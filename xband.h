@@ -7,90 +7,94 @@
 /*
  * XBAND modem peripheral emulation.
  *
- * XBAND (Catapult Entertainment, 1994-1997) was a pass-through cartridge
- * that contained its own 1MB firmware ROM, 64KB SRAM, a Rockwell RC2324DP
- * 2400-baud modem, and a custom "Fred" chip that applied per-game binary
- * patches at runtime. It enabled online multiplayer for roughly a dozen
- * SNES games over dial-up.
+ * Implementation follows the bsnes-plus xband_support branch
+ * (fresh-eggs/bsnes-plus). XBAND is a pass-through cartridge by Catapult
+ * Entertainment (1994-1997) containing:
+ *   - 1MB firmware ROM (XBAND BIOS)
+ *   - 64KB SRAM (profiles, patches, mail, news, icons)
+ *   - Rockwell RC2324DP 2400-baud modem
+ *   - A custom "Fred" chip exposing a flat 224-byte register file that
+ *     holds game-patch vectors, LED state, and various magic registers
  *
  * Memory map (SNES address space, standalone XBAND BIOS mode):
- *   $00-$3F:$8000-$FFFF  XBAND firmware ROM (LoROM-style)
- *   $80-$BF:$8000-$FFFF  XBAND firmware ROM (mirror)
- *   $E0:$0000-$FFFF      XBAND SRAM (64KB), via MAP_XBAND
- *   $FB:$C000-$CFFF      Modem + Fred MMIO, via MAP_XBAND
- *                        (register sub-range decoded as $FB:$C180-$C1BF)
+ *   $00-$3F:$8000-$FFFF   XBAND firmware ROM (HiROM)
+ *   $80-$BF:$8000-$FFFF   XBAND firmware ROM (mirror)
+ *   $C0-$FF:$0000-$FFFF   XBAND firmware ROM (HiROM, with mirroring)
+ *   $E0:$0000-$FFFF       XBAND SRAM (64KB), via MAP_XBAND
+ *   $FB:$C000-$FDFF       Fred + Rockwell modem MMIO, via MAP_XBAND
+ *     $FBC000-$FBC17E     Fred general registers (2-byte stride, reg 0x00-0xBF)
+ *     $FBC180-$FBC1BE     Rockwell modem registers (2-byte stride, modem 0x00-0x1F)
+ *     $FBFE01             XBAND kill register
+ *     $FBFE03             XBAND control register
  *
- * When a game cartridge is plugged in on top, the XBAND firmware swaps
- * the game ROM into the cartridge space and keeps its SRAM/MMIO regions.
- * That pass-through behavior is not yet implemented here.
+ * Register address decoding is at a 2-byte stride:
+ *   reg = (offset - $C000) / 2
+ * Writes to even addresses are ignored ("event/strobe" half).
  *
  * The modem data path is bridged to a TCP socket so the emulator can
- * connect to the replacement XBAND server at xband.retrocomputing.network.
- * We don't implement the ADSP protocol itself — the firmware handles that.
- * We just shuttle bytes between the UART registers and the TCP socket.
+ * connect to a replacement XBAND server (e.g. 16bit.retrocomputing.network
+ * or xband.retrocomputing.network).
  */
 
 #ifndef _XBAND_H_
 #define _XBAND_H_
 
 #include <cstdint>
+#include <cstddef>
 
 #define XBAND_ROM_SIZE		0x100000	// 1MB firmware ROM
 #define XBAND_SRAM_SIZE		0x010000	// 64KB SRAM
-#define XBAND_FIFO_SIZE		0x1000		// 4KB rx/tx FIFO each
-#define XBAND_NUM_PATCHES	16			// Fred chip patch vectors
+#define XBAND_FRED_REGS		0xE0		// 224 Fred general registers
+#define XBAND_MODEM_REGS	0x20		// 32 Rockwell modem registers
+#define XBAND_RXBUF_SIZE	0x4000		// 16KB network rx buffer
+#define XBAND_TXBUF_SIZE	0x4000		// 16KB network tx buffer
 
-// Modem MMIO base in SNES address space (bank:offset = $FB:$C180)
+// MMIO region on the XBAND — the full upper half of bank $FB gets
+// claimed by MAP_XBAND so the dispatch inside S9xGetXBand / S9xSetXBand
+// can decode the Fred / modem / kill / control sub-ranges.
 #define XBAND_MMIO_BANK		0xFB
-#define XBAND_MMIO_BASE		0xC180
-#define XBAND_MMIO_END		0xC1BF
+#define XBAND_MMIO_BASE		0x8000
+#define XBAND_MMIO_END		0xFFFF
 
-struct SXBandPatch
-{
-	bool8	enabled;
-	uint32	address;	// 24-bit SNES address to intercept
-	uint8	length;		// Number of bytes to override (1-4)
-	uint8	data[4];	// Replacement bytes
-};
+// Network state machine (bsnes-plus net_step values)
+#define XBAND_NET_IDLE		0
+#define XBAND_NET_HANDSHAKE	1
+#define XBAND_NET_CONNECTED	2
 
 struct SXBAND
 {
-	// Enable / state flags
+	// Enable / detect flags
 	bool8	enabled;
 	bool8	bios_loaded;
 	bool8	connected;
 	bool8	sram_dirty;
 
-	// Rockwell RC2324DP modem registers (16550-compatible UART core).
-	// DLAB=0: RBR (R)/THR (W) at 0x00, IER at 0x02
-	// DLAB=1: DLL at 0x00, DLM at 0x02
-	// Always:  IIR (R)/FCR (W) at 0x04, LCR at 0x06,
-	//          MCR at 0x08, LSR at 0x0A, MSR at 0x0C, SCR at 0x0E
-	uint8	ier;			// Interrupt Enable Register
-	uint8	iir;			// Interrupt Identification Register (read)
-	uint8	fcr;			// FIFO Control Register (write)
-	uint8	lcr;			// Line Control Register (DLAB in bit 7)
-	uint8	mcr;			// Modem Control Register
-	uint8	lsr;			// Line Status Register
-	uint8	msr;			// Modem Status Register
-	uint8	scr;			// Scratch register
-	uint8	dll;			// Divisor latch LSB
-	uint8	dlm;			// Divisor latch MSB
+	// Fred general register file: holds patch vectors, LED state, etc.
+	// Indexed by `reg = (addr - $FBC000) / 2` for reg < $C0.
+	uint8	regs[XBAND_FRED_REGS];
 
-	// RX FIFO: bytes received from the network, waiting for the SNES to read
-	uint8	rx_fifo[XBAND_FIFO_SIZE];
-	uint32	rx_head;
-	uint32	rx_tail;
+	// Rockwell RC2324DP modem registers. Indexed by `reg - $C0`
+	// (so $FBC180 is modem reg $00).
+	uint8	modem_regs[XBAND_MODEM_REGS];
 
-	// TX FIFO: bytes written by the SNES, waiting to flush to the network
-	uint8	tx_fifo[XBAND_FIFO_SIZE];
-	uint32	tx_head;
-	uint32	tx_tail;
+	// XBAND cartridge kill/control registers at $FBFE01 / $FBFE03.
+	uint8	kill;
+	uint8	control;
 
-	// Fred chip — runtime game ROM patch vectors
-	uint8			fred_control;
-	uint8			fred_status;
-	SXBandPatch		patches[XBAND_NUM_PATCHES];
+	// Modem state
+	uint8	modem_line_relay;	// RTS bit from modem reg 0x07
+	uint8	modem_set_ATV25;	// one-shot: next read of 0x0B sets ATV25
+	uint8	net_step;			// XBAND_NET_*
+	uint32	consecutive_reads;	// cap on kreadmstatus2 tight polls
+
+	// Network RX/TX buffers (separate from modem regs — these are the
+	// FIFO between the emulator's TCP socket and the XBAND firmware).
+	uint8	rxbuf[XBAND_RXBUF_SIZE];
+	uint32	rxbufpos;		// write position (bytes received from socket)
+	uint32	rxbufused;		// read position (bytes consumed by firmware)
+	uint8	txbuf[XBAND_TXBUF_SIZE];
+	uint32	txbufpos;		// write position (bytes from firmware)
+	uint32	txbufused;		// read position (bytes flushed to socket)
 
 	// SRAM (player profiles, patches, mail, news, icons)
 	uint8	sram[XBAND_SRAM_SIZE];
@@ -119,8 +123,27 @@ bool8	S9xXBandConnect (const char *host, int port);
 void	S9xXBandDisconnect (void);
 void	S9xXBandPoll (void);
 
-// Fred chip patch vector application.
-// Returns TRUE and writes the patched byte to *out_byte if address is patched.
-bool8	S9xXBandTryPatch (uint32 address, uint8 *out_byte);
+// Debug helper: write the last few MMIO accesses into `out` as a
+// human-readable multi-line string. Used by the deadlock handler.
+void	S9xXBandDumpTrace (char *out, size_t out_size);
+
+// Temporarily stop logging XBAND accesses into the trace buffer, so
+// diagnostic reads (e.g. from the deadlock dump) don't evict the
+// actually-interesting entries.
+void	S9xXBandTraceSuppress (bool on);
+
+// Debug-only trace entry, used by the deadlock handler for per-site
+// code dumps. Keep in sync with the internal definition in xband.cpp.
+struct XBandTraceEntry {
+	uint32	address;
+	uint32	caller_pc;
+	uint8	value;
+	bool	is_write;
+};
+
+// Fetch the Nth-oldest trace entry (0 = oldest). Returns false when
+// `index` is past the live entries.
+bool	S9xXBandGetTraceEntry (int index, struct XBandTraceEntry *out);
+#define XBAND_TRACE_SIZE 256
 
 #endif

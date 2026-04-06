@@ -13,6 +13,7 @@
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
+#include "xband.h"
 #include "snapshot.h"
 #include "controls.h"
 #include "movie.h"
@@ -962,6 +963,36 @@ static FreezeData	SnapBSX[] =
 };
 
 #undef STRUCT
+#define STRUCT	struct SXBAND
+
+static FreezeData	SnapXBand[] =
+{
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, enabled),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, bios_loaded),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, connected),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, sram_dirty),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, ier),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, iir),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, fcr),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, lcr),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, mcr),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, lsr),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, msr),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, scr),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, dll),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, dlm),
+	ARRAY_ENTRY(SNAPSHOT_VERSION_XBAND, rx_fifo, XBAND_FIFO_SIZE, uint8_ARRAY_V),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, rx_head),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, rx_tail),
+	ARRAY_ENTRY(SNAPSHOT_VERSION_XBAND, tx_fifo, XBAND_FIFO_SIZE, uint8_ARRAY_V),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, tx_head),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, tx_tail),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, fred_control),
+	INT_ENTRY(SNAPSHOT_VERSION_XBAND, fred_status),
+	ARRAY_ENTRY(SNAPSHOT_VERSION_XBAND, sram, XBAND_SRAM_SIZE, uint8_ARRAY_V)
+};
+
+#undef STRUCT
 #define STRUCT	struct SMSU1
 
 static FreezeData	SnapMSU1[] =
@@ -1324,6 +1355,9 @@ void S9xFreezeToStream (STREAM stream)
 	if (Settings.BS)
 		FreezeStruct(stream, "BSX", &BSX, SnapBSX, COUNT(SnapBSX));
 
+	if (Settings.XBAND)
+		FreezeStruct(stream, "XBD", &XBand, SnapXBand, COUNT(SnapXBand));
+
 	if (Settings.MSU1)
 		FreezeStruct(stream, "MSU", &MSU1, SnapMSU1, COUNT(SnapMSU1));
 
@@ -1489,6 +1523,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	uint8	*local_srtc          = NULL;
 	uint8	*local_rtc_data      = NULL;
 	uint8	*local_bsx_data      = NULL;
+	uint8	*local_xband_data    = NULL;
 	uint8	*local_msu1_data     = NULL;
 	uint8	*local_pf94_data     = NULL;
 	uint8	*local_box_data      = NULL;
@@ -1637,6 +1672,13 @@ int S9xUnfreezeFromStream (STREAM stream)
 		result = UnfreezeStructCopy(stream, "BSX", &local_bsx_data, SnapBSX, COUNT(SnapBSX), version);
 		if (result != SUCCESS && Settings.BS)
 			break;
+
+		if (version >= SNAPSHOT_VERSION_XBAND)
+		{
+			result = UnfreezeStructCopy(stream, "XBD", &local_xband_data, SnapXBand, COUNT(SnapXBand), version);
+			if (result != SUCCESS && Settings.XBAND)
+				break;
+		}
 
 		result = UnfreezeStructCopy(stream, "MSU", &local_msu1_data, SnapMSU1, COUNT(SnapMSU1), version);
 		if (result != SUCCESS && Settings.MSU1)
@@ -1925,6 +1967,9 @@ int S9xUnfreezeFromStream (STREAM stream)
 		if (local_bsx_data)
 			UnfreezeStructFromCopy(&BSX, SnapBSX, COUNT(SnapBSX), local_bsx_data, version);
 
+		if (local_xband_data)
+			UnfreezeStructFromCopy(&XBand, SnapXBand, COUNT(SnapXBand), local_xband_data, version);
+
 		if (local_msu1_data)
 			UnfreezeStructFromCopy(&MSU1, SnapMSU1, COUNT(SnapMSU1), local_msu1_data, version);
 
@@ -2038,6 +2083,9 @@ int S9xUnfreezeFromStream (STREAM stream)
 		if (local_bsx_data)
 			S9xBSXPostLoadState();
 
+		if (local_xband_data)
+			S9xXBandPostLoadState();
+
 		if (local_msu1_data)
 			S9xMSU1PostLoadState();
 
@@ -2131,6 +2179,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_srtc)				delete [] local_srtc;
 	if (local_rtc_data)			delete [] local_rtc_data;
 	if (local_bsx_data)			delete [] local_bsx_data;
+	if (local_xband_data)		delete [] local_xband_data;
 	if (local_screenshot)		delete [] local_screenshot;
 	if (local_movie_data)		delete [] local_movie_data;
 	if (local_pf94_data)		delete [] local_pf94_data;

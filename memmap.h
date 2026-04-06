@@ -55,6 +55,7 @@ struct CMemory
 		MAP_SFCBOX_SRAM,
 		MAP_CARTPROT,
 		MAP_RP2040,
+		MAP_XBAND,
 		MAP_NONE,
 		MAP_LAST
 	};
@@ -189,6 +190,8 @@ struct CMemory
 	void	Map_SPC7110HiROMMap (void);
 	void	Map_BSCartLoROMMap(uint8);
 	void	Map_BSCartHiROMMap(void);
+	void	Map_XBandLoROMMap (void);
+	void	Map_XBandHiROMMap (void);
 
 	uint16	checksum_calc_sum (uint8 *, uint32);
 	uint16	checksum_mirror_sum (uint8 *, uint32 &, uint32 mask = 0x800000);

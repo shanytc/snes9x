@@ -77,360 +77,409 @@ static bool s_winsock_inited = false;
 #endif
 
 // -----------------------------------------------------------------------
-// Internal FIFO helpers
+// Access trace buffer — tiny ring of recent MMIO accesses, used for
+// debugging unexplained deadlocks / hangs while iterating on the modem
+// register behaviour.
 // -----------------------------------------------------------------------
 
-static inline uint32 xband_fifo_count (uint32 head, uint32 tail)
+// XBAND_TRACE_SIZE and struct XBandTraceEntry are defined in xband.h
+// so the deadlock handler in cpuexec.cpp can read trace entries.
+
+static XBandTraceEntry xband_trace[XBAND_TRACE_SIZE];
+static int  xband_trace_head    = 0;
+static int  xband_trace_count   = 0;
+static bool xband_trace_suppress = false;
+
+void S9xXBandTraceSuppress (bool on)
 {
-	return (head - tail) & (XBAND_FIFO_SIZE - 1);
+	xband_trace_suppress = on;
 }
 
-static inline bool xband_fifo_empty (uint32 head, uint32 tail)
+bool S9xXBandGetTraceEntry (int index, struct XBandTraceEntry *out)
 {
-	return head == tail;
+	if (!out) return false;
+	if (index < 0 || index >= xband_trace_count) return false;
+	int idx = (xband_trace_head - xband_trace_count + index + XBAND_TRACE_SIZE)
+	          % XBAND_TRACE_SIZE;
+	*out = xband_trace[idx];
+	return true;
 }
 
-static inline bool xband_fifo_full (uint32 head, uint32 tail)
+static void xband_trace_log (uint32 address, uint8 value, bool is_write)
 {
-	return xband_fifo_count(head, tail) == (XBAND_FIFO_SIZE - 1);
+	if (xband_trace_suppress) return;
+	xband_trace[xband_trace_head].address  = address;
+	xband_trace[xband_trace_head].caller_pc =
+		(uint32)((Registers.PBPC & 0xffffff));
+	xband_trace[xband_trace_head].value    = value;
+	xband_trace[xband_trace_head].is_write = is_write;
+	xband_trace_head = (xband_trace_head + 1) % XBAND_TRACE_SIZE;
+	if (xband_trace_count < XBAND_TRACE_SIZE)
+		xband_trace_count++;
 }
 
-static void xband_rx_push (uint8 byte)
+void S9xXBandDumpTrace (char *out, size_t out_size)
 {
-	if (xband_fifo_full(XBand.rx_head, XBand.rx_tail))
-		return; // drop — the XBAND server should pace itself
-	XBand.rx_fifo[XBand.rx_head] = byte;
-	XBand.rx_head = (XBand.rx_head + 1) & (XBAND_FIFO_SIZE - 1);
-}
+	if (!out || out_size == 0) return;
+	size_t pos = 0;
+	int n = xband_trace_count;
+	int idx = (xband_trace_head - n + XBAND_TRACE_SIZE) % XBAND_TRACE_SIZE;
 
-static uint8 xband_rx_pop (void)
-{
-	if (xband_fifo_empty(XBand.rx_head, XBand.rx_tail))
-		return 0;
-	uint8 b = XBand.rx_fifo[XBand.rx_tail];
-	XBand.rx_tail = (XBand.rx_tail + 1) & (XBAND_FIFO_SIZE - 1);
-	return b;
-}
-
-static void xband_tx_push (uint8 byte)
-{
-	if (xband_fifo_full(XBand.tx_head, XBand.tx_tail))
-		return; // drop — should flush more aggressively
-	XBand.tx_fifo[XBand.tx_head] = byte;
-	XBand.tx_head = (XBand.tx_head + 1) & (XBAND_FIFO_SIZE - 1);
-}
-
-// -----------------------------------------------------------------------
-// Line Status Register maintenance
-// -----------------------------------------------------------------------
-
-// LSR bits (16550 standard):
-//   0  Data Ready (RX FIFO has data)
-//   1  Overrun Error
-//   2  Parity Error
-//   3  Framing Error
-//   4  Break Indicator
-//   5  THR Empty (TX holding register empty)
-//   6  TEMT (TX shift + holding empty)
-//   7  FIFO error
-#define XBAND_LSR_DR		0x01
-#define XBAND_LSR_THRE		0x20
-#define XBAND_LSR_TEMT		0x40
-
-static void xband_update_lsr (void)
-{
-	uint8 lsr = XBand.lsr & ~(XBAND_LSR_DR | XBAND_LSR_THRE | XBAND_LSR_TEMT);
-
-	if (!xband_fifo_empty(XBand.rx_head, XBand.rx_tail))
-		lsr |= XBAND_LSR_DR;
-
-	if (xband_fifo_empty(XBand.tx_head, XBand.tx_tail))
-		lsr |= (XBAND_LSR_THRE | XBAND_LSR_TEMT);
-
-	XBand.lsr = lsr;
-}
-
-// -----------------------------------------------------------------------
-// Modem register access (Rockwell RC2324DP, 16550-style UART)
-// -----------------------------------------------------------------------
-//
-// The XBAND maps modem registers at $FB:$C180-$C1BF. Registers are 8-bit
-// wide but word-aligned (every other byte), which is why we use offset/2
-// to index them. The 16550 UART has 8 logical registers; the RC2324DP
-// exposes extensions but the XBAND firmware speaks to them via this
-// standard UART interface.
-//
-//   Reg  DLAB=0         DLAB=1
-//   0    RBR (R) / THR (W)    DLL
-//   1    IER                  DLM
-//   2    IIR (R) / FCR (W)
-//   3    LCR (bit 7 = DLAB)
-//   4    MCR
-//   5    LSR
-//   6    MSR
-//   7    SCR
-
-static uint8 xband_read_uart (uint8 reg)
-{
-	bool dlab = (XBand.lcr & 0x80) != 0;
-
-	switch (reg)
+	// Compress runs of identical access+PC entries, but print the
+	// calling PC so we can correlate each MMIO hit with the ROM
+	// instruction that issued it.
+	pos += snprintf(out + pos, out_size - pos,
+		"XBAND MMIO trace (last %d accesses, oldest first):\n", n);
+	int i = 0;
+	while (i < n && pos + 60 < out_size)
 	{
-		case 0: // RBR (read) or DLL if DLAB
-			if (dlab)
-				return XBand.dll;
-			{
-				uint8 b = xband_rx_pop();
-				xband_update_lsr();
-				return b;
-			}
-
-		case 1: // IER or DLM
-			return dlab ? XBand.dlm : XBand.ier;
-
-		case 2: // IIR (read)
-			return XBand.iir;
-
-		case 3: // LCR
-			return XBand.lcr;
-
-		case 4: // MCR
-			return XBand.mcr;
-
-		case 5: // LSR
-			xband_update_lsr();
-			return XBand.lsr;
-
-		case 6: // MSR
-			return XBand.msr;
-
-		case 7: // SCR
-			return XBand.scr;
-	}
-
-	return 0xFF;
-}
-
-static void xband_write_uart (uint8 reg, uint8 byte)
-{
-	bool dlab = (XBand.lcr & 0x80) != 0;
-
-	switch (reg)
-	{
-		case 0: // THR (write) or DLL if DLAB
-			if (dlab)
-				XBand.dll = byte;
-			else
-			{
-				xband_tx_push(byte);
-				xband_update_lsr();
-			}
-			return;
-
-		case 1: // IER or DLM
-			if (dlab)
-				XBand.dlm = byte;
-			else
-				XBand.ier = byte & 0x0F; // only low 4 bits are defined
-			return;
-
-		case 2: // FCR (write)
-			XBand.fcr = byte;
-			// Bits 1,2: clear RX / TX FIFO
-			if (byte & 0x02)
-			{
-				XBand.rx_head = XBand.rx_tail = 0;
-			}
-			if (byte & 0x04)
-			{
-				XBand.tx_head = XBand.tx_tail = 0;
-			}
-			return;
-
-		case 3: // LCR
-			XBand.lcr = byte;
-			return;
-
-		case 4: // MCR
-			XBand.mcr = byte;
-			return;
-
-		case 5: // LSR — writable bits are limited
-			XBand.lsr = (XBand.lsr & ~0x1E) | (byte & 0x1E);
-			return;
-
-		case 6: // MSR
-			XBand.msr = byte;
-			return;
-
-		case 7: // SCR
-			XBand.scr = byte;
-			return;
-	}
-}
-
-// -----------------------------------------------------------------------
-// Fred chip register access
-// -----------------------------------------------------------------------
-//
-// The Fred chip sits at the high end of the MMIO region, past the UART.
-// Register layout (relative to $C180):
-//   0x20       Fred control
-//   0x21       Fred status
-//   0x22-0x3F  Patch vector programming window (index + data)
-//
-// The precise layout of the Fred chip is still partially reverse-engineered.
-// We expose a simple programming interface that's enough to carry the
-// XBAND firmware's patch-loading routines. A write to 0x22 selects a
-// patch slot; subsequent writes to 0x23-0x29 program the address/length/
-// bytes/enable fields.
-
-static uint8 xband_fred_selected_slot = 0;
-static uint8 xband_fred_field_index   = 0;
-
-static uint8 xband_read_fred (uint8 reg)
-{
-	switch (reg)
-	{
-		case 0x00: return XBand.fred_control;
-		case 0x01: return XBand.fred_status;
-
-		case 0x02: return xband_fred_selected_slot;
-
-		case 0x03:
+		const XBandTraceEntry &e = xband_trace[idx];
+		int run = 1;
+		int j = (idx + 1) % XBAND_TRACE_SIZE;
+		while (i + run < n)
 		{
-			// Read back the currently-indexed field of the selected slot.
-			SXBandPatch &p = XBand.patches[xband_fred_selected_slot & (XBAND_NUM_PATCHES - 1)];
-			switch (xband_fred_field_index)
-			{
-				case 0: return p.enabled ? 1 : 0;
-				case 1: return (p.address >> 16) & 0xFF;
-				case 2: return (p.address >>  8) & 0xFF;
-				case 3: return  p.address        & 0xFF;
-				case 4: return p.length;
-				case 5: return p.data[0];
-				case 6: return p.data[1];
-				case 7: return p.data[2];
-				case 8: return p.data[3];
-			}
-			return 0;
+			const XBandTraceEntry &f = xband_trace[j];
+			if (f.address != e.address || f.value != e.value ||
+			    f.is_write != e.is_write || f.caller_pc != e.caller_pc)
+				break;
+			run++;
+			j = (j + 1) % XBAND_TRACE_SIZE;
 		}
+		if (run > 1)
+			pos += snprintf(out + pos, out_size - pos,
+				"  [pc=%06X] %s $%06X = %02X  x%d\n",
+				(unsigned)e.caller_pc,
+				e.is_write ? "W" : "R",
+				(unsigned)(e.address & 0xFFFFFF),
+				(unsigned)e.value, run);
+		else
+			pos += snprintf(out + pos, out_size - pos,
+				"  [pc=%06X] %s $%06X = %02X\n",
+				(unsigned)e.caller_pc,
+				e.is_write ? "W" : "R",
+				(unsigned)(e.address & 0xFFFFFF),
+				(unsigned)e.value);
+		i += run;
+		idx = (idx + run) % XBAND_TRACE_SIZE;
 	}
-
-	return 0;
 }
 
-static void xband_write_fred (uint8 reg, uint8 byte)
+// -----------------------------------------------------------------------
+// Internal RX/TX buffer helpers
+// -----------------------------------------------------------------------
+//
+// We follow bsnes-plus's model: linear rxbuf/txbuf with write-position
+// (rxbufpos/txbufpos) and read-position (rxbufused/txbufused) indexes.
+// When the read position catches up, both get reset to zero.
+
+static bool xband_rxbuf_has_data (void)
 {
-	switch (reg)
-	{
-		case 0x00:
-			XBand.fred_control = byte;
-			// Bit 7 is a master enable for patches
-			return;
+	return XBand.rxbufused < XBand.rxbufpos;
+}
 
-		case 0x01:
-			XBand.fred_status = byte;
-			return;
+static uint8 xband_rxbuf_pop (void)
+{
+	if (!xband_rxbuf_has_data()) return 0;
+	uint8 r = XBand.rxbuf[XBand.rxbufused++];
+	if (XBand.rxbufused == XBand.rxbufpos)
+		XBand.rxbufused = XBand.rxbufpos = 0;
+	return r;
+}
 
-		case 0x02:
-			xband_fred_selected_slot = byte & (XBAND_NUM_PATCHES - 1);
-			xband_fred_field_index   = 0;
-			return;
-
-		case 0x03:
-		{
-			// Program the currently-indexed field of the selected slot,
-			// then advance the field index. A small, deterministic
-			// protocol that mirrors how Fred-style chips are typically
-			// accessed via a single data port.
-			SXBandPatch &p = XBand.patches[xband_fred_selected_slot & (XBAND_NUM_PATCHES - 1)];
-			switch (xband_fred_field_index)
-			{
-				case 0: p.enabled  = (byte & 1) ? TRUE : FALSE;             break;
-				case 1: p.address  = (p.address & 0x00FFFF) | (byte << 16); break;
-				case 2: p.address  = (p.address & 0xFF00FF) | (byte <<  8); break;
-				case 3: p.address  = (p.address & 0xFFFF00) |  byte;        break;
-				case 4: p.length   = byte > 4 ? 4 : byte;                   break;
-				case 5: p.data[0]  = byte;                                  break;
-				case 6: p.data[1]  = byte;                                  break;
-				case 7: p.data[2]  = byte;                                  break;
-				case 8: p.data[3]  = byte;                                  break;
-			}
-			if (xband_fred_field_index < 8)
-				xband_fred_field_index++;
-			return;
-		}
-	}
+static void xband_txbuf_push (uint8 byte)
+{
+	if (XBand.txbufpos >= XBAND_TXBUF_SIZE) return; // overflow; drop
+	XBand.txbuf[XBand.txbufpos++] = byte;
 }
 
 // -----------------------------------------------------------------------
 // Public memory dispatch — called from getset.h via MAP_XBAND
+//
+// Register layout (bsnes-plus xband_support branch, xband_base.cpp):
+//   addr in $FB:$C000..$FBFDFF  — Fred + modem register file, 2-byte stride
+//     reg = (addr - $FBC000) / 2
+//     reg $00..$BF  -> Fred general registers (regs[reg])
+//     reg $C0..$FF  -> Rockwell modem (modem_regs[reg - $C0])
+//   addr = $FBFE01  -> kill register
+//   addr = $FBFE03  -> control register
+//
+// Bank $E0 is the 64KB XBAND SRAM, linear.
 // -----------------------------------------------------------------------
+
+// Return true if `addr` falls inside the XBAND SRAM mirror window
+// (matches bsnes-plus's xband_base.cpp::read region match).
+static inline bool xband_in_sram (uint32 addr)
+{
+	uint8  bank   = (addr >> 16) & 0xFF;
+	uint16 offset =  addr        & 0xFFFF;
+	if (bank >= 0xE0 && bank <= 0xFA) return true;
+	if (bank == 0xFB && offset <= 0xBFFF) return true;
+	if (bank >= 0xFC && bank <= 0xFF) return true;
+	if (bank >= 0x60 && bank <= 0x7D) return true;
+	return false;
+}
 
 uint8 S9xGetXBand (uint32 address)
 {
-	uint8  bank   = (address >> 16) & 0xFF;
-	uint16 offset =  address        & 0xFFFF;
+	uint32 addr   = address & 0xFFFFFF;
+	uint8  bank   = (addr >> 16) & 0xFF;
+	uint16 offset =  addr        & 0xFFFF;
+	uint8  result = 0x00;
 
-	// XBAND SRAM at $E0:$0000-$FFFF
-	if (bank == 0xE0)
-		return XBand.sram[offset];
-
-	// XBAND firmware ROM at $D0-$DF is mapped as direct pointer, so we
-	// shouldn't normally land here for that range. Handle it defensively.
-
-	// Modem + Fred MMIO at $FB:$C180-$C1BF
-	if (bank == XBAND_MMIO_BANK && offset >= XBAND_MMIO_BASE && offset <= XBAND_MMIO_END)
+	// XBAND SRAM mirror window (banks $E0-$FA, $FB:$0000-$BFFF,
+	// $FC-$FF, $60-$7D — all aliasing the same 64KB).
+	if (xband_in_sram(addr))
 	{
-		uint8 local = (uint8)(offset - XBAND_MMIO_BASE);
-		// Word-aligned registers: the UART occupies the low 16 bytes,
-		// Fred occupies the next 16. Each logical register is 2 bytes wide.
-		uint8 reg = local >> 1;
-		if (local < 0x10)
-			return xband_read_uart(reg & 0x07);
+		result = XBand.sram[offset & (XBAND_SRAM_SIZE - 1)];
+	}
+	// Fred + modem MMIO window $FB:$C000-$FDFF
+	else if (bank == XBAND_MMIO_BANK && offset >= 0xC000 && offset < 0xFE00)
+	{
+		uint8 reg = (uint8)((offset - 0xC000) >> 1);
+
+		// Fred magic constants that make the USA BIOS boot — straight
+		// from bsnes-plus reset()/read():
+		//   reg $7D ($FBC0FA) must return $80
+		//   reg $B4 ($FBC168) must return $7F (kLEDData)
+		if (reg == 0x7D)
+			result = 0x80;
+		else if (reg == 0xB4)
+			result = 0x7F;
+		else if (reg == 0x94)
+		{
+			// krxbuff — pop one byte from the network RX buffer
+			result = xband_rxbuf_pop();
+		}
+		else if (reg == 0x98)
+		{
+			// kreadmstatus2 — "is there RX data in the Fred FIFO?"
+			// Polled in tight loops inside _PUVBLCallback. bsnes-plus
+			// caps consecutive "yes" responses at 127 to break infinite
+			// poll loops (fixes a kFifoOverflowErr panic).
+			if (XBand.net_step && xband_rxbuf_has_data())
+			{
+				XBand.consecutive_reads++;
+				if (XBand.consecutive_reads >= 127)
+				{
+					XBand.consecutive_reads = 0;
+					result = 0;
+				}
+				else
+				{
+					result = 1;
+				}
+			}
+			else
+			{
+				XBand.consecutive_reads = 0;
+				result = 0;
+			}
+		}
+		else if (reg == 0xA0)
+		{
+			// Fred modem status 1 — bsnes-plus returns 0
+			result = 0;
+		}
+		else if (reg >= 0xC0)
+		{
+			// Rockwell modem register file at modem_reg = reg - $C0
+			uint8 modemreg = (uint8)(reg - 0xC0);
+			uint8 ret = 0;
+			switch (modemreg)
+			{
+				case 0x09:
+					ret = XBand.modem_regs[modemreg];
+					break;
+				case 0x0B:
+					if (XBand.modem_line_relay) ret |= (1 << 7); // TONEA
+					if (XBand.modem_set_ATV25)
+					{
+						ret |= (1 << 4); // ATV25
+						XBand.modem_set_ATV25 = 0;
+					}
+					break;
+				case 0x0D:
+					ret |= (1 << 3); // U1DET
+					break;
+				case 0x0E:
+					ret |= 3; // k2400Baud
+					break;
+				case 0x0F:
+					ret |= (1 << 7) | (1 << 5); // RLSD + CTS — "modem alive"
+					break;
+				case 0x19: // X-RAM Data
+					ret = XBand.modem_regs[modemreg];
+					break;
+				case 0x1C:
+					ret = XBand.modem_regs[0x1C];
+					break;
+				case 0x1D:
+					ret = XBand.modem_regs[0x1D];
+					break;
+				case 0x1E:
+					ret = XBand.modem_regs[0x1E] | (1 << 3); // TDBE (TX always empty)
+					break;
+				case 0x1F:
+					ret = XBand.modem_regs[0x1F];
+					break;
+				default:
+					break;
+			}
+			result = ret;
+		}
 		else
-			return xband_read_fred(reg - 0x08);
+		{
+			// Generic Fred register — read-as-last-written.
+			result = XBand.regs[reg];
+		}
+	}
+	// Kill / control at $FBFE01 / $FBFE03
+	else if (bank == XBAND_MMIO_BANK && offset == 0xFE01)
+	{
+		result = XBand.kill;
+	}
+	else if (bank == XBAND_MMIO_BANK && offset == 0xFE03)
+	{
+		result = XBand.control;
 	}
 
-	return OpenBus;
+	// Everything else in the MAP_XBAND range falls through as 0. This
+	// matches bsnes-plus's default behaviour for addresses outside the
+	// registered ranges.
+
+	xband_trace_log(address, result, false);
+	return result;
 }
 
 void S9xSetXBand (uint8 byte, uint32 address)
 {
-	uint8  bank   = (address >> 16) & 0xFF;
-	uint16 offset =  address        & 0xFFFF;
+	uint32 addr   = address & 0xFFFFFF;
+	uint8  bank   = (addr >> 16) & 0xFF;
+	uint16 offset =  addr        & 0xFFFF;
 
-	if (bank == 0xE0)
+	xband_trace_log(address, byte, true);
+
+	// XBAND SRAM mirror window (banks $E0-$FA, $FB:$0000-$BFFF,
+	// $FC-$FF, $60-$7D — all aliasing the same 64KB).
+	if (xband_in_sram(addr))
 	{
-		if (XBand.sram[offset] != byte)
+		uint16 sram_off = offset & (XBAND_SRAM_SIZE - 1);
+		if (XBand.sram[sram_off] != byte)
 		{
-			XBand.sram[offset] = byte;
-			XBand.sram_dirty   = TRUE;
-			CPU.SRAMModified   = TRUE;
+			XBand.sram[sram_off] = byte;
+			XBand.sram_dirty     = TRUE;
+			CPU.SRAMModified     = TRUE;
 		}
 		return;
 	}
 
-	if (bank == XBAND_MMIO_BANK && offset >= XBAND_MMIO_BASE && offset <= XBAND_MMIO_END)
+	// Fred + modem MMIO window $FB:$C000-$FDFF
+	if (bank == XBAND_MMIO_BANK && offset >= 0xC000 && offset < 0xFE00)
 	{
-		uint8 local = (uint8)(offset - XBAND_MMIO_BASE);
-		uint8 reg = local >> 1;
-		if (local < 0x10)
-			xband_write_uart(reg & 0x07, byte);
-		else
-			xband_write_fred(reg - 0x08, byte);
+		uint8 reg = (uint8)((offset - 0xC000) >> 1);
+
+		// Modem TX FIFO write at Fred reg $90 ($FBC120)
+		if (reg == 0x90)
+		{
+			if (XBand.net_step == XBAND_NET_CONNECTED ||
+			    XBand.net_step == XBAND_NET_HANDSHAKE)
+			{
+				xband_txbuf_push(byte);
+			}
+		}
+
+		// Rockwell modem register writes at reg $C0..$FF
+		if (reg >= 0xC0)
+		{
+			uint8 modemreg = (uint8)(reg - 0xC0);
+			switch (modemreg)
+			{
+				case 0x07:
+					XBand.modem_line_relay = byte & 0x02;
+					// If the firmware drops the line relay mid-session,
+					// bsnes-plus tears down the TCP socket. We do the
+					// same so a "hang up" in the UI stops the modem.
+					if (XBand.modem_line_relay == 0 && XBand.net_step)
+					{
+						S9xXBandDisconnect();
+						XBand.net_step = XBAND_NET_IDLE;
+						XBand.txbufpos = XBand.txbufused = 0;
+						XBand.rxbufpos = XBand.rxbufused = 0;
+					}
+					break;
+				case 0x08:
+					if ((byte & 1) && XBand.net_step < XBAND_NET_HANDSHAKE)
+					{
+						// The firmware is raising RTS to ask the modem
+						// to initiate a call. We don't auto-connect —
+						// the UI does that explicitly via the Netplay
+						// menu. Just mark the state machine as pending
+						// so a subsequent connect() can enter handshake.
+						XBand.net_step = XBAND_NET_HANDSHAKE;
+					}
+					break;
+				case 0x09:
+					XBand.modem_regs[modemreg] = byte;
+					break;
+				case 0x12:
+					if (byte == 0x84)   // kV22bisMode
+						XBand.modem_set_ATV25 = 1;
+					break;
+				case 0x1E:
+					XBand.modem_regs[0x1E] = byte & 0x24; // TDBIE + RDBIE
+					break;
+				case 0x1F:
+					XBand.modem_regs[0x1F] = byte & 0x14; // NSIE + NCIE
+					break;
+				default:
+					XBand.modem_regs[modemreg] = byte;
+					break;
+			}
+			return;
+		}
+
+		// Fred writes land on odd addresses only; even-address writes
+		// are ignored ("event/strobe" half in the 2-byte stride).
+		if (!(addr & 1))
+			return;
+
+		// Fred general register write.
+		switch (reg)
+		{
+			case 219: // MORE_MYSTERY
+			case 221: // UNKNOWN_REG
+				byte &= 0x7F;
+				break;
+			case 223: // UNKNOWN_REG3
+				byte &= 0xFE;
+				break;
+			default:
+				break;
+		}
+		XBand.regs[reg] = byte;
+		return;
+	}
+
+	// Kill / control at $FBFE01 / $FBFE03
+	if (bank == XBAND_MMIO_BANK && offset == 0xFE01)
+	{
+		XBand.kill = byte;
+		return;
+	}
+	if (bank == XBAND_MMIO_BANK && offset == 0xFE03)
+	{
+		XBand.control = byte;
 		return;
 	}
 }
 
 uint8 *S9xGetBasePointerXBand (uint32 address)
 {
-	uint8 bank = (address >> 16) & 0xFF;
-	if (bank == 0xE0)
+	if (xband_in_sram(address))
 	{
 		// Convention: callers compute byte = base[Address & 0xFFFF],
 		// so the base pointer must equal the start of the bank's data.
+		// All SRAM mirror banks alias the same 64KB.
 		return XBand.sram;
 	}
 	// MMIO is I/O with no linear base pointer
@@ -438,28 +487,19 @@ uint8 *S9xGetBasePointerXBand (uint32 address)
 }
 
 // -----------------------------------------------------------------------
-// Fred chip patch application
+// Fred chip patch vector application
 // -----------------------------------------------------------------------
+//
+// bsnes-plus keeps the patch-slot fields inside the flat `regs[]` array
+// at offsets 0-41 (11 slots × 4 bytes each) plus auxiliary ranges at 44+.
+// We implement a thin read-side helper here for when pass-through game
+// ROM mode eventually lands — for now nothing calls this because we're
+// booting the BIOS standalone.
 
 bool8 S9xXBandTryPatch (uint32 address, uint8 *out_byte)
 {
-	if (!XBand.enabled)
-		return FALSE;
-	if (!(XBand.fred_control & 0x80))
-		return FALSE;
-
-	uint32 a = address & 0xFFFFFF;
-	for (int i = 0; i < XBAND_NUM_PATCHES; i++)
-	{
-		SXBandPatch &p = XBand.patches[i];
-		if (!p.enabled || p.length == 0)
-			continue;
-		if (a >= p.address && a < p.address + p.length)
-		{
-			*out_byte = p.data[a - p.address];
-			return TRUE;
-		}
-	}
+	(void)address;
+	(void)out_byte;
 	return FALSE;
 }
 
@@ -524,39 +564,56 @@ void S9xInitXBand (void)
 	XBand.socket_fd = XBAND_INVALID_SOCKET;
 }
 
+// External hooks into cpuexec.cpp's BRK detector so a fresh power-on
+// gives us a fresh debugging snapshot.
+extern uint8  XBandFirstBrkOp;
+extern uint32 XBandFirstBrkPC;
+extern uint16 XBandFirstBrkS;
+extern bool   XBandFirstBrkSeen;
+
 void S9xResetXBand (void)
 {
-	// Reset modem state but preserve SRAM (like a real power cycle
-	// with the battery still connected).
-	XBand.ier = 0;
-	XBand.iir = 0x01; // no interrupt pending
-	XBand.fcr = 0;
-	XBand.lcr = 0;
-	XBand.mcr = 0;
-	XBand.lsr = XBAND_LSR_THRE | XBAND_LSR_TEMT;
-	XBand.msr = 0;
-	XBand.scr = 0;
-	XBand.dll = 0;
-	XBand.dlm = 0;
+	// Reset the BRK / COP debugging flag so each power-on captures a
+	// fresh first-trap snapshot.
+	XBandFirstBrkOp   = 0;
+	XBandFirstBrkPC   = 0;
+	XBandFirstBrkS    = 0;
+	XBandFirstBrkSeen = false;
 
-	XBand.rx_head = XBand.rx_tail = 0;
-	XBand.tx_head = XBand.tx_tail = 0;
+	// Power-on values for the Fred + modem register files, copied from
+	// bsnes-plus xband_base.cpp reset(). Without these, the XBAND USA
+	// BIOS triggers a BRK panic handler during init.
+	memset(XBand.regs, 0, sizeof(XBand.regs));
+	memset(XBand.modem_regs, 0, sizeof(XBand.modem_regs));
 
-	XBand.fred_control = 0;
-	XBand.fred_status  = 0;
-	xband_fred_selected_slot = 0;
-	xband_fred_field_index   = 0;
+	XBand.regs[0x7C] = 0;      // kAddrStatus
+	XBand.regs[0x7D] = 0x80;   // read-constant, also seeded here
+	XBand.regs[0xB4] = 0x7F;   // kLEDData
+	XBand.regs[222]  = 8;      // UNKNOWN_REG2
 
-	for (int i = 0; i < XBAND_NUM_PATCHES; i++)
-		memset(&XBand.patches[i], 0, sizeof(SXBandPatch));
+	// From the Catapult _PUResetModem routine.
+	XBand.modem_regs[0x19] = 0x46;
+
+	XBand.kill    = 0;
+	XBand.control = 0;
+
+	XBand.modem_line_relay  = 0;
+	XBand.modem_set_ATV25   = 0;
+	XBand.net_step          = XBAND_NET_IDLE;
+	XBand.consecutive_reads = 0;
+
+	XBand.rxbufpos = XBand.rxbufused = 0;
+	XBand.txbufpos = XBand.txbufused = 0;
 }
 
 void S9xXBandPostLoadState (void)
 {
-	// Re-derive LSR from FIFO state
-	xband_update_lsr();
-	// Don't touch the socket — the user must reconnect after loading
-	// a save state, just like a real modem call being hung up.
+	// Nothing to re-derive; the register files live entirely inside
+	// the serialized struct. Don't touch the socket — a save state
+	// load implicitly "hangs up" the modem, same as loading a state
+	// during snes9x netplay.
+	XBand.socket_fd = XBAND_INVALID_SOCKET;
+	XBand.connected = FALSE;
 }
 
 // -----------------------------------------------------------------------
@@ -628,9 +685,10 @@ bool8 S9xXBandConnect (const char *host, int port)
 
 	XBand.socket_fd = (intptr_t)fd;
 	XBand.connected = TRUE;
-
-	// Raise CD / DSR in MSR so the firmware sees the modem as connected.
-	XBand.msr = 0x90; // bit 7 = DCD, bit 4 = CTS
+	// Enter the handshake phase; a real XBAND firmware raises RTS and
+	// expects the server to reply. The firmware polls reg $98 for RX
+	// data once it believes the modem is in V.22bis mode.
+	XBand.net_step = XBAND_NET_HANDSHAKE;
 	return TRUE;
 }
 
@@ -642,7 +700,9 @@ void S9xXBandDisconnect (void)
 		XBand.socket_fd = XBAND_INVALID_SOCKET;
 	}
 	XBand.connected = FALSE;
-	XBand.msr = 0;
+	XBand.net_step  = XBAND_NET_IDLE;
+	XBand.rxbufpos  = XBand.rxbufused = 0;
+	XBand.txbufpos  = XBand.txbufused = 0;
 }
 
 void S9xXBandPoll (void)
@@ -652,29 +712,28 @@ void S9xXBandPoll (void)
 
 	xband_sock_t fd = (xband_sock_t)XBand.socket_fd;
 
-	// Flush TX FIFO to the socket
-	while (!xband_fifo_empty(XBand.tx_head, XBand.tx_tail))
+	// Flush any buffered TX bytes to the socket. bsnes-plus sends each
+	// byte at modem-write time; we accumulate and flush once per frame
+	// so the socket isn't poked on every $FBC120 write.
+	while (XBand.txbufused < XBand.txbufpos)
 	{
-		uint8 b = XBand.tx_fifo[XBand.tx_tail];
+		uint8 b = XBand.txbuf[XBand.txbufused];
 		int sent = (int)send(fd, (const char *)&b, 1, 0);
 		if (sent != 1)
 			break; // socket would block or is broken
-		XBand.tx_tail = (XBand.tx_tail + 1) & (XBAND_FIFO_SIZE - 1);
+		XBand.txbufused++;
 	}
+	if (XBand.txbufused >= XBand.txbufpos)
+		XBand.txbufpos = XBand.txbufused = 0;
 
-	// Drain any bytes waiting on the socket into the RX FIFO
-	for (;;)
+	// Drain any bytes the server has sent into the RX buffer.
+	while (XBand.rxbufpos < XBAND_RXBUF_SIZE)
 	{
-		if (xband_fifo_full(XBand.rx_head, XBand.rx_tail))
-			break;
-
 		uint8 b;
 		int got = (int)recv(fd, (char *)&b, 1, 0);
 		if (got == 1)
-			xband_rx_push(b);
+			XBand.rxbuf[XBand.rxbufpos++] = b;
 		else
 			break;
 	}
-
-	xband_update_lsr();
 }

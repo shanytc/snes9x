@@ -24,6 +24,7 @@ int32	S9xRefreshClocks = 0;
 #include "hg51b.h"
 #include "nss.h"
 #include "voicekun.h"
+#include "xband.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #include "missing.h"
@@ -744,6 +745,11 @@ void S9xDoHEventProcessing (void)
 
 				ICPU.Frame++;
 				PPU.HVBeamCounterLatched = 0;
+
+				// Shuttle modem bytes between the XBAND socket and the
+				// UART FIFOs once per frame.
+				if (Settings.XBAND)
+					S9xXBandPoll();
 			}
 
 			// From byuu:

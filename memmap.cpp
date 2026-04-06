@@ -2059,19 +2059,6 @@ void CMemory::ParseSNESHeader (uint8 *RomHeader)
 
 void CMemory::InitROM (void)
 {
-#ifdef _WIN32
-	// TEMP debug: prove InitROM is actually being called for the loaded ROM.
-	// Remove once XBAND detection is confirmed working.
-	{
-		char msg[128];
-		_snprintf(msg, sizeof(msg) - 1,
-			"InitROM called.\nCalculatedSize = 0x%x\nHiROM=%d LoROM=%d",
-			(unsigned)CalculatedSize, (int)HiROM, (int)LoROM);
-		msg[sizeof(msg) - 1] = 0;
-		MessageBoxA(NULL, msg, "XBAND: InitROM hit", MB_OK);
-	}
-#endif
-
 	Settings.SuperFX = FALSE;
 	Settings.DSP = 0;
 	Settings.SA1 = FALSE;
@@ -2192,11 +2179,12 @@ void CMemory::InitROM (void)
 				    "   (no known signature matched)\n");
 			}
 
-			// Show the diagnostic popup so we get visible feedback on
-			// the first load of a 1MB ROM. Remove this block once XBAND
-			// detection is reliable.
 #ifdef _WIN32
-			MessageBoxA(NULL, dbg, "XBAND Detection", MB_OK);
+			// Only show the diagnostic popup if we *didn't* detect. On
+			// successful detection, stay silent and let the firmware
+			// boot unattended.
+			if (!xband_bios)
+				MessageBoxA(NULL, dbg, "XBAND Detection (no match)", MB_OK);
 #endif
 		}
 
@@ -3324,24 +3312,31 @@ void CMemory::Map_XBandLoROMMap (void)
 void CMemory::Map_XBandHiROMMap (void)
 {
 	printf("Map_XBandHiROMMap\n");
-#ifdef _WIN32
-	MessageBoxA(NULL, "Map_XBandHiROMMap called", "XBAND", MB_OK);
-#endif
 
 	// Released XBAND BIOS (internal name "XBAND VIDEOGAME" at $FFB0)
-	// is HiROM. Mirror the standard HiROM layout, then overlay our
-	// modem/Fred MMIO at $FB:$C000-$CFFF.
+	// is HiROM. Lay out the firmware ROM as standard HiROM in banks
+	// $C0-$DF (we deliberately stop at $DF rather than $FF — banks
+	// $E0-$FF are XBAND SRAM mirrors and modem MMIO).
 	map_System();
 
 	map_hirom(0x00, 0x3f, 0x8000, 0xffff, CalculatedSize);
 	map_hirom(0x40, 0x7f, 0x0000, 0xffff, CalculatedSize);
 	map_hirom(0x80, 0xbf, 0x8000, 0xffff, CalculatedSize);
-	map_hirom(0xc0, 0xff, 0x0000, 0xffff, CalculatedSize);
+	map_hirom(0xc0, 0xdf, 0x0000, 0xffff, CalculatedSize);
 
-	// XBAND modem + Fred MMIO at $FB:$C000-$CFFF. The exact sub-range
-	// ($FB:$C180-$C1BF) is decoded inside S9xGetXBand/S9xSetXBand.
-	// This overrides the HiROM map in that 4KB block.
-	map_index(0xfb, 0xfb, 0xc000, 0xcfff, MAP_XBAND, MAP_TYPE_I_O);
+	// XBAND SRAM mirror window. bsnes-plus maps the same 64KB SRAM at
+	// $E0-$FA, $FB:$0000-$BFFF, $FC-$FF and $60-$7D — the firmware
+	// expects all of those to read/write the same physical memory.
+	// We register the dispatch ranges; the actual mirroring back to
+	// XBand.sram[] is done inside S9xGetXBand / S9xSetXBand.
+	map_index(0xe0, 0xfa, 0x0000, 0xffff, MAP_XBAND, MAP_TYPE_RAM);
+	map_index(0xfb, 0xfb, 0x0000, 0xbfff, MAP_XBAND, MAP_TYPE_RAM);
+	map_index(0xfc, 0xff, 0x0000, 0xffff, MAP_XBAND, MAP_TYPE_RAM);
+
+	// XBAND modem + Fred MMIO at $FB:$C000-$FDFF, plus the kill /
+	// control pair at $FBFE01/$FBFE03. We claim $FB:$C000-$FFFF for
+	// MAP_XBAND so the dispatch sees every register access.
+	map_index(0xfb, 0xfb, 0xc000, 0xffff, MAP_XBAND, MAP_TYPE_I_O);
 
 	map_HiROMSRAM();
 	map_WRAM();

@@ -206,6 +206,7 @@
     <ClInclude Include="..\filter\snes_ntsc.h" />
     <ClInclude Include="..\bml.h" />
     <ClInclude Include="..\bsx.h" />
+    <ClInclude Include="..\xband.h" />
     <ClInclude Include="..\c4.h" />
     <ClInclude Include="..\cheats.h" />
     <ClInclude Include="..\conffile.h" />
@@ -265,6 +266,7 @@
     <ClCompile Include="..\filter\snes_ntsc.c" />
     <ClCompile Include="..\bml.cpp" />
     <ClCompile Include="..\bsx.cpp" />
+    <ClCompile Include="..\xband.cpp" />
     <ClCompile Include="..\c4.cpp" />
     <ClCompile Include="..\c4emu.cpp" />
     <ClCompile Include="..\cheats.cpp" />

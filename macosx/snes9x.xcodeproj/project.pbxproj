@@ -81,6 +81,7 @@
 		30D15CFC22CE6B74005BC352 /* sha256.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 85FEF90A20DDB18D00C038E9 /* sha256.cpp */; };
 		30D15CFE22CE6B74005BC352 /* bml.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 85FEF90620DDB15B00C038E9 /* bml.cpp */; };
 		30D15D2D22CE6B74005BC352 /* bsx.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EA2F380F09B17E070078DCA7 /* bsx.cpp */; };
+		30D15DFF22CE6B74005BC352 /* xband.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EAFF381F09B17E070078DCA7 /* xband.cpp */; };
 		30D15D2E22CE6B74005BC352 /* c4.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EAE0615F0526CCB900A80003 /* c4.cpp */; };
 		30D15D2F22CE6B74005BC352 /* c4emu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EAE061610526CCB900A80003 /* c4emu.cpp */; };
 		30D15D3022CE6B74005BC352 /* cheats.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EAE061630526CCB900A80003 /* cheats.cpp */; };
@@ -425,6 +426,8 @@
 		EA2DBC0D0510ABE700A80003 /* mac-screenshot.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; lineEnding = 0; path = "mac-screenshot.mm"; sourceTree = "<group>"; };
 		EA2F380F09B17E070078DCA7 /* bsx.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = bsx.cpp; sourceTree = "<group>"; usesTabs = 1; };
 		EA2F381A09B17E9E0078DCA7 /* bsx.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = bsx.h; sourceTree = "<group>"; usesTabs = 1; };
+		EAFF381F09B17E070078DCA7 /* xband.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = xband.cpp; sourceTree = "<group>"; usesTabs = 1; };
+		EAFF382A09B17E9E0078DCA7 /* xband.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = xband.h; sourceTree = "<group>"; usesTabs = 1; };
 		EA31FE2D05F7743E00E13748 /* gfx.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; lineEnding = 0; path = gfx.cpp; sourceTree = "<group>"; usesTabs = 1; };
 		EA362C3E086119D100FBE476 /* HID_Utilities_External.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; lineEnding = 0; path = HID_Utilities_External.h; sourceTree = "<group>"; };
 		EA3D2F360A26083B00BDACCC /* SRAM.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = SRAM.icns; sourceTree = "<group>"; };
@@ -890,6 +893,8 @@
 				85FEF90720DDB15C00C038E9 /* bml.h */,
 				EA2F380F09B17E070078DCA7 /* bsx.cpp */,
 				EA2F381A09B17E9E0078DCA7 /* bsx.h */,
+				EAFF381F09B17E070078DCA7 /* xband.cpp */,
+				EAFF382A09B17E9E0078DCA7 /* xband.h */,
 				EAE0615F0526CCB900A80003 /* c4.cpp */,
 				EAE061600526CCB900A80003 /* c4.h */,
 				EAE061610526CCB900A80003 /* c4emu.cpp */,
@@ -1343,6 +1348,7 @@
 				30D15CFC22CE6B74005BC352 /* sha256.cpp in Sources */,
 				30D15CFE22CE6B74005BC352 /* bml.cpp in Sources */,
 				30D15D2D22CE6B74005BC352 /* bsx.cpp in Sources */,
+				30D15DFF22CE6B74005BC352 /* xband.cpp in Sources */,
 				30D15D2E22CE6B74005BC352 /* c4.cpp in Sources */,
 				30D15D2F22CE6B74005BC352 /* c4emu.cpp in Sources */,
 				30D15D3022CE6B74005BC352 /* cheats.cpp in Sources */,

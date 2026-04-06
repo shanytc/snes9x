@@ -37,6 +37,14 @@
 #include "display.h"
 #include "sha256.h"
 #include "snapshot.h"
+#include "xband.h"
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #ifndef SET_UI_COLOR
 #define SET_UI_COLOR(r, g, b) ;
@@ -2051,6 +2059,19 @@ void CMemory::ParseSNESHeader (uint8 *RomHeader)
 
 void CMemory::InitROM (void)
 {
+#ifdef _WIN32
+	// TEMP debug: prove InitROM is actually being called for the loaded ROM.
+	// Remove once XBAND detection is confirmed working.
+	{
+		char msg[128];
+		_snprintf(msg, sizeof(msg) - 1,
+			"InitROM called.\nCalculatedSize = 0x%x\nHiROM=%d LoROM=%d",
+			(unsigned)CalculatedSize, (int)HiROM, (int)LoROM);
+		msg[sizeof(msg) - 1] = 0;
+		MessageBoxA(NULL, msg, "XBAND: InitROM hit", MB_OK);
+	}
+#endif
+
 	Settings.SuperFX = FALSE;
 	Settings.DSP = 0;
 	Settings.SA1 = FALSE;
@@ -2063,6 +2084,7 @@ void CMemory::InitROM (void)
 	Settings.SRTC = FALSE;
 	Settings.BS = FALSE;
 	Settings.MSU1 = FALSE;
+	Settings.XBAND = FALSE;
 
 	SuperFX.nRomBanks = CalculatedSize >> 15;
 
@@ -2078,6 +2100,108 @@ void CMemory::InitROM (void)
 		RomHeader += 0x8000;
 
 	S9xInitBSX(); // Set BS header before parsing
+
+	// XBAND BIOS detection. We scan the whole ROM for known markers,
+	// and also dump bytes around the SNES ROM header locations so that
+	// if detection fails, we can see exactly what's in the ROM and
+	// adjust. Results shown via MessageBox so GUI Win32 builds see them
+	// reliably regardless of CWD.
+	S9xInitXBand();
+	{
+		bool xband_bios = false;
+		size_t match_offset = 0;
+		const char *match_name = NULL;
+
+		// Write debug output into a single growable buffer, then show
+		// it once via MessageBox if the ROM is 1MB (candidate size).
+		char dbg[4096];
+		int  dbg_len = 0;
+		dbg[0] = 0;
+		#define DBG(...) do { \
+			int _r = _snprintf(dbg + dbg_len, sizeof(dbg) - dbg_len - 1, __VA_ARGS__); \
+			if (_r > 0) dbg_len += _r; \
+		} while (0)
+
+		DBG("ROM CalculatedSize = 0x%x (%u bytes)\n\n",
+			(unsigned)CalculatedSize, (unsigned)CalculatedSize);
+
+		if (CalculatedSize == XBAND_ROM_SIZE)
+		{
+			static const struct { const char *s; size_t n; } needles[] = {
+				{ "CATAPULT", 8 },
+				{ "Catapult", 8 },
+				{ "X-BAND",   6 },
+				{ "X-Band",   6 },
+				{ "XBAND",    5 },
+				{ "Xband",    5 },
+			};
+			const int num_needles = (int)(sizeof(needles) / sizeof(needles[0]));
+
+			const uint8 *hay = ROM;
+			size_t hay_len = CalculatedSize;
+
+			for (int k = 0; k < num_needles && !xband_bios; k++)
+			{
+				size_t n = needles[k].n;
+				if (hay_len < n) continue;
+				for (size_t i = 0; i + n <= hay_len; i++)
+				{
+					if (memcmp(hay + i, needles[k].s, n) == 0)
+					{
+						xband_bios   = true;
+						match_offset = i;
+						match_name   = needles[k].s;
+						break;
+					}
+				}
+			}
+
+			// Dump printable chars and first 16 raw bytes at standard
+			// ROM header offsets $7FB0 and $FFB0.
+			for (uint32 header_off = 0x7FB0; header_off <= 0xFFB0; header_off += 0x8000)
+			{
+				DBG("Header @ 0x%06x:\n  text: ", header_off);
+				for (int b = 0; b < 32; b++)
+				{
+					uint8 c = ROM[header_off + b];
+					char ch = (c >= 0x20 && c < 0x7f) ? (char)c : '.';
+					DBG("%c", ch);
+				}
+				DBG("\n  hex:  ");
+				for (int b = 0; b < 16; b++)
+					DBG("%02x ", ROM[header_off + b]);
+				DBG("\n\n");
+			}
+
+			if (xband_bios)
+			{
+				Settings.XBAND = TRUE;
+				XBand.enabled  = TRUE;
+				XBand.bios_loaded = TRUE;
+				// Don't force LoROM/HiROM — trust whatever ScoreLoROM /
+				// ScoreHiROM decided earlier. The released XBAND BIOS is
+				// HiROM (internal name "XBAND VIDEOGAME" at $FFB0).
+				DBG("=> DETECTED as XBAND BIOS (%s)\n"
+				    "   signature \"%s\" at offset 0x%06x\n",
+				    HiROM ? "HiROM" : "LoROM",
+				    match_name, (unsigned)match_offset);
+			}
+			else
+			{
+				DBG("=> NOT detected as XBAND BIOS\n"
+				    "   (no known signature matched)\n");
+			}
+
+			// Show the diagnostic popup so we get visible feedback on
+			// the first load of a 1MB ROM. Remove this block once XBAND
+			// detection is reliable.
+#ifdef _WIN32
+			MessageBoxA(NULL, dbg, "XBAND Detection", MB_OK);
+#endif
+		}
+
+		#undef DBG
+	}
 
 	ParseSNESHeader(RomHeader);
 
@@ -2252,6 +2376,8 @@ void CMemory::InitROM (void)
 	{
 		if (Settings.BS)
 			/* Do nothing */;
+		else if (Settings.XBAND)
+			Map_XBandHiROMMap();
 		else if (Settings.SPC7110)
 			Map_SPC7110HiROMMap();
 		else if (ExtendedFormat != NOPE)
@@ -2265,6 +2391,8 @@ void CMemory::InitROM (void)
 	{
 		if (Settings.BS)
 			/* Do nothing */;
+		else if (Settings.XBAND)
+			Map_XBandLoROMMap();
 		else if (Settings.SETA && Settings.SETA != ST_018)
 			Map_SetaDSPLoROMMap();
 		else if (Settings.SuperFX)
@@ -3151,6 +3279,71 @@ void CMemory::Map_BSCartLoROMMap(uint8 mapping)
 
 	map_LoROMSRAM();
 	map_index(0xc0, 0xef, 0x0000, 0xffff, MAP_BSX, MAP_TYPE_RAM);
+	map_WRAM();
+
+	map_WriteProtectROM();
+}
+
+void CMemory::Map_XBandLoROMMap (void)
+{
+	printf("Map_XBandLoROMMap\n");
+	{
+		FILE *xlog = fopen("xband.log", "a");
+		if (xlog)
+		{
+			fprintf(xlog, "  -> Map_XBandLoROMMap called (CalculatedSize=0x%x)\n",
+				(unsigned)CalculatedSize);
+			fclose(xlog);
+		}
+	}
+
+	// XBAND, booted standalone (no game cartridge on top), maps the
+	// firmware ROM into the normal LoROM cartridge address space. The
+	// firmware is already sitting in the main ROM buffer at this point.
+	map_System();
+
+	map_lorom(0x00, 0x3f, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0x40, 0x7f, 0x0000, 0xffff, CalculatedSize);
+	map_lorom(0x80, 0xbf, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0xc0, 0xff, 0x0000, 0xffff, CalculatedSize);
+
+	// XBAND SRAM at $E0:$0000-$FFFF (handled by MAP_XBAND dispatch).
+	// This overrides whatever map_lorom put in those blocks above.
+	map_index(0xe0, 0xe0, 0x0000, 0xffff, MAP_XBAND, MAP_TYPE_RAM);
+
+	// Modem + Fred MMIO at $FB:$C000-$CFFF. The exact sub-range is
+	// decoded inside S9xGetXBand/S9xSetXBand.
+	map_index(0xfb, 0xfb, 0xc000, 0xcfff, MAP_XBAND, MAP_TYPE_I_O);
+
+	map_LoROMSRAM();
+	map_WRAM();
+
+	map_WriteProtectROM();
+}
+
+void CMemory::Map_XBandHiROMMap (void)
+{
+	printf("Map_XBandHiROMMap\n");
+#ifdef _WIN32
+	MessageBoxA(NULL, "Map_XBandHiROMMap called", "XBAND", MB_OK);
+#endif
+
+	// Released XBAND BIOS (internal name "XBAND VIDEOGAME" at $FFB0)
+	// is HiROM. Mirror the standard HiROM layout, then overlay our
+	// modem/Fred MMIO at $FB:$C000-$CFFF.
+	map_System();
+
+	map_hirom(0x00, 0x3f, 0x8000, 0xffff, CalculatedSize);
+	map_hirom(0x40, 0x7f, 0x0000, 0xffff, CalculatedSize);
+	map_hirom(0x80, 0xbf, 0x8000, 0xffff, CalculatedSize);
+	map_hirom(0xc0, 0xff, 0x0000, 0xffff, CalculatedSize);
+
+	// XBAND modem + Fred MMIO at $FB:$C000-$CFFF. The exact sub-range
+	// ($FB:$C180-$C1BF) is decoded inside S9xGetXBand/S9xSetXBand.
+	// This overrides the HiROM map in that 4KB block.
+	map_index(0xfb, 0xfb, 0xc000, 0xcfff, MAP_XBAND, MAP_TYPE_I_O);
+
+	map_HiROMSRAM();
 	map_WRAM();
 
 	map_WriteProtectROM();

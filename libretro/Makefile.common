@@ -14,6 +14,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/apu/bapu/smp/smp.cpp \
 				 $(CORE_DIR)/apu/bapu/smp/smp_state.cpp \
 				 $(CORE_DIR)/bsx.cpp \
+				 $(CORE_DIR)/xband.cpp \
 				 $(CORE_DIR)/c4.cpp \
 				 $(CORE_DIR)/c4emu.cpp \
 				 $(CORE_DIR)/cheats.cpp \

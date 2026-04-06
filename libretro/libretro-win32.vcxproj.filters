@@ -24,6 +24,9 @@
     <ClInclude Include="..\bsx.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\xband.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\c4.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
@@ -192,6 +195,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\xband.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\c4.cpp">

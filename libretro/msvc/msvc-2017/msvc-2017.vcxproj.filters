@@ -39,6 +39,9 @@
     <ClCompile Include="..\..\..\bsx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\xband.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\..\c4.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

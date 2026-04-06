@@ -455,6 +455,8 @@
 #define ID_NETPLAY_CONNECT              40078
 #define ID_NETPLAY_DISCONNECT           40079
 #define ID_NETPLAY_OPTIONS              40080
+#define ID_XBAND_CONNECT                40190
+#define ID_XBAND_DISCONNECT             40191
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083
@@ -613,7 +615,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        172
-#define _APS_NEXT_COMMAND_VALUE         40189
+#define _APS_NEXT_COMMAND_VALUE         40192
 #define _APS_NEXT_CONTROL_VALUE         3061
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

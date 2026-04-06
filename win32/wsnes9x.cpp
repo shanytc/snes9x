@@ -42,6 +42,7 @@
 #include "../display.h"
 #include "../cheats.h"
 #include "../netplay.h"
+#include "../xband.h"
 #include "kaillera.h"
 #include "kaillera_client.h"
 #include "kaillera_server.h"
@@ -2120,6 +2121,43 @@ LRESULT CALLBACK WinProc(
 				RestoreSNESDisplay ();
 				break;
 			}
+        case ID_XBAND_CONNECT:
+			{
+				// Replacement XBAND server — see xband.retrocomputing.network.
+				// Edit these two lines if your server runs on a different
+				// host/port. A proper dialog can come later.
+				const char *xband_host = "xband.retrocomputing.network";
+				const int   xband_port = 2023;
+
+				if (!Settings.XBAND)
+				{
+					MessageBox(hWnd,
+						TEXT("Load the XBAND BIOS ROM first, then try connecting."),
+						TEXT("XBAND"), MB_OK | MB_ICONINFORMATION);
+					break;
+				}
+
+				RestoreGUIDisplay();
+				if (S9xXBandConnect(xband_host, xband_port))
+				{
+					TCHAR msg[256];
+					_stprintf(msg, TEXT("Connected to XBAND server %s:%d."),
+						(TCHAR *)_tFromChar(xband_host), xband_port);
+					MessageBox(hWnd, msg, TEXT("XBAND"), MB_OK | MB_ICONINFORMATION);
+				}
+				else
+				{
+					TCHAR msg[256];
+					_stprintf(msg, TEXT("Failed to connect to XBAND server %s:%d."),
+						(TCHAR *)_tFromChar(xband_host), xband_port);
+					MessageBox(hWnd, msg, TEXT("XBAND"), MB_OK | MB_ICONERROR);
+				}
+				RestoreSNESDisplay();
+				break;
+			}
+        case ID_XBAND_DISCONNECT:
+			S9xXBandDisconnect();
+			break;
         case ID_NETPLAY_SYNC:
             S9xNPServerQueueSyncAll ();
             break;

@@ -58,6 +58,7 @@ set(SNES9X_CORE_SOURCES
     ../stream.cpp
     ../conffile.cpp
     ../bsx.cpp
+    ../xband.cpp
     ../snapshot.cpp
     ../screenshot.cpp
     ../movie.cpp

@@ -377,6 +377,9 @@
     <ClCompile Include="..\bsx.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
+    <ClCompile Include="..\xband.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
     <ClCompile Include="..\c4.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
@@ -864,6 +867,9 @@
       <Filter>Emu</Filter>
     </CustomBuild>
     <CustomBuild Include="..\bsx.h">
+      <Filter>Emu</Filter>
+    </CustomBuild>
+    <CustomBuild Include="..\xband.h">
       <Filter>Emu</Filter>
     </CustomBuild>
     <CustomBuild Include="..\c4.h">

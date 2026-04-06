@@ -15,6 +15,7 @@
 #include "obc1.h"
 #include "seta.h"
 #include "bsx.h"
+#include "xband.h"
 #include "msu1.h"
 
 #define addCyclesInMemoryAccess \
@@ -146,6 +147,11 @@ inline uint8 S9xGetByte (uint32 Address)
 
 		case CMemory::MAP_BSX:
 			byte = S9xGetBSX(Address);
+			addCyclesInMemoryAccess;
+			return (byte);
+
+		case CMemory::MAP_XBAND:
+			byte = S9xGetXBand(Address);
 			addCyclesInMemoryAccess;
 			return (byte);
 
@@ -309,6 +315,13 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			addCyclesInMemoryAccess;
 			return (word);
 
+		case CMemory::MAP_XBAND:
+			word  = S9xGetXBand(Address);
+			addCyclesInMemoryAccess;
+			word |= S9xGetXBand(Address + 1) << 8;
+			addCyclesInMemoryAccess;
+			return (word);
+
 		case CMemory::MAP_NONE:
 		default:
 			word = OpenBus | (OpenBus << 8);
@@ -413,6 +426,11 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 
 		case CMemory::MAP_BSX:
 			S9xSetBSX(Byte, Address);
+			addCyclesInMemoryAccess;
+			return;
+
+		case CMemory::MAP_XBAND:
+			S9xSetXBand(Byte, Address);
 			addCyclesInMemoryAccess;
 			return;
 
@@ -687,6 +705,24 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 				return;
 			}
 
+		case CMemory::MAP_XBAND:
+			if (o)
+			{
+				S9xSetXBand(Word >> 8, Address + 1);
+				addCyclesInMemoryAccess;
+				S9xSetXBand((uint8) Word, Address);
+				addCyclesInMemoryAccess;
+				return;
+			}
+			else
+			{
+				S9xSetXBand((uint8) Word, Address);
+				addCyclesInMemoryAccess;
+				S9xSetXBand(Word >> 8, Address + 1);
+				addCyclesInMemoryAccess;
+				return;
+			}
+
 		case CMemory::MAP_NONE:
 		default:
 			addCyclesInMemoryAccess_x2;
@@ -757,6 +793,10 @@ inline void S9xSetPCBase (uint32 Address)
 			CPU.PCBase = S9xGetBasePointerBSX(Address);
 			return;
 
+		case CMemory::MAP_XBAND:
+			CPU.PCBase = S9xGetBasePointerXBand(Address);
+			return;
+
 		case CMemory::MAP_NONE:
 		default:
 			CPU.PCBase = NULL;
@@ -803,6 +843,9 @@ inline uint8 * S9xGetBasePointer (uint32 Address)
 		case CMemory::MAP_OBC_RAM:
 			return (S9xGetBasePointerOBC1(Address & 0xffff));
 
+		case CMemory::MAP_XBAND:
+			return (S9xGetBasePointerXBand(Address));
+
 		case CMemory::MAP_NONE:
 		default:
 			return (NULL);
@@ -847,6 +890,12 @@ inline uint8 * S9xGetMemPointer (uint32 Address)
 
 		case CMemory::MAP_OBC_RAM:
 			return (S9xGetMemPointerOBC1(Address & 0xffff));
+
+		case CMemory::MAP_XBAND:
+		{
+			uint8 *base = S9xGetBasePointerXBand(Address);
+			return base ? base + (Address & 0xffff) : NULL;
+		}
 
 		case CMemory::MAP_NONE:
 		default:

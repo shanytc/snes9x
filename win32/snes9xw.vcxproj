@@ -329,6 +329,7 @@
     <ClInclude Include="..\apu\bapu\dsp\SPC_DSP.h" />
     <ClInclude Include="..\apu\bapu\snes\snes.hpp" />
     <CustomBuild Include="..\bsx.h" />
+    <CustomBuild Include="..\xband.h" />
     <CustomBuild Include="..\c4.h" />
     <CustomBuild Include="..\cheats.h" />
     <CustomBuild Include="..\conffile.h" />
@@ -507,6 +508,7 @@
     <ClCompile Include="..\apu\bapu\smp\smp.cpp" />
     <ClCompile Include="..\apu\bapu\smp\smp_state.cpp" />
     <ClCompile Include="..\bsx.cpp" />
+    <ClCompile Include="..\xband.cpp" />
     <ClCompile Include="..\c4.cpp" />
     <ClCompile Include="..\c4emu.cpp" />
     <ClCompile Include="..\cheats.cpp" />

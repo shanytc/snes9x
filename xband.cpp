@@ -571,6 +571,41 @@ extern uint32 XBandFirstBrkPC;
 extern uint16 XBandFirstBrkS;
 extern bool   XBandFirstBrkSeen;
 
+// Adopt whatever is in Memory.SRAM as the XBAND SRAM. snes9x's standard
+// SRAM loader (memmap.cpp::LoadSRAM) reads the .srm file into
+// Memory.SRAM before InitROM calls our reset, so by the time we get
+// here Memory.SRAM already has the user's saved (or pre-populated)
+// XBAND SRAM contents. We copy it into our local XBand.sram array
+// so the dispatch in S9xGetXBand/S9xSetXBand sees the right bytes.
+//
+// Without a valid SRAM image (the BIOS dump only contains the firmware,
+// not user data), the XBAND BIOS hangs in its "first-time setup" loop
+// because nothing matches the boot vector / box-ID magic it expects.
+// Pre-populating the .srm with a dump from a real XBAND cartridge
+// (e.g. one of the dumps in Cinghialotto's SNES-XBandSRAMs.rar)
+// bypasses that hang.
+//
+// On save, we mirror the other direction: see S9xXBandSyncSRAMOut.
+static bool xband_load_sram_image (void)
+{
+	// Memory.SRAM is allocated to SRAM_SIZE (0x80000) by snes9x's core,
+	// so we can safely read XBAND_SRAM_SIZE (0x10000) bytes from it.
+	// If the snes9x loader didn't find a .srm file, Memory.SRAM is all
+	// zeros (cleared by ClearSRAM), which is the same as our default —
+	// so this copy is a no-op in that case.
+	memcpy(XBand.sram, Memory.SRAM, XBAND_SRAM_SIZE);
+	return true;
+}
+
+void S9xXBandSyncSRAMOut (void)
+{
+	// Mirror our XBand.sram[] back into Memory.SRAM[] so snes9x's
+	// standard SaveSRAM picks up the latest XBAND SRAM contents when
+	// the user closes the emulator or auto-saves.
+	if (Settings.XBAND)
+		memcpy(Memory.SRAM, XBand.sram, XBAND_SRAM_SIZE);
+}
+
 void S9xResetXBand (void)
 {
 	// Reset the BRK / COP debugging flag so each power-on captures a
@@ -604,6 +639,14 @@ void S9xResetXBand (void)
 
 	XBand.rxbufpos = XBand.rxbufused = 0;
 	XBand.txbufpos = XBand.txbufused = 0;
+
+	// Try to load a real XBAND SRAM dump (e.g. one of the dumps in the
+	// Cinghialotto repo's SNES-XBandSRAMs.rar). On a fresh "first-time
+	// setup" boot, the BIOS spins forever in init because nothing in
+	// zeroed SRAM matches the magic boot vector / box ID it expects.
+	// A real SRAM dump bypasses that hang.
+	if (xband_load_sram_image())
+		XBand.sram_dirty = FALSE;
 }
 
 void S9xXBandPostLoadState (void)

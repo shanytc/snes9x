@@ -493,6 +493,8 @@
 #define ID_NETPLAY_OPTIONS              40080
 #define ID_XBAND_CONNECT                40190
 #define ID_XBAND_DISCONNECT             40191
+#define ID_XBAND_PC_HISTOGRAM           40192
+#define ID_XBAND_PPU_STATE              40193
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083

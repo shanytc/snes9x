@@ -1934,6 +1934,11 @@ bool8 CMemory::SaveSRAM (const char *filename)
 	if (Settings.SA1 && ROMType == 0x34)    // doesn't have SRAM
 		return (TRUE);
 
+	// XBAND SRAM lives in XBand.sram[], not Memory.SRAM. Sync it
+	// across so the standard fwrite below picks up our buffer.
+	if (Settings.XBAND)
+		S9xXBandSyncSRAMOut();
+
 	FILE	*file;
 	int		size;
 

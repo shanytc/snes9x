@@ -127,6 +127,8 @@ void S9xReset (void)
 		S9xResetSRTC();
 	if (Settings.MSU1)
 		S9xMSU1Init();
+	if (Settings.XBAND)
+		S9xResetXBand();
 
 	S9xInitCheatData();
 }
@@ -139,6 +141,8 @@ void S9xSoftReset (void)
 
 	if (Settings.BS)
 		S9xResetBSX();
+	if (Settings.XBAND)
+		S9xResetXBand();
 
 	S9xSoftResetCPU();
 	S9xSoftResetPPU();

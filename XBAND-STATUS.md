@@ -69,30 +69,102 @@ multiplayer.
   first BRK/COP executed inside the firmware bank for post-mortem
   analysis.
 
-## What does not work
+- **Multi-cart loader path.** `File -> Open Multicart...` accepts
+  the XBAND BIOS in slot A (with or without a game cart in slot B).
+  When `is_XBand_BIOS` matches the slot-A image, `Multi.cartType`
+  is set to a new value `6`, `LoadXBandMultiCart` runs, and
+  `Map_XBandMultiCartHiROMMap` lays out the same HiROM + SRAM
+  mirror + MMIO window as the standalone path. The `stbios.bin
+  not found!` warning in the dialog only matters for Sufami Turbo
+  loads -- you can ignore it for XBAND. The dialog itself does not
+  yet have a per-cart-type message.
 
-- **The BIOS does not display anything.** Boot reaches a steady
-  state where the firmware spins through what appears to be a
-  database / timer scheduler loop, alternating between a 32-bit
-  signed comparison helper at `$D0:11B1` and an outer record
-  iterator at `$D5:5B27`. PPU is never enabled (`$2100 INIDISP`,
-  `$212C TM`, `$4200 NMITIMEN` all stay zero). CGRAM is set up
-  with a default palette, but with brightness 0 the screen renders
-  pitch black.
+## Boot wall: cleared
 
-- This was confirmed to **not depend on SRAM contents**: empty
-  SRAM, Benner's dump, and Luke2's dump all produce the same
-  loop, same PC, same registers.
+For a long time, boot reached a steady state where the firmware
+spun through a database / timer scheduler loop, alternating between
+a 32-bit signed comparison helper at `$D0:11B1` and an outer record
+iterator at `$D5:5B27`. PPU never came on. We confirmed:
 
-- It was also confirmed to **not be a snes9x-specific issue**:
-  Mesen running the same BIOS does not write to `$2100` either.
-  No general-purpose SNES emulator gets the BIOS to display
-  standalone -- which strongly suggests the BIOS is fundamentally
-  designed to require either:
-  1. A game cartridge plugged in on top (pass-through mode), or
-  2. Live network traffic from a paired XBAND server (full ADSP
-     protocol, not just raw TCP), or
-  3. Specific hardware behaviour we are not yet emulating.
+- **Not SRAM-dependent.** Empty SRAM, Benner's dump, and Luke2's
+  dump all produced the same PC, same registers, same loop.
+- **Not snes9x-specific.** Mesen running the same BIOS does not
+  write to `$2100` either. No general-purpose SNES emulator gets
+  the BIOS to display standalone *out of the box*.
+- **Not gated on `$00:$FFB0` cart-header reads.** A read counter
+  hooked into `S9xGetByte` recorded `0` reads of `$XX:$FFB0-$FFDF`
+  during the loop. The BIOS isn't checking the cart there.
+
+The actual cause turned out to be two infinite loops in the boot
+path that have no exit condition under our emulation environment
+(no Fred bank-mux, no live ADSP server, no real game cart visible
+to the BIOS at the addresses it reads). Both are now bypassed by
+**two surgical 2-byte ROM patches** applied at map time in
+`xband_apply_loop_break_patch` (memmap.cpp) and recorded in a
+table so further patches can be added the same way:
+
+1. **`$D5:$5B3D  D0 03 -> EA EA`** — NOPs the `BNE +3` that gates
+   the only exit from the database iterator at `$D5:$5B27`. After
+   the NOP the `BRL +$5F` at `$5B3F` is unconditional, so the
+   iterator function returns to its caller on the very first
+   iteration instead of looping forever.
+
+2. **`$D5:$40FC  D0 03 -> EA EA`** — NOPs the `BNE +3` in the
+   record-create loop at `$D5:$40F1`. After the NOP the `BRL +$16`
+   at `$40FE` is unconditional, so the loop exits early to its
+   post-loop continuation at `$D5:$4117` without ever calling the
+   in-loop SRAM JSL `$E0:0040`.
+
+Both patches were found by:
+- Live PC sampling (`XBandPCBank` / `XBandPCD0Sub` / `XBandPCD5Sub`
+  histograms in `cpuexec.cpp`, displayed via the `Netplay -> XBAND:
+  Show CPU PC Histogram` menu) to localize the hot 4KB window the
+  CPU was spinning in.
+- Hex dumps of the hot region pasted into `Show PPU State` and
+  hand-disassembled to find the BNE/BRL pattern that controlled the
+  back-edge.
+- Verified safe by checking the actual ROM bytes against expected
+  values before patching, with a `FAILED (mismatch)` popup if the
+  bytes drift.
+
+## What works after the loop-break patches
+
+With both patches applied (whether loaded standalone or via
+multi-cart):
+
+- **The BIOS boots all the way to its main UI.**
+  - PPU comes on, brightness ramps up.
+  - The XBAND wallpaper renders (the Catapult circuit / icon
+    background with phone, eye, mail, X marks, etc.).
+  - A real menu dialog draws on top of the wallpaper.
+  - The two-player input prompt (`#1 / #2 ↑↓←→ A B Y X L R St Sel`)
+    is rendered at the bottom of the screen.
+  - Frame rate is locked at 60 fps.
+- **The cart-detection step runs and returns "no match".** With the
+  XBAND BIOS in slot A and a real XBAND-supported game (e.g. Super
+  Street Fighter II) in slot B, the BIOS displays:
+  > *"This game may not be available yet on XBAND. Check out XBAND
+  > News for a list of currently available games."*
+- This means the BIOS is reaching the post-cart-detection user-facing
+  menu code path. We are now well past boot init.
+
+## What still doesn't work
+
+- **Slot-B game cart is not actually visible to the BIOS.**
+  `Map_XBandMultiCartHiROMMap` only maps the BIOS into the SNES
+  address space; the slot-B game ROM sits in the ROM buffer at
+  `Multi.cartOffsetB` and is never read by the firmware. The "no
+  match" message above proves the BIOS is looking *somewhere* for
+  the game ID, but it isn't `$XX:$FFB0-$FFDF` and it isn't anywhere
+  we currently expose. The next milestone is wiring up the Fred
+  chip's per-bank patch vectors so the BIOS can read the game cart
+  through the same address windows it would see on real hardware.
+
+- **No actual matchmaking / online play.** Even with cart detection
+  fixed, the network side is still raw TCP rather than ADSP framing,
+  and we have no Fred patch chip emulation, so the inputs the
+  firmware would normally redirect through XBAND don't get
+  redirected.
 
 ## Reference material
 

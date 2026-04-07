@@ -1894,6 +1894,13 @@ bool8 CMemory::LoadSRAM (const char *filename)
 			if (Settings.SRTC || Settings.SPC7110RTC)
 				LoadSRTC();
 
+			// XBAND keeps its working SRAM in XBand.sram[]; mirror
+			// the freshly-loaded Memory.SRAM into it so the BIOS
+			// sees the user's saved profile/box-id data.
+			if (Settings.XBAND)
+				memcpy(XBand.sram, SRAM,
+					(size < (int)XBAND_SRAM_SIZE) ? size : (int)XBAND_SRAM_SIZE);
+
 			return (TRUE);
 		}
 		else if (Settings.BS && !Settings.BSXItself)
@@ -1934,10 +1941,14 @@ bool8 CMemory::SaveSRAM (const char *filename)
 	if (Settings.SA1 && ROMType == 0x34)    // doesn't have SRAM
 		return (TRUE);
 
-	// XBAND SRAM lives in XBand.sram[], not Memory.SRAM. Sync it
-	// across so the standard fwrite below picks up our buffer.
+	// XBAND: refuse to overwrite the .srm file from this code path.
+	// While we're still figuring out what the firmware writes during
+	// boot, an automatic save would clobber a hand-curated SRAM dump
+	// (e.g. one of the Cinghialotto preserved dumps) with whatever
+	// half-initialized garbage the firmware happened to leave behind.
+	// Manual SRAM save still works through other paths if needed.
 	if (Settings.XBAND)
-		S9xXBandSyncSRAMOut();
+		return (TRUE);
 
 	FILE	*file;
 	int		size;

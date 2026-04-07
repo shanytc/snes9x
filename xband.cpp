@@ -571,30 +571,51 @@ extern uint32 XBandFirstBrkPC;
 extern uint16 XBandFirstBrkS;
 extern bool   XBandFirstBrkSeen;
 
-// Adopt whatever is in Memory.SRAM as the XBAND SRAM. snes9x's standard
-// SRAM loader (memmap.cpp::LoadSRAM) reads the .srm file into
-// Memory.SRAM before InitROM calls our reset, so by the time we get
-// here Memory.SRAM already has the user's saved (or pre-populated)
-// XBAND SRAM contents. We copy it into our local XBand.sram array
-// so the dispatch in S9xGetXBand/S9xSetXBand sees the right bytes.
+// Pre-populate XBand.sram with a saved SRAM image so the BIOS doesn't
+// hang in its "first-time setup" loop on a fresh empty SRAM.
 //
-// Without a valid SRAM image (the BIOS dump only contains the firmware,
-// not user data), the XBAND BIOS hangs in its "first-time setup" loop
-// because nothing matches the boot vector / box-ID magic it expects.
-// Pre-populating the .srm with a dump from a real XBAND cartridge
-// (e.g. one of the dumps in Cinghialotto's SNES-XBandSRAMs.rar)
-// bypasses that hang.
-//
-// On save, we mirror the other direction: see S9xXBandSyncSRAMOut.
+// We load from BIOS_DIR (the snes9x BIOS folder) rather than SRAM_DIR
+// because snes9x never writes to BIOS_DIR — that means a hand-curated
+// SRAM dump can sit there permanently and never get clobbered by
+// snes9x's auto-save / oops-save / shutdown-save paths. The user
+// drops one of the preserved Cinghialotto SNES-XBandSRAMs files into
+// the BIOS dir and the BIOS picks it up on every boot.
 static bool xband_load_sram_image (void)
 {
-	// Memory.SRAM is allocated to SRAM_SIZE (0x80000) by snes9x's core,
-	// so we can safely read XBAND_SRAM_SIZE (0x10000) bytes from it.
-	// If the snes9x loader didn't find a .srm file, Memory.SRAM is all
-	// zeros (cleared by ClearSRAM), which is the same as our default —
-	// so this copy is a no-op in that case.
-	memcpy(XBand.sram, Memory.SRAM, XBAND_SRAM_SIZE);
-	return true;
+	const char *candidates[] = {
+		"XBAND.srm",
+		"xband.srm",
+		"XBAND.bin",
+		"xband.bin",
+		"Benner.1.SRM",
+		"XBand_luke2.srm",
+		"SF2DXB.S04.srm",
+		NULL
+	};
+	FILE *f = NULL;
+	for (int i = 0; candidates[i] != NULL && !f; i++)
+	{
+		std::string p = S9xGetDirectory(BIOS_DIR);
+		p += SLASH_STR;
+		p += candidates[i];
+		f = fopen(p.c_str(), "rb");
+	}
+	if (!f) return false;
+
+	fseek(f, 0, SEEK_END);
+	long sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	long offset = 0;
+	if (sz == XBAND_SRAM_SIZE + 512) offset = 512; // strip copier header
+	else if (sz != XBAND_SRAM_SIZE)
+	{
+		fclose(f);
+		return false;
+	}
+	if (offset) fseek(f, offset, SEEK_SET);
+	size_t r = fread(XBand.sram, 1, XBAND_SRAM_SIZE, f);
+	fclose(f);
+	return (r == XBAND_SRAM_SIZE);
 }
 
 void S9xXBandSyncSRAMOut (void)
@@ -645,8 +666,29 @@ void S9xResetXBand (void)
 	// setup" boot, the BIOS spins forever in init because nothing in
 	// zeroed SRAM matches the magic boot vector / box ID it expects.
 	// A real SRAM dump bypasses that hang.
-	if (xband_load_sram_image())
+	bool loaded = xband_load_sram_image();
+	if (loaded)
 		XBand.sram_dirty = FALSE;
+
+#ifdef _WIN32
+	// One-shot popup so we can confirm the SRAM image actually loads.
+	// Remove once XBAND boot reliably reaches a visible UI.
+	{
+		char msg[256];
+		_snprintf(msg, sizeof(msg) - 1,
+			"S9xResetXBand: SRAM dump load = %s\n\n"
+			"First 16 bytes of XBand.sram:\n"
+			"%02X %02X %02X %02X %02X %02X %02X %02X "
+			"%02X %02X %02X %02X %02X %02X %02X %02X",
+			loaded ? "OK" : "FAILED (using zeros)",
+			XBand.sram[0],  XBand.sram[1],  XBand.sram[2],  XBand.sram[3],
+			XBand.sram[4],  XBand.sram[5],  XBand.sram[6],  XBand.sram[7],
+			XBand.sram[8],  XBand.sram[9],  XBand.sram[10], XBand.sram[11],
+			XBand.sram[12], XBand.sram[13], XBand.sram[14], XBand.sram[15]);
+		msg[sizeof(msg) - 1] = 0;
+		MessageBoxA(NULL, msg, "XBAND Reset Diag", MB_OK);
+	}
+#endif
 }
 
 void S9xXBandPostLoadState (void)

@@ -118,6 +118,10 @@ void	S9xResetXBand (void);
 void	S9xXBandPostLoadState (void);
 bool8	S9xLoadXBandBIOS (void);
 
+// Mirror XBand.sram[] back into Memory.SRAM[] so snes9x's standard
+// SaveSRAM picks up the current XBAND SRAM contents on shutdown.
+void	S9xXBandSyncSRAMOut (void);
+
 // Network bridging.
 bool8	S9xXBandConnect (const char *host, int port);
 void	S9xXBandDisconnect (void);

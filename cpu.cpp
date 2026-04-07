@@ -156,6 +156,8 @@ void S9xReset (void)
 		S9xResetSRTC();
 	if (Settings.MSU1)
 		S9xMSU1Init();
+	if (Settings.XBAND)
+		S9xResetXBand();
 
 	// SGB / GB / GBC: cold-reset the GB core on a hard reset. In BIOS mode
 	// (SGB_BIOSModeActive) this clears the handshake cache so the next
@@ -281,6 +283,8 @@ void S9xSoftReset (void)
 
 	if (Settings.BS)
 		S9xResetBSX();
+	if (Settings.XBAND)
+		S9xResetXBand();
 
 	if (PF94.active)
 		S9xPF94Reset();

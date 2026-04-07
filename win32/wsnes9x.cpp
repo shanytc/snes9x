@@ -2158,6 +2158,181 @@ LRESULT CALLBACK WinProc(
         case ID_XBAND_DISCONNECT:
 			S9xXBandDisconnect();
 			break;
+        case ID_XBAND_PPU_STATE:
+			{
+				char text[4096];
+				int  pos = 0;
+				uint8 inidisp = Memory.FillRAM[0x2100];
+				uint8 obsel   = Memory.FillRAM[0x2101];
+				uint8 bgmode  = Memory.FillRAM[0x2105];
+				uint8 mosaic  = Memory.FillRAM[0x2106];
+				uint8 bg1sc   = Memory.FillRAM[0x2107];
+				uint8 bg2sc   = Memory.FillRAM[0x2108];
+				uint8 bg3sc   = Memory.FillRAM[0x2109];
+				uint8 bg4sc   = Memory.FillRAM[0x210A];
+				uint8 bg12nba = Memory.FillRAM[0x210B];
+				uint8 bg34nba = Memory.FillRAM[0x210C];
+				uint8 tm      = Memory.FillRAM[0x212C];
+				uint8 ts      = Memory.FillRAM[0x212D];
+				uint8 cgwsel  = Memory.FillRAM[0x2130];
+				uint8 cgadsub = Memory.FillRAM[0x2131];
+				uint8 nmiten  = Memory.FillRAM[0x4200];
+				uint8 hvbjoy  = Memory.FillRAM[0x4212];
+
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"PPU REGISTERS\n"
+					"-------------\n"
+					"$2100 INIDISP   = $%02X  (force-blank=%s, brightness=%d/15)\n"
+					"$2101 OBSEL     = $%02X  (sprite name+size config)\n"
+					"$2105 BGMODE    = $%02X  (mode %d)\n"
+					"$2106 MOSAIC    = $%02X\n"
+					"$2107 BG1SC     = $%02X\n"
+					"$2108 BG2SC     = $%02X\n"
+					"$2109 BG3SC     = $%02X\n"
+					"$210A BG4SC     = $%02X\n"
+					"$210B BG12NBA   = $%02X\n"
+					"$210C BG34NBA   = $%02X\n"
+					"$212C TM        = $%02X  (main screen layers)\n"
+					"$212D TS        = $%02X  (sub screen layers)\n"
+					"$2130 CGWSEL    = $%02X\n"
+					"$2131 CGADSUB   = $%02X\n"
+					"\n"
+					"CPU CONTROL\n"
+					"-----------\n"
+					"$4200 NMITIMEN  = $%02X  (NMI=%s, Vcount-IRQ=%s, Hcount-IRQ=%s, JOY=%s)\n"
+					"$4212 HVBJOY    = $%02X  (VBlank=%s, HBlank=%s, JoyBusy=%s)\n"
+					"\n",
+					(unsigned)inidisp, (inidisp & 0x80) ? "ON (BLACK)" : "off",  (unsigned)(inidisp & 0x0F),
+					(unsigned)obsel,
+					(unsigned)bgmode, (unsigned)(bgmode & 0x07),
+					(unsigned)mosaic,
+					(unsigned)bg1sc, (unsigned)bg2sc, (unsigned)bg3sc, (unsigned)bg4sc,
+					(unsigned)bg12nba, (unsigned)bg34nba,
+					(unsigned)tm, (unsigned)ts,
+					(unsigned)cgwsel, (unsigned)cgadsub,
+					(unsigned)nmiten,
+					(nmiten & 0x80) ? "on" : "off",
+					(nmiten & 0x20) ? "on" : "off",
+					(nmiten & 0x10) ? "on" : "off",
+					(nmiten & 0x01) ? "on" : "off",
+					(unsigned)hvbjoy,
+					(hvbjoy & 0x80) ? "yes" : "no",
+					(hvbjoy & 0x40) ? "yes" : "no",
+					(hvbjoy & 0x01) ? "yes" : "no");
+
+				// Sample first 32 bytes of CGRAM (palette).
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"CGRAM (first 16 colors as 16-bit BGR):\n");
+				for (int i = 0; i < 16; i++)
+				{
+					uint16 c = PPU.CGDATA[i];
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						" %04X%s", c, ((i + 1) % 8 == 0) ? "\n" : "");
+				}
+
+				// Live CPU state — what's executing RIGHT NOW.
+				unsigned cpb = (unsigned)((Registers.PBPC >> 16) & 0xFF);
+				unsigned cpc = (unsigned)(Registers.PCw & 0xFFFF);
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"\nCURRENT CPU STATE\n"
+					"-----------------\n"
+					"PB:PC = %02X:%04X  S=%04X  D=%04X  DB=%02X\n"
+					"A=%04X X=%04X Y=%04X\n",
+					cpb, cpc,
+					(unsigned)Registers.S.W,
+					(unsigned)Registers.D.W,
+					(unsigned)Registers.DB,
+					(unsigned)Registers.A.W,
+					(unsigned)Registers.X.W,
+					(unsigned)Registers.Y.W);
+
+				// Bytes around the current PC.
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"\nBytes around %02X:%04X:\n", cpb, cpc);
+				for (int row = 0; row < 4; row++)
+				{
+					int row_start = -16 + row * 16;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						" %02X:%04X: ", cpb,
+						(unsigned)(((int)cpc + row_start) & 0xFFFF));
+					for (int col = 0; col < 16; col++)
+					{
+						int ofs = row_start + col;
+						uint32 a = ((uint32)cpb << 16) |
+						           (((int)cpc + ofs) & 0xFFFF);
+						uint8 b = S9xGetByte(a);
+						pos += _snprintf(text + pos, sizeof(text) - pos,
+							"%s%02X%s",
+							(ofs == 0) ? "[" : "",
+							(unsigned)b,
+							(ofs == 0) ? "]" : " ");
+					}
+					pos += _snprintf(text + pos, sizeof(text) - pos, "\n");
+				}
+
+				// And dump $D0:$1000-$11FF (the 100%-of-D0 hot region).
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"\nFirmware hot region $D0:$1000-$10FF:\n");
+				for (int row = 0; row < 16; row++)
+				{
+					uint32 base = 0xD01000 + row * 16;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						" D0:%04X: ", (unsigned)(base & 0xFFFF));
+					for (int col = 0; col < 16; col++)
+						pos += _snprintf(text + pos, sizeof(text) - pos,
+							"%02X ",
+							(unsigned)S9xGetByte(base + col));
+					pos += _snprintf(text + pos, sizeof(text) - pos, "\n");
+				}
+
+				MessageBoxA(GUI.hWnd, text, "XBAND PPU State", MB_OK);
+			}
+			break;
+        case ID_XBAND_PC_HISTOGRAM:
+			{
+				extern uint64 XBandPCBank[256];
+				extern uint64 XBandPCD0Sub[16];
+				extern uint64 XBandPCBucketTotal;
+				char text[8192];
+				int  pos = 0;
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"Total samples: %llu\n\n",
+					(unsigned long long)XBandPCBucketTotal);
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"Per-bank histogram (one bucket per program bank):\n");
+				for (int i = 0; i < 256; i++)
+				{
+					if (XBandPCBank[i] == 0) continue;
+					double pct = XBandPCBucketTotal
+						? (100.0 * (double)XBandPCBank[i] / (double)XBandPCBucketTotal)
+						: 0.0;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						"  bank %02X: %12llu  (%5.1f%%)\n",
+						(unsigned)i,
+						(unsigned long long)XBandPCBank[i], pct);
+				}
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"\nBank $D0 detail (4KB sub-buckets):\n");
+				uint64 d0_total = XBandPCBank[0xD0];
+				for (int i = 0; i < 16; i++)
+				{
+					if (XBandPCD0Sub[i] == 0) continue;
+					double pct = d0_total
+						? (100.0 * (double)XBandPCD0Sub[i] / (double)d0_total)
+						: 0.0;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						"  D0:%X000-%XFFF: %12llu  (%5.1f%% of D0)\n",
+						i, i,
+						(unsigned long long)XBandPCD0Sub[i], pct);
+				}
+				MessageBoxA(GUI.hWnd, text, "XBAND PC Histogram", MB_OK);
+				// Reset for the next sampling window so successive
+				// snapshots show only what happened between them.
+				memset(XBandPCBank, 0, sizeof(XBandPCBank));
+				memset(XBandPCD0Sub, 0, sizeof(XBandPCD0Sub));
+				XBandPCBucketTotal = 0;
+			}
+			break;
         case ID_NETPLAY_SYNC:
             S9xNPServerQueueSyncAll ();
             break;

@@ -26,6 +26,18 @@ uint32 XBandFirstBrkPC   = 0;
 uint16 XBandFirstBrkS    = 0;
 bool   XBandFirstBrkSeen = false;
 
+// XBAND debug: live PC sampler. Each opcode fetch increments a hit
+// counter so we can see which addresses the firmware is actually
+// executing right now (especially useful when the screen is blank but
+// the CPU is running).
+//   XBandPCBank[256] - one bucket per program bank ($00..$FF)
+//   XBandPCD0Sub[16] - 4KB sub-buckets inside bank $D0 (the firmware
+//                      ROM bank where most code lives)
+//   XBandPCBucketTotal - total opcode fetches sampled
+uint64 XBandPCBank[256] = {0};
+uint64 XBandPCD0Sub[16] = {0};
+uint64 XBandPCBucketTotal = 0;
+
 static inline void S9xReschedule (void);
 
 void S9xMainLoop (void)
@@ -161,16 +173,30 @@ void S9xMainLoop (void)
 			extern uint32 XBandFirstBrkPC;
 			extern uint16 XBandFirstBrkS;
 			extern bool   XBandFirstBrkSeen;
-			if (Settings.XBAND && !XBandFirstBrkSeen)
+			extern uint64 XBandPCBank[256];
+			extern uint64 XBandPCD0Sub[16];
+			extern uint64 XBandPCBucketTotal;
+			if (Settings.XBAND)
 			{
 				unsigned cpb = (unsigned)((Registers.PBPC >> 16) & 0xFF);
-				if ((Op == 0x00 || Op == 0x02) && cpb >= 0xC0)
+				if (!XBandFirstBrkSeen)
 				{
-					XBandFirstBrkOp   = Op;
-					XBandFirstBrkPC   = Registers.PBPC & 0xffffff;
-					XBandFirstBrkS    = Registers.S.W;
-					XBandFirstBrkSeen = true;
+					if ((Op == 0x00 || Op == 0x02) && cpb >= 0xC0)
+					{
+						XBandFirstBrkOp   = Op;
+						XBandFirstBrkPC   = Registers.PBPC & 0xffffff;
+						XBandFirstBrkS    = Registers.S.W;
+						XBandFirstBrkSeen = true;
+					}
 				}
+				// Per-bank histogram (256 banks, 64KB each).
+				XBandPCBank[cpb]++;
+				// Detail histogram for bank $D0 — 16 buckets of 4KB
+				// each, so we can see which $1000-block of the firmware
+				// is hot.
+				if (cpb == 0xD0)
+					XBandPCD0Sub[(Registers.PCw >> 12) & 0xF]++;
+				XBandPCBucketTotal++;
 			}
 
 			if (CPU.Cycles > 1000000)

@@ -2270,14 +2270,15 @@ LRESULT CALLBACK WinProc(
 					pos += _snprintf(text + pos, sizeof(text) - pos, "\n");
 				}
 
-				// And dump $D0:$1000-$11FF (the 100%-of-D0 hot region).
+				// And dump $D5:$5B00-$5BFF (the outer record-iteration
+				// loop that the firmware has been spinning in).
 				pos += _snprintf(text + pos, sizeof(text) - pos,
-					"\nFirmware hot region $D0:$1000-$10FF:\n");
+					"\nOuter loop $D5:$5B00-$5BFF:\n");
 				for (int row = 0; row < 16; row++)
 				{
-					uint32 base = 0xD01000 + row * 16;
+					uint32 base = 0xD55B00 + row * 16;
 					pos += _snprintf(text + pos, sizeof(text) - pos,
-						" D0:%04X: ", (unsigned)(base & 0xFFFF));
+						" D5:%04X: ", (unsigned)(base & 0xFFFF));
 					for (int col = 0; col < 16; col++)
 						pos += _snprintf(text + pos, sizeof(text) - pos,
 							"%02X ",

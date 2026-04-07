@@ -118,6 +118,7 @@ struct CMemory
     bool8	LoadMultiCartInt ();
 	bool8	LoadSufamiTurbo ();
 	bool8	LoadBSCart ();
+	bool8	LoadXBandMultiCart ();
 	bool8	LoadGNEXT ();
 	bool8	LoadSRAM (const char *);
 	bool8	SaveSRAM (const char *);
@@ -166,6 +167,7 @@ struct CMemory
 	void	Map_BSCartHiROMMap(void);
 	void	Map_XBandLoROMMap (void);
 	void	Map_XBandHiROMMap (void);
+	void	Map_XBandMultiCartHiROMMap (void);
 
 	uint16	checksum_calc_sum (uint8 *, uint32);
 	uint16	checksum_mirror_sum (uint8 *, uint32 &, uint32 mask = 0x800000);

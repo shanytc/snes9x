@@ -1059,6 +1059,34 @@ static bool8 is_BSCart_BIOS(const uint8 *data, uint32 size)
 		return (FALSE);
 }
 
+// XBAND BIOS detection for the multi-cart loader: same signature scan
+// the standalone path uses (CATAPULT / X-Band / XBAND markers in the
+// ROM header area or first ~1KB).
+static bool8 is_XBand_BIOS (const uint8 *data, uint32 size)
+{
+	if (size != XBAND_ROM_SIZE) return (FALSE);
+	auto find = [data, size](const char *needle, size_t needle_len,
+	                          const uint8 *hay, size_t hay_len) -> bool {
+		if (hay_len < needle_len) return false;
+		for (size_t i = 0; i + needle_len <= hay_len; i++)
+			if (memcmp(hay + i, needle, needle_len) == 0)
+				return true;
+		return false;
+	};
+	if (find("CATAPULT", 8, data, 0x400)) goto yes;
+	if (find("X-BAND",  6, data + 0x7FB0, 0x40)) goto yes;
+	if (find("X-Band",  6, data + 0x7FB0, 0x40)) goto yes;
+	if (find("XBAND",   5, data + 0x7FB0, 0x40)) goto yes;
+	if (find("X-BAND",  6, data + 0xFFB0, 0x40)) goto yes;
+	if (find("X-Band",  6, data + 0xFFB0, 0x40)) goto yes;
+	if (find("XBAND",   5, data + 0xFFB0, 0x40)) goto yes;
+	return (FALSE);
+yes:
+	Memory.LoROM = FALSE;
+	Memory.HiROM = TRUE;
+	return (TRUE);
+}
+
 static bool8 is_BSCartSA1_BIOS (const uint8 *data, uint32 size)
 {
 	//Same basic check as BSCart
@@ -1649,6 +1677,9 @@ bool8 CMemory::LoadMultiCartInt ()
 
 	if (Multi.cartSizeA)
 	{
+		if (is_XBand_BIOS(ROM + Multi.cartOffsetA, Multi.cartSizeA))
+			Multi.cartType = 6; // XBAND BIOS as base cart, game cart in slot B
+		else
 		if (is_SufamiTurbo_Cart(ROM + Multi.cartOffsetA, Multi.cartSizeA))
 			Multi.cartType = 4;
 		else
@@ -1702,6 +1733,10 @@ bool8 CMemory::LoadMultiCartInt ()
 		case 3:
 		case 5:
 			r = LoadBSCart();
+			break;
+
+		case 6:
+			r = LoadXBandMultiCart();
 			break;
 
 		default:
@@ -1786,6 +1821,48 @@ bool8 CMemory::LoadBSCart ()
 		Multi.cartSizeB = 0x100000;
 		memset(Memory.ROM + Multi.cartOffsetB, 0xFF, 0x100000);
 	}
+
+	return (TRUE);
+}
+
+bool8 CMemory::LoadXBandMultiCart ()
+{
+	// Slot A holds the XBAND BIOS (1MB HiROM, identified by signature).
+	// Slot B (optional) holds a regular SNES game ROM that the XBAND
+	// firmware will pass through to.
+	//
+	// Layout in the ROM buffer (set up by LoadMultiCart):
+	//   ROM + Multi.cartOffsetA = XBAND BIOS firmware (1MB)
+	//   ROM + Multi.cartOffsetB = game ROM (variable size)
+	//
+	// We use Memory.SRAM for the standard game-cart save data and
+	// XBand.sram[] for the XBAND-internal SRAM. The two are separate.
+	Multi.sramA = SRAM;
+	Multi.sramB = SRAM + 0x10000;
+
+	// XBAND firmware doesn't itself need an SRAM region in the
+	// multicart sense -- its SRAM lives in XBand.sram[].
+	Multi.sramSizeA = 0;
+	Multi.sramMaskA = 0;
+
+	// Game cart in slot B uses standard SRAM size detection.
+	if (Multi.cartSizeB)
+	{
+		Multi.sramSizeB = ROM[Multi.cartOffsetB + 0xffd8];
+		// Default to 0 if the header looks bogus.
+		if (Multi.sramSizeB > 7) Multi.sramSizeB = 0;
+		Multi.sramMaskB = Multi.sramSizeB
+			? ((1 << (Multi.sramSizeB + 3)) * 128 - 1) : 0;
+	}
+
+	// Force HiROM (XBAND BIOS is HiROM).
+	LoROM = FALSE;
+	HiROM = TRUE;
+
+	// Calculated size = total mapped ROM. We use the BIOS size as the
+	// base; the game ROM is mapped separately via Multi.cartSizeB /
+	// Multi.cartOffsetB inside the mapping function.
+	CalculatedSize = Multi.cartSizeA;
 
 	return (TRUE);
 }
@@ -2380,6 +2457,8 @@ void CMemory::InitROM (void)
 	{
 		if (Settings.BS)
 			/* Do nothing */;
+		else if (Multi.cartType == 6)
+			Map_XBandMultiCartHiROMMap();
 		else if (Settings.XBAND)
 			Map_XBandHiROMMap();
 		else if (Settings.SPC7110)
@@ -3325,9 +3404,127 @@ void CMemory::Map_XBandLoROMMap (void)
 	map_WriteProtectROM();
 }
 
+// EXPERIMENT: a list of surgical 2-byte ROM patches that NOP-out
+// conditional branches that gate infinite loops in the XBAND BIOS,
+// allowing the firmware to make forward progress past stages it
+// otherwise can't escape on its own (no real game cart, no live
+// network traffic, no Fred bank-mux). Each patch records the
+// expected original bytes so we can detect mismatches and abort
+// rather than corrupting random firmware code.
+//
+// Patch 1 — $D5:$5B3D (database iterator at $D5:$5B27)
+//   $D5:$5B32  LDY  #$003A
+//   $D5:$5B35  LDA  [$0B],Y       ; read SRAM byte at record offset $3A
+//   $D5:$5B37  AND  #$00FF
+//   $D5:$5B3A  AND  #$0080        ; test bit 7
+//   $D5:$5B3D  BNE  +3            ; <-- patched to NOP NOP
+//   $D5:$5B3F  BRL  +$005F        ; -> $5BA1 (function epilogue)
+//   ...                           ; loop body
+//   $D5:$5B9E  BRL  -$006F        ; back-edge to $5B32
+//   $D5:$5BA1  PLD : TSC : CLC : ADC #$0016 : TCS : RTL
+//
+// Patch 2 — $D5:$40FC (record-create loop in the function at $D5:$403B)
+//   $D5:$40F1  LDY  #$0032
+//   $D5:$40F4  LDA  [$13],Y       ; read record byte at offset $32
+//   $D5:$40F9  CMP  #$0046        ; check for $46 (early-exit value)
+//   $D5:$40FC  BNE  +3            ; <-- patched to NOP NOP
+//   $D5:$40FE  BRL  +$0016        ; -> $4117 (LOOP EXIT)
+//   $D5:$4101  ...                ; pre-JSL setup
+//   $D5:$4108  JSL  $E00040       ; in-loop SRAM call
+//   $D5:$410C  BNE  +3            ; alternate exit if JSL returns NZ
+//   $D5:$410E  BRL  +$0003 -> $4114
+//   $D5:$4114  BRL  -$0026        ; back-edge to $40F1
+//   $D5:$4117  STZ  $0D           ; (post-loop continues here)
+//
+// HiROM bank $D5 maps to ROM offset $50000 (1MB ROM mirrors every 16
+// banks; bank index $D5-$C0=$15, $15 mod 16 = $5, * $10000 = $50000).
+struct XBandLoopBreakPatch
+{
+	uint32      offset;       // ROM offset within the 1MB BIOS image
+	uint8       expected[2];  // bytes that must be there before patching
+	uint8       patched[2];   // bytes to write
+	const char *site;         // human-readable site, e.g. "$D5:$5B3D"
+	const char *description;  // one-line description for the popup
+};
+
+static const XBandLoopBreakPatch s_xband_patches[] = {
+	{
+		0x55B3D,
+		{ 0xD0, 0x03 },
+		{ 0xEA, 0xEA },
+		"$D5:$5B3D",
+		"NOP BNE so BRL +$5F always exits the database iterator at $D5:$5B27"
+	},
+	{
+		0x540FC,
+		{ 0xD0, 0x03 },
+		{ 0xEA, 0xEA },
+		"$D5:$40FC",
+		"NOP BNE so BRL +$16 always exits the record-create loop at $D5:$40F1"
+	},
+};
+
+static void xband_apply_loop_break_patch (uint32 bios_base)
+{
+	const int n = (int)(sizeof(s_xband_patches) / sizeof(s_xband_patches[0]));
+
+#ifdef _WIN32
+	char msg[1024];
+	int  pos = 0;
+	pos += _snprintf(msg + pos, sizeof(msg) - pos,
+		"XBAND loop-break patches (bios_base = 0x%X)\n\n",
+		(unsigned)bios_base);
+#endif
+
+	for (int i = 0; i < n; i++)
+	{
+		const XBandLoopBreakPatch &p = s_xband_patches[i];
+		uint32 ofs = bios_base + p.offset;
+		uint8  b0  = Memory.ROM[ofs];
+		uint8  b1  = Memory.ROM[ofs + 1];
+		bool   ok  = (b0 == p.expected[0] && b1 == p.expected[1]);
+		if (ok)
+		{
+			Memory.ROM[ofs]     = p.patched[0];
+			Memory.ROM[ofs + 1] = p.patched[1];
+		}
+#ifdef _WIN32
+		pos += _snprintf(msg + pos, sizeof(msg) - pos,
+			"%s  %s\n"
+			"  ROM offset: 0x%X\n"
+			"  Original:   %02X %02X (expected %02X %02X)\n"
+			"  Patched:    %02X %02X\n"
+			"  %s\n\n",
+			p.site,
+			ok ? "APPLIED" : "FAILED (mismatch)",
+			(unsigned)ofs,
+			(unsigned)b0, (unsigned)b1,
+			(unsigned)p.expected[0], (unsigned)p.expected[1],
+			(unsigned)p.patched[0], (unsigned)p.patched[1],
+			p.description);
+#endif
+	}
+
+#ifdef _WIN32
+	msg[sizeof(msg) - 1] = 0;
+	MessageBoxA(NULL, msg, "XBAND patches", MB_OK);
+#endif
+}
+
 void CMemory::Map_XBandHiROMMap (void)
 {
 	printf("Map_XBandHiROMMap\n");
+#ifdef _WIN32
+	{
+		char msg[256];
+		_snprintf(msg, sizeof(msg) - 1,
+			"Map_XBandHiROMMap (standalone path)\n"
+			"CalculatedSize = %u KB",
+			(unsigned)CalculatedSize / 1024);
+		msg[sizeof(msg) - 1] = 0;
+		MessageBoxA(NULL, msg, "XBAND map", MB_OK);
+	}
+#endif
 
 	// Released XBAND BIOS (internal name "XBAND VIDEOGAME" at $FFB0)
 	// is HiROM. Lay out the firmware ROM as standard HiROM in banks
@@ -3358,6 +3555,85 @@ void CMemory::Map_XBandHiROMMap (void)
 	map_WRAM();
 
 	map_WriteProtectROM();
+
+	// Standalone XBAND BIOS load: BIOS lives at ROM offset 0.
+	xband_apply_loop_break_patch(0);
+}
+
+void CMemory::Map_XBandMultiCartHiROMMap (void)
+{
+	printf("Map_XBandMultiCartHiROMMap (BIOS=%uKB, GAME=%uKB)\n",
+		(unsigned)Multi.cartSizeA / 1024,
+		(unsigned)Multi.cartSizeB / 1024);
+#ifdef _WIN32
+	{
+		char msg[512];
+		const char *gameName = (Multi.cartSizeB && Multi.fileNameB[0])
+			? Multi.fileNameB : "(none)";
+		_snprintf(msg, sizeof(msg) - 1,
+			"Map_XBandMultiCartHiROMMap (multicart path)\n"
+			"\n"
+			"Slot A (BIOS):  %u KB\n"
+			"Slot B (game):  %u KB\n"
+			"Game file:      %s\n"
+			"\n"
+			"Note: game-cart bytes are NOT yet exposed to the SNES\n"
+			"address space (Fred bank-mux not implemented). The BIOS\n"
+			"will see the same state as standalone-no-cart mode.",
+			(unsigned)Multi.cartSizeA / 1024,
+			(unsigned)Multi.cartSizeB / 1024,
+			gameName);
+		msg[sizeof(msg) - 1] = 0;
+		MessageBoxA(NULL, msg, "XBAND map", MB_OK);
+	}
+#endif
+	map_System();
+
+	// XBAND BIOS firmware lives in slot A. Map it identically to
+	// the standalone path (HiROM, mirrored into $00-$3F so the
+	// reset vector at $00:$FFFC reads the BIOS reset vector and
+	// jumps to $D0:0000 where the firmware lives).
+	//
+	// The game cart in slot B is intentionally NOT mapped into the
+	// SNES address space here. On real hardware the Fred chip is
+	// responsible for muxing BIOS vs game-cart accesses on a
+	// per-bank basis (Fred patch vectors). Without that, dropping
+	// the game cart at $00-$3F would let the SNES boot directly
+	// into the game and skip the BIOS entirely. Until Fred bank
+	// muxing is implemented, the game cart bytes sit unused in the
+	// ROM buffer at Multi.cartOffsetB and the BIOS will report "no
+	// cart detected" — the same as a real XBAND with the door open.
+	map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+	map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+	map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+	map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+
+	// XBAND SRAM mirror window — same as standalone XBAND mode.
+	map_index(0xe0, 0xfa, 0x0000, 0xffff, MAP_XBAND, MAP_TYPE_RAM);
+	map_index(0xfb, 0xfb, 0x0000, 0xbfff, MAP_XBAND, MAP_TYPE_RAM);
+	map_index(0xfc, 0xff, 0x0000, 0xffff, MAP_XBAND, MAP_TYPE_RAM);
+
+	// XBAND modem + Fred MMIO at $FB:$C000-$FFFF.
+	map_index(0xfb, 0xfb, 0xc000, 0xffff, MAP_XBAND, MAP_TYPE_I_O);
+
+	map_HiROMSRAM();
+	map_WRAM();
+	map_WriteProtectROM();
+
+	// (We previously experimented with patching the game cart's SNES
+	// header into the BIOS image at $00:$FFB0-$FFDF. The XBandHdrRead*
+	// counters in cpuexec.cpp / wsnes9x.cpp confirmed the BIOS does
+	// NOT read $XX:$FFB0-$FFDF at all during the database loop, so
+	// the patch was dead code and has been removed. The counters are
+	// still wired up so future experiments can verify their hypotheses
+	// the same way.)
+
+	// Multicart XBAND load: BIOS lives at ROM offset Multi.cartOffsetA.
+	xband_apply_loop_break_patch(Multi.cartOffsetA);
 }
 
 void CMemory::Map_BSCartHiROMMap(void)

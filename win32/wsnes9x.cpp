@@ -2123,11 +2123,12 @@ LRESULT CALLBACK WinProc(
 			}
         case ID_XBAND_CONNECT:
 			{
-				// Replacement XBAND server — see xband.retrocomputing.network.
-				// Edit these two lines if your server runs on a different
-				// host/port. A proper dialog can come later.
-				const char *xband_host = "xband.retrocomputing.network";
-				const int   xband_port = 2023;
+				// Replacement XBAND server. The bsnes-plus xband_support
+				// branch hardcodes 16bit.retrocomputing.network:56969,
+				// which appears to be the active community server. Edit
+				// these two lines if you have a different server.
+				const char *xband_host = "16bit.retrocomputing.network";
+				const int   xband_port = 56969;
 
 				if (!Settings.XBAND)
 				{
@@ -2160,7 +2161,7 @@ LRESULT CALLBACK WinProc(
 			break;
         case ID_XBAND_PPU_STATE:
 			{
-				char text[4096];
+				char text[8192];
 				int  pos = 0;
 				uint8 inidisp = Memory.FillRAM[0x2100];
 				uint8 obsel   = Memory.FillRAM[0x2101];
@@ -2246,12 +2247,13 @@ LRESULT CALLBACK WinProc(
 					(unsigned)Registers.X.W,
 					(unsigned)Registers.Y.W);
 
-				// Bytes around the current PC.
+				// Bytes around the current PC. Wider window: 64 bytes
+				// before and 64 bytes after, in 16-byte rows.
 				pos += _snprintf(text + pos, sizeof(text) - pos,
-					"\nBytes around %02X:%04X:\n", cpb, cpc);
-				for (int row = 0; row < 4; row++)
+					"\nBytes around %02X:%04X (window: -64..+63):\n", cpb, cpc);
+				for (int row = 0; row < 8; row++)
 				{
-					int row_start = -16 + row * 16;
+					int row_start = -64 + row * 16;
 					pos += _snprintf(text + pos, sizeof(text) - pos,
 						" %02X:%04X: ", cpb,
 						(unsigned)(((int)cpc + row_start) & 0xFFFF));
@@ -2270,10 +2272,77 @@ LRESULT CALLBACK WinProc(
 					pos += _snprintf(text + pos, sizeof(text) - pos, "\n");
 				}
 
-				// And dump $D5:$5B00-$5BFF (the outer record-iteration
-				// loop that the firmware has been spinning in).
+				// XBAND header read tracker: which banks (if any) ever
+				// read $XX:$FFB0-$FFDF. We patched $00:$FFB0 with the
+				// game cart's header in Map_XBandMultiCartHiROMMap; if
+				// no bank shows up here after a few seconds of run
+				// time, the BIOS isn't looking at the patched bytes
+				// at all and the patch is dead code.
+				{
+					extern uint64 XBandHdrReadBank[256];
+					extern uint64 XBandHdrReadTotal;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						"\nReads of $XX:$FFB0-$FFDF (cart header):\n"
+						"  Total: %llu\n",
+						(unsigned long long)XBandHdrReadTotal);
+					if (XBandHdrReadTotal == 0)
+					{
+						pos += _snprintf(text + pos, sizeof(text) - pos,
+							"  (no reads observed -- BIOS is NOT looking at the cart header)\n");
+					}
+					else
+					{
+						for (int i = 0; i < 256; i++)
+						{
+							if (XBandHdrReadBank[i] == 0) continue;
+							pos += _snprintf(text + pos, sizeof(text) - pos,
+								"  bank %02X: %12llu reads\n",
+								(unsigned)i,
+								(unsigned long long)XBandHdrReadBank[i]);
+						}
+					}
+				}
+
+				// Dump the new hot region $D5:$4000-$40FF (256 bytes).
+				// After the $D5:$5B3D loop-break patch, the PC histogram
+				// shows 100% of bank $D5 activity in $D5:$4000-$4FFF, so
+				// the next gate to find lives in here.
 				pos += _snprintf(text + pos, sizeof(text) - pos,
-					"\nOuter loop $D5:$5B00-$5BFF:\n");
+					"\nNew hot region $D5:$4000-$40FF:\n");
+				for (int row = 0; row < 16; row++)
+				{
+					uint32 base = 0xD54000 + row * 16;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						" D5:%04X: ", (unsigned)(base & 0xFFFF));
+					for (int col = 0; col < 16; col++)
+						pos += _snprintf(text + pos, sizeof(text) - pos,
+							"%02X ",
+							(unsigned)S9xGetByte(base + col));
+					pos += _snprintf(text + pos, sizeof(text) - pos, "\n");
+				}
+
+				// Continued: $D5:$4100-$41FF (256 more bytes) — the loop
+				// back-edge we saw last time was at $D5:$4114 BRL -$26
+				// (target $40F1), so the loop body straddles $40F0-$4117.
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"\nNew hot region $D5:$4100-$41FF:\n");
+				for (int row = 0; row < 16; row++)
+				{
+					uint32 base = 0xD54100 + row * 16;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						" D5:%04X: ", (unsigned)(base & 0xFFFF));
+					for (int col = 0; col < 16; col++)
+						pos += _snprintf(text + pos, sizeof(text) - pos,
+							"%02X ",
+							(unsigned)S9xGetByte(base + col));
+					pos += _snprintf(text + pos, sizeof(text) - pos, "\n");
+				}
+
+				// Old database iterator $D5:$5B00-$5BFF — kept so we can
+				// verify the EA EA loop-break patch at $5B3D is still in
+				// place and the original loop is still bypassed.
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"\nOld iterator $D5:$5B00-$5BFF (verify EA EA at 5B3D):\n");
 				for (int row = 0; row < 16; row++)
 				{
 					uint32 base = 0xD55B00 + row * 16;
@@ -2293,6 +2362,7 @@ LRESULT CALLBACK WinProc(
 			{
 				extern uint64 XBandPCBank[256];
 				extern uint64 XBandPCD0Sub[16];
+				extern uint64 XBandPCD5Sub[16];
 				extern uint64 XBandPCBucketTotal;
 				char text[8192];
 				int  pos = 0;
@@ -2326,11 +2396,26 @@ LRESULT CALLBACK WinProc(
 						i, i,
 						(unsigned long long)XBandPCD0Sub[i], pct);
 				}
+				pos += _snprintf(text + pos, sizeof(text) - pos,
+					"\nBank $D5 detail (4KB sub-buckets):\n");
+				uint64 d5_total = XBandPCBank[0xD5];
+				for (int i = 0; i < 16; i++)
+				{
+					if (XBandPCD5Sub[i] == 0) continue;
+					double pct = d5_total
+						? (100.0 * (double)XBandPCD5Sub[i] / (double)d5_total)
+						: 0.0;
+					pos += _snprintf(text + pos, sizeof(text) - pos,
+						"  D5:%X000-%XFFF: %12llu  (%5.1f%% of D5)\n",
+						i, i,
+						(unsigned long long)XBandPCD5Sub[i], pct);
+				}
 				MessageBoxA(GUI.hWnd, text, "XBAND PC Histogram", MB_OK);
 				// Reset for the next sampling window so successive
 				// snapshots show only what happened between them.
 				memset(XBandPCBank, 0, sizeof(XBandPCBank));
 				memset(XBandPCD0Sub, 0, sizeof(XBandPCD0Sub));
+				memset(XBandPCD5Sub, 0, sizeof(XBandPCD5Sub));
 				XBandPCBucketTotal = 0;
 			}
 			break;

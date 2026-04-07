@@ -36,7 +36,15 @@ bool   XBandFirstBrkSeen = false;
 //   XBandPCBucketTotal - total opcode fetches sampled
 uint64 XBandPCBank[256] = {0};
 uint64 XBandPCD0Sub[16] = {0};
+uint64 XBandPCD5Sub[16] = {0};
 uint64 XBandPCBucketTotal = 0;
+
+// XBAND debug: per-bank counter for reads of the SNES cart-header
+// region $XX:$FFB0-$FFDF. Lets us tell whether the BIOS ever actually
+// reads the bytes we patched at $00:$FFB0 in Map_XBandMultiCartHiROMMap.
+// Bumped from S9xGetByte when Settings.XBAND is set.
+uint64 XBandHdrReadBank[256] = {0};
+uint64 XBandHdrReadTotal = 0;
 
 static inline void S9xReschedule (void);
 
@@ -175,6 +183,7 @@ void S9xMainLoop (void)
 			extern bool   XBandFirstBrkSeen;
 			extern uint64 XBandPCBank[256];
 			extern uint64 XBandPCD0Sub[16];
+			extern uint64 XBandPCD5Sub[16];
 			extern uint64 XBandPCBucketTotal;
 			if (Settings.XBAND)
 			{
@@ -193,9 +202,12 @@ void S9xMainLoop (void)
 				XBandPCBank[cpb]++;
 				// Detail histogram for bank $D0 — 16 buckets of 4KB
 				// each, so we can see which $1000-block of the firmware
-				// is hot.
+				// is hot. Same for bank $D5 (added once we discovered
+				// the BIOS is also spending most of its time there).
 				if (cpb == 0xD0)
 					XBandPCD0Sub[(Registers.PCw >> 12) & 0xF]++;
+				else if (cpb == 0xD5)
+					XBandPCD5Sub[(Registers.PCw >> 12) & 0xF]++;
 				XBandPCBucketTotal++;
 			}
 

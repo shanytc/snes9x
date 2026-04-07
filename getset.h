@@ -62,6 +62,22 @@ inline uint8 S9xGetByte (uint32 Address)
 	int32	speed = memory_speed(Address);
 	uint8	byte;
 
+	// XBAND debug: count reads of the SNES cart-header window
+	// $XX:$FFB0-$FFDF, broken down by program bank. We patched the
+	// BIOS bytes at $00:$FFB0 in multicart mode and want to know
+	// whether the firmware ever actually reads them.
+	if (Settings.XBAND)
+	{
+		extern uint64 XBandHdrReadBank[256];
+		extern uint64 XBandHdrReadTotal;
+		uint16 lo = (uint16)(Address & 0xFFFF);
+		if (lo >= 0xFFB0 && lo <= 0xFFDF)
+		{
+			XBandHdrReadBank[(Address >> 16) & 0xFF]++;
+			XBandHdrReadTotal++;
+		}
+	}
+
 	if (GetAddress >= (uint8 *) CMemory::MAP_LAST)
 	{
 		byte = *(GetAddress + (Address & 0xffff));

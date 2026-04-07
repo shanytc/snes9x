@@ -280,6 +280,14 @@ uint8 S9xGetXBand (uint32 address)
 			// Fred modem status 1 — bsnes-plus returns 0
 			result = 0;
 		}
+		else if (reg == 0x84)
+		{
+			// kSStatus — smart card status. Return "card present"
+			// (bit 0 = 1) so the firmware doesn't loop waiting for
+			// a card insertion. Catapult's earlier xband_cart.cpp
+			// dead code returned 0x01 here for the same reason.
+			result = 0x01;
+		}
 		else if (reg >= 0xC0)
 		{
 			// Rockwell modem register file at modem_reg = reg - $C0
@@ -666,29 +674,8 @@ void S9xResetXBand (void)
 	// setup" boot, the BIOS spins forever in init because nothing in
 	// zeroed SRAM matches the magic boot vector / box ID it expects.
 	// A real SRAM dump bypasses that hang.
-	bool loaded = xband_load_sram_image();
-	if (loaded)
+	if (xband_load_sram_image())
 		XBand.sram_dirty = FALSE;
-
-#ifdef _WIN32
-	// One-shot popup so we can confirm the SRAM image actually loads.
-	// Remove once XBAND boot reliably reaches a visible UI.
-	{
-		char msg[256];
-		_snprintf(msg, sizeof(msg) - 1,
-			"S9xResetXBand: SRAM dump load = %s\n\n"
-			"First 16 bytes of XBand.sram:\n"
-			"%02X %02X %02X %02X %02X %02X %02X %02X "
-			"%02X %02X %02X %02X %02X %02X %02X %02X",
-			loaded ? "OK" : "FAILED (using zeros)",
-			XBand.sram[0],  XBand.sram[1],  XBand.sram[2],  XBand.sram[3],
-			XBand.sram[4],  XBand.sram[5],  XBand.sram[6],  XBand.sram[7],
-			XBand.sram[8],  XBand.sram[9],  XBand.sram[10], XBand.sram[11],
-			XBand.sram[12], XBand.sram[13], XBand.sram[14], XBand.sram[15]);
-		msg[sizeof(msg) - 1] = 0;
-		MessageBoxA(NULL, msg, "XBAND Reset Diag", MB_OK);
-	}
-#endif
 }
 
 void S9xXBandPostLoadState (void)

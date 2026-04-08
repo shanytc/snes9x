@@ -226,6 +226,11 @@ static uint64 xband_adsp_frames_bad_crc  = 0;
 static uint64 xband_adsp_frames_aborted  = 0;
 static uint64 xband_adsp_frames_control  = 0;  // tiny <4-byte (no CRC)
 
+// BIOS RX consumption counter — bumped when xband_rxbuf_pop returns
+// a real byte (i.e., the BIOS read a non-empty rxbuf via fred $94).
+// Tells us whether the BIOS is actually receiving the bytes we forward.
+static uint64 xband_rxbuf_bytes_consumed = 0;
+
 // First N captured RX frames, for inspection in the kctl dump. Store
 // up to 4 so we can compare structures and CRC values side-by-side.
 #define XBAND_ADSP_FIRST_FRAMES 4
@@ -254,6 +259,13 @@ static const char *xband_crc_variant_names[XBAND_CRC_VARIANTS] = {
 	"FALSE byte-swap ", // 6
 };
 static int    xband_adsp_first_frame_count = 0;
+
+// First-N captured TX frames — parallel to xband_adsp_first_frame[]
+// but for the BIOS-side stream. Captured at TX-flush time when we
+// successfully send a complete \x10\x03 frame to the socket.
+static uint8  xband_adsp_first_tx_frame[XBAND_ADSP_FIRST_FRAMES][256];
+static int    xband_adsp_first_tx_frame_len[XBAND_ADSP_FIRST_FRAMES] = {0};
+static int    xband_adsp_first_tx_frame_count = 0;
 
 // TX frame counter — bumped each time the TX accumulator successfully
 // sends a complete `\x10\x03`-terminated packet to the socket.
@@ -511,6 +523,77 @@ static uint16 xband_crc_kermit (const uint8 *data, int len)
 	return crc;
 }
 
+// ServerTalk opcode → name lookup table from xband_post.txt enum.
+// Returns "?" for unknown opcodes. Used by the dump to label captured
+// frames with their message type.
+static const char *xband_servertalk_name (uint8 opcode)
+{
+	switch (opcode)
+	{
+	case 1:  return "kFirstServerMessage";
+	case 2:  return "msEndOfStream";
+	case 3:  return "msGamePatch";
+	case 4:  return "msSetDateAndTime";
+	case 5:  return "msServerMiscControl";
+	case 9:  return "msExecuteCode";
+	case 10: return "msPatchOSCode";
+	case 12: return "msRemoveDBTypeOpCode";
+	case 13: return "msRemoveMessageHandler";
+	case 14: return "msRegisterPlayer";
+	case 15: return "msNewNGPList";
+	case 16: return "msSetBoxSerialNumber";
+	case 17: return "msGetTypeIDsFromDB";
+	case 18: return "msAddItemToDB";
+	case 19: return "msDeleteItemFromDB";
+	case 20: return "msGetItemFromDB";
+	case 21: return "msGetFirstItemIDFromDB";
+	case 22: return "msGetNextItemIDFromDB";
+	case 23: return "msClearSendQ";
+	case 27: return "msLoopBack";
+	case 28: return "msWaitForOpponent";
+	case 29: return "msOpponentPhoneNumber";
+	case 30: return "msReceiveMail";
+	case 31: return "msNewsHeader";
+	case 32: return "msNewsPage";
+	case 34: return "msQDefDialog";
+	case 35: return "msAddAddressBookEntry";
+	case 36: return "msDeleteAddressBookEntry";
+	case 37: return "msReceiveRanking";
+	case 38: return "msDeleteRanking";
+	case 39: return "msGetNumRankings";
+	case 40: return "msGetFirstRankingID";
+	case 41: return "msGetNextRankingID";
+	case 42: return "msGetRankingData";
+	case 43: return "msSetBoxPhoneNumber";
+	case 44: return "msSetLocalAccessPhoneNumber";
+	case 45: return "msSetConstants";
+	case 46: return "msReceiveValidPers";
+	case 47: return "msGetInvalidPers";
+	case 49: return "msCorrelateAddressBookEntry";
+	case 50: return "msReceiveWriteableString";
+	case 51: return "msReceiveCredit";
+	case 52: return "msReceiveRestrictions";
+	case 53: return "msReceiveCreditToken";
+	case 54: return "msSetCurrentUserName";
+	case 56: return "msSetBoxHometown";
+	case 57: return "msGetConstant";
+	case 58: return "msReceiveProblemToken";
+	case 59: return "msReceiveValidationToken";
+	case 60: return "msLiveDebitSmartCard";
+	case 61: return "msSendDialScript";
+	case 62: return "msSetCurrentUserNumber";
+	case 63: return "msBoxWipeMind";
+	case 64: return "msGetHiddenSerials";
+	case 66: return "msGetLoadedGameInfo";
+	case 67: return "msClearNetOpponent";
+	case 68: return "msGetBoxMemStats";
+	case 69: return "msReceiveRentalSerialNumber";
+	case 70: return "msReceiveNewsIndex";
+	case 71: return "msReceiveBoxNastyLong";
+	default: return "?";
+	}
+}
+
 // Canonical XBAND CRC: CCITT-16-FALSE computed over the encapsulated
 // body (the deframed bytes WITH a synthetic leading `\x00`). Confirmed
 // against live server frames where this variant matches the expected
@@ -738,6 +821,10 @@ void S9xXBandKCtlReset (void)
 	memset(xband_adsp_first_frame_len,    0, sizeof(xband_adsp_first_frame_len));
 	memset(xband_adsp_first_frame_crc_expected, 0, sizeof(xband_adsp_first_frame_crc_expected));
 	memset(xband_adsp_first_frame_crcs, 0, sizeof(xband_adsp_first_frame_crcs));
+	xband_adsp_first_tx_frame_count = 0;
+	memset(xband_adsp_first_tx_frame,     0, sizeof(xband_adsp_first_tx_frame));
+	memset(xband_adsp_first_tx_frame_len, 0, sizeof(xband_adsp_first_tx_frame_len));
+	xband_rxbuf_bytes_consumed = 0;
 	xband_tx_frames_sent       = 0;
 }
 
@@ -824,6 +911,7 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		"  RX frames control = %llu (tiny <4-byte, no CRC field)\n"
 		"  RX frames aborted = %llu (invalid escape sequence)\n"
 		"  TX frames sent    = %llu (\\x10\\x03-terminated packets)\n"
+		"  RX bytes consumed = %llu (BIOS popped from rxbuf via fred $94)\n"
 		"\n",
 		(unsigned long long)xband_kctl_fb_fe01_writes,
 		(unsigned long long)xband_kctl_fb_fe01_reads,
@@ -852,42 +940,52 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		(unsigned long long)xband_adsp_frames_bad_crc,
 		(unsigned long long)xband_adsp_frames_control,
 		(unsigned long long)xband_adsp_frames_aborted,
-		(unsigned long long)xband_tx_frames_sent);
+		(unsigned long long)xband_tx_frames_sent,
+		(unsigned long long)xband_rxbuf_bytes_consumed);
 
-	// First N captured ADSP frames with CRC details for all variants.
-	// The variant whose computed CRC matches the expected value is
-	// the one the protocol actually uses.
+	// First N captured RX ADSP frames with CRC variants and opcode label.
 	if (xband_adsp_first_frame_count > 0)
 	{
 		pos += snprintf(out + pos, out_size - pos,
-			"First %d ADSP frame(s) captured (deframed body, last 2 bytes are CRC):\n",
+			"First %d RX ADSP frame(s) (server -> BIOS, deframed body):\n",
 			xband_adsp_first_frame_count);
 		for (int i = 0; i < xband_adsp_first_frame_count && pos + 400 < out_size; i++)
 		{
+			uint8 op = (xband_adsp_first_frame_len[i] > 0)
+				? xband_adsp_first_frame[i][0] : 0;
 			pos += snprintf(out + pos, out_size - pos,
-				"\nFrame #%d (%d bytes):\n",
-				i, xband_adsp_first_frame_len[i]);
+				"\nRX Frame #%d (%d bytes, opcode $%02X = %s):\n",
+				i, xband_adsp_first_frame_len[i],
+				(unsigned)op, xband_servertalk_name(op));
 			pos += xband_hex_ascii_dump(out + pos, out_size - pos,
 				xband_adsp_first_frame[i], xband_adsp_first_frame_len[i]);
 			if (xband_adsp_first_frame_len[i] >= 4)
 			{
 				uint16 expected = xband_adsp_first_frame_crc_expected[i];
-				uint16 expected_swap = (uint16)((expected >> 8) | (expected << 8));
 				pos += snprintf(out + pos, out_size - pos,
-					"  CRC expected (BE) = $%04X  (LE = $%04X)\n",
-					(unsigned)expected, (unsigned)expected_swap);
-				for (int v = 0; v < XBAND_CRC_VARIANTS; v++)
-				{
-					uint16 c = xband_adsp_first_frame_crcs[i][v];
-					// For variant 6 (byte-swap), compare against swapped expected.
-					uint16 cmp = (v == 6) ? expected_swap : expected;
-					const char *match = (c == cmp) ? "  <-- MATCH!" : "";
-					pos += snprintf(out + pos, out_size - pos,
-						"    [%d] %s = $%04X%s\n",
-						v, xband_crc_variant_names[v],
-						(unsigned)c, match);
-				}
+					"  CRC expected = $%04X  (variant 5 [FALSE+\\x00] is canonical)\n",
+					(unsigned)expected);
 			}
+		}
+		pos += snprintf(out + pos, out_size - pos, "\n");
+	}
+
+	// First N captured TX ADSP frames with opcode label.
+	if (xband_adsp_first_tx_frame_count > 0)
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"First %d TX ADSP frame(s) (BIOS -> server, deframed body):\n",
+			xband_adsp_first_tx_frame_count);
+		for (int i = 0; i < xband_adsp_first_tx_frame_count && pos + 400 < out_size; i++)
+		{
+			uint8 op = (xband_adsp_first_tx_frame_len[i] > 0)
+				? xband_adsp_first_tx_frame[i][0] : 0;
+			pos += snprintf(out + pos, out_size - pos,
+				"\nTX Frame #%d (%d bytes, opcode $%02X = %s):\n",
+				i, xband_adsp_first_tx_frame_len[i],
+				(unsigned)op, xband_servertalk_name(op));
+			pos += xband_hex_ascii_dump(out + pos, out_size - pos,
+				xband_adsp_first_tx_frame[i], xband_adsp_first_tx_frame_len[i]);
 		}
 		pos += snprintf(out + pos, out_size - pos, "\n");
 	}
@@ -1434,6 +1532,7 @@ static uint8 xband_rxbuf_pop (void)
 {
 	if (!xband_rxbuf_has_data()) return 0;
 	uint8 r = XBand.rxbuf[XBand.rxbufused++];
+	xband_rxbuf_bytes_consumed++;
 	if (XBand.rxbufused == XBand.rxbufpos)
 		XBand.rxbufused = XBand.rxbufpos = 0;
 	return r;
@@ -2350,7 +2449,31 @@ void S9xXBandPoll (void)
 			// safety-valve raw flushes don't have that suffix and
 			// shouldn't inflate the frame count.
 			if (was_real_frame)
+			{
 				xband_tx_frames_sent++;
+
+				// Capture first N TX frames for inspection. Strip
+				// the leading \x00 (if present — sender adds it as
+				// encapsulation byte) and the trailing \x10\x03 so
+				// the captured body matches the same shape as the
+				// RX frame captures (deframed body, last 2 bytes
+				// being the CRC).
+				if (xband_adsp_first_tx_frame_count < XBAND_ADSP_FIRST_FRAMES)
+				{
+					int slot = xband_adsp_first_tx_frame_count++;
+					uint32 body_start = start;
+					uint32 body_end   = end - 2;  // strip \x10\x03
+					if (body_start < body_end &&
+					    XBand.txbuf[body_start] == 0x00)
+						body_start++;  // strip leading \x00
+					int n = (int)(body_end - body_start);
+					if (n > 256) n = 256;
+					if (n < 0) n = 0;
+					memcpy(xband_adsp_first_tx_frame[slot],
+						XBand.txbuf + body_start, n);
+					xband_adsp_first_tx_frame_len[slot] = n;
+				}
+			}
 		}
 		// If buffer is fully drained, reset positions to start.
 		if (XBand.txbufused >= XBand.txbufpos)

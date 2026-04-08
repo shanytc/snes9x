@@ -127,6 +127,13 @@ bool8	S9xXBandConnect (const char *host, int port);
 void	S9xXBandDisconnect (void);
 void	S9xXBandPoll (void);
 
+// Runtime toggle for the HELO\n RX filter. When `on`, HELO\n probes
+// from the server are stripped before reaching the BIOS. When `off`,
+// raw bytes pass through. Defaults to ON. Used by the GUI to A/B
+// test which behavior the BIOS prefers.
+void	S9xXBandSetHeloFilter (bool on);
+bool	S9xXBandGetHeloFilter (void);
+
 // Debug helper: write the last few MMIO accesses into `out` as a
 // human-readable multi-line string. Used by the deadlock handler.
 void	S9xXBandDumpTrace (char *out, size_t out_size);
@@ -149,5 +156,55 @@ struct XBandTraceEntry {
 // `index` is past the live entries.
 bool	S9xXBandGetTraceEntry (int index, struct XBandTraceEntry *out);
 #define XBAND_TRACE_SIZE 256
+
+// -----------------------------------------------------------------------
+// Kill / control register trace
+// -----------------------------------------------------------------------
+//
+// Dedicated, narrowly-scoped trace for accesses to the candidate Fred
+// "kill" and "control" register addresses. The XBAND BIOS uses these to
+// switch the SNES bus between "BIOS visible" and "game cart visible"
+// modes (see Catapult source xband_src/xband/gameid/gameid.c). bsnes-plus
+// puts the registers at $FB:FE01/$FB:FE03; the Catapult fredequ.h has
+// SNES-specific constants at $61:7000/$61:7001. We hook BOTH so we can
+// see which the BIOS actually touches.
+//
+// The kctl trace is separate from the generic xband_trace ring so it
+// doesn't get evicted by the firehose of unrelated MMIO accesses while
+// the BIOS is running.
+struct XBandKCtlEntry {
+	uint32	pc;			// PB:PC of the instruction issuing the access
+	uint32	address;	// full 24-bit address
+	uint8	value;		// byte read or written
+	bool	is_write;
+};
+
+#define XBAND_KCTL_TRACE_SIZE 128
+
+void	S9xXBandKCtlLog (uint32 address, uint8 value, bool is_write);
+void	S9xXBandKCtlDump (char *out, size_t out_size);
+void	S9xXBandKCtlReset (void);
+
+// "Silent write" trap: called from S9xSetByte for any write whose
+// WriteMap entry is MAP_NONE while Settings.XBAND is set. These writes
+// would otherwise vanish — the BIOS shouldn't be making them in normal
+// operation, so any stray store is a strong hint that there's an
+// unknown MMIO register sitting at that address. Logged into the same
+// kctl dump.
+void	S9xXBandSilentWriteLog (uint32 address, uint8 value);
+
+// Per-Fred-register write counter. Bumped from S9xSetXBand for every
+// Fred general / modem register write so we can see which registers
+// the BIOS actually touches (separately from the noisy generic trace).
+void	S9xXBandFredRegWriteBump (uint8 reg, uint8 value);
+
+// "Cross-bank read" trap: called from S9xGetByte for any read whose
+// program bank is inside BIOS code space ($D0-$DF or its mirror
+// $50-$5F) but whose target bank is on the cart side ($00-$3F:$8000+,
+// $40-$7D, $80-$BF:$8000+, $C0-$CF). When the BIOS code does a long
+// read into cart-side address space, it expects to see GAME bytes —
+// even if our current map gives it BIOS bytes. Logging these reads
+// shows us exactly where the BIOS thinks the cart should be.
+void	S9xXBandCrossBankReadLog (uint32 address, uint8 value);
 
 #endif

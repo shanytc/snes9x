@@ -495,6 +495,12 @@
 #define ID_XBAND_DISCONNECT             40191
 #define ID_XBAND_PC_HISTOGRAM           40192
 #define ID_XBAND_PPU_STATE              40193
+#define ID_XBAND_KCTL_TRACE             40194
+#define ID_XBAND_TOGGLE_HELO_FILTER     40195
+#define ID_XBAND_CONNECT_16BIT          40196
+#define ID_XBAND_CONNECT_XBAND          40197
+#define ID_XBAND_CONNECT_BARE           40198
+#define ID_XBAND_CONNECT_XBSERVER       40199
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083

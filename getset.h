@@ -76,6 +76,49 @@ inline uint8 S9xGetByte (uint32 Address)
 			XBandHdrReadBank[(Address >> 16) & 0xFF]++;
 			XBandHdrReadTotal++;
 		}
+		// XBAND debug: trap reads of the SNES-specific kill/control
+		// register addresses from Catapult fredequ.h
+		// (kSNESKillHereSoft = $617000, kSNESCtlRegSoft = $617001).
+		// These currently fall through to read-only HiROM-mapped BIOS
+		// bytes; we don't redirect, just record so we can tell if the
+		// BIOS is actually using them. Use the linear pointer in
+		// Memory.Map[] (this address always sits in HiROM-mapped BIOS)
+		// to grab the byte value the SNES would actually see.
+		if ((Address & 0xFFFFFE) == 0x617000)
+		{
+			uint8 val = (GetAddress >= (uint8 *) CMemory::MAP_LAST)
+				? *(GetAddress + (Address & 0xffff))
+				: 0;
+			S9xXBandKCtlLog(Address, val, false);
+		}
+
+		// XBAND debug: cross-bank read trap. Logs reads where the
+		// program bank is in BIOS code space ($D0-$DF or its $50-$5F
+		// mirror) but the target bank is on the cart side ($00-$3F:
+		// $8000+, $40-$7D, $80-$BF:$8000+, $C0-$CF). These are the
+		// "smoking gun" reads — the BIOS expects cart bytes but our
+		// map gives it BIOS bytes. Only fires when GetAddress is a
+		// linear pointer (i.e. the read resolves to a flat ROM/RAM
+		// region — which is what cart-side HiROM looks like).
+		if (GetAddress >= (uint8 *) CMemory::MAP_LAST)
+		{
+			uint8 pb = (uint8)((Registers.PBPC >> 16) & 0xFF);
+			uint8 tb = (uint8)((Address >> 16) & 0xFF);
+			uint16 tlo = (uint16)(Address & 0xFFFF);
+			bool from_bios =
+				(pb >= 0xD0 && pb <= 0xDF) ||
+				(pb >= 0x50 && pb <= 0x5F);
+			bool to_cart =
+				((tb <= 0x3F) && (tlo >= 0x8000)) ||
+				((tb >= 0x40) && (tb <= 0x7D)) ||
+				((tb >= 0x80) && (tb <= 0xBF) && (tlo >= 0x8000)) ||
+				((tb >= 0xC0) && (tb <= 0xCF));
+			if (from_bios && to_cart && pb != tb)
+			{
+				uint8 val = *(GetAddress + (Address & 0xffff));
+				S9xXBandCrossBankReadLog(Address, val);
+			}
+		}
 	}
 
 	if (GetAddress >= (uint8 *) CMemory::MAP_LAST)
@@ -426,6 +469,33 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 	int		block = (Address & 0xffffff) >> MEMMAP_SHIFT;
 	uint8	*SetAddress = Memory.WriteMap[block];
 	int32	speed = memory_speed(Address);
+
+	// XBAND debug: trap writes to the SNES-specific kill/control
+	// register addresses from Catapult fredequ.h. These currently fall
+	// through to MAP_NONE (write-protected ROM) and are silently
+	// dropped; we record them here so we can tell if the BIOS uses
+	// them.
+	if (Settings.XBAND && (Address & 0xFFFFFE) == 0x617000)
+		S9xXBandKCtlLog(Address, Byte, true);
+
+	// XBAND debug: silent-write trap. Any write whose WriteMap entry
+	// is MAP_NONE in cart-side HiROM banks ($00-$3F:$8000-$FFFF,
+	// $40-$7D, $80-$BF:$8000-$FFFF, $C0-$DF) will vanish — these are
+	// write-protected ROM. The BIOS shouldn't normally write to ROM,
+	// so any stray store here is a strong hint there's an unknown MMIO
+	// register at that address. Logged into the kctl dump.
+	if (Settings.XBAND && SetAddress == (uint8 *) CMemory::MAP_NONE)
+	{
+		uint8  bank = (uint8)((Address >> 16) & 0xFF);
+		uint16 lo   = (uint16)(Address & 0xFFFF);
+		bool   in_cart_hirom =
+			((bank <= 0x3F) && (lo >= 0x8000)) ||
+			((bank >= 0x40) && (bank <= 0x7D)) ||
+			((bank >= 0x80) && (bank <= 0xBF) && (lo >= 0x8000)) ||
+			((bank >= 0xC0) && (bank <= 0xDF));
+		if (in_cart_hirom)
+			S9xXBandSilentWriteLog(Address, Byte);
+	}
 
 	if (SetAddress >= (uint8 *) CMemory::MAP_LAST)
 	{

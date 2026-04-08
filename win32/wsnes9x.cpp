@@ -2695,13 +2695,36 @@ LRESULT CALLBACK WinProc(
 				break;
 			}
         case ID_XBAND_CONNECT:
+        case ID_XBAND_CONNECT_XBSERVER:
+        case ID_XBAND_CONNECT_16BIT:
+        case ID_XBAND_CONNECT_XBAND:
+        case ID_XBAND_CONNECT_BARE:
 			{
-				// Replacement XBAND server. The bsnes-plus xband_support
-				// branch hardcodes 16bit.retrocomputing.network:56969,
-				// which appears to be the active community server. Edit
-				// these two lines if you have a different server.
-				const char *xband_host = "16bit.retrocomputing.network";
+				// Pick host based on which menu item was clicked.
+				// xbserver.retrocomputing.network is the canonical
+				// hostname per the dreampi reference (netlink.py
+				// xband_server). All four hostnames currently resolve
+				// to the same backend IP (51.79.10.145) but using the
+				// dreampi-documented one is the right thing to do.
+				const char *xband_host = "xbserver.retrocomputing.network";
 				const int   xband_port = 56969;
+				switch (LOWORD(wParam))
+				{
+				case ID_XBAND_CONNECT_XBAND:
+					xband_host = "xband.retrocomputing.network";
+					break;
+				case ID_XBAND_CONNECT_BARE:
+					xband_host = "retrocomputing.network";
+					break;
+				case ID_XBAND_CONNECT_16BIT:
+					xband_host = "16bit.retrocomputing.network";
+					break;
+				case ID_XBAND_CONNECT_XBSERVER:
+				case ID_XBAND_CONNECT:
+				default:
+					xband_host = "xbserver.retrocomputing.network";
+					break;
+				}
 
 				if (!Settings.XBAND)
 				{
@@ -2990,6 +3013,34 @@ LRESULT CALLBACK WinProc(
 				memset(XBandPCD0Sub, 0, sizeof(XBandPCD0Sub));
 				memset(XBandPCD5Sub, 0, sizeof(XBandPCD5Sub));
 				XBandPCBucketTotal = 0;
+			}
+			break;
+        case ID_XBAND_KCTL_TRACE:
+			{
+				// Dump the kill/control register access trace. We
+				// keep this in its own ring (separate from the noisy
+				// generic XBAND MMIO trace) so accesses to the four
+				// candidate kill/control addresses survive long enough
+				// to be inspected. Reset after dump so successive
+				// snapshots show only what happened between opens.
+				char text[16384];
+				S9xXBandKCtlDump(text, sizeof(text));
+				MessageBoxA(GUI.hWnd, text, "XBAND Kill/Ctrl Trace", MB_OK);
+				S9xXBandKCtlReset();
+			}
+			break;
+        case ID_XBAND_TOGGLE_HELO_FILTER:
+			{
+				// Flip the HELO\n filter so we can A/B test whether
+				// the BIOS prefers seeing or not seeing the server's
+				// HELO probes. Default is ON; toggle to OFF to let
+				// raw bytes through.
+				bool now = !S9xXBandGetHeloFilter();
+				S9xXBandSetHeloFilter(now);
+				MessageBoxA(GUI.hWnd,
+					now ? "HELO\\n filter is now ON (probes hidden from BIOS)"
+					    : "HELO\\n filter is now OFF (raw bytes pass through)",
+					"XBAND HELO Filter", MB_OK | MB_ICONINFORMATION);
 			}
 			break;
         case ID_NETPLAY_SYNC:

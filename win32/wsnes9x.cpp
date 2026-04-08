@@ -3039,6 +3039,61 @@ LRESULT CALLBACK WinProc(
 					"XBAND HELO Filter", MB_OK | MB_ICONINFORMATION);
 			}
 			break;
+        case ID_XBAND_SRAM_AUTO:
+        case ID_XBAND_SRAM_BENNER:
+        case ID_XBAND_SRAM_LUKE2:
+        case ID_XBAND_SRAM_SF2DXB:
+			{
+				// Pick which preserved XBAND SRAM dump to load from
+				// BIOS_DIR. Each dump contains a different historical
+				// 1990s user profile (username, hometown, phone, address
+				// book, etc.). Reload immediately and reset the SNES so
+				// the BIOS re-reads the new contents on its next boot
+				// pass.
+				const char *fname = NULL;
+				const char *label = NULL;
+				switch (LOWORD(wParam))
+				{
+				case ID_XBAND_SRAM_BENNER:
+					fname = "Benner.1.SRM";
+					label = "Benner.1.SRM (0mEgA DeAtH, Fort Wayne IN)";
+					break;
+				case ID_XBAND_SRAM_LUKE2:
+					fname = "XBand_luke2.srm";
+					label = "XBand_luke2.srm (ButthoLeSurfer2, W Palm Bch FL)";
+					break;
+				case ID_XBAND_SRAM_SF2DXB:
+					fname = "SF2DXB.S04.srm";
+					label = "SF2DXB.S04.srm ($G-MONEY$, Chicago IL)";
+					break;
+				case ID_XBAND_SRAM_AUTO:
+				default:
+					fname = "";
+					label = "[auto / first available]";
+					break;
+				}
+				S9xXBandSetPreferredSRAM(fname);
+				bool ok = S9xXBandReloadSRAM() ? true : false;
+				TCHAR msg[512];
+				if (ok)
+				{
+					_stprintf(msg,
+						TEXT("Loaded SRAM: %s\n\nResetting SNES so the BIOS re-reads the new profile."),
+						(TCHAR *)_tFromChar(label));
+					MessageBoxA(GUI.hWnd, (const char *)_tToChar(msg),
+						"XBAND SRAM", MB_OK | MB_ICONINFORMATION);
+					S9xReset();
+				}
+				else
+				{
+					_stprintf(msg,
+						TEXT("Failed to load SRAM: %s\n\nFile not present in win32/BIOS/, or wrong size (must be 64KB)."),
+						(TCHAR *)_tFromChar(label));
+					MessageBoxA(GUI.hWnd, (const char *)_tToChar(msg),
+						"XBAND SRAM", MB_OK | MB_ICONERROR);
+				}
+			}
+			break;
         case ID_NETPLAY_SYNC:
             S9xNPServerQueueSyncAll ();
             break;

@@ -137,6 +137,30 @@ bool8	S9xXBandConnect (const char *host, int port);
 void	S9xXBandDisconnect (void);
 void	S9xXBandPoll (void);
 
+// Fake-server injection: synthesize an ADSP-framed ServerTalk reply
+// with the given opcode + payload, sniff connID/seq from the live
+// connection state, and push the wire bytes into XBand.rxbuf so the
+// BIOS reads them as if they came from the socket. Used to drive the
+// BIOS past the post-login "waiting for server data" wall when the
+// live server isn't sending what the BIOS expects. Returns true on
+// successful injection. Bool (not bool8) to match its C++ origin.
+bool	S9xXBandFakeInject (uint8 opcode, const uint8 *payload, int payload_len);
+
+// Toggle the connID source used by the fake-server injector. There
+// are two interpretations of the SNES XBAND ADSP layer: either
+// server frames carry the SERVER's source connID (Apple ADSP
+// standard) or they carry the BOX's source connID (xbsega echo-back
+// model). Default is server. Used by the menu A/B test.
+void	S9xXBandFakeToggleConnIDSource (void);
+const char *S9xXBandFakeConnIDSourceLabel (void);
+
+// Inject a "post-login canned response" -- multiple ServerTalk
+// messages bundled into one ADSP segment, mimicking what a real
+// server would send after the box's login dump. Currently includes
+// msSetDateAndTime, msSetCurrentUserNumber 0, msReceiveValidationToken,
+// and msEndOfStream. Returns true on successful injection.
+bool	S9xXBandFakeInjectLoginReply (void);
+
 // Runtime toggle for the HELO\n RX filter. When `on`, HELO\n probes
 // from the server are stripped before reaching the BIOS. When `off`,
 // raw bytes pass through. Defaults to ON. Used by the GUI to A/B

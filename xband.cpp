@@ -68,6 +68,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cstdarg>
 
 // Global instance, referenced by memory dispatch.
 struct SXBAND XBand;
@@ -272,6 +273,171 @@ static int    xband_adsp_first_tx_frame_count = 0;
 // (Distinct from xband_sock_tx_bytes which counts individual bytes.)
 static uint64 xband_tx_frames_sent = 0;
 
+// ----------------------------------------------------------------------
+// ServerTalk message dispatcher state
+// ----------------------------------------------------------------------
+//
+// ADSP frame layout (after deframing — leading \x00 stripped, trailing
+// \x10\x03 stripped, byte-stuffing decoded). Per the bsnes-plus debug
+// dumper (xband_base_GAMEPLAY.cpp print_adsp_debug_in):
+//
+//   bytes [0..1]    Source ConnID         (uint16, big-endian)
+//   bytes [2..5]    PktFirstByteSeq       (uint32, big-endian)
+//   bytes [6..9]    PktNextRecvSeq        (uint32, big-endian)
+//   bytes [10..11]  PktRecvWindow         (uint16, big-endian)
+//   byte  [12]      ADSP descriptor       (control flags / ack-req etc.)
+//   byte  [13]      ServerTalk opcode     (first data byte, if any)
+//   bytes [14..n-3] ServerTalk payload    (variable)
+//   bytes [n-2..n-1] CRC-16               (CCITT-FALSE w/ leading \x00)
+//
+// Minimum data-carrying frame size is 16 bytes (13 header + 1 opcode +
+// 0 data + 2 CRC). A frame of exactly 15 bytes is a header-only ADSP
+// control segment with no ServerTalk payload (e.g. an ack of a sequence
+// number, or a window update). Less than 15 bytes is malformed and
+// shouldn't reach the validate-frame path.
+#define XBAND_ADSP_HEADER_LEN 13
+
+struct XBandParsedFrame
+{
+	uint16 source_conn_id;
+	uint32 first_byte_seq;
+	uint32 next_recv_seq;
+	uint16 recv_window;
+	uint8  descriptor;
+	bool   has_opcode;        // false for header-only ADSP control frames
+	uint8  opcode;            // ServerTalk opcode (only if has_opcode)
+	const uint8 *payload;     // ServerTalk payload bytes (after opcode)
+	int    payload_len;       // bytes available between opcode and CRC
+};
+
+// Per-opcode RX/TX counters. Index 0 covers "no opcode" (header-only
+// ADSP control frames); indices 1..255 are direct opcode lookups.
+// Bumped from xband_servertalk_dispatch_rx / _tx for every good frame.
+#define XBAND_SERVERTALK_OPCODES 256
+static uint64 xband_servertalk_rx_count[XBAND_SERVERTALK_OPCODES] = {0};
+static uint64 xband_servertalk_tx_count[XBAND_SERVERTALK_OPCODES] = {0};
+// Distinct count of header-only RX frames (ADSP acks / window updates).
+// These don't carry a ServerTalk opcode but tell us the server is still
+// driving the session forward, so they're worth counting separately.
+static uint64 xband_servertalk_rx_headeronly = 0;
+static uint64 xband_servertalk_tx_headeronly = 0;
+
+// Last decoded ServerTalk message text. Captured by the dispatcher for
+// known opcodes (msNewNGPList, msSetDateAndTime, msSetCurrentUserName,
+// etc.). The dump prints these alongside the per-frame hex view so we
+// can read off what the server is actually sending. Most recent N
+// messages, ring buffer.
+#define XBAND_SERVERTALK_DECODED_LOG 16
+struct XBandDecodedMessage
+{
+	uint8  opcode;
+	bool   is_tx;             // direction
+	int    payload_len;       // bytes excluding opcode itself
+	char   text[160];         // human-readable summary
+};
+static XBandDecodedMessage xband_servertalk_decoded[XBAND_SERVERTALK_DECODED_LOG];
+static int xband_servertalk_decoded_head  = 0;
+static int xband_servertalk_decoded_count = 0;
+
+// ----------------------------------------------------------------------
+// ServerTalk stream reassembly
+// ----------------------------------------------------------------------
+//
+// Per-direction byte stream accumulator. Every good-CRC ADSP segment
+// appends its data section (offsets 13..len-3 of the deframed body) to
+// the stream. This gives us a contiguous view of the ServerTalk byte
+// stream as the BIOS / server sees it -- the same view xbsega.go's
+// `bytes.IndexByte(rx_buffer, msBoxType)` operates on. From here we
+// can scan for opcodes by byte search and decode known message types
+// without worrying about ADSP segment boundaries.
+//
+// Buffers are 8KB each, ring-style: once full, the oldest bytes get
+// overwritten and the read offset advances. The dump shows the most
+// recent N bytes plus a list of opcode positions found via byte
+// search.
+#define XBAND_STREAM_BUF_SIZE 8192
+static uint8  xband_rx_stream[XBAND_STREAM_BUF_SIZE];
+static uint32 xband_rx_stream_pos    = 0;   // total bytes ever appended
+static uint32 xband_rx_stream_dropped = 0;  // bytes evicted by ring wrap
+static uint8  xband_tx_stream[XBAND_STREAM_BUF_SIZE];
+static uint32 xband_tx_stream_pos    = 0;
+static uint32 xband_tx_stream_dropped = 0;
+
+// ----------------------------------------------------------------------
+// Sniffed ADSP connection state -- used by the fake-server injector
+// ----------------------------------------------------------------------
+//
+// To inject a valid server reply we need ADSP fields the BIOS will
+// accept: the ConnID it's expecting from the server, the next sequence
+// number it expects to receive (its "PktNextRecvSeq"), and the most
+// recent send-seq the BIOS used (so our reply can ack it). All of
+// these are taken from the actual frames flowing across the live
+// connection -- the dispatcher updates these every time it parses a
+// good frame.
+//
+// "tx_*" tracks the BIOS's outgoing frames: their connID is the BOX
+// connID, their first_byte_seq is the box's send sequence (the byte
+// position of the first data byte in the segment), their next_recv_seq
+// is the byte the box expects next from the server.
+//
+// "rx_*" tracks the SERVER's outgoing frames: connID is the SERVER
+// connID, first_byte_seq is the server's send sequence.
+//
+// When we inject a fake reply we use:
+//   source_conn_id = sniffed_server_conn_id  (so it looks like the
+//                    same server connection)
+//   first_byte_seq = sniffed_server_send_seq + sniffed_server_data_so_far
+//                    (where the server would be in its send stream)
+//   next_recv_seq  = sniffed_box_send_seq + sniffed_box_data_so_far
+//                    (acknowledging everything the box has sent)
+//   recv_window    = a generous value, e.g. 0x0400 = 1024 bytes
+//   descriptor     = $20 (EOM bit set) so the BIOS treats the message
+//                    as complete
+static uint16 xband_sniff_box_conn_id    = 0;
+static uint32 xband_sniff_box_first_seq  = 0;
+static uint32 xband_sniff_box_next_recv  = 0;
+static uint16 xband_sniff_box_recv_win   = 0;
+static uint32 xband_sniff_box_data_total = 0; // sum of all data byte lengths sent
+static bool   xband_sniff_box_seen       = false;
+
+static uint16 xband_sniff_srv_conn_id    = 0;
+static uint32 xband_sniff_srv_first_seq  = 0;
+static uint32 xband_sniff_srv_next_recv  = 0;
+static uint16 xband_sniff_srv_recv_win   = 0;
+static uint32 xband_sniff_srv_data_total = 0;
+static bool   xband_sniff_srv_seen       = false;
+
+// Counter / status for the injected fakes (for the kctl dump).
+static uint32 xband_fake_inject_count = 0;
+static char   xband_fake_inject_last[128] = "(none)";
+
+// Running send_seq for our fake server output. Initialized lazily on
+// the first inject from the box's next_recv_seq (which tells us
+// authoritatively where the box thinks the server is in the byte
+// stream). Each subsequent inject advances this by the data length
+// it sent. Reset on connect/disconnect/SNES reset.
+static uint32 xband_fake_send_seq         = 0;
+static bool   xband_fake_send_seq_primed  = false;
+
+// ConnID source for the fake-server injector. There are two possible
+// interpretations of the SNES XBAND ADSP layer:
+//   - "live server" mode: server-originated frames carry the SERVER's
+//     source connID ($0539 in the test session). This is what real
+//     Apple ADSP does -- each end has its own connID.
+//   - "echo box" mode: the open-connection-ack echoes the BOX's frame
+//     back with only the descriptor flipped (per the xbsega.go
+//     reference, line 234-238), preserving the BOX's source connID.
+//     If the SNES BIOS expects all server frames to use the BOX's
+//     connID (because that's what was in the open-conn-ack), our
+//     "live server" connID will be rejected.
+// Toggleable via menu so we can A/B test which one the BIOS accepts.
+// Default = LIVE_SRV per Apple ADSP standard.
+enum {
+	XBAND_FAKE_CONNID_LIVE_SRV = 0,  // sniffed server source connID
+	XBAND_FAKE_CONNID_BOX      = 1,  // sniffed box source connID
+};
+static int xband_fake_connid_source = XBAND_FAKE_CONNID_LIVE_SRV;
+
 // Remembered host / port from the last successful Connect click. Lets
 // the BIOS-driven retry loop (which asserts RTS in modem reg $08
 // every time it wants to "dial") auto-reconnect without a fresh menu
@@ -378,13 +544,19 @@ void S9xXBandKCtlLog (uint32 address, uint8 value, bool is_write)
 // row, address column on the left, ASCII column on the right. Used by
 // the kctl dump to print the start of both directions of the
 // conversation so we can identify the protocol.
-static size_t xband_hex_ascii_dump (char *out, size_t out_size,
-                                    const uint8 *data, int n)
+//
+// `addr_base` is added to each row label so callers can show absolute
+// stream offsets when only dumping a slice. Pass 0 if dumping from
+// the beginning of `data`.
+static size_t xband_hex_ascii_dump_at (char *out, size_t out_size,
+                                       const uint8 *data, int n,
+                                       uint32 addr_base)
 {
 	size_t pos = 0;
 	for (int row = 0; row < n && pos + 80 < out_size; row += 16)
 	{
-		pos += snprintf(out + pos, out_size - pos, "  %04X: ", row);
+		pos += snprintf(out + pos, out_size - pos, "  %04X: ",
+			(unsigned)(addr_base + row));
 		for (int col = 0; col < 16; col++)
 		{
 			if (row + col < n)
@@ -403,6 +575,13 @@ static size_t xband_hex_ascii_dump (char *out, size_t out_size,
 		pos += snprintf(out + pos, out_size - pos, "|\n");
 	}
 	return pos;
+}
+
+// Backwards-compat wrapper -- starts addresses at 0.
+static size_t xband_hex_ascii_dump (char *out, size_t out_size,
+                                    const uint8 *data, int n)
+{
+	return xband_hex_ascii_dump_at(out, out_size, data, n, 0);
 }
 
 // Side-effect-free memory peek for debug reads from inside the trap
@@ -523,14 +702,33 @@ static uint16 xband_crc_kermit (const uint8 *data, int len)
 	return crc;
 }
 
-// ServerTalk opcode → name lookup table from xband_post.txt enum.
-// Returns "?" for unknown opcodes. Used by the dump to label captured
-// frames with their message type.
-static const char *xband_servertalk_name (uint8 opcode)
+// ServerTalk opcode → name lookup. There are TWO distinct opcode
+// enums in XBAND:
+//
+//   - SERVER → BOX  (received by the SNES BIOS): opcodes from
+//     xband_post.txt enum -- msReceive*, msNew*, msSet*, msExecute*.
+//     These tell the box what to do or hand it data the server
+//     wants persisted (game patches, news, mail, etc.).
+//
+//   - BOX → SERVER  (sent by the SNES BIOS): opcodes from xbsega.go
+//     -- msLogin, msSystemVersion, msBoxType, msSendGameResults, etc.
+//     These are how the box reports its state and answers server
+//     queries during the login handshake.
+//
+// The two enums overlap in numeric range (server-side $01..$47,
+// box-side $0B..$27), so you MUST know the direction to label an
+// opcode correctly. The lookup helpers below take an `is_tx` flag.
+
+static const char *xband_servertalk_name_server_to_box (uint8 opcode)
 {
 	switch (opcode)
 	{
-	case 1:  return "kFirstServerMessage";
+	// $01 = kFirstServerMessage is a SENTINEL constant from
+	// xband_post.txt (lower bound for valid msg IDs in
+	// _ReceiveServerMessageDispatch). It's not a real message --
+	// flag it so the scanner doesn't get fooled by stray $01 bytes
+	// in payload data.
+	case 1:  return "(kFirstServerMessage sentinel)";
 	case 2:  return "msEndOfStream";
 	case 3:  return "msGamePatch";
 	case 4:  return "msSetDateAndTime";
@@ -592,6 +790,745 @@ static const char *xband_servertalk_name (uint8 opcode)
 	case 71: return "msReceiveBoxNastyLong";
 	default: return "?";
 	}
+}
+
+// Box → server opcodes from xbsega.go (Genesis xbsega reference). The
+// SNES BIOS uses the same enum -- xbsega processes packet dumps from
+// both Genesis and SNES boxes via the same byte-search parser.
+static const char *xband_servertalk_name_box_to_server (uint8 opcode)
+{
+	switch (opcode)
+	{
+	case 0x02: return "msEndOfStream";       // shared with server enum
+	case 0x0B: return "msLogin";
+	case 0x0C: return "msGAMEIDAndPatchVersion";
+	case 0x0E: return "msChallengeRequest";
+	case 0x0F: return "msSystemVersion";
+	case 0x10: return "msSendNGPVersion";
+	case 0x11: return "msDBIDInfo";
+	case 0x12: return "msSendItemFromDB";
+	case 0x13: return "msSendFirstItemID";
+	case 0x14: return "msSendNextItemID";
+	case 0x15: return "msSendSendQElements";
+	case 0x16: return "msSendAddressesToVerify";
+	case 0x17: return "msSendNumRankings";
+	case 0x18: return "msSendFirstRankingID";
+	case 0x19: return "msSendNextRankingID";
+	case 0x1A: return "msSendRankingData";
+	case 0x1B: return "msSendInvalidPers";
+	case 0x1D: return "msSendOutgoingMail";
+	case 0x1E: return "msSendCreditDebitInfo";
+	case 0x1F: return "msBoxType";
+	case 0x20: return "msSendGameResults";
+	case 0x21: return "msSendNoGameResults";
+	case 0x22: return "msSendConstant";
+	case 0x23: return "msSendGameErrorResults";
+	case 0x24: return "msSendNoGameErrorResults";
+	case 0x25: return "msSendNetErrors";
+	case 0x26: return "msNoNetErrors";
+	case 0x27: return "msSendHiddenSerials";
+	default:   return "?";
+	}
+}
+
+// Direction-aware opcode lookup. Use this whenever you have an opcode
+// AND know which direction it came from -- the dump tables, the
+// counter rows, the decoded message log all need to be direction-aware
+// because $20 means very different things in each direction
+// (msNewsPage server->box vs msSendGameResults box->server).
+static const char *xband_servertalk_name_dir (uint8 opcode, bool is_tx)
+{
+	return is_tx
+		? xband_servertalk_name_box_to_server(opcode)
+		: xband_servertalk_name_server_to_box(opcode);
+}
+
+// Parse a deframed ADSP body (the same shape stored in
+// xband_adsp_first_frame[] / xband_adsp_first_tx_frame[]) into the
+// 13-byte ADSP header + ServerTalk opcode + payload split. The body
+// is expected to still have the trailing 2 CRC bytes; those are
+// excluded from out->payload_len.
+//
+// Returns false for malformed bodies (too short to even hold the ADSP
+// header + CRC). For header-only frames (length == 13 + 2 = 15), out
+// is filled with has_opcode=false; the caller can still bump the
+// header-only counter and look at the descriptor byte.
+static bool xband_servertalk_parse (const uint8 *body, int body_len,
+                                    XBandParsedFrame *out)
+{
+	if (!out || !body) return false;
+	memset(out, 0, sizeof(*out));
+
+	// Need at least 13 header + 2 CRC = 15 bytes.
+	if (body_len < XBAND_ADSP_HEADER_LEN + 2)
+		return false;
+
+	out->source_conn_id =
+		((uint16)body[0] << 8) | body[1];
+	out->first_byte_seq =
+		((uint32)body[2] << 24) | ((uint32)body[3] << 16) |
+		((uint32)body[4] << 8)  |  (uint32)body[5];
+	out->next_recv_seq =
+		((uint32)body[6] << 24) | ((uint32)body[7] << 16) |
+		((uint32)body[8] << 8)  |  (uint32)body[9];
+	out->recv_window =
+		((uint16)body[10] << 8) | body[11];
+	out->descriptor = body[12];
+
+	int data_start = XBAND_ADSP_HEADER_LEN;          // 13
+	int data_end   = body_len - 2;                   // exclude CRC
+
+	if (data_end > data_start)
+	{
+		out->has_opcode  = true;
+		out->opcode      = body[data_start];
+		out->payload     = body + data_start + 1;
+		out->payload_len = data_end - data_start - 1;
+	}
+	else
+	{
+		out->has_opcode  = false;
+		out->opcode      = 0;
+		out->payload     = NULL;
+		out->payload_len = 0;
+	}
+	return true;
+}
+
+// Append one entry to the decoded-message ring. The ring is meant for
+// human inspection in the dump, not for replay — entries get evicted
+// once XBAND_SERVERTALK_DECODED_LOG is full.
+static void xband_servertalk_log_decoded (uint8 opcode, bool is_tx,
+                                          int payload_len,
+                                          const char *fmt, ...)
+{
+	XBandDecodedMessage *e =
+		&xband_servertalk_decoded[xband_servertalk_decoded_head];
+	xband_servertalk_decoded_head =
+		(xband_servertalk_decoded_head + 1) % XBAND_SERVERTALK_DECODED_LOG;
+	if (xband_servertalk_decoded_count < XBAND_SERVERTALK_DECODED_LOG)
+		xband_servertalk_decoded_count++;
+
+	e->opcode      = opcode;
+	e->is_tx       = is_tx;
+	e->payload_len = payload_len;
+
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(e->text, sizeof(e->text), fmt, ap);
+	va_end(ap);
+}
+
+// Read a big-endian uint32 from payload at offset, with bounds check.
+// Returns 0 on out-of-range — the formatted decode text shows the raw
+// length so the user can spot truncation.
+static uint32 xband_be32 (const uint8 *p, int len, int off)
+{
+	if (off + 4 > len) return 0;
+	return ((uint32)p[off] << 24) | ((uint32)p[off+1] << 16) |
+	       ((uint32)p[off+2] << 8) |  (uint32)p[off+3];
+}
+static uint16 xband_be16 (const uint8 *p, int len, int off)
+{
+	if (off + 2 > len) return 0;
+	return ((uint16)p[off] << 8) | p[off+1];
+}
+
+// Copy a fixed-length null-padded ASCII string from payload into a
+// caller buffer, replacing non-printable bytes with '.'. Used for the
+// 34-byte hometown / username fields per sample_packets.txt.
+static void xband_copy_padded (char *dst, size_t dst_size,
+                               const uint8 *p, int len, int off, int field_len)
+{
+	size_t out = 0;
+	if (dst_size == 0) return;
+	for (int i = 0; i < field_len && off + i < len && out + 1 < dst_size; i++)
+	{
+		uint8 c = p[off + i];
+		if (c == 0) break;
+		dst[out++] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+	}
+	dst[out] = '\0';
+}
+
+// Per-opcode decoder. Format known ServerTalk messages into a
+// human-readable summary and append to the decoded log. Unknown
+// opcodes get a generic "(opcode $XX, N bytes payload)" entry. Both
+// directions go through this — set is_tx for BIOS->server frames.
+//
+// IMPORTANT CAVEAT: ServerTalk runs as a STREAM over ADSP. ADSP can
+// fragment a single ServerTalk message across multiple segments. We
+// only see the byte at the start of each segment's data section --
+// for the FIRST segment of a message that's the opcode, but for
+// CONTINUATION segments it's just the next data byte (which will
+// usually look like garbage when fed to a switch on opcode values).
+// The xbsega.go reference reassembles all incoming segments into one
+// big buffer and scans for opcode bytes to find them. We will need to
+// do the same to get reliable per-message decoding -- this per-segment
+// decoder is best-effort and only labels the FIRST byte as an opcode.
+static void xband_servertalk_decode (const XBandParsedFrame *p, bool is_tx)
+{
+	if (!p->has_opcode)
+	{
+		// Header-only ADSP control segment — ack/window/etc. Skip the
+		// decoded log to avoid drowning out the data frames.
+		return;
+	}
+
+	uint8 op = p->opcode;
+	const uint8 *d = p->payload;
+	int n = p->payload_len;
+
+	// TX-side decoders: box-to-server messages, sourced from xbsega.go
+	// and the SSR-side handlers. Most of these are short fixed-format
+	// or counter-style messages so we can decode them straight from
+	// the segment without needing stream reassembly.
+	if (is_tx)
+	{
+		switch (op)
+		{
+		case 0x02: // msEndOfStream — terminator, no payload
+			xband_servertalk_log_decoded(op, is_tx, n, "msEndOfStream");
+			break;
+
+		case 0x0B: // msLogin
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msLogin (login state, %d bytes)", n);
+			break;
+
+		case 0x0C: // msGAMEIDAndPatchVersion
+			// 4-byte gameID + patch version. Cart fingerprint.
+			if (n >= 4)
+				xband_servertalk_log_decoded(op, is_tx, n,
+					"msGAMEIDAndPatchVersion gameID=$%08X (+%d more bytes)",
+					xband_be32(d, n, 0), n - 4);
+			else
+				xband_servertalk_log_decoded(op, is_tx, n,
+					"msGAMEIDAndPatchVersion (truncated, %d bytes)", n);
+			break;
+
+		case 0x0E: // msChallengeRequest
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msChallengeRequest (%d bytes)", n);
+			break;
+
+		case 0x0F: // msSystemVersion
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSystemVersion (%d bytes)", n);
+			break;
+
+		case 0x10: // msSendNGPVersion — uint16 version
+			if (n >= 2)
+				xband_servertalk_log_decoded(op, is_tx, n,
+					"msSendNGPVersion ver=$%04X", xband_be16(d, n, 0));
+			else
+				xband_servertalk_log_decoded(op, is_tx, n,
+					"msSendNGPVersion (truncated)");
+			break;
+
+		case 0x1B: // msSendInvalidPers — password / personalization
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSendInvalidPers (%d bytes -- password block)", n);
+			break;
+
+		case 0x1F: // msBoxType — 4-byte ASCII box type ("sn07" for SNES)
+		{
+			char tag[8] = "";
+			xband_copy_padded(tag, sizeof(tag), d, n, 0, 4);
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msBoxType '%s'", tag);
+			break;
+		}
+
+		case 0x20: // msSendGameResults
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSendGameResults (%d bytes)", n);
+			break;
+
+		case 0x21: // msSendNoGameResults
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSendNoGameResults");
+			break;
+
+		case 0x22: // msSendConstant
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSendConstant (%d bytes)", n);
+			break;
+
+		case 0x25: // msSendNetErrors
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSendNetErrors (%d bytes)", n);
+			break;
+
+		case 0x26: // msNoNetErrors — opcode only
+			xband_servertalk_log_decoded(op, is_tx, n, "msNoNetErrors");
+			break;
+
+		case 0x27: // msSendHiddenSerials
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSendHiddenSerials (%d bytes)", n);
+			break;
+
+		default:
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"%s (op $%02X, %d bytes payload) [TX continuation?]",
+				xband_servertalk_name_box_to_server(op),
+				(unsigned)op, n);
+			break;
+		}
+		return;
+	}
+
+	// RX-side decoders: server-to-box messages, sourced from
+	// xband_post.txt and sample_packets.txt.
+	switch (op)
+	{
+	case 2:  // msEndOfStream
+		xband_servertalk_log_decoded(op, is_tx, n, "msEndOfStream");
+		break;
+
+	case 4:  // msSetDateAndTime
+		// Per sample_packets.txt: 4 bytes date + 5? bytes time.
+		// (Sample shows 04 000059C3 000031DC02.) Render both raw.
+		if (n >= 4)
+		{
+			uint32 date = xband_be32(d, n, 0);
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSetDateAndTime date=$%08X (raw, %d bytes payload)",
+				date, n);
+		}
+		else
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSetDateAndTime (truncated, %d bytes)", n);
+		break;
+
+	case 14: // msRegisterPlayer
+		// Per sample_packets.txt: 4-byte wait time.
+		if (n >= 4)
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msRegisterPlayer wait=%u", xband_be32(d, n, 0));
+		else
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msRegisterPlayer (truncated)");
+		break;
+
+	case 15: // msNewNGPList — game list
+		// 0F 0010 0001 0009 C4CDDF0C 00000000 00000003 0010 4D6F7274616C204B6F6D626174203200
+		// length(2) count(2) version(2) gameID(4) gameflags(4) patchver(4) titleLen(2) title(N)
+		if (n >= 6)
+		{
+			uint16 length      = xband_be16(d, n, 0);
+			uint16 count       = xband_be16(d, n, 2);
+			uint16 list_ver    = xband_be16(d, n, 4);
+			char title[40] = "";
+			uint32 game_id = 0, gameflags = 0, patchver = 0;
+			if (n >= 22)
+			{
+				game_id   = xband_be32(d, n, 6);
+				gameflags = xband_be32(d, n, 10);
+				patchver  = xband_be32(d, n, 14);
+				uint16 title_len = xband_be16(d, n, 18);
+				if (title_len > 0)
+					xband_copy_padded(title, sizeof(title),
+						d, n, 20, title_len);
+			}
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msNewNGPList len=%u count=%u ver=%u game=$%08X title='%s'",
+				length, count, list_ver, game_id, title);
+		}
+		else
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msNewNGPList (truncated, %d bytes)", n);
+		break;
+
+	case 16: // msSetBoxSerialNumber
+		if (n >= 8)
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSetBoxSerialNumber region=$%08X serial=$%08X",
+				xband_be32(d, n, 0), xband_be32(d, n, 4));
+		else
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSetBoxSerialNumber (truncated, %d bytes)", n);
+		break;
+
+	case 23: // msClearSendQ — opcode only
+		xband_servertalk_log_decoded(op, is_tx, n, "msClearSendQ");
+		break;
+
+	case 27: // msLoopBack
+		xband_servertalk_log_decoded(op, is_tx, n,
+			"msLoopBack (%d bytes payload)", n);
+		break;
+
+	case 43: // msSetBoxPhoneNumber
+	{
+		// 2B 00 00 35313238363735333039 00...  ←  DBID + padding + 24 bytes phone
+		char phone[32] = "";
+		if (n >= 4)
+			xband_copy_padded(phone, sizeof(phone), d, n, 3, 24);
+		xband_servertalk_log_decoded(op, is_tx, n,
+			"msSetBoxPhoneNumber phone='%s'", phone);
+		break;
+	}
+
+	case 54: // msSetCurrentUserName — opcode + 34 bytes name
+	{
+		char name[40] = "";
+		xband_copy_padded(name, sizeof(name), d, n, 0, 34);
+		xband_servertalk_log_decoded(op, is_tx, n,
+			"msSetCurrentUserName name='%s'", name);
+		break;
+	}
+
+	case 56: // msSetBoxHometown — opcode + 34 bytes town
+	{
+		char town[40] = "";
+		xband_copy_padded(town, sizeof(town), d, n, 0, 34);
+		xband_servertalk_log_decoded(op, is_tx, n,
+			"msSetBoxHometown town='%s'", town);
+		break;
+	}
+
+	case 58: // msReceiveProblemToken
+		xband_servertalk_log_decoded(op, is_tx, n,
+			"msReceiveProblemToken (%d bytes)", n);
+		break;
+
+	case 59: // msReceiveValidationToken
+		xband_servertalk_log_decoded(op, is_tx, n,
+			"msReceiveValidationToken (%d bytes)", n);
+		break;
+
+	case 62: // msSetCurrentUserNumber
+		if (n >= 1)
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSetCurrentUserNumber user=%u", (unsigned)d[0]);
+		else
+			xband_servertalk_log_decoded(op, is_tx, n,
+				"msSetCurrentUserNumber (truncated)");
+		break;
+
+	default:
+		xband_servertalk_log_decoded(op, is_tx, n,
+			"%s (op $%02X, %d bytes payload) [RX continuation?]",
+			xband_servertalk_name_server_to_box(op),
+			(unsigned)op, n);
+		break;
+	}
+}
+
+// Reverse byte-stuffing on a buffer in place: every `\x10\x10` pair
+// collapses to a single `\x10`. Returns the new length. Used by the
+// TX stream path because the TX capture stores wire bytes (the BIOS
+// produces already-stuffed output) -- we want the stream view to
+// match the RX view, which is logical (de-stuffed) bytes.
+static int xband_destuff_inplace (uint8 *buf, int len)
+{
+	int o = 0;
+	for (int i = 0; i < len; i++)
+	{
+		if (i + 1 < len && buf[i] == 0x10 && buf[i + 1] == 0x10)
+		{
+			buf[o++] = 0x10;
+			i++;  // skip the second \x10
+		}
+		else
+		{
+			buf[o++] = buf[i];
+		}
+	}
+	return o;
+}
+
+// Append the data section of a parsed ADSP segment to the per-direction
+// stream accumulator. Ring-buffer behaviour: once full, older bytes get
+// shifted out (the buffer always holds the MOST RECENT
+// XBAND_STREAM_BUF_SIZE bytes of the conversation).
+static void xband_stream_append (uint8 *stream, uint32 *stream_pos,
+                                 uint32 *stream_dropped,
+                                 const uint8 *data, int data_len)
+{
+	if (!data || data_len <= 0) return;
+
+	// Tail pointer = (stream_pos - dropped) within the buffer.
+	uint32 used = *stream_pos - *stream_dropped;
+	if (used > XBAND_STREAM_BUF_SIZE) used = XBAND_STREAM_BUF_SIZE;
+
+	// If the new chunk would overflow, shift the existing window left
+	// to make room. This is O(N) on append but we only run a few
+	// thousand bytes per session, so cost is negligible.
+	if (used + (uint32)data_len > XBAND_STREAM_BUF_SIZE)
+	{
+		uint32 keep = XBAND_STREAM_BUF_SIZE - (uint32)data_len;
+		if (keep > used) keep = used;
+		uint32 shift = used - keep;
+		if (shift > 0 && keep > 0)
+			memmove(stream, stream + shift, keep);
+		*stream_dropped += shift;
+		used = keep;
+	}
+
+	int copy_len = data_len;
+	if (copy_len > XBAND_STREAM_BUF_SIZE)
+	{
+		// Single chunk bigger than the whole buffer -- only keep the
+		// tail end so the overall window stays the most recent.
+		*stream_dropped += copy_len - XBAND_STREAM_BUF_SIZE;
+		data += copy_len - XBAND_STREAM_BUF_SIZE;
+		copy_len = XBAND_STREAM_BUF_SIZE;
+		used = 0;
+	}
+
+	memcpy(stream + used, data, copy_len);
+	*stream_pos += data_len;
+}
+
+// Returns true if the parsed frame is an ADSP control packet (its
+// descriptor has bit 7 set). Control packets carry connection
+// management info -- open-conn req/ack, attention, retransmit advice,
+// forward reset -- and DO NOT advance the data byte stream. Counting
+// their body bytes toward data_total breaks the send_seq math used by
+// the fake-server injector.
+static inline bool xband_adsp_is_control (const XBandParsedFrame *p)
+{
+	return (p->descriptor & 0x80) != 0;
+}
+
+// Receive-side dispatcher: called from xband_adsp_validate_frame for
+// every good-CRC frame. Bumps per-opcode counter, appends segment data
+// to the RX stream (for data packets only), and runs the per-segment
+// decoder. Does NOT inject any reply — actual ServerTalk message
+// processing is done by the BIOS itself (we just emulate the bus).
+// The decoded log and stream view are for our visibility, not for
+// protocol participation.
+static void xband_servertalk_dispatch_rx (const uint8 *body, int body_len)
+{
+	XBandParsedFrame p;
+	if (!xband_servertalk_parse(body, body_len, &p))
+		return;
+
+	bool is_control = xband_adsp_is_control(&p);
+
+	if (p.has_opcode && !is_control)
+		xband_servertalk_rx_count[p.opcode]++;
+	else
+		xband_servertalk_rx_headeronly++;
+
+	// Snoop the SERVER's ADSP connection state for the fake-server
+	// injector. ConnID + first_seq + next_recv update on EVERY frame
+	// (including control packets) since the connection identity comes
+	// from there. data_total only advances for DATA packets -- control
+	// packet body bytes don't count toward the ADSP data stream and
+	// counting them poisons our send_seq computation.
+	xband_sniff_srv_conn_id   = p.source_conn_id;
+	xband_sniff_srv_first_seq = p.first_byte_seq;
+	xband_sniff_srv_next_recv = p.next_recv_seq;
+	xband_sniff_srv_recv_win  = p.recv_window;
+	if (!is_control)
+	{
+		int data_off = XBAND_ADSP_HEADER_LEN;
+		int data_end = body_len - 2;
+		if (data_end > data_off)
+			xband_sniff_srv_data_total += (uint32)(data_end - data_off);
+	}
+	xband_sniff_srv_seen = true;
+
+	// Append the segment's data section (everything between the ADSP
+	// header and the trailing CRC) to the RX stream accumulator -- but
+	// only for non-control segments. Control packets contain ADSP
+	// management bytes that pollute the stream view of ServerTalk.
+	if (!is_control)
+	{
+		int data_off = XBAND_ADSP_HEADER_LEN;
+		int data_end = body_len - 2;  // exclude CRC
+		if (data_end > data_off)
+		{
+			xband_stream_append(xband_rx_stream,
+			                    &xband_rx_stream_pos,
+			                    &xband_rx_stream_dropped,
+			                    body + data_off, data_end - data_off);
+		}
+	}
+
+	xband_servertalk_decode(&p, false /*is_tx*/);
+}
+
+// Send-side dispatcher: called from the TX-frame-capture path so we
+// also see what the BIOS is sending. The TX body comes from the BIOS
+// in already-byte-stuffed form (we just forward what the BIOS wrote
+// to fred reg $90 to the socket), so we need to de-stuff it locally
+// before parsing to get the same logical view the RX path produces.
+static void xband_servertalk_dispatch_tx (const uint8 *body, int body_len)
+{
+	// Local de-stuff buffer. 256 is enough for typical ADSP segments
+	// (~125 bytes wire) and we cap input length to match the capture
+	// arrays.
+	uint8 dest[256];
+	int n = body_len;
+	if (n > (int)sizeof(dest)) n = (int)sizeof(dest);
+	memcpy(dest, body, n);
+	int destuffed_len = xband_destuff_inplace(dest, n);
+
+	XBandParsedFrame p;
+	if (!xband_servertalk_parse(dest, destuffed_len, &p))
+		return;
+
+	bool is_control = xband_adsp_is_control(&p);
+
+	if (p.has_opcode && !is_control)
+		xband_servertalk_tx_count[p.opcode]++;
+	else
+		xband_servertalk_tx_headeronly++;
+
+	// Snoop the BOX's ADSP connection state -- needed by the
+	// fake-server injector to ack the box's data correctly. data_total
+	// only advances for DATA packets, same reasoning as the RX side.
+	xband_sniff_box_conn_id   = p.source_conn_id;
+	xband_sniff_box_first_seq = p.first_byte_seq;
+	xband_sniff_box_next_recv = p.next_recv_seq;
+	xband_sniff_box_recv_win  = p.recv_window;
+	if (!is_control)
+	{
+		int data_off2 = XBAND_ADSP_HEADER_LEN;
+		int data_end2 = destuffed_len - 2;
+		if (data_end2 > data_off2)
+			xband_sniff_box_data_total += (uint32)(data_end2 - data_off2);
+	}
+	xband_sniff_box_seen = true;
+
+	if (!is_control)
+	{
+		int data_off = XBAND_ADSP_HEADER_LEN;
+		int data_end = destuffed_len - 2;
+		if (data_end > data_off)
+		{
+			xband_stream_append(xband_tx_stream,
+			                    &xband_tx_stream_pos,
+			                    &xband_tx_stream_dropped,
+			                    dest + data_off, data_end - data_off);
+		}
+	}
+
+	xband_servertalk_decode(&p, true /*is_tx*/);
+}
+
+// Heuristic: should we treat this byte as a likely opcode candidate?
+// We filter out the ASCII printable range $20..$7E because most opcode
+// false positives in the byte search come from text fields (usernames,
+// email subjects, hometown). msBoxType happens to be $1F (just below
+// space) and the box-side opcodes cluster in $0B..$27, so the
+// $20..$7E filter only loses msSendGameResults ($20), msSendNoGameResults
+// ($21), msSendConstant ($22), msSendGameErrorResults ($23),
+// msSendNoGameErrorResults ($24), msSendNetErrors ($25), msNoNetErrors
+// ($26), msSendHiddenSerials ($27) -- but those are all "stats reply"
+// messages that show up rarely and would be drowned in noise anyway.
+// Better to lose those signals than report 100 spurious hits per dump.
+//
+// We also keep $02 (msEndOfStream) since it's a critical anchor for
+// finding message boundaries.
+static bool xband_stream_byte_is_candidate_opcode (uint8 b, bool is_tx)
+{
+	// Always-keep anchors:
+	if (b == 0x02) return true;          // msEndOfStream
+	if (b == 0x1F) return true;          // msBoxType (TX) / msNewsHeader (RX)
+
+	// Filter ASCII range to avoid text-field false positives.
+	if (b >= 0x20 && b < 0x7F) return false;
+
+	// For the rest, only keep bytes that map to a non-"?" name in the
+	// relevant enum. This excludes high values like $E8 / $BB / $FF
+	// which are continuation noise.
+	const char *name = is_tx
+		? xband_servertalk_name_box_to_server(b)
+		: xband_servertalk_name_server_to_box(b);
+	return name[0] != '?';
+}
+
+// Walk the reassembled ServerTalk byte stream looking for known opcodes
+// using the same byte-search approach as xbsega.go. The result is a
+// best-effort opcode location list -- byte search will always have
+// false positives when payload data contains values that look like
+// opcodes. We filter out ASCII printables and unknown values to keep
+// the noise down.
+//
+// We also use $02 (msEndOfStream) as a message-boundary anchor: each
+// occurrence likely separates two ServerTalk messages.
+//
+// Returns the number of bytes consumed by the formatter so the caller
+// can advance the dump output buffer.
+static size_t xband_stream_format (char *out, size_t out_size,
+                                   const uint8 *stream, uint32 stream_used,
+                                   bool is_tx)
+{
+	if (!out || out_size == 0 || stream_used == 0) return 0;
+	size_t pos = 0;
+
+	pos += snprintf(out + pos, out_size - pos,
+		"Reassembled %s ServerTalk stream (%u bytes used, %u total ever appended):\n",
+		is_tx ? "TX" : "RX",
+		(unsigned)stream_used,
+		(unsigned)(is_tx ? xband_tx_stream_pos : xband_rx_stream_pos));
+
+	// Show the START of the stream first (login handshake is here).
+	// If the stream is large, follow up with the END (most recent
+	// activity). Cap at ~512 + 256 bytes total for the hex dump.
+	uint32 head_n = stream_used;
+	if (head_n > 512) head_n = 512;
+	pos += snprintf(out + pos, out_size - pos,
+		"  -- start of stream (first %u bytes) --\n", (unsigned)head_n);
+	pos += xband_hex_ascii_dump_at(out + pos, out_size - pos,
+		stream, (int)head_n, 0);
+
+	if (stream_used > head_n + 16)
+	{
+		uint32 tail_n = stream_used - head_n;
+		if (tail_n > 256) tail_n = 256;
+		uint32 tail_start = stream_used - tail_n;
+		pos += snprintf(out + pos, out_size - pos,
+			"  -- end of stream (last %u bytes, offset %u..%u) --\n",
+			(unsigned)tail_n, (unsigned)tail_start,
+			(unsigned)(stream_used - 1));
+		pos += xband_hex_ascii_dump_at(out + pos, out_size - pos,
+			stream + tail_start, (int)tail_n, tail_start);
+	}
+
+	// Scan the WHOLE stream (not just the dumped portion) for opcode
+	// candidates. Print up to 32 hits with absolute offsets so the
+	// user can cross-reference with the hex dump above.
+	pos += snprintf(out + pos, out_size - pos,
+		"Opcode candidates in stream (filtered, $02 = msEndOfStream is a boundary marker):\n");
+	int hits = 0;
+	for (uint32 i = 0; i < stream_used && hits < 32 &&
+	                   pos + 120 < out_size; i++)
+	{
+		uint8 b = stream[i];
+		if (!xband_stream_byte_is_candidate_opcode(b, is_tx))
+			continue;
+		const char *name = is_tx
+			? xband_servertalk_name_box_to_server(b)
+			: xband_servertalk_name_server_to_box(b);
+		// Pretty-print the next 4 bytes after the candidate so the
+		// user can eyeball whether the field shape matches the opcode
+		// (e.g. msBoxType $1F should be followed by 4 ASCII chars).
+		char tail[20] = "";
+		int tail_off = 0;
+		for (int k = 1; k <= 6 && i + k < stream_used &&
+		                tail_off < (int)sizeof(tail) - 4; k++)
+		{
+			tail_off += snprintf(tail + tail_off,
+				sizeof(tail) - tail_off, "%02X ",
+				(unsigned)stream[i + k]);
+		}
+		pos += snprintf(out + pos, out_size - pos,
+			"  +%04u: $%02X %-30s next=[%s]\n",
+			(unsigned)i, (unsigned)b, name, tail);
+		hits++;
+	}
+	if (hits == 0)
+		pos += snprintf(out + pos, out_size - pos,
+			"  (no recognized opcodes in stream)\n");
+	pos += snprintf(out + pos, out_size - pos, "\n");
+	return pos;
 }
 
 // Canonical XBAND CRC: CCITT-16-FALSE computed over the encapsulated
@@ -677,6 +1614,15 @@ static void xband_adsp_validate_frame (void)
 			xband_adsp_first_frame_crc_expected[slot] = expected;
 			xband_compute_all_crcs(slot, data_len);
 		}
+
+		// Dispatch good frames into the ServerTalk decoder so the dump
+		// can show per-opcode counts and human-readable details. Bad-CRC
+		// frames are not parsed — the body is suspect.
+		if (good)
+		{
+			xband_servertalk_dispatch_rx(
+				xband_adsp_frame_buf, xband_adsp_frame_pos);
+		}
 		return;
 	}
 
@@ -743,6 +1689,330 @@ static void xband_adsp_feed_byte (uint8 b)
 		}
 		break;
 	}
+}
+
+// =====================================================================
+// Phase A: ADSP frame BUILDER + RX injection (the inverse of the
+// parser/dispatcher above). Used by the fake-server menu trigger to
+// synthesize a server reply and feed it into XBand.rxbuf as if it had
+// arrived over the wire.
+// =====================================================================
+
+// Build a wire-format ADSP frame from logical fields. Output layout:
+//
+//   \x00 + escape(header[13] + payload + CRC[2]) + \x10\x03
+//
+// where escape() doubles every \x10 byte. CRC is CCITT-16-FALSE
+// computed over the encapsulation byte (\x00) + header + payload --
+// matches the canonical formula we validated against live RX frames
+// (`xband_ccitt_crc16` above).
+//
+// Returns the number of bytes written to `out`. Returns 0 on failure
+// (out too small for worst-case-stuffed output).
+//
+// Worst-case output size: 1 (encap) + 2*(13 + payload_len + 2) + 2 (EOP)
+//   = 33 + 2*payload_len  for payload_len >= 0
+// We require out_size >= that.
+static int xband_adsp_build_frame (
+	uint8 *out, int out_size,
+	uint16 source_conn_id,
+	uint32 first_byte_seq,
+	uint32 next_recv_seq,
+	uint16 recv_window,
+	uint8  descriptor,
+	const uint8 *payload, int payload_len)
+{
+	if (!out || out_size <= 0) return 0;
+	if (payload_len < 0) payload_len = 0;
+	if (33 + 2 * payload_len > out_size) return 0;
+
+	// 1. Build the unstuffed body: 13-byte ADSP header + payload + CRC.
+	//    We use a local scratch buffer for this so we can compute the
+	//    CRC over (encap + body) before stuffing.
+	uint8 body[1024];
+	int   body_len = XBAND_ADSP_HEADER_LEN + payload_len + 2;
+	if (body_len + 1 > (int)sizeof(body)) return 0;
+
+	body[0]  = (uint8)(source_conn_id >> 8);
+	body[1]  = (uint8)(source_conn_id);
+	body[2]  = (uint8)(first_byte_seq >> 24);
+	body[3]  = (uint8)(first_byte_seq >> 16);
+	body[4]  = (uint8)(first_byte_seq >> 8);
+	body[5]  = (uint8)(first_byte_seq);
+	body[6]  = (uint8)(next_recv_seq >> 24);
+	body[7]  = (uint8)(next_recv_seq >> 16);
+	body[8]  = (uint8)(next_recv_seq >> 8);
+	body[9]  = (uint8)(next_recv_seq);
+	body[10] = (uint8)(recv_window >> 8);
+	body[11] = (uint8)(recv_window);
+	body[12] = descriptor;
+	if (payload && payload_len > 0)
+		memcpy(body + 13, payload, payload_len);
+
+	// 2. Compute CRC over encap byte (\x00) + header + payload. The CRC
+	//    helper xband_ccitt_crc16 already prepends the encap byte.
+	uint16 crc = xband_ccitt_crc16(body, XBAND_ADSP_HEADER_LEN + payload_len);
+	body[XBAND_ADSP_HEADER_LEN + payload_len]     = (uint8)(crc >> 8);
+	body[XBAND_ADSP_HEADER_LEN + payload_len + 1] = (uint8)(crc);
+
+	// 3. Emit the wire frame: leading \x00, byte-stuffed body, \x10\x03.
+	int o = 0;
+	out[o++] = 0x00;
+	for (int i = 0; i < body_len; i++)
+	{
+		uint8 b = body[i];
+		if (b == 0x10)
+		{
+			if (o + 2 > out_size) return 0;
+			out[o++] = 0x10;
+			out[o++] = 0x10;
+		}
+		else
+		{
+			if (o + 1 > out_size) return 0;
+			out[o++] = b;
+		}
+	}
+	if (o + 2 > out_size) return 0;
+	out[o++] = 0x10;
+	out[o++] = 0x03;
+	return o;
+}
+
+// Push raw wire bytes into XBand.rxbuf as if they had arrived from the
+// socket. The BIOS will pull them out byte-at-a-time via fred reg $94
+// (`xband_rxbuf_pop`) and feed them through its ADSP modem driver --
+// the same path live RX bytes take.
+//
+// Returns the number of bytes injected (may be less than `len` if the
+// rxbuf would overflow).
+static int xband_inject_rxbuf_bytes (const uint8 *bytes, int len)
+{
+	if (!bytes || len <= 0) return 0;
+	int written = 0;
+	for (int i = 0; i < len; i++)
+	{
+		if (XBand.rxbufpos >= XBAND_RXBUF_SIZE) break;
+		XBand.rxbuf[XBand.rxbufpos++] = bytes[i];
+
+		// Mirror the byte into the RX socket-first capture so it shows
+		// up in the kctl dump's RX hex view -- otherwise injected bytes
+		// would be invisible to all our debug tooling.
+		if (xband_sock_rx_first_used < XBAND_SOCK_FIRST_SIZE)
+			xband_sock_rx_first[xband_sock_rx_first_used++] = bytes[i];
+
+		// Also feed the ADSP detector so the dispatcher sees our
+		// injected frame in the same way it sees live RX. This means
+		// the per-opcode counters and decoded log reflect both real
+		// and fake traffic, which is what we want for verification.
+		xband_adsp_feed_byte(bytes[i]);
+
+		written++;
+	}
+	xband_sock_rx_bytes += (uint64)written;
+	return written;
+}
+
+// Public entry point: build an ADSP-framed ServerTalk reply with the
+// given opcode + payload, sniff connID/seq from the live connection,
+// and inject the frame into rxbuf so the BIOS will read it.
+//
+// Returns true on success. Failure modes:
+//   - no live connection state sniffed yet (haven't seen any frames)
+//   - frame builder ran out of buffer space (payload too big)
+//   - rxbuf overflow on inject
+bool S9xXBandFakeInject (uint8 opcode, const uint8 *payload, int payload_len)
+{
+	if (!xband_sniff_box_seen)
+	{
+		snprintf(xband_fake_inject_last,
+		         sizeof(xband_fake_inject_last),
+		         "FAILED: no box frames sniffed yet");
+		return false;
+	}
+
+	// Pick the source connID per the active mode (see
+	// xband_fake_connid_source above). Default is the sniffed server
+	// connID, which matches Apple ADSP semantics; the alternate mode
+	// uses the box's connID, which matches the xbsega open-conn-ack
+	// behavior where the server echoes the box's frame back unchanged.
+	uint16 srv_conn;
+	const char *connid_label;
+	if (xband_fake_connid_source == XBAND_FAKE_CONNID_BOX &&
+	    xband_sniff_box_seen)
+	{
+		srv_conn     = xband_sniff_box_conn_id;
+		connid_label = "BOX";
+	}
+	else if (xband_sniff_srv_seen)
+	{
+		srv_conn     = xband_sniff_srv_conn_id;
+		connid_label = "SRV";
+	}
+	else
+	{
+		srv_conn     = (uint16)0x08C8;  // bsnes-plus default fallback
+		connid_label = "FALLBACK";
+	}
+
+	// Build the ServerTalk message body: opcode + payload.
+	uint8  st_body[256];
+	int    st_len = 1 + payload_len;
+	if (st_len > (int)sizeof(st_body))
+		st_len = (int)sizeof(st_body);
+	st_body[0] = opcode;
+	if (payload && payload_len > 0)
+		memcpy(st_body + 1, payload, st_len - 1);
+
+	// ADSP send seq: where this server segment starts in the server's
+	// outbound byte stream. Use a dedicated running counter that we
+	// prime from the BOX's next_recv_seq on the first inject -- the
+	// box authoritatively tells us "the next byte I expect from the
+	// server is at sequence N", so injecting at exactly that position
+	// will be in-order. For subsequent injects we just advance the
+	// counter by the previous inject's data length so consecutive
+	// injects line up tail-to-head with no gaps.
+	if (!xband_fake_send_seq_primed)
+	{
+		xband_fake_send_seq        = xband_sniff_box_next_recv;
+		xband_fake_send_seq_primed = true;
+	}
+	uint32 send_seq = xband_fake_send_seq;
+
+	// Ack: the next byte we expect from the box. Use the box's
+	// first_byte_seq + total observed data bytes since. The box's own
+	// frames keep advancing this in real time, so as long as we read
+	// it fresh each inject we should never under-ack. (Under-acking
+	// just keeps the box's send window full -- ADSP receivers don't
+	// reject under-acked segments.)
+	uint32 ack_seq = xband_sniff_box_first_seq +
+	                 xband_sniff_box_data_total;
+	if (xband_sniff_srv_next_recv > ack_seq)
+		ack_seq = xband_sniff_srv_next_recv;
+
+	// Descriptor: bit 6 ($40) = ack request, bit 5 ($20) = EOM.
+	// Together = $60. The ack-request bit asks the BIOS to send us an
+	// ack frame after processing -- which gives us a clean signal that
+	// the BIOS actually accepted our segment (its next next_recv_seq
+	// will jump forward by our data length).
+	uint8 descriptor = 0x60;
+
+	// Recv window -- 1024 bytes is generous and matches what the live
+	// server sends.
+	uint16 recv_win = 0x0400;
+
+	uint8 wire[600];
+	int wire_len = xband_adsp_build_frame(
+		wire, (int)sizeof(wire),
+		srv_conn, send_seq, ack_seq, recv_win, descriptor,
+		st_body, st_len);
+	if (wire_len <= 0)
+	{
+		snprintf(xband_fake_inject_last,
+		         sizeof(xband_fake_inject_last),
+		         "FAILED: build_frame returned 0 (op $%02X len %d)",
+		         (unsigned)opcode, payload_len);
+		return false;
+	}
+
+	int injected = xband_inject_rxbuf_bytes(wire, wire_len);
+	if (injected < wire_len)
+	{
+		snprintf(xband_fake_inject_last,
+		         sizeof(xband_fake_inject_last),
+		         "PARTIAL: %d/%d wire bytes injected (op $%02X)",
+		         injected, wire_len, (unsigned)opcode);
+		return false;
+	}
+
+	// Advance our running send_seq counter so the next inject lines
+	// up tail-to-head with this one. NOTE: do NOT also bump
+	// xband_sniff_srv_data_total here -- the dispatcher already
+	// auto-bumped it when our injected frame went through
+	// xband_inject_rxbuf_bytes -> xband_adsp_feed_byte ->
+	// xband_servertalk_dispatch_rx (the same path live RX takes).
+	// Double-counting was the source of the previous send_seq=$8
+	// off-by-8 bug.
+	xband_fake_send_seq += (uint32)st_len;
+	xband_fake_inject_count++;
+	snprintf(xband_fake_inject_last,
+	         sizeof(xband_fake_inject_last),
+	         "OK op=$%02X stlen=%d wirelen=%d connID=$%04X(%s) send_seq=$%08X ack=$%08X",
+	         (unsigned)opcode, st_len, wire_len,
+	         (unsigned)srv_conn, connid_label,
+	         (unsigned)send_seq, (unsigned)ack_seq);
+	return true;
+}
+
+// Public toggle for the connID source -- LIVE_SRV (default) vs BOX
+// (xbsega echo-back model). Cycles between the two each time it's
+// called. Used by the menu A/B test.
+void S9xXBandFakeToggleConnIDSource (void)
+{
+	xband_fake_connid_source =
+		(xband_fake_connid_source == XBAND_FAKE_CONNID_LIVE_SRV)
+		? XBAND_FAKE_CONNID_BOX
+		: XBAND_FAKE_CONNID_LIVE_SRV;
+}
+
+// Inject a "post-login canned response" that bundles several
+// ServerTalk messages into one ADSP segment, in the order a real
+// server would send them after the box's login dump:
+//
+//   msSetDateAndTime  (4 bytes date + 5 bytes time, raw values)
+//   msSetCurrentUserNumber 0  (1 byte profile index)
+//   msReceiveValidationToken  (4 zero token bytes)
+//   msEndOfStream
+//
+// All four messages are concatenated tail-to-head into a single
+// ServerTalk byte stream and sent as one ADSP data segment with EOM
+// + ack-request descriptor. This is a closer match to what the live
+// server would actually send than the bare-msEndOfStream test, and
+// it gives the BIOS structured fields to populate its UI with.
+//
+// Returns true on successful injection.
+bool S9xXBandFakeInjectLoginReply (void)
+{
+	uint8 body[64];
+	int   o = 0;
+
+	// msSetDateAndTime (op $04) + 4 bytes date + 5 bytes time. The
+	// values are taken from sample_packets.txt example: 04 000059C3
+	// 000031DC02. We don't know if the BIOS validates the format
+	// strictly; pass the same values the example shows.
+	body[o++] = 0x04;
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x59; body[o++] = 0xC3;
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x31; body[o++] = 0xDC;
+
+	// msSetCurrentUserNumber (op $3E = 62) + 1 byte profile index.
+	body[o++] = 0x3E;
+	body[o++] = 0x00;  // profile 0 = first user
+
+	// msReceiveValidationToken (op $3B = 59) + 4 zero token bytes.
+	// Token format unknown -- 4 zeros is a guess. The BIOS may
+	// accept it as "valid" or may reject it based on contents.
+	body[o++] = 0x3B;
+	body[o++] = 0x00; body[o++] = 0x00; body[o++] = 0x00; body[o++] = 0x00;
+
+	// msEndOfStream (op $02) -- terminator
+	body[o++] = 0x02;
+
+	// Inject the entire blob as a single ServerTalk "message" (the
+	// individual messages will be unwrapped by the BIOS dispatcher).
+	// We pass body[0] as the "opcode" to the inject function and
+	// body[1..o-1] as the "payload" -- the inject function doesn't
+	// actually distinguish, it just builds an ADSP segment with the
+	// concatenated bytes.
+	return S9xXBandFakeInject(body[0], body + 1, o - 1);
+}
+
+const char *S9xXBandFakeConnIDSourceLabel (void)
+{
+	return (xband_fake_connid_source == XBAND_FAKE_CONNID_BOX)
+		? "BOX (xbsega echo-back)"
+		: "SRV (Apple ADSP standard)";
 }
 
 void S9xXBandKCtlReset (void)
@@ -824,6 +2094,32 @@ void S9xXBandKCtlReset (void)
 	xband_adsp_first_tx_frame_count = 0;
 	memset(xband_adsp_first_tx_frame,     0, sizeof(xband_adsp_first_tx_frame));
 	memset(xband_adsp_first_tx_frame_len, 0, sizeof(xband_adsp_first_tx_frame_len));
+
+	// ServerTalk per-opcode counters and decoded log.
+	memset(xband_servertalk_rx_count, 0, sizeof(xband_servertalk_rx_count));
+	memset(xband_servertalk_tx_count, 0, sizeof(xband_servertalk_tx_count));
+	xband_servertalk_rx_headeronly = 0;
+	xband_servertalk_tx_headeronly = 0;
+	memset(xband_servertalk_decoded, 0, sizeof(xband_servertalk_decoded));
+	xband_servertalk_decoded_head  = 0;
+	xband_servertalk_decoded_count = 0;
+
+	// Stream reassembly buffers.
+	memset(xband_rx_stream, 0, sizeof(xband_rx_stream));
+	memset(xband_tx_stream, 0, sizeof(xband_tx_stream));
+	xband_rx_stream_pos     = 0;
+	xband_rx_stream_dropped = 0;
+	xband_tx_stream_pos     = 0;
+	xband_tx_stream_dropped = 0;
+
+	// NOTE: we deliberately do NOT clear the sniffed connection state
+	// here because the live connection (XBand.net_step / socket_fd)
+	// outlives the dump windows. Resetting it would lose the
+	// connID/seq numbers we need for the next inject. The sniff state
+	// only resets at S9xResetXBand / S9xXBandConnect / Disconnect time.
+	xband_fake_inject_count = 0;
+	snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
+	         "(none)");
 	xband_rxbuf_bytes_consumed = 0;
 	xband_tx_frames_sent       = 0;
 }
@@ -943,20 +2239,169 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		(unsigned long long)xband_tx_frames_sent,
 		(unsigned long long)xband_rxbuf_bytes_consumed);
 
-	// First N captured RX ADSP frames with CRC variants and opcode label.
+	// Sniffed ADSP connection state + fake-server inject status. The
+	// connID and seq numbers must be populated before any inject can
+	// succeed -- if they're zero, the BIOS hasn't talked to the server
+	// yet (and our injects will use the wrong ConnID).
+	pos += snprintf(out + pos, out_size - pos,
+		"Sniffed ADSP state (used by fake-server injector):\n"
+		"  box  : %s connID=$%04X first_seq=$%08X next_recv=$%08X "
+		"win=$%04X data_total=%u\n"
+		"  srv  : %s connID=$%04X first_seq=$%08X next_recv=$%08X "
+		"win=$%04X data_total=%u\n"
+		"  fake injects sent = %u\n"
+		"  last inject       = %s\n"
+		"\n",
+		xband_sniff_box_seen ? "OK" : "??",
+		(unsigned)xband_sniff_box_conn_id,
+		(unsigned)xband_sniff_box_first_seq,
+		(unsigned)xband_sniff_box_next_recv,
+		(unsigned)xband_sniff_box_recv_win,
+		(unsigned)xband_sniff_box_data_total,
+		xband_sniff_srv_seen ? "OK" : "??",
+		(unsigned)xband_sniff_srv_conn_id,
+		(unsigned)xband_sniff_srv_first_seq,
+		(unsigned)xband_sniff_srv_next_recv,
+		(unsigned)xband_sniff_srv_recv_win,
+		(unsigned)xband_sniff_srv_data_total,
+		(unsigned)xband_fake_inject_count,
+		xband_fake_inject_last);
+
+	// Per-opcode RX/TX counter table. Shows every opcode that has been
+	// seen at least once in either direction. Header-only frames (no
+	// ServerTalk opcode) get their own row at the bottom so we can see
+	// how many ADSP acks/window-updates the server is sending separate
+	// from real data frames.
+	{
+		bool any_rx = false, any_tx = false;
+		for (int op = 0; op < XBAND_SERVERTALK_OPCODES; op++)
+		{
+			if (xband_servertalk_rx_count[op]) any_rx = true;
+			if (xband_servertalk_tx_count[op]) any_tx = true;
+		}
+		if (any_rx || any_tx ||
+		    xband_servertalk_rx_headeronly ||
+		    xband_servertalk_tx_headeronly)
+		{
+			pos += snprintf(out + pos, out_size - pos,
+				"ServerTalk opcode counters (separate enums per direction):\n"
+				"  RX = server -> BIOS (xband_post.txt)\n"
+				"  TX = BIOS -> server (xbsega.go)\n"
+				"NOTE: Continuation segments mis-label byte 13 as opcode.\n"
+				"Real opcodes only appear at the START of a ServerTalk\n"
+				"message; later segments carry stream bytes that look like\n"
+				"random opcodes (high values like $6E/$BB/$E8/$FF are usually\n"
+				"continuation noise, not real messages).\n\n");
+			for (int op = 0; op < XBAND_SERVERTALK_OPCODES &&
+			                 pos + 200 < out_size; op++)
+			{
+				if (!xband_servertalk_rx_count[op] &&
+				    !xband_servertalk_tx_count[op])
+					continue;
+				pos += snprintf(out + pos, out_size - pos,
+					"  $%02X RX=%llu (%-25s) TX=%llu (%s)\n",
+					(unsigned)op,
+					(unsigned long long)xband_servertalk_rx_count[op],
+					xband_servertalk_name_server_to_box((uint8)op),
+					(unsigned long long)xband_servertalk_tx_count[op],
+					xband_servertalk_name_box_to_server((uint8)op));
+			}
+			if (xband_servertalk_rx_headeronly ||
+			    xband_servertalk_tx_headeronly)
+			{
+				pos += snprintf(out + pos, out_size - pos,
+					"  --  (header-only ADSP control)    RX=%llu TX=%llu\n",
+					(unsigned long long)xband_servertalk_rx_headeronly,
+					(unsigned long long)xband_servertalk_tx_headeronly);
+			}
+			pos += snprintf(out + pos, out_size - pos, "\n");
+		}
+	}
+
+	// Reassembled per-direction ServerTalk stream view. This is the
+	// best place to read off what the BIOS is actually sending /
+	// receiving because it ignores ADSP segment boundaries (which
+	// fragment messages) and shows the raw byte stream the way
+	// xbsega.go's parser sees it.
+	{
+		uint32 rx_used = xband_rx_stream_pos - xband_rx_stream_dropped;
+		if (rx_used > XBAND_STREAM_BUF_SIZE) rx_used = XBAND_STREAM_BUF_SIZE;
+		uint32 tx_used = xband_tx_stream_pos - xband_tx_stream_dropped;
+		if (tx_used > XBAND_STREAM_BUF_SIZE) tx_used = XBAND_STREAM_BUF_SIZE;
+
+		if (rx_used > 0)
+			pos += xband_stream_format(out + pos, out_size - pos,
+				xband_rx_stream, rx_used, false /*is_tx*/);
+		if (tx_used > 0)
+			pos += xband_stream_format(out + pos, out_size - pos,
+				xband_tx_stream, tx_used, true /*is_tx*/);
+	}
+
+	// Decoded message log: most recent N parsed messages from either
+	// direction, in chronological order. Helps read off what the BIOS
+	// is actually doing without paging through hex dumps.
+	if (xband_servertalk_decoded_count > 0)
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"Most recent %d decoded ServerTalk messages:\n",
+			xband_servertalk_decoded_count);
+		// Walk the ring oldest-to-newest.
+		int start_idx =
+			(xband_servertalk_decoded_head -
+			 xband_servertalk_decoded_count +
+			 XBAND_SERVERTALK_DECODED_LOG) %
+			XBAND_SERVERTALK_DECODED_LOG;
+		for (int i = 0; i < xband_servertalk_decoded_count &&
+		                pos + 200 < out_size; i++)
+		{
+			int idx = (start_idx + i) % XBAND_SERVERTALK_DECODED_LOG;
+			XBandDecodedMessage *e = &xband_servertalk_decoded[idx];
+			pos += snprintf(out + pos, out_size - pos,
+				"  [%s op=$%02X len=%-3d] %s\n",
+				e->is_tx ? "TX" : "RX",
+				(unsigned)e->opcode, e->payload_len, e->text);
+		}
+		pos += snprintf(out + pos, out_size - pos, "\n");
+	}
+
+	// First N captured RX ADSP frames with parsed header + opcode.
 	if (xband_adsp_first_frame_count > 0)
 	{
 		pos += snprintf(out + pos, out_size - pos,
 			"First %d RX ADSP frame(s) (server -> BIOS, deframed body):\n",
 			xband_adsp_first_frame_count);
-		for (int i = 0; i < xband_adsp_first_frame_count && pos + 400 < out_size; i++)
+		for (int i = 0; i < xband_adsp_first_frame_count && pos + 500 < out_size; i++)
 		{
-			uint8 op = (xband_adsp_first_frame_len[i] > 0)
-				? xband_adsp_first_frame[i][0] : 0;
-			pos += snprintf(out + pos, out_size - pos,
-				"\nRX Frame #%d (%d bytes, opcode $%02X = %s):\n",
-				i, xband_adsp_first_frame_len[i],
-				(unsigned)op, xband_servertalk_name(op));
+			XBandParsedFrame p;
+			bool ok = xband_servertalk_parse(
+				xband_adsp_first_frame[i],
+				xband_adsp_first_frame_len[i], &p);
+			if (ok && p.has_opcode)
+				pos += snprintf(out + pos, out_size - pos,
+					"\nRX Frame #%d (%d bytes) connID=$%04X seq=$%08X "
+					"recvSeq=$%08X win=$%04X desc=$%02X byte13=$%02X (%s)\n",
+					i, xband_adsp_first_frame_len[i],
+					(unsigned)p.source_conn_id,
+					(unsigned)p.first_byte_seq,
+					(unsigned)p.next_recv_seq,
+					(unsigned)p.recv_window,
+					(unsigned)p.descriptor,
+					(unsigned)p.opcode,
+					xband_servertalk_name_server_to_box(p.opcode));
+			else if (ok)
+				pos += snprintf(out + pos, out_size - pos,
+					"\nRX Frame #%d (%d bytes) connID=$%04X seq=$%08X "
+					"recvSeq=$%08X win=$%04X desc=$%02X (header-only ADSP)\n",
+					i, xband_adsp_first_frame_len[i],
+					(unsigned)p.source_conn_id,
+					(unsigned)p.first_byte_seq,
+					(unsigned)p.next_recv_seq,
+					(unsigned)p.recv_window,
+					(unsigned)p.descriptor);
+			else
+				pos += snprintf(out + pos, out_size - pos,
+					"\nRX Frame #%d (%d bytes) too short to parse\n",
+					i, xband_adsp_first_frame_len[i]);
 			pos += xband_hex_ascii_dump(out + pos, out_size - pos,
 				xband_adsp_first_frame[i], xband_adsp_first_frame_len[i]);
 			if (xband_adsp_first_frame_len[i] >= 4)
@@ -970,20 +2415,44 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		pos += snprintf(out + pos, out_size - pos, "\n");
 	}
 
-	// First N captured TX ADSP frames with opcode label.
+	// First N captured TX ADSP frames with parsed header + opcode.
 	if (xband_adsp_first_tx_frame_count > 0)
 	{
 		pos += snprintf(out + pos, out_size - pos,
 			"First %d TX ADSP frame(s) (BIOS -> server, deframed body):\n",
 			xband_adsp_first_tx_frame_count);
-		for (int i = 0; i < xband_adsp_first_tx_frame_count && pos + 400 < out_size; i++)
+		for (int i = 0; i < xband_adsp_first_tx_frame_count && pos + 500 < out_size; i++)
 		{
-			uint8 op = (xband_adsp_first_tx_frame_len[i] > 0)
-				? xband_adsp_first_tx_frame[i][0] : 0;
-			pos += snprintf(out + pos, out_size - pos,
-				"\nTX Frame #%d (%d bytes, opcode $%02X = %s):\n",
-				i, xband_adsp_first_tx_frame_len[i],
-				(unsigned)op, xband_servertalk_name(op));
+			XBandParsedFrame p;
+			bool ok = xband_servertalk_parse(
+				xband_adsp_first_tx_frame[i],
+				xband_adsp_first_tx_frame_len[i], &p);
+			if (ok && p.has_opcode)
+				pos += snprintf(out + pos, out_size - pos,
+					"\nTX Frame #%d (%d bytes) connID=$%04X seq=$%08X "
+					"recvSeq=$%08X win=$%04X desc=$%02X byte13=$%02X (%s)\n",
+					i, xband_adsp_first_tx_frame_len[i],
+					(unsigned)p.source_conn_id,
+					(unsigned)p.first_byte_seq,
+					(unsigned)p.next_recv_seq,
+					(unsigned)p.recv_window,
+					(unsigned)p.descriptor,
+					(unsigned)p.opcode,
+					xband_servertalk_name_box_to_server(p.opcode));
+			else if (ok)
+				pos += snprintf(out + pos, out_size - pos,
+					"\nTX Frame #%d (%d bytes) connID=$%04X seq=$%08X "
+					"recvSeq=$%08X win=$%04X desc=$%02X (header-only ADSP)\n",
+					i, xband_adsp_first_tx_frame_len[i],
+					(unsigned)p.source_conn_id,
+					(unsigned)p.first_byte_seq,
+					(unsigned)p.next_recv_seq,
+					(unsigned)p.recv_window,
+					(unsigned)p.descriptor);
+			else
+				pos += snprintf(out + pos, out_size - pos,
+					"\nTX Frame #%d (%d bytes) too short to parse\n",
+					i, xband_adsp_first_tx_frame_len[i]);
 			pos += xband_hex_ascii_dump(out + pos, out_size - pos,
 				xband_adsp_first_tx_frame[i], xband_adsp_first_tx_frame_len[i]);
 		}
@@ -2153,6 +3622,19 @@ void S9xResetXBand (void)
 	XBand.rxbufpos = XBand.rxbufused = 0;
 	XBand.txbufpos = XBand.txbufused = 0;
 
+	// Drop sniffed ADSP connection state -- a fresh power-on / reset
+	// implies any prior connID/seq numbers are stale. The dispatcher
+	// will repopulate them as soon as the BIOS opens a new connection.
+	xband_sniff_box_seen       = false;
+	xband_sniff_srv_seen       = false;
+	xband_sniff_box_data_total = 0;
+	xband_sniff_srv_data_total = 0;
+	xband_fake_inject_count    = 0;
+	xband_fake_send_seq        = 0;
+	xband_fake_send_seq_primed = false;
+	snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
+	         "(none)");
+
 	// Try to load a real XBAND SRAM dump (e.g. one of the dumps in the
 	// Cinghialotto repo's SNES-XBandSRAMs.rar). On a fresh "first-time
 	// setup" boot, the BIOS spins forever in init because nothing in
@@ -2263,6 +3745,16 @@ bool8 S9xXBandConnect (const char *host, int port)
 
 	XBand.socket_fd = (intptr_t)fd;
 	XBand.connected = TRUE;
+
+	// Fresh connection -- drop all sniffed ADSP state and the running
+	// fake-server send_seq counter so a previous session's numbers
+	// don't poison the new connection.
+	xband_sniff_box_seen       = false;
+	xband_sniff_srv_seen       = false;
+	xband_sniff_box_data_total = 0;
+	xband_sniff_srv_data_total = 0;
+	xband_fake_send_seq        = 0;
+	xband_fake_send_seq_primed = false;
 
 	// Send identity proactively immediately after connect, then drop
 	// straight to CONNECTED so BIOS TX bytes flush on the very next
@@ -2500,26 +3992,33 @@ void S9xXBandPoll (void)
 			{
 				xband_tx_frames_sent++;
 
-				// Capture first N TX frames for inspection. Strip
-				// the leading \x00 (if present — sender adds it as
-				// encapsulation byte) and the trailing \x10\x03 so
-				// the captured body matches the same shape as the
-				// RX frame captures (deframed body, last 2 bytes
-				// being the CRC).
+				// Compute the deframed body shape (strip leading \x00 +
+				// trailing \x10\x03) so both the per-frame capture and
+				// the ServerTalk dispatcher see the same view as the RX
+				// path. The dispatcher runs for every TX frame; the
+				// capture only fills the first N slots.
+				uint32 body_start = start;
+				uint32 body_end   = end - 2;  // strip \x10\x03
+				if (body_start < body_end &&
+				    XBand.txbuf[body_start] == 0x00)
+					body_start++;  // strip leading \x00
+				int body_len = (int)(body_end - body_start);
+				if (body_len < 0) body_len = 0;
+
 				if (xband_adsp_first_tx_frame_count < XBAND_ADSP_FIRST_FRAMES)
 				{
 					int slot = xband_adsp_first_tx_frame_count++;
-					uint32 body_start = start;
-					uint32 body_end   = end - 2;  // strip \x10\x03
-					if (body_start < body_end &&
-					    XBand.txbuf[body_start] == 0x00)
-						body_start++;  // strip leading \x00
-					int n = (int)(body_end - body_start);
+					int n = body_len;
 					if (n > 256) n = 256;
-					if (n < 0) n = 0;
 					memcpy(xband_adsp_first_tx_frame[slot],
 						XBand.txbuf + body_start, n);
 					xband_adsp_first_tx_frame_len[slot] = n;
+				}
+
+				if (body_len > 0)
+				{
+					xband_servertalk_dispatch_tx(
+						XBand.txbuf + body_start, body_len);
 				}
 			}
 		}

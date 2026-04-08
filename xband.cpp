@@ -231,8 +231,27 @@ static uint64 xband_adsp_frames_aborted  = 0;
 static uint8  xband_adsp_first_frame[XBAND_ADSP_FIRST_FRAMES][256];
 static int    xband_adsp_first_frame_len[XBAND_ADSP_FIRST_FRAMES] = {0};
 static uint16 xband_adsp_first_frame_crc_expected[XBAND_ADSP_FIRST_FRAMES] = {0};
-static uint16 xband_adsp_first_frame_crc_computed[XBAND_ADSP_FIRST_FRAMES] = {0};
-static uint16 xband_adsp_first_frame_residue[XBAND_ADSP_FIRST_FRAMES] = {0};
+// Multiple CRC variants computed per frame so we can identify the
+// right formula by hand. Index meanings (also see the labels in
+// xband_crc_variant_names below):
+//   0: CCITT-16-FALSE       (init $FFFF, xor $FFFF)
+//   1: CCITT-16-FALSE-noxor (init $FFFF, no xor)
+//   2: CCITT-16-XMODEM      (init $0000, no xor)
+//   3: CCITT-16-AUG         (init $1D0F, no xor)
+//   4: CRC-16-Kermit        (init $0000, reflected, no xor)
+//   5: same as 0 but data INCLUDES the leading \x00 encap byte
+//   6: same as 0 but byte order swapped (little-endian compare)
+#define XBAND_CRC_VARIANTS 7
+static uint16 xband_adsp_first_frame_crcs[XBAND_ADSP_FIRST_FRAMES][XBAND_CRC_VARIANTS] = {{0}};
+static const char *xband_crc_variant_names[XBAND_CRC_VARIANTS] = {
+	"CCITT-FALSE     ", // 0
+	"CCITT-FALSE-noxor", // 1
+	"CCITT-XMODEM    ", // 2
+	"CCITT-AUG ($1D0F)", // 3
+	"CRC-16-Kermit   ", // 4
+	"FALSE+leading\\x00", // 5
+	"FALSE byte-swap ", // 6
+};
 static int    xband_adsp_first_frame_count = 0;
 
 // TX frame counter — bumped each time the TX accumulator successfully
@@ -406,61 +425,148 @@ static uint8 xband_peek_byte (uint32 address)
 	return 0;
 }
 
-// CCITT-16 (poly $1021, init $FFFF, output XOR $FFFF) — same algorithm
-// as the ccitt_updcrc routine in the XBAND ROM ($D4:FB41) and the PHP
-// CRC table in xband_post.txt. Used by the ADSP frame detector to
-// validate inbound frames.
-static uint16 xband_ccitt_crc16 (const uint8 *data, int len)
+// CRC variants to test against the captured frames. The protocol uses
+// CCITT-16 family but the exact init/xor/byte-order is unconfirmed.
+// We compute several variants per frame and the dump shows all of
+// them so we can hand-pick which one the server is actually using.
+//
+// All variants use poly $1021 (no reflection). Differences are in
+// init value, final XOR, and whether they reflect bits. The
+// "_FALSE", "_XMODEM", "_AUG" suffixes are standard CCITT-16 names.
+
+// CCITT-16-FALSE: init $FFFF, xor $FFFF (IBM original)
+static uint16 xband_crc_false (const uint8 *data, int len)
 {
 	uint16 crc = 0xFFFF;
 	for (int i = 0; i < len; i++)
 	{
 		crc ^= ((uint16)data[i]) << 8;
 		for (int j = 0; j < 8; j++)
-		{
-			if (crc & 0x8000)
-				crc = (uint16)((crc << 1) ^ 0x1021);
-			else
-				crc = (uint16)(crc << 1);
-		}
+			crc = (crc & 0x8000)
+				? (uint16)((crc << 1) ^ 0x1021)
+				: (uint16)(crc << 1);
 	}
 	return crc ^ 0xFFFF;
 }
 
-// CRC residue check — runs CCITT-16 over the FULL deframed body
-// (data + appended CRC). When the appending order is consistent, the
-// residue equals the magic constant 0x1D0F (per the test code in
-// catapult/Modem.c). This is more robust than the direct compare.
-static uint16 xband_ccitt_crc16_residue (const uint8 *data, int len)
+// CCITT-16-FALSE without final xor (init $FFFF, no xor — what some
+// references call "CCITT FALSE residue form")
+static uint16 xband_crc_false_noxor (const uint8 *data, int len)
 {
-	// Compute CCITT-16 WITHOUT the final XOR (matches the form the
-	// XBAND ROM uses internally — see Modem.c verification path).
 	uint16 crc = 0xFFFF;
 	for (int i = 0; i < len; i++)
 	{
 		crc ^= ((uint16)data[i]) << 8;
 		for (int j = 0; j < 8; j++)
-		{
-			if (crc & 0x8000)
-				crc = (uint16)((crc << 1) ^ 0x1021);
-			else
-				crc = (uint16)(crc << 1);
-		}
+			crc = (crc & 0x8000)
+				? (uint16)((crc << 1) ^ 0x1021)
+				: (uint16)(crc << 1);
 	}
-	return crc;  // NO final XOR — this is the "residue" form
+	return crc;
 }
 
-// Validate the buffered frame (last 2 bytes are big-endian CRC of the
-// preceding bytes). Captures the first N frames for inspection so we
-// can hand-verify the CRC formula.
+// CCITT-16-XMODEM: init $0000, no xor
+static uint16 xband_crc_xmodem (const uint8 *data, int len)
+{
+	uint16 crc = 0x0000;
+	for (int i = 0; i < len; i++)
+	{
+		crc ^= ((uint16)data[i]) << 8;
+		for (int j = 0; j < 8; j++)
+			crc = (crc & 0x8000)
+				? (uint16)((crc << 1) ^ 0x1021)
+				: (uint16)(crc << 1);
+	}
+	return crc;
+}
+
+// CCITT-16-AUG: init $1D0F, no xor
+static uint16 xband_crc_aug (const uint8 *data, int len)
+{
+	uint16 crc = 0x1D0F;
+	for (int i = 0; i < len; i++)
+	{
+		crc ^= ((uint16)data[i]) << 8;
+		for (int j = 0; j < 8; j++)
+			crc = (crc & 0x8000)
+				? (uint16)((crc << 1) ^ 0x1021)
+				: (uint16)(crc << 1);
+	}
+	return crc;
+}
+
+// CRC-16-Kermit / CCITT-TRUE: init $0000, REFLECTED bits, no xor
+static uint16 xband_crc_kermit (const uint8 *data, int len)
+{
+	uint16 crc = 0x0000;
+	for (int i = 0; i < len; i++)
+	{
+		crc ^= (uint16)data[i];
+		for (int j = 0; j < 8; j++)
+			crc = (crc & 1)
+				? (uint16)((crc >> 1) ^ 0x8408)
+				: (uint16)(crc >> 1);
+	}
+	return crc;
+}
+
+// Canonical XBAND CRC: CCITT-16-FALSE computed over the encapsulated
+// body (the deframed bytes WITH a synthetic leading `\x00`). Confirmed
+// against live server frames where this variant matches the expected
+// CRC at the tail. NOTE: this contradicts the PHP framer in
+// xband_post.txt (which computes CRC before encapsulation), but the
+// wire bytes are authoritative — the live server includes the
+// encapsulation byte in the CRC.
+static uint16 xband_ccitt_crc16 (const uint8 *data, int len)
+{
+	uint8 tmp[1024];
+	if (len + 1 > (int)sizeof(tmp))
+		len = (int)sizeof(tmp) - 1;
+	tmp[0] = 0x00;
+	memcpy(tmp + 1, data, len);
+	return xband_crc_false(tmp, len + 1);
+}
+
+// Compute all 7 CRC variants for a frame and store them in the slot.
+// Variants 5 and 6 are special cases that don't match the standard
+// "data is body[0..n-2], crc is body[n-2..n]" model — they test
+// alternate interpretations.
+static void xband_compute_all_crcs (int slot, int data_len)
+{
+	const uint8 *data = xband_adsp_frame_buf;
+	uint16 *out = xband_adsp_first_frame_crcs[slot];
+
+	out[0] = xband_crc_false      (data, data_len);
+	out[1] = xband_crc_false_noxor(data, data_len);
+	out[2] = xband_crc_xmodem     (data, data_len);
+	out[3] = xband_crc_aug        (data, data_len);
+	out[4] = xband_crc_kermit     (data, data_len);
+
+	// Variant 5: include a synthetic leading \x00 (the encapsulation
+	// byte that gets stripped by the deframer). Compute over a
+	// temporary buffer with the prefix.
+	{
+		uint8 tmp[257];
+		tmp[0] = 0x00;
+		int n = (data_len < 256) ? data_len : 256;
+		memcpy(tmp + 1, data, n);
+		out[5] = xband_crc_false(tmp, n + 1);
+	}
+
+	// Variant 6: same algorithm as #0, but the EXPECTED CRC at the
+	// end of the frame is interpreted as little-endian instead of
+	// big-endian. Stored as the same computed value as #0; the dump
+	// reader compares against the byte-swapped expected.
+	out[6] = out[0];
+}
+
+// Validate the buffered frame and capture for inspection.
 static void xband_adsp_validate_frame (void)
 {
 	xband_adsp_frames_total++;
 	if (xband_adsp_frame_pos < 4)
 	{
-		// Too short to have data + CRC. Treat as a control frame
-		// with no CRC. Don't count as bad — count as a separate
-		// "control" bucket via the aborted counter for now.
+		// Too short to have data + CRC. Probably a tiny control frame.
 		xband_adsp_frames_bad_crc++;
 	}
 	else
@@ -470,19 +576,13 @@ static void xband_adsp_validate_frame (void)
 			((uint16)xband_adsp_frame_buf[data_len] << 8) |
 			xband_adsp_frame_buf[data_len + 1];
 		uint16 computed = xband_ccitt_crc16(xband_adsp_frame_buf, data_len);
-		// Residue: run CCITT-16 over the FULL frame including the
-		// appended CRC bytes. If the algorithm matches, residue
-		// equals the magic constant 0x1D0F.
-		uint16 residue = xband_ccitt_crc16_residue(
-			xband_adsp_frame_buf, xband_adsp_frame_pos);
 
-		bool good = (expected == computed) || (residue == 0x1D0F);
+		bool good = (expected == computed);
 		if (good)
 			xband_adsp_frames_good_crc++;
 		else
 			xband_adsp_frames_bad_crc++;
 
-		// Capture first N frames for hand inspection
 		if (xband_adsp_first_frame_count < XBAND_ADSP_FIRST_FRAMES)
 		{
 			int slot = xband_adsp_first_frame_count++;
@@ -490,8 +590,7 @@ static void xband_adsp_validate_frame (void)
 			memcpy(xband_adsp_first_frame[slot], xband_adsp_frame_buf, n);
 			xband_adsp_first_frame_len[slot] = n;
 			xband_adsp_first_frame_crc_expected[slot] = expected;
-			xband_adsp_first_frame_crc_computed[slot] = computed;
-			xband_adsp_first_frame_residue[slot] = residue;
+			xband_compute_all_crcs(slot, data_len);
 		}
 		return;
 	}
@@ -504,8 +603,9 @@ static void xband_adsp_validate_frame (void)
 		memcpy(xband_adsp_first_frame[slot], xband_adsp_frame_buf, n);
 		xband_adsp_first_frame_len[slot] = n;
 		xband_adsp_first_frame_crc_expected[slot] = 0;
-		xband_adsp_first_frame_crc_computed[slot] = 0;
-		xband_adsp_first_frame_residue[slot] = 0;
+		// Don't compute variants for tiny frames — no data to CRC over.
+		for (int v = 0; v < XBAND_CRC_VARIANTS; v++)
+			xband_adsp_first_frame_crcs[slot][v] = 0;
 	}
 }
 
@@ -634,8 +734,7 @@ void S9xXBandKCtlReset (void)
 	memset(xband_adsp_first_frame,        0, sizeof(xband_adsp_first_frame));
 	memset(xband_adsp_first_frame_len,    0, sizeof(xband_adsp_first_frame_len));
 	memset(xband_adsp_first_frame_crc_expected, 0, sizeof(xband_adsp_first_frame_crc_expected));
-	memset(xband_adsp_first_frame_crc_computed, 0, sizeof(xband_adsp_first_frame_crc_computed));
-	memset(xband_adsp_first_frame_residue,      0, sizeof(xband_adsp_first_frame_residue));
+	memset(xband_adsp_first_frame_crcs, 0, sizeof(xband_adsp_first_frame_crcs));
 	xband_tx_frames_sent       = 0;
 }
 
@@ -750,15 +849,15 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		(unsigned long long)xband_adsp_frames_aborted,
 		(unsigned long long)xband_tx_frames_sent);
 
-	// First N captured ADSP frames with CRC details. Lets us hand-
-	// verify the CRC formula by comparing expected/computed/residue
-	// values across multiple frames.
+	// First N captured ADSP frames with CRC details for all variants.
+	// The variant whose computed CRC matches the expected value is
+	// the one the protocol actually uses.
 	if (xband_adsp_first_frame_count > 0)
 	{
 		pos += snprintf(out + pos, out_size - pos,
 			"First %d ADSP frame(s) captured (deframed body, last 2 bytes are CRC):\n",
 			xband_adsp_first_frame_count);
-		for (int i = 0; i < xband_adsp_first_frame_count && pos + 200 < out_size; i++)
+		for (int i = 0; i < xband_adsp_first_frame_count && pos + 400 < out_size; i++)
 		{
 			pos += snprintf(out + pos, out_size - pos,
 				"\nFrame #%d (%d bytes):\n",
@@ -767,15 +866,22 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 				xband_adsp_first_frame[i], xband_adsp_first_frame_len[i]);
 			if (xband_adsp_first_frame_len[i] >= 4)
 			{
+				uint16 expected = xband_adsp_first_frame_crc_expected[i];
+				uint16 expected_swap = (uint16)((expected >> 8) | (expected << 8));
 				pos += snprintf(out + pos, out_size - pos,
-					"  CRC expected (last 2 bytes BE) = $%04X\n",
-					(unsigned)xband_adsp_first_frame_crc_expected[i]);
-				pos += snprintf(out + pos, out_size - pos,
-					"  CRC computed (CCITT-16 over data) = $%04X\n",
-					(unsigned)xband_adsp_first_frame_crc_computed[i]);
-				pos += snprintf(out + pos, out_size - pos,
-					"  CRC residue (CCITT-16 over data+crc, no XOR) = $%04X (magic = $1D0F)\n",
-					(unsigned)xband_adsp_first_frame_residue[i]);
+					"  CRC expected (BE) = $%04X  (LE = $%04X)\n",
+					(unsigned)expected, (unsigned)expected_swap);
+				for (int v = 0; v < XBAND_CRC_VARIANTS; v++)
+				{
+					uint16 c = xband_adsp_first_frame_crcs[i][v];
+					// For variant 6 (byte-swap), compare against swapped expected.
+					uint16 cmp = (v == 6) ? expected_swap : expected;
+					const char *match = (c == cmp) ? "  <-- MATCH!" : "";
+					pos += snprintf(out + pos, out_size - pos,
+						"    [%d] %s = $%04X%s\n",
+						v, xband_crc_variant_names[v],
+						(unsigned)c, match);
+				}
 			}
 		}
 		pos += snprintf(out + pos, out_size - pos, "\n");

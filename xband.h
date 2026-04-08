@@ -122,6 +122,16 @@ bool8	S9xLoadXBandBIOS (void);
 // SaveSRAM picks up the current XBAND SRAM contents on shutdown.
 void	S9xXBandSyncSRAMOut (void);
 
+// User-selected SRAM dump filename for the BIOS_DIR loader. Set via
+// the Win32 Netplay menu (XBAND: Use SRAM ...). Empty string =
+// auto-pick from default candidate list.
+void	S9xXBandSetPreferredSRAM (const char *name);
+const char *S9xXBandGetPreferredSRAM (void);
+
+// Reload the SRAM image from disk into XBand.sram[]. Caller should
+// trigger a SNES reset afterwards so the BIOS re-reads the contents.
+bool8	S9xXBandReloadSRAM (void);
+
 // Network bridging.
 bool8	S9xXBandConnect (const char *host, int port);
 void	S9xXBandDisconnect (void);

@@ -2024,9 +2024,31 @@ extern bool   XBandFirstBrkSeen;
 // snes9x's auto-save / oops-save / shutdown-save paths. The user
 // drops one of the preserved Cinghialotto SNES-XBandSRAMs files into
 // the BIOS dir and the BIOS picks it up on every boot.
+// User-selected SRAM dump filename (set via S9xXBandSetPreferredSRAM
+// from the Win32 Netplay menu). When set, xband_load_sram_image tries
+// this file first; otherwise it falls through to the default candidate
+// list. Empty string means "auto-pick first available".
+static char xband_preferred_sram[64] = {0};
+
+void S9xXBandSetPreferredSRAM (const char *name)
+{
+	if (!name)
+	{
+		xband_preferred_sram[0] = 0;
+		return;
+	}
+	strncpy(xband_preferred_sram, name, sizeof(xband_preferred_sram) - 1);
+	xband_preferred_sram[sizeof(xband_preferred_sram) - 1] = 0;
+}
+
+const char *S9xXBandGetPreferredSRAM (void)
+{
+	return xband_preferred_sram[0] ? xband_preferred_sram : NULL;
+}
+
 static bool xband_load_sram_image (void)
 {
-	const char *candidates[] = {
+	const char *default_candidates[] = {
 		"XBAND.srm",
 		"xband.srm",
 		"XBAND.bin",
@@ -2037,12 +2059,29 @@ static bool xband_load_sram_image (void)
 		NULL
 	};
 	FILE *f = NULL;
-	for (int i = 0; candidates[i] != NULL && !f; i++)
+	std::string used_path;
+
+	// Try the user-selected file first.
+	if (xband_preferred_sram[0])
 	{
 		std::string p = S9xGetDirectory(BIOS_DIR);
 		p += SLASH_STR;
-		p += candidates[i];
+		p += xband_preferred_sram;
 		f = fopen(p.c_str(), "rb");
+		if (f)
+			used_path = p;
+	}
+
+	// Fall back to default candidate list if no preferred file or
+	// preferred file isn't there.
+	for (int i = 0; default_candidates[i] != NULL && !f; i++)
+	{
+		std::string p = S9xGetDirectory(BIOS_DIR);
+		p += SLASH_STR;
+		p += default_candidates[i];
+		f = fopen(p.c_str(), "rb");
+		if (f)
+			used_path = p;
 	}
 	if (!f) return false;
 
@@ -2060,6 +2099,15 @@ static bool xband_load_sram_image (void)
 	size_t r = fread(XBand.sram, 1, XBAND_SRAM_SIZE, f);
 	fclose(f);
 	return (r == XBAND_SRAM_SIZE);
+}
+
+// Public re-entry point: reload the SRAM image from the preferred (or
+// default-fallback) file. Used by the Netplay menu when the user picks
+// a different SRAM dump. Caller is responsible for triggering a SNES
+// reset afterwards so the BIOS re-reads the new contents.
+bool8 S9xXBandReloadSRAM (void)
+{
+	return xband_load_sram_image() ? TRUE : FALSE;
 }
 
 void S9xXBandSyncSRAMOut (void)

@@ -501,6 +501,10 @@
 #define ID_XBAND_CONNECT_XBAND          40197
 #define ID_XBAND_CONNECT_BARE           40198
 #define ID_XBAND_CONNECT_XBSERVER       40199
+#define ID_XBAND_SRAM_AUTO              40200
+#define ID_XBAND_SRAM_BENNER            40201
+#define ID_XBAND_SRAM_LUKE2             40202
+#define ID_XBAND_SRAM_SF2DXB            40203
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083

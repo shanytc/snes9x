@@ -3094,6 +3094,109 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			break;
+        case ID_XBAND_FAKE_INJECT_END:
+        case ID_XBAND_FAKE_INJECT_DATETIME:
+        case ID_XBAND_FAKE_INJECT_USERNUM:
+        case ID_XBAND_FAKE_INJECT_VALIDATE:
+			{
+				// Phase A fake-server injection: synthesize a single
+				// ADSP-framed ServerTalk reply and push it into rxbuf
+				// so the BIOS reads it as if from the wire. The
+				// connID/seq numbers come from the live connection
+				// (sniffed by xband_servertalk_dispatch_*). Use the
+				// kctl trace dump afterwards to see whether the BIOS
+				// actually consumed the bytes and what it did next.
+				uint8 op = 0x02;       // msEndOfStream
+				uint8 payload[8];
+				int   payload_len = 0;
+				const char *label = "msEndOfStream";
+
+				switch (LOWORD(wParam))
+				{
+				case ID_XBAND_FAKE_INJECT_END:
+					op = 0x02;  // msEndOfStream
+					payload_len = 0;
+					label = "msEndOfStream";
+					break;
+				case ID_XBAND_FAKE_INJECT_DATETIME:
+					op = 0x04;  // msSetDateAndTime
+					// Per sample_packets.txt: 4 bytes date + 5 bytes
+					// time. Use a plausible 1995 date for now -- the
+					// BIOS might validate the format more than the
+					// value, so any well-formed value should work.
+					payload[0] = 0x00; payload[1] = 0x00;
+					payload[2] = 0x59; payload[3] = 0xC3;  // raw date
+					payload[4] = 0x00; payload[5] = 0x00;
+					payload[6] = 0x31; payload[7] = 0xDC;  // raw time
+					payload_len = 8;
+					label = "msSetDateAndTime (1995-ish)";
+					break;
+				case ID_XBAND_FAKE_INJECT_USERNUM:
+					op = 0x3E;  // msSetCurrentUserNumber (decimal 62)
+					payload[0] = 0x00;  // user number 0 = profile 1
+					payload_len = 1;
+					label = "msSetCurrentUserNumber 0";
+					break;
+				case ID_XBAND_FAKE_INJECT_VALIDATE:
+					op = 0x3B;  // msReceiveValidationToken (decimal 59)
+					// Token bytes are opaque to us; send 4 zero bytes
+					// as a placeholder. Real format unknown.
+					payload[0] = payload[1] = payload[2] = payload[3] = 0;
+					payload_len = 4;
+					label = "msReceiveValidationToken (zero token)";
+					break;
+				}
+
+				bool ok = S9xXBandFakeInject(op, payload, payload_len);
+				char buf[512];
+				snprintf(buf, sizeof(buf),
+					"Inject %s: %s\n\n"
+					"Use 'XBAND: Show Kill/Ctrl Trace' afterwards to\n"
+					"see whether the BIOS consumed the injected bytes\n"
+					"and what state it's in now.",
+					label, ok ? "OK" : "FAILED");
+				MessageBoxA(GUI.hWnd, buf, "XBAND Fake Inject",
+					ok ? (MB_OK | MB_ICONINFORMATION)
+					   : (MB_OK | MB_ICONWARNING));
+			}
+			break;
+        case ID_XBAND_FAKE_TOGGLE_CONNID:
+			{
+				S9xXBandFakeToggleConnIDSource();
+				char buf[256];
+				snprintf(buf, sizeof(buf),
+					"Fake-inject ConnID source is now: %s\n\n"
+					"SRV mode = use the live server's source connID "
+					"(Apple ADSP standard).\n"
+					"BOX mode = use the box's source connID (xbsega "
+					"echo-back model).\n\n"
+					"Try injecting again and check whether box.next_recv "
+					"advances.",
+					S9xXBandFakeConnIDSourceLabel());
+				MessageBoxA(GUI.hWnd, buf, "XBAND Fake ConnID",
+					MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+        case ID_XBAND_FAKE_INJECT_LOGIN:
+			{
+				// Bundled login reply: date+time + user num + token +
+				// end of stream, all in one ADSP segment.
+				bool ok = S9xXBandFakeInjectLoginReply();
+				char buf[512];
+				snprintf(buf, sizeof(buf),
+					"Inject Fake Login Reply: %s\n\n"
+					"Bundle: msSetDateAndTime + msSetCurrentUserNumber 0 +\n"
+					"        msReceiveValidationToken + msEndOfStream\n\n"
+					"This mimics what a real server would send after the\n"
+					"box's login dump. Use 'XBAND: Show Kill/Ctrl Trace'\n"
+					"after a few seconds to see if the BIOS state\n"
+					"advances further than the bare-msEndOfStream test.",
+					ok ? "OK" : "FAILED");
+				MessageBoxA(GUI.hWnd, buf, "XBAND Fake Inject Login",
+					ok ? (MB_OK | MB_ICONINFORMATION)
+					   : (MB_OK | MB_ICONWARNING));
+			}
+			break;
         case ID_NETPLAY_SYNC:
             S9xNPServerQueueSyncAll ();
             break;

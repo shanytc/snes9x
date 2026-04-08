@@ -224,6 +224,7 @@ static uint64 xband_adsp_frames_total    = 0;
 static uint64 xband_adsp_frames_good_crc = 0;
 static uint64 xband_adsp_frames_bad_crc  = 0;
 static uint64 xband_adsp_frames_aborted  = 0;
+static uint64 xband_adsp_frames_control  = 0;  // tiny <4-byte (no CRC)
 
 // First N captured RX frames, for inspection in the kctl dump. Store
 // up to 4 so we can compare structures and CRC values side-by-side.
@@ -566,8 +567,9 @@ static void xband_adsp_validate_frame (void)
 	xband_adsp_frames_total++;
 	if (xband_adsp_frame_pos < 4)
 	{
-		// Too short to have data + CRC. Probably a tiny control frame.
-		xband_adsp_frames_bad_crc++;
+		// Too short to have data + CRC. ADSP control frames (e.g.
+		// the 2-byte $1E0F probe) — no CRC to validate.
+		xband_adsp_frames_control++;
 	}
 	else
 	{
@@ -729,6 +731,7 @@ void S9xXBandKCtlReset (void)
 	xband_adsp_frames_total    = 0;
 	xband_adsp_frames_good_crc = 0;
 	xband_adsp_frames_bad_crc  = 0;
+	xband_adsp_frames_control  = 0;
 	xband_adsp_frames_aborted  = 0;
 	xband_adsp_first_frame_count = 0;
 	memset(xband_adsp_first_frame,        0, sizeof(xband_adsp_first_frame));
@@ -818,6 +821,7 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		"  RX frames total   = %llu\n"
 		"  RX frames good CRC= %llu\n"
 		"  RX frames bad CRC = %llu\n"
+		"  RX frames control = %llu (tiny <4-byte, no CRC field)\n"
 		"  RX frames aborted = %llu (invalid escape sequence)\n"
 		"  TX frames sent    = %llu (\\x10\\x03-terminated packets)\n"
 		"\n",
@@ -846,6 +850,7 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		(unsigned long long)xband_adsp_frames_total,
 		(unsigned long long)xband_adsp_frames_good_crc,
 		(unsigned long long)xband_adsp_frames_bad_crc,
+		(unsigned long long)xband_adsp_frames_control,
 		(unsigned long long)xband_adsp_frames_aborted,
 		(unsigned long long)xband_tx_frames_sent);
 

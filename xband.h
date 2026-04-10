@@ -161,6 +161,120 @@ const char *S9xXBandFakeConnIDSourceLabel (void);
 // and msEndOfStream. Returns true on successful injection.
 bool	S9xXBandFakeInjectLoginReply (void);
 
+// Inject a "cart-supported" canned reply for the post-Challenge flow.
+// After clicking Challenge, the BIOS sends msGAMEIDAndPatchVersion
+// to the server and waits for confirmation that the game is in the
+// supported list. This inject sends an empty msGamePatch (the in-game
+// controller-input patch the BIOS would normally install) followed
+// by msEndOfStream, telling the BIOS "yes, cart accepted, no patch
+// needed". Should advance the BIOS into the matchmaking flow without
+// needing a real per-game patch. Returns true on successful injection.
+bool	S9xXBandFakeInjectGameSupported (void);
+
+// Inject the real SSF2.JSNES game patch from BIOS_DIR. Reads the
+// 3.3 KB patch file (from the Cinghialotto/xband repo) and chains
+// it across multiple ADSP segments with sequential send_seq numbers
+// so the BIOS reassembles it as a single msGamePatch ServerTalk
+// message. Requires SSF2.JSNES to be present in win32/BIOS/.
+// Returns true on successful injection.
+bool	S9xXBandFakeInjectSSF2Patch (void);
+
+// Inject a fake msNewNGPList that maps the BIOS's broken default
+// cart hash ($F7 2B 5D 1A) to "Super Street Fighter II". Used to
+// test whether the BIOS uses the NGP list as its supported-games
+// table when deciding whether to show "not an XBAND Card".
+bool	S9xXBandFakeInjectFakeNGPList (void);
+
+// Toggle the Fred bank-mux (cart-detection swap). When enabled, a
+// non-zero write to the XBAND kill register at $FB:FE01 maps the
+// game cart from slot B into the HiROM range so the BIOS can read
+// cart bytes during cart identification; a zero write restores
+// the BIOS view. OFF by default because the BIOS may write to the
+// kill register during early boot before its WRAM trampoline is
+// set up. Returns the new state.
+bool	S9xXBandToggleBankMux (void);
+bool	S9xXBandGetBankMux (void);
+
+// Search WRAM, XBAND SRAM, Fred regs, and modem regs for the
+// BIOS's cached cart-id bytes ($F7 $2B $5D $1A). Writes a
+// human-readable report into `out`. Used to find where the BIOS
+// stores its computed cart-id so we can override it before the
+// local Challenge cart-check fires.
+void	S9xXBandSearchCartIDInMemory (char *out, size_t out_size);
+
+// Called from the getset.h S9xGetByte read interceptor whenever the
+// CPU reads from $7F:$0C8B-$0C8E with the spoofer enabled. Records
+// the PC + byte offset + returned value so we can see which BIOS
+// instructions read the cart-id cache and disassemble around them.
+void	S9xXBandLogCartIDRead (uint32 pc, int byte_off, uint8 byte_val);
+
+// Called from getset.h S9xSetByte for any write to $7F:$0C8B-$0C8E.
+// Captures the writer's PC -- this is the cart-id computation
+// function we've been hunting. The writer's PC is much more useful
+// than the consumer PCs because it points directly at the function
+// that decides what value to store.
+void	S9xXBandLogCartIDWrite (uint32 pc, int byte_off, uint8 byte_val);
+
+// Overwrite every match of $F7 $2B $5D $1A in the searched
+// memory regions with $D8 $22 $21 $03 (SSF2 Japan's expected
+// GameID). Returns the number of locations modified. Used to
+// bypass the BIOS's local cart-detection check by stomping the
+// cached value the BIOS reads at Challenge click time.
+int	S9xXBandForceCartIDOverride (char *out, size_t out_size);
+
+// Toggle the TX GameID spoofer. When ON, every outgoing ADSP frame
+// is parsed and any byte sequence matching $0C $F7 $2B $5D $1A
+// (msGAMEIDAndPatchVersion + the BIOS's broken default cart hash)
+// is rewritten to $0C $D8 $22 $21 $03 (SSF2 Japan's expected
+// GameID per xbsega.go) before sending. The frame's CRC is
+// recomputed over the modified body. Used to fool the server (and
+// our own fake-server injects) into thinking the box has SSF2
+// Japan loaded even though the BIOS's cart-detection produces
+// garbage. OFF by default. Returns the new state.
+bool	S9xXBandToggleGameIDSpoof (void);
+bool	S9xXBandGetGameIDSpoof (void);
+
+// Cart-id spoof value table. The interceptor returns whichever value
+// is currently selected via S9xXBandSetSpoofValueByIndex(). The list
+// is a fixed set of ~19 candidates pulled from xbsega.go and the
+// commented-out SNES game hashes in the same file -- intended for
+// brute-forcing which value the BIOS's local supported-games table
+// accepts. The Win32 menu builds one MENUITEM per candidate.
+void		S9xXBandCycleSpoofValue (void);
+bool		S9xXBandSetSpoofValueByIndex (int idx);
+int			S9xXBandGetSpoofValueCount (void);
+const char *S9xXBandGetSpoofValueLabelAt (int idx);
+const uint8 *S9xXBandGetSpoofValueBytesAt (int idx);
+const char *S9xXBandSpoofValueLabel (void);
+const uint8 *S9xXBandSpoofValueBytes (void);
+
+// BIOS firmware scan output. memmap.cpp's multi-cart loader scans
+// the BIOS image for dialog-trigger references (PEA #$4C54 etc.) at
+// load time and uses these to publish the results into the kctl
+// trace dialog. Reset clears the buffer; Append adds a line/string.
+void	S9xXBandResetDialogScan (void);
+void	S9xXBandAppendDialogScan (const char *line);
+
+// Inject a complete login + matchmaking server response. Force-primes
+// the ADSP sniffer state so it works even without a live server
+// connection. Sends: login reply, NGP list (SSF2 Japan), wait for
+// opponent, in three ADSP batches.
+bool	S9xXBandFakeInjectMatchmaking (void);
+
+// Auto-sequencing fake server. Injects messages in rounds, waiting
+// for the BIOS to respond between each round. Start it via the menu;
+// it ticks automatically on every kreadmstatus2 poll.
+void	S9xXBandFakeServerStart (void);
+void	S9xXBandFakeServerStop (void);
+int		S9xXBandFakeServerState (void);
+
+// kDispatcherVector ($E0:$0040) call logger. cpuexec.cpp's main loop
+// traps PBPC == $00E00040 and calls S9xXBandLogDispatcherCall() with
+// the caller PC (read from the stack), function ID (X), and the
+// accumulator (A). Dump appears in the kctl trace dialog.
+void	S9xXBandLogDispatcherCall (uint32 caller, uint16 func_id, uint16 a);
+void	S9xXBandResetDispatcherLog (void);
+
 // Runtime toggle for the HELO\n RX filter. When `on`, HELO\n probes
 // from the server are stripped before reaching the BIOS. When `off`,
 // raw bytes pass through. Defaults to ON. Used by the GUI to A/B

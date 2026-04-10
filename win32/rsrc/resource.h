@@ -511,6 +511,19 @@
 #define ID_XBAND_FAKE_INJECT_VALIDATE   40207
 #define ID_XBAND_FAKE_TOGGLE_CONNID     40208
 #define ID_XBAND_FAKE_INJECT_LOGIN      40209
+#define ID_XBAND_TOGGLE_BANKMUX         40210
+#define ID_XBAND_FAKE_INJECT_GAMESUPP   40211
+#define ID_XBAND_FAKE_INJECT_SSF2PATCH  40212
+#define ID_XBAND_TOGGLE_GAMEID_SPOOF    40213
+#define ID_XBAND_FAKE_INJECT_NGPLIST    40214
+#define ID_XBAND_SEARCH_CARTID          40215
+#define ID_XBAND_FORCE_CARTID           40216
+#define ID_XBAND_CYCLE_SPOOF            40217
+#define ID_XBAND_FAKE_INJECT_MATCHMAKING 40218
+// Spoof candidate sub-menu IDs. 19 candidates currently, leave
+// headroom up to 64 entries (40300..40363). Keep range contiguous.
+#define ID_XBAND_SPOOF_BASE             40300
+#define ID_XBAND_SPOOF_LAST             40363
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083

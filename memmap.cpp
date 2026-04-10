@@ -5554,17 +5554,6 @@ static void xband_apply_loop_break_patch (uint32 bios_base)
 void CMemory::Map_XBandHiROMMap (void)
 {
 	printf("Map_XBandHiROMMap\n");
-#ifdef _WIN32
-	{
-		char msg[256];
-		_snprintf(msg, sizeof(msg) - 1,
-			"Map_XBandHiROMMap (standalone path)\n"
-			"CalculatedSize = %u KB",
-			(unsigned)CalculatedSize / 1024);
-		msg[sizeof(msg) - 1] = 0;
-		MessageBoxA(NULL, msg, "XBAND map", MB_OK);
-	}
-#endif
 
 	// Released XBAND BIOS (internal name "XBAND VIDEOGAME" at $FFB0)
 	// is HiROM. Lay out the firmware ROM as standard HiROM in banks
@@ -5605,52 +5594,401 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 	printf("Map_XBandMultiCartHiROMMap (BIOS=%uKB, GAME=%uKB)\n",
 		(unsigned)Multi.cartSizeA / 1024,
 		(unsigned)Multi.cartSizeB / 1024);
-#ifdef _WIN32
-	{
-		char msg[512];
-		const char *gameName = (Multi.cartSizeB && Multi.fileNameB[0])
-			? Multi.fileNameB : "(none)";
-		_snprintf(msg, sizeof(msg) - 1,
-			"Map_XBandMultiCartHiROMMap (multicart path)\n"
-			"\n"
-			"Slot A (BIOS):  %u KB\n"
-			"Slot B (game):  %u KB\n"
-			"Game file:      %s\n"
-			"\n"
-			"Note: game-cart bytes are NOT yet exposed to the SNES\n"
-			"address space (Fred bank-mux not implemented). The BIOS\n"
-			"will see the same state as standalone-no-cart mode.",
-			(unsigned)Multi.cartSizeA / 1024,
-			(unsigned)Multi.cartSizeB / 1024,
-			gameName);
-		msg[sizeof(msg) - 1] = 0;
-		MessageBoxA(NULL, msg, "XBAND map", MB_OK);
-	}
-#endif
 	map_System();
 
-	// XBAND BIOS firmware lives in slot A. Map it identically to
-	// the standalone path (HiROM, mirrored into $00-$3F so the
-	// reset vector at $00:$FFFC reads the BIOS reset vector and
-	// jumps to $D0:0000 where the firmware lives).
+	// Multi-cart layout follows the bsnes-plus xband_gameplay branch
+	// (cartridge_GAMEPLAY.hpp lines 519-520). The XBAND BIOS firmware
+	// only occupies TWO bank ranges:
 	//
-	// The game cart in slot B is intentionally NOT mapped into the
-	// SNES address space here. On real hardware the Fred chip is
-	// responsible for muxing BIOS vs game-cart accesses on a
-	// per-bank basis (Fred patch vectors). Without that, dropping
-	// the game cart at $00-$3F would let the SNES boot directly
-	// into the game and skip the BIOS entirely. Until Fred bank
-	// muxing is implemented, the game cart bytes sit unused in the
-	// ROM buffer at Multi.cartOffsetB and the BIOS will report "no
-	// cart detected" — the same as a real XBAND with the door open.
-	map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
+	//   $D0-$DF:$0000-$FFFF   BIOS firmware (linear, 1 MB)
+	//   $50-$5F:$0000-$FFFF   BIOS shadow mirror (1 MB)
+	//
+	// All other HiROM banks are free for the game cart in slot B,
+	// laid out as a standard HiROM cart. This way the BIOS can read
+	// the game cart's SNES header at $C0:$FFB0 (and the $00:$FFB0
+	// mirror) directly from Memory.Map[], no Fred bank-mux required.
+	//
+	// The one wrinkle is the SNES reset vector at $00:$FFFC. The CPU
+	// reads it on power-on and it must point at the BIOS entry, not
+	// the cart entry. So we override the upper 4KB of bank $00 (the
+	// vector area) with BIOS bytes after the cart map is laid down.
+	// Same for the $80:$Fxxx mirror for safety.
+	if (Multi.cartSizeB)
+	{
+		// Game cart in slot B fills the standard HiROM range first.
+		map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
+		                 Multi.cartSizeB, Multi.cartOffsetB);
+		map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
+		                 Multi.cartSizeB, Multi.cartOffsetB);
+		map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
+		                 Multi.cartSizeB, Multi.cartOffsetB);
+		map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
+		                 Multi.cartSizeB, Multi.cartOffsetB);
+	}
+	else
+	{
+		// No game cart loaded -- fall back to BIOS-only layout so
+		// the BIOS still boots normally.
+		map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
+		                 Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
+		                 Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
+		                 Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
+		                 Multi.cartSizeA, Multi.cartOffsetA);
+	}
+
+	// XBAND BIOS firmware overlay -- $D0-$DF (canonical) + $50-$5F
+	// (shadow). These overwrite whatever the cart placed there above
+	// because they're called after the cart map.
+	map_hirom_offset(0xd0, 0xdf, 0x0000, 0xffff,
 	                 Multi.cartSizeA, Multi.cartOffsetA);
-	map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
+	map_hirom_offset(0x50, 0x5f, 0x0000, 0xffff,
 	                 Multi.cartSizeA, Multi.cartOffsetA);
-	map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
-	map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
+
+	// Reset/IRQ vector preservation. The SNES reads the reset vector
+	// at $00:$FFFC on power-on; if that area is cart bytes, the SNES
+	// will boot the GAME instead of the BIOS. Override the upper 4KB
+	// of bank $00 (and bank $80 for the mirror) so the vector area
+	// always reads BIOS bytes regardless of what the cart claims.
+	// The BIOS firmware contains its own reset vector at the same
+	// $XX:$FFFC offset, so the math just works out.
+	if (Multi.cartSizeB)
+	{
+		map_hirom_offset(0x00, 0x00, 0xf000, 0xffff,
+		                 Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0x80, 0x80, 0xf000, 0xffff,
+		                 Multi.cartSizeA, Multi.cartOffsetA);
+	}
+
+	// DIALOG TRIGGER SCAN. The BIOS shows a "This game may not be
+	// available on XBAND" dialog whose descriptor lives at $D8:$4C54
+	// (msgID $021D, string at $D8:$4C69). The previous PATCH TEST OK
+	// experiment confirmed the dialog string is read directly out of
+	// ROM via snes9x's inline fast path (bypassing S9xGetByte), and
+	// also confirmed we can patch BIOS firmware bytes at load time.
+	//
+	// PRIOR FINDING: The msgID $021D and descriptor address $4C54
+	// are referenced *only* in the registration call at $D2:$45C9
+	// (PEA #$4C54 / LDA #$001E / PHA / LDA #$021D / PHA / LDX #$0007
+	// / JSL $E0:$0040). The registration callee $E0:$0040 is in
+	// XBAND SRAM, NOT in the BIOS firmware -- meaning the dialog
+	// system (registry, lookup, renderer) is implemented in SRAM
+	// code we cannot statically scan. So the only way to suppress
+	// the dialog from BIOS firmware bytes is to break the
+	// registration so the SRAM-side trigger's lookup returns null.
+	//
+	// We still run the scan because it's useful documentation, but
+	// we now expect to find no further hits beyond the registration.
+	if (Memory.ROM && Multi.cartOffsetA + Multi.cartSizeA <= Memory.CalculatedSize)
+	{
+		uint8 *bios = Memory.ROM + Multi.cartOffsetA;
+		uint32 sz = Multi.cartSizeA;
+		char line[200];
+
+		S9xXBandResetDialogScan();
+		S9xXBandResetDispatcherLog();
+		snprintf(line, sizeof(line),
+			"  scanning BIOS (%u bytes) for dialog refs\n"
+			"  descriptor=$D8:$4C54  string=$D8:$4C69  msgID=$021D\n",
+			sz);
+		S9xXBandAppendDialogScan(line);
+
+		// 1) Dump 32 bytes of the dialog descriptor itself so we can see
+		//    its structure (string ptr, flags, handler ptr, etc).
+		{
+			uint32 desc_off = 0x84C54; // $D8:$4C54
+			if (desc_off + 32 < sz)
+			{
+				S9xXBandAppendDialogScan("\n  descriptor bytes at $D8:$4C54:\n   ");
+				for (int i = 0; i < 32; i++)
+				{
+					char b[8];
+					snprintf(b, sizeof(b), " %02X", bios[desc_off + i]);
+					S9xXBandAppendDialogScan(b);
+					if (i == 15)
+						S9xXBandAppendDialogScan("\n   ");
+				}
+				S9xXBandAppendDialogScan("\n\n");
+			}
+		}
+
+		// 2) Dump 64 bytes around the registration call at $C2:$45C9 so
+		//    we can read the full PEA/LDA/PHA/LDX/JSL pattern and any
+		//    surrounding entries that might form a dialog table.
+		{
+			uint32 reg_off = 0x245C9 - 16;
+			if (reg_off + 64 < sz)
+			{
+				char hdr[80];
+				snprintf(hdr, sizeof(hdr),
+					"  64 bytes around registration site $D2:$45B9:\n   ");
+				S9xXBandAppendDialogScan(hdr);
+				for (int i = 0; i < 64; i++)
+				{
+					char b[8];
+					snprintf(b, sizeof(b), " %02X", bios[reg_off + i]);
+					S9xXBandAppendDialogScan(b);
+					if ((i & 15) == 15 && i != 63)
+						S9xXBandAppendDialogScan("\n   ");
+				}
+				S9xXBandAppendDialogScan("\n\n");
+			}
+		}
+
+		// 2b) Dump 64 bytes around the false-positive LDX #$021D site
+		//     at $D4:$2A65. Disassembly showed this is a memory copy
+		//     routine using $021D as a RAM address index, NOT a
+		//     msgID. Kept for documentation only.
+		{
+			uint32 trig_off = 0x42A65 - 16;
+			if (trig_off + 64 < sz)
+			{
+				S9xXBandAppendDialogScan(
+					"  64 bytes around false-positive site $D4:$2A55:\n   ");
+				for (int i = 0; i < 64; i++)
+				{
+					char b[8];
+					snprintf(b, sizeof(b), " %02X", bios[trig_off + i]);
+					S9xXBandAppendDialogScan(b);
+					if ((i & 15) == 15 && i != 63)
+						S9xXBandAppendDialogScan("\n   ");
+				}
+				S9xXBandAppendDialogScan("\n\n");
+			}
+		}
+
+		// 3) Search the BIOS for various references to the descriptor,
+		//    string, and msgID. The known $245C9 / $245D0 hits will
+		//    appear in the PEA #$4C54 / LDA #$021D categories.
+		int hits = 0;
+		for (uint32 off = 0; off + 3 < sz; off++)
+		{
+			uint32 snes_bank = 0xD0 + (off >> 16);
+			uint32 snes_addr = off & 0xFFFF;
+			const uint8 *p = bios + off;
+			const char *kind = NULL;
+
+			// PEA #$4C54  -> F4 54 4C
+			if (p[0] == 0xF4 && p[1] == 0x54 && p[2] == 0x4C)
+				kind = "PEA #$4C54  ";
+			// LDA #$021D 16-bit imm -> A9 1D 02
+			else if (p[0] == 0xA9 && p[1] == 0x1D && p[2] == 0x02)
+				kind = "LDA #$021D  ";
+			// LDX #$4C54 -> A2 54 4C
+			else if (p[0] == 0xA2 && p[1] == 0x54 && p[2] == 0x4C)
+				kind = "LDX #$4C54  ";
+			// LDY #$4C54 -> A0 54 4C
+			else if (p[0] == 0xA0 && p[1] == 0x54 && p[2] == 0x4C)
+				kind = "LDY #$4C54  ";
+			// PEA #$021D -> F4 1D 02
+			else if (p[0] == 0xF4 && p[1] == 0x1D && p[2] == 0x02)
+				kind = "PEA #$021D  ";
+			// CMP #$021D 16-bit -> C9 1D 02
+			else if (p[0] == 0xC9 && p[1] == 0x1D && p[2] == 0x02)
+				kind = "CMP #$021D  ";
+			// LDX #$021D -> A2 1D 02
+			else if (p[0] == 0xA2 && p[1] == 0x1D && p[2] == 0x02)
+				kind = "LDX #$021D  ";
+			// LDY #$021D -> A0 1D 02
+			else if (p[0] == 0xA0 && p[1] == 0x1D && p[2] == 0x02)
+				kind = "LDY #$021D  ";
+
+			if (kind)
+			{
+				snprintf(line, sizeof(line),
+					"  %s file=$%05X  SNES=$%02X:$%04X\n",
+					kind, off, snes_bank, snes_addr);
+				S9xXBandAppendDialogScan(line);
+				hits++;
+			}
+		}
+
+		// 4) 24-bit pointer scans. Any 3-byte sequence pointing to
+		//    $D8:$4C54 (descriptor) or $D8:$4C69 (string) is a hit:
+		//    descriptor pointer -> 54 4C D8
+		//    string     pointer -> 69 4C D8
+		for (uint32 off = 0; off + 2 < sz; off++)
+		{
+			const uint8 *p = bios + off;
+			if (p[0] == 0x54 && p[1] == 0x4C && p[2] == 0xD8)
+			{
+				snprintf(line, sizeof(line),
+					"  ptr->$D8:$4C54  file=$%05X  SNES=$%02X:$%04X\n",
+					off, 0xD0 + (off >> 16), off & 0xFFFF);
+				S9xXBandAppendDialogScan(line);
+				hits++;
+			}
+			else if (p[0] == 0x69 && p[1] == 0x4C && p[2] == 0xD8)
+			{
+				snprintf(line, sizeof(line),
+					"  ptr->$D8:$4C69  file=$%05X  SNES=$%02X:$%04X\n",
+					off, 0xD0 + (off >> 16), off & 0xFFFF);
+				S9xXBandAppendDialogScan(line);
+				hits++;
+			}
+		}
+
+		snprintf(line, sizeof(line), "  done, %d hits total\n\n", hits);
+		S9xXBandAppendDialogScan(line);
+
+		// 5) Raw $1D $02 word scan. Limited to even file offsets
+		//    (msgID tables are usually 2-byte aligned). Skip the
+		//    known registration entries we already found. Show
+		//    nearby bytes so the user can spot table-like patterns
+		//    (sequences of $02XX values).
+		S9xXBandAppendDialogScan(
+			"  raw $1D $02 word scan (even-aligned, +/- 4 bytes context):\n");
+		int raw_hits = 0;
+		for (uint32 off = 0; off + 1 < sz; off += 2)
+		{
+			if (bios[off] != 0x1D || bios[off+1] != 0x02)
+				continue;
+			// Skip the known registration site at $245D1.
+			if (off == 0x245D1)
+				continue;
+			if (raw_hits >= 64)
+			{
+				S9xXBandAppendDialogScan("  (truncated, >64 raw hits)\n");
+				break;
+			}
+			uint32 ctx_start = (off >= 4) ? off - 4 : 0;
+			uint32 ctx_end = off + 6;
+			if (ctx_end > sz) ctx_end = sz;
+			snprintf(line, sizeof(line),
+				"  $%05X (SNES $%02X:$%04X):",
+				off, 0xD0 + (off >> 16), off & 0xFFFF);
+			S9xXBandAppendDialogScan(line);
+			for (uint32 i = ctx_start; i < ctx_end; i++)
+			{
+				char b[8];
+				snprintf(b, sizeof(b), " %02X", bios[i]);
+				S9xXBandAppendDialogScan(b);
+			}
+			S9xXBandAppendDialogScan("\n");
+			raw_hits++;
+		}
+		snprintf(line, sizeof(line), "  raw scan: %d hits\n\n", raw_hits);
+		S9xXBandAppendDialogScan(line);
+
+		// (Removed: registration callee $E0:$0040 dump. The callee is
+		//  in XBAND SRAM, not the BIOS firmware file, so we can't read
+		//  it from Memory.ROM at multi-cart load time.)
+
+		// (Removed: dialog suppression patch test. The patch did not
+		//  prevent the dialog -- confirming the trigger lives in
+		//  XBAND SRAM, not BIOS firmware. The kDispatcherVector
+		//  logger in cpuexec.cpp + xband.cpp now traces every OS
+		//  function call so we can find the actual game-check site.)
+
+		// === CART-ID CHECK PATCH ===
+		// Disassembly of the cart-id processor at $D2:$5620 (found
+		// via the kDispatcherVector logger -- see project memory)
+		// reveals the supported-game decision is a single BNE at
+		// $D2:$5672:
+		//
+		//   $D2:$566B  LDX #$02E2          ; load cart-id query funcID
+		//   $D2:$566E  JSL $E0:$0040       ; query DB; A = 0 if found
+		//   $D2:$5672  D0 03   BNE +3      ; <-- DECISION
+		//   $D2:$5674  82 0B 00 BRL $5682  ;   if A==0 (found) -> success
+		//   $D2:$5677  A9 09 00 LDA #$0009  ;   FAILURE PATH
+		//   $D2:$567A  48        PHA
+		//   $D2:$567B  A2 0D 03  LDX #$030D ;   show "may not be available"
+		//   $D2:$567E  22 40 00 E0 JSL $E0:$0040
+		//   $D2:$5682  ...                  ; both paths converge
+		//
+		// Patching the BNE to NOP NOP forces fall-through to the
+		// unconditional BRL, skipping the show-dialog dispatch and
+		// taking the success path. File offset $25672 == $D2:$5672.
+		if (0x25673 < sz &&
+		    bios[0x25672] == 0xD0 &&
+		    bios[0x25673] == 0x03)
+		{
+			Memory.ROM[Multi.cartOffsetA + 0x25672] = 0xEA;
+			Memory.ROM[Multi.cartOffsetA + 0x25673] = 0xEA;
+			S9xXBandAppendDialogScan(
+				"\n  ** PATCH: $D2:$5672 BNE +3 -> NOP NOP\n"
+				"  ** cart-id check now always falls through to\n"
+				"  ** BRL $5682 (success path), skipping the\n"
+				"  ** $030D show-dialog dispatch.\n");
+		}
+		else
+		{
+			S9xXBandAppendDialogScan(
+				"\n  ** PATCH: skipped, expected D0 03 not found at $25672\n");
+		}
+
+		// === CART-ID PROCESSOR DUMP ===
+		// The dispatcher logger found the cart-id check at $D2:$5620-
+		// $56A0. The pattern is:
+		//   $D2:$5634 -> funcID $024B with A = $5D1A (cart-id low)
+		//   $D2:$5671 -> funcID $02E2 with A = $F72B (cart-id high)
+		// where $F72B5D1A is the cart-id we've been tracking. Dump
+		// 192 bytes of BIOS code around $D2:$5620 so we can
+		// disassemble the routine and find the comparison/branch
+		// that decides "supported vs unsupported".
+		{
+			char line[200];
+			S9xXBandAppendDialogScan(
+				"\n  cart-id processor at $D2:$5620 (192 bytes):\n   ");
+			uint32 cidp_off = 0x25620;
+			if (cidp_off + 192 < sz)
+			{
+				for (int i = 0; i < 192; i++)
+				{
+					char b[8];
+					snprintf(b, sizeof(b), " %02X", bios[cidp_off + i]);
+					S9xXBandAppendDialogScan(b);
+					if ((i & 15) == 15 && i != 191)
+						S9xXBandAppendDialogScan("\n   ");
+				}
+				S9xXBandAppendDialogScan("\n\n");
+			}
+		}
+
+		// === SUSPECTED DIALOG-SHOW SITE DUMP ===
+		// Right after the cart-id processor, $D3:$E475 calls funcID
+		// $030F with A = $4CF8. $4CF8 is just 144 bytes past our
+		// "this game may not be available" dialog string at $4C69 --
+		// looks like it's in the same dialog group. Dump $D3:$E460
+		// area + the descriptor area at $D8:$4CF8 so we can confirm
+		// what dialog $030F shows.
+		{
+			char line[200];
+			S9xXBandAppendDialogScan(
+				"  dialog-show site at $D3:$E460 (96 bytes):\n   ");
+			uint32 ds_off = 0x3E460;
+			if (ds_off + 96 < sz)
+			{
+				for (int i = 0; i < 96; i++)
+				{
+					char b[8];
+					snprintf(b, sizeof(b), " %02X", bios[ds_off + i]);
+					S9xXBandAppendDialogScan(b);
+					if ((i & 15) == 15 && i != 95)
+						S9xXBandAppendDialogScan("\n   ");
+				}
+				S9xXBandAppendDialogScan("\n\n");
+			}
+
+			S9xXBandAppendDialogScan(
+				"  data near $D8:$4CF8 (suspected next dialog, 64 bytes):\n   ");
+			uint32 dd_off = 0x84CF8;
+			if (dd_off + 64 < sz)
+			{
+				for (int i = 0; i < 64; i++)
+				{
+					char b[8];
+					snprintf(b, sizeof(b), " %02X", bios[dd_off + i]);
+					S9xXBandAppendDialogScan(b);
+					if ((i & 15) == 15 && i != 63)
+						S9xXBandAppendDialogScan("\n   ");
+				}
+				S9xXBandAppendDialogScan("\n");
+			}
+		}
+	}
 
 	// XBAND SRAM mirror window — same as standalone XBAND mode.
 	map_index(0xe0, 0xfa, 0x0000, 0xffff, MAP_XBAND, MAP_TYPE_RAM);
@@ -5674,6 +6012,54 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 
 	// Multicart XBAND load: BIOS lives at ROM offset Multi.cartOffsetA.
 	xband_apply_loop_break_patch(Multi.cartOffsetA);
+}
+
+// Fred bank-mux: when the BIOS asserts the kill register, the SNES
+// HiROM cartridge bus is electrically disconnected from the BIOS ROM
+// and reconnected to the game cart slot. The BIOS jumps to a small
+// trampoline in WRAM before flipping the kill bit, reads the cart
+// bytes (typically the SNES header for game identification), then
+// flips the kill bit back and returns to its own code. We mirror
+// that behavior by remapping the HiROM range in Memory.Map[]:
+//
+//   $00-$3F:$8000-$FFFF   HiROM mirror (lo half)
+//   $40-$7D:$0000-$FFFF   HiROM lo half
+//   $80-$BF:$8000-$FFFF   HiROM mirror (hi half)
+//   $C0-$DF:$0000-$FFFF   HiROM hi half (BIOS firmware lives here)
+//
+// $E0-$FF is XBAND-specific (SRAM mirror + MMIO) and never gets
+// remapped by either helper. The system / WRAM / write-protect
+// setup also stays put -- only ROM bank pointers move.
+void CMemory::Map_XBandMultiCartCartVisible (void)
+{
+	if (!Multi.cartSizeB)
+		return;  // no game cart loaded; nothing to expose
+
+	map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
+	                 Multi.cartSizeB, Multi.cartOffsetB);
+	map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
+	                 Multi.cartSizeB, Multi.cartOffsetB);
+	map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
+	                 Multi.cartSizeB, Multi.cartOffsetB);
+	map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
+	                 Multi.cartSizeB, Multi.cartOffsetB);
+
+	// Re-apply write protection so MAP_NONE writes still get caught.
+	map_WriteProtectROM();
+}
+
+void CMemory::Map_XBandMultiCartBiosVisible (void)
+{
+	map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+	map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+	map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+	map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
+	                 Multi.cartSizeA, Multi.cartOffsetA);
+
+	map_WriteProtectROM();
 }
 
 void CMemory::Map_BSCartHiROMMap(void)

@@ -6156,6 +6156,19 @@ void S9xXBandPoll (void)
 						XBand.txbuf + body_start, body_len);
 				}
 			}
+
+			// Send on the socket (best-effort, may fail if server dropped).
+			if (XBand.socket_fd != (intptr_t)-2)
+			{
+				int sent = (int)send(fd, (const char *)send_data, send_len, 0);
+				if (sent > 0)
+					xband_sock_tx_bytes += sent;
+			}
+
+			// Advance txbufused over the ORIGINAL frame's bytes.
+			// Must always advance regardless of send result to
+			// prevent infinite loop.
+			XBand.txbufused += frame_len;
 		}
 		// If buffer is fully drained, reset positions to start.
 		if (XBand.txbufused >= XBand.txbufpos)

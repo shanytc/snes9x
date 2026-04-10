@@ -427,6 +427,33 @@ void S9xMainLoop (void)
 					else if (cpb == 0xD5)
 						XBandPCD5Sub[(Registers.PCw >> 12) & 0xF]++;
 					XBandPCBucketTotal++;
+
+					// kDispatcherVector trap. Every XBAND OS function call
+					// goes through `JSL $E0:$0040`. When PBPC reaches that
+					// address (start of dispatcher), read the JSL return
+					// address from the stack to identify the caller, then
+					// log it along with the function ID (X) and A. We
+					// trigger only on the first instruction of the
+					// dispatcher (PBPC == $00E00040 EXACTLY) so we don't
+					// re-log on every instruction inside the dispatcher.
+					if ((Registers.PBPC & 0x00FFFFFF) == 0x00E00040)
+					{
+						// JSL pushes 24-bit return address (PB, PCH, PCL).
+						// On entry to the callee, S+1 = PCL, S+2 = PCH,
+						// S+3 = PB. The address pushed is the address of
+						// the LAST byte of the JSL operand (because RTL
+						// reads back PB:PC then increments PC by 1).
+						uint16 s = Registers.S.W;
+						uint8 ra_lo  = S9xGetByte((uint32)((s + 1) & 0xFFFF));
+						uint8 ra_mid = S9xGetByte((uint32)((s + 2) & 0xFFFF));
+						uint8 ra_hi  = S9xGetByte((uint32)((s + 3) & 0xFFFF));
+						uint32 caller =
+							((uint32)ra_hi << 16) |
+							((uint32)ra_mid << 8) |
+							((uint32)ra_lo);
+						S9xXBandLogDispatcherCall(caller,
+							Registers.X.W, Registers.A.W);
+					}
 				}
 
 				if (CPU.Cycles > 1000000)

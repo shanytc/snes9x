@@ -2246,6 +2246,30 @@ LRESULT CALLBACK WinProc(
 			WinSaveConfigFile();
 			break;
 		}
+		// XBAND spoof-cart-ID picker sub-menu (40300..40363).
+		// Pick a specific candidate cart-id from the brute-force list.
+		else if (cmd_id >= ID_XBAND_SPOOF_BASE &&
+		         cmd_id <= ID_XBAND_SPOOF_LAST)
+		{
+			int idx = cmd_id - ID_XBAND_SPOOF_BASE;
+			if (S9xXBandSetSpoofValueByIndex(idx))
+			{
+				const uint8 *v = S9xXBandSpoofValueBytes();
+				char buf[256];
+				snprintf(buf, sizeof(buf),
+					"Spoof cart-id set to:\n\n"
+					"  $%02X $%02X $%02X $%02X  (%s)\n\n"
+					"This value is now what the read interceptor\n"
+					"returns for $7F:0C8B / $7F:2D15 / $7F:323B.\n\n"
+					"Make sure 'Toggle TX GameID Spoof' is ON,\n"
+					"then click Challenge to test.",
+					v[0], v[1], v[2], v[3],
+					S9xXBandSpoofValueLabel());
+				MessageBoxA(GUI.hWnd, buf, "XBAND Spoof Cart-ID",
+					MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+		}
 		switch (cmd_id)
 		{
 		case ID_FILE_AVI_RECORDING:
@@ -3013,16 +3037,110 @@ LRESULT CALLBACK WinProc(
 			break;
         case ID_XBAND_KCTL_TRACE:
 			{
-				// Dump the kill/control register access trace. We
-				// keep this in its own ring (separate from the noisy
-				// generic XBAND MMIO trace) so accesses to the four
-				// candidate kill/control addresses survive long enough
-				// to be inspected. Reset after dump so successive
-				// snapshots show only what happened between opens.
-				char text[16384];
-				S9xXBandKCtlDump(text, sizeof(text));
-				MessageBoxA(GUI.hWnd, text, "XBAND Kill/Ctrl Trace", MB_OK);
-				S9xXBandKCtlReset();
+				// Dump trace into a large buffer and show in a
+				// resizable window with a scrollable read-only edit
+				// control (textarea). Windows EDIT controls need
+				// \r\n for line breaks, so we convert after dumping.
+				{
+					static char text[262144];
+					static char crlf[524288]; // worst case: every char is \n
+					S9xXBandKCtlDump(text, sizeof(text));
+					text[sizeof(text) - 1] = '\0';
+
+					// Convert \n -> \r\n for Windows EDIT control.
+					{
+						char *src = text;
+						char *dst = crlf;
+						char *end = crlf + sizeof(crlf) - 2;
+						while (*src && dst < end)
+						{
+							if (*src == '\n')
+								*dst++ = '\r';
+							*dst++ = *src++;
+						}
+						*dst = '\0';
+					}
+
+					// Register a one-off window class so we get a
+					// proper movable/resizable frame with WM_SIZE.
+					static bool classRegistered = false;
+					static ATOM wndClass = 0;
+					if (!classRegistered)
+					{
+						WNDCLASSEXA wc = {};
+						wc.cbSize = sizeof(wc);
+						wc.lpfnWndProc = [](HWND hw, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT
+						{
+							switch (msg)
+							{
+							case WM_SIZE:
+							{
+								HWND edit = GetWindow(hw, GW_CHILD);
+								if (edit)
+								{
+									RECT rc;
+									GetClientRect(hw, &rc);
+									MoveWindow(edit, 0, 0, rc.right, rc.bottom, TRUE);
+								}
+								return 0;
+							}
+							case WM_CLOSE:
+								DestroyWindow(hw);
+								return 0;
+							case WM_DESTROY:
+								return 0;
+							default:
+								return DefWindowProcA(hw, msg, wp, lp);
+							}
+						};
+						wc.hInstance = (HINSTANCE)GetWindowLongPtr(GUI.hWnd, GWLP_HINSTANCE);
+						wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+						wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+						wc.lpszClassName = "XBandTraceWnd";
+						wndClass = RegisterClassExA(&wc);
+						classRegistered = true;
+					}
+
+					HINSTANCE hInst = (HINSTANCE)GetWindowLongPtr(GUI.hWnd, GWLP_HINSTANCE);
+					HWND dlg = CreateWindowExA(
+						0,
+						"XBandTraceWnd", "XBAND Kill/Ctrl Trace",
+						WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+						CW_USEDEFAULT, CW_USEDEFAULT, 900, 700,
+						NULL, NULL, hInst, NULL);
+					if (dlg)
+					{
+						RECT rc;
+						GetClientRect(dlg, &rc);
+						HWND edit = CreateWindowExA(
+							WS_EX_CLIENTEDGE,
+							"EDIT", NULL,
+							WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
+							ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL |
+							ES_AUTOHSCROLL,
+							0, 0, rc.right, rc.bottom,
+							dlg, NULL, hInst, NULL);
+						if (edit)
+						{
+							HFONT mono = CreateFontA(
+								14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+								DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+								CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+								FIXED_PITCH | FF_MODERN, "Consolas");
+							if (mono)
+								SendMessage(edit, WM_SETFONT, (WPARAM)mono, TRUE);
+							SetWindowTextA(edit, crlf);
+						}
+						// Pump messages until the window is closed.
+						MSG msg;
+						while (IsWindow(dlg) && GetMessage(&msg, NULL, 0, 0))
+						{
+							TranslateMessage(&msg);
+							DispatchMessage(&msg);
+						}
+					}
+					S9xXBandKCtlReset();
+				}
 			}
 			break;
         case ID_XBAND_TOGGLE_HELO_FILTER:
@@ -3193,6 +3311,184 @@ LRESULT CALLBACK WinProc(
 					"advances further than the bare-msEndOfStream test.",
 					ok ? "OK" : "FAILED");
 				MessageBoxA(GUI.hWnd, buf, "XBAND Fake Inject Login",
+					ok ? (MB_OK | MB_ICONINFORMATION)
+					   : (MB_OK | MB_ICONWARNING));
+			}
+			break;
+        case ID_XBAND_FAKE_INJECT_MATCHMAKING:
+			{
+				S9xXBandFakeServerStart();
+				MessageBoxA(GUI.hWnd,
+					"Fake server STARTED. Injects will happen automatically:\n\n"
+					"  Round 1: Login reply (date+user+token+clear+EOS)\n"
+					"  Round 2: NGP list (SSF2 Japan $D8222103)\n"
+					"  Round 3: Game patch (SSF2.JSNES from BIOS dir)\n"
+					"  Round 4: msWaitForOpponent + EOS\n\n"
+					"Each round waits for the BIOS to respond before\n"
+					"sending the next. Check kctl trace for progress.",
+					"XBAND Fake Server",
+					MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+        case ID_XBAND_TOGGLE_BANKMUX:
+			{
+				// Toggle the Fred bank-mux for cart identification.
+				// Off by default. Enable AFTER reaching the main menu
+				// so the BIOS isn't writing to kill during early boot
+				// (which could swap the bank out from under itself).
+				bool now = S9xXBandToggleBankMux();
+				char buf[512];
+				snprintf(buf, sizeof(buf),
+					"Fred bank-mux is now: %s\n\n"
+					"When ON: a non-zero write to $FB:FE01 (XBAND kill\n"
+					"register) maps the game cart from slot B over the\n"
+					"BIOS HiROM range so the BIOS can read cart bytes\n"
+					"during cart identification. A zero write flips it\n"
+					"back to BIOS.\n\n"
+					"Enable BEFORE clicking Challenge with a real game\n"
+					"loaded in slot B. Use 'XBAND: Show Kill/Ctrl Trace'\n"
+					"to see whether swaps actually fire.",
+					now ? "ON" : "OFF");
+				MessageBoxA(GUI.hWnd, buf, "XBAND Bank-Mux",
+					MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+        case ID_XBAND_FAKE_INJECT_GAMESUPP:
+			{
+				// Post-Challenge advance: just msEndOfStream. The
+				// previous attempt sent an empty msGamePatch and
+				// caused the BIOS to hard-panic into its fatal-error
+				// handler at $D0:3AD8 (which wipes SRAM byte 0 and
+				// STPs the CPU). msEndOfStream alone is known-safe
+				// and advances the BIOS state machine without
+				// triggering content validation.
+				bool ok = S9xXBandFakeInjectGameSupported();
+				char buf[512];
+				snprintf(buf, sizeof(buf),
+					"Inject Post-Challenge Advance: %s\n\n"
+					"Sends just msEndOfStream. This is the SAFE version\n"
+					"of the original 'msGamePatch' inject which crashed\n"
+					"the BIOS into its fatal-error STP handler.\n\n"
+					"Click this AFTER:\n"
+					"  1. Reaching the main menu (post-login reply)\n"
+					"  2. Clicking Challenge\n"
+					"  3. 'Dialing XBAND...' completes\n"
+					"  4. The BIOS is sitting on the cart-detection wait\n\n"
+					"Use 'XBAND: Show Kill/Ctrl Trace' afterwards to see\n"
+					"whether box.next_recv advanced (= BIOS accepted)\n"
+					"and which screen the BIOS is now on.",
+					ok ? "OK" : "FAILED");
+				MessageBoxA(GUI.hWnd, buf, "XBAND Post-Challenge Advance",
+					ok ? (MB_OK | MB_ICONINFORMATION)
+					   : (MB_OK | MB_ICONWARNING));
+			}
+			break;
+        case ID_XBAND_SEARCH_CARTID:
+			{
+				char text[8192];
+				S9xXBandSearchCartIDInMemory(text, sizeof(text));
+				MessageBoxA(GUI.hWnd, text,
+					"XBAND Cart-ID Memory Search", MB_OK);
+			}
+			break;
+        case ID_XBAND_FORCE_CARTID:
+			{
+				char text[8192];
+				S9xXBandForceCartIDOverride(text, sizeof(text));
+				MessageBoxA(GUI.hWnd, text,
+					"XBAND Cart-ID Override", MB_OK);
+			}
+			break;
+        case ID_XBAND_CYCLE_SPOOF:
+			{
+				S9xXBandCycleSpoofValue();
+				const uint8 *v = S9xXBandSpoofValueBytes();
+				char buf[256];
+				snprintf(buf, sizeof(buf),
+					"Spoof value advanced to:\n\n"
+					"  $%02X $%02X $%02X $%02X  (%s)\n\n"
+					"This value is now what the read interceptor\n"
+					"returns for $7F:0C8B / $7F:2D15 / $7F:323B.\n\n"
+					"Use the 'Set Spoof Cart-ID To...' sub-menu to\n"
+					"pick a specific candidate instead of cycling.",
+					v[0], v[1], v[2], v[3],
+					S9xXBandSpoofValueLabel());
+				MessageBoxA(GUI.hWnd, buf, "XBAND Spoof Value",
+					MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+        case ID_XBAND_FAKE_INJECT_NGPLIST:
+			{
+				bool ok = S9xXBandFakeInjectFakeNGPList();
+				char buf[512];
+				snprintf(buf, sizeof(buf),
+					"Inject Fake msNewNGPList: %s\n\n"
+					"Sends msNewNGPList telling the BIOS that gameID\n"
+					"$F7 2B 5D 1A (its own broken default cart hash)\n"
+					"is 'Super Street Fighter II' with patch version 3.\n\n"
+					"Hope: the BIOS uses the NGP list as its 'supported\n"
+					"games' table, so when you click Challenge, the\n"
+					"local cart-id check will succeed and skip the\n"
+					"'not an XBAND Card' dialog.\n\n"
+					"Click this AFTER reaching the main menu, BEFORE\n"
+					"clicking Challenge.",
+					ok ? "OK" : "FAILED");
+				MessageBoxA(GUI.hWnd, buf, "XBAND Fake NGP List",
+					ok ? (MB_OK | MB_ICONINFORMATION)
+					   : (MB_OK | MB_ICONWARNING));
+			}
+			break;
+        case ID_XBAND_TOGGLE_GAMEID_SPOOF:
+			{
+				bool now = S9xXBandToggleGameIDSpoof();
+				char buf[512];
+				snprintf(buf, sizeof(buf),
+					"TX GameID spoofer is now: %s\n\n"
+					"When ON, every outgoing ADSP frame containing\n"
+					"$0C $F7 $2B $5D $1A (msGAMEIDAndPatchVersion + the\n"
+					"BIOS's broken cart hash) is rewritten to use\n"
+					"$0C $D8 $22 $21 $03 (SSF2 Japan's expected GameID).\n"
+					"The frame's CRC is recomputed over the modified body.\n\n"
+					"Enable BEFORE clicking Challenge so the BIOS's\n"
+					"first cart-id message gets rewritten on the wire.\n\n"
+					"Use 'XBAND: Show Kill/Ctrl Trace' to see how many\n"
+					"spoofs have been applied (look for the new TX\n"
+					"GameID spoofer block).",
+					now ? "ON" : "OFF");
+				MessageBoxA(GUI.hWnd, buf, "XBAND TX GameID Spoof",
+					MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+        case ID_XBAND_FAKE_INJECT_SSF2PATCH:
+			{
+				// Phase D: chain-inject the real SSF2.JSNES game
+				// patch from the Cinghialotto/xband repo. Reads the
+				// 3.3 KB binary from win32/BIOS/SSF2.JSNES and sends
+				// it as ~30 sequential ADSP segments tied together by
+				// send_seq. Requires Super Street Fighter II (Japan)
+				// loaded in slot B for the BIOS's cart-hash check to
+				// match $d8222103.
+				bool ok = S9xXBandFakeInjectSSF2Patch();
+				char buf[768];
+				snprintf(buf, sizeof(buf),
+					"Inject SSF2.JSNES Patch: %s\n\n"
+					"Sends the REAL Super Street Fighter II Japan\n"
+					"controller-input patch (3305 bytes, ~33 ADSP\n"
+					"segments) chained back-to-back into rxbuf.\n\n"
+					"REQUIREMENTS:\n"
+					"  1. SSF2.JSNES dropped in win32/BIOS/\n"
+					"  2. Super Street Fighter II (Japan).sfc loaded\n"
+					"     in slot B (NOT the USA version)\n"
+					"  3. BIOS already at the post-Challenge wait state\n\n"
+					"If FAILED, the file is missing or doesn't have the\n"
+					"expected $03 d8 22 21 03 header.\n\n"
+					"If OK but the BIOS panics, our chunking or seq math\n"
+					"is wrong - check the kctl trace for the new\n"
+					"'Sniffed ADSP state' to confirm box.next_recv\n"
+					"advanced. If accepted, the BIOS should proceed to\n"
+					"the matchmaking practice prompt.",
+					ok ? "OK" : "FAILED");
+				MessageBoxA(GUI.hWnd, buf, "XBAND Inject SSF2 Patch",
 					ok ? (MB_OK | MB_ICONINFORMATION)
 					   : (MB_OK | MB_ICONWARNING));
 			}

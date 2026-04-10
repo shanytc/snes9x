@@ -419,6 +419,362 @@ static char   xband_fake_inject_last[128] = "(none)";
 static uint32 xband_fake_send_seq         = 0;
 static bool   xband_fake_send_seq_primed  = false;
 
+// Runtime toggle for the Fred bank-mux. OFF by default because the
+// BIOS may write to the kill register during early boot before the
+// trampoline-in-WRAM dance is set up, and remapping the BIOS bank
+// mid-fetch from BIOS-side code would crash. Once the BIOS reaches
+// the main menu (post-login) the user enables this via menu, then
+// clicks Challenge and the bank-mux activates the moment the BIOS
+// asserts the kill register during cart identification.
+static bool xband_bankmux_enabled = false;
+static uint32 xband_bankmux_swaps = 0;
+static char   xband_bankmux_last[64] = "(none)";
+
+// BIOS firmware scan results. Populated at multi-cart load time by
+// memmap.cpp's dialog-trigger scanner. Free-form text we can grow as
+// we add more scans (PEA #$4C54, LDA #$021D, etc). Visible in the
+// kctl trace dialog so the user can read scan output without needing
+// a console attached for stderr.
+#define XBAND_DIALOG_SCAN_BUF 16384
+static char xband_dialog_scan_buf[XBAND_DIALOG_SCAN_BUF] = {0};
+
+// kDispatcherVector logger. Every XBAND OS function call goes through
+// `JSL $E0:$0040` with the function ID in the X register. Per the
+// fresh-eggs xband_post writeup:
+//   #define kDispatcherVector at $E0:$0040
+//   LDX #funcID ; JSL $E0:$0040
+// We trap CPU execution at PBPC == $00E00040 in cpuexec.cpp's main
+// loop and call S9xXBandLogDispatcherCall() with the caller PC (read
+// from the return address on the stack), the function ID (X), and the
+// accumulator (A). This lets us see exactly which OS functions get
+// invoked when the user clicks "Challenge" -- including DBGetItem
+// ($D0:$7145) which is our prime suspect for the game-check call.
+struct XBandDispatchEntry
+{
+	uint32 caller;          // 24-bit address of last byte of the JSL
+	uint16 func_id;         // X register (function ID)
+	uint16 a_first;         // A register at FIRST occurrence
+	uint16 a_last;          // A register at MOST RECENT occurrence
+	uint32 hits;            // total times this (caller, funcID) seen
+	uint64 first_seen_call; // global call sequence number when first seen
+};
+// 1024 unique call sites should cover the entire BIOS boot. Each
+// (caller, funcID) is stored ONCE; subsequent calls bump the hit
+// counter. This way idle loops don't flood the buffer -- we see one
+// entry per unique call site in chronological order of first
+// occurrence.
+#define XBAND_DISPATCH_LOG_SIZE 1024
+static XBandDispatchEntry xband_dispatch_log[XBAND_DISPATCH_LOG_SIZE];
+static uint32 xband_dispatch_log_count = 0;   // unique entries stored
+static uint64 xband_dispatch_total_calls = 0; // total raw calls
+static uint32 xband_dispatch_overflow = 0;    // unique sites we couldn't store
+// Per-funcID counter for the most-called function IDs.
+#define XBAND_DISPATCH_FUNCID_BUCKETS 0x400
+static uint64 xband_dispatch_funcid_count[XBAND_DISPATCH_FUNCID_BUCKETS] = {0};
+
+void S9xXBandResetDispatcherLog ()
+{
+	xband_dispatch_log_count = 0;
+	xband_dispatch_total_calls = 0;
+	xband_dispatch_overflow = 0;
+	memset(xband_dispatch_funcid_count, 0,
+	       sizeof(xband_dispatch_funcid_count));
+}
+
+void S9xXBandLogDispatcherCall (uint32 caller, uint16 func_id, uint16 a)
+{
+	xband_dispatch_total_calls++;
+	if (func_id < XBAND_DISPATCH_FUNCID_BUCKETS)
+		xband_dispatch_funcid_count[func_id]++;
+
+	// Linear search for an existing matching (caller, funcID) entry.
+	// 1024 entries * 57k calls = ~58M comparisons; well under a
+	// second. We could use a hash table for speed but boot completes
+	// quickly enough that this is acceptable for diagnostic use.
+	for (uint32 i = 0; i < xband_dispatch_log_count; i++)
+	{
+		XBandDispatchEntry *e = &xband_dispatch_log[i];
+		if (e->caller == caller && e->func_id == func_id)
+		{
+			if (e->hits < 0xFFFFFFFFu)
+				e->hits++;
+			e->a_last = a;
+			return;
+		}
+	}
+
+	// New unique call site -- append in first-seen order.
+	if (xband_dispatch_log_count >= XBAND_DISPATCH_LOG_SIZE)
+	{
+		xband_dispatch_overflow++;
+		return;
+	}
+	XBandDispatchEntry *e = &xband_dispatch_log[xband_dispatch_log_count++];
+	e->caller = caller;
+	e->func_id = func_id;
+	e->a_first = a;
+	e->a_last = a;
+	e->hits = 1;
+	e->first_seen_call = xband_dispatch_total_calls;
+}
+
+void S9xXBandResetDialogScan ()
+{
+	xband_dialog_scan_buf[0] = '\0';
+}
+
+void S9xXBandAppendDialogScan (const char *line)
+{
+	if (!line) return;
+	size_t cur = strlen(xband_dialog_scan_buf);
+	size_t room = XBAND_DIALOG_SCAN_BUF - cur - 1;
+	if (room == 0) return;
+	size_t n = strlen(line);
+	if (n > room) n = room;
+	memcpy(xband_dialog_scan_buf + cur, line, n);
+	xband_dialog_scan_buf[cur + n] = '\0';
+}
+
+// Read interceptor PC log. When the BIOS reads from $7F:$0C8B-$0C8E
+// and the spoofer is enabled, the read interceptor in getset.h logs
+// the calling PC here so we can see WHICH BIOS instructions read the
+// cart-id cache. Once we have those PCs, we can disassemble the
+// surrounding bytes in the BIOS image to find the supported-games
+// table comparison and patch it.
+//
+// The trap also snapshots a 32-byte window of memory around the PC
+// at the moment of the trap (so the snapshot reflects the actual
+// instruction bytes, not whatever WRAM looks like later when the
+// user runs the search) plus the A/X/Y/DBR/D registers (so we know
+// what data the instruction was processing).
+#define XBAND_CARTID_PC_LOG_SIZE 32
+struct XBandCartIDReadEntry {
+	uint32 pc;        // PB:PC of the instruction reading the cart-id
+	uint8  byte_off;  // 0..3 — which byte of the cart-id was read
+	uint8  byte_val;  // value the interceptor returned
+
+	// Snapshot of CPU state at trap time -- captures the in-flight
+	// data so we can identify what the instruction is doing.
+	uint16 reg_a;
+	uint16 reg_x;
+	uint16 reg_y;
+	uint16 reg_d;
+	uint8  reg_db;
+	uint8  reg_p;     // M/X/I/C/etc. flags
+
+	// 32-byte snapshot of memory around the PC. The byte AT the PC
+	// is at offset 16 in the array (so we capture 16 bytes BEFORE
+	// the PC and 16 bytes AFTER). Lets us reconstruct the actual
+	// instruction stream regardless of later WRAM reuse.
+	uint8  pc_bytes[32];
+};
+static XBandCartIDReadEntry xband_cartid_read_pc_log[XBAND_CARTID_PC_LOG_SIZE];
+static uint32 xband_cartid_read_pc_count = 0;
+
+// Snapshot the trap-time CPU state and 32 bytes of memory around the
+// PC into a log entry. We read directly from Memory.RAM (for the
+// low WRAM mirror at bank $00:0000-$1FFF) or from Memory.ROM (for
+// BIOS bank $D0-$DF in multicart mode), bypassing the memory map
+// dispatch entirely so we don't disturb CPU.Cycles or take a
+// dependency on the function definition order.
+static void xband_cartid_snapshot (XBandCartIDReadEntry *e, uint32 pc)
+{
+	e->reg_a  = (uint16)(Registers.A.W);
+	e->reg_x  = (uint16)(Registers.X.W);
+	e->reg_y  = (uint16)(Registers.Y.W);
+	e->reg_d  = (uint16)(Registers.D.W);
+	e->reg_db = Registers.DB;
+	e->reg_p  = Registers.PL;
+
+	// Capture 32 bytes centered at PC: 16 before, 16 after.
+	uint16 lo = (uint16)(pc & 0xFFFF);
+	uint8  pb = (uint8)((pc >> 16) & 0xFF);
+	int center = 16;
+	for (int i = 0; i < 32; i++)
+	{
+		int off = (int)lo - center + i;
+		if (off < 0 || off > 0xFFFF)
+		{
+			e->pc_bytes[i] = 0;
+			continue;
+		}
+		// Bank 0 low addresses ($0000-$1FFF) mirror $7E:$0000-$1FFF
+		// in WRAM. Read directly from Memory.RAM.
+		if (pb == 0 && off <= 0x1FFF && Memory.RAM)
+		{
+			e->pc_bytes[i] = Memory.RAM[off];
+		}
+		// Bank $7E or $7F: direct WRAM access.
+		else if ((pb == 0x7E || pb == 0x7F) && Memory.RAM)
+		{
+			int linear = ((pb - 0x7E) << 16) | off;
+			if (linear < 0x20000)
+				e->pc_bytes[i] = Memory.RAM[linear];
+			else
+				e->pc_bytes[i] = 0;
+		}
+		// Multicart BIOS bank ($D0-$DF): firmware lives at
+		// Memory.ROM + Multi.cartOffsetA, mapped HiROM-style with
+		// 1MB mirror.
+		else if (pb >= 0xD0 && pb <= 0xDF &&
+		         Multi.cartType == 6 && Memory.ROM)
+		{
+			uint32 bios_off = ((uint32)(pb - 0xD0) << 16) | off;
+			bios_off &= (XBAND_ROM_SIZE - 1);
+			e->pc_bytes[i] = Memory.ROM[Multi.cartOffsetA + bios_off];
+		}
+		else
+		{
+			e->pc_bytes[i] = 0;
+		}
+	}
+}
+
+// Called from getset.h S9xGetByte when the read interceptor fires.
+// Records the PC + offset + returned value + snapshot of CPU state
+// and surrounding memory into the ring buffer.
+void S9xXBandLogCartIDRead (uint32 pc, int byte_off, uint8 byte_val)
+{
+	if (xband_cartid_read_pc_count >= XBAND_CARTID_PC_LOG_SIZE)
+	{
+		xband_cartid_read_pc_count++;
+		return;
+	}
+	XBandCartIDReadEntry *e =
+		&xband_cartid_read_pc_log[xband_cartid_read_pc_count++];
+	e->pc       = pc & 0xFFFFFF;
+	e->byte_off = (uint8)byte_off;
+	e->byte_val = byte_val;
+	xband_cartid_snapshot(e, pc);
+}
+
+// Separate ring for cart-id WRITES. The writer is whoever computes
+// the cart-id and stores it at $7F:$0C8B. Finding this PC gives us
+// the cart-id computation function in the BIOS, which is much more
+// useful than the consumer PCs we already capture.
+static XBandCartIDReadEntry xband_cartid_write_pc_log[XBAND_CARTID_PC_LOG_SIZE];
+static uint32 xband_cartid_write_pc_count = 0;
+
+void S9xXBandLogCartIDWrite (uint32 pc, int byte_off, uint8 byte_val)
+{
+	if (xband_cartid_write_pc_count >= XBAND_CARTID_PC_LOG_SIZE)
+	{
+		xband_cartid_write_pc_count++;
+		return;
+	}
+	XBandCartIDReadEntry *e =
+		&xband_cartid_write_pc_log[xband_cartid_write_pc_count++];
+	e->pc       = pc & 0xFFFFFF;
+	e->byte_off = (uint8)byte_off;
+	e->byte_val = byte_val;
+	xband_cartid_snapshot(e, pc);
+}
+
+// Runtime spoof value for the cart-id read interceptor. Can be
+// changed at runtime via S9xXBandCycleSpoofValue() so the user can
+// brute-force through candidate cart-ids without rebuilding.
+//
+// Default = D8 22 21 03 (xbsega SSF2 Japan). Cycling advances
+// through a list of known/candidate values from the patches we
+// have access to plus a few computed guesses.
+static uint8 xband_spoof_value[4] = { 0xD8, 0x22, 0x21, 0x03 };
+static int   xband_spoof_value_idx = 0;
+
+struct XBandSpoofCandidate {
+	uint8 bytes[4];
+	const char *label;
+};
+
+// Candidate cart-ids to try. Include the values we have from
+// xbsega.go and a few likely guesses.
+static const XBandSpoofCandidate xband_spoof_candidates[] = {
+	{ { 0xD8, 0x22, 0x21, 0x03 }, "SSF2 Japan (xbsega JSNES)" },
+	{ { 0xEF, 0x12, 0x0A, 0x61 }, "SSF2 (xbsega comment)" },
+	{ { 0x4D, 0x1C, 0x4E, 0x1D }, "SSF2 Sega" },
+	{ { 0xC4, 0xCD, 0xDF, 0x0C }, "MK2 Sega" },
+	{ { 0xC0, 0x43, 0x21, 0x72 }, "MK2 SNES (commented)" },
+	{ { 0xE3, 0x0C, 0x29, 0x6E }, "NBA JAM Sega" },
+	{ { 0x8F, 0x6B, 0x9F, 0x70 }, "NHL95 Sega" },
+	{ { 0xAB, 0x63, 0x48, 0xE9 }, "MK Sega" },
+	{ { 0x31, 0xED, 0x81, 0x23 }, "Madden95 Sega" },
+	{ { 0x12, 0x7E, 0x81, 0x81 }, "NHL95 SNES (commented)" },
+	{ { 0x19, 0x69, 0xD2, 0xAF }, "NBA JAM TE SNES" },
+	{ { 0x3D, 0x1C, 0x44, 0xEB }, "Super Mario Kart SNES" },
+	{ { 0x05, 0x48, 0x49, 0x71 }, "MK3 SNES" },
+	{ { 0x94, 0xB5, 0x64, 0xB5 }, "DOOM SNES" },
+	{ { 0x2D, 0x17, 0xC0, 0x45 }, "Killer Instinct SNES" },
+	{ { 0x83, 0xE6, 0x27, 0xEF }, "Kirby SNES" },
+	{ { 0xA8, 0x97, 0x3C, 0x8C }, "Ken Griffey SNES" },
+	{ { 0x00, 0x00, 0x00, 0x00 }, "all zeros" },
+	{ { 0xFF, 0xFF, 0xFF, 0xFF }, "all ones" },
+};
+
+#define XBAND_SPOOF_CANDIDATES_COUNT \
+	(sizeof(xband_spoof_candidates) / sizeof(xband_spoof_candidates[0]))
+
+void S9xXBandCycleSpoofValue (void)
+{
+	xband_spoof_value_idx =
+		(xband_spoof_value_idx + 1) % XBAND_SPOOF_CANDIDATES_COUNT;
+	memcpy(xband_spoof_value,
+	       xband_spoof_candidates[xband_spoof_value_idx].bytes, 4);
+}
+
+bool S9xXBandSetSpoofValueByIndex (int idx)
+{
+	if (idx < 0 || idx >= (int)XBAND_SPOOF_CANDIDATES_COUNT)
+		return false;
+	xband_spoof_value_idx = idx;
+	memcpy(xband_spoof_value,
+	       xband_spoof_candidates[idx].bytes, 4);
+	return true;
+}
+
+int S9xXBandGetSpoofValueCount (void)
+{
+	return (int)XBAND_SPOOF_CANDIDATES_COUNT;
+}
+
+const char *S9xXBandGetSpoofValueLabelAt (int idx)
+{
+	if (idx < 0 || idx >= (int)XBAND_SPOOF_CANDIDATES_COUNT)
+		return "?";
+	return xband_spoof_candidates[idx].label;
+}
+
+const uint8 *S9xXBandGetSpoofValueBytesAt (int idx)
+{
+	if (idx < 0 || idx >= (int)XBAND_SPOOF_CANDIDATES_COUNT)
+		return NULL;
+	return xband_spoof_candidates[idx].bytes;
+}
+
+const char *S9xXBandSpoofValueLabel (void)
+{
+	return xband_spoof_candidates[xband_spoof_value_idx].label;
+}
+
+const uint8 *S9xXBandSpoofValueBytes (void)
+{
+	return xband_spoof_value;
+}
+
+// Runtime toggle for the TX GameID spoofer. When ON, every outgoing
+// ADSP frame is parsed in xband_tx_rewrite_gameid and any byte
+// sequence matching `$0C $F7 $2B $5D $1A` (msGAMEIDAndPatchVersion
+// followed by the BIOS's broken default cart hash) is replaced with
+// `$0C $d8 $22 $21 $03` (SSF2 Japan's expected GameID per
+// xbsega.go). The frame's CRC is recomputed over the modified body
+// before sending. This makes the server (and our fake-server
+// injects) think the box has SSF2 Japan loaded even though the
+// BIOS's own cart-detection produces garbage.
+//
+// OFF by default. Enable from the menu after the BIOS has reached
+// the main menu and you're ready to click Challenge.
+static bool   xband_tx_gameid_spoof = false;
+static uint32 xband_tx_gameid_spoof_count = 0;
+static char   xband_tx_gameid_spoof_last[96] = "(none)";
+
 // ConnID source for the fake-server injector. There are two possible
 // interpretations of the SNES XBAND ADSP layer:
 //   - "live server" mode: server-originated frames carry the SERVER's
@@ -1779,6 +2135,118 @@ static int xband_adsp_build_frame (
 	return o;
 }
 
+// TX rewriter: parse an outgoing wire frame, look for the BIOS's
+// broken default GameID in a msGAMEIDAndPatchVersion message, and
+// rebuild the frame with the SSF2 Japan GameID instead. Used by the
+// TX flush path when xband_tx_gameid_spoof is enabled, so the server
+// (and our fake-server injects) think the box has SSF2 Japan loaded.
+//
+// `wire_in` / `wire_in_len` = original ADSP-framed wire bytes from
+// txbuf (starting with $00, ending with $10$03, byte-stuffing applied).
+// `wire_out` / `wire_out_size` = buffer to fill with rebuilt frame.
+//
+// Returns the new wire length on rewrite, 0 if no rewrite was needed
+// (frame contained no msGAMEIDAndPatchVersion match), or -1 on error.
+static int xband_tx_rewrite_gameid (
+	const uint8 *wire_in, int wire_in_len,
+	uint8 *wire_out, int wire_out_size)
+{
+	if (!wire_in || wire_in_len < 19 || !wire_out || wire_out_size <= 0)
+		return 0;
+	if (wire_in[0] != 0x00) return 0;
+	if (wire_in[wire_in_len - 2] != 0x10 ||
+	    wire_in[wire_in_len - 1] != 0x03)
+		return 0;
+
+	// 1. De-stuff the body (everything between encap byte and EOP).
+	//    Maximum unstuffed body size is wire_in_len - 3.
+	uint8 body[1024];
+	int   body_len = 0;
+	for (int i = 1; i < wire_in_len - 2 && body_len < (int)sizeof(body); i++)
+	{
+		uint8 b = wire_in[i];
+		if (b == 0x10 && i + 1 < wire_in_len - 2 &&
+		    wire_in[i + 1] == 0x10)
+		{
+			body[body_len++] = 0x10;
+			i++;  // skip the second 0x10
+		}
+		else
+		{
+			body[body_len++] = b;
+		}
+	}
+
+	// 2. Need at least the 13-byte ADSP header + 5 bytes payload (opcode
+	//    + 4-byte GameID) + 2-byte CRC to even consider rewriting.
+	if (body_len < XBAND_ADSP_HEADER_LEN + 5 + 2) return 0;
+
+	// 3. Search the data section for the byte sequence
+	//    `0C F7 2B 5D 1A` (msGAMEIDAndPatchVersion + broken GameID).
+	//    Data section spans body[13..body_len-3] (excluding 2-byte CRC).
+	int data_start = XBAND_ADSP_HEADER_LEN;
+	int data_end   = body_len - 2;
+	int found_off  = -1;
+	for (int i = data_start; i + 5 <= data_end; i++)
+	{
+		if (body[i + 0] == 0x0C &&
+		    body[i + 1] == 0xF7 && body[i + 2] == 0x2B &&
+		    body[i + 3] == 0x5D && body[i + 4] == 0x1A)
+		{
+			found_off = i;
+			break;
+		}
+	}
+	if (found_off < 0) return 0;  // no rewrite needed
+
+	// 4. Replace the 4 GameID bytes with SSF2 Japan's expected value.
+	body[found_off + 1] = 0xD8;
+	body[found_off + 2] = 0x22;
+	body[found_off + 3] = 0x21;
+	body[found_off + 4] = 0x03;
+
+	// 5. Recompute the CRC over the modified body (header + data).
+	//    Same formula the parser/dispatcher already validates against:
+	//    CCITT-FALSE with leading $00 encap byte (xband_ccitt_crc16
+	//    handles the encap-byte prefix internally).
+	int data_only_len = body_len - 2;  // header + data, no CRC
+	uint16 new_crc = xband_ccitt_crc16(body, data_only_len);
+	body[data_only_len]     = (uint8)(new_crc >> 8);
+	body[data_only_len + 1] = (uint8)(new_crc);
+
+	// 6. Re-stuff and re-frame: $00 + escape(body) + $10$03.
+	int o = 0;
+	if (o >= wire_out_size) return -1;
+	wire_out[o++] = 0x00;
+	for (int i = 0; i < body_len; i++)
+	{
+		uint8 b = body[i];
+		if (b == 0x10)
+		{
+			if (o + 2 > wire_out_size) return -1;
+			wire_out[o++] = 0x10;
+			wire_out[o++] = 0x10;
+		}
+		else
+		{
+			if (o + 1 > wire_out_size) return -1;
+			wire_out[o++] = b;
+		}
+	}
+	if (o + 2 > wire_out_size) return -1;
+	wire_out[o++] = 0x10;
+	wire_out[o++] = 0x03;
+
+	xband_tx_gameid_spoof_count++;
+	snprintf(xband_tx_gameid_spoof_last,
+	         sizeof(xband_tx_gameid_spoof_last),
+	         "spoof #%u: $0C $F7$2B$5D$1A -> $D8$22$21$03 "
+	         "(in_len=%d out_len=%d body_len=%d off=%d)",
+	         xband_tx_gameid_spoof_count, wire_in_len, o,
+	         body_len, found_off);
+	return o;
+}
+
 // Push raw wire bytes into XBand.rxbuf as if they had arrived from the
 // socket. The BIOS will pull them out byte-at-a-time via fred reg $94
 // (`xband_rxbuf_pop`) and feed them through its ADSP modem driver --
@@ -1944,6 +2412,810 @@ bool S9xXBandFakeInject (uint8 opcode, const uint8 *payload, int payload_len)
 	return true;
 }
 
+// Inject a large ServerTalk payload by fragmenting it across multiple
+// ADSP segments. Used for delivering binary blobs that exceed the
+// ~109-byte ADSP segment payload limit -- e.g. game patches from the
+// Cinghialotto/xband repo's XBAND_Game_Patches.zip, which are
+// thousands of bytes long.
+//
+// Each segment carries a chunk of the payload as raw stream data:
+//   - segment 0..N-2: descriptor = $00 (data, no EOM)
+//   - segment N-1   : descriptor = $20 (EOM = end of message)
+//
+// All segments use sequential send_seq values so the BIOS's ADSP
+// reassembler glues them back together into the original payload.
+// We don't use ack-request bits on chunks because we send them all
+// back-to-back without waiting for acks; ADSP receivers will catch
+// up at their own pace.
+//
+// Returns the number of segments successfully injected. The caller
+// can compare against the expected segment count to detect partial
+// failure.
+static int xband_fake_inject_chunked (
+	const uint8 *payload, int payload_len,
+	const char *label_for_status)
+{
+	if (!payload || payload_len <= 0) return 0;
+
+	if (!xband_sniff_box_seen)
+	{
+		snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
+		         "FAILED: no box frames sniffed yet (chunked %s)",
+		         label_for_status ? label_for_status : "?");
+		return 0;
+	}
+
+	// Pick connID per the active source mode.
+	uint16 srv_conn;
+	const char *connid_label;
+	if (xband_fake_connid_source == XBAND_FAKE_CONNID_BOX &&
+	    xband_sniff_box_seen)
+	{
+		srv_conn     = xband_sniff_box_conn_id;
+		connid_label = "BOX";
+	}
+	else if (xband_sniff_srv_seen)
+	{
+		srv_conn     = xband_sniff_srv_conn_id;
+		connid_label = "SRV";
+	}
+	else
+	{
+		srv_conn     = (uint16)0x08C8;
+		connid_label = "FALLBACK";
+	}
+
+	// Prime send_seq from the box's next_recv_seq if needed.
+	if (!xband_fake_send_seq_primed)
+	{
+		xband_fake_send_seq        = xband_sniff_box_next_recv;
+		xband_fake_send_seq_primed = true;
+	}
+
+	// Choose chunk size. ADSP segment data section is typically
+	// ~109 bytes in the live server traffic we observed. Stay at
+	// or below that to avoid the BIOS's per-segment size limit.
+	const int chunk_size = 100;
+
+	// Compute initial ack_seq once -- box.first_seq + data_total
+	// reflects the latest box send position. We don't refresh
+	// between chunks because they're sent back-to-back.
+	uint32 ack_seq = xband_sniff_box_first_seq +
+	                 xband_sniff_box_data_total;
+	if (xband_sniff_srv_next_recv > ack_seq)
+		ack_seq = xband_sniff_srv_next_recv;
+
+	uint16 recv_win = 0x0400;
+	int    segments_sent = 0;
+	int    pos = 0;
+
+	while (pos < payload_len)
+	{
+		int remaining = payload_len - pos;
+		int this_chunk = (remaining > chunk_size) ? chunk_size : remaining;
+		bool is_last  = (pos + this_chunk == payload_len);
+
+		// Descriptor: data segment, EOM only on the final chunk.
+		uint8 descriptor = is_last ? 0x20 : 0x00;
+
+		// Build wire frame for this chunk.
+		uint8 wire[600];
+		int wire_len = xband_adsp_build_frame(
+			wire, (int)sizeof(wire),
+			srv_conn, xband_fake_send_seq, ack_seq, recv_win,
+			descriptor,
+			payload + pos, this_chunk);
+		if (wire_len <= 0)
+		{
+			snprintf(xband_fake_inject_last,
+			         sizeof(xband_fake_inject_last),
+			         "FAILED: build_frame chunk %d at offset %d (%s)",
+			         segments_sent, pos,
+			         label_for_status ? label_for_status : "?");
+			return segments_sent;
+		}
+
+		int injected = xband_inject_rxbuf_bytes(wire, wire_len);
+		if (injected < wire_len)
+		{
+			snprintf(xband_fake_inject_last,
+			         sizeof(xband_fake_inject_last),
+			         "PARTIAL: chunk %d %d/%d wire bytes (%s)",
+			         segments_sent, injected, wire_len,
+			         label_for_status ? label_for_status : "?");
+			return segments_sent;
+		}
+
+		// Advance our running send_seq for the next chunk so they
+		// stitch together as a contiguous byte stream.
+		xband_fake_send_seq += (uint32)this_chunk;
+		segments_sent++;
+		pos += this_chunk;
+	}
+
+	xband_fake_inject_count++;
+	snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
+	         "OK chunked %s: %d segments, %d bytes payload, connID=$%04X(%s)",
+	         label_for_status ? label_for_status : "?",
+	         segments_sent, payload_len,
+	         (unsigned)srv_conn, connid_label);
+	return segments_sent;
+}
+
+// Read a binary file from disk into a caller-provided buffer.
+// Returns the number of bytes read, or 0 on failure.
+static int xband_read_file (const char *path, uint8 *buf, int buf_size)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f) return 0;
+	int n = (int)fread(buf, 1, (size_t)buf_size, f);
+	fclose(f);
+	return n;
+}
+
+// Inject a fake msNewNGPList with the BIOS's broken default cart
+// hash ($F7 2B 5D 1A) mapped to "Super Street Fighter II". The hope
+// is that the BIOS uses the NGP list as its "what games are
+// supported" table -- so telling it the broken hash is a real game
+// might make the BIOS skip the "not an XBAND Card" dialog when the
+// user clicks Challenge.
+//
+// Format from sample_packets.txt:
+//   0F           opcode (msNewNGPList)
+//   00 23        2-byte length up to next length field (0x23 = 35)
+//   00 01        2-byte count = 1 game
+//   00 09        2-byte version of list = 9 (matches the example)
+//   F7 2B 5D 1A  4-byte gameID = the BIOS's broken default hash
+//   00 00 00 00  4-byte gameflags
+//   00 00 00 03  4-byte patch version = 3
+//   00 17        2-byte length of title
+//   "Super Street Fighter2\0"  title (23 bytes including terminator)
+//   02           msEndOfStream terminator
+//
+// Returns true on successful injection.
+bool S9xXBandFakeInjectFakeNGPList (void)
+{
+	uint8 body[64];
+	int   o = 0;
+
+	// msNewNGPList header
+	body[o++] = 0x0F;            // opcode
+	body[o++] = 0x00;            // length high
+	body[o++] = 0x23;            // length low = 35 (header + 1 game entry)
+	body[o++] = 0x00;            // count high
+	body[o++] = 0x01;            // count low = 1 game
+	body[o++] = 0x00;            // list version high
+	body[o++] = 0x09;            // list version low = 9
+
+	// Game entry: gameID (the BIOS's broken hash so it self-recognizes)
+	body[o++] = 0xF7;
+	body[o++] = 0x2B;
+	body[o++] = 0x5D;
+	body[o++] = 0x1A;
+
+	// gameflags
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x00; body[o++] = 0x00;
+
+	// patch version
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x00; body[o++] = 0x03;
+
+	// title length + title (23 bytes including terminator)
+	body[o++] = 0x00; body[o++] = 0x17;
+	const char *title = "Super Street Fighter2";
+	for (int i = 0; title[i] && o < (int)sizeof(body); i++)
+		body[o++] = (uint8)title[i];
+	body[o++] = 0x00;            // null terminator
+	body[o++] = 0x00;            // padding to 23 bytes
+
+	// msEndOfStream
+	body[o++] = 0x02;
+
+	return S9xXBandFakeInject(body[0], body + 1, o - 1);
+}
+
+// Load SSF2.JSNES from BIOS_DIR and inject it as a chained
+// msGamePatch. The patch file is the complete ServerTalk message:
+// it already starts with the $03 opcode at byte 0, followed by the
+// 4-byte GameID (d8 22 21 03 = SSF2 Japan), the patch version,
+// type, length fields, and the in-game controller-injection code.
+// Total ~3.3 KB; ends with a $02 msEndOfStream byte.
+//
+// Drop SSF2.JSNES into win32/BIOS/ alongside the SRAM dumps before
+// firing this. Source:
+//   https://github.com/Cinghialotto/xband
+//   XBAND_Game_Patches.zip -> XBAND Game Patches/SNES/SSF2.JSNES
+//
+// Returns true if the file was found AND fully injected.
+bool S9xXBandFakeInjectSSF2Patch (void)
+{
+	// Look for the patch in BIOS_DIR (same place as the SRAM dumps).
+	std::string path = S9xGetDirectory(BIOS_DIR);
+	path += SLASH_STR;
+	path += "SSF2.JSNES";
+
+	uint8 patch[8192];
+	int patch_len = xband_read_file(path.c_str(), patch,
+	                                (int)sizeof(patch));
+	if (patch_len <= 0)
+	{
+		snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
+		         "FAILED: SSF2.JSNES not found in BIOS_DIR (%s)",
+		         path.c_str());
+		return false;
+	}
+
+	// Sanity-check the patch shape: should start with $03 (msGamePatch
+	// opcode) and the GameID for SSF2 Japan (d8 22 21 03).
+	if (patch_len < 16 ||
+	    patch[0] != 0x03 ||
+	    patch[1] != 0xd8 || patch[2] != 0x22 ||
+	    patch[3] != 0x21 || patch[4] != 0x03)
+	{
+		snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
+		         "FAILED: SSF2.JSNES doesn't look right "
+		         "(len=%d hdr=%02x %02x %02x %02x %02x...)",
+		         patch_len,
+		         patch_len > 0 ? patch[0] : 0,
+		         patch_len > 1 ? patch[1] : 0,
+		         patch_len > 2 ? patch[2] : 0,
+		         patch_len > 3 ? patch[3] : 0,
+		         patch_len > 4 ? patch[4] : 0);
+		return false;
+	}
+
+	int segments = xband_fake_inject_chunked(patch, patch_len,
+	                                          "SSF2.JSNES");
+	return (segments > 0) && (segments * 100 >= patch_len - 100);
+}
+
+// Public toggle for Fred bank-mux. Off by default; the user enables
+// it from the menu after reaching the main menu (when it's safe for
+// the BIOS to flip the kill register). Returns the new state.
+bool S9xXBandToggleBankMux (void)
+{
+	xband_bankmux_enabled = !xband_bankmux_enabled;
+	if (!xband_bankmux_enabled)
+	{
+		// Force-restore BIOS view on disable so we don't strand the
+		// system with cart bytes mapped where the BIOS expects to be.
+		if (Multi.cartType == 6)
+			Memory.Map_XBandMultiCartBiosVisible();
+	}
+	return xband_bankmux_enabled;
+}
+
+bool S9xXBandGetBankMux (void)
+{
+	return xband_bankmux_enabled;
+}
+
+// Public toggle for the TX GameID spoofer. When ON, every outgoing
+// ADSP frame containing $0C $F7 $2B $5D $1A is rewritten to use
+// $D8 $22 $21 $03 (SSF2 Japan's expected GameID) and a fresh CRC.
+// Returns the new state.
+bool S9xXBandToggleGameIDSpoof (void)
+{
+	xband_tx_gameid_spoof = !xband_tx_gameid_spoof;
+	return xband_tx_gameid_spoof;
+}
+
+bool S9xXBandGetGameIDSpoof (void)
+{
+	return xband_tx_gameid_spoof;
+}
+
+// Overwrite every $F7 $2B $5D $1A in known memory regions with
+// $D8 $22 $21 $03 (SSF2 Japan's expected GameID). Returns the
+// number of locations modified. Used to bypass the BIOS's local
+// cart-detection check at Challenge click time -- we can't make
+// the BIOS COMPUTE the right value without disassembling its
+// cart-id routine, but we can stomp the cache it ends up reading.
+//
+// Writes a human-readable report into `out` so the user can see
+// where we patched and verify the BIOS picks up the change.
+int S9xXBandForceCartIDOverride (char *out, size_t out_size)
+{
+	int written = 0;
+	size_t pos = 0;
+	const uint8 from[4] = { 0xF7, 0x2B, 0x5D, 0x1A };
+	const uint8 to[4]   = { 0xD8, 0x22, 0x21, 0x03 };
+
+	if (out && out_size > 0)
+		pos += snprintf(out + pos, out_size - pos,
+			"Cart-ID override: $F7 $2B $5D $1A -> $D8 $22 $21 $03\n\n");
+
+	// 1. WRAM ($7E:$0000 - $7F:$FFFF)
+	if (Memory.RAM)
+	{
+		for (int i = 0; i + 4 <= 0x20000; i++)
+		{
+			if (Memory.RAM[i + 0] == from[0] &&
+			    Memory.RAM[i + 1] == from[1] &&
+			    Memory.RAM[i + 2] == from[2] &&
+			    Memory.RAM[i + 3] == from[3])
+			{
+				Memory.RAM[i + 0] = to[0];
+				Memory.RAM[i + 1] = to[1];
+				Memory.RAM[i + 2] = to[2];
+				Memory.RAM[i + 3] = to[3];
+				written++;
+				if (out && pos + 80 < out_size)
+				{
+					uint32 bank = (i >> 16) & 1;
+					uint32 addr = i & 0xFFFF;
+					pos += snprintf(out + pos, out_size - pos,
+						"  WRAM   $7%c:$%04X (linear $%05X) PATCHED\n",
+						bank ? 'F' : 'E', addr, i);
+				}
+			}
+		}
+	}
+
+	// 2. XBAND SRAM
+	for (int i = 0; i + 4 <= XBAND_SRAM_SIZE; i++)
+	{
+		if (XBand.sram[i + 0] == from[0] &&
+		    XBand.sram[i + 1] == from[1] &&
+		    XBand.sram[i + 2] == from[2] &&
+		    XBand.sram[i + 3] == from[3])
+		{
+			XBand.sram[i + 0] = to[0];
+			XBand.sram[i + 1] = to[1];
+			XBand.sram[i + 2] = to[2];
+			XBand.sram[i + 3] = to[3];
+			written++;
+			if (out && pos + 80 < out_size)
+				pos += snprintf(out + pos, out_size - pos,
+					"  SRAM   $%04X PATCHED\n", i);
+		}
+	}
+
+	// 3. Fred general regs
+	for (int i = 0; i + 4 <= XBAND_FRED_REGS; i++)
+	{
+		if (XBand.regs[i + 0] == from[0] &&
+		    XBand.regs[i + 1] == from[1] &&
+		    XBand.regs[i + 2] == from[2] &&
+		    XBand.regs[i + 3] == from[3])
+		{
+			XBand.regs[i + 0] = to[0];
+			XBand.regs[i + 1] = to[1];
+			XBand.regs[i + 2] = to[2];
+			XBand.regs[i + 3] = to[3];
+			written++;
+			if (out && pos + 80 < out_size)
+				pos += snprintf(out + pos, out_size - pos,
+					"  Fred   reg[$%02X..$%02X] PATCHED\n",
+					i, i + 3);
+		}
+	}
+
+	// 4. Modem regs
+	for (int i = 0; i + 4 <= XBAND_MODEM_REGS; i++)
+	{
+		if (XBand.modem_regs[i + 0] == from[0] &&
+		    XBand.modem_regs[i + 1] == from[1] &&
+		    XBand.modem_regs[i + 2] == from[2] &&
+		    XBand.modem_regs[i + 3] == from[3])
+		{
+			XBand.modem_regs[i + 0] = to[0];
+			XBand.modem_regs[i + 1] = to[1];
+			XBand.modem_regs[i + 2] = to[2];
+			XBand.modem_regs[i + 3] = to[3];
+			written++;
+			if (out && pos + 80 < out_size)
+				pos += snprintf(out + pos, out_size - pos,
+					"  Modem  reg[$%02X..$%02X] PATCHED\n",
+					i, i + 3);
+		}
+	}
+
+	if (out && pos + 80 < out_size)
+		pos += snprintf(out + pos, out_size - pos,
+			"\nTotal patched: %d location(s)\n\n"
+			"Now click Challenge. If the cart is recognized, the\n"
+			"BIOS uses one of these locations and the dialog should\n"
+			"either disappear or change content (e.g. show 'Super\n"
+			"Street Fighter II' as a recognized game). If you still\n"
+			"see 'This game may not be available', the BIOS reads\n"
+			"the cart-id from a memory region we don't scan -- the\n"
+			"value is computed on-demand or stored byte-swapped, etc.\n",
+			written);
+
+	return written;
+}
+
+// Search known memory regions for the BIOS's cached cart-id bytes
+// (the "broken default" $F7 $2B $5D $1A that gets sent in
+// msGAMEIDAndPatchVersion). If we find it, we know where the BIOS
+// caches its computed cart-id and can overwrite it to spoof the
+// cart locally before Challenge click.
+//
+// Now also searches for the spoofed value $D8 $22 $21 $03 so we
+// can verify the read interceptor is working: if F7 2B 5D 1A is
+// gone from memory but D8 22 21 03 is now present at $7F:$0C8B,
+// the BIOS read our spoof and cached it. Confirms interception.
+//
+// Searches:
+//   WRAM       $7E:$0000 - $7F:$FFFF (128 KB)
+//   XBAND SRAM XBand.sram[] (64 KB)
+//   Fred regs  XBand.regs[] (224 bytes)
+//   Modem regs XBand.modem_regs[] (32 bytes)
+//
+// Writes a human-readable report into `out`. Used by the kctl trace
+// menu to report findings without needing a separate dialog.
+
+static void xband_search_one_pattern (char *out, size_t *pos_ptr,
+                                       size_t out_size,
+                                       const char *label,
+                                       const uint8 *target)
+{
+	size_t pos = *pos_ptr;
+	pos += snprintf(out + pos, out_size - pos,
+		"Searching for %s ($%02X $%02X $%02X $%02X):\n",
+		label, target[0], target[1], target[2], target[3]);
+
+	int total = 0;
+	if (Memory.RAM)
+	{
+		int hits_here = 0;
+		for (int i = 0; i + 4 <= 0x20000; i++)
+		{
+			if (Memory.RAM[i + 0] == target[0] &&
+			    Memory.RAM[i + 1] == target[1] &&
+			    Memory.RAM[i + 2] == target[2] &&
+			    Memory.RAM[i + 3] == target[3])
+			{
+				if (hits_here < 8)
+				{
+					uint32 bank = (i >> 16) & 1;
+					uint32 addr = i & 0xFFFF;
+					pos += snprintf(out + pos, out_size - pos,
+						"  WRAM   $7%c:$%04X (linear $%05X)\n",
+						bank ? 'F' : 'E', addr, i);
+				}
+				hits_here++;
+				total++;
+			}
+		}
+		if (hits_here > 8)
+			pos += snprintf(out + pos, out_size - pos,
+				"  WRAM   ... and %d more\n", hits_here - 8);
+		if (hits_here == 0)
+			pos += snprintf(out + pos, out_size - pos,
+				"  WRAM   (no match)\n");
+	}
+	pos += snprintf(out + pos, out_size - pos,
+		"  total: %d\n\n", total);
+	*pos_ptr = pos;
+}
+
+void S9xXBandSearchCartIDInMemory (char *out, size_t out_size)
+{
+	if (!out || out_size == 0) return;
+	size_t pos = 0;
+
+	// Search both the BIOS default and the spoof target so we can
+	// see whether the interceptor is working.
+	const uint8 broken[4]  = { 0xF7, 0x2B, 0x5D, 0x1A };
+	const uint8 spoofed[4] = { 0xD8, 0x22, 0x21, 0x03 };
+
+	xband_search_one_pattern(out, &pos, out_size,
+		"BIOS default cart-id (F7 2B 5D 1A)", broken);
+	xband_search_one_pattern(out, &pos, out_size,
+		"Spoofed SSF2 Japan cart-id (D8 22 21 03)", spoofed);
+
+	pos += snprintf(out + pos, out_size - pos,
+		"Note: PC log offsets >=$10 are for the MASTER source at\n"
+		"$7F:2D15-2D18 (the MVN at $00:0EEA copies from there to\n"
+		"$7F:0C8B). Offsets >=$100 in the read log mark reads from\n"
+		"the master source.\n\n");
+
+	// Dump the captured PCs from the WRITE trap first -- those are the
+	// most valuable (they identify the cart-id computation function).
+	pos += snprintf(out + pos, out_size - pos,
+		"\nWrite trap PCs (BIOS code that WROTE to $7F:0C8B):\n");
+	if (xband_cartid_write_pc_count == 0)
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"  (none -- BIOS hasn't written $7F:0C8B yet)\n");
+	}
+	else
+	{
+		int wn = xband_cartid_write_pc_count;
+		if (wn > XBAND_CARTID_PC_LOG_SIZE) wn = XBAND_CARTID_PC_LOG_SIZE;
+		uint32 last_pc_w = 0xFFFFFFFF;
+		for (int i = 0; i < wn && pos + 400 < out_size; i++)
+		{
+			XBandCartIDReadEntry *e = &xband_cartid_write_pc_log[i];
+			pos += snprintf(out + pos, out_size - pos,
+				"  PC=$%06X  off=+%d val=$%02X  "
+				"A=$%04X X=$%04X Y=$%04X DBR=$%02X D=$%04X\n",
+				(unsigned)e->pc, (int)e->byte_off,
+				(unsigned)e->byte_val,
+				(unsigned)e->reg_a, (unsigned)e->reg_x,
+				(unsigned)e->reg_y, (unsigned)e->reg_db,
+				(unsigned)e->reg_d);
+			// Only print snapshot bytes once per unique PC.
+			if (e->pc != last_pc_w)
+			{
+				last_pc_w = e->pc;
+				pos += snprintf(out + pos, out_size - pos,
+					"    snapshot at trap (16 bytes before PC, *PC, 15 after):\n      ");
+				for (int j = 0; j < 32; j++)
+				{
+					int marker = (j == 16) ? '*' : ' ';
+					pos += snprintf(out + pos, out_size - pos,
+						"%c%02X", marker, (unsigned)e->pc_bytes[j]);
+				}
+				pos += snprintf(out + pos, out_size - pos, "\n");
+			}
+		}
+		pos += snprintf(out + pos, out_size - pos,
+			"  (total writes since reset: %u)\n",
+			(unsigned)xband_cartid_write_pc_count);
+	}
+
+	// Also dump the captured PCs from the read interceptor (if any).
+	pos += snprintf(out + pos, out_size - pos,
+		"\nRead interceptor PCs (BIOS code that read $7F:0C8B):\n");
+	if (xband_cartid_read_pc_count == 0)
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"  (none -- BIOS hasn't read $7F:0C8B yet, "
+			"or interceptor is disabled)\n");
+	}
+	else
+	{
+		int n = xband_cartid_read_pc_count;
+		if (n > XBAND_CARTID_PC_LOG_SIZE) n = XBAND_CARTID_PC_LOG_SIZE;
+		// Dedupe -- consecutive entries with the same PC are usually
+		// loop iterations and we only need the bytes at that PC once.
+		uint32 last_pc = 0xFFFFFFFF;
+		for (int i = 0; i < n; i++)
+		{
+			XBandCartIDReadEntry *e = &xband_cartid_read_pc_log[i];
+			pos += snprintf(out + pos, out_size - pos,
+				"  PC=$%06X  offset=+%d  value-returned=$%02X\n",
+				(unsigned)e->pc, (int)e->byte_off,
+				(unsigned)e->byte_val);
+			if (e->pc != last_pc)
+				last_pc = e->pc;
+		}
+		pos += snprintf(out + pos, out_size - pos,
+			"  (total reads since reset: %u)\n\n",
+			(unsigned)xband_cartid_read_pc_count);
+
+		// Dump WRAM bytes around each unique PC -- wider window so the
+		// instruction start (which is BEFORE the captured PC because
+		// snes9x advances PBPC during operand fetch) is included.
+		// The PCs live in $00:$0000-$1FFF which mirrors $7E:$0000-$1FFF,
+		// so we read directly from Memory.RAM.
+		//
+		// Also: since the BIOS copied this code from its firmware ROM
+		// into WRAM at boot, we search Memory.BIOSROM for the same
+		// 32-byte sequence that's around each PC. If we find a match,
+		// the firmware offset gives us a stable reference to disassemble
+		// against -- much easier than reading WRAM that gets reused.
+		pos += snprintf(out + pos, out_size - pos,
+			"WRAM bytes around captured PCs (-64..+96 = 160 bytes):\n"
+			"  (instr start is N bytes BEFORE the * marker, where N is\n"
+			"   the size of whatever instruction read $7F:0C8B)\n");
+		uint32 dumped[XBAND_CARTID_PC_LOG_SIZE];
+		int dumped_n = 0;
+		for (int i = 0; i < n && pos + 512 < out_size; i++)
+		{
+			uint32 pc = xband_cartid_read_pc_log[i].pc;
+			bool seen = false;
+			for (int j = 0; j < dumped_n; j++)
+				if (dumped[j] == pc) { seen = true; break; }
+			if (seen) continue;
+			if (dumped_n < (int)XBAND_CARTID_PC_LOG_SIZE)
+				dumped[dumped_n++] = pc;
+
+			uint16 lo  = (uint16)(pc & 0xFFFF);
+			uint8  bnk = (uint8)((pc >> 16) & 0xFF);
+			if (bnk != 0 || lo > 0x1FFF || !Memory.RAM)
+			{
+				pos += snprintf(out + pos, out_size - pos,
+					"  PC=$%06X (not in low WRAM mirror, skipping)\n",
+					(unsigned)pc);
+				continue;
+			}
+			pos += snprintf(out + pos, out_size - pos,
+				"\n  PC=$%06X (linear $%05X in WRAM):\n",
+				(unsigned)pc, (unsigned)lo);
+			int start = (int)lo - 64;
+			int end   = (int)lo + 96;
+			if (start < 0) start = 0;
+			if (end > 0x2000) end = 0x2000;
+			for (int row = start; row < end; row += 16)
+			{
+				pos += snprintf(out + pos, out_size - pos,
+					"    $7E:$%04X: ", row);
+				for (int col = 0; col < 16; col++)
+				{
+					if (row + col >= end) break;
+					int marker = (row + col == (int)lo) ? '*' : ' ';
+					pos += snprintf(out + pos, out_size - pos,
+						"%c%02X", marker,
+						(unsigned)Memory.RAM[row + col]);
+				}
+				pos += snprintf(out + pos, out_size - pos, "\n");
+			}
+
+			// Search BIOS firmware for the same 32-byte chunk around
+			// the PC. If the BIOS copied this code from firmware to
+			// WRAM, the chunk will appear once in firmware and we can
+			// give the user a stable BIOS offset to look at.
+			//
+			// In multicart mode (cartType == 6), the BIOS lives at
+			// Memory.ROM + Multi.cartOffsetA. Otherwise it's in
+			// Memory.BIOSROM (standalone load path).
+			uint8 *bios_base = NULL;
+			int firmware_size = 0x100000;
+			if (Multi.cartType == 6 && Memory.ROM)
+				bios_base = Memory.ROM + Multi.cartOffsetA;
+			else if (Memory.BIOSROM)
+				bios_base = Memory.BIOSROM;
+			if (bios_base && lo >= 16 && lo + 16 < 0x2000)
+			{
+				uint8 chunk[32];
+				memcpy(chunk, Memory.RAM + lo - 16, 32);
+				int firmware_hits = 0;
+				int first_hit = -1;
+				for (int o = 0; o + 32 <= firmware_size; o++)
+				{
+					if (memcmp(bios_base + o, chunk, 32) == 0)
+					{
+						firmware_hits++;
+						if (first_hit < 0) first_hit = o;
+						if (firmware_hits >= 4) break;
+					}
+				}
+				if (firmware_hits > 0)
+					pos += snprintf(out + pos, out_size - pos,
+						"  -> matches BIOS firmware offset $%05X (%d hit%s total)\n",
+						(unsigned)first_hit, firmware_hits,
+						firmware_hits == 1 ? "" : "s");
+				else
+					pos += snprintf(out + pos, out_size - pos,
+						"  -> no match in BIOS firmware (code may be runtime-generated)\n");
+			}
+		}
+	}
+	return;
+
+	// Old detailed search kept below for reference -- not reached.
+	const uint8 target[4] = { 0xF7, 0x2B, 0x5D, 0x1A };
+	int total_hits = 0;
+
+	// 1. WRAM ($7E:$0000 - $7F:$FFFF) -- 128 KB main system RAM
+	if (Memory.RAM)
+	{
+		int hits_here = 0;
+		for (int i = 0; i + 4 <= 0x20000; i++)
+		{
+			if (Memory.RAM[i + 0] == target[0] &&
+			    Memory.RAM[i + 1] == target[1] &&
+			    Memory.RAM[i + 2] == target[2] &&
+			    Memory.RAM[i + 3] == target[3])
+			{
+				if (hits_here < 8)
+				{
+					uint32 bank = (i >> 16) & 1;
+					uint32 addr = i & 0xFFFF;
+					pos += snprintf(out + pos, out_size - pos,
+						"  WRAM   $7%c:$%04X (linear $%05X)\n",
+						bank ? 'F' : 'E', addr, i);
+				}
+				hits_here++;
+				total_hits++;
+			}
+		}
+		if (hits_here > 8)
+			pos += snprintf(out + pos, out_size - pos,
+				"  WRAM   ... and %d more\n", hits_here - 8);
+		if (hits_here == 0)
+			pos += snprintf(out + pos, out_size - pos,
+				"  WRAM   (no match in 128 KB)\n");
+	}
+
+	// 2. XBAND SRAM (64 KB)
+	{
+		int hits_here = 0;
+		for (int i = 0; i + 4 <= XBAND_SRAM_SIZE; i++)
+		{
+			if (XBand.sram[i + 0] == target[0] &&
+			    XBand.sram[i + 1] == target[1] &&
+			    XBand.sram[i + 2] == target[2] &&
+			    XBand.sram[i + 3] == target[3])
+			{
+				if (hits_here < 8)
+					pos += snprintf(out + pos, out_size - pos,
+						"  SRAM   $%04X\n", i);
+				hits_here++;
+				total_hits++;
+			}
+		}
+		if (hits_here > 8)
+			pos += snprintf(out + pos, out_size - pos,
+				"  SRAM   ... and %d more\n", hits_here - 8);
+		if (hits_here == 0)
+			pos += snprintf(out + pos, out_size - pos,
+				"  SRAM   (no match in 64 KB)\n");
+	}
+
+	// 3. Fred general register file (224 bytes)
+	{
+		int hits_here = 0;
+		for (int i = 0; i + 4 <= XBAND_FRED_REGS; i++)
+		{
+			if (XBand.regs[i + 0] == target[0] &&
+			    XBand.regs[i + 1] == target[1] &&
+			    XBand.regs[i + 2] == target[2] &&
+			    XBand.regs[i + 3] == target[3])
+			{
+				pos += snprintf(out + pos, out_size - pos,
+					"  Fred   reg[$%02X..$%02X]\n", i, i + 3);
+				hits_here++;
+				total_hits++;
+			}
+		}
+		if (hits_here == 0)
+			pos += snprintf(out + pos, out_size - pos,
+				"  Fred   (no match in 224 regs)\n");
+	}
+
+	// 4. Modem register file (32 bytes)
+	{
+		int hits_here = 0;
+		for (int i = 0; i + 4 <= XBAND_MODEM_REGS; i++)
+		{
+			if (XBand.modem_regs[i + 0] == target[0] &&
+			    XBand.modem_regs[i + 1] == target[1] &&
+			    XBand.modem_regs[i + 2] == target[2] &&
+			    XBand.modem_regs[i + 3] == target[3])
+			{
+				pos += snprintf(out + pos, out_size - pos,
+					"  Modem  reg[$%02X..$%02X]\n", i, i + 3);
+				hits_here++;
+				total_hits++;
+			}
+		}
+		if (hits_here == 0)
+			pos += snprintf(out + pos, out_size - pos,
+				"  Modem  (no match in 32 regs)\n");
+	}
+
+	pos += snprintf(out + pos, out_size - pos,
+		"\nTotal: %d match(es) found.\n", total_hits);
+
+	if (total_hits == 0)
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"\nThe value isn't cached in any of the regions we\n"
+			"searched. Possible causes:\n"
+			"  - Cached in BIOS-private RAM that mirrors WRAM\n"
+			"  - Stored byte-swapped or in another encoding\n"
+			"  - Computed on-the-fly each time (no cache)\n"
+			"  - Using a different value than $F7 $2B $5D $1A\n"
+			"    (the value might depend on what triggered the\n"
+			"    boot path -- run this AFTER reaching the main menu)\n");
+	}
+	else
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"\nNext step: find which match the BIOS reads when you\n"
+			"click Challenge. We can write a debugger trap on each\n"
+			"candidate location to identify the right one, then\n"
+			"overwrite it with $D8 $22 $21 $03 (SSF2 Japan) before\n"
+			"clicking Challenge.\n");
+	}
+}
+
 // Public toggle for the connID source -- LIVE_SRV (default) vs BOX
 // (xbsega echo-back model). Cycles between the two each time it's
 // called. Used by the menu A/B test.
@@ -1953,6 +3225,33 @@ void S9xXBandFakeToggleConnIDSource (void)
 		(xband_fake_connid_source == XBAND_FAKE_CONNID_LIVE_SRV)
 		? XBAND_FAKE_CONNID_BOX
 		: XBAND_FAKE_CONNID_LIVE_SRV;
+}
+
+// Post-Challenge "advance" reply.
+//
+// First attempt sent msGamePatch (op $03) with length=0, hoping the
+// BIOS would interpret it as "game accepted, no patch needed". The
+// BIOS instead **panicked**: ran straight into its fatal-error
+// handler at $D0:3AD8 which wipes XBAND SRAM byte 0, disables IRQs,
+// and STPs the CPU. Confirmed empty msGamePatch is poison: the BIOS
+// validates the patch contents (probably CRC + cart-hash match) and
+// fails recovery on bad input. Lesson: do not send a msGamePatch
+// without a real patch payload tied to the actual cart hash.
+//
+// Safer behavior: send just msEndOfStream. We already proved
+// (Phase A) that bare msEndOfStream advances the BIOS state machine
+// without triggering validation. The BIOS interprets it as "the
+// server has finished its current reply stream, proceed".
+//
+// If you want to play with msGamePatch in the future, the format
+// likely needs at minimum: 4-byte length, 4-byte cart-hash the
+// patch is for, N bytes of patch data, possibly a CRC. Get any of
+// those wrong and the BIOS will hard-panic again.
+bool S9xXBandFakeInjectGameSupported (void)
+{
+	uint8 body[2];
+	body[0] = 0x02;  // msEndOfStream
+	return S9xXBandFakeInject(body[0], NULL, 0);
 }
 
 // Inject a "post-login canned response" that bundles several
@@ -2013,6 +3312,325 @@ const char *S9xXBandFakeConnIDSourceLabel (void)
 	return (xband_fake_connid_source == XBAND_FAKE_CONNID_BOX)
 		? "BOX (xbsega echo-back)"
 		: "SRV (Apple ADSP standard)";
+}
+
+// ================================================================
+// Auto-sequencing fake server. Instead of dumping all messages at
+// once, injects them in rounds and waits for the BIOS to respond
+// between each round. Hooked into the kreadmstatus2 poll so it
+// fires while the BIOS is actively checking for RX data.
+// ================================================================
+static void xband_force_prime_sniff_state (void); // forward decl
+enum {
+	FAKESVR_OFF = 0,
+	FAKESVR_LOGIN_REPLY,       // inject login reply
+	FAKESVR_WAIT_BIOS1,        // wait for BIOS to respond
+	FAKESVR_SEND_NGP,          // inject NGP list
+	FAKESVR_WAIT_BIOS2,        // wait for BIOS to respond
+	FAKESVR_SEND_PATCH,        // inject game patch (chunked)
+	FAKESVR_WAIT_BIOS3,        // wait for BIOS to respond
+	FAKESVR_SEND_MATCHMAKING,  // inject msWaitForOpponent
+	FAKESVR_DONE
+};
+static int    fakesvr_state = FAKESVR_OFF;
+static uint32 fakesvr_tx_baseline = 0; // TX bytes at start of wait
+static uint32 fakesvr_poll_count = 0;  // polls since entering wait
+
+void S9xXBandFakeServerStart (void)
+{
+	// Force-prime ADSP state for inject.
+	xband_force_prime_sniff_state();
+	fakesvr_state = FAKESVR_LOGIN_REPLY;
+	fakesvr_poll_count = 0;
+	fakesvr_tx_baseline = xband_sniff_box_data_total;
+}
+
+void S9xXBandFakeServerStop (void)
+{
+	fakesvr_state = FAKESVR_OFF;
+}
+
+int S9xXBandFakeServerState (void)
+{
+	return fakesvr_state;
+}
+
+// Called from the kreadmstatus2 handler on every BIOS poll.
+static void xband_fake_server_tick (void)
+{
+	// How many TX bytes the BIOS has sent since our last wait baseline.
+	uint32 tx_growth = xband_sniff_box_data_total - fakesvr_tx_baseline;
+
+	switch (fakesvr_state)
+	{
+	case FAKESVR_LOGIN_REPLY:
+	{
+		// Round 1: login reply
+		uint8 body[64];
+		int o = 0;
+		body[o++] = 0x04; // msSetDateAndTime
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x59; body[o++] = 0xC3;
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x31; body[o++] = 0xDC;
+		body[o++] = 0x3E; // msSetCurrentUserNumber
+		body[o++] = 0x00;
+		body[o++] = 0x3B; // msReceiveValidationToken
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x17; // msClearSendQ
+		body[o++] = 0x02; // msEndOfStream
+		S9xXBandFakeInject(body[0], body + 1, o - 1);
+		fakesvr_state = FAKESVR_WAIT_BIOS1;
+		fakesvr_tx_baseline = xband_sniff_box_data_total;
+		fakesvr_poll_count = 0;
+		break;
+	}
+	case FAKESVR_WAIT_BIOS1:
+	case FAKESVR_WAIT_BIOS2:
+	case FAKESVR_WAIT_BIOS3:
+	{
+		fakesvr_poll_count++;
+		// Advance when the BIOS has sent >50 new TX bytes (it
+		// responded to our inject) OR after ~3 seconds of polling
+		// (~50000 polls at ~16k polls/frame * 60fps).
+		if (tx_growth > 50 || fakesvr_poll_count > 50000)
+		{
+			if (fakesvr_state == FAKESVR_WAIT_BIOS1)
+				fakesvr_state = FAKESVR_SEND_NGP;
+			else if (fakesvr_state == FAKESVR_WAIT_BIOS2)
+				fakesvr_state = FAKESVR_SEND_PATCH;
+			else
+				fakesvr_state = FAKESVR_SEND_MATCHMAKING;
+			fakesvr_tx_baseline = xband_sniff_box_data_total;
+			fakesvr_poll_count = 0;
+		}
+		break;
+	}
+	case FAKESVR_SEND_NGP:
+	{
+		// Round 2: NGP game list
+		uint8 body[128];
+		int o = 0;
+		body[o++] = 0x0F; // msNewNGPList
+		body[o++] = 0x00; body[o++] = 0x10; // length = 16
+		body[o++] = 0x00; body[o++] = 0x01; // count = 1
+		body[o++] = 0x00; body[o++] = 0x01; // version = 1
+		body[o++] = 0xD8; body[o++] = 0x22; // GameID $D8222103
+		body[o++] = 0x21; body[o++] = 0x03;
+		body[o++] = 0x00; body[o++] = 0x00; // flags
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x00; body[o++] = 0x00; // patch version = 1
+		body[o++] = 0x00; body[o++] = 0x01;
+		body[o++] = 0x00; body[o++] = 0x18; // title len = 24
+		const char *title = "Super Street Fighter 2";
+		int tlen = (int)strlen(title);
+		for (int i = 0; i < 24; i++)
+			body[o++] = (i < tlen) ? (uint8)title[i] : 0x00;
+		body[o++] = 0x02; // msEndOfStream
+		S9xXBandFakeInject(body[0], body + 1, o - 1);
+		fakesvr_state = FAKESVR_WAIT_BIOS2;
+		fakesvr_tx_baseline = xband_sniff_box_data_total;
+		fakesvr_poll_count = 0;
+		break;
+	}
+	case FAKESVR_SEND_PATCH:
+	{
+		// Round 3: SSF2 game patch (chunked)
+		std::string path = S9xGetDirectory(BIOS_DIR);
+		path += SLASH_STR;
+		path += "SSF2.JSNES";
+		uint8 patch[8192];
+		int patch_len = xband_read_file(path.c_str(), patch,
+		                                (int)sizeof(patch));
+		if (patch_len > 0)
+			xband_fake_inject_chunked(patch, patch_len, "SSF2.JSNES");
+		fakesvr_state = FAKESVR_WAIT_BIOS3;
+		fakesvr_tx_baseline = xband_sniff_box_data_total;
+		fakesvr_poll_count = 0;
+		break;
+	}
+	case FAKESVR_SEND_MATCHMAKING:
+	{
+		// Round 4: matchmaking
+		uint8 body[8];
+		int o = 0;
+		body[o++] = 0x1C; // msWaitForOpponent
+		body[o++] = 0x02; // msEndOfStream
+		S9xXBandFakeInject(body[0], body + 1, o - 1);
+		fakesvr_state = FAKESVR_DONE;
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+// Force-prime the ADSP sniffer state so injects work even without a
+// real server connection. Uses sensible defaults (bsnes-plus connID
+// $08C8, seq 0, generous window). Call this before any inject when
+// the sniffer state hasn't been populated (box: ?? in the kctl trace).
+static void xband_force_prime_sniff_state (void)
+{
+	if (!xband_sniff_box_seen)
+	{
+		xband_sniff_box_conn_id   = 0x08C8;
+		xband_sniff_box_first_seq = 0;
+		xband_sniff_box_next_recv = 0;
+		xband_sniff_box_recv_win  = 0x7FFF;
+		xband_sniff_box_data_total = 0;
+		xband_sniff_box_seen      = true;
+	}
+	if (!xband_sniff_srv_seen)
+	{
+		xband_sniff_srv_conn_id   = 0x08C8;
+		xband_sniff_srv_first_seq = 0;
+		xband_sniff_srv_next_recv = 0;
+		xband_sniff_srv_recv_win  = 0x7FFF;
+		xband_sniff_srv_data_total = 0;
+		xband_sniff_srv_seen      = true;
+	}
+	// The BIOS only polls Fred reg $98 (kreadmstatus2) for RX data
+	// when net_step > 0. Without a real TCP connection, net_step
+	// stays at IDLE and our injected bytes sit unread in the rxbuf.
+	// Force CONNECTED so the BIOS will actually read our inject.
+	if (XBand.net_step == XBAND_NET_IDLE)
+		XBand.net_step = XBAND_NET_CONNECTED;
+}
+
+// Inject a complete "login + matchmaking" server response in one shot.
+// This bundles everything the server would send after the BIOS dumps
+// its initial data stream: login confirmation, the NGP game list with
+// SSF2 Japan ($F72B5D1A), and a wait-for-opponent command.
+//
+// The BIOS sends msBoxType + msLogin + msGAMEIDAndPatchVersion +
+// msChallengeRequest and then waits. This reply tells it: "login OK,
+// SSF2 is a supported game, please wait for an opponent." That should
+// trigger the "Would you like to practice <game> while XBAND searches
+// for an opponent?" screen.
+//
+// Message sequence (all RX, server→box):
+//   1. msSetDateAndTime      ($04) — login ack
+//   2. msSetCurrentUserNumber($3E) — select profile 0
+//   3. msReceiveValidationToken($3B) — token
+//   4. msClearSendQ          ($17) — stop sending data to server
+//   5. msEndOfStream         ($02) — end login batch
+//   --- second batch ---
+//   6. msNewNGPList          ($0F) — SSF2 in the available games list
+//   7. msEndOfStream         ($02) — end batch
+//   --- third batch ---
+//   8. msWaitForOpponent     ($1C) — enter matchmaking
+//   9. msEndOfStream         ($02) — end batch
+bool S9xXBandFakeInjectMatchmaking (void)
+{
+	// Force-prime ADSP state so inject doesn't fail with
+	// "no box frames sniffed yet".
+	xband_force_prime_sniff_state();
+
+	bool ok = true;
+
+	// === BATCH 1: Login reply ===
+	{
+		uint8 body[64];
+		int o = 0;
+		// msSetDateAndTime ($04) + 4 bytes date + 5 bytes time
+		body[o++] = 0x04;
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x59; body[o++] = 0xC3;
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x31; body[o++] = 0xDC;
+		// msSetCurrentUserNumber ($3E) + 1 byte profile
+		body[o++] = 0x3E;
+		body[o++] = 0x00;
+		// msReceiveValidationToken ($3B) + 4 zero bytes
+		body[o++] = 0x3B;
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x00; body[o++] = 0x00;
+		// msClearSendQ ($17)
+		body[o++] = 0x17;
+		// msEndOfStream ($02)
+		body[o++] = 0x02;
+		if (!S9xXBandFakeInject(body[0], body + 1, o - 1))
+			ok = false;
+	}
+
+	// === BATCH 2: NGP game list with SSF2 Japan ===
+	{
+		uint8 body[128];
+		int o = 0;
+		// msNewNGPList ($0F)
+		// Format from sample_packets.txt:
+		//   Opcode + LenToNextLen(short) + Count(short) + Version(short)
+		//   + GameID(long) + Gameflags(long) + PatchVersion(long)
+		//   + TitleLen(short) + Title(bytes)
+		body[o++] = 0x0F;
+		// LenToNextLen = 16 (covers Count+Version+GameID+Flags+PatchVer)
+		body[o++] = 0x00; body[o++] = 0x10;
+		// Count = 1
+		body[o++] = 0x00; body[o++] = 0x01;
+		// Version = 1
+		body[o++] = 0x00; body[o++] = 0x01;
+		// GameID = $D8222103 (SSF2 Japan — must match the GameID
+		// inside the SSF2.JSNES patch file header, NOT the BIOS's
+		// internal cart-id $F72B5D1A which is a different identifier).
+		body[o++] = 0xD8; body[o++] = 0x22;
+		body[o++] = 0x21; body[o++] = 0x03;
+		// Gameflags = 0
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x00; body[o++] = 0x00;
+		// PatchVersion = 1
+		body[o++] = 0x00; body[o++] = 0x00;
+		body[o++] = 0x00; body[o++] = 0x01;
+		// TitleLen = 24
+		body[o++] = 0x00; body[o++] = 0x18;
+		// Title = "Super Street Fighter 2\0" (24 bytes padded)
+		const char *title = "Super Street Fighter 2";
+		int tlen = (int)strlen(title);
+		for (int i = 0; i < 24; i++)
+			body[o++] = (i < tlen) ? (uint8)title[i] : 0x00;
+		// msEndOfStream ($02)
+		body[o++] = 0x02;
+		if (!S9xXBandFakeInject(body[0], body + 1, o - 1))
+			ok = false;
+	}
+
+	// === BATCH 3: SSF2 game patch (msGamePatch, ~3.3 KB chunked) ===
+	// The patch file SSF2.JSNES is a complete ServerTalk message:
+	//   $03 (opcode) + 4-byte GameID + patch version + type + length +
+	//   controller-injection code + $02 (msEndOfStream).
+	// Load from BIOS_DIR and inject via the chunked path.
+	{
+		std::string path = S9xGetDirectory(BIOS_DIR);
+		path += SLASH_STR;
+		path += "SSF2.JSNES";
+
+		uint8 patch[8192];
+		int patch_len = xband_read_file(path.c_str(), patch,
+		                                (int)sizeof(patch));
+		if (patch_len > 0)
+		{
+			int segments = xband_fake_inject_chunked(patch, patch_len,
+			                                          "SSF2.JSNES");
+			if (segments <= 0)
+				ok = false;
+		}
+		// If SSF2.JSNES not found, continue anyway — the login + NGP
+		// messages might be enough to advance the BIOS.
+	}
+
+	// === BATCH 4: Wait for opponent (matchmaking) ===
+	{
+		uint8 body[8];
+		int o = 0;
+		// msWaitForOpponent ($1C)
+		body[o++] = 0x1C;
+		// msEndOfStream ($02)
+		body[o++] = 0x02;
+		if (!S9xXBandFakeInject(body[0], body + 1, o - 1))
+			ok = false;
+	}
+
+	return ok;
 }
 
 void S9xXBandKCtlReset (void)
@@ -2244,6 +3862,114 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 	// succeed -- if they're zero, the BIOS hasn't talked to the server
 	// yet (and our injects will use the wrong ConnID).
 	pos += snprintf(out + pos, out_size - pos,
+		"Fred bank-mux (cart-detection swap):\n"
+		"  enabled         = %s\n"
+		"  swaps observed  = %u\n"
+		"  last swap       = %s\n"
+		"\n",
+		xband_bankmux_enabled ? "ON" : "OFF",
+		(unsigned)xband_bankmux_swaps,
+		xband_bankmux_last);
+
+	// BIOS firmware scan results. Populated by memmap.cpp's
+	// dialog-trigger scanner at multi-cart load time. Empty unless
+	// a multi-cart was loaded this session.
+	if (xband_dialog_scan_buf[0])
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"BIOS firmware scan (dialog-trigger search):\n"
+			"%s\n",
+			xband_dialog_scan_buf);
+	}
+
+	// kDispatcherVector log. Every JSL $E0:$0040 in BIOS code lands
+	// in our trap (cpuexec.cpp) and gets logged here. We track UNIQUE
+	// (caller, funcID) pairs in chronological order of first
+	// occurrence with hit counters; idle loops don't flood the buffer
+	// because each entry is stored only once. The early entries in
+	// the buffer are the BIOS boot sequence -- find the first entry
+	// that looks like the dialog/game-check there.
+	if (xband_dispatch_total_calls > 0)
+	{
+		pos += snprintf(out + pos, out_size - pos,
+			"kDispatcherVector ($E0:$0040) call log:\n"
+			"  total raw calls   = %llu\n"
+			"  unique call sites = %u (max %u, overflow=%u)\n\n",
+			(unsigned long long)xband_dispatch_total_calls,
+			(unsigned)xband_dispatch_log_count,
+			(unsigned)XBAND_DISPATCH_LOG_SIZE,
+			(unsigned)xband_dispatch_overflow);
+
+		// Top-10 funcID histogram (consumes the histogram buckets to
+		// find the top entries; we restore zeros after).
+		pos += snprintf(out + pos, out_size - pos,
+			"  top-called function IDs:\n");
+		uint64 saved_counts[10];
+		int saved_ids[10];
+		int saved_n = 0;
+		for (int top = 0; top < 10; top++)
+		{
+			uint64 best = 0;
+			int best_id = -1;
+			for (int i = 0; i < XBAND_DISPATCH_FUNCID_BUCKETS; i++)
+			{
+				if (xband_dispatch_funcid_count[i] > best)
+				{
+					best = xband_dispatch_funcid_count[i];
+					best_id = i;
+				}
+			}
+			if (best_id < 0) break;
+			pos += snprintf(out + pos, out_size - pos,
+				"    funcID $%04X : %llu calls\n",
+				(unsigned)best_id, (unsigned long long)best);
+			saved_counts[saved_n] = best;
+			saved_ids[saved_n] = best_id;
+			saved_n++;
+			xband_dispatch_funcid_count[best_id] = 0; // consume
+		}
+		// Restore so subsequent dumps still see them.
+		for (int i = 0; i < saved_n; i++)
+			xband_dispatch_funcid_count[saved_ids[i]] = saved_counts[i];
+
+		// First-seen ordering: dump entries in the order they were
+		// added to the buffer. Entries near the start are early-boot
+		// calls; the show-dialog call should appear in there as a
+		// LOW-hit-count entry (since the dialog is shown only once).
+		pos += snprintf(out + pos, out_size - pos,
+			"\n  unique call sites in first-seen order"
+			" (low-hit entries are interesting):\n");
+		for (uint32 i = 0; i < xband_dispatch_log_count &&
+		                   pos + 200 < out_size; i++)
+		{
+			XBandDispatchEntry *e = &xband_dispatch_log[i];
+			uint8 caller_bank = (uint8)((e->caller >> 16) & 0xFF);
+			uint16 caller_addr = (uint16)(e->caller & 0xFFFF);
+			pos += snprintf(out + pos, out_size - pos,
+				"    [#%-4u hits=%-7u] caller=$%02X:$%04X"
+				"  funcID=$%04X  A0=$%04X  Aend=$%04X\n",
+				(unsigned)(i + 1),
+				(unsigned)e->hits,
+				(unsigned)caller_bank,
+				(unsigned)caller_addr,
+				(unsigned)e->func_id,
+				(unsigned)e->a_first,
+				(unsigned)e->a_last);
+		}
+		pos += snprintf(out + pos, out_size - pos, "\n");
+	}
+
+	pos += snprintf(out + pos, out_size - pos,
+		"TX GameID spoofer ($0C $F7$2B$5D$1A -> $D8$22$21$03):\n"
+		"  enabled         = %s\n"
+		"  spoofs applied  = %u\n"
+		"  last spoof      = %s\n"
+		"\n",
+		xband_tx_gameid_spoof ? "ON" : "OFF",
+		(unsigned)xband_tx_gameid_spoof_count,
+		xband_tx_gameid_spoof_last);
+
+	pos += snprintf(out + pos, out_size - pos,
 		"Sniffed ADSP state (used by fake-server injector):\n"
 		"  box  : %s connID=$%04X first_seq=$%08X next_recv=$%08X "
 		"win=$%04X data_total=%u\n"
@@ -2251,6 +3977,7 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		"win=$%04X data_total=%u\n"
 		"  fake injects sent = %u\n"
 		"  last inject       = %s\n"
+		"  fake server state = %d (%s)\n"
 		"\n",
 		xband_sniff_box_seen ? "OK" : "??",
 		(unsigned)xband_sniff_box_conn_id,
@@ -2265,7 +3992,17 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		(unsigned)xband_sniff_srv_recv_win,
 		(unsigned)xband_sniff_srv_data_total,
 		(unsigned)xband_fake_inject_count,
-		xband_fake_inject_last);
+		xband_fake_inject_last,
+		fakesvr_state,
+		(fakesvr_state == FAKESVR_OFF)             ? "OFF" :
+		(fakesvr_state == FAKESVR_LOGIN_REPLY)     ? "LOGIN_REPLY" :
+		(fakesvr_state == FAKESVR_WAIT_BIOS1)      ? "WAIT_BIOS1" :
+		(fakesvr_state == FAKESVR_SEND_NGP)        ? "SEND_NGP" :
+		(fakesvr_state == FAKESVR_WAIT_BIOS2)      ? "WAIT_BIOS2" :
+		(fakesvr_state == FAKESVR_SEND_PATCH)      ? "SEND_PATCH" :
+		(fakesvr_state == FAKESVR_WAIT_BIOS3)      ? "WAIT_BIOS3" :
+		(fakesvr_state == FAKESVR_SEND_MATCHMAKING) ? "SEND_MATCHMAKING" :
+		(fakesvr_state == FAKESVR_DONE)            ? "DONE" : "?");
 
 	// Per-opcode RX/TX counter table. Shows every opcode that has been
 	// seen at least once in either direction. Header-only frames (no
@@ -3077,6 +4814,12 @@ uint8 S9xGetXBand (uint32 address)
 			// Polled in tight loops inside _PUVBLCallback. bsnes-plus
 			// caps consecutive "yes" responses at 127 to break infinite
 			// poll loops (fixes a kFifoOverflowErr panic).
+
+			// Auto-sequencing fake server: tick on every poll so we
+			// inject at the right time (BIOS is actively checking).
+			if (fakesvr_state > FAKESVR_OFF && fakesvr_state < FAKESVR_DONE)
+				xband_fake_server_tick();
+
 			if (XBand.net_step && xband_rxbuf_has_data())
 			{
 				XBand.consecutive_reads++;
@@ -3111,15 +4854,32 @@ uint8 S9xGetXBand (uint32 address)
 		}
 		else if (reg >= 0xC0)
 		{
-			// Rockwell modem register file at modem_reg = reg - $C0
+			// Rockwell modem register file at modem_reg = reg - $C0.
+			// Some return values are "magic constants" the BIOS expects
+			// to see during boot-time cart-detection (per the
+			// commented-out mcu_access in bsnes-plus xband_gameplay
+			// xband_cart.cpp). Without these, the BIOS shows
+			// "This game may not be available" even with a supported
+			// cart loaded.
 			uint8 modemreg = (uint8)(reg - 0xC0);
 			uint8 ret = 0;
 			switch (modemreg)
 			{
+				case 0x04:
+					// bsnes "$188 -> 0x00" -- return 0 (default)
+					ret = 0x00;
+					break;
 				case 0x09:
-					ret = XBand.modem_regs[modemreg];
+					// bsnes "$192 -> 0xff". Previously we returned the
+					// last-written value which was usually 0; the BIOS
+					// expects 0xff here for a valid XBAND state.
+					ret = 0xFF;
 					break;
 				case 0x0B:
+					// bsnes "$196 DIAL-UP! -> 0x80". OR with our
+					// state-machine bits so dialing/ATV25 still works
+					// for the network side.
+					ret = 0x80;
 					if (XBand.modem_line_relay) ret |= (1 << 7); // TONEA
 					if (XBand.modem_set_ATV25)
 					{
@@ -3136,8 +4896,16 @@ uint8 S9xGetXBand (uint32 address)
 				case 0x0F:
 					ret |= (1 << 7) | (1 << 5); // RLSD + CTS — "modem alive"
 					break;
-				case 0x19: // X-RAM Data
-					ret = XBand.modem_regs[modemreg];
+				case 0x18:
+					// bsnes "$1b0 -> 0xff" -- not previously handled.
+					ret = 0xFF;
+					break;
+				case 0x19: // X-RAM Data / "For running XBAND"
+					// bsnes "$1b2 -> 0x46". We initialize modem_regs[$19]
+					// to $46 in S9xResetXBand so the previous read-as-
+					// last-written approach also returned $46 by default.
+					// Make it explicit so it survives writes.
+					ret = 0x46;
 					break;
 				case 0x1C:
 					ret = XBand.modem_regs[0x1C];
@@ -3146,7 +4914,10 @@ uint8 S9xGetXBand (uint32 address)
 					ret = XBand.modem_regs[0x1D];
 					break;
 				case 0x1E:
-					ret = XBand.modem_regs[0x1E] | (1 << 3); // TDBE (TX always empty)
+					// bsnes "$1bc -> 0x08". Bit 3 is TDBE (transmitter
+					// data buffer empty). We OR our last-written value
+					// with bit 3 so TDBE is always asserted.
+					ret = XBand.modem_regs[0x1E] | (1 << 3);
 					break;
 				case 0x1F:
 					ret = XBand.modem_regs[0x1F];
@@ -3375,7 +5146,46 @@ void S9xSetXBand (uint8 byte, uint32 address)
 	if (bank == XBAND_MMIO_BANK && offset == 0xFE01)
 	{
 		S9xXBandKCtlLog(address, byte, true);
+		uint8 prev = XBand.kill;
 		XBand.kill = byte;
+
+		// Fred bank-mux: writing a non-zero value to the kill
+		// register electrically detaches the BIOS ROM from the
+		// SNES cartridge bus and exposes the game cart in slot B
+		// instead. Writing zero restores the BIOS view. The BIOS
+		// jumps to a small WRAM trampoline before flipping the
+		// bit so it doesn't disappear out from under itself.
+		// We track the transition (not the value) so multiple
+		// writes of the same value don't keep re-mapping.
+		if (xband_bankmux_enabled &&
+		    (prev == 0) != (byte == 0))
+		{
+			// Multi.cartType == 6 is the XBAND multicart loader (BIOS
+			// in slot A, game in slot B). The bank-mux only makes
+			// sense in that mode -- standalone XBAND has no game cart
+			// to swap to.
+			if (Multi.cartType == 6)
+			{
+				if (byte != 0)
+				{
+					Memory.Map_XBandMultiCartCartVisible();
+					snprintf(xband_bankmux_last,
+					         sizeof(xband_bankmux_last),
+					         "CART (kill=$%02X) PC=$%06X",
+					         (unsigned)byte,
+					         (unsigned)(Registers.PBPC & 0xFFFFFF));
+				}
+				else
+				{
+					Memory.Map_XBandMultiCartBiosVisible();
+					snprintf(xband_bankmux_last,
+					         sizeof(xband_bankmux_last),
+					         "BIOS (kill=$00) PC=$%06X",
+					         (unsigned)(Registers.PBPC & 0xFFFFFF));
+				}
+				xband_bankmux_swaps++;
+			}
+		}
 		return;
 	}
 	if (bank == XBAND_MMIO_BANK && offset == 0xFE03)
@@ -3632,6 +5442,10 @@ void S9xResetXBand (void)
 	xband_fake_inject_count    = 0;
 	xband_fake_send_seq        = 0;
 	xband_fake_send_seq_primed = false;
+	xband_cartid_read_pc_count = 0;
+	xband_cartid_write_pc_count = 0;
+	memset(xband_cartid_read_pc_log, 0, sizeof(xband_cartid_read_pc_log));
+	memset(xband_cartid_write_pc_log, 0, sizeof(xband_cartid_write_pc_log));
 	snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
 	         "(none)");
 
@@ -3965,25 +5779,76 @@ void S9xXBandPoll (void)
 			uint32 frame_len = end - start;
 			bool   was_real_frame = (XBand.txbuf[end - 2] == 0x10 &&
 			                          XBand.txbuf[end - 1] == 0x03);
+
+			// TX rewriter: if the GameID spoofer is enabled, rebuild
+			// the frame with $d8 22 21 03 instead of $f7 2b 5d 1a.
+			// `rewrite_buf` holds the new wire bytes; `send_data` /
+			// `send_len` point at either the rewritten or the original
+			// frame depending on whether rewriting actually triggered.
+			uint8 rewrite_buf[600];
+			const uint8 *send_data = XBand.txbuf + start;
+			int          send_len  = (int)frame_len;
+			bool         rewrote   = false;
+			if (xband_tx_gameid_spoof && was_real_frame)
+			{
+				int new_len = xband_tx_rewrite_gameid(
+					XBand.txbuf + start, (int)frame_len,
+					rewrite_buf, (int)sizeof(rewrite_buf));
+				if (new_len > 0)
+				{
+					send_data = rewrite_buf;
+					send_len  = new_len;
+					rewrote   = true;
+				}
+			}
+
 			int sent = (int)send(fd,
-				(const char *)(XBand.txbuf + start),
-				(int)frame_len, 0);
+				(const char *)send_data,
+				send_len, 0);
 			if (sent <= 0)
 				break;  // socket would block or broken
 
-			// Capture into the TX-first ring (up to limit).
+			// Partial send: in non-rewrite mode we'd retry the rest
+			// next poll. In rewrite mode, the partial bytes are from
+			// rewrite_buf which doesn't survive across calls -- so a
+			// partial send mid-rewrite means we drop the rest and the
+			// server gets a truncated frame. Since our frames are
+			// small (~125-600 bytes) on a non-blocking TCP socket,
+			// partial sends are extremely rare in practice. Log if
+			// it happens; otherwise treat the rewrite as fully sent.
+			if (sent < send_len)
+			{
+				if (rewrote)
+				{
+					// Rewrite was partial: count what got out, advance
+					// over the original frame proportionally, and bail.
+					XBand.txbufused += frame_len;
+					xband_sock_tx_bytes += sent;
+					break;
+				}
+				// Non-rewrite partial: original behavior.
+				XBand.txbufused += sent;
+				xband_sock_tx_bytes += sent;
+				break;
+			}
+
+			// Full send. Capture into the TX-first ring (up to limit).
+			// Always capture from the ORIGINAL frame so the kctl trace
+			// shows what the BIOS actually emitted, not the rewritten
+			// version. The rewrite is invisible to the local debug.
 			for (int i = 0;
-			     i < sent && xband_sock_tx_first_used < XBAND_SOCK_FIRST_SIZE;
+			     i < (int)frame_len &&
+			     xband_sock_tx_first_used < XBAND_SOCK_FIRST_SIZE;
 			     i++)
 				xband_sock_tx_first[xband_sock_tx_first_used++] =
 					XBand.txbuf[start + i];
 
-			XBand.txbufused += sent;
+			// Advance over the ORIGINAL frame's byte count, not the
+			// rewritten frame size. The BIOS's txbuf write pointer
+			// assumes its frame was sent in full and we must keep
+			// txbufused in sync with that view.
+			XBand.txbufused += frame_len;
 			xband_sock_tx_bytes += sent;
-
-			// Partial send? Stop here and retry on next poll.
-			if ((uint32)sent < frame_len)
-				break;
 
 			// Only count "real" \x10\x03-terminated frames; the
 			// safety-valve raw flushes don't have that suffix and

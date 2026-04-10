@@ -3346,6 +3346,7 @@ static int    xbsvr_state = XBSVR_OFF;
 static uint32 xbsvr_tx_baseline = 0;
 static uint32 xbsvr_poll_count = 0;
 static int    xbsvr_data_batch_count = 0;
+static int    xbsvr_connection_number = 0; // 1st connect = login, 2nd = challenge
 static bool   xbsvr_intercept_rx = false; // block real server RX
 
 // TX batch accumulator: opcodes seen in current BIOS batch.
@@ -3381,6 +3382,34 @@ static void xbsvr_log_append (bool is_tx, uint8 op, const char *fmt, ...)
 	va_end(ap);
 	xbsvr_log_head = (xbsvr_log_head + 1) % XBSVR_LOG_SIZE;
 	if (xbsvr_log_count < XBSVR_LOG_SIZE) xbsvr_log_count++;
+}
+
+// --- ADSP keepalive: header-only ack frame ---
+// Sends a descriptor-$80 frame with no data — just acknowledges
+// the BIOS's TX position so the ADSP session stays alive.
+static void xbsvr_send_keepalive (void)
+{
+	uint16 srv_conn = xband_sniff_srv_seen
+		? xband_sniff_srv_conn_id : (uint16)0x08C8;
+	uint32 ack_seq = xband_sniff_box_first_seq +
+	                 xband_sniff_box_data_total;
+	uint16 recv_win = 0x0400;
+
+	// Use our current fake send_seq (position in server→box stream).
+	if (!xband_fake_send_seq_primed)
+	{
+		xband_fake_send_seq        = xband_sniff_box_next_recv;
+		xband_fake_send_seq_primed = true;
+	}
+
+	uint8 wire[64];
+	int wire_len = xband_adsp_build_frame(
+		wire, (int)sizeof(wire),
+		srv_conn, xband_fake_send_seq, ack_seq, recv_win,
+		0x80,       // descriptor: header-only ack, no data
+		NULL, 0);   // no payload
+	if (wire_len > 0)
+		xband_inject_rxbuf_bytes(wire, wire_len);
 }
 
 // --- Response injection helpers ---
@@ -3497,6 +3526,12 @@ static void xband_server_tick (void)
 	if (xbsvr_state <= XBSVR_OFF) return;
 
 	xbsvr_poll_count++;
+
+	// Send ADSP keepalive acks periodically to prevent the BIOS's
+	// ADSP layer from timing out. Every ~200 ticks ≈ a few times
+	// per second. Runs in ALL states including MATCHMAKING.
+	if ((xbsvr_poll_count % 200) == 0 && xband_sniff_box_seen)
+		xbsvr_send_keepalive();
 	uint32 cur_tx_pos = xband_tx_stream_pos;
 	uint32 tx_growth = cur_tx_pos - xbsvr_last_tx_pos;
 
@@ -3505,35 +3540,37 @@ static void xband_server_tick (void)
 	case XBSVR_HANDSHAKE:
 		if (xband_sniff_box_seen)
 		{
-			xbsvr_log_append(false, 0, "ADSP handshake complete");
-			xbsvr_state = XBSVR_WAIT_LOGIN;
-			// Don't block real server RX — the BIOS needs ADSP ack
-			// frames from the real server to advance its send window.
-			// The real server sends zero ServerTalk data, so there's
-			// no conflict with our injected responses.
+			xbsvr_connection_number++;
+			xbsvr_log_append(false, 0,
+				"ADSP handshake complete (connection #%d)",
+				xbsvr_connection_number);
 			xbsvr_intercept_rx = false;
 			xbsvr_last_tx_pos = cur_tx_pos;
+			if (xbsvr_connection_number <= 1)
+			{
+				// First connection: full login reply
+				xbsvr_state = XBSVR_INJECT_LOGIN_REPLY;
+			}
+			else
+			{
+				// Challenge connection: per xbsega.go, just wait
+				// for dump then send msRegisterPlayer only.
+				xbsvr_state = XBSVR_WAIT_DATA;
+			}
 			xbsvr_poll_count = 0;
 		}
 		break;
 
-	case XBSVR_WAIT_LOGIN:
-		// Wait for the BIOS to send its login dump (>100 TX bytes).
-		// Use a pure timeout so continuous TX activity doesn't stall us.
-		if (cur_tx_pos > 100 && xbsvr_poll_count > 500)
+	// Auto-reset: if the server is past login and the BIOS reconnects
+	// (e.g. Challenge dial), detect the new handshake and restart.
+	case XBSVR_MATCHMAKING:
+		// Check if the BIOS dropped and reconnected. If TX stream
+		// resets (new connection), go back to HANDSHAKE.
+		if (!xband_sniff_box_seen)
 		{
-			xbsvr_log_append(true, 0, "TX login batch detected (%u bytes)",
-				(unsigned)cur_tx_pos);
-			xbsvr_state = XBSVR_INJECT_LOGIN_REPLY;
+			xbsvr_log_append(false, 0, "=== connection dropped, waiting for reconnect ===");
+			xbsvr_state = XBSVR_HANDSHAKE;
 			xbsvr_poll_count = 0;
-		}
-		// Periodic diagnostic every ~100000 polls (~few seconds).
-		if ((xbsvr_poll_count % 100000) == 99999)
-		{
-			xbsvr_log_append(false, 0,
-				"[diag] WAIT_LOGIN: tx_pos=%u polls=%u net_step=%d",
-				(unsigned)cur_tx_pos, (unsigned)xbsvr_poll_count,
-				(int)XBand.net_step);
 		}
 		break;
 
@@ -3546,9 +3583,10 @@ static void xband_server_tick (void)
 		break;
 
 	case XBSVR_WAIT_DATA:
-		// Wait for the BIOS data dump, then ack and proceed to game
-		// reply. Pure timeout — don't reset on TX growth.
-		if (xbsvr_poll_count > 500)
+		// Wait for the BIOS data dump. Give it plenty of time to
+		// process the login reply and show the "battery dead" dialog
+		// before we send anything else. ~5 seconds.
+		if (xbsvr_poll_count > 15000)
 		{
 			xbsvr_data_batch_count++;
 			xbsvr_log_append(true, 0, "TX data batch #%d (%u bytes total)",
@@ -3561,15 +3599,39 @@ static void xband_server_tick (void)
 		break;
 
 	case XBSVR_INJECT_DATA_ACK:
-		xbsvr_inject_data_ack();
-		if (xbsvr_data_batch_count == -1)
+		if (xbsvr_connection_number >= 2)
 		{
-			xbsvr_state = XBSVR_INJECT_NGP;
-			xbsvr_data_batch_count = 0;
+			// Challenge connection: per xbsega.go, send ONLY
+			// msRegisterPlayer + msEndOfStream. No login reply,
+			// no NGP, no game patch, no msWaitForOpponent.
+			uint8 reg_body[8];
+			int ro = 0;
+			reg_body[ro++] = 0x0E; // msRegisterPlayer
+			// Wait time matching xbsega.go: 0x01100000 ticks
+			reg_body[ro++] = 0x01;
+			reg_body[ro++] = 0x10;
+			reg_body[ro++] = 0x00;
+			reg_body[ro++] = 0x00;
+			reg_body[ro++] = 0x02; // msEndOfStream
+			S9xXBandFakeInject(reg_body[0], reg_body + 1, ro - 1);
+			xbsvr_log_append(false, 0x0E,
+				"RX msRegisterPlayer only (xbsega.go style)");
+			xbsvr_state = XBSVR_MATCHMAKING;
+			xbsvr_log_append(false, 0,
+				"=== SERVER: matchmaking active ===");
 		}
 		else
 		{
-			xbsvr_state = XBSVR_WAIT_DATA;
+			xbsvr_inject_data_ack();
+			if (xbsvr_data_batch_count == -1)
+			{
+				xbsvr_state = XBSVR_INJECT_NGP;
+				xbsvr_data_batch_count = 0;
+			}
+			else
+			{
+				xbsvr_state = XBSVR_WAIT_DATA;
+			}
 		}
 		xbsvr_tx_baseline = cur_tx_pos;
 		xbsvr_last_tx_pos = cur_tx_pos;
@@ -3589,7 +3651,7 @@ static void xband_server_tick (void)
 		// Pure timeout — don't reset on TX growth. The BIOS may be
 		// sending a second login dump (challenge reconnect) which
 		// would keep resetting the counter forever.
-		if (xbsvr_poll_count > 500)
+		if (xbsvr_poll_count > 5000)
 		{
 			xbsvr_state = (xbsvr_state == XBSVR_WAIT_NGP)
 				? XBSVR_INJECT_PATCH : XBSVR_INJECT_MATCHMAKING;
@@ -3607,10 +3669,26 @@ static void xband_server_tick (void)
 		break;
 
 	case XBSVR_INJECT_MATCHMAKING:
+	{
+		// msRegisterPlayer ($0E) + 4-byte wait time — tells the BIOS
+		// "you're registered, wait N seconds." Must come BEFORE
+		// msWaitForOpponent per the real server flow.
+		uint8 reg_body[8];
+		int ro = 0;
+		reg_body[ro++] = 0x0E; // msRegisterPlayer
+		reg_body[ro++] = 0x01; // wait time (4 bytes BE) = 1 second
+		reg_body[ro++] = 0x00;
+		reg_body[ro++] = 0x00;
+		reg_body[ro++] = 0x00;
+		reg_body[ro++] = 0x02; // msEndOfStream
+		S9xXBandFakeInject(reg_body[0], reg_body + 1, ro - 1);
+		xbsvr_log_append(false, 0x0E, "RX registerPlayer (wait=1s)");
+
 		xbsvr_inject_wait_for_opponent();
 		xbsvr_state = XBSVR_MATCHMAKING;
 		xbsvr_log_append(false, 0, "=== SERVER: matchmaking active ===");
 		break;
+	}
 
 	default:
 		break;
@@ -3626,6 +3704,7 @@ void S9xXBandServerStart (void)
 	xbsvr_tx_baseline = 0;
 	xbsvr_last_tx_pos = xband_tx_stream_pos;
 	xbsvr_data_batch_count = 0;
+	xbsvr_connection_number = 0;
 	xbsvr_game_id_seen = false;
 	xbsvr_intercept_rx = false;
 	xbsvr_log_count = 0;
@@ -3643,7 +3722,8 @@ void S9xXBandServerStop (void)
 int S9xXBandServerState (void) { return xbsvr_state; }
 void S9xXBandServerTick (void)
 {
-	if (xbsvr_state > XBSVR_OFF && xbsvr_state < XBSVR_MATCHMAKING)
+	// Run in ALL active states including MATCHMAKING (for keepalives).
+	if (xbsvr_state > XBSVR_OFF)
 		xband_server_tick();
 }
 bool S9xXBandServerInterceptRX (void) { return xbsvr_intercept_rx; }
@@ -5289,6 +5369,20 @@ void S9xSetXBand (uint8 byte, uint32 address)
 						XBand.net_step = XBAND_NET_IDLE;
 						XBand.txbufpos = XBand.txbufused = 0;
 						XBand.rxbufpos = XBand.rxbufused = 0;
+						// Reset ADSP sniffer so the server detects
+						// the next connection as a fresh handshake.
+						xband_sniff_box_seen = false;
+						xband_sniff_srv_seen = false;
+						xband_fake_send_seq_primed = false;
+						// If our server is running, reset to HANDSHAKE
+						// so it handles the BIOS's next dial.
+						if (xbsvr_state > XBSVR_OFF)
+						{
+							xbsvr_log_append(false, 0,
+								"=== BIOS hung up, resetting for next dial ===");
+							xbsvr_state = XBSVR_HANDSHAKE;
+							xbsvr_poll_count = 0;
+						}
 					}
 					break;
 				case 0x08:
@@ -5917,9 +6011,12 @@ void S9xXBandPoll (void)
 		}
 		else if (got == 0)
 		{
-			// Clean server-side close. Latch the flag so the kctl
-			// dump shows it; the BIOS will eventually notice the
-			// modem is dead and drop the line relay on its own.
+			// Clean server-side close. If our event-driven server
+			// is running, suppress the EOF — the BIOS doesn't need
+			// to know the real server dropped. We keep the
+			// connection appearing alive via our injected responses.
+			if (xbsvr_state > XBSVR_OFF)
+				break; // silently ignore EOF
 			xband_sock_eof_seen = true;
 			break;
 		}

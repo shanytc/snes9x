@@ -3280,10 +3280,10 @@ bool S9xXBandFakeInjectLoginReply (void)
 	// 000031DC02. We don't know if the BIOS validates the format
 	// strictly; pass the same values the example shows.
 	body[o++] = 0x04;
+	body[o++] = 0x00; body[o++] = 0x1A; // year 2026
+	body[o++] = 0x35; body[o++] = 0x00; // April 10
 	body[o++] = 0x00; body[o++] = 0x00;
-	body[o++] = 0x59; body[o++] = 0xC3;
-	body[o++] = 0x00; body[o++] = 0x00;
-	body[o++] = 0x31; body[o++] = 0xDC;
+	body[o++] = 0x00; body[o++] = 0x00; // time: midnight
 
 	// msSetCurrentUserNumber (op $3E = 62) + 1 byte profile index.
 	body[o++] = 0x3E;
@@ -3419,10 +3419,10 @@ static bool xbsvr_inject_login_reply (void)
 	uint8 body[64];
 	int o = 0;
 	body[o++] = 0x04; // msSetDateAndTime
+	body[o++] = 0x00; body[o++] = 0x1A; // year 2026
+	body[o++] = 0x35; body[o++] = 0x00; // April 10
 	body[o++] = 0x00; body[o++] = 0x00;
-	body[o++] = 0x59; body[o++] = 0xC3;
-	body[o++] = 0x00; body[o++] = 0x00;
-	body[o++] = 0x31; body[o++] = 0xDC;
+	body[o++] = 0x00; body[o++] = 0x00; // time: midnight
 	body[o++] = 0x3E; // msSetCurrentUserNumber
 	body[o++] = 0x00;
 	// msReceiveValidationToken ($3B) — zeros don't match the SRAM
@@ -3827,10 +3827,10 @@ bool S9xXBandFakeInjectMatchmaking (void)
 		int o = 0;
 		// msSetDateAndTime ($04) + 4 bytes date + 5 bytes time
 		body[o++] = 0x04;
+		body[o++] = 0x00; body[o++] = 0x1A; // year 2026
+		body[o++] = 0x35; body[o++] = 0x00; // April 10
 		body[o++] = 0x00; body[o++] = 0x00;
-		body[o++] = 0x59; body[o++] = 0xC3;
-		body[o++] = 0x00; body[o++] = 0x00;
-		body[o++] = 0x31; body[o++] = 0xDC;
+		body[o++] = 0x00; body[o++] = 0x00; // time: midnight
 		// msSetCurrentUserNumber ($3E) + 1 byte profile
 		body[o++] = 0x3E;
 		body[o++] = 0x00;

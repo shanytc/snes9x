@@ -3601,21 +3601,24 @@ static void xband_server_tick (void)
 	case XBSVR_INJECT_DATA_ACK:
 		if (xbsvr_connection_number >= 2)
 		{
-			// Challenge connection: per xbsega.go, send ONLY
-			// msRegisterPlayer + msEndOfStream. No login reply,
-			// no NGP, no game patch, no msWaitForOpponent.
+			// Challenge connection: send game patch first (so the
+			// BIOS can launch practice mode), then msRegisterPlayer.
+			// xbsega.go doesn't send the patch (unimplemented) but
+			// the real Catapult server would have.
+			xbsvr_inject_game_patch();
+
+			// msRegisterPlayer + msEndOfStream (xbsega.go style)
 			uint8 reg_body[8];
 			int ro = 0;
 			reg_body[ro++] = 0x0E; // msRegisterPlayer
-			// Wait time matching xbsega.go: 0x01100000 ticks
-			reg_body[ro++] = 0x01;
+			reg_body[ro++] = 0x01; // wait time 0x01100000
 			reg_body[ro++] = 0x10;
 			reg_body[ro++] = 0x00;
 			reg_body[ro++] = 0x00;
 			reg_body[ro++] = 0x02; // msEndOfStream
 			S9xXBandFakeInject(reg_body[0], reg_body + 1, ro - 1);
 			xbsvr_log_append(false, 0x0E,
-				"RX msRegisterPlayer only (xbsega.go style)");
+				"RX gamePatch + msRegisterPlayer");
 			xbsvr_state = XBSVR_MATCHMAKING;
 			xbsvr_log_append(false, 0,
 				"=== SERVER: matchmaking active ===");

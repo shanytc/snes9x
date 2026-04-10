@@ -3334,6 +3334,96 @@ LRESULT CALLBACK WinProc(
 					MB_OK | MB_ICONINFORMATION);
 			}
 			break;
+        case ID_XBAND_SERVER_START:
+			{
+				S9xXBandServerStart();
+				MessageBoxA(GUI.hWnd,
+					"XBAND Server STARTED.\n\n"
+					"The server watches the BIOS's TX messages and\n"
+					"responds automatically:\n"
+					"  - Login reply when BIOS sends msLogin\n"
+					"  - Data ack for each data dump batch\n"
+					"  - NGP list + game patch + matchmaking\n"
+					"    when BIOS sends msChallengeRequest\n\n"
+					"Use 'Show Server Log' to see message flow.\n"
+					"Use 'Stop Server' to disable.",
+					"XBAND Server", MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+        case ID_XBAND_SERVER_STOP:
+			{
+				S9xXBandServerStop();
+				MessageBoxA(GUI.hWnd, "XBAND Server stopped.",
+					"XBAND Server", MB_OK | MB_ICONINFORMATION);
+			}
+			break;
+        case ID_XBAND_SERVER_LOG:
+			{
+				static char logtext[65536];
+				S9xXBandServerLogDump(logtext, sizeof(logtext));
+				// Reuse the textarea window pattern from kctl trace.
+				static char crlf[131072];
+				{
+					char *src = logtext, *dst = crlf;
+					char *end = crlf + sizeof(crlf) - 2;
+					while (*src && dst < end)
+					{
+						if (*src == '\n') *dst++ = '\r';
+						*dst++ = *src++;
+					}
+					*dst = '\0';
+				}
+				static bool logClassReg = false;
+				if (!logClassReg)
+				{
+					WNDCLASSEXA wc = {};
+					wc.cbSize = sizeof(wc);
+					wc.lpfnWndProc = [](HWND hw, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+						if (msg == WM_SIZE) {
+							HWND e = GetWindow(hw, GW_CHILD);
+							if (e) { RECT rc; GetClientRect(hw, &rc); MoveWindow(e, 0, 0, rc.right, rc.bottom, TRUE); }
+							return 0;
+						}
+						if (msg == WM_CLOSE) { DestroyWindow(hw); return 0; }
+						if (msg == WM_DESTROY) return 0;
+						return DefWindowProcA(hw, msg, wp, lp);
+					};
+					wc.hInstance = (HINSTANCE)GetWindowLongPtr(GUI.hWnd, GWLP_HINSTANCE);
+					wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+					wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+					wc.lpszClassName = "XBandServerLogWnd";
+					RegisterClassExA(&wc);
+					logClassReg = true;
+				}
+				HINSTANCE hInst = (HINSTANCE)GetWindowLongPtr(GUI.hWnd, GWLP_HINSTANCE);
+				HWND dlg = CreateWindowExA(0, "XBandServerLogWnd",
+					"XBAND Server Log", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+					CW_USEDEFAULT, CW_USEDEFAULT, 800, 500,
+					NULL, NULL, hInst, NULL);
+				if (dlg)
+				{
+					RECT rc; GetClientRect(dlg, &rc);
+					HWND edit = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", NULL,
+						WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
+						ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+						0, 0, rc.right, rc.bottom, dlg, NULL, hInst, NULL);
+					if (edit)
+					{
+						HFONT mono = CreateFontA(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+							DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+							DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+						if (mono) SendMessage(edit, WM_SETFONT, (WPARAM)mono, TRUE);
+						SetWindowTextA(edit, crlf);
+					}
+					MSG msg;
+					while (IsWindow(dlg) && GetMessage(&msg, NULL, 0, 0))
+					{
+						TranslateMessage(&msg);
+						DispatchMessage(&msg);
+					}
+				}
+			}
+			break;
         case ID_XBAND_TOGGLE_BANKMUX:
 			{
 				// Toggle the Fred bank-mux for cart identification.

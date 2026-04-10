@@ -3315,156 +3315,366 @@ const char *S9xXBandFakeConnIDSourceLabel (void)
 }
 
 // ================================================================
-// Auto-sequencing fake server. Instead of dumping all messages at
-// once, injects them in rounds and waits for the BIOS to respond
-// between each round. Hooked into the kreadmstatus2 poll so it
-// fires while the BIOS is actively checking for RX data.
+// Event-driven XBAND Server. Watches the BIOS's TX ServerTalk
+// stream, detects batch boundaries (msEndOfStream $02), analyzes
+// what was sent, and injects appropriate server responses. Requires
+// a real TCP connection for the ADSP handshake (the real server at
+// xbserver.retrocomputing.network handles that), then takes over
+// all subsequent ServerTalk processing.
+//
+// Start via "XBAND: Start Server" menu. State visible in the kctl
+// trace. Responses injected via existing S9xXBandFakeInject.
 // ================================================================
 static void xband_force_prime_sniff_state (void); // forward decl
-enum {
-	FAKESVR_OFF = 0,
-	FAKESVR_LOGIN_REPLY,       // inject login reply
-	FAKESVR_WAIT_BIOS1,        // wait for BIOS to respond
-	FAKESVR_SEND_NGP,          // inject NGP list
-	FAKESVR_WAIT_BIOS2,        // wait for BIOS to respond
-	FAKESVR_SEND_PATCH,        // inject game patch (chunked)
-	FAKESVR_WAIT_BIOS3,        // wait for BIOS to respond
-	FAKESVR_SEND_MATCHMAKING,  // inject msWaitForOpponent
-	FAKESVR_DONE
+
+enum XBandServerState {
+	XBSVR_OFF = 0,
+	XBSVR_HANDSHAKE,          // waiting for ADSP handshake to complete
+	XBSVR_WAIT_LOGIN,         // waiting for login batch from BIOS
+	XBSVR_INJECT_LOGIN_REPLY, // ready to inject login response
+	XBSVR_WAIT_DATA,          // waiting for BIOS data dump batches
+	XBSVR_INJECT_DATA_ACK,    // ready to inject data ack
+	XBSVR_INJECT_NGP,         // inject NGP game list
+	XBSVR_WAIT_NGP,           // wait for BIOS to process NGP
+	XBSVR_INJECT_PATCH,       // inject game patch (chunked)
+	XBSVR_WAIT_PATCH,         // wait for BIOS to process patch
+	XBSVR_INJECT_MATCHMAKING, // inject msWaitForOpponent
+	XBSVR_MATCHMAKING,        // done, in matchmaking
 };
-static int    fakesvr_state = FAKESVR_OFF;
-static uint32 fakesvr_tx_baseline = 0; // TX bytes at start of wait
-static uint32 fakesvr_poll_count = 0;  // polls since entering wait
 
-void S9xXBandFakeServerStart (void)
+static int    xbsvr_state = XBSVR_OFF;
+static uint32 xbsvr_tx_baseline = 0;
+static uint32 xbsvr_poll_count = 0;
+static int    xbsvr_data_batch_count = 0;
+static bool   xbsvr_intercept_rx = false; // block real server RX
+
+// TX batch accumulator: opcodes seen in current BIOS batch.
+#define XBSVR_BATCH_MAX 32
+static uint8 xbsvr_batch[XBSVR_BATCH_MAX];
+static int   xbsvr_batch_count = 0;
+
+// Captured game ID from msGAMEIDAndPatchVersion ($0C).
+static uint8 xbsvr_game_id[4] = {0};
+static bool  xbsvr_game_id_seen = false;
+
+// Timestamped server log ring.
+#define XBSVR_LOG_SIZE 256
+struct XBandServerLogEntry {
+	uint64 frame;       // CPU cycle counter or frame number
+	bool   is_tx;       // true = BIOS→server, false = server→BIOS
+	uint8  opcode;
+	char   text[128];
+};
+static XBandServerLogEntry xbsvr_log[XBSVR_LOG_SIZE];
+static int xbsvr_log_head = 0;
+static int xbsvr_log_count = 0;
+
+static void xbsvr_log_append (bool is_tx, uint8 op, const char *fmt, ...)
 {
-	// Force-prime ADSP state for inject.
-	xband_force_prime_sniff_state();
-	fakesvr_state = FAKESVR_LOGIN_REPLY;
-	fakesvr_poll_count = 0;
-	fakesvr_tx_baseline = xband_sniff_box_data_total;
+	XBandServerLogEntry *e = &xbsvr_log[xbsvr_log_head];
+	e->frame = CPU.Cycles;
+	e->is_tx = is_tx;
+	e->opcode = op;
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(e->text, sizeof(e->text), fmt, ap);
+	va_end(ap);
+	xbsvr_log_head = (xbsvr_log_head + 1) % XBSVR_LOG_SIZE;
+	if (xbsvr_log_count < XBSVR_LOG_SIZE) xbsvr_log_count++;
 }
 
-void S9xXBandFakeServerStop (void)
+// --- Response injection helpers ---
+
+static bool xbsvr_inject_login_reply (void)
 {
-	fakesvr_state = FAKESVR_OFF;
+	uint8 body[64];
+	int o = 0;
+	body[o++] = 0x04; // msSetDateAndTime
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x59; body[o++] = 0xC3;
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x31; body[o++] = 0xDC;
+	body[o++] = 0x3E; // msSetCurrentUserNumber
+	body[o++] = 0x00;
+	// Skip msReceiveValidationToken ($3B) — sending zeros causes
+	// the BIOS to think SRAM was wiped ("battery may be dead").
+	// Without it, the BIOS keeps its existing SRAM token.
+	body[o++] = 0x17; // msClearSendQ
+	body[o++] = 0x02; // msEndOfStream
+	xbsvr_log_append(false, 0x04,
+		"RX login reply: date+user+clearQ+EOS (no token)");
+	return S9xXBandFakeInject(body[0], body + 1, o - 1);
 }
 
-int S9xXBandFakeServerState (void)
+static bool xbsvr_inject_data_ack (void)
 {
-	return fakesvr_state;
+	uint8 body[4];
+	int o = 0;
+	body[o++] = 0x17; // msClearSendQ
+	body[o++] = 0x02; // msEndOfStream
+	xbsvr_log_append(false, 0x17,
+		"RX data ack: clearQ+EOS (batch #%d)", xbsvr_data_batch_count);
+	return S9xXBandFakeInject(body[0], body + 1, o - 1);
 }
 
-// Called from the kreadmstatus2 handler on every BIOS poll.
-static void xband_fake_server_tick (void)
+static bool xbsvr_inject_ngp_list (void)
 {
-	// How many TX bytes the BIOS has sent since our last wait baseline.
-	uint32 tx_growth = xband_sniff_box_data_total - fakesvr_tx_baseline;
+	uint8 body[128];
+	int o = 0;
+	body[o++] = 0x0F; // msNewNGPList
+	body[o++] = 0x00; body[o++] = 0x10; // length = 16
+	body[o++] = 0x00; body[o++] = 0x01; // count = 1
+	body[o++] = 0x00; body[o++] = 0x01; // version = 1
+	// Use captured game ID, or SSF2 default $D8222103
+	static uint8 default_gid[4] = {0xD8, 0x22, 0x21, 0x03};
+	uint8 *gid = xbsvr_game_id_seen ? xbsvr_game_id : default_gid;
+	body[o++] = gid[0]; body[o++] = gid[1];
+	body[o++] = gid[2]; body[o++] = gid[3];
+	body[o++] = 0x00; body[o++] = 0x00; // flags
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x00; body[o++] = 0x00; // patch version = 1
+	body[o++] = 0x00; body[o++] = 0x01;
+	body[o++] = 0x00; body[o++] = 0x18; // title len = 24
+	const char *title = "Super Street Fighter 2";
+	int tlen = (int)strlen(title);
+	for (int i = 0; i < 24; i++)
+		body[o++] = (i < tlen) ? (uint8)title[i] : 0x00;
+	body[o++] = 0x02; // msEndOfStream
+	xbsvr_log_append(false, 0x0F,
+		"RX NGP list: gameID=%02X%02X%02X%02X SSF2",
+		gid[0], gid[1], gid[2], gid[3]);
+	return S9xXBandFakeInject(body[0], body + 1, o - 1);
+}
 
-	switch (fakesvr_state)
+static bool xbsvr_inject_game_patch (void)
+{
+	std::string path = S9xGetDirectory(BIOS_DIR);
+	path += SLASH_STR;
+	path += "SSF2.JSNES";
+	uint8 patch[8192];
+	int patch_len = xband_read_file(path.c_str(), patch,
+	                                (int)sizeof(patch));
+	if (patch_len <= 0)
 	{
-	case FAKESVR_LOGIN_REPLY:
-	{
-		// Round 1: login reply
-		uint8 body[64];
-		int o = 0;
-		body[o++] = 0x04; // msSetDateAndTime
-		body[o++] = 0x00; body[o++] = 0x00;
-		body[o++] = 0x59; body[o++] = 0xC3;
-		body[o++] = 0x00; body[o++] = 0x00;
-		body[o++] = 0x31; body[o++] = 0xDC;
-		body[o++] = 0x3E; // msSetCurrentUserNumber
-		body[o++] = 0x00;
-		body[o++] = 0x3B; // msReceiveValidationToken
-		body[o++] = 0x00; body[o++] = 0x00;
-		body[o++] = 0x00; body[o++] = 0x00;
-		body[o++] = 0x17; // msClearSendQ
-		body[o++] = 0x02; // msEndOfStream
-		S9xXBandFakeInject(body[0], body + 1, o - 1);
-		fakesvr_state = FAKESVR_WAIT_BIOS1;
-		fakesvr_tx_baseline = xband_sniff_box_data_total;
-		fakesvr_poll_count = 0;
-		break;
+		xbsvr_log_append(false, 0x03,
+			"RX game patch: SSF2.JSNES not found, skipped");
+		return false;
 	}
-	case FAKESVR_WAIT_BIOS1:
-	case FAKESVR_WAIT_BIOS2:
-	case FAKESVR_WAIT_BIOS3:
+	xbsvr_log_append(false, 0x03,
+		"RX game patch: SSF2.JSNES %d bytes chunked", patch_len);
+	return xband_fake_inject_chunked(patch, patch_len, "SSF2.JSNES") > 0;
+}
+
+static bool xbsvr_inject_wait_for_opponent (void)
+{
+	uint8 body[4];
+	int o = 0;
+	body[o++] = 0x1C; // msWaitForOpponent
+	body[o++] = 0x02; // msEndOfStream
+	xbsvr_log_append(false, 0x1C, "RX matchmaking: waitForOpponent+EOS");
+	return S9xXBandFakeInject(body[0], body + 1, o - 1);
+}
+
+// --- TX Stream Watcher ---
+// Instead of parsing per-frame opcodes (which are unreliable due to
+// ADSP continuation segments), we watch the reassembled TX stream
+// growth. The BIOS sends data in bursts; each burst is a batch.
+// When the stream grows and then pauses, a batch has completed.
+// We use the stream size + poll-count timeouts to detect this.
+static uint32 xbsvr_last_tx_pos = 0; // last scanned TX stream pos
+
+// --- Server Tick: called from kreadmstatus2 poll ---
+// Uses TX stream growth to detect when the BIOS has finished
+// sending a batch. Much more reliable than per-frame opcode
+// parsing (which is broken by ADSP continuation segments).
+
+static void xband_server_tick (void)
+{
+	if (xbsvr_state <= XBSVR_OFF) return;
+
+	xbsvr_poll_count++;
+	uint32 cur_tx_pos = xband_tx_stream_pos;
+	uint32 tx_growth = cur_tx_pos - xbsvr_last_tx_pos;
+
+	switch (xbsvr_state)
 	{
-		fakesvr_poll_count++;
-		// Advance when the BIOS has sent >50 new TX bytes (it
-		// responded to our inject) OR after ~3 seconds of polling
-		// (~50000 polls at ~16k polls/frame * 60fps).
-		if (tx_growth > 50 || fakesvr_poll_count > 50000)
+	case XBSVR_HANDSHAKE:
+		if (xband_sniff_box_seen)
 		{
-			if (fakesvr_state == FAKESVR_WAIT_BIOS1)
-				fakesvr_state = FAKESVR_SEND_NGP;
-			else if (fakesvr_state == FAKESVR_WAIT_BIOS2)
-				fakesvr_state = FAKESVR_SEND_PATCH;
+			xbsvr_log_append(false, 0, "ADSP handshake complete");
+			xbsvr_state = XBSVR_WAIT_LOGIN;
+			xbsvr_intercept_rx = true;
+			xbsvr_last_tx_pos = cur_tx_pos;
+			xbsvr_poll_count = 0;
+		}
+		break;
+
+	case XBSVR_WAIT_LOGIN:
+		// The BIOS sends msBoxType + msLogin + EOS in a burst (~145 bytes).
+		// Wait until we've seen >100 TX bytes and the stream has paused
+		// (no growth for >5000 polls ≈ a fraction of a second).
+		if (cur_tx_pos > 100 && tx_growth == 0 && xbsvr_poll_count > 5000)
+		{
+			xbsvr_log_append(true, 0, "TX login batch detected (%u bytes)",
+				(unsigned)cur_tx_pos);
+			xbsvr_state = XBSVR_INJECT_LOGIN_REPLY;
+			xbsvr_poll_count = 0;
+		}
+		if (tx_growth > 0)
+		{
+			xbsvr_last_tx_pos = cur_tx_pos;
+			xbsvr_poll_count = 0; // reset pause timer on new data
+		}
+		break;
+
+	case XBSVR_INJECT_LOGIN_REPLY:
+		xbsvr_inject_login_reply();
+		xbsvr_state = XBSVR_WAIT_DATA;
+		xbsvr_last_tx_pos = cur_tx_pos;
+		xbsvr_poll_count = 0;
+		xbsvr_data_batch_count = 0;
+		break;
+
+	case XBSVR_WAIT_DATA:
+		// The BIOS sends multiple data dump batches. Each time TX grows
+		// and then pauses, ack it. After enough batches (or enough total
+		// TX bytes), move on to the game reply sequence.
+		if (tx_growth > 0)
+		{
+			xbsvr_last_tx_pos = cur_tx_pos;
+			xbsvr_poll_count = 0;
+		}
+		else if (xbsvr_poll_count > 5000 && cur_tx_pos > xbsvr_tx_baseline + 50)
+		{
+			xbsvr_data_batch_count++;
+			xbsvr_log_append(true, 0, "TX data batch #%d (%u bytes total)",
+				xbsvr_data_batch_count, (unsigned)cur_tx_pos);
+			// After enough data or enough batches, send the game reply.
+			// The BIOS typically sends ~500-1300 bytes across 3-5 batches.
+			if (cur_tx_pos > 300 || xbsvr_data_batch_count >= 3)
+			{
+				xbsvr_state = XBSVR_INJECT_DATA_ACK;
+				// Signal: proceed to NGP after this ack.
+				xbsvr_data_batch_count = -1;
+			}
 			else
-				fakesvr_state = FAKESVR_SEND_MATCHMAKING;
-			fakesvr_tx_baseline = xband_sniff_box_data_total;
-			fakesvr_poll_count = 0;
+			{
+				xbsvr_state = XBSVR_INJECT_DATA_ACK;
+			}
+			xbsvr_poll_count = 0;
+		}
+		break;
+
+	case XBSVR_INJECT_DATA_ACK:
+		xbsvr_inject_data_ack();
+		if (xbsvr_data_batch_count == -1)
+		{
+			xbsvr_state = XBSVR_INJECT_NGP;
+			xbsvr_data_batch_count = 0;
+		}
+		else
+		{
+			xbsvr_state = XBSVR_WAIT_DATA;
+		}
+		xbsvr_tx_baseline = cur_tx_pos;
+		xbsvr_last_tx_pos = cur_tx_pos;
+		xbsvr_poll_count = 0;
+		break;
+
+	case XBSVR_INJECT_NGP:
+		xbsvr_inject_ngp_list();
+		xbsvr_state = XBSVR_WAIT_NGP;
+		xbsvr_last_tx_pos = cur_tx_pos;
+		xbsvr_poll_count = 0;
+		break;
+
+	case XBSVR_WAIT_NGP:
+	case XBSVR_WAIT_PATCH:
+	{
+		if (tx_growth > 0)
+		{
+			xbsvr_last_tx_pos = cur_tx_pos;
+			xbsvr_poll_count = 0;
+		}
+		else if (xbsvr_poll_count > 10000)
+		{
+			xbsvr_state = (xbsvr_state == XBSVR_WAIT_NGP)
+				? XBSVR_INJECT_PATCH : XBSVR_INJECT_MATCHMAKING;
+			xbsvr_last_tx_pos = cur_tx_pos;
+			xbsvr_poll_count = 0;
 		}
 		break;
 	}
-	case FAKESVR_SEND_NGP:
-	{
-		// Round 2: NGP game list
-		uint8 body[128];
-		int o = 0;
-		body[o++] = 0x0F; // msNewNGPList
-		body[o++] = 0x00; body[o++] = 0x10; // length = 16
-		body[o++] = 0x00; body[o++] = 0x01; // count = 1
-		body[o++] = 0x00; body[o++] = 0x01; // version = 1
-		body[o++] = 0xD8; body[o++] = 0x22; // GameID $D8222103
-		body[o++] = 0x21; body[o++] = 0x03;
-		body[o++] = 0x00; body[o++] = 0x00; // flags
-		body[o++] = 0x00; body[o++] = 0x00;
-		body[o++] = 0x00; body[o++] = 0x00; // patch version = 1
-		body[o++] = 0x00; body[o++] = 0x01;
-		body[o++] = 0x00; body[o++] = 0x18; // title len = 24
-		const char *title = "Super Street Fighter 2";
-		int tlen = (int)strlen(title);
-		for (int i = 0; i < 24; i++)
-			body[o++] = (i < tlen) ? (uint8)title[i] : 0x00;
-		body[o++] = 0x02; // msEndOfStream
-		S9xXBandFakeInject(body[0], body + 1, o - 1);
-		fakesvr_state = FAKESVR_WAIT_BIOS2;
-		fakesvr_tx_baseline = xband_sniff_box_data_total;
-		fakesvr_poll_count = 0;
+
+	case XBSVR_INJECT_PATCH:
+		xbsvr_inject_game_patch();
+		xbsvr_state = XBSVR_WAIT_PATCH;
+		xbsvr_last_tx_pos = cur_tx_pos;
+		xbsvr_poll_count = 0;
 		break;
-	}
-	case FAKESVR_SEND_PATCH:
-	{
-		// Round 3: SSF2 game patch (chunked)
-		std::string path = S9xGetDirectory(BIOS_DIR);
-		path += SLASH_STR;
-		path += "SSF2.JSNES";
-		uint8 patch[8192];
-		int patch_len = xband_read_file(path.c_str(), patch,
-		                                (int)sizeof(patch));
-		if (patch_len > 0)
-			xband_fake_inject_chunked(patch, patch_len, "SSF2.JSNES");
-		fakesvr_state = FAKESVR_WAIT_BIOS3;
-		fakesvr_tx_baseline = xband_sniff_box_data_total;
-		fakesvr_poll_count = 0;
+
+	case XBSVR_INJECT_MATCHMAKING:
+		xbsvr_inject_wait_for_opponent();
+		xbsvr_state = XBSVR_MATCHMAKING;
+		xbsvr_log_append(false, 0, "=== SERVER: matchmaking active ===");
 		break;
-	}
-	case FAKESVR_SEND_MATCHMAKING:
-	{
-		// Round 4: matchmaking
-		uint8 body[8];
-		int o = 0;
-		body[o++] = 0x1C; // msWaitForOpponent
-		body[o++] = 0x02; // msEndOfStream
-		S9xXBandFakeInject(body[0], body + 1, o - 1);
-		fakesvr_state = FAKESVR_DONE;
-		break;
-	}
+
 	default:
 		break;
 	}
 }
+
+// --- Public API ---
+
+void S9xXBandServerStart (void)
+{
+	xbsvr_state = XBSVR_HANDSHAKE;
+	xbsvr_poll_count = 0;
+	xbsvr_tx_baseline = 0;
+	xbsvr_last_tx_pos = xband_tx_stream_pos;
+	xbsvr_data_batch_count = 0;
+	xbsvr_game_id_seen = false;
+	xbsvr_intercept_rx = false;
+	xbsvr_log_count = 0;
+	xbsvr_log_head = 0;
+	xbsvr_log_append(false, 0, "=== SERVER STARTED, waiting for handshake ===");
+}
+
+void S9xXBandServerStop (void)
+{
+	xbsvr_state = XBSVR_OFF;
+	xbsvr_intercept_rx = false;
+	xbsvr_log_append(false, 0, "=== SERVER STOPPED ===");
+}
+
+int S9xXBandServerState (void) { return xbsvr_state; }
+bool S9xXBandServerInterceptRX (void) { return xbsvr_intercept_rx; }
+
+void S9xXBandServerLogDump (char *out, size_t out_size)
+{
+	if (!out || out_size == 0) return;
+	size_t pos = 0;
+	pos += snprintf(out + pos, out_size - pos,
+		"XBAND Server Log (%d entries, state=%d)\n"
+		"==========================================\n\n",
+		xbsvr_log_count, xbsvr_state);
+	int start = (xbsvr_log_head - xbsvr_log_count + XBSVR_LOG_SIZE)
+	            % XBSVR_LOG_SIZE;
+	for (int i = 0; i < xbsvr_log_count && pos + 200 < out_size; i++)
+	{
+		int idx = (start + i) % XBSVR_LOG_SIZE;
+		XBandServerLogEntry *e = &xbsvr_log[idx];
+		pos += snprintf(out + pos, out_size - pos,
+			"  %s $%02X  %s\n",
+			e->is_tx ? "TX" : "RX",
+			(unsigned)e->opcode, e->text);
+	}
+}
+
+// Compat shims for old fake server API (used by menu handler).
+void S9xXBandFakeServerStart (void) { S9xXBandServerStart(); }
+void S9xXBandFakeServerStop (void) { S9xXBandServerStop(); }
+int  S9xXBandFakeServerState (void) { return S9xXBandServerState(); }
 
 // Force-prime the ADSP sniffer state so injects work even without a
 // real server connection. Uses sensible defaults (bsnes-plus connID
@@ -3993,16 +4203,19 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		(unsigned)xband_sniff_srv_data_total,
 		(unsigned)xband_fake_inject_count,
 		xband_fake_inject_last,
-		fakesvr_state,
-		(fakesvr_state == FAKESVR_OFF)             ? "OFF" :
-		(fakesvr_state == FAKESVR_LOGIN_REPLY)     ? "LOGIN_REPLY" :
-		(fakesvr_state == FAKESVR_WAIT_BIOS1)      ? "WAIT_BIOS1" :
-		(fakesvr_state == FAKESVR_SEND_NGP)        ? "SEND_NGP" :
-		(fakesvr_state == FAKESVR_WAIT_BIOS2)      ? "WAIT_BIOS2" :
-		(fakesvr_state == FAKESVR_SEND_PATCH)      ? "SEND_PATCH" :
-		(fakesvr_state == FAKESVR_WAIT_BIOS3)      ? "WAIT_BIOS3" :
-		(fakesvr_state == FAKESVR_SEND_MATCHMAKING) ? "SEND_MATCHMAKING" :
-		(fakesvr_state == FAKESVR_DONE)            ? "DONE" : "?");
+		xbsvr_state,
+		(xbsvr_state == XBSVR_OFF)              ? "OFF" :
+		(xbsvr_state == XBSVR_HANDSHAKE)        ? "HANDSHAKE" :
+		(xbsvr_state == XBSVR_WAIT_LOGIN)       ? "WAIT_LOGIN" :
+		(xbsvr_state == XBSVR_INJECT_LOGIN_REPLY) ? "INJECT_LOGIN" :
+		(xbsvr_state == XBSVR_WAIT_DATA)        ? "WAIT_DATA" :
+		(xbsvr_state == XBSVR_INJECT_DATA_ACK)  ? "INJECT_DATA_ACK" :
+		(xbsvr_state == XBSVR_INJECT_NGP)       ? "INJECT_NGP" :
+		(xbsvr_state == XBSVR_WAIT_NGP)         ? "WAIT_NGP" :
+		(xbsvr_state == XBSVR_INJECT_PATCH)     ? "INJECT_PATCH" :
+		(xbsvr_state == XBSVR_WAIT_PATCH)       ? "WAIT_PATCH" :
+		(xbsvr_state == XBSVR_INJECT_MATCHMAKING) ? "INJECT_MATCHMAKING" :
+		(xbsvr_state == XBSVR_MATCHMAKING)      ? "MATCHMAKING" : "?");
 
 	// Per-opcode RX/TX counter table. Shows every opcode that has been
 	// seen at least once in either direction. Header-only frames (no
@@ -4815,10 +5028,10 @@ uint8 S9xGetXBand (uint32 address)
 			// caps consecutive "yes" responses at 127 to break infinite
 			// poll loops (fixes a kFifoOverflowErr panic).
 
-			// Auto-sequencing fake server: tick on every poll so we
-			// inject at the right time (BIOS is actively checking).
-			if (fakesvr_state > FAKESVR_OFF && fakesvr_state < FAKESVR_DONE)
-				xband_fake_server_tick();
+			// Event-driven server: tick on every poll so we inject
+			// responses at the right time (BIOS is actively checking).
+			if (xbsvr_state > XBSVR_OFF && xbsvr_state < XBSVR_MATCHMAKING)
+				xband_server_tick();
 
 			if (XBand.net_step && xband_rxbuf_has_data())
 			{

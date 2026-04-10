@@ -520,6 +520,9 @@
 #define ID_XBAND_FORCE_CARTID           40216
 #define ID_XBAND_CYCLE_SPOOF            40217
 #define ID_XBAND_FAKE_INJECT_MATCHMAKING 40218
+#define ID_XBAND_SERVER_START           40220
+#define ID_XBAND_SERVER_STOP            40221
+#define ID_XBAND_SERVER_LOG             40222
 // Spoof candidate sub-menu IDs. 19 candidates currently, leave
 // headroom up to 64 entries (40300..40363). Keep range contiguous.
 #define ID_XBAND_SPOOF_BASE             40300

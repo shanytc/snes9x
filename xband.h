@@ -269,6 +269,7 @@ void	S9xXBandServerStop (void);
 int		S9xXBandServerState (void);
 bool	S9xXBandServerInterceptRX (void);
 void	S9xXBandServerLogDump (char *out, size_t out_size);
+void	S9xXBandServerTick (void);   // called from cpuexec main loop
 
 // Compat shims for old menu handler.
 void	S9xXBandFakeServerStart (void);

@@ -430,6 +430,15 @@ void S9xMainLoop (void)
 						XBandPCD5Sub[(Registers.PCw >> 12) & 0xF]++;
 					XBandPCBucketTotal++;
 
+					// Event-driven server tick. Throttled to once per
+					// ~1024 instructions. With poll thresholds of 500,
+					// each state transition takes ~0.15 seconds.
+					{
+						static uint32 svr_tick_ctr = 0;
+						if ((++svr_tick_ctr & 0x3FF) == 0)
+							S9xXBandServerTick();
+					}
+
 					// kDispatcherVector trap. Every XBAND OS function call
 					// goes through `JSL $E0:$0040`. When PBPC reaches that
 					// address (start of dispatcher), read the JSL return

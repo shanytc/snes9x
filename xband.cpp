@@ -3396,13 +3396,17 @@ static bool xbsvr_inject_login_reply (void)
 	body[o++] = 0x31; body[o++] = 0xDC;
 	body[o++] = 0x3E; // msSetCurrentUserNumber
 	body[o++] = 0x00;
-	// Skip msReceiveValidationToken ($3B) — sending zeros causes
-	// the BIOS to think SRAM was wiped ("battery may be dead").
-	// Without it, the BIOS keeps its existing SRAM token.
+	// msReceiveValidationToken ($3B) — zeros don't match the SRAM
+	// token so the BIOS shows "battery may be dead", but it DOES
+	// proceed past login afterward. Without this message, the BIOS
+	// hangs waiting. TODO: read the real token from XBand.sram[].
+	body[o++] = 0x3B;
+	body[o++] = 0x00; body[o++] = 0x00;
+	body[o++] = 0x00; body[o++] = 0x00;
 	body[o++] = 0x17; // msClearSendQ
 	body[o++] = 0x02; // msEndOfStream
 	xbsvr_log_append(false, 0x04,
-		"RX login reply: date+user+clearQ+EOS (no token)");
+		"RX login reply: date+user+token+clearQ+EOS");
 	return S9xXBandFakeInject(body[0], body + 1, o - 1);
 }
 
@@ -3503,27 +3507,33 @@ static void xband_server_tick (void)
 		{
 			xbsvr_log_append(false, 0, "ADSP handshake complete");
 			xbsvr_state = XBSVR_WAIT_LOGIN;
-			xbsvr_intercept_rx = true;
+			// Don't block real server RX — the BIOS needs ADSP ack
+			// frames from the real server to advance its send window.
+			// The real server sends zero ServerTalk data, so there's
+			// no conflict with our injected responses.
+			xbsvr_intercept_rx = false;
 			xbsvr_last_tx_pos = cur_tx_pos;
 			xbsvr_poll_count = 0;
 		}
 		break;
 
 	case XBSVR_WAIT_LOGIN:
-		// The BIOS sends msBoxType + msLogin + EOS in a burst (~145 bytes).
-		// Wait until we've seen >100 TX bytes and the stream has paused
-		// (no growth for >5000 polls ≈ a fraction of a second).
-		if (cur_tx_pos > 100 && tx_growth == 0 && xbsvr_poll_count > 5000)
+		// Wait for the BIOS to send its login dump (>100 TX bytes).
+		// Use a pure timeout so continuous TX activity doesn't stall us.
+		if (cur_tx_pos > 100 && xbsvr_poll_count > 500)
 		{
 			xbsvr_log_append(true, 0, "TX login batch detected (%u bytes)",
 				(unsigned)cur_tx_pos);
 			xbsvr_state = XBSVR_INJECT_LOGIN_REPLY;
 			xbsvr_poll_count = 0;
 		}
-		if (tx_growth > 0)
+		// Periodic diagnostic every ~100000 polls (~few seconds).
+		if ((xbsvr_poll_count % 100000) == 99999)
 		{
-			xbsvr_last_tx_pos = cur_tx_pos;
-			xbsvr_poll_count = 0; // reset pause timer on new data
+			xbsvr_log_append(false, 0,
+				"[diag] WAIT_LOGIN: tx_pos=%u polls=%u net_step=%d",
+				(unsigned)cur_tx_pos, (unsigned)xbsvr_poll_count,
+				(int)XBand.net_step);
 		}
 		break;
 
@@ -3536,31 +3546,16 @@ static void xband_server_tick (void)
 		break;
 
 	case XBSVR_WAIT_DATA:
-		// The BIOS sends multiple data dump batches. Each time TX grows
-		// and then pauses, ack it. After enough batches (or enough total
-		// TX bytes), move on to the game reply sequence.
-		if (tx_growth > 0)
-		{
-			xbsvr_last_tx_pos = cur_tx_pos;
-			xbsvr_poll_count = 0;
-		}
-		else if (xbsvr_poll_count > 5000 && cur_tx_pos > xbsvr_tx_baseline + 50)
+		// Wait for the BIOS data dump, then ack and proceed to game
+		// reply. Pure timeout — don't reset on TX growth.
+		if (xbsvr_poll_count > 500)
 		{
 			xbsvr_data_batch_count++;
 			xbsvr_log_append(true, 0, "TX data batch #%d (%u bytes total)",
 				xbsvr_data_batch_count, (unsigned)cur_tx_pos);
-			// After enough data or enough batches, send the game reply.
-			// The BIOS typically sends ~500-1300 bytes across 3-5 batches.
-			if (cur_tx_pos > 300 || xbsvr_data_batch_count >= 3)
-			{
-				xbsvr_state = XBSVR_INJECT_DATA_ACK;
-				// Signal: proceed to NGP after this ack.
-				xbsvr_data_batch_count = -1;
-			}
-			else
-			{
-				xbsvr_state = XBSVR_INJECT_DATA_ACK;
-			}
+			// After the first data batch, go straight to game reply.
+			xbsvr_state = XBSVR_INJECT_DATA_ACK;
+			xbsvr_data_batch_count = -1; // signal: proceed to NGP
 			xbsvr_poll_count = 0;
 		}
 		break;
@@ -3591,12 +3586,10 @@ static void xband_server_tick (void)
 	case XBSVR_WAIT_NGP:
 	case XBSVR_WAIT_PATCH:
 	{
-		if (tx_growth > 0)
-		{
-			xbsvr_last_tx_pos = cur_tx_pos;
-			xbsvr_poll_count = 0;
-		}
-		else if (xbsvr_poll_count > 10000)
+		// Pure timeout — don't reset on TX growth. The BIOS may be
+		// sending a second login dump (challenge reconnect) which
+		// would keep resetting the counter forever.
+		if (xbsvr_poll_count > 500)
 		{
 			xbsvr_state = (xbsvr_state == XBSVR_WAIT_NGP)
 				? XBSVR_INJECT_PATCH : XBSVR_INJECT_MATCHMAKING;
@@ -3648,6 +3641,11 @@ void S9xXBandServerStop (void)
 }
 
 int S9xXBandServerState (void) { return xbsvr_state; }
+void S9xXBandServerTick (void)
+{
+	if (xbsvr_state > XBSVR_OFF && xbsvr_state < XBSVR_MATCHMAKING)
+		xband_server_tick();
+}
 bool S9xXBandServerInterceptRX (void) { return xbsvr_intercept_rx; }
 
 void S9xXBandServerLogDump (char *out, size_t out_size)
@@ -4997,6 +4995,7 @@ uint8 S9xGetXBand (uint32 address)
 	uint16 offset =  addr        & 0xFFFF;
 	uint8  result = 0x00;
 
+
 	// XBAND SRAM mirror window (banks $E0-$FA, $FB:$0000-$BFFF,
 	// $FC-$FF, $60-$7D — all aliasing the same 64KB).
 	if (xband_in_sram(addr))
@@ -5027,12 +5026,6 @@ uint8 S9xGetXBand (uint32 address)
 			// Polled in tight loops inside _PUVBLCallback. bsnes-plus
 			// caps consecutive "yes" responses at 127 to break infinite
 			// poll loops (fixes a kFifoOverflowErr panic).
-
-			// Event-driven server: tick on every poll so we inject
-			// responses at the right time (BIOS is actively checking).
-			if (xbsvr_state > XBSVR_OFF && xbsvr_state < XBSVR_MATCHMAKING)
-				xband_server_tick();
-
 			if (XBand.net_step && xband_rxbuf_has_data())
 			{
 				XBand.consecutive_reads++;

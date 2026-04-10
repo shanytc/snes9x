@@ -3542,8 +3542,46 @@ static void xband_server_tick (void)
 		{
 			xbsvr_connection_number++;
 			xbsvr_log_append(false, 0,
-				"ADSP handshake complete (connection #%d)",
+				"ADSP handshake (connection #%d), sending open-ack",
 				xbsvr_connection_number);
+
+			// Per xbsega.go: echo the BIOS's open-connection frame
+			// with descriptor changed to $82 (ack) and CRC recalculated.
+			// This tells the BIOS the ADSP session is established.
+			{
+				uint16 box_conn = xband_sniff_box_conn_id;
+				uint16 srv_conn = 0x0539; // fixed server connID
+				uint32 send_seq = 0;
+				uint32 ack_seq  = xband_sniff_box_first_seq;
+				uint16 win      = 0x0400;
+				// Descriptor $83 = open-connection-ack + attention
+				// (matches what the real server sends in frame #1).
+				uint8 wire[64];
+				// Build header-only frame with open-ack descriptor.
+				// We include the box's connID in the data section
+				// (7 bytes: $01 + box_conn(2) + zeros(4)) matching
+				// the real server's open-ack format.
+				uint8 ack_data[7];
+				ack_data[0] = 0x01;
+				ack_data[1] = (uint8)(box_conn >> 8);
+				ack_data[2] = (uint8)(box_conn);
+				ack_data[3] = 0x00;
+				ack_data[4] = 0x00;
+				ack_data[5] = 0x00;
+				ack_data[6] = 0x00;
+				int wire_len = xband_adsp_build_frame(
+					wire, (int)sizeof(wire),
+					srv_conn, send_seq, ack_seq, win,
+					0x83, // open-connection-ack descriptor
+					ack_data, 7);
+				if (wire_len > 0)
+					xband_inject_rxbuf_bytes(wire, wire_len);
+				// Prime our fake send seq for subsequent injects.
+				xband_fake_send_seq = 0;
+				xband_fake_send_seq_primed = true;
+				xband_sniff_srv_conn_id = srv_conn;
+				xband_sniff_srv_seen = true;
+			}
 			xbsvr_intercept_rx = false;
 			xbsvr_last_tx_pos = cur_tx_pos;
 			if (xbsvr_connection_number <= 1)
@@ -3576,10 +3614,14 @@ static void xband_server_tick (void)
 
 	case XBSVR_INJECT_LOGIN_REPLY:
 		xbsvr_inject_login_reply();
-		xbsvr_state = XBSVR_WAIT_DATA;
+		// Connection #1: stop after login reply. The BIOS will show
+		// Welcome/news/mail, return to main menu, then hang up.
+		// Don't send data ack/NGP/patch — those go on connection #2.
+		xbsvr_state = XBSVR_MATCHMAKING;
+		xbsvr_log_append(false, 0,
+			"=== login done, waiting for BIOS to process ===");
 		xbsvr_last_tx_pos = cur_tx_pos;
 		xbsvr_poll_count = 0;
-		xbsvr_data_batch_count = 0;
 		break;
 
 	case XBSVR_WAIT_DATA:
@@ -5915,6 +5957,46 @@ bool S9xXBandGetHeloFilter (void)
 static void xband_try_auto_reconnect (void)
 {
 	if (XBand.socket_fd != XBAND_INVALID_SOCKET) return;
+
+	// If our server is running, use loopback mode — no real TCP
+	// connection needed. Fake the "connected" state so the BIOS
+	// proceeds, and our server handles everything via rxbuf inject.
+	if (xbsvr_state > XBSVR_OFF)
+	{
+		// Use a sentinel socket_fd value so S9xXBandPoll doesn't
+		// try to read from it. -2 = loopback mode.
+		XBand.socket_fd = (intptr_t)-2;
+		XBand.connected = TRUE;
+		XBand.net_step  = XBAND_NET_CONNECTED;
+
+		// Inject HELO probes into the rxbuf — the BIOS expects
+		// the server to send data first before it starts the ADSP
+		// handshake. Without this, it times out with "Translation
+		// problem." Match the real server's HELO format.
+		{
+			const char *helo = "HELO\nHELO\nHELO\n";
+			int hlen = (int)strlen(helo);
+			for (int i = 0; i < hlen && XBand.rxbufpos < XBAND_RXBUF_SIZE; i++)
+				XBand.rxbuf[XBand.rxbufpos++] = (uint8)helo[i];
+		}
+
+		// Reset ADSP sniffer for fresh handshake detection.
+		xband_sniff_box_seen       = false;
+		xband_sniff_srv_seen       = false;
+		xband_sniff_box_data_total = 0;
+		xband_sniff_srv_data_total = 0;
+		xband_fake_send_seq        = 0;
+		xband_fake_send_seq_primed = false;
+
+		// The BIOS's TX frames will still be captured by the
+		// servertalk_dispatch_tx path, so our server's TX stream
+		// watcher works. We just don't send them to a real socket.
+
+		xband_auto_reconnects++;
+		xbsvr_log_append(false, 0, "=== loopback connect (no real server) ===");
+		return;
+	}
+
 	if (xband_last_host[0] == 0)                 return;
 	if (S9xXBandConnect(xband_last_host, xband_last_port))
 		xband_auto_reconnects++;
@@ -5937,6 +6019,10 @@ void S9xXBandPoll (void)
 {
 	if (XBand.socket_fd == XBAND_INVALID_SOCKET)
 		return;
+
+	// Loopback mode: skip socket reads but still run TX flush
+	// so frames get dispatched to servertalk_dispatch_tx.
+	bool loopback = (XBand.socket_fd == (intptr_t)-2);
 
 	xband_sock_t fd = (xband_sock_t)XBand.socket_fd;
 
@@ -5966,7 +6052,9 @@ void S9xXBandPoll (void)
 	// 1) Drain any bytes the server has sent into the RX buffer.
 	//    HELO\n softmodem probes are stripped here so the BIOS only
 	//    sees "real" payload bytes — see comment on xband_helo_*.
+	//    Skip in loopback mode (no real socket).
 	uint32 rx_before = XBand.rxbufpos;
+	if (!loopback)
 	while (XBand.rxbufpos < XBAND_RXBUF_SIZE)
 	{
 		uint8 b;
@@ -6031,7 +6119,8 @@ void S9xXBandPoll (void)
 
 	// 2) First server bytes have arrived while still in handshake —
 	//    send the identity prefix and advance the state machine.
-	if (XBand.net_step == XBAND_NET_HANDSHAKE && XBand.rxbufpos > rx_before)
+	//    Skip in loopback mode (no real server to talk to).
+	if (!loopback && XBand.net_step == XBAND_NET_HANDSHAKE && XBand.rxbufpos > rx_before)
 	{
 		xband_send_identity(fd);
 		XBand.net_step = XBAND_NET_CONNECTED;
@@ -6108,11 +6197,21 @@ void S9xXBandPoll (void)
 				}
 			}
 
-			int sent = (int)send(fd,
-				(const char *)send_data,
-				send_len, 0);
-			if (sent <= 0)
-				break;  // socket would block or broken
+			int sent;
+			if (XBand.socket_fd == (intptr_t)-2)
+			{
+				// Loopback mode: don't send to socket, just
+				// pretend all bytes were sent.
+				sent = send_len;
+			}
+			else
+			{
+				sent = (int)send(fd,
+					(const char *)send_data,
+					send_len, 0);
+				if (sent <= 0)
+					break;  // socket would block or broken
+			}
 
 			// Partial send: in non-rewrite mode we'd retry the rest
 			// next poll. In rewrite mode, the partial bytes are from

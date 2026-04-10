@@ -261,9 +261,16 @@ void	S9xXBandAppendDialogScan (const char *line);
 // opponent, in three ADSP batches.
 bool	S9xXBandFakeInjectMatchmaking (void);
 
-// Auto-sequencing fake server. Injects messages in rounds, waiting
-// for the BIOS to respond between each round. Start it via the menu;
-// it ticks automatically on every kreadmstatus2 poll.
+// Event-driven XBAND Server. Watches the BIOS's TX ServerTalk
+// stream, detects batch boundaries, and injects appropriate server
+// responses. Start/Stop via menu. Log shows timestamped message flow.
+void	S9xXBandServerStart (void);
+void	S9xXBandServerStop (void);
+int		S9xXBandServerState (void);
+bool	S9xXBandServerInterceptRX (void);
+void	S9xXBandServerLogDump (char *out, size_t out_size);
+
+// Compat shims for old menu handler.
 void	S9xXBandFakeServerStart (void);
 void	S9xXBandFakeServerStop (void);
 int		S9xXBandFakeServerState (void);

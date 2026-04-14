@@ -622,6 +622,7 @@
 
 #define IDC_ALLOWMULTIBIND              3102
 #define IDC_BINDINGCOMBO                3103
+#define ID_SOUND_MUTE                   40189
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -629,7 +630,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        172
-#define _APS_NEXT_COMMAND_VALUE         40189
+#define _APS_NEXT_COMMAND_VALUE         40190
 #define _APS_NEXT_CONTROL_VALUE         3061
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

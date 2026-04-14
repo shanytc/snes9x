@@ -2279,6 +2279,21 @@ LRESULT CALLBACK WinProc(
 			GUI.Mute = !GUI.Mute;
             break;
 
+		case ID_SOUND_MUTE:
+		{
+			static unsigned int savedVolume = 100;
+			if(GUI.VolumeRegular > 0)
+			{
+				savedVolume = GUI.VolumeRegular;
+				GUI.VolumeRegular = 0;
+			}
+			else
+			{
+				GUI.VolumeRegular = savedVolume;
+			}
+			break;
+		}
+
         case ID_SOUND_SYNC:
             Settings.SoundSync = !Settings.SoundSync;
 			S9xDisplayStateChange (WINPROC_SYNC_SND, Settings.SoundSync);
@@ -4222,6 +4237,9 @@ static void CheckMenuStates ()
 
     if (Settings.SoundSync)
         SetMenuItemInfo (GUI.hMenu, ID_SOUND_SYNC, FALSE, &mii);
+
+    mii.fState = (GUI.VolumeRegular == 0) ? MFS_CHECKED : MFS_UNCHECKED;
+    SetMenuItemInfo (GUI.hMenu, ID_SOUND_MUTE, FALSE, &mii);
 
 #ifdef DEBUGGER
     mii.fState = (CPU.Flags & TRACE_FLAG) ? MFS_CHECKED : MFS_UNCHECKED;

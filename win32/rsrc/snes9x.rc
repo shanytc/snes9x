@@ -1144,6 +1144,7 @@ BEGIN
             MENUITEM "Enable All",                  ID_CHANNELS_ENABLEALL,MFT_STRING,MFS_ENABLED
         END
         MENUITEM MFT_SEPARATOR
+        MENUITEM "&Mute",                       ID_SOUND_MUTE,MFT_STRING,MFS_ENABLED
         MENUITEM "S&ync Sound\tAlt+]",          ID_SOUND_SYNC,MFT_STRING,MFS_ENABLED
         MENUITEM "&Settings...\tAlt+T",         ID_SOUND_OPTIONS,MFT_STRING,MFS_ENABLED
     END

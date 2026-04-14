@@ -786,6 +786,7 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
         icp->hFont     = (HFONT__ *) GetStockObject(DEFAULT_GUI_FONT);
         memset(icp->keys, 0, sizeof(icp->keys));
         icp->numKeys   = 0;
+        icp->maxKeys   = MAX_BIND_KEYS;
 
         // Assign the window text specified in the call to CreateWindow.
         SetWindowText(hwnd, ((CREATESTRUCT *)lParam)->lpszName);
@@ -844,9 +845,16 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
             icp->numKeys--;
             icp->keys[icp->numKeys] = 0;
         }
-        else if (icp->numKeys < MAX_BIND_KEYS)
+        else if (icp->maxKeys == 1)
         {
-            // Check for duplicates
+            // Single mode: replace the existing key
+            icp->keys[0] = (WORD)wParam;
+            icp->numKeys = 1;
+            for (int i = 1; i < MAX_BIND_KEYS; i++) icp->keys[i] = 0;
+        }
+        else if (icp->numKeys < icp->maxKeys)
+        {
+            // Multi mode: accumulate keys
             bool duplicate = false;
             for (int i = 0; i < icp->numKeys; i++) {
                 if (icp->keys[i] == (WORD)wParam) { duplicate = true; break; }
@@ -877,8 +885,9 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
 		if (lParam > 0 && lParam <= MAX_BIND_KEYS)
 		{
 			WORD *keys = (WORD *)wParam;
+			int limit = min((int)lParam, icp->maxKeys);
 			icp->numKeys = 0;
-			for (int i = 0; i < (int)lParam; i++) {
+			for (int i = 0; i < limit; i++) {
 				if (keys[i] != 0 && keys[i] != VK_ESCAPE) {
 					icp->keys[icp->numKeys++] = keys[i];
 				}
@@ -910,6 +919,13 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
 		InvalidateRect(icp->hwnd, NULL, FALSE);
 		UpdateWindow(icp->hwnd);
 
+		break;
+	}
+
+	case WM_USER+47:
+	{
+		// Set maxKeys: wParam = new maxKeys value
+		icp->maxKeys = max(1, min((int)wParam, MAX_BIND_KEYS));
 		break;
 	}
 

@@ -28,6 +28,7 @@ typedef struct
     HWND     hwnd;         // The control's window handle
     WORD     keys[MAX_BIND_KEYS];  // accumulated multi-bind keys
     int      numKeys;               // count of bound keys
+    int      maxKeys;               // max allowed keys (1=single, MAX_BIND_KEYS=multi)
 } InputCust;
 COLORREF CheckButtonKey( WORD Key);
 COLORREF CheckHotKey( WORD Key, int modifiers);

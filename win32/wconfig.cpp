@@ -879,6 +879,7 @@ void WinRegisterConfigItems()
 #define	CATEGORY "Controls"
 	AddBoolC("AllowLeftRight", Settings.UpAndDown, false, "true to allow left+right and up+down");
 	AddBoolC("AllowMultipleBindings", GUI.AllowMultipleBindings, true, "true to process all bindings per button, false to use only the first");
+	AddBoolC("MultiBindingMode", GUI.MultiBindingMode, true, "true to use multi-binding mode in input config, false for single-binding mode");
 #undef CATEGORY
 #define	CATEGORY "ROM"
 	AddBoolC("Cheat", Settings.ApplyCheats, true, "true to allow enabled cheats to be applied");

@@ -9254,6 +9254,30 @@ INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 	return false;
 }
 #endif
+// Helper: set maxKeys on all InputCustom controls in the dialog
+static void SetInputMaxKeys(HWND hDlg, int maxKeys)
+{
+	static const int inputControls[] = {
+		IDC_UP, IDC_DOWN, IDC_LEFT, IDC_RIGHT,
+		IDC_A, IDC_B, IDC_X, IDC_Y,
+		IDC_L, IDC_R, IDC_START, IDC_SELECT,
+		IDC_UPLEFT, IDC_UPRIGHT, IDC_DWNLEFT, IDC_DWNRIGHT
+	};
+	for (int i = 0; i < sizeof(inputControls)/sizeof(inputControls[0]); i++)
+		SendDlgItemMessage(hDlg, inputControls[i], WM_USER+47, maxKeys, 0);
+}
+
+// Helper: update binding mode UI (show/hide Enabled checkbox, set input maxKeys)
+static void UpdateBindingMode(HWND hDlg, int index)
+{
+	int bindMode = SendDlgItemMessage(hDlg, IDC_BINDINGCOMBO, CB_GETCURSEL, 0, 0);
+	bool isMulti = (bindMode == 1);
+	ShowWindow(GetDlgItem(hDlg, IDC_ALLOWMULTIBIND), isMulti ? SW_SHOW : SW_HIDE);
+	int maxKeys = (isMulti && IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND)) ? MAX_BIND_KEYS : 1;
+	SetInputMaxKeys(hDlg, maxKeys);
+	set_buttoninfo(index, hDlg);
+}
+
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	TCHAR temp[256];
@@ -9330,13 +9354,20 @@ switch(msg)
 
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
+
+		// Initialize binding mode combobox
+		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO,CB_ADDSTRING,0,(LPARAM)TEXT("Single"));
+		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO,CB_ADDSTRING,0,(LPARAM)TEXT("Multi"));
+		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO,CB_SETCURSEL, GUI.MultiBindingMode ? 1 : 0, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWMULTIBIND,BM_SETCHECK, GUI.AllowMultipleBindings ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
+		ShowWindow(GetDlgItem(hDlg, IDC_ALLOWMULTIBIND), GUI.MultiBindingMode ? SW_SHOW : SW_HIDE);
+		SetInputMaxKeys(hDlg, GUI.MultiBindingMode ? MAX_BIND_KEYS : 1);
 
 		set_buttoninfo(index,hDlg);
 
 		EnableDisableKeyFields(index,hDlg);
 
-		PostMessage(hDlg,WM_COMMAND, CBN_SELCHANGE<<16, 0);
+		PostMessage(hDlg,WM_COMMAND, MAKEWPARAM(IDC_JPCOMBO, CBN_SELCHANGE), 0);
 
 		SetFocus(GetDlgItem(hDlg,IDC_JPCOMBO));
 
@@ -9389,7 +9420,9 @@ switch(msg)
 
 		set_buttoninfo(index,hDlg);
 
-		// No auto-advance: user can press multiple keys for multi-bind, then Tab to next field
+		// In single mode, auto-advance to the next button field
+		if(icp->maxKeys == 1)
+			PostMessage(hDlg,WM_NEXTDLGCTL,0,0);
 		return true;
 		}
 	case WM_COMMAND:
@@ -9403,7 +9436,8 @@ switch(msg)
 
 		case IDOK:
 			Settings.UpAndDown = IsDlgButtonChecked(hDlg, IDC_ALLOWLEFTRIGHT);
-			GUI.AllowMultipleBindings = IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND) != 0;
+			GUI.MultiBindingMode = (SendDlgItemMessage(hDlg, IDC_BINDINGCOMBO, CB_GETCURSEL, 0, 0) == 1);
+			GUI.AllowMultipleBindings = GUI.MultiBindingMode && (IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND) != 0);
 			WinSaveConfigFile();
 			EndDialog(hDlg,0);
 			break;
@@ -9415,10 +9449,26 @@ switch(msg)
 			set_buttoninfo(index, hDlg); // update display of conflicts
 			break;
 
+		case IDC_ALLOWMULTIBIND: // binding Enabled toggle
+			index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
+			if(index > 4) index += 3;
+			UpdateBindingMode(hDlg, index);
+			break;
+
+		case IDC_BINDINGCOMBO: // binding mode changed (Single/Multi)
+			if(HIWORD(wParam) == CBN_SELCHANGE)
+			{
+				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
+				if(index > 4) index += 3;
+				UpdateBindingMode(hDlg, index);
+			}
+			break;
+
 		}
 		switch(HIWORD(wParam))
 		{
 			case CBN_SELCHANGE:
+				if(LOWORD(wParam) != IDC_JPCOMBO) break;
 				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
 				SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)index,0);
 				if(index > 4) index += 3; // skip controllers 6, 7, and 8 in the input dialog
@@ -9621,7 +9671,7 @@ switch(msg)
 
 		set_hotkeyinfo(hDlg);
 
-		PostMessage(hDlg,WM_COMMAND, CBN_SELCHANGE<<16, 0);
+		PostMessage(hDlg,WM_COMMAND, MAKEWPARAM(IDC_JPCOMBO, CBN_SELCHANGE), 0);
 
 		SetFocus(GetDlgItem(hDlg,IDC_HKCOMBO));
 

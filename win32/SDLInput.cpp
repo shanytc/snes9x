@@ -140,6 +140,62 @@ static void OpenDevice(int device_index)
     s_devices[dev.instance_id] = dev;
 }
 
+// Helper: check if a WORD binding references a specific joystick slot
+static bool IsJoyBinding(WORD key, int joySlot)
+{
+    return (key & 0x8000) && (((key >> 8) & 0xF) == joySlot);
+}
+
+// Remove joystick bindings for a disconnected slot from a joypad's config.
+// In multi-bind mode, promotes keyboard extras to primary.
+static void CleanupBindingsForSlot(int joySlot)
+{
+    bool isMulti = GUI.MultiBindingMode;
+
+    for (int pad = 0; pad < 16; pad++)
+    {
+        // Process each button field with a macro
+        #define CLEANUP(field) do { \
+            if (IsJoyBinding(Joypad[pad].field, joySlot)) { \
+                Joypad[pad].field = 0; \
+                if (isMulti) { \
+                    /* Promote first keyboard extra to primary */ \
+                    for (int _e = 0; _e < MAX_EXTRA_BINDS; _e++) { \
+                        if (JoypadExtra[pad].field[_e] != 0 && \
+                            JoypadExtra[pad].field[_e] != VK_ESCAPE && \
+                            !(JoypadExtra[pad].field[_e] & 0x8000)) { \
+                            Joypad[pad].field = JoypadExtra[pad].field[_e]; \
+                            /* Shift remaining extras up */ \
+                            for (int _j = _e; _j < MAX_EXTRA_BINDS - 1; _j++) \
+                                JoypadExtra[pad].field[_j] = JoypadExtra[pad].field[_j+1]; \
+                            JoypadExtra[pad].field[MAX_EXTRA_BINDS-1] = 0; \
+                            break; \
+                        } \
+                    } \
+                } \
+            } \
+            /* Also remove joystick extras for this slot */ \
+            for (int _e = 0; _e < MAX_EXTRA_BINDS; _e++) { \
+                if (IsJoyBinding(JoypadExtra[pad].field[_e], joySlot)) { \
+                    JoypadExtra[pad].field[_e] = 0; \
+                    /* Compact: shift remaining up */ \
+                    for (int _j = _e; _j < MAX_EXTRA_BINDS - 1; _j++) \
+                        JoypadExtra[pad].field[_j] = JoypadExtra[pad].field[_j+1]; \
+                    JoypadExtra[pad].field[MAX_EXTRA_BINDS-1] = 0; \
+                    _e--; /* re-check this slot */ \
+                } \
+            } \
+        } while(0)
+
+        CLEANUP(Up); CLEANUP(Down); CLEANUP(Left); CLEANUP(Right);
+        CLEANUP(A); CLEANUP(B); CLEANUP(X); CLEANUP(Y);
+        CLEANUP(L); CLEANUP(R); CLEANUP(Start); CLEANUP(Select);
+        CLEANUP(Left_Up); CLEANUP(Left_Down);
+        CLEANUP(Right_Up); CLEANUP(Right_Down);
+        #undef CLEANUP
+    }
+}
+
 static void CloseDevice(SDL_JoystickID instance_id)
 {
     auto it = s_devices.find(instance_id);
@@ -149,6 +205,9 @@ static void CloseDevice(SDL_JoystickID instance_id)
     auto &dev = it->second;
     if (dev.slot >= 0 && dev.slot < 16)
     {
+        // Clean up bindings that reference this joystick slot
+        CleanupBindingsForSlot(dev.slot);
+
         Joystick[dev.slot].Attached = false;
         memset(&Joystick[dev.slot].Left, 0,
                sizeof(SJoyState) - offsetof(SJoyState, Left));

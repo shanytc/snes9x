@@ -9473,10 +9473,11 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		{
 			// Poll SDL for device add/remove events
 			SDLInput_Poll();
-			// Refresh device name display
+			// Refresh device name and button bindings display
 			index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
 			if(index > 4) index += 3;
 			UpdateDeviceInfo(hDlg, index);
+			set_buttoninfo(index, hDlg);
 		}
 		return TRUE;
 	case WM_USER+46:

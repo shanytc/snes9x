@@ -30,6 +30,8 @@ typedef struct
     WORD     mods[MAX_BIND_KEYS];  // accumulated multi-bind modifiers (hotkeys only)
     int      numKeys;               // count of bound keys
     int      maxKeys;               // max allowed keys (1=single, MAX_BIND_KEYS=multi)
+    bool     capturing;             // true while actively waiting for input
+    bool     inContextMenu;         // true while right-click context menu is open
 } InputCust;
 COLORREF CheckButtonKey( WORD Key);
 COLORREF CheckHotKey( WORD Key, int modifiers);

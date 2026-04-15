@@ -9591,7 +9591,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 				if (SDLInput_AutoMapGamepad(checkSlot, Joypad[index]))
 				{
-					bool isMulti = GUI.MultiBindingMode && GUI.AllowMultipleBindings;
+					bool isMulti = GUI.MultiBindingMode;
 
 					// Helper: for each button, preserve old keyboard bindings as extras
 					#define PRESERVE_KB(field) do { \

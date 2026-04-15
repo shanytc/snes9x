@@ -2511,7 +2511,10 @@ LRESULT CALLBACK WinProc(
 			RA_Win32_RegisterCallbacks();
 			RA_Init();
 			if (RA_IsLoggedIn())
-				RA_Logout();
+			{
+				if (MessageBox(hWnd, TEXT("Are you sure you want to logout?"), TEXT("RetroAchievements"), MB_YESNO | MB_ICONQUESTION) == IDYES)
+					RA_Logout();
+			}
 			else
 				RA_ShowLoginDialog();
 			break;

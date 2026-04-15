@@ -793,6 +793,7 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
         icp->crBackGnd = GetSysColor(COLOR_WINDOW);
         icp->hFont     = (HFONT__ *) GetStockObject(DEFAULT_GUI_FONT);
         memset(icp->keys, 0, sizeof(icp->keys));
+        memset(icp->mods, 0, sizeof(icp->mods));
         icp->numKeys   = 0;
         icp->maxKeys   = MAX_BIND_KEYS;
 
@@ -1030,6 +1031,20 @@ static void TranslateKeyWithModifiers(int wParam, int modifiers, char * outStr)
 	}
 }
 
+// Format multiple hotkey bindings (key+modifiers) as comma-separated text
+static void TranslateMultiHotKey(WORD *keys, WORD *mods, int numKeys, char *out)
+{
+	out[0] = '\0';
+	for (int i = 0; i < numKeys; i++) {
+		if (keys[i] == 0 || keys[i] == VK_ESCAPE) continue;
+		if (out[0] != '\0') strcat(out, ", ");
+		char temp[128];
+		TranslateKeyWithModifiers(keys[i], mods[i], temp);
+		strcat(out, temp);
+	}
+	if (out[0] == '\0') TranslateKey(0, out); // "Disabled"
+}
+
 static bool keyPressLock = false;
 
 static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -1041,7 +1056,7 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 
 	static HWND selectedItem = NULL;
 
-	char temp[100];
+	char temp[512];
 	COLORREF col;
     switch(msg)
     {
@@ -1064,6 +1079,10 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
         icp->crForeGnd = GetSysColor(COLOR_WINDOWTEXT);
         icp->crBackGnd = GetSysColor(COLOR_WINDOW);
         icp->hFont     = (HFONT__ *) GetStockObject(DEFAULT_GUI_FONT);
+        memset(icp->keys, 0, sizeof(icp->keys));
+        memset(icp->mods, 0, sizeof(icp->mods));
+        icp->numKeys   = 0;
+        icp->maxKeys   = 1;
 
         // Assign the window text specified in the call to CreateWindow.
         SetWindowText(hwnd, ((CREATESTRUCT *)lParam)->lpszName);
@@ -1092,35 +1111,7 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 		break;
 	case WM_ERASEBKGND:
 		return 1;
-/*
-	case WM_KEYUP:
-		{
-			int count = 0;
-			for(int i=0;i<256;i++)
-				if(GetAsyncKeyState(i))
-					count++;
 
-			if(count < 2)
-			{
-				int p = count;
-			}
-			if(count < 1)
-			{
-				int p = count;
-			}
-
-			TranslateKey(wParam,temp);
-			col = CheckButtonKey(wParam);
-
-			icp->crForeGnd = ((~col) & 0x00ffffff);
-			icp->crBackGnd = col;
-			SetWindowText(hwnd,temp);
-			InvalidateRect(icp->hwnd, NULL, FALSE);
-			UpdateWindow(icp->hwnd);
-			SendMessage(pappy,WM_USER+43,wParam,(LPARAM)hwnd);
-		}
-		break;
-*/
 	case WM_SYSKEYDOWN:
 	case WM_KEYDOWN:
 
@@ -1149,6 +1140,9 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 			if(wParam == VK_SHIFT || wParam == VK_MENU || wParam == VK_CONTROL)
 				break;
 
+			if(keyPressLock)
+				break;
+
 			int modifiers = 0;
 			if(GetAsyncKeyState(VK_MENU))
 				modifiers |= CUSTKEY_ALT_MASK;
@@ -1157,11 +1151,68 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 			if(GetAsyncKeyState(VK_SHIFT))
 				modifiers |= CUSTKEY_SHIFT_MASK;
 
-			TranslateKeyWithModifiers(wParam, modifiers, temp);
+			if (wParam == VK_ESCAPE)
+			{
+				// Escape clears all bindings
+				memset(icp->keys, 0, sizeof(icp->keys));
+				memset(icp->mods, 0, sizeof(icp->mods));
+				icp->numKeys = 0;
 
-			col = CheckHotKey(wParam,modifiers);
-///			if(col == RGB(255,0,0)) // un-redify
-///				col = RGB(255,255,255);
+				TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+				col = RGB(255,255,255);
+				icp->crForeGnd = ((~col) & 0x00ffffff);
+				icp->crBackGnd = col;
+				SetWindowText(hwnd,_tFromChar(temp));
+				InvalidateRect(icp->hwnd, NULL, FALSE);
+				UpdateWindow(icp->hwnd);
+				SendMessage(pappy,WM_USER+43,wParam,(LPARAM)hwnd);
+				keyPressLock = true;
+				break;
+			}
+
+			if (wParam == VK_DELETE && icp->numKeys > 0)
+			{
+				// Delete removes the last binding
+				icp->numKeys--;
+				icp->keys[icp->numKeys] = 0;
+				icp->mods[icp->numKeys] = 0;
+
+				TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+				col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+				icp->crForeGnd = ((~col) & 0x00ffffff);
+				icp->crBackGnd = col;
+				SetWindowText(hwnd,_tFromChar(temp));
+				InvalidateRect(icp->hwnd, NULL, FALSE);
+				UpdateWindow(icp->hwnd);
+				SendMessage(pappy,WM_USER+43,wParam,(LPARAM)hwnd);
+				keyPressLock = true;
+				break;
+			}
+
+			if (icp->maxKeys == 1)
+			{
+				// Single mode: replace the existing binding
+				icp->keys[0] = (WORD)wParam;
+				icp->mods[0] = (WORD)modifiers;
+				icp->numKeys = 1;
+				for (int i = 1; i < MAX_BIND_KEYS; i++) { icp->keys[i] = 0; icp->mods[i] = 0; }
+			}
+			else if (icp->numKeys < icp->maxKeys)
+			{
+				// Multi mode: accumulate bindings (check for duplicates)
+				bool duplicate = false;
+				for (int i = 0; i < icp->numKeys; i++) {
+					if (icp->keys[i] == (WORD)wParam && icp->mods[i] == (WORD)modifiers) { duplicate = true; break; }
+				}
+				if (!duplicate) {
+					icp->keys[icp->numKeys] = (WORD)wParam;
+					icp->mods[icp->numKeys] = (WORD)modifiers;
+					icp->numKeys++;
+				}
+			}
+
+			TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+			col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
 
 			icp->crForeGnd = ((~col) & 0x00ffffff);
 			icp->crBackGnd = col;
@@ -1191,14 +1242,29 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 			{
 				if(wParam == VK_SHIFT || wParam == VK_MENU || wParam == VK_CONTROL)
 				{
-					if(wParam == VK_SHIFT)
-						sprintf(temp, "Shift");
-					if(wParam == VK_MENU)
-						sprintf(temp, "Alt");
-					if(wParam == VK_CONTROL)
-						sprintf(temp, "Control");
+					// Pure modifier key assignment
+					if (icp->maxKeys == 1)
+					{
+						icp->keys[0] = (WORD)wParam;
+						icp->mods[0] = 0;
+						icp->numKeys = 1;
+						for (int i = 1; i < MAX_BIND_KEYS; i++) { icp->keys[i] = 0; icp->mods[i] = 0; }
+					}
+					else if (icp->numKeys < icp->maxKeys)
+					{
+						bool duplicate = false;
+						for (int i = 0; i < icp->numKeys; i++) {
+							if (icp->keys[i] == (WORD)wParam && icp->mods[i] == 0) { duplicate = true; break; }
+						}
+						if (!duplicate) {
+							icp->keys[icp->numKeys] = (WORD)wParam;
+							icp->mods[icp->numKeys] = 0;
+							icp->numKeys++;
+						}
+					}
 
-					col = CheckHotKey(wParam,0);
+					TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+					col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
 
 					icp->crForeGnd = ((~col) & 0x00ffffff);
 					icp->crBackGnd = col;
@@ -1211,40 +1277,79 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 		}
 		break;
 	case WM_USER+44:
-
-		// set a hotkey field:
+	{
+		// Set a hotkey field
+		// Multi-bind protocol: wParam = pointer to SCustomKey array, lParam = count (negative = multi-bind)
+		// Legacy protocol: wParam = key, lParam = modifiers
+		if (lParam < 0)
 		{
-		int modifiers = lParam;
+			// Multi-bind protocol
+			SCustomKey *hkeys = (SCustomKey *)wParam;
+			int count = (int)(-lParam);
+			if (count > icp->maxKeys) count = icp->maxKeys;
+			icp->numKeys = 0;
+			for (int i = 0; i < count; i++) {
+				if (hkeys[i].key != 0 && hkeys[i].key != VK_ESCAPE) {
+					icp->keys[icp->numKeys] = hkeys[i].key;
+					icp->mods[icp->numKeys] = hkeys[i].modifiers;
+					icp->numKeys++;
+				}
+			}
+			for (int i = icp->numKeys; i < MAX_BIND_KEYS; i++) {
+				icp->keys[i] = 0;
+				icp->mods[i] = 0;
+			}
 
-		TranslateKeyWithModifiers(wParam, modifiers, temp);
-
-		if(IsWindowEnabled(hwnd))
-		{
-			col = CheckHotKey(wParam,modifiers);
-///			if(col == RGB(255,0,0)) // un-redify
-///				col = RGB(255,255,255);
+			TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+			if(IsWindowEnabled(hwnd))
+				col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+			else
+				col = RGB(192,192,192);
 		}
 		else
 		{
-			col = RGB( 192,192,192);
+			// Legacy single-key protocol
+			int modifiers = lParam;
+			TranslateKeyWithModifiers(wParam, modifiers, temp);
+
+			icp->numKeys = (wParam != 0 && wParam != VK_ESCAPE) ? 1 : 0;
+			icp->keys[0] = (WORD)wParam;
+			icp->mods[0] = (WORD)modifiers;
+			for (int i = 1; i < MAX_BIND_KEYS; i++) { icp->keys[i] = 0; icp->mods[i] = 0; }
+
+			if(IsWindowEnabled(hwnd))
+				col = CheckHotKey(wParam,modifiers);
+			else
+				col = RGB(192,192,192);
 		}
 		icp->crForeGnd = ((~col) & 0x00ffffff);
 		icp->crBackGnd = col;
 		SetWindowText(hwnd,_tFromChar(temp));
 		InvalidateRect(icp->hwnd, NULL, FALSE);
 		UpdateWindow(icp->hwnd);
-		}
+	}
 		break;
+
+	case WM_USER+47:
+	{
+		// Set maxKeys: wParam = new maxKeys value
+		icp->maxKeys = max(1, min((int)wParam, MAX_BIND_KEYS));
+		break;
+	}
 
 	case WM_SETFOCUS:
 	{
 		selectedItem = hwnd;
+		// Reset accumulation - start fresh for new key capture
+		icp->numKeys = 0;
+		memset(icp->keys, 0, sizeof(icp->keys));
+		memset(icp->mods, 0, sizeof(icp->mods));
 		col = RGB( 0,255,0);
 		icp->crForeGnd = ((~col) & 0x00ffffff);
 		icp->crBackGnd = col;
+		SetWindowText(hwnd, _T("..."));
 		InvalidateRect(icp->hwnd, NULL, FALSE);
 		UpdateWindow(icp->hwnd);
-//		tid = wParam;
 
 		break;
 	}

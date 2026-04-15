@@ -226,6 +226,8 @@ struct sGUI {
     bool BackgroundKeyHotkeys;
 	bool AllowMultipleBindings;
 	bool MultiBindingMode;
+	bool AllowMultipleHotkeyBindings;
+	bool HotkeyMultiBindingMode;
 	bool JoystickHotkeys;
 	bool MovieClearSRAM;
 	bool MovieStartFromReset;
@@ -315,6 +317,10 @@ struct sLanguages {
 #define CUSTKEY_CTRL_MASK  0x02
 #define CUSTKEY_SHIFT_MASK 0x04
 
+#ifndef MAX_EXTRA_BINDS
+#define MAX_EXTRA_BINDS 3  // 3 extra + 1 primary = 4 total bindings per button
+#endif
+
 struct SCustomKey {
 	WORD key;
 	WORD modifiers;
@@ -369,6 +375,59 @@ struct SCustomKeys {
     SCustomKey CheatSearchDialog;
 };
 
+struct SCustomKeyExtra {
+	SCustomKey extra[MAX_EXTRA_BINDS];
+};
+
+struct SCustomKeysExtra {
+	SCustomKeyExtra SpeedUp;
+	SCustomKeyExtra SpeedDown;
+	SCustomKeyExtra Pause;
+	SCustomKeyExtra FrameAdvance;
+	SCustomKeyExtra SkipUp;
+	SCustomKeyExtra SkipDown;
+	SCustomKeyExtra ScopeTurbo;
+	SCustomKeyExtra ScopePause;
+	SCustomKeyExtra FrameCount;
+	SCustomKeyExtra ReadOnly;
+	SCustomKeyExtra Save [SAVE_SLOTS_PER_BANK];
+	SCustomKeyExtra Load [SAVE_SLOTS_PER_BANK];
+	SCustomKeyExtra FastForward;
+	SCustomKeyExtra FastForwardToggle;
+	SCustomKeyExtra ShowPressed;
+	SCustomKeyExtra SaveScreenShot;
+	SCustomKeyExtra SlotPlus;
+	SCustomKeyExtra SlotMinus;
+	SCustomKeyExtra SlotSave;
+	SCustomKeyExtra SlotLoad;
+	SCustomKeyExtra BankPlus;
+	SCustomKeyExtra BankMinus;
+	SCustomKeyExtra DialogSave;
+	SCustomKeyExtra DialogLoad;
+	SCustomKeyExtra BGL1;
+	SCustomKeyExtra BGL2;
+	SCustomKeyExtra BGL3;
+	SCustomKeyExtra BGL4;
+	SCustomKeyExtra BGL5;
+	SCustomKeyExtra ToggleBackdrop;
+	SCustomKeyExtra ClippingWindows;
+	SCustomKeyExtra Transparency;
+	SCustomKeyExtra JoypadSwap;
+	SCustomKeyExtra SwitchControllers;
+	SCustomKeyExtra TurboA, TurboB, TurboY, TurboX, TurboL, TurboR, TurboStart, TurboSelect, TurboLeft, TurboUp, TurboRight, TurboDown;
+	SCustomKeyExtra SelectSave [SAVE_SLOTS_PER_BANK];
+	SCustomKeyExtra ResetGame;
+	SCustomKeyExtra ToggleCheats;
+	SCustomKeyExtra QuitS9X;
+	SCustomKeyExtra Rewind;
+	SCustomKeyExtra SaveFileSelect;
+	SCustomKeyExtra LoadFileSelect;
+	SCustomKeyExtra Mute;
+	SCustomKeyExtra AspectRatio;
+	SCustomKeyExtra CheatEditorDialog;
+	SCustomKeyExtra CheatSearchDialog;
+};
+
 struct SJoypad {
     BOOL Enabled;
     union {
@@ -400,8 +459,6 @@ struct SJoypad {
     WORD L;
     WORD R;
 };
-
-#define MAX_EXTRA_BINDS 3  // 3 extra + 1 primary = 4 total bindings per button
 
 struct SJoypadExtraBinds {
     WORD Left[MAX_EXTRA_BINDS];
@@ -476,6 +533,7 @@ extern struct SJoypad ToggleJoypadStorage[8];
 extern struct SJoypad TurboToggleJoypadStorage[8];
 extern struct SJoypadExtraBinds JoypadExtra[16];
 extern struct SCustomKeys CustomKeys;
+extern struct SCustomKeysExtra CustomKeysExtra;
 
 enum
 {

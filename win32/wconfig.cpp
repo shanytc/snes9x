@@ -880,6 +880,8 @@ void WinRegisterConfigItems()
 	AddBoolC("AllowLeftRight", Settings.UpAndDown, false, "true to allow left+right and up+down");
 	AddBoolC("AllowMultipleBindings", GUI.AllowMultipleBindings, true, "true to process all bindings per button, false to use only the first");
 	AddBoolC("MultiBindingMode", GUI.MultiBindingMode, true, "true to use multi-binding mode in input config, false for single-binding mode");
+	AddBoolC("AllowMultipleHotkeyBindings", GUI.AllowMultipleHotkeyBindings, false, "true to process all hotkey bindings, false to use only the first");
+	AddBoolC("HotkeyMultiBindingMode", GUI.HotkeyMultiBindingMode, false, "true to use multi-binding mode in hotkey config, false for single-binding mode");
 #undef CATEGORY
 #define	CATEGORY "ROM"
 	AddBoolC("Cheat", Settings.ApplyCheats, true, "true to allow enabled cheats to be applied");
@@ -980,6 +982,37 @@ void WinRegisterConfigItems()
     ADD(CheatSearchDialog);
 #undef ADD
 #undef ADDN
+
+	// Extra hotkey bindings (multi-bind support)
+#define ADDX(x,s) AddVKey("Key:" #x ":Extra" #s, CustomKeysExtra.x.extra[s-1].key, CustomKeysExtra.x.extra[s-1].key); AddVKMod("Mods:" #x ":Extra" #s, CustomKeysExtra.x.extra[s-1].modifiers, CustomKeysExtra.x.extra[s-1].modifiers)
+#define ADDXN(x,n2,s) AddVKey("Key:" #n2 ":Extra" #s, CustomKeysExtra.x.extra[s-1].key, CustomKeysExtra.x.extra[s-1].key); AddVKMod("Mods:" #n2 ":Extra" #s, CustomKeysExtra.x.extra[s-1].modifiers, CustomKeysExtra.x.extra[s-1].modifiers)
+#define ADDXALL(x) ADDX(x,1); ADDX(x,2); ADDX(x,3)
+#define ADDXALLN(x,n2) ADDXN(x,n2,1); ADDXN(x,n2,2); ADDXN(x,n2,3)
+	ADDXALL(SpeedUp); ADDXALL(SpeedDown); ADDXALL(Pause); ADDXALL(FrameAdvance);
+	ADDXALL(SkipUp); ADDXALL(SkipDown); ADDXALL(ScopeTurbo); ADDXALL(ScopePause);
+	ADDXALL(FrameCount); ADDXALL(ReadOnly); ADDXALL(FastForward); ADDXALL(FastForwardToggle); ADDXALL(ShowPressed);
+	ADDXALLN(Save[0],SaveSlot0); ADDXALLN(Save[1],SaveSlot1); ADDXALLN(Save[2],SaveSlot2); ADDXALLN(Save[3],SaveSlot3); ADDXALLN(Save[4],SaveSlot4);
+	ADDXALLN(Save[5],SaveSlot5); ADDXALLN(Save[6],SaveSlot6); ADDXALLN(Save[7],SaveSlot7); ADDXALLN(Save[8],SaveSlot8); ADDXALLN(Save[9],SaveSlot9);
+	ADDXALLN(Load[0],LoadSlot0); ADDXALLN(Load[1],LoadSlot1); ADDXALLN(Load[2],LoadSlot2); ADDXALLN(Load[3],LoadSlot3); ADDXALLN(Load[4],LoadSlot4);
+	ADDXALLN(Load[5],LoadSlot5); ADDXALLN(Load[6],LoadSlot6); ADDXALLN(Load[7],LoadSlot7); ADDXALLN(Load[8],LoadSlot8); ADDXALLN(Load[9],LoadSlot9);
+	ADDXALLN(SelectSave[0],SelectSlot0); ADDXALLN(SelectSave[1],SelectSlot1); ADDXALLN(SelectSave[2],SelectSlot2); ADDXALLN(SelectSave[3],SelectSlot3); ADDXALLN(SelectSave[4],SelectSlot4);
+	ADDXALLN(SelectSave[5],SelectSlot5); ADDXALLN(SelectSave[6],SelectSlot6); ADDXALLN(SelectSave[7],SelectSlot7); ADDXALLN(SelectSave[8],SelectSlot8); ADDXALLN(SelectSave[9],SelectSlot9);
+	ADDXALL(SaveScreenShot); ADDXALL(SlotPlus); ADDXALL(SlotMinus); ADDXALL(SlotSave); ADDXALL(SlotLoad); ADDXALL(BankPlus); ADDXALL(BankMinus); ADDXALL(DialogSave); ADDXALL(DialogLoad);
+	ADDXALL(BGL1); ADDXALL(BGL2); ADDXALL(BGL3); ADDXALL(BGL4); ADDXALL(BGL5);
+	ADDXALL(ClippingWindows); ADDXALL(Transparency);
+	ADDXALL(JoypadSwap); ADDXALL(SwitchControllers); ADDXALL(ResetGame); ADDXALL(ToggleCheats);
+	ADDXALL(TurboA); ADDXALL(TurboB); ADDXALL(TurboY); ADDXALL(TurboX); ADDXALL(TurboL); ADDXALL(TurboR); ADDXALL(TurboStart); ADDXALL(TurboSelect); ADDXALL(TurboUp); ADDXALL(TurboDown); ADDXALL(TurboLeft); ADDXALL(TurboRight);
+	ADDXALL(QuitS9X); ADDXALL(Rewind);
+	ADDXALL(SaveFileSelect); ADDXALL(LoadFileSelect);
+	ADDXALL(Mute);
+	ADDXALL(ToggleBackdrop);
+	ADDXALL(AspectRatio);
+	ADDXALL(CheatEditorDialog);
+	ADDXALL(CheatSearchDialog);
+#undef ADDX
+#undef ADDXN
+#undef ADDXALL
+#undef ADDXALLN
 #undef CATEGORY
 #define	CATEGORY "Hack"
     AddUIntC("CPUOverclockMode", Settings.OverclockMode, 0, "CPU Overclock: 0=none, 1=min, 2=medium, 3=max");

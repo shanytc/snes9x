@@ -9459,10 +9459,25 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		SetFocus(GetDlgItem(hDlg,IDC_JPCOMBO));
 
+		// Start timer to poll for controller hot-plug events
+		SetTimer(hDlg, 99, 500, NULL);
+
 		return true;
 		break;
 	case WM_CLOSE:
+		KillTimer(hDlg, 99);
 		EndDialog(hDlg, 0);
+		return TRUE;
+	case WM_TIMER:
+		if(wParam == 99)
+		{
+			// Poll SDL for device add/remove events
+			SDLInput_Poll();
+			// Refresh device name display
+			index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
+			if(index > 4) index += 3;
+			UpdateDeviceInfo(hDlg, index);
+		}
 		return TRUE;
 	case WM_USER+46:
 		// refresh command, for clicking away from a selected field
@@ -9517,12 +9532,14 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		switch(LOWORD(wParam))
 		{
 		case IDCANCEL:
+			KillTimer(hDlg, 99);
 			memcpy(Joypad, pads, 10*sizeof(SJoypad));
 			memcpy(JoypadExtra, padsExtra, 10*sizeof(SJoypadExtraBinds));
 			EndDialog(hDlg,0);
 			break;
 
 		case IDOK:
+			KillTimer(hDlg, 99);
 			Settings.UpAndDown = IsDlgButtonChecked(hDlg, IDC_ALLOWLEFTRIGHT);
 			GUI.MultiBindingMode = (SendDlgItemMessage(hDlg, IDC_BINDINGCOMBO, CB_GETCURSEL, 0, 0) == 1);
 			GUI.AllowMultipleBindings = GUI.MultiBindingMode && (IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND) != 0);

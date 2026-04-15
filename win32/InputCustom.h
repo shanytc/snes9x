@@ -27,6 +27,7 @@ typedef struct
     HFONT    hFont;        // The font
     HWND     hwnd;         // The control's window handle
     WORD     keys[MAX_BIND_KEYS];  // accumulated multi-bind keys
+    WORD     mods[MAX_BIND_KEYS];  // accumulated multi-bind modifiers (hotkeys only)
     int      numKeys;               // count of bound keys
     int      maxKeys;               // max allowed keys (1=single, MAX_BIND_KEYS=multi)
 } InputCust;

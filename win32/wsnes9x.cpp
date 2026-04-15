@@ -349,6 +349,8 @@ SJoypad TurboToggleJoypadStorage [8] = {
 
 SJoypadExtraBinds JoypadExtra[16] = {};
 
+struct SCustomKeysExtra CustomKeysExtra = {};
+
 struct SCustomKeys CustomKeys = {
 	{/*VK_OEM_PLUS*/0xBB,0}, // speed+ (=)
 	{/*VK_OEM_MINUS*/0xBD,0}, // speed- (-)
@@ -792,9 +794,23 @@ static void ShowStatusSlotInfo()
 	S9xSetInfoString(str);
 }
 
+// Helper: check if a key+modifier combo matches a hotkey (primary or any extra binding)
+static inline bool MatchesHotkeyBinding(WORD key, int modifiers, SCustomKey *primary, SCustomKeyExtra *extra)
+{
+	if (key == primary->key && modifiers == primary->modifiers)
+		return true;
+	if (GUI.AllowMultipleHotkeyBindings) {
+		for (int i = 0; i < MAX_EXTRA_BINDS; i++) {
+			if (extra->extra[i].key != 0 && extra->extra[i].key != VK_ESCAPE
+				&& key == extra->extra[i].key && modifiers == extra->extra[i].modifiers)
+				return true;
+		}
+	}
+	return false;
+}
+
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {
-	// Helper: returns true if wParam matches the primary binding or any extra binding
 	auto MatchesAnyBinding = [](WPARAM wParam, WORD primary, const WORD* extra) -> bool {
 		if (primary != 0 && primary != VK_ESCAPE && wParam == primary) return true;
 		if (GUI.AllowMultipleBindings) {
@@ -892,6 +908,9 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 	}
 
 
+	// Helper: check if a key+modifier combo matches a hotkey (primary or extra bindings)
+	#define HKmatch(field) (MatchesHotkeyBinding(wParam, modifiers, &CustomKeys.field, &CustomKeysExtra.field))
+
 	bool hitHotKey = false;
 
     // if this is not a gamepad press and background hotkeys are disabled, skip it if we do not have focus
@@ -913,46 +932,39 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		{
 			for(int i = 0 ; i < SAVE_SLOTS_PER_BANK; i++)
 			{
-				if(wParam == CustomKeys.Save[i].key
-				&& modifiers == CustomKeys.Save[i].modifiers)
+				if(MatchesHotkeyBinding(wParam, modifiers, &CustomKeys.Save[i], &CustomKeysExtra.Save[i]))
 				{
 					FreezeUnfreezeSlot (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + i, true);
 					hitHotKey = true;
 				}
-				if(wParam == CustomKeys.Load[i].key
-				&& modifiers == CustomKeys.Load[i].modifiers)
+				if(MatchesHotkeyBinding(wParam, modifiers, &CustomKeys.Load[i], &CustomKeysExtra.Load[i]))
 				{
 					FreezeUnfreezeSlot (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + i, false);
 					hitHotKey = true;
 				}
 			}
 
-			if(wParam == CustomKeys.SlotSave.key
-			&& modifiers == CustomKeys.SlotSave.modifiers)
+			if(HKmatch(SlotSave))
 			{
 				FreezeUnfreezeSlot (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot, true);
 				hitHotKey = true;
 			}
-			if(wParam == CustomKeys.SlotLoad.key
-			&& modifiers == CustomKeys.SlotLoad.modifiers)
+			if(HKmatch(SlotLoad))
 			{
 				FreezeUnfreezeSlot (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot, false);
 				hitHotKey = true;
 			}
-            if(wParam == CustomKeys.DialogSave.key
-                && modifiers == CustomKeys.DialogSave.modifiers)
+            if(HKmatch(DialogSave))
             {
                 FreezeUnfreezeDialogPreview(true);
                 hitHotKey = true;
             }
-            if(wParam == CustomKeys.DialogLoad.key
-                && modifiers == CustomKeys.DialogLoad.modifiers)
+            if(HKmatch(DialogLoad))
             {
                 FreezeUnfreezeDialogPreview(false);
                 hitHotKey = true;
             }
-			if(wParam == CustomKeys.SlotPlus.key
-			&& modifiers == CustomKeys.SlotPlus.modifiers)
+			if(HKmatch(SlotPlus))
 			{
 				GUI.CurrentSaveSlot++;
 				if(GUI.CurrentSaveSlot > LAST_SAVE_SLOT_IN_BANK)
@@ -962,8 +974,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 
 				hitHotKey = true;
 			}
-			if(wParam == CustomKeys.SlotMinus.key
-			&& modifiers == CustomKeys.SlotMinus.modifiers)
+			if(HKmatch(SlotMinus))
 			{
 				GUI.CurrentSaveSlot--;
 				if(GUI.CurrentSaveSlot < 0)
@@ -973,8 +984,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 
 				hitHotKey = true;
 			}
-			if (wParam == CustomKeys.BankPlus.key
-				&& modifiers == CustomKeys.BankPlus.modifiers)
+			if(HKmatch(BankPlus))
 			{
 				GUI.CurrentSaveBank++;
 				if (GUI.CurrentSaveBank > LAST_SAVE_BANK)
@@ -984,8 +994,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 
 				hitHotKey = true;
 			}
-			if (wParam == CustomKeys.BankMinus.key
-				&& modifiers == CustomKeys.BankMinus.modifiers)
+			if(HKmatch(BankMinus))
 			{
 				GUI.CurrentSaveBank--;
 				if (GUI.CurrentSaveBank < 0)
@@ -998,8 +1007,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		}
 
 
-		if(wParam == CustomKeys.FrameAdvance.key
-		&& modifiers == CustomKeys.FrameAdvance.modifiers)
+		if(HKmatch(FrameAdvance))
 		{
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			if (RA_IsHardcoreModeActive())
@@ -1037,8 +1045,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			hitHotKey = true;
 			}
 		}
-		if(wParam == CustomKeys.FrameCount.key
-		&& modifiers == CustomKeys.FrameCount.modifiers)
+		if(HKmatch(FrameCount))
 		{
 			if (S9xMovieActive()
 #ifdef NETPLAY_SUPPORT
@@ -1050,8 +1057,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				S9xMessage(S9X_INFO, S9X_MOVIE_INFO, MOVIE_ERR_NOFRAMETOGGLE);
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.Pause.key
-		&& modifiers == CustomKeys.Pause.modifiers)
+		if(HKmatch(Pause))
 		{
 			Settings.Paused = Settings.Paused ^ true;
 			Settings.FrameAdvance = false;
@@ -1061,8 +1067,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				S9xMouseOn();
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.ReadOnly.key
-		&& modifiers == CustomKeys.ReadOnly.modifiers)
+		if(HKmatch(ReadOnly))
 		{
 			if (S9xMovieActive())
 				S9xMovieToggleRecState();
@@ -1070,8 +1075,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				S9xMessage(S9X_INFO, S9X_MOVIE_INFO, MOVIE_ERR_NOREADONLYTOGGLE);
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.FastForward.key
-		&& modifiers == CustomKeys.FastForward.modifiers)
+		if(HKmatch(FastForward))
 		{
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			if (!RA_IsHardcoreModeActive())
@@ -1083,8 +1087,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			}
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.FastForwardToggle.key
-		&& modifiers == CustomKeys.FastForwardToggle.modifiers)
+		if(HKmatch(FastForwardToggle))
 		{
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			if (!RA_IsHardcoreModeActive())
@@ -1100,8 +1103,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			}
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.ShowPressed.key
-		&& modifiers == CustomKeys.ShowPressed.modifiers)
+		if(HKmatch(ShowPressed))
 		{
 			Settings.DisplayPressedKeys = Settings.DisplayPressedKeys?0:2;
 
@@ -1112,25 +1114,21 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.SaveScreenShot.key
-		&& modifiers == CustomKeys.SaveScreenShot.modifiers)
+		if(HKmatch(SaveScreenShot))
 		{
 			Settings.TakeScreenshot=true;
 		}
-		if(wParam == CustomKeys.ScopePause.key
-		&& modifiers == CustomKeys.ScopePause.modifiers)
+		if(HKmatch(ScopePause))
 		{
 			GUI.superscope_pause = 1;
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.ScopeTurbo.key
-		&& modifiers == CustomKeys.ScopeTurbo.modifiers)
+		if(HKmatch(ScopeTurbo))
 		{
 			GUI.superscope_turbo = 1;
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.SkipDown.key
-		&& modifiers == CustomKeys.SkipDown.modifiers)
+		if(HKmatch(SkipDown))
 		{
 			if (Settings.SkipFrames <= 1)
 				Settings.SkipFrames = AUTO_FRAMERATE;
@@ -1148,8 +1146,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				}
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.SkipUp.key
-		&& modifiers == CustomKeys.SkipUp.modifiers)
+		if(HKmatch(SkipUp))
 		{
 			if (Settings.SkipFrames == AUTO_FRAMERATE)
 				Settings.SkipFrames = 1;
@@ -1167,8 +1164,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				}
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.SpeedDown.key
-		&& modifiers == CustomKeys.SpeedDown.modifiers)
+		if(HKmatch(SpeedDown))
 		{
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			if (!RA_IsHardcoreModeActive())
@@ -1185,8 +1181,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			}
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.SpeedUp.key
-		&& modifiers == CustomKeys.SpeedUp.modifiers)
+		if(HKmatch(SpeedUp))
 		{
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			if (!RA_IsHardcoreModeActive())
@@ -1204,56 +1199,47 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			}
 			hitHotKey = true;
 		}
-		if(wParam == CustomKeys.BGL1.key
-		&& modifiers == CustomKeys.BGL1.modifiers)
+		if(HKmatch(BGL1))
 		{
 			Settings.BG_Forced ^= 1;
 			S9xDisplayStateChange (WINPROC_BG1, !(Settings.BG_Forced & 1));
 		}
-		if(wParam == CustomKeys.BGL2.key
-		&& modifiers == CustomKeys.BGL2.modifiers)
+		if(HKmatch(BGL2))
 		{
 			Settings.BG_Forced ^= 2;
 			S9xDisplayStateChange (WINPROC_BG2, !(Settings.BG_Forced & 2));
 		}
-		if(wParam == CustomKeys.BGL3.key
-		&& modifiers == CustomKeys.BGL3.modifiers)
+		if(HKmatch(BGL3))
 		{
 			Settings.BG_Forced ^= 4;
 			S9xDisplayStateChange (WINPROC_BG3, !(Settings.BG_Forced & 4));
 		}
-		if(wParam == CustomKeys.BGL4.key
-		&& modifiers == CustomKeys.BGL4.modifiers)
+		if(HKmatch(BGL4))
 		{
 			Settings.BG_Forced ^= 8;
 			S9xDisplayStateChange (WINPROC_BG4, !(Settings.BG_Forced & 8));
 		}
-		if(wParam == CustomKeys.BGL5.key
-		&& modifiers == CustomKeys.BGL5.modifiers)
+		if(HKmatch(BGL5))
 		{
 			Settings.BG_Forced ^= 16;
 			S9xDisplayStateChange (WINPROC_SPRITES, !(Settings.BG_Forced & 16));
 		}
-		if(wParam == CustomKeys.ResetGame.key
-		&& modifiers == CustomKeys.ResetGame.modifiers)
+		if(HKmatch(ResetGame))
 		{
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_FILE_RESET),(LPARAM)(NULL));
 		}
-		if(wParam == CustomKeys.ToggleCheats.key
-		&& modifiers == CustomKeys.ToggleCheats.modifiers)
+		if(HKmatch(ToggleCheats))
 		{
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_CHEAT_APPLY),(LPARAM)(NULL));
 		}
-		if(wParam == CustomKeys.JoypadSwap.key
-		&& modifiers == CustomKeys.JoypadSwap.modifiers)
+		if(HKmatch(JoypadSwap))
 		{
 			if(!S9xMoviePlaying())
 			{
 				S9xApplyCommand(S9xGetCommandT("SwapJoypads"),1,0);
 			}
 		}
-		if(wParam == CustomKeys.SwitchControllers.key
-		&& modifiers == CustomKeys.SwitchControllers.modifiers)
+		if(HKmatch(SwitchControllers))
 		{
 			if((!S9xMovieActive() || !S9xMovieGetFrameCounter()))
 			{
@@ -1270,13 +1256,11 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				S9xReportControllers();
 			}
 		}
-		if(wParam == CustomKeys.QuitS9X.key
-		&& modifiers == CustomKeys.QuitS9X.modifiers)
+		if(HKmatch(QuitS9X))
 		{
 			PostMessage(GUI.hWnd,WM_CLOSE,(WPARAM)NULL,(LPARAM)(NULL));
 		}
-        if(wParam == CustomKeys.Rewind.key
-		&& modifiers == CustomKeys.Rewind.modifiers)
+        if(HKmatch(Rewind))
 		{
             if(!Settings.Rewinding)
                 S9xMessage (S9X_INFO, 0, GUI.rewindBufferSize?WINPROC_REWINDING_TEXT:WINPROC_REWINDING_DISABLED);
@@ -1284,35 +1268,31 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			hitHotKey = true;
         }
 
-		if (wParam == CustomKeys.SaveFileSelect.key
-			&& modifiers == CustomKeys.SaveFileSelect.modifiers)
+		if(HKmatch(SaveFileSelect))
 		{
 			FreezeUnfreezeDialog(TRUE);
 			hitHotKey = true;
 		}
-		if (wParam == CustomKeys.LoadFileSelect.key
-			&& modifiers == CustomKeys.LoadFileSelect.modifiers)
+		if(HKmatch(LoadFileSelect))
 		{
 			FreezeUnfreezeDialog(FALSE);
 			hitHotKey = true;
 		}
 
-		if (wParam == CustomKeys.Mute.key
-			&& modifiers == CustomKeys.Mute.modifiers)
+		if(HKmatch(Mute))
 		{
 			GUI.Mute = !GUI.Mute;
 			hitHotKey = true;
 		}
 
-		if (wParam == CustomKeys.ToggleBackdrop.key && modifiers == CustomKeys.ToggleBackdrop.modifiers)
+		if(HKmatch(ToggleBackdrop))
 		{
 			auto cmd = S9xGetCommandT("ToggleBackdrop");
 			S9xApplyCommand(cmd, 1, 0);
             hitHotKey = true;
 		}
 
-        if (wParam == CustomKeys.AspectRatio.key
-            && modifiers == CustomKeys.AspectRatio.modifiers)
+        if(HKmatch(AspectRatio))
         {
             if (GUI.AspectWidth == ASPECT_WIDTH_4_3)
             {
@@ -1324,8 +1304,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             }
             hitHotKey = true;
         }
-        if (wParam == CustomKeys.CheatEditorDialog.key
-            && modifiers == CustomKeys.CheatEditorDialog.modifiers)
+        if(HKmatch(CheatEditorDialog))
         {
             // update menu state
             CheckMenuStates();
@@ -1340,8 +1319,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             }
             hitHotKey = true;
         }
-        if (wParam == CustomKeys.CheatSearchDialog.key
-            && modifiers == CustomKeys.CheatSearchDialog.modifiers)
+        if(HKmatch(CheatSearchDialog))
         {
             // update menu state
             CheckMenuStates();
@@ -1372,34 +1350,34 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		//		Settings.Mode7Interpolate);
 		//}
 
-		if(wParam == CustomKeys.TurboA.key && modifiers == CustomKeys.TurboA.modifiers)
+		if(HKmatch(TurboA))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_A),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboB.key && modifiers == CustomKeys.TurboB.modifiers)
+		if(HKmatch(TurboB))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_B),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboY.key && modifiers == CustomKeys.TurboY.modifiers)
+		if(HKmatch(TurboY))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_Y),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboX.key && modifiers == CustomKeys.TurboX.modifiers)
+		if(HKmatch(TurboX))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_X),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboL.key && modifiers == CustomKeys.TurboL.modifiers)
+		if(HKmatch(TurboL))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_L),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboR.key && modifiers == CustomKeys.TurboR.modifiers)
+		if(HKmatch(TurboR))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_R),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboStart.key && modifiers == CustomKeys.TurboStart.modifiers)
+		if(HKmatch(TurboStart))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_START),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboSelect.key && modifiers == CustomKeys.TurboSelect.modifiers)
+		if(HKmatch(TurboSelect))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_SELECT),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboLeft.key && modifiers == CustomKeys.TurboLeft.modifiers)
+		if(HKmatch(TurboLeft))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_LEFT),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboUp.key && modifiers == CustomKeys.TurboUp.modifiers)
+		if(HKmatch(TurboUp))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_UP),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboRight.key && modifiers == CustomKeys.TurboRight.modifiers)
+		if(HKmatch(TurboRight))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_RIGHT),(LPARAM)(NULL));
-		if(wParam == CustomKeys.TurboDown.key && modifiers == CustomKeys.TurboDown.modifiers)
+		if(HKmatch(TurboDown))
 			PostMessage(GUI.hWnd, WM_COMMAND, (WPARAM)(ID_TURBO_DOWN),(LPARAM)(NULL));
 
 		for(int i = 0 ; i < SAVE_SLOTS_PER_BANK; i++)
 		{
-			if(wParam == CustomKeys.SelectSave[i].key && modifiers == CustomKeys.SelectSave[i].modifiers)
+			if(MatchesHotkeyBinding(wParam, modifiers, &CustomKeys.SelectSave[i], &CustomKeysExtra.SelectSave[i]))
 			{
 				GUI.CurrentSaveSlot = GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + i;
 
@@ -1409,8 +1387,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			}
 		}
 
-		if(wParam == CustomKeys.Transparency.key
-		&& modifiers == CustomKeys.Transparency.modifiers)
+		if(HKmatch(Transparency))
 		{
 //					if (Settings.SixteenBit)
 			{
@@ -1423,8 +1400,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 //						S9xSetInfoString ("Transparency requires Sixteen Bit mode.");
 //					}
 		}
-		if(wParam == CustomKeys.ClippingWindows.key
-		&& modifiers == CustomKeys.ClippingWindows.modifiers)
+		if(HKmatch(ClippingWindows))
 		{
 			Settings.DisableGraphicWindows = !Settings.DisableGraphicWindows;
 			S9xDisplayStateChange (WINPROC_CLIPWIN,
@@ -1697,18 +1673,15 @@ LRESULT CALLBACK WinProc(
 			if(GetAsyncKeyState(VK_SHIFT)|| wParam == VK_SHIFT)
 				modifiers |= CUSTKEY_SHIFT_MASK;
 
-			if(wParam == CustomKeys.FastForward.key
-			&& modifiers == CustomKeys.FastForward.modifiers)
+			if(HKmatch(FastForward))
 			{
 				Settings.TurboMode = FALSE;
 			}
-			if(wParam == CustomKeys.ScopePause.key
-			&& modifiers == CustomKeys.ScopePause.modifiers)
+			if(HKmatch(ScopePause))
 			{
 				GUI.superscope_pause = 0;
 			}
-            if(wParam == CustomKeys.Rewind.key
-		    && modifiers == CustomKeys.Rewind.modifiers)
+            if(HKmatch(Rewind))
 		    {
                 Settings.Rewinding = false;
             }
@@ -9577,6 +9550,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 struct hotkey_dialog_item {
     SCustomKey *key_entry;
+    SCustomKeyExtra *extra_entry;
     TCHAR *description;
 };
 
@@ -9584,86 +9558,128 @@ struct hotkey_dialog_item {
 // to keep an entry blank, set the SCustomKey pointer to NULL and the text to an empty string
 static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES][MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
     {
-        { &CustomKeys.SpeedUp, HOTKEYS_LABEL_1_1 },
-        { &CustomKeys.SpeedDown, HOTKEYS_LABEL_1_2 },
-        { &CustomKeys.Pause, HOTKEYS_LABEL_1_3 },
-        { &CustomKeys.FastForwardToggle, HOTKEYS_LABEL_1_4 },
-        { &CustomKeys.FastForward, HOTKEYS_LABEL_1_5 },
-        { &CustomKeys.Rewind, HOTKEYS_LABEL_1_6 },
-        { &CustomKeys.SkipUp, HOTKEYS_LABEL_1_7 },
-        { &CustomKeys.SkipDown, HOTKEYS_LABEL_1_8 },
-        { &CustomKeys.Mute, HOTKEYS_LABEL_1_9 },
-        { &CustomKeys.ToggleCheats, HOTKEYS_LABEL_1_10 },
-        { &CustomKeys.QuitS9X, HOTKEYS_LABEL_1_11 },
-        { &CustomKeys.ResetGame, HOTKEYS_LABEL_1_12 },
-        { &CustomKeys.SaveScreenShot, HOTKEYS_LABEL_1_13 },
-		{ &CustomKeys.FrameAdvance, HOTKEYS_LABEL_1_14 },
+        { &CustomKeys.SpeedUp, &CustomKeysExtra.SpeedUp, HOTKEYS_LABEL_1_1 },
+        { &CustomKeys.SpeedDown, &CustomKeysExtra.SpeedDown, HOTKEYS_LABEL_1_2 },
+        { &CustomKeys.Pause, &CustomKeysExtra.Pause, HOTKEYS_LABEL_1_3 },
+        { &CustomKeys.FastForwardToggle, &CustomKeysExtra.FastForwardToggle, HOTKEYS_LABEL_1_4 },
+        { &CustomKeys.FastForward, &CustomKeysExtra.FastForward, HOTKEYS_LABEL_1_5 },
+        { &CustomKeys.Rewind, &CustomKeysExtra.Rewind, HOTKEYS_LABEL_1_6 },
+        { &CustomKeys.SkipUp, &CustomKeysExtra.SkipUp, HOTKEYS_LABEL_1_7 },
+        { &CustomKeys.SkipDown, &CustomKeysExtra.SkipDown, HOTKEYS_LABEL_1_8 },
+        { &CustomKeys.Mute, &CustomKeysExtra.Mute, HOTKEYS_LABEL_1_9 },
+        { &CustomKeys.ToggleCheats, &CustomKeysExtra.ToggleCheats, HOTKEYS_LABEL_1_10 },
+        { &CustomKeys.QuitS9X, &CustomKeysExtra.QuitS9X, HOTKEYS_LABEL_1_11 },
+        { &CustomKeys.ResetGame, &CustomKeysExtra.ResetGame, HOTKEYS_LABEL_1_12 },
+        { &CustomKeys.SaveScreenShot, &CustomKeysExtra.SaveScreenShot, HOTKEYS_LABEL_1_13 },
+		{ &CustomKeys.FrameAdvance, &CustomKeysExtra.FrameAdvance, HOTKEYS_LABEL_1_14 },
     },
     {
-        { &CustomKeys.BGL1, HOTKEYS_LABEL_2_1 },
-        { &CustomKeys.BGL2, HOTKEYS_LABEL_2_2 },
-        { &CustomKeys.BGL3, HOTKEYS_LABEL_2_3 },
-        { &CustomKeys.BGL4, HOTKEYS_LABEL_2_4 },
-        { &CustomKeys.BGL5, HOTKEYS_LABEL_2_5 },
-        { &CustomKeys.ClippingWindows, HOTKEYS_LABEL_2_6 },
-        { &CustomKeys.Transparency, HOTKEYS_LABEL_2_7 },
-		{ &CustomKeys.ToggleBackdrop, HOTKEYS_LABEL_2_8 },
-        { &CustomKeys.ScopePause, HOTKEYS_LABEL_2_9 },
-        { &CustomKeys.SwitchControllers, HOTKEYS_LABEL_2_10 },
-        { &CustomKeys.JoypadSwap, HOTKEYS_LABEL_2_11 },
-        { &CustomKeys.ShowPressed, HOTKEYS_LABEL_2_12 },
-        { &CustomKeys.FrameCount, HOTKEYS_LABEL_2_13 },
-		{ &CustomKeys.ReadOnly, HOTKEYS_LABEL_2_14 },
+        { &CustomKeys.BGL1, &CustomKeysExtra.BGL1, HOTKEYS_LABEL_2_1 },
+        { &CustomKeys.BGL2, &CustomKeysExtra.BGL2, HOTKEYS_LABEL_2_2 },
+        { &CustomKeys.BGL3, &CustomKeysExtra.BGL3, HOTKEYS_LABEL_2_3 },
+        { &CustomKeys.BGL4, &CustomKeysExtra.BGL4, HOTKEYS_LABEL_2_4 },
+        { &CustomKeys.BGL5, &CustomKeysExtra.BGL5, HOTKEYS_LABEL_2_5 },
+        { &CustomKeys.ClippingWindows, &CustomKeysExtra.ClippingWindows, HOTKEYS_LABEL_2_6 },
+        { &CustomKeys.Transparency, &CustomKeysExtra.Transparency, HOTKEYS_LABEL_2_7 },
+		{ &CustomKeys.ToggleBackdrop, &CustomKeysExtra.ToggleBackdrop, HOTKEYS_LABEL_2_8 },
+        { &CustomKeys.ScopePause, &CustomKeysExtra.ScopePause, HOTKEYS_LABEL_2_9 },
+        { &CustomKeys.SwitchControllers, &CustomKeysExtra.SwitchControllers, HOTKEYS_LABEL_2_10 },
+        { &CustomKeys.JoypadSwap, &CustomKeysExtra.JoypadSwap, HOTKEYS_LABEL_2_11 },
+        { &CustomKeys.ShowPressed, &CustomKeysExtra.ShowPressed, HOTKEYS_LABEL_2_12 },
+        { &CustomKeys.FrameCount, &CustomKeysExtra.FrameCount, HOTKEYS_LABEL_2_13 },
+		{ &CustomKeys.ReadOnly, &CustomKeysExtra.ReadOnly, HOTKEYS_LABEL_2_14 },
     },
     {
-        { &CustomKeys.TurboA, HOTKEYS_LABEL_3_1 },
-        { &CustomKeys.TurboB, HOTKEYS_LABEL_3_2 },
-        { &CustomKeys.TurboY, HOTKEYS_LABEL_3_3 },
-        { &CustomKeys.TurboX, HOTKEYS_LABEL_3_4 },
-        { &CustomKeys.TurboL, HOTKEYS_LABEL_3_5 },
-        { &CustomKeys.TurboR, HOTKEYS_LABEL_3_6 },
-        { &CustomKeys.TurboStart, HOTKEYS_LABEL_3_7 },
-        { &CustomKeys.TurboSelect, HOTKEYS_LABEL_3_8 },
-        { &CustomKeys.TurboLeft, HOTKEYS_LABEL_3_9 },
-        { &CustomKeys.TurboUp, HOTKEYS_LABEL_3_10 },
-        { &CustomKeys.TurboRight, HOTKEYS_LABEL_3_11 },
-        { &CustomKeys.TurboDown, HOTKEYS_LABEL_3_12 },
-		{ &CustomKeys.ScopeTurbo, HOTKEYS_LABEL_3_13 },
-		{ NULL, _T("") },
+        { &CustomKeys.TurboA, &CustomKeysExtra.TurboA, HOTKEYS_LABEL_3_1 },
+        { &CustomKeys.TurboB, &CustomKeysExtra.TurboB, HOTKEYS_LABEL_3_2 },
+        { &CustomKeys.TurboY, &CustomKeysExtra.TurboY, HOTKEYS_LABEL_3_3 },
+        { &CustomKeys.TurboX, &CustomKeysExtra.TurboX, HOTKEYS_LABEL_3_4 },
+        { &CustomKeys.TurboL, &CustomKeysExtra.TurboL, HOTKEYS_LABEL_3_5 },
+        { &CustomKeys.TurboR, &CustomKeysExtra.TurboR, HOTKEYS_LABEL_3_6 },
+        { &CustomKeys.TurboStart, &CustomKeysExtra.TurboStart, HOTKEYS_LABEL_3_7 },
+        { &CustomKeys.TurboSelect, &CustomKeysExtra.TurboSelect, HOTKEYS_LABEL_3_8 },
+        { &CustomKeys.TurboLeft, &CustomKeysExtra.TurboLeft, HOTKEYS_LABEL_3_9 },
+        { &CustomKeys.TurboUp, &CustomKeysExtra.TurboUp, HOTKEYS_LABEL_3_10 },
+        { &CustomKeys.TurboRight, &CustomKeysExtra.TurboRight, HOTKEYS_LABEL_3_11 },
+        { &CustomKeys.TurboDown, &CustomKeysExtra.TurboDown, HOTKEYS_LABEL_3_12 },
+		{ &CustomKeys.ScopeTurbo, &CustomKeysExtra.ScopeTurbo, HOTKEYS_LABEL_3_13 },
+		{ NULL, NULL, _T("") },
     },
     {
-        { &CustomKeys.SelectSave[0], HOTKEYS_LABEL_4_1 },
-        { &CustomKeys.SelectSave[1], HOTKEYS_LABEL_4_2 },
-        { &CustomKeys.SelectSave[2], HOTKEYS_LABEL_4_3 },
-        { &CustomKeys.SelectSave[3], HOTKEYS_LABEL_4_4 },
-        { &CustomKeys.SelectSave[4], HOTKEYS_LABEL_4_5 },
-        { &CustomKeys.SelectSave[5], HOTKEYS_LABEL_4_6 },
-        { &CustomKeys.SelectSave[6], HOTKEYS_LABEL_4_7 },
-        { &CustomKeys.SelectSave[7], HOTKEYS_LABEL_4_8 },
-        { &CustomKeys.SelectSave[8], HOTKEYS_LABEL_4_9 },
-        { &CustomKeys.SelectSave[9], HOTKEYS_LABEL_4_10 },
-        { &CustomKeys.SaveFileSelect, HOTKEYS_LABEL_4_11 },
-        { &CustomKeys.LoadFileSelect, HOTKEYS_LABEL_4_12 },
-		{ NULL, _T("") },
-		{ NULL, _T("") },
+        { &CustomKeys.SelectSave[0], &CustomKeysExtra.SelectSave[0], HOTKEYS_LABEL_4_1 },
+        { &CustomKeys.SelectSave[1], &CustomKeysExtra.SelectSave[1], HOTKEYS_LABEL_4_2 },
+        { &CustomKeys.SelectSave[2], &CustomKeysExtra.SelectSave[2], HOTKEYS_LABEL_4_3 },
+        { &CustomKeys.SelectSave[3], &CustomKeysExtra.SelectSave[3], HOTKEYS_LABEL_4_4 },
+        { &CustomKeys.SelectSave[4], &CustomKeysExtra.SelectSave[4], HOTKEYS_LABEL_4_5 },
+        { &CustomKeys.SelectSave[5], &CustomKeysExtra.SelectSave[5], HOTKEYS_LABEL_4_6 },
+        { &CustomKeys.SelectSave[6], &CustomKeysExtra.SelectSave[6], HOTKEYS_LABEL_4_7 },
+        { &CustomKeys.SelectSave[7], &CustomKeysExtra.SelectSave[7], HOTKEYS_LABEL_4_8 },
+        { &CustomKeys.SelectSave[8], &CustomKeysExtra.SelectSave[8], HOTKEYS_LABEL_4_9 },
+        { &CustomKeys.SelectSave[9], &CustomKeysExtra.SelectSave[9], HOTKEYS_LABEL_4_10 },
+        { &CustomKeys.SaveFileSelect, &CustomKeysExtra.SaveFileSelect, HOTKEYS_LABEL_4_11 },
+        { &CustomKeys.LoadFileSelect, &CustomKeysExtra.LoadFileSelect, HOTKEYS_LABEL_4_12 },
+		{ NULL, NULL, _T("") },
+		{ NULL, NULL, _T("") },
     },
     {
-        { &CustomKeys.AspectRatio, HOTKEYS_SWITCH_ASPECT_RATIO },
-        { &CustomKeys.CheatEditorDialog, HOTKEYS_CHEAT_EDITOR_DIALOG },
-        { &CustomKeys.CheatSearchDialog, HOTKEYS_CHEAT_SEARCH_DIALOG },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
-        { NULL, _T("") },
+        { &CustomKeys.AspectRatio, &CustomKeysExtra.AspectRatio, HOTKEYS_SWITCH_ASPECT_RATIO },
+        { &CustomKeys.CheatEditorDialog, &CustomKeysExtra.CheatEditorDialog, HOTKEYS_CHEAT_EDITOR_DIALOG },
+        { &CustomKeys.CheatSearchDialog, &CustomKeysExtra.CheatSearchDialog, HOTKEYS_CHEAT_SEARCH_DIALOG },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
     },
 };
+
+// Helper: build a SCustomKey[MAX_BIND_KEYS] array from primary + extra, then send to control
+static void SendMultiBindHotkeyToControl(HWND hDlg, int idc, SCustomKey *primary, SCustomKeyExtra *extra)
+{
+	SCustomKey hkeys[MAX_BIND_KEYS];
+	hkeys[0] = *primary;
+	for (int i = 0; i < MAX_EXTRA_BINDS; i++)
+		hkeys[1 + i] = extra->extra[i];
+	SendDlgItemMessage(hDlg, idc, WM_USER+44, (WPARAM)hkeys, -MAX_BIND_KEYS);
+}
+
+// Helper: set maxKeys on all InputCustomHot controls in the hotkey dialog
+static void SetHotkeyMaxKeys(HWND hDlg, int maxKeys)
+{
+	for (int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)
+		SendDlgItemMessage(hDlg, IDC_HOTKEY1 + i, WM_USER+47, maxKeys, 0);
+
+	static const int fixedControls[] = {
+		IDC_SLOTPLUS, IDC_SLOTMINUS, IDC_SLOTSAVE, IDC_SLOTLOAD,
+		IDC_DIALOGSAVE, IDC_DIALOGLOAD, IDC_BANKPLUS, IDC_BANKMINUS
+	};
+	for (int i = 0; i < sizeof(fixedControls)/sizeof(fixedControls[0]); i++)
+		SendDlgItemMessage(hDlg, fixedControls[i], WM_USER+47, maxKeys, 0);
+
+	for (int i = 0; i < SAVE_SLOTS_PER_BANK; i++) {
+		SendDlgItemMessage(hDlg, IDC_SAVE1+i, WM_USER+47, maxKeys, 0);
+		SendDlgItemMessage(hDlg, IDC_SAVE11+i, WM_USER+47, maxKeys, 0);
+	}
+}
+
+static void set_hotkeyinfo(HWND hDlg); // forward declaration
+
+// Helper: update hotkey binding mode UI
+static void UpdateHotkeyBindingMode(HWND hDlg)
+{
+	int bindMode = SendDlgItemMessage(hDlg, IDC_BINDINGCOMBO_HK, CB_GETCURSEL, 0, 0);
+	bool isMulti = (bindMode == 1);
+	ShowWindow(GetDlgItem(hDlg, IDC_ALLOWMULTIBIND_HK), isMulti ? SW_SHOW : SW_HIDE);
+	int maxKeys = (isMulti && IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND_HK)) ? MAX_BIND_KEYS : 1;
+	SetHotkeyMaxKeys(hDlg, maxKeys);
+	set_hotkeyinfo(hDlg);
+}
 
 static void set_hotkeyinfo(HWND hDlg)
 {
@@ -9677,26 +9693,27 @@ static void set_hotkeyinfo(HWND hDlg)
         ShowWindow(GetDlgItem(hDlg, IDC_HOTKEY1 + i), flags);
         ShowWindow(GetDlgItem(hDlg, IDC_LABEL_HK1 + i), flags);
 
-        int wParam = 0, lParam = 0;
         if (hotkey_dialog_items[index][i].key_entry)
         {
-            wParam = hotkey_dialog_items[index][i].key_entry->key;
-            lParam = hotkey_dialog_items[index][i].key_entry->modifiers;
+            SendMultiBindHotkeyToControl(hDlg, IDC_HOTKEY1 + i, hotkey_dialog_items[index][i].key_entry, hotkey_dialog_items[index][i].extra_entry);
         }
-        SendDlgItemMessage(hDlg, IDC_HOTKEY1 + i, WM_USER + 44, wParam, lParam);
+        else
+        {
+            SendDlgItemMessage(hDlg, IDC_HOTKEY1 + i, WM_USER + 44, 0, 0);
+        }
     }
 
-	SendDlgItemMessage(hDlg,IDC_SLOTPLUS,WM_USER+44,CustomKeys.SlotPlus.key,CustomKeys.SlotPlus.modifiers);
-	SendDlgItemMessage(hDlg,IDC_SLOTMINUS,WM_USER+44,CustomKeys.SlotMinus.key,CustomKeys.SlotMinus.modifiers);
-	SendDlgItemMessage(hDlg,IDC_SLOTSAVE,WM_USER+44,CustomKeys.SlotSave.key,CustomKeys.SlotSave.modifiers);
-	SendDlgItemMessage(hDlg,IDC_SLOTLOAD,WM_USER+44,CustomKeys.SlotLoad.key,CustomKeys.SlotLoad.modifiers);
-    SendDlgItemMessage(hDlg, IDC_DIALOGSAVE, WM_USER + 44, CustomKeys.DialogSave.key, CustomKeys.DialogSave.modifiers);
-    SendDlgItemMessage(hDlg, IDC_DIALOGLOAD, WM_USER + 44, CustomKeys.DialogLoad.key, CustomKeys.DialogLoad.modifiers);
-	SendDlgItemMessage(hDlg, IDC_BANKPLUS, WM_USER + 44, CustomKeys.BankPlus.key, CustomKeys.BankPlus.modifiers);
-	SendDlgItemMessage(hDlg, IDC_BANKMINUS, WM_USER + 44, CustomKeys.BankMinus.key, CustomKeys.BankMinus.modifiers);
+	SendMultiBindHotkeyToControl(hDlg,IDC_SLOTPLUS,&CustomKeys.SlotPlus,&CustomKeysExtra.SlotPlus);
+	SendMultiBindHotkeyToControl(hDlg,IDC_SLOTMINUS,&CustomKeys.SlotMinus,&CustomKeysExtra.SlotMinus);
+	SendMultiBindHotkeyToControl(hDlg,IDC_SLOTSAVE,&CustomKeys.SlotSave,&CustomKeysExtra.SlotSave);
+	SendMultiBindHotkeyToControl(hDlg,IDC_SLOTLOAD,&CustomKeys.SlotLoad,&CustomKeysExtra.SlotLoad);
+	SendMultiBindHotkeyToControl(hDlg,IDC_DIALOGSAVE,&CustomKeys.DialogSave,&CustomKeysExtra.DialogSave);
+	SendMultiBindHotkeyToControl(hDlg,IDC_DIALOGLOAD,&CustomKeys.DialogLoad,&CustomKeysExtra.DialogLoad);
+	SendMultiBindHotkeyToControl(hDlg,IDC_BANKPLUS,&CustomKeys.BankPlus,&CustomKeysExtra.BankPlus);
+	SendMultiBindHotkeyToControl(hDlg,IDC_BANKMINUS,&CustomKeys.BankMinus,&CustomKeysExtra.BankMinus);
 	int i;
-	for(i = 0 ; i < SAVE_SLOTS_PER_BANK; i++) SendDlgItemMessage(hDlg,IDC_SAVE1+i,WM_USER+44,CustomKeys.Save[i].key,CustomKeys.Save[i].modifiers);
-	for(i = 0 ; i < SAVE_SLOTS_PER_BANK; i++) SendDlgItemMessage(hDlg,IDC_SAVE11+i,WM_USER+44,CustomKeys.Load[i].key,CustomKeys.Load[i].modifiers);
+	for(i = 0 ; i < SAVE_SLOTS_PER_BANK; i++) SendMultiBindHotkeyToControl(hDlg,IDC_SAVE1+i,&CustomKeys.Save[i],&CustomKeysExtra.Save[i]);
+	for(i = 0 ; i < SAVE_SLOTS_PER_BANK; i++) SendMultiBindHotkeyToControl(hDlg,IDC_SAVE11+i,&CustomKeys.Load[i],&CustomKeysExtra.Load[i]);
 
     for(int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)
     {
@@ -9712,6 +9729,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
 
 	static SCustomKeys keys;
+	static SCustomKeysExtra keysExtra;
 
 
 	//HBRUSH g_hbrBackground;
@@ -9733,10 +9751,19 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		SendDlgItemMessage(hDlg,IDC_HKCOMBO,CB_SETCURSEL,(WPARAM)0,0);
 
 		memcpy(&keys, &CustomKeys, sizeof(SCustomKeys));
+		memcpy(&keysExtra, &CustomKeysExtra, sizeof(SCustomKeysExtra));
 		for( i=0;i<256;i++)
 		{
 			GetAsyncKeyState(i);
 		}
+
+		// Initialize binding mode combobox
+		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO_HK,CB_ADDSTRING,0,(LPARAM)TEXT("Single"));
+		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO_HK,CB_ADDSTRING,0,(LPARAM)TEXT("Multi"));
+		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO_HK,CB_SETCURSEL, GUI.HotkeyMultiBindingMode ? 1 : 0, 0);
+		SendDlgItemMessage(hDlg,IDC_ALLOWMULTIBIND_HK,BM_SETCHECK, GUI.AllowMultipleHotkeyBindings ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
+		ShowWindow(GetDlgItem(hDlg, IDC_ALLOWMULTIBIND_HK), GUI.HotkeyMultiBindingMode ? SW_SHOW : SW_HIDE);
+		SetHotkeyMaxKeys(hDlg, GUI.HotkeyMultiBindingMode ? MAX_BIND_KEYS : 1);
 
 		SetDlgItemText(hDlg,IDC_LABEL_BLUE,HOTKEYS_LABEL_BLUE);
 
@@ -9759,83 +9786,78 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		return TRUE;
 	case WM_USER+43:
 	{
-		//MessageBox(hDlg,"USER+43 CAUGHT","moo",MB_OK);
-		int modifiers = 0;
-		if(GetAsyncKeyState(VK_MENU) || wParam == VK_MENU)
-			modifiers |= CUSTKEY_ALT_MASK;
-		if(GetAsyncKeyState(VK_CONTROL) || wParam == VK_CONTROL)
-			modifiers |= CUSTKEY_CTRL_MASK;
-		if(GetAsyncKeyState(VK_SHIFT) || wParam == VK_SHIFT)
-			modifiers |= CUSTKEY_SHIFT_MASK;
+		which = GetDlgCtrlID((HWND)lParam);
+		InputCust *icp = GetInputCustom((HWND)lParam);
+
+		// Helper macro: store multi-bind hotkeys from control into primary + extra
+		#define STORE_HOTKEY_MULTIBIND(idc, field) \
+			case idc: { \
+				CustomKeys.field.key = icp->numKeys > 0 ? icp->keys[0] : 0; \
+				CustomKeys.field.modifiers = icp->numKeys > 0 ? icp->mods[0] : 0; \
+				for(int _i = 0; _i < MAX_EXTRA_BINDS; _i++) { \
+					CustomKeysExtra.field.extra[_i].key = (_i+1) < icp->numKeys ? icp->keys[_i+1] : 0; \
+					CustomKeysExtra.field.extra[_i].modifiers = (_i+1) < icp->numKeys ? icp->mods[_i+1] : 0; \
+				} \
+				break; \
+			}
 
 		int index = SendDlgItemMessage(hDlg,IDC_HKCOMBO,CB_GETCURSEL,0,0);
 
-		which = GetDlgCtrlID((HWND)lParam);
-
 		switch(which)
 		{
-		case IDC_SLOTPLUS:
-			CustomKeys.SlotPlus.key = wParam;
-			CustomKeys.SlotPlus.modifiers = modifiers;
-			break;
-
-		case IDC_SLOTMINUS:
-			CustomKeys.SlotMinus.key = wParam;
-			CustomKeys.SlotMinus.modifiers = modifiers;
-			break;
-
-		case IDC_SLOTLOAD:
-			CustomKeys.SlotLoad.key = wParam;
-			CustomKeys.SlotLoad.modifiers = modifiers;
-			break;
-
-		case IDC_SLOTSAVE:
-			CustomKeys.SlotSave.key = wParam;
-			CustomKeys.SlotSave.modifiers = modifiers;
-			break;
-
-        case IDC_DIALOGSAVE:
-            CustomKeys.DialogSave.key = wParam;
-            CustomKeys.DialogSave.modifiers = modifiers;
-            break;
-
-        case IDC_DIALOGLOAD:
-            CustomKeys.DialogLoad.key = wParam;
-            CustomKeys.DialogLoad.modifiers = modifiers;
-            break;
-
-		case IDC_BANKPLUS:
-			CustomKeys.BankPlus.key = wParam;
-			CustomKeys.BankPlus.modifiers = modifiers;
-			break;
-
-		case IDC_BANKMINUS:
-			CustomKeys.BankMinus.key = wParam;
-			CustomKeys.BankMinus.modifiers = modifiers;
-			break;
+			STORE_HOTKEY_MULTIBIND(IDC_SLOTPLUS, SlotPlus)
+			STORE_HOTKEY_MULTIBIND(IDC_SLOTMINUS, SlotMinus)
+			STORE_HOTKEY_MULTIBIND(IDC_SLOTLOAD, SlotLoad)
+			STORE_HOTKEY_MULTIBIND(IDC_SLOTSAVE, SlotSave)
+			STORE_HOTKEY_MULTIBIND(IDC_DIALOGSAVE, DialogSave)
+			STORE_HOTKEY_MULTIBIND(IDC_DIALOGLOAD, DialogLoad)
+			STORE_HOTKEY_MULTIBIND(IDC_BANKPLUS, BankPlus)
+			STORE_HOTKEY_MULTIBIND(IDC_BANKMINUS, BankMinus)
 		}
 
         if(which >= IDC_HOTKEY1 && which <= IDC_HOTKEY14)
         {
             int offset = which - IDC_HOTKEY1;
-            hotkey_dialog_items[index][offset].key_entry->key = wParam;
-            hotkey_dialog_items[index][offset].key_entry->modifiers = modifiers;
+            SCustomKey *primary = hotkey_dialog_items[index][offset].key_entry;
+            SCustomKeyExtra *extra = hotkey_dialog_items[index][offset].extra_entry;
+            if (primary) {
+                primary->key = icp->numKeys > 0 ? icp->keys[0] : 0;
+                primary->modifiers = icp->numKeys > 0 ? icp->mods[0] : 0;
+                for(int _i = 0; _i < MAX_EXTRA_BINDS; _i++) {
+                    extra->extra[_i].key = (_i+1) < icp->numKeys ? icp->keys[_i+1] : 0;
+                    extra->extra[_i].modifiers = (_i+1) < icp->numKeys ? icp->mods[_i+1] : 0;
+                }
+            }
         }
 
 		if(which >= IDC_SAVE1 && which <= IDC_SAVE10)
 		{
-			CustomKeys.Save[which-IDC_SAVE1].key = wParam;
-			CustomKeys.Save[which-IDC_SAVE1].modifiers = modifiers;
+			int si = which-IDC_SAVE1;
+			CustomKeys.Save[si].key = icp->numKeys > 0 ? icp->keys[0] : 0;
+			CustomKeys.Save[si].modifiers = icp->numKeys > 0 ? icp->mods[0] : 0;
+			for(int _i = 0; _i < MAX_EXTRA_BINDS; _i++) {
+				CustomKeysExtra.Save[si].extra[_i].key = (_i+1) < icp->numKeys ? icp->keys[_i+1] : 0;
+				CustomKeysExtra.Save[si].extra[_i].modifiers = (_i+1) < icp->numKeys ? icp->mods[_i+1] : 0;
+			}
 		}
 		if(which >= IDC_SAVE11 && which <= IDC_SAVE20)
 		{
-			CustomKeys.Load[which-IDC_SAVE11].key = wParam;
-			CustomKeys.Load[which-IDC_SAVE11].modifiers = modifiers;
+			int li = which-IDC_SAVE11;
+			CustomKeys.Load[li].key = icp->numKeys > 0 ? icp->keys[0] : 0;
+			CustomKeys.Load[li].modifiers = icp->numKeys > 0 ? icp->mods[0] : 0;
+			for(int _i = 0; _i < MAX_EXTRA_BINDS; _i++) {
+				CustomKeysExtra.Load[li].extra[_i].key = (_i+1) < icp->numKeys ? icp->keys[_i+1] : 0;
+				CustomKeysExtra.Load[li].extra[_i].modifiers = (_i+1) < icp->numKeys ? icp->mods[_i+1] : 0;
+			}
 		}
 
+		#undef STORE_HOTKEY_MULTIBIND
+
 		set_hotkeyinfo(hDlg);
-		PostMessage(hDlg,WM_NEXTDLGCTL,0,0);
-//		PostMessage(hDlg,WM_KILLFOCUS,0,0);
+
+		// In single mode, auto-advance to next field
+		if(icp->maxKeys == 1)
+			PostMessage(hDlg,WM_NEXTDLGCTL,0,0);
 	}
 		return true;
 	case WM_COMMAND:
@@ -9843,16 +9865,29 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		{
 		case IDCANCEL:
 			memcpy(&CustomKeys, &keys, sizeof(SCustomKeys));
+			memcpy(&CustomKeysExtra, &keysExtra, sizeof(SCustomKeysExtra));
 			EndDialog(hDlg,0);
 			break;
 		case IDOK:
+			GUI.HotkeyMultiBindingMode = (SendDlgItemMessage(hDlg, IDC_BINDINGCOMBO_HK, CB_GETCURSEL, 0, 0) == 1);
+			GUI.AllowMultipleHotkeyBindings = GUI.HotkeyMultiBindingMode && (IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND_HK) != 0);
 			WinSaveConfigFile();
 			EndDialog(hDlg,0);
+			break;
+
+		case IDC_ALLOWMULTIBIND_HK:
+			UpdateHotkeyBindingMode(hDlg);
+			break;
+
+		case IDC_BINDINGCOMBO_HK:
+			if(HIWORD(wParam) == CBN_SELCHANGE)
+				UpdateHotkeyBindingMode(hDlg);
 			break;
 		}
 		switch(HIWORD(wParam))
 		{
 			case CBN_SELCHANGE:
+				if(LOWORD(wParam) != IDC_HKCOMBO) break;
 				index = SendDlgItemMessage(hDlg,IDC_HKCOMBO,CB_GETCURSEL,0,0);
 				SendDlgItemMessage(hDlg,IDC_HKCOMBO,CB_SETCURSEL,(WPARAM)index,0);
 

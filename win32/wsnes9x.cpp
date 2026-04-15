@@ -9585,10 +9585,36 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				if (testKey & 0x8000)
 					checkSlot = (testKey >> 8) & 0xF;
 
+				// Save old bindings before auto-assign overwrites them
+				SJoypad oldPad = Joypad[index];
+				SJoypadExtraBinds oldExtra = JoypadExtra[index];
+
 				if (SDLInput_AutoMapGamepad(checkSlot, Joypad[index]))
 				{
-					// Clear extra bindings since auto-assign sets primary only
-					memset(&JoypadExtra[index], 0, sizeof(SJoypadExtraBinds));
+					bool isMulti = GUI.MultiBindingMode && GUI.AllowMultipleBindings;
+
+					// Helper: for each button, preserve old keyboard bindings as extras
+					#define PRESERVE_KB(field) do { \
+						memset(JoypadExtra[index].field, 0, sizeof(JoypadExtra[index].field)); \
+						if (isMulti) { \
+							int slot = 0; \
+							/* Keep old primary if it was a keyboard binding */ \
+							if (oldPad.field != 0 && oldPad.field != VK_ESCAPE && !(oldPad.field & 0x8000) && slot < MAX_EXTRA_BINDS) \
+								JoypadExtra[index].field[slot++] = oldPad.field; \
+							/* Keep old extras that were keyboard bindings */ \
+							for (int _e = 0; _e < MAX_EXTRA_BINDS && slot < MAX_EXTRA_BINDS; _e++) \
+								if (oldExtra.field[_e] != 0 && oldExtra.field[_e] != VK_ESCAPE && !(oldExtra.field[_e] & 0x8000)) \
+									JoypadExtra[index].field[slot++] = oldExtra.field[_e]; \
+						} \
+					} while(0)
+
+					PRESERVE_KB(Up); PRESERVE_KB(Down); PRESERVE_KB(Left); PRESERVE_KB(Right);
+					PRESERVE_KB(A); PRESERVE_KB(B); PRESERVE_KB(X); PRESERVE_KB(Y);
+					PRESERVE_KB(L); PRESERVE_KB(R); PRESERVE_KB(Start); PRESERVE_KB(Select);
+					PRESERVE_KB(Left_Up); PRESERVE_KB(Left_Down);
+					PRESERVE_KB(Right_Up); PRESERVE_KB(Right_Down);
+					#undef PRESERVE_KB
+
 					set_buttoninfo(index, hDlg);
 					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK,(WPARAM)BST_CHECKED,0);
 				}

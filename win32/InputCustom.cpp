@@ -590,7 +590,6 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
 	// retrieve the custom structure POINTER for THIS window
     InputCust *icp = GetInputCustom(hwnd);
 	HWND pappy = (HWND__ *)GetWindowLongPtr(hwnd,GWLP_HWNDPARENT);
-	funky= hwnd;
 
 	static HWND selectedItem = NULL;
 
@@ -702,8 +701,20 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
         }
 
         // Update display with all bindings
-        TranslateMultiKey(icp->keys, icp->numKeys, temp);
-        col = icp->numKeys > 0 ? CheckButtonKey(icp->keys[0]) : RGB(255,255,255);
+        if (icp->maxKeys > 1) {
+            // Multi mode: stay green to indicate more keys can be added
+            if (icp->numKeys > 0) {
+                TranslateMultiKey(icp->keys, icp->numKeys, temp);
+                if (icp->numKeys < icp->maxKeys)
+                    strcat(temp, ", ...");
+            } else {
+                strcpy(temp, "...");
+            }
+            col = RGB(0, 255, 0);
+        } else {
+            TranslateMultiKey(icp->keys, icp->numKeys, temp);
+            col = icp->numKeys > 0 ? CheckButtonKey(icp->keys[0]) : RGB(255,255,255);
+        }
 
         icp->crForeGnd = ((~col) & 0x00ffffff);
         icp->crBackGnd = col;
@@ -810,6 +821,7 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
 	case WM_TIMER:
 		if(hwnd == selectedItem)
 		{
+			funky = hwnd;
 			FunkyJoyStickTimer();
 		}
 		SetTimer(hwnd,777,125,NULL);
@@ -895,16 +907,25 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
 				icp->numKeys--;
 				icp->keys[icp->numKeys] = 0;
 
-				// Update display and notify parent of the change
-				icp->capturing = false;
-				TranslateMultiKey(icp->keys, icp->numKeys, temp);
-				col = icp->numKeys > 0 ? CheckButtonKey(icp->keys[0]) : RGB(255,255,255);
+				// Stay in capture mode with green highlight
+				if (icp->numKeys > 0) {
+					TranslateMultiKey(icp->keys, icp->numKeys, temp);
+					if (icp->numKeys < icp->maxKeys)
+						strcat(temp, ", ...");
+				} else {
+					strcpy(temp, "...");
+				}
+				col = RGB(0, 255, 0);
 				icp->crForeGnd = ((~col) & 0x00ffffff);
 				icp->crBackGnd = col;
 				SetWindowText(hwnd, _tFromChar(temp));
 				InvalidateRect(icp->hwnd, NULL, FALSE);
 				UpdateWindow(icp->hwnd);
 				SendMessage(pappy, WM_USER + 43, 0, (LPARAM)hwnd);
+				// Keep capture active
+				selectedItem = hwnd;
+				if (GetFocus() != hwnd)
+					SetFocus(hwnd);
 			}
 			else
 			{
@@ -914,9 +935,8 @@ static LRESULT CALLBACK InputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, L
 				icp->crBackGnd = prevBg;
 				InvalidateRect(icp->hwnd, NULL, FALSE);
 				UpdateWindow(icp->hwnd);
+				selectedItem = NULL;
 			}
-
-			selectedItem = NULL;
 		}
 		break;
 	}
@@ -1002,7 +1022,6 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 	// retrieve the custom structure POINTER for THIS window
     InputCust *icp = GetInputCustom(hwnd);
 	HWND pappy = (HWND__ *)GetWindowLongPtr(hwnd,GWLP_HWNDPARENT);
-	funky= hwnd;
 
 	static HWND selectedItem = NULL;
 
@@ -1033,6 +1052,8 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
         memset(icp->mods, 0, sizeof(icp->mods));
         icp->numKeys   = 0;
         icp->maxKeys   = 1;
+        icp->capturing = false;
+        icp->inContextMenu = false;
 
         // Assign the window text specified in the call to CreateWindow.
         SetWindowText(hwnd, ((CREATESTRUCT *)lParam)->lpszName);
@@ -1090,7 +1111,7 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 			if(wParam == VK_SHIFT || wParam == VK_MENU || wParam == VK_CONTROL)
 				break;
 
-			if(keyPressLock)
+			if(keyPressLock && !(wParam & 0x8000))
 				break;
 
 			int modifiers = 0;
@@ -1108,8 +1129,13 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 				memset(icp->mods, 0, sizeof(icp->mods));
 				icp->numKeys = 0;
 
-				TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
-				col = RGB(255,255,255);
+				if (icp->maxKeys > 1) {
+					strcpy(temp, "...");
+					col = RGB(0, 255, 0);
+				} else {
+					TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+					col = RGB(255,255,255);
+				}
 				icp->crForeGnd = ((~col) & 0x00ffffff);
 				icp->crBackGnd = col;
 				SetWindowText(hwnd,_tFromChar(temp));
@@ -1127,8 +1153,19 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 				icp->keys[icp->numKeys] = 0;
 				icp->mods[icp->numKeys] = 0;
 
-				TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
-				col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+				if (icp->maxKeys > 1) {
+					if (icp->numKeys > 0) {
+						TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+						if (icp->numKeys < icp->maxKeys)
+							strcat(temp, ", ...");
+					} else {
+						strcpy(temp, "...");
+					}
+					col = RGB(0, 255, 0);
+				} else {
+					TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+					col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+				}
 				icp->crForeGnd = ((~col) & 0x00ffffff);
 				icp->crBackGnd = col;
 				SetWindowText(hwnd,_tFromChar(temp));
@@ -1161,8 +1198,19 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 				}
 			}
 
-			TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
-			col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+			if (icp->maxKeys > 1) {
+				if (icp->numKeys > 0) {
+					TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+					if (icp->numKeys < icp->maxKeys)
+						strcat(temp, ", ...");
+				} else {
+					strcpy(temp, "...");
+				}
+				col = RGB(0, 255, 0);
+			} else {
+				TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+				col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+			}
 
 			icp->crForeGnd = ((~col) & 0x00ffffff);
 			icp->crBackGnd = col;
@@ -1213,8 +1261,19 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 						}
 					}
 
-					TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
-					col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+					if (icp->maxKeys > 1) {
+						if (icp->numKeys > 0) {
+							TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+							if (icp->numKeys < icp->maxKeys)
+								strcat(temp, ", ...");
+						} else {
+							strcpy(temp, "...");
+						}
+						col = RGB(0, 255, 0);
+					} else {
+						TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+						col = icp->numKeys > 0 ? CheckHotKey(icp->keys[0], icp->mods[0]) : RGB(255,255,255);
+					}
 
 					icp->crForeGnd = ((~col) & 0x00ffffff);
 					icp->crBackGnd = col;
@@ -1228,6 +1287,10 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 		break;
 	case WM_USER+44:
 	{
+		// Don't overwrite while actively capturing input (display is managed by WM_KEYDOWN)
+		if (icp->capturing)
+			break;
+
 		// Set a hotkey field
 		// Multi-bind protocol: wParam = pointer to SCustomKey array, lParam = count (negative = multi-bind)
 		// Legacy protocol: wParam = key, lParam = modifiers
@@ -1290,14 +1353,28 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 	case WM_SETFOCUS:
 	{
 		selectedItem = hwnd;
-		// Reset accumulation - start fresh for new key capture
-		icp->numKeys = 0;
-		memset(icp->keys, 0, sizeof(icp->keys));
-		memset(icp->mods, 0, sizeof(icp->mods));
+		icp->capturing = true;
+		keyPressLock = false;
 		col = RGB( 0,255,0);
 		icp->crForeGnd = ((~col) & 0x00ffffff);
 		icp->crBackGnd = col;
-		SetWindowText(hwnd, _T("..."));
+
+		if (icp->maxKeys > 1 && icp->numKeys > 0)
+		{
+			// Multi mode with existing bindings: keep them, allow adding more
+			TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+			if (icp->numKeys < icp->maxKeys)
+				strcat(temp, ", ...");
+			SetWindowText(hwnd, _tFromChar(temp));
+		}
+		else
+		{
+			// Single mode or no existing bindings: start fresh
+			icp->numKeys = 0;
+			memset(icp->keys, 0, sizeof(icp->keys));
+			memset(icp->mods, 0, sizeof(icp->mods));
+			SetWindowText(hwnd, _T("..."));
+		}
 		InvalidateRect(icp->hwnd, NULL, FALSE);
 		UpdateWindow(icp->hwnd);
 
@@ -1305,7 +1382,10 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 	}
 	case WM_KILLFOCUS:
 	{
+		if (icp->inContextMenu)
+			break; // don't reset state while context menu is open
 		selectedItem = NULL;
+		icp->capturing = false;
 		SendMessage(pappy,WM_USER+46,wParam,(LPARAM)hwnd); // refresh fields on deselect
 		break;
 	}
@@ -1313,6 +1393,7 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 	case WM_TIMER:
 		if(hwnd == selectedItem)
 		{
+			funky = hwnd;
 			FunkyJoyStickTimer();
 		}
 		SetTimer(hwnd,747,125,NULL);
@@ -1320,6 +1401,122 @@ static LRESULT CALLBACK HotInputCustomWndProc(HWND hwnd, UINT msg, WPARAM wParam
 	case WM_LBUTTONDOWN:
 		SetFocus(hwnd);
 		break;
+	case WM_CONTEXTMENU:
+	{
+		if (icp->maxKeys > 1 && icp->numKeys > 0)
+		{
+			// Guard against WM_USER+44 refreshes (timer, focus changes) during menu
+			icp->capturing = true;
+			icp->inContextMenu = true;
+
+			// Deactivate any other active control first
+			if (selectedItem != NULL && selectedItem != hwnd)
+			{
+				InputCust *other = GetInputCustom(selectedItem);
+				if (other)
+				{
+					other->capturing = false;
+					other->inContextMenu = false;
+				}
+				// Refresh all fields so the old control reverts to normal colors
+				SendMessage(pappy, WM_USER + 46, 0, 0);
+			}
+
+			// Highlight green
+			COLORREF prevFg = icp->crForeGnd;
+			COLORREF prevBg = icp->crBackGnd;
+			col = RGB(0, 255, 0);
+			icp->crForeGnd = ((~col) & 0x00ffffff);
+			icp->crBackGnd = col;
+			InvalidateRect(icp->hwnd, NULL, FALSE);
+			UpdateWindow(icp->hwnd);
+
+			HMENU hMenu = CreatePopupMenu();
+			AppendMenu(hMenu, MF_STRING, 1, _T("Reset"));
+
+			// Build "Remove" submenu listing each bound key for removal
+			HMENU hEditMenu = CreatePopupMenu();
+			for (int i = 0; i < icp->numKeys; i++)
+			{
+				char keyName[128];
+				TranslateKeyWithModifiers(icp->keys[i], icp->mods[i], keyName);
+				// Menu IDs 100+ map to key index to remove
+				AppendMenu(hEditMenu, MF_STRING, 100 + i, _tFromChar(keyName));
+			}
+			AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hEditMenu, _T("Remove"));
+
+			POINT pt;
+			GetCursorPos(&pt);
+			int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+			                         pt.x, pt.y, 0, hwnd, NULL);
+			icp->inContextMenu = false;
+			DestroyMenu(hMenu);
+
+			if (cmd == 1)
+			{
+				// Reset: clear all bindings and enter fresh capture mode
+				icp->numKeys = 0;
+				memset(icp->keys, 0, sizeof(icp->keys));
+				memset(icp->mods, 0, sizeof(icp->mods));
+				col = RGB(0, 255, 0);
+				icp->crForeGnd = ((~col) & 0x00ffffff);
+				icp->crBackGnd = col;
+				SetWindowText(hwnd, _T("..."));
+				InvalidateRect(icp->hwnd, NULL, FALSE);
+				UpdateWindow(icp->hwnd);
+				// Notify parent to clear the stored binding for this field
+				SendMessage(pappy, WM_USER + 43, 0, (LPARAM)hwnd);
+				// Ensure focus for key capture
+				selectedItem = hwnd;
+				if (GetFocus() != hwnd)
+					SetFocus(hwnd);
+			}
+			else if (cmd >= 100 && cmd < 100 + icp->numKeys)
+			{
+				// Remove: remove the selected key from the set
+				int removeIdx = cmd - 100;
+				for (int i = removeIdx; i < icp->numKeys - 1; i++)
+				{
+					icp->keys[i] = icp->keys[i + 1];
+					icp->mods[i] = icp->mods[i + 1];
+				}
+				icp->numKeys--;
+				icp->keys[icp->numKeys] = 0;
+				icp->mods[icp->numKeys] = 0;
+
+				// Stay in capture mode with green highlight
+				if (icp->numKeys > 0) {
+					TranslateMultiHotKey(icp->keys, icp->mods, icp->numKeys, temp);
+					if (icp->numKeys < icp->maxKeys)
+						strcat(temp, ", ...");
+				} else {
+					strcpy(temp, "...");
+				}
+				col = RGB(0, 255, 0);
+				icp->crForeGnd = ((~col) & 0x00ffffff);
+				icp->crBackGnd = col;
+				SetWindowText(hwnd, _tFromChar(temp));
+				InvalidateRect(icp->hwnd, NULL, FALSE);
+				UpdateWindow(icp->hwnd);
+				SendMessage(pappy, WM_USER + 43, 0, (LPARAM)hwnd);
+				// Keep capture active
+				selectedItem = hwnd;
+				if (GetFocus() != hwnd)
+					SetFocus(hwnd);
+			}
+			else
+			{
+				// Menu dismissed without action: restore original colors
+				icp->capturing = false;
+				icp->crForeGnd = prevFg;
+				icp->crBackGnd = prevBg;
+				InvalidateRect(icp->hwnd, NULL, FALSE);
+				UpdateWindow(icp->hwnd);
+				selectedItem = NULL;
+			}
+		}
+		break;
+	}
 	case WM_ENABLE:
 		COLORREF col;
 		if(wParam)

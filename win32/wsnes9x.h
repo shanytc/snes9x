@@ -523,4 +523,9 @@ std::wstring GetTextWstring(HWND hWnd);
 
 #define CHEAT_SIZE 32767
 
+std::wstring GetDlgItemTextWstring(HWND hDlg, int nIDDlgItem);
+std::wstring GetTextWstring(HWND hWnd);
+
+#define CHEAT_SIZE 32767
+
 #endif // !defined(SNES9X_H_INCLUDED)

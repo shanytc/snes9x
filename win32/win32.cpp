@@ -26,6 +26,7 @@
 #include "render.h"
 #include "AVIOutput.h"
 #include "wlanguage.h"
+#include "SDLInput.h"
 
 #include <shlwapi.h>
 #include <direct.h>
@@ -575,143 +576,9 @@ void CheckAxis (int val, int min, int max, bool &first, bool &second)
 void S9xWinScanJoypads ()
 {
     uint8 PadState[2];
-    JOYINFOEX jie;
 
-    for (int C = 0; C != 16; C ++)
-    {
-        if (Joystick[C].Attached)
-        {
-            jie.dwSize = sizeof (jie);
-            jie.dwFlags = JOY_RETURNALL;
-
-            if (joyGetPosEx (JOYSTICKID1+C, &jie) != JOYERR_NOERROR)
-            {
-                Joystick[C].Attached = false;
-                continue;
-            }
-
-            CheckAxis (jie.dwXpos,
-                       Joystick[C].Caps.wXmin, Joystick[C].Caps.wXmax,
-                       Joystick[C].Left, Joystick[C].Right);
-            CheckAxis (jie.dwYpos,
-                       Joystick[C].Caps.wYmin, Joystick[C].Caps.wYmax,
-                       Joystick[C].Up, Joystick[C].Down);
-            CheckAxis (jie.dwZpos,
-                       Joystick[C].Caps.wZmin, Joystick[C].Caps.wZmax,
-                       Joystick[C].ZUp, Joystick[C].ZDown);
-            CheckAxis (jie.dwRpos,
-                       Joystick[C].Caps.wRmin, Joystick[C].Caps.wRmax,
-                       Joystick[C].RUp, Joystick[C].RDown);
-            CheckAxis (jie.dwUpos,
-                       Joystick[C].Caps.wUmin, Joystick[C].Caps.wUmax,
-                       Joystick[C].UUp, Joystick[C].UDown);
-            CheckAxis (jie.dwVpos,
-                       Joystick[C].Caps.wVmin, Joystick[C].Caps.wVmax,
-                       Joystick[C].VUp, Joystick[C].VDown);
-
-            switch (jie.dwPOV)
-            {
-                case JOY_POVBACKWARD:
-                    Joystick[C].PovDown = true;
-                    Joystick[C].PovUp = false;
-                    Joystick[C].PovLeft = false;
-                    Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = false;
-					 break;
-				case 4500:
-					Joystick[C].PovDown = false;
-					Joystick[C].PovUp = false;
-					Joystick[C].PovLeft = false;
-					Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = true;
-					break;
-				case 13500:
-					Joystick[C].PovDown = false;
-					Joystick[C].PovUp = false;
-					Joystick[C].PovLeft = false;
-					Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = true;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = false;
-					break;
-				case 22500:
-					Joystick[C].PovDown = false;
-					Joystick[C].PovUp = false;
-					Joystick[C].PovLeft = false;
-					Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = true;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = false;
-					break;
-				case 31500:
-					Joystick[C].PovDown = false;
-					Joystick[C].PovUp = false;
-					Joystick[C].PovLeft = false;
-					Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = true;
-					Joystick[C].PovUpRight = false;
-					break;
-
-
-                case JOY_POVFORWARD:
-                    Joystick[C].PovDown = false;
-                    Joystick[C].PovUp = true;
-                    Joystick[C].PovLeft = false;
-                    Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = false;
-                    break;
-
-                case JOY_POVLEFT:
-                    Joystick[C].PovDown = false;
-                    Joystick[C].PovUp = false;
-                    Joystick[C].PovLeft = true;
-                    Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = false;
-                    break;
-
-                case JOY_POVRIGHT:
-                    Joystick[C].PovDown = false;
-                    Joystick[C].PovUp = false;
-                    Joystick[C].PovLeft = false;
-                    Joystick[C].PovRight = true;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = false;
-                    break;
-
-                default:
-                    Joystick[C].PovDown = false;
-                    Joystick[C].PovUp = false;
-                    Joystick[C].PovLeft = false;
-                    Joystick[C].PovRight = false;
-					Joystick[C].PovDnLeft = false;
-					Joystick[C].PovDnRight = false;
-					Joystick[C].PovUpLeft = false;
-					Joystick[C].PovUpRight = false;
-                    break;
-            }
-
-            for (int B = 0; B < 32; B ++)
-                Joystick[C].Button[B] = (jie.dwButtons & (1 << B)) != 0;
-        }
-    }
+    // Poll SDL to update Joystick[] state for all attached devices
+    SDLInput_Poll();
 
     for (int J = 0; J < 8; J++)
     {
@@ -843,9 +710,7 @@ void S9xWinScanJoypads ()
 
 void S9xDetectJoypads()
 {
-    for (int C = 0; C != 16; C ++)
-        Joystick[C].Attached = joyGetDevCaps (JOYSTICKID1+C, &Joystick[C].Caps,
-                                              sizeof( JOYCAPS)) == JOYERR_NOERROR;
+    SDLInput_DetectJoypads();
 }
 
 void InitSnes9x( void)
@@ -883,10 +748,12 @@ void InitSnes9x( void)
 
 	S9xMovieInit ();
 
+    SDLInput_Init();
     S9xDetectJoypads();
 }
 void DeinitS9x()
 {
+    SDLInput_Shutdown();
 #ifdef KAILLERA_SUPPORT
 	KailleraServerUnpublish();
 	KailleraServerStop();

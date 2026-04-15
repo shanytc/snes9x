@@ -25,6 +25,7 @@
 #include "InputCustom.h"
 #include "wsnes9x.h"
 #include "wlanguage.h"
+#include "SDLInput.h"
 
 static TCHAR szClassName[] = _T("InputCustom");
 static TCHAR szHotkeysClassName[] = _T("InputCustomHot");
@@ -115,180 +116,7 @@ void CheckAxis (short joy, short control, int val,
 
 void FunkyJoyStickTimer()
 {
-	JOYINFOEX jie;
-
-    for (short C = 0; C != 16; C ++)
-    {
-
-        jie.dwSize = sizeof( jie);
-        jie.dwFlags = JOY_RETURNALL;
-
-        if (joyGetPosEx (JOYSTICKID1 + C, &jie) != JOYERR_NOERROR)
-            continue;
-
-        CheckAxis (C, 0, jie.dwXpos,
-                   JoystickF[C].Caps.wXmin, JoystickF[C].Caps.wXmax,
-                   JoystickF[C].Left, JoystickF[C].Right);
-        CheckAxis (C, 2, jie.dwYpos,
-                   JoystickF[C].Caps.wYmin, JoystickF[C].Caps.wYmax,
-                   JoystickF[C].Up, JoystickF[C].Down);
-        if(JoystickF[C].Caps.wCaps & JOYCAPS_HASZ)
-		{
-		CheckAxis (C, 41, jie.dwZpos,
-                   JoystickF[C].Caps.wZmin, JoystickF[C].Caps.wZmax,
-                   JoystickF[C].ZUp, JoystickF[C].ZDown);
-		}
-		if(JoystickF[C].Caps.wCaps & JOYCAPS_HASR)
-		{
-        CheckAxis (C, 43, jie.dwRpos,
-                   JoystickF[C].Caps.wRmin, JoystickF[C].Caps.wRmax,
-                   JoystickF[C].RUp, JoystickF[C].RDown);
-		}
-		if(JoystickF[C].Caps.wCaps & JOYCAPS_HASU)
-		{
-        CheckAxis (C, 45, jie.dwUpos,
-                   JoystickF[C].Caps.wUmin, JoystickF[C].Caps.wUmax,
-                   JoystickF[C].UUp, JoystickF[C].UDown);
-		}
-        if(JoystickF[C].Caps.wCaps & JOYCAPS_HASV)
-		{
-		CheckAxis (C, 47, jie.dwVpos,
-                   JoystickF[C].Caps.wVmin, JoystickF[C].Caps.wVmax,
-                   JoystickF[C].VUp, JoystickF[C].VDown);
-		}
-
-        switch (jie.dwPOV)
-        {
-            case JOY_POVBACKWARD:
-                if( !JoystickF[C].PovDown)
-                {   JoystickChanged( C, 7); }
-
-                JoystickF[C].PovDown = true;
-                JoystickF[C].PovUp = false;
-                JoystickF[C].PovLeft = false;
-                JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = false;
-                break;
-			case 4500:
-				if( !JoystickF[C].PovUpRight)
-                {   JoystickChanged( C, 52); }
-				JoystickF[C].PovDown = false;
-                JoystickF[C].PovUp = false;
-                JoystickF[C].PovLeft = false;
-                JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = true;
-				break;
-			case 13500:
-				if( !JoystickF[C].PovDnRight)
-                {   JoystickChanged( C, 50); }
-				JoystickF[C].PovDown = false;
-                JoystickF[C].PovUp = false;
-                JoystickF[C].PovLeft = false;
-                JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = true;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = false;
-				break;
-			case 22500:
-				if( !JoystickF[C].PovDnLeft)
-                {   JoystickChanged( C, 49); }
-				JoystickF[C].PovDown = false;
-                JoystickF[C].PovUp = false;
-                JoystickF[C].PovLeft = false;
-                JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = true;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = false;
-				break;
-			case 31500:
-				if( !JoystickF[C].PovUpLeft)
-                {   JoystickChanged( C, 51); }
-				JoystickF[C].PovDown = false;
-                JoystickF[C].PovUp = false;
-                JoystickF[C].PovLeft = false;
-                JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = true;
-				JoystickF[C].PovUpRight = false;
-				break;
-
-            case JOY_POVFORWARD:
-                if( !JoystickF[C].PovUp)
-                {   JoystickChanged( C, 6); }
-
-                JoystickF[C].PovDown = false;
-                JoystickF[C].PovUp = true;
-                JoystickF[C].PovLeft = false;
-                JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = false;
-                break;
-
-            case JOY_POVLEFT:
-                if( !JoystickF[C].PovLeft)
-                {   JoystickChanged( C, 4); }
-
-				JoystickF[C].PovDown = false;
-				JoystickF[C].PovUp = false;
-				JoystickF[C].PovLeft = true;
-				JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = false;
-                break;
-
-            case JOY_POVRIGHT:
-                if( !JoystickF[C].PovRight)
-                {   JoystickChanged( C, 5); }
-
-				JoystickF[C].PovDown = false;
-				JoystickF[C].PovUp = false;
-				JoystickF[C].PovLeft = false;
-				JoystickF[C].PovRight = true;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = false;
-                break;
-
-            default:
-                JoystickF[C].PovDown = false;
-                JoystickF[C].PovUp = false;
-                JoystickF[C].PovLeft = false;
-                JoystickF[C].PovRight = false;
-				JoystickF[C].PovDnLeft = false;
-				JoystickF[C].PovDnRight = false;
-				JoystickF[C].PovUpLeft = false;
-				JoystickF[C].PovUpRight = false;
-                break;
-        }
-
-        for( short B = 0; B != 32; B ++, jie.dwButtons >>= 1)
-        if( (jie.dwButtons&1))
-        {
-            if( !JoystickF[C].Button[B])
-            {
-                JoystickChanged( C, (short)(8+B));
-                JoystickF[C].Button[B] = true;
-            }
-        }
-        else
-        {   JoystickF[C].Button[B] = false; }
-
-    }
-
+    SDLInput_PollForBinding();
 }
 
 void TranslateKey(WORD keyz,char *out)
@@ -636,12 +464,9 @@ COLORREF CheckHotKey( WORD Key, int modifiers)
 
 void InitJoystickStruct()
 {
-    for (short C = 0; C != 16; C++)
-        JoystickF[C].Attached = joyGetDevCaps(JOYSTICKID1 + C, &JoystickF[C].Caps, sizeof(JOYCAPS)) == JOYERR_NOERROR;
-
-    // call FunkyJoyStickTimer once to initialize the JoystickF states to the current joypad state, this prevents
-    // immediately triggering on first entry into an edit field
-    FunkyJoyStickTimer();
+    // Initialize SDL binding capture state with current device positions,
+    // preventing immediate triggering on first entry into an edit field
+    SDLInput_InitBindingState();
 }
 
 void InitInputCustomControl()

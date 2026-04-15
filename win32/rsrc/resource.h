@@ -627,6 +627,8 @@
 #define IDC_BINDINGCOMBO                3103
 #define IDC_ALLOWMULTIBIND_HK           3104
 #define IDC_BINDINGCOMBO_HK             3105
+#define IDC_AUTOASSIGN                  3106
+#define IDC_DEVICENAME                  3107
 #define ID_SOUND_MUTE                   40189
 #define IDC_STATIC                      -1
 

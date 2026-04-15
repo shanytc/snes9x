@@ -87,6 +87,9 @@
     <ClInclude Include="InputCustom.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="SDLInput.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
     <ClInclude Include="render.h">
       <Filter>GUI</Filter>
     </ClInclude>
@@ -564,6 +567,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="InputCustom.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="SDLInput.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="render.cpp">

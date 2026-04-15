@@ -955,6 +955,10 @@ void WinRegisterConfigItems()
 #undef ADDXTB
 #undef ADDXTB3
 #undef ADDXTBALL
+	// SDL device GUIDs for stable controller identification across sessions
+#define ADDGUID(n) AddStringC("Joypad" #n ":DeviceGUID", GUI.JoypadGUID[n-1], 64, "", "SDL device GUID for controller identity persistence")
+	ADDGUID(1); ADDGUID(2); ADDGUID(3); ADDGUID(4); ADDGUID(5); ADDGUID(6); ADDGUID(7); ADDGUID(8);
+#undef ADDGUID
 	AddBool2C("Input:Background", GUI.BackgroundInput, false, "on to detect game keypresses and hotkeys while window is inactive, if PauseWhenInactive = FALSE.");
 	AddBool2C("Input:BackgroundKeyHotkeys", GUI.BackgroundKeyHotkeys, true, "on to also detect keyboard hotkeys when backgroundinput is active");
 #undef CATEGORY

@@ -53,6 +53,7 @@
 #include "../statemanager.h"
 #include "AVIOutput.h"
 #include "InputCustom.h"
+#include "SDLInput.h"
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "retroachievements.h"
 #endif
@@ -9342,6 +9343,39 @@ static void UpdateBindingMode(HWND hDlg, int index)
 	set_buttoninfo(index, hDlg);
 }
 
+// Helper: update device name label and auto-assign button state for given joypad index
+static void UpdateDeviceInfo(HWND hDlg, int index)
+{
+	// Find which joystick slot this joypad might be bound to
+	// Check if any current binding references a joystick slot
+	int slot = -1;
+	WORD testKey = Joypad[index].A ? Joypad[index].A :
+	               Joypad[index].B ? Joypad[index].B :
+	               Joypad[index].Up ? Joypad[index].Up : 0;
+	if (testKey & 0x8000)
+		slot = (testKey >> 8) & 0xF;
+
+	// Also check if any joystick is attached at a reasonable slot for this controller index
+	// Default: use the controller index as the slot (0-4 for controllers 1-5)
+	int checkSlot = (index < 5) ? index : (index - 8); // turbo panels map to controller 0-4
+	if (checkSlot < 0) checkSlot = 0;
+
+	// Prefer the slot from existing bindings, fall back to index-based
+	int displaySlot = (slot >= 0) ? slot : checkSlot;
+
+	std::string devName = SDLInput_GetDeviceName(displaySlot);
+	if (!devName.empty())
+	{
+		SetDlgItemTextA(hDlg, IDC_DEVICENAME, devName.c_str());
+		EnableWindow(GetDlgItem(hDlg, IDC_AUTOASSIGN), SDLInput_IsGamepad(displaySlot) ? TRUE : FALSE);
+	}
+	else
+	{
+		SetDlgItemTextA(hDlg, IDC_DEVICENAME, "No device detected");
+		EnableWindow(GetDlgItem(hDlg, IDC_AUTOASSIGN), FALSE);
+	}
+}
+
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	TCHAR temp[256];
@@ -9418,6 +9452,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		set_buttoninfo(index,hDlg);
 
 		EnableDisableKeyFields(index,hDlg);
+
+		UpdateDeviceInfo(hDlg, index);
 
 		PostMessage(hDlg,WM_COMMAND, MAKEWPARAM(IDC_JPCOMBO, CBN_SELCHANGE), 0);
 
@@ -9516,6 +9552,32 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			}
 			break;
 
+		case IDC_AUTOASSIGN: // Auto-assign gamepad buttons
+			{
+				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
+				if(index > 4) index += 3;
+
+				// Determine which joystick slot to auto-assign from
+				int checkSlot = (index < 5) ? index : (index - 8);
+				if (checkSlot < 0) checkSlot = 0;
+
+				// Check existing bindings for a joystick slot
+				WORD testKey = Joypad[index].A ? Joypad[index].A :
+				               Joypad[index].B ? Joypad[index].B :
+				               Joypad[index].Up ? Joypad[index].Up : 0;
+				if (testKey & 0x8000)
+					checkSlot = (testKey >> 8) & 0xF;
+
+				if (SDLInput_AutoMapGamepad(checkSlot, Joypad[index]))
+				{
+					// Clear extra bindings since auto-assign sets primary only
+					memset(&JoypadExtra[index], 0, sizeof(SJoypadExtraBinds));
+					set_buttoninfo(index, hDlg);
+					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK,(WPARAM)BST_CHECKED,0);
+				}
+			}
+			break;
+
 		}
 		switch(HIWORD(wParam))
 		{
@@ -9538,6 +9600,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				set_buttoninfo(index,hDlg);
 
 				EnableDisableKeyFields(index,hDlg);
+
+				UpdateDeviceInfo(hDlg, index);
 
 				break;
 		}

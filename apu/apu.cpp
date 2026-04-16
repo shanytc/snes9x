@@ -135,6 +135,28 @@ void S9xClearSamples(void)
         msu::resampler.clear();
 }
 
+// Run-ahead audio state preservation. We snapshot the resampler control state
+// (ring positions, phase accumulator, hermite history) before the hidden
+// frame runs, and restore it afterwards. This keeps the hermite interpolation
+// warmed-up across iterations so the audio output for the displayed frame
+// follows on seamlessly from the previous displayed frame's output.
+static ResamplerState saved_spc_resampler_state;
+static ResamplerState saved_msu_resampler_state;
+
+void S9xRunAheadSaveAudio(void)
+{
+    spc::resampler.save_state(saved_spc_resampler_state);
+    if (Settings.MSU1)
+        msu::resampler.save_state(saved_msu_resampler_state);
+}
+
+void S9xRunAheadLoadAudio(void)
+{
+    spc::resampler.load_state(saved_spc_resampler_state);
+    if (Settings.MSU1)
+        msu::resampler.load_state(saved_msu_resampler_state);
+}
+
 bool8 S9xSyncSound(void)
 {
     if (!Settings.SoundSync || spc::sound_in_sync)

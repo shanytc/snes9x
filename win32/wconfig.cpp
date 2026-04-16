@@ -85,6 +85,13 @@ void WinSetDefaultValues ()
 	GUI.FlipCounter	= 0;
 	GUI.NumFlipFrames =	1;
 	Settings.BilinearFilter	= false;
+	Settings.RunAhead = 0;
+	Settings.InRunAhead = false;
+	Settings.ColorCorrection = false;
+	Settings.AdjustmentsEnabled = false;
+	Settings.Gamma = 0;
+	Settings.Contrast = 0;
+	Settings.Saturation = 0;
 	GUI.LockDirectories = false;
 	GUI.window_maximized = false;
 	GUI.EmulatedFullscreen = false;
@@ -808,6 +815,12 @@ void WinRegisterConfigItems()
 	AddBoolC("ReduceInputLag", GUI.ReduceInputLag, false, "true to reduce input lag by hard synchronization");
     AddBoolC("DWMSync", GUI.DWMSync, false, "sync to DWM compositor if it is running");
 	AddUIntC("OSDSize", GUI.OSDSize, 24, "Size of On-Screen Display");
+	AddIntC("RunAhead", Settings.RunAhead, 0, "number of frames to run ahead for reduced input latency (0=off, 1-4)");
+	AddBoolC("ColorCorrection", Settings.ColorCorrection, false, "true to enable accurate SNES color correction");
+	AddBoolC("AdjustmentsEnabled", Settings.AdjustmentsEnabled, false, "true to apply gamma/contrast/saturation adjustments");
+	AddIntC("Gamma", Settings.Gamma, 0, "gamma adjustment (-100..+100, 0=no change)");
+	AddIntC("Contrast", Settings.Contrast, 0, "contrast adjustment (-100..+100, 0=no change)");
+	AddIntC("Saturation", Settings.Saturation, 0, "saturation adjustment (-100..+100, 0=no change)");
 #undef CATEGORY
 #define CATEGORY "Settings"
 	AddUIntC("FrameSkip", Settings.SkipFrames, AUTO_FRAMERATE, "200=automatic (limits at 50/60 fps), 0=none, 1=skip every other, ...");

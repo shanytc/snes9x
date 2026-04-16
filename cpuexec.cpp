@@ -331,7 +331,8 @@ void S9xDoHEventProcessing (void)
 					if (!(CPU.Flags & FRAME_ADVANCE_FLAG))
 				#endif
 				{
-					S9xSyncSpeed();
+					if (!Settings.InRunAhead)
+						S9xSyncSpeed();
 				}
 
 				CPU.Flags |= SCAN_KEYS_FLAG;

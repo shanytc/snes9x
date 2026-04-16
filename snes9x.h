@@ -314,6 +314,14 @@ struct SSettings
 	int	OneSlowClockCycle;
 	int	TwoClockCycles;
 	int	MaxSpriteTilesPerLine;
+
+	int		RunAhead;     // 0 = off, 1-4 = number of frames to run ahead
+	bool8	InRunAhead;   // true while emulating a hidden "ahead" frame
+	bool8	ColorCorrection;
+	bool8	AdjustmentsEnabled;
+	int		Gamma;       // signed: -100..+100, 0 = no change
+	int		Contrast;    // signed: -100..+100, 0 = no change
+	int		Saturation;  // signed: -100..+100, 0 = no change
 };
 
 struct SSNESGameFixes

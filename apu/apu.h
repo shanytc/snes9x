@@ -43,6 +43,11 @@ bool8 S9xMixSamples (uint8 *, int);
 void S9xSetSamplesAvailableCallback (apu_callback, void *);
 void S9xUpdateDynamicRate (int empty = 1, int buffer_size = 2);
 
+// Save/restore resampler state for run-ahead (preserves hermite filter
+// continuity across the hidden frame)
+void S9xRunAheadSaveAudio (void);
+void S9xRunAheadLoadAudio (void);
+
 #define DSP_INTERPOLATION_NONE     0
 #define DSP_INTERPOLATION_LINEAR   1
 #define DSP_INTERPOLATION_GAUSSIAN 2

@@ -148,8 +148,16 @@ void S9xBuildDirectColourMaps (void)
 	IPPU.XB = mul_brightness[PPU.Brightness];
 
 	for (uint32 p = 0; p < 8; p++)
+	{
 		for (uint32 c = 0; c < 256; c++)
-			DirectColourMaps[p][c] = BUILD_PIXEL(IPPU.XB[((c & 7) << 2) | ((p & 1) << 1)], IPPU.XB[((c & 0x38) >> 1) | (p & 2)], IPPU.XB[((c & 0xc0) >> 3) | (p & 4)]);
+		{
+			uint8 r = IPPU.XB[((c & 7) << 2) | ((p & 1) << 1)];
+			uint8 g = IPPU.XB[((c & 0x38) >> 1) | (p & 2)];
+			uint8 b = IPPU.XB[((c & 0xc0) >> 3) | (p & 4)];
+			S9xApplyColorAdjustments(r, g, b, 0x1f);
+			DirectColourMaps[p][c] = BUILD_PIXEL(r, g, b);
+		}
+	}
 }
 
 void S9xStartScreenRefresh (void)
@@ -1904,6 +1912,12 @@ static void DisplayFrameRate (void)
 	static uint32 lastFrameCount = 0, calcFps = 0;
 	static time_t lastTime = time(NULL);
 
+	// With run-ahead enabled, each iteration emulates (RunAhead + 1) SNES
+	// frames but only one of them is displayed. Divide both FPS metrics by
+	// that multiplier so the counter reflects the logical game frame rate
+	// (target ~60) instead of raw emulation throughput.
+	uint32 runAheadMul = (Settings.RunAhead > 0) ? (uint32)Settings.RunAhead + 1 : 1;
+
 	time_t currTime = time(NULL);
 	if (lastTime != currTime) {
 		if (lastFrameCount < IPPU.TotalEmulatedFrames) {
@@ -1912,15 +1926,17 @@ static void DisplayFrameRate (void)
 		lastTime = currTime;
 		lastFrameCount = IPPU.TotalEmulatedFrames;
 	}
-	sprintf(string, "%u fps", calcFps);
+	sprintf(string, "%u fps", calcFps / runAheadMul);
 	S9xDisplayString(string, 2, IPPU.RenderedScreenWidth - (font_width - 1) * strlen(string) - 1, false);
+
+	uint32 displayedRendered = IPPU.DisplayedRenderedFrameCount * runAheadMul;
 
 #ifdef DEBUGGER
 	const int	len = 8;
-	sprintf(string, "%02d/%02d %02d", (int) IPPU.DisplayedRenderedFrameCount, (int) Memory.ROMFramesPerSecond, (int) IPPU.FrameCount);
+	sprintf(string, "%02d/%02d %02d", (int) displayedRendered, (int) Memory.ROMFramesPerSecond, (int) IPPU.FrameCount);
 #else
 	const int	len = 5;
-	sprintf(string, "%02d/%02d",      (int) IPPU.DisplayedRenderedFrameCount, (int) Memory.ROMFramesPerSecond);
+	sprintf(string, "%02d/%02d",      (int) displayedRendered, (int) Memory.ROMFramesPerSecond);
 #endif
 
 	S9xDisplayString(string, 1, IPPU.RenderedScreenWidth - (font_width - 1) * len - 1, false);

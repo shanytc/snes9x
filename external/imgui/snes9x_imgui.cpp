@@ -243,6 +243,11 @@ bool S9xImGuiDraw(int width, int height)
         static uint32 lastFrameCount = 0, calcFps = 0;
         static time_t lastTime = time(NULL);
 
+        // Normalize emulation-throughput counters to logical game frames when
+        // run-ahead is on (each iteration emulates RunAhead+1 SNES frames but
+        // only one is displayed).
+        uint32 runAheadMul = (Settings.RunAhead > 0) ? (uint32)Settings.RunAhead + 1 : 1;
+
         time_t currTime = time(NULL);
         if (lastTime != currTime)
         {
@@ -254,7 +259,7 @@ bool S9xImGuiDraw(int width, int height)
             lastFrameCount = IPPU.TotalEmulatedFrames;
         }
 
-        sprintf(string, "%u fps\n%02d/%02d", calcFps, (int)IPPU.DisplayedRenderedFrameCount, (int)Memory.ROMFramesPerSecond);
+        sprintf(string, "%u fps\n%02d/%02d", calcFps / runAheadMul, (int)(IPPU.DisplayedRenderedFrameCount * runAheadMul), (int)Memory.ROMFramesPerSecond);
 
         ImGui_DrawTextOverlay(string,
                               width - settings.spacing,

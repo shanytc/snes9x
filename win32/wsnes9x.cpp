@@ -2496,8 +2496,20 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_PAUSEWHENINACTIVE:
 			GUI.InactivePause = !GUI.InactivePause;
 			break;
-		case ID_EMULATION_RUNAHEAD:
-			Settings.RunAhead = !Settings.RunAhead;
+		case ID_EMULATION_RUNAHEAD_OFF:
+			Settings.RunAhead = 0;
+			break;
+		case ID_EMULATION_RUNAHEAD_1:
+			Settings.RunAhead = 1;
+			break;
+		case ID_EMULATION_RUNAHEAD_2:
+			Settings.RunAhead = 2;
+			break;
+		case ID_EMULATION_RUNAHEAD_3:
+			Settings.RunAhead = 3;
+			break;
+		case ID_EMULATION_RUNAHEAD_4:
+			Settings.RunAhead = 4;
 			break;
 		case ID_OPTIONS_SETTINGS:
 			RestoreGUIDisplay ();
@@ -3875,21 +3887,25 @@ int WINAPI WinMain(
 				}
 			}
 
-			if (Settings.RunAhead && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
+			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
 			{
-				// Run-ahead: commit the hidden frame silently, save state, run the displayed
-				// frame as a preview, then restore. The displayed frame shows what the game
-				// will look like 1 frame in the future given the current input.
+				// Run-ahead: commit 1 hidden frame, save state, run N-1 more hidden frames
+				// to "look into the future", then run the displayed frame as a preview, and
+				// finally restore to the committed state. The displayed frame shows what
+				// the game will look like N frames in the future given the current input,
+				// reducing apparent input latency by N frames.
+				int numAheadFrames = Settings.RunAhead;
+				if (numAheadFrames > 4) numAheadFrames = 4;
+
 				static uint32 runAheadBufSize = 0;
 				static uint8 *runAheadBuf = nullptr;
 
 				// Minimize per-frame overhead:
 				// - drop the ~500KB screenshot from the state
 				// - enable fast path (skips 512KB screen memset + memory zeroing on load)
-				// - detach the sample-available callback during the hidden frame so its
-				//   audio never reaches the OS buffer; otherwise we push 2 frames of audio
-				//   per iteration and the buffer fills faster than it drains, throttling
-				//   us to ~30 iterations/sec
+				// - detach the sample-available callback during hidden frames so their
+				//   audio never reaches the OS buffer; otherwise we push multiple frames
+				//   of audio per iteration and the buffer fills faster than it drains
 				bool8 savedScreenshots = Settings.SnapshotScreenshots;
 				bool8 savedFast = Settings.FastSavestates;
 				Settings.SnapshotScreenshots = FALSE;
@@ -3902,27 +3918,35 @@ int WINAPI WinMain(
 					runAheadBuf = new uint8[runAheadBufSize];
 				}
 
-				// Suppress audio output for the hidden frame
+				// Suppress audio output for the hidden frames
 				S9xSetSamplesAvailableCallback(NULL, NULL);
 
-				// Snapshot the resampler so we can undo the hidden frame's
-				// effect on it (preserves hermite filter continuity — simply
-				// clearing the resampler zeros the warm-up state, which would
-				// cause audible artifacts on every iteration)
+				// Snapshot the resampler so we can undo the hidden frames' effect on it
+				// (preserves hermite filter continuity across iterations)
 				S9xRunAheadSaveAudio();
 
-				// Hidden "commit" frame: no render, no throttle
 				Settings.InRunAhead = TRUE;
+
+				// First hidden frame: the "commit" frame — its state gets saved and
+				// becomes the starting point of the next iteration
 				IPPU.RenderThisFrame = FALSE;
 				S9xMainLoop();
-				Settings.InRunAhead = FALSE;
-
-				// Restore resampler state so the displayed frame's output flows
-				// on directly from the previous displayed frame's output
-				S9xRunAheadLoadAudio();
 
 				// Save state at end of the committed frame
 				S9xFreezeGameMem(runAheadBuf, runAheadBufSize);
+
+				// Additional hidden frames (peek further into the future)
+				for (int i = 1; i < numAheadFrames; i++)
+				{
+					IPPU.RenderThisFrame = FALSE;
+					S9xMainLoop();
+				}
+
+				Settings.InRunAhead = FALSE;
+
+				// Restore resampler state so the displayed frame's output flows on
+				// directly from the previous displayed frame's output
+				S9xRunAheadLoadAudio();
 
 				// Re-enable audio output for the displayed frame
 				S9xSetSamplesAvailableCallback(S9xSoundCallback, NULL);
@@ -4202,8 +4226,21 @@ static void CheckMenuStates ()
 	mii.fState = (GUI.InactivePause) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
 
-	mii.fState = Settings.RunAhead ? MFS_CHECKED : MFS_UNCHECKED;
-	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_RUNAHEAD, FALSE, &mii);
+	{
+		int runAheadIds[5] = {
+			ID_EMULATION_RUNAHEAD_OFF,
+			ID_EMULATION_RUNAHEAD_1,
+			ID_EMULATION_RUNAHEAD_2,
+			ID_EMULATION_RUNAHEAD_3,
+			ID_EMULATION_RUNAHEAD_4
+		};
+		int clamped = Settings.RunAhead < 0 ? 0 : (Settings.RunAhead > 4 ? 4 : Settings.RunAhead);
+		for (int i = 0; i < 5; i++)
+		{
+			mii.fState = (i == clamped) ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo(GUI.hMenu, runAheadIds[i], FALSE, &mii);
+		}
+	}
 
     mii.fState = MFS_UNCHECKED;
     if (Settings.StopEmulation)

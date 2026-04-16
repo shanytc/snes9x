@@ -315,8 +315,8 @@ struct SSettings
 	int	TwoClockCycles;
 	int	MaxSpriteTilesPerLine;
 
-	bool8	RunAhead;
-	bool8	InRunAhead;   // true while emulating the hidden "ahead" frame
+	int		RunAhead;     // 0 = off, 1-4 = number of frames to run ahead
+	bool8	InRunAhead;   // true while emulating a hidden "ahead" frame
 	bool8	ColorCorrection;
 	bool8	AdjustmentsEnabled;
 	int		Gamma;       // signed: -100..+100, 0 = no change

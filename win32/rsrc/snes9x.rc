@@ -1128,7 +1128,14 @@ BEGIN
         MENUITEM "Pause &When Inactive",        ID_EMULATION_PAUSEWHENINACTIVE,MFT_STRING,MFS_ENABLED
         MENUITEM "&Frame Advance",              ID_FRAME_ADVANCE,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        MENUITEM "Run &Ahead",                  ID_EMULATION_RUNAHEAD,MFT_STRING,MFS_ENABLED
+        POPUP "Run &Ahead",                     0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&0 (off)",                    ID_EMULATION_RUNAHEAD_OFF,MFT_STRING,MFS_ENABLED
+            MENUITEM "&1 frame",                    ID_EMULATION_RUNAHEAD_1,MFT_STRING,MFS_ENABLED
+            MENUITEM "&2 frames",                   ID_EMULATION_RUNAHEAD_2,MFT_STRING,MFS_ENABLED
+            MENUITEM "&3 frames",                   ID_EMULATION_RUNAHEAD_3,MFT_STRING,MFS_ENABLED
+            MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
+        END
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Hacks...",                   ID_EMULATION_HACKS,MFT_STRING,MFS_ENABLED
         MENUITEM "&Settings...\tAlt+F8",        ID_OPTIONS_SETTINGS,MFT_STRING,MFS_ENABLED

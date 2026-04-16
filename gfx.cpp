@@ -1912,6 +1912,12 @@ static void DisplayFrameRate (void)
 	static uint32 lastFrameCount = 0, calcFps = 0;
 	static time_t lastTime = time(NULL);
 
+	// With run-ahead enabled, each iteration emulates (RunAhead + 1) SNES
+	// frames but only one of them is displayed. Divide both FPS metrics by
+	// that multiplier so the counter reflects the logical game frame rate
+	// (target ~60) instead of raw emulation throughput.
+	uint32 runAheadMul = (Settings.RunAhead > 0) ? (uint32)Settings.RunAhead + 1 : 1;
+
 	time_t currTime = time(NULL);
 	if (lastTime != currTime) {
 		if (lastFrameCount < IPPU.TotalEmulatedFrames) {
@@ -1920,15 +1926,17 @@ static void DisplayFrameRate (void)
 		lastTime = currTime;
 		lastFrameCount = IPPU.TotalEmulatedFrames;
 	}
-	sprintf(string, "%u fps", calcFps);
+	sprintf(string, "%u fps", calcFps / runAheadMul);
 	S9xDisplayString(string, 2, IPPU.RenderedScreenWidth - (font_width - 1) * strlen(string) - 1, false);
+
+	uint32 displayedRendered = IPPU.DisplayedRenderedFrameCount * runAheadMul;
 
 #ifdef DEBUGGER
 	const int	len = 8;
-	sprintf(string, "%02d/%02d %02d", (int) IPPU.DisplayedRenderedFrameCount, (int) Memory.ROMFramesPerSecond, (int) IPPU.FrameCount);
+	sprintf(string, "%02d/%02d %02d", (int) displayedRendered, (int) Memory.ROMFramesPerSecond, (int) IPPU.FrameCount);
 #else
 	const int	len = 5;
-	sprintf(string, "%02d/%02d",      (int) IPPU.DisplayedRenderedFrameCount, (int) Memory.ROMFramesPerSecond);
+	sprintf(string, "%02d/%02d",      (int) displayedRendered, (int) Memory.ROMFramesPerSecond);
 #endif
 
 	S9xDisplayString(string, 1, IPPU.RenderedScreenWidth - (font_width - 1) * len - 1, false);

@@ -630,6 +630,9 @@
 #define IDC_BINDINGCOMBO_HK             3105
 #define IDC_AUTOASSIGN                  3106
 #define IDC_DEVICENAME                  3107
+#define IDC_MASTERHOTKEY_ENABLE         3108
+#define IDC_MASTERHOTKEY_BIND           3109
+#define IDC_LABEL_MASTERHOTKEY          3110
 #define ID_SOUND_MUTE                   40189
 #define IDC_STATIC                      -1
 

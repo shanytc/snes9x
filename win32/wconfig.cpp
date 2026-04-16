@@ -965,6 +965,9 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "Controls\\Win\\Hotkeys"
 	AddBool2C("Handler:Joystick", GUI.JoystickHotkeys, true, "on to detect game controller buttons assigned to hotkeys. May impact performance.");
+	AddBool2C("MasterHotkey:Enabled", GUI.MasterHotkeyEnabled, false, "on to require master key held for hotkeys to activate");
+	AddVKey("Key:MasterHotkey", CustomKeys.MasterHotkey.key, CustomKeys.MasterHotkey.key);
+	AddVKMod("Mods:MasterHotkey", CustomKeys.MasterHotkey.modifiers, CustomKeys.MasterHotkey.modifiers);
 #define ADD(x) AddVKey("Key:" #x , CustomKeys.x.key, CustomKeys.x.key); AddVKMod("Mods:" #x, CustomKeys.x.modifiers, CustomKeys.x.modifiers)
 #define ADDN(x,n2) AddVKey("Key:" #n2, CustomKeys.x.key, CustomKeys.x.key); AddVKMod("Mods:" #n2, CustomKeys.x.modifiers, CustomKeys.x.modifiers)
 	ADD(SpeedUp); ADD(SpeedDown); ADD(Pause); ADD(FrameAdvance);

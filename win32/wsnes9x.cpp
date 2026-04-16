@@ -815,6 +815,16 @@ static inline bool MatchesHotkeyBinding(WORD key, int modifiers, SCustomKey *pri
 	return false;
 }
 
+// Master hotkey hold timer state
+static DWORD masterKeyDownTime = 0;
+static bool masterKeyToggled = false;
+
+static void MasterHotkeyResetTimer()
+{
+	masterKeyDownTime = 0;
+	masterKeyToggled = false;
+}
+
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {
 	auto MatchesAnyBinding = [](WPARAM wParam, WORD primary, const WORD* extra) -> bool {
@@ -826,6 +836,32 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		}
 		return false;
 	};
+
+	// Master hotkey toggle: hold for 2 seconds to toggle hotkeys on/off
+	if (GUI.MasterHotkeyEnabled && CustomKeys.MasterHotkey.key != 0
+		&& CustomKeys.MasterHotkey.key != VK_ESCAPE)
+	{
+		if (wParam == CustomKeys.MasterHotkey.key)
+		{
+			DWORD now = timeGetTime();
+			if (masterKeyDownTime == 0)
+			{
+				masterKeyDownTime = now;
+				masterKeyToggled = false;
+			}
+			else if (!masterKeyToggled && (now - masterKeyDownTime >= 2000))
+			{
+				GUI.HotkeysActive = !GUI.HotkeysActive;
+				S9xSetInfoString(GUI.HotkeysActive ? "Hotkeys: ON" : "Hotkeys: OFF");
+				masterKeyToggled = true;
+			}
+			return 1; // master key never triggers other hotkeys
+		}
+
+		// If hotkeys are not active, suppress all other hotkey processing
+		if (!GUI.HotkeysActive)
+			return 1;
+	}
 
 	// update toggles
 	for (int J = 0; J < 5; J++)
@@ -1678,6 +1714,15 @@ LRESULT CALLBACK WinProc(
 				modifiers |= CUSTKEY_CTRL_MASK;
 			if(GetAsyncKeyState(VK_SHIFT)|| wParam == VK_SHIFT)
 				modifiers |= CUSTKEY_SHIFT_MASK;
+
+			// Master hotkey key-up: reset hold timer
+			// (the static vars are in HandleKeyMessage, so we reset via a sentinel call)
+			if (GUI.MasterHotkeyEnabled && CustomKeys.MasterHotkey.key != 0
+				&& CustomKeys.MasterHotkey.key != VK_ESCAPE
+				&& wParam == CustomKeys.MasterHotkey.key)
+			{
+				MasterHotkeyResetTimer();
+			}
 
 			if(HKmatch(FastForward))
 			{
@@ -3630,6 +3675,9 @@ int WINAPI WinMain(
     const TCHAR *rom_filename = WinParseCommandLineAndLoadConfigFile (GetCommandLine());
     WinSaveConfigFile ();
 	WinLockConfigFile ();
+
+	// When master hotkey is enabled, hotkeys start disabled until toggled on
+	GUI.HotkeysActive = !GUI.MasterHotkeyEnabled;
 
 	LoadExts();
 
@@ -9890,6 +9938,16 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		ShowWindow(GetDlgItem(hDlg, IDC_ALLOWMULTIBIND_HK), GUI.HotkeyMultiBindingMode ? SW_SHOW : SW_HIDE);
 		SetHotkeyMaxKeys(hDlg, GUI.HotkeyMultiBindingMode ? MAX_BIND_KEYS : 1);
 
+		// Initialize master hotkey controls
+		SendDlgItemMessage(hDlg, IDC_MASTERHOTKEY_ENABLE, BM_SETCHECK,
+			GUI.MasterHotkeyEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+		SendDlgItemMessage(hDlg, IDC_MASTERHOTKEY_BIND, WM_USER+47, 1, 0); // single key only
+		{
+			SCustomKey hk = CustomKeys.MasterHotkey;
+			SendDlgItemMessage(hDlg, IDC_MASTERHOTKEY_BIND, WM_USER+44, (WPARAM)&hk, -1);
+		}
+		EnableWindow(GetDlgItem(hDlg, IDC_MASTERHOTKEY_BIND), GUI.MasterHotkeyEnabled);
+
 		SetDlgItemText(hDlg,IDC_LABEL_BLUE,HOTKEYS_LABEL_BLUE);
 
 		set_hotkeyinfo(hDlg);
@@ -9938,6 +9996,12 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			STORE_HOTKEY_MULTIBIND(IDC_DIALOGLOAD, DialogLoad)
 			STORE_HOTKEY_MULTIBIND(IDC_BANKPLUS, BankPlus)
 			STORE_HOTKEY_MULTIBIND(IDC_BANKMINUS, BankMinus)
+			case IDC_MASTERHOTKEY_BIND:
+			{
+				CustomKeys.MasterHotkey.key = icp->numKeys > 0 ? icp->keys[0] : 0;
+				CustomKeys.MasterHotkey.modifiers = icp->numKeys > 0 ? icp->mods[0] : 0;
+				break;
+			}
 		}
 
         if(which >= IDC_HOTKEY1 && which <= IDC_HOTKEY14)
@@ -9996,8 +10060,14 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		case IDOK:
 			GUI.HotkeyMultiBindingMode = (SendDlgItemMessage(hDlg, IDC_BINDINGCOMBO_HK, CB_GETCURSEL, 0, 0) == 1);
 			GUI.AllowMultipleHotkeyBindings = GUI.HotkeyMultiBindingMode && (IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND_HK) != 0);
+			GUI.MasterHotkeyEnabled = (IsDlgButtonChecked(hDlg, IDC_MASTERHOTKEY_ENABLE) != 0);
 			WinSaveConfigFile();
 			EndDialog(hDlg,0);
+			break;
+
+		case IDC_MASTERHOTKEY_ENABLE:
+			EnableWindow(GetDlgItem(hDlg, IDC_MASTERHOTKEY_BIND),
+				IsDlgButtonChecked(hDlg, IDC_MASTERHOTKEY_ENABLE) != 0);
 			break;
 
 		case IDC_ALLOWMULTIBIND_HK:

@@ -76,6 +76,7 @@ void WinSetDefaultValues ()
 
 	GUI.ControllerOption = SNES_JOYPAD;
 	GUI.ValidControllerOptions = 0xFFFF;
+	GUI.SuperScopeCrosshairVisible = true;
 	GUI.IgnoreNextMouseMove	= false;
 
 	GUI.DoubleBuffered = false;

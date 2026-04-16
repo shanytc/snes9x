@@ -221,6 +221,7 @@ struct sGUI {
     int  MaxRecentGames;
 	int  ControllerOption;
 	int  ValidControllerOptions;
+	bool SuperScopeCrosshairVisible;
 	int  SoundChannelEnable;
 	bool BackgroundInput;
     bool BackgroundKeyHotkeys;

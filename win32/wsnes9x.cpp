@@ -48,6 +48,7 @@
 #include "kaillera_server.h"
 #include "../apu/apu.h"
 #include "../movie.h"
+#include "../crosshairs.h"
 #include "../controls.h"
 #include "../conffile.h"
 #include "../statemanager.h"
@@ -655,6 +656,10 @@ void ChangeInputDevice(void)
 		Settings.SuperScopeMaster = true;
 		S9xSetController(0, CTL_JOYPAD,     0, 0, 0, 0);
 		S9xSetController(1, CTL_SUPERSCOPE, 0, 0, 0, 0);
+		if (GUI.SuperScopeCrosshairVisible)
+			S9xSetControllerCrosshair(X_SUPERSCOPE, 2, "White", "Black");
+		else
+			S9xSetControllerCrosshair(X_SUPERSCOPE, 0, "Trans", "Trans");
 		break;
 	case SNES_MULTIPLAYER5:
 		Settings.MultiPlayer5Master = true;
@@ -1855,6 +1860,13 @@ LRESULT CALLBACK WinProc(
 			MOVIE_LOCKED_SETTING
 			GUI.ControllerOption = SNES_SUPERSCOPE;
 			ChangeInputDevice();
+			break;
+		case IDM_SCOPE_SHOW_CROSSHAIR:
+			GUI.SuperScopeCrosshairVisible = !GUI.SuperScopeCrosshairVisible;
+			if (GUI.SuperScopeCrosshairVisible)
+				S9xSetControllerCrosshair(X_SUPERSCOPE, 2, "White", "Black");
+			else
+				S9xSetControllerCrosshair(X_SUPERSCOPE, 0, "Trans", "Trans");
 			break;
 		case IDM_JUSTIFIER:
 			MOVIE_LOCKED_SETTING
@@ -4288,6 +4300,11 @@ static void CheckMenuStates ()
 	validFlag = (((1<<SNES_SUPERSCOPE) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;
     mii.fState = validFlag | (GUI.ControllerOption == SNES_SUPERSCOPE ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_SCOPE_TOGGLE, FALSE, &mii);
+
+	// "Show Crosshair" sub-item: only enabled when Super Scope is active, checked per visibility flag
+    mii.fState = (GUI.ControllerOption == SNES_SUPERSCOPE ? MFS_ENABLED : MFS_DISABLED)
+               | (GUI.SuperScopeCrosshairVisible ? MFS_CHECKED : MFS_UNCHECKED);
+    SetMenuItemInfo (GUI.hMenu, IDM_SCOPE_SHOW_CROSSHAIR, FALSE, &mii);
 
 	validFlag = (((1<<SNES_JUSTIFIER) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;
     mii.fState = validFlag | (GUI.ControllerOption == SNES_JUSTIFIER ? MFS_CHECKED : MFS_UNCHECKED);

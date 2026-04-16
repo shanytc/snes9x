@@ -1116,7 +1116,11 @@ BEGIN
         MENUITEM MFT_SEPARATOR
         MENUITEM "Use SNES Joypad(s)",          IDM_SNES_JOYPAD,MFT_STRING,MFS_ENABLED
         MENUITEM "Use SNES Mouse",              IDM_MOUSE_TOGGLE,MFT_STRING,MFS_ENABLED
-        MENUITEM "Use Super Scope",             IDM_SCOPE_TOGGLE,MFT_STRING,MFS_ENABLED
+        POPUP "Use Super Scope",                0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "Enable",                      IDM_SCOPE_TOGGLE,MFT_STRING,MFS_ENABLED
+            MENUITEM "Show Crosshair",              IDM_SCOPE_SHOW_CROSSHAIR,MFT_STRING,MFS_ENABLED
+        END
         MENUITEM "Use Super Multitap (5-player)", IDM_ENABLE_MULTITAP,MFT_STRING,MFS_ENABLED
         MENUITEM "Use Konami Justifier",        IDM_JUSTIFIER,MFT_STRING,MFS_ENABLED
         MENUITEM "Use Mouse in alternate port", IDM_MOUSE_SWAPPED,MFT_STRING,MFS_ENABLED

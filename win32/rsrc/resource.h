@@ -557,6 +557,7 @@
 #define ID_FILE_LOAD_OOPS               44330
 #define ID_FILE_LOAD_FILE               44331
 #define IDM_MACSRIFLE_TOGGLE            44332
+#define IDM_SCOPE_SHOW_CROSSHAIR        44350
 #define ID_KAILLERA_NETPLAY             44333
 #define ID_KAILLERA_HOST_SERVER         44334
 #define IDD_KAILLERA_SERVER             170

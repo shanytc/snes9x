@@ -634,15 +634,29 @@
 #define IDC_MASTERHOTKEY_BIND           3109
 #define IDC_LABEL_MASTERHOTKEY          3110
 #define ID_SOUND_MUTE                   40189
+#define ID_EMULATION_RUNAHEAD           40190
+#define ID_VIDEO_COLORCORRECTION        40191
+
+#define IDD_COLORCORRECTION             176
+#define IDC_COLOR_CORRECTION_ENABLE     3111
+#define IDC_SLIDER_GAMMA                3112
+#define IDC_SLIDER_CONTRAST             3113
+#define IDC_SLIDER_SATURATION           3114
+#define IDC_EDIT_GAMMA                  3115
+#define IDC_EDIT_CONTRAST               3116
+#define IDC_EDIT_SATURATION             3117
+#define IDC_DEFAULTS_COLOR              3118
+#define IDC_ADJUSTMENTS_ENABLE          3119
+
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        172
-#define _APS_NEXT_COMMAND_VALUE         40190
-#define _APS_NEXT_CONTROL_VALUE         3061
+#define _APS_NEXT_RESOURCE_VALUE        177
+#define _APS_NEXT_COMMAND_VALUE         40192
+#define _APS_NEXT_CONTROL_VALUE         3120
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

@@ -208,6 +208,7 @@ void S9xSetCPU (uint8, uint16);
 uint8 S9xGetCPU (uint16);
 void S9xUpdateIRQPositions (bool initial);
 void S9xFixColourBrightness (void);
+void S9xApplyColorAdjustments (uint8 &r, uint8 &g, uint8 &b, int maxVal);
 void S9xDoAutoJoypad (void);
 
 #include "gfx.h"
@@ -554,10 +555,16 @@ static inline void REGISTER_2122 (uint8 Byte)
 			FLUSH_REDRAW();
 			PPU.CGDATA[PPU.CGADD] = (Byte & 0x7f) << 8 | PPU.CGSavedByte;
 			IPPU.ColorsChanged = TRUE;
-			IPPU.Red[PPU.CGADD] = IPPU.XB[PPU.CGSavedByte & 0x1f];
-			IPPU.Blue[PPU.CGADD] = IPPU.XB[(Byte >> 2) & 0x1f];
-			IPPU.Green[PPU.CGADD] = IPPU.XB[(PPU.CGDATA[PPU.CGADD] >> 5) & 0x1f];
-			IPPU.ScreenColors[PPU.CGADD] = (uint16) BUILD_PIXEL(IPPU.Red[PPU.CGADD], IPPU.Green[PPU.CGADD], IPPU.Blue[PPU.CGADD]);
+			{
+				uint8 r = IPPU.XB[PPU.CGSavedByte & 0x1f];
+				uint8 b = IPPU.XB[(Byte >> 2) & 0x1f];
+				uint8 g = IPPU.XB[(PPU.CGDATA[PPU.CGADD] >> 5) & 0x1f];
+				S9xApplyColorAdjustments(r, g, b, 0x1f);
+				IPPU.Red[PPU.CGADD]   = r;
+				IPPU.Green[PPU.CGADD] = g;
+				IPPU.Blue[PPU.CGADD]  = b;
+				IPPU.ScreenColors[PPU.CGADD] = (uint16) BUILD_PIXEL(r, g, b);
+			}
 		}
 
 		PPU.CGADD++;

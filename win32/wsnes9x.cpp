@@ -103,6 +103,7 @@ INT_PTR CALLBACK DlgInfoProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgAboutProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgEmulatorHacksProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
 INT_PTR CALLBACK DlgOpenROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgMultiROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -2385,6 +2386,12 @@ LRESULT CALLBACK WinProc(
 		case ID_VIDEO_SHOWFRAMERATE:
 			Settings.DisplayFrameRate = !Settings.DisplayFrameRate;
 			break;
+		case ID_VIDEO_COLORCORRECTION:
+			RestoreGUIDisplay();
+			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_COLORCORRECTION), hWnd, DlgColorCorrectionProc);
+			RestoreSNESDisplay();
+			S9xFixColourBrightness();
+			break;
 		case ID_SAVESCREENSHOT:
 			Settings.TakeScreenshot=true;
 			break;
@@ -2488,6 +2495,9 @@ LRESULT CALLBACK WinProc(
 			break;
 		case ID_EMULATION_PAUSEWHENINACTIVE:
 			GUI.InactivePause = !GUI.InactivePause;
+			break;
+		case ID_EMULATION_RUNAHEAD:
+			Settings.RunAhead = !Settings.RunAhead;
 			break;
 		case ID_OPTIONS_SETTINGS:
 			RestoreGUIDisplay ();
@@ -3865,7 +3875,65 @@ int WINAPI WinMain(
 				}
 			}
 
-			S9xMainLoop();
+			if (Settings.RunAhead && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
+			{
+				// Run-ahead: commit the hidden frame silently, save state, run the displayed
+				// frame as a preview, then restore. The displayed frame shows what the game
+				// will look like 1 frame in the future given the current input.
+				static uint32 runAheadBufSize = 0;
+				static uint8 *runAheadBuf = nullptr;
+
+				// Minimize per-frame overhead:
+				// - drop the ~500KB screenshot from the state
+				// - enable fast path (skips 512KB screen memset + memory zeroing on load)
+				// - detach the sample-available callback during the hidden frame so its
+				//   audio never reaches the OS buffer; otherwise we push 2 frames of audio
+				//   per iteration and the buffer fills faster than it drains, throttling
+				//   us to ~30 iterations/sec
+				bool8 savedScreenshots = Settings.SnapshotScreenshots;
+				bool8 savedFast = Settings.FastSavestates;
+				Settings.SnapshotScreenshots = FALSE;
+				Settings.FastSavestates = TRUE;
+
+				// Allocate the state buffer once per session. S9xFreezeSize() is expensive
+				// (it does a full dry-run serialization), so cache the result.
+				if (!runAheadBuf) {
+					runAheadBufSize = S9xFreezeSize();
+					runAheadBuf = new uint8[runAheadBufSize];
+				}
+
+				// Suppress audio output for the hidden frame
+				S9xSetSamplesAvailableCallback(NULL, NULL);
+
+				// Hidden "commit" frame: no render, no throttle
+				Settings.InRunAhead = TRUE;
+				IPPU.RenderThisFrame = FALSE;
+				S9xMainLoop();
+				Settings.InRunAhead = FALSE;
+
+				// Drop samples the APU accumulated during the hidden frame
+				S9xClearSamples();
+
+				// Save state at end of the committed frame
+				S9xFreezeGameMem(runAheadBuf, runAheadBufSize);
+
+				// Re-enable audio output for the displayed frame
+				S9xSetSamplesAvailableCallback(S9xSoundCallback, NULL);
+
+				// Displayed "preview" frame: renders and throttles normally
+				IPPU.RenderThisFrame = TRUE;
+				S9xMainLoop();
+
+				// Restore to end-of-committed-frame so next iteration starts from there
+				S9xUnfreezeGameMem(runAheadBuf, runAheadBufSize);
+
+				Settings.SnapshotScreenshots = savedScreenshots;
+				Settings.FastSavestates = savedFast;
+			}
+			else
+			{
+				S9xMainLoop();
+			}
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			RA_DoFrame();
 #endif
@@ -4126,6 +4194,9 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.InactivePause) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
+
+	mii.fState = Settings.RunAhead ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_RUNAHEAD, FALSE, &mii);
 
     mii.fState = MFS_UNCHECKED;
     if (Settings.StopEmulation)
@@ -5679,6 +5750,120 @@ INT_PTR CALLBACK DlgEmulatorHacksProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM
     default:
         return false;
     }
+}
+
+static void UpdateColorSliderText(HWND hDlg, int sliderId, int editId)
+{
+	int pos = (int)SendDlgItemMessage(hDlg, sliderId, TBM_GETPOS, 0, 0);
+	TCHAR buf[16];
+	if (pos > 0)
+		_sntprintf(buf, 16, TEXT("+%d"), pos);
+	else
+		_sntprintf(buf, 16, TEXT("%d"), pos);
+	SetDlgItemText(hDlg, editId, buf);
+}
+
+static void EnableAdjustmentSliders(HWND hDlg, BOOL enable)
+{
+	EnableWindow(GetDlgItem(hDlg, IDC_SLIDER_GAMMA), enable);
+	EnableWindow(GetDlgItem(hDlg, IDC_SLIDER_CONTRAST), enable);
+	EnableWindow(GetDlgItem(hDlg, IDC_SLIDER_SATURATION), enable);
+	EnableWindow(GetDlgItem(hDlg, IDC_EDIT_GAMMA), enable);
+	EnableWindow(GetDlgItem(hDlg, IDC_EDIT_CONTRAST), enable);
+	EnableWindow(GetDlgItem(hDlg, IDC_EDIT_SATURATION), enable);
+}
+
+INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	static bool prevColorCorrection;
+	static bool prevAdjustmentsEnabled;
+	static int prevGamma, prevContrast, prevSaturation;
+
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+		prevColorCorrection = Settings.ColorCorrection;
+		prevAdjustmentsEnabled = Settings.AdjustmentsEnabled;
+		prevGamma = Settings.Gamma;
+		prevContrast = Settings.Contrast;
+		prevSaturation = Settings.Saturation;
+
+		CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE, Settings.ColorCorrection ? BST_CHECKED : BST_UNCHECKED);
+		CheckDlgButton(hDlg, IDC_ADJUSTMENTS_ENABLE, Settings.AdjustmentsEnabled ? BST_CHECKED : BST_UNCHECKED);
+
+		SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETRANGE, TRUE, MAKELONG(-100, 100));
+		SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETPOS, TRUE, Settings.Gamma);
+		SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETTICFREQ, 25, 0);
+
+		SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_SETRANGE, TRUE, MAKELONG(-100, 100));
+		SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_SETPOS, TRUE, Settings.Contrast);
+		SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_SETTICFREQ, 25, 0);
+
+		SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_SETRANGE, TRUE, MAKELONG(-100, 100));
+		SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_SETPOS, TRUE, Settings.Saturation);
+		SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_SETTICFREQ, 25, 0);
+
+		UpdateColorSliderText(hDlg, IDC_SLIDER_GAMMA, IDC_EDIT_GAMMA);
+		UpdateColorSliderText(hDlg, IDC_SLIDER_CONTRAST, IDC_EDIT_CONTRAST);
+		UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
+
+		EnableAdjustmentSliders(hDlg, Settings.AdjustmentsEnabled);
+
+		return TRUE;
+
+	case WM_HSCROLL:
+	{
+		HWND trackHwnd = (HWND)lParam;
+		if (trackHwnd == GetDlgItem(hDlg, IDC_SLIDER_GAMMA))
+			UpdateColorSliderText(hDlg, IDC_SLIDER_GAMMA, IDC_EDIT_GAMMA);
+		else if (trackHwnd == GetDlgItem(hDlg, IDC_SLIDER_CONTRAST))
+			UpdateColorSliderText(hDlg, IDC_SLIDER_CONTRAST, IDC_EDIT_CONTRAST);
+		else if (trackHwnd == GetDlgItem(hDlg, IDC_SLIDER_SATURATION))
+			UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
+		return TRUE;
+	}
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDC_ADJUSTMENTS_ENABLE:
+			EnableAdjustmentSliders(hDlg, IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED);
+			return TRUE;
+
+		case IDOK:
+			Settings.ColorCorrection = IsDlgButtonChecked(hDlg, IDC_COLOR_CORRECTION_ENABLE) == BST_CHECKED;
+			Settings.AdjustmentsEnabled = IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED;
+			Settings.Gamma = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_GETPOS, 0, 0);
+			Settings.Contrast = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_GETPOS, 0, 0);
+			Settings.Saturation = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_GETPOS, 0, 0);
+			EndDialog(hDlg, 1);
+			return TRUE;
+
+		case IDCANCEL:
+			Settings.ColorCorrection = prevColorCorrection;
+			Settings.AdjustmentsEnabled = prevAdjustmentsEnabled;
+			Settings.Gamma = prevGamma;
+			Settings.Contrast = prevContrast;
+			Settings.Saturation = prevSaturation;
+			EndDialog(hDlg, 0);
+			return TRUE;
+
+		case IDC_DEFAULTS_COLOR:
+			CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE, BST_UNCHECKED);
+			CheckDlgButton(hDlg, IDC_ADJUSTMENTS_ENABLE, BST_UNCHECKED);
+			SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETPOS, TRUE, 0);
+			SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_SETPOS, TRUE, 0);
+			SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_SETPOS, TRUE, 0);
+			UpdateColorSliderText(hDlg, IDC_SLIDER_GAMMA, IDC_EDIT_GAMMA);
+			UpdateColorSliderText(hDlg, IDC_SLIDER_CONTRAST, IDC_EDIT_CONTRAST);
+			UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
+			EnableAdjustmentSliders(hDlg, FALSE);
+			return TRUE;
+		}
+		break;
+	}
+
+	return FALSE;
 }
 
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)

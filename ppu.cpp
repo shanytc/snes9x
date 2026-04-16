@@ -4,6 +4,7 @@
    For further information, consult the LICENSE file in the root directory.
 \*****************************************************************************/
 
+#include <math.h>
 #include "snes9x.h"
 #include "memmap.h"
 #include "dma.h"
@@ -185,6 +186,73 @@ void S9xUpdateIRQPositions (bool initial)
 #endif
 }
 
+static inline uint8 ClampColor (int v, int max)
+{
+	if (v < 0) return 0;
+	if (v > max) return (uint8)max;
+	return (uint8)v;
+}
+
+void S9xApplyColorAdjustments (uint8 &r, uint8 &g, uint8 &b, int maxVal)
+{
+	bool needsCorrection = Settings.ColorCorrection;
+	bool needsAdjustment = Settings.AdjustmentsEnabled &&
+		(Settings.Gamma != 0 || Settings.Contrast != 0 || Settings.Saturation != 0);
+
+	if (!needsCorrection && !needsAdjustment)
+		return;
+
+	double fr = (double)r / maxVal;
+	double fg = (double)g / maxVal;
+	double fb = (double)b / maxVal;
+
+	// Color correction: apply gamma curve to simulate SNES CRT output
+	// Real SNES DAC output viewed on a CRT has an effective gamma of ~1.8
+	if (needsCorrection)
+	{
+		double gamma = 1.8 / 2.2;
+		fr = pow(fr, gamma);
+		fg = pow(fg, gamma);
+		fb = pow(fb, gamma);
+	}
+
+	if (needsAdjustment)
+	{
+		// Gamma: slider left=darker, right=brighter. Exponential symmetric mapping.
+		// gamma exponent = 2^(-v/100): v=-100 -> 2.0 (darker), v=+100 -> 0.5 (brighter)
+		if (Settings.Gamma != 0)
+		{
+			double gammaExp = pow(2.0, -Settings.Gamma / 100.0);
+			fr = pow(fr, gammaExp);
+			fg = pow(fg, gammaExp);
+			fb = pow(fb, gammaExp);
+		}
+
+		// Contrast: linear around 0.5. v=-100 -> 0 (flat gray), v=+100 -> 2x contrast
+		if (Settings.Contrast != 0)
+		{
+			double contrast = 1.0 + Settings.Contrast / 100.0;
+			fr = (fr - 0.5) * contrast + 0.5;
+			fg = (fg - 0.5) * contrast + 0.5;
+			fb = (fb - 0.5) * contrast + 0.5;
+		}
+
+		// Saturation: v=-100 -> grayscale, v=+100 -> 2x saturated
+		if (Settings.Saturation != 0)
+		{
+			double luma = 0.2126 * fr + 0.7152 * fg + 0.0722 * fb;
+			double sat = 1.0 + Settings.Saturation / 100.0;
+			fr = luma + (fr - luma) * sat;
+			fg = luma + (fg - luma) * sat;
+			fb = luma + (fb - luma) * sat;
+		}
+	}
+
+	r = ClampColor((int)(fr * maxVal + 0.5), maxVal);
+	g = ClampColor((int)(fg * maxVal + 0.5), maxVal);
+	b = ClampColor((int)(fb * maxVal + 0.5), maxVal);
+}
+
 void S9xFixColourBrightness (void)
 {
 	IPPU.XB = mul_brightness[PPU.Brightness];
@@ -199,10 +267,16 @@ void S9xFixColourBrightness (void)
 
 	for (int i = 0; i < 256; i++)
 	{
-		IPPU.Red[i]   = IPPU.XB[(PPU.CGDATA[i])       & 0x1f];
-		IPPU.Green[i] = IPPU.XB[(PPU.CGDATA[i] >>  5) & 0x1f];
-		IPPU.Blue[i]  = IPPU.XB[(PPU.CGDATA[i] >> 10) & 0x1f];
-		IPPU.ScreenColors[i] = BUILD_PIXEL(IPPU.Red[i], IPPU.Green[i], IPPU.Blue[i]);
+		uint8 r = IPPU.XB[(PPU.CGDATA[i])       & 0x1f];
+		uint8 g = IPPU.XB[(PPU.CGDATA[i] >>  5) & 0x1f];
+		uint8 b = IPPU.XB[(PPU.CGDATA[i] >> 10) & 0x1f];
+
+		S9xApplyColorAdjustments(r, g, b, 0x1f);
+
+		IPPU.Red[i]   = r;
+		IPPU.Green[i] = g;
+		IPPU.Blue[i]  = b;
+		IPPU.ScreenColors[i] = BUILD_PIXEL(r, g, b);
 	}
 }
 

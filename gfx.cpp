@@ -148,8 +148,16 @@ void S9xBuildDirectColourMaps (void)
 	IPPU.XB = mul_brightness[PPU.Brightness];
 
 	for (uint32 p = 0; p < 8; p++)
+	{
 		for (uint32 c = 0; c < 256; c++)
-			DirectColourMaps[p][c] = BUILD_PIXEL(IPPU.XB[((c & 7) << 2) | ((p & 1) << 1)], IPPU.XB[((c & 0x38) >> 1) | (p & 2)], IPPU.XB[((c & 0xc0) >> 3) | (p & 4)]);
+		{
+			uint8 r = IPPU.XB[((c & 7) << 2) | ((p & 1) << 1)];
+			uint8 g = IPPU.XB[((c & 0x38) >> 1) | (p & 2)];
+			uint8 b = IPPU.XB[((c & 0xc0) >> 3) | (p & 4)];
+			S9xApplyColorAdjustments(r, g, b, 0x1f);
+			DirectColourMaps[p][c] = BUILD_PIXEL(r, g, b);
+		}
+	}
 }
 
 void S9xStartScreenRefresh (void)

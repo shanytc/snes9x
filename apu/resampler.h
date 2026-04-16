@@ -12,6 +12,15 @@
 #include <cstdint>
 #include <cmath>
 
+struct ResamplerState
+{
+    int   start;
+    int   end;
+    float r_frac;
+    int   r_left[4];
+    int   r_right[4];
+};
+
 class Resampler
 {
   public:
@@ -242,6 +251,29 @@ class Resampler
         buffer_size = num_samples;
         buffer = new int16_t[buffer_size];
         clear();
+    }
+
+    // Save/restore resampler control state (ring-buffer positions, phase
+    // accumulator, hermite history). Used by run-ahead to undo the effect of
+    // the hidden frame's audio generation on the resampler without resetting
+    // hermite warm-up state (which would cause audio artifacts on every
+    // iteration).
+    void save_state(ResamplerState &s) const
+    {
+        s.start = start;
+        s.end = end;
+        s.r_frac = r_frac;
+        memcpy(s.r_left, r_left, sizeof(r_left));
+        memcpy(s.r_right, r_right, sizeof(r_right));
+    }
+
+    void load_state(const ResamplerState &s)
+    {
+        start = s.start;
+        end = s.end;
+        r_frac = s.r_frac;
+        memcpy(r_left, s.r_left, sizeof(r_left));
+        memcpy(r_right, s.r_right, sizeof(r_right));
     }
 };
 

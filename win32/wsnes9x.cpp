@@ -3905,14 +3905,21 @@ int WINAPI WinMain(
 				// Suppress audio output for the hidden frame
 				S9xSetSamplesAvailableCallback(NULL, NULL);
 
+				// Snapshot the resampler so we can undo the hidden frame's
+				// effect on it (preserves hermite filter continuity — simply
+				// clearing the resampler zeros the warm-up state, which would
+				// cause audible artifacts on every iteration)
+				S9xRunAheadSaveAudio();
+
 				// Hidden "commit" frame: no render, no throttle
 				Settings.InRunAhead = TRUE;
 				IPPU.RenderThisFrame = FALSE;
 				S9xMainLoop();
 				Settings.InRunAhead = FALSE;
 
-				// Drop samples the APU accumulated during the hidden frame
-				S9xClearSamples();
+				// Restore resampler state so the displayed frame's output flows
+				// on directly from the previous displayed frame's output
+				S9xRunAheadLoadAudio();
 
 				// Save state at end of the committed frame
 				S9xFreezeGameMem(runAheadBuf, runAheadBufSize);

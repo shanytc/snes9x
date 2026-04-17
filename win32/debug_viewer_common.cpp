@@ -91,6 +91,9 @@ void BlitTile8x8BGRA(const uint8 tile[64], const uint32 palBGRA[256],
                      int paletteOffset, int tileIndexMask,
                      uint32 *dstBGRA, int dstStridePixels,
                      int dstX, int dstY, bool hflip, bool vflip) {
+    // Index 0 is transparent — leave the destination pixel untouched so the
+    // caller's pre-fill (usually palette[0], the SNES backdrop) shows through.
+    // This matches bsnes-plus BaseRenderer::draw8pxTile behaviour.
     for (int y = 0; y < 8; ++y) {
         int srcY = vflip ? (7 - y) : y;
         uint32 *dstRow = dstBGRA + (dstY + y) * dstStridePixels + dstX;
@@ -98,6 +101,7 @@ void BlitTile8x8BGRA(const uint8 tile[64], const uint32 palBGRA[256],
             int srcX = hflip ? (7 - x) : x;
             int idx = tile[srcY * 8 + srcX];
             if (tileIndexMask) idx &= tileIndexMask;
+            if (idx == 0) continue;
             int palIdx = (paletteOffset + idx) & 0xFF;
             dstRow[x] = palBGRA[palIdx];
         }

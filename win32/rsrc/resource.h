@@ -686,6 +686,15 @@
 #define IDC_VRAMV_PALROW                3141
 #define IDC_VRAMV_ZOOM                  3142
 #define IDC_VRAMV_INFO                  3143
+#define IDC_VRAMV_SHOWGRID              3200
+#define IDC_VRAMV_SOURCE                3201
+#define IDC_VRAMV_ADDRESS               3202
+#define IDC_VRAMV_PREV                  3203
+#define IDC_VRAMV_NEXT                  3204
+#define IDC_VRAMV_BITDEPTH              3205
+#define IDC_VRAMV_WIDTH                 3206
+#define IDC_VRAMV_WIDTH_SPIN            3207
+#define IDC_VRAMV_TILEINFO              3208
 
 #define IDC_TMV_CANVAS                  3150
 #define IDC_TMV_AUTOUPDATE              3151
@@ -720,7 +729,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        180
 #define _APS_NEXT_COMMAND_VALUE         40203
-#define _APS_NEXT_CONTROL_VALUE         3180
+#define _APS_NEXT_CONTROL_VALUE         3220
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

@@ -56,7 +56,6 @@ struct SPVState {
     // Pan offset for screen canvas.
     int screenViewX, screenViewY;
     int screenCurW, screenCurH; // always (kScreenW, kScreenH)
-    int screenZoom;             // pan helper needs its own slot; we reuse zoom=1 for pixel clamp
 };
 
 SPVState *GetState(HWND hDlg) {
@@ -307,22 +306,20 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
     int h = dis->rcItem.bottom - dis->rcItem.top;
 
     if (dis->CtlID == IDC_SPV_PREVIEW && st->previewBmp) {
+        // Preview renders the single selected sprite 1:1 centred; no user zoom.
+        FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
         HDC memDC = CreateCompatibleDC(dis->hDC);
         HGDIOBJ oldBmp = SelectObject(memDC, st->previewBmp);
-        int scale = st->zoom < 1 ? 1 : st->zoom;
-        int drawW = kPreviewSrc * scale;
-        int drawH = kPreviewSrc * scale;
-        if (drawW > w) drawW = w;
-        if (drawH > h) drawH = h;
-        FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        int drawW = kPreviewSrc; if (drawW > w) drawW = w;
+        int drawH = kPreviewSrc; if (drawH > h) drawH = h;
         SetStretchBltMode(dis->hDC, COLORONCOLOR);
         StretchBlt(dis->hDC, 0, 0, drawW, drawH,
-                   memDC, 0, 0, drawW / scale, drawH / scale, SRCCOPY);
+                   memDC, 0, 0, drawW, drawH, SRCCOPY);
         SelectObject(memDC, oldBmp);
         DeleteDC(memDC);
     } else if (dis->CtlID == IDC_SPV_SCREEN && st->screenBmp) {
         FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
-        int scale = 1; // screen view drawn at 1:1; drag-pan handles oversize
+        int scale = st->zoom < 1 ? 1 : st->zoom;
         int srcW = w / scale;
         int srcH = h / scale;
         if (srcW > kScreenW - st->screenViewX) srcW = kScreenW - st->screenViewX;
@@ -404,7 +401,6 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         st->screenViewY = 0;
         st->screenCurW = kScreenW;
         st->screenCurH = kScreenH;
-        st->screenZoom = 1;
         SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)st);
 
         CheckDlgButton(hDlg, IDC_SPV_AUTOUPDATE, BST_CHECKED);
@@ -422,7 +418,7 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
         InstallDragPan(GetDlgItem(hDlg, IDC_SPV_SCREEN),
                        &st->screenViewX, &st->screenViewY,
-                       &st->screenZoom, &st->screenCurW, &st->screenCurH);
+                       &st->zoom, &st->screenCurW, &st->screenCurH);
 
         DebugViewers_Register(hDlg, &st->autoUpdate);
         Refresh(hDlg);
@@ -484,7 +480,9 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 int sel = (int)SendDlgItemMessage(hDlg, IDC_SPV_ZOOM, CB_GETCURSEL, 0, 0);
                 if (sel >= 0) {
                     st->zoom = sel + 1;
-                    InvalidateRect(GetDlgItem(hDlg, IDC_SPV_PREVIEW), NULL, FALSE);
+                    st->screenViewX = 0;
+                    st->screenViewY = 0;
+                    InvalidateRect(GetDlgItem(hDlg, IDC_SPV_SCREEN), NULL, FALSE);
                 }
             }
             return TRUE;

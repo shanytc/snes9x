@@ -376,7 +376,16 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
         SelectObject(memDC, oldBmp);
         DeleteDC(memDC);
     } else if (dis->CtlID == IDC_SPV_SCREEN && st->screenBmp) {
-        FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        // Fill the widget with the user's selected Background color so the
+        // area outside the 512x256 source matches the DIB's backdrop.
+        uint32 pal[256];
+        SnapshotPaletteBGRA(pal);
+        uint32 argb = BackgroundColor(st, pal);
+        HBRUSH hbr = CreateSolidBrush(RGB((argb >> 16) & 0xFF,
+                                          (argb >>  8) & 0xFF,
+                                          (argb      ) & 0xFF));
+        FillRect(dis->hDC, &dis->rcItem, hbr);
+        DeleteObject(hbr);
         int scale = st->zoom < 1 ? 1 : st->zoom;
         int srcW = w / scale;
         int srcH = h / scale;

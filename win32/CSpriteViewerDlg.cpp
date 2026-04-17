@@ -78,19 +78,25 @@ void SpriteDims(int sizeSel, bool isLarge, int *w, int *h) {
     else         { *w = d[0]; *h = d[1]; }
 }
 
-// Address of sprite tile `n` (0..511) using live OBJ tile-base registers.
+// Address of sprite tile `n` (0..511), matching snes9x tileimpl.h:
+//   TileAddr = OBJNameBase + (tile & 0x3FF) * 32
+//   if (tile & 0x100) TileAddr += OBJNameSelect
+// tileNum * 32 already covers the offset into the second tile table; only
+// the NameSelect gap is added for tiles with bit 8 set.
 uint32 SpriteTileAddr(uint16 tileNum) {
-    return (PPU.OBJNameBase + tileNum * 32 +
-            (tileNum >= 256 ? (PPU.OBJNameSelect + 0x2000) : 0)) & 0xFFFF;
+    uint32 a = PPU.OBJNameBase + (tileNum & 0x3FF) * 32;
+    if (tileNum & 0x100) a += PPU.OBJNameSelect;
+    return a & 0xFFFF;
 }
 
 // Build the tile index for row/column (dx, dy) within an obj.Name base.
-// Sprite tile rows are 16 tiles wide; wrap the column nibble within the
-// same row.
+// Sprite tile rows are 16 tiles wide and wrap within the current name
+// table (bit 8 is preserved; row/col wrap in their 4-bit fields).
 uint16 SpriteSubTile(uint16 name, int dx, int dy) {
-    uint16 col = (uint16)((name + dx) & 0x0F);
-    uint16 row = (uint16)((name + dy * 16) & 0xFF0);
-    return (uint16)(col | row);
+    uint16 table = (uint16)(name & 0x100);
+    uint16 col   = (uint16)((name + dx)       & 0x00F);
+    uint16 row   = (uint16)((name + dy * 16)  & 0x0F0);
+    return (uint16)(table | row | col);
 }
 
 // Draw one sprite into a BGRA buffer of the given stride, at canvas (cx, cy).

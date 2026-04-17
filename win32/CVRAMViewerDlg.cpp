@@ -8,6 +8,7 @@
 
 #include "CVRAMViewerDlg.h"
 #include "debug_viewer_common.h"
+#include "debug_viewer_export.h"
 #include "wsnes9x.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
@@ -414,6 +415,39 @@ void StepAddress(HWND hDlg, VRAMState *st, bool forward) {
     RedrawTiles(hDlg);
 }
 
+// Save the current tile grid (source image from st->tileBits) as a PNG.
+// The grid overlay is omitted regardless of the Show Grid checkbox.
+void ExportTilesToPng(HWND hDlg) {
+    VRAMState *st = GetState(hDlg);
+    if (!st || !st->tileBits) return;
+
+    bool savedGrid = st->showGrid;
+    st->showGrid = false;
+    RedrawTiles(hDlg); // rewrite st->tileBits without the grid
+
+    int w = st->curSrcW, h = st->curSrcH;
+    TCHAR path[MAX_PATH];
+    bool cancelled = false;
+    bool ok = false;
+    if (w > 0 && h > 0) {
+        if (ShowSaveDialog(hDlg, path, MAX_PATH, _T("tiles.png"),
+                           _T("PNG Image (*.png)\0*.png\0All Files (*.*)\0*.*\0\0"),
+                           _T("png"))) {
+            ok = WritePngFile(path, w, h, kSrcMax, st->tileBits);
+        } else {
+            cancelled = true;
+        }
+    }
+
+    st->showGrid = savedGrid;
+    RedrawTiles(hDlg);
+
+    if (!cancelled && !ok) {
+        MessageBox(hDlg, _T("Failed to save PNG"),
+                   _T("Export"), MB_OK | MB_ICONERROR);
+    }
+}
+
 INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_INITDIALOG: {
@@ -466,6 +500,29 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
         RefreshBaseAddresses(hDlg);
         RedrawPalette(hDlg);
         RedrawTiles(hDlg);
+        return TRUE;
+    }
+
+    case WM_CONTEXTMENU: {
+        HWND hSrc = (HWND)wParam;
+        HWND hCanvas = GetDlgItem(hDlg, IDC_VRAMV_CANVAS);
+        if (hSrc != hCanvas) break;
+
+        int x = (short)LOWORD(lParam);
+        int y = (short)HIWORD(lParam);
+        if (x == -1 && y == -1) {
+            RECT rc; GetWindowRect(hCanvas, &rc);
+            x = rc.left + 20;
+            y = rc.top  + 20;
+        }
+
+        HMENU hMenu = CreatePopupMenu();
+        AppendMenu(hMenu, MF_STRING, 1, _T("Export to PNG..."));
+        int cmd = TrackPopupMenu(hMenu,
+                                 TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                 x, y, 0, hDlg, NULL);
+        DestroyMenu(hMenu);
+        if (cmd == 1) ExportTilesToPng(hDlg);
         return TRUE;
     }
 

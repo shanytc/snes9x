@@ -7,6 +7,7 @@
 
 #include "CTilemapViewerDlg.h"
 #include "debug_viewer_common.h"
+#include "debug_viewer_export.h"
 #include "wsnes9x.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
@@ -461,6 +462,40 @@ void ReadCustomFieldsFromUI(HWND hDlg, TMVState *st) {
     if (ParseHex(buf, &v)) st->overrideTileAddr = v & 0xFFFF;
 }
 
+// Save the current tilemap content as a PNG. The grid overlay is excluded
+// regardless of the Show Grid checkbox (analogous to the Sprite Viewer's
+// Screen export which also omits the outline).
+void ExportTilemapToPng(HWND hDlg) {
+    TMVState *st = GetState(hDlg);
+    if (!st || !st->bits) return;
+
+    bool savedGrid = st->showGrid;
+    st->showGrid = false;
+    Render(hDlg);   // redraw st->bits without the grid overlay
+
+    int w = st->curSrcW, h = st->curSrcH;
+    TCHAR path[MAX_PATH];
+    bool cancelled = false;
+    bool ok = false;
+    if (w > 0 && h > 0) {
+        if (ShowSaveDialog(hDlg, path, MAX_PATH, _T("tilemap.png"),
+                           _T("PNG Image (*.png)\0*.png\0All Files (*.*)\0*.*\0\0"),
+                           _T("png"))) {
+            ok = WritePngFile(path, w, h, kSrcMax, st->bits);
+        } else {
+            cancelled = true;
+        }
+    }
+
+    st->showGrid = savedGrid;
+    Render(hDlg);   // restore the grid overlay if it was on
+
+    if (!cancelled && !ok) {
+        MessageBox(hDlg, _T("Failed to save PNG"),
+                   _T("Export"), MB_OK | MB_ICONERROR);
+    }
+}
+
 INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_INITDIALOG: {
@@ -514,6 +549,29 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
         TMVState *st = GetState(hDlg);
         if (st) SeedAutoFields(hDlg, st);
         Render(hDlg);
+        return TRUE;
+    }
+
+    case WM_CONTEXTMENU: {
+        HWND hSrc = (HWND)wParam;
+        HWND hCanvas = GetDlgItem(hDlg, IDC_TMV_CANVAS);
+        if (hSrc != hCanvas) break;
+
+        int x = (short)LOWORD(lParam);
+        int y = (short)HIWORD(lParam);
+        if (x == -1 && y == -1) {
+            RECT rc; GetWindowRect(hCanvas, &rc);
+            x = rc.left + 20;
+            y = rc.top  + 20;
+        }
+
+        HMENU hMenu = CreatePopupMenu();
+        AppendMenu(hMenu, MF_STRING, 1, _T("Export to PNG..."));
+        int cmd = TrackPopupMenu(hMenu,
+                                 TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                 x, y, 0, hDlg, NULL);
+        DestroyMenu(hMenu);
+        if (cmd == 1) ExportTilemapToPng(hDlg);
         return TRUE;
     }
 

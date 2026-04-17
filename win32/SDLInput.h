@@ -63,4 +63,8 @@ bool SDLInput_IsGamepad(int slot);
 // Returns true if the device is a gamepad and mapping was successful.
 bool SDLInput_AutoMapGamepad(int slot, SJoypad &out);
 
+// Force SDL to process any pending device-change messages and drain events.
+// Call from the main window's WM_DEVICECHANGE handler for instant hot-plug response.
+void SDLInput_OnDeviceChange();
+
 #endif // SDLINPUT_H

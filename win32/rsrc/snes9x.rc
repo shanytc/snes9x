@@ -333,7 +333,7 @@ BEGIN
     CONTROL         "Progress1",IDC_NPPROGRESS,"msctls_progress32",WS_BORDER,6,30,174,25
 END
 
-IDD_INPUTCONFIG DIALOGEX 0, 0, 380, 197
+IDD_INPUTCONFIG DIALOGEX 0, 0, 380, 212
 STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CLIPCHILDREN | WS_CAPTION
 CAPTION " "
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
@@ -360,8 +360,8 @@ BEGIN
     CONTROL         " ",IDC_UPRIGHT,"InputCustom",WS_DISABLED | WS_TABSTOP,190,129,100,12,WS_EX_CLIENTEDGE
     CONTROL         " ",IDC_DWNRIGHT,"InputCustom",WS_DISABLED | WS_TABSTOP,190,142,100,12,WS_EX_CLIENTEDGE
     CONTROL         " ",IDC_DWNLEFT,"InputCustom",WS_DISABLED | WS_TABSTOP,190,155,100,12,WS_EX_CLIENTEDGE
-    PUSHBUTTON      "Cancel",IDCANCEL,326,177,48,14
-    PUSHBUTTON      "OK",IDOK,272,177,48,14
+    PUSHBUTTON      "Cancel",IDCANCEL,326,192,48,14
+    PUSHBUTTON      "OK",IDOK,272,192,48,14
     LTEXT           "Blue means already mapped. Pink conflicts with hotkey.\nRed is reserved by Windows. Escape clears bindings.\nPress multiple keys for multi-bind. Delete removes last.",IDC_LABEL_BLUE,155,0,220,26
     RTEXT           "UP",IDC_LABEL_UP,8,67,38,8
     RTEXT           "RIGHT",IDC_LABEL_RIGHT,6,106,41,8
@@ -381,6 +381,8 @@ BEGIN
     RTEXT           "DN LEFT",IDC_LABEL_DOWNLEFT,155,157,31,8
     CONTROL         IDB_PAD,IDC_STATIC,"Static",SS_BITMAP,293,64,80,74
     CONTROL         "Allow Left+Rt/Up+Dn",IDC_ALLOWLEFTRIGHT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,293,145,87,11
+    CONTROL         "Use DirectInput",IDC_USEDIRECTINPUT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,293,158,87,11
+    LTEXT           "(restart required)",IDC_STATIC,293,170,87,8
     GROUPBOX        "Controller",IDC_STATIC,5,1,142,28,0,WS_EX_TRANSPARENT
     GROUPBOX        "Binding",IDC_STATIC,5,30,142,24,0,WS_EX_TRANSPARENT
     GROUPBOX        "Buttons",IDC_STATIC,5,55,288,118,0,WS_EX_TRANSPARENT
@@ -1252,7 +1254,7 @@ BEGIN
             MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
         END
         MENUITEM MFT_SEPARATOR
-        POPUP "&Debug Viewers",                 0,MFT_STRING,MFS_ENABLED
+        POPUP "&S-PPU",                         0,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Tile Viewer...",             ID_DEBUG_VRAM_VIEWER,MFT_STRING,MFS_ENABLED
             MENUITEM "&Tilemap Viewer...",          ID_DEBUG_TILEMAP_VIEWER,MFT_STRING,MFS_ENABLED

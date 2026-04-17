@@ -358,17 +358,15 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
     bmi.bmiHeader.biCompression = BI_RGB;
 
     FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    (void)dstW; (void)dstH;
 
-    // Target rect scaled by zoom, clipped to canvas.
+    // Anchor the scaled image at top-left of the canvas; GDI clips the
+    // overflow to the control's client rect automatically.
     int scale = st->zoom < 1 ? 1 : st->zoom;
-    int drawW = st->curSrcW * scale;
-    int drawH = st->curSrcH * scale;
-    if (drawW > dstW) drawW = dstW;
-    if (drawH > dstH) drawH = dstH;
-
     SetStretchBltMode(dis->hDC, COLORONCOLOR);
-    StretchDIBits(dis->hDC, 0, 0, drawW, drawH,
-                  0, 0, drawW / scale, drawH / scale,
+    StretchDIBits(dis->hDC,
+                  0, 0, st->curSrcW * scale, st->curSrcH * scale,
+                  0, 0, st->curSrcW, st->curSrcH,
                   st->bits, &bmi, DIB_RGB_COLORS, SRCCOPY);
 }
 
@@ -378,7 +376,7 @@ void FillZoomCombo(HWND hCombo) {
         _sntprintf(buf, 8, _T("%dx"), i);
         SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)buf);
     }
-    SendMessage(hCombo, CB_SETCURSEL, 1, 0); // default 2x
+    SendMessage(hCombo, CB_SETCURSEL, 0, 0); // default 1x
 }
 
 void FillBitDepthCombo(HWND hCombo) {
@@ -468,7 +466,7 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
     case WM_INITDIALOG: {
         TMVState *st = new TMVState();
         st->selectedBG = 0;
-        st->zoom = 2;
+        st->zoom = 1;
         st->showGrid = false;
         st->autoUpdate = true;
         st->customScreenMode = false;

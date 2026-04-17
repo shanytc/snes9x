@@ -314,13 +314,13 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
         bmi.bmiHeader.biCompression = BI_RGB;
         FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
         int scale = st->zoom < 1 ? 1 : st->zoom;
-        int drawW = st->curSrcW * scale;
-        int drawH = st->curSrcH * scale;
-        if (drawW > w) drawW = w;
-        if (drawH > h) drawH = h;
+        // Anchor the scaled image at top-left of the canvas; GDI clips the
+        // overflow to the control's client rect automatically. Each source
+        // pixel becomes scale x scale destination pixels.
         SetStretchBltMode(dis->hDC, COLORONCOLOR);
-        StretchDIBits(dis->hDC, 0, 0, drawW, drawH,
-                      0, 0, drawW / scale, drawH / scale,
+        StretchDIBits(dis->hDC,
+                      0, 0, st->curSrcW * scale, st->curSrcH * scale,
+                      0, 0, st->curSrcW, st->curSrcH,
                       st->tileBits, &bmi, DIB_RGB_COLORS, SRCCOPY);
     } else if (dis->CtlID == IDC_VRAMV_PALETTE && st->palBmp) {
         BITMAPINFO bmi = {};
@@ -376,7 +376,7 @@ void PopulateZoom(HWND hCombo) {
         _sntprintf(buf, 8, _T("%dx"), i);
         SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)buf);
     }
-    SendMessage(hCombo, CB_SETCURSEL, 2, 0); // default 3x like bsnes
+    SendMessage(hCombo, CB_SETCURSEL, 0, 0); // default 1x
 }
 
 void PopulateSource(HWND hCombo) {
@@ -422,7 +422,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
         st->bitDepth = BD_4BPP;
         st->address = 0;
         st->widthTiles = 16;
-        st->zoom = 3;
+        st->zoom = 1;
         st->showGrid = false;
         st->useCGRAM = true;
         st->autoUpdate = true;

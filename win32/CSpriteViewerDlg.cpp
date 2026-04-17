@@ -74,6 +74,10 @@ struct SPVState {
     LocalSprite sprites[128];
     uint8 sizeBase;         // OBJSizeSelect (0..7)
     uint8 firstSprite;      // PPU.FirstSprite (0..127)
+
+    // Auto-update throttle: minimum ms between snapshots (0 = realtime).
+    int    updateRateMs;
+    DWORD  lastRefreshTick;
 };
 
 SPVState *GetState(HWND hDlg) {
@@ -438,6 +442,18 @@ void PopulateZoom(HWND hCombo) {
     SendMessage(hCombo, CB_SETCURSEL, 0, 0);
 }
 
+constexpr int kRateOptions[] = { 0, 250, 500, 1000, 2000 };
+constexpr int kRateCount = sizeof(kRateOptions) / sizeof(kRateOptions[0]);
+
+void PopulateRate(HWND hCombo) {
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("Realtime"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("0.25s"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("0.5s"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("1s"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("2s"));
+    SendMessage(hCombo, CB_SETCURSEL, 3, 0); // default 1s
+}
+
 void PopulateBgCombo(HWND hCombo) {
     SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("Transparent"));
     for (int i = 0; i < 8; ++i) {
@@ -471,6 +487,8 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         for (int i = 0; i < 128; ++i) st->sprites[i] = LocalSprite{};
         st->sizeBase = 0;
         st->firstSprite = 0;
+        st->updateRateMs = 1000;   // default: refresh once per second
+        st->lastRefreshTick = 0;
         SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)st);
 
         CheckDlgButton(hDlg, IDC_SPV_AUTOUPDATE, BST_CHECKED);
@@ -485,6 +503,7 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         }
         PopulateZoom(GetDlgItem(hDlg, IDC_SPV_ZOOM));
         PopulateBgCombo(GetDlgItem(hDlg, IDC_SPV_BG));
+        PopulateRate(GetDlgItem(hDlg, IDC_SPV_RATE));
 
         InstallDragPan(GetDlgItem(hDlg, IDC_SPV_SCREEN),
                        &st->screenViewX, &st->screenViewY,
@@ -499,9 +518,18 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         HandleDrawItem(hDlg, (DRAWITEMSTRUCT *)lParam);
         return TRUE;
 
-    case WM_USER_VIEWER_REFRESH:
+    case WM_USER_VIEWER_REFRESH: {
+        SPVState *st = GetState(hDlg);
+        if (st && st->updateRateMs > 0) {
+            DWORD now = GetTickCount();
+            if (now - st->lastRefreshTick < (DWORD)st->updateRateMs) {
+                return TRUE;
+            }
+            st->lastRefreshTick = now;
+        }
         Refresh(hDlg);
         return TRUE;
+    }
 
     case WM_NOTIFY: {
         NMHDR *n = (NMHDR *)lParam;
@@ -562,6 +590,15 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 if (sel >= 0) {
                     st->bgType = sel;
                     DrawScreen(hDlg);
+                }
+            }
+            return TRUE;
+        case IDC_SPV_RATE:
+            if (code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hDlg, IDC_SPV_RATE, CB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < kRateCount) {
+                    st->updateRateMs = kRateOptions[sel];
+                    st->lastRefreshTick = 0; // refresh on the next tick
                 }
             }
             return TRUE;

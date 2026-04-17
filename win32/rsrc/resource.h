@@ -725,6 +725,7 @@
 #define IDC_SPV_SHOW_OUTLINE            3177
 #define IDC_SPV_BG                      3178
 #define IDC_SPV_FIRST_SPRITE            3179
+#define IDC_SPV_RATE                    3180
 
 #define IDC_STATIC                      -1
 

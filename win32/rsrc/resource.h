@@ -720,6 +720,11 @@
 #define IDC_SPV_AUTOUPDATE              3172
 #define IDC_SPV_REFRESH                 3173
 #define IDC_SPV_DETAILS                 3174
+#define IDC_SPV_SCREEN                  3175
+#define IDC_SPV_ZOOM                    3176
+#define IDC_SPV_SHOW_OUTLINE            3177
+#define IDC_SPV_BG                      3178
+#define IDC_SPV_FIRST_SPRITE            3179
 
 #define IDC_STATIC                      -1
 

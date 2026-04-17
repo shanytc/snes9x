@@ -307,40 +307,31 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
     int h = dis->rcItem.bottom - dis->rcItem.top;
 
     if (dis->CtlID == IDC_VRAMV_CANVAS && st->tileBmp) {
-        BITMAPINFO bmi = {};
-        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bmi.bmiHeader.biWidth = kSrcMax;
-        bmi.bmiHeader.biHeight = -kSrcMax;
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
         FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
         int scale = st->zoom < 1 ? 1 : st->zoom;
-        // Fit as many source pixels as the canvas can show at this scale,
-        // starting from (viewX, viewY). Resulting dst rect is exactly
-        // srcSize * scale in each axis so no non-integer scaling occurs.
         int srcW = w / scale;
         int srcH = h / scale;
         if (srcW > st->curSrcW - st->viewX) srcW = st->curSrcW - st->viewX;
         if (srcH > st->curSrcH - st->viewY) srcH = st->curSrcH - st->viewY;
         if (srcW > 0 && srcH > 0) {
+            HDC memDC = CreateCompatibleDC(dis->hDC);
+            HGDIOBJ oldBmp = SelectObject(memDC, st->tileBmp);
             SetStretchBltMode(dis->hDC, COLORONCOLOR);
-            StretchDIBits(dis->hDC,
-                          0, 0, srcW * scale, srcH * scale,
-                          st->viewX, st->viewY, srcW, srcH,
-                          st->tileBits, &bmi, DIB_RGB_COLORS, SRCCOPY);
+            StretchBlt(dis->hDC,
+                       0, 0, srcW * scale, srcH * scale,
+                       memDC, st->viewX, st->viewY, srcW, srcH,
+                       SRCCOPY);
+            SelectObject(memDC, oldBmp);
+            DeleteDC(memDC);
         }
     } else if (dis->CtlID == IDC_VRAMV_PALETTE && st->palBmp) {
-        BITMAPINFO bmi = {};
-        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bmi.bmiHeader.biWidth = kPalSrcSize;
-        bmi.bmiHeader.biHeight = -(kPalSrcSize / 2);
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
+        HDC memDC = CreateCompatibleDC(dis->hDC);
+        HGDIOBJ oldBmp = SelectObject(memDC, st->palBmp);
         SetStretchBltMode(dis->hDC, COLORONCOLOR);
-        StretchDIBits(dis->hDC, 0, 0, w, h, 0, 0, kPalSrcSize, kPalSrcSize / 2,
-                      st->palBits, &bmi, DIB_RGB_COLORS, SRCCOPY);
+        StretchBlt(dis->hDC, 0, 0, w, h,
+                   memDC, 0, 0, kPalSrcSize, kPalSrcSize / 2, SRCCOPY);
+        SelectObject(memDC, oldBmp);
+        DeleteDC(memDC);
     }
 }
 

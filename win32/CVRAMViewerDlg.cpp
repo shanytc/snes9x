@@ -25,8 +25,9 @@ constexpr int kPalSrcSize = 128;
 enum BitDepth { BD_2BPP = 0, BD_4BPP, BD_8BPP, BD_MODE7, BD_MODE7_EXTBG };
 
 struct VRAMState {
+    int  source;             // TILE_SRC_*
     int  bitDepth;
-    uint32 address;          // VRAM byte offset top-left of tile grid
+    uint32 address;          // byte offset into the selected source
     int  widthTiles;         // tiles per row (8..64)
     int  zoom;               // 1..9
     bool showGrid;
@@ -71,24 +72,31 @@ int ColorsPerTile(int bd) {
 
 bool IsMode7(int bd) { return bd == BD_MODE7 || bd == BD_MODE7_EXTBG; }
 
-uint32 AddressMask(int bd) {
+// Tile-alignment mask bits for the given bit depth. We also AND with the
+// source's size, computed separately in SourceAddressMask().
+uint32 DepthAlignMask(int bd) {
     switch (bd) {
-    case BD_8BPP: return 0xFFC0;
-    case BD_4BPP: return 0xFFE0;
-    case BD_2BPP: return 0xFFF0;
+    case BD_8BPP: return ~0x3Fu;
+    case BD_4BPP: return ~0x1Fu;
+    case BD_2BPP: return ~0x0Fu;
     default: return 0;
     }
 }
 
-int MaxTiles(int bd) {
-    switch (bd) {
-    case BD_2BPP: return 4096;
-    case BD_4BPP: return 2048;
-    case BD_8BPP: return 1024;
-    case BD_MODE7:
-    case BD_MODE7_EXTBG: return 256;
-    }
-    return 1024;
+// Largest (byte + 1) address usable for this (source, depth).
+uint32 SourceUpperBound(int source) {
+    uint32 s = TileSourceSize(source);
+    return s ? s : 0x10000;
+}
+
+int MaxTiles(int source, int bd) {
+    if (bd == BD_MODE7 || bd == BD_MODE7_EXTBG) return 256;
+    uint32 sz = SourceUpperBound(source);
+    int bpt = (bd == BD_2BPP) ? 16 : (bd == BD_4BPP) ? 32 : 64;
+    if (sz < (uint32)bpt) return 0;
+    uint32 n = sz / (uint32)bpt;
+    if (n > 65536) n = 65536;
+    return (int)n;
 }
 
 // Build palette to index with. For CGRAM mode the real palette is used as-is,
@@ -128,18 +136,26 @@ void DrawTileIntoCanvas(VRAMState *st, int tileIdx, const uint32 pal[256]) {
     uint32 *dst = st->tileBits + gy * kSrcMax + gx;
 
     if (IsMode7(st->bitDepth)) {
+        // Mode 7 only makes sense for VRAM.
         DrawMode7TilePixel(dst, kSrcMax, tileIdx & 0xFF,
                            st->bitDepth == BD_MODE7_EXTBG, pal);
         return;
     }
 
-    uint32 addr = (st->address + tileIdx * BytesPerTile(st->bitDepth))
-                  & AddressMask(st->bitDepth);
+    int bppVal = (st->bitDepth == BD_2BPP) ? 2 :
+                 (st->bitDepth == BD_4BPP) ? 4 : 8;
+    int bpt = (bppVal == 2) ? 16 : (bppVal == 4) ? 32 : 64;
+    uint32 sourceSize = SourceUpperBound(st->source);
+    uint32 base = (st->address + (uint32)tileIdx * (uint32)bpt);
+
+    uint8 bytes[64];
+    for (int i = 0; i < bpt; ++i) {
+        uint32 a = base + i;
+        if (a >= sourceSize) { bytes[i] = 0; continue; }
+        bytes[i] = ReadTileSourceByte(st->source, a);
+    }
     uint8 tile[64];
-    DecodeTile8x8(addr, (st->bitDepth == BD_2BPP) ? 2 :
-                          (st->bitDepth == BD_4BPP) ? 4 : 8, tile);
-    // paletteOffset is clamped to colorsPerTile-aligned start by bsnes, but
-    // we use it as a direct CGRAM index so users can scroll anywhere.
+    DecodeTileBytes8x8(bytes, bppVal, tile);
     BlitTile8x8BGRA(tile, pal, st->paletteOffset & 0xFF, 0,
                     st->tileBits, kSrcMax, gx, gy, false, false);
 }
@@ -152,11 +168,12 @@ void RedrawTiles(HWND hDlg) {
     BuildPaletteBGRA(st, pal);
 
     // Calc how many tiles to display and canvas size.
-    int maxT = MaxTiles(st->bitDepth);
+    int maxT = MaxTiles(st->source, st->bitDepth);
     if (!IsMode7(st->bitDepth)) {
         int firstTile = st->address / BytesPerTile(st->bitDepth);
         if (firstTile >= maxT) firstTile = 0;
         maxT -= firstTile;
+        if (maxT < 0) maxT = 0;
     }
     int tilesX = st->widthTiles;
     if (tilesX < 8) tilesX = 8;
@@ -249,8 +266,12 @@ void RefreshBaseAddresses(HWND hDlg) {
 }
 
 void UpdateAddressEdit(HWND hDlg, VRAMState *st) {
-    TCHAR buf[16];
-    _sntprintf(buf, 16, _T("0x%04X"), st->address & 0xFFFF);
+    TCHAR buf[20];
+    if (st->source == TILE_SRC_VRAM) {
+        _sntprintf(buf, 20, _T("0x%04X"), st->address & 0xFFFF);
+    } else {
+        _sntprintf(buf, 20, _T("0x%06X"), st->address & 0xFFFFFF);
+    }
     SetDlgItemText(hDlg, IDC_VRAMV_ADDRESS, buf);
 }
 
@@ -267,8 +288,13 @@ void UpdateTileInfo(HWND hDlg, VRAMState *st) {
         tileAddr = (st->address + st->selectedTile * BytesPerTile(st->bitDepth))
                    & 0xFFFF;
     }
-    _sntprintf(buf, 128, _T("Selected tile #%d\nAddress 0x%04X"),
-               st->selectedTile, tileAddr);
+    if (st->source == TILE_SRC_VRAM) {
+        _sntprintf(buf, 128, _T("Selected tile #%d\nAddress 0x%04X"),
+                   st->selectedTile, tileAddr & 0xFFFF);
+    } else {
+        _sntprintf(buf, 128, _T("Selected tile #%d\nAddress 0x%06X"),
+                   st->selectedTile, tileAddr & 0xFFFFFF);
+    }
     SetDlgItemText(hDlg, IDC_VRAMV_TILEINFO, buf);
 }
 
@@ -355,6 +381,11 @@ void PopulateZoom(HWND hCombo) {
 
 void PopulateSource(HWND hCombo) {
     SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("VRAM"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("S-CPU Bus"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("Cartridge ROM"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("Cartridge RAM"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("SA1 Bus"));
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("SFX Bus"));
     SendMessage(hCombo, CB_SETCURSEL, 0, 0);
 }
 
@@ -370,11 +401,15 @@ void PopulateBitDepth(HWND hCombo) {
 void StepAddress(HWND hDlg, VRAMState *st, bool forward) {
     if (IsMode7(st->bitDepth)) return;
     uint32 step = BytesPerTile(st->bitDepth) * (uint32)st->widthTiles;
+    uint32 cap = SourceUpperBound(st->source);
     if (forward) {
-        st->address = (st->address + step) & AddressMask(st->bitDepth);
+        uint32 a = st->address + step;
+        if (cap && a + step > cap) a = (cap > step) ? (cap - step) : 0;
+        st->address = a;
     } else {
         st->address = (st->address >= step) ? (st->address - step) : 0;
     }
+    st->address &= DepthAlignMask(st->bitDepth);
     UpdateAddressEdit(hDlg, st);
     RedrawTiles(hDlg);
 }
@@ -383,6 +418,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
     switch (msg) {
     case WM_INITDIALOG: {
         VRAMState *st = new VRAMState();
+        st->source = TILE_SRC_VRAM;
         st->bitDepth = BD_4BPP;
         st->address = 0;
         st->widthTiles = 16;
@@ -492,13 +528,28 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
             }
             return TRUE;
 
+        case IDC_VRAMV_SOURCE:
+            if (code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hDlg, IDC_VRAMV_SOURCE, CB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < TILE_SRC_COUNT) {
+                    st->source = sel;
+                    st->address = 0;
+                    st->selectedTile = -1;
+                    UpdateAddressEdit(hDlg, st);
+                    UpdateTileInfo(hDlg, st);
+                    RedrawTiles(hDlg);
+                }
+            }
+            return TRUE;
+
         case IDC_VRAMV_ADDRESS:
             if (code == EN_CHANGE) {
                 TCHAR buf[32];
                 GetDlgItemText(hDlg, IDC_VRAMV_ADDRESS, buf, 32);
                 uint32 v;
                 if (ParseHex(buf, &v)) {
-                    st->address = v & AddressMask(st->bitDepth);
+                    uint32 srcMask = (st->source == TILE_SRC_VRAM) ? 0xFFFF : 0xFFFFFF;
+                    st->address = (v & srcMask) & DepthAlignMask(st->bitDepth);
                     RedrawTiles(hDlg);
                 }
             }
@@ -538,7 +589,11 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
             }
             SendDlgItemMessage(hDlg, IDC_VRAMV_BITDEPTH, CB_SETCURSEL,
                                st->bitDepth, 0);
-            st->address = addr & AddressMask(st->bitDepth);
+            // Goto buttons target VRAM.
+            st->source = TILE_SRC_VRAM;
+            SendDlgItemMessage(hDlg, IDC_VRAMV_SOURCE, CB_SETCURSEL,
+                               TILE_SRC_VRAM, 0);
+            st->address = addr & DepthAlignMask(st->bitDepth);
             st->selectedTile = -1;
             UpdateAddressEdit(hDlg, st);
             UpdateTileInfo(hDlg, st);

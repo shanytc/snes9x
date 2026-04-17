@@ -11,6 +11,32 @@
 // bpp must be 2, 4, or 8. Address is wrapped to 16-bit (VRAM is 64KB).
 void DecodeTile8x8(uint32 vramByteAddr, int bpp, uint8 out[64]);
 
+// Decode one 8x8 tile from an already-collected byte buffer.
+// buffer must hold at least bytesPerTile(bpp) bytes (16/32/64 for 2/4/8bpp).
+void DecodeTileBytes8x8(const uint8 *tileBytes, int bpp, uint8 out[64]);
+
+// Tile data source. Mirrors bsnes-plus TileRenderer::Source.
+enum TileSource {
+    TILE_SRC_VRAM = 0,
+    TILE_SRC_CPU_BUS,
+    TILE_SRC_CART_ROM,
+    TILE_SRC_CART_RAM,
+    TILE_SRC_SA1_BUS,
+    TILE_SRC_SFX_BUS,
+    TILE_SRC_COUNT
+};
+
+// Read one byte from a tile source without side effects.
+// Returns 0 when the source is unavailable (e.g. SA1 bus on a non-SA1 ROM).
+uint8 ReadTileSourceByte(int source, uint32 addr);
+
+// Largest valid byte address for the given source (inclusive upper bound + 1).
+uint32 TileSourceSize(int source);
+
+// True when this source currently has usable data (ROM loaded, SA1/SFX chip
+// present, etc.).
+bool TileSourceAvailable(int source);
+
 // Decode one 8x8 Mode 7 tile: tile bytes live at even VRAM bytes only,
 // character base is implicit (tileIndex * 128 covers 8 rows * 8 pixels * 2 bytes).
 void DecodeMode7Tile8x8(uint32 tileIndex, uint8 out[64]);

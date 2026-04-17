@@ -2,6 +2,7 @@
 #include "../snes9x.h"
 #include "../memmap.h"
 #include "../ppu.h"
+#include "../sa1.h"
 
 #include <tchar.h>
 #include <vector>
@@ -25,22 +26,18 @@ void Decode2bppRow(const uint8 *p0p1, uint8 out[8]) {
 
 } // anonymous namespace
 
-void DecodeTile8x8(uint32 vramByteAddr, int bpp, uint8 out[64]) {
-    vramByteAddr &= 0xFFFF;
-    const uint8 *vram = Memory.VRAM;
-
+void DecodeTileBytes8x8(const uint8 *tileBytes, int bpp, uint8 out[64]) {
     for (int y = 0; y < 8; ++y) {
         uint8 row0[8] = {0};
-        Decode2bppRow(&vram[(vramByteAddr + y * 2) & 0xFFFF], row0);
+        Decode2bppRow(&tileBytes[y * 2], row0);
 
         if (bpp == 2) {
             for (int x = 0; x < 8; ++x) out[y * 8 + x] = row0[x];
             continue;
         }
 
-        // 4bpp: plane 2+3 live 16 bytes further in.
         uint8 row23[8] = {0};
-        Decode2bppRow(&vram[(vramByteAddr + 16 + y * 2) & 0xFFFF], row23);
+        Decode2bppRow(&tileBytes[16 + y * 2], row23);
 
         if (bpp == 4) {
             for (int x = 0; x < 8; ++x)
@@ -48,16 +45,101 @@ void DecodeTile8x8(uint32 vramByteAddr, int bpp, uint8 out[64]) {
             continue;
         }
 
-        // 8bpp: additional 4 planes at +32 and +48 bytes.
         uint8 row45[8] = {0}, row67[8] = {0};
-        Decode2bppRow(&vram[(vramByteAddr + 32 + y * 2) & 0xFFFF], row45);
-        Decode2bppRow(&vram[(vramByteAddr + 48 + y * 2) & 0xFFFF], row67);
-
+        Decode2bppRow(&tileBytes[32 + y * 2], row45);
+        Decode2bppRow(&tileBytes[48 + y * 2], row67);
         for (int x = 0; x < 8; ++x) {
             out[y * 8 + x] = row0[x] | (row23[x] << 2) |
                              (row45[x] << 4) | (row67[x] << 6);
         }
     }
+}
+
+void DecodeTile8x8(uint32 vramByteAddr, int bpp, uint8 out[64]) {
+    const uint8 *vram = Memory.VRAM;
+    uint8 buf[64];
+    int bytes = (bpp == 2) ? 16 : (bpp == 4) ? 32 : 64;
+    for (int i = 0; i < bytes; ++i)
+        buf[i] = vram[(vramByteAddr + i) & 0xFFFF];
+    DecodeTileBytes8x8(buf, bpp, out);
+}
+
+// Walk a CPU-style memory map (Memory.Map or SA1.Map) to read a single byte
+// without side effects. Ported from the private S9xDebugGetByte in debug.cpp.
+static uint8 ReadViaMap(uint8 * const *map, uint32 addr) {
+    addr &= 0xFFFFFF;
+    int block = addr >> MEMMAP_SHIFT;
+    uint8 *p = map[block];
+    if (p >= (uint8 *)CMemory::MAP_LAST) {
+        return p[addr & 0xFFFF];
+    }
+    switch ((pint)p) {
+    case CMemory::MAP_LOROM_SRAM:
+    case CMemory::MAP_SA1RAM:
+        if (!Memory.SRAMMask) return 0;
+        return Memory.SRAM[((((addr & 0xff0000) >> 1) | (addr & 0x7fff)) & Memory.SRAMMask)];
+    case CMemory::MAP_HIROM_SRAM:
+    case CMemory::MAP_RONLY_SRAM:
+        if (!Memory.SRAMMask) return 0;
+        return Memory.SRAM[((((addr & 0x7fff) - 0x6000 + ((addr & 0xf0000) >> 3))) & Memory.SRAMMask)];
+    case CMemory::MAP_BWRAM:
+        return Memory.BWRAM[(addr & 0x7fff) - 0x6000];
+    default:
+        return 0;
+    }
+}
+
+uint8 ReadTileSourceByte(int source, uint32 addr) {
+    switch (source) {
+    case TILE_SRC_VRAM:
+        return Memory.VRAM[addr & 0xFFFF];
+
+    case TILE_SRC_CPU_BUS:
+        return ReadViaMap(Memory.Map, addr);
+
+    case TILE_SRC_CART_ROM: {
+        if (Memory.CalculatedSize == 0) return 0;
+        return Memory.ROM[addr % Memory.CalculatedSize];
+    }
+
+    case TILE_SRC_CART_RAM:
+        if (!Memory.SRAMMask) return 0;
+        return Memory.SRAM[addr & Memory.SRAMMask];
+
+    case TILE_SRC_SA1_BUS:
+        if (!Settings.SA1) return 0;
+        return ReadViaMap(SA1.Map, addr);
+
+    case TILE_SRC_SFX_BUS:
+        // SuperFX shares the CPU memory map; use it as a best-effort source.
+        if (!Settings.SuperFX) return 0;
+        return ReadViaMap(Memory.Map, addr);
+    }
+    return 0;
+}
+
+uint32 TileSourceSize(int source) {
+    switch (source) {
+    case TILE_SRC_VRAM:     return 0x10000;
+    case TILE_SRC_CPU_BUS:  return 0x1000000;
+    case TILE_SRC_CART_ROM: return Memory.CalculatedSize;
+    case TILE_SRC_CART_RAM: return Memory.SRAMMask ? (Memory.SRAMMask + 1u) : 0;
+    case TILE_SRC_SA1_BUS:  return Settings.SA1 ? 0x1000000u : 0;
+    case TILE_SRC_SFX_BUS:  return Settings.SuperFX ? 0x1000000u : 0;
+    }
+    return 0;
+}
+
+bool TileSourceAvailable(int source) {
+    switch (source) {
+    case TILE_SRC_VRAM:     return true;
+    case TILE_SRC_CPU_BUS:  return Memory.CalculatedSize > 0;
+    case TILE_SRC_CART_ROM: return Memory.CalculatedSize > 0;
+    case TILE_SRC_CART_RAM: return Memory.SRAMMask > 0;
+    case TILE_SRC_SA1_BUS:  return Settings.SA1 != 0;
+    case TILE_SRC_SFX_BUS:  return Settings.SuperFX != 0;
+    }
+    return false;
 }
 
 void DecodeMode7Tile8x8(uint32 tileIndex, uint8 out[64]) {

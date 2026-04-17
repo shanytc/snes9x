@@ -83,6 +83,10 @@ struct SPVState {
     // auto-fit the preview to the widget.
     int    previewSpriteW;
     int    previewSpriteH;
+
+    // True while we bulk-update ListView checkboxes from the context menu
+    // so LVN_ITEMCHANGED doesn't run DrawScreen 128 times.
+    bool   batchUpdating;
 };
 
 SPVState *GetState(HWND hDlg) {
@@ -523,6 +527,7 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         st->lastRefreshTick = 0;
         st->previewSpriteW = 0;
         st->previewSpriteH = 0;
+        st->batchUpdating = false;
         SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)st);
 
         CheckDlgButton(hDlg, IDC_SPV_AUTOUPDATE, BST_CHECKED);
@@ -572,6 +577,7 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 NMLISTVIEW *nm = (NMLISTVIEW *)lParam;
                 SPVState *st = GetState(hDlg);
                 if (!st) return TRUE;
+                if (st->batchUpdating) return TRUE;
 
                 // Selection change -> redraw preview.
                 if ((nm->uNewState & LVIS_SELECTED) && !(nm->uOldState & LVIS_SELECTED)) {
@@ -588,6 +594,60 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 }
             }
         }
+        return TRUE;
+    }
+
+    case WM_CONTEXTMENU: {
+        SPVState *st = GetState(hDlg);
+        if (!st) break;
+        HWND hSrc = (HWND)wParam;
+        HWND hList = GetDlgItem(hDlg, IDC_SPV_LIST);
+        if (hSrc != hList) break;
+
+        int x = (short)LOWORD(lParam);
+        int y = (short)HIWORD(lParam);
+        if (x == -1 && y == -1) {
+            // Keyboard-invoked context menu: anchor near the focused row.
+            RECT rc; GetWindowRect(hList, &rc);
+            x = rc.left + 20;
+            y = rc.top  + 20;
+        }
+
+        enum { CTX_TOGGLE = 1, CTX_ONLY = 2, CTX_ALL = 3 };
+        HMENU hMenu = CreatePopupMenu();
+        AppendMenu(hMenu, MF_STRING, CTX_TOGGLE, _T("Toggle Visibility"));
+        AppendMenu(hMenu, MF_STRING, CTX_ONLY,   _T("Show Only Selected Objects"));
+        AppendMenu(hMenu, MF_STRING, CTX_ALL,    _T("Show All Objects"));
+        int cmd = TrackPopupMenu(hMenu,
+                                 TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                 x, y, 0, hDlg, NULL);
+        DestroyMenu(hMenu);
+        if (cmd < 1 || cmd > 3) return TRUE;
+
+        st->batchUpdating = true;
+        if (cmd == CTX_TOGGLE) {
+            int i = -1;
+            while ((i = (int)SendMessage(hList, LVM_GETNEXTITEM, i,
+                                          MAKELPARAM(LVNI_SELECTED, 0))) != -1) {
+                if (i < 0 || i >= 128) break;
+                st->visible[i] = !st->visible[i];
+                ListView_SetCheckState(hList, i, st->visible[i]);
+            }
+        } else if (cmd == CTX_ONLY) {
+            for (int i = 0; i < 128; ++i) {
+                bool sel = (ListView_GetItemState(hList, i, LVIS_SELECTED)
+                            & LVIS_SELECTED) != 0;
+                st->visible[i] = sel;
+                ListView_SetCheckState(hList, i, sel);
+            }
+        } else if (cmd == CTX_ALL) {
+            for (int i = 0; i < 128; ++i) {
+                st->visible[i] = true;
+                ListView_SetCheckState(hList, i, TRUE);
+            }
+        }
+        st->batchUpdating = false;
+        DrawScreen(hDlg);
         return TRUE;
     }
 

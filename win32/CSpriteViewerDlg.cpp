@@ -37,6 +37,19 @@ enum BgType {
     BG_MAGENTA, BG_CYAN, BG_WHITE, BG_BLACK
 };
 
+// Self-contained OAM entry parsed from raw PPU.OAMData at refresh time.
+// Decoupled from snes9x's live PPU.OBJ[] so mid-frame PPU writes can't
+// make the ListView / Screen canvas flicker within one refresh.
+struct LocalSprite {
+    int16  hpos;
+    uint8  vpos;
+    uint16 name;       // 9-bit
+    uint8  palette;    // 0..7
+    uint8  priority;   // 0..3
+    bool   hflip, vflip;
+    bool   size;       // false=small, true=large
+};
+
 struct SPVState {
     int  selected;
     bool autoUpdate;
@@ -56,10 +69,47 @@ struct SPVState {
     // Pan offset for screen canvas.
     int screenViewX, screenViewY;
     int screenCurW, screenCurH; // always (kScreenW, kScreenH)
+
+    // Snapshot of the PPU's sprite state, refreshed once per call to Refresh().
+    LocalSprite sprites[128];
+    uint8 sizeBase;         // OBJSizeSelect (0..7)
+    uint8 firstSprite;      // PPU.FirstSprite (0..127)
 };
 
 SPVState *GetState(HWND hDlg) {
     return (SPVState *)GetWindowLongPtr(hDlg, DWLP_USER);
+}
+
+// Parse raw OAM RAM into st->sprites[] and snapshot size/firstSprite.
+// Mirrors bsnes oam-data-model.cpp::refresh() so what we render and what
+// we list are both taken from a single consistent sample of PPU state.
+void SnapshotOAM(SPVState *st) {
+    st->sizeBase    = PPU.OBJSizeSelect & 7;
+    st->firstSprite = PPU.FirstSprite & 127;
+
+    const uint8 *oam = PPU.OAMData;
+    for (int i = 0; i < 128; ++i) {
+        uint8 d0 = oam[i * 4 + 0];
+        uint8 d1 = oam[i * 4 + 1];
+        uint8 d2 = oam[i * 4 + 2];
+        uint8 d3 = oam[i * 4 + 3];
+        uint8 d4 = oam[512 + (i >> 2)];
+        int shift = (i & 3) * 2;
+        int x8   = (d4 >> shift) & 1;
+        int size = (d4 >> (shift + 1)) & 1;
+
+        LocalSprite &s = st->sprites[i];
+        int xv = d0 | (x8 << 8);
+        if (xv & 0x100) xv |= ~0x1FF;     // sign-extend 9-bit signed
+        s.hpos     = (int16)xv;
+        s.vpos     = d1;
+        s.name     = (uint16)(d2 | ((d3 & 1) << 8));
+        s.palette  = (d3 >> 1) & 7;
+        s.priority = (d3 >> 4) & 3;
+        s.hflip    = (d3 & 0x40) != 0;
+        s.vflip    = (d3 & 0x80) != 0;
+        s.size     = size != 0;
+    }
 }
 
 void SpriteDims(int sizeSel, bool isLarge, int *w, int *h) {
@@ -100,40 +150,37 @@ uint16 SpriteSubTile(uint16 name, int dx, int dy) {
 }
 
 // Draw one sprite into a BGRA buffer of the given stride, at canvas (cx, cy).
-// pal is the 256-entry CGRAM snapshot; overwriteBg=true writes idx-0 pixels as
-// palette[0] (used by "Background = Sprite Palette N" mode so you see the
-// sprite's full tile data incl. transparent pixels).
-void DrawSpriteAt(const SOBJ &obj, int cx, int cy,
+// pal is the 256-entry CGRAM snapshot. Uses the size base that was snapshotted
+// at the start of the refresh so dims stay consistent across the whole frame.
+void DrawSpriteAt(const LocalSprite &obj, int sizeBase, int cx, int cy,
                   uint32 *dst, int stride, int stridePixels,
                   const uint32 pal[256]) {
     int w, h;
-    SpriteDims(PPU.OBJSizeSelect, obj.Size != 0, &w, &h);
-    int palOff = 128 + (obj.Palette & 7) * 16;
+    SpriteDims(sizeBase, obj.size, &w, &h);
+    int palOff = 128 + (obj.palette & 7) * 16;
     int tilesAcross = w / 8;
     int tilesDown   = h / 8;
 
     for (int ty = 0; ty < tilesDown; ++ty) {
         for (int tx = 0; tx < tilesAcross; ++tx) {
-            int dx = obj.HFlip ? (tilesAcross - 1 - tx) : tx;
-            int dy = obj.VFlip ? (tilesDown - 1 - ty) : ty;
-            uint16 tileNum = SpriteSubTile(obj.Name, dx, dy);
+            int dx = obj.hflip ? (tilesAcross - 1 - tx) : tx;
+            int dy = obj.vflip ? (tilesDown - 1 - ty) : ty;
+            uint16 tileNum = SpriteSubTile(obj.name, dx, dy);
             uint32 addr = SpriteTileAddr(tileNum);
             uint8 tile[64];
             DecodeTile8x8(addr, 4, tile);
             int px = cx + tx * 8;
             int py = cy + ty * 8;
-            // Clip against the destination buffer bounds.
             if (px + 8 <= 0 || py + 8 <= 0) continue;
             if (px >= stridePixels || py >= stride) continue;
 
-            // Custom blit: respects buffer bounds per-row.
             for (int yy = 0; yy < 8; ++yy) {
-                int sy = obj.VFlip ? (7 - yy) : yy;
+                int sy = obj.vflip ? (7 - yy) : yy;
                 int dpy = py + yy;
                 if (dpy < 0 || dpy >= stride) continue;
                 uint32 *row = dst + dpy * stridePixels;
                 for (int xx = 0; xx < 8; ++xx) {
-                    int sx = obj.HFlip ? (7 - xx) : xx;
+                    int sx = obj.hflip ? (7 - xx) : xx;
                     uint8 idx = tile[sy * 8 + sx];
                     if (idx == 0) continue;
                     int dpx = px + xx;
@@ -172,21 +219,21 @@ void DrawScreen(HWND hDlg) {
     // Lowest-priority first so highest-priority sprite ends up on top.
     // Iteration order per SNES priority rotation: start at FirstSprite, go
     // forward (wrapping); earlier in iteration = higher priority.
-    int fs = PPU.FirstSprite & 127;
+    int fs = st->firstSprite;
     for (int i = 127; i >= 0; --i) {
         int id = (fs + i) & 127;
         if (!st->visible[id]) continue;
-        const SOBJ &obj = PPU.OBJ[id];
+        const LocalSprite &obj = st->sprites[id];
         int w, h;
-        SpriteDims(PPU.OBJSizeSelect, obj.Size != 0, &w, &h);
-        int cx = obj.HPos + 256;
-        int cy = obj.VPos;
+        SpriteDims(st->sizeBase, obj.size, &w, &h);
+        int cx = obj.hpos + 256;
+        int cy = obj.vpos;
 
-        DrawSpriteAt(obj, cx, cy,
+        DrawSpriteAt(obj, st->sizeBase, cx, cy,
                      st->screenBits, kScreenH, kScreenW, pal);
         // Y-wrap: sprites with y >= 240 wrap back through 0.
         if (cy + h > kScreenH) {
-            DrawSpriteAt(obj, cx, cy - kScreenH,
+            DrawSpriteAt(obj, st->sizeBase, cx, cy - kScreenH,
                          st->screenBits, kScreenH, kScreenW, pal);
         }
     }
@@ -223,9 +270,9 @@ void DrawPreview(HWND hDlg) {
         return;
     }
 
-    const SOBJ &obj = PPU.OBJ[idx];
+    const LocalSprite &obj = st->sprites[idx];
     int w, h;
-    SpriteDims(PPU.OBJSizeSelect, obj.Size != 0, &w, &h);
+    SpriteDims(st->sizeBase, obj.size, &w, &h);
 
     uint32 pal[256];
     SnapshotPaletteBGRA(pal);
@@ -233,16 +280,16 @@ void DrawPreview(HWND hDlg) {
     int ox = (kPreviewSrc - w) / 2; if (ox < 0) ox = 0;
     int oy = (kPreviewSrc - h) / 2; if (oy < 0) oy = 0;
 
-    DrawSpriteAt(obj, ox, oy,
+    DrawSpriteAt(obj, st->sizeBase, ox, oy,
                  st->previewBits, kPreviewSrc, kPreviewSrc, pal);
 
     TCHAR det[200];
     _sntprintf(det, 200,
                _T("Sprite #%d\nsize %dx%d\npos (%d,%d)\ntile 0x%03X\npal %d  pri %d\nflags %s%s"),
-               idx, w, h, obj.HPos, obj.VPos, obj.Name & 0x1FF,
-               obj.Palette, obj.Priority,
-               obj.HFlip ? _T("H") : _T("-"),
-               obj.VFlip ? _T("V") : _T("-"));
+               idx, w, h, obj.hpos, obj.vpos, obj.name & 0x1FF,
+               obj.palette, obj.priority,
+               obj.hflip ? _T("H") : _T("-"),
+               obj.vflip ? _T("V") : _T("-"));
     SetDlgItemText(hDlg, IDC_SPV_DETAILS, det);
 
     InvalidateRect(GetDlgItem(hDlg, IDC_SPV_PREVIEW), NULL, FALSE);
@@ -263,29 +310,29 @@ void InitializeListRows(HWND hList) {
     }
 }
 
-void UpdateListValues(HWND hList) {
+void UpdateListValues(HWND hList, const SPVState *st) {
     SendMessage(hList, WM_SETREDRAW, FALSE, 0);
     for (int i = 0; i < 128; ++i) {
-        const SOBJ &obj = PPU.OBJ[i];
+        const LocalSprite &obj = st->sprites[i];
         int w, h;
-        SpriteDims(PPU.OBJSizeSelect, obj.Size != 0, &w, &h);
+        SpriteDims(st->sizeBase, obj.size, &w, &h);
 
         TCHAR col[40];
         _sntprintf(col, 40, _T("%dx%d"), w, h);
         ListView_SetItemText(hList, i, 1, col);
-        _sntprintf(col, 40, _T("%d"), obj.HPos);
+        _sntprintf(col, 40, _T("%d"), obj.hpos);
         ListView_SetItemText(hList, i, 2, col);
-        _sntprintf(col, 40, _T("%d"), obj.VPos);
+        _sntprintf(col, 40, _T("%d"), obj.vpos);
         ListView_SetItemText(hList, i, 3, col);
-        _sntprintf(col, 40, _T("0x%03X"), obj.Name & 0x1FF);
+        _sntprintf(col, 40, _T("0x%03X"), obj.name & 0x1FF);
         ListView_SetItemText(hList, i, 4, col);
-        _sntprintf(col, 40, _T("%d"), obj.Priority);
+        _sntprintf(col, 40, _T("%d"), obj.priority);
         ListView_SetItemText(hList, i, 5, col);
-        _sntprintf(col, 40, _T("%d"), obj.Palette);
+        _sntprintf(col, 40, _T("%d"), obj.palette);
         ListView_SetItemText(hList, i, 6, col);
         _sntprintf(col, 40, _T("%s%s"),
-                   obj.HFlip ? _T("H") : _T("-"),
-                   obj.VFlip ? _T("V") : _T("-"));
+                   obj.hflip ? _T("H") : _T("-"),
+                   obj.vflip ? _T("V") : _T("-"));
         ListView_SetItemText(hList, i, 7, col);
     }
     SendMessage(hList, WM_SETREDRAW, TRUE, 0);
@@ -293,11 +340,16 @@ void UpdateListValues(HWND hList) {
 }
 
 void Refresh(HWND hDlg) {
+    SPVState *st = GetState(hDlg);
+    if (!st) return;
+
+    SnapshotOAM(st);
+
     HWND hList = GetDlgItem(hDlg, IDC_SPV_LIST);
-    UpdateListValues(hList);
+    UpdateListValues(hList, st);
 
     TCHAR buf[8];
-    _sntprintf(buf, 8, _T("%d"), PPU.FirstSprite & 127);
+    _sntprintf(buf, 8, _T("%d"), st->firstSprite);
     SetDlgItemText(hDlg, IDC_SPV_FIRST_SPRITE, buf);
 
     DrawScreen(hDlg);
@@ -407,6 +459,9 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         st->screenViewY = 0;
         st->screenCurW = kScreenW;
         st->screenCurH = kScreenH;
+        for (int i = 0; i < 128; ++i) st->sprites[i] = LocalSprite{};
+        st->sizeBase = 0;
+        st->firstSprite = 0;
         SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)st);
 
         CheckDlgButton(hDlg, IDC_SPV_AUTOUPDATE, BST_CHECKED);

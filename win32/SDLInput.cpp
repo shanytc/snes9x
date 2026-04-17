@@ -238,8 +238,33 @@ void SDLInput_Init()
         return;
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    // Some HID devices (e.g. Gamesir G7 Pro "HID-compliant vendor-defined device"
+    // under HID\VID_3537) cause SDL_PollEvent to stall 70-100 ms on USB hotplug
+    // when DirectInput is active. Let users disable the DI backend as a workaround.
+    if (!GUI.UseDirectInput)
+        SDL_SetHint(SDL_HINT_JOYSTICK_DIRECTINPUT, "0");
     SDL_Init(SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK);
     s_sdl_initialized = true;
+}
+
+void SDLInput_OnDeviceChange()
+{
+    if (!s_sdl_initialized)
+        return;
+
+    // Force SDL to run its internal message pump so queued WM_DEVICECHANGE
+    // notifications on SDL's hidden message window are processed now rather
+    // than on the next timed poll. Then drain the resulting events.
+    SDL_PumpEvents();
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event))
+    {
+        if (event.type == SDL_EVENT_JOYSTICK_ADDED)
+            OpenDevice(event.jdevice.which);
+        else if (event.type == SDL_EVENT_JOYSTICK_REMOVED)
+            CloseDevice(event.jdevice.which);
+    }
 }
 
 void SDLInput_Shutdown()

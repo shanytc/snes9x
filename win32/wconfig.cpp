@@ -896,6 +896,7 @@ void WinRegisterConfigItems()
 	AddBoolC("MultiBindingMode", GUI.MultiBindingMode, true, "true to use multi-binding mode in input config, false for single-binding mode");
 	AddBoolC("AllowMultipleHotkeyBindings", GUI.AllowMultipleHotkeyBindings, false, "true to process all hotkey bindings, false to use only the first");
 	AddBoolC("HotkeyMultiBindingMode", GUI.HotkeyMultiBindingMode, false, "true to use multi-binding mode in hotkey config, false for single-binding mode");
+	AddBoolC("UseDirectInput", GUI.UseDirectInput, true, "true to let SDL use DirectInput for controllers; set false if plugging/unplugging USB devices causes stutter (restart required)");
 #undef CATEGORY
 #define	CATEGORY "ROM"
 	AddBoolC("Cheat", Settings.ApplyCheats, true, "true to allow enabled cheats to be applied");

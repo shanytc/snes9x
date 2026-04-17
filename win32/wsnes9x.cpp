@@ -119,6 +119,7 @@ INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+HWND InputConfig_GetOpenHwnd();
 INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgCheater(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgCheatSearch(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -1681,6 +1682,12 @@ void WinShowCheatEditorDialog()
 
 #define MOVIE_LOCKED_SETTING	if(S9xMovieActive()) {MessageBox(GUI.hWnd,TEXT("That setting is locked while a movie is active."),TEXT("Notice"),MB_OK|MB_ICONEXCLAMATION); break;}
 
+// Timer ID used on the main window to burst-poll SDL after WM_DEVICECHANGE,
+// giving slow backends (XInput polling, driver init) time to enumerate a
+// newly plugged device without a ~10s wait for SDL's own scan schedule.
+#define TIMER_HOTPLUG_BURST 0xD0D0
+static int g_hotplugTicksRemaining = 0;
+
 LRESULT CALLBACK WinProc(
 						 HWND hWnd,
 						 UINT uMsg,
@@ -1698,6 +1705,37 @@ LRESULT CALLBACK WinProc(
 		g_hInst = ((LPCREATESTRUCT)lParam)->hInstance;
 		DragAcceptFiles(hWnd, TRUE);
 		return 0;
+	case WM_DEVICECHANGE:
+		// Windows fires WM_DEVICECHANGE when a device is connected/disconnected,
+		// but SDL's backends (XInput, WGI, RawInput, DI) may not have enumerated
+		// the new device yet — some run periodic scans on their own schedule and
+		// some need the device driver to finish initializing. Rather than polling
+		// once and hoping, kick off a short burst of retries to catch the ADDED
+		// event the instant SDL emits it.
+		if (wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE)
+		{
+			SDLInput_OnDeviceChange();
+			HWND hCfg = InputConfig_GetOpenHwnd();
+			if (hCfg)
+				PostMessage(hCfg, WM_TIMER, 99, 0);
+			// 6 seconds of 150ms ticks = 40 retries; resets if another
+			// WM_DEVICECHANGE lands mid-burst so we always get a full window.
+			g_hotplugTicksRemaining = 40;
+			SetTimer(hWnd, TIMER_HOTPLUG_BURST, 150, NULL);
+		}
+		break;
+	case WM_TIMER:
+		if (wParam == TIMER_HOTPLUG_BURST)
+		{
+			SDLInput_OnDeviceChange();
+			HWND hCfg = InputConfig_GetOpenHwnd();
+			if (hCfg)
+				PostMessage(hCfg, WM_TIMER, 99, 0);
+			if (--g_hotplugTicksRemaining <= 0)
+				KillTimer(hWnd, TIMER_HOTPLUG_BURST);
+			return 0;
+		}
+		break;
 	case WM_KEYDOWN:
 		if(GUI.BackgroundInput && !GUI.InactivePause)
 			break;
@@ -9684,6 +9722,12 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 	}
 }
 
+// Set by DlgInputConfig while the Input Config dialog is open. Read from
+// WinProc's WM_DEVICECHANGE handler to kick an immediate UI refresh instead
+// of waiting up to 500 ms for the dialog's own poll timer.
+static HWND s_inputConfigHwnd = NULL;
+HWND InputConfig_GetOpenHwnd() { return s_inputConfigHwnd; }
+
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	TCHAR temp[256];
@@ -9701,6 +9745,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
     switch(msg)
 	{
 	case WM_INITDIALOG:
+		s_inputConfigHwnd = hDlg;
 		WinRefreshDisplay();
 		SetWindowText(hDlg,INPUTCONFIG_TITLE);
 		SetDlgItemText(hDlg,IDC_JPTOGGLE,INPUTCONFIG_JPTOGGLE);
@@ -9748,6 +9793,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
+		SendDlgItemMessage(hDlg,IDC_USEDIRECTINPUT,BM_SETCHECK, GUI.UseDirectInput ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 
 		// Initialize binding mode combobox
 		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO,CB_ADDSTRING,0,(LPARAM)TEXT("Single"));
@@ -9774,6 +9820,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		break;
 	case WM_CLOSE:
 		KillTimer(hDlg, 99);
+		s_inputConfigHwnd = NULL;
 		EndDialog(hDlg, 0);
 		return TRUE;
 	case WM_TIMER:
@@ -9842,6 +9889,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		{
 		case IDCANCEL:
 			KillTimer(hDlg, 99);
+			s_inputConfigHwnd = NULL;
 			memcpy(Joypad, pads, 10*sizeof(SJoypad));
 			memcpy(JoypadExtra, padsExtra, 10*sizeof(SJoypadExtraBinds));
 			EndDialog(hDlg,0);
@@ -9849,9 +9897,11 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		case IDOK:
 			KillTimer(hDlg, 99);
+			s_inputConfigHwnd = NULL;
 			Settings.UpAndDown = IsDlgButtonChecked(hDlg, IDC_ALLOWLEFTRIGHT);
 			GUI.MultiBindingMode = (SendDlgItemMessage(hDlg, IDC_BINDINGCOMBO, CB_GETCURSEL, 0, 0) == 1);
 			GUI.AllowMultipleBindings = GUI.MultiBindingMode && (IsDlgButtonChecked(hDlg, IDC_ALLOWMULTIBIND) != 0);
+			GUI.UseDirectInput = (IsDlgButtonChecked(hDlg, IDC_USEDIRECTINPUT) != 0);
 			WinSaveConfigFile();
 			EndDialog(hDlg,0);
 			break;

@@ -232,6 +232,7 @@ struct sGUI {
 	bool JoystickHotkeys;
 	bool MasterHotkeyEnabled;
 	bool HotkeysActive;
+	bool UseDirectInput;
 	char JoypadGUID[8][64]; // SDL device GUID per joypad slot (hex string)
 	bool MovieClearSRAM;
 	bool MovieStartFromReset;

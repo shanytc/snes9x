@@ -726,6 +726,7 @@
 #define IDC_SPV_BG                      3178
 #define IDC_SPV_FIRST_SPRITE            3179
 #define IDC_SPV_RATE                    3180
+#define IDC_USEDIRECTINPUT              3181
 
 #define IDC_STATIC                      -1
 
@@ -735,7 +736,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        180
 #define _APS_NEXT_COMMAND_VALUE         40203
-#define _APS_NEXT_CONTROL_VALUE         3220
+#define _APS_NEXT_CONTROL_VALUE         3221
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

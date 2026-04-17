@@ -78,6 +78,11 @@ struct SPVState {
     // Auto-update throttle: minimum ms between snapshots (0 = realtime).
     int    updateRateMs;
     DWORD  lastRefreshTick;
+
+    // Current preview sprite native pixel dims; HandleDrawItem uses them to
+    // auto-fit the preview to the widget.
+    int    previewSpriteW;
+    int    previewSpriteH;
 };
 
 SPVState *GetState(HWND hDlg) {
@@ -264,11 +269,19 @@ void DrawPreview(HWND hDlg) {
     SPVState *st = GetState(hDlg);
     if (!st || !st->previewBits) return;
 
+    uint32 pal[256];
+    SnapshotPaletteBGRA(pal);
+    uint32 bg = BackgroundColor(st, pal);
+
+    // Fill the DIB with the selected Background so transparent (idx-0)
+    // sprite pixels blend with whatever we paint in HandleDrawItem.
     for (int i = 0; i < kPreviewSrc * kPreviewSrc; ++i)
-        st->previewBits[i] = 0xFF101010u;
+        st->previewBits[i] = bg;
 
     int idx = st->selected;
     if (idx < 0 || idx >= 128) {
+        st->previewSpriteW = 0;
+        st->previewSpriteH = 0;
         InvalidateRect(GetDlgItem(hDlg, IDC_SPV_PREVIEW), NULL, FALSE);
         SetDlgItemText(hDlg, IDC_SPV_DETAILS, _T(""));
         return;
@@ -277,14 +290,13 @@ void DrawPreview(HWND hDlg) {
     const LocalSprite &obj = st->sprites[idx];
     int w, h;
     SpriteDims(st->sizeBase, obj.size, &w, &h);
+    st->previewSpriteW = w;
+    st->previewSpriteH = h;
 
-    uint32 pal[256];
-    SnapshotPaletteBGRA(pal);
-
-    int ox = (kPreviewSrc - w) / 2; if (ox < 0) ox = 0;
-    int oy = (kPreviewSrc - h) / 2; if (oy < 0) oy = 0;
-
-    DrawSpriteAt(obj, st->sizeBase, ox, oy,
+    // Draw sprite at the top-left of the DIB at native 1:1. The scale-to-fit
+    // zoom and centering happen in HandleDrawItem so the user sees the
+    // sprite fill the preview cell like bsnes does.
+    DrawSpriteAt(obj, st->sizeBase, 0, 0,
                  st->previewBits, kPreviewSrc, kPreviewSrc, pal);
 
     TCHAR det[200];
@@ -368,17 +380,37 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
     int h = dis->rcItem.bottom - dis->rcItem.top;
 
     if (dis->CtlID == IDC_SPV_PREVIEW && st->previewBmp) {
-        // Preview renders the single selected sprite 1:1 centred; no user zoom.
-        FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
-        HDC memDC = CreateCompatibleDC(dis->hDC);
-        HGDIOBJ oldBmp = SelectObject(memDC, st->previewBmp);
-        int drawW = kPreviewSrc; if (drawW > w) drawW = w;
-        int drawH = kPreviewSrc; if (drawH > h) drawH = h;
-        SetStretchBltMode(dis->hDC, COLORONCOLOR);
-        StretchBlt(dis->hDC, 0, 0, drawW, drawH,
-                   memDC, 0, 0, drawW, drawH, SRCCOPY);
-        SelectObject(memDC, oldBmp);
-        DeleteDC(memDC);
+        // Fill widget with the selected Background color.
+        uint32 pal[256];
+        SnapshotPaletteBGRA(pal);
+        uint32 argb = BackgroundColor(st, pal);
+        HBRUSH hbr = CreateSolidBrush(RGB((argb >> 16) & 0xFF,
+                                          (argb >>  8) & 0xFF,
+                                          (argb      ) & 0xFF));
+        FillRect(dis->hDC, &dis->rcItem, hbr);
+        DeleteObject(hbr);
+
+        int sw = st->previewSpriteW;
+        int sh = st->previewSpriteH;
+        if (sw > 0 && sh > 0 && w > 0 && h > 0) {
+            // Largest integer scale that keeps the sprite in the widget.
+            int scaleW = w / sw;
+            int scaleH = h / sh;
+            int scale = (scaleW < scaleH) ? scaleW : scaleH;
+            if (scale < 1) scale = 1;
+            int drawW = sw * scale;
+            int drawH = sh * scale;
+            int dstX = (w - drawW) / 2;
+            int dstY = (h - drawH) / 2;
+
+            HDC memDC = CreateCompatibleDC(dis->hDC);
+            HGDIOBJ oldBmp = SelectObject(memDC, st->previewBmp);
+            SetStretchBltMode(dis->hDC, COLORONCOLOR);
+            StretchBlt(dis->hDC, dstX, dstY, drawW, drawH,
+                       memDC, 0, 0, sw, sh, SRCCOPY);
+            SelectObject(memDC, oldBmp);
+            DeleteDC(memDC);
+        }
     } else if (dis->CtlID == IDC_SPV_SCREEN && st->screenBmp) {
         // Fill the widget with the user's selected Background color so the
         // area outside the 512x256 source matches the DIB's backdrop.
@@ -489,6 +521,8 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
         st->firstSprite = 0;
         st->updateRateMs = 1000;   // default: refresh once per second
         st->lastRefreshTick = 0;
+        st->previewSpriteW = 0;
+        st->previewSpriteH = 0;
         SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)st);
 
         CheckDlgButton(hDlg, IDC_SPV_AUTOUPDATE, BST_CHECKED);
@@ -590,6 +624,7 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
                 if (sel >= 0) {
                     st->bgType = sel;
                     DrawScreen(hDlg);
+                    DrawPreview(hDlg);
                 }
             }
             return TRUE;

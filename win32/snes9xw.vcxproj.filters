@@ -390,6 +390,9 @@
     <ClInclude Include="debug_viewer_common.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="debug_viewer_export.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
@@ -831,6 +834,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="debug_viewer_common.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="debug_viewer_export.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
   </ItemGroup>

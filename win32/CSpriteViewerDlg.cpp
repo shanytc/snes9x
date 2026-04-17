@@ -15,11 +15,14 @@
 
 #include "CSpriteViewerDlg.h"
 #include "debug_viewer_common.h"
+#include "debug_viewer_export.h"
 #include "wsnes9x.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
 #include "../memmap.h"
 #include "../ppu.h"
+
+#include <vector>
 
 HWND gSpriteViewerHWND = NULL;
 extern HINSTANCE g_hInst;
@@ -203,6 +206,65 @@ void DrawSpriteAt(const LocalSprite &obj, int sizeBase, int cx, int cy,
             }
         }
     }
+}
+
+// Forward decl; defined below.
+void DrawSpriteAt(const struct LocalSprite &obj, int sizeBase, int cx, int cy,
+                  uint32 *dst, int stride, int stridePixels,
+                  const uint32 pal[256]);
+
+// Allocate a w*h BGRA buffer and render the sprite into it at 1:1 with
+// transparent (alpha-0) background. Used for PNG export.
+void RenderSpriteRGBA(const LocalSprite &obj, int sizeBase,
+                      std::vector<uint32> &pixels, int &outW, int &outH) {
+    SpriteDims(sizeBase, obj.size, &outW, &outH);
+    pixels.assign((size_t)outW * outH, 0u); // fully transparent
+    uint32 pal[256];
+    SnapshotPaletteBGRA(pal);
+    DrawSpriteAt(obj, sizeBase, 0, 0, pixels.data(), outH, outW, pal);
+}
+
+// Render the Screen composition (no outline, respects BG combo + visibility)
+// into a freshly allocated BGRA buffer. Used for PNG export.
+void RenderScreenForExport(SPVState *st, std::vector<uint32> &out) {
+    out.assign((size_t)kScreenW * kScreenH, 0u);
+
+    uint32 pal[256];
+    SnapshotPaletteBGRA(pal);
+
+    // BG_TRANSPARENT exports with genuine alpha-0; all other modes fill
+    // the canvas with the chosen colour.
+    if (st->bgType != BG_TRANSPARENT) {
+        uint32 bg = 0; // local computation; mirrors BackgroundColor()
+        switch (st->bgType) {
+        case BG_PALETTE_0: case BG_PALETTE_1: case BG_PALETTE_2: case BG_PALETTE_3:
+        case BG_PALETTE_4: case BG_PALETTE_5: case BG_PALETTE_6: case BG_PALETTE_7:
+            bg = pal[128 + (st->bgType - BG_PALETTE_0) * 16]; break;
+        case BG_MAGENTA: bg = 0xFFFF00FFu; break;
+        case BG_CYAN:    bg = 0xFF00FFFFu; break;
+        case BG_WHITE:   bg = 0xFFFFFFFFu; break;
+        case BG_BLACK:   bg = 0xFF000000u; break;
+        default: bg = 0xFF303030u; break;
+        }
+        for (int i = 0; i < kScreenW * kScreenH; ++i) out[i] = bg;
+    }
+
+    int fs = st->firstSprite;
+    for (int i = 127; i >= 0; --i) {
+        int id = (fs + i) & 127;
+        if (!st->visible[id]) continue;
+        const LocalSprite &obj = st->sprites[id];
+        int w, h;
+        SpriteDims(st->sizeBase, obj.size, &w, &h);
+        int cx = obj.hpos + 256;
+        int cy = obj.vpos;
+        DrawSpriteAt(obj, st->sizeBase, cx, cy, out.data(), kScreenH, kScreenW, pal);
+        if (cy + h > kScreenH) {
+            DrawSpriteAt(obj, st->sizeBase, cx, cy - kScreenH,
+                         out.data(), kScreenH, kScreenW, pal);
+        }
+    }
+    // Intentionally no screen outline in the exported image.
 }
 
 uint32 BackgroundColor(const SPVState *st, const uint32 pal[256]) {
@@ -504,6 +566,76 @@ void PopulateBgCombo(HWND hCombo) {
     SendMessage(hCombo, CB_SETCURSEL, 0, 0);
 }
 
+void ExportSingleSpriteToPng(HWND hDlg, int idx) {
+    SPVState *st = GetState(hDlg);
+    if (!st || idx < 0 || idx >= 128) return;
+
+    std::vector<uint32> pixels;
+    int w, h;
+    RenderSpriteRGBA(st->sprites[idx], st->sizeBase, pixels, w, h);
+
+    TCHAR path[MAX_PATH];
+    TCHAR defName[40];
+    _sntprintf(defName, 40, _T("sprite_%d.png"), idx);
+    if (!ShowSaveDialog(hDlg, path, MAX_PATH, defName,
+                        _T("PNG Image (*.png)\0*.png\0All Files (*.*)\0*.*\0\0"),
+                        _T("png"))) return;
+
+    if (!WritePngFile(path, w, h, w, pixels.data())) {
+        MessageBox(hDlg, _T("Failed to save PNG"),
+                   _T("Export"), MB_OK | MB_ICONERROR);
+    }
+}
+
+void ExportSpritesToZip(HWND hDlg, const std::vector<int> &ids) {
+    SPVState *st = GetState(hDlg);
+    if (!st || ids.empty()) return;
+
+    std::vector<ZipBlob> entries;
+    entries.reserve(ids.size());
+    for (int id : ids) {
+        if (id < 0 || id >= 128) continue;
+        std::vector<uint32> pixels;
+        int w, h;
+        RenderSpriteRGBA(st->sprites[id], st->sizeBase, pixels, w, h);
+        ZipBlob blob;
+        char buf[40];
+        _snprintf(buf, 40, "sprite_%d.png", id);
+        blob.name = buf;
+        if (!WritePngToMemory(w, h, w, pixels.data(), blob.data)) continue;
+        entries.push_back(std::move(blob));
+    }
+    if (entries.empty()) return;
+
+    TCHAR path[MAX_PATH];
+    if (!ShowSaveDialog(hDlg, path, MAX_PATH, _T("sprites.zip"),
+                        _T("ZIP Archive (*.zip)\0*.zip\0All Files (*.*)\0*.*\0\0"),
+                        _T("zip"))) return;
+
+    if (!WriteZipFile(path, entries)) {
+        MessageBox(hDlg, _T("Failed to save ZIP"),
+                   _T("Export"), MB_OK | MB_ICONERROR);
+    }
+}
+
+void ExportScreenToPng(HWND hDlg) {
+    SPVState *st = GetState(hDlg);
+    if (!st) return;
+
+    std::vector<uint32> pixels;
+    RenderScreenForExport(st, pixels);
+
+    TCHAR path[MAX_PATH];
+    if (!ShowSaveDialog(hDlg, path, MAX_PATH, _T("sprite_screen.png"),
+                        _T("PNG Image (*.png)\0*.png\0All Files (*.*)\0*.*\0\0"),
+                        _T("png"))) return;
+
+    if (!WritePngFile(path, kScreenW, kScreenH, kScreenW, pixels.data())) {
+        MessageBox(hDlg, _T("Failed to save PNG"),
+                   _T("Export"), MB_OK | MB_ICONERROR);
+    }
+}
+
 INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_INITDIALOG: {
@@ -600,55 +732,100 @@ INT_PTR CALLBACK DlgSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
     case WM_CONTEXTMENU: {
         SPVState *st = GetState(hDlg);
         if (!st) break;
-        HWND hSrc = (HWND)wParam;
+        HWND hSrc  = (HWND)wParam;
         HWND hList = GetDlgItem(hDlg, IDC_SPV_LIST);
-        if (hSrc != hList) break;
+        HWND hPrev = GetDlgItem(hDlg, IDC_SPV_PREVIEW);
+        HWND hScrn = GetDlgItem(hDlg, IDC_SPV_SCREEN);
 
         int x = (short)LOWORD(lParam);
         int y = (short)HIWORD(lParam);
-        if (x == -1 && y == -1) {
-            // Keyboard-invoked context menu: anchor near the focused row.
-            RECT rc; GetWindowRect(hList, &rc);
-            x = rc.left + 20;
-            y = rc.top  + 20;
+
+        auto adjustKeyboardPos = [&](HWND target) {
+            if (x == -1 && y == -1) {
+                RECT rc; GetWindowRect(target, &rc);
+                x = rc.left + 20;
+                y = rc.top  + 20;
+            }
+        };
+
+        if (hSrc == hList) {
+            adjustKeyboardPos(hList);
+            enum { CTX_TOGGLE = 1, CTX_ONLY = 2, CTX_ALL = 3, CTX_EXPORT = 4 };
+            HMENU hMenu = CreatePopupMenu();
+            AppendMenu(hMenu, MF_STRING, CTX_TOGGLE, _T("Toggle Visibility"));
+            AppendMenu(hMenu, MF_STRING, CTX_ONLY,   _T("Show Only Selected Objects"));
+            AppendMenu(hMenu, MF_STRING, CTX_ALL,    _T("Show All Objects"));
+            AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenu(hMenu, MF_STRING, CTX_EXPORT, _T("Export Selected to PNG..."));
+            int cmd = TrackPopupMenu(hMenu,
+                                     TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                     x, y, 0, hDlg, NULL);
+            DestroyMenu(hMenu);
+            if (cmd < 1 || cmd > 4) return TRUE;
+
+            if (cmd == CTX_EXPORT) {
+                std::vector<int> ids;
+                int i = -1;
+                while ((i = (int)SendMessage(hList, LVM_GETNEXTITEM, i,
+                                              MAKELPARAM(LVNI_SELECTED, 0))) != -1) {
+                    if (i >= 0 && i < 128) ids.push_back(i);
+                }
+                if (ids.size() == 1) ExportSingleSpriteToPng(hDlg, ids[0]);
+                else if (ids.size() > 1) ExportSpritesToZip(hDlg, ids);
+                return TRUE;
+            }
+
+            st->batchUpdating = true;
+            if (cmd == CTX_TOGGLE) {
+                int i = -1;
+                while ((i = (int)SendMessage(hList, LVM_GETNEXTITEM, i,
+                                              MAKELPARAM(LVNI_SELECTED, 0))) != -1) {
+                    if (i < 0 || i >= 128) break;
+                    st->visible[i] = !st->visible[i];
+                    ListView_SetCheckState(hList, i, st->visible[i]);
+                }
+            } else if (cmd == CTX_ONLY) {
+                for (int i = 0; i < 128; ++i) {
+                    bool sel = (ListView_GetItemState(hList, i, LVIS_SELECTED)
+                                & LVIS_SELECTED) != 0;
+                    st->visible[i] = sel;
+                    ListView_SetCheckState(hList, i, sel);
+                }
+            } else if (cmd == CTX_ALL) {
+                for (int i = 0; i < 128; ++i) {
+                    st->visible[i] = true;
+                    ListView_SetCheckState(hList, i, TRUE);
+                }
+            }
+            st->batchUpdating = false;
+            DrawScreen(hDlg);
+            return TRUE;
         }
 
-        enum { CTX_TOGGLE = 1, CTX_ONLY = 2, CTX_ALL = 3 };
-        HMENU hMenu = CreatePopupMenu();
-        AppendMenu(hMenu, MF_STRING, CTX_TOGGLE, _T("Toggle Visibility"));
-        AppendMenu(hMenu, MF_STRING, CTX_ONLY,   _T("Show Only Selected Objects"));
-        AppendMenu(hMenu, MF_STRING, CTX_ALL,    _T("Show All Objects"));
-        int cmd = TrackPopupMenu(hMenu,
-                                 TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
-                                 x, y, 0, hDlg, NULL);
-        DestroyMenu(hMenu);
-        if (cmd < 1 || cmd > 3) return TRUE;
-
-        st->batchUpdating = true;
-        if (cmd == CTX_TOGGLE) {
-            int i = -1;
-            while ((i = (int)SendMessage(hList, LVM_GETNEXTITEM, i,
-                                          MAKELPARAM(LVNI_SELECTED, 0))) != -1) {
-                if (i < 0 || i >= 128) break;
-                st->visible[i] = !st->visible[i];
-                ListView_SetCheckState(hList, i, st->visible[i]);
-            }
-        } else if (cmd == CTX_ONLY) {
-            for (int i = 0; i < 128; ++i) {
-                bool sel = (ListView_GetItemState(hList, i, LVIS_SELECTED)
-                            & LVIS_SELECTED) != 0;
-                st->visible[i] = sel;
-                ListView_SetCheckState(hList, i, sel);
-            }
-        } else if (cmd == CTX_ALL) {
-            for (int i = 0; i < 128; ++i) {
-                st->visible[i] = true;
-                ListView_SetCheckState(hList, i, TRUE);
-            }
+        if (hSrc == hPrev) {
+            adjustKeyboardPos(hPrev);
+            HMENU hMenu = CreatePopupMenu();
+            AppendMenu(hMenu, MF_STRING, 1, _T("Export to PNG..."));
+            int cmd = TrackPopupMenu(hMenu,
+                                     TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                     x, y, 0, hDlg, NULL);
+            DestroyMenu(hMenu);
+            if (cmd == 1) ExportSingleSpriteToPng(hDlg, st->selected);
+            return TRUE;
         }
-        st->batchUpdating = false;
-        DrawScreen(hDlg);
-        return TRUE;
+
+        if (hSrc == hScrn) {
+            adjustKeyboardPos(hScrn);
+            HMENU hMenu = CreatePopupMenu();
+            AppendMenu(hMenu, MF_STRING, 1, _T("Export to PNG..."));
+            int cmd = TrackPopupMenu(hMenu,
+                                     TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                     x, y, 0, hDlg, NULL);
+            DestroyMenu(hMenu);
+            if (cmd == 1) ExportScreenToPng(hDlg);
+            return TRUE;
+        }
+        break;
     }
 
     case WM_COMMAND: {

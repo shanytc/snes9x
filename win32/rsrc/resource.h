@@ -653,15 +653,89 @@
 #define IDC_DEFAULTS_COLOR              3118
 #define IDC_ADJUSTMENTS_ENABLE          3119
 
+// Debug viewers (VRAM / Tilemap / Sprite)
+#define IDD_VRAM_VIEWER                 177
+#define IDD_TILEMAP_VIEWER              178
+#define IDD_SPRITE_VIEWER               179
+
+#define ID_DEBUG_VRAM_VIEWER            40200
+#define ID_DEBUG_TILEMAP_VIEWER         40201
+#define ID_DEBUG_SPRITE_VIEWER          40202
+
+#define IDC_VRAMV_CANVAS                3120
+#define IDC_VRAMV_PALETTE               3121
+#define IDC_VRAMV_BPP_2                 3122
+#define IDC_VRAMV_BPP_4                 3123
+#define IDC_VRAMV_BPP_8                 3124
+#define IDC_VRAMV_BPP_MODE7             3125
+#define IDC_VRAMV_AUTOUPDATE            3126
+#define IDC_VRAMV_REFRESH               3127
+#define IDC_VRAMV_USECGRAM              3128
+#define IDC_VRAMV_BG1_ADDR              3129
+#define IDC_VRAMV_BG2_ADDR              3130
+#define IDC_VRAMV_BG3_ADDR              3131
+#define IDC_VRAMV_BG4_ADDR              3132
+#define IDC_VRAMV_OAM1_ADDR             3133
+#define IDC_VRAMV_OAM2_ADDR             3134
+#define IDC_VRAMV_BG1_GOTO              3135
+#define IDC_VRAMV_BG2_GOTO              3136
+#define IDC_VRAMV_BG3_GOTO              3137
+#define IDC_VRAMV_BG4_GOTO              3138
+#define IDC_VRAMV_OAM1_GOTO             3139
+#define IDC_VRAMV_OAM2_GOTO             3140
+#define IDC_VRAMV_PALROW                3141
+#define IDC_VRAMV_ZOOM                  3142
+#define IDC_VRAMV_INFO                  3143
+#define IDC_VRAMV_SHOWGRID              3200
+#define IDC_VRAMV_SOURCE                3201
+#define IDC_VRAMV_ADDRESS               3202
+#define IDC_VRAMV_PREV                  3203
+#define IDC_VRAMV_NEXT                  3204
+#define IDC_VRAMV_BITDEPTH              3205
+#define IDC_VRAMV_WIDTH                 3206
+#define IDC_VRAMV_WIDTH_SPIN            3207
+#define IDC_VRAMV_TILEINFO              3208
+
+#define IDC_TMV_CANVAS                  3150
+#define IDC_TMV_AUTOUPDATE              3151
+#define IDC_TMV_REFRESH                 3152
+#define IDC_TMV_BG_1                    3153
+#define IDC_TMV_BG_2                    3154
+#define IDC_TMV_BG_3                    3155
+#define IDC_TMV_BG_4                    3156
+#define IDC_TMV_CUSTOM_MODE             3157
+#define IDC_TMV_MODE                    3158
+#define IDC_TMV_BITDEPTH                3159
+#define IDC_TMV_MAPSIZE                 3160
+#define IDC_TMV_MAPADDR                 3161
+#define IDC_TMV_TILESIZE                3162
+#define IDC_TMV_TILEADDR                3163
+#define IDC_TMV_ZOOM                    3164
+#define IDC_TMV_INFO                    3165
+#define IDC_TMV_SHOWGRID                3166
+#define IDC_TMV_OVERRIDE_TILEMAP        3167
+
+#define IDC_SPV_LIST                    3170
+#define IDC_SPV_PREVIEW                 3171
+#define IDC_SPV_AUTOUPDATE              3172
+#define IDC_SPV_REFRESH                 3173
+#define IDC_SPV_DETAILS                 3174
+#define IDC_SPV_SCREEN                  3175
+#define IDC_SPV_ZOOM                    3176
+#define IDC_SPV_SHOW_OUTLINE            3177
+#define IDC_SPV_BG                      3178
+#define IDC_SPV_FIRST_SPRITE            3179
+#define IDC_SPV_RATE                    3180
+
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        177
-#define _APS_NEXT_COMMAND_VALUE         40197
-#define _APS_NEXT_CONTROL_VALUE         3120
+#define _APS_NEXT_RESOURCE_VALUE        180
+#define _APS_NEXT_COMMAND_VALUE         40203
+#define _APS_NEXT_CONTROL_VALUE         3220
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

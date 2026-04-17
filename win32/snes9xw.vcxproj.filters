@@ -378,6 +378,21 @@
     <ClInclude Include="CCheatGroupDialog.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="CVRAMViewerDlg.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CTilemapViewerDlg.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CSpriteViewerDlg.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="debug_viewer_common.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="debug_viewer_export.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
@@ -807,6 +822,21 @@
       <Filter>Filter</Filter>
     </ClCompile>
     <ClCompile Include="CCheatGroupDialog.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CVRAMViewerDlg.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CTilemapViewerDlg.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CSpriteViewerDlg.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="debug_viewer_common.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="debug_viewer_export.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
   </ItemGroup>

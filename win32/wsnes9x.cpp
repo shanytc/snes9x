@@ -37,6 +37,10 @@
 #include "CShaderParamDlg.h"
 #include "CSaveLoadWithPreviewDlg.h"
 #include "CCheatGroupDialog.h"
+#include "CVRAMViewerDlg.h"
+#include "CTilemapViewerDlg.h"
+#include "CSpriteViewerDlg.h"
+#include "debug_viewer_common.h"
 #include "../snes9x.h"
 #include "../memmap.h"
 #include "../cpuexec.h"
@@ -2458,6 +2462,15 @@ LRESULT CALLBACK WinProc(
         case ID_FILE_SAVE_PREVIEW:
             FreezeUnfreezeDialogPreview(TRUE);
             break;
+		case ID_DEBUG_VRAM_VIEWER:
+            WinShowVRAMViewerDialog();
+			break;
+		case ID_DEBUG_TILEMAP_VIEWER:
+            WinShowTilemapViewerDialog();
+			break;
+		case ID_DEBUG_SPRITE_VIEWER:
+            WinShowSpriteViewerDialog();
+			break;
 		case ID_CHEAT_ENTER:
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			if (!RA_WarnDisableHardcore("Cheat editor"))
@@ -3969,6 +3982,7 @@ int WINAPI WinMain(
 			RA_DoFrame();
 #endif
 			GUI.FrameCount++;
+			DebugViewers_OnFrame();
 			if (GUI.CursorTimer)
 			{
 				if (--GUI.CursorTimer == 0)

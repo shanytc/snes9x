@@ -478,6 +478,11 @@
     <ClInclude Include="CSaveLoadWithPreviewDlg.h" />
     <ClInclude Include="COpenGL.h" />
     <ClInclude Include="CShaderParamDlg.h" />
+    <ClInclude Include="CVRAMViewerDlg.h" />
+    <ClInclude Include="CTilemapViewerDlg.h" />
+    <ClInclude Include="CSpriteViewerDlg.h" />
+    <ClInclude Include="debug_viewer_common.h" />
+    <ClInclude Include="debug_viewer_export.h" />
     <ClInclude Include="CVulkan.h" />
     <ClInclude Include="CWaveOut.h" />
     <ClInclude Include="CXAudio2.h" />
@@ -694,6 +699,11 @@
     <ClCompile Include="CSaveLoadWithPreviewDlg.cpp" />
     <ClCompile Include="COpenGL.cpp" />
     <ClCompile Include="CShaderParamDlg.cpp" />
+    <ClCompile Include="CVRAMViewerDlg.cpp" />
+    <ClCompile Include="CTilemapViewerDlg.cpp" />
+    <ClCompile Include="CSpriteViewerDlg.cpp" />
+    <ClCompile Include="debug_viewer_common.cpp" />
+    <ClCompile Include="debug_viewer_export.cpp" />
     <ClCompile Include="CVulkan.cpp" />
     <ClCompile Include="CWaveOut.cpp" />
     <ClCompile Include="CXAudio2.cpp" />

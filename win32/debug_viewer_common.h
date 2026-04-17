@@ -73,4 +73,13 @@ void DebugViewers_OnFrame();
 // Returns false on malformed input.
 bool ParseHex(const TCHAR *text, uint32 *out);
 
+// Subclass the given static control so left-click-and-drag updates the
+// caller's viewX/viewY offsets (in source pixels). `scale` is read each
+// mouse move to scale the mouse delta. `maxX`/`maxY` set the clamp upper
+// bounds (exclusive). All four pointers must outlive the control.
+void InstallDragPan(HWND canvas,
+                    int *viewX, int *viewY,
+                    int *scale, int *maxX, int *maxY);
+void UninstallDragPan(HWND canvas);
+
 #endif // DEBUG_VIEWER_COMMON_H

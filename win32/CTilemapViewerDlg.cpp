@@ -36,6 +36,8 @@ struct TMVState {
     uint32 overrideMapAddr;
     uint32 overrideTileAddr;
 
+    int  viewX, viewY;        // pan offset in source pixels
+
     HBITMAP bmp;
     uint32 *bits;
     int curSrcW, curSrcH;
@@ -358,16 +360,19 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
     bmi.bmiHeader.biCompression = BI_RGB;
 
     FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
-    (void)dstW; (void)dstH;
 
-    // Anchor the scaled image at top-left of the canvas; GDI clips the
-    // overflow to the control's client rect automatically.
     int scale = st->zoom < 1 ? 1 : st->zoom;
-    SetStretchBltMode(dis->hDC, COLORONCOLOR);
-    StretchDIBits(dis->hDC,
-                  0, 0, st->curSrcW * scale, st->curSrcH * scale,
-                  0, 0, st->curSrcW, st->curSrcH,
-                  st->bits, &bmi, DIB_RGB_COLORS, SRCCOPY);
+    int srcW = dstW / scale;
+    int srcH = dstH / scale;
+    if (srcW > st->curSrcW - st->viewX) srcW = st->curSrcW - st->viewX;
+    if (srcH > st->curSrcH - st->viewY) srcH = st->curSrcH - st->viewY;
+    if (srcW > 0 && srcH > 0) {
+        SetStretchBltMode(dis->hDC, COLORONCOLOR);
+        StretchDIBits(dis->hDC,
+                      0, 0, srcW * scale, srcH * scale,
+                      st->viewX, st->viewY, srcW, srcH,
+                      st->bits, &bmi, DIB_RGB_COLORS, SRCCOPY);
+    }
 }
 
 void FillZoomCombo(HWND hCombo) {
@@ -467,6 +472,8 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
         TMVState *st = new TMVState();
         st->selectedBG = 0;
         st->zoom = 1;
+        st->viewX = 0;
+        st->viewY = 0;
         st->showGrid = false;
         st->autoUpdate = true;
         st->customScreenMode = false;
@@ -497,6 +504,9 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
         SeedAutoFields(hDlg, st);
 
         DebugViewers_Register(hDlg, &st->autoUpdate);
+        InstallDragPan(GetDlgItem(hDlg, IDC_TMV_CANVAS),
+                       &st->viewX, &st->viewY,
+                       &st->zoom, &st->curSrcW, &st->curSrcH);
         Render(hDlg);
         return TRUE;
     }
@@ -522,6 +532,7 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
         case IDC_TMV_BG_1: case IDC_TMV_BG_2:
         case IDC_TMV_BG_3: case IDC_TMV_BG_4:
             st->selectedBG = BgRadioIndex(hDlg);
+            st->viewX = st->viewY = 0;
             SeedAutoFields(hDlg, st);
             Render(hDlg);
             return TRUE;
@@ -613,6 +624,7 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
 
     case WM_DESTROY: {
         TMVState *st = GetState(hDlg);
+        UninstallDragPan(GetDlgItem(hDlg, IDC_TMV_CANVAS));
         DebugViewers_Unregister(hDlg);
         if (st) {
             if (st->bmp) DeleteObject(st->bmp);

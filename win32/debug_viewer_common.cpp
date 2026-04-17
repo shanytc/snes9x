@@ -226,6 +226,105 @@ void DebugViewers_OnFrame() {
     }
 }
 
+namespace {
+
+struct DragPanState {
+    bool dragging;
+    int  dragStartX, dragStartY;
+    int  dragViewX,  dragViewY;
+    int *viewX;
+    int *viewY;
+    int *scale;
+    int *maxX;
+    int *maxY;
+    WNDPROC origProc;
+};
+
+LRESULT CALLBACK DragPanWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DragPanState *ps = (DragPanState *)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    if (!ps) return DefWindowProc(hWnd, msg, wParam, lParam);
+
+    switch (msg) {
+    case WM_LBUTTONDOWN:
+        ps->dragging = true;
+        ps->dragStartX = (short)LOWORD(lParam);
+        ps->dragStartY = (short)HIWORD(lParam);
+        ps->dragViewX  = *ps->viewX;
+        ps->dragViewY  = *ps->viewY;
+        SetCapture(hWnd);
+        SetCursor(LoadCursor(NULL, IDC_SIZEALL));
+        return 0;
+
+    case WM_MOUSEMOVE:
+        if (ps->dragging) {
+            int mx = (short)LOWORD(lParam);
+            int my = (short)HIWORD(lParam);
+            int dx = mx - ps->dragStartX;
+            int dy = my - ps->dragStartY;
+            int sc = (ps->scale && *ps->scale > 0) ? *ps->scale : 1;
+            int nx = ps->dragViewX - dx / sc;
+            int ny = ps->dragViewY - dy / sc;
+
+            // Clamp so you can't pan past the end of the source: the lower
+            // right edge should align with the lower right of the canvas.
+            RECT rc; GetClientRect(hWnd, &rc);
+            int visW = (rc.right / sc);
+            int visH = (rc.bottom / sc);
+            int maxXv = (ps->maxX && *ps->maxX > visW) ? (*ps->maxX - visW) : 0;
+            int maxYv = (ps->maxY && *ps->maxY > visH) ? (*ps->maxY - visH) : 0;
+            if (nx < 0) nx = 0;
+            if (ny < 0) ny = 0;
+            if (nx > maxXv) nx = maxXv;
+            if (ny > maxYv) ny = maxYv;
+            *ps->viewX = nx;
+            *ps->viewY = ny;
+            InvalidateRect(hWnd, NULL, FALSE);
+        }
+        return 0;
+
+    case WM_LBUTTONUP:
+        if (ps->dragging) {
+            ps->dragging = false;
+            ReleaseCapture();
+        }
+        return 0;
+
+    case WM_SETCURSOR:
+        if (ps->dragging) {
+            SetCursor(LoadCursor(NULL, IDC_SIZEALL));
+            return TRUE;
+        }
+        break;
+    }
+    return CallWindowProc(ps->origProc, hWnd, msg, wParam, lParam);
+}
+
+} // anonymous namespace
+
+void InstallDragPan(HWND canvas, int *viewX, int *viewY,
+                    int *scale, int *maxX, int *maxY) {
+    DragPanState *ps = new DragPanState();
+    ps->dragging = false;
+    ps->dragStartX = ps->dragStartY = 0;
+    ps->dragViewX = ps->dragViewY = 0;
+    ps->viewX = viewX;
+    ps->viewY = viewY;
+    ps->scale = scale;
+    ps->maxX = maxX;
+    ps->maxY = maxY;
+    ps->origProc = (WNDPROC)GetWindowLongPtr(canvas, GWLP_WNDPROC);
+    SetWindowLongPtr(canvas, GWLP_USERDATA, (LONG_PTR)ps);
+    SetWindowLongPtr(canvas, GWLP_WNDPROC, (LONG_PTR)DragPanWndProc);
+}
+
+void UninstallDragPan(HWND canvas) {
+    DragPanState *ps = (DragPanState *)GetWindowLongPtr(canvas, GWLP_USERDATA);
+    if (!ps) return;
+    SetWindowLongPtr(canvas, GWLP_WNDPROC, (LONG_PTR)ps->origProc);
+    SetWindowLongPtr(canvas, GWLP_USERDATA, 0);
+    delete ps;
+}
+
 bool ParseHex(const TCHAR *text, uint32 *out) {
     while (*text == _T(' ') || *text == _T('\t')) ++text;
     if (text[0] == _T('0') && (text[1] == _T('x') || text[1] == _T('X')))

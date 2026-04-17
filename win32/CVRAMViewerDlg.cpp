@@ -37,6 +37,8 @@ struct VRAMState {
 
     int  selectedTile;       // -1 if none
 
+    int  viewX, viewY;       // pan offset into tileBits (source pixels)
+
     HBITMAP tileBmp;
     uint32 *tileBits;
     HBITMAP palBmp;
@@ -314,14 +316,20 @@ void HandleDrawItem(HWND hDlg, DRAWITEMSTRUCT *dis) {
         bmi.bmiHeader.biCompression = BI_RGB;
         FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
         int scale = st->zoom < 1 ? 1 : st->zoom;
-        // Anchor the scaled image at top-left of the canvas; GDI clips the
-        // overflow to the control's client rect automatically. Each source
-        // pixel becomes scale x scale destination pixels.
-        SetStretchBltMode(dis->hDC, COLORONCOLOR);
-        StretchDIBits(dis->hDC,
-                      0, 0, st->curSrcW * scale, st->curSrcH * scale,
-                      0, 0, st->curSrcW, st->curSrcH,
-                      st->tileBits, &bmi, DIB_RGB_COLORS, SRCCOPY);
+        // Fit as many source pixels as the canvas can show at this scale,
+        // starting from (viewX, viewY). Resulting dst rect is exactly
+        // srcSize * scale in each axis so no non-integer scaling occurs.
+        int srcW = w / scale;
+        int srcH = h / scale;
+        if (srcW > st->curSrcW - st->viewX) srcW = st->curSrcW - st->viewX;
+        if (srcH > st->curSrcH - st->viewY) srcH = st->curSrcH - st->viewY;
+        if (srcW > 0 && srcH > 0) {
+            SetStretchBltMode(dis->hDC, COLORONCOLOR);
+            StretchDIBits(dis->hDC,
+                          0, 0, srcW * scale, srcH * scale,
+                          st->viewX, st->viewY, srcW, srcH,
+                          st->tileBits, &bmi, DIB_RGB_COLORS, SRCCOPY);
+        }
     } else if (dis->CtlID == IDC_VRAMV_PALETTE && st->palBmp) {
         BITMAPINFO bmi = {};
         bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -410,6 +418,7 @@ void StepAddress(HWND hDlg, VRAMState *st, bool forward) {
         st->address = (st->address >= step) ? (st->address - step) : 0;
     }
     st->address &= DepthAlignMask(st->bitDepth);
+    st->viewX = st->viewY = 0;
     UpdateAddressEdit(hDlg, st);
     RedrawTiles(hDlg);
 }
@@ -428,6 +437,8 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
         st->autoUpdate = true;
         st->paletteOffset = 0;
         st->selectedTile = -1;
+        st->viewX = 0;
+        st->viewY = 0;
         st->tileBmp = CreateBGRADib(kSrcMax, kSrcMax, &st->tileBits);
         st->palBmp  = CreateBGRADib(kPalSrcSize, kPalSrcSize / 2, &st->palBits);
         st->curSrcW = 128;
@@ -448,6 +459,9 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
         RefreshBaseAddresses(hDlg);
 
         DebugViewers_Register(hDlg, &st->autoUpdate);
+        InstallDragPan(GetDlgItem(hDlg, IDC_VRAMV_CANVAS),
+                       &st->viewX, &st->viewY,
+                       &st->zoom, &st->curSrcW, &st->curSrcH);
         RedrawPalette(hDlg);
         RedrawTiles(hDlg);
         return TRUE;
@@ -507,6 +521,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
                 if (sel >= 0) {
                     st->bitDepth = sel;
                     st->selectedTile = -1;
+                    st->viewX = st->viewY = 0;
                     UpdateTileInfo(hDlg, st);
                     RedrawTiles(hDlg);
                 }
@@ -522,6 +537,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
                     if (v > 64) v = 64;
                     if (v != st->widthTiles) {
                         st->widthTiles = v;
+                        st->viewX = st->viewY = 0;
                         RedrawTiles(hDlg);
                     }
                 }
@@ -535,6 +551,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
                     st->source = sel;
                     st->address = 0;
                     st->selectedTile = -1;
+                    st->viewX = st->viewY = 0;
                     UpdateAddressEdit(hDlg, st);
                     UpdateTileInfo(hDlg, st);
                     RedrawTiles(hDlg);
@@ -550,6 +567,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
                 if (ParseHex(buf, &v)) {
                     uint32 srcMask = (st->source == TILE_SRC_VRAM) ? 0xFFFF : 0xFFFFFF;
                     st->address = (v & srcMask) & DepthAlignMask(st->bitDepth);
+                    st->viewX = st->viewY = 0;
                     RedrawTiles(hDlg);
                 }
             }
@@ -595,6 +613,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
                                TILE_SRC_VRAM, 0);
             st->address = addr & DepthAlignMask(st->bitDepth);
             st->selectedTile = -1;
+            st->viewX = st->viewY = 0;
             UpdateAddressEdit(hDlg, st);
             UpdateTileInfo(hDlg, st);
             RedrawTiles(hDlg);
@@ -627,6 +646,7 @@ INT_PTR CALLBACK DlgVRAMViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 
     case WM_DESTROY: {
         VRAMState *st = GetState(hDlg);
+        UninstallDragPan(GetDlgItem(hDlg, IDC_VRAMV_CANVAS));
         DebugViewers_Unregister(hDlg);
         if (st) {
             if (st->tileBmp) DeleteObject(st->tileBmp);

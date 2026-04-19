@@ -54,6 +54,7 @@ struct CpuState
 	bool     stopped;
 	bool     halt_bug;     // HALT-with-IME-off-and-pending-IRQ oddity
 	int64_t  t_cycles;     // monotonic T-cycle counter
+	uint32_t illegal_ops;  // count of the 11 undefined opcodes executed
 };
 
 // Debug trace — called before each instruction dispatch.
@@ -73,12 +74,8 @@ public:
 	// P1a installs a process-global trace hook. nullptr disables.
 	static void SetTraceHook(TraceHook hook);
 
-	// Count of unimplemented opcodes encountered since reset (diagnostic only).
-	uint32_t UnknownOpcodesSeen() const { return unknown_opcodes_; }
-
 private:
 	CpuState state_{};
-	uint32_t unknown_opcodes_ = 0;
 };
 
 } // namespace SGB

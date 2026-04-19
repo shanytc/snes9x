@@ -51,6 +51,8 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/seta018.cpp \
 				 $(CORE_DIR)/sgb/sgb.cpp \
 				 $(CORE_DIR)/sgb/gb_cpu.cpp \
+				 $(CORE_DIR)/sgb/gb_ops.cpp \
+				 $(CORE_DIR)/sgb/gb_ops_cb.cpp \
 				 $(CORE_DIR)/sgb/gb_memory.cpp \
 				 $(CORE_DIR)/sgb/gb_mbc.cpp \
 				 $(CORE_DIR)/sgb/gb_ppu.cpp \

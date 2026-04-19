@@ -129,15 +129,19 @@ set LIB_ARCH=%~2
 set BUILD_DIR=%BUILD_ROOT%\%LIB_ARCH%
 
 REM Extra CMake args added only in `syms` mode. Overrides CMake's default
-REM debug flags "/Zi /Ob0 /Od /RTC1" with /Z7 so debug info is embedded in
-REM the .obj (and hence the .lib), not written to a separate .pdb - without
-REM this the snes9x debugger can't bind breakpoints inside SDL source. In
-REM normal mode we leave CMake defaults alone so the committed libs stay
-REM lean.
+REM debug flags "/Zi /Ob0 /Od /RTC1" with /Z7 while keeping /Ob0 /Od /RTC1,
+REM so debug info is embedded in the .obj (and hence the .lib) but stack
+REM / uninitialized-var runtime checks still fire the same way as a normal
+REM Debug build. Without /Z7 the snes9x debugger can't bind breakpoints
+REM inside SDL source. In normal mode we leave CMake defaults alone so the
+REM committed libs stay lean.
+REM
+REM The quotes must be embedded in the variable value (not just around the
+REM set statement) or CMD re-tokenizes on spaces when the var expands and
+REM CMake sees /Ob0 /Od /RTC1 as stray positional paths.
 set EXTRA_CMAKE_ARGS=
 if %DO_SYMS%==1 (
-    set "EXTRA_CMAKE_ARGS=-DCMAKE_C_FLAGS_DEBUG=/Z7 /Ob0 /Od /RTC1"
-    set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! -DCMAKE_CXX_FLAGS_DEBUG=/Z7 /Ob0 /Od /RTC1"
+    set EXTRA_CMAKE_ARGS="-DCMAKE_C_FLAGS_DEBUG=/Z7 /Ob0 /Od /RTC1" "-DCMAKE_CXX_FLAGS_DEBUG=/Z7 /Ob0 /Od /RTC1"
 )
 
 echo.

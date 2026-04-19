@@ -8,6 +8,12 @@ Please check the [Wiki](https://github.com/snes9xgit/snes9x/wiki) for additional
 ## SuperSnes9x Features:
 - Kaillera Server/Client
 - RetroAchievements
+- S-PPU Sprite/Tile/Tiles viewers
+- Multi-Controller support
+- SDL Support
+- Run-Ahead Support
+- Color Correction Support
+- Enhanced Cheat Search / Cheat Editor
 
 ## Nightly builds
 

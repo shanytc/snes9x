@@ -56,6 +56,10 @@ struct CpuState
 	int64_t  t_cycles;     // monotonic T-cycle counter
 };
 
+// Debug trace — called before each instruction dispatch.
+// Fired in user code (hot path), so keep hooks cheap.
+using TraceHook = void (*)(uint16_t pc, uint8_t opcode, const CpuState &state);
+
 class Cpu
 {
 public:
@@ -66,8 +70,15 @@ public:
 	CpuState &State() { return state_; }
 	const CpuState &State() const { return state_; }
 
+	// P1a installs a process-global trace hook. nullptr disables.
+	static void SetTraceHook(TraceHook hook);
+
+	// Count of unimplemented opcodes encountered since reset (diagnostic only).
+	uint32_t UnknownOpcodesSeen() const { return unknown_opcodes_; }
+
 private:
 	CpuState state_{};
+	uint32_t unknown_opcodes_ = 0;
 };
 
 } // namespace SGB

@@ -19,3 +19,7 @@
 [submodule "external/rcheevos"]
 	path = external/rcheevos
 	url = https://github.com/RetroAchievements/rcheevos.git
+[submodule "external/SDL3-src"]
+	path = external/SDL3-src
+	url = https://github.com/shanytc/SDL.git
+	branch = snes9x-3.2.14

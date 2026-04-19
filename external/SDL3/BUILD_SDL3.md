@@ -39,11 +39,18 @@ bump *and* the new `.lib` files together.
 From `external/SDL3/`:
 
 ```
-build_sdl3.bat            # builds x64 + x86, Debug + Release
-build_sdl3.bat x64        # x64 only
-build_sdl3.bat x86        # x86 only
-build_sdl3.bat clean      # wipe CMake build trees first, then build
+build_sdl3.bat                # builds x64 + x86, Debug + Release
+build_sdl3.bat x64            # x64 only
+build_sdl3.bat x86            # x86 only
+build_sdl3.bat clean          # wipe CMake build trees first, then build
+build_sdl3.bat syms           # embed /Z7 debug info in the Debug lib for
+                              # stepping into SDL source from VS - produces
+                              # a fat SDL3-staticd.lib. DO NOT commit it.
+                              # Rerun without "syms" when done to restore
+                              # the lean committed artifact.
 ```
+
+Flags combine: `build_sdl3.bat x64 clean syms` etc.
 
 The script:
 

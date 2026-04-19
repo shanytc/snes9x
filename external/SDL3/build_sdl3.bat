@@ -3,10 +3,19 @@ REM =========================================================================
 REM  build_sdl3.bat - Build SDL3 static libs from the external/SDL3-src
 REM                   submodule and drop them into external/SDL3/lib/.
 REM
-REM  Usage:  build_sdl3.bat            (builds x64 + x86, Debug + Release)
-REM          build_sdl3.bat x64        (builds x64 only)
-REM          build_sdl3.bat x86        (builds x86 only)
-REM          build_sdl3.bat clean      (wipes build/ trees before building)
+REM  Usage:  build_sdl3.bat                    (x64 + x86, Debug + Release)
+REM          build_sdl3.bat x64                (x64 only)
+REM          build_sdl3.bat x86                (x86 only)
+REM          build_sdl3.bat clean              (wipe build trees first)
+REM          build_sdl3.bat syms               (embed /Z7 debug info in the
+REM                                             Debug lib so VS can step into
+REM                                             SDL source; produces a FAT
+REM                                             SDL3-staticd.lib - do NOT
+REM                                             commit that artifact. Rerun
+REM                                             without "syms" when done to
+REM                                             restore the lean release lib)
+REM
+REM  Flags can be combined: "build_sdl3.bat x64 clean syms" etc.
 REM
 REM  Requires: Visual Studio 2019 or 2022 with "Desktop C++" workload + CMake.
 REM            Run from a normal cmd - this script locates VS automatically
@@ -66,15 +75,28 @@ REM --- Parse args ----------------------------------------------------------
 set DO_X64=1
 set DO_X86=1
 set DO_CLEAN=0
+set DO_SYMS=0
 
-if /i "%~1"=="x64" ( set DO_X64=1 & set DO_X86=0 )
-if /i "%~1"=="x86" ( set DO_X64=0 & set DO_X86=1 )
-if /i "%~1"=="clean" set DO_CLEAN=1
-if /i "%~2"=="clean" set DO_CLEAN=1
+for %%A in (%*) do (
+    if /i "%%~A"=="x64"   ( set DO_X64=1 & set DO_X86=0 )
+    if /i "%%~A"=="x86"   ( set DO_X64=0 & set DO_X86=1 )
+    if /i "%%~A"=="clean" ( set DO_CLEAN=1 )
+    if /i "%%~A"=="syms"  ( set DO_SYMS=1 )
+)
+
+REM Toggling syms mode changes the compile flags; force a clean reconfigure
+REM so the CMake cache doesn't carry stale debug-format settings.
+if %DO_SYMS%==1 set DO_CLEAN=1
 
 if %DO_CLEAN%==1 (
     echo Cleaning build trees...
     if exist "%BUILD_ROOT%" rmdir /s /q "%BUILD_ROOT%"
+)
+
+if %DO_SYMS%==1 (
+    echo *** syms mode: Debug lib will embed /Z7 debug info. DO NOT commit.
+) else (
+    echo Release mode: Debug lib uses CMake default /Zi (no embedded syms^).
 )
 
 REM --- Build x64 -----------------------------------------------------------
@@ -106,6 +128,18 @@ set CM_PLATFORM=%~1
 set LIB_ARCH=%~2
 set BUILD_DIR=%BUILD_ROOT%\%LIB_ARCH%
 
+REM Extra CMake args added only in `syms` mode. Overrides CMake's default
+REM debug flags "/Zi /Ob0 /Od /RTC1" with /Z7 so debug info is embedded in
+REM the .obj (and hence the .lib), not written to a separate .pdb - without
+REM this the snes9x debugger can't bind breakpoints inside SDL source. In
+REM normal mode we leave CMake defaults alone so the committed libs stay
+REM lean.
+set EXTRA_CMAKE_ARGS=
+if %DO_SYMS%==1 (
+    set "EXTRA_CMAKE_ARGS=-DCMAKE_C_FLAGS_DEBUG=/Z7 /Ob0 /Od /RTC1"
+    set "EXTRA_CMAKE_ARGS=!EXTRA_CMAKE_ARGS! -DCMAKE_CXX_FLAGS_DEBUG=/Z7 /Ob0 /Od /RTC1"
+)
+
 echo.
 echo ============================================================
 echo   Configuring SDL3 for %LIB_ARCH% (%CM_PLATFORM%)
@@ -118,6 +152,7 @@ REM CMAKE_MSVC_RUNTIME_LIBRARY instead of burning /MD into the flags.
     -G "%CMAKE_GENERATOR%" -A %CM_PLATFORM% ^
     -DCMAKE_POLICY_DEFAULT_CMP0091=NEW ^
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>" ^
+    %EXTRA_CMAKE_ARGS% ^
     -DSDL_STATIC=ON ^
     -DSDL_SHARED=OFF ^
     -DSDL_TEST_LIBRARY=OFF ^

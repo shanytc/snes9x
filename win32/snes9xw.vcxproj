@@ -324,6 +324,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <CustomBuild Include="..\65c816.h" />
+    <ClInclude Include="..\sgb\sgb.h" />
+    <ClInclude Include="..\sgb\gb_cpu.h" />
+    <ClInclude Include="..\sgb\gb_memory.h" />
+    <ClInclude Include="..\sgb\gb_mbc.h" />
+    <ClInclude Include="..\sgb\gb_ppu.h" />
+    <ClInclude Include="..\sgb\gb_apu.h" />
+    <ClInclude Include="..\sgb\gb_timer.h" />
+    <ClInclude Include="..\sgb\gb_joypad.h" />
+    <ClInclude Include="..\sgb\gb_cart.h" />
     <ClInclude Include="..\apu\apu.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_common.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_config.h" />
@@ -507,6 +516,15 @@
     <ClInclude Include="_tfwopen.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\sgb\sgb.cpp" />
+    <ClCompile Include="..\sgb\gb_cpu.cpp" />
+    <ClCompile Include="..\sgb\gb_memory.cpp" />
+    <ClCompile Include="..\sgb\gb_mbc.cpp" />
+    <ClCompile Include="..\sgb\gb_ppu.cpp" />
+    <ClCompile Include="..\sgb\gb_apu.cpp" />
+    <ClCompile Include="..\sgb\gb_timer.cpp" />
+    <ClCompile Include="..\sgb\gb_joypad.cpp" />
+    <ClCompile Include="..\sgb\gb_cart.cpp" />
     <ClCompile Include="..\apu\apu.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\sdsp.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\SPC_DSP.cpp">

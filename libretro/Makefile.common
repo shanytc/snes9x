@@ -49,6 +49,15 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/seta010.cpp \
 				 $(CORE_DIR)/seta011.cpp \
 				 $(CORE_DIR)/seta018.cpp \
+				 $(CORE_DIR)/sgb/sgb.cpp \
+				 $(CORE_DIR)/sgb/gb_cpu.cpp \
+				 $(CORE_DIR)/sgb/gb_memory.cpp \
+				 $(CORE_DIR)/sgb/gb_mbc.cpp \
+				 $(CORE_DIR)/sgb/gb_ppu.cpp \
+				 $(CORE_DIR)/sgb/gb_apu.cpp \
+				 $(CORE_DIR)/sgb/gb_timer.cpp \
+				 $(CORE_DIR)/sgb/gb_joypad.cpp \
+				 $(CORE_DIR)/sgb/gb_cart.cpp \
 				 $(CORE_DIR)/snapshot.cpp \
 				 $(CORE_DIR)/snes9x.cpp \
 				 $(CORE_DIR)/spc7110.cpp \

@@ -1,0 +1,54 @@
+/*****************************************************************************\
+     Snes9x - Portable Super Nintendo Entertainment System (TM) emulator.
+                This file is licensed under the Snes9x License.
+   For further information, consult the LICENSE file in the root directory.
+\*****************************************************************************/
+
+#ifndef _SGB_GB_PPU_H_
+#define _SGB_GB_PPU_H_
+
+#include <cstdint>
+
+namespace SGB {
+
+struct Memory;
+
+// GB screen is 160x144. Pixel values are 0-3 (2-bit shade index).
+// SGB attribute layer adds a 4-bit palette index per 8x8 tile cell later.
+constexpr int GB_SCREEN_WIDTH  = 160;
+constexpr int GB_SCREEN_HEIGHT = 144;
+
+enum class PpuMode : uint8_t
+{
+	HBlank     = 0,  // 204-cycle mode 0
+	VBlank     = 1,  // 4560 cycles covering lines 144-153
+	OamScan    = 2,  // 80 cycles (mode 2)
+	Transfer   = 3   // 172-289 cycles (mode 3)
+};
+
+struct Ppu
+{
+	uint8_t  vram[0x2000];
+	uint8_t  oam[0xA0];
+
+	uint8_t  lcdc = 0;    // 0xFF40
+	uint8_t  stat = 0;    // 0xFF41
+	uint8_t  scy  = 0, scx = 0;
+	uint8_t  ly   = 0;
+	uint8_t  lyc  = 0;
+	uint8_t  bgp  = 0, obp0 = 0, obp1 = 0;
+	uint8_t  wy   = 0, wx  = 0;
+
+	PpuMode  mode = PpuMode::OamScan;
+	int32_t  mode_clock = 0;
+
+	uint8_t  framebuffer[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT];
+	bool     frame_ready = false;
+};
+
+void PpuReset(Ppu &p);
+void PpuStep(Ppu &p, Memory &mem, int32_t tcycles);
+
+} // namespace SGB
+
+#endif

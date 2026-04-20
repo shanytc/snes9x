@@ -42,6 +42,20 @@ struct Ppu
 	PpuMode  mode = PpuMode::OamScan;
 	int32_t  mode_clock = 0;
 
+	// Internal window line counter — increments only on lines where the
+	// window was actually drawn, independent of LY (Pan Docs: Window
+	// Internal Line Counter).
+	int32_t  window_line = 0;
+
+	// Per-scanline raw BG/window 2-bit color (pre-palette). Used by the
+	// sprite renderer so the BG-priority flag can check "BG color was 0"
+	// after the palette mapping has already been applied to framebuffer.
+	uint8_t  scanline_bg_raw[GB_SCREEN_WIDTH];
+
+	// Latched state of the STAT IRQ line — edge-triggered, so we fire an
+	// LCDSTAT interrupt only when this transitions 0 → 1.
+	bool     stat_line_high = false;
+
 	uint8_t  framebuffer[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT];
 	bool     frame_ready = false;
 };

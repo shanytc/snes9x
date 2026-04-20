@@ -13,6 +13,7 @@
 #include "gb_timer.h"
 #include "gb_joypad.h"
 #include "gb_cart.h"
+#include "sgb_packet.h"
 
 #include <cstring>
 
@@ -20,17 +21,18 @@ namespace SGB {
 
 struct Emulator::Impl
 {
-	Cpu    cpu;
-	Memory mem;
-	Ppu    ppu;
-	Apu    apu;
-	Timer  timer;
-	Joypad joypad;
-	Cart   cart;
+	Cpu         cpu;
+	Memory      mem;
+	Ppu         ppu;
+	Apu         apu;
+	Timer       timer;
+	Joypad      joypad;
+	Cart        cart;
+	PacketState sgb_pkt;
 
-	RunMode     run_mode = RunMode::SGB;
+	RunMode     run_mode  = RunMode::SGB;
 	FrameBuffer fb{};
-	bool        has_rom = false;
+	bool        has_rom   = false;
 	float       clock_mul = 1.0f;
 };
 
@@ -57,6 +59,7 @@ void Emulator::Reset()
 	ApuReset(impl_->apu);
 	TimerReset(impl_->timer);
 	JoypadReset(impl_->joypad);
+	PacketReset(impl_->sgb_pkt);
 
 	impl_->mem.ppu    = &impl_->ppu;
 	impl_->mem.apu    = &impl_->apu;
@@ -131,9 +134,13 @@ void Emulator::SetJoypad(uint16_t snes_pad_mask)
 	JoypadSet(impl_->joypad, impl_->mem, gb);
 }
 
-void Emulator::OnJoyserWrite(uint8_t /*value*/)
+void Emulator::OnJoyserWrite(uint8_t value)
 {
-	// P6a hooks the SGB command-packet sniffer here.
+	// Only meaningful when the cart declares SGB features. Feeding always
+	// is harmless (non-SGB games don't produce RESET pulses) but we gate
+	// on run_mode anyway so the packet state doesn't accumulate noise.
+	if (impl_->run_mode == RunMode::DMG) return;
+	PacketFeed(impl_->sgb_pkt, value);
 }
 
 size_t Emulator::StateSize() const { return 0; }

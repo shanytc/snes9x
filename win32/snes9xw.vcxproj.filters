@@ -195,6 +195,9 @@
     <ClInclude Include="..\sgb\sgb.h">
       <Filter>SGB</Filter>
     </ClInclude>
+    <ClInclude Include="..\sgb\sgb_packet.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
     <ClInclude Include="..\sgb\gb_cpu.h">
       <Filter>SGB</Filter>
     </ClInclude>
@@ -690,6 +693,9 @@
       <Filter>JMA</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\sgb.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\sgb_packet.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\gb_cpu.cpp">

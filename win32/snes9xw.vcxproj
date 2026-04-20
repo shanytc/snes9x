@@ -325,6 +325,7 @@
   <ItemGroup>
     <CustomBuild Include="..\65c816.h" />
     <ClInclude Include="..\sgb\sgb.h" />
+    <ClInclude Include="..\sgb\sgb_packet.h" />
     <ClInclude Include="..\sgb\gb_cpu.h" />
     <ClInclude Include="..\sgb\gb_ops.h" />
     <ClInclude Include="..\sgb\gb_memory.h" />
@@ -518,6 +519,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\sgb\sgb.cpp" />
+    <ClCompile Include="..\sgb\sgb_packet.cpp" />
     <ClCompile Include="..\sgb\gb_cpu.cpp" />
     <ClCompile Include="..\sgb\gb_ops.cpp" />
     <ClCompile Include="..\sgb\gb_ops_cb.cpp" />

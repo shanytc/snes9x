@@ -42,6 +42,7 @@ struct Memory
 	uint8_t ie;             // 0xFFFF
 	uint8_t if_;            // 0xFF0F
 	uint8_t serial_data;    // 0xFF01 last written byte
+	uint8_t serial_control; // 0xFF02 last written; bit 7 stays set on external-clock waits
 };
 
 uint8_t MemRead(Memory &m, uint16_t addr);

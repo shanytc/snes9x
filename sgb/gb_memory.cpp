@@ -29,10 +29,11 @@ void MemReset(Memory &m)
 {
 	std::memset(m.wram, 0, sizeof m.wram);
 	std::memset(m.hram, 0, sizeof m.hram);
-	m.ie          = 0;
-	m.if_         = 0xE1;   // bits 5-7 always set, VBlank latent
-	m.serial_data = 0;
-	g_dma_last    = 0xFF;
+	m.ie             = 0;
+	m.if_            = 0xE1;   // bits 5-7 always set, VBlank latent
+	m.serial_data    = 0;
+	m.serial_control = 0;
+	g_dma_last       = 0xFF;
 }
 
 static uint8_t ReadIO(Memory &m, uint16_t addr);
@@ -152,7 +153,7 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 	{
 		case 0xFF00: return m.joypad ? JoypadRead(*m.joypad) : 0xFF;
 		case 0xFF01: return m.serial_data;
-		case 0xFF02: return 0x7E;            // SC: bits 1-6 unused, reads as 1
+		case 0xFF02: return static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
@@ -182,12 +183,18 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			m.serial_data = value;
 			return;
 		case 0xFF02:
-			// Bit 7 = start. We don't emulate a real link — fire the observer
-			// callback with the captured byte and signal instant completion.
-			if (value & 0x80)
+			m.serial_control = value;
+			// Internal clock (bit 0 = 1) completes instantly with no peer:
+			// push the byte to the observer callback and fire the serial IRQ,
+			// then clear the start bit. External clock (bit 0 = 0) has no
+			// partner clocking bits in, so bit 7 stays set and no IRQ fires —
+			// matching real DMG with a disconnected link cable. Games like
+			// Tetris Plus rely on this silence to detect "no link partner".
+			if ((value & 0x81) == 0x81)
 			{
 				if (g_serial_cb) g_serial_cb(m.serial_data);
 				m.if_ = static_cast<uint8_t>(m.if_ | IRQ_SERIAL);
+				m.serial_control = static_cast<uint8_t>(value & 0x7F);
 			}
 			return;
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:

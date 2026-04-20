@@ -202,27 +202,12 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 {
 	if (!buf || cap == 0) return;
 	const CpuState &s = impl_->cpu.State();
-	const Ppu      &p = impl_->ppu;
-	const Memory   &m = impl_->mem;
-	const Timer    &t = impl_->timer;
-	Memory         &mem_nonconst = const_cast<Memory &>(impl_->mem);
-
-	// Peek 12 bytes starting at PC so we can read the opcode sequence
-	// the CPU is spinning on. MemRead is non-const because it routes
-	// through the MBC's read path.
-	uint8_t op[12];
-	for (int i = 0; i < 12; ++i)
-		op[i] = MemRead(mem_nonconst, static_cast<uint16_t>(s.r.pc + i));
-
 	std::snprintf(buf, cap,
-	              "PC=%04X%s IME=%d LCDC=%02X IE=%02X IF=%02X "
-	              "op: %02X %02X %02X %02X %02X %02X %02X %02X %02X",
-	              s.r.pc,
-	              s.halted ? "H" : (s.stopped ? "S" : ""),
-	              s.ime ? 1 : 0,
-	              p.lcdc, m.ie, m.if_,
-	              op[0], op[1], op[2], op[3], op[4],
-	              op[5], op[6], op[7], op[8]);
+	              "SGB PC=%04X SP=%04X A=%02X%s T=%lld ill=%u",
+	              s.r.pc, s.r.sp, s.r.a,
+	              s.halted ? " HALT" : (s.stopped ? " STOP" : ""),
+	              static_cast<long long>(s.t_cycles),
+	              static_cast<unsigned>(s.illegal_ops));
 }
 
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)

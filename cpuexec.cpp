@@ -29,15 +29,6 @@ void S9xMainLoop (void)
 	// call S9xMainLoop once per frame, so this satisfies the contract.
 	if (Settings.SuperGameBoy)
 	{
-		// Diagnostic status line — re-enabled temporarily for Silver.
-		static uint32_t sgb_status_counter = 0;
-		if ((++sgb_status_counter % 60) == 0)
-		{
-			char buf[160];
-			S9xSGBGetStatus(buf, sizeof buf);
-			S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, buf);
-		}
-
 		if (CPU.Flags & SCAN_KEYS_FLAG)
 		{
 			CPU.Flags &= ~SCAN_KEYS_FLAG;

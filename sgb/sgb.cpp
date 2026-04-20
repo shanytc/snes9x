@@ -202,11 +202,17 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 {
 	if (!buf || cap == 0) return;
 	const CpuState &s = impl_->cpu.State();
+	const Ppu      &p = impl_->ppu;
+	const Memory   &m = impl_->mem;
+	const PacketState &pkt = impl_->sgb_pkt;
 	std::snprintf(buf, cap,
-	              "SGB PC=%04X SP=%04X A=%02X%s T=%lld ill=%u",
-	              s.r.pc, s.r.sp, s.r.a,
-	              s.halted ? " HALT" : (s.stopped ? " STOP" : ""),
-	              static_cast<long long>(s.t_cycles),
+	              "PC=%04X%s LCDC=%02X LY=%u IE=%02X IF=%02X "
+	              "sgb:cmd=%u pkt=%u ill=%u",
+	              s.r.pc,
+	              s.halted ? " H" : (s.stopped ? " S" : ""),
+	              p.lcdc, p.ly, m.ie, m.if_,
+	              static_cast<unsigned>(pkt.commands_received),
+	              static_cast<unsigned>(pkt.packets_received),
 	              static_cast<unsigned>(s.illegal_ops));
 }
 

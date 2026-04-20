@@ -212,6 +212,9 @@ struct SSettings
 	bool8	BSXItself;
 	bool8	BSXBootup;
 	bool8	MSU1;
+	bool8	SuperGameBoy;        // active when a .gb/.gbc ROM is loaded
+	uint8	GameBoyRunMode;      // 0=DMG, 1=SGB1, 2=SGB2
+	float	GBClockMultiplier;   // 1.0 = real speed; underclock on weak ARM, over on strong hosts
 	bool8	MouseMaster;
 	bool8	SuperScopeMaster;
 	bool8	JustifierMaster;

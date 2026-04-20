@@ -16,7 +16,9 @@
 #include "sgb_packet.h"
 #include "sgb_state.h"
 
+#include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace SGB {
 
@@ -107,15 +109,55 @@ RunMode Emulator::GetRunMode() const { return impl_->run_mode; }
 
 void Emulator::RunFrame()
 {
-	// P7 drives this once per snes9x frame. For now just tick the stubs.
 	if (!impl_->has_rom) return;
-	impl_->cpu.Step(impl_->mem);
-	PpuStep(impl_->ppu, impl_->mem, 4);
-	ApuStep(impl_->apu, 4);
-	TimerStep(impl_->timer, impl_->mem, 4);
+
+	impl_->ppu.frame_ready = false;
+
+	// Run CPU steps, ticking every subsystem by the same number of
+	// T-cycles the CPU actually consumed, until the PPU signals VBlank.
+	// A nominal GB frame is 70224 T-cycles; safety cap at ~3× that to
+	// prevent a broken ROM from hanging the emulator thread.
+	int32_t safety = 250000;
+
+	while (!impl_->ppu.frame_ready && safety > 0)
+	{
+		const int64_t pre_t = impl_->cpu.State().t_cycles;
+		impl_->cpu.Step(impl_->mem);
+		int32_t consumed = static_cast<int32_t>(
+			impl_->cpu.State().t_cycles - pre_t);
+		if (consumed <= 0) consumed = 4;
+
+		PpuStep  (impl_->ppu,   impl_->mem, consumed);
+		TimerStep(impl_->timer, impl_->mem, consumed);
+		ApuStep  (impl_->apu,                consumed);
+
+		safety -= consumed;
+	}
 }
 
-void Emulator::RunCycles(int32_t /*tcycles*/) {}
+void Emulator::RunCycles(int32_t tcycles)
+{
+	if (!impl_->has_rom) return;
+
+	// Partial-frame advance. Used when a host driving its own clock wants
+	// to interleave GB execution with other work at finer granularity
+	// than one frame. Same per-step ticking as RunFrame.
+	int32_t remaining = tcycles;
+	while (remaining > 0)
+	{
+		const int64_t pre_t = impl_->cpu.State().t_cycles;
+		impl_->cpu.Step(impl_->mem);
+		int32_t consumed = static_cast<int32_t>(
+			impl_->cpu.State().t_cycles - pre_t);
+		if (consumed <= 0) consumed = 4;
+
+		PpuStep  (impl_->ppu,   impl_->mem, consumed);
+		TimerStep(impl_->timer, impl_->mem, consumed);
+		ApuStep  (impl_->apu,                consumed);
+
+		remaining -= consumed;
+	}
+}
 
 const FrameBuffer &Emulator::GetFrameBuffer() const { return impl_->fb; }
 
@@ -126,8 +168,7 @@ int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)
 
 int32_t Emulator::GetAudioSampleRate() const
 {
-	// Matches snes9x's default SoundPlaybackRate; P4 may choose to resample differently.
-	return 32000;
+	return impl_->apu.output_rate;
 }
 
 void Emulator::SetJoypad(uint16_t snes_pad_mask)
@@ -188,8 +229,23 @@ void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBSetJoypad(uint16_t m)    { SGB::Instance().SetJoypad(m); }
 void S9xSGBOnJoyserWrite(uint8_t v) { SGB::Instance().OnJoyserWrite(v); }
 
-bool S9xSGBLoadROM(const char * /*filename*/)
+bool S9xSGBLoadROM(const char *filename)
 {
-	// P7 hooks file I/O (reuses snes9x's loader infrastructure to unzip etc).
-	return false;
+	if (!filename || !*filename) return false;
+
+	std::FILE *f = std::fopen(filename, "rb");
+	if (!f) return false;
+
+	if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return false; }
+	const long sz = std::ftell(f);
+	if (sz <= 0 || sz > 16 * 1024 * 1024)   // 16 MB is the MBC5/MBC6 ceiling
+	{ std::fclose(f); return false; }
+	std::fseek(f, 0, SEEK_SET);
+
+	std::vector<uint8_t> buf(static_cast<size_t>(sz));
+	const size_t got = std::fread(buf.data(), 1, static_cast<size_t>(sz), f);
+	std::fclose(f);
+	if (got != static_cast<size_t>(sz)) return false;
+
+	return SGB::Instance().LoadROM(buf.data(), buf.size(), filename);
 }

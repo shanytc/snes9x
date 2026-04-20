@@ -29,29 +29,6 @@ void S9xMainLoop (void)
 	// call S9xMainLoop once per frame, so this satisfies the contract.
 	if (Settings.SuperGameBoy)
 	{
-		// One-shot on-screen confirmation that this branch is firing.
-		// If the user reports a pure-black window and never sees this
-		// message, the SGB branch isn't being reached (the ROM load
-		// path is the suspect, not the run loop).
-		static bool sgb_announced = false;
-		if (!sgb_announced)
-		{
-			sgb_announced = true;
-			sprintf(String, "SGB mode active");
-			S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
-		}
-
-		// Periodic CPU status OSD every 60 frames (~1 sec). Unchanging
-		// PC + HALT flag over several samples means the CPU is stuck in
-		// a wait loop; illegal > 0 means a bug somewhere flipped stopped.
-		static uint32_t sgb_status_counter = 0;
-		if ((++sgb_status_counter % 60) == 0)
-		{
-			char buf[128];
-			S9xSGBGetStatus(buf, sizeof buf);
-			S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, buf);
-		}
-
 		if (CPU.Flags & SCAN_KEYS_FLAG)
 		{
 			CPU.Flags &= ~SCAN_KEYS_FLAG;

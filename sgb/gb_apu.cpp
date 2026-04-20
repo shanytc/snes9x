@@ -358,16 +358,9 @@ void PushSample(Apu &a, int16_t l, int16_t r)
 	a.sample_head = next;
 }
 
-// Accumulate + emit at output rate.
-void AdvanceOutput(Apu &a, int32_t l, int32_t r)
+// Emit one integrated sample to the ring buffer, reset accumulator.
+void FlushSample(Apu &a)
 {
-	a.sample_accum_l   += l;
-	a.sample_accum_r   += r;
-	++a.sample_accum_cnt;
-
-	if (--a.sample_timer > 0) return;
-	a.sample_timer = a.cycles_per_sample;
-
 	int16_t out_l = 0, out_r = 0;
 	if (a.sample_accum_cnt > 0)
 	{
@@ -419,31 +412,100 @@ void ApuSetOutputRate(Apu &a, int32_t rate)
 	a.sample_timer      = a.cycles_per_sample;
 }
 
+// Event-driven advance. Per-T-cycle loops were the hottest code in the
+// SGB core (APU fires for every CPU instruction). This version walks
+// forward in chunks bounded by the *next* event — whichever of the
+// channel freq-timers, frame-sequencer timer, or sample-output timer
+// expires soonest. During any such chunk every channel's output level
+// is constant, so we mix once and multiply by the chunk width to
+// contribute to the sample accumulator. Net result: O(events) instead
+// of O(cycles), with the same sample output.
 void ApuStep(Apu &a, int32_t tcycles)
 {
-	for (int32_t t = 0; t < tcycles; ++t)
+	while (tcycles > 0)
 	{
+		// Determine the size of the next constant-output chunk. Master
+		// disable has a single event (sample emit) — timers don't tick.
+		int32_t chunk = tcycles;
+		if (a.sample_timer < chunk) chunk = a.sample_timer;
+
 		if (a.master_enabled)
 		{
-			if (a.ch1.enabled) SquareClock(a.ch1);
-			if (a.ch2.enabled) SquareClock(a.ch2);
-			if (a.ch3.enabled) WaveClock(a.ch3);
-			if (a.ch4.enabled) NoiseClock(a.ch4);
+			if (a.frame_seq_timer                   < chunk) chunk = a.frame_seq_timer;
+			if (a.ch1.enabled && a.ch1.freq_timer   < chunk) chunk = a.ch1.freq_timer;
+			if (a.ch2.enabled && a.ch2.freq_timer   < chunk) chunk = a.ch2.freq_timer;
+			if (a.ch3.enabled && a.ch3.freq_timer   < chunk) chunk = a.ch3.freq_timer;
+			if (a.ch4.enabled && a.ch4.freq_timer   < chunk) chunk = a.ch4.freq_timer;
+		}
+		if (chunk < 1) chunk = 1;  // safety against zero-period corner cases
 
-			if (--a.frame_seq_timer <= 0)
-			{
-				a.frame_seq_timer = FRAME_SEQ_PERIOD;
-				FrameSequencerStep(a);
-			}
-
+		// Integrate channel output × chunk into the sample accumulator.
+		if (a.master_enabled)
+		{
 			int32_t l, r;
 			Mix(a, l, r);
-			AdvanceOutput(a, l, r);
+			a.sample_accum_l   += l * chunk;
+			a.sample_accum_r   += r * chunk;
 		}
-		else
+		a.sample_accum_cnt += static_cast<uint32_t>(chunk);
+
+		// Advance timers by the same chunk size.
+		a.sample_timer -= chunk;
+
+		if (a.master_enabled)
 		{
-			AdvanceOutput(a, 0, 0);
+			a.frame_seq_timer -= chunk;
+			if (a.ch1.enabled) a.ch1.freq_timer -= chunk;
+			if (a.ch2.enabled) a.ch2.freq_timer -= chunk;
+			if (a.ch3.enabled) a.ch3.freq_timer -= chunk;
+			if (a.ch4.enabled) a.ch4.freq_timer -= chunk;
+
+			// Handle expiries. Channel periods are positive, so a single
+			// reload per event suffices; for larger skips (e.g. a very
+			// short NR43 divisor), the next loop iteration's chunk math
+			// reconverges.
+			if (a.ch1.enabled && a.ch1.freq_timer <= 0)
+			{
+				a.ch1.freq_timer += SquarePeriod(a.ch1.freq);
+				a.ch1.duty_pos    = static_cast<uint8_t>((a.ch1.duty_pos + 1) & 7);
+			}
+			if (a.ch2.enabled && a.ch2.freq_timer <= 0)
+			{
+				a.ch2.freq_timer += SquarePeriod(a.ch2.freq);
+				a.ch2.duty_pos    = static_cast<uint8_t>((a.ch2.duty_pos + 1) & 7);
+			}
+			if (a.ch3.enabled && a.ch3.freq_timer <= 0)
+			{
+				a.ch3.freq_timer += WavePeriod(a.ch3.freq);
+				a.ch3.pos         = static_cast<uint8_t>((a.ch3.pos + 1) & 0x1F);
+				const uint8_t byte = a.ch3.ram[a.ch3.pos >> 1];
+				a.ch3.sample_buf  = (a.ch3.pos & 1) ? static_cast<uint8_t>(byte & 0x0F)
+				                                    : static_cast<uint8_t>(byte >> 4);
+			}
+			if (a.ch4.enabled && a.ch4.freq_timer <= 0)
+			{
+				a.ch4.freq_timer += NoisePeriod(a.ch4.nr43);
+				const uint16_t bit  = static_cast<uint16_t>((a.ch4.lfsr ^ (a.ch4.lfsr >> 1)) & 1);
+				uint16_t       next = static_cast<uint16_t>((a.ch4.lfsr >> 1) | (bit << 14));
+				if (a.ch4.nr43 & 0x08)
+					next = static_cast<uint16_t>((next & ~0x40) | (bit << 6));
+				a.ch4.lfsr = next;
+			}
+
+			if (a.frame_seq_timer <= 0)
+			{
+				a.frame_seq_timer += FRAME_SEQ_PERIOD;
+				FrameSequencerStep(a);
+			}
 		}
+
+		if (a.sample_timer <= 0)
+		{
+			a.sample_timer += a.cycles_per_sample;
+			FlushSample(a);
+		}
+
+		tcycles -= chunk;
 	}
 }
 

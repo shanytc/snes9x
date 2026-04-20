@@ -288,6 +288,15 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 	// LCD master disable (LCDC bit 7). Real HW parks the PPU in mode 0
 	// with LY=0 until the bit toggles back on. We keep the framebuffer
 	// contents so the display keeps showing the last valid frame.
+	//
+	// Crucially: STAT IRQs do NOT fire while the LCD is off. The STAT
+	// line is forced low, which means we must NOT call RecomputeStatLine
+	// here — that function's "rising edge" detector would see a live
+	// HBlank (mode=0) every call and raise IRQ_LCDSTAT on every CPU
+	// instruction. Pokemon Yellow's Pikachu-voice routine disables the
+	// LCD with STAT bit 3 (HBlank IRQ) still enabled, and we were
+	// storm-firing its ISR forever at PC=15C1 (one instruction before
+	// RETI, right after POP AF).
 	if (!(p.lcdc & 0x80))
 	{
 		p.mode           = PpuMode::HBlank;
@@ -295,7 +304,11 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		p.mode_clock     = 0;
 		p.window_line    = 0;
 		p.stat_line_high = false;
-		RecomputeStatLine(p, mem);
+		// Zero the STAT mode + coincidence bits (low 3); keep the IRQ
+		// enable bits (4..6) because the game's register writes still
+		// work. Intentionally NOT raising IRQ_LCDSTAT.
+		p.stat = static_cast<uint8_t>(p.stat & 0xF8);
+		(void)mem;
 		return;
 	}
 

@@ -1020,6 +1020,12 @@ void S9xResetSaveTimer (bool8 dontsave)
 
 uint32 S9xFreezeSize()
 {
+    // SGB mode — return the size of the versioned "SGB!" blob instead
+    // of dry-running the 65816 snapshot serializer. Run-ahead asks us
+    // this at load time to preallocate its state buffer.
+    if (Settings.SuperGameBoy)
+        return static_cast<uint32>(S9xSGBStateSize());
+
     nulStream stream;
     S9xFreezeToStream(&stream);
     return stream.size();
@@ -1027,6 +1033,14 @@ uint32 S9xFreezeSize()
 
 bool8 S9xFreezeGameMem (uint8 *buf, uint32 bufSize)
 {
+    if (Settings.SuperGameBoy)
+    {
+        const size_t need = S9xSGBStateSize();
+        if (bufSize < need) return (FALSE);
+        S9xSGBStateSave(buf);
+        return (TRUE);
+    }
+
     memStream mStream(buf, bufSize);
 	S9xFreezeToStream(&mStream);
 
@@ -1076,6 +1090,9 @@ bool8 S9xFreezeGame (const char *filename)
 
 int S9xUnfreezeGameMem (const uint8 *buf, uint32 bufSize)
 {
+    if (Settings.SuperGameBoy)
+        return S9xSGBStateLoad(buf, bufSize) ? SUCCESS : WRONG_FORMAT;
+
     memStream stream(buf, bufSize);
 	int result = S9xUnfreezeFromStream(&stream);
 

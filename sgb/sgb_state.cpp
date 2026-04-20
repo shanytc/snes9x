@@ -525,11 +525,15 @@ void SgbAdvancePlayer(SgbState &s)
 
 void SgbRenderBorder(const SgbState &s, uint16_t *out)
 {
-	// No border uploaded yet — plain black outer frame. Leave the
-	// central 20x18 tile region alone too; P7 fills it with GB pixels.
+	// No border uploaded yet — fill with a muted dark-gray so an
+	// all-black window is a clear "SGB frame didn't reach the screen"
+	// signal and a gray border around a running game is "SGB is live
+	// but this cart hasn't sent a custom border yet".
 	if (!s.border.map_loaded || !s.border.tiles_loaded)
 	{
-		for (uint32_t i = 0; i < SGB_BORDER_W * SGB_BORDER_H; ++i) out[i] = 0;
+		constexpr uint16_t DEFAULT_BORDER = 0x294A;  // 10,10,10 dark gray
+		for (uint32_t i = 0; i < SGB_BORDER_W * SGB_BORDER_H; ++i)
+			out[i] = DEFAULT_BORDER;
 		return;
 	}
 

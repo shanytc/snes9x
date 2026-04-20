@@ -198,6 +198,18 @@ void Emulator::RunCycles(int32_t tcycles)
 
 const FrameBuffer &Emulator::GetFrameBuffer() const { return impl_->fb; }
 
+void Emulator::GetStatus(char *buf, size_t cap) const
+{
+	if (!buf || cap == 0) return;
+	const CpuState &s = impl_->cpu.State();
+	std::snprintf(buf, cap,
+	              "SGB PC=%04X SP=%04X A=%02X%s T=%lld ill=%u",
+	              s.r.pc, s.r.sp, s.r.a,
+	              s.halted ? " HALT" : (s.stopped ? " STOP" : ""),
+	              static_cast<long long>(s.t_cycles),
+	              static_cast<unsigned>(s.illegal_ops));
+}
+
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	if (!impl_->has_rom || !dest) return;
@@ -587,6 +599,11 @@ bool S9xSGBSaveStateToFile(const char *filename)
 	const size_t w = fwrite(buf.data(), 1, need, f);
 	fclose(f);
 	return w == need;
+}
+
+void S9xSGBGetStatus(char *buf, size_t cap)
+{
+	SGB::Instance().GetStatus(buf, cap);
 }
 
 bool S9xSGBLoadStateFromFile(const char *filename)

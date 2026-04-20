@@ -102,6 +102,10 @@ public:
 	// for a tightly-packed buffer, or the SNES GFX.Screen's PPL).
 	void  BlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 
+	// Write a one-line status snapshot — PC, SP, A, halt/stop flag,
+	// total T-cycles, illegal-op count.
+	void  GetStatus(char *buf, size_t cap) const;
+
 	// Opaque implementation struct — forward-declared so file-local
 	// helpers in sgb.cpp can reference the full type. External code
 	// has no way to obtain one.
@@ -157,6 +161,12 @@ void    S9xSGBSetClockMultiplier(float mul);
 size_t  S9xSGBStateSize(void);
 void    S9xSGBStateSave(uint8_t *buffer);
 bool    S9xSGBStateLoad(const uint8_t *buffer, size_t size);
+
+// Fill `buf` with a one-line status snapshot:
+//   "SGB PC=abcd T=xxxxxx(+nnnnn) HALT illegal=N"
+// Used by cpuexec.cpp's periodic OSD hook to diagnose hangs. `cap`
+// is the buffer size; truncated on overflow.
+void    S9xSGBGetStatus(char *buf, size_t cap);
 
 // Convenience file I/O wrappers — write the full blob to `filename`,
 // or read it back. Return false on I/O error or format mismatch.

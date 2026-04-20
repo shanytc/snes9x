@@ -157,8 +157,11 @@ void Emulator::OnJoyserWrite(uint8_t value)
 void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)
 {
 	// *_TRN commands source their 4KB from GB VRAM $8000..$8FFF — our
-	// first half of Ppu::vram. Non-TRN commands ignore the pointer.
-	SgbHandleCommand(impl_->sgb_state, cmd, data, len, impl_->ppu.vram);
+	// first half of Ppu::vram. MASK_EN freeze also needs the current
+	// GB framebuffer. Non-consuming commands ignore both pointers.
+	SgbHandleCommand(impl_->sgb_state, cmd, data, len,
+	                 impl_->ppu.vram,
+	                 impl_->ppu.framebuffer);
 }
 
 size_t Emulator::StateSize() const { return 0; }

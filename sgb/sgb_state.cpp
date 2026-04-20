@@ -332,7 +332,63 @@ void HandleAttrSet(SgbState &s, const uint8_t *d)
 {
 	const uint8_t b = d[1];
 	ApplyAttrFile(s, static_cast<uint8_t>(b & 0x3F));
-	if (b & 0x40) s.mask_mode = 0;
+	if (b & 0x40) s.mask_mode = SGB_MASK_CANCEL;
+}
+
+// ------------------------------------------------------------------
+// CHR_TRN — upload 128 border tiles (half of the 256-tile bank).
+// ------------------------------------------------------------------
+//   [1]  bit 0: 0 = lower 128 tiles (tiles 0..127),
+//               1 = upper 128 tiles (tiles 128..255)
+//        bit 1: type (0 = BG, 1 = OBJ — OBJ for OBJ_TRN, unused here)
+// Each half is 128 × 32 bytes = 4096 bytes pulled straight from VRAM.
+
+void HandleChrTrn(SgbState &s, const uint8_t *d, const uint8_t *vram)
+{
+	if (!vram) return;
+	const uint8_t  high_half = static_cast<uint8_t>(d[1] & 0x01);
+	uint8_t *dest = &s.border.tiles[high_half ? (128 * 32) : 0];
+	std::memcpy(dest, vram, 128 * 32);
+	s.border.tiles_loaded = true;
+}
+
+// ------------------------------------------------------------------
+// PCT_TRN — upload 32x32 tile map (2KB) + 4 palettes (128B).
+// ------------------------------------------------------------------
+// VRAM layout (first 4KB):
+//   0x000..0x7FF   32×32 map entries, 16-bit LE each
+//   0x800..0x87F   4 palettes × 16 colors × 2 bytes  (128 bytes)
+//   0x880..0xFFF   unused
+
+void HandlePctTrn(SgbState &s, const uint8_t *vram)
+{
+	if (!vram) return;
+
+	for (int i = 0; i < 32 * 32; ++i)
+		s.border.tile_map[i] = Rd16(vram + i * 2);
+
+	const uint8_t *pal = vram + 0x800;
+	for (int p = 0; p < 4; ++p)
+		for (int c = 0; c < 16; ++c)
+			s.border.palettes[p][c] = Rd16(pal + (p * 16 + c) * 2);
+
+	s.border.map_loaded = true;
+}
+
+// ------------------------------------------------------------------
+// MASK_EN — freeze / blank / black the GB screen area.
+// ------------------------------------------------------------------
+//   [1] bits 0-1: mask mode (0..3 per SGB_MASK_*)
+
+void HandleMaskEn(SgbState &s, const uint8_t *d, const uint8_t *gb_fb)
+{
+	const uint8_t mode = static_cast<uint8_t>(d[1] & 0x03);
+	if (mode == SGB_MASK_FREEZE && gb_fb)
+	{
+		std::memcpy(s.frozen_frame, gb_fb, sizeof s.frozen_frame);
+		s.frozen_frame_valid = true;
+	}
+	s.mask_mode = mode;
 }
 
 } // anonymous
@@ -350,16 +406,20 @@ void SgbReset(SgbState &s)
 	std::memset(s.attr_map,         0, sizeof s.attr_map);
 	std::memset(s.system_palettes,  0, sizeof s.system_palettes);
 	std::memset(s.attr_files,       0, sizeof s.attr_files);
+	std::memset(s.frozen_frame,     0, sizeof s.frozen_frame);
+	std::memset(&s.border,          0, sizeof s.border);
 	s.system_palettes_loaded = false;
 	s.attr_files_loaded      = false;
-	s.mask_mode              = 0;
+	s.frozen_frame_valid     = false;
+	s.mask_mode              = SGB_MASK_CANCEL;
 	s.palette_writes         = 0;
 	s.attr_writes            = 0;
 	s.last_cmd               = 0xFF;
 }
 
 void SgbHandleCommand(SgbState &s, uint8_t cmd, const uint8_t *data,
-                      uint32_t len, const uint8_t *vram_4kb)
+                      uint32_t len, const uint8_t *vram_4kb,
+                      const uint8_t *gb_fb_160x144)
 {
 	if (len < 16) return;
 	s.last_cmd = cmd;
@@ -376,9 +436,11 @@ void SgbHandleCommand(SgbState &s, uint8_t cmd, const uint8_t *data,
 		case 0x07: HandleAttrChr(s, data, len); break;         // ATTR_CHR
 		case 0x0A: HandlePalSet(s, data); break;               // PAL_SET
 		case 0x0B: HandlePalTrn(s, vram_4kb); break;           // PAL_TRN
+		case 0x13: HandleChrTrn(s, data, vram_4kb); break;     // CHR_TRN
+		case 0x14: HandlePctTrn(s, vram_4kb); break;           // PCT_TRN
 		case 0x15: HandleAttrTrn(s, vram_4kb); break;          // ATTR_TRN
 		case 0x16: HandleAttrSet(s, data); break;              // ATTR_SET
-		// P6c: CHR_TRN (0x13), PCT_TRN (0x14), MASK_EN (0x17)
+		case 0x17: HandleMaskEn(s, data, gb_fb_160x144); break;// MASK_EN
 		// P6d: SOUND (0x08), SOU_TRN (0x09), MLT_REQ (0x11), DATA_SND (0x0F),
 		//      DATA_TRN (0x10), JUMP (0x12), OBJ_TRN (0x18), ATRC_EN (0x0C),
 		//      TEST_EN (0x0D), ICON_EN (0x0E)
@@ -397,6 +459,64 @@ uint16_t SgbResolveColor(const SgbState &s, uint32_t tile_x, uint32_t tile_y,
 {
 	const uint8_t pal = SgbGetTilePalette(s, tile_x, tile_y);
 	return s.active[pal].colors[shade & 3];
+}
+
+void SgbRenderBorder(const SgbState &s, uint16_t *out)
+{
+	// No border uploaded yet — plain black outer frame. Leave the
+	// central 20x18 tile region alone too; P7 fills it with GB pixels.
+	if (!s.border.map_loaded || !s.border.tiles_loaded)
+	{
+		for (uint32_t i = 0; i < SGB_BORDER_W * SGB_BORDER_H; ++i) out[i] = 0;
+		return;
+	}
+
+	for (uint32_t ty = 0; ty < SGB_BORDER_ROWS; ++ty)
+	{
+		for (uint32_t tx = 0; tx < SGB_BORDER_COLS; ++tx)
+		{
+			// Skip the central 20x18 tiles; those will be overwritten
+			// by the GB framebuffer blit in the P7 display path.
+			const bool in_gb =
+				(tx >= SGB_GB_TILE_X && tx < SGB_GB_TILE_X + SGB_TILE_COLS) &&
+				(ty >= SGB_GB_TILE_Y && ty < SGB_GB_TILE_Y + SGB_TILE_ROWS);
+			if (in_gb) continue;
+
+			const uint16_t entry    = s.border.tile_map[ty * 32 + tx];
+			const uint32_t tile_num = entry & 0x03FF;
+			const uint32_t pal_idx  = (entry >> 10) & 0x03;  // wrap 4..7 → 0..3
+			const bool     hflip    = (entry >> 14) & 1;
+			const bool     vflip    = (entry >> 15) & 1;
+
+			const uint8_t *tile = &s.border.tiles[(tile_num & 0xFF) * 32];
+
+			for (int py = 0; py < 8; ++py)
+			{
+				const int row = vflip ? (7 - py) : py;
+				// SNES 4bpp planar: bytes [row*2, row*2+1] for planes 0/1,
+				// bytes [16 + row*2, 16 + row*2 + 1] for planes 2/3.
+				const uint8_t p0 = tile[row * 2 + 0];
+				const uint8_t p1 = tile[row * 2 + 1];
+				const uint8_t p2 = tile[16 + row * 2 + 0];
+				const uint8_t p3 = tile[16 + row * 2 + 1];
+
+				for (int px = 0; px < 8; ++px)
+				{
+					const int bit = hflip ? px : (7 - px);
+					const uint8_t ci = static_cast<uint8_t>(
+						((p0 >> bit) & 1) |
+						(((p1 >> bit) & 1) << 1) |
+						(((p2 >> bit) & 1) << 2) |
+						(((p3 >> bit) & 1) << 3));
+					const uint16_t color = s.border.palettes[pal_idx][ci];
+
+					const uint32_t dst_x = tx * 8 + static_cast<uint32_t>(px);
+					const uint32_t dst_y = ty * 8 + static_cast<uint32_t>(py);
+					out[dst_y * SGB_BORDER_W + dst_x] = color;
+				}
+			}
+		}
+	}
 }
 
 } // namespace SGB

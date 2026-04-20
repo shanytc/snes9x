@@ -6,6 +6,7 @@
 
 #include "gb_memory.h"
 #include "gb_cart.h"
+#include "gb_cpu.h"
 #include "gb_ppu.h"
 #include "gb_apu.h"
 #include "gb_timer.h"

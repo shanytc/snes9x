@@ -48,27 +48,27 @@ std::string g_serial;
 void OnSerial(uint8_t b)
 {
 	g_serial.push_back(static_cast<char>(b));
-	std::fputc(b, stdout);
-	std::fflush(stdout);
+	fputc(b, stdout);
+	fflush(stdout);
 }
 
 // Output the 160x144 indexed GB framebuffer as grayscale PPM so it can
 // be diffed pixel-exactly against dmg-acid2 reference images.
 bool DumpFramebufferPpm(const char *path, const uint8_t *fb, int w, int h)
 {
-	std::FILE *f = std::fopen(path, "wb");
+	FILE *f = fopen(path, "wb");
 	if (!f) return false;
 
-	std::fprintf(f, "P6\n%d %d\n255\n", w, h);
+	fprintf(f, "P6\n%d %d\n255\n", w, h);
 	static const uint8_t shade_rgb[4] = { 255, 170, 85, 0 };
 	for (int i = 0; i < w * h; ++i)
 	{
 		const uint8_t s = shade_rgb[fb[i] & 3];
-		std::fputc(s, f);
-		std::fputc(s, f);
-		std::fputc(s, f);
+		fputc(s, f);
+		fputc(s, f);
+		fputc(s, f);
 	}
-	std::fclose(f);
+	fclose(f);
 	return true;
 }
 
@@ -79,11 +79,11 @@ bool DumpCompositeRaw(const char *path)
 	std::vector<uint16_t> buf(256 * 224);
 	S9xSGBBlitScreen(buf.data(), 256);
 
-	std::FILE *f = std::fopen(path, "wb");
+	FILE *f = fopen(path, "wb");
 	if (!f) return false;
 	const size_t n = buf.size() * sizeof(uint16_t);
-	const size_t w = std::fwrite(buf.data(), 1, n, f);
-	std::fclose(f);
+	const size_t w = fwrite(buf.data(), 1, n, f);
+	fclose(f);
 	return w == n;
 }
 
@@ -101,7 +101,7 @@ int main(int argc, char **argv)
 {
 	if (argc < 2)
 	{
-		std::fprintf(stderr,
+		fprintf(stderr,
 			"Usage: %s <rom.gb> [frames=1800] [mode=sgb|sgb2|dmg] [mul=1.0]\n",
 			argv[0]);
 		return 1;
@@ -114,12 +114,12 @@ int main(int argc, char **argv)
 
 	if (!S9xSGBInit())
 	{
-		std::fprintf(stderr, "SGB init failed\n");
+		fprintf(stderr, "SGB init failed\n");
 		return 1;
 	}
 	if (!S9xSGBLoadROM(rom_path))
 	{
-		std::fprintf(stderr, "Failed to load '%s'\n", rom_path);
+		fprintf(stderr, "Failed to load '%s'\n", rom_path);
 		return 1;
 	}
 	S9xSGBSetRunMode(mode);
@@ -127,7 +127,7 @@ int main(int argc, char **argv)
 	S9xSGBSetAudioRate(32000);
 	SGB::SetSerialCallback(&OnSerial);
 
-	std::fprintf(stderr,
+	fprintf(stderr,
 		"rom=%s frames=%d mode=%d mul=%.2f\n",
 		rom_path, frames, mode, static_cast<double>(mul));
 
@@ -147,7 +147,7 @@ int main(int argc, char **argv)
 	const bool said_failed = g_serial.find("Failed") != std::string::npos;
 	if (said_failed) exit_code = 2;
 
-	std::fprintf(stderr,
+	fprintf(stderr,
 		"\n--- summary ---\n"
 		"frames      = %d\n"
 		"serial      = %zu bytes\n"

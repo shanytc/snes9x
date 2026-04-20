@@ -177,11 +177,11 @@ bool CartSaveBattery(const Cart &c)
 	const std::string sav = MakeSavPath(c.path);
 	if (sav.empty()) return false;
 
-	FILE *f = std::fopen(sav.c_str(), "wb");
+	FILE *f = fopen(sav.c_str(), "wb");
 	if (!f) return false;
 
-	const size_t written = std::fwrite(c.sram.data(), 1, c.sram.size(), f);
-	std::fclose(f);
+	const size_t written = fwrite(c.sram.data(), 1, c.sram.size(), f);
+	fclose(f);
 	return written == c.sram.size();
 }
 
@@ -192,14 +192,14 @@ bool CartLoadBattery(Cart &c)
 	const std::string sav = MakeSavPath(c.path);
 	if (sav.empty()) return false;
 
-	FILE *f = std::fopen(sav.c_str(), "rb");
+	FILE *f = fopen(sav.c_str(), "rb");
 	if (!f) return false;
 
 	// Cap at the allocated SRAM; ignore any trailing RTC bytes for now
 	// (proper RTC persistence lands with the P2 follow-up).
 	const size_t want = c.sram.size();
-	const size_t got  = std::fread(c.sram.data(), 1, want, f);
-	std::fclose(f);
+	const size_t got  = fread(c.sram.data(), 1, want, f);
+	fclose(f);
 	return got == want;
 }
 

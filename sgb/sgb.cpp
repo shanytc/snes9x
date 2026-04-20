@@ -576,10 +576,10 @@ bool S9xSGBSaveStateToFile(const char *filename)
 	std::vector<uint8_t> buf(need);
 	SGB::Instance().StateSave(buf.data());
 
-	std::FILE *f = std::fopen(filename, "wb");
+	FILE *f = fopen(filename, "wb");
 	if (!f) return false;
-	const size_t w = std::fwrite(buf.data(), 1, need, f);
-	std::fclose(f);
+	const size_t w = fwrite(buf.data(), 1, need, f);
+	fclose(f);
 	return w == need;
 }
 
@@ -587,16 +587,16 @@ bool S9xSGBLoadStateFromFile(const char *filename)
 {
 	if (!filename) return false;
 
-	std::FILE *f = std::fopen(filename, "rb");
+	FILE *f = fopen(filename, "rb");
 	if (!f) return false;
-	if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return false; }
-	const long sz = std::ftell(f);
-	if (sz <= 12 || sz > 4 * 1024 * 1024) { std::fclose(f); return false; }
-	std::fseek(f, 0, SEEK_SET);
+	if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+	const long sz = ftell(f);
+	if (sz <= 12 || sz > 4 * 1024 * 1024) { fclose(f); return false; }
+	fseek(f, 0, SEEK_SET);
 
 	std::vector<uint8_t> buf(static_cast<size_t>(sz));
-	const size_t got = std::fread(buf.data(), 1, static_cast<size_t>(sz), f);
-	std::fclose(f);
+	const size_t got = fread(buf.data(), 1, static_cast<size_t>(sz), f);
+	fclose(f);
 	if (got != static_cast<size_t>(sz)) return false;
 
 	return SGB::Instance().StateLoad(buf.data(), buf.size());
@@ -606,18 +606,18 @@ bool S9xSGBLoadROM(const char *filename)
 {
 	if (!filename || !*filename) return false;
 
-	std::FILE *f = std::fopen(filename, "rb");
+	FILE *f = fopen(filename, "rb");
 	if (!f) return false;
 
-	if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return false; }
-	const long sz = std::ftell(f);
+	if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+	const long sz = ftell(f);
 	if (sz <= 0 || sz > 16 * 1024 * 1024)   // 16 MB is the MBC5/MBC6 ceiling
-	{ std::fclose(f); return false; }
-	std::fseek(f, 0, SEEK_SET);
+	{ fclose(f); return false; }
+	fseek(f, 0, SEEK_SET);
 
 	std::vector<uint8_t> buf(static_cast<size_t>(sz));
-	const size_t got = std::fread(buf.data(), 1, static_cast<size_t>(sz), f);
-	std::fclose(f);
+	const size_t got = fread(buf.data(), 1, static_cast<size_t>(sz), f);
+	fclose(f);
 	if (got != static_cast<size_t>(sz)) return false;
 
 	return SGB::Instance().LoadROM(buf.data(), buf.size(), filename);

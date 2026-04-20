@@ -84,6 +84,32 @@ void Emulator::Reset()
 	impl_->fb.width  = GB_SCREEN_WIDTH;
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
+
+	// Apply run-mode specific post-boot register values. The SGB BIOS
+	// hands control to the cart with slightly different register state
+	// than a DMG boot ROM does — some games (notably Donkey Kong and
+	// Pokemon) check these to detect whether they're running on a real
+	// SGB host.
+	CpuState &cs = impl_->cpu.State();
+	switch (impl_->run_mode)
+	{
+		case RunMode::SGB:
+			cs.r.af = 0x0100;
+			cs.r.bc = 0x0014;
+			cs.r.de = 0x0000;
+			cs.r.hl = 0xC060;
+			break;
+		case RunMode::SGB2:
+			cs.r.af = 0xFF00;
+			cs.r.bc = 0x0014;
+			cs.r.de = 0x0000;
+			cs.r.hl = 0xC060;
+			break;
+		case RunMode::DMG:
+		default:
+			// gb_cpu.cpp Reset() already set DMG values.
+			break;
+	}
 }
 
 bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
@@ -113,26 +139,32 @@ void Emulator::RunFrame()
 
 	impl_->ppu.frame_ready = false;
 
-	// Run CPU steps, ticking every subsystem by the same number of
-	// T-cycles the CPU actually consumed, until the PPU signals VBlank.
-	// A nominal GB frame is 70224 T-cycles; safety cap at ~3× that to
-	// prevent a broken ROM from hanging the emulator thread.
-	int32_t safety = 250000;
-
-	while (!impl_->ppu.frame_ready && safety > 0)
+	// Cycle budget per SNES frame depends on run mode and the user
+	// overclock/underclock knob:
+	//   SGB1: SNES master clock / 5 = 4.2955 MHz (2.4% faster than real GB)
+	//   SGB2: exact GB clock         = 4.1943 MHz
+	//   DMG:  exact GB clock         = 4.1943 MHz
+	// At NTSC SNES refresh (60.099 fps) that's ~71485 / 69801 T-cycles per
+	// SNES frame. Clamp the multiplier to a sane range so users can't
+	// accidentally freeze the emulator with a 0x or 1000x setting.
+	constexpr double SNES_FPS = 60.09881389744051;
+	double base_hz;
+	switch (impl_->run_mode)
 	{
-		const int64_t pre_t = impl_->cpu.State().t_cycles;
-		impl_->cpu.Step(impl_->mem);
-		int32_t consumed = static_cast<int32_t>(
-			impl_->cpu.State().t_cycles - pre_t);
-		if (consumed <= 0) consumed = 4;
-
-		PpuStep  (impl_->ppu,   impl_->mem, consumed);
-		TimerStep(impl_->timer, impl_->mem, consumed);
-		ApuStep  (impl_->apu,                consumed);
-
-		safety -= consumed;
+		case RunMode::SGB:  base_hz = 21477272.727272 / 5.0; break;
+		case RunMode::SGB2: base_hz = 4194304.0;             break;
+		case RunMode::DMG:
+		default:            base_hz = 4194304.0;             break;
 	}
+
+	float mul = impl_->clock_mul;
+	if (mul < 0.10f) mul = 0.10f;
+	if (mul > 8.00f) mul = 8.00f;
+
+	const double   per_frame = (base_hz / SNES_FPS) * static_cast<double>(mul);
+	const int32_t  budget    = static_cast<int32_t>(per_frame);
+
+	RunCycles(budget);
 }
 
 void Emulator::RunCycles(int32_t tcycles)
@@ -324,6 +356,24 @@ int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s)
 void S9xSGBSetAudioRate(int32_t rate_hz)
 {
 	SGB::Instance().SetAudioRate(rate_hz);
+}
+
+void S9xSGBSetRunMode(uint8_t mode)
+{
+	SGB::RunMode m;
+	switch (mode)
+	{
+		case 2:  m = SGB::RunMode::SGB2; break;
+		case 0:  m = SGB::RunMode::DMG;  break;
+		case 1:
+		default: m = SGB::RunMode::SGB;  break;
+	}
+	SGB::Instance().SetRunMode(m);
+}
+
+void S9xSGBSetClockMultiplier(float mul)
+{
+	SGB::Instance().SetClockMultiplier(mul);
 }
 
 bool S9xSGBLoadROM(const char *filename)

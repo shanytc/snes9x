@@ -45,6 +45,14 @@ void S9xMainLoop (void)
 		// only wire the first controller.
 		S9xSGBSetJoypad(MovieGetJoypad(0));
 
+		// Push timing knobs each frame so UI changes take effect live.
+		// Default GBClockMultiplier to 1.0 if it's been left at its
+		// zero-initialized value (backwards-compat with older configs).
+		const float mul = (Settings.GBClockMultiplier > 0.0f)
+		                  ? Settings.GBClockMultiplier : 1.0f;
+		S9xSGBSetClockMultiplier(mul);
+		S9xSGBSetRunMode(Settings.GameBoyRunMode);
+
 		S9xStartScreenRefresh();
 		S9xSGBRunFrame();
 		S9xSGBBlitScreen(GFX.Screen, GFX.RealPPL);

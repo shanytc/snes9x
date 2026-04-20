@@ -134,4 +134,12 @@ int32_t S9xSGBGetSampleCount(void);
 int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s);
 void    S9xSGBSetAudioRate(int32_t rate_hz);
 
+// Timing knobs — push Settings.GameBoyRunMode and GBClockMultiplier
+// into the emulator from snes9x's per-frame dispatch. Both take effect
+// from the next RunFrame forward; SetRunMode does NOT implicitly reset
+// so applying it mid-game is harmless (but won't rewrite boot-state
+// registers until the next Reset).
+void    S9xSGBSetRunMode(uint8_t mode /* 0=DMG, 1=SGB1, 2=SGB2 */);
+void    S9xSGBSetClockMultiplier(float mul);
+
 #endif

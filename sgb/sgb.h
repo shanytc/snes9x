@@ -87,6 +87,11 @@ public:
 	// state. Exposed because the packet callback trampoline needs it.
 	void  OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len);
 
+	// Composite the SGB border + GB screen into a 256 × 224 BGR555
+	// buffer. `pitch_pixels` is the stride in uint16_t units (use 256
+	// for a tightly-packed buffer, or the SNES GFX.Screen's PPL).
+	void  BlitScreen(uint16_t *dest, uint32_t pitch_pixels);
+
 private:
 	struct Impl;
 	Impl *impl_;
@@ -106,5 +111,10 @@ void S9xSGBRunFrame(void);
 void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);
 bool S9xSGBIsActive(void);
+
+// Composite the current frame (border + GB screen + mask mode) into a
+// 256 × 224 BGR555 buffer. `pitch_pixels` is the stride in uint16_t
+// units. Call after S9xSGBRunFrame.
+void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 
 #endif

@@ -12,6 +12,9 @@
 #include "fxemu.h"
 #include "snapshot.h"
 #include "movie.h"
+#include "ppu.h"
+#include "gfx.h"
+#include "sgb/sgb.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #include "missing.h"
@@ -21,6 +24,34 @@ static inline void S9xReschedule (void);
 
 void S9xMainLoop (void)
 {
+	// Super Game Boy mode — run the GB core for one frame and return.
+	// The 65816 loop below is bypassed entirely; snes9x's frontends
+	// call S9xMainLoop once per frame, so this satisfies the contract.
+	if (Settings.SuperGameBoy)
+	{
+		if (CPU.Flags & SCAN_KEYS_FLAG)
+		{
+			CPU.Flags &= ~SCAN_KEYS_FLAG;
+			S9xMovieUpdate();
+		}
+
+		IPPU.RenderThisFrame      = TRUE;
+		PPU.ScreenHeight          = SNES_HEIGHT;
+		IPPU.RenderedScreenWidth  = SNES_WIDTH;
+		IPPU.RenderedScreenHeight = SNES_HEIGHT;
+
+		S9xStartScreenRefresh();
+		S9xSGBRunFrame();
+		S9xSGBBlitScreen(GFX.Screen, GFX.RealPPL);
+		S9xEndScreenRefresh();
+
+		if (!Settings.InRunAhead)
+			S9xSyncSpeed();
+
+		CPU.Flags |= SCAN_KEYS_FLAG;
+		return;
+	}
+
 	#define CHECK_FOR_IRQ_CHANGE() \
 	if (Timings.IRQFlagChanging) \
 	{ \

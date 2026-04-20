@@ -28,6 +28,7 @@
 
 #include "memmap.h"
 #include "apu/apu.h"
+#include "sgb/sgb.h"
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
@@ -1322,10 +1323,53 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
     return TRUE;
 }
 
+// Case-insensitive ASCII extension match. Used to route .gb/.gbc ROMs
+// into the SGB subsystem instead of the 65816 SNES path.
+static bool S9xFilenameHasExt(const char *name, const char *ext)
+{
+    if (!name || !ext) return false;
+    const char *dot = strrchr(name, '.');
+    if (!dot) return false;
+    const char *a = dot;
+    const char *b = ext;
+    while (*a && *b)
+    {
+        char ca = *a++; if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca + 32);
+        char cb = *b++; if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb + 32);
+        if (ca != cb) return false;
+    }
+    return *a == 0 && *b == 0;
+}
+
 bool8 CMemory::LoadROM (const char *filename)
 {
     if(!filename || !*filename)
         return FALSE;
+
+    // .gb / .gbc — hand off to the SGB subsystem. The 65816 path below
+    // is bypassed entirely; S9xMainLoop gates on Settings.SuperGameBoy
+    // and runs the GB core instead.
+    if (S9xFilenameHasExt(filename, ".gb") || S9xFilenameHasExt(filename, ".gbc"))
+    {
+        if (Settings.SuperGameBoy) S9xSGBDeinit();
+        Settings.SuperGameBoy      = TRUE;
+        Settings.GameBoyRunMode    = 1;   // default SGB1
+        Settings.GBClockMultiplier = 1.0f;
+        if (!S9xSGBInit() || !S9xSGBLoadROM(filename))
+        {
+            Settings.SuperGameBoy = FALSE;
+            return FALSE;
+        }
+        ROMFilename = filename;
+        return TRUE;
+    }
+
+    // Loading a non-GB ROM — tear down any previous SGB state first.
+    if (Settings.SuperGameBoy)
+    {
+        S9xSGBDeinit();
+        Settings.SuperGameBoy = FALSE;
+    }
 
     S9xResetSaveTimer(FALSE); // reset oops timer here so that .oops file has rom name of previous rom
 

@@ -161,6 +161,64 @@ void Emulator::RunCycles(int32_t tcycles)
 
 const FrameBuffer &Emulator::GetFrameBuffer() const { return impl_->fb; }
 
+void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
+{
+	if (!impl_->has_rom || !dest) return;
+
+	// Stage border into a packed 256 × 224 buffer. Border leaves the
+	// centered 20 × 18 tile area untouched — we overwrite that next.
+	uint16_t staging[SGB_BORDER_W * SGB_BORDER_H];
+	SgbRenderBorder(impl_->sgb_state, staging);
+
+	// Pick the source pixels for the GB screen area based on MASK_EN.
+	const uint8_t *src_fb = impl_->ppu.framebuffer;
+	if (impl_->sgb_state.mask_mode == SGB_MASK_FREEZE &&
+	    impl_->sgb_state.frozen_frame_valid)
+	{
+		src_fb = impl_->sgb_state.frozen_frame;
+	}
+
+	const uint32_t origin_x = SGB_GB_TILE_X * 8;  // 48
+	const uint32_t origin_y = SGB_GB_TILE_Y * 8;  // 40
+
+	for (uint32_t py = 0; py < GB_SCREEN_HEIGHT; ++py)
+	{
+		const uint32_t dst_y     = origin_y + py;
+		uint16_t *const dst_row  = staging + dst_y * SGB_BORDER_W + origin_x;
+		for (uint32_t px = 0; px < GB_SCREEN_WIDTH; ++px)
+		{
+			uint16_t color;
+			switch (impl_->sgb_state.mask_mode)
+			{
+				case SGB_MASK_BLACK:
+					color = 0x0000;
+					break;
+				case SGB_MASK_BLANK:
+					color = impl_->sgb_state.active[0].colors[0];
+					break;
+				default:
+				{
+					const uint8_t  shade   = src_fb[py * GB_SCREEN_WIDTH + px];
+					const uint32_t tile_x  = px / 8;
+					const uint32_t tile_y  = py / 8;
+					color = SgbResolveColor(impl_->sgb_state, tile_x, tile_y, shade);
+					break;
+				}
+			}
+			dst_row[px] = color;
+		}
+	}
+
+	// Copy to destination with pitch. For a packed 256-wide dest this
+	// degenerates into a flat memcpy per row.
+	for (uint32_t y = 0; y < SGB_BORDER_H; ++y)
+	{
+		std::memcpy(dest + y * pitch_pixels,
+		            staging + y * SGB_BORDER_W,
+		            SGB_BORDER_W * sizeof(uint16_t));
+	}
+}
+
 int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)
 {
 	return ApuDrain(impl_->apu, out, max_samples);
@@ -228,6 +286,11 @@ bool S9xSGBIsActive(void)           { return SGB::Instance().HasROM(); }
 void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBSetJoypad(uint16_t m)    { SGB::Instance().SetJoypad(m); }
 void S9xSGBOnJoyserWrite(uint8_t v) { SGB::Instance().OnJoyserWrite(v); }
+
+void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
+{
+	SGB::Instance().BlitScreen(dest, pitch_pixels);
+}
 
 bool S9xSGBLoadROM(const char *filename)
 {

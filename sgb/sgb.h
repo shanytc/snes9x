@@ -83,6 +83,10 @@ public:
 	void  SetClockMultiplier(float m);
 	float GetClockMultiplier() const;
 
+	// Internal — routes a decoded SGB command into the palette/attribute
+	// state. Exposed because the packet callback trampoline needs it.
+	void  OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len);
+
 private:
 	struct Impl;
 	Impl *impl_;

@@ -198,6 +198,9 @@
     <ClInclude Include="..\sgb\sgb_packet.h">
       <Filter>SGB</Filter>
     </ClInclude>
+    <ClInclude Include="..\sgb\sgb_state.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
     <ClInclude Include="..\sgb\gb_cpu.h">
       <Filter>SGB</Filter>
     </ClInclude>
@@ -696,6 +699,9 @@
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\sgb_packet.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\sgb_state.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\gb_cpu.cpp">

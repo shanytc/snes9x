@@ -14,6 +14,7 @@
 #include "gb_joypad.h"
 #include "gb_cart.h"
 #include "sgb_packet.h"
+#include "sgb_state.h"
 
 #include <cstring>
 
@@ -29,12 +30,20 @@ struct Emulator::Impl
 	Joypad      joypad;
 	Cart        cart;
 	PacketState sgb_pkt;
+	SgbState    sgb_state;
 
 	RunMode     run_mode  = RunMode::SGB;
 	FrameBuffer fb{};
 	bool        has_rom   = false;
 	float       clock_mul = 1.0f;
 };
+
+// File-local trampoline — lets the process-global SgbCommandCallback
+// forward into the singleton Emulator's Impl.
+static void SgbCommandTrampoline(uint8_t cmd, const uint8_t *data, uint32_t len)
+{
+	Instance().OnSgbCommandInternal(cmd, data, len);
+}
 
 Emulator::Emulator() : impl_(new Impl) {}
 
@@ -43,6 +52,7 @@ Emulator::~Emulator() { delete impl_; }
 bool Emulator::Init()
 {
 	Reset();
+	SetSgbCommandCallback(&SgbCommandTrampoline);
 	return true;
 }
 
@@ -60,6 +70,7 @@ void Emulator::Reset()
 	TimerReset(impl_->timer);
 	JoypadReset(impl_->joypad);
 	PacketReset(impl_->sgb_pkt);
+	SgbReset(impl_->sgb_state);
 
 	impl_->mem.ppu    = &impl_->ppu;
 	impl_->mem.apu    = &impl_->apu;
@@ -141,6 +152,13 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	// on run_mode anyway so the packet state doesn't accumulate noise.
 	if (impl_->run_mode == RunMode::DMG) return;
 	PacketFeed(impl_->sgb_pkt, value);
+}
+
+void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)
+{
+	// *_TRN commands source their 4KB from GB VRAM $8000..$8FFF — our
+	// first half of Ppu::vram. Non-TRN commands ignore the pointer.
+	SgbHandleCommand(impl_->sgb_state, cmd, data, len, impl_->ppu.vram);
 }
 
 size_t Emulator::StateSize() const { return 0; }

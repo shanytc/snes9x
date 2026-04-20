@@ -39,8 +39,9 @@ struct Memory
 
 	uint8_t wram[0x2000];
 	uint8_t hram[0x7F];
-	uint8_t ie;     // 0xFFFF
-	uint8_t if_;    // 0xFF0F
+	uint8_t ie;             // 0xFFFF
+	uint8_t if_;            // 0xFF0F
+	uint8_t serial_data;    // 0xFF01 last written byte
 };
 
 uint8_t MemRead(Memory &m, uint16_t addr);
@@ -51,6 +52,13 @@ uint16_t MemRead16(Memory &m, uint16_t addr);
 void     MemWrite16(Memory &m, uint16_t addr, uint16_t value);
 
 void MemReset(Memory &m);
+
+// Callback fires each time the CPU initiates a serial transfer (write
+// 0x80/0x81 to 0xFF02). The byte passed is whatever was in 0xFF01 at
+// the moment. Used by the test harness to capture Blargg output; P6a
+// may hook it too. nullptr disables.
+using SerialByteCallback = void (*)(uint8_t byte);
+void SetSerialCallback(SerialByteCallback cb);
 
 } // namespace SGB
 

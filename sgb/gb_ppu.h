@@ -49,6 +49,10 @@ struct Ppu
 void PpuReset(Ppu &p);
 void PpuStep(Ppu &p, Memory &mem, int32_t tcycles);
 
+// Register I/O — 0xFF40 .. 0xFF4B (LCDC/STAT/SCY/SCX/LY/LYC/DMA/BGP/OBP0/OBP1/WY/WX).
+uint8_t PpuReadReg(const Ppu &p, uint16_t addr);
+void    PpuWriteReg(Ppu &p, uint16_t addr, uint8_t value);
+
 } // namespace SGB
 
 #endif

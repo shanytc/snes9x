@@ -602,6 +602,12 @@ bool S9xSGBLoadStateFromFile(const char *filename)
 	return SGB::Instance().StateLoad(buf.data(), buf.size());
 }
 
+bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path_for_sram)
+{
+	if (!data || size < 0x150) return false;
+	return SGB::Instance().LoadROM(static_cast<const uint8_t *>(data), size, path_for_sram);
+}
+
 bool S9xSGBLoadROM(const char *filename)
 {
 	if (!filename || !*filename) return false;

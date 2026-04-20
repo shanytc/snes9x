@@ -121,6 +121,11 @@ bool S9xSGBInit(void);
 void S9xSGBDeinit(void);
 void S9xSGBReset(void);
 bool S9xSGBLoadROM(const char *filename);
+
+// Load a GB ROM from an in-memory buffer. Callers that already have the
+// bytes (e.g. after snes9x's FileLoader has unzipped a .zip/.jma/.7z
+// container) use this to skip the stdio re-read.
+bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path_for_sram);
 void S9xSGBRunFrame(void);
 void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);

@@ -1341,6 +1341,24 @@ static bool S9xFilenameHasExt(const char *name, const char *ext)
     return *a == 0 && *b == 0;
 }
 
+// Detect a Game Boy ROM by content. Every licensed GB cart carries the
+// 48-byte Nintendo logo at 0x0104-0x0133 — if it's not present the real
+// HW boot ROM refuses to run the cart. Matching lets us catch .gb/.gbc
+// wrapped in .zip/.jma/.7z containers after FileLoader has unzipped.
+static bool S9xRomBytesAreGb(const uint8 *rom, int32 size)
+{
+    if (size < 0x150 || !rom) return false;
+    static const uint8 kGbNintendoLogo[48] = {
+        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+        0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+        0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+        0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
+        0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
+        0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
+    };
+    return memcmp(rom + 0x0104, kGbNintendoLogo, 48) == 0;
+}
+
 bool8 CMemory::LoadROM (const char *filename)
 {
     if(!filename || !*filename)
@@ -1387,6 +1405,26 @@ bool8 CMemory::LoadROM (const char *filename)
 
         if (!totalFileSize)
             return (FALSE);
+
+        // Container-format sniff: .zip/.jma/.7z of a GB ROM land here
+        // because FileLoader accepted the extension. If the unzipped
+        // content carries the Nintendo logo it's a GB cart — route
+        // into the SGB subsystem instead of the 65816 parser.
+        if (S9xRomBytesAreGb(ROM, totalFileSize))
+        {
+            Settings.SuperGameBoy      = TRUE;
+            Settings.GameBoyRunMode    = 1;
+            Settings.GBClockMultiplier = 1.0f;
+            if (!S9xSGBInit() ||
+                !S9xSGBLoadROMBytes(ROM, static_cast<size_t>(totalFileSize), filename))
+            {
+                Settings.SuperGameBoy = FALSE;
+                return FALSE;
+            }
+            S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+            ROMFilename = filename;
+            return TRUE;
+        }
 
         CheckForAnyPatch(filename, HeaderCount != 0, totalFileSize);
     }

@@ -311,9 +311,186 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 	                 impl_->ppu.framebuffer);
 }
 
-size_t Emulator::StateSize() const { return 0; }
-void   Emulator::StateSave(uint8_t * /*buffer*/) const {}
-bool   Emulator::StateLoad(const uint8_t * /*buffer*/, size_t /*size*/) { return false; }
+// ===================================================================
+// State serialization
+//
+// Layout:
+//   [0..3]   magic "SGB!"
+//   [4..7]   version (u32 LE)
+//   [8..11]  payload length (u32 LE)
+//   [12..]   payload fields in Visit() order
+//
+// Version 1: initial format.
+// ===================================================================
+
+namespace {
+
+constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
+constexpr uint32_t SGB_STATE_VERSION = 1;
+
+enum class IoMode : uint8_t { Size, Save, Load };
+
+struct IoCtx
+{
+	uint8_t       *wbuf;
+	const uint8_t *rbuf;
+	size_t         pos;
+	size_t         cap;
+	IoMode         mode;
+	bool           ok;
+};
+
+inline void IoBytes(IoCtx &c, void *data, size_t n)
+{
+	if (!c.ok) return;
+	if (c.mode != IoMode::Size && c.pos + n > c.cap) { c.ok = false; return; }
+	if      (c.mode == IoMode::Save) std::memcpy(c.wbuf + c.pos, data, n);
+	else if (c.mode == IoMode::Load) std::memcpy(data, c.rbuf + c.pos, n);
+	c.pos += n;
+}
+
+template <typename T>
+inline void IoField(IoCtx &c, T &v)
+{
+	IoBytes(c, &v, sizeof v);
+}
+
+void VisitState(Emulator::Impl &impl, IoCtx &c)
+{
+	// ----- CPU -----
+	IoField(c, impl.cpu.State());
+
+	// ----- Memory (skip pointer fields — they're relinked after load) -----
+	IoBytes(c, impl.mem.wram, sizeof impl.mem.wram);
+	IoBytes(c, impl.mem.hram, sizeof impl.mem.hram);
+	IoField(c, impl.mem.ie);
+	IoField(c, impl.mem.if_);
+	IoField(c, impl.mem.serial_data);
+
+	// ----- Cart MBC + SRAM (ROM is static, not serialized) -----
+	IoField(c, impl.cart.mbc);
+
+	uint32_t sram_size = static_cast<uint32_t>(impl.cart.sram.size());
+	IoField(c, sram_size);
+	if (c.mode == IoMode::Load) impl.cart.sram.resize(sram_size);
+	if (sram_size > 0) IoBytes(c, impl.cart.sram.data(), sram_size);
+
+	// ----- PPU -----
+	IoBytes(c, impl.ppu.vram, sizeof impl.ppu.vram);
+	IoBytes(c, impl.ppu.oam,  sizeof impl.ppu.oam);
+	IoField(c, impl.ppu.lcdc);
+	IoField(c, impl.ppu.stat);
+	IoField(c, impl.ppu.scy);
+	IoField(c, impl.ppu.scx);
+	IoField(c, impl.ppu.ly);
+	IoField(c, impl.ppu.lyc);
+	IoField(c, impl.ppu.bgp);
+	IoField(c, impl.ppu.obp0);
+	IoField(c, impl.ppu.obp1);
+	IoField(c, impl.ppu.wy);
+	IoField(c, impl.ppu.wx);
+	IoField(c, impl.ppu.mode);
+	IoField(c, impl.ppu.mode_clock);
+	IoField(c, impl.ppu.window_line);
+	IoField(c, impl.ppu.stat_line_high);
+	IoBytes(c, impl.ppu.framebuffer,      sizeof impl.ppu.framebuffer);
+	IoBytes(c, impl.ppu.scanline_bg_raw,  sizeof impl.ppu.scanline_bg_raw);
+	IoField(c, impl.ppu.frame_ready);
+
+	// ----- APU channels + master regs + frame sequencer -----
+	// (sample buffer + accumulators are transient and reset on load.)
+	IoField(c, impl.apu.ch1);
+	IoField(c, impl.apu.ch2);
+	IoField(c, impl.apu.ch3);
+	IoField(c, impl.apu.ch4);
+	IoField(c, impl.apu.nr50);
+	IoField(c, impl.apu.nr51);
+	IoField(c, impl.apu.master_enabled);
+	IoField(c, impl.apu.frame_seq_timer);
+	IoField(c, impl.apu.frame_seq_step);
+
+	// ----- Timer / Joypad -----
+	IoField(c, impl.timer);
+	IoField(c, impl.joypad);
+
+	// ----- SGB command layer -----
+	IoField(c, impl.sgb_pkt);
+	IoField(c, impl.sgb_state);
+
+	// ----- Emulator-level config -----
+	IoField(c, impl.run_mode);
+	IoField(c, impl.clock_mul);
+}
+
+} // anonymous
+
+size_t Emulator::StateSize() const
+{
+	IoCtx c{nullptr, nullptr, 0, 0, IoMode::Size, true};
+	VisitState(const_cast<Impl &>(*impl_), c);
+	// +12 for header: magic + version + payload_size.
+	return c.pos + 12;
+}
+
+void Emulator::StateSave(uint8_t *buffer) const
+{
+	if (!buffer) return;
+
+	// Compute payload size first.
+	const size_t payload = StateSize() - 12;
+
+	uint32_t magic   = SGB_STATE_MAGIC;
+	uint32_t version = SGB_STATE_VERSION;
+	uint32_t plen    = static_cast<uint32_t>(payload);
+	std::memcpy(buffer + 0, &magic,   4);
+	std::memcpy(buffer + 4, &version, 4);
+	std::memcpy(buffer + 8, &plen,    4);
+
+	IoCtx c{buffer + 12, nullptr, 0, payload, IoMode::Save, true};
+	VisitState(const_cast<Impl &>(*impl_), c);
+}
+
+bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
+{
+	if (!buffer || size < 12) return false;
+
+	uint32_t magic, version, plen;
+	std::memcpy(&magic,   buffer + 0, 4);
+	std::memcpy(&version, buffer + 4, 4);
+	std::memcpy(&plen,    buffer + 8, 4);
+
+	if (magic != SGB_STATE_MAGIC)     return false;
+	if (version != SGB_STATE_VERSION) return false;  // future: accept v<=current
+	if (size < 12 + plen)             return false;
+
+	IoCtx c{nullptr, buffer + 12, 0, plen, IoMode::Load, true};
+	VisitState(*impl_, c);
+	if (!c.ok) return false;
+
+	// Relink Memory's pointer fields — they were serialized as garbage.
+	impl_->mem.ppu    = &impl_->ppu;
+	impl_->mem.apu    = &impl_->apu;
+	impl_->mem.timer  = &impl_->timer;
+	impl_->mem.joypad = &impl_->joypad;
+	impl_->mem.cart   = &impl_->cart;
+
+	// Reset transient audio output state — the ring buffer content is
+	// not serialized because it's sub-frame scratch.
+	impl_->apu.sample_accum_l   = 0;
+	impl_->apu.sample_accum_r   = 0;
+	impl_->apu.sample_accum_cnt = 0;
+	impl_->apu.sample_head      = 0;
+	impl_->apu.sample_tail      = 0;
+	impl_->apu.sample_timer     = impl_->apu.cycles_per_sample;
+
+	// Re-point the exposed FrameBuffer at the (now-restored) PPU fb.
+	impl_->fb.pixels = impl_->ppu.framebuffer;
+	impl_->fb.width  = GB_SCREEN_WIDTH;
+	impl_->fb.height = GB_SCREEN_HEIGHT;
+	impl_->fb.pitch  = GB_SCREEN_WIDTH;
+
+	return true;
+}
 
 void  Emulator::SetClockMultiplier(float m) { impl_->clock_mul = m; }
 float Emulator::GetClockMultiplier() const  { return impl_->clock_mul; }
@@ -374,6 +551,55 @@ void S9xSGBSetRunMode(uint8_t mode)
 void S9xSGBSetClockMultiplier(float mul)
 {
 	SGB::Instance().SetClockMultiplier(mul);
+}
+
+size_t S9xSGBStateSize(void)
+{
+	return SGB::Instance().StateSize();
+}
+
+void S9xSGBStateSave(uint8_t *buffer)
+{
+	SGB::Instance().StateSave(buffer);
+}
+
+bool S9xSGBStateLoad(const uint8_t *buffer, size_t size)
+{
+	return SGB::Instance().StateLoad(buffer, size);
+}
+
+bool S9xSGBSaveStateToFile(const char *filename)
+{
+	if (!filename) return false;
+
+	const size_t need = SGB::Instance().StateSize();
+	std::vector<uint8_t> buf(need);
+	SGB::Instance().StateSave(buf.data());
+
+	std::FILE *f = std::fopen(filename, "wb");
+	if (!f) return false;
+	const size_t w = std::fwrite(buf.data(), 1, need, f);
+	std::fclose(f);
+	return w == need;
+}
+
+bool S9xSGBLoadStateFromFile(const char *filename)
+{
+	if (!filename) return false;
+
+	std::FILE *f = std::fopen(filename, "rb");
+	if (!f) return false;
+	if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return false; }
+	const long sz = std::ftell(f);
+	if (sz <= 12 || sz > 4 * 1024 * 1024) { std::fclose(f); return false; }
+	std::fseek(f, 0, SEEK_SET);
+
+	std::vector<uint8_t> buf(static_cast<size_t>(sz));
+	const size_t got = std::fread(buf.data(), 1, static_cast<size_t>(sz), f);
+	std::fclose(f);
+	if (got != static_cast<size_t>(sz)) return false;
+
+	return SGB::Instance().StateLoad(buf.data(), buf.size());
 }
 
 bool S9xSGBLoadROM(const char *filename)

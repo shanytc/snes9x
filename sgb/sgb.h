@@ -102,8 +102,12 @@ public:
 	// for a tightly-packed buffer, or the SNES GFX.Screen's PPL).
 	void  BlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 
-private:
+	// Opaque implementation struct — forward-declared so file-local
+	// helpers in sgb.cpp can reference the full type. External code
+	// has no way to obtain one.
 	struct Impl;
+
+private:
 	Impl *impl_;
 };
 
@@ -141,5 +145,17 @@ void    S9xSGBSetAudioRate(int32_t rate_hz);
 // registers until the next Reset).
 void    S9xSGBSetRunMode(uint8_t mode /* 0=DMG, 1=SGB1, 2=SGB2 */);
 void    S9xSGBSetClockMultiplier(float mul);
+
+// Save-state bridge — snapshot.cpp branches on Settings.SuperGameBoy
+// and writes/reads the SGB state directly to/from the save file.
+// Format: 4-byte "SGB!" magic + version + payload size + opaque blob.
+size_t  S9xSGBStateSize(void);
+void    S9xSGBStateSave(uint8_t *buffer);
+bool    S9xSGBStateLoad(const uint8_t *buffer, size_t size);
+
+// Convenience file I/O wrappers — write the full blob to `filename`,
+// or read it back. Return false on I/O error or format mismatch.
+bool    S9xSGBSaveStateToFile(const char *filename);
+bool    S9xSGBLoadStateFromFile(const char *filename);
 
 #endif

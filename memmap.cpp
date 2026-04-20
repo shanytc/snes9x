@@ -28,6 +28,7 @@
 
 #include "memmap.h"
 #include "apu/apu.h"
+#include "cheats.h"
 #include "sgb/sgb.h"
 #include "fxemu.h"
 #include "sdd1.h"
@@ -1382,6 +1383,11 @@ bool8 CMemory::LoadROM (const char *filename)
         // audio path is configured for, so S9xMixSamples can stream
         // directly without a second resample step.
         S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+        // Wire cheat-search pointers at Memory.RAM/SRAM/FillRAM. Normally
+        // S9xReset does this via S9xInitCheatData, but we skip S9xReset
+        // in the SGB path. LoadROMPlain calls S9xStartCheatSearch right
+        // after us and crashes without these.
+        S9xInitCheatData();
         ROMFilename = filename;
         return TRUE;
     }
@@ -1422,6 +1428,10 @@ bool8 CMemory::LoadROM (const char *filename)
                 return FALSE;
             }
             S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+            // Same cheat-pointer init as the .gb/.gbc fast path —
+            // LoadROMPlain memmoves from Cheat.RAM/SRAM/FillRAM right
+            // after us, and those stay NULL without S9xInitCheatData.
+            S9xInitCheatData();
             ROMFilename = filename;
             return TRUE;
         }

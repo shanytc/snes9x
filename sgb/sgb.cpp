@@ -34,6 +34,11 @@ struct Emulator::Impl
 	PacketState sgb_pkt;
 	SgbState    sgb_state;
 
+	// 256×224 composite staging buffer — heap-resident to keep a
+	// ~112 KB allocation off the stack of whatever thread drives
+	// S9xMainLoop (snes9x's per-thread stacks aren't always large).
+	uint16_t    composite[SGB_BORDER_W * SGB_BORDER_H];
+
 	RunMode     run_mode  = RunMode::SGB;
 	FrameBuffer fb{};
 	bool        has_rom   = false;
@@ -197,9 +202,10 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	if (!impl_->has_rom || !dest) return;
 
-	// Stage border into a packed 256 × 224 buffer. Border leaves the
-	// centered 20 × 18 tile area untouched — we overwrite that next.
-	uint16_t staging[SGB_BORDER_W * SGB_BORDER_H];
+	// Stage border into our heap-resident 256 × 224 buffer. Border
+	// leaves the centered 20 × 18 tile area untouched — we overwrite
+	// that next with palette-resolved GB pixels.
+	uint16_t *const staging = impl_->composite;
 	SgbRenderBorder(impl_->sgb_state, staging);
 
 	// Pick the source pixels for the GB screen area based on MASK_EN.

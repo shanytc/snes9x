@@ -204,16 +204,18 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	const CpuState &s = impl_->cpu.State();
 	const Ppu      &p = impl_->ppu;
 	const Memory   &m = impl_->mem;
+	const Timer    &t = impl_->timer;
 	const PacketState &pkt = impl_->sgb_pkt;
 	std::snprintf(buf, cap,
-	              "PC=%04X%s LCDC=%02X LY=%u IE=%02X IF=%02X "
-	              "sgb:cmd=%u pkt=%u ill=%u",
+	              "PC=%04X%s IME=%d LCDC=%02X LY=%u IE=%02X IF=%02X "
+	              "TIMA=%02X TAC=%02X DIV=%02X cmd=%u",
 	              s.r.pc,
-	              s.halted ? " H" : (s.stopped ? " S" : ""),
+	              s.halted ? "H" : (s.stopped ? "S" : ""),
+	              s.ime ? 1 : 0,
 	              p.lcdc, p.ly, m.ie, m.if_,
-	              static_cast<unsigned>(pkt.commands_received),
-	              static_cast<unsigned>(pkt.packets_received),
-	              static_cast<unsigned>(s.illegal_ops));
+	              t.tima, t.tac,
+	              static_cast<unsigned>(t.div_counter >> 8),
+	              static_cast<unsigned>(pkt.commands_received));
 }
 
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)

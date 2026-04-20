@@ -391,6 +391,41 @@ void HandleMaskEn(SgbState &s, const uint8_t *d, const uint8_t *gb_fb)
 	s.mask_mode = mode;
 }
 
+// ------------------------------------------------------------------
+// SOUND — trigger a built-in sound effect.
+// ------------------------------------------------------------------
+// Real SGB has four SFX banks in its SPC program. We don't ship that
+// SPC image, so we just stash the command arguments for diagnostics
+// and let the SNES-side host wire up synthesized/sampled playback in
+// a later pass if they care.
+
+void HandleSound(SgbState &s, const uint8_t *d)
+{
+	s.sound_last[0] = d[1];   // sound A
+	s.sound_last[1] = d[2];   // sound B
+	s.sound_last[2] = d[3];   // volume / ctrl
+	s.sound_last[3] = d[4];   // mixer selection
+	++s.sound_commands;
+}
+
+// ------------------------------------------------------------------
+// MLT_REQ — enable multi-controller mode for 2 or 4 players.
+// ------------------------------------------------------------------
+//   [1] bits 0-1:  0 = 1 player, 1 = 2 players, 3 = 4 players
+
+void HandleMltReq(SgbState &s, const uint8_t *d)
+{
+	const uint8_t mlt = static_cast<uint8_t>(d[1] & 0x03);
+	switch (mlt)
+	{
+		case 1:  s.mlt_players = 2; break;
+		case 3:  s.mlt_players = 4; break;
+		default: s.mlt_players = 1; break;
+	}
+	if (s.mlt_current_player >= s.mlt_players)
+		s.mlt_current_player = 0;
+}
+
 } // anonymous
 
 // ===================================================================
@@ -408,12 +443,17 @@ void SgbReset(SgbState &s)
 	std::memset(s.attr_files,       0, sizeof s.attr_files);
 	std::memset(s.frozen_frame,     0, sizeof s.frozen_frame);
 	std::memset(&s.border,          0, sizeof s.border);
+	std::memset(s.sound_last,       0, sizeof s.sound_last);
 	s.system_palettes_loaded = false;
 	s.attr_files_loaded      = false;
 	s.frozen_frame_valid     = false;
 	s.mask_mode              = SGB_MASK_CANCEL;
+	s.mlt_players            = 1;
+	s.mlt_current_player     = 0;
 	s.palette_writes         = 0;
 	s.attr_writes            = 0;
+	s.sound_commands         = 0;
+	s.misc_commands          = 0;
 	s.last_cmd               = 0xFF;
 }
 
@@ -441,9 +481,25 @@ void SgbHandleCommand(SgbState &s, uint8_t cmd, const uint8_t *data,
 		case 0x15: HandleAttrTrn(s, vram_4kb); break;          // ATTR_TRN
 		case 0x16: HandleAttrSet(s, data); break;              // ATTR_SET
 		case 0x17: HandleMaskEn(s, data, gb_fb_160x144); break;// MASK_EN
-		// P6d: SOUND (0x08), SOU_TRN (0x09), MLT_REQ (0x11), DATA_SND (0x0F),
-		//      DATA_TRN (0x10), JUMP (0x12), OBJ_TRN (0x18), ATRC_EN (0x0C),
-		//      TEST_EN (0x0D), ICON_EN (0x0E)
+		case 0x08: HandleSound(s, data); break;                // SOUND
+		case 0x11: HandleMltReq(s, data); break;               // MLT_REQ
+		// Stubbed — swallowed so games don't crash. SOU_TRN would need an
+		// SPC program image the real SGB ships with; DATA_* would need
+		// access to host SNES WRAM; JUMP is a debugger escape with no
+		// meaningful analog; ATRC/TEST/ICON_EN are config bits the SGB
+		// BIOS reads. OBJ_TRN uploads border-layer sprites we don't yet
+		// render.
+		case 0x09:   // SOU_TRN
+		case 0x0C:   // ATRC_EN
+		case 0x0D:   // TEST_EN
+		case 0x0E:   // ICON_EN
+		case 0x0F:   // DATA_SND
+		case 0x10:   // DATA_TRN
+		case 0x12:   // JUMP
+		case 0x18:   // OBJ_TRN
+			++s.misc_commands;
+			break;
+
 		default: break;
 	}
 }
@@ -459,6 +515,12 @@ uint16_t SgbResolveColor(const SgbState &s, uint32_t tile_x, uint32_t tile_y,
 {
 	const uint8_t pal = SgbGetTilePalette(s, tile_x, tile_y);
 	return s.active[pal].colors[shade & 3];
+}
+
+void SgbAdvancePlayer(SgbState &s)
+{
+	if (s.mlt_players == 0) { s.mlt_current_player = 0; return; }
+	s.mlt_current_player = static_cast<uint8_t>((s.mlt_current_player + 1) % s.mlt_players);
 }
 
 void SgbRenderBorder(const SgbState &s, uint16_t *out)

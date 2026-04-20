@@ -93,9 +93,20 @@ struct SgbState
 	// SGB border state — tiles + map + palettes.
 	SgbBorder  border;
 
+	// MLT_REQ — controller multiplexing. mlt_players is 1, 2, or 4;
+	// mlt_current_player is advanced by the joypad-select cycling
+	// pattern P7 wires up. Defaults to single-player.
+	uint8_t    mlt_players;
+	uint8_t    mlt_current_player;
+
+	// Last SOUND command parameters (for diagnostics + future SFX hook).
+	uint8_t    sound_last[4];
+
 	// Diagnostics.
 	uint32_t   palette_writes;
 	uint32_t   attr_writes;
+	uint32_t   sound_commands;
+	uint32_t   misc_commands;
 	uint32_t   last_cmd;        // 0xFF = none
 };
 
@@ -123,6 +134,11 @@ uint16_t SgbResolveColor(const SgbState &s, uint32_t tile_x, uint32_t tile_y, ui
 // P7 blits the live GB framebuffer over it. When no border has been
 // uploaded, the outer frame is filled solid black.
 void     SgbRenderBorder(const SgbState &s, uint16_t *out_256x224);
+
+// Advance mlt_current_player (wraps mod mlt_players). P7 calls this
+// when it observes the joypad-select cycling pattern MLT_REQ games
+// use. Safe no-op in single-player mode.
+void     SgbAdvancePlayer(SgbState &s);
 
 } // namespace SGB
 

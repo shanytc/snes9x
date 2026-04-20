@@ -260,6 +260,96 @@ inline void AluCcf(CpuState &s)
 	s.r.f = static_cast<uint8_t>((s.r.f & (FLAG_Z | FLAG_C)) ^ FLAG_C);
 }
 
+// ------------------------------------------------------------------
+// CB-prefix ALU — used by gb_ops_cb.cpp
+// ------------------------------------------------------------------
+
+inline uint8_t AluRlc(CpuState &s, uint8_t v)
+{
+	uint8_t c = static_cast<uint8_t>((v >> 7) & 1);
+	uint8_t r = static_cast<uint8_t>((v << 1) | c);
+	SetFlags(s, r == 0, false, false, c != 0);
+	return r;
+}
+
+inline uint8_t AluRrc(CpuState &s, uint8_t v)
+{
+	uint8_t c = static_cast<uint8_t>(v & 1);
+	uint8_t r = static_cast<uint8_t>((v >> 1) | (c << 7));
+	SetFlags(s, r == 0, false, false, c != 0);
+	return r;
+}
+
+inline uint8_t AluRl(CpuState &s, uint8_t v)
+{
+	uint8_t in    = FlagC(s) ? 1 : 0;
+	uint8_t c_out = static_cast<uint8_t>((v >> 7) & 1);
+	uint8_t r     = static_cast<uint8_t>((v << 1) | in);
+	SetFlags(s, r == 0, false, false, c_out != 0);
+	return r;
+}
+
+inline uint8_t AluRr(CpuState &s, uint8_t v)
+{
+	uint8_t in    = FlagC(s) ? 1 : 0;
+	uint8_t c_out = static_cast<uint8_t>(v & 1);
+	uint8_t r     = static_cast<uint8_t>((v >> 1) | (in << 7));
+	SetFlags(s, r == 0, false, false, c_out != 0);
+	return r;
+}
+
+inline uint8_t AluSla(CpuState &s, uint8_t v)
+{
+	uint8_t c = static_cast<uint8_t>((v >> 7) & 1);
+	uint8_t r = static_cast<uint8_t>(v << 1);
+	SetFlags(s, r == 0, false, false, c != 0);
+	return r;
+}
+
+inline uint8_t AluSra(CpuState &s, uint8_t v)
+{
+	// Arithmetic right shift — bit 7 preserved (sign extension).
+	uint8_t c = static_cast<uint8_t>(v & 1);
+	uint8_t r = static_cast<uint8_t>((v >> 1) | (v & 0x80));
+	SetFlags(s, r == 0, false, false, c != 0);
+	return r;
+}
+
+inline uint8_t AluSwap(CpuState &s, uint8_t v)
+{
+	uint8_t r = static_cast<uint8_t>((v >> 4) | (v << 4));
+	SetFlags(s, r == 0, false, false, false);
+	return r;
+}
+
+inline uint8_t AluSrl(CpuState &s, uint8_t v)
+{
+	// Logical right shift — bit 7 becomes 0.
+	uint8_t c = static_cast<uint8_t>(v & 1);
+	uint8_t r = static_cast<uint8_t>(v >> 1);
+	SetFlags(s, r == 0, false, false, c != 0);
+	return r;
+}
+
+inline void AluBit(CpuState &s, uint8_t bit, uint8_t v)
+{
+	// Z = !(v & (1<<bit)), N = 0, H = 1, C preserved.
+	s.r.f = static_cast<uint8_t>(
+		((v & (1 << bit)) ? 0 : FLAG_Z) |
+		FLAG_H |
+		(s.r.f & FLAG_C));
+}
+
+inline uint8_t AluRes(uint8_t bit, uint8_t v)
+{
+	return static_cast<uint8_t>(v & ~(1 << bit));
+}
+
+inline uint8_t AluSet(uint8_t bit, uint8_t v)
+{
+	return static_cast<uint8_t>(v | (1 << bit));
+}
+
 } // namespace SGB
 
 #endif

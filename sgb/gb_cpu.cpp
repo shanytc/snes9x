@@ -36,13 +36,9 @@ void Cpu::Reset()
 
 void Cpu::Step(Memory &mem)
 {
-	// EI has a one-instruction delay: the IME bit becomes true *after* the
-	// instruction that follows EI completes. Latch the pending state before
-	// the instruction runs so EI doesn't accidentally promote itself.
-	const bool promote_ime_after = state_.ime_pending;
-
-	// While halted, tick 4 T-cycles per poll and wait for any pending IRQ
-	// to lift us back out. Actual IRQ dispatch happens in ServiceInterrupts.
+	// Halt wake-up: any pending IRQ (even with IME=0) clears the halt flag.
+	// When IME is also set, ServiceInterrupts will dispatch to the vector
+	// below; when IME=0 we just resume execution from PC normally.
 	if (state_.halted)
 	{
 		const uint8_t pending = mem.ie & mem.if_ & IRQ_ALL;
@@ -55,12 +51,21 @@ void Cpu::Step(Memory &mem)
 		}
 	}
 
+	// An IRQ takes precedence over the next instruction when IME is set.
+	if (ServiceInterrupts(mem) > 0)
+		return;
+
 	// STOP (0x10) behaves like HALT for now; P5 wires wake-up on joypad.
 	if (state_.stopped)
 	{
 		state_.t_cycles += 4;
 		return;
 	}
+
+	// EI has a one-instruction delay: the IME bit becomes true *after* the
+	// instruction that follows EI completes. Latch the pending state before
+	// the instruction runs so EI doesn't accidentally promote itself.
+	const bool promote_ime_after = state_.ime_pending;
 
 	const uint16_t pc_at_fetch = state_.r.pc;
 	const uint8_t  op          = Fetch8(state_, mem);
@@ -85,10 +90,34 @@ void Cpu::Step(Memory &mem)
 	}
 }
 
-int Cpu::ServiceInterrupts(Memory & /*mem*/)
+int Cpu::ServiceInterrupts(Memory &mem)
 {
-	// P1c implements the full 20-T-cycle dispatch (push PC, jump to vector).
-	return 0;
+	if (!state_.ime)
+		return 0;
+
+	const uint8_t pending = mem.ie & mem.if_ & IRQ_ALL;
+	if (!pending)
+		return 0;
+
+	// Priority order matches bit order: VBlank(0) > LCDSTAT(1) > Timer(2)
+	// > Serial(3) > Joypad(4). Service the lowest set bit first.
+	uint8_t bit = 0;
+	while (!(pending & (1u << bit)))
+		++bit;
+	const uint16_t vector = static_cast<uint16_t>(0x40 + bit * 8);
+
+	// Acknowledge: clear IF bit, disable IME, unhalt.
+	mem.if_       = static_cast<uint8_t>(mem.if_ & ~(1u << bit));
+	state_.ime    = false;
+	state_.halted = false;
+
+	// Push PC, then jump to vector.
+	Push16(state_, mem, state_.r.pc);
+	state_.r.pc = vector;
+
+	// Dispatch is 5 M-cycles = 20 T-cycles per Pan Docs.
+	state_.t_cycles += 20;
+	return 20;
 }
 
 } // namespace SGB

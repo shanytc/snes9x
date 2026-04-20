@@ -12,6 +12,7 @@
 #include "../snapshot.h"
 #include "../display.h"
 #include "resampler.h"
+#include "../sgb/sgb.h"
 
 #include "bapu/snes/snes.hpp"
 
@@ -70,6 +71,21 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
 {
     int16 *out = (int16 *)dest;
 
+    // SGB mode — route the GB APU's samples into the host buffer,
+    // zero-fill any shortfall so downstream audio stays clocked.
+    if (Settings.SuperGameBoy)
+    {
+        if (Settings.Mute)
+        {
+            memset(out, 0, sample_count << 1);
+            return true;
+        }
+        const int32_t got = S9xSGBDrainSamples(out, sample_count);
+        if (got < sample_count)
+            memset(out + got, 0, (sample_count - got) << 1);
+        return true;
+    }
+
     if (Settings.Mute)
     {
         memset(out, 0, sample_count << 1);
@@ -110,6 +126,9 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
 
 int S9xGetSampleCount(void)
 {
+	if (Settings.SuperGameBoy)
+		return S9xSGBGetSampleCount();
+
 	int avail = spc::resampler.avail();
 	if (Settings.MSU1) // return minimum available samples, otherwise we can run into the assert above due to partial sample generation in msu1
 		avail = Resampler::min(avail, msu::resampler.avail());

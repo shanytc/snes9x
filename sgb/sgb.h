@@ -64,9 +64,19 @@ public:
 
 	const FrameBuffer &GetFrameBuffer() const;
 
-	// Consume pending audio samples. Returns the count written.
+	// Consume pending audio samples. Returns the count written
+	// (stereo frames — each frame stores L, R into out[2*i], out[2*i+1]).
 	int32_t DrainAudio(int16_t *out, int32_t max_samples);
 	int32_t GetAudioSampleRate() const;
+
+	// Count of int16 values (NOT stereo frames) currently ready in the
+	// ring buffer. Matches the convention S9xGetSampleCount uses —
+	// useful when driving snes9x's host audio pull path.
+	int32_t GetAudioSamplesAvailable() const;
+
+	// Configure the APU's downsample target in Hz. Takes effect on the
+	// next Reset(), or immediately for the next sample emitted.
+	void    SetAudioRate(int32_t rate_hz);
 
 	// Mapped from a SNES joypad bitmask — see sgb.cpp for the mapping table.
 	void SetJoypad(uint16_t snes_pad_mask);
@@ -116,5 +126,12 @@ bool S9xSGBIsActive(void);
 // 256 × 224 BGR555 buffer. `pitch_pixels` is the stride in uint16_t
 // units. Call after S9xSGBRunFrame.
 void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
+
+// Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
+// contract. `count_int16s` is the number of int16 samples (stereo frame
+// × 2), returning the number actually drained.
+int32_t S9xSGBGetSampleCount(void);
+int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s);
+void    S9xSGBSetAudioRate(int32_t rate_hz);
 
 #endif

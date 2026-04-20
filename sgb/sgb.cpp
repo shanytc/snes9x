@@ -229,6 +229,22 @@ int32_t Emulator::GetAudioSampleRate() const
 	return impl_->apu.output_rate;
 }
 
+int32_t Emulator::GetAudioSamplesAvailable() const
+{
+	const uint32_t head = impl_->apu.sample_head;
+	const uint32_t tail = impl_->apu.sample_tail;
+	const uint32_t frames = (head >= tail)
+		? (head - tail)
+		: (APU_SAMPLE_BUF_SIZE - tail + head);
+	// Each frame is one stereo pair = 2 int16 values.
+	return static_cast<int32_t>(frames * 2);
+}
+
+void Emulator::SetAudioRate(int32_t rate_hz)
+{
+	ApuSetOutputRate(impl_->apu, rate_hz);
+}
+
 void Emulator::SetJoypad(uint16_t snes_pad_mask)
 {
 	// SNES->GB button mapping. B/Y map to A/B (SNES has extra shoulders & face buttons).
@@ -290,6 +306,24 @@ void S9xSGBOnJoyserWrite(uint8_t v) { SGB::Instance().OnJoyserWrite(v); }
 void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	SGB::Instance().BlitScreen(dest, pitch_pixels);
+}
+
+int32_t S9xSGBGetSampleCount(void)
+{
+	return SGB::Instance().GetAudioSamplesAvailable();
+}
+
+int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s)
+{
+	if (!dest || count_int16s <= 0) return 0;
+	const int32_t frames = count_int16s / 2;
+	const int32_t got    = SGB::Instance().DrainAudio(dest, frames);
+	return got * 2;
+}
+
+void S9xSGBSetAudioRate(int32_t rate_hz)
+{
+	SGB::Instance().SetAudioRate(rate_hz);
 }
 
 bool S9xSGBLoadROM(const char *filename)

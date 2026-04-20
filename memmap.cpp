@@ -1360,6 +1360,10 @@ bool8 CMemory::LoadROM (const char *filename)
             Settings.SuperGameBoy = FALSE;
             return FALSE;
         }
+        // Match the GB APU's output rate to whatever snes9x's host
+        // audio path is configured for, so S9xMixSamples can stream
+        // directly without a second resample step.
+        S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
         ROMFilename = filename;
         return TRUE;
     }

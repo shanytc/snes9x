@@ -11,6 +11,8 @@
 
 namespace SGB {
 
+struct Memory;
+
 // GB joypad is a 4-bit active-low matrix at 0xFF00, selected by bits 4/5.
 //   bit 4 = 0 selects direction keys (Right, Left, Up, Down)
 //   bit 5 = 0 selects buttons          (A, B, Select, Start)
@@ -18,9 +20,10 @@ namespace SGB {
 // handled in sgb_packet.cpp, not here.
 struct Joypad
 {
-	uint8_t select = 0x30;   // upper nibble — P14/P15 select lines
-	uint8_t dpad   = 0x0F;   // low nibble, active-low — 1 = released
-	uint8_t btns   = 0x0F;
+	uint8_t select    = 0x30;   // upper nibble — P14/P15 select lines
+	uint8_t dpad      = 0x0F;   // low nibble, active-low — 1 = released
+	uint8_t btns      = 0x0F;
+	uint8_t prev_mask = 0;      // last GB_* mask — used for IRQ edge detection
 };
 
 enum : uint8_t
@@ -36,7 +39,10 @@ enum : uint8_t
 };
 
 void JoypadReset(Joypad &j);
-void JoypadSet(Joypad &j, uint8_t mask);  // mask uses GB_* flags; 1 = pressed
+
+// Apply a new pressed-button mask. Raises IRQ_JOYPAD in mem.if_ for any
+// button that transitioned released → pressed since the previous call.
+void    JoypadSet(Joypad &j, Memory &mem, uint8_t mask);
 uint8_t JoypadRead(const Joypad &j);
 void    JoypadWrite(Joypad &j, uint8_t value);
 

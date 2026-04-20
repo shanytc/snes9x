@@ -24,6 +24,7 @@ struct Timer
 	uint8_t  tma  = 0;
 	uint8_t  tac  = 0;
 	bool     tima_overflow_pending = false;  // 4-T-cycle delay before TMA reload
+	int8_t   reload_delay = 0;               // T-cycles remaining until reload fires
 };
 
 void TimerReset(Timer &t);

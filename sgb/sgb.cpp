@@ -128,7 +128,7 @@ void Emulator::SetJoypad(uint16_t snes_pad_mask)
 	if (snes_pad_mask & (1 << 10)) gb |= GB_DOWN;
 	if (snes_pad_mask & (1 <<  9)) gb |= GB_LEFT;
 	if (snes_pad_mask & (1 <<  8)) gb |= GB_RIGHT;
-	JoypadSet(impl_->joypad, gb);
+	JoypadSet(impl_->joypad, impl_->mem, gb);
 }
 
 void Emulator::OnJoyserWrite(uint8_t /*value*/)

@@ -51,16 +51,23 @@ void Cpu::Step(Memory &mem)
 		}
 	}
 
+	// STOP wakes only on a joypad IRQ being raised (Pan Docs). Unlike
+	// HALT, it does NOT wake on VBlank/Timer/Serial/LCDSTAT, and a
+	// stopped CPU doesn't service regular interrupts either.
+	if (state_.stopped)
+	{
+		if (mem.if_ & IRQ_JOYPAD)
+			state_.stopped = false;
+		else
+		{
+			state_.t_cycles += 4;
+			return;
+		}
+	}
+
 	// An IRQ takes precedence over the next instruction when IME is set.
 	if (ServiceInterrupts(mem) > 0)
 		return;
-
-	// STOP (0x10) behaves like HALT for now; P5 wires wake-up on joypad.
-	if (state_.stopped)
-	{
-		state_.t_cycles += 4;
-		return;
-	}
 
 	// EI has a one-instruction delay: the IME bit becomes true *after* the
 	// instruction that follows EI completes. Latch the pending state before

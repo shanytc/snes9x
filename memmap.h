@@ -111,6 +111,9 @@ struct CMemory
 	uint32	FileLoader (uint8 *, const char *, uint32);
     bool8   LoadROMMem (const uint8 *, uint32, const char* optional_rom_filename = NULL);
 	bool8	LoadROM (const char *);
+	bool8	LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path);
+	bool8	LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
+	                                  const char *gb_path, const char *bios_path);
     bool8	LoadROMInt (int32);
     bool8   LoadMultiCartMem (const uint8 *, uint32, const uint8 *, uint32, const uint8 *, uint32);
 	bool8	LoadMultiCart (const char *, const char *);

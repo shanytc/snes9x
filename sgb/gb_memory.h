@@ -43,6 +43,13 @@ struct Memory
 	uint8_t if_;            // 0xFF0F
 	uint8_t serial_data;    // 0xFF01 last written byte
 	uint8_t serial_control; // 0xFF02 last written; bit 7 stays set on external-clock waits
+
+	// GB boot ROM (256 bytes). Overlays cart ROM at 0x0000-0x00FF while
+	// boot_rom_enabled is true; cleared by the first write to 0xFF50.
+	// Populated by S9xSGBLoadBootROM in authentic BIOS mode; untouched in
+	// BIOS-less mode (boot_rom_enabled stays false, cart is visible from reset).
+	uint8_t boot_rom[0x100];
+	bool    boot_rom_enabled;
 };
 
 uint8_t MemRead(Memory &m, uint16_t addr);

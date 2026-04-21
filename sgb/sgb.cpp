@@ -22,6 +22,66 @@
 
 namespace SGB {
 
+// Embedded SGB1 / SGB2 GB-side boot ROMs. These are the authentic boot ROMs
+// that scroll the Nintendo logo AND produce the 5-packet header handshake
+// ($F1/$F3/$F5/$F7/$F9 command bytes + cart header bytes) that the SGB BIOS
+// on the SNES side waits for to unblock its splash screen.
+//
+// Source: LIJI32/SameBoy (https://github.com/LIJI32/SameBoy), MIT license.
+// Redistributed via Mesen2 (https://github.com/SourMesen/Mesen2 —
+// Core/Gameboy/GbBootRom.h), also MIT, and tweaked with a short delay
+// loop at the handoff so Tetris DX's SGB border doesn't get skipped.
+// Preserving those redistributions here under the same terms.
+static const uint8_t kSgbBootRom[256] = {
+    0x31, 0xFE, 0xFF, 0x21, 0x00, 0x80, 0x22, 0xCB, 0x6C, 0x28, 0xFB, 0x3E,
+    0x80, 0xE0, 0x26, 0xE0, 0x11, 0x3E, 0xF3, 0xE0, 0x12, 0xE0, 0x25, 0x3E,
+    0x77, 0xE0, 0x24, 0x3E, 0x00, 0xE0, 0x47, 0x11, 0x04, 0x01, 0x21, 0x10,
+    0x80, 0x1A, 0x47, 0xCD, 0xC9, 0x00, 0xCD, 0xC9, 0x00, 0x13, 0x7B, 0xEE,
+    0x34, 0x20, 0xF2, 0x11, 0xEA, 0x00, 0x0E, 0x08, 0x1A, 0x13, 0x22, 0x23,
+    0x0D, 0x20, 0xF9, 0x3E, 0x19, 0xEA, 0x10, 0x99, 0x21, 0x2F, 0x99, 0x0E,
+    0x0C, 0x3D, 0x28, 0x08, 0x32, 0x0D, 0x20, 0xF9, 0x2E, 0x0F, 0x18, 0xF5,
+    0x3E, 0x91, 0xE0, 0x40, 0x3E, 0xF1, 0xE0, 0x80, 0x21, 0x04, 0x01, 0xAF,
+    0x4F, 0xAF, 0xE2, 0x3E, 0x30, 0xE2, 0xF0, 0x80, 0xCD, 0xB7, 0x00, 0xE5,
+    0x06, 0x0E, 0x16, 0x00, 0xCD, 0xAD, 0x00, 0x82, 0x57, 0x05, 0x20, 0xF8,
+    0xCD, 0xB7, 0x00, 0xE1, 0x06, 0x0E, 0xCD, 0xAD, 0x00, 0xCD, 0xB7, 0x00,
+    0x05, 0x20, 0xF7, 0x3E, 0x20, 0xE2, 0x3E, 0x30, 0xE2, 0xF0, 0x80, 0xC6,
+    0x02, 0xE0, 0x80, 0x3E, 0x58, 0xBD, 0x20, 0xC9, 0x0E, 0x13, 0x3E, 0xC1,
+    0xE2, 0x0C, 0x3E, 0x07, 0xE2, 0x3E, 0xFC, 0xE0, 0x47, 0x3E, 0x01, 0x21,
+    0x60, 0xC0, 0xC3, 0xF2, 0x00, 0x3E, 0x4F, 0xBD, 0x38, 0x02, 0x2A, 0xC9,
+    0x23, 0xAF, 0xC9, 0x5F, 0x16, 0x08, 0x3E, 0x10, 0xCB, 0x1B, 0x38, 0x01,
+    0x87, 0xE2, 0x3E, 0x30, 0xE2, 0x15, 0xC8, 0x18, 0xF1, 0x3E, 0x04, 0x0E,
+    0x00, 0xCB, 0x20, 0xF5, 0xCB, 0x11, 0xF1, 0xCB, 0x11, 0x3D, 0x20, 0xF5,
+    0x79, 0x22, 0x23, 0x22, 0x23, 0xC9, 0xE5, 0x21, 0x0F, 0xFF, 0xCB, 0x86,
+    0xCB, 0x46, 0x28, 0xFC, 0xE1, 0xC9, 0x3C, 0x42, 0xB9, 0xA5, 0xB9, 0xA5,
+    0x42, 0x3C, 0x16, 0xE1, 0x1E, 0xAA, 0x1B, 0x14, 0x15, 0x20, 0xFB, 0x5A,
+    0xEE, 0x00, 0xE0, 0x50
+};
+
+static const uint8_t kSgb2BootRom[256] = {
+    0x31, 0xFE, 0xFF, 0x21, 0x00, 0x80, 0x22, 0xCB, 0x6C, 0x28, 0xFB, 0x3E,
+    0x80, 0xE0, 0x26, 0xE0, 0x11, 0x3E, 0xF3, 0xE0, 0x12, 0xE0, 0x25, 0x3E,
+    0x77, 0xE0, 0x24, 0x3E, 0x00, 0xE0, 0x47, 0x11, 0x04, 0x01, 0x21, 0x10,
+    0x80, 0x1A, 0x47, 0xCD, 0xC9, 0x00, 0xCD, 0xC9, 0x00, 0x13, 0x7B, 0xEE,
+    0x34, 0x20, 0xF2, 0x11, 0xEA, 0x00, 0x0E, 0x08, 0x1A, 0x13, 0x22, 0x23,
+    0x0D, 0x20, 0xF9, 0x3E, 0x19, 0xEA, 0x10, 0x99, 0x21, 0x2F, 0x99, 0x0E,
+    0x0C, 0x3D, 0x28, 0x08, 0x32, 0x0D, 0x20, 0xF9, 0x2E, 0x0F, 0x18, 0xF5,
+    0x3E, 0x91, 0xE0, 0x40, 0x3E, 0xF1, 0xE0, 0x80, 0x21, 0x04, 0x01, 0xAF,
+    0x4F, 0xAF, 0xE2, 0x3E, 0x30, 0xE2, 0xF0, 0x80, 0xCD, 0xB7, 0x00, 0xE5,
+    0x06, 0x0E, 0x16, 0x00, 0xCD, 0xAD, 0x00, 0x82, 0x57, 0x05, 0x20, 0xF8,
+    0xCD, 0xB7, 0x00, 0xE1, 0x06, 0x0E, 0xCD, 0xAD, 0x00, 0xCD, 0xB7, 0x00,
+    0x05, 0x20, 0xF7, 0x3E, 0x20, 0xE2, 0x3E, 0x30, 0xE2, 0xF0, 0x80, 0xC6,
+    0x02, 0xE0, 0x80, 0x3E, 0x58, 0xBD, 0x20, 0xC9, 0x0E, 0x13, 0x3E, 0xC1,
+    0xE2, 0x0C, 0x3E, 0x07, 0xE2, 0x3E, 0xFC, 0xE0, 0x47, 0x3E, 0xFF, 0x21,
+    0x60, 0xC0, 0xC3, 0xF2, 0x00, 0x3E, 0x4F, 0xBD, 0x38, 0x02, 0x2A, 0xC9,
+    0x23, 0xAF, 0xC9, 0x5F, 0x16, 0x08, 0x3E, 0x10, 0xCB, 0x1B, 0x38, 0x01,
+    0x87, 0xE2, 0x3E, 0x30, 0xE2, 0x15, 0xC8, 0x18, 0xF1, 0x3E, 0x04, 0x0E,
+    0x00, 0xCB, 0x20, 0xF5, 0xCB, 0x11, 0xF1, 0xCB, 0x11, 0x3D, 0x20, 0xF5,
+    0x79, 0x22, 0x23, 0x22, 0x23, 0xC9, 0xE5, 0x21, 0x0F, 0xFF, 0xCB, 0x86,
+    0xCB, 0x46, 0x28, 0xFC, 0xE1, 0xC9, 0x3C, 0x42, 0xB9, 0xA5, 0xB9, 0xA5,
+    0x42, 0x3C, 0x16, 0xE1, 0x1E, 0xAA, 0x1B, 0x14, 0x15, 0x20, 0xFB, 0x5A,
+    0xEE, 0x00, 0xE0, 0x50
+};
+
 struct Emulator::Impl
 {
 	Cpu         cpu;
@@ -43,6 +103,71 @@ struct Emulator::Impl
 	FrameBuffer fb{};
 	bool        has_rom   = false;
 	float       clock_mul = 1.0f;
+
+	// Staged GB-side boot ROM. Copied into mem.boot_rom on Reset when
+	// boot_rom_loaded is true (authentic BIOS mode only). Staging is kept
+	// separate because MemReset zeroes mem.boot_rom.
+	uint8_t     boot_rom_staging[0x100];
+	bool        boot_rom_loaded = false;
+
+	// ICD2 state — the SGB cart-chip register set exposed at 0x6000-0x7FFF
+	// on the SNES side when running under a real BIOS. Layout mirrors the
+	// community-documented SGB hardware protocol (see sgb.h for the register
+	// table; see bsnes / Mesen2 for reference implementations — their
+	// register choices match what we implement here).
+	struct Icd2
+	{
+		// $6003 — control. bit 7 = GB release, 5..4 = player count,
+		// 1..0 = clock divider select.
+		uint8_t  control;
+
+		// $6001 — LCD row bank select for the $7800 char window. Also
+		// resets the $7800 read position to 0. P2d consumes this.
+		uint8_t  lcd_row_select;
+
+		// $7800 auto-increment pointer. Populated in P2d.
+		uint16_t read_position;
+
+		// $6004-$6007 — joypad state that the GB sees when it polls
+		// $FF00. P2e will wire these to the SNES pad.
+		uint8_t  joypad[4];
+		uint8_t  input_value;   // last $FF00 write from GB (for edge detect)
+		uint8_t  input_index;   // 0..3 — current MLT_REQ player slot
+
+		// Packet assembler. GB bit-bangs SGB commands over $FF00:
+		//   $00 (P14+P15 both active) = reset/start pulse
+		//   $10 (P15 active only)     = 1-bit
+		//   $20 (P14 active only)     = 0-bit
+		//   $30 (both inactive)       = clock-high / idle
+		// We shift bits into bit_accumulator LSB-first, pack into
+		// packet_data[] every 8 bits, then flag packet_ready after 16
+		// bytes. Single-slot FIFO — BIOS must drain $7000-$700F before
+		// the next packet completes.
+		uint8_t  packet_data[16];
+		uint16_t bit_accumulator;
+		uint8_t  packet_bit;    // 0..7
+		uint8_t  packet_byte;   // 0..16
+		bool     in_packet;
+		bool     packet_ready;
+
+		// P2c diagnostic counters — help verify packet flow by OSD.
+		uint32_t packets_received;   // completed 16-byte packets
+		uint32_t fifo_reads;         // $7000-$700F reads
+		uint32_t ctrl_writes;        // $6003 writes
+		uint32_t row_writes;         // $6001 writes
+		uint32_t f1_packets;         // packets whose first byte == $F1 (boot ROM handshake)
+		uint8_t  last_cmd_ids[8];    // ring buffer of last 8 packet command IDs (byte0 >> 3)
+		uint8_t  last_cmd_ids_len;   // 0..8
+
+		// Synthesized boot-ROM handshake. Most GB boot ROM dumps are plain
+		// DMG — they scroll the Nintendo logo and disable themselves but
+		// do NOT send the 5-packet SGB handshake the BIOS requires. We
+		// synthesize them here from the cart header so BIOS mode works
+		// without needing an SGB-specific boot ROM.
+		uint8_t  synth_packets[5][16];
+		uint8_t  synth_remaining;    // packets yet to hand out (5 → 0)
+		uint8_t  drain_ptr;          // bytes read of current packet (0..15)
+	} icd2;
 };
 
 // File-local trampoline — lets the process-global SgbCommandCallback
@@ -78,6 +203,7 @@ void Emulator::Reset()
 	JoypadReset(impl_->joypad);
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
+	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
 
 	impl_->mem.ppu    = &impl_->ppu;
 	impl_->mem.apu    = &impl_->apu;
@@ -115,6 +241,96 @@ void Emulator::Reset()
 			// gb_cpu.cpp Reset() already set DMG values.
 			break;
 	}
+
+	// If a GB-side boot ROM was staged (authentic BIOS mode), overlay it
+	// at 0x0000-0x00FF and start the CPU there. The boot code will scroll
+	// the Nintendo logo, send the 5-packet SGB handshake the BIOS is
+	// waiting for, then write 0xFF50 to disable itself — at which point
+	// the cart takes over exactly as it would on real hardware.
+	if (impl_->boot_rom_loaded)
+	{
+		std::memcpy(impl_->mem.boot_rom, impl_->boot_rom_staging, sizeof impl_->mem.boot_rom);
+		impl_->mem.boot_rom_enabled = true;
+		cs.r.af = 0x0000;
+		cs.r.bc = 0x0000;
+		cs.r.de = 0x0000;
+		cs.r.hl = 0x0000;
+		cs.r.sp = 0x0000;
+		cs.r.pc = 0x0000;
+	}
+}
+
+bool Emulator::LoadBootROM(const uint8_t *data, size_t size)
+{
+	if (!data || size == 0)
+	{
+		impl_->boot_rom_loaded = false;
+		return true;
+	}
+	if (size != sizeof impl_->boot_rom_staging) return false;
+	std::memcpy(impl_->boot_rom_staging, data, size);
+	impl_->boot_rom_loaded = true;
+	return true;
+}
+
+void Emulator::PrimeBIOSHandshake()
+{
+	if (!impl_->has_rom || impl_->cart.rom.size() < 0x150) return;
+
+	Emulator::Impl::Icd2 &icd = impl_->icd2;
+	const std::vector<uint8_t> &rom = impl_->cart.rom;
+
+	// Real SGB boot ROM handshake sends 5 packets with byte 0 cycling
+	// through $F1, $F3, $F5, $F7, $F9 (the first-byte encoding of SGB
+	// "header data" commands, cmd_id $1E/$1F). Only the first packet's
+	// byte 0 is verified by the BIOS at $BE66 (must equal $F1). The
+	// subsequent 4 bytes drive the handshake counter $02C0 through the
+	// $BE75 path which doesn't content-check but the real boot ROM
+	// uses these specific values so we match for compatibility.
+	// Bytes 1..15 are successive 15-byte slices of the cart header
+	// starting at $0104 (Nintendo logo bytes → title → cart-type → etc).
+	static const uint8_t kHeaderByte0[5] = { 0xF1, 0xF3, 0xF5, 0xF7, 0xF9 };
+	for (int p = 0; p < 5; ++p)
+	{
+		icd.synth_packets[p][0] = kHeaderByte0[p];
+		for (int b = 1; b < 16; ++b)
+		{
+			const size_t off = 0x0104 + p * 15 + (b - 1);
+			icd.synth_packets[p][b] = (off < rom.size()) ? rom[off] : 0x00;
+		}
+	}
+
+	// Populate the synth queue but DO NOT stage into the FIFO yet. The
+	// BIOS's splash-animation code on the SNES side might drain pending
+	// packets via its own paths before it reaches the handshake wait at
+	// $BE3C. Staging too early means our packets get eaten before the
+	// handshake counter ever increments. Wait for the BIOS to release
+	// the GB (write $6003 bit 7) — that's the real-hardware signal that
+	// the BIOS is ready to see handshake packets.
+	icd.synth_remaining = 5;     // 5 packets queued, none staged yet
+	icd.drain_ptr       = 0;
+}
+
+static void IcdStageNextSynth(Emulator::Impl::Icd2 &icd)
+{
+	if (icd.synth_remaining == 0) return;
+	const uint8_t next_idx = static_cast<uint8_t>(5 - icd.synth_remaining);
+	std::memcpy(icd.packet_data, icd.synth_packets[next_idx], 16);
+	icd.synth_remaining--;
+	icd.packet_ready = true;
+	icd.drain_ptr    = 0;
+	icd.packets_received++;
+	const uint8_t byte0  = icd.packet_data[0];
+	const uint8_t cmd_id = static_cast<uint8_t>(byte0 >> 3);
+	if (byte0 == 0xF1) icd.f1_packets++;
+	if (icd.last_cmd_ids_len < 8)
+		icd.last_cmd_ids[icd.last_cmd_ids_len++] = cmd_id;
+	else
+	{
+		for (int i = 0; i < 7; ++i)
+			icd.last_cmd_ids[i] = icd.last_cmd_ids[i + 1];
+		icd.last_cmd_ids[7] = cmd_id;
+	}
 }
 
 bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
@@ -131,6 +347,9 @@ void Emulator::UnloadROM()
 	if (impl_->has_rom) CartSaveBattery(impl_->cart);
 	CartUnload(impl_->cart);
 	impl_->has_rom = false;
+	// Drop any staged boot ROM so a subsequent BIOS-less load starts at
+	// $0100 with the normal post-boot register state.
+	impl_->boot_rom_loaded = false;
 }
 
 bool Emulator::HasROM() const { return impl_->has_rom; }
@@ -202,12 +421,134 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 {
 	if (!buf || cap == 0) return;
 	const CpuState &s = impl_->cpu.State();
+	const Emulator::Impl::Icd2 &icd = impl_->icd2;
+	char cmds[64] = {0};
+	char *p = cmds;
+	for (unsigned i = 0; i < icd.last_cmd_ids_len && p < cmds + sizeof cmds - 4; ++i)
+		p += std::snprintf(p, sizeof cmds - (p - cmds), "%02X ", icd.last_cmd_ids[i]);
 	std::snprintf(buf, cap,
-	              "SGB PC=%04X SP=%04X A=%02X%s T=%lld ill=%u",
-	              s.r.pc, s.r.sp, s.r.a,
-	              s.halted ? " HALT" : (s.stopped ? " STOP" : ""),
-	              static_cast<long long>(s.t_cycles),
-	              static_cast<unsigned>(s.illegal_ops));
+	              "GBPC=%04X ctrl=%02X pkts=%u F1=%u rd=%u rowW=%u ly=%u bootROM=%d | cmds: %s",
+	              s.r.pc, icd.control,
+	              icd.packets_received, icd.f1_packets,
+	              icd.fifo_reads, icd.row_writes,
+	              static_cast<unsigned>(impl_->ppu.ly),
+	              impl_->mem.boot_rom_enabled ? 1 : 0,
+	              cmds);
+}
+
+// ICD2 register mirrors repeat every 16 bytes across each kB window
+// ($6000-$67FF, $7000-$77FF, $7800-$7FFF). Matches real SGB hardware.
+static inline uint16_t Icd2Mask(uint16_t addr) { return addr & 0xF80F; }
+
+uint8_t Emulator::GetICD2(uint16_t addr)
+{
+	if (!impl_) return 0xFF;
+	const uint16_t a = Icd2Mask(addr);
+	Emulator::Impl::Icd2 &icd = impl_->icd2;
+
+	// $7000-$700F — packet data FIFO. Reading any byte clears packet_ready.
+	if (a >= 0x7000 && a <= 0x700F)
+	{
+		const uint8_t b = icd.packet_data[a & 0x0F];
+		icd.packet_ready = false;
+		icd.fifo_reads++;
+		icd.drain_ptr++;
+		// When the BIOS has fully drained a packet (sequentially reads
+		// all 16 bytes), stage the next synth packet if any remain. The
+		// synth queue feeds the $F1 handshake packets that a real GB
+		// boot ROM would have sent; after those are gone the real GB
+		// packet stream takes over.
+		if (icd.drain_ptr >= 16)
+		{
+			icd.drain_ptr = 0;
+			IcdStageNextSynth(icd);  // no-op if synth queue is empty
+		}
+		return b;
+	}
+
+	// $7800-$780F — GB frame char-transfer window (P2d).
+	if (a >= 0x7800 && a <= 0x780F)
+	{
+		return 0xFF;
+	}
+
+	switch (a)
+	{
+		case 0x6000:
+		{
+			// Bits 7..3 = GB LCD row within the current 8-line bank.
+			// Bits 1..0 = current 8-line bank (0..3, advances every 8 lines).
+			// BIOS polls this to confirm the GB is alive and the PPU is
+			// advancing — returning a static 0 makes it think the GB
+			// never woke up and blocks progress past the splash.
+			const uint8_t ly = impl_->ppu.ly;
+			return static_cast<uint8_t>(((ly & 0x07) << 3) | ((ly >> 3) & 0x03));
+		}
+		case 0x6002: return icd.packet_ready ? 1 : 0;
+		case 0x600F: return 0x21;           // BIOS version byte (bsnes / Mesen return $21)
+	}
+	return 0xFF;
+}
+
+void Emulator::SetICD2(uint8_t value, uint16_t addr)
+{
+	if (!impl_) return;
+	const uint16_t a = Icd2Mask(addr);
+	Emulator::Impl::Icd2 &icd = impl_->icd2;
+
+	switch (a)
+	{
+		case 0x6001: icd.lcd_row_select = value; icd.read_position = 0; icd.row_writes++; return;
+		case 0x6003:
+		{
+			const bool was_released = (icd.control & 0x80) != 0;
+			icd.control = value;
+			icd.ctrl_writes++;
+			// On the 0→1 transition of the release bit, stage the first
+			// synth handshake packet. This matches real-hardware timing:
+			// the boot ROM starts sending its packets only after the
+			// SNES side releases the GB CPU.
+			if (!was_released && (value & 0x80) && icd.synth_remaining > 0)
+				IcdStageNextSynth(icd);
+			return;
+		}
+		case 0x6004:
+		{
+			icd.joypad[0] = value;
+			// P2e minimal — mirror player 1's $6004 state into the GB joypad
+			// so the game's MLT_REQ probe sees plausible responses and so
+			// normal gameplay input works. Format: $6004 is active-low,
+			// upper nibble = d-pad (D,U,L,R = bits 7,6,5,4), lower nibble
+			// = buttons (Start,Select,B,A = bits 3,2,1,0). Multi-player
+			// cycling across $6005-$6007 will come later.
+			uint8_t mask = 0;
+			if (!(value & 0x10)) mask |= GB_RIGHT;
+			if (!(value & 0x20)) mask |= GB_LEFT;
+			if (!(value & 0x40)) mask |= GB_UP;
+			if (!(value & 0x80)) mask |= GB_DOWN;
+			if (!(value & 0x01)) mask |= GB_A;
+			if (!(value & 0x02)) mask |= GB_B;
+			if (!(value & 0x04)) mask |= GB_SELECT;
+			if (!(value & 0x08)) mask |= GB_START;
+			JoypadSet(impl_->joypad, impl_->mem, mask);
+			return;
+		}
+		case 0x6005: icd.joypad[1]      = value;                                           return;
+		case 0x6006: icd.joypad[2]      = value;                                           return;
+		case 0x6007: icd.joypad[3]      = value;                                           return;
+	}
+}
+
+bool Emulator::IsGBReleased() const
+{
+	if (!impl_) return false;
+	return (impl_->icd2.control & 0x80) != 0;
+}
+
+bool Emulator::IsHandshakePending() const
+{
+	if (!impl_) return false;
+	return impl_->icd2.synth_remaining > 0 || impl_->icd2.packet_ready;
 }
 
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
@@ -310,13 +651,91 @@ void Emulator::SetJoypad(uint16_t snes_pad_mask)
 	JoypadSet(impl_->joypad, impl_->mem, gb);
 }
 
+// ICD2 packet decoder. The GB drives $FF00 bits 4/5 in four states:
+//   $00 — reset pulse: start a new packet
+//   $10 — 1-bit
+//   $20 — 0-bit
+//   $30 — idle / clock-high
+// Bits accumulate LSB-first into a byte, then into packet_data[0..15].
+// A rising edge on P15 (bit 5) while NOT in a packet advances the MLT_REQ
+// player index (see Pan Docs SGB multi-player handshake).
+static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
+{
+	const uint8_t sel = value & 0x30;
+
+	// Player-select edge detection fires only between packets — during
+	// packet assembly these same transitions encode data bits.
+	if (!icd.in_packet)
+	{
+		const bool p15_rose = !(icd.input_value & 0x20) && (value & 0x20);
+		if (p15_rose)
+			icd.input_index = static_cast<uint8_t>((icd.input_index + 1) & 0x03);
+	}
+	icd.input_value = value;
+
+	if (sel == 0x00)
+	{
+		// Reset pulse — arm the packet assembler.
+		icd.in_packet        = true;
+		icd.packet_byte      = 0;
+		icd.packet_bit       = 0;
+		icd.bit_accumulator  = 0;
+		return;
+	}
+
+	if (!icd.in_packet) return;
+	if (sel != 0x10 && sel != 0x20) return;  // $30 (idle) doesn't latch a bit
+
+	const uint16_t bit = (sel == 0x10) ? 1u : 0u;
+	icd.bit_accumulator |= static_cast<uint16_t>(bit << icd.packet_bit);
+	icd.packet_bit++;
+
+	if (icd.packet_bit >= 8)
+	{
+		if (icd.packet_byte < 16)
+			icd.packet_data[icd.packet_byte] = static_cast<uint8_t>(icd.bit_accumulator);
+		icd.packet_byte++;
+		icd.packet_bit      = 0;
+		icd.bit_accumulator = 0;
+
+		if (icd.packet_byte >= 16)
+		{
+			icd.packet_ready     = true;
+			icd.in_packet        = false;
+			icd.packets_received++;
+
+			// Log this packet's command ID (byte 0 >> 3) into the ring
+			// so GetStatus can show what the GB has been sending.
+			const uint8_t cmd_id = static_cast<uint8_t>(icd.packet_data[0] >> 3);
+			if (icd.last_cmd_ids_len < 8)
+				icd.last_cmd_ids[icd.last_cmd_ids_len++] = cmd_id;
+			else
+			{
+				for (int i = 0; i < 7; ++i)
+					icd.last_cmd_ids[i] = icd.last_cmd_ids[i + 1];
+				icd.last_cmd_ids[7] = cmd_id;
+			}
+			// Count boot-ROM handshake packets (first byte $F1) separately.
+			if (icd.packet_data[0] == 0xF1) icd.f1_packets++;
+		}
+	}
+}
+
 void Emulator::OnJoyserWrite(uint8_t value)
 {
 	// Only meaningful when the cart declares SGB features. Feeding always
 	// is harmless (non-SGB games don't produce RESET pulses) but we gate
 	// on run_mode anyway so the packet state doesn't accumulate noise.
 	if (impl_->run_mode == RunMode::DMG) return;
+
+	// BIOS-less path — our internal packet assembler fires the dispatch
+	// callback into sgb_state.cpp (palettes / border / mask).
 	PacketFeed(impl_->sgb_pkt, value);
+
+	// BIOS-mode path — independent decoder that parks completed packets
+	// in the single-slot ICD2 FIFO. Harmless when no BIOS is running
+	// (nothing reads $7000-$700F).
+	IcdFeedJoypad(impl_->icd2, value);
 }
 
 void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)
@@ -631,6 +1050,22 @@ bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path
 	return SGB::Instance().LoadROM(static_cast<const uint8_t *>(data), size, path_for_sram);
 }
 
+bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size)
+{
+	return SGB::Instance().LoadBootROM(static_cast<const uint8_t *>(data), size);
+}
+
+bool S9xSGBLoadEmbeddedBootROM(unsigned char mode)
+{
+	const uint8_t *src = (mode == 2) ? SGB::kSgb2BootRom : SGB::kSgbBootRom;
+	return SGB::Instance().LoadBootROM(src, 256);
+}
+
+void S9xSGBPrimeBIOSHandshake(void)
+{
+	SGB::Instance().PrimeBIOSHandshake();
+}
+
 bool S9xSGBLoadROM(const char *filename)
 {
 	if (!filename || !*filename) return false;
@@ -650,4 +1085,27 @@ bool S9xSGBLoadROM(const char *filename)
 	if (got != static_cast<size_t>(sz)) return false;
 
 	return SGB::Instance().LoadROM(buf.data(), buf.size(), filename);
+}
+
+// ICD2 bridge — 0x6000-0x7FFF on the SNES side. P2b just stores writes in a
+// raw register file and returns them on read. Real semantics (reset gating,
+// packet FIFO, joypad multiplex, VRAM readback) land in P2c-P2e.
+unsigned char S9xSGBGetICD2(unsigned short addr)
+{
+	return SGB::Instance().GetICD2(addr);
+}
+
+void S9xSGBSetICD2(unsigned char value, unsigned short addr)
+{
+	SGB::Instance().SetICD2(value, addr);
+}
+
+bool S9xSGBBIOSGBIsReleased(void)
+{
+	return SGB::Instance().IsGBReleased();
+}
+
+bool S9xSGBBIOSHandshakePending(void)
+{
+	return SGB::Instance().IsHandshakePending();
 }

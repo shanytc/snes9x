@@ -16,6 +16,7 @@
 #include "seta.h"
 #include "bsx.h"
 #include "msu1.h"
+#include "sgb/sgb.h"
 
 #define addCyclesInMemoryAccess \
 	if (!CPU.InDMAorHDMA) \
@@ -146,6 +147,11 @@ inline uint8 S9xGetByte (uint32 Address)
 
 		case CMemory::MAP_BSX:
 			byte = S9xGetBSX(Address);
+			addCyclesInMemoryAccess;
+			return (byte);
+
+		case CMemory::MAP_SGB_ICD2:
+			byte = S9xSGBGetICD2(Address & 0xffff);
 			addCyclesInMemoryAccess;
 			return (byte);
 
@@ -309,6 +315,13 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			addCyclesInMemoryAccess;
 			return (word);
 
+		case CMemory::MAP_SGB_ICD2:
+			word  = S9xSGBGetICD2(Address & 0xffff);
+			addCyclesInMemoryAccess;
+			word |= S9xSGBGetICD2((Address + 1) & 0xffff) << 8;
+			addCyclesInMemoryAccess;
+			return (word);
+
 		case CMemory::MAP_NONE:
 		default:
 			word = OpenBus | (OpenBus << 8);
@@ -413,6 +426,11 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 
 		case CMemory::MAP_BSX:
 			S9xSetBSX(Byte, Address);
+			addCyclesInMemoryAccess;
+			return;
+
+		case CMemory::MAP_SGB_ICD2:
+			S9xSGBSetICD2(Byte, Address & 0xffff);
 			addCyclesInMemoryAccess;
 			return;
 
@@ -683,6 +701,24 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 				S9xSetBSX((uint8) Word, Address);
 				addCyclesInMemoryAccess;
 				S9xSetBSX(Word >> 8, Address + 1);
+				addCyclesInMemoryAccess;
+				return;
+			}
+
+		case CMemory::MAP_SGB_ICD2:
+			if (o)
+			{
+				S9xSGBSetICD2(Word >> 8, (Address + 1) & 0xffff);
+				addCyclesInMemoryAccess;
+				S9xSGBSetICD2((uint8) Word, Address & 0xffff);
+				addCyclesInMemoryAccess;
+				return;
+			}
+			else
+			{
+				S9xSGBSetICD2((uint8) Word, Address & 0xffff);
+				addCyclesInMemoryAccess;
+				S9xSGBSetICD2(Word >> 8, (Address + 1) & 0xffff);
 				addCyclesInMemoryAccess;
 				return;
 			}

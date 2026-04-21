@@ -50,6 +50,7 @@ struct CMemory
 		MAP_SETA_DSP,
 		MAP_SETA_RISC,
 		MAP_BSX,
+		MAP_SGB_ICD2,
 		MAP_NONE,
 		MAP_LAST
 	};
@@ -150,6 +151,7 @@ struct CMemory
 	void	map_WriteProtectROM (void);
 	void	Map_Initialize (void);
 	void	Map_LoROMMap (void);
+	void	Map_SGBLoROMMap (void);
 	void	Map_NoMAD1LoROMMap (void);
 	void	Map_JumboLoROMMap (void);
 	void	Map_ROM24MBSLoROMMap (void);

@@ -33,7 +33,12 @@ void MemReset(Memory &m)
 	m.if_            = 0xE1;   // bits 5-7 always set, VBlank latent
 	m.serial_data    = 0;
 	m.serial_control = 0;
-	g_dma_last       = 0xFF;
+	// Boot ROM staging — zeroed on reset. S9xSGBLoadBootROM fills these
+	// in from the user-provided sgb.boot.rom / sgb2.boot.rom before the
+	// GB CPU starts. boot_rom_enabled stays false until LoadBootROM sets it.
+	std::memset(m.boot_rom, 0, sizeof m.boot_rom);
+	m.boot_rom_enabled = false;
+	g_dma_last         = 0xFF;
 }
 
 static uint8_t ReadIO(Memory &m, uint16_t addr);
@@ -42,6 +47,14 @@ static void    DoOamDma(Memory &m, uint8_t value);
 
 uint8_t MemRead(Memory &m, uint16_t addr)
 {
+	// Boot ROM overlay — first 256 bytes mirror the DMG/SGB boot ROM
+	// while it's still enabled. The boot code writes 0x01 to 0xFF50
+	// as its final act, which clears boot_rom_enabled and exposes the
+	// cart bytes underneath.
+	if (m.boot_rom_enabled && addr < 0x0100)
+	{
+		return m.boot_rom[addr];
+	}
 	if (addr < 0x8000)
 	{
 		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr) : 0xFF;
@@ -207,6 +220,12 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			g_dma_last = value;
 			DoOamDma(m, value);
 			return;
+		case 0xFF50:
+			// Boot-ROM disable: writing any non-zero value (canonically 0x01)
+			// latches off the boot overlay so the cart bytes at 0x0000-0x00FF
+			// become visible. Real hardware: bit 0 disables, can't be re-enabled.
+			if (value != 0) m.boot_rom_enabled = false;
+			return;
 	}
 	if (addr >= 0xFF10 && addr <= 0xFF3F)
 	{
@@ -218,7 +237,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		if (m.ppu) PpuWriteReg(*m.ppu, addr, value);
 		return;
 	}
-	// Remaining I/O addresses (CGB regs, boot-ROM disable, etc.) are ignored.
+	// Remaining I/O addresses (CGB regs, etc.) are ignored.
 }
 
 // ---------------------------------------------------------------------------

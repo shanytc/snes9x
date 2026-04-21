@@ -219,6 +219,58 @@ void S9xMainLoop (void)
 			S9xSA1MainLoop();
 	}
 
+	// P2 — in BIOS mode the GB core is held in reset until the BIOS
+	// writes the release bit to the ICD2 reset register ($6003 bit 7).
+	// Matches real SGB hardware: the SNES boots first, brings up border
+	// + palette, then unblocks the GB CPU. Until then we skip stepping
+	// entirely so the SNES loop keeps its 60 fps budget.
+	if (Settings.SGB_BIOSModeActive)
+	{
+		const bool released = S9xSGBBIOSGBIsReleased();
+
+		if (released)
+		{
+			const float mul = (Settings.GBClockMultiplier > 0.0f)
+			                  ? Settings.GBClockMultiplier : 1.0f;
+			S9xSGBSetClockMultiplier(mul);
+			S9xSGBSetRunMode(Settings.GameBoyRunMode);
+			S9xSGBRunFrame();
+		}
+
+		// Periodic status OSD for P2 triage — once per second, print the
+		// ICD2 counter state so we can see whether packets are flowing.
+		// Remove once the bridge is stable.
+		static uint32_t s_tick = 0;
+		// Poll RAM every frame so we can catch transient values between
+		// OSD refreshes. Track whether $02F8 or $02C0 ever went non-zero.
+		static uint8   s_prev_f8  = 0;
+		static uint8   s_prev_c0  = 0;
+		static uint8   s_max_c0   = 0;
+		static uint32  s_f8_set_count = 0;
+		const uint8 now_f8 = Memory.RAM[0x02F8];
+		const uint8 now_c0 = Memory.RAM[0x02C0];
+		if (s_prev_f8 == 0 && now_f8 != 0) s_f8_set_count++;
+		if (now_c0 > s_max_c0) s_max_c0 = now_c0;
+		s_prev_f8 = now_f8;
+		s_prev_c0 = now_c0;
+		if ((++s_tick % 60) == 0)
+		{
+			char buf[320], msg[512];
+			S9xSGBGetStatus(buf, sizeof buf);
+			snprintf(msg, sizeof msg,
+			         "SNES PC=%02X:%04X 02F8now=%02X(set#%u) 02C0now=%02X(max=%u) | %s",
+			         static_cast<unsigned>(Registers.PB),
+			         static_cast<unsigned>(Registers.PCw),
+			         now_f8, s_f8_set_count,
+			         now_c0, s_max_c0,
+			         buf);
+			const uint32 saved = Settings.InitialInfoStringTimeout;
+			Settings.InitialInfoStringTimeout = 120;
+			S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
+			Settings.InitialInfoStringTimeout = saved;
+		}
+	}
+
 	S9xPackStatus();
 }
 

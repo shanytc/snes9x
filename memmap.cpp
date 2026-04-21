@@ -781,8 +781,10 @@ static bool8 is_SufamiTurbo_Cart (const uint8 *, uint32);
 static bool8 is_BSCart_BIOS (const uint8 *, uint32);
 static bool8 is_BSCartSA1_BIOS(const uint8 *, uint32);
 static bool8 is_GNEXT_Add_On (const uint8 *, uint32);
-static bool8 is_SGB_BIOS     (const uint8 *data, uint32 size, uint8 *out_mode /*1 or 2*/);
-static bool8 FindSGB_BIOS    (uint8 mode, const char *gb_rom_path, std::string &out_path);
+static bool8 is_SGB_BIOS      (const uint8 *data, uint32 size, uint8 *out_mode /*1 or 2*/);
+static bool8 FindSGB_BIOS     (uint8 mode, const char *gb_rom_path, std::string &out_path);
+static bool8 FindSGB_BootROM  (uint8 mode, const char *gb_rom_path, std::string &out_path);
+static bool8 LoadSGBBootROM   (const char *path, std::vector<uint8> &out_bytes);
 static uint32 caCRC32 (uint8 *, uint32, uint32 crc32 = 0xffffffff);
 static bool8 ReadUPSPatch (Stream *, long, int32 &);
 static long ReadInt (Stream *, unsigned);
@@ -1150,6 +1152,58 @@ static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out
 	return (FALSE);
 }
 
+// Locate the 256-byte GB-side boot ROM that accompanies the SGB BIOS.
+// Common names and the same directory-search order as the .sfc.
+static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &out_path)
+{
+	static const char *sgb1_names[] = {
+		"sgb.boot.rom", "sgb1.boot.rom", "sgb_bios.bin", nullptr
+	};
+	static const char *sgb2_names[] = {
+		"sgb2.boot.rom", "sgb2_bios.bin", nullptr
+	};
+	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
+
+	std::vector<std::string> dirs;
+	if (gb_rom_path && *gb_rom_path)
+	{
+		std::string p(gb_rom_path);
+		const size_t sep = p.find_last_of("/\\");
+		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
+	}
+	dirs.push_back(S9xGetDirectory(BIOS_DIR));
+	dirs.push_back(".");
+
+	for (const auto &dir : dirs)
+	{
+		for (int i = 0; names[i]; ++i)
+		{
+			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
+			FILE *f = fopen(full.c_str(), "rb");
+			if (!f) continue;
+			fseek(f, 0, SEEK_END);
+			const long sz = ftell(f);
+			fclose(f);
+			if (sz == 256)
+			{
+				out_path = full;
+				return (TRUE);
+			}
+		}
+	}
+	return (FALSE);
+}
+
+static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f) return (FALSE);
+	out_bytes.assign(256, 0);
+	const size_t got = fread(out_bytes.data(), 1, 256, f);
+	fclose(f);
+	return got == 256;
+}
+
 int CMemory::ScoreHiROM (bool8 skip_header, int32 romoff)
 {
 	uint8	*buf = ROM + 0xff00 + romoff + (skip_header ? 0x200 : 0);
@@ -1494,8 +1548,14 @@ bool8 CMemory::LoadROM (const char *filename)
         ROMFilename = filename;
 
         {
-            char msg[256];
-            snprintf(msg, sizeof msg, "SGB BIOS-less mode (no sgb.sfc/sgb2.sfc found)");
+            char msg[512];
+            if (bios_mode)
+                snprintf(msg, sizeof msg,
+                         "SGB BIOS-less: SGB%u BIOS load failed (%s)",
+                         unsigned(bios_mode), bios_path.c_str());
+            else
+                snprintf(msg, sizeof msg,
+                         "SGB BIOS-less mode (no sgb.sfc/sgb2.sfc found)");
             const uint32 saved = Settings.InitialInfoStringTimeout;
             Settings.InitialInfoStringTimeout = 60 * 10;
             S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
@@ -1545,8 +1605,9 @@ bool8 CMemory::LoadROM (const char *filename)
                 else bios_path.clear();
             }
 
-            if (bios_mode && LoadROMWithSGBBIOSBytes(ROM, (uint32)totalFileSize,
-                                                     filename, bios_path.c_str()))
+            if (bios_mode &&
+                LoadROMWithSGBBIOSBytes(ROM, (uint32)totalFileSize,
+                                         filename, bios_path.c_str()))
             {
                 char msg[1024];
                 snprintf(msg, sizeof msg,
@@ -1575,8 +1636,14 @@ bool8 CMemory::LoadROM (const char *filename)
             ROMFilename = filename;
 
             {
-                char msg[256];
-                snprintf(msg, sizeof msg, "SGB BIOS-less mode (no sgb.sfc/sgb2.sfc found)");
+                char msg[512];
+                if (bios_mode)
+                    snprintf(msg, sizeof msg,
+                             "SGB BIOS-less: SGB%u BIOS load failed (%s)",
+                             unsigned(bios_mode), bios_path.c_str());
+                else
+                    snprintf(msg, sizeof msg,
+                             "SGB BIOS-less mode (no sgb.sfc/sgb2.sfc found)");
                 const uint32 saved = Settings.InitialInfoStringTimeout;
                 Settings.InitialInfoStringTimeout = 60 * 10;
                 S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
@@ -1625,6 +1692,26 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
     uint8 mode = 1;
     if (!LoadSGBBIOSBytes(bios_path, bios, mode)) return FALSE;
 
+    // GB-side boot ROM. Publicly dumped sgb*.boot.rom files are almost
+    // always plain DMG boot ROMs that don't send the 5-packet SGB
+    // handshake the BIOS expects. Heuristic: a real SGB boot ROM contains
+    // a `3E F1` sequence (LD A, $F1) somewhere in its body as the first
+    // handshake command byte. If we don't find that, fall back to the
+    // embedded LIJI32/SameBoy SGB boot ROM.
+    std::string boot_path;
+    std::vector<uint8> user_boot;
+    const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
+                               LoadSGBBootROM(boot_path.c_str(), user_boot);
+    bool user_boot_is_sgb = false;
+    if (user_has_boot)
+    {
+        for (size_t k = 0; k + 1 < user_boot.size(); ++k)
+        {
+            if (user_boot[k] == 0x3E && user_boot[k + 1] == 0xF1)
+            { user_boot_is_sgb = true; break; }
+        }
+    }
+
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
         S9xSGBDeinit();
@@ -1632,8 +1719,12 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
         Settings.SGB_BIOSModeActive = FALSE;
     }
 
-    if (!S9xSGBInit() || !S9xSGBLoadROM(gb_path))
-        return FALSE;
+    if (!S9xSGBInit()) return FALSE;
+    if (user_boot_is_sgb)
+        S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
+    else
+        S9xSGBLoadEmbeddedBootROM(mode);
+    if (!S9xSGBLoadROM(gb_path)) return FALSE;
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
     if (!LoadROMMem(bios.data(), (uint32)bios.size(), bios_path))
@@ -1662,6 +1753,20 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
     uint8 mode = 1;
     if (!LoadSGBBIOSBytes(bios_path, bios, mode)) return FALSE;
 
+    std::string boot_path;
+    std::vector<uint8> user_boot;
+    const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
+                               LoadSGBBootROM(boot_path.c_str(), user_boot);
+    bool user_boot_is_sgb = false;
+    if (user_has_boot)
+    {
+        for (size_t k = 0; k + 1 < user_boot.size(); ++k)
+        {
+            if (user_boot[k] == 0x3E && user_boot[k + 1] == 0xF1)
+            { user_boot_is_sgb = true; break; }
+        }
+    }
+
     // Snapshot the GB bytes before LoadROMMem clobbers ROM[].
     std::vector<uint8> gb_copy(gb_bytes, gb_bytes + gb_size);
 
@@ -1672,8 +1777,12 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
         Settings.SGB_BIOSModeActive = FALSE;
     }
 
-    if (!S9xSGBInit() ||
-        !S9xSGBLoadROMBytes(gb_copy.data(), gb_copy.size(), gb_path))
+    if (!S9xSGBInit()) return FALSE;
+    if (user_boot_is_sgb)
+        S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
+    else
+        S9xSGBLoadEmbeddedBootROM(mode);
+    if (!S9xSGBLoadROMBytes(gb_copy.data(), gb_copy.size(), gb_path))
         return FALSE;
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
@@ -2655,6 +2764,8 @@ void CMemory::InitROM (void)
 				Map_SufamiTurboPseudoLoROMMap();
 			}
 		}
+		else if (strncmp(ROMName, "Super GAMEBOY", 13) == 0)
+			Map_SGBLoROMMap();
 		else
 			Map_LoROMMap();
     }
@@ -3093,6 +3204,26 @@ void CMemory::Map_LoROMMap (void)
     map_LoROMSRAM();
 	map_WRAM();
 
+	map_WriteProtectROM();
+}
+
+// P2 — SGB cart map. Standard LoROM with the 0x6000-0x7FFF range in banks
+// 0x00-0x3F and 0x80-0xBF routed to MAP_SGB_ICD2 so SNES accesses to the
+// BIOS's cart-chip registers land in our bridge.
+void CMemory::Map_SGBLoROMMap (void)
+{
+	printf("Map_SGBLoROMMap\n");
+	map_System();
+
+	map_lorom(0x00, 0x3f, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0x40, 0x7f, 0x0000, 0xffff, CalculatedSize);
+	map_lorom(0x80, 0xbf, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0xc0, 0xff, 0x0000, 0xffff, CalculatedSize);
+
+	map_index(0x00, 0x3f, 0x6000, 0x7fff, MAP_SGB_ICD2, MAP_TYPE_I_O);
+	map_index(0x80, 0xbf, 0x6000, 0x7fff, MAP_SGB_ICD2, MAP_TYPE_I_O);
+
+	map_WRAM();
 	map_WriteProtectROM();
 }
 

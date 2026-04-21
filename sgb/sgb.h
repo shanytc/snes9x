@@ -53,6 +53,18 @@ public:
 	void UnloadROM();
 	bool HasROM() const;
 
+	// Install the 256-byte DMG/SGB GB-side boot ROM. Takes effect on the
+	// next Reset. Call with nullptr/size=0 to clear. Only loaded in
+	// authentic BIOS mode — BIOS-less continues to start at 0x0100.
+	bool LoadBootROM(const uint8_t *data, size_t size);
+
+	// Populate the 5-packet boot-ROM handshake from the current cart's
+	// header and queue the first packet as if the GB boot ROM had sent
+	// it. The SGB BIOS waits on these to transition past its splash;
+	// the GB's dumped boot ROM typically doesn't generate them, so we
+	// synthesize them ourselves. Requires a cart already loaded.
+	void PrimeBIOSHandshake();
+
 	void SetRunMode(RunMode m);
 	RunMode GetRunMode() const;
 
@@ -106,6 +118,20 @@ public:
 	// total T-cycles, illegal-op count.
 	void  GetStatus(char *buf, size_t cap) const;
 
+	// ICD2 (BIOS-mode cart chip) register access — 0x6000-0x7FFF on the
+	// SNES side. See S9xSGBGetICD2 / S9xSGBSetICD2 below for the C facade.
+	// Non-const because reading $7000-$700F drains a single-slot FIFO
+	// (clears the packet-ready flag exposed at $6002).
+	uint8_t GetICD2(uint16_t addr);
+	void    SetICD2(uint8_t value, uint16_t addr);
+
+	// True once the BIOS has released the GB CPU (bit 7 of $6003). Used
+	// by cpuexec to gate per-frame GB core stepping.
+	bool    IsGBReleased() const;
+
+	// True while synth handshake packets are still pending drain.
+	bool    IsHandshakePending() const;
+
 	// Opaque implementation struct — forward-declared so file-local
 	// helpers in sgb.cpp can reference the full type. External code
 	// has no way to obtain one.
@@ -125,6 +151,24 @@ bool S9xSGBInit(void);
 void S9xSGBDeinit(void);
 void S9xSGBReset(void);
 bool S9xSGBLoadROM(const char *filename);
+
+// Hand the 256-byte GB-side boot ROM to the SGB core. Only used in
+// authentic BIOS mode — boot ROM scrolls the Nintendo logo and sends
+// 5 SGB handshake packets that the BIOS is waiting for before it
+// transitions out of its splash screen.
+bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size);
+
+// Install the built-in SGB1 (mode=1) or SGB2 (mode=2) boot ROM. Used
+// as the default in BIOS mode — most publicly-dumped sgb*.boot.rom
+// files are plain DMG boot ROMs without the handshake, so we ship the
+// real SGB-specific variants (from LIJI32/SameBoy under MIT).
+bool S9xSGBLoadEmbeddedBootROM(unsigned char mode);
+
+// Prime the 5-packet SGB handshake from the loaded cart. Call after
+// S9xSGBLoadROM/S9xSGBLoadROMBytes in BIOS mode — boot ROM dumps in
+// the wild almost never contain the SGB-specific handshake code, so
+// we synthesize the packets from cart header bytes $0104-$014F.
+void S9xSGBPrimeBIOSHandshake(void);
 
 // Load a GB ROM from an in-memory buffer. Callers that already have the
 // bytes (e.g. after snes9x's FileLoader has unzipped a .zip/.jma/.7z
@@ -172,5 +216,29 @@ void    S9xSGBGetStatus(char *buf, size_t cap);
 // or read it back. Return false on I/O error or format mismatch.
 bool    S9xSGBSaveStateToFile(const char *filename);
 bool    S9xSGBLoadStateFromFile(const char *filename);
+
+// ---- P2 — ICD2 bridge ------------------------------------------------------
+// The real SGB cart contains a custom "ICD2" chip that memory-maps a set of
+// registers at 0x6000-0x7FFF on the SNES side. The BIOS reads/writes these
+// to talk to the GB subsystem on the cart. Our bridge routes those accesses
+// into our GB core.
+//
+// P2b scope: skeleton handlers that track register writes so the BIOS can
+// read back consistent values. P2c+ add real semantics (packet FIFO,
+// joypad routing, VRAM readback, reset gating).
+unsigned char S9xSGBGetICD2 (unsigned short addr);
+void          S9xSGBSetICD2 (unsigned char value, unsigned short addr);
+
+// True when the BIOS has released the GB CPU from reset (via the ICD2
+// reset register). cpuexec.cpp gates per-frame GB core stepping on this —
+// before release the BIOS has sole control of the SNES, after release
+// the GB runs in parallel. P2c defines the actual release bit.
+bool          S9xSGBBIOSGBIsReleased (void);
+
+// True while synth handshake packets are still queued in the single-slot
+// FIFO. cpuexec uses this as an additional gate on GB core stepping —
+// real GB packets must not clobber a pending synth packet before the
+// BIOS reads it, so the GB is paused until the handshake drains out.
+bool          S9xSGBBIOSHandshakePending (void);
 
 #endif

@@ -89,6 +89,12 @@ static inline uint8 S9xGetByteFree(uint32 Address)
         byte = S9xGetBSX(Address);
         return (byte);
 
+    case CMemory::MAP_SGB_ICD2:
+        // Cheat-engine reads don't meaningfully apply to the SGB cart
+        // chip; return open bus so search/compare modes skip this range.
+        byte = OpenBus;
+        return (byte);
+
     case CMemory::MAP_NONE:
     default:
         byte = OpenBus;
@@ -177,6 +183,11 @@ static inline void S9xSetByteFree(uint8 Byte, uint32 Address)
 
     case CMemory::MAP_BSX:
         S9xSetBSX(Byte, Address);
+        return;
+
+    case CMemory::MAP_SGB_ICD2:
+        // Cheat writes to the SGB cart-chip registers are pointless;
+        // they'd confuse the BIOS-to-GB handshake. Drop them.
         return;
 
     case CMemory::MAP_NONE:

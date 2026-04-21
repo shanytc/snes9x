@@ -167,6 +167,13 @@ struct Emulator::Impl
 		uint8_t  synth_packets[5][16];
 		uint8_t  synth_remaining;    // packets yet to hand out (5 → 0)
 		uint8_t  drain_ptr;          // bytes read of current packet (0..15)
+
+		// P2d — framebuffer char-transfer for $7800. The SGB BIOS reads
+		// 320 bytes per bank (8 rows × 20 tiles × 2 bit-planes) to
+		// reconstruct a 160×8 slice of the GB screen. 144 scanlines /
+		// 8 = 18 full slices per frame, so we advance an 18-slot slice
+		// index on each $6001 write.
+		uint8_t  slice_index;        // 0..17 — which 8-row band of the GB frame
 	} icd2;
 };
 
@@ -466,10 +473,37 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		return b;
 	}
 
-	// $7800-$780F — GB frame char-transfer window (P2d).
+	// $7800-$780F — GB frame char-transfer window. Streams bit-plane
+	// bytes of an 8-row band of the GB framebuffer. Layout per band:
+	// 20 tiles × 8 rows × 2 planes = 320 bytes of real data, then $FF
+	// padding to 512 before wrap.
 	if (a >= 0x7800 && a <= 0x780F)
 	{
-		return 0xFF;
+		const uint16_t pos = icd.read_position;
+		icd.read_position  = static_cast<uint16_t>((icd.read_position + 1) & 0x1FF);  // wrap at 512
+		if (pos >= 320)
+			return 0xFF;
+
+		const uint8_t tile_col   = static_cast<uint8_t>(pos / 16);    // 0..19
+		const uint8_t byte_in    = static_cast<uint8_t>(pos & 0x0F);
+		const uint8_t row_in     = static_cast<uint8_t>(byte_in / 2); // 0..7
+		const uint8_t plane      = static_cast<uint8_t>(byte_in & 1);
+
+		const uint16_t fb_row    = static_cast<uint16_t>(icd.slice_index * 8 + row_in);
+		if (fb_row >= GB_SCREEN_HEIGHT)
+			return 0xFF;
+
+		const uint8_t *px_row = impl_->ppu.framebuffer + fb_row * GB_SCREEN_WIDTH;
+		const uint8_t *px     = px_row + tile_col * 8;
+
+		uint8_t b = 0;
+		for (int i = 0; i < 8; ++i)
+		{
+			const uint8_t palidx = static_cast<uint8_t>(px[i] & 0x03);
+			const uint8_t bit    = static_cast<uint8_t>((palidx >> plane) & 1);
+			b = static_cast<uint8_t>(b | (bit << (7 - i)));
+		}
+		return b;
 	}
 
 	switch (a)
@@ -498,7 +532,16 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 
 	switch (a)
 	{
-		case 0x6001: icd.lcd_row_select = value; icd.read_position = 0; icd.row_writes++; return;
+		case 0x6001:
+			icd.lcd_row_select = value;
+			icd.read_position  = 0;
+			// Advance to the next 8-row slice. Over 18 writes we cover
+			// the full 144-line GB frame; wrap so long read runs keep
+			// rolling. BIOS also polls $6000 (tied to GB LY) to time
+			// the reads with the GB PPU's natural scanline advance.
+			icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
+			icd.row_writes++;
+			return;
 		case 0x6003:
 		{
 			const bool was_released = (icd.control & 0x80) != 0;

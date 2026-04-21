@@ -781,6 +781,8 @@ static bool8 is_SufamiTurbo_Cart (const uint8 *, uint32);
 static bool8 is_BSCart_BIOS (const uint8 *, uint32);
 static bool8 is_BSCartSA1_BIOS(const uint8 *, uint32);
 static bool8 is_GNEXT_Add_On (const uint8 *, uint32);
+static bool8 is_SGB_BIOS     (const uint8 *data, uint32 size, uint8 *out_mode /*1 or 2*/);
+static bool8 FindSGB_BIOS    (uint8 mode, const char *gb_rom_path, std::string &out_path);
 static uint32 caCRC32 (uint8 *, uint32, uint32 crc32 = 0xffffffff);
 static bool8 ReadUPSPatch (Stream *, long, int32 &);
 static long ReadInt (Stream *, unsigned);
@@ -1072,6 +1074,80 @@ static bool8 is_GNEXT_Add_On (const uint8 *data, uint32 size)
 		return (TRUE);
 	else
 		return (FALSE);
+}
+
+// SGB1 / SGB2 BIOS detection. Both ship as a standard LoROM SNES cart with
+// the header at 0x7FC0. SGB1 title reads "Super GAMEBOY" (13 chars),
+// SGB2 appends a '2'. Canonical file sizes are 256 KB / 512 KB respectively
+// but we only validate the title here — callers typically read a partial
+// buffer (header-sized) so ROM-size checks live outside this helper.
+static bool8 is_SGB_BIOS (const uint8 *data, uint32 size, uint8 *out_mode)
+{
+	if (!data || size < 0x8000) return (FALSE);
+	if (memcmp(data + 0x7FC0, "Super GAMEBOY", 13) != 0) return (FALSE);
+	const uint8 mode = (data[0x7FC0 + 13] == '2') ? 2 : 1;
+	if (out_mode) *out_mode = mode;
+	return (TRUE);
+}
+
+// Look for an SGB BIOS file matching `mode`. Search order:
+//   1. Same directory as the GB ROM (if path known)
+//   2. BIOS_DIR — snes9x's configured BIOS search path
+//   3. Current working directory
+// Candidate filenames per mode are tried in order; the header is verified
+// before a match is accepted. Writes the full path to `out_path` on hit.
+static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out_path)
+{
+	static const char *sgb1_names[] = {
+		"sgb.sfc", "SGB.sfc", "sgb1.sfc", "SGB1.sfc",
+		"Super Game Boy (World).sfc", nullptr
+	};
+	static const char *sgb2_names[] = {
+		"sgb2.sfc", "SGB2.sfc",
+		"Super Game Boy 2 (Japan).sfc", nullptr
+	};
+	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
+
+	std::vector<std::string> dirs;
+	if (gb_rom_path && *gb_rom_path)
+	{
+		std::string p(gb_rom_path);
+		const size_t sep = p.find_last_of("/\\");
+		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
+	}
+	dirs.push_back(S9xGetDirectory(BIOS_DIR));
+	dirs.push_back(".");
+
+	for (const auto &dir : dirs)
+	{
+		for (int i = 0; names[i]; ++i)
+		{
+			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
+			FILE *f = fopen(full.c_str(), "rb");
+			if (!f) continue;
+
+			uint8 hdr[0x8000];
+			const size_t n = fread(hdr, 1, sizeof hdr, f);
+			fclose(f);
+			if (n < 0x8000) continue;
+
+			uint8 got_mode = 0;
+			if (is_SGB_BIOS(hdr, static_cast<uint32>(n), &got_mode) && got_mode == mode)
+			{
+				out_path = full;
+				return (TRUE);
+			}
+		}
+	}
+	// On miss, stash the search roots into out_path so the caller can
+	// show the user which directories were probed.
+	out_path.clear();
+	for (const auto &dir : dirs)
+	{
+		if (!out_path.empty()) out_path += " ; ";
+		out_path += dir.empty() ? std::string(".") : dir;
+	}
+	return (FALSE);
 }
 
 int CMemory::ScoreHiROM (bool8 skip_header, int32 romoff)
@@ -1374,6 +1450,7 @@ bool8 CMemory::LoadROM (const char *filename)
         Settings.SuperGameBoy      = TRUE;
         Settings.GameBoyRunMode    = 1;   // default SGB1
         Settings.GBClockMultiplier = 1.0f;
+
         if (!S9xSGBInit() || !S9xSGBLoadROM(filename))
         {
             Settings.SuperGameBoy = FALSE;
@@ -1389,6 +1466,33 @@ bool8 CMemory::LoadROM (const char *filename)
         // after us and crashes without these.
         S9xInitCheatData();
         ROMFilename = filename;
+
+        // P7 — BIOS-mode probe. Runs AFTER the GB ROM is fully loaded so
+        // our message is the last thing posted to the OSD (nothing else
+        // overwrites it). Emit on both hit and miss; on a miss include
+        // the searched directories so the user knows where to drop the
+        // BIOS file. P1 will wire up actual BIOS loading.
+        {
+            std::string bios_path;
+            const uint8 want_mode = Settings.GameBoyRunMode ? Settings.GameBoyRunMode : 1;
+            char msg[1024];
+            if (FindSGB_BIOS(want_mode, filename, bios_path))
+                snprintf(msg, sizeof msg,
+                         "SGB BIOS found: SGB%u at '%s' (P1 will wire it up)",
+                         unsigned(want_mode), bios_path.c_str());
+            else
+                snprintf(msg, sizeof msg,
+                         "SGB BIOS not found for SGB%u; searched: %s",
+                         unsigned(want_mode), bios_path.c_str());
+            // Bump the OSD timeout so the probe result is readable. Default
+            // is ~120 frames (2s) — here we push it to 10s of frames, which
+            // is plenty to read the path. Saved/restored so it only affects
+            // this one message.
+            const uint32 saved = Settings.InitialInfoStringTimeout;
+            Settings.InitialInfoStringTimeout = 60 * 10;
+            S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
+            Settings.InitialInfoStringTimeout = saved;
+        }
         return TRUE;
     }
 
@@ -1433,6 +1537,25 @@ bool8 CMemory::LoadROM (const char *filename)
             // after us, and those stay NULL without S9xInitCheatData.
             S9xInitCheatData();
             ROMFilename = filename;
+
+            // Same P7 BIOS probe as the direct .gb path above.
+            {
+                std::string bios_path;
+                const uint8 want_mode = Settings.GameBoyRunMode ? Settings.GameBoyRunMode : 1;
+                char msg[1024];
+                if (FindSGB_BIOS(want_mode, filename, bios_path))
+                    snprintf(msg, sizeof msg,
+                             "SGB BIOS found: SGB%u at '%s' (P1 will wire it up)",
+                             unsigned(want_mode), bios_path.c_str());
+                else
+                    snprintf(msg, sizeof msg,
+                             "SGB BIOS not found for SGB%u; searched: %s",
+                             unsigned(want_mode), bios_path.c_str());
+                const uint32 saved = Settings.InitialInfoStringTimeout;
+                Settings.InitialInfoStringTimeout = 60 * 10;
+                S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
+                Settings.InitialInfoStringTimeout = saved;
+            }
             return TRUE;
         }
 

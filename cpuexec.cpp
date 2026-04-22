@@ -224,6 +224,13 @@ void S9xMainLoop (void)
 	// Matches real SGB hardware: the SNES boots first, brings up border
 	// + palette, then unblocks the GB CPU. Until then we skip stepping
 	// entirely so the SNES loop keeps its 60 fps budget.
+	// P2 — in BIOS mode, force the I flag clear at end-of-frame so the
+	// BIOS's V-IRQ fires. Not ideal (real HW doesn't need this) but in
+	// our setup the BIOS's init path that would do CLI isn't reached.
+	// TODO: find the missing CLI and drop this workaround.
+	if (Settings.SGB_BIOSModeActive)
+		Registers.PL &= ~0x04;
+
 	if (Settings.SGB_BIOSModeActive)
 	{
 		const bool released = S9xSGBBIOSGBIsReleased();
@@ -234,7 +241,8 @@ void S9xMainLoop (void)
 			                  ? Settings.GBClockMultiplier : 1.0f;
 			S9xSGBSetClockMultiplier(mul);
 			S9xSGBSetRunMode(Settings.GameBoyRunMode);
-			S9xSGBRunFrame();
+			// Per-scanline stepping now happens in S9xDoHEventProcessing.
+			// End-of-frame RunFrame disabled to avoid double-stepping.
 		}
 
 		// Periodic status OSD for P2 triage — once per second, print the
@@ -249,6 +257,17 @@ void S9xMainLoop (void)
 		static uint32  s_f8_set_count = 0;
 		const uint8 now_f8 = Memory.RAM[0x02F8];
 		const uint8 now_c0 = Memory.RAM[0x02C0];
+		const uint8 now_22 = Memory.RAM[0x0022];
+		static uint8   s_prev_22  = 0;
+		static uint32  s_22_edges = 0;
+		if (s_prev_22 == 0 && now_22 != 0) s_22_edges++;
+		s_prev_22 = now_22;
+		const uint8 nmitimen = Memory.FillRAM[0x4200];
+		const int32 irq_timer = Timings.NextIRQTimer;
+		const uint8 irq_line  = CPU.IRQLine ? 1 : 0;
+		// H/V-IRQ targets: bit 0 of H2/V2 is high bit of 10/9-bit target
+		const uint16 h_target = Memory.FillRAM[0x4207] | ((Memory.FillRAM[0x4208] & 1) << 8);
+		const uint16 v_target = Memory.FillRAM[0x4209] | ((Memory.FillRAM[0x420A] & 1) << 8);
 		if (s_prev_f8 == 0 && now_f8 != 0) s_f8_set_count++;
 		if (now_c0 > s_max_c0) s_max_c0 = now_c0;
 		s_prev_f8 = now_f8;
@@ -257,13 +276,14 @@ void S9xMainLoop (void)
 		{
 			char buf[320], msg[512];
 			S9xSGBGetStatus(buf, sizeof buf);
+			char gb_buf[240];
+			S9xSGBGetStatus(gb_buf, sizeof gb_buf);
+			const uint8 p_flags = Registers.PL;
 			snprintf(msg, sizeof msg,
-			         "SNES PC=%02X:%04X 02F8now=%02X(set#%u) 02C0now=%02X(max=%u) | %s",
-			         static_cast<unsigned>(Registers.PB),
+			         "PC=%04X P=%02X 4200=%02X $22ed=%u 02F8#%u IRQ#%u | %s",
 			         static_cast<unsigned>(Registers.PCw),
-			         now_f8, s_f8_set_count,
-			         now_c0, s_max_c0,
-			         buf);
+			         p_flags, nmitimen, s_22_edges, s_f8_set_count,
+			         irq_line, gb_buf);
 			const uint32 saved = Settings.InitialInfoStringTimeout;
 			Settings.InitialInfoStringTimeout = 120;
 			S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
@@ -356,6 +376,19 @@ void S9xDoHEventProcessing (void)
 				if (!SuperFX.oneLineDone)
 					S9xSuperFXExec();
 				SuperFX.oneLineDone = FALSE;
+			}
+
+			// P2 — BIOS mode: step the GB core by roughly one scanline's
+			// worth of T-cycles at each SNES scanline boundary. Rate
+			// matches Mesen2/real SGB: GB clock = SNES master / 5 =
+			// 21477272 / 5 ≈ 4.295 MHz. Per SNES scanline = 21477272 /
+			// 5 / 60 / 262 ≈ 273 GB T-cycles. This is intentionally
+			// ~0.32 lines faster than the SNES frame so the GB PPU's
+			// row position drifts naturally across SNES frames — which
+			// is exactly what BIOS's $B9BE row-diff check needs.
+			if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+			{
+				S9xSGBRunCycles(273);
 			}
 
 			S9xAPUEndScanline();

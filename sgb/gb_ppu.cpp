@@ -32,6 +32,7 @@
 #include "gb_ppu.h"
 #include "gb_memory.h"
 #include "gb_cpu.h"
+#include "sgb.h"
 
 #include <cstring>
 
@@ -261,6 +262,12 @@ void RenderScanline(Ppu &p)
 	}
 
 	if (p.lcdc & 0x02) RenderSprites(p, line);
+
+	// SGB BIOS-mode hook: copy this freshly-drawn line into the ICD2
+	// capture ring so $7800 reads the LIVE framebuffer (required for
+	// the boot animation's Nintendo logo scroll and general SGB frame
+	// display). Benign in BIOS-less mode.
+	S9xSGBCaptureScanline(line);
 }
 
 } // anonymous
@@ -343,12 +350,16 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		{
 			p.mode_clock -= MODE0_DOTS;
 			++p.ly;
+			// SGB BIOS-mode hook: advance $6000 row counter per line.
+			// VBlank branch below resets it. Benign in BIOS-less mode.
+			S9xSGBOnPpuHBlank();
 			if (p.ly == VISIBLE_LINES)
 			{
 				p.mode          = PpuMode::VBlank;
 				p.frame_ready   = true;
 				p.window_line   = 0;
 				mem.if_         = static_cast<uint8_t>(mem.if_ | IRQ_VBLANK);
+				S9xSGBOnPpuVBlank();
 			}
 			else
 			{

@@ -132,6 +132,11 @@ public:
 	// True while synth handshake packets are still pending drain.
 	bool    IsHandshakePending() const;
 
+	// GB PPU scanline event hooks for SGB row/bank counter advance.
+	void    OnPpuHBlank();
+	void    OnPpuVBlank();
+	void    CaptureScanline(const uint8_t *pixels);
+
 	// Opaque implementation struct — forward-declared so file-local
 	// helpers in sgb.cpp can reference the full type. External code
 	// has no way to obtain one.
@@ -175,6 +180,19 @@ void S9xSGBPrimeBIOSHandshake(void);
 // container) use this to skip the stdio re-read.
 bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path_for_sram);
 void S9xSGBRunFrame(void);
+void S9xSGBRunCycles(int tcycles);
+
+// GB PPU scanline-event hooks used to advance the SGB row/bank counters
+// exposed at $6000. Call at HBlank end of each visible line (mode 0 →
+// mode 2 transition for lines 0..142) and at VBlank entry (line 143 →
+// 144 transition). Benign no-ops in BIOS-less mode.
+void S9xSGBOnPpuHBlank(void);
+void S9xSGBOnPpuVBlank(void);
+
+// Capture a drawn GB scanline (160 palette indices, 0..3) into the SGB
+// char-transfer ring. Call immediately after RenderScanline; writes to
+// lcd_ring[sgb_bank] at row (sgb_row & 7). Benign no-op in BIOS-less mode.
+void S9xSGBCaptureScanline(const unsigned char *pixels);
 void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);
 bool S9xSGBIsActive(void);

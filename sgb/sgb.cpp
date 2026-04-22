@@ -174,6 +174,24 @@ struct Emulator::Impl
 		// 8 = 18 full slices per frame, so we advance an 18-slot slice
 		// index on each $6001 write.
 		uint8_t  slice_index;        // 0..17 — which 8-row band of the GB frame
+
+		// $6000 row/bank counters (Mesen2-style). Advanced by GB PPU
+		// scanline events: sgb_row++ on each HBlank end (mode 0 → OAM
+		// scan for line 1..143), sgb_bank advances every 8 rows, and
+		// both get zeroed on VBlank entry. $6000 = (row & 0xF8) | bank.
+		uint8_t  sgb_row;
+		uint8_t  sgb_bank;
+
+		// Per-pixel capture ring — 4 banks × 8 rows × 160 pixels (palette
+		// indices 0..3). The GB PPU's renderer calls S9xSGBCaptureScanline
+		// after drawing each visible line, which writes into bank[sgb_bank]
+		// at row (sgb_row & 7). $7800 reconstructs 2bpp bit-planes from
+		// this ring, NOT from the end-of-frame framebuffer. Matches
+		// bsnes (icd.hpp `output[4*512]`) and Mesen2 (`_lcdBuffer[4][1280]`)
+		// — the boot animation's logo scroll depends on this live capture
+		// since the BIOS reads $7800 mid-frame before ppu.framebuffer is
+		// complete.
+		uint8_t  lcd_ring[4][8 * 160];
 	} icd2;
 };
 
@@ -434,13 +452,13 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	for (unsigned i = 0; i < icd.last_cmd_ids_len && p < cmds + sizeof cmds - 4; ++i)
 		p += std::snprintf(p, sizeof cmds - (p - cmds), "%02X ", icd.last_cmd_ids[i]);
 	std::snprintf(buf, cap,
-	              "GBPC=%04X ctrl=%02X pkts=%u F1=%u rd=%u rowW=%u ly=%u bootROM=%d | cmds: %s",
+	              "GBPC=%04X ctrl=%02X pkts=%u rowW=%u ly=%u sgb_row=%u sgb_bk=%u $6000=%02X",
 	              s.r.pc, icd.control,
-	              icd.packets_received, icd.f1_packets,
-	              icd.fifo_reads, icd.row_writes,
+	              icd.packets_received,
+	              icd.row_writes,
 	              static_cast<unsigned>(impl_->ppu.ly),
-	              impl_->mem.boot_rom_enabled ? 1 : 0,
-	              cmds);
+	              unsigned(icd.sgb_row), unsigned(icd.sgb_bank),
+	              unsigned((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03)));
 }
 
 // ICD2 register mirrors repeat every 16 bytes across each kB window
@@ -474,27 +492,26 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 	}
 
 	// $7800-$780F — GB frame char-transfer window. Streams bit-plane
-	// bytes of an 8-row band of the GB framebuffer. Layout per band:
-	// 20 tiles × 8 rows × 2 planes = 320 bytes of real data, then $FF
-	// padding to 512 before wrap.
+	// bytes from the live 4-bank capture ring (lcd_ring), selected by
+	// lcd_row_select. Layout per bank: 20 tiles × 8 rows × 2 planes =
+	// 320 bytes of real data, then $FF padding to 512 before wrap.
+	// Reading from the live ring (not the end-of-frame framebuffer)
+	// is what lets the BIOS capture the boot animation's Nintendo logo
+	// scroll — the BIOS reads $7800 while the GB is still mid-drawing.
 	if (a >= 0x7800 && a <= 0x780F)
 	{
 		const uint16_t pos = icd.read_position;
-		icd.read_position  = static_cast<uint16_t>((icd.read_position + 1) & 0x1FF);  // wrap at 512
+		icd.read_position  = static_cast<uint16_t>((icd.read_position + 1) & 0x1FF);
 		if (pos >= 320)
 			return 0xFF;
 
-		const uint8_t tile_col   = static_cast<uint8_t>(pos / 16);    // 0..19
-		const uint8_t byte_in    = static_cast<uint8_t>(pos & 0x0F);
-		const uint8_t row_in     = static_cast<uint8_t>(byte_in / 2); // 0..7
-		const uint8_t plane      = static_cast<uint8_t>(byte_in & 1);
+		const uint8_t tile_col = static_cast<uint8_t>(pos / 16);    // 0..19
+		const uint8_t byte_in  = static_cast<uint8_t>(pos & 0x0F);
+		const uint8_t row_in   = static_cast<uint8_t>(byte_in / 2); // 0..7
+		const uint8_t plane    = static_cast<uint8_t>(byte_in & 1);
 
-		const uint16_t fb_row    = static_cast<uint16_t>(icd.slice_index * 8 + row_in);
-		if (fb_row >= GB_SCREEN_HEIGHT)
-			return 0xFF;
-
-		const uint8_t *px_row = impl_->ppu.framebuffer + fb_row * GB_SCREEN_WIDTH;
-		const uint8_t *px     = px_row + tile_col * 8;
+		const uint8_t bank     = static_cast<uint8_t>(icd.lcd_row_select & 0x03);
+		const uint8_t *px      = &icd.lcd_ring[bank][row_in * 160 + tile_col * 8];
 
 		uint8_t b = 0;
 		for (int i = 0; i < 8; ++i)
@@ -509,15 +526,13 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 	switch (a)
 	{
 		case 0x6000:
-		{
-			// Bits 7..3 = GB LCD row within the current 8-line bank.
-			// Bits 1..0 = current 8-line bank (0..3, advances every 8 lines).
-			// BIOS polls this to confirm the GB is alive and the PPU is
-			// advancing — returning a static 0 makes it think the GB
-			// never woke up and blocks progress past the splash.
-			const uint8_t ly = impl_->ppu.ly;
-			return static_cast<uint8_t>(((ly & 0x07) << 3) | ((ly >> 3) & 0x03));
-		}
+			// Row/bank counters advanced by GB PPU HBlank/VBlank events
+			// (see S9xSGBOnPpuHBlank / S9xSGBOnPpuVBlank). Format matches
+			// Mesen2/real SGB: (row & 0xF8) | (bank & 0x03). The row
+			// bits let the BIOS track which of 18 8-line slices just
+			// completed; bank cycles 0..3 as the rolling capture buffers
+			// advance.
+			return static_cast<uint8_t>((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03));
 		case 0x6002: return icd.packet_ready ? 1 : 0;
 		case 0x600F: return 0x21;           // BIOS version byte (bsnes / Mesen return $21)
 	}
@@ -544,15 +559,8 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			return;
 		case 0x6003:
 		{
-			const bool was_released = (icd.control & 0x80) != 0;
 			icd.control = value;
 			icd.ctrl_writes++;
-			// On the 0→1 transition of the release bit, stage the first
-			// synth handshake packet. This matches real-hardware timing:
-			// the boot ROM starts sending its packets only after the
-			// SNES side releases the GB CPU.
-			if (!was_released && (value & 0x80) && icd.synth_remaining > 0)
-				IcdStageNextSynth(icd);
 			return;
 		}
 		case 0x6004:
@@ -592,6 +600,30 @@ bool Emulator::IsHandshakePending() const
 {
 	if (!impl_) return false;
 	return impl_->icd2.synth_remaining > 0 || impl_->icd2.packet_ready;
+}
+
+void Emulator::OnPpuHBlank()
+{
+	if (!impl_) return;
+	Emulator::Impl::Icd2 &icd = impl_->icd2;
+	icd.sgb_row++;
+	if ((icd.sgb_row & 0x07) == 0)
+		icd.sgb_bank = static_cast<uint8_t>((icd.sgb_bank + 1) & 0x03);
+}
+
+void Emulator::OnPpuVBlank()
+{
+	if (!impl_) return;
+	impl_->icd2.sgb_row = 0;
+}
+
+void Emulator::CaptureScanline(const uint8_t *pixels)
+{
+	if (!impl_ || !pixels) return;
+	Emulator::Impl::Icd2 &icd = impl_->icd2;
+	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
+	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);
+	std::memcpy(&icd.lcd_ring[bank][row * 160], pixels, 160);
 }
 
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
@@ -989,6 +1021,14 @@ void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
 void S9xSGBReset(void)              { SGB::Instance().Reset(); }
 bool S9xSGBIsActive(void)           { return SGB::Instance().HasROM(); }
 void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
+void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
+
+void S9xSGBOnPpuHBlank(void) { SGB::Instance().OnPpuHBlank(); }
+void S9xSGBOnPpuVBlank(void) { SGB::Instance().OnPpuVBlank(); }
+void S9xSGBCaptureScanline(const unsigned char *pixels)
+{
+	SGB::Instance().CaptureScanline(static_cast<const uint8_t *>(pixels));
+}
 void S9xSGBSetJoypad(uint16_t m)    { SGB::Instance().SetJoypad(m); }
 void S9xSGBOnJoyserWrite(uint8_t v) { SGB::Instance().OnJoyserWrite(v); }
 

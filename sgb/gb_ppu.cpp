@@ -350,8 +350,9 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		{
 			p.mode_clock -= MODE0_DOTS;
 			++p.ly;
-			// SGB BIOS-mode hook: advance $6000 row counter per line.
-			// VBlank branch below resets it. Benign in BIOS-less mode.
+			// bsnes ICD::ppuHreset equivalent — advance $6000 row/bank
+			// from GB PPU. Frozen while GB halted (callback only fires
+			// when GB actually ticks).
 			S9xSGBOnPpuHBlank();
 			if (p.ly == VISIBLE_LINES)
 			{
@@ -359,7 +360,7 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 				p.frame_ready   = true;
 				p.window_line   = 0;
 				mem.if_         = static_cast<uint8_t>(mem.if_ | IRQ_VBLANK);
-				S9xSGBOnPpuVBlank();
+				S9xSGBOnPpuVBlank();  // bsnes ICD::ppuVreset
 			}
 			else
 			{

@@ -182,6 +182,40 @@ bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path
 void S9xSGBRunFrame(void);
 void S9xSGBRunCycles(int tcycles);
 
+// Accumulator-based SNES→GB cycle stepping for BIOS mode. Call per
+// SNES opcode (or per H event) with the number of SNES master cycles
+// just consumed. Internally divides by 5 (SGB1 clock ratio) and steps
+// the GB core by the resulting GB T-cycle count, carrying the fractional
+// remainder to the next call. Much finer-grained than per-scanline
+// batch stepping — the BIOS's $B9BE row-diff check needs continuous
+// row advancement to progress.
+void S9xSGBTickSnes(int snes_master_cycles);
+void S9xSGBResetClockSync(void);
+
+// Coroutine-style mid-opcode catch-up. Call with current CPU.Cycles
+// before every ICD2 register read/write and at end of each SNES
+// opcode iteration. Internally tracks the last-synced anchor cycle;
+// compensates for SNES scanline wrap using the h_max value set via
+// S9xSGBSetHMax(). The GB core is always caught up to the SNES's
+// exact master-cycle position before the host side reads $6000/
+// $6002/etc., so cross-domain reads reflect the most recent GB PPU
+// state — matches bsnes's libco thread sync-point semantics without
+// the coroutine runtime.
+void S9xSGBSyncToSnesCycle(int32_t cpu_cycles);
+
+// Tell sgb.cpp the SNES scanline period (Timings.H_Max) so it can
+// recover from CPU.Cycles wrap. Call once per frame from cpuexec.
+// Kept out of S9xSGBSyncToSnesCycle's signature so getset.h inlines
+// don't have to see the STimings struct.
+void S9xSGBSetHMax(int32_t h_max);
+
+// Reset the sync anchor to the given SNES cycle. Call at known-good
+// restart points — start of each SNES frame, just after $6003 bit-7
+// release (since Reset() zeroes the GB state). Without a reset, a
+// stale anchor from before a scanline wrap can make the first delta
+// appear huge (or negative beyond h_max correction).
+void S9xSGBResetSyncAnchor(int32_t cpu_cycles);
+
 // GB PPU scanline-event hooks used to advance the SGB row/bank counters
 // exposed at $6000. Call at HBlank end of each visible line (mode 0 →
 // mode 2 transition for lines 0..142) and at VBlank entry (line 143 →

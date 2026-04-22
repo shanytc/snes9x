@@ -151,6 +151,8 @@ inline uint8 S9xGetByte (uint32 Address)
 			return (byte);
 
 		case CMemory::MAP_SGB_ICD2:
+			if (Settings.SGB_BIOSModeActive)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
 			byte = S9xSGBGetICD2(Address & 0xffff);
 			addCyclesInMemoryAccess;
 			return (byte);
@@ -316,8 +318,12 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			return (word);
 
 		case CMemory::MAP_SGB_ICD2:
+			if (Settings.SGB_BIOSModeActive)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
 			word  = S9xSGBGetICD2(Address & 0xffff);
 			addCyclesInMemoryAccess;
+			if (Settings.SGB_BIOSModeActive)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
 			word |= S9xSGBGetICD2((Address + 1) & 0xffff) << 8;
 			addCyclesInMemoryAccess;
 			return (word);
@@ -430,6 +436,8 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 			return;
 
 		case CMemory::MAP_SGB_ICD2:
+			if (Settings.SGB_BIOSModeActive)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
 			S9xSGBSetICD2(Byte, Address & 0xffff);
 			addCyclesInMemoryAccess;
 			return;
@@ -708,16 +716,24 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 		case CMemory::MAP_SGB_ICD2:
 			if (o)
 			{
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
 				S9xSGBSetICD2(Word >> 8, (Address + 1) & 0xffff);
 				addCyclesInMemoryAccess;
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
 				S9xSGBSetICD2((uint8) Word, Address & 0xffff);
 				addCyclesInMemoryAccess;
 				return;
 			}
 			else
 			{
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
 				S9xSGBSetICD2((uint8) Word, Address & 0xffff);
 				addCyclesInMemoryAccess;
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
 				S9xSGBSetICD2(Word >> 8, (Address + 1) & 0xffff);
 				addCyclesInMemoryAccess;
 				return;

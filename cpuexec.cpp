@@ -86,6 +86,18 @@ void S9xMainLoop (void)
 		S9xMovieUpdate();
 	}
 
+	// Reset the SGB sync anchor to the current SNES cycle at loop entry
+	// and publish the scanline period for wrap-compensation. getset.h
+	// calls S9xSGBSyncToSnesCycle on every ICD2 access; without a fresh
+	// anchor the first delta would be huge (or bogus-negative if a
+	// scanline wrap just happened) and misattribute past SNES cycles
+	// to the GB core.
+	if (Settings.SGB_BIOSModeActive)
+	{
+		S9xSGBSetHMax(Timings.H_Max);
+		S9xSGBResetSyncAnchor(CPU.Cycles);
+	}
+
 	for (;;)
 	{
 		if (CPU.NMIPending)
@@ -217,6 +229,16 @@ void S9xMainLoop (void)
 
 		if (Settings.SA1)
 			S9xSA1MainLoop();
+
+		// Coroutine-style SNES→GB sync. Post-iteration catch-up covers
+		// any cycles since the last ICD2 access (or since loop entry).
+		// getset.h also calls S9xSGBSyncToSnesCycle mid-opcode on every
+		// ICD2 register access, so BIOS polls of $6000/$6002 see the
+		// most recent GB PPU state — matches bsnes's thread-yield model
+		// without the coroutine runtime. Handles scanline wrap via the
+		// h_max argument.
+		if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+			S9xSGBSyncToSnesCycle(CPU.Cycles);
 	}
 
 	// P2 — in BIOS mode the GB core is held in reset until the BIOS
@@ -224,13 +246,6 @@ void S9xMainLoop (void)
 	// Matches real SGB hardware: the SNES boots first, brings up border
 	// + palette, then unblocks the GB CPU. Until then we skip stepping
 	// entirely so the SNES loop keeps its 60 fps budget.
-	// P2 — in BIOS mode, force the I flag clear at end-of-frame so the
-	// BIOS's V-IRQ fires. Not ideal (real HW doesn't need this) but in
-	// our setup the BIOS's init path that would do CLI isn't reached.
-	// TODO: find the missing CLI and drop this workaround.
-	if (Settings.SGB_BIOSModeActive)
-		Registers.PL &= ~0x04;
-
 	if (Settings.SGB_BIOSModeActive)
 	{
 		const bool released = S9xSGBBIOSGBIsReleased();
@@ -241,8 +256,8 @@ void S9xMainLoop (void)
 			                  ? Settings.GBClockMultiplier : 1.0f;
 			S9xSGBSetClockMultiplier(mul);
 			S9xSGBSetRunMode(Settings.GameBoyRunMode);
-			// Per-scanline stepping now happens in S9xDoHEventProcessing.
-			// End-of-frame RunFrame disabled to avoid double-stepping.
+			// GB is now stepped per SNES opcode via S9xSGBTickSnes —
+			// see the main loop. Per-scanline/end-of-frame run disabled.
 		}
 
 		// Periodic status OSD for P2 triage — once per second, print the
@@ -280,9 +295,11 @@ void S9xMainLoop (void)
 			S9xSGBGetStatus(gb_buf, sizeof gb_buf);
 			const uint8 p_flags = Registers.PL;
 			snprintf(msg, sizeof msg,
-			         "PC=%04X P=%02X 4200=%02X $22ed=%u 02F8#%u IRQ#%u | %s",
+			         "PC=%04X P=%02X 4200=%02X Vt=%u Ht=%u V=%u $22ed=%u 02F8#%u IRQ#%u | %s",
 			         static_cast<unsigned>(Registers.PCw),
-			         p_flags, nmitimen, s_22_edges, s_f8_set_count,
+			         p_flags, nmitimen, v_target, h_target,
+			         static_cast<unsigned>(CPU.V_Counter),
+			         s_22_edges, s_f8_set_count,
 			         irq_line, gb_buf);
 			const uint32 saved = Settings.InitialInfoStringTimeout;
 			Settings.InitialInfoStringTimeout = 120;
@@ -378,18 +395,11 @@ void S9xDoHEventProcessing (void)
 				SuperFX.oneLineDone = FALSE;
 			}
 
-			// P2 — BIOS mode: step the GB core by roughly one scanline's
-			// worth of T-cycles at each SNES scanline boundary. Rate
-			// matches Mesen2/real SGB: GB clock = SNES master / 5 =
-			// 21477272 / 5 ≈ 4.295 MHz. Per SNES scanline = 21477272 /
-			// 5 / 60 / 262 ≈ 273 GB T-cycles. This is intentionally
-			// ~0.32 lines faster than the SNES frame so the GB PPU's
-			// row position drifts naturally across SNES frames — which
-			// is exactly what BIOS's $B9BE row-diff check needs.
-			if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
-			{
-				S9xSGBRunCycles(273);
-			}
+			// GB stepping via S9xSGBTickSnes in main loop. $6000 vcounter
+			// driven by GB PPU (HBlank/VBlank hooks in gb_ppu.cpp), which
+			// per bsnes is correctly FROZEN while GB is halted ($6003
+			// bit 7 = 0). BIOS polling $6000 during splash gets stable
+			// zero until BIOS actually releases the GB.
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

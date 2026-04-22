@@ -140,15 +140,26 @@ struct Emulator::Impl
 		//   $20 (P14 active only)     = 0-bit
 		//   $30 (both inactive)       = clock-high / idle
 		// We shift bits into bit_accumulator LSB-first, pack into
-		// packet_data[] every 8 bits, then flag packet_ready after 16
-		// bytes. Single-slot FIFO — BIOS must drain $7000-$700F before
-		// the next packet completes.
-		uint8_t  packet_data[16];
+		// assembly_buf[] every 8 bits. On the 16th byte the fully-
+		// assembled packet is pushed onto packet_queue.
+		uint8_t  assembly_buf[16];
 		uint16_t bit_accumulator;
 		uint8_t  packet_bit;    // 0..7
 		uint8_t  packet_byte;   // 0..16
 		bool     in_packet;
-		bool     packet_ready;
+
+		// 64-deep packet queue (ring buffer). Matches bsnes's icd.cpp
+		// packet path. The GB sends packets in bursts (5 handshake
+		// packets back-to-back, plus game-driven palette/CHR/PCT/ATTR
+		// transfers) — a single-slot FIFO loses anything after the
+		// first while the BIOS is busy draining, which corrupts the
+		// expected command sequence and strands the BIOS waiting for
+		// $6002 forever. Queue drains on $7000-$700F reads: drain_ptr
+		// advances per read; at 16 we pop the head and decrement count.
+		uint8_t  packet_queue[64][16];
+		uint8_t  queue_head;         // next packet to drain (0..63)
+		uint8_t  queue_tail;         // next slot to push (0..63)
+		uint8_t  queue_count;        // number of packets queued (0..64)
 
 		// P2c diagnostic counters — help verify packet flow by OSD.
 		uint32_t packets_received;   // completed 16-byte packets
@@ -158,6 +169,16 @@ struct Emulator::Impl
 		uint32_t f1_packets;         // packets whose first byte == $F1 (boot ROM handshake)
 		uint8_t  last_cmd_ids[8];    // ring buffer of last 8 packet command IDs (byte0 >> 3)
 		uint8_t  last_cmd_ids_len;   // 0..8
+
+		// Per-address read/write counts for the registers the BIOS is
+		// most likely to poll. Lets the status line expose which
+		// register the BIOS is hot-looping on (distinct from bucketed
+		// counts since $60xx and $78xx share low nibbles).
+		uint32_t r_6000, r_6002, r_6003, r_600F, r_7000, r_7800;
+		uint32_t w_6000, w_6001, w_6003, w_7000;
+		uint16_t last_read_addr;
+		uint16_t last_write_addr;
+		uint8_t  last_write_val;
 
 		// Synthesized boot-ROM handshake. Most GB boot ROM dumps are plain
 		// DMG — they scroll the Nintendo logo and disable themselves but
@@ -229,6 +250,15 @@ void Emulator::Reset()
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
+	// $7800 capture ring starts as $FF (matches bsnes `output[2048]=0xFF`).
+	std::memset(impl_->icd2.lcd_ring, 0xFF, sizeof impl_->icd2.lcd_ring);
+	// Joypad registers idle = $FF (active-low, no buttons held).
+	// bsnes r6004-r6007 = 0xff. Initializing to 0 makes the GB see all
+	// buttons held and the SGB BIOS's probe sequences fail. Critical.
+	impl_->icd2.joypad[0] = 0xFF;
+	impl_->icd2.joypad[1] = 0xFF;
+	impl_->icd2.joypad[2] = 0xFF;
+	impl_->icd2.joypad[3] = 0xFF;
 
 	impl_->mem.ppu    = &impl_->ppu;
 	impl_->mem.apu    = &impl_->apu;
@@ -336,16 +366,21 @@ void Emulator::PrimeBIOSHandshake()
 	icd.drain_ptr       = 0;
 }
 
-static void IcdStageNextSynth(Emulator::Impl::Icd2 &icd)
+// Push a freshly-assembled 16-byte packet onto the queue. Drops the
+// oldest slot silently if the queue is full — matches bsnes icd.cpp
+// behavior (`if(packetSize >= 64) packetSize = 64;`). Bumps the
+// diagnostic counters as the canonical "packet arrived" event.
+static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 {
-	if (icd.synth_remaining == 0) return;
-	const uint8_t next_idx = static_cast<uint8_t>(5 - icd.synth_remaining);
-	std::memcpy(icd.packet_data, icd.synth_packets[next_idx], 16);
-	icd.synth_remaining--;
-	icd.packet_ready = true;
-	icd.drain_ptr    = 0;
+	std::memcpy(icd.packet_queue[icd.queue_tail], pkt, 16);
+	icd.queue_tail = static_cast<uint8_t>((icd.queue_tail + 1) & 63);
+	if (icd.queue_count < 64)
+		icd.queue_count++;
+	else
+		icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
+
 	icd.packets_received++;
-	const uint8_t byte0  = icd.packet_data[0];
+	const uint8_t byte0  = pkt[0];
 	const uint8_t cmd_id = static_cast<uint8_t>(byte0 >> 3);
 	if (byte0 == 0xF1) icd.f1_packets++;
 	if (icd.last_cmd_ids_len < 8)
@@ -356,6 +391,14 @@ static void IcdStageNextSynth(Emulator::Impl::Icd2 &icd)
 			icd.last_cmd_ids[i] = icd.last_cmd_ids[i + 1];
 		icd.last_cmd_ids[7] = cmd_id;
 	}
+}
+
+static void IcdStageNextSynth(Emulator::Impl::Icd2 &icd)
+{
+	if (icd.synth_remaining == 0) return;
+	const uint8_t next_idx = static_cast<uint8_t>(5 - icd.synth_remaining);
+	IcdPushQueue(icd, icd.synth_packets[next_idx]);
+	icd.synth_remaining--;
 }
 
 bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
@@ -447,18 +490,21 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	if (!buf || cap == 0) return;
 	const CpuState &s = impl_->cpu.State();
 	const Emulator::Impl::Icd2 &icd = impl_->icd2;
-	char cmds[64] = {0};
-	char *p = cmds;
-	for (unsigned i = 0; i < icd.last_cmd_ids_len && p < cmds + sizeof cmds - 4; ++i)
-		p += std::snprintf(p, sizeof cmds - (p - cmds), "%02X ", icd.last_cmd_ids[i]);
+
 	std::snprintf(buf, cap,
-	              "GBPC=%04X ctrl=%02X pkts=%u rowW=%u ly=%u sgb_row=%u sgb_bk=%u $6000=%02X",
+	              "GBPC=%04X ctrl=%02X pkts=%u rowW=%u ly=%u $6000=%02X "
+	              "R:6000=%u 6002=%u 6003=%u 600F=%u 7000=%u 7800=%u "
+	              "W:6000=%u 6001=%u 6003=%u 7000=%u "
+	              "L=%04X W=%04X:%02X",
 	              s.r.pc, icd.control,
 	              icd.packets_received,
 	              icd.row_writes,
 	              static_cast<unsigned>(impl_->ppu.ly),
-	              unsigned(icd.sgb_row), unsigned(icd.sgb_bank),
-	              unsigned((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03)));
+	              unsigned((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03)),
+	              icd.r_6000, icd.r_6002, icd.r_6003, icd.r_600F, icd.r_7000, icd.r_7800,
+	              icd.w_6000, icd.w_6001, icd.w_6003, icd.w_7000,
+	              unsigned(icd.last_read_addr),
+	              unsigned(icd.last_write_addr), unsigned(icd.last_write_val));
 }
 
 // ICD2 register mirrors repeat every 16 bytes across each kB window
@@ -470,23 +516,39 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 	if (!impl_) return 0xFF;
 	const uint16_t a = Icd2Mask(addr);
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
+	icd.last_read_addr = a;
+	switch (a)
+	{
+		case 0x6000: icd.r_6000++; break;
+		case 0x6002: icd.r_6002++; break;
+		case 0x6003: icd.r_6003++; break;
+		case 0x600F: icd.r_600F++; break;
+		default:
+			if      (a >= 0x7000 && a <= 0x700F) icd.r_7000++;
+			else if (a >= 0x7800 && a <= 0x780F) icd.r_7800++;
+			break;
+	}
 
-	// $7000-$700F — packet data FIFO. Reading any byte clears packet_ready.
+	// $7000-$700F — front of the packet queue. Reading any byte drains
+	// one byte of the current head packet; at 16 bytes we pop the head.
+	// Returns $FF when the queue is empty (matches bsnes's static default).
 	if (a >= 0x7000 && a <= 0x700F)
 	{
-		const uint8_t b = icd.packet_data[a & 0x0F];
-		icd.packet_ready = false;
 		icd.fifo_reads++;
+		if (icd.queue_count == 0)
+			return 0xFF;
+		const uint8_t b = icd.packet_queue[icd.queue_head][a & 0x0F];
 		icd.drain_ptr++;
-		// When the BIOS has fully drained a packet (sequentially reads
-		// all 16 bytes), stage the next synth packet if any remain. The
-		// synth queue feeds the $F1 handshake packets that a real GB
-		// boot ROM would have sent; after those are gone the real GB
-		// packet stream takes over.
 		if (icd.drain_ptr >= 16)
 		{
-			icd.drain_ptr = 0;
-			IcdStageNextSynth(icd);  // no-op if synth queue is empty
+			icd.drain_ptr  = 0;
+			icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
+			icd.queue_count--;
+			// Keep the legacy synth path alive: after the current packet
+			// is drained, push the next synth packet if any remain.
+			// Normally no-op — either the queue already has real packets
+			// behind the head, or synth was exhausted at prime time.
+			IcdStageNextSynth(icd);
 		}
 		return b;
 	}
@@ -533,10 +595,12 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 			// completed; bank cycles 0..3 as the rolling capture buffers
 			// advance.
 			return static_cast<uint8_t>((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03));
-		case 0x6002: return icd.packet_ready ? 1 : 0;
+		case 0x6002: return icd.queue_count > 0 ? 1 : 0;
+		case 0x6003: return icd.control;    // R/W — some BIOS paths verify writes
+
 		case 0x600F: return 0x21;           // BIOS version byte (bsnes / Mesen return $21)
 	}
-	return 0xFF;
+	return 0x00;  // bsnes readIO falls through to 0 for unmapped ICD2 addrs
 }
 
 void Emulator::SetICD2(uint8_t value, uint16_t addr)
@@ -544,6 +608,17 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 	if (!impl_) return;
 	const uint16_t a = Icd2Mask(addr);
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
+	icd.last_write_addr = a;
+	icd.last_write_val  = value;
+	switch (a)
+	{
+		case 0x6000: icd.w_6000++; break;
+		case 0x6001: icd.w_6001++; break;
+		case 0x6003: icd.w_6003++; break;
+		default:
+			if (a >= 0x7000 && a <= 0x700F) icd.w_7000++;
+			break;
+	}
 
 	switch (a)
 	{
@@ -559,8 +634,36 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			return;
 		case 0x6003:
 		{
-			icd.control = value;
+			// Match bsnes `io.cpp`: on 0→1 transition of bit 7, the GB
+			// is POWER-ON-RESET. Essential for the SGB boot handshake —
+			// the BIOS writes $80 to start the GB from its reset vector
+			// so the boot ROM runs fresh (Nintendo logo scroll → 5-
+			// packet handshake). Without this the GB is already past
+			// its boot ROM and the BIOS's expected sequence breaks.
+			const bool was_released = (icd.control & 0x80) != 0;
+			const bool now_released = (value & 0x80) != 0;
 			icd.ctrl_writes++;
+			if (!was_released && now_released)
+			{
+				Reset();                     // full GB reset, zeroes icd2
+				impl_->icd2.control = value; // re-apply after reset
+			}
+			else
+			{
+				icd.control = value;
+				// Entering reset (1→0): freeze the row/bank counters
+				// to 0 so $6000 reads match the fresh GB state the
+				// BIOS will see once it re-releases. Without this the
+				// counters stay at whatever mid-frame value the GB
+				// was executing when the BIOS wrote $01, and the
+				// BIOS's subsequent $6000 poll can confuse its
+				// "GB fresh?" check on the next release.
+				if (was_released && !now_released)
+				{
+					icd.sgb_row  = 0;
+					icd.sgb_bank = 0;
+				}
+			}
 			return;
 		}
 		case 0x6004:
@@ -599,7 +702,7 @@ bool Emulator::IsGBReleased() const
 bool Emulator::IsHandshakePending() const
 {
 	if (!impl_) return false;
-	return impl_->icd2.synth_remaining > 0 || impl_->icd2.packet_ready;
+	return impl_->icd2.synth_remaining > 0 || impl_->icd2.queue_count > 0;
 }
 
 void Emulator::OnPpuHBlank()
@@ -731,7 +834,8 @@ void Emulator::SetJoypad(uint16_t snes_pad_mask)
 //   $10 — 1-bit
 //   $20 — 0-bit
 //   $30 — idle / clock-high
-// Bits accumulate LSB-first into a byte, then into packet_data[0..15].
+// Bits accumulate LSB-first into a byte, then into assembly_buf[0..15]
+// which is pushed onto the packet queue on the 16th byte.
 // A rising edge on P15 (bit 5) while NOT in a packet advances the MLT_REQ
 // player index (see Pan Docs SGB multi-player handshake).
 static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
@@ -768,30 +872,19 @@ static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
 	if (icd.packet_bit >= 8)
 	{
 		if (icd.packet_byte < 16)
-			icd.packet_data[icd.packet_byte] = static_cast<uint8_t>(icd.bit_accumulator);
+			icd.assembly_buf[icd.packet_byte] = static_cast<uint8_t>(icd.bit_accumulator);
 		icd.packet_byte++;
 		icd.packet_bit      = 0;
 		icd.bit_accumulator = 0;
 
 		if (icd.packet_byte >= 16)
 		{
-			icd.packet_ready     = true;
-			icd.in_packet        = false;
-			icd.packets_received++;
-
-			// Log this packet's command ID (byte 0 >> 3) into the ring
-			// so GetStatus can show what the GB has been sending.
-			const uint8_t cmd_id = static_cast<uint8_t>(icd.packet_data[0] >> 3);
-			if (icd.last_cmd_ids_len < 8)
-				icd.last_cmd_ids[icd.last_cmd_ids_len++] = cmd_id;
-			else
-			{
-				for (int i = 0; i < 7; ++i)
-					icd.last_cmd_ids[i] = icd.last_cmd_ids[i + 1];
-				icd.last_cmd_ids[7] = cmd_id;
-			}
-			// Count boot-ROM handshake packets (first byte $F1) separately.
-			if (icd.packet_data[0] == 0xF1) icd.f1_packets++;
+			icd.in_packet = false;
+			// Push the fully-assembled packet onto the queue. Counter
+			// bookkeeping (packets_received, last_cmd_ids, f1_packets)
+			// is handled inside IcdPushQueue for consistency with the
+			// synth-staging path.
+			IcdPushQueue(icd, icd.assembly_buf);
 		}
 	}
 }
@@ -1022,6 +1115,61 @@ void S9xSGBReset(void)              { SGB::Instance().Reset(); }
 bool S9xSGBIsActive(void)           { return SGB::Instance().HasROM(); }
 void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
+
+namespace {
+	int32_t g_snes_cycle_accum = 0;
+	int32_t g_sync_anchor      = 0;
+	int32_t g_h_max            = 1364;  // NTSC default; overwritten per-frame by cpuexec
+}
+
+void S9xSGBResetClockSync(void)
+{
+	g_snes_cycle_accum = 0;
+	g_sync_anchor      = 0;
+}
+
+void S9xSGBTickSnes(int snes_master_cycles)
+{
+	if (snes_master_cycles <= 0) return;
+	g_snes_cycle_accum += snes_master_cycles;
+	// SGB1 clock ratio: GB T-cycle = SNES master / 5 (≈ 4.295 MHz).
+	const int32_t gb_cycles = g_snes_cycle_accum / 5;
+	if (gb_cycles > 0)
+	{
+		g_snes_cycle_accum -= gb_cycles * 5;
+		SGB::Instance().RunCycles(gb_cycles);
+	}
+}
+
+void S9xSGBResetSyncAnchor(int32_t cpu_cycles)
+{
+	g_sync_anchor = cpu_cycles;
+}
+
+void S9xSGBSetHMax(int32_t h_max)
+{
+	if (h_max > 0) g_h_max = h_max;
+}
+
+void S9xSGBSyncToSnesCycle(int32_t cpu_cycles)
+{
+	int32_t delta = cpu_cycles - g_sync_anchor;
+	// Scanline wrap: snes9x's H-event subtracts H_Max from CPU.Cycles,
+	// so a legitimate forward step across the wrap appears as a large
+	// negative delta. Adding H_Max back recovers the real delta, as
+	// long as we sync at least once per scanline (trivially true given
+	// per-opcode sync points).
+	if (delta < 0) delta += g_h_max;
+	g_sync_anchor = cpu_cycles;
+	// GB is held in reset (control bit 7 = 0) — advance the anchor but
+	// do NOT step the GB core. Otherwise a BIOS write of $6003=$01
+	// (reset line held low) still lets the GB progress, which breaks
+	// the "toggle reset to re-boot GB" pattern the SGB BIOS uses after
+	// the splash animation. Match bsnes: GB thread only runs while
+	// r6003.d7 is 1.
+	if (!S9xSGBBIOSGBIsReleased()) return;
+	if (delta > 0) S9xSGBTickSnes(delta);
+}
 
 void S9xSGBOnPpuHBlank(void) { SGB::Instance().OnPpuHBlank(); }
 void S9xSGBOnPpuVBlank(void) { SGB::Instance().OnPpuVBlank(); }

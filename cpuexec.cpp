@@ -18,6 +18,7 @@
 #ifdef DEBUGGER
 #include "debug.h"
 #include "missing.h"
+#include "getset.h"
 #endif
 
 static inline void S9xReschedule (void);
@@ -289,18 +290,31 @@ void S9xMainLoop (void)
 		s_prev_c0 = now_c0;
 		if ((++s_tick % 60) == 0)
 		{
-			char buf[320], msg[512];
-			S9xSGBGetStatus(buf, sizeof buf);
-			char gb_buf[240];
+			char gb_buf[320], msg[512];
 			S9xSGBGetStatus(gb_buf, sizeof gb_buf);
-			const uint8 p_flags = Registers.PL;
+
+			// Compact diagnostic: SNES PC/banks/handshake counters, GB
+			// status (ring shows what our ICD2 actually served), and
+			// DMA channel 3 registers — that's the channel the BIOS
+			// triggers (MDMAEN=$08 = bit 3), so it's the real drain
+			// path. A1T3=7000 + BBAD3=18/22/80 tells us where the
+			// packet bytes are actually being streamed.
 			snprintf(msg, sizeof msg,
-			         "PC=%04X P=%02X 4200=%02X 02C0=%02X 02F8=%02X #5=%u | %s",
+			         "PC=%04X PB=%02X DB=%02X 02C0=%02X(max=%02X) 02F8=%02X #5=%u | %s\n"
+			         "DMA3 BBAD=%02X A1T=%02X%02X A1B=%02X DAS=%02X%02X  MDMAEN(last)=%02X  HDMAEN=%02X",
 			         static_cast<unsigned>(Registers.PCw),
-			         p_flags, nmitimen,
+			         static_cast<unsigned>(Registers.PB),
+			         static_cast<unsigned>(Registers.DB),
 			         static_cast<unsigned>(now_c0),
+			         static_cast<unsigned>(s_max_c0),
 			         static_cast<unsigned>(now_f8),
-			         s_f8_set_count, gb_buf);
+			         s_f8_set_count, gb_buf,
+			         Memory.FillRAM[0x4331],
+			         Memory.FillRAM[0x4333], Memory.FillRAM[0x4332],
+			         Memory.FillRAM[0x4334],
+			         Memory.FillRAM[0x4336], Memory.FillRAM[0x4335],
+			         Memory.FillRAM[0x420B],
+			         Memory.FillRAM[0x420C]);
 			const uint32 saved = Settings.InitialInfoStringTimeout;
 			Settings.InitialInfoStringTimeout = 120;
 			S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);

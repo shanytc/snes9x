@@ -187,13 +187,38 @@ struct Emulator::Impl
 		uint8_t  first_packet_byte0;
 		bool     first_packet_seen;
 
+		// Diagnostic: snapshot of the FIRST packet's full 16 bytes, and
+		// the byte0 of the first 8 packets. Lets us verify (a) that the
+		// Nintendo logo bytes at $0104.. reach the BIOS intact inside
+		// packet 0, and (b) that the boot ROM's packet-0 byte sequence
+		// is exactly F1 F3 F5 F7 F9 (5 packets) rather than a longer
+		// drifting list.
+		uint8_t  pkt0_bytes[16];
+		uint8_t  byte0_log[8];
+		uint8_t  byte0_log_len;
+
+		// Ring of the last 16 bytes returned for $7000-$700F reads.
+		// If the BIOS's drain path is reaching our ICD2 handler, we'll
+		// see real packet bytes here. If it's getting zeros/FFs, our
+		// queue wasn't serving valid data at that moment.
+		uint8_t  last_r7000_vals[16];
+		uint8_t  last_r7000_idx;
+
+		// bsnes-style packet read buffer. Reading $6002 with a pending
+		// packet pops the front of the queue into r7000_buf[0..15], and
+		// subsequent $7000-$700F reads return from this buffer (NOT the
+		// queue directly). This matters because the BIOS may not read
+		// all 16 bytes of a packet — if we only pop on $700F, we'd keep
+		// re-reading the same packet forever.
+		uint8_t  r7000_buf[16];
+
 		// Synthesized boot-ROM handshake. Most GB boot ROM dumps are plain
 		// DMG — they scroll the Nintendo logo and disable themselves but
 		// do NOT send the 5-packet SGB handshake the BIOS requires. We
 		// synthesize them here from the cart header so BIOS mode works
 		// without needing an SGB-specific boot ROM.
-		uint8_t  synth_packets[5][16];
-		uint8_t  synth_remaining;    // packets yet to hand out (5 → 0)
+		uint8_t  synth_packets[6][16];
+		uint8_t  synth_remaining;    // packets yet to hand out (6 → 0)
 		uint8_t  drain_ptr;          // bytes read of current packet (0..15)
 
 		// P2d — framebuffer char-transfer for $7800. The SGB BIOS reads
@@ -221,6 +246,18 @@ struct Emulator::Impl
 		// complete.
 		uint8_t  lcd_ring[4][8 * 160];
 	} icd2;
+
+	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
+	// SGB BIOS handshake validates that two consecutive GB resets produce
+	// byte-identical packets ($B8AE:BE3C captures byte 1s into $7E:1718,
+	// then $B0F6:B107 drains a second time and $B119 compares against
+	// $1718 — mismatch → $02FA=1 → cart error). Stored OUTSIDE the
+	// Icd2 struct because Reset() zeroes icd2 on every $6003 0→1
+	// transition, and we want the cache to persist across those resets
+	// so we can re-queue deterministic packets on subsequent releases.
+	uint8_t  cached_packets[6][16]{};
+	uint8_t  cached_count   = 0;   // 0..6 (how many filled during first boot)
+	bool     cache_valid    = false; // set true once 6 packets cached
 };
 
 // File-local trampoline — lets the process-global SgbCommandCallback
@@ -259,6 +296,9 @@ void Emulator::Reset()
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
 	// $7800 capture ring starts as $FF (matches bsnes `output[2048]=0xFF`).
 	std::memset(impl_->icd2.lcd_ring, 0xFF, sizeof impl_->icd2.lcd_ring);
+	// $7000-$700F latch buffer starts as $FF so reads before the first
+	// $6002 pop return all-ones (matches bsnes r7000 power-on state).
+	std::memset(impl_->icd2.r7000_buf, 0xFF, sizeof impl_->icd2.r7000_buf);
 	// Joypad registers idle = $FF (active-low, no buttons held).
 	// bsnes r6004-r6007 = 0xff. Initializing to 0 makes the GB see all
 	// buttons held and the SGB BIOS's probe sequences fail. Critical.
@@ -342,17 +382,17 @@ void Emulator::PrimeBIOSHandshake()
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
 	const std::vector<uint8_t> &rom = impl_->cart.rom;
 
-	// Real SGB boot ROM handshake sends 5 packets with byte 0 cycling
-	// through $F1, $F3, $F5, $F7, $F9 (the first-byte encoding of SGB
-	// "header data" commands, cmd_id $1E/$1F). Only the first packet's
-	// byte 0 is verified by the BIOS at $BE66 (must equal $F1). The
-	// subsequent 4 bytes drive the handshake counter $02C0 through the
-	// $BE75 path which doesn't content-check but the real boot ROM
-	// uses these specific values so we match for compatibility.
+	// Real SGB boot ROM handshake sends 6 packets with byte 0 cycling
+	// through $F1, $F3, $F5, $F7, $F9, $FB (low 3 bits encode a +2
+	// packet index that overflows the cmd_id nibble on the 5th step:
+	// cmd $1E idx 1/3/5/7 → $1F idx 1/3). The BIOS at $BE66/$BE69
+	// verifies the first packet's byte 0 against #$F1 and counts each
+	// subsequent packet into $02C0 at $BE75. Observed live from our
+	// own boot ROM capture: b0s = F1 F3 F5 F7 F9 FB, exactly.
 	// Bytes 1..15 are successive 15-byte slices of the cart header
 	// starting at $0104 (Nintendo logo bytes → title → cart-type → etc).
-	static const uint8_t kHeaderByte0[5] = { 0xF1, 0xF3, 0xF5, 0xF7, 0xF9 };
-	for (int p = 0; p < 5; ++p)
+	static const uint8_t kHeaderByte0[6] = { 0xF1, 0xF3, 0xF5, 0xF7, 0xF9, 0xFB };
+	for (int p = 0; p < 6; ++p)
 	{
 		icd.synth_packets[p][0] = kHeaderByte0[p];
 		for (int b = 1; b < 16; ++b)
@@ -369,7 +409,7 @@ void Emulator::PrimeBIOSHandshake()
 	// handshake counter ever increments. Wait for the BIOS to release
 	// the GB (write $6003 bit 7) — that's the real-hardware signal that
 	// the BIOS is ready to see handshake packets.
-	icd.synth_remaining = 5;     // 5 packets queued, none staged yet
+	icd.synth_remaining = 6;     // 6 packets queued, none staged yet
 	icd.drain_ptr       = 0;
 }
 
@@ -394,7 +434,10 @@ static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 	{
 		icd.first_packet_byte0 = byte0;
 		icd.first_packet_seen  = true;
+		std::memcpy(icd.pkt0_bytes, pkt, 16);
 	}
+	if (icd.byte0_log_len < 8)
+		icd.byte0_log[icd.byte0_log_len++] = byte0;
 	if (icd.last_cmd_ids_len < 8)
 		icd.last_cmd_ids[icd.last_cmd_ids_len++] = cmd_id;
 	else
@@ -408,7 +451,7 @@ static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 static void IcdStageNextSynth(Emulator::Impl::Icd2 &icd)
 {
 	if (icd.synth_remaining == 0) return;
-	const uint8_t next_idx = static_cast<uint8_t>(5 - icd.synth_remaining);
+	const uint8_t next_idx = static_cast<uint8_t>(6 - icd.synth_remaining);
 	IcdPushQueue(icd, icd.synth_packets[next_idx]);
 	icd.synth_remaining--;
 }
@@ -503,18 +546,26 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	const CpuState &s = impl_->cpu.State();
 	const Emulator::Impl::Icd2 &icd = impl_->icd2;
 
+	const uint8_t *p0 = icd.pkt0_bytes;
+	const uint8_t *b0 = icd.byte0_log;
+	const uint8_t *rv = icd.last_r7000_vals;
 	std::snprintf(buf, cap,
-	              "GBPC=%04X ctrl=%02X pkts=%u F1=%u 1st=%02X ly=%u "
-	              "R:6002=%u 7000=%u W:6001=%u 6003=%u L=%04X W=%04X:%02X",
+	              "GBPC=%04X ctrl=%02X pkts=%u F1=%u ly=%u "
+	              "b0s=%02X%02X%02X%02X%02X%02X "
+	              "p0=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
+	              "r7000_ring=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
+	              "R:6002=%u 7000=%u W:6001=%u 6003=%u",
 	              s.r.pc, icd.control,
 	              icd.packets_received,
 	              icd.f1_packets,
-	              icd.first_packet_byte0,
 	              static_cast<unsigned>(impl_->ppu.ly),
+	              b0[0], b0[1], b0[2], b0[3], b0[4], b0[5],
+	              p0[0],  p0[1],  p0[2],  p0[3],  p0[4],  p0[5],  p0[6],  p0[7],
+	              p0[8],  p0[9],  p0[10], p0[11], p0[12], p0[13], p0[14], p0[15],
+	              rv[0],  rv[1],  rv[2],  rv[3],  rv[4],  rv[5],  rv[6],  rv[7],
+	              rv[8],  rv[9],  rv[10], rv[11], rv[12], rv[13], rv[14], rv[15],
 	              icd.r_6002, icd.r_7000,
-	              icd.w_6001, icd.w_6003,
-	              unsigned(icd.last_read_addr),
-	              unsigned(icd.last_write_addr), unsigned(icd.last_write_val));
+	              icd.w_6001, icd.w_6003);
 }
 
 // ICD2 register mirrors repeat every 16 bytes across each kB window
@@ -539,30 +590,19 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 			break;
 	}
 
-	// $7000-$700F — front of the packet queue. Reading any byte drains
-	// one byte of the current head packet; at 16 bytes we pop the head.
-	// Returns $FF when the queue is empty (matches bsnes's static default).
+	// $7000-$700F — bsnes-style latch read. Returns bytes from r7000_buf,
+	// which was populated on the last $6002 read that found a pending
+	// packet. This lets the BIOS read any subset of the 16 bytes (or
+	// re-read them) without advancing the queue.
 	if (a >= 0x7000 && a <= 0x700F)
 	{
-		icd.fifo_reads++;
-		if (icd.queue_count == 0)
-			return 0xFF;
-		const uint8_t b = icd.packet_queue[icd.queue_head][a & 0x0F];
-		icd.drain_ptr++;
-		if (icd.drain_ptr >= 16)
-		{
-			icd.drain_ptr  = 0;
-			icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
-			icd.queue_count--;
-			// Keep the legacy synth path alive: after the current packet
-			// is drained, push the next synth packet if any remain.
-			// Normally no-op — either the queue already has real packets
-			// behind the head, or synth was exhausted at prime time.
-			IcdStageNextSynth(icd);
-		}
+		const uint8_t b = icd.r7000_buf[a & 0x0F];
+		// Trace: log into ring so OSD can see what our ICD2 actually
+		// served for the last drain attempts.
+		icd.last_r7000_vals[icd.last_r7000_idx & 0x0F] = b;
+		icd.last_r7000_idx++;
 		return b;
 	}
-
 	// $7800-$780F — GB frame char-transfer window. Streams bit-plane
 	// bytes from the live 4-bank capture ring (lcd_ring), selected by
 	// lcd_row_select. Layout per bank: 20 tiles × 8 rows × 2 planes =
@@ -579,7 +619,7 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 
 		const uint8_t tile_col = static_cast<uint8_t>(pos / 16);    // 0..19
 		const uint8_t byte_in  = static_cast<uint8_t>(pos & 0x0F);
-		const uint8_t row_in   = static_cast<uint8_t>(byte_in / 2); // 0..7
+		const uint8_t row_in   = static_cast<uint8_t>(byte_in >> 1); // 0..7
 		const uint8_t plane    = static_cast<uint8_t>(byte_in & 1);
 
 		const uint8_t bank     = static_cast<uint8_t>(icd.lcd_row_select & 0x03);
@@ -598,15 +638,37 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 	switch (a)
 	{
 		case 0x6000:
-			// bsnes `io.cpp`: `vcounter & ~7 | writeBank` where vcounter
-			// is the GB LY directly — includes VBlank lines 144..153,
-			// so during VBlank $6000 = 0x90 | bank. Our previous code
-			// reset sgb_row at VBlank entry, making $6000 = 0 | bank
-			// during VBlank — wrong. Use ppu.ly directly to match.
-			return static_cast<uint8_t>((impl_->ppu.ly & 0xF8) | (icd.sgb_bank & 0x03));
-		case 0x6002: return icd.queue_count > 0 ? 1 : 0;
-		case 0x6003: return icd.control;    // R/W — some BIOS paths verify writes
+			// bsnes `io.cpp`: `vcounter & ~7 | writeBank` — the low bits
+			// are the latched $6001 bank value (the BIOS's *request*),
+			// NOT our scanline-derived sgb_bank. Before the BIOS writes
+			// $6001 (early handshake) these bits must read zero, matching
+			// real hardware / bsnes. Upper bits are GB LY masked — includes
+			// VBlank lines 144..153, so during VBlank $6000 = 0x90 | bank.
+			return static_cast<uint8_t>((impl_->ppu.ly & 0xF8) | (icd.lcd_row_select & 0x03));
+		case 0x6002:
+		{
+			// Lazy-stage the next synth packet if queue's empty (no-op
+			// when a real boot ROM is running — synth_remaining stays 0).
+			if (icd.queue_count == 0 && icd.synth_remaining > 0)
+				IcdStageNextSynth(icd);
 
+			// bsnes semantics: reading $6002 with a pending packet POPS
+			// the front packet into r7000_buf[0..15] and shifts the queue.
+			// Subsequent $7000-$700F reads return from r7000_buf, so the
+			// BIOS can read any subset (or even re-read) without draining
+			// more packets. Return 0/1 based on whether a packet was
+			// popped (i.e., queue had data going in).
+			if (icd.queue_count > 0)
+			{
+				std::memcpy(icd.r7000_buf, icd.packet_queue[icd.queue_head], 16);
+				icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
+				icd.queue_count--;
+				IcdStageNextSynth(icd);
+				return 0x01;
+			}
+			return 0x00;
+		}
+		case 0x6003: return icd.control;    // R/W — some BIOS paths verify writes
 		case 0x600F: return 0x21;           // BIOS version byte (bsnes / Mesen return $21)
 	}
 	return 0x00;  // bsnes readIO falls through to 0 for unmapped ICD2 addrs
@@ -644,36 +706,54 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 		case 0x6003:
 		{
 			// Match bsnes `io.cpp`: on 0→1 transition of bit 7, the GB
-			// is POWER-ON-RESET. Essential for the SGB boot handshake —
-			// the BIOS writes $80 to start the GB from its reset vector
-			// so the boot ROM runs fresh (Nintendo logo scroll → 5-
-			// packet handshake). Without this the GB is already past
-			// its boot ROM and the BIOS's expected sequence breaks.
+			// is POWER-ON-RESET. On 1→0 we just freeze the GB in reset.
 			const bool was_released = (icd.control & 0x80) != 0;
 			const bool now_released = (value & 0x80) != 0;
 			icd.ctrl_writes++;
+
+			icd.control = value;
+
 			if (!was_released && now_released)
 			{
-				Reset();                     // full GB reset, zeroes icd2
-				PrimeBIOSHandshake(); // Re-fill the packets that Reset() just deleted
-				IcdStageNextSynth(impl_->icd2); // Push the first one ($F1) into the queue
-				impl_->icd2.control = value; // re-apply after reset
-			}
-			else
-			{
-				icd.control = value;
-				// Entering reset (1→0): freeze the row/bank counters
-				// to 0 so $6000 reads match the fresh GB state the
-				// BIOS will see once it re-releases. Without this the
-				// counters stay at whatever mid-frame value the GB
-				// was executing when the BIOS wrote $01, and the
-				// BIOS's subsequent $6000 poll can confuse its
-				// "GB fresh?" check on the next release.
-				if (was_released && !now_released)
+				if (!impl_->cache_valid)
 				{
-					icd.sgb_row  = 0;
-					icd.sgb_bank = 0;
+					// First release: fresh GB boot. Reset() zeroes icd2,
+					// reloads the boot ROM, sets PC=$0000. The GB's boot
+					// ROM will bit-bang 6 packets, which OnJoyserWrite
+					// caches into impl_->cached_packets as they arrive.
+					Reset();
+					icd.control = value;  // re-apply after Reset wiped it
+					if (!impl_->boot_rom_loaded)
+						PrimeBIOSHandshake();
 				}
+				else
+				{
+					// Subsequent release: the SGB2 BIOS handshake at
+					// $B119 requires byte-identical packets across two
+					// GB resets. Rather than re-running the boot ROM
+					// (whose bit-bang timing could shift by a cycle and
+					// change byte 1), drop the GB into reset and replay
+					// the SAME cached packets we captured during the
+					// first boot. The BIOS's $B119 comparison against
+					// $7E:1718 is guaranteed to match byte-for-byte,
+					// $02FA stays 0, handshake accepted.
+					// Clear only the ICD2 queue so we control exactly
+					// what the BIOS drains — GB CPU/PPU state is left
+					// alone (it's frozen in reset anyway while $6003
+					// bit 7 was 0).
+					icd.queue_head  = 0;
+					icd.queue_tail  = 0;
+					icd.queue_count = 0;
+					for (int p = 0; p < 6; ++p)
+						IcdPushQueue(icd, impl_->cached_packets[p]);
+				}
+			}
+			else if (was_released && !now_released)
+			{
+				// Entering reset: freeze row/bank so $6000 reads match
+				// the fresh GB state the BIOS sees on the next release.
+				icd.sgb_row  = 0;
+				icd.sgb_bank = 0;
 			}
 			return;
 		}
@@ -719,10 +799,13 @@ bool Emulator::IsHandshakePending() const
 void Emulator::OnPpuHBlank()
 {
 	if (!impl_) return;
-	Emulator::Impl::Icd2 &icd = impl_->icd2;
-	icd.sgb_row++;
-	if ((icd.sgb_row & 0x07) == 0)
-		icd.sgb_bank = static_cast<uint8_t>((icd.sgb_bank + 1) & 0x03);
+	Emulator::Impl::Icd2& icd = impl_->icd2;
+
+	// Direct mapping to scanlines: 
+	// This ensures the 4-bank ring buffer (lcd_ring) is filled 
+	// exactly how the SGB BIOS expects to read it via $6001/$7800.
+	icd.sgb_row = impl_->ppu.ly;
+	icd.sgb_bank = (icd.sgb_row / 8) & 0x03;
 }
 
 void Emulator::OnPpuVBlank()
@@ -914,7 +997,25 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	// BIOS-mode path — independent decoder that parks completed packets
 	// in the single-slot ICD2 FIFO. Harmless when no BIOS is running
 	// (nothing reads $7000-$700F).
+	const uint32_t pre_received = impl_->icd2.packets_received;
 	IcdFeedJoypad(impl_->icd2, value);
+	// If a new packet completed (packets_received grew), and our cache
+	// isn't full yet, append a copy. The SGB2 BIOS's handshake validator
+	// at $B119 compares each packet's byte 1 across TWO separate GB
+	// resets ($7E:1718 is the reference, populated by $BFD3 from a prior
+	// iteration's packets). If our re-booted GB produces byte-different
+	// packets, validation fails and $02FA=1 triggers cart error. Caching
+	// the first 6 real packets lets us re-queue byte-identical copies on
+	// subsequent releases, guaranteeing the BIOS's byte-1 reference check
+	// passes.
+	if (impl_->icd2.packets_received > pre_received &&
+	    impl_->cached_count < 6)
+	{
+		std::memcpy(impl_->cached_packets[impl_->cached_count],
+		            impl_->icd2.assembly_buf, 16);
+		impl_->cached_count++;
+		if (impl_->cached_count == 6) impl_->cache_valid = true;
+	}
 }
 
 void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)

@@ -258,6 +258,9 @@ struct Emulator::Impl
 	uint8_t  cached_packets[6][16]{};
 	uint8_t  cached_count   = 0;   // 0..6 (how many filled during first boot)
 	bool     cache_valid    = false; // set true once 6 packets cached
+	uint8_t  replays_done   = 0;   // cap replay count so post-splash releases don't
+	                                // keep re-queuing handshake packets (which would
+	                                // block game-generated SGB commands).
 };
 
 // File-local trampoline — lets the process-global SgbCommandCallback
@@ -652,12 +655,23 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 			if (icd.queue_count == 0 && icd.synth_remaining > 0)
 				IcdStageNextSynth(icd);
 
+			// Auto-stage cached packets if queue is empty and we have a
+			// valid cache from the first boot. The SGB2 BIOS's state
+			// machine requires ~41 sub-state iterations of successful
+			// handshake to advance $0101 to 5 (game-display mode via
+			// $808EA0 → JML $80AEFC). Each iteration needs 6 packets to
+			// drain with $B119 validating byte 1s against the $7E:1718
+			// reference. Without this auto-stage, the BIOS enters
+			// sub_80B107 with empty queue and spins on $6002 forever
+			// since it doesn't write $6003 inside that loop.
+			if (icd.queue_count == 0 && impl_->cache_valid)
+			{
+				for (int p = 0; p < 6; ++p)
+					IcdPushQueue(icd, impl_->cached_packets[p]);
+			}
+
 			// bsnes semantics: reading $6002 with a pending packet POPS
 			// the front packet into r7000_buf[0..15] and shifts the queue.
-			// Subsequent $7000-$700F reads return from r7000_buf, so the
-			// BIOS can read any subset (or even re-read) without draining
-			// more packets. Return 0/1 based on whether a packet was
-			// popped (i.e., queue had data going in).
 			if (icd.queue_count > 0)
 			{
 				std::memcpy(icd.r7000_buf, icd.packet_queue[icd.queue_head], 16);
@@ -726,27 +740,23 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 					if (!impl_->boot_rom_loaded)
 						PrimeBIOSHandshake();
 				}
-				else
+				else if (icd.queue_count == 0)
 				{
-					// Subsequent release: the SGB2 BIOS handshake at
-					// $B119 requires byte-identical packets across two
-					// GB resets. Rather than re-running the boot ROM
-					// (whose bit-bang timing could shift by a cycle and
-					// change byte 1), drop the GB into reset and replay
-					// the SAME cached packets we captured during the
-					// first boot. The BIOS's $B119 comparison against
-					// $7E:1718 is guaranteed to match byte-for-byte,
-					// $02FA stays 0, handshake accepted.
-					// Clear only the ICD2 queue so we control exactly
-					// what the BIOS drains — GB CPU/PPU state is left
-					// alone (it's frozen in reset anyway while $6003
-					// bit 7 was 0).
-					icd.queue_head  = 0;
-					icd.queue_tail  = 0;
-					icd.queue_count = 0;
+					// Subsequent release with an EMPTY queue — BIOS is
+					// expecting handshake packets to validate. Replay
+					// cached packets so $B119 passes and the state
+					// machine can advance $0102 through its ~41 sub-
+					// states (at which point $B0CD sets $0101=5 and
+					// $808EA0 jumps to game-mode display).
+					// Gate on queue_count==0 so we don't wipe any
+					// game-generated packets that are already queued —
+					// only replay when the BIOS actually needs packets.
 					for (int p = 0; p < 6; ++p)
 						IcdPushQueue(icd, impl_->cached_packets[p]);
+					impl_->replays_done++;
 				}
+				// Non-empty queue means game packets are pending —
+				// leave them alone and let the BIOS drain/process them.
 			}
 			else if (was_released && !now_released)
 			{

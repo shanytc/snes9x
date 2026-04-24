@@ -180,6 +180,13 @@ struct Emulator::Impl
 		uint16_t last_write_addr;
 		uint8_t  last_write_val;
 
+		// First byte of the first-ever packet to arrive after reset —
+		// that's what the SGB2 BIOS checks at $BE69 against #$F1. If
+		// this is not $F1, the BIOS's $02C0 handshake counter resets
+		// every call and the boot loop at $BE3C never exits.
+		uint8_t  first_packet_byte0;
+		bool     first_packet_seen;
+
 		// Synthesized boot-ROM handshake. Most GB boot ROM dumps are plain
 		// DMG — they scroll the Nintendo logo and disable themselves but
 		// do NOT send the 5-packet SGB handshake the BIOS requires. We
@@ -383,6 +390,11 @@ static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 	const uint8_t byte0  = pkt[0];
 	const uint8_t cmd_id = static_cast<uint8_t>(byte0 >> 3);
 	if (byte0 == 0xF1) icd.f1_packets++;
+	if (!icd.first_packet_seen)
+	{
+		icd.first_packet_byte0 = byte0;
+		icd.first_packet_seen  = true;
+	}
 	if (icd.last_cmd_ids_len < 8)
 		icd.last_cmd_ids[icd.last_cmd_ids_len++] = cmd_id;
 	else
@@ -492,17 +504,15 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	const Emulator::Impl::Icd2 &icd = impl_->icd2;
 
 	std::snprintf(buf, cap,
-	              "GBPC=%04X ctrl=%02X pkts=%u rowW=%u ly=%u $6000=%02X "
-	              "R:6000=%u 6002=%u 6003=%u 600F=%u 7000=%u 7800=%u "
-	              "W:6000=%u 6001=%u 6003=%u 7000=%u "
-	              "L=%04X W=%04X:%02X",
+	              "GBPC=%04X ctrl=%02X pkts=%u F1=%u 1st=%02X ly=%u "
+	              "R:6002=%u 7000=%u W:6001=%u 6003=%u L=%04X W=%04X:%02X",
 	              s.r.pc, icd.control,
 	              icd.packets_received,
-	              icd.row_writes,
+	              icd.f1_packets,
+	              icd.first_packet_byte0,
 	              static_cast<unsigned>(impl_->ppu.ly),
-	              unsigned((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03)),
-	              icd.r_6000, icd.r_6002, icd.r_6003, icd.r_600F, icd.r_7000, icd.r_7800,
-	              icd.w_6000, icd.w_6001, icd.w_6003, icd.w_7000,
+	              icd.r_6002, icd.r_7000,
+	              icd.w_6001, icd.w_6003,
 	              unsigned(icd.last_read_addr),
 	              unsigned(icd.last_write_addr), unsigned(icd.last_write_val));
 }
@@ -588,13 +598,12 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 	switch (a)
 	{
 		case 0x6000:
-			// Row/bank counters advanced by GB PPU HBlank/VBlank events
-			// (see S9xSGBOnPpuHBlank / S9xSGBOnPpuVBlank). Format matches
-			// Mesen2/real SGB: (row & 0xF8) | (bank & 0x03). The row
-			// bits let the BIOS track which of 18 8-line slices just
-			// completed; bank cycles 0..3 as the rolling capture buffers
-			// advance.
-			return static_cast<uint8_t>((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03));
+			// bsnes `io.cpp`: `vcounter & ~7 | writeBank` where vcounter
+			// is the GB LY directly — includes VBlank lines 144..153,
+			// so during VBlank $6000 = 0x90 | bank. Our previous code
+			// reset sgb_row at VBlank entry, making $6000 = 0 | bank
+			// during VBlank — wrong. Use ppu.ly directly to match.
+			return static_cast<uint8_t>((impl_->ppu.ly & 0xF8) | (icd.sgb_bank & 0x03));
 		case 0x6002: return icd.queue_count > 0 ? 1 : 0;
 		case 0x6003: return icd.control;    // R/W — some BIOS paths verify writes
 

@@ -295,12 +295,12 @@ void S9xMainLoop (void)
 			S9xSGBGetStatus(gb_buf, sizeof gb_buf);
 			const uint8 p_flags = Registers.PL;
 			snprintf(msg, sizeof msg,
-			         "PC=%04X P=%02X 4200=%02X Vt=%u Ht=%u V=%u $22ed=%u 02F8#%u IRQ#%u | %s",
+			         "PC=%04X P=%02X 4200=%02X 02C0=%02X 02F8=%02X #5=%u | %s",
 			         static_cast<unsigned>(Registers.PCw),
-			         p_flags, nmitimen, v_target, h_target,
-			         static_cast<unsigned>(CPU.V_Counter),
-			         s_22_edges, s_f8_set_count,
-			         irq_line, gb_buf);
+			         p_flags, nmitimen,
+			         static_cast<unsigned>(now_c0),
+			         static_cast<unsigned>(now_f8),
+			         s_f8_set_count, gb_buf);
 			const uint32 saved = Settings.InitialInfoStringTimeout;
 			Settings.InitialInfoStringTimeout = 120;
 			S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);

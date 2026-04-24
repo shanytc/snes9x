@@ -655,6 +655,8 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			if (!was_released && now_released)
 			{
 				Reset();                     // full GB reset, zeroes icd2
+				PrimeBIOSHandshake(); // Re-fill the packets that Reset() just deleted
+				IcdStageNextSynth(impl_->icd2); // Push the first one ($F1) into the queue
 				impl_->icd2.control = value; // re-apply after reset
 			}
 			else

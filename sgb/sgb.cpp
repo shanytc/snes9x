@@ -240,11 +240,17 @@ struct Emulator::Impl
 		// after drawing each visible line, which writes into bank[sgb_bank]
 		// at row (sgb_row & 7). $7800 reconstructs 2bpp bit-planes from
 		// this ring, NOT from the end-of-frame framebuffer. Matches
-		// bsnes (icd.hpp `output[4*512]`) and Mesen2 (`_lcdBuffer[4][1280]`)
-		// — the boot animation's logo scroll depends on this live capture
-		// since the BIOS reads $7800 mid-frame before ppu.framebuffer is
-		// complete.
+		// bsnes (icd.hpp `output[4*512]`) and Mesen2 (`_lcdBuffer[4][1280]`).
 		uint8_t  lcd_ring[4][8 * 160];
+
+		// Snapshot of the selected bank at the moment $6001 was written.
+		// $7800 reads from this snapshot (not the live lcd_ring), so the
+		// BIOS gets a stable view of the bank even if the GB overwrites
+		// it while the BIOS is mid-DMA. Without this, a bank whose rows
+		// are concurrently being re-drawn (slice 4 overwrites slice 0's
+		// bank 0, for instance) reads as a mix of two slices and produces
+		// horizontally-banded tile corruption in CHR_TRN output.
+		uint8_t  r7800_snapshot[8 * 160];
 	} icd2;
 
 	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
@@ -299,6 +305,9 @@ void Emulator::Reset()
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
 	// $7800 capture ring starts as $FF (matches bsnes `output[2048]=0xFF`).
 	std::memset(impl_->icd2.lcd_ring, 0xFF, sizeof impl_->icd2.lcd_ring);
+	// $7800 snapshot buffer also $FF so early reads (before any $6001
+	// write) return open-bus-like all-ones rather than stale pixels.
+	std::memset(impl_->icd2.r7800_snapshot, 0xFF, sizeof impl_->icd2.r7800_snapshot);
 	// $7000-$700F latch buffer starts as $FF so reads before the first
 	// $6002 pop return all-ones (matches bsnes r7000 power-on state).
 	std::memset(impl_->icd2.r7000_buf, 0xFF, sizeof impl_->icd2.r7000_buf);
@@ -625,7 +634,11 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		const uint8_t row_in   = static_cast<uint8_t>(byte_in >> 1); // 0..7
 		const uint8_t plane    = static_cast<uint8_t>(byte_in & 1);
 
-		const uint8_t bank     = static_cast<uint8_t>(icd.lcd_row_select & 0x03);
+		// Read LIVE from lcd_ring — matches bsnes/Mesen2, which both
+		// do not latch. The snapshot-on-$6001-write approach didn't
+		// help and may have captured bank contents at a less-optimal
+		// moment than what live reads give.
+		const uint8_t bank     = icd.lcd_row_select & 0x03;
 		const uint8_t *px      = &icd.lcd_ring[bank][row_in * 160 + tile_col * 8];
 
 		uint8_t b = 0;
@@ -656,18 +669,25 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 				IcdStageNextSynth(icd);
 
 			// Auto-stage cached packets if queue is empty and we have a
-			// valid cache from the first boot. The SGB2 BIOS's state
-			// machine requires ~41 sub-state iterations of successful
-			// handshake to advance $0101 to 5 (game-display mode via
-			// $808EA0 → JML $80AEFC). Each iteration needs 6 packets to
-			// drain with $B119 validating byte 1s against the $7E:1718
-			// reference. Without this auto-stage, the BIOS enters
-			// sub_80B107 with empty queue and spins on $6002 forever
-			// since it doesn't write $6003 inside that loop.
-			if (icd.queue_count == 0 && impl_->cache_valid)
+			// valid cache from the first boot. Without this, the BIOS
+			// eventually enters sub_80B107 with empty queue and spins
+			// on $6002 forever (it doesn't write $6003 inside that
+			// loop, so our release-triggered replay can't fire).
+			//
+			// Cap the count so the BIOS can eventually EXIT the
+			// validate-and-reset cycle. Staging indefinitely keeps the
+			// BIOS forever re-running handshake validation, which
+			// interferes with game-display tile transfers — garbled
+			// CHR_TRN output. 50 iterations is enough for the BIOS to
+			// complete splash setup and advance $0101 to game-display
+			// mode; after that the game's own SGB commands drive the
+			// packet queue and validation is no longer needed.
+			if (icd.queue_count == 0 && impl_->cache_valid &&
+			    impl_->replays_done < 50)
 			{
 				for (int p = 0; p < 6; ++p)
 					IcdPushQueue(icd, impl_->cached_packets[p]);
+				impl_->replays_done++;
 			}
 
 			// bsnes semantics: reading $6002 with a pending packet POPS
@@ -712,8 +732,8 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			icd.read_position  = 0;
 			// Advance to the next 8-row slice. Over 18 writes we cover
 			// the full 144-line GB frame; wrap so long read runs keep
-			// rolling. BIOS also polls $6000 (tied to GB LY) to time
-			// the reads with the GB PPU's natural scanline advance.
+			// rolling. $7800 now reads live from lcd_ring (matching
+			// bsnes/Mesen2 — they don't snapshot either).
 			icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
 			icd.row_writes++;
 			return;
@@ -821,7 +841,15 @@ void Emulator::OnPpuHBlank()
 void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
-	impl_->icd2.sgb_row = 0;
+	// Reset BOTH row and bank at VBlank. During VBlank scanlines
+	// (144-153), OnPpuHBlank isn't called, so these values persist
+	// until scanline 0 of the next frame. Leaving sgb_bank at its
+	// end-of-frame value (e.g. 2 after LY=144) causes scanline 0
+	// to be captured into the wrong bank, shifting every frame's
+	// first row into slice 2's slot instead of slice 0's. This was
+	// the "rows jumping around" bug seen across all SGB games.
+	impl_->icd2.sgb_row  = 0;
+	impl_->icd2.sgb_bank = 0;
 }
 
 void Emulator::CaptureScanline(const uint8_t *pixels)

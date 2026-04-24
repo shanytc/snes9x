@@ -111,6 +111,7 @@ void RenderBG(Ppu &p, uint8_t *line_out)
 			(((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));
 
 		p.scanline_bg_raw[x] = color_idx;
+		p.scanline_raw[x]    = color_idx;   // raw for SGB $7800 capture
 		line_out[x]          = ApplyPalette(p.bgp, color_idx);
 	}
 }
@@ -150,6 +151,7 @@ void RenderWindow(Ppu &p, uint8_t *line_out)
 			(((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));
 
 		p.scanline_bg_raw[x] = color_idx;
+		p.scanline_raw[x]    = color_idx;   // raw for SGB $7800 capture
 		line_out[x]          = ApplyPalette(p.bgp, color_idx);
 	}
 }
@@ -232,7 +234,8 @@ void RenderSprites(Ppu &p, uint8_t *line_out)
 
 			if (bg_over && p.scanline_bg_raw[x] != 0) continue;
 
-			line_out[x] = ApplyPalette(palette, color_idx);
+			p.scanline_raw[x] = color_idx;   // raw sprite pixel for SGB capture
+			line_out[x]       = ApplyPalette(palette, color_idx);
 		}
 	}
 }
@@ -259,14 +262,15 @@ void RenderScanline(Ppu &p)
 		// BG/window master off — fill with color 0 (post-palette).
 		std::memset(line,                 ApplyPalette(p.bgp, 0), GB_SCREEN_WIDTH);
 		std::memset(p.scanline_bg_raw, 0, GB_SCREEN_WIDTH);
+		std::memset(p.scanline_raw,    0, GB_SCREEN_WIDTH);
 	}
 
 	if (p.lcdc & 0x02) RenderSprites(p, line);
 
-	// SGB BIOS-mode hook: copy this freshly-drawn line into the ICD2
-	// capture ring so $7800 reads the LIVE framebuffer (required for
-	// the boot animation's Nintendo logo scroll and general SGB frame
-	// display). Benign in BIOS-less mode.
+	// SGB BIOS-mode hook: capture post-BGP/OBP shade values (what the
+	// real GB's LCD would show). SameBoy's ICD pixel callback delivers
+	// the same — post-palette value 0-3 — and bsnes stores those
+	// directly as the "color" it shifts into $7800 bit-planes.
 	S9xSGBCaptureScanline(line);
 }
 
@@ -278,6 +282,7 @@ void PpuReset(Ppu &p)
 	std::memset(p.oam,         0, sizeof p.oam);
 	std::memset(p.framebuffer, 0, sizeof p.framebuffer);
 	std::memset(p.scanline_bg_raw, 0, sizeof p.scanline_bg_raw);
+	std::memset(p.scanline_raw,    0, sizeof p.scanline_raw);
 	p.lcdc = 0x91;   // LCD on, BG on, BG tile data at 0x8000, BG map at 0x9800.
 	p.stat = 0x85;
 	p.scy = p.scx = p.ly = p.lyc = 0;

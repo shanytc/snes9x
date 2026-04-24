@@ -52,6 +52,14 @@ struct Ppu
 	// after the palette mapping has already been applied to framebuffer.
 	uint8_t  scanline_bg_raw[GB_SCREEN_WIDTH];
 
+	// Per-scanline FULL composited raw 2-bit color indices (BG + window
+	// + sprites, all pre-palette). bsnes/Mesen2 feed these raw indices
+	// to the SGB ICD2 $7800 readback — NOT BGP/OBP-mapped shades. If a
+	// game sets BGP to anything other than identity ($E4), the captured
+	// shades no longer match raw indices and CHR_TRN / live char-transfer
+	// produces mangled tile output on the SGB side.
+	uint8_t  scanline_raw[GB_SCREEN_WIDTH];
+
 	// Latched state of the STAT IRQ line — edge-triggered, so we fire an
 	// LCDSTAT interrupt only when this transitions 0 → 1.
 	bool     stat_line_high = false;

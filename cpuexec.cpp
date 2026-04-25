@@ -64,15 +64,18 @@ void S9xMainLoop (void)
 		S9xSGBBlitScreen(GFX.Screen, GFX.RealPPL);
 		S9xEndScreenRefresh();
 
-		// Drive the host audio callback to drain GB samples into the
-		// sound device. In standard SNES mode the SPC/DSP path fires
-		// this from S9xAPUEndScanline; in SGB mode that path is bypassed
-		// so we trigger it ourselves once per frame. With Settings.SoundSync
-		// enabled, ProcessSound will block on GUI.SoundSyncEvent until
-		// the audio queue drains — that's our throttle. Skipped during
-		// run-ahead so hidden-frame samples don't get queued for output.
-		if (!Settings.InRunAhead)
-			S9xLandSamples();
+		// NOTE: BIOS-less audio drain is intentionally NOT wired to
+		// S9xLandSamples here. ProcessSound's wait loop in CXAudio2
+		// checks freeBytes/2 vs S9xGetSampleCount(), which in
+		// SuperGameBoy mode returns the GB ring buffer count. Once
+		// the GB ring exceeds the audio queue capacity (~6144 int16
+		// at 48 kHz / 64 ms), the wait condition becomes unsatisfiable;
+		// after all buffers drain XAudio2 stops firing OnBufferEnd
+		// and WaitForSingleObject hits its 1000 ms timeout — the
+		// emulator pegs at 1 fps with a frozen UI. BIOS-less GB
+		// audio needs a different (non-SoundSync-blocking) pump;
+		// tracked as a follow-up. BIOS-mode audio still works via
+		// the SPC scanline path mixing in apu.cpp.
 
 		if (!Settings.InRunAhead)
 			S9xSyncSpeed();

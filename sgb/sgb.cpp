@@ -1282,12 +1282,42 @@ void S9xSGBTickSnes(int snes_master_cycles)
 {
 	if (snes_master_cycles <= 0) return;
 	g_snes_cycle_accum += snes_master_cycles;
-	// SGB1 clock ratio: GB T-cycle = SNES master / 5 (≈ 4.295 MHz).
-	const int32_t gb_cycles = g_snes_cycle_accum / 5;
-	if (gb_cycles > 0)
+
+	// Clock ratio depends on RunMode:
+	//   SGB1: GB clock = SNES master / 5 (≈ 4.295 MHz, slightly faster
+	//                    than DMG — matches the ICD2 cart's wiring).
+	//   SGB2: GB clock = real DMG clock (4.194 MHz). The SNES still
+	//                    runs at 21.477 MHz, so the ratio is ~5.121,
+	//                    NOT 5. Using /5 in SGB2 mode makes the GB run
+	//                    2.4% too fast; over a frame that's ~6 scan-
+	//                    lines of drift, which desyncs the BIOS's
+	//                    bank-read timing against our slice writes
+	//                    and produces visible vertical row drift.
+	//   DMG:  same as SGB2 — real GB clock.
+	int32_t gb_cycles;
+	const SGB::RunMode mode = SGB::Instance().GetRunMode();
+	if (mode == SGB::RunMode::SGB)
 	{
-		g_snes_cycle_accum -= gb_cycles * 5;
-		SGB::Instance().RunCycles(gb_cycles);
+		gb_cycles = g_snes_cycle_accum / 5;
+		if (gb_cycles > 0)
+		{
+			g_snes_cycle_accum -= gb_cycles * 5;
+			SGB::Instance().RunCycles(gb_cycles);
+		}
+	}
+	else
+	{
+		// 64-bit math to avoid overflow: ratio = 4194304 / 21477272.
+		// gb_cycles = accum * 4194304 / 21477272.
+		const int64_t scaled = static_cast<int64_t>(g_snes_cycle_accum) * 4194304;
+		gb_cycles = static_cast<int32_t>(scaled / 21477272);
+		if (gb_cycles > 0)
+		{
+			// Subtract back the SNES-cycle equivalent of what we ran.
+			const int64_t consumed = (static_cast<int64_t>(gb_cycles) * 21477272) / 4194304;
+			g_snes_cycle_accum -= static_cast<int32_t>(consumed);
+			SGB::Instance().RunCycles(gb_cycles);
+		}
 	}
 }
 

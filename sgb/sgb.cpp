@@ -860,15 +860,17 @@ void Emulator::OnPpuHBlank()
 void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
-	// Reset BOTH row and bank at VBlank. During VBlank scanlines
-	// (144-153), OnPpuHBlank isn't called, so these values persist
-	// until scanline 0 of the next frame. Leaving sgb_bank at its
-	// end-of-frame value (e.g. 2 after LY=144) causes scanline 0
-	// to be captured into the wrong bank, shifting every frame's
-	// first row into slice 2's slot instead of slice 0's. This was
-	// the "rows jumping around" bug seen across all SGB games.
+	// Reset row and bank at VBlank — see earlier comment for why both.
 	impl_->icd2.sgb_row  = 0;
 	impl_->icd2.sgb_bank = 0;
+
+	// Force-realign read_slice to 16 per frame so the first $6001 write
+	// of the next frame always advances to slice 17 (the wrap-read).
+	// Without this, drift accumulates if any frame has !=18 $6001 writes
+	// (e.g., during handshake transitions or BIOS internal scheduling
+	// variation), producing the slow vertical scroll-up of the entire
+	// composited image.
+	impl_->icd2.read_slice = 16;
 }
 
 void Emulator::CaptureScanline(const uint8_t *pixels)

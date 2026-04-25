@@ -175,7 +175,7 @@ struct Emulator::Impl
 		// register the BIOS is hot-looping on (distinct from bucketed
 		// counts since $60xx and $78xx share low nibbles).
 		uint32_t r_6000, r_6002, r_6003, r_600F, r_7000, r_7800;
-		uint32_t w_6000, w_6001, w_6003, w_7000;
+		uint32_t w_6000, w_6001, w_6003, w_7000, w_6004;
 		uint16_t last_read_addr;
 		uint16_t last_write_addr;
 		uint8_t  last_write_val;
@@ -757,6 +757,7 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 		case 0x6000: icd.w_6000++; break;
 		case 0x6001: icd.w_6001++; break;
 		case 0x6003: icd.w_6003++; break;
+		case 0x6004: icd.w_6004++; break;
 		default:
 			if (a >= 0x7000 && a <= 0x700F) icd.w_7000++;
 			break;
@@ -829,21 +830,25 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 		case 0x6004:
 		{
 			icd.joypad[0] = value;
-			// P2e minimal — mirror player 1's $6004 state into the GB joypad
-			// so the game's MLT_REQ probe sees plausible responses and so
-			// normal gameplay input works. Format: $6004 is active-low,
-			// upper nibble = d-pad (D,U,L,R = bits 7,6,5,4), lower nibble
-			// = buttons (Start,Select,B,A = bits 3,2,1,0). Multi-player
-			// cycling across $6005-$6007 will come later.
+			// SGB $6004 joypad-mirror format (verified against the BIOS's
+			// own bit-shuffle in sub_80BCDE — see SGB2.sfc.lst:12372+).
+			// Active-LOW. The BIOS writes:
+			//   bit 0: RIGHT     bit 4: A
+			//   bit 1: LEFT      bit 5: B
+			//   bit 2: UP        bit 6: SELECT
+			//   bit 3: DOWN      bit 7: START
+			// Earlier comment said the opposite (dpad in upper nibble) —
+			// that produced "press A → character moves right" because we
+			// interpreted bit 4 as Right.
 			uint8_t mask = 0;
-			if (!(value & 0x10)) mask |= GB_RIGHT;
-			if (!(value & 0x20)) mask |= GB_LEFT;
-			if (!(value & 0x40)) mask |= GB_UP;
-			if (!(value & 0x80)) mask |= GB_DOWN;
-			if (!(value & 0x01)) mask |= GB_A;
-			if (!(value & 0x02)) mask |= GB_B;
-			if (!(value & 0x04)) mask |= GB_SELECT;
-			if (!(value & 0x08)) mask |= GB_START;
+			if (!(value & 0x01)) mask |= GB_RIGHT;
+			if (!(value & 0x02)) mask |= GB_LEFT;
+			if (!(value & 0x04)) mask |= GB_UP;
+			if (!(value & 0x08)) mask |= GB_DOWN;
+			if (!(value & 0x10)) mask |= GB_A;
+			if (!(value & 0x20)) mask |= GB_B;
+			if (!(value & 0x40)) mask |= GB_SELECT;
+			if (!(value & 0x80)) mask |= GB_START;
 			JoypadSet(impl_->joypad, impl_->mem, mask);
 			return;
 		}

@@ -48,6 +48,11 @@ public:
 	bool Init();
 	void Deinit();
 	void Reset();
+	// Like Reset() but ALSO clears the BIOS-handshake packet cache and
+	// counters. Use for SNES-side reset / new ROM load — Reset() alone
+	// preserves the cache, which is correct for in-game $6003 0→1 GB
+	// resets but wrong when the user invokes File→Reset.
+	void ColdReset();
 
 	bool LoadROM(const uint8_t *data, size_t size, const char *path = nullptr);
 	void UnloadROM();

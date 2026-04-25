@@ -13,6 +13,7 @@
 #include "srtc.h"
 #include "snapshot.h"
 #include "cheats.h"
+#include "sgb/sgb.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #endif
@@ -128,6 +129,13 @@ void S9xReset (void)
 	if (Settings.MSU1)
 		S9xMSU1Init();
 
+	// SGB BIOS-mode: clear handshake cache + GB state so the next $6003
+	// release re-runs the boot ROM and the SGB splash plays again. Without
+	// this, our cache_valid persists from the previous session and the
+	// BIOS skips the splash on File→Reset.
+	if (Settings.SGB_BIOSModeActive)
+		S9xSGBReset();
+
 	S9xInitCheatData();
 }
 
@@ -164,6 +172,11 @@ void S9xSoftReset (void)
 		S9xResetSRTC();
 	if (Settings.MSU1)
 		S9xMSU1Init();
+
+	// Same as S9xReset above — File→Reset uses this path on some
+	// front-ends. Drop SGB handshake cache so splash replays.
+	if (Settings.SGB_BIOSModeActive)
+		S9xSGBReset();
 
 	S9xInitCheatData();
 }

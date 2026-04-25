@@ -297,7 +297,7 @@ Emulator::~Emulator() { delete impl_; }
 
 bool Emulator::Init()
 {
-	Reset();
+	ColdReset();   // first-time init: clear cache state too
 	SetSgbCommandCallback(&SgbCommandTrampoline);
 	return true;
 }
@@ -305,6 +305,24 @@ bool Emulator::Init()
 void Emulator::Deinit()
 {
 	UnloadROM();
+}
+
+void Emulator::ColdReset()
+{
+	// Clear the BIOS-handshake cache before delegating to Reset(). On a
+	// user-initiated reset (File→Reset / new ROM load), the SNES BIOS
+	// will run from scratch and expects to perform the full handshake
+	// again — but our cache_valid flag and cached_packets persist
+	// across the GB-side Reset() (which is correct for in-game $6003
+	// 0→1 transitions). Without clearing, the next $6003 release skips
+	// the boot-ROM run and replays cached packets, producing no SGB
+	// splash and either a black screen or whatever stale state the
+	// SNES retained from before the reset.
+	std::memset(impl_->cached_packets, 0, sizeof impl_->cached_packets);
+	impl_->cached_count = 0;
+	impl_->cache_valid  = false;
+	impl_->replays_done = 0;
+	Reset();
 }
 
 void Emulator::Reset()
@@ -491,7 +509,7 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	if (!CartLoad(impl_->cart, data, size, path))
 		return false;
 	impl_->has_rom = true;
-	Reset();
+	ColdReset();   // new cart → start fresh, drop any stale handshake cache
 	return true;
 }
 
@@ -1288,7 +1306,7 @@ Emulator &Instance()
 // C-style facade used by snes9x integration code.
 bool S9xSGBInit(void)               { return SGB::Instance().Init(); }
 void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
-void S9xSGBReset(void)              { SGB::Instance().Reset(); }
+void S9xSGBReset(void)              { SGB::Instance().ColdReset(); }
 bool S9xSGBIsActive(void)           { return SGB::Instance().HasROM(); }
 void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }

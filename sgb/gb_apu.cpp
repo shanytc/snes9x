@@ -407,9 +407,21 @@ void ApuReset(Apu &a)
 void ApuSetOutputRate(Apu &a, int32_t rate)
 {
 	if (rate <= 0) rate = 32000;
+	if (rate == a.output_rate) return;  // idempotent — preserve sample_timer
 	a.output_rate       = rate;
-	a.cycles_per_sample = (CPU_CLOCK_HZ + rate / 2) / rate;  // rounded
-	a.sample_timer      = a.cycles_per_sample;
+	a.cycles_per_sample = (a.clock_hz + rate / 2) / rate;  // rounded
+	if (a.cycles_per_sample < 1) a.cycles_per_sample = 1;
+	// Don't touch sample_timer — it's a countdown into the next sample
+	// boundary; letting it tick down naturally avoids a one-sample gap.
+}
+
+void ApuSetClockHz(Apu &a, int32_t hz)
+{
+	if (hz <= 0)         return;
+	if (hz == a.clock_hz) return;  // idempotent
+	a.clock_hz          = hz;
+	a.cycles_per_sample = (hz + a.output_rate / 2) / a.output_rate;
+	if (a.cycles_per_sample < 1) a.cycles_per_sample = 1;
 }
 
 // Event-driven advance. Per-T-cycle loops were the hottest code in the

@@ -53,11 +53,26 @@ void S9xMainLoop (void)
 		                  ? Settings.GBClockMultiplier : 1.0f;
 		S9xSGBSetClockMultiplier(mul);
 		S9xSGBSetRunMode(Settings.GameBoyRunMode);
+		// Match the GB APU's downsample target to the host playback rate
+		// so the samples we drain need no further rate conversion. The
+		// setter is idempotent, so calling every frame is cheap and
+		// picks up sound-config changes (output device / rate switch).
+		S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
 		S9xStartScreenRefresh();
 		S9xSGBRunFrame();
 		S9xSGBBlitScreen(GFX.Screen, GFX.RealPPL);
 		S9xEndScreenRefresh();
+
+		// Drive the host audio callback to drain GB samples into the
+		// sound device. In standard SNES mode the SPC/DSP path fires
+		// this from S9xAPUEndScanline; in SGB mode that path is bypassed
+		// so we trigger it ourselves once per frame. With Settings.SoundSync
+		// enabled, ProcessSound will block on GUI.SoundSyncEvent until
+		// the audio queue drains — that's our throttle. Skipped during
+		// run-ahead so hidden-frame samples don't get queued for output.
+		if (!Settings.InRunAhead)
+			S9xLandSamples();
 
 		if (!Settings.InRunAhead)
 			S9xSyncSpeed();

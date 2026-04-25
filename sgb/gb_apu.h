@@ -115,6 +115,12 @@ struct Apu
 	int32_t   sample_timer      = 0;
 	int32_t   cycles_per_sample = 131;  // ~4.194 MHz / 32000 Hz
 	int32_t   output_rate       = 32000;
+	// Actual GB clock rate the host is driving us at. Defaults to DMG
+	// (4.194 MHz); SGB1 mode uses SNES master / 5 = 4.295 MHz, which
+	// is 2.4% faster — without tracking this, SGB1 audio would play
+	// back chipmunk-pitched (samples emitted faster than the host rate
+	// expects). Used together with output_rate to compute cycles_per_sample.
+	int32_t   clock_hz          = 4194304;
 
 	// Ring buffer of mixed stereo int16 samples (interleaved L,R).
 	int16_t   sample_buf[APU_SAMPLE_BUF_SIZE * 2];
@@ -130,9 +136,15 @@ void    ApuWrite(Apu &a, uint16_t addr, uint8_t value);
 
 int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples);
 
-// Configure the downsample target. Call before Reset or it takes effect
-// on the next reset.
+// Configure the downsample target. Idempotent — re-applying the same
+// rate is a no-op so callers can safely push it every frame from the
+// host audio path without disturbing in-flight sample accumulation.
 void ApuSetOutputRate(Apu &a, int32_t rate);
+
+// Tell the APU the actual GB clock rate it's being stepped at. Affects
+// cycles_per_sample math so audio plays at correct pitch regardless of
+// run mode (DMG/SGB2 = 4.194 MHz, SGB1 = 4.295 MHz). Idempotent.
+void ApuSetClockHz(Apu &a, int32_t hz);
 
 } // namespace SGB
 

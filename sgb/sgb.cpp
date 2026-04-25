@@ -525,7 +525,17 @@ void Emulator::UnloadROM()
 
 bool Emulator::HasROM() const { return impl_->has_rom; }
 
-void Emulator::SetRunMode(RunMode m) { impl_->run_mode = m; }
+void Emulator::SetRunMode(RunMode m)
+{
+	if (m == impl_->run_mode) return;  // idempotent — avoids re-pushing clock
+	impl_->run_mode = m;
+	// SGB1 runs the GB at SNES_master / 5 = 4.295455 MHz (~2.4% faster
+	// than DMG); SGB2 and DMG both run at the authentic 4.194304 MHz.
+	// The APU uses this to keep cycles_per_sample correct so audio plays
+	// at the right pitch in every mode.
+	const int32_t clock = (m == RunMode::SGB) ? 4295455 : 4194304;
+	ApuSetClockHz(impl_->apu, clock);
+}
 RunMode Emulator::GetRunMode() const { return impl_->run_mode; }
 
 void Emulator::RunFrame()

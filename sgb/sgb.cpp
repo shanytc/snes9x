@@ -238,10 +238,25 @@ struct Emulator::Impl
 		// Per-pixel capture ring — 4 banks × 8 rows × 160 pixels (palette
 		// indices 0..3). The GB PPU's renderer calls S9xSGBCaptureScanline
 		// after drawing each visible line, which writes into bank[sgb_bank]
-		// at row (sgb_row & 7). $7800 reconstructs 2bpp bit-planes from
-		// this ring, NOT from the end-of-frame framebuffer. Matches
-		// bsnes (icd.hpp `output[4*512]`) and Mesen2 (`_lcdBuffer[4][1280]`).
+		// at row (sgb_row & 7). Matches bsnes/Mesen2 layout but only used
+		// as a transitional buffer; $7800 reads from full_frame instead
+		// (see below).
 		uint8_t  lcd_ring[4][8 * 160];
+
+		// Full 18-slice frame buffer. Each scanline N is captured into
+		// full_frame[N/8][N%8] without bank-wrap overwrite, so all 18
+		// slices (rows 0-7, 8-15, ..., 136-143) are simultaneously
+		// addressable.
+		uint8_t  full_frame[18][8 * 160];
+
+		// BIOS's $6001-write sequence counter. The BIOS writes $6001
+		// once per slice in order (slice 0, 1, ..., 17, then wraps).
+		// We track this independently of the bank value the BIOS
+		// writes, so $7800 reads map to the actual slice the BIOS is
+		// requesting — fixing the bank-wrap ambiguity (BIOS reads bank
+		// 3 at frame-end-wrap expecting slice 17, not slice 15 which
+		// happens to be in bank 3 at that moment).
+		uint8_t  read_slice;          // 0..17, current slice being read
 
 		// Snapshot of the selected bank at the moment $6001 was written.
 		// $7800 reads from this snapshot (not the live lcd_ring), so the
@@ -311,6 +326,9 @@ void Emulator::Reset()
 	// $7000-$700F latch buffer starts as $FF so reads before the first
 	// $6002 pop return all-ones (matches bsnes r7000 power-on state).
 	std::memset(impl_->icd2.r7000_buf, 0xFF, sizeof impl_->icd2.r7000_buf);
+	// Init read_slice to 17 so the first $6001 write advances it to
+	// 0 (slice 0 — what the BIOS expects on its first drain).
+	impl_->icd2.read_slice = 17;
 	// Joypad registers idle = $FF (active-low, no buttons held).
 	// bsnes r6004-r6007 = 0xff. Initializing to 0 makes the GB see all
 	// buttons held and the SGB BIOS's probe sequences fail. Critical.
@@ -634,12 +652,13 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		const uint8_t row_in   = static_cast<uint8_t>(byte_in >> 1); // 0..7
 		const uint8_t plane    = static_cast<uint8_t>(byte_in & 1);
 
-		// Read LIVE from lcd_ring — matches bsnes/Mesen2, which both
-		// do not latch. The snapshot-on-$6001-write approach didn't
-		// help and may have captured bank contents at a less-optimal
-		// moment than what live reads give.
-		const uint8_t bank     = icd.lcd_row_select & 0x03;
-		const uint8_t *px      = &icd.lcd_ring[bank][row_in * 160 + tile_col * 8];
+		// Read from the full 18-slice frame buffer indexed by the
+		// BIOS's $6001-write sequence counter (read_slice). Each
+		// $6001 write advances read_slice by 1 (mod 18), so the
+		// BIOS's drain pattern (slice 0, 1, …, 17, wrap) maps
+		// directly to the right slice in full_frame.
+		const uint8_t slice    = icd.read_slice % 18;
+		const uint8_t *px      = &icd.full_frame[slice][row_in * 160 + tile_col * 8];
 
 		uint8_t b = 0;
 		for (int i = 0; i < 8; ++i)
@@ -730,10 +749,12 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 		case 0x6001:
 			icd.lcd_row_select = value;
 			icd.read_position  = 0;
-			// Advance to the next 8-row slice. Over 18 writes we cover
-			// the full 144-line GB frame; wrap so long read runs keep
-			// rolling. $7800 now reads live from lcd_ring (matching
-			// bsnes/Mesen2 — they don't snapshot either).
+			// Advance the slice-read counter. The BIOS issues $6001
+			// writes in order: slice 0, 1, …, 17, then wraps. We use
+			// THIS counter (not the bank field) to index the full_frame
+			// buffer, so each $7800 stream serves the correct slice
+			// regardless of bank-wrap.
+			icd.read_slice = static_cast<uint8_t>((icd.read_slice + 1) % 18);
 			icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
 			icd.row_writes++;
 			return;
@@ -831,9 +852,7 @@ void Emulator::OnPpuHBlank()
 	if (!impl_) return;
 	Emulator::Impl::Icd2& icd = impl_->icd2;
 
-	// Direct mapping to scanlines: 
-	// This ensures the 4-bank ring buffer (lcd_ring) is filled 
-	// exactly how the SGB BIOS expects to read it via $6001/$7800.
+	// Restored normal mapping. Trying a different empirical tweak elsewhere.
 	icd.sgb_row = impl_->ppu.ly;
 	icd.sgb_bank = (icd.sgb_row / 8) & 0x03;
 }
@@ -856,9 +875,15 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
-	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
-	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);
+	const uint8_t bank  = static_cast<uint8_t>(icd.sgb_bank & 0x03);
+	const uint8_t row   = static_cast<uint8_t>(icd.sgb_row  & 0x07);
+	const uint8_t slice = static_cast<uint8_t>((icd.sgb_row / 8) % 18);
+
+	// Legacy 4-bank ring (kept for state-save compatibility).
 	std::memcpy(&icd.lcd_ring[bank][row * 160], pixels, 160);
+	// Full 18-slice buffer — what $7800 actually reads from.
+	if (slice < 18)
+		std::memcpy(&icd.full_frame[slice][row * 160], pixels, 160);
 }
 
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)

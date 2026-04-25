@@ -71,8 +71,7 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
 {
     int16 *out = (int16 *)dest;
 
-    // SGB mode — route the GB APU's samples into the host buffer,
-    // zero-fill any shortfall so downstream audio stays clocked.
+    // BIOS-less SGB — no SPC running, GB owns the host output entirely.
     if (Settings.SuperGameBoy)
     {
         if (Settings.Mute)
@@ -111,6 +110,27 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
         for (int i = 0; i < sample_count; ++i)
         {
             int32 mixed = (int32)out[i] + msu::resampler_buffer[i];
+            out[i] = ((int16)mixed != mixed) ? (mixed >> 31) ^ 0x7fff : mixed;
+        }
+    }
+
+    // SGB BIOS mode — once the BIOS releases the GB, mix GB APU output
+    // additively on top of the SPC output. SPC stays the timing master
+    // (its drain rate paces SoundSync's wait loop), so excessive GB
+    // production can't deadlock the audio queue. When the GB ring
+    // buffer is empty (pre-release, briefly during reset toggles) we
+    // leave the SPC output untouched. Mirrors how the real SGB cart
+    // mixes the GB's analog audio onto the SNES audio bus.
+    if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+    {
+        static std::vector<int16_t> gb_mix_buf;
+        if ((int)gb_mix_buf.size() < sample_count)
+            gb_mix_buf.resize(sample_count);
+
+        const int32_t got = S9xSGBDrainSamples(gb_mix_buf.data(), sample_count);
+        for (int32_t i = 0; i < got; ++i)
+        {
+            int32 mixed = (int32)out[i] + (int32)gb_mix_buf[i];
             out[i] = ((int16)mixed != mixed) ? (mixed >> 31) ^ 0x7fff : mixed;
         }
     }

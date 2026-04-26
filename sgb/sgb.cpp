@@ -6,6 +6,9 @@
 
 #include "sgb.h"
 
+#include "../snes9x.h"   // Settings.SGB_BIOSModeActive for the
+                          // mode-aware sample-count cap below.
+
 #include "gb_cpu.h"
 #include "gb_memory.h"
 #include "gb_ppu.h"
@@ -607,12 +610,12 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	const uint8_t *p0 = icd.pkt0_bytes;
 	const uint8_t *b0 = icd.byte0_log;
 	const uint8_t *rv = icd.last_r7000_vals;
-	std::snprintf(buf, cap,
-	              "GBPC=%04X ctrl=%02X pkts=%u F1=%u ly=%u "
-	              "b0s=%02X%02X%02X%02X%02X%02X "
-	              "p0=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
-	              "r7000_ring=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
-	              "R:6002=%u 7000=%u W:6001=%u 6003=%u",
+	snprintf(buf, cap,
+	         "GBPC=%04X ctrl=%02X pkts=%u F1=%u ly=%u "
+	         "b0s=%02X%02X%02X%02X%02X%02X "
+	         "p0=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
+	         "r7000_ring=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
+	         "R:6002=%u 7000=%u W:6001=%u 6003=%u",
 	              s.r.pc, icd.control,
 	              icd.packets_received,
 	              icd.f1_packets,
@@ -1443,17 +1446,23 @@ void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 int32_t S9xSGBGetSampleCount(void)
 {
 	int32_t count = SGB::Instance().GetAudioSamplesAvailable();
-	// Cap reported avail. ProcessSound's audio-sync wait engages when
-	// freeBytes/2 < availableSamples; bigger cap → bigger wait spike
-	// when GB ring backs up → more aggressive throttle. With cap at
-	// one SNES frame (1600 int16/48k), spikes drain ~3 buffers per
-	// wait engagement (~24 ms), throttling emu to ~35 fps wall in
-	// SGB BIOS mode. Cap at 1/4 frame (400) → ~6 ms wait spike →
-	// roughly 4× less throttling, target ~60 fps wall.
-	// Hard ceiling stays as a deadlock safeguard (avail must stay
-	// well below queue max free, ~6144 int16 at 48 kHz / 64 ms).
-	const int32_t out_rate    = SGB::Instance().GetAudioSampleRate();
-	int32_t       cap         = (out_rate * 2) / 252;  // ~381 at 48k
+	// Cap depends on which audio drive cadence is active:
+	//   BIOS-less SGB — ProcessSound is called once per SNES frame
+	//   from cpuexec's SuperGameBoy branch. avail per call should be
+	//   ~one full frame's worth of samples; otherwise ProcessSound
+	//   under-drains and audio queue underruns into gibberish.
+	//   Cap = output_rate × 2 / 60 = 1600 at 48 kHz (one NTSC frame).
+	//
+	//   BIOS mode — SPC scanline driver fires ProcessSound ~33/frame.
+	//   avail per call is per-call drain, much smaller. Cap tuned
+	//   empirically (~381 at 48 kHz) to land emulation at 60 fps wall
+	//   without over-throttling. See commit log for the binary search.
+	const int32_t out_rate = SGB::Instance().GetAudioSampleRate();
+	int32_t       cap;
+	if (Settings.SGB_BIOSModeActive)
+		cap = (out_rate * 2) / 252;  // ~381 at 48k
+	else
+		cap = (out_rate * 2) / 60;   // 1600 at 48k (BIOS-less)
 	if (cap < 64)   cap = 64;
 	if (cap > 6000) cap = 6000;
 	if (count > cap) count = cap;

@@ -15,7 +15,6 @@
 #include "ppu.h"
 #include "gfx.h"
 #include "sgb/sgb.h"
-#include <chrono>
 #ifdef DEBUGGER
 #include "debug.h"
 #include "missing.h"
@@ -280,59 +279,6 @@ void S9xMainLoop (void)
 			// see the main loop. Per-scanline/end-of-frame run disabled.
 		}
 
-		// Periodic ICD2 / DMA status OSD (disabled — was useful for the
-		// SGB BIOS handshake bring-up; kept commented out so it can be
-		// re-enabled if BIOS-side diagnostics are needed again. The
-		// audio-pacing OSD in the V=225 hook below is unobstructed
-		// while this is off).
-#if 0
-		static uint32_t s_tick = 0;
-		static uint8   s_prev_f8  = 0;
-		static uint8   s_prev_c0  = 0;
-		static uint8   s_max_c0   = 0;
-		static uint32  s_f8_set_count = 0;
-		const uint8 now_f8 = Memory.RAM[0x02F8];
-		const uint8 now_c0 = Memory.RAM[0x02C0];
-		const uint8 now_22 = Memory.RAM[0x0022];
-		static uint8   s_prev_22  = 0;
-		static uint32  s_22_edges = 0;
-		if (s_prev_22 == 0 && now_22 != 0) s_22_edges++;
-		s_prev_22 = now_22;
-		const uint8 nmitimen = Memory.FillRAM[0x4200];
-		const int32 irq_timer = Timings.NextIRQTimer;
-		const uint8 irq_line  = CPU.IRQLine ? 1 : 0;
-		const uint16 h_target = Memory.FillRAM[0x4207] | ((Memory.FillRAM[0x4208] & 1) << 8);
-		const uint16 v_target = Memory.FillRAM[0x4209] | ((Memory.FillRAM[0x420A] & 1) << 8);
-		if (s_prev_f8 == 0 && now_f8 != 0) s_f8_set_count++;
-		if (now_c0 > s_max_c0) s_max_c0 = now_c0;
-		s_prev_f8 = now_f8;
-		s_prev_c0 = now_c0;
-		if ((++s_tick % 60) == 0)
-		{
-			char gb_buf[320], msg[512];
-			S9xSGBGetStatus(gb_buf, sizeof gb_buf);
-			snprintf(msg, sizeof msg,
-			         "PC=%04X PB=%02X DB=%02X 02C0=%02X(max=%02X) 02F8=%02X #5=%u | %s\n"
-			         "DMA3 BBAD=%02X A1T=%02X%02X A1B=%02X DAS=%02X%02X  MDMAEN(last)=%02X  HDMAEN=%02X",
-			         static_cast<unsigned>(Registers.PCw),
-			         static_cast<unsigned>(Registers.PB),
-			         static_cast<unsigned>(Registers.DB),
-			         static_cast<unsigned>(now_c0),
-			         static_cast<unsigned>(s_max_c0),
-			         static_cast<unsigned>(now_f8),
-			         s_f8_set_count, gb_buf,
-			         Memory.FillRAM[0x4331],
-			         Memory.FillRAM[0x4333], Memory.FillRAM[0x4332],
-			         Memory.FillRAM[0x4334],
-			         Memory.FillRAM[0x4336], Memory.FillRAM[0x4335],
-			         Memory.FillRAM[0x420B],
-			         Memory.FillRAM[0x420C]);
-			const uint32 saved = Settings.InitialInfoStringTimeout;
-			Settings.InitialInfoStringTimeout = 120;
-			S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
-			Settings.InitialInfoStringTimeout = saved;
-		}
-#endif
 	}
 
 	S9xPackStatus();
@@ -497,77 +443,6 @@ void S9xDoHEventProcessing (void)
 			if (CPU.V_Counter == PPU.ScreenHeight + FIRST_VISIBLE_LINE)	// VBlank starts from V=225(240).
 			{
 				S9xEndScreenRefresh();
-				// Diagnostic OSD — fps wall + audio-sync settings + GB
-				// ring/audio-sample info to figure out where the
-				// throttle is coming from.
-				if (Settings.SGB_BIOSModeActive)
-				{
-					using clock = std::chrono::steady_clock;
-					static clock::time_point last_report = clock::now();
-					static int      emulated_count = 0;
-					static int      skip_window    = 0;
-					static unsigned last_qovf      = 0;
-					static unsigned last_edrn      = 0;
-					static unsigned last_pdrn      = 0;
-					static unsigned last_pdrop     = 0;
-					static unsigned long long last_gbcyc = 0;
-					emulated_count++;
-					// Per-frame skip tally: at this V=225 hook we've just
-					// finished emulating the current frame. IPPU.RenderThisFrame
-					// reflects whether the *previous* SyncSpeed gated us into
-					// rendering it. False == frame skipped. SyncSpeed for
-					// the next frame runs a few lines below this block.
-					if (!IPPU.RenderThisFrame) skip_window++;
-					const auto now = clock::now();
-					const auto elapsed_ms = std::chrono::duration_cast<
-						std::chrono::milliseconds>(now - last_report).count();
-					if (elapsed_ms >= 1000)
-					{
-						const int gb_avail_capped = S9xSGBGetSampleCount();
-						const int gb_clock = S9xSGBGetAudioClockHz();
-						const int gb_cps   = S9xSGBGetAudioCyclesPerSample();
-						const int gb_rem   = S9xSGBGetAudioCpsRemainderStep();
-						const unsigned qovf  = S9xSGBGetDiagQueueOverflow();
-						const unsigned edrn  = S9xSGBGetDiagEmptyDrains();
-						const unsigned pdrn  = S9xSGBGetDiagPartialDrains();
-						const unsigned pdrop = S9xSGBGetDiagPushDrops();
-						const int      ringf = S9xSGBGetDiagRingFill();
-						const unsigned long long gbcyc = S9xSGBGetDiagGbCyclesRun();
-						const unsigned long long gbcyc_delta = gbcyc - last_gbcyc;
-						char dmsg[512];
-						snprintf(dmsg, sizeof dmsg,
-							"SGB: fps=%d skipped=%d ring=%d gbcyc/s=%llu avail=%d "
-							"rate=%d clk=%d cps=%d rem=%d sync=%d rel=%d "
-							"qovf+=%u edrn+=%u pdrn+=%u pdrop+=%u",
-							emulated_count,
-							skip_window,
-							ringf,
-							(unsigned long long)gbcyc_delta,
-							gb_avail_capped,
-							Settings.SoundPlaybackRate,
-							gb_clock,
-							gb_cps,
-							gb_rem,
-							Settings.SoundSync ? 1 : 0,
-							S9xSGBBIOSGBIsReleased() ? 1 : 0,
-							qovf  - last_qovf,
-							edrn  - last_edrn,
-							pdrn  - last_pdrn,
-							pdrop - last_pdrop);
-						const uint32 saved = Settings.InitialInfoStringTimeout;
-						Settings.InitialInfoStringTimeout = 120;
-						S9xMessage(S9X_INFO, S9X_ROM_INFO, dmsg);
-						Settings.InitialInfoStringTimeout = saved;
-						emulated_count = 0;
-						skip_window    = 0;
-						last_report    = now;
-						last_qovf      = qovf;
-						last_edrn      = edrn;
-						last_pdrn      = pdrn;
-						last_pdrop     = pdrop;
-						last_gbcyc     = gbcyc;
-					}
-				}
 				#ifdef DEBUGGER
 					if (!(CPU.Flags & FRAME_ADVANCE_FLAG))
 				#endif
@@ -575,14 +450,6 @@ void S9xDoHEventProcessing (void)
 					if (!Settings.InRunAhead)
 						S9xSyncSpeed();
 				}
-
-				// (Wall-clock pacing is handled by WinThrottleFramerate in
-				// the display Present path — see win32_display.cpp:706.
-				// We had a custom sleep_until here while diagnosing slow
-				// BIOS mode under RunAhead=4; it turned out the slowdown
-				// was caused by RunAhead, not by missing throttling, and
-				// the custom sleep starved ProcessSound during the wait
-				// window which produced audible audio underrun. Removed.)
 
 				CPU.Flags |= SCAN_KEYS_FLAG;
 

@@ -296,26 +296,6 @@ struct Emulator::Impl
 	                                // keep re-queuing handshake packets (which would
 	                                // block game-generated SGB commands).
 
-	// Lifetime diagnostic counters — surfaced via the V=225 OSD line in
-	// cpuexec.cpp so we can pinpoint whether BIOS-mode dropped frames /
-	// audio gibberish are caused by:
-	//   queue_overflow — IcdPushQueue dropped the oldest packet because
-	//                    the SNES BIOS hadn't drained $6002 fast enough.
-	//                    Bsnes's icd.cpp does the same, but it's a useful
-	//                    signal that game-side packet rate exceeds drain.
-	//   empty_drains   — DrainAudio called with non-zero max but the GB
-	//                    APU ring was empty (caller will zero-pad).
-	//   partial_drains — DrainAudio returned fewer samples than requested
-	//                    (zero-pad would still occur).
-	uint32_t queue_overflow_count = 0;
-	uint32_t empty_drains          = 0;
-	uint32_t partial_drains        = 0;
-
-	// Diagnostic — total GB T-cycles actually executed by RunCycles.
-	// Compared against expected (4194304 GB cycles per wall-second of
-	// SNES emulation in BIOS mode) to catch over-/under-stepping.
-	uint64_t gb_cycles_run         = 0;
-
 	// Cycle-debt accumulator for RunCycles. The per-opcode SyncToSnesCycle
 	// path in BIOS mode hands tiny tcycle requests (1-3 GB cycles) to
 	// RunCycles, but cpu.Step() always advances >=4 T-cycles (NOP min).
@@ -520,10 +500,7 @@ static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 	if (icd.queue_count < 64)
 		icd.queue_count++;
 	else
-	{
 		icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
-		Instance().BumpQueueOverflow();
-	}
 
 	icd.packets_received++;
 	const uint8_t byte0  = pkt[0];
@@ -645,7 +622,6 @@ void Emulator::RunCycles(int32_t tcycles)
 		ApuStep  (impl_->apu,                consumed);
 
 		impl_->cycle_debt -= consumed;
-		impl_->gb_cycles_run += static_cast<uint32_t>(consumed);
 	}
 }
 
@@ -1040,31 +1016,13 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 
 int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)
 {
-	const int32_t got = ApuDrain(impl_->apu, out, max_samples);
-	if (max_samples > 0)
-	{
-		if (got == 0)            impl_->empty_drains++;
-		else if (got < max_samples) impl_->partial_drains++;
-	}
-	return got;
+	return ApuDrain(impl_->apu, out, max_samples);
 }
 
 int32_t Emulator::GetAudioSampleRate() const
 {
 	return impl_->apu.output_rate;
 }
-
-void Emulator::BumpQueueOverflow()
-{
-	impl_->queue_overflow_count++;
-}
-
-uint32_t Emulator::GetDiagQueueOverflow() const  { return impl_->queue_overflow_count; }
-uint32_t Emulator::GetDiagEmptyDrains()    const { return impl_->empty_drains; }
-uint32_t Emulator::GetDiagPartialDrains()  const { return impl_->partial_drains; }
-uint32_t Emulator::GetDiagPushDrops()      const { return impl_->apu.push_drops; }
-int32_t  Emulator::GetDiagRingFill()       const { return GetAudioSamplesAvailable(); }
-uint64_t Emulator::GetDiagGbCyclesRun()    const { return impl_->gb_cycles_run; }
 
 int32_t Emulator::GetAudioClockHz() const
 {
@@ -1389,10 +1347,9 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->apu.sample_tail      = 0;
 	impl_->apu.sample_timer     = impl_->apu.cycles_per_sample;
 
-	// cycle_debt and push_drops are diagnostic/transient — reset on load
-	// so a stale debt from before the snapshot doesn't burst-step the GB.
+	// cycle_debt is transient — reset on load so a stale debt from
+	// before the snapshot doesn't burst-step the GB.
 	impl_->cycle_debt           = 0;
-	impl_->apu.push_drops       = 0;
 
 	// Rebuild full_frame_planar from full_frame. The planar mirror is a
 	// derived view; if a snapshot from before this field existed gets
@@ -1599,31 +1556,6 @@ int32_t S9xSGBGetAudioCyclesPerSample(void)
 int32_t S9xSGBGetAudioCpsRemainderStep(void)
 {
 	return SGB::Instance().GetAudioCpsRemainderStep();
-}
-
-unsigned int S9xSGBGetDiagQueueOverflow(void)
-{
-	return SGB::Instance().GetDiagQueueOverflow();
-}
-unsigned int S9xSGBGetDiagEmptyDrains(void)
-{
-	return SGB::Instance().GetDiagEmptyDrains();
-}
-unsigned int S9xSGBGetDiagPartialDrains(void)
-{
-	return SGB::Instance().GetDiagPartialDrains();
-}
-unsigned int S9xSGBGetDiagPushDrops(void)
-{
-	return SGB::Instance().GetDiagPushDrops();
-}
-int S9xSGBGetDiagRingFill(void)
-{
-	return SGB::Instance().GetDiagRingFill();
-}
-unsigned long long S9xSGBGetDiagGbCyclesRun(void)
-{
-	return SGB::Instance().GetDiagGbCyclesRun();
 }
 
 void S9xSGBSetRunMode(uint8_t mode)

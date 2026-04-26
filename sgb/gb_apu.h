@@ -136,13 +136,6 @@ struct Apu
 	int16_t   sample_buf[APU_SAMPLE_BUF_SIZE * 2];
 	uint32_t  sample_head = 0;
 	uint32_t  sample_tail = 0;
-
-	// Diagnostic — incremented when PushSample finds the ring full and
-	// has to discard a sample. Surfaced via the BIOS-mode OSD; non-zero
-	// means the host is draining slower than the GB APU produces, which
-	// is audible as crackle/gibberish even when DrainAudio never reports
-	// underrun.
-	uint32_t  push_drops = 0;
 };
 
 void ApuReset(Apu &a);

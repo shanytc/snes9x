@@ -72,24 +72,15 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
     int16 *out = (int16 *)dest;
 
     // GB owns the host output: BIOS-less mode (SPC not running) OR
-    // BIOS mode after the GB has been released (SPC's DSP residual
-    // after the splash chime can produce audible noise even when no
-    // game audio is being sent — drain GB exclusively to keep the
-    // output clean). The cap in S9xSGBGetSampleCount keeps
-    // ProcessSound's wait loop satisfiable in either case.
+    // BIOS mode after the GB has been released. Drain GB exclusively;
+    // clear spc::resampler to keep its scanline-driver gate firing at
+    // the natural ~1965/sec cadence (otherwise it stays full and fires
+    // every scanline). Splash chime plays normally pre-release because
+    // the gate below is false (gbReleased = 0).
     const bool gb_owns_audio = Settings.SuperGameBoy ||
         (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
     if (gb_owns_audio)
     {
-        // Discard SPC's accumulated samples. The SPC700 keeps running
-        // and pushing into spc::resampler; with our routing we never
-        // read from it, so it stays full. S9xAPUEndScanline's gate
-        // (space_filled >= APU_SAMPLE_BLOCK) then fires LandSamples on
-        // every scanline (~15720/sec) instead of every ~8 scanlines
-        // (~1965/sec) like normal SNES, and each extra ProcessSound
-        // call engages SoundSync's wait, over-throttling emulation
-        // to single-digit fps. Clearing here keeps the SPC resampler
-        // near-empty so the gate fires at the natural cadence.
         S9xClearSamples();
 
         if (Settings.Mute)

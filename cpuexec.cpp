@@ -15,6 +15,7 @@
 #include "ppu.h"
 #include "gfx.h"
 #include "sgb/sgb.h"
+#include <chrono>
 #ifdef DEBUGGER
 #include "debug.h"
 #include "missing.h"
@@ -499,6 +500,39 @@ void S9xDoHEventProcessing (void)
 			if (CPU.V_Counter == PPU.ScreenHeight + FIRST_VISIBLE_LINE)	// VBlank starts from V=225(240).
 			{
 				S9xEndScreenRefresh();
+				// Diagnostic OSD — fps wall + audio-sync settings + GB
+				// ring/audio-sample info to figure out where the
+				// throttle is coming from.
+				if (Settings.SGB_BIOSModeActive)
+				{
+					using clock = std::chrono::steady_clock;
+					static clock::time_point last_report = clock::now();
+					static int  frame_count   = 0;
+					frame_count++;
+					const auto now = clock::now();
+					const auto elapsed_ms = std::chrono::duration_cast<
+						std::chrono::milliseconds>(now - last_report).count();
+					if (elapsed_ms >= 1000)
+					{
+						const int gb_avail_capped = S9xSGBGetSampleCount();
+						char dmsg[200];
+						snprintf(dmsg, sizeof dmsg,
+							"SGB diag: fps=%d skip=%d avail=%d rate=%d "
+							"sync=%d released=%d",
+							frame_count,
+							(int)IPPU.SkippedFrames,
+							gb_avail_capped,
+							Settings.SoundPlaybackRate,
+							Settings.SoundSync ? 1 : 0,
+							S9xSGBBIOSGBIsReleased() ? 1 : 0);
+						const uint32 saved = Settings.InitialInfoStringTimeout;
+						Settings.InitialInfoStringTimeout = 120;
+						S9xMessage(S9X_INFO, S9X_ROM_INFO, dmsg);
+						Settings.InitialInfoStringTimeout = saved;
+						frame_count  = 0;
+						last_report  = now;
+					}
+				}
 				#ifdef DEBUGGER
 					if (!(CPU.Flags & FRAME_ADVANCE_FLAG))
 				#endif

@@ -1428,31 +1428,15 @@ void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 int32_t S9xSGBGetSampleCount(void)
 {
 	int32_t count = SGB::Instance().GetAudioSamplesAvailable();
-	// Cap the reported count at one SNES-frame's worth of int16s. This
-	// directly controls ProcessSound's pacing: its wait loop blocks
-	// while freeBytes/2 < availableSamples, so reporting one frame's
-	// worth means each wait is satisfied after roughly one frame's
-	// worth of audio drains — exactly matching the SNES frame
-	// interval and pacing emulation at 60 fps.
-	//
-	// Reporting more than the host audio queue can hold (~6144 int16
-	// at 48 kHz / 64 ms) deadlocks the wait at its 1-second timeout
-	// → 1 fps. Reporting much more than one frame's worth over-
-	// throttles, since each wait now spans multiple frame intervals
-	// → audio plays at sub-1× speed (the 4096 we tried produced ~24 fps).
-	// Reporting much less drains less than the GB produces → ring
-	// buffer growth and eventual sample drops.
-	//
-	// Excess samples stay queued in the GB ring and drain on the next
-	// call. Constant divisor 60 ≈ NTSC SNES; PAL users see ~0.5%
-	// pacing drift, addressable later. We read the rate from the APU's
-	// stored output_rate (set via ApuSetOutputRate from the host's
-	// Settings.SoundPlaybackRate); avoids a snes9x.h dependency here.
-	const int32_t out_rate = SGB::Instance().GetAudioSampleRate();
-	const int32_t per_frame_int16 = (out_rate * 2) / 60;
-	int32_t cap = per_frame_int16;
+	// Cap at one SNES frame's worth of int16s. Hard ceiling kept as a
+	// deadlock safeguard against GB ring overruns — avail must stay
+	// well below the host queue's max free space (~6144 int16 at 48k /
+	// 64 ms) or ProcessSound's audio-sync wait can't be satisfied and
+	// the emulator pegs at the wait's 1-second timeout (1 fps).
+	const int32_t out_rate    = SGB::Instance().GetAudioSampleRate();
+	int32_t       cap         = (out_rate * 2) / 60;  // 1600 at 48k
 	if (cap < 256)  cap = 256;
-	if (cap > 6000) cap = 6000;  // hard ceiling: stay clear of queue cap
+	if (cap > 6000) cap = 6000;
 	if (count > cap) count = cap;
 	return count;
 }

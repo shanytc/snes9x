@@ -269,6 +269,16 @@ struct Emulator::Impl
 		// bank 0, for instance) reads as a mix of two slices and produces
 		// horizontally-banded tile corruption in CHR_TRN output.
 		uint8_t  r7800_snapshot[8 * 160];
+
+		// Pre-computed bit-planar layout of full_frame, in the exact
+		// byte order $7800 reads expect (8 rows × 20 tiles × 2 planes
+		// = 320 bytes per slice). Produced incrementally by Capture-
+		// Scanline so that GetICD2's $7800 path is a single byte load
+		// instead of an 8-iteration bit-extraction loop. The SGB BIOS
+		// in-game menu reads this window at 5760 bytes/frame to embed
+		// the GB screen inside the menu — that's 345k extractions/sec
+		// in the old code.
+		uint8_t  full_frame_planar[18][320];
 	} icd2;
 
 	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
@@ -718,27 +728,9 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		if (pos >= 320)
 			return 0xFF;
 
-		const uint8_t tile_col = static_cast<uint8_t>(pos / 16);    // 0..19
-		const uint8_t byte_in  = static_cast<uint8_t>(pos & 0x0F);
-		const uint8_t row_in   = static_cast<uint8_t>(byte_in >> 1); // 0..7
-		const uint8_t plane    = static_cast<uint8_t>(byte_in & 1);
-
-		// Read from the full 18-slice frame buffer indexed by the
-		// BIOS's $6001-write sequence counter (read_slice). Each
-		// $6001 write advances read_slice by 1 (mod 18), so the
-		// BIOS's drain pattern (slice 0, 1, …, 17, wrap) maps
-		// directly to the right slice in full_frame.
-		const uint8_t slice    = icd.read_slice % 18;
-		const uint8_t *px      = &icd.full_frame[slice][row_in * 160 + tile_col * 8];
-
-		uint8_t b = 0;
-		for (int i = 0; i < 8; ++i)
-		{
-			const uint8_t palidx = static_cast<uint8_t>(px[i] & 0x03);
-			const uint8_t bit    = static_cast<uint8_t>((palidx >> plane) & 1);
-			b = static_cast<uint8_t>(b | (bit << (7 - i)));
-		}
-		return b;
+		// Pre-computed in CaptureScanline — see Impl::Icd2::full_frame_planar.
+		const uint8_t slice = icd.read_slice % 18;
+		return icd.full_frame_planar[slice][pos];
 	}
 
 	switch (a)
@@ -961,7 +953,30 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 	std::memcpy(&icd.lcd_ring[bank][row * 160], pixels, 160);
 	// Full 18-slice buffer — what $7800 actually reads from.
 	if (slice < 18)
+	{
 		std::memcpy(&icd.full_frame[slice][row * 160], pixels, 160);
+		// Update the planar mirror for this row (40 bytes: 20 tiles × 2
+		// bit-planes). Cost: 20 × 8 ops per scanline = ~28k ops/sec
+		// vs the millions of bit-extraction ops the read path was doing.
+		uint8_t *out = &icd.full_frame_planar[slice][row * 2];
+		for (int t = 0; t < 20; ++t)
+		{
+			const uint8_t *p = &pixels[t * 8];
+			uint8_t plane0 = 0, plane1 = 0;
+			for (int i = 0; i < 8; ++i)
+			{
+				const uint8_t pix = static_cast<uint8_t>(p[i] & 0x03);
+				plane0 = static_cast<uint8_t>(plane0 | (((pix >> 0) & 1) << (7 - i)));
+				plane1 = static_cast<uint8_t>(plane1 | (((pix >> 1) & 1) << (7 - i)));
+			}
+			// Layout matches the BIOS read order:
+			//   pos = tile_col * 16 + row_in * 2 + plane
+			// so for the current row_in == row, tile t fills indices
+			// (t*16 + row*2 + 0) and (t*16 + row*2 + 1).
+			out[t * 16 + 0] = plane0;
+			out[t * 16 + 1] = plane1;
+		}
+	}
 }
 
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
@@ -1378,6 +1393,32 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	// so a stale debt from before the snapshot doesn't burst-step the GB.
 	impl_->cycle_debt           = 0;
 	impl_->apu.push_drops       = 0;
+
+	// Rebuild full_frame_planar from full_frame. The planar mirror is a
+	// derived view; if a snapshot from before this field existed gets
+	// loaded the planar buffer would be zeroed and $7800 reads would
+	// return zeros until the next GB scanline capture overwrites it.
+	for (int s = 0; s < 18; ++s)
+	{
+		for (int r = 0; r < 8; ++r)
+		{
+			uint8_t *out = &impl_->icd2.full_frame_planar[s][r * 2];
+			const uint8_t *row = &impl_->icd2.full_frame[s][r * 160];
+			for (int t = 0; t < 20; ++t)
+			{
+				const uint8_t *p = &row[t * 8];
+				uint8_t plane0 = 0, plane1 = 0;
+				for (int i = 0; i < 8; ++i)
+				{
+					const uint8_t pix = static_cast<uint8_t>(p[i] & 0x03);
+					plane0 = static_cast<uint8_t>(plane0 | (((pix >> 0) & 1) << (7 - i)));
+					plane1 = static_cast<uint8_t>(plane1 | (((pix >> 1) & 1) << (7 - i)));
+				}
+				out[t * 16 + 0] = plane0;
+				out[t * 16 + 1] = plane1;
+			}
+		}
+	}
 
 	// Re-point the exposed FrameBuffer at the (now-restored) PPU fb.
 	impl_->fb.pixels = impl_->ppu.framebuffer;

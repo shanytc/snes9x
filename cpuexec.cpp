@@ -247,15 +247,14 @@ void S9xMainLoop (void)
 		if (Settings.SA1)
 			S9xSA1MainLoop();
 
-		// Coroutine-style SNES→GB sync. Post-iteration catch-up covers
-		// any cycles since the last ICD2 access (or since loop entry).
-		// getset.h also calls S9xSGBSyncToSnesCycle mid-opcode on every
-		// ICD2 register access, so BIOS polls of $6000/$6002 see the
-		// most recent GB PPU state — matches bsnes's thread-yield model
-		// without the coroutine runtime. Handles scanline wrap via the
-		// h_max argument.
-		if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
-			S9xSGBSyncToSnesCycle(CPU.Cycles);
+		// SNES→GB sync now happens at scanline boundaries only (see
+		// HC_HCOUNTER_MAX_EVENT below) plus on every ICD2 register
+		// access in getset.h. The previous per-opcode sync here cost
+		// millions of function calls/sec in BIOS-released mode and
+		// dropped wall-fps from 60 to ~25. Scanline-grained sync is
+		// fine for game-running mode — the BIOS handshake's tight
+		// $7800-slice timing happens before release, where ICD2-access
+		// syncs already serialize state correctly.
 	}
 
 	// P2 — in BIOS mode the GB core is held in reset until the BIOS
@@ -423,11 +422,15 @@ void S9xDoHEventProcessing (void)
 				SuperFX.oneLineDone = FALSE;
 			}
 
-			// GB stepping via S9xSGBTickSnes in main loop. $6000 vcounter
-			// driven by GB PPU (HBlank/VBlank hooks in gb_ppu.cpp), which
-			// per bsnes is correctly FROZEN while GB is halted ($6003
-			// bit 7 = 0). BIOS polling $6000 during splash gets stable
-			// zero until BIOS actually releases the GB.
+			// Per-scanline GB sync in BIOS-released mode. Replaces the
+			// old per-opcode hook for performance (millions of calls/sec
+			// → ~262×60 = 15k/sec). ICD2-register accesses in getset.h
+			// also call SyncToSnesCycle inline so $7800/$6002 reads
+			// still see freshest GB state mid-opcode; this scanline-end
+			// sync just guarantees forward progress on scanlines that
+			// have no ICD2 traffic.
+			if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;
@@ -572,6 +575,14 @@ void S9xDoHEventProcessing (void)
 					if (!Settings.InRunAhead)
 						S9xSyncSpeed();
 				}
+
+				// (Wall-clock pacing is handled by WinThrottleFramerate in
+				// the display Present path — see win32_display.cpp:706.
+				// We had a custom sleep_until here while diagnosing slow
+				// BIOS mode under RunAhead=4; it turned out the slowdown
+				// was caused by RunAhead, not by missing throttling, and
+				// the custom sleep starved ProcessSound during the wait
+				// window which produced audible audio underrun. Removed.)
 
 				CPU.Flags |= SCAN_KEYS_FLAG;
 

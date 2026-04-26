@@ -501,8 +501,20 @@ void S9xDoHEventProcessing (void)
 				{
 					using clock = std::chrono::steady_clock;
 					static clock::time_point last_report = clock::now();
-					static int  frame_count   = 0;
-					frame_count++;
+					static int      emulated_count = 0;
+					static int      skip_window    = 0;
+					static unsigned last_qovf      = 0;
+					static unsigned last_edrn      = 0;
+					static unsigned last_pdrn      = 0;
+					static unsigned last_pdrop     = 0;
+					static unsigned long long last_gbcyc = 0;
+					emulated_count++;
+					// Per-frame skip tally: at this V=225 hook we've just
+					// finished emulating the current frame. IPPU.RenderThisFrame
+					// reflects whether the *previous* SyncSpeed gated us into
+					// rendering it. False == frame skipped. SyncSpeed for
+					// the next frame runs a few lines below this block.
+					if (!IPPU.RenderThisFrame) skip_window++;
 					const auto now = clock::now();
 					const auto elapsed_ms = std::chrono::duration_cast<
 						std::chrono::milliseconds>(now - last_report).count();
@@ -512,24 +524,45 @@ void S9xDoHEventProcessing (void)
 						const int gb_clock = S9xSGBGetAudioClockHz();
 						const int gb_cps   = S9xSGBGetAudioCyclesPerSample();
 						const int gb_rem   = S9xSGBGetAudioCpsRemainderStep();
-						char dmsg[280];
+						const unsigned qovf  = S9xSGBGetDiagQueueOverflow();
+						const unsigned edrn  = S9xSGBGetDiagEmptyDrains();
+						const unsigned pdrn  = S9xSGBGetDiagPartialDrains();
+						const unsigned pdrop = S9xSGBGetDiagPushDrops();
+						const int      ringf = S9xSGBGetDiagRingFill();
+						const unsigned long long gbcyc = S9xSGBGetDiagGbCyclesRun();
+						const unsigned long long gbcyc_delta = gbcyc - last_gbcyc;
+						char dmsg[512];
 						snprintf(dmsg, sizeof dmsg,
-							"SGB diag: fps=%d avail=%d rate=%d "
-							"clk=%d cps=%d rem=%d sync=%d rel=%d",
-							frame_count,
+							"SGB: fps=%d skipped=%d ring=%d gbcyc/s=%llu avail=%d "
+							"rate=%d clk=%d cps=%d rem=%d sync=%d rel=%d "
+							"qovf+=%u edrn+=%u pdrn+=%u pdrop+=%u",
+							emulated_count,
+							skip_window,
+							ringf,
+							(unsigned long long)gbcyc_delta,
 							gb_avail_capped,
 							Settings.SoundPlaybackRate,
 							gb_clock,
 							gb_cps,
 							gb_rem,
 							Settings.SoundSync ? 1 : 0,
-							S9xSGBBIOSGBIsReleased() ? 1 : 0);
+							S9xSGBBIOSGBIsReleased() ? 1 : 0,
+							qovf  - last_qovf,
+							edrn  - last_edrn,
+							pdrn  - last_pdrn,
+							pdrop - last_pdrop);
 						const uint32 saved = Settings.InitialInfoStringTimeout;
 						Settings.InitialInfoStringTimeout = 120;
 						S9xMessage(S9X_INFO, S9X_ROM_INFO, dmsg);
 						Settings.InitialInfoStringTimeout = saved;
-						frame_count  = 0;
-						last_report  = now;
+						emulated_count = 0;
+						skip_window    = 0;
+						last_report    = now;
+						last_qovf      = qovf;
+						last_edrn      = edrn;
+						last_pdrn      = pdrn;
+						last_pdrop     = pdrop;
+						last_gbcyc     = gbcyc;
 					}
 				}
 				#ifdef DEBUGGER

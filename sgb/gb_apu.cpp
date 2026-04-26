@@ -351,6 +351,7 @@ void PushSample(Apu &a, int16_t l, int16_t r)
 	{
 		// Buffer full — drop. In practice snes9x's audio thread should
 		// drain in time; overruns indicate an unconsumed stream.
+		a.push_drops++;
 		return;
 	}
 	a.sample_buf[a.sample_head * 2 + 0] = l;

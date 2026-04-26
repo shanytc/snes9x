@@ -93,6 +93,15 @@ public:
 	int32_t GetAudioCyclesPerSample() const;
 	int32_t GetAudioCpsRemainderStep() const;
 
+	// BIOS-mode lifetime diagnostic counters — see Impl declaration.
+	void     BumpQueueOverflow();
+	uint32_t GetDiagQueueOverflow() const;
+	uint32_t GetDiagEmptyDrains()   const;
+	uint32_t GetDiagPartialDrains() const;
+	uint32_t GetDiagPushDrops()     const;
+	int32_t  GetDiagRingFill()      const;
+	uint64_t GetDiagGbCyclesRun()   const;
+
 	// Count of int16 values (NOT stereo frames) currently ready in the
 	// ring buffer. Matches the convention S9xGetSampleCount uses —
 	// useful when driving snes9x's host audio pull path.
@@ -259,6 +268,19 @@ void    S9xSGBSetAudioRate(int32_t rate_hz);
 int32_t S9xSGBGetAudioClockHz(void);
 int32_t S9xSGBGetAudioCyclesPerSample(void);
 int32_t S9xSGBGetAudioCpsRemainderStep(void);
+
+// BIOS-mode lifetime diagnostic counters. queue_overflow tracks the
+// number of times IcdPushQueue had to drop the oldest packet because
+// the SNES BIOS hadn't drained $6002 yet (matches bsnes drop-oldest
+// behavior, but counter is non-zero only if game-side packet rate is
+// actually outrunning drain). empty/partial drains track GB APU ring
+// underflows visible to the host audio path.
+unsigned int S9xSGBGetDiagQueueOverflow(void);
+unsigned int S9xSGBGetDiagEmptyDrains(void);
+unsigned int S9xSGBGetDiagPartialDrains(void);
+unsigned int S9xSGBGetDiagPushDrops(void);
+int          S9xSGBGetDiagRingFill(void);
+unsigned long long S9xSGBGetDiagGbCyclesRun(void);
 
 // Timing knobs — push Settings.GameBoyRunMode and GBClockMultiplier
 // into the emulator from snes9x's per-frame dispatch. Both take effect

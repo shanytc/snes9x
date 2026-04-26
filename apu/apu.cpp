@@ -71,9 +71,27 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
 {
     int16 *out = (int16 *)dest;
 
-    // BIOS-less SGB — no SPC running, GB owns the host output entirely.
-    if (Settings.SuperGameBoy)
+    // GB owns the host output: BIOS-less mode (SPC not running) OR
+    // BIOS mode after the GB has been released (SPC's DSP residual
+    // after the splash chime can produce audible noise even when no
+    // game audio is being sent — drain GB exclusively to keep the
+    // output clean). The cap in S9xSGBGetSampleCount keeps
+    // ProcessSound's wait loop satisfiable in either case.
+    const bool gb_owns_audio = Settings.SuperGameBoy ||
+        (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
+    if (gb_owns_audio)
     {
+        // Discard SPC's accumulated samples. The SPC700 keeps running
+        // and pushing into spc::resampler; with our routing we never
+        // read from it, so it stays full. S9xAPUEndScanline's gate
+        // (space_filled >= APU_SAMPLE_BLOCK) then fires LandSamples on
+        // every scanline (~15720/sec) instead of every ~8 scanlines
+        // (~1965/sec) like normal SNES, and each extra ProcessSound
+        // call engages SoundSync's wait, over-throttling emulation
+        // to single-digit fps. Clearing here keeps the SPC resampler
+        // near-empty so the gate fires at the natural cadence.
+        S9xClearSamples();
+
         if (Settings.Mute)
         {
             memset(out, 0, sample_count << 1);
@@ -114,27 +132,6 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
         }
     }
 
-    // SGB BIOS mode — once the BIOS releases the GB, mix GB APU output
-    // additively on top of the SPC output. SPC stays the timing master
-    // (its drain rate paces SoundSync's wait loop), so excessive GB
-    // production can't deadlock the audio queue. When the GB ring
-    // buffer is empty (pre-release, briefly during reset toggles) we
-    // leave the SPC output untouched. Mirrors how the real SGB cart
-    // mixes the GB's analog audio onto the SNES audio bus.
-    if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
-    {
-        static std::vector<int16_t> gb_mix_buf;
-        if ((int)gb_mix_buf.size() < sample_count)
-            gb_mix_buf.resize(sample_count);
-
-        const int32_t got = S9xSGBDrainSamples(gb_mix_buf.data(), sample_count);
-        for (int32_t i = 0; i < got; ++i)
-        {
-            int32 mixed = (int32)out[i] + (int32)gb_mix_buf[i];
-            out[i] = ((int16)mixed != mixed) ? (mixed >> 31) ^ 0x7fff : mixed;
-        }
-    }
-
     if (spc::resampler.space_empty() >= 535 * 2 || !Settings.SoundSync ||
         Settings.TurboMode || Settings.Mute)
         spc::sound_in_sync = true;
@@ -146,7 +143,8 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
 
 int S9xGetSampleCount(void)
 {
-	if (Settings.SuperGameBoy)
+	if (Settings.SuperGameBoy ||
+	    (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased()))
 		return S9xSGBGetSampleCount();
 
 	int avail = spc::resampler.avail();
@@ -343,6 +341,15 @@ void S9xAPUEndScanline(void)
 {
     S9xAPUExecute();
     SNES::dsp.synchronize();
+
+    // BIOS-less SGB skips this entire path — cpuexec bypasses the
+    // SNES loop in that mode and drives audio from its own SGB-only
+    // branch. For BIOS mode (SGB_BIOSModeActive), keep the SPC
+    // scanline driver firing as in normal SNES — that's what paces
+    // the SNES at 60 fps wall via ProcessSound's wait engaging
+    // ~33 times/frame. Routing-to-GB happens inside S9xMixSamples.
+    if (Settings.SuperGameBoy)
+        return;
 
     if (spc::resampler.space_filled() >= APU_SAMPLE_BLOCK)
         S9xLandSamples();

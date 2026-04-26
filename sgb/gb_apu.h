@@ -113,7 +113,7 @@ struct Apu
 	int32_t   sample_accum_r    = 0;
 	uint32_t  sample_accum_cnt  = 0;
 	int32_t   sample_timer      = 0;
-	int32_t   cycles_per_sample = 131;  // ~4.194 MHz / 32000 Hz
+	int32_t   cycles_per_sample = 131;  // ~4.194 MHz / 32000 Hz (floor)
 	int32_t   output_rate       = 32000;
 	// Actual GB clock rate the host is driving us at. Defaults to DMG
 	// (4.194 MHz); SGB1 mode uses SNES master / 5 = 4.295 MHz, which
@@ -121,6 +121,16 @@ struct Apu
 	// back chipmunk-pitched (samples emitted faster than the host rate
 	// expects). Used together with output_rate to compute cycles_per_sample.
 	int32_t   clock_hz          = 4194304;
+	// Bresenham fractional accumulator for cycles_per_sample. Integer
+	// cps alone gives clock_hz/cps Hz output, which differs from the
+	// true clock_hz/output_rate by up to ~0.5% (e.g. 4194304/48000 =
+	// 87.38, integer 87 → effective 48210 Hz at host 48000 Hz, audible
+	// as a "hurried" pitch shift). On each sample emit, sample_timer
+	// reloads with `cps + (1 if remainder_acc rolls over, else 0)`,
+	// making the long-run average exactly clock_hz/output_rate cycles
+	// per sample. Pitch is now exact.
+	int32_t   cps_remainder_step = 0;       // = clock_hz % output_rate
+	int32_t   cps_remainder_acc  = 0;       // [0, output_rate)
 
 	// Ring buffer of mixed stereo int16 samples (interleaved L,R).
 	int16_t   sample_buf[APU_SAMPLE_BUF_SIZE * 2];

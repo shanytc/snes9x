@@ -86,6 +86,13 @@ public:
 	int32_t DrainAudio(int16_t *out, int32_t max_samples);
 	int32_t GetAudioSampleRate() const;
 
+	// Diagnostics: GB clock_hz and cycles_per_sample as currently
+	// configured in the APU. Used by the SGB OSD to verify audio
+	// rate math.
+	int32_t GetAudioClockHz() const;
+	int32_t GetAudioCyclesPerSample() const;
+	int32_t GetAudioCpsRemainderStep() const;
+
 	// Count of int16 values (NOT stereo frames) currently ready in the
 	// ring buffer. Matches the convention S9xGetSampleCount uses —
 	// useful when driving snes9x's host audio pull path.
@@ -247,6 +254,11 @@ void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 int32_t S9xSGBGetSampleCount(void);
 int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s);
 void    S9xSGBSetAudioRate(int32_t rate_hz);
+
+// Diagnostics — see Emulator::GetAudioClockHz / GetAudioCyclesPerSample.
+int32_t S9xSGBGetAudioClockHz(void);
+int32_t S9xSGBGetAudioCyclesPerSample(void);
+int32_t S9xSGBGetAudioCpsRemainderStep(void);
 
 // Timing knobs — push Settings.GameBoyRunMode and GBClockMultiplier
 // into the emulator from snes9x's per-frame dispatch. Both take effect

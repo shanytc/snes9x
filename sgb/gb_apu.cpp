@@ -404,13 +404,27 @@ void ApuReset(Apu &a)
 	std::memset(a.sample_buf, 0, sizeof a.sample_buf);
 }
 
+// Compute cycles_per_sample as integer FLOOR (not rounded) plus the
+// Bresenham remainder so the long-run average is exactly clock_hz/
+// output_rate cycles per sample. Pitch is exact — no 0.4% drift from
+// integer rounding.
+static inline void RecomputeSampleRate(Apu &a)
+{
+	if (a.output_rate < 1) a.output_rate = 32000;
+	a.cycles_per_sample  = a.clock_hz / a.output_rate;       // floor
+	a.cps_remainder_step = a.clock_hz % a.output_rate;       // [0, rate)
+	if (a.cycles_per_sample < 1) a.cycles_per_sample = 1;
+	// Preserve cps_remainder_acc across rate changes — the running
+	// fractional carry shouldn't reset, otherwise we'd briefly emit
+	// at the integer-only rate until the carry rebuilds.
+}
+
 void ApuSetOutputRate(Apu &a, int32_t rate)
 {
 	if (rate <= 0) rate = 32000;
 	if (rate == a.output_rate) return;  // idempotent — preserve sample_timer
-	a.output_rate       = rate;
-	a.cycles_per_sample = (a.clock_hz + rate / 2) / rate;  // rounded
-	if (a.cycles_per_sample < 1) a.cycles_per_sample = 1;
+	a.output_rate = rate;
+	RecomputeSampleRate(a);
 	// Don't touch sample_timer — it's a countdown into the next sample
 	// boundary; letting it tick down naturally avoids a one-sample gap.
 }
@@ -419,9 +433,8 @@ void ApuSetClockHz(Apu &a, int32_t hz)
 {
 	if (hz <= 0)         return;
 	if (hz == a.clock_hz) return;  // idempotent
-	a.clock_hz          = hz;
-	a.cycles_per_sample = (hz + a.output_rate / 2) / a.output_rate;
-	if (a.cycles_per_sample < 1) a.cycles_per_sample = 1;
+	a.clock_hz = hz;
+	RecomputeSampleRate(a);
 }
 
 // Event-driven advance. Per-T-cycle loops were the hottest code in the
@@ -513,7 +526,17 @@ void ApuStep(Apu &a, int32_t tcycles)
 
 		if (a.sample_timer <= 0)
 		{
+			// Bresenham: reload with `cycles_per_sample` floor, plus
+			// occasionally an extra cycle when remainder accumulates
+			// past output_rate. Long-run average reload = clock_hz/
+			// output_rate exactly — no integer-rounding drift.
 			a.sample_timer += a.cycles_per_sample;
+			a.cps_remainder_acc += a.cps_remainder_step;
+			if (a.cps_remainder_acc >= a.output_rate)
+			{
+				a.cps_remainder_acc -= a.output_rate;
+				a.sample_timer += 1;
+			}
 			FlushSample(a);
 		}
 

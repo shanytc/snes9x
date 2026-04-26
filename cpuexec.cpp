@@ -281,12 +281,13 @@ void S9xMainLoop (void)
 			// see the main loop. Per-scanline/end-of-frame run disabled.
 		}
 
-		// Periodic status OSD for P2 triage — once per second, print the
-		// ICD2 counter state so we can see whether packets are flowing.
-		// Remove once the bridge is stable.
+		// Periodic ICD2 / DMA status OSD (disabled — was useful for the
+		// SGB BIOS handshake bring-up; kept commented out so it can be
+		// re-enabled if BIOS-side diagnostics are needed again. The
+		// audio-pacing OSD in the V=225 hook below is unobstructed
+		// while this is off).
+#if 0
 		static uint32_t s_tick = 0;
-		// Poll RAM every frame so we can catch transient values between
-		// OSD refreshes. Track whether $02F8 or $02C0 ever went non-zero.
 		static uint8   s_prev_f8  = 0;
 		static uint8   s_prev_c0  = 0;
 		static uint8   s_max_c0   = 0;
@@ -301,7 +302,6 @@ void S9xMainLoop (void)
 		const uint8 nmitimen = Memory.FillRAM[0x4200];
 		const int32 irq_timer = Timings.NextIRQTimer;
 		const uint8 irq_line  = CPU.IRQLine ? 1 : 0;
-		// H/V-IRQ targets: bit 0 of H2/V2 is high bit of 10/9-bit target
 		const uint16 h_target = Memory.FillRAM[0x4207] | ((Memory.FillRAM[0x4208] & 1) << 8);
 		const uint16 v_target = Memory.FillRAM[0x4209] | ((Memory.FillRAM[0x420A] & 1) << 8);
 		if (s_prev_f8 == 0 && now_f8 != 0) s_f8_set_count++;
@@ -312,13 +312,6 @@ void S9xMainLoop (void)
 		{
 			char gb_buf[320], msg[512];
 			S9xSGBGetStatus(gb_buf, sizeof gb_buf);
-
-			// Compact diagnostic: SNES PC/banks/handshake counters, GB
-			// status (ring shows what our ICD2 actually served), and
-			// DMA channel 3 registers — that's the channel the BIOS
-			// triggers (MDMAEN=$08 = bit 3), so it's the real drain
-			// path. A1T3=7000 + BBAD3=18/22/80 tells us where the
-			// packet bytes are actually being streamed.
 			snprintf(msg, sizeof msg,
 			         "PC=%04X PB=%02X DB=%02X 02C0=%02X(max=%02X) 02F8=%02X #5=%u | %s\n"
 			         "DMA3 BBAD=%02X A1T=%02X%02X A1B=%02X DAS=%02X%02X  MDMAEN(last)=%02X  HDMAEN=%02X",
@@ -340,6 +333,7 @@ void S9xMainLoop (void)
 			S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
 			Settings.InitialInfoStringTimeout = saved;
 		}
+#endif
 	}
 
 	S9xPackStatus();
@@ -515,14 +509,19 @@ void S9xDoHEventProcessing (void)
 					if (elapsed_ms >= 1000)
 					{
 						const int gb_avail_capped = S9xSGBGetSampleCount();
-						char dmsg[200];
+						const int gb_clock = S9xSGBGetAudioClockHz();
+						const int gb_cps   = S9xSGBGetAudioCyclesPerSample();
+						const int gb_rem   = S9xSGBGetAudioCpsRemainderStep();
+						char dmsg[280];
 						snprintf(dmsg, sizeof dmsg,
-							"SGB diag: fps=%d skip=%d avail=%d rate=%d "
-							"sync=%d released=%d",
+							"SGB diag: fps=%d avail=%d rate=%d "
+							"clk=%d cps=%d rem=%d sync=%d rel=%d",
 							frame_count,
-							(int)IPPU.SkippedFrames,
 							gb_avail_capped,
 							Settings.SoundPlaybackRate,
+							gb_clock,
+							gb_cps,
+							gb_rem,
 							Settings.SoundSync ? 1 : 0,
 							S9xSGBBIOSGBIsReleased() ? 1 : 0);
 						const uint32 saved = Settings.InitialInfoStringTimeout;

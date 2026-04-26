@@ -990,6 +990,21 @@ int32_t Emulator::GetAudioSampleRate() const
 	return impl_->apu.output_rate;
 }
 
+int32_t Emulator::GetAudioClockHz() const
+{
+	return impl_->apu.clock_hz;
+}
+
+int32_t Emulator::GetAudioCyclesPerSample() const
+{
+	return impl_->apu.cycles_per_sample;
+}
+
+int32_t Emulator::GetAudioCpsRemainderStep() const
+{
+	return impl_->apu.cps_remainder_step;
+}
+
 int32_t Emulator::GetAudioSamplesAvailable() const
 {
 	const uint32_t head = impl_->apu.sample_head;
@@ -1428,14 +1443,18 @@ void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 int32_t S9xSGBGetSampleCount(void)
 {
 	int32_t count = SGB::Instance().GetAudioSamplesAvailable();
-	// Cap at one SNES frame's worth of int16s. Hard ceiling kept as a
-	// deadlock safeguard against GB ring overruns — avail must stay
-	// well below the host queue's max free space (~6144 int16 at 48k /
-	// 64 ms) or ProcessSound's audio-sync wait can't be satisfied and
-	// the emulator pegs at the wait's 1-second timeout (1 fps).
+	// Cap reported avail. ProcessSound's audio-sync wait engages when
+	// freeBytes/2 < availableSamples; bigger cap → bigger wait spike
+	// when GB ring backs up → more aggressive throttle. With cap at
+	// one SNES frame (1600 int16/48k), spikes drain ~3 buffers per
+	// wait engagement (~24 ms), throttling emu to ~35 fps wall in
+	// SGB BIOS mode. Cap at 1/4 frame (400) → ~6 ms wait spike →
+	// roughly 4× less throttling, target ~60 fps wall.
+	// Hard ceiling stays as a deadlock safeguard (avail must stay
+	// well below queue max free, ~6144 int16 at 48 kHz / 64 ms).
 	const int32_t out_rate    = SGB::Instance().GetAudioSampleRate();
-	int32_t       cap         = (out_rate * 2) / 60;  // 1600 at 48k
-	if (cap < 256)  cap = 256;
+	int32_t       cap         = (out_rate * 2) / 252;  // ~381 at 48k
+	if (cap < 64)   cap = 64;
 	if (cap > 6000) cap = 6000;
 	if (count > cap) count = cap;
 	return count;
@@ -1452,6 +1471,21 @@ int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s)
 void S9xSGBSetAudioRate(int32_t rate_hz)
 {
 	SGB::Instance().SetAudioRate(rate_hz);
+}
+
+int32_t S9xSGBGetAudioClockHz(void)
+{
+	return SGB::Instance().GetAudioClockHz();
+}
+
+int32_t S9xSGBGetAudioCyclesPerSample(void)
+{
+	return SGB::Instance().GetAudioCyclesPerSample();
+}
+
+int32_t S9xSGBGetAudioCpsRemainderStep(void)
+{
+	return SGB::Instance().GetAudioCpsRemainderStep();
 }
 
 void S9xSGBSetRunMode(uint8_t mode)

@@ -47,13 +47,38 @@ void JoypadSet(Joypad &j, Memory &mem, uint8_t mask)
 
 uint8_t JoypadRead(const Joypad &j)
 {
-	uint8_t result = static_cast<uint8_t>(j.select | 0xC0);
-	const bool sel_dpad = (j.select & 0x10) == 0;
-	const bool sel_btns = (j.select & 0x20) == 0;
+	const uint8_t sel_bits = static_cast<uint8_t>(j.select & 0x30);
+	const bool    sel_dpad = (sel_bits & 0x10) == 0;
+	const bool    sel_btns = (sel_bits & 0x20) == 0;
+
 	uint8_t low = 0x0F;
-	if (sel_dpad) low &= j.dpad;
-	if (sel_btns) low &= j.btns;
-	return static_cast<uint8_t>(result | low);
+	if (j.sgb_active)
+	{
+		const uint8_t pad    = j.sgb_pads[j.sgb_index & 0x03];
+		const uint8_t dpad_n = static_cast<uint8_t>(pad & 0x0F);
+		const uint8_t btns_n = static_cast<uint8_t>((pad >> 4) & 0x0F);
+		if (!sel_dpad && !sel_btns)
+		{
+			// SGB ICD2: with neither line driven, low nibble is the
+			// inverted player-rotation index. Single-player games see
+			// 0x0F here (sgb_index == 0); MLT-detect probes that
+			// toggle P15 then read $30 see 0x0E / 0x0D / 0x0C and
+			// conclude SGB.
+			low = static_cast<uint8_t>(~j.sgb_index & 0x0F);
+		}
+		else
+		{
+			if (sel_dpad) low &= dpad_n;
+			if (sel_btns) low &= btns_n;
+		}
+	}
+	else
+	{
+		if (sel_dpad) low &= j.dpad;
+		if (sel_btns) low &= j.btns;
+	}
+
+	return static_cast<uint8_t>(sel_bits | 0xC0 | low);
 }
 
 void JoypadWrite(Joypad &j, uint8_t value)

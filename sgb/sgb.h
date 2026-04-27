@@ -126,6 +126,11 @@ public:
 	// for a tightly-packed buffer, or the SNES GFX.Screen's PPL).
 	void  BlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 
+	// BIOS-mode overlay path — see S9xSGBOverlayBiosBorder for the
+	// full description. Renders the captured custom border on top of
+	// the SNES-rendered output, sparing the central 20×18 GB area.
+	void  OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
+
 	// Write a one-line status snapshot — PC, SP, A, halt/stop flag,
 	// total T-cycles, illegal-op count.
 	void  GetStatus(char *buf, size_t cap) const;
@@ -247,6 +252,24 @@ bool S9xSGBIsActive(void);
 // 256 × 224 BGR555 buffer. `pitch_pixels` is the stride in uint16_t
 // units. Call after S9xSGBRunFrame.
 void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
+
+// BIOS-mode border overlay. In BIOS mode the SNES 65816 runs the SGB2
+// BIOS, which renders its OWN device-frame border into GFX.Screen via
+// normal SNES BG layers. Once the loaded GB game uploads a custom
+// border via PCT_TRN/CHR_TRN (captured by our framebuffer-capture
+// path even in BIOS mode), this routine overlays our captured border
+// onto GFX.Screen — but ONLY the outer ring, leaving the central
+// 20×18 GB area at offset (48,40) untouched so the BIOS's authentic
+// GB rendering stays visible. No-op if no custom border has been
+// captured yet (the BIOS's default frame stays).
+//   `dest`         — must point at a 256-wide BGR555 buffer (typically
+//                    GFX.Screen).
+//   `pitch_pixels` — uint16 stride per row.
+// Wired into S9xEndScreenRefresh AFTER FLUSH_REDRAW (which finalizes
+// the PPU output into GFX.Screen) and BEFORE S9xDisplayMessages, so
+// the overlay isn't clobbered by the PPU blit and the snes9x OSD
+// still draws on top.
+void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
 
 // Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
 // contract. `count_int16s` is the number of int16 samples (stereo frame

@@ -24,6 +24,20 @@ struct Joypad
 	uint8_t dpad      = 0x0F;   // low nibble, active-low — 1 = released
 	uint8_t btns      = 0x0F;
 	uint8_t prev_mask = 0;      // last GB_* mask — used for IRQ edge detection
+
+	// ICD2 (SGB BIOS) joypad bridge. When sgb_active, JoypadRead pulls
+	// the selected nibble from sgb_pads[sgb_index] instead of dpad/btns,
+	// AND — critically — exposes ~sgb_index in the low nibble when the
+	// GB selects neither line ($30 idle). That rotation byte is what
+	// SGB-detect probes (DK Japan after MLT_REQ, etc.) read back to
+	// confirm SGB hardware. Without it, the low nibble is always 0x0F
+	// and the game silently falls back to "plain DMG" — no border, no
+	// palette commands. sgb_pads[N] mirrors the byte the BIOS wrote to
+	// $6004+N (active-low, low nibble = R/L/U/D, high nibble =
+	// A/B/Sel/Start).
+	bool    sgb_active = false;
+	uint8_t sgb_index  = 0;
+	uint8_t sgb_pads[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 };
 
 enum : uint8_t

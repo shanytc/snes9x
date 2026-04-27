@@ -6,8 +6,10 @@
 
 #include "sgb.h"
 
-#include "../snes9x.h"   // Settings.SGB_BIOSModeActive for the
-                          // mode-aware sample-count cap below.
+#include "../snes9x.h"   // Settings.SGB_BIOSModeActive + S9xMessage
+                          // (used for the border-capture diagnostic OSD,
+                          // matching the pattern dropped in bd2a5479).
+#include "../messages.h" // S9X_INFO / S9X_ROM_INFO type tags.
 
 #include "gb_cpu.h"
 #include "gb_memory.h"
@@ -305,6 +307,41 @@ struct Emulator::Impl
 	// only step when debt covers a full instruction; under-runs carry
 	// forward as positive debt; over-runs carry as negative debt.
 	int32_t  cycle_debt            = 0;
+
+	// Deferred CHR_TRN / PCT_TRN capture. Real SGB hardware reconstructs
+	// border tile/map data from the GB's LCD over multiple frames after
+	// the *_TRN packet — not from VRAM at packet completion. A direct
+	// memcpy of GB $8000 races the game's own VRAM updates and picks up
+	// zero/partial data (DK Japan visibly: solid-blue surround instead
+	// of arcade machine). Instead we stash the packet here and at the
+	// next GB frame end decode the top-left 128×128 area of the rendered
+	// LCD into the canonical 4 KB byte stream the SGB tile/map handlers
+	// expect.
+	struct BorderCapture
+	{
+		enum Stage : uint8_t { Idle = 0, ChrTrn = 1, PctTrn = 2 };
+		Stage   stage = Idle;
+		uint8_t pkt[16] = {};   // saved packet bytes (cmd in [0], param in [1])
+	} border_capture;
+
+	// BIOS-mode border crossfade. Counts frames since both halves of
+	// CHR_TRN + PCT_TRN landed; 0 = no custom border yet (BIOS default
+	// shows through), >= BORDER_FADE_FRAMES = full overlay. In between,
+	// OverlayBiosBorder lerps per-pixel between the BIOS-rendered
+	// default and the captured custom border so the gray Game Boy
+	// frame eases out into the game's arcade machine instead of
+	// snapping in on a single frame.
+	uint16_t border_fade_frames = 0;
+
+	// One-shot snapshot of GB CPU registers at the moment the boot
+	// ROM unmapped itself (FF50 write). DK / Pokémon / etc. read
+	// these to detect SGB1 vs SGB2 vs DMG; if our boot ROM hands off
+	// with the wrong A/F values, those games take their non-SGB
+	// branch and never emit border packets. Surfaced via the OSD so
+	// we can compare against real SGB2 (A=$FF, F=$00, BC=$0014,
+	// DE=$0000, HL=$C060).
+	bool     boot_handoff_captured = false;
+	CpuRegs  boot_handoff_regs{};
 };
 
 // File-local trampoline — lets the process-global SgbCommandCallback
@@ -363,6 +400,11 @@ void Emulator::Reset()
 	JoypadReset(impl_->joypad);
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
+	impl_->border_capture.stage = Impl::BorderCapture::Idle;
+	impl_->border_fade_frames   = 0;
+	impl_->boot_handoff_captured = false;
+	impl_->boot_handoff_regs     = {};
+	IrqServicedReset();
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
 	// $7800 capture ring starts as $FF (matches bsnes `output[2048]=0xFF`).
 	std::memset(impl_->icd2.lcd_ring, 0xFF, sizeof impl_->icd2.lcd_ring);
@@ -382,6 +424,17 @@ void Emulator::Reset()
 	impl_->icd2.joypad[1] = 0xFF;
 	impl_->icd2.joypad[2] = 0xFF;
 	impl_->icd2.joypad[3] = 0xFF;
+
+	// ICD2 joypad bridge — only active when the SNES BIOS is driving
+	// $6004-$6007 directly (BIOS mode). In BIOS-less mode the SetJoypad
+	// path feeds the standard JoypadSet flow instead, so we leave the
+	// bridge disabled there to avoid pulling stale sgb_pads bytes.
+	impl_->joypad.sgb_active = Settings.SGB_BIOSModeActive;
+	impl_->joypad.sgb_index  = 0;
+	impl_->joypad.sgb_pads[0] = 0xFF;
+	impl_->joypad.sgb_pads[1] = 0xFF;
+	impl_->joypad.sgb_pads[2] = 0xFF;
+	impl_->joypad.sgb_pads[3] = 0xFF;
 
 	impl_->mem.ppu    = &impl_->ppu;
 	impl_->mem.apu    = &impl_->apu;
@@ -600,6 +653,215 @@ void Emulator::RunFrame()
 	RunCycles(budget);
 }
 
+// ===================================================================
+// Border-capture diagnostic OSD (temporary — remove once DK Japan and
+// a couple other reference games confirm the capture path is correct).
+// Counters + latest captured/packet metadata are pushed once per frame
+// via S9xMessage, using the same temporary-timeout-bump pattern as the
+// BIOS-mode diagnostic OSD removed in bd2a5479.
+// ===================================================================
+struct SgbDbg
+{
+	uint32_t pkt_chr      = 0;
+	uint32_t pkt_pct      = 0;
+	uint32_t cap_fired    = 0;
+	uint8_t  last_param   = 0;
+	uint8_t  last_lcdc    = 0;
+	uint8_t  last_scx     = 0;
+	uint8_t  last_scy     = 0;
+	uint8_t  last_bgp     = 0;
+	uint8_t  last_dec[8]  = {};
+	// Ring of the last 8 command IDs that reached OnSgbCommandInternal,
+	// in chronological order (cmd_ring[0] = oldest). Lets us see
+	// exactly what DK sent when chr/pct stay at 0 — e.g., is it just
+	// MASK_EN/PAL01 or is there really no CHR_TRN coming?
+	uint8_t  cmd_ring[8]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+	uint32_t cmd_count    = 0;
+
+	// Raw $FF00 traffic from the GB. Lets us tell apart "GB is
+	// silently HALTing without trying to send packets" (these
+	// counters frozen at boot-ROM totals) from "GB is bit-banging
+	// but our decoder is dropping packets" (joy_writes climbs but
+	// rst_pulses doesn't, or rst_pulses climbs but rcv doesn't).
+	uint32_t joy_writes   = 0;   // total GB writes to $FF00
+	uint32_t rst_pulses   = 0;   // count of $00 (P14=0,P15=0) writes
+};
+static SgbDbg g_sgb_dbg;
+
+static void DbgPushCmd(uint8_t cmd)
+{
+	const uint32_t i = g_sgb_dbg.cmd_count;
+	if (i < 8)
+	{
+		g_sgb_dbg.cmd_ring[i] = cmd;
+	}
+	else
+	{
+		// Shift left, append at the end.
+		for (int k = 0; k < 7; ++k)
+			g_sgb_dbg.cmd_ring[k] = g_sgb_dbg.cmd_ring[k + 1];
+		g_sgb_dbg.cmd_ring[7] = cmd;
+	}
+	++g_sgb_dbg.cmd_count;
+}
+
+static void DbgDrawOsd(const Emulator::Impl &impl)
+{
+	char buf[400];
+	const SgbDbg &d = g_sgb_dbg;
+	const auto   &icd = impl.icd2;
+	const auto   &b   = impl.sgb_state.border;
+	const uint8_t mode_now = (impl.run_mode == RunMode::SGB)  ? 1
+	                       : (impl.run_mode == RunMode::SGB2) ? 2
+	                       : 0;
+	// Unqualified snprintf — win32 headers macro it to _snprintf, so
+	// `std::snprintf` expands to `std::_snprintf` and fails to resolve
+	// (same hazard as the `fopen` → `_tfwopen` macro).
+	//
+	// Diagnostic field key (read in this order to triage):
+	//   w6=N        — count of BIOS writes to $6004. ZERO = BIOS NMI
+	//                 handler isn't running / GB not yet released.
+	//                 Climbing = BIOS is alive and feeding the GB.
+	//   jp=XX/YY    — last $6004 / $6005 byte (active-low; FF = idle).
+	//                 If w6 > 0 but jp stays FF, BIOS sees no SNES pad.
+	//   idx=N       — current ICD2 player rotation index (0..3). For
+	//                 SGB-detect (MLT_REQ-2 probe), this should briefly
+	//                 toggle to 1 then settle at 0.
+	//   mlt=N       — sniffed MLT_REQ player count (1/2/4).
+	//   sel=XX      — last GB write to $FF00 (j.select, masked $30).
+	//   tl/ml       — border tiles_loaded / map_loaded flags. BOTH
+	//                 must flip 1 before OverlayBiosBorder draws the
+	//                 captured frame. cap=N counts how many times
+	//                 RunCycles flushed a deferred CHR_TRN/PCT_TRN.
+	//   jw=N rst=N  — raw GB→$FF00 traffic. jw is total writes,
+	//                 rst is count of $00 (RESET-pulse) writes —
+	//                 i.e. packet starts. After boot-ROM handshake
+	//                 baseline (~rst=8 for SGB2's F1..FF set), if
+	//                 rst stays flat the GB isn't trying to send
+	//                 packets at all; if rst climbs but rcv doesn't
+	//                 keep up, the packet decoder is dropping bits.
+	//   cmds=N ring — total commands seen by OnSgbCommandInternal +
+	//                 last 8 cmd IDs (oldest→newest). The cmd is
+	//                 byte0>>3, so handshake F1/F3/F5/F7 → 1E and
+	//                 F9/FB/FD/FF → 1F. Game commands: 11 = MLT_REQ,
+	//                 13 = CHR_TRN, 14 = PCT_TRN, 0B = PAL_TRN,
+	//                 15 = ATTR_TRN, 17 = MASK_EN.
+	//   IE/IF       — GB interrupt enable / pending. If GB is HALTed
+	//                 (HLT=1) and IE & IF == 0, GB is hung waiting
+	//                 for an IRQ that no one will fire.
+	//   IME         — GB master interrupt-enable flag.
+	//   HLT         — GB CPU is in HALT (PC frozen on HALT instr).
+	//   BR          — GB-side boot ROM still mapped at $0000-$00FF.
+	//                 Should flip to 0 once boot ROM finishes and
+	//                 writes $FF50; if stuck at 1, boot ROM is hung.
+	//   CTL         — ICD2 $6003. Bit 7 = GB released. If $00, GB is
+	//                 frozen in reset (no instructions executing).
+	//   SGBflag     — cart header byte $0146. $03 = SGB-aware, $00 =
+	//                 plain DMG. If $00, the loaded game won't EVER
+	//                 send SGB packets regardless of how good our
+	//                 ICD2 bridge is — the BIOS-mode test ROM must
+	//                 actually be SGB-flagged (e.g. the JP/EU "Donkey
+	//                 Kong" rev, NOT the original 1994 NTSC release).
+	//   title       — first 11 bytes of cart title at $0134, ASCII-
+	//                 only filter. Cross-check against the file the
+	//                 user thinks they loaded.
+	//   handoff +   — GB CPU register snapshot at the moment the
+	//   AF/BC/DE/HL   boot ROM unmapped itself. Real SGB2: AF=$FF00,
+	//                 BC=$0014, DE=$0000, HL=$C060. Real SGB1:
+	//                 AF=$0100, BC=$0014, DE=$0000, HL=$C060. Real
+	//                 DMG: AF=$01B0, BC=$0013, DE=$00D8, HL=$014D.
+	//                 Mismatch = the loaded GB game's hardware-
+	//                 detect branches DMG-side and skips SGB-init.
+	//   irqV/S/T    — count of VBlank / STAT / Timer IRQs serviced
+	//                 by Cpu::ServiceInterrupts since reset. At 60 Hz
+	//                 with default wiring, irqV should grow ≈ once
+	//                 per frame. Anything substantially slower means
+	//                 our PPU/timer isn't producing the IRQs the
+	//                 running game expects.
+	//   ill         — count of illegal opcodes executed. Should stay
+	//                 0 on healthy ROMs; rising means our CPU lost
+	//                 the plot and is fetching from data/RAM.
+	//   bank        — current MBC1 ROM bank visible at $4000-$7FFF.
+	const auto &cs = impl.cpu.State();
+	// Snapshot the cart's title (first 11 bytes — title region is
+	// 0x0134..0x0142 but past byte 11 may overlap manufacturer code on
+	// CGB-aware carts). Print printable ASCII only, so a non-GB cart or
+	// truncated load shows obvious garbage.
+	char title[12] = {0};
+	for (int i = 0; i < 11; ++i)
+	{
+		const char ch = impl.cart.header.title[i];
+		title[i] = (ch >= 0x20 && ch < 0x7F) ? ch : '.';
+	}
+	snprintf(buf, sizeof buf,
+	         "SGB m=%u rcv=%u cmds=%u chr=%u pct=%u cap=%u "
+	         "w6=%u jp=%02X/%02X idx=%u mlt=%u sel=%02X tl=%u ml=%u "
+	         "jw=%u rst=%u "
+	         "ring=%02X-%02X-%02X-%02X-%02X-%02X-%02X-%02X "
+	         "PC=%04X LY=%02X LCDC=%02X "
+	         "IE=%02X IF=%02X IME=%u HLT=%u BR=%u CTL=%02X "
+	         "SGBflag=%02X title=\"%s\" "
+	         "handoff=%s AF=%04X BC=%04X DE=%04X HL=%04X "
+	         "irqV=%u irqS=%u irqT=%u ill=%u bank=%u",
+	         mode_now, impl.sgb_pkt.packets_received, d.cmd_count,
+	         d.pkt_chr, d.pkt_pct, d.cap_fired,
+	         icd.w_6004,
+	         icd.joypad[0], icd.joypad[1],
+	         impl.joypad.sgb_index, impl.sgb_state.mlt_players,
+	         static_cast<uint8_t>(impl.joypad.select & 0x30),
+	         b.tiles_loaded ? 1u : 0u, b.map_loaded ? 1u : 0u,
+	         d.joy_writes, d.rst_pulses,
+	         d.cmd_ring[0], d.cmd_ring[1], d.cmd_ring[2], d.cmd_ring[3],
+	         d.cmd_ring[4], d.cmd_ring[5], d.cmd_ring[6], d.cmd_ring[7],
+	         cs.r.pc, impl.ppu.ly, impl.ppu.lcdc,
+	         impl.mem.ie, impl.mem.if_,
+	         cs.ime ? 1u : 0u, cs.halted ? 1u : 0u,
+	         impl.mem.boot_rom_enabled ? 1u : 0u, icd.control,
+	         impl.cart.header.sgb_flag, title,
+	         impl.boot_handoff_captured ? "yes" : "no",
+	         impl.boot_handoff_regs.af, impl.boot_handoff_regs.bc,
+	         impl.boot_handoff_regs.de, impl.boot_handoff_regs.hl,
+	         IrqServicedCount(0), IrqServicedCount(1), IrqServicedCount(2),
+	         cs.illegal_ops, impl.cart.mbc.rom_bank);
+	// Same pattern as the BIOS-mode diagnostic OSD removed in bd2a5479
+	// (and used in memmap.cpp:1526-1529): temporarily force the
+	// InitialInfoStringTimeout high enough that S9xMessage won't drop
+	// the line on configs where the user has disabled OSD messages.
+	const uint32 saved = Settings.InitialInfoStringTimeout;
+	Settings.InitialInfoStringTimeout = 120;
+	S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
+	Settings.InitialInfoStringTimeout = saved;
+}
+
+// Reconstruct 4 KB of byte data from the top-left 16x16 tile area
+// (128x128 pixels, 2bpp raw indices) of the GB framebuffer. Output
+// bytes are in canonical GB-tile order — exactly the sequence
+// CHR_TRN / PCT_TRN delivers to the SGB BIOS over the LCD signal.
+static void DecodeBorderCapture(const uint8_t *raw_fb, uint8_t *out_4kb)
+{
+	for (int ty = 0; ty < 16; ++ty)
+	{
+		for (int tx = 0; tx < 16; ++tx)
+		{
+			uint8_t *tile_out = &out_4kb[(ty * 16 + tx) * 16];
+			for (int row = 0; row < 8; ++row)
+			{
+				uint8_t plane0 = 0, plane1 = 0;
+				for (int px = 0; px < 8; ++px)
+				{
+					const uint8_t pix = static_cast<uint8_t>(
+						raw_fb[(ty * 8 + row) * GB_SCREEN_WIDTH + (tx * 8 + px)] & 0x03);
+					const int bit = 7 - px;
+					if (pix & 1) plane0 = static_cast<uint8_t>(plane0 | (1u << bit));
+					if (pix & 2) plane1 = static_cast<uint8_t>(plane1 | (1u << bit));
+				}
+				tile_out[row * 2 + 0] = plane0;
+				tile_out[row * 2 + 1] = plane1;
+			}
+		}
+	}
+}
+
 void Emulator::RunCycles(int32_t tcycles)
 {
 	if (!impl_->has_rom) return;
@@ -611,17 +873,48 @@ void Emulator::RunCycles(int32_t tcycles)
 	impl_->cycle_debt += tcycles;
 	while (impl_->cycle_debt >= 4)
 	{
+		const bool was_boot = impl_->mem.boot_rom_enabled;
 		const int64_t pre_t = impl_->cpu.State().t_cycles;
 		impl_->cpu.Step(impl_->mem);
 		int32_t consumed = static_cast<int32_t>(
 			impl_->cpu.State().t_cycles - pre_t);
 		if (consumed <= 0) consumed = 4;
 
+		// One-shot snapshot of GB CPU registers at the moment the
+		// boot ROM unmaps itself. That's the exact "post-boot,
+		// pre-cart" handoff state DK / Pokemon / etc. inspect to
+		// detect SGB1 vs SGB2 vs DMG. Persists across the rest of
+		// the run so the OSD always shows the handoff value, not
+		// whatever the running game has since clobbered.
+		if (was_boot && !impl_->mem.boot_rom_enabled &&
+		    !impl_->boot_handoff_captured)
+		{
+			impl_->boot_handoff_captured = true;
+			impl_->boot_handoff_regs     = impl_->cpu.State().r;
+		}
+
 		PpuStep  (impl_->ppu,   impl_->mem, consumed);
 		TimerStep(impl_->timer, impl_->mem, consumed);
 		ApuStep  (impl_->apu,                consumed);
 
 		impl_->cycle_debt -= consumed;
+	}
+
+	if (impl_->border_capture.stage != Impl::BorderCapture::Idle &&
+	    impl_->ppu.frame_ready)
+	{
+		uint8_t decoded[4096];
+		DecodeBorderCapture(impl_->ppu.raw_framebuffer, decoded);
+		const uint8_t cmd =
+			(impl_->border_capture.stage == Impl::BorderCapture::ChrTrn)
+				? static_cast<uint8_t>(0x13)
+				: static_cast<uint8_t>(0x14);
+		++g_sgb_dbg.cap_fired;
+		SgbHandleCommand(impl_->sgb_state, cmd,
+		                 impl_->border_capture.pkt, 16,
+		                 decoded, impl_->ppu.framebuffer);
+		impl_->border_capture.stage = Impl::BorderCapture::Idle;
+		impl_->ppu.frame_ready      = false;
 	}
 }
 
@@ -861,6 +1154,7 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			// Earlier comment said the opposite (dpad in upper nibble) —
 			// that produced "press A → character moves right" because we
 			// interpreted bit 4 as Right.
+			impl_->joypad.sgb_pads[0] = value;
 			uint8_t mask = 0;
 			if (!(value & 0x01)) mask |= GB_RIGHT;
 			if (!(value & 0x02)) mask |= GB_LEFT;
@@ -873,9 +1167,9 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			JoypadSet(impl_->joypad, impl_->mem, mask);
 			return;
 		}
-		case 0x6005: icd.joypad[1]      = value;                                           return;
-		case 0x6006: icd.joypad[2]      = value;                                           return;
-		case 0x6007: icd.joypad[3]      = value;                                           return;
+		case 0x6005: icd.joypad[1] = value; impl_->joypad.sgb_pads[1] = value; return;
+		case 0x6006: icd.joypad[2] = value; impl_->joypad.sgb_pads[2] = value; return;
+		case 0x6007: icd.joypad[3] = value; impl_->joypad.sgb_pads[3] = value; return;
 	}
 }
 
@@ -945,14 +1239,33 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 				plane0 = static_cast<uint8_t>(plane0 | (((pix >> 0) & 1) << (7 - i)));
 				plane1 = static_cast<uint8_t>(plane1 | (((pix >> 1) & 1) << (7 - i)));
 			}
-			// Layout matches the BIOS read order:
-			//   pos = tile_col * 16 + row_in * 2 + plane
-			// so for the current row_in == row, tile t fills indices
-			// (t*16 + row*2 + 0) and (t*16 + row*2 + 1).
 			out[t * 16 + 0] = plane0;
 			out[t * 16 + 1] = plane1;
 		}
 	}
+}
+
+static inline uint16_t BgrToHost(uint16_t bgr)
+{
+	const uint16_t r = static_cast<uint16_t>(bgr & 0x1F);
+	const uint16_t g = static_cast<uint16_t>((bgr >> 5) & 0x1F);
+	const uint16_t b = static_cast<uint16_t>((bgr >> 10) & 0x1F);
+	return static_cast<uint16_t>(BUILD_PIXEL(r, g, b));
+}
+
+static inline uint16_t LerpPixel(uint16_t a, uint16_t b, uint16_t t)
+{
+	const uint16_t inv = static_cast<uint16_t>(256 - t);
+	const uint16_t ar  = static_cast<uint16_t>((a >> RED_SHIFT_BITS)   & 0x1F);
+	const uint16_t ag  = static_cast<uint16_t>((a >> GREEN_SHIFT_BITS) & 0x1F);
+	const uint16_t ab  = static_cast<uint16_t>(a                       & 0x1F);
+	const uint16_t br  = static_cast<uint16_t>((b >> RED_SHIFT_BITS)   & 0x1F);
+	const uint16_t bg  = static_cast<uint16_t>((b >> GREEN_SHIFT_BITS) & 0x1F);
+	const uint16_t bb  = static_cast<uint16_t>(b                       & 0x1F);
+	const uint16_t r   = static_cast<uint16_t>((ar * inv + br * t) >> 8);
+	const uint16_t g   = static_cast<uint16_t>((ag * inv + bg * t) >> 8);
+	const uint16_t bch = static_cast<uint16_t>((ab * inv + bb * t) >> 8);
+	return static_cast<uint16_t>((r << RED_SHIFT_BITS) | (g << GREEN_SHIFT_BITS) | bch);
 }
 
 void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
@@ -1004,14 +1317,31 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 		}
 	}
 
-	// Copy to destination with pitch. For a packed 256-wide dest this
-	// degenerates into a flat memcpy per row.
 	for (uint32_t y = 0; y < SGB_BORDER_H; ++y)
 	{
-		std::memcpy(dest + y * pitch_pixels,
-		            staging + y * SGB_BORDER_W,
-		            SGB_BORDER_W * sizeof(uint16_t));
+		uint16_t       *const drow = dest    + y * pitch_pixels;
+		const uint16_t *const srow = staging + y * SGB_BORDER_W;
+		for (uint32_t x = 0; x < SGB_BORDER_W; ++x)
+			drow[x] = BgrToHost(srow[x]);
 	}
+
+	// Diagnostic OSD: post the line via S9xMessage. The host's
+	// S9xEndScreenRefresh runs right after this BlitScreen call (see
+	// cpuexec.cpp BIOS-less branch) and its DisplayMessages step
+	// renders the InfoString on top of GFX.Screen. Live PC + LY tell us
+	// whether the GB CPU is stuck in a JOYP busy-wait (frozen PC,
+	// advancing LY) or making progress.
+	DbgDrawOsd(*impl_);
+}
+
+static constexpr uint16_t BORDER_FADE_FRAMES = 24;
+
+void Emulator::OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
+{
+	(void)dest;
+	(void)pitch_pixels;
+	if (!impl_->has_rom) return;
+	DbgDrawOsd(*impl_);
 }
 
 int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)
@@ -1137,6 +1467,12 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	// on run_mode anyway so the packet state doesn't accumulate noise.
 	if (impl_->run_mode == RunMode::DMG) return;
 
+	// Raw GB→$FF00 traffic counters — read by the OSD so we can tell
+	// whether the GB is even attempting to bit-bang packets, separate
+	// from whether our decoder consumes them.
+	++g_sgb_dbg.joy_writes;
+	if ((value & 0x30) == 0x00) ++g_sgb_dbg.rst_pulses;
+
 	// BIOS-less path — our internal packet assembler fires the dispatch
 	// callback into sgb_state.cpp (palettes / border / mask).
 	PacketFeed(impl_->sgb_pkt, value);
@@ -1146,6 +1482,8 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	// (nothing reads $7000-$700F).
 	const uint32_t pre_received = impl_->icd2.packets_received;
 	IcdFeedJoypad(impl_->icd2, value);
+
+	impl_->joypad.sgb_index = impl_->icd2.input_index;
 	// If a new packet completed (packets_received grew), and our cache
 	// isn't full yet, append a copy. The SGB2 BIOS's handshake validator
 	// at $B119 compares each packet's byte 1 across TWO separate GB
@@ -1167,9 +1505,20 @@ void Emulator::OnJoyserWrite(uint8_t value)
 
 void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)
 {
-	// *_TRN commands source their 4KB from GB VRAM $8000..$8FFF — our
-	// first half of Ppu::vram. MASK_EN freeze also needs the current
-	// GB framebuffer. Non-consuming commands ignore both pointers.
+	DbgPushCmd(cmd);
+
+	if (cmd == 0x13 || cmd == 0x14)
+	{
+		impl_->border_capture.stage = (cmd == 0x13)
+			? Impl::BorderCapture::ChrTrn
+			: Impl::BorderCapture::PctTrn;
+		std::memcpy(impl_->border_capture.pkt, data, 16);
+		impl_->ppu.frame_ready = false;
+		if (cmd == 0x13) ++g_sgb_dbg.pkt_chr;
+		else             ++g_sgb_dbg.pkt_pct;
+		return;
+	}
+
 	SgbHandleCommand(impl_->sgb_state, cmd, data, len,
 	                 impl_->ppu.vram,
 	                 impl_->ppu.framebuffer);
@@ -1275,7 +1624,16 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 
 	// ----- Timer / Joypad -----
 	IoField(c, impl.timer);
-	IoField(c, impl.joypad);
+	// Serialize only the GB-side joypad fields (size, dpad, btns,
+	// prev_mask) — keeping the on-disk layout byte-identical to v1
+	// even though the struct now also holds SGB-bridge state
+	// (sgb_active, sgb_index, sgb_pads). Those reconstruct from
+	// icd2 + BIOS writes within one frame after load, so persisting
+	// them would only complicate save-state compat.
+	IoField(c, impl.joypad.select);
+	IoField(c, impl.joypad.dpad);
+	IoField(c, impl.joypad.btns);
+	IoField(c, impl.joypad.prev_mask);
 
 	// ----- SGB command layer -----
 	IoField(c, impl.sgb_pkt);
@@ -1382,6 +1740,17 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->fb.width  = GB_SCREEN_WIDTH;
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
+
+	// Reseed the SGB-bridge mirrors on Joypad from icd2 — these are
+	// not serialized (see VisitState), so a load with the BIOS not
+	// yet refreshing $6004 would otherwise leave the GB seeing stale
+	// "all buttons released" instead of the captured pad state.
+	impl_->joypad.sgb_active   = Settings.SGB_BIOSModeActive;
+	impl_->joypad.sgb_pads[0]  = impl_->icd2.joypad[0];
+	impl_->joypad.sgb_pads[1]  = impl_->icd2.joypad[1];
+	impl_->joypad.sgb_pads[2]  = impl_->icd2.joypad[2];
+	impl_->joypad.sgb_pads[3]  = impl_->icd2.joypad[3];
+	impl_->joypad.sgb_index    = impl_->icd2.input_index;
 
 	return true;
 }
@@ -1502,6 +1871,11 @@ void S9xSGBOnJoyserWrite(uint8_t v) { SGB::Instance().OnJoyserWrite(v); }
 void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	SGB::Instance().BlitScreen(dest, pitch_pixels);
+}
+
+void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
+{
+	SGB::Instance().OverlayBiosBorder(dest, pitch_pixels);
 }
 
 int32_t S9xSGBGetSampleCount(void)

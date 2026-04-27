@@ -65,6 +65,13 @@ struct Ppu
 	bool     stat_line_high = false;
 
 	uint8_t  framebuffer[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT];
+
+	// Per-frame raw 2-bit BG/window/sprite indices (pre-BGP/OBP). The
+	// SGB BIOS-less border-capture path reads this when reconstructing
+	// CHR_TRN / PCT_TRN data from the LCD, so non-identity BGP doesn't
+	// mangle the byte stream the game intended to send.
+	uint8_t  raw_framebuffer[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT];
+
 	bool     frame_ready = false;
 };
 

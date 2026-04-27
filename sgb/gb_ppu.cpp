@@ -267,6 +267,12 @@ void RenderScanline(Ppu &p)
 
 	if (p.lcdc & 0x02) RenderSprites(p, line);
 
+	// Snapshot pre-palette raw indices for the SGB BIOS-less border
+	// capture path. End-of-frame, the capture decodes a 128x128 area
+	// from raw_framebuffer back into 4 KB of CHR_TRN/PCT_TRN bytes.
+	std::memcpy(&p.raw_framebuffer[y * GB_SCREEN_WIDTH],
+	            p.scanline_raw, GB_SCREEN_WIDTH);
+
 	// SGB BIOS-mode hook: capture post-BGP/OBP shade values (what the
 	// real GB's LCD would show). SameBoy's ICD pixel callback delivers
 	// the same — post-palette value 0-3 — and bsnes stores those
@@ -280,7 +286,8 @@ void PpuReset(Ppu &p)
 {
 	std::memset(p.vram,        0, sizeof p.vram);
 	std::memset(p.oam,         0, sizeof p.oam);
-	std::memset(p.framebuffer, 0, sizeof p.framebuffer);
+	std::memset(p.framebuffer,     0, sizeof p.framebuffer);
+	std::memset(p.raw_framebuffer, 0, sizeof p.raw_framebuffer);
 	std::memset(p.scanline_bg_raw, 0, sizeof p.scanline_bg_raw);
 	std::memset(p.scanline_raw,    0, sizeof p.scanline_raw);
 	p.lcdc = 0x91;   // LCD on, BG on, BG tile data at 0x8000, BG map at 0x9800.

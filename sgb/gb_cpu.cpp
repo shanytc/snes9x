@@ -12,6 +12,17 @@ namespace SGB {
 
 namespace {
 TraceHook g_trace_hook = nullptr;
+uint32_t  g_irq_serviced[5] = {0, 0, 0, 0, 0};
+}
+
+uint32_t IrqServicedCount(uint8_t vector)
+{
+	return (vector < 5) ? g_irq_serviced[vector] : 0;
+}
+
+void IrqServicedReset()
+{
+	for (int i = 0; i < 5; ++i) g_irq_serviced[i] = 0;
 }
 
 void Cpu::SetTraceHook(TraceHook hook)
@@ -113,10 +124,10 @@ int Cpu::ServiceInterrupts(Memory &mem)
 		++bit;
 	const uint16_t vector = static_cast<uint16_t>(0x40 + bit * 8);
 
-	// Acknowledge: clear IF bit, disable IME, unhalt.
 	mem.if_       = static_cast<uint8_t>(mem.if_ & ~(1u << bit));
 	state_.ime    = false;
 	state_.halted = false;
+	if (bit < 5) ++g_irq_serviced[bit];
 
 	// Push PC, then jump to vector.
 	Push16(state_, mem, state_.r.pc);

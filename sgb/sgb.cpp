@@ -1419,7 +1419,13 @@ static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
 	{
 		const bool p15_rose = !(icd.input_value & 0x20) && (value & 0x20);
 		if (p15_rose)
-			icd.input_index = static_cast<uint8_t>((icd.input_index + 1) & 0x03);
+		{
+			const uint8_t mlt_bits = static_cast<uint8_t>((icd.control >> 4) & 0x03);
+			const uint8_t players  = (mlt_bits == 0) ? 1u
+			                       : (mlt_bits == 1) ? 2u : 4u;
+			icd.input_index = static_cast<uint8_t>(
+				(icd.input_index + 1) % players);
+		}
 	}
 	icd.input_value = value;
 

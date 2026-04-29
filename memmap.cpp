@@ -28,6 +28,8 @@
 
 #include "memmap.h"
 #include "apu/apu.h"
+#include "cheats.h"
+#include "sgb/sgb.h"
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
@@ -779,6 +781,10 @@ static bool8 is_SufamiTurbo_Cart (const uint8 *, uint32);
 static bool8 is_BSCart_BIOS (const uint8 *, uint32);
 static bool8 is_BSCartSA1_BIOS(const uint8 *, uint32);
 static bool8 is_GNEXT_Add_On (const uint8 *, uint32);
+static bool8 is_SGB_BIOS      (const uint8 *data, uint32 size, uint8 *out_mode /*1 or 2*/);
+static bool8 FindSGB_BIOS     (uint8 mode, const char *gb_rom_path, std::string &out_path);
+static bool8 FindSGB_BootROM  (uint8 mode, const char *gb_rom_path, std::string &out_path);
+static bool8 LoadSGBBootROM   (const char *path, std::vector<uint8> &out_bytes);
 static uint32 caCRC32 (uint8 *, uint32, uint32 crc32 = 0xffffffff);
 static bool8 ReadUPSPatch (Stream *, long, int32 &);
 static long ReadInt (Stream *, unsigned);
@@ -1072,6 +1078,138 @@ static bool8 is_GNEXT_Add_On (const uint8 *data, uint32 size)
 		return (FALSE);
 }
 
+// SGB1 / SGB2 BIOS detection. Both ship as a standard LoROM SNES cart with
+// the header at 0x7FC0. SGB1 title reads "Super GAMEBOY" (13 chars),
+// SGB2 appends a '2'. Canonical file sizes are 256 KB / 512 KB respectively
+// but we only validate the title here — callers typically read a partial
+// buffer (header-sized) so ROM-size checks live outside this helper.
+static bool8 is_SGB_BIOS (const uint8 *data, uint32 size, uint8 *out_mode)
+{
+	if (!data || size < 0x8000) return (FALSE);
+	if (memcmp(data + 0x7FC0, "Super GAMEBOY", 13) != 0) return (FALSE);
+	const uint8 mode = (data[0x7FC0 + 13] == '2') ? 2 : 1;
+	if (out_mode) *out_mode = mode;
+	return (TRUE);
+}
+
+// Look for an SGB BIOS file matching `mode`. Search order:
+//   1. Same directory as the GB ROM (if path known)
+//   2. BIOS_DIR — snes9x's configured BIOS search path
+//   3. Current working directory
+// Candidate filenames per mode are tried in order; the header is verified
+// before a match is accepted. Writes the full path to `out_path` on hit.
+static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out_path)
+{
+	static const char *sgb1_names[] = {
+		"sgb.sfc", "SGB.sfc", "sgb1.sfc", "SGB1.sfc",
+		"Super Game Boy (World).sfc", nullptr
+	};
+	static const char *sgb2_names[] = {
+		"sgb2.sfc", "SGB2.sfc",
+		"Super Game Boy 2 (Japan).sfc", nullptr
+	};
+	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
+
+	std::vector<std::string> dirs;
+	if (gb_rom_path && *gb_rom_path)
+	{
+		std::string p(gb_rom_path);
+		const size_t sep = p.find_last_of("/\\");
+		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
+	}
+	dirs.push_back(S9xGetDirectory(BIOS_DIR));
+	dirs.push_back(".");
+
+	for (const auto &dir : dirs)
+	{
+		for (int i = 0; names[i]; ++i)
+		{
+			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
+			FILE *f = fopen(full.c_str(), "rb");
+			if (!f) continue;
+
+			uint8 hdr[0x8000];
+			const size_t n = fread(hdr, 1, sizeof hdr, f);
+			fclose(f);
+			if (n < 0x8000) continue;
+
+			uint8 got_mode = 0;
+			if (is_SGB_BIOS(hdr, static_cast<uint32>(n), &got_mode) && got_mode == mode)
+			{
+				out_path = full;
+				return (TRUE);
+			}
+		}
+	}
+	// On miss, stash the search roots into out_path so the caller can
+	// show the user which directories were probed.
+	out_path.clear();
+	for (const auto &dir : dirs)
+	{
+		if (!out_path.empty()) out_path += " ; ";
+		out_path += dir.empty() ? std::string(".") : dir;
+	}
+	return (FALSE);
+}
+
+bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path)
+{
+	std::string dummy;
+	return FindSGB_BIOS(mode, gb_rom_path, dummy);
+}
+
+// Locate the 256-byte GB-side boot ROM that accompanies the SGB BIOS.
+// Common names and the same directory-search order as the .sfc.
+static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &out_path)
+{
+	static const char *sgb1_names[] = {
+		"sgb.boot.rom", "sgb1.boot.rom", "sgb_bios.bin", nullptr
+	};
+	static const char *sgb2_names[] = {
+		"sgb2.boot.rom", "sgb2_bios.bin", nullptr
+	};
+	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
+
+	std::vector<std::string> dirs;
+	if (gb_rom_path && *gb_rom_path)
+	{
+		std::string p(gb_rom_path);
+		const size_t sep = p.find_last_of("/\\");
+		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
+	}
+	dirs.push_back(S9xGetDirectory(BIOS_DIR));
+	dirs.push_back(".");
+
+	for (const auto &dir : dirs)
+	{
+		for (int i = 0; names[i]; ++i)
+		{
+			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
+			FILE *f = fopen(full.c_str(), "rb");
+			if (!f) continue;
+			fseek(f, 0, SEEK_END);
+			const long sz = ftell(f);
+			fclose(f);
+			if (sz == 256)
+			{
+				out_path = full;
+				return (TRUE);
+			}
+		}
+	}
+	return (FALSE);
+}
+
+static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f) return (FALSE);
+	out_bytes.assign(256, 0);
+	const size_t got = fread(out_bytes.data(), 1, 256, f);
+	fclose(f);
+	return got == 256;
+}
+
 int CMemory::ScoreHiROM (bool8 skip_header, int32 romoff)
 {
 	uint8	*buf = ROM + 0xff00 + romoff + (skip_header ? 0x200 : 0);
@@ -1322,10 +1460,133 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
     return TRUE;
 }
 
+// Case-insensitive ASCII extension match. Used to route .gb/.gbc ROMs
+// into the SGB subsystem instead of the 65816 SNES path.
+static bool S9xFilenameHasExt(const char *name, const char *ext)
+{
+    if (!name || !ext) return false;
+    const char *dot = strrchr(name, '.');
+    if (!dot) return false;
+    const char *a = dot;
+    const char *b = ext;
+    while (*a && *b)
+    {
+        char ca = *a++; if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca + 32);
+        char cb = *b++; if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb + 32);
+        if (ca != cb) return false;
+    }
+    return *a == 0 && *b == 0;
+}
+
+// Detect a Game Boy ROM by content. Every licensed GB cart carries the
+// 48-byte Nintendo logo at 0x0104-0x0133 — if it's not present the real
+// HW boot ROM refuses to run the cart. Matching lets us catch .gb/.gbc
+// wrapped in .zip/.jma/.7z containers after FileLoader has unzipped.
+static bool S9xRomBytesAreGb(const uint8 *rom, int32 size)
+{
+    if (size < 0x150 || !rom) return false;
+    static const uint8 kGbNintendoLogo[48] = {
+        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+        0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+        0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+        0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
+        0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
+        0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
+    };
+    return memcmp(rom + 0x0104, kGbNintendoLogo, 48) == 0;
+}
+
+static std::string GBGameNameFromPath(const char *path)
+{
+    if (!path || !*path) return std::string();
+    std::string s = path;
+    const size_t sep = s.find_last_of("/\\");
+    if (sep != std::string::npos) s = s.substr(sep + 1);
+    const size_t dot = s.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) s = s.substr(0, dot);
+    return s;
+}
+
+static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
+{
+    const std::string name = GBGameNameFromPath(gb_path);
+    const char *region = Settings.PAL ? "PAL" : "NTSC";
+    char msg[1024];
+    if (bios_mode == 2)
+        snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy 2", name.c_str(), region);
+    else if (bios_mode == 1)
+        snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy", name.c_str(), region);
+    else
+        snprintf(msg, sizeof msg, "\"%s\" (%s)", name.c_str(), region);
+    const uint32 saved = Settings.InitialInfoStringTimeout;
+    Settings.InitialInfoStringTimeout = 60 * 5;
+    S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
+    Settings.InitialInfoStringTimeout = saved;
+}
+
 bool8 CMemory::LoadROM (const char *filename)
 {
     if(!filename || !*filename)
         return FALSE;
+
+    // .gb / .gbc — hand off to the SGB subsystem. The 65816 path below
+    // is bypassed entirely; S9xMainLoop gates on Settings.SuperGameBoy
+    // and runs the GB core instead.
+    if (S9xFilenameHasExt(filename, ".gb") || S9xFilenameHasExt(filename, ".gbc"))
+    {
+        // Remember the GB ROM path so the BIOS menu can reload with a
+        // different preference.
+        strncpy(Settings.GBRomPath, filename, sizeof(Settings.GBRomPath) - 1);
+        Settings.GBRomPath[sizeof(Settings.GBRomPath) - 1] = '\0';
+
+        std::string bios_path;
+        uint8 bios_mode = 0;
+        if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
+        {
+            bios_mode = 2;
+        }
+        else if (Settings.SGB_BIOSPreference >= 1)
+        {
+            bios_path.clear();
+            if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
+            else bios_path.clear();
+        }
+
+        if (bios_mode && LoadROMWithSGBBIOS(filename, bios_path.c_str()))
+        {
+            EmitSGBLoadBanner(filename, bios_mode);
+            return TRUE;
+        }
+
+        // BIOS-less fallback — the legacy path that runs our GB core directly
+        // in S9xMainLoop, gated on Settings.SuperGameBoy.
+        if (Settings.SuperGameBoy) S9xSGBDeinit();
+        if (Settings.SGB_BIOSModeActive) Settings.SGB_BIOSModeActive = FALSE;
+        Settings.SuperGameBoy      = TRUE;
+        Settings.GameBoyRunMode    = 1;   // default SGB1
+        Settings.GBClockMultiplier = 1.0f;
+
+        if (!S9xSGBInit() || !S9xSGBLoadROM(filename))
+        {
+            Settings.SuperGameBoy = FALSE;
+            Settings.GBRomPath[0] = '\0';
+            return FALSE;
+        }
+        S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+        S9xInitCheatData();
+        ROMFilename = filename;
+        EmitSGBLoadBanner(filename, 0);
+        return TRUE;
+    }
+
+    // Loading a non-GB ROM — tear down any previous SGB state first.
+    if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+    {
+        S9xSGBDeinit();
+        Settings.SuperGameBoy       = FALSE;
+        Settings.SGB_BIOSModeActive = FALSE;
+    }
+    Settings.GBRomPath[0] = '\0';
 
     S9xResetSaveTimer(FALSE); // reset oops timer here so that .oops file has rom name of previous rom
 
@@ -1340,10 +1601,203 @@ bool8 CMemory::LoadROM (const char *filename)
         if (!totalFileSize)
             return (FALSE);
 
+        // Container-format sniff: .zip/.jma/.7z of a GB ROM land here
+        // because FileLoader accepted the extension. If the unzipped
+        // content carries the Nintendo logo it's a GB cart — route
+        // into the SGB subsystem instead of the 65816 parser.
+        if (S9xRomBytesAreGb(ROM, totalFileSize))
+        {
+            strncpy(Settings.GBRomPath, filename, sizeof(Settings.GBRomPath) - 1);
+            Settings.GBRomPath[sizeof(Settings.GBRomPath) - 1] = '\0';
+
+            std::string bios_path;
+            uint8 bios_mode = 0;
+            if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
+            {
+                bios_mode = 2;
+            }
+            else if (Settings.SGB_BIOSPreference >= 1)
+            {
+                bios_path.clear();
+                if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
+                else bios_path.clear();
+            }
+
+            if (bios_mode &&
+                LoadROMWithSGBBIOSBytes(ROM, (uint32)totalFileSize,
+                                         filename, bios_path.c_str()))
+            {
+                EmitSGBLoadBanner(filename, bios_mode);
+                return TRUE;
+            }
+
+            // BIOS-less fallback (legacy path).
+            if (Settings.SGB_BIOSModeActive) Settings.SGB_BIOSModeActive = FALSE;
+            Settings.SuperGameBoy      = TRUE;
+            Settings.GameBoyRunMode    = 1;
+            Settings.GBClockMultiplier = 1.0f;
+            if (!S9xSGBInit() ||
+                !S9xSGBLoadROMBytes(ROM, static_cast<size_t>(totalFileSize), filename))
+            {
+                Settings.SuperGameBoy = FALSE;
+                Settings.GBRomPath[0] = '\0';
+                return FALSE;
+            }
+            S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+            S9xInitCheatData();
+            ROMFilename = filename;
+            EmitSGBLoadBanner(filename, 0);
+            return TRUE;
+        }
+
         CheckForAnyPatch(filename, HeaderCount != 0, totalFileSize);
     }
     while(!LoadROMInt(totalFileSize));
 
+    return TRUE;
+}
+
+// P1 — BIOS-mode load. Runs the real SGB1/SGB2 SNES-side BIOS on the 65816
+// and keeps our GB core loaded alongside as the cart's GB chip. The two
+// CPUs don't yet talk to each other (P2 adds the cart I/O bridge); P1 just
+// proves the dual-ROM load path works end-to-end.
+//
+// ORDER MATTERS: GB core init happens FIRST because LoadROMMem below
+// memsets ROM[] — the GB bytes would be gone before our SGB::Cart could
+// copy them out.
+static bool8 LoadSGBBIOSBytes (const char *bios_path, std::vector<uint8> &out_bios, uint8 &out_mode)
+{
+    FILE *f = fopen(bios_path, "rb");
+    if (!f) return FALSE;
+    fseek(f, 0, SEEK_END);
+    const long bios_size = ftell(f);
+    if (bios_size <= 0 || bios_size > (long)CMemory::MAX_ROM_SIZE) { fclose(f); return FALSE; }
+    fseek(f, 0, SEEK_SET);
+    out_bios.assign((size_t)bios_size, 0);
+    const bool ok = (fread(out_bios.data(), 1, bios_size, f) == (size_t)bios_size);
+    fclose(f);
+    if (!ok) return FALSE;
+    out_mode = 1;
+    if (!is_SGB_BIOS(out_bios.data(), (uint32)out_bios.size(), &out_mode)) return FALSE;
+    return TRUE;
+}
+
+bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
+{
+    if (!gb_path || !bios_path) return FALSE;
+
+    std::vector<uint8> bios;
+    uint8 mode = 1;
+    if (!LoadSGBBIOSBytes(bios_path, bios, mode)) return FALSE;
+
+    // GB-side boot ROM. Publicly dumped sgb*.boot.rom files are almost
+    // always plain DMG boot ROMs that don't send the 5-packet SGB
+    // handshake the BIOS expects. Heuristic: a real SGB boot ROM contains
+    // a `3E F1` sequence (LD A, $F1) somewhere in its body as the first
+    // handshake command byte. If we don't find that, fall back to the
+    // embedded LIJI32/SameBoy SGB boot ROM.
+    std::string boot_path;
+    std::vector<uint8> user_boot;
+    const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
+                               LoadSGBBootROM(boot_path.c_str(), user_boot);
+    bool user_boot_is_sgb = false;
+    if (user_has_boot)
+    {
+        for (size_t k = 0; k + 1 < user_boot.size(); ++k)
+        {
+            if (user_boot[k] == 0x3E && user_boot[k + 1] == 0xF1)
+            { user_boot_is_sgb = true; break; }
+        }
+    }
+
+    if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+    {
+        S9xSGBDeinit();
+        Settings.SuperGameBoy       = FALSE;
+        Settings.SGB_BIOSModeActive = FALSE;
+    }
+
+    if (!S9xSGBInit()) return FALSE;
+    if (user_boot_is_sgb)
+        S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
+    else
+        S9xSGBLoadEmbeddedBootROM(mode);
+    if (!S9xSGBLoadROM(gb_path)) return FALSE;
+    S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+
+    if (!LoadROMMem(bios.data(), (uint32)bios.size(), bios_path))
+    {
+        S9xSGBDeinit();
+        return FALSE;
+    }
+
+    Settings.SGB_BIOSModeActive = TRUE;
+    strncpy(Settings.SGB_BIOSPath, bios_path, sizeof Settings.SGB_BIOSPath - 1);
+    Settings.SGB_BIOSPath[sizeof Settings.SGB_BIOSPath - 1] = 0;
+    Settings.GameBoyRunMode     = mode;
+    Settings.GBClockMultiplier  = 1.0f;
+
+    ROMFilename = gb_path;
+    S9xInitCheatData();
+    return TRUE;
+}
+
+bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
+                                         const char *gb_path, const char *bios_path)
+{
+    if (!gb_bytes || !gb_size || !bios_path) return FALSE;
+
+    std::vector<uint8> bios;
+    uint8 mode = 1;
+    if (!LoadSGBBIOSBytes(bios_path, bios, mode)) return FALSE;
+
+    std::string boot_path;
+    std::vector<uint8> user_boot;
+    const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
+                               LoadSGBBootROM(boot_path.c_str(), user_boot);
+    bool user_boot_is_sgb = false;
+    if (user_has_boot)
+    {
+        for (size_t k = 0; k + 1 < user_boot.size(); ++k)
+        {
+            if (user_boot[k] == 0x3E && user_boot[k + 1] == 0xF1)
+            { user_boot_is_sgb = true; break; }
+        }
+    }
+
+    // Snapshot the GB bytes before LoadROMMem clobbers ROM[].
+    std::vector<uint8> gb_copy(gb_bytes, gb_bytes + gb_size);
+
+    if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+    {
+        S9xSGBDeinit();
+        Settings.SuperGameBoy       = FALSE;
+        Settings.SGB_BIOSModeActive = FALSE;
+    }
+
+    if (!S9xSGBInit()) return FALSE;
+    if (user_boot_is_sgb)
+        S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
+    else
+        S9xSGBLoadEmbeddedBootROM(mode);
+    if (!S9xSGBLoadROMBytes(gb_copy.data(), gb_copy.size(), gb_path))
+        return FALSE;
+    S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+
+    if (!LoadROMMem(bios.data(), (uint32)bios.size(), bios_path))
+    {
+        S9xSGBDeinit();
+        return FALSE;
+    }
+
+    Settings.SGB_BIOSModeActive = TRUE;
+    strncpy(Settings.SGB_BIOSPath, bios_path, sizeof Settings.SGB_BIOSPath - 1);
+    Settings.SGB_BIOSPath[sizeof Settings.SGB_BIOSPath - 1] = 0;
+    Settings.GameBoyRunMode     = mode;
+    Settings.GBClockMultiplier  = 1.0f;
+
+    ROMFilename = gb_path ? gb_path : "GameBoy ROM";
+    S9xInitCheatData();
     return TRUE;
 }
 
@@ -2308,6 +2762,8 @@ void CMemory::InitROM (void)
 				Map_SufamiTurboPseudoLoROMMap();
 			}
 		}
+		else if (strncmp(ROMName, "Super GAMEBOY", 13) == 0)
+			Map_SGBLoROMMap();
 		else
 			Map_LoROMMap();
     }
@@ -2445,7 +2901,8 @@ void CMemory::InitROM (void)
 		 : "bad checksum"),
 		MapType(), Size(), KartContents(), Settings.PAL ? "PAL" : "NTSC", StaticRAMSize(), ROMId, ROMCRC32);
 
-	S9xMessage(S9X_INFO, S9X_ROM_INFO, GetMultilineROMInfo().c_str());
+	if (!Settings.GBRomPath[0])
+		S9xMessage(S9X_INFO, S9X_ROM_INFO, GetMultilineROMInfo().c_str());
 
 	Settings.ForceLoROM = FALSE;
 	Settings.ForceHiROM = FALSE;
@@ -2746,6 +3203,26 @@ void CMemory::Map_LoROMMap (void)
     map_LoROMSRAM();
 	map_WRAM();
 
+	map_WriteProtectROM();
+}
+
+// P2 — SGB cart map. Standard LoROM with the 0x6000-0x7FFF range in banks
+// 0x00-0x3F and 0x80-0xBF routed to MAP_SGB_ICD2 so SNES accesses to the
+// BIOS's cart-chip registers land in our bridge.
+void CMemory::Map_SGBLoROMMap (void)
+{
+	printf("Map_SGBLoROMMap\n");
+	map_System();
+
+	map_lorom(0x00, 0x3f, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0x40, 0x7f, 0x0000, 0xffff, CalculatedSize);
+	map_lorom(0x80, 0xbf, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0xc0, 0xff, 0x0000, 0xffff, CalculatedSize);
+
+	map_index(0x00, 0x3f, 0x6000, 0x7fff, MAP_SGB_ICD2, MAP_TYPE_I_O);
+	map_index(0x80, 0xbf, 0x6000, 0x7fff, MAP_SGB_ICD2, MAP_TYPE_I_O);
+
+	map_WRAM();
 	map_WriteProtectROM();
 }
 

@@ -18,6 +18,7 @@
 #include "movie.h"
 #include "display.h"
 #include "language.h"
+#include "sgb/sgb.h"
 #include "gfx.h"
 
 #ifndef min
@@ -1019,6 +1020,12 @@ void S9xResetSaveTimer (bool8 dontsave)
 
 uint32 S9xFreezeSize()
 {
+    // SGB mode — return the size of the versioned "SGB!" blob instead
+    // of dry-running the 65816 snapshot serializer. Run-ahead asks us
+    // this at load time to preallocate its state buffer.
+    if (Settings.SuperGameBoy)
+        return static_cast<uint32>(S9xSGBStateSize());
+
     nulStream stream;
     S9xFreezeToStream(&stream);
     return stream.size();
@@ -1026,6 +1033,14 @@ uint32 S9xFreezeSize()
 
 bool8 S9xFreezeGameMem (uint8 *buf, uint32 bufSize)
 {
+    if (Settings.SuperGameBoy)
+    {
+        const size_t need = S9xSGBStateSize();
+        if (bufSize < need) return (FALSE);
+        S9xSGBStateSave(buf);
+        return (TRUE);
+    }
+
     memStream mStream(buf, bufSize);
 	S9xFreezeToStream(&mStream);
 
@@ -1034,6 +1049,22 @@ bool8 S9xFreezeGameMem (uint8 *buf, uint32 bufSize)
 
 bool8 S9xFreezeGame (const char *filename)
 {
+	// SGB snapshots bypass the 65816 state format entirely — the cart
+	// doesn't have meaningful SNES state once Settings.SuperGameBoy is
+	// set. We write an opaque "SGB!" blob straight to the target file.
+	if (Settings.SuperGameBoy)
+	{
+		if (!S9xSGBSaveStateToFile(filename))
+			return (FALSE);
+
+		S9xResetSaveTimer(TRUE);
+
+		auto base = S9xBasename(filename);
+		sprintf(String, SAVE_INFO_SNAPSHOT " %s", base.c_str());
+		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
+		return (TRUE);
+	}
+
 	STREAM	stream = NULL;
 
 	if (S9xOpenSnapshotFile(filename, FALSE, &stream))
@@ -1059,6 +1090,9 @@ bool8 S9xFreezeGame (const char *filename)
 
 int S9xUnfreezeGameMem (const uint8 *buf, uint32 bufSize)
 {
+    if (Settings.SuperGameBoy)
+        return S9xSGBStateLoad(buf, bufSize) ? SUCCESS : WRONG_FORMAT;
+
     memStream stream(buf, bufSize);
 	int result = S9xUnfreezeFromStream(&stream);
 
@@ -1099,11 +1133,25 @@ void S9xMessageFromResult(int result, const char* base)
 
 bool8 S9xUnfreezeGame (const char *filename)
 {
-	STREAM	stream = NULL;
-
 	auto base = S9xBasename(filename);
 	auto path = splitpath(filename);
 	S9xResetSaveTimer(path.ext_is(".oops") || path.ext_is(".oop"));
+
+	// SGB branch — mirror S9xFreezeGame. Return success/failure
+	// directly without going through the SNES snapshot decoder.
+	if (Settings.SuperGameBoy)
+	{
+		if (!S9xSGBLoadStateFromFile(filename))
+		{
+			S9xMessageFromResult(WRONG_FORMAT, base.c_str());
+			return (FALSE);
+		}
+		sprintf(String, SAVE_INFO_LOAD " %s", base.c_str());
+		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
+		return (TRUE);
+	}
+
+	STREAM	stream = NULL;
 
 	if (S9xOpenSnapshotFile(filename, TRUE, &stream))
 	{

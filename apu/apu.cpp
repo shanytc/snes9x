@@ -12,6 +12,7 @@
 #include "../snapshot.h"
 #include "../display.h"
 #include "resampler.h"
+#include "../sgb/sgb.h"
 
 #include "bapu/snes/snes.hpp"
 
@@ -70,6 +71,29 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
 {
     int16 *out = (int16 *)dest;
 
+    // GB owns the host output: BIOS-less mode (SPC not running) OR
+    // BIOS mode after the GB has been released. Drain GB exclusively;
+    // clear spc::resampler to keep its scanline-driver gate firing at
+    // the natural ~1965/sec cadence (otherwise it stays full and fires
+    // every scanline). Splash chime plays normally pre-release because
+    // the gate below is false (gbReleased = 0).
+    const bool gb_owns_audio = Settings.SuperGameBoy ||
+        (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
+    if (gb_owns_audio)
+    {
+        S9xClearSamples();
+
+        if (Settings.Mute)
+        {
+            memset(out, 0, sample_count << 1);
+            return true;
+        }
+        const int32_t got = S9xSGBDrainSamples(out, sample_count);
+        if (got < sample_count)
+            memset(out + got, 0, (sample_count - got) << 1);
+        return true;
+    }
+
     if (Settings.Mute)
     {
         memset(out, 0, sample_count << 1);
@@ -110,6 +134,10 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
 
 int S9xGetSampleCount(void)
 {
+	if (Settings.SuperGameBoy ||
+	    (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased()))
+		return S9xSGBGetSampleCount();
+
 	int avail = spc::resampler.avail();
 	if (Settings.MSU1) // return minimum available samples, otherwise we can run into the assert above due to partial sample generation in msu1
 		avail = Resampler::min(avail, msu::resampler.avail());
@@ -304,6 +332,15 @@ void S9xAPUEndScanline(void)
 {
     S9xAPUExecute();
     SNES::dsp.synchronize();
+
+    // BIOS-less SGB skips this entire path — cpuexec bypasses the
+    // SNES loop in that mode and drives audio from its own SGB-only
+    // branch. For BIOS mode (SGB_BIOSModeActive), keep the SPC
+    // scanline driver firing as in normal SNES — that's what paces
+    // the SNES at 60 fps wall via ProcessSound's wait engaging
+    // ~33 times/frame. Routing-to-GB happens inside S9xMixSamples.
+    if (Settings.SuperGameBoy)
+        return;
 
     if (spc::resampler.space_filled() >= APU_SAMPLE_BLOCK)
         S9xLandSamples();

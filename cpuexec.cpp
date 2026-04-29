@@ -12,15 +12,75 @@
 #include "fxemu.h"
 #include "snapshot.h"
 #include "movie.h"
+#include "ppu.h"
+#include "gfx.h"
+#include "sgb/sgb.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #include "missing.h"
+#include "getset.h"
 #endif
 
 static inline void S9xReschedule (void);
 
 void S9xMainLoop (void)
 {
+	// Super Game Boy mode — run the GB core for one frame and return.
+	// The 65816 loop below is bypassed entirely; snes9x's frontends
+	// call S9xMainLoop once per frame, so this satisfies the contract.
+	if (Settings.SuperGameBoy)
+	{
+		if (CPU.Flags & SCAN_KEYS_FLAG)
+		{
+			CPU.Flags &= ~SCAN_KEYS_FLAG;
+			S9xMovieUpdate();
+		}
+
+		IPPU.RenderThisFrame      = TRUE;
+		PPU.ScreenHeight          = SNES_HEIGHT;
+		IPPU.RenderedScreenWidth  = SNES_WIDTH;
+		IPPU.RenderedScreenHeight = SNES_HEIGHT;
+
+		// Pipe the SNES controller 0 bitmask into the GB joypad. P6d's
+		// MLT_REQ handling reads from mlt_current_player; for now we
+		// only wire the first controller.
+		S9xSGBSetJoypad(MovieGetJoypad(0));
+
+		// Push timing knobs each frame so UI changes take effect live.
+		// Default GBClockMultiplier to 1.0 if it's been left at its
+		// zero-initialized value (backwards-compat with older configs).
+		const float mul = (Settings.GBClockMultiplier > 0.0f)
+		                  ? Settings.GBClockMultiplier : 1.0f;
+		S9xSGBSetClockMultiplier(mul);
+		S9xSGBSetRunMode(Settings.GameBoyRunMode);
+		// Match the GB APU's downsample target to the host playback rate
+		// so the samples we drain need no further rate conversion. The
+		// setter is idempotent, so calling every frame is cheap and
+		// picks up sound-config changes (output device / rate switch).
+		S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+
+		S9xStartScreenRefresh();
+		S9xSGBRunFrame();
+		S9xSGBBlitScreen(GFX.Screen, GFX.RealPPL);
+		S9xEndScreenRefresh();
+
+		// Drive the host audio callback to drain GB samples into the
+		// sound device. In standard SNES mode the SPC scanline path
+		// fires this from S9xAPUEndScanline; in BIOS-less SGB mode
+		// that path is bypassed so we trigger it ourselves once per
+		// frame. The defensive cap in S9xSGBGetSampleCount keeps
+		// ProcessSound's wait condition satisfiable so we don't pin
+		// at 1 fps the way the prior naive hookup did.
+		if (!Settings.InRunAhead)
+			S9xLandSamples();
+
+		if (!Settings.InRunAhead)
+			S9xSyncSpeed();
+
+		CPU.Flags |= SCAN_KEYS_FLAG;
+		return;
+	}
+
 	#define CHECK_FOR_IRQ_CHANGE() \
 	if (Timings.IRQFlagChanging) \
 	{ \
@@ -40,6 +100,18 @@ void S9xMainLoop (void)
 	{
 		CPU.Flags &= ~SCAN_KEYS_FLAG;
 		S9xMovieUpdate();
+	}
+
+	// Reset the SGB sync anchor to the current SNES cycle at loop entry
+	// and publish the scanline period for wrap-compensation. getset.h
+	// calls S9xSGBSyncToSnesCycle on every ICD2 access; without a fresh
+	// anchor the first delta would be huge (or bogus-negative if a
+	// scanline wrap just happened) and misattribute past SNES cycles
+	// to the GB core.
+	if (Settings.SGB_BIOSModeActive)
+	{
+		S9xSGBSetHMax(Timings.H_Max);
+		S9xSGBResetSyncAnchor(CPU.Cycles);
 	}
 
 	for (;;)
@@ -173,6 +245,40 @@ void S9xMainLoop (void)
 
 		if (Settings.SA1)
 			S9xSA1MainLoop();
+
+		// SNES→GB sync now happens at scanline boundaries only (see
+		// HC_HCOUNTER_MAX_EVENT below) plus on every ICD2 register
+		// access in getset.h. The previous per-opcode sync here cost
+		// millions of function calls/sec in BIOS-released mode and
+		// dropped wall-fps from 60 to ~25. Scanline-grained sync is
+		// fine for game-running mode — the BIOS handshake's tight
+		// $7800-slice timing happens before release, where ICD2-access
+		// syncs already serialize state correctly.
+	}
+
+	// P2 — in BIOS mode the GB core is held in reset until the BIOS
+	// writes the release bit to the ICD2 reset register ($6003 bit 7).
+	// Matches real SGB hardware: the SNES boots first, brings up border
+	// + palette, then unblocks the GB CPU. Until then we skip stepping
+	// entirely so the SNES loop keeps its 60 fps budget.
+	if (Settings.SGB_BIOSModeActive)
+	{
+		const bool released = S9xSGBBIOSGBIsReleased();
+
+		if (released)
+		{
+			const float mul = (Settings.GBClockMultiplier > 0.0f)
+			                  ? Settings.GBClockMultiplier : 1.0f;
+			S9xSGBSetClockMultiplier(mul);
+			S9xSGBSetRunMode(Settings.GameBoyRunMode);
+			// Match the GB APU's downsample target to the host playback
+			// rate. Idempotent so per-frame calls are cheap; picks up
+			// any sound-config change while the game is running.
+			S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
+			// GB is now stepped per SNES opcode via S9xSGBTickSnes —
+			// see the main loop. Per-scanline/end-of-frame run disabled.
+		}
+
 	}
 
 	S9xPackStatus();
@@ -261,6 +367,16 @@ void S9xDoHEventProcessing (void)
 					S9xSuperFXExec();
 				SuperFX.oneLineDone = FALSE;
 			}
+
+			// Per-scanline GB sync in BIOS-released mode. Replaces the
+			// old per-opcode hook for performance (millions of calls/sec
+			// → ~262×60 = 15k/sec). ICD2-register accesses in getset.h
+			// also call SyncToSnesCycle inline so $7800/$6002 reads
+			// still see freshest GB state mid-opcode; this scanline-end
+			// sync just guarantees forward progress on scanlines that
+			// have no ICD2 traffic.
+			if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

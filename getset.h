@@ -16,6 +16,7 @@
 #include "seta.h"
 #include "bsx.h"
 #include "msu1.h"
+#include "sgb/sgb.h"
 
 #define addCyclesInMemoryAccess \
 	if (!CPU.InDMAorHDMA) \
@@ -146,6 +147,21 @@ inline uint8 S9xGetByte (uint32 Address)
 
 		case CMemory::MAP_BSX:
 			byte = S9xGetBSX(Address);
+			addCyclesInMemoryAccess;
+			return (byte);
+
+		case CMemory::MAP_SGB_ICD2:
+			// Skip per-access GB sync for $7800-$7FFF (frame slice window).
+			// Those reads stream from `full_frame` which is captured at
+			// GB-side HBlank events — a mid-stream sync wouldn't change
+			// what we serve, and the SGB BIOS in-game menu reads ~5760
+			// bytes/frame from this window to embed the GB screen inside
+			// the menu. Per-access sync here was the dominant hot path.
+			// $6000-$77FF still gets sync — those are vcounter / packet-
+			// status / packet-drain reads that need fresh GB state.
+			if (Settings.SGB_BIOSModeActive && (Address & 0xF800) != 0x7800)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
+			byte = S9xSGBGetICD2(Address & 0xffff);
 			addCyclesInMemoryAccess;
 			return (byte);
 
@@ -309,6 +325,19 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			addCyclesInMemoryAccess;
 			return (word);
 
+		case CMemory::MAP_SGB_ICD2:
+			// $7800-$7FFF reads stream a captured GB-frame snapshot — see
+			// the byte-read path above for the full reasoning.
+			if (Settings.SGB_BIOSModeActive && (Address & 0xF800) != 0x7800)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
+			word  = S9xSGBGetICD2(Address & 0xffff);
+			addCyclesInMemoryAccess;
+			if (Settings.SGB_BIOSModeActive && ((Address + 1) & 0xF800) != 0x7800)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
+			word |= S9xSGBGetICD2((Address + 1) & 0xffff) << 8;
+			addCyclesInMemoryAccess;
+			return (word);
+
 		case CMemory::MAP_NONE:
 		default:
 			word = OpenBus | (OpenBus << 8);
@@ -413,6 +442,13 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 
 		case CMemory::MAP_BSX:
 			S9xSetBSX(Byte, Address);
+			addCyclesInMemoryAccess;
+			return;
+
+		case CMemory::MAP_SGB_ICD2:
+			if (Settings.SGB_BIOSModeActive)
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
+			S9xSGBSetICD2(Byte, Address & 0xffff);
 			addCyclesInMemoryAccess;
 			return;
 
@@ -683,6 +719,32 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 				S9xSetBSX((uint8) Word, Address);
 				addCyclesInMemoryAccess;
 				S9xSetBSX(Word >> 8, Address + 1);
+				addCyclesInMemoryAccess;
+				return;
+			}
+
+		case CMemory::MAP_SGB_ICD2:
+			if (o)
+			{
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
+				S9xSGBSetICD2(Word >> 8, (Address + 1) & 0xffff);
+				addCyclesInMemoryAccess;
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
+				S9xSGBSetICD2((uint8) Word, Address & 0xffff);
+				addCyclesInMemoryAccess;
+				return;
+			}
+			else
+			{
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
+				S9xSGBSetICD2((uint8) Word, Address & 0xffff);
+				addCyclesInMemoryAccess;
+				if (Settings.SGB_BIOSModeActive)
+					S9xSGBSyncToSnesCycle(CPU.Cycles);
+				S9xSGBSetICD2(Word >> 8, (Address + 1) & 0xffff);
 				addCyclesInMemoryAccess;
 				return;
 			}

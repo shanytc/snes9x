@@ -13,6 +13,9 @@
 #include "movie.h"
 #include "screenshot.h"
 #include "display.h"
+#include "sgb/sgb.h"   // S9xSGBOverlayBiosBorder — runs after FLUSH_REDRAW
+                        // so the BIOS-mode custom-border overlay isn't
+                        // clobbered by the PPU's final blit.
 
 extern struct SCheatData		Cheat;
 extern struct SLineData			LineData[240];
@@ -206,6 +209,17 @@ void S9xEndScreenRefresh (void)
 	if (IPPU.RenderThisFrame)
 	{
 		FLUSH_REDRAW();
+
+		// SGB BIOS-mode custom-border overlay. FLUSH_REDRAW above
+		// finalized the SNES PPU output (including the SGB2 BIOS's
+		// default device-frame border) into GFX.Screen. If the loaded
+		// GB game uploaded a custom border via PCT_TRN/CHR_TRN — which
+		// our packet decoder captures even in BIOS mode — replace the
+		// outer ring with the captured border. Runs BEFORE
+		// S9xDisplayMessages so the snes9x OSD still draws on top.
+		// No-op until both halves of CHR_TRN + PCT_TRN have arrived.
+		if (Settings.SGB_BIOSModeActive)
+			S9xSGBOverlayBiosBorder(GFX.Screen, GFX.RealPPL);
 
 		if (GFX.DoInterlace && S9xInterlaceField() == 0)
 		{

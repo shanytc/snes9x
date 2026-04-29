@@ -28,6 +28,9 @@
     <Filter Include="APU">
       <UniqueIdentifier>{e7997c6a-3a7d-42ed-b170-e6d16a508e41}</UniqueIdentifier>
     </Filter>
+    <Filter Include="SGB">
+      <UniqueIdentifier>{a1b2c3d4-5e6f-4789-8abc-def012345678}</UniqueIdentifier>
+    </Filter>
     <Filter Include="APU\DSP">
       <UniqueIdentifier>{0bea040f-0040-4c3e-b9f1-9a9dbb482ba1}</UniqueIdentifier>
     </Filter>
@@ -188,6 +191,42 @@
     </ClInclude>
     <ClInclude Include="rsrc\resource.h">
       <Filter>Resource</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\sgb.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\sgb_packet.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\sgb_state.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_cpu.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_ops.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_memory.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_mbc.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_ppu.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_apu.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_timer.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_joypad.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_cart.h">
+      <Filter>SGB</Filter>
     </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>APU</Filter>
@@ -655,6 +694,45 @@
     </ClCompile>
     <ClCompile Include="..\jma\winout.cpp">
       <Filter>JMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\sgb.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\sgb_packet.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\sgb_state.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_cpu.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_ops.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_ops_cb.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_memory.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_mbc.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_ppu.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_apu.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_timer.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_joypad.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_cart.cpp">
+      <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\apu\apu.cpp">
       <Filter>APU</Filter>

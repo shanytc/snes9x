@@ -13,6 +13,7 @@
 #include "srtc.h"
 #include "snapshot.h"
 #include "cheats.h"
+#include "sgb/sgb.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #endif
@@ -96,6 +97,17 @@ static void S9xSoftResetCPU (void)
 
 void S9xReset (void)
 {
+	// BIOS-less GB/GBC: same crash protection as S9xSoftReset — the
+	// SNES is dormant, running the full SNES reset chain triggers a
+	// stale-state SPC DSP synthesis pass that crashes. Cold-reset the
+	// GB core and bail out.
+	if (Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+	{
+		S9xSGBReset();
+		S9xInitCheatData();
+		return;
+	}
+
 	S9xResetSaveTimer(FALSE);
 
 	memset(Memory.RAM, 0x55, sizeof(Memory.RAM));
@@ -128,11 +140,39 @@ void S9xReset (void)
 	if (Settings.MSU1)
 		S9xMSU1Init();
 
+	// SGB / GB / GBC: cold-reset the GB core on File→Reset. In BIOS mode
+	// (SGB_BIOSModeActive) this clears the handshake cache so the next
+	// $6003 release re-runs the boot ROM and replays the splash. In
+	// BIOS-less mode (SuperGameBoy) the SNES side is being reset around
+	// us — leaving the GB CPU/PPU/APU in mid-game state would make them
+	// run against a freshly-reset SNES with mismatched expectations,
+	// which crashes the emulator. Resetting the GB core too restarts
+	// the game cleanly.
+	if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+		S9xSGBReset();
+
 	S9xInitCheatData();
 }
 
 void S9xSoftReset (void)
 {
+	// BIOS-less GB/GBC mode — the SNES side is dormant (cpuexec's
+	// SuperGameBoy branch bypasses the 65816/SPC entirely). Running
+	// the full SNES reset chain crashes: S9xSoftResetCPU's reset-
+	// vector read at line 65 (S9xGetWord(0xfffc)) advances CPU.Cycles
+	// past NextEvent, triggering S9xDoHEventProcessing → S9xAPUEnd-
+	// Scanline → dsp.synchronize() → SPC_DSP::run, and the SPC DSP
+	// has been idle since power-on so its synthesis state can't
+	// catch up cleanly. Just cold-reset the GB core and return —
+	// the user expects File→Reset to restart the GB game, nothing
+	// more. (BIOS mode keeps the full path; the SNES is live there.)
+	if (Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+	{
+		S9xSGBReset();
+		S9xInitCheatData();
+		return;
+	}
+
 	S9xResetSaveTimer(FALSE);
 
 	memset(Memory.FillRAM, 0, 0x8000);
@@ -164,6 +204,12 @@ void S9xSoftReset (void)
 		S9xResetSRTC();
 	if (Settings.MSU1)
 		S9xMSU1Init();
+
+	// Same as S9xReset above — File→Reset uses this path on the win32
+	// frontend. Cold-reset the GB core for both BIOS and BIOS-less so
+	// the GB doesn't keep running against a freshly-reset SNES side.
+	if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+		S9xSGBReset();
 
 	S9xInitCheatData();
 }

@@ -50,6 +50,7 @@ struct CMemory
 		MAP_SETA_DSP,
 		MAP_SETA_RISC,
 		MAP_BSX,
+		MAP_SGB_ICD2,
 		MAP_NONE,
 		MAP_LAST
 	};
@@ -111,6 +112,9 @@ struct CMemory
 	uint32	FileLoader (uint8 *, const char *, uint32);
     bool8   LoadROMMem (const uint8 *, uint32, const char* optional_rom_filename = NULL);
 	bool8	LoadROM (const char *);
+	bool8	LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path);
+	bool8	LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
+	                                  const char *gb_path, const char *bios_path);
     bool8	LoadROMInt (int32);
     bool8   LoadMultiCartMem (const uint8 *, uint32, const uint8 *, uint32, const uint8 *, uint32);
 	bool8	LoadMultiCart (const char *, const char *);
@@ -147,6 +151,7 @@ struct CMemory
 	void	map_WriteProtectROM (void);
 	void	Map_Initialize (void);
 	void	Map_LoROMMap (void);
+	void	Map_SGBLoROMMap (void);
 	void	Map_NoMAD1LoROMMap (void);
 	void	Map_JumboLoROMMap (void);
 	void	Map_ROM24MBSLoROMMap (void);
@@ -209,6 +214,7 @@ inline bool S9xInterlaceField()
 
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *);
+bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
 
 enum s9xwrap_t
 {

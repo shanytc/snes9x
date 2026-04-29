@@ -1253,6 +1253,12 @@ BEGIN
             MENUITEM "&3 frames",                   ID_EMULATION_RUNAHEAD_3,MFT_STRING,MFS_ENABLED
             MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
         END
+        POPUP "&BIOS",                          ID_EMULATION_BIOS,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&No BIOS",                    ID_EMULATION_BIOS_NONE,MFT_STRING,MFS_ENABLED
+            MENUITEM "&SGB1",                       ID_EMULATION_BIOS_SGB1,MFT_STRING,MFS_ENABLED
+            MENUITEM "SGB&2",                       ID_EMULATION_BIOS_SGB2,MFT_STRING,MFS_ENABLED
+        END
         MENUITEM MFT_SEPARATOR
         POPUP "&S-PPU",                         0,MFT_STRING,MFS_ENABLED
         BEGIN

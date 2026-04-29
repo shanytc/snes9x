@@ -72,25 +72,56 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
     int16 *out = (int16 *)dest;
 
     // GB owns the host output: BIOS-less mode (SPC not running) OR
-    // BIOS mode after the GB has been released. Drain GB exclusively;
-    // clear spc::resampler to keep its scanline-driver gate firing at
-    // the natural ~1965/sec cadence (otherwise it stays full and fires
-    // every scanline). Splash chime plays normally pre-release because
-    // the gate below is false (gbReleased = 0).
+    // BIOS mode after the GB has been released. Splash chime plays
+    // normally pre-release because the gate below is false (gbReleased = 0).
+    //
+    // In BIOS mode after GB release we ALSO mix the SPC stream into the GB
+    // output so the SGB BIOS sound engine stays audible — that engine
+    // dispatches SOUND ($08) effects and SOU_TRN ($09)-uploaded samples
+    // (Donkey Kong '94 voice clips, MLT_REQ blip, etc). When the SPC
+    // resampler has fewer samples than the host wants, we just clear it
+    // to keep its scanline-driver gate firing at the natural ~1965/sec
+    // cadence and skip the mix this round (avoids blending partial silence
+    // into the output).
     const bool gb_owns_audio = Settings.SuperGameBoy ||
         (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
+    const bool mix_spc_under_gb = Settings.SGB_BIOSModeActive &&
+                                   S9xSGBBIOSGBIsReleased();
     if (gb_owns_audio)
     {
-        S9xClearSamples();
-
         if (Settings.Mute)
         {
             memset(out, 0, sample_count << 1);
+            S9xClearSamples();
             return true;
         }
+
         const int32_t got = S9xSGBDrainSamples(out, sample_count);
         if (got < sample_count)
             memset(out + got, 0, (sample_count - got) << 1);
+
+        if (mix_spc_under_gb && spc::resampler.avail() >= sample_count)
+        {
+            int16 spc_buf[2048];
+            const int chunk = (sample_count > (int)(sizeof(spc_buf) / sizeof(spc_buf[0])))
+                                  ? (int)(sizeof(spc_buf) / sizeof(spc_buf[0]))
+                                  : sample_count;
+            spc::resampler.read(spc_buf, chunk);
+            for (int i = 0; i < chunk; ++i)
+            {
+                int32 mixed = (int32)out[i] + (int32)spc_buf[i];
+                if (mixed >  32767) mixed =  32767;
+                if (mixed < -32768) mixed = -32768;
+                out[i] = (int16)mixed;
+            }
+            // Discard any leftover beyond our scratch buffer to keep the
+            // resampler from filling up.
+            if (sample_count > chunk) S9xClearSamples();
+        }
+        else
+        {
+            S9xClearSamples();
+        }
         return true;
     }
 
@@ -142,6 +173,11 @@ int S9xGetSampleCount(void)
 	if (Settings.MSU1) // return minimum available samples, otherwise we can run into the assert above due to partial sample generation in msu1
 		avail = Resampler::min(avail, msu::resampler.avail());
     return avail;
+}
+
+int S9xGetSPCResamplerAvail(void)
+{
+    return spc::resampler.avail();
 }
 
 void S9xLandSamples(void)

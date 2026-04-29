@@ -35,6 +35,12 @@ bool8 S9xOpenSoundDevice (void);
 
 bool8 S9xSyncSound (void);
 int S9xGetSampleCount (void);
+
+// Diagnostic: SPC resampler buffered-sample count regardless of audio
+// ownership mode (S9xGetSampleCount returns the GB count when GB owns
+// the host stream). Used by the SGB BIOS-mode audio OSD to report
+// whether the SGB sound engine is producing samples.
+int S9xGetSPCResamplerAvail (void);
 void S9xSetSoundControl (uint8);
 void S9xSetSoundMute (bool8);
 void S9xLandSamples (void);

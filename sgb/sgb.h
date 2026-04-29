@@ -70,6 +70,10 @@ public:
 	// out-of-range addresses.
 	uint8_t        PeekRAByte(uint32_t addr) const;
 
+	// Read-only handle to the SGB command-layer state for diagnostic
+	// purposes (audio-path OSD, etc). Lifetime ties to the Emulator.
+	const SgbState &GetSgbStateForDiag() const;
+
 	// Install the 256-byte DMG/SGB GB-side boot ROM. Takes effect on the
 	// next Reset. Call with nullptr/size=0 to clear. Only loaded in
 	// authentic BIOS mode — BIOS-less continues to start at 0x0100.
@@ -361,5 +365,13 @@ bool          S9xSGBGetROMBytes (const unsigned char **out_data, size_t *out_siz
 // 0x10000-0x33FFF for the extended SRAM/CGB-WRAM bank window). Returns
 // 0 for unmapped or out-of-range addresses.
 unsigned char S9xSGBPeekRAByte (unsigned int addr);
+
+// Format a one-line snapshot of the SGB sound-path state into `buf` —
+// SOU_TRN counters + last segment shape, SOUND command counters + last
+// parameter bytes, and the BIOS / GB-released flags. Used by the
+// gfx.cpp persistent OSD to surface what the cart is feeding into the
+// SGB BIOS sound engine. `cap` is the buffer size; truncated on overflow.
+// Always writes a NUL-terminated string.
+void          S9xSGBGetAudioDiag (char *buf, size_t cap);
 
 #endif

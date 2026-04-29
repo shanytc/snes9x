@@ -32,11 +32,12 @@ namespace SGB {
 // ($F1/$F3/$F5/$F7/$F9 command bytes + cart header bytes) that the SGB BIOS
 // on the SNES side waits for to unblock its splash screen.
 //
-// Source: LIJI32/SameBoy (https://github.com/LIJI32/SameBoy), MIT license.
-// Redistributed via Mesen2 (https://github.com/SourMesen/Mesen2 —
-// Core/Gameboy/GbBootRom.h), also MIT, and tweaked with a short delay
-// loop at the handoff so Tetris DX's SGB border doesn't get skipped.
-// Preserving those redistributions here under the same terms.
+// Source: LIJI32/SameBoy (https://github.com/LIJI32/SameBoy), Expat (MIT)
+// license — copyright (c) 2015-2026 Lior Halphon. Routed via Mesen2
+// (https://github.com/SourMesen/Mesen2 — Core/Gameboy/GbBootRom.h), which
+// embeds the same SameBoy bytes with a short delay loop at the handoff so
+// Tetris DX's SGB border doesn't get skipped. Full license text shipped
+// alongside this file as sgb/SAMEBOY-LICENSE.txt.
 static const uint8_t kSgbBootRom[256] = {
     0x31, 0xFE, 0xFF, 0x21, 0x00, 0x80, 0x22, 0xCB, 0x6C, 0x28, 0xFB, 0x3E,
     0x80, 0xE0, 0x26, 0xE0, 0x11, 0x3E, 0xF3, 0xE0, 0x12, 0xE0, 0x25, 0x3E,

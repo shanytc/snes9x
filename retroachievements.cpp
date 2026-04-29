@@ -19,6 +19,7 @@
 #include "snes9x.h"
 #include "memmap.h"
 #include "cpuexec.h"
+#include "sgb/sgb.h"
 
 // ---------------------------------------------------------------------------
 // Platform callbacks (set by platform before RA_Init)
@@ -64,10 +65,25 @@ static void RA_QueueNotification(const char *title, const char *subtitle, float 
 }
 
 // ---------------------------------------------------------------------------
+// Tracks which console rcheevos identified the loaded game as. Memory reads
+// re-route accordingly: SNES games use Memory.RAM/SRAM/FillRAM, GB/GBC games
+// use the SGB subsystem's GB-side address space.
+// ---------------------------------------------------------------------------
+static uint32_t g_loadedConsoleId = RC_CONSOLE_SUPER_NINTENDO;
+
+// ---------------------------------------------------------------------------
 // Callback: Memory Read
 // ---------------------------------------------------------------------------
 static uint32_t RC_CCONV ra_read_memory(uint32_t address, uint8_t *buffer, uint32_t num_bytes, rc_client_t *client)
 {
+    if (g_loadedConsoleId == RC_CONSOLE_GAMEBOY ||
+        g_loadedConsoleId == RC_CONSOLE_GAMEBOY_COLOR)
+    {
+        for (uint32_t i = 0; i < num_bytes; ++i)
+            buffer[i] = S9xSGBPeekRAByte(address + i);
+        return num_bytes;
+    }
+
     const uint8_t *src = nullptr;
     uint32_t available = 0;
 
@@ -305,6 +321,32 @@ void RA_OnLoadROM()
     if (!g_rcClient || !g_raEnabled)
         return;
 
+    // Game Boy / Game Boy Color routed through SGB. Memory.ROM here either
+    // holds the SGB BIOS (authentic-BIOS mode) or the leftover SNES ROM
+    // bytes — neither hashes to anything in the RA database. Hash the GB
+    // ROM bytes from the SGB subsystem against the GB / GBC console IDs
+    // instead. CGB flag at cart header byte 0x143: 0x80 = GB+GBC, 0xC0 =
+    // GBC only; anything else is plain DMG/SGB.
+    if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+    {
+        const unsigned char *gb_data = nullptr;
+        size_t gb_size = 0;
+        if (S9xSGBGetROMBytes(&gb_data, &gb_size) && gb_data && gb_size >= 0x150)
+        {
+            const uint8_t cgb_flag = gb_data[0x143];
+            const uint32_t console = (cgb_flag == 0x80 || cgb_flag == 0xC0)
+                                         ? RC_CONSOLE_GAMEBOY_COLOR
+                                         : RC_CONSOLE_GAMEBOY;
+            g_loadedConsoleId = console;
+            const char *gb_path = (Settings.GBRomPath[0] != '\0') ? Settings.GBRomPath : NULL;
+            rc_client_begin_identify_and_load_game(g_rcClient, console, gb_path,
+                                                   gb_data, gb_size,
+                                                   ra_game_loaded_callback, nullptr);
+            return;
+        }
+    }
+
+    g_loadedConsoleId = RC_CONSOLE_SUPER_NINTENDO;
     rc_client_begin_identify_and_load_game(g_rcClient,
                                            RC_CONSOLE_SUPER_NINTENDO,
                                            NULL,

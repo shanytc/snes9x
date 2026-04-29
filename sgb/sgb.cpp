@@ -607,6 +607,69 @@ void Emulator::UnloadROM()
 
 bool Emulator::HasROM() const { return impl_->has_rom; }
 
+const uint8_t *Emulator::GetROMData() const
+{
+	if (!impl_->has_rom || impl_->cart.rom.empty()) return nullptr;
+	return impl_->cart.rom.data();
+}
+
+size_t Emulator::GetROMSize() const
+{
+	if (!impl_->has_rom) return 0;
+	return impl_->cart.rom.size();
+}
+
+uint8_t Emulator::PeekRAByte(uint32_t addr) const
+{
+	if (!impl_->has_rom) return 0;
+
+	// Native GB address space (0x0000-0xFFFF). Cart accesses go through
+	// the MBC mapper, which is side-effect-free for reads. Other regions
+	// read raw backing storage — no I/O reads, no PPU bus contention.
+	if (addr < 0x10000)
+	{
+		const uint16_t a = static_cast<uint16_t>(addr);
+		if (a < 0x8000)
+			return MbcRead(const_cast<MbcState &>(impl_->cart.mbc),
+			               impl_->cart.rom, impl_->cart.sram, a);
+		if (a < 0xA000)        // VRAM — not exposed (would need PPU sync)
+			return 0;
+		if (a < 0xC000)        // External cart RAM (current bank)
+			return MbcRead(const_cast<MbcState &>(impl_->cart.mbc),
+			               impl_->cart.rom, impl_->cart.sram, a);
+		if (a < 0xE000)        // WRAM 0xC000-0xDFFF
+			return impl_->mem.wram[a - 0xC000];
+		if (a < 0xFE00)        // Echo RAM mirrors C000-DDFF
+			return impl_->mem.wram[a - 0xE000];
+		if (a < 0xFEA0)        // OAM — not exposed
+			return 0;
+		if (a < 0xFF00)        // Unusable
+			return 0;
+		if (a < 0xFF80)        // Hardware I/O — skip (side-effecting)
+			return 0;
+		if (a < 0xFFFF)        // HRAM 0xFF80-0xFFFE
+			return impl_->mem.hram[a - 0xFF80];
+		return impl_->mem.ie;  // 0xFFFF interrupt enable
+	}
+
+	// Extended bank window 0x10000-0x33FFF.
+	//   0x10000-0x15FFF — GBC system RAM banks 2-7. We don't yet emulate
+	//                     CGB extra WRAM banks; return 0.
+	//   0x16000-0x33FFF — Cartridge SRAM banks 1-15 (each 0x2000 bytes).
+	if (addr < 0x16000) return 0;
+	if (addr < 0x34000)
+	{
+		const uint32_t off = addr - 0x16000;
+		const uint32_t bank = 1 + (off / 0x2000);
+		const uint32_t in_bank = off % 0x2000;
+		const uint32_t flat = bank * 0x2000 + in_bank;
+		if (flat < impl_->cart.sram.size())
+			return impl_->cart.sram[flat];
+		return 0;
+	}
+	return 0;
+}
+
 void Emulator::SetRunMode(RunMode m)
 {
 	if (m == impl_->run_mode) return;  // idempotent — avoids re-pushing clock
@@ -2069,4 +2132,19 @@ bool S9xSGBBIOSGBIsReleased(void)
 bool S9xSGBBIOSHandshakePending(void)
 {
 	return SGB::Instance().IsHandshakePending();
+}
+
+bool S9xSGBGetROMBytes(const unsigned char **out_data, size_t *out_size)
+{
+	const uint8_t *data = SGB::Instance().GetROMData();
+	const size_t   size = SGB::Instance().GetROMSize();
+	if (!data || size == 0) return false;
+	if (out_data) *out_data = data;
+	if (out_size) *out_size = size;
+	return true;
+}
+
+unsigned char S9xSGBPeekRAByte(unsigned int addr)
+{
+	return SGB::Instance().PeekRAByte(addr);
 }

@@ -58,6 +58,18 @@ public:
 	void UnloadROM();
 	bool HasROM() const;
 
+	// Raw cart ROM accessor for hashing / external introspection. Returns
+	// nullptr when no ROM is loaded.
+	const uint8_t *GetROMData() const;
+	size_t         GetROMSize() const;
+
+	// Read a byte from the GB-side address space using the rcheevos
+	// GameBoy / GameBoy Color memory map (0x0000-0xFFFF native + the
+	// 0x10000-0x33FFF extended bank window). Side-effect-free; does not
+	// touch I/O registers or PPU bus state. Returns 0 for unmapped or
+	// out-of-range addresses.
+	uint8_t        PeekRAByte(uint32_t addr) const;
+
 	// Install the 256-byte DMG/SGB GB-side boot ROM. Takes effect on the
 	// next Reset. Call with nullptr/size=0 to clear. Only loaded in
 	// authentic BIOS mode — BIOS-less continues to start at 0x0100.
@@ -332,5 +344,22 @@ bool          S9xSGBBIOSGBIsReleased (void);
 // real GB packets must not clobber a pending synth packet before the
 // BIOS reads it, so the GB is paused until the handshake drains out.
 bool          S9xSGBBIOSHandshakePending (void);
+
+// ---- Integration hooks for RetroAchievements -------------------------------
+// Expose the loaded GB ROM so the platform can hash it under the GameBoy /
+// GameBoy Color console IDs (the SNES Memory.ROM only holds the SGB BIOS in
+// authentic-BIOS mode, and is empty in BIOS-less mode). Returns false if no
+// GB ROM is loaded. The buffer is owned by the SGB module and is valid until
+// the next LoadROM/Deinit.
+bool          S9xSGBGetROMBytes (const unsigned char **out_data, size_t *out_size);
+
+// One-byte read from the GB address space for RetroAchievements memory
+// inspection. Reads are done against raw backing storage (WRAM, HRAM,
+// cart ROM bank-mapped, cart SRAM bank-mapped) — no I/O side effects,
+// no interrupt or PPU bus contention. `addr` is the rcheevos GameBoy /
+// GameBoy Color memory map address (0x0000-0xFFFF for native space,
+// 0x10000-0x33FFF for the extended SRAM/CGB-WRAM bank window). Returns
+// 0 for unmapped or out-of-range addresses.
+unsigned char S9xSGBPeekRAByte (unsigned int addr);
 
 #endif

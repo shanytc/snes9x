@@ -1519,14 +1519,6 @@ bool8 CMemory::LoadROM (const char *filename)
 
         if (bios_mode && LoadROMWithSGBBIOS(filename, bios_path.c_str()))
         {
-            char msg[1024];
-            snprintf(msg, sizeof msg,
-                     "SGB BIOS mode: running SGB%u BIOS (%s)",
-                     unsigned(bios_mode), bios_path.c_str());
-            const uint32 saved = Settings.InitialInfoStringTimeout;
-            Settings.InitialInfoStringTimeout = 60 * 10;
-            S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
-            Settings.InitialInfoStringTimeout = saved;
             return TRUE;
         }
 
@@ -1609,14 +1601,6 @@ bool8 CMemory::LoadROM (const char *filename)
                 LoadROMWithSGBBIOSBytes(ROM, (uint32)totalFileSize,
                                          filename, bios_path.c_str()))
             {
-                char msg[1024];
-                snprintf(msg, sizeof msg,
-                         "SGB BIOS mode: running SGB%u BIOS (%s)",
-                         unsigned(bios_mode), bios_path.c_str());
-                const uint32 saved = Settings.InitialInfoStringTimeout;
-                Settings.InitialInfoStringTimeout = 60 * 10;
-                S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
-                Settings.InitialInfoStringTimeout = saved;
                 return TRUE;
             }
 

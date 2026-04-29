@@ -705,6 +705,7 @@ static void DbgPushCmd(uint8_t cmd)
 	++g_sgb_dbg.cmd_count;
 }
 
+#if 0
 static void DbgDrawOsd(const Emulator::Impl &impl)
 {
 	char buf[400];
@@ -832,6 +833,7 @@ static void DbgDrawOsd(const Emulator::Impl &impl)
 	S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
 	Settings.InitialInfoStringTimeout = saved;
 }
+#endif
 
 // Reconstruct 4 KB of byte data from the top-left 16x16 tile area
 // (128x128 pixels, 2bpp raw indices) of the GB framebuffer. Output
@@ -1325,13 +1327,6 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 			drow[x] = BgrToHost(srow[x]);
 	}
 
-	// Diagnostic OSD: post the line via S9xMessage. The host's
-	// S9xEndScreenRefresh runs right after this BlitScreen call (see
-	// cpuexec.cpp BIOS-less branch) and its DisplayMessages step
-	// renders the InfoString on top of GFX.Screen. Live PC + LY tell us
-	// whether the GB CPU is stuck in a JOYP busy-wait (frozen PC,
-	// advancing LY) or making progress.
-	DbgDrawOsd(*impl_);
 }
 
 static constexpr uint16_t BORDER_FADE_FRAMES = 24;
@@ -1341,7 +1336,6 @@ void Emulator::OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
 	(void)dest;
 	(void)pitch_pixels;
 	if (!impl_->has_rom) return;
-	DbgDrawOsd(*impl_);
 }
 
 int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)

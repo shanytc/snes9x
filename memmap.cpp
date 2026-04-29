@@ -1152,6 +1152,12 @@ static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out
 	return (FALSE);
 }
 
+bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path)
+{
+	std::string dummy;
+	return FindSGB_BIOS(mode, gb_rom_path, dummy);
+}
+
 // Locate the 256-byte GB-side boot ROM that accompanies the SGB BIOS.
 // Common names and the same directory-search order as the .sfc.
 static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &out_path)
@@ -1490,6 +1496,34 @@ static bool S9xRomBytesAreGb(const uint8 *rom, int32 size)
     return memcmp(rom + 0x0104, kGbNintendoLogo, 48) == 0;
 }
 
+static std::string GBGameNameFromPath(const char *path)
+{
+    if (!path || !*path) return std::string();
+    std::string s = path;
+    const size_t sep = s.find_last_of("/\\");
+    if (sep != std::string::npos) s = s.substr(sep + 1);
+    const size_t dot = s.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) s = s.substr(0, dot);
+    return s;
+}
+
+static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
+{
+    const std::string name = GBGameNameFromPath(gb_path);
+    const char *region = Settings.PAL ? "PAL" : "NTSC";
+    char msg[1024];
+    if (bios_mode == 2)
+        snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy 2", name.c_str(), region);
+    else if (bios_mode == 1)
+        snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy", name.c_str(), region);
+    else
+        snprintf(msg, sizeof msg, "\"%s\" (%s)", name.c_str(), region);
+    const uint32 saved = Settings.InitialInfoStringTimeout;
+    Settings.InitialInfoStringTimeout = 60 * 5;
+    S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
+    Settings.InitialInfoStringTimeout = saved;
+}
+
 bool8 CMemory::LoadROM (const char *filename)
 {
     if(!filename || !*filename)
@@ -1500,17 +1534,18 @@ bool8 CMemory::LoadROM (const char *filename)
     // and runs the GB core instead.
     if (S9xFilenameHasExt(filename, ".gb") || S9xFilenameHasExt(filename, ".gbc"))
     {
-        // P1 — try authentic BIOS mode first. Prefer SGB2.sfc (newer, more
-        // accurate 4.194 MHz GB timing), fall back to SGB1.sfc. On success
-        // the 65816 runs the real BIOS and our GB core attaches as the
-        // cart's GB chip; final fallback is the BIOS-less GB core.
+        // Remember the GB ROM path so the BIOS menu can reload with a
+        // different preference.
+        strncpy(Settings.GBRomPath, filename, sizeof(Settings.GBRomPath) - 1);
+        Settings.GBRomPath[sizeof(Settings.GBRomPath) - 1] = '\0';
+
         std::string bios_path;
         uint8 bios_mode = 0;
-        if (FindSGB_BIOS(2, filename, bios_path))
+        if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
         {
             bios_mode = 2;
         }
-        else
+        else if (Settings.SGB_BIOSPreference >= 1)
         {
             bios_path.clear();
             if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
@@ -1519,6 +1554,7 @@ bool8 CMemory::LoadROM (const char *filename)
 
         if (bios_mode && LoadROMWithSGBBIOS(filename, bios_path.c_str()))
         {
+            EmitSGBLoadBanner(filename, bios_mode);
             return TRUE;
         }
 
@@ -1533,26 +1569,13 @@ bool8 CMemory::LoadROM (const char *filename)
         if (!S9xSGBInit() || !S9xSGBLoadROM(filename))
         {
             Settings.SuperGameBoy = FALSE;
+            Settings.GBRomPath[0] = '\0';
             return FALSE;
         }
         S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
         S9xInitCheatData();
         ROMFilename = filename;
-
-        {
-            char msg[512];
-            if (bios_mode)
-                snprintf(msg, sizeof msg,
-                         "SGB BIOS-less: SGB%u BIOS load failed (%s)",
-                         unsigned(bios_mode), bios_path.c_str());
-            else
-                snprintf(msg, sizeof msg,
-                         "SGB BIOS-less mode (no sgb.sfc/sgb2.sfc found)");
-            const uint32 saved = Settings.InitialInfoStringTimeout;
-            Settings.InitialInfoStringTimeout = 60 * 10;
-            S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
-            Settings.InitialInfoStringTimeout = saved;
-        }
+        EmitSGBLoadBanner(filename, 0);
         return TRUE;
     }
 
@@ -1563,6 +1586,7 @@ bool8 CMemory::LoadROM (const char *filename)
         Settings.SuperGameBoy       = FALSE;
         Settings.SGB_BIOSModeActive = FALSE;
     }
+    Settings.GBRomPath[0] = '\0';
 
     S9xResetSaveTimer(FALSE); // reset oops timer here so that .oops file has rom name of previous rom
 
@@ -1583,14 +1607,16 @@ bool8 CMemory::LoadROM (const char *filename)
         // into the SGB subsystem instead of the 65816 parser.
         if (S9xRomBytesAreGb(ROM, totalFileSize))
         {
-            // Same BIOS-mode preference as the direct .gb path (SGB2 → SGB1).
+            strncpy(Settings.GBRomPath, filename, sizeof(Settings.GBRomPath) - 1);
+            Settings.GBRomPath[sizeof(Settings.GBRomPath) - 1] = '\0';
+
             std::string bios_path;
             uint8 bios_mode = 0;
-            if (FindSGB_BIOS(2, filename, bios_path))
+            if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
             {
                 bios_mode = 2;
             }
-            else
+            else if (Settings.SGB_BIOSPreference >= 1)
             {
                 bios_path.clear();
                 if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
@@ -1601,6 +1627,7 @@ bool8 CMemory::LoadROM (const char *filename)
                 LoadROMWithSGBBIOSBytes(ROM, (uint32)totalFileSize,
                                          filename, bios_path.c_str()))
             {
+                EmitSGBLoadBanner(filename, bios_mode);
                 return TRUE;
             }
 
@@ -1613,26 +1640,13 @@ bool8 CMemory::LoadROM (const char *filename)
                 !S9xSGBLoadROMBytes(ROM, static_cast<size_t>(totalFileSize), filename))
             {
                 Settings.SuperGameBoy = FALSE;
+                Settings.GBRomPath[0] = '\0';
                 return FALSE;
             }
             S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
             S9xInitCheatData();
             ROMFilename = filename;
-
-            {
-                char msg[512];
-                if (bios_mode)
-                    snprintf(msg, sizeof msg,
-                             "SGB BIOS-less: SGB%u BIOS load failed (%s)",
-                             unsigned(bios_mode), bios_path.c_str());
-                else
-                    snprintf(msg, sizeof msg,
-                             "SGB BIOS-less mode (no sgb.sfc/sgb2.sfc found)");
-                const uint32 saved = Settings.InitialInfoStringTimeout;
-                Settings.InitialInfoStringTimeout = 60 * 10;
-                S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
-                Settings.InitialInfoStringTimeout = saved;
-            }
+            EmitSGBLoadBanner(filename, 0);
             return TRUE;
         }
 
@@ -2887,7 +2901,8 @@ void CMemory::InitROM (void)
 		 : "bad checksum"),
 		MapType(), Size(), KartContents(), Settings.PAL ? "PAL" : "NTSC", StaticRAMSize(), ROMId, ROMCRC32);
 
-	S9xMessage(S9X_INFO, S9X_ROM_INFO, GetMultilineROMInfo().c_str());
+	if (!Settings.GBRomPath[0])
+		S9xMessage(S9X_INFO, S9X_ROM_INFO, GetMultilineROMInfo().c_str());
 
 	Settings.ForceLoROM = FALSE;
 	Settings.ForceHiROM = FALSE;

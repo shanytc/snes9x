@@ -218,6 +218,8 @@ struct SSettings
 	bool8	SGB_UseBIOS;         // prefer authentic SGB1/SGB2 BIOS mode when a matching BIOS file is found
 	bool8	SGB_BIOSModeActive;  // runtime: the currently-loaded ROM is running on the real SGB BIOS
 	char	SGB_BIOSPath[260];   // runtime: absolute path of the BIOS .sfc in use (empty in BIOS-less mode)
+	uint8	SGB_BIOSPreference;  // user-selected BIOS mode: 0=No BIOS, 1=SGB1, 2=SGB2 (default 2)
+	char	GBRomPath[260];      // runtime: path of the currently-loaded GB/GBC ROM (for BIOS-mode reload)
 	bool8	MouseMaster;
 	bool8	SuperScopeMaster;
 	bool8	JustifierMaster;

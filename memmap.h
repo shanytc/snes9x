@@ -214,6 +214,7 @@ inline bool S9xInterlaceField()
 
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *);
+bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
 
 enum s9xwrap_t
 {

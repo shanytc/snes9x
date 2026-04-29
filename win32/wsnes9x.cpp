@@ -2562,6 +2562,26 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_RUNAHEAD_4:
 			Settings.RunAhead = 4;
 			break;
+		case ID_EMULATION_BIOS_NONE:
+		case ID_EMULATION_BIOS_SGB1:
+		case ID_EMULATION_BIOS_SGB2:
+			{
+				const uint8 new_pref = (LOWORD(wParam) == ID_EMULATION_BIOS_NONE) ? 0
+				                     : (LOWORD(wParam) == ID_EMULATION_BIOS_SGB1) ? 1
+				                     : 2;
+				Settings.SGB_BIOSPreference = new_pref;
+				if (Settings.GBRomPath[0])
+				{
+					TCHAR wpath[_MAX_PATH];
+					Utf8ToWide u8(Settings.GBRomPath);
+					_tcsncpy(wpath, u8, _MAX_PATH - 1);
+					wpath[_MAX_PATH - 1] = 0;
+					RestoreGUIDisplay();
+					LoadROM(wpath);
+					RestoreSNESDisplay();
+				}
+			}
+			break;
 		case ID_OPTIONS_SETTINGS:
 			RestoreGUIDisplay ();
 			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_EMU_SETTINGS), hWnd, DlgEmulatorProc);
@@ -4292,6 +4312,31 @@ static void CheckMenuStates ()
 			mii.fState = (i == clamped) ? MFS_CHECKED : MFS_UNCHECKED;
 			SetMenuItemInfo(GUI.hMenu, runAheadIds[i], FALSE, &mii);
 		}
+	}
+
+	{
+		const bool gb_loaded = (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+		const bool sgb1_avail = gb_loaded && S9xSGBBIOSAvailable(1, Settings.GBRomPath) != FALSE;
+		const bool sgb2_avail = gb_loaded && S9xSGBBIOSAvailable(2, Settings.GBRomPath) != FALSE;
+
+		uint8 active = 0;
+		if (Settings.SGB_BIOSModeActive) active = (Settings.GameBoyRunMode == 2) ? 2 : 1;
+
+		const int biosIds[3] = {
+			ID_EMULATION_BIOS_NONE,
+			ID_EMULATION_BIOS_SGB1,
+			ID_EMULATION_BIOS_SGB2
+		};
+		const bool avail[3] = { true, sgb1_avail, sgb2_avail };
+		for (int i = 0; i < 3; i++)
+		{
+			mii.fState = (i == active) ? MFS_CHECKED : MFS_UNCHECKED;
+			if (!gb_loaded || !avail[i]) mii.fState |= MFS_DISABLED;
+			SetMenuItemInfo(GUI.hMenu, biosIds[i], FALSE, &mii);
+		}
+
+		mii.fState = gb_loaded ? MFS_ENABLED : MFS_DISABLED;
+		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS, FALSE, &mii);
 	}
 
     mii.fState = MFS_UNCHECKED;

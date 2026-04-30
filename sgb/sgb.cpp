@@ -607,8 +607,6 @@ void Emulator::UnloadROM()
 
 bool Emulator::HasROM() const { return impl_->has_rom; }
 
-const SgbState &Emulator::GetSgbStateForDiag() const { return impl_->sgb_state; }
-
 const uint8_t *Emulator::GetROMData() const
 {
 	if (!impl_->has_rom || impl_->cart.rom.empty()) return nullptr;
@@ -1600,13 +1598,12 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 //   [12..]   payload fields in Visit() order
 //
 // Version 1: initial format.
-// Version 2: SgbState gained sou_trn_blob[0x1000] + parsed-segment metadata.
 // ===================================================================
 
 namespace {
 
 constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
-constexpr uint32_t SGB_STATE_VERSION = 2;
+constexpr uint32_t SGB_STATE_VERSION = 1;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -2150,21 +2147,4 @@ bool S9xSGBGetROMBytes(const unsigned char **out_data, size_t *out_size)
 unsigned char S9xSGBPeekRAByte(unsigned int addr)
 {
 	return SGB::Instance().PeekRAByte(addr);
-}
-
-void S9xSGBGetAudioDiag(char *buf, size_t cap)
-{
-	if (!buf || cap == 0) return;
-	const SGB::SgbState &st = SGB::Instance().GetSgbStateForDiag();
-	const bool released     = SGB::Instance().IsGBReleased();
-	snprintf(buf, cap,
-	         "SGB sou=%u seg=%u byt=%u dst=%04X ln=%u snd=%u "
-	         "lst=%02X.%02X.%02X.%02X bios=%u rel=%u",
-	         st.sou_trn_seq, st.sou_trn_segments, st.sou_trn_total_bytes,
-	         st.sou_trn_first_dest, st.sou_trn_first_len,
-	         st.sound_commands,
-	         st.sound_last[0], st.sound_last[1],
-	         st.sound_last[2], st.sound_last[3],
-	         Settings.SGB_BIOSModeActive ? 1u : 0u,
-	         released ? 1u : 0u);
 }

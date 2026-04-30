@@ -102,26 +102,6 @@ struct SgbState
 	// Last SOUND command parameters (for diagnostics + future SFX hook).
 	uint8_t    sound_last[4];
 
-	// Most recent SOU_TRN payload — 4 KB copied verbatim from GB VRAM
-	// 0x8000-0x8FFF when the cart issues command 0x09. Per Pan Docs the
-	// block holds one or more {dest:u16, len:u16, data[len]} records that
-	// the SGB BIOS deposits into APU RAM regions:
-	//   0x0400-0x2AFF  Program Area
-	//   0x2B00-0x4AFF  Sound Score Area
-	//   0x4DB0-0xEEFF  Sampling Data Area
-	// The SGB BIOS owns the SPC sound engine that consumes this data —
-	// SOU_TRN by itself just stages bytes; SOUND ($08) triggers playback
-	// through the engine. We capture the blob unconditionally so BIOS-mode
-	// audio routing can inspect it and so BIOS-less builds have a hook
-	// for future engine-synthesis work.
-	uint8_t    sou_trn_blob[0x1000];
-	bool       sou_trn_valid;        // a payload has been captured at least once
-	uint16_t   sou_trn_first_dest;   // dest address of the first parsed segment
-	uint16_t   sou_trn_first_len;    // length of the first parsed segment
-	uint32_t   sou_trn_total_bytes;  // sum of segment lengths in the most recent payload
-	uint32_t   sou_trn_segments;     // number of valid {dest,len,data} records in latest payload
-	uint32_t   sou_trn_seq;          // monotonic counter — incremented every capture
-
 	// Diagnostics.
 	uint32_t   palette_writes;
 	uint32_t   attr_writes;

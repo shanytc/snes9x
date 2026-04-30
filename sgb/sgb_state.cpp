@@ -409,55 +409,6 @@ void HandleSound(SgbState &s, const uint8_t *d)
 }
 
 // ------------------------------------------------------------------
-// SOU_TRN — transfer 4 KB of sound program / score / sample data from
-// GB VRAM into the SGB BIOS's SPC sound engine. Per Pan Docs the block
-// holds {dest:u16, len:u16, data[len]} records targeting one of the
-// engine's three APU-RAM regions. The BIOS keeps a permanent SPC program
-// resident; SOU_TRN just patches data into it, then SOUND ($08) plays
-// effects/music indices through that engine. We only stage the bytes
-// here — actual playback requires the SGB BIOS engine running on the
-// SPC700 (i.e. SGB BIOS mode); BIOS-less builds can't dispatch the data.
-// ------------------------------------------------------------------
-
-void HandleSouTrn(SgbState &s, const uint8_t *vram_4kb)
-{
-	if (!vram_4kb) { ++s.misc_commands; return; }
-
-	std::memcpy(s.sou_trn_blob, vram_4kb, 0x1000);
-	s.sou_trn_valid = true;
-	++s.sou_trn_seq;
-
-	// Walk the segment list defensively. Pan Docs is uncertain about the
-	// exact framing ("One (or two ???) 16bit expression(s ???)") so we
-	// stop on the first malformed/zero-length record rather than trusting
-	// the whole block.
-	uint32_t off          = 0;
-	uint32_t segs         = 0;
-	uint32_t total_bytes  = 0;
-	uint16_t first_dest   = 0;
-	uint16_t first_len    = 0;
-
-	while (off + 4 <= 0x1000)
-	{
-		const uint16_t dest = Rd16(s.sou_trn_blob + off);
-		const uint16_t blen = Rd16(s.sou_trn_blob + off + 2);
-		if (blen == 0) break;
-		if (off + 4 + blen > 0x1000) break;
-
-		if (segs == 0) { first_dest = dest; first_len = blen; }
-		++segs;
-		total_bytes += blen;
-		off += 4 + blen;
-	}
-
-	s.sou_trn_segments    = segs;
-	s.sou_trn_total_bytes = total_bytes;
-	s.sou_trn_first_dest  = first_dest;
-	s.sou_trn_first_len   = first_len;
-	++s.misc_commands;
-}
-
-// ------------------------------------------------------------------
 // MLT_REQ — enable multi-controller mode for 2 or 4 players.
 // ------------------------------------------------------------------
 //   [1] bits 0-1:  0 = 1 player, 1 = 2 players, 3 = 4 players
@@ -493,13 +444,6 @@ void SgbReset(SgbState &s)
 	std::memset(s.frozen_frame,     0, sizeof s.frozen_frame);
 	std::memset(&s.border,          0, sizeof s.border);
 	std::memset(s.sound_last,       0, sizeof s.sound_last);
-	std::memset(s.sou_trn_blob,     0, sizeof s.sou_trn_blob);
-	s.sou_trn_valid          = false;
-	s.sou_trn_first_dest     = 0;
-	s.sou_trn_first_len      = 0;
-	s.sou_trn_total_bytes    = 0;
-	s.sou_trn_segments       = 0;
-	s.sou_trn_seq            = 0;
 	s.system_palettes_loaded = false;
 	s.attr_files_loaded      = false;
 	s.frozen_frame_valid     = false;
@@ -538,13 +482,14 @@ void SgbHandleCommand(SgbState &s, uint8_t cmd, const uint8_t *data,
 		case 0x16: HandleAttrSet(s, data); break;              // ATTR_SET
 		case 0x17: HandleMaskEn(s, data, gb_fb_160x144); break;// MASK_EN
 		case 0x08: HandleSound(s, data); break;                // SOUND
-		case 0x09: HandleSouTrn(s, vram_4kb); break;           // SOU_TRN
 		case 0x11: HandleMltReq(s, data); break;               // MLT_REQ
-		// Stubbed — swallowed so games don't crash. DATA_* would need
+		// Stubbed — swallowed so games don't crash. SOU_TRN would need an
+		// SPC program image the real SGB ships with; DATA_* would need
 		// access to host SNES WRAM; JUMP is a debugger escape with no
 		// meaningful analog; ATRC/TEST/ICON_EN are config bits the SGB
 		// BIOS reads. OBJ_TRN uploads border-layer sprites we don't yet
 		// render.
+		case 0x09:   // SOU_TRN
 		case 0x0C:   // ATRC_EN
 		case 0x0D:   // TEST_EN
 		case 0x0E:   // ICON_EN

@@ -78,11 +78,11 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
     // In BIOS mode after GB release we ALSO mix the SPC stream into the GB
     // output so the SGB BIOS sound engine stays audible — that engine
     // dispatches SOUND ($08) effects and SOU_TRN ($09)-uploaded samples
-    // (Donkey Kong '94 voice clips, MLT_REQ blip, etc). When the SPC
-    // resampler has fewer samples than the host wants, we just clear it
-    // to keep its scanline-driver gate firing at the natural ~1965/sec
-    // cadence and skip the mix this round (avoids blending partial silence
-    // into the output).
+    // (Donkey Kong '94 voice clips, MLT_REQ blip, etc). Mix is best-effort:
+    // we read whatever the SPC resampler has and leave the tail GB-only on
+    // an underrun. In BIOS-less mode there's no engine to dispatch through,
+    // so we just drain the SPC ring to keep its scanline-driver gate firing
+    // at the natural ~1965/sec cadence.
     const bool gb_owns_audio = Settings.SuperGameBoy ||
         (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
     const bool mix_spc_under_gb = Settings.SGB_BIOSModeActive &&
@@ -100,26 +100,34 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
         if (got < sample_count)
             memset(out + got, 0, (sample_count - got) << 1);
 
-        if (mix_spc_under_gb && spc::resampler.avail() >= sample_count)
+        if (mix_spc_under_gb)
         {
-            int16 spc_buf[2048];
-            const int chunk = (sample_count > (int)(sizeof(spc_buf) / sizeof(spc_buf[0])))
-                                  ? (int)(sizeof(spc_buf) / sizeof(spc_buf[0]))
-                                  : sample_count;
-            spc::resampler.read(spc_buf, chunk);
-            for (int i = 0; i < chunk; ++i)
+            // Mix whatever the SPC has produced into the GB stream. If
+            // SPC ran short this call, the tail of `out` stays GB-only —
+            // strictly better than dropping the partial voice. Read is
+            // bounded by our scratch buffer and forced even (the resampler
+            // asserts on odd counts because it emits stereo pairs).
+            int read_count = spc::resampler.avail();
+            if (read_count > sample_count) read_count = sample_count;
+            if (read_count > 2048)         read_count = 2048;
+            if (read_count & 1)            --read_count;
+            if (read_count > 0)
             {
-                int32 mixed = (int32)out[i] + (int32)spc_buf[i];
-                if (mixed >  32767) mixed =  32767;
-                if (mixed < -32768) mixed = -32768;
-                out[i] = (int16)mixed;
+                int16 spc_buf[2048];
+                spc::resampler.read(spc_buf, read_count);
+                for (int i = 0; i < read_count; ++i)
+                {
+                    int32 mixed = (int32)out[i] + (int32)spc_buf[i];
+                    if (mixed >  32767) mixed =  32767;
+                    if (mixed < -32768) mixed = -32768;
+                    out[i] = (int16)mixed;
+                }
             }
-            // Discard any leftover beyond our scratch buffer to keep the
-            // resampler from filling up.
-            if (sample_count > chunk) S9xClearSamples();
         }
         else
         {
+            // BIOS-less GB: SPC isn't running an SGB engine — drain to
+            // keep the scanline-driver gate firing at its natural cadence.
             S9xClearSamples();
         }
         return true;
@@ -173,11 +181,6 @@ int S9xGetSampleCount(void)
 	if (Settings.MSU1) // return minimum available samples, otherwise we can run into the assert above due to partial sample generation in msu1
 		avail = Resampler::min(avail, msu::resampler.avail());
     return avail;
-}
-
-int S9xGetSPCResamplerAvail(void)
-{
-    return spc::resampler.avail();
 }
 
 void S9xLandSamples(void)

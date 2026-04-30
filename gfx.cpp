@@ -16,7 +16,6 @@
 #include "sgb/sgb.h"   // S9xSGBOverlayBiosBorder — runs after FLUSH_REDRAW
                         // so the BIOS-mode custom-border overlay isn't
                         // clobbered by the PPU's final blit.
-#include "apu/apu.h"   // S9xGetSPCResamplerAvail for the SGB audio OSD
 
 extern struct SCheatData		Cheat;
 extern struct SLineData			LineData[240];
@@ -30,7 +29,6 @@ static void SetupOBJ (void);
 static void DrawOBJS (int);
 static void DisplayTime (void);
 static void DisplayFrameRate (void);
-static void DisplaySGBAudioDiag (void);
 static void DisplayPressedKeys (void);
 static void DisplayWatchedAddresses (void);
 static void DisplayStringFromBottom (const char *, int, int, bool);
@@ -1958,25 +1956,6 @@ static void DisplayFrameRate (void)
 	S9xDisplayString(string, 1, IPPU.RenderedScreenWidth - (font_width - 1) * len - 1, false);
 }
 
-// SGB sound-path OSD. Persistent overlay that mirrors the FPS counter
-// rendering, so the user can see in real time whether the cart is
-// feeding SOU_TRN ($09) and SOUND ($08) packets to the BIOS sound
-// engine and whether the SPC700 is producing samples. Useful for
-// diagnosing why an enhanced cart's voice clips (Donkey Kong '94's
-// "Help!", etc.) are silent. Suppressed when no GB game is loaded.
-static void DisplaySGBAudioDiag (void)
-{
-	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive) return;
-
-	char sgb_buf[160];
-	S9xSGBGetAudioDiag(sgb_buf, sizeof sgb_buf);
-
-	char line[200];
-	snprintf(line, sizeof line, "%s spc=%d", sgb_buf, S9xGetSPCResamplerAvail());
-
-	S9xDisplayString(line, 4, 1, false);
-}
-
 static void DisplayPressedKeys (void)
 {
 	static unsigned char	KeyMap[]   = { '0', '1', '2', 'R', 'L', 'X', 'A', 225, 224, 227, 226, 'S', 's', 'Y', 'B' };
@@ -2145,8 +2124,6 @@ void S9xDisplayMessages (uint16 *screen, int ppl, int width, int height, int sca
 
 	if (Settings.DisplayFrameRate)
 		DisplayFrameRate();
-
-	DisplaySGBAudioDiag();
 
 	if (Settings.DisplayWatchedAddresses)
 		DisplayWatchedAddresses();

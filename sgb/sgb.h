@@ -260,6 +260,20 @@ void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);
 bool S9xSGBIsActive(void);
 
+// Diagnostic: increment a per-frame counter for GB-side I/O reads.
+// Used to spot which addresses the GB polls per frame and how often
+// (variance there points at our SGB bridge returning inconsistent data).
+void S9xSGBDbgCountIoRead(uint16_t addr);
+
+// Diagnostic: increment a per-frame counter when the GB CPU executes a
+// HALT-state cpu.Step (consumes 4 cycles waiting for IRQ).
+void S9xSGBDbgCountHaltStep(void);
+
+// Diagnostic: increment a per-frame counter when GB CPU exits HALT due
+// to a pending IRQ. Total HALT-exit count per frame should equal the
+// number of IRQs that fired during the frame.
+void S9xSGBDbgCountHaltExit(void);
+
 // Composite the current frame (border + GB screen + mask mode) into a
 // 256 × 224 BGR555 buffer. `pitch_pixels` is the stride in uint16_t
 // units. Call after S9xSGBRunFrame.

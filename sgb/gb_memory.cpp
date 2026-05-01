@@ -162,6 +162,7 @@ void MemWrite16(Memory &m, uint16_t addr, uint16_t value)
 
 static uint8_t ReadIO(Memory &m, uint16_t addr)
 {
+	S9xSGBDbgCountIoRead(addr);
 	switch (addr)
 	{
 		case 0xFF00: return m.joypad ? JoypadRead(*m.joypad) : 0xFF;

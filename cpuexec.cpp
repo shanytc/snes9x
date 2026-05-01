@@ -250,6 +250,16 @@ void S9xMainLoop (void)
 		Registers.PCw++;
 		(*Opcodes[Op].S9xOpcode)();
 
+		// Per-opcode SGB sync. ICD2-access syncs alone deliver variable
+		// chunk sizes (a few SNES cycles to ~1300) which makes our GB
+		// cycle_debt evolve differently each frame, in turn changing
+		// the GB CPU's HALT-vs-code instruction-mix per frame, in turn
+		// drifting visible state. Per-opcode sync delivers tiny uniform
+		// deltas (1-3 SNES cycles), keeping cycle_debt evolution
+		// frame-stable.
+		if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+			S9xSGBSyncToSnesCycle(CPU.Cycles);
+
 		if (Settings.SA1)
 			S9xSA1MainLoop();
 

@@ -744,6 +744,37 @@ struct SgbDbg
 	uint8_t  last_scy     = 0;
 	uint8_t  last_bgp     = 0;
 	uint8_t  last_dec[8]  = {};
+
+	// Per-frame profiling. Counts call frequency of each hot path.
+	// If counts vary frame-to-frame at default settings (vs being
+	// stable with overclock), the variability is the desync source.
+	uint32_t prof_sync_calls       = 0;   // S9xSGBSyncToSnesCycle invocations
+	uint32_t prof_runcycles_calls  = 0;   // SGB::RunCycles invocations
+	uint32_t prof_cpu_steps        = 0;   // GB cpu.Step invocations
+	uint32_t prof_ppu_steps        = 0;   // PpuStep invocations
+	uint32_t prof_capture_calls    = 0;   // CaptureScanline invocations
+	uint32_t prof_gb_cycles_total  = 0;   // total GB cycles advanced
+	uint32_t prof_sync_calls_snap      = 0;
+	uint32_t prof_runcycles_calls_snap = 0;
+	uint32_t prof_cpu_steps_snap       = 0;
+	uint32_t prof_ppu_steps_snap       = 0;
+	uint32_t prof_capture_calls_snap   = 0;
+	uint32_t prof_gb_cycles_total_snap = 0;
+	uint8_t  prof_frame_index          = 0;
+
+	// GB-side I/O read counts per frame. Variance here = GB polling
+	// different registers in different code paths per frame.
+	uint32_t io_ff00_reads      = 0;  // joypad
+	uint32_t io_ff41_reads      = 0;  // STAT
+	uint32_t io_ff44_reads      = 0;  // LY
+	uint32_t halt_steps         = 0;  // cpu.Step calls in HALT state
+	uint32_t halt_exits         = 0;  // HALT->non-HALT transitions per frame
+	uint32_t io_ff00_reads_snap = 0;
+	uint32_t io_ff41_reads_snap = 0;
+	uint32_t io_ff44_reads_snap = 0;
+	uint32_t halt_steps_snap    = 0;
+	uint32_t halt_exits_snap    = 0;
+
 	// Ring of the last 8 command IDs that reached OnSgbCommandInternal,
 	// in chronological order (cmd_ring[0] = oldest). Lets us see
 	// exactly what DK sent when chr/pct stay at 0 — e.g., is it just
@@ -940,6 +971,8 @@ static void DecodeBorderCapture(const uint8_t *raw_fb, uint8_t *out_4kb)
 void Emulator::RunCycles(int32_t tcycles)
 {
 	if (!impl_->has_rom) return;
+	++g_sgb_dbg.prof_runcycles_calls;
+	g_sgb_dbg.prof_gb_cycles_total += static_cast<uint32_t>(tcycles > 0 ? tcycles : 0);
 
 	// Partial-frame advance. Used when a host driving its own clock wants
 	// to interleave GB execution with other work at finer granularity
@@ -948,6 +981,8 @@ void Emulator::RunCycles(int32_t tcycles)
 	impl_->cycle_debt += tcycles;
 	while (impl_->cycle_debt >= 4)
 	{
+		++g_sgb_dbg.prof_cpu_steps;
+		++g_sgb_dbg.prof_ppu_steps;
 		const bool was_boot = impl_->mem.boot_rom_enabled;
 		const int64_t pre_t = impl_->cpu.State().t_cycles;
 		impl_->cpu.Step(impl_->mem);
@@ -1159,12 +1194,7 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 		case 0x6001:
 			icd.lcd_row_select = value;
 			icd.read_position  = 0;
-			// Advance the slice-read counter. The BIOS issues $6001
-			// writes in order: slice 0, 1, …, 17, then wraps. We use
-			// THIS counter (not the bank field) to index the full_frame
-			// buffer, so each $7800 stream serves the correct slice
-			// regardless of bank-wrap.
-			icd.read_slice = static_cast<uint8_t>((icd.read_slice + 1) % 18);
+			icd.read_slice  = static_cast<uint8_t>((icd.read_slice + 1) % 18);
 			icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
 			icd.row_writes++;
 			return;
@@ -1278,19 +1308,64 @@ void Emulator::OnPpuVBlank()
 	// Reset row and bank at VBlank — see earlier comment for why both.
 	impl_->icd2.sgb_row  = 0;
 	impl_->icd2.sgb_bank = 0;
-
 	// Force-realign read_slice to 16 per frame so the first $6001 write
 	// of the next frame always advances to slice 17 (the wrap-read).
-	// Without this, drift accumulates if any frame has !=18 $6001 writes
-	// (e.g., during handshake transitions or BIOS internal scheduling
-	// variation), producing the slow vertical scroll-up of the entire
-	// composited image.
 	impl_->icd2.read_slice = 16;
+
+	// Snapshot per-frame profiling counters and reset for next frame.
+	g_sgb_dbg.prof_sync_calls_snap      = g_sgb_dbg.prof_sync_calls;
+	g_sgb_dbg.prof_runcycles_calls_snap = g_sgb_dbg.prof_runcycles_calls;
+	g_sgb_dbg.prof_cpu_steps_snap       = g_sgb_dbg.prof_cpu_steps;
+	g_sgb_dbg.prof_ppu_steps_snap       = g_sgb_dbg.prof_ppu_steps;
+	g_sgb_dbg.prof_capture_calls_snap   = g_sgb_dbg.prof_capture_calls;
+	g_sgb_dbg.prof_gb_cycles_total_snap = g_sgb_dbg.prof_gb_cycles_total;
+	g_sgb_dbg.io_ff00_reads_snap = g_sgb_dbg.io_ff00_reads;
+	g_sgb_dbg.io_ff41_reads_snap = g_sgb_dbg.io_ff41_reads;
+	g_sgb_dbg.io_ff44_reads_snap = g_sgb_dbg.io_ff44_reads;
+	g_sgb_dbg.halt_steps_snap    = g_sgb_dbg.halt_steps;
+	g_sgb_dbg.halt_exits_snap    = g_sgb_dbg.halt_exits;
+	g_sgb_dbg.prof_sync_calls       = 0;
+	g_sgb_dbg.prof_runcycles_calls  = 0;
+	g_sgb_dbg.prof_cpu_steps        = 0;
+	g_sgb_dbg.prof_ppu_steps        = 0;
+	g_sgb_dbg.prof_capture_calls    = 0;
+	g_sgb_dbg.prof_gb_cycles_total  = 0;
+	g_sgb_dbg.io_ff00_reads = 0;
+	g_sgb_dbg.io_ff41_reads = 0;
+	g_sgb_dbg.io_ff44_reads = 0;
+	g_sgb_dbg.halt_steps = 0;
+	g_sgb_dbg.halt_exits = 0;
+	g_sgb_dbg.prof_frame_index = static_cast<uint8_t>(
+		(g_sgb_dbg.prof_frame_index + 1) & 0x0F);
+
+	// Profiling OSD: per-frame call counts for hot paths.
+	// SY = SyncToSnesCycle calls (per ICD2 access + per scanline)
+	// RC = RunCycles invocations
+	// CS = CPU steps (GB instructions executed)
+	// CP = CaptureScanline calls (should be 144 ± a few)
+	// GB = total GB cycles advanced (should be ~70k per frame)
+	// If these vary frame-to-frame at default settings, that's the
+	// non-determinism source.
+	{
+		char buf[260];
+		snprintf(buf, sizeof buf,
+		         "F%X CS=%u HALT=%u CODE=%u EXITS=%u",
+		         (unsigned)g_sgb_dbg.prof_frame_index,
+		         (unsigned)g_sgb_dbg.prof_cpu_steps_snap,
+		         (unsigned)g_sgb_dbg.halt_steps_snap,
+		         (unsigned)(g_sgb_dbg.prof_cpu_steps_snap - g_sgb_dbg.halt_steps_snap),
+		         (unsigned)g_sgb_dbg.halt_exits_snap);
+		const uint32 saved_t = Settings.InitialInfoStringTimeout;
+		Settings.InitialInfoStringTimeout = 120;
+		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
+		Settings.InitialInfoStringTimeout = saved_t;
+	}
 }
 
 void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
+	++g_sgb_dbg.prof_capture_calls;
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
 	const uint8_t bank  = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row   = static_cast<uint8_t>(icd.sgb_row  & 0x07);
@@ -1917,6 +1992,7 @@ void S9xSGBSetHMax(int32_t h_max)
 
 void S9xSGBSyncToSnesCycle(int32_t cpu_cycles)
 {
+	++SGB::g_sgb_dbg.prof_sync_calls;
 	int32_t delta = cpu_cycles - g_sync_anchor;
 	// Scanline wrap: snes9x's H-event subtracts H_Max from CPU.Cycles,
 	// so a legitimate forward step across the wrap appears as a large
@@ -1937,6 +2013,25 @@ void S9xSGBSyncToSnesCycle(int32_t cpu_cycles)
 
 void S9xSGBOnPpuHBlank(void) { SGB::Instance().OnPpuHBlank(); }
 void S9xSGBOnPpuVBlank(void) { SGB::Instance().OnPpuVBlank(); }
+
+void S9xSGBDbgCountIoRead(uint16_t addr)
+{
+	switch (addr) {
+		case 0xFF00: ++SGB::g_sgb_dbg.io_ff00_reads; break;
+		case 0xFF41: ++SGB::g_sgb_dbg.io_ff41_reads; break;
+		case 0xFF44: ++SGB::g_sgb_dbg.io_ff44_reads; break;
+	}
+}
+
+void S9xSGBDbgCountHaltStep(void)
+{
+	++SGB::g_sgb_dbg.halt_steps;
+}
+
+void S9xSGBDbgCountHaltExit(void)
+{
+	++SGB::g_sgb_dbg.halt_exits;
+}
 void S9xSGBCaptureScanline(const unsigned char *pixels)
 {
 	SGB::Instance().CaptureScanline(static_cast<const uint8_t *>(pixels));

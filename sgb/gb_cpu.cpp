@@ -7,6 +7,7 @@
 #include "gb_cpu.h"
 #include "gb_memory.h"
 #include "gb_ops.h"
+#include "sgb.h"
 
 namespace SGB {
 
@@ -54,10 +55,14 @@ void Cpu::Step(Memory &mem)
 	{
 		const uint8_t pending = mem.ie & mem.if_ & IRQ_ALL;
 		if (pending)
+		{
 			state_.halted = false;
+			S9xSGBDbgCountHaltExit();
+		}
 		else
 		{
 			state_.t_cycles += 4;
+			S9xSGBDbgCountHaltStep();
 			return;
 		}
 	}

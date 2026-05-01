@@ -182,6 +182,41 @@ struct Emulator::Impl
 		// counts since $60xx and $78xx share low nibbles).
 		uint32_t r_6000, r_6002, r_6003, r_600F, r_7000, r_7800;
 		uint32_t w_6000, w_6001, w_6003, w_7000, w_6004;
+
+		// Per-frame $6001 write counter for the slice-rotation clamp.
+		// Real SGB hardware sees the BIOS write $6001 exactly 18 times
+		// per frame (one per 8-row slice of the 144-line LCD). At default
+		// SNES cycle settings our timing approximates real HW closely
+		// enough most frames but occasionally drifts by ±1 → BIOS writes
+		// 17 or 19, the slice rotation goes off, and the next frame's
+		// SNES VRAM tile uploads land at the wrong vertical position
+		// (visible jitter in the GB game area).
+		//
+		// Mitigation: clamp the rotation at 18 writes per frame. The
+		// 19th and beyond don't advance read_slice; under-count fires
+		// phantom rotations at VBlank to bring the running total to 18.
+		// Resets to 0 in OnPpuVBlank.
+		uint8_t  frame_6001_count;
+
+		// Visual-freeze flag for off-count frames. Set at VBlank when the
+		// just-ended frame had frame_6001_count != 18. While true,
+		// CaptureScanline is a no-op so full_frame / full_frame_planar
+		// retain the previous good frame's pixel data; the BIOS's $7800
+		// reads next frame return that stale data and upload identical
+		// tiles to SNES VRAM as the previous frame → the GB game area
+		// visually freezes for one frame instead of jumping. Cleared at
+		// the next VBlank (so the freeze is at most one frame, after
+		// which capture resumes).
+		bool     freeze_capture;
+
+		// Per-write byte log for $6001. Captures the actual values the
+		// BIOS writes each frame so the OSD can show the full sequence
+		// for diagnosis: a "good" frame shows 18 cycling bank values
+		// (typically 03,00,01,02,03,00,…), an off-count frame shows the
+		// extra/missing/anomalous write directly. Sized for up to 24
+		// writes per frame (handles off-counts well past the typical
+		// ±1 drift).
+		uint8_t  frame_6001_bytes[24];
 		uint16_t last_read_addr;
 		uint16_t last_write_addr;
 		uint8_t  last_write_val;
@@ -299,15 +334,13 @@ struct Emulator::Impl
 	                                // keep re-queuing handshake packets (which would
 	                                // block game-generated SGB commands).
 
-	// Cycle-debt accumulator for RunCycles. The per-opcode SyncToSnesCycle
-	// path in BIOS mode hands tiny tcycle requests (1-3 GB cycles) to
-	// RunCycles, but cpu.Step() always advances >=4 T-cycles (NOP min).
-	// Without a debt accumulator, every small request triggered a full
-	// step, over-running by ~2.5x → APU produced samples at ~98 kHz vs
-	// the host's 48 kHz drain, ring overflow, audible crackle. Now we
-	// only step when debt covers a full instruction; under-runs carry
-	// forward as positive debt; over-runs carry as negative debt.
-	int32_t  cycle_debt            = 0;
+	// SNES-master-cycle target for cycle-exact GB sync (libco-style).
+	// Each ICD2 access (or per-opcode/per-scanline tick) calls
+	// AdvanceMasterCycles which adds the master-cycle delta to this
+	// counter and advances the GB to match. Single source of truth —
+	// no integer-division remainder, no PPU phase wobble: SNES-side
+	// $6000 reads see ly at exactly the master cycle of the read.
+	int64_t  snes_master_target    = 0;
 
 	// Deferred CHR_TRN / PCT_TRN capture. Real SGB hardware reconstructs
 	// border tile/map data from the GB's LCD over multiple frames after
@@ -389,11 +422,10 @@ void Emulator::ColdReset()
 void Emulator::Reset()
 {
 	impl_->cpu.Reset();
-	// Drop any in-flight cycle debt — Reset semantically restarts the GB
-	// at t=0 so a stale negative/positive debt from before the reset has
-	// no meaning and would either freeze the GB (huge negative) or run
-	// it ahead by tens of cycles (positive) on the very first SyncToSnes.
-	impl_->cycle_debt = 0;
+	// cpu.Reset() puts cpu.t_cycles = 0; align master target so the first
+	// post-reset sync doesn't see a stale pre-reset target ahead of the
+	// now-zeroed clock.
+	impl_->snes_master_target = 0;
 	MemReset(impl_->mem);
 	PpuReset(impl_->ppu);
 	ApuReset(impl_->apu);
@@ -717,7 +749,9 @@ void Emulator::RunFrame()
 	RunCycles(budget);
 
 	// Always end at VBlank entry so BlitScreen reads a complete framebuffer.
-	// cycle_debt carries the overshoot into the next call.
+	// snes_master_target keeps the master-cycle target ahead of the GB
+	// across calls; the next RunFrame's budget add is relative, so any
+	// last-opcode CPU overshoot is naturally absorbed.
 	int32_t safety = 70224;
 	while (!impl_->ppu.frame_ready && safety > 0)
 	{
@@ -774,6 +808,34 @@ struct SgbDbg
 	uint32_t io_ff44_reads_snap = 0;
 	uint32_t halt_steps_snap    = 0;
 	uint32_t halt_exits_snap    = 0;
+
+	// Slice-rotation diagnostics. The SGB BIOS is supposed to write $6001
+	// exactly 18 times per GB frame (once per 8-row slice of the 144-line
+	// LCD). Variation here is the direct cause of the visible vertical
+	// jitter at default cycle settings: 17 writes leaves one slice un-
+	// drained, 19 double-drains a slice, both shift the slice→data
+	// mapping into the next frame.
+	//   w_6001_prev   — value of icd.w_6001 captured at the previous VBlank
+	//   w_6001_snap   — delta (writes since last VBlank); should be 18
+	//   r_7800_prev   — value of icd.r_7800 captured at the previous VBlank
+	//   r_7800_snap   — delta (bytes since last VBlank); should be 5760 (18×320)
+	//   read_slice_at_vb_snap — value of icd.read_slice JUST BEFORE the
+	//                   force-realign-to-16 fires. If the BIOS wrote 18
+	//                   times starting from slice 17 it ends at slice 16,
+	//                   so a stable RS@VB=16 confirms the BIOS hit its
+	//                   expected count. RS@VB ≠ 16 = BIOS off-count, the
+	//                   realign is masking it but slice→data is mis-mapped.
+	uint32_t w_6001_prev          = 0;
+	uint32_t w_6001_snap          = 0;
+	uint32_t r_7800_prev          = 0;
+	uint32_t r_7800_snap          = 0;
+	uint8_t  read_slice_at_vb_snap = 0;
+
+	// Per-frame $6001 byte log snapshot for OSD diagnosis. Copied from
+	// icd.frame_6001_bytes at VBlank along with the count, so the OSD
+	// shows exactly what the BIOS wrote on the just-ended frame.
+	uint8_t  frame_6001_bytes_snap[24] = {};
+	uint8_t  frame_6001_count_snap     = 0;
 
 	// Ring of the last 8 command IDs that reached OnSgbCommandInternal,
 	// in chronological order (cmd_ring[0] = oldest). Lets us see
@@ -971,15 +1033,72 @@ static void DecodeBorderCapture(const uint8_t *raw_fb, uint8_t *out_4kb)
 void Emulator::RunCycles(int32_t tcycles)
 {
 	if (!impl_->has_rom) return;
-	++g_sgb_dbg.prof_runcycles_calls;
-	g_sgb_dbg.prof_gb_cycles_total += static_cast<uint32_t>(tcycles > 0 ? tcycles : 0);
+	if (tcycles <= 0) return;
+	// Public API: caller specifies advancement in GB t-cycles. Convert
+	// to SNES master-cycle equivalent and delegate to AdvanceMasterCycles
+	// — the single cycle-exact entry point. SGB1: 1 GB t-cycle = 5 SNES
+	// master cycles. SGB2/DMG: 21477272/4194304 ratio (≈5.121).
+	int64_t master_delta;
+	switch (impl_->run_mode)
+	{
+		case RunMode::SGB:
+			master_delta = static_cast<int64_t>(tcycles) * 5;
+			break;
+		case RunMode::SGB2:
+		case RunMode::DMG:
+		default:
+			master_delta = (static_cast<int64_t>(tcycles) * 21477272 + 2097152)
+			               / 4194304;
+			break;
+	}
+	AdvanceMasterCycles(master_delta);
+}
 
-	// Partial-frame advance. Used when a host driving its own clock wants
-	// to interleave GB execution with other work at finer granularity
-	// than one frame. cycle_debt absorbs the gap between requested cycles
-	// and the GB CPU's minimum step size — see Impl::cycle_debt comment.
-	impl_->cycle_debt += tcycles;
-	while (impl_->cycle_debt >= 4)
+void Emulator::AdvanceMasterCycles(int64_t master_delta)
+{
+	if (!impl_->has_rom) return;
+	if (master_delta <= 0) return;
+	++g_sgb_dbg.prof_runcycles_calls;
+	g_sgb_dbg.prof_gb_cycles_total += static_cast<uint32_t>(master_delta);
+
+	impl_->snes_master_target += master_delta;
+
+	// Translate SNES master cycle target → GB t-cycle target. SGB1's 5:1
+	// ratio is exact (target / 5). SGB2/DMG uses 4194304/21477272 — keep
+	// the multiplication ahead of the division to avoid precision loss.
+	int64_t ppu_target_t;
+	switch (impl_->run_mode)
+	{
+		case RunMode::SGB:
+			ppu_target_t = impl_->snes_master_target / 5;
+			break;
+		case RunMode::SGB2:
+		case RunMode::DMG:
+		default:
+			ppu_target_t = (impl_->snes_master_target * 4194304)
+			               / 21477272;
+			break;
+	}
+
+	// Step 1: advance PPU to EXACTLY the master-cycle target. The cascade
+	// in PpuStep handles arbitrarily large deltas (multiple scanline /
+	// frame transitions in one call). After this, ppu.ly reflects the
+	// dot-clock position at the SNES master cycle of the read that
+	// triggered this sync — what the SGB BIOS expects to see at $6000.
+	if (impl_->ppu.t_cycles < ppu_target_t)
+	{
+		const int32_t ppu_advance =
+			static_cast<int32_t>(ppu_target_t - impl_->ppu.t_cycles);
+		PpuStep(impl_->ppu, impl_->mem, ppu_advance);
+	}
+
+	// Step 2: run CPU atomically until cpu.t_cycles catches up to the
+	// target. Atomic-instruction overshoot lands the CPU 0–19 cycles past
+	// target. PPU is intentionally NOT advanced in this loop — it stays
+	// at exact target so the next SNES-side read sees ly precisely at
+	// the read's master cycle. Timer/APU follow the CPU since GB-side
+	// reads of those don't have the same SNES-cycle precision requirement.
+	while (impl_->cpu.State().t_cycles < ppu_target_t)
 	{
 		++g_sgb_dbg.prof_cpu_steps;
 		++g_sgb_dbg.prof_ppu_steps;
@@ -1003,11 +1122,8 @@ void Emulator::RunCycles(int32_t tcycles)
 			impl_->boot_handoff_regs     = impl_->cpu.State().r;
 		}
 
-		PpuStep  (impl_->ppu,   impl_->mem, consumed);
 		TimerStep(impl_->timer, impl_->mem, consumed);
 		ApuStep  (impl_->apu,                consumed);
-
-		impl_->cycle_debt -= consumed;
 	}
 
 	if (impl_->border_capture.stage != Impl::BorderCapture::Idle &&
@@ -1194,8 +1310,14 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 		case 0x6001:
 			icd.lcd_row_select = value;
 			icd.read_position  = 0;
-			icd.read_slice  = static_cast<uint8_t>((icd.read_slice + 1) % 18);
-			icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
+			if (icd.frame_6001_count < 18)
+			{
+				icd.read_slice  = static_cast<uint8_t>((icd.read_slice + 1) % 18);
+				icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
+			}
+			if (icd.frame_6001_count < 24)
+				icd.frame_6001_bytes[icd.frame_6001_count] = value;
+			++icd.frame_6001_count;
 			icd.row_writes++;
 			return;
 		case 0x6003:
@@ -1305,12 +1427,53 @@ void Emulator::OnPpuHBlank()
 void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
-	// Reset row and bank at VBlank — see earlier comment for why both.
+	// Snapshot slice-rotation diagnostics BEFORE touching read_slice — the
+	// realign-to-16 below would clobber the BIOS's actual end-of-frame
+	// slice value, hiding whether the BIOS wrote $6001 the expected 18
+	// times this frame.
+	{
+		const uint32_t w6001_now  = impl_->icd2.w_6001;
+		const uint32_t r7800_now  = impl_->icd2.r_7800;
+		g_sgb_dbg.w_6001_snap     = w6001_now - g_sgb_dbg.w_6001_prev;
+		g_sgb_dbg.r_7800_snap     = r7800_now - g_sgb_dbg.r_7800_prev;
+		g_sgb_dbg.w_6001_prev     = w6001_now;
+		g_sgb_dbg.r_7800_prev     = r7800_now;
+		g_sgb_dbg.read_slice_at_vb_snap = impl_->icd2.read_slice;
+		// Snapshot the per-write byte log for OSD diagnosis (alongside
+		// the count, capped at 24 entries — anything beyond is dropped
+		// at write time but the count keeps incrementing so we still
+		// know the true total via W6001).
+		g_sgb_dbg.frame_6001_count_snap = impl_->icd2.frame_6001_count;
+		std::memcpy(g_sgb_dbg.frame_6001_bytes_snap,
+		            impl_->icd2.frame_6001_bytes,
+		            sizeof g_sgb_dbg.frame_6001_bytes_snap);
+	}
+
 	impl_->icd2.sgb_row  = 0;
 	impl_->icd2.sgb_bank = 0;
-	// Force-realign read_slice to 16 per frame so the first $6001 write
-	// of the next frame always advances to slice 17 (the wrap-read).
+
+	const uint8_t advances = (impl_->icd2.frame_6001_count < 18)
+	                         ? impl_->icd2.frame_6001_count
+	                         : static_cast<uint8_t>(18);
+	const uint8_t missing  = static_cast<uint8_t>(18 - advances);
+	for (uint8_t i = 0; i < missing; ++i)
+	{
+		impl_->icd2.read_slice  = static_cast<uint8_t>(
+			(impl_->icd2.read_slice  + 1) % 18);
+		impl_->icd2.slice_index = static_cast<uint8_t>(
+			(impl_->icd2.slice_index + 1) % 18);
+	}
 	impl_->icd2.read_slice = 16;
+
+	// Visual-freeze on off-count frames. If the just-ended frame had
+	// $6001 count != 18, set the capture-skip flag so the NEXT frame's
+	// CaptureScanline calls are no-ops; full_frame / full_frame_planar
+	// retain the just-finished good frame's pixel data, the BIOS's
+	// $7800 reads next frame stream that data, and the GB game area
+	// visually freezes for one frame instead of jumping. Self-clears
+	// at the following VBlank so the freeze is bounded to one frame.
+	impl_->icd2.freeze_capture   = (impl_->icd2.frame_6001_count != 18);
+	impl_->icd2.frame_6001_count = 0;
 
 	// Snapshot per-frame profiling counters and reset for next frame.
 	g_sgb_dbg.prof_sync_calls_snap      = g_sgb_dbg.prof_sync_calls;
@@ -1349,12 +1512,43 @@ void Emulator::OnPpuVBlank()
 	{
 		char buf[260];
 		snprintf(buf, sizeof buf,
-		         "F%X CS=%u HALT=%u CODE=%u EXITS=%u",
+		         "F%X CS=%u HALT=%u CODE=%u EXITS=%u "
+		         "W6001=%u RS@VB=%u R7800=%u",
 		         (unsigned)g_sgb_dbg.prof_frame_index,
 		         (unsigned)g_sgb_dbg.prof_cpu_steps_snap,
 		         (unsigned)g_sgb_dbg.halt_steps_snap,
 		         (unsigned)(g_sgb_dbg.prof_cpu_steps_snap - g_sgb_dbg.halt_steps_snap),
-		         (unsigned)g_sgb_dbg.halt_exits_snap);
+		         (unsigned)g_sgb_dbg.halt_exits_snap,
+		         (unsigned)g_sgb_dbg.w_6001_snap,
+		         (unsigned)g_sgb_dbg.read_slice_at_vb_snap,
+		         (unsigned)g_sgb_dbg.r_7800_snap);
+		const uint32 saved_t = Settings.InitialInfoStringTimeout;
+		Settings.InitialInfoStringTimeout = 120;
+		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
+		Settings.InitialInfoStringTimeout = saved_t;
+	}
+
+	// Second OSD line: per-write byte log of $6001. Shows the actual
+	// value the BIOS wrote on each of this frame's $6001 writes (up to
+	// 24 entries logged). Compare across consecutive frames to spot
+	// the anomalous write that doesn't fit the BIOS's normal cycling
+	// bank pattern (typically 03,00,01,02,03,…).
+	{
+		char buf[300];
+		// Build "B6001=xx,xx,xx,..." prefix.
+		int off = snprintf(buf, sizeof buf, "B6001[%u]=",
+		                   (unsigned)g_sgb_dbg.frame_6001_count_snap);
+		const uint8_t shown =
+			(g_sgb_dbg.frame_6001_count_snap < 24)
+				? g_sgb_dbg.frame_6001_count_snap
+				: static_cast<uint8_t>(24);
+		for (uint8_t i = 0; i < shown && off < (int)sizeof buf - 4; ++i)
+		{
+			off += snprintf(buf + off, sizeof buf - off,
+			                "%s%02X",
+			                (i == 0) ? "" : ",",
+			                (unsigned)g_sgb_dbg.frame_6001_bytes_snap[i]);
+		}
 		const uint32 saved_t = Settings.InitialInfoStringTimeout;
 		Settings.InitialInfoStringTimeout = 120;
 		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
@@ -1367,6 +1561,13 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 	if (!impl_ || !pixels) return;
 	++g_sgb_dbg.prof_capture_calls;
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
+	// Visual-freeze for off-count frames. When the previous frame's $6001
+	// count was != 18, freeze_capture is set; while it's set, leave
+	// full_frame / full_frame_planar at the previous frame's data so the
+	// BIOS's $7800 reads this frame return identical bytes to last frame
+	// → SNES VRAM tile uploads are identical → no visible jump. The flag
+	// self-clears at the next OnPpuVBlank.
+	if (icd.freeze_capture) return;
 	const uint8_t bank  = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row   = static_cast<uint8_t>(icd.sgb_row  & 0x07);
 	const uint8_t slice = static_cast<uint8_t>((icd.sgb_row / 8) % 18);
@@ -1856,9 +2057,28 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->apu.sample_accum_cnt = 0;
 	impl_->apu.sample_timer     = impl_->apu.cycles_per_sample;
 
-	// cycle_debt is transient — reset on load so a stale debt from
-	// before the snapshot doesn't burst-step the GB.
-	impl_->cycle_debt           = 0;
+	// Realign the SNES-side master-cycle target and PPU's t_cycles to
+	// the just-loaded GB clock so the first post-load sync doesn't see
+	// a stale pre-snapshot target ahead of cpu.t_cycles and burst-step
+	// the GB to catch up. Neither field is serialized (snes_master_target
+	// is purely a sync coordinate, ppu.t_cycles is derived from PPU
+	// mode/mode_clock/ly which ARE serialized).
+	{
+		int64_t lhs;
+		int64_t rhs;
+		switch (impl_->run_mode)
+		{
+			case SGB::RunMode::SGB:
+				lhs = 5;        rhs = 1;       break;
+			case SGB::RunMode::SGB2:
+			case SGB::RunMode::DMG:
+			default:
+				lhs = 21477272; rhs = 4194304; break;
+		}
+		// Solve cpu.t_cycles * lhs == target * rhs for target.
+		impl_->snes_master_target = impl_->cpu.State().t_cycles * lhs / rhs;
+		impl_->ppu.t_cycles       = impl_->cpu.State().t_cycles;
+	}
 
 	// Rebuild full_frame_planar from full_frame. The planar mirror is a
 	// derived view; if a snapshot from before this field existed gets
@@ -1926,58 +2146,26 @@ void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
 
 namespace {
-	int32_t g_snes_cycle_accum = 0;
 	int32_t g_sync_anchor      = 0;
 	int32_t g_h_max            = 1364;  // NTSC default; overwritten per-frame by cpuexec
 }
 
 void S9xSGBResetClockSync(void)
 {
-	g_snes_cycle_accum = 0;
-	g_sync_anchor      = 0;
+	g_sync_anchor = 0;
 }
 
 void S9xSGBTickSnes(int snes_master_cycles)
 {
 	if (snes_master_cycles <= 0) return;
-	g_snes_cycle_accum += snes_master_cycles;
-
-	// Clock ratio depends on RunMode:
-	//   SGB1: GB clock = SNES master / 5 (≈ 4.295 MHz, slightly faster
-	//                    than DMG — matches the ICD2 cart's wiring).
-	//   SGB2: GB clock = real DMG clock (4.194 MHz). The SNES still
-	//                    runs at 21.477 MHz, so the ratio is ~5.121,
-	//                    NOT 5. Using /5 in SGB2 mode makes the GB run
-	//                    2.4% too fast; over a frame that's ~6 scan-
-	//                    lines of drift, which desyncs the BIOS's
-	//                    bank-read timing against our slice writes
-	//                    and produces visible vertical row drift.
-	//   DMG:  same as SGB2 — real GB clock.
-	int32_t gb_cycles;
-	const SGB::RunMode mode = SGB::Instance().GetRunMode();
-	if (mode == SGB::RunMode::SGB)
-	{
-		gb_cycles = g_snes_cycle_accum / 5;
-		if (gb_cycles > 0)
-		{
-			g_snes_cycle_accum -= gb_cycles * 5;
-			SGB::Instance().RunCycles(gb_cycles);
-		}
-	}
-	else
-	{
-		// 64-bit math to avoid overflow: ratio = 4194304 / 21477272.
-		// gb_cycles = accum * 4194304 / 21477272.
-		const int64_t scaled = static_cast<int64_t>(g_snes_cycle_accum) * 4194304;
-		gb_cycles = static_cast<int32_t>(scaled / 21477272);
-		if (gb_cycles > 0)
-		{
-			// Subtract back the SNES-cycle equivalent of what we ran.
-			const int64_t consumed = (static_cast<int64_t>(gb_cycles) * 21477272) / 4194304;
-			g_snes_cycle_accum -= static_cast<int32_t>(consumed);
-			SGB::Instance().RunCycles(gb_cycles);
-		}
-	}
+	// Cycle-exact path: hand SNES master cycles directly to the emulator's
+	// AdvanceMasterCycles. It owns both the SNES→GB ratio (exact 5:1 for
+	// SGB1, cross-multiplied 21477272/4194304 for SGB2/DMG) and the
+	// PPU/CPU sync so $6000 reads see ly at the precise master cycle.
+	// No SNES-side accumulator → no 0..4-master-cycle leftover bucket
+	// that previously caused the BIOS to occasionally see a stale ly band
+	// at polling time → 17/19 $6001 writes per frame instead of 18.
+	SGB::Instance().AdvanceMasterCycles(snes_master_cycles);
 }
 
 void S9xSGBResetSyncAnchor(int32_t cpu_cycles)

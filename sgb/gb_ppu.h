@@ -42,6 +42,12 @@ struct Ppu
 	PpuMode  mode = PpuMode::OamScan;
 	int32_t  mode_clock = 0;
 
+	// Monotonic GB t-cycle counter — advanced by PpuStep. Used by
+	// AdvanceMasterCycles (sgb.cpp) to drive PPU exactly to the SNES
+	// master-cycle target on each sync, decoupled from CPU instruction
+	// boundaries. Required for cycle-exact $6000 reads.
+	int64_t  t_cycles = 0;
+
 	// Internal window line counter — increments only on lines where the
 	// window was actually drawn, independent of LY (Pan Docs: Window
 	// Internal Line Counter).

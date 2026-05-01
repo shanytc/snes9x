@@ -300,10 +300,13 @@ void PpuReset(Ppu &p)
 	p.window_line   = 0;
 	p.stat_line_high = false;
 	p.frame_ready   = false;
+	p.t_cycles      = 0;
 }
 
 void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 {
+	if (tcycles > 0) p.t_cycles += tcycles;
+
 	// LCD master disable (LCDC bit 7). Real HW parks the PPU in mode 0
 	// with LY=0 until the bit toggles back on. We keep the framebuffer
 	// contents so the display keeps showing the last valid frame.
@@ -333,71 +336,86 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 
 	p.mode_clock += tcycles;
 
-	bool mode_changed = false;
-
-	switch (p.mode)
+	// Cascade through every mode transition the accumulated mode_clock
+	// covers, not just the first. A single PpuStep call can be handed a
+	// large enough delta to cross multiple mode boundaries (OAM-scan →
+	// transfer → HBlank → next-line OAM-scan); a one-shot switch would
+	// only fire the first transition and leave the rest as phantom
+	// mode_clock leftover, dropping scanline transitions on the floor.
+	for (;;)
 	{
-	case PpuMode::OamScan:
-		if (p.mode_clock >= MODE2_DOTS)
+		bool transitioned = false;
+		switch (p.mode)
 		{
-			p.mode_clock -= MODE2_DOTS;
-			p.mode        = PpuMode::Transfer;
-			// Render at mode-3 entry (simplification — see top-of-file note).
-			RenderScanline(p);
-			mode_changed = true;
-		}
-		break;
-
-	case PpuMode::Transfer:
-		if (p.mode_clock >= MODE3_DOTS)
-		{
-			p.mode_clock -= MODE3_DOTS;
-			p.mode        = PpuMode::HBlank;
-			mode_changed  = true;
-		}
-		break;
-
-	case PpuMode::HBlank:
-		if (p.mode_clock >= MODE0_DOTS)
-		{
-			p.mode_clock -= MODE0_DOTS;
-			++p.ly;
-			// bsnes ICD::ppuHreset equivalent — advance $6000 row/bank
-			// from GB PPU. Frozen while GB halted (callback only fires
-			// when GB actually ticks).
-			S9xSGBOnPpuHBlank();
-			if (p.ly == VISIBLE_LINES)
+		case PpuMode::OamScan:
+			if (p.mode_clock >= MODE2_DOTS)
 			{
-				p.mode          = PpuMode::VBlank;
-				p.frame_ready   = true;
-				p.window_line   = 0;
-				mem.if_         = static_cast<uint8_t>(mem.if_ | IRQ_VBLANK);
-				S9xSGBOnPpuVBlank();  // bsnes ICD::ppuVreset
+				p.mode_clock -= MODE2_DOTS;
+				p.mode        = PpuMode::Transfer;
+				// Render at mode-3 entry (simplification — see top-of-file note).
+				RenderScanline(p);
+				transitioned = true;
 			}
-			else
-			{
-				p.mode = PpuMode::OamScan;
-			}
-			mode_changed = true;
-		}
-		break;
+			break;
 
-	case PpuMode::VBlank:
-		if (p.mode_clock >= LINE_DOTS)
-		{
-			p.mode_clock -= LINE_DOTS;
-			++p.ly;
-			if (p.ly >= TOTAL_LINES)
+		case PpuMode::Transfer:
+			if (p.mode_clock >= MODE3_DOTS)
 			{
-				p.ly   = 0;
-				p.mode = PpuMode::OamScan;
+				p.mode_clock -= MODE3_DOTS;
+				p.mode        = PpuMode::HBlank;
+				transitioned  = true;
 			}
-			mode_changed = true;
+			break;
+
+		case PpuMode::HBlank:
+			if (p.mode_clock >= MODE0_DOTS)
+			{
+				p.mode_clock -= MODE0_DOTS;
+				++p.ly;
+				// bsnes ICD::ppuHreset equivalent — advance $6000 row/bank
+				// from GB PPU. Frozen while GB halted (callback only fires
+				// when GB actually ticks).
+				S9xSGBOnPpuHBlank();
+				if (p.ly == VISIBLE_LINES)
+				{
+					p.mode          = PpuMode::VBlank;
+					p.frame_ready   = true;
+					p.window_line   = 0;
+					mem.if_         = static_cast<uint8_t>(mem.if_ | IRQ_VBLANK);
+					S9xSGBOnPpuVBlank();  // bsnes ICD::ppuVreset
+				}
+				else
+				{
+					p.mode = PpuMode::OamScan;
+				}
+				transitioned = true;
+			}
+			break;
+
+		case PpuMode::VBlank:
+			if (p.mode_clock >= LINE_DOTS)
+			{
+				p.mode_clock -= LINE_DOTS;
+				++p.ly;
+				if (p.ly >= TOTAL_LINES)
+				{
+					p.ly   = 0;
+					p.mode = PpuMode::OamScan;
+				}
+				transitioned = true;
+			}
+			break;
 		}
-		break;
+		if (!transitioned) break;
+		// STAT IRQ uses edge detection — must run after every transition
+		// inside the cascade, NOT just once at the end. With one large
+		// PpuStep delta the cascade can fire 5+ scanline transitions in
+		// a single call; if RecomputeStatLine runs only at the end, the
+		// GB game's HBlank/mode-2/LYC-match STAT handlers miss the inter-
+		// mediate edges → game state drifts → packet timing to SGB BIOS
+		// shifts → BIOS writes $6001 17 or 19 times instead of 18.
+		RecomputeStatLine(p, mem);
 	}
-
-	if (mode_changed) RecomputeStatLine(p, mem);
 }
 
 uint8_t PpuReadReg(const Ppu &p, uint16_t addr)

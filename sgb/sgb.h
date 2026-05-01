@@ -91,6 +91,16 @@ public:
 	// Advance by N T-cycles. Used when snes9x drives the master clock directly.
 	void RunCycles(int32_t tcycles);
 
+	// Cycle-exact sync entry point (libco-style, function-call inversion).
+	// Adds master_delta SNES master cycles to the running target and
+	// drives both PPU and CPU forward: PPU advances to exactly the new
+	// target (cycle-precise), CPU runs atomically until it catches up
+	// (may overshoot the target by up to one opcode's width). This way
+	// every SNES-side $6000 read sees ly at the exact master cycle of
+	// the read, eliminating the bimodal phase wobble that caused 17/19
+	// $6001 write counts at default cycle settings.
+	void AdvanceMasterCycles(int64_t master_delta);
+
 	const FrameBuffer &GetFrameBuffer() const;
 
 	// Consume pending audio samples. Returns the count written

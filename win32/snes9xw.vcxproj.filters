@@ -866,6 +866,9 @@
     <ClCompile Include="..\external\stb\stb_image_implementation.cpp">
       <Filter>GUI\VideoDriver\Vulkan</Filter>
     </ClCompile>
+    <ClCompile Include="..\external\libco\libco.c">
+      <Filter>SGB</Filter>
+    </ClCompile>
     <ClCompile Include="..\common\video\vulkan\vulkan_simple_output.cpp">
       <Filter>GUI\VideoDriver\Vulkan</Filter>
     </ClCompile>

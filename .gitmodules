@@ -23,3 +23,6 @@
 	path = external/SDL3-src
 	url = https://github.com/shanytc/SDL.git
 	branch = snes9x-3.2.14
+[submodule "external/libco"]
+	path = external/libco
+	url = https://github.com/higan-emu/libco.git

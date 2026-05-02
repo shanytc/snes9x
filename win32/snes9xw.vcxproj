@@ -576,6 +576,10 @@
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release Unicode|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="..\external\stb\stb_image_implementation.cpp" />
+    <!-- libco - cooperative cothreads for SGB SNES<->GB sync -->
+    <ClCompile Include="..\external\libco\libco.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
     <!-- rcheevos - RetroAchievements support -->
     <ClCompile Include="..\external\rcheevos\src\rc_client.c" />
     <ClCompile Include="..\external\rcheevos\src\rc_compat.c" />

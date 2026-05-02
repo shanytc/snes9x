@@ -363,6 +363,18 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 			{
 				p.mode_clock -= MODE3_DOTS;
 				p.mode        = PpuMode::HBlank;
+				// Mesen2 GbPpu fires SuperGameboy::ProcessHBlank at the
+				// Drawing→HBlank transition (before ly increments). Its
+				// ProcessHBlank does _row++ so during LY=N's HBlank the
+				// SNES sees $6000 high = (N+1) & ~7 — critical at the
+				// LY=143 HBlank where the SNES BIOS expects to see
+				// sgb_row = 144 ($6000 = 0x90|bank) for ~204 dots
+				// before VBlank reset. Our previous "OnPpuHBlank at
+				// HBlank exit" arrangement made this window invisible
+				// (the reset fired in the same C++ block as the row
+				// advance), causing the BIOS to wobble between 17/19
+				// $6001 writes per frame.
+				S9xSGBOnPpuHBlank();
 				transitioned  = true;
 			}
 			break;
@@ -372,10 +384,6 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 			{
 				p.mode_clock -= MODE0_DOTS;
 				++p.ly;
-				// bsnes ICD::ppuHreset equivalent — advance $6000 row/bank
-				// from GB PPU. Frozen while GB halted (callback only fires
-				// when GB actually ticks).
-				S9xSGBOnPpuHBlank();
 				if (p.ly == VISIBLE_LINES)
 				{
 					p.mode          = PpuMode::VBlank;

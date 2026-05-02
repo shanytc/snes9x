@@ -91,15 +91,20 @@ public:
 	// Advance by N T-cycles. Used when snes9x drives the master clock directly.
 	void RunCycles(int32_t tcycles);
 
-	// Cycle-exact sync entry point (libco-style, function-call inversion).
-	// Adds master_delta SNES master cycles to the running target and
-	// drives both PPU and CPU forward: PPU advances to exactly the new
-	// target (cycle-precise), CPU runs atomically until it catches up
-	// (may overshoot the target by up to one opcode's width). This way
-	// every SNES-side $6000 read sees ly at the exact master cycle of
-	// the read, eliminating the bimodal phase wobble that caused 17/19
-	// $6001 write counts at default cycle settings.
+	// Cycle-exact sync entry point. Stamps the running SNES master-cycle
+	// target and switches into the GB cothread, which drives PPU/CPU/
+	// Timer/APU forward until caught up. Same contract as before: PPU
+	// lands EXACTLY on the new target (cycle-precise), CPU may overshoot
+	// by up to one opcode's width. SNES-side $6000 reads see ly at the
+	// exact master cycle of the read.
 	void AdvanceMasterCycles(int64_t master_delta);
+
+	// GB cothread body — owned by the libco GbCoEntry trampoline. Drives
+	// the GB subsystems forward until impl_->snes_master_target is
+	// reached, then returns so the entry trampoline can co_switch back
+	// to the SNES host thread. Public only because the file-scope
+	// trampoline needs to call it; not part of the host-side API.
+	void CothreadStep();
 
 	const FrameBuffer &GetFrameBuffer() const;
 

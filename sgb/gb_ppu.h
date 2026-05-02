@@ -42,6 +42,33 @@ struct Ppu
 	PpuMode  mode = PpuMode::OamScan;
 	int32_t  mode_clock = 0;
 
+	// Per-pixel rendering state (mode-3 active draw).
+	// draw_x advances 0..160 across mode 3, one pixel per GB t-cycle dot.
+	// Each pixel re-samples SCX/SCY/BGP/OBP0/OBP1/LCDC/WX/WY so games that
+	// change those registers mid-scanline (Animaniacs cloud strip, Balloon
+	// Kid title parallax, others) render with the right per-pixel state
+	// instead of a single sample latched at mode-3 entry.
+	int16_t  draw_x = 0;
+
+	// Sprite list for the current LY, latched at mode 2 → mode 3 transition.
+	// Up to 10 sprites overlap a scanline; we pre-sort by render priority
+	// (lowest X first, ties by OAM index) so per-pixel coverage checks can
+	// be a linear scan against sprite_x[i] / sprite_x_end[i].
+	struct SpriteHit {
+		int16_t  x;        // OAM X-8 (screen-space leftmost pixel)
+		uint8_t  oam_idx;  // 0..39
+	};
+	SpriteHit sprites[10];
+	uint8_t   sprite_count    = 0;
+	bool      window_active   = false;   // window engaged on this LY
+	int16_t   window_start_x  = 0;       // x at which window engaged
+
+	// Monotonic GB t-cycle counter — advanced by PpuStep. Used by
+	// AdvanceMasterCycles (sgb.cpp) to drive PPU exactly to the SNES
+	// master-cycle target on each sync, decoupled from CPU instruction
+	// boundaries. Required for cycle-exact $6000 reads.
+	int64_t  t_cycles = 0;
+
 	// Internal window line counter — increments only on lines where the
 	// window was actually drawn, independent of LY (Pan Docs: Window
 	// Internal Line Counter).

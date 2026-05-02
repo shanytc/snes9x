@@ -36,7 +36,7 @@ void S9xMainLoop (void)
 			S9xMovieUpdate();
 		}
 
-		IPPU.RenderThisFrame      = TRUE;
+		IPPU.RenderThisFrame      = !Settings.InRunAhead;
 		PPU.ScreenHeight          = SNES_HEIGHT;
 		IPPU.RenderedScreenWidth  = SNES_WIDTH;
 		IPPU.RenderedScreenHeight = SNES_HEIGHT;
@@ -59,10 +59,17 @@ void S9xMainLoop (void)
 		// picks up sound-config changes (output device / rate switch).
 		S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
-		S9xStartScreenRefresh();
+		// Hidden runahead frames advance GB state but skip blit/present:
+		// double-presenting per displayed frame can clobber video on
+		// some host backends.
+		if (!Settings.InRunAhead)
+			S9xStartScreenRefresh();
 		S9xSGBRunFrame();
-		S9xSGBBlitScreen(GFX.Screen, GFX.RealPPL);
-		S9xEndScreenRefresh();
+		if (!Settings.InRunAhead)
+		{
+			S9xSGBBlitScreen(GFX.Screen, GFX.RealPPL);
+			S9xEndScreenRefresh();
+		}
 
 		// Drive the host audio callback to drain GB samples into the
 		// sound device. In standard SNES mode the SPC scanline path

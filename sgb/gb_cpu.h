@@ -64,6 +64,12 @@ void     IrqServicedReset();
 // Fired in user code (hot path), so keep hooks cheap.
 using TraceHook = void (*)(uint16_t pc, uint8_t opcode, const CpuState &state);
 
+// Upper bound on T-cycles a single Cpu::Step() can consume. The longest
+// observed paths are CALL cc,nn taken (24 T-cycles) and IRQ dispatch
+// (20 T-cycles). Used by the per-dot CPU/PPU interleaving gate in
+// RunCycles so the GB CPU never overshoots PPU on a sub-opcode boundary.
+static constexpr int kMaxOpcodeTCycles = 24;
+
 class Cpu
 {
 public:

@@ -261,22 +261,9 @@ struct Emulator::Impl
 		// Per-pixel capture ring — 4 banks × 8 rows × 160 pixels
 		// (palette indices 0..3). Mesen2 SuperGameboy::WriteLcdColor
 		// writes into _lcdBuffer[_bank][(_row & 7) * 160 + pixel] from
-		// the GB PPU renderer.
+		// the GB PPU renderer; $7800 reads decode planar bytes inline
+		// from this buffer (live, no snapshot).
 		uint8_t  lcd_ring[4][8 * 160];
-
-		// Stable snapshot of the SNES-asserted bank's lcd_ring data at
-		// the moment $6001 is written. $7800 reads stream from this
-		// buffer instead of the live ring so the BIOS's 320-byte drain
-		// always reads a consistent source — replicates the behavior
-		// CPU-overclock-max produces (where the drain finishes inside
-		// LY=N's HBlank period before the GB starts writing the bank
-		// for current frame, so all bytes come from the previous
-		// frame's last write to that bank). At default speed, without
-		// snapshotting, the drain spans LY=N HBlank → LY=N+1 mode 3
-		// and reads MIXED data (some prev-frame, some in-progress
-		// current-frame), which manifests as the visible "streaks of
-		// color" inside the GB display area.
-		uint8_t  r7800_snapshot[8 * 160];
 	} icd2;
 
 	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
@@ -1238,17 +1225,11 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 	//   read_position bits  8:4 → tile-column     (0..19)
 	//   read_position bit   0   → bit-plane       (0 or 1)
 	// 320 bytes of real data, then $FF padding to 512 before wrap.
-	// $7800-$780F — GB frame char-transfer window. Streams bit-plane
-	// bytes from r7800_snapshot, latched at $6001 write time. Decoded
-	// inline:
-	//   read_position bits  3:1 → row-within-bank (0..7)
-	//   read_position bits  8:4 → tile-column     (0..19)
-	//   read_position bit   0   → bit-plane       (0 or 1)
-	// 320 bytes of real data, then $FF padding to 512 before wrap.
-	// Reading from the snapshot makes the drain consistent regardless
-	// of how far the GB has progressed by the time BIOS reads — see
-	// r7800_snapshot's struct comment for the streaks-vs-overclock
-	// reasoning.
+	// Mesen2 SuperGameboy::Read does the same — no snapshot. The
+	// BIOS asserts $6001=N at the HBlank-entry transition where the
+	// GB just STARTED writing bank N, then paces its 320 $7800 reads
+	// to land 8 GB scanlines later (after bank N has filled), so
+	// live-ring reads always see fully-rendered band data.
 	if (a >= 0x7800 && a <= 0x780F)
 	{
 		const uint16_t pos = icd.read_position;
@@ -1256,10 +1237,11 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		if (pos >= 320)
 			return 0xFF;
 
+		const uint8_t bank  = static_cast<uint8_t>(icd.lcd_row_select & 0x03);
 		const uint8_t row   = static_cast<uint8_t>((pos >> 1) & 0x07);
 		const uint8_t col   = static_cast<uint8_t>(pos >> 4);
 		const uint8_t shift = static_cast<uint8_t>(pos & 0x01);
-		const uint8_t *src  = &icd.r7800_snapshot[row * 160 + col * 8];
+		const uint8_t *src  = &icd.lcd_ring[bank][row * 160 + col * 8];
 
 		uint8_t data = 0;
 		for (int i = 0; i < 8; ++i)
@@ -1346,19 +1328,23 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 	switch (a)
 	{
 		case 0x6001:
+			// Mesen2: `_lcdRowSelect = value & 0x03; _readPosition = 0;`
+			// $7800 reads stream live from lcd_ring[lcd_row_select].
+			// We previously snapshotted the bank into a stable buffer
+			// at this point, but the BIOS asserts $6001 the moment
+			// bank N STARTS being written (at the HBlank-entry
+			// transition where sgb_bank just rolled to N), not when
+			// bank N is full. Snapshotting at that moment captures
+			// the previous frame's data for bank N, and the BIOS's
+			// later 320-byte $7800 drain — which is paced to land
+			// after bank N has actually filled — would read the
+			// frozen-stale snapshot instead of the just-rendered band.
+			// That mismatch was the Balloon Kid mid-band tearing.
+			// With W6001 locked at 18 (HBlank-entry timing) the BIOS
+			// drain is on-time and there's no overwrite race to
+			// protect against, so live-ring reads match Mesen2 exactly.
 			icd.lcd_row_select = static_cast<uint8_t>(value & 0x03);
 			icd.read_position  = 0;
-			// Latch a stable copy of the asserted bank for the
-			// upcoming $7800 drain — see r7800_snapshot's comment for
-			// the full rationale. Empirically: with CPU overclock max
-			// the user reports streaks vanish, because the BIOS
-			// finishes its drain inside LY=N's HBlank window from a
-			// single consistent prev-frame source. Snapshotting here
-			// produces that same single-source behavior at any clock
-			// speed, fixing the streaks at default settings.
-			std::memcpy(icd.r7800_snapshot,
-			            icd.lcd_ring[icd.lcd_row_select],
-			            sizeof icd.r7800_snapshot);
 			if (icd.frame_6001_count < 24)
 				icd.frame_6001_bytes[icd.frame_6001_count] = value;
 			++icd.frame_6001_count;
@@ -1641,15 +1627,12 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);
 
-	// Bulk-write the just-finished LY's 160 post-palette pixels into
-	// lcd_ring at the appropriate row of the current bank. This is
-	// the source the next $6001 write will snapshot from; with the
-	// snapshot path the lcd_ring contents at $6001 write time are
-	// always last-frame's last-completed band-write to that bank,
-	// giving the SGB BIOS drain a consistent (single-source) view.
+	// Mesen2 WriteLcdColor analogue: write the 160 raw 4-color pixel
+	// indices into _lcdBuffer[bank][row*160 + col]. $7800 reads decode
+	// planar bytes from this same buffer at request time; no separate
+	// 18-slice mirror is needed.
 	std::memcpy(&icd.lcd_ring[bank][row * 160], pixels, 160);
 }
-
 
 static inline uint16_t BgrToHost(uint16_t bgr)
 {

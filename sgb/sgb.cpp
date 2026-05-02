@@ -261,17 +261,9 @@ struct Emulator::Impl
 		// Per-pixel capture ring — 4 banks × 8 rows × 160 pixels
 		// (palette indices 0..3). Mesen2 SuperGameboy::WriteLcdColor
 		// writes into _lcdBuffer[_bank][(_row & 7) * 160 + pixel] from
-		// the GB PPU renderer.
+		// the GB PPU renderer; $7800 reads decode planar bytes inline
+		// from this buffer (live, no snapshot).
 		uint8_t  lcd_ring[4][8 * 160];
-
-		// Stable snapshot of the SNES-asserted bank, taken at $6001
-		// write time. $7800 reads stream from this buffer instead of
-		// the live lcd_ring so the BIOS's 320-byte drain isn't torn
-		// by the GB overwriting the bank mid-burst — the race that
-		// shows up as a bottom-band flash on off-count frames where
-		// the BIOS drain ends up straddling the GB's next-frame
-		// band-0 write into the same bank.
-		uint8_t  r7800_snapshot[8 * 160];
 	} icd2;
 
 	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
@@ -790,12 +782,16 @@ struct SgbDbg
 	uint32_t prof_ppu_steps        = 0;   // PpuStep invocations
 	uint32_t prof_capture_calls    = 0;   // CaptureScanline invocations
 	uint32_t prof_gb_cycles_total  = 0;   // total GB cycles advanced
+	uint32_t prof_hblank_fires     = 0;   // OnPpuHBlank invocations per frame
+	uint32_t prof_vblank_fires     = 0;   // OnPpuVBlank invocations per frame
 	uint32_t prof_sync_calls_snap      = 0;
 	uint32_t prof_runcycles_calls_snap = 0;
 	uint32_t prof_cpu_steps_snap       = 0;
 	uint32_t prof_ppu_steps_snap       = 0;
 	uint32_t prof_capture_calls_snap   = 0;
 	uint32_t prof_gb_cycles_total_snap = 0;
+	uint32_t prof_hblank_fires_snap    = 0;
+	uint32_t prof_vblank_fires_snap    = 0;
 	uint8_t  prof_frame_index          = 0;
 
 	// GB-side I/O read counts per frame. Variance here = GB polling
@@ -1224,16 +1220,16 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		return b;
 	}
 	// $7800-$780F — GB frame char-transfer window. Streams bit-plane
-	// bytes from r7800_snapshot, which was latched by the matching
-	// $6001 write. Decoded inline:
+	// bytes live from lcd_ring[lcd_row_select], decoded inline:
 	//   read_position bits  3:1 → row-within-bank (0..7)
 	//   read_position bits  8:4 → tile-column     (0..19)
 	//   read_position bit   0   → bit-plane       (0 or 1)
 	// 320 bytes of real data, then $FF padding to 512 before wrap.
-	// Reading from the snapshot (not the live lcd_ring) is what
-	// keeps the bottom 4–5 bands artifact-free on frames where
-	// BIOS drain timing drifts and the GB has begun rewriting the
-	// asserted bank by the time the BIOS gets to it.
+	// Mesen2 SuperGameboy::Read does the same — no snapshot. The
+	// BIOS asserts $6001=N at the HBlank-entry transition where the
+	// GB just STARTED writing bank N, then paces its 320 $7800 reads
+	// to land 8 GB scanlines later (after bank N has filled), so
+	// live-ring reads always see fully-rendered band data.
 	if (a >= 0x7800 && a <= 0x780F)
 	{
 		const uint16_t pos = icd.read_position;
@@ -1241,10 +1237,11 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		if (pos >= 320)
 			return 0xFF;
 
+		const uint8_t bank  = static_cast<uint8_t>(icd.lcd_row_select & 0x03);
 		const uint8_t row   = static_cast<uint8_t>((pos >> 1) & 0x07);
 		const uint8_t col   = static_cast<uint8_t>(pos >> 4);
 		const uint8_t shift = static_cast<uint8_t>(pos & 0x01);
-		const uint8_t *src  = &icd.r7800_snapshot[row * 160 + col * 8];
+		const uint8_t *src  = &icd.lcd_ring[bank][row * 160 + col * 8];
 
 		uint8_t data = 0;
 		for (int i = 0; i < 8; ++i)
@@ -1332,20 +1329,22 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 	{
 		case 0x6001:
 			// Mesen2: `_lcdRowSelect = value & 0x03; _readPosition = 0;`
-			// — the SNES picks one of 4 banks to drain via $7800.
-			// No per-frame counter advance: which slice/row the next
-			// 320-byte burst returns is purely a function of the bank
-			// the BIOS just selected, not how many times $6001 has
-			// been written this frame. That uncoupling is what kills
-			// the 17/19-write-count dependency.
+			// $7800 reads stream live from lcd_ring[lcd_row_select].
+			// We previously snapshotted the bank into a stable buffer
+			// at this point, but the BIOS asserts $6001 the moment
+			// bank N STARTS being written (at the HBlank-entry
+			// transition where sgb_bank just rolled to N), not when
+			// bank N is full. Snapshotting at that moment captures
+			// the previous frame's data for bank N, and the BIOS's
+			// later 320-byte $7800 drain — which is paced to land
+			// after bank N has actually filled — would read the
+			// frozen-stale snapshot instead of the just-rendered band.
+			// That mismatch was the Balloon Kid mid-band tearing.
+			// With W6001 locked at 18 (HBlank-entry timing) the BIOS
+			// drain is on-time and there's no overwrite race to
+			// protect against, so live-ring reads match Mesen2 exactly.
 			icd.lcd_row_select = static_cast<uint8_t>(value & 0x03);
 			icd.read_position  = 0;
-			// Latch a stable copy of the asserted bank so the
-			// upcoming $7800 burst isn't torn by the GB overwriting
-			// the bank mid-drain.
-			std::memcpy(icd.r7800_snapshot,
-			            icd.lcd_ring[icd.lcd_row_select],
-			            sizeof icd.r7800_snapshot);
 			if (icd.frame_6001_count < 24)
 				icd.frame_6001_bytes[icd.frame_6001_count] = value;
 			++icd.frame_6001_count;
@@ -1392,13 +1391,13 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 				// Non-empty queue means game packets are pending —
 				// leave them alone and let the BIOS drain/process them.
 			}
-			else if (was_released && !now_released)
-			{
-				// Entering reset: freeze row/bank so $6000 reads match
-				// the fresh GB state the BIOS sees on the next release.
-				icd.sgb_row  = 0;
-				icd.sgb_bank = 0;
-			}
+			// Mesen2 leaves _row/_bank untouched on $6003 1→0 (entering
+			// reset) — only PowerOn / VBlank reset _row, and _bank is
+			// only initialized on construction. Zeroing sgb_bank here
+			// breaks the bank-to-band phase the BIOS has been tracking
+			// across frames, which can land the BIOS's next drain on a
+			// physically wrong bank and produce mid-band tile tearing
+			// (Balloon Kid, etc).
 			return;
 		}
 		case 0x6004:
@@ -1464,6 +1463,7 @@ void Emulator::OnPpuHBlank()
 	icd.sgb_row = static_cast<uint8_t>(icd.sgb_row + 1);
 	if ((icd.sgb_row & 0x07) == 0)
 		icd.sgb_bank = static_cast<uint8_t>((icd.sgb_bank + 1) & 0x03);
+	++g_sgb_dbg.prof_hblank_fires;
 }
 
 void Emulator::OnPpuVBlank()
@@ -1495,6 +1495,16 @@ void Emulator::OnPpuVBlank()
 	impl_->icd2.sgb_row  = 0;
 	impl_->icd2.frame_6001_count = 0;
 
+	// VBlank fires once per GB frame. With SGB1 (GB clock = SNES/5),
+	// the GB does ~71473 GB t-cycles per SNES frame but a GB frame
+	// is 70224 cycles, so per SNES frame we expect 1 VBlank fire
+	// most of the time but occasionally 2 (when an extra GB frame's
+	// VBlank lands in the same SNES frame). That's the cadence the
+	// 17/18/19 W6001 wobble traces back to. Increment AFTER the
+	// snapshot so the snapshot reflects the just-ended SNES frame's
+	// VBlank count including the one that triggered this call.
+	++g_sgb_dbg.prof_vblank_fires;
+
 	// Snapshot per-frame profiling counters and reset for next frame.
 	g_sgb_dbg.prof_sync_calls_snap      = g_sgb_dbg.prof_sync_calls;
 	g_sgb_dbg.prof_runcycles_calls_snap = g_sgb_dbg.prof_runcycles_calls;
@@ -1502,6 +1512,8 @@ void Emulator::OnPpuVBlank()
 	g_sgb_dbg.prof_ppu_steps_snap       = g_sgb_dbg.prof_ppu_steps;
 	g_sgb_dbg.prof_capture_calls_snap   = g_sgb_dbg.prof_capture_calls;
 	g_sgb_dbg.prof_gb_cycles_total_snap = g_sgb_dbg.prof_gb_cycles_total;
+	g_sgb_dbg.prof_hblank_fires_snap    = g_sgb_dbg.prof_hblank_fires;
+	g_sgb_dbg.prof_vblank_fires_snap    = g_sgb_dbg.prof_vblank_fires;
 	g_sgb_dbg.io_ff00_reads_snap = g_sgb_dbg.io_ff00_reads;
 	g_sgb_dbg.io_ff41_reads_snap = g_sgb_dbg.io_ff41_reads;
 	g_sgb_dbg.io_ff44_reads_snap = g_sgb_dbg.io_ff44_reads;
@@ -1513,6 +1525,8 @@ void Emulator::OnPpuVBlank()
 	g_sgb_dbg.prof_ppu_steps        = 0;
 	g_sgb_dbg.prof_capture_calls    = 0;
 	g_sgb_dbg.prof_gb_cycles_total  = 0;
+	g_sgb_dbg.prof_hblank_fires     = 0;
+	g_sgb_dbg.prof_vblank_fires     = 0;
 	g_sgb_dbg.io_ff00_reads = 0;
 	g_sgb_dbg.io_ff41_reads = 0;
 	g_sgb_dbg.io_ff44_reads = 0;
@@ -1541,6 +1555,37 @@ void Emulator::OnPpuVBlank()
 		         (unsigned)g_sgb_dbg.halt_exits_snap,
 		         (unsigned)g_sgb_dbg.w_6001_snap,
 		         (unsigned)g_sgb_dbg.r_7800_snap);
+		const uint32 saved_t = Settings.InitialInfoStringTimeout;
+		Settings.InitialInfoStringTimeout = 120;
+		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
+		Settings.InitialInfoStringTimeout = saved_t;
+	}
+
+	// Timing diagnostics — reveals which input to the BIOS-write count
+	// is jittering between frames at default CPU speed.
+	//   HB  = OnPpuHBlank fires per GB frame (144 visible scanlines).
+	//         Should be 144 every frame; if it varies, our PpuStep is
+	//         emitting different scanline counts per frame.
+	//   VB  = OnPpuVBlank fires per GB frame. 1 per GB frame, always.
+	//   CAP = CaptureScanline calls per GB frame. Same as HB.
+	//   RC  = AdvanceMasterCycles call count per GB frame. Reflects
+	//         how many SNES-side ICD2 + per-opcode syncs reached us.
+	//   GBC = total GB t-cycles advanced per GB frame. Stable at ~70224
+	//         + a fractional remainder that wraps every ~57 GB frames.
+	//         If it jumps by more than the remainder cadence, the
+	//         master→GB clock conversion is dropping cycles.
+	//   PPU = PpuStep call count. High vs CPU steps reveals how often
+	//         the catch-up loop fired vs ran straight through.
+	{
+		char buf[260];
+		snprintf(buf, sizeof buf,
+		         "T HB=%u VB=%u CAP=%u RC=%u GBC=%u PPU=%u",
+		         (unsigned)g_sgb_dbg.prof_hblank_fires_snap,
+		         (unsigned)g_sgb_dbg.prof_vblank_fires_snap,
+		         (unsigned)g_sgb_dbg.prof_capture_calls_snap,
+		         (unsigned)g_sgb_dbg.prof_runcycles_calls_snap,
+		         (unsigned)g_sgb_dbg.prof_gb_cycles_total_snap,
+		         (unsigned)g_sgb_dbg.prof_ppu_steps_snap);
 		const uint32 saved_t = Settings.InitialInfoStringTimeout;
 		Settings.InitialInfoStringTimeout = 120;
 		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);

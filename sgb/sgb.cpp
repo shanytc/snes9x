@@ -182,6 +182,21 @@ struct Emulator::Impl
 		// counts since $60xx and $78xx share low nibbles).
 		uint32_t r_6000, r_6002, r_6003, r_600F, r_7000, r_7800;
 		uint32_t w_6000, w_6001, w_6003, w_7000, w_6004;
+
+		// Slice-rotation jitter defenses. The SGB BIOS is supposed to write
+		// $6001 exactly 18 times per frame (one per 8-row slice). At default
+		// SNES cycle settings our timing occasionally drifts by ±1 → BIOS
+		// writes 17 or 19 → slice rotation goes off → next frame's tile
+		// uploads land at the wrong vertical position (visible jitter).
+		// Mitigations: (a) clamp the rotation at 18 writes per frame; (b)
+		// phantom rotations at VBlank fill in any missing advances; (c)
+		// freeze_capture skips next frame's CaptureScanline so $7800 reads
+		// stream identical bytes — visually steady for one frame instead
+		// of jumping. Reset to 0 / false in OnPpuVBlank.
+		uint8_t  frame_6001_count;
+		uint8_t  frame_6001_bytes[24];
+		bool     freeze_capture;
+
 		uint16_t last_read_addr;
 		uint16_t last_write_addr;
 		uint8_t  last_write_val;
@@ -1150,13 +1165,18 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 		case 0x6001:
 			icd.lcd_row_select = value;
 			icd.read_position  = 0;
-			// Advance the slice-read counter. The BIOS issues $6001
-			// writes in order: slice 0, 1, …, 17, then wraps. We use
-			// THIS counter (not the bank field) to index the full_frame
-			// buffer, so each $7800 stream serves the correct slice
-			// regardless of bank-wrap.
-			icd.read_slice = static_cast<uint8_t>((icd.read_slice + 1) % 18);
-			icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
+			// Slice-rotation clamp: only advance read_slice on the first
+			// 18 writes per frame. A 19th+ write parks at the last good
+			// position so over-count frames don't double-stream a slice
+			// and shift the slice→data mapping into the next frame.
+			if (icd.frame_6001_count < 18)
+			{
+				icd.read_slice  = static_cast<uint8_t>((icd.read_slice  + 1) % 18);
+				icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
+			}
+			if (icd.frame_6001_count < 24)
+				icd.frame_6001_bytes[icd.frame_6001_count] = value;
+			++icd.frame_6001_count;
 			icd.row_writes++;
 			return;
 		case 0x6003:
@@ -1266,23 +1286,48 @@ void Emulator::OnPpuHBlank()
 void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
-	// Reset row and bank at VBlank — see earlier comment for why both.
 	impl_->icd2.sgb_row  = 0;
 	impl_->icd2.sgb_bank = 0;
 
+	// Phantom rotations: if the BIOS under-counted (wrote $6001 fewer
+	// than 18 times), advance read_slice for the missing slices so the
+	// running total reaches 18 before the realign. Together with the
+	// over-count clamp in the $6001 write path this caps the per-frame
+	// rotation at exactly 18 regardless of how the BIOS actually wrote.
+	const uint8_t advances = (impl_->icd2.frame_6001_count < 18)
+	                         ? impl_->icd2.frame_6001_count
+	                         : static_cast<uint8_t>(18);
+	const uint8_t missing  = static_cast<uint8_t>(18 - advances);
+	for (uint8_t i = 0; i < missing; ++i)
+	{
+		impl_->icd2.read_slice  = static_cast<uint8_t>(
+			(impl_->icd2.read_slice  + 1) % 18);
+		impl_->icd2.slice_index = static_cast<uint8_t>(
+			(impl_->icd2.slice_index + 1) % 18);
+	}
+
 	// Force-realign read_slice to 16 per frame so the first $6001 write
 	// of the next frame always advances to slice 17 (the wrap-read).
-	// Without this, drift accumulates if any frame has !=18 $6001 writes
-	// (e.g., during handshake transitions or BIOS internal scheduling
-	// variation), producing the slow vertical scroll-up of the entire
-	// composited image.
 	impl_->icd2.read_slice = 16;
+
+	// Visual-freeze on off-count frames. CaptureScanline next frame is
+	// a no-op so full_frame retains last frame's data and BIOS $7800
+	// reads stream identical bytes — GB game area visually freezes for
+	// one frame instead of jumping. Self-clears at the next VBlank.
+	impl_->icd2.freeze_capture   = (impl_->icd2.frame_6001_count != 18);
+	impl_->icd2.frame_6001_count = 0;
 }
 
 void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
+	// Visual-freeze for off-count frames: while freeze_capture is set,
+	// leave full_frame at the previous good frame's data so $7800 reads
+	// stream identical bytes and SNES VRAM uploads match the previous
+	// frame — visible jitter collapses to a one-frame freeze. Cleared
+	// at the next OnPpuVBlank.
+	if (icd.freeze_capture) return;
 	const uint8_t bank  = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row   = static_cast<uint8_t>(icd.sgb_row  & 0x07);
 	const uint8_t slice = static_cast<uint8_t>((icd.sgb_row / 8) % 18);

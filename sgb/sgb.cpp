@@ -700,6 +700,18 @@ void Emulator::RunFrame()
 	const int32_t  budget    = static_cast<int32_t>(per_frame);
 
 	RunCycles(budget);
+
+	// Always end at VBlank entry so BlitScreen reads a complete framebuffer.
+	// Fixed budget alone drifts the render position out of VBlank every few
+	// calls (SGB1 overshoots ~2.77 lines/call; SGB2/DMG undershoot ~0.95
+	// lines/call), tearing the displayed image and depositing mid-frame
+	// palette/attr packets onto a half-rendered buffer.
+	int32_t safety = 70224;
+	while (!impl_->ppu.frame_ready && safety > 0)
+	{
+		RunCycles(456);
+		safety -= 456;
+	}
 }
 
 // ===================================================================
@@ -968,7 +980,9 @@ void Emulator::RunCycles(int32_t tcycles)
 		                 impl_->border_capture.pkt, 16,
 		                 decoded, impl_->ppu.framebuffer);
 		impl_->border_capture.stage = Impl::BorderCapture::Idle;
-		impl_->ppu.frame_ready      = false;
+		// Don't clear frame_ready here — RunFrame's run-to-vblank loop
+		// reads it to know the frame completed. The tail can't re-fire
+		// because stage is now Idle.
 	}
 }
 
@@ -1748,13 +1762,14 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->mem.joypad = &impl_->joypad;
 	impl_->mem.cart   = &impl_->cart;
 
-	// Reset transient audio output state — the ring buffer content is
-	// not serialized because it's sub-frame scratch.
+	// Reset only the sub-sample integration accumulator. The ring buffer
+	// is not serialized but also not wiped — it stays at its current
+	// in-memory positions so already-queued samples keep playing across
+	// the load. Wiping it on every load broke runahead audio (the hidden
+	// frame's samples were discarded each iteration).
 	impl_->apu.sample_accum_l   = 0;
 	impl_->apu.sample_accum_r   = 0;
 	impl_->apu.sample_accum_cnt = 0;
-	impl_->apu.sample_head      = 0;
-	impl_->apu.sample_tail      = 0;
 	impl_->apu.sample_timer     = impl_->apu.cycles_per_sample;
 
 	// Rebuild full_frame_planar from full_frame. The planar mirror is a
@@ -1928,28 +1943,11 @@ void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
 
 int32_t S9xSGBGetSampleCount(void)
 {
-	int32_t count = SGB::Instance().GetAudioSamplesAvailable();
-	// Cap depends on which audio drive cadence is active:
-	//   BIOS-less SGB — ProcessSound is called once per SNES frame
-	//   from cpuexec's SuperGameBoy branch. avail per call should be
-	//   ~one full frame's worth of samples; otherwise ProcessSound
-	//   under-drains and audio queue underruns into gibberish.
-	//   Cap = output_rate × 2 / 60 = 1600 at 48 kHz (one NTSC frame).
-	//
-	//   BIOS mode — SPC scanline driver fires ProcessSound ~33/frame.
-	//   avail per call is per-call drain, much smaller. Cap tuned
-	//   empirically (~381 at 48 kHz) to land emulation at 60 fps wall
-	//   without over-throttling. See commit log for the binary search.
-	const int32_t out_rate = SGB::Instance().GetAudioSampleRate();
-	int32_t       cap;
-	if (Settings.SGB_BIOSModeActive)
-		cap = (out_rate * 2) / 252;  // ~381 at 48k
-	else
-		cap = (out_rate * 2) / 60;   // 1600 at 48k (BIOS-less)
-	if (cap < 64)   cap = 64;
-	if (cap > 6000) cap = 6000;
-	if (count > cap) count = cap;
-	return count;
+	// Hand the host whatever the GB APU has produced. S9xMixSamples is
+	// already bounded by the host's per-call sample_count request, so no
+	// internal cap is needed; capping here just starves hosts whose audio
+	// buffer cadence differs from ours.
+	return SGB::Instance().GetAudioSamplesAvailable();
 }
 
 int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s)

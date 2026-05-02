@@ -183,19 +183,12 @@ struct Emulator::Impl
 		uint32_t r_6000, r_6002, r_6003, r_600F, r_7000, r_7800;
 		uint32_t w_6000, w_6001, w_6003, w_7000, w_6004;
 
-		// Slice-rotation jitter defenses. The SGB BIOS is supposed to write
-		// $6001 exactly 18 times per frame (one per 8-row slice). At default
-		// SNES cycle settings our timing occasionally drifts by ±1 → BIOS
-		// writes 17 or 19 → slice rotation goes off → next frame's tile
-		// uploads land at the wrong vertical position (visible jitter).
-		// Mitigations: (a) clamp the rotation at 18 writes per frame; (b)
-		// phantom rotations at VBlank fill in any missing advances; (c)
-		// freeze_capture skips next frame's CaptureScanline so $7800 reads
-		// stream identical bytes — visually steady for one frame instead
-		// of jumping. Reset to 0 / false in OnPpuVBlank.
+		// Per-frame $6001 write counter / byte log. Diagnostic only under
+		// the 4-bank protocol — slice-index defenses don't apply here
+		// (sgb_bank is GB-driven; W6001 wobble doesn't shift the protocol's
+		// data layout the way it did under 18-slice). Reset in OnPpuVBlank.
 		uint8_t  frame_6001_count;
 		uint8_t  frame_6001_bytes[24];
-		bool     freeze_capture;
 
 		uint16_t last_read_addr;
 		uint16_t last_write_addr;
@@ -1246,11 +1239,6 @@ void Emulator::OnPpuVBlank()
 	// finished; persisting _bank is what makes that signal work
 	// across frames.
 	impl_->icd2.sgb_row = 0;
-
-	// Visual-freeze on off-count frames carried forward from slice
-	// defenses. With 4-bank, freeze still skips lcd_ring writes so
-	// $7800 streams identical bytes from last frame.
-	impl_->icd2.freeze_capture   = (impl_->icd2.frame_6001_count != 18);
 	impl_->icd2.frame_6001_count = 0;
 }
 
@@ -1258,7 +1246,6 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
-	if (icd.freeze_capture) return;
 	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);
 	std::memcpy(&icd.lcd_ring[bank][row * 160], pixels, 160);

@@ -250,17 +250,17 @@ void S9xMainLoop (void)
 		Registers.PCw++;
 		(*Opcodes[Op].S9xOpcode)();
 
+		// Per-opcode SGB sync. ICD2-access + scanline syncs alone deliver
+		// variable chunk sizes (a few cycles to ~1300), making GB CPU
+		// HALT-vs-code mix vary per frame, drifting BIOS bank-rotation
+		// timing and producing visible border-tile corruption at default
+		// settings (CPUOverclock=0). Per-opcode sync delivers tiny uniform
+		// deltas (1-3 SNES cycles), keeping per-frame timing stable.
+		if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+			S9xSGBSyncToSnesCycle(CPU.Cycles);
+
 		if (Settings.SA1)
 			S9xSA1MainLoop();
-
-		// SNES→GB sync now happens at scanline boundaries only (see
-		// HC_HCOUNTER_MAX_EVENT below) plus on every ICD2 register
-		// access in getset.h. The previous per-opcode sync here cost
-		// millions of function calls/sec in BIOS-released mode and
-		// dropped wall-fps from 60 to ~25. Scanline-grained sync is
-		// fine for game-running mode — the BIOS handshake's tight
-		// $7800-slice timing happens before release, where ICD2-access
-		// syncs already serialize state correctly.
 	}
 
 	// P2 — in BIOS mode the GB core is held in reset until the BIOS

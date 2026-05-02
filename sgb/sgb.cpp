@@ -1561,45 +1561,13 @@ void Emulator::OnPpuVBlank()
 		Settings.InitialInfoStringTimeout = saved_t;
 	}
 
-	// Timing diagnostics — reveals which input to the BIOS-write count
-	// is jittering between frames at default CPU speed.
-	//   HB  = OnPpuHBlank fires per GB frame (144 visible scanlines).
-	//         Should be 144 every frame; if it varies, our PpuStep is
-	//         emitting different scanline counts per frame.
-	//   VB  = OnPpuVBlank fires per GB frame. 1 per GB frame, always.
-	//   CAP = CaptureScanline calls per GB frame. Same as HB.
-	//   RC  = AdvanceMasterCycles call count per GB frame. Reflects
-	//         how many SNES-side ICD2 + per-opcode syncs reached us.
-	//   GBC = total GB t-cycles advanced per GB frame. Stable at ~70224
-	//         + a fractional remainder that wraps every ~57 GB frames.
-	//         If it jumps by more than the remainder cadence, the
-	//         master→GB clock conversion is dropping cycles.
-	//   PPU = PpuStep call count. High vs CPU steps reveals how often
-	//         the catch-up loop fired vs ran straight through.
-	{
-		char buf[260];
-		snprintf(buf, sizeof buf,
-		         "T HB=%u VB=%u CAP=%u RC=%u GBC=%u PPU=%u",
-		         (unsigned)g_sgb_dbg.prof_hblank_fires_snap,
-		         (unsigned)g_sgb_dbg.prof_vblank_fires_snap,
-		         (unsigned)g_sgb_dbg.prof_capture_calls_snap,
-		         (unsigned)g_sgb_dbg.prof_runcycles_calls_snap,
-		         (unsigned)g_sgb_dbg.prof_gb_cycles_total_snap,
-		         (unsigned)g_sgb_dbg.prof_ppu_steps_snap);
-		const uint32 saved_t = Settings.InitialInfoStringTimeout;
-		Settings.InitialInfoStringTimeout = 120;
-		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
-		Settings.InitialInfoStringTimeout = saved_t;
-	}
-
-	// Second OSD line: per-write byte log of $6001. Shows the actual
-	// value the BIOS wrote on each of this frame's $6001 writes (up to
-	// 24 entries logged). Compare across consecutive frames to spot
-	// the anomalous write that doesn't fit the BIOS's normal cycling
-	// bank pattern (typically 03,00,01,02,03,…).
+	// Per-write byte log of $6001. Shows the actual value the BIOS wrote
+	// on each of this frame's $6001 writes (up to 24 entries logged).
+	// Compare across consecutive frames to spot the anomalous write that
+	// doesn't fit the BIOS's normal cycling bank pattern (typically
+	// 03,00,01,02,03,…).
 	{
 		char buf[300];
-		// Build "B6001=xx,xx,xx,..." prefix.
 		int off = snprintf(buf, sizeof buf, "B6001[%u]=",
 		                   (unsigned)g_sgb_dbg.frame_6001_count_snap);
 		const uint8_t shown =
@@ -1613,6 +1581,37 @@ void Emulator::OnPpuVBlank()
 			                (i == 0) ? "" : ",",
 			                (unsigned)g_sgb_dbg.frame_6001_bytes_snap[i]);
 		}
+		const uint32 saved_t = Settings.InitialInfoStringTimeout;
+		Settings.InitialInfoStringTimeout = 120;
+		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);
+		Settings.InitialInfoStringTimeout = saved_t;
+	}
+
+	// Timing diagnostics — last so the host's S9xMessage queue keeps
+	// this one visible alongside the prior lines (Win32 only retains the
+	// most-recent ROM_INFO message). Reveals which input to the BIOS-
+	// write count is jittering between frames at default CPU speed.
+	//   HB  = OnPpuHBlank fires per GB frame (144 visible scanlines).
+	//         Should be 144 every frame; if it varies, PpuStep is
+	//         emitting different scanline counts per frame.
+	//   VB  = OnPpuVBlank fires per GB frame. 1 per GB frame, always.
+	//   CAP = CaptureScanline calls per GB frame. Same as HB.
+	//   RC  = AdvanceMasterCycles call count per GB frame.
+	//   GBC = total GB t-cycles advanced per GB frame. Stable at ~70224
+	//         + a fractional remainder that wraps every ~57 GB frames.
+	//         If it jumps by more than that cadence the master→GB clock
+	//         conversion is dropping cycles.
+	//   PPU = PpuStep call count.
+	{
+		char buf[260];
+		snprintf(buf, sizeof buf,
+		         "T HB=%u VB=%u CAP=%u RC=%u GBC=%u PPU=%u",
+		         (unsigned)g_sgb_dbg.prof_hblank_fires_snap,
+		         (unsigned)g_sgb_dbg.prof_vblank_fires_snap,
+		         (unsigned)g_sgb_dbg.prof_capture_calls_snap,
+		         (unsigned)g_sgb_dbg.prof_runcycles_calls_snap,
+		         (unsigned)g_sgb_dbg.prof_gb_cycles_total_snap,
+		         (unsigned)g_sgb_dbg.prof_ppu_steps_snap);
 		const uint32 saved_t = Settings.InitialInfoStringTimeout;
 		Settings.InitialInfoStringTimeout = 120;
 		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);

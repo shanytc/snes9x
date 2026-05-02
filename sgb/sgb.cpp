@@ -299,16 +299,6 @@ struct Emulator::Impl
 	                                // keep re-queuing handshake packets (which would
 	                                // block game-generated SGB commands).
 
-	// Cycle-debt accumulator for RunCycles. The per-opcode SyncToSnesCycle
-	// path in BIOS mode hands tiny tcycle requests (1-3 GB cycles) to
-	// RunCycles, but cpu.Step() always advances >=4 T-cycles (NOP min).
-	// Without a debt accumulator, every small request triggered a full
-	// step, over-running by ~2.5x → APU produced samples at ~98 kHz vs
-	// the host's 48 kHz drain, ring overflow, audible crackle. Now we
-	// only step when debt covers a full instruction; under-runs carry
-	// forward as positive debt; over-runs carry as negative debt.
-	int32_t  cycle_debt            = 0;
-
 	// Deferred CHR_TRN / PCT_TRN capture. Real SGB hardware reconstructs
 	// border tile/map data from the GB's LCD over multiple frames after
 	// the *_TRN packet — not from VRAM at packet completion. A direct
@@ -389,11 +379,6 @@ void Emulator::ColdReset()
 void Emulator::Reset()
 {
 	impl_->cpu.Reset();
-	// Drop any in-flight cycle debt — Reset semantically restarts the GB
-	// at t=0 so a stale negative/positive debt from before the reset has
-	// no meaning and would either freeze the GB (huge negative) or run
-	// it ahead by tens of cycles (positive) on the very first SyncToSnes.
-	impl_->cycle_debt = 0;
 	MemReset(impl_->mem);
 	PpuReset(impl_->ppu);
 	ApuReset(impl_->apu);
@@ -931,39 +916,42 @@ static void DecodeBorderCapture(const uint8_t *raw_fb, uint8_t *out_4kb)
 void Emulator::RunCycles(int32_t tcycles)
 {
 	if (!impl_->has_rom) return;
+	if (tcycles <= 0) return;
 
-	// Partial-frame advance. Used when a host driving its own clock wants
-	// to interleave GB execution with other work at finer granularity
-	// than one frame. cycle_debt absorbs the gap between requested cycles
-	// and the GB CPU's minimum step size — see Impl::cycle_debt comment.
-	impl_->cycle_debt += tcycles;
-	while (impl_->cycle_debt >= 4)
+	// Per-dot CPU/PPU interleaving. Advance PPU one t-cycle at a time;
+	// after each dot, run CPU as far as it can go without overshooting
+	// PPU. STAT IRQs raised by PPU mode transitions (HBlank entry, mode
+	// 2, LYC match) are serviced by CPU before PPU advances further, so
+	// games that update SCX/BGP/WX from the HBlank IRQ between scan-
+	// lines (Wario Land 2 cloud parallax, Balloon Fight title) have
+	// their new register value in place by the time PPU starts the next
+	// mode 3. cycle_debt is no longer needed — the per-dot model only
+	// steps CPU when it has kMaxOpcodeTCycles of headroom.
+	const int64_t target_t = impl_->ppu.t_cycles + tcycles;
+	while (impl_->ppu.t_cycles < target_t)
 	{
-		const bool was_boot = impl_->mem.boot_rom_enabled;
-		const int64_t pre_t = impl_->cpu.State().t_cycles;
-		impl_->cpu.Step(impl_->mem);
-		int32_t consumed = static_cast<int32_t>(
-			impl_->cpu.State().t_cycles - pre_t);
-		if (consumed <= 0) consumed = 4;
+		PpuStep(impl_->ppu, impl_->mem, 1);
 
-		// One-shot snapshot of GB CPU registers at the moment the
-		// boot ROM unmaps itself. That's the exact "post-boot,
-		// pre-cart" handoff state DK / Pokemon / etc. inspect to
-		// detect SGB1 vs SGB2 vs DMG. Persists across the rest of
-		// the run so the OSD always shows the handoff value, not
-		// whatever the running game has since clobbered.
-		if (was_boot && !impl_->mem.boot_rom_enabled &&
-		    !impl_->boot_handoff_captured)
+		while (impl_->cpu.State().t_cycles + kMaxOpcodeTCycles <=
+		       impl_->ppu.t_cycles)
 		{
-			impl_->boot_handoff_captured = true;
-			impl_->boot_handoff_regs     = impl_->cpu.State().r;
+			const bool was_boot = impl_->mem.boot_rom_enabled;
+			const int64_t pre_t = impl_->cpu.State().t_cycles;
+			impl_->cpu.Step(impl_->mem);
+			int32_t consumed = static_cast<int32_t>(
+				impl_->cpu.State().t_cycles - pre_t);
+			if (consumed <= 0) consumed = 4;
+
+			if (was_boot && !impl_->mem.boot_rom_enabled &&
+			    !impl_->boot_handoff_captured)
+			{
+				impl_->boot_handoff_captured = true;
+				impl_->boot_handoff_regs     = impl_->cpu.State().r;
+			}
+
+			TimerStep(impl_->timer, impl_->mem, consumed);
+			ApuStep  (impl_->apu,                consumed);
 		}
-
-		PpuStep  (impl_->ppu,   impl_->mem, consumed);
-		TimerStep(impl_->timer, impl_->mem, consumed);
-		ApuStep  (impl_->apu,                consumed);
-
-		impl_->cycle_debt -= consumed;
 	}
 
 	if (impl_->border_capture.stage != Impl::BorderCapture::Idle &&
@@ -1768,10 +1756,6 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->apu.sample_head      = 0;
 	impl_->apu.sample_tail      = 0;
 	impl_->apu.sample_timer     = impl_->apu.cycles_per_sample;
-
-	// cycle_debt is transient — reset on load so a stale debt from
-	// before the snapshot doesn't burst-step the GB.
-	impl_->cycle_debt           = 0;
 
 	// Rebuild full_frame_planar from full_frame. The planar mirror is a
 	// derived view; if a snapshot from before this field existed gets

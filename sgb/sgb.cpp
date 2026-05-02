@@ -1079,59 +1079,46 @@ void Emulator::CothreadStep()
 			break;
 	}
 
-	// Step 1: advance PPU to EXACTLY the master-cycle target. The cascade
-	// in PpuStep handles arbitrarily large deltas (multiple scanline /
-	// frame transitions in one call). After this, ppu.ly reflects the
-	// dot-clock position at the SNES master cycle of the read that
-	// triggered this sync — what the SGB BIOS expects to see at $6000.
-	if (impl_->ppu.t_cycles < ppu_target_t)
+	// Per-dot CPU/PPU interleaving. After each PPU dot, run CPU as far as
+	// it can go without overshooting the current PPU position. STAT IRQs
+	// raised by PPU mode transitions (HBlank entry, mode 2, LYC match)
+	// are serviced by the GB CPU before the PPU advances further — so
+	// games that use HBlank IRQ to update SCX / BGP / WX between scan-
+	// lines (Wario Land 2 cloud parallax, Balloon Fight title etc.)
+	// have the new register value in place by the time PPU starts
+	// rendering the next mode 3. Previously CothreadStep advanced PPU
+	// in a single batch then ran CPU — during the BIOS's $7800 DMA
+	// drain (which doesn't trigger per-byte GB sync, so PpuStep gets
+	// called with ~273-dot deltas at scanline boundaries) PPU could
+	// render an entire next-LY's mode 3 before CPU serviced the prior
+	// HBlank IRQ, leaving SCX stale and producing the visible color
+	// streaks at default CPU speed.
+	while (impl_->ppu.t_cycles < ppu_target_t)
 	{
-		const int32_t ppu_advance =
-			static_cast<int32_t>(ppu_target_t - impl_->ppu.t_cycles);
-		PpuStep(impl_->ppu, impl_->mem, ppu_advance);
-	}
-
-	// Step 2: run CPU until the *next* opcode would overshoot the target.
-	// Gating by + kMaxOpcodeTCycles guarantees cpu.t_cycles ≤ ppu_target_t
-	// after the loop — the CPU never commits an instruction past the
-	// SNES-side sync cycle. This is what eliminates the 17/19 $6001
-	// wobble: with raw "while cpu < target" the CPU could land 0–23
-	// cycles past target, and any GB write to $FF00 (the SGB packet bus)
-	// landing inside that overshoot window would be visible or not
-	// visible at the SNES's $6002 read depending on phase. With the
-	// bound, the CPU always stops at the same opcode boundary 0..23
-	// cycles short of target every frame — deterministic.
-	//
-	// PPU is intentionally NOT advanced in this loop — it stays at
-	// exact target so the next SNES-side read sees ly precisely at the
-	// read's master cycle. Timer/APU follow the CPU since GB-side
-	// reads of those don't have the same SNES-cycle precision requirement.
-	while (impl_->cpu.State().t_cycles + kMaxOpcodeTCycles <= ppu_target_t)
-	{
-		++g_sgb_dbg.prof_cpu_steps;
+		PpuStep(impl_->ppu, impl_->mem, 1);
 		++g_sgb_dbg.prof_ppu_steps;
-		const bool was_boot = impl_->mem.boot_rom_enabled;
-		const int64_t pre_t = impl_->cpu.State().t_cycles;
-		impl_->cpu.Step(impl_->mem);
-		int32_t consumed = static_cast<int32_t>(
-			impl_->cpu.State().t_cycles - pre_t);
-		if (consumed <= 0) consumed = 4;
 
-		// One-shot snapshot of GB CPU registers at the moment the
-		// boot ROM unmaps itself. That's the exact "post-boot,
-		// pre-cart" handoff state DK / Pokemon / etc. inspect to
-		// detect SGB1 vs SGB2 vs DMG. Persists across the rest of
-		// the run so the OSD always shows the handoff value, not
-		// whatever the running game has since clobbered.
-		if (was_boot && !impl_->mem.boot_rom_enabled &&
-		    !impl_->boot_handoff_captured)
+		while (impl_->cpu.State().t_cycles + kMaxOpcodeTCycles <=
+		       impl_->ppu.t_cycles)
 		{
-			impl_->boot_handoff_captured = true;
-			impl_->boot_handoff_regs     = impl_->cpu.State().r;
-		}
+			++g_sgb_dbg.prof_cpu_steps;
+			const bool was_boot = impl_->mem.boot_rom_enabled;
+			const int64_t pre_t = impl_->cpu.State().t_cycles;
+			impl_->cpu.Step(impl_->mem);
+			int32_t consumed = static_cast<int32_t>(
+				impl_->cpu.State().t_cycles - pre_t);
+			if (consumed <= 0) consumed = 4;
 
-		TimerStep(impl_->timer, impl_->mem, consumed);
-		ApuStep  (impl_->apu,                consumed);
+			if (was_boot && !impl_->mem.boot_rom_enabled &&
+			    !impl_->boot_handoff_captured)
+			{
+				impl_->boot_handoff_captured = true;
+				impl_->boot_handoff_regs     = impl_->cpu.State().r;
+			}
+
+			TimerStep(impl_->timer, impl_->mem, consumed);
+			ApuStep  (impl_->apu,                consumed);
+		}
 	}
 
 	if (impl_->border_capture.stage != Impl::BorderCapture::Idle &&
@@ -1605,13 +1592,14 @@ void Emulator::OnPpuVBlank()
 	{
 		char buf[260];
 		snprintf(buf, sizeof buf,
-		         "T HB=%u VB=%u CAP=%u RC=%u GBC=%u PPU=%u",
+		         "T HB=%u VB=%u CAP=%u RC=%u GBC=%u PPU=%u FROM=%d",
 		         (unsigned)g_sgb_dbg.prof_hblank_fires_snap,
 		         (unsigned)g_sgb_dbg.prof_vblank_fires_snap,
 		         (unsigned)g_sgb_dbg.prof_capture_calls_snap,
 		         (unsigned)g_sgb_dbg.prof_runcycles_calls_snap,
 		         (unsigned)g_sgb_dbg.prof_gb_cycles_total_snap,
-		         (unsigned)g_sgb_dbg.prof_ppu_steps_snap);
+		         (unsigned)g_sgb_dbg.prof_ppu_steps_snap,
+		         (int)CPU.FastROMSpeed);
 		const uint32 saved_t = Settings.InitialInfoStringTimeout;
 		Settings.InitialInfoStringTimeout = 120;
 		S9xMessage(S9X_INFO, S9X_ROM_INFO, buf);

@@ -268,10 +268,11 @@ void S9xSGBOnPpuHBlank(void);
 void S9xSGBOnPpuVBlank(void);
 
 // Capture a drawn GB scanline (160 palette indices, 0..3) into the SGB
-// char-transfer ring. Called by gb_ppu.cpp's FinalizeScanline at mode 3
-// → HBlank, after all 160 per-pixel renders for this LY have committed
-// to the framebuffer. Writes to lcd_ring[sgb_bank] at row (sgb_row & 7).
-// Benign no-op in BIOS-less mode.
+// raw-framebuffer (used by the BIOS-less border-capture path for
+// CHR_TRN/PCT_TRN reconstruction) and into lcd_ring (consumed by the
+// $6001 snapshot path on the next BIOS drain). Called once per LY at
+// mode 3 → HBlank from FinalizeScanline. Benign no-op in BIOS-less
+// mode.
 void S9xSGBCaptureScanline(const unsigned char *pixels);
 void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);

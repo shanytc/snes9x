@@ -232,7 +232,10 @@ SpritePixel SampleSpritePixel(const Ppu &p, int x)
 // Render exactly one pixel at p.draw_x for the current LY. Re-samples
 // every relevant register so mid-LY changes (SCX/SCY/BGP/LCDC/WX/etc.)
 // take effect at the right pixel, matching real hardware's per-dot
-// fetch behavior.
+// fetch behavior. Also streams the final post-palette pixel into
+// lcd_ring (Mesen2 WriteLcdColor parity) so a SNES-side $7800 drain
+// issued during mode 3 sees the same in-progress data the GB PPU is
+// committing, instead of the previous frame's stale bytes.
 void RenderPixel(Ppu &p)
 {
 	const int x = static_cast<int>(p.draw_x);
@@ -241,8 +244,9 @@ void RenderPixel(Ppu &p)
 
 	uint8_t *const line = &p.framebuffer[p.ly * GB_SCREEN_WIDTH];
 
-	// BG / window resolve.
-	uint8_t bg_color = 0;   // raw 2-bit pre-palette
+	// BG / window resolve. LCDC.0 cleared on DMG forces BG/window OFF
+	// (palette index 0); sprites still composite on top.
+	uint8_t bg_color = 0;
 	if (p.lcdc & 0x01)
 	{
 		const int wx = static_cast<int>(p.wx) - 7;
@@ -254,8 +258,6 @@ void RenderPixel(Ppu &p)
 		if (win_active_here)
 		{
 			bg_color = SampleWindowPixel(p, x);
-			// Latch the "window did draw" state for window_line bookkeeping
-			// at end of LY.
 			if (!p.window_active)
 			{
 				p.window_active  = true;
@@ -279,6 +281,10 @@ void RenderPixel(Ppu &p)
 		p.scanline_raw[x] = sp.color;
 		line[x]           = ApplyPalette(sp.palette, sp.color);
 	}
+	// Note: lcd_ring is populated by CaptureScanline at HBlank entry
+	// (one bulk memcpy per LY), and the SGB BIOS drains via a snapshot
+	// taken at $6001 write time — see Emulator::CaptureScanline and
+	// the $6001 handler in sgb.cpp.
 }
 
 // Called once at the mode 3 → HBlank transition (after all 160 pixels
@@ -359,29 +365,12 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 		// Render one pixel per dot. After 160 emitted, idle until the
 		// mode 3 budget elapses (constant 172 dots — fetcher penalties
 		// for sprites/window/SCX-fine are NOT modeled yet, follow-up).
+		// RenderPixel handles BG/window/sprite resolve and the per-pixel
+		// lcd_ring write — including the LCDC.0=0 branch (BG/window
+		// forced to color 0, sprites still draw).
 		if (p.draw_x < GB_SCREEN_WIDTH)
 		{
-			if (p.lcdc & 0x01)
-			{
-				RenderPixel(p);
-			}
-			else
-			{
-				// LCDC.0 cleared on DMG = BG/window OFF, force pixel 0.
-				// Sprites still composite on top.
-				const int x = static_cast<int>(p.draw_x);
-				p.scanline_bg_raw[x] = 0;
-				p.scanline_raw[x]    = 0;
-				p.framebuffer[p.ly * GB_SCREEN_WIDTH + x] =
-					ApplyPalette(p.bgp, 0);
-				const SpritePixel sp = SampleSpritePixel(p, x);
-				if (sp.covered)
-				{
-					p.scanline_raw[x] = sp.color;
-					p.framebuffer[p.ly * GB_SCREEN_WIDTH + x] =
-						ApplyPalette(sp.palette, sp.color);
-				}
-			}
+			RenderPixel(p);
 			++p.draw_x;
 		}
 		if (p.mode_clock >= MODE3_DOTS)

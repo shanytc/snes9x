@@ -242,13 +242,6 @@ struct Emulator::Impl
 		uint8_t  synth_remaining;    // packets yet to hand out (6 → 0)
 		uint8_t  drain_ptr;          // bytes read of current packet (0..15)
 
-		// P2d — framebuffer char-transfer for $7800. The SGB BIOS reads
-		// 320 bytes per bank (8 rows × 20 tiles × 2 bit-planes) to
-		// reconstruct a 160×8 slice of the GB screen. 144 scanlines /
-		// 8 = 18 full slices per frame, so we advance an 18-slot slice
-		// index on each $6001 write.
-		uint8_t  slice_index;        // 0..17 — which 8-row band of the GB frame
-
 		// $6000 row/bank counters (Mesen2-style). Advanced by GB PPU
 		// scanline events: sgb_row++ on each HBlank end (mode 0 → OAM
 		// scan for line 1..143), sgb_bank advances every 8 rows, and
@@ -257,46 +250,11 @@ struct Emulator::Impl
 		uint8_t  sgb_bank;
 
 		// Per-pixel capture ring — 4 banks × 8 rows × 160 pixels (palette
-		// indices 0..3). The GB PPU's renderer calls S9xSGBCaptureScanline
-		// after drawing each visible line, which writes into bank[sgb_bank]
-		// at row (sgb_row & 7). Matches bsnes/Mesen2 layout but only used
-		// as a transitional buffer; $7800 reads from full_frame instead
-		// (see below).
+		// indices 0..3). Mesen2 SuperGameboy::WriteLcdColor writes into
+		// _lcdBuffer[_bank][(_row & 7) * 160 + pixel] from the GB PPU
+		// renderer; $7800 reads decode planar bytes inline from this
+		// buffer (live, no snapshot).
 		uint8_t  lcd_ring[4][8 * 160];
-
-		// Full 18-slice frame buffer. Each scanline N is captured into
-		// full_frame[N/8][N%8] without bank-wrap overwrite, so all 18
-		// slices (rows 0-7, 8-15, ..., 136-143) are simultaneously
-		// addressable.
-		uint8_t  full_frame[18][8 * 160];
-
-		// BIOS's $6001-write sequence counter. The BIOS writes $6001
-		// once per slice in order (slice 0, 1, ..., 17, then wraps).
-		// We track this independently of the bank value the BIOS
-		// writes, so $7800 reads map to the actual slice the BIOS is
-		// requesting — fixing the bank-wrap ambiguity (BIOS reads bank
-		// 3 at frame-end-wrap expecting slice 17, not slice 15 which
-		// happens to be in bank 3 at that moment).
-		uint8_t  read_slice;          // 0..17, current slice being read
-
-		// Snapshot of the selected bank at the moment $6001 was written.
-		// $7800 reads from this snapshot (not the live lcd_ring), so the
-		// BIOS gets a stable view of the bank even if the GB overwrites
-		// it while the BIOS is mid-DMA. Without this, a bank whose rows
-		// are concurrently being re-drawn (slice 4 overwrites slice 0's
-		// bank 0, for instance) reads as a mix of two slices and produces
-		// horizontally-banded tile corruption in CHR_TRN output.
-		uint8_t  r7800_snapshot[8 * 160];
-
-		// Pre-computed bit-planar layout of full_frame, in the exact
-		// byte order $7800 reads expect (8 rows × 20 tiles × 2 planes
-		// = 320 bytes per slice). Produced incrementally by Capture-
-		// Scanline so that GetICD2's $7800 path is a single byte load
-		// instead of an 8-iteration bit-extraction loop. The SGB BIOS
-		// in-game menu reads this window at 5760 bytes/frame to embed
-		// the GB screen inside the menu — that's 345k extractions/sec
-		// in the old code.
-		uint8_t  full_frame_planar[18][320];
 	} icd2;
 
 	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
@@ -407,17 +365,10 @@ void Emulator::Reset()
 	impl_->boot_handoff_regs     = {};
 	IrqServicedReset();
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
-	// $7800 capture ring starts as $FF (matches bsnes `output[2048]=0xFF`).
-	std::memset(impl_->icd2.lcd_ring, 0xFF, sizeof impl_->icd2.lcd_ring);
-	// $7800 snapshot buffer also $FF so early reads (before any $6001
-	// write) return open-bus-like all-ones rather than stale pixels.
-	std::memset(impl_->icd2.r7800_snapshot, 0xFF, sizeof impl_->icd2.r7800_snapshot);
+	// 4-bank LCD ring starts at $00 (matches Mesen2 SuperGameboy::Reset).
 	// $7000-$700F latch buffer starts as $FF so reads before the first
 	// $6002 pop return all-ones (matches bsnes r7000 power-on state).
 	std::memset(impl_->icd2.r7000_buf, 0xFF, sizeof impl_->icd2.r7000_buf);
-	// Init read_slice to 17 so the first $6001 write advances it to
-	// 0 (slice 0 — what the BIOS expects on its first drain).
-	impl_->icd2.read_slice = 17;
 	// Joypad registers idle = $FF (active-low, no buttons held).
 	// bsnes r6004-r6007 = 0xff. Initializing to 0 makes the GB see all
 	// buttons held and the SGB BIOS's probe sequences fail. Critical.
@@ -1080,21 +1031,26 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 		if (pos >= 320)
 			return 0xFF;
 
-		// Pre-computed in CaptureScanline — see Impl::Icd2::full_frame_planar.
-		const uint8_t slice = icd.read_slice % 18;
-		return icd.full_frame_planar[slice][pos];
+		const uint8_t bank  = static_cast<uint8_t>(icd.lcd_row_select & 0x03);
+		const uint8_t row   = static_cast<uint8_t>((pos >> 1) & 0x07);
+		const uint8_t col   = static_cast<uint8_t>(pos >> 4);
+		const uint8_t shift = static_cast<uint8_t>(pos & 0x01);
+		const uint8_t *src  = &icd.lcd_ring[bank][row * 160 + col * 8];
+		uint8_t data = 0;
+		for (int i = 0; i < 8; ++i)
+			data |= static_cast<uint8_t>(((src[i] >> shift) & 0x01) << (7 - i));
+		return data;
 	}
 
 	switch (a)
 	{
 		case 0x6000:
-			// bsnes `io.cpp`: `vcounter & ~7 | writeBank` — the low bits
-			// are the latched $6001 bank value (the BIOS's *request*),
-			// NOT our scanline-derived sgb_bank. Before the BIOS writes
-			// $6001 (early handshake) these bits must read zero, matching
-			// real hardware / bsnes. Upper bits are GB LY masked — includes
-			// VBlank lines 144..153, so during VBlank $6000 = 0x90 | bank.
-			return static_cast<uint8_t>((impl_->ppu.ly & 0xF8) | (icd.lcd_row_select & 0x03));
+			// Mesen2 SuperGameboy.cpp: `(_row & ~0x07) | _bank` — high bits
+			// are the GB-driven row counter, low bits are the GB-driven
+			// bank counter (cycles 0→1→2→3→0 every 8 GB scanlines). The
+			// BIOS uses the bank rotation to detect when a fresh bank is
+			// ready to drain.
+			return static_cast<uint8_t>((icd.sgb_row & 0xF8) | (icd.sgb_bank & 0x03));
 		case 0x6002:
 		{
 			// Lazy-stage the next synth packet if queue's empty (no-op
@@ -1163,17 +1119,8 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 	switch (a)
 	{
 		case 0x6001:
-			icd.lcd_row_select = value;
+			icd.lcd_row_select = static_cast<uint8_t>(value & 0x03);
 			icd.read_position  = 0;
-			// Slice-rotation clamp: only advance read_slice on the first
-			// 18 writes per frame. A 19th+ write parks at the last good
-			// position so over-count frames don't double-stream a slice
-			// and shift the slice→data mapping into the next frame.
-			if (icd.frame_6001_count < 18)
-			{
-				icd.read_slice  = static_cast<uint8_t>((icd.read_slice  + 1) % 18);
-				icd.slice_index = static_cast<uint8_t>((icd.slice_index + 1) % 18);
-			}
 			if (icd.frame_6001_count < 24)
 				icd.frame_6001_bytes[icd.frame_6001_count] = value;
 			++icd.frame_6001_count;
@@ -1278,42 +1225,31 @@ void Emulator::OnPpuHBlank()
 	if (!impl_) return;
 	Emulator::Impl::Icd2& icd = impl_->icd2;
 
-	// Restored normal mapping. Trying a different empirical tweak elsewhere.
-	icd.sgb_row = impl_->ppu.ly;
-	icd.sgb_bank = (icd.sgb_row / 8) & 0x03;
+	// Mesen2 ProcessHBlank: `_row++; if((_row & 7) == 0) _bank = (_bank + 1) & 3;`
+	// Incremental advance — sgb_bank is intentionally NOT re-derived from
+	// sgb_row each call, so it persists across frames. 18 advances per
+	// frame × 4-bank wrap = phase shifts every 2 frames (the BIOS uses
+	// $6000's low bits to detect when a fresh band lands in a new bank).
+	icd.sgb_row = static_cast<uint8_t>(icd.sgb_row + 1);
+	if ((icd.sgb_row & 0x07) == 0)
+		icd.sgb_bank = static_cast<uint8_t>((icd.sgb_bank + 1) & 0x03);
 }
 
 void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
-	impl_->icd2.sgb_row  = 0;
-	impl_->icd2.sgb_bank = 0;
+	// Mesen2 ProcessVBlank: just `_row = 0;`. _bank is intentionally
+	// NOT reset — it persists across frames, so the bank-to-band
+	// mapping shifts each frame (frame 1 starts at bank 0, frame 2
+	// starts at bank 2 because 18 % 4 = 2). The SNES BIOS reads
+	// $6000's low bits to know which bank holds the band that just
+	// finished; persisting _bank is what makes that signal work
+	// across frames.
+	impl_->icd2.sgb_row = 0;
 
-	// Phantom rotations: if the BIOS under-counted (wrote $6001 fewer
-	// than 18 times), advance read_slice for the missing slices so the
-	// running total reaches 18 before the realign. Together with the
-	// over-count clamp in the $6001 write path this caps the per-frame
-	// rotation at exactly 18 regardless of how the BIOS actually wrote.
-	const uint8_t advances = (impl_->icd2.frame_6001_count < 18)
-	                         ? impl_->icd2.frame_6001_count
-	                         : static_cast<uint8_t>(18);
-	const uint8_t missing  = static_cast<uint8_t>(18 - advances);
-	for (uint8_t i = 0; i < missing; ++i)
-	{
-		impl_->icd2.read_slice  = static_cast<uint8_t>(
-			(impl_->icd2.read_slice  + 1) % 18);
-		impl_->icd2.slice_index = static_cast<uint8_t>(
-			(impl_->icd2.slice_index + 1) % 18);
-	}
-
-	// Force-realign read_slice to 16 per frame so the first $6001 write
-	// of the next frame always advances to slice 17 (the wrap-read).
-	impl_->icd2.read_slice = 16;
-
-	// Visual-freeze on off-count frames. CaptureScanline next frame is
-	// a no-op so full_frame retains last frame's data and BIOS $7800
-	// reads stream identical bytes — GB game area visually freezes for
-	// one frame instead of jumping. Self-clears at the next VBlank.
+	// Visual-freeze on off-count frames carried forward from slice
+	// defenses. With 4-bank, freeze still skips lcd_ring writes so
+	// $7800 streams identical bytes from last frame.
 	impl_->icd2.freeze_capture   = (impl_->icd2.frame_6001_count != 18);
 	impl_->icd2.frame_6001_count = 0;
 }
@@ -1322,40 +1258,10 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
-	// Visual-freeze for off-count frames: while freeze_capture is set,
-	// leave full_frame at the previous good frame's data so $7800 reads
-	// stream identical bytes and SNES VRAM uploads match the previous
-	// frame — visible jitter collapses to a one-frame freeze. Cleared
-	// at the next OnPpuVBlank.
 	if (icd.freeze_capture) return;
-	const uint8_t bank  = static_cast<uint8_t>(icd.sgb_bank & 0x03);
-	const uint8_t row   = static_cast<uint8_t>(icd.sgb_row  & 0x07);
-	const uint8_t slice = static_cast<uint8_t>((icd.sgb_row / 8) % 18);
-
-	// Legacy 4-bank ring (kept for state-save compatibility).
+	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
+	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);
 	std::memcpy(&icd.lcd_ring[bank][row * 160], pixels, 160);
-	// Full 18-slice buffer — what $7800 actually reads from.
-	if (slice < 18)
-	{
-		std::memcpy(&icd.full_frame[slice][row * 160], pixels, 160);
-		// Update the planar mirror for this row (40 bytes: 20 tiles × 2
-		// bit-planes). Cost: 20 × 8 ops per scanline = ~28k ops/sec
-		// vs the millions of bit-extraction ops the read path was doing.
-		uint8_t *out = &icd.full_frame_planar[slice][row * 2];
-		for (int t = 0; t < 20; ++t)
-		{
-			const uint8_t *p = &pixels[t * 8];
-			uint8_t plane0 = 0, plane1 = 0;
-			for (int i = 0; i < 8; ++i)
-			{
-				const uint8_t pix = static_cast<uint8_t>(p[i] & 0x03);
-				plane0 = static_cast<uint8_t>(plane0 | (((pix >> 0) & 1) << (7 - i)));
-				plane1 = static_cast<uint8_t>(plane1 | (((pix >> 1) & 1) << (7 - i)));
-			}
-			out[t * 16 + 0] = plane0;
-			out[t * 16 + 1] = plane1;
-		}
-	}
 }
 
 static inline uint16_t BgrToHost(uint16_t bgr)
@@ -1816,32 +1722,6 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->apu.sample_accum_r   = 0;
 	impl_->apu.sample_accum_cnt = 0;
 	impl_->apu.sample_timer     = impl_->apu.cycles_per_sample;
-
-	// Rebuild full_frame_planar from full_frame. The planar mirror is a
-	// derived view; if a snapshot from before this field existed gets
-	// loaded the planar buffer would be zeroed and $7800 reads would
-	// return zeros until the next GB scanline capture overwrites it.
-	for (int s = 0; s < 18; ++s)
-	{
-		for (int r = 0; r < 8; ++r)
-		{
-			uint8_t *out = &impl_->icd2.full_frame_planar[s][r * 2];
-			const uint8_t *row = &impl_->icd2.full_frame[s][r * 160];
-			for (int t = 0; t < 20; ++t)
-			{
-				const uint8_t *p = &row[t * 8];
-				uint8_t plane0 = 0, plane1 = 0;
-				for (int i = 0; i < 8; ++i)
-				{
-					const uint8_t pix = static_cast<uint8_t>(p[i] & 0x03);
-					plane0 = static_cast<uint8_t>(plane0 | (((pix >> 0) & 1) << (7 - i)));
-					plane1 = static_cast<uint8_t>(plane1 | (((pix >> 1) & 1) << (7 - i)));
-				}
-				out[t * 16 + 0] = plane0;
-				out[t * 16 + 1] = plane1;
-			}
-		}
-	}
 
 	// Re-point the exposed FrameBuffer at the (now-restored) PPU fb.
 	impl_->fb.pixels = impl_->ppu.framebuffer;

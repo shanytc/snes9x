@@ -12,6 +12,7 @@
 #include "../snes9x.h"
 #include "../ppu.h"
 #include "../font.h"
+#include "../sgb/sgb.h"
 #include "wsnes9x.h"
 #include "win32_display.h"
 #include "CDirect3D.h"
@@ -709,6 +710,11 @@ void WinThrottleFramerate()
 	static int64_t PCBase, PCFrameTime, PCFrameTimeNTSC, PCFrameTimePAL, PCStart, PCEnd;
 
 	if (Settings.SkipFrames != AUTO_FRAMERATE || Settings.TurboMode || Settings.NetPlay || Settings.NetPlayServer)
+		return;
+
+	const bool sgb_owns_audio = Settings.SuperGameBoy ||
+		(Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
+	if (sgb_owns_audio && Settings.SoundSync)
 		return;
 
 	if (!throttle_timer)

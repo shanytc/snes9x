@@ -86,6 +86,30 @@ inline uint8_t ApplyPalette(uint8_t palette, uint8_t color_idx)
 	return static_cast<uint8_t>((palette >> (color_idx * 2)) & 0x03);
 }
 
+constexpr uint32_t kStatIrqRingCap = 16;
+PpuStatIrqEvent g_stat_irq_ring[kStatIrqRingCap]{};
+uint32_t        g_stat_irq_ring_head  = 0;
+uint32_t        g_stat_irq_ring_count = 0;
+uint64_t        g_stat_irq_raise_count = 0;
+uint64_t        g_frame_count          = 0;
+
+void PushStatIrqEvent(const Ppu &p, uint8_t source)
+{
+	PpuStatIrqEvent &e = g_stat_irq_ring[g_stat_irq_ring_head];
+	e.ly          = p.ly;
+	e.lyc         = p.lyc;
+	e.scx         = p.scx;
+	e.scy         = p.scy;
+	e.bgp         = p.bgp;
+	e.stat        = p.stat;
+	e.source      = source;
+	e.frame_phase = static_cast<uint8_t>(p.mode);
+	e.t_cycles    = static_cast<uint64_t>(p.t_cycles);
+	g_stat_irq_ring_head = (g_stat_irq_ring_head + 1) % kStatIrqRingCap;
+	if (g_stat_irq_ring_count < kStatIrqRingCap) ++g_stat_irq_ring_count;
+	++g_stat_irq_raise_count;
+}
+
 void RecomputeStatLine(Ppu &p, Memory &mem)
 {
 	// Rebuild the low 3 bits of STAT (mode + LYC coincidence).
@@ -104,18 +128,26 @@ void RecomputeStatLine(Ppu &p, Memory &mem)
 	// disabled. Zerd no Densetsu's bank-1 init exposed this: it writes
 	// STAT.bit6 inside a DI region with the LCD off via $02CF; without
 	// the guard the spurious raise leaks into the post-EI flow.
-	bool line_high = false;
+	//
+	// `source` is debugger-only — tracks which condition(s) drove the
+	// rising edge so the IRQ ring in the CPU debugger can label each
+	// raise. Not used by the IRQ logic itself.
+	bool    line_high = false;
+	uint8_t source    = 0;
 	if (p.lcdc & 0x80)
 	{
-		if ((p.stat & 0x40) && (p.ly == p.lyc))                 line_high = true;
-		if ((p.stat & 0x20) && p.mode == PpuMode::OamScan)       line_high = true;
-		if ((p.stat & 0x10) && p.mode == PpuMode::VBlank)        line_high = true;
-		if ((p.stat & 0x08) && p.mode == PpuMode::HBlank)        line_high = true;
+		if ((p.stat & 0x40) && (p.ly == p.lyc))            { line_high = true; source |= 0x40; }
+		if ((p.stat & 0x20) && p.mode == PpuMode::OamScan)  { line_high = true; source |= 0x20; }
+		if ((p.stat & 0x10) && p.mode == PpuMode::VBlank)   { line_high = true; source |= 0x10; }
+		if ((p.stat & 0x08) && p.mode == PpuMode::HBlank)   { line_high = true; source |= 0x08; }
 	}
 
 	// Rising edge on the combined line raises LCDSTAT IRQ.
 	if (line_high && !p.stat_line_high)
+	{
 		mem.if_ = static_cast<uint8_t>(mem.if_ | IRQ_LCDSTAT);
+		PushStatIrqEvent(p, source);
+	}
 	p.stat_line_high = line_high;
 }
 
@@ -372,6 +404,7 @@ void PpuReset(Ppu &p)
 	p.mode3_sprite_stall = 0;
 	p.latched_wx    = 0;
 	p.latched_bgp   = p.bgp;
+	PpuStatIrqRingReset();
 }
 
 // One GB t-cycle's worth of PPU work. Drives mode 2 sprite eval (latched
@@ -498,6 +531,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				p.window_line   = 0;
 				p.window_active = false;
 				p.vblank_irq_delay = 24;
+				++g_frame_count;
 				S9xSGBOnPpuVBlank();
 			}
 			else
@@ -609,6 +643,30 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 	}
 	return 0xFF;
 }
+
+uint32_t PpuStatIrqRingCount()              { return g_stat_irq_ring_count; }
+uint32_t PpuStatIrqRingHead()               { return g_stat_irq_ring_head; }
+
+bool PpuStatIrqRingGet(uint32_t i, PpuStatIrqEvent &out)
+{
+	if (i >= g_stat_irq_ring_count) return false;
+	const uint32_t cap   = kStatIrqRingCap;
+	const uint32_t start = (g_stat_irq_ring_count < cap)
+	    ? 0 : g_stat_irq_ring_head;
+	out = g_stat_irq_ring[(start + i) % cap];
+	return true;
+}
+
+void PpuStatIrqRingReset()
+{
+	g_stat_irq_ring_head   = 0;
+	g_stat_irq_ring_count  = 0;
+	g_stat_irq_raise_count = 0;
+	g_frame_count          = 0;
+}
+
+uint64_t PpuStatIrqRaiseCount() { return g_stat_irq_raise_count; }
+uint64_t PpuFrameCount()        { return g_frame_count; }
 
 void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 {

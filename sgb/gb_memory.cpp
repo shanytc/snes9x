@@ -39,6 +39,14 @@ void MemReset(Memory &m)
 	std::memset(m.boot_rom, 0, sizeof m.boot_rom);
 	m.boot_rom_enabled = false;
 	g_dma_last         = 0xFF;
+	m.ff00_reads = m.ff00_writes = 0;
+	m.ff00_dpad_reads = m.ff00_btns_reads = m.ff00_idle_reads = 0;
+	std::memset(m.ff00_last_returns, 0, sizeof m.ff00_last_returns);
+	std::memset(m.ff00_dpad_returns, 0, sizeof m.ff00_dpad_returns);
+	std::memset(m.ff00_btns_returns, 0, sizeof m.ff00_btns_returns);
+	std::memset(m.ff00_last_writes,  0, sizeof m.ff00_last_writes);
+	m.ff00_last_returns_idx = m.ff00_last_writes_idx = 0;
+	m.ff00_dpad_returns_idx = m.ff00_btns_returns_idx = 0;
 }
 
 static uint8_t ReadIO(Memory &m, uint16_t addr);
@@ -172,7 +180,24 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 {
 	switch (addr)
 	{
-		case 0xFF00: return m.joypad ? JoypadRead(*m.joypad) : 0xFF;
+		case 0xFF00: {
+			const uint8_t v = m.joypad ? JoypadRead(*m.joypad) : 0xFF;
+			++m.ff00_reads;
+			if (!(v & 0x10)) {
+				++m.ff00_dpad_reads;
+				m.ff00_dpad_returns[m.ff00_dpad_returns_idx & 7] = v;
+				m.ff00_dpad_returns_idx = static_cast<uint8_t>((m.ff00_dpad_returns_idx + 1) & 7);
+			}
+			if (!(v & 0x20)) {
+				++m.ff00_btns_reads;
+				m.ff00_btns_returns[m.ff00_btns_returns_idx & 7] = v;
+				m.ff00_btns_returns_idx = static_cast<uint8_t>((m.ff00_btns_returns_idx + 1) & 7);
+			}
+			if ((v & 0x30) == 0x30) ++m.ff00_idle_reads;
+			m.ff00_last_returns[m.ff00_last_returns_idx & 7] = v;
+			m.ff00_last_returns_idx = static_cast<uint8_t>((m.ff00_last_returns_idx + 1) & 7);
+			return v;
+		}
 		case 0xFF01: return m.serial_data;
 		case 0xFF02: return static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
@@ -197,6 +222,9 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 	{
 		case 0xFF00:
 			if (m.joypad) JoypadWrite(*m.joypad, value);
+			++m.ff00_writes;
+			m.ff00_last_writes[m.ff00_last_writes_idx & 7] = value;
+			m.ff00_last_writes_idx = static_cast<uint8_t>((m.ff00_last_writes_idx + 1) & 7);
 			// Feed SGB command-packet sniffer. Benign when SGB mode inactive.
 			S9xSGBOnJoyserWrite(value);
 			return;

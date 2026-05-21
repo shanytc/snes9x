@@ -408,6 +408,61 @@ struct S9xSGBDebugState
 	uint8_t  input_value;
 	uint16_t mlt_auto_drop_polls;
 
+	// Live GB joypad object state. joypad[]/input_value above are the ICD2-
+	// side mirrors of $6004-$6007 and the last byte the GB wrote to $FF00.
+	// These fields below are the SGB::Joypad struct that actually answers
+	// JoypadRead, so we can see what the running cart sees.
+	//   joypad_select : upper-nibble select lines from $FF00 (bits 4/5)
+	//   joypad_dpad   : internal active-low D-pad nibble (used when sgb_active=0)
+	//   joypad_btns   : internal active-low buttons nibble (used when sgb_active=0)
+	//   joypad_prev_mask : last GB_* mask, for IRQ edge detection
+	//   joypad_sgb_active : true when JoypadRead routes through the bridge
+	//   joypad_sgb_index  : current player rotation index
+	//   joypad_sgb_pads[] : per-player bridge mirrors (same as icd2.joypad[])
+	//   joypad_ff00       : live JoypadRead() result with current select bits
+	//   joypad_snes_mask  : raw SNES controller 0 bitmask we forward via SetJoypad
+	uint8_t  joypad_select;
+	uint8_t  joypad_dpad;
+	uint8_t  joypad_btns;
+	uint8_t  joypad_prev_mask;
+	bool     joypad_sgb_active;
+	uint8_t  joypad_sgb_index;
+	uint8_t  joypad_sgb_pads[4];
+	uint8_t  joypad_ff00;
+	uint16_t joypad_snes_mask;
+
+	// $FF00 access tracking. The game must read $FF00 with one of P14/P15
+	// pulled low for the joypad input to actually reach its code. ff00_reads
+	// counts every IO read of $FF00; ff00_dpad_reads counts reads where the
+	// returned value's upper nibble has P14=0 (dpad selected); ff00_btns_reads
+	// counts the same for P15. ff00_last_returns is a ring of the last 8 bytes
+	// JoypadRead returned to the CPU; ff00_last_writes is a ring of the last
+	// 8 bytes the GB wrote into $FF00 select. If a game responds to A but
+	// not D-pad, watching ff00_dpad_reads stay flat would confirm the game
+	// never selects the dpad nibble.
+	// Full HRAM dump ($FF80-$FFFE, 127 bytes). Each game uses HRAM differently
+	// for input state, so dumping the whole region lets the user diff
+	// pressed/released snapshots and locate the input byte.
+	uint8_t  hram_peek[128];
+
+	// WRAM peek at $C000 (game state region — start of WRAM bank 0).
+	// First 64 bytes of WRAM cover Alleyway's main game state block.
+	uint8_t  wram_peek[64];
+
+	uint32_t ff00_reads;
+	uint32_t ff00_writes;
+	uint32_t ff00_dpad_reads;
+	uint32_t ff00_btns_reads;
+	uint32_t ff00_idle_reads;
+	uint8_t  ff00_last_returns[8];
+	uint8_t  ff00_dpad_returns[8];
+	uint8_t  ff00_btns_returns[8];
+	uint8_t  ff00_last_writes[8];
+	uint8_t  ff00_last_returns_idx;
+	uint8_t  ff00_dpad_returns_idx;
+	uint8_t  ff00_btns_returns_idx;
+	uint8_t  ff00_last_writes_idx;
+
 	uint8_t  bios_state_0101;
 	uint8_t  bios_substate_0102;
 	uint8_t  bios_dma_swap_0280;

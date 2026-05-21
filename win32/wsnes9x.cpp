@@ -14687,6 +14687,77 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
     for (int i = 0; i < 17 && gb.title[i]; ++i)
         gb_title[i] = (wchar_t)(uint8_t)gb.title[i];
 
+    // Decode joypad state into human-readable strings.
+    // SNES bitmask layout (controls.h): bit15=B, 14=Y, 13=Sel, 12=St,
+    // 11=U, 10=D, 9=L, 8=R, 7=A, 6=X, 5=L, 4=R.
+    auto snes_pad_str = [](uint16_t m, wchar_t *buf, size_t cap) {
+        buf[0] = 0;
+        const wchar_t *names[12] = {
+            L"R", L"L", L"D", L"U", L"St", L"Sel", L"Y", L"B",
+            L"r", L"l", L"X", L"A"
+        };
+        const uint16_t bits[12] = {
+            1u<<8, 1u<<9, 1u<<10, 1u<<11, 1u<<12, 1u<<13, 1u<<14, 1u<<15,
+            1u<<4, 1u<<5, 1u<<6,  1u<<7
+        };
+        bool first = true;
+        for (int i = 0; i < 12; ++i) {
+            if (m & bits[i]) {
+                if (!first) wcsncat(buf, L"+", cap - wcslen(buf) - 1);
+                wcsncat(buf, names[i], cap - wcslen(buf) - 1);
+                first = false;
+            }
+        }
+        if (first) wcsncat(buf, L"-", cap - wcslen(buf) - 1);
+    };
+    // GB nibble is active-LOW (bit=0 means pressed). Decode dpad/btns nibbles.
+    auto dpad_str = [](uint8_t nib, wchar_t *buf, size_t cap) {
+        buf[0] = 0;
+        nib &= 0x0F;
+        bool first = true;
+        const wchar_t *names[4] = { L"R", L"L", L"U", L"D" };
+        for (int i = 0; i < 4; ++i) {
+            if (!(nib & (1u << i))) {
+                if (!first) wcsncat(buf, L"+", cap - wcslen(buf) - 1);
+                wcsncat(buf, names[i], cap - wcslen(buf) - 1);
+                first = false;
+            }
+        }
+        if (first) wcsncat(buf, L"-", cap - wcslen(buf) - 1);
+    };
+    auto btns_str = [](uint8_t nib, wchar_t *buf, size_t cap) {
+        buf[0] = 0;
+        nib &= 0x0F;
+        bool first = true;
+        const wchar_t *names[4] = { L"A", L"B", L"Sel", L"St" };
+        for (int i = 0; i < 4; ++i) {
+            if (!(nib & (1u << i))) {
+                if (!first) wcsncat(buf, L"+", cap - wcslen(buf) - 1);
+                wcsncat(buf, names[i], cap - wcslen(buf) - 1);
+                first = false;
+            }
+        }
+        if (first) wcsncat(buf, L"-", cap - wcslen(buf) - 1);
+    };
+    // For sgb_pads[0] decode: low nibble = R/L/U/D (active-low),
+    // high nibble = A/B/Sel/St (active-low).
+    auto pad_dpad_str = [&dpad_str](uint8_t pad, wchar_t *buf, size_t cap) {
+        dpad_str(pad & 0x0F, buf, cap);
+    };
+    auto pad_btns_str = [&btns_str](uint8_t pad, wchar_t *buf, size_t cap) {
+        btns_str((pad >> 4) & 0x0F, buf, cap);
+    };
+
+    wchar_t snes_buf[64], dpad_buf[32], btns_buf[32];
+    wchar_t p1d_buf[32], p1b_buf[32];
+    snes_pad_str(gb.joypad_snes_mask, snes_buf, _countof(snes_buf));
+    dpad_str(gb.joypad_dpad, dpad_buf, _countof(dpad_buf));
+    btns_str(gb.joypad_btns, btns_buf, _countof(btns_buf));
+    pad_dpad_str(gb.joypad_sgb_pads[0], p1d_buf, _countof(p1d_buf));
+    pad_btns_str(gb.joypad_sgb_pads[0], p1b_buf, _countof(p1b_buf));
+    const wchar_t *p14_str = (gb.joypad_select & 0x10) ? L"hi" : L"LO";
+    const wchar_t *p15_str = (gb.joypad_select & 0x20) ? L"hi" : L"LO";
+
     _snwprintf(out, outLen,
         L"== GB/SGB cart ==\r\n"
         L"  Loaded   = %hs   Title = \"%ls\"\r\n"
@@ -14735,6 +14806,18 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
         L"== ICD2 joypad ==\r\n"
         L"  $6004-7=%02X %02X %02X %02X  input_value=$%02X  mlt_auto_drop_polls=%u\r\n"
         L"\r\n"
+        L"== GB joypad live ==\r\n"
+        L"  SNES pad in = $%04X  [%ls]\r\n"
+        L"  $FF00 select = $%02X  (P14=%ls P15=%ls)  live read = $%02X\r\n"
+        L"  internal: dpad nibble=$%X (%ls)  btns nibble=$%X (%ls)  prev_mask=$%02X\r\n"
+        L"  bridge: sgb_active=%d  index=%u  pads[0..3]=%02X %02X %02X %02X\r\n"
+        L"  player1 decoded: D-pad [%ls] Buttons [%ls]\r\n"
+        L"  $FF00 reads=%u  writes=%u   dpad-sel=%u  btns-sel=%u  idle=%u\r\n"
+        L"  last writes (oldest..newest): %02X %02X %02X %02X %02X %02X %02X %02X\r\n"
+        L"  last returns(oldest..newest): %02X %02X %02X %02X %02X %02X %02X %02X\r\n"
+        L"  dpad returns(oldest..newest): %02X %02X %02X %02X %02X %02X %02X %02X\r\n"
+        L"  btns returns(oldest..newest): %02X %02X %02X %02X %02X %02X %02X %02X\r\n"
+        L"\r\n"
         L"== SGB BIOS state (WRAM $7E:0100-$7E:0285) ==\r\n"
         L"  state $0101=$%02X (5=game-mode)  substate $0102=$%02X\r\n"
         L"  dma_swap $0280=$%02X  ptr_A $0282=$%04X  ptr_B $0284=$%04X\r\n"
@@ -14776,6 +14859,48 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
         gb.w_6000, gb.w_6001, gb.w_6003, gb.w_7000, gb.w_6004,
         gb.last_read_addr, gb.last_write_addr, gb.last_write_val,
         gb.joypad[0], gb.joypad[1], gb.joypad[2], gb.joypad[3], gb.input_value, (unsigned)gb.mlt_auto_drop_polls,
+        gb.joypad_snes_mask, snes_buf,
+        gb.joypad_select, p14_str, p15_str, gb.joypad_ff00,
+        gb.joypad_dpad & 0x0F, dpad_buf,
+        gb.joypad_btns & 0x0F, btns_buf,
+        gb.joypad_prev_mask,
+        (int)gb.joypad_sgb_active, (unsigned)gb.joypad_sgb_index,
+        gb.joypad_sgb_pads[0], gb.joypad_sgb_pads[1],
+        gb.joypad_sgb_pads[2], gb.joypad_sgb_pads[3],
+        p1d_buf, p1b_buf,
+        gb.ff00_reads, gb.ff00_writes, gb.ff00_dpad_reads, gb.ff00_btns_reads, gb.ff00_idle_reads,
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 0) & 7],
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 1) & 7],
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 2) & 7],
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 3) & 7],
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 4) & 7],
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 5) & 7],
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 6) & 7],
+        gb.ff00_last_writes [(gb.ff00_last_writes_idx  + 7) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 0) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 1) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 2) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 3) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 4) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 5) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 6) & 7],
+        gb.ff00_last_returns[(gb.ff00_last_returns_idx + 7) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 0) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 1) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 2) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 3) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 4) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 5) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 6) & 7],
+        gb.ff00_dpad_returns[(gb.ff00_dpad_returns_idx + 7) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 0) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 1) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 2) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 3) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 4) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 5) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 6) & 7],
+        gb.ff00_btns_returns[(gb.ff00_btns_returns_idx + 7) & 7],
         gb.bios_state_0101, gb.bios_substate_0102,
         gb.bios_dma_swap_0280, gb.bios_dma_ptr_a_0282, gb.bios_dma_ptr_b_0284,
         gb.vram_hash, gb.oam_hash,
@@ -14828,6 +14953,32 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
            gb.irq_serviced[3], gb.irq_serviced[4]);
     append(L"  STAT raises=%I64u   GB frames (LY 143->144)=%I64u\r\n",
            gb.stat_irq_raise_count, gb.frame_count);
+
+    // Full HRAM dump ($FF80-$FFFE) — 8 rows of 16. Game variables live here;
+    // diff between pressed/released snapshots to find input bytes.
+    append(L"\r\n== HRAM ($FF80-$FFFE) ==\r\n");
+    for (unsigned row = 0; row < 8; ++row) {
+        const unsigned base = row * 16;
+        append(L"  $FF%02X:", 0x80 + base);
+        for (unsigned col = 0; col < 16; ++col) {
+            const unsigned idx = base + col;
+            if (idx >= 127) { append(L"   "); continue; }
+            append(L" %02X", gb.hram_peek[idx]);
+        }
+        append(L"\r\n");
+    }
+
+    // WRAM peek ($C000-$C03F) — start of WRAM bank 0, where game state
+    // structs typically live. Useful when input is processed into a WRAM
+    // variable rather than HRAM.
+    append(L"\r\n== WRAM ($C000-$C03F) ==\r\n");
+    for (unsigned row = 0; row < 4; ++row) {
+        const unsigned base = row * 16;
+        append(L"  $C0%02X:", base);
+        for (unsigned col = 0; col < 16; ++col)
+            append(L" %02X", gb.wram_peek[base + col]);
+        append(L"\r\n");
+    }
 
     append(L"\r\n== LCDSTAT IRQ raise ring (last %u, ring head=%u) ==\r\n",
            (unsigned)gb.stat_irq_ring_count, (unsigned)gb.stat_irq_ring_head);

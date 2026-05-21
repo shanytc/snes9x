@@ -50,6 +50,28 @@ struct Memory
 	// BIOS-less mode (boot_rom_enabled stays false, cart is visible from reset).
 	uint8_t boot_rom[0x100];
 	bool    boot_rom_enabled;
+
+	// $FF00 access diagnostics (debugger-only). Counted by ReadIO/WriteIO.
+	// dpad_reads = reads with P14 low (returned byte bit 4 = 0).
+	// btns_reads = reads with P15 low (returned byte bit 5 = 0).
+	// idle_reads = reads with both selects high (returned byte bits 4&5 = 1).
+	// last_*_idx is the next write slot into the 8-entry ring.
+	uint32_t ff00_reads;
+	uint32_t ff00_writes;
+	uint32_t ff00_dpad_reads;
+	uint32_t ff00_btns_reads;
+	uint32_t ff00_idle_reads;
+	// Per-select-state return rings. last_returns mixes both selectors and
+	// gets clobbered by the most recent burst; the per-state rings stay
+	// populated so we can compare what each select state returns.
+	uint8_t  ff00_last_returns[8];
+	uint8_t  ff00_dpad_returns[8];   // last 8 reads where P14 was low
+	uint8_t  ff00_btns_returns[8];   // last 8 reads where P15 was low
+	uint8_t  ff00_last_writes[8];
+	uint8_t  ff00_last_returns_idx;
+	uint8_t  ff00_dpad_returns_idx;
+	uint8_t  ff00_btns_returns_idx;
+	uint8_t  ff00_last_writes_idx;
 };
 
 uint8_t MemRead(Memory &m, uint16_t addr);

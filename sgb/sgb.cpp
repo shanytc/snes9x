@@ -330,6 +330,11 @@ struct Emulator::Impl
 	// BIOS's transient sequential-tilemap setup doesn't bleed through
 	// as stripe artifacts before the game's own PCT_TRN takes over.
 	uint32_t handoff_frames           = 0;
+
+	// Last SNES controller 0 bitmask forwarded into SetJoypad. Captured so
+	// the debugger can show the raw input we received before the ICD2/JoypadSet
+	// translation — diagnosing "is the bug in the SNES side or the GB side?"
+	uint16_t last_snes_mask           = 0;
 };
 
 // File-local trampoline — lets the process-global SgbCommandCallback
@@ -1602,6 +1607,7 @@ void Emulator::SetAudioRate(int32_t rate_hz)
 
 void Emulator::SetJoypad(uint16_t snes_pad_mask)
 {
+	impl_->last_snes_mask = snes_pad_mask;
 	// SNES->GB button mapping. B/Y map to A/B (SNES has extra shoulders & face buttons).
 	uint8_t gb = 0;
 	if (snes_pad_mask & (1 << 15)) gb |= GB_A;       // SNES B  → GB A
@@ -2458,6 +2464,40 @@ void S9xSGBGetDebugState(S9xSGBDebugState *out)
 	for (int i = 0; i < 4; ++i) out->joypad[i] = p->icd2.joypad[i];
 	out->input_value       = p->icd2.input_value;
 	out->mlt_auto_drop_polls = p->icd2.mlt_auto_drop_polls;
+
+	out->joypad_select     = p->joypad.select;
+	out->joypad_dpad       = p->joypad.dpad;
+	out->joypad_btns       = p->joypad.btns;
+	out->joypad_prev_mask  = p->joypad.prev_mask;
+	out->joypad_sgb_active = p->joypad.sgb_active;
+	out->joypad_sgb_index  = p->joypad.sgb_index;
+	for (int i = 0; i < 4; ++i) out->joypad_sgb_pads[i] = p->joypad.sgb_pads[i];
+	out->joypad_ff00       = SGB::JoypadRead(p->joypad);
+	out->joypad_snes_mask  = p->last_snes_mask;
+
+	// Snapshot full HRAM ($FF80-$FFFE = 127 bytes; pad slot to 128).
+	for (int i = 0; i < 127; ++i)
+		out->hram_peek[i] = p->mem.hram[i];
+	out->hram_peek[127] = 0;
+	// Snapshot WRAM[$C000..$C03F] — game-state region for most simple GB carts.
+	for (int i = 0; i < 64; ++i)
+		out->wram_peek[i] = p->mem.wram[i];
+
+	out->ff00_reads        = p->mem.ff00_reads;
+	out->ff00_writes       = p->mem.ff00_writes;
+	out->ff00_dpad_reads   = p->mem.ff00_dpad_reads;
+	out->ff00_btns_reads   = p->mem.ff00_btns_reads;
+	out->ff00_idle_reads   = p->mem.ff00_idle_reads;
+	for (int i = 0; i < 8; ++i) {
+		out->ff00_last_returns[i] = p->mem.ff00_last_returns[i];
+		out->ff00_dpad_returns[i] = p->mem.ff00_dpad_returns[i];
+		out->ff00_btns_returns[i] = p->mem.ff00_btns_returns[i];
+		out->ff00_last_writes[i]  = p->mem.ff00_last_writes[i];
+	}
+	out->ff00_last_returns_idx = p->mem.ff00_last_returns_idx;
+	out->ff00_dpad_returns_idx = p->mem.ff00_dpad_returns_idx;
+	out->ff00_btns_returns_idx = p->mem.ff00_btns_returns_idx;
+	out->ff00_last_writes_idx  = p->mem.ff00_last_writes_idx;
 
 	out->bios_state_0101     = ::Memory.RAM[0x0101];
 	out->bios_substate_0102  = ::Memory.RAM[0x0102];

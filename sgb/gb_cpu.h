@@ -60,6 +60,25 @@ struct CpuState
 uint32_t IrqServicedCount(uint8_t vector);
 void     IrqServicedReset();
 
+// Per-instruction PC trace ring — captures pc, opcode and key registers for
+// each Step(). Freezes automatically once an RST 38 loop is detected (PC at
+// $0038/$0039 for many consecutive instructions), so the entries leading up
+// to a crash are preserved instead of being overwritten by the loop itself.
+struct PcTraceEntry
+{
+	uint16_t pc;        // PC at fetch
+	uint16_t sp;        // SP at fetch — diverges fast when stack gets hosed
+	uint16_t af;        // AF for context
+	uint8_t  opcode;    // opcode byte at PC
+	uint8_t  ime;       // 0/1
+};
+static constexpr uint32_t kPcTraceCap = 64;
+
+uint32_t PcTraceCount();
+bool     PcTraceFrozen();
+bool     PcTraceGet(uint32_t i, PcTraceEntry &out);
+void     PcTraceReset();
+
 // Debug trace — called before each instruction dispatch.
 // Fired in user code (hot path), so keep hooks cheap.
 using TraceHook = void (*)(uint16_t pc, uint8_t opcode, const CpuState &state);

@@ -13,6 +13,64 @@ namespace SGB {
 namespace {
 TraceHook g_trace_hook = nullptr;
 uint32_t  g_irq_serviced[5] = {0, 0, 0, 0, 0};
+
+// PC trace ring — see PcTraceEntry in gb_cpu.h. Frozen on RST 38 loop
+// detection so post-crash $0038/$0039 spinning doesn't overwrite the
+// pre-crash trail leading into the crash.
+PcTraceEntry g_pc_trace[kPcTraceCap]{};
+uint32_t     g_pc_trace_head     = 0;
+uint32_t     g_pc_trace_count    = 0;
+bool         g_pc_trace_frozen   = false;
+uint32_t     g_rst38_consecutive = 0;
+
+inline void PcTracePush(uint16_t pc, uint8_t opcode, const CpuState &s)
+{
+	if (g_pc_trace_frozen) return;
+
+	PcTraceEntry &e = g_pc_trace[g_pc_trace_head];
+	e.pc     = pc;
+	e.sp     = s.r.sp;
+	e.af     = s.r.af;
+	e.opcode = opcode;
+	e.ime    = s.ime ? 1 : 0;
+	g_pc_trace_head = (g_pc_trace_head + 1) % kPcTraceCap;
+	if (g_pc_trace_count < kPcTraceCap) ++g_pc_trace_count;
+
+	// Freeze the trace as soon as we see 2 consecutive instructions in
+	// $0038/$0039 — the RST 38 trap loop. Threshold 2 (not 1) protects
+	// against a single legitimate RST 38h call; threshold low enough that
+	// the 64-entry ring still has ~62 pre-crash instructions when freeze
+	// triggers, instead of being fully overwritten by the loop itself.
+	if (pc == 0x0038 || pc == 0x0039)
+	{
+		if (++g_rst38_consecutive >= 2)
+			g_pc_trace_frozen = true;
+	}
+	else
+	{
+		g_rst38_consecutive = 0;
+	}
+}
+}
+
+uint32_t PcTraceCount()  { return g_pc_trace_count; }
+bool     PcTraceFrozen() { return g_pc_trace_frozen; }
+
+bool PcTraceGet(uint32_t i, PcTraceEntry &out)
+{
+	if (i >= g_pc_trace_count) return false;
+	const uint32_t start = (g_pc_trace_count < kPcTraceCap)
+		? 0 : g_pc_trace_head;
+	out = g_pc_trace[(start + i) % kPcTraceCap];
+	return true;
+}
+
+void PcTraceReset()
+{
+	g_pc_trace_head     = 0;
+	g_pc_trace_count    = 0;
+	g_pc_trace_frozen   = false;
+	g_rst38_consecutive = 0;
 }
 
 uint32_t IrqServicedCount(uint8_t vector)
@@ -23,6 +81,7 @@ uint32_t IrqServicedCount(uint8_t vector)
 void IrqServicedReset()
 {
 	for (int i = 0; i < 5; ++i) g_irq_serviced[i] = 0;
+	PcTraceReset();
 }
 
 void Cpu::SetTraceHook(TraceHook hook)
@@ -96,6 +155,8 @@ void Cpu::Step(Memory &mem)
 		state_.r.pc--;
 		state_.halt_bug = false;
 	}
+
+	PcTracePush(pc_at_fetch, op, state_);
 
 	if (g_trace_hook) g_trace_hook(pc_at_fetch, op, state_);
 

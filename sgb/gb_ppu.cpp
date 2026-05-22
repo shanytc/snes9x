@@ -404,6 +404,8 @@ void PpuReset(Ppu &p)
 	p.mode3_sprite_stall = 0;
 	p.latched_wx    = 0;
 	p.latched_bgp   = p.bgp;
+	p.lyc_writes    = 0;
+	p.stat_writes   = 0;
 	PpuStatIrqRingReset();
 }
 
@@ -690,6 +692,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 		}
 		case 0xFF41:
 		{
+			++p.stat_writes;  // debugger counter
 			// DMG STAT write quirk (Pan Docs §STAT.spurious-stat-interrupts):
 			// On DMG, writing to STAT momentarily glitches the enable bits
 			// to all-1 for one cycle. If a source condition (mode 0/1/2 or
@@ -740,7 +743,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 		case 0xFF42: p.scy = value; break;
 		case 0xFF43: p.scx = value; break;
 		case 0xFF44: p.ly  = 0; RecomputeStatLine(p, mem); break;
-		case 0xFF45: p.lyc = value; RecomputeStatLine(p, mem); break;
+		case 0xFF45: ++p.lyc_writes; p.lyc = value; RecomputeStatLine(p, mem); break;
 		case 0xFF47: p.bgp  = value; break;
 		case 0xFF48: p.obp0 = value; break;
 		case 0xFF49: p.obp1 = value; break;

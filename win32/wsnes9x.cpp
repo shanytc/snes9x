@@ -14997,6 +14997,28 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
         prev_t = e.t_cycles;
         have_prev = true;
     }
+
+    // $C2CC trampoline + STAT/LYC write counts. If the handler at
+    // $64D6 ever ran, lyc_writes should be > 0 ($64E0 / $64FD write LYC).
+    append(L"\r\n== WRAM $C2C0-$C2CF (STAT trampoline lives at $C2CC) ==\r\n");
+    append(L"  $C2C0:");
+    for (int i = 0; i < 16; ++i)
+        append(L" %02X", gb.wram_c2cc_peek[i]);
+    append(L"\r\n");
+    append(L"  expected: C3 D6 64 (bank 1 init JP $64D6) or C3 EE 78 (bank 5 init JP $78EE)\r\n");
+    append(L"  CPU writes to $FF45 (LYC) = %u   CPU writes to $FF41 (STAT) = %u\r\n",
+           gb.lyc_writes, gb.stat_writes);
+
+    // PC trace ring — last 64 instructions before crash freeze (or live
+    // if no crash detected). Reading top-down: oldest first, newest last.
+    append(L"\r\n== PC trace ring (last %u entries%ls) ==\r\n",
+           (unsigned)gb.pc_trace_count,
+           gb.pc_trace_frozen ? L", FROZEN on RST 38 loop" : L"");
+    for (unsigned i = 0; i < gb.pc_trace_count; ++i) {
+        const auto &t = gb.pc_trace[i];
+        append(L"  #%2u  PC=$%04X op=$%02X  SP=$%04X  AF=$%04X  IME=%u\r\n",
+               i + 1, t.pc, t.opcode, t.sp, t.af, (unsigned)t.ime);
+    }
 }
 
 INT_PTR CALLBACK CpuDebugDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)

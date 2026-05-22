@@ -139,6 +139,14 @@ struct Ppu
 	bool     frame_ready = false;
 
 	uint64_t vram_writes = 0;
+
+	// Diagnostic counters — debugger-only.
+	// lyc_writes = number of CPU writes to $FF45 since reset. Tells us
+	//   whether a game's STAT handler ever changed LYC (Zerd no Densetsu
+	//   diagnosis: handler ran but raises continued at LYC=0).
+	// stat_writes = number of CPU writes to $FF41 since reset.
+	uint32_t lyc_writes  = 0;
+	uint32_t stat_writes = 0;
 };
 
 void PpuReset(Ppu &p);

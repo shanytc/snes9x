@@ -2555,6 +2555,31 @@ void S9xSGBGetDebugState(S9xSGBDebugState *out)
 
 	out->stat_irq_raise_count = SGB::PpuStatIrqRaiseCount();
 	out->frame_count          = SGB::PpuFrameCount();
+
+	// $C2CC trampoline area peek + LYC/STAT write counts. Bank 1 init
+	// writes "JP $64D6" here, bank 5 init overwrites with "JP $78EE".
+	// If the bytes are anything else when STAT IRQ fires, the handler
+	// jumps to garbage and the CPU eventually falls into $0038 RST 38.
+	for (int i = 0; i < 16; ++i)
+		out->wram_c2cc_peek[i] = p->mem.wram[0x02C0 + i];
+	out->lyc_writes  = p->ppu.lyc_writes;
+	out->stat_writes = p->ppu.stat_writes;
+
+	// PC trace ring — last N instructions before crash (frozen on RST 38
+	// loop detection so post-crash spinning doesn't overwrite the trail).
+	const uint32_t pc_n = SGB::PcTraceCount();
+	out->pc_trace_count  = static_cast<uint8_t>(pc_n > 64 ? 64 : pc_n);
+	out->pc_trace_frozen = SGB::PcTraceFrozen();
+	for (uint32_t i = 0; i < out->pc_trace_count; ++i)
+	{
+		SGB::PcTraceEntry e{};
+		if (!SGB::PcTraceGet(i, e)) break;
+		out->pc_trace[i].pc     = e.pc;
+		out->pc_trace[i].sp     = e.sp;
+		out->pc_trace[i].af     = e.af;
+		out->pc_trace[i].opcode = e.opcode;
+		out->pc_trace[i].ime    = e.ime;
+	}
 }
 
 bool S9xSGBGetROMBytes(const unsigned char **out_data, size_t *out_size)

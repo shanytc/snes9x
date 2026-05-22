@@ -502,6 +502,29 @@ struct S9xSGBDebugState
 
 	uint64_t stat_irq_raise_count;
 	uint64_t frame_count;
+
+	// Diagnostic peeks for Zerd no Densetsu STAT IRQ investigation.
+	// wram_c2cc_peek covers $C2C0-$C2CF — at $C2CC the game installs a
+	// "JP <handler>" trampoline so $0048 (LCDSTAT vector) can JP $C2CC
+	// → JP $XXXX. If $C2CC isn't $C3 ($D6 $64) or $C3 ($EE $78), the
+	// STAT IRQ jumps to garbage.
+	uint8_t  wram_c2cc_peek[16];
+	uint32_t lyc_writes;   // count of CPU writes to $FF45 since reset
+	uint32_t stat_writes;  // count of CPU writes to $FF41 since reset
+
+	// Per-instruction PC trace ring — last 64 entries before crash, or
+	// last 64 entries if no crash detected. Frozen after RST 38 loop
+	// detection (PC=$0038/$0039 for 200 consecutive instructions) so the
+	// pre-crash trail isn't overwritten by the loop spinning forever.
+	struct PcTraceSlot {
+		uint16_t pc;
+		uint16_t sp;
+		uint16_t af;
+		uint8_t  opcode;
+		uint8_t  ime;
+	} pc_trace[64];
+	uint8_t  pc_trace_count;
+	bool     pc_trace_frozen;
 };
 
 void          S9xSGBGetDebugState (S9xSGBDebugState *out);

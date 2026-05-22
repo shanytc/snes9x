@@ -525,6 +525,25 @@ struct S9xSGBDebugState
 	} pc_trace[64];
 	uint8_t  pc_trace_count;
 	bool     pc_trace_frozen;
+
+	// PPU register-write ring — last 32 writes to LCDC / STAT / SCY / SCX /
+	// LYC / WY / WX, captured with the PPU's LY+mode+dot-into-mode at the
+	// moment the CPU did the write. Used to see whether the game's STAT
+	// IRQ handler is updating LCDC.1 / WX during mode 2 (good — applies to
+	// next mode 3) or mid-mode 3 (bad — half the scanline already rendered
+	// with old config). One Piece dialog-boundary glitch lives in here.
+	struct PpuRegWriteSlot {
+		uint16_t addr;
+		uint8_t  value;
+		uint8_t  prev;
+		uint8_t  ly;
+		uint8_t  mode;          // 0=HBl 1=VBl 2=OAM 3=Trf
+		uint8_t  sprite_count;  // 0..10, sprites covering the scanline
+		uint16_t mode_clock;
+		uint64_t t_cycles;
+	} reg_write_ring[32];
+	uint8_t  reg_write_ring_count;
+	uint8_t  reg_write_ring_head;
 };
 
 void          S9xSGBGetDebugState (S9xSGBDebugState *out);

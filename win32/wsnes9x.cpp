@@ -15009,6 +15009,46 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
     append(L"  CPU writes to $FF45 (LYC) = %u   CPU writes to $FF41 (STAT) = %u\r\n",
            gb.lyc_writes, gb.stat_writes);
 
+    // PPU register-write ring. Each entry tells us when the CPU wrote one
+    // of LCDC/STAT/SCY/SCX/LYC/WY/WX and where the PPU was at that moment.
+    // The key column is `mode/clk`: writes during mode 2 (OAM scan, dots
+    // 0-79) take effect before the next mode 3, so the whole line renders
+    // with the new value. Writes during mode 3 (dots 0-171) land mid-line
+    // — pixels already emitted keep the old value, pixels after the write
+    // pick up the new one. That mid-mode-3 timing is the One Piece dialog
+    // boundary glitch: LCDC.1 (sprite enable) writes from the STAT IRQ
+    // handler arriving partway through the boundary scanline.
+    append(L"\r\n== PPU reg-write ring (last %u, ring head=%u) ==\r\n",
+           (unsigned)gb.reg_write_ring_count, (unsigned)gb.reg_write_ring_head);
+    append(L"  addr names: 40=LCDC 41=STAT 42=SCY 43=SCX 45=LYC 4A=WY 4B=WX\r\n");
+    append(L"  mode: 0=HBl 1=VBl 2=OAM(80) 3=Mode3(172+spr*6 dots)\r\n");
+    append(L"  spr=N: sprites covering scanline. Pixel 0 emits at mode-3 dot 12+N*6.\r\n");
+    {
+        uint64_t prev_t = 0;
+        bool     have_prev = false;
+        for (unsigned i = 0; i < gb.reg_write_ring_count; ++i) {
+            const auto &e = gb.reg_write_ring[i];
+            uint64_t dt = have_prev ? (e.t_cycles - prev_t) : 0;
+            const wchar_t *name = L"???";
+            switch (e.addr) {
+                case 0xFF40: name = L"LCDC"; break;
+                case 0xFF41: name = L"STAT"; break;
+                case 0xFF42: name = L"SCY";  break;
+                case 0xFF43: name = L"SCX";  break;
+                case 0xFF45: name = L"LYC";  break;
+                case 0xFF4A: name = L"WY";   break;
+                case 0xFF4B: name = L"WX";   break;
+            }
+            append(L"  #%2u  $%04X(%-4ls) %02X->%02X  LY=%3u  mode=%u/clk=%3u  spr=%2u  t=%I64u  dt=%I64u\r\n",
+                   i + 1, e.addr, name, e.prev, e.value,
+                   (unsigned)e.ly, (unsigned)e.mode, (unsigned)e.mode_clock,
+                   (unsigned)e.sprite_count,
+                   e.t_cycles, dt);
+            prev_t = e.t_cycles;
+            have_prev = true;
+        }
+    }
+
     // PC trace ring — last 64 instructions before crash freeze (or live
     // if no crash detected). Reading top-down: oldest first, newest last.
     append(L"\r\n== PC trace ring (last %u entries%ls) ==\r\n",

@@ -177,6 +177,28 @@ void     PpuStatIrqRingReset();
 uint64_t PpuStatIrqRaiseCount();
 uint64_t PpuFrameCount();
 
+// Captured PPU register write — used to diagnose when the game's STAT IRQ
+// handler writes to LCDC / WX / WY / LYC relative to the PPU's per-line
+// state. One Piece (Maboroshi no Grand Line) glitch was traced to LCDC.1
+// (sprite enable) writes landing mid-mode-3 of the boundary scanline; the
+// ring lets us see exactly which dot-into-mode each write lands on.
+struct PpuRegWriteEvent
+{
+	uint16_t addr;          // 0xFF40-0xFF4B (LCDC/STAT/SCY/SCX/LYC/WY/WX)
+	uint8_t  value;         // new value written
+	uint8_t  prev;          // value just before this write
+	uint8_t  ly;            // LY at write time
+	uint8_t  mode;          // 0=HBl 1=VBl 2=OAM 3=Transfer
+	uint8_t  sprite_count;  // sprites latched for current scanline (0..10)
+	uint16_t mode_clock;    // dots elapsed in current mode
+	uint64_t t_cycles;      // monotonic PPU t-cycle counter
+};
+
+uint32_t PpuRegWriteRingCount();
+uint32_t PpuRegWriteRingHead();
+bool     PpuRegWriteRingGet(uint32_t i, PpuRegWriteEvent &out);
+void     PpuRegWriteRingReset();
+
 } // namespace SGB
 
 #endif

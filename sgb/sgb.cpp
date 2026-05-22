@@ -2580,6 +2580,29 @@ void S9xSGBGetDebugState(S9xSGBDebugState *out)
 		out->pc_trace[i].opcode = e.opcode;
 		out->pc_trace[i].ime    = e.ime;
 	}
+
+	// PPU register-write ring — last N writes to LCDC/STAT/SCY/SCX/LYC/WY/WX
+	// captured with the PPU's mode and dot-into-mode at write time. The
+	// dot-into-mode value tells us whether a write landed during mode 2
+	// (will affect next mode 3, GOOD) or mid-mode 3 (half the line already
+	// rendered with old config, BAD — symptom for One Piece dialog box top
+	// being partial).
+	const uint32_t rw_n = SGB::PpuRegWriteRingCount();
+	out->reg_write_ring_count = static_cast<uint8_t>(rw_n > 32 ? 32 : rw_n);
+	out->reg_write_ring_head  = static_cast<uint8_t>(SGB::PpuRegWriteRingHead());
+	for (uint32_t i = 0; i < out->reg_write_ring_count; ++i)
+	{
+		SGB::PpuRegWriteEvent e{};
+		if (!SGB::PpuRegWriteRingGet(i, e)) break;
+		out->reg_write_ring[i].addr         = e.addr;
+		out->reg_write_ring[i].value        = e.value;
+		out->reg_write_ring[i].prev         = e.prev;
+		out->reg_write_ring[i].ly           = e.ly;
+		out->reg_write_ring[i].mode         = e.mode;
+		out->reg_write_ring[i].sprite_count = e.sprite_count;
+		out->reg_write_ring[i].mode_clock   = e.mode_clock;
+		out->reg_write_ring[i].t_cycles     = e.t_cycles;
+	}
 }
 
 bool S9xSGBGetROMBytes(const unsigned char **out_data, size_t *out_size)

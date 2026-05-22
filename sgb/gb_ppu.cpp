@@ -93,6 +93,26 @@ uint32_t        g_stat_irq_ring_count = 0;
 uint64_t        g_stat_irq_raise_count = 0;
 uint64_t        g_frame_count          = 0;
 
+constexpr uint32_t kRegWriteRingCap = 32;
+PpuRegWriteEvent g_reg_write_ring[kRegWriteRingCap]{};
+uint32_t         g_reg_write_ring_head  = 0;
+uint32_t         g_reg_write_ring_count = 0;
+
+void PushRegWriteEvent(const Ppu &p, uint16_t addr, uint8_t prev, uint8_t value)
+{
+	PpuRegWriteEvent &e = g_reg_write_ring[g_reg_write_ring_head];
+	e.addr         = addr;
+	e.value        = value;
+	e.prev         = prev;
+	e.ly           = p.ly;
+	e.mode         = static_cast<uint8_t>(p.mode);
+	e.sprite_count = p.sprite_count;
+	e.mode_clock   = static_cast<uint16_t>(p.mode_clock);
+	e.t_cycles     = static_cast<uint64_t>(p.t_cycles);
+	g_reg_write_ring_head = (g_reg_write_ring_head + 1) % kRegWriteRingCap;
+	if (g_reg_write_ring_count < kRegWriteRingCap) ++g_reg_write_ring_count;
+}
+
 void PushStatIrqEvent(const Ppu &p, uint8_t source)
 {
 	PpuStatIrqEvent &e = g_stat_irq_ring[g_stat_irq_ring_head];
@@ -407,6 +427,7 @@ void PpuReset(Ppu &p)
 	p.lyc_writes    = 0;
 	p.stat_writes   = 0;
 	PpuStatIrqRingReset();
+	PpuRegWriteRingReset();
 }
 
 // One GB t-cycle's worth of PPU work. Drives mode 2 sprite eval (latched
@@ -670,8 +691,44 @@ void PpuStatIrqRingReset()
 uint64_t PpuStatIrqRaiseCount() { return g_stat_irq_raise_count; }
 uint64_t PpuFrameCount()        { return g_frame_count; }
 
+uint32_t PpuRegWriteRingCount() { return g_reg_write_ring_count; }
+uint32_t PpuRegWriteRingHead()  { return g_reg_write_ring_head; }
+
+bool PpuRegWriteRingGet(uint32_t i, PpuRegWriteEvent &out)
+{
+	if (i >= g_reg_write_ring_count) return false;
+	const uint32_t cap   = kRegWriteRingCap;
+	const uint32_t start = (g_reg_write_ring_count < cap)
+	    ? 0 : g_reg_write_ring_head;
+	out = g_reg_write_ring[(start + i) % cap];
+	return true;
+}
+
+void PpuRegWriteRingReset()
+{
+	g_reg_write_ring_head  = 0;
+	g_reg_write_ring_count = 0;
+}
+
 void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 {
+	// Capture into the reg-write ring BEFORE we mutate p, so `prev` reflects
+	// the pre-write value and ly/mode/mode_clock are the PPU state the CPU
+	// observed when issuing the write. Skip BGP/OBP/DMA/LY: those are either
+	// noisy or not the regs we're diagnosing. The ring is bounded (32),
+	// FIFO; useful for the One Piece dialog-boundary investigation.
+	switch (addr)
+	{
+		case 0xFF40: PushRegWriteEvent(p, addr, p.lcdc, value); break;
+		case 0xFF41: PushRegWriteEvent(p, addr, p.stat, value); break;
+		case 0xFF42: PushRegWriteEvent(p, addr, p.scy,  value); break;
+		case 0xFF43: PushRegWriteEvent(p, addr, p.scx,  value); break;
+		case 0xFF45: PushRegWriteEvent(p, addr, p.lyc,  value); break;
+		case 0xFF4A: PushRegWriteEvent(p, addr, p.wy,   value); break;
+		case 0xFF4B: PushRegWriteEvent(p, addr, p.wx,   value); break;
+		default: break;
+	}
+
 	switch (addr)
 	{
 		case 0xFF40:

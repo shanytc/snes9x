@@ -15163,6 +15163,29 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
         }
         append(L"\r\n");
     }
+    // Sprite-only tile data: $8000-$87FF (2 KiB = 128 tiles × 16 bytes).
+    // Sprites ALWAYS fetch from $8000 + tile_index*16 regardless of
+    // LCDC.4 — so the tile index in OAM directly indexes this range
+    // for indices $00..$7F. (Indices $80..$FF map to $8800-$8FFF which
+    // is in the BG-reachable dump below.)
+    append(L"\r\n== Tile data $8000-$87FF (sprite-only, 128 tiles) ==\r\n");
+    append(L"  unsigned: u=$00 @ $8000 .. u=$7F @ $87F0\r\n");
+    append(L"  (all-zero tiles skipped; capped at 64 entries)\r\n");
+    unsigned shown_obj_tiles = 0;
+    for (unsigned k = 0; k < 128 && shown_obj_tiles < 64; ++k) {
+        const unsigned vram_off = k * 16;          // covers $0000-$07F0
+        const unsigned absaddr  = 0x8000u + vram_off;
+        bool nonzero = false;
+        for (int b = 0; b < 16; ++b)
+            if (gb.vram_dump[vram_off + b]) { nonzero = true; break; }
+        if (!nonzero) continue;
+        append(L"  $%04X u=$%02X:", absaddr, k);
+        for (int b = 0; b < 16; ++b)
+            append(L" %02X", gb.vram_dump[vram_off + b]);
+        append(L"\r\n");
+        ++shown_obj_tiles;
+    }
+
     // Tile data dump: $8800-$97FF (4 KiB = 256 tiles × 16 bytes), one
     // tile per row. This window covers every tile a BG fetch can produce
     // — signed mode uses base $9000 ±127 (= $8800-$97FF), unsigned uses
@@ -15231,7 +15254,7 @@ INT_PTR CALLBACK CpuDebugDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
     case WM_TIMER:
         if (wParam == CPU_DEBUG_TIMER_ID) {
-            wchar_t buf[24576];
+            wchar_t buf[40960];
             int tab = (int)SendDlgItemMessage(hDlg, IDC_CPU_DEBUG_TAB, TCM_GETCURSEL, 0, 0);
             if (tab == 1)
                 CpuDebugFormatGb(buf, _countof(buf));

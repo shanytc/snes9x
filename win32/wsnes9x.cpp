@@ -15020,7 +15020,7 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
     // handler arriving partway through the boundary scanline.
     append(L"\r\n== PPU reg-write ring (last %u, ring head=%u) ==\r\n",
            (unsigned)gb.reg_write_ring_count, (unsigned)gb.reg_write_ring_head);
-    append(L"  addr names: 40=LCDC 41=STAT 42=SCY 43=SCX 45=LYC 4A=WY 4B=WX\r\n");
+    append(L"  addr names: 40=LCDC 41=STAT 42=SCY 43=SCX 45=LYC 47=BGP 48=OBP0 49=OBP1 4A=WY 4B=WX\r\n");
     append(L"  mode: 0=HBl 1=VBl 2=OAM(80) 3=Mode3(172+spr*6 dots)\r\n");
     append(L"  spr=N: sprites covering scanline. Pixel 0 emits at mode-3 dot 12+N*6.\r\n");
     {
@@ -15036,6 +15036,9 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
                 case 0xFF42: name = L"SCY";  break;
                 case 0xFF43: name = L"SCX";  break;
                 case 0xFF45: name = L"LYC";  break;
+                case 0xFF47: name = L"BGP";  break;
+                case 0xFF48: name = L"OBP0"; break;
+                case 0xFF49: name = L"OBP1"; break;
                 case 0xFF4A: name = L"WY";   break;
                 case 0xFF4B: name = L"WX";   break;
             }
@@ -15087,6 +15090,32 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
     }
     if (shown_rows == 0)
         append(L"  (all zeros — game has never written to SRAM)\r\n");
+
+    // OAM dump — 40 sprites × 4 bytes. Each line: idx, Y, X, tile, flags
+    // plus on-screen position (X-8, Y-16) and visibility hint. Hidden
+    // sprites (Y=0 or Y>=160) are skipped so the dump only shows the
+    // ones the PPU actually composites.
+    append(L"\r\n== OAM ($FE00-$FE9F) — 40 sprites, visible only ==\r\n");
+    append(L"  flags: 80=bg-over 40=yflip 20=xflip 10=palette(0=OBP0 1=OBP1)\r\n");
+    unsigned shown_sprites = 0;
+    for (unsigned i = 0; i < 40; ++i) {
+        const uint8_t oy    = gb.oam_dump[i * 4 + 0];
+        const uint8_t ox    = gb.oam_dump[i * 4 + 1];
+        const uint8_t tile  = gb.oam_dump[i * 4 + 2];
+        const uint8_t flags = gb.oam_dump[i * 4 + 3];
+        if (oy == 0 || oy >= 160) continue;  // off-screen above/below
+        const int sy = static_cast<int>(oy) - 16;
+        const int sx = static_cast<int>(ox) - 8;
+        append(L"  #%2u  Y=$%02X(scr=%4d) X=$%02X(scr=%4d) tile=$%02X flags=$%02X\r\n",
+               i, oy, sy, ox, sx, tile, flags);
+        ++shown_sprites;
+        if (shown_sprites >= 24) {
+            append(L"  ... (more sprites visible — capped at 24 lines)\r\n");
+            break;
+        }
+    }
+    if (shown_sprites == 0)
+        append(L"  (no visible sprites)\r\n");
 
     // PC trace ring — last 64 instructions before crash freeze (or live
     // if no crash detected). Reading top-down: oldest first, newest last.

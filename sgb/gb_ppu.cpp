@@ -714,9 +714,10 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 {
 	// Capture into the reg-write ring BEFORE we mutate p, so `prev` reflects
 	// the pre-write value and ly/mode/mode_clock are the PPU state the CPU
-	// observed when issuing the write. Skip BGP/OBP/DMA/LY: those are either
-	// noisy or not the regs we're diagnosing. The ring is bounded (32),
-	// FIFO; useful for the One Piece dialog-boundary investigation.
+	// observed when issuing the write. Skip DMA/LY: those are noisy. BGP
+	// IS tracked because per-scanline BGP changes (Initial D Gaiden racing
+	// perspective color gradient) need the timing diagnostics. The ring
+	// is bounded (32), FIFO; useful for raster-effect investigations.
 	switch (addr)
 	{
 		case 0xFF40: PushRegWriteEvent(p, addr, p.lcdc, value); break;
@@ -724,6 +725,9 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 		case 0xFF42: PushRegWriteEvent(p, addr, p.scy,  value); break;
 		case 0xFF43: PushRegWriteEvent(p, addr, p.scx,  value); break;
 		case 0xFF45: PushRegWriteEvent(p, addr, p.lyc,  value); break;
+		case 0xFF47: PushRegWriteEvent(p, addr, p.bgp,  value); break;
+		case 0xFF48: PushRegWriteEvent(p, addr, p.obp0, value); break;
+		case 0xFF49: PushRegWriteEvent(p, addr, p.obp1, value); break;
 		case 0xFF4A: PushRegWriteEvent(p, addr, p.wy,   value); break;
 		case 0xFF4B: PushRegWriteEvent(p, addr, p.wx,   value); break;
 		default: break;

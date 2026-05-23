@@ -36,14 +36,17 @@ inline void PcTracePush(uint16_t pc, uint8_t opcode, const CpuState &s)
 	g_pc_trace_head = (g_pc_trace_head + 1) % kPcTraceCap;
 	if (g_pc_trace_count < kPcTraceCap) ++g_pc_trace_count;
 
-	// Freeze the trace as soon as we see 2 consecutive instructions in
-	// $0038/$0039 — the RST 38 trap loop. Threshold 2 (not 1) protects
-	// against a single legitimate RST 38h call; threshold low enough that
-	// the 64-entry ring still has ~62 pre-crash instructions when freeze
-	// triggers, instead of being fully overwritten by the loop itself.
-	if (pc == 0x0038 || pc == 0x0039)
+	// Freeze the trace on a real RST 38 trap loop only — PC=$0038 AND the
+	// fetched byte was $FF (the RST 38 opcode itself, the self-recursing
+	// pattern when ROM is padded with $FF at the RST vector). The boot
+	// ROM legitimately executes non-$FF code at $0038-$0039, so freezing
+	// on any PC in $0038/$0039 (regardless of opcode) was a false positive
+	// that locked the trace ring before the game even reached its entry
+	// point. Threshold 16 lets the 64-entry ring keep ~48 pre-crash
+	// instructions when the freeze fires.
+	if (pc == 0x0038 && opcode == 0xFF)
 	{
-		if (++g_rst38_consecutive >= 2)
+		if (++g_rst38_consecutive >= 16)
 			g_pc_trace_frozen = true;
 	}
 	else

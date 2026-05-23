@@ -565,6 +565,11 @@ struct S9xSGBDebugState
 	uint32_t mbc_ram_disables;  // count of writes that set ram_enable=false
 	uint32_t mbc_sram_reads_when_disabled;  // $A000-$BFFF reads that returned $FF
 	uint32_t mbc_sram_writes_when_disabled; // $A000-$BFFF writes that were dropped
+
+	// Full OAM snapshot ($FE00-$FE9F = 40 sprites × 4 bytes). Each entry
+	// is { Y, X, tile_index, flags }. Y=0 / X=0 means hidden (off-screen).
+	// Used when in-game sprites (car, opponents) are suspect.
+	uint8_t  oam_dump[0xA0];
 };
 
 void          S9xSGBGetDebugState (S9xSGBDebugState *out);

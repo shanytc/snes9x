@@ -2514,6 +2514,7 @@ void S9xSGBGetDebugState(S9xSGBDebugState *out)
 	for (int i = 0; i < 0xA0; ++i) { h ^= p->ppu.oam[i]; h *= 0x01000193; }
 	out->oam_hash = h;
 	std::memcpy(out->vram_dump, p->ppu.vram, sizeof out->vram_dump);
+	std::memcpy(out->oam_dump,  p->ppu.oam,  sizeof out->oam_dump);
 
 	// Cart RAM snapshot — copy up to ram_size bytes (rest stays zeroed from
 	// out->cart_ram_dump being part of the *out = {} init at function top).

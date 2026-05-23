@@ -544,6 +544,27 @@ struct S9xSGBDebugState
 	} reg_write_ring[32];
 	uint8_t  reg_write_ring_count;
 	uint8_t  reg_write_ring_head;
+
+	// Full GB VRAM snapshot ($8000-$9FFF, 8 KiB). The CPU debugger formats
+	// the visible BG tilemap region and a slice of tile data — having the
+	// whole window means we can decide at format time which tilemap (LCDC.3)
+	// and which tile-data base (LCDC.4 signed vs unsigned) the running game
+	// is using, without needing a separate copy per addressing mode.
+	uint8_t  vram_dump[0x2000];
+
+	// Cart RAM dump ($A000-$BFFF, up to 8 KiB — first ram_size bytes are
+	// valid; rest is unused). When ram_enable=0 reads return $FF, but the
+	// underlying storage is preserved across enable/disable cycles, so
+	// inspecting this can tell us whether the game's writes actually
+	// landed in SRAM or were dropped because RAM wasn't enabled at write
+	// time. The mbc_ram_enable_* counters track every MBC1/3/5 enable
+	// register write (value & 0x0F == 0x0A enables, else disables) so we
+	// can spot games that fail to enable RAM before reading from $Axxx.
+	uint8_t  cart_ram_dump[0x2000];
+	uint32_t mbc_ram_enables;   // count of writes that set ram_enable=true
+	uint32_t mbc_ram_disables;  // count of writes that set ram_enable=false
+	uint32_t mbc_sram_reads_when_disabled;  // $A000-$BFFF reads that returned $FF
+	uint32_t mbc_sram_writes_when_disabled; // $A000-$BFFF writes that were dropped
 };
 
 void          S9xSGBGetDebugState (S9xSGBDebugState *out);

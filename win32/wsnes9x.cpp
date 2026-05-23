@@ -15049,6 +15049,45 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
         }
     }
 
+    // MBC RAM access summary + cart RAM hex dump.
+    // Hang signature for games that read SRAM strings without enabling RAM:
+    //   mbc_sram_reads_when_disabled climbs at ~1 per character looked up,
+    //   while mbc_ram_enables stays at the value from boot-time (e.g. just
+    //   the few writes to enable/disable the save block once).
+    // The hex dump below ($A000-$BFFF) reflects what the GAME wrote — not
+    // what the CPU sees right now: when ram_enable=0 every read returns
+    // $FF regardless of what's in this buffer. So if the dump shows real
+    // string bytes but the game keeps reading $FF, it's a "forgot to flip
+    // ram_enable" pattern (game bug or our enable tracking off).
+    append(L"\r\n== MBC SRAM diagnostics ==\r\n");
+    append(L"  ram_enable now=%u   enable writes ON=%u  OFF=%u\r\n",
+           (unsigned)gb.mbc_ram_enable, gb.mbc_ram_enables, gb.mbc_ram_disables);
+    append(L"  SRAM reads while disabled = %u  (each returns $FF)\r\n",
+           gb.mbc_sram_reads_when_disabled);
+    append(L"  SRAM writes while disabled = %u  (each is dropped)\r\n",
+           gb.mbc_sram_writes_when_disabled);
+    // Cart RAM hex dump — show first 256 bytes always, then any non-zero
+    // 16-byte rows past that, capped to keep buffer happy.
+    append(L"\r\n== Cart RAM $A000-$BFFF (ram_size=%u bytes; underlying storage) ==\r\n",
+           gb.ram_size);
+    const unsigned cart_ram_visible = gb.ram_size < 0x2000u ? gb.ram_size : 0x2000u;
+    unsigned shown_rows = 0;
+    for (unsigned base = 0; base < cart_ram_visible && shown_rows < 64; base += 16) {
+        bool nonzero = (base < 0x100);  // always show first 256 bytes
+        if (!nonzero) {
+            for (unsigned k = 0; k < 16 && (base + k) < cart_ram_visible; ++k)
+                if (gb.cart_ram_dump[base + k]) { nonzero = true; break; }
+        }
+        if (!nonzero) continue;
+        append(L"  $%04X:", 0xA000u + base);
+        for (unsigned k = 0; k < 16 && (base + k) < cart_ram_visible; ++k)
+            append(L" %02X", gb.cart_ram_dump[base + k]);
+        append(L"\r\n");
+        ++shown_rows;
+    }
+    if (shown_rows == 0)
+        append(L"  (all zeros — game has never written to SRAM)\r\n");
+
     // PC trace ring — last 64 instructions before crash freeze (or live
     // if no crash detected). Reading top-down: oldest first, newest last.
     append(L"\r\n== PC trace ring (last %u entries%ls) ==\r\n",
@@ -15058,6 +15097,89 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
         const auto &t = gb.pc_trace[i];
         append(L"  #%2u  PC=$%04X op=$%02X  SP=$%04X  AF=$%04X  IME=%u\r\n",
                i + 1, t.pc, t.opcode, t.sp, t.af, (unsigned)t.ime);
+    }
+
+    // VRAM tilemap + tile data dump. Visible BG (and window) tilemap is
+    // 20 cols × 18 rows starting from ($SCX/$SCY); this dump shows the
+    // top-left 20×18 of each tilemap ($9800 and $9C00) — accurate when
+    // SCX=SCY=0, otherwise the user should add the offset mentally. The
+    // tile-data dump below covers the BG-reachable signed-mode window
+    // ($8800-$97FF, 4 KiB = 256 tiles × 16 bytes). LCDC.4 picks which
+    // half ($8800-$8FFF for indices 128..255, $9000-$97FF for 0..127).
+    const uint16_t bg_map_base  = (gb.lcdc & 0x08) ? 0x1C00 : 0x1800;
+    const uint16_t win_map_base = (gb.lcdc & 0x40) ? 0x1C00 : 0x1800;
+    append(L"\r\n== BG tilemap visible 20x18 (LCDC.3=%u → $%04X) ==\r\n",
+           (gb.lcdc >> 3) & 1u, 0x8000u + bg_map_base);
+    append(L"      ");
+    for (unsigned col = 0; col < 20; ++col) append(L" %2u", col);
+    append(L"\r\n");
+    for (unsigned row = 0; row < 18; ++row) {
+        append(L"  r%2u:", row);
+        for (unsigned col = 0; col < 20; ++col) {
+            const unsigned idx = bg_map_base + row * 32 + col;
+            append(L" %02X", gb.vram_dump[idx]);
+        }
+        append(L"\r\n");
+    }
+    append(L"\r\n== Window tilemap visible 20x18 (LCDC.6=%u → $%04X) ==\r\n",
+           (gb.lcdc >> 6) & 1u, 0x8000u + win_map_base);
+    append(L"      ");
+    for (unsigned col = 0; col < 20; ++col) append(L" %2u", col);
+    append(L"\r\n");
+    for (unsigned row = 0; row < 18; ++row) {
+        append(L"  r%2u:", row);
+        for (unsigned col = 0; col < 20; ++col) {
+            const unsigned idx = win_map_base + row * 32 + col;
+            append(L" %02X", gb.vram_dump[idx]);
+        }
+        append(L"\r\n");
+    }
+    // Tile data dump: $8800-$97FF (4 KiB = 256 tiles × 16 bytes), one
+    // tile per row. This window covers every tile a BG fetch can produce
+    // — signed mode uses base $9000 ±127 (= $8800-$97FF), unsigned uses
+    // base $8000 +0..255 (= $8000-$8FFF) and the upper half ($9000-$97FF)
+    // is unreachable. Each row shows the absolute address and both
+    // addressing-mode indices so cross-referencing with the tilemap dump
+    // above is just a column lookup.
+    //
+    // Format: addr  u=$NN  s=$NN(sd)  : 16 bytes
+    //   u  = unsigned-mode index (LCDC.4=1). Valid for $8000-$8FFF only.
+    //   s  = signed-mode index   (LCDC.4=0). Valid for $8800-$97FF.
+    //   sd = same, displayed as signed decimal (-128..127).
+    // All-zero tile rows are skipped to keep the dump readable.
+    append(L"\r\n== Tile data $8800-$97FF (BG signed/unsigned reachable, LCDC.4=%u) ==\r\n",
+           (gb.lcdc >> 4) & 1u);
+    append(L"  signed:   s=$00 @ $9000 .. s=$7F @ $97F0 .. s=$80 @ $8800 .. s=$FF @ $8FF0\r\n");
+    append(L"  unsigned: u=$00 @ $8000 .. u=$FF @ $8FF0 (only $8000-$8FFF reachable)\r\n");
+    append(L"  (all-zero tiles skipped; capped at 96 entries to fit buffer)\r\n");
+    unsigned shown_tiles = 0;
+    for (unsigned k = 0; k < 256 && shown_tiles < 96; ++k) {
+        // k iterates VRAM offsets $0800 + k*16, covering $8800-$97F0.
+        const unsigned vram_off = 0x0800 + k * 16;
+        const unsigned absaddr  = 0x8000u + vram_off;
+        // $8800-$8FFF: signed index = k - 128 (-128..-1 → bytes $80..$FF),
+        //              unsigned index = k + 128 ($80..$FF).
+        // $9000-$97FF: signed index = k - 128 (0..127 → bytes $00..$7F),
+        //              unsigned not reachable from BG.
+        const unsigned signed_byte = static_cast<unsigned>((k - 128) & 0xFF);
+        const int      signed_dec  = static_cast<int>(static_cast<int8_t>(signed_byte));
+        const bool     in_8800     = (absaddr < 0x9000);
+        bool nonzero = false;
+        for (int b = 0; b < 16; ++b)
+            if (gb.vram_dump[vram_off + b]) { nonzero = true; break; }
+        if (!nonzero) continue;
+        if (in_8800) {
+            const unsigned unsigned_byte = static_cast<unsigned>((k + 128) & 0xFF);
+            append(L"  $%04X u=$%02X s=$%02X(%4d):",
+                   absaddr, unsigned_byte, signed_byte, signed_dec);
+        } else {
+            append(L"  $%04X u=---  s=$%02X(%4d):",
+                   absaddr, signed_byte, signed_dec);
+        }
+        for (int b = 0; b < 16; ++b)
+            append(L" %02X", gb.vram_dump[vram_off + b]);
+        append(L"\r\n");
+        ++shown_tiles;
     }
 }
 
@@ -15080,7 +15202,7 @@ INT_PTR CALLBACK CpuDebugDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
     case WM_TIMER:
         if (wParam == CPU_DEBUG_TIMER_ID) {
-            wchar_t buf[8192];
+            wchar_t buf[24576];
             int tab = (int)SendDlgItemMessage(hDlg, IDC_CPU_DEBUG_TAB, TCM_GETCURSEL, 0, 0);
             if (tab == 1)
                 CpuDebugFormatGb(buf, _countof(buf));

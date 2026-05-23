@@ -76,6 +76,17 @@ struct MbcState
 	// the menu's title during its one-shot handshake, which usually
 	// looks badly inverted.
 	bool     mmm01_just_locked       = false;
+
+	// Diagnostic counters for SRAM access patterns. ram_enables/disables
+	// count writes to the MBC RAM-enable region ($0000-$1FFF) that
+	// flipped the gate; sram_reads_when_disabled / sram_writes_when_disabled
+	// count $A000-$BFFF accesses while ram_enable was false (read returns
+	// $FF, write is dropped). Useful for diagnosing games that hang
+	// reading SRAM strings without realizing the gate is closed.
+	uint32_t ram_enable_writes_on  = 0;
+	uint32_t ram_enable_writes_off = 0;
+	uint32_t sram_reads_disabled   = 0;
+	uint32_t sram_writes_disabled  = 0;
 };
 
 struct Cart;

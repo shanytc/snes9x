@@ -2513,6 +2513,20 @@ void S9xSGBGetDebugState(S9xSGBDebugState *out)
 	h = 0x811C9DC5;
 	for (int i = 0; i < 0xA0; ++i) { h ^= p->ppu.oam[i]; h *= 0x01000193; }
 	out->oam_hash = h;
+	std::memcpy(out->vram_dump, p->ppu.vram, sizeof out->vram_dump);
+
+	// Cart RAM snapshot — copy up to ram_size bytes (rest stays zeroed from
+	// out->cart_ram_dump being part of the *out = {} init at function top).
+	{
+		const auto &sram = p->cart.sram;
+		const size_t n   = sram.size() < sizeof out->cart_ram_dump
+		                 ? sram.size() : sizeof out->cart_ram_dump;
+		if (n > 0) std::memcpy(out->cart_ram_dump, sram.data(), n);
+	}
+	out->mbc_ram_enables                = p->cart.mbc.ram_enable_writes_on;
+	out->mbc_ram_disables               = p->cart.mbc.ram_enable_writes_off;
+	out->mbc_sram_reads_when_disabled   = p->cart.mbc.sram_reads_disabled;
+	out->mbc_sram_writes_when_disabled  = p->cart.mbc.sram_writes_disabled;
 
 	for (int i = 0; i < 32; ++i)
 		out->stack_peek[i] = SGB::MemRead(p->mem, static_cast<uint16_t>(cs.r.sp + i));

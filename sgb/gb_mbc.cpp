@@ -225,7 +225,13 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 	}
 	if (addr >= 0xA000 && addr < 0xC000)
 	{
-		if (!s.ram_enable) return 0xFF;
+		if (!s.ram_enable)
+		{
+			// Track misses — games that hang reading SRAM strings while
+			// forgetting to enable RAM show up as a fast-growing counter.
+			++s.sram_reads_disabled;
+			return 0xFF;
+		}
 
 		// MBC3 RTC select exposes latched RTC values in this window.
 		if (s.type == MbcType::MBC3 && s.rtc_select >= 0x08 && s.rtc_select <= 0x0C)
@@ -270,7 +276,11 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 	case MbcType::MBC1:
 		if (addr < 0x2000)
 		{
-			s.ram_enable = ((value & 0x0F) == 0x0A);
+			{
+				const bool _was = s.ram_enable;
+				s.ram_enable = ((value & 0x0F) == 0x0A);
+				if (_was != s.ram_enable) (s.ram_enable ? ++s.ram_enable_writes_on : ++s.ram_enable_writes_off);
+			}
 		}
 		else if (addr < 0x4000)
 		{
@@ -289,7 +299,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
-			if (!s.ram_enable) break;
+			if (!s.ram_enable) { ++s.sram_writes_disabled; break; }
 			WriteSram(c, (Mbc1RamBank(s) * 0x2000u) + (addr - 0xA000u), value);
 		}
 		break;
@@ -301,7 +311,11 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 			// bit 8 of the address selects which function.
 			if ((addr & 0x0100) == 0)
 			{
+				{
+				const bool _was = s.ram_enable;
 				s.ram_enable = ((value & 0x0F) == 0x0A);
+				if (_was != s.ram_enable) (s.ram_enable ? ++s.ram_enable_writes_on : ++s.ram_enable_writes_off);
+			}
 			}
 			else
 			{
@@ -312,7 +326,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
-			if (!s.ram_enable) break;
+			if (!s.ram_enable) { ++s.sram_writes_disabled; break; }
 			// 512 x 4-bit — only low nibble stored.
 			WriteSram(c, (addr - 0xA000) & 0x01FF, static_cast<uint8_t>(value & 0x0F));
 		}
@@ -321,7 +335,11 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 	case MbcType::MBC3:
 		if (addr < 0x2000)
 		{
-			s.ram_enable = ((value & 0x0F) == 0x0A);
+			{
+				const bool _was = s.ram_enable;
+				s.ram_enable = ((value & 0x0F) == 0x0A);
+				if (_was != s.ram_enable) (s.ram_enable ? ++s.ram_enable_writes_on : ++s.ram_enable_writes_off);
+			}
 		}
 		else if (addr < 0x4000)
 		{
@@ -345,7 +363,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
-			if (!s.ram_enable) break;
+			if (!s.ram_enable) { ++s.sram_writes_disabled; break; }
 			if (s.rtc_select >= 0x08 && s.rtc_select <= 0x0C)
 			{
 				s.rtc_regs[s.rtc_select - 0x08] = value;
@@ -360,7 +378,11 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 	case MbcType::MBC5:
 		if (addr < 0x2000)
 		{
-			s.ram_enable = ((value & 0x0F) == 0x0A);
+			{
+				const bool _was = s.ram_enable;
+				s.ram_enable = ((value & 0x0F) == 0x0A);
+				if (_was != s.ram_enable) (s.ram_enable ? ++s.ram_enable_writes_on : ++s.ram_enable_writes_off);
+			}
 		}
 		else if (addr < 0x3000)
 		{
@@ -377,7 +399,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
-			if (!s.ram_enable) break;
+			if (!s.ram_enable) { ++s.sram_writes_disabled; break; }
 			WriteSram(c, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
 		}
 		break;
@@ -406,7 +428,11 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		// mbc1_mode + ram_enable) remain writable.
 		if (addr < 0x2000)
 		{
-			s.ram_enable = ((value & 0x0F) == 0x0A);
+			{
+				const bool _was = s.ram_enable;
+				s.ram_enable = ((value & 0x0F) == 0x0A);
+				if (_was != s.ram_enable) (s.ram_enable ? ++s.ram_enable_writes_on : ++s.ram_enable_writes_off);
+			}
 			if (!s.mmm01_locked)
 			{
 				s.mmm01_ram_bank_mask = static_cast<uint8_t>(value >> 4);
@@ -453,7 +479,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
-			if (!s.ram_enable) break;
+			if (!s.ram_enable) { ++s.sram_writes_disabled; break; }
 			WriteSram(c, ((Mmm01RamBank(s) & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
 		}
 		break;

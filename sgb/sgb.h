@@ -454,6 +454,21 @@ bool    S9xSGBStateLoad(const uint8_t *buffer, size_t size);
 // is the buffer size; truncated on overflow.
 void    S9xSGBGetStatus(char *buf, size_t cap);
 
+// Side-effect-free snapshot of the GB CPU state — used by the Win32
+// debugger's Status panel. Any pointer may be NULL to skip. `ie` /
+// `if_` mirror the IE / IF I/O registers ($FFFF / $FF0F).
+void    S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
+                         uint16_t *bc, uint16_t *de, uint16_t *hl,
+                         uint8_t  *ime, uint8_t *halted, uint8_t *stopped,
+                         uint8_t  *ie,  uint8_t *if_,
+                         uint64_t *t_cycles);
+
+typedef void (*S9xSGBDebuggerHook)(uint16_t pc, uint8_t opcode);
+void    S9xSGBSetDebuggerHook(S9xSGBDebuggerHook hook);
+
+void    S9xSGBRequestDebuggerBreak(void);
+void    S9xSGBClearDebuggerBreak(void);
+
 // Convenience file I/O wrappers — write the full blob to `filename`,
 // or read it back. Return false on I/O error or format mismatch.
 bool    S9xSGBSaveStateToFile(const char *filename);

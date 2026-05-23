@@ -453,6 +453,36 @@
     <ClInclude Include="debug_viewer_export.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="debugger_hook.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDebugger.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDebuggerDlg.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDebuggerSplitter.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDebuggerSnes.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDebuggerGb.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDisasm65816.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDisasmGb.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CDisasmPanel.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CStatusPanel.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
@@ -954,6 +984,33 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="debug_viewer_export.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDebugger.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDebuggerDlg.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDebuggerSplitter.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDebuggerSnes.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDebuggerGb.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDisasm65816.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDisasmGb.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDisasmPanel.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CStatusPanel.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
   </ItemGroup>

@@ -44,6 +44,7 @@
 #include "CGBTileViewerDlg.h"
 #include "CGBTilemapViewerDlg.h"
 #include "CGBSpriteViewerDlg.h"
+#include "CDebugger.h"
 #include "debug_viewer_common.h"
 #include "win32_webcam.h"
 
@@ -2870,6 +2871,12 @@ LRESULT CALLBACK WinProc(
 			S9xDisplayStateChange(gbLayerNames[gbLayer], on);
 			break;
 		}
+		case ID_EMULATION_DEBUGGER_SNES:
+			WinShowSnesDebuggerDialog();
+			break;
+		case ID_EMULATION_DEBUGGER_GB:
+			WinShowGbDebuggerDialog();
+			break;
 		case ID_CHEAT_ENTER:
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			if (!RA_WarnDisableHardcore("Cheat editor"))
@@ -5087,6 +5094,7 @@ int WINAPI WinMain(
 				}
 			}
 			DebugViewers_OnFrame();
+			S9xDebuggerRefreshAll();
 			if (GUI.CursorTimer)
 			{
 				if (--GUI.CursorTimer == 0)
@@ -5524,6 +5532,15 @@ static void CheckMenuStates ()
 			mii.fState = S9xVoiceKunAttached() ? MFS_DISABLED : MFS_ENABLED;
 			SetMenuItemInfo(GUI.hMenu, ID_SOUND_VOICEKUN_ATTACH, FALSE, &mii);
 		}
+	}
+
+	{
+		const bool snes_running = !Settings.StopEmulation && (!Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+		const bool gb_running   = !Settings.StopEmulation && (Settings.SuperGameBoy  || Settings.SGB_BIOSModeActive);
+		mii.fState = snes_running ? MFS_ENABLED : MFS_DISABLED;
+		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_DEBUGGER_SNES, FALSE, &mii);
+		mii.fState = gb_running ? MFS_ENABLED : MFS_DISABLED;
+		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_DEBUGGER_GB, FALSE, &mii);
 	}
 
     mii.fState = MFS_UNCHECKED;

@@ -23,6 +23,10 @@
 #include "getset.h"
 #endif
 
+#ifdef __WIN32__
+#include "win32/debugger_hook.h"
+#endif
+
 static inline void S9xReschedule (void);
 
 void S9xMainLoop (void)
@@ -334,6 +338,15 @@ void S9xMainLoop (void)
 			if (oldPCBase != CPU.PCBase || (Registers.PCw & ~MEMMAP_MASK) == (0xffff & ~MEMMAP_MASK))
 				Opcodes = S9xOpcodesSlow;
 		}
+
+#ifdef __WIN32__
+		if (g_debugger_attached)
+		{
+			S9xDebuggerOnSnesPreInstruction();
+			if (CPU.Flags & SCAN_KEYS_FLAG)
+				break;
+		}
+#endif
 
 		Registers.PCw++;
 		(*Opcodes[Op].S9xOpcode)();

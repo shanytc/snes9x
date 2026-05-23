@@ -27,6 +27,8 @@
 #include <cstring>
 #include <vector>
 
+static bool g_dbg_break_requested = false;
+
 namespace SGB {
 
 // Embedded SGB1 / SGB2 GB-side boot ROMs. These are the authentic boot ROMs
@@ -1364,12 +1366,17 @@ void Emulator::RunCycles(int32_t tcycles)
 	int32_t &apu_rem  = impl_->apu_ds_rem;
 	while (impl_->ppu.t_cycles < target_t)
 	{
+		if (g_dbg_break_requested)
+			break;
+
 		PpuStep(impl_->ppu, impl_->mem, 1);
 		if (impl_->mem.double_speed) ds_extra += 1;
 
 		while (impl_->cpu.State().t_cycles + kMaxOpcodeTCycles <=
 		       impl_->ppu.t_cycles + ds_extra)
 		{
+			if (g_dbg_break_requested)
+				break;
 			const bool was_boot = impl_->mem.boot_rom_enabled;
 			const int64_t pre_t = impl_->cpu.State().t_cycles;
 			impl_->cpu.Step(impl_->mem);
@@ -2769,6 +2776,68 @@ bool S9xSGBSaveStateToFile(const char *filename)
 void S9xSGBGetStatus(char *buf, size_t cap)
 {
 	SGB::Instance().GetStatus(buf, cap);
+}
+
+namespace {
+S9xSGBDebuggerHook g_user_dbg_hook = nullptr;
+
+void DebuggerTraceShim(uint16_t pc, uint8_t opcode, const SGB::CpuState &)
+{
+	if (g_user_dbg_hook)
+		g_user_dbg_hook(pc, opcode);
+}
+}
+
+bool S9xSGBDebuggerBreakRequested()
+{
+	return g_dbg_break_requested;
+}
+
+void S9xSGBSetDebuggerHook(S9xSGBDebuggerHook hook)
+{
+	g_user_dbg_hook = hook;
+	SGB::Cpu::SetTraceHook(hook ? DebuggerTraceShim : nullptr);
+}
+
+void S9xSGBRequestDebuggerBreak(void)
+{
+	g_dbg_break_requested = true;
+}
+
+void S9xSGBClearDebuggerBreak(void)
+{
+	g_dbg_break_requested = false;
+}
+
+void S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
+                      uint16_t *bc, uint16_t *de, uint16_t *hl,
+                      uint8_t  *ime, uint8_t *halted, uint8_t *stopped,
+                      uint8_t  *ie,  uint8_t *if_,
+                      uint64_t *t_cycles)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl)
+	{
+		if (pc) *pc = 0; if (sp) *sp = 0;
+		if (af) *af = 0; if (bc) *bc = 0; if (de) *de = 0; if (hl) *hl = 0;
+		if (ime) *ime = 0; if (halted) *halted = 0; if (stopped) *stopped = 0;
+		if (ie) *ie = 0; if (if_) *if_ = 0;
+		if (t_cycles) *t_cycles = 0;
+		return;
+	}
+	const SGB::CpuState &s = impl->cpu.State();
+	if (pc) *pc = s.r.pc;
+	if (sp) *sp = s.r.sp;
+	if (af) *af = s.r.af;
+	if (bc) *bc = s.r.bc;
+	if (de) *de = s.r.de;
+	if (hl) *hl = s.r.hl;
+	if (ime)     *ime     = s.ime ? 1 : 0;
+	if (halted)  *halted  = s.halted ? 1 : 0;
+	if (stopped) *stopped = s.stopped ? 1 : 0;
+	if (ie)  *ie  = impl->mem.ie;
+	if (if_) *if_ = impl->mem.if_;
+	if (t_cycles) *t_cycles = (uint64_t)s.t_cycles;
 }
 
 bool S9xSGBLoadStateFromFile(const char *filename)

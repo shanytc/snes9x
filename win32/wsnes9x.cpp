@@ -15170,9 +15170,9 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
     // is in the BG-reachable dump below.)
     append(L"\r\n== Tile data $8000-$87FF (sprite-only, 128 tiles) ==\r\n");
     append(L"  unsigned: u=$00 @ $8000 .. u=$7F @ $87F0\r\n");
-    append(L"  (all-zero tiles skipped; capped at 64 entries)\r\n");
+    append(L"  (all-zero tiles skipped; full 128-tile range)\r\n");
     unsigned shown_obj_tiles = 0;
-    for (unsigned k = 0; k < 128 && shown_obj_tiles < 64; ++k) {
+    for (unsigned k = 0; k < 128 && shown_obj_tiles < 128; ++k) {
         const unsigned vram_off = k * 16;          // covers $0000-$07F0
         const unsigned absaddr  = 0x8000u + vram_off;
         bool nonzero = false;
@@ -15203,9 +15203,9 @@ void CpuDebugFormatGb(wchar_t *out, size_t outLen)
            (gb.lcdc >> 4) & 1u);
     append(L"  signed:   s=$00 @ $9000 .. s=$7F @ $97F0 .. s=$80 @ $8800 .. s=$FF @ $8FF0\r\n");
     append(L"  unsigned: u=$00 @ $8000 .. u=$FF @ $8FF0 (only $8000-$8FFF reachable)\r\n");
-    append(L"  (all-zero tiles skipped; capped at 96 entries to fit buffer)\r\n");
+    append(L"  (all-zero tiles skipped; full 256-tile range)\r\n");
     unsigned shown_tiles = 0;
-    for (unsigned k = 0; k < 256 && shown_tiles < 96; ++k) {
+    for (unsigned k = 0; k < 256 && shown_tiles < 256; ++k) {
         // k iterates VRAM offsets $0800 + k*16, covering $8800-$97F0.
         const unsigned vram_off = 0x0800 + k * 16;
         const unsigned absaddr  = 0x8000u + vram_off;

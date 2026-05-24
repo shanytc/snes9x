@@ -10,4 +10,6 @@ void DebuggerDlgRefresh(HWND h);
 
 void DebuggerDlgGlobalInit(HINSTANCE hInst);
 
+HACCEL S9xDebuggerGetAcceleratorsForWindow(HWND wnd);
+
 #endif

@@ -10,7 +10,94 @@
 #include "CDebuggerGb.h"
 #include "CDisasmPanel.h"
 #include "CStatusPanel.h"
+#include "rsrc/resource.h"
 #include "../snes9x.h"
+
+static HACCEL g_dbg_accel = NULL;
+
+HACCEL S9xDebuggerGetAcceleratorsForWindow(HWND wnd);
+
+struct InputDlgState
+{
+	const TCHAR *prompt;
+	const TCHAR *title;
+	TCHAR        result[64];
+	bool         accepted;
+};
+
+static INT_PTR CALLBACK InputDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
+	switch (msg)
+	{
+		case WM_INITDIALOG:
+		{
+			InputDlgState *st = (InputDlgState *)lp;
+			SetWindowLongPtr(dlg, DWLP_USER, (LONG_PTR)st);
+			SetWindowText(dlg, st->title);
+			SetDlgItemText(dlg, IDC_DBG_INPUT_PROMPT, st->prompt);
+			SetDlgItemText(dlg, IDC_DBG_INPUT_EDIT,   st->result);
+			SendDlgItemMessage(dlg, IDC_DBG_INPUT_EDIT, EM_SETSEL, 0, -1);
+			SetFocus(GetDlgItem(dlg, IDC_DBG_INPUT_EDIT));
+			return FALSE;
+		}
+		case WM_COMMAND:
+			if (LOWORD(wp) == IDOK)
+			{
+				InputDlgState *st = (InputDlgState *)GetWindowLongPtr(dlg, DWLP_USER);
+				if (st)
+				{
+					GetDlgItemText(dlg, IDC_DBG_INPUT_EDIT, st->result,
+					               (int)(sizeof(st->result)/sizeof(TCHAR)));
+					st->accepted = true;
+				}
+				EndDialog(dlg, IDOK);
+				return TRUE;
+			}
+			if (LOWORD(wp) == IDCANCEL)
+			{
+				EndDialog(dlg, IDCANCEL);
+				return TRUE;
+			}
+			break;
+	}
+	return FALSE;
+}
+
+static bool PromptHex(HWND parent, const TCHAR *title, const TCHAR *prompt,
+                      const TCHAR *initial, uint32_t *out_value)
+{
+	InputDlgState st = {};
+	st.title  = title;
+	st.prompt = prompt;
+	if (initial) _tcsncpy(st.result, initial, 63);
+
+	const INT_PTR rv = DialogBoxParam(GetModuleHandle(NULL),
+	                                  MAKEINTRESOURCE(IDD_DBG_INPUT), parent,
+	                                  InputDlgProc, (LPARAM)&st);
+	if (rv != IDOK || !st.accepted) return false;
+
+	const TCHAR *s = st.result;
+	while (*s == ' ' || *s == '\t') s++;
+	if (*s == '$') s++;
+	else if (*s == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+
+	uint32_t v = 0;
+	bool any = false;
+	while (*s)
+	{
+		TCHAR c = *s++;
+		int d;
+		if (c >= '0' && c <= '9') d = c - '0';
+		else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
+		else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
+		else break;
+		v = (v << 4) | (uint32_t)d;
+		any = true;
+	}
+	if (!any) return false;
+	*out_value = v;
+	return true;
+}
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -45,6 +132,17 @@ enum
 	IDM_DBG_RESET,
 	IDM_DBG_GOTO,
 	IDM_DBG_FIND,
+	IDM_DBG_STEP_BACK,
+	IDM_DBG_STEP_BACK_SCANLINE,
+	IDM_DBG_STEP_BACK_FRAME,
+	IDM_DBG_RUN_ONE_CPU,
+	IDM_DBG_RUN_ONE_PPU,
+	IDM_DBG_RUN_ONE_SCANLINE,
+	IDM_DBG_RUN_TO_NMI,
+	IDM_DBG_RUN_TO_IRQ,
+	IDM_DBG_RUN_TO_SCANLINE,
+	IDM_DBG_BREAK_IN,
+	IDM_DBG_RELOAD_ROM,
 
 	IDB_DBG_RUN = 5300,
 	IDB_DBG_PAUSE,
@@ -89,20 +187,35 @@ static HMENU BuildMenu()
 	AppendMenu(menu, MF_POPUP, (UINT_PTR)mFile, TEXT("&File"));
 
 	HMENU mDebug = CreatePopupMenu();
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN,        TEXT("&Run\tF5"));
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_PAUSE,      TEXT("&Pause\tF6"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN,                TEXT("&Continue\tF5"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_PAUSE,              TEXT("&Break\tShift+F5"));
 	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_STEP_IN,    TEXT("Step &Into\tF11"));
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_STEP_OVER,  TEXT("Step &Over\tF10"));
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_STEP_OUT,   TEXT("Step Ou&t\tShift+F11"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_STEP_IN,            TEXT("Step &Into\tF11"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_STEP_OVER,          TEXT("Step &Over\tF10"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_STEP_OUT,           TEXT("Step Ou&t\tShift+F11"));
 	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_FRAME_STEP, TEXT("&Frame Advance\tF7"));
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_RESET,      TEXT("Re&set"));
+	AppendMenu(mDebug, MF_STRING | MF_GRAYED, IDM_DBG_STEP_BACK,          TEXT("Step Back\tShift+F10"));
+	AppendMenu(mDebug, MF_STRING | MF_GRAYED, IDM_DBG_STEP_BACK_SCANLINE, TEXT("Step Back (1 scanline)\tShift+F7"));
+	AppendMenu(mDebug, MF_STRING | MF_GRAYED, IDM_DBG_STEP_BACK_FRAME,    TEXT("Step Back (1 frame)\tShift+F8"));
+	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
+	AppendMenu(mDebug, MF_STRING | MF_GRAYED, IDM_DBG_RUN_ONE_CPU,      TEXT("Run one CPU cycle"));
+	AppendMenu(mDebug, MF_STRING | MF_GRAYED, IDM_DBG_RUN_ONE_PPU,      TEXT("Run one PPU cycle\tF6"));
+	AppendMenu(mDebug, MF_STRING,             IDM_DBG_RUN_ONE_SCANLINE, TEXT("Run one scanline\tF7"));
+	AppendMenu(mDebug, MF_STRING,             IDM_DBG_FRAME_STEP,       TEXT("Run one frame\tF8"));
+	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_NMI,      TEXT("Run to NMI"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_IRQ,      TEXT("Run to IRQ"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_SCANLINE, TEXT("Run to scanline...\tAlt+B"));
+	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_BREAK_IN,        TEXT("Break in...\tCtrl+B"));
+	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RESET,           TEXT("&Reset\tCtrl+R"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RELOAD_ROM,      TEXT("Reload ROM\tCtrl+Shift+R"));
 	AppendMenu(menu, MF_POPUP, (UINT_PTR)mDebug, TEXT("&Debug"));
 
 	HMENU mSearch = CreatePopupMenu();
-	AppendMenu(mSearch, MF_STRING, IDM_DBG_GOTO, TEXT("&Go to address...\tCtrl+G"));
-	AppendMenu(mSearch, MF_STRING, IDM_DBG_FIND, TEXT("&Find sequence..."));
+	AppendMenu(mSearch, MF_STRING | MF_GRAYED, IDM_DBG_GOTO, TEXT("&Go to address...\tCtrl+G"));
+	AppendMenu(mSearch, MF_STRING | MF_GRAYED, IDM_DBG_FIND, TEXT("&Find sequence..."));
 	AppendMenu(menu, MF_POPUP, (UINT_PTR)mSearch, TEXT("&Search"));
 
 	HMENU mSettings = CreatePopupMenu();
@@ -211,8 +324,39 @@ static void OnCommand(HWND hwnd, DbgDlgState *st, WPARAM wp)
 		case IDM_DBG_FRAME_STEP:
 			gDebugger.FrameStep();
 			break;
+		case IDM_DBG_RUN_ONE_SCANLINE:
+			gDebugger.StepOneScanline(st->sys);
+			break;
+		case IDM_DBG_RUN_TO_NMI:
+			gDebugger.RunToNmi(st->sys);
+			break;
+		case IDM_DBG_RUN_TO_IRQ:
+			gDebugger.RunToIrq(st->sys);
+			break;
+		case IDM_DBG_RUN_TO_SCANLINE:
+		{
+			uint32_t v = 0;
+			if (PromptHex(hwnd, TEXT("Run to scanline"),
+			              TEXT("Target scanline (hex, e.g. E1 for VBlank):"),
+			              TEXT("E1"), &v))
+				gDebugger.RunToScanline(st->sys, (int)v);
+			break;
+		}
+		case IDM_DBG_BREAK_IN:
+		{
+			uint32_t v = 0;
+			if (PromptHex(hwnd, TEXT("Break in"),
+			              TEXT("Cycles from now (hex):"),
+			              TEXT("400"), &v))
+				gDebugger.BreakIn(st->sys, (uint64_t)v);
+			break;
+		}
 		case IDM_DBG_RESET:
 			gDebugger.ResetMachine(st->sys);
+			DebuggerDlgRefresh(hwnd);
+			break;
+		case IDM_DBG_RELOAD_ROM:
+			gDebugger.ReloadRom();
 			DebuggerDlgRefresh(hwnd);
 			break;
 		default:
@@ -290,6 +434,7 @@ static LRESULT CALLBACK DebuggerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 				gDebugger.AttachGb(hwnd);
 
 			ResizeLayout(hwnd);
+			DebuggerDlgRefresh(hwnd);
 			return 0;
 		}
 
@@ -359,6 +504,30 @@ void DebuggerDlgGlobalInit(HINSTANCE hInst)
 	StatusPanelRegisterClass(hInst);
 	RegisterDebuggerClass(hInst, kSnesClassName);
 	RegisterDebuggerClass(hInst, kGbClassName);
+
+	const ACCEL accels[] = {
+		{ FVIRTKEY,                IDM_DBG_RUN              | 0, (WORD)VK_F5 },
+		{ FVIRTKEY | FSHIFT,       IDM_DBG_PAUSE            | 0, (WORD)VK_F5 },
+		{ FVIRTKEY,                IDM_DBG_STEP_IN          | 0, (WORD)VK_F11 },
+		{ FVIRTKEY,                IDM_DBG_STEP_OVER        | 0, (WORD)VK_F10 },
+		{ FVIRTKEY | FSHIFT,       IDM_DBG_STEP_OUT         | 0, (WORD)VK_F11 },
+		{ FVIRTKEY,                IDM_DBG_RUN_ONE_SCANLINE | 0, (WORD)VK_F7 },
+		{ FVIRTKEY,                IDM_DBG_FRAME_STEP       | 0, (WORD)VK_F8 },
+		{ FVIRTKEY | FALT,         IDM_DBG_RUN_TO_SCANLINE  | 0, (WORD)'B' },
+		{ FVIRTKEY | FCONTROL,     IDM_DBG_BREAK_IN         | 0, (WORD)'B' },
+		{ FVIRTKEY | FCONTROL,     IDM_DBG_RESET            | 0, (WORD)'R' },
+		{ FVIRTKEY | FCONTROL | FSHIFT, IDM_DBG_RELOAD_ROM  | 0, (WORD)'R' },
+	};
+	g_dbg_accel = CreateAcceleratorTable((LPACCEL)accels, sizeof(accels)/sizeof(accels[0]));
+}
+
+HACCEL S9xDebuggerGetAcceleratorsForWindow(HWND wnd)
+{
+	if (!wnd || !g_dbg_accel) return NULL;
+	HWND root = GetAncestor(wnd, GA_ROOT);
+	if (root == gSnesDebuggerHWND || root == gGbDebuggerHWND)
+		return g_dbg_accel;
+	return NULL;
 }
 
 HWND DebuggerDlgCreate(DbgSystem sys)

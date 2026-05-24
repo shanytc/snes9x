@@ -733,6 +733,10 @@
 #define ID_EMULATION_DEBUGGER_SNES      40209
 #define ID_EMULATION_DEBUGGER_GB        40210
 
+#define IDD_DBG_INPUT                   183
+#define IDC_DBG_INPUT_PROMPT            5000
+#define IDC_DBG_INPUT_EDIT              5001
+
 #define IDC_VRAMV_CANVAS                3120
 #define IDC_VRAMV_PALETTE               3121
 #define IDC_VRAMV_BPP_2                 3122
@@ -898,7 +902,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        189
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         5000
+#define _APS_NEXT_CONTROL_VALUE         5002
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

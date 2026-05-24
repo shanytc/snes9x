@@ -45,6 +45,7 @@
 #include "CGBTilemapViewerDlg.h"
 #include "CGBSpriteViewerDlg.h"
 #include "CDebugger.h"
+#include "CDebuggerDlg.h"
 #include "debug_viewer_common.h"
 #include "win32_webcam.h"
 
@@ -4839,10 +4840,18 @@ int WINAPI WinMain(
             if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
                 continue;
 
-            if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
             {
-                TranslateMessage (&msg);
-                DispatchMessage (&msg);
+                HWND   dbg_wnd = GetForegroundWindow();
+                HACCEL dbg_acc = S9xDebuggerGetAcceleratorsForWindow(dbg_wnd);
+                if (dbg_acc && TranslateAccelerator(dbg_wnd, dbg_acc, &msg))
+                {
+                    // handled by debugger accelerator
+                }
+                else if (!TranslateAccelerator(GUI.hWnd, GUI.Accelerators, &msg))
+                {
+                    TranslateMessage(&msg);
+                    DispatchMessage(&msg);
+                }
             }
 
 			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && (!Settings.FrameAdvance || GUI.FAMute)));

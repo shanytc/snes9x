@@ -35,7 +35,13 @@ public:
 	void StepOver(DbgSystem sys);
 	void StepOut(DbgSystem sys);
 	void FrameStep();
+	void StepOneScanline(DbgSystem sys);
+	void RunToNmi(DbgSystem sys);
+	void RunToIrq(DbgSystem sys);
+	void RunToScanline(DbgSystem sys, int target_v);
+	void BreakIn(DbgSystem sys, uint64_t cycles_from_now);
 	void ResetMachine(DbgSystem sys);
+	void ReloadRom();
 
 	void AddExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr);
 	void RemoveExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr);
@@ -72,6 +78,15 @@ private:
 
 	bool snes_frame_step_armed_ = false;
 	bool gb_frame_step_armed_   = false;
+
+	bool     snes_run_to_nmi_           = false;
+	bool     snes_run_to_irq_           = false;
+	bool     snes_run_to_scanline_armed_ = false;
+	int      snes_run_to_scanline_target_ = 0;
+	bool     snes_step_one_scanline_    = false;
+	int      snes_step_one_scanline_start_ = -1;
+	bool     snes_break_in_armed_       = false;
+	uint64_t snes_break_in_target_      = 0;
 
 	std::vector<DbgBreakpoint> bps_;
 };

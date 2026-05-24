@@ -31,7 +31,7 @@ enum
 	IDM_DISASM_RUN_TO_BRANCH_TARGET
 };
 
-enum { COL_MARGIN = 0, COL_ADDR = 1, COL_BYTES = 2, COL_CODE = 3 };
+enum { COL_MARGIN = 0, COL_ADDR = 1, COL_BYTES = 2, COL_MNEM = 3, COL_OPERAND = 4 };
 
 struct DisasmLine
 {
@@ -60,6 +60,46 @@ static bool IsTargetOpcode_Gb(uint8_t op)
 static bool IsTargetOpcode(DbgSystem sys, uint8_t op)
 {
 	return sys == DbgSystem::Snes ? IsTargetOpcode_Snes(op) : IsTargetOpcode_Gb(op);
+}
+
+static COLORREF MnemColor(DbgSystem sys, uint8_t op)
+{
+	if (sys == DbgSystem::Snes)
+	{
+		switch (op)
+		{
+			case 0x10: case 0x30: case 0x50: case 0x70:
+			case 0x80: case 0x82: case 0x90:
+			case 0xB0: case 0xD0: case 0xF0:
+				return RGB(50, 100, 180);
+			case 0x4C: case 0x5C: case 0x6C: case 0xDC:
+			case 0x20: case 0x22: case 0x7C: case 0xFC:
+				return RGB(170, 60, 60);
+			case 0x60: case 0x6B: case 0x40:
+				return RGB(140, 30, 30);
+			case 0x48: case 0x68: case 0xDA: case 0xFA:
+			case 0x5A: case 0x7A: case 0x8B: case 0xAB:
+			case 0x0B: case 0x2B: case 0x4B:
+			case 0x08: case 0x28:
+				return RGB(120, 60, 140);
+		}
+		return RGB(20, 20, 20);
+	}
+	if (op == 0x20 || op == 0x28 || op == 0x30 || op == 0x38 ||
+	    op == 0xC2 || op == 0xCA || op == 0xD2 || op == 0xDA)
+		return RGB(50, 100, 180);
+	if (op == 0x18 || op == 0xC3 || op == 0xE9)
+		return RGB(170, 60, 60);
+	if (op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC ||
+	    (op & 0xC7) == 0xC7)
+		return RGB(170, 60, 60);
+	if (op == 0xC9 || op == 0xD9 ||
+	    op == 0xC0 || op == 0xC8 || op == 0xD0 || op == 0xD8)
+		return RGB(140, 30, 30);
+	if (op == 0xC5 || op == 0xD5 || op == 0xE5 || op == 0xF5 ||
+	    op == 0xC1 || op == 0xD1 || op == 0xE1 || op == 0xF1)
+		return RGB(120, 60, 140);
+	return RGB(20, 20, 20);
 }
 
 struct DisasmPanelState
@@ -427,7 +467,7 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 		{
 			char *out = di->item.pszText;
 			const int cap = di->item.cchTextMax;
-			if (di->item.iSubItem == COL_CODE)
+			if (di->item.iSubItem == COL_MNEM)
 				_snprintf_s(out, cap, _TRUNCATE, "$%02x%04x:",
 				            (unsigned)(ln.pc >> 16) & 0xFF,
 				            (unsigned)(ln.pc & 0xFFFF));
@@ -471,14 +511,29 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 				else if (byte_count == 3) _snprintf_s(out, cap, _TRUNCATE, "%02X %02X %02X", bytes[0], bytes[1], bytes[2]);
 				else                      _snprintf_s(out, cap, _TRUNCATE, "%02X %02X %02X %02X", bytes[0], bytes[1], bytes[2], bytes[3]);
 				break;
-			case COL_CODE:
+			case COL_MNEM:
 			{
+				const char *sp = strchr(line, ' ');
+				int mlen = sp ? (int)(sp - line) : (int)strlen(line);
+				if (mlen >= cap) mlen = cap - 1;
+				memcpy(out, line, mlen);
+				out[mlen] = 0;
+				break;
+			}
+			case COL_OPERAND:
+			{
+				const char *operand_start = strchr(line, ' ');
+				if (operand_start)
+					while (*operand_start == ' ') operand_start++;
+				else
+					operand_start = "";
+
 				uint32_t lookup_addr = 0;
 				bool     have_addr   = false;
-				const char *p = line;
+				const char *p = operand_start;
 				while (*p)
 				{
-					if (*p == '$' && (p == line || p[-1] != '#'))
+					if (*p == '$' && (p == operand_start || p[-1] != '#'))
 					{
 						const char *digits = p + 1;
 						uint32_t val = 0;
@@ -526,7 +581,7 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 					_snprintf_s(suffix, 64, _TRUNCATE, " [%s]", label);
 				}
 
-				_snprintf_s(out, cap, _TRUNCATE, "%s%s", line, suffix);
+				_snprintf_s(out, cap, _TRUNCATE, "%s%s", operand_start, suffix);
 				break;
 			}
 		}
@@ -569,7 +624,24 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 					}
 				}
 			}
-			return CDRF_NOTIFYPOSTPAINT | CDRF_NEWFONT;
+			return CDRF_NOTIFYPOSTPAINT | CDRF_NOTIFYSUBITEMDRAW | CDRF_NEWFONT;
+		}
+
+		case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
+		{
+			const int idx = (int)cd->nmcd.dwItemSpec;
+			const int sub = cd->iSubItem;
+			if (idx < st->line_count && sub == COL_MNEM)
+			{
+				const DisasmLine &row = st->lines[idx];
+				if (!row.is_label_row)
+				{
+					char ln[160]; uint8_t b[4]; int c;
+					DisasmOne(st->sys, row.pc, ln, sizeof(ln), b, &c);
+					cd->clrText = MnemColor(st->sys, b[0]);
+				}
+			}
+			return CDRF_NEWFONT;
 		}
 
 		case CDDS_ITEMPOSTPAINT:
@@ -609,25 +681,37 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			else
 				has_bp = gDebugger.HasExecBreakpoint(DbgSystem::Gb, 0, (uint16_t)row_pc);
 
+			const int cx = (mr.left + mr.right) / 2;
+			const int cy = (mr.top + mr.bottom) / 2;
+			const int r  = 5;
+
 			if (has_bp)
 			{
-				HBRUSH red = CreateSolidBrush(RGB(200, 0, 0));
-				RECT dot = { mr.left + 4, mr.top + 3, mr.left + 14, mr.top + 13 };
-				FillRect(dc, &dot, red);
-				DeleteObject(red);
+				HBRUSH fill = CreateSolidBrush(RGB(220, 30, 30));
+				HPEN   edge = CreatePen(PS_SOLID, 1, RGB(120, 0, 0));
+				HBRUSH oldB = (HBRUSH)SelectObject(dc, fill);
+				HPEN   oldP = (HPEN)SelectObject(dc, edge);
+				Ellipse(dc, cx - r, cy - r, cx + r, cy + r);
+				SelectObject(dc, oldP);
+				SelectObject(dc, oldB);
+				DeleteObject(edge);
+				DeleteObject(fill);
 			}
 			if (row_pc == cur_pc)
 			{
-				HBRUSH yel = CreateSolidBrush(RGB(220, 200, 0));
-				const int cy = (mr.top + mr.bottom) / 2;
+				HBRUSH yel  = CreateSolidBrush(RGB(220, 200, 0));
+				HPEN   edge = CreatePen(PS_SOLID, 1, RGB(140, 110, 0));
+				HBRUSH oldB = (HBRUSH)SelectObject(dc, yel);
+				HPEN   oldP = (HPEN)SelectObject(dc, edge);
 				POINT arrow[3] = {
-					{ mr.left + 14, mr.top + 2 },
-					{ mr.right - 3, cy },
-					{ mr.left + 14, mr.bottom - 2 }
+					{ cx - r, cy - r },
+					{ cx + r, cy     },
+					{ cx - r, cy + r }
 				};
-				HRGN hr = CreatePolygonRgn(arrow, 3, ALTERNATE);
-				FillRgn(dc, hr, yel);
-				DeleteObject(hr);
+				Polygon(dc, arrow, 3);
+				SelectObject(dc, oldP);
+				SelectObject(dc, oldB);
+				DeleteObject(edge);
 				DeleteObject(yel);
 			}
 			return CDRF_DODEFAULT;
@@ -962,10 +1046,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 
 			LVCOLUMNA col = {};
 			col.mask = LVCF_TEXT | LVCF_WIDTH;
-			col.pszText = (LPSTR)" ";        col.cx = 32;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_MARGIN, (LPARAM)&col);
-			col.pszText = (LPSTR)"Address";  col.cx = 70;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_ADDR,   (LPARAM)&col);
-			col.pszText = (LPSTR)"Bytes";    col.cx = 95;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_BYTES,  (LPARAM)&col);
-			col.pszText = (LPSTR)"Code";     col.cx = 320; SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_CODE,   (LPARAM)&col);
+			col.pszText = (LPSTR)" ";        col.cx = 32;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_MARGIN,  (LPARAM)&col);
+			col.pszText = (LPSTR)"Address";  col.cx = 70;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_ADDR,    (LPARAM)&col);
+			col.pszText = (LPSTR)"Bytes";    col.cx = 95;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_BYTES,   (LPARAM)&col);
+			col.pszText = (LPSTR)"Mnem";     col.cx = 48;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_MNEM,    (LPARAM)&col);
+			col.pszText = (LPSTR)"Operand";  col.cx = 290; SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_OPERAND, (LPARAM)&col);
 
 			ListView_SetItemCountEx(st->lv, 0, LVSICF_NOINVALIDATEALL);
 			return 0;
@@ -1067,6 +1152,8 @@ void DisasmPanelRefresh(HWND h)
 {
 	DisasmPanelState *st = GetState(h);
 	if (!st || !st->lv) return;
+
+	if (st->view_initialized && !Settings.Paused) return;
 
 	EnsurePCVisible(st);
 	InvalidateRect(st->lv, NULL, FALSE);

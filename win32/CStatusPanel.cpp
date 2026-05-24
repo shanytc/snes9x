@@ -109,7 +109,7 @@ static void PaintGb(HDC dc, HWND h)
 
 	int y = 8;
 	int x = 8;
-	const int colW = 90;
+	const int colW = 110;
 
 	SetTextColor(dc, RGB(20, 20, 20));
 
@@ -125,10 +125,10 @@ static void PaintGb(HDC dc, HWND h)
 	y += 24;
 
 	const uint8_t f = s.af & 0xFF;
-	DrawCheck(dc, x + colW*0, y, "Z (Zero)",     (f & 0x80) != 0);
-	DrawCheck(dc, x + colW*1, y, "N (Subtract)", (f & 0x40) != 0);
-	DrawCheck(dc, x + colW*2, y, "H (Half)",     (f & 0x20) != 0);
-	DrawCheck(dc, x + colW*3, y, "C (Carry)",    (f & 0x10) != 0);
+	DrawCheck(dc, x + colW*0, y, "Z (Zero)",  (f & 0x80) != 0);
+	DrawCheck(dc, x + colW*1, y, "N (Sub)",   (f & 0x40) != 0);
+	DrawCheck(dc, x + colW*2, y, "H (Half)",  (f & 0x20) != 0);
+	DrawCheck(dc, x + colW*3, y, "C (Carry)", (f & 0x10) != 0);
 	y += 24;
 
 	DrawCheck(dc, x + colW*0, y, "IME",     s.ime != 0);

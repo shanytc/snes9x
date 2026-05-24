@@ -7,14 +7,33 @@
 static const TCHAR *kClassName = TEXT("S9xDebuggerDisasmPanel");
 static const int    kMarginPx  = 22;
 static const int    kRowH      = 16;
+static const int    kLabelRowH = 20;
+
+static bool IsCtlFlowEnd(DbgSystem sys, uint8_t op)
+{
+	if (sys == DbgSystem::Snes)
+		return op == 0x60 || op == 0x6B || op == 0x40   // RTS / RTL / RTI
+		    || op == 0x4C || op == 0x5C                 // JMP abs / JMP long
+		    || op == 0x82 || op == 0x80;                // BRL / BRA
+	return op == 0xC9 || op == 0xD9   // RET / RETI
+	    || op == 0xC3 || op == 0xE9   // JP a16 / JP HL
+	    || op == 0x18;                // JR e8 (unconditional)
+}
 
 struct DisasmPanelState
 {
 	DbgSystem sys;
 	HFONT     font;
-	int       scroll_offset_rows;
-	bool      follow_pc;
+	uint32_t  view_start_pc;
+	bool      view_initialized;
 };
+
+static uint32_t AdvancePC(DbgSystem sys, uint32_t pc, uint8_t len)
+{
+	if (sys == DbgSystem::Snes)
+		return (pc & 0xFF0000) | ((uint16_t)(pc + len) & 0xFFFF);
+	return (uint16_t)(pc + len);
+}
 
 static DisasmPanelState *GetState(HWND h)
 {
@@ -40,17 +59,14 @@ static int DisasmOne(DbgSystem sys, uint32_t pc, char *line, size_t cap, uint8_t
 	{
 		DisasmResult65816 r = {};
 		uint8_t len = SnesBackend::Disassemble(pc, &r);
-		_snprintf_s(line, cap, _TRUNCATE, "%02X:%04X  %-4s %s",
-		            (unsigned)(pc >> 16) & 0xFF, (unsigned)(pc & 0xFFFF),
-		            r.mnemonic, r.operand);
+		_snprintf_s(line, cap, _TRUNCATE, "%-4s %s", r.mnemonic, r.operand);
 		for (int i = 0; i < len && i < 4; i++) out_bytes[i] = r.bytes[i];
 		*out_byte_count = len;
 		return len;
 	}
 	DisasmResultGb r = {};
 	uint8_t len = GbBackend::Disassemble((uint16_t)pc, &r);
-	_snprintf_s(line, cap, _TRUNCATE, "%04X  %-4s %s",
-	            (unsigned)(pc & 0xFFFF), r.mnemonic, r.operand);
+	_snprintf_s(line, cap, _TRUNCATE, "%-4s %s", r.mnemonic, r.operand);
 	for (int i = 0; i < len && i < 3; i++) out_bytes[i] = r.bytes[i];
 	*out_byte_count = len;
 	return len;
@@ -70,19 +86,57 @@ static void OnPaint(HWND h, DisasmPanelState *st)
 	SetBkMode(dc, TRANSPARENT);
 
 	const uint32_t cur_pc = GetCurrentPC(st->sys);
-	uint32_t pc = cur_pc;
-
 	const int rows = (rc.bottom - rc.top) / kRowH;
-	const int pc_row = rows / 3;
 
-	if (st->sys == DbgSystem::Snes)
-		pc = (pc & 0xFF0000) | ((uint16_t)(pc - (pc_row * 2)) & 0xFFFF);
-	else
-		pc = (uint16_t)(pc - pc_row);
-
-	for (int i = 0; i < rows; i++)
+	if (!st->view_initialized)
 	{
-		int y = i * kRowH;
+		st->view_start_pc    = cur_pc;
+		st->view_initialized = true;
+	}
+	else
+	{
+		uint32_t scan_pc = st->view_start_pc;
+		bool     in_view = false;
+		for (int i = 0; i < rows; i++)
+		{
+			if (scan_pc == cur_pc) { in_view = true; break; }
+			char ln[160]; uint8_t b[4]; int c;
+			int len = DisasmOne(st->sys, scan_pc, ln, sizeof(ln), b, &c);
+			scan_pc = AdvancePC(st->sys, scan_pc, (uint8_t)len);
+		}
+		if (!in_view)
+			st->view_start_pc = cur_pc;
+	}
+
+	uint32_t pc = st->view_start_pc;
+	int y = 0;
+	bool prev_ended_flow = false;
+
+	while (y + kRowH <= rc.bottom)
+	{
+		if (prev_ended_flow)
+		{
+			if (y + kLabelRowH > rc.bottom) break;
+
+			HPEN sep = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
+			HPEN oldP = (HPEN)SelectObject(dc, sep);
+			MoveToEx(dc, kMarginPx, y + 2, NULL);
+			LineTo(dc, rc.right - 4, y + 2);
+			SelectObject(dc, oldP);
+			DeleteObject(sep);
+
+			char label[24];
+			if (st->sys == DbgSystem::Snes)
+				_snprintf_s(label, 24, _TRUNCATE, "$%02X%04X:",
+				            (unsigned)(pc >> 16) & 0xFF, (unsigned)(pc & 0xFFFF));
+			else
+				_snprintf_s(label, 24, _TRUNCATE, "$%04X:", (unsigned)(pc & 0xFFFF));
+
+			SetTextColor(dc, RGB(0, 96, 0));
+			TextOutA(dc, kMarginPx + 6, y + 4, label, (int)strlen(label));
+			y += kLabelRowH;
+			if (y + kRowH > rc.bottom) break;
+		}
 
 		if (pc == cur_pc)
 		{
@@ -122,27 +176,28 @@ static void OnPaint(HWND h, DisasmPanelState *st)
 		int byte_count = 0;
 		int len = DisasmOne(st->sys, pc, line, sizeof(line), bytes, &byte_count);
 
+		char addr_buf[12];
+		if (st->sys == DbgSystem::Snes)
+			_snprintf_s(addr_buf, 12, _TRUNCATE, "%02X:%04X",
+			            (unsigned)(pc >> 16) & 0xFF, (unsigned)(pc & 0xFFFF));
+		else
+			_snprintf_s(addr_buf, 12, _TRUNCATE, "%04X", (unsigned)(pc & 0xFFFF));
+
 		char hex[16];
-		if (byte_count == 1) _snprintf_s(hex, 16, _TRUNCATE, "%02X      ", bytes[0]);
-		else if (byte_count == 2) _snprintf_s(hex, 16, _TRUNCATE, "%02X %02X   ", bytes[0], bytes[1]);
-		else if (byte_count == 3) _snprintf_s(hex, 16, _TRUNCATE, "%02X %02X %02X", bytes[0], bytes[1], bytes[2]);
+		if (byte_count == 1) _snprintf_s(hex, 16, _TRUNCATE, "%02X         ", bytes[0]);
+		else if (byte_count == 2) _snprintf_s(hex, 16, _TRUNCATE, "%02X %02X      ", bytes[0], bytes[1]);
+		else if (byte_count == 3) _snprintf_s(hex, 16, _TRUNCATE, "%02X %02X %02X   ", bytes[0], bytes[1], bytes[2]);
 		else _snprintf_s(hex, 16, _TRUNCATE, "%02X %02X %02X %02X", bytes[0], bytes[1], bytes[2], bytes[3]);
 
 		char full[200];
-		_snprintf_s(full, 200, _TRUNCATE, "  %s   %s", hex, line);
+		_snprintf_s(full, 200, _TRUNCATE, "%s  %s   %s", addr_buf, hex, line);
 
 		SetTextColor(dc, RGB(20, 20, 20));
-		TextOutA(dc, kMarginPx, y + 1, full, (int)strlen(full));
+		TextOutA(dc, kMarginPx + 4, y + 1, full, (int)strlen(full));
 
-		if (st->sys == DbgSystem::Snes)
-		{
-			const uint16_t lo = (uint16_t)(pc & 0xFFFF) + (uint16_t)len;
-			pc = (pc & 0xFF0000) | lo;
-		}
-		else
-		{
-			pc = (uint16_t)((uint16_t)pc + (uint16_t)len);
-		}
+		prev_ended_flow = IsCtlFlowEnd(st->sys, bytes[0]);
+		pc = AdvancePC(st->sys, pc, (uint8_t)len);
+		y += kRowH;
 	}
 
 	HPEN pen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
@@ -169,7 +224,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 			st->font = CreateFont(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
 			                       DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
 			                       ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, TEXT("Consolas"));
-			st->follow_pc = true;
+			st->view_initialized = false;
 			SetWindowLongPtr(h, GWLP_USERDATA, (LONG_PTR)st);
 			break;
 		}
@@ -203,36 +258,47 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 		{
 			DisasmPanelState *st = GetState(h);
 			if (!st) return 0;
-			const int x = LOWORD(lp);
-			const int y = HIWORD(lp);
-			if (x < kMarginPx)
+			const int mx = LOWORD(lp);
+			const int my = HIWORD(lp);
+			if (mx < kMarginPx && st->view_initialized)
 			{
 				RECT rc; GetClientRect(h, &rc);
-				const int rows = (rc.bottom - rc.top) / kRowH;
-				const int pc_row = rows / 3;
-				const int row = y / kRowH;
+				uint32_t pc = st->view_start_pc;
+				int yy = 0;
+				bool prev_ended = false;
+				bool found = false;
+				uint32_t hit_pc = 0;
 
-				const uint32_t cur_pc = GetCurrentPC(st->sys);
-				uint32_t pc = cur_pc;
-				if (st->sys == DbgSystem::Snes)
-					pc = (pc & 0xFF0000) | ((uint16_t)(pc - (pc_row * 2)) & 0xFFFF);
-				else
-					pc = (uint16_t)(pc - pc_row);
-
-				for (int i = 0; i < row; i++)
+				while (yy + kRowH <= rc.bottom)
 				{
-					char line[160]; uint8_t b[4]; int c;
-					int len = DisasmOne(st->sys, pc, line, sizeof(line), b, &c);
-					if (st->sys == DbgSystem::Snes)
-						pc = (pc & 0xFF0000) | (((uint16_t)(pc & 0xFFFF)) + (uint16_t)len);
-					else
-						pc = (uint16_t)((uint16_t)pc + (uint16_t)len);
+					if (prev_ended)
+					{
+						if (yy + kLabelRowH > rc.bottom) break;
+						yy += kLabelRowH;
+						if (yy + kRowH > rc.bottom) break;
+					}
+
+					if (my >= yy && my < yy + kRowH)
+					{
+						hit_pc = pc;
+						found = true;
+						break;
+					}
+
+					char ln[160]; uint8_t b[4]; int c;
+					int len = DisasmOne(st->sys, pc, ln, sizeof(ln), b, &c);
+					prev_ended = IsCtlFlowEnd(st->sys, b[0]);
+					pc = AdvancePC(st->sys, pc, (uint8_t)len);
+					yy += kRowH;
 				}
 
-				const uint8_t  bank = (st->sys == DbgSystem::Snes) ? (uint8_t)(pc >> 16) : (uint8_t)0;
-				const uint16_t addr = (uint16_t)(pc & 0xFFFF);
-				gDebugger.ToggleExecBreakpoint(st->sys, bank, addr);
-				InvalidateRect(h, NULL, FALSE);
+				if (found)
+				{
+					const uint8_t  bank = (st->sys == DbgSystem::Snes) ? (uint8_t)(hit_pc >> 16) : (uint8_t)0;
+					const uint16_t addr = (uint16_t)(hit_pc & 0xFFFF);
+					gDebugger.ToggleExecBreakpoint(st->sys, bank, addr);
+					InvalidateRect(h, NULL, FALSE);
+				}
 			}
 			SetFocus(h);
 			return 0;

@@ -463,6 +463,8 @@ void    S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
                          uint8_t  *ie,  uint8_t *if_,
                          uint64_t *t_cycles);
 
+uint32_t S9xSGBGetCurrentRomBank(void);
+
 typedef void (*S9xSGBDebuggerHook)(uint16_t pc, uint8_t opcode);
 void    S9xSGBSetDebuggerHook(S9xSGBDebuggerHook hook);
 

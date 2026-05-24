@@ -4,6 +4,7 @@
 #include "../snes9x.h"
 #include "../memmap.h"
 #include "../65c816.h"
+#include "../sgb/sgb.h"
 #include <commctrl.h>
 #include <windowsx.h>
 #include <stdio.h>
@@ -34,6 +35,7 @@ struct DisasmLine
 	uint32_t pc;
 	uint8_t  length;
 	bool     is_sub_start;
+	uint32_t section_index;
 };
 
 struct DisasmPanelState
@@ -134,9 +136,10 @@ static void ResetLines(DisasmPanelState *st, uint32_t new_start_pc)
 	st->view_start_pc = new_start_pc;
 	ClearLines(st);
 	DisasmLine first{};
-	first.pc           = new_start_pc;
-	first.length       = 0;
-	first.is_sub_start = false;
+	first.pc            = new_start_pc;
+	first.length        = 0;
+	first.is_sub_start  = false;
+	first.section_index = 0;
 	PushLine(st, first);
 	ListView_SetItemCountEx(st->lv, 100000, LVSICF_NOINVALIDATEALL);
 	InvalidateRect(st->lv, NULL, FALSE);
@@ -149,6 +152,7 @@ static void EnsureLineCached(DisasmPanelState *st, int index)
 	{
 		const uint32_t back_pc     = st->lines[st->line_count - 1].pc;
 		uint8_t        back_length = st->lines[st->line_count - 1].length;
+		const uint32_t back_sec    = st->lines[st->line_count - 1].section_index;
 
 		char ln[160]; uint8_t bytes[4]; int byte_count;
 		int len = DisasmOne(st->sys, back_pc, ln, sizeof(ln), bytes, &byte_count);
@@ -158,10 +162,13 @@ static void EnsureLineCached(DisasmPanelState *st, int index)
 			st->lines[st->line_count - 1].length = back_length;
 		}
 
+		const bool ends_section = IsCtlFlowEnd(st->sys, bytes[0]);
+
 		DisasmLine next{};
-		next.pc           = AdvancePC(st->sys, back_pc, back_length);
-		next.length       = 0;
-		next.is_sub_start = IsCtlFlowEnd(st->sys, bytes[0]);
+		next.pc            = AdvancePC(st->sys, back_pc, back_length);
+		next.length        = 0;
+		next.is_sub_start  = ends_section;
+		next.section_index = ends_section ? (back_sec + 1) : back_sec;
 		PushLine(st, next);
 	}
 }
@@ -202,14 +209,20 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 				break;
 			case COL_ADDR:
 				if (st->sys == DbgSystem::Snes)
-					_snprintf_s(out, cap, _TRUNCATE, "%s%02X:%04X",
-					            ln.is_sub_start ? "* " : "  ",
+				{
+					_snprintf_s(out, cap, _TRUNCATE, "%02x:%04x",
 					            (unsigned)(ln.pc >> 16) & 0xFF,
 					            (unsigned)(ln.pc & 0xFFFF));
+				}
 				else
-					_snprintf_s(out, cap, _TRUNCATE, "%s%04X",
-					            ln.is_sub_start ? "* " : "  ",
-					            (unsigned)(ln.pc & 0xFFFF));
+				{
+					const uint16_t a = (uint16_t)(ln.pc & 0xFFFF);
+					unsigned bank;
+					if (a < 0x4000)        bank = 0;
+					else if (a < 0x8000)   bank = S9xSGBGetCurrentRomBank() & 0xFF;
+					else                   bank = 0;
+					_snprintf_s(out, cap, _TRUNCATE, "%02x:%04x", bank, (unsigned)a);
+				}
 				break;
 			case COL_BYTES:
 				if (byte_count == 1)      _snprintf_s(out, cap, _TRUNCATE, "%02X", bytes[0]);
@@ -243,9 +256,13 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 					cd->clrTextBk = RGB(255, 255, 180);
 					cd->clrText   = RGB(0, 0, 0);
 				}
-				else if (st->lines[idx].is_sub_start)
+				else if (st->lines[idx].section_index & 1)
 				{
-					cd->clrText = RGB(0, 96, 0);
+					cd->clrTextBk = RGB(255, 240, 240);
+				}
+				else
+				{
+					cd->clrTextBk = RGB(255, 255, 255);
 				}
 			}
 			return CDRF_NOTIFYPOSTPAINT | CDRF_NEWFONT;
@@ -265,6 +282,18 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			const uint32_t row_pc = st->lines[idx].pc;
 			const uint32_t cur_pc = GetCurrentPC(st->sys);
 
+			HDC dc = cd->nmcd.hdc;
+
+			if (st->lines[idx].is_sub_start)
+			{
+				HPEN sep = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
+				HPEN oldP = (HPEN)SelectObject(dc, sep);
+				MoveToEx(dc, row_rect.left, row_rect.top, NULL);
+				LineTo(dc, row_rect.right, row_rect.top);
+				SelectObject(dc, oldP);
+				DeleteObject(sep);
+			}
+
 			bool has_bp = false;
 			if (st->sys == DbgSystem::Snes)
 				has_bp = gDebugger.HasExecBreakpoint(DbgSystem::Snes,
@@ -273,7 +302,6 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			else
 				has_bp = gDebugger.HasExecBreakpoint(DbgSystem::Gb, 0, (uint16_t)row_pc);
 
-			HDC dc = cd->nmcd.hdc;
 			if (has_bp)
 			{
 				HBRUSH red = CreateSolidBrush(RGB(200, 0, 0));

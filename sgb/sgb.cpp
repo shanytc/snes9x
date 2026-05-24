@@ -2809,6 +2809,13 @@ void S9xSGBClearDebuggerBreak(void)
 	g_dbg_break_requested = false;
 }
 
+uint32_t S9xSGBGetCurrentRomBank(void)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl) return 0;
+	return impl->cart.mbc.rom_bank;
+}
+
 void S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
                       uint16_t *bc, uint16_t *de, uint16_t *hl,
                       uint8_t  *ime, uint8_t *halted, uint8_t *stopped,

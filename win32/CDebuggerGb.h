@@ -15,9 +15,12 @@ struct GbStatus
 
 namespace GbBackend
 {
-	uint8_t ReadByte(uint16_t addr);
+	uint8_t ReadByte(uint32_t display_addr);
 	void    GetStatus(GbStatus *out);
-	uint8_t Disassemble(uint16_t pc, DisasmResultGb *out);
+	uint8_t Disassemble(uint32_t display_pc, DisasmResultGb *out);
+
+	uint32_t CurrentDisplayPC();
+	uint32_t TotalROMBanks();
 }
 
 #endif

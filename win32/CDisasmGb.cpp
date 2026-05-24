@@ -143,16 +143,93 @@ static void FormatCb(uint8_t cb, char *mnem, size_t mnem_cap, char *operand, siz
 	}
 }
 
-uint8_t DisassembleGb(uint16_t pc, ReadGbFn read, DisasmResultGb *out)
+static void ComputeGbEffective(uint8_t opcode, uint8_t op1, uint8_t op2,
+                                const GbContext *ctx, ReadGbFn read, DisasmResultGb *out)
 {
-	const uint8_t opcode = read(pc);
-	const uint8_t op1    = read((uint16_t)(pc + 1));
-	const uint8_t op2    = read((uint16_t)(pc + 2));
+	if (!ctx) return;
+	uint16_t addr = 0;
+	bool eff = true;
+
+	switch (opcode)
+	{
+		case 0x02: case 0x0A: addr = ctx->bc; break;
+		case 0x12: case 0x1A: addr = ctx->de; break;
+		case 0x22: case 0x2A: case 0x32: case 0x3A:
+		case 0x34: case 0x35: case 0x36:
+		case 0x46: case 0x4E: case 0x56: case 0x5E:
+		case 0x66: case 0x6E: case 0x7E:
+		case 0x70: case 0x71: case 0x72: case 0x73:
+		case 0x74: case 0x75: case 0x77:
+		case 0x86: case 0x8E: case 0x96: case 0x9E:
+		case 0xA6: case 0xAE: case 0xB6: case 0xBE:
+			addr = ctx->hl;
+			break;
+		case 0xE0: case 0xF0:
+			addr = (uint16_t)(0xFF00 | op1);
+			break;
+		case 0xE2: case 0xF2:
+			addr = (uint16_t)(0xFF00 | (ctx->bc & 0xFF));
+			break;
+		case 0xEA: case 0xFA: case 0x08:
+			addr = (uint16_t)(((uint16_t)op2 << 8) | op1);
+			break;
+		default:
+			eff = false;
+			break;
+	}
+
+	if (eff)
+	{
+		out->has_effective   = true;
+		out->effective_addr  = addr;
+		out->effective_value = read(addr);
+	}
+}
+
+uint8_t DisassembleGb(uint32_t display_pc, const GbContext *ctx, ReadGbFn read, DisasmResultGb *out)
+{
+	const uint8_t opcode = read(display_pc);
+	const uint8_t op1    = read(display_pc + 1);
+	const uint8_t op2    = read(display_pc + 2);
+	const uint16_t pc    = (uint16_t)(display_pc & 0xFFFF);
 
 	memset(out, 0, sizeof(*out));
 	out->bytes[0] = opcode;
 	out->bytes[1] = op1;
 	out->bytes[2] = op2;
+
+	ComputeGbEffective(opcode, op1, op2, ctx, read, out);
+
+	switch (opcode)
+	{
+		case 0x18: case 0x20: case 0x28: case 0x30: case 0x38:
+		{
+			const int8_t  sb  = (int8_t)op1;
+			const uint16_t tgt = (uint16_t)(pc + 2 + sb);
+			out->has_branch    = true;
+			out->branch_target = tgt;
+			break;
+		}
+		case 0xC3: case 0xC2: case 0xCA: case 0xD2: case 0xDA:
+		case 0xCD: case 0xC4: case 0xCC: case 0xD4: case 0xDC:
+			out->has_branch    = true;
+			out->branch_target = (uint16_t)(((uint16_t)op2 << 8) | op1);
+			break;
+		case 0xE9:
+			if (ctx)
+			{
+				out->has_branch    = true;
+				out->branch_target = ctx->hl;
+			}
+			break;
+		case 0xC7: case 0xCF: case 0xD7: case 0xDF:
+		case 0xE7: case 0xEF: case 0xF7: case 0xFF:
+			out->has_branch    = true;
+			out->branch_target = (uint16_t)(opcode & 0x38);
+			break;
+		default:
+			break;
+	}
 
 	const OpInfo &info = kBase[opcode];
 	uint8_t length = info.length;

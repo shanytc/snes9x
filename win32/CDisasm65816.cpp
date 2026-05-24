@@ -58,7 +58,14 @@ static const int kAddrModes[256] =
 	 4, 11,  9, 20, 26,  7,  7, 13,  0, 16,  0,  0, 23, 15, 15, 18
 };
 
-uint8_t Disassemble65816(uint32_t pc24, bool flag_M, bool flag_X, Read65816Fn read, DisasmResult65816 *out)
+static void SetEff(DisasmResult65816 *out, uint32_t addr24, Read65816Fn read)
+{
+	out->has_effective   = true;
+	out->effective_addr  = addr24 & 0xFFFFFF;
+	out->effective_value = read(out->effective_addr);
+}
+
+uint8_t Disassemble65816(uint32_t pc24, const Snes65816Context *ctx, Read65816Fn read, DisasmResult65816 *out)
 {
 	const uint8_t opcode = read(pc24);
 	const uint8_t op1    = read((pc24 + 1) & 0xFFFFFF);
@@ -66,6 +73,9 @@ uint8_t Disassemble65816(uint32_t pc24, bool flag_M, bool flag_X, Read65816Fn re
 	const uint8_t op3    = read((pc24 + 3) & 0xFFFFFF);
 
 	const uint16_t pc16 = (uint16_t)(pc24 & 0xFFFF);
+
+	const bool flag_M = ctx ? ctx->flag_M : true;
+	const bool flag_X = ctx ? ctx->flag_X : true;
 
 	memset(out, 0, sizeof(*out));
 	out->bytes[0] = opcode;
@@ -106,6 +116,8 @@ uint8_t Disassemble65816(uint32_t pc24, bool flag_M, bool flag_X, Read65816Fn re
 			int8_t  sb   = (int8_t)op1;
 			uint16_t tgt = (uint16_t)(pc16 + 2 + sb);
 			snprintf(o, cap, "$%04X", tgt);
+			out->has_branch    = true;
+			out->branch_target = (pc24 & 0xFF0000) | tgt;
 			size = 2;
 			break;
 		}
@@ -115,22 +127,27 @@ uint8_t Disassemble65816(uint32_t pc24, bool flag_M, bool flag_X, Read65816Fn re
 			int16_t sw  = (int16_t)(((uint16_t)op2 << 8) | op1);
 			uint16_t tgt = (uint16_t)(pc16 + 3 + sw);
 			snprintf(o, cap, "$%04X", tgt);
+			out->has_branch    = true;
+			out->branch_target = (pc24 & 0xFF0000) | tgt;
 			size = 3;
 			break;
 		}
 
 		case 6:
 			snprintf(o, cap, "$%02X", op1);
+			if (ctx) SetEff(out, (uint16_t)(ctx->D + op1), read);
 			size = 2;
 			break;
 
 		case 7:
 			snprintf(o, cap, "$%02X,x", op1);
+			if (ctx) SetEff(out, (uint16_t)(ctx->D + op1 + ctx->X), read);
 			size = 2;
 			break;
 
 		case 8:
 			snprintf(o, cap, "$%02X,y", op1);
+			if (ctx) SetEff(out, (uint16_t)(ctx->D + op1 + ctx->Y), read);
 			size = 2;
 			break;
 
@@ -160,32 +177,69 @@ uint8_t Disassemble65816(uint32_t pc24, bool flag_M, bool flag_X, Read65816Fn re
 			break;
 
 		case 14:
+		{
+			const uint16_t a16 = (uint16_t)(((uint16_t)op2 << 8) | op1);
 			snprintf(o, cap, "$%02X%02X", op2, op1);
+			if (opcode == 0x4C || opcode == 0x20)
+			{
+				out->has_branch    = true;
+				out->branch_target = (pc24 & 0xFF0000) | a16;
+			}
+			else if (ctx)
+			{
+				SetEff(out, ((uint32_t)ctx->DB << 16) | a16, read);
+			}
 			size = 3;
 			break;
+		}
 
 		case 15:
+		{
+			const uint16_t a16 = (uint16_t)(((uint16_t)op2 << 8) | op1);
 			snprintf(o, cap, "$%02X%02X,x", op2, op1);
+			if (ctx) SetEff(out, ((uint32_t)ctx->DB << 16) | (uint16_t)(a16 + ctx->X), read);
 			size = 3;
 			break;
+		}
 
 		case 16:
+		{
+			const uint16_t a16 = (uint16_t)(((uint16_t)op2 << 8) | op1);
 			snprintf(o, cap, "$%02X%02X,y", op2, op1);
+			if (ctx) SetEff(out, ((uint32_t)ctx->DB << 16) | (uint16_t)(a16 + ctx->Y), read);
 			size = 3;
 			break;
+		}
 
 		case 17:
+		{
+			const uint32_t a24 = ((uint32_t)op3 << 16) | ((uint32_t)op2 << 8) | op1;
 			snprintf(o, cap, "$%02X%02X%02X", op3, op2, op1);
+			if (opcode == 0x5C || opcode == 0x22)
+			{
+				out->has_branch    = true;
+				out->branch_target = a24;
+			}
+			else if (ctx)
+			{
+				SetEff(out, a24, read);
+			}
 			size = 4;
 			break;
+		}
 
 		case 18:
+		{
+			const uint32_t a24 = ((uint32_t)op3 << 16) | ((uint32_t)op2 << 8) | op1;
 			snprintf(o, cap, "$%02X%02X%02X,x", op3, op2, op1);
+			if (ctx) SetEff(out, (a24 + ctx->X) & 0xFFFFFF, read);
 			size = 4;
 			break;
+		}
 
 		case 19:
 			snprintf(o, cap, "$%02X,s", op1);
+			if (ctx) SetEff(out, (uint16_t)(ctx->S + op1), read);
 			size = 2;
 			break;
 

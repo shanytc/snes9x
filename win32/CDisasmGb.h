@@ -5,15 +5,26 @@
 
 struct DisasmResultGb
 {
-	uint8_t length;
-	uint8_t bytes[3];
-	char    mnemonic[8];
-	char    operand[40];
+	uint8_t  length;
+	uint8_t  bytes[3];
+	char     mnemonic[8];
+	char     operand[40];
+	bool     has_effective;
+	uint16_t effective_addr;
+	uint8_t  effective_value;
+	bool     has_branch;
+	uint16_t branch_target;
 };
 
-typedef uint8_t (*ReadGbFn)(uint16_t addr);
+struct GbContext
+{
+	uint16_t af, bc, de, hl, sp;
+};
 
-uint8_t DisassembleGb(uint16_t pc,
+typedef uint8_t (*ReadGbFn)(uint32_t display_addr);
+
+uint8_t DisassembleGb(uint32_t display_pc,
+                      const GbContext *ctx,
                       ReadGbFn read,
                       DisasmResultGb *out);
 

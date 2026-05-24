@@ -60,14 +60,20 @@ void GetStatus(SnesStatus *out)
 
 uint8_t Disassemble(uint32_t pc24, DisasmResult65816 *out)
 {
-	const bool m = CheckMemory() != 0;
-	const bool x = CheckIndex()  != 0;
-	return DisassembleAt(pc24, m, x, out);
+	Snes65816Context ctx{};
+	ctx.flag_M = CheckMemory() != 0;
+	ctx.flag_X = CheckIndex()  != 0;
+	ctx.D  = Registers.D.W;
+	ctx.X  = Registers.X.W;
+	ctx.Y  = Registers.Y.W;
+	ctx.S  = Registers.S.W;
+	ctx.DB = Registers.DB;
+	return DisassembleAt(pc24, &ctx, out);
 }
 
-uint8_t DisassembleAt(uint32_t pc24, bool flag_M, bool flag_X, DisasmResult65816 *out)
+uint8_t DisassembleAt(uint32_t pc24, const Snes65816Context *ctx, DisasmResult65816 *out)
 {
-	return Disassemble65816(pc24, flag_M, flag_X, &ReadByte, out);
+	return Disassemble65816(pc24, ctx, &ReadByte, out);
 }
 
 } // namespace SnesBackend

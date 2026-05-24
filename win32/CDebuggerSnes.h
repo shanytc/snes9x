@@ -30,7 +30,7 @@ namespace SnesBackend
 	uint8_t ReadByte(uint32_t addr24);
 	void    GetStatus(SnesStatus *out);
 	uint8_t Disassemble(uint32_t pc24, DisasmResult65816 *out);
-	uint8_t DisassembleAt(uint32_t pc24, bool flag_M, bool flag_X, DisasmResult65816 *out);
+	uint8_t DisassembleAt(uint32_t pc24, const Snes65816Context *ctx, DisasmResult65816 *out);
 }
 
 #endif

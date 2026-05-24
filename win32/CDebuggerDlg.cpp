@@ -505,20 +505,20 @@ void DebuggerDlgGlobalInit(HINSTANCE hInst)
 	RegisterDebuggerClass(hInst, kSnesClassName);
 	RegisterDebuggerClass(hInst, kGbClassName);
 
-	const ACCEL accels[] = {
-		{ FVIRTKEY,                IDM_DBG_RUN              | 0, (WORD)VK_F5 },
-		{ FVIRTKEY | FSHIFT,       IDM_DBG_PAUSE            | 0, (WORD)VK_F5 },
-		{ FVIRTKEY,                IDM_DBG_STEP_IN          | 0, (WORD)VK_F11 },
-		{ FVIRTKEY,                IDM_DBG_STEP_OVER        | 0, (WORD)VK_F10 },
-		{ FVIRTKEY | FSHIFT,       IDM_DBG_STEP_OUT         | 0, (WORD)VK_F11 },
-		{ FVIRTKEY,                IDM_DBG_RUN_ONE_SCANLINE | 0, (WORD)VK_F7 },
-		{ FVIRTKEY,                IDM_DBG_FRAME_STEP       | 0, (WORD)VK_F8 },
-		{ FVIRTKEY | FALT,         IDM_DBG_RUN_TO_SCANLINE  | 0, (WORD)'B' },
-		{ FVIRTKEY | FCONTROL,     IDM_DBG_BREAK_IN         | 0, (WORD)'B' },
-		{ FVIRTKEY | FCONTROL,     IDM_DBG_RESET            | 0, (WORD)'R' },
-		{ FVIRTKEY | FCONTROL | FSHIFT, IDM_DBG_RELOAD_ROM  | 0, (WORD)'R' },
+	ACCEL accels[] = {
+		{ FVIRTKEY,                     (WORD)VK_F5,  (WORD)IDM_DBG_RUN              },
+		{ FVIRTKEY | FSHIFT,            (WORD)VK_F5,  (WORD)IDM_DBG_PAUSE            },
+		{ FVIRTKEY,                     (WORD)VK_F11, (WORD)IDM_DBG_STEP_IN          },
+		{ FVIRTKEY,                     (WORD)VK_F10, (WORD)IDM_DBG_STEP_OVER        },
+		{ FVIRTKEY | FSHIFT,            (WORD)VK_F11, (WORD)IDM_DBG_STEP_OUT         },
+		{ FVIRTKEY,                     (WORD)VK_F7,  (WORD)IDM_DBG_RUN_ONE_SCANLINE },
+		{ FVIRTKEY,                     (WORD)VK_F8,  (WORD)IDM_DBG_FRAME_STEP       },
+		{ FVIRTKEY | FALT,              (WORD)'B',    (WORD)IDM_DBG_RUN_TO_SCANLINE  },
+		{ FVIRTKEY | FCONTROL,          (WORD)'B',    (WORD)IDM_DBG_BREAK_IN         },
+		{ FVIRTKEY | FCONTROL,          (WORD)'R',    (WORD)IDM_DBG_RESET            },
+		{ FVIRTKEY | FCONTROL | FSHIFT, (WORD)'R',    (WORD)IDM_DBG_RELOAD_ROM       },
 	};
-	g_dbg_accel = CreateAcceleratorTable((LPACCEL)accels, sizeof(accels)/sizeof(accels[0]));
+	g_dbg_accel = CreateAcceleratorTable(accels, sizeof(accels)/sizeof(accels[0]));
 }
 
 HACCEL S9xDebuggerGetAcceleratorsForWindow(HWND wnd)

@@ -7,6 +7,7 @@
 #include "gb_cpu.h"
 #include "gb_memory.h"
 #include "gb_ops.h"
+#include "sgb.h"
 
 namespace SGB {
 
@@ -87,6 +88,12 @@ void Cpu::Step(Memory &mem)
 	}
 
 	if (g_trace_hook) g_trace_hook(pc_at_fetch, op, state_);
+
+	if (S9xSGBDebuggerBreakRequested())
+	{
+		state_.r.pc = pc_at_fetch;
+		return;
+	}
 
 	Dispatch(state_, mem, op);
 

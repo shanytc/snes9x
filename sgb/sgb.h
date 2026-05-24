@@ -465,11 +465,15 @@ void    S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
 
 uint32_t S9xSGBGetCurrentRomBank(void);
 
+uint8_t  S9xSGBPeekROMByte(uint32_t rom_offset);
+uint32_t S9xSGBGetROMSize(void);
+
 typedef void (*S9xSGBDebuggerHook)(uint16_t pc, uint8_t opcode);
 void    S9xSGBSetDebuggerHook(S9xSGBDebuggerHook hook);
 
 void    S9xSGBRequestDebuggerBreak(void);
 void    S9xSGBClearDebuggerBreak(void);
+bool    S9xSGBDebuggerBreakRequested(void);
 
 // Convenience file I/O wrappers — write the full blob to `filename`,
 // or read it back. Return false on I/O error or format mismatch.

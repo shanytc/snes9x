@@ -2816,6 +2816,22 @@ uint32_t S9xSGBGetCurrentRomBank(void)
 	return impl->cart.mbc.rom_bank;
 }
 
+uint8_t S9xSGBPeekROMByte(uint32_t rom_offset)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl) return 0;
+	const std::vector<uint8_t> &rom = impl->cart.rom;
+	if (rom_offset >= rom.size()) return 0;
+	return rom[rom_offset];
+}
+
+uint32_t S9xSGBGetROMSize(void)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl) return 0;
+	return (uint32_t)impl->cart.rom.size();
+}
+
 void S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
                       uint16_t *bc, uint16_t *de, uint16_t *hl,
                       uint8_t  *ime, uint8_t *halted, uint8_t *stopped,

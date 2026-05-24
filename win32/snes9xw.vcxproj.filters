@@ -483,6 +483,9 @@
     <ClInclude Include="CStatusPanel.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="CDebuggerLabels.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
@@ -1011,6 +1014,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CStatusPanel.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CDebuggerLabels.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
   </ItemGroup>

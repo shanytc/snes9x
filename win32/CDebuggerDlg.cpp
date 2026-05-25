@@ -10,6 +10,8 @@
 #include "CDebuggerGb.h"
 #include "CDisasmPanel.h"
 #include "CStatusPanel.h"
+#include "CBreakpointsPanel.h"
+#include "CMemoryViewer.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
 
@@ -143,6 +145,7 @@ enum
 	IDM_DBG_RUN_TO_SCANLINE,
 	IDM_DBG_BREAK_IN,
 	IDM_DBG_RELOAD_ROM,
+	IDM_DBG_MEMORY_VIEWER,
 
 	IDB_DBG_RUN = 5300,
 	IDB_DBG_PAUSE,
@@ -211,6 +214,8 @@ static HMENU BuildMenu()
 	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RESET,           TEXT("&Reset\tCtrl+R"));
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RELOAD_ROM,      TEXT("Reload ROM\tCtrl+Shift+R"));
+	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_MEMORY_VIEWER,   TEXT("&Memory Viewer...\tCtrl+M"));
 	AppendMenu(menu, MF_POPUP, (UINT_PTR)mDebug, TEXT("&Debug"));
 
 	HMENU mSearch = CreatePopupMenu();
@@ -359,6 +364,9 @@ static void OnCommand(HWND hwnd, DbgDlgState *st, WPARAM wp)
 			gDebugger.ReloadRom();
 			DebuggerDlgRefresh(hwnd);
 			break;
+		case IDM_DBG_MEMORY_VIEWER:
+			OpenMemoryViewer(st->sys);
+			break;
 		default:
 			break;
 	}
@@ -411,7 +419,7 @@ static LRESULT CALLBACK DebuggerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 			st->hLabels      = CreatePlaceholder(st->hSplitMid,    IDC_DBG_LABELS,      TEXT("Labels"));
 			st->hSettings    = CreatePlaceholder(st->hSplitRight,  IDC_DBG_SETTINGS,    TEXT("Disassembly settings"));
 			st->hWatch       = CreatePlaceholder(st->hSplitBottom, IDC_DBG_WATCH,       TEXT("Watch"));
-			st->hBreakpoints = CreatePlaceholder(st->hSplitBottom2,IDC_DBG_BREAKPOINTS, TEXT("Breakpoints"));
+			st->hBreakpoints = BreakpointsPanelCreate(st->hSplitBottom2, st->sys, IDC_DBG_BREAKPOINTS);
 			st->hCallstack   = CreatePlaceholder(st->hSplitBottom2,IDC_DBG_CALLSTACK,   TEXT("Call Stack"));
 
 			SplitterSetChildren(st->hSplitBottom2, st->hBreakpoints, st->hCallstack);
@@ -502,6 +510,7 @@ void DebuggerDlgGlobalInit(HINSTANCE hInst)
 	SplitterRegisterClass(hInst);
 	DisasmPanelRegisterClass(hInst);
 	StatusPanelRegisterClass(hInst);
+	BreakpointsPanelRegisterClass(hInst);
 	RegisterDebuggerClass(hInst, kSnesClassName);
 	RegisterDebuggerClass(hInst, kGbClassName);
 
@@ -517,6 +526,7 @@ void DebuggerDlgGlobalInit(HINSTANCE hInst)
 		{ FVIRTKEY | FCONTROL,          (WORD)'B',    (WORD)IDM_DBG_BREAK_IN         },
 		{ FVIRTKEY | FCONTROL,          (WORD)'R',    (WORD)IDM_DBG_RESET            },
 		{ FVIRTKEY | FCONTROL | FSHIFT, (WORD)'R',    (WORD)IDM_DBG_RELOAD_ROM       },
+		{ FVIRTKEY | FCONTROL,          (WORD)'M',    (WORD)IDM_DBG_MEMORY_VIEWER    },
 	};
 	g_dbg_accel = CreateAcceleratorTable(accels, sizeof(accels)/sizeof(accels[0]));
 }
@@ -586,6 +596,7 @@ void DebuggerDlgRefresh(HWND h)
 
 	if (st->hDisasm) DisasmPanelRefresh(st->hDisasm);
 	if (st->hStatus) StatusPanelRefresh(st->hStatus);
+	if (st->hBreakpoints) BreakpointsPanelRefresh(st->hBreakpoints);
 
 	InvalidateRect(h, NULL, FALSE);
 }

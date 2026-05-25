@@ -2,6 +2,7 @@
 #include "CDebuggerDlg.h"
 #include "CDebuggerSnes.h"
 #include "CDebuggerGb.h"
+#include "CMemoryViewer.h"
 #include "debugger_hook.h"
 #include "../snes9x.h"
 #include "../memmap.h"
@@ -133,7 +134,11 @@ void CDebugger::OnGbPreInstruction(uint16_t pc, uint8_t opcode)
 	if (!gb_attached_)
 		return;
 
-	if (HasExecBreakpoint(DbgSystem::Gb, 0, pc))
+	uint8_t cur_bank = 0;
+	if (pc >= 0x4000 && pc < 0x8000)
+		cur_bank = (uint8_t)(S9xSGBGetCurrentRomBank() & 0xFF);
+
+	if (HasExecBreakpoint(DbgSystem::Gb, cur_bank, pc))
 	{
 		HaltGbNow();
 		return;
@@ -361,25 +366,56 @@ void CDebugger::ReloadRom()
 	S9xReset();
 }
 
+static int InferMemoryType(DbgSystem sys, uint8_t bank, uint16_t addr)
+{
+	if (sys == DbgSystem::Gb)
+	{
+		if (addr < 0x8000) return DBG_MEM_PRG_ROM;
+		if (addr < 0xA000) return DBG_MEM_VIDEO_RAM;
+		if (addr < 0xC000) return DBG_MEM_SRAM;
+		if (addr < 0xFE00) return DBG_MEM_WORK_RAM;
+		if (addr < 0xFEA0) return DBG_MEM_OAM;
+		if (addr < 0xFF00) return DBG_MEM_CPU;
+		if (addr < 0xFF80) return DBG_MEM_REGISTER;
+		if (addr < 0xFFFF) return DBG_MEM_CPU;
+		return DBG_MEM_REGISTER;
+	}
+	if ((addr >= 0x2100 && addr < 0x2200) || (addr >= 0x4200 && addr < 0x4400))
+		return DBG_MEM_REGISTER;
+	if (bank == 0x7E || bank == 0x7F)
+		return DBG_MEM_WORK_RAM;
+	if (addr < 0x2000 && ((bank < 0x40) || (bank >= 0x80 && bank < 0xC0)))
+		return DBG_MEM_WORK_RAM;
+	if (bank >= 0xC0 || (addr >= 0x8000 && (bank < 0x40 || (bank >= 0x80 && bank < 0xC0))))
+		return DBG_MEM_PRG_ROM;
+	if (bank >= 0x40 && bank < 0x7E)
+		return DBG_MEM_PRG_ROM;
+	return DBG_MEM_CPU;
+}
+
 void CDebugger::AddExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr)
 {
 	if (HasExecBreakpoint(sys, bank, addr))
 		return;
 	DbgBreakpoint bp{};
-	bp.system  = sys;
-	bp.enabled = true;
-	bp.bank    = bank;
-	bp.address = addr;
+	bp.system      = sys;
+	bp.enabled     = true;
+	bp.brk_execute = true;
+	bp.memory_type = InferMemoryType(sys, bank, addr);
+	bp.bank        = bank;
+	bp.address     = addr;
 	bps_.push_back(bp);
+	bps_version_++;
 }
 
 void CDebugger::RemoveExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr)
 {
 	for (auto it = bps_.begin(); it != bps_.end(); ++it)
 	{
-		if (it->system == sys && it->bank == bank && it->address == addr)
+		if (it->system == sys && it->bank == bank && it->address == addr && it->brk_execute)
 		{
 			bps_.erase(it);
+			bps_version_++;
 			return;
 		}
 	}
@@ -398,12 +434,47 @@ bool CDebugger::HasExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr) co
 	for (const auto &bp : bps_)
 	{
 		if (!bp.enabled) continue;
+		if (!bp.brk_execute) continue;
 		if (bp.system != sys) continue;
 		if (sys == DbgSystem::Snes && bp.bank != bank) continue;
+		if (sys == DbgSystem::Gb && addr < 0x8000 && bp.bank != bank) continue;
 		if (bp.address == addr)
 			return true;
 	}
 	return false;
+}
+
+void CDebugger::AddBreakpoint(const DbgBreakpoint &bp)
+{
+	bps_.push_back(bp);
+	bps_version_++;
+}
+
+void CDebugger::UpdateBreakpoint(size_t index, const DbgBreakpoint &bp)
+{
+	if (index >= bps_.size()) return;
+	bps_[index] = bp;
+	bps_version_++;
+}
+
+void CDebugger::RemoveBreakpointAt(size_t index)
+{
+	if (index >= bps_.size()) return;
+	bps_.erase(bps_.begin() + index);
+	bps_version_++;
+}
+
+void CDebugger::ToggleBreakpointEnabledAt(size_t index)
+{
+	if (index >= bps_.size()) return;
+	bps_[index].enabled = !bps_[index].enabled;
+	bps_version_++;
+}
+
+const DbgBreakpoint *CDebugger::GetBreakpoint(size_t index) const
+{
+	if (index >= bps_.size()) return nullptr;
+	return &bps_[index];
 }
 
 void CDebugger::RefreshSnes()
@@ -434,6 +505,7 @@ void S9xDebuggerRefreshAll()
 		PostMessage(gSnesDebuggerHWND, WM_USER_DEBUGGER_REFRESH, 0, 0);
 	if (gGbDebuggerHWND)
 		PostMessage(gGbDebuggerHWND, WM_USER_DEBUGGER_REFRESH, 0, 0);
+	MemoryViewerRefreshAll();
 }
 
 void WinShowSnesDebuggerDialog()

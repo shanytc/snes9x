@@ -737,6 +737,17 @@
 #define IDC_DBG_INPUT_PROMPT            5000
 #define IDC_DBG_INPUT_EDIT              5001
 
+#define IDD_DBG_BREAKPOINT              184
+#define IDC_DBG_BP_TYPE                 5002
+#define IDC_DBG_BP_MAX                  5003
+#define IDC_DBG_BP_EXEC                 5004
+#define IDC_DBG_BP_READ                 5005
+#define IDC_DBG_BP_WRITE                5006
+#define IDC_DBG_BP_ADDR                 5007
+#define IDC_DBG_BP_COND                 5008
+#define IDC_DBG_BP_MARK                 5009
+#define IDC_DBG_BP_BREAKEXEC            5010
+
 #define IDC_VRAMV_CANVAS                3120
 #define IDC_VRAMV_PALETTE               3121
 #define IDC_VRAMV_BPP_2                 3122
@@ -902,7 +913,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        189
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         5002
+#define _APS_NEXT_CONTROL_VALUE         5011
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

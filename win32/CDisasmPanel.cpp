@@ -119,6 +119,8 @@ struct DisasmPanelState
 	bool         rclick_valid     = false;
 	bool         rclick_has_branch = false;
 	uint32_t     rclick_branch_target = 0;
+	uint32_t     shown_bps_version = 0;
+	uint32_t     shown_pc          = 0xFFFFFFFFu;
 };
 
 static void EnsureTargetsCap(DisasmPanelState *st, int need)
@@ -673,13 +675,9 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				DeleteObject(sep);
 			}
 
-			bool has_bp = false;
-			if (st->sys == DbgSystem::Snes)
-				has_bp = gDebugger.HasExecBreakpoint(DbgSystem::Snes,
-				                                     (uint8_t)(row_pc >> 16),
-				                                     (uint16_t)(row_pc & 0xFFFF));
-			else
-				has_bp = gDebugger.HasExecBreakpoint(DbgSystem::Gb, 0, (uint16_t)row_pc);
+			const uint8_t  row_bank = (uint8_t)((row_pc >> 16) & 0xFF);
+			const uint16_t row_addr = (uint16_t)(row_pc & 0xFFFF);
+			const bool has_bp = gDebugger.HasExecBreakpoint(st->sys, row_bank, row_addr);
 
 			const int cx = (mr.left + mr.right) / 2;
 			const int cy = (mr.top + mr.bottom) / 2;
@@ -833,15 +831,19 @@ static void OnContextMenuCommand(HWND parent, DisasmPanelState *st, int cmd)
 	if (!st->rclick_valid && cmd != IDM_DISASM_COPY_LINE && cmd != IDM_DISASM_GO_TO_PC)
 		return;
 	const uint32_t pc = st->rclick_pc;
-	const uint8_t  bank = (st->sys == DbgSystem::Snes) ? (uint8_t)(pc >> 16) : (uint8_t)0;
+	const uint8_t  bank = (uint8_t)((pc >> 16) & 0xFF);
 	const uint16_t addr = (uint16_t)(pc & 0xFFFF);
 
 	switch (cmd)
 	{
 		case IDM_DISASM_TOGGLE_BP:
+		{
 			gDebugger.ToggleExecBreakpoint(st->sys, bank, addr);
 			InvalidateRect(st->lv, NULL, FALSE);
+			HWND root = GetAncestor(parent, GA_ROOT);
+			if (root) PostMessage(root, WM_USER_DEBUGGER_REFRESH, 0, 0);
 			break;
+		}
 		case IDM_DISASM_COPY_ADDR:
 		{
 			char buf[16];
@@ -905,7 +907,7 @@ static void OnContextMenuCommand(HWND parent, DisasmPanelState *st, int cmd)
 		case IDM_DISASM_RUN_TO_BRANCH_TARGET:
 			if (st->rclick_has_branch)
 			{
-				const uint8_t  bb = (st->sys == DbgSystem::Snes) ? (uint8_t)(st->rclick_branch_target >> 16) : (uint8_t)0;
+				const uint8_t  bb = (uint8_t)((st->rclick_branch_target >> 16) & 0xFF);
 				const uint16_t aa = (uint16_t)(st->rclick_branch_target & 0xFFFF);
 				gDebugger.AddExecBreakpoint(st->sys, bb, aa);
 				gDebugger.Run();
@@ -1103,10 +1105,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 					    && !st->lines[act->iItem].is_label_row)
 					{
 						const uint32_t pc = st->lines[act->iItem].pc;
-						const uint8_t  b  = (st->sys == DbgSystem::Snes) ? (uint8_t)(pc >> 16) : (uint8_t)0;
+						const uint8_t  b  = (uint8_t)((pc >> 16) & 0xFF);
 						const uint16_t a  = (uint16_t)(pc & 0xFFFF);
 						gDebugger.ToggleExecBreakpoint(st->sys, b, a);
 						InvalidateRect(st->lv, NULL, FALSE);
+						HWND root = GetAncestor(h, GA_ROOT);
+						if (root) PostMessage(root, WM_USER_DEBUGGER_REFRESH, 0, 0);
 					}
 					return 0;
 				}
@@ -1153,8 +1157,22 @@ void DisasmPanelRefresh(HWND h)
 	DisasmPanelState *st = GetState(h);
 	if (!st || !st->lv) return;
 
-	if (st->view_initialized && !Settings.Paused) return;
+	const uint32_t cur_pc          = GetCurrentPC(st->sys);
+	const uint32_t cur_bps_version = gDebugger.BreakpointsVersion();
+	const bool     bps_changed     = st->shown_bps_version != cur_bps_version;
+	const bool     pc_changed      = st->shown_pc          != cur_pc;
+	const bool     first_run       = !st->view_initialized;
 
-	EnsurePCVisible(st);
-	InvalidateRect(st->lv, NULL, FALSE);
+	if (first_run || (Settings.Paused && pc_changed))
+	{
+		EnsurePCVisible(st);
+		InvalidateRect(st->lv, NULL, FALSE);
+	}
+	else if (bps_changed)
+	{
+		InvalidateRect(st->lv, NULL, FALSE);
+	}
+
+	st->shown_bps_version = cur_bps_version;
+	st->shown_pc          = cur_pc;
 }

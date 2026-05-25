@@ -7,12 +7,31 @@
 
 enum class DbgSystem { None, Snes, Gb };
 
+enum DbgMemoryType
+{
+	DBG_MEM_CPU       = 0,
+	DBG_MEM_PRG_ROM   = 1,
+	DBG_MEM_WORK_RAM  = 2,
+	DBG_MEM_VIDEO_RAM = 3,
+	DBG_MEM_OAM       = 4,
+	DBG_MEM_CG_RAM    = 5,
+	DBG_MEM_REGISTER  = 6,
+	DBG_MEM_SRAM      = 7
+};
+
 struct DbgBreakpoint
 {
-	DbgSystem system;
-	bool      enabled;
-	uint8_t   bank;
-	uint16_t  address;
+	DbgSystem system        = DbgSystem::None;
+	bool      enabled       = true;
+	bool      brk_execute   = true;
+	bool      brk_read      = false;
+	bool      brk_write     = false;
+	bool      mark_event    = false;
+	bool      break_exec    = true;
+	int       memory_type   = DBG_MEM_CPU;
+	uint8_t   bank          = 0;
+	uint16_t  address       = 0;
+	char      condition[64] = {};
 };
 
 class CDebugger
@@ -48,6 +67,14 @@ public:
 	void ToggleExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr);
 	bool HasExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr) const;
 	const std::vector<DbgBreakpoint> &Breakpoints() const { return bps_; }
+
+	void   AddBreakpoint(const DbgBreakpoint &bp);
+	void   UpdateBreakpoint(size_t index, const DbgBreakpoint &bp);
+	void   RemoveBreakpointAt(size_t index);
+	void   ToggleBreakpointEnabledAt(size_t index);
+	size_t BreakpointCount() const { return bps_.size(); }
+	const  DbgBreakpoint *GetBreakpoint(size_t index) const;
+	uint32_t BreakpointsVersion() const { return bps_version_; }
 
 	HWND SnesDlg() const { return snes_dlg_; }
 	HWND GbDlg()   const { return gb_dlg_; }
@@ -89,6 +116,7 @@ private:
 	uint64_t snes_break_in_target_      = 0;
 
 	std::vector<DbgBreakpoint> bps_;
+	uint32_t bps_version_ = 0;
 };
 
 extern CDebugger gDebugger;

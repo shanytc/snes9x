@@ -513,6 +513,9 @@
     <ClInclude Include="CDisasmPanel.h" />
     <ClInclude Include="CStatusPanel.h" />
     <ClInclude Include="CDebuggerLabels.h" />
+    <ClInclude Include="CBreakpointsPanel.h" />
+    <ClInclude Include="CMemoryRegions.h" />
+    <ClInclude Include="CMemoryViewer.h" />
     <ClInclude Include="CVulkan.h" />
     <ClInclude Include="CWaveOut.h" />
     <ClInclude Include="CXAudio2.h" />
@@ -765,6 +768,9 @@
     <ClCompile Include="CDisasmPanel.cpp" />
     <ClCompile Include="CStatusPanel.cpp" />
     <ClCompile Include="CDebuggerLabels.cpp" />
+    <ClCompile Include="CBreakpointsPanel.cpp" />
+    <ClCompile Include="CMemoryRegions.cpp" />
+    <ClCompile Include="CMemoryViewer.cpp" />
     <ClCompile Include="CVulkan.cpp" />
     <ClCompile Include="CWaveOut.cpp" />
     <ClCompile Include="CXAudio2.cpp" />

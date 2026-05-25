@@ -486,6 +486,15 @@
     <ClInclude Include="CDebuggerLabels.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="CBreakpointsPanel.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CMemoryRegions.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CMemoryViewer.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
@@ -1017,6 +1026,15 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CDebuggerLabels.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CBreakpointsPanel.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CMemoryRegions.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CMemoryViewer.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
   </ItemGroup>

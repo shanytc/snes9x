@@ -48,6 +48,10 @@ public:
 	void OnSnesPreInstruction();
 	void OnGbPreInstruction(uint16_t pc, uint8_t opcode);
 
+	void OnSnesMemAccess(uint32_t addr24, uint8_t value, bool is_write);
+	void OnGbMemAccess(uint16_t addr, uint8_t value, bool is_write);
+	bool HasRWBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr, bool is_write) const;
+
 	void Run();
 	void Pause();
 	void StepIn(DbgSystem sys);
@@ -117,6 +121,8 @@ private:
 
 	std::vector<DbgBreakpoint> bps_;
 	uint32_t bps_version_ = 0;
+
+	void OnBpsChanged();
 };
 
 extern CDebugger gDebugger;

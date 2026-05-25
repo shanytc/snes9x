@@ -14,6 +14,10 @@
 #include "gb_mbc.h"
 #include "sgb.h"
 
+#ifdef __WIN32__
+#include "../win32/debugger_hook.h"
+#endif
+
 #include <cstring>
 
 namespace SGB {
@@ -94,6 +98,9 @@ inline void CgbWritePalette(uint8_t *pal, uint8_t &idx, uint8_t value, bool stor
 
 uint8_t MemRead(Memory &m, uint16_t addr)
 {
+#ifdef __WIN32__
+	if (g_debugger_check_rw) S9xDebuggerOnGbMemAccess(addr, 0, false);
+#endif
 	// Boot ROM overlay — first 256 bytes mirror the DMG/SGB boot ROM
 	// while it's still enabled. The boot code writes 0x01 to 0xFF50
 	// as its final act, which clears boot_rom_enabled and exposes the
@@ -162,6 +169,9 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 
 void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 {
+#ifdef __WIN32__
+	if (g_debugger_check_rw) S9xDebuggerOnGbMemAccess(addr, value, true);
+#endif
 	if (addr < 0x8000)
 	{
 		if (m.cart) MbcWrite(*m.cart, addr, value);

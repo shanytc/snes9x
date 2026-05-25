@@ -12,6 +12,14 @@
 CDebugger gDebugger;
 
 bool g_debugger_attached = false;
+bool g_debugger_check_rw = false;
+
+static bool BpsHaveAnyRW(const std::vector<DbgBreakpoint> &bps)
+{
+	for (const auto &bp : bps)
+		if (bp.enabled && (bp.brk_read || bp.brk_write)) return true;
+	return false;
+}
 
 HWND gSnesDebuggerHWND = NULL;
 HWND gGbDebuggerHWND   = NULL;
@@ -19,6 +27,7 @@ HWND gGbDebuggerHWND   = NULL;
 void CDebugger::RecomputeAttached()
 {
 	g_debugger_attached = snes_attached_ || gb_attached_;
+	g_debugger_check_rw = g_debugger_attached && BpsHaveAnyRW(bps_);
 }
 
 void CDebugger::AttachSnes(HWND dlg)
@@ -405,7 +414,7 @@ void CDebugger::AddExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr)
 	bp.bank        = bank;
 	bp.address     = addr;
 	bps_.push_back(bp);
-	bps_version_++;
+	OnBpsChanged();
 }
 
 void CDebugger::RemoveExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr)
@@ -415,7 +424,7 @@ void CDebugger::RemoveExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr)
 		if (it->system == sys && it->bank == bank && it->address == addr && it->brk_execute)
 		{
 			bps_.erase(it);
-			bps_version_++;
+			OnBpsChanged();
 			return;
 		}
 	}
@@ -447,34 +456,86 @@ bool CDebugger::HasExecBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr) co
 void CDebugger::AddBreakpoint(const DbgBreakpoint &bp)
 {
 	bps_.push_back(bp);
-	bps_version_++;
+	OnBpsChanged();
 }
 
 void CDebugger::UpdateBreakpoint(size_t index, const DbgBreakpoint &bp)
 {
 	if (index >= bps_.size()) return;
 	bps_[index] = bp;
-	bps_version_++;
+	OnBpsChanged();
 }
 
 void CDebugger::RemoveBreakpointAt(size_t index)
 {
 	if (index >= bps_.size()) return;
 	bps_.erase(bps_.begin() + index);
-	bps_version_++;
+	OnBpsChanged();
 }
 
 void CDebugger::ToggleBreakpointEnabledAt(size_t index)
 {
 	if (index >= bps_.size()) return;
 	bps_[index].enabled = !bps_[index].enabled;
-	bps_version_++;
+	OnBpsChanged();
 }
 
 const DbgBreakpoint *CDebugger::GetBreakpoint(size_t index) const
 {
 	if (index >= bps_.size()) return nullptr;
 	return &bps_[index];
+}
+
+void CDebugger::OnBpsChanged()
+{
+	bps_version_++;
+	g_debugger_check_rw = g_debugger_attached && BpsHaveAnyRW(bps_);
+}
+
+bool CDebugger::HasRWBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr, bool is_write) const
+{
+	for (const auto &bp : bps_)
+	{
+		if (!bp.enabled) continue;
+		if (bp.system != sys) continue;
+		if (is_write) { if (!bp.brk_write) continue; }
+		else          { if (!bp.brk_read)  continue; }
+		if (sys == DbgSystem::Snes && bp.bank != bank) continue;
+		if (sys == DbgSystem::Gb && addr < 0x8000 && bp.bank != bank) continue;
+		if (bp.address == addr) return true;
+	}
+	return false;
+}
+
+void CDebugger::OnSnesMemAccess(uint32_t addr24, uint8_t value, bool is_write)
+{
+	(void)value;
+	if (!snes_attached_) return;
+	const uint8_t  bank = (uint8_t)((addr24 >> 16) & 0xFF);
+	const uint16_t addr = (uint16_t)(addr24 & 0xFFFF);
+	if (HasRWBreakpoint(DbgSystem::Snes, bank, addr, is_write))
+		HaltSnesNow();
+}
+
+void CDebugger::OnGbMemAccess(uint16_t addr, uint8_t value, bool is_write)
+{
+	(void)value;
+	if (!gb_attached_) return;
+	uint8_t cur_bank = 0;
+	if (addr >= 0x4000 && addr < 0x8000)
+		cur_bank = (uint8_t)(S9xSGBGetCurrentRomBank() & 0xFF);
+	if (HasRWBreakpoint(DbgSystem::Gb, cur_bank, addr, is_write))
+		HaltGbNow();
+}
+
+void S9xDebuggerOnSnesMemAccess(uint32_t addr24, uint8_t value, bool is_write)
+{
+	gDebugger.OnSnesMemAccess(addr24, value, is_write);
+}
+
+void S9xDebuggerOnGbMemAccess(uint16_t addr, uint8_t value, bool is_write)
+{
+	gDebugger.OnGbMemAccess(addr, value, is_write);
 }
 
 void CDebugger::RefreshSnes()

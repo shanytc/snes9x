@@ -18,6 +18,10 @@
 #include "msu1.h"
 #include "sgb/sgb.h"
 
+#ifdef __WIN32__
+#include "win32/debugger_hook.h"
+#endif
+
 #define addCyclesInMemoryAccess \
 	if (!CPU.InDMAorHDMA) \
 	{ \
@@ -57,6 +61,9 @@ static inline int32 memory_speed (uint32 address)
 
 inline uint8 S9xGetByte (uint32 Address)
 {
+#ifdef __WIN32__
+	if (g_debugger_check_rw) S9xDebuggerOnSnesMemAccess(Address, 0, false);
+#endif
 	int		block = (Address & 0xffffff) >> MEMMAP_SHIFT;
 	uint8	*GetAddress = Memory.Map[block];
 	int32	speed = memory_speed(Address);
@@ -372,6 +379,9 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 
 inline void S9xSetByte (uint8 Byte, uint32 Address)
 {
+#ifdef __WIN32__
+	if (g_debugger_check_rw) S9xDebuggerOnSnesMemAccess(Address, Byte, true);
+#endif
 	int		block = (Address & 0xffffff) >> MEMMAP_SHIFT;
 	uint8	*SetAddress = Memory.WriteMap[block];
 	int32	speed = memory_speed(Address);

@@ -190,6 +190,7 @@ void CDebugger::HaltGbNow()
 {
 	gb_break_pending_ = false;
 	Settings.Paused = true;
+	CPU.Flags |= SCAN_KEYS_FLAG;
 	gb_free_run_ = false;
 	gb_step_remaining_ = 0;
 	S9xSGBRequestDebuggerBreak();

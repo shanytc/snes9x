@@ -121,6 +121,7 @@ struct DisasmPanelState
 	uint32_t     rclick_branch_target = 0;
 	uint32_t     shown_bps_version = 0;
 	uint32_t     shown_pc          = 0xFFFFFFFFu;
+	bool         shown_paused      = false;
 };
 
 static void EnsureTargetsCap(DisasmPanelState *st, int need)
@@ -633,14 +634,38 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 		{
 			const int idx = (int)cd->nmcd.dwItemSpec;
 			const int sub = cd->iSubItem;
-			if (idx < st->line_count && sub == COL_MNEM)
+			if (idx < st->line_count)
 			{
 				const DisasmLine &row = st->lines[idx];
-				if (!row.is_label_row)
+				if (row.is_label_row)
 				{
-					char ln[160]; uint8_t b[4]; int c;
-					DisasmOne(st->sys, row.pc, ln, sizeof(ln), b, &c);
-					cd->clrText = MnemColor(st->sys, b[0]);
+					cd->clrTextBk = (row.section_index & 1) ? RGB(255, 240, 240) : RGB(255, 255, 255);
+					cd->clrText   = RGB(0, 96, 0);
+				}
+				else
+				{
+					const uint32_t cur_pc = GetCurrentPC(st->sys);
+					if (row.pc == cur_pc)
+					{
+						cd->clrTextBk = RGB(255, 255, 180);
+						cd->clrText   = RGB(0, 0, 0);
+					}
+					else if (row.section_index & 1)
+					{
+						cd->clrTextBk = RGB(255, 240, 240);
+						cd->clrText   = RGB(20, 20, 20);
+					}
+					else
+					{
+						cd->clrTextBk = RGB(255, 255, 255);
+						cd->clrText   = RGB(20, 20, 20);
+					}
+					if (sub == COL_MNEM)
+					{
+						char ln[160]; uint8_t b[4]; int c;
+						DisasmOne(st->sys, row.pc, ln, sizeof(ln), b, &c);
+						cd->clrText = MnemColor(st->sys, b[0]);
+					}
 				}
 			}
 			return CDRF_NEWFONT;
@@ -994,14 +1019,15 @@ static void EnsurePCVisible(DisasmPanelState *st)
 		st->view_initialized = true;
 	}
 
-	const int pc_idx = FindOrExtendForPC(st, cur_pc, 80000);
+	const int pc_idx = FindOrExtendForPC(st, cur_pc, 2000000);
 	if (pc_idx < 0) return;
 
 	const int per_page = ListView_GetCountPerPage(st->lv);
 	const int top      = ListView_GetTopIndex(st->lv);
-	const int bottom   = top + per_page;
+	const int bottom   = top + per_page - 1;
+	const int margin   = (per_page > 12) ? 3 : 1;
 
-	if (pc_idx < top || pc_idx > bottom)
+	if (pc_idx < top + margin || pc_idx > bottom - margin)
 	{
 		if (per_page > 6)
 		{
@@ -1162,17 +1188,15 @@ void DisasmPanelRefresh(HWND h)
 	const bool     bps_changed     = st->shown_bps_version != cur_bps_version;
 	const bool     pc_changed      = st->shown_pc          != cur_pc;
 	const bool     first_run       = !st->view_initialized;
+	const bool     just_paused     = !st->shown_paused && Settings.Paused;
 
-	if (first_run || (Settings.Paused && pc_changed))
-	{
+	if (first_run || just_paused || (Settings.Paused && pc_changed))
 		EnsurePCVisible(st);
+
+	if (first_run || Settings.Paused || bps_changed)
 		InvalidateRect(st->lv, NULL, FALSE);
-	}
-	else if (bps_changed)
-	{
-		InvalidateRect(st->lv, NULL, FALSE);
-	}
 
 	st->shown_bps_version = cur_bps_version;
 	st->shown_pc          = cur_pc;
+	st->shown_paused      = Settings.Paused;
 }

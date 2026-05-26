@@ -564,6 +564,23 @@ void DebuggerDlgClose(HWND h)
 		DestroyWindow(h);
 }
 
+static void UpdateRunPauseButtonStates(DbgDlgState *st, HWND h)
+{
+	const bool running = !Settings.Paused;
+
+	if (st->hToolbar)
+	{
+		SendMessage(st->hToolbar, TB_ENABLEBUTTON, IDM_DBG_RUN,   MAKELONG(running ? 0 : 1, 0));
+		SendMessage(st->hToolbar, TB_ENABLEBUTTON, IDM_DBG_PAUSE, MAKELONG(running ? 1 : 0, 0));
+	}
+	HMENU menu = GetMenu(h);
+	if (menu)
+	{
+		EnableMenuItem(menu, IDM_DBG_RUN,   MF_BYCOMMAND | (running ? MF_GRAYED  : MF_ENABLED));
+		EnableMenuItem(menu, IDM_DBG_PAUSE, MF_BYCOMMAND | (running ? MF_ENABLED : MF_GRAYED));
+	}
+}
+
 void DebuggerDlgRefresh(HWND h)
 {
 	if (!h || !IsWindow(h)) return;
@@ -571,6 +588,8 @@ void DebuggerDlgRefresh(HWND h)
 	if (!st || !st->hStatusbar) return;
 
 	TCHAR buf[64];
+
+	UpdateRunPauseButtonStates(st, h);
 
 	if (Settings.Paused)
 		SendMessage(st->hStatusbar, SB_SETTEXT, 0, (LPARAM)TEXT("Paused"));

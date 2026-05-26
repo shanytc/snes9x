@@ -612,7 +612,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				else
 				{
 					const uint32_t cur_pc = GetCurrentPC(st->sys);
-					if (row.pc == cur_pc)
+					if (Settings.Paused && row.pc == cur_pc)
 					{
 						cd->clrTextBk = RGB(255, 255, 180);
 						cd->clrText   = RGB(0, 0, 0);
@@ -645,7 +645,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				else
 				{
 					const uint32_t cur_pc = GetCurrentPC(st->sys);
-					if (row.pc == cur_pc)
+					if (Settings.Paused && row.pc == cur_pc)
 					{
 						cd->clrTextBk = RGB(255, 255, 180);
 						cd->clrText   = RGB(0, 0, 0);
@@ -720,7 +720,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				DeleteObject(edge);
 				DeleteObject(fill);
 			}
-			if (row_pc == cur_pc)
+			if (Settings.Paused && row_pc == cur_pc)
 			{
 				HBRUSH yel  = CreateSolidBrush(RGB(220, 200, 0));
 				HPEN   edge = CreatePen(PS_SOLID, 1, RGB(140, 110, 0));
@@ -1188,12 +1188,13 @@ void DisasmPanelRefresh(HWND h)
 	const bool     bps_changed     = st->shown_bps_version != cur_bps_version;
 	const bool     pc_changed      = st->shown_pc          != cur_pc;
 	const bool     first_run       = !st->view_initialized;
-	const bool     just_paused     = !st->shown_paused && Settings.Paused;
+	const bool     just_paused     = !st->shown_paused &&  Settings.Paused;
+	const bool     just_unpaused   =  st->shown_paused && !Settings.Paused;
 
 	if (first_run || just_paused || (Settings.Paused && pc_changed))
 		EnsurePCVisible(st);
 
-	if (first_run || Settings.Paused || bps_changed)
+	if (first_run || Settings.Paused || just_unpaused || bps_changed)
 		InvalidateRect(st->lv, NULL, FALSE);
 
 	st->shown_bps_version = cur_bps_version;

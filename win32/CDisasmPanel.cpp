@@ -1200,6 +1200,31 @@ void DisasmPanelRefresh(HWND h)
 		UpdateWindow(st->lv);
 	}
 
+	{
+		HWND parent = GetParent(h);
+		while (parent && (GetWindowLongPtr(parent, GWL_STYLE) & WS_CHILD))
+			parent = GetParent(parent);
+		if (parent)
+		{
+			const int pc_idx_for_title = FindIndexForPC(st, cur_pc);
+			const int top_for_title    = ListView_GetTopIndex(st->lv);
+			const int per_page_title   = ListView_GetCountPerPage(st->lv);
+			char title[160];
+			_snprintf_s(title, sizeof(title), _TRUNCATE,
+			            "%s Debugger [P:%d sp:%d jp:%d pc:%06X idx:%d top:%d pp:%d lc:%d]",
+			            st->sys == DbgSystem::Snes ? "SNES" : "GB",
+			            Settings.Paused ? 1 : 0,
+			            st->shown_paused ? 1 : 0,
+			            just_paused ? 1 : 0,
+			            (unsigned)cur_pc,
+			            pc_idx_for_title,
+			            top_for_title,
+			            per_page_title,
+			            st->line_count);
+			SetWindowTextA(parent, title);
+		}
+	}
+
 	st->shown_bps_version = cur_bps_version;
 	st->shown_pc          = cur_pc;
 	st->shown_paused      = Settings.Paused;

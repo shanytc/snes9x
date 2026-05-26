@@ -115,6 +115,9 @@ static uint8_t  GbHramRead(uint32_t off)
 	return 0;
 }
 
+static uint32_t GbBootRomSize() { return S9xSGBGetBootROMSize(); }
+static uint8_t  GbBootRomRead(uint32_t off) { return S9xSGBPeekBootROMByte(off); }
+
 static uint32_t GbIoSize() { return 0x80u; }
 static uint8_t  GbIoRead(uint32_t off)
 {
@@ -131,14 +134,15 @@ static uint8_t  GbSramRead(uint32_t off)
 
 static const MemRegion kGbRegions[] =
 {
-	{ "CPU Bus",   GbCpuBusSize, GbCpuBusRead, 4 },
-	{ "Cart ROM",  GbRomSize,    GbRomRead,    6 },
-	{ "Work RAM",  GbWramSize,   GbWramRead,   4 },
-	{ "Video RAM", GbVramSize,   GbVramRead,   4 },
-	{ "OAM",       GbOamSize,    GbOamRead,    4 },
-	{ "I/O Regs",  GbIoSize,     GbIoRead,     4 },
-	{ "HRAM",      GbHramSize,   GbHramRead,   4 },
-	{ "SRAM",      GbSramSize,   GbSramRead,   4 }
+	{ "CPU Memory",     GbCpuBusSize,  GbCpuBusRead,  4 },
+	{ "PRG ROM",        GbRomSize,     GbRomRead,     6 },
+	{ "Work RAM",       GbWramSize,    GbWramRead,    4 },
+	{ "High RAM",       GbHramSize,    GbHramRead,    4 },
+	{ "Boot ROM",       GbBootRomSize, GbBootRomRead, 4 },
+	{ "Video RAM",      GbVramSize,    GbVramRead,    4 },
+	{ "Sprite RAM",     GbOamSize,     GbOamRead,     4 },
+	{ "I/O Registers",  GbIoSize,      GbIoRead,      4 },
+	{ "SRAM",           GbSramSize,    GbSramRead,    4 }
 };
 
 int MemRegionCount(DbgSystem sys)

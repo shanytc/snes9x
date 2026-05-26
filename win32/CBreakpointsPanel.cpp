@@ -347,13 +347,15 @@ static const MemTypeEntry kMemTypesSnes[] =
 
 static const MemTypeEntry kMemTypesGb[] =
 {
-	{ "CPU Memory",    DBG_MEM_CPU       },
-	{ "Cart ROM",      DBG_MEM_PRG_ROM   },
-	{ "Work RAM",      DBG_MEM_WORK_RAM  },
-	{ "Video RAM",     DBG_MEM_VIDEO_RAM },
-	{ "OAM (Sprites)", DBG_MEM_OAM       },
-	{ "Register",      DBG_MEM_REGISTER  },
-	{ "SRAM",          DBG_MEM_SRAM      }
+	{ "GB - CPU Memory",     DBG_MEM_CPU       },
+	{ "GB - PRG ROM",        DBG_MEM_PRG_ROM   },
+	{ "GB - Work RAM",       DBG_MEM_WORK_RAM  },
+	{ "GB - High RAM",       DBG_MEM_HIGH_RAM  },
+	{ "GB - Boot ROM",       DBG_MEM_BOOT_ROM  },
+	{ "GB - Video RAM",      DBG_MEM_VIDEO_RAM },
+	{ "GB - Sprite RAM",     DBG_MEM_OAM       },
+	{ "GB - I/O Registers",  DBG_MEM_REGISTER  },
+	{ "GB - SRAM",           DBG_MEM_SRAM      }
 };
 
 static uint32_t ParseHex(const char *s)

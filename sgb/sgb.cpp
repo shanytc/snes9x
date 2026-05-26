@@ -2832,6 +2832,19 @@ uint32_t S9xSGBGetROMSize(void)
 	return (uint32_t)impl->cart.rom.size();
 }
 
+uint8_t S9xSGBPeekBootROMByte(uint32_t off)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl) return 0xFF;
+	if (off >= sizeof(impl->mem.boot_rom)) return 0xFF;
+	return impl->mem.boot_rom[off];
+}
+
+uint32_t S9xSGBGetBootROMSize(void)
+{
+	return 256u;
+}
+
 void S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
                       uint16_t *bc, uint16_t *de, uint16_t *hl,
                       uint8_t  *ime, uint8_t *halted, uint8_t *stopped,

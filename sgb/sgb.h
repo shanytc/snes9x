@@ -468,6 +468,9 @@ uint32_t S9xSGBGetCurrentRomBank(void);
 uint8_t  S9xSGBPeekROMByte(uint32_t rom_offset);
 uint32_t S9xSGBGetROMSize(void);
 
+uint8_t  S9xSGBPeekBootROMByte(uint32_t off);
+uint32_t S9xSGBGetBootROMSize(void);
+
 typedef void (*S9xSGBDebuggerHook)(uint16_t pc, uint8_t opcode);
 void    S9xSGBSetDebuggerHook(S9xSGBDebuggerHook hook);
 

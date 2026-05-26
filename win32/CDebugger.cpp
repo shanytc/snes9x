@@ -386,7 +386,7 @@ static int InferMemoryType(DbgSystem sys, uint8_t bank, uint16_t addr)
 		if (addr < 0xFEA0) return DBG_MEM_OAM;
 		if (addr < 0xFF00) return DBG_MEM_CPU;
 		if (addr < 0xFF80) return DBG_MEM_REGISTER;
-		if (addr < 0xFFFF) return DBG_MEM_CPU;
+		if (addr < 0xFFFF) return DBG_MEM_HIGH_RAM;
 		return DBG_MEM_REGISTER;
 	}
 	if ((addr >= 0x2100 && addr < 0x2200) || (addr >= 0x4200 && addr < 0x4400))

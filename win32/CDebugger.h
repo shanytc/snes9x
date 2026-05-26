@@ -16,7 +16,9 @@ enum DbgMemoryType
 	DBG_MEM_OAM       = 4,
 	DBG_MEM_CG_RAM    = 5,
 	DBG_MEM_REGISTER  = 6,
-	DBG_MEM_SRAM      = 7
+	DBG_MEM_SRAM      = 7,
+	DBG_MEM_BOOT_ROM  = 8,
+	DBG_MEM_HIGH_RAM  = 9
 };
 
 struct DbgBreakpoint

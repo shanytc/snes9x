@@ -47,6 +47,8 @@ public:
 	bool IsSnesAttached() const { return snes_attached_; }
 	bool IsGbAttached()   const { return gb_attached_; }
 
+	bool IsGbBreakPending() const { return gb_break_pending_; }
+
 	void OnSnesPreInstruction();
 	void OnGbPreInstruction(uint16_t pc, uint8_t opcode);
 
@@ -55,7 +57,7 @@ public:
 	bool HasRWBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr, bool is_write) const;
 
 	void Run();
-	void Pause();
+	void Pause(DbgSystem requested_by = DbgSystem::None);
 	void StepIn(DbgSystem sys);
 	void StepOver(DbgSystem sys);
 	void StepOut(DbgSystem sys);
@@ -111,6 +113,8 @@ private:
 
 	bool snes_frame_step_armed_ = false;
 	bool gb_frame_step_armed_   = false;
+
+	bool gb_break_pending_      = false;
 
 	bool     snes_run_to_nmi_           = false;
 	bool     snes_run_to_irq_           = false;

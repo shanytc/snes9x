@@ -314,7 +314,7 @@ static void OnCommand(HWND hwnd, DbgDlgState *st, WPARAM wp)
 			DebuggerDlgRefresh(hwnd);
 			break;
 		case IDM_DBG_PAUSE:
-			gDebugger.Pause();
+			gDebugger.Pause(st->sys);
 			DebuggerDlgRefresh(hwnd);
 			break;
 		case IDM_DBG_STEP_IN:
@@ -593,6 +593,8 @@ void DebuggerDlgRefresh(HWND h)
 
 	if (Settings.Paused)
 		SendMessage(st->hStatusbar, SB_SETTEXT, 0, (LPARAM)TEXT("Paused"));
+	else if (st->sys == DbgSystem::Gb && gDebugger.IsGbBreakPending())
+		SendMessage(st->hStatusbar, SB_SETTEXT, 0, (LPARAM)TEXT("Waiting for GB execution..."));
 	else
 		SendMessage(st->hStatusbar, SB_SETTEXT, 0, (LPARAM)TEXT("Running"));
 

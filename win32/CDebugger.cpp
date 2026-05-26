@@ -153,6 +153,12 @@ void CDebugger::OnGbPreInstruction(uint16_t pc, uint8_t opcode)
 		return;
 	}
 
+	if (gb_break_pending_)
+	{
+		HaltGbNow();
+		return;
+	}
+
 	if (gb_step_over_active_ && pc == gb_step_over_addr_)
 	{
 		gb_step_over_active_ = false;
@@ -182,6 +188,7 @@ void CDebugger::HaltSnesNow()
 
 void CDebugger::HaltGbNow()
 {
+	gb_break_pending_ = false;
 	Settings.Paused = true;
 	gb_free_run_ = false;
 	gb_step_remaining_ = 0;
@@ -197,6 +204,7 @@ void CDebugger::Run()
 	gb_step_over_active_   = false;
 	snes_frame_step_armed_ = false;
 	gb_frame_step_armed_   = false;
+	gb_break_pending_      = false;
 	snes_run_to_nmi_ = false;
 	snes_run_to_irq_ = false;
 	snes_run_to_scanline_armed_ = false;
@@ -206,8 +214,16 @@ void CDebugger::Run()
 	Settings.Paused = false;
 }
 
-void CDebugger::Pause()
+void CDebugger::Pause(DbgSystem requested_by)
 {
+	if (requested_by == DbgSystem::Gb && gb_attached_)
+	{
+		gb_break_pending_ = true;
+		gb_free_run_      = false;
+		RefreshGb();
+		return;
+	}
+
 	Settings.Paused = true;
 	snes_free_run_ = false;
 	gb_free_run_   = false;

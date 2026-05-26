@@ -1195,7 +1195,10 @@ void DisasmPanelRefresh(HWND h)
 		EnsurePCVisible(st);
 
 	if (first_run || Settings.Paused || just_unpaused || bps_changed)
+	{
 		InvalidateRect(st->lv, NULL, FALSE);
+		UpdateWindow(st->lv);
+	}
 
 	st->shown_bps_version = cur_bps_version;
 	st->shown_pc          = cur_pc;

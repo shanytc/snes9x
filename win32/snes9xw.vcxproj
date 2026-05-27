@@ -516,6 +516,7 @@
     <ClInclude Include="CBreakpointsPanel.h" />
     <ClInclude Include="CMemoryRegions.h" />
     <ClInclude Include="CMemoryViewer.h" />
+    <ClInclude Include="CMemHeatmap.h" />
     <ClInclude Include="CVulkan.h" />
     <ClInclude Include="CWaveOut.h" />
     <ClInclude Include="CXAudio2.h" />
@@ -771,6 +772,7 @@
     <ClCompile Include="CBreakpointsPanel.cpp" />
     <ClCompile Include="CMemoryRegions.cpp" />
     <ClCompile Include="CMemoryViewer.cpp" />
+    <ClCompile Include="CMemHeatmap.cpp" />
     <ClCompile Include="CVulkan.cpp" />
     <ClCompile Include="CWaveOut.cpp" />
     <ClCompile Include="CXAudio2.cpp" />

@@ -5,6 +5,7 @@
 
 extern bool g_debugger_attached;
 extern bool g_debugger_check_rw;
+extern bool g_debugger_heatmap_active;
 
 void S9xDebuggerOnSnesPreInstruction(void);
 void S9xDebuggerOnGbPreInstruction(uint16_t pc, uint8_t opcode);

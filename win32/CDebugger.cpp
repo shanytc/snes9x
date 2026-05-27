@@ -3,6 +3,7 @@
 #include "CDebuggerSnes.h"
 #include "CDebuggerGb.h"
 #include "CMemoryViewer.h"
+#include "CMemHeatmap.h"
 #include "debugger_hook.h"
 #include "../snes9x.h"
 #include "../memmap.h"
@@ -483,6 +484,7 @@ void CDebugger::OnEmulatorReset()
 	S9xSGBClearDebuggerBreak();
 	if (snes_dlg_) DebuggerDlgInvalidateCache(snes_dlg_);
 	if (gb_dlg_)   DebuggerDlgInvalidateCache(gb_dlg_);
+	MemHeatmap::Reset();
 	MemoryViewerRefreshAll();
 	RefreshSnes();
 	RefreshGb();
@@ -628,6 +630,7 @@ bool CDebugger::HasRWBreakpoint(DbgSystem sys, uint8_t bank, uint16_t addr, bool
 void CDebugger::OnSnesMemAccess(uint32_t addr24, uint8_t value, bool is_write)
 {
 	(void)value;
+	MemHeatmap::TrackSnes(addr24, is_write);
 	if (!snes_attached_) return;
 	const uint8_t  bank = (uint8_t)((addr24 >> 16) & 0xFF);
 	const uint16_t addr = (uint16_t)(addr24 & 0xFFFF);
@@ -638,6 +641,7 @@ void CDebugger::OnSnesMemAccess(uint32_t addr24, uint8_t value, bool is_write)
 void CDebugger::OnGbMemAccess(uint16_t addr, uint8_t value, bool is_write)
 {
 	(void)value;
+	MemHeatmap::TrackGb(addr, is_write);
 	if (!gb_attached_) return;
 	uint8_t cur_bank = 0;
 	if (addr >= 0x4000 && addr < 0x8000)

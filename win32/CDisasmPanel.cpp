@@ -614,7 +614,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 					const uint32_t cur_pc = GetCurrentPC(st->sys);
 					if (Settings.Paused && row.pc == cur_pc)
 					{
-						cd->clrTextBk = RGB(255, 255, 180);
+						cd->clrTextBk = RGB(255, 230, 90);
 						cd->clrText   = RGB(0, 0, 0);
 					}
 					else if (row.section_index & 1)
@@ -647,7 +647,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 					const uint32_t cur_pc = GetCurrentPC(st->sys);
 					if (Settings.Paused && row.pc == cur_pc)
 					{
-						cd->clrTextBk = RGB(255, 255, 180);
+						cd->clrTextBk = RGB(255, 230, 90);
 						cd->clrText   = RGB(0, 0, 0);
 					}
 					else if (row.section_index & 1)

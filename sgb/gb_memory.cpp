@@ -99,7 +99,7 @@ inline void CgbWritePalette(uint8_t *pal, uint8_t &idx, uint8_t value, bool stor
 uint8_t MemRead(Memory &m, uint16_t addr)
 {
 #ifdef __WIN32__
-	if (g_debugger_check_rw) S9xDebuggerOnGbMemAccess(addr, 0, false);
+	if (g_debugger_check_rw | g_debugger_heatmap_active) S9xDebuggerOnGbMemAccess(addr, 0, false);
 #endif
 	// Boot ROM overlay — first 256 bytes mirror the DMG/SGB boot ROM
 	// while it's still enabled. The boot code writes 0x01 to 0xFF50
@@ -170,7 +170,7 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 {
 #ifdef __WIN32__
-	if (g_debugger_check_rw) S9xDebuggerOnGbMemAccess(addr, value, true);
+	if (g_debugger_check_rw | g_debugger_heatmap_active) S9xDebuggerOnGbMemAccess(addr, value, true);
 #endif
 	if (addr < 0x8000)
 	{

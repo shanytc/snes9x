@@ -1,29 +1,39 @@
 #include "CMemoryViewer.h"
 #include "CMemoryRegions.h"
+#include "CMemHeatmap.h"
 #include "../snes9x.h"
 #include <commctrl.h>
 #include <windowsx.h>
 #include <tchar.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 static const TCHAR *kClassName = TEXT("S9xDebuggerMemoryViewer");
 
 enum
 {
-	IDC_MV_COMBO = 8000,
-	IDC_MV_LV    = 8001
+	IDC_MV_COMBO     = 8000,
+	IDC_MV_LV        = 8001,
+	IDC_MV_ZONE      = 8002,
+	IDC_MV_CLEAR     = 8003,
+	IDC_MV_ZONE_LBL  = 8004
 };
 
 enum { MVCOL_ADDR = 0, MVCOL_HEX = 1, MVCOL_ASCII = 2 };
 
 struct MemViewerState
 {
-	DbgSystem sys           = DbgSystem::None;
-	HFONT     font          = nullptr;
-	HWND      combo         = nullptr;
-	HWND      lv            = nullptr;
-	int       current_region = 0;
+	DbgSystem sys             = DbgSystem::None;
+	HFONT     font            = nullptr;
+	HWND      combo           = nullptr;
+	HWND      lv              = nullptr;
+	HWND      zone_combo      = nullptr;
+	HWND      zone_label      = nullptr;
+	HWND      clear_btn       = nullptr;
+	int       current_region  = 0;
+	MemZone   zone            = MemZone::None;
+	bool      heatmap_acquired = false;
 };
 
 static HWND g_snes_memview = NULL;
@@ -62,6 +72,33 @@ static void PopulateCombo(MemViewerState *st)
 		SendMessage(st->combo, CB_SETCURSEL, 0, 0);
 		st->current_region = 0;
 	}
+}
+
+static void PopulateZoneCombo(MemViewerState *st)
+{
+	SendMessageA(st->zone_combo, CB_RESETCONTENT, 0, 0);
+	SendMessageA(st->zone_combo, CB_ADDSTRING, 0, (LPARAM)"None");
+	SendMessageA(st->zone_combo, CB_ADDSTRING, 0, (LPARAM)"Read zone");
+	SendMessageA(st->zone_combo, CB_ADDSTRING, 0, (LPARAM)"Write zone");
+	SendMessage(st->zone_combo, CB_SETCURSEL, 0, 0);
+}
+
+static void SetZone(MemViewerState *st, MemZone z)
+{
+	if (st->zone == z) return;
+	const bool now_active = z != MemZone::None;
+	st->zone = z;
+	if (now_active && !st->heatmap_acquired)
+	{
+		MemHeatmap::Acquire();
+		st->heatmap_acquired = true;
+	}
+	else if (!now_active && st->heatmap_acquired)
+	{
+		MemHeatmap::Release();
+		st->heatmap_acquired = false;
+	}
+	InvalidateRect(st->lv, NULL, FALSE);
 }
 
 static void OnGetDispInfo(MemViewerState *st, NMLVDISPINFOA *di)
@@ -140,6 +177,138 @@ static void OnGetDispInfo(MemViewerState *st, NMLVDISPINFOA *di)
 	}
 }
 
+static uint16_t HeatmapValue(MemViewerState *st, const MemRegion *r, uint32_t off)
+{
+	if (!r || !r->to_cpu_addr) return 0;
+	const uint32_t addr = r->to_cpu_addr(off);
+	if (addr == kNoCpuAddr) return 0;
+	const bool reads = st->zone == MemZone::Reads;
+	return st->sys == DbgSystem::Snes ? MemHeatmap::GetSnes(addr, reads)
+	                                  : MemHeatmap::GetGb((uint16_t)addr, reads);
+}
+
+static COLORREF HeatmapColor(uint16_t count, bool &text_white)
+{
+	text_white = false;
+	if (count == 0) return RGB(255, 255, 255);
+	// Counters are halved once per second, so the value tracks roughly the
+	// access rate. Saturate at ~1000 hits/sec so a byte being touched every
+	// frame reaches deep red, and rare writes stay pale pink.
+	static const double kDenom = log(1024.0);
+	double t = log((double)count + 1.0) / kDenom;
+	if (t > 1.0) t = 1.0;
+	if (t < 0.0) t = 0.0;
+	const int g = (int)((1.0 - t) * 255.0 + 0.5);
+	const int b = g;
+	if (t >= 0.55) text_white = true;
+	return RGB(255, g, b);
+}
+
+static void DrawHexCell(MemViewerState *st, NMLVCUSTOMDRAW *cd)
+{
+	const MemRegion *r = CurRegion(st);
+	if (!r) return;
+
+	const int row = (int)cd->nmcd.dwItemSpec;
+	const uint32_t base = (uint32_t)row * 16u;
+	const uint32_t size = r->get_size();
+
+	RECT rc;
+	rc.left = LVIR_BOUNDS;
+	ListView_GetSubItemRect(st->lv, row, MVCOL_HEX, LVIR_BOUNDS, &rc);
+
+	HDC hdc = cd->nmcd.hdc;
+
+	const bool selected =
+		(ListView_GetItemState(st->lv, row, LVIS_SELECTED) & LVIS_SELECTED) != 0;
+
+	const COLORREF bg_row = selected ? GetSysColor(COLOR_HIGHLIGHT)
+	                                 : GetSysColor(COLOR_WINDOW);
+	HBRUSH bg_brush = CreateSolidBrush(bg_row);
+	FillRect(hdc, &rc, bg_brush);
+	DeleteObject(bg_brush);
+
+	HFONT old_font = (HFONT)SelectObject(hdc, st->font);
+	SetBkMode(hdc, TRANSPARENT);
+
+	TEXTMETRIC tm;
+	GetTextMetrics(hdc, &tm);
+	const int char_w = tm.tmAveCharWidth;
+	const int pad_left = 6;
+	const int y = rc.top + (rc.bottom - rc.top - tm.tmHeight) / 2;
+
+	int x = rc.left + pad_left;
+	for (uint32_t i = 0; i < 16; i++)
+	{
+		const uint32_t off = base + i;
+		char buf[4];
+		bool has_byte = (off < size);
+
+		if (has_byte)
+		{
+			const uint8_t b = r->read_byte(off);
+			_snprintf_s(buf, 4, _TRUNCATE, "%02X", b);
+		}
+		else
+		{
+			buf[0] = ' '; buf[1] = ' '; buf[2] = 0;
+		}
+
+		RECT cell;
+		cell.left   = x - (char_w / 2);
+		cell.right  = x + char_w * 2 + (char_w + 1) / 2;
+		cell.top    = rc.top;
+		cell.bottom = rc.bottom;
+
+		bool text_white = false;
+		if (has_byte && st->zone != MemZone::None)
+		{
+			const uint16_t count = HeatmapValue(st, r, off);
+			if (count > 0)
+			{
+				const COLORREF heat = HeatmapColor(count, text_white);
+				HBRUSH hb = CreateSolidBrush(heat);
+				FillRect(hdc, &cell, hb);
+				DeleteObject(hb);
+			}
+		}
+
+		COLORREF text_color;
+		if (text_white)
+			text_color = RGB(255, 255, 255);
+		else if (selected)
+			text_color = GetSysColor(COLOR_HIGHLIGHTTEXT);
+		else
+			text_color = GetSysColor(COLOR_WINDOWTEXT);
+		SetTextColor(hdc, text_color);
+
+		TextOutA(hdc, x, y, buf, (int)strlen(buf));
+
+		x += char_w * 3;
+	}
+
+	SelectObject(hdc, old_font);
+}
+
+static LRESULT HandleCustomDraw(MemViewerState *st, NMLVCUSTOMDRAW *cd)
+{
+	switch (cd->nmcd.dwDrawStage)
+	{
+		case CDDS_PREPAINT:
+			return CDRF_NOTIFYITEMDRAW;
+		case CDDS_ITEMPREPAINT:
+			return CDRF_NOTIFYSUBITEMDRAW;
+		case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
+			if (cd->iSubItem == MVCOL_HEX && st->zone != MemZone::None)
+			{
+				DrawHexCell(st, cd);
+				return CDRF_SKIPDEFAULT;
+			}
+			return CDRF_DODEFAULT;
+	}
+	return CDRF_DODEFAULT;
+}
+
 static void DoResize(HWND hwnd, MemViewerState *st)
 {
 	if (!st) return;
@@ -150,8 +319,11 @@ static void DoResize(HWND hwnd, MemViewerState *st)
 
 	const int top_h   = 28;
 	const int padding = 4;
-	if (st->combo) MoveWindow(st->combo, padding, padding, 200, 200, TRUE);
-	if (st->lv)    MoveWindow(st->lv,    0, top_h, w, h - top_h, TRUE);
+	if (st->combo)      MoveWindow(st->combo,      padding,        padding, 180, 200, TRUE);
+	if (st->zone_label) MoveWindow(st->zone_label, padding + 192,  padding + 4, 36, 18, TRUE);
+	if (st->zone_combo) MoveWindow(st->zone_combo, padding + 230,  padding, 120, 200, TRUE);
+	if (st->clear_btn)  MoveWindow(st->clear_btn,  padding + 358,  padding, 60,  20,  TRUE);
+	if (st->lv)         MoveWindow(st->lv,         0, top_h, w, h - top_h, TRUE);
 }
 
 static LRESULT CALLBACK MemViewerWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
@@ -183,6 +355,32 @@ static LRESULT CALLBACK MemViewerWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 			SendMessage(st->combo, WM_SETFONT,
 			            (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
 
+			st->zone_label = CreateWindowExA(0, "STATIC", "Zone:",
+			                                 WS_CHILD | WS_VISIBLE | SS_LEFT,
+			                                 0, 0, 0, 0, h,
+			                                 (HMENU)(LONG_PTR)IDC_MV_ZONE_LBL,
+			                                 GetModuleHandle(NULL), NULL);
+			SendMessage(st->zone_label, WM_SETFONT,
+			            (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+
+			st->zone_combo = CreateWindowEx(0, TEXT("COMBOBOX"), TEXT(""),
+			                                WS_CHILD | WS_VISIBLE | WS_TABSTOP
+			                                | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+			                                0, 0, 0, 0,
+			                                h, (HMENU)(LONG_PTR)IDC_MV_ZONE,
+			                                GetModuleHandle(NULL), NULL);
+			SendMessage(st->zone_combo, WM_SETFONT,
+			            (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+
+			st->clear_btn = CreateWindowExA(0, "BUTTON", "Clear",
+			                                WS_CHILD | WS_VISIBLE | WS_TABSTOP
+			                                | BS_PUSHBUTTON,
+			                                0, 0, 0, 0, h,
+			                                (HMENU)(LONG_PTR)IDC_MV_CLEAR,
+			                                GetModuleHandle(NULL), NULL);
+			SendMessage(st->clear_btn, WM_SETFONT,
+			            (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+
 			st->lv = CreateWindowEx(0, WC_LISTVIEW, TEXT(""),
 			                        WS_CHILD | WS_VISIBLE | WS_TABSTOP
 			                        | LVS_REPORT | LVS_OWNERDATA
@@ -201,6 +399,7 @@ static LRESULT CALLBACK MemViewerWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 			col.pszText = (LPSTR)"ASCII";   col.cx = 160; SendMessageA(st->lv, LVM_INSERTCOLUMNA, MVCOL_ASCII, (LPARAM)&col);
 
 			PopulateCombo(st);
+			PopulateZoneCombo(st);
 			UpdateRowCount(st);
 			DoResize(h, st);
 			return 0;
@@ -227,6 +426,21 @@ static LRESULT CALLBACK MemViewerWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 				}
 				return 0;
 			}
+			if (LOWORD(wp) == IDC_MV_ZONE && HIWORD(wp) == CBN_SELCHANGE)
+			{
+				int sel = (int)SendMessage(st->zone_combo, CB_GETCURSEL, 0, 0);
+				MemZone z = MemZone::None;
+				if (sel == 1) z = MemZone::Reads;
+				else if (sel == 2) z = MemZone::Writes;
+				SetZone(st, z);
+				return 0;
+			}
+			if (LOWORD(wp) == IDC_MV_CLEAR && HIWORD(wp) == BN_CLICKED)
+			{
+				MemHeatmap::Reset();
+				InvalidateRect(st->lv, NULL, FALSE);
+				return 0;
+			}
 			break;
 		}
 
@@ -239,6 +453,10 @@ static LRESULT CALLBACK MemViewerWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 			{
 				OnGetDispInfo(st, (NMLVDISPINFOA *)lp);
 				return 0;
+			}
+			if (hdr->code == NM_CUSTOMDRAW)
+			{
+				return HandleCustomDraw(st, (NMLVCUSTOMDRAW *)lp);
 			}
 			break;
 		}
@@ -259,6 +477,7 @@ static LRESULT CALLBACK MemViewerWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 			MemViewerState *st = GetState(h);
 			if (st)
 			{
+				if (st->heatmap_acquired) MemHeatmap::Release();
 				if (st->font) DeleteObject(st->font);
 				if (g_snes_memview == h) g_snes_memview = NULL;
 				if (g_gb_memview   == h) g_gb_memview   = NULL;
@@ -323,6 +542,12 @@ HWND OpenMemoryViewer(DbgSystem sys)
 
 void MemoryViewerRefreshAll()
 {
+	static int frame_tick = 0;
+	if (++frame_tick >= 60)
+	{
+		frame_tick = 0;
+		MemHeatmap::Decay();
+	}
 	if (g_snes_memview && IsWindow(g_snes_memview))
 		PostMessage(g_snes_memview, WM_USER_DEBUGGER_REFRESH, 0, 0);
 	if (g_gb_memview   && IsWindow(g_gb_memview))

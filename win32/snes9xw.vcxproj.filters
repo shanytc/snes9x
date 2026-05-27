@@ -495,6 +495,9 @@
     <ClInclude Include="CMemoryViewer.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="CMemHeatmap.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
@@ -1035,6 +1038,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CMemoryViewer.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CMemHeatmap.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
   </ItemGroup>

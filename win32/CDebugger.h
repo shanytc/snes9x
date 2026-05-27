@@ -117,6 +117,9 @@ private:
 
 	bool gb_break_pending_      = false;
 
+	bool snes_skip_exec_bp_once_ = false;
+	bool gb_skip_exec_bp_once_   = false;
+
 	bool     snes_run_to_nmi_           = false;
 	bool     snes_run_to_irq_           = false;
 	bool     snes_run_to_scanline_armed_ = false;

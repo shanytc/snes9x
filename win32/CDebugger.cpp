@@ -78,7 +78,11 @@ void CDebugger::OnSnesPreInstruction()
 	const uint8_t  bank = Registers.PB;
 	const uint16_t addr = Registers.PCw;
 
-	if (HasExecBreakpoint(DbgSystem::Snes, bank, addr))
+	if (snes_skip_exec_bp_once_)
+	{
+		snes_skip_exec_bp_once_ = false;
+	}
+	else if (HasExecBreakpoint(DbgSystem::Snes, bank, addr))
 	{
 		HaltSnesNow();
 		return;
@@ -147,7 +151,11 @@ void CDebugger::OnGbPreInstruction(uint16_t pc, uint8_t opcode)
 	if (pc >= 0x4000 && pc < 0x8000)
 		cur_bank = (uint8_t)(S9xSGBGetCurrentRomBank() & 0xFF);
 
-	if (HasExecBreakpoint(DbgSystem::Gb, cur_bank, pc))
+	if (gb_skip_exec_bp_once_)
+	{
+		gb_skip_exec_bp_once_ = false;
+	}
+	else if (HasExecBreakpoint(DbgSystem::Gb, cur_bank, pc))
 	{
 		HaltGbNow();
 		return;
@@ -211,6 +219,8 @@ void CDebugger::Run()
 	snes_run_to_scanline_armed_ = false;
 	snes_step_one_scanline_ = false;
 	snes_break_in_armed_ = false;
+	snes_skip_exec_bp_once_ = true;
+	gb_skip_exec_bp_once_   = true;
 	S9xSGBClearDebuggerBreak();
 	Settings.Paused = false;
 }
@@ -239,12 +249,14 @@ void CDebugger::StepIn(DbgSystem sys)
 		snes_free_run_ = false;
 		snes_step_remaining_ = 1;
 		gb_free_run_ = true;
+		snes_skip_exec_bp_once_ = true;
 	}
 	else if (sys == DbgSystem::Gb)
 	{
 		gb_free_run_ = false;
 		gb_step_remaining_ = 1;
 		snes_free_run_ = true;
+		gb_skip_exec_bp_once_ = true;
 	}
 	S9xSGBClearDebuggerBreak();
 	Settings.Paused = false;
@@ -275,6 +287,7 @@ void CDebugger::StepOver(DbgSystem sys)
 			snes_step_over_addr_   = (uint16_t)(pc + len);
 			snes_free_run_         = true;
 			gb_free_run_           = true;
+			snes_skip_exec_bp_once_ = true;
 			S9xSGBClearDebuggerBreak();
 			Settings.Paused        = false;
 			return;
@@ -299,6 +312,7 @@ void CDebugger::StepOver(DbgSystem sys)
 			gb_step_over_addr_   = (uint16_t)(pc + len);
 			snes_free_run_       = true;
 			gb_free_run_         = true;
+			gb_skip_exec_bp_once_ = true;
 			S9xSGBClearDebuggerBreak();
 			Settings.Paused      = false;
 			return;
@@ -409,6 +423,8 @@ void CDebugger::OnEmulatorReset()
 	snes_step_one_scanline_     = false;
 	snes_step_one_scanline_start_ = -1;
 	snes_break_in_armed_   = false;
+	snes_skip_exec_bp_once_ = false;
+	gb_skip_exec_bp_once_   = false;
 	S9xSGBClearDebuggerBreak();
 	if (snes_dlg_) DebuggerDlgInvalidateCache(snes_dlg_);
 	if (gb_dlg_)   DebuggerDlgInvalidateCache(gb_dlg_);

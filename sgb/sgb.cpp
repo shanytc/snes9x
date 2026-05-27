@@ -940,6 +940,8 @@ uint8_t Emulator::PeekRAByte(uint32_t addr) const
 	if (addr < 0x10000)
 	{
 		const uint16_t a = static_cast<uint16_t>(addr);
+		if (impl_->mem.boot_rom_enabled && a < 0x0100)
+			return impl_->mem.boot_rom[a];
 		if (a < 0x8000)
 			return MbcRead(const_cast<MbcState &>(impl_->cart.mbc),
 			               impl_->cart.rom, impl_->cart.sram, a, impl_->cart.mbc1_multicart);

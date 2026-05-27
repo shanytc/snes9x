@@ -112,8 +112,13 @@ private:
 	bool     gb_step_over_active_ = false;
 	uint16_t gb_step_over_addr_   = 0;
 
-	bool snes_frame_step_armed_ = false;
-	bool gb_frame_step_armed_   = false;
+	bool     snes_frame_step_armed_     = false;
+	uint32_t snes_frame_step_start_     = 0;
+	bool     gb_frame_step_armed_       = false;
+	uint64_t gb_frame_step_start_t_     = 0;
+
+	bool     gb_step_one_scanline_armed_  = false;
+	uint64_t gb_step_one_scanline_start_t_ = 0;
 
 	bool gb_break_pending_      = false;
 

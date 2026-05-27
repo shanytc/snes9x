@@ -471,6 +471,9 @@ uint32_t S9xSGBGetROMSize(void);
 uint8_t  S9xSGBPeekBootROMByte(uint32_t off);
 uint32_t S9xSGBGetBootROMSize(void);
 
+uint64_t S9xSGBGetGbTCycles(void);
+uint8_t  S9xSGBGetCurrentLY(void);
+
 typedef void (*S9xSGBDebuggerHook)(uint16_t pc, uint8_t opcode);
 void    S9xSGBSetDebuggerHook(S9xSGBDebuggerHook hook);
 

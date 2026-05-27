@@ -7,6 +7,7 @@
 #include "../snes9x.h"
 #include "../memmap.h"
 #include "../65c816.h"
+#include "../ppu.h"
 #include "../sgb/sgb.h"
 
 CDebugger gDebugger;
@@ -123,6 +124,13 @@ void CDebugger::OnSnesPreInstruction()
 		return;
 	}
 
+	if (snes_frame_step_armed_ && IPPU.TotalEmulatedFrames != snes_frame_step_start_)
+	{
+		snes_frame_step_armed_ = false;
+		HaltSnesNow();
+		return;
+	}
+
 	if (snes_break_in_armed_ && (uint64_t)CPU.Cycles >= snes_break_in_target_)
 	{
 		snes_break_in_armed_ = false;
@@ -174,6 +182,28 @@ void CDebugger::OnGbPreInstruction(uint16_t pc, uint8_t opcode)
 		return;
 	}
 
+	if (gb_step_one_scanline_armed_)
+	{
+		const uint64_t now_t = S9xSGBGetGbTCycles();
+		if (now_t - gb_step_one_scanline_start_t_ >= 456)
+		{
+			gb_step_one_scanline_armed_ = false;
+			HaltGbNow();
+			return;
+		}
+	}
+
+	if (gb_frame_step_armed_)
+	{
+		const uint64_t now_t = S9xSGBGetGbTCycles();
+		if (now_t - gb_frame_step_start_t_ >= 70224)
+		{
+			gb_frame_step_armed_ = false;
+			HaltGbNow();
+			return;
+		}
+	}
+
 	if (!gb_free_run_)
 	{
 		if (gb_step_remaining_ <= 0)
@@ -213,6 +243,7 @@ void CDebugger::Run()
 	gb_step_over_active_   = false;
 	snes_frame_step_armed_ = false;
 	gb_frame_step_armed_   = false;
+	gb_step_one_scanline_armed_ = false;
 	gb_break_pending_      = false;
 	snes_run_to_nmi_ = false;
 	snes_run_to_irq_ = false;
@@ -329,24 +360,44 @@ void CDebugger::StepOut(DbgSystem sys)
 
 void CDebugger::FrameStep()
 {
-	snes_frame_step_armed_ = true;
-	gb_frame_step_armed_   = true;
 	Run();
+	if (snes_attached_)
+	{
+		snes_frame_step_armed_ = true;
+		snes_frame_step_start_ = IPPU.TotalEmulatedFrames;
+	}
+	if (gb_attached_)
+	{
+		gb_frame_step_armed_   = true;
+		gb_frame_step_start_t_ = S9xSGBGetGbTCycles();
+	}
 }
 
 void CDebugger::StepOneScanline(DbgSystem sys)
 {
-	if (sys != DbgSystem::Snes)
+	if (sys == DbgSystem::Snes)
 	{
-		StepIn(sys);
+		snes_step_one_scanline_       = true;
+		snes_step_one_scanline_start_ = (int)CPU.V_Counter;
+		snes_free_run_                = true;
+		gb_free_run_                  = true;
+		snes_skip_exec_bp_once_       = true;
+		S9xSGBClearDebuggerBreak();
+		Settings.Paused               = false;
 		return;
 	}
-	snes_step_one_scanline_       = true;
-	snes_step_one_scanline_start_ = (int)CPU.V_Counter;
-	snes_free_run_                = true;
-	gb_free_run_                  = true;
-	S9xSGBClearDebuggerBreak();
-	Settings.Paused               = false;
+	if (sys == DbgSystem::Gb)
+	{
+		gb_step_one_scanline_armed_   = true;
+		gb_step_one_scanline_start_t_ = S9xSGBGetGbTCycles();
+		snes_free_run_                = true;
+		gb_free_run_                  = true;
+		gb_skip_exec_bp_once_         = true;
+		S9xSGBClearDebuggerBreak();
+		Settings.Paused               = false;
+		return;
+	}
+	StepIn(sys);
 }
 
 void CDebugger::RunToNmi(DbgSystem sys)
@@ -415,7 +466,11 @@ void CDebugger::OnEmulatorReset()
 	snes_step_over_active_ = false;
 	gb_step_over_active_   = false;
 	snes_frame_step_armed_ = false;
+	snes_frame_step_start_ = 0;
 	gb_frame_step_armed_   = false;
+	gb_frame_step_start_t_ = 0;
+	gb_step_one_scanline_armed_   = false;
+	gb_step_one_scanline_start_t_ = 0;
 	gb_break_pending_      = false;
 	snes_run_to_nmi_       = false;
 	snes_run_to_irq_       = false;

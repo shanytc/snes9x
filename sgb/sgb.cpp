@@ -2847,6 +2847,20 @@ uint32_t S9xSGBGetBootROMSize(void)
 	return 256u;
 }
 
+uint64_t S9xSGBGetGbTCycles(void)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl) return 0;
+	return (uint64_t)impl->cpu.State().t_cycles;
+}
+
+uint8_t S9xSGBGetCurrentLY(void)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl) return 0;
+	return impl->ppu.ly;
+}
+
 void S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
                       uint16_t *bc, uint16_t *de, uint16_t *hl,
                       uint8_t  *ime, uint8_t *halted, uint8_t *stopped,

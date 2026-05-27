@@ -9,7 +9,7 @@ uint8_t ReadByte(uint32_t display_addr)
 	const uint16_t cpu  = (uint16_t)(display_addr & 0xFFFF);
 
 	if (bank == 0 && cpu < 0x4000)
-		return S9xSGBPeekROMByte((uint32_t)cpu);
+		return S9xSGBPeekRAByte((uint32_t)cpu);
 	if (bank > 0 && cpu >= 0x4000 && cpu < 0x8000)
 		return S9xSGBPeekROMByte((uint32_t)bank * 0x4000u + (cpu - 0x4000u));
 

@@ -1178,6 +1178,24 @@ HWND DisasmPanelCreate(HWND parent, DbgSystem sys, int id)
 	                     parent, (HMENU)(LONG_PTR)id, GetModuleHandle(NULL), (LPVOID)(intptr_t)sys);
 }
 
+void DisasmPanelInvalidateCache(HWND h)
+{
+	DisasmPanelState *st = GetState(h);
+	if (!st) return;
+	st->view_initialized = false;
+	st->view_start_pc    = 0;
+	st->shown_pc         = 0xFFFFFFFFu;
+	st->shown_paused     = false;
+	st->shown_bps_version = 0;
+	st->line_count       = 0;
+	st->targets_count    = 0;
+	if (st->lv)
+	{
+		ListView_SetItemCountEx(st->lv, 0, LVSICF_NOINVALIDATEALL);
+		InvalidateRect(st->lv, NULL, FALSE);
+	}
+}
+
 void DisasmPanelRefresh(HWND h)
 {
 	DisasmPanelState *st = GetState(h);

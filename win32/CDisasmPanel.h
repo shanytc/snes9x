@@ -7,5 +7,6 @@
 void DisasmPanelRegisterClass(HINSTANCE hInst);
 HWND DisasmPanelCreate(HWND parent, DbgSystem sys, int id);
 void DisasmPanelRefresh(HWND h);
+void DisasmPanelInvalidateCache(HWND h);
 
 #endif

@@ -581,6 +581,14 @@ static void UpdateRunPauseButtonStates(DbgDlgState *st, HWND h)
 	}
 }
 
+void DebuggerDlgInvalidateCache(HWND h)
+{
+	if (!h || !IsWindow(h)) return;
+	DbgDlgState *st = GetState(h);
+	if (!st) return;
+	if (st->hDisasm) DisasmPanelInvalidateCache(st->hDisasm);
+}
+
 void DebuggerDlgRefresh(HWND h)
 {
 	if (!h || !IsWindow(h)) return;

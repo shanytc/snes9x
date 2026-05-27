@@ -7,6 +7,7 @@
 HWND DebuggerDlgCreate(DbgSystem sys);
 void DebuggerDlgClose(HWND h);
 void DebuggerDlgRefresh(HWND h);
+void DebuggerDlgInvalidateCache(HWND h);
 
 void DebuggerDlgGlobalInit(HINSTANCE hInst);
 

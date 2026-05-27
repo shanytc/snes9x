@@ -392,6 +392,36 @@ void CDebugger::ReloadRom()
 	S9xReset();
 }
 
+void CDebugger::OnEmulatorReset()
+{
+	snes_free_run_         = true;
+	gb_free_run_           = true;
+	snes_step_remaining_   = 0;
+	gb_step_remaining_     = 0;
+	snes_step_over_active_ = false;
+	gb_step_over_active_   = false;
+	snes_frame_step_armed_ = false;
+	gb_frame_step_armed_   = false;
+	gb_break_pending_      = false;
+	snes_run_to_nmi_       = false;
+	snes_run_to_irq_       = false;
+	snes_run_to_scanline_armed_ = false;
+	snes_step_one_scanline_     = false;
+	snes_step_one_scanline_start_ = -1;
+	snes_break_in_armed_   = false;
+	S9xSGBClearDebuggerBreak();
+	if (snes_dlg_) DebuggerDlgInvalidateCache(snes_dlg_);
+	if (gb_dlg_)   DebuggerDlgInvalidateCache(gb_dlg_);
+	MemoryViewerRefreshAll();
+	RefreshSnes();
+	RefreshGb();
+}
+
+void S9xDebuggerOnEmulatorReset(void)
+{
+	gDebugger.OnEmulatorReset();
+}
+
 static int InferMemoryType(DbgSystem sys, uint8_t bank, uint16_t addr)
 {
 	if (sys == DbgSystem::Gb)

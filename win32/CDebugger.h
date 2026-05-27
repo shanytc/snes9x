@@ -58,6 +58,7 @@ public:
 
 	void Run();
 	void Pause(DbgSystem requested_by = DbgSystem::None);
+	void OnEmulatorReset();
 	void StepIn(DbgSystem sys);
 	void StepOver(DbgSystem sys);
 	void StepOut(DbgSystem sys);

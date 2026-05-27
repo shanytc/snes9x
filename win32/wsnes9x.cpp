@@ -2815,6 +2815,7 @@ LRESULT CALLBACK WinProc(
 						S9xReset ();
 					else
 						S9xSoftReset ();
+					gDebugger.OnEmulatorReset();
 					ReInitSound();
 #ifdef RETROACHIEVEMENTS_SUPPORT
 					RA_OnReset();
@@ -3038,6 +3039,7 @@ LRESULT CALLBACK WinProc(
             if (i == 1)
 			{
                 S9xReset();
+				gDebugger.OnEmulatorReset();
 #ifdef RETROACHIEVEMENTS_SUPPORT
 				RA_OnReset();
 #endif
@@ -3497,6 +3499,7 @@ LRESULT CALLBACK WinProc(
 				if (!Settings.StopEmulation && strcmp(Memory.ROMName, gameName) == 0)
 				{
 					S9xReset();
+					gDebugger.OnEmulatorReset();
 #ifdef RETROACHIEVEMENTS_SUPPORT
 					RA_OnReset();
 #endif
@@ -5897,6 +5900,7 @@ static bool LoadROMPlain(const TCHAR *filename)
 		S9xStartCheatSearch (&Cheat);
         ReInitSound();
 		ResetFrameTimer();
+		gDebugger.OnEmulatorReset();
         return (TRUE);
     }
     return (FALSE);

@@ -698,9 +698,12 @@ void WinShowSnesDebuggerDialog()
 	{
 		ShowWindow(gSnesDebuggerHWND, SW_SHOW);
 		SetForegroundWindow(gSnesDebuggerHWND);
-		return;
 	}
-	DebuggerDlgCreate(DbgSystem::Snes);
+	else
+	{
+		DebuggerDlgCreate(DbgSystem::Snes);
+	}
+	gDebugger.Pause(DbgSystem::Snes);
 }
 
 void WinShowGbDebuggerDialog()
@@ -710,7 +713,10 @@ void WinShowGbDebuggerDialog()
 	{
 		ShowWindow(gGbDebuggerHWND, SW_SHOW);
 		SetForegroundWindow(gGbDebuggerHWND);
-		return;
 	}
-	DebuggerDlgCreate(DbgSystem::Gb);
+	else
+	{
+		DebuggerDlgCreate(DbgSystem::Gb);
+	}
+	gDebugger.Pause(DbgSystem::Gb);
 }

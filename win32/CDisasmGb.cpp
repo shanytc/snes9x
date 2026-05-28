@@ -242,6 +242,14 @@ uint8_t DisassembleGb(uint32_t display_pc, const GbContext *ctx, ReadGbFn read, 
 		return length;
 	}
 
+	if (info.mode == M_BAD)
+	{
+		snprintf(out->mnemonic, sizeof(out->mnemonic), "ILL_%02X", opcode);
+		out->operand[0] = 0;
+		out->length = length;
+		return length;
+	}
+
 	strncpy(out->mnemonic, info.mnem, sizeof(out->mnemonic) - 1);
 
 	switch (info.mode)

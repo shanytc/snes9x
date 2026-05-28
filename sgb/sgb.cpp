@@ -2834,6 +2834,13 @@ uint32_t S9xSGBGetROMSize(void)
 	return (uint32_t)impl->cart.rom.size();
 }
 
+uint32_t S9xSGBGetSRAMSize(void)
+{
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl) return 0;
+	return (uint32_t)impl->cart.sram.size();
+}
+
 uint8_t S9xSGBPeekBootROMByte(uint32_t off)
 {
 	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();

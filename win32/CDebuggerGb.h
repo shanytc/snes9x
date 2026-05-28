@@ -20,7 +20,7 @@ namespace GbBackend
 	uint8_t Disassemble(uint32_t display_pc, DisasmResultGb *out);
 
 	uint32_t CurrentDisplayPC();
-	uint32_t TotalROMBanks();
+	uint32_t CartSRAMSize();
 }
 
 #endif

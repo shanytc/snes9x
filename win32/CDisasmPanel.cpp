@@ -39,8 +39,49 @@ struct DisasmLine
 	uint8_t  length;
 	bool     is_sub_start;
 	bool     is_label_row;
+	bool     is_unmapped;
 	uint32_t section_index;
 };
+
+struct UnmappedRegion
+{
+	uint32_t pc;
+	uint32_t size;
+	const char *label;
+};
+
+static uint8_t BpBankForPC(DbgSystem sys, uint32_t pc)
+{
+	if (sys == DbgSystem::Snes)
+		return (uint8_t)((pc >> 16) & 0xFF);
+	const uint16_t cpu = (uint16_t)(pc & 0xFFFFu);
+	if (cpu >= 0x4000 && cpu < 0x8000)
+		return (uint8_t)(S9xSGBGetCurrentRomBank() & 0xFFu);
+	return 0;
+}
+
+static bool IsInUnmappedRegion(DbgSystem sys, uint32_t pc, UnmappedRegion *out)
+{
+	if (sys != DbgSystem::Gb) return false;
+
+	const uint16_t cpu = (uint16_t)(pc & 0xFFFF);
+
+	if (cpu >= 0xA000 && cpu < 0xC000 && GbBackend::CartSRAMSize() == 0)
+	{
+		out->pc    = 0xA000u;
+		out->size  = 0x2000u;
+		out->label = "unmapped (no cart RAM)";
+		return true;
+	}
+	if (cpu >= 0xFEA0 && cpu < 0xFF00)
+	{
+		out->pc    = 0xFEA0u;
+		out->size  = 0x0060u;
+		out->label = "unmapped (prohibited)";
+		return true;
+	}
+	return false;
+}
 
 static bool IsTargetOpcode_Snes(uint8_t op)
 {
@@ -115,6 +156,12 @@ struct DisasmPanelState
 	uint32_t    *targets          = nullptr;
 	int          targets_count    = 0;
 	int          targets_cap      = 0;
+	uint32_t    *entries          = nullptr;
+	int          entries_count    = 0;
+	int          entries_cap      = 0;
+	uint32_t    *section_starts   = nullptr;
+	int          sections_count   = 0;
+	int          sections_cap     = 0;
 	uint32_t     rclick_pc        = 0;
 	bool         rclick_valid     = false;
 	bool         rclick_has_branch = false;
@@ -122,6 +169,7 @@ struct DisasmPanelState
 	uint32_t     shown_bps_version = 0;
 	uint32_t     shown_pc          = 0xFFFFFFFFu;
 	bool         shown_paused      = false;
+	bool         walk_complete     = false;
 };
 
 static void EnsureTargetsCap(DisasmPanelState *st, int need)
@@ -166,6 +214,109 @@ static void AddKnownTarget(DisasmPanelState *st, uint32_t addr)
 	st->targets_count++;
 }
 
+static void EnsureEntriesCap(DisasmPanelState *st, int need)
+{
+	if (st->entries_cap >= need) return;
+	int new_cap = st->entries_cap > 0 ? st->entries_cap : 64;
+	while (new_cap < need) new_cap *= 2;
+	uint32_t *new_arr = (uint32_t *)malloc(sizeof(uint32_t) * new_cap);
+	if (st->entries && st->entries_count > 0)
+		memcpy(new_arr, st->entries, sizeof(uint32_t) * st->entries_count);
+	free(st->entries);
+	st->entries     = new_arr;
+	st->entries_cap = new_cap;
+}
+
+static bool IsKnownEntry(DisasmPanelState *st, uint32_t addr)
+{
+	int lo = 0, hi = st->entries_count - 1;
+	while (lo <= hi)
+	{
+		int mid = (lo + hi) / 2;
+		if (st->entries[mid] == addr) return true;
+		if (st->entries[mid] < addr) lo = mid + 1;
+		else                          hi = mid - 1;
+	}
+	return false;
+}
+
+static void AddKnownEntry(DisasmPanelState *st, uint32_t addr)
+{
+	int lo = 0, hi = st->entries_count;
+	while (lo < hi)
+	{
+		int mid = (lo + hi) / 2;
+		if (st->entries[mid] < addr) lo = mid + 1;
+		else                          hi = mid;
+	}
+	if (lo < st->entries_count && st->entries[lo] == addr) return;
+	EnsureEntriesCap(st, st->entries_count + 1);
+	memmove(st->entries + lo + 1, st->entries + lo, sizeof(uint32_t) * (st->entries_count - lo));
+	st->entries[lo] = addr;
+	st->entries_count++;
+}
+
+static void EnsureSectionsCap(DisasmPanelState *st, int need)
+{
+	if (st->sections_cap >= need) return;
+	int new_cap = st->sections_cap > 0 ? st->sections_cap : 64;
+	while (new_cap < need) new_cap *= 2;
+	uint32_t *new_arr = (uint32_t *)malloc(sizeof(uint32_t) * new_cap);
+	if (st->section_starts && st->sections_count > 0)
+		memcpy(new_arr, st->section_starts, sizeof(uint32_t) * st->sections_count);
+	free(st->section_starts);
+	st->section_starts = new_arr;
+	st->sections_cap   = new_cap;
+}
+
+static void AppendSectionStart(DisasmPanelState *st, uint32_t pc)
+{
+	EnsureSectionsCap(st, st->sections_count + 1);
+	st->section_starts[st->sections_count++] = pc;
+}
+
+static bool IsCallOpcode(DbgSystem sys, uint8_t op)
+{
+	if (sys == DbgSystem::Snes)
+		return op == 0x20 || op == 0x22 || op == 0xFC;
+	return op == 0xCD || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC
+	    || (op & 0xC7) == 0xC7;
+}
+
+static bool IsPrologueOpcode(DbgSystem sys, uint8_t op)
+{
+	if (sys == DbgSystem::Snes)
+		return op == 0x48 || op == 0x8B || op == 0x0B || op == 0x4B
+		    || op == 0x08 || op == 0xDA || op == 0x5A;
+	return op == 0xF5 || op == 0xC5 || op == 0xD5 || op == 0xE5;
+}
+
+static void SeedEntries(DisasmPanelState *st)
+{
+	if (st->sys == DbgSystem::Gb)
+	{
+		static const uint32_t gb_vectors[] = {
+			0x0000, 0x0008, 0x0010, 0x0018, 0x0020, 0x0028, 0x0030, 0x0038,
+			0x0040, 0x0048, 0x0050, 0x0058, 0x0060, 0x0100
+		};
+		for (uint32_t v : gb_vectors) AddKnownEntry(st, v);
+		return;
+	}
+
+	static const uint32_t snes_vector_locs[] = {
+		0x00FFE4, 0x00FFE6, 0x00FFE8, 0x00FFEA, 0x00FFEE,
+		0x00FFF4, 0x00FFF8, 0x00FFFA, 0x00FFFC, 0x00FFFE
+	};
+	for (uint32_t loc : snes_vector_locs)
+	{
+		const uint8_t lo = SnesBackend::ReadByte(loc);
+		const uint8_t hi = SnesBackend::ReadByte(loc + 1);
+		const uint16_t ptr = (uint16_t)(lo | (hi << 8));
+		if (ptr == 0x0000 || ptr == 0xFFFF) continue;
+		AddKnownEntry(st, (uint32_t)ptr);
+	}
+}
+
 static bool GetBranchTargetForPC(DbgSystem sys, uint32_t pc, uint32_t *out_target)
 {
 	if (sys == DbgSystem::Snes)
@@ -178,15 +329,7 @@ static bool GetBranchTargetForPC(DbgSystem sys, uint32_t pc, uint32_t *out_targe
 	{
 		DisasmResultGb r = {};
 		GbBackend::Disassemble(pc, &r);
-		if (r.has_branch)
-		{
-			const uint8_t bank = (uint8_t)((pc >> 16) & 0xFF);
-			const uint16_t tgt = r.branch_target;
-			uint8_t tgt_bank = bank;
-			if (tgt < 0x4000)      tgt_bank = 0;
-			*out_target = ((uint32_t)tgt_bank << 16) | tgt;
-			return true;
-		}
+		if (r.has_branch) { *out_target = r.branch_target & 0xFFFFu; return true; }
 	}
 	return false;
 }
@@ -218,12 +361,8 @@ static void ClearLines(DisasmPanelState *st)
 static bool IsCtlFlowEnd(DbgSystem sys, uint8_t op)
 {
 	if (sys == DbgSystem::Snes)
-		return op == 0x60 || op == 0x6B || op == 0x40
-		    || op == 0x4C || op == 0x5C
-		    || op == 0x82 || op == 0x80;
-	return op == 0xC9 || op == 0xD9
-	    || op == 0xC3 || op == 0xE9
-	    || op == 0x18;
+		return op == 0x60 || op == 0x6B || op == 0x40;
+	return op == 0xC9 || op == 0xD9;
 }
 
 static DisasmPanelState *GetState(HWND h)
@@ -245,39 +384,12 @@ static uint32_t GetCurrentPC(DbgSystem sys)
 static uint32_t AdvancePC(DbgSystem sys, uint32_t pc, uint8_t len)
 {
 	if (sys == DbgSystem::Snes)
-		return (pc & 0xFF0000) | ((uint16_t)(pc + len) & 0xFFFF);
+		return (pc + len) & 0xFFFFFFu;
 
-	uint8_t  bank = (uint8_t)((pc >> 16) & 0xFF);
-	uint16_t cpu  = (uint16_t)(pc & 0xFFFF);
-	cpu = (uint16_t)(cpu + len);
-
-	if (bank == 0)
-	{
-		if (cpu >= 0x4000)
-		{
-			const uint8_t  total_banks = (uint8_t)GbBackend::TotalROMBanks();
-			if (total_banks >= 2) bank = 1;
-			cpu = (uint16_t)(0x4000 + (cpu - 0x4000));
-		}
-	}
-	else
-	{
-		if (cpu >= 0x8000)
-		{
-			const uint8_t total_banks = (uint8_t)GbBackend::TotalROMBanks();
-			const uint8_t next_bank = (uint8_t)(bank + 1);
-			if (total_banks == 0 || next_bank < total_banks)
-			{
-				bank = next_bank;
-				cpu  = (uint16_t)(0x4000 + (cpu - 0x8000));
-			}
-			else
-			{
-				cpu = 0x7FFF;
-			}
-		}
-	}
-	return ((uint32_t)bank << 16) | cpu;
+	const uint32_t cpu = pc & 0xFFFFu;
+	const uint32_t new_cpu = cpu + len;
+	if (new_cpu >= 0x10000u) return 0xFFFFu;
+	return new_cpu;
 }
 
 static int DisasmOne(DbgSystem sys, uint32_t pc, char *line, size_t cap,
@@ -323,9 +435,14 @@ static int DisasmOne(DbgSystem sys, uint32_t pc, char *line, size_t cap,
 
 static void ResetLines(DisasmPanelState *st, uint32_t new_start_pc)
 {
-	st->view_start_pc = new_start_pc;
+	st->view_start_pc  = new_start_pc;
+	st->walk_complete  = false;
 	ClearLines(st);
-	st->targets_count = 0;
+	st->targets_count  = 0;
+	st->entries_count  = 0;
+	st->sections_count = 0;
+	SeedEntries(st);
+	AppendSectionStart(st, new_start_pc);
 	DisasmLine first{};
 	first.pc            = new_start_pc;
 	first.length        = 0;
@@ -333,7 +450,7 @@ static void ResetLines(DisasmPanelState *st, uint32_t new_start_pc)
 	first.is_label_row  = false;
 	first.section_index = 0;
 	PushLine(st, first);
-	ListView_SetItemCountEx(st->lv, 100000, LVSICF_NOINVALIDATEALL);
+	ListView_SetItemCountEx(st->lv, 5000000, LVSICF_NOINVALIDATEALL);
 	InvalidateRect(st->lv, NULL, FALSE);
 }
 
@@ -344,51 +461,88 @@ static int LastInstrIdx(DisasmPanelState *st)
 	return -1;
 }
 
-static uint32_t ComputeBranchTargetDisplay(DbgSystem sys, uint32_t caller_pc, uint32_t raw_branch)
+static uint32_t ComputeBranchTargetDisplay(DbgSystem sys, uint32_t /*caller_pc*/, uint32_t raw_branch)
 {
 	if (sys == DbgSystem::Snes)
 		return raw_branch & 0xFFFFFF;
-	const uint16_t tgt_cpu     = (uint16_t)(raw_branch & 0xFFFF);
-	const uint8_t  caller_bank = (uint8_t)((caller_pc >> 16) & 0xFF);
-	uint8_t tgt_bank;
-	if      (tgt_cpu < 0x4000) tgt_bank = 0;
-	else if (tgt_cpu < 0x8000) tgt_bank = caller_bank;
-	else                       tgt_bank = 0;
-	return ((uint32_t)tgt_bank << 16) | tgt_cpu;
+	return raw_branch & 0xFFFFu;
 }
 
 static void EnsureLineCached(DisasmPanelState *st, int index)
 {
 	if (st->line_count == 0) return;
+	if (st->walk_complete) return;
 	while (st->line_count <= index)
 	{
 		const int last = LastInstrIdx(st);
 		if (last < 0) break;
 
 		const uint32_t back_pc  = st->lines[last].pc;
-		uint8_t        back_length = st->lines[last].length;
 		const uint32_t back_sec = st->lines[last].section_index;
 
-		char ln[160]; uint8_t bytes[4]; int byte_count;
-		bool has_branch = false; uint32_t raw_branch = 0;
-		int len = DisasmOne(st->sys, back_pc, ln, sizeof(ln), bytes, &byte_count,
-		                    nullptr, nullptr, nullptr,
-		                    &has_branch, &raw_branch);
-		if (back_length == 0)
+		uint32_t next_pc;
+		uint32_t next_sec;
+		bool     ends_section;
+
+		if (st->lines[last].is_unmapped)
 		{
-			back_length = (uint8_t)len;
-			st->lines[last].length = back_length;
+			UnmappedRegion ur{};
+			IsInUnmappedRegion(st->sys, back_pc, &ur);
+			next_pc      = back_pc + ur.size;
+			next_sec     = back_sec + 1;
+			ends_section = true;
+			if (next_pc == back_pc) { st->walk_complete = true; break; }
+		}
+		else
+		{
+			uint8_t back_length = st->lines[last].length;
+			char ln[160]; uint8_t bytes[4]; int byte_count;
+			bool has_branch = false; uint32_t raw_branch = 0;
+			int len = DisasmOne(st->sys, back_pc, ln, sizeof(ln), bytes, &byte_count,
+			                    nullptr, nullptr, nullptr,
+			                    &has_branch, &raw_branch);
+			if (back_length == 0)
+			{
+				back_length = (uint8_t)len;
+				st->lines[last].length = back_length;
+			}
+
+			if (has_branch && IsTargetOpcode(st->sys, bytes[0]))
+			{
+				const uint32_t tgt_display = ComputeBranchTargetDisplay(st->sys, back_pc, raw_branch);
+				AddKnownTarget(st, tgt_display);
+				if (IsCallOpcode(st->sys, bytes[0]))
+					AddKnownEntry(st, tgt_display);
+			}
+
+			ends_section = IsCtlFlowEnd(st->sys, bytes[0]);
+			next_pc      = AdvancePC(st->sys, back_pc, back_length);
+			if (next_pc == back_pc) { st->walk_complete = true; break; }
+			next_sec     = ends_section ? (back_sec + 1) : back_sec;
+
+			if (ends_section)
+			{
+				char pln[160]; uint8_t pb[4]; int pc_count;
+				DisasmOne(st->sys, next_pc, pln, sizeof(pln), pb, &pc_count);
+				if (IsPrologueOpcode(st->sys, pb[0]))
+					AddKnownEntry(st, next_pc);
+			}
 		}
 
-		if (has_branch && IsTargetOpcode(st->sys, bytes[0]))
+		UnmappedRegion ur{};
+		if (IsInUnmappedRegion(st->sys, next_pc, &ur))
 		{
-			const uint32_t tgt_display = ComputeBranchTargetDisplay(st->sys, back_pc, raw_branch);
-			AddKnownTarget(st, tgt_display);
+			DisasmLine umrow{};
+			umrow.pc            = ur.pc;
+			umrow.length        = 0;
+			umrow.is_sub_start  = true;
+			umrow.is_label_row  = false;
+			umrow.is_unmapped   = true;
+			umrow.section_index = next_sec;
+			PushLine(st, umrow);
+			AppendSectionStart(st, ur.pc);
+			continue;
 		}
-
-		const bool ends_section = IsCtlFlowEnd(st->sys, bytes[0]);
-		const uint32_t next_pc  = AdvancePC(st->sys, back_pc, back_length);
-		const uint32_t next_sec = ends_section ? (back_sec + 1) : back_sec;
 
 		if (IsKnownTarget(st, next_pc))
 		{
@@ -414,13 +568,27 @@ static void EnsureLineCached(DisasmPanelState *st, int index)
 		next.is_label_row  = false;
 		next.section_index = next_sec;
 		PushLine(st, next);
+		if (ends_section) AppendSectionStart(st, next_pc);
 	}
+
+	if (st->walk_complete && st->lv)
+		ListView_SetItemCountEx(st->lv, st->line_count, LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
 }
 
 static int FindIndexForPC(DisasmPanelState *st, uint32_t pc)
 {
 	for (int i = 0; i < st->line_count; i++)
-		if (st->lines[i].pc == pc && !st->lines[i].is_label_row) return i;
+	{
+		if (st->lines[i].is_label_row) continue;
+		if (st->lines[i].pc == pc) return i;
+		if (st->lines[i].is_unmapped)
+		{
+			UnmappedRegion ur{};
+			if (IsInUnmappedRegion(st->sys, st->lines[i].pc, &ur)
+			    && pc >= ur.pc && pc < ur.pc + ur.size)
+				return i;
+		}
+	}
 	return -1;
 }
 
@@ -455,6 +623,82 @@ static uint32_t FindGoodStartAddr(DbgSystem sys, uint32_t target_pc, int lookbac
 	return target_pc;
 }
 
+struct OperandText
+{
+	char text[224];
+	int  suffix_offset;
+};
+
+static void BuildOperandText(DisasmPanelState *st, uint32_t row_pc, OperandText *out_buf)
+{
+	char line[160]; uint8_t bytes[4]; int byte_count;
+	bool has_eff = false; uint32_t eff_addr = 0; uint8_t eff_val = 0;
+	DisasmOne(st->sys, row_pc, line, sizeof(line), bytes, &byte_count,
+	          &has_eff, &eff_addr, &eff_val);
+
+	const char *operand_start = strchr(line, ' ');
+	if (operand_start)
+		while (*operand_start == ' ') operand_start++;
+	else
+		operand_start = "";
+
+	uint32_t lookup_addr = 0;
+	bool     have_addr   = false;
+	const char *p = operand_start;
+	while (*p)
+	{
+		if (*p == '$' && (p == operand_start || p[-1] != '#'))
+		{
+			const char *digits = p + 1;
+			uint32_t val = 0;
+			int n = 0;
+			while (n < 6)
+			{
+				const char c = *digits;
+				int d;
+				if (c >= '0' && c <= '9')      d = c - '0';
+				else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
+				else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
+				else break;
+				val = (val << 4) | (uint32_t)d;
+				digits++;
+				n++;
+			}
+			if (n >= 4)
+			{
+				lookup_addr = val;
+				have_addr   = true;
+				break;
+			}
+		}
+		p++;
+	}
+
+	const char *label = NULL;
+	if (has_eff)
+		label = LookupLabel(st->sys, eff_addr);
+	else if (have_addr)
+		label = LookupLabel(st->sys, lookup_addr);
+
+	char suffix[96] = "";
+	if (has_eff)
+	{
+		if (label)
+			_snprintf_s(suffix, 96, _TRUNCATE, " [%s] = $%02X", label, eff_val);
+		else if (st->sys == DbgSystem::Snes)
+			_snprintf_s(suffix, 96, _TRUNCATE, " [$%06X] = $%02X", eff_addr & 0xFFFFFF, eff_val);
+		else
+			_snprintf_s(suffix, 96, _TRUNCATE, " [$%04X] = $%02X", eff_addr & 0xFFFF, eff_val);
+	}
+	else if (label)
+	{
+		_snprintf_s(suffix, 96, _TRUNCATE, " [%s]", label);
+	}
+
+	out_buf->suffix_offset = suffix[0] ? (int)strlen(operand_start) : -1;
+	_snprintf_s(out_buf->text, sizeof(out_buf->text), _TRUNCATE, "%s%s", operand_start, suffix);
+}
+
 static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 {
 	const int idx = di->item.iItem;
@@ -471,11 +715,47 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 			char *out = di->item.pszText;
 			const int cap = di->item.cchTextMax;
 			if (di->item.iSubItem == COL_MNEM)
-				_snprintf_s(out, cap, _TRUNCATE, "$%02x%04x:",
-				            (unsigned)(ln.pc >> 16) & 0xFF,
-				            (unsigned)(ln.pc & 0xFFFF));
+			{
+				if (st->sys == DbgSystem::Snes)
+					_snprintf_s(out, cap, _TRUNCATE, "$%06X:", (unsigned)(ln.pc & 0xFFFFFFu));
+				else
+					_snprintf_s(out, cap, _TRUNCATE, "$%04X:", (unsigned)(ln.pc & 0xFFFFu));
+			}
 			else
 				out[0] = 0;
+		}
+		return;
+	}
+
+	if (ln.is_unmapped)
+	{
+		if (di->item.mask & LVIF_TEXT)
+		{
+			char *out = di->item.pszText;
+			const int cap = di->item.cchTextMax;
+			UnmappedRegion ur{};
+			IsInUnmappedRegion(st->sys, ln.pc, &ur);
+			const uint32_t end_addr = ur.pc + ur.size - 1;
+			switch (di->item.iSubItem)
+			{
+				case COL_MARGIN:
+					out[0] = 0;
+					break;
+				case COL_ADDR:
+					_snprintf_s(out, cap, _TRUNCATE, "%04x-%04x",
+					            (unsigned)(ur.pc & 0xFFFF),
+					            (unsigned)(end_addr & 0xFFFF));
+					break;
+				case COL_BYTES:
+					out[0] = 0;
+					break;
+				case COL_MNEM:
+					out[0] = 0;
+					break;
+				case COL_OPERAND:
+					_snprintf_s(out, cap, _TRUNCATE, "%s", ur.label ? ur.label : "unmapped");
+					break;
+			}
 		}
 		return;
 	}
@@ -504,9 +784,10 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 				out[0] = 0;
 				break;
 			case COL_ADDR:
-				_snprintf_s(out, cap, _TRUNCATE, "%02x:%04x",
-				            (unsigned)(ln.pc >> 16) & 0xFF,
-				            (unsigned)(ln.pc & 0xFFFF));
+				if (st->sys == DbgSystem::Snes)
+					_snprintf_s(out, cap, _TRUNCATE, "%06X", (unsigned)(ln.pc & 0xFFFFFFu));
+				else
+					_snprintf_s(out, cap, _TRUNCATE, "%04X", (unsigned)(ln.pc & 0xFFFFu));
 				break;
 			case COL_BYTES:
 				if (byte_count == 1)      _snprintf_s(out, cap, _TRUNCATE, "%02X", bytes[0]);
@@ -525,66 +806,9 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 			}
 			case COL_OPERAND:
 			{
-				const char *operand_start = strchr(line, ' ');
-				if (operand_start)
-					while (*operand_start == ' ') operand_start++;
-				else
-					operand_start = "";
-
-				uint32_t lookup_addr = 0;
-				bool     have_addr   = false;
-				const char *p = operand_start;
-				while (*p)
-				{
-					if (*p == '$' && (p == operand_start || p[-1] != '#'))
-					{
-						const char *digits = p + 1;
-						uint32_t val = 0;
-						int n = 0;
-						while (n < 6)
-						{
-							const char c = *digits;
-							int d;
-							if (c >= '0' && c <= '9')      d = c - '0';
-							else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
-							else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
-							else break;
-							val = (val << 4) | (uint32_t)d;
-							digits++;
-							n++;
-						}
-						if (n >= 4)
-						{
-							lookup_addr = val;
-							have_addr   = true;
-							break;
-						}
-					}
-					p++;
-				}
-
-				const char *label = NULL;
-				if (has_eff)
-					label = LookupLabel(st->sys, eff_addr);
-				else if (have_addr)
-					label = LookupLabel(st->sys, lookup_addr);
-
-				char suffix[64] = "";
-				if (has_eff)
-				{
-					if (label)
-						_snprintf_s(suffix, 64, _TRUNCATE, " [%s] = $%02X", label, eff_val);
-					else if (st->sys == DbgSystem::Snes)
-						_snprintf_s(suffix, 64, _TRUNCATE, " [$%06X] = $%02X", eff_addr & 0xFFFFFF, eff_val);
-					else
-						_snprintf_s(suffix, 64, _TRUNCATE, " [$%04X] = $%02X", eff_addr & 0xFFFF, eff_val);
-				}
-				else if (label)
-				{
-					_snprintf_s(suffix, 64, _TRUNCATE, " [%s]", label);
-				}
-
-				_snprintf_s(out, cap, _TRUNCATE, "%s%s", operand_start, suffix);
+				OperandText ot;
+				BuildOperandText(st, ln.pc, &ot);
+				_snprintf_s(out, cap, _TRUNCATE, "%s", ot.text);
 				break;
 			}
 		}
@@ -604,10 +828,17 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			if (idx < st->line_count)
 			{
 				const DisasmLine &row = st->lines[idx];
+				const bool in_func = (int)row.section_index < st->sections_count
+				    && IsKnownEntry(st, st->section_starts[row.section_index]);
 				if (row.is_label_row)
 				{
-					cd->clrTextBk = (row.section_index & 1) ? RGB(255, 240, 240) : RGB(255, 255, 255);
+					cd->clrTextBk = in_func ? RGB(255, 240, 240) : RGB(255, 255, 255);
 					cd->clrText   = RGB(0, 96, 0);
+				}
+				else if (row.is_unmapped)
+				{
+					cd->clrTextBk = RGB(240, 240, 240);
+					cd->clrText   = RGB(110, 110, 110);
 				}
 				else
 				{
@@ -617,7 +848,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 						cd->clrTextBk = RGB(255, 230, 90);
 						cd->clrText   = RGB(0, 0, 0);
 					}
-					else if (row.section_index & 1)
+					else if (in_func)
 					{
 						cd->clrTextBk = RGB(255, 240, 240);
 					}
@@ -637,10 +868,17 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			if (idx < st->line_count)
 			{
 				const DisasmLine &row = st->lines[idx];
+				const bool in_func = (int)row.section_index < st->sections_count
+				    && IsKnownEntry(st, st->section_starts[row.section_index]);
 				if (row.is_label_row)
 				{
-					cd->clrTextBk = (row.section_index & 1) ? RGB(255, 240, 240) : RGB(255, 255, 255);
+					cd->clrTextBk = in_func ? RGB(255, 240, 240) : RGB(255, 255, 255);
 					cd->clrText   = RGB(0, 96, 0);
+				}
+				else if (row.is_unmapped)
+				{
+					cd->clrTextBk = RGB(240, 240, 240);
+					cd->clrText   = RGB(110, 110, 110);
 				}
 				else
 				{
@@ -650,7 +888,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 						cd->clrTextBk = RGB(255, 230, 90);
 						cd->clrText   = RGB(0, 0, 0);
 					}
-					else if (row.section_index & 1)
+					else if (in_func)
 					{
 						cd->clrTextBk = RGB(255, 240, 240);
 						cd->clrText   = RGB(20, 20, 20);
@@ -666,6 +904,8 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 						DisasmOne(st->sys, row.pc, ln, sizeof(ln), b, &c);
 						cd->clrText = MnemColor(st->sys, b[0]);
 					}
+					if (sub == COL_OPERAND)
+						return CDRF_SKIPDEFAULT;
 				}
 			}
 			return CDRF_NEWFONT;
@@ -676,7 +916,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			const int idx = (int)cd->nmcd.dwItemSpec;
 			if (idx >= st->line_count) return CDRF_DODEFAULT;
 
-			if (st->lines[idx].is_label_row)
+			if (st->lines[idx].is_label_row || st->lines[idx].is_unmapped)
 				return CDRF_DODEFAULT;
 
 			RECT row_rect = {};
@@ -690,6 +930,82 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 
 			HDC dc = cd->nmcd.hdc;
 
+			{
+				RECT op_rect = {};
+				ListView_GetSubItemRect(st->lv, idx, COL_OPERAND, LVIR_BOUNDS, &op_rect);
+
+				const bool in_func = (int)st->lines[idx].section_index < st->sections_count
+				    && IsKnownEntry(st, st->section_starts[st->lines[idx].section_index]);
+				const bool is_pc = Settings.Paused && row_pc == cur_pc;
+
+				COLORREF bg_color;
+				if      (is_pc)   bg_color = RGB(255, 230, 90);
+				else if (in_func) bg_color = RGB(255, 240, 240);
+				else              bg_color = RGB(255, 255, 255);
+
+				HBRUSH bg = CreateSolidBrush(bg_color);
+				FillRect(dc, &op_rect, bg);
+				DeleteObject(bg);
+
+				OperandText ot;
+				BuildOperandText(st, row_pc, &ot);
+
+				const int prev_bk_mode = SetBkMode(dc, TRANSPARENT);
+
+				TEXTMETRICA tm; GetTextMetricsA(dc, &tm);
+				int y = op_rect.top + ((op_rect.bottom - op_rect.top) - tm.tmHeight) / 2;
+				int x = op_rect.left + 4;
+
+				const int total_len = (int)strlen(ot.text);
+				const int pre_end   = (ot.suffix_offset >= 0) ? ot.suffix_offset : total_len;
+
+				auto DrawSpan = [&](const char *s, int n, COLORREF c) {
+					if (n <= 0) return;
+					SetTextColor(dc, c);
+					ExtTextOutA(dc, x, y, ETO_CLIPPED, &op_rect, s, n, NULL);
+					SIZE sz; GetTextExtentPoint32A(dc, s, n, &sz);
+					x += sz.cx;
+				};
+
+				if (is_pc)
+				{
+					DrawSpan(ot.text, total_len, RGB(0, 0, 0));
+				}
+				else
+				{
+					int i = 0;
+					while (i < pre_end)
+					{
+						if (ot.text[i] == '$')
+						{
+							int j = i + 1;
+							while (j < pre_end)
+							{
+								const char c = ot.text[j];
+								const bool is_hex = (c >= '0' && c <= '9')
+								    || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+								if (!is_hex) break;
+								j++;
+							}
+							DrawSpan(&ot.text[i], j - i, RGB(40, 80, 200));
+							i = j;
+						}
+						else
+						{
+							int j = i;
+							while (j < pre_end && ot.text[j] != '$') j++;
+							DrawSpan(&ot.text[i], j - i, RGB(20, 20, 20));
+							i = j;
+						}
+					}
+					if (ot.suffix_offset >= 0)
+						DrawSpan(&ot.text[ot.suffix_offset],
+						         total_len - ot.suffix_offset, RGB(110, 110, 110));
+				}
+
+				SetBkMode(dc, prev_bk_mode);
+			}
+
 			if (st->lines[idx].is_sub_start)
 			{
 				HPEN sep = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
@@ -700,7 +1016,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				DeleteObject(sep);
 			}
 
-			const uint8_t  row_bank = (uint8_t)((row_pc >> 16) & 0xFF);
+			const uint8_t  row_bank = BpBankForPC(st->sys, row_pc);
 			const uint16_t row_addr = (uint16_t)(row_pc & 0xFFFF);
 			const bool has_bp = gDebugger.HasExecBreakpoint(st->sys, row_bank, row_addr);
 
@@ -751,30 +1067,30 @@ static HMENU BuildContextMenu(uint32_t pc, DbgSystem sys, bool has_branch, uint3
 	if (has_branch)
 	{
 		if (sys == DbgSystem::Snes)
-			_snprintf_s(buf, 64, _TRUNCATE, "Go to Branch Target ($%02X:%04X)",
-			            (unsigned)(branch_target >> 16) & 0xFF, (unsigned)(branch_target & 0xFFFF));
+			_snprintf_s(buf, 64, _TRUNCATE, "Go to Branch Target ($%06X)",
+			            (unsigned)(branch_target & 0xFFFFFFu));
 		else
 			_snprintf_s(buf, 64, _TRUNCATE, "Go to Branch Target ($%04X)",
-			            (unsigned)(branch_target & 0xFFFF));
+			            (unsigned)(branch_target & 0xFFFFu));
 		AppendMenuA(m, MF_STRING, IDM_DISASM_GO_TO_BRANCH_TARGET, buf);
 
 		if (sys == DbgSystem::Snes)
-			_snprintf_s(buf, 64, _TRUNCATE, "Run to Branch Target ($%02X:%04X)",
-			            (unsigned)(branch_target >> 16) & 0xFF, (unsigned)(branch_target & 0xFFFF));
+			_snprintf_s(buf, 64, _TRUNCATE, "Run to Branch Target ($%06X)",
+			            (unsigned)(branch_target & 0xFFFFFFu));
 		else
 			_snprintf_s(buf, 64, _TRUNCATE, "Run to Branch Target ($%04X)",
-			            (unsigned)(branch_target & 0xFFFF));
+			            (unsigned)(branch_target & 0xFFFFu));
 		AppendMenuA(m, MF_STRING, IDM_DISASM_RUN_TO_BRANCH_TARGET, buf);
 
 		AppendMenuA(m, MF_SEPARATOR, 0, NULL);
 	}
 
 	if (sys == DbgSystem::Snes)
-		_snprintf_s(buf, 64, _TRUNCATE, "Toggle Breakpoint ($%02X:%04X)\tF9",
-		            (unsigned)(pc >> 16) & 0xFF, (unsigned)(pc & 0xFFFF));
+		_snprintf_s(buf, 64, _TRUNCATE, "Toggle Breakpoint ($%06X)\tF9",
+		            (unsigned)(pc & 0xFFFFFFu));
 	else
 		_snprintf_s(buf, 64, _TRUNCATE, "Toggle Breakpoint ($%04X)\tF9",
-		            (unsigned)(pc & 0xFFFF));
+		            (unsigned)(pc & 0xFFFFu));
 	AppendMenuA(m, MF_STRING, IDM_DISASM_TOGGLE_BP, buf);
 
 	AppendMenuA(m, MF_SEPARATOR, 0, NULL);
@@ -783,27 +1099,27 @@ static HMENU BuildContextMenu(uint32_t pc, DbgSystem sys, bool has_branch, uint3
 	AppendMenuA(m, MF_SEPARATOR, 0, NULL);
 
 	if (sys == DbgSystem::Snes)
-		_snprintf_s(buf, 64, _TRUNCATE, "Move Program Counter ($%02X:%04X)",
-		            (unsigned)(pc >> 16) & 0xFF, (unsigned)(pc & 0xFFFF));
+		_snprintf_s(buf, 64, _TRUNCATE, "Move Program Counter ($%06X)",
+		            (unsigned)(pc & 0xFFFFFFu));
 	else
 		_snprintf_s(buf, 64, _TRUNCATE, "Move Program Counter ($%04X)",
-		            (unsigned)(pc & 0xFFFF));
+		            (unsigned)(pc & 0xFFFFu));
 	AppendMenuA(m, MF_STRING, IDM_DISASM_MOVE_PC, buf);
 
 	if (sys == DbgSystem::Snes)
-		_snprintf_s(buf, 64, _TRUNCATE, "Run to Location ($%02X:%04X)\tCtrl+F11",
-		            (unsigned)(pc >> 16) & 0xFF, (unsigned)(pc & 0xFFFF));
+		_snprintf_s(buf, 64, _TRUNCATE, "Run to Location ($%06X)\tCtrl+F11",
+		            (unsigned)(pc & 0xFFFFFFu));
 	else
 		_snprintf_s(buf, 64, _TRUNCATE, "Run to Location ($%04X)\tCtrl+F11",
-		            (unsigned)(pc & 0xFFFF));
+		            (unsigned)(pc & 0xFFFFu));
 	AppendMenuA(m, MF_STRING, IDM_DISASM_RUN_TO_LOCATION, buf);
 
 	if (sys == DbgSystem::Snes)
-		_snprintf_s(buf, 64, _TRUNCATE, "Go to Location ($%02X:%04X)",
-		            (unsigned)(pc >> 16) & 0xFF, (unsigned)(pc & 0xFFFF));
+		_snprintf_s(buf, 64, _TRUNCATE, "Go to Location ($%06X)",
+		            (unsigned)(pc & 0xFFFFFFu));
 	else
 		_snprintf_s(buf, 64, _TRUNCATE, "Go to Location ($%04X)",
-		            (unsigned)(pc & 0xFFFF));
+		            (unsigned)(pc & 0xFFFFu));
 	AppendMenuA(m, MF_STRING, IDM_DISASM_GO_TO_LOCATION, buf);
 
 	AppendMenuA(m, MF_SEPARATOR, 0, NULL);
@@ -826,10 +1142,9 @@ static void CopySelectionToClipboard(HWND parent, DisasmPanelState *st)
 
 		char addr[16];
 		if (st->sys == DbgSystem::Snes)
-			_snprintf_s(addr, 16, _TRUNCATE, "%02X:%04X",
-			            (unsigned)(ln.pc >> 16) & 0xFF, (unsigned)(ln.pc & 0xFFFF));
+			_snprintf_s(addr, 16, _TRUNCATE, "%06X", (unsigned)(ln.pc & 0xFFFFFFu));
 		else
-			_snprintf_s(addr, 16, _TRUNCATE, "%04X", (unsigned)(ln.pc & 0xFFFF));
+			_snprintf_s(addr, 16, _TRUNCATE, "%04X", (unsigned)(ln.pc & 0xFFFFu));
 
 		char row[256];
 		_snprintf_s(row, 256, _TRUNCATE, "%s  %s\r\n", addr, line);
@@ -856,7 +1171,7 @@ static void OnContextMenuCommand(HWND parent, DisasmPanelState *st, int cmd)
 	if (!st->rclick_valid && cmd != IDM_DISASM_COPY_LINE && cmd != IDM_DISASM_GO_TO_PC)
 		return;
 	const uint32_t pc = st->rclick_pc;
-	const uint8_t  bank = (uint8_t)((pc >> 16) & 0xFF);
+	const uint8_t  bank = BpBankForPC(st->sys, pc);
 	const uint16_t addr = (uint16_t)(pc & 0xFFFF);
 
 	switch (cmd)
@@ -873,7 +1188,7 @@ static void OnContextMenuCommand(HWND parent, DisasmPanelState *st, int cmd)
 		{
 			char buf[16];
 			if (st->sys == DbgSystem::Snes)
-				_snprintf_s(buf, 16, _TRUNCATE, "%02X:%04X", bank, addr);
+				_snprintf_s(buf, 16, _TRUNCATE, "%06X", (unsigned)(pc & 0xFFFFFFu));
 			else
 				_snprintf_s(buf, 16, _TRUNCATE, "%04X", addr);
 			if (OpenClipboard(parent))
@@ -908,31 +1223,31 @@ static void OnContextMenuCommand(HWND parent, DisasmPanelState *st, int cmd)
 			break;
 		case IDM_DISASM_GO_TO_LOCATION:
 		{
-			const int idx = FindOrExtendForPC(st, pc, 200000);
+			const int idx = FindOrExtendForPC(st, pc, 2000000);
 			if (idx >= 0) ListView_EnsureVisible(st->lv, idx, FALSE);
-			else          ResetLines(st, pc);
+			else if (st->sys == DbgSystem::Snes) { ResetLines(st, pc); st->view_initialized = true; }
 			break;
 		}
 		case IDM_DISASM_GO_TO_PC:
 		{
 			const uint32_t cur = GetCurrentPC(st->sys);
-			const int idx = FindOrExtendForPC(st, cur, 200000);
+			const int idx = FindOrExtendForPC(st, cur, 2000000);
 			if (idx >= 0) ListView_EnsureVisible(st->lv, idx, FALSE);
-			else { ResetLines(st, cur); st->view_initialized = true; }
+			else if (st->sys == DbgSystem::Snes) { ResetLines(st, cur); st->view_initialized = true; }
 			break;
 		}
 		case IDM_DISASM_GO_TO_BRANCH_TARGET:
 			if (st->rclick_has_branch)
 			{
-				const int idx = FindOrExtendForPC(st, st->rclick_branch_target, 200000);
+				const int idx = FindOrExtendForPC(st, st->rclick_branch_target, 2000000);
 				if (idx >= 0) ListView_EnsureVisible(st->lv, idx, FALSE);
-				else          ResetLines(st, st->rclick_branch_target);
+				else if (st->sys == DbgSystem::Snes) { ResetLines(st, st->rclick_branch_target); st->view_initialized = true; }
 			}
 			break;
 		case IDM_DISASM_RUN_TO_BRANCH_TARGET:
 			if (st->rclick_has_branch)
 			{
-				const uint8_t  bb = (uint8_t)((st->rclick_branch_target >> 16) & 0xFF);
+				const uint8_t  bb = BpBankForPC(st->sys, st->rclick_branch_target);
 				const uint16_t aa = (uint16_t)(st->rclick_branch_target & 0xFFFF);
 				gDebugger.AddExecBreakpoint(st->sys, bb, aa);
 				gDebugger.Run();
@@ -1092,6 +1407,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 				if (st->font) DeleteObject(st->font);
 				free(st->lines);
 				free(st->targets);
+				free(st->entries);
+				free(st->section_starts);
 				delete st;
 			}
 			return 0;
@@ -1128,10 +1445,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 				{
 					NMITEMACTIVATE *act = (NMITEMACTIVATE *)lp;
 					if (act->iItem >= 0 && act->iItem < st->line_count
-					    && !st->lines[act->iItem].is_label_row)
+					    && !st->lines[act->iItem].is_label_row
+					    && !st->lines[act->iItem].is_unmapped)
 					{
 						const uint32_t pc = st->lines[act->iItem].pc;
-						const uint8_t  b  = (uint8_t)((pc >> 16) & 0xFF);
+						const uint8_t  b  = BpBankForPC(st->sys, pc);
 						const uint16_t a  = (uint16_t)(pc & 0xFFFF);
 						gDebugger.ToggleExecBreakpoint(st->sys, b, a);
 						InvalidateRect(st->lv, NULL, FALSE);
@@ -1189,6 +1507,9 @@ void DisasmPanelInvalidateCache(HWND h)
 	st->shown_bps_version = 0;
 	st->line_count       = 0;
 	st->targets_count    = 0;
+	st->entries_count    = 0;
+	st->sections_count   = 0;
+	st->walk_complete    = false;
 	if (st->lv)
 	{
 		ListView_SetItemCountEx(st->lv, 0, LVSICF_NOINVALIDATEALL);

@@ -5,15 +5,7 @@ namespace GbBackend {
 
 uint8_t ReadByte(uint32_t display_addr)
 {
-	const uint8_t  bank = (uint8_t)((display_addr >> 16) & 0xFF);
-	const uint16_t cpu  = (uint16_t)(display_addr & 0xFFFF);
-
-	if (bank == 0 && cpu < 0x4000)
-		return S9xSGBPeekRAByte((uint32_t)cpu);
-	if (bank > 0 && cpu >= 0x4000 && cpu < 0x8000)
-		return S9xSGBPeekROMByte((uint32_t)bank * 0x4000u + (cpu - 0x4000u));
-
-	return S9xSGBPeekRAByte((uint32_t)cpu);
+	return S9xSGBPeekRAByte(display_addr & 0xFFFFu);
 }
 
 void GetStatus(GbStatus *out)
@@ -41,17 +33,12 @@ uint32_t CurrentDisplayPC()
 {
 	GbStatus s = {};
 	GetStatus(&s);
-	const uint16_t pc = s.pc;
-	uint8_t bank = 0;
-	if (pc >= 0x4000 && pc < 0x8000)
-		bank = (uint8_t)(S9xSGBGetCurrentRomBank() & 0xFF);
-	return ((uint32_t)bank << 16) | pc;
+	return (uint32_t)s.pc;
 }
 
-uint32_t TotalROMBanks()
+uint32_t CartSRAMSize()
 {
-	const uint32_t sz = S9xSGBGetROMSize();
-	return sz ? (sz + 0x3FFFu) / 0x4000u : 0u;
+	return S9xSGBGetSRAMSize();
 }
 
 } // namespace GbBackend

@@ -29,6 +29,26 @@
 
 static bool g_dbg_break_requested = false;
 
+// SGB command-packet trace ring — most recent packets the GB bit-banged over
+// $FF00, surfaced to the Win32 "Packet" window. File scope so both the
+// SGB-namespace producer (OnJoyserWrite) and the global S9xSGBGetPacketLog
+// consumer reach it without namespace gymnastics.
+struct PacketLog
+{
+	struct Entry { uint8_t bytes[16]; uint64_t t_cycle; };
+	Entry    entries[128];
+	uint32_t head = 0;   // total packets logged (monotonic); newest slot = (head-1) % 128
+};
+static PacketLog g_pkt_log;
+
+static void PacketLogPush(const uint8_t *pkt, uint64_t t_cycle)
+{
+	PacketLog::Entry &e = g_pkt_log.entries[g_pkt_log.head % 128];
+	std::memcpy(e.bytes, pkt, 16);
+	e.t_cycle = t_cycle;
+	g_pkt_log.head++;
+}
+
 namespace SGB {
 
 // Embedded SGB1 / SGB2 GB-side boot ROMs. These are the authentic boot ROMs
@@ -388,6 +408,7 @@ void Emulator::ColdReset()
 	impl_->cached_count = 0;
 	impl_->cache_valid  = false;
 	impl_->replays_done = 0;
+	g_pkt_log.head      = 0;   // fresh packet trace per cold reset
 	Reset();
 }
 
@@ -2064,11 +2085,13 @@ static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
 
 	if (sel == 0x00)
 	{
-		// Reset pulse — arm the packet assembler.
+		// Reset pulse — arm the packet assembler and reset the SGB joypad
+		// multiplexer to player 1 (real HW ties $00 to the rotation counter).
 		icd.in_packet        = true;
 		icd.packet_byte      = 0;
 		icd.packet_bit       = 0;
 		icd.bit_accumulator  = 0;
+		icd.input_index      = 0;
 		return;
 	}
 
@@ -2123,6 +2146,14 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	IcdFeedJoypad(impl_->icd2, value);
 
 	impl_->joypad.sgb_index = impl_->icd2.input_index;
+
+	// A game packet completed this write (packets_received only grows via
+	// IcdFeedJoypad here — synth/replay staging happens elsewhere). Log it
+	// for the Packet trace window.
+	if (impl_->icd2.packets_received > pre_received)
+		PacketLogPush(impl_->icd2.assembly_buf,
+		              static_cast<uint64_t>(impl_->ppu.t_cycles));
+
 	// If a new packet completed (packets_received grew), and our cache
 	// isn't full yet, append a copy. The SGB2 BIOS's handshake validator
 	// at $B119 compares each packet's byte 1 across TWO separate GB
@@ -2856,6 +2887,23 @@ bool S9xSGBGetMapperInfo(SgbMapperInfo *out)
 	out->rom_size    = static_cast<uint32_t>(impl->cart.rom.size());
 	out->ram_size    = static_cast<uint32_t>(impl->cart.sram.size());
 	return true;
+}
+
+uint32_t S9xSGBGetPacketLog(SgbPacketLogEntry *out, uint32_t max_entries)
+{
+	if (!out || max_entries == 0) return 0;
+	const uint32_t total = g_pkt_log.head;
+	uint32_t avail = total < 128 ? total : 128;
+	if (avail > max_entries) avail = max_entries;
+	const uint32_t base = total - avail;   // seq of the oldest returned entry
+	for (uint32_t i = 0; i < avail; i++)
+	{
+		const PacketLog::Entry &e = g_pkt_log.entries[(base + i) % 128];
+		std::memcpy(out[i].bytes, e.bytes, 16);
+		out[i].t_cycle = e.t_cycle;
+		out[i].seq     = base + i;
+	}
+	return avail;
 }
 
 uint8_t S9xSGBPeekROMByte(uint32_t rom_offset)

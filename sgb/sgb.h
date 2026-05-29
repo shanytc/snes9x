@@ -484,6 +484,19 @@ struct SgbMapperInfo
 };
 bool S9xSGBGetMapperInfo(SgbMapperInfo *out);
 
+// SGB command-packet trace for the Win32 "Packet" window. Each entry is one
+// 16-byte packet the GB bit-banged over $FF00, with the GB t-cycle it
+// completed. S9xSGBGetPacketLog fills `out` oldest-first (up to max_entries)
+// from a 128-deep ring and returns the count written; `seq` is the running
+// packet number so the window can show drops when the ring wraps.
+struct SgbPacketLogEntry
+{
+	uint8_t  bytes[16];
+	uint64_t t_cycle;
+	uint32_t seq;
+};
+uint32_t S9xSGBGetPacketLog(SgbPacketLogEntry *out, uint32_t max_entries);
+
 uint8_t  S9xSGBPeekROMByte(uint32_t rom_offset);
 uint32_t S9xSGBGetROMSize(void);
 uint32_t S9xSGBGetSRAMSize(void);

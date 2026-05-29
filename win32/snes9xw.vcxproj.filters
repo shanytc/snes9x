@@ -504,6 +504,9 @@
     <ClInclude Include="CMemoryViewer.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="CPacketViewer.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
     <ClInclude Include="CMemHeatmap.h">
       <Filter>GUI</Filter>
     </ClInclude>
@@ -1056,6 +1059,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CMemoryViewer.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CPacketViewer.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CMemHeatmap.cpp">

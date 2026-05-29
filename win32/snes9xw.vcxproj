@@ -519,6 +519,7 @@
     <ClInclude Include="CCallStackPanel.h" />
     <ClInclude Include="CMemoryRegions.h" />
     <ClInclude Include="CMemoryViewer.h" />
+    <ClInclude Include="CPacketViewer.h" />
     <ClInclude Include="CMemHeatmap.h" />
     <ClInclude Include="CVulkan.h" />
     <ClInclude Include="CWaveOut.h" />
@@ -778,6 +779,7 @@
     <ClCompile Include="CCallStackPanel.cpp" />
     <ClCompile Include="CMemoryRegions.cpp" />
     <ClCompile Include="CMemoryViewer.cpp" />
+    <ClCompile Include="CPacketViewer.cpp" />
     <ClCompile Include="CMemHeatmap.cpp" />
     <ClCompile Include="CVulkan.cpp" />
     <ClCompile Include="CWaveOut.cpp" />

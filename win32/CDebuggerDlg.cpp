@@ -15,6 +15,7 @@
 #include "CWatchPanel.h"
 #include "CCallStackPanel.h"
 #include "CMemoryViewer.h"
+#include "CPacketViewer.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
 
@@ -148,10 +149,12 @@ enum
 	IDM_DBG_RUN_TO_NMI,
 	IDM_DBG_RUN_TO_IRQ,
 	IDM_DBG_RUN_TO_WRAM_EXEC,
+	IDM_DBG_RUN_TO_RAM_DISABLE,
 	IDM_DBG_RUN_TO_SCANLINE,
 	IDM_DBG_BREAK_IN,
 	IDM_DBG_RELOAD_ROM,
 	IDM_DBG_MEMORY_VIEWER,
+	IDM_DBG_PACKET_VIEWER,
 
 	IDB_DBG_RUN = 5300,
 	IDB_DBG_PAUSE,
@@ -217,6 +220,7 @@ static HMENU BuildMenu()
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_NMI,        TEXT("Run to NMI"));
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_IRQ,        TEXT("Run to IRQ"));
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_WRAM_EXEC,  TEXT("Run until exec leaves ROM (GB)"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_RAM_DISABLE, TEXT("Run until RAM disabled (GB)"));
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_SCANLINE, TEXT("Run to scanline...\tAlt+B"));
 	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_BREAK_IN,        TEXT("Break in...\tCtrl+B"));
@@ -225,6 +229,7 @@ static HMENU BuildMenu()
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RELOAD_ROM,      TEXT("Reload ROM\tCtrl+Shift+R"));
 	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_MEMORY_VIEWER,   TEXT("&Memory Viewer...\tCtrl+M"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_PACKET_VIEWER,   TEXT("SGB &Packet Trace..."));
 	AppendMenu(menu, MF_POPUP, (UINT_PTR)mDebug, TEXT("&Debug"));
 
 	HMENU mSearch = CreatePopupMenu();
@@ -350,6 +355,9 @@ static void OnCommand(HWND hwnd, DbgDlgState *st, WPARAM wp)
 		case IDM_DBG_RUN_TO_WRAM_EXEC:
 			gDebugger.RunToWramExec(st->sys);
 			break;
+		case IDM_DBG_RUN_TO_RAM_DISABLE:
+			gDebugger.RunToRamDisable(st->sys);
+			break;
 		case IDM_DBG_RUN_TO_SCANLINE:
 		{
 			uint32_t v = 0;
@@ -375,6 +383,9 @@ static void OnCommand(HWND hwnd, DbgDlgState *st, WPARAM wp)
 		case IDM_DBG_RELOAD_ROM:
 			gDebugger.ReloadRom();
 			DebuggerDlgRefresh(hwnd);
+			break;
+		case IDM_DBG_PACKET_VIEWER:
+			OpenPacketViewer();
 			break;
 		case IDM_DBG_MEMORY_VIEWER:
 			OpenMemoryViewer(st->sys);

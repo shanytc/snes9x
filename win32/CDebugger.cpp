@@ -3,6 +3,7 @@
 #include "CDebuggerSnes.h"
 #include "CDebuggerGb.h"
 #include "CMemoryViewer.h"
+#include "CPacketViewer.h"
 #include "CMemHeatmap.h"
 #include "debugger_hook.h"
 #include "../snes9x.h"
@@ -439,6 +440,7 @@ void CDebugger::Run()
 	gb_frame_step_armed_   = false;
 	gb_step_one_scanline_armed_ = false;
 	gb_run_to_wram_exec_   = false;
+	gb_run_to_ram_disable_ = false;
 	gb_break_pending_      = false;
 	snes_run_to_nmi_ = false;
 	snes_run_to_irq_ = false;
@@ -626,6 +628,20 @@ void CDebugger::RunToWramExec(DbgSystem sys)
 	Settings.Paused      = false;
 }
 
+void CDebugger::RunToRamDisable(DbgSystem sys)
+{
+	if (sys != DbgSystem::Gb) return;
+	gb_run_to_ram_disable_ = true;
+	gb_free_run_           = true;
+	snes_free_run_         = true;
+	gb_skip_exec_bp_once_  = true;
+	// Force the memory-access hook on so OnGbMemAccess fires on every write,
+	// even with no R/W breakpoint set.
+	g_debugger_check_rw    = true;
+	S9xSGBClearDebuggerBreak();
+	Settings.Paused        = false;
+}
+
 void CDebugger::RunToScanline(DbgSystem sys, int target_v)
 {
 	if (sys != DbgSystem::Snes) return;
@@ -692,6 +708,7 @@ void CDebugger::OnEmulatorReset()
 	if (gb_dlg_)   DebuggerDlgInvalidateCache(gb_dlg_);
 	MemHeatmap::Reset();
 	MemoryViewerRefreshAll();
+	PacketViewerRefreshAll();
 	RefreshSnes();
 	RefreshGb();
 }
@@ -846,9 +863,19 @@ void CDebugger::OnSnesMemAccess(uint32_t addr24, uint8_t value, bool is_write)
 
 void CDebugger::OnGbMemAccess(uint16_t addr, uint8_t value, bool is_write)
 {
-	(void)value;
 	MemHeatmap::TrackGb(addr, is_write);
 	if (!gb_attached_) return;
+
+	// RAM-disable trap: a store to the MBC RAM-enable register ($0000-$1FFF)
+	// whose low nibble != $A turns cart RAM off.
+	if (gb_run_to_ram_disable_ && is_write && addr < 0x2000 &&
+	    (value & 0x0F) != 0x0A)
+	{
+		gb_run_to_ram_disable_ = false;
+		HaltGbNow();
+		return;
+	}
+
 	uint8_t cur_bank = 0;
 	if (addr >= 0x4000 && addr < 0x8000)
 		cur_bank = (uint8_t)(S9xSGBGetCurrentRomBank() & 0xFF);
@@ -895,6 +922,7 @@ void S9xDebuggerRefreshAll()
 	if (gGbDebuggerHWND)
 		PostMessage(gGbDebuggerHWND, WM_USER_DEBUGGER_REFRESH, 0, 0);
 	MemoryViewerRefreshAll();
+	PacketViewerRefreshAll();
 }
 
 void WinShowSnesDebuggerDialog()

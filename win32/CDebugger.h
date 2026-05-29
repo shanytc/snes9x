@@ -76,6 +76,7 @@ public:
 	void RunToNmi(DbgSystem sys);
 	void RunToIrq(DbgSystem sys);
 	void RunToWramExec(DbgSystem sys);
+	void RunToRamDisable(DbgSystem sys);
 	void RunToScanline(DbgSystem sys, int target_v);
 	void BreakIn(DbgSystem sys, uint64_t cycles_from_now);
 	void ResetMachine(DbgSystem sys);
@@ -139,6 +140,12 @@ private:
 	// is executing garbage" failure. HRAM ($FF80-) is excluded since OAM-DMA
 	// wait routines legitimately run there.
 	bool gb_run_to_wram_exec_   = false;
+
+	// One-shot: halt on a GB cart write that DISABLES RAM — a store to
+	// $0000-$1FFF whose low nibble != $A (MBC RAM-enable register). Catches
+	// the exact instant cart RAM is turned off (e.g. a runaway write that
+	// strands a game executing from SRAM), skipping the many $0A re-enables.
+	bool gb_run_to_ram_disable_ = false;
 
 	bool gb_break_pending_      = false;
 

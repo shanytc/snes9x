@@ -465,6 +465,8 @@ static int DisasmOne(DbgSystem sys, uint32_t pc, char *line, size_t cap,
 	return len;
 }
 
+static void EnsureLineCached(DisasmPanelState *st, int index);
+
 static void ResetLines(DisasmPanelState *st, uint32_t new_start_pc)
 {
 	st->view_start_pc  = new_start_pc;
@@ -484,6 +486,8 @@ static void ResetLines(DisasmPanelState *st, uint32_t new_start_pc)
 	PushLine(st, first);
 	ListView_SetItemCountEx(st->lv, 5000000, LVSICF_NOINVALIDATEALL);
 	InvalidateRect(st->lv, NULL, FALSE);
+	if (st->sys == DbgSystem::Gb)
+		EnsureLineCached(st, 0x1FFFF);
 }
 
 static int LastInstrIdx(DisasmPanelState *st)
@@ -559,6 +563,12 @@ static void EnsureLineCached(DisasmPanelState *st, int index)
 				if (IsPrologueOpcode(st->sys, pb[0]))
 					AddKnownEntry(st, next_pc);
 			}
+		}
+
+		if (st->sys == DbgSystem::Gb && (next_pc <= back_pc || next_pc >= 0x10000))
+		{
+			st->walk_complete = true;
+			break;
 		}
 
 		UnmappedRegion ur{};
@@ -1325,9 +1335,16 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			const uint16_t row_addr = (uint16_t)(row_pc & 0xFFFF);
 			const bool has_bp = gDebugger.HasExecBreakpoint(st->sys, row_bank, row_addr);
 
-			const int cx = (mr.left + mr.right) / 2;
-			const int cy = (mr.top + mr.bottom) / 2;
-			const int r  = 5;
+			const bool is_pc = Settings.Paused && row_pc == cur_pc;
+			const bool both  = has_bp && is_pc;
+			const int  cy    = (mr.top + mr.bottom) / 2;
+			const int  r     = both ? 4 : 5;
+			// When a breakpoint and the PC are on the same row, place the dot
+			// and the arrow side by side instead of stacked on top of each
+			// other: dot in the left half of the margin, arrow in the right.
+			const int  quarter = (mr.right - mr.left) / 4;
+			const int  bp_cx = both ? (mr.left + quarter)  : (mr.left + mr.right) / 2;
+			const int  pc_cx = both ? (mr.right - quarter) : (mr.left + mr.right) / 2;
 
 			if (has_bp)
 			{
@@ -1335,22 +1352,22 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				HPEN   edge = CreatePen(PS_SOLID, 1, RGB(120, 0, 0));
 				HBRUSH oldB = (HBRUSH)SelectObject(dc, fill);
 				HPEN   oldP = (HPEN)SelectObject(dc, edge);
-				Ellipse(dc, cx - r, cy - r, cx + r, cy + r);
+				Ellipse(dc, bp_cx - r, cy - r, bp_cx + r, cy + r);
 				SelectObject(dc, oldP);
 				SelectObject(dc, oldB);
 				DeleteObject(edge);
 				DeleteObject(fill);
 			}
-			if (Settings.Paused && row_pc == cur_pc)
+			if (is_pc)
 			{
 				HBRUSH yel  = CreateSolidBrush(RGB(220, 200, 0));
 				HPEN   edge = CreatePen(PS_SOLID, 1, RGB(140, 110, 0));
 				HBRUSH oldB = (HBRUSH)SelectObject(dc, yel);
 				HPEN   oldP = (HPEN)SelectObject(dc, edge);
 				POINT arrow[3] = {
-					{ cx - r, cy - r },
-					{ cx + r, cy     },
-					{ cx - r, cy + r }
+					{ pc_cx - r, cy - r },
+					{ pc_cx + r, cy     },
+					{ pc_cx - r, cy + r }
 				};
 				Polygon(dc, arrow, 3);
 				SelectObject(dc, oldP);
@@ -1636,6 +1653,31 @@ static int FindOrExtendForPC(DisasmPanelState *st, uint32_t pc, int max_rows)
 	return FindIndexForPC(st, pc);
 }
 
+// Scroll so row `idx` is visible with context lines above it (never pinned to
+// the very top, so addresses before it stay reachable). Moves only the
+// viewport — the line list is never rebuilt or filtered here.
+static void ScrollRowIntoView(DisasmPanelState *st, int idx)
+{
+	if (idx < 0) return;
+	const int per_page = ListView_GetCountPerPage(st->lv);
+	if (per_page <= 6)
+	{
+		ListView_EnsureVisible(st->lv, idx, FALSE);
+		return;
+	}
+	const int third = per_page / 3;
+	int bottom_anchor = idx + (per_page - 1 - third);
+	if (bottom_anchor >= st->line_count) bottom_anchor = st->line_count - 1;
+	int top_anchor = idx - third;
+	if (top_anchor < third) top_anchor = 0;   // near the start → show from the top
+	if (top_anchor < 0)     top_anchor = 0;
+	// Order matters (last call wins for minimal scroll): anchor the bottom,
+	// then the top, leaving `idx` ~a third down with lines visible above it.
+	ListView_EnsureVisible(st->lv, bottom_anchor, FALSE);
+	ListView_EnsureVisible(st->lv, top_anchor, FALSE);
+	ListView_EnsureVisible(st->lv, idx, FALSE);
+}
+
 static void EnsurePCVisible(DisasmPanelState *st)
 {
 	const uint32_t cur_pc = GetCurrentPC(st->sys);
@@ -1653,7 +1695,7 @@ static void EnsurePCVisible(DisasmPanelState *st)
 	int pc_idx = FindOrExtendForPC(st, cur_pc, 2000000);
 	if (pc_idx < 0)
 	{
-		ResetLines(st, cur_pc);
+		ResetLines(st, BankStart(st->sys, cur_pc));   // re-anchor to bank start, never mid-bank
 		st->view_initialized = true;
 		pc_idx = FindOrExtendForPC(st, cur_pc, 2000000);
 		if (pc_idx < 0) return;
@@ -1665,16 +1707,7 @@ static void EnsurePCVisible(DisasmPanelState *st)
 	const int margin   = (per_page > 12) ? 3 : 1;
 
 	if (pc_idx < top + margin || pc_idx > bottom - margin)
-	{
-		if (per_page > 6)
-		{
-			const int third = per_page / 3;
-			int bottom_anchor = pc_idx + (per_page - 1 - third);
-			if (bottom_anchor >= st->line_count) bottom_anchor = st->line_count - 1;
-			ListView_EnsureVisible(st->lv, bottom_anchor, FALSE);
-		}
-		ListView_EnsureVisible(st->lv, pc_idx, FALSE);
-	}
+		ScrollRowIntoView(st, pc_idx);
 }
 
 // The flow-arrow gutter spans rows, so the ListView's default scroll-blit
@@ -1902,21 +1935,13 @@ void DisasmPanelGotoAddress(HWND h, uint32_t addr)
 	int idx = FindOrExtendForPC(st, addr, 2000000);
 	if (idx < 0)
 	{
-		ResetLines(st, addr);
+		ResetLines(st, start);   // re-anchor to the bank start, never mid-bank
 		st->view_initialized = true;
 		idx = FindOrExtendForPC(st, addr, 2000000);
 		if (idx < 0) return;
 	}
 
-	const int per_page = ListView_GetCountPerPage(st->lv);
-	if (per_page > 6)
-	{
-		const int third = per_page / 3;
-		int bottom_anchor = idx + (per_page - 1 - third);
-		if (bottom_anchor >= st->line_count) bottom_anchor = st->line_count - 1;
-		ListView_EnsureVisible(st->lv, bottom_anchor, FALSE);
-	}
-	ListView_EnsureVisible(st->lv, idx, FALSE);
+	ScrollRowIntoView(st, idx);
 	ListView_SetItemState(st->lv, idx, LVIS_SELECTED | LVIS_FOCUSED,
 	                      LVIS_SELECTED | LVIS_FOCUSED);
 	InvalidateRect(st->lv, NULL, FALSE);

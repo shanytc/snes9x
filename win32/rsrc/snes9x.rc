@@ -794,7 +794,7 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     LTEXT           "Memory type:",IDC_STATIC,8,10,50,8
     COMBOBOX        IDC_DBG_BP_TYPE,62,8,120,80,CBS_DROPDOWNLIST | WS_TABSTOP
-    LTEXT           "(Max: $FFFFFF)",IDC_DBG_BP_MAX,188,10,85,8
+    LTEXT           "(Max: $FFFFFF)",IDC_DBG_BP_MAX,186,10,90,8
 
     LTEXT           "Break on:",IDC_STATIC,8,32,50,8
     CONTROL         "&Execution",IDC_DBG_BP_EXEC,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,62,30,60,10

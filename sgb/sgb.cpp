@@ -930,6 +930,26 @@ bool Emulator::GetLayerEnabled(int layer) const
 	return true;
 }
 
+// Side-effect-free read of the GB I/O register block (0xFF00-0xFF7F) for
+// the debugger's memory peek. Mirrors gb_memory.cpp ReadIO but never
+// touches bus-contention or latch state, so the disassembler/memory viewer
+// can surface LCDC/STAT/LY/IF/joypad/timer/APU without perturbing the run.
+static uint8_t PeekIO(Emulator::Impl &impl, uint16_t a)
+{
+	switch (a)
+	{
+		case 0xFF00: return JoypadRead(impl.joypad);
+		case 0xFF01: return impl.mem.serial_data;
+		case 0xFF02: return static_cast<uint8_t>((impl.mem.serial_control & 0x81) | 0x7E);
+		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
+			return TimerRead(impl.timer, a);
+		case 0xFF0F: return static_cast<uint8_t>(impl.mem.if_ | 0xE0);
+	}
+	if (a >= 0xFF10 && a <= 0xFF3F) return ApuRead(impl.apu, a);
+	if (a >= 0xFF40 && a <= 0xFF4B) return PpuReadReg(impl.ppu, a);
+	return 0xFF;   // open bus — matches ReadIO's default
+}
+
 uint8_t Emulator::PeekRAByte(uint32_t addr) const
 {
 	if (!impl_->has_rom) return 0;
@@ -945,8 +965,8 @@ uint8_t Emulator::PeekRAByte(uint32_t addr) const
 		if (a < 0x8000)
 			return MbcRead(const_cast<MbcState &>(impl_->cart.mbc),
 			               impl_->cart.rom, impl_->cart.sram, a, impl_->cart.mbc1_multicart);
-		if (a < 0xA000)        // VRAM — not exposed (would need PPU sync)
-			return 0;
+		if (a < 0xA000)        // VRAM 0x8000-0x9FFF
+			return impl_->ppu.vram[a - 0x8000];
 		if (a < 0xC000)        // External cart RAM (current bank)
 			return MbcRead(const_cast<MbcState &>(impl_->cart.mbc),
 			               impl_->cart.rom, impl_->cart.sram, a, impl_->cart.mbc1_multicart);
@@ -954,12 +974,12 @@ uint8_t Emulator::PeekRAByte(uint32_t addr) const
 			return impl_->mem.wram[a - 0xC000];
 		if (a < 0xFE00)        // Echo RAM mirrors C000-DDFF
 			return impl_->mem.wram[a - 0xE000];
-		if (a < 0xFEA0)        // OAM — not exposed
-			return 0;
+		if (a < 0xFEA0)        // OAM 0xFE00-0xFE9F
+			return impl_->ppu.oam[a - 0xFE00];
 		if (a < 0xFF00)        // Unusable
 			return 0;
-		if (a < 0xFF80)        // Hardware I/O — skip (side-effecting)
-			return 0;
+		if (a < 0xFF80)            // Hardware I/O — read-only mirrors of the
+			return PeekIO(*impl_, a);  // backing registers (side-effect-free)
 		if (a < 0xFFFF)        // HRAM 0xFF80-0xFFFE
 			return impl_->mem.hram[a - 0xFF80];
 		return impl_->mem.ie;  // 0xFFFF interrupt enable
@@ -2816,6 +2836,26 @@ uint32_t S9xSGBGetCurrentRomBank(void)
 	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
 	if (!impl) return 0;
 	return impl->cart.mbc.rom_bank;
+}
+
+bool S9xSGBGetMapperInfo(SgbMapperInfo *out)
+{
+	if (!out) return false;
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl || !impl->has_rom) return false;
+	const SGB::MbcState &m = impl->cart.mbc;
+	out->mbc_type    = static_cast<int>(m.type);
+	out->rom_bank    = m.rom_bank;
+	out->ram_bank    = m.ram_bank;
+	out->ram_enable  = m.ram_enable ? 1 : 0;
+	out->mbc1_mode   = m.mbc1_mode ? 1 : 0;
+	out->has_battery = impl->cart.has_battery ? 1 : 0;
+	out->has_rtc     = impl->cart.has_rtc ? 1 : 0;
+	out->has_rumble  = impl->cart.has_rumble ? 1 : 0;
+	out->cart_type   = impl->cart.header.cart_type;
+	out->rom_size    = static_cast<uint32_t>(impl->cart.rom.size());
+	out->ram_size    = static_cast<uint32_t>(impl->cart.sram.size());
+	return true;
 }
 
 uint8_t S9xSGBPeekROMByte(uint32_t rom_offset)

@@ -512,8 +512,11 @@
     <ClInclude Include="CDisasmGb.h" />
     <ClInclude Include="CDisasmPanel.h" />
     <ClInclude Include="CStatusPanel.h" />
+    <ClInclude Include="CMapperPanel.h" />
     <ClInclude Include="CDebuggerLabels.h" />
     <ClInclude Include="CBreakpointsPanel.h" />
+    <ClInclude Include="CWatchPanel.h" />
+    <ClInclude Include="CCallStackPanel.h" />
     <ClInclude Include="CMemoryRegions.h" />
     <ClInclude Include="CMemoryViewer.h" />
     <ClInclude Include="CMemHeatmap.h" />
@@ -768,8 +771,11 @@
     <ClCompile Include="CDisasmGb.cpp" />
     <ClCompile Include="CDisasmPanel.cpp" />
     <ClCompile Include="CStatusPanel.cpp" />
+    <ClCompile Include="CMapperPanel.cpp" />
     <ClCompile Include="CDebuggerLabels.cpp" />
     <ClCompile Include="CBreakpointsPanel.cpp" />
+    <ClCompile Include="CWatchPanel.cpp" />
+    <ClCompile Include="CCallStackPanel.cpp" />
     <ClCompile Include="CMemoryRegions.cpp" />
     <ClCompile Include="CMemoryViewer.cpp" />
     <ClCompile Include="CMemHeatmap.cpp" />

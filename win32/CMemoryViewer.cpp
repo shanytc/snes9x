@@ -1,6 +1,7 @@
 #include "CMemoryViewer.h"
 #include "CMemoryRegions.h"
 #include "CMemHeatmap.h"
+#include "CDebuggerDlg.h"   // DebuggerPromptHex
 #include "../snes9x.h"
 #include <commctrl.h>
 #include <windowsx.h>
@@ -17,7 +18,9 @@ enum
 	IDC_MV_LV        = 8001,
 	IDC_MV_ZONE      = 8002,
 	IDC_MV_CLEAR     = 8003,
-	IDC_MV_ZONE_LBL  = 8004
+	IDC_MV_ZONE_LBL  = 8004,
+
+	IDM_MV_GOTO      = 8100
 };
 
 enum { MVCOL_ADDR = 0, MVCOL_HEX = 1, MVCOL_ASCII = 2 };
@@ -56,6 +59,46 @@ static void UpdateRowCount(MemViewerState *st)
 	const int rows = (int)((size + 15) / 16);
 	ListView_SetItemCountEx(st->lv, rows, LVSICF_NOINVALIDATEALL);
 	InvalidateRect(st->lv, NULL, FALSE);
+}
+
+// Scroll the view to a region offset (matching what the Address column shows),
+// placing it near the top of the list and selecting that row.
+static void GoToAddress(MemViewerState *st, uint32_t addr)
+{
+	const MemRegion *r = CurRegion(st);
+	if (!r) return;
+	const uint32_t size = r->get_size();
+	if (size == 0) return;
+	if (addr >= size) addr = size - 1;
+
+	const int total = (int)((size + 15) / 16);
+	int row = (int)(addr / 16u);
+	if (row >= total) row = total - 1;
+
+	// Anchor one page below so the target lands near the top, then ensure
+	// the target row itself is visible and selected.
+	const int per_page = ListView_GetCountPerPage(st->lv);
+	if (per_page > 2)
+	{
+		int anchor = row + per_page - 1;
+		if (anchor > total - 1) anchor = total - 1;
+		ListView_EnsureVisible(st->lv, anchor, FALSE);
+	}
+	ListView_EnsureVisible(st->lv, row, FALSE);
+	ListView_SetItemState(st->lv, row, LVIS_SELECTED | LVIS_FOCUSED,
+	                      LVIS_SELECTED | LVIS_FOCUSED);
+	InvalidateRect(st->lv, NULL, FALSE);
+}
+
+static void DoGoToPrompt(HWND h, MemViewerState *st)
+{
+	const MemRegion *r = CurRegion(st);
+	if (!r) return;
+	uint32_t addr = 0;
+	if (DebuggerPromptHex(h, TEXT("Go to Address"),
+	                      TEXT("Offset in current region (hex):"),
+	                      TEXT("0"), &addr))
+		GoToAddress(st, addr);
 }
 
 static void PopulateCombo(MemViewerState *st)
@@ -459,6 +502,30 @@ static LRESULT CALLBACK MemViewerWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 				return HandleCustomDraw(st, (NMLVCUSTOMDRAW *)lp);
 			}
 			break;
+		}
+
+		case WM_CONTEXTMENU:
+		{
+			MemViewerState *st = GetState(h);
+			if (!st || (HWND)wp != st->lv) break;
+
+			int x = GET_X_LPARAM(lp);
+			int y = GET_Y_LPARAM(lp);
+			if (x == -1 && y == -1)   // keyboard (Shift+F10 / Menu key)
+			{
+				RECT rc; GetWindowRect(st->lv, &rc);
+				x = rc.left + 16; y = rc.top + 16;
+			}
+
+			HMENU menu = CreatePopupMenu();
+			AppendMenuA(menu, MF_STRING, IDM_MV_GOTO, "Go to Address...");
+			const int cmd = (int)TrackPopupMenu(menu,
+			    TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+			    x, y, 0, h, NULL);
+			DestroyMenu(menu);
+
+			if (cmd == IDM_MV_GOTO) DoGoToPrompt(h, st);
+			return 0;
 		}
 
 		case WM_USER_DEBUGGER_REFRESH:

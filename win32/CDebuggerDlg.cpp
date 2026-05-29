@@ -10,7 +10,10 @@
 #include "CDebuggerGb.h"
 #include "CDisasmPanel.h"
 #include "CStatusPanel.h"
+#include "CMapperPanel.h"
 #include "CBreakpointsPanel.h"
+#include "CWatchPanel.h"
+#include "CCallStackPanel.h"
 #include "CMemoryViewer.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
@@ -65,8 +68,8 @@ static INT_PTR CALLBACK InputDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
 	return FALSE;
 }
 
-static bool PromptHex(HWND parent, const TCHAR *title, const TCHAR *prompt,
-                      const TCHAR *initial, uint32_t *out_value)
+bool DebuggerPromptHex(HWND parent, const TCHAR *title, const TCHAR *prompt,
+                       const TCHAR *initial, uint32_t *out_value)
 {
 	InputDlgState st = {};
 	st.title  = title;
@@ -112,6 +115,7 @@ enum
 	IDC_DBG_STATUSBAR,
 	IDC_DBG_DISASM,
 	IDC_DBG_STATUS_PANEL,
+	IDC_DBG_MAPPER,
 	IDC_DBG_LABELS,
 	IDC_DBG_SETTINGS,
 	IDC_DBG_WATCH,
@@ -121,6 +125,7 @@ enum
 	IDC_DBG_SPLIT_BODY,
 	IDC_DBG_SPLIT_RIGHT,
 	IDC_DBG_SPLIT_MID,
+	IDC_DBG_SPLIT_REGS,
 	IDC_DBG_SPLIT_BOTTOM,
 	IDC_DBG_SPLIT_BOTTOM2,
 
@@ -142,6 +147,7 @@ enum
 	IDM_DBG_RUN_ONE_SCANLINE,
 	IDM_DBG_RUN_TO_NMI,
 	IDM_DBG_RUN_TO_IRQ,
+	IDM_DBG_RUN_TO_WRAM_EXEC,
 	IDM_DBG_RUN_TO_SCANLINE,
 	IDM_DBG_BREAK_IN,
 	IDM_DBG_RELOAD_ROM,
@@ -165,10 +171,12 @@ struct DbgDlgState
 	HWND      hSplitBody;
 	HWND      hSplitRight;
 	HWND      hSplitMid;
+	HWND      hSplitRegs;
 	HWND      hSplitBottom;
 	HWND      hSplitBottom2;
 	HWND      hDisasm;
 	HWND      hStatus;
+	HWND      hMapper;
 	HWND      hLabels;
 	HWND      hSettings;
 	HWND      hWatch;
@@ -206,8 +214,9 @@ static HMENU BuildMenu()
 	AppendMenu(mDebug, MF_STRING,             IDM_DBG_RUN_ONE_SCANLINE, TEXT("Run one scanline\tF7"));
 	AppendMenu(mDebug, MF_STRING,             IDM_DBG_FRAME_STEP,       TEXT("Run one frame\tF8"));
 	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_NMI,      TEXT("Run to NMI"));
-	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_IRQ,      TEXT("Run to IRQ"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_NMI,        TEXT("Run to NMI"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_IRQ,        TEXT("Run to IRQ"));
+	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_WRAM_EXEC,  TEXT("Run until exec leaves ROM (GB)"));
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_RUN_TO_SCANLINE, TEXT("Run to scanline...\tAlt+B"));
 	AppendMenu(mDebug, MF_SEPARATOR, 0, NULL);
 	AppendMenu(mDebug, MF_STRING, IDM_DBG_BREAK_IN,        TEXT("Break in...\tCtrl+B"));
@@ -338,10 +347,13 @@ static void OnCommand(HWND hwnd, DbgDlgState *st, WPARAM wp)
 		case IDM_DBG_RUN_TO_IRQ:
 			gDebugger.RunToIrq(st->sys);
 			break;
+		case IDM_DBG_RUN_TO_WRAM_EXEC:
+			gDebugger.RunToWramExec(st->sys);
+			break;
 		case IDM_DBG_RUN_TO_SCANLINE:
 		{
 			uint32_t v = 0;
-			if (PromptHex(hwnd, TEXT("Run to scanline"),
+			if (DebuggerPromptHex(hwnd, TEXT("Run to scanline"),
 			              TEXT("Target scanline (hex, e.g. E1 for VBlank):"),
 			              TEXT("E1"), &v))
 				gDebugger.RunToScanline(st->sys, (int)v);
@@ -350,7 +362,7 @@ static void OnCommand(HWND hwnd, DbgDlgState *st, WPARAM wp)
 		case IDM_DBG_BREAK_IN:
 		{
 			uint32_t v = 0;
-			if (PromptHex(hwnd, TEXT("Break in"),
+			if (DebuggerPromptHex(hwnd, TEXT("Break in"),
 			              TEXT("Cycles from now (hex):"),
 			              TEXT("400"), &v))
 				gDebugger.BreakIn(st->sys, (uint64_t)v);
@@ -412,19 +424,22 @@ static LRESULT CALLBACK DebuggerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 			st->hSplitBottom  = SplitterCreate(st->hSplitMain, SPLIT_HORZ, IDC_DBG_SPLIT_BOTTOM);
 			st->hSplitRight   = SplitterCreate(st->hSplitBody, SPLIT_HORZ, IDC_DBG_SPLIT_RIGHT);
 			st->hSplitMid     = SplitterCreate(st->hSplitRight, SPLIT_VERT, IDC_DBG_SPLIT_MID);
+			st->hSplitRegs    = SplitterCreate(st->hSplitMid,  SPLIT_VERT, IDC_DBG_SPLIT_REGS);
 			st->hSplitBottom2 = SplitterCreate(st->hSplitBottom, SPLIT_HORZ, IDC_DBG_SPLIT_BOTTOM2);
 
 			st->hDisasm      = DisasmPanelCreate(st->hSplitBody,   st->sys, IDC_DBG_DISASM);
-			st->hStatus      = StatusPanelCreate(st->hSplitMid,    st->sys, IDC_DBG_STATUS_PANEL);
+			st->hStatus      = StatusPanelCreate(st->hSplitRegs,   st->sys, IDC_DBG_STATUS_PANEL);
+			st->hMapper      = MapperPanelCreate(st->hSplitRegs,   st->sys, IDC_DBG_MAPPER);
 			st->hLabels      = CreatePlaceholder(st->hSplitMid,    IDC_DBG_LABELS,      TEXT("Labels"));
 			st->hSettings    = CreatePlaceholder(st->hSplitRight,  IDC_DBG_SETTINGS,    TEXT("Disassembly settings"));
-			st->hWatch       = CreatePlaceholder(st->hSplitBottom, IDC_DBG_WATCH,       TEXT("Watch"));
+			st->hWatch       = WatchPanelCreate(st->hSplitBottom,  st->sys, IDC_DBG_WATCH);
 			st->hBreakpoints = BreakpointsPanelCreate(st->hSplitBottom2, st->sys, IDC_DBG_BREAKPOINTS);
-			st->hCallstack   = CreatePlaceholder(st->hSplitBottom2,IDC_DBG_CALLSTACK,   TEXT("Call Stack"));
+			st->hCallstack   = CallStackPanelCreate(st->hSplitBottom2, st->sys, IDC_DBG_CALLSTACK);
 
 			SplitterSetChildren(st->hSplitBottom2, st->hBreakpoints, st->hCallstack);
 			SplitterSetChildren(st->hSplitBottom,  st->hWatch, st->hSplitBottom2);
-			SplitterSetChildren(st->hSplitMid,     st->hStatus, st->hLabels);
+			SplitterSetChildren(st->hSplitRegs,    st->hStatus, st->hMapper);
+			SplitterSetChildren(st->hSplitMid,     st->hSplitRegs, st->hLabels);
 			SplitterSetChildren(st->hSplitRight,   st->hSplitMid, st->hSettings);
 			SplitterSetChildren(st->hSplitBody,    st->hDisasm, st->hSplitRight);
 			SplitterSetChildren(st->hSplitMain,    st->hSplitBody, st->hSplitBottom);
@@ -433,6 +448,7 @@ static LRESULT CALLBACK DebuggerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 			SplitterSetRatio(st->hSplitBody, 0.45f);
 			SplitterSetRatio(st->hSplitRight, 0.65f);
 			SplitterSetRatio(st->hSplitMid, 0.55f);
+			SplitterSetRatio(st->hSplitRegs, 0.60f);
 			SplitterSetRatio(st->hSplitBottom, 0.30f);
 			SplitterSetRatio(st->hSplitBottom2, 0.50f);
 
@@ -460,6 +476,14 @@ static LRESULT CALLBACK DebuggerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 		case WM_USER_DEBUGGER_REFRESH:
 			DebuggerDlgRefresh(hwnd);
 			return 0;
+
+		case WM_USER_DEBUGGER_GOTO:
+		{
+			DbgDlgState *st = GetState(hwnd);
+			if (st && st->hDisasm)
+				DisasmPanelGotoAddress(st->hDisasm, (uint32_t)lp);
+			return 0;
+		}
 
 		case WM_CLOSE:
 			DestroyWindow(hwnd);
@@ -510,7 +534,10 @@ void DebuggerDlgGlobalInit(HINSTANCE hInst)
 	SplitterRegisterClass(hInst);
 	DisasmPanelRegisterClass(hInst);
 	StatusPanelRegisterClass(hInst);
+	MapperPanelRegisterClass(hInst);
 	BreakpointsPanelRegisterClass(hInst);
+	WatchPanelRegisterClass(hInst);
+	CallStackPanelRegisterClass(hInst);
 	RegisterDebuggerClass(hInst, kSnesClassName);
 	RegisterDebuggerClass(hInst, kGbClassName);
 
@@ -625,7 +652,10 @@ void DebuggerDlgRefresh(HWND h)
 
 	if (st->hDisasm) DisasmPanelRefresh(st->hDisasm);
 	if (st->hStatus) StatusPanelRefresh(st->hStatus);
+	if (st->hMapper) MapperPanelRefresh(st->hMapper);
 	if (st->hBreakpoints) BreakpointsPanelRefresh(st->hBreakpoints);
+	if (st->hWatch) WatchPanelRefresh(st->hWatch);
+	if (st->hCallstack) CallStackPanelRefresh(st->hCallstack);
 
 	InvalidateRect(h, NULL, FALSE);
 }

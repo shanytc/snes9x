@@ -358,6 +358,57 @@ static const MemTypeEntry kMemTypesGb[] =
 	{ "GB - SRAM",           DBG_MEM_SRAM      }
 };
 
+static bool MemTypeRange(DbgSystem sys, int memtype, uint32_t *begin, uint32_t *end)
+{
+	if (sys == DbgSystem::Gb)
+	{
+		switch (memtype)
+		{
+			case DBG_MEM_CPU:       *begin = 0x0000; *end = 0xFFFF; return true;
+			case DBG_MEM_PRG_ROM:   *begin = 0x0000; *end = 0x7FFF; return true;
+			case DBG_MEM_VIDEO_RAM: *begin = 0x8000; *end = 0x9FFF; return true;
+			case DBG_MEM_SRAM:      *begin = 0xA000; *end = 0xBFFF; return true;
+			case DBG_MEM_WORK_RAM:  *begin = 0xC000; *end = 0xDFFF; return true;
+			case DBG_MEM_OAM:       *begin = 0xFE00; *end = 0xFE9F; return true;
+			case DBG_MEM_REGISTER:  *begin = 0xFF00; *end = 0xFF7F; return true;
+			case DBG_MEM_HIGH_RAM:  *begin = 0xFF80; *end = 0xFFFE; return true;
+			case DBG_MEM_BOOT_ROM:  *begin = 0x0000; *end = 0x00FF; return true;
+		}
+		return false;
+	}
+
+	switch (memtype)
+	{
+		case DBG_MEM_CPU:       *begin = 0x000000; *end = 0xFFFFFF; return true;
+		case DBG_MEM_PRG_ROM:   *begin = 0x000000; *end = 0xFFFFFF; return true;
+		case DBG_MEM_WORK_RAM:  *begin = 0x7E0000; *end = 0x7FFFFF; return true;
+		case DBG_MEM_VIDEO_RAM: *begin = 0x000000; *end = 0x00FFFF; return true;
+		case DBG_MEM_OAM:       *begin = 0x000000; *end = 0x00021F; return true;
+		case DBG_MEM_CG_RAM:    *begin = 0x000000; *end = 0x0001FF; return true;
+		case DBG_MEM_REGISTER:  *begin = 0x002100; *end = 0x0043FF; return true;
+	}
+	return false;
+}
+
+static void UpdateRangeLabel(HWND dlg, DbgSystem sys, int memtype)
+{
+	uint32_t b = 0, e = 0;
+	char buf[48];
+	if (MemTypeRange(sys, memtype, &b, &e))
+	{
+		if (sys == DbgSystem::Snes)
+			_snprintf_s(buf, sizeof(buf), _TRUNCATE, "($%06X - $%06X)", b, e);
+		else
+			_snprintf_s(buf, sizeof(buf), _TRUNCATE, "($%04X - $%04X)", b, e);
+	}
+	else
+	{
+		_snprintf_s(buf, sizeof(buf), _TRUNCATE,
+		            sys == DbgSystem::Snes ? "(Max: $FFFFFF)" : "(Max: $FFFF)");
+	}
+	SetDlgItemTextA(dlg, IDC_DBG_BP_MAX, buf);
+}
+
 static uint32_t ParseHex(const char *s)
 {
 	while (*s == ' ' || *s == '\t') s++;
@@ -408,8 +459,7 @@ static INT_PTR CALLBACK EditDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
 			}
 			SendMessage(combo, CB_SETCURSEL, sel_idx, 0);
 
-			SetDlgItemTextA(dlg, IDC_DBG_BP_MAX,
-			                st->sys == DbgSystem::Snes ? "(Max: $FFFFFF)" : "(Max: $FFFF)");
+			UpdateRangeLabel(dlg, st->sys, st->bp->memory_type);
 
 			CheckDlgButton(dlg, IDC_DBG_BP_EXEC,      st->bp->brk_execute ? BST_CHECKED : BST_UNCHECKED);
 			CheckDlgButton(dlg, IDC_DBG_BP_READ,      st->bp->brk_read    ? BST_CHECKED : BST_UNCHECKED);
@@ -432,6 +482,19 @@ static INT_PTR CALLBACK EditDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
 		}
 
 		case WM_COMMAND:
+			if (LOWORD(wp) == IDC_DBG_BP_TYPE && HIWORD(wp) == CBN_SELCHANGE)
+			{
+				EditDlgState *st = (EditDlgState *)GetWindowLongPtr(dlg, DWLP_USER);
+				if (st)
+				{
+					HWND combo = (HWND)lp;
+					int sel = (int)SendMessage(combo, CB_GETCURSEL, 0, 0);
+					if (sel >= 0)
+						UpdateRangeLabel(dlg, st->sys,
+						                 (int)SendMessage(combo, CB_GETITEMDATA, sel, 0));
+				}
+				return TRUE;
+			}
 			if (LOWORD(wp) == IDOK)
 			{
 				EditDlgState *st = (EditDlgState *)GetWindowLongPtr(dlg, DWLP_USER);

@@ -31,7 +31,7 @@ enum
 	IDM_DISASM_RUN_TO_BRANCH_TARGET
 };
 
-enum { COL_MARGIN = 0, COL_ADDR = 1, COL_BYTES = 2, COL_MNEM = 3, COL_OPERAND = 4 };
+enum { COL_MARGIN = 0, COL_FLOW = 1, COL_ADDR = 2, COL_BYTES = 3, COL_MNEM = 4, COL_OPERAND = 5 };
 
 struct DisasmLine
 {
@@ -143,6 +143,35 @@ static COLORREF MnemColor(DbgSystem sys, uint8_t op)
 	return RGB(20, 20, 20);
 }
 
+struct FlowArrow
+{
+	int src_idx;   // row of the branch instruction (tail)
+	int dst_idx;   // row of the branch target (head/arrowhead)
+	int top_idx;   // min(src,dst)
+	int bot_idx;   // max(src,dst)
+	int lane;
+};
+
+// Visual style keyed off a stable seed (the branch source address) so an
+// arrow keeps the same color/style regardless of scroll position. Cycles
+// color + pen style + weight to keep crossing arrows distinct. Dashed/dotted
+// GDI pens require width 1, so weight-2 entries are solid.
+static void ArrowStyle(uint32_t seed, COLORREF *color, int *pen_style, int *width)
+{
+	static const struct { COLORREF c; int s; int w; } kStyles[] = {
+		{ RGB( 60, 160,  80), PS_DOT,   1 },
+		{ RGB( 60,  90, 200), PS_SOLID, 2 },
+		{ RGB(200,  60,  60), PS_DASH,  1 },
+		{ RGB(150,  60, 160), PS_SOLID, 1 },
+		{ RGB(210, 140,  40), PS_DOT,   1 },
+		{ RGB( 40, 160, 160), PS_SOLID, 2 },
+	};
+	const int n = (int)(sizeof(kStyles)/sizeof(kStyles[0]));
+	const uint32_t h = seed * 2654435761u;          // Knuth multiplicative hash
+	const int i = (int)((h >> 24) % (uint32_t)n);
+	*color = kStyles[i].c; *pen_style = kStyles[i].s; *width = kStyles[i].w;
+}
+
 struct DisasmPanelState
 {
 	DbgSystem    sys              = DbgSystem::None;
@@ -162,6 +191,9 @@ struct DisasmPanelState
 	uint32_t    *section_starts   = nullptr;
 	int          sections_count   = 0;
 	int          sections_cap     = 0;
+	FlowArrow   *arrows           = nullptr;
+	int          arrows_count     = 0;
+	int          arrows_cap       = 0;
 	uint32_t     rclick_pc        = 0;
 	bool         rclick_valid     = false;
 	bool         rclick_has_branch = false;
@@ -592,6 +624,152 @@ static int FindIndexForPC(DisasmPanelState *st, uint32_t pc)
 	return -1;
 }
 
+static int FindIndexForPCInRange(DisasmPanelState *st, uint32_t pc, int lo, int hi)
+{
+	if (lo < 0) lo = 0;
+	if (hi > st->line_count) hi = st->line_count;
+	for (int i = lo; i < hi; i++)
+	{
+		if (st->lines[i].is_label_row || st->lines[i].is_unmapped) continue;
+		if (st->lines[i].pc == pc) return i;
+	}
+	return -1;
+}
+
+static bool IsConditionalBranch(DbgSystem sys, uint8_t op)
+{
+	if (sys == DbgSystem::Snes)
+		return op == 0x10 || op == 0x30 || op == 0x50 || op == 0x70
+		    || op == 0x90 || op == 0xB0 || op == 0xD0 || op == 0xF0;
+	return op == 0x20 || op == 0x28 || op == 0x30 || op == 0x38
+	    || op == 0xC2 || op == 0xCA || op == 0xD2 || op == 0xDA
+	    || op == 0xC4 || op == 0xCC || op == 0xD4 || op == 0xDC;
+}
+
+static bool IsIndirectBranch(DbgSystem sys, uint8_t op)
+{
+	if (sys == DbgSystem::Snes)
+		return op == 0x6C || op == 0x7C || op == 0xDC || op == 0xFC;
+	return op == 0xE9;
+}
+
+// A branch whose static target we want to draw a flow arrow for: relative
+// branches, absolute jumps, and calls with a known immediate target. Excludes
+// returns, indirect jumps, and RST vectors.
+static bool GetFlowBranch(DisasmPanelState *st, uint32_t pc, uint32_t *out_target, bool *out_cond)
+{
+	char ln[160]; uint8_t bytes[4]; int byte_count;
+	bool has_branch = false; uint32_t raw_branch = 0;
+	DisasmOne(st->sys, pc, ln, sizeof(ln), bytes, &byte_count,
+	          nullptr, nullptr, nullptr, &has_branch, &raw_branch);
+	if (!has_branch) return false;
+
+	const uint8_t op = bytes[0];
+	if (IsIndirectBranch(st->sys, op)) return false;
+	if (st->sys == DbgSystem::Gb && (op & 0xC7) == 0xC7) return false; // RST
+
+	*out_target = ComputeBranchTargetDisplay(st->sys, pc, raw_branch);
+	*out_cond   = IsConditionalBranch(st->sys, op);
+	return true;
+}
+
+static void EnsureArrowsCap(DisasmPanelState *st, int need)
+{
+	if (st->arrows_cap >= need) return;
+	int new_cap = st->arrows_cap > 0 ? st->arrows_cap : 64;
+	while (new_cap < need) new_cap *= 2;
+	FlowArrow *new_arr = (FlowArrow *)malloc(sizeof(FlowArrow) * new_cap);
+	if (st->arrows && st->arrows_count > 0)
+		memcpy(new_arr, st->arrows, sizeof(FlowArrow) * st->arrows_count);
+	free(st->arrows);
+	st->arrows     = new_arr;
+	st->arrows_cap = new_cap;
+}
+
+static void BuildFlowArrows(DisasmPanelState *st)
+{
+	st->arrows_count = 0;
+	if (!st->lv || st->line_count <= 0) return;
+
+	const int top      = ListView_GetTopIndex(st->lv);
+	const int per_page = ListView_GetCountPerPage(st->lv);
+	if (per_page <= 0) return;
+
+	const int vis_lo = top;
+	int vis_hi = top + per_page;
+	if (vis_hi > st->line_count - 1) vis_hi = st->line_count - 1;
+
+	// Scan beyond the viewport so an arrow with one endpoint off-screen is
+	// still found. An arrow is drawn when AT LEAST ONE endpoint is visible;
+	// the off-screen end simply runs to the viewport edge (no cap). Arrows
+	// with both endpoints off-screen are dropped (no bare verticals).
+	const int EXTRA = 256;
+	int scan_lo = vis_lo - EXTRA; if (scan_lo < 0) scan_lo = 0;
+	int scan_hi = vis_hi + EXTRA; if (scan_hi > st->line_count) scan_hi = st->line_count;
+
+	for (int i = scan_lo; i < scan_hi; i++)
+	{
+		const DisasmLine &ln = st->lines[i];
+		if (ln.is_label_row || ln.is_unmapped) continue;
+
+		uint32_t tgt; bool cond;
+		if (!GetFlowBranch(st, ln.pc, &tgt, &cond)) continue;
+
+		const int dst = FindIndexForPCInRange(st, tgt, scan_lo, scan_hi);
+		if (dst < 0 || dst == i) continue;
+
+		const bool src_vis = (i   >= vis_lo && i   <= vis_hi);
+		const bool dst_vis = (dst >= vis_lo && dst <= vis_hi);
+		if (!src_vis && !dst_vis) continue;
+
+		const int a_top = i < dst ? i : dst;
+		const int a_bot = i < dst ? dst : i;
+
+		EnsureArrowsCap(st, st->arrows_count + 1);
+		FlowArrow &fa = st->arrows[st->arrows_count++];
+		fa.src_idx = i;
+		fa.dst_idx = dst;
+		fa.top_idx = a_top;
+		fa.bot_idx = a_bot;
+		fa.lane    = 0;
+	}
+
+	// Shorter spans first so tight loops nest into the inner lanes.
+	for (int i = 1; i < st->arrows_count; i++)
+	{
+		FlowArrow key = st->arrows[i];
+		const int key_span = key.bot_idx - key.top_idx;
+		int j = i - 1;
+		while (j >= 0 && (st->arrows[j].bot_idx - st->arrows[j].top_idx) > key_span)
+		{
+			st->arrows[j + 1] = st->arrows[j];
+			j--;
+		}
+		st->arrows[j + 1] = key;
+	}
+
+	const int MAXLANES = 6;
+	for (int i = 0; i < st->arrows_count; i++)
+	{
+		int lane = 0;
+		bool clash = true;
+		while (clash && lane < MAXLANES)
+		{
+			clash = false;
+			for (int j = 0; j < i; j++)
+			{
+				if (st->arrows[j].lane != lane) continue;
+				if (st->arrows[i].top_idx <= st->arrows[j].bot_idx
+				 && st->arrows[j].top_idx <= st->arrows[i].bot_idx)
+				{ clash = true; break; }
+			}
+			if (clash) lane++;
+		}
+		if (lane >= MAXLANES) lane = MAXLANES - 1;
+		st->arrows[i].lane = lane;
+	}
+}
+
 static int FindOrExtendForPC(DisasmPanelState *st, uint32_t pc, int max_rows);
 
 static uint32_t FindGoodStartAddr(DbgSystem sys, uint32_t target_pc, int lookback_bytes)
@@ -621,6 +799,20 @@ static uint32_t FindGoodStartAddr(DbgSystem sys, uint32_t target_pc, int lookbac
 		if (aligned) return start;
 	}
 	return target_pc;
+}
+
+static void BuildLabelRowName(DisasmPanelState *st, uint32_t pc, char *out, size_t cap)
+{
+	const char *label = LookupLabel(st->sys, pc);
+	if (label)
+	{
+		_snprintf_s(out, cap, _TRUNCATE, "%s:", label);
+		return;
+	}
+	if (st->sys == DbgSystem::Snes)
+		_snprintf_s(out, cap, _TRUNCATE, "sub_%06X:", (unsigned)(pc & 0xFFFFFFu));
+	else
+		_snprintf_s(out, cap, _TRUNCATE, "sub_%04X:", (unsigned)(pc & 0xFFFFu));
 }
 
 struct OperandText
@@ -711,19 +903,7 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 	if (ln.is_label_row)
 	{
 		if (di->item.mask & LVIF_TEXT)
-		{
-			char *out = di->item.pszText;
-			const int cap = di->item.cchTextMax;
-			if (di->item.iSubItem == COL_MNEM)
-			{
-				if (st->sys == DbgSystem::Snes)
-					_snprintf_s(out, cap, _TRUNCATE, "$%06X:", (unsigned)(ln.pc & 0xFFFFFFu));
-				else
-					_snprintf_s(out, cap, _TRUNCATE, "$%04X:", (unsigned)(ln.pc & 0xFFFFu));
-			}
-			else
-				out[0] = 0;
-		}
+			di->item.pszText[0] = 0;
 		return;
 	}
 
@@ -739,6 +919,7 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 			switch (di->item.iSubItem)
 			{
 				case COL_MARGIN:
+				case COL_FLOW:
 					out[0] = 0;
 					break;
 				case COL_ADDR:
@@ -781,6 +962,7 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 		switch (di->item.iSubItem)
 		{
 			case COL_MARGIN:
+			case COL_FLOW:
 				out[0] = 0;
 				break;
 			case COL_ADDR:
@@ -815,11 +997,20 @@ static void OnGetDispInfo(DisasmPanelState *st, NMLVDISPINFOA *di)
 	}
 }
 
+static bool RowHasExecBp(DisasmPanelState *st, const DisasmLine &row)
+{
+	if (row.is_label_row || row.is_unmapped) return false;
+	const uint8_t  bank = BpBankForPC(st->sys, row.pc);
+	const uint16_t addr = (uint16_t)(row.pc & 0xFFFF);
+	return gDebugger.HasExecBreakpoint(st->sys, bank, addr);
+}
+
 static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 {
 	switch (cd->nmcd.dwDrawStage)
 	{
 		case CDDS_PREPAINT:
+			BuildFlowArrows(st);
 			return CDRF_NOTIFYITEMDRAW;
 
 		case CDDS_ITEMPREPAINT:
@@ -843,7 +1034,12 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				else
 				{
 					const uint32_t cur_pc = GetCurrentPC(st->sys);
-					if (Settings.Paused && row.pc == cur_pc)
+					if (RowHasExecBp(st, row))
+					{
+						cd->clrTextBk = RGB(200, 40, 40);
+						cd->clrText   = RGB(255, 255, 255);
+					}
+					else if (Settings.Paused && row.pc == cur_pc)
 					{
 						cd->clrTextBk = RGB(255, 230, 90);
 						cd->clrText   = RGB(0, 0, 0);
@@ -883,7 +1079,15 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 				else
 				{
 					const uint32_t cur_pc = GetCurrentPC(st->sys);
-					if (Settings.Paused && row.pc == cur_pc)
+					const bool bp_col = RowHasExecBp(st, row)
+					    && sub != COL_MARGIN && sub != COL_FLOW;
+					if (bp_col)
+					{
+						cd->clrTextBk = RGB(200, 40, 40);
+						cd->clrText   = RGB(255, 255, 255);
+						cd->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
+					}
+					else if (Settings.Paused && row.pc == cur_pc)
 					{
 						cd->clrTextBk = RGB(255, 230, 90);
 						cd->clrText   = RGB(0, 0, 0);
@@ -898,7 +1102,7 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 						cd->clrTextBk = RGB(255, 255, 255);
 						cd->clrText   = RGB(20, 20, 20);
 					}
-					if (sub == COL_MNEM)
+					if (!bp_col && sub == COL_MNEM)
 					{
 						char ln[160]; uint8_t b[4]; int c;
 						DisasmOne(st->sys, row.pc, ln, sizeof(ln), b, &c);
@@ -907,6 +1111,8 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 					if (sub == COL_OPERAND)
 						return CDRF_SKIPDEFAULT;
 				}
+				if (sub == COL_MARGIN || sub == COL_FLOW)
+					cd->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_FOCUS);
 			}
 			return CDRF_NEWFONT;
 		}
@@ -916,7 +1122,94 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 			const int idx = (int)cd->nmcd.dwItemSpec;
 			if (idx >= st->line_count) return CDRF_DODEFAULT;
 
-			if (st->lines[idx].is_label_row || st->lines[idx].is_unmapped)
+			// Code-flow arrow gutter — drawn for every row type so vertical
+			// lanes stay continuous across label / unmapped rows.
+			if (st->arrows_count > 0)
+			{
+				RECT fr = {};
+				ListView_GetSubItemRect(st->lv, idx, COL_FLOW, LVIR_BOUNDS, &fr);
+				const int cy         = (fr.top + fr.bottom) / 2;
+				const int flow_right = fr.right - 1;
+				const int LANE_W     = 9;
+				const int HRUN       = 16;   // horizontal run from innermost lane to the arrowhead
+				HDC dc = cd->nmcd.hdc;
+
+				for (int ai = 0; ai < st->arrows_count; ai++)
+				{
+					const FlowArrow &a = st->arrows[ai];
+					if (idx < a.top_idx || idx > a.bot_idx) continue;
+
+					int x = flow_right - HRUN - a.lane * LANE_W;
+					if (x < fr.left + 2) x = fr.left + 2;
+
+					COLORREF col; int ps; int w;
+					ArrowStyle(st->lines[a.src_idx].pc, &col, &ps, &w);
+
+					HPEN pen  = CreatePen(ps, w, col);
+					HPEN oldP = (HPEN)SelectObject(dc, pen);
+
+					const int vy_top = (idx == a.top_idx) ? cy : fr.top;
+					const int vy_bot = (idx == a.bot_idx) ? cy : fr.bottom;
+					MoveToEx(dc, x, vy_top, NULL);
+					LineTo(dc, x, vy_bot);
+
+					if (idx == a.src_idx)        // tail — plain connector to the address
+					{
+						MoveToEx(dc, x, cy, NULL);
+						LineTo(dc, flow_right, cy);
+					}
+					if (idx == a.dst_idx)        // head — connector + filled arrowhead
+					{
+						MoveToEx(dc, x, cy, NULL);
+						LineTo(dc, flow_right, cy);
+					}
+
+					SelectObject(dc, oldP);
+					DeleteObject(pen);
+
+					if (idx == a.dst_idx)
+					{
+						POINT tri[3] = {
+							{ flow_right - 6, cy - 4 },
+							{ flow_right,     cy     },
+							{ flow_right - 6, cy + 4 }
+						};
+						HBRUSH fill = CreateSolidBrush(col);
+						HPEN   edge = CreatePen(PS_SOLID, 1, col);
+						HBRUSH oldB = (HBRUSH)SelectObject(dc, fill);
+						HPEN   oldE = (HPEN)SelectObject(dc, edge);
+						Polygon(dc, tri, 3);
+						SelectObject(dc, oldE);
+						SelectObject(dc, oldB);
+						DeleteObject(edge);
+						DeleteObject(fill);
+					}
+				}
+			}
+
+			if (st->lines[idx].is_label_row)
+			{
+				RECT lr = {};
+				ListView_GetItemRect(st->lv, idx, &lr, LVIR_BOUNDS);
+				RECT ar = {};
+				ListView_GetSubItemRect(st->lv, idx, COL_ADDR, LVIR_BOUNDS, &ar);
+
+				char name[96];
+				BuildLabelRowName(st, st->lines[idx].pc, name, sizeof(name));
+
+				HDC dc = cd->nmcd.hdc;
+				const int prev_bk = SetBkMode(dc, TRANSPARENT);
+				SetTextColor(dc, RGB(0, 96, 0));
+				TEXTMETRICA tm; GetTextMetricsA(dc, &tm);
+				const int y = lr.top + ((lr.bottom - lr.top) - tm.tmHeight) / 2;
+				const int x = ar.left + 4;
+				RECT clip = { ar.left, lr.top, lr.right, lr.bottom };
+				ExtTextOutA(dc, x, y, ETO_CLIPPED, &clip, name, (UINT)strlen(name), NULL);
+				SetBkMode(dc, prev_bk);
+				return CDRF_DODEFAULT;
+			}
+
+			if (st->lines[idx].is_unmapped)
 				return CDRF_DODEFAULT;
 
 			RECT row_rect = {};
@@ -936,12 +1229,16 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 
 				const bool in_func = (int)st->lines[idx].section_index < st->sections_count
 				    && IsKnownEntry(st, st->section_starts[st->lines[idx].section_index]);
-				const bool is_pc = Settings.Paused && row_pc == cur_pc;
+				const bool is_pc       = Settings.Paused && row_pc == cur_pc;
+				const bool is_selected = (ListView_GetItemState(st->lv, idx, LVIS_SELECTED) & LVIS_SELECTED) != 0;
+				const bool has_bp      = RowHasExecBp(st, st->lines[idx]);
 
 				COLORREF bg_color;
-				if      (is_pc)   bg_color = RGB(255, 230, 90);
-				else if (in_func) bg_color = RGB(255, 240, 240);
-				else              bg_color = RGB(255, 255, 255);
+				if      (has_bp)      bg_color = RGB(200, 40, 40);
+				else if (is_selected) bg_color = GetSysColor(COLOR_HIGHLIGHT);
+				else if (is_pc)       bg_color = RGB(255, 230, 90);
+				else if (in_func)     bg_color = RGB(255, 240, 240);
+				else                  bg_color = RGB(255, 255, 255);
 
 				HBRUSH bg = CreateSolidBrush(bg_color);
 				FillRect(dc, &op_rect, bg);
@@ -967,7 +1264,15 @@ static LRESULT OnCustomDraw(DisasmPanelState *st, NMLVCUSTOMDRAW *cd)
 					x += sz.cx;
 				};
 
-				if (is_pc)
+				if (has_bp)
+				{
+					DrawSpan(ot.text, total_len, RGB(255, 255, 255));
+				}
+				else if (is_selected)
+				{
+					DrawSpan(ot.text, total_len, GetSysColor(COLOR_HIGHLIGHTTEXT));
+				}
+				else if (is_pc)
 				{
 					DrawSpan(ot.text, total_len, RGB(0, 0, 0));
 				}
@@ -1137,6 +1442,9 @@ static void CopySelectionToClipboard(HWND parent, DisasmPanelState *st)
 		EnsureLineCached(st, idx);
 		if (idx >= st->line_count) break;
 		const DisasmLine &ln = st->lines[idx];
+
+		if (ln.is_label_row || ln.is_unmapped) continue;
+
 		char line[160]; uint8_t bytes[4]; int byte_count;
 		DisasmOne(st->sys, ln.pc, line, sizeof(line), bytes, &byte_count);
 
@@ -1146,8 +1454,16 @@ static void CopySelectionToClipboard(HWND parent, DisasmPanelState *st)
 		else
 			_snprintf_s(addr, 16, _TRUNCATE, "%04X", (unsigned)(ln.pc & 0xFFFFu));
 
-		char row[256];
-		_snprintf_s(row, 256, _TRUNCATE, "%s  %s\r\n", addr, line);
+		char bytestr[16] = "";
+		for (int b = 0; b < byte_count && b < 4; b++)
+			_snprintf_s(bytestr + b * 3, 16 - b * 3, _TRUNCATE, b ? " %02X" : "%02X", bytes[b]);
+
+		OperandText ot;
+		BuildOperandText(st, ln.pc, &ot);
+		const char *suffix = ot.suffix_offset >= 0 ? ot.text + ot.suffix_offset : "";
+
+		char row[320];
+		_snprintf_s(row, sizeof(row), _TRUNCATE, "%s  %s  %s%s\r\n", addr, bytestr, line, suffix);
 		out += row;
 	}
 	if (out.empty()) return;
@@ -1334,8 +1650,14 @@ static void EnsurePCVisible(DisasmPanelState *st)
 		st->view_initialized = true;
 	}
 
-	const int pc_idx = FindOrExtendForPC(st, cur_pc, 2000000);
-	if (pc_idx < 0) return;
+	int pc_idx = FindOrExtendForPC(st, cur_pc, 2000000);
+	if (pc_idx < 0)
+	{
+		ResetLines(st, cur_pc);
+		st->view_initialized = true;
+		pc_idx = FindOrExtendForPC(st, cur_pc, 2000000);
+		if (pc_idx < 0) return;
+	}
 
 	const int per_page = ListView_GetCountPerPage(st->lv);
 	const int top      = ListView_GetTopIndex(st->lv);
@@ -1353,6 +1675,40 @@ static void EnsurePCVisible(DisasmPanelState *st)
 		}
 		ListView_EnsureVisible(st->lv, pc_idx, FALSE);
 	}
+}
+
+// The flow-arrow gutter spans rows, so the ListView's default scroll-blit
+// smears it: it copies old gutter pixels to new positions and only repaints
+// newly-exposed rows. Force a full client repaint after any scroll so every
+// row's arrows are recomputed and redrawn cleanly.
+static LRESULT CALLBACK DisasmLvSubclass(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                         UINT_PTR id, DWORD_PTR /*ref*/)
+{
+	switch (msg)
+	{
+		case WM_WINDOWPOSCHANGING:
+		{
+			WINDOWPOS *wpos = (WINDOWPOS *)lp;
+			if (wpos && !(wpos->flags & SWP_NOSIZE))
+				wpos->flags |= SWP_NOCOPYBITS;
+			break;
+		}
+		case WM_VSCROLL:
+		case WM_HSCROLL:
+		case WM_MOUSEWHEEL:
+		case WM_KEYDOWN:
+		case WM_SIZE:
+		case WM_WINDOWPOSCHANGED:
+		{
+			const LRESULT r = DefSubclassProc(hwnd, msg, wp, lp);
+			InvalidateRect(hwnd, NULL, FALSE);
+			return r;
+		}
+		case WM_NCDESTROY:
+			RemoveWindowSubclass(hwnd, DisasmLvSubclass, id);
+			break;
+	}
+	return DefSubclassProc(hwnd, msg, wp, lp);
 }
 
 static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
@@ -1386,12 +1742,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 			ListView_SetExtendedListViewStyle(st->lv,
 			    LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
 			SendMessage(st->lv, WM_SETFONT, (WPARAM)st->font, TRUE);
+			SetWindowSubclass(st->lv, DisasmLvSubclass, 1, 0);
 
 			LVCOLUMNA col = {};
 			col.mask = LVCF_TEXT | LVCF_WIDTH;
 			col.pszText = (LPSTR)" ";        col.cx = 32;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_MARGIN,  (LPARAM)&col);
+			col.pszText = (LPSTR)"";         col.cx = 84;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_FLOW,    (LPARAM)&col);
 			col.pszText = (LPSTR)"Address";  col.cx = 70;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_ADDR,    (LPARAM)&col);
-			col.pszText = (LPSTR)"Bytes";    col.cx = 95;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_BYTES,   (LPARAM)&col);
+			col.pszText = (LPSTR)"Opcodes";  col.cx = 95;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_BYTES,   (LPARAM)&col);
 			col.pszText = (LPSTR)"Mnem";     col.cx = 48;  SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_MNEM,    (LPARAM)&col);
 			col.pszText = (LPSTR)"Operand";  col.cx = 290; SendMessageA(st->lv, LVM_INSERTCOLUMNA, COL_OPERAND, (LPARAM)&col);
 
@@ -1409,9 +1767,18 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 				free(st->targets);
 				free(st->entries);
 				free(st->section_starts);
+				free(st->arrows);
 				delete st;
 			}
 			return 0;
+		}
+
+		case WM_WINDOWPOSCHANGING:
+		{
+			WINDOWPOS *wpos = (WINDOWPOS *)lp;
+			if (wpos && !(wpos->flags & SWP_NOSIZE))
+				wpos->flags |= SWP_NOCOPYBITS;
+			break;
 		}
 
 		case WM_SIZE:
@@ -1421,6 +1788,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 			{
 				RECT rc; GetClientRect(h, &rc);
 				MoveWindow(st->lv, 0, 0, rc.right, rc.bottom, TRUE);
+				InvalidateRect(st->lv, NULL, FALSE);
 			}
 			return 0;
 		}
@@ -1509,12 +1877,50 @@ void DisasmPanelInvalidateCache(HWND h)
 	st->targets_count    = 0;
 	st->entries_count    = 0;
 	st->sections_count   = 0;
+	st->arrows_count     = 0;
 	st->walk_complete    = false;
 	if (st->lv)
 	{
 		ListView_SetItemCountEx(st->lv, 0, LVSICF_NOINVALIDATEALL);
 		InvalidateRect(st->lv, NULL, FALSE);
 	}
+}
+
+void DisasmPanelGotoAddress(HWND h, uint32_t addr)
+{
+	DisasmPanelState *st = GetState(h);
+	if (!st || !st->lv) return;
+
+	const uint32_t start = BankStart(st->sys, addr);
+	if (!st->view_initialized ||
+	    BankStart(st->sys, st->view_start_pc) != start)
+	{
+		ResetLines(st, start);
+		st->view_initialized = true;
+	}
+
+	int idx = FindOrExtendForPC(st, addr, 2000000);
+	if (idx < 0)
+	{
+		ResetLines(st, addr);
+		st->view_initialized = true;
+		idx = FindOrExtendForPC(st, addr, 2000000);
+		if (idx < 0) return;
+	}
+
+	const int per_page = ListView_GetCountPerPage(st->lv);
+	if (per_page > 6)
+	{
+		const int third = per_page / 3;
+		int bottom_anchor = idx + (per_page - 1 - third);
+		if (bottom_anchor >= st->line_count) bottom_anchor = st->line_count - 1;
+		ListView_EnsureVisible(st->lv, bottom_anchor, FALSE);
+	}
+	ListView_EnsureVisible(st->lv, idx, FALSE);
+	ListView_SetItemState(st->lv, idx, LVIS_SELECTED | LVIS_FOCUSED,
+	                      LVIS_SELECTED | LVIS_FOCUSED);
+	InvalidateRect(st->lv, NULL, FALSE);
+	UpdateWindow(st->lv);
 }
 
 void DisasmPanelRefresh(HWND h)

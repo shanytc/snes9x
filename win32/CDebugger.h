@@ -36,6 +36,15 @@ struct DbgBreakpoint
 	char      condition[64] = {};
 };
 
+struct DbgCallFrame
+{
+	uint32_t target      = 0;   // routine entry address (full)
+	uint32_t return_addr = 0;   // address execution returns to (full)
+	uint32_t caller_pc   = 0;   // address of the call instruction (full)
+	uint16_t sp_at_call  = 0;   // stack pointer right after the call pushed
+	uint8_t  caller_bank = 0;   // GB ROM bank active at the call site
+};
+
 class CDebugger
 {
 public:
@@ -66,6 +75,7 @@ public:
 	void StepOneScanline(DbgSystem sys);
 	void RunToNmi(DbgSystem sys);
 	void RunToIrq(DbgSystem sys);
+	void RunToWramExec(DbgSystem sys);
 	void RunToScanline(DbgSystem sys, int target_v);
 	void BreakIn(DbgSystem sys, uint64_t cycles_from_now);
 	void ResetMachine(DbgSystem sys);
@@ -84,6 +94,9 @@ public:
 	size_t BreakpointCount() const { return bps_.size(); }
 	const  DbgBreakpoint *GetBreakpoint(size_t index) const;
 	uint32_t BreakpointsVersion() const { return bps_version_; }
+
+	const std::vector<DbgCallFrame> &CallStack(DbgSystem sys) const;
+	uint32_t CallStackVersion() const { return cs_version_; }
 
 	HWND SnesDlg() const { return snes_dlg_; }
 	HWND GbDlg()   const { return gb_dlg_; }
@@ -120,6 +133,13 @@ private:
 	bool     gb_step_one_scanline_armed_  = false;
 	uint64_t gb_step_one_scanline_start_t_ = 0;
 
+	// One-shot: halt the instant the GB fetches an instruction from outside
+	// ROM (VRAM/SRAM/WRAM/echo/OAM/IO, i.e. PC in [0x8000,0xFF7F)). Catches
+	// runaway jumps into RAM — the classic "game derailed into its data and
+	// is executing garbage" failure. HRAM ($FF80-) is excluded since OAM-DMA
+	// wait routines legitimately run there.
+	bool gb_run_to_wram_exec_   = false;
+
 	bool gb_break_pending_      = false;
 
 	bool snes_skip_exec_bp_once_ = false;
@@ -137,6 +157,30 @@ private:
 	std::vector<DbgBreakpoint> bps_;
 	uint32_t bps_version_ = 0;
 
+	std::vector<DbgCallFrame> snes_cs_;
+	std::vector<DbgCallFrame> gb_cs_;
+	uint32_t cs_version_ = 0;
+
+	bool     cs_snes_valid_   = false;
+	uint32_t cs_snes_prev_pc_ = 0;
+	uint16_t cs_snes_prev_sp_ = 0;
+	uint8_t  cs_snes_prev_op_ = 0;
+
+	bool     cs_gb_valid_     = false;
+	uint16_t cs_gb_prev_pc_   = 0;
+	uint16_t cs_gb_prev_sp_   = 0;
+	uint8_t  cs_gb_prev_op_   = 0;
+	uint8_t  cs_gb_prev_bank_ = 0;
+
+	void TrackSnesCallStack(uint8_t bank, uint16_t addr, uint16_t sp, uint8_t op);
+	void TrackGbCallStack(uint16_t pc, uint16_t sp, uint8_t op, uint8_t bank);
+	// Best-effort GB call-stack reconstruction by scanning RAM upward from SP:
+	// a 16-bit value V is treated as a frame when mem[V-3] is a CALL opcode or
+	// mem[V-1] is an RST. Stateless — works even when the debugger is opened
+	// mid-run with no prior live tracking. Rebuilt at every GB halt.
+	void UnwindGbCallStack();
+	void ClearCallStacks();
+
 	void OnBpsChanged();
 };
 
@@ -152,5 +196,7 @@ void S9xDebuggerRefreshAll();
 
 #define WM_USER_DEBUGGER_REFRESH (WM_USER + 0x200)
 #define WM_USER_DEBUGGER_HALT    (WM_USER + 0x201)
+// lParam = display address to center the disassembly view on.
+#define WM_USER_DEBUGGER_GOTO    (WM_USER + 0x202)
 
 #endif

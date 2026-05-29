@@ -483,10 +483,19 @@
     <ClInclude Include="CStatusPanel.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="CMapperPanel.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
     <ClInclude Include="CDebuggerLabels.h">
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="CBreakpointsPanel.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CWatchPanel.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="CCallStackPanel.h">
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="CMemoryRegions.h">
@@ -1028,10 +1037,19 @@
     <ClCompile Include="CStatusPanel.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
+    <ClCompile Include="CMapperPanel.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
     <ClCompile Include="CDebuggerLabels.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CBreakpointsPanel.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CWatchPanel.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CCallStackPanel.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CMemoryRegions.cpp">

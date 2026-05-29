@@ -465,6 +465,25 @@ void    S9xSGBGetCpuRegs(uint16_t *pc, uint16_t *sp, uint16_t *af,
 
 uint32_t S9xSGBGetCurrentRomBank(void);
 
+// Snapshot of the active GB cartridge mapper for the Win32 debugger's
+// Mapper panel. `mbc_type` is the SGB::MbcType enum value (0 = None / ROM
+// only). Sizes are in bytes. Returns false when no GB cart is loaded.
+struct SgbMapperInfo
+{
+	int      mbc_type;
+	uint32_t rom_bank;     // selected ROM-bank register (raw)
+	uint32_t ram_bank;     // selected RAM-bank register (raw)
+	uint8_t  ram_enable;   // 1 = cart RAM/IO accessible
+	uint8_t  mbc1_mode;    // MBC1 banking mode (0 = ROM, 1 = RAM)
+	uint8_t  has_battery;
+	uint8_t  has_rtc;
+	uint8_t  has_rumble;
+	uint8_t  cart_type;    // header byte $0147
+	uint32_t rom_size;     // bytes
+	uint32_t ram_size;     // bytes
+};
+bool S9xSGBGetMapperInfo(SgbMapperInfo *out);
+
 uint8_t  S9xSGBPeekROMByte(uint32_t rom_offset);
 uint32_t S9xSGBGetROMSize(void);
 uint32_t S9xSGBGetSRAMSize(void);

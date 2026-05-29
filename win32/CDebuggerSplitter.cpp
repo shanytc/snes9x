@@ -17,6 +17,15 @@ static SplitterState *GetState(HWND h)
 	return (SplitterState *)GetWindowLongPtr(h, GWLP_USERDATA);
 }
 
+static void PlaceChild(HWND child, int x, int y, int w, int h)
+{
+	if (!child) return;
+	SetWindowPos(child, NULL, x, y, w, h,
+	             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+	RedrawWindow(child, NULL, NULL,
+	             RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+}
+
 static void Layout(HWND h, SplitterState *s)
 {
 	RECT rc;
@@ -29,16 +38,16 @@ static void Layout(HWND h, SplitterState *s)
 		int leftW = (int)(w * s->ratio);
 		if (leftW < 32) leftW = 32;
 		if (leftW > w - 32 - kBarSize) leftW = w - 32 - kBarSize;
-		if (s->childA) MoveWindow(s->childA, 0, 0, leftW, hh, TRUE);
-		if (s->childB) MoveWindow(s->childB, leftW + kBarSize, 0, w - leftW - kBarSize, hh, TRUE);
+		PlaceChild(s->childA, 0, 0, leftW, hh);
+		PlaceChild(s->childB, leftW + kBarSize, 0, w - leftW - kBarSize, hh);
 	}
 	else
 	{
 		int topH = (int)(hh * s->ratio);
 		if (topH < 32) topH = 32;
 		if (topH > hh - 32 - kBarSize) topH = hh - 32 - kBarSize;
-		if (s->childA) MoveWindow(s->childA, 0, 0, w, topH, TRUE);
-		if (s->childB) MoveWindow(s->childB, 0, topH + kBarSize, w, hh - topH - kBarSize, TRUE);
+		PlaceChild(s->childA, 0, 0, w, topH);
+		PlaceChild(s->childB, 0, topH + kBarSize, w, hh - topH - kBarSize);
 	}
 }
 
@@ -115,9 +124,10 @@ static LRESULT CALLBACK SplitterProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 		{
 			SplitterState *s = GetState(h);
 			if (!s) break;
-			if ((HWND)wp != h)
-				return FALSE;
-			SetCursor(LoadCursor(NULL, s->orient == SPLIT_HORZ ? IDC_SIZEWE : IDC_SIZENS));
+			if ((HWND)wp == h && LOWORD(lp) == HTCLIENT)
+				SetCursor(LoadCursor(NULL, s->orient == SPLIT_HORZ ? IDC_SIZEWE : IDC_SIZENS));
+			else
+				SetCursor(LoadCursor(NULL, IDC_ARROW));
 			return TRUE;
 		}
 

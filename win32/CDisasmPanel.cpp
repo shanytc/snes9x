@@ -781,6 +781,8 @@ static void BuildFlowArrows(DisasmPanelState *st)
 }
 
 static int FindOrExtendForPC(DisasmPanelState *st, uint32_t pc, int max_rows);
+static void ScrollRowIntoView(DisasmPanelState *st, int idx, bool center = false);
+static void GotoAddressInternal(DisasmPanelState *st, uint32_t addr, bool center);
 
 static uint32_t FindGoodStartAddr(DbgSystem sys, uint32_t target_pc, int lookback_bytes)
 {
@@ -1564,9 +1566,7 @@ static void OnContextMenuCommand(HWND parent, DisasmPanelState *st, int cmd)
 		case IDM_DISASM_GO_TO_PC:
 		{
 			const uint32_t cur = GetCurrentPC(st->sys);
-			const int idx = FindOrExtendForPC(st, cur, 2000000);
-			if (idx >= 0) ListView_EnsureVisible(st->lv, idx, FALSE);
-			else if (st->sys == DbgSystem::Snes) { ResetLines(st, cur); st->view_initialized = true; }
+			GotoAddressInternal(st, cur, true);
 			break;
 		}
 		case IDM_DISASM_GO_TO_BRANCH_TARGET:
@@ -1656,7 +1656,7 @@ static int FindOrExtendForPC(DisasmPanelState *st, uint32_t pc, int max_rows)
 // Scroll so row `idx` is visible with context lines above it (never pinned to
 // the very top, so addresses before it stay reachable). Moves only the
 // viewport — the line list is never rebuilt or filtered here.
-static void ScrollRowIntoView(DisasmPanelState *st, int idx)
+static void ScrollRowIntoView(DisasmPanelState *st, int idx, bool center)
 {
 	if (idx < 0) return;
 	const int per_page = ListView_GetCountPerPage(st->lv);
@@ -1665,14 +1665,14 @@ static void ScrollRowIntoView(DisasmPanelState *st, int idx)
 		ListView_EnsureVisible(st->lv, idx, FALSE);
 		return;
 	}
-	const int third = per_page / 3;
-	int bottom_anchor = idx + (per_page - 1 - third);
+	const int offset = center ? per_page / 2 : per_page / 3;
+	int bottom_anchor = idx + (per_page - 1 - offset);
 	if (bottom_anchor >= st->line_count) bottom_anchor = st->line_count - 1;
-	int top_anchor = idx - third;
-	if (top_anchor < third) top_anchor = 0;   // near the start → show from the top
+	int top_anchor = idx - offset;
+	if (top_anchor < offset) top_anchor = 0;   // near the start → show from the top
 	if (top_anchor < 0)     top_anchor = 0;
 	// Order matters (last call wins for minimal scroll): anchor the bottom,
-	// then the top, leaving `idx` ~a third down with lines visible above it.
+	// then the top, leaving `idx` centered (or ~a third down) with lines above it.
 	ListView_EnsureVisible(st->lv, bottom_anchor, FALSE);
 	ListView_EnsureVisible(st->lv, top_anchor, FALSE);
 	ListView_EnsureVisible(st->lv, idx, FALSE);
@@ -1919,9 +1919,8 @@ void DisasmPanelInvalidateCache(HWND h)
 	}
 }
 
-void DisasmPanelGotoAddress(HWND h, uint32_t addr)
+static void GotoAddressInternal(DisasmPanelState *st, uint32_t addr, bool center)
 {
-	DisasmPanelState *st = GetState(h);
 	if (!st || !st->lv) return;
 
 	const uint32_t start = BankStart(st->sys, addr);
@@ -1941,11 +1940,17 @@ void DisasmPanelGotoAddress(HWND h, uint32_t addr)
 		if (idx < 0) return;
 	}
 
-	ScrollRowIntoView(st, idx);
+	ScrollRowIntoView(st, idx, center);
+	ListView_SetItemState(st->lv, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
 	ListView_SetItemState(st->lv, idx, LVIS_SELECTED | LVIS_FOCUSED,
 	                      LVIS_SELECTED | LVIS_FOCUSED);
 	InvalidateRect(st->lv, NULL, FALSE);
 	UpdateWindow(st->lv);
+}
+
+void DisasmPanelGotoAddress(HWND h, uint32_t addr)
+{
+	GotoAddressInternal(GetState(h), addr, false);
 }
 
 void DisasmPanelRefresh(HWND h)

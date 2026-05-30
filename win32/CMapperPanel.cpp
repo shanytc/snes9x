@@ -32,6 +32,8 @@ static const char *MbcName(int t)
 		case 9:  return "HuC3";
 		case 10: return "MMM01";
 		case 11: return "Sachen MMC1";
+		case 12: return "TAMA5";
+		case 13: return "M161";
 		default: return "Unknown";
 	}
 }

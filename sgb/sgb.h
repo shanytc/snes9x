@@ -485,6 +485,56 @@ struct SgbMapperInfo
 };
 bool S9xSGBGetMapperInfo(SgbMapperInfo *out);
 
+// Live snapshot of the GB APU for the Win32 debugger's "APU" panel. One entry
+// per channel (CH1, CH2, CH3 wave, CH4 noise) plus master regs and CH3 wave
+// RAM. The dbg_* counters are free-running diagnostics (reset on emulator
+// reset, not persisted in savestates) for tracing digitized-voice playback —
+// e.g. distinguishing a sample cut short by a length-counter underflow from one
+// whose stream simply stops being fed. Returns false when no GB cart is loaded.
+struct SgbApuChannelInfo
+{
+	uint8_t  enabled;        // channel currently producing output
+	uint8_t  dac_enabled;    // channel DAC powered
+	uint8_t  length_enabled; // NRx4 bit 6 — length counter gates the channel
+	uint32_t length;         // remaining length ticks (0..64, CH3 0..256)
+	uint16_t freq;           // 11-bit frequency (CH1-3); 0 for noise
+	uint8_t  volume;         // env volume 0..15 (CH1/2/4); CH3 volume code 0..3
+	uint32_t trigger_count;  // running count of NRx4 bit-7 triggers
+};
+
+struct SgbApuInfo
+{
+	uint8_t  master_enabled; // NR52 bit 7
+	uint8_t  nr50;           // master L/R volume + VIN
+	uint8_t  nr51;           // per-channel panning
+	uint8_t  frame_seq_step; // 0..7 frame-sequencer phase
+	SgbApuChannelInfo ch[4]; // CH1, CH2, CH3, CH4
+
+	uint8_t  wave_pos;       // CH3 current sample index 0..31
+	uint8_t  ch3_volume_code;// (NR32>>5)&3 : 0=mute 1=100% 2=50% 3=25%
+	uint8_t  wave_ram[16];   // CH3 wave pattern RAM
+
+	uint32_t wave_ram_writes;// running count of $FF30-$FF3F writes
+	uint32_t ch3_len_disable;// CH3 turned off by length underflow
+	uint32_t ch3_dac_disable;// CH3 turned off by DAC clear (NR30 bit 7)
+
+	// PCM-via-NR50 voice diagnostics. This game plays digitized speech by
+	// writing NR50 (master volume) once per timer interrupt with CH4 as a DC
+	// carrier, so nr50_writes is effectively the timer-ISR / PCM sample rate.
+	// Watch its per-frame delta during a voice line: ~118/frame == the ~7 kHz
+	// stream is healthy; a drop to 0 mid-line is the sample being cut short.
+	uint32_t nr50_writes;    // running count of $FF24 writes
+	uint32_t nr51_writes;    // running count of $FF25 writes
+	uint32_t pcm_silent;     // NR50 writes with zero carrier (silent PCM samples)
+	uint8_t  timer_tac;      // $FF07 — bit 2 enable + clock select
+	uint8_t  timer_tma;      // $FF06 — TIMA reload (sets PCM rate)
+	uint8_t  timer_tima;     // $FF05 — live timer counter
+
+	uint32_t queued_samples; // mixed stereo frames waiting in the ring buffer
+	int32_t  output_rate;    // current downsample target (Hz)
+};
+bool S9xSGBGetApuState(SgbApuInfo *out);
+
 // SGB command-packet trace for the Win32 "Packet" window. Each entry is one
 // 16-byte packet the GB bit-banged over $FF00, with the GB t-cycle it
 // completed. S9xSGBGetPacketLog fills `out` oldest-first (up to max_entries)

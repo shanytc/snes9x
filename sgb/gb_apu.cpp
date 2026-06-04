@@ -388,7 +388,9 @@ void FrameSequencerStep(Apu &a)
 	{
 		LengthTick(a.ch1.length, a.ch1.length_enabled, a.ch1.enabled);
 		LengthTick(a.ch2.length, a.ch2.length_enabled, a.ch2.enabled);
+		const bool ch3_was_on = a.ch3.enabled;
 		LengthTick(a.ch3.length, a.ch3.length_enabled, a.ch3.enabled);
+		if (ch3_was_on && !a.ch3.enabled) ++a.dbg_ch3_len_disable;
 		LengthTick(a.ch4.length, a.ch4.length_enabled, a.ch4.enabled);
 	}
 
@@ -636,6 +638,15 @@ void ApuReset(Apu &a, bool cgb, bool post_boot)
 	a.lp_z1_r[0] = a.lp_z2_r[0] = a.lp_z1_r[1] = a.lp_z2_r[1] = 0.0f;
 	RecomputeLowpass(a);
 
+	a.dbg_trigger_count[0] = a.dbg_trigger_count[1] = 0;
+	a.dbg_trigger_count[2] = a.dbg_trigger_count[3] = 0;
+	a.dbg_wave_ram_writes  = 0;
+	a.dbg_ch3_len_disable  = 0;
+	a.dbg_ch3_dac_disable  = 0;
+	a.dbg_nr50_writes      = 0;
+	a.dbg_nr51_writes      = 0;
+	a.dbg_pcm_silent       = 0;
+
 	std::memset(a.sample_buf, 0, sizeof a.sample_buf);
 }
 
@@ -869,6 +880,7 @@ void ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb)
 			return;
 		}
 		a.ch3.ram[addr - 0xFF30] = value;
+		++a.dbg_wave_ram_writes;
 		return;
 	}
 
@@ -932,7 +944,7 @@ void ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb)
 			a.ch1.nrx4            = value;
 			a.ch1.length_enabled  = (value & 0x40) != 0;
 			a.ch1.freq            = SquareFreq(a.ch1);
-			if (value & 0x80) TriggerSquare(a.ch1, /*is_ch1=*/true);
+			if (value & 0x80) { ++a.dbg_trigger_count[0]; TriggerSquare(a.ch1, /*is_ch1=*/true); }
 			return;
 
 		case 0xFF16:
@@ -952,13 +964,17 @@ void ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb)
 			a.ch2.nrx4            = value;
 			a.ch2.length_enabled  = (value & 0x40) != 0;
 			a.ch2.freq            = SquareFreq(a.ch2);
-			if (value & 0x80) TriggerSquare(a.ch2, /*is_ch1=*/false);
+			if (value & 0x80) { ++a.dbg_trigger_count[1]; TriggerSquare(a.ch2, /*is_ch1=*/false); }
 			return;
 
 		case 0xFF1A:
 			a.ch3.nr30        = value;
 			a.ch3.dac_enabled = (value & 0x80) != 0;
-			if (!a.ch3.dac_enabled) a.ch3.enabled = false;
+			if (!a.ch3.dac_enabled)
+			{
+				if (a.ch3.enabled) ++a.dbg_ch3_dac_disable;
+				a.ch3.enabled = false;
+			}
 			return;
 		case 0xFF1B:
 			a.ch3.nr31   = value;
@@ -975,7 +991,7 @@ void ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb)
 			a.ch3.nr34           = value;
 			a.ch3.length_enabled = (value & 0x40) != 0;
 			a.ch3.freq           = WaveFreq(a.ch3);
-			if (value & 0x80) TriggerWave(a.ch3);
+			if (value & 0x80) { ++a.dbg_trigger_count[2]; TriggerWave(a.ch3); }
 			return;
 
 		case 0xFF20:
@@ -993,11 +1009,23 @@ void ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb)
 		case 0xFF23:
 			a.ch4.nr44           = value;
 			a.ch4.length_enabled = (value & 0x40) != 0;
-			if (value & 0x80) TriggerNoise(a.ch4);
+			if (value & 0x80) { ++a.dbg_trigger_count[3]; TriggerNoise(a.ch4); }
 			return;
 
-		case 0xFF24: a.nr50 = value; return;
-		case 0xFF25: a.nr51 = value; return;
+		case 0xFF24:
+			a.nr50 = value;
+			++a.dbg_nr50_writes;
+			// A digitized-voice PCM sample is silent if there is no DAC carrier
+			// for the new master volume to scale. With the DAC-bias mixer a
+			// powered DAC is a non-zero carrier even at digital 0, so this now
+			// reads 0 once the voice plays correctly (was == NR50/f before).
+			if (DacAnalog(a.ch1.dac_enabled, SquareOutput(a.ch1)) +
+			    DacAnalog(a.ch2.dac_enabled, SquareOutput(a.ch2)) +
+			    DacAnalog(a.ch3.dac_enabled, WaveOutput(a.ch3)) +
+			    DacAnalog(a.ch4.dac_enabled, NoiseOutput(a.ch4)) == 0)
+				++a.dbg_pcm_silent;
+			return;
+		case 0xFF25: a.nr51 = value; ++a.dbg_nr51_writes; return;
 	}
 }
 

@@ -486,6 +486,9 @@
     <ClInclude Include="CMapperPanel.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="CApuPanel.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
     <ClInclude Include="CDebuggerLabels.h">
       <Filter>GUI</Filter>
     </ClInclude>
@@ -1041,6 +1044,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CMapperPanel.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="CApuPanel.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CDebuggerLabels.cpp">

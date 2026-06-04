@@ -11,6 +11,7 @@
 #include "CDisasmPanel.h"
 #include "CStatusPanel.h"
 #include "CMapperPanel.h"
+#include "CApuPanel.h"
 #include "CBreakpointsPanel.h"
 #include "CWatchPanel.h"
 #include "CCallStackPanel.h"
@@ -119,6 +120,7 @@ enum
 	IDC_DBG_MAPPER,
 	IDC_DBG_LABELS,
 	IDC_DBG_SETTINGS,
+	IDC_DBG_APU,
 	IDC_DBG_WATCH,
 	IDC_DBG_BREAKPOINTS,
 	IDC_DBG_CALLSTACK,
@@ -181,7 +183,7 @@ struct DbgDlgState
 	HWND      hStatus;
 	HWND      hMapper;
 	HWND      hLabels;
-	HWND      hSettings;
+	HWND      hApu;
 	HWND      hWatch;
 	HWND      hBreakpoints;
 	HWND      hCallstack;
@@ -442,7 +444,7 @@ static LRESULT CALLBACK DebuggerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 			st->hStatus      = StatusPanelCreate(st->hSplitRegs,   st->sys, IDC_DBG_STATUS_PANEL);
 			st->hMapper      = MapperPanelCreate(st->hSplitRegs,   st->sys, IDC_DBG_MAPPER);
 			st->hLabels      = CreatePlaceholder(st->hSplitMid,    IDC_DBG_LABELS,      TEXT("Labels"));
-			st->hSettings    = CreatePlaceholder(st->hSplitRight,  IDC_DBG_SETTINGS,    TEXT("Disassembly settings"));
+			st->hApu         = ApuPanelCreate(st->hSplitRight,     st->sys, IDC_DBG_APU);
 			st->hWatch       = WatchPanelCreate(st->hSplitBottom,  st->sys, IDC_DBG_WATCH);
 			st->hBreakpoints = BreakpointsPanelCreate(st->hSplitBottom2, st->sys, IDC_DBG_BREAKPOINTS);
 			st->hCallstack   = CallStackPanelCreate(st->hSplitBottom2, st->sys, IDC_DBG_CALLSTACK);
@@ -451,7 +453,7 @@ static LRESULT CALLBACK DebuggerWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 			SplitterSetChildren(st->hSplitBottom,  st->hWatch, st->hSplitBottom2);
 			SplitterSetChildren(st->hSplitRegs,    st->hStatus, st->hMapper);
 			SplitterSetChildren(st->hSplitMid,     st->hSplitRegs, st->hLabels);
-			SplitterSetChildren(st->hSplitRight,   st->hSplitMid, st->hSettings);
+			SplitterSetChildren(st->hSplitRight,   st->hSplitMid, st->hApu);
 			SplitterSetChildren(st->hSplitBody,    st->hDisasm, st->hSplitRight);
 			SplitterSetChildren(st->hSplitMain,    st->hSplitBody, st->hSplitBottom);
 
@@ -546,6 +548,7 @@ void DebuggerDlgGlobalInit(HINSTANCE hInst)
 	DisasmPanelRegisterClass(hInst);
 	StatusPanelRegisterClass(hInst);
 	MapperPanelRegisterClass(hInst);
+	ApuPanelRegisterClass(hInst);
 	BreakpointsPanelRegisterClass(hInst);
 	WatchPanelRegisterClass(hInst);
 	CallStackPanelRegisterClass(hInst);
@@ -664,6 +667,7 @@ void DebuggerDlgRefresh(HWND h)
 	if (st->hDisasm) DisasmPanelRefresh(st->hDisasm);
 	if (st->hStatus) StatusPanelRefresh(st->hStatus);
 	if (st->hMapper) MapperPanelRefresh(st->hMapper);
+	if (st->hApu) ApuPanelRefresh(st->hApu);
 	if (st->hBreakpoints) BreakpointsPanelRefresh(st->hBreakpoints);
 	if (st->hWatch) WatchPanelRefresh(st->hWatch);
 	if (st->hCallstack) CallStackPanelRefresh(st->hCallstack);

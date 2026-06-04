@@ -513,6 +513,7 @@
     <ClInclude Include="CDisasmPanel.h" />
     <ClInclude Include="CStatusPanel.h" />
     <ClInclude Include="CMapperPanel.h" />
+    <ClInclude Include="CApuPanel.h" />
     <ClInclude Include="CDebuggerLabels.h" />
     <ClInclude Include="CBreakpointsPanel.h" />
     <ClInclude Include="CWatchPanel.h" />
@@ -773,6 +774,7 @@
     <ClCompile Include="CDisasmPanel.cpp" />
     <ClCompile Include="CStatusPanel.cpp" />
     <ClCompile Include="CMapperPanel.cpp" />
+    <ClCompile Include="CApuPanel.cpp" />
     <ClCompile Include="CDebuggerLabels.cpp" />
     <ClCompile Include="CBreakpointsPanel.cpp" />
     <ClCompile Include="CWatchPanel.cpp" />

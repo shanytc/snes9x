@@ -2890,6 +2890,73 @@ bool S9xSGBGetMapperInfo(SgbMapperInfo *out)
 	return true;
 }
 
+bool S9xSGBGetApuState(SgbApuInfo *out)
+{
+	if (!out) return false;
+	const SGB::Emulator::Impl *impl = SGB::Instance().DebugImpl();
+	if (!impl || !impl->has_rom) return false;
+	const SGB::Apu &a = impl->apu;
+
+	out->master_enabled = a.master_enabled ? 1 : 0;
+	out->nr50           = a.nr50;
+	out->nr51           = a.nr51;
+	out->frame_seq_step = a.frame_seq_step;
+
+	// CH1 / CH2 — square.
+	const SGB::ApuSquare *sq[2] = { &a.ch1, &a.ch2 };
+	for (int i = 0; i < 2; ++i)
+	{
+		out->ch[i].enabled        = sq[i]->enabled ? 1 : 0;
+		out->ch[i].dac_enabled    = sq[i]->dac_enabled ? 1 : 0;
+		out->ch[i].length_enabled = sq[i]->length_enabled ? 1 : 0;
+		out->ch[i].length         = sq[i]->length;
+		out->ch[i].freq           = sq[i]->freq;
+		out->ch[i].volume         = sq[i]->env_volume;
+		out->ch[i].trigger_count  = a.dbg_trigger_count[i];
+	}
+
+	// CH3 — wave. volume reported as the NR32 volume code (0..3).
+	const uint8_t ch3_vol_code = static_cast<uint8_t>((a.ch3.nr32 >> 5) & 0x03);
+	out->ch[2].enabled        = a.ch3.enabled ? 1 : 0;
+	out->ch[2].dac_enabled    = a.ch3.dac_enabled ? 1 : 0;
+	out->ch[2].length_enabled = a.ch3.length_enabled ? 1 : 0;
+	out->ch[2].length         = a.ch3.length;
+	out->ch[2].freq           = a.ch3.freq;
+	out->ch[2].volume         = ch3_vol_code;
+	out->ch[2].trigger_count  = a.dbg_trigger_count[2];
+
+	// CH4 — noise (no 11-bit frequency).
+	out->ch[3].enabled        = a.ch4.enabled ? 1 : 0;
+	out->ch[3].dac_enabled    = a.ch4.dac_enabled ? 1 : 0;
+	out->ch[3].length_enabled = a.ch4.length_enabled ? 1 : 0;
+	out->ch[3].length         = a.ch4.length;
+	out->ch[3].freq           = 0;
+	out->ch[3].volume         = a.ch4.env_volume;
+	out->ch[3].trigger_count  = a.dbg_trigger_count[3];
+
+	out->wave_pos        = a.ch3.pos;
+	out->ch3_volume_code = ch3_vol_code;
+	std::memcpy(out->wave_ram, a.ch3.ram, 16);
+
+	out->wave_ram_writes = a.dbg_wave_ram_writes;
+	out->ch3_len_disable = a.dbg_ch3_len_disable;
+	out->ch3_dac_disable = a.dbg_ch3_dac_disable;
+
+	out->nr50_writes = a.dbg_nr50_writes;
+	out->nr51_writes = a.dbg_nr51_writes;
+	out->pcm_silent  = a.dbg_pcm_silent;
+	out->timer_tac   = impl->timer.tac;
+	out->timer_tma   = impl->timer.tma;
+	out->timer_tima  = impl->timer.tima;
+
+	const uint32_t head = a.sample_head;
+	const uint32_t tail = a.sample_tail;
+	out->queued_samples = (head >= tail) ? (head - tail)
+	                                     : (SGB::APU_SAMPLE_BUF_SIZE - tail + head);
+	out->output_rate     = a.output_rate;
+	return true;
+}
+
 uint32_t S9xSGBGetPacketLog(SgbPacketLogEntry *out, uint32_t max_entries)
 {
 	if (!out || max_entries == 0) return 0;

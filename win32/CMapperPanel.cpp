@@ -66,8 +66,8 @@ static void PaintMapper(HDC dc, MapperPanelState *st)
 
 	char buf[96];
 
-	_snprintf_s(buf, sizeof(buf), _TRUNCATE, "Mapper:     %s  (type $%02X)",
-	            MbcName(m.mbc_type), m.cart_type);
+	_snprintf_s(buf, sizeof(buf), _TRUNCATE, "Mapper:     %s%s  (type $%02X)",
+	            MbcName(m.mbc_type), m.mbc1_multicart ? " multicart" : "", m.cart_type);
 	Line(dc, x, y, buf);
 
 	const uint32_t rom_banks = m.rom_size ? (m.rom_size / 0x4000u) : 0;
@@ -88,8 +88,13 @@ static void PaintMapper(HDC dc, MapperPanelState *st)
 	y += 6;
 
 	// Effective ROM bank at $4000-$7FFF (the bank register wraps modulo the
-	// cart's bank count on read, exactly as MbcRead does).
-	const uint32_t eff_rom = rom_banks ? (m.rom_bank % rom_banks) : m.rom_bank;
+	// cart's bank count on read, exactly as MbcRead does). On an MBC1 multicart
+	// the BANK2 register selects a 256 KiB game slot (BANK1 low 4 bits | BANK2<<4),
+	// so the physical bank differs from the raw BANK1 register.
+	const uint32_t reg_bank = m.mbc1_multicart
+	                        ? ((m.rom_bank & 0x0F) | ((m.ram_bank & 0x03) << 4))
+	                        : m.rom_bank;
+	const uint32_t eff_rom = rom_banks ? (reg_bank % rom_banks) : reg_bank;
 	if (eff_rom != m.rom_bank)
 		_snprintf_s(buf, sizeof(buf), _TRUNCATE,
 		            "ROM bank:   $%03X  (-> phys $%02X)", m.rom_bank, eff_rom);

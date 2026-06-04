@@ -481,6 +481,7 @@ struct SgbMapperInfo
 	uint8_t  cart_type;    // header byte $0147
 	uint32_t rom_size;     // bytes
 	uint32_t ram_size;     // bytes
+	uint8_t  mbc1_multicart; // 1 = MBC1M wiring (BANK2 selects a 256 KiB game slot)
 };
 bool S9xSGBGetMapperInfo(SgbMapperInfo *out);
 

@@ -482,6 +482,8 @@ struct SgbMapperInfo
 	uint32_t rom_size;     // bytes
 	uint32_t ram_size;     // bytes
 	uint8_t  mbc1_multicart; // 1 = MBC1M wiring (BANK2 selects a 256 KiB game slot)
+	uint8_t  duz_multicart;  // 1 = Duz 2-in-1 MBC3 multicart (SRAM-window select register)
+	uint32_t duz_base_bank;  // ROM base bank the Duz select register adds to every access
 };
 bool S9xSGBGetMapperInfo(SgbMapperInfo *out);
 

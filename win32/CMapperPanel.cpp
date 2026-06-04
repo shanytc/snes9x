@@ -67,7 +67,7 @@ static void PaintMapper(HDC dc, MapperPanelState *st)
 	char buf[96];
 
 	_snprintf_s(buf, sizeof(buf), _TRUNCATE, "Mapper:     %s%s  (type $%02X)",
-	            MbcName(m.mbc_type), m.mbc1_multicart ? " multicart" : "", m.cart_type);
+	            MbcName(m.mbc_type), (m.mbc1_multicart || m.duz_multicart) ? " multicart" : "", m.cart_type);
 	Line(dc, x, y, buf);
 
 	const uint32_t rom_banks = m.rom_size ? (m.rom_size / 0x4000u) : 0;
@@ -93,6 +93,7 @@ static void PaintMapper(HDC dc, MapperPanelState *st)
 	// so the physical bank differs from the raw BANK1 register.
 	const uint32_t reg_bank = m.mbc1_multicart
 	                        ? ((m.rom_bank & 0x0F) | ((m.ram_bank & 0x03) << 4))
+	                        : m.duz_multicart ? (m.rom_bank + m.duz_base_bank)
 	                        : m.rom_bank;
 	const uint32_t eff_rom = rom_banks ? (reg_bank % rom_banks) : reg_bank;
 	if (eff_rom != m.rom_bank)

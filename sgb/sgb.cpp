@@ -2887,6 +2887,8 @@ bool S9xSGBGetMapperInfo(SgbMapperInfo *out)
 	out->rom_size    = static_cast<uint32_t>(impl->cart.rom.size());
 	out->ram_size    = static_cast<uint32_t>(impl->cart.sram.size());
 	out->mbc1_multicart = impl->cart.mbc1_multicart ? 1 : 0;
+	out->duz_multicart  = impl->cart.duz_multicart ? 1 : 0;
+	out->duz_base_bank  = m.sachen_outer_bank;
 	return true;
 }
 

@@ -1,0 +1,269 @@
+// ---------------------------------------------------------------------------
+// Headless GB/GBC/SGB diagnostic harness for the snes9x `sgb/` core.
+//
+// Drives the real GB core (sgb/gb_*.cpp) with NO Windows / SNES dependencies,
+// so you can reproduce and trace audio/CPU/timing bugs from the command line,
+// in a loop, under a debugger, or in CI — without launching the GUI.
+//
+// It replicates the per-dot CPU/PPU/APU/timer interleaving that
+// Emulator::RunCycles performs in sgb/sgb.cpp (interrupts run inside
+// Cpu::Step, HDMA runs inside PpuStep), plus the run-mode boot register
+// values from Emulator::Reset.
+//
+// What it surfaces:
+//   * APU register-write trace  — every NRxx change with the PC that wrote it
+//   * per-frame audio energy     — peak/avg of the mixed output (via ApuDrain),
+//                                  so you can SEE whether a channel that is
+//                                  "enabled" is actually producing sound
+//   * PC histogram (final frame) — hang / busy-loop detector
+//   * optional PC-range watcher  — count hits in a routine of interest
+//   * run-mode boot divergence   — cgb vs sgb2 vs sgb vs dmg in one binary
+//
+// See README.md in this directory for the build command and worked examples
+// (this is the tool used to find the Telefang digitized-voice duty bug).
+// ---------------------------------------------------------------------------
+
+#include "gb_cart.h"
+#include "gb_cpu.h"
+#include "gb_ppu.h"
+#include "gb_apu.h"
+#include "gb_timer.h"
+#include "gb_joypad.h"
+#include "gb_memory.h"
+
+#include <cstdio>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+#include <map>
+#include <algorithm>
+
+using namespace SGB;
+
+// --- Host hooks the GB core references; no-ops for the headless harness. -----
+bool S9xSGBDebuggerBreakRequested() { return false; }
+void S9xSGBOnJoyserWrite(unsigned char) {}
+void S9xSGBOnPpuHBlank() {}
+void S9xSGBOnPpuVBlank() {}
+void S9xSGBCaptureScanline(const unsigned char*) {}
+
+// --- Subsystems (same set Emulator::Impl owns). -----------------------------
+static Cart   cart;
+static Memory mem;
+static Cpu    cpu;
+static Ppu    ppu;
+static Apu    apu;
+static Timer  timer;
+static Joypad joypad;
+
+// --- CPU trace hook state ---------------------------------------------------
+static uint64_t g_instr = 0;
+static std::map<uint16_t,uint64_t> g_pc_hist;     // sampled on the final frame
+static bool     g_hist_on = false;
+static uint16_t g_watch_lo = 0xFFFF, g_watch_hi = 0;  // optional PC-range watch
+static uint64_t g_watch_hits = 0;
+
+static void Trace(uint16_t pc, uint8_t /*op*/, const CpuState &)
+{
+    ++g_instr;
+    if (g_hist_on) g_pc_hist[pc]++;
+    if (pc >= g_watch_lo && pc <= g_watch_hi) ++g_watch_hits;
+}
+
+// --- APU register shadow, for change detection ------------------------------
+struct ApuShadow {
+    uint8_t nr10,nr11,nr12,nr13,nr14, nr21,nr22,nr23,nr24;
+    uint8_t nr30,nr31,nr32,nr33,nr34, nr41,nr42,nr43,nr44;
+    uint8_t nr50,nr51,nr52;
+};
+static ApuShadow prev{};
+static long g_apu_writes_logged = 0;
+static const long APU_WRITE_LOG_CAP = 400;
+
+static ApuShadow Snap()
+{
+    ApuShadow s;
+    s.nr10=apu.ch1.nrx0; s.nr11=apu.ch1.nrx1; s.nr12=apu.ch1.nrx2; s.nr13=apu.ch1.nrx3; s.nr14=apu.ch1.nrx4;
+    s.nr21=apu.ch2.nrx1; s.nr22=apu.ch2.nrx2; s.nr23=apu.ch2.nrx3; s.nr24=apu.ch2.nrx4;
+    s.nr30=apu.ch3.nr30; s.nr31=apu.ch3.nr31; s.nr32=apu.ch3.nr32; s.nr33=apu.ch3.nr33; s.nr34=apu.ch3.nr34;
+    s.nr41=apu.ch4.nr41; s.nr42=apu.ch4.nr42; s.nr43=apu.ch4.nr43; s.nr44=apu.ch4.nr44;
+    s.nr50=apu.nr50; s.nr51=apu.nr51; s.nr52=apu.master_enabled?0x80:0;
+    return s;
+}
+
+// --- One Emulator::RunCycles slice (per-dot interleave, double-speed aware) --
+static void RunCycles(int32_t tcycles, bool trace_apu)
+{
+    CpuState &cs = cpu.State();
+    int64_t target_t = ppu.t_cycles + tcycles;
+    int64_t ds_extra = cs.t_cycles - ppu.t_cycles;
+    if (ds_extra < 0) ds_extra = 0;
+    int32_t apu_rem = 0;
+
+    while (ppu.t_cycles < target_t)
+    {
+        PpuStep(ppu, mem, 1);                       // HDMA-on-HBlank lives here
+        if (mem.double_speed) ds_extra += 1;
+
+        while (cs.t_cycles + kMaxOpcodeTCycles <= ppu.t_cycles + ds_extra)
+        {
+            uint16_t prePC = cs.r.pc;
+            int64_t  pre_t = cs.t_cycles;
+            cpu.Step(mem);                           // interrupts serviced inside
+            int32_t consumed = (int32_t)(cs.t_cycles - pre_t);
+            if (consumed <= 0) consumed = 4;
+
+            TimerStep(timer, mem, consumed);         // CPU clock domain (DIV doubles)
+            int32_t apu_in = consumed;               // APU stays real-time
+            if (mem.double_speed) { apu_rem += consumed; apu_in = apu_rem >> 1; apu_rem &= 1; }
+            ApuStep(apu, apu_in);
+
+            if (trace_apu && g_apu_writes_logged < APU_WRITE_LOG_CAP)
+            {
+                ApuShadow now = Snap();
+                if (memcmp(&now, &prev, sizeof now) != 0)
+                {
+                    #define D(field,name) if(now.field!=prev.field){ if(g_apu_writes_logged<APU_WRITE_LOG_CAP){ \
+                        printf("    APUW pc=%04X %-4s %02X->%02X\n",prePC,name,prev.field,now.field); ++g_apu_writes_logged; } }
+                    D(nr10,"NR10")D(nr11,"NR11")D(nr12,"NR12")D(nr13,"NR13")D(nr14,"NR14")
+                    D(nr21,"NR21")D(nr22,"NR22")D(nr23,"NR23")D(nr24,"NR24")
+                    D(nr30,"NR30")D(nr31,"NR31")D(nr32,"NR32")D(nr33,"NR33")D(nr34,"NR34")
+                    D(nr41,"NR41")D(nr42,"NR42")D(nr43,"NR43")D(nr44,"NR44")
+                    D(nr50,"NR50")D(nr51,"NR51")D(nr52,"NR52")
+                    #undef D
+                    prev = now;
+                }
+            }
+            else
+            {
+                prev = Snap();
+            }
+        }
+    }
+}
+
+static void Usage(const char *argv0)
+{
+    fprintf(stderr,
+        "usage: %s <rom.gb|.gbc> [frames=1500] [mode=cgb|sgb2|sgb|dmg]\n"
+        "          [input|noinput] [watchLoHex watchHiHex]\n"
+        "  rom      raw GB/GBC ROM (unzip first)\n"
+        "  frames   SNES-frames to run (~60/sec)\n"
+        "  mode     boot register state: cgb (A=11), sgb2 (A=FF), sgb (A=01), dmg\n"
+        "  input    pulse START then A every 120 frames (advances menus);\n"
+        "           noinput leaves the pad idle (default)\n"
+        "  watch    optional PC range to count hits in (e.g. 38F2 3925)\n", argv0);
+}
+
+int main(int argc, char **argv)
+{
+    if (argc < 2) { Usage(argv[0]); return 2; }
+    const char *rom_path = argv[1];
+    int         frames   = argc>2 ? atoi(argv[2]) : 1500;
+    const char *mode     = argc>3 ? argv[3] : "cgb";
+    bool        noinput  = !(argc>4 && !strcmp(argv[4],"input"));
+    if (argc>6) { g_watch_lo=(uint16_t)strtol(argv[5],0,16); g_watch_hi=(uint16_t)strtol(argv[6],0,16); }
+
+    FILE *f = fopen(rom_path,"rb");
+    if (!f) { fprintf(stderr,"cannot open %s\n", rom_path); return 1; }
+    fseek(f,0,SEEK_END); long sz=ftell(f); fseek(f,0,SEEK_SET);
+    std::vector<uint8_t> rom(sz);
+    if (fread(rom.data(),1,sz,f)!=(size_t)sz) { fprintf(stderr,"short read\n"); return 1; }
+    fclose(f);
+
+    if (!CartLoad(cart, rom.data(), sz, rom_path)) { fprintf(stderr,"CartLoad failed\n"); return 1; }
+    printf("Loaded %s: cartType=0x%02X cgbFlag=0x%02X rom=%uB ram=%uB mbc=%d\n",
+        rom_path, cart.header.cart_type, cart.header.cgb_flag,
+        cart.header.rom_size, cart.header.ram_size, (int)cart.mbc.type);
+
+    // Replicate Emulator::Reset() for a standalone cart (no boot ROM, no SGB BIOS).
+    cpu.Reset(); MemReset(mem); PpuReset(ppu); ApuReset(apu);
+    TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
+    mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart;
+
+    bool cgb=false; int clk=4194304;
+    CpuState &cs = cpu.State();
+    if      (!strcmp(mode,"cgb"))  { cgb=true; cs.r.af=0x1180; cs.r.bc=0x0000; cs.r.de=0xFF56; cs.r.hl=0x000D; }
+    else if (!strcmp(mode,"sgb2")) { cs.r.af=0xFF00; cs.r.bc=0x0014; cs.r.de=0x0000; cs.r.hl=0xC060; }
+    else if (!strcmp(mode,"sgb"))  { cs.r.af=0x0100; cs.r.bc=0x0014; cs.r.de=0x0000; cs.r.hl=0xC060; clk=4295454; }
+    else                           { /* dmg: keep cpu.Reset() DMG defaults */ }
+    ppu.cgb = cgb;
+    ApuSetClockHz(apu, clk);
+    ApuSetOutputRate(apu, 48000);
+    Cpu::SetTraceHook(&Trace);
+    printf("MODE=%s cgb=%d clk=%d af=%04X frames=%d input=%s watch=%04X-%04X\n\n",
+        mode, cgb, clk, cs.r.af, frames, noinput?"no":"yes", g_watch_lo, g_watch_hi);
+
+    // Stats
+    int first_ch[4] = {-1,-1,-1,-1};        // first frame each channel triggers
+    int first_freq[2] = {-1,-1};            // first frame CH1/CH2 freq != 0
+    int ds_frame=-1, stop_frame=-1;
+    int64_t total_samples=0; int global_peak=0, frames_with_audio=0;
+    uint64_t watch_prev=0;
+    prev = Snap();
+    static int16_t buf[16384*2];
+
+    for (int fr=0; fr<frames; ++fr)
+    {
+        uint8_t mask = 0;
+        if (!noinput) { int p=fr%120; if(p>=10&&p<16) mask=GB_START; else if(p>=40&&p<46) mask=GB_A; }
+        JoypadSet(joypad, mem, mask);
+
+        ppu.frame_ready=false;
+        uint64_t instr_before=g_instr;
+        g_hist_on = (fr==frames-1);
+
+        int32_t remaining=70224;            // ~one frame of GB T-cycles
+        while (remaining>0 && !ppu.frame_ready) { int32_t c=remaining<456?remaining:456; RunCycles(c,true); remaining-=c; }
+        int32_t safety=70224;
+        while (!ppu.frame_ready && safety>0) { RunCycles(456,false); safety-=456; }
+
+        // Audio energy this frame.
+        int32_t got=ApuDrain(apu,buf,16384); total_samples+=got;
+        int32_t peak=0; int64_t energy=0;
+        for(int i=0;i<got*2;i++){ int v=buf[i]; if(v<0)v=-v; if(v>peak)peak=v; energy+=v; }
+        if(peak>global_peak) global_peak=peak;
+        if(peak>0) frames_with_audio++;
+
+        uint64_t watch_this=g_watch_hits-watch_prev; watch_prev=g_watch_hits;
+
+        if (mem.double_speed && ds_frame<0) ds_frame=fr;
+        if (cs.stopped && stop_frame<0) stop_frame=fr;
+        for(int i=0;i<4;i++) if(apu.dbg_trigger_count[i]>0 && first_ch[i]<0) first_ch[i]=fr;
+        if(apu.ch1.freq && first_freq[0]<0) first_freq[0]=fr;
+        if(apu.ch2.freq && first_freq[1]<0) first_freq[1]=fr;
+
+        bool notable = (peak>40) || (watch_this>0);
+        if (fr<6 || fr%120==0 || fr==frames-1 || notable)
+            printf("[f%5d] pc=%04X instr=%llu DS=%d stop=%d halt=%d ime=%d watch=%llu | "
+                   "M=%d audPeak=%d audAvg=%lld | CH1(en%d f%03X v%2d) CH2(en%d f%03X v%2d) "
+                   "CH3(en%d) CH4(en%d) tg=%u/%u/%u/%u\n",
+                fr, cs.r.pc, (unsigned long long)(g_instr-instr_before),
+                mem.double_speed, cs.stopped, cs.halted, cs.ime, (unsigned long long)watch_this,
+                apu.master_enabled, peak, (long long)(got?energy/(got*2):0),
+                apu.ch1.enabled,apu.ch1.freq,apu.ch1.env_volume,
+                apu.ch2.enabled,apu.ch2.freq,apu.ch2.env_volume,
+                apu.ch3.enabled,apu.ch4.enabled,
+                apu.dbg_trigger_count[0],apu.dbg_trigger_count[1],apu.dbg_trigger_count[2],apu.dbg_trigger_count[3]);
+    }
+
+    printf("\n=== SUMMARY ===\n");
+    printf("double_speed: %s (frame %d)   STOP: %s (frame %d)\n",
+        ds_frame>=0?"YES":"no", ds_frame, stop_frame>=0?"YES":"no", stop_frame);
+    printf("first trigger: CH1 f%d  CH2 f%d  CH3 f%d  CH4 f%d\n",
+        first_ch[0],first_ch[1],first_ch[2],first_ch[3]);
+    printf("first non-zero freq: CH1 f%d  CH2 f%d\n", first_freq[0], first_freq[1]);
+    printf("final trig counts: CH1=%u CH2=%u CH3=%u CH4=%u  waveWrites=%u nr50w=%u nr51w=%u\n",
+        apu.dbg_trigger_count[0],apu.dbg_trigger_count[1],apu.dbg_trigger_count[2],apu.dbg_trigger_count[3],
+        apu.dbg_wave_ram_writes, apu.dbg_nr50_writes, apu.dbg_nr51_writes);
+    printf("AUDIO: totalSamples=%lld globalPeak=%d framesWithAudio=%d/%d  watchHits=%llu\n",
+        (long long)total_samples, global_peak, frames_with_audio, frames, (unsigned long long)g_watch_hits);
+
+    printf("\nHottest PCs on final frame (distinct=%zu) — busy-loop / hang detector:\n", g_pc_hist.size());
+    std::vector<std::pair<uint64_t,uint16_t>> v;
+    for (auto &kv : g_pc_hist) v.push_back({kv.second, kv.first});
+    std::sort(v.rbegin(), v.rend());
+    for (size_t i=0;i<v.size() && i<12;i++) printf("  PC %04X : %llu\n", v[i].second, (unsigned long long)v[i].first);
+    return 0;
+}

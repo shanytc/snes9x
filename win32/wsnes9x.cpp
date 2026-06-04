@@ -2035,6 +2035,7 @@ LRESULT CALLBACK WinProc(
 		bool snesActive = !Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
 		GbSetSubmenuEnabled(hPopup, ID_DEBUG_VRAM_VIEWER,    romLoaded && snesActive); // S-PPU
 		GbSetSubmenuEnabled(hPopup, ID_DEBUG_GB_TILE_VIEWER, romLoaded && gbActive);   // GB-PPU
+		GbSetSubmenuEnabled(hPopup, ID_EMULATION_DEBUGGER_SNES, romLoaded);            // Debugger
 		return DefWindowProc(hWnd, uMsg, wParam, lParam);
 	}
 	case WM_DEVICECHANGE:

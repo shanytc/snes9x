@@ -256,16 +256,25 @@ bit-permutation** (`A0↔A6`, `A1↔A4`) across `$0104-$01FF`, so
 header lies (claims MBC1).
 
 **Key insight (the whole mechanism):** the bit-permutation exists **only** to
-make the boot ROM's Nintendo-logo check pass. **The game's own code is stored
-and runs unscrambled.** So the header xform (`SachenLockedHeaderXform`,
-`sachen_locked`) must be live **exactly while the boot ROM is mapped**:
+make the boot ROM's Nintendo-logo check pass. What the cart does *after* boot
+splits into two kinds, which is why the lock (`SachenLockedHeaderXform` /
+`sachen_locked`) is **per-cart**, decided at load by `Cart::sachen_runs_raw`
+(true ⇔ the scrambled entry decodes to a `JP` below `$4000`, i.e. into the
+header region itself — no real loader there):
 
-- Set while the boot ROM is mapped; **cleared when the boot writes `$FF50`**
-  (`gb_memory.cpp`). In BIOS-less mode it starts clear (`sgb.cpp` reset:
-  `sachen_locked = boot_rom_enabled`).
-- After hand-off the CPU sees raw ROM, so the cart's real entry at `$0100`
-  executes unscrambled — matching real hardware and Mesen (which reports no
-  special mapper and runs these carts raw).
+- **runs-raw carts** (e.g. 4B-005, scrambled entry `JP $0150` = a per-game logo
+  checksum, not a loader). The game is actually stored *unscrambled*. The lock
+  is **dropped at the `$FF50` boot hand-off** (`gb_memory.cpp`) and starts clear
+  in BIOS-less mode (`sgb.cpp`: `sachen_locked = boot_rom_enabled || !runs_raw`),
+  so `$0100` executes raw — matching Mesen (which runs these raw, no mapper).
+- **scrambled-entry carts** (4B-007 `JP $6F60`, 4B-008 `JP $6200`). The xform
+  **stays on** so the entry decodes to its real high-bank loader; the cart then
+  runs from raw high banks and clears the lock via `sachen_unlock_ctr` /
+  `MbcNotifyHighWrite` (the `$31`-write counter — *not* vestigial for these).
+
+Getting this wrong hangs one kind or the other: keeping the xform always-on
+hangs 4B-005 in its `$0158` checksum loop; dropping it always-off sends 4B-008's
+raw `JP $00CE` into `$FF`-filled memory → the `RST $38` loop.
 
 Banking registers (latch only while inner-bank `D5:D4 == 0b11`, per Tauwasser):
 
@@ -278,15 +287,8 @@ Banking registers (latch only while inner-bank `D5:D4 == 0b11`, per Tauwasser):
 Effective bank = `outer & mask` (`$0000-$3FFF`) or `(outer & mask) | (inner &
 ~mask)` (`$4000-$7FFF`).
 
-`sachen_unlock_ctr` / `MbcNotifyHighWrite` (an old `$31`-write unlock counter)
-are **vestigial** now that the lock tracks the boot ROM — kept only for
-savestate ABI stability.
-
-**Fixes:** *4 in 1 (4B-007, Sachen)* and *4 in 1 (4B-005, Sachen-Commin)*. 4B-005
-previously hung in the Nintendo logo because its xformed entry decoded to a
-stray `JP $0150` into a per-game logo checksum that VBlank-waits at `$0158` and
-loops forever; 4B-007 only limped through because its xformed entry happened to
-land on a `JP` into raw high-bank code.
+**Fixes:** *4 in 1* **4B-005** (Sachen-Commin), **4B-007**, **4B-008** — all
+boot to their game-select menus.
 
 ---
 

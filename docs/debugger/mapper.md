@@ -259,18 +259,20 @@ header lies (claims MBC1).
 make the boot ROM's Nintendo-logo check pass. What the cart does *after* boot
 splits into two kinds, which is why the lock (`SachenLockedHeaderXform` /
 `sachen_locked`) is **per-cart**, decided at load by `Cart::sachen_runs_raw`
-(true ⇔ the scrambled entry decodes to a `JP` below `$4000`, i.e. into the
-header region itself — no real loader there):
+(true ⇔ the scrambled entry decodes to a `JP` back into the scrambled header
+region itself, `< $0200` — no real loader there):
 
 - **runs-raw carts** (e.g. 4B-005, scrambled entry `JP $0150` = a per-game logo
   checksum, not a loader). The game is actually stored *unscrambled*. The lock
   is **dropped at the `$FF50` boot hand-off** (`gb_memory.cpp`) and starts clear
   in BIOS-less mode (`sgb.cpp`: `sachen_locked = boot_rom_enabled || !runs_raw`),
   so `$0100` executes raw — matching Mesen (which runs these raw, no mapper).
-- **scrambled-entry carts** (4B-007 `JP $6F60`, 4B-008 `JP $6200`). The xform
-  **stays on** so the entry decodes to its real high-bank loader; the cart then
-  runs from raw high banks and clears the lock via `sachen_unlock_ctr` /
+- **scrambled-entry carts** (4B-007 `JP $6F60`, 4B-008 `JP $6200`, 4B-009 `JP
+  $0200`). The xform **stays on** so the entry decodes to its real loader; the
+  cart then runs from raw ROM and clears the lock via `sachen_unlock_ctr` /
   `MbcNotifyHighWrite` (the `$31`-write counter — *not* vestigial for these).
+  4B-009 is why the boundary is `$0200`, not a bank line: its loader sits at
+  `$0200`, just past the header, still inside bank 0.
 
 Getting this wrong hangs one kind or the other: keeping the xform always-on
 hangs 4B-005 in its `$0158` checksum loop; dropping it always-off sends 4B-008's
@@ -287,8 +289,8 @@ Banking registers (latch only while inner-bank `D5:D4 == 0b11`, per Tauwasser):
 Effective bank = `outer & mask` (`$0000-$3FFF`) or `(outer & mask) | (inner &
 ~mask)` (`$4000-$7FFF`).
 
-**Fixes:** *4 in 1* **4B-005** (Sachen-Commin), **4B-007**, **4B-008** — all
-boot to their game-select menus.
+**Fixes:** *4 in 1* **4B-005** (Sachen-Commin), **4B-007**, **4B-008**, **4B-009**
+— all boot to their game-select menus.
 
 ---
 

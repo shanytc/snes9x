@@ -130,6 +130,20 @@ When the hook routes through `CDebugger::OnGbPreInstruction → HaltGbNow → S9
 - Authentic BIOS mode (`boot_rom_loaded` true): GB Resets with `PC = $0000` and `boot_rom_enabled = true`. The Nintendo boot routine runs and unmaps itself.
 - BIOS-less mode (`boot_rom_loaded` false): GB Resets with `PC = $0100`, `boot_rom_enabled = false`, post-boot register values pre-loaded from `Cpu::Reset()`.
 
+## PPU window / background rendering quirks
+
+`sgb/gb_ppu.cpp` renders one pixel per dot (`RenderPixel` for DMG, `RenderPixelCgb` for CGB), re-sampling registers each pixel. Two non-obvious DMG window behaviors live here; both were needed to render *Star Trek - 25th Anniversary*'s credit "TV monitor" correctly (frame = window for the top bezel + bottom console, background for the sides + scrolling text, switched by a STAT/LYC handler toggling LCDC.5 mid-frame).
+
+### Window engages at the WX trigger column, latched for the line
+The window is **not** a running `x >= WX-7` test. It engages **once**, at the pixel where `x == latched_wx - 7` (clamped ≥0), with LCDC.5 sampled *at that pixel*, and stays latched for the rest of the line. Real hardware uses an `x == WX` comparator: if LCDC.5 is clear when X passes the trigger column, a *later* mid-mode-3 LCDC.5 enable can no longer start the window that line. Without this, a STAT handler that re-enables the window late tears the scanline from the write pixel on (Star Trek re-enables at ~pixel 48 of line 103 → bottom-edge streak). WX itself is latched at the mode 2→3 boundary (`latched_wx`) so mid-line WX writes don't tear — see the One Piece dialog-overlay note in the file header.
+
+### DMG window-to-background 1px pixel-shift glitch
+A real DMG-only hardware bug (Windesync-validate test ROM; Mesen models it in `GbPpu.cpp` and its comment names Star Trek). **Once the window has been active earlier in the frame**, every later line on which the window is **disabled** gets one blank pixel (BG color 0) inserted into the BG FIFO at the window-X hit column `WX-7`, shifting the rest of that line's background right by one — but **only when `(WX & 7) == 7 - (SCX & 7)`**. Star Trek hits it exactly (WX=7, SCX=0 → `7 == 7`): the background sides shift right 1px to line up with the window frame's top/bottom. Without it the inner screen is 1px left of the frame.
+
+Our implementation (`RenderPixel`, DMG path only): gated on `p.window_line > 1` (== Mesen `_windowCounter > 0`, i.e. the window drew ≥2 lines), `(p.lcdc & 0x20) == 0`, the `(WX&7)==7-(SCX&7)` test, and an on-screen hit. At `x == hit` emit a blank; for `x > hit` sample `SampleBgPixel(p, x-1)`.
+
+**Verifying window/BG changes:** the canonical test is **dmg-acid2** — render it headless and diff against the repo reference image; it must stay pixel-exact. Note acid2 exercises the window at **WX=95**, *not* WX=7, so it does **not** catch a WX=7-specific error — when an emulator differs there, compare the actual game frame against a reference emulator and read that emulator's source for the named quirk. The `docs/debugger/gb-headless-harness/` driver dumps framebuffers + per-LY latched registers + LCDC/scroll write timing for exactly this kind of bisection.
+
 ## Common GB-debugger gotchas
 
 - **PeekRAByte must match MemRead.** Any new MemRead branch (overlay, MBC quirk, CGB WRAM banking, etc.) must be mirrored in PeekRAByte or the disasm will lie.

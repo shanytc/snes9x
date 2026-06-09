@@ -40,6 +40,7 @@ g++ -O2 -std=c++17 -Isgb \
 
 ```
 gb_harness <rom.gb|.gbc> [frames=1500] [mode=cgb|sgb2|sgb|dmg] [input|noinput] [watchLoHex watchHiHex]
+           [press=F:BTN,...] [fb=F:path.ppm,...]
 ```
 
 | arg     | meaning |
@@ -49,6 +50,8 @@ gb_harness <rom.gb|.gbc> [frames=1500] [mode=cgb|sgb2|sgb|dmg] [input|noinput] [
 | `mode`  | boot register state the cart sees: `cgb` (A=$11, GBC), `sgb2` (A=$FF), `sgb` (A=$01, 4.295 MHz clock), `dmg`. Running the same ROM in two modes isolates mode-specific divergence. |
 | `input` | pulse START then A every 120 frames (to walk past logos / "press start"); `noinput` (default) leaves the pad idle — use this to observe automatic title behaviour |
 | `watch` | optional PC range; the harness counts instructions executed inside it per frame (e.g. `38F2 3925` to watch a sound routine) |
+| `press` | scripted input, overrides `input`/`noinput`: `press=1260:A,1500:START,2700:D+A` holds each combo for 8 frames starting at frame F. Buttons: `A B START SELECT U D L R`. Use it to navigate menus deterministically (e.g. reach a game mode that triggers a bug) |
+| `fb`    | screenshot dumps: `fb=3000:/tmp/f3000.ppm,4100:/tmp/f4100.ppm` writes the screen as PPM (CGB color or DMG grayscale) after frame F runs — see which screen/menu the game is on |
 
 ## What the output tells you
 

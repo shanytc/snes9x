@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 #include <map>
 #include <algorithm>
@@ -69,6 +70,84 @@ static void Trace(uint16_t pc, uint8_t /*op*/, const CpuState &)
     ++g_instr;
     if (g_hist_on) g_pc_hist[pc]++;
     if (pc >= g_watch_lo && pc <= g_watch_hi) ++g_watch_hits;
+}
+
+// --- Scripted input + framebuffer dumps --------------------------------------
+// press=10:START,300:D,360:A   hold each button combo (B+A ok) for 8 frames
+// fb=300:/tmp/f300.ppm         dump the screen as PPM after that frame runs
+struct Press { int frame; uint8_t mask; };
+static std::vector<Press> g_press;
+static std::vector<std::pair<int,std::string>> g_fbdump;
+
+static uint8_t BtnMask(const std::string &n)
+{
+    if (n=="A") return GB_A;         if (n=="B") return GB_B;
+    if (n=="START") return GB_START; if (n=="SELECT") return GB_SELECT;
+    if (n=="U") return GB_UP;        if (n=="D") return GB_DOWN;
+    if (n=="L") return GB_LEFT;      if (n=="R") return GB_RIGHT;
+    fprintf(stderr, "unknown button '%s'\n", n.c_str());
+    exit(2);
+}
+
+static void ParsePress(const char *s)
+{
+    for (const char *p = s; *p; )
+    {
+        int fr = atoi(p);
+        const char *colon = strchr(p, ':');
+        if (!colon) break;
+        const char *end = strchr(colon, ',');
+        std::string btns(colon + 1, end ? end - colon - 1 : strlen(colon + 1));
+        uint8_t mask = 0;
+        size_t pos = 0;
+        while (pos != std::string::npos)
+        {
+            size_t plus = btns.find('+', pos);
+            mask |= BtnMask(btns.substr(pos, plus == std::string::npos ? plus : plus - pos));
+            pos = plus == std::string::npos ? plus : plus + 1;
+        }
+        g_press.push_back({fr, mask});
+        p = end ? end + 1 : "";
+    }
+}
+
+static void ParseFbDump(const char *s)
+{
+    for (const char *p = s; *p; )
+    {
+        int fr = atoi(p);
+        const char *colon = strchr(p, ':');
+        if (!colon) break;
+        const char *end = strchr(colon, ',');
+        g_fbdump.push_back({fr, std::string(colon + 1, end ? end - colon - 1 : strlen(colon + 1))});
+        p = end ? end + 1 : "";
+    }
+}
+
+static void DumpFb(const char *path, bool cgb)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path); return; }
+    fprintf(f, "P6\n%d %d\n255\n", GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
+    for (int i = 0; i < GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT; ++i)
+    {
+        uint8_t rgb[3];
+        if (cgb)
+        {
+            const uint16_t v = ppu.color_fb[i];
+            rgb[0] = (uint8_t)(((v      ) & 31) << 3);
+            rgb[1] = (uint8_t)(((v >>  5) & 31) << 3);
+            rgb[2] = (uint8_t)(((v >> 10) & 31) << 3);
+        }
+        else
+        {
+            const uint8_t shade = (uint8_t)((3 - (ppu.framebuffer[i] & 3)) * 85);
+            rgb[0] = rgb[1] = rgb[2] = shade;
+        }
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+    printf("FB dumped -> %s\n", path);
 }
 
 // --- APU register shadow, for change detection ------------------------------
@@ -153,7 +232,10 @@ static void Usage(const char *argv0)
         "  mode     boot register state: cgb (A=11), sgb2 (A=FF), sgb (A=01), dmg\n"
         "  input    pulse START then A every 120 frames (advances menus);\n"
         "           noinput leaves the pad idle (default)\n"
-        "  watch    optional PC range to count hits in (e.g. 38F2 3925)\n", argv0);
+        "  watch    optional PC range to count hits in (e.g. 38F2 3925)\n"
+        "  press=F:BTN[+BTN],...   scripted input: hold combo 8 frames at frame F\n"
+        "           (A B START SELECT U D L R); overrides input/noinput\n"
+        "  fb=F:path.ppm,...       dump screen as PPM after frame F\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -164,6 +246,11 @@ int main(int argc, char **argv)
     const char *mode     = argc>3 ? argv[3] : "cgb";
     bool        noinput  = !(argc>4 && !strcmp(argv[4],"input"));
     if (argc>6) { g_watch_lo=(uint16_t)strtol(argv[5],0,16); g_watch_hi=(uint16_t)strtol(argv[6],0,16); }
+    for (int i = 2; i < argc; ++i)
+    {
+        if (!strncmp(argv[i], "press=", 6)) ParsePress(argv[i] + 6);
+        if (!strncmp(argv[i], "fb=",    3)) ParseFbDump(argv[i] + 3);
+    }
 
     FILE *f = fopen(rom_path,"rb");
     if (!f) { fprintf(stderr,"cannot open %s\n", rom_path); return 1; }
@@ -207,7 +294,12 @@ int main(int argc, char **argv)
     for (int fr=0; fr<frames; ++fr)
     {
         uint8_t mask = 0;
-        if (!noinput) { int p=fr%120; if(p>=10&&p<16) mask=GB_START; else if(p>=40&&p<46) mask=GB_A; }
+        if (!g_press.empty())
+        {
+            for (const Press &pr : g_press)
+                if (fr >= pr.frame && fr < pr.frame + 8) mask |= pr.mask;
+        }
+        else if (!noinput) { int p=fr%120; if(p>=10&&p<16) mask=GB_START; else if(p>=40&&p<46) mask=GB_A; }
         JoypadSet(joypad, mem, mask);
 
         ppu.frame_ready=false;
@@ -218,6 +310,9 @@ int main(int argc, char **argv)
         while (remaining>0 && !ppu.frame_ready) { int32_t c=remaining<456?remaining:456; RunCycles(c,true); remaining-=c; }
         int32_t safety=70224;
         while (!ppu.frame_ready && safety>0) { RunCycles(456,false); safety-=456; }
+
+        for (const auto &d : g_fbdump)
+            if (d.first == fr) DumpFb(d.second.c_str(), ppu.cgb);
 
         // Audio energy this frame.
         int32_t got=ApuDrain(apu,buf,16384); total_samples+=got;

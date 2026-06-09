@@ -52,9 +52,11 @@ static Apu    apu;   static Timer  timer; static Joypad joypad;
 static void RunCycles(int32_t tcycles)
 {
     const int64_t target_t = ppu.t_cycles + tcycles;
-    int64_t ds_extra = cpu.State().t_cycles - ppu.t_cycles;
-    if (ds_extra < 0) ds_extra = 0;
-    int32_t apu_rem = 0;
+    // Persistent across calls (mirrors Emulator::Impl::ds_extra/apu_ds_rem) —
+    // re-deriving per call forgives CPU lag at every slice boundary, bleeding
+    // ~2% CPU throughput in double-speed (Demotronic raster desync).
+    static int64_t ds_extra = 0;
+    static int32_t apu_rem  = 0;
     while (ppu.t_cycles < target_t)
     {
         PpuStep(ppu, mem, 1);

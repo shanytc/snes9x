@@ -98,7 +98,7 @@ int main(int argc, char **argv)
     const uint8_t cgb_flag = cart.header.cgb_flag;
     const bool    cgb      = (cgb_flag == 0x80 || cgb_flag == 0xC0);
 
-    cpu.Reset(); MemReset(mem); PpuReset(ppu); ApuReset(apu);
+    cpu.Reset(); MemReset(mem, cgb); PpuReset(ppu); ApuReset(apu);
     TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
     mem.ppu = &ppu; mem.apu = &apu; mem.timer = &timer; mem.joypad = &joypad; mem.cart = &cart;
     CpuState &cs = cpu.State();

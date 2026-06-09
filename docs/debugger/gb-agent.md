@@ -144,6 +144,19 @@ Our implementation (`RenderPixel`, DMG path only): gated on `p.window_line > 1` 
 
 **Verifying window/BG changes:** the canonical test is **dmg-acid2** — render it headless and diff against the repo reference image; it must stay pixel-exact. Note acid2 exercises the window at **WX=95**, *not* WX=7, so it does **not** catch a WX=7-specific error — when an emulator differs there, compare the actual game frame against a reference emulator and read that emulator's source for the named quirk. The `docs/debugger/gb-headless-harness/` driver dumps framebuffers + per-LY latched registers + LCDC/scroll write timing for exactly this kind of bisection.
 
+## STAT IRQ model and per-scanline raster effects
+
+`RecomputeStatLine` (`sgb/gb_ppu.cpp`) treats STAT as real hardware does: the four sources (LYC match / mode 2 OAM / mode 1 VBlank / mode 0 HBlank, each gated by its enable bit in `$FF41`) are **ORed into one line**, and we raise `IRQ_LCDSTAT` only on its **0→1 edge** (`p.stat_line_high`). One consequence is **STAT blocking**: if one enabled source already holds the line high, a second source becoming true produces *no* new edge and *no* IRQ. This is hardware-accurate and intended.
+
+### The LY==LYC comparator re-latch (`lyc_relatch` / `RelatchLyc`)
+There is one hardware subtlety the naive edge model gets wrong. At the very start of every scanline real hardware momentarily forces the LY-for-compare value to `-1` (Pan Docs; Mesen `GbPpu::ProcessVisibleScanline` sets `_state.LyForCompare = -1` at cycle 2, restores it at cycle 4) **before** comparing against the new LY. That brief de-assert lets an `LY==LYC` match generate a **fresh rising edge each scanline even when another source (HBlank/OAM) is holding the STAT line high** — so a **chained-LYC raster effect keeps firing while the HBlank STAT IRQ is also enabled**.
+
+We model it with `RelatchLyc()`, called right after LY advances at each scanline boundary (HBlank→OamScan, the LY153→0 quirk, the VBlank LY++): one `RecomputeStatLine` with `p.lyc_relatch = true` (LYC suppressed → line drops if LYC was the only holder), then the per-dot end-of-step `RecomputeStatLine` re-asserts it → a clean LYC edge. `lyc_relatch` is **transient** — set only for that one suppressed call, never observed between dots, not serialized.
+
+**Why it matters — Ken Griffey Jr.'s Slugfest (CGB, double-speed).** The field is a chained-LYC per-scanline **background-palette gradient** (handler writes a band's palette via `$FF69`, re-points `$FF45`/LYC to the next band). On alternate frames the game also enables the HBlank STAT IRQ; without the re-latch the LYC edge was blocked, the chain stalled, the palette went flat, and the **field flickered clean↔garbled every other frame** (sprites unaffected). With the re-latch it renders correctly. Fix shipped to master as branch `gb_lyc_relatch` / PR #129; headless signature sweep = 0/105 ROMs changed.
+
+**Diagnosing this class of bug:** the tell is the **STAT-edge-by-source** breakdown — a clean frame shows the expected `LYC=N` count, a broken one shows `LYC=0` with the line instead pinned high by HBlank. The `docs/debugger/gb-headless-harness/` driver can be extended to bucket STAT edges by source and count per-scanline palette (`bg_pal`) / VRAM distinct states, which is how this was localized. **Do not** confuse this with the LCD-off LYC latch (Mr. Do!, commit `5282b031`) or the DMG `$FF41`-write spurious-IRQ quirk (gated `!p.cgb`); the re-latch only runs while the LCD is on (inside `ExecPpuDot`).
+
 ## Common GB-debugger gotchas
 
 - **PeekRAByte must match MemRead.** Any new MemRead branch (overlay, MBC quirk, CGB WRAM banking, etc.) must be mirrored in PeekRAByte or the disasm will lie.

@@ -876,7 +876,11 @@ void ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb)
 	{
 		if (a.ch3.enabled)
 		{
-			if (cgb) a.ch3.ram[a.ch3.pos >> 1] = value;
+			if (cgb)
+			{
+				a.ch3.ram[a.ch3.pos >> 1] = value;
+				++a.dbg_wave_ram_writes;
+			}
 			return;
 		}
 		a.ch3.ram[addr - 0xFF30] = value;

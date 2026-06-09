@@ -85,6 +85,10 @@ void MemHdmaHBlank(Memory &m);
 // counts as entering HBlank, so one pending block fires (SameBoy GB_lcd_off).
 void MemHdmaLcdOff(Memory &m);
 
+// Side-effect-free IO read for the debugger ($FF00-$FF7F): same dispatch the
+// CPU's read path uses — every branch of it is a pure register composition.
+uint8_t MemPeekIO(Memory &m, uint16_t addr);
+
 // Callback fires each time the CPU initiates a serial transfer (write
 // 0x80/0x81 to 0xFF02). The byte passed is whatever was in 0xFF01 at
 // the moment. Used by the test harness to capture Blargg output; P6a

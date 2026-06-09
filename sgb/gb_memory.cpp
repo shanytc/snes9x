@@ -297,6 +297,11 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 	return 0xFF;
 }
 
+uint8_t MemPeekIO(Memory &m, uint16_t addr)
+{
+	return ReadIO(m, addr);
+}
+
 static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 {
 	switch (addr)

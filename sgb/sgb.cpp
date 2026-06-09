@@ -952,23 +952,13 @@ bool Emulator::GetLayerEnabled(int layer) const
 }
 
 // Side-effect-free read of the GB I/O register block (0xFF00-0xFF7F) for
-// the debugger's memory peek. Mirrors gb_memory.cpp ReadIO but never
-// touches bus-contention or latch state, so the disassembler/memory viewer
-// can surface LCDC/STAT/LY/IF/joypad/timer/APU without perturbing the run.
+// the debugger's memory peek. Delegates to the CPU's own ReadIO dispatch
+// (every branch of which is a pure register composition), so the debugger
+// always shows exactly what a CPU read would return — including the CGB
+// set (KEY1/VBK/HDMA5/BCPS/OCPS/SVBK) the old mirror here didn't cover.
 static uint8_t PeekIO(Emulator::Impl &impl, uint16_t a)
 {
-	switch (a)
-	{
-		case 0xFF00: return JoypadRead(impl.joypad);
-		case 0xFF01: return impl.mem.serial_data;
-		case 0xFF02: return static_cast<uint8_t>((impl.mem.serial_control & 0x81) | 0x7E);
-		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
-			return TimerRead(impl.timer, a);
-		case 0xFF0F: return static_cast<uint8_t>(impl.mem.if_ | 0xE0);
-	}
-	if (a >= 0xFF10 && a <= 0xFF3F) return ApuRead(impl.apu, a);
-	if (a >= 0xFF40 && a <= 0xFF4B) return PpuReadReg(impl.ppu, a);
-	return 0xFF;   // open bus — matches ReadIO's default
+	return MemPeekIO(impl.mem, a);
 }
 
 uint8_t Emulator::PeekRAByte(uint32_t addr) const

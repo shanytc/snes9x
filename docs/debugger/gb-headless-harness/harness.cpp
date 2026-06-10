@@ -78,6 +78,7 @@ static void Trace(uint16_t pc, uint8_t /*op*/, const CpuState &)
 struct Press { int frame; uint8_t mask; };
 static std::vector<Press> g_press;
 static std::vector<std::pair<int,std::string>> g_fbdump;
+static std::vector<std::pair<int,std::string>> g_fbldump;
 static std::string g_wav_path;                 // wav=/tmp/out.wav
 static std::vector<int16_t> g_wav;             // accumulated stereo samples
 static uint8_t g_mute51_keep = 0xFF;           // mute=124 -> clear those CHx bits in NR51
@@ -122,7 +123,7 @@ static void ParsePress(const char *s)
     }
 }
 
-static void ParseFbDump(const char *s)
+static void ParseFbDump(const char *s, std::vector<std::pair<int,std::string>> &out)
 {
     for (const char *p = s; *p; )
     {
@@ -130,7 +131,7 @@ static void ParseFbDump(const char *s)
         const char *colon = strchr(p, ':');
         if (!colon) break;
         const char *end = strchr(colon, ',');
-        g_fbdump.push_back({fr, std::string(colon + 1, end ? end - colon - 1 : strlen(colon + 1))});
+        out.push_back({fr, std::string(colon + 1, end ? end - colon - 1 : strlen(colon + 1))});
         p = end ? end + 1 : "";
     }
 }
@@ -150,6 +151,17 @@ static void WriteWav(const char *path, const std::vector<int16_t> &pcm, uint32_t
     fwrite(pcm.data(),1,data_bytes,f);
     fclose(f);
     printf("WAV dumped -> %s (%u samples)\n", path, (unsigned)(pcm.size()/2));
+}
+
+static void DumpLayer(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path); return; }
+    fprintf(f, "P5\n%d %d\n255\n", GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
+    for (int i = 0; i < GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT; ++i)
+        fputc(ppu.layer[i] * 100, f);
+    fclose(f);
+    printf("Layer dumped -> %s\n", path);
 }
 
 static void DumpFb(const char *path, bool cgb)
@@ -294,6 +306,7 @@ static void Usage(const char *argv0)
         "  press=F:BTN[+BTN],...   scripted input: hold combo 8 frames at frame F\n"
         "           (A B START SELECT U D L R); overrides input/noinput\n"
         "  fb=F:path.ppm,...       dump screen as PPM after frame F\n"
+        "  fbl=F:path.pgm,...      dump per-pixel layer map (0=BG 100=WIN 200=OBJ) after frame F\n"
         "  wav=path.wav            dump mixed audio (48kHz stereo S16) to a WAV\n"
         "  mute=NN..               silence channels 1-4 in NR51 (e.g. mute=124 solos CH3)\n"
         "  trig3=LO:HI             print CH3 state + wave RAM at each trigger in frames [LO,HI)\n"
@@ -313,7 +326,8 @@ int main(int argc, char **argv)
     for (int i = 2; i < argc; ++i)
     {
         if (!strncmp(argv[i], "press=", 6)) ParsePress(argv[i] + 6);
-        if (!strncmp(argv[i], "fb=",    3)) ParseFbDump(argv[i] + 3);
+        if (!strncmp(argv[i], "fb=",    3)) ParseFbDump(argv[i] + 3, g_fbdump);
+        if (!strncmp(argv[i], "fbl=",   4)) ParseFbDump(argv[i] + 4, g_fbldump);
         if (!strncmp(argv[i], "wav=",   4)) g_wav_path = argv[i] + 4;
         if (!strncmp(argv[i], "trig3=", 6)) sscanf(argv[i] + 6, "%d:%d", &g_trig3_lo, &g_trig3_hi);
         if (!strncmp(argv[i], "hostpace=", 9)) g_hostpace = atof(argv[i] + 9);
@@ -390,6 +404,8 @@ int main(int argc, char **argv)
 
         for (const auto &d : g_fbdump)
             if (d.first == fr) DumpFb(d.second.c_str(), ppu.cgb);
+        for (const auto &d : g_fbldump)
+            if (d.first == fr) DumpLayer(d.second.c_str());
 
         // Audio energy this frame.
         {

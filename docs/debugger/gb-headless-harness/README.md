@@ -40,7 +40,8 @@ g++ -O2 -std=c++17 -Isgb \
 
 ```
 gb_harness <rom.gb|.gbc> [frames=1500] [mode=cgb|sgb2|sgb|dmg] [input|noinput] [watchLoHex watchHiHex]
-           [press=F:BTN,...] [fb=F:path.ppm,...]
+           [press=F:BTN,...] [fb=F:path.ppm,...] [wav=path.wav] [mute=NN..]
+           [trig3=LO:HI] [hostpace=FPS] [drc]
 ```
 
 | arg     | meaning |
@@ -52,6 +53,11 @@ gb_harness <rom.gb|.gbc> [frames=1500] [mode=cgb|sgb2|sgb|dmg] [input|noinput] [
 | `watch` | optional PC range; the harness counts instructions executed inside it per frame (e.g. `38F2 3925` to watch a sound routine) |
 | `press` | scripted input, overrides `input`/`noinput`: `press=1260:A,1500:START,2700:D+A` holds each combo for 8 frames starting at frame F. Buttons: `A B START SELECT U D L R`. Use it to navigate menus deterministically (e.g. reach a game mode that triggers a bug) |
 | `fb`    | screenshot dumps: `fb=3000:/tmp/f3000.ppm,4100:/tmp/f4100.ppm` writes the screen as PPM (CGB color or DMG grayscale) after frame F runs — see which screen/menu the game is on |
+| `wav`   | dump the mixed APU output (48 kHz stereo S16) to a WAV for offline spectral / waveform analysis, or to diff against a reference emulator's capture (SameBoy builds headless with a ~70-line driver) |
+| `mute`  | mask channels out of NR51 each CPU step: `mute=124` solos CH3, `mute=3` mutes CH3. Re-applied continuously, so the game's own NR51 writes can't unmute. Pair with `wav=` to isolate which channel carries an artifact |
+| `trig3` | print CH3 trigger forensics for frames `[LO,HI)`: trigger count, PC, freq, pre-trigger playback position, sample latch, and the full 16-byte wave RAM. This is the tool for wave-RAM streamers (3D Pocket Pool rewrites all 16 bytes ~7×/frame and retriggers at pos 16) |
+| `hostpace` | instead of draining the ring fully each frame, drain `48000/FPS` samples — replicates how the Win32 host consumes audio when its frame pacing differs from the GB's 59.7275 Hz. Overproduction pins the ring (PushSample drops), shortfall starves the device. `SUMMARY` reports `ringFullFrames` |
+| `drc`   | enable the mirror of `sgb.cpp`'s audio dynamic-rate control (PI loop steering `ApuSetClockHz` to hold the ring at 1/8 fill). With `hostpace=60.0988` the corr converges to ≈ +0.0065 and `ringFullFrames` stays 0 |
 
 ## What the output tells you
 

@@ -78,6 +78,17 @@ static void Trace(uint16_t pc, uint8_t /*op*/, const CpuState &)
 struct Press { int frame; uint8_t mask; };
 static std::vector<Press> g_press;
 static std::vector<std::pair<int,std::string>> g_fbdump;
+static std::string g_wav_path;                 // wav=/tmp/out.wav
+static std::vector<int16_t> g_wav;             // accumulated stereo samples
+static uint8_t g_mute51_keep = 0xFF;           // mute=124 -> clear those CHx bits in NR51
+static int g_trig3_lo = -1, g_trig3_hi = -1;   // trig3=LO:HI -> dump CH3 trigger state
+static int g_cur_frame = 0;
+static double g_hostpace = 0.0;                // hostpace=60.0988 -> drain like the
+                                               // win32 host: 48000/HZ frames per GB
+                                               // frame, surplus pins the ring (drops)
+static bool   g_drc = false;                   // drc -> mirror sgb.cpp's rate control
+static double g_drc_integ = 0.0;
+static double g_drc_corr  = 0.0;
 
 static uint8_t BtnMask(const std::string &n)
 {
@@ -122,6 +133,23 @@ static void ParseFbDump(const char *s)
         g_fbdump.push_back({fr, std::string(colon + 1, end ? end - colon - 1 : strlen(colon + 1))});
         p = end ? end + 1 : "";
     }
+}
+
+static void WriteWav(const char *path, const std::vector<int16_t> &pcm, uint32_t rate)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path); return; }
+    const uint32_t data_bytes = (uint32_t)(pcm.size() * sizeof(int16_t));
+    const uint32_t riff = 36 + data_bytes, byte_rate = rate * 4;
+    const uint16_t fmt = 1, ch = 2, align = 4, bits = 16;
+    fwrite("RIFF",1,4,f); fwrite(&riff,4,1,f); fwrite("WAVEfmt ",1,8,f);
+    const uint32_t fmt_size = 16;
+    fwrite(&fmt_size,4,1,f); fwrite(&fmt,2,1,f); fwrite(&ch,2,1,f);
+    fwrite(&rate,4,1,f); fwrite(&byte_rate,4,1,f); fwrite(&align,2,1,f); fwrite(&bits,2,1,f);
+    fwrite("data",1,4,f); fwrite(&data_bytes,4,1,f);
+    fwrite(pcm.data(),1,data_bytes,f);
+    fclose(f);
+    printf("WAV dumped -> %s (%u samples)\n", path, (unsigned)(pcm.size()/2));
 }
 
 static void DumpFb(const char *path, bool cgb)
@@ -198,6 +226,7 @@ static void RunCycles(int32_t tcycles, bool trace_apu)
         {
             uint16_t prePC = cs.r.pc;
             int64_t  pre_t = cs.t_cycles;
+            uint8_t  pre_pos3 = apu.ch3.pos;
             cpu.Step(mem);                           // interrupts serviced inside
             int32_t consumed = (int32_t)(cs.t_cycles - pre_t);
             if (consumed <= 0) consumed = 4;
@@ -205,7 +234,27 @@ static void RunCycles(int32_t tcycles, bool trace_apu)
             TimerStep(timer, mem, consumed);         // CPU clock domain (DIV doubles)
             int32_t apu_in = consumed;               // APU stays real-time
             if (mem.double_speed) { apu_rem += consumed; apu_in = apu_rem >> 1; apu_rem &= 1; }
+            if (g_mute51_keep != 0xFF) apu.nr51 &= g_mute51_keep;
             ApuStep(apu, apu_in);
+
+            static uint32_t last_tg3 = 0;
+            static uint8_t  last_nr30 = 0;
+            if (g_cur_frame >= g_trig3_lo && g_cur_frame < g_trig3_hi)
+            {
+                if (apu.ch3.nr30 != last_nr30)
+                    printf("NR30 %02X->%02X t=%lld pos=%2d ftimer=%d\n",
+                        last_nr30, apu.ch3.nr30, (long long)cs.t_cycles, apu.ch3.pos, apu.ch3.freq_timer);
+                if (apu.dbg_trigger_count[2] != last_tg3)
+                {
+                    printf("TRIG3 #%u f%d t=%lld pc=%04X freq=%03X prepos=%2d buf=%X ram=",
+                        apu.dbg_trigger_count[2], g_cur_frame, (long long)cs.t_cycles, prePC,
+                        apu.ch3.freq, pre_pos3, apu.ch3.sample_buf);
+                    for (int i = 0; i < 16; ++i) printf("%02X", apu.ch3.ram[i]);
+                    printf("\n");
+                }
+            }
+            last_nr30 = apu.ch3.nr30;
+            last_tg3  = apu.dbg_trigger_count[2];
 
             if (trace_apu && g_apu_writes_logged < APU_WRITE_LOG_CAP)
             {
@@ -244,7 +293,13 @@ static void Usage(const char *argv0)
         "  watch    optional PC range to count hits in (e.g. 38F2 3925)\n"
         "  press=F:BTN[+BTN],...   scripted input: hold combo 8 frames at frame F\n"
         "           (A B START SELECT U D L R); overrides input/noinput\n"
-        "  fb=F:path.ppm,...       dump screen as PPM after frame F\n", argv0);
+        "  fb=F:path.ppm,...       dump screen as PPM after frame F\n"
+        "  wav=path.wav            dump mixed audio (48kHz stereo S16) to a WAV\n"
+        "  mute=NN..               silence channels 1-4 in NR51 (e.g. mute=124 solos CH3)\n"
+        "  trig3=LO:HI             print CH3 state + wave RAM at each trigger in frames [LO,HI)\n"
+        "  hostpace=FPS            drain only 48000/FPS samples per frame like the real host\n"
+        "                          (surplus pins the ring and drops, shortfall starves)\n"
+        "  drc                     enable the sgb.cpp dynamic-rate-control mirror\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -259,6 +314,17 @@ int main(int argc, char **argv)
     {
         if (!strncmp(argv[i], "press=", 6)) ParsePress(argv[i] + 6);
         if (!strncmp(argv[i], "fb=",    3)) ParseFbDump(argv[i] + 3);
+        if (!strncmp(argv[i], "wav=",   4)) g_wav_path = argv[i] + 4;
+        if (!strncmp(argv[i], "trig3=", 6)) sscanf(argv[i] + 6, "%d:%d", &g_trig3_lo, &g_trig3_hi);
+        if (!strncmp(argv[i], "hostpace=", 9)) g_hostpace = atof(argv[i] + 9);
+        if (!strcmp(argv[i], "drc")) g_drc = true;
+        if (!strncmp(argv[i], "mute=",  5))
+            for (const char *m = argv[i] + 5; *m; ++m)
+                if (*m >= '1' && *m <= '4')
+                {
+                    const int ch = *m - '1';
+                    g_mute51_keep &= (uint8_t)~((1u << ch) | (1u << (ch + 4)));
+                }
     }
 
     FILE *f = fopen(rom_path,"rb");
@@ -297,11 +363,13 @@ int main(int argc, char **argv)
     int ds_frame=-1, stop_frame=-1;
     int64_t total_samples=0; int global_peak=0, frames_with_audio=0;
     uint64_t watch_prev=0;
+    int ring_full_frames=0; double drain_carry=0.0;
     prev = Snap();
     static int16_t buf[16384*2];
 
     for (int fr=0; fr<frames; ++fr)
     {
+        g_cur_frame = fr;
         uint8_t mask = 0;
         if (!g_press.empty())
         {
@@ -324,7 +392,31 @@ int main(int argc, char **argv)
             if (d.first == fr) DumpFb(d.second.c_str(), ppu.cgb);
 
         // Audio energy this frame.
-        int32_t got=ApuDrain(apu,buf,16384); total_samples+=got;
+        {
+            const uint32_t head=apu.sample_head, tail=apu.sample_tail;
+            const uint32_t fill=(head>=tail)?(head-tail):(APU_SAMPLE_BUF_SIZE-tail+head);
+            if (fill >= APU_SAMPLE_BUF_SIZE-2) ring_full_frames++;
+            if (g_drc)
+            {
+                const double err = (double)fill / APU_SAMPLE_BUF_SIZE - 0.125;
+                g_drc_integ += 5e-5 * err;
+                if (g_drc_integ >  0.03) g_drc_integ =  0.03;
+                if (g_drc_integ < -0.03) g_drc_integ = -0.03;
+                g_drc_corr = 0.02 * err + g_drc_integ;
+                if (g_drc_corr >  0.03) g_drc_corr =  0.03;
+                if (g_drc_corr < -0.03) g_drc_corr = -0.03;
+                ApuSetClockHz(apu, (int32_t)((double)clk * (1.0 + g_drc_corr) + 0.5));
+            }
+        }
+        int32_t want = 16384;
+        if (g_hostpace > 0.0)
+        {
+            drain_carry += 48000.0 / g_hostpace;
+            want = (int32_t)drain_carry;
+            drain_carry -= want;
+        }
+        int32_t got=ApuDrain(apu,buf,want); total_samples+=got;
+        if (!g_wav_path.empty()) g_wav.insert(g_wav.end(), buf, buf + got*2);
         int32_t peak=0; int64_t energy=0;
         for(int i=0;i<got*2;i++){ int v=buf[i]; if(v<0)v=-v; if(v>peak)peak=v; energy+=v; }
         if(peak>global_peak) global_peak=peak;
@@ -352,6 +444,8 @@ int main(int argc, char **argv)
                 apu.dbg_trigger_count[0],apu.dbg_trigger_count[1],apu.dbg_trigger_count[2],apu.dbg_trigger_count[3]);
     }
 
+    if (!g_wav_path.empty()) WriteWav(g_wav_path.c_str(), g_wav, 48000);
+
     printf("\n=== SUMMARY ===\n");
     printf("double_speed: %s (frame %d)   STOP: %s (frame %d)\n",
         ds_frame>=0?"YES":"no", ds_frame, stop_frame>=0?"YES":"no", stop_frame);
@@ -363,6 +457,8 @@ int main(int argc, char **argv)
         apu.dbg_wave_ram_writes, apu.dbg_nr50_writes, apu.dbg_nr51_writes);
     printf("AUDIO: totalSamples=%lld globalPeak=%d framesWithAudio=%d/%d  watchHits=%llu\n",
         (long long)total_samples, global_peak, frames_with_audio, frames, (unsigned long long)g_watch_hits);
+    if (g_hostpace > 0.0 || g_drc)
+        printf("HOSTPACE: ringFullFrames=%d/%d drcCorr=%+.5f\n", ring_full_frames, frames, g_drc_corr);
 
     printf("\nHottest PCs on final frame (distinct=%zu) — busy-loop / hang detector:\n", g_pc_hist.size());
     std::vector<std::pair<uint64_t,uint16_t>> v;

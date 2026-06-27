@@ -552,7 +552,6 @@ uint32_t S9xSGBGetPacketLog(SgbPacketLogEntry *out, uint32_t max_entries);
 
 uint8_t  S9xSGBPeekROMByte(uint32_t rom_offset);
 uint32_t S9xSGBGetROMSize(void);
-uint32_t S9xSGBGetSRAMSize(void);
 
 uint8_t  S9xSGBPeekBootROMByte(uint32_t off);
 uint32_t S9xSGBGetBootROMSize(void);

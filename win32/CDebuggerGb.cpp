@@ -38,7 +38,7 @@ uint32_t CurrentDisplayPC()
 
 uint32_t CartSRAMSize()
 {
-	return S9xSGBGetSRAMSize();
+	return (uint32_t)S9xSGBGetSRAMSize();
 }
 
 } // namespace GbBackend

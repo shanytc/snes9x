@@ -83,6 +83,7 @@ static std::string g_wav_path;                 // wav=/tmp/out.wav
 static std::vector<int16_t> g_wav;             // accumulated stereo samples
 static uint8_t g_mute51_keep = 0xFF;           // mute=124 -> clear those CHx bits in NR51
 static int g_trig3_lo = -1, g_trig3_hi = -1;   // trig3=LO:HI -> dump CH3 trigger state
+static int g_apuw_lo = 0, g_apuw_hi = 0x7fffffff; // apuw=LO:HI -> log APU writes only in window
 static int g_cur_frame = 0;
 static double g_hostpace = 0.0;                // hostpace=60.0988 -> drain like the
                                                // win32 host: 48000/HZ frames per GB
@@ -268,13 +269,14 @@ static void RunCycles(int32_t tcycles, bool trace_apu)
             last_nr30 = apu.ch3.nr30;
             last_tg3  = apu.dbg_trigger_count[2];
 
-            if (trace_apu && g_apu_writes_logged < APU_WRITE_LOG_CAP)
+            if (trace_apu && g_apu_writes_logged < APU_WRITE_LOG_CAP
+                && g_cur_frame >= g_apuw_lo && g_cur_frame < g_apuw_hi)
             {
                 ApuShadow now = Snap();
                 if (memcmp(&now, &prev, sizeof now) != 0)
                 {
                     #define D(field,name) if(now.field!=prev.field){ if(g_apu_writes_logged<APU_WRITE_LOG_CAP){ \
-                        printf("    APUW pc=%04X %-4s %02X->%02X\n",prePC,name,prev.field,now.field); ++g_apu_writes_logged; } }
+                        printf("    APUW f%d pc=%04X %-4s %02X->%02X\n",g_cur_frame,prePC,name,prev.field,now.field); ++g_apu_writes_logged; } }
                     D(nr10,"NR10")D(nr11,"NR11")D(nr12,"NR12")D(nr13,"NR13")D(nr14,"NR14")
                     D(nr21,"NR21")D(nr22,"NR22")D(nr23,"NR23")D(nr24,"NR24")
                     D(nr30,"NR30")D(nr31,"NR31")D(nr32,"NR32")D(nr33,"NR33")D(nr34,"NR34")
@@ -310,6 +312,7 @@ static void Usage(const char *argv0)
         "  wav=path.wav            dump mixed audio (48kHz stereo S16) to a WAV\n"
         "  mute=NN..               silence channels 1-4 in NR51 (e.g. mute=124 solos CH3)\n"
         "  trig3=LO:HI             print CH3 state + wave RAM at each trigger in frames [LO,HI)\n"
+        "  apuw=LO:HI              log frame-tagged APU register writes + per-frame CH3 state in [LO,HI)\n"
         "  hostpace=FPS            drain only 48000/FPS samples per frame like the real host\n"
         "                          (surplus pins the ring and drops, shortfall starves)\n"
         "  drc                     enable the sgb.cpp dynamic-rate-control mirror\n", argv0);
@@ -330,6 +333,7 @@ int main(int argc, char **argv)
         if (!strncmp(argv[i], "fbl=",   4)) ParseFbDump(argv[i] + 4, g_fbldump);
         if (!strncmp(argv[i], "wav=",   4)) g_wav_path = argv[i] + 4;
         if (!strncmp(argv[i], "trig3=", 6)) sscanf(argv[i] + 6, "%d:%d", &g_trig3_lo, &g_trig3_hi);
+        if (!strncmp(argv[i], "apuw=",  5)) sscanf(argv[i] + 5, "%d:%d", &g_apuw_lo, &g_apuw_hi);
         if (!strncmp(argv[i], "hostpace=", 9)) g_hostpace = atof(argv[i] + 9);
         if (!strcmp(argv[i], "drc")) g_drc = true;
         if (!strncmp(argv[i], "mute=",  5))
@@ -354,7 +358,7 @@ int main(int argc, char **argv)
         cart.header.rom_size, cart.header.ram_size, (int)cart.mbc.type);
 
     // Replicate Emulator::Reset() for a standalone cart (no boot ROM, no SGB BIOS).
-    cpu.Reset(); MemReset(mem, !strcmp(mode,"cgb")); PpuReset(ppu); ApuReset(apu);
+    cpu.Reset(); MemReset(mem, !strcmp(mode,"cgb")); PpuReset(ppu); ApuReset(apu, !strcmp(mode,"cgb"));
     TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
     mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart;
 
@@ -446,6 +450,12 @@ int main(int argc, char **argv)
         if(apu.ch1.freq && first_freq[0]<0) first_freq[0]=fr;
         if(apu.ch2.freq && first_freq[1]<0) first_freq[1]=fr;
 
+        bool in_apuw = (fr >= g_apuw_lo && fr < g_apuw_hi && g_apuw_hi != 0x7fffffff);
+        if (in_apuw)
+            printf("[f%5d] CH3 en=%d dac=%d len=%u lenEn=%d nr30=%02X nr32=%02X nr34=%02X freq=%03X pos=%2d tg3=%u | peak=%d\n",
+                fr, apu.ch3.enabled, apu.ch3.dac_enabled, apu.ch3.length, apu.ch3.length_enabled,
+                apu.ch3.nr30, apu.ch3.nr32, apu.ch3.nr34, apu.ch3.freq, apu.ch3.pos,
+                apu.dbg_trigger_count[2], peak);
         bool notable = (peak>40) || (watch_this>0);
         if (fr<6 || fr%120==0 || fr==frames-1 || notable)
             printf("[f%5d] pc=%04X instr=%llu DS=%d stop=%d halt=%d ime=%d watch=%llu | "

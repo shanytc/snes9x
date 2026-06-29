@@ -2951,6 +2951,7 @@ LRESULT CALLBACK WinProc(
 					if (LoadROM(wpath))
 					{
 						S9xReset();
+						gDebugger.OnEmulatorReset();
 						ReInitSound();
 					}
 					RestoreSNESDisplay();

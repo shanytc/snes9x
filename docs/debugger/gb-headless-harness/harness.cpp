@@ -358,7 +358,7 @@ int main(int argc, char **argv)
         cart.header.rom_size, cart.header.ram_size, (int)cart.mbc.type);
 
     // Replicate Emulator::Reset() for a standalone cart (no boot ROM, no SGB BIOS).
-    cpu.Reset(); MemReset(mem, !strcmp(mode,"cgb")); PpuReset(ppu); ApuReset(apu, !strcmp(mode,"cgb"));
+    cpu.Reset(); MemReset(mem, !strcmp(mode,"cgb")); PpuReset(ppu); ApuReset(apu, !strcmp(mode,"cgb"), true);
     TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
     mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart;
 

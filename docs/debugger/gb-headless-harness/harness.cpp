@@ -44,7 +44,6 @@ using namespace SGB;
 
 // --- Host hooks the GB core references; no-ops for the headless harness. -----
 bool S9xSGBDebuggerBreakRequested() { return false; }
-void S9xSGBOnJoyserWrite(unsigned char) {}
 void S9xSGBOnPpuHBlank() {}
 void S9xSGBOnPpuVBlank() {}
 void S9xSGBCaptureScanline(const unsigned char*) {}
@@ -57,6 +56,37 @@ static Ppu    ppu;
 static Apu    apu;
 static Timer  timer;
 static Joypad joypad;
+
+long g_sgb_resets = 0, g_sgb_rotations = 0;
+std::vector<std::pair<int,int>> g_sgb_cmds;   // (frame, command id)
+extern int g_cur_frame;
+void S9xSGBOnJoyserWrite(unsigned char value)
+{
+    if (!joypad.sgb_active) return;
+    static uint8_t prev = 0xFF;
+    static bool    in_packet = false;
+    static int     bits = 0;
+    static uint8_t b0 = 0;
+    const uint8_t sel = value & 0x30;
+    if (sel == 0x00) { in_packet = true; bits = 0; b0 = 0; prev = value; ++g_sgb_resets; return; }
+    if (in_packet)
+    {
+        if (sel == 0x10 || sel == 0x20)
+        {
+            if (bits < 8 && sel == 0x10) b0 |= static_cast<uint8_t>(1u << bits);
+            if (bits == 7) g_sgb_cmds.push_back({g_cur_frame, b0 >> 3});
+            if (++bits >= 128) in_packet = false;
+        }
+        prev = value;
+        return;
+    }
+    if (!(prev & 0x20) && (value & 0x20))
+    {
+        joypad.sgb_index = static_cast<uint8_t>((joypad.sgb_index + 1) & 0x03);
+        ++g_sgb_rotations;
+    }
+    prev = value;
+}
 
 // --- CPU trace hook state ---------------------------------------------------
 static uint64_t g_instr = 0;
@@ -84,7 +114,7 @@ static std::vector<int16_t> g_wav;             // accumulated stereo samples
 static uint8_t g_mute51_keep = 0xFF;           // mute=124 -> clear those CHx bits in NR51
 static int g_trig3_lo = -1, g_trig3_hi = -1;   // trig3=LO:HI -> dump CH3 trigger state
 static int g_apuw_lo = 0, g_apuw_hi = 0x7fffffff; // apuw=LO:HI -> log APU writes only in window
-static int g_cur_frame = 0;
+int g_cur_frame = 0;
 static double g_hostpace = 0.0;                // hostpace=60.0988 -> drain like the
                                                // win32 host: 48000/HZ frames per GB
                                                // frame, surplus pins the ring (drops)
@@ -325,9 +355,11 @@ int main(int argc, char **argv)
     int         frames   = argc>2 ? atoi(argv[2]) : 1500;
     const char *mode     = argc>3 ? argv[3] : "cgb";
     bool        noinput  = !(argc>4 && !strcmp(argv[4],"input"));
+    int         softreset_frame = -1;
     if (argc>6) { g_watch_lo=(uint16_t)strtol(argv[5],0,16); g_watch_hi=(uint16_t)strtol(argv[6],0,16); }
     for (int i = 2; i < argc; ++i)
     {
+        if (!strncmp(argv[i], "softreset=", 10)) softreset_frame = atoi(argv[i] + 10);
         if (!strncmp(argv[i], "press=", 6)) ParsePress(argv[i] + 6);
         if (!strncmp(argv[i], "fb=",    3)) ParseFbDump(argv[i] + 3, g_fbdump);
         if (!strncmp(argv[i], "fbl=",   4)) ParseFbDump(argv[i] + 4, g_fbldump);
@@ -369,9 +401,22 @@ int main(int argc, char **argv)
     else if (!strcmp(mode,"sgb"))  { cs.r.af=0x0100; cs.r.bc=0x0014; cs.r.de=0x0000; cs.r.hl=0xC060; clk=4295454; }
     else                           { /* dmg: keep cpu.Reset() DMG defaults */ }
     ppu.cgb = cgb;
+    joypad.sgb_active = (!strcmp(mode,"sgb") || !strcmp(mode,"sgb2"));
     ApuSetClockHz(apu, clk);
     ApuSetOutputRate(apu, 48000);
     Cpu::SetTraceHook(&Trace);
+
+    auto SoftReset = [&]() {
+        cpu.Reset(); MemReset(mem, cgb); PpuReset(ppu); ApuReset(apu, cgb, true);
+        TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
+        mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart;
+        CpuState &c = cpu.State();
+        if      (!strcmp(mode,"cgb"))  { c.r.af=0x1180; c.r.bc=0x0000; c.r.de=0xFF56; c.r.hl=0x000D; }
+        else if (!strcmp(mode,"sgb2")) { c.r.af=0xFF00; c.r.bc=0x0014; c.r.de=0x0000; c.r.hl=0xC060; }
+        else if (!strcmp(mode,"sgb"))  { c.r.af=0x0100; c.r.bc=0x0014; c.r.de=0x0000; c.r.hl=0xC060; }
+        ppu.cgb = cgb;
+        ApuSetClockHz(apu, clk);
+    };
     printf("MODE=%s cgb=%d clk=%d af=%04X frames=%d input=%s watch=%04X-%04X\n\n",
         mode, cgb, clk, cs.r.af, frames, noinput?"no":"yes", g_watch_lo, g_watch_hi);
 
@@ -388,6 +433,7 @@ int main(int argc, char **argv)
     for (int fr=0; fr<frames; ++fr)
     {
         g_cur_frame = fr;
+        if (fr == softreset_frame) { printf("[softreset @ frame %d]\n", fr); SoftReset(); }
         uint8_t mask = 0;
         if (!g_press.empty())
         {
@@ -485,6 +531,17 @@ int main(int argc, char **argv)
         (long long)total_samples, global_peak, frames_with_audio, frames, (unsigned long long)g_watch_hits);
     if (g_hostpace > 0.0 || g_drc)
         printf("HOSTPACE: ringFullFrames=%d/%d drcCorr=%+.5f\n", ring_full_frames, frames, g_drc_corr);
+
+    extern long g_sgb_resets, g_sgb_rotations;
+    extern std::vector<std::pair<int,int>> g_sgb_cmds;
+    printf("SGB: packetResets=%ld joypadRotations=%ld cmds=%zu\n", g_sgb_resets, g_sgb_rotations, g_sgb_cmds.size());
+    static const char *kCmd[0x20] = {
+        "PAL01","PAL23","PAL03","PAL12","ATTR_BLK","ATTR_LIN","ATTR_DIV","ATTR_CHR",
+        "SOUND","SOU_TRN","PAL_SET","PAL_TRN","ATRC_EN","TEST_EN","ICON_EN","DATA_SND",
+        "DATA_TRN","MLT_REQ","JUMP","CHR_TRN","PCT_TRN","ATTR_TRN","ATTR_SET","MASK_EN",
+        "OBJ_TRN","?","?","?","?","?","?","?"};
+    for (auto &c : g_sgb_cmds)
+        printf("  cmd f%-5d 0x%02X %s\n", c.first, c.second, c.second < 0x20 ? kCmd[c.second] : "?");
 
     printf("\nHottest PCs on final frame (distinct=%zu) — busy-loop / hang detector:\n", g_pc_hist.size());
     std::vector<std::pair<uint64_t,uint16_t>> v;

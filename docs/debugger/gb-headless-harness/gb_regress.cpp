@@ -100,7 +100,7 @@ int main(int argc, char **argv)
 
     cpu.Reset(); MemReset(mem, cgb); PpuReset(ppu); ApuReset(apu, cgb);
     TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
-    mem.ppu = &ppu; mem.apu = &apu; mem.timer = &timer; mem.joypad = &joypad; mem.cart = &cart;
+    mem.ppu = &ppu; mem.apu = &apu; mem.timer = &timer; mem.joypad = &joypad; mem.cart = &cart; mem.cpu = &cpu.State();
     CpuState &cs = cpu.State();
     if (cgb) { cs.r.af = 0x1180; cs.r.bc = 0x0000; cs.r.de = 0xFF56; cs.r.hl = 0x000D; }
     // else: cpu.Reset() leaves DMG post-boot register state.

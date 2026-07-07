@@ -46,7 +46,10 @@ using namespace SGB;
 bool S9xSGBDebuggerBreakRequested() { return false; }
 void S9xSGBOnPpuHBlank() {}
 void S9xSGBOnPpuVBlank() {}
-void S9xSGBCaptureScanline(const unsigned char*) {}
+struct SLRec { int ly, scx, scy, stall, lcdc; };
+static int g_slframe = -1;              // slframe=N : dump per-scanline scroll for frame N
+static std::vector<SLRec> g_slrec;
+void S9xSGBCaptureScanline(const unsigned char*);   // real body after `ppu` is declared
 
 // --- Subsystems (same set Emulator::Impl owns). -----------------------------
 static Cart   cart;
@@ -88,6 +91,37 @@ void S9xSGBOnJoyserWrite(unsigned char value)
     prev = value;
 }
 
+// Per-scanline scroll recorder + SGB-ring model. CaptureScanline runs
+// synchronously inside FinalizeScanline (mode 3 -> HBlank) — and, with the
+// BGP back-spill re-capture, again from PpuWriteReg — so g_ring_fb holds
+// exactly what the SGB BIOS's ICD2 lcd_ring would display (fbb= dumps it;
+// diff vs fb= exposes corrections that miss the ring). slframe= records
+// per-scanline scroll for one frame.
+static uint8_t g_ring_fb[160 * 144];
+void S9xSGBCaptureScanline(const unsigned char *pixels)
+{
+    if (ppu.ly < GB_SCREEN_HEIGHT)
+        memcpy(&g_ring_fb[ppu.ly * 160], pixels, 160);
+    if (g_cur_frame == g_slframe && ppu.ly < GB_SCREEN_HEIGHT)
+        g_slrec.push_back({ (int)ppu.ly, (int)ppu.scx, (int)ppu.scy,
+                            (int)ppu.mode3_sprite_stall, (int)ppu.lcdc });
+}
+
+static void DumpRing(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path); return; }
+    fprintf(f, "P6\n160 144\n255\n");
+    for (int i = 0; i < 160 * 144; ++i)
+    {
+        unsigned char s = (unsigned char)((3 - (g_ring_fb[i] & 3)) * 85);
+        unsigned char rgb[3] = { s, s, s };
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+    printf("RingFB dumped -> %s\n", path);
+}
+
 // --- CPU trace hook state ---------------------------------------------------
 static uint64_t g_instr = 0;
 static std::map<uint16_t,uint64_t> g_pc_hist;     // sampled on the final frame
@@ -95,11 +129,22 @@ static bool     g_hist_on = false;
 static uint16_t g_watch_lo = 0xFFFF, g_watch_hi = 0;  // optional PC-range watch
 static uint64_t g_watch_hits = 0;
 
-static void Trace(uint16_t pc, uint8_t /*op*/, const CpuState &)
+static int g_bgpw_frame = -1;     // bgpw=F: trace BGP writes + IRQ entries + HALTs that frame
+
+static void Trace(uint16_t pc, uint8_t op, const CpuState &)
 {
     ++g_instr;
     if (g_hist_on) g_pc_hist[pc]++;
     if (pc >= g_watch_lo && pc <= g_watch_hi) ++g_watch_hits;
+    if (g_cur_frame == g_bgpw_frame)
+    {
+        if (pc == 0x40 || pc == 0x48 || pc == 0x50 || pc == 0x58)
+            printf("IRQVEC %02X ly=%3d mode=%d mclk=%3d\n",
+                   pc, ppu.ly, (int)ppu.mode, ppu.mode_clock);
+        if (op == 0x76)
+            printf("HALT   @%04X ly=%3d mode=%d mclk=%3d\n",
+                   pc, ppu.ly, (int)ppu.mode, ppu.mode_clock);
+    }
 }
 
 // --- Scripted input + framebuffer dumps --------------------------------------
@@ -109,6 +154,7 @@ struct Press { int frame; uint8_t mask; };
 static std::vector<Press> g_press;
 static std::vector<std::pair<int,std::string>> g_fbdump;
 static std::vector<std::pair<int,std::string>> g_fbldump;
+static std::vector<std::pair<int,std::string>> g_fbbdump;   // fbb=F:path — SGB-ring view
 static std::string g_wav_path;                 // wav=/tmp/out.wav
 static std::vector<int16_t> g_wav;             // accumulated stereo samples
 static uint8_t g_mute51_keep = 0xFF;           // mute=124 -> clear those CHx bits in NR51
@@ -270,9 +316,31 @@ static void RunCycles(int32_t tcycles, bool trace_apu)
             uint16_t prePC = cs.r.pc;
             int64_t  pre_t = cs.t_cycles;
             uint8_t  pre_pos3 = apu.ch3.pos;
+            uint8_t  pre_bgp  = ppu.bgp;
             cpu.Step(mem);                           // interrupts serviced inside
             int32_t consumed = (int32_t)(cs.t_cycles - pre_t);
             if (consumed <= 0) consumed = 4;
+
+            if (g_cur_frame == g_bgpw_frame && ppu.bgp != pre_bgp)
+            {
+                // arrival line-dot (mode2=0.., mode3=80.., mode0=252.. for stall=0)
+                int arr = ppu.mode_clock;
+                if      (ppu.mode == PpuMode::Transfer) arr += 80;
+                else if (ppu.mode == PpuMode::HBlank)   arr += 80 + 172 + ppu.mode3_sprite_stall;
+                const long long lag = (long long)(ppu.t_cycles - (pre_t + 4));
+                printf("BGPW pc=%04X %02X->%02X ly=%3d mode=%d mclk=%3d arr=%3d lag=%2lld true=%3lld\n",
+                       prePC, pre_bgp, ppu.bgp, ppu.ly, (int)ppu.mode, ppu.mode_clock,
+                       arr, lag, (long long)(arr - lag));
+                static std::map<uint16_t,bool> dumped;
+                if (!dumped[prePC] && dumped.size() < 4)
+                {
+                    dumped[prePC] = true;
+                    printf("  ROM around %04X:", prePC);
+                    for (int i = -8; i < 40; ++i)
+                        printf(" %02X", MemRead(mem, (uint16_t)(prePC + i)));
+                    printf("\n");
+                }
+            }
 
             TimerStep(timer, mem, consumed);         // CPU clock domain (DIV doubles)
             int32_t apu_in = consumed;               // APU stays real-time
@@ -360,6 +428,9 @@ int main(int argc, char **argv)
     for (int i = 2; i < argc; ++i)
     {
         if (!strncmp(argv[i], "softreset=", 10)) softreset_frame = atoi(argv[i] + 10);
+        if (!strncmp(argv[i], "slframe=", 8)) g_slframe = atoi(argv[i] + 8);
+        if (!strncmp(argv[i], "bgpw=", 5)) g_bgpw_frame = atoi(argv[i] + 5);
+        if (!strncmp(argv[i], "fbb=",   4)) ParseFbDump(argv[i] + 4, g_fbbdump);
         if (!strncmp(argv[i], "press=", 6)) ParsePress(argv[i] + 6);
         if (!strncmp(argv[i], "fb=",    3)) ParseFbDump(argv[i] + 3, g_fbdump);
         if (!strncmp(argv[i], "fbl=",   4)) ParseFbDump(argv[i] + 4, g_fbldump);
@@ -392,7 +463,7 @@ int main(int argc, char **argv)
     // Replicate Emulator::Reset() for a standalone cart (no boot ROM, no SGB BIOS).
     cpu.Reset(); MemReset(mem, !strcmp(mode,"cgb")); PpuReset(ppu); ApuReset(apu, !strcmp(mode,"cgb"), true);
     TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
-    mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart;
+    mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart; mem.cpu = &cpu.State();
 
     bool cgb=false; int clk=4194304;
     CpuState &cs = cpu.State();
@@ -409,7 +480,7 @@ int main(int argc, char **argv)
     auto SoftReset = [&]() {
         cpu.Reset(); MemReset(mem, cgb); PpuReset(ppu); ApuReset(apu, cgb, true);
         TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
-        mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart;
+        mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart; mem.cpu = &cpu.State();
         CpuState &c = cpu.State();
         if      (!strcmp(mode,"cgb"))  { c.r.af=0x1180; c.r.bc=0x0000; c.r.de=0xFF56; c.r.hl=0x000D; }
         else if (!strcmp(mode,"sgb2")) { c.r.af=0xFF00; c.r.bc=0x0014; c.r.de=0x0000; c.r.hl=0xC060; }
@@ -456,6 +527,26 @@ int main(int argc, char **argv)
             if (d.first == fr) DumpFb(d.second.c_str(), ppu.cgb);
         for (const auto &d : g_fbldump)
             if (d.first == fr) DumpLayer(d.second.c_str());
+        for (const auto &d : g_fbbdump)
+            if (d.first == fr) DumpRing(d.second.c_str());
+
+        if (g_slframe == fr)
+        {
+            const uint16_t base = (ppu.lcdc & 0x08) ? 0x1C00 : 0x1800;
+            printf("TILEMAP@%d lcdc=%02X bgp=%02X (rows6-15, cols0-9):\n", fr, ppu.lcdc, ppu.bgp);
+            const bool un = (ppu.lcdc & 0x10) != 0;
+            for (int tr = 6; tr < 16; ++tr)
+            {
+                printf(" tr%2d:", tr);
+                for (int tc = 0; tc < 10; ++tc) printf(" %02X", ppu.vram[base + tr * 32 + tc]);
+                // col-0 tile's 16 bytes of data
+                const uint8_t n = ppu.vram[base + tr * 32 + 0];
+                const uint16_t ta = un ? (uint16_t)(n * 16) : (uint16_t)(0x1000 + (int8_t)n * 16);
+                printf("   | col0 tile %02X data:", n);
+                for (int b = 0; b < 16; ++b) printf(" %02X", ppu.vram[ta + b]);
+                printf("\n");
+            }
+        }
 
         // Audio energy this frame.
         {
@@ -517,6 +608,21 @@ int main(int argc, char **argv)
     }
 
     if (!g_wav_path.empty()) WriteWav(g_wav_path.c_str(), g_wav, 48000);
+
+    if (g_slframe >= 0)
+    {
+        printf("\n=== per-scanline scroll @ frame %d  (stall = sprites*? + SCX&7) ===\n", g_slframe);
+        int prev_s7 = -1, runs = 0;
+        for (const SLRec &r : g_slrec)
+        {
+            printf("  ly%3d  scx=%3d (scx&7=%d)  scy=%3d  stall=%d  lcdc=%02X %s\n",
+                   r.ly, r.scx, r.scx & 7, r.scy, r.stall, r.lcdc,
+                   (r.lcdc & 1) ? "BGon" : "BGoff<<<");
+            if ((r.scx & 7) != prev_s7) { ++runs; prev_s7 = r.scx & 7; }
+        }
+        printf("  --> distinct SCX&7 transitions across the frame: %d "
+               "(high = per-scanline SCX-fine raster; feeds mode-3 penalty)\n", runs);
+    }
 
     printf("\n=== SUMMARY ===\n");
     printf("double_speed: %s (frame %d)   STOP: %s (frame %d)\n",

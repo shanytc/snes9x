@@ -474,7 +474,8 @@ int main(int argc, char **argv)
     ppu.cgb = cgb;
     joypad.sgb_active = (!strcmp(mode,"sgb") || !strcmp(mode,"sgb2"));
     ApuSetClockHz(apu, clk);
-    ApuSetOutputRate(apu, 48000);
+    int g_orate = getenv("SGB_ORATE") ? atoi(getenv("SGB_ORATE")) : 48000;
+    ApuSetOutputRate(apu, g_orate);
     Cpu::SetTraceHook(&Trace);
 
     auto SoftReset = [&]() {
@@ -607,7 +608,7 @@ int main(int argc, char **argv)
                 apu.dbg_trigger_count[0],apu.dbg_trigger_count[1],apu.dbg_trigger_count[2],apu.dbg_trigger_count[3]);
     }
 
-    if (!g_wav_path.empty()) WriteWav(g_wav_path.c_str(), g_wav, 48000);
+    if (!g_wav_path.empty()) WriteWav(g_wav_path.c_str(), g_wav, g_orate);
 
     if (g_slframe >= 0)
     {

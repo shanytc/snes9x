@@ -131,11 +131,18 @@ static uint64_t g_watch_hits = 0;
 
 static int g_bgpw_frame = -1;     // bgpw=F: trace BGP writes + IRQ entries + HALTs that frame
 
-static void Trace(uint16_t pc, uint8_t op, const CpuState &)
+// pctrace=F: per-instruction PC/reg/bank dump for frames F..F+1 —
+// diff vs a SameBoy exec-callback trace to pin interrupt-timing divergences.
+int g_pctrace_frame = -1;
+static void Trace(uint16_t pc, uint8_t op, const CpuState &state)
 {
     ++g_instr;
     if (g_hist_on) g_pc_hist[pc]++;
     if (pc >= g_watch_lo && pc <= g_watch_hi) ++g_watch_hits;
+    if (g_pctrace_frame >= 0 && g_cur_frame >= g_pctrace_frame && g_cur_frame <= g_pctrace_frame + 1)
+        fprintf(stderr, "P %04X a=%02X bc=%04X de=%04X hl=%04X | f%d ly=%d m=%d bank=%d\n",
+                pc, state.r.a, state.r.bc, state.r.de, state.r.hl, g_cur_frame,
+                (int)ppu.ly, (int)ppu.mode, mem.cart ? (int)mem.cart->mbc.rom_bank : -1);
     if (g_cur_frame == g_bgpw_frame)
     {
         if (pc == 0x40 || pc == 0x48 || pc == 0x50 || pc == 0x58)
@@ -155,6 +162,8 @@ static std::vector<Press> g_press;
 static std::vector<std::pair<int,std::string>> g_fbdump;
 static std::vector<std::pair<int,std::string>> g_fbldump;
 static std::vector<std::pair<int,std::string>> g_fbbdump;   // fbb=F:path — SGB-ring view
+static std::vector<std::pair<int,std::string>> g_bgmapdump; // bgmap=F:path — full 256x256 BG plane
+static std::vector<std::pair<int,std::string>> g_winmapdump;// winmap=F:path — full 256x256 window plane
 static std::string g_wav_path;                 // wav=/tmp/out.wav
 static std::vector<int16_t> g_wav;             // accumulated stereo samples
 static uint8_t g_mute51_keep = 0xFF;           // mute=124 -> clear those CHx bits in NR51
@@ -265,6 +274,60 @@ static void DumpFb(const char *path, bool cgb)
     }
     fclose(f);
     printf("FB dumped -> %s\n", path);
+}
+
+// Dump the full 256x256 BG (or window) tilemap plane so off-screen tiles are
+// visible in context. Marks the on-screen viewport with a mid-gray box.
+static void DumpPlane(const char *path, bool window)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path); return; }
+    const uint16_t map_base = window ? ((ppu.lcdc & 0x40) ? 0x1C00 : 0x1800)
+                                     : ((ppu.lcdc & 0x08) ? 0x1C00 : 0x1800);
+    const bool un = (ppu.lcdc & 0x10) != 0;
+    static uint8_t plane[256 * 256];
+    for (int py = 0; py < 256; ++py)
+        for (int px = 0; px < 256; ++px)
+        {
+            const int tr = py >> 3, fy = py & 7, tc = px >> 3, fx = px & 7;
+            const uint8_t n = ppu.vram[map_base + tr * 32 + tc];
+            uint16_t ta = un ? (uint16_t)(n * 16) : (uint16_t)(0x1000 + (int8_t)n * 16);
+            ta += fy * 2;
+            const uint8_t lo = ppu.vram[ta], hi = ppu.vram[ta + 1];
+            const uint8_t bit = 7 - fx;
+            const uint8_t ci = (uint8_t)((((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));
+            plane[py * 256 + px] = (uint8_t)(ppu.bgp >> (ci * 2)) & 3;
+        }
+    fprintf(f, "P6\n256 256\n255\n");
+    for (int py = 0; py < 256; ++py)
+        for (int px = 0; px < 256; ++px)
+        {
+            uint8_t s = (uint8_t)((3 - plane[py * 256 + px]) * 85);
+            // Viewport outline: BG uses scx/scy; window origin is (0,0) mapped to (wx-7, wy).
+            bool edge = false;
+            if (!window)
+            {
+                int vx = (px - ppu.scx) & 255, vy = (py - ppu.scy) & 255;
+                edge = ((vx == 0 || vx == 159) && vy < 144) || ((vy == 0 || vy == 143) && vx < 160);
+            }
+            uint8_t rgb[3] = { s, s, s };
+            if (edge) { rgb[0] = 255; rgb[1] = 0; rgb[2] = 0; }
+            fwrite(rgb, 1, 3, f);
+        }
+    fclose(f);
+    printf("Plane(%s) dumped -> %s  (map_base=%04X scx=%d scy=%d wx=%d wy=%d lcdc=%02X)\n",
+           window ? "WIN" : "BG", path, map_base, ppu.scx, ppu.scy, ppu.wx, ppu.wy, ppu.lcdc);
+    if (!window)
+    {
+        printf("  BG tilemap indices rows 0..11, cols 24..31:\n");
+        for (int tr = 0; tr < 12; ++tr)
+        {
+            printf("   r%2d:", tr);
+            for (int tc = 24; tc < 32; ++tc)
+                printf(" %02X", ppu.vram[map_base + tr * 32 + tc]);
+            printf("\n");
+        }
+    }
 }
 
 // --- APU register shadow, for change detection ------------------------------
@@ -434,6 +497,9 @@ int main(int argc, char **argv)
         if (!strncmp(argv[i], "press=", 6)) ParsePress(argv[i] + 6);
         if (!strncmp(argv[i], "fb=",    3)) ParseFbDump(argv[i] + 3, g_fbdump);
         if (!strncmp(argv[i], "fbl=",   4)) ParseFbDump(argv[i] + 4, g_fbldump);
+        if (!strncmp(argv[i], "pctrace=", 8)) g_pctrace_frame = atoi(argv[i]+8);
+        if (!strncmp(argv[i], "bgmap=", 6)) ParseFbDump(argv[i] + 6, g_bgmapdump);
+        if (!strncmp(argv[i], "winmap=",7)) ParseFbDump(argv[i] + 7, g_winmapdump);
         if (!strncmp(argv[i], "wav=",   4)) g_wav_path = argv[i] + 4;
         if (!strncmp(argv[i], "trig3=", 6)) sscanf(argv[i] + 6, "%d:%d", &g_trig3_lo, &g_trig3_hi);
         if (!strncmp(argv[i], "apuw=",  5)) sscanf(argv[i] + 5, "%d:%d", &g_apuw_lo, &g_apuw_hi);
@@ -530,6 +596,10 @@ int main(int argc, char **argv)
             if (d.first == fr) DumpLayer(d.second.c_str());
         for (const auto &d : g_fbbdump)
             if (d.first == fr) DumpRing(d.second.c_str());
+        for (const auto &d : g_bgmapdump)
+            if (d.first == fr) DumpPlane(d.second.c_str(), false);
+        for (const auto &d : g_winmapdump)
+            if (d.first == fr) DumpPlane(d.second.c_str(), true);
 
         if (g_slframe == fr)
         {

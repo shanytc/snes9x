@@ -51,7 +51,7 @@ but the invoking shell may be git-bash, and their `/tmp` mappings differ.
 ```
 snes_harness <rom.sfc> [frames=N] [log=N] [press=F:BTN[+BTN][:HOLD],...]
              [fb=F:path.ppm,...] [cgram=F:path.ppm,...] [save=F:path,...] [load=path]
-             [opt=key:value,...] [apuspd=N] [trace=LO:HI] [reg=LO:HI]
+             [poke=F:ADDR:VAL,...] [opt=key:value,...] [apuspd=N] [trace=LO:HI] [reg=LO:HI]
 buttons: A B X Y START SELECT U D L R LB RB
 ```
 
@@ -62,7 +62,8 @@ buttons: A B X Y START SELECT U D L R LB RB
 | `press`  | scripted input: `press=950:A,1550:START` holds each combo 8 frames (or `:HOLD` frames) starting at frame F |
 | `fb`     | dump the rendered frame as PPM after frame F |
 | `cgram`  | dump CGRAM as a 16×16 color swatch PPM **and** print all 256 entries as hex — first thing to check when graphics render "black" or wrongly colored (tiles usually fine, palette gone) |
-| `save`/`load` | savestate at frame F / restore at startup — skip long boot sequences while iterating |
+| `save`/`load` | savestate at frame F / restore at startup — skip long boot sequences while iterating (win32 `.000` states work after `gunzip`) |
+| `poke`   | write a WRAM byte at frame F: `poke=1000:746:5` sets $7E:0746=05 (ADDR/VAL hex) — force game-state variables while probing code paths |
 | `opt`    | answer libretro core-option queries: `opt=snes9x_block_invalid_vram_access:disabled` |
 | `apuspd` | override `Timings.APUSpeedup` after ROM fixes — sweep it to test timing-hack sensitivity |
 | `trace`/`reg` | frame ranges for the CGRAM-write / DMA-register traces — need the hooks: `git apply docs/debugger/snes-headless-harness/cgram-trace.patch`, rebuild `ppu.o`+`dma.o`, and build the harness with `-DHARNESS_TRACE_HOOKS` |

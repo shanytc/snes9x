@@ -17,8 +17,12 @@
 
 struct PressEvent { int frame; uint16_t mask; int hold; };
 struct PathEvent  { int frame; std::string path; };
+struct PokeEvent  { int frame; uint32_t addr; uint8_t val; };
+struct EvJmpEvent { int frame; uint8_t sel; uint32_t addr; };
 
 static std::vector<PressEvent> g_press;
+static std::vector<PokeEvent>  g_pokes;
+static std::vector<EvJmpEvent> g_evjmps;
 static std::vector<PathEvent>  g_dumps;
 static std::vector<PathEvent>  g_cgdumps;
 static std::vector<PathEvent>  g_saves;
@@ -135,6 +139,36 @@ static void parse_press(const std::string &arg)
         for (const std::string &b : split(parts[1], '+'))
             ev.mask |= 1u << button_id(b);
         g_press.push_back(ev);
+    }
+}
+
+static void parse_pokes(const std::string &arg)
+{
+    for (const std::string &item : split(arg, ','))
+    {
+        if (item.empty()) continue;
+        std::vector<std::string> parts = split(item, ':');
+        if (parts.size() < 3) { fprintf(stderr, "bad poke '%s'\n", item.c_str()); exit(1); }
+        PokeEvent ev;
+        ev.frame = atoi(parts[0].c_str());
+        ev.addr  = (uint32_t)strtoul(parts[1].c_str(), nullptr, 16);
+        ev.val   = (uint8_t)strtoul(parts[2].c_str(), nullptr, 16);
+        g_pokes.push_back(ev);
+    }
+}
+
+static void parse_evjmps(const std::string &arg)
+{
+    for (const std::string &item : split(arg, ','))
+    {
+        if (item.empty()) continue;
+        std::vector<std::string> parts = split(item, ':');
+        if (parts.size() < 3) { fprintf(stderr, "bad evjmp '%s'\n", item.c_str()); exit(1); }
+        EvJmpEvent ev;
+        ev.frame = atoi(parts[0].c_str());
+        ev.sel   = (uint8_t)strtoul(parts[1].c_str(), nullptr, 16);
+        ev.addr  = (uint32_t)strtoul(parts[2].c_str(), nullptr, 16);
+        g_evjmps.push_back(ev);
     }
 }
 
@@ -304,6 +338,8 @@ int main(int argc, char **argv)
         else if (a.rfind("save=", 0) == 0)   parse_paths(a.substr(5), g_saves);
         else if (a.rfind("load=", 0) == 0)   g_load = a.substr(5);
         else if (a.rfind("apuspd=", 0) == 0) g_apuspd = atoi(a.c_str() + 7);
+        else if (a.rfind("poke=", 0) == 0)   parse_pokes(a.substr(5));
+        else if (a.rfind("evjmp=", 0) == 0)  parse_evjmps(a.substr(6));
         else if (a.rfind("reg=", 0) == 0)
         {
             std::vector<std::string> lohi = split(a.substr(4), ':');
@@ -371,6 +407,24 @@ int main(int argc, char **argv)
         for (const PressEvent &ev : g_press)
             if (g_frame >= ev.frame && g_frame < ev.frame + ev.hold)
                 g_buttons |= ev.mask;
+
+        for (const PokeEvent &ev : g_pokes)
+            if (ev.frame == g_frame)
+            {
+                Memory.RAM[ev.addr & 0x1FFFF] = ev.val;
+                printf("poke f%d: $7E:%04X <- %02X\n", g_frame, ev.addr & 0xFFFF, ev.val);
+            }
+
+        for (const EvJmpEvent &ev : g_evjmps)
+            if (ev.frame == g_frame)
+            {
+                if (ev.sel != 0xFF)
+                    S9xSetEvent(ev.sel, 0x206000);
+                Registers.PL |= 0x30;
+                S9xUnpackStatus();
+                S9xSetPCBase(ev.addr & 0xFFFFFF);
+                printf("evjmp f%d: select <- %02X, PC <- %06X\n", g_frame, ev.sel, ev.addr);
+            }
 
         g_trace_cgram = (g_frame >= g_traceLo && g_frame < g_traceHi);
         g_trace_reg   = (g_frame >= g_regLo && g_frame < g_regHi);

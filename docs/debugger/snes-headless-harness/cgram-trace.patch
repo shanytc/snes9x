@@ -1,0 +1,93 @@
+diff --git a/dma.cpp b/dma.cpp
+index e1ad324c..0fcd3c51 100644
+--- a/dma.cpp
++++ b/dma.cpp
+@@ -19,6 +19,7 @@
+ extern uint8	*HDMAMemPointers[8];
+ extern int		HDMA_ModeByteCounts[8];
+ extern SPC7110	s7emu;
++extern int		g_trace_cgram;
+ 
+ static uint8	sdd1_decode_buffer[0x10000];
+ 
+@@ -617,6 +618,10 @@ bool8 S9xDoDMA (uint8 Channel)
+ 							do
+ 							{
+ 								Work = *(base + p);
++								if (g_trace_cgram)
++									printf("CG data V=%3d cur=%3d cyc=%4d src=gdma idx=%02X flip=%d <= %02X\n",
++										(int)CPU.V_Counter, (int)IPPU.CurrentLine, (int)CPU.Cycles,
++										PPU.CGADD, (int)PPU.CGFLIP, Work);
+ 								REGISTER_2122(Work);
+ 								UPDATE_COUNTERS;
+ 							} while (--count > 0);
+diff --git a/ppu.cpp b/ppu.cpp
+index 0a4541d3..a03ac60d 100644
+--- a/ppu.cpp
++++ b/ppu.cpp
+@@ -25,6 +25,8 @@
+ 
+ extern uint8	*HDMAMemPointers[8];
+ 
++int g_trace_cgram = 0;
++int g_trace_reg = 0;
+ 
+ static inline void S9xLatchCounters (bool force)
+ {
+@@ -328,6 +330,10 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
+ 		switch (Address)
+ 		{
+ 			case 0x2100: // INIDISP
++				if (g_trace_cgram && Byte != Memory.FillRAM[0x2100])
++					printf("REG 2100 V=%3d cyc=%4d PC=%02X:%04X <= %02X\n",
++						(int)CPU.V_Counter, (int)CPU.Cycles,
++						(unsigned)Registers.PB, (unsigned)Registers.PCw, Byte);
+ 				if (Byte != Memory.FillRAM[0x2100])
+ 				{
+ 					FLUSH_REDRAW();
+@@ -678,12 +684,21 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
+ 				break;
+ 
+ 			case 0x2121: // CGADD
++				if (g_trace_cgram)
++					printf("CG addr V=%3d cur=%3d cyc=%4d src=%s <= %02X\n",
++						(int)CPU.V_Counter, (int)IPPU.CurrentLine, (int)CPU.Cycles,
++						CPU.InHDMA ? "hdma" : CPU.InDMA ? "dma " : "cpu ", Byte);
+ 				PPU.CGFLIP = 0;
+ 				PPU.CGFLIPRead = 0;
+ 				PPU.CGADD = Byte;
+ 				break;
+ 
+ 			case 0x2122: // CGDATA
++				if (g_trace_cgram)
++					printf("CG data V=%3d cur=%3d cyc=%4d src=%s idx=%02X flip=%d <= %02X\n",
++						(int)CPU.V_Counter, (int)IPPU.CurrentLine, (int)CPU.Cycles,
++						CPU.InHDMA ? "hdma" : CPU.InDMA ? "dma " : "cpu ",
++						PPU.CGADD, (int)PPU.CGFLIP, Byte);
+ 				REGISTER_2122(Byte);
+ 				break;
+ 
+@@ -1572,6 +1587,12 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
+ 			case 0x420b: // MDMAEN
+ 				if (CPU.InDMAorHDMA)
+ 					return;
++				if (g_trace_cgram || g_trace_reg)
++					printf("REG 420B V=%3d cyc=%4d PC=%02X:%04X <= %02X (ch0: %02X:%04X->21%02X len=%04X) HDMA=%02X\n",
++						(int)CPU.V_Counter, (int)CPU.Cycles,
++						(unsigned)Registers.PB, (unsigned)Registers.PCw, Byte,
++						DMA[0].ABank, DMA[0].AAddress, DMA[0].BAddress, DMA[0].TransferBytes,
++						PPU.HDMA);
+ 				// XXX: Not quite right...
+                 if (Byte) {
+ 				CPU.Cycles += Timings.DMACPUSync;
+@@ -1601,6 +1622,10 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
+ 			case 0x420c: // HDMAEN
+ 				if (CPU.InDMAorHDMA)
+ 					return;
++				if (g_trace_cgram || g_trace_reg)
++					printf("REG 420C V=%3d cyc=%4d PC=%02X:%04X <= %02X\n",
++						(int)CPU.V_Counter, (int)CPU.Cycles,
++						(unsigned)Registers.PB, (unsigned)Registers.PCw, Byte);
+ 				Memory.FillRAM[0x420c] = Byte;
+ 				// Yoshi's Island, Genjyu Ryodan, Mortal Kombat, Tales of Phantasia
+ 				PPU.HDMA = Byte & ~PPU.HDMAEnded;

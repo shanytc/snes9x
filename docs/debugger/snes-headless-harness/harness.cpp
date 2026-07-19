@@ -67,6 +67,22 @@ static bool env_cb(unsigned cmd, void *data)
         var->value = it->second.c_str();
         return true;
     }
+    case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+    {
+        // BIOS lookups (SGB/BS-X/SFC-Box) go through this. Honor the
+        // conventional BIOS/ folder in the working directory, overridable
+        // via SNES9X_SYSTEM_DIR. The core additionally probes the ROM's
+        // own directory and its BIOS/ siblings, so this is just the
+        // explicit front door.
+        static const char *sysdir = nullptr;
+        if (!sysdir)
+        {
+            const char *env = getenv("SNES9X_SYSTEM_DIR");
+            sysdir = (env && *env) ? strdup(env) : "BIOS";
+        }
+        *(const char **)data = sysdir;
+        return true;
+    }
     default:
         return false;
     }

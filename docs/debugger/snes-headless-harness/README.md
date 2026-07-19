@@ -29,6 +29,7 @@ printf '%s\n' \
   sgb/gb_memory.cpp sgb/gb_mbc.cpp sgb/gb_ppu.cpp sgb/gb_apu.cpp sgb/gb_timer.cpp sgb/gb_joypad.cpp sgb/gb_cart.cpp \
   snapshot.cpp snes9x.cpp spc7110.cpp srtc.cpp tile.cpp tileimpl-n1x1.cpp tileimpl-n2x1.cpp tileimpl-h2x1.cpp \
   sha256.cpp bml.cpp movie.cpp fscompat.cpp libretro/libretro.cpp \
+  hd64180.cpp sfcbox.cpp \
   | xargs -P 12 -I{} sh -c 'o=/tmp/sn_obj/$(echo {} | tr "/" "_" | sed "s/\.cpp$/.o/"); \
     g++ -O2 -std=gnu++17 -fno-rtti -w -DRIGHTSHIFT_IS_SAR -D__LIBRETRO__ -DALLOW_CPU_OVERCLOCK \
     -DHAVE_STDINT_H -DHAVE_STRINGS_H -DNDEBUG \

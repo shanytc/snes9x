@@ -23,6 +23,7 @@ struct EvJmpEvent { int frame; uint8_t sel; uint32_t addr; };
 static std::vector<PressEvent> g_press;
 static std::vector<PokeEvent>  g_pokes;
 static std::vector<EvJmpEvent> g_evjmps;
+static std::vector<int>        g_resets;   // frames to call retro_reset (soft reset)
 static std::vector<PathEvent>  g_dumps;
 static std::vector<PathEvent>  g_cgdumps;
 static std::vector<PathEvent>  g_saves;
@@ -356,6 +357,7 @@ int main(int argc, char **argv)
         else if (a.rfind("apuspd=", 0) == 0) g_apuspd = atoi(a.c_str() + 7);
         else if (a.rfind("poke=", 0) == 0)   parse_pokes(a.substr(5));
         else if (a.rfind("evjmp=", 0) == 0)  parse_evjmps(a.substr(6));
+        else if (a.rfind("reset=", 0) == 0)  g_resets.push_back(atoi(a.c_str() + 6));
         else if (a.rfind("reg=", 0) == 0)
         {
             std::vector<std::string> lohi = split(a.substr(4), ':');
@@ -440,6 +442,13 @@ int main(int argc, char **argv)
                 S9xUnpackStatus();
                 S9xSetPCBase(ev.addr & 0xFFFFFF);
                 printf("evjmp f%d: select <- %02X, PC <- %06X\n", g_frame, ev.sel, ev.addr);
+            }
+
+        for (int rf : g_resets)
+            if (rf == g_frame)
+            {
+                retro_reset();
+                printf("soft reset at f%d\n", g_frame);
             }
 
         g_trace_cgram = (g_frame >= g_traceLo && g_frame < g_traceHi);

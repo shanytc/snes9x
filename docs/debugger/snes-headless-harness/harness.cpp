@@ -14,6 +14,7 @@
 #include "ppu.h"
 #include "dma.h"
 #include "apu/apu.h"
+#include "sfcbox.h"
 
 struct PressEvent { int frame; uint16_t mask; int hold; };
 struct PathEvent  { int frame; std::string path; };
@@ -27,6 +28,9 @@ static std::vector<int>        g_resets;   // frames to call retro_reset (soft r
 static std::vector<PathEvent>  g_dumps;
 static std::vector<PathEvent>  g_cgdumps;
 static std::vector<PathEvent>  g_saves;
+static std::vector<int>        g_osddumps;   // frames to dump the SFC-Box OSD grid
+static std::vector<int>        g_coins;      // frames to insert a coin (SFC-Box)
+static std::vector<PokeEvent>  g_keysw;      // frames to turn the SFC-Box keyswitch (addr = position)
 #if defined(HARNESS_TRACE_HOOKS)
 extern int g_trace_cgram;
 extern int g_trace_reg;
@@ -38,6 +42,7 @@ static std::string g_load;
 static int  g_traceLo  = -1, g_traceHi = -1;
 static int  g_regLo    = -1, g_regHi   = -1;
 static int  g_frames   = 600;
+static int  g_english  = 0;   // Settings.SFCBoxOSDEnglish override
 static int  g_apuspd   = -1;
 static int  g_logEvery = 60;
 static int  g_frame    = 0;
@@ -308,6 +313,35 @@ static void load_state(const std::string &path)
     printf("state loaded <- %s\n", path.c_str());
 }
 
+// Dump the raw (pre-translation) SFC-Box OSD text grid: per non-blank row,
+// the cell bytes as hex plus a best-effort ASCII rendering ('.' = non-ASCII).
+static void dump_osd()
+{
+    printf("--- OSD dump f%d (rows with content only) ---\n", g_frame);
+    for (int y = 0; y < SFCBOX_OSD_H; y++)
+    {
+        const uint8 *ch = SFCBox.OSD.VRAMChar[y];
+        const uint8 *at = SFCBox.OSD.VRAMColor[y];
+        bool blank = true;
+        for (int x = 0; x < SFCBOX_OSD_W; x++)
+            if (ch[x] != 0xff && ch[x] != 0x20) { blank = false; break; }
+        if (blank)
+            continue;
+        printf("  row %2d ch:", y);
+        for (int x = 0; x < SFCBOX_OSD_W; x++) printf(" %02X", ch[x]);
+        printf("\n         at:");
+        for (int x = 0; x < SFCBOX_OSD_W; x++) printf(" %02X", at[x]);
+        printf("\n         as: ");
+        for (int x = 0; x < SFCBOX_OSD_W; x++)
+        {
+            uint8 c = ch[x];
+            putchar((c >= 0x20 && c < 0x7f) ? c : (c == 0xff ? ' ' : '.'));
+        }
+        printf("\n");
+    }
+    fflush(stdout);
+}
+
 static void log_frame()
 {
     printf("[f%5d] PC=%02X:%04X mode=%d INIDISP=%02X TM=%02X TS=%02X CGWSEL=%02X CGADSUB=%02X HDMAEN=%02X %ux%u\n",
@@ -358,6 +392,30 @@ int main(int argc, char **argv)
         else if (a.rfind("poke=", 0) == 0)   parse_pokes(a.substr(5));
         else if (a.rfind("evjmp=", 0) == 0)  parse_evjmps(a.substr(6));
         else if (a.rfind("reset=", 0) == 0)  g_resets.push_back(atoi(a.c_str() + 6));
+        else if (a.rfind("english=", 0) == 0) g_english = atoi(a.c_str() + 8);
+        else if (a.rfind("coin=", 0) == 0)
+        {
+            for (const std::string &f : split(a.substr(5), ','))
+                if (!f.empty()) g_coins.push_back(atoi(f.c_str()));
+        }
+        else if (a.rfind("keysw=", 0) == 0)
+        {
+            for (const std::string &item : split(a.substr(6), ','))
+            {
+                if (item.empty()) continue;
+                std::vector<std::string> parts = split(item, ':');
+                PokeEvent ev;
+                ev.frame = atoi(parts[0].c_str());
+                ev.addr  = (uint32_t)atoi(parts[1].c_str());   // port-80h bit index
+                ev.val   = 0;
+                g_keysw.push_back(ev);
+            }
+        }
+        else if (a.rfind("osd=", 0) == 0)
+        {
+            for (const std::string &f : split(a.substr(4), ','))
+                if (!f.empty()) g_osddumps.push_back(atoi(f.c_str()));
+        }
         else if (a.rfind("reg=", 0) == 0)
         {
             std::vector<std::string> lohi = split(a.substr(4), ':');
@@ -419,6 +477,12 @@ int main(int argc, char **argv)
     if (!g_load.empty())
         load_state(g_load);
 
+    if (g_english)
+    {
+        Settings.SFCBoxOSDEnglish = TRUE;
+        printf("SFC-Box OSD language: English\n");
+    }
+
     for (g_frame = 0; g_frame < g_frames; g_frame++)
     {
         g_buttons = 0;
@@ -451,6 +515,20 @@ int main(int argc, char **argv)
                 printf("soft reset at f%d\n", g_frame);
             }
 
+        for (int cf : g_coins)
+            if (cf == g_frame)
+            {
+                S9xSFCBoxInsertCoin();
+                printf("coin inserted at f%d\n", g_frame);
+            }
+
+        for (const PokeEvent &ev : g_keysw)
+            if (ev.frame == g_frame)
+            {
+                SFCBox.Keyswitch = (uint8)ev.addr;
+                printf("keyswitch -> %u at f%d\n", ev.addr, g_frame);
+            }
+
         g_trace_cgram = (g_frame >= g_traceLo && g_frame < g_traceHi);
         g_trace_reg   = (g_frame >= g_regLo && g_frame < g_regHi);
         if (g_trace_cgram || g_trace_reg)
@@ -466,6 +544,8 @@ int main(int argc, char **argv)
             if (ev.frame == g_frame) { dump_cgram(ev.path); interesting = true; }
         for (const PathEvent &ev : g_saves)
             if (ev.frame == g_frame) save_state(ev.path);
+        for (int of : g_osddumps)
+            if (of == g_frame) { dump_osd(); interesting = true; }
         if (interesting)
             log_frame();
     }

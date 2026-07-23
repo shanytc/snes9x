@@ -558,6 +558,17 @@ int main(int argc, char **argv)
     printf("MODE=%s cgb=%d clk=%d af=%04X frames=%d input=%s watch=%04X-%04X\n\n",
         mode, cgb, clk, cs.r.af, frames, noinput?"no":"yes", g_watch_lo, g_watch_hi);
 
+    if (g_drc)
+    {
+        // Frame-locking runs one 70224-cycle GB frame per host frame, so
+        // the steady-state correction is known a priori (SGB1's fast clock
+        // needs about -1.7%). Seed the integrator there instead of letting
+        // it crawl from zero through minutes of ring-bottom underruns
+        // (mirrors the sgb.cpp seed).
+        const double pace = (g_hostpace > 0.0) ? g_hostpace : 59.7275;
+        g_drc_integ = 70224.0 * pace / (double)clk - 1.0;
+    }
+
     // Stats
     int first_ch[4] = {-1,-1,-1,-1};        // first frame each channel triggers
     int first_freq[2] = {-1,-1};            // first frame CH1/CH2 freq != 0
@@ -587,8 +598,12 @@ int main(int argc, char **argv)
 
         int32_t remaining=70224;            // ~one frame of GB T-cycles
         while (remaining>0 && !ppu.frame_ready) { int32_t c=remaining<456?remaining:456; RunCycles(c,true); remaining-=c; }
+        // With the LCD off frame_ready can never latch (PPU parked in
+        // HBlank), so an unguarded safety loop burns a SECOND full frame
+        // of cycles — doubling APU sample production during fades and
+        // flooding the ring (mirrors the sgb.cpp RunFrame fix).
         int32_t safety=70224;
-        while (!ppu.frame_ready && safety>0) { RunCycles(456,false); safety-=456; }
+        while (!ppu.frame_ready && safety>0 && (ppu.lcdc & 0x80)) { RunCycles(456,false); safety-=456; }
 
         for (const auto &d : g_fbdump)
             if (d.first == fr) DumpFb(d.second.c_str(), ppu.cgb);
@@ -643,7 +658,12 @@ int main(int argc, char **argv)
             want = (int32_t)drain_carry;
             drain_carry -= want;
         }
+        const uint32_t hPre=apu.sample_head, tPre=apu.sample_tail;
+        const uint32_t fillPre=(hPre>=tPre)?(hPre-tPre):(APU_SAMPLE_BUF_SIZE-tPre+hPre);
         int32_t got=ApuDrain(apu,buf,want); total_samples+=got;
+        if (g_hostpace > 0.0 && (fr % 60 == 0 || got < want))
+            printf("PACE f%5d fillPre=%5u want=%3d got=%3d corr=%+.5f%s\n",
+                fr, fillPre, want, got, g_drc_corr, (got<want)?"  <-- UNDERRUN":"");
         if (!g_wav_path.empty()) g_wav.insert(g_wav.end(), buf, buf + got*2);
         int32_t peak=0; int64_t energy=0;
         for(int i=0;i<got*2;i++){ int v=buf[i]; if(v<0)v=-v; if(v>peak)peak=v; energy+=v; }

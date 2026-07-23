@@ -39,6 +39,7 @@ int g_trace_cgram;
 int g_trace_reg;
 #endif
 static std::string g_load;
+static std::vector<PathEvent> g_loadats;   // mid-run state loads (rewind-style)
 static int  g_traceLo  = -1, g_traceHi = -1;
 static int  g_regLo    = -1, g_regHi   = -1;
 static int  g_frames   = 600;
@@ -388,6 +389,7 @@ int main(int argc, char **argv)
         else if (a.rfind("cgram=", 0) == 0)  parse_paths(a.substr(6), g_cgdumps);
         else if (a.rfind("save=", 0) == 0)   parse_paths(a.substr(5), g_saves);
         else if (a.rfind("load=", 0) == 0)   g_load = a.substr(5);
+        else if (a.rfind("loadat=", 0) == 0) parse_paths(a.substr(7), g_loadats);
         else if (a.rfind("apuspd=", 0) == 0) g_apuspd = atoi(a.c_str() + 7);
         else if (a.rfind("poke=", 0) == 0)   parse_pokes(a.substr(5));
         else if (a.rfind("evjmp=", 0) == 0)  parse_evjmps(a.substr(6));
@@ -527,6 +529,13 @@ int main(int argc, char **argv)
             {
                 SFCBox.Keyswitch = (uint8)ev.addr;
                 printf("keyswitch -> %u at f%d\n", ev.addr, g_frame);
+            }
+
+        for (const PathEvent &ev : g_loadats)
+            if (ev.frame == g_frame)
+            {
+                load_state(ev.path);
+                printf("mid-run state load f%d <- %s\n", g_frame, ev.path.c_str());
             }
 
         g_trace_cgram = (g_frame >= g_traceLo && g_frame < g_traceHi);

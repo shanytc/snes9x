@@ -51,7 +51,7 @@ but the invoking shell may be git-bash, and their `/tmp` mappings differ.
 
 ```
 snes_harness <rom.sfc> [frames=N] [log=N] [press=F:BTN[+BTN][:HOLD],...]
-             [fb=F:path.ppm,...] [cgram=F:path.ppm,...] [save=F:path,...] [load=path]
+             [fb=F:path.ppm,...] [cgram=F:path.ppm,...] [save=F:path,...] [load=path] [loadat=F:path,...]
              [poke=F:ADDR:VAL,...] [opt=key:value,...] [apuspd=N] [trace=LO:HI] [reg=LO:HI]
 buttons: A B X Y START SELECT U D L R LB RB
 ```
@@ -64,6 +64,7 @@ buttons: A B X Y START SELECT U D L R LB RB
 | `fb`     | dump the rendered frame as PPM after frame F |
 | `cgram`  | dump CGRAM as a 16×16 color swatch PPM **and** print all 256 entries as hex — first thing to check when graphics render "black" or wrongly colored (tiles usually fine, palette gone) |
 | `save`/`load` | savestate at frame F / restore at startup — skip long boot sequences while iterating (win32 `.000` states work after `gunzip`) |
+| `loadat` | restore a savestate at frame F while the machine is running — reproduces rewind-pop / in-session load-state behavior, which `load=` (restore into a fresh boot) does not |
 | `poke`   | write a WRAM byte at frame F: `poke=1000:746:5` sets $7E:0746=05 (ADDR/VAL hex) — force game-state variables while probing code paths |
 | `opt`    | answer libretro core-option queries: `opt=snes9x_block_invalid_vram_access:disabled` |
 | `apuspd` | override `Timings.APUSpeedup` after ROM fixes — sweep it to test timing-hack sensitivity |

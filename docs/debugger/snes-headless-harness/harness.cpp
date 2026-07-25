@@ -40,6 +40,7 @@ int g_trace_reg;
 #endif
 static std::string g_load;
 static std::vector<PathEvent> g_loadats;   // mid-run state loads (rewind-style)
+static std::vector<PathEvent> g_loadroms;  // mid-run ROM swaps (GUI File->Open)
 static int  g_traceLo  = -1, g_traceHi = -1;
 static int  g_regLo    = -1, g_regHi   = -1;
 static int  g_frames   = 600;
@@ -390,6 +391,7 @@ int main(int argc, char **argv)
         else if (a.rfind("save=", 0) == 0)   parse_paths(a.substr(5), g_saves);
         else if (a.rfind("load=", 0) == 0)   g_load = a.substr(5);
         else if (a.rfind("loadat=", 0) == 0) parse_paths(a.substr(7), g_loadats);
+        else if (a.rfind("loadrom=", 0) == 0) parse_paths(a.substr(8), g_loadroms);
         else if (a.rfind("apuspd=", 0) == 0) g_apuspd = atoi(a.c_str() + 7);
         else if (a.rfind("poke=", 0) == 0)   parse_pokes(a.substr(5));
         else if (a.rfind("evjmp=", 0) == 0)  parse_evjmps(a.substr(6));
@@ -461,7 +463,12 @@ int main(int argc, char **argv)
     retro_set_input_state(input_state_cb);
     retro_init();
 
-    retro_game_info gi = { rompath, rom.data(), (size_t)romsize, nullptr };
+    // .zip goes path-only so Memory.LoadROM runs the same FileLoader/unzip
+    // route the win32 GUI uses (needs a -DUNZIP_SUPPORT core build).
+    const size_t rplen = strlen(rompath);
+    const bool is_zip = rplen > 4 && !strcasecmp(rompath + rplen - 4, ".zip");
+    retro_game_info gi = { rompath, is_zip ? nullptr : rom.data(),
+                           is_zip ? 0 : (size_t)romsize, nullptr };
     if (!retro_load_game(&gi))
     {
         fprintf(stderr, "retro_load_game failed\n");
@@ -537,6 +544,13 @@ int main(int argc, char **argv)
                 load_state(ev.path);
                 printf("mid-run state load f%d <- %s\n", g_frame, ev.path.c_str());
             }
+
+        // Mid-run cart swap through Memory.LoadROM — the exact path the
+        // win32 GUI's File->Open takes over a live session.
+        for (const PathEvent &ev : g_loadroms)
+            if (ev.frame == g_frame)
+                printf("mid-run LoadROM f%d <- %s : %s\n", g_frame, ev.path.c_str(),
+                       Memory.LoadROM(ev.path.c_str()) ? "ok" : "FAILED");
 
         g_trace_cgram = (g_frame >= g_traceLo && g_frame < g_traceHi);
         g_trace_reg   = (g_frame >= g_regLo && g_frame < g_regHi);

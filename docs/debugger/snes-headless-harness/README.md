@@ -120,3 +120,24 @@ the 2019 SMP-clock retune to 3 is what broke it — see issue #563).
   `libretro.cpp` defaults. Hires/interlace frames dump at their native size.
 * No audio output; the APU still runs (games hang without it).
 * Temporary tool — build under `/tmp`, don't commit binaries.
+
+## SGB visual regression baselines (`sgb_regression.py`)
+
+Boots every GB/GBC/SGB ROM through the SGB BIOS and keeps one PNG per ROM in
+`regression_images/`. The folder doubles as an at-a-glance answer to "which games
+boot?", which a framebuffer hash cannot give you — a title that was already broken
+hashes as unchanged and reads as a pass.
+
+```sh
+python sgb_regression.py --update             # record baselines
+python sgb_regression.py                      # check; changed ROMs -> _current/
+python sgb_regression.py --update --filter X  # bless an improvement
+```
+
+Covers SNES ROMs and SGB-enhanced carts (cart flag `$0146 == 0x03`); plain
+GB/GBC carts belong to `docs/debugger/gb-headless-harness` instead. SGB BIOS
+mode needs the 65816, which is why the SGB half lives here.
+
+Known noise: the SFC-Box carts (`pss61*`) seed their RTC from the host clock,
+so their attract screen is not bit-reproducible and reports CHANGED on most
+runs. Compare the image before believing it.

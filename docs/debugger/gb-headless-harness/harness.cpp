@@ -522,6 +522,9 @@ int main(int argc, char **argv)
     fclose(f);
 
     if (!CartLoad(cart, rom.data(), sz, rom_path)) { fprintf(stderr,"CartLoad failed\n"); return 1; }
+    // "auto" = whatever the BIOS-less loader would pick, taken from the header
+    // CartLoad just parsed (memmap.cpp: gbCgb = rom[0x143] & 0x80).
+    if (!strcmp(mode, "auto")) mode = (cart.header.cgb_flag & 0x80) ? "cgb" : "dmg";
     printf("Loaded %s: cartType=0x%02X cgbFlag=0x%02X rom=%uB ram=%uB mbc=%d\n",
         rom_path, cart.header.cart_type, cart.header.cgb_flag,
         cart.header.rom_size, cart.header.ram_size, (int)cart.mbc.type);

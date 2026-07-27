@@ -263,7 +263,10 @@ def main():
                 print(f"CHANGED  {name}  -> regression_images/_current/{name}.png")
         sys.stdout.flush()
 
-    write_summary(IMAGES, rows)
+    # Only on a full run: a filtered run has seen just a subset and would
+    # otherwise drop every other ROM from the summary.
+    if not args.filter:
+        write_summary(IMAGES, rows)
 
     if args.update:
         print(f"\nbaselines written to {IMAGES}")

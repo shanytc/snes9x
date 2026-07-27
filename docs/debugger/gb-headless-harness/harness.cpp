@@ -532,6 +532,10 @@ int main(int argc, char **argv)
     // Replicate Emulator::Reset() for a standalone cart (no boot ROM, no SGB BIOS).
     cpu.Reset(); MemReset(mem, !strcmp(mode,"cgb")); PpuReset(ppu); ApuReset(apu, !strcmp(mode,"cgb"), true);
     TimerReset(timer); JoypadReset(joypad); MbcReset(cart.mbc);
+    // Tail of Emulator::Reset (sgb.cpp): MbcReset leaves the Sachen header
+    // xform latched on, and with no boot ROM a runs-raw cart must start
+    // unlocked or it executes scrambled bytes. Keep in sync with sgb.cpp.
+    cart.mbc.sachen_locked = !cart.sachen_runs_raw;
     mem.ppu=&ppu; mem.apu=&apu; mem.timer=&timer; mem.joypad=&joypad; mem.cart=&cart; mem.cpu = &cpu.State();
 
     bool cgb=false; int clk=4194304;

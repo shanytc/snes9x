@@ -105,18 +105,23 @@ def rom_class(path):
 
 
 def content_score(w, h, rgb):
-    """How much is actually on screen — a uniform fade/black frame scores 0."""
-    dark = light = 0
+    """How much is actually on screen: pixels differing from the most common
+    colour. A blank/uniform frame scores 0 whatever its shade — counting only
+    dark and light pixels would call a mid-tone screen (Mulan's orange title)
+    blank even though it is fully drawn.
+    """
+    counts = {}
+    total = 0
     for y in range(0, h, 2):
         row = y * w * 3
         for x in range(0, w, 2):
             o = row + x * 3
-            v = rgb[o] + rgb[o + 1] + rgb[o + 2]
-            if v < 240:
-                dark += 1
-            elif v > 540:
-                light += 1
-    return min(dark, light)
+            px = rgb[o] | (rgb[o + 1] << 8) | (rgb[o + 2] << 16)
+            counts[px] = counts.get(px, 0) + 1
+            total += 1
+    if not counts:
+        return 0
+    return total - max(counts.values())
 
 
 def capture(harness, rom, frames, workdir, timeout):

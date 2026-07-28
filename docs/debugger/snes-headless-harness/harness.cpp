@@ -75,6 +75,18 @@ static bool env_cb(unsigned cmd, void *data)
         var->value = it->second.c_str();
         return true;
     }
+    case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
+    {
+        // Log rumble-motor updates (LRG Port-1 dongle) with the frame number.
+        auto *iface = (retro_rumble_interface *)data;
+        iface->set_rumble_state = [](unsigned port, enum retro_rumble_effect effect, uint16_t strength) -> bool {
+            printf("[f%5d] RUMBLE port=%u %s=%u (%.0f%%)\n", g_frame, port,
+                   effect == RETRO_RUMBLE_STRONG ? "strong/L" : "weak/R",
+                   strength, strength * 100.0 / 0xffff);
+            return true;
+        };
+        return true;
+    }
     case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
     {
         // BIOS lookups (SGB/BS-X/SFC-Box) go through this. Honor the

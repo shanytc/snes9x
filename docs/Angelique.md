@@ -238,7 +238,7 @@ reaches the same voice requests.
 We do not emulate the IR hardware. The shipped feature plays the audio
 straight from the CD image:
 
-- **Emulation → Voice Kun** (win32) appears **only while a supported
+- **Sound → Voice Kun** (win32) appears **only while a supported
   game is loaded** (dynamic show/hide in `CheckMenuStates`, keyed on the
   game list). **Attach Audio CD...** accepts the game's `.cue` (BIN
   streamed from disk) or a `.zip` holding cue+bin (BIN extracted into

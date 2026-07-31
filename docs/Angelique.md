@@ -233,7 +233,71 @@ it either. Next candidates if anyone wants the hardware path: trace the
 tests. None of this is needed for CD playback — the manual path below
 reaches the same voice requests.
 
-## The snes9x implementation: Voice Kun audio tracks (no IR)
+## The device detect (solved)
+
+Both games decide the Voicer-kun is plugged in by reading the **port-2
+auto-joypad register `$421A` (JOY2L)** and testing its **low nibble for
+`$D`**. On the SNES the auto-read shifts 12 button bits out of a port and
+then four device-id bits; a standard pad reports `0` there, so the check
+fails and the setup prompt loops forever — which is why both games got
+stuck at "connect the Voicer-kun and press A".
+
+EMIT's check, at `$C91341`:
+
+```
+PEA $421A            ; JOY2L
+PEA $0000
+PEA $0001
+JSL $C08000          ; kernel service $01 - read that register
+LDA $00
+AND #$000F           ; device id nibble
+CMP #$000D           ; Voicer-kun signature
+BNE  -> re-prompt
+LDA #$0001           ; accepted
+```
+
+`voicekun.cpp` reports that id (`port2_id`) on port 2 whenever a verified
+disc is attached, ORed into the word `S9xDoAutoJoypad` writes to `$421A`
+(the serial-read path in `S9xReadJOYSERn` is *not* enough on its own — the
+auto-joypad path writes `$421A` directly and bypasses it). With that in
+place both games accept the device: EMIT sets `$7E22B2 = 1` and moves on,
+and Angelique leaves its wizard the same way.
+
+Notes for anyone extending this:
+
+- Nothing about the detect touches the IR lines. `$4017` is read only by
+  the learn routine and `$4201` written only by the transmitter, and
+  neither runs during the check — earlier attempts to satisfy it by
+  echoing IR were looking in the wrong place.
+- **The next gate is the IR learn wizard.** Having accepted the device,
+  both games ask the player to point a real CD remote at it and press each
+  key, recording the waveforms into the 322-byte slots. Getting through
+  that needs synthetic IR on `$4017` bit 1. The codes need not be real
+  remote codes: nothing downstream transmits to actual hardware, so any
+  self-consistent waveform the learner accepts will do.
+
+## Voicer mode
+
+With the device reported and the IR line emulated, the Voicer path
+completes and the game drives the CD player itself — the deck UI that
+manual mode shows never appears. The mechanism was traced on EMIT and is
+written up in full in [emit_1.md](emit_1.md): the mode byte, the five
+322-byte transport slots, the two transmit dispatchers, and the fact that
+the whole configuration persists to SRAM so the learn wizard is one-time.
+
+Angelique runs the same bank-`$C9` driver behind a friendlier UI. Its
+selection screen asks ボイサーくん / 手動 (「彼女のために、声の制御の方法を
+決めてくださいね。」), then quizzes the player's remote layout —
+「CDのリモコンに ▶ ボタンがありますか?」 with あります / ない — rather than
+showing EMIT's deck graphic. Its mode byte is **`$7E6844`** (`1` = Voicer),
+the counterpart of EMIT's `$7E22B2`.
+
+Verified in the harness: attaching the disc makes the ボイサーくん option
+selectable and `$7E6844` reaches `1`. Angelique's wizard was **not** driven
+to completion, so its per-scene behaviour in Voicer mode is untested; EMIT's
+was, across 14 tracks.
+
+## The snes9x implementation: Voicer-kun audio tracks (no IR)
 
 We do not emulate the IR hardware. The shipped feature plays the audio
 straight from the CD image:

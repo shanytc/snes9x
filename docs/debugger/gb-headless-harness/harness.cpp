@@ -47,6 +47,7 @@ bool S9xSGBDebuggerBreakRequested() { return false; }
 void S9xSGBOnPpuHBlank() {}
 void S9xSGBOnPpuVBlank() {}
 struct SLRec { int ly, scx, scy, stall, lcdc; };
+static bool g_objstat = false;
 static int g_slframe = -1;              // slframe=N : dump per-scanline scroll for frame N
 static std::vector<SLRec> g_slrec;
 void S9xSGBCaptureScanline(const unsigned char*);   // real body after `ppu` is declared
@@ -102,6 +103,18 @@ void S9xSGBCaptureScanline(const unsigned char *pixels)
 {
     if (ppu.ly < GB_SCREEN_HEIGHT)
         memcpy(&g_ring_fb[ppu.ly * 160], pixels, 160);
+    if (g_objstat && ppu.ly < GB_SCREEN_HEIGHT)
+    {
+        const int sh = (ppu.lcdc & 0x04) ? 16 : 8;
+        int n = 0;
+        for (int i = 0; i < 40; ++i)
+        {
+            const int top = (int)ppu.oam[i*4] - 16;
+            if ((int)ppu.ly >= top && (int)ppu.ly < top + sh) ++n;
+        }
+        if (n > 10)
+            printf("OBJOVF f%d ly=%d overlapping=%d dropped=%d\n", g_cur_frame, (int)ppu.ly, n, n - 10);
+    }
     if (g_cur_frame == g_slframe && ppu.ly < GB_SCREEN_HEIGHT)
         g_slrec.push_back({ (int)ppu.ly, (int)ppu.scx, (int)ppu.scy,
                             (int)ppu.mode3_sprite_stall, (int)ppu.lcdc });
@@ -274,6 +287,25 @@ static void DumpFb(const char *path, bool cgb)
     }
     fclose(f);
     printf("FB dumped -> %s\n", path);
+}
+
+// Raw PPU state snapshot: 16K VRAM (both banks), 64B BG palette RAM, 64B OBJ
+// palette RAM, 160B OAM, then LCDC/SCX/SCY/BGP/OBP0/OBP1/WX/WY. Lets an
+// offline renderer re-derive the screen from the same inputs the PPU had —
+// the cross-check that separates "wrong VRAM contents" from "wrong renderer".
+static std::vector<std::pair<int,std::string>> g_vramdump;
+static void DumpVram(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path); return; }
+    fwrite(ppu.vram, 1, sizeof ppu.vram, f);
+    fwrite(ppu.bg_pal, 1, sizeof ppu.bg_pal, f);
+    fwrite(ppu.obj_pal, 1, sizeof ppu.obj_pal, f);
+    fwrite(ppu.oam, 1, sizeof ppu.oam, f);
+    uint8_t regs[8] = { ppu.lcdc, ppu.scx, ppu.scy, ppu.bgp, ppu.obp0, ppu.obp1, ppu.wx, ppu.wy };
+    fwrite(regs, 1, sizeof regs, f);
+    fclose(f);
+    printf("VRAM dumped -> %s\n", path);
 }
 
 // Dump the full 256x256 BG (or window) tilemap plane so off-screen tiles are
@@ -491,6 +523,8 @@ int main(int argc, char **argv)
     for (int i = 2; i < argc; ++i)
     {
         if (!strncmp(argv[i], "softreset=", 10)) softreset_frame = atoi(argv[i] + 10);
+        if (!strcmp(argv[i], "objstat")) g_objstat = true;
+        if (!strcmp(argv[i], "nospritelimit")) ppu.no_sprite_limit = true;
         if (!strncmp(argv[i], "slframe=", 8)) g_slframe = atoi(argv[i] + 8);
         if (!strncmp(argv[i], "bgpw=", 5)) g_bgpw_frame = atoi(argv[i] + 5);
         if (!strncmp(argv[i], "fbb=",   4)) ParseFbDump(argv[i] + 4, g_fbbdump);
@@ -499,6 +533,7 @@ int main(int argc, char **argv)
         if (!strncmp(argv[i], "fbl=",   4)) ParseFbDump(argv[i] + 4, g_fbldump);
         if (!strncmp(argv[i], "pctrace=", 8)) g_pctrace_frame = atoi(argv[i]+8);
         if (!strncmp(argv[i], "bgmap=", 6)) ParseFbDump(argv[i] + 6, g_bgmapdump);
+        if (!strncmp(argv[i], "vramdump=", 9)) ParseFbDump(argv[i] + 9, g_vramdump);
         if (!strncmp(argv[i], "winmap=",7)) ParseFbDump(argv[i] + 7, g_winmapdump);
         if (!strncmp(argv[i], "wav=",   4)) g_wav_path = argv[i] + 4;
         if (!strncmp(argv[i], "trig3=", 6)) sscanf(argv[i] + 6, "%d:%d", &g_trig3_lo, &g_trig3_hi);
@@ -618,6 +653,8 @@ int main(int argc, char **argv)
             if (d.first == fr) DumpLayer(d.second.c_str());
         for (const auto &d : g_fbbdump)
             if (d.first == fr) DumpRing(d.second.c_str());
+        for (const auto &d : g_vramdump)
+            if (d.first == fr) DumpVram(d.second.c_str());
         for (const auto &d : g_bgmapdump)
             if (d.first == fr) DumpPlane(d.second.c_str(), false);
         for (const auto &d : g_winmapdump)

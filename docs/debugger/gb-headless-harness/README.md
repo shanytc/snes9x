@@ -41,6 +41,7 @@ g++ -O2 -std=c++17 -Isgb \
 ```
 gb_harness <rom.gb|.gbc> [frames=1500] [mode=cgb|sgb2|sgb|dmg] [input|noinput] [watchLoHex watchHiHex]
            [press=F:BTN,...] [fb=F:path.ppm,...] [fbl=F:path.pgm,...] [wav=path.wav] [mute=NN..]
+           [vramdump=F:path.bin,...] [objstat]
            [trig3=LO:HI] [apuw=LO:HI] [hostpace=FPS] [drc]
 ```
 
@@ -54,6 +55,9 @@ gb_harness <rom.gb|.gbc> [frames=1500] [mode=cgb|sgb2|sgb|dmg] [input|noinput] [
 | `press` | scripted input, overrides `input`/`noinput`: `press=1260:A,1500:START,2700:D+A` holds each combo for 8 frames starting at frame F. Buttons: `A B START SELECT U D L R`. Use it to navigate menus deterministically (e.g. reach a game mode that triggers a bug) |
 | `fb`    | screenshot dumps: `fb=3000:/tmp/f3000.ppm,4100:/tmp/f4100.ppm` writes the screen as PPM (CGB color or DMG grayscale) after frame F runs — see which screen/menu the game is on |
 | `fbl`   | dump the per-pixel layer map (P5 PGM, 0=BG / 100=window / 200=OBJ) after frame F — pair with `fb=` to classify which layer flickering pixels belong to when picking a frame-blend layer (3D Pocket Pool multiplexes balls on OBJ *and* shadows on BG, so its auto-blend entry needs layer ALL) |
+| `vramdump` | raw PPU state after frame F: 16384 B VRAM (bank 0 then bank 1), 64 B BG palette RAM, 64 B OBJ palette RAM, 160 B OAM, then 8 register bytes (LCDC, SCX, SCY, BGP, OBP0, OBP1, WX, WY). Feed it to an offline renderer and diff against the same frame's `fb=` — if they agree, the pixel pipeline is faithful to its inputs and the bug is upstream (VRAM contents, palettes, or the per-scanline register schedule). Pair with `slframe=` for the per-line SCX/SCY the offline render needs |
+| `objstat` | print `OBJOVF f<N> ly=<L> overlapping=<n> dropped=<n-10>` for every scanline where more than 10 objects overlap. Sprite-built artwork loses its highest-OAM-index pieces on those lines exactly as hardware does, so this tells you whether a "chunk missing" from a sprite object is the game overrunning the per-line limit rather than an emulation fault |
+| `nospritelimit` | set `Ppu::no_sprite_limit`, the core flag behind Emulator Hacks > "No Sprite Limit (GameBoy)": keep every OAM-scan hit instead of the first 10. Pair with `fb=` and diff against a run without it to see exactly which pixels the hardware limit costs. Mode-3 length still bills the 10-object cap either way, so `slframe=` stall values must come out identical with and without it — that diff is the regression test for the hack not disturbing raster timing |
 | `wav`   | dump the mixed APU output (48 kHz stereo S16) to a WAV for offline spectral / waveform analysis, or to diff against a reference emulator's capture (SameBoy builds headless with a ~70-line driver) |
 | `mute`  | mask channels out of NR51 each CPU step: `mute=124` solos CH3, `mute=3` mutes CH3. Re-applied continuously, so the game's own NR51 writes can't unmute. Pair with `wav=` to isolate which channel carries an artifact |
 | `trig3` | print CH3 trigger forensics for frames `[LO,HI)`: trigger count, PC, freq, pre-trigger playback position, sample latch, and the full 16-byte wave RAM. This is the tool for wave-RAM streamers (3D Pocket Pool rewrites all 16 bytes ~7×/frame and retriggers at pos 16) |

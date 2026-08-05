@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -119,9 +120,178 @@ static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
     }
 }
 
+// ---- audio capture ----------------------------------------------------
+// libretro drains the whole SPC resampler every emulated frame, so the batch
+// callback's frame count IS the core's per-frame production at the configured
+// input:playback ratio. That series is what decides whether a host device
+// running at Settings.SoundPlaybackRate starves or overflows.
+static std::string          g_wavPath;
+static std::vector<int16_t> g_wavPcm;
+static std::vector<int>     g_prodFrames;   // output frames produced per emulated frame
+static int                  g_prodThisFrame = 0;
+static int                  g_inRate = 0, g_outRate = 0;   // 0 = leave libretro's default
+static int                  g_abufMs = 64;
+static double               g_devPpm = 0.0;   // host device clock offset, ppm
+static int                  g_interp = -1;    // Settings.InterpolationMethod override
+static double               g_q0     = 1.0;   // initial queue fill (fraction of cap)
+static std::string          g_profPath;       // dump per-frame production series
+static int                  g_drcReset = 0;   // mimic win32: S9xSpcResetDrc() every callback
+static int                  g_engine = -1;    // Settings.AudioFidelity override
+
 static void audio_sample_cb(int16_t, int16_t) {}
-static size_t audio_batch_cb(const int16_t *, size_t frames) { return frames; }
+static long long g_clipCount = 0;
+static size_t audio_batch_cb(const int16_t *data, size_t frames)
+{
+    g_prodThisFrame += (int)frames;
+    for (size_t i = 0; data && i < frames * 2; ++i)
+        if (data[i] >= 32767 || data[i] <= -32768) g_clipCount++;
+    if (!g_wavPath.empty() && data)
+        g_wavPcm.insert(g_wavPcm.end(), data, data + frames * 2);
+    return frames;
+}
 static void input_poll_cb() {}
+
+static void write_wav(const std::string &path, const std::vector<int16_t> &pcm, int rate)
+{
+    FILE *f = fopen(path.c_str(), "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path.c_str()); return; }
+    const uint32_t dataBytes = (uint32_t)(pcm.size() * 2);
+    const uint32_t byteRate  = (uint32_t)rate * 4;
+    uint8_t h[44] = {0};
+    memcpy(h, "RIFF", 4);   *(uint32_t*)(h+4)  = 36 + dataBytes;
+    memcpy(h+8, "WAVEfmt ", 8); *(uint32_t*)(h+16) = 16;
+    *(uint16_t*)(h+20) = 1;  *(uint16_t*)(h+22) = 2;
+    *(uint32_t*)(h+24) = rate; *(uint32_t*)(h+28) = byteRate;
+    *(uint16_t*)(h+32) = 4;  *(uint16_t*)(h+34) = 16;
+    memcpy(h+36, "data", 4); *(uint32_t*)(h+40) = dataBytes;
+    fwrite(h, 1, 44, f);
+    fwrite(pcm.data(), 1, dataBytes, f);
+    fclose(f);
+    printf("wrote %s (%zu frames, %d Hz)\n", path.c_str(), pcm.size() / 2, rate);
+}
+
+// Model the win32 XAudio2 queue against the recorded production series:
+// 8 blocks of abufMs/8, device drains outRate frames per second of wall time
+// while the emulator is throttled to the console frame rate. Reports the
+// starve/overflow the real driver would hit with these rates.
+static void report_audio(double fps)
+{
+    if (g_prodFrames.empty() || g_outRate <= 0) return;
+
+    long long total = 0;
+    for (int n : g_prodFrames) total += n;
+    const double secs     = g_prodFrames.size() / fps;
+    const double effRate  = total / secs;
+    const double needPerF = g_outRate / fps;
+
+    printf("\n--- audio ---\n");
+    printf("rates      : input=%d playback=%d ratio=%.6f  fps=%.6f\n",
+           g_inRate, g_outRate, (double)g_inRate / g_outRate, fps);
+    printf("produced   : %lld frames over %d emulated frames (%.3f/frame)\n",
+           total, (int)g_prodFrames.size(), (double)total / g_prodFrames.size());
+    printf("device need: %.3f frames/frame (%d Hz)\n", needPerF, g_outRate);
+    printf("effective  : %.2f Hz  -> drift %+.4f%% (%+.2f Hz)\n",
+           effRate, (effRate - g_outRate) * 100.0 / g_outRate, effRate - g_outRate);
+    // Measured SPC production in emulated-real time; the value InputRate is
+    // meant to be. Output rate scales as PlaybackRate/InputRate, so matching
+    // the device means setting InputRate to what the SPC actually emits.
+    // Raw input words the DSP pushed into the resampler: independent of
+    // time_ratio, so it exposes the APU-speedup timing hack that the ratio
+    // normally compensates for.
+    unsigned pushed = 0, consumed = 0;
+    S9xSpcIoMeters(&pushed, &consumed);
+    printf("SPC raw in : %.3f frames/emu-frame -> %.2f Hz native production\n",
+           pushed / 2.0 / g_prodFrames.size(), pushed / 2.0 / secs);
+
+    const double spcRate = effRate * g_inRate / g_outRate;
+    printf("SPC actual : %.2f Hz  (InputRate is set to %d -> %+.2f Hz off)\n",
+           spcRate, g_inRate, g_inRate - spcRate);
+
+    int mn = g_prodFrames[0], mx = g_prodFrames[0];
+    for (int n : g_prodFrames) { if (n < mn) mn = n; if (n > mx) mx = n; }
+    printf("per-frame  : min=%d max=%d spread=%d\n", mn, mx, mx - mn);
+
+    // Sound-sync holds the XAudio2 queue near FULL (the emu thread blocks until
+    // every pending sample fits), so that is the honest starting cushion. The
+    // device consumes at its own crystal, which is what adev= perturbs.
+    const int blockFrames = g_outRate * (g_abufMs / 8) / 1000;
+    const int capFrames   = blockFrames * 8;
+    const double devPerF  = needPerF * (1.0 + g_devPpm / 1e6);
+    double queue = capFrames * g_q0;
+    int starves = 0, overflows = 0, firstStarve = -1;
+    long long starvedFrames = 0, droppedFrames = 0;
+    for (size_t i = 0; i < g_prodFrames.size(); ++i)
+    {
+        queue += g_prodFrames[i];
+        if (queue > capFrames) { droppedFrames += (long long)(queue - capFrames); queue = capFrames; overflows++; }
+        queue -= devPerF;
+        if (queue < 0)
+        {
+            starvedFrames += (long long)(-queue); queue = 0; starves++;
+            if (firstStarve < 0) firstStarve = (int)i;
+        }
+    }
+    printf("queue model: cap=%d frames (%d ms, 8 x %d) device %+.0f ppm  end=%.0f\n",
+           capFrames, g_abufMs, blockFrames, g_devPpm, queue);
+    printf("  starves   : %d frames-with-gap, %lld silent frames inserted", starves, starvedFrames);
+    if (firstStarve >= 0) printf(" (first at frame %d, t=%.1fs)", firstStarve, firstStarve / fps);
+    printf("\n  overflows : %d frames, %lld frames dropped\n", overflows, droppedFrames);
+    // Drain rate with no rate control: how long the full cushion survives.
+    const double leakPerSec = (devPerF - (double)total / g_prodFrames.size()) * fps;
+    if (leakPerSec > 0.0)
+        printf("  drift     : queue leaks %.2f frames/s -> full %d-frame cushion gone in %.0f s\n",
+               leakPerSec, capFrames, capFrames / leakPerSec);
+    else
+        printf("  drift     : queue gains %.2f frames/s (rides full, sound-sync throttles)\n", -leakPerSec);
+    printf("core drops : %ld resampler words   clipped samples: %lld\n",
+           S9xSpcDroppedSamples(), g_clipCount);
+
+    if (starves > 0)
+        printf("  gap detail: %.2f gaps/s after first starve, mean gap %.1f frames\n",
+               starves / ((g_prodFrames.size() - firstStarve) / fps),
+               (double)starvedFrames / starves);
+
+    if (!g_profPath.empty())
+    {
+        FILE *pf = fopen(g_profPath.c_str(), "w");
+        if (pf) { for (int n : g_prodFrames) fprintf(pf, "%d\n", n); fclose(pf);
+                  printf("  wrote per-frame series to %s\n", g_profPath.c_str()); }
+    }
+
+    int hist[6] = {0};   // <700, <760, <790, <798, <=800, >800
+    for (int n : g_prodFrames)
+        hist[n < 700 ? 0 : n < 760 ? 1 : n < 790 ? 2 : n < 798 ? 3 : n <= 800 ? 4 : 5]++;
+    printf("per-frame distribution: <700:%d <760:%d <790:%d <798:%d 798-800:%d >800:%d\n",
+           hist[0], hist[1], hist[2], hist[3], hist[4], hist[5]);
+}
+
+// Sample-level discontinuity scan: a click is a step far larger than the
+// surrounding slew. Reports the worst offenders with their time stamp.
+static void report_clicks(const std::vector<int16_t> &pcm, int rate)
+{
+    if (pcm.size() < 64) return;
+    const size_t n = pcm.size() / 2;
+    double sumAbsDelta = 0.0;
+    for (size_t i = 1; i < n; ++i)
+        sumAbsDelta += fabs((double)pcm[i*2] - pcm[(i-1)*2]);
+    const double meanDelta = sumAbsDelta / (n - 1);
+    const double thresh = meanDelta * 20.0 + 600.0;
+
+    struct Hit { size_t frame; double delta; };
+    std::vector<Hit> hits;
+    for (size_t i = 1; i < n; ++i)
+    {
+        double d = fabs((double)pcm[i*2] - pcm[(i-1)*2]);
+        if (d > thresh) hits.push_back({i, d});
+    }
+    printf("clicks     : mean |step|=%.1f threshold=%.0f -> %zu discontinuities\n",
+           meanDelta, thresh, hits.size());
+    for (size_t i = 0; i < hits.size() && i < 20; ++i)
+        printf("   t=%8.4fs (emuframe ~%5.0f) step=%.0f\n",
+               hits[i].frame / (double)rate,
+               hits[i].frame / (double)rate * 60.098814,
+               hits[i].delta);
+}
 
 static int16_t input_state_cb(unsigned port, unsigned device, unsigned, unsigned id)
 {
@@ -444,6 +614,28 @@ int main(int argc, char **argv)
             g_traceLo = atoi(lohi[0].c_str());
             g_traceHi = lohi.size() > 1 ? atoi(lohi[1].c_str()) : g_traceLo + 1;
         }
+        else if (a.rfind("audio=", 0) == 0)
+            g_wavPath = a.substr(6);
+        else if (a.rfind("arate=", 0) == 0)
+        {
+            std::vector<std::string> io = split(a.substr(6), ':');
+            g_inRate  = atoi(io[0].c_str());
+            g_outRate = io.size() > 1 ? atoi(io[1].c_str()) : g_inRate;
+        }
+        else if (a.rfind("abuf=", 0) == 0)
+            g_abufMs = atoi(a.substr(5).c_str());
+        else if (a.rfind("adev=", 0) == 0)
+            g_devPpm = atof(a.substr(5).c_str());
+        else if (a.rfind("interp=", 0) == 0)
+            g_interp = atoi(a.substr(7).c_str());
+        else if (a.rfind("aq0=", 0) == 0)
+            g_q0 = atof(a.substr(4).c_str());
+        else if (a.rfind("aprof=", 0) == 0)
+            g_profPath = a.substr(6);
+        else if (a.rfind("drcreset=", 0) == 0)
+            g_drcReset = atoi(a.substr(9).c_str());
+        else if (a.rfind("engine=", 0) == 0)
+            g_engine = atoi(a.substr(7).c_str());
         else if (a.rfind("opt=", 0) == 0)
         {
             for (const std::string &kv : split(a.substr(4), ','))
@@ -487,6 +679,29 @@ int main(int argc, char **argv)
         return 1;
     }
     printf("loaded %s (%ld bytes) '%s'\n", rompath, romsize, Memory.ROMName);
+
+    // Re-open the sound core at the host's rates (win32 defaults 32040 -> 48000)
+    // so the resampler runs the same ratio the GUI does; libretro's own 1:1
+    // 32040 setup bypasses the resampler entirely and hides rate bugs.
+    if (g_engine >= 0)
+    {
+        Settings.AudioFidelity = g_engine;
+        printf("audio fidelity: %s\n", g_engine ? "Windowed-Sinc" : "Hermite");
+    }
+
+    if (g_outRate > 0)
+    {
+        Settings.SoundInputRate    = g_inRate;
+        Settings.SoundPlaybackRate = g_outRate;
+        S9xInitSound(g_abufMs);
+        printf("audio: input=%d playback=%d buffer=%dms\n", g_inRate, g_outRate, g_abufMs);
+    }
+
+    if (g_interp >= 0)
+    {
+        Settings.InterpolationMethod = g_interp;
+        printf("interpolation method: %d\n", g_interp);
+    }
 
     if (g_apuspd >= 0)
     {
@@ -569,7 +784,13 @@ int main(int argc, char **argv)
         if (g_trace_cgram || g_trace_reg)
             printf("--- trace frame %d ---\n", g_frame);
 
+        // win32's CXAudio2::ProcessSound calls this on every sound callback for
+        // non-SGB games; it rewrites time_ratio from InputRate/PlaybackRate and
+        // drops the APU-speedup timing-hack factor UpdatePlaybackRate applies.
+        if (g_drcReset) S9xSpcResetDrc();
+        g_prodThisFrame = 0;
         retro_run();
+        if (g_outRate > 0) g_prodFrames.push_back(g_prodThisFrame);
 
         bool interesting = g_frame < 3 || g_frame == g_frames - 1 ||
                            (g_logEvery > 0 && g_frame % g_logEvery == 0);
@@ -584,6 +805,15 @@ int main(int argc, char **argv)
         if (interesting)
             log_frame();
     }
+
+    if (g_outRate > 0)
+    {
+        const double fps = (Settings.PAL ? 50.006979 : 60.098814);
+        report_audio(fps);
+        if (!g_wavPcm.empty()) report_clicks(g_wavPcm, g_outRate);
+    }
+    if (!g_wavPath.empty())
+        write_wav(g_wavPath, g_wavPcm, g_outRate > 0 ? g_outRate : 32040);
 
     retro_deinit();
     return 0;

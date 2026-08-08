@@ -29,7 +29,7 @@ printf '%s\n' \
   sgb/gb_memory.cpp sgb/gb_mbc.cpp sgb/gb_ppu.cpp sgb/gb_apu.cpp sgb/gb_timer.cpp sgb/gb_joypad.cpp sgb/gb_cart.cpp \
   snapshot.cpp snes9x.cpp spc7110.cpp srtc.cpp tile.cpp tileimpl-n1x1.cpp tileimpl-n2x1.cpp tileimpl-h2x1.cpp \
   sha256.cpp bml.cpp movie.cpp fscompat.cpp libretro/libretro.cpp \
-  hd64180.cpp sfcbox.cpp \
+  hd64180.cpp sfcbox.cpp voicekun.cpp \
   | xargs -P 12 -I{} sh -c 'o=/tmp/sn_obj/$(echo {} | tr "/" "_" | sed "s/\.cpp$/.o/"); \
     g++ -O2 -std=gnu++17 -fno-rtti -w -DRIGHTSHIFT_IS_SAR -D__LIBRETRO__ -DALLOW_CPU_OVERCLOCK \
     -DHAVE_STDINT_H -DHAVE_STRINGS_H -DNDEBUG \
@@ -64,6 +64,7 @@ buttons: A B X Y START SELECT U D L R LB RB
 | `press`  | scripted input: `press=950:A,1550:START` holds each combo 8 frames (or `:HOLD` frames) starting at frame F |
 | `fb`     | dump the rendered frame as PPM after frame F |
 | `cgram`  | dump CGRAM as a 16×16 color swatch PPM **and** print all 256 entries as hex — first thing to check when graphics render "black" or wrongly colored (tiles usually fine, palette gone) |
+| `oam`    | `oam=F,...` print a decoded OAM snapshot after frame F (per on-screen sprite: position, size, tile, palette, priority, flips, plus OBSEL) — the SNES side of the GB harness's OAM dump |
 | `save`/`load` | savestate at frame F / restore at startup — skip long boot sequences while iterating (win32 `.000` states work after `gunzip`) |
 | `loadat` | restore a savestate at frame F while the machine is running — reproduces rewind-pop / in-session load-state behavior, which `load=` (restore into a fresh boot) does not |
 | `loadrom` | load another ROM at frame F through `Memory.LoadROM` — the win32 GUI's File→Open path over a live session. Use it to reproduce cart-swap bugs |

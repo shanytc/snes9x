@@ -28,6 +28,7 @@ static std::vector<EvJmpEvent> g_evjmps;
 static std::vector<int>        g_resets;   // frames to call retro_reset (soft reset)
 static std::vector<PathEvent>  g_dumps;
 static std::vector<PathEvent>  g_cgdumps;
+static std::vector<int>        g_oamdumps;
 static std::vector<PathEvent>  g_saves;
 static std::vector<int>        g_osddumps;   // frames to dump the SFC-Box OSD grid
 static std::vector<int>        g_coins;      // frames to insert a coin (SFC-Box)
@@ -463,6 +464,36 @@ static void dump_cgram(const std::string &path)
     }
 }
 
+// Decoded OAM snapshot (SNES side of the GB harness's VRAM/OAM dump): one
+// line per on-screen sprite, plus OBSEL so sizes can be interpreted.
+static void dump_oam(void)
+{
+    static const int sizes[8][2][2] = // OBJSizeSelect -> {small,large} {w,h}
+    {
+        {{ 8, 8},{16,16}}, {{ 8, 8},{32,32}}, {{ 8, 8},{64,64}},
+        {{16,16},{32,32}}, {{16,16},{64,64}}, {{32,32},{64,64}},
+        {{16,32},{32,64}}, {{16,32},{32,32}},
+    };
+    printf("oam dump f%d OBSEL=%02X (base=%04X nameselect=%04X sizesel=%d)\n",
+           g_frame, Memory.FillRAM[0x2101], PPU.OBJNameBase, PPU.OBJNameSelect,
+           PPU.OBJSizeSelect);
+    for (int i = 0; i < 128; i++)
+    {
+        const uint8_t *o = PPU.OAMData + i * 4;
+        uint8_t hi = PPU.OAMData[512 + (i >> 2)] >> ((i & 3) * 2);
+        int x = o[0] | ((hi & 1) << 8);
+        if (x > 255) x -= 512;
+        int y = o[1];
+        int large = (hi >> 1) & 1;
+        const int *wh = sizes[PPU.OBJSizeSelect][large];
+        if (y >= 0xE0 && y < 0x100) continue; // parked offscreen
+        printf("  obj%03d x=%4d y=%3d %dx%-2d tile=%03X pal=%d prio=%d %c%c\n",
+               i, x, y, wh[0], wh[1],
+               o[2] | ((o[3] & 1) << 8), (o[3] >> 1) & 7, (o[3] >> 4) & 3,
+               (o[3] & 0x40) ? 'H' : '-', (o[3] & 0x80) ? 'V' : '-');
+    }
+}
+
 static void save_state(const std::string &path)
 {
     size_t sz = retro_serialize_size();
@@ -570,6 +601,11 @@ int main(int argc, char **argv)
         else if (a.rfind("press=", 0) == 0)  parse_press(a.substr(6));
         else if (a.rfind("fb=", 0) == 0)     parse_paths(a.substr(3), g_dumps);
         else if (a.rfind("cgram=", 0) == 0)  parse_paths(a.substr(6), g_cgdumps);
+        else if (a.rfind("oam=", 0) == 0)
+        {
+            for (const std::string &f : split(a.substr(4), ','))
+                if (!f.empty()) g_oamdumps.push_back(atoi(f.c_str()));
+        }
         else if (a.rfind("save=", 0) == 0)   parse_paths(a.substr(5), g_saves);
         else if (a.rfind("load=", 0) == 0)   g_load = a.substr(5);
         else if (a.rfind("loadat=", 0) == 0) parse_paths(a.substr(7), g_loadats);
@@ -798,6 +834,8 @@ int main(int argc, char **argv)
             if (ev.frame == g_frame) { write_ppm(ev.path); interesting = true; }
         for (const PathEvent &ev : g_cgdumps)
             if (ev.frame == g_frame) { dump_cgram(ev.path); interesting = true; }
+        for (int f : g_oamdumps)
+            if (f == g_frame) { dump_oam(); interesting = true; }
         for (const PathEvent &ev : g_saves)
             if (ev.frame == g_frame) save_state(ev.path);
         for (int of : g_osddumps)

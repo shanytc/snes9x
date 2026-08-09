@@ -525,3 +525,6 @@ gtk/build-appimage-x86/
 Roms/
 */Roms/
 Bios/
+
+# transient side-by-side output from regression check runs
+docs/debugger/*/regression_images/_current/

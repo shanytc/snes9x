@@ -223,6 +223,20 @@ void PumpRx()
 	}
 }
 
+// A Game Boy has one link port. Anything that dials in while a peer is
+// already attached gets accepted and closed at once, so it sees an honest
+// refusal instead of sitting unnoticed in the backlog looking connected.
+void RejectExtraPeers()
+{
+	if (g_link.listen_fd == SGB_INVALID_SOCKET) return;
+	for (;;)
+	{
+		const socket_t fd = accept(g_link.listen_fd, nullptr, nullptr);
+		if (fd == SGB_INVALID_SOCKET) return;
+		SGB_CLOSESOCKET(fd);
+	}
+}
+
 void AdoptPeer(socket_t fd)
 {
 	SetNonBlocking(fd);
@@ -307,13 +321,26 @@ bool LinkStartServer(uint16_t port, char *err, size_t err_cap)
 		return false;
 	}
 
+	// Binding is how the auto-sense picks a role, so it must fail cleanly
+	// when the other instance already holds the port. Windows SO_REUSEADDR
+	// would let a second socket bind the same port and silently steal it,
+	// so ask for the opposite there; on POSIX SO_REUSEADDR only recycles
+	// TIME_WAIT and still rejects a live listener, which is what we want.
 	int one = 1;
+#ifdef _WIN32
+	setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+	           reinterpret_cast<const char *>(&one), sizeof one);
+#else
 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
 	           reinterpret_cast<const char *>(&one), sizeof one);
+#endif
 
+	// Loopback only: the link is same-PC by design, and not listening on
+	// every interface means no firewall prompt and nothing exposed to the
+	// network.
 	sockaddr_in addr{};
 	addr.sin_family      = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	addr.sin_port        = htons(port);
 
 	if (bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof addr) != 0)
@@ -429,6 +456,7 @@ LinkState LinkPoll()
 			break;
 
 		case LinkState::Connected:
+			RejectExtraPeers();
 			FlushTx();
 			PumpRx();
 			break;

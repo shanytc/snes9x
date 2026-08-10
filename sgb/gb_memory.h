@@ -9,6 +9,8 @@
 
 #include <cstdint>
 
+#include "gb_serial.h"
+
 namespace SGB {
 
 struct Cart;
@@ -43,6 +45,7 @@ struct Memory
 	Apu    *apu    = nullptr;
 	Timer  *timer  = nullptr;
 	Joypad *joypad = nullptr;
+	Serial *serial = nullptr;
 	// CPU clock, for PPU-register write-time reconstruction. In the per-dot
 	// interleave the CPU trails the PPU by up to kMaxOpcodeTCycles, so at the
 	// moment a store reaches PpuWriteReg the PPU has already rendered dots the

@@ -259,6 +259,18 @@ void Snes9xController::updateSettings(EmuConfig *config)
         S9xSetChipMode(i, config->chip_modes[i]);
     }
 
+    // Game Boy link cable. Only the stored preferences are pushed here; the
+    // session itself opens on ROM load (see AutoStartGBLink in memmap.cpp).
+    Settings.GBLinkMode = (config->sgb_link_mode < 0 || config->sgb_link_mode > 2)
+                              ? 0
+                              : (uint8)config->sgb_link_mode;
+    Settings.GBLinkPort = (config->sgb_link_port < 1 || config->sgb_link_port > 65535)
+                              ? 8765
+                              : (uint16)config->sgb_link_port;
+    Settings.GBLinkAutoStart = config->sgb_link_auto_start;
+    snprintf(Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "%s",
+             config->sgb_link_host.empty() ? "localhost" : config->sgb_link_host.c_str());
+
     // The DIP block reaches NSS.DipSwitches on the next load, or from the menu.
     Settings.NSSDipSwitches = (uint32)(config->nss_dip_switches & 0xff);
     Settings.NSSJoypadWatchdog = config->nss_joypad_watchdog;

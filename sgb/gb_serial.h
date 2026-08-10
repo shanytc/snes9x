@@ -14,18 +14,8 @@ namespace SGB {
 
 struct Memory;
 
-// Game Boy serial port (link cable) at 0xFF01/0xFF02.
-//
-// SB (0xFF01) and SC (0xFF02) themselves stay in Memory — they were
-// already there and the save-state layout depends on it. This struct is
-// only the transfer machinery: the shift-clock countdown, which side is
-// driving it, and the bytes in flight to and from a linked peer.
-//
-// With no peer connected the port keeps its historical stub behaviour
-// (internal-clock writes complete immediately reading back $FF, external
-// clock never completes), so unlinked games behave exactly as before.
-// Once a peer is connected the transfer is timed properly and the byte
-// actually crosses the wire, via the BGB link protocol in gb_link.cpp.
+// Transfer machinery for the serial port at 0xFF01/0xFF02. SB and SC
+// themselves stay in Memory, which the save-state layout depends on.
 struct Serial
 {
 	bool     cgb = false;          // CGB carts can select the fast shift clock
@@ -40,9 +30,8 @@ struct Serial
 	bool     peer_valid = false;   // peer answered our active transfer
 	uint8_t  peer_data  = 0xFF;
 
-	// A peer's transfer that landed before our game armed its own side.
-	// Held for a short window so a small skew between the two emulators
-	// doesn't turn into a dropped byte.
+	// A peer's transfer that landed before our game armed, held briefly so
+	// skew between the two emulators doesn't drop a byte.
 	bool     pending_valid = false;
 	uint8_t  pending_data  = 0xFF;
 	int32_t  pending_age   = 0;
@@ -57,31 +46,26 @@ struct Serial
 	bool     handshake_sent = false;   // our version packet is out on this connection
 };
 
-// Fires each time the CPU starts an internal-clock transfer (write $81 to
-// 0xFF02); the byte is whatever SB held at that moment. The GB test
-// harness captures Blargg's pass/fail text through it. nullptr disables.
+// Fires when the CPU starts an internal-clock transfer; the GB test
+// harness reads Blargg's pass/fail text through it. nullptr disables.
 using SerialByteCallback = void (*)(uint8_t byte);
 void SetSerialCallback(SerialByteCallback cb);
 
 void SerialReset(Serial &s, bool cgb);
 
-// A save state captures one side of the cable but not the peer, so the
-// transfer machinery is rebuilt rather than restored: in-flight bytes are
-// dropped and, if SC still says a transfer is running, the countdown is
-// re-armed so the game can't hang waiting on a bit 7 that never clears.
+// Rebuilt, not restored: a state captures one side of a cable whose peer
+// never rewound. Re-arms SC so the game can't hang on bit 7.
 void SerialAfterStateLoad(Serial &s, Memory &mem);
 
-// Bill T-cycles in the CPU clock domain — call it right next to TimerStep
-// so double-speed doubles the shift clock the way hardware does.
+// Bill T-cycles in the CPU clock domain, next to TimerStep, so double
+// speed doubles the shift clock the way hardware does.
 void SerialStep(Serial &s, Memory &mem, int32_t tcycles);
 
-// 0xFF01 / 0xFF02 access. SB writes are plain stores while no transfer is
-// in flight; SC writes are what start one.
+// SC writes are what start a transfer; SB writes are plain stores.
 void    SerialWriteSC(Serial &s, Memory &mem, uint8_t value);
 uint8_t SerialReadSC(const Serial &s, const Memory &mem);
 
 // ---- Link session control (host UI facade) ---------------------------------
-// Which end of the cable this instance ended up as.
 enum class LinkRole : uint8_t
 {
 	None   = 0,
@@ -89,11 +73,8 @@ enum class LinkRole : uint8_t
 	Client = 2    // second one up: found the port taken and dialled in
 };
 
-// Bring the cable up on loopback without asking the user which end they
-// are. Binding the port IS the probe: winning it means nobody is there
-// yet and this instance listens; losing it means the other end is already
-// up, so this one connects to it. The kernel arbitrates the bind, so two
-// instances toggled at the same instant cannot both become the server.
+// Bring the cable up on loopback, sensing the role: binding the port is
+// the probe, and the kernel arbitrates it so there is only ever one host.
 LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap);
 
 void SerialLinkDisconnect();
@@ -104,20 +85,20 @@ LinkRole SerialLinkGetRole();
 bool SerialLinkIsEnabled();     // a session is listening, connecting or connected
 bool SerialLinkIsConnected();   // a peer is attached and past the version handshake
 
-// Service the socket from outside the emulation loop. SerialStep normally
-// does this, but a modal settings dialog blocks the emulation thread and
-// an accept/connect would otherwise never complete while it is open.
+// Service the socket from outside the emulation loop, for when that loop
+// is parked and an accept/connect would otherwise never complete.
 void SerialLinkPump();
 
-// One-line human-readable state for the UI / OSD, e.g.
-// "Link cable: connected (Master)". The Master/Passive suffix appears
-// only once a byte has actually crossed, since which end drives the clock
-// is chosen by the games rather than by the connection.
+// Game Boys on the cable including this one (0/1/2). Governs what a
+// disconnect means; >2 needs DMG-07 adapter emulation and a star topology.
+int SerialLinkPlayerCount();
+
+// One-line state for the OSD, e.g. "Link cable: connected (Master)". The
+// suffix appears only once a byte has crossed.
 void SerialLinkStatusText(char *buf, size_t cap);
 
-// True once when the driving end has changed and it is worth telling the
-// user again; fills `buf` with the text to show. Rate-limited, so a game
-// that alternates master and slave per byte can't flood the OSD.
+// True once when the driving end changed and is worth re-announcing;
+// fills `buf`. Rate-limited so alternating games can't flood the OSD.
 bool SerialLinkTakeStatusChange(char *buf, size_t cap);
 
 } // namespace SGB

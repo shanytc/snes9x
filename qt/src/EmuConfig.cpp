@@ -435,10 +435,6 @@ bool EmuConfig::setDefaults(int section)
         pf94_timer_display = 0;
         cc92_timer_minutes = 6;
         cc92_timer_display = 0;
-        sgb_link_mode = 0;
-        sgb_link_host = "localhost";
-        sgb_link_port = 8765;
-        sgb_link_auto_start = false;
     }
 
     if (section == -1 || section == 4)
@@ -795,10 +791,6 @@ void EmuConfig::config(const std::string &filename, bool write)
         if (!write)
             S9xSetBiosPath(i, bios_paths[i].c_str());
     }
-    Int("LinkMode", sgb_link_mode, "Game Boy link cable role: 0=off, 1=listen for a peer (server), 2=connect to a peer (client)");
-    String("LinkHost", sgb_link_host, "host name or IP of the link cable peer, used in client mode ('localhost' to link two emulators on this PC)");
-    Int("LinkPort", sgb_link_port, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
-    Bool("LinkAutoStart", sgb_link_auto_start, "Open the link cable session automatically whenever a GB/GBC ROM is loaded");
     EndSection();
 
     // Section and keys as win32 writes them.

@@ -947,24 +947,10 @@
 #define IDC_PAUSE_EMULATION             3351
 #define IDC_PAD_IMAGE                   3320
 
-// Game Boy link cable dialog
-#define IDD_GB_LINK_CABLE               189
-#define IDC_GBLINK_MODE_SERVER          3368
-#define IDC_GBLINK_MODE_CLIENT          3369
-#define IDC_GBLINK_HOST                 3370
-#define IDC_GBLINK_PORT                 3371
-#define IDC_GBLINK_AUTOSTART            3372
-#define IDC_GBLINK_STATUS               3373
-#define IDC_GBLINK_START                3374
-#define IDC_GBLINK_STOP                 3375
-#define IDC_GBLINK_GROUP                3376
-#define IDC_GBLINK_HOST_LABEL           3377
-#define IDC_GBLINK_PORT_LABEL           3378
-#define IDC_GBLINK_HINT                 3379
-
 #define ID_SOUND_AUDIOWAVEFORM          40198
 #define ID_INPUT_ENABLERUMBLE           40211
-#define ID_NETPLAY_GB_LINK              40216
+#define ID_EMULATION_GB_LINK_SAME       40216
+#define ID_EMULATION_GB_LINK_DIFF       40217
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

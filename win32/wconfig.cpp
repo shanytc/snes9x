@@ -305,6 +305,20 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			S9xUsage();
 	}
 
+	// Strip our private link-cable switch before the portable parser sees
+	// it -- S9xParseArgs would take the unknown option for a ROM name.
+	for (int i = 0; i < count; i++)
+	{
+		if (strcasecmp(parameters[i], GBLINK_PEER_SWITCH_A) != 0)
+			continue;
+
+		Settings.GBLinkPeerInstance = TRUE;
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
+	}
+
 	const char* rf = S9xParseArgs (parameters, count);
 
     if(rf) // save rom_filename as TCHAR if available
@@ -1077,10 +1091,7 @@ void WinRegisterConfigItems()
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
 	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9.");
-	AddUIntC("LinkMode", Settings.GBLinkMode, 0, "Game Boy link cable role: 0=off, 1=listen for a peer (server), 2=connect to a peer (client).");
-	AddStringC("LinkHost", Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "localhost", "host name or IP of the link cable peer, used in client mode ('localhost' to link two emulators on this PC)");
-	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "TCP port for the link cable session. 8765 is BGB's default, so leaving it alone lets you link against BGB / SameBoy / Emulicious.");
-	AddBoolC("LinkAutoStart", Settings.GBLinkAutoStart, false, "true to open the link cable session automatically whenever a GB/GBC ROM is loaded");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Data Link. Only worth changing if something else on this PC already owns 8765.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

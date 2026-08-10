@@ -50,6 +50,11 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 // ID_WINDOW_SIZE_1X.
 constexpr unsigned int WINDOW_SIZE_FACTORS = 10;
 
+// Marks the emulator instance auto-launched by the Game Boy Data Link
+// menu. It links itself on startup and never launches one in turn.
+#define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
+#define GBLINK_PEER_SWITCH_A "-gblinkpeer"
+
 #include "_tfwopen.h"
 #ifdef UNICODE
 #define _tToChar WideToUtf8

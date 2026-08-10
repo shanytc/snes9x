@@ -1425,7 +1425,7 @@ BEGIN
     BEGIN
         MENUITEM "&Pause",                      ID_FILE_PAUSE,MFT_STRING,MFS_ENABLED
         MENUITEM "Pause &When Inactive",        ID_EMULATION_PAUSEWHENINACTIVE,MFT_STRING,MFS_ENABLED
-        POPUP "Game Boy &Data Link",            0,MFT_STRING,MFS_ENABLED
+        POPUP "Game Boy &Data Link",            ID_EMULATION_GB_LINK,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "Link &Same Game",             ID_EMULATION_GB_LINK_SAME,MFT_STRING,MFS_ENABLED
             MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED

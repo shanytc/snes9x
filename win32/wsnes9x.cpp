@@ -5331,6 +5331,70 @@ void CheckDirectoryIsWritable (const char *filename)
     }
 }
 
+// Pull a whole submenu out of the menu bar when it doesn't apply and put
+// it back in the same place when it does. The Game Boy submenus are hidden
+// rather than greyed (see the BIOS submenu below, which does this inline).
+// Removal loses both the handle and the position, so the first pass caches
+// them while the item is still there.
+static void SetSubMenuVisible (UINT id, const TCHAR *label, bool visible,
+                               HMENU *cached, HMENU *parent, UINT *pos)
+{
+	if (!*cached)
+	{
+		const int top_n = GetMenuItemCount (GUI.hMenu);
+		for (int t = 0; t < top_n && !*cached; t++)
+		{
+			HMENU sub = GetSubMenu (GUI.hMenu, t);
+			if (!sub) continue;
+			const int sub_n = GetMenuItemCount (sub);
+			for (int j = 0; j < sub_n; j++)
+			{
+				MENUITEMINFO probe = {};
+				probe.cbSize = sizeof(probe);
+				probe.fMask  = MIIM_ID | MIIM_SUBMENU;
+				if (GetMenuItemInfo (sub, j, TRUE, &probe) &&
+				    probe.wID == id && probe.hSubMenu)
+				{
+					*cached = probe.hSubMenu;
+					*parent = sub;
+					*pos    = (UINT)j;
+					break;
+				}
+			}
+		}
+	}
+	if (!*cached || !*parent) return;
+
+	MENUITEMINFO present = {};
+	present.cbSize = sizeof(present);
+	present.fMask  = MIIM_ID;
+	const bool in_menu = GetMenuItemInfo (*parent, id, FALSE, &present) != FALSE;
+
+	if (visible && !in_menu)
+	{
+		MENUITEMINFO ins = {};
+		ins.cbSize     = sizeof(ins);
+		ins.fMask      = MIIM_STRING | MIIM_SUBMENU | MIIM_ID | MIIM_FTYPE;
+		ins.fType      = MFT_STRING;
+		ins.wID        = id;
+		ins.hSubMenu   = *cached;
+		ins.dwTypeData = (LPTSTR)label;
+		ins.cch        = (UINT)_tcslen (label);
+
+		UINT at = *pos;
+		const UINT count = (UINT)GetMenuItemCount (*parent);
+		if (at > count) at = count;
+		InsertMenuItem (*parent, at, TRUE, &ins);
+		if (LocaleIsTranslated ()) LocalizeMenu (*parent);
+		DrawMenuBar (GUI.hWnd);
+	}
+	else if (!visible && in_menu)
+	{
+		RemoveMenu (*parent, id, MF_BYCOMMAND);
+		DrawMenuBar (GUI.hWnd);
+	}
+}
+
 static void CheckMenuStates ()
 {
     MENUITEMINFO mii;
@@ -5366,20 +5430,30 @@ static void CheckMenuStates ()
 	mii.fState = (GUI.InactivePause) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
 
-	// Read back from the link itself, so when the peer unplugs, this
-	// instance's tick clears on its own without any message passing.
-	// The cable is only offered with a Game Boy game running, but a live
-	// link is never greyed out: the auto-spawned instance starts with no
-	// ROM, and greying it there would leave a ticked item it can't untick.
+	// The cable only means anything with a Game Boy game running, so the
+	// whole submenu comes and goes like the BIOS one. It stays while a link
+	// is live, though: the auto-spawned instance starts with no ROM, and
+	// hiding it there would strand a connection with no way to unplug.
 	{
-		const int  gblink = WinGetGBLinkMode ();
-		const UINT gray   = (Settings.SuperGameBoy || S9xSGBLinkIsEnabled ())
-		                        ? 0 : MFS_DISABLED;
+		static HMENU s_link_hmenu  = NULL;
+		static HMENU s_link_parent = NULL;
+		static UINT  s_link_pos    = 0;
 
-		mii.fState = ((gblink == 1) ? MFS_CHECKED : MFS_UNCHECKED) | gray;
-		SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
-		mii.fState = ((gblink == 2) ? MFS_CHECKED : MFS_UNCHECKED) | gray;
-		SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
+		const bool show = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive ||
+		                  S9xSGBLinkIsEnabled ();
+		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Data Link"), show,
+		                   &s_link_hmenu, &s_link_parent, &s_link_pos);
+
+		// Ticks are read back from the link, so when the peer unplugs this
+		// instance's tick clears on its own with no message passing.
+		if (show)
+		{
+			const int gblink = WinGetGBLinkMode ();
+			mii.fState = (gblink == 1) ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
+			mii.fState = (gblink == 2) ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
+		}
 	}
 
 	{
@@ -9980,9 +10054,11 @@ void WinToggleGBLink (int mode)
 		return;
 	}
 
-	// Belt and braces behind the greyed-out menu — linking two instances
-	// that have nothing to talk to each other with is just two dead windows.
-	if (!Settings.SuperGameBoy)
+	// Belt and braces behind the hidden menu. Both flags are needed: the
+	// BIOS path leaves SuperGameBoy FALSE and only sets SGB_BIOSModeActive,
+	// so testing the former alone would refuse to link in BIOS mode, which
+	// is the default.
+	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
 	{
 		S9xSetInfoString ("Link cable: load a Game Boy game first");
 		return;

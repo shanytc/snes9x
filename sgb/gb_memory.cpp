@@ -13,6 +13,7 @@
 #include "gb_timer.h"
 #include "gb_joypad.h"
 #include "gb_mbc.h"
+#include "gb_serial.h"
 #include "sgb.h"
 
 #include <cstring>
@@ -567,7 +568,9 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 	{
 		case 0xFF00: return m.joypad ? JoypadRead(*m.joypad) : 0xFF;
 		case 0xFF01: return m.serial_data;
-		case 0xFF02: return static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
+		case 0xFF02:
+			return m.serial ? SerialReadSC(*m.serial, m)
+			                : static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
@@ -630,23 +633,11 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			m.serial_data = value;
 			return;
 		case 0xFF02:
-			m.serial_control = value;
-			// Internal clock (bit 0 = 1) completes instantly with no peer:
-			// push the byte to the observer callback and fire the serial IRQ,
-			// then clear the start bit. External clock (bit 0 = 0) has no
-			// partner clocking bits in, so bit 7 stays set and no IRQ fires —
-			// matching real DMG with a disconnected link cable. Games like
-			// Tetris Plus rely on this silence to detect "no link partner".
-			// SB latches $FF: disconnected MISO floats high, so each clock
-			// shifts in a 1. Alleyway's serial-IRQ input loop depends on this.
-			if ((value & 0x81) == 0x81)
-			{
-				if (m.serial_cb) m.serial_cb(m.serial_user, m.serial_data);
-				m.serial_bits  = 8;  // clocked off DIV bit 8 in TimerStep
-				m.serial_guard = 0;
-			}
-			else
-				m.serial_bits = 0;
+			// gb_serial.cpp owns what a start bit means: unlinked it keeps
+			// the original instant-completion stub, linked it clocks eight
+			// real bit periods and swaps a byte with the peer.
+			if (m.serial) SerialWriteSC(*m.serial, m, value);
+			else          m.serial_control = value;
 			return;
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			if (m.timer) TimerWrite(*m.timer, m, addr, value);

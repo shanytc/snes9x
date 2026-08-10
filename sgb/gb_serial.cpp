@@ -4,28 +4,14 @@
    For further information, consult the LICENSE file in the root directory.
 \*****************************************************************************/
 
-// Game Boy serial port + link cable.
+// Game Boy serial port: the shift register itself, plus the BGB 1.4 link
+// protocol (https://bgb.bircd.org/bgblink.html) over gb_link.cpp.
 //
-// Two halves live here. The first is the shift register itself: SC bit 0
-// picks who drives the clock, and eight bit periods later SB holds what
-// the other end shifted in. The second is the BGB 1.4 link protocol
-// (https://bgb.bircd.org/bgblink.html) layered on the TCP transport in
-// gb_link.cpp, which is what carries that byte to the other emulator.
-// Speaking BGB's protocol rather than something bespoke means a session
-// pairs with BGB, SameBoy and Emulicious as readily as with a second
-// Snes9x — and localhost is just a peer like any other.
+//   master (SC=$81): send sync1 -> 8 bit periods -> peer's sync2 into SB
+//   slave  (SC=$80): arm, wait for peer's sync1, answer sync2, complete
 //
-// Transfer flow, master side (SC = $81):
-//   write SC -> send sync1(our SB) -> count 8 bit periods -> peer's sync2
-//   byte lands in SB, serial IRQ fires, SC bit 7 clears.
-// Slave side (SC = $80):
-//   write SC arms a passive transfer -> peer's sync1 arrives -> we answer
-//   sync2(our SB) and complete immediately.
-//
-// With no peer the port keeps its original stub behaviour so unlinked
-// games are bit-for-bit unaffected: internal clock completes at once
-// reading $FF back (a disconnected MISO floats high), external clock
-// never completes at all, which is how games detect "no cable".
+// With no peer the port keeps its original stub behaviour, so unlinked
+// games are bit-for-bit unaffected.
 
 #include "gb_serial.h"
 #include "gb_link.h"
@@ -52,45 +38,37 @@ constexpr uint8_t kStatusRunning          = 0x01;
 constexpr uint8_t kStatusPaused           = 0x02;
 constexpr uint8_t kStatusSupportReconnect = 0x04;
 
-// Shift-clock bit periods in T-cycles. 4194304 / 8192 = 512 for the
-// normal clock, 4194304 / 262144 = 16 for the CGB fast clock. Double
-// speed needs no special case: SerialStep is billed in CPU-domain
-// cycles, which already run twice as fast.
+// Bit periods in T-cycles: 8192 Hz normal, 262144 Hz CGB fast. Double
+// speed needs no case - SerialStep is billed in CPU-domain cycles.
 constexpr int32_t kBitPeriodNormal = 512;
 constexpr int32_t kBitPeriodFast   = 16;
 
-// How often to service the socket, in T-cycles (~0.24 ms). Frequent
-// enough that a slave answers a peer's sync1 promptly, rare enough that
-// the non-blocking recv() costs nothing measurable.
+// Socket service interval in T-cycles (~0.24 ms): prompt enough for a
+// slave to answer sync1, rare enough to cost nothing.
 constexpr int32_t kPollInterval = 1024;
 
 // How often to volunteer our timestamp so the peer can pace itself (~1 ms).
 constexpr int32_t kTimestampInterval = 4096;
 
-// How long a peer's transfer waits for our game to arm its side before we
-// give up and ack it (~1 ms). Covers the usual few-hundred-cycle skew
-// between two independently free-running emulators.
+// How long a peer's transfer waits for our game to arm (~1 ms), covering
+// the skew between two free-running emulators.
 constexpr int32_t kPendingHoldCycles = 4096;
 
-// Ceiling on how long the master may stall the emulation thread waiting
-// for the peer's reply. Generous enough for an internet round trip,
-// bounded so a peer that freezes can't take this instance down with it.
+// Ceiling on the master's stall waiting for a reply - bounded so a frozen
+// peer can't take this instance down with it.
 constexpr int kMasterWaitMs = 500;
 
-// Once a wait has timed out the peer is presumed paused or gone, and
-// paying the full ceiling on every subsequent byte would freeze this side
-// solid. Drop to a token wait that still notices the peer coming back.
+// After one timeout the peer is presumed paused: drop to a token wait, or
+// every byte would cost the full ceiling.
 constexpr int kStalledWaitMs = 20;
 constexpr int kWaitSliceMs   = 5;
 
-// The Serial currently being stepped, plus the bus it belongs to, so the
-// UI can report live counters and pump the socket while the emulation
-// thread is parked in a modal dialog. There is only ever one GB core.
+// The Serial being stepped and its bus, so the UI can pump the socket
+// while the emulation thread is parked. Only ever one GB core.
 Serial *g_active     = nullptr;
 Memory *g_active_mem = nullptr;
 
-// Session state for the attached peer. Not emulation state and never
-// serialized — it belongs to the connection, not to the Game Boy.
+// Peer session state. Never serialized: it belongs to the connection.
 struct LinkSession
 {
 	bool     handshaked        = false;
@@ -100,17 +78,15 @@ struct LinkSession
 	uint32_t transfers         = 0;
 	bool     stalled           = false;   // a master wait timed out
 
-	// Which end drove the last transfer. Not a property of the connection:
-	// the games pick it per byte via SC bit 0, so it can change mid-session.
-	// 0 = nothing exchanged yet, 1 = we clocked it, 2 = the peer did.
+	// Who drove the last transfer, chosen per byte by the games via SC
+	// bit 0: 0 = nothing yet, 1 = us, 2 = the peer.
 	uint8_t  driving           = 0;
 	uint8_t  reported          = 0;   // last value handed to the host UI
 	int64_t  next_report       = 0;   // real-cycle gate on re-announcing
 };
 
-// Games that alternate master and slave every byte would otherwise repaint
-// the OSD continuously; roughly three seconds of GB real time between
-// announcements is enough to stay readable.
+// Games alternating master/slave per byte would repaint the OSD forever;
+// ~3 s of GB time between announcements keeps it readable.
 constexpr int64_t kRoleReportInterval = 3 * 4194304;
 
 LinkSession g_session;
@@ -149,8 +125,8 @@ void SendStatus()
 	           0, 0, 0);
 }
 
-// Finish a transfer we clocked ourselves. Without a peer byte the wire
-// idles high, which is the same $FF an unplugged cable shifts in.
+// Finish a transfer we clocked. With no peer byte the wire idles high,
+// the same $FF an unplugged cable shifts in.
 void CompleteActive(Serial &s, Memory &mem)
 {
 	mem.serial_data    = s.peer_valid ? s.peer_data : 0xFF;
@@ -181,8 +157,8 @@ void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
 	switch (p.b1)
 	{
 		case kCmdVersion:
-			// Mismatched protocol means the peer speaks something we'd
-			// misread as transfers; drop rather than corrupt saves.
+			// A mismatched protocol reads as bogus transfers, which can
+			// corrupt a trade. Drop instead.
 			if (p.b2 != 1 || p.b3 != 4 || p.b4 != 0)
 			{
 				LinkStop();
@@ -210,15 +186,14 @@ void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
 			}
 			else if (s.active)
 			{
-				// Both ends driving the clock. Nothing to give, so ack it;
-				// on real hardware this collision is garbage too.
+				// Both ends clocking: nothing to give, so ack. Hardware
+				// produces garbage here too.
 				SendPacket(kCmdSync3, 1, 0, 0, 0);
 			}
 			else
 			{
-				// Peer got here first. Hold the byte briefly — our game
-				// very likely arms its side within the next few hundred
-				// cycles, and dropping it would cost a whole retry cycle.
+				// Peer got here first; hold briefly, since our game very
+				// likely arms within a few hundred cycles.
 				s.pending_valid = true;
 				s.pending_data  = p.b2;
 				s.pending_age   = 0;
@@ -246,8 +221,7 @@ void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
 
 		case kCmdJoypad:
 		case kCmdWantDisconnect:
-			// Remote control is out of scope; wantdisconnect only tells us
-			// not to auto-reconnect, which we never do.
+			// Remote control is out of scope, and we never auto-reconnect.
 			return;
 
 		default:
@@ -265,15 +239,13 @@ void ServiceLink(Serial &s, Memory &mem)
 	{
 		if (g_session.handshaked)
 		{
-			// Peer vanished. Release any transfer waiting on it so the
-			// game sees a dead cable instead of hanging on SC bit 7.
+			// Release any waiting transfer, or the game hangs on SC bit 7.
 			g_session.handshaked = false;
 			s.pending_valid      = false;
 			if (s.active) { s.peer_valid = false; CompleteActive(s, mem); }
 			s.passive = false;
 		}
-		// A server drops back to listening after a peer leaves, so the next
-		// arrival needs a fresh version packet.
+		// The next arrival needs a fresh version packet.
 		s.handshake_sent = false;
 		return;
 	}
@@ -314,11 +286,8 @@ void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
 
 void SerialReset(Serial &s, bool cgb)
 {
-	// A live cable survives a GB reset — power-cycling a Game Boy does not
-	// unplug it. Only the transfer machinery is rebuilt. handshake_sent has
-	// to be carried over by hand: it belongs to the TCP connection, not to
-	// the console, and clearing it would put a second version packet on a
-	// wire that has already been introduced.
+	// A reset does not unplug the cable, so only the transfer machinery is
+	// rebuilt; handshake_sent belongs to the connection, not the console.
 	const bool still_linked = s.handshake_sent && LinkIsConnected();
 
 	const Serial fresh;
@@ -377,9 +346,8 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 
 	if (!LinkIsConnected())
 	{
-		// Unlinked: the original stub path, unchanged. Internal clock
-		// completes at once with $FF shifted in; external clock leaves
-		// bit 7 set forever, which is how games spot a missing cable.
+		// Unlinked stub path: internal clock completes at once, external
+		// leaves bit 7 set, which is how games spot a missing cable.
 		s.active = s.passive = false;
 		if ((value & 0x81) == 0x81)
 		{
@@ -400,8 +368,8 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 
 	if (value & 0x01)
 	{
-		// Internal clock: we are the master. Put our byte on the wire now
-		// and let the bit countdown decide when the answer is due.
+		// Internal clock: we drive. Byte goes out now; the bit countdown
+		// decides when the answer is due.
 		if (g_serial_cb) g_serial_cb(mem.serial_data);
 
 		s.passive       = false;
@@ -514,9 +482,8 @@ LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap)
 {
 	SerialLinkDisconnect();
 
-	// Try to be the listener first. Success means this is the first
-	// instance up; failure means the port is taken, which is exactly the
-	// signal that the other instance is already waiting for us.
+	// Listener first: winning the bind means we are the first instance up,
+	// losing it means the other one is already waiting.
 	if (LinkStartServer(port, err, err_cap))
 	{
 		g_role = LinkRole::Server;
@@ -529,9 +496,8 @@ LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap)
 		return g_role;
 	}
 
-	// Port was taken a moment ago but nothing answered: the other instance
-	// was on its way out and has now released it. Take it over rather than
-	// reporting a failure the user would have to click through.
+	// Port was taken but nothing answered: the other instance was on its
+	// way out, so take it over rather than failing.
 	if (LinkStartServer(port, err, err_cap))
 	{
 		g_role = LinkRole::Server;
@@ -575,6 +541,12 @@ void SerialLinkPump()
 	else                          LinkPoll();
 }
 
+int SerialLinkPlayerCount()
+{
+	if (SerialLinkIsConnected()) return 2;
+	return SerialLinkIsEnabled() ? 1 : 0;
+}
+
 bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 {
 	if (!buf || cap == 0) return false;
@@ -586,9 +558,7 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 	}
 	if (g_session.driving == 0 || g_session.driving == g_session.reported) return false;
 
-	// Rate-limit re-announcements so a game that alternates master and
-	// slave per byte doesn't repaint the OSD forever. The first report is
-	// always let through.
+	// Rate-limit re-announcements; the first is always let through.
 	const int64_t now = g_active ? g_active->real_cycles : 0;
 	if (g_session.reported != 0 && now < g_session.next_report) return false;
 
@@ -618,17 +588,15 @@ void SerialLinkStatusText(char *buf, size_t cap)
 			std::snprintf(buf, cap, "Link cable: connecting...");
 			return;
 		case LinkState::Connected:
-			// Socket up but no version packet yet means the peer isn't
-			// running the protocol — worth distinguishing from a real link,
-			// or a silent game looks identical to a broken connection.
+			// Socket up but no version packet: distinguish from a real link,
+			// or a silent game looks like a broken connection.
 			if (!g_session.handshaked)
 			{
 				std::snprintf(buf, cap, "Link cable: connected, waiting for handshake");
 				return;
 			}
-			// The suffix is left off until a byte has actually moved: which
-			// end drives the clock is the games' choice, not ours, so before
-			// the first transfer there is genuinely nothing to report.
+			// No suffix until a byte has moved: the games choose who drives,
+			// so before the first transfer there is nothing to report.
 			std::snprintf(buf, cap, "Link cable: connected%s%s",
 			              g_session.driving == 1 ? " (Master)"
 			                                     : (g_session.driving == 2 ? " (Passive)" : ""),

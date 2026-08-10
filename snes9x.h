@@ -251,10 +251,8 @@ struct SSettings
 	bool8	GB_BIOSActive;       // runtime: the currently-loaded GB/GBC cart is booting through such a boot ROM
 	char	GB_BIOSPath[260];    // runtime: absolute path of the GB/GBC boot ROM in use (empty otherwise)
 	char	GBRomPath[260];      // runtime: path of the currently-loaded GB/GBC ROM (for BIOS-mode reload)
-	uint8	GBLinkMode;          // link cable role: 0=off, 1=listen (server), 2=connect (client)
-	char	GBLinkHost[128];     // peer host/IP dialled in client mode ("localhost" for same-PC play)
-	uint16	GBLinkPort;          // TCP port for the link session (8765 = BGB's default)
-	bool8	GBLinkAutoStart;     // open the session automatically when a GB/GBC ROM is loaded
+	uint16	GBLinkPort;          // loopback port for the GB link cable (8765 = BGB's default)
+	bool8	GBLinkPeerInstance;  // runtime: launched as the auto-spawned second instance, so never spawns one itself
 	bool8	MouseMaster;
 	bool8	SuperScopeMaster;
 	bool8	JustifierMaster;

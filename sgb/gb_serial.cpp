@@ -102,6 +102,7 @@ struct LinkSession
 };
 
 LinkSession g_session;
+LinkRole    g_role = LinkRole::None;
 
 SerialByteCallback g_serial_cb = nullptr;
 
@@ -489,16 +490,32 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 
 // ---- Link session control --------------------------------------------------
 
-bool SerialLinkListen(uint16_t port, char *err, size_t err_cap)
+LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap)
 {
 	SerialLinkDisconnect();
-	return LinkStartServer(port, err, err_cap);
+
+	// Try to be the listener first. Success means this is the first
+	// instance up; failure means the port is taken, which is exactly the
+	// signal that the other instance is already waiting for us.
+	if (LinkStartServer(port, err, err_cap))
+	{
+		g_role = LinkRole::Server;
+		return g_role;
+	}
+
+	if (LinkStartClient("127.0.0.1", port, err, err_cap))
+	{
+		g_role = LinkRole::Client;
+		return g_role;
+	}
+
+	g_role = LinkRole::None;
+	return g_role;
 }
 
-bool SerialLinkConnect(const char *host, uint16_t port, char *err, size_t err_cap)
+LinkRole SerialLinkGetRole()
 {
-	SerialLinkDisconnect();
-	return LinkStartClient(host, port, err, err_cap);
+	return SerialLinkIsEnabled() ? g_role : LinkRole::None;
 }
 
 void SerialLinkDisconnect()
@@ -508,6 +525,7 @@ void SerialLinkDisconnect()
 
 	LinkStop();
 	g_session = LinkSession();
+	g_role    = LinkRole::None;
 
 	if (g_active)
 	{
@@ -542,17 +560,25 @@ void SerialLinkStatusText(char *buf, size_t cap)
 			return;
 		}
 		case LinkState::Listening:
-			std::snprintf(buf, cap, "Link cable: waiting for a peer (%s)", LinkPeerName());
+			std::snprintf(buf, cap, "Link cable: waiting for the other instance");
 			return;
 		case LinkState::Connecting:
-			std::snprintf(buf, cap, "Link cable: connecting to %s...", LinkPeerName());
+			std::snprintf(buf, cap, "Link cable: connecting...");
 			return;
 		case LinkState::Connected:
-			std::snprintf(buf, cap, "Link cable: connected to %s - %u byte%s%s",
-			              LinkPeerName(),
+			// Socket up but no version packet yet means the peer isn't
+			// running the protocol — worth distinguishing from a real link,
+			// or a silent game looks identical to a broken connection.
+			if (!g_session.handshaked)
+			{
+				std::snprintf(buf, cap, "Link cable: connected, waiting for handshake");
+				return;
+			}
+			std::snprintf(buf, cap, "Link cable: linked (%s) - %u byte%s%s",
+			              g_role == LinkRole::Server ? "server" : "client",
 			              static_cast<unsigned>(g_session.transfers),
 			              g_session.transfers == 1 ? "" : "s",
-			              g_session.stalled ? " (peer not responding)" : "");
+			              g_session.stalled ? " - peer not responding" : "");
 			return;
 	}
 }

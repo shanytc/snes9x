@@ -1833,8 +1833,6 @@ static void AutoStartGBLink(void)
 
 static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
 {
-    AutoStartGBLink();
-
     const std::string name = GBGameNameFromPath(gb_path);
     const char *region = Settings.PAL ? "PAL" : "NTSC";
     const bool sgbc = (bios_mode == 2) && S9xSGBSgbcActive();

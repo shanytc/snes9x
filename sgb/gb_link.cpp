@@ -169,22 +169,25 @@ void CloseConnection(socket_t &fd)
 	fd = SGB_INVALID_SOCKET;
 }
 
-// Peer went away. Both ends tear all the way down, listening socket
-// included: losing the other instance ends the session rather than
-// silently reverting to waiting for a new one, so the host UI can clear
-// its tick and the user starts a fresh cycle. Only reached once a peer
-// was actually attached — a listener that has never been connected to
-// stays listening.
+// Peer went away. The server owns the session and keeps hosting: it drops
+// back to Listening so the client can unplug and plug back in on its own,
+// with one click and no second window. A client has no listening socket to
+// fall back to, so it goes Off and its tick clears.
+//
+// Tearing the listener down here as well would mean re-establishing always
+// cost a click in each window, which is the wrong trade for the side that
+// did not ask to disconnect.
 void DropPeer(const char *reason)
 {
 	CloseConnection(g_link.peer_fd);
-	CloseSocket(g_link.listen_fd);
 	g_link.rx_len = g_link.rx_out = 0;
 	g_link.tx_len = 0;
 	if (reason && *reason)
 		std::snprintf(g_link.err, sizeof g_link.err, "%s", reason);
 
-	g_link.state = LinkState::Off;
+	g_link.state = (g_link.listen_fd != SGB_INVALID_SOCKET)
+	                   ? LinkState::Listening
+	                   : LinkState::Off;
 }
 
 // Compact the receive buffer so a long session doesn't walk rx_out off

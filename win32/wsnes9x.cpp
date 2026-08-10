@@ -5439,7 +5439,15 @@ static void CheckMenuStates ()
 		static HMENU s_link_parent = NULL;
 		static UINT  s_link_pos    = 0;
 
-		const bool show = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive ||
+		// SGB1 has no link port -- SGB2 was the revision that added one --
+		// so the cable is not offered while the SGB1 BIOS is driving.
+		// GameBoyRunMode alone cannot say that: the BIOS-less path parks
+		// every non-CGB cart in mode 1 too, and those are bare Game Boys
+		// with a perfectly good port.
+		const bool sgb1_bios = Settings.SGB_BIOSModeActive &&
+		                       Settings.GameBoyRunMode == 1;
+		const bool show = ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
+		                   !sgb1_bios) ||
 		                  S9xSGBLinkIsEnabled ();
 		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Data Link"), show,
 		                   &s_link_hmenu, &s_link_parent, &s_link_pos);
@@ -10061,6 +10069,12 @@ void WinToggleGBLink (int mode)
 	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
 	{
 		S9xSetInfoString ("Link cable: load a Game Boy game first");
+		return;
+	}
+
+	if (Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1)
+	{
+		S9xSetInfoString ("Link cable: the Super Game Boy 1 has no link port - use SGB2");
 		return;
 	}
 

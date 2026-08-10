@@ -150,6 +150,25 @@ void CloseSocket(socket_t &fd)
 	}
 }
 
+// Close a live connection without parking it in TIME_WAIT. On the server
+// side the accepted socket owns the well-known port, and a lingering one
+// makes the next bind fail for minutes under SO_EXCLUSIVEADDRUSE — which
+// is exactly the unplug-then-plug-back-in path. Nothing in the protocol
+// needs a graceful flush at close, so a reset is the right trade.
+void CloseConnection(socket_t &fd)
+{
+	if (fd == SGB_INVALID_SOCKET) return;
+
+	linger lg;
+	lg.l_onoff  = 1;
+	lg.l_linger = 0;
+	setsockopt(fd, SOL_SOCKET, SO_LINGER,
+	           reinterpret_cast<const char *>(&lg), sizeof lg);
+
+	SGB_CLOSESOCKET(fd);
+	fd = SGB_INVALID_SOCKET;
+}
+
 // Peer went away. Both ends tear all the way down, listening socket
 // included: losing the other instance ends the session rather than
 // silently reverting to waiting for a new one, so the host UI can clear
@@ -158,7 +177,7 @@ void CloseSocket(socket_t &fd)
 // stays listening.
 void DropPeer(const char *reason)
 {
-	CloseSocket(g_link.peer_fd);
+	CloseConnection(g_link.peer_fd);
 	CloseSocket(g_link.listen_fd);
 	g_link.rx_len = g_link.rx_out = 0;
 	g_link.tx_len = 0;
@@ -435,7 +454,7 @@ bool LinkStartClient(const char *host, uint16_t port, char *err, size_t err_cap)
 
 void LinkStop()
 {
-	CloseSocket(g_link.peer_fd);
+	CloseConnection(g_link.peer_fd);
 	CloseSocket(g_link.listen_fd);
 	g_link.rx_len = g_link.rx_out = 0;
 	g_link.tx_len = 0;
@@ -459,9 +478,13 @@ LinkState LinkPoll()
 			break;
 
 		case LinkState::Connected:
-			RejectExtraPeers();
+			// Read first. A peer that dropped and immediately re-dialled
+			// would otherwise be turned away by RejectExtraPeers as a third
+			// instance, because we had not yet noticed the old connection
+			// was gone — the reconnect died before we knew we were free.
 			FlushTx();
 			PumpRx();
+			if (g_link.state == LinkState::Connected) RejectExtraPeers();
 			break;
 	}
 	return g_link.state;

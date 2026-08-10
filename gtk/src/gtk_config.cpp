@@ -254,6 +254,11 @@ int Snes9xConfig::load_defaults()
     Settings.PF94TimerDisplay = 0;
     Settings.CC92TimerMinutes = 6;
     Settings.CC92TimerDisplay = 0;
+    
+    Settings.GBLinkMode = 0;
+    Settings.GBLinkPort = 8765;
+    Settings.GBLinkAutoStart = false;
+    snprintf(Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "localhost");
 
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
@@ -484,6 +489,10 @@ int Snes9xConfig::save_config_file()
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
     outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
     outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
+    outint("LinkMode", Settings.GBLinkMode, "Game Boy link cable role: 0=off, 1=listen for a peer (server), 2=connect to a peer (client)");
+    outstring("LinkHost", Settings.GBLinkHost, "host name or IP of the link cable peer, used in client mode ('localhost' to link two emulators on this PC)");
+    outint("LinkPort", Settings.GBLinkPort, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
+    outbool("LinkAutoStart", Settings.GBLinkAutoStart, "Open the link cable session automatically whenever a GB/GBC ROM is loaded");
 
     section = "Input";
     outstring("ControllerOption", controller_option_names[controller_option],
@@ -780,6 +789,20 @@ int Snes9xConfig::load_config_file()
     inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
     inint("GBBootPolicy", Settings.GBBootPolicy);
     Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+
+    inint("LinkMode", Settings.GBLinkMode);
+    if (Settings.GBLinkMode > 2)
+        Settings.GBLinkMode = 0;
+    inint("LinkPort", Settings.GBLinkPort);
+    if (Settings.GBLinkPort == 0)
+        Settings.GBLinkPort = 8765;
+    inbool("LinkAutoStart", Settings.GBLinkAutoStart);
+    {
+        std::string host;
+        instr("LinkHost", host);
+        if (!host.empty())
+            snprintf(Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "%s", host.c_str());
+    }
 
     section = "Input";
 

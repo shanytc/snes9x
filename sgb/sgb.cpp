@@ -2526,6 +2526,11 @@ void S9xSGBLinkGetStatusText(char *buf, size_t cap)
 	SGB::SerialLinkStatusText(buf, cap);
 }
 
+bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap)
+{
+	return SGB::SerialLinkTakeStatusChange(buf, cap);
+}
+
 namespace {
 	int32_t g_snes_cycle_accum = 0;
 	// SGB2/DMG unspent SNES cycles, pre-multiplied by the GB clock.

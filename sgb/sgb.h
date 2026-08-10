@@ -316,8 +316,12 @@ void S9xSGBLinkPump(void);
 bool S9xSGBLinkIsEnabled(void);
 bool S9xSGBLinkIsConnected(void);
 
-// One-line state for the OSD / status bar.
+// One-line state for the OSD, e.g. "Link cable: connected (Master)".
 void S9xSGBLinkGetStatusText(char *buf, size_t cap);
+
+// True once when the driving end changed and is worth re-announcing;
+// fills `buf` with the text to show. Poll it from the frame loop.
+bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap);
 
 // Accumulator-based SNES→GB cycle stepping for BIOS mode. Call per
 // SNES opcode (or per H event) with the number of SNES master cycles

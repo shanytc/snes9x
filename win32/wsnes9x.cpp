@@ -5368,11 +5368,17 @@ static void CheckMenuStates ()
 
 	// Read back from the link itself, so when the peer unplugs, this
 	// instance's tick clears on its own without any message passing.
+	// The cable is only offered with a Game Boy game running, but a live
+	// link is never greyed out: the auto-spawned instance starts with no
+	// ROM, and greying it there would leave a ticked item it can't untick.
 	{
-		const int gblink = WinGetGBLinkMode ();
-		mii.fState = (gblink == 1) ? MFS_CHECKED : MFS_UNCHECKED;
+		const int  gblink = WinGetGBLinkMode ();
+		const UINT gray   = (Settings.SuperGameBoy || S9xSGBLinkIsEnabled ())
+		                        ? 0 : MFS_DISABLED;
+
+		mii.fState = ((gblink == 1) ? MFS_CHECKED : MFS_UNCHECKED) | gray;
 		SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
-		mii.fState = (gblink == 2) ? MFS_CHECKED : MFS_UNCHECKED;
+		mii.fState = ((gblink == 2) ? MFS_CHECKED : MFS_UNCHECKED) | gray;
 		SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
 	}
 
@@ -9913,8 +9919,9 @@ static void GBLinkSpawnPeer (int mode)
 	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return;
 
 	// Same-game mode hands the child our ROM as a plain positional argument
-	// so it loads through the normal path. With no GB ROM loaded there is
-	// nothing to pass, so it quietly behaves like the different-game item.
+	// so it loads through the normal path. The menu is greyed out without a
+	// Game Boy game running, so the pathless branch is only reached by the
+	// other-game item.
 	TCHAR cmd[MAX_PATH * 3];
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
 		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s \"%s\""), exe, GBLINK_PEER_SWITCH,
@@ -9970,6 +9977,14 @@ void WinToggleGBLink (int mode)
 		S9xSGBLinkDisconnect ();
 		GBLinkMode = GBLINK_OFF;
 		S9xSetInfoString ("Link cable: disconnected");
+		return;
+	}
+
+	// Belt and braces behind the greyed-out menu — linking two instances
+	// that have nothing to talk to each other with is just two dead windows.
+	if (!Settings.SuperGameBoy)
+	{
+		S9xSetInfoString ("Link cable: load a Game Boy game first");
 		return;
 	}
 

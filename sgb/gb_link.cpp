@@ -4,17 +4,11 @@
    For further information, consult the LICENSE file in the root directory.
 \*****************************************************************************/
 
-// Non-blocking TCP transport for the Game Boy link cable. See gb_link.h
-// for the contract; this file is sockets and byte framing only.
-//
-// Everything is single-threaded and driven from LinkPoll(), which the GB
-// serial engine calls from the emulation thread. No locks, no worker
-// thread: a link session moves at most a few hundred 8-byte packets per
-// second, so polling costs less than the synchronisation would.
+// Non-blocking TCP transport for the Game Boy link cable — sockets and
+// byte framing only. Single-threaded, driven entirely from LinkPoll().
 
-// getaddrinfo and friends sit behind feature-test macros that a strict
-// -std=c++NN dialect switches off. Ask for them before anything pulls in
-// a libc header.
+// getaddrinfo sits behind feature-test macros a strict -std=c++NN turns
+// off; ask for them before any libc header is pulled in.
 #if !defined(_WIN32)
 	#ifndef _POSIX_C_SOURCE
 		#define _POSIX_C_SOURCE 200112L
@@ -33,9 +27,8 @@
 #include <cstring>
 
 #ifdef _WIN32
-	// getaddrinfo/getnameinfo are gated behind XP-era _WIN32_WINNT in both
-	// the MSVC SDK and MinGW headers, and MinGW may have already picked a
-	// lower default — raise it before winsock2.h is pulled in.
+	// getaddrinfo is gated behind XP-era _WIN32_WINNT; MinGW may default
+	// lower, so raise it before winsock2.h.
 	#if defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0501
 		#undef _WIN32_WINNT
 	#endif
@@ -150,11 +143,8 @@ void CloseSocket(socket_t &fd)
 	}
 }
 
-// Close a live connection without parking it in TIME_WAIT. On the server
-// side the accepted socket owns the well-known port, and a lingering one
-// makes the next bind fail for minutes under SO_EXCLUSIVEADDRUSE — which
-// is exactly the unplug-then-plug-back-in path. Nothing in the protocol
-// needs a graceful flush at close, so a reset is the right trade.
+// Close without parking the well-known port in TIME_WAIT, which would
+// make the next bind fail for minutes under SO_EXCLUSIVEADDRUSE.
 void CloseConnection(socket_t &fd)
 {
 	if (fd == SGB_INVALID_SOCKET) return;
@@ -169,25 +159,18 @@ void CloseConnection(socket_t &fd)
 	fd = SGB_INVALID_SOCKET;
 }
 
-// Peer went away. The server owns the session and keeps hosting: it drops
-// back to Listening so the client can unplug and plug back in on its own,
-// with one click and no second window. A client has no listening socket to
-// fall back to, so it goes Off and its tick clears.
-//
-// Tearing the listener down here as well would mean re-establishing always
-// cost a click in each window, which is the wrong trade for the side that
-// did not ask to disconnect.
+// At two players, one leaving ends it for both, so the listener goes too.
+// A 4-player cable would keep hosting here — see SerialLinkPlayerCount.
 void DropPeer(const char *reason)
 {
 	CloseConnection(g_link.peer_fd);
+	CloseSocket(g_link.listen_fd);
 	g_link.rx_len = g_link.rx_out = 0;
 	g_link.tx_len = 0;
 	if (reason && *reason)
 		std::snprintf(g_link.err, sizeof g_link.err, "%s", reason);
 
-	g_link.state = (g_link.listen_fd != SGB_INVALID_SOCKET)
-	                   ? LinkState::Listening
-	                   : LinkState::Off;
+	g_link.state = LinkState::Off;
 }
 
 // Compact the receive buffer so a long session doesn't walk rx_out off
@@ -224,7 +207,7 @@ void FlushTx()
 
 		const int e = SGB_SOCKET_ERRNO;
 		if (sent < 0 && e == SGB_EWOULDBLOCK) return;   // retry next poll
-		DropPeer("Link closed by peer (send failed)");
+		DropPeer("Link closed by peer");
 		return;
 	}
 }
@@ -243,14 +226,13 @@ void PumpRx()
 		if (got == 0) { DropPeer("Link closed by peer"); return; }
 
 		if (SGB_SOCKET_ERRNO == SGB_EWOULDBLOCK) return;
-		DropPeer("Link closed by peer (recv failed)");
+		DropPeer("Link closed by peer");
 		return;
 	}
 }
 
-// A Game Boy has one link port. Anything that dials in while a peer is
-// already attached gets accepted and closed at once, so it sees an honest
-// refusal instead of sitting unnoticed in the backlog looking connected.
+// One link port per Game Boy: anything dialling in while a peer is
+// attached is accepted and closed, so it gets an honest refusal.
 void RejectExtraPeers()
 {
 	if (g_link.listen_fd == SGB_INVALID_SOCKET) return;
@@ -295,9 +277,8 @@ void PollAccept()
 	AdoptPeer(fd);
 }
 
-// Non-blocking connect finishes asynchronously: the socket becomes
-// writable on success and (on POSIX) also on failure, so the pending
-// SO_ERROR is what actually distinguishes the two.
+// A non-blocking connect goes writable on both success and failure, so
+// the pending SO_ERROR is what distinguishes them.
 void PollConnect()
 {
 	fd_set wr, ex;
@@ -346,11 +327,8 @@ bool LinkStartServer(uint16_t port, char *err, size_t err_cap)
 		return false;
 	}
 
-	// Binding is how the auto-sense picks a role, so it must fail cleanly
-	// when the other instance already holds the port. Windows SO_REUSEADDR
-	// would let a second socket bind the same port and silently steal it,
-	// so ask for the opposite there; on POSIX SO_REUSEADDR only recycles
-	// TIME_WAIT and still rejects a live listener, which is what we want.
+	// Bind is the role probe, so it must fail when the peer holds the port.
+	// Windows SO_REUSEADDR would allow a second bind, so invert it there.
 	int one = 1;
 #ifdef _WIN32
 	setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
@@ -360,9 +338,8 @@ bool LinkStartServer(uint16_t port, char *err, size_t err_cap)
 	           reinterpret_cast<const char *>(&one), sizeof one);
 #endif
 
-	// Loopback only: the link is same-PC by design, and not listening on
-	// every interface means no firewall prompt and nothing exposed to the
-	// network.
+	// Loopback only: same-PC by design, so nothing is exposed and Windows
+	// raises no firewall prompt.
 	sockaddr_in addr{};
 	addr.sin_family      = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -481,10 +458,8 @@ LinkState LinkPoll()
 			break;
 
 		case LinkState::Connected:
-			// Read first. A peer that dropped and immediately re-dialled
-			// would otherwise be turned away by RejectExtraPeers as a third
-			// instance, because we had not yet noticed the old connection
-			// was gone — the reconnect died before we knew we were free.
+			// Read first: a peer that dropped and re-dialled would otherwise
+			// be rejected as a third instance before we noticed it had gone.
 			FlushTx();
 			PumpRx();
 			if (g_link.state == LinkState::Connected) RejectExtraPeers();
@@ -504,8 +479,8 @@ bool LinkSend(const LinkPacket &p)
 
 	if (g_link.tx_len + kPacketBytes > kTxCap)
 	{
-		// The peer has stopped draining for long enough to fill the queue;
-		// treating that as a dead link beats silently dropping transfers.
+		// Peer stopped draining long enough to fill the queue: treat as dead
+		// rather than silently dropping transfers.
 		DropPeer("Link stalled (send queue full)");
 		return false;
 	}

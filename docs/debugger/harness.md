@@ -65,6 +65,16 @@ Build notes that cost time if missed:
 * Zip support needs `-I unzip -I win32/zlib/src` on **both** the core and the
   harness link, plus the `gz*` objects; `zlib.h`/`unzip.h` not found and
   `undefined reference to gzopen` are the two errors you will hit in order.
+* Then the bundled zlib and minizip still fail to link under cygwin, because
+  both assume Win32/MSVC:
+  * `undefined reference to _wopen` — `gzguts.h` turns on its `WIDECHAR` path
+    for `__CYGWIN__`, and cygwin has no `_wopen`. Link a stub; `WIDECHAR` only
+    gates `gzopen_w()`, which the harness never calls. Do **not** reach for
+    `-U__CYGWIN__` — it makes cygwin's own `<sys/fcntl.h>` redefine
+    `struct flock` and the build dies further from the cause.
+  * `undefined reference to fopen64` / `fseeko64` / `ftello64` — build
+    `unzip/ioapi.c` and `unzip/unzip.c` with `-DMINIZIP_FOPEN_NO_64`, which
+    maps them to the un-suffixed calls cygwin does provide.
 
 ## SGB visual regression suite
 
@@ -106,6 +116,13 @@ run both over the suspect ROMs and compare the PPMs byte-for-byte. If they match
 the code is exonerated and the baseline is simply stale. Confirm the ROM is
 deterministic first by running one binary twice — if that alone differs, nothing
 downstream means anything.
+
+**Known non-deterministic: the SFC-Box merged containers** (`pss61+62_merged`,
+`pss61+63_merged`, `pss61+64_merged`). Repeating `--filter pss61` on one
+unchanged binary reported, in order: `pss61+64`, none, `pss61+62`+`pss61+63`,
+none. The delta is a single colour (`4279c6` vs `3961c6`) on scattered pixels
+with geometry identical, never a structural difference. Treat a `CHANGED` on
+these as noise unless the geometry moved; re-run before investigating.
 
 ## Trace hooks
 

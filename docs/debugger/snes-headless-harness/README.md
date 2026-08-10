@@ -47,6 +47,36 @@ g++ -O2 -std=gnu++17 -fno-rtti -w -DRIGHTSHIFT_IS_SAR -D__LIBRETRO__ -DHAVE_STDI
 Use explicit `C:/...` paths for ROM/output args: the harness is a cygwin binary
 but the invoking shell may be git-bash, and their `/tmp` mappings differ.
 
+### Zip support (required by `snes_regression.py`)
+
+`win32/Roms/` is almost all `.zip`, so the regression suite needs a zip-capable
+build. Add `-DUNZIP_SUPPORT -DZLIB -Iwin32/zlib/src -Iunzip` to `CXXFLAGS`, add
+`loadzip.cpp` to the core list, and compile the C sources into the same lib:
+
+```sh
+for z in adler32 compress crc32 deflate gzclose gzlib gzread gzwrite infback \
+         inffast inflate inftrees trees uncompr zutil; do
+  gcc -O2 -w -DNDEBUG -Iwin32/zlib/src -c win32/zlib/src/$z.c -o /tmp/sn_obj/zlib_$z.o
+done
+# MINIZIP_FOPEN_NO_64: cygwin has fopen/fseeko/ftello, not the *64 spellings
+for u in unzip ioapi; do
+  gcc -O2 -w -DNDEBUG -DMINIZIP_FOPEN_NO_64 -Iwin32/zlib/src -Iunzip \
+      -c unzip/$u.c -o /tmp/sn_obj/unzip_$u.o
+done
+```
+
+One more link error remains: `undefined reference to _wopen`. `gzguts.h` enables
+its `WIDECHAR` path for `__CYGWIN__`, but cygwin provides no `_wopen`. `WIDECHAR`
+only gates `gzopen_w()`, which the harness never calls, so link a stub:
+
+```c
+#include <wchar.h>
+int _wopen(const wchar_t *p, int f, ...) { (void) p; (void) f; return (-1); }
+```
+
+Do **not** try `-U__CYGWIN__` instead — cygwin's own `<sys/fcntl.h>` then
+redefines `struct flock` and the build fails somewhere unrelated.
+
 ## Usage
 
 ```

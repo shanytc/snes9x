@@ -81,13 +81,25 @@ void    SerialWriteSC(Serial &s, Memory &mem, uint8_t value);
 uint8_t SerialReadSC(const Serial &s, const Memory &mem);
 
 // ---- Link session control (host UI facade) ---------------------------------
-// Host side of the connection: listen on `port`, or connect out to
-// `host:port`. Both return false and fill `err` when the socket can't be
-// set up. Only one session exists at a time; starting a new one drops any
-// existing link.
-bool SerialLinkListen(uint16_t port, char *err, size_t err_cap);
-bool SerialLinkConnect(const char *host, uint16_t port, char *err, size_t err_cap);
+// Which end of the cable this instance ended up as.
+enum class LinkRole : uint8_t
+{
+	None   = 0,
+	Server = 1,   // first one up: holds the port, waits for the peer
+	Client = 2    // second one up: found the port taken and dialled in
+};
+
+// Bring the cable up on loopback without asking the user which end they
+// are. Binding the port IS the probe: winning it means nobody is there
+// yet and this instance listens; losing it means the other end is already
+// up, so this one connects to it. The kernel arbitrates the bind, so two
+// instances toggled at the same instant cannot both become the server.
+LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap);
+
 void SerialLinkDisconnect();
+
+// Role of the live session, or None when the cable is unplugged.
+LinkRole SerialLinkGetRole();
 
 bool SerialLinkIsEnabled();     // a session is listening, connecting or connected
 bool SerialLinkIsConnected();   // a peer is attached and past the version handshake

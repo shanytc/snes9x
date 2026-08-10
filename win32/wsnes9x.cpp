@@ -5452,14 +5452,22 @@ static void CheckMenuStates ()
 		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Data Link"), show,
 		                   &s_link_hmenu, &s_link_parent, &s_link_pos);
 
-		// Ticks are read back from the link, so when the peer unplugs this
+		// Once a session exists its mode is settled — the client never chose
+		// it, and the server cannot switch without tearing down first — so
+		// the mode not in force is greyed out. The active one stays live
+		// because it doubles as the disconnect; unplugging re-enables both.
+		//
+		// Mode is read back from the live link, so when the peer leaves this
 		// instance's tick clears on its own with no message passing.
 		if (show)
 		{
-			const int gblink = WinGetGBLinkMode ();
-			mii.fState = (gblink == 1) ? MFS_CHECKED : MFS_UNCHECKED;
+			const int  gblink   = WinGetGBLinkMode ();
+			const UINT inactive = (gblink == 0) ? MFS_UNCHECKED
+			                                    : (MFS_UNCHECKED | MFS_DISABLED);
+
+			mii.fState = (gblink == 1) ? MFS_CHECKED : inactive;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
-			mii.fState = (gblink == 2) ? MFS_CHECKED : MFS_UNCHECKED;
+			mii.fState = (gblink == 2) ? MFS_CHECKED : inactive;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
 		}
 	}

@@ -284,16 +284,26 @@ void S9xSGBRunFrame(void);
 void S9xSGBRunCycles(int tcycles);
 
 // ---- Link cable ------------------------------------------------------------
-// Emulates the Game Boy link cable over TCP, speaking the BGB 1.4 link
-// protocol so the peer can be another Snes9x instance on localhost, a
-// machine across the network, or a different emulator entirely (BGB,
-// SameBoy, Emulicious). One side listens, the other connects; the two
-// instances run independent ROMs and exchange bytes through $FF01/$FF02.
+// Emulates the Game Boy link cable between two emulator instances on this
+// PC, speaking the BGB 1.4 link protocol over a loopback TCP socket. The
+// two instances run independent ROMs and exchange bytes through
+// $FF01/$FF02 — Pokemon Red <-> Blue trading and friends.
 //
-// Both entry points return false and fill `err` when the socket cannot be
-// opened. Starting a session replaces any existing one.
-bool S9xSGBLinkListen(unsigned short port, char *err, size_t err_cap);
-bool S9xSGBLinkConnect(const char *host, unsigned short port, char *err, size_t err_cap);
+// There is no server/client choice to make: the role is sensed. See
+// SerialLinkAutoStart in gb_serial.h for how binding the port doubles as
+// the probe. Roles below match SGB::LinkRole.
+#define S9X_GBLINK_NONE   0
+#define S9X_GBLINK_SERVER 1
+#define S9X_GBLINK_CLIENT 2
+
+// Bring the cable up on Settings.GBLinkPort, returning the role taken.
+// S9X_GBLINK_NONE means the socket could not be opened at all; `err` says
+// why. Starting a session replaces any existing one.
+int  S9xSGBLinkAutoStart(char *err, size_t err_cap);
+
+// Role of the live session, or S9X_GBLINK_NONE when unplugged.
+int  S9xSGBLinkGetRole(void);
+
 void S9xSGBLinkDisconnect(void);
 
 // Service the socket while the emulation loop is parked — the link

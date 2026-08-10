@@ -302,6 +302,20 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			S9xUsage();
 	}
 
+	// Strip our private link-cable switch before the portable parser sees
+	// it -- S9xParseArgs would take the unknown option for a ROM name.
+	for (int i = 0; i < count; i++)
+	{
+		if (strcasecmp(parameters[i], GBLINK_PEER_SWITCH_A) != 0)
+			continue;
+
+		Settings.GBLinkPeerInstance = TRUE;
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
+	}
+
 	const char* rf = S9xParseArgs (parameters, count);
 
     if(rf) // save rom_filename as TCHAR if available
@@ -959,10 +973,7 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
-	AddUIntC("LinkMode", Settings.GBLinkMode, 0, "Game Boy link cable role: 0=off, 1=listen for a peer (server), 2=connect to a peer (client).");
-	AddStringC("LinkHost", Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "localhost", "host name or IP of the link cable peer, used in client mode ('localhost' to link two emulators on this PC)");
-	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "TCP port for the link cable session. 8765 is BGB's default, so leaving it alone lets you link against BGB / SameBoy / Emulicious.");
-	AddBoolC("LinkAutoStart", Settings.GBLinkAutoStart, false, "true to open the link cable session automatically whenever a GB/GBC ROM is loaded");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Data Link. Only worth changing if something else on this PC already owns 8765.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

@@ -1589,27 +1589,8 @@ static std::string GBGameNameFromPath(const char *path)
     return s;
 }
 
-// Re-open the configured link cable session for a freshly loaded GB ROM.
-// Both LoadGB entry points converge on EmitSGBLoadBanner, so hooking it
-// there covers BIOS and BIOS-less loads alike. Failures are silent: a peer
-// that isn't listening yet is the normal case when the two players are
-// still getting set up, and the Link Cable dialog reports the real state.
-static void AutoStartGBLink(void)
-{
-    if (!Settings.GBLinkAutoStart || Settings.GBLinkMode == 0) return;
-    if (S9xSGBLinkIsEnabled()) return;   // an existing session survives ROM changes
-
-    char err[192];
-    if (Settings.GBLinkMode == 2)
-        S9xSGBLinkConnect(Settings.GBLinkHost, Settings.GBLinkPort, err, sizeof(err));
-    else
-        S9xSGBLinkListen(Settings.GBLinkPort, err, sizeof(err));
-}
-
 static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
 {
-    AutoStartGBLink();
-
     const std::string name = GBGameNameFromPath(gb_path);
     const char *region = Settings.PAL ? "PAL" : "NTSC";
     char msg[1024];

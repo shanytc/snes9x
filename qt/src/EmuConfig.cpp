@@ -347,10 +347,6 @@ bool EmuConfig::setDefaults(int section)
         superfx_clock_multiplier = 100;
         sound_filter = eGaussian;
         sgb_bios_preference = 2;
-        sgb_link_mode = 0;
-        sgb_link_host = "localhost";
-        sgb_link_port = 8765;
-        sgb_link_auto_start = false;
     }
 
     if (section == -1 || section == 4)
@@ -650,10 +646,6 @@ void EmuConfig::config(const std::string &filename, bool write)
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     BeginSection("SGB");
     Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
-    Int("LinkMode", sgb_link_mode, "Game Boy link cable role: 0=off, 1=listen for a peer (server), 2=connect to a peer (client)");
-    String("LinkHost", sgb_link_host, "host name or IP of the link cable peer, used in client mode ('localhost' to link two emulators on this PC)");
-    Int("LinkPort", sgb_link_port, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
-    Bool("LinkAutoStart", sgb_link_auto_start, "Open the link cable session automatically whenever a GB/GBC ROM is loaded");
     EndSection();
 
     BeginSection("Ports");

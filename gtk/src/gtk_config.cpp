@@ -220,10 +220,7 @@ int Snes9xConfig::load_defaults()
     Settings.DisplayPressedKeys = false;
     Settings.InitialInfoStringTimeout   =  120;
     Settings.SGB_BIOSPreference = 2;
-    Settings.GBLinkMode = 0;
     Settings.GBLinkPort = 8765;
-    Settings.GBLinkAutoStart = false;
-    snprintf(Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "localhost");
 
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
@@ -418,10 +415,7 @@ int Snes9xConfig::save_config_file()
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
-    outint("LinkMode", Settings.GBLinkMode, "Game Boy link cable role: 0=off, 1=listen for a peer (server), 2=connect to a peer (client)");
-    outstring("LinkHost", Settings.GBLinkHost, "host name or IP of the link cable peer, used in client mode ('localhost' to link two emulators on this PC)");
     outint("LinkPort", Settings.GBLinkPort, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
-    outbool("LinkAutoStart", Settings.GBLinkAutoStart, "Open the link cable session automatically whenever a GB/GBC ROM is loaded");
 
     section = "Input";
     controllers controller = CTL_NONE;
@@ -704,19 +698,9 @@ int Snes9xConfig::load_config_file()
     if (Settings.SGB_BIOSPreference > 2)
         Settings.SGB_BIOSPreference = 2;
 
-    inint("LinkMode", Settings.GBLinkMode);
-    if (Settings.GBLinkMode > 2)
-        Settings.GBLinkMode = 0;
     inint("LinkPort", Settings.GBLinkPort);
     if (Settings.GBLinkPort == 0)
         Settings.GBLinkPort = 8765;
-    inbool("LinkAutoStart", Settings.GBLinkAutoStart);
-    {
-        std::string host;
-        instr("LinkHost", host);
-        if (!host.empty())
-            snprintf(Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "%s", host.c_str());
-    }
 
     section = "Input";
 

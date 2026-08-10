@@ -2504,16 +2504,14 @@ void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
 
 // ---- Link cable session (see gb_serial.h) ----------------------------------
-bool S9xSGBLinkListen(unsigned short port, char *err, size_t err_cap)
+int S9xSGBLinkAutoStart(char *err, size_t err_cap)
 {
-	return SGB::SerialLinkListen(port, err, err_cap);
+	uint16_t port = Settings.GBLinkPort;
+	if (port == 0) port = 8765;
+	return static_cast<int>(SGB::SerialLinkAutoStart(port, err, err_cap));
 }
 
-bool S9xSGBLinkConnect(const char *host, unsigned short port, char *err, size_t err_cap)
-{
-	return SGB::SerialLinkConnect(host, port, err, err_cap);
-}
-
+int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }
 void S9xSGBLinkDisconnect(void)     { SGB::SerialLinkDisconnect(); }
 void S9xSGBLinkPump(void)           { SGB::SerialLinkPump(); }
 bool S9xSGBLinkIsEnabled(void)      { return SGB::SerialLinkIsEnabled(); }

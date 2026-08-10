@@ -130,7 +130,9 @@ LRESULT CALLBACK DlgChildSplitProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
-INT_PTR CALLBACK DlgGBLinkCable(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+void WinToggleGBLink(int mode);
+void WinAutoStartGBLinkPeer();
+int  WinGetGBLinkMode();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -2524,14 +2526,6 @@ LRESULT CALLBACK WinProc(
 			break;
 #endif
 
-		// The Game Boy link cable is its own TCP session, independent of
-		// SNES netplay — keep it out of the NETPLAY_SUPPORT gate.
-		case ID_NETPLAY_GB_LINK:
-			RestoreGUIDisplay ();
-			DialogBox (g_hInst, MAKEINTRESOURCE(IDD_GB_LINK_CABLE), hWnd, DlgGBLinkCable);
-			RestoreSNESDisplay ();
-			break;
-
 #ifdef NETPLAY_SUPPORT
 		case ID_NETPLAY_SERVER:
             S9xRestoreWindowTitle ();
@@ -2916,6 +2910,12 @@ LRESULT CALLBACK WinProc(
 			break;
 		case ID_EMULATION_PAUSEWHENINACTIVE:
 			GUI.InactivePause = !GUI.InactivePause;
+			break;
+		case ID_EMULATION_GB_LINK_SAME:
+			WinToggleGBLink (1);
+			break;
+		case ID_EMULATION_GB_LINK_DIFF:
+			WinToggleGBLink (2);
 			break;
 		case ID_EMULATION_RUNAHEAD_OFF:
 			Settings.RunAhead = 0;
@@ -4802,6 +4802,10 @@ int WINAPI WinMain(
 		}
 	}
 
+	// After the ROM load, so the peer instance can tell same-game from
+	// other-game by whether it was handed one. No-op in a normal launch.
+	WinAutoStartGBLinkPeer ();
+
 	S9xUnmapAllControls();
 	S9xSetupDefaultKeymap();
 
@@ -4849,6 +4853,11 @@ int WINAPI WinMain(
 
 			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && (!Settings.FrameAdvance || GUI.FAMute)));
         }
+
+        // Drive accept/connect completion and the version handshake even
+        // with no ROM loaded -- the auto-spawned instance sits here until
+        // its game is picked, and the peer must still see it arrive.
+        S9xSGBLinkPump ();
 
 #ifdef NETPLAY_SUPPORT
         if (!Settings.NetPlay || !NetPlay.PendingWait4Sync ||
@@ -5356,6 +5365,16 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.InactivePause) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
+
+	// Read back from the link itself, so when the peer unplugs, this
+	// instance's tick clears on its own without any message passing.
+	{
+		const int gblink = WinGetGBLinkMode ();
+		mii.fState = (gblink == 1) ? MFS_CHECKED : MFS_UNCHECKED;
+		SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
+		mii.fState = (gblink == 2) ? MFS_CHECKED : MFS_UNCHECKED;
+		SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
+	}
 
 	{
 		int runAheadIds[5] = {
@@ -9851,137 +9870,126 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 }
 #endif
 
-// Game Boy link cable session (Netplay > Game Boy Link Cable...).
+// Game Boy link cable (Emulation > Use Link Cable).
 //
-// Two emulator instances, each with its own ROM, joined over TCP: one
-// listens, the other connects. Because the dialog is modal the emulation
-// loop is parked while it is open, so a timer pumps the socket here —
-// otherwise an incoming connection would sit unaccepted until the user
-// closed the window, which reads as "it doesn't work".
-#define GBLINK_TIMER_ID    1
-#define GBLINK_TIMER_MS    250
-
-static void GBLinkRefreshDialog(HWND hDlg)
+// No server/client choice is exposed. Ticking either item binds the
+// loopback port if it is free -- this instance listens -- or connects to
+// it if something already holds it, meaning the other instance is up.
+// The first one to tick also launches the second with the item already
+// ticked, so the whole setup is one click in one window.
+//
+// The two items differ only in what that spawned instance loads: the same
+// ROM (Tetris vs Tetris) or nothing, leaving the user to pick the other
+// cartridge (Red vs Blue).
+//
+// A spawned instance is flagged so it never spawns in turn, or re-ticking
+// on that side after a disconnect would open a third window.
+enum
 {
-	char status[256];
-	S9xSGBLinkGetStatusText(status, sizeof(status));
-	SetDlgItemText(hDlg, IDC_GBLINK_STATUS, _tFromChar(status));
+	GBLINK_OFF  = 0,
+	GBLINK_SAME = 1,
+	GBLINK_DIFF = 2
+};
 
-	const bool client = IsDlgButtonChecked(hDlg, IDC_GBLINK_MODE_CLIENT) == BST_CHECKED;
-	EnableWindow(GetDlgItem(hDlg, IDC_GBLINK_HOST), client);
-	EnableWindow(GetDlgItem(hDlg, IDC_GBLINK_HOST_LABEL), client);
+static int                 GBLinkMode  = GBLINK_OFF;
+static PROCESS_INFORMATION GBLinkChild = {0};
 
-	const bool live = S9xSGBLinkIsEnabled();
-	EnableWindow(GetDlgItem(hDlg, IDC_GBLINK_STOP), live);
-	SetDlgItemText(hDlg, IDC_GBLINK_START, live ? TEXT("&Restart") : TEXT("&Start"));
+static bool GBLinkChildAlive ()
+{
+	if (!GBLinkChild.hProcess) return false;
+	if (WaitForSingleObject (GBLinkChild.hProcess, 0) == WAIT_TIMEOUT) return true;
+
+	CloseHandle (GBLinkChild.hProcess);
+	CloseHandle (GBLinkChild.hThread);
+	ZeroMemory (&GBLinkChild, sizeof GBLinkChild);
+	return false;
 }
 
-INT_PTR CALLBACK DlgGBLinkCable(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+static void GBLinkSpawnPeer (int mode)
 {
-	switch (msg)
+	if (Settings.GBLinkPeerInstance || GBLinkChildAlive ()) return;
+
+	TCHAR exe[MAX_PATH];
+	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return;
+
+	// Same-game mode hands the child our ROM as a plain positional argument
+	// so it loads through the normal path. With no GB ROM loaded there is
+	// nothing to pass, so it quietly behaves like the different-game item.
+	TCHAR cmd[MAX_PATH * 3];
+	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s \"%s\""), exe, GBLINK_PEER_SWITCH,
+		            (TCHAR *)_tFromChar (Settings.GBRomPath));
+	else
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s"), exe, GBLINK_PEER_SWITCH);
+	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
+
+	STARTUPINFO si;
+	ZeroMemory (&si, sizeof si);
+	si.cb = sizeof si;
+	ZeroMemory (&GBLinkChild, sizeof GBLinkChild);
+
+	if (!CreateProcess (NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &GBLinkChild))
+		S9xSetInfoString ("Link cable: could not launch the second instance");
+}
+
+static void WinStartGBLink (int mode)
+{
+	char err[192];
+	err[0] = '\0';
+
+	const int role = S9xSGBLinkAutoStart (err, sizeof(err));
+	if (role == S9X_GBLINK_NONE)
 	{
-	case WM_INITDIALOG:
-	{
-		LocalizeDialog(hDlg);
-		WinRefreshDisplay();
-
-		CheckRadioButton(hDlg, IDC_GBLINK_MODE_SERVER, IDC_GBLINK_MODE_CLIENT,
-		                 Settings.GBLinkMode == 2 ? IDC_GBLINK_MODE_CLIENT
-		                                          : IDC_GBLINK_MODE_SERVER);
-
-		if (!Settings.GBLinkHost[0])
-			strcpy(Settings.GBLinkHost, "localhost");
-		if (Settings.GBLinkPort == 0)
-			Settings.GBLinkPort = 8765;
-
-		SetDlgItemText(hDlg, IDC_GBLINK_HOST, _tFromChar(Settings.GBLinkHost));
-		SetDlgItemInt(hDlg, IDC_GBLINK_PORT, Settings.GBLinkPort, FALSE);
-		CheckDlgButton(hDlg, IDC_GBLINK_AUTOSTART,
-		               Settings.GBLinkAutoStart ? BST_CHECKED : BST_UNCHECKED);
-
-		SetTimer(hDlg, GBLINK_TIMER_ID, GBLINK_TIMER_MS, NULL);
-		GBLinkRefreshDialog(hDlg);
-		return TRUE;
+		MessageBox (GUI.hWnd,
+		            _tFromChar (err[0] ? err : "Could not open the link cable socket."),
+		            TEXT("Game Boy Link Cable"), MB_OK | MB_ICONERROR);
+		return;
 	}
 
-	case WM_TIMER:
-		if (wParam == GBLINK_TIMER_ID)
-		{
-			S9xSGBLinkPump();
-			GBLinkRefreshDialog(hDlg);
-		}
-		return TRUE;
+	GBLinkMode = mode;
 
-	case WM_COMMAND:
-		switch (LOWORD(wParam))
-		{
-		case IDC_GBLINK_MODE_SERVER:
-		case IDC_GBLINK_MODE_CLIENT:
-			GBLinkRefreshDialog(hDlg);
-			return TRUE;
-
-		case IDC_GBLINK_START:
-		{
-			TCHAR host[128];
-			GetDlgItemText(hDlg, IDC_GBLINK_HOST, host, 128);
-			strncpy(Settings.GBLinkHost, _tToChar(host), sizeof(Settings.GBLinkHost) - 1);
-			Settings.GBLinkHost[sizeof(Settings.GBLinkHost) - 1] = '\0';
-
-			BOOL ok = FALSE;
-			const UINT port = GetDlgItemInt(hDlg, IDC_GBLINK_PORT, &ok, FALSE);
-			if (!ok || port < 1 || port > 65535)
-			{
-				MessageBox(hDlg, TEXT("Port number must be between 1 and 65535."),
-				           TEXT("Game Boy Link Cable"), MB_OK | MB_ICONWARNING);
-				return TRUE;
-			}
-			Settings.GBLinkPort = (uint16)port;
-
-			const bool client = IsDlgButtonChecked(hDlg, IDC_GBLINK_MODE_CLIENT) == BST_CHECKED;
-			Settings.GBLinkMode = client ? 2 : 1;
-			Settings.GBLinkAutoStart =
-				IsDlgButtonChecked(hDlg, IDC_GBLINK_AUTOSTART) == BST_CHECKED;
-
-			char err[192];
-			err[0] = '\0';
-			const bool started = client
-				? S9xSGBLinkConnect(Settings.GBLinkHost, Settings.GBLinkPort, err, sizeof(err))
-				: S9xSGBLinkListen(Settings.GBLinkPort, err, sizeof(err));
-
-			if (!started)
-				MessageBox(hDlg, _tFromChar(err[0] ? err : "Could not start the link session."),
-				           TEXT("Game Boy Link Cable"), MB_OK | MB_ICONERROR);
-
-			GBLinkRefreshDialog(hDlg);
-			return TRUE;
-		}
-
-		case IDC_GBLINK_STOP:
-			S9xSGBLinkDisconnect();
-			// A deliberate teardown should not come back on the next ROM load.
-			Settings.GBLinkMode = 0;
-			GBLinkRefreshDialog(hDlg);
-			return TRUE;
-
-		case IDOK:
-		case IDCANCEL:
-			// The session deliberately outlives the dialog — closing this
-			// window is not the same as unplugging the cable.
-			Settings.GBLinkAutoStart =
-				IsDlgButtonChecked(hDlg, IDC_GBLINK_AUTOSTART) == BST_CHECKED;
-			KillTimer(hDlg, GBLINK_TIMER_ID);
-			EndDialog(hDlg, 0);
-			return TRUE;
-
-		default:
-			break;
-		}
-		break;
-
-	default:
-		break;
+	if (role == S9X_GBLINK_SERVER)
+	{
+		GBLinkSpawnPeer (mode);
+		S9xSetInfoString ("Link cable: waiting for the second instance");
 	}
-	return FALSE;
+	else
+	{
+		S9xSetInfoString ("Link cable: connected");
+	}
+}
+
+// Called for both menu items. Ticking starts the link in that mode;
+// clicking either one while linked unplugs the cable.
+void WinToggleGBLink (int mode)
+{
+	if (S9xSGBLinkIsEnabled ())
+	{
+		// Closing the socket is what unlinks the peer. Its menu tick clears
+		// by itself, because the check state is read back from the link.
+		S9xSGBLinkDisconnect ();
+		GBLinkMode = GBLINK_OFF;
+		S9xSetInfoString ("Link cable: disconnected");
+		return;
+	}
+
+	WinStartGBLink (mode);
+}
+
+// The auto-spawned instance links itself on startup. Its mode is inferred
+// from whether it was handed a ROM, which only affects which menu item
+// shows ticked -- a child never spawns anything itself.
+void WinAutoStartGBLinkPeer ()
+{
+	if (!Settings.GBLinkPeerInstance) return;
+	WinStartGBLink (Settings.GBRomPath[0] ? GBLINK_SAME : GBLINK_DIFF);
+}
+
+// Which item currently owns the tick. Reads the live link so a peer-side
+// disconnect clears it here too.
+int WinGetGBLinkMode ()
+{
+	return S9xSGBLinkIsEnabled () ? GBLinkMode : GBLINK_OFF;
 }
 
 void SetInfoDlgColor(unsigned char r, unsigned char g, unsigned char b)

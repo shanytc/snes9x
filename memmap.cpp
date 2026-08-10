@@ -1461,11 +1461,10 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
     }
 
     // Not a GB ROM — tear down any previous SGB session so a SNES ROM loaded
-    // after a GB ROM runs on the 65816 path. The link cable goes with it:
+    // after a GB ROM runs on the 65816 path. S9xSGBDeinit unplugs the cable with it:
     // there is no Game Boy left for the peer to talk to.
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
-        S9xSGBLinkDisconnect();
         S9xSGBDeinit();
         Settings.SuperGameBoy       = FALSE;
         Settings.SGB_BIOSModeActive = FALSE;
@@ -1774,10 +1773,9 @@ bool8 CMemory::LoadROM (const char *filename)
     }
 
     // Loading a non-GB ROM — tear down any previous SGB state first, link
-    // cable included (see the LoadROMMem twin for why it is explicit here).
+    // cable included (S9xSGBDeinit drops it).
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
-        S9xSGBLinkDisconnect();
         S9xSGBDeinit();
         Settings.SuperGameBoy       = FALSE;
         Settings.SGB_BIOSModeActive = FALSE;

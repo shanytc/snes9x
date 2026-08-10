@@ -370,9 +370,11 @@ bool Emulator::Init()
 
 void Emulator::Deinit()
 {
-	// The link deliberately survives this. Deinit runs on every GB->GB
-	// reload too, and swapping cartridges does not unplug a real cable —
-	// callers drop the link explicitly when a non-GB ROM takes over.
+	// Changing the cartridge unplugs the cable. Every caller guards this on
+	// a GB session already being live, so the one case that must NOT drop
+	// the link — the auto-spawned instance loading its first ROM — never
+	// reaches here.
+	SerialLinkDisconnect();
 	UnloadROM();
 }
 

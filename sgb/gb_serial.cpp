@@ -301,13 +301,20 @@ void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
 
 void SerialReset(Serial &s, bool cgb)
 {
-	const Serial fresh;
-	s     = fresh;
-	s.cgb = cgb;
+	// A live cable survives a GB reset — power-cycling a Game Boy does not
+	// unplug it. Only the transfer machinery is rebuilt. handshake_sent has
+	// to be carried over by hand: it belongs to the TCP connection, not to
+	// the console, and clearing it would put a second version packet on a
+	// wire that has already been introduced.
+	const bool still_linked = s.handshake_sent && LinkIsConnected();
 
-	g_active            = &s;
-	g_session.transfers = 0;
-	g_session.stalled   = false;
+	const Serial fresh;
+	s                = fresh;
+	s.cgb            = cgb;
+	s.handshake_sent = still_linked;
+
+	g_active          = &s;
+	g_session.stalled = false;
 }
 
 void SerialAfterStateLoad(Serial &s, Memory &mem)

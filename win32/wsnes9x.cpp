@@ -6070,6 +6070,15 @@ int WINAPI WinMain(
         // its game is picked, and the peer must still see it arrive.
         S9xSGBLinkPump ();
 
+        // Which end drives the clock is the games' choice and can change
+        // mid-session, so the OSD is refreshed when it does rather than
+        // only at connect time.
+        {
+            char gblink_status[256];
+            if (S9xSGBLinkTakeStatusChange (gblink_status, sizeof(gblink_status)))
+                S9xSetInfoString (gblink_status);
+        }
+
         WinEmulateFrame ();
     }
 
@@ -14188,7 +14197,9 @@ static void WinStartGBLink (int mode)
 	}
 	else
 	{
-		S9xSetInfoString ("Link cable: connected");
+		char status[256];
+		S9xSGBLinkGetStatusText (status, sizeof(status));
+		S9xSetInfoString (status);
 	}
 }
 

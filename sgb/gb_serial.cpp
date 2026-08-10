@@ -99,7 +99,19 @@ struct LinkSession
 	uint32_t peer_timestamp    = 0;
 	uint32_t transfers         = 0;
 	bool     stalled           = false;   // a master wait timed out
+
+	// Which end drove the last transfer. Not a property of the connection:
+	// the games pick it per byte via SC bit 0, so it can change mid-session.
+	// 0 = nothing exchanged yet, 1 = we clocked it, 2 = the peer did.
+	uint8_t  driving           = 0;
+	uint8_t  reported          = 0;   // last value handed to the host UI
+	int64_t  next_report       = 0;   // real-cycle gate on re-announcing
 };
+
+// Games that alternate master and slave every byte would otherwise repaint
+// the OSD continuously; roughly three seconds of GB real time between
+// announcements is enough to stay readable.
+constexpr int64_t kRoleReportInterval = 3 * 4194304;
 
 LinkSession g_session;
 LinkRole    g_role = LinkRole::None;
@@ -147,7 +159,7 @@ void CompleteActive(Serial &s, Memory &mem)
 
 	s.active     = false;
 	s.bits_left  = 0;
-	if (s.peer_valid) ++g_session.transfers;
+	if (s.peer_valid) { ++g_session.transfers; g_session.driving = 1; }
 	s.peer_valid = false;
 	s.peer_data  = 0xFF;
 }
@@ -161,6 +173,7 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 
 	s.passive = false;
 	++g_session.transfers;
+	g_session.driving = 2;
 }
 
 void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
@@ -562,6 +575,29 @@ void SerialLinkPump()
 	else                          LinkPoll();
 }
 
+bool SerialLinkTakeStatusChange(char *buf, size_t cap)
+{
+	if (!buf || cap == 0) return false;
+
+	if (!SerialLinkIsConnected())
+	{
+		g_session.reported = 0;
+		return false;
+	}
+	if (g_session.driving == 0 || g_session.driving == g_session.reported) return false;
+
+	// Rate-limit re-announcements so a game that alternates master and
+	// slave per byte doesn't repaint the OSD forever. The first report is
+	// always let through.
+	const int64_t now = g_active ? g_active->real_cycles : 0;
+	if (g_session.reported != 0 && now < g_session.next_report) return false;
+
+	g_session.reported    = g_session.driving;
+	g_session.next_report = now + kRoleReportInterval;
+	SerialLinkStatusText(buf, cap);
+	return true;
+}
+
 void SerialLinkStatusText(char *buf, size_t cap)
 {
 	if (!buf || cap == 0) return;
@@ -590,10 +626,12 @@ void SerialLinkStatusText(char *buf, size_t cap)
 				std::snprintf(buf, cap, "Link cable: connected, waiting for handshake");
 				return;
 			}
-			std::snprintf(buf, cap, "Link cable: linked (%s) - %u byte%s%s",
-			              g_role == LinkRole::Server ? "server" : "client",
-			              static_cast<unsigned>(g_session.transfers),
-			              g_session.transfers == 1 ? "" : "s",
+			// The suffix is left off until a byte has actually moved: which
+			// end drives the clock is the games' choice, not ours, so before
+			// the first transfer there is genuinely nothing to report.
+			std::snprintf(buf, cap, "Link cable: connected%s%s",
+			              g_session.driving == 1 ? " (Master)"
+			                                     : (g_session.driving == 2 ? " (Passive)" : ""),
 			              g_session.stalled ? " - peer not responding" : "");
 			return;
 	}

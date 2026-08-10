@@ -110,8 +110,15 @@ bool SerialLinkIsConnected();   // a peer is attached and past the version hands
 void SerialLinkPump();
 
 // One-line human-readable state for the UI / OSD, e.g.
-// "Connected to 192.168.1.5:8765 (412 bytes)".
+// "Link cable: connected (Master)". The Master/Passive suffix appears
+// only once a byte has actually crossed, since which end drives the clock
+// is chosen by the games rather than by the connection.
 void SerialLinkStatusText(char *buf, size_t cap);
+
+// True once when the driving end has changed and it is worth telling the
+// user again; fills `buf` with the text to show. Rate-limited, so a game
+// that alternates master and slave per byte can't flood the OSD.
+bool SerialLinkTakeStatusChange(char *buf, size_t cap);
 
 } // namespace SGB
 

@@ -5332,12 +5332,15 @@ void CheckDirectoryIsWritable (const char *filename)
 }
 
 // Pull a whole submenu out of the menu bar when it doesn't apply and put
-// it back in the same place when it does. The Game Boy submenus are hidden
-// rather than greyed (see the BIOS submenu below, which does this inline).
-// Removal loses both the handle and the position, so the first pass caches
-// them while the item is still there.
-static void SetSubMenuVisible (UINT id, const TCHAR *label, bool visible,
-                               HMENU *cached, HMENU *parent, UINT *pos)
+// it back when it does. The Game Boy submenus are hidden rather than greyed
+// (see the BIOS submenu below, which does this inline). Removal loses the
+// handle, so the first pass caches it while the item is still there.
+//
+// Placement is expressed as "before before_id" rather than a remembered
+// index: the BIOS submenu sits in the same popup and is itself inserted
+// and removed at runtime, so any absolute position drifts under it.
+static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT before_id,
+                               bool visible, HMENU *cached, HMENU *parent)
 {
 	if (!*cached)
 	{
@@ -5357,7 +5360,6 @@ static void SetSubMenuVisible (UINT id, const TCHAR *label, bool visible,
 				{
 					*cached = probe.hSubMenu;
 					*parent = sub;
-					*pos    = (UINT)j;
 					break;
 				}
 			}
@@ -5381,10 +5383,7 @@ static void SetSubMenuVisible (UINT id, const TCHAR *label, bool visible,
 		ins.dwTypeData = (LPTSTR)label;
 		ins.cch        = (UINT)_tcslen (label);
 
-		UINT at = *pos;
-		const UINT count = (UINT)GetMenuItemCount (*parent);
-		if (at > count) at = count;
-		InsertMenuItem (*parent, at, TRUE, &ins);
+		InsertMenuItem (*parent, before_id, FALSE, &ins);
 		if (LocaleIsTranslated ()) LocalizeMenu (*parent);
 		DrawMenuBar (GUI.hWnd);
 	}
@@ -5437,7 +5436,6 @@ static void CheckMenuStates ()
 	{
 		static HMENU s_link_hmenu  = NULL;
 		static HMENU s_link_parent = NULL;
-		static UINT  s_link_pos    = 0;
 
 		// SGB1 has no link port -- SGB2 was the revision that added one --
 		// so the cable is not offered while the SGB1 BIOS is driving.
@@ -5449,8 +5447,8 @@ static void CheckMenuStates ()
 		const bool show = ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
 		                   !sgb1_bios) ||
 		                  S9xSGBLinkIsEnabled ();
-		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Data Link"), show,
-		                   &s_link_hmenu, &s_link_parent, &s_link_pos);
+		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Data Link"),
+		                   ID_EMULATION_HACKS, show, &s_link_hmenu, &s_link_parent);
 
 		// Once a session exists its mode is settled — the client never chose
 		// it, and the server cannot switch without tearing down first — so

@@ -310,6 +310,20 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			S9xUsage();
 	}
 
+	// Strip our private link-cable switch before the portable parser sees
+	// it -- S9xParseArgs would take the unknown option for a ROM name.
+	for (int i = 0; i < count; i++)
+	{
+		if (strcasecmp(parameters[i], GBLINK_PEER_SWITCH_A) != 0)
+			continue;
+
+		Settings.GBLinkPeerInstance = TRUE;
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
+	}
+
 	const char* rf = S9xParseArgs (parameters, count);
 
     if(rf) // save rom_filename as TCHAR if available
@@ -1115,10 +1129,7 @@ void WinRegisterConfigItems()
 	AddBoolC("RTCOff", Settings.GBRTCOff, false, "false (default) = the cartridge clock follows the PC's clock; true = the RTC is off and RTCTime stands in for the PC's clock (Emulation -> Real Time Clock -> Settings)");
 	AddUIntC("RTCTime", Settings.GBRTCTime, 0, "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
 	AddUIntC("RTCHuC3Format", Settings.GBRTCHuC3Format, 0, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
-	AddUIntC("LinkMode", Settings.GBLinkMode, 0, "Game Boy link cable role: 0=off, 1=listen for a peer (server), 2=connect to a peer (client).");
-	AddStringC("LinkHost", Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "localhost", "host name or IP of the link cable peer, used in client mode ('localhost' to link two emulators on this PC)");
-	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "TCP port for the link cable session. 8765 is BGB's default, so leaving it alone lets you link against BGB / SameBoy / Emulicious.");
-	AddBoolC("LinkAutoStart", Settings.GBLinkAutoStart, false, "true to open the link cable session automatically whenever a GB/GBC ROM is loaded");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Data Link. Only worth changing if something else on this PC already owns 8765.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

@@ -4802,8 +4802,8 @@ int WINAPI WinMain(
 		}
 	}
 
-	// After the ROM load, so the peer instance can tell same-game from
-	// other-game by whether it was handed one. No-op in a normal launch.
+	// After the ROM load, so the peer can tell same-game from other-game.
+	// No-op in a normal launch.
 	WinAutoStartGBLinkPeer ();
 
 	S9xUnmapAllControls();
@@ -4854,14 +4854,12 @@ int WINAPI WinMain(
 			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && (!Settings.FrameAdvance || GUI.FAMute)));
         }
 
-        // Drive accept/connect completion and the version handshake even
-        // with no ROM loaded -- the auto-spawned instance sits here until
-        // its game is picked, and the peer must still see it arrive.
+        // Runs with no ROM loaded too: the spawned instance sits here
+        // until its game is picked, and the peer must see it arrive.
         S9xSGBLinkPump ();
 
-        // Which end drives the clock is the games' choice and can change
-        // mid-session, so the OSD is refreshed when it does rather than
-        // only at connect time.
+        // The driving end can change mid-session, so refresh on change
+        // rather than only at connect.
         {
             char gblink_status[256];
             if (S9xSGBLinkTakeStatusChange (gblink_status, sizeof(gblink_status)))
@@ -5340,14 +5338,9 @@ void CheckDirectoryIsWritable (const char *filename)
     }
 }
 
-// Pull a whole submenu out of the menu bar when it doesn't apply and put
-// it back when it does. The Game Boy submenus are hidden rather than greyed
-// (see the BIOS submenu below, which does this inline). Removal loses the
-// handle, so the first pass caches it while the item is still there.
-//
-// Placement is expressed as "before before_id" rather than a remembered
-// index: the BIOS submenu sits in the same popup and is itself inserted
-// and removed at runtime, so any absolute position drifts under it.
+// Show or hide a whole submenu, the way the BIOS one below does inline.
+// Placement is "before before_id" because an absolute index would drift
+// under the BIOS submenu, which is itself inserted and removed.
 static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT before_id,
                                bool visible, HMENU *cached, HMENU *parent)
 {
@@ -5438,19 +5431,14 @@ static void CheckMenuStates ()
 	mii.fState = (GUI.InactivePause) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
 
-	// The cable only means anything with a Game Boy game running, so the
-	// whole submenu comes and goes like the BIOS one. It stays while a link
-	// is live, though: the auto-spawned instance starts with no ROM, and
-	// hiding it there would strand a connection with no way to unplug.
+	// Game Boy only, so the submenu comes and goes like the BIOS one. A
+	// live link keeps it, or the spawned instance couldn't unplug.
 	{
 		static HMENU s_link_hmenu  = NULL;
 		static HMENU s_link_parent = NULL;
 
-		// SGB1 has no link port -- SGB2 was the revision that added one --
-		// so the cable is not offered while the SGB1 BIOS is driving.
-		// GameBoyRunMode alone cannot say that: the BIOS-less path parks
-		// every non-CGB cart in mode 1 too, and those are bare Game Boys
-		// with a perfectly good port.
+		// SGB1 has no link port. Run mode 1 alone can't say that: the
+		// BIOS-less path parks every non-CGB cart there too.
 		const bool sgb1_bios = Settings.SGB_BIOSModeActive &&
 		                       Settings.GameBoyRunMode == 1;
 		const bool show = ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
@@ -5459,13 +5447,8 @@ static void CheckMenuStates ()
 		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Data Link"),
 		                   ID_EMULATION_HACKS, show, &s_link_hmenu, &s_link_parent);
 
-		// Once a session exists its mode is settled — the client never chose
-		// it, and the server cannot switch without tearing down first — so
-		// the mode not in force is greyed out. The active one stays live
-		// because it doubles as the disconnect; unplugging re-enables both.
-		//
-		// Mode is read back from the live link, so when the peer leaves this
-		// instance's tick clears on its own with no message passing.
+		// A live session's mode is settled, so the other one is greyed; the
+		// active item stays enabled because it doubles as the disconnect.
 		if (show)
 		{
 			const int  gblink   = WinGetGBLinkMode ();
@@ -9973,20 +9956,12 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 }
 #endif
 
-// Game Boy link cable (Emulation > Use Link Cable).
+// Game Boy link cable (Emulation > Game Boy Data Link).
 //
-// No server/client choice is exposed. Ticking either item binds the
-// loopback port if it is free -- this instance listens -- or connects to
-// it if something already holds it, meaning the other instance is up.
-// The first one to tick also launches the second with the item already
-// ticked, so the whole setup is one click in one window.
-//
-// The two items differ only in what that spawned instance loads: the same
-// ROM (Tetris vs Tetris) or nothing, leaving the user to pick the other
-// cartridge (Red vs Blue).
-//
-// A spawned instance is flagged so it never spawns in turn, or re-ticking
-// on that side after a disconnect would open a third window.
+// Ticking either item senses the role and, if this instance ends up
+// hosting, launches the second one with the item already ticked. The two
+// items differ only in what that instance loads: the same ROM, or nothing
+// so the user can pick the other cartridge.
 enum
 {
 	GBLINK_OFF  = 0,
@@ -10015,10 +9990,8 @@ static void GBLinkSpawnPeer (int mode)
 	TCHAR exe[MAX_PATH];
 	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return;
 
-	// Same-game mode hands the child our ROM as a plain positional argument
-	// so it loads through the normal path. The menu is greyed out without a
-	// Game Boy game running, so the pathless branch is only reached by the
-	// other-game item.
+	// Same-game mode passes our ROM as a positional argument so the child
+	// loads it through the normal path.
 	TCHAR cmd[MAX_PATH * 3];
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
 		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s \"%s\""), exe, GBLINK_PEER_SWITCH,
@@ -10065,8 +10038,7 @@ static void WinStartGBLink (int mode)
 	}
 }
 
-// Called for both menu items. Ticking starts the link in that mode;
-// clicking either one while linked unplugs the cable.
+// Both menu items land here; clicking either while linked unplugs.
 void WinToggleGBLink (int mode)
 {
 	if (S9xSGBLinkIsEnabled ())
@@ -10079,10 +10051,8 @@ void WinToggleGBLink (int mode)
 		return;
 	}
 
-	// Belt and braces behind the hidden menu. Both flags are needed: the
-	// BIOS path leaves SuperGameBoy FALSE and only sets SGB_BIOSModeActive,
-	// so testing the former alone would refuse to link in BIOS mode, which
-	// is the default.
+	// Both flags needed: the BIOS path leaves SuperGameBoy FALSE, and BIOS
+	// mode is the default.
 	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
 	{
 		S9xSetInfoString ("Link cable: load a Game Boy game first");
@@ -10098,17 +10068,15 @@ void WinToggleGBLink (int mode)
 	WinStartGBLink (mode);
 }
 
-// The auto-spawned instance links itself on startup. Its mode is inferred
-// from whether it was handed a ROM, which only affects which menu item
-// shows ticked -- a child never spawns anything itself.
+// The spawned instance links itself on startup; its mode is inferred from
+// whether it was handed a ROM, which only affects which item shows ticked.
 void WinAutoStartGBLinkPeer ()
 {
 	if (!Settings.GBLinkPeerInstance) return;
 	WinStartGBLink (Settings.GBRomPath[0] ? GBLINK_SAME : GBLINK_DIFF);
 }
 
-// Which item currently owns the tick. Reads the live link so a peer-side
-// disconnect clears it here too.
+// Which item owns the tick, read from the live link.
 int WinGetGBLinkMode ()
 {
 	return S9xSGBLinkIsEnabled () ? GBLinkMode : GBLINK_OFF;

@@ -302,8 +302,8 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			S9xUsage();
 	}
 
-	// Strip our private link-cable switch before the portable parser sees
-	// it -- S9xParseArgs would take the unknown option for a ROM name.
+	// Strip before the portable parser sees it: S9xParseArgs would take the
+	// unknown option for a ROM name.
 	for (int i = 0; i < count; i++)
 	{
 		if (strcasecmp(parameters[i], GBLINK_PEER_SWITCH_A) != 0)

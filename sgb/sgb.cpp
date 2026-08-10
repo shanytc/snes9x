@@ -2516,6 +2516,7 @@ int S9xSGBLinkAutoStart(char *err, size_t err_cap)
 }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }
+int S9xSGBLinkPlayerCount(void)     { return SGB::SerialLinkPlayerCount(); }
 void S9xSGBLinkDisconnect(void)     { SGB::SerialLinkDisconnect(); }
 void S9xSGBLinkPump(void)           { SGB::SerialLinkPump(); }
 bool S9xSGBLinkIsEnabled(void)      { return SGB::SerialLinkIsEnabled(); }

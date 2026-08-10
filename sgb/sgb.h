@@ -284,31 +284,27 @@ void S9xSGBRunFrame(void);
 void S9xSGBRunCycles(int tcycles);
 
 // ---- Link cable ------------------------------------------------------------
-// Emulates the Game Boy link cable between two emulator instances on this
-// PC, speaking the BGB 1.4 link protocol over a loopback TCP socket. The
-// two instances run independent ROMs and exchange bytes through
-// $FF01/$FF02 — Pokemon Red <-> Blue trading and friends.
-//
-// There is no server/client choice to make: the role is sensed. See
-// SerialLinkAutoStart in gb_serial.h for how binding the port doubles as
-// the probe. Roles below match SGB::LinkRole.
+// Links two emulator instances on this PC over loopback TCP (BGB 1.4
+// protocol). The role is sensed rather than chosen; see gb_serial.h.
 #define S9X_GBLINK_NONE   0
 #define S9X_GBLINK_SERVER 1
 #define S9X_GBLINK_CLIENT 2
 
 // Bring the cable up on Settings.GBLinkPort, returning the role taken.
-// S9X_GBLINK_NONE means the socket could not be opened at all; `err` says
-// why. Starting a session replaces any existing one.
+// S9X_GBLINK_NONE means the socket could not be opened; `err` says why.
 int  S9xSGBLinkAutoStart(char *err, size_t err_cap);
 
 // Role of the live session, or S9X_GBLINK_NONE when unplugged.
 int  S9xSGBLinkGetRole(void);
 
+// Game Boys on the cable including this one (0/1/2). Governs what a
+// disconnect means: at two players one leaving ends it for both. See
+// SerialLinkPlayerCount in gb_serial.h for why >2 is not reachable yet.
+int  S9xSGBLinkPlayerCount(void);
+
 void S9xSGBLinkDisconnect(void);
 
-// Service the socket while the emulation loop is parked — the link
-// settings dialog calls this on a timer so an incoming connection still
-// completes with the modal window open.
+// Service the socket while the emulation loop is parked.
 void S9xSGBLinkPump(void);
 
 // Enabled = a session exists (listening, connecting or connected).

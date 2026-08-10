@@ -46,8 +46,8 @@
 constexpr int ASPECT_WIDTH_4_3 = 256;
 constexpr int ASPECT_WIDTH_8_7 = 299;
 
-// Marks the emulator instance auto-launched by the Game Boy Data Link
-// menu. It links itself on startup and never launches one in turn.
+// Marks the instance auto-launched by the Game Boy Data Link menu: it
+// links itself on startup and never launches one in turn.
 #define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
 #define GBLINK_PEER_SWITCH_A "-gblinkpeer"
 

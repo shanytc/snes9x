@@ -516,6 +516,15 @@ LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap)
 		return g_role;
 	}
 
+	// Port was taken a moment ago but nothing answered: the other instance
+	// was on its way out and has now released it. Take it over rather than
+	// reporting a failure the user would have to click through.
+	if (LinkStartServer(port, err, err_cap))
+	{
+		g_role = LinkRole::Server;
+		return g_role;
+	}
+
 	g_role = LinkRole::None;
 	return g_role;
 }

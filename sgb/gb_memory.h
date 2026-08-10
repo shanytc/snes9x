@@ -9,6 +9,8 @@
 
 #include <cstdint>
 
+#include "gb_serial.h"
+
 namespace SGB {
 
 struct Cart;
@@ -37,6 +39,7 @@ struct Memory
 	Apu    *apu    = nullptr;
 	Timer  *timer  = nullptr;
 	Joypad *joypad = nullptr;
+	Serial *serial = nullptr;
 	// CPU clock, for PPU-register write-time reconstruction. In the per-dot
 	// interleave the CPU trails the PPU by up to kMaxOpcodeTCycles, so at the
 	// moment a store reaches PpuWriteReg the PPU has already rendered dots the
@@ -84,13 +87,6 @@ void MemHdmaHBlank(Memory &m);
 // LCD turned off outside HBlank with an HBlank HDMA armed: the off edge
 // counts as entering HBlank, so one pending block fires (SameBoy GB_lcd_off).
 void MemHdmaLcdOff(Memory &m);
-
-// Callback fires each time the CPU initiates a serial transfer (write
-// 0x80/0x81 to 0xFF02). The byte passed is whatever was in 0xFF01 at
-// the moment. Used by the test harness to capture Blargg output; P6a
-// may hook it too. nullptr disables.
-using SerialByteCallback = void (*)(uint8_t byte);
-void SetSerialCallback(SerialByteCallback cb);
 
 } // namespace SGB
 

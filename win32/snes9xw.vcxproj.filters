@@ -228,6 +228,12 @@
     <ClInclude Include="..\sgb\gb_timer.h">
       <Filter>SGB</Filter>
     </ClInclude>
+    <ClInclude Include="..\sgb\gb_serial.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sgb\gb_link.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
     <ClInclude Include="..\sgb\gb_joypad.h">
       <Filter>SGB</Filter>
     </ClInclude>
@@ -753,6 +759,12 @@
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\gb_timer.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_serial.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_link.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\gb_joypad.cpp">

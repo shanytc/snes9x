@@ -78,6 +78,8 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/sgb/gb_ppu.cpp \
 				 $(CORE_DIR)/sgb/gb_apu.cpp \
 				 $(CORE_DIR)/sgb/gb_timer.cpp \
+				 $(CORE_DIR)/sgb/gb_serial.cpp \
+				 $(CORE_DIR)/sgb/gb_link.cpp \
 				 $(CORE_DIR)/sgb/gb_joypad.cpp \
 				 $(CORE_DIR)/sgb/gb_cart.cpp \
 				 $(CORE_DIR)/snapshot.cpp \

@@ -12,6 +12,7 @@
 #include "gb_timer.h"
 #include "gb_joypad.h"
 #include "gb_mbc.h"
+#include "gb_serial.h"
 #include "sgb.h"
 
 #include <cstring>
@@ -19,9 +20,8 @@
 namespace SGB {
 
 namespace {
-SerialByteCallback g_serial_cb = nullptr;
-uint8_t            g_dma_last  = 0xFF;  // 0xFF46 last written byte — register reads echo this.
-bool               g_dma_vram_bypass = false;
+uint8_t g_dma_last  = 0xFF;  // 0xFF46 last written byte — register reads echo this.
+bool    g_dma_vram_bypass = false;
 }
 
 inline bool VramBlocked(const Memory &m)
@@ -36,8 +36,6 @@ inline bool CramBlocked(const Memory &m)
 	       m.ppu->mode == PpuMode::Transfer && (m.ppu->lcdc & 0x80) &&
 	       m.ppu->mode_clock > GB_MODE3_SETUP_DOTS + m.ppu->mode3_sprite_stall;
 }
-
-void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
 
 void MemReset(Memory &m, bool cgb)
 {
@@ -251,7 +249,9 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 	{
 		case 0xFF00: return m.joypad ? JoypadRead(*m.joypad) : 0xFF;
 		case 0xFF01: return m.serial_data;
-		case 0xFF02: return static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
+		case 0xFF02:
+			return m.serial ? SerialReadSC(*m.serial, m)
+			                : static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
@@ -300,22 +300,11 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			m.serial_data = value;
 			return;
 		case 0xFF02:
-			m.serial_control = value;
-			// Internal clock (bit 0 = 1) completes instantly with no peer:
-			// push the byte to the observer callback and fire the serial IRQ,
-			// then clear the start bit. External clock (bit 0 = 0) has no
-			// partner clocking bits in, so bit 7 stays set and no IRQ fires —
-			// matching real DMG with a disconnected link cable. Games like
-			// Tetris Plus rely on this silence to detect "no link partner".
-			// SB latches $FF: disconnected MISO floats high, so each clock
-			// shifts in a 1. Alleyway's serial-IRQ input loop depends on this.
-			if ((value & 0x81) == 0x81)
-			{
-				if (g_serial_cb) g_serial_cb(m.serial_data);
-				m.serial_data    = 0xFF;
-				m.if_            = static_cast<uint8_t>(m.if_ | IRQ_SERIAL);
-				m.serial_control = static_cast<uint8_t>(value & 0x7F);
-			}
+			// gb_serial.cpp owns what a start bit means: unlinked it keeps
+			// the original instant-completion stub, linked it clocks eight
+			// real bit periods and swaps a byte with the peer.
+			if (m.serial) SerialWriteSC(*m.serial, m, value);
+			else          m.serial_control = value;
 			return;
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			if (m.timer) TimerWrite(*m.timer, addr, value);

@@ -373,6 +373,30 @@ BEGIN
     CONTROL         "Progress1",IDC_NPPROGRESS,"msctls_progress32",WS_BORDER,6,30,174,25
 END
 
+IDD_GB_LINK_CABLE DIALOGEX 0, 0, 268, 168
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Game Boy Link Cable"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "Connection",IDC_GBLINK_GROUP,7,7,254,74
+    CONTROL         "&Listen for a peer on this PC (server)",IDC_GBLINK_MODE_SERVER,
+                    "Button",BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,16,21,180,10
+    CONTROL         "&Connect to a peer (client)",IDC_GBLINK_MODE_CLIENT,
+                    "Button",BS_AUTORADIOBUTTON | WS_TABSTOP,16,35,180,10
+    RTEXT           "&Host:",IDC_GBLINK_HOST_LABEL,26,52,26,10,SS_CENTERIMAGE
+    EDITTEXT        IDC_GBLINK_HOST,56,51,138,13,ES_AUTOHSCROLL
+    RTEXT           "&Port:",IDC_GBLINK_PORT_LABEL,196,52,22,10,SS_CENTERIMAGE
+    EDITTEXT        IDC_GBLINK_PORT,222,51,32,13,ES_AUTOHSCROLL | ES_NUMBER
+    CONTROL         "Start the link &automatically when a Game Boy ROM is loaded",IDC_GBLINK_AUTOSTART,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,16,66,238,10
+    LTEXT           "Run a second emulator with the other game, set one side to Listen and the other to Connect. Port 8765 also links against BGB, SameBoy and Emulicious.",
+                    IDC_GBLINK_HINT,7,86,254,26
+    LTEXT           "Link cable: disconnected",IDC_GBLINK_STATUS,7,116,254,20
+    PUSHBUTTON      "&Start",IDC_GBLINK_START,96,145,52,16
+    PUSHBUTTON      "&Disconnect",IDC_GBLINK_STOP,152,145,52,16
+    DEFPUSHBUTTON   "Close",IDOK,208,145,52,16
+END
+
 IDD_INPUTCONFIG DIALOGEX 0, 0, 380, 212
 STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CLIPCHILDREN | WS_CAPTION
 CAPTION " "
@@ -1597,6 +1621,8 @@ BEGIN
         MENUITEM "S&ync Using Reset Game",      ID_NETPLAY_SYNC_BY_RESET,MFT_STRING,MFS_CHECKED
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Options...",                 ID_NETPLAY_OPTIONS,MFT_STRING,MFS_ENABLED
+        MENUITEM MFT_SEPARATOR
+        MENUITEM "Game Boy &Link Cable...",     ID_NETPLAY_GB_LINK,MFT_STRING,MFS_ENABLED
     END
 #ifdef RETROACHIEVEMENTS_SUPPORT
     POPUP "&RetroAchievements",             0,MFT_STRING,MFS_ENABLED

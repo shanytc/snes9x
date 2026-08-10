@@ -283,6 +283,32 @@ bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path
 void S9xSGBRunFrame(void);
 void S9xSGBRunCycles(int tcycles);
 
+// ---- Link cable ------------------------------------------------------------
+// Emulates the Game Boy link cable over TCP, speaking the BGB 1.4 link
+// protocol so the peer can be another Snes9x instance on localhost, a
+// machine across the network, or a different emulator entirely (BGB,
+// SameBoy, Emulicious). One side listens, the other connects; the two
+// instances run independent ROMs and exchange bytes through $FF01/$FF02.
+//
+// Both entry points return false and fill `err` when the socket cannot be
+// opened. Starting a session replaces any existing one.
+bool S9xSGBLinkListen(unsigned short port, char *err, size_t err_cap);
+bool S9xSGBLinkConnect(const char *host, unsigned short port, char *err, size_t err_cap);
+void S9xSGBLinkDisconnect(void);
+
+// Service the socket while the emulation loop is parked — the link
+// settings dialog calls this on a timer so an incoming connection still
+// completes with the modal window open.
+void S9xSGBLinkPump(void);
+
+// Enabled = a session exists (listening, connecting or connected).
+// Connected = a peer is attached and the version handshake is done.
+bool S9xSGBLinkIsEnabled(void);
+bool S9xSGBLinkIsConnected(void);
+
+// One-line state for the OSD / status bar.
+void S9xSGBLinkGetStatusText(char *buf, size_t cap);
+
 // Accumulator-based SNES→GB cycle stepping for BIOS mode. Call per
 // SNES opcode (or per H event) with the number of SNES master cycles
 // just consumed. Internally divides by 5 (SGB1 clock ratio) and steps

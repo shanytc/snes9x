@@ -18,13 +18,18 @@ SGBDIR   := $(ROOT)/sgb
 # All sgb/ sources except the test itself.
 SGBSRCS := $(filter-out $(SGBDIR)/tests/%.cpp,$(wildcard $(SGBDIR)/*.cpp))
 
+# gb_link.cpp needs winsock on Windows hosts (MinGW/MSYS).
+ifeq ($(OS),Windows_NT)
+LDLIBS += -lws2_32
+endif
+
 TARGET := sgb_test
 SRCS   := cpu_test.cpp
 
 all: $(TARGET)
 
 $(TARGET): $(SRCS) $(SGBSRCS)
-	$(CXX) $(CXXFLAGS) -I$(ROOT) -I$(SGBDIR) $(SRCS) $(SGBSRCS) -o $@
+	$(CXX) $(CXXFLAGS) -I$(ROOT) -I$(SGBDIR) $(SRCS) $(SGBSRCS) -o $@ $(LDLIBS)
 
 clean:
 	rm -f $(TARGET) sgb_out.ppm sgb_out.rgb

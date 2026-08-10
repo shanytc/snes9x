@@ -130,6 +130,7 @@ LRESULT CALLBACK DlgChildSplitProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK DlgGBLinkCable(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -2522,6 +2523,14 @@ LRESULT CALLBACK WinProc(
 			}
 			break;
 #endif
+
+		// The Game Boy link cable is its own TCP session, independent of
+		// SNES netplay — keep it out of the NETPLAY_SUPPORT gate.
+		case ID_NETPLAY_GB_LINK:
+			RestoreGUIDisplay ();
+			DialogBox (g_hInst, MAKEINTRESOURCE(IDD_GB_LINK_CABLE), hWnd, DlgGBLinkCable);
+			RestoreSNESDisplay ();
+			break;
 
 #ifdef NETPLAY_SUPPORT
 		case ID_NETPLAY_SERVER:
@@ -9841,6 +9850,140 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 	return FALSE;
 }
 #endif
+
+// Game Boy link cable session (Netplay > Game Boy Link Cable...).
+//
+// Two emulator instances, each with its own ROM, joined over TCP: one
+// listens, the other connects. Because the dialog is modal the emulation
+// loop is parked while it is open, so a timer pumps the socket here —
+// otherwise an incoming connection would sit unaccepted until the user
+// closed the window, which reads as "it doesn't work".
+#define GBLINK_TIMER_ID    1
+#define GBLINK_TIMER_MS    250
+
+static void GBLinkRefreshDialog(HWND hDlg)
+{
+	char status[256];
+	S9xSGBLinkGetStatusText(status, sizeof(status));
+	SetDlgItemText(hDlg, IDC_GBLINK_STATUS, _tFromChar(status));
+
+	const bool client = IsDlgButtonChecked(hDlg, IDC_GBLINK_MODE_CLIENT) == BST_CHECKED;
+	EnableWindow(GetDlgItem(hDlg, IDC_GBLINK_HOST), client);
+	EnableWindow(GetDlgItem(hDlg, IDC_GBLINK_HOST_LABEL), client);
+
+	const bool live = S9xSGBLinkIsEnabled();
+	EnableWindow(GetDlgItem(hDlg, IDC_GBLINK_STOP), live);
+	SetDlgItemText(hDlg, IDC_GBLINK_START, live ? TEXT("&Restart") : TEXT("&Start"));
+}
+
+INT_PTR CALLBACK DlgGBLinkCable(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog(hDlg);
+		WinRefreshDisplay();
+
+		CheckRadioButton(hDlg, IDC_GBLINK_MODE_SERVER, IDC_GBLINK_MODE_CLIENT,
+		                 Settings.GBLinkMode == 2 ? IDC_GBLINK_MODE_CLIENT
+		                                          : IDC_GBLINK_MODE_SERVER);
+
+		if (!Settings.GBLinkHost[0])
+			strcpy(Settings.GBLinkHost, "localhost");
+		if (Settings.GBLinkPort == 0)
+			Settings.GBLinkPort = 8765;
+
+		SetDlgItemText(hDlg, IDC_GBLINK_HOST, _tFromChar(Settings.GBLinkHost));
+		SetDlgItemInt(hDlg, IDC_GBLINK_PORT, Settings.GBLinkPort, FALSE);
+		CheckDlgButton(hDlg, IDC_GBLINK_AUTOSTART,
+		               Settings.GBLinkAutoStart ? BST_CHECKED : BST_UNCHECKED);
+
+		SetTimer(hDlg, GBLINK_TIMER_ID, GBLINK_TIMER_MS, NULL);
+		GBLinkRefreshDialog(hDlg);
+		return TRUE;
+	}
+
+	case WM_TIMER:
+		if (wParam == GBLINK_TIMER_ID)
+		{
+			S9xSGBLinkPump();
+			GBLinkRefreshDialog(hDlg);
+		}
+		return TRUE;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDC_GBLINK_MODE_SERVER:
+		case IDC_GBLINK_MODE_CLIENT:
+			GBLinkRefreshDialog(hDlg);
+			return TRUE;
+
+		case IDC_GBLINK_START:
+		{
+			TCHAR host[128];
+			GetDlgItemText(hDlg, IDC_GBLINK_HOST, host, 128);
+			strncpy(Settings.GBLinkHost, _tToChar(host), sizeof(Settings.GBLinkHost) - 1);
+			Settings.GBLinkHost[sizeof(Settings.GBLinkHost) - 1] = '\0';
+
+			BOOL ok = FALSE;
+			const UINT port = GetDlgItemInt(hDlg, IDC_GBLINK_PORT, &ok, FALSE);
+			if (!ok || port < 1 || port > 65535)
+			{
+				MessageBox(hDlg, TEXT("Port number must be between 1 and 65535."),
+				           TEXT("Game Boy Link Cable"), MB_OK | MB_ICONWARNING);
+				return TRUE;
+			}
+			Settings.GBLinkPort = (uint16)port;
+
+			const bool client = IsDlgButtonChecked(hDlg, IDC_GBLINK_MODE_CLIENT) == BST_CHECKED;
+			Settings.GBLinkMode = client ? 2 : 1;
+			Settings.GBLinkAutoStart =
+				IsDlgButtonChecked(hDlg, IDC_GBLINK_AUTOSTART) == BST_CHECKED;
+
+			char err[192];
+			err[0] = '\0';
+			const bool started = client
+				? S9xSGBLinkConnect(Settings.GBLinkHost, Settings.GBLinkPort, err, sizeof(err))
+				: S9xSGBLinkListen(Settings.GBLinkPort, err, sizeof(err));
+
+			if (!started)
+				MessageBox(hDlg, _tFromChar(err[0] ? err : "Could not start the link session."),
+				           TEXT("Game Boy Link Cable"), MB_OK | MB_ICONERROR);
+
+			GBLinkRefreshDialog(hDlg);
+			return TRUE;
+		}
+
+		case IDC_GBLINK_STOP:
+			S9xSGBLinkDisconnect();
+			// A deliberate teardown should not come back on the next ROM load.
+			Settings.GBLinkMode = 0;
+			GBLinkRefreshDialog(hDlg);
+			return TRUE;
+
+		case IDOK:
+		case IDCANCEL:
+			// The session deliberately outlives the dialog — closing this
+			// window is not the same as unplugging the cable.
+			Settings.GBLinkAutoStart =
+				IsDlgButtonChecked(hDlg, IDC_GBLINK_AUTOSTART) == BST_CHECKED;
+			KillTimer(hDlg, GBLINK_TIMER_ID);
+			EndDialog(hDlg, 0);
+			return TRUE;
+
+		default:
+			break;
+		}
+		break;
+
+	default:
+		break;
+	}
+	return FALSE;
+}
+
 void SetInfoDlgColor(unsigned char r, unsigned char g, unsigned char b)
 {
 	GUI.InfoColor=RGB(r,g,b);

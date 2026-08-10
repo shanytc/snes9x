@@ -237,6 +237,16 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	if (Settings.SGB_BIOSPreference > 2) Settings.SGB_BIOSPreference = 2;
 	Settings.GBRomPath[0] = '\0';
 
+	// Game Boy link cable (BGB protocol over TCP).
+	Settings.GBLinkMode                 =  static_cast<uint8>(conf.GetUInt("SGB::LinkMode", 0));
+	if (Settings.GBLinkMode > 2) Settings.GBLinkMode = 0;
+	Settings.GBLinkPort                 =  static_cast<uint16>(conf.GetUInt("SGB::LinkPort", 8765));
+	if (Settings.GBLinkPort == 0) Settings.GBLinkPort = 8765;
+	Settings.GBLinkAutoStart            =  conf.GetBool("SGB::LinkAutoStart", false);
+	strncpy(Settings.GBLinkHost, conf.GetString("SGB::LinkHost", "localhost"),
+	        sizeof(Settings.GBLinkHost) - 1);
+	Settings.GBLinkHost[sizeof(Settings.GBLinkHost) - 1] = '\0';
+
 	// Display
 
 	Settings.Transparency               =  conf.GetBool("Display::Transparency",               true);

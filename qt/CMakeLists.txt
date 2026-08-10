@@ -58,6 +58,8 @@ set(SNES9X_CORE_SOURCES
     ../sgb/gb_ppu.cpp
     ../sgb/gb_apu.cpp
     ../sgb/gb_timer.cpp
+    ../sgb/gb_serial.cpp
+    ../sgb/gb_link.cpp
     ../sgb/gb_joypad.cpp
     ../sgb/gb_cart.cpp
     ../msu1.cpp
@@ -422,6 +424,8 @@ list(APPEND LIBS
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     list(APPEND DEFINES "VK_USE_PLATFORM_WIN32_KHR")
+    # sgb/gb_link.cpp (Game Boy link cable) needs winsock.
+    list(APPEND LIBS ws2_32)
 elseif(NOT APPLE)
     list(APPEND DEFINES
         "VK_USE_PLATFORM_XLIB_KHR"

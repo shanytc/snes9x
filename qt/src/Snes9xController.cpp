@@ -234,6 +234,18 @@ void Snes9xController::updateSettings(EmuConfig *config)
                                       ? 2
                                       : (uint8)config->sgb_bios_preference;
 
+    // Game Boy link cable. Only the stored preferences are pushed here; the
+    // session itself opens on ROM load (see AutoStartGBLink in memmap.cpp).
+    Settings.GBLinkMode = (config->sgb_link_mode < 0 || config->sgb_link_mode > 2)
+                              ? 0
+                              : (uint8)config->sgb_link_mode;
+    Settings.GBLinkPort = (config->sgb_link_port < 1 || config->sgb_link_port > 65535)
+                              ? 8765
+                              : (uint16)config->sgb_link_port;
+    Settings.GBLinkAutoStart = config->sgb_link_auto_start;
+    snprintf(Settings.GBLinkHost, sizeof(Settings.GBLinkHost), "%s",
+             config->sgb_link_host.empty() ? "localhost" : config->sgb_link_host.c_str());
+
     if (rewind_buffer_size != config->rewind_buffer_size && active)
     {
         g_state_manager.init(config->rewind_buffer_size * 1048576);

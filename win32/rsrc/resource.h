@@ -885,8 +885,24 @@
 #define IDC_PAUSE_EMULATION             3351
 #define IDC_PAD_IMAGE                   3320
 
+// Game Boy link cable dialog
+#define IDD_GB_LINK_CABLE               189
+#define IDC_GBLINK_MODE_SERVER          3368
+#define IDC_GBLINK_MODE_CLIENT          3369
+#define IDC_GBLINK_HOST                 3370
+#define IDC_GBLINK_PORT                 3371
+#define IDC_GBLINK_AUTOSTART            3372
+#define IDC_GBLINK_STATUS               3373
+#define IDC_GBLINK_START                3374
+#define IDC_GBLINK_STOP                 3375
+#define IDC_GBLINK_GROUP                3376
+#define IDC_GBLINK_HOST_LABEL           3377
+#define IDC_GBLINK_PORT_LABEL           3378
+#define IDC_GBLINK_HINT                 3379
+
 #define ID_SOUND_AUDIOWAVEFORM          40198
 #define ID_INPUT_ENABLERUMBLE           40211
+#define ID_NETPLAY_GB_LINK              40216
 
 #define IDC_STATIC                      -1
 
@@ -894,9 +910,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        189
-#define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3368
+#define _APS_NEXT_RESOURCE_VALUE        190
+#define _APS_NEXT_COMMAND_VALUE         40217
+#define _APS_NEXT_CONTROL_VALUE         3380
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

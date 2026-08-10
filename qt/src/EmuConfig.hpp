@@ -194,6 +194,10 @@ struct EmuConfig
     // Persisted under [SGB] BIOSPreference to match win32/GTK/CLI, applied to
     // Settings.SGB_BIOSPreference; the BIOS menu keeps this in sync.
     int sgb_bios_preference;
+    int sgb_link_mode;          // 0=off, 1=listen (server), 2=connect (client)
+    std::string sgb_link_host;
+    int sgb_link_port;
+    bool sgb_link_auto_start;
 
     // Files
     enum FileLocation

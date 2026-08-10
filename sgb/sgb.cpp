@@ -19,6 +19,7 @@
 #include "gb_apu.h"
 #include "gb_timer.h"
 #include "gb_joypad.h"
+#include "gb_serial.h"
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
@@ -98,6 +99,7 @@ struct Emulator::Impl
 	Apu         apu;
 	Timer       timer;
 	Joypad      joypad;
+	Serial      serial;
 	Cart        cart;
 	PacketState sgb_pkt;
 	SgbState    sgb_state;
@@ -368,6 +370,7 @@ bool Emulator::Init()
 
 void Emulator::Deinit()
 {
+	SerialLinkDisconnect();
 	UnloadROM();
 }
 
@@ -436,6 +439,10 @@ void Emulator::Reset()
 	ApuReset(impl_->apu, impl_->cgb_mode && !Settings.SGB_BIOSModeActive, !impl_->boot_rom_loaded);
 	TimerReset(impl_->timer);
 	JoypadReset(impl_->joypad);
+	// A live link survives a GB reset — only the in-flight transfer is
+	// dropped, exactly like yanking the console's power with the cable
+	// still plugged in.
+	SerialReset(impl_->serial, impl_->cgb_mode && !Settings.SGB_BIOSModeActive);
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
 	MbcReset(impl_->cart.mbc);
@@ -475,6 +482,7 @@ void Emulator::Reset()
 	impl_->mem.apu    = &impl_->apu;
 	impl_->mem.timer  = &impl_->timer;
 	impl_->mem.joypad = &impl_->joypad;
+	impl_->mem.serial = &impl_->serial;
 	impl_->mem.cart   = &impl_->cart;
 	impl_->mem.cpu    = &impl_->cpu.State();
 
@@ -1387,6 +1395,9 @@ void Emulator::RunCycles(int32_t tcycles)
 			// Timer runs in the CPU clock domain (DIV doubles in double-
 			// speed); the APU stays real-time so audio pitch is unchanged.
 			TimerStep(impl_->timer, impl_->mem, consumed);
+			// Serial shares the timer's clock domain — the link shift
+			// clock doubles in double-speed the same way DIV does.
+			SerialStep(impl_->serial, impl_->mem, consumed);
 			int32_t apu_in = consumed;
 			if (impl_->mem.double_speed)
 			{
@@ -2421,8 +2432,11 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->mem.apu    = &impl_->apu;
 	impl_->mem.timer  = &impl_->timer;
 	impl_->mem.joypad = &impl_->joypad;
+	impl_->mem.serial = &impl_->serial;
 	impl_->mem.cart   = &impl_->cart;
 	impl_->mem.cpu    = &impl_->cpu.State();
+
+	SerialAfterStateLoad(impl_->serial, impl_->mem);
 
 	impl_->cart.sram_dirty = false;
 	impl_->ds_extra        = -1;
@@ -2488,6 +2502,27 @@ unsigned char *S9xSGBGetSRAM(void)  { return SGB::Instance().GetSRAMData(); }
 size_t S9xSGBGetSRAMSize(void)      { return SGB::Instance().GetSRAMSize(); }
 void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
+
+// ---- Link cable session (see gb_serial.h) ----------------------------------
+bool S9xSGBLinkListen(unsigned short port, char *err, size_t err_cap)
+{
+	return SGB::SerialLinkListen(port, err, err_cap);
+}
+
+bool S9xSGBLinkConnect(const char *host, unsigned short port, char *err, size_t err_cap)
+{
+	return SGB::SerialLinkConnect(host, port, err, err_cap);
+}
+
+void S9xSGBLinkDisconnect(void)     { SGB::SerialLinkDisconnect(); }
+void S9xSGBLinkPump(void)           { SGB::SerialLinkPump(); }
+bool S9xSGBLinkIsEnabled(void)      { return SGB::SerialLinkIsEnabled(); }
+bool S9xSGBLinkIsConnected(void)    { return SGB::SerialLinkIsConnected(); }
+
+void S9xSGBLinkGetStatusText(char *buf, size_t cap)
+{
+	SGB::SerialLinkStatusText(buf, cap);
+}
 
 namespace {
 	int32_t g_snes_cycle_accum = 0;

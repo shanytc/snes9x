@@ -9983,9 +9983,46 @@ static bool GBLinkChildAlive ()
 	return false;
 }
 
+// Locate the top-level window belonging to the spawned instance.
+static BOOL CALLBACK GBLinkFindChildWnd (HWND hWnd, LPARAM lParam)
+{
+	DWORD pid = 0;
+	GetWindowThreadProcessId (hWnd, &pid);
+	if (pid != GBLinkChild.dwProcessId) return TRUE;
+
+	TCHAR cls[64] = {0};
+	if (GetClassName (hWnd, cls, 64) && !lstrcmp (cls, TEXT("Snes9x: WndClass")))
+	{
+		*(HWND *)lParam = hWnd;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+// Ask the still-open child to tick its own item, so re-linking reuses that
+// window instead of piling up a new one each time.
+static void GBLinkRejoinChild (int mode)
+{
+	HWND child = NULL;
+	EnumWindows (GBLinkFindChildWnd, (LPARAM)&child);
+	if (!child) return;
+
+	PostMessage (child, WM_COMMAND,
+	             MAKEWPARAM (mode == GBLINK_SAME ? ID_EMULATION_GB_LINK_SAME
+	                                             : ID_EMULATION_GB_LINK_DIFF, 0), 0);
+}
+
 static void GBLinkSpawnPeer (int mode)
 {
-	if (Settings.GBLinkPeerInstance || GBLinkChildAlive ()) return;
+	if (Settings.GBLinkPeerInstance) return;
+
+	// Already have an instance: it is unlinked rather than gone, so bring it
+	// back rather than opening another window.
+	if (GBLinkChildAlive ())
+	{
+		GBLinkRejoinChild (mode);
+		return;
+	}
 
 	TCHAR exe[MAX_PATH];
 	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return;
@@ -10052,8 +10089,10 @@ void WinToggleGBLink (int mode)
 	}
 
 	// Both flags needed: the BIOS path leaves SuperGameBoy FALSE, and BIOS
-	// mode is the default.
-	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+	// mode is the default. A spawned instance is exempt — it links before
+	// its ROM is picked, exactly as it does at startup.
+	if (!Settings.GBLinkPeerInstance &&
+	    !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
 	{
 		S9xSetInfoString ("Link cable: load a Game Boy game first");
 		return;

@@ -51,9 +51,14 @@ constexpr int32_t kPollInterval = 1024;
 // a frame is ample; at ~1 ms it buried a paused peer in backlog.
 constexpr int32_t kTimestampInterval = 65536;
 
-// How long a peer's transfer waits for our game to arm (~1 ms), covering
-// the skew between two free-running emulators.
-constexpr int32_t kPendingHoldCycles = 4096;
+// How long a peer's transfer waits for our game to arm. The two emulators
+// free-run on their own timing, so their frame phase drifts against each
+// other; a window shorter than a frame gets walked out of, and the games
+// then see a dead cable. Held short once the other game has stopped
+// answering, so a side that is not playing does not stall the poller.
+constexpr int32_t kPendingHoldActive = 70224;   // one GB frame, ~16.7 ms
+constexpr int32_t kPendingHoldIdle   = 4096;    // ~1 ms
+constexpr uint32_t kUnansweredIdle   = 4;
 
 // Ceiling on the master's stall waiting for a reply - bounded so a frozen
 // peer can't take this instance down with it.
@@ -489,7 +494,9 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	if (s.pending_valid)
 	{
 		s.pending_age += tcycles;
-		if (s.pending_age >= kPendingHoldCycles)
+		const int32_t hold = (g_session.unanswered >= kUnansweredIdle)
+		                         ? kPendingHoldIdle : kPendingHoldActive;
+		if (s.pending_age >= hold)
 		{
 			// Our game never armed its side; tell the peer so it stops waiting.
 			s.pending_valid = false;

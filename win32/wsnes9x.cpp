@@ -9969,26 +9969,31 @@ enum
 	GBLINK_DIFF = 2
 };
 
-static int                 GBLinkMode  = GBLINK_OFF;
-static PROCESS_INFORMATION GBLinkChild = {0};
+static int GBLinkMode = GBLINK_OFF;
 
-static bool GBLinkChildAlive ()
+// Held by process id rather than a spawn handle, so it means the same
+// thing whichever instance started the other.
+DWORD GBLinkPartnerPid = 0;
+
+static bool GBLinkPartnerAlive ()
 {
-	if (!GBLinkChild.hProcess) return false;
-	if (WaitForSingleObject (GBLinkChild.hProcess, 0) == WAIT_TIMEOUT) return true;
+	if (!GBLinkPartnerPid) return false;
 
-	CloseHandle (GBLinkChild.hProcess);
-	CloseHandle (GBLinkChild.hThread);
-	ZeroMemory (&GBLinkChild, sizeof GBLinkChild);
-	return false;
+	HANDLE h = OpenProcess (SYNCHRONIZE, FALSE, GBLinkPartnerPid);
+	if (!h) { GBLinkPartnerPid = 0; return false; }
+
+	const bool alive = WaitForSingleObject (h, 0) == WAIT_TIMEOUT;
+	CloseHandle (h);
+	if (!alive) GBLinkPartnerPid = 0;
+	return alive;
 }
 
-// Locate the top-level window belonging to the spawned instance.
-static BOOL CALLBACK GBLinkFindChildWnd (HWND hWnd, LPARAM lParam)
+// Locate the top-level window belonging to the paired instance.
+static BOOL CALLBACK GBLinkFindPartnerWnd (HWND hWnd, LPARAM lParam)
 {
 	DWORD pid = 0;
 	GetWindowThreadProcessId (hWnd, &pid);
-	if (pid != GBLinkChild.dwProcessId) return TRUE;
+	if (pid != GBLinkPartnerPid) return TRUE;
 
 	TCHAR cls[64] = {0};
 	if (GetClassName (hWnd, cls, 64) && !lstrcmp (cls, SNES9XW_WNDCLASS))
@@ -9999,51 +10004,61 @@ static BOOL CALLBACK GBLinkFindChildWnd (HWND hWnd, LPARAM lParam)
 	return TRUE;
 }
 
-// Ask the still-open child to tick its own item, so re-linking reuses that
+// Ask the paired instance to tick its own item, so re-linking reuses that
 // window instead of piling up a new one each time.
-static void GBLinkRejoinChild (int mode)
+static void GBLinkRejoinPartner (int mode)
 {
-	HWND child = NULL;
-	EnumWindows (GBLinkFindChildWnd, (LPARAM)&child);
-	if (!child) return;
+	HWND partner = NULL;
+	EnumWindows (GBLinkFindPartnerWnd, (LPARAM)&partner);
+	if (!partner) return;
 
-	PostMessage (child, WM_COMMAND,
+	PostMessage (partner, WM_COMMAND,
 	             MAKEWPARAM (mode == GBLINK_SAME ? ID_EMULATION_GB_LINK_SAME
 	                                             : ID_EMULATION_GB_LINK_DIFF, 0), 0);
 }
 
-static void GBLinkSpawnPeer (int mode)
+// Whichever instance ends up hosting brings the other one up, so the same
+// single click works from either window.
+static void GBLinkBringUpPartner (int mode)
 {
-	if (Settings.GBLinkPeerInstance) return;
-
-	// Already have an instance: it is unlinked rather than gone, so bring it
-	// back rather than opening another window.
-	if (GBLinkChildAlive ())
+	// Still open, just unlinked: reuse it rather than opening another.
+	if (GBLinkPartnerAlive ())
 	{
-		GBLinkRejoinChild (mode);
+		GBLinkRejoinPartner (mode);
 		return;
 	}
 
 	TCHAR exe[MAX_PATH];
 	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return;
 
-	// Same-game mode passes our ROM as a positional argument so the child
-	// loads it through the normal path.
+	// Same-game mode passes our ROM as a positional argument so the new
+	// instance loads it through the normal path. Our pid goes with it, so
+	// the pairing is known from both ends.
 	TCHAR cmd[MAX_PATH * 3];
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s \"%s\""), exe, GBLINK_PEER_SWITCH,
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu \"%s\""), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId (),
 		            (TCHAR *)_tFromChar (Settings.GBRomPath));
 	else
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s"), exe, GBLINK_PEER_SWITCH);
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu"), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId ());
 	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
 
 	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
 	ZeroMemory (&si, sizeof si);
+	ZeroMemory (&pi, sizeof pi);
 	si.cb = sizeof si;
-	ZeroMemory (&GBLinkChild, sizeof GBLinkChild);
 
-	if (!CreateProcess (NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &GBLinkChild))
+	if (!CreateProcess (NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+	{
 		S9xSetInfoString ("Link cable: could not launch the second instance");
+		return;
+	}
+
+	GBLinkPartnerPid = pi.dwProcessId;
+	CloseHandle (pi.hThread);
+	CloseHandle (pi.hProcess);
 }
 
 static void WinStartGBLink (int mode)
@@ -10064,7 +10079,7 @@ static void WinStartGBLink (int mode)
 
 	if (role == S9X_GBLINK_SERVER)
 	{
-		GBLinkSpawnPeer (mode);
+		GBLinkBringUpPartner (mode);
 		S9xSetInfoString ("Link cable: waiting for the second instance");
 	}
 	else

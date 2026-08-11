@@ -304,12 +304,16 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 
 	// Strip before the portable parser sees it: S9xParseArgs would take the
 	// unknown option for a ROM name.
+	const size_t gblink_len = strlen(GBLINK_PEER_SWITCH_A);
 	for (int i = 0; i < count; i++)
 	{
-		if (strcasecmp(parameters[i], GBLINK_PEER_SWITCH_A) != 0)
+		if (strncasecmp(parameters[i], GBLINK_PEER_SWITCH_A, gblink_len) != 0)
 			continue;
 
 		Settings.GBLinkPeerInstance = TRUE;
+		if (parameters[i][gblink_len] == '=')
+			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, NULL, 10);
+
 		for (int j = i; j + 1 < count; j++)
 			parameters[j] = parameters[j + 1];
 		count--;

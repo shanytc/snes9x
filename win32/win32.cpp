@@ -858,6 +858,8 @@ void S9xSetPause (uint32 mask)
     // here; the audio thread otherwise underruns mid-waveform and clicks.
     if (!was_paused && S9xSoundOutput)
         S9xSoundOutput->OnPauseRequested();
+
+    GBLinkMirrorPause ();
 }
 
 void S9xClearPause (uint32 mask)
@@ -871,6 +873,8 @@ void S9xClearPause (uint32 mask)
         // Wake up the main loop thread just if its blocked in a GetMessage call.
         PostMessage (GUI.hWnd, WM_NULL, 0, 0);
     }
+
+    GBLinkMirrorPause ();
 }
 
 bool JustifierOffscreen()

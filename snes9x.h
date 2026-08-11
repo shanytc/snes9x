@@ -440,7 +440,10 @@ enum
 	PAUSE_RESTORE_GUI			= (1 << 6),
 	PAUSE_FREEZE_FILE			= (1 << 7),
 	PAUSE_SOUND_DIALOG			= (1 << 8),
-	PAUSE_LUA_DEBUGGER			= (1 << 9)	// a Lua script is stopped at a breakpoint
+	PAUSE_LUA_DEBUGGER			= (1 << 9),	// a Lua script is stopped at a breakpoint
+	// The linked instance paused, so this one holds with it: a Game Boy
+	// that stops answering reads to the other game as an unplugged cable.
+	PAUSE_LINK_PEER				= (1 << 10)
 };
 
 void S9xSetPause(uint32);

@@ -47,8 +47,9 @@ constexpr int32_t kBitPeriodFast   = 16;
 // slave to answer sync1, rare enough to cost nothing.
 constexpr int32_t kPollInterval = 1024;
 
-// How often to volunteer our timestamp so the peer can pace itself (~1 ms).
-constexpr int32_t kTimestampInterval = 4096;
+// How often to volunteer our timestamp so the peer can pace itself. Once
+// a frame is ample; at ~1 ms it buried a paused peer in backlog.
+constexpr int32_t kTimestampInterval = 65536;
 
 // How long a peer's transfer waits for our game to arm (~1 ms), covering
 // the skew between two free-running emulators.
@@ -106,7 +107,8 @@ inline uint32_t Timestamp(const Serial &s)
 	return static_cast<uint32_t>((s.real_cycles >> 1) & 0x7FFFFFFF);
 }
 
-void SendPacket(uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4, uint32_t i1)
+void SendPacket(uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4, uint32_t i1,
+                bool droppable = false)
 {
 	LinkPacket p;
 	p.b1 = b1;
@@ -114,7 +116,7 @@ void SendPacket(uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4, uint32_t i1)
 	p.b3 = b3;
 	p.b4 = b4;
 	p.i1 = i1;
-	LinkSend(p);
+	LinkSend(p, droppable);
 }
 
 void SendVersion() { SendPacket(kCmdVersion, 1, 4, 0, 0); }
@@ -323,6 +325,12 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	g_active     = &s;
 	g_active_mem = &mem;
 
+	// Anything buffered belongs to the timeline just replaced; applying it
+	// to the restored state would shift a byte into the wrong transfer.
+	LinkFlush();
+	g_session.driving    = 0;
+	g_session.unanswered = 0;
+
 	s.active        = false;
 	s.passive       = false;
 	s.bits_left     = 0;
@@ -493,7 +501,7 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	if (s.ts_send_timer <= 0)
 	{
 		s.ts_send_timer = kTimestampInterval;
-		SendPacket(kCmdSync3, 0, 0, 0, Timestamp(s));
+		SendPacket(kCmdSync3, 0, 0, 0, Timestamp(s), true);
 	}
 }
 

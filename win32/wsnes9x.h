@@ -46,6 +46,10 @@
 constexpr int ASPECT_WIDTH_4_3 = 256;
 constexpr int ASPECT_WIDTH_8_7 = 299;
 
+// Main window class. Distinct from upstream Snes9x so this fork's windows
+// can be told apart, including by our own second-instance lookup.
+#define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
+
 // Marks the instance auto-launched by the Game Boy Data Link menu: it
 // links itself on startup and never launches one in turn.
 #define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")

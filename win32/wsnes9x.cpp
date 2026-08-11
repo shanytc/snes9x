@@ -4138,7 +4138,7 @@ BOOL WinInit( HINSTANCE hInstance)
     wndclass.hIconSm = NULL;
     wndclass.hCursor = NULL;
     wndclass.lpszMenuName = NULL;
-    wndclass.lpszClassName = TEXT("Snes9x: WndClass");
+    wndclass.lpszClassName = SNES9XW_WNDCLASS;
 	wndclass.hbrBackground=(HBRUSH)GetStockObject(BLACK_BRUSH);
 
     GUI.hInstance = hInstance;
@@ -4234,7 +4234,7 @@ BOOL WinInit( HINSTANCE hInstance)
     AdjustWindowRectEx (&rect, dwStyle, FALSE, dwExStyle);
     if ((GUI.hWnd = CreateWindowEx (
         dwExStyle,
-        TEXT("Snes9x: WndClass"),
+        SNES9XW_WNDCLASS,
         buf,
         WS_CLIPSIBLINGS |
         WS_CLIPCHILDREN |
@@ -10474,7 +10474,7 @@ static BOOL CALLBACK GBLinkFindChildWnd (HWND hWnd, LPARAM lParam)
 	if (pid != GBLinkChild.dwProcessId) return TRUE;
 
 	TCHAR cls[64] = {0};
-	if (GetClassName (hWnd, cls, 64) && !lstrcmp (cls, TEXT("Snes9x: WndClass")))
+	if (GetClassName (hWnd, cls, 64) && !lstrcmp (cls, SNES9XW_WNDCLASS))
 	{
 		*(HWND *)lParam = hWnd;
 		return FALSE;

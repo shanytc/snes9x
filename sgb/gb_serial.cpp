@@ -584,8 +584,12 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 
 	if (!SerialLinkIsConnected())
 	{
+		// Say so once on the side that did not ask for it: the peer left, and
+		// nothing else would tell this instance.
+		if (g_session.reported == 0) return false;
 		g_session.reported = 0;
-		return false;
+		SerialLinkStatusText(buf, cap);
+		return true;
 	}
 	const uint8_t st = LinkDisplayState();
 	if (st == 0 || st == g_session.reported) return false;
@@ -610,12 +614,10 @@ void SerialLinkStatusText(char *buf, size_t cap)
 	switch (LinkGetState())
 	{
 		case LinkState::Off:
-		{
-			const char *err = LinkLastError();
-			if (err && *err) std::snprintf(buf, cap, "Link cable: %s", err);
-			else             std::snprintf(buf, cap, "Link cable: disconnected");
+			// LinkLastError stays available for diagnostics, but the reason a
+			// cable came out is not what the player needs on screen.
+			std::snprintf(buf, cap, "Link cable: disconnected");
 			return;
-		}
 		case LinkState::Listening:
 			std::snprintf(buf, cap, "Link cable: waiting for the other instance");
 			return;

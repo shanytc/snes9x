@@ -29,6 +29,9 @@ struct Serial
 
 	bool     peer_valid = false;   // peer answered our active transfer
 	uint8_t  peer_data  = 0xFF;
+	// True only when that answer carried a byte. An ack meaning "nothing
+	// armed here" also releases the transfer, but nobody was listening.
+	bool     peer_supplied = false;
 
 	// A peer's transfer that landed before our game armed, held briefly so
 	// skew between the two emulators doesn't drop a byte.

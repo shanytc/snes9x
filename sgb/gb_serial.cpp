@@ -81,6 +81,7 @@ struct LinkSession
 	// Who drove the last transfer, chosen per byte by the games via SC
 	// bit 0: 0 = nothing yet, 1 = us, 2 = the peer.
 	uint8_t  driving           = 0;
+	uint32_t unanswered        = 0;   // polls we clocked that nobody answered
 	uint8_t  reported          = 0;   // last value handed to the host UI
 	int64_t  next_report       = 0;   // real-cycle gate on re-announcing
 };
@@ -135,9 +136,20 @@ void CompleteActive(Serial &s, Memory &mem)
 
 	s.active     = false;
 	s.bits_left  = 0;
-	if (s.peer_valid) { ++g_session.transfers; g_session.driving = 1; }
-	s.peer_valid = false;
-	s.peer_data  = 0xFF;
+	if (s.peer_supplied)
+	{
+		++g_session.transfers;
+		g_session.driving    = 1;
+		g_session.unanswered = 0;
+	}
+	else if (s.peer_valid)
+	{
+		// We drove the clock but the other game was not listening.
+		++g_session.unanswered;
+	}
+	s.peer_valid    = false;
+	s.peer_supplied = false;
+	s.peer_data     = 0xFF;
 }
 
 // Finish a transfer the peer clocked for us.
@@ -149,7 +161,8 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 
 	s.passive = false;
 	++g_session.transfers;
-	g_session.driving = 2;
+	g_session.driving    = 2;
+	g_session.unanswered = 0;
 }
 
 void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
@@ -201,17 +214,23 @@ void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
 			return;
 
 		case kCmdSync2:
-			// Peer answered the transfer we are clocking.
-			s.peer_data  = p.b2;
-			s.peer_valid = true;
+			// Only while we are actually clocking: a reply that arrives after
+			// we gave up would otherwise be shifted into the next transfer.
+			if (!s.active) return;
+			s.peer_data     = p.b2;
+			s.peer_valid    = true;
+			s.peer_supplied = true;
 			return;
 
 		case kCmdSync3:
 			if (p.b2 == 1)
 			{
-				// Peer had no transfer armed; the wire stayed high.
-				s.peer_data  = 0xFF;
-				s.peer_valid = true;
+				// Peer had nothing armed, so the wire stayed high. Releases
+				// our transfer but is not an exchange with anyone.
+				if (!s.active) return;
+				s.peer_data     = 0xFF;
+				s.peer_valid    = true;
+				s.peer_supplied = false;
 			}
 			else
 			{
@@ -309,6 +328,7 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	s.bits_left     = 0;
 	s.bit_timer     = 0;
 	s.peer_valid    = false;
+	s.peer_supplied = false;
 	s.peer_data     = 0xFF;
 	s.pending_valid = false;
 	s.pending_age   = 0;
@@ -378,6 +398,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		s.bit_period    = BitPeriod(s, value);
 		s.bit_timer     = s.bit_period;
 		s.peer_valid    = false;
+		s.peer_supplied = false;
 		s.peer_data     = 0xFF;
 
 		if (s.pending_valid)
@@ -541,6 +562,14 @@ void SerialLinkPump()
 	else                          LinkPoll();
 }
 
+// What the OSD is currently saying: 0 nothing yet, 1 we drive, 2 the peer
+// drives, 3 we drive but the other game never answers.
+uint8_t LinkDisplayState()
+{
+	if (g_session.driving) return g_session.driving;
+	return g_session.unanswered ? 3 : 0;
+}
+
 int SerialLinkPlayerCount()
 {
 	if (SerialLinkIsConnected()) return 2;
@@ -556,13 +585,14 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 		g_session.reported = 0;
 		return false;
 	}
-	if (g_session.driving == 0 || g_session.driving == g_session.reported) return false;
+	const uint8_t st = LinkDisplayState();
+	if (st == 0 || st == g_session.reported) return false;
 
 	// Rate-limit re-announcements; the first is always let through.
 	const int64_t now = g_active ? g_active->real_cycles : 0;
 	if (g_session.reported != 0 && now < g_session.next_report) return false;
 
-	g_session.reported    = g_session.driving;
+	g_session.reported    = st;
 	g_session.next_report = now + kRoleReportInterval;
 	SerialLinkStatusText(buf, cap);
 	return true;
@@ -595,12 +625,16 @@ void SerialLinkStatusText(char *buf, size_t cap)
 				std::snprintf(buf, cap, "Link cable: connected, waiting for handshake");
 				return;
 			}
-			// No suffix until a byte has moved: the games choose who drives,
-			// so before the first transfer there is nothing to report.
-			std::snprintf(buf, cap, "Link cable: connected%s%s",
-			              g_session.driving == 1 ? " (Master)"
-			                                     : (g_session.driving == 2 ? " (Passive)" : ""),
-			              g_session.stalled ? " - peer not responding" : "");
+			// No role claim until a byte has actually moved: the games choose
+			// who drives, and clocking an empty wire proves nothing.
+			{
+				const uint8_t st = LinkDisplayState();
+				const char *role = (st == 1) ? " (Master)"
+				                 : (st == 2) ? " (Passive)"
+				                 : (st == 3) ? " - waiting for the other game" : "";
+				std::snprintf(buf, cap, "Link cable: connected%s%s", role,
+				              g_session.stalled ? " - peer not responding" : "");
+			}
 			return;
 	}
 }

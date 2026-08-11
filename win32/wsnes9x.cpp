@@ -5246,11 +5246,12 @@ void GetSlotFilename(int slot, char filename[_MAX_PATH + 1])
 {
     char ext[_MAX_EXT + 1];
 
-    // Two linked instances on one ROM resolve to the same path, so tag by
-    // bind role -- the one thing that cannot change while connected.
+    // Two linked instances on one ROM resolve to the same path. Tagged by
+    // player index rather than bind role: the role is re-decided on every
+    // reconnect, which would swap the pair's files between sessions.
     const char *tag = "";
     if (S9xSGBLinkIsConnected())
-        tag = (S9xSGBLinkGetRole() == S9X_GBLINK_SERVER) ? "_server" : "_client";
+        tag = (GBLinkPlayerIndex == 2) ? "_p2" : "_p1";
 
     if(slot == -1)
         snprintf(ext, _MAX_EXT, "%s.oops", tag);
@@ -10006,6 +10007,9 @@ static int GBLinkMode = GBLINK_OFF;
 // thing whichever instance started the other.
 DWORD GBLinkPartnerPid = 0;
 
+// A fresh instance is player 1; a launched one is told otherwise.
+int GBLinkPlayerIndex = 1;
+
 static bool GBLinkPartnerAlive ()
 {
 	if (!GBLinkPartnerPid) return false;
@@ -10073,12 +10077,12 @@ static void GBLinkBringUpPartner (int mode)
 	// the pairing is known from both ends.
 	TCHAR cmd[MAX_PATH * 3];
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu \"%s\""), exe, GBLINK_PEER_SWITCH,
-		            (unsigned long)GetCurrentProcessId (),
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId (), GBLinkPlayerIndex,
 		            (TCHAR *)_tFromChar (Settings.GBRomPath));
 	else
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu"), exe, GBLINK_PEER_SWITCH,
-		            (unsigned long)GetCurrentProcessId ());
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d"), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId (), GBLinkPlayerIndex);
 	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
 
 	STARTUPINFO si;

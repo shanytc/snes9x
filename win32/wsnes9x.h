@@ -50,14 +50,20 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 // can be told apart, including by our own second-instance lookup.
 #define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
 
-// Marks the instance auto-launched by the Game Boy Data Link menu, and
-// carries the launching process id as "-gblinkpeer=<pid>" so the pairing
-// is mutual: either side can bring the other back.
+// Marks the instance auto-launched by the Game Boy Data Link menu.
+// "-gblinkpeer=<pid>,<index>" carries the launcher's process id and player
+// index, so the pairing is mutual and the launched side knows which half
+// of the pair it is.
 #define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
 #define GBLINK_PEER_SWITCH_A "-gblinkpeer"
 
 // The other half of the pair, whichever way round it was started.
 extern DWORD GBLinkPartnerPid;
+
+// 1 or 2, fixed for this process. Comes from the pairing rather than from
+// the bind race, which is re-decided on every reconnect -- so save state
+// filenames stay put across sessions.
+extern int GBLinkPlayerIndex;
 
 #include "_tfwopen.h"
 #ifdef UNICODE

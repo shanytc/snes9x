@@ -312,7 +312,15 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 
 		Settings.GBLinkPeerInstance = TRUE;
 		if (parameters[i][gblink_len] == '=')
-			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, NULL, 10);
+		{
+			char *end = NULL;
+			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
+
+			// We are the other half of whoever launched us, so the pair is
+			// always {1,2} even when a survivor spawns a replacement.
+			if (end && *end == ',')
+				GBLinkPlayerIndex = (atoi(end + 1) == 1) ? 2 : 1;
+		}
 
 		for (int j = i; j + 1 < count; j++)
 			parameters[j] = parameters[j + 1];

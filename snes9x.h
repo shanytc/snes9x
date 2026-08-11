@@ -388,7 +388,10 @@ enum
 	PAUSE_WINDOW_ICONISED		= (1 << 5),
 	PAUSE_RESTORE_GUI			= (1 << 6),
 	PAUSE_FREEZE_FILE			= (1 << 7),
-	PAUSE_SOUND_DIALOG			= (1 << 8)
+	PAUSE_SOUND_DIALOG			= (1 << 8),
+	// The linked instance paused, so this one holds with it: a Game Boy
+	// that stops answering reads to the other game as an unplugged cable.
+	PAUSE_LINK_PEER				= (1 << 9)
 };
 
 void S9xSetPause(uint32);

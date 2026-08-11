@@ -60,6 +60,11 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 // The other half of the pair, whichever way round it was started.
 extern DWORD GBLinkPartnerPid;
 
+// Mirror this instance's pause to the paired one, so a Game Boy that
+// stops answering never reads as an unplugged cable. Called from the
+// pause setters.
+void GBLinkMirrorPause();
+
 // 1 or 2, fixed for this process. Comes from the pairing rather than from
 // the bind race, which is re-decided on every reconnect -- so save state
 // filenames stay put across sessions.

@@ -132,6 +132,7 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 void WinToggleGBLink(int mode);
 bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam);
+void GBLinkMirrorPause();
 void WinAutoStartGBLinkPeer();
 int  WinGetGBLinkMode();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -175,6 +176,8 @@ void S9xWinScanJoypads();
 // Save/load fanned out to the paired Data Link instance. wParam = slot,
 // lParam != 0 to save.
 #define WM_GBLINK_FREEZE (WM_APP + 2)
+// Pause mirrored to the paired instance. wParam != 0 to hold.
+#define WM_GBLINK_PAUSE (WM_APP + 3)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 5;
@@ -3203,6 +3206,11 @@ LRESULT CALLBACK WinProc(
 		DrawMenuBar(GUI.hWnd);
 		break;
 
+	case WM_GBLINK_PAUSE:
+		if (wParam) S9xSetPause (PAUSE_LINK_PEER);
+		else        S9xClearPause (PAUSE_LINK_PEER);
+		return 0;
+
 	case WM_GBLINK_FREEZE:
 		// The paired instance saved or loaded; match it on our own file.
 		// The flag stops this bouncing straight back at it.
@@ -4872,6 +4880,10 @@ int WINAPI WinMain(
         // Runs with no ROM loaded too: the spawned instance sits here
         // until its game is picked, and the peer must see it arrive.
         S9xSGBLinkPump ();
+
+        // Never stay frozen waiting on an instance that has gone away.
+        if ((Settings.ForcedPause & PAUSE_LINK_PEER) && !S9xSGBLinkIsConnected ())
+            S9xClearPause (PAUSE_LINK_PEER);
 
         // The driving end can change mid-session, so refresh on change
         // rather than only at connect.
@@ -10037,6 +10049,24 @@ static BOOL CALLBACK GBLinkFindPartnerWnd (HWND hWnd, LPARAM lParam)
 		return FALSE;
 	}
 	return TRUE;
+}
+
+// A paused instance stops answering the cable, and the other game reads
+// that as unplugged and drops to its title screen -- so the pair holds
+// together. Called from S9xSetPause/S9xClearPause to catch every source,
+// including the modal menu loop, which never returns to the main loop.
+void GBLinkMirrorPause ()
+{
+	static bool mirrored = false;
+
+	if (!S9xSGBLinkIsConnected ()) { mirrored = false; return; }
+
+	// Our own pause only: mirroring the peer's would hold both forever.
+	const bool paused = (Settings.ForcedPause & ~PAUSE_LINK_PEER) != 0;
+	if (paused == mirrored) return;
+
+	mirrored = paused;
+	GBLinkPostToPartner (WM_GBLINK_PAUSE, (WPARAM)(paused ? 1 : 0), 0);
 }
 
 bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam)

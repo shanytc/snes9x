@@ -55,8 +55,14 @@ const char *LinkLastError();
 // "host:port" of the current or intended peer, for the status line.
 const char *LinkPeerName();
 
-// Queue one packet; false if not connected or the peer is gone.
-bool LinkSend(const LinkPacket &p);
+// Queue one packet; false if not connected or the peer is gone. Mark
+// status packets droppable so a paused peer's backlog cannot kill the
+// link -- only undeliverable real transfers mean it is really gone.
+bool LinkSend(const LinkPacket &p, bool droppable = false);
+
+// Discard buffered traffic both ways. Used on state load, where
+// anything still queued belongs to the timeline being replaced.
+void LinkFlush();
 
 // Pop one fully-received packet. Returns false when none is buffered.
 bool LinkRecv(LinkPacket &out);

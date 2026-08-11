@@ -131,6 +131,7 @@ INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 void WinToggleGBLink(int mode);
+bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam);
 void WinAutoStartGBLinkPeer();
 int  WinGetGBLinkMode();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -171,6 +172,9 @@ void S9xWinScanJoypads();
 #define TIMER_SCANJOYPADS  (99999)
 #define NC_SEARCHDB 0x8000
 #define WM_CHEATS_ADDED (WM_APP + 1)
+// Save/load fanned out to the paired Data Link instance. wParam = slot,
+// lParam != 0 to save.
+#define WM_GBLINK_FREEZE (WM_APP + 2)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 5;
@@ -190,6 +194,9 @@ constexpr int HOTKEY_TAB_DISPLAY    = 3;
 /* Global variables                                                          */
 /*****************************************************************************/
 struct sGUI GUI;
+
+// Set while applying a peer-initiated save/load, so it is not relayed back.
+static bool GBLinkStateRelaying = false;
 typedef struct sExtList
 {
 	TCHAR* extension;
@@ -3196,6 +3203,14 @@ LRESULT CALLBACK WinProc(
 		DrawMenuBar(GUI.hWnd);
 		break;
 
+	case WM_GBLINK_FREEZE:
+		// The paired instance saved or loaded; match it on our own file.
+		// The flag stops this bouncing straight back at it.
+		GBLinkStateRelaying = true;
+		FreezeUnfreezeSlot ((int)wParam, lParam ? TRUE : FALSE);
+		GBLinkStateRelaying = false;
+		return 0;
+
 	case WM_CLOSE:
 		SaveMainWinPos();
 		break;
@@ -5231,10 +5246,16 @@ void GetSlotFilename(int slot, char filename[_MAX_PATH + 1])
 {
     char ext[_MAX_EXT + 1];
 
+    // Two linked instances on one ROM resolve to the same path, so tag by
+    // bind role -- the one thing that cannot change while connected.
+    const char *tag = "";
+    if (S9xSGBLinkIsConnected())
+        tag = (S9xSGBLinkGetRole() == S9X_GBLINK_SERVER) ? "_server" : "_client";
+
     if(slot == -1)
-        strcpy(ext, ".oops");
+        snprintf(ext, _MAX_EXT, "%s.oops", tag);
     else
-        snprintf(ext, _MAX_EXT, ".%03d", slot);
+        snprintf(ext, _MAX_EXT, "%s.%03d", tag, slot);
     strcpy(filename, S9xGetFilename(ext, SNAPSHOT_DIR).c_str());
 }
 
@@ -5243,24 +5264,33 @@ void FreezeUnfreezeSlot(int slot, bool8 freeze)
     char filename[_MAX_PATH + 1];
     GetSlotFilename(slot, filename);
 
-    FreezeUnfreeze(filename, freeze);
+    // A linked pair is one save: loading half of it would leave the two
+    // games at different moments and desync immediately. Relayed only after
+    // this side commits, so a cancelled confirm cannot half-apply it. The
+    // oops slot is an emergency dump of this instance alone.
+    const bool done = FreezeUnfreeze(filename, freeze);
+
+    if (done && !GBLinkStateRelaying && slot != -1 && S9xSGBLinkIsConnected())
+        GBLinkPostToPartner(WM_GBLINK_FREEZE, (WPARAM)slot, (LPARAM)(freeze ? 1 : 0));
 }
 
-void FreezeUnfreeze (const char *filename, bool8 freeze)
+bool FreezeUnfreeze (const char *filename, bool8 freeze)
 {
 #ifdef NETPLAY_SUPPORT
     if (!freeze && Settings.NetPlay && !Settings.NetPlayServer)
     {
         S9xMessage (S9X_INFO, S9X_NETPLAY_NOT_SERVER,
 			"Only the server is allowed to load freeze files.");
-        return;
+        return false;
     }
 #endif
 
     if(Settings.StopEmulation)
-        return;
+        return false;
 
-	if (GUI.ConfirmSaveLoad)
+	// Not while matching the paired instance: nobody asked for it on this
+	// window, and a modal prompt here would strand the other half.
+	if (GUI.ConfirmSaveLoad && !GBLinkStateRelaying)
 	{
 		std::string msg, title;
 		if (freeze)
@@ -5276,7 +5306,7 @@ void FreezeUnfreeze (const char *filename, bool8 freeze)
 		msg += filename;
 		int res = MessageBox(GUI.hWnd, _tFromChar(msg.c_str()), _tFromChar(title.c_str()), MB_YESNO | MB_ICONQUESTION);
 		if (res != IDYES)
-			return;
+			return false;
 	}
 
     S9xSetPause (PAUSE_FREEZE_FILE);
@@ -5294,7 +5324,7 @@ void FreezeUnfreeze (const char *filename, bool8 freeze)
 		if (!RA_WarnDisableHardcore("Loading save states"))
 		{
 			S9xClearPause(PAUSE_FREEZE_FILE);
-			return;
+			return false;
 		}
 #endif
 
@@ -5313,6 +5343,7 @@ void FreezeUnfreeze (const char *filename, bool8 freeze)
     }
 
     S9xClearPause (PAUSE_FREEZE_FILE);
+    return true;
 }
 
 bool UnfreezeScreenshotSlot(int slot, uint16 **image_buffer, int &width, int &height)
@@ -10004,17 +10035,23 @@ static BOOL CALLBACK GBLinkFindPartnerWnd (HWND hWnd, LPARAM lParam)
 	return TRUE;
 }
 
+bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	HWND partner = NULL;
+	EnumWindows (GBLinkFindPartnerWnd, (LPARAM)&partner);
+	if (!partner) return false;
+
+	PostMessage (partner, msg, wParam, lParam);
+	return true;
+}
+
 // Ask the paired instance to tick its own item, so re-linking reuses that
 // window instead of piling up a new one each time.
 static void GBLinkRejoinPartner (int mode)
 {
-	HWND partner = NULL;
-	EnumWindows (GBLinkFindPartnerWnd, (LPARAM)&partner);
-	if (!partner) return;
-
-	PostMessage (partner, WM_COMMAND,
-	             MAKEWPARAM (mode == GBLINK_SAME ? ID_EMULATION_GB_LINK_SAME
-	                                             : ID_EMULATION_GB_LINK_DIFF, 0), 0);
+	GBLinkPostToPartner (WM_COMMAND,
+	                     MAKEWPARAM (mode == GBLINK_SAME ? ID_EMULATION_GB_LINK_SAME
+	                                                     : ID_EMULATION_GB_LINK_DIFF, 0), 0);
 }
 
 // Whichever instance ends up hosting brings the other one up, so the same

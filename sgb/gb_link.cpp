@@ -473,14 +473,17 @@ bool        LinkIsConnected() { return g_link.state == LinkState::Connected; }
 const char *LinkLastError()   { return g_link.err; }
 const char *LinkPeerName()    { return g_link.peer; }
 
-bool LinkSend(const LinkPacket &p)
+bool LinkSend(const LinkPacket &p, bool droppable)
 {
 	if (g_link.state != LinkState::Connected) return false;
 
 	if (g_link.tx_len + kPacketBytes > kTxCap)
 	{
-		// Peer stopped draining long enough to fill the queue: treat as dead
-		// rather than silently dropping transfers.
+		// A peer that is merely paused -- loading a state, sitting in a menu
+		// -- stops draining for a while. Status packets are dropped rather
+		// than killing a link that is about to come back; only a backlog of
+		// real transfers means it is genuinely gone.
+		if (droppable) return false;
 		DropPeer("Link stalled (send queue full)");
 		return false;
 	}
@@ -515,6 +518,12 @@ bool LinkRecv(LinkPacket &out)
 	         (static_cast<uint32_t>(r[7]) << 24);
 	g_link.rx_out += kPacketBytes;
 	return true;
+}
+
+void LinkFlush()
+{
+	g_link.rx_len = g_link.rx_out = 0;
+	g_link.tx_len = 0;
 }
 
 bool LinkWaitReadable(int timeout_ms)

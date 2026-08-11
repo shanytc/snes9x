@@ -562,12 +562,14 @@ void SerialLinkPump()
 	else                          LinkPoll();
 }
 
-// What the OSD is currently saying: 0 nothing yet, 1 we drive, 2 the peer
-// drives, 3 we drive but the other game never answers.
+// What the OSD is currently saying: 0 nothing to report, 1 we drive,
+// 2 the peer drives, 3 we drive but the other game never answers,
+// 4 linked with nothing exchanged yet.
 uint8_t LinkDisplayState()
 {
-	if (g_session.driving) return g_session.driving;
-	return g_session.unanswered ? 3 : 0;
+	if (!SerialLinkIsConnected()) return 0;
+	if (g_session.driving)        return g_session.driving;
+	return g_session.unanswered ? 3 : 4;
 }
 
 int SerialLinkPlayerCount()
@@ -588,9 +590,12 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 	const uint8_t st = LinkDisplayState();
 	if (st == 0 || st == g_session.reported) return false;
 
-	// Rate-limit re-announcements; the first is always let through.
-	const int64_t now = g_active ? g_active->real_cycles : 0;
-	if (g_session.reported != 0 && now < g_session.next_report) return false;
+	// Only master/passive flapping is rate-limited. Reaching the link, and
+	// the first real transfer, are news and go out at once.
+	const int64_t now  = g_active ? g_active->real_cycles : 0;
+	const bool    flap = (g_session.reported == 1 || g_session.reported == 2) &&
+	                     (st == 1 || st == 2);
+	if (flap && now < g_session.next_report) return false;
 
 	g_session.reported    = st;
 	g_session.next_report = now + kRoleReportInterval;

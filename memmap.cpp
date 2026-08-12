@@ -3438,6 +3438,23 @@ static const char *SuperDiscSRAMName (const char *filename, std::string &buf)
 	return (buf.c_str());
 }
 
+// GB battery file for this instance. Players past the first get their own
+// (.sav2, .sav3...): two linked instances on one ROM would otherwise write
+// the same file. Keyed on the player index, not on the link being up --
+// SRAM loads before linking starts and saves after it may have dropped, so
+// anything connection-dependent could load .sav and then save .sav2.
+static std::string GBBatteryPath(const char *filename)
+{
+	std::string sav(filename);
+	const size_t dot = sav.rfind('.');
+	if (dot != std::string::npos) sav.replace(dot, std::string::npos, ".sav");
+	else                          sav += ".sav";
+
+	if (Settings.GBLinkPlayerIndex > 1)
+		sav += std::to_string(Settings.GBLinkPlayerIndex);
+	return sav;
+}
+
 bool8 CMemory::LoadSRAM (const char *filename)
 {
 	FILE	*file;
@@ -3447,13 +3464,7 @@ bool8 CMemory::LoadSRAM (const char *filename)
 	filename = SuperDiscSRAMName(filename, sd_srm);
 
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
-	{
-		std::string sav(filename);
-		size_t dot = sav.rfind('.');
-		if (dot != std::string::npos) sav.replace(dot, std::string::npos, ".sav");
-		else                          sav += ".sav";
-		S9xSGBLoadBatteryFromPath(sav.c_str());
-	}
+		S9xSGBLoadBatteryFromPath(GBBatteryPath(filename).c_str());
 
 	// Every NSS cartridge keeps its own .srm, whichever socket it is in.
 	if (Settings.NSS)
@@ -3535,13 +3546,7 @@ bool8 CMemory::SaveSRAM (const char *filename)
 	filename = SuperDiscSRAMName(filename, sd_srm);
 
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
-	{
-		std::string sav(filename);
-		size_t dot = sav.rfind('.');
-		if (dot != std::string::npos) sav.replace(dot, std::string::npos, ".sav");
-		else                          sav += ".sav";
-		S9xSGBSaveBatteryToPath(sav.c_str());
-	}
+		S9xSGBSaveBatteryToPath(GBBatteryPath(filename).c_str());
 
 	if (Settings.SFCBox)
 		S9xSFCBoxSaveNVRAM();	// KROM battery RAM rides along with the .srm

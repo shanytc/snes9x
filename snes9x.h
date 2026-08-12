@@ -249,6 +249,7 @@ struct SSettings
 	char	GBRomPath[260];      // runtime: path of the currently-loaded GB/GBC ROM (for BIOS-mode reload)
 	uint16	GBLinkPort;          // loopback port for the GB link cable (8765 = BGB's default)
 	bool8	GBLinkPeerInstance;  // runtime: launched as the auto-spawned second instance, so never spawns one itself
+	uint8	GBLinkPlayerIndex;   // 1 or 2 (later: 3, 4), fixed for the process; players past the first get their own .sav and save states
 	bool8	MouseMaster;
 	bool8	SuperScopeMaster;
 	bool8	JustifierMaster;

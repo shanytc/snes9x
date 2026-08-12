@@ -319,7 +319,7 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			// We are the other half of whoever launched us, so the pair is
 			// always {1,2} even when a survivor spawns a replacement.
 			if (end && *end == ',')
-				GBLinkPlayerIndex = (atoi(end + 1) == 1) ? 2 : 1;
+				Settings.GBLinkPlayerIndex = (atoi(end + 1) == 1) ? 2 : 1;
 		}
 
 		for (int j = i; j + 1 < count; j++)

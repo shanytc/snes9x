@@ -5263,7 +5263,7 @@ void GetSlotFilename(int slot, char filename[_MAX_PATH + 1])
     // reconnect, which would swap the pair's files between sessions.
     const char *tag = "";
     if (S9xSGBLinkIsConnected())
-        tag = (GBLinkPlayerIndex == 2) ? "_p2" : "_p1";
+        tag = (Settings.GBLinkPlayerIndex >= 2) ? "_p2" : "_p1";
 
     if(slot == -1)
         snprintf(ext, _MAX_EXT, "%s.oops", tag);
@@ -10019,8 +10019,6 @@ static int GBLinkMode = GBLINK_OFF;
 // thing whichever instance started the other.
 DWORD GBLinkPartnerPid = 0;
 
-// A fresh instance is player 1; a launched one is told otherwise.
-int GBLinkPlayerIndex = 1;
 
 static bool GBLinkPartnerAlive ()
 {
@@ -10108,11 +10106,11 @@ static void GBLinkBringUpPartner (int mode)
 	TCHAR cmd[MAX_PATH * 3];
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
 		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
-		            (unsigned long)GetCurrentProcessId (), GBLinkPlayerIndex,
+		            (unsigned long)GetCurrentProcessId (), Settings.GBLinkPlayerIndex,
 		            (TCHAR *)_tFromChar (Settings.GBRomPath));
 	else
 		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d"), exe, GBLINK_PEER_SWITCH,
-		            (unsigned long)GetCurrentProcessId (), GBLinkPlayerIndex);
+		            (unsigned long)GetCurrentProcessId (), Settings.GBLinkPlayerIndex);
 	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
 
 	STARTUPINFO si;

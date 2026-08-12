@@ -65,10 +65,6 @@ extern DWORD GBLinkPartnerPid;
 // pause setters.
 void GBLinkMirrorPause();
 
-// 1 or 2, fixed for this process. Comes from the pairing rather than from
-// the bind race, which is re-decided on every reconnect -- so save state
-// filenames stay put across sessions.
-extern int GBLinkPlayerIndex;
 
 #include "_tfwopen.h"
 #ifdef UNICODE

@@ -1400,10 +1400,13 @@ BEGIN
         BEGIN
             MENUITEM "S&ave SPC Data",              ID_FILE_SAVE_SPC_DATA,MFT_STRING,MFS_ENABLED
             MENUITEM "Save Screenshot",             ID_SAVESCREENSHOT,MFT_STRING,MFS_ENABLED
-            MENUITEM "Sa&ve S-RAM Data",            ID_FILE_SAVE_SRAM_DATA,MFT_STRING,MFS_ENABLED
             MENUITEM "Save Memory Pack",            ID_SAVEMEMPACK,MFT_STRING,MFS_ENABLED
         END
-        MENUITEM "&Load S-RAM Data...",         ID_FILE_LOAD_SRAM_DATA,MFT_STRING,MFS_ENABLED
+        POPUP "S-&RAM",                        0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&Load S-RAM...",              ID_FILE_LOAD_SRAM_DATA,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Save S-RAM...",              ID_FILE_SAVE_SRAM_DATA,MFT_STRING,MFS_ENABLED
+        END
         MENUITEM "ROM Information...",          IDM_ROM_INFO,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
         MENUITEM "Movie Play...",               ID_FILE_MOVIE_PLAY,MFT_STRING,MFS_ENABLED

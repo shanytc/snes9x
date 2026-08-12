@@ -2108,9 +2108,11 @@ static void RetireSNESSessions (void)
 
 int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filename)
 {
-    // New cartridge: back to the player-index name, not whatever file was
-    // last loaded by hand for the previous one.
-    Settings.GBSramPathOverride[0] = 0;
+    // A hand-picked battery file belongs to the cartridge it was chosen
+    // for, so it survives a reload of the same ROM and is dropped for a
+    // different one.
+    if (!filename || !*filename || strcmp(filename, Settings.GBRomPath) != 0)
+        Settings.GBSramPathOverride[0] = 0;
 
     if (!S9xRomBytesAreGb(rom, static_cast<int32>(size)))
         return 0;

@@ -2796,6 +2796,57 @@ LRESULT CALLBACK WinProc(
 			if(!success)
 				S9xMessage(S9X_ERROR, S9X_FREEZE_FILE_INFO, SRM_SAVE_FAILED);
 		}	break;
+		case ID_FILE_LOAD_SRAM_DATA: {
+			if (Settings.StopEmulation)
+				break;
+
+			TCHAR picked[MAX_PATH];
+			picked[0] = TEXT('\0');
+
+			OPENFILENAME ofn;
+			ZeroMemory (&ofn, sizeof ofn);
+			ofn.lStructSize     = sizeof(ofn);
+			ofn.hwndOwner       = GUI.hWnd;
+			ofn.lpstrFilter     = TEXT("Battery saves\0*.sav;*.sav2;*.sav3;*.sav4;*.srm\0All Files\0*.*\0\0");
+			ofn.lpstrFile       = picked;
+			ofn.nMaxFile        = MAX_PATH;
+			ofn.lpstrInitialDir = S9xGetDirectoryT (SRAM_DIR);
+			ofn.lpstrTitle      = TEXT("Load S-RAM Data");
+			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+
+			RestoreGUIDisplay ();
+			if (GetOpenFileName (&ofn))
+			{
+				char chosen[MAX_PATH];
+				strncpy (chosen, _tToChar (picked), MAX_PATH - 1);
+				chosen[MAX_PATH - 1] = '\0';
+
+				// Reset first so the game boots and re-reads the save it is
+				// about to be given, rather than sitting on the old one.
+				S9xReset ();
+
+				bool ok;
+				if (S9xSGBIsActive ())
+				{
+					// Straight to the battery loader: Memory.LoadSRAM rewrites
+					// the extension and would load the player-index file back.
+					ok = S9xSGBLoadBatteryFromPath (chosen) != FALSE;
+					// Keep writing to what was loaded, or the next save would
+					// land on the index-derived name and overwrite it.
+					if (ok)
+					{
+						strncpy (Settings.GBSramPathOverride, chosen,
+						         sizeof(Settings.GBSramPathOverride) - 1);
+						Settings.GBSramPathOverride[sizeof(Settings.GBSramPathOverride) - 1] = '\0';
+					}
+				}
+				else
+					ok = Memory.LoadSRAM (chosen) != FALSE;
+
+				S9xSetInfoString (ok ? "S-RAM loaded" : "S-RAM load failed");
+			}
+			RestoreSNESDisplay ();
+		}	break;
 		case ID_SAVEMEMPACK: {
 			std::string filename = S9xGetFilenameInc(".bs", SRAM_DIR);
 			bool8 success = Memory.SaveMPAK(filename.c_str());

@@ -1639,6 +1639,10 @@ static uint8 GbFileCgbFlag(const char *filename)
 //           -1 : GB ROM but the load failed (caller should return FALSE)
 int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filename)
 {
+    // New cartridge: back to the player-index name, not whatever file was
+    // last loaded by hand for the previous one.
+    Settings.GBSramPathOverride[0] = 0;
+
     if (!S9xRomBytesAreGb(rom, static_cast<int32>(size)))
         return 0;
 
@@ -2726,6 +2730,11 @@ void CMemory::ClearSRAM (bool8 onlyNonSavedSRAM)
 // anything connection-dependent could load .sav and then save .sav2.
 static std::string GBBatteryPath(const char *filename)
 {
+	// A battery file loaded by hand keeps being the one we write, or the
+	// next save would land on the index-derived name and overwrite it.
+	if (Settings.GBSramPathOverride[0])
+		return std::string(Settings.GBSramPathOverride);
+
 	std::string sav(filename);
 	const size_t dot = sav.rfind('.');
 	if (dot != std::string::npos) sav.replace(dot, std::string::npos, ".sav");

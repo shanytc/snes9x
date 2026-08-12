@@ -6833,6 +6833,7 @@ static void CheckMenuStates ()
 		pack.fState = (mii.fState & MFS_DISABLED) || !has_pack ? MFS_DISABLED : MFS_ENABLED;
 		SetMenuItemInfo (GUI.hMenu, ID_SAVEMEMPACK, FALSE, &pack);
 	}
+    SetMenuItemInfo (GUI.hMenu, ID_FILE_LOAD_SRAM_DATA, FALSE, &mii);
 
 	for(int i = ID_FILE_SAVE0; i <= ID_FILE_SAVE_FILE; i++)
 		SetMenuItemInfo (GUI.hMenu, i, FALSE, &mii);

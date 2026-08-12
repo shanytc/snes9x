@@ -2821,10 +2821,6 @@ LRESULT CALLBACK WinProc(
 				strncpy (chosen, _tToChar (picked), MAX_PATH - 1);
 				chosen[MAX_PATH - 1] = '\0';
 
-				// Battery RAM only: nothing here touches the console, so the
-				// SGB palettes and border are left exactly as they are. Do it
-				// at the title screen and the game reads the new save when you
-				// pick Continue; mid-game it is seen at the next save access.
 				bool ok;
 				if (S9xSGBIsActive ())
 				{
@@ -2843,6 +2839,13 @@ LRESULT CALLBACK WinProc(
 				}
 				else
 					ok = Memory.LoadSRAM (chosen) != FALSE;
+
+				// Reboot so the game re-reads the save it was just given.
+				// Mid-game the old save is already in work RAM, and an
+				// in-game save would overwrite the file just loaded.
+				// Reset does not clear cart SRAM, so the load survives it.
+				if (ok)
+					S9xReset ();
 
 				S9xSetInfoString (ok ? "S-RAM loaded" : "S-RAM load failed");
 			}

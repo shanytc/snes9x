@@ -2821,37 +2821,28 @@ LRESULT CALLBACK WinProc(
 				strncpy (chosen, _tToChar (picked), MAX_PATH - 1);
 				chosen[MAX_PATH - 1] = '\0';
 
+				// Battery RAM only: nothing here touches the console, so the
+				// SGB palettes and border are left exactly as they are. Do it
+				// at the title screen and the game reads the new save when you
+				// pick Continue; mid-game it is seen at the next save access.
 				bool ok;
-				if (S9xSGBIsActive () && Settings.GBRomPath[0])
+				if (S9xSGBIsActive ())
 				{
-					// Reload the cartridge rather than just resetting it. An
-					// SGB game's palettes come out of the full load path, and
-					// a bare reset leaves them wrong. Keep writing to the file
-					// just picked, too, or the next save would land on the
-					// player-index name and overwrite it.
-					strncpy (Settings.GBSramPathOverride, chosen,
-					         sizeof(Settings.GBSramPathOverride) - 1);
-					Settings.GBSramPathOverride[sizeof(Settings.GBSramPathOverride) - 1] = '\0';
+					// Straight to the battery loader: Memory.LoadSRAM rewrites
+					// the extension and would load the player-index file back.
+					ok = S9xSGBLoadBatteryFromPath (chosen);
 
-					TCHAR wpath[_MAX_PATH];
-					Utf8ToWide u8 (Settings.GBRomPath);
-					_tcsncpy (wpath, u8, _MAX_PATH - 1);
-					wpath[_MAX_PATH - 1] = 0;
-
-					ok = LoadROM (wpath);
+					// Keep writing to the file just loaded, or the next save
+					// would land on the index-derived name and overwrite it.
 					if (ok)
 					{
-						S9xReset ();
-						ReInitSound ();
+						strncpy (Settings.GBSramPathOverride, chosen,
+						         sizeof(Settings.GBSramPathOverride) - 1);
+						Settings.GBSramPathOverride[sizeof(Settings.GBSramPathOverride) - 1] = '\0';
 					}
-					else
-						Settings.GBSramPathOverride[0] = '\0';
 				}
 				else
-				{
 					ok = Memory.LoadSRAM (chosen) != FALSE;
-					if (ok) S9xReset ();
-				}
 
 				S9xSetInfoString (ok ? "S-RAM loaded" : "S-RAM load failed");
 			}

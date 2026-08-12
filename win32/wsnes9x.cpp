@@ -5741,6 +5741,7 @@ static void CheckMenuStates ()
         mii.fState |= MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SPC_DATA, FALSE, &mii);
     SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SRAM_DATA, FALSE, &mii);
+    SetMenuItemInfo (GUI.hMenu, ID_FILE_LOAD_SRAM_DATA, FALSE, &mii);
 
 	for(int i = ID_FILE_SAVE0; i <= ID_FILE_SAVE_FILE; i++)
 		SetMenuItemInfo (GUI.hMenu, i, FALSE, &mii);

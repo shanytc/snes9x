@@ -2752,8 +2752,16 @@ bool8 CMemory::LoadSRAM (const char *filename)
 	FILE	*file;
 	int		size, len;
 
+	// GB cart: the battery result IS the result. Falling through to the
+	// SNES logic reported FALSE (SGB carts have no SNES SRAM), which made
+	// the caller's ROM-directory fallback re-load the battery from there,
+	// silently overriding the Saves-dir file with any stale .sav by the ROM.
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
-		S9xSGBLoadBatteryFromPath(GBBatteryPath(filename).c_str());
+	{
+		const bool ok = S9xSGBLoadBatteryFromPath(GBBatteryPath(filename).c_str());
+		ClearSRAM();
+		return ok ? TRUE : FALSE;
+	}
 
 	ClearSRAM();
 
@@ -2824,8 +2832,9 @@ bool8 CMemory::LoadSRAM (const char *filename)
 
 bool8 CMemory::SaveSRAM (const char *filename)
 {
+	// GB cart: the battery result is the result, same as LoadSRAM.
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
-		S9xSGBSaveBatteryToPath(GBBatteryPath(filename).c_str());
+		return S9xSGBSaveBatteryToPath(GBBatteryPath(filename).c_str()) ? TRUE : FALSE;
 
 	if (Settings.SFCBox)
 		S9xSFCBoxSaveNVRAM();	// KROM battery RAM rides along with the .srm

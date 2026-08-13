@@ -316,10 +316,22 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			char *end = NULL;
 			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
 
-			// We are the other half of whoever launched us, so the pair is
-			// always {1,2} even when a survivor spawns a replacement.
-			if (end && *end == ',')
-				Settings.GBLinkPlayerIndex = (atoi(end + 1) == 1) ? 2 : 1;
+			// "<pid>,<launcher>,<index>,<players>": our own index is spelled
+			// out so a hub seat keeps its player number. The old two-value
+			// form only names the launcher; we are the other half of that
+			// pair, so {1,2} still falls out.
+			long launcher = 0, index = 0, players = 0;
+			if (end && *end == ',') launcher = strtol(end + 1, &end, 10);
+			if (end && *end == ',') index    = strtol(end + 1, &end, 10);
+			if (end && *end == ',') players  = strtol(end + 1, &end, 10);
+
+			if (index < 1) index = (launcher == 1) ? 2 : 1;
+			if (index > 4) index = 4;
+			Settings.GBLinkPlayerIndex = (uint8)index;
+
+			if (players < 2) players = 2;
+			if (players > 4) players = 4;
+			GBLinkSessionPlayers = (int)players;
 		}
 
 		for (int j = i; j + 1 < count; j++)
@@ -985,7 +997,7 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
-	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Data Link. Only worth changing if something else on this PC already owns 8765.");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Link Cable. Only worth changing if something else on this PC already owns 8765.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

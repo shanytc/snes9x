@@ -1434,7 +1434,17 @@ BEGIN
         MENUITEM "Soft &Reset",                 ID_EMULATION_SOFT_RESET,MFT_STRING,MFS_ENABLED
         MENUITEM "&Hard Reset (Power Cycle)",   ID_EMULATION_HARD_RESET,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        POPUP "Run &Ahead",                     0,MFT_STRING,MFS_ENABLED
+        POPUP "Game Boy &Link Cable",           ID_EMULATION_GB_LINK,MFT_STRING,MFS_ENABLED
+        BEGIN
+            POPUP "Link &Same Game",                ID_EMULATION_GB_LINK_SAME_POPUP,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "&2 Players",                  ID_EMULATION_GB_LINK_SAME,MFT_STRING,MFS_ENABLED
+                MENUITEM "&3 Players",                  ID_EMULATION_GB_LINK_SAME_3,MFT_STRING,MFS_ENABLED
+                MENUITEM "&4 Players",                  ID_EMULATION_GB_LINK_SAME_4,MFT_STRING,MFS_ENABLED
+            END
+            MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED
+        END
+        POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&0 (off)",                    ID_EMULATION_RUNAHEAD_OFF,MFT_STRING,MFS_ENABLED
             MENUITEM "&1 frame",                    ID_EMULATION_RUNAHEAD_1,MFT_STRING,MFS_ENABLED
@@ -1466,11 +1476,6 @@ BEGIN
             MENUITEM "Show S&prites",               ID_DEBUG_GB_SHOW_OBJ,MFT_STRING,MFS_ENABLED | MFS_CHECKED
         END
         MENUITEM MFT_SEPARATOR
-        POPUP "Game Boy &Data Link",            ID_EMULATION_GB_LINK,MFT_STRING,MFS_ENABLED
-        BEGIN
-            MENUITEM "Link &Same Game",             ID_EMULATION_GB_LINK_SAME,MFT_STRING,MFS_ENABLED
-            MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED
-        END
         MENUITEM "&Hacks...",                   ID_EMULATION_HACKS,MFT_STRING,MFS_ENABLED
         MENUITEM "&Settings...\tAlt+F8",        ID_OPTIONS_SETTINGS,MFT_STRING,MFS_ENABLED
     END

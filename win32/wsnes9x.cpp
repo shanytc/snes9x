@@ -130,11 +130,13 @@ LRESULT CALLBACK DlgChildSplitProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
-void WinToggleGBLink(int mode);
-bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam);
+void WinToggleGBLink(int mode, int players);
+bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid = 0);
 void GBLinkMirrorPause();
 void WinAutoStartGBLinkPeer();
 int  WinGetGBLinkMode();
+int  WinGetGBLinkPlayers();
+static void GBLinkPumpSpawns();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -173,10 +175,12 @@ void S9xWinScanJoypads();
 #define TIMER_SCANJOYPADS  (99999)
 #define NC_SEARCHDB 0x8000
 #define WM_CHEATS_ADDED (WM_APP + 1)
-// Save/load fanned out to the paired Data Link instance. wParam = slot,
-// lParam != 0 to save.
+// Save/load fanned out to the linked instances. wParam = slot in the low
+// word, non-zero high word to save; lParam = the originator's pid, so the
+// hub host can forward it to the other seats without it bouncing back.
 #define WM_GBLINK_FREEZE (WM_APP + 2)
-// Pause mirrored to the paired instance. wParam != 0 to hold.
+// Pause mirrored to the linked instances. wParam != 0 to hold; lParam =
+// the originator's pid, forwarded the same way.
 #define WM_GBLINK_PAUSE (WM_APP + 3)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
@@ -3001,10 +3005,16 @@ LRESULT CALLBACK WinProc(
 			GUI.InactivePause = !GUI.InactivePause;
 			break;
 		case ID_EMULATION_GB_LINK_SAME:
-			WinToggleGBLink (1);
+			WinToggleGBLink (1, 2);
+			break;
+		case ID_EMULATION_GB_LINK_SAME_3:
+			WinToggleGBLink (1, 3);
+			break;
+		case ID_EMULATION_GB_LINK_SAME_4:
+			WinToggleGBLink (1, 4);
 			break;
 		case ID_EMULATION_GB_LINK_DIFF:
-			WinToggleGBLink (2);
+			WinToggleGBLink (2, 2);
 			break;
 		case ID_EMULATION_RUNAHEAD_OFF:
 			Settings.RunAhead = 0;
@@ -3288,14 +3298,21 @@ LRESULT CALLBACK WinProc(
 	case WM_GBLINK_PAUSE:
 		if (wParam) S9xSetPause (PAUSE_LINK_PEER);
 		else        S9xClearPause (PAUSE_LINK_PEER);
+		// The hub host passes a seat's pause on to the other seats; they
+		// only know the host, so nothing bounces back.
+		if (!Settings.GBLinkPeerInstance)
+			GBLinkPostToPartner (WM_GBLINK_PAUSE, wParam, lParam, (DWORD)lParam);
 		return 0;
 
 	case WM_GBLINK_FREEZE:
-		// The paired instance saved or loaded; match it on our own file.
-		// The flag stops this bouncing straight back at it.
+		// A linked instance saved or loaded; match it on our own file.
+		// The flag stops this bouncing straight back at the sender.
 		GBLinkStateRelaying = true;
-		FreezeUnfreezeSlot ((int)wParam, lParam ? TRUE : FALSE);
+		FreezeUnfreezeSlot ((int)LOWORD (wParam), HIWORD (wParam) ? TRUE : FALSE);
 		GBLinkStateRelaying = false;
+		// The hub host passes it on to the seats that have not heard.
+		if (!Settings.GBLinkPeerInstance)
+			GBLinkPostToPartner (WM_GBLINK_FREEZE, wParam, lParam, (DWORD)lParam);
 		return 0;
 
 	case WM_CLOSE:
@@ -4964,6 +4981,9 @@ int WINAPI WinMain(
         // Catches every unlink path, including the peer just going away.
         GBLinkSyncResponsiveSettings ();
 
+        // A hub host seats its instances one at a time as they arrive.
+        GBLinkPumpSpawns ();
+
         // Never stay frozen waiting on an instance that has gone away.
         if ((Settings.ForcedPause & PAUSE_LINK_PEER) && !S9xSGBLinkIsConnected ())
             S9xClearPause (PAUSE_LINK_PEER);
@@ -5341,12 +5361,12 @@ void GetSlotFilename(int slot, char filename[_MAX_PATH + 1])
 {
     char ext[_MAX_EXT + 1];
 
-    // Two linked instances on one ROM resolve to the same path. Tagged by
+    // Linked instances on one ROM resolve to the same path. Tagged by
     // player index rather than bind role: the role is re-decided on every
-    // reconnect, which would swap the pair's files between sessions.
-    const char *tag = "";
+    // reconnect, which would swap the files between sessions.
+    char tag[8] = "";
     if (S9xSGBLinkIsConnected())
-        tag = (Settings.GBLinkPlayerIndex >= 2) ? "_p2" : "_p1";
+        snprintf(tag, sizeof(tag), "_p%u", (unsigned)Settings.GBLinkPlayerIndex);
 
     if(slot == -1)
         snprintf(ext, _MAX_EXT, "%s.oops", tag);
@@ -5360,14 +5380,16 @@ void FreezeUnfreezeSlot(int slot, bool8 freeze)
     char filename[_MAX_PATH + 1];
     GetSlotFilename(slot, filename);
 
-    // A linked pair is one save: loading half of it would leave the two
+    // A linked session is one save: loading part of it would leave the
     // games at different moments and desync immediately. Relayed only after
     // this side commits, so a cancelled confirm cannot half-apply it. The
     // oops slot is an emergency dump of this instance alone.
     const bool done = FreezeUnfreeze(filename, freeze);
 
     if (done && !GBLinkStateRelaying && slot != -1 && S9xSGBLinkIsConnected())
-        GBLinkPostToPartner(WM_GBLINK_FREEZE, (WPARAM)slot, (LPARAM)(freeze ? 1 : 0));
+        GBLinkPostToPartner(WM_GBLINK_FREEZE,
+                            MAKEWPARAM(slot, freeze ? 1 : 0),
+                            (LPARAM)GetCurrentProcessId());
 }
 
 bool FreezeUnfreeze (const char *filename, bool8 freeze)
@@ -5571,19 +5593,24 @@ static void CheckMenuStates ()
 		const bool show = ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
 		                   !sgb1_bios) ||
 		                  S9xSGBLinkIsEnabled ();
-		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Data Link"),
-		                   ID_EMULATION_HACKS, show, &s_link_hmenu, &s_link_parent);
+		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Link Cable"),
+		                   ID_EMULATION_RUNAHEAD_POPUP, show, &s_link_hmenu, &s_link_parent);
 
-		// A live session's mode is settled, so the other one is greyed; the
+		// A live session's mode is settled, so the others are greyed; the
 		// active item stays enabled because it doubles as the disconnect.
 		if (show)
 		{
 			const int  gblink   = WinGetGBLinkMode ();
+			const int  players  = WinGetGBLinkPlayers ();
 			const UINT inactive = (gblink == 0) ? MFS_UNCHECKED
 			                                    : (MFS_UNCHECKED | MFS_DISABLED);
 
-			mii.fState = (gblink == 1) ? MFS_CHECKED : inactive;
+			mii.fState = (gblink == 1 && players <= 2) ? MFS_CHECKED : inactive;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
+			mii.fState = (gblink == 1 && players == 3) ? MFS_CHECKED : inactive;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_3, FALSE, &mii);
+			mii.fState = (gblink == 1 && players == 4) ? MFS_CHECKED : inactive;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_4, FALSE, &mii);
 			mii.fState = (gblink == 2) ? MFS_CHECKED : inactive;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
 		}
@@ -5656,8 +5683,22 @@ static void CheckMenuStates ()
 				TCHAR txt[]    = TEXT("&BIOS");
 				ins.dwTypeData = txt;
 				ins.cch        = (UINT)_tcslen(txt);
+				// anchor after Run Ahead: the cached index drifts when the
+				// Link Cable popup above it comes and goes
 				UINT pos = s_bios_pos;
 				const UINT count = (UINT)GetMenuItemCount(s_bios_parent);
+				for (UINT j = 0; j < count; j++)
+				{
+					MENUITEMINFO probe = {};
+					probe.cbSize = sizeof(probe);
+					probe.fMask  = MIIM_ID;
+					if (GetMenuItemInfo(s_bios_parent, j, TRUE, &probe) &&
+					    probe.wID == ID_EMULATION_RUNAHEAD_POPUP)
+					{
+						pos = j + 1;
+						break;
+					}
+				}
 				if (pos > count) pos = count;
 				InsertMenuItem(s_bios_parent, pos, TRUE, &ins);
 				if (LocaleIsTranslated())
@@ -6226,7 +6267,17 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 	if (!Settings.StopEmulation) {
 		bool8 loadedSRAM = Memory.LoadSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 		if(!loadedSRAM) // help migration from earlier Snes9x versions by checking ROM directory for savestates
-			Memory.LoadSRAM (S9xGetFilename (".srm", ROMFILENAME_DIR).c_str());
+			loadedSRAM = Memory.LoadSRAM (S9xGetFilename (".srm", ROMFILENAME_DIR).c_str());
+
+		// A linked player past the first with no .savN of its own would start
+		// on the index-less .sav the GB core pre-seeds; back to power-on $FF.
+		if (!loadedSRAM && Settings.GBLinkPlayerIndex > 1 &&
+		    S9xSGBIsActive () && S9xSGBHasBattery ())
+		{
+			unsigned char *sram = S9xSGBGetSRAM ();
+			const size_t   size = S9xSGBGetSRAMSize ();
+			if (sram && size) memset (sram, 0xFF, size);
+		}
 		if(!filename2) // no recent for multi cart
 			S9xAddToRecentGames (filename);
 		CheckDirectoryIsWritable (S9xGetFilename (".---", SNAPSHOT_DIR).c_str());
@@ -10084,12 +10135,14 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 }
 #endif
 
-// Game Boy link cable (Emulation > Game Boy Data Link).
+// Game Boy link cable (Emulation > Game Boy Link Cable).
 //
-// Ticking either item senses the role and, if this instance ends up
-// hosting, launches the second one with the item already ticked. The two
-// items differ only in what that instance loads: the same ROM, or nothing
-// so the user can pick the other cartridge.
+// Ticking an item senses the role and, if this instance ends up hosting,
+// launches the missing instances with the item already ticked. Same-game
+// and other-game differ only in what the new instance loads; the player
+// count under "Link Same Game" decides between the direct cable and the
+// DMG-07 adapter, which this instance hosts while the launched ones dial
+// in as ordinary clients.
 enum
 {
 	GBLINK_OFF  = 0,
@@ -10099,44 +10152,102 @@ enum
 
 static int GBLinkMode = GBLINK_OFF;
 
+// Players on the session this instance asked for, or was spawned into
+// via the launch switch. Read back by the menu while a session exists.
+int GBLinkSessionPlayers = 2;
+
 // Held by process id rather than a spawn handle, so it means the same
-// thing whichever instance started the other.
+// thing whichever instance started the other. The partner is the other
+// half of a direct cable — or, on a spawned instance, the hub host.
 DWORD GBLinkPartnerPid = 0;
 
+// The instances a hub host has seated: slot k plays as player k+2. Kept
+// across unlink so a re-link finds the same windows instead of piling up
+// new ones. Spawning is sequential — the next seat is only brought up
+// once the previous one is on the port — so the seat a peer connects
+// into always matches the player number it was launched with.
+static DWORD GBLinkPeerPids[3]  = {0, 0, 0};
+static int   GBLinkSlotsStarted = 0;
 
-static bool GBLinkPartnerAlive ()
+static bool GBLinkPidAlive (DWORD pid)
 {
-	if (!GBLinkPartnerPid) return false;
+	if (!pid) return false;
 
-	HANDLE h = OpenProcess (SYNCHRONIZE, FALSE, GBLinkPartnerPid);
-	if (!h) { GBLinkPartnerPid = 0; return false; }
+	HANDLE h = OpenProcess (SYNCHRONIZE, FALSE, pid);
+	if (!h) return false;
 
 	const bool alive = WaitForSingleObject (h, 0) == WAIT_TIMEOUT;
 	CloseHandle (h);
-	if (!alive) GBLinkPartnerPid = 0;
 	return alive;
 }
 
-// Locate the top-level window belonging to the paired instance.
-static BOOL CALLBACK GBLinkFindPartnerWnd (HWND hWnd, LPARAM lParam)
+static bool GBLinkPartnerAlive ()
 {
+	if (!GBLinkPidAlive (GBLinkPartnerPid)) { GBLinkPartnerPid = 0; return false; }
+	return true;
+}
+
+// Locate the top-level window belonging to a linked instance.
+struct GBLinkFindWndCtx
+{
+	DWORD pid;
+	HWND  hwnd;
+};
+
+static BOOL CALLBACK GBLinkFindWndByPid (HWND hWnd, LPARAM lParam)
+{
+	GBLinkFindWndCtx *ctx = (GBLinkFindWndCtx *)lParam;
+
 	DWORD pid = 0;
 	GetWindowThreadProcessId (hWnd, &pid);
-	if (pid != GBLinkPartnerPid) return TRUE;
+	if (pid != ctx->pid) return TRUE;
 
 	TCHAR cls[64] = {0};
 	if (GetClassName (hWnd, cls, 64) && !lstrcmp (cls, SNES9XW_WNDCLASS))
 	{
-		*(HWND *)lParam = hWnd;
+		ctx->hwnd = hWnd;
 		return FALSE;
 	}
 	return TRUE;
 }
 
-// A paused instance stops answering the cable, and the other game reads
-// that as unplugged and drops to its title screen -- so the pair holds
-// together. Called from S9xSetPause/S9xClearPause to catch every source,
-// including the modal menu loop, which never returns to the main loop.
+static bool GBLinkPostToPid (DWORD pid, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	GBLinkFindWndCtx ctx = { pid, NULL };
+	EnumWindows (GBLinkFindWndByPid, (LPARAM)&ctx);
+	if (!ctx.hwnd) return false;
+
+	PostMessage (ctx.hwnd, msg, wParam, lParam);
+	return true;
+}
+
+// Everyone on the CURRENT session: the hub host fans out to its seats,
+// anyone else talks to its partner. Scoped by the session shape, so an
+// instance remembered from an earlier session of the other kind never
+// hears about pauses or savestates that are not its business.
+static int GBLinkKnownPids (DWORD out[4])
+{
+	int n = 0;
+
+	const bool hub_host = !Settings.GBLinkPeerInstance &&
+	                      GBLinkSessionPlayers > 2 &&
+	                      S9xSGBLinkIsEnabled ();
+	if (hub_host)
+	{
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+			if (GBLinkPeerPids[i]) out[n++] = GBLinkPeerPids[i];
+		return n;
+	}
+
+	if (GBLinkPartnerPid) out[n++] = GBLinkPartnerPid;
+	return n;
+}
+
+// A paused instance stops answering the cable, and the other games read
+// that as unplugged and drop to their title screens -- so the session
+// holds together. Called from S9xSetPause/S9xClearPause to catch every
+// source, including the modal menu loop, which never returns to the main
+// loop.
 void GBLinkMirrorPause ()
 {
 	static bool mirrored = false;
@@ -10148,53 +10259,53 @@ void GBLinkMirrorPause ()
 	if (paused == mirrored) return;
 
 	mirrored = paused;
-	GBLinkPostToPartner (WM_GBLINK_PAUSE, (WPARAM)(paused ? 1 : 0), 0);
+	GBLinkPostToPartner (WM_GBLINK_PAUSE, (WPARAM)(paused ? 1 : 0),
+	                     (LPARAM)GetCurrentProcessId ());
 }
 
-bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam)
+bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid)
 {
-	HWND partner = NULL;
-	EnumWindows (GBLinkFindPartnerWnd, (LPARAM)&partner);
-	if (!partner) return false;
+	DWORD pids[4];
+	const int n = GBLinkKnownPids (pids);
 
-	PostMessage (partner, msg, wParam, lParam);
-	return true;
-}
-
-// Ask the paired instance to tick its own item, so re-linking reuses that
-// window instead of piling up a new one each time.
-static void GBLinkRejoinPartner (int mode)
-{
-	GBLinkPostToPartner (WM_COMMAND,
-	                     MAKEWPARAM (mode == GBLINK_SAME ? ID_EMULATION_GB_LINK_SAME
-	                                                     : ID_EMULATION_GB_LINK_DIFF, 0), 0);
-}
-
-// Whichever instance ends up hosting brings the other one up, so the same
-// single click works from either window.
-static void GBLinkBringUpPartner (int mode)
-{
-	// Still open, just unlinked: reuse it rather than opening another.
-	if (GBLinkPartnerAlive ())
+	bool any = false;
+	for (int i = 0; i < n; i++)
 	{
-		GBLinkRejoinPartner (mode);
-		return;
+		if (pids[i] == exceptPid) continue;
+		if (GBLinkPostToPid (pids[i], msg, wParam, lParam)) any = true;
+	}
+	return any;
+}
+
+// Launch one instance, or ask a surviving one to re-tick its item so a
+// re-link reuses that window instead of piling up a new one each time.
+// The switch carries our pid and index, the launched side's index, and
+// the session's player count, so the pairing is known from both ends.
+static DWORD GBLinkLaunchInstance (DWORD reusePid, int mode, int playerIndex, int players)
+{
+	if (GBLinkPidAlive (reusePid))
+	{
+		// Its own toggle senses the role: our port is up, so it dials in.
+		if (GBLinkPostToPid (reusePid, WM_COMMAND,
+		                     MAKEWPARAM (mode == GBLINK_SAME ? ID_EMULATION_GB_LINK_SAME
+		                                                     : ID_EMULATION_GB_LINK_DIFF, 0), 0))
+			return reusePid;
 	}
 
 	TCHAR exe[MAX_PATH];
-	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return;
+	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return 0;
 
 	// Same-game mode passes our ROM as a positional argument so the new
-	// instance loads it through the normal path. Our pid goes with it, so
-	// the pairing is known from both ends.
+	// instance loads it through the normal path.
 	TCHAR cmd[MAX_PATH * 3];
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
-		            (unsigned long)GetCurrentProcessId (), Settings.GBLinkPlayerIndex,
-		            (TCHAR *)_tFromChar (Settings.GBRomPath));
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
+		            playerIndex, players, (TCHAR *)_tFromChar (Settings.GBRomPath));
 	else
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d"), exe, GBLINK_PEER_SWITCH,
-		            (unsigned long)GetCurrentProcessId (), Settings.GBLinkPlayerIndex);
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d"), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
+		            playerIndex, players);
 	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
 
 	STARTUPINFO si;
@@ -10204,14 +10315,57 @@ static void GBLinkBringUpPartner (int mode)
 	si.cb = sizeof si;
 
 	if (!CreateProcess (NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+		return 0;
+
+	CloseHandle (pi.hThread);
+	CloseHandle (pi.hProcess);
+	return pi.dwProcessId;
+}
+
+// Whichever instance ends up hosting a direct cable brings the other one
+// up, so the same single click works from either window.
+static void GBLinkBringUpPartner (int mode)
+{
+	const DWORD pid = GBLinkLaunchInstance (GBLinkPartnerAlive () ? GBLinkPartnerPid : 0,
+	                                        mode,
+	                                        Settings.GBLinkPlayerIndex == 1 ? 2 : 1, 2);
+	if (!pid)
 	{
 		S9xSetInfoString ("Link cable: could not launch the second instance");
 		return;
 	}
+	GBLinkPartnerPid = pid;
+}
 
-	GBLinkPartnerPid = pi.dwProcessId;
-	CloseHandle (pi.hThread);
-	CloseHandle (pi.hProcess);
+// A hub host brings its seats up one at a time from the main loop, where
+// arrivals are seen: the next instance is only launched once the previous
+// one is on the port, so seat order — the player number — always matches
+// launch order.
+static void GBLinkPumpSpawns ()
+{
+	if (Settings.GBLinkPeerInstance) return;
+	if (GBLinkSessionPlayers <= 2 || GBLinkMode != GBLINK_SAME) return;
+	if (!S9xSGBLinkIsEnabled ()) return;
+
+	const int want = GBLinkSessionPlayers - 1;
+	if (GBLinkSlotsStarted >= want) return;
+
+	// The next seat waits for the attached count to catch up; an instance
+	// that died on the way up parks the sequence rather than respawning
+	// every frame.
+	if (S9xSGBLinkPlayerCount () - 1 < GBLinkSlotsStarted) return;
+
+	const int   slot = GBLinkSlotsStarted;
+	const DWORD pid  = GBLinkLaunchInstance (GBLinkPeerPids[slot], GBLINK_SAME,
+	                                         slot + 2, GBLinkSessionPlayers);
+	if (!pid)
+	{
+		S9xSetInfoString ("Link cable: could not launch the next instance");
+		GBLinkSlotsStarted = want;   // give up rather than retry forever
+		return;
+	}
+	GBLinkPeerPids[slot] = pid;
+	++GBLinkSlotsStarted;
 }
 
 // A linked instance must keep running and reading input while unfocused,
@@ -10262,12 +10416,16 @@ void GBLinkSyncResponsiveSettings ()
 	}
 }
 
-static void WinStartGBLink (int mode)
+static void WinStartGBLink (int mode, int players)
 {
 	char err[192];
 	err[0] = '\0';
 
-	const int role = S9xSGBLinkAutoStart (err, sizeof(err));
+	// A spawned instance always dials in as a plain client, whatever size
+	// the session is; only the original instance can host the hub.
+	const int link_players = Settings.GBLinkPeerInstance ? 2 : players;
+
+	const int role = S9xSGBLinkAutoStart (err, sizeof(err), link_players);
 	if (role == S9X_GBLINK_NONE)
 	{
 		MessageBox (GUI.hWnd,
@@ -10276,13 +10434,20 @@ static void WinStartGBLink (int mode)
 		return;
 	}
 
-	GBLinkMode = mode;
+	GBLinkMode           = mode;
+	GBLinkSessionPlayers = players;
+	GBLinkSlotsStarted   = 0;
 	GBLinkSyncResponsiveSettings ();
 
 	if (role == S9X_GBLINK_SERVER)
 	{
-		GBLinkBringUpPartner (mode);
-		S9xSetInfoString ("Link cable: waiting for the second instance");
+		if (players <= 2)
+		{
+			GBLinkBringUpPartner (mode);
+			S9xSetInfoString ("Link cable: waiting for the second instance");
+		}
+		// A hub's instances come up one at a time from the main loop, so
+		// seat order stays deterministic; the OSD counts the arrivals.
 	}
 	else
 	{
@@ -10292,13 +10457,19 @@ static void WinStartGBLink (int mode)
 	}
 }
 
-// Both menu items land here; clicking either while linked unplugs.
-void WinToggleGBLink (int mode)
+// All the link items land here; clicking any while linked unplugs, and
+// the next click starts the newly picked session size.
+void WinToggleGBLink (int mode, int players)
 {
+	// A spawned instance keeps the session size it was launched into, so
+	// a rejoin request cannot turn it into a competing host.
+	if (Settings.GBLinkPeerInstance) players = GBLinkSessionPlayers;
+
 	if (S9xSGBLinkIsEnabled ())
 	{
-		// Closing the socket is what unlinks the peer. Its menu tick clears
-		// by itself, because the check state is read back from the link.
+		// Closing the socket is what unlinks the peers. Their menu ticks
+		// clear by themselves, because the check state is read back from
+		// the link.
 		S9xSGBLinkDisconnect ();
 		GBLinkMode = GBLINK_OFF;
 		GBLinkSyncResponsiveSettings ();
@@ -10322,7 +10493,7 @@ void WinToggleGBLink (int mode)
 		return;
 	}
 
-	WinStartGBLink (mode);
+	WinStartGBLink (mode, players);
 }
 
 // The spawned instance links itself on startup; its mode is inferred from
@@ -10330,13 +10501,19 @@ void WinToggleGBLink (int mode)
 void WinAutoStartGBLinkPeer ()
 {
 	if (!Settings.GBLinkPeerInstance) return;
-	WinStartGBLink (Settings.GBRomPath[0] ? GBLINK_SAME : GBLINK_DIFF);
+	WinStartGBLink (Settings.GBRomPath[0] ? GBLINK_SAME : GBLINK_DIFF,
+	                GBLinkSessionPlayers);
 }
 
 // Which item owns the tick, read from the live link.
 int WinGetGBLinkMode ()
 {
 	return S9xSGBLinkIsEnabled () ? GBLinkMode : GBLINK_OFF;
+}
+
+int WinGetGBLinkPlayers ()
+{
+	return S9xSGBLinkIsEnabled () ? GBLinkSessionPlayers : 0;
 }
 
 void SetInfoDlgColor(unsigned char r, unsigned char g, unsigned char b)
@@ -14071,8 +14248,9 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)(LPCTSTR)temp);
 		}
 
-		// A linked player-2 instance plays on Joypad #2, so open on it.
-		index = (Settings.GBLinkPlayerIndex >= 2 && S9xSGBLinkIsEnabled ()) ? 1 : 0;
+		// A linked player-N instance plays on Joypad #N, so open on it.
+		index = (Settings.GBLinkPlayerIndex >= 2 && Settings.GBLinkPlayerIndex <= 4 &&
+		         S9xSGBLinkIsEnabled ()) ? Settings.GBLinkPlayerIndex - 1 : 0;
 		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)index,0);
 
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);

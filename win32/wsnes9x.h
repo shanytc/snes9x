@@ -50,15 +50,21 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 // can be told apart, including by our own second-instance lookup.
 #define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
 
-// Marks the instance auto-launched by the Game Boy Data Link menu.
-// "-gblinkpeer=<pid>,<index>" carries the launcher's process id and player
-// index, so the pairing is mutual and the launched side knows which half
-// of the pair it is.
+// Marks the instance auto-launched by the Game Boy Link Cable menu.
+// "-gblinkpeer=<pid>,<launcher>,<index>,<players>" carries the launcher's
+// process id and player index, this instance's own index, and how many
+// players the session is for, so the pairing is mutual and a hub seat
+// keeps its player number.
 #define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
 #define GBLINK_PEER_SWITCH_A "-gblinkpeer"
 
-// The other half of the pair, whichever way round it was started.
+// The other end this instance talks to directly: the direct-cable
+// partner, or the hub host that spawned it.
 extern DWORD GBLinkPartnerPid;
+
+// Players on the current session (2..4); on a spawned instance the value
+// carried by the launch switch.
+extern int GBLinkSessionPlayers;
 
 // Mirror this instance's pause to the paired one, so a Game Boy that
 // stops answering never reads as an unplugged cable. Called from the

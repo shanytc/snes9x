@@ -583,13 +583,15 @@ void S9xWinScanJoypads ()
     // Poll SDL to update Joystick[] state for all attached devices
     SDLInput_Poll();
 
-    // Link player 2 plays on the Joypad #2 binding set, so both instances
-    // can share one keyboard; the port and autohold state stay on slot 0.
-    const bool link_p2 = Settings.GBLinkPlayerIndex >= 2 && S9xSGBLinkIsEnabled ();
+    // Link players 2-4 play on their own Joypad #N binding set, so all
+    // the instances can share one keyboard; the port and autohold state
+    // stay on slot 0.
+    const int link_pad = (Settings.GBLinkPlayerIndex >= 2 && Settings.GBLinkPlayerIndex <= 4 &&
+                          S9xSGBLinkIsEnabled ()) ? Settings.GBLinkPlayerIndex - 1 : 0;
 
     for (int J = 0; J < 8; J++)
     {
-        const int B = (J == 0 && link_p2) ? 1 : J;
+        const int B = (J == 0 && link_pad) ? link_pad : J;
         if (Joypad [J].Enabled)
         {
 			// toggle checks

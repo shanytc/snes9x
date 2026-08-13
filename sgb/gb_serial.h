@@ -33,11 +33,19 @@ struct Serial
 	// armed here" also releases the transfer, but nobody was listening.
 	bool     peer_supplied = false;
 
-	// A peer's transfer that landed before our game armed, held briefly so
-	// skew between the two emulators doesn't drop a byte.
-	bool     pending_valid = false;
-	uint8_t  pending_data  = 0xFF;
-	int32_t  pending_age   = 0;
+	// Peer transfers that landed before our game armed, held in arrival
+	// order: the emulators run in frame bursts, so several clocks can turn
+	// up while our game had no cycles to re-arm, and the game then drains
+	// them as fast as it answers. Each clock's sync1 i1 rides along and is
+	// echoed in whatever answers it, so a DMG-07 host can match replies to
+	// clocks by sequence number. Overflow acks the oldest away — a slow
+	// game misses those bytes on hardware just the same.
+	static constexpr int kPendingCap = 32;
+	uint8_t  pending_data[kPendingCap] = {0};
+	uint32_t pending_i1[kPendingCap]   = {0};
+	uint8_t  pending_head = 0;
+	uint8_t  pending_len  = 0;
+	int32_t  pending_age  = 0;   // age of the oldest held clock
 
 	// BGB timestamps are 2 MiHz; this counts real-time GB T-cycles (4 MiHz),
 	// so double-speed cycles are halved back into real time before use.
@@ -45,8 +53,6 @@ struct Serial
 	int32_t  ds_remainder  = 0;
 	int32_t  ts_send_timer = 0;
 	int32_t  poll_timer    = 0;
-
-	bool     handshake_sent = false;   // our version packet is out on this connection
 };
 
 // Fires when the CPU starts an internal-clock transfer; the GB test
@@ -76,9 +82,14 @@ enum class LinkRole : uint8_t
 	Client = 2    // second one up: found the port taken and dialled in
 };
 
-// Bring the cable up on loopback, sensing the role: binding the port is
-// the probe, and the kernel arbitrates it so there is only ever one host.
-LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap);
+// Bring the cable up on loopback. At `players` == 2 the role is sensed:
+// binding the port is the probe, and the kernel arbitrates it so there is
+// only ever one host. At 3 or 4 this instance hosts an emulated DMG-07
+// Four Player Adapter: it must win the bind, every Game Boy on the
+// session (this one included) runs as an external-clock slave of the
+// adapter, and the joining instances are ordinary clients that never
+// know a hub is on the other end.
+LinkRole SerialLinkAutoStart(uint16_t port, int players, char *err, size_t err_cap);
 
 void SerialLinkDisconnect();
 
@@ -92,8 +103,8 @@ bool SerialLinkIsConnected();   // a peer is attached and past the version hands
 // is parked and an accept/connect would otherwise never complete.
 void SerialLinkPump();
 
-// Game Boys on the cable including this one (0/1/2). Governs what a
-// disconnect means; >2 needs DMG-07 adapter emulation and a star topology.
+// Game Boys on the session including this one (0..4). On a direct cable
+// one side leaving ends it for both; on a hub only that seat empties.
 int SerialLinkPlayerCount();
 
 // One-line state for the OSD, e.g. "Link cable: connected (Master)". The

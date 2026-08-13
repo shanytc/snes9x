@@ -137,6 +137,7 @@ void WinAutoStartGBLinkPeer();
 int  WinGetGBLinkMode();
 int  WinGetGBLinkPlayers();
 static void GBLinkPumpSpawns();
+static void GBLinkAutoCloseAbandonedHub();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -4981,8 +4982,10 @@ int WINAPI WinMain(
         // Catches every unlink path, including the peer just going away.
         GBLinkSyncResponsiveSettings ();
 
-        // A hub host seats its instances one at a time as they arrive.
+        // A hub host seats its instances one at a time as they arrive,
+        // and folds the session once every one of them has been closed.
         GBLinkPumpSpawns ();
+        GBLinkAutoCloseAbandonedHub ();
 
         // Never stay frozen waiting on an instance that has gone away.
         if ((Settings.ForcedPause & PAUSE_LINK_PEER) && !S9xSGBLinkIsConnected ())
@@ -10366,6 +10369,27 @@ static void GBLinkPumpSpawns ()
 	}
 	GBLinkPeerPids[slot] = pid;
 	++GBLinkSlotsStarted;
+}
+
+// A hub whose instances were all closed is over: untick the item and hand
+// the user's settings back rather than hosting an empty port forever. An
+// instance that merely unlinked keeps the session — its window is still
+// there to re-tick — so only dead processes count.
+static void GBLinkAutoCloseAbandonedHub ()
+{
+	if (Settings.GBLinkPeerInstance) return;
+	if (GBLinkSessionPlayers <= 2 || GBLinkMode != GBLINK_SAME) return;
+	if (!S9xSGBLinkIsEnabled ()) return;
+	if (GBLinkSlotsStarted == 0) return;        // nothing brought up yet
+	if (S9xSGBLinkPlayerCount () > 1) return;   // someone is still linked
+
+	for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+		if (GBLinkPidAlive (GBLinkPeerPids[i])) return;
+
+	S9xSGBLinkDisconnect ();
+	GBLinkMode = GBLINK_OFF;
+	GBLinkSyncResponsiveSettings ();
+	S9xSetInfoString ("Link cable: all instances closed - disconnected");
 }
 
 // A linked instance must keep running and reading input while unfocused,

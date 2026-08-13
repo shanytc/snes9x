@@ -10,6 +10,13 @@
 //   master (SC=$81): send sync1 -> 8 bit periods -> peer's sync2 into SB
 //   slave  (SC=$80): arm, wait for peer's sync1, answer sync2, complete
 //
+// A 3- or 4-player session adds an emulated DMG-07 Four Player Adapter
+// on the hosting instance (protocol per Pan Docs "4-Player Adapter" and
+// GBE+'s dmg07.cpp). The adapter owns the clock: the host's own Game Boy
+// is completed in-process, and each joining instance is driven over the
+// ordinary BGB wire with the adapter as permanent master, so peers run
+// the unmodified two-player code.
+//
 // With no peer the port keeps its original stub behaviour, so unlinked
 // games are bit-for-bit unaffected.
 
@@ -74,32 +81,126 @@ constexpr int kWaitSliceMs   = 5;
 Serial *g_active     = nullptr;
 Memory *g_active_mem = nullptr;
 
-// Peer session state. Never serialized: it belongs to the connection.
+// What the answer to one adapter clock will mean when it lands, frozen at
+// send time so later phase changes cannot skew it. The instances free-run
+// on their own frame bursts, so replies are collected whenever they arrive
+// -- the protocol's own one-packet buffering delay is the tolerance.
+struct HubReplyTag
+{
+	uint32_t seq           = 0;    // echoed back by the peer in its answer
+	int16_t  store_at      = -1;   // transmission-buffer index, or none
+	int8_t   presence_wire = -1;   // 1/2 when the reply is an $88 ack slot
+};
+
+constexpr int kHubFifoDepth = 64;
+
+// Per-channel peer session state. Never serialized: it belongs to the
+// connection. Channel 0 is the direct cable; a hub uses all three.
 struct LinkSession
 {
-	bool     handshaked        = false;
+	int      gen               = -1;      // transport occupant this belongs to
+	bool     handshake_sent    = false;   // our version packet is out
+	bool     handshaked        = false;   // theirs came back and checked out
 	bool     peer_running      = false;
 	bool     peer_reconnect_ok = false;
 	uint32_t peer_timestamp    = 0;
-	uint32_t transfers         = 0;
-	bool     stalled           = false;   // a master wait timed out
+
+	// The adapter clocks in flight on this seat, oldest first. Replies
+	// echo the sequence number, so a peer that flushed its queues (state
+	// load) just leaves holes we skip over instead of shifting every
+	// later answer onto the wrong byte.
+	uint32_t    seq_next  = 1;
+	uint8_t     fifo_head = 0;
+	uint8_t     fifo_len  = 0;
+	HubReplyTag fifo[kHubFifoDepth];
+};
+
+LinkSession g_sessions[kLinkMaxChannels];
+
+// Direct-cable bookkeeping, meaningful only for channel 0 without a hub.
+struct DirectState
+{
+	uint32_t transfers  = 0;
+	bool     stalled    = false;   // a master wait timed out
 
 	// Who drove the last transfer, chosen per byte by the games via SC
 	// bit 0: 0 = nothing yet, 1 = us, 2 = the peer.
-	uint8_t  driving           = 0;
-	uint32_t unanswered        = 0;   // polls we clocked that nobody answered
-	uint8_t  reported          = 0;   // last value handed to the host UI
-	int64_t  next_report       = 0;   // real-cycle gate on re-announcing
+	uint8_t  driving     = 0;
+	uint32_t unanswered  = 0;   // polls we clocked that nobody answered
+	uint8_t  reported    = 0;   // last value handed to the host UI
+	int64_t  next_report = 0;   // real-cycle gate on re-announcing
 };
+
+DirectState g_direct;
 
 // Games alternating master/slave per byte would repaint the OSD forever;
 // ~3 s of GB time between announcements keeps it readable.
 constexpr int64_t kRoleReportInterval = 3 * 4194304;
 
-LinkSession g_session;
-LinkRole    g_role = LinkRole::None;
+LinkRole g_role = LinkRole::None;
 
 SerialByteCallback g_serial_cb = nullptr;
+
+// ---- DMG-07 Four Player Adapter --------------------------------------------
+// Timing from Pan Docs, in real T-cycles at 4.194304 MHz (1 ms = 4194).
+constexpr int32_t kCyclesPerMs = 4194;
+
+// Ping packets: four bytes clustered at the start (128 us of shifting,
+// 1.42 ms gap), then a 12.2 ms + (RATE & $0F) ms rest.
+constexpr int32_t kPingByteGap = 6486;
+constexpr int32_t kPingRest    = 51169;
+
+// Transmission packets: byte-to-byte is 0.887 ms + (RATE >> 4) * 0.106 ms
+// plus the shift itself, and the packet repeats no faster than
+// (17 + (RATE & $0F)) ms.
+constexpr int32_t kNetByteBase  = 4257;
+constexpr int32_t kNetByteStep  = 445;
+constexpr int32_t kNetPacketMin = 71298;
+constexpr int32_t kNetPacketPad = 4194;   // tail beyond the last byte
+
+enum : uint8_t
+{
+	kDmg07Ping    = 0,   // FE + three status bytes, probing for $88 acks
+	kDmg07Sync    = 1,   // one packet of $CC announcing transmission mode
+	kDmg07Net     = 2,   // data packets, SIZE bytes per player
+	kDmg07Restart = 3    // one packet of $FF on the way back to ping
+};
+
+struct Dmg07
+{
+	bool    hosting = false;
+	uint8_t target  = 2;      // players on the session, this instance included
+
+	uint8_t phase      = kDmg07Ping;
+	uint8_t wire       = 0;   // byte index inside the current packet
+	uint8_t status     = 0;   // presence bits 4-7, one per port
+	uint8_t rate       = 0;   // player 1's RATE reply, latched during ping
+	uint8_t size_reply = 0;   // player 1's SIZE reply, latched during ping
+	uint8_t size       = 1;   // packet size in force for the transmission run
+	bool    begin_sync = false;
+	uint8_t ff_run     = 0;   // consecutive $FF replies from player 1
+	bool    restart_pending = false;
+
+	uint8_t buffer[32];       // size*8: the half going out + the half filling
+	uint8_t buf_pos = 0;
+
+	int32_t timer = 0;        // real T-cycles until the next byte event
+
+	// The previous byte event, kept so player 1's in-process answer can be
+	// read at the next event with hardware wire semantics; remote answers
+	// instead land whenever they arrive, matched by sequence number.
+	bool    prev_valid = false;
+	uint8_t prev_phase = kDmg07Ping;
+	uint8_t prev_wire  = 0;
+	uint8_t prev_buf   = 0;
+	uint8_t prev_local = 0xFF;
+
+	Dmg07() { std::memset(buffer, 0, sizeof buffer); }
+};
+
+Dmg07 g_hub;
+
+int g_hub_reported = -1;   // instances last announced on the OSD
 
 inline int32_t BitPeriod(const Serial &s, uint8_t sc)
 {
@@ -112,8 +213,8 @@ inline uint32_t Timestamp(const Serial &s)
 	return static_cast<uint32_t>((s.real_cycles >> 1) & 0x7FFFFFFF);
 }
 
-void SendPacket(uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4, uint32_t i1,
-                bool droppable = false)
+void SendPacket(int ch, uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4,
+                uint32_t i1, bool droppable = false)
 {
 	LinkPacket p;
 	p.b1 = b1;
@@ -121,16 +222,117 @@ void SendPacket(uint8_t b1, uint8_t b2, uint8_t b3, uint8_t b4, uint32_t i1,
 	p.b3 = b3;
 	p.b4 = b4;
 	p.i1 = i1;
-	LinkSend(p, droppable);
+	LinkSend(ch, p, droppable);
 }
 
-void SendVersion() { SendPacket(kCmdVersion, 1, 4, 0, 0); }
+void SendVersion(int ch) { SendPacket(ch, kCmdVersion, 1, 4, 0, 0); }
 
-void SendStatus()
+void SendStatus(int ch)
 {
-	SendPacket(kCmdStatus,
+	SendPacket(ch, kCmdStatus,
 	           static_cast<uint8_t>(kStatusRunning | kStatusSupportReconnect),
 	           0, 0, 0);
+}
+
+// ---- Held peer clocks (slave side) ------------------------------------------
+
+void PendingPop(Serial &s, uint8_t &data, uint32_t &i1)
+{
+	data = s.pending_data[s.pending_head];
+	i1   = s.pending_i1[s.pending_head];
+	s.pending_head = static_cast<uint8_t>((s.pending_head + 1) % Serial::kPendingCap);
+	--s.pending_len;
+	s.pending_age = 0;
+}
+
+// Release the oldest held clock unanswered: the wire idled high for it.
+void PendingAckDropOldest(int ch, Serial &s)
+{
+	uint8_t  data;
+	uint32_t i1;
+	PendingPop(s, data, i1);
+	SendPacket(ch, kCmdSync3, 1, 0, 0, i1);
+}
+
+void PendingPush(int ch, Serial &s, uint8_t data, uint32_t i1)
+{
+	if (s.pending_len == Serial::kPendingCap)
+		PendingAckDropOldest(ch, s);
+
+	const int tail = (s.pending_head + s.pending_len) % Serial::kPendingCap;
+	s.pending_data[tail] = data;
+	s.pending_i1[tail]   = i1;
+	if (s.pending_len == 0) s.pending_age = 0;
+	++s.pending_len;
+}
+
+void PendingClear(Serial &s)
+{
+	s.pending_head = 0;
+	s.pending_len  = 0;
+	s.pending_age  = 0;
+}
+
+int HandshakedCount()
+{
+	int n = 0;
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		if (LinkChannelConnected(ch) && g_sessions[ch].handshaked) ++n;
+	return n;
+}
+
+// ---- Hub reply matching -----------------------------------------------------
+
+HubReplyTag HubFifoPop(LinkSession &ses)
+{
+	const HubReplyTag t = ses.fifo[ses.fifo_head];
+	ses.fifo_head = static_cast<uint8_t>((ses.fifo_head + 1) % kHubFifoDepth);
+	--ses.fifo_len;
+	return t;
+}
+
+void HubFifoPush(LinkSession &ses, const HubReplyTag &t)
+{
+	// A seat this far behind is stalled; its oldest clock is a dead letter.
+	if (ses.fifo_len == kHubFifoDepth) HubFifoPop(ses);
+	ses.fifo[(ses.fifo_head + ses.fifo_len) % kHubFifoDepth] = t;
+	++ses.fifo_len;
+}
+
+inline bool SeqLess(uint32_t a, uint32_t b)
+{
+	return static_cast<int32_t>(a - b) < 0;
+}
+
+// A seat's answer landed: apply it to the byte it was for. Answers the
+// peer never sent (it flushed on a state load) are skipped past; answers
+// to bytes already skipped are stale and dropped.
+void HubApplyRemoteReply(int ch, uint32_t seq, uint8_t data, bool supplied)
+{
+	LinkSession &ses = g_sessions[ch];
+
+	while (ses.fifo_len && SeqLess(ses.fifo[ses.fifo_head].seq, seq))
+		HubFifoPop(ses);
+	if (!ses.fifo_len || ses.fifo[ses.fifo_head].seq != seq) return;
+
+	const HubReplyTag tag = HubFifoPop(ses);
+
+	if (tag.presence_wire >= 0)
+	{
+		// The $88 acks are what "connected" means for this port.
+		const uint8_t bit = static_cast<uint8_t>(1 << (5 + ch));
+		if (supplied && data == 0x88)
+			g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
+		else
+			g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);
+	}
+
+	if (tag.store_at >= 0 && tag.store_at < static_cast<int>(sizeof g_hub.buffer))
+	{
+		// A seat with nothing to say reads as zeroes in the broadcast,
+		// which is what the DMG-07 fills empty ports with (Pan Docs).
+		g_hub.buffer[tag.store_at] = supplied ? data : 0x00;
+	}
 }
 
 // Finish a transfer we clocked. With no peer byte the wire idles high,
@@ -145,14 +347,14 @@ void CompleteActive(Serial &s, Memory &mem)
 	s.bits_left  = 0;
 	if (s.peer_supplied)
 	{
-		++g_session.transfers;
-		g_session.driving    = 1;
-		g_session.unanswered = 0;
+		++g_direct.transfers;
+		g_direct.driving    = 1;
+		g_direct.unanswered = 0;
 	}
 	else if (s.peer_valid)
 	{
 		// We drove the clock but the other game was not listening.
-		++g_session.unanswered;
+		++g_direct.unanswered;
 	}
 	s.peer_valid    = false;
 	s.peer_supplied = false;
@@ -167,60 +369,75 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
 
 	s.passive = false;
-	++g_session.transfers;
-	g_session.driving    = 2;
-	g_session.unanswered = 0;
+	++g_direct.transfers;
+	g_direct.driving    = 2;
+	g_direct.unanswered = 0;
 }
 
-void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
+void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 {
+	LinkSession &ses = g_sessions[ch];
+
 	switch (p.b1)
 	{
 		case kCmdVersion:
 			// A mismatched protocol reads as bogus transfers, which can
-			// corrupt a trade. Drop instead.
+			// corrupt a trade. Drop instead — on a hub only this seat.
 			if (p.b2 != 1 || p.b3 != 4 || p.b4 != 0)
 			{
-				LinkStop();
-				g_session.handshaked = false;
+				LinkCloseChannel(ch);
+				ses = LinkSession();
 				return;
 			}
-			g_session.handshaked = true;
-			SendStatus();
+			ses.handshaked = true;
+			SendStatus(ch);
 			return;
 
 		case kCmdStatus:
-			g_session.peer_running      = (p.b2 & kStatusRunning) != 0 &&
-			                              (p.b2 & kStatusPaused) == 0;
-			g_session.peer_reconnect_ok = (p.b2 & kStatusSupportReconnect) != 0;
+			ses.peer_running      = (p.b2 & kStatusRunning) != 0 &&
+			                        (p.b2 & kStatusPaused) == 0;
+			ses.peer_reconnect_ok = (p.b2 & kStatusSupportReconnect) != 0;
 			// Must not be answered with another status, or the two sides
 			// ping-pong forever.
 			return;
 
 		case kCmdSync1:
+			if (g_hub.hosting)
+			{
+				// A game clocking internally under the adapter gets garbage
+				// on hardware; an empty ack releases its transfer, which is
+				// the closest polite translation.
+				SendPacket(ch, kCmdSync3, 1, 0, 0, p.i1);
+				return;
+			}
 			if (s.passive)
 			{
-				// Armed and waiting to be clocked — hand back our byte.
-				SendPacket(kCmdSync2, mem.serial_data, 0x80, 0, 0);
+				// Armed and waiting to be clocked — hand back our byte. The
+				// echoed i1 tells a DMG-07 host which clock this answers.
+				SendPacket(ch, kCmdSync2, mem.serial_data, 0x80, 0, p.i1);
 				CompletePassive(s, mem, p.b2);
 			}
 			else if (s.active)
 			{
 				// Both ends clocking: nothing to give, so ack. Hardware
 				// produces garbage here too.
-				SendPacket(kCmdSync3, 1, 0, 0, 0);
+				SendPacket(ch, kCmdSync3, 1, 0, 0, p.i1);
 			}
 			else
 			{
-				// Peer got here first; hold briefly, since our game very
-				// likely arms within a few hundred cycles.
-				s.pending_valid = true;
-				s.pending_data  = p.b2;
-				s.pending_age   = 0;
+				// Peer got here first; hold it, in order, until our game
+				// arms. Bursts of clocks land here whenever the other
+				// emulator's frame ran ahead of ours.
+				PendingPush(ch, s, p.b2, p.i1);
 			}
 			return;
 
 		case kCmdSync2:
+			if (g_hub.hosting)
+			{
+				HubApplyRemoteReply(ch, p.i1, p.b2, true);
+				return;
+			}
 			// Only while we are actually clocking: a reply that arrives after
 			// we gave up would otherwise be shifted into the next transfer.
 			if (!s.active) return;
@@ -232,8 +449,13 @@ void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
 		case kCmdSync3:
 			if (p.b2 == 1)
 			{
-				// Peer had nothing armed, so the wire stayed high. Releases
-				// our transfer but is not an exchange with anyone.
+				// Peer had nothing armed, so the wire stayed high.
+				if (g_hub.hosting)
+				{
+					HubApplyRemoteReply(ch, p.i1, 0xFF, false);
+					return;
+				}
+				// Releases our transfer but is not an exchange with anyone.
 				if (!s.active) return;
 				s.peer_data     = 0xFF;
 				s.peer_valid    = true;
@@ -241,7 +463,7 @@ void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
 			}
 			else
 			{
-				g_session.peer_timestamp = p.i1;
+				ses.peer_timestamp = p.i1;
 			}
 			return;
 
@@ -255,55 +477,344 @@ void HandlePacket(Serial &s, Memory &mem, const LinkPacket &p)
 	}
 }
 
-// Drain everything the transport has buffered, and drive the connection
-// state machine (accept / connect completion, version handshake).
+// Drain everything the transport has buffered on every channel, and drive
+// the connection state machine (accepts, connects, version handshakes).
 void ServiceLink(Serial &s, Memory &mem)
 {
-	const LinkState state = LinkPoll();
+	LinkPoll();
 
-	if (state != LinkState::Connected)
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
 	{
-		if (g_session.handshaked)
+		LinkSession &ses = g_sessions[ch];
+
+		if (!LinkChannelConnected(ch))
 		{
-			// Release any waiting transfer, or the game hangs on SC bit 7.
-			g_session.handshaked = false;
-			s.pending_valid      = false;
-			if (s.active) { s.peer_valid = false; CompleteActive(s, mem); }
-			s.passive = false;
+			if (ses.handshake_sent || ses.handshaked)
+			{
+				ses = LinkSession();
+				if (g_hub.hosting)
+				{
+					// An emptied port reads as zeroes in the broadcast from
+					// here on, like a cable pulled from the real adapter.
+					for (int half = 0; half < 2; ++half)
+						for (int k = 0; k < g_hub.size; ++k)
+							g_hub.buffer[(half * 4 + ch + 1) * g_hub.size + k] = 0;
+				}
+				else if (ch == 0)
+				{
+					// Release any waiting transfer, or the game hangs on SC
+					// bit 7.
+					PendingClear(s);
+					if (s.active) { s.peer_valid = false; CompleteActive(s, mem); }
+					s.passive = false;
+				}
+			}
+			continue;
 		}
-		// The next arrival needs a fresh version packet.
-		s.handshake_sent = false;
-		return;
-	}
 
-	if (!s.handshake_sent)
-	{
-		// Both sides open with a version packet and verify the reply.
-		SendVersion();
-		s.handshake_sent    = true;
-		g_session.transfers = 0;
-		g_session.stalled   = false;
-	}
+		// A seat dropped and refilled inside one poll keeps its channel
+		// number; the generation says it is a different occupant.
+		const int gen = LinkChannelGeneration(ch);
+		if (ses.gen != gen)
+		{
+			ses     = LinkSession();
+			ses.gen = gen;
+		}
 
-	LinkPacket p;
-	while (LinkRecv(p)) HandlePacket(s, mem, p);
+		if (!ses.handshake_sent)
+		{
+			// Both sides open with a version packet and verify the reply.
+			SendVersion(ch);
+			ses.handshake_sent = true;
+			if (!g_hub.hosting && ch == 0)
+			{
+				g_direct.transfers = 0;
+				g_direct.stalled   = false;
+			}
+		}
+
+		LinkPacket p;
+		while (LinkRecv(ch, p)) HandlePacket(ch, s, mem, p);
+	}
 }
 
-// Master side: the eight bit periods elapsed but the peer's byte has not
-// landed yet. Give it a bounded window, servicing the socket throughout.
+// Master side of the direct cable: the eight bit periods elapsed but the
+// peer's byte has not landed yet. Give it a bounded window, servicing the
+// socket throughout.
 void WaitForPeer(Serial &s, Memory &mem)
 {
-	const int budget = g_session.stalled ? kStalledWaitMs : kMasterWaitMs;
+	const int budget = g_direct.stalled ? kStalledWaitMs : kMasterWaitMs;
 
 	int waited = 0;
 	while (!s.peer_valid && waited < budget)
 	{
 		if (!LinkIsConnected()) return;
-		LinkWaitReadable(kWaitSliceMs);
+		LinkWaitReadable(0, kWaitSliceMs);
 		waited += kWaitSliceMs;
 		ServiceLink(s, mem);
 	}
-	g_session.stalled = !s.peer_valid;
+	g_direct.stalled = !s.peer_valid;
+}
+
+// ---- DMG-07 byte engine -----------------------------------------------------
+
+int HubPacketLen(uint8_t phase)
+{
+	return (phase == kDmg07Net || phase == kDmg07Restart) ? g_hub.size * 4 : 4;
+}
+
+// Read player 1's previous wire byte the way the adapter would have heard
+// it: the byte a Game Boy sends during transfer N is its answer to byte
+// N-1. Player 1 is in-process, so everything that steers the adapter —
+// RATE, SIZE, the $AA switch, the $FF restart — is known synchronously;
+// the remote seats only feed presence bits and the data buffer, which
+// arrive through HubApplyRemoteReply whenever their answers land.
+void HubInterpretLocal()
+{
+	const uint8_t b = g_hub.prev_local;
+
+	if (g_hub.prev_phase == kDmg07Ping)
+	{
+		// Player 1 announcing the switch to transmission mode.
+		if (b == 0xAA) g_hub.begin_sync = true;
+
+		switch (g_hub.prev_wire)
+		{
+			case 0:
+				// Reply to the previous packet's STAT3: player 1's SIZE.
+				if (!g_hub.begin_sync) g_hub.size_reply = b;
+				break;
+
+			case 1:
+			case 2:
+				// The $88 acks are what "connected" means; while the $AA
+				// train replaces them, player 1 stays counted (GBE+ rule).
+				if (b == 0x88 || g_hub.begin_sync)
+					g_hub.status = static_cast<uint8_t>(g_hub.status | 0x10);
+				else
+					g_hub.status = static_cast<uint8_t>(g_hub.status & ~0x10);
+				break;
+
+			case 3:
+				// Reply to STAT2: player 1's RATE.
+				if (!g_hub.begin_sync) g_hub.rate = b;
+				break;
+		}
+		return;
+	}
+
+	if (g_hub.prev_phase == kDmg07Net)
+	{
+		const int size    = g_hub.size;
+		const int pkt_pos = g_hub.prev_buf % (size * 4);
+
+		// The first SIZE transfers of a packet carry each player's fresh
+		// data; player 1's lands in the half not being broadcast, one
+		// packet behind (GBE+ layout).
+		if (pkt_pos > 0 && pkt_pos <= size)
+			g_hub.buffer[(g_hub.prev_buf - 1 + size * 4) % (size * 8)] = b;
+
+		// Player 1 pumping $FF asks for the ping phase back.
+		if (b == 0xFF)
+		{
+			if (g_hub.ff_run < 0xFF) ++g_hub.ff_run;
+			if (g_hub.ff_run >= 3) g_hub.restart_pending = true;
+		}
+		else
+		{
+			g_hub.ff_run = 0;
+		}
+	}
+}
+
+// Phase changes land on packet edges, once every reply of the packet just
+// finished has been interpreted.
+void HubPacketBoundary()
+{
+	if (!g_hub.prev_valid) return;   // first byte of the session
+
+	switch (g_hub.prev_phase)
+	{
+		case kDmg07Ping:
+			if (g_hub.begin_sync)
+			{
+				g_hub.phase      = kDmg07Sync;
+				g_hub.begin_sync = false;
+			}
+			break;
+
+		case kDmg07Sync:
+		{
+			// The RATE and SIZE latched during ping take effect here. Pan
+			// Docs: sizes 1..4 are what works without issue.
+			uint8_t sz = g_hub.size_reply;
+			if (sz < 1) sz = 1;
+			if (sz > 4) sz = 4;
+			g_hub.size = sz;
+
+			// The real buffer starts as ping-phase garbage; games are told
+			// to ignore the first packet, so zeroes are as good (GBE+ does
+			// the same).
+			std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
+			g_hub.buf_pos         = 0;
+			g_hub.ff_run          = 0;
+			g_hub.restart_pending = false;
+			g_hub.phase           = kDmg07Net;
+			break;
+		}
+
+		case kDmg07Net:
+			if (g_hub.restart_pending) g_hub.phase = kDmg07Restart;
+			break;
+
+		case kDmg07Restart:
+			g_hub.phase           = kDmg07Ping;
+			g_hub.status          = 0;
+			g_hub.ff_run          = 0;
+			g_hub.restart_pending = false;
+			break;
+	}
+}
+
+// Put this event's byte on every port: complete the local Game Boy on the
+// spot, clock each seated peer over the wire as master.
+void HubSendByte(Serial &s, Memory &mem)
+{
+	uint8_t out[4];
+	switch (g_hub.phase)
+	{
+		case kDmg07Ping:
+			if (g_hub.wire == 0)
+			{
+				out[0] = out[1] = out[2] = out[3] = 0xFE;
+			}
+			else
+			{
+				// STAT bytes: presence up top, the port's own player number
+				// below, which is how each Game Boy learns who it is.
+				for (int p = 0; p < 4; ++p)
+					out[p] = static_cast<uint8_t>((g_hub.status & 0xF0) | (p + 1));
+			}
+			break;
+
+		case kDmg07Sync:
+			out[0] = out[1] = out[2] = out[3] = 0xCC;
+			break;
+
+		case kDmg07Net:
+			out[0] = out[1] = out[2] = out[3] = g_hub.buffer[g_hub.buf_pos];
+			break;
+
+		default:
+			out[0] = out[1] = out[2] = out[3] = 0xFF;
+			break;
+	}
+
+	// Player 1 is in-process: complete its armed transfer immediately. An
+	// unarmed Game Boy leaves the wire idle, which reads back as $FF.
+	g_hub.prev_local = 0xFF;
+	if (s.passive)
+	{
+		g_hub.prev_local   = mem.serial_data;
+		mem.serial_data    = out[0];
+		mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
+		mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
+		s.passive          = false;
+	}
+
+	// What the answer to this byte will mean, frozen before anything can
+	// change phase under it.
+	int8_t presence_wire = -1;
+	if (g_hub.phase == kDmg07Ping && (g_hub.wire == 1 || g_hub.wire == 2))
+		presence_wire = static_cast<int8_t>(g_hub.wire);
+
+	int store_base = -1;
+	if (g_hub.phase == kDmg07Net)
+	{
+		const int size    = g_hub.size;
+		const int pkt_pos = g_hub.buf_pos % (size * 4);
+		if (pkt_pos > 0 && pkt_pos <= size)
+			store_base = (g_hub.buf_pos - 1 + size * 4) % (size * 8);
+	}
+
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+	{
+		LinkSession &ses = g_sessions[ch];
+		if (!LinkChannelConnected(ch) || !ses.handshaked) continue;
+
+		HubReplyTag tag;
+		tag.seq           = ses.seq_next++;
+		tag.presence_wire = presence_wire;
+		tag.store_at      = store_base >= 0
+		                  ? static_cast<int16_t>(store_base + (ch + 1) * g_hub.size)
+		                  : static_cast<int16_t>(-1);
+		HubFifoPush(ses, tag);
+
+		SendPacket(ch, kCmdSync1, out[ch + 1], 0x81, 0, tag.seq);
+	}
+
+	g_hub.prev_phase = g_hub.phase;
+	g_hub.prev_wire  = g_hub.wire;
+	g_hub.prev_buf   = g_hub.buf_pos;
+	g_hub.prev_valid = true;
+}
+
+// Step the wire position and schedule the next byte event.
+void HubAdvance()
+{
+	const int len = HubPacketLen(g_hub.phase);
+	const int hi  = g_hub.rate >> 4;
+	const int lo  = g_hub.rate & 0x0F;
+
+	if (g_hub.phase == kDmg07Net)
+		g_hub.buf_pos = static_cast<uint8_t>((g_hub.buf_pos + 1) % (g_hub.size * 8));
+
+	g_hub.wire = static_cast<uint8_t>((g_hub.wire + 1) % len);
+
+	int32_t delay;
+	if (g_hub.phase == kDmg07Ping || g_hub.phase == kDmg07Sync)
+	{
+		delay = (g_hub.wire != 0) ? kPingByteGap
+		                          : kPingRest + lo * kCyclesPerMs;
+	}
+	else
+	{
+		const int32_t per_byte = kNetByteBase + hi * kNetByteStep;
+		if (g_hub.wire != 0)
+		{
+			delay = per_byte;
+		}
+		else
+		{
+			// The packet repeats at whichever is slower: its own bytes or
+			// the RATE floor.
+			const int32_t floor_len = kNetPacketMin + lo * kCyclesPerMs;
+			const int32_t body      = per_byte * (len - 1) + kNetPacketPad;
+			const int32_t total     = body > floor_len ? body : floor_len;
+			delay = total - per_byte * (len - 1);
+		}
+	}
+	g_hub.timer += delay;
+}
+
+void HubRunByte(Serial &s, Memory &mem)
+{
+	// Never blocks: remote answers land through HubApplyRemoteReply as
+	// they arrive; one extra drain here just shortens their latency.
+	ServiceLink(s, mem);
+
+	if (g_hub.prev_valid) HubInterpretLocal();
+	if (g_hub.wire == 0)  HubPacketBoundary();
+
+	HubSendByte(s, mem);
+	HubAdvance();
+}
+
+void HubStep(Serial &s, Memory &mem, int32_t real_cycles)
+{
+	g_hub.timer -= real_cycles;
+	while (g_hub.timer <= 0)
+		HubRunByte(s, mem);   // HubAdvance always pushes the timer forward
 }
 
 } // anonymous
@@ -313,16 +824,31 @@ void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
 void SerialReset(Serial &s, bool cgb)
 {
 	// A reset does not unplug the cable, so only the transfer machinery is
-	// rebuilt; handshake_sent belongs to the connection, not the console.
-	const bool still_linked = s.handshake_sent && LinkIsConnected();
-
+	// rebuilt; the per-channel handshakes belong to the connections and
+	// survive untouched in g_sessions.
 	const Serial fresh;
-	s                = fresh;
-	s.cgb            = cgb;
-	s.handshake_sent = still_linked;
+	s     = fresh;
+	s.cgb = cgb;
 
-	g_active          = &s;
-	g_session.stalled = false;
+	g_active         = &s;
+	g_direct.stalled = false;
+
+	if (g_hub.hosting)
+	{
+		// The console reset does not power the adapter down, but this
+		// session of it starts over from the ping phase. In-flight clocks
+		// belong to the old run; their late answers fall away.
+		Dmg07 fresh_hub;
+		fresh_hub.hosting = true;
+		fresh_hub.target  = g_hub.target;
+		g_hub = fresh_hub;
+
+		for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		{
+			g_sessions[ch].fifo_head = 0;
+			g_sessions[ch].fifo_len  = 0;
+		}
+	}
 }
 
 void SerialAfterStateLoad(Serial &s, Memory &mem)
@@ -332,9 +858,16 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 
 	// Anything buffered belongs to the timeline just replaced; applying it
 	// to the restored state would shift a byte into the wrong transfer.
+	// The sequence counters stay: late answers to flushed clocks miss the
+	// emptied queues and fall away instead of landing on the wrong byte.
 	LinkFlush();
-	g_session.driving    = 0;
-	g_session.unanswered = 0;
+	g_direct.driving    = 0;
+	g_direct.unanswered = 0;
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+	{
+		g_sessions[ch].fifo_head = 0;
+		g_sessions[ch].fifo_len  = 0;
+	}
 
 	s.active        = false;
 	s.passive       = false;
@@ -343,8 +876,21 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	s.peer_valid    = false;
 	s.peer_supplied = false;
 	s.peer_data     = 0xFF;
-	s.pending_valid = false;
-	s.pending_age   = 0;
+	PendingClear(s);
+
+	if (g_hub.hosting)
+	{
+		// The adapter's phase belongs to the connection, not the state;
+		// restart from ping and let the games renegotiate.
+		Dmg07 fresh_hub;
+		fresh_hub.hosting = true;
+		fresh_hub.target  = g_hub.target;
+		g_hub = fresh_hub;
+
+		if ((mem.serial_control & 0x80) != 0 && (mem.serial_control & 0x01) == 0)
+			s.passive = true;
+		return;
+	}
 
 	if ((mem.serial_control & 0x80) == 0) return;
 
@@ -376,6 +922,31 @@ uint8_t SerialReadSC(const Serial &s, const Memory &mem)
 void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 {
 	mem.serial_control = value;
+
+	if (g_hub.hosting && LinkGetState() != LinkState::Off)
+	{
+		// Under the adapter every Game Boy is an external-clock slave, our
+		// own included — the adapter pings it even with no peers seated
+		// yet. Driving the internal clock yields garbage on hardware; the
+		// unlinked stub models that closely enough.
+		if (!(value & 0x80))
+		{
+			s.active = s.passive = false;
+			return;
+		}
+		if (value & 0x01)
+		{
+			if (g_serial_cb) g_serial_cb(mem.serial_data);
+			s.active = s.passive = false;
+			mem.serial_data    = 0xFF;
+			mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
+			mem.serial_control = static_cast<uint8_t>(value & 0x7F);
+			return;
+		}
+		s.active  = false;
+		s.passive = true;
+		return;
+	}
 
 	if (!LinkIsConnected())
 	{
@@ -414,17 +985,14 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		s.peer_supplied = false;
 		s.peer_data     = 0xFF;
 
-		if (s.pending_valid)
-		{
-			// The peer is clocking too; ack its byte rather than swallow it.
-			s.pending_valid = false;
-			SendPacket(kCmdSync3, 1, 0, 0, 0);
-		}
+		// The peer is clocking too; ack its bytes rather than swallow them.
+		while (s.pending_len)
+			PendingAckDropOldest(0, s);
 
 		uint8_t control = 0x81;
 		if (value & 0x02)     control = static_cast<uint8_t>(control | 0x02);
 		if (mem.double_speed) control = static_cast<uint8_t>(control | 0x04);
-		SendPacket(kCmdSync1, mem.serial_data, control, 0, Timestamp(s));
+		SendPacket(0, kCmdSync1, mem.serial_data, control, 0, Timestamp(s));
 		return;
 	}
 
@@ -432,12 +1000,14 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 	s.active  = false;
 	s.passive = true;
 
-	if (s.pending_valid)
+	if (s.pending_len)
 	{
-		// The peer's byte was already here — settle it immediately.
-		const uint8_t data = s.pending_data;
-		s.pending_valid    = false;
-		SendPacket(kCmdSync2, mem.serial_data, 0x80, 0, 0);
+		// The peer's next byte was already here — settle it immediately;
+		// the game drains a backlog one re-arm at a time.
+		uint8_t  data;
+		uint32_t i1;
+		PendingPop(s, data, i1);
+		SendPacket(0, kCmdSync2, mem.serial_data, 0x80, 0, i1);
 		CompletePassive(s, mem, data);
 	}
 }
@@ -450,10 +1020,12 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 
 	// Timestamps are real time, so undo the double-speed doubling that
 	// the CPU-domain cycle count carries.
+	int32_t real = tcycles;
 	if (mem.double_speed)
 	{
 		s.ds_remainder += tcycles;
-		s.real_cycles  += s.ds_remainder >> 1;
+		real            = s.ds_remainder >> 1;
+		s.real_cycles  += real;
 		s.ds_remainder &= 1;
 	}
 	else
@@ -468,6 +1040,14 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	{
 		s.poll_timer = kPollInterval;
 		ServiceLink(s, mem);
+	}
+
+	if (g_hub.hosting)
+	{
+		// The adapter free-runs from power-on, peers or none: a lone
+		// player 1 still sees itself connected, exactly like hardware.
+		HubStep(s, mem, real);
+		return;
 	}
 
 	if (!LinkIsConnected()) return;
@@ -491,16 +1071,16 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		}
 	}
 
-	if (s.pending_valid)
+	if (s.pending_len)
 	{
 		s.pending_age += tcycles;
-		const int32_t hold = (g_session.unanswered >= kUnansweredIdle)
+		const int32_t hold = (g_direct.unanswered >= kUnansweredIdle)
 		                         ? kPendingHoldIdle : kPendingHoldActive;
 		if (s.pending_age >= hold)
 		{
-			// Our game never armed its side; tell the peer so it stops waiting.
-			s.pending_valid = false;
-			SendPacket(kCmdSync3, 1, 0, 0, 0);
+			// Our game never armed its side; release the oldest clock so
+			// the peer stops waiting on it.
+			PendingAckDropOldest(0, s);
 		}
 	}
 
@@ -508,19 +1088,38 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	if (s.ts_send_timer <= 0)
 	{
 		s.ts_send_timer = kTimestampInterval;
-		SendPacket(kCmdSync3, 0, 0, 0, Timestamp(s), true);
+		SendPacket(0, kCmdSync3, 0, 0, 0, Timestamp(s), true);
 	}
 }
 
 // ---- Link session control --------------------------------------------------
 
-LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap)
+LinkRole SerialLinkAutoStart(uint16_t port, int players, char *err, size_t err_cap)
 {
 	SerialLinkDisconnect();
 
+	if (players > 2)
+	{
+		// The hub must own the port: the adapter lives here, and the
+		// joining instances are launched to dial in. Nothing to take over
+		// from — a survivor of an old session frees the port on unlink.
+		const int seats = (players > 4 ? 4 : players) - 1;
+		if (!LinkStartServer(port, seats, err, err_cap))
+		{
+			g_role = LinkRole::None;
+			return g_role;
+		}
+		g_hub          = Dmg07();
+		g_hub.hosting  = true;
+		g_hub.target   = static_cast<uint8_t>(seats + 1);
+		g_hub_reported = -1;
+		g_role         = LinkRole::Server;
+		return g_role;
+	}
+
 	// Listener first: winning the bind means we are the first instance up,
 	// losing it means the other one is already waiting.
-	if (LinkStartServer(port, err, err_cap))
+	if (LinkStartServer(port, 1, err, err_cap))
 	{
 		g_role = LinkRole::Server;
 		return g_role;
@@ -534,7 +1133,7 @@ LinkRole SerialLinkAutoStart(uint16_t port, char *err, size_t err_cap)
 
 	// Port was taken but nothing answered: the other instance was on its
 	// way out, so take it over rather than failing.
-	if (LinkStartServer(port, err, err_cap))
+	if (LinkStartServer(port, 1, err, err_cap))
 	{
 		g_role = LinkRole::Server;
 		return g_role;
@@ -551,25 +1150,36 @@ LinkRole SerialLinkGetRole()
 
 void SerialLinkDisconnect()
 {
-	if (LinkIsConnected() && g_session.peer_reconnect_ok)
-		SendPacket(kCmdWantDisconnect, 0, 0, 0, 0);
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		if (LinkChannelConnected(ch) && g_sessions[ch].handshaked &&
+		    g_sessions[ch].peer_reconnect_ok)
+			SendPacket(ch, kCmdWantDisconnect, 0, 0, 0, 0);
 
 	LinkStop();
-	g_session = LinkSession();
-	g_role    = LinkRole::None;
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		g_sessions[ch] = LinkSession();
+	g_direct       = DirectState();
+	g_hub          = Dmg07();
+	g_hub_reported = -1;
+	g_role         = LinkRole::None;
 
 	if (g_active)
 	{
-		g_active->handshake_sent = false;
-		g_active->pending_valid  = false;
-		g_active->peer_valid     = false;
-		g_active->active         = false;
-		g_active->passive        = false;
+		PendingClear(*g_active);
+		g_active->peer_valid = false;
+		g_active->active     = false;
+		g_active->passive    = false;
 	}
 }
 
-bool SerialLinkIsEnabled()   { return LinkGetState() != LinkState::Off; }
-bool SerialLinkIsConnected() { return LinkIsConnected() && g_session.handshaked; }
+bool SerialLinkIsEnabled() { return LinkGetState() != LinkState::Off; }
+
+bool SerialLinkIsConnected()
+{
+	if (!LinkIsConnected()) return false;
+	if (g_hub.hosting) return HandshakedCount() > 0;
+	return g_sessions[0].handshaked;
+}
 
 void SerialLinkPump()
 {
@@ -583,41 +1193,53 @@ void SerialLinkPump()
 uint8_t LinkDisplayState()
 {
 	if (!SerialLinkIsConnected()) return 0;
-	if (g_session.driving)        return g_session.driving;
-	return g_session.unanswered ? 3 : 4;
+	if (g_direct.driving)         return g_direct.driving;
+	return g_direct.unanswered ? 3 : 4;
 }
 
 int SerialLinkPlayerCount()
 {
-	if (SerialLinkIsConnected()) return 2;
-	return SerialLinkIsEnabled() ? 1 : 0;
+	if (!SerialLinkIsEnabled()) return 0;
+	if (g_hub.hosting) return 1 + HandshakedCount();
+	return SerialLinkIsConnected() ? 2 : 1;
 }
 
 bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 {
 	if (!buf || cap == 0) return false;
 
+	if (g_hub.hosting)
+	{
+		// Hub news is arrivals and departures, not who drives: the
+		// adapter always does.
+		const int now = SerialLinkPlayerCount();
+		if (now == g_hub_reported) return false;
+		g_hub_reported = now;
+		SerialLinkStatusText(buf, cap);
+		return true;
+	}
+
 	if (!SerialLinkIsConnected())
 	{
 		// Say so once on the side that did not ask for it: the peer left, and
 		// nothing else would tell this instance.
-		if (g_session.reported == 0) return false;
-		g_session.reported = 0;
+		if (g_direct.reported == 0) return false;
+		g_direct.reported = 0;
 		SerialLinkStatusText(buf, cap);
 		return true;
 	}
 	const uint8_t st = LinkDisplayState();
-	if (st == 0 || st == g_session.reported) return false;
+	if (st == 0 || st == g_direct.reported) return false;
 
 	// Only master/passive flapping is rate-limited. Reaching the link, and
 	// the first real transfer, are news and go out at once.
 	const int64_t now  = g_active ? g_active->real_cycles : 0;
-	const bool    flap = (g_session.reported == 1 || g_session.reported == 2) &&
+	const bool    flap = (g_direct.reported == 1 || g_direct.reported == 2) &&
 	                     (st == 1 || st == 2);
-	if (flap && now < g_session.next_report) return false;
+	if (flap && now < g_direct.next_report) return false;
 
-	g_session.reported    = st;
-	g_session.next_report = now + kRoleReportInterval;
+	g_direct.reported    = st;
+	g_direct.next_report = now + kRoleReportInterval;
 	SerialLinkStatusText(buf, cap);
 	return true;
 }
@@ -625,6 +1247,21 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 void SerialLinkStatusText(char *buf, size_t cap)
 {
 	if (!buf || cap == 0) return;
+
+	if (g_hub.hosting && LinkGetState() != LinkState::Off)
+	{
+		const int linked = SerialLinkPlayerCount();
+		if (linked < g_hub.target)
+			std::snprintf(buf, cap,
+			              "Link cable: %u-player adapter - %d of %u instances linked",
+			              static_cast<unsigned>(g_hub.target), linked,
+			              static_cast<unsigned>(g_hub.target));
+		else
+			std::snprintf(buf, cap,
+			              "Link cable: %u-player adapter - all instances linked",
+			              static_cast<unsigned>(g_hub.target));
+		return;
+	}
 
 	switch (LinkGetState())
 	{
@@ -642,7 +1279,7 @@ void SerialLinkStatusText(char *buf, size_t cap)
 		case LinkState::Connected:
 			// Socket up but no version packet: distinguish from a real link,
 			// or a silent game looks like a broken connection.
-			if (!g_session.handshaked)
+			if (!g_sessions[0].handshaked)
 			{
 				std::snprintf(buf, cap, "Link cable: connected, waiting for handshake");
 				return;
@@ -655,7 +1292,7 @@ void SerialLinkStatusText(char *buf, size_t cap)
 				                 : (st == 2) ? " (Passive)"
 				                 : (st == 3) ? " - waiting for the other game" : "";
 				std::snprintf(buf, cap, "Link cable: connected%s%s", role,
-				              g_session.stalled ? " - peer not responding" : "");
+				              g_direct.stalled ? " - peer not responding" : "");
 			}
 			return;
 	}

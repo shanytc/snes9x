@@ -2452,6 +2452,11 @@ LRESULT CALLBACK WinProc(
             break;
 
 		case ID_EMULATION_BACKGROUNDINPUT:
+			if (S9xSGBLinkIsEnabled ())
+			{
+				S9xSetInfoString ("Link cable: background input stays on while linked");
+				break;
+			}
 			GUI.BackgroundInput = !GUI.BackgroundInput;
 			if(!GUI.hHotkeyTimer)
 				GUI.hHotkeyTimer = timeSetEvent (32, 0, (LPTIMECALLBACK)HotkeyTimer, 0, TIME_PERIODIC);
@@ -2988,6 +2993,11 @@ LRESULT CALLBACK WinProc(
 			}
 			break;
 		case ID_EMULATION_PAUSEWHENINACTIVE:
+			if (S9xSGBLinkIsEnabled ())
+			{
+				S9xSetInfoString ("Link cable: pause-when-inactive stays off while linked");
+				break;
+			}
 			GUI.InactivePause = !GUI.InactivePause;
 			break;
 		case ID_EMULATION_GB_LINK_SAME:
@@ -3319,7 +3329,8 @@ LRESULT CALLBACK WinProc(
 	case WM_ACTIVATE:
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
-			if(GUI.InactivePause)
+			// Never while linked: an unfocused pause reads as a dead cable.
+			if(GUI.InactivePause && !S9xSGBLinkIsEnabled ())
 			{
 				S9xSetPause (PAUSE_INACTIVE_WINDOW);
 			}
@@ -3339,7 +3350,7 @@ LRESULT CALLBACK WinProc(
 		//                RealizePalette (GUI.WindowDC);
 		break;
 	case WM_SIZE:
-		if (wParam == SIZE_MINIMIZED && GUI.InactivePause)
+		if (wParam == SIZE_MINIMIZED && GUI.InactivePause && !S9xSGBLinkIsEnabled ())
 		{
 			S9xSetPause(PAUSE_INACTIVE_WINDOW);
 		}
@@ -4949,6 +4960,9 @@ int WINAPI WinMain(
         // Runs with no ROM loaded too: the spawned instance sits here
         // until its game is picked, and the peer must see it arrive.
         S9xSGBLinkPump ();
+
+        // Catches every unlink path, including the peer just going away.
+        GBLinkSyncResponsiveSettings ();
 
         // Never stay frozen waiting on an instance that has gone away.
         if ((Settings.ForcedPause & PAUSE_LINK_PEER) && !S9xSGBLinkIsConnected ())
@@ -10200,6 +10214,54 @@ static void GBLinkBringUpPartner (int mode)
 	CloseHandle (pi.hProcess);
 }
 
+// A linked instance must keep running and reading input while unfocused,
+// or the other game reads the quiet cable as unplugged. Forced for the
+// session only; the stash holds the user's values for unlink and the file.
+static bool GBLinkSettingsForced      = false;
+static bool GBLinkUserInactivePause   = false;
+static bool GBLinkUserBackgroundInput = false;
+
+bool GBLinkGetUserResponsiveSettings (bool *inactivePause, bool *backgroundInput)
+{
+	if (!GBLinkSettingsForced) return false;
+	*inactivePause   = GBLinkUserInactivePause;
+	*backgroundInput = GBLinkUserBackgroundInput;
+	return true;
+}
+
+void GBLinkSyncResponsiveSettings ()
+{
+	if (S9xSGBLinkIsEnabled ())
+	{
+		if (!GBLinkSettingsForced)
+		{
+			GBLinkSettingsForced      = true;
+			GBLinkUserInactivePause   = GUI.InactivePause;
+			GBLinkUserBackgroundInput = GUI.BackgroundInput;
+		}
+
+		// Re-asserted every pass, so a mid-session menu toggle cannot stick.
+		GUI.InactivePause   = false;
+		GUI.BackgroundInput = true;
+		if (!GUI.hHotkeyTimer)
+			GUI.hHotkeyTimer = timeSetEvent (32, 0, (LPTIMECALLBACK)HotkeyTimer, 0, TIME_PERIODIC);
+
+		// The spawned instance can link while already sitting unfocused.
+		if (Settings.ForcedPause & PAUSE_INACTIVE_WINDOW)
+			S9xClearPause (PAUSE_INACTIVE_WINDOW);
+	}
+	else if (GBLinkSettingsForced)
+	{
+		GBLinkSettingsForced = false;
+		GUI.InactivePause    = GBLinkUserInactivePause;
+		GUI.BackgroundInput  = GBLinkUserBackgroundInput;
+
+		// Unfocused at unlink: land in the state the setting would have made.
+		if (GUI.InactivePause && GUI.hWnd != GetForegroundWindow ())
+			S9xSetPause (PAUSE_INACTIVE_WINDOW);
+	}
+}
+
 static void WinStartGBLink (int mode)
 {
 	char err[192];
@@ -10215,6 +10277,7 @@ static void WinStartGBLink (int mode)
 	}
 
 	GBLinkMode = mode;
+	GBLinkSyncResponsiveSettings ();
 
 	if (role == S9X_GBLINK_SERVER)
 	{
@@ -10238,6 +10301,7 @@ void WinToggleGBLink (int mode)
 		// by itself, because the check state is read back from the link.
 		S9xSGBLinkDisconnect ();
 		GBLinkMode = GBLINK_OFF;
+		GBLinkSyncResponsiveSettings ();
 		S9xSetInfoString ("Link cable: disconnected");
 		return;
 	}
@@ -14007,7 +14071,9 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)(LPCTSTR)temp);
 		}
 
-		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)0,0);
+		// A linked player-2 instance plays on Joypad #2, so open on it.
+		index = (Settings.GBLinkPlayerIndex >= 2 && S9xSGBLinkIsEnabled ()) ? 1 : 0;
+		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)index,0);
 
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);

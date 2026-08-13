@@ -1248,8 +1248,24 @@ void WinSaveConfigFile()
 
 	WinPreSave(conf);
 
+	// The link session forces these two; the file keeps the user's own values.
+	bool userPause = false, userBackground = false;
+	const bool linkForced = GBLinkGetUserResponsiveSettings(&userPause, &userBackground);
+	const bool livePause = GUI.InactivePause, liveBackground = GUI.BackgroundInput;
+	if(linkForced)
+	{
+		GUI.InactivePause   = userPause;
+		GUI.BackgroundInput = userBackground;
+	}
+
 	for(unsigned int i = 0 ; i < configItems.size()	; i++)
 		configItems[i].Set(conf);
+
+	if(linkForced)
+	{
+		GUI.InactivePause   = livePause;
+		GUI.BackgroundInput = liveBackground;
+	}
 
 	bool wasLocked = locked_file!=NULL;
 	if(wasLocked) WinUnlockConfigFile();

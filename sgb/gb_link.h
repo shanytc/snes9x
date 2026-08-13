@@ -14,6 +14,12 @@ namespace SGB {
 
 // TCP transport for the link cable: BGB 1.4 packet framing only, with the
 // command semantics in gb_serial.cpp. Entirely non-blocking.
+//
+// A direct cable is one peer on channel 0. A DMG-07 hub session keeps the
+// listener open and seats up to three peers, one channel per adapter port,
+// so the channel index is the player number minus two.
+
+constexpr int kLinkMaxChannels = 3;
 
 // A BGB wire packet: four command bytes plus a 32-bit LE value, usually
 // a 2 MiHz timestamp.
@@ -31,45 +37,58 @@ enum class LinkState : uint8_t
 	Off        = 0,
 	Listening  = 1,   // server socket open, no peer yet
 	Connecting = 2,   // client connect() in flight
-	Connected  = 3
+	Connected  = 3    // at least one peer attached
 };
 
-// Open a listening socket on `port`; false and `err` filled on failure.
-bool LinkStartServer(uint16_t port, char *err, size_t err_cap);
+// Open a listening socket on `port`, seating up to `max_peers` (1..3).
+// One peer is the direct cable; more is the DMG-07 hub, where a dropped
+// peer frees its seat instead of ending the session.
+bool LinkStartServer(uint16_t port, int max_peers, char *err, size_t err_cap);
 
-// Start a non-blocking connect; completion shows up as LinkPoll going
-// to LinkState::Connected.
+// Start a non-blocking connect (always channel 0); completion shows up as
+// LinkPoll going to LinkState::Connected.
 bool LinkStartClient(const char *host, uint16_t port, char *err, size_t err_cap);
 
 // Close everything and return to LinkState::Off.
 void LinkStop();
 
-// Complete a pending accept/connect, flush the send queue and read what
-// has arrived. Cheap enough to call at kilohertz rates.
+// Complete pending accepts/connects, flush the send queues and read what
+// has arrived, on every channel. Cheap enough to call at kilohertz rates.
 LinkState LinkPoll();
 
 LinkState   LinkGetState();
-bool        LinkIsConnected();
+bool        LinkIsConnected();            // any channel attached
+bool        LinkChannelConnected(int ch); // this seat specifically
+int         LinkChannelCount();           // attached channels
 const char *LinkLastError();
 
+// Close one seat: on a hub it frees the port, on a direct cable it ends
+// the session. For refusing a peer at the protocol level.
+void LinkCloseChannel(int ch);
+
+// Bumps every time a new peer takes the seat, so a drop-and-refill that
+// happens inside one poll cannot inherit the old occupant's handshake.
+int LinkChannelGeneration(int ch);
+
 // "host:port" of the current or intended peer, for the status line.
+// With several peers it names the first one; the caller counts the rest.
 const char *LinkPeerName();
 
-// Queue one packet; false if not connected or the peer is gone. Mark
-// status packets droppable so a paused peer's backlog cannot kill the
-// link -- only undeliverable real transfers mean it is really gone.
-bool LinkSend(const LinkPacket &p, bool droppable = false);
+// Queue one packet on a channel; false if that seat is empty. Mark status
+// packets droppable so a paused peer's backlog cannot kill the link --
+// only undeliverable real transfers mean it is really gone.
+bool LinkSend(int ch, const LinkPacket &p, bool droppable = false);
 
-// Discard buffered traffic both ways. Used on state load, where
-// anything still queued belongs to the timeline being replaced.
+// Discard buffered traffic both ways on every channel. Used on state
+// load, where anything still queued belongs to the timeline replaced.
 void LinkFlush();
 
-// Pop one fully-received packet. Returns false when none is buffered.
-bool LinkRecv(LinkPacket &out);
+// Pop one fully-received packet from a channel. False when none is there.
+bool LinkRecv(int ch, LinkPacket &out);
 
-// Block up to `timeout_ms` for readable data, giving the master side a
-// bounded chance to hear back before writing the byte off.
-bool LinkWaitReadable(int timeout_ms);
+// Block up to `timeout_ms` for readable data on a channel, giving the
+// clocking side a bounded chance to hear back before writing it off.
+bool LinkWaitReadable(int ch, int timeout_ms);
 
 } // namespace SGB
 

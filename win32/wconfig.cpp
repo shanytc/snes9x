@@ -324,10 +324,22 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			char *end = NULL;
 			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
 
-			// We are the other half of whoever launched us, so the pair is
-			// always {1,2} even when a survivor spawns a replacement.
-			if (end && *end == ',')
-				Settings.GBLinkPlayerIndex = (atoi(end + 1) == 1) ? 2 : 1;
+			// "<pid>,<launcher>,<index>,<players>": our own index is spelled
+			// out so a hub seat keeps its player number. The old two-value
+			// form only names the launcher; we are the other half of that
+			// pair, so {1,2} still falls out.
+			long launcher = 0, index = 0, players = 0;
+			if (end && *end == ',') launcher = strtol(end + 1, &end, 10);
+			if (end && *end == ',') index    = strtol(end + 1, &end, 10);
+			if (end && *end == ',') players  = strtol(end + 1, &end, 10);
+
+			if (index < 1) index = (launcher == 1) ? 2 : 1;
+			if (index > 4) index = 4;
+			Settings.GBLinkPlayerIndex = (uint8)index;
+
+			if (players < 2) players = 2;
+			if (players > 4) players = 4;
+			GBLinkSessionPlayers = (int)players;
 		}
 
 		for (int j = i; j + 1 < count; j++)
@@ -1141,7 +1153,7 @@ void WinRegisterConfigItems()
 	AddBoolC("RTCOff", Settings.GBRTCOff, false, "false (default) = the cartridge clock follows the PC's clock; true = the RTC is off and RTCTime stands in for the PC's clock (Emulation -> Real Time Clock -> Settings)");
 	AddUIntC("RTCTime", Settings.GBRTCTime, 0, "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
 	AddUIntC("RTCHuC3Format", Settings.GBRTCHuC3Format, 0, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
-	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Data Link. Only worth changing if something else on this PC already owns 8765.");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Link Cable. Only worth changing if something else on this PC already owns 8765.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

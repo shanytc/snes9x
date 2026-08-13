@@ -136,6 +136,7 @@ void GBLinkMirrorPause();
 void WinAutoStartGBLinkPeer();
 int  WinGetGBLinkMode();
 int  WinGetGBLinkPlayers();
+static int  WinGetGBLinkLivePlayers();
 static void GBLinkPumpSpawns();
 static void GBLinkAutoCloseAbandonedHub();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -3017,6 +3018,16 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_LINK_DIFF:
 			WinToggleGBLink (2, 2);
 			break;
+		case ID_EMULATION_GB_LINK_CONNECT:
+			// Dial into whatever session exists; idempotent, so a rejoin
+			// request can never unplug an instance that is already on.
+			if (!S9xSGBLinkIsEnabled ())
+				WinToggleGBLink (Settings.GBRomPath[0] ? 1 : 2, 2);
+			break;
+		case ID_EMULATION_GB_LINK_DISCONNECT:
+			if (S9xSGBLinkIsEnabled ())
+				WinToggleGBLink (WinGetGBLinkMode () ? WinGetGBLinkMode () : 1, 2);
+			break;
 		case ID_EMULATION_RUNAHEAD_OFF:
 			Settings.RunAhead = 0;
 			break;
@@ -5584,7 +5595,8 @@ static void CheckMenuStates ()
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
 
 	// Game Boy only, so the submenu comes and goes like the BIOS one. A
-	// live link keeps it, or the spawned instance couldn't unplug.
+	// spawned instance keeps it unconditionally: it must always be able
+	// to reconnect, even before its game is picked.
 	{
 		static HMENU s_link_hmenu  = NULL;
 		static HMENU s_link_parent = NULL;
@@ -5595,16 +5607,44 @@ static void CheckMenuStates ()
 		                       Settings.GameBoyRunMode == 1;
 		const bool show = ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
 		                   !sgb1_bios) ||
-		                  S9xSGBLinkIsEnabled ();
+		                  S9xSGBLinkIsEnabled () ||
+		                  Settings.GBLinkPeerInstance;
 		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Link Cable"),
 		                   ID_EMULATION_RUNAHEAD_POPUP, show, &s_link_hmenu, &s_link_parent);
 
-		// A live session's mode is settled, so the others are greyed; the
-		// active item stays enabled because it doubles as the disconnect.
-		if (show)
+		// A spawned instance never chooses the session shape — only the
+		// master does. Its menu is rebuilt once into plain Connect and
+		// Disconnect, which cover it whichever game it was launched for.
+		static bool s_peer_menu_built = false;
+		if (show && Settings.GBLinkPeerInstance && !s_peer_menu_built && s_link_hmenu)
 		{
+			while (GetMenuItemCount (s_link_hmenu) > 0)
+				DeleteMenu (s_link_hmenu, 0, MF_BYPOSITION);
+			AppendMenu (s_link_hmenu, MF_STRING, ID_EMULATION_GB_LINK_CONNECT,
+			            TEXT("&Connect"));
+			AppendMenu (s_link_hmenu, MF_STRING, ID_EMULATION_GB_LINK_DISCONNECT,
+			            TEXT("&Disconnect"));
+			s_peer_menu_built = true;
+		}
+
+		if (show && Settings.GBLinkPeerInstance)
+		{
+			const bool linked = S9xSGBLinkIsEnabled ();
+			mii.fState = linked ? (MFS_CHECKED | MFS_DISABLED) : MFS_UNCHECKED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_CONNECT, FALSE, &mii);
+			mii.fState = linked ? MFS_UNCHECKED : (MFS_UNCHECKED | MFS_DISABLED);
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DISCONNECT, FALSE, &mii);
+		}
+		else if (show)
+		{
+			// A live session's shape is settled, so the others are greyed;
+			// the active item stays enabled because it doubles as the
+			// disconnect. The tick follows the instances actually present:
+			// a 4-player session with one window closed reads as 3.
 			const int  gblink   = WinGetGBLinkMode ();
-			const int  players  = WinGetGBLinkPlayers ();
+			int        players  = WinGetGBLinkPlayers ();
+			if (gblink == 1 && players > 2)
+				players = WinGetGBLinkLivePlayers ();
 			const UINT inactive = (gblink == 0) ? MFS_UNCHECKED
 			                                    : (MFS_UNCHECKED | MFS_DISABLED);
 
@@ -10288,10 +10328,10 @@ static DWORD GBLinkLaunchInstance (DWORD reusePid, int mode, int playerIndex, in
 {
 	if (GBLinkPidAlive (reusePid))
 	{
-		// Its own toggle senses the role: our port is up, so it dials in.
+		// Connect senses the role: our port is up, so it dials in — and
+		// being idempotent, it cannot unplug an instance already linked.
 		if (GBLinkPostToPid (reusePid, WM_COMMAND,
-		                     MAKEWPARAM (mode == GBLINK_SAME ? ID_EMULATION_GB_LINK_SAME
-		                                                     : ID_EMULATION_GB_LINK_DIFF, 0), 0))
+		                     MAKEWPARAM (ID_EMULATION_GB_LINK_CONNECT, 0), 0))
 			return reusePid;
 	}
 
@@ -10538,6 +10578,25 @@ int WinGetGBLinkMode ()
 int WinGetGBLinkPlayers ()
 {
 	return S9xSGBLinkIsEnabled () ? GBLinkSessionPlayers : 0;
+}
+
+// Instances actually on the session: linked seats, launched ones still
+// alive (they can re-tick Connect), and seats not yet brought up. A seat
+// whose window was closed no longer counts, so the master's tick slides
+// from 4 Players to 3 when one is gone for good.
+static int WinGetGBLinkLivePlayers ()
+{
+	int live = 1;
+	const int want = GBLinkSessionPlayers - 1;
+	for (int i = 0; i < want && i < 3; i++)
+		if (i >= GBLinkSlotsStarted || GBLinkPidAlive (GBLinkPeerPids[i]))
+			++live;
+
+	// An instance the user launched by hand holds a seat without a pid.
+	const int linked = S9xSGBLinkPlayerCount ();
+	if (linked > live) live = linked;
+
+	return live < 2 ? 2 : live;
 }
 
 void SetInfoDlgColor(unsigned char r, unsigned char g, unsigned char b)

@@ -319,10 +319,22 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			char *end = NULL;
 			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
 
-			// We are the other half of whoever launched us, so the pair is
-			// always {1,2} even when a survivor spawns a replacement.
-			if (end && *end == ',')
-				Settings.GBLinkPlayerIndex = (atoi(end + 1) == 1) ? 2 : 1;
+			// "<pid>,<launcher>,<index>,<players>": our own index is spelled
+			// out so a hub seat keeps its player number. The old two-value
+			// form only names the launcher; we are the other half of that
+			// pair, so {1,2} still falls out.
+			long launcher = 0, index = 0, players = 0;
+			if (end && *end == ',') launcher = strtol(end + 1, &end, 10);
+			if (end && *end == ',') index    = strtol(end + 1, &end, 10);
+			if (end && *end == ',') players  = strtol(end + 1, &end, 10);
+
+			if (index < 1) index = (launcher == 1) ? 2 : 1;
+			if (index > 4) index = 4;
+			Settings.GBLinkPlayerIndex = (uint8)index;
+
+			if (players < 2) players = 2;
+			if (players > 4) players = 4;
+			GBLinkSessionPlayers = (int)players;
 		}
 
 		for (int j = i; j + 1 < count; j++)
@@ -1103,7 +1115,7 @@ void WinRegisterConfigItems()
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
 	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9.");
-	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Data Link. Only worth changing if something else on this PC already owns 8765.");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Link Cable. Only worth changing if something else on this PC already owns 8765.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

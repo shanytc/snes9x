@@ -950,9 +950,13 @@
 #define ID_SOUND_AUDIOWAVEFORM          40198
 #define ID_INPUT_ENABLERUMBLE           40211
 #define ID_EMULATION_GB_LINK            40218
+#define ID_EMULATION_RUNAHEAD_POPUP     40220
 #define ID_FILE_LOAD_SRAM_DATA          40219
 #define ID_EMULATION_GB_LINK_SAME       40216
 #define ID_EMULATION_GB_LINK_DIFF       40217
+#define ID_EMULATION_GB_LINK_SAME_POPUP 40221
+#define ID_EMULATION_GB_LINK_SAME_3     40222
+#define ID_EMULATION_GB_LINK_SAME_4     40223
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

@@ -65,6 +65,11 @@ extern DWORD GBLinkPartnerPid;
 // pause setters.
 void GBLinkMirrorPause();
 
+// While linked, pause-when-inactive is forced off and background input
+// forced on; unlinking gives the user's own values back.
+void GBLinkSyncResponsiveSettings();
+bool GBLinkGetUserResponsiveSettings(bool *inactivePause, bool *backgroundInput);
+
 
 #include "_tfwopen.h"
 #ifdef UNICODE

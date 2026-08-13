@@ -47,6 +47,10 @@ struct Serial
 	uint8_t  pending_len  = 0;
 	int32_t  pending_age  = 0;   // age of the oldest held clock
 
+	// Held clocks complete no faster than hardware ever spaces them, or a
+	// burst overwrites SB before the game's main loop has read it.
+	int32_t  ext_gap_timer = 0;
+
 	// BGB timestamps are 2 MiHz; this counts real-time GB T-cycles (4 MiHz),
 	// so double-speed cycles are halved back into real time before use.
 	int64_t  real_cycles   = 0;

@@ -6,6 +6,7 @@
 
 // Non-blocking TCP transport for the Game Boy link cable — sockets and
 // byte framing only. Single-threaded, driven entirely from LinkPoll().
+// One peer channel is the direct cable; up to three carry a DMG-07 hub.
 
 // getaddrinfo sits behind feature-test macros a strict -std=c++NN turns
 // off; ask for them before any libc header is pulled in.
@@ -70,11 +71,9 @@ constexpr size_t kPacketBytes = 8;
 constexpr size_t kRxCap       = 4096;   // ~500 packets; a stalled peer can't grow it
 constexpr size_t kTxCap       = 4096;
 
-struct LinkCtx
+struct PeerCtx
 {
-	socket_t  listen_fd = SGB_INVALID_SOCKET;
-	socket_t  peer_fd   = SGB_INVALID_SOCKET;
-	LinkState state     = LinkState::Off;
+	socket_t fd = SGB_INVALID_SOCKET;
 
 	uint8_t rx[kRxCap];
 	size_t  rx_len = 0;
@@ -82,6 +81,17 @@ struct LinkCtx
 
 	uint8_t tx[kTxCap];
 	size_t  tx_len = 0;
+};
+
+struct LinkCtx
+{
+	socket_t  listen_fd = SGB_INVALID_SOCKET;
+	LinkState state     = LinkState::Off;
+	int       max_peers = 1;
+	bool      client    = false;
+
+	PeerCtx peers[kLinkMaxChannels];
+	int     gen[kLinkMaxChannels] = {0};
 
 	char err[192]  = {0};
 	char peer[160] = {0};
@@ -159,136 +169,171 @@ void CloseConnection(socket_t &fd)
 	fd = SGB_INVALID_SOCKET;
 }
 
-// At two players, one leaving ends it for both, so the listener goes too.
-// A 4-player cable would keep hosting here — see SerialLinkPlayerCount.
-void DropPeer(const char *reason)
+int CountPeers()
 {
-	CloseConnection(g_link.peer_fd);
-	CloseSocket(g_link.listen_fd);
-	g_link.rx_len = g_link.rx_out = 0;
-	g_link.tx_len = 0;
+	int n = 0;
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		if (g_link.peers[ch].fd != SGB_INVALID_SOCKET) ++n;
+	return n;
+}
+
+void ResetChannel(PeerCtx &p)
+{
+	p.rx_len = p.rx_out = 0;
+	p.tx_len = 0;
+}
+
+// Losing the only peer of a direct cable ends the session, listener and
+// all, as it always has. On a hub the seat is merely freed: the adapter
+// keeps pinging, the player's status bit clears, and a new instance can
+// dial into the empty port.
+void DropChannel(int ch, const char *reason)
+{
+	PeerCtx &p = g_link.peers[ch];
+	CloseConnection(p.fd);
+	ResetChannel(p);
+
 	if (reason && *reason)
 		std::snprintf(g_link.err, sizeof g_link.err, "%s", reason);
 
-	g_link.state = LinkState::Off;
-}
-
-// Compact the receive buffer so a long session doesn't walk rx_out off
-// the end. Called once the read cursor has consumed everything buffered.
-void CompactRx()
-{
-	if (g_link.rx_out == 0) return;
-	if (g_link.rx_out >= g_link.rx_len)
+	if (g_link.client || g_link.max_peers <= 1)
 	{
-		g_link.rx_len = g_link.rx_out = 0;
+		CloseSocket(g_link.listen_fd);
+		g_link.state = LinkState::Off;
 		return;
 	}
-	const size_t left = g_link.rx_len - g_link.rx_out;
-	std::memmove(g_link.rx, g_link.rx + g_link.rx_out, left);
-	g_link.rx_len = left;
-	g_link.rx_out = 0;
+
+	g_link.state = CountPeers() ? LinkState::Connected : LinkState::Listening;
 }
 
-void FlushTx()
+// Compact a receive buffer so a long session doesn't walk rx_out off the
+// end. Called once the read cursor has consumed everything buffered.
+void CompactRx(PeerCtx &p)
 {
-	while (g_link.tx_len > 0 && g_link.peer_fd != SGB_INVALID_SOCKET)
+	if (p.rx_out == 0) return;
+	if (p.rx_out >= p.rx_len)
+	{
+		p.rx_len = p.rx_out = 0;
+		return;
+	}
+	const size_t left = p.rx_len - p.rx_out;
+	std::memmove(p.rx, p.rx + p.rx_out, left);
+	p.rx_len = left;
+	p.rx_out = 0;
+}
+
+void FlushTx(int ch)
+{
+	PeerCtx &p = g_link.peers[ch];
+	while (p.tx_len > 0 && p.fd != SGB_INVALID_SOCKET)
 	{
 		const int sent = static_cast<int>(
-			send(g_link.peer_fd, reinterpret_cast<const char *>(g_link.tx),
-			     static_cast<int>(g_link.tx_len), 0));
+			send(p.fd, reinterpret_cast<const char *>(p.tx),
+			     static_cast<int>(p.tx_len), 0));
 		if (sent > 0)
 		{
 			const size_t n = static_cast<size_t>(sent);
-			if (n >= g_link.tx_len) { g_link.tx_len = 0; return; }
-			std::memmove(g_link.tx, g_link.tx + n, g_link.tx_len - n);
-			g_link.tx_len -= n;
+			if (n >= p.tx_len) { p.tx_len = 0; return; }
+			std::memmove(p.tx, p.tx + n, p.tx_len - n);
+			p.tx_len -= n;
 			continue;
 		}
 
 		const int e = SGB_SOCKET_ERRNO;
 		if (sent < 0 && e == SGB_EWOULDBLOCK) return;   // retry next poll
-		DropPeer("Link closed by peer");
+		DropChannel(ch, "Link closed by peer");
 		return;
 	}
 }
 
-void PumpRx()
+void PumpRx(int ch)
 {
-	while (g_link.peer_fd != SGB_INVALID_SOCKET)
+	PeerCtx &p = g_link.peers[ch];
+	while (p.fd != SGB_INVALID_SOCKET)
 	{
-		CompactRx();
-		if (g_link.rx_len >= kRxCap) return;   // consumer is behind; stop reading
+		CompactRx(p);
+		if (p.rx_len >= kRxCap) return;   // consumer is behind; stop reading
 
 		const int got = static_cast<int>(
-			recv(g_link.peer_fd, reinterpret_cast<char *>(g_link.rx + g_link.rx_len),
-			     static_cast<int>(kRxCap - g_link.rx_len), 0));
-		if (got > 0) { g_link.rx_len += static_cast<size_t>(got); continue; }
-		if (got == 0) { DropPeer("Link closed by peer"); return; }
+			recv(p.fd, reinterpret_cast<char *>(p.rx + p.rx_len),
+			     static_cast<int>(kRxCap - p.rx_len), 0));
+		if (got > 0) { p.rx_len += static_cast<size_t>(got); continue; }
+		if (got == 0) { DropChannel(ch, "Link closed by peer"); return; }
 
 		if (SGB_SOCKET_ERRNO == SGB_EWOULDBLOCK) return;
-		DropPeer("Link closed by peer");
+		DropChannel(ch, "Link closed by peer");
 		return;
 	}
 }
 
-// One link port per Game Boy: anything dialling in while a peer is
-// attached is accepted and closed, so it gets an honest refusal.
-void RejectExtraPeers()
-{
-	if (g_link.listen_fd == SGB_INVALID_SOCKET) return;
-	for (;;)
-	{
-		const socket_t fd = accept(g_link.listen_fd, nullptr, nullptr);
-		if (fd == SGB_INVALID_SOCKET) return;
-		SGB_CLOSESOCKET(fd);
-	}
-}
-
-void AdoptPeer(socket_t fd)
+void AdoptPeer(int ch, socket_t fd)
 {
 	SetNonBlocking(fd);
 	SetNoDelay(fd);
-	g_link.peer_fd = fd;
-	g_link.rx_len = g_link.rx_out = 0;
-	g_link.tx_len = 0;
+	PeerCtx &p = g_link.peers[ch];
+	p.fd = fd;
+	ResetChannel(p);
+	++g_link.gen[ch];
 	g_link.state  = LinkState::Connected;
 	g_link.err[0] = '\0';
 }
 
+// Seat arrivals in the lowest free channel; on a hub that seat is the
+// player number. Anything dialling in with every seat taken is accepted
+// and closed, so it gets an honest refusal.
 void PollAccept()
 {
-	sockaddr_storage from{};
+	if (g_link.listen_fd == SGB_INVALID_SOCKET) return;
+	for (;;)
+	{
+		sockaddr_storage from{};
 #ifdef _WIN32
-	int from_len = static_cast<int>(sizeof from);
+		int from_len = static_cast<int>(sizeof from);
 #else
-	socklen_t from_len = sizeof from;
+		socklen_t from_len = sizeof from;
 #endif
-	const socket_t fd = accept(g_link.listen_fd,
-	                           reinterpret_cast<sockaddr *>(&from), &from_len);
-	if (fd == SGB_INVALID_SOCKET) return;
+		const socket_t fd = accept(g_link.listen_fd,
+		                           reinterpret_cast<sockaddr *>(&from), &from_len);
+		if (fd == SGB_INVALID_SOCKET) return;
 
-	char host[NI_MAXHOST] = {0};
-	char serv[NI_MAXSERV] = {0};
-	if (getnameinfo(reinterpret_cast<sockaddr *>(&from), from_len,
-	                host, sizeof host, serv, sizeof serv,
-	                NI_NUMERICHOST | NI_NUMERICSERV) == 0)
-		std::snprintf(g_link.peer, sizeof g_link.peer, "%s:%s", host, serv);
+		int seat = -1;
+		for (int ch = 0; ch < g_link.max_peers && ch < kLinkMaxChannels; ++ch)
+			if (g_link.peers[ch].fd == SGB_INVALID_SOCKET) { seat = ch; break; }
 
-	AdoptPeer(fd);
+		if (seat < 0)
+		{
+			SGB_CLOSESOCKET(fd);
+			continue;
+		}
+
+		if (seat == 0)
+		{
+			char host[NI_MAXHOST] = {0};
+			char serv[NI_MAXSERV] = {0};
+			if (getnameinfo(reinterpret_cast<sockaddr *>(&from), from_len,
+			                host, sizeof host, serv, sizeof serv,
+			                NI_NUMERICHOST | NI_NUMERICSERV) == 0)
+				std::snprintf(g_link.peer, sizeof g_link.peer, "%s:%s", host, serv);
+		}
+
+		AdoptPeer(seat, fd);
+	}
 }
 
 // A non-blocking connect goes writable on both success and failure, so
 // the pending SO_ERROR is what distinguishes them.
 void PollConnect()
 {
+	PeerCtx &p = g_link.peers[0];
+
 	fd_set wr, ex;
 	FD_ZERO(&wr);
 	FD_ZERO(&ex);
-	FD_SET(g_link.peer_fd, &wr);
-	FD_SET(g_link.peer_fd, &ex);
+	FD_SET(p.fd, &wr);
+	FD_SET(p.fd, &ex);
 
 	timeval tv{0, 0};
-	const int rc = select(static_cast<int>(g_link.peer_fd) + 1, nullptr, &wr, &ex, &tv);
+	const int rc = select(static_cast<int>(p.fd) + 1, nullptr, &wr, &ex, &tv);
 	if (rc <= 0) return;
 
 	int       so_err = 0;
@@ -297,25 +342,26 @@ void PollConnect()
 #else
 	socklen_t len    = sizeof so_err;
 #endif
-	getsockopt(g_link.peer_fd, SOL_SOCKET, SO_ERROR,
+	getsockopt(p.fd, SOL_SOCKET, SO_ERROR,
 	           reinterpret_cast<char *>(&so_err), &len);
 
-	if (FD_ISSET(g_link.peer_fd, &ex) || so_err != 0)
+	if (FD_ISSET(p.fd, &ex) || so_err != 0)
 	{
-		CloseSocket(g_link.peer_fd);
+		CloseSocket(p.fd);
 		g_link.state = LinkState::Off;
 		SetError("Connect failed (%d)", so_err ? so_err : SGB_SOCKET_ERRNO);
 		return;
 	}
 
-	SetNoDelay(g_link.peer_fd);
+	SetNoDelay(p.fd);
+	++g_link.gen[0];
 	g_link.state  = LinkState::Connected;
 	g_link.err[0] = '\0';
 }
 
 } // anonymous
 
-bool LinkStartServer(uint16_t port, char *err, size_t err_cap)
+bool LinkStartServer(uint16_t port, int max_peers, char *err, size_t err_cap)
 {
 	LinkStop();
 	if (!EnsureWinsock(err, err_cap)) return false;
@@ -354,7 +400,7 @@ bool LinkStartServer(uint16_t port, char *err, size_t err_cap)
 		return false;
 	}
 
-	if (listen(fd, 1) != 0)
+	if (listen(fd, kLinkMaxChannels) != 0)
 	{
 		if (err && err_cap) std::snprintf(err, err_cap, "listen() failed (%d)", SGB_SOCKET_ERRNO);
 		SGB_CLOSESOCKET(fd);
@@ -364,6 +410,9 @@ bool LinkStartServer(uint16_t port, char *err, size_t err_cap)
 	SetNonBlocking(fd);
 	g_link.listen_fd = fd;
 	g_link.state     = LinkState::Listening;
+	g_link.client    = false;
+	g_link.max_peers = max_peers < 1 ? 1
+	                 : max_peers > kLinkMaxChannels ? kLinkMaxChannels : max_peers;
 	g_link.err[0]    = '\0';
 	std::snprintf(g_link.peer, sizeof g_link.peer, "listening on port %u",
 	              static_cast<unsigned>(port));
@@ -391,6 +440,9 @@ bool LinkStartClient(const char *host, uint16_t port, char *err, size_t err_cap)
 		return false;
 	}
 
+	g_link.client    = true;
+	g_link.max_peers = 1;
+
 	socket_t fd = SGB_INVALID_SOCKET;
 	for (addrinfo *ai = list; ai; ai = ai->ai_next)
 	{
@@ -402,14 +454,15 @@ bool LinkStartClient(const char *host, uint16_t port, char *err, size_t err_cap)
 		if (rc == 0)
 		{
 			SetNoDelay(fd);
-			g_link.peer_fd = fd;
-			g_link.state   = LinkState::Connected;
+			g_link.peers[0].fd = fd;
+			++g_link.gen[0];
+			g_link.state       = LinkState::Connected;
 			break;
 		}
 		if (SGB_SOCKET_ERRNO == SGB_EINPROGRESS)
 		{
-			g_link.peer_fd = fd;
-			g_link.state   = LinkState::Connecting;
+			g_link.peers[0].fd = fd;
+			g_link.state       = LinkState::Connecting;
 			break;
 		}
 		SGB_CLOSESOCKET(fd);
@@ -434,12 +487,16 @@ bool LinkStartClient(const char *host, uint16_t port, char *err, size_t err_cap)
 
 void LinkStop()
 {
-	CloseConnection(g_link.peer_fd);
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+	{
+		CloseConnection(g_link.peers[ch].fd);
+		ResetChannel(g_link.peers[ch]);
+	}
 	CloseSocket(g_link.listen_fd);
-	g_link.rx_len = g_link.rx_out = 0;
-	g_link.tx_len = 0;
-	g_link.state  = LinkState::Off;
-	g_link.peer[0] = '\0';
+	g_link.state     = LinkState::Off;
+	g_link.client    = false;
+	g_link.max_peers = 1;
+	g_link.peer[0]   = '\0';
 }
 
 LinkState LinkPoll()
@@ -459,36 +516,69 @@ LinkState LinkPoll()
 
 		case LinkState::Connected:
 			// Read first: a peer that dropped and re-dialled would otherwise
-			// be rejected as a third instance before we noticed it had gone.
-			FlushTx();
-			PumpRx();
-			if (g_link.state == LinkState::Connected) RejectExtraPeers();
+			// be refused for the seat it still appeared to hold.
+			for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+			{
+				if (g_link.peers[ch].fd == SGB_INVALID_SOCKET) continue;
+				FlushTx(ch);
+				if (g_link.peers[ch].fd != SGB_INVALID_SOCKET) PumpRx(ch);
+			}
+			if (g_link.state == LinkState::Connected ||
+			    g_link.state == LinkState::Listening)
+				PollAccept();
 			break;
 	}
 	return g_link.state;
 }
 
-LinkState   LinkGetState()    { return g_link.state; }
-bool        LinkIsConnected() { return g_link.state == LinkState::Connected; }
-const char *LinkLastError()   { return g_link.err; }
-const char *LinkPeerName()    { return g_link.peer; }
+LinkState LinkGetState()    { return g_link.state; }
+bool      LinkIsConnected() { return g_link.state == LinkState::Connected; }
 
-bool LinkSend(const LinkPacket &p, bool droppable)
+bool LinkChannelConnected(int ch)
 {
-	if (g_link.state != LinkState::Connected) return false;
+	if (ch < 0 || ch >= kLinkMaxChannels) return false;
+	return g_link.state == LinkState::Connected &&
+	       g_link.peers[ch].fd != SGB_INVALID_SOCKET;
+}
 
-	if (g_link.tx_len + kPacketBytes > kTxCap)
+int LinkChannelCount()
+{
+	return g_link.state == LinkState::Connected ? CountPeers() : 0;
+}
+
+const char *LinkLastError() { return g_link.err; }
+const char *LinkPeerName()  { return g_link.peer; }
+
+void LinkCloseChannel(int ch)
+{
+	if (ch < 0 || ch >= kLinkMaxChannels) return;
+	if (g_link.peers[ch].fd == SGB_INVALID_SOCKET) return;
+	DropChannel(ch, nullptr);
+}
+
+int LinkChannelGeneration(int ch)
+{
+	if (ch < 0 || ch >= kLinkMaxChannels) return 0;
+	return g_link.gen[ch];
+}
+
+bool LinkSend(int ch, const LinkPacket &p, bool droppable)
+{
+	if (!LinkChannelConnected(ch)) return false;
+	PeerCtx &peer = g_link.peers[ch];
+
+	if (peer.tx_len + kPacketBytes > kTxCap)
 	{
 		// A peer that is merely paused -- loading a state, sitting in a menu
 		// -- stops draining for a while. Status packets are dropped rather
 		// than killing a link that is about to come back; only a backlog of
 		// real transfers means it is genuinely gone.
 		if (droppable) return false;
-		DropPeer("Link stalled (send queue full)");
+		DropChannel(ch, "Link stalled (send queue full)");
 		return false;
 	}
 
-	uint8_t *w = g_link.tx + g_link.tx_len;
+	uint8_t *w = peer.tx + peer.tx_len;
 	w[0] = p.b1;
 	w[1] = p.b2;
 	w[2] = p.b3;
@@ -497,17 +587,19 @@ bool LinkSend(const LinkPacket &p, bool droppable)
 	w[5] = static_cast<uint8_t>((p.i1 >> 8) & 0xFF);
 	w[6] = static_cast<uint8_t>((p.i1 >> 16) & 0xFF);
 	w[7] = static_cast<uint8_t>((p.i1 >> 24) & 0xFF);
-	g_link.tx_len += kPacketBytes;
+	peer.tx_len += kPacketBytes;
 
-	FlushTx();
+	FlushTx(ch);
 	return true;
 }
 
-bool LinkRecv(LinkPacket &out)
+bool LinkRecv(int ch, LinkPacket &out)
 {
-	if (g_link.rx_len - g_link.rx_out < kPacketBytes) return false;
+	if (ch < 0 || ch >= kLinkMaxChannels) return false;
+	PeerCtx &p = g_link.peers[ch];
+	if (p.rx_len - p.rx_out < kPacketBytes) return false;
 
-	const uint8_t *r = g_link.rx + g_link.rx_out;
+	const uint8_t *r = p.rx + p.rx_out;
 	out.b1 = r[0];
 	out.b2 = r[1];
 	out.b3 = r[2];
@@ -516,34 +608,35 @@ bool LinkRecv(LinkPacket &out)
 	         (static_cast<uint32_t>(r[5]) << 8) |
 	         (static_cast<uint32_t>(r[6]) << 16) |
 	         (static_cast<uint32_t>(r[7]) << 24);
-	g_link.rx_out += kPacketBytes;
+	p.rx_out += kPacketBytes;
 	return true;
 }
 
 void LinkFlush()
 {
-	g_link.rx_len = g_link.rx_out = 0;
-	g_link.tx_len = 0;
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		ResetChannel(g_link.peers[ch]);
 }
 
-bool LinkWaitReadable(int timeout_ms)
+bool LinkWaitReadable(int ch, int timeout_ms)
 {
-	if (g_link.state != LinkState::Connected) return false;
-	if (g_link.rx_len - g_link.rx_out >= kPacketBytes) return true;
+	if (!LinkChannelConnected(ch)) return false;
+	PeerCtx &p = g_link.peers[ch];
+	if (p.rx_len - p.rx_out >= kPacketBytes) return true;
 
 	fd_set rd;
 	FD_ZERO(&rd);
-	FD_SET(g_link.peer_fd, &rd);
+	FD_SET(p.fd, &rd);
 
 	timeval tv;
 	tv.tv_sec  = timeout_ms / 1000;
 	tv.tv_usec = (timeout_ms % 1000) * 1000;
 
-	const int rc = select(static_cast<int>(g_link.peer_fd) + 1, &rd, nullptr, nullptr, &tv);
+	const int rc = select(static_cast<int>(p.fd) + 1, &rd, nullptr, nullptr, &tv);
 	if (rc <= 0) return false;
 
-	PumpRx();
-	return g_link.rx_len - g_link.rx_out >= kPacketBytes;
+	PumpRx(ch);
+	return p.rx_len - p.rx_out >= kPacketBytes;
 }
 
 } // namespace SGB

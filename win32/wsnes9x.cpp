@@ -2792,8 +2792,22 @@ LRESULT CALLBACK WinProc(
 			S9xMessage(S9X_INFO, 0, INFO_SAVE_SPC);
 			break;
 		case ID_FILE_SAVE_SRAM_DATA: {
+			// Battery-less carts have nothing to write; without this check
+			// SaveSRAM's FALSE return would read as a write error.
+			const bool no_sram = S9xSGBIsActive()
+				? !S9xSGBHasBattery()
+				: (!Memory.SRAMSize && !(Multi.cartType && Multi.sramSizeB)) ||
+				  (Settings.SuperFX && (Memory.ROMType < 0x15 || Memory.ROMType == 0x17)) ||
+				  (Settings.SA1 && Memory.ROMType == 0x34);
+			if (no_sram)
+			{
+				S9xMessage(S9X_INFO, 0, SRM_NO_BATTERY);
+				break;
+			}
 			bool8 success = Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
-			if(!success)
+			if (success)
+				S9xMessage(S9X_INFO, 0, SRM_SAVED);
+			else
 				S9xMessage(S9X_ERROR, S9X_FREEZE_FILE_INFO, SRM_SAVE_FAILED);
 		}	break;
 		case ID_FILE_LOAD_SRAM_DATA: {

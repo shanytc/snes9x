@@ -452,6 +452,8 @@ Nintendo is a trademark.")
 
 #define ERR_ROM_NOT_FOUND "ROM image \"%s\" was not found or could not be opened."
 #define SRM_SAVE_FAILED "Failed to save SRM file."
+#define SRM_SAVED "S-RAM saved."
+#define SRM_NO_BATTERY "This game has no battery-backed S-RAM."
 
 #define INFO_SAVE_SPC "Saving SPC Data."
 

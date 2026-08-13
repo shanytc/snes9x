@@ -67,6 +67,13 @@ constexpr int32_t kPendingHoldActive = 70224;   // one GB frame, ~16.7 ms
 constexpr int32_t kPendingHoldIdle   = 4096;    // ~1 ms
 constexpr uint32_t kUnansweredIdle   = 4;
 
+// Floor between passive completions, ~1.015 ms: the fastest a DMG-07 ever
+// clocks bytes (0.887 ms gap + 0.128 ms shift). Games time their mailbox
+// reads against it — a queued burst delivered any faster overwrites SB
+// before the main loop consumed it, and the game's packet framing slips
+// until a reset. That is what garbled F-1 Race's racer-entry screen.
+constexpr int32_t kExtByteGap = 4257;
+
 // Ceiling on the master's stall waiting for a reply - bounded so a frozen
 // peer can't take this instance down with it.
 constexpr int kMasterWaitMs = 500;
@@ -368,10 +375,24 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 	mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
 
-	s.passive = false;
+	s.passive       = false;
+	s.ext_gap_timer = kExtByteGap;
 	++g_direct.transfers;
 	g_direct.driving    = 2;
 	g_direct.unanswered = 0;
+}
+
+// Deliver the next held clock once one is due: the game has re-armed and
+// the wire could really have clocked another byte by now.
+void TrySettlePending(Serial &s, Memory &mem)
+{
+	if (!s.passive || !s.pending_len || s.ext_gap_timer > 0) return;
+
+	uint8_t  data;
+	uint32_t i1;
+	PendingPop(s, data, i1);
+	SendPacket(0, kCmdSync2, mem.serial_data, 0x80, 0, i1);
+	CompletePassive(s, mem, data);
 }
 
 void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
@@ -410,7 +431,7 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 				SendPacket(ch, kCmdSync3, 1, 0, 0, p.i1);
 				return;
 			}
-			if (s.passive)
+			if (s.passive && s.pending_len == 0 && s.ext_gap_timer <= 0)
 			{
 				// Armed and waiting to be clocked — hand back our byte. The
 				// echoed i1 tells a DMG-07 host which clock this answers.
@@ -425,8 +446,8 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			}
 			else
 			{
-				// Peer got here first; hold it, in order, until our game
-				// arms. Bursts of clocks land here whenever the other
+				// Hold it, in order, until our game arms and the pacing gap
+				// has passed. Bursts of clocks land here whenever the other
 				// emulator's frame ran ahead of ours.
 				PendingPush(ch, s, p.b2, p.i1);
 			}
@@ -876,6 +897,7 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	s.peer_valid    = false;
 	s.peer_supplied = false;
 	s.peer_data     = 0xFF;
+	s.ext_gap_timer = 0;
 	PendingClear(s);
 
 	if (g_hub.hosting)
@@ -1000,16 +1022,9 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 	s.active  = false;
 	s.passive = true;
 
-	if (s.pending_len)
-	{
-		// The peer's next byte was already here — settle it immediately;
-		// the game drains a backlog one re-arm at a time.
-		uint8_t  data;
-		uint32_t i1;
-		PendingPop(s, data, i1);
-		SendPacket(0, kCmdSync2, mem.serial_data, 0x80, 0, i1);
-		CompletePassive(s, mem, data);
-	}
+	// A held byte settles now if the wire could have clocked it already;
+	// a backlog drains one re-arm at a time, at hardware pace.
+	TrySettlePending(s, mem);
 }
 
 void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
@@ -1071,7 +1086,13 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		}
 	}
 
-	if (s.pending_len)
+	if (s.ext_gap_timer > 0) s.ext_gap_timer -= tcycles;
+	TrySettlePending(s, mem);
+
+	// Aging only while the game is not armed: an armed game is merely
+	// waiting out the pacing gap and will take the byte in under a
+	// millisecond.
+	if (s.pending_len && !s.passive)
 	{
 		s.pending_age += tcycles;
 		const int32_t hold = (g_direct.unanswered >= kUnansweredIdle)

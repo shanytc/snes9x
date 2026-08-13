@@ -284,22 +284,26 @@ void S9xSGBRunFrame(void);
 void S9xSGBRunCycles(int tcycles);
 
 // ---- Link cable ------------------------------------------------------------
-// Links two emulator instances on this PC over loopback TCP (BGB 1.4
-// protocol). The role is sensed rather than chosen; see gb_serial.h.
+// Links emulator instances on this PC over loopback TCP (BGB 1.4
+// protocol). Two players is the direct cable, with the role sensed
+// rather than chosen; three or four makes this instance host an emulated
+// DMG-07 Four Player Adapter that the others dial into as ordinary
+// clients. See gb_serial.h.
 #define S9X_GBLINK_NONE   0
 #define S9X_GBLINK_SERVER 1
 #define S9X_GBLINK_CLIENT 2
 
-// Bring the cable up on Settings.GBLinkPort, returning the role taken.
-// S9X_GBLINK_NONE means the socket could not be opened; `err` says why.
-int  S9xSGBLinkAutoStart(char *err, size_t err_cap);
+// Bring the cable up on Settings.GBLinkPort for a session of `players`
+// (2..4), returning the role taken. S9X_GBLINK_NONE means the socket
+// could not be opened; `err` says why.
+int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players);
 
 // Role of the live session, or S9X_GBLINK_NONE when unplugged.
 int  S9xSGBLinkGetRole(void);
 
-// Game Boys on the cable including this one (0/1/2). Governs what a
-// disconnect means: at two players one leaving ends it for both. See
-// SerialLinkPlayerCount in gb_serial.h for why >2 is not reachable yet.
+// Game Boys on the session including this one (0..4). Governs what a
+// disconnect means: on a direct cable one side leaving ends it for both,
+// on a hub only that seat empties.
 int  S9xSGBLinkPlayerCount(void);
 
 void S9xSGBLinkDisconnect(void);

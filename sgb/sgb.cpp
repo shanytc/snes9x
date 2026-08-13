@@ -2508,11 +2508,11 @@ void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
 
 // ---- Link cable session (see gb_serial.h) ----------------------------------
-int S9xSGBLinkAutoStart(char *err, size_t err_cap)
+int S9xSGBLinkAutoStart(char *err, size_t err_cap, int players)
 {
 	uint16_t port = Settings.GBLinkPort;
 	if (port == 0) port = 8765;
-	return static_cast<int>(SGB::SerialLinkAutoStart(port, err, err_cap));
+	return static_cast<int>(SGB::SerialLinkAutoStart(port, players, err, err_cap));
 }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }

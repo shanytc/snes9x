@@ -1273,27 +1273,34 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 
 // ---- Link session control --------------------------------------------------
 
-LinkRole SerialLinkAutoStart(uint16_t port, int players, char *err, size_t err_cap)
+LinkRole SerialLinkAutoStart(uint16_t port, int players, bool force_hub,
+                             char *err, size_t err_cap)
 {
 	SerialLinkDisconnect();
 
-	if (players > 2)
+	if (players > 2 || force_hub)
 	{
 		// The hub must own the port: the adapter lives here, and the
 		// joining instances are launched to dial in. Nothing to take over
 		// from — a survivor of an old session frees the port on unlink.
-		const int seats = (players > 4 ? 4 : players) - 1;
-		if (!LinkStartServer(port, seats, err, err_cap))
+		const int clamped = players > 4 ? 4 : (players < 2 ? 2 : players);
+		const int seats   = clamped - 1;
+		if (LinkStartServer(port, seats, err, err_cap))
+		{
+			g_hub          = Dmg07();
+			g_hub.hosting  = true;
+			g_hub.target   = static_cast<uint8_t>(seats + 1);
+			g_hub_reported = -1;
+			g_role         = LinkRole::Server;
+			return g_role;
+		}
+		if (players > 2)
 		{
 			g_role = LinkRole::None;
 			return g_role;
 		}
-		g_hub          = Dmg07();
-		g_hub.hosting  = true;
-		g_hub.target   = static_cast<uint8_t>(seats + 1);
-		g_hub_reported = -1;
-		g_role         = LinkRole::Server;
-		return g_role;
+		// A 2-player adapter session losing the bind can mean the partner
+		// window already hosts it — fall through and dial in.
 	}
 
 	// Listener first: winning the bind means we are the first instance up,
@@ -1384,7 +1391,8 @@ int SerialLinkPlayerCount()
 	return SerialLinkIsConnected() ? 2 : 1;
 }
 
-void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count)
+void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
+                       bool force_hub)
 {
 	// Split screen and the socket link are mutually exclusive sessions.
 	SerialLinkDisconnect();
@@ -1400,9 +1408,10 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count)
 		g_splitlink.m[i] = mems[i];
 	}
 
-	if (count > 2)
+	if (count > 2 || force_hub)
 	{
-		// Three or four seats ride the DMG-07, clocked by seat 0's core.
+		// Three or four seats — or a forced 2-seat adapter session — ride
+		// the DMG-07, clocked by seat 0's core.
 		Dmg07 fresh;
 		fresh.hosting = true;
 		fresh.local   = true;

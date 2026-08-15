@@ -9,7 +9,7 @@
 
 #ifndef VERSION
 #define VERSION	"1.63"
-#define PATCH_VERSION "29"
+#define PATCH_VERSION "30"
 #define VERSION_DISPLAY VERSION "." PATCH_VERSION
 #endif
 

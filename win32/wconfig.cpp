@@ -329,6 +329,10 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			if (index > 4) index = 4;
 			Settings.GBLinkPlayerIndex = (uint8)index;
 
+			if (launcher < 1) launcher = 1;
+			if (launcher > 4) launcher = 4;
+			GBLinkLauncherIndex = (int)launcher;
+
 			if (players < 2) players = 2;
 			if (players > 4) players = 4;
 			GBLinkSessionPlayers = (int)players;

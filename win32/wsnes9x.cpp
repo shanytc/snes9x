@@ -139,6 +139,7 @@ int  WinGetGBLinkPlayers();
 static int  WinGetGBLinkLivePlayers();
 static void GBLinkPumpSpawns();
 static void GBLinkAutoCloseAbandonedHub();
+static void GBLinkPlacePeerWindow();
 static void WinStartGBSplit(int players);
 static void WinStopGBSplit();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -4887,6 +4888,7 @@ int WINAPI WinMain(
     S9xSetRecentGames ();
 
 	RestoreMainWinPos();
+	GBLinkPlacePeerWindow();
 
 	void InitSnes9x (void);
 	InitSnes9x ();
@@ -10237,6 +10239,10 @@ static int GBLinkMode = GBLINK_OFF;
 // via the launch switch. Read back by the menu while a session exists.
 int GBLinkSessionPlayers = 2;
 
+// Player number of the instance that spawned this one; anchors the
+// split-screen-style window placement of a spawned seat.
+int GBLinkLauncherIndex = 1;
+
 // Link Same Game runs its 2-4 players as in-process split screen rather
 // than spawned instances. A preference, not a session: it decides what
 // the next click of a players item does.
@@ -10305,6 +10311,42 @@ static bool GBLinkPostToPid (DWORD pid, UINT msg, WPARAM wParam, LPARAM lParam)
 
 	PostMessage (ctx.hwnd, msg, wParam, lParam);
 	return true;
+}
+
+// A spawned seat parks itself where split screen would draw it: the
+// launcher's window is the anchor tile and the player number picks the
+// quadrant, so the session comes up as the same 1x2 / 2x2 grid.
+static void GBLinkPlacePeerWindow ()
+{
+	if (!Settings.GBLinkPeerInstance || GUI.FullScreen) return;
+
+	GBLinkFindWndCtx ctx = { GBLinkPartnerPid, NULL };
+	EnumWindows (GBLinkFindWndByPid, (LPARAM)&ctx);
+	if (!ctx.hwnd) return;
+
+	RECT host;
+	if (!GetWindowRect (ctx.hwnd, &host)) return;
+	const int w = (int)(host.right - host.left);
+	const int h = (int)(host.bottom - host.top);
+	if (w <= 0 || h <= 0) return;
+
+	const int me     = (int)Settings.GBLinkPlayerIndex - 1;
+	const int anchor = GBLinkLauncherIndex - 1;
+	int x = host.left + ((me & 1) - (anchor & 1)) * w;
+	int y = host.top  + ((me >> 1) - (anchor >> 1)) * h;
+
+	// Pull a tile that ran off the desktop back to the nearest edge.
+	const int vx = GetSystemMetrics (SM_XVIRTUALSCREEN);
+	const int vy = GetSystemMetrics (SM_YVIRTUALSCREEN);
+	const int vr = vx + GetSystemMetrics (SM_CXVIRTUALSCREEN);
+	const int vb = vy + GetSystemMetrics (SM_CYVIRTUALSCREEN);
+	if (x + w > vr) x = vr - w;
+	if (y + h > vb) y = vb - h;
+	if (x < vx) x = vx;
+	if (y < vy) y = vy;
+
+	if (IsZoomed (GUI.hWnd)) ShowWindow (GUI.hWnd, SW_RESTORE);
+	SetWindowPos (GUI.hWnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 // Everyone on the CURRENT session: the hub host fans out to its seats,

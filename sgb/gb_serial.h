@@ -27,6 +27,12 @@ struct Serial
 
 	bool     passive    = false;   // external clock: armed, waiting to be clocked
 
+	// Split screen: cycles a finished master countdown waits for the
+	// lagging peer core to arm before ruling the wire idle. The cores
+	// interleave in scanline slices, so "not armed right now" can mean
+	// "arms a few hundred cycles into its near future".
+	int32_t  split_grace = 0;
+
 	bool     peer_valid = false;   // peer answered our active transfer
 	uint8_t  peer_data  = 0xFF;
 	// True only when that answer carried a byte. An ack meaning "nothing

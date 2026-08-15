@@ -2577,7 +2577,12 @@ int S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapt
 // them. Exact GB header titles, verified against real ROMs.
 bool S9xSGBCartNeedsDmg07(void)
 {
-	static const char *const kDmg07Only[] = { "F1RACE" };
+	static const char *const kDmg07Only[] = {
+		"F1RACE",             // F-1 Race (World)
+		" - TRUMP BOY2 - ",   // Trump Boy II (Japan) - 4-port screen, no cable mode
+		"JANTAKUBOY",         // Jantaku Boy (Japan) - slave-only serial code
+		"W CIRCUIT SERIES",   // World Circuit Series (USA) - slave-only serial code
+	};
 	SGB::Emulator &prim = SGB::Instance();
 	if (!prim.HasROM()) return false;
 	const char *title = prim.DebugImpl()->cart.header.title;

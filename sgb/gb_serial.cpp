@@ -768,9 +768,10 @@ void HubInterpretLocal()
 
 			case 1:
 			case 2:
-				// The $88 acks are what "connected" means; while the $AA
-				// train replaces them, player 1 stays counted (GBE+ rule).
-				if ((armed && b == 0x88) || g_hub.begin_sync)
+				// The $88 acks are what "connected" means; while $AA rides
+				// these wires, player 1 stays counted (GBE+ rule) — even
+				// before the train is long enough to flip the phase.
+				if ((armed && (b == 0x88 || b == 0xAA)) || g_hub.begin_sync)
 					g_hub.status = static_cast<uint8_t>(g_hub.status | 0x10);
 				else
 					g_hub.status = static_cast<uint8_t>(g_hub.status & ~0x10);

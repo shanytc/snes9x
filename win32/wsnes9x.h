@@ -66,6 +66,10 @@ extern DWORD GBLinkPartnerPid;
 // carried by the launch switch.
 extern int GBLinkSessionPlayers;
 
+// Player number of the launching instance, from the launch switch; the
+// spawned window tiles itself next to it split-screen style.
+extern int GBLinkLauncherIndex;
+
 // Link Same Game runs its players as in-process split screen instead of
 // spawned instances. Persisted; consulted at session start.
 extern bool GBLinkSplitScreen;

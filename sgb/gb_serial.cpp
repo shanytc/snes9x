@@ -249,6 +249,14 @@ struct Dmg07
 	uint8_t prev_wire  = 0;
 	uint8_t prev_buf   = 0;
 	uint8_t prev_local = 0xFF;
+	// Whether prev_local came from an armed transfer: protocol-steering
+	// values must never latch from an idle wire's $FF (GBE+ semantics).
+	bool    prev_local_armed = false;
+	// Consecutive armed $AA replies: the Pan Docs chart shows player 1
+	// answering $AA on every ping byte to start transmission. A single
+	// stray $AA (Trump Boy II beacons one per frame from its title
+	// screen) must not flip the adapter.
+	uint8_t aa_run = 0;
 
 	Dmg07() { std::memset(buffer, 0, sizeof buffer); }
 };
@@ -728,37 +736,50 @@ int HubPacketLen(uint8_t phase)
 // arrive through HubApplyRemoteReply whenever their answers land.
 void HubInterpretLocal()
 {
-	const uint8_t b = g_hub.prev_local;
+	const uint8_t b     = g_hub.prev_local;
+	const bool    armed = g_hub.prev_local_armed;
 
 	if (g_hub.prev_phase == kDmg07Ping)
 	{
-		// Player 1 announcing the switch to transmission mode.
-		if (b == 0xAA)
+		// Player 1 announcing the switch to transmission mode: the Pan
+		// Docs chart shows $AA on every ping byte, so a real request is a
+		// train, never a lone reply.
+		if (armed && b == 0xAA)
 		{
-			if (!g_hub.begin_sync) Trace("p1  begin-sync ($AA)");
-			g_hub.begin_sync = true;
+			if (g_hub.aa_run < 0xFF) ++g_hub.aa_run;
+			if (g_hub.aa_run >= 3 && !g_hub.begin_sync)
+			{
+				Trace("p1  begin-sync ($AA train)");
+				g_hub.begin_sync = true;
+			}
+		}
+		else
+		{
+			g_hub.aa_run = 0;
 		}
 
 		switch (g_hub.prev_wire)
 		{
 			case 0:
 				// Reply to the previous packet's STAT3: player 1's SIZE.
-				if (!g_hub.begin_sync) g_hub.size_reply = b;
+				// Only a real reply latches; an idle wire keeps the last.
+				if (armed && !g_hub.begin_sync) g_hub.size_reply = b;
 				break;
 
 			case 1:
 			case 2:
 				// The $88 acks are what "connected" means; while the $AA
 				// train replaces them, player 1 stays counted (GBE+ rule).
-				if (b == 0x88 || g_hub.begin_sync)
+				if ((armed && b == 0x88) || g_hub.begin_sync)
 					g_hub.status = static_cast<uint8_t>(g_hub.status | 0x10);
 				else
 					g_hub.status = static_cast<uint8_t>(g_hub.status & ~0x10);
 				break;
 
 			case 3:
-				// Reply to STAT2: player 1's RATE.
-				if (!g_hub.begin_sync) g_hub.rate = b;
+				// Reply to STAT2: player 1's RATE. Armed replies only, or
+				// a menu-idled game latches $FF and crawls the wire.
+				if (armed && !g_hub.begin_sync) g_hub.rate = b;
 				break;
 		}
 		return;
@@ -775,14 +796,16 @@ void HubInterpretLocal()
 		if (pkt_pos > 0 && pkt_pos <= size)
 			g_hub.buffer[(g_hub.prev_buf - 1 + size * 4) % (size * 8)] = b;
 
-		// Player 1 pumping $FF asks for the ping phase back.
-		if (b == 0xFF)
+		// Player 1 pumping $FF asks for the ping phase back. Only armed
+		// replies count: a game merely slow to re-arm reads as idle wire,
+		// and that must not tear the session down.
+		if (armed && b == 0xFF)
 		{
 			if (g_hub.ff_run < 0xFF) ++g_hub.ff_run;
 			if (g_hub.ff_run == 3) Trace("p1  restart requested ($FF x3)");
 			if (g_hub.ff_run >= 3) g_hub.restart_pending = true;
 		}
-		else
+		else if (armed)
 		{
 			g_hub.ff_run = 0;
 		}
@@ -835,6 +858,7 @@ void HubPacketBoundary()
 			{
 				g_hub.phase      = kDmg07Sync;
 				g_hub.begin_sync = false;
+				g_hub.aa_run     = 0;
 			}
 			break;
 
@@ -866,6 +890,7 @@ void HubPacketBoundary()
 			g_hub.phase           = kDmg07Ping;
 			g_hub.status          = 0;
 			g_hub.ff_run          = 0;
+			g_hub.aa_run          = 0;
 			g_hub.restart_pending = false;
 			break;
 	}
@@ -984,10 +1009,11 @@ void HubSendByte(Serial &s, Memory &mem)
 		}
 	}
 
-	g_hub.prev_phase = g_hub.phase;
-	g_hub.prev_wire  = g_hub.wire;
-	g_hub.prev_buf   = g_hub.buf_pos;
-	g_hub.prev_valid = true;
+	g_hub.prev_phase       = g_hub.phase;
+	g_hub.prev_wire        = g_hub.wire;
+	g_hub.prev_buf         = g_hub.buf_pos;
+	g_hub.prev_local_armed = p1_armed;
+	g_hub.prev_valid       = true;
 }
 
 // Step the wire position and schedule the next byte event.

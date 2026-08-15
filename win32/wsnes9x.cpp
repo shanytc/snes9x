@@ -219,6 +219,19 @@ static bool GBLinkStateRelaying = false;
 // Who last paused the session over the link, so a watchdog timer can
 // lift the pause if that process dies without sending the unpause.
 static DWORD GBLinkPauserPid = 0;
+
+// A spawned seat comes up muted — only the master should sound — but
+// the shared config file keeps the user's own Mute. Cleared the moment
+// the user flips Mute themselves: their choice becomes the real one.
+static bool GBLinkMuteForced = false;
+static bool GBLinkUserMute   = false;
+
+bool GBLinkGetUserMute (bool *mute)
+{
+	if (!GBLinkMuteForced) return false;
+	*mute = GBLinkUserMute;
+	return true;
+}
 typedef struct sExtList
 {
 	TCHAR* extension;
@@ -5062,6 +5075,17 @@ int WINAPI WinMain(
 	ConfigFile::SetTimeSort(false);
 
     const TCHAR *rom_filename = WinParseCommandLineAndLoadConfigFile (GetCommandLine());
+
+	// A spawned seat plays silent: several instances of one soundtrack is
+	// noise, so only the master sounds. The stash keeps the user's Mute
+	// out of the shared config file.
+	if (Settings.GBLinkPeerInstance && !GUI.Mute)
+	{
+		GBLinkUserMute   = GUI.Mute;
+		GBLinkMuteForced = true;
+		GUI.Mute         = true;
+	}
+
     WinSaveConfigFile ();
 	WinLockConfigFile ();
 
@@ -7638,6 +7662,8 @@ static void SoundConfUpdateModeState(HWND hDlg, bool force)
 // has to track changes made behind it or OK would push a stale value back.
 static void S9xSetMuted(bool mute)
 {
+	// The user's own flip outranks the spawned seat's forced default.
+	GBLinkMuteForced = false;
 	GUI.Mute = mute;
 	S9xSetSoundMute(GUI.Mute);
 	if (s_hSoundOptsDlg)
@@ -7997,6 +8023,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 					Settings.DynamicRateControl=IsDlgButtonChecked(hDlg, IDC_DYNRATECONTROL);
 					Settings.SoundSync=IsDlgButtonChecked(hDlg, IDC_SYNC_TO_SOUND_CPU);
 					Settings.GBSuppressNRxGlitches=IsDlgButtonChecked(hDlg, IDC_SUPPRESS_NRX_GLITCHES);
+					GBLinkMuteForced = false;   // dialog apply is the user's choice too
 					GUI.Mute=IsDlgButtonChecked(hDlg, IDC_MUTE);
 					GUI.FAMute=IsDlgButtonChecked(hDlg, IDC_FAMT)!=0;
 

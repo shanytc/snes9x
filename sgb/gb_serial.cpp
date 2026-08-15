@@ -176,6 +176,7 @@ enum : uint8_t
 struct Dmg07
 {
 	bool    hosting = false;
+	bool    local   = false;  // split screen: every seat is an in-process core
 	uint8_t target  = 2;      // players on the session, this instance included
 
 	uint8_t phase      = kDmg07Ping;
@@ -208,6 +209,24 @@ struct Dmg07
 Dmg07 g_hub;
 
 int g_hub_reported = -1;   // instances last announced on the OSD
+
+// Split screen: every core on the session lives in this process, in
+// player order. Seat 0 is the primary core; the others are peeked and
+// completed directly, so nothing here ever waits or buffers.
+struct SplitLink
+{
+	int     count = 0;
+	Serial *s[4]  = {nullptr, nullptr, nullptr, nullptr};
+	Memory *m[4]  = {nullptr, nullptr, nullptr, nullptr};
+
+	// Wire bytes captured from seats 2..4 at the previous adapter event,
+	// interpreted one event later — the same hardware semantics as the
+	// hub's player 1.
+	uint8_t prev_seat[3]       = {0xFF, 0xFF, 0xFF};
+	bool    prev_seat_armed[3] = {false, false, false};
+};
+
+SplitLink g_splitlink;
 
 inline int32_t BitPeriod(const Serial &s, uint8_t sc)
 {
@@ -393,6 +412,28 @@ void TrySettlePending(Serial &s, Memory &mem)
 	PendingPop(s, data, i1);
 	SendPacket(0, kCmdSync2, mem.serial_data, 0x80, 0, i1);
 	CompletePassive(s, mem, data);
+}
+
+// The countdown of an in-process master ran out: read the other core's
+// live state, completing its slave side on the spot. An unarmed peer
+// leaves the wire idle, exactly like the socket cable's empty ack.
+void SplitResolveMaster(Serial &s, Memory &mem)
+{
+	Serial *ps = (&s == g_splitlink.s[0]) ? g_splitlink.s[1] : g_splitlink.s[0];
+	Memory *pm = (&s == g_splitlink.s[0]) ? g_splitlink.m[1] : g_splitlink.m[0];
+
+	if (ps && ps->passive)
+	{
+		const uint8_t theirs = pm->serial_data;
+		CompletePassive(*ps, *pm, mem.serial_data);
+		s.peer_data     = theirs;
+		s.peer_valid    = true;
+		s.peer_supplied = true;
+		return;
+	}
+	s.peer_data     = 0xFF;
+	s.peer_valid    = true;
+	s.peer_supplied = false;
 }
 
 void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
@@ -648,6 +689,39 @@ void HubInterpretLocal()
 	}
 }
 
+// Split-screen seats answer with real wire semantics too: the byte
+// captured at event N answers byte N-1. Same rules as the socket path's
+// HubApplyRemoteReply, minus the matching — nothing here can arrive late.
+void HubInterpretLocalSeats()
+{
+	for (int k = 1; k < g_splitlink.count; ++k)
+	{
+		const uint8_t b     = g_splitlink.prev_seat[k - 1];
+		const bool    armed = g_splitlink.prev_seat_armed[k - 1];
+
+		if (g_hub.prev_phase == kDmg07Ping &&
+		    (g_hub.prev_wire == 1 || g_hub.prev_wire == 2))
+		{
+			const uint8_t bit = static_cast<uint8_t>(1 << (4 + k));
+			if (armed && b == 0x88)
+				g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
+			else
+				g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);
+		}
+
+		if (g_hub.prev_phase == kDmg07Net)
+		{
+			const int size    = g_hub.size;
+			const int pkt_pos = g_hub.prev_buf % (size * 4);
+			if (pkt_pos > 0 && pkt_pos <= size)
+			{
+				const int base = (g_hub.prev_buf - 1 + size * 4) % (size * 8);
+				g_hub.buffer[base + k * size] = armed ? b : 0x00;
+			}
+		}
+	}
+}
+
 // Phase changes land on packet edges, once every reply of the packet just
 // finished has been interpreted.
 void HubPacketBoundary()
@@ -743,35 +817,61 @@ void HubSendByte(Serial &s, Memory &mem)
 		s.passive          = false;
 	}
 
-	// What the answer to this byte will mean, frozen before anything can
-	// change phase under it.
-	int8_t presence_wire = -1;
-	if (g_hub.phase == kDmg07Ping && (g_hub.wire == 1 || g_hub.wire == 2))
-		presence_wire = static_cast<int8_t>(g_hub.wire);
-
-	int store_base = -1;
-	if (g_hub.phase == kDmg07Net)
+	if (g_hub.local)
 	{
-		const int size    = g_hub.size;
-		const int pkt_pos = g_hub.buf_pos % (size * 4);
-		if (pkt_pos > 0 && pkt_pos <= size)
-			store_base = (g_hub.buf_pos - 1 + size * 4) % (size * 8);
+		// Split screen: every seat is in-process. Complete each armed
+		// slave on the spot and keep its outgoing byte for the next
+		// event's interpretation — the same wire semantics as player 1.
+		for (int k = 1; k < g_splitlink.count; ++k)
+		{
+			Serial *ss = g_splitlink.s[k];
+			Memory *sm = g_splitlink.m[k];
+
+			g_splitlink.prev_seat[k - 1]       = 0xFF;
+			g_splitlink.prev_seat_armed[k - 1] = false;
+			if (ss && ss->passive)
+			{
+				g_splitlink.prev_seat[k - 1]       = sm->serial_data;
+				g_splitlink.prev_seat_armed[k - 1] = true;
+				sm->serial_data    = out[k];
+				sm->serial_control = static_cast<uint8_t>(sm->serial_control & 0x7F);
+				sm->if_            = static_cast<uint8_t>(sm->if_ | IRQ_SERIAL);
+				ss->passive        = false;
+			}
+		}
 	}
-
-	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+	else
 	{
-		LinkSession &ses = g_sessions[ch];
-		if (!LinkChannelConnected(ch) || !ses.handshaked) continue;
+		// What the answer to this byte will mean, frozen before anything
+		// can change phase under it.
+		int8_t presence_wire = -1;
+		if (g_hub.phase == kDmg07Ping && (g_hub.wire == 1 || g_hub.wire == 2))
+			presence_wire = static_cast<int8_t>(g_hub.wire);
 
-		HubReplyTag tag;
-		tag.seq           = ses.seq_next++;
-		tag.presence_wire = presence_wire;
-		tag.store_at      = store_base >= 0
-		                  ? static_cast<int16_t>(store_base + (ch + 1) * g_hub.size)
-		                  : static_cast<int16_t>(-1);
-		HubFifoPush(ses, tag);
+		int store_base = -1;
+		if (g_hub.phase == kDmg07Net)
+		{
+			const int size    = g_hub.size;
+			const int pkt_pos = g_hub.buf_pos % (size * 4);
+			if (pkt_pos > 0 && pkt_pos <= size)
+				store_base = (g_hub.buf_pos - 1 + size * 4) % (size * 8);
+		}
 
-		SendPacket(ch, kCmdSync1, out[ch + 1], 0x81, 0, tag.seq);
+		for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		{
+			LinkSession &ses = g_sessions[ch];
+			if (!LinkChannelConnected(ch) || !ses.handshaked) continue;
+
+			HubReplyTag tag;
+			tag.seq           = ses.seq_next++;
+			tag.presence_wire = presence_wire;
+			tag.store_at      = store_base >= 0
+			                  ? static_cast<int16_t>(store_base + (ch + 1) * g_hub.size)
+			                  : static_cast<int16_t>(-1);
+			HubFifoPush(ses, tag);
+
+			SendPacket(ch, kCmdSync1, out[ch + 1], 0x81, 0, tag.seq);
+		}
 	}
 
 	g_hub.prev_phase = g_hub.phase;
@@ -821,11 +921,16 @@ void HubAdvance()
 void HubRunByte(Serial &s, Memory &mem)
 {
 	// Never blocks: remote answers land through HubApplyRemoteReply as
-	// they arrive; one extra drain here just shortens their latency.
-	ServiceLink(s, mem);
+	// they arrive; one extra drain here just shortens their latency. A
+	// split-screen hub has no sockets to service at all.
+	if (!g_hub.local) ServiceLink(s, mem);
 
-	if (g_hub.prev_valid) HubInterpretLocal();
-	if (g_hub.wire == 0)  HubPacketBoundary();
+	if (g_hub.prev_valid)
+	{
+		HubInterpretLocal();
+		if (g_hub.local) HubInterpretLocalSeats();
+	}
+	if (g_hub.wire == 0) HubPacketBoundary();
 
 	HubSendByte(s, mem);
 	HubAdvance();
@@ -861,6 +966,7 @@ void SerialReset(Serial &s, bool cgb)
 		// belong to the old run; their late answers fall away.
 		Dmg07 fresh_hub;
 		fresh_hub.hosting = true;
+		fresh_hub.local   = g_hub.local;
 		fresh_hub.target  = g_hub.target;
 		g_hub = fresh_hub;
 
@@ -868,6 +974,11 @@ void SerialReset(Serial &s, bool cgb)
 		{
 			g_sessions[ch].fifo_head = 0;
 			g_sessions[ch].fifo_len  = 0;
+		}
+		for (int k = 0; k < 3; ++k)
+		{
+			g_splitlink.prev_seat[k]       = 0xFF;
+			g_splitlink.prev_seat_armed[k] = false;
 		}
 	}
 }
@@ -906,6 +1017,7 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 		// restart from ping and let the games renegotiate.
 		Dmg07 fresh_hub;
 		fresh_hub.hosting = true;
+		fresh_hub.local   = g_hub.local;
 		fresh_hub.target  = g_hub.target;
 		g_hub = fresh_hub;
 
@@ -945,12 +1057,13 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 {
 	mem.serial_control = value;
 
-	if (g_hub.hosting && LinkGetState() != LinkState::Off)
+	if (g_hub.hosting && (g_hub.local || LinkGetState() != LinkState::Off))
 	{
 		// Under the adapter every Game Boy is an external-clock slave, our
 		// own included — the adapter pings it even with no peers seated
 		// yet. Driving the internal clock yields garbage on hardware; the
-		// unlinked stub models that closely enough.
+		// unlinked stub models that closely enough. Split-screen seats all
+		// take this same path: the adapter completes them directly.
 		if (!(value & 0x80))
 		{
 			s.active = s.passive = false;
@@ -963,6 +1076,34 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			mem.serial_data    = 0xFF;
 			mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
 			mem.serial_control = static_cast<uint8_t>(value & 0x7F);
+			return;
+		}
+		s.active  = false;
+		s.passive = true;
+		return;
+	}
+
+	if (SerialSplitActive())
+	{
+		// In-process direct cable: the same arming as the socket cable,
+		// minus the packets — the exchange resolves when the countdown
+		// completes, against the other core's live state.
+		if (!(value & 0x80))
+		{
+			s.active = s.passive = false;
+			return;
+		}
+		if (value & 0x01)
+		{
+			if (g_serial_cb) g_serial_cb(mem.serial_data);
+			s.passive       = false;
+			s.active        = true;
+			s.bits_left     = 8;
+			s.bit_period    = BitPeriod(s, value);
+			s.bit_timer     = s.bit_period;
+			s.peer_valid    = false;
+			s.peer_supplied = false;
+			s.peer_data     = 0xFF;
 			return;
 		}
 		s.active  = false;
@@ -1048,24 +1189,30 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		s.real_cycles += tcycles;
 	}
 
-	if (!SerialLinkIsEnabled()) return;
+	if (!SerialLinkIsEnabled() && !SerialSplitActive()) return;
 
-	s.poll_timer -= tcycles;
-	if (s.poll_timer <= 0)
+	if (!SerialSplitActive())
 	{
-		s.poll_timer = kPollInterval;
-		ServiceLink(s, mem);
+		s.poll_timer -= tcycles;
+		if (s.poll_timer <= 0)
+		{
+			s.poll_timer = kPollInterval;
+			ServiceLink(s, mem);
+		}
 	}
 
 	if (g_hub.hosting)
 	{
 		// The adapter free-runs from power-on, peers or none: a lone
 		// player 1 still sees itself connected, exactly like hardware.
-		HubStep(s, mem, real);
+		// In split screen only seat 0's core clocks it; the other cores
+		// are pure slaves with nothing of their own to step.
+		if (!g_hub.local || &s == g_splitlink.s[0])
+			HubStep(s, mem, real);
 		return;
 	}
 
-	if (!LinkIsConnected()) return;
+	if (!LinkIsConnected() && !SerialSplitActive()) return;
 
 	if (s.active)
 	{
@@ -1079,12 +1226,23 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		{
 			if (!s.peer_valid)
 			{
-				ServiceLink(s, mem);
-				if (!s.peer_valid) WaitForPeer(s, mem);
+				if (SerialSplitActive())
+				{
+					SplitResolveMaster(s, mem);
+				}
+				else
+				{
+					ServiceLink(s, mem);
+					if (!s.peer_valid) WaitForPeer(s, mem);
+				}
 			}
 			CompleteActive(s, mem);
 		}
 	}
+
+	// Held clocks and timestamps are socket concepts; the in-process
+	// cable resolves against live state and has neither.
+	if (SerialSplitActive()) return;
 
 	if (s.ext_gap_timer > 0) s.ext_gap_timer -= tcycles;
 	TrySettlePending(s, mem);
@@ -1180,7 +1338,8 @@ void SerialLinkDisconnect()
 	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
 		g_sessions[ch] = LinkSession();
 	g_direct       = DirectState();
-	g_hub          = Dmg07();
+	// A split-screen hub has no sockets; unplugging those must not kill it.
+	if (!g_hub.local) g_hub = Dmg07();
 	g_hub_reported = -1;
 	g_role         = LinkRole::None;
 
@@ -1224,6 +1383,41 @@ int SerialLinkPlayerCount()
 	if (g_hub.hosting) return 1 + HandshakedCount();
 	return SerialLinkIsConnected() ? 2 : 1;
 }
+
+void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count)
+{
+	// Split screen and the socket link are mutually exclusive sessions.
+	SerialLinkDisconnect();
+	SerialSplitDetach();
+
+	if (count < 2 || !serials || !mems) return;
+	if (count > 4) count = 4;
+
+	g_splitlink.count = count;
+	for (int i = 0; i < count; ++i)
+	{
+		g_splitlink.s[i] = serials[i];
+		g_splitlink.m[i] = mems[i];
+	}
+
+	if (count > 2)
+	{
+		// Three or four seats ride the DMG-07, clocked by seat 0's core.
+		Dmg07 fresh;
+		fresh.hosting = true;
+		fresh.local   = true;
+		fresh.target  = static_cast<uint8_t>(count);
+		g_hub = fresh;
+	}
+}
+
+void SerialSplitDetach()
+{
+	if (g_hub.local) g_hub = Dmg07();
+	g_splitlink = SplitLink();
+}
+
+bool SerialSplitActive() { return g_splitlink.count > 0; }
 
 bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 {

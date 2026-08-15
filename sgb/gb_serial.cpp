@@ -27,10 +27,57 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdarg>
+#include <cstdlib>
+
+#ifdef _WIN32
+#include <process.h>
+#define SGB_LINK_PID _getpid()
+#else
+#include <unistd.h>
+#define SGB_LINK_PID getpid()
+#endif
 
 namespace SGB {
 
 namespace {
+
+// ---- Wire trace -------------------------------------------------------------
+// SGB_LINK_TRACE=1 in the environment dumps every serial and adapter
+// event to sgb_link_trace_<pid>.log in the working directory, one file
+// per instance. Spawned instances inherit the variable.
+FILE *g_trace         = nullptr;
+bool  g_trace_checked = false;
+
+bool TraceOn()
+{
+	if (!g_trace_checked)
+	{
+		g_trace_checked = true;
+		const char *v = std::getenv("SGB_LINK_TRACE");
+		if (v && *v && *v != '0')
+		{
+			char name[64];
+			std::snprintf(name, sizeof name, "sgb_link_trace_%lu.log",
+			              (unsigned long)SGB_LINK_PID);
+			// Unqualified: the win32 build remaps fopen to its wide-path
+			// wrapper via a forced include.
+			g_trace = fopen(name, "w");
+		}
+	}
+	return g_trace != nullptr;
+}
+
+void Trace(const char *fmt, ...)
+{
+	if (!TraceOn()) return;
+	va_list ap;
+	va_start(ap, fmt);
+	std::vfprintf(g_trace, fmt, ap);
+	va_end(ap);
+	std::fputc('\n', g_trace);
+	std::fflush(g_trace);
+}
 
 // BGB command bytes.
 constexpr uint8_t kCmdVersion        = 1;
@@ -277,6 +324,8 @@ void PendingAckDropOldest(int ch, Serial &s)
 	uint8_t  data;
 	uint32_t i1;
 	PendingPop(s, data, i1);
+	Trace("[%lld] drop held %02X seq=%u (never armed)",
+	      (long long)s.real_cycles, data, i1);
 	SendPacket(ch, kCmdSync3, 1, 0, 0, i1);
 }
 
@@ -337,9 +386,20 @@ void HubApplyRemoteReply(int ch, uint32_t seq, uint8_t data, bool supplied)
 {
 	LinkSession &ses = g_sessions[ch];
 
+	int skipped = 0;
 	while (ses.fifo_len && SeqLess(ses.fifo[ses.fifo_head].seq, seq))
+	{
 		HubFifoPop(ses);
-	if (!ses.fifo_len || ses.fifo[ses.fifo_head].seq != seq) return;
+		++skipped;
+	}
+	if (!ses.fifo_len || ses.fifo[ses.fifo_head].seq != seq)
+	{
+		Trace("rx  ch=%d seq=%u data=%02X sup=%d STALE (skipped=%d fifo=%d)",
+		      ch, seq, data, supplied ? 1 : 0, skipped, ses.fifo_len);
+		return;
+	}
+	Trace("rx  ch=%d seq=%u data=%02X sup=%d ok (skipped=%d)",
+	      ch, seq, data, supplied ? 1 : 0, skipped);
 
 	const HubReplyTag tag = HubFifoPop(ses);
 
@@ -410,6 +470,8 @@ void TrySettlePending(Serial &s, Memory &mem)
 	uint8_t  data;
 	uint32_t i1;
 	PendingPop(s, data, i1);
+	Trace("[%lld] settle held %02X seq=%u -> reply %02X (left=%u)",
+	      (long long)s.real_cycles, data, i1, mem.serial_data, s.pending_len);
 	SendPacket(0, kCmdSync2, mem.serial_data, 0x80, 0, i1);
 	CompletePassive(s, mem, data);
 }
@@ -452,6 +514,7 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 				return;
 			}
 			ses.handshaked = true;
+			Trace("ch=%d handshaked", ch);
 			SendStatus(ch);
 			return;
 
@@ -469,6 +532,8 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 				// A game clocking internally under the adapter gets garbage
 				// on hardware; an empty ack releases its transfer, which is
 				// the closest polite translation.
+				Trace("in  ch=%d sync1 %02X seq=%u -> ack (seat is clocking)",
+				      ch, p.b2, p.i1);
 				SendPacket(ch, kCmdSync3, 1, 0, 0, p.i1);
 				return;
 			}
@@ -476,6 +541,8 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			{
 				// Armed and waiting to be clocked — hand back our byte. The
 				// echoed i1 tells a DMG-07 host which clock this answers.
+				Trace("[%lld] in  sync1 %02X seq=%u -> reply %02X",
+				      (long long)s.real_cycles, p.b2, p.i1, mem.serial_data);
 				SendPacket(ch, kCmdSync2, mem.serial_data, 0x80, 0, p.i1);
 				CompletePassive(s, mem, p.b2);
 			}
@@ -483,6 +550,8 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			{
 				// Both ends clocking: nothing to give, so ack. Hardware
 				// produces garbage here too.
+				Trace("[%lld] in  sync1 %02X seq=%u -> ack (both clocking)",
+				      (long long)s.real_cycles, p.b2, p.i1);
 				SendPacket(ch, kCmdSync3, 1, 0, 0, p.i1);
 			}
 			else
@@ -490,6 +559,9 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 				// Hold it, in order, until our game arms and the pacing gap
 				// has passed. Bursts of clocks land here whenever the other
 				// emulator's frame ran ahead of ours.
+				Trace("[%lld] in  sync1 %02X seq=%u -> held (n=%u pas=%d gap=%d)",
+				      (long long)s.real_cycles, p.b2, p.i1,
+				      s.pending_len + 1, s.passive ? 1 : 0, s.ext_gap_timer);
 				PendingPush(ch, s, p.b2, p.i1);
 			}
 			return;
@@ -502,7 +574,12 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			}
 			// Only while we are actually clocking: a reply that arrives after
 			// we gave up would otherwise be shifted into the next transfer.
-			if (!s.active) return;
+			if (!s.active)
+			{
+				Trace("in  sync2 %02X seq=%u LATE (not clocking)", p.b2, p.i1);
+				return;
+			}
+			Trace("in  sync2 %02X seq=%u", p.b2, p.i1);
 			s.peer_data     = p.b2;
 			s.peer_valid    = true;
 			s.peer_supplied = true;
@@ -553,6 +630,8 @@ void ServiceLink(Serial &s, Memory &mem)
 		{
 			if (ses.handshake_sent || ses.handshaked)
 			{
+				Trace("ch=%d dropped (was %s)", ch,
+				      ses.handshaked ? "handshaked" : "connecting");
 				ses = LinkSession();
 				if (g_hub.hosting)
 				{
@@ -579,6 +658,7 @@ void ServiceLink(Serial &s, Memory &mem)
 		const int gen = LinkChannelGeneration(ch);
 		if (ses.gen != gen)
 		{
+			Trace("ch=%d new occupant (gen %d -> %d)", ch, ses.gen, gen);
 			ses     = LinkSession();
 			ses.gen = gen;
 		}
@@ -638,7 +718,11 @@ void HubInterpretLocal()
 	if (g_hub.prev_phase == kDmg07Ping)
 	{
 		// Player 1 announcing the switch to transmission mode.
-		if (b == 0xAA) g_hub.begin_sync = true;
+		if (b == 0xAA)
+		{
+			if (!g_hub.begin_sync) Trace("p1  begin-sync ($AA)");
+			g_hub.begin_sync = true;
+		}
 
 		switch (g_hub.prev_wire)
 		{
@@ -680,6 +764,7 @@ void HubInterpretLocal()
 		if (b == 0xFF)
 		{
 			if (g_hub.ff_run < 0xFF) ++g_hub.ff_run;
+			if (g_hub.ff_run == 3) Trace("p1  restart requested ($FF x3)");
 			if (g_hub.ff_run >= 3) g_hub.restart_pending = true;
 		}
 		else
@@ -808,6 +893,7 @@ void HubSendByte(Serial &s, Memory &mem)
 	// Player 1 is in-process: complete its armed transfer immediately. An
 	// unarmed Game Boy leaves the wire idle, which reads back as $FF.
 	g_hub.prev_local = 0xFF;
+	const bool p1_armed = s.passive;
 	if (s.passive)
 	{
 		g_hub.prev_local   = mem.serial_data;
@@ -816,6 +902,9 @@ void HubSendByte(Serial &s, Memory &mem)
 		mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
 		s.passive          = false;
 	}
+	Trace("[%lld] ev  ph=%u wire=%u buf=%u out=%02X st=%02X p1=%02X%s",
+	      (long long)s.real_cycles, g_hub.phase, g_hub.wire, g_hub.buf_pos,
+	      out[0], g_hub.status, g_hub.prev_local, p1_armed ? "" : " (idle)");
 
 	if (g_hub.local)
 	{
@@ -838,6 +927,9 @@ void HubSendByte(Serial &s, Memory &mem)
 				sm->if_            = static_cast<uint8_t>(sm->if_ | IRQ_SERIAL);
 				ss->passive        = false;
 			}
+			Trace("    seat%d in=%02X reply=%02X%s", k + 1, out[k],
+			      g_splitlink.prev_seat[k - 1],
+			      g_splitlink.prev_seat_armed[k - 1] ? "" : " (idle)");
 		}
 	}
 	else
@@ -871,6 +963,9 @@ void HubSendByte(Serial &s, Memory &mem)
 			HubFifoPush(ses, tag);
 
 			SendPacket(ch, kCmdSync1, out[ch + 1], 0x81, 0, tag.seq);
+			Trace("    tx  ch=%d seq=%u out=%02X store=%d pw=%d fifo=%u",
+			      ch, tag.seq, out[ch + 1], tag.store_at, tag.presence_wire,
+			      ses.fifo_len);
 		}
 	}
 
@@ -930,7 +1025,12 @@ void HubRunByte(Serial &s, Memory &mem)
 		HubInterpretLocal();
 		if (g_hub.local) HubInterpretLocalSeats();
 	}
+	const uint8_t ph_before = g_hub.phase;
 	if (g_hub.wire == 0) HubPacketBoundary();
+	if (g_hub.phase != ph_before)
+		Trace("[%lld] hub phase %u -> %u (size=%u rate=%02X status=%02X)",
+		      (long long)s.real_cycles, ph_before, g_hub.phase,
+		      g_hub.size, g_hub.rate, g_hub.status);
 
 	HubSendByte(s, mem);
 	HubAdvance();
@@ -1057,6 +1157,22 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 {
 	mem.serial_control = value;
 
+	if (value & 0x80)
+	{
+		int seat = 0;
+		if (SerialSplitActive())
+			for (int i = 0; i < g_splitlink.count; ++i)
+				if (&s == g_splitlink.s[i]) { seat = i + 1; break; }
+		if (seat)
+			Trace("[%lld] SC<=%02X SB=%02X seat%d", (long long)s.real_cycles,
+			      value, mem.serial_data, seat);
+		else
+			Trace("[%lld] SC<=%02X SB=%02X %s", (long long)s.real_cycles, value,
+			      mem.serial_data,
+			      g_hub.hosting ? "hub-slave" :
+			      LinkIsConnected() ? "link" : "stub");
+	}
+
 	if (g_hub.hosting && (g_hub.local || LinkGetState() != LinkState::Off))
 	{
 		// Under the adapter every Game Boy is an external-clock slave, our
@@ -1072,6 +1188,8 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		if (value & 0x01)
 		{
 			if (g_serial_cb) g_serial_cb(mem.serial_data);
+			Trace("[%lld] p1  MASTER WRITE under hub -> instant $FF stub",
+			      (long long)s.real_cycles);
 			s.active = s.passive = false;
 			mem.serial_data    = 0xFF;
 			mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
@@ -1292,6 +1410,7 @@ LinkRole SerialLinkAutoStart(uint16_t port, int players, bool force_hub,
 			g_hub.target   = static_cast<uint8_t>(seats + 1);
 			g_hub_reported = -1;
 			g_role         = LinkRole::Server;
+			Trace("session: hub host, target=%d players, port=%u", seats + 1, port);
 			return g_role;
 		}
 		if (players > 2)
@@ -1308,12 +1427,14 @@ LinkRole SerialLinkAutoStart(uint16_t port, int players, bool force_hub,
 	if (LinkStartServer(port, 1, err, err_cap))
 	{
 		g_role = LinkRole::Server;
+		Trace("session: direct cable server, port=%u", port);
 		return g_role;
 	}
 
 	if (LinkStartClient("127.0.0.1", port, err, err_cap))
 	{
 		g_role = LinkRole::Client;
+		Trace("session: client, port=%u", port);
 		return g_role;
 	}
 
@@ -1418,6 +1539,8 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 		fresh.target  = static_cast<uint8_t>(count);
 		g_hub = fresh;
 	}
+	Trace("session: split x%d%s", count,
+	      g_hub.local ? " (local DMG-07)" : " (direct cable)");
 }
 
 void SerialSplitDetach()

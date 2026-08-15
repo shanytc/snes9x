@@ -92,8 +92,10 @@ enum class LinkRole : uint8_t
 // Four Player Adapter: it must win the bind, every Game Boy on the
 // session (this one included) runs as an external-clock slave of the
 // adapter, and the joining instances are ordinary clients that never
-// know a hub is on the other end.
-LinkRole SerialLinkAutoStart(uint16_t port, int players, char *err, size_t err_cap);
+// know a hub is on the other end. `force_hub` hosts the adapter even at
+// 2 players, for games whose multiplayer only exists through it.
+LinkRole SerialLinkAutoStart(uint16_t port, int players, bool force_hub,
+                             char *err, size_t err_cap);
 
 void SerialLinkDisconnect();
 
@@ -116,7 +118,9 @@ int SerialLinkPlayerCount();
 // cable (2 seats) or the DMG-07 (3-4 seats, adapter clocked by seat 0's
 // core) is resolved by direct exchange between the cores — no transport,
 // no packets, no processes. Attach drops any socket session first.
-void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count);
+// `force_hub` runs the adapter even with 2 seats (adapter-only games).
+void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
+                       bool force_hub);
 void SerialSplitDetach();
 bool SerialSplitActive();
 

@@ -270,6 +270,13 @@ RECT CalculateDisplayRect(unsigned int sourceWidth,unsigned int sourceHeight,
 	double snesAspect = (double)GUI.AspectWidth/hExtend;
 	RECT drawRect;
 
+	// A split-screen session tiles square-pixel GB viewports into its own
+	// geometry (320x144 side by side, 320x288 as a grid); forcing the SNES
+	// preset onto that stretches every screen. The source itself is the
+	// aspect, whatever filter scaling rode on top of it.
+	if (S9xSGBSplitActive() && sourceWidth && sourceHeight)
+		snesAspect = (double)sourceWidth / (double)sourceHeight;
+
 	if(GUI.Stretch) {
 		if(GUI.AspectRatio) {
 

@@ -26,6 +26,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace SGB {
@@ -2494,9 +2496,44 @@ Emulator &Instance()
 
 // C-style facade used by snes9x integration code.
 bool S9xSGBInit(void)               { return SGB::Instance().Init(); }
+// Split-screen seats (players 2..4). Owned here rather than in the SGB
+// namespace so every facade below can reach them; managed by the
+// S9xSGBSplit* section further down.
+namespace {
+
+std::unique_ptr<SGB::Emulator> g_split_cores[3];
+int g_split_players = 0;   // seats including the primary; 0 = off
+
+int SplitCollect(SGB::Emulator *out[4])
+{
+	int n = 0;
+	out[n++] = &SGB::Instance();
+	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+		if (g_split_cores[k]) out[n++] = g_split_cores[k].get();
+	return n;
+}
+
+} // anonymous
+
 void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
-void S9xSGBReset(void)              { SGB::Instance().ColdReset(); }
-bool S9xSGBSoftReset(void)          { return SGB::Instance().SoftReset(); }
+
+// Resets reach every split-screen seat: the consoles power-cycle
+// together, and the local adapter restarts from its ping phase.
+void S9xSGBReset(void)
+{
+	SGB::Instance().ColdReset();
+	for (int k = 0; k < 3; ++k)
+		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
+}
+
+bool S9xSGBSoftReset(void)
+{
+	const bool ok = SGB::Instance().SoftReset();
+	if (ok)
+		for (int k = 0; k < 3; ++k)
+			if (g_split_cores[k]) g_split_cores[k]->SoftReset();
+	return ok;
+}
 bool S9xSGBIsActive(void)           { return SGB::Instance().HasROM(); }
 bool S9xSGBHasBattery(void)         { return SGB::Instance().HasBattery(); }
 bool S9xSGBSaveBatteryToPath(const char *path) { return SGB::Instance().SaveBatteryToPath(path); }
@@ -2530,6 +2567,235 @@ void S9xSGBLinkGetStatusText(char *buf, size_t cap)
 bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap)
 {
 	return SGB::SerialLinkTakeStatusChange(buf, cap);
+}
+
+// ---- Split screen ----------------------------------------------------------
+// Seat 0 is the global Instance(); the extra players are private cores
+// owned here, stepped in lockstep and linked through gb_serial's local
+// seats. Everything below reaches core internals via DebugImpl(), which
+// this file defines anyway. The core array itself lives further up so
+// the reset facades can fan out to it.
+
+bool S9xSGBSplitStart(int players, const char *battery_base_path)
+{
+	S9xSGBSplitStop(battery_base_path);
+
+	if (players < 2) return false;
+	if (players > 4) players = 4;
+
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) return false;
+	const uint8_t *rom  = prim.GetROMData();
+	const size_t   size = prim.GetROMSize();
+	if (!rom || !size) return false;
+
+	for (int k = 0; k < players - 1; ++k)
+	{
+		std::unique_ptr<SGB::Emulator> core(new SGB::Emulator());
+		core->SetRunMode(prim.GetRunMode());
+		// Path deliberately empty: the core must not seed itself from the
+		// shared index-less .sav; each seat loads its own .savN below.
+		if (!core->Init() || !core->LoadROM(rom, size, nullptr))
+		{
+			for (int j = 0; j < 3; ++j) g_split_cores[j].reset();
+			return false;
+		}
+		// The SGB command callback is process-global and routes to the
+		// primary core; this seat's packets must stay its own.
+		core->DebugImpl()->sgb_pkt.mute_commands = true;
+		g_split_cores[k] = std::move(core);
+	}
+	g_split_players = players;
+
+	SGB::Emulator *cs[4];
+	SGB::Serial   *ss[4];
+	SGB::Memory   *mm[4];
+	const int n = SplitCollect(cs);
+	for (int i = 0; i < n; ++i)
+	{
+		ss[i] = &cs[i]->DebugImpl()->serial;
+		mm[i] = &cs[i]->DebugImpl()->mem;
+	}
+	SGB::SerialSplitAttach(ss, mm, n);
+
+	S9xSGBSplitLoadBatteries(battery_base_path);
+	return true;
+}
+
+void S9xSGBSplitStop(const char *battery_base_path)
+{
+	if (!g_split_players) return;
+	S9xSGBSplitSaveBatteries(battery_base_path);
+	SGB::SerialSplitDetach();
+	for (int k = 0; k < 3; ++k) g_split_cores[k].reset();
+	g_split_players = 0;
+}
+
+bool S9xSGBSplitActive(void)  { return g_split_players >= 2; }
+int  S9xSGBSplitPlayers(void) { return g_split_players; }
+
+void S9xSGBSplitSetJoypad(int player, uint16_t snes_pad_mask)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= 3 || !g_split_cores[k]) return;
+	g_split_cores[k]->SetJoypad(snes_pad_mask);
+}
+
+void S9xSGBSplitRunFrame(void)
+{
+	SGB::Emulator *cs[4];
+	const int n = SplitCollect(cs);
+	if (n < 2)
+	{
+		S9xSGBRunFrame();
+		return;
+	}
+
+	SGB::Emulator &prim = *cs[0];
+
+	// Keep the seats on the primary's knobs; cheap and idempotent.
+	for (int i = 1; i < n; ++i)
+	{
+		cs[i]->SetRunMode(prim.GetRunMode());
+		cs[i]->SetClockMultiplier(prim.DebugImpl()->clock_mul);
+		cs[i]->SetNoSpriteLimit(Settings.GBNoSpriteLimit);
+	}
+
+	// The same budget derivation as Emulator::RunFrame, shared by every
+	// seat since they run the same mode and multiplier.
+	constexpr double SNES_FPS = 60.09881389744051;
+	double base_hz;
+	if (prim.DebugImpl()->cgb_mode)
+		base_hz = 4194304.0;
+	else switch (prim.GetRunMode())
+	{
+		case SGB::RunMode::SGB: base_hz = 21477272.727272 / 5.0; break;
+		default:                base_hz = 4194304.0;             break;
+	}
+	float mul = prim.DebugImpl()->clock_mul;
+	if (mul < 0.10f) mul = 0.10f;
+	if (mul > 8.00f) mul = 8.00f;
+	const int32_t budget =
+		static_cast<int32_t>((base_hz / SNES_FPS) * static_cast<double>(mul));
+
+	// Interleave by scanline so the in-process cable always peeks a peer
+	// within one line of the caller — lockstep the socket path can never
+	// have. Each seat still frame-locks at its own first VBlank, exactly
+	// like Emulator::RunFrame, so every viewport blits untorn.
+	int32_t remaining[4], safety[4];
+	bool    done[4];
+	for (int i = 0; i < n; ++i)
+	{
+		SGB::Emulator::Impl *im = cs[i]->DebugImpl();
+		im->ppu.frame_ready = false;
+		remaining[i] = budget;
+		safety[i]    = 70224;
+		done[i]      = !im->has_rom;
+	}
+
+	bool running = true;
+	while (running)
+	{
+		running = false;
+		for (int i = 0; i < n; ++i)
+		{
+			if (done[i]) continue;
+			SGB::Emulator::Impl *im = cs[i]->DebugImpl();
+			if (!im->ppu.frame_ready && remaining[i] > 0)
+			{
+				const int32_t chunk = remaining[i] < 456 ? remaining[i] : 456;
+				cs[i]->RunCycles(chunk);
+				remaining[i] -= chunk;
+				running = true;
+			}
+			else if (!im->ppu.frame_ready && (im->ppu.lcdc & 0x80) && safety[i] > 0)
+			{
+				cs[i]->RunCycles(456);
+				safety[i] -= 456;
+				running = true;
+			}
+			else
+			{
+				done[i] = true;
+			}
+		}
+	}
+
+	// Audio rides the primary alone — the seats' sample rings overflow
+	// and drop silently. Same drain-rate steering as Emulator::RunFrame.
+	if (Settings.Mute) return;
+	SGB::Emulator::Impl *pi = prim.DebugImpl();
+	const uint32_t head = pi->apu.sample_head;
+	const uint32_t tail = pi->apu.sample_tail;
+	const uint32_t fill = (head >= tail) ? (head - tail)
+	                                     : (SGB::APU_SAMPLE_BUF_SIZE - tail + head);
+	const double err = static_cast<double>(fill) / SGB::APU_SAMPLE_BUF_SIZE - 0.125;
+	pi->drc_integ += 5e-5 * err;
+	if (pi->drc_integ >  0.03) pi->drc_integ =  0.03;
+	if (pi->drc_integ < -0.03) pi->drc_integ = -0.03;
+	double corr = 0.02 * err + pi->drc_integ;
+	if (corr >  0.03) corr =  0.03;
+	if (corr < -0.03) corr = -0.03;
+	SGB::ApuSetClockHz(pi->apu, static_cast<int32_t>(base_hz * (1.0 + corr) + 0.5));
+}
+
+void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
+{
+	if (!dest || g_split_players < 2) return;
+
+	SGB::Instance().BlitScreenGB(dest, pitch_pixels);
+	if (g_split_cores[0])
+		g_split_cores[0]->BlitScreenGB(dest + SGB_GB_SCREEN_W, pitch_pixels);
+
+	if (g_split_players >= 3)
+	{
+		uint16_t *lower = dest + static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
+		if (g_split_cores[1])
+			g_split_cores[1]->BlitScreenGB(lower, pitch_pixels);
+		if (g_split_players == 4 && g_split_cores[2])
+		{
+			g_split_cores[2]->BlitScreenGB(lower + SGB_GB_SCREEN_W, pitch_pixels);
+		}
+		else
+		{
+			// Three players: the empty quadrant stays black.
+			for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
+				std::memset(lower + y * pitch_pixels + SGB_GB_SCREEN_W, 0,
+				            SGB_GB_SCREEN_W * sizeof(uint16_t));
+		}
+	}
+}
+
+int S9xSGBSplitScreenWidth(void)
+{
+	return static_cast<int>(SGB_GB_SCREEN_W) * (g_split_players >= 2 ? 2 : 1);
+}
+
+int S9xSGBSplitScreenHeight(void)
+{
+	return static_cast<int>(SGB_GB_SCREEN_H) * (g_split_players >= 3 ? 2 : 1);
+}
+
+void S9xSGBSplitLoadBatteries(const char *battery_base_path)
+{
+	if (!battery_base_path || !*battery_base_path) return;
+	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+	{
+		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
+		const std::string p = std::string(battery_base_path) + std::to_string(k + 2);
+		g_split_cores[k]->LoadBatteryFromPath(p.c_str());
+	}
+}
+
+void S9xSGBSplitSaveBatteries(const char *battery_base_path)
+{
+	if (!battery_base_path || !*battery_base_path) return;
+	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+	{
+		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
+		const std::string p = std::string(battery_base_path) + std::to_string(k + 2);
+		g_split_cores[k]->SaveBatteryToPath(p.c_str());
+	}
 }
 
 namespace {

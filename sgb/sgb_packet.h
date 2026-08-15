@@ -85,6 +85,12 @@ struct PacketState
 	uint32_t    commands_received = 0;
 	uint32_t    packets_received  = 0;
 	uint32_t    last_cmd          = 0xFF;  // 0xFF = none yet
+
+	// The command callback is process-global and routes to the primary
+	// core; a split-screen aux core keeps assembling packets (the games
+	// behave identically) but must not dispatch them onto another
+	// console's palettes. Survives PacketReset.
+	bool        mute_commands     = false;
 };
 
 // Called when a complete multi-packet command has been assembled.

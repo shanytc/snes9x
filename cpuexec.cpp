@@ -38,15 +38,21 @@ void S9xMainLoop (void)
 			S9xMovieUpdate();
 		}
 
+		const bool gb_split = S9xSGBSplitActive();
+
 		IPPU.RenderThisFrame      = !Settings.InRunAhead;
-		PPU.ScreenHeight          = SGB_GB_SCREEN_H;
-		IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
-		IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
+		PPU.ScreenHeight          = gb_split ? S9xSGBSplitScreenHeight() : SGB_GB_SCREEN_H;
+		IPPU.RenderedScreenWidth  = gb_split ? S9xSGBSplitScreenWidth()  : SGB_GB_SCREEN_W;
+		IPPU.RenderedScreenHeight = gb_split ? S9xSGBSplitScreenHeight() : SGB_GB_SCREEN_H;
 
 		// Pipe the SNES controller 0 bitmask into the GB joypad. P6d's
 		// MLT_REQ handling reads from mlt_current_player; for now we
-		// only wire the first controller.
+		// only wire the first controller. Split-screen seats each read
+		// their own controller slot.
 		S9xSGBSetJoypad(MovieGetJoypad(0));
+		if (gb_split)
+			for (int p = 2; p <= S9xSGBSplitPlayers(); p++)
+				S9xSGBSplitSetJoypad(p, MovieGetJoypad(p - 1));
 
 		// Push timing knobs each frame so UI changes take effect live.
 		// Default GBClockMultiplier to 1.0 if it's been left at its
@@ -67,12 +73,24 @@ void S9xMainLoop (void)
 		// some host backends.
 		if (!Settings.InRunAhead)
 			S9xStartScreenRefresh();
-		S9xSGBRunFrame();
+		if (gb_split)
+			S9xSGBSplitRunFrame();
+		else
+			S9xSGBRunFrame();
 		if (!Settings.InRunAhead)
 		{
-			IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
-			IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
-			S9xSGBBlitScreenGB(GFX.Screen, GFX.RealPPL);
+			if (gb_split)
+			{
+				IPPU.RenderedScreenWidth  = S9xSGBSplitScreenWidth();
+				IPPU.RenderedScreenHeight = S9xSGBSplitScreenHeight();
+				S9xSGBSplitBlitScreen(GFX.Screen, GFX.RealPPL);
+			}
+			else
+			{
+				IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
+				IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
+				S9xSGBBlitScreenGB(GFX.Screen, GFX.RealPPL);
+			}
 			S9xEndScreenRefresh();
 		}
 

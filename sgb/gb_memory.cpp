@@ -19,14 +19,9 @@
 
 namespace SGB {
 
-namespace {
-uint8_t g_dma_last  = 0xFF;  // 0xFF46 last written byte — register reads echo this.
-bool    g_dma_vram_bypass = false;
-}
-
 inline bool VramBlocked(const Memory &m)
 {
-	return !g_dma_vram_bypass && m.ppu &&
+	return !m.dma_vram_bypass && m.ppu &&
 	       m.ppu->mode == PpuMode::Transfer && (m.ppu->lcdc & 0x80);
 }
 
@@ -50,7 +45,8 @@ void MemReset(Memory &m, bool cgb)
 	// GB CPU starts. boot_rom_enabled stays false until LoadBootROM sets it.
 	std::memset(m.boot_rom, 0, sizeof m.boot_rom);
 	m.boot_rom_enabled = false;
-	g_dma_last         = cgb ? 0x00 : 0xFF;
+	m.dma_last         = cgb ? 0x00 : 0xFF;
+	m.dma_vram_bypass  = false;
 
 	m.svbk         = 1;
 	m.key1_armed   = false;
@@ -255,7 +251,7 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
-		case 0xFF46: return g_dma_last;
+		case 0xFF46: return m.dma_last;
 		case 0xFF4D:
 			return (m.ppu && m.ppu->cgb)
 				? static_cast<uint8_t>((m.double_speed ? 0x80 : 0x00) |
@@ -313,7 +309,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			m.if_ = static_cast<uint8_t>((value & 0x1F) | 0xE0);
 			return;
 		case 0xFF46:
-			g_dma_last = value;
+			m.dma_last = value;
 			DoOamDma(m, value);
 			return;
 		case 0xFF50:
@@ -366,35 +362,35 @@ static void DoOamDma(Memory &m, uint8_t value)
 {
 	if (!m.ppu) return;
 	const uint16_t src = static_cast<uint16_t>(value << 8);
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (int i = 0; i < 0xA0; ++i)
 	{
 		m.ppu->oam[i] = MemRead(m, static_cast<uint16_t>(src + i));
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 }
 
 static void DoGdma(Memory &m, uint16_t src, uint16_t dst, uint16_t blocks)
 {
 	const uint32_t n = static_cast<uint32_t>(blocks) * 0x10u;
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < n; ++i)
 	{
 		const uint8_t b = MemRead(m, static_cast<uint16_t>(src + i));
 		MemWrite(m, static_cast<uint16_t>(0x8000 + ((dst + i) & 0x1FFF)), b);
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 }
 
 static void HdmaTransferBlock(Memory &m)
 {
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < 0x10; ++i)
 	{
 		const uint8_t b = MemRead(m, static_cast<uint16_t>(m.hdma_src + i));
 		MemWrite(m, static_cast<uint16_t>(0x8000 + ((m.hdma_dst + i) & 0x1FFF)), b);
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 	m.hdma_src = static_cast<uint16_t>(m.hdma_src + 0x10);
 	m.hdma_dst = static_cast<uint16_t>(m.hdma_dst + 0x10);
 	m.hdma1 = static_cast<uint8_t>(m.hdma_src >> 8);

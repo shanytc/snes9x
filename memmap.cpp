@@ -2759,6 +2759,8 @@ bool8 CMemory::LoadSRAM (const char *filename)
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
 	{
 		const bool ok = S9xSGBLoadBatteryFromPath(GBBatteryPath(filename).c_str());
+		if (S9xSGBSplitActive())
+			S9xSGBSplitLoadBatteries(GBBatteryPath(filename).c_str());
 		ClearSRAM();
 		return ok ? TRUE : FALSE;
 	}
@@ -2834,7 +2836,11 @@ bool8 CMemory::SaveSRAM (const char *filename)
 {
 	// GB cart: the battery result is the result, same as LoadSRAM.
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
+	{
+		if (S9xSGBSplitActive())
+			S9xSGBSplitSaveBatteries(GBBatteryPath(filename).c_str());
 		return S9xSGBSaveBatteryToPath(GBBatteryPath(filename).c_str()) ? TRUE : FALSE;
+	}
 
 	if (Settings.SFCBox)
 		S9xSFCBoxSaveNVRAM();	// KROM battery RAM rides along with the .srm

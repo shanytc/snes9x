@@ -111,6 +111,15 @@ void SerialLinkPump();
 // one side leaving ends it for both; on a hub only that seat empties.
 int SerialLinkPlayerCount();
 
+// ---- Split screen (in-process multi-core link) ------------------------------
+// Registers every core's serial port and bus, in player order, so the
+// cable (2 seats) or the DMG-07 (3-4 seats, adapter clocked by seat 0's
+// core) is resolved by direct exchange between the cores — no transport,
+// no packets, no processes. Attach drops any socket session first.
+void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count);
+void SerialSplitDetach();
+bool SerialSplitActive();
+
 // One-line state for the OSD, e.g. "Link cable: connected (Master)". The
 // suffix appears only once a byte has crossed.
 void SerialLinkStatusText(char *buf, size_t cap);

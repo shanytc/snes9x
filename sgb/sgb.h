@@ -323,6 +323,24 @@ void S9xSGBLinkGetStatusText(char *buf, size_t cap);
 // fills `buf` with the text to show. Poll it from the frame loop.
 bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap);
 
+// ---- Split screen -----------------------------------------------------------
+// Runs 2-4 cores of the same game inside this process, tiled into one
+// frame and linked in-process (direct cable at two seats, DMG-07 at
+// three or four). BIOS-less GB mode only. Player N reads SNES joypad N;
+// seats past the first save to <base>.savN. Mutually exclusive with the
+// socket link.
+bool S9xSGBSplitStart(int players, const char *battery_base_path);
+void S9xSGBSplitStop(const char *battery_base_path);  // saves seat batteries first
+bool S9xSGBSplitActive(void);
+int  S9xSGBSplitPlayers(void);
+void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
+void S9xSGBSplitRunFrame(void);
+void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
+int  S9xSGBSplitScreenWidth(void);
+int  S9xSGBSplitScreenHeight(void);
+void S9xSGBSplitLoadBatteries(const char *battery_base_path);
+void S9xSGBSplitSaveBatteries(const char *battery_base_path);
+
 // Accumulator-based SNES→GB cycle stepping for BIOS mode. Call per
 // SNES opcode (or per H event) with the number of SNES master cycles
 // just consumed. Internally divides by 5 (SGB1 clock ratio) and steps

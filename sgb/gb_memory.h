@@ -70,6 +70,11 @@ struct Memory
 	uint16_t hdma_src = 0, hdma_dst = 0, hdma_len = 0;
 	bool     hdma_active = false;
 	bool     hdma_hblank_latch = false;
+
+	// Per-console, not per-process: split screen runs several cores in one
+	// process, so these cannot live in file-scope globals.
+	uint8_t  dma_last = 0xFF;         // 0xFF46 last written byte, echoed on reads
+	bool     dma_vram_bypass = false; // OAM DMA reads dodge the mode-3 VRAM block
 };
 
 uint8_t MemRead(Memory &m, uint16_t addr);

@@ -139,6 +139,8 @@ int  WinGetGBLinkPlayers();
 static int  WinGetGBLinkLivePlayers();
 static void GBLinkPumpSpawns();
 static void GBLinkAutoCloseAbandonedHub();
+static void WinStartGBSplit(int players);
+static void WinStopGBSplit();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -3018,6 +3020,12 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_LINK_DIFF:
 			WinToggleGBLink (2, 2);
 			break;
+		case ID_EMULATION_GB_LINK_SPLIT:
+			// A preference for what the players items do; settled while
+			// any session is live, so it only flips between sessions.
+			if (!S9xSGBLinkIsEnabled () && !S9xSGBSplitActive ())
+				GBLinkSplitScreen = !GBLinkSplitScreen;
+			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
 			// Dial into whatever session exists; idempotent, so a rejoin
 			// request can never unplug an instance that is already on.
@@ -5081,7 +5089,9 @@ int WINAPI WinMain(
 
 			ProcessInput();
 
-			if (GUI.rewindBufferSize
+			// Rewind snapshots capture only the primary core; rewinding a
+			// split-screen session would desync the other seats.
+			if (GUI.rewindBufferSize && !S9xSGBSplitActive()
 #ifdef NETPLAY_SUPPORT
 				&& !Settings.NetPlay
 #endif
@@ -5135,7 +5145,10 @@ int WINAPI WinMain(
 				}
 			}
 
-			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
+			// Run-ahead rolls back through savestates that do not carry the
+			// split-screen seats; run those sessions plainly.
+			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused &&
+			    !S9xSGBSplitActive())
 			{
 				// Run-ahead: commit 1 hidden frame, save state, run N-1 more hidden frames
 				// to "look into the future", then run the displayed frame as a preview, and
@@ -5408,6 +5421,14 @@ void FreezeUnfreezeSlot(int slot, bool8 freeze)
 
 bool FreezeUnfreeze (const char *filename, bool8 freeze)
 {
+    // Save states capture only the primary core; loading one under a
+    // split-screen session would desync the other seats.
+    if (S9xSGBSplitActive ())
+    {
+        S9xSetInfoString ("Save states are not supported in split screen yet");
+        return false;
+    }
+
 #ifdef NETPLAY_SUPPORT
     if (!freeze && Settings.NetPlay && !Settings.NetPlayServer)
     {
@@ -5640,11 +5661,19 @@ static void CheckMenuStates ()
 			// A live session's shape is settled, so the others are greyed;
 			// the active item stays enabled because it doubles as the
 			// disconnect. The tick follows the instances actually present:
-			// a 4-player session with one window closed reads as 3.
-			const int  gblink   = WinGetGBLinkMode ();
-			int        players  = WinGetGBLinkPlayers ();
-			if (gblink == 1 && players > 2)
+			// a 4-player session with one window closed reads as 3. A
+			// split session ticks like a live link of its size.
+			int gblink  = WinGetGBLinkMode ();
+			int players = WinGetGBLinkPlayers ();
+			if (S9xSGBSplitActive ())
+			{
+				gblink  = 1;
+				players = S9xSGBSplitPlayers ();
+			}
+			else if (gblink == 1 && players > 2)
+			{
 				players = WinGetGBLinkLivePlayers ();
+			}
 			const UINT inactive = (gblink == 0) ? MFS_UNCHECKED
 			                                    : (MFS_UNCHECKED | MFS_DISABLED);
 
@@ -5656,6 +5685,12 @@ static void CheckMenuStates ()
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_4, FALSE, &mii);
 			mii.fState = (gblink == 2) ? MFS_CHECKED : inactive;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
+
+			// The split toggle is a preference; it only flips while no
+			// session is live.
+			mii.fState = (GBLinkSplitScreen ? MFS_CHECKED : MFS_UNCHECKED) |
+			             ((gblink != 0) ? MFS_DISABLED : MFS_ENABLED);
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SPLIT, FALSE, &mii);
 		}
 	}
 
@@ -6295,6 +6330,9 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		filename = msu1_renamed;
 
 	if (!Settings.StopEmulation) {
+		// A split session belongs to the outgoing game: fold it (and save
+		// its seat batteries) before the paths change under it.
+		if (S9xSGBSplitActive ()) WinStopGBSplit ();
 		Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 		S9xSaveCheatFile (S9xGetFilename (".cht", CHEAT_DIR).c_str());
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -10199,6 +10237,11 @@ static int GBLinkMode = GBLINK_OFF;
 // via the launch switch. Read back by the menu while a session exists.
 int GBLinkSessionPlayers = 2;
 
+// Link Same Game runs its 2-4 players as in-process split screen rather
+// than spawned instances. A preference, not a session: it decides what
+// the next click of a players item does.
+bool GBLinkSplitScreen = false;
+
 // Held by process id rather than a spawn handle, so it means the same
 // thing whichever instance started the other. The partner is the other
 // half of a direct cable — or, on a spawned instance, the hub host.
@@ -10525,6 +10568,13 @@ static void WinStartGBLink (int mode, int players)
 // the next click starts the newly picked session size.
 void WinToggleGBLink (int mode, int players)
 {
+	// A split session ends on any link click, like the socket toggle.
+	if (S9xSGBSplitActive ())
+	{
+		WinStopGBSplit ();
+		return;
+	}
+
 	// A spawned instance keeps the session size it was launched into, so
 	// a rejoin request cannot turn it into a competing host.
 	if (Settings.GBLinkPeerInstance) players = GBLinkSessionPlayers;
@@ -10557,7 +10607,55 @@ void WinToggleGBLink (int mode, int players)
 		return;
 	}
 
+	// Split screen replaces the spawned instances for Link Same Game.
+	if (mode == GBLINK_SAME && GBLinkSplitScreen && !Settings.GBLinkPeerInstance)
+	{
+		WinStartGBSplit (players);
+		return;
+	}
+
 	WinStartGBLink (mode, players);
+}
+
+// In-process split screen: no processes, no sockets — the SGB layer owns
+// the extra consoles and the local cable/adapter. The battery base path
+// hands each seat its own .savN next to the primary's .sav.
+static void WinStartGBSplit (int players)
+{
+	if (Settings.SGB_BIOSModeActive)
+	{
+		S9xSetInfoString ("Split screen needs the BIOS-less GB mode - set Emulation > BIOS > No BIOS");
+		return;
+	}
+	if (!Settings.SuperGameBoy)
+	{
+		S9xSetInfoString ("Link cable: load a Game Boy game first");
+		return;
+	}
+
+	char base[_MAX_PATH + 1];
+	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
+	base[_MAX_PATH] = '\0';
+
+	if (!S9xSGBSplitStart (players, base))
+	{
+		S9xSetInfoString ("Split screen: could not start the extra consoles");
+		return;
+	}
+
+	char msg[64];
+	snprintf (msg, sizeof (msg), "Split screen: %d players", players);
+	S9xSetInfoString (msg);
+}
+
+static void WinStopGBSplit ()
+{
+	char base[_MAX_PATH + 1];
+	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
+	base[_MAX_PATH] = '\0';
+
+	S9xSGBSplitStop (base);
+	S9xSetInfoString ("Split screen: off");
 }
 
 // The spawned instance links itself on startup; its mode is inferred from

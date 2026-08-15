@@ -998,6 +998,7 @@ void WinRegisterConfigItems()
 #define	CATEGORY "SGB"
 	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
 	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Link Cable. Only worth changing if something else on this PC already owns 8765.");
+	AddBoolC("LinkSplitScreen", GBLinkSplitScreen, false, "Link Same Game runs its 2-4 players split screen in this window instead of spawning instances. BIOS-less GB mode only.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

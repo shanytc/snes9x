@@ -66,6 +66,10 @@ extern DWORD GBLinkPartnerPid;
 // carried by the launch switch.
 extern int GBLinkSessionPlayers;
 
+// Link Same Game runs its players as in-process split screen instead of
+// spawned instances. Persisted; consulted at session start.
+extern bool GBLinkSplitScreen;
+
 // Mirror this instance's pause to the paired one, so a Game Boy that
 // stops answering never reads as an unplugged cable. Called from the
 // pause setters.

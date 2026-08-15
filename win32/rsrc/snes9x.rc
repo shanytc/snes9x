@@ -1441,6 +1441,8 @@ BEGIN
                 MENUITEM "&2 Players",                  ID_EMULATION_GB_LINK_SAME,MFT_STRING,MFS_ENABLED
                 MENUITEM "&3 Players",                  ID_EMULATION_GB_LINK_SAME_3,MFT_STRING,MFS_ENABLED
                 MENUITEM "&4 Players",                  ID_EMULATION_GB_LINK_SAME_4,MFT_STRING,MFS_ENABLED
+                MENUITEM MFT_SEPARATOR
+                MENUITEM "S&plit Screen",               ID_EMULATION_GB_LINK_SPLIT,MFT_STRING,MFS_ENABLED
             END
             MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED
         END

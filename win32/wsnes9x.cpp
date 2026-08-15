@@ -137,8 +137,10 @@ void WinAutoStartGBLinkPeer();
 int  WinGetGBLinkMode();
 int  WinGetGBLinkPlayers();
 static int  WinGetGBLinkLivePlayers();
+static bool GBLinkPidAlive(DWORD pid);
 static void GBLinkPumpSpawns();
 static void GBLinkAutoCloseAbandonedHub();
+static void GBLinkResetWhenLeftAlone();
 static void GBLinkPlacePeerWindow();
 static void WinStartGBSplit(int players);
 static void WinStopGBSplit();
@@ -209,6 +211,10 @@ struct sGUI GUI;
 
 // Set while applying a peer-initiated save/load, so it is not relayed back.
 static bool GBLinkStateRelaying = false;
+
+// Who last paused the session over the link, so a watchdog timer can
+// lift the pause if that process dies without sending the unpause.
+static DWORD GBLinkPauserPid = 0;
 typedef struct sExtList
 {
 	TCHAR* extension;
@@ -1939,6 +1945,7 @@ void WinShowCheatEditorDialog()
 // giving slow backends (XInput polling, driver init) time to enumerate a
 // newly plugged device without a ~10s wait for SDL's own scan schedule.
 #define TIMER_HOTPLUG_BURST 0xD0D0
+#define TIMER_GBLINK_PAUSE  0xD0D1
 static int g_hotplugTicksRemaining = 0;
 
 // Grey (or enable) the submenu inside `parent` that contains `containedCmd`.
@@ -2085,6 +2092,25 @@ LRESULT CALLBACK WinProc(
 				PostMessage(hCfg, WM_TIMER, 99, 0);
 			if (--g_hotplugTicksRemaining <= 0)
 				KillTimer(hWnd, TIMER_HOTPLUG_BURST);
+			return 0;
+		}
+		if (wParam == TIMER_GBLINK_PAUSE)
+		{
+			// Runs inside the paused message pump, where the main loop's
+			// stuck-pause watchdog cannot: a peer that died holding the
+			// session paused would otherwise freeze this instance forever.
+			if (!(Settings.ForcedPause & PAUSE_LINK_PEER))
+			{
+				KillTimer(hWnd, TIMER_GBLINK_PAUSE);
+				return 0;
+			}
+			S9xSGBLinkPump();
+			if (!GBLinkPidAlive(GBLinkPauserPid) || !S9xSGBLinkIsConnected())
+			{
+				KillTimer(hWnd, TIMER_GBLINK_PAUSE);
+				GBLinkPauserPid = 0;
+				S9xClearPause(PAUSE_LINK_PEER);
+			}
 			return 0;
 		}
 		break;
@@ -3028,6 +3054,30 @@ LRESULT CALLBACK WinProc(
 				GBLinkSplitScreen = !GBLinkSplitScreen;
 			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
+			// lParam rides the master's booted BIOS mode + 1 (0 = not
+			// specified): a reused window may sit in another mode and has
+			// to reboot into the master's before dialing in.
+			if (lParam >= 1 && lParam <= 3)
+			{
+				const uint8 want   = (uint8)(lParam - 1);
+				const uint8 active = Settings.SGB_BIOSModeActive
+				                   ? Settings.GameBoyRunMode : 0;
+				Settings.SGB_BIOSPreference = want;   // covers a later cart pick too
+				if (Settings.GBRomPath[0] && want != active)
+				{
+					TCHAR wpath[_MAX_PATH];
+					Utf8ToWide u8(Settings.GBRomPath);
+					_tcsncpy(wpath, u8, _MAX_PATH - 1);
+					wpath[_MAX_PATH - 1] = 0;
+					RestoreGUIDisplay();
+					if (LoadROM(wpath))
+					{
+						S9xReset();
+						ReInitSound();
+					}
+					RestoreSNESDisplay();
+				}
+			}
 			// Dial into whatever session exists; idempotent, so a rejoin
 			// request can never unplug an instance that is already on.
 			if (!S9xSGBLinkIsEnabled ())
@@ -3317,8 +3367,19 @@ LRESULT CALLBACK WinProc(
 		break;
 
 	case WM_GBLINK_PAUSE:
-		if (wParam) S9xSetPause (PAUSE_LINK_PEER);
-		else        S9xClearPause (PAUSE_LINK_PEER);
+		if (wParam)
+		{
+			// Watch the pauser: if it dies, its unpause can never arrive.
+			GBLinkPauserPid = (DWORD)lParam;
+			S9xSetPause (PAUSE_LINK_PEER);
+			SetTimer (hWnd, TIMER_GBLINK_PAUSE, 250, NULL);
+		}
+		else
+		{
+			KillTimer (hWnd, TIMER_GBLINK_PAUSE);
+			GBLinkPauserPid = 0;
+			S9xClearPause (PAUSE_LINK_PEER);
+		}
 		// The hub host passes a seat's pause on to the other seats; they
 		// only know the host, so nothing bounces back.
 		if (!Settings.GBLinkPeerInstance)
@@ -5006,6 +5067,7 @@ int WINAPI WinMain(
         // A hub host seats its instances one at a time as they arrive,
         // and folds the session once every one of them has been closed.
         GBLinkPumpSpawns ();
+        GBLinkResetWhenLeftAlone ();
         GBLinkAutoCloseAbandonedHub ();
 
         // Never stay frozen waiting on an instance that has gone away.
@@ -5687,6 +5749,49 @@ static void CheckMenuStates ()
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_4, FALSE, &mii);
 			mii.fState = (gblink == 2) ? MFS_CHECKED : inactive;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
+
+			// Split screen needs the BIOS-less core, so in BIOS mode the
+			// item comes out of the menu rather than offering a dead end.
+			static HMENU s_same_hmenu = NULL;
+			if (!s_same_hmenu && s_link_hmenu)
+			{
+				const int cnt = GetMenuItemCount (s_link_hmenu);
+				for (int j = 0; j < cnt; j++)
+				{
+					MENUITEMINFO probe = {};
+					probe.cbSize = sizeof(probe);
+					probe.fMask  = MIIM_ID | MIIM_SUBMENU;
+					if (GetMenuItemInfo (s_link_hmenu, j, TRUE, &probe) &&
+					    probe.wID == ID_EMULATION_GB_LINK_SAME_POPUP && probe.hSubMenu)
+					{
+						s_same_hmenu = probe.hSubMenu;
+						break;
+					}
+				}
+			}
+			if (s_same_hmenu)
+			{
+				MENUITEMINFO present = {};
+				present.cbSize = sizeof(present);
+				present.fMask  = MIIM_ID;
+				const bool in_menu  = GetMenuItemInfo (s_same_hmenu, ID_EMULATION_GB_LINK_SPLIT,
+				                                       FALSE, &present) != FALSE;
+				const bool split_ok = !Settings.SGB_BIOSModeActive;
+				if (split_ok && !in_menu)
+				{
+					AppendMenu (s_same_hmenu, MF_SEPARATOR, 0, NULL);
+					AppendMenu (s_same_hmenu, MF_STRING, ID_EMULATION_GB_LINK_SPLIT,
+					            TEXT("S&plit Screen"));
+					if (LocaleIsTranslated ()) LocalizeMenu (s_same_hmenu);
+				}
+				else if (!split_ok && in_menu)
+				{
+					// The item and its separator sit at the submenu's tail.
+					const int cnt = GetMenuItemCount (s_same_hmenu);
+					RemoveMenu (s_same_hmenu, cnt - 1, MF_BYPOSITION);
+					if (cnt >= 2) RemoveMenu (s_same_hmenu, cnt - 2, MF_BYPOSITION);
+				}
+			}
 
 			// The split toggle is a preference; it only flips while no
 			// session is live.
@@ -10383,7 +10488,9 @@ void GBLinkMirrorPause ()
 	if (!S9xSGBLinkIsConnected ()) { mirrored = false; return; }
 
 	// Our own pause only: mirroring the peer's would hold both forever.
-	const bool paused = (Settings.ForcedPause & ~PAUSE_LINK_PEER) != 0;
+	// PAUSE_EXIT is a dying instance's last act — its clear never runs,
+	// so mirroring it would leave the session paused with no unpauser.
+	const bool paused = (Settings.ForcedPause & ~(PAUSE_LINK_PEER | PAUSE_EXIT)) != 0;
 	if (paused == mirrored) return;
 
 	mirrored = paused;
@@ -10407,16 +10514,24 @@ bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPi
 
 // Launch one instance, or ask a surviving one to re-tick its item so a
 // re-link reuses that window instead of piling up a new one each time.
-// The switch carries our pid and index, the launched side's index, and
-// the session's player count, so the pairing is known from both ends.
+// The switch carries our pid and index, the launched side's index, the
+// session's player count and our booted BIOS mode, so the pairing is
+// known from both ends and the seat boots the way the master did.
 static DWORD GBLinkLaunchInstance (DWORD reusePid, int mode, int playerIndex, int players)
 {
+	// What this instance actually booted, not what the shared config
+	// file happens to say right now.
+	const int bios = Settings.SGB_BIOSModeActive ? Settings.GameBoyRunMode : 0;
+
 	if (GBLinkPidAlive (reusePid))
 	{
 		// Connect senses the role: our port is up, so it dials in — and
 		// being idempotent, it cannot unplug an instance already linked.
+		// lParam rides our BIOS mode + 1 so a window sitting in another
+		// mode reboots into ours first.
 		if (GBLinkPostToPid (reusePid, WM_COMMAND,
-		                     MAKEWPARAM (ID_EMULATION_GB_LINK_CONNECT, 0), 0))
+		                     MAKEWPARAM (ID_EMULATION_GB_LINK_CONNECT, 0),
+		                     (LPARAM)(bios + 1)))
 			return reusePid;
 	}
 
@@ -10427,13 +10542,13 @@ static DWORD GBLinkLaunchInstance (DWORD reusePid, int mode, int playerIndex, in
 	// instance loads it through the normal path.
 	TCHAR cmd[MAX_PATH * 3];
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
 		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
-		            playerIndex, players, (TCHAR *)_tFromChar (Settings.GBRomPath));
+		            playerIndex, players, bios, (TCHAR *)_tFromChar (Settings.GBRomPath));
 	else
-		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d"), exe, GBLINK_PEER_SWITCH,
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d,%d"), exe, GBLINK_PEER_SWITCH,
 		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
-		            playerIndex, players);
+		            playerIndex, players, bios);
 	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
 
 	STARTUPINFO si;
@@ -10517,6 +10632,35 @@ static void GBLinkAutoCloseAbandonedHub ()
 	S9xSetInfoString ("Link cable: all instances closed - disconnected");
 }
 
+// The last instance standing drops back to its title screen: its game
+// was linked and is now alone mid-session, and a lone racer waiting on
+// dead cars reads as a freeze. Runs before the hub auto-close so the
+// fold cannot mask the transition.
+static void GBLinkResetWhenLeftAlone ()
+{
+	static bool had_company = false;
+
+	bool company = false;
+	if (GBLinkMode != GBLINK_OFF)
+	{
+		if (!Settings.GBLinkPeerInstance && GBLinkSessionPlayers > 2)
+		{
+			for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+				if (GBLinkPidAlive (GBLinkPeerPids[i])) { company = true; break; }
+		}
+		else
+			company = GBLinkPartnerAlive ();
+	}
+
+	// Only a companion process dying counts: a manual unlink clears the
+	// mode first and must leave the game exactly where it is.
+	if (had_company && !company && GBLinkMode != GBLINK_OFF &&
+	    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
+		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_SOFT_RESET, 0), 0);
+
+	had_company = company;
+}
+
 // A linked instance must keep running and reading input while unfocused,
 // or the other game reads the quiet cable as unplugged. Forced for the
 // session only; the stash holds the user's values for unlink and the file.
@@ -10574,7 +10718,12 @@ static void WinStartGBLink (int mode, int players)
 	// the session is; only the original instance can host the hub.
 	const int link_players = Settings.GBLinkPeerInstance ? 2 : players;
 
-	const int role = S9xSGBLinkAutoStart (err, sizeof(err), link_players);
+	// Adapter-only games (F-1 Race) never link on a bare 2-player cable:
+	// their session hosts the DMG-07 even with a single seat.
+	const bool force_adapter = !Settings.GBLinkPeerInstance && mode == GBLINK_SAME &&
+	                           link_players == 2 && S9xSGBCartNeedsDmg07 ();
+
+	const int role = S9xSGBLinkAutoStart (err, sizeof(err), link_players, force_adapter);
 	if (role == S9X_GBLINK_NONE)
 	{
 		MessageBox (GUI.hWnd,
@@ -10587,6 +10736,11 @@ static void WinStartGBLink (int mode, int players)
 	GBLinkSessionPlayers = players;
 	GBLinkSlotsStarted   = 0;
 	GBLinkSyncResponsiveSettings ();
+
+	// Every game enters the session from its title screen: an instance
+	// left in demo or mid-game would never sync with freshly booted ones.
+	if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_SOFT_RESET, 0), 0);
 
 	if (role == S9X_GBLINK_SERVER)
 	{
@@ -10649,8 +10803,11 @@ void WinToggleGBLink (int mode, int players)
 		return;
 	}
 
-	// Split screen replaces the spawned instances for Link Same Game.
-	if (mode == GBLINK_SAME && GBLinkSplitScreen && !Settings.GBLinkPeerInstance)
+	// Split screen replaces the spawned instances for Link Same Game —
+	// only on the BIOS-less core; in BIOS mode the preference lies
+	// dormant and the players items spawn instances as usual.
+	if (mode == GBLINK_SAME && GBLinkSplitScreen && !Settings.GBLinkPeerInstance &&
+	    !Settings.SGB_BIOSModeActive)
 	{
 		WinStartGBSplit (players);
 		return;
@@ -10684,6 +10841,9 @@ static void WinStartGBSplit (int players)
 		S9xSetInfoString ("Split screen: could not start the extra consoles");
 		return;
 	}
+
+	// All seats power up together; the primary may have been in demo.
+	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_SOFT_RESET, 0), 0);
 
 	char msg[64];
 	snprintf (msg, sizeof (msg), "Split screen: %d players", players);

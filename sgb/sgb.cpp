@@ -2545,11 +2545,26 @@ void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
 
 // ---- Link cable session (see gb_serial.h) ----------------------------------
-int S9xSGBLinkAutoStart(char *err, size_t err_cap, int players)
+int S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter)
 {
 	uint16_t port = Settings.GBLinkPort;
 	if (port == 0) port = 8765;
-	return static_cast<int>(SGB::SerialLinkAutoStart(port, players, err, err_cap));
+	return static_cast<int>(SGB::SerialLinkAutoStart(port, players, force_adapter,
+	                                                 err, err_cap));
+}
+
+// Games whose multiplayer runs only through the DMG-07 (the adapter
+// shipped bundled with F-1 Race): a bare 2-player cable never links
+// them. Exact GB header titles, verified against real ROMs.
+bool S9xSGBCartNeedsDmg07(void)
+{
+	static const char *const kDmg07Only[] = { "F1RACE" };
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) return false;
+	const char *title = prim.DebugImpl()->cart.header.title;
+	for (const char *t : kDmg07Only)
+		if (std::strcmp(title, t) == 0) return true;
+	return false;
 }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }
@@ -2616,7 +2631,8 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		ss[i] = &cs[i]->DebugImpl()->serial;
 		mm[i] = &cs[i]->DebugImpl()->mem;
 	}
-	SGB::SerialSplitAttach(ss, mm, n);
+	// Adapter-only games ride the DMG-07 even as a 2-seat split.
+	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07());
 
 	S9xSGBSplitLoadBatteries(battery_base_path);
 	return true;

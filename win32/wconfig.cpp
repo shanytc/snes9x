@@ -316,14 +316,15 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			char *end = NULL;
 			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
 
-			// "<pid>,<launcher>,<index>,<players>": our own index is spelled
-			// out so a hub seat keeps its player number. The old two-value
-			// form only names the launcher; we are the other half of that
-			// pair, so {1,2} still falls out.
-			long launcher = 0, index = 0, players = 0;
+			// "<pid>,<launcher>,<index>,<players>,<bios>": our own index is
+			// spelled out so a hub seat keeps its player number. The old
+			// two-value form only names the launcher; we are the other half
+			// of that pair, so {1,2} still falls out.
+			long launcher = 0, index = 0, players = 0, bios = -1;
 			if (end && *end == ',') launcher = strtol(end + 1, &end, 10);
 			if (end && *end == ',') index    = strtol(end + 1, &end, 10);
 			if (end && *end == ',') players  = strtol(end + 1, &end, 10);
+			if (end && *end == ',') bios     = strtol(end + 1, &end, 10);
 
 			if (index < 1) index = (launcher == 1) ? 2 : 1;
 			if (index > 4) index = 4;
@@ -332,6 +333,11 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			if (launcher < 1) launcher = 1;
 			if (launcher > 4) launcher = 4;
 			GBLinkLauncherIndex = (int)launcher;
+
+			// The master's booted BIOS mode overrides the shared config,
+			// which may have been saved under a different preference.
+			if (bios >= 0 && bios <= 2)
+				Settings.SGB_BIOSPreference = (uint8)bios;
 
 			if (players < 2) players = 2;
 			if (players > 4) players = 4;

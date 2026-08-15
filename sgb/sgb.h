@@ -295,8 +295,13 @@ void S9xSGBRunCycles(int tcycles);
 
 // Bring the cable up on Settings.GBLinkPort for a session of `players`
 // (2..4), returning the role taken. S9X_GBLINK_NONE means the socket
-// could not be opened; `err` says why.
-int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players);
+// could not be opened; `err` says why. `force_adapter` hosts the DMG-07
+// even at 2 players (adapter-only games).
+int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter);
+
+// The loaded cart's multiplayer exists only through the DMG-07 Four
+// Player Adapter, so even a 2-player session must host it.
+bool S9xSGBCartNeedsDmg07(void);
 
 // Role of the live session, or S9X_GBLINK_NONE when unplugged.
 int  S9xSGBLinkGetRole(void);

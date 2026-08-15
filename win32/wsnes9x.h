@@ -51,10 +51,11 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 #define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
 
 // Marks the instance auto-launched by the Game Boy Link Cable menu.
-// "-gblinkpeer=<pid>,<launcher>,<index>,<players>" carries the launcher's
-// process id and player index, this instance's own index, and how many
-// players the session is for, so the pairing is mutual and a hub seat
-// keeps its player number.
+// "-gblinkpeer=<pid>,<launcher>,<index>,<players>,<bios>" carries the
+// launcher's process id and player index, this instance's own index, how
+// many players the session is for, and the launcher's booted BIOS mode
+// (0 = BIOS-less, 1/2 = SGB1/2) — the seat must boot the way the master
+// did, whatever the shared config says.
 #define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
 #define GBLINK_PEER_SWITCH_A "-gblinkpeer"
 

@@ -58,7 +58,7 @@ void AppendBit(PacketState &ps, uint8_t bit)
 
 	if (ps.pkts_received >= ps.total_pkts)
 	{
-		if (g_command_cb)
+		if (g_command_cb && !ps.mute_commands)
 		{
 			g_command_cb(ps.cmd, ps.chain_buf,
 			             static_cast<uint32_t>(ps.total_pkts) * 16u);
@@ -78,8 +78,10 @@ void AppendBit(PacketState &ps, uint8_t bit)
 
 void PacketReset(PacketState &ps)
 {
+	const bool mute = ps.mute_commands;
 	ps = PacketState{};
 	ps.prev_joyser_val = 0x30;
+	ps.mute_commands   = mute;
 }
 
 void PacketFeed(PacketState &ps, uint8_t value)

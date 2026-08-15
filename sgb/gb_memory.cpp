@@ -225,6 +225,7 @@ void MemReset(Memory &m, bool cgb)
 	m.boot_rom_size    = 0;
 	m.boot_rom_enabled = false;
 	m.dma_last         = cgb ? 0x00 : 0xFF;
+	m.dma_vram_bypass  = false;
 
 	m.svbk         = 1;
 	m.key1_armed   = false;

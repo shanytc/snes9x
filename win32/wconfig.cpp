@@ -1281,6 +1281,12 @@ void WinSaveConfigFile()
 		GUI.BackgroundInput = userBackground;
 	}
 
+	// Same for the spawned seat's forced Mute: the file keeps the user's.
+	bool userMute = false;
+	const bool muteForced = GBLinkGetUserMute(&userMute);
+	const bool liveMute = GUI.Mute;
+	if(muteForced) GUI.Mute = userMute;
+
 	for(unsigned int i = 0 ; i < configItems.size()	; i++)
 		configItems[i].Set(conf);
 
@@ -1289,6 +1295,7 @@ void WinSaveConfigFile()
 		GUI.InactivePause   = livePause;
 		GUI.BackgroundInput = liveBackground;
 	}
+	if(muteForced) GUI.Mute = liveMute;
 
 	bool wasLocked = locked_file!=NULL;
 	if(wasLocked) WinUnlockConfigFile();

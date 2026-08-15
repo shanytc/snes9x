@@ -85,6 +85,10 @@ void GBLinkMirrorPause();
 void GBLinkSyncResponsiveSettings();
 bool GBLinkGetUserResponsiveSettings(bool *inactivePause, bool *backgroundInput);
 
+// A spawned seat starts muted (only the master sounds); the stash keeps
+// the user's own Mute out of the shared config file.
+bool GBLinkGetUserMute(bool *mute);
+
 
 #include "_tfwopen.h"
 #ifdef UNICODE

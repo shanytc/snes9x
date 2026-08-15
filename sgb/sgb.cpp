@@ -2504,6 +2504,13 @@ namespace {
 std::unique_ptr<SGB::Emulator> g_split_cores[3];
 int g_split_players = 0;   // seats including the primary; 0 = off
 
+// Each seat's last completed frame, lifted out at its VBlank inside the
+// lockstep loop. Cores then never park while others run — a parked seat
+// cannot re-arm its serial port, and the adapter clocking bytes into it
+// shredded the data phase (F-1 Race's start grid garbled, then hung).
+uint16_t g_split_snap[4][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+bool     g_split_snap_valid[4] = {false, false, false, false};
+
 int SplitCollect(SGB::Emulator *out[4])
 {
 	int n = 0;
@@ -2511,6 +2518,18 @@ int SplitCollect(SGB::Emulator *out[4])
 	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
 		if (g_split_cores[k]) out[n++] = g_split_cores[k].get();
 	return n;
+}
+
+// Lift a completed frame out the moment VBlank latches it, then let the
+// core run on into the next frame; the blit reads the snapshot.
+bool SplitSnapIfReady(SGB::Emulator *core, int i)
+{
+	SGB::Emulator::Impl *im = core->DebugImpl();
+	if (!im->ppu.frame_ready) return false;
+	core->BlitScreenGB(g_split_snap[i], SGB_GB_SCREEN_W);
+	g_split_snap_valid[i] = true;
+	im->ppu.frame_ready   = false;
+	return true;
 }
 
 } // anonymous
@@ -2621,6 +2640,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		g_split_cores[k] = std::move(core);
 	}
 	g_split_players = players;
+	for (int k = 0; k < 4; ++k) g_split_snap_valid[k] = false;
 
 	SGB::Emulator *cs[4];
 	SGB::Serial   *ss[4];
@@ -2644,6 +2664,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	S9xSGBSplitSaveBatteries(battery_base_path);
 	SGB::SerialSplitDetach();
 	for (int k = 0; k < 3; ++k) g_split_cores[k].reset();
+	for (int k = 0; k < 4; ++k) g_split_snap_valid[k] = false;
 	g_split_players = 0;
 }
 
@@ -2695,18 +2716,19 @@ void S9xSGBSplitRunFrame(void)
 		static_cast<int32_t>((base_hz / SNES_FPS) * static_cast<double>(mul));
 
 	// Interleave by scanline so the in-process cable always peeks a peer
-	// within one line of the caller — lockstep the socket path can never
-	// have. Each seat still frame-locks at its own first VBlank, exactly
-	// like Emulator::RunFrame, so every viewport blits untorn.
-	int32_t remaining[4], safety[4];
-	bool    done[4];
+	// within one line of the caller. Cores never park: a seat hitting its
+	// VBlank snapshots the finished frame and runs on, so the adapter can
+	// never clock a byte into a console that was merely waiting with its
+	// frame done. Every core runs the identical cycle total per call.
+	int32_t remaining[4];
+	bool    has[4], snapped[4];
 	for (int i = 0; i < n; ++i)
 	{
 		SGB::Emulator::Impl *im = cs[i]->DebugImpl();
 		im->ppu.frame_ready = false;
 		remaining[i] = budget;
-		safety[i]    = 70224;
-		done[i]      = !im->has_rom;
+		has[i]       = im->has_rom;
+		snapped[i]   = false;
 	}
 
 	bool running = true;
@@ -2715,26 +2737,34 @@ void S9xSGBSplitRunFrame(void)
 		running = false;
 		for (int i = 0; i < n; ++i)
 		{
-			if (done[i]) continue;
-			SGB::Emulator::Impl *im = cs[i]->DebugImpl();
-			if (!im->ppu.frame_ready && remaining[i] > 0)
-			{
-				const int32_t chunk = remaining[i] < 456 ? remaining[i] : 456;
-				cs[i]->RunCycles(chunk);
-				remaining[i] -= chunk;
-				running = true;
-			}
-			else if (!im->ppu.frame_ready && (im->ppu.lcdc & 0x80) && safety[i] > 0)
-			{
-				cs[i]->RunCycles(456);
-				safety[i] -= 456;
-				running = true;
-			}
-			else
-			{
-				done[i] = true;
-			}
+			if (!has[i] || remaining[i] <= 0) continue;
+			const int32_t chunk = remaining[i] < 456 ? remaining[i] : 456;
+			cs[i]->RunCycles(chunk);
+			remaining[i] -= chunk;
+			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
+			running = true;
 		}
+	}
+
+	// The budget is a hair under one GB frame, so a core's VBlank slips
+	// out of the window now and then. Chase it with EVERY core still in
+	// lockstep — the multi-core version of RunFrame's first-VBlank frame
+	// lock, minus the parking.
+	int32_t chase = 70224;
+	for (;;)
+	{
+		bool owe = false;
+		for (int i = 0; i < n; ++i)
+			if (has[i] && !snapped[i] &&
+			    (cs[i]->DebugImpl()->ppu.lcdc & 0x80)) owe = true;
+		if (!owe || chase <= 0) break;
+		for (int i = 0; i < n; ++i)
+		{
+			if (!has[i]) continue;
+			cs[i]->RunCycles(456);
+			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
+		}
+		chase -= 456;
 	}
 
 	// Audio rides the primary alone — the seats' sample rings overflow
@@ -2759,26 +2789,35 @@ void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	if (!dest || g_split_players < 2) return;
 
-	SGB::Instance().BlitScreenGB(dest, pitch_pixels);
-	if (g_split_cores[0])
-		g_split_cores[0]->BlitScreenGB(dest + SGB_GB_SCREEN_W, pitch_pixels);
+	SGB::Emulator *cs[4];
+	const int n = SplitCollect(cs);
 
-	if (g_split_players >= 3)
+	for (int i = 0; i < n; ++i)
 	{
-		uint16_t *lower = dest + static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
-		if (g_split_cores[1])
-			g_split_cores[1]->BlitScreenGB(lower, pitch_pixels);
-		if (g_split_players == 4 && g_split_cores[2])
+		uint16_t *tile = dest + (i & 1) * SGB_GB_SCREEN_W +
+		                 (i >> 1) * static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
+		if (g_split_snap_valid[i])
 		{
-			g_split_cores[2]->BlitScreenGB(lower + SGB_GB_SCREEN_W, pitch_pixels);
+			// The frame captured at this seat's own VBlank; the core has
+			// long run past it.
+			for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
+				std::memcpy(tile + y * pitch_pixels,
+				            g_split_snap[i] + y * SGB_GB_SCREEN_W,
+				            SGB_GB_SCREEN_W * sizeof(uint16_t));
 		}
 		else
 		{
-			// Three players: the empty quadrant stays black.
-			for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
-				std::memset(lower + y * pitch_pixels + SGB_GB_SCREEN_W, 0,
-				            SGB_GB_SCREEN_W * sizeof(uint16_t));
+			cs[i]->BlitScreenGB(tile, pitch_pixels);
 		}
+	}
+
+	if (g_split_players == 3)
+	{
+		// Three players: the empty quadrant stays black.
+		uint16_t *lower = dest + static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
+		for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
+			std::memset(lower + y * pitch_pixels + SGB_GB_SCREEN_W, 0,
+			            SGB_GB_SCREEN_W * sizeof(uint16_t));
 	}
 }
 

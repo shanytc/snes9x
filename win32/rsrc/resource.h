@@ -959,6 +959,7 @@
 #define ID_EMULATION_GB_LINK_SAME_4     40223
 #define ID_EMULATION_GB_LINK_CONNECT    40224
 #define ID_EMULATION_GB_LINK_DISCONNECT 40225
+#define ID_EMULATION_GB_LINK_SPLIT      40226
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

@@ -447,6 +447,22 @@ void CompleteActive(Serial &s, Memory &mem)
 	s.peer_data     = 0xFF;
 }
 
+// Step an armed transfer whose outcome is already known (stub or master
+// under the adapter: the wire idles $FF). It still takes its eight bit
+// periods — an instant IRQ re-enters the game's ISR before the
+// bookkeeping that follows the SC write, and corrupts its state.
+void StepResolvedActive(Serial &s, Memory &mem, int32_t tcycles)
+{
+	if (!s.active) return;
+	s.bit_timer -= tcycles;
+	while (s.bit_timer <= 0 && s.bits_left > 0)
+	{
+		--s.bits_left;
+		s.bit_timer += s.bit_period;
+	}
+	if (s.bits_left == 0) CompleteActive(s, mem);
+}
+
 // Finish a transfer the peer clocked for us.
 void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 {
@@ -477,9 +493,10 @@ void TrySettlePending(Serial &s, Memory &mem)
 }
 
 // The countdown of an in-process master ran out: read the other core's
-// live state, completing its slave side on the spot. An unarmed peer
-// leaves the wire idle, exactly like the socket cable's empty ack.
-void SplitResolveMaster(Serial &s, Memory &mem)
+// live state, completing its slave side on the spot. False when the
+// peer has nothing armed — the caller waits out the interleave skew
+// before ruling the wire idle.
+bool SplitTryResolveMaster(Serial &s, Memory &mem)
 {
 	Serial *ps = (&s == g_splitlink.s[0]) ? g_splitlink.s[1] : g_splitlink.s[0];
 	Memory *pm = (&s == g_splitlink.s[0]) ? g_splitlink.m[1] : g_splitlink.m[0];
@@ -491,11 +508,9 @@ void SplitResolveMaster(Serial &s, Memory &mem)
 		s.peer_data     = theirs;
 		s.peer_valid    = true;
 		s.peer_supplied = true;
-		return;
+		return true;
 	}
-	s.peer_data     = 0xFF;
-	s.peer_valid    = true;
-	s.peer_supplied = false;
+	return false;
 }
 
 void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
@@ -1187,13 +1202,19 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		}
 		if (value & 0x01)
 		{
+			// Driving the internal clock under the adapter reads the idle
+			// wire, but only after the real eight bit periods.
 			if (g_serial_cb) g_serial_cb(mem.serial_data);
-			Trace("[%lld] p1  MASTER WRITE under hub -> instant $FF stub",
+			Trace("[%lld] MASTER WRITE under hub -> timed $FF",
 			      (long long)s.real_cycles);
-			s.active = s.passive = false;
-			mem.serial_data    = 0xFF;
-			mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
-			mem.serial_control = static_cast<uint8_t>(value & 0x7F);
+			s.passive       = false;
+			s.active        = true;
+			s.bits_left     = 8;
+			s.bit_period    = BitPeriod(s, value);
+			s.bit_timer     = s.bit_period;
+			s.peer_valid    = true;
+			s.peer_data     = 0xFF;
+			s.peer_supplied = false;
 			return;
 		}
 		s.active  = false;
@@ -1222,6 +1243,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			s.peer_valid    = false;
 			s.peer_supplied = false;
 			s.peer_data     = 0xFF;
+			s.split_grace   = 912;   // two interleave slices of skew
 			return;
 		}
 		s.active  = false;
@@ -1231,15 +1253,20 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 
 	if (!LinkIsConnected())
 	{
-		// Unlinked stub path: internal clock completes at once, external
-		// leaves bit 7 set, which is how games spot a missing cable.
+		// Unlinked stub path: internal clock shifts the idle wire's $FF in
+		// over the real eight bit periods; external leaves bit 7 set,
+		// which is how games spot a missing cable.
 		s.active = s.passive = false;
 		if ((value & 0x81) == 0x81)
 		{
 			if (g_serial_cb) g_serial_cb(mem.serial_data);
-			mem.serial_data    = 0xFF;
-			mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
-			mem.serial_control = static_cast<uint8_t>(value & 0x7F);
+			s.active        = true;
+			s.bits_left     = 8;
+			s.bit_period    = BitPeriod(s, value);
+			s.bit_timer     = s.bit_period;
+			s.peer_valid    = true;
+			s.peer_data     = 0xFF;
+			s.peer_supplied = false;
 		}
 		return;
 	}
@@ -1307,7 +1334,12 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		s.real_cycles += tcycles;
 	}
 
-	if (!SerialLinkIsEnabled() && !SerialSplitActive()) return;
+	if (!SerialLinkIsEnabled() && !SerialSplitActive())
+	{
+		// No session: only the stub's timed $FF countdown has work here.
+		StepResolvedActive(s, mem, tcycles);
+		return;
+	}
 
 	if (!SerialSplitActive())
 	{
@@ -1321,6 +1353,9 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 
 	if (g_hub.hosting)
 	{
+		// A master write under the adapter completes as a timed $FF.
+		StepResolvedActive(s, mem, tcycles);
+
 		// The adapter free-runs from power-on, peers or none: a lone
 		// player 1 still sees itself connected, exactly like hardware.
 		// In split screen only seat 0's core clocks it; the other cores
@@ -1330,7 +1365,12 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		return;
 	}
 
-	if (!LinkIsConnected() && !SerialSplitActive()) return;
+	if (!LinkIsConnected() && !SerialSplitActive())
+	{
+		// Session up but nobody attached yet: same stub semantics.
+		StepResolvedActive(s, mem, tcycles);
+		return;
+	}
 
 	if (s.active)
 	{
@@ -1342,11 +1382,31 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		}
 		if (s.bits_left == 0)
 		{
+			bool settle = true;
 			if (!s.peer_valid)
 			{
 				if (SerialSplitActive())
 				{
-					SplitResolveMaster(s, mem);
+					if (!SplitTryResolveMaster(s, mem))
+					{
+						// The other core lags by up to an interleave slice;
+						// an arm resolved away this instant may already have
+						// happened in its near future. Wait out the skew
+						// before calling the wire idle.
+						if (s.split_grace > 0)
+						{
+							s.split_grace -= tcycles;
+							settle = false;
+						}
+						else
+						{
+							Trace("[%lld] split master unanswered -> FF",
+							      (long long)s.real_cycles);
+							s.peer_data     = 0xFF;
+							s.peer_valid    = true;
+							s.peer_supplied = false;
+						}
+					}
 				}
 				else
 				{
@@ -1354,7 +1414,7 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 					if (!s.peer_valid) WaitForPeer(s, mem);
 				}
 			}
-			CompleteActive(s, mem);
+			if (settle) CompleteActive(s, mem);
 		}
 	}
 

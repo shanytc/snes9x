@@ -1175,8 +1175,7 @@ void HubSendByte(Serial &s, Memory &mem)
 {
 	// A completed bulk re-anchored every game's framing; restart the
 	// slot cycle with them.
-	if (g_hub.local && g_hub.phase == kDmg07Net && g_hub.size == 1 &&
-	    g_hub.bulk_stage == 7)
+	if (g_hub.phase == kDmg07Net && g_hub.size == 1 && g_hub.bulk_stage == 7)
 	{
 		std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
 		g_hub.buf_pos    = 0;
@@ -1241,7 +1240,7 @@ void HubSendByte(Serial &s, Memory &mem)
 	// so the slot cycle can re-anchor when the games' framing shifts.
 	// Signalling games only: a streaming game's payload will contain
 	// this byte sequence eventually, and it means nothing there.
-	if (g_hub.local && g_hub.phase == kDmg07Net && g_hub.size == 1)
+	if (g_hub.phase == kDmg07Net && g_hub.size == 1)
 	{
 		const uint8_t ob = out[0];
 		if (g_hub.bulk_stage < 4)
@@ -1454,6 +1453,28 @@ void HubRunByte(Serial &s, Memory &mem)
 	// they arrive; one extra drain here just shortens their latency. A
 	// split-screen hub has no sockets to service at all.
 	if (!g_hub.local) ServiceLink(s, mem);
+
+	// A sourced bulk relays one staged byte per transfer, and the seat
+	// staging it produces each byte only when clocked for the one
+	// before. In process that answer is instant; over a socket the seat
+	// is a whole emulator running in frame bursts, so the byte can be
+	// milliseconds out. Hold the event for it rather than broadcasting
+	// a gap — the consoles count bulk bytes, and one wrong byte rotates
+	// their framing for the rest of the session. The cap is the same
+	// idea as the in-process arm grace: long enough for a seat that is
+	// merely late, short enough to give up on one that has stopped.
+	if (!g_hub.local && g_hub.phase == kDmg07Net && g_hub.bulk_stage == 6 &&
+	    g_hub.bulk_src > 0 && g_hub.rq_len == 0)
+	{
+		if (g_hub.event_grace < 64)
+		{
+			++g_hub.event_grace;
+			g_hub.timer += 456;
+			return;
+		}
+		Trace("hub bulk relay starved (seat %d)", g_hub.bulk_src + 1);
+	}
+	g_hub.event_grace = 0;
 
 	if (g_hub.prev_valid)
 	{

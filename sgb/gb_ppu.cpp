@@ -80,6 +80,15 @@ constexpr int32_t MODE3_DOTS        = 172;
 constexpr int32_t MODE0_DOTS        = 204;
 constexpr int32_t MODE3_SETUP_DOTS  = GB_MODE3_SETUP_DOTS;
 constexpr int32_t SPRITE_STALL_DOTS = 6;
+
+// The mode-2 STAT source is a pulse at the scanline boundary, not a level
+// held across all 80 OAM-scan dots: SameBoy asserts its mode_for_interrupt
+// = 2 around the LY increment and drops it to "no source" a T-cycle later
+// (Core/display.c, "The OAM STAT interrupt occurs 1 T-cycle before STAT
+// actually changes"). Holding it for the whole mode makes any STAT write
+// landing in OAM scan look like an active source, and the DMG STAT-write
+// quirk then fires an interrupt real hardware never would.
+constexpr int32_t OAM_IRQ_DOTS = 4;
 constexpr int32_t LINE_DOTS  = MODE2_DOTS + MODE3_DOTS + MODE0_DOTS;  // 456
 constexpr int32_t VISIBLE_LINES = 144;
 constexpr int32_t TOTAL_LINES   = 154;
@@ -93,6 +102,12 @@ inline uint8_t ApplyPalette(uint8_t palette, uint8_t color_idx)
 	// BGP/OBP0/OBP1 are 2-bit mappings packed into 8 bits:
 	//   bits 1:0 = shade for color 0, 3:2 for color 1, 5:4 for color 2, 7:6 for color 3.
 	return static_cast<uint8_t>((palette >> (color_idx * 2)) & 0x03);
+}
+
+// The mode-2 STAT source, live only for the pulse at the top of the line.
+inline bool OamIrqActive(const Ppu &p)
+{
+	return p.mode == PpuMode::OamScan && p.mode_clock < OAM_IRQ_DOTS;
 }
 
 void RecomputeStatLine(Ppu &p, Memory &mem, bool defer_irq = false)
@@ -131,7 +146,7 @@ void RecomputeStatLine(Ppu &p, Memory &mem, bool defer_irq = false)
 	if (p.lcdc & 0x80)
 	{
 		if ((p.stat & 0x40) && lyc_match)                       line_high = true;
-		if ((p.stat & 0x20) && p.mode == PpuMode::OamScan)       line_high = true;
+		if ((p.stat & 0x20) && OamIrqActive(p))                  line_high = true;
 		if ((p.stat & 0x10) && p.mode == PpuMode::VBlank)        line_high = true;
 		if ((p.stat & 0x08) && p.mode == PpuMode::HBlank)        line_high = true;
 	}
@@ -673,6 +688,8 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 	switch (p.mode)
 	{
 	case PpuMode::OamScan:
+		// Pulse over: let the line fall so a later source can edge again.
+		if (p.mode_clock == OAM_IRQ_DOTS) RecomputeStatLine(p, mem, true);
 		if (p.mode_clock >= MODE2_DOTS)
 		{
 			p.mode_clock -= MODE2_DOTS;
@@ -1000,7 +1017,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				const bool any_source_active =
 					p.mode == PpuMode::HBlank ||
 					p.mode == PpuMode::VBlank ||
-					p.mode == PpuMode::OamScan ||
+					OamIrqActive(p) ||
 					p.ly == p.lyc;
 				if (any_source_active)
 					mem.if_ = static_cast<uint8_t>(mem.if_ | IRQ_LCDSTAT);

@@ -167,8 +167,46 @@ not guess at it, the references are exact. Summary:
   player's fresh data lands in the half of the double buffer not being
   broadcast — a one-packet delay that is part of the protocol. Empty
   ports read as zeroes.
-- **Restart**: ≥3 consecutive `$FF` from player 1 → one all-`$FF`
-  packet → back to ping, presence cleared.
+- **Restart**: 3 consecutive armed `$FF` replies from player 1 → one
+  all-`$FF` packet → back to ping, presence cleared. Armed only, and
+  exactly three: Jantaku Boy's stage-1 command blocks are
+  `[cmd,FF,FF,00]`, so a looser rule reads its filler as a quit — and
+  the all-`$FF` restart packet is that game's stage-1 abort signal.
+
+#### Undocumented adapter behaviour
+
+Everything above is what the references cover, and it is enough for the
+games they were derived from — the ones that treat the adapter as a
+broadcast pipe and stream at a fixed rate. Jantaku Boy does not: all
+four consoles run the full simulation and trade one-byte signals, and
+it depends on three adapter behaviours no public source describes.
+They were recovered from its machine code, which is now the only
+surviving description of these states. shonumi's hardware capture does
+show the wake (["some random looking
+data"](https://shonumi.github.io/articles/art9.html)) — F-1 Race
+ignores it, so it was never decoded.
+
+- **Restart-wake**: a `[cmd,FF,FF,break]` block is a mid-session
+  restart request. The adapter answers by re-announcing the
+  transmission — one `[FD,FF,FF,FF]` window. Games park with the LCD
+  off and only the serial interrupt enabled waiting for it; no console
+  can produce it. Three or more `$FF` is still the quit flood above.
+  Read at packet size 1 only, so a streaming game's payload can never
+  trip it.
+- **Length echo**: the byte after the window is a bulk length, and it
+  is the requesting console's own command byte. It rides that
+  console's reply slot, so the adapter must place it in slot 0 of the
+  announcement and protect it from the replies still in flight.
+- **Bulk relay**: the payload that follows is the requester's staged
+  block, relayed contiguously rather than sampled per slot. The
+  interleave that is right for signal windows fills every console's
+  mirror tables with three seats of unrelated bytes.
+
+Two consequences for the adapter's own bookkeeping: the slot cycle
+re-anchors when a bulk ends (its length rotates every console's 4-byte
+framing), and the `$CC` acknowledgment is held for a few packets so
+slow consoles reach their serial wait before the one-shot
+announcement.
 
 Emulation shape: the instance that picks 3/4 players hosts the adapter
 and is always player 1. Its own GB completes in-process; every remote

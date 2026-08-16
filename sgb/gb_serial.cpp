@@ -1063,11 +1063,13 @@ void HubPacketBoundary()
 				g_hub.phase      = kDmg07Sync;
 				g_hub.begin_sync = false;
 				g_hub.aa_run     = 0;
-				// Several $CC packets, not one: the games take different
-				// paths into their post-sync serial wait (Jantaku Boy's
-				// parent stages a payload first), and the transmission's
-				// one-shot first packet must find every console listening.
-				g_hub.sync_tail  = 5;
+				// Signalling games (size 1) get several $CC packets, not
+				// one: they take different paths into their post-sync
+				// serial wait and the announcement below is one-shot, so
+				// it must find every console listening. Streaming games
+				// start feeding the buffer immediately — a held tail
+				// throws their first packets away.
+				g_hub.sync_tail  = g_hub.size_reply == 1 ? 5 : 0;
 			}
 			break;
 
@@ -1089,17 +1091,23 @@ void HubPacketBoundary()
 			if (sz > 4) sz = 4;
 			g_hub.size = sz;
 
-			// The first transmission packet is "garbage" per Pan Docs — but
-			// structured garbage: it announces the transmission with the
-			// [FD,FF,FF,FF] window, and the next byte is a bulk length.
-			// Jantaku Boy waits for exactly this to leave its lobby; the
-			// $04 here is a placeholder its parent overwrites with the
-			// real length. F-1 Race ignores the first packet either way.
+			// The first transmission packet is "garbage" per Pan Docs. For
+			// signalling games it is structured garbage: the [FD,FF,FF,FF]
+			// announcement plus a bulk length ($04 is a placeholder the
+			// staging console overwrites). Streaming games must not see
+			// it — F-1 Race reads the first packet as racer data, and the
+			// length would drive the bulk tracker into re-anchoring its
+			// wire mid-stream.
 			std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
-			std::memset(g_hub.buffer, 0xFF, 4);
-			g_hub.buffer[0]       = 0xFD;
-			g_hub.buffer[4]       = 0x04;
+			if (sz == 1)
+			{
+				std::memset(g_hub.buffer, 0xFF, 4);
+				g_hub.buffer[0] = 0xFD;
+				g_hub.buffer[4] = 0x04;
+			}
 			g_hub.buf_pos         = 0;
+			g_hub.bulk_stage      = 0;
+			g_hub.bulk_left       = 0;
 			g_hub.ff_run          = 0;
 			g_hub.restart_pending = false;
 			g_hub.wake_pending    = false;
@@ -1125,7 +1133,7 @@ void HubPacketBoundary()
 			// transmission. Same shape as the session-start packet — the
 			// wake window plus a phase-neutral length that the consoles'
 			// own post-wake replies overwrite with the real bulk length.
-			if (g_hub.wake_pending && g_hub.bulk_stage == 0)
+			if (g_hub.wake_pending && g_hub.bulk_stage == 0 && g_hub.size == 1)
 			{
 				std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
 				std::memset(g_hub.buffer, 0xFF, 4);
@@ -1164,7 +1172,8 @@ void HubSendByte(Serial &s, Memory &mem)
 {
 	// A completed bulk re-anchored every game's framing; restart the
 	// slot cycle with them.
-	if (g_hub.local && g_hub.phase == kDmg07Net && g_hub.bulk_stage == 7)
+	if (g_hub.local && g_hub.phase == kDmg07Net && g_hub.size == 1 &&
+	    g_hub.bulk_stage == 7)
 	{
 		std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
 		g_hub.buf_pos    = 0;
@@ -1227,7 +1236,9 @@ void HubSendByte(Serial &s, Memory &mem)
 
 	// Track the wake-window + LEN-bulk sequence on the broadcast stream
 	// so the slot cycle can re-anchor when the games' framing shifts.
-	if (g_hub.local && g_hub.phase == kDmg07Net)
+	// Signalling games only: a streaming game's payload will contain
+	// this byte sequence eventually, and it means nothing there.
+	if (g_hub.local && g_hub.phase == kDmg07Net && g_hub.size == 1)
 	{
 		const uint8_t ob = out[0];
 		if (g_hub.bulk_stage < 4)
@@ -1416,18 +1427,18 @@ void HubRunByte(Serial &s, Memory &mem)
 	// In-process net phase: hold the byte event while a console is
 	// between re-arms — the interleave can put a seat a few hundred
 	// cycles "behind" an instant that real wiring spreads over a
-	// millisecond. At hardware byte pacing (SIZE=1: ~2k cycles per byte)
-	// one dropped byte desyncs a console's bulk counter and rotates its
-	// frame alignment beyond recovery, so the wait must outlast any
-	// slice skew; the cap only exists for a console that stopped
-	// serial work entirely (session teardown).
+	// millisecond. Signalling games wait longer: one dropped byte
+	// desyncs a console's bulk counter and rotates its framing beyond
+	// recovery. Streaming games keep the short wait — they leave the
+	// wire idle between packets by design, and a long hold would
+	// throttle the whole session to that console's pace.
 	if (g_hub.local && g_hub.phase == kDmg07Net)
 	{
 		bool all_armed = s.passive;
 		for (int k = 1; k < g_splitlink.count && all_armed; ++k)
 			if (g_splitlink.s[k] && !g_splitlink.s[k]->passive)
 				all_armed = false;
-		if (!all_armed && g_hub.event_grace < 64)
+		if (!all_armed && g_hub.event_grace < (g_hub.size == 1 ? 64 : 8))
 		{
 			++g_hub.event_grace;
 			g_hub.timer += 456;

@@ -130,6 +130,13 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 void SerialSplitDetach();
 bool SerialSplitActive();
 
+// Emit one line into the SGB_LINK_TRACE log (no-op when tracing is off).
+// Lets the split runner log per-core state the serial layer cannot see.
+void SerialTraceMsg(const char *msg);
+
+// Tell the PC tracer which split seat is currently executing (-1 = none).
+void SerialSetTraceSeat(int seat);
+
 // One-line state for the OSD, e.g. "Link cable: connected (Master)". The
 // suffix appears only once a byte has crossed.
 void SerialLinkStatusText(char *buf, size_t cap);

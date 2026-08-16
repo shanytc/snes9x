@@ -697,6 +697,41 @@ bool SplitTryResolveMaster(Serial &s, Memory &mem)
 	return false;
 }
 
+// The peer core was not armed for a clock we drove. Hold the byte for
+// it the way the socket transport holds a peer emulator's: hardware
+// shifts it into the other console's register whether or not that
+// console asked for a transfer, and a game that clocks unilaterally
+// (Micro Machines promotes itself to master on a timeout, whatever the
+// other console is doing) sends most of its handshake into exactly
+// this gap. Games with a settled master and slave never notice, which
+// is why nothing else needed it.
+void SplitHoldClock(Serial &s, uint8_t data)
+{
+	Serial *ps = (&s == g_splitlink.s[0]) ? g_splitlink.s[1] : g_splitlink.s[0];
+	if (!ps || ps->pending_len >= Serial::kPendingCap) return;
+
+	const int tail = (ps->pending_head + ps->pending_len) % Serial::kPendingCap;
+	ps->pending_data[tail] = data;
+	ps->pending_i1[tail]   = 0;
+	if (ps->pending_len == 0) ps->pending_age = 0;
+	++ps->pending_len;
+}
+
+// Deliver one held clock once this core arms. Nothing is sent back:
+// the core that drove it settled long ago, exactly as it would have
+// against a wire whose other end was not listening yet.
+void SplitSettlePending(Serial &s, Memory &mem)
+{
+	if (!s.passive || !s.pending_len || s.ext_gap_timer > 0) return;
+
+	uint8_t  data;
+	uint32_t i1;
+	PendingPop(s, data, i1);
+	Trace("[%lld] split settle held %02X (left=%u)",
+	      (long long)s.real_cycles, data, s.pending_len);
+	CompletePassive(s, mem, data);
+}
+
 void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 {
 	LinkSession &ses = g_sessions[ch];
@@ -1785,8 +1820,9 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 						}
 						else
 						{
-							Trace("[%lld] split master unanswered -> FF",
+							Trace("[%lld] split master unanswered -> FF (held)",
 							      (long long)s.real_cycles);
+							SplitHoldClock(s, mem.serial_data);
 							s.peer_data     = 0xFF;
 							s.peer_valid    = true;
 							s.peer_supplied = false;
@@ -1803,9 +1839,25 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		}
 	}
 
-	// Held clocks and timestamps are socket concepts; the in-process
-	// cable resolves against live state and has neither.
-	if (SerialSplitActive()) return;
+	// Timestamps are a socket concept; held clocks are not. Deliver one
+	// when this core arms, paced like the socket path, and let a byte
+	// nobody ever collected age out after a frame.
+	if (SerialSplitActive())
+	{
+		if (s.ext_gap_timer > 0) s.ext_gap_timer -= tcycles;
+		SplitSettlePending(s, mem);
+		if (s.pending_len && !s.passive)
+		{
+			s.pending_age += tcycles;
+			if (s.pending_age >= kPendingHoldActive)
+			{
+				uint8_t  stale;
+				uint32_t unused;
+				PendingPop(s, stale, unused);
+			}
+		}
+		return;
+	}
 
 	if (s.ext_gap_timer > 0) s.ext_gap_timer -= tcycles;
 	TrySettlePending(s, mem);
@@ -1972,6 +2024,8 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 	{
 		g_splitlink.s[i] = serials[i];
 		g_splitlink.m[i] = mems[i];
+		// A byte held from an earlier session belongs to nobody here.
+		PendingClear(*serials[i]);
 	}
 
 	if (count > 2 || force_hub)

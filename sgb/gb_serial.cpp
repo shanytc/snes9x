@@ -247,11 +247,6 @@ struct Dmg07
 	uint8_t size_reply = 0;   // player 1's SIZE reply, latched during ping
 	uint8_t size       = 1;   // packet size in force for the transmission run
 	bool    begin_sync = false;
-	// Ping packets still owed after the $CC acknowledgment before the
-	// transmission starts. Jantaku Boy's event system needs at least one
-	// post-sync FE+presence heartbeat or its lobby coroutine starts its
-	// step counter at zero and sleeps forever.
-	uint8_t sync_tail  = 0;
 	uint8_t ff_run     = 0;   // consecutive $FF replies from player 1
 	bool    restart_pending = false;
 
@@ -953,13 +948,10 @@ void HubInterpretLocal()
 			case 2:
 				// The $88 acks are what "connected" means; while $AA rides
 				// these wires, player 1 stays counted (GBE+ rule) — even
-				// before the train is long enough to flip the phase. The
-				// sync tail keeps presence sticky: the games have left the
-				// connection screen and no longer ack, but the heartbeat
-				// they key on needs the bits standing.
+				// before the train is long enough to flip the phase.
 				if ((armed && (b == 0x88 || b == 0xAA)) || g_hub.begin_sync)
 					g_hub.status = static_cast<uint8_t>(g_hub.status | 0x10);
-				else if (!g_hub.sync_tail)
+				else
 					g_hub.status = static_cast<uint8_t>(g_hub.status & ~0x10);
 				break;
 
@@ -1029,7 +1021,7 @@ void HubInterpretLocalSeats()
 			const uint8_t bit = static_cast<uint8_t>(1 << (4 + k));
 			if (armed && b == 0x88)
 				g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
-			else if (!g_hub.sync_tail)
+			else
 				g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);
 		}
 
@@ -1063,27 +1055,11 @@ void HubPacketBoundary()
 				g_hub.phase      = kDmg07Sync;
 				g_hub.begin_sync = false;
 				g_hub.aa_run     = 0;
-				// Signalling games (size 1) get several $CC packets, not
-				// one: they take different paths into their post-sync
-				// serial wait and the announcement below is one-shot, so
-				// it must find every console listening. Streaming games
-				// start feeding the buffer immediately — a held tail
-				// throws their first packets away.
-				g_hub.sync_tail  = g_hub.size_reply == 1 ? 5 : 0;
 			}
 			break;
 
 		case kDmg07Sync:
 		{
-			// Hold the acknowledgment for a few packets so every console
-			// reaches its serial wait before the one-shot first packet.
-			if (g_hub.sync_tail > 1)
-			{
-				--g_hub.sync_tail;
-				break;
-			}
-			g_hub.sync_tail = 0;
-
 			// The RATE and SIZE latched during ping take effect here. Pan
 			// Docs: sizes 1..4 are what works without issue.
 			uint8_t sz = g_hub.size_reply;
@@ -1091,20 +1067,12 @@ void HubPacketBoundary()
 			if (sz > 4) sz = 4;
 			g_hub.size = sz;
 
-			// The first transmission packet is "garbage" per Pan Docs. For
-			// signalling games it is structured garbage: the [FD,FF,FF,FF]
-			// announcement plus a bulk length ($04 is a placeholder the
-			// staging console overwrites). Streaming games must not see
-			// it — F-1 Race reads the first packet as racer data, and the
-			// length would drive the bulk tracker into re-anchoring its
-			// wire mid-stream.
+			// The real buffer starts as ping-phase garbage; games are told
+			// to ignore the first packet, so zeroes are as good (GBE+ does
+			// the same). Nothing is announced here: the adapter announces
+			// a transmission only when a console asks for one, and a
+			// console that wants the first bulk asks like any other.
 			std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
-			if (sz == 1)
-			{
-				std::memset(g_hub.buffer, 0xFF, 4);
-				g_hub.buffer[0] = 0xFD;
-				g_hub.buffer[4] = 0x04;
-			}
 			g_hub.buf_pos         = 0;
 			g_hub.bulk_stage      = 0;
 			g_hub.bulk_left       = 0;

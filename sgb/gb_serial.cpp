@@ -122,6 +122,17 @@ constexpr uint32_t kUnansweredIdle   = 4;
 // until a reset. That is what garbled F-1 Race's racer-entry screen.
 constexpr int32_t kExtByteGap = 4257;
 
+// Floor between arming and the first completion, the 0.128 ms the DMG-07
+// spends shifting eight bits in. A held clock settled in the same
+// instruction that set SC.7 is something no wire can do, and games write
+// their arm and their IF housekeeping back to back: F1 Pole Position's
+// link init clears IF three instructions after arming ($39FC then $01CC),
+// so an instant settle loses that transfer's interrupt outright. Nothing
+// re-arms the port afterwards but the serial ISR, so the console drops out
+// of the session for good — which is what left every joining instance
+// stuck answering $F0 to the adapter's pings.
+constexpr int32_t kExtShiftTime = 537;
+
 // Ceiling on the master's stall waiting for a reply - bounded so a frozen
 // peer can't take this instance down with it.
 constexpr int kMasterWaitMs = 500;
@@ -204,6 +215,18 @@ constexpr int32_t kCyclesPerMs = 4194;
 // 1.42 ms gap), then a 12.2 ms + (RATE & $0F) ms rest.
 constexpr int32_t kPingByteGap = 6486;
 constexpr int32_t kPingRest    = 51169;
+
+// Rest after the one packet of $CC that announces transmission, for
+// socket sessions only. Hardware gives the consoles the ordinary ping
+// rest to notice it, and they need it: the $CC packet is sent once, and
+// a console that has not matched four of them in its receive slots
+// before the next packet overwrites them stays in the ping phase for
+// good (F1 Pole Position then sits on RACER ENTRY with that seat's
+// block reading back as its ping reply). A joining instance runs a
+// frame behind the adapter and replays that rest as one byte gap, so
+// the window has to come from the adapter instead: stop clocking long
+// enough for every seat to drain its backlog and run a main loop.
+constexpr int32_t kSyncSettle  = 4 * 70224;
 
 // Transmission packets: byte-to-byte is 0.887 ms + (RATE >> 4) * 0.106 ms
 // plus the shift itself, and the packet repeats no faster than
@@ -1401,8 +1424,12 @@ void HubAdvance()
 	int32_t delay;
 	if (g_hub.phase == kDmg07Ping || g_hub.phase == kDmg07Sync)
 	{
-		delay = (g_hub.wire != 0) ? kPingByteGap
-		                          : kPingRest + lo * kCyclesPerMs;
+		if (g_hub.wire != 0)
+			delay = kPingByteGap;
+		else if (g_hub.phase == kDmg07Sync && !g_hub.local)
+			delay = kSyncSettle;   // seats over sockets need the room
+		else
+			delay = kPingRest + lo * kCyclesPerMs;
 	}
 	else
 	{
@@ -1689,6 +1716,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		}
 		s.active  = false;
 		s.passive = true;
+		if (s.ext_gap_timer < kExtShiftTime) s.ext_gap_timer = kExtShiftTime;
 		return;
 	}
 
@@ -1745,13 +1773,13 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		return;
 	}
 
-	// External clock: arm and wait to be clocked by the peer.
+	// External clock: arm and wait to be clocked by the peer. A held byte
+	// settles from SerialStep once the shift time has passed, so a backlog
+	// drains one re-arm at a time at hardware pace and never lands inside
+	// the instruction that armed the port.
 	s.active  = false;
 	s.passive = true;
-
-	// A held byte settles now if the wire could have clocked it already;
-	// a backlog drains one re-arm at a time, at hardware pace.
-	TrySettlePending(s, mem);
+	if (s.ext_gap_timer < kExtShiftTime) s.ext_gap_timer = kExtShiftTime;
 }
 
 void SerialStep(Serial &s, Memory &mem, int32_t tcycles)

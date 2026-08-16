@@ -2538,19 +2538,38 @@ void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
 
 // Resets reach every split-screen seat: the consoles power-cycle
 // together, and the local adapter restarts from its ping phase.
+// Consoles never come up in step: they are switched on seconds apart
+// and their crystals drift after that. Split seats reset together run
+// bit-identical instead, so a game that arbitrates the cable by
+// "whoever hears nothing first drives it" — Micro Machines promotes
+// itself to master after 30 idle ticks — has both seats promote on the
+// very same cycle and neither is ever listening. Offset the second
+// seat; the difference lasts until the next reset re-applies it.
+// Adapter sessions are left alone: the DMG-07 owns the clock there and
+// nothing arbitrates for it.
+static void SplitStaggerSeats(void)
+{
+	if (S9xSGBSplitPlayers() != 2 || S9xSGBCartNeedsDmg07()) return;
+	if (g_split_cores[0]) g_split_cores[0]->RunCycles(17556);   // a quarter frame
+}
+
 void S9xSGBReset(void)
 {
 	SGB::Instance().ColdReset();
 	for (int k = 0; k < 3; ++k)
 		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
+	SplitStaggerSeats();
 }
 
 bool S9xSGBSoftReset(void)
 {
 	const bool ok = SGB::Instance().SoftReset();
 	if (ok)
+	{
 		for (int k = 0; k < 3; ++k)
 			if (g_split_cores[k]) g_split_cores[k]->SoftReset();
+		SplitStaggerSeats();
+	}
 	return ok;
 }
 bool S9xSGBIsActive(void)           { return SGB::Instance().HasROM(); }
@@ -2660,6 +2679,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07());
 
 	S9xSGBSplitLoadBatteries(battery_base_path);
+	SplitStaggerSeats();
 	return true;
 }
 

@@ -2744,6 +2744,7 @@ void S9xSGBSplitRunFrame(void)
 		{
 			if (!has[i] || remaining[i] <= 0) continue;
 			const int32_t chunk = remaining[i] < 456 ? remaining[i] : 456;
+			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(chunk);
 			remaining[i] -= chunk;
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
@@ -2766,10 +2767,29 @@ void S9xSGBSplitRunFrame(void)
 		for (int i = 0; i < n; ++i)
 		{
 			if (!has[i]) continue;
+			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(456);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
 		}
 		chase -= 456;
+	}
+	SGB::SerialSetTraceSeat(-1);
+
+	// Jantaku Boy investigation: each core's PC once per host frame — a
+	// core stuck in a tight spin shows the same PC every line.
+	{
+		char pcline[200];
+		int  pn = 0;
+		for (int i = 0; i < n && pn < (int)sizeof(pcline) - 40; ++i)
+		{
+			SGB::Emulator::Impl *im = cs[i]->DebugImpl();
+			const SGB::CpuState &cst = im->cpu.State();
+			pn += snprintf(pcline + pn, sizeof(pcline) - (size_t)pn,
+			               " p%d[pc=%04X%s%s ly=%02X lcdc=%02X]",
+			               i + 1, cst.r.pc, cst.halted ? " HALT" : "",
+			               cst.ime ? "" : " !ime", im->ppu.ly, im->ppu.lcdc);
+		}
+		SGB::SerialTraceMsg(pcline);
 	}
 
 	// Audio rides the primary alone — the seats' sample rings overflow

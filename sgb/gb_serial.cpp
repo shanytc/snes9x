@@ -23,6 +23,7 @@
 #include "gb_serial.h"
 #include "gb_link.h"
 #include "gb_memory.h"
+#include "gb_joypad.h"
 #include "gb_cpu.h"
 
 #include <cstdio>
@@ -228,13 +229,65 @@ struct Dmg07
 
 	uint8_t phase      = kDmg07Ping;
 	uint8_t wire       = 0;   // byte index inside the current packet
+	// Net-phase byte events wait briefly for every console to re-arm: a
+	// missed transfer shifts that console's reply cycle permanently and
+	// rotates its blocks in the broadcast (Jantaku Boy's confirm landed
+	// on the wrong window byte). Real ~1 ms byte gaps never miss.
+	uint8_t event_grace = 0;
+
+	// Bulk re-anchoring: a [FD,FF,FF,FF] wake window followed by an
+	// LEN-prefixed bulk shifts every game's 4-byte framing by LEN mod 4.
+	// The adapter is a dumb pipe — the games' framing is THE framing —
+	// so the slot cycle re-anchors when the bulk ends. 0=idle, 1..3 =
+	// wake-window match, 4 = next byte is LEN, 6 = counting, 7 = done.
+	uint8_t bulk_stage = 0;
+	uint8_t bulk_left  = 0;
 	uint8_t status     = 0;   // presence bits 4-7, one per port
 	uint8_t rate       = 0;   // player 1's RATE reply, latched during ping
 	uint8_t size_reply = 0;   // player 1's SIZE reply, latched during ping
 	uint8_t size       = 1;   // packet size in force for the transmission run
 	bool    begin_sync = false;
+	// Ping packets still owed after the $CC acknowledgment before the
+	// transmission starts. Jantaku Boy's event system needs at least one
+	// post-sync FE+presence heartbeat or its lobby coroutine starts its
+	// step counter at zero and sleeps forever.
+	uint8_t sync_tail  = 0;
 	uint8_t ff_run     = 0;   // consecutive $FF replies from player 1
 	bool    restart_pending = false;
+
+	// Per-seat consecutive armed $FF replies during transmission. A run of
+	// exactly two, broken by a non-$FF, is a game's mid-session restart
+	// request ([cmd,FF,FF,00] command blocks): the adapter answers by
+	// re-announcing the transmission — the [FD,FF,FF,FF] wake window —
+	// which is the only thing that releases Jantaku Boy's lobby blackouts.
+	// Runs of 3+ belong to the quit flood and never fire this.
+	uint8_t wake_ff[4]  = {0, 0, 0, 0};
+	bool    wake_pending = false;
+	// The command byte riding ahead of the FF pair is the bulk LENGTH the
+	// consoles will read from the first post-wake broadcast byte. When the
+	// requesting seat isn't player 1 its command rides the wrong slot, so
+	// the announcement presets slot 0 with it and guards that byte from
+	// being clobbered by stale pre-wake replies.
+	uint8_t wake_prev[4] = {0, 0, 0, 0};
+	uint8_t wake_cmd     = 0;
+	bool    wake_len_guard = false;
+	// Completed request frames per seat, and the command each carried.
+	// A repeat of the same command is one standing request, not a new
+	// one: the block stays on the wire until the wake answers it.
+	uint8_t wake_pairs[4]    = {0, 0, 0, 0};
+	uint8_t wake_pair_cmd[4] = {0, 0, 0, 0};
+	uint8_t wake_seat        = 0;
+
+	// Bulk relay: the LEN-announced payload is the requesting console's
+	// contiguous C300 block ($03C0 stages C600->C300; $0345 harvests the
+	// broadcast into C200 byte-for-byte). The per-slot sampling that is
+	// right for stage-1 signal windows would interleave three seats of
+	// junk into it, so during a bulk the broadcast relays the requester's
+	// replies in order instead.
+	int8_t  bulk_src  = -1;   // seat whose stream the bulk relays
+	bool    relay_arm = false;
+	uint8_t rq[8];
+	uint8_t rq_head = 0, rq_len = 0;
 
 	uint8_t buffer[32];       // size*8: the half going out + the half filling
 	uint8_t buf_pos = 0;
@@ -282,6 +335,73 @@ struct SplitLink
 };
 
 SplitLink g_splitlink;
+
+// ---- Jantaku Boy PC tracer --------------------------------------------------
+// Breakpoint-style: logs hits on the game's lobby key addresses along
+// with the variable that matters there, so the event/step interleave
+// reads as a transcript. Active only while SGB_LINK_TRACE is on.
+int g_trace_seat = -1;   // core currently executing in the split loop
+
+struct PcWatch { uint16_t pc; uint8_t bank; const char *name; uint16_t var; };
+// bank 0xFF = unbanked ($0000-$3FFF); else must match the shadow $FFAB.
+// var: $C0xx/$C6xx -> wram, $FF8x+ -> hram.
+constexpr PcWatch kPcWatch[] = {
+	{ 0x08C3, 0xFF, "ev-dispatch", 0xC0B1 },
+	{ 0x0998, 0xFF, "ev3-step",    0xC0B2 },
+	{ 0x0A08, 0xFF, "step0-stn",   0xC0B3 },
+	{ 0x03E6, 0xFF, "blackout+",   0xC0B2 },
+	{ 0x03F7, 0xFF, "blackout-",   0xC0B2 },
+	{ 0x0AB2, 0xFF, "rollcall",    0xC6A0 },
+	{ 0x03D0, 0xFF, "cmdwrite",    0xFFA9 },
+	{ 0x1492, 0xFF, "fd-poll",     0xFF96 },
+	{ 0x149E, 0xFF, "FD-SEND",     0xFFA1 },
+	{ 0x6000, 3,    "stn0",        0xC0B2 },
+	{ 0x602A, 3,    "stn1",        0xC0B3 },
+	{ 0x6053, 3,    "stn2-Await",  0xFF96 },
+	{ 0x6077, 3,    "stn3",        0xFFA1 },
+	{ 0x608C, 3,    "stn4",        0xFFA1 },
+	{ 0x719F, 6,    "mode3-entry", 0xFF99 },
+	{ 0x7164, 6,    "lobby-loop",  0xFF9D },
+	// In-game turn machinery (macro-step 5, handler $176B):
+	{ 0x2317, 0xFF, "discard-A",   0xC0B9 },   // A-edge commit path from $2038
+	{ 0x2285, 0xFF, "discard-B",   0xC0B9 },   // B-edge path from $2038
+	{ 0x2150, 0xFF, "turn-modal",  0xC6A5 },   // C6A5 modal branch (riichi menu?)
+	{ 0x1830, 0xFF, "turn-owner",  0xC6A2 },   // my-turn entry
+	{ 0x1934, 0xFF, "turn-watch",  0xC6A1 },   // spectator watch entry
+	{ 0x1A16, 0xFF, "saw-1F",      0xC6A1 },   // spectator saw the discard-done
+	{ 0x1788, 0xFF, "dlr-sub",     0xC788 },   // dealer path for absent seat
+	{ 0x17B6, 0xFF, "sig-3F",      0xC6A2 },   // [3F] signal write
+	{ 0x17D1, 0xFF, "dlr-tick",    0xC788 },   // dealer AI tick (bank7)
+	{ 0x1901, 0xFF, "send-1F",     0xC0A6 },   // owner broadcasts 1F + discard
+	{ 0x1C99, 0xFF, "zero-barr",   0xC6A2 },   // zero-block + all-zero barrier
+	{ 0x197F, 0xFF, "tile-latch",  0xC0A5 },   // value spectator took as the tile
+	{ 0x1C80, 0xFF, "tile-follow", 0xC0A7 },   // owner's announce follow-up byte
+	{ 0x2106, 0xFF, "announce",    0xC0A7 },   // turn-entry broadcast helper
+};
+uint32_t g_pc_hits[sizeof kPcWatch / sizeof *kPcWatch][4] = {};
+
+void SerialPcHook(uint16_t pc, uint8_t, const CpuState &st)
+{
+	if (g_trace_seat < 0) return;
+	Memory *m = g_splitlink.m[g_trace_seat];
+	if (!m) return;
+	for (size_t w = 0; w < sizeof kPcWatch / sizeof *kPcWatch; ++w)
+	{
+		const PcWatch &pw = kPcWatch[w];
+		if (pc != pw.pc) continue;
+		if (pw.bank != 0xFF && m->hram[0x2B] != pw.bank) continue;
+		uint32_t &hits = g_pc_hits[w][g_trace_seat];
+		++hits;
+		// Hot spins: after 64 hits, one line per 256.
+		if (hits > 64 && (hits & 0xFF) != 0) return;
+		const uint8_t v = pw.var >= 0xFF80
+		                ? m->hram[pw.var - 0xFF80]
+		                : m->wram[pw.var - 0xC000];
+		Trace("PC p%d %-11s v=%02X n=%u t=%lld",
+		      g_trace_seat + 1, pw.name, v, hits, (long long)st.t_cycles);
+		return;
+	}
+}
 
 inline int32_t BitPeriod(const Serial &s, uint8_t sc)
 {
@@ -387,6 +507,60 @@ inline bool SeqLess(uint32_t a, uint32_t b)
 	return static_cast<int32_t>(a - b) < 0;
 }
 
+// Queue one relay byte from the bulk source's reply stream.
+void HubBulkRelayPush(int seat, uint8_t b, bool armed)
+{
+	if (!g_hub.relay_arm || seat != g_hub.bulk_src) return;
+	if (!armed) b = 0x00;
+	if (g_hub.rq_len < sizeof g_hub.rq)
+		g_hub.rq[(g_hub.rq_head + g_hub.rq_len++) % sizeof g_hub.rq] = b;
+}
+
+// Watch one seat's transmission replies for the [cmd,FF,FF,00] restart
+// request: an armed $FF pair broken by a non-$FF arms a wake, served as a
+// fresh [FD,FF,FF,FF] announcement at the next packet boundary. Counting
+// pauses while a bulk is in flight — payload bytes are not protocol.
+void HubWakeFF(int seat, uint8_t b, bool armed)
+{
+	// The request block spans exactly one SIZE=1 packet; at larger sizes
+	// (F-1 Race streams at 4) an $FF pair is payload, never protocol.
+	if (g_hub.size != 1)
+		return;
+	if (!armed || g_hub.prev_phase != kDmg07Net || g_hub.bulk_stage != 0)
+		return;
+	if (b == 0xFF)
+	{
+		if (g_hub.wake_ff[seat] < 0xFF) ++g_hub.wake_ff[seat];
+		return;
+	}
+	if (g_hub.wake_ff[seat] == 2)
+	{
+		const uint8_t cmd = g_hub.wake_prev[seat];
+		if (cmd != g_hub.wake_pair_cmd[seat])
+		{
+			g_hub.wake_pair_cmd[seat] = cmd;
+			g_hub.wake_pairs[seat]    = 1;
+		}
+		else if (g_hub.wake_pairs[seat] < 0xFF)
+		{
+			++g_hub.wake_pairs[seat];
+		}
+		// Fire on the first completed request frame: the command must not
+		// linger on the wire — station matchers re-dispatch a visible
+		// command every window they see it in.
+		if (g_hub.wake_pairs[seat] == 1)
+		{
+			g_hub.wake_pending = true;
+			g_hub.wake_cmd     = cmd;
+			g_hub.wake_seat    = static_cast<uint8_t>(seat);
+			Trace("hub wake requested (seat %d $FF pair, cmd=%02X)",
+			      seat + 1, g_hub.wake_cmd);
+		}
+	}
+	g_hub.wake_ff[seat]   = 0;
+	g_hub.wake_prev[seat] = b;
+}
+
 // A seat's answer landed: apply it to the byte it was for. Answers the
 // peer never sent (it flushed on a state load) are skipped past; answers
 // to bytes already skipped are stale and dropped.
@@ -425,8 +599,15 @@ void HubApplyRemoteReply(int ch, uint32_t seq, uint8_t data, bool supplied)
 	{
 		// A seat with nothing to say reads as zeroes in the broadcast,
 		// which is what the DMG-07 fills empty ports with (Pan Docs).
-		g_hub.buffer[tag.store_at] = supplied ? data : 0x00;
+		// One-shot guard: see the player-1 store site.
+		if (g_hub.wake_len_guard && tag.store_at == 4)
+			g_hub.wake_len_guard = false;
+		else
+			g_hub.buffer[tag.store_at] = supplied ? data : 0x00;
 	}
+
+	HubWakeFF(ch + 1, data, supplied);
+	HubBulkRelayPush(ch + 1, data, supplied);
 }
 
 // Finish a transfer we clocked. With no peer byte the wire idles high,
@@ -761,8 +942,10 @@ void HubInterpretLocal()
 		switch (g_hub.prev_wire)
 		{
 			case 0:
-				// Reply to the previous packet's STAT3: player 1's SIZE.
-				// Only a real reply latches; an idle wire keeps the last.
+				// Reply riding the $FE transfer: player 1's SIZE (GBE+
+				// mapping, confirmed twice over — F-1 Race declares $04
+				// here, and Jantaku Boy's $01 matches its confirm matcher
+				// reading player N at interleave byte N-1).
 				if (armed && !g_hub.begin_sync) g_hub.size_reply = b;
 				break;
 
@@ -770,16 +953,19 @@ void HubInterpretLocal()
 			case 2:
 				// The $88 acks are what "connected" means; while $AA rides
 				// these wires, player 1 stays counted (GBE+ rule) — even
-				// before the train is long enough to flip the phase.
+				// before the train is long enough to flip the phase. The
+				// sync tail keeps presence sticky: the games have left the
+				// connection screen and no longer ack, but the heartbeat
+				// they key on needs the bits standing.
 				if ((armed && (b == 0x88 || b == 0xAA)) || g_hub.begin_sync)
 					g_hub.status = static_cast<uint8_t>(g_hub.status | 0x10);
-				else
+				else if (!g_hub.sync_tail)
 					g_hub.status = static_cast<uint8_t>(g_hub.status & ~0x10);
 				break;
 
 			case 3:
-				// Reply to STAT2: player 1's RATE. Armed replies only, or
-				// a menu-idled game latches $FF and crawls the wire.
+				// Reply riding the last STAT: player 1's RATE. Armed
+				// replies only, or a menu-idled game latches garbage.
 				if (armed && !g_hub.begin_sync) g_hub.rate = b;
 				break;
 		}
@@ -795,11 +981,22 @@ void HubInterpretLocal()
 		// data; player 1's lands in the half not being broadcast, one
 		// packet behind (GBE+ layout).
 		if (pkt_pos > 0 && pkt_pos <= size)
-			g_hub.buffer[(g_hub.prev_buf - 1 + size * 4) % (size * 8)] = b;
+		{
+			const int at = (g_hub.prev_buf - 1 + size * 4) % (size * 8);
+			// The reply riding the wake announcement is a pre-wake block;
+			// the preset length byte must survive it. One skip only — the
+			// same index recurs as a normal data slot during the bulk.
+			if (g_hub.wake_len_guard && at == 4)
+				g_hub.wake_len_guard = false;
+			else
+				g_hub.buffer[at] = b;
+		}
 
-		// Player 1 pumping $FF asks for the ping phase back. Only armed
-		// replies count: a game merely slow to re-arm reads as idle wire,
-		// and that must not tear the session down.
+		// Player 1 pumping $FF asks for the ping phase back: three in a
+		// row, armed replies only — an idle wire is a slow game, not a
+		// quit. Jantaku Boy's stage-1 command blocks are [cmd,FF,FF,00],
+		// so anything looser reads its FILLER as a quit and the restart
+		// packet is that game's stage-1 abort signal (DI + reset).
 		if (armed && b == 0xFF)
 		{
 			if (g_hub.ff_run < 0xFF) ++g_hub.ff_run;
@@ -810,6 +1007,9 @@ void HubInterpretLocal()
 		{
 			g_hub.ff_run = 0;
 		}
+
+		HubWakeFF(0, b, armed);
+		HubBulkRelayPush(0, b, armed);
 	}
 }
 
@@ -829,7 +1029,7 @@ void HubInterpretLocalSeats()
 			const uint8_t bit = static_cast<uint8_t>(1 << (4 + k));
 			if (armed && b == 0x88)
 				g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
-			else
+			else if (!g_hub.sync_tail)
 				g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);
 		}
 
@@ -843,6 +1043,9 @@ void HubInterpretLocalSeats()
 				g_hub.buffer[base + k * size] = armed ? b : 0x00;
 			}
 		}
+
+		HubWakeFF(k, b, armed);
+		HubBulkRelayPush(k, b, armed);
 	}
 }
 
@@ -860,11 +1063,25 @@ void HubPacketBoundary()
 				g_hub.phase      = kDmg07Sync;
 				g_hub.begin_sync = false;
 				g_hub.aa_run     = 0;
+				// Several $CC packets, not one: the games take different
+				// paths into their post-sync serial wait (Jantaku Boy's
+				// parent stages a payload first), and the transmission's
+				// one-shot first packet must find every console listening.
+				g_hub.sync_tail  = 5;
 			}
 			break;
 
 		case kDmg07Sync:
 		{
+			// Hold the acknowledgment for a few packets so every console
+			// reaches its serial wait before the one-shot first packet.
+			if (g_hub.sync_tail > 1)
+			{
+				--g_hub.sync_tail;
+				break;
+			}
+			g_hub.sync_tail = 0;
+
 			// The RATE and SIZE latched during ping take effect here. Pan
 			// Docs: sizes 1..4 are what works without issue.
 			uint8_t sz = g_hub.size_reply;
@@ -872,19 +1089,63 @@ void HubPacketBoundary()
 			if (sz > 4) sz = 4;
 			g_hub.size = sz;
 
-			// The real buffer starts as ping-phase garbage; games are told
-			// to ignore the first packet, so zeroes are as good (GBE+ does
-			// the same).
+			// The first transmission packet is "garbage" per Pan Docs — but
+			// structured garbage: it announces the transmission with the
+			// [FD,FF,FF,FF] window, and the next byte is a bulk length.
+			// Jantaku Boy waits for exactly this to leave its lobby; the
+			// $04 here is a placeholder its parent overwrites with the
+			// real length. F-1 Race ignores the first packet either way.
 			std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
+			std::memset(g_hub.buffer, 0xFF, 4);
+			g_hub.buffer[0]       = 0xFD;
+			g_hub.buffer[4]       = 0x04;
 			g_hub.buf_pos         = 0;
 			g_hub.ff_run          = 0;
 			g_hub.restart_pending = false;
+			g_hub.wake_pending    = false;
+			g_hub.wake_len_guard  = false;
+			std::memset(g_hub.wake_ff, 0, sizeof g_hub.wake_ff);
+			std::memset(g_hub.wake_pairs, 0, sizeof g_hub.wake_pairs);
+			// The session-start bulk is staged by the lobby parent —
+			// player 1 by construction (it hosts the adapter).
+			g_hub.bulk_src  = 0;
+			g_hub.relay_arm = false;
+			g_hub.rq_len    = 0;
 			g_hub.phase           = kDmg07Net;
 			break;
 		}
 
 		case kDmg07Net:
-			if (g_hub.restart_pending) g_hub.phase = kDmg07Restart;
+			if (g_hub.restart_pending)
+			{
+				g_hub.phase = kDmg07Restart;
+				break;
+			}
+			// A seat asked for the mid-session restart: re-announce the
+			// transmission. Same shape as the session-start packet — the
+			// wake window plus a phase-neutral length that the consoles'
+			// own post-wake replies overwrite with the real bulk length.
+			if (g_hub.wake_pending && g_hub.bulk_stage == 0)
+			{
+				std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
+				std::memset(g_hub.buffer, 0xFF, 4);
+				g_hub.buffer[0]    = 0xFD;
+				// The requester's command byte doubles as the bulk length
+				// ($0395 stages FFA9 bytes; $035C reads C200[0]). It must
+				// be the first post-wake broadcast byte no matter which
+				// slot the requester sits in.
+				g_hub.buffer[4]        = g_hub.wake_cmd ? g_hub.wake_cmd : 0x04;
+				g_hub.wake_len_guard   = true;
+				g_hub.buf_pos      = 0;
+				g_hub.wake_pending = false;
+				g_hub.bulk_src     = static_cast<int8_t>(g_hub.wake_seat);
+				g_hub.relay_arm    = false;
+				g_hub.rq_len       = 0;
+				std::memset(g_hub.wake_ff, 0, sizeof g_hub.wake_ff);
+				std::memset(g_hub.wake_pairs, 0, sizeof g_hub.wake_pairs);
+				Trace("hub wake: FD announce len=%02X src=%d",
+				      g_hub.buffer[4], g_hub.bulk_src + 1);
+			}
 			break;
 
 		case kDmg07Restart:
@@ -901,6 +1162,37 @@ void HubPacketBoundary()
 // spot, clock each seated peer over the wire as master.
 void HubSendByte(Serial &s, Memory &mem)
 {
+	// A completed bulk re-anchored every game's framing; restart the
+	// slot cycle with them.
+	if (g_hub.local && g_hub.phase == kDmg07Net && g_hub.bulk_stage == 7)
+	{
+		std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
+		g_hub.buf_pos    = 0;
+		g_hub.wire       = 0;
+		g_hub.bulk_stage = 0;
+		// Replies that crossed during the wake and bulk were pre-wake
+		// blocks, not fresh requests; drop anything they armed.
+		g_hub.wake_pending   = false;
+		g_hub.wake_len_guard = false;
+		g_hub.bulk_src       = -1;
+		g_hub.relay_arm      = false;
+		g_hub.rq_len         = 0;
+		std::memset(g_hub.wake_ff, 0, sizeof g_hub.wake_ff);
+		std::memset(g_hub.wake_pairs, 0, sizeof g_hub.wake_pairs);
+		Trace("hub bulk re-anchor");
+	}
+
+	// Relay bytes replace the slot buffer while a sourced bulk is in
+	// flight; popped before the tracker so the countdown sees them.
+	int relay_byte = -1;
+	if (g_hub.phase == kDmg07Net && g_hub.bulk_stage == 6 &&
+	    g_hub.bulk_src >= 0 && g_hub.rq_len)
+	{
+		relay_byte = g_hub.rq[g_hub.rq_head];
+		g_hub.rq_head = static_cast<uint8_t>((g_hub.rq_head + 1) % sizeof g_hub.rq);
+		--g_hub.rq_len;
+	}
+
 	uint8_t out[4];
 	switch (g_hub.phase)
 	{
@@ -923,12 +1215,43 @@ void HubSendByte(Serial &s, Memory &mem)
 			break;
 
 		case kDmg07Net:
-			out[0] = out[1] = out[2] = out[3] = g_hub.buffer[g_hub.buf_pos];
+			out[0] = out[1] = out[2] = out[3] =
+			    relay_byte >= 0 ? static_cast<uint8_t>(relay_byte)
+			                    : g_hub.buffer[g_hub.buf_pos];
 			break;
 
 		default:
 			out[0] = out[1] = out[2] = out[3] = 0xFF;
 			break;
+	}
+
+	// Track the wake-window + LEN-bulk sequence on the broadcast stream
+	// so the slot cycle can re-anchor when the games' framing shifts.
+	if (g_hub.local && g_hub.phase == kDmg07Net)
+	{
+		const uint8_t ob = out[0];
+		if (g_hub.bulk_stage < 4)
+		{
+			if (ob == 0xFD)                            g_hub.bulk_stage = 1;
+			else if (g_hub.bulk_stage && ob == 0xFF)   ++g_hub.bulk_stage;
+			else                                       g_hub.bulk_stage = 0;
+		}
+		else if (g_hub.bulk_stage == 4)
+		{
+			// This byte is the bulk length and also its first transfer.
+			Trace("hub bulk len=%02X", ob);
+			if (ob <= 1) g_hub.bulk_stage = ob ? 7 : 0;
+			else { g_hub.bulk_left = static_cast<uint8_t>(ob - 1); g_hub.bulk_stage = 6; }
+			// The source's next reply is its first staged payload byte
+			// ($0345 loads C300[0] in the ISR that receives this length).
+			g_hub.relay_arm = true;
+			g_hub.rq_len    = 0;
+			g_hub.rq_head   = 0;
+		}
+		else if (g_hub.bulk_stage == 6)
+		{
+			if (--g_hub.bulk_left == 0) g_hub.bulk_stage = 7;
+		}
 	}
 
 	// Player 1 is in-process: complete its armed transfer immediately. An
@@ -1010,6 +1333,39 @@ void HubSendByte(Serial &s, Memory &mem)
 		}
 	}
 
+	// Jantaku Boy investigation: each split seat's live lobby state —
+	// mode $C0C0, ISR stage $FF99, reply $FFA1, gate $FF96, sub-state
+	// counters $C0B1/$C0B2/$C0BF, command source $FFA9, gate table $C6AE.
+	if (g_hub.local && TraceOn())
+	{
+		char st[560];
+		int  n = 0;
+		for (int k = 0; k < g_splitlink.count && n < (int)sizeof(st) - 136; ++k)
+		{
+			Memory *m = g_splitlink.m[k];
+			if (!m) continue;
+			// j = live held GB buttons: high nibble A/B/Sel/Start, low
+			// nibble R/L/U/D, 1 = pressed (inverted from the wire).
+			const uint8_t held = m->joypad
+				? static_cast<uint8_t>(((~m->joypad->btns & 0x0F) << 4) |
+				                       (~m->joypad->dpad & 0x0F))
+				: 0;
+			n += std::snprintf(st + n, sizeof(st) - (size_t)n,
+			                   " p%d[m=%02X s=%02X r=%02X%02X%02X%02X a=%02X g=%02X j=%02X e=%02X.%02X b=%02X.%02X.%02X.%02X t=%02X.%02X.%02X w=%02X:%02X%02X%02X%02X]",
+			                   k + 1, m->wram[0x00C0], m->hram[0x19],
+			                   m->hram[0x21], m->hram[0x22], m->hram[0x23],
+			                   m->hram[0x24], m->hram[0x26],
+			                   m->hram[0x16], held,
+			                   m->ie, m->if_,
+			                   m->wram[0x00B1], m->wram[0x00B2], m->wram[0x00B3],
+			                   m->wram[0x00BF], m->wram[0x06A0], m->wram[0x06A1],
+			                   m->wram[0x06A2],
+			                   m->hram[0x1A], m->hram[0x1D], m->hram[0x1E],
+			                   m->hram[0x1F], m->hram[0x20]);
+		}
+		Trace("    state%s", st);
+	}
+
 	g_hub.prev_phase       = g_hub.phase;
 	g_hub.prev_wire        = g_hub.wire;
 	g_hub.prev_buf         = g_hub.buf_pos;
@@ -1057,6 +1413,29 @@ void HubAdvance()
 
 void HubRunByte(Serial &s, Memory &mem)
 {
+	// In-process net phase: hold the byte event while a console is
+	// between re-arms — the interleave can put a seat a few hundred
+	// cycles "behind" an instant that real wiring spreads over a
+	// millisecond. At hardware byte pacing (SIZE=1: ~2k cycles per byte)
+	// one dropped byte desyncs a console's bulk counter and rotates its
+	// frame alignment beyond recovery, so the wait must outlast any
+	// slice skew; the cap only exists for a console that stopped
+	// serial work entirely (session teardown).
+	if (g_hub.local && g_hub.phase == kDmg07Net)
+	{
+		bool all_armed = s.passive;
+		for (int k = 1; k < g_splitlink.count && all_armed; ++k)
+			if (g_splitlink.s[k] && !g_splitlink.s[k]->passive)
+				all_armed = false;
+		if (!all_armed && g_hub.event_grace < 64)
+		{
+			++g_hub.event_grace;
+			g_hub.timer += 456;
+			return;
+		}
+		g_hub.event_grace = 0;
+	}
+
 	// Never blocks: remote answers land through HubApplyRemoteReply as
 	// they arrive; one extra drain here just shortens their latency. A
 	// split-screen hub has no sockets to service at all.
@@ -1628,15 +2007,34 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 	}
 	Trace("session: split x%d%s", count,
 	      g_hub.local ? " (local DMG-07)" : " (direct cable)");
+
+	// The PC tracer rides the CPU trace hook while the wire trace is on.
+	if (TraceOn())
+	{
+		std::memset(g_pc_hits, 0, sizeof g_pc_hits);
+		Cpu::SetTraceHook(SerialPcHook);
+	}
 }
 
 void SerialSplitDetach()
 {
+	Cpu::SetTraceHook(nullptr);
+	g_trace_seat = -1;
 	if (g_hub.local) g_hub = Dmg07();
 	g_splitlink = SplitLink();
 }
 
 bool SerialSplitActive() { return g_splitlink.count > 0; }
+
+void SerialTraceMsg(const char *msg)
+{
+	Trace("%s", msg);
+}
+
+void SerialSetTraceSeat(int seat)
+{
+	g_trace_seat = seat;
+}
 
 bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 {

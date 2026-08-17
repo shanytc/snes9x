@@ -2598,6 +2598,8 @@ bool S9xSGBCartNeedsDmg07(void)
 {
 	static const char *const kDmg07Only[] = {
 		"F1RACE",             // F-1 Race (World)
+		"F-1 HEROGB",         // Nakajima Satoru F-1 Hero GB - MULTI GAME bounces
+		                      // straight back to the menu without the adapter
 		" - TRUMP BOY2 - ",   // Trump Boy II (Japan) - 4-port screen, no cable mode
 		"JANTAKUBOY",         // Jantaku Boy (Japan) - slave-only serial code
 		"W CIRCUIT SERIES",   // World Circuit Series (USA) - slave-only serial code

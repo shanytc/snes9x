@@ -1318,7 +1318,8 @@ void WinRegisterConfigItems()
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
 	ADDN(GBModel[4],GBModelSGBC);
-	ADD(BarcodeConnect); ADD(BarcodeScan); ADD(BarcodeRescan);
+	ADD(Link2P); ADD(Link3P); ADD(Link4P);
+	ADD(LinkOtherGame); ADD(LinkSplitToggle); ADD(LinkEnd);
 #undef ADD
 #undef ADDN
 
@@ -1363,7 +1364,8 @@ void WinRegisterConfigItems()
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
 	ADDXALLN(GBModel[4],GBModelSGBC);
-	ADDXALL(BarcodeConnect); ADDXALL(BarcodeScan); ADDXALL(BarcodeRescan);
+	ADDXALL(Link2P); ADDXALL(Link3P); ADDXALL(Link4P);
+	ADDXALL(LinkOtherGame); ADDXALL(LinkSplitToggle); ADDXALL(LinkEnd);
 #undef ADDX
 #undef ADDXN
 #undef ADDXALL

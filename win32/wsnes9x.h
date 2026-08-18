@@ -526,6 +526,12 @@ struct SCustomKeys {
 	// g_gbModelHotkeyPolicy for which policy each slot picks.
 	SCustomKey GBModel[GB_MODEL_HOTKEYS];
 	SCustomKey NSSMountEject[3];     // Nintendo Super System -> Slot 1-3 (mount/eject)
+	SCustomKey Link2P;               // GB link cable session shapes
+	SCustomKey Link3P;
+	SCustomKey Link4P;
+	SCustomKey LinkOtherGame;
+	SCustomKey LinkSplitToggle;
+	SCustomKey LinkEnd;
 };
 
 struct SCustomKeyExtra {
@@ -595,6 +601,12 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra BiosManager;
 	SCustomKeyExtra GBModel[GB_MODEL_HOTKEYS];
 	SCustomKeyExtra NSSMountEject[3];
+	SCustomKeyExtra Link2P;
+	SCustomKeyExtra Link3P;
+	SCustomKeyExtra Link4P;
+	SCustomKeyExtra LinkOtherGame;
+	SCustomKeyExtra LinkSplitToggle;
+	SCustomKeyExtra LinkEnd;
 };
 
 struct SJoypad {

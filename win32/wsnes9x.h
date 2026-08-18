@@ -531,6 +531,12 @@ struct SCustomKeys {
 	SCustomKey SFCBoxTVGame;
 	SCustomKey SFCBoxMountEject[2];
 	SCustomKey SFCBoxPowerOff;       // keyswitch position 4 (added last: layout)
+	SCustomKey Link2P;               // GB link cable session shapes
+	SCustomKey Link3P;
+	SCustomKey Link4P;
+	SCustomKey LinkOtherGame;
+	SCustomKey LinkSplitToggle;
+	SCustomKey LinkEnd;
 };
 
 struct SCustomKeyExtra {
@@ -604,6 +610,12 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra SFCBoxTVGame;
 	SCustomKeyExtra SFCBoxMountEject[2];
 	SCustomKeyExtra SFCBoxPowerOff;
+	SCustomKeyExtra Link2P;
+	SCustomKeyExtra Link3P;
+	SCustomKeyExtra Link4P;
+	SCustomKeyExtra LinkOtherGame;
+	SCustomKeyExtra LinkSplitToggle;
+	SCustomKeyExtra LinkEnd;
 };
 
 struct SJoypad {

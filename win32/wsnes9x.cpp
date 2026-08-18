@@ -131,6 +131,7 @@ INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 void WinToggleGBLink(int mode, int players);
+void WinToggleGBLinkSplit();
 bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid = 0);
 void GBLinkMirrorPause();
 void WinAutoStartGBLinkPeer();
@@ -140,6 +141,7 @@ static int  WinGetGBLinkLivePlayers();
 static bool GBLinkPidAlive(DWORD pid);
 static void GBLinkPumpSpawns();
 static void GBLinkAutoCloseAbandonedHub();
+static void WinGBLinkMasterUnplug();
 static void GBLinkResetWhenLeftAlone();
 static void GBLinkPlacePeerWindow();
 static void WinStartGBSplit(int players);
@@ -2047,6 +2049,69 @@ static void BuildLanguageMenu(HMENU bar)
 	}
 }
 
+// Keep the menu open when the Split Screen preference is clicked: run the
+// toggle ourselves and swallow the click so the menu never dismisses.
+static HHOOK s_menu_filter_hook = NULL;
+// The "Link Same Game" popup, tracked by CheckMenuStates. While a menu is
+// up the mouse is captured by the owner, so hit-test this handle directly.
+static HMENU s_gb_same_hmenu = NULL;
+
+static bool MenuSplitIdle (void)
+{
+	return !S9xSGBLinkIsEnabled () && !S9xSGBSplitActive ();
+}
+
+// A menu window repaints on its own only when the mouse moves; after a
+// swallowed click the fresh check state has to be pushed at it.
+static BOOL CALLBACK MenuRedrawProc (HWND hwnd, LPARAM)
+{
+	TCHAR cls[16];
+	if (GetClassName (hwnd, cls, 16) && _tcscmp (cls, TEXT("#32768")) == 0)
+		RedrawWindow (hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+	return TRUE;
+}
+
+static void MenuToggleSplitInPlace (void)
+{
+	SendMessage (GUI.hWnd, WM_COMMAND, ID_EMULATION_GB_LINK_SPLIT, 0);
+	CheckMenuItem (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SPLIT, MF_BYCOMMAND |
+	               (GBLinkSplitScreen ? MF_CHECKED : MF_UNCHECKED));
+	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
+}
+
+static LRESULT CALLBACK MenuKeepOpenFilter (int code, WPARAM wParam, LPARAM lParam)
+{
+	if (code == MSGF_MENU && s_gb_same_hmenu)
+	{
+		MSG *msg = (MSG *)lParam;
+		if (msg->message == WM_LBUTTONDOWN || msg->message == WM_LBUTTONUP)
+		{
+			int idx = MenuItemFromPoint (NULL, s_gb_same_hmenu, msg->pt);
+			if (idx < 0) idx = MenuItemFromPoint (GUI.hWnd, s_gb_same_hmenu, msg->pt);
+			if (idx >= 0 &&
+			    GetMenuItemID (s_gb_same_hmenu, idx) == ID_EMULATION_GB_LINK_SPLIT &&
+			    MenuSplitIdle ())
+			{
+				if (msg->message == WM_LBUTTONUP)
+					MenuToggleSplitInPlace ();
+				return TRUE;
+			}
+		}
+		else if (msg->message == WM_KEYDOWN && msg->wParam == VK_RETURN)
+		{
+			MENUITEMINFO mii = { sizeof(mii), MIIM_STATE };
+			if (GetMenuItemInfo (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SPLIT,
+			                     FALSE, &mii) && (mii.fState & MFS_HILITE) &&
+			    MenuSplitIdle ())
+			{
+				MenuToggleSplitInPlace ();
+				return TRUE;
+			}
+		}
+	}
+	return CallNextHookEx (s_menu_filter_hook, code, wParam, lParam);
+}
+
 LRESULT CALLBACK WinProc(
 						 HWND hWnd,
 						 UINT uMsg,
@@ -3061,10 +3126,7 @@ LRESULT CALLBACK WinProc(
 			WinToggleGBLink (2, 2);
 			break;
 		case ID_EMULATION_GB_LINK_SPLIT:
-			// A preference for what the players items do; settled while
-			// any session is live, so it only flips between sessions.
-			if (!S9xSGBLinkIsEnabled () && !S9xSGBSplitActive ())
-				GBLinkSplitScreen = !GBLinkSplitScreen;
+			WinToggleGBLinkSplit ();
 			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
 			// lParam rides the master's booted BIOS mode + 1 (0 = not
@@ -3092,9 +3154,16 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			// Dial into whatever session exists; idempotent, so a rejoin
-			// request can never unplug an instance that is already on.
-			if (!S9xSGBLinkIsEnabled ())
+			// request can never unplug an instance that is already on. A
+			// connect request always means a socket seat, so the split
+			// preference must not hijack it into an in-process session.
+			if (!S9xSGBLinkIsEnabled () && !S9xSGBSplitActive ())
+			{
+				const bool split_pref = GBLinkSplitScreen;
+				GBLinkSplitScreen = false;
 				WinToggleGBLink (Settings.GBRomPath[0] ? 1 : 2, 2);
+				GBLinkSplitScreen = split_pref;
+			}
 			break;
 		case ID_EMULATION_GB_LINK_DISCONNECT:
 			if (S9xSGBLinkIsEnabled ())
@@ -3366,12 +3435,20 @@ LRESULT CALLBACK WinProc(
         break;
 	}
 	case WM_EXITMENULOOP:
+		if (s_menu_filter_hook)
+		{
+			UnhookWindowsHookEx (s_menu_filter_hook);
+			s_menu_filter_hook = NULL;
+		}
 		UpdateWindow(GUI.hWnd);
 		DrawMenuBar(GUI.hWnd);
 		S9xClearPause (PAUSE_MENU);
 		break;
 
 	case WM_ENTERMENULOOP:
+		if (!s_menu_filter_hook)
+			s_menu_filter_hook = SetWindowsHookEx (WH_MSGFILTER, MenuKeepOpenFilter,
+			                                       NULL, GetCurrentThreadId ());
 		S9xSetPause (PAUSE_MENU);
 		CheckMenuStates ();
 
@@ -5746,11 +5823,13 @@ static void CheckMenuStates ()
 		}
 		else if (show)
 		{
-			// A live session's shape is settled, so the others are greyed;
-			// the active item stays enabled because it doubles as the
-			// disconnect. The tick follows the instances actually present:
-			// a 4-player session with one window closed reads as 3. A
-			// split session ticks like a live link of its size.
+			// Same-game shapes stay enabled among themselves: the ticked
+			// one doubles as the disconnect, any other one switches the
+			// live session to it. Crossing between Same and Other makes
+			// no sense mid-session, so the opposite family greys out.
+			// The tick follows the instances actually present: a 4-player
+			// session with one window closed reads as 3. A split session
+			// ticks like a live link of its size.
 			int gblink  = WinGetGBLinkMode ();
 			int players = WinGetGBLinkPlayers ();
 			if (S9xSGBSplitActive ())
@@ -5762,22 +5841,27 @@ static void CheckMenuStates ()
 			{
 				players = WinGetGBLinkLivePlayers ();
 			}
-			const UINT inactive = (gblink == 0) ? MFS_UNCHECKED
-			                                    : (MFS_UNCHECKED | MFS_DISABLED);
+			const UINT same_off = (gblink == 2)
+			                    ? (MFS_UNCHECKED | MFS_DISABLED) : MFS_UNCHECKED;
+			const UINT diff_off = (gblink == 1)
+			                    ? (MFS_UNCHECKED | MFS_DISABLED) : MFS_UNCHECKED;
 
-			mii.fState = (gblink == 1 && players <= 2) ? MFS_CHECKED : inactive;
+			mii.fState = (gblink == 1 && players <= 2) ? MFS_CHECKED : same_off;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
-			mii.fState = (gblink == 1 && players == 3) ? MFS_CHECKED : inactive;
+			mii.fState = (gblink == 1 && players == 3) ? MFS_CHECKED : same_off;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_3, FALSE, &mii);
-			mii.fState = (gblink == 1 && players == 4) ? MFS_CHECKED : inactive;
+			mii.fState = (gblink == 1 && players == 4) ? MFS_CHECKED : same_off;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_4, FALSE, &mii);
-			mii.fState = (gblink == 2) ? MFS_CHECKED : inactive;
+			mii.fState = (gblink == 2) ? MFS_CHECKED : diff_off;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
+
+			// The whole Same Game submenu greys during an Other session.
+			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_POPUP, FALSE, &mii);
 
 			// Split screen needs the BIOS-less core, so in BIOS mode the
 			// item comes out of the menu rather than offering a dead end.
-			static HMENU s_same_hmenu = NULL;
-			if (!s_same_hmenu && s_link_hmenu)
+			if (!s_gb_same_hmenu && s_link_hmenu)
 			{
 				const int cnt = GetMenuItemCount (s_link_hmenu);
 				for (int j = 0; j < cnt; j++)
@@ -5788,39 +5872,38 @@ static void CheckMenuStates ()
 					if (GetMenuItemInfo (s_link_hmenu, j, TRUE, &probe) &&
 					    probe.wID == ID_EMULATION_GB_LINK_SAME_POPUP && probe.hSubMenu)
 					{
-						s_same_hmenu = probe.hSubMenu;
+						s_gb_same_hmenu = probe.hSubMenu;
 						break;
 					}
 				}
 			}
-			if (s_same_hmenu)
+			if (s_gb_same_hmenu)
 			{
 				MENUITEMINFO present = {};
 				present.cbSize = sizeof(present);
 				present.fMask  = MIIM_ID;
-				const bool in_menu  = GetMenuItemInfo (s_same_hmenu, ID_EMULATION_GB_LINK_SPLIT,
+				const bool in_menu  = GetMenuItemInfo (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SPLIT,
 				                                       FALSE, &present) != FALSE;
 				const bool split_ok = !Settings.SGB_BIOSModeActive;
 				if (split_ok && !in_menu)
 				{
-					AppendMenu (s_same_hmenu, MF_SEPARATOR, 0, NULL);
-					AppendMenu (s_same_hmenu, MF_STRING, ID_EMULATION_GB_LINK_SPLIT,
+					AppendMenu (s_gb_same_hmenu, MF_SEPARATOR, 0, NULL);
+					AppendMenu (s_gb_same_hmenu, MF_STRING, ID_EMULATION_GB_LINK_SPLIT,
 					            TEXT("S&plit Screen"));
-					if (LocaleIsTranslated ()) LocalizeMenu (s_same_hmenu);
+					if (LocaleIsTranslated ()) LocalizeMenu (s_gb_same_hmenu);
 				}
 				else if (!split_ok && in_menu)
 				{
 					// The item and its separator sit at the submenu's tail.
-					const int cnt = GetMenuItemCount (s_same_hmenu);
-					RemoveMenu (s_same_hmenu, cnt - 1, MF_BYPOSITION);
-					if (cnt >= 2) RemoveMenu (s_same_hmenu, cnt - 2, MF_BYPOSITION);
+					const int cnt = GetMenuItemCount (s_gb_same_hmenu);
+					RemoveMenu (s_gb_same_hmenu, cnt - 1, MF_BYPOSITION);
+					if (cnt >= 2) RemoveMenu (s_gb_same_hmenu, cnt - 2, MF_BYPOSITION);
 				}
 			}
 
-			// The split toggle is a preference; it only flips while no
-			// session is live.
-			mii.fState = (GBLinkSplitScreen ? MFS_CHECKED : MFS_UNCHECKED) |
-			             ((gblink != 0) ? MFS_DISABLED : MFS_ENABLED);
+			// The split toggle stays live too: mid-session it restarts
+			// the session in the other flavor.
+			mii.fState = (GBLinkSplitScreen ? MFS_CHECKED : MFS_UNCHECKED);
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SPLIT, FALSE, &mii);
 		}
 	}
@@ -6462,8 +6545,10 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 
 	if (!Settings.StopEmulation) {
 		// A split session belongs to the outgoing game: fold it (and save
-		// its seat batteries) before the paths change under it.
+		// its seat batteries) before the paths change under it. A master
+		// swapping its cartridge likewise ends a socket session outright.
 		if (S9xSGBSplitActive ()) WinStopGBSplit ();
+		WinGBLinkMasterUnplug ();
 		Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 		S9xSaveCheatFile (S9xGetFilename (".cht", CHEAT_DIR).c_str());
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -6522,6 +6607,11 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 			ReInitSound();
 			S9xMessage(S9X_INFO, 0, "Playback rate not usable here - switched to 48 kHz");
 		}
+
+		// A peer whose cartridge change unplugged the cable dials back
+		// in; the master is still listening. First loads keep the link
+		// and fall through the already-on-the-wire guard.
+		WinAutoStartGBLinkPeer ();
 	}
 
 	if(GUI.ControllerOption == SNES_SUPERSCOPE || GUI.ControllerOption == SNES_MACSRIFLE)
@@ -10503,6 +10593,31 @@ static int GBLinkKnownPids (DWORD out[4])
 	return n;
 }
 
+// Close every spawned seat window: switching to split screen replaces
+// them with in-process seats. Must run before the disconnect, which is
+// what scopes GBLinkKnownPids to the live session.
+static void GBLinkCloseInstances ()
+{
+	DWORD pids[4];
+	const int n = GBLinkKnownPids (pids);
+	for (int i = 0; i < n; i++)
+		GBLinkPostToPid (pids[i], WM_CLOSE, 0, 0);
+	for (int i = 0; i < 3; i++) GBLinkPeerPids[i] = 0;
+	GBLinkPartnerPid = 0;
+}
+
+// A master swapping its cartridge ends the whole session, spawned seats
+// and all - the same teardown as its disconnect click.
+static void WinGBLinkMasterUnplug ()
+{
+	if (Settings.GBLinkPeerInstance || !S9xSGBLinkIsEnabled ()) return;
+	GBLinkCloseInstances ();
+	S9xSGBLinkDisconnect ();
+	GBLinkMode = GBLINK_OFF;
+	GBLinkSyncResponsiveSettings ();
+	S9xSetInfoString ("Link cable: disconnected");
+}
+
 // A paused instance stops answering the cable, and the other games read
 // that as unplugged and drop to their title screens -- so the session
 // holds together. Called from S9xSetPause/S9xClearPause to catch every
@@ -10644,15 +10759,32 @@ static void GBLinkPumpSpawns ()
 // there to re-tick — so only dead processes count.
 static void GBLinkAutoCloseAbandonedHub ()
 {
+	// A spawned companion closing its window is the exit from the link
+	// setup; a mere unlink keeps the master listening for a reconnect.
+	static bool had_partner = false;
+
 	if (Settings.GBLinkPeerInstance) return;
-	if (GBLinkSessionPlayers <= 2 || GBLinkMode != GBLINK_SAME) return;
-	if (!S9xSGBLinkIsEnabled ()) return;
-	if (GBLinkSlotsStarted == 0) return;        // nothing brought up yet
+	if (GBLinkMode == GBLINK_OFF || !S9xSGBLinkIsEnabled ())
+	{
+		had_partner = false;
+		return;
+	}
 	if (S9xSGBLinkPlayerCount () > 1) return;   // someone is still linked
 
-	for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
-		if (GBLinkPidAlive (GBLinkPeerPids[i])) return;
+	if (GBLinkSessionPlayers > 2 && GBLinkMode == GBLINK_SAME)
+	{
+		if (GBLinkSlotsStarted == 0) return;    // nothing brought up yet
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+			if (GBLinkPidAlive (GBLinkPeerPids[i])) return;
+	}
+	else
+	{
+		// A hand-launched instance leaves no pid and never triggers this.
+		if (GBLinkPartnerAlive ()) { had_partner = true; return; }
+		if (!had_partner) return;
+	}
 
+	had_partner = false;
 	S9xSGBLinkDisconnect ();
 	GBLinkMode = GBLINK_OFF;
 	GBLinkSyncResponsiveSettings ();
@@ -10750,7 +10882,8 @@ static void WinStartGBLink (int mode, int players)
 	const bool force_adapter = !Settings.GBLinkPeerInstance && mode == GBLINK_SAME &&
 	                           link_players == 2 && S9xSGBCartNeedsDmg07 ();
 
-	const int role = S9xSGBLinkAutoStart (err, sizeof(err), link_players, force_adapter);
+	const int role = S9xSGBLinkAutoStart (err, sizeof(err), link_players, force_adapter,
+	                                      Settings.GBLinkPeerInstance);
 	if (role == S9X_GBLINK_NONE)
 	{
 		MessageBox (GUI.hWnd,
@@ -10764,9 +10897,11 @@ static void WinStartGBLink (int mode, int players)
 	GBLinkSlotsStarted   = 0;
 	GBLinkSyncResponsiveSettings ();
 
-	// Every game enters the session from its title screen: an instance
-	// left in demo or mid-game would never sync with freshly booted ones.
-	if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+	// Same-game sessions boot in lockstep from their title screens; an
+	// other-game link joins wherever each game already is (a trade
+	// partner mid-game must stay mid-game).
+	if (mode == GBLINK_SAME &&
+	    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
 		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_SOFT_RESET, 0), 0);
 
 	if (role == S9X_GBLINK_SERVER)
@@ -10791,19 +10926,34 @@ static void WinStartGBLink (int mode, int players)
 // the next click starts the newly picked session size.
 void WinToggleGBLink (int mode, int players)
 {
-	// A split session ends on any link click, like the socket toggle.
-	if (S9xSGBSplitActive ())
-	{
-		WinStopGBSplit ();
-		return;
-	}
-
 	// A spawned instance keeps the session size it was launched into, so
 	// a rejoin request cannot turn it into a competing host.
 	if (Settings.GBLinkPeerInstance) players = GBLinkSessionPlayers;
 
-	if (S9xSGBLinkIsEnabled ())
+	// Clicking the live shape disconnects; any other shape switches to it.
+	if (S9xSGBSplitActive ())
 	{
+		const bool same = (mode == GBLINK_SAME &&
+		                   players == S9xSGBSplitPlayers ());
+		WinStopGBSplit ();
+		if (same || Settings.GBLinkPeerInstance) return;
+	}
+	else if (S9xSGBLinkIsEnabled ())
+	{
+		// The tick follows the instances actually present, so the
+		// disconnect click is matched against that same count.
+		const int live_mode = WinGetGBLinkMode ();
+		int live = WinGetGBLinkPlayers ();
+		if (live_mode == GBLINK_SAME && live > 2)
+			live = WinGetGBLinkLivePlayers ();
+		const bool same = (mode == live_mode && players == live);
+
+		// Any click ends the session and its spawned seats with it; a
+		// switch then brings up a fresh set for the new shape, the same
+		// way split screen rebuilds its seats.
+		if (!Settings.GBLinkPeerInstance)
+			GBLinkCloseInstances ();
+
 		// Closing the socket is what unlinks the peers. Their menu ticks
 		// clear by themselves, because the check state is read back from
 		// the link.
@@ -10811,7 +10961,7 @@ void WinToggleGBLink (int mode, int players)
 		GBLinkMode = GBLINK_OFF;
 		GBLinkSyncResponsiveSettings ();
 		S9xSetInfoString ("Link cable: disconnected");
-		return;
+		if (same || Settings.GBLinkPeerInstance) return;
 	}
 
 	// Both flags needed: the BIOS path leaves SuperGameBoy FALSE, and BIOS
@@ -10841,6 +10991,33 @@ void WinToggleGBLink (int mode, int players)
 	}
 
 	WinStartGBLink (mode, players);
+}
+
+// A preference when idle; on a live same-game session it restarts the
+// session in the other flavor, same seat count.
+void WinToggleGBLinkSplit ()
+{
+	if (S9xSGBSplitActive ())
+	{
+		const int players = S9xSGBSplitPlayers ();
+		WinStopGBSplit ();
+		GBLinkSplitScreen = false;
+		WinToggleGBLink (GBLINK_SAME, players);
+	}
+	else if (S9xSGBLinkIsEnabled () && !Settings.GBLinkPeerInstance &&
+	         WinGetGBLinkMode () == GBLINK_SAME)
+	{
+		int players = WinGetGBLinkPlayers ();
+		if (players > 2) players = WinGetGBLinkLivePlayers ();
+		GBLinkCloseInstances ();
+		S9xSGBLinkDisconnect ();
+		GBLinkMode = GBLINK_OFF;
+		GBLinkSyncResponsiveSettings ();
+		GBLinkSplitScreen = true;
+		WinToggleGBLink (GBLINK_SAME, players);
+	}
+	else if (!S9xSGBLinkIsEnabled ())
+		GBLinkSplitScreen = !GBLinkSplitScreen;
 }
 
 // In-process split screen: no processes, no sockets — the SGB layer owns
@@ -10892,6 +11069,7 @@ static void WinStopGBSplit ()
 void WinAutoStartGBLinkPeer ()
 {
 	if (!Settings.GBLinkPeerInstance) return;
+	if (S9xSGBLinkIsEnabled ()) return;   // already on the wire
 	WinStartGBLink (Settings.GBRomPath[0] ? GBLINK_SAME : GBLINK_DIFF,
 	                GBLinkSessionPlayers);
 }

@@ -1969,9 +1969,23 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 // ---- Link session control --------------------------------------------------
 
 LinkRole SerialLinkAutoStart(uint16_t port, int players, bool force_hub,
-                             char *err, size_t err_cap)
+                             char *err, size_t err_cap, bool client_only)
 {
 	SerialLinkDisconnect();
+
+	// A spawned seat never hosts: the master owns the port. If nobody is
+	// listening, the master is gone and this window stays unplugged.
+	if (client_only)
+	{
+		if (LinkStartClient("127.0.0.1", port, err, err_cap))
+		{
+			g_role = LinkRole::Client;
+			Trace("session: client (spawned seat), port=%u", port);
+		}
+		else
+			g_role = LinkRole::None;
+		return g_role;
+	}
 
 	if (players > 2 || force_hub)
 	{
@@ -2135,6 +2149,10 @@ void SerialSplitDetach()
 	g_trace_seat = -1;
 	if (g_hub.local) g_hub = Dmg07();
 	g_splitlink = SplitLink();
+	// The seat cores are freed right after this; the last one to step
+	// may still be the active port, and everything null-checks it.
+	g_active     = nullptr;
+	g_active_mem = nullptr;
 }
 
 bool SerialSplitActive() { return g_splitlink.count > 0; }
@@ -2152,6 +2170,10 @@ void SerialSetTraceSeat(int seat)
 bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 {
 	if (!buf || cap == 0) return false;
+
+	// A split session has no sockets; without this it reads as a cable
+	// that came out. The split runner announces its own state.
+	if (SerialSplitActive()) return false;
 
 	if (g_hub.hosting)
 	{
@@ -2174,7 +2196,16 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 		return true;
 	}
 	const uint8_t st = LinkDisplayState();
-	if (st == 0 || st == g_direct.reported) return false;
+	if (st == 0)
+	{
+		// The handshake itself is news; the driver suffix comes once a
+		// byte has actually moved.
+		if (g_direct.reported != 0) return false;
+		g_direct.reported = 0xFF;
+		SerialLinkStatusText(buf, cap);
+		return true;
+	}
+	if (st == g_direct.reported) return false;
 
 	// Only master/passive flapping is rate-limited. Reaching the link, and
 	// the first real transfer, are news and go out at once.
@@ -2192,6 +2223,13 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 void SerialLinkStatusText(char *buf, size_t cap)
 {
 	if (!buf || cap == 0) return;
+
+	if (SerialSplitActive())
+	{
+		std::snprintf(buf, cap, "Link cable: split screen - %d seats",
+		              g_splitlink.count);
+		return;
+	}
 
 	if (g_hub.hosting && LinkGetState() != LinkState::Off)
 	{

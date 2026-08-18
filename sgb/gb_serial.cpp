@@ -155,9 +155,11 @@ int32_t ExtGapFloor(const Serial &s)
 // peer can't take this instance down with it.
 constexpr int kMasterWaitMs = 500;
 
-// After one timeout the peer is presumed paused: drop to a token wait, or
-// every byte would cost the full ceiling.
-constexpr int kStalledWaitMs = 20;
+// After one timeout the peer is presumed paused: drop to a shorter wait,
+// or every byte would cost the full ceiling. Still above the worst honest
+// reply - lockstep skew, the peer's once-a-frame arm, and settle pacing
+// stack to ~50 ms - or a single unanswered poll poisons the pairing.
+constexpr int kStalledWaitMs = 80;
 constexpr int kWaitSliceMs   = 5;
 
 // The Serial being stepped and its bus, so the UI can pump the socket
@@ -189,6 +191,13 @@ struct LinkSession
 	bool     peer_reconnect_ok = false;
 	uint32_t peer_timestamp    = 0;
 
+	// Lockstep baseline, latched at the first timestamp: only progress
+	// SINCE the handshake counts, so a fresh boot never stalls a peer
+	// that has been running for minutes.
+	bool     ts_valid          = false;
+	uint32_t ts_base_peer      = 0;
+	uint32_t ts_base_ours      = 0;
+
 	// The adapter clocks in flight on this seat, oldest first. Replies
 	// echo the sequence number, so a peer that flushed its queues (state
 	// load) just leaves holes we skip over instead of shifting every
@@ -210,6 +219,12 @@ struct DirectState
 	// Who drove the last transfer, chosen per byte by the games via SC
 	// bit 0: 0 = nothing yet, 1 = us, 2 = the peer.
 	uint8_t  driving     = 0;
+	// When each direction last completed: games like Death Track clock
+	// both ways, and neither label alone is true for them. Latched for
+	// the session - idle gaps must not flap the OSD role back and forth.
+	int64_t  last_drive_us   = -1;
+	int64_t  last_drive_peer = -1;
+	bool     bidir_seen      = false;
 	uint32_t unanswered  = 0;   // polls we clocked that nobody answered
 	uint8_t  reported    = 0;   // last value handed to the host UI
 	int64_t  next_report = 0;   // real-cycle gate on re-announcing
@@ -652,11 +667,18 @@ void CompleteActive(Serial &s, Memory &mem)
 
 	s.active     = false;
 	s.bits_left  = 0;
+	// The wire cannot clock again for another byte period, whoever the
+	// master was. Without this a peer clock arriving in the same socket
+	// drain as our reply is answered from the stale pre-transfer arm -
+	// the game's ISR never ran in between. Death Track's pairing died on
+	// exactly that race.
+	if (s.ext_gap_timer < kExtShiftTime) s.ext_gap_timer = kExtShiftTime;
 	if (s.peer_supplied)
 	{
 		++g_direct.transfers;
-		g_direct.driving    = 1;
-		g_direct.unanswered = 0;
+		g_direct.driving       = 1;
+		g_direct.last_drive_us = s.real_cycles;
+		g_direct.unanswered    = 0;
 	}
 	else if (s.peer_valid)
 	{
@@ -694,8 +716,11 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 	s.passive       = false;
 	s.ext_gap_timer = ExtGapFloor(s);
 	++g_direct.transfers;
-	g_direct.driving    = 2;
-	g_direct.unanswered = 0;
+	g_direct.driving         = 2;
+	g_direct.last_drive_peer = s.real_cycles;
+	g_direct.unanswered      = 0;
+	// The peer clocking us proves it is alive: restore the full wait.
+	g_direct.stalled         = false;
 }
 
 // Deliver the next held clock once one is due: the game has re-armed and
@@ -820,11 +845,27 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			}
 			else if (s.active)
 			{
-				// Both ends clocking: nothing to give, so ack. Hardware
-				// produces garbage here too.
-				Trace("[%lld] in  sync1 %02X seq=%u -> ack (both clocking)",
-				      (long long)s.real_cycles, p.b2, p.i1);
-				SendPacket(ch, kCmdSync3, 1, 0, 0, p.i1);
+				if (!s.peer_valid)
+				{
+					// Crossed masters: the port is full duplex, so two
+					// overlapping clocks exchange bytes on hardware.
+					// Death Track pairs its players with exactly this.
+					Trace("[%lld] in  sync1 %02X seq=%u -> crossed (ours %02X)",
+					      (long long)s.real_cycles, p.b2, p.i1,
+					      mem.serial_data);
+					SendPacket(ch, kCmdSync2, mem.serial_data, 0x80, 0, p.i1);
+					s.peer_data     = p.b2;
+					s.peer_valid    = true;
+					s.peer_supplied = true;
+				}
+				else
+				{
+					// Our transfer is already answered; their clock is for
+					// whatever we arm next - hold it like any early clock.
+					Trace("[%lld] in  sync1 %02X seq=%u -> held past active",
+					      (long long)s.real_cycles, p.b2, p.i1);
+					PendingPush(ch, s, p.b2, p.i1);
+				}
 			}
 			else
 			{
@@ -874,6 +915,16 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			}
 			else
 			{
+				// A timestamp jumping backward is the peer's console
+				// resetting (the cable survives a reset); re-baseline.
+				const int32_t step = static_cast<int32_t>(
+					(p.i1 - ses.peer_timestamp) << 1) >> 1;
+				if (!ses.ts_valid || step < -4 * 35112)
+				{
+					ses.ts_valid     = true;
+					ses.ts_base_peer = p.i1;
+					ses.ts_base_ours = g_active ? Timestamp(*g_active) : 0;
+				}
 				ses.peer_timestamp = p.i1;
 			}
 			return;
@@ -1568,6 +1619,11 @@ void SerialReset(Serial &s, bool cgb)
 	s     = fresh;
 	s.cgb = cgb;
 
+	// Our clock just restarted; the lockstep baselines re-latch on the
+	// next timestamps or every peer would read us as eternally behind.
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		g_sessions[ch].ts_valid = false;
+
 	g_active         = &s;
 	g_direct.stalled = false;
 
@@ -2086,13 +2142,58 @@ void SerialLinkPump()
 	else                          LinkPoll();
 }
 
+// Emulated progress a peer may lag before we hold a frame: one span for
+// the once-a-frame timestamp interval, one for the transport.
+constexpr int32_t kLockstepWindow = 2 * 35112;   // 2 MiHz units
+
+// Timestamp lockstep: true while our emulated clock has outrun a linked
+// peer's by more than hardware skew ever could. The caller idles the
+// frame and keeps the socket pumped; the behind side never holds, so
+// the pair converges instead of deadlocking.
+bool SerialLinkShouldHoldFrame()
+{
+	if (!g_active || LinkGetState() != LinkState::Connected) return false;
+
+	// Never hold while peer clocks sit in the queue: only a running game
+	// can arm the port and answer them, and the peer is blocked on that
+	// answer - holding here deadlocks both sides into a timeout.
+	if (g_active->pending_len) return false;
+
+	const uint32_t ours = Timestamp(*g_active);
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+	{
+		const LinkSession &ses = g_sessions[ch];
+		if (!ses.handshaked || !ses.peer_running || !ses.ts_valid) continue;
+		if (!LinkChannelConnected(ch)) continue;
+
+		const int32_t we_ran = static_cast<int32_t>(
+			(ours - ses.ts_base_ours) << 1) >> 1;
+		const int32_t they_ran = static_cast<int32_t>(
+			(ses.peer_timestamp - ses.ts_base_peer) << 1) >> 1;
+		if (we_ran - they_ran > kLockstepWindow) return true;
+	}
+	return false;
+}
+
 // What the OSD is currently saying: 0 nothing to report, 1 we drive,
 // 2 the peer drives, 3 we drive but the other game never answers,
 // 4 linked with nothing exchanged yet.
 uint8_t LinkDisplayState()
 {
 	if (!SerialLinkIsConnected()) return 0;
-	if (g_direct.driving)         return g_direct.driving;
+	if (g_direct.driving)
+	{
+		// Both directions completing recently means the games clock each
+		// other by turns - neither Master nor Passive alone is true.
+		constexpr int64_t kBothWindow = 30 * 70224;
+		const int64_t now = g_active ? g_active->real_cycles : 0;
+		if (g_direct.last_drive_us >= 0 && g_direct.last_drive_peer >= 0 &&
+		    now - g_direct.last_drive_us   < kBothWindow &&
+		    now - g_direct.last_drive_peer < kBothWindow)
+			g_direct.bidir_seen = true;
+		if (g_direct.bidir_seen) return 5;
+		return g_direct.driving;
+	}
 	return g_direct.unanswered ? 3 : 4;
 }
 
@@ -2210,8 +2311,9 @@ bool SerialLinkTakeStatusChange(char *buf, size_t cap)
 	// Only master/passive flapping is rate-limited. Reaching the link, and
 	// the first real transfer, are news and go out at once.
 	const int64_t now  = g_active ? g_active->real_cycles : 0;
-	const bool    flap = (g_direct.reported == 1 || g_direct.reported == 2) &&
-	                     (st == 1 || st == 2);
+	const bool    flap = (g_direct.reported == 1 || g_direct.reported == 2 ||
+	                      g_direct.reported == 5) &&
+	                     (st == 1 || st == 2 || st == 5);
 	if (flap && now < g_direct.next_report) return false;
 
 	g_direct.reported    = st;
@@ -2273,6 +2375,7 @@ void SerialLinkStatusText(char *buf, size_t cap)
 				const uint8_t st = LinkDisplayState();
 				const char *role = (st == 1) ? " (Master)"
 				                 : (st == 2) ? " (Passive)"
+				                 : (st == 5) ? " (Bidirectional)"
 				                 : (st == 3) ? " - waiting for the other game" : "";
 				std::snprintf(buf, cap, "Link cable: connected%s%s", role,
 				              g_direct.stalled ? " - peer not responding" : "");

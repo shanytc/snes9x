@@ -122,15 +122,8 @@ constexpr uint32_t kUnansweredIdle   = 4;
 // until a reset. That is what garbled F-1 Race's racer-entry screen.
 constexpr int32_t kExtByteGap = 4257;
 
-// Floor between arming and the first completion, the 0.128 ms the DMG-07
-// spends shifting eight bits in. A held clock settled in the same
-// instruction that set SC.7 is something no wire can do, and games write
-// their arm and their IF housekeeping back to back: F1 Pole Position's
-// link init clears IF three instructions after arming ($39FC then $01CC),
-// so an instant settle loses that transfer's interrupt outright. Nothing
-// re-arms the port afterwards but the serial ISR, so the console drops out
-// of the session for good — which is what left every joining instance
-// stuck answering $F0 to the adapter's pings.
+// Arm-to-completion floor, the 0.128 ms the DMG-07 shifts a byte in: a
+// same-instruction settle loses the IRQ to the game's own IF clear.
 constexpr int32_t kExtShiftTime = 537;
 
 // Ceiling on the master's stall waiting for a reply - bounded so a frozen
@@ -216,16 +209,8 @@ constexpr int32_t kCyclesPerMs = 4194;
 constexpr int32_t kPingByteGap = 6486;
 constexpr int32_t kPingRest    = 51169;
 
-// Rest after the one packet of $CC that announces transmission, for
-// socket sessions only. Hardware gives the consoles the ordinary ping
-// rest to notice it, and they need it: the $CC packet is sent once, and
-// a console that has not matched four of them in its receive slots
-// before the next packet overwrites them stays in the ping phase for
-// good (F1 Pole Position then sits on RACER ENTRY with that seat's
-// block reading back as its ping reply). A joining instance runs a
-// frame behind the adapter and replays that rest as one byte gap, so
-// the window has to come from the adapter instead: stop clocking long
-// enough for every seat to drain its backlog and run a main loop.
+// Rest after the one $CC packet, socket sessions only: a seat replaying
+// a backlog needs room to match it or it never leaves the ping phase.
 constexpr int32_t kSyncSettle  = 4 * 70224;
 
 // Transmission packets: byte-to-byte is 0.887 ms + (RATE >> 4) * 0.106 ms
@@ -257,6 +242,8 @@ struct Dmg07
 	// rotates its blocks in the broadcast (Jantaku Boy's confirm landed
 	// on the wrong window byte). Real ~1 ms byte gaps never miss.
 	uint8_t event_grace = 0;
+	// Byte period in force, so the arm grace can be held to it.
+	int32_t byte_gap    = kNetByteBase;
 
 	// Bulk re-anchoring: a [FD,FF,FF,FF] wake window followed by an
 	// LEN-prefixed bulk shifts every game's 4-byte framing by LEN mod 4.
@@ -1041,6 +1028,11 @@ void HubInterpretLocal()
 			else
 				g_hub.buffer[at] = b;
 		}
+		// Only the first SIZE transfers are sampled; anything else the
+		// console shifts out is discarded, which is easy to miss by eye.
+		else if (armed && b != 0xFD && b != 0x00 && b != 0xFF)
+			Trace("[%lld] p1 %02X DROPPED (slot %d, window 1..%d)",
+			      (long long)(g_active ? g_active->real_cycles : 0), b, pkt_pos, size);
 
 		// Player 1 pumping $FF asks for the ping phase back: three in a
 		// row, armed replies only — an idle wire is a slow game, not a
@@ -1092,6 +1084,10 @@ void HubInterpretLocalSeats()
 				const int base = (g_hub.prev_buf - 1 + size * 4) % (size * 8);
 				g_hub.buffer[base + k * size] = armed ? b : 0x00;
 			}
+			else if (armed && b != 0xFD && b != 0x00 && b != 0xFF)
+				Trace("[%lld] seat%d %02X DROPPED (slot %d, window 1..%d)",
+				      (long long)(g_active ? g_active->real_cycles : 0), k + 1, b,
+				      pkt_pos, size);
 		}
 
 		HubWakeFF(k, b, armed);
@@ -1434,6 +1430,7 @@ void HubAdvance()
 	else
 	{
 		const int32_t per_byte = kNetByteBase + hi * kNetByteStep;
+		g_hub.byte_gap = per_byte;
 		if (g_hub.wire != 0)
 		{
 			delay = per_byte;
@@ -1446,6 +1443,10 @@ void HubAdvance()
 			const int32_t body      = per_byte * (len - 1) + kNetPacketPad;
 			const int32_t total     = body > floor_len ? body : floor_len;
 			delay = total - per_byte * (len - 1);
+			// Never below the byte period: a shorter tail lets the next
+			// packet's first byte nest inside a preempted serial ISR.
+			if (delay < per_byte)
+				delay = per_byte;
 		}
 	}
 	g_hub.timer += delay;
@@ -1456,18 +1457,18 @@ void HubRunByte(Serial &s, Memory &mem)
 	// In-process net phase: hold the byte event while a console is
 	// between re-arms — the interleave can put a seat a few hundred
 	// cycles "behind" an instant that real wiring spreads over a
-	// millisecond. Signalling games wait longer: one dropped byte
-	// desyncs a console's bulk counter and rotates its framing beyond
-	// recovery. Streaming games keep the short wait — they leave the
-	// wire idle between packets by design, and a long hold would
-	// throttle the whole session to that console's pace.
+	// millisecond. Clocking past a late console trails its slot counter
+	// for good, so hold for a byte period; signalling games wait longer.
 	if (g_hub.local && g_hub.phase == kDmg07Net)
 	{
 		bool all_armed = s.passive;
 		for (int k = 1; k < g_splitlink.count && all_armed; ++k)
 			if (g_splitlink.s[k] && !g_splitlink.s[k]->passive)
 				all_armed = false;
-		if (!all_armed && g_hub.event_grace < (g_hub.size == 1 ? 64 : 8))
+		int cap = g_hub.byte_gap / 456;
+		if (cap < 8)             cap = 8;
+		if (g_hub.size == 1)     cap = 64;
+		if (!all_armed && g_hub.event_grace < cap)
 		{
 			++g_hub.event_grace;
 			g_hub.timer += 456;

@@ -2583,12 +2583,13 @@ void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }
 void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int32_t>(tcycles)); }
 
 // ---- Link cable session (see gb_serial.h) ----------------------------------
-int S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter)
+int S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter,
+                        bool client_only)
 {
 	uint16_t port = Settings.GBLinkPort;
 	if (port == 0) port = 8765;
 	return static_cast<int>(SGB::SerialLinkAutoStart(port, players, force_adapter,
-	                                                 err, err_cap));
+	                                                 err, err_cap, client_only));
 }
 
 // Games whose multiplayer runs only through the DMG-07 (the adapter

@@ -297,7 +297,8 @@ void S9xSGBRunCycles(int tcycles);
 // (2..4), returning the role taken. S9X_GBLINK_NONE means the socket
 // could not be opened; `err` says why. `force_adapter` hosts the DMG-07
 // even at 2 players (adapter-only games).
-int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter);
+int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter,
+                         bool client_only = false);
 
 // The loaded cart's multiplayer exists only through the DMG-07 Four
 // Player Adapter, so even a 2-player session must host it.

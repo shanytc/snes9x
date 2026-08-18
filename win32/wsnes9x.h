@@ -487,6 +487,12 @@ struct SCustomKeys {
 	// Emulation -> Game Boy Model, one per console the menu offers; see
 	// g_gbModelHotkeyPolicy for which policy each slot picks.
 	SCustomKey GBModel[GB_MODEL_HOTKEYS];
+	SCustomKey Link2P;               // GB link cable session shapes
+	SCustomKey Link3P;
+	SCustomKey Link4P;
+	SCustomKey LinkOtherGame;
+	SCustomKey LinkSplitToggle;
+	SCustomKey LinkEnd;
 };
 
 struct SCustomKeyExtra {
@@ -546,6 +552,12 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra SFCBoxKeyswitch[5];
 	SCustomKeyExtra BiosManager;
 	SCustomKeyExtra GBModel[GB_MODEL_HOTKEYS];
+	SCustomKeyExtra Link2P;
+	SCustomKeyExtra Link3P;
+	SCustomKeyExtra Link4P;
+	SCustomKeyExtra LinkOtherGame;
+	SCustomKeyExtra LinkSplitToggle;
+	SCustomKeyExtra LinkEnd;
 };
 
 struct SJoypad {

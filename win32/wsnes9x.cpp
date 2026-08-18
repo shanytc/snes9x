@@ -6178,6 +6178,15 @@ int WINAPI WinMain(
                 S9xSetInfoString (gblink_status);
         }
 
+        // Timestamp lockstep: while our emulated clock has outrun a
+        // linked peer's, idle this frame. The pump above keeps running,
+        // so the peer's timestamps arrive and the pair converges.
+        if (S9xSGBLinkShouldHoldFrame ())
+        {
+            Sleep (1);
+            continue;
+        }
+
         WinEmulateFrame ();
     }
 

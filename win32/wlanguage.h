@@ -190,6 +190,12 @@ Nintendo is a trademark.")
 #define HOTKEYS_SFCBOX_TVGAME TEXT("GAME/TV Switch:")
 #define HOTKEYS_SFCBOX_MOUNT1 TEXT("Mount/Eject Slot 1:")
 #define HOTKEYS_SFCBOX_MOUNT2 TEXT("Mount/Eject Slot 2:")
+#define HOTKEYS_LINK_2P TEXT("Same Game 2P:")
+#define HOTKEYS_LINK_3P TEXT("Same Game 3P:")
+#define HOTKEYS_LINK_4P TEXT("Same Game 4P:")
+#define HOTKEYS_LINK_SPLIT TEXT("Split Screen:")
+#define HOTKEYS_LINK_OTHER TEXT("Other Game:")
+#define HOTKEYS_LINK_END TEXT("Exit Link Cable:")
 
 // gaming buttons and axes
 #define GAMEDEVICE_JOYNUMPREFIX "(J%x)" // don't change this

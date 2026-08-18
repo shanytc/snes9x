@@ -183,10 +183,10 @@ void ResetChannel(PeerCtx &p)
 	p.tx_len = 0;
 }
 
-// Losing the only peer of a direct cable ends the session, listener and
-// all, as it always has. On a hub the seat is merely freed: the adapter
-// keeps pinging, the player's status bit clears, and a new instance can
-// dial into the empty port.
+// The master never stops listening: a dropped peer only frees its seat,
+// direct cable and hub alike, so it can dial back into the same session.
+// Only a client losing its server ends up unplugged - it never re-hosts,
+// the master owns the port.
 void DropChannel(int ch, const char *reason)
 {
 	PeerCtx &p = g_link.peers[ch];
@@ -196,7 +196,7 @@ void DropChannel(int ch, const char *reason)
 	if (reason && *reason)
 		std::snprintf(g_link.err, sizeof g_link.err, "%s", reason);
 
-	if (g_link.client || g_link.max_peers <= 1)
+	if (g_link.client)
 	{
 		CloseSocket(g_link.listen_fd);
 		g_link.state = LinkState::Off;

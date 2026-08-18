@@ -126,6 +126,31 @@ constexpr int32_t kExtByteGap = 4257;
 // same-instruction settle loses the IRQ to the game's own IF clear.
 constexpr int32_t kExtShiftTime = 537;
 
+// Ceiling for the observed-cadence floor: the slowest DMG-07 byte period.
+constexpr int32_t kExtGapCeil = 10932;
+
+// Average the arrival spacing of the peer's clocks. Bursts and stalls of
+// the transport cancel out; the mean is the wire's true byte period.
+void ClockCadenceSample(Serial &s)
+{
+	const int64_t now = s.real_cycles;
+	if (s.clk_last > 0 && now > s.clk_last && now - s.clk_last < 200000)
+	{
+		const int32_t gap = static_cast<int32_t>(now - s.clk_last);
+		s.clk_gap_ema = s.clk_gap_ema ? s.clk_gap_ema + (gap - s.clk_gap_ema) / 8
+		                              : gap;
+	}
+	s.clk_last = now;
+}
+
+int32_t ExtGapFloor(const Serial &s)
+{
+	int32_t g = s.clk_gap_ema;
+	if (g < kExtByteGap) g = kExtByteGap;
+	if (g > kExtGapCeil) g = kExtGapCeil;
+	return g;
+}
+
 // Ceiling on the master's stall waiting for a reply - bounded so a frozen
 // peer can't take this instance down with it.
 constexpr int kMasterWaitMs = 500;
@@ -351,6 +376,8 @@ struct PcWatch { uint16_t pc; uint8_t bank; const char *name; uint16_t var; };
 // bank 0xFF = unbanked ($0000-$3FFF); else must match the shadow $FFAB.
 // var: $C0xx/$C6xx -> wram, $FF8x+ -> hram.
 constexpr PcWatch kPcWatch[] = {
+	// F-1 Hero's MULTI GAME menu gate: proceeds only on $FFC0 = 1 or 3.
+	{ 0x4480, 0xFF, "mg-gate",     0xFFC0 },
 	{ 0x08C3, 0xFF, "ev-dispatch", 0xC0B1 },
 	{ 0x0998, 0xFF, "ev3-step",    0xC0B2 },
 	{ 0x0A08, 0xFF, "step0-stn",   0xC0B3 },
@@ -665,7 +692,7 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
 
 	s.passive       = false;
-	s.ext_gap_timer = kExtByteGap;
+	s.ext_gap_timer = ExtGapFloor(s);
 	++g_direct.transfers;
 	g_direct.driving    = 2;
 	g_direct.unanswered = 0;
@@ -771,6 +798,7 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			return;
 
 		case kCmdSync1:
+			ClockCadenceSample(s);
 			if (g_hub.hosting)
 			{
 				// A game clocking internally under the adapter gets garbage
@@ -1593,6 +1621,8 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	s.peer_supplied = false;
 	s.peer_data     = 0xFF;
 	s.ext_gap_timer = 0;
+	s.clk_gap_ema   = 0;
+	s.clk_last      = 0;
 	PendingClear(s);
 
 	if (g_hub.hosting)

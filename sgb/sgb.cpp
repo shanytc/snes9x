@@ -1163,6 +1163,20 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 		impl_->cgb_mode      = false;
 		impl_->sgb_authentic = true;
 	}
+	{
+		// The file's basename reads better than the header title; the
+		// null-path seat loads fall back to the cartridge's own name.
+		const char *label = impl_->cart.header.title;
+		bool from_path = false;
+		if (path && *path)
+		{
+			const char *base = path;
+			for (const char *c = path; *c; ++c)
+				if (*c == '/' || *c == '\\') base = c + 1;
+			if (*base) { label = base; from_path = true; }
+		}
+		SGB::SerialTraceSetRom(label, from_path);
+	}
 	ApplyAutoBlend();   // pick blend from the per-title table when Auto is on
 	ColdReset();   // new cart → start fresh, drop any stale handshake cache
 	return true;

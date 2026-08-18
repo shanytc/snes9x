@@ -106,7 +106,8 @@ enum class LinkRole : uint8_t
 // know a hub is on the other end. `force_hub` hosts the adapter even at
 // 2 players, for games whose multiplayer only exists through it.
 LinkRole SerialLinkAutoStart(uint16_t port, int players, bool force_hub,
-                             char *err, size_t err_cap);
+                             char *err, size_t err_cap,
+                             bool client_only = false);
 
 void SerialLinkDisconnect();
 

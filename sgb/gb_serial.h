@@ -63,6 +63,11 @@ struct Serial
 	int32_t  ds_remainder  = 0;
 	int32_t  ts_send_timer = 0;
 	int32_t  poll_timer    = 0;
+
+	// Observed cadence of the peer's clocks, so a queued burst replays at
+	// the wire's real byte period instead of the base floor.
+	int32_t  clk_gap_ema = 0;
+	int64_t  clk_last    = 0;
 };
 
 // Fires when the CPU starts an internal-clock transfer; the GB test

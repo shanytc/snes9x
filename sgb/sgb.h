@@ -316,6 +316,7 @@ void S9xSGBLinkDisconnect(void);
 
 // Service the socket while the emulation loop is parked.
 void S9xSGBLinkPump(void);
+bool S9xSGBLinkShouldHoldFrame(void);
 
 // Enabled = a session exists (listening, connecting or connected).
 // Connected = a peer is attached and the version handshake is done.

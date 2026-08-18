@@ -2617,6 +2617,7 @@ int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGet
 int S9xSGBLinkPlayerCount(void)     { return SGB::SerialLinkPlayerCount(); }
 void S9xSGBLinkDisconnect(void)     { SGB::SerialLinkDisconnect(); }
 void S9xSGBLinkPump(void)           { SGB::SerialLinkPump(); }
+bool S9xSGBLinkShouldHoldFrame(void){ return SGB::SerialLinkShouldHoldFrame(); }
 bool S9xSGBLinkIsEnabled(void)      { return SGB::SerialLinkIsEnabled(); }
 bool S9xSGBLinkIsConnected(void)    { return SGB::SerialLinkIsConnected(); }
 

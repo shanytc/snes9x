@@ -121,6 +121,10 @@ bool SerialLinkIsConnected();   // a peer is attached and past the version hands
 // is parked and an accept/connect would otherwise never complete.
 void SerialLinkPump();
 
+// True while this side's emulated clock has outrun a linked peer's; the
+// frame loop idles (socket still pumped) until the peer catches up.
+bool SerialLinkShouldHoldFrame();
+
 // Game Boys on the session including this one (0..4). On a direct cable
 // one side leaving ends it for both; on a hub only that seat empties.
 int SerialLinkPlayerCount();

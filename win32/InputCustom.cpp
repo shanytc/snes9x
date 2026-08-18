@@ -367,6 +367,12 @@ int GetNumHotKeysAssignedTo (WORD Key, int modifiers)
 			if(MATCHES_KEY(SFCBoxKeyswitch[i])) count++;
 		for(int i = 0 ; i < GB_MODEL_HOTKEYS ; i++)
 			if(MATCHES_KEY(GBModel[i]))         count++;
+		if(MATCHES_KEY(Link2P))            count++;
+		if(MATCHES_KEY(Link3P))            count++;
+		if(MATCHES_KEY(Link4P))            count++;
+		if(MATCHES_KEY(LinkOtherGame))     count++;
+		if(MATCHES_KEY(LinkSplitToggle))   count++;
+		if(MATCHES_KEY(LinkEnd))           count++;
 
 		#undef MATCHES_KEY
 	}

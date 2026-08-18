@@ -1141,6 +1141,8 @@ void WinRegisterConfigItems()
     ADD(InsertCoin);
 	ADDN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADD(Link2P); ADD(Link3P); ADD(Link4P);
+	ADD(LinkOtherGame); ADD(LinkSplitToggle); ADD(LinkEnd);
 #undef ADD
 #undef ADDN
 
@@ -1173,6 +1175,8 @@ void WinRegisterConfigItems()
 	ADDXALL(InsertCoin);
 	ADDXALLN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDXALLN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDXALLN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDXALLN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDXALLN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADDXALL(Link2P); ADDXALL(Link3P); ADDXALL(Link4P);
+	ADDXALL(LinkOtherGame); ADDXALL(LinkSplitToggle); ADDXALL(LinkEnd);
 #undef ADDX
 #undef ADDXN
 #undef ADDXALL

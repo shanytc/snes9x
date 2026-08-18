@@ -132,6 +132,7 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 void WinToggleGBLink(int mode, int players);
 void WinToggleGBLinkSplit();
+void WinGBLinkHotkey(int what);
 bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid = 0);
 void GBLinkMirrorPause();
 void WinAutoStartGBLinkPeer();
@@ -193,8 +194,9 @@ void S9xWinScanJoypads();
 #define WM_GBLINK_PAUSE (WM_APP + 3)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 5;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 6;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
+constexpr int HOTKEY_TAB_LINK   = 5;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
 constexpr int HOTKEY_TAB_TURBO      = 2;
@@ -1299,6 +1301,12 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			}
 			hitHotKey = true;
 		}
+		if(HKmatch(Link2P))          { WinGBLinkHotkey (2);  hitHotKey = true; }
+		if(HKmatch(Link3P))          { WinGBLinkHotkey (3);  hitHotKey = true; }
+		if(HKmatch(Link4P))          { WinGBLinkHotkey (4);  hitHotKey = true; }
+		if(HKmatch(LinkOtherGame))   { WinGBLinkHotkey (0);  hitHotKey = true; }
+		if(HKmatch(LinkSplitToggle)) { WinGBLinkHotkey (-1); hitHotKey = true; }
+		if(HKmatch(LinkEnd))         { WinGBLinkHotkey (-2); hitHotKey = true; }
 		for (int ksp = 0; ksp < 5; ksp++)
 		{
 			// SFC-Box rotary keyswitch positions (panel order 1/OFF/ON/2/3);
@@ -11020,6 +11028,69 @@ void WinToggleGBLinkSplit ()
 		GBLinkSplitScreen = !GBLinkSplitScreen;
 }
 
+// Hotkey face of the link menu, same gating: the opposite family blocks
+// mid-session, and a spawned seat never chooses the shape. what = 2..4
+// for Same Game, 0 for Other Game, -1 split toggle, -2 end the session.
+void WinGBLinkHotkey (int what)
+{
+	const int  live      = WinGetGBLinkMode ();
+	const bool same_live = S9xSGBSplitActive () || live == GBLINK_SAME;
+	const bool diff_live = live == GBLINK_DIFF;
+
+	switch (what)
+	{
+		case 2: case 3: case 4:
+			if (Settings.GBLinkPeerInstance) return;
+			if (diff_live)
+			{
+				S9xSetInfoString ("Link cable: end the Other Game session first");
+				return;
+			}
+			WinToggleGBLink (GBLINK_SAME, what);
+			return;
+
+		case 0:
+			if (Settings.GBLinkPeerInstance) return;
+			if (same_live)
+			{
+				S9xSetInfoString ("Link cable: end the Same Game session first");
+				return;
+			}
+			WinToggleGBLink (GBLINK_DIFF, 2);
+			return;
+
+		case -1:
+		{
+			const bool was = GBLinkSplitScreen;
+			WinToggleGBLinkSplit ();
+			if (GBLinkSplitScreen != was &&
+			    !S9xSGBSplitActive () && !S9xSGBLinkIsEnabled ())
+				S9xSetInfoString (GBLinkSplitScreen
+				                  ? "Split screen: on for the next Same Game session"
+				                  : "Split screen: off for the next Same Game session");
+			return;
+		}
+
+		case -2:
+			if (S9xSGBSplitActive ())
+			{
+				WinStopGBSplit ();
+				return;
+			}
+			if (!S9xSGBLinkIsEnabled ()) return;
+			if (Settings.GBLinkPeerInstance)
+			{
+				S9xSGBLinkDisconnect ();
+				GBLinkMode = GBLINK_OFF;
+				GBLinkSyncResponsiveSettings ();
+				S9xSetInfoString ("Link cable: disconnected");
+				return;
+			}
+			WinGBLinkMasterUnplug ();
+			return;
+	}
+}
+
 // In-process split screen: no processes, no sockets — the SGB layer owns
 // the extra consoles and the local cable/adapter. The battery base path
 // hands each seat its own .savN next to the primary's .sav.
@@ -15208,6 +15279,19 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
+    // Tab 5: Game Boy Link Cable - the menu's session controls as keys.
+    {
+        { &CustomKeys.Link2P,          &CustomKeysExtra.Link2P,          HOTKEYS_LINK_2P },
+        { &CustomKeys.Link3P,          &CustomKeysExtra.Link3P,          HOTKEYS_LINK_3P },
+        { &CustomKeys.Link4P,          &CustomKeysExtra.Link4P,          HOTKEYS_LINK_4P },
+        { &CustomKeys.LinkSplitToggle, &CustomKeysExtra.LinkSplitToggle, HOTKEYS_LINK_SPLIT },
+        { &CustomKeys.LinkOtherGame,   &CustomKeysExtra.LinkOtherGame,   HOTKEYS_LINK_OTHER },
+        { &CustomKeys.LinkEnd,         &CustomKeysExtra.LinkEnd,         HOTKEYS_LINK_END },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -15376,7 +15460,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box")
+				TEXT("SFC Box"), TEXT("Link Cable")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

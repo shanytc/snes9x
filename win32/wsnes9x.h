@@ -479,6 +479,12 @@ struct SCustomKeys {
 	SCustomKey MasterHotkey;
 	SCustomKey InsertCoin;           // SFC-Box front-panel coin switch
 	SCustomKey SFCBoxKeyswitch[5];   // rotary positions, panel order 1/OFF/ON/2/3
+	SCustomKey Link2P;               // GB link cable session shapes
+	SCustomKey Link3P;
+	SCustomKey Link4P;
+	SCustomKey LinkOtherGame;
+	SCustomKey LinkSplitToggle;
+	SCustomKey LinkEnd;
 };
 
 struct SCustomKeyExtra {
@@ -536,6 +542,12 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra CheatSearchDialog;
 	SCustomKeyExtra InsertCoin;
 	SCustomKeyExtra SFCBoxKeyswitch[5];
+	SCustomKeyExtra Link2P;
+	SCustomKeyExtra Link3P;
+	SCustomKeyExtra Link4P;
+	SCustomKeyExtra LinkOtherGame;
+	SCustomKeyExtra LinkSplitToggle;
+	SCustomKeyExtra LinkEnd;
 };
 
 struct SJoypad {

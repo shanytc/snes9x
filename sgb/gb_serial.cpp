@@ -49,6 +49,18 @@ namespace {
 // per instance. Spawned instances inherit the variable.
 FILE *g_trace         = nullptr;
 bool  g_trace_checked = false;
+char  g_trace_rom[48] = "";
+char  g_trace_file[128] = "";
+
+void TraceFileName(char *out, size_t cap)
+{
+	if (g_trace_rom[0])
+		std::snprintf(out, cap, "sgb_link_trace_%s_%lu.log",
+		              g_trace_rom, (unsigned long)SGB_LINK_PID);
+	else
+		std::snprintf(out, cap, "sgb_link_trace_%lu.log",
+		              (unsigned long)SGB_LINK_PID);
+}
 
 bool TraceOn()
 {
@@ -58,12 +70,10 @@ bool TraceOn()
 		const char *v = std::getenv("SGB_LINK_TRACE");
 		if (v && *v && *v != '0')
 		{
-			char name[64];
-			std::snprintf(name, sizeof name, "sgb_link_trace_%lu.log",
-			              (unsigned long)SGB_LINK_PID);
+			TraceFileName(g_trace_file, sizeof g_trace_file);
 			// Unqualified: the win32 build remaps fopen to its wide-path
 			// wrapper via a forced include.
-			g_trace = fopen(name, "w");
+			g_trace = fopen(g_trace_file, "w");
 		}
 	}
 	return g_trace != nullptr;
@@ -88,6 +98,10 @@ constexpr uint8_t kCmdSync2          = 105;
 constexpr uint8_t kCmdSync3          = 106;
 constexpr uint8_t kCmdStatus         = 108;
 constexpr uint8_t kCmdWantDisconnect = 109;
+// Ours, outside BGB's range: the hub tells each seat its byte period, so
+// queued bursts replay at the wire's true cadence instead of guessing it
+// from batched arrival times. Unknown to old peers, who ignore it.
+constexpr uint8_t kCmdCadence        = 200;
 
 constexpr uint8_t kStatusRunning          = 0x01;
 constexpr uint8_t kStatusPaused           = 0x02;
@@ -129,23 +143,12 @@ constexpr int32_t kExtShiftTime = 537;
 // Ceiling for the observed-cadence floor: the slowest DMG-07 byte period.
 constexpr int32_t kExtGapCeil = 10932;
 
-// Average the arrival spacing of the peer's clocks. Bursts and stalls of
-// the transport cancel out; the mean is the wire's true byte period.
-void ClockCadenceSample(Serial &s)
-{
-	const int64_t now = s.real_cycles;
-	if (s.clk_last > 0 && now > s.clk_last && now - s.clk_last < 200000)
-	{
-		const int32_t gap = static_cast<int32_t>(now - s.clk_last);
-		s.clk_gap_ema = s.clk_gap_ema ? s.clk_gap_ema + (gap - s.clk_gap_ema) / 8
-		                              : gap;
-	}
-	s.clk_last = now;
-}
-
 int32_t ExtGapFloor(const Serial &s)
 {
-	int32_t g = s.clk_gap_ema;
+	// The hub declares its byte period; without one (direct cable, an
+	// older peer) the DMG-07's fastest cadence stays the floor, as it
+	// always was.
+	int32_t g = s.clk_gap_fixed ? s.clk_gap_fixed : kExtByteGap;
 	if (g < kExtByteGap) g = kExtByteGap;
 	if (g > kExtGapCeil) g = kExtGapCeil;
 	return g;
@@ -284,6 +287,7 @@ struct Dmg07
 	uint8_t event_grace = 0;
 	// Byte period in force, so the arm grace can be held to it.
 	int32_t byte_gap    = kNetByteBase;
+	int32_t byte_gap_sent = 0;   // last cadence broadcast to the seats
 
 	// Bulk re-anchoring: a [FD,FF,FF,FF] wake window followed by an
 	// LEN-prefixed bulk shifts every game's 4-byte framing by LEN mod 4.
@@ -823,7 +827,6 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			return;
 
 		case kCmdSync1:
-			ClockCadenceSample(s);
 			if (g_hub.hosting)
 			{
 				// A game clocking internally under the adapter gets garbage
@@ -927,6 +930,11 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 				}
 				ses.peer_timestamp = p.i1;
 			}
+			return;
+
+		case kCmdCadence:
+			s.clk_gap_fixed = static_cast<int32_t>(p.i1);
+			Trace("in  cadence %u", p.i1);
 			return;
 
 		case kCmdJoypad:
@@ -1509,6 +1517,14 @@ void HubAdvance()
 	else
 	{
 		const int32_t per_byte = kNetByteBase + hi * kNetByteStep;
+		if (per_byte != g_hub.byte_gap_sent && !g_hub.local)
+		{
+			for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+				if (g_sessions[ch].handshaked)
+					SendPacket(ch, kCmdCadence, 0, 0, 0,
+					           static_cast<uint32_t>(per_byte));
+			g_hub.byte_gap_sent = per_byte;
+		}
 		g_hub.byte_gap = per_byte;
 		if (g_hub.wire != 0)
 		{
@@ -1677,8 +1693,7 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	s.peer_supplied = false;
 	s.peer_data     = 0xFF;
 	s.ext_gap_timer = 0;
-	s.clk_gap_ema   = 0;
-	s.clk_last      = 0;
+	s.clk_gap_fixed = 0;
 	PendingClear(s);
 
 	if (g_hub.hosting)
@@ -2154,6 +2169,11 @@ bool SerialLinkShouldHoldFrame()
 {
 	if (!g_active || LinkGetState() != LinkState::Connected) return false;
 
+	// The adapter host is the wire's clock: everyone paces off it, and it
+	// holding for the slowest of three seats chains any hiccup into a
+	// freeze for all four. Its protocol is latency-tolerant by design.
+	if (g_hub.hosting) return false;
+
 	// Never hold while peer clocks sit in the queue: only a running game
 	// can arm the port and answer them, and the peer is blocked on that
 	// answer - holding here deadlocks both sides into a timeout.
@@ -2261,6 +2281,41 @@ bool SerialSplitActive() { return g_splitlink.count > 0; }
 void SerialTraceMsg(const char *msg)
 {
 	Trace("%s", msg);
+}
+
+// Stamp the trace file with the cartridge so a folder of logs reads by
+// game. Renames an already-open file; spaces become underscores.
+void SerialTraceSetRom(const char *label, bool from_path)
+{
+	// A file basename beats a header title: the seats' null-path loads
+	// must not override the primary's real name.
+	static bool have_path = false;
+	if (have_path && !from_path) return;
+	if (from_path) have_path = true;
+
+	char clean[sizeof g_trace_rom];
+	size_t n = 0;
+	for (const char *c = label; c && *c && n + 1 < sizeof clean; ++c)
+	{
+		const char ch = *c;
+		if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+		    (ch >= '0' && ch <= '9') || ch == '-' || ch == '.')
+			clean[n++] = ch;
+		else if (ch == ' ' && n && clean[n - 1] != '_')
+			clean[n++] = '_';
+	}
+	clean[n] = 0;
+	if (!n || !std::strcmp(clean, g_trace_rom)) return;
+	std::strcpy(g_trace_rom, clean);
+
+	if (!g_trace) return;
+	fclose(g_trace);
+	char fresh[sizeof g_trace_file];
+	TraceFileName(fresh, sizeof fresh);
+	if (std::rename(g_trace_file, fresh) == 0)
+		std::strcpy(g_trace_file, fresh);
+	g_trace = fopen(g_trace_file, "a");
+	Trace("rom: %s", label);
 }
 
 void SerialSetTraceSeat(int seat)

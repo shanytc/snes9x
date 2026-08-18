@@ -64,10 +64,9 @@ struct Serial
 	int32_t  ts_send_timer = 0;
 	int32_t  poll_timer    = 0;
 
-	// Observed cadence of the peer's clocks, so a queued burst replays at
-	// the wire's real byte period instead of the base floor.
-	int32_t  clk_gap_ema = 0;
-	int64_t  clk_last    = 0;
+	// Byte period the hub declared for this wire (0 = none declared):
+	// queued bursts replay at the wire's true cadence, never a guess.
+	int32_t  clk_gap_fixed = 0;
 };
 
 // Fires when the CPU starts an internal-clock transfer; the GB test
@@ -143,6 +142,10 @@ bool SerialSplitActive();
 // Emit one line into the SGB_LINK_TRACE log (no-op when tracing is off).
 // Lets the split runner log per-core state the serial layer cannot see.
 void SerialTraceMsg(const char *msg);
+
+// Stamp the trace file name with the loaded cartridge's name. A label
+// derived from a file path outranks one from the cart's header title.
+void SerialTraceSetRom(const char *label, bool from_path);
 
 // Tell the PC tracer which split seat is currently executing (-1 = none).
 void SerialSetTraceSeat(int seat);

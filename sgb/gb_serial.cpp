@@ -103,6 +103,8 @@ constexpr uint8_t kCmdWantDisconnect = 109;
 // queued bursts replay at the wire's true cadence instead of guessing it
 // from batched arrival times. Unknown to old peers, who ignore it.
 constexpr uint8_t kCmdCadence        = 200;
+// Barrier lockstep: the host grants each seat an emulated-time horizon.
+constexpr uint8_t kCmdTimeGrant      = 201;
 
 constexpr uint8_t kStatusRunning          = 0x01;
 constexpr uint8_t kStatusPaused           = 0x02;
@@ -120,6 +122,10 @@ constexpr int32_t kPollInterval = 1024;
 // How often to volunteer our timestamp so the peer can pace itself. Once
 // a frame is ample; at ~1 ms it buried a paused peer in backlog.
 constexpr int32_t kTimestampInterval = 65536;
+
+// Emulated progress a peer may lag before we hold a frame: one span for
+// the once-a-frame timestamp interval, one for the transport (2 MiHz).
+constexpr int32_t kLockstepWindow = 2 * 35112;
 
 // How long a peer's transfer waits for our game to arm. The two emulators
 // free-run on their own timing, so their frame phase drifts against each
@@ -970,6 +976,11 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 			Trace("in  cadence %u", p.i1);
 			return;
 
+		case kCmdTimeGrant:
+			s.grant_horizon = p.i1;
+			s.grant_valid   = true;
+			return;
+
 		case kCmdJoypad:
 		case kCmdWantDisconnect:
 			// Remote control is out of scope, and we never auto-reconnect.
@@ -1727,6 +1738,7 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	s.peer_data     = 0xFF;
 	s.ext_gap_timer = 0;
 	s.clk_gap_fixed = 0;
+	s.grant_valid   = false;
 	PendingClear(s);
 
 	if (g_hub.hosting)
@@ -2066,7 +2078,43 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	if (s.ts_send_timer <= 0)
 	{
 		s.ts_send_timer = kTimestampInterval;
-		SendPacket(0, kCmdSync3, 0, 0, 0, Timestamp(s), true);
+		const uint32_t ours = Timestamp(s);
+		const bool host = g_hub.hosting || g_role == LinkRole::Server;
+		for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+		{
+			if (ch != 0 && !host) break;
+			if (!g_sessions[ch].handshaked) continue;
+			SendPacket(ch, kCmdSync3, 0, 0, 0, ours, true);
+		}
+
+		// The host is the clock owner: grant every seat a horizon just
+		// past the slowest seat's progress, in that seat's own clock.
+		// Everything then slows together instead of drifting apart.
+		if (host)
+		{
+			bool     any = false;
+			int32_t  slowest = 0;
+			for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+			{
+				const LinkSession &ses = g_sessions[ch];
+				if (!ses.handshaked || !ses.peer_running || !ses.ts_valid) continue;
+				if (!LinkChannelConnected(ch)) continue;
+				const int32_t prog = static_cast<int32_t>(
+					(ses.peer_timestamp - ses.ts_base_peer) << 1) >> 1;
+				if (!any || prog < slowest) { slowest = prog; any = true; }
+			}
+			if (any)
+				for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+				{
+					const LinkSession &ses = g_sessions[ch];
+					if (!ses.handshaked || !ses.ts_valid) continue;
+					if (!LinkChannelConnected(ch)) continue;
+					const uint32_t horizon = (ses.ts_base_peer +
+						static_cast<uint32_t>(slowest) +
+						static_cast<uint32_t>(kLockstepWindow)) & 0x7FFFFFFF;
+					SendPacket(ch, kCmdTimeGrant, 0, 0, 0, horizon, true);
+				}
+		}
 
 		// A wall-clock beacon once a second, so logs from separate
 		// processes merge into one real-time timeline.
@@ -2209,10 +2257,6 @@ void SerialLinkPump()
 	else                          LinkPoll();
 }
 
-// Emulated progress a peer may lag before we hold a frame: one span for
-// the once-a-frame timestamp interval, one for the transport.
-constexpr int32_t kLockstepWindow = 2 * 35112;   // 2 MiHz units
-
 // Timestamp lockstep: true while our emulated clock has outrun a linked
 // peer's by more than hardware skew ever could. The caller idles the
 // frame and keeps the socket pumped; the behind side never holds, so
@@ -2221,15 +2265,19 @@ bool SerialLinkShouldHoldFrame()
 {
 	if (!g_active || LinkGetState() != LinkState::Connected) return false;
 
-	// The adapter host is the wire's clock: everyone paces off it, and it
-	// holding for the slowest of three seats chains any hiccup into a
-	// freeze for all four. Its protocol is latency-tolerant by design.
-	if (g_hub.hosting) return false;
-
 	// Never hold while peer clocks sit in the queue: only a running game
 	// can arm the port and answer them, and the peer is blocked on that
 	// answer - holding here deadlocks both sides into a timeout.
 	if (g_active->pending_len) return false;
+
+	// Barrier lockstep: a granted horizon is absolute - the session
+	// slows down together instead of letting one instance drift.
+	if (g_active->grant_valid)
+	{
+		const int32_t past = static_cast<int32_t>(
+			(Timestamp(*g_active) - g_active->grant_horizon) << 1) >> 1;
+		if (past > 0) return true;
+	}
 
 	const uint32_t ours = Timestamp(*g_active);
 	for (int ch = 0; ch < kLinkMaxChannels; ++ch)

@@ -49,6 +49,7 @@ struct Serial
 	static constexpr int kPendingCap = 32;
 	uint8_t  pending_data[kPendingCap] = {0};
 	uint32_t pending_i1[kPendingCap]   = {0};
+	int64_t  pending_born[kPendingCap] = {0};   // real_cycles at arrival
 	uint8_t  pending_head = 0;
 	uint8_t  pending_len  = 0;
 	int32_t  pending_age  = 0;   // age of the oldest held clock

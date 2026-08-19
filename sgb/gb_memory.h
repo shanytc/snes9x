@@ -72,6 +72,9 @@ struct Memory
 	uint8_t  svbk = 1;            // 0xFF70
 	bool     key1_armed   = false;
 	bool     double_speed = false;
+	// $FF00 writes feed the SGB packet/ICD2 sniffers, which route to the
+	// process-primary core: split seats must not pollute its assemblers.
+	bool     sgb_feed     = true;
 
 	// CGB undocumented registers ($FF72/$FF73/$FF74 R/W, $FF75 bits 6-4).
 	uint8_t  ff72 = 0, ff73 = 0, ff74 = 0, ff75 = 0;

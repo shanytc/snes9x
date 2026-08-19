@@ -5426,9 +5426,10 @@ int WINAPI WinMain(
 			// sessions do this from the SGB branch in S9xMainLoop.)
 			if (Settings.SGB_BIOSModeActive && S9xSGBViewerHostActive ())
 			{
+				// One window = one player: a seat's input is its viewer
+				// window, never the master's other controllers.
 				for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
-					S9xSGBSplitSetJoypad (p, MovieGetJoypad (p - 1) |
-					                          S9xSGBViewerHostPad (p));
+					S9xSGBSplitSetJoypad (p, S9xSGBViewerHostPad (p));
 				S9xSGBViewerHostPush ();
 				// The SNES frame doubles as the shared SGB border plane.
 				S9xSGBViewerHostPushBorder (GFX.Screen, GFX.RealPPL);
@@ -10887,15 +10888,16 @@ bool GBLinkGetUserResponsiveSettings (bool *inactivePause, bool *backgroundInput
 
 void GBLinkSyncResponsiveSettings ()
 {
-	// Viewer pads follow window focus unless the user chose background
-	// input; the forced flag below is session plumbing, not their choice.
-	S9xSGBViewerSetBackgroundInput (GBLinkSettingsForced ? GBLinkUserBackgroundInput
-	                                                     : GUI.BackgroundInput);
+	// One keyboard, one joypad slot per player: a session reads input
+	// with or without focus, exactly like the socket instances always
+	// did - so every window plays without ever being clicked.
+	const bool session = S9xSGBLinkIsEnabled () ||
+	                     S9xSGBViewerHostActive () || S9xSGBViewerClientActive ();
+	S9xSGBViewerSetBackgroundInput (session ? true : GUI.BackgroundInput);
 
-	// Viewer sessions need the same treatment as sockets: an unfocused
-	// master would pause every seat, an unfocused viewer would freeze.
-	if (S9xSGBLinkIsEnabled () ||
-	    S9xSGBViewerHostActive () || S9xSGBViewerClientActive ())
+	// Sessions also need an unfocused master running: a paused master
+	// would pause every seat, an unfocused viewer would freeze.
+	if (session)
 	{
 		if (!GBLinkSettingsForced)
 		{

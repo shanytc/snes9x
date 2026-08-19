@@ -17,6 +17,7 @@
 #include "../netplay.h"
 #include "../controls.h"
 #include "../sgb/sgb.h"
+#include "../sgb/gb_viewer.h"
 
 #include "wsnes9x.h"
 #include "kaillera.h"
@@ -585,9 +586,10 @@ void S9xWinScanJoypads ()
 
     // Link players 2-4 play on their own Joypad #N binding set, so all
     // the instances can share one keyboard; the port and autohold state
-    // stay on slot 0.
+    // stay on slot 0. Viewer windows are seats too, just without a socket.
     const int link_pad = (Settings.GBLinkPlayerIndex >= 2 && Settings.GBLinkPlayerIndex <= 4 &&
-                          S9xSGBLinkIsEnabled ()) ? Settings.GBLinkPlayerIndex - 1 : 0;
+                          (S9xSGBLinkIsEnabled () || S9xSGBViewerClientActive ()))
+                         ? Settings.GBLinkPlayerIndex - 1 : 0;
 
     for (int J = 0; J < 8; J++)
     {

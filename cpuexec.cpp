@@ -77,10 +77,13 @@ void S9xMainLoop (void)
 		// their own controller slot.
 		const bool local_pads = S9xSGBViewerHostLocalPads();
 		S9xSGBSetJoypad(local_pads ? MovieGetJoypad(0) : 0);
+		// Viewer sessions: one window = one player, a seat hears only its
+		// viewer. Split screen: all seats share this window's controllers.
 		if (gb_split)
 			for (int p = 2; p <= S9xSGBSplitPlayers(); p++)
-				S9xSGBSplitSetJoypad(p, (local_pads ? MovieGetJoypad(p - 1) : 0) |
-				                        S9xSGBViewerHostPad(p));
+				S9xSGBSplitSetJoypad(p, S9xSGBViewerHostActive()
+				                        ? S9xSGBViewerHostPad(p)
+				                        : MovieGetJoypad(p - 1));
 
 		// Push timing knobs each frame so UI changes take effect live.
 		// Default GBClockMultiplier to 1.0 if it's been left at its

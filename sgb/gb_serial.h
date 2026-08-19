@@ -68,6 +68,11 @@ struct Serial
 	// Byte period the hub declared for this wire (0 = none declared):
 	// queued bursts replay at the wire's true cadence, never a guess.
 	int32_t  clk_gap_fixed = 0;
+
+	// Barrier lockstep: the session host grants an emulated-time horizon
+	// (2 MiHz units, this instance's clock); we never run past it.
+	uint32_t grant_horizon = 0;
+	bool     grant_valid   = false;
 };
 
 // Fires when the CPU starts an internal-clock transfer; the GB test

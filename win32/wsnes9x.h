@@ -77,6 +77,10 @@ extern int GBLinkLauncherIndex;
 // spawned instances. Persisted; consulted at session start.
 extern bool GBLinkSplitScreen;
 
+// The user's own BIOS preference, captured before a launch switch
+// overrides it; the config file keeps this, not the session's value.
+extern int GBLinkUserBiosPref;   // -1 = not a spawned instance
+
 // Mirror this instance's pause to the paired one, so a Game Boy that
 // stops answering never reads as an unplugged cable. Called from the
 // pause setters.

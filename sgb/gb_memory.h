@@ -64,6 +64,9 @@ struct Memory
 	uint8_t  svbk = 1;            // 0xFF70
 	bool     key1_armed   = false;
 	bool     double_speed = false;
+	// $FF00 writes feed the SGB packet/ICD2 sniffers, which route to the
+	// process-primary core: split seats must not pollute its assemblers.
+	bool     sgb_feed     = true;
 
 	uint8_t  hdma1 = 0, hdma2 = 0, hdma3 = 0, hdma4 = 0;  // 0xFF51-0xFF54
 	uint8_t  hdma5 = 0xFF;        // 0xFF55 status

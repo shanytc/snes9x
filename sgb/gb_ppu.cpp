@@ -615,7 +615,7 @@ void FinalizeScanline(Ppu &p)
 
 	std::memcpy(&p.raw_framebuffer[p.ly * GB_SCREEN_WIDTH],
 	            p.scanline_raw, GB_SCREEN_WIDTH);
-	S9xSGBCaptureScanline(line);
+	if (p.icd_feed) S9xSGBCaptureScanline(line);
 
 	if (p.window_active)
 		++p.window_line;
@@ -808,7 +808,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 		{
 			p.mode_clock -= mode0_length;
 			++p.ly;
-			S9xSGBOnPpuHBlank();
+			if (p.icd_feed) S9xSGBOnPpuHBlank();
 			if (p.ly == VISIBLE_LINES)
 			{
 				if (::g_cam_live > 0)
@@ -829,7 +829,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				p.window_active = false;
 				p.wy_triggered  = false;
 				p.vblank_irq_at = p.t_cycles + GB_VBLANK_IRQ_OFFSET;
-				S9xSGBOnPpuVBlank();
+				if (p.icd_feed) S9xSGBOnPpuVBlank();
 			}
 			else
 			{
@@ -1092,7 +1092,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 						// this band yet — trailing raster writes arrive
 						// within ~35 dots of HBlank entry. Idempotent memcpy;
 						// no-op in BIOS-less mode and in the harness.
-						if (x_end == GB_SCREEN_WIDTH)
+						if (x_end == GB_SCREEN_WIDTH && p.icd_feed)
 							S9xSGBCaptureScanline(line);
 					}
 				}

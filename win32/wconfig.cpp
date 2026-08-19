@@ -322,10 +322,12 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 		if (players < 2) players = 2;
 		if (players > 4) players = 4;
 
-		// Peer housekeeping applies (muting, placement, no hosting), and
-		// the master is necessarily BIOS-less, so the viewer boots there.
+		// Peer housekeeping applies (muting, placement, no hosting).
+		// A viewer never emulates through the BIOS whatever the master
+		// runs; the config file keeps the user's own preference.
 		Settings.GBLinkPeerInstance = TRUE;
 		Settings.GBLinkPlayerIndex  = (uint8)seat;
+		GBLinkUserBiosPref          = Settings.SGB_BIOSPreference;
 		Settings.SGB_BIOSPreference = 0;
 		GBLinkPartnerPid     = (DWORD)pid;
 		GBLinkLauncherIndex  = 1;
@@ -373,7 +375,10 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			// The master's booted BIOS mode overrides the shared config,
 			// which may have been saved under a different preference.
 			if (bios >= 0 && bios <= 2)
+			{
+				GBLinkUserBiosPref          = Settings.SGB_BIOSPreference;
 				Settings.SGB_BIOSPreference = (uint8)bios;
+			}
 
 			if (players < 2) players = 2;
 			if (players > 4) players = 4;
@@ -1327,6 +1332,11 @@ void WinSaveConfigFile()
 	const bool liveMute = GUI.Mute;
 	if(muteForced) GUI.Mute = userMute;
 
+	// And its forced BIOS preference (a launch switch overrode the file's).
+	const uint8 liveBios = Settings.SGB_BIOSPreference;
+	if(GBLinkUserBiosPref >= 0)
+		Settings.SGB_BIOSPreference = (uint8)GBLinkUserBiosPref;
+
 	for(unsigned int i = 0 ; i < configItems.size()	; i++)
 		configItems[i].Set(conf);
 
@@ -1336,6 +1346,7 @@ void WinSaveConfigFile()
 		GUI.BackgroundInput = liveBackground;
 	}
 	if(muteForced) GUI.Mute = liveMute;
+	if(GBLinkUserBiosPref >= 0) Settings.SGB_BIOSPreference = liveBios;
 
 	bool wasLocked = locked_file!=NULL;
 	if(wasLocked) WinUnlockConfigFile();

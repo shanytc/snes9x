@@ -5419,6 +5419,20 @@ int WINAPI WinMain(
 			{
 				S9xMainLoop();
 			}
+
+			// BIOS-mode viewer sessions: the seats stepped inside the
+			// frame, slaved to the SNES clock; publish their frames and
+			// collect the viewer pads once per host frame. (BIOS-less
+			// sessions do this from the SGB branch in S9xMainLoop.)
+			if (Settings.SGB_BIOSModeActive && S9xSGBViewerHostActive ())
+			{
+				for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
+					S9xSGBSplitSetJoypad (p, MovieGetJoypad (p - 1) |
+					                          S9xSGBViewerHostPad (p));
+				S9xSGBViewerHostPush ();
+				// The SNES frame doubles as the shared SGB border plane.
+				S9xSGBViewerHostPushBorder (GFX.Screen, GFX.RealPPL);
+			}
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			{
 				// Suspend achievement processing whenever remote inputs are
@@ -10496,6 +10510,7 @@ int GBLinkSessionPlayers = 2;
 // Player number of the instance that spawned this one; anchors the
 // split-screen-style window placement of a spawned seat.
 int GBLinkLauncherIndex = 1;
+int GBLinkUserBiosPref  = -1;
 
 // Link Same Game runs its 2-4 players as in-process split screen rather
 // than spawned instances. A preference, not a session: it decides what
@@ -11032,15 +11047,17 @@ void WinToggleGBLink (int mode, int players)
 		return;
 	}
 
-	// Every BIOS-less Same Game session runs on the split engine — the one
-	// architecture that cannot desync. Split checked = one shared window,
-	// unchecked = a viewer window per player. BIOS mode still links over
-	// sockets, where the preference lies dormant.
-	if (mode == GBLINK_SAME && !Settings.GBLinkPeerInstance &&
-	    !Settings.SGB_BIOSModeActive)
+	// Every Same Game session runs on the split engine — the one
+	// architecture that cannot desync. Split checked = one shared window
+	// (BIOS-less only), unchecked = a viewer window per player; in BIOS
+	// mode the seats slave to the SNES-driven GB clock. Only Link Other
+	// Game still rides sockets.
+	if (mode == GBLINK_SAME && !Settings.GBLinkPeerInstance)
 	{
-		if (GBLinkSplitScreen) WinStartGBSplit (players);
-		else                   WinStartGBViewerSession (players);
+		if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
+			WinStartGBSplit (players);
+		else
+			WinStartGBViewerSession (players);
 		return;
 	}
 
@@ -11054,6 +11071,13 @@ void WinToggleGBLinkSplit ()
 	if (S9xSGBViewerClientActive ()) return;
 	if (S9xSGBSplitActive ())
 	{
+		// One shared window needs the BIOS-less core; don't fold a live
+		// BIOS-mode viewer session into a dead end.
+		if (Settings.SGB_BIOSModeActive)
+		{
+			S9xSetInfoString ("Split screen needs the BIOS-less GB mode - set Emulation > BIOS > No BIOS");
+			return;
+		}
 		// Restart the live session in the other flavor, same seat count:
 		// viewer windows fold into one shared window and vice versa.
 		const int  players  = S9xSGBSplitPlayers ();
@@ -11207,7 +11231,12 @@ static void WinStopGBSplit ()
 // windows only view a seat over shared memory and send their joypad back.
 static void WinStartGBViewerSession (int players)
 {
-	if (Settings.SGB_BIOSModeActive || !Settings.SuperGameBoy)
+	if (Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1)
+	{
+		S9xSetInfoString ("Link cable: the Super Game Boy 1 has no link port - use SGB2");
+		return;
+	}
+	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
 	{
 		S9xSetInfoString ("Link cable: load a Game Boy game first");
 		return;

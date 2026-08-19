@@ -290,7 +290,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		case 0xFF00:
 			if (m.joypad) JoypadWrite(*m.joypad, value);
 			// Feed SGB command-packet sniffer. Benign when SGB mode inactive.
-			S9xSGBOnJoyserWrite(value);
+			if (m.sgb_feed) S9xSGBOnJoyserWrite(value);
 			return;
 		case 0xFF01:
 			m.serial_data = value;

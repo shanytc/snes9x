@@ -478,7 +478,9 @@ void Emulator::Reset()
 	// $6004-$6007 directly (BIOS mode). In BIOS-less mode the SetJoypad
 	// path feeds the standard JoypadSet flow instead, so we leave the
 	// bridge disabled there to avoid pulling stale sgb_pads bytes.
-	impl_->joypad.sgb_active = Settings.SGB_BIOSModeActive;
+	// Only the core wired to the BIOS: split seats are plain DMGs whose
+	// pads come from SetJoypad — the bridge would read a frozen 0xFF.
+	impl_->joypad.sgb_active = Settings.SGB_BIOSModeActive && impl_->mem.sgb_feed;
 	impl_->joypad.sgb_index  = 0;
 	impl_->joypad.sgb_pads[0] = 0xFF;
 	impl_->joypad.sgb_pads[1] = 0xFF;
@@ -2534,6 +2536,9 @@ int g_split_players = 0;   // seats including the primary; 0 = off
 // cannot re-arm its serial port, and the adapter clocking bytes into it
 // shredded the data phase (F-1 Race's start grid garbled, then hung).
 uint16_t g_split_snap[4][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+// Raw DMG shades of the same frame, for recoloring seat frames through
+// the master's live SGB palettes in BIOS-mode sessions.
+uint8_t  g_split_snap_shades[4][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
 bool     g_split_snap_valid[4] = {false, false, false, false};
 
 int SplitCollect(SGB::Emulator *out[4])
@@ -2552,6 +2557,8 @@ bool SplitSnapIfReady(SGB::Emulator *core, int i)
 	SGB::Emulator::Impl *im = core->DebugImpl();
 	if (!im->ppu.frame_ready) return false;
 	core->BlitScreenGB(g_split_snap[i], SGB_GB_SCREEN_W);
+	std::memcpy(g_split_snap_shades[i], im->ppu.framebuffer,
+	            SGB_GB_SCREEN_W * SGB_GB_SCREEN_H);
 	g_split_snap_valid[i] = true;
 	im->ppu.frame_ready   = false;
 	return true;
@@ -2574,6 +2581,9 @@ void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
 // nothing arbitrates for it.
 static void SplitStaggerSeats(void)
 {
+	// BIOS mode slaves the primary to the SNES clock: free-running it
+	// here would shear the BIOS's bank-read timing off our slices.
+	if (Settings.SGB_BIOSModeActive) return;
 	if (S9xSGBSplitPlayers() != 2 || S9xSGBCartNeedsDmg07()) return;
 	if (g_split_cores[0]) g_split_cores[0]->RunCycles(17556);   // a quarter frame
 }
@@ -2687,9 +2697,13 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 			for (int j = 0; j < 3; ++j) g_split_cores[j].reset();
 			return false;
 		}
-		// The SGB command callback is process-global and routes to the
-		// primary core; this seat's packets must stay its own.
+		// The SGB sniffers and the ICD2 LCD feed route to the process-
+		// primary core: a seat feeding them pollutes the master's packet
+		// assemblers (the BIOS handshake cache!) and shreds its LCD ring.
 		core->DebugImpl()->sgb_pkt.mute_commands = true;
+		core->DebugImpl()->ppu.icd_feed = false;
+		core->DebugImpl()->mem.sgb_feed = false;
+		core->DebugImpl()->joypad.sgb_active = false;   // creation reset predates the flag
 		g_split_cores[k] = std::move(core);
 	}
 	g_split_players = players;
@@ -2907,6 +2921,28 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 	const int n = SplitCollect(cs);
 	const int i = player - 1;
 	if (!dest || i < 1 || i >= n) return false;
+
+	// BIOS-mode sessions dress every seat in the master's live SGB
+	// palettes, so all windows share the game's colorization; before a
+	// game sends any, the BIOS's default set (cream/orange/brown/dark).
+	if (Settings.SGB_BIOSModeActive && g_split_snap_valid[i])
+	{
+		static constexpr uint16_t kBiosPal[4] = {0x67BE, 0x225D, 0x1956, 0x006A};
+		const SGB::SgbState &st = SGB::Instance().DebugImpl()->sgb_state;
+		const bool colored = st.palette_writes > 0;
+		const uint8_t *sh  = g_split_snap_shades[i];
+		for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
+			for (uint32_t x = 0; x < SGB_GB_SCREEN_W; ++x)
+			{
+				const uint8_t shade = sh[y * SGB_GB_SCREEN_W + x] & 3;
+				const uint16_t bgr = colored
+					? SGB::SgbResolveColor(st, x / 8, y / 8, shade)
+					: kBiosPal[shade];
+				dest[y * SGB_GB_SCREEN_W + x] = SGB::BgrToHost(bgr);
+			}
+		return true;
+	}
+
 	if (g_split_snap_valid[i])
 		std::memcpy(dest, g_split_snap[i],
 		            SGB_GB_SCREEN_W * SGB_GB_SCREEN_H * sizeof(uint16_t));
@@ -2972,6 +3008,23 @@ void S9xSGBGetCycleMeters(uint64_t *snes, uint64_t *gb)
 	if (gb)   *gb   = g_gb_cycle_meter;
 }
 
+// BIOS mode drives the primary GB from the SNES clock, so split seats
+// slave to the same deltas; one tick is about a SNES scanline (~270 GB
+// cycles), finer than the split loop's own 456-cycle slices.
+static void SplitRunSeatsSlaved(int32_t gb_cycles)
+{
+	if (g_split_players < 2 || !Settings.SGB_BIOSModeActive) return;
+	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+	{
+		SGB::Emulator *core = g_split_cores[k].get();
+		if (!core || !core->DebugImpl()->has_rom) continue;
+		SGB::SerialSetTraceSeat(k + 1);
+		core->RunCycles(gb_cycles);
+		SplitSnapIfReady(core, k + 1);
+	}
+	SGB::SerialSetTraceSeat(-1);
+}
+
 void S9xSGBTickSnes(int snes_master_cycles)
 {
 	if (snes_master_cycles <= 0) return;
@@ -2998,6 +3051,7 @@ void S9xSGBTickSnes(int snes_master_cycles)
 		{
 			g_snes_cycle_accum -= gb_cycles * 5;
 			SGB::Instance().RunCycles(gb_cycles);
+			SplitRunSeatsSlaved(gb_cycles);
 		}
 	}
 	else
@@ -3013,6 +3067,7 @@ void S9xSGBTickSnes(int snes_master_cycles)
 			g_snes_scaled_accum -= static_cast<int64_t>(gb_cycles) * 21477272;
 			g_gb_cycle_meter += (uint64_t)gb_cycles;
 			SGB::Instance().RunCycles(gb_cycles);
+			SplitRunSeatsSlaved(gb_cycles);
 		}
 	}
 }

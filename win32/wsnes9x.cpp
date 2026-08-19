@@ -10914,12 +10914,14 @@ static void WinStartGBLink (int mode, int players)
 	GBLinkSlotsStarted   = 0;
 	GBLinkSyncResponsiveSettings ();
 
-	// Same-game sessions boot in lockstep from their title screens; an
-	// other-game link joins wherever each game already is (a trade
-	// partner mid-game must stay mid-game).
+	// Same-game sessions power-cycle into the session like consoles
+	// switched on together - a HARD reset, because a soft one landing
+	// mid-boot leaves the game's RAM half-initialized and its link
+	// engine dead (Death Track's seats went white on exactly that). An
+	// other-game link joins wherever each game already is.
 	if (mode == GBLINK_SAME &&
 	    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
-		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_SOFT_RESET, 0), 0);
+		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	if (role == S9X_GBLINK_SERVER)
 	{
@@ -11127,7 +11129,9 @@ static void WinStartGBSplit (int players)
 	}
 
 	// All seats power up together; the primary may have been in demo.
-	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_SOFT_RESET, 0), 0);
+	// Hard, for the same reason as the socket session: a warm reset
+	// landing mid-boot strands a game with a dead link engine.
+	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	char msg[64];
 	snprintf (msg, sizeof (msg), "Split screen: %d players", players);

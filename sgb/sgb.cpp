@@ -101,6 +101,7 @@ struct Emulator::Impl
 	Apu         apu;
 	Timer       timer;
 	Joypad      joypad;
+	uint16_t    joypad_traced = 0xFFFF;   // last pad mask written to the trace
 	Serial      serial;
 	Cart        cart;
 	PacketState sgb_pkt;
@@ -1995,6 +1996,16 @@ void Emulator::SetAudioRate(int32_t rate_hz)
 
 void Emulator::SetJoypad(uint16_t snes_pad_mask)
 {
+	// Button edges into the wire trace: a session log then shows what
+	// each game was actually told, next to what it did on the cable.
+	if (impl_->joypad_traced != snes_pad_mask)
+	{
+		impl_->joypad_traced = snes_pad_mask;
+		char msg[48];
+		snprintf(msg, sizeof msg, "pad %04X", snes_pad_mask);
+		SGB::SerialTraceMsg(msg);
+	}
+
 	// SNES->GB mapping per the SGB BIOS's own shuffle (SGB2 sub_80BCDE):
 	// A → A, B → B, Y doubles as B (left-of-A on both pads), X unused.
 	uint8_t gb = 0;

@@ -43,13 +43,17 @@ void S9xMainLoop (void)
 		// core produced inside the master and publishes its joypad back.
 		if (S9xSGBViewerClientActive())
 		{
+			// 256x224 with the SGB border in BIOS-mode sessions, bare
+			// 160x144 otherwise.
+			int vw, vh;
+			S9xSGBViewerClientDims(&vw, &vh);
 			IPPU.RenderThisFrame = TRUE;
-			PPU.ScreenHeight     = SGB_GB_SCREEN_H;
+			PPU.ScreenHeight     = vh;
 			S9xSGBViewerClientSetPad(MovieGetJoypad(0));
 			S9xStartScreenRefresh();
 			// After the refresh starts, which resets them to SNES sizes.
-			IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
-			IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
+			IPPU.RenderedScreenWidth  = vw;
+			IPPU.RenderedScreenHeight = vh;
 			S9xSGBViewerClientBlit(GFX.Screen, GFX.RealPPL);
 			S9xEndScreenRefresh();
 			S9xSyncSpeed();

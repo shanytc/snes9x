@@ -2707,6 +2707,11 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	// Adapter-only games ride the DMG-07 even as a 2-seat split.
 	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07());
 
+	// A link session is Game Boys on a cable, and the SGB has no link
+	// port: the primary presents as a plain DMG too (KI hides its link
+	// mode on an SGB), so no detection and no palettes for anyone.
+	cs[0]->DebugImpl()->sgb_pkt.mute_commands = true;
+
 	S9xSGBSplitLoadBatteries(battery_base_path);
 	SplitStaggerSeats();
 	return true;
@@ -2716,6 +2721,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 {
 	if (!g_split_players) return;
 	S9xSGBSplitSaveBatteries(battery_base_path);
+	SGB::Instance().DebugImpl()->sgb_pkt.mute_commands = false;
 	SGB::SerialSplitDetach();
 	for (int k = 0; k < 3; ++k) g_split_cores[k].reset();
 	for (int k = 0; k < 4; ++k) g_split_snap_valid[k] = false;

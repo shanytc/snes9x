@@ -20,6 +20,9 @@ void S9xSGBViewerHostStop(void);
 bool S9xSGBViewerHostActive(void);
 // Copies each seat's latest frame into the mapping; call once per host frame.
 void S9xSGBViewerHostPush(void);
+// BIOS-mode dressing: the master's SNES frame (256x224) doubles as the
+// shared SGB border plane; viewers composite their seat into its window.
+void S9xSGBViewerHostPushBorder(const uint16_t *snes_frame, uint32_t pitch_pixels);
 // The seat's live joypad as published by its viewer (0 if none attached).
 uint16_t S9xSGBViewerHostPad(int player);
 // All windows share one keyboard, so input follows focus: true when the
@@ -37,7 +40,11 @@ void S9xSGBViewerClientStop(void);
 bool S9xSGBViewerClientActive(void);
 // False once the master has torn the session down (or died uncleanly).
 bool S9xSGBViewerClientAlive(void);
-// Latest frame into dest (160x144, uint16 pixels); false while none arrived.
+// What the viewer should present: 256x224 once a border plane is live
+// (BIOS-mode session), else the bare 160x144 GB frame.
+void S9xSGBViewerClientDims(int *w, int *h);
+// Latest frame into dest (at the size ClientDims reports); false while
+// none arrived.
 bool S9xSGBViewerClientBlit(uint16_t *dest, uint32_t pitch_pixels);
 void S9xSGBViewerClientSetPad(uint16_t snes_pad_mask);
 

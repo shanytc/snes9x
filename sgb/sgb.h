@@ -345,6 +345,13 @@ void S9xSGBSplitRunFrame(void);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 // One seat's latest finished frame (160x144) for the viewer transport.
 bool S9xSGBSplitCopySeatFrame(int player /*2..4*/, uint16_t *dest);
+// Trace comparator: our decoded SGB palettes vs the BIOS's rendered truth.
+void S9xSGBDebugSgbCompare(const uint16_t *snes_frame, uint32_t pitch_pixels,
+                           const uint16_t *cgram);
+// The primary core's decoded SGB state, for debug tooling.
+namespace SGB { struct SgbState; struct PacketState; }
+const SGB::SgbState *S9xSGBGetSgbState(void);
+const SGB::PacketState *S9xSGBGetPacketState(void);
 int  S9xSGBSplitScreenWidth(void);
 int  S9xSGBSplitScreenHeight(void);
 void S9xSGBSplitLoadBatteries(const char *battery_base_path);

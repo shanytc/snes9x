@@ -5433,6 +5433,7 @@ int WINAPI WinMain(
 				S9xSGBViewerHostPush ();
 				// The SNES frame doubles as the shared SGB border plane.
 				S9xSGBViewerHostPushBorder (GFX.Screen, GFX.RealPPL);
+				S9xSGBDebugSgbCompare (GFX.Screen, GFX.RealPPL, PPU.CGDATA);
 			}
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			{

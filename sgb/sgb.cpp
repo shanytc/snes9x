@@ -2922,22 +2922,31 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 	const int i = player - 1;
 	if (!dest || i < 1 || i >= n) return false;
 
-	// BIOS-mode sessions dress every seat in the master's live SGB
-	// palettes, so all windows share the game's colorization; before a
-	// game sends any, the BIOS's default set (cream/orange/brown/dark).
+	// BIOS-mode sessions dress every seat straight from SNES CGRAM - the
+	// palette ground truth where game packets, the BIOS's per-title
+	// presets and the user's SGB-menu picks all land. Shade 0 is the
+	// shared backdrop color; our attribute decode picks the palette.
 	if (Settings.SGB_BIOSModeActive && g_split_snap_valid[i])
 	{
 		static constexpr uint16_t kBiosPal[4] = {0x67BE, 0x225D, 0x1956, 0x006A};
+		const bool cgram_live = (PPU.CGDATA[0] | PPU.CGDATA[1] |
+		                         PPU.CGDATA[2] | PPU.CGDATA[3]) != 0;
 		const SGB::SgbState &st = SGB::Instance().DebugImpl()->sgb_state;
-		const bool colored = st.palette_writes > 0;
 		const uint8_t *sh  = g_split_snap_shades[i];
 		for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
 			for (uint32_t x = 0; x < SGB_GB_SCREEN_W; ++x)
 			{
 				const uint8_t shade = sh[y * SGB_GB_SCREEN_W + x] & 3;
-				const uint16_t bgr = colored
-					? SGB::SgbResolveColor(st, x / 8, y / 8, shade)
-					: kBiosPal[shade];
+				uint16_t bgr;
+				if (!cgram_live)
+					bgr = kBiosPal[shade];
+				else if (shade == 0)
+					bgr = PPU.CGDATA[0] & 0x7FFF;
+				else
+				{
+					const uint8_t pal = SGB::SgbGetTilePalette(st, x / 8, y / 8) & 3;
+					bgr = PPU.CGDATA[pal * 16 + shade] & 0x7FFF;
+				}
 				dest[y * SGB_GB_SCREEN_W + x] = SGB::BgrToHost(bgr);
 			}
 		return true;
@@ -2949,6 +2958,61 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 	else
 		cs[i]->BlitScreenGB(dest, SGB_GB_SCREEN_W);
 	return true;
+}
+
+const SGB::SgbState *S9xSGBGetSgbState(void)
+{
+	return &SGB::Instance().DebugImpl()->sgb_state;
+}
+
+const SGB::PacketState *S9xSGBGetPacketState(void)
+{
+	return &SGB::Instance().DebugImpl()->sgb_pkt;
+}
+
+// Once-a-second comparator for the seat recoloring: our packet-decoded
+// palettes vs what the SGB BIOS actually rendered (SNES frame + CGRAM).
+void S9xSGBDebugSgbCompare(const uint16_t *snes, uint32_t pitch_pixels,
+                           const uint16_t *cgram)
+{
+	static int cd = 0;
+	if (++cd < 60) return;
+	cd = 0;
+	if (!snes || !cgram) return;
+
+	const SGB::Emulator::Impl *im = SGB::Instance().DebugImpl();
+	const SGB::SgbState &st = im->sgb_state;
+	char line[240];
+	int  n = 0;
+
+	n = snprintf(line, sizeof(line), "sgbcmp pals(w=%u)", st.palette_writes);
+	for (int p = 0; p < 4; ++p)
+		n += snprintf(line + n, sizeof(line) - (size_t)n, " p%d:%04X,%04X,%04X,%04X",
+		              p, st.active[p].colors[0], st.active[p].colors[1],
+		              st.active[p].colors[2], st.active[p].colors[3]);
+	SGB::SerialTraceMsg(line);
+
+	n = snprintf(line, sizeof(line), "sgbcmp cgram");
+	for (int p = 0; p < 8; ++p)
+		n += snprintf(line + n, sizeof(line) - (size_t)n, " %d:%04X,%04X,%04X,%04X",
+		              p, cgram[p * 16], cgram[p * 16 + 1],
+		              cgram[p * 16 + 2], cgram[p * 16 + 3]);
+	SGB::SerialTraceMsg(line);
+
+	static const uint8_t sx[6] = {8, 80, 152, 8, 80, 152};
+	static const uint8_t sy[6] = {8, 8, 8, 136, 72, 136};
+	n = snprintf(line, sizeof(line), "sgbcmp px");
+	for (int i = 0; i < 6; ++i)
+	{
+		const uint8_t  shade = im->ppu.framebuffer[sy[i] * 160 + sx[i]] & 3;
+		const uint8_t  pal   = SGB::SgbGetTilePalette(st, sx[i] / 8u, sy[i] / 8u);
+		const uint16_t ours  = SGB::BgrToHost(
+			SGB::SgbResolveColor(st, sx[i] / 8u, sy[i] / 8u, shade));
+		const uint16_t bios  = snes[(40u + sy[i]) * pitch_pixels + 48u + sx[i]];
+		n += snprintf(line + n, sizeof(line) - (size_t)n,
+		              " (%u,%u)s%ua%u:%04X/%04X", sx[i], sy[i], shade, pal, ours, bios);
+	}
+	SGB::SerialTraceMsg(line);
 }
 
 int S9xSGBSplitScreenWidth(void)

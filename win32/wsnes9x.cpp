@@ -980,6 +980,43 @@ static void WinRequestScreenshot()
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
 static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
 
+// A held link hotkey re-fires (key auto-repeat, plus the background-input
+// scanner a new session switches on mid-press): gate to one shot per press.
+struct SLinkHotkeyGate { WPARAM key; DWORD lastSeen; };
+static SLinkHotkeyGate linkHotkeyGate[4];
+
+static bool LinkHotkeyPressEdge (WPARAM key)
+{
+	const DWORD now = timeGetTime ();
+	int oldest = 0;
+	for (int i = 0; i < 4; i++)
+	{
+		if (linkHotkeyGate[i].key == key)
+		{
+			// Refreshed on every blocked repeat; the timeout only re-arms
+			// a key whose key-up landed in another window.
+			const bool held = (now - linkHotkeyGate[i].lastSeen) <= 1500;
+			linkHotkeyGate[i].lastSeen = now;
+			return !held;
+		}
+		if (linkHotkeyGate[i].lastSeen < linkHotkeyGate[oldest].lastSeen)
+			oldest = i;
+	}
+	linkHotkeyGate[oldest].key      = key;
+	linkHotkeyGate[oldest].lastSeen = now;
+	return true;
+}
+
+static void LinkHotkeyRelease (WPARAM key)
+{
+	for (int i = 0; i < 4; i++)
+		if (linkHotkeyGate[i].key == key)
+		{
+			linkHotkeyGate[i].key      = 0;
+			linkHotkeyGate[i].lastSeen = 0;
+		}
+}
+
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {
 	auto MatchesAnyBinding = [](WPARAM wParam, WORD primary, const WORD* extra) -> bool {
@@ -1304,12 +1341,23 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			}
 			hitHotKey = true;
 		}
-		if(HKmatch(Link2P))          { WinGBLinkHotkey (2);  hitHotKey = true; }
-		if(HKmatch(Link3P))          { WinGBLinkHotkey (3);  hitHotKey = true; }
-		if(HKmatch(Link4P))          { WinGBLinkHotkey (4);  hitHotKey = true; }
-		if(HKmatch(LinkOtherGame))   { WinGBLinkHotkey (0);  hitHotKey = true; }
-		if(HKmatch(LinkSplitToggle)) { WinGBLinkHotkey (-1); hitHotKey = true; }
-		if(HKmatch(LinkEnd))         { WinGBLinkHotkey (-2); hitHotKey = true; }
+		{
+			// Session toggles fire once per press, like their menu items
+			// fire once per click — a repeat would flip the session back.
+			int linkWhat = -3;
+			if      (HKmatch(Link2P))          linkWhat = 2;
+			else if (HKmatch(Link3P))          linkWhat = 3;
+			else if (HKmatch(Link4P))          linkWhat = 4;
+			else if (HKmatch(LinkOtherGame))   linkWhat = 0;
+			else if (HKmatch(LinkSplitToggle)) linkWhat = -1;
+			else if (HKmatch(LinkEnd))         linkWhat = -2;
+			if (linkWhat != -3)
+			{
+				hitHotKey = true;
+				if (LinkHotkeyPressEdge (wParam))
+					WinGBLinkHotkey (linkWhat);
+			}
+		}
 		for (int ksp = 0; ksp < 5; ksp++)
 		{
 			// SFC-Box rotary keyswitch positions (panel order 1/OFF/ON/2/3);
@@ -2218,6 +2266,8 @@ LRESULT CALLBACK WinProc(
 	case WM_KEYUP:
 	case WM_CUSTKEYUP:
 		{
+			LinkHotkeyRelease (wParam);
+
 			// Master hotkey key-up: reset hold timer
 			// (the static vars are in HandleKeyMessage, so we reset via a sentinel call)
 			if (GUI.MasterHotkeyEnabled && CustomKeys.MasterHotkey.key != 0
@@ -11138,6 +11188,24 @@ void WinGBLinkHotkey (int what)
 
 		case -1:
 		{
+			// Mirror the menu, which hides/greys the Split Screen item in
+			// exactly these states.
+			if (Settings.GBLinkPeerInstance) return;
+			if (diff_live)
+			{
+				S9xSetInfoString ("Link cable: end the Other Game session first");
+				return;
+			}
+			if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+			{
+				S9xSetInfoString ("Link cable: load a Game Boy game first");
+				return;
+			}
+			if (Settings.SGB_BIOSModeActive)
+			{
+				S9xSetInfoString ("Split screen needs the BIOS-less GB mode - set Emulation > BIOS > No BIOS");
+				return;
+			}
 			const bool was = GBLinkSplitScreen;
 			WinToggleGBLinkSplit ();
 			if (GBLinkSplitScreen != was &&

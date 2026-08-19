@@ -3,6 +3,7 @@
 // builds this file under Cygwin and never touches viewers).
 
 #include "gb_viewer.h"
+#include "gb_serial.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -135,6 +136,21 @@ void S9xSGBViewerHostPush(void)
 		else
 			g_beat_age[k] = 0;
 		g_seen_beat[k] = beat;
+
+		// Trace the shm boundary: what the viewer publishes is the whole
+		// story of whether its input ever reaches this process.
+		static uint32_t last_pad[3], last_att[3] = {99, 99, 99};
+		if (s.attached != last_att[k] || s.pad != last_pad[k])
+		{
+			char line[96];
+			snprintf(line, sizeof(line),
+			         "viewer seat%d attached=%u pad=%04X beat=%u age=%u",
+			         k + 2, (unsigned)s.attached, (unsigned)s.pad,
+			         (unsigned)beat, (unsigned)g_beat_age[k]);
+			SGB::SerialTraceMsg(line);
+			last_att[k] = s.attached;
+			last_pad[k] = s.pad;
+		}
 	}
 }
 
@@ -226,39 +242,67 @@ bool S9xSGBViewerClientBlit(uint16_t *dest, uint32_t pitch_pixels)
 {
 	if (!g_cli || !dest) return false;
 	const ViewSeat &s = g_cli->seat[g_cli_seat - 2];
-	if (s.seq == 0) return false;
 
-	// BIOS-mode dressing: lay the shared border plane down first; the
-	// seat frame then lands in the SGB's GB window.
+	// Last-good staging: a seqlock collision (the master mid-copy) just
+	// re-presents the previous frame - never stale or torn pixels. Reads
+	// land in a temp first so a torn copy can't poison the good buffer.
+	static uint16_t good_frame[kFrameW * kFrameH];
+	static uint16_t good_border[kSnesW * kSnesH];
+	static uint16_t tmp[kSnesW * kSnesH];
+	static bool     frame_valid  = false;
+	static bool     border_valid = false;
+
 	const bool sgb = g_cli->border_seq > 0;
 	if (sgb)
 	{
-		for (int tries = 0; tries < 8; ++tries)
+		const uint32_t b0 = g_cli->border_seq;
+		if (!(b0 & 1))
 		{
-			const uint32_t before = g_cli->border_seq;
-			if (before & 1) continue;
-			for (uint32_t y = 0; y < kSnesH; ++y)
-				memcpy(dest + y * pitch_pixels,
-				       const_cast<const uint16_t *>(g_cli->border_px) + y * kSnesW,
-				       kSnesW * sizeof(uint16_t));
-			if (g_cli->border_seq == before) break;
+			memcpy(tmp, const_cast<const uint16_t *>(g_cli->border_px),
+			       sizeof good_border);
+			if (g_cli->border_seq == b0)
+			{
+				memcpy(good_border, tmp, sizeof good_border);
+				border_valid = true;
+			}
 		}
 	}
-	uint16_t *win = sgb ? dest + kWinY * pitch_pixels + kWinX : dest;
-
-	// Seqlock read; a torn frame is retried, a persistent writer race
-	// (master mid-teardown) falls out after a few spins.
-	for (int tries = 0; tries < 8; ++tries)
+	if (s.seq != 0)
 	{
-		const uint32_t before = s.seq;
-		if (before & 1) continue;
-		for (uint32_t y = 0; y < kFrameH; ++y)
-			memcpy(win + y * pitch_pixels,
-			       const_cast<const uint16_t *>(s.px) + y * kFrameW,
-			       kFrameW * sizeof(uint16_t));
-		if (s.seq == before) return true;
+		const uint32_t f0 = s.seq;
+		if (!(f0 & 1))
+		{
+			memcpy(tmp, const_cast<const uint16_t *>(s.px), sizeof good_frame);
+			if (s.seq == f0)
+			{
+				memcpy(good_frame, tmp, sizeof good_frame);
+				frame_valid = true;
+			}
+		}
 	}
-	return false;
+	if (!frame_valid) return false;
+
+	if (sgb)
+	{
+		for (uint32_t y = 0; y < kSnesH; ++y)
+		{
+			if (border_valid)
+				memcpy(dest + y * pitch_pixels, good_border + y * kSnesW,
+				       kSnesW * sizeof(uint16_t));
+			else
+				memset(dest + y * pitch_pixels, 0, kSnesW * sizeof(uint16_t));
+		}
+		uint16_t *win = dest + kWinY * pitch_pixels + kWinX;
+		for (uint32_t y = 0; y < kFrameH; ++y)
+			memcpy(win + y * pitch_pixels, good_frame + y * kFrameW,
+			       kFrameW * sizeof(uint16_t));
+		return true;
+	}
+
+	for (uint32_t y = 0; y < kFrameH; ++y)
+		memcpy(dest + y * pitch_pixels, good_frame + y * kFrameW,
+		       kFrameW * sizeof(uint16_t));
+	return true;
 }
 
 void S9xSGBViewerClientSetPad(uint16_t snes_pad_mask)

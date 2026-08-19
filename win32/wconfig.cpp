@@ -24,6 +24,7 @@
 #include "../spc7110.h"
 #include "../gfx.h"
 #include "../snapshot.h"
+#include "../sgb/gb_viewer.h"
 #ifdef NETPLAY_SUPPORT
 	#include "../netplay.h"
 	extern SNPServer NPServer;
@@ -300,6 +301,41 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 	{
 		if(!strcasecmp(parameters[i], "/?") || !strcasecmp(parameters[i], "-h"))
 			S9xUsage();
+	}
+
+	// A viewer seat: map the master's session before anything else runs, so
+	// the whole GUI comes up already knowing it never emulates.
+	const size_t gbview_len = strlen(GBVIEW_SWITCH_A);
+	for (int i = 0; i < count; i++)
+	{
+		if (strncasecmp(parameters[i], GBVIEW_SWITCH_A, gbview_len) != 0 ||
+		    parameters[i][gbview_len] != '=')
+			continue;
+
+		char *end = NULL;
+		const unsigned long pid = strtoul(parameters[i] + gbview_len + 1, &end, 10);
+		long seat = 0, players = 0;
+		if (end && *end == ',') seat    = strtol(end + 1, &end, 10);
+		if (end && *end == ',') players = strtol(end + 1, &end, 10);
+		if (seat < 2) seat = 2;
+		if (seat > 4) seat = 4;
+		if (players < 2) players = 2;
+		if (players > 4) players = 4;
+
+		// Peer housekeeping applies (muting, placement, no hosting), and
+		// the master is necessarily BIOS-less, so the viewer boots there.
+		Settings.GBLinkPeerInstance = TRUE;
+		Settings.GBLinkPlayerIndex  = (uint8)seat;
+		Settings.SGB_BIOSPreference = 0;
+		GBLinkPartnerPid     = (DWORD)pid;
+		GBLinkLauncherIndex  = 1;
+		GBLinkSessionPlayers = (int)players;
+		S9xSGBViewerClientStart(pid, (int)seat, (int)players);
+
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
 	}
 
 	// Strip before the portable parser sees it: S9xParseArgs would take the

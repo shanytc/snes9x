@@ -343,6 +343,8 @@ int  S9xSGBSplitPlayers(void);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 void S9xSGBSplitRunFrame(void);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
+// One seat's latest finished frame (160x144) for the viewer transport.
+bool S9xSGBSplitCopySeatFrame(int player /*2..4*/, uint16_t *dest);
 int  S9xSGBSplitScreenWidth(void);
 int  S9xSGBSplitScreenHeight(void);
 void S9xSGBSplitLoadBatteries(const char *battery_base_path);

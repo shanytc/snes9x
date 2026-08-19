@@ -2895,6 +2895,20 @@ void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 	}
 }
 
+bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
+{
+	SGB::Emulator *cs[4];
+	const int n = SplitCollect(cs);
+	const int i = player - 1;
+	if (!dest || i < 1 || i >= n) return false;
+	if (g_split_snap_valid[i])
+		std::memcpy(dest, g_split_snap[i],
+		            SGB_GB_SCREEN_W * SGB_GB_SCREEN_H * sizeof(uint16_t));
+	else
+		cs[i]->BlitScreenGB(dest, SGB_GB_SCREEN_W);
+	return true;
+}
+
 int S9xSGBSplitScreenWidth(void)
 {
 	return static_cast<int>(SGB_GB_SCREEN_W) * (g_split_players >= 2 ? 2 : 1);

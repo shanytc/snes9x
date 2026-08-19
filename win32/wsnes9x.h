@@ -58,6 +58,8 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 // did, whatever the shared config says.
 #define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
 #define GBLINK_PEER_SWITCH_A "-gblinkpeer"
+#define GBVIEW_SWITCH TEXT("-gbview")
+#define GBVIEW_SWITCH_A "-gbview"
 
 // The other end this instance talks to directly: the direct-cable
 // partner, or the hub host that spawned it.

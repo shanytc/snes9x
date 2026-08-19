@@ -60,6 +60,7 @@
 #include "../apu/apu.h"
 #include "../msu1.h"
 #include "../sgb/sgb.h"
+#include "../sgb/gb_viewer.h"
 #include "../sfcbox.h"
 #include "../movie.h"
 #include "../voicekun.h"
@@ -147,6 +148,8 @@ static void GBLinkResetWhenLeftAlone();
 static void GBLinkPlacePeerWindow();
 static void WinStartGBSplit(int players);
 static void WinStopGBSplit();
+static void WinStartGBViewerSession(int players);
+static void GBLinkViewerWatch();
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -3165,7 +3168,8 @@ LRESULT CALLBACK WinProc(
 			// request can never unplug an instance that is already on. A
 			// connect request always means a socket seat, so the split
 			// preference must not hijack it into an in-process session.
-			if (!S9xSGBLinkIsEnabled () && !S9xSGBSplitActive ())
+			if (!S9xSGBLinkIsEnabled () && !S9xSGBSplitActive () &&
+			    !S9xSGBViewerClientActive ())
 			{
 				const bool split_pref = GBLinkSplitScreen;
 				GBLinkSplitScreen = false;
@@ -5178,6 +5182,7 @@ int WINAPI WinMain(
         GBLinkPumpSpawns ();
         GBLinkResetWhenLeftAlone ();
         GBLinkAutoCloseAbandonedHub ();
+        GBLinkViewerWatch ();
 
         // Never stay frozen waiting on an instance that has gone away.
         if ((Settings.ForcedPause & PAUSE_LINK_PEER) && !S9xSGBLinkIsConnected ())
@@ -5832,10 +5837,14 @@ static void CheckMenuStates ()
 
 		if (show && Settings.GBLinkPeerInstance)
 		{
-			const bool linked = S9xSGBLinkIsEnabled ();
+			// A viewer seat is wired for the session's life: both items
+			// grey out, and closing the window is the way out.
+			const bool viewer = S9xSGBViewerClientActive ();
+			const bool linked = S9xSGBLinkIsEnabled () || viewer;
 			mii.fState = linked ? (MFS_CHECKED | MFS_DISABLED) : MFS_UNCHECKED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_CONNECT, FALSE, &mii);
-			mii.fState = linked ? MFS_UNCHECKED : (MFS_UNCHECKED | MFS_DISABLED);
+			mii.fState = (linked && !viewer) ? MFS_UNCHECKED
+			                                 : (MFS_UNCHECKED | MFS_DISABLED);
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DISCONNECT, FALSE, &mii);
 		}
 		else if (show)
@@ -10597,8 +10606,8 @@ static int GBLinkKnownPids (DWORD out[4])
 	int n = 0;
 
 	const bool hub_host = !Settings.GBLinkPeerInstance &&
-	                      GBLinkSessionPlayers > 2 &&
-	                      S9xSGBLinkIsEnabled ();
+	                      ((GBLinkSessionPlayers > 2 && S9xSGBLinkIsEnabled ()) ||
+	                       S9xSGBViewerHostActive ());
 	if (hub_host)
 	{
 		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
@@ -10627,7 +10636,9 @@ static void GBLinkCloseInstances ()
 // and all - the same teardown as its disconnect click.
 static void WinGBLinkMasterUnplug ()
 {
-	if (Settings.GBLinkPeerInstance || !S9xSGBLinkIsEnabled ()) return;
+	if (Settings.GBLinkPeerInstance) return;
+	if (S9xSGBViewerHostActive ()) { WinStopGBSplit (); return; }
+	if (!S9xSGBLinkIsEnabled ()) return;
 	GBLinkCloseInstances ();
 	S9xSGBLinkDisconnect ();
 	GBLinkMode = GBLINK_OFF;
@@ -10819,7 +10830,8 @@ static void GBLinkResetWhenLeftAlone ()
 	bool company = false;
 	if (GBLinkMode != GBLINK_OFF)
 	{
-		if (!Settings.GBLinkPeerInstance && GBLinkSessionPlayers > 2)
+		if (!Settings.GBLinkPeerInstance &&
+		    (GBLinkSessionPlayers > 2 || S9xSGBViewerHostActive ()))
 		{
 			for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
 				if (GBLinkPidAlive (GBLinkPeerPids[i])) { company = true; break; }
@@ -10854,7 +10866,15 @@ bool GBLinkGetUserResponsiveSettings (bool *inactivePause, bool *backgroundInput
 
 void GBLinkSyncResponsiveSettings ()
 {
-	if (S9xSGBLinkIsEnabled ())
+	// Viewer pads follow window focus unless the user chose background
+	// input; the forced flag below is session plumbing, not their choice.
+	S9xSGBViewerSetBackgroundInput (GBLinkSettingsForced ? GBLinkUserBackgroundInput
+	                                                     : GUI.BackgroundInput);
+
+	// Viewer sessions need the same treatment as sockets: an unfocused
+	// master would pause every seat, an unfocused viewer would freeze.
+	if (S9xSGBLinkIsEnabled () ||
+	    S9xSGBViewerHostActive () || S9xSGBViewerClientActive ())
 	{
 		if (!GBLinkSettingsForced)
 		{
@@ -10945,6 +10965,13 @@ static void WinStartGBLink (int mode, int players)
 // the next click starts the newly picked session size.
 void WinToggleGBLink (int mode, int players)
 {
+	// A viewer window has no session shape of its own to change.
+	if (S9xSGBViewerClientActive ())
+	{
+		S9xSetInfoString ("This window is a player's screen - close it to leave the session");
+		return;
+	}
+
 	// A spawned instance keeps the session size it was launched into, so
 	// a rejoin request cannot turn it into a competing host.
 	if (Settings.GBLinkPeerInstance) players = GBLinkSessionPlayers;
@@ -10999,13 +11026,15 @@ void WinToggleGBLink (int mode, int players)
 		return;
 	}
 
-	// Split screen replaces the spawned instances for Link Same Game —
-	// only on the BIOS-less core; in BIOS mode the preference lies
-	// dormant and the players items spawn instances as usual.
-	if (mode == GBLINK_SAME && GBLinkSplitScreen && !Settings.GBLinkPeerInstance &&
+	// Every BIOS-less Same Game session runs on the split engine — the one
+	// architecture that cannot desync. Split checked = one shared window,
+	// unchecked = a viewer window per player. BIOS mode still links over
+	// sockets, where the preference lies dormant.
+	if (mode == GBLINK_SAME && !Settings.GBLinkPeerInstance &&
 	    !Settings.SGB_BIOSModeActive)
 	{
-		WinStartGBSplit (players);
+		if (GBLinkSplitScreen) WinStartGBSplit (players);
+		else                   WinStartGBViewerSession (players);
 		return;
 	}
 
@@ -11016,11 +11045,15 @@ void WinToggleGBLink (int mode, int players)
 // session in the other flavor, same seat count.
 void WinToggleGBLinkSplit ()
 {
+	if (S9xSGBViewerClientActive ()) return;
 	if (S9xSGBSplitActive ())
 	{
-		const int players = S9xSGBSplitPlayers ();
+		// Restart the live session in the other flavor, same seat count:
+		// viewer windows fold into one shared window and vice versa.
+		const int  players  = S9xSGBSplitPlayers ();
+		const bool to_split = S9xSGBViewerHostActive ();
 		WinStopGBSplit ();
-		GBLinkSplitScreen = false;
+		GBLinkSplitScreen = to_split;
 		WinToggleGBLink (GBLINK_SAME, players);
 	}
 	else if (S9xSGBLinkIsEnabled () && !Settings.GBLinkPeerInstance &&
@@ -11083,6 +11116,13 @@ void WinGBLinkHotkey (int what)
 		}
 
 		case -2:
+			if (S9xSGBViewerClientActive ())
+			{
+				// A viewer's exit is its window: the master folds the
+				// session once every player window is gone.
+				PostMessage (GUI.hWnd, WM_CLOSE, 0, 0);
+				return;
+			}
 			if (S9xSGBSplitActive ())
 			{
 				WinStopGBSplit ();
@@ -11144,14 +11184,134 @@ static void WinStopGBSplit ()
 	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
 	base[_MAX_PATH] = '\0';
 
+	const bool viewer = S9xSGBViewerHostActive ();
+	if (viewer)
+	{
+		GBLinkCloseInstances ();
+		S9xSGBViewerHostStop ();
+		GBLinkMode = GBLINK_OFF;
+		GBLinkSyncResponsiveSettings ();
+	}
 	S9xSGBSplitStop (base);
-	S9xSetInfoString ("Split screen: off");
+	S9xSetInfoString (viewer ? "Link cable: disconnected" : "Split screen: off");
+}
+
+// The socketless Same Game session: every seat emulates inside this process
+// on the split engine, so a desync is structurally impossible; the spawned
+// windows only view a seat over shared memory and send their joypad back.
+static void WinStartGBViewerSession (int players)
+{
+	if (Settings.SGB_BIOSModeActive || !Settings.SuperGameBoy)
+	{
+		S9xSetInfoString ("Link cable: load a Game Boy game first");
+		return;
+	}
+
+	char base[_MAX_PATH + 1];
+	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
+	base[_MAX_PATH] = '\0';
+
+	if (!S9xSGBSplitStart (players, base))
+	{
+		S9xSetInfoString ("Link cable: could not start the extra consoles");
+		return;
+	}
+	if (!S9xSGBViewerHostStart (players))
+	{
+		S9xSGBSplitStop (base);
+		S9xSetInfoString ("Link cable: could not share the player windows");
+		return;
+	}
+
+	GBLinkMode           = GBLINK_SAME;
+	GBLinkSessionPlayers = players;
+	GBLinkSlotsStarted   = 0;
+	GBLinkSyncResponsiveSettings ();
+
+	// Seat identity rides the switch, so every window can come up at once —
+	// there is no port arrival order to keep.
+	TCHAR exe[MAX_PATH];
+	if (GetModuleFileName (NULL, exe, MAX_PATH))
+	{
+		for (int k = 0; k < players - 1; k++)
+		{
+			TCHAR cmd[MAX_PATH * 3];
+			_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d \"%s\""),
+			            exe, GBVIEW_SWITCH, (unsigned long)GetCurrentProcessId (),
+			            k + 2, players, (TCHAR *)_tFromChar (Settings.GBRomPath));
+			cmd[MAX_PATH * 3 - 1] = TEXT('\0');
+
+			STARTUPINFO si;
+			PROCESS_INFORMATION pi;
+			ZeroMemory (&si, sizeof si);
+			ZeroMemory (&pi, sizeof pi);
+			si.cb = sizeof si;
+			if (!CreateProcess (NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+			{
+				S9xSetInfoString ("Link cable: could not launch a player window");
+				break;
+			}
+			CloseHandle (pi.hThread);
+			CloseHandle (pi.hProcess);
+			GBLinkPeerPids[k] = pi.dwProcessId;
+			++GBLinkSlotsStarted;
+		}
+	}
+
+	// All consoles power up together — hard, so no seat boots from
+	// half-initialized RAM.
+	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+
+	char msg[64];
+	snprintf (msg, sizeof (msg), "Link cable: %d players", players);
+	S9xSetInfoString (msg);
+}
+
+// The per-frame session watchdog for both viewer roles: a viewer follows
+// its master out; the master reports arrivals and folds the session once
+// every player window is gone.
+static void GBLinkViewerWatch ()
+{
+	if (S9xSGBViewerClientActive ())
+	{
+		static bool closing = false;
+		if (!closing &&
+		    (!S9xSGBViewerClientAlive () || !GBLinkPidAlive (GBLinkPartnerPid)))
+		{
+			closing = true;
+			PostMessage (GUI.hWnd, WM_CLOSE, 0, 0);
+		}
+		return;
+	}
+
+	static int last_count = -1;
+	if (!S9xSGBViewerHostActive ()) { last_count = -1; return; }
+
+	const int count = S9xSGBViewerHostViewerCount ();
+	if (last_count >= 0 && count != last_count)
+	{
+		char msg[96];
+		snprintf (msg, sizeof (msg), "Link cable: %d of %d players connected",
+		          count + 1, GBLinkSessionPlayers);
+		S9xSetInfoString (msg);
+	}
+	last_count = count;
+
+	// Every player window closed = out of the link setup, same as sockets.
+	if (GBLinkSlotsStarted > 0)
+	{
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+			if (GBLinkPidAlive (GBLinkPeerPids[i])) return;
+		WinStopGBSplit ();
+		S9xSetInfoString ("Link cable: all instances closed - disconnected");
+	}
 }
 
 // The spawned instance links itself on startup; its mode is inferred from
 // whether it was handed a ROM, which only affects which item shows ticked.
 void WinAutoStartGBLinkPeer ()
 {
+	if (S9xSGBViewerClientActive ()) return;   // viewers never dial
 	if (!Settings.GBLinkPeerInstance) return;
 	if (S9xSGBLinkIsEnabled ()) return;   // already on the wire
 	WinStartGBLink (Settings.GBRomPath[0] ? GBLINK_SAME : GBLINK_DIFF,

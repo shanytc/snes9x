@@ -336,6 +336,7 @@
     <ClInclude Include="..\sgb\gb_timer.h" />
     <ClInclude Include="..\sgb\gb_serial.h" />
     <ClInclude Include="..\sgb\gb_link.h" />
+    <ClInclude Include="..\sgb\gb_viewer.h" />
     <ClInclude Include="..\sgb\gb_joypad.h" />
     <ClInclude Include="..\sgb\gb_cart.h" />
     <ClInclude Include="..\apu\apu.h" />
@@ -543,6 +544,7 @@
     <ClCompile Include="..\sgb\gb_timer.cpp" />
     <ClCompile Include="..\sgb\gb_serial.cpp" />
     <ClCompile Include="..\sgb\gb_link.cpp" />
+    <ClCompile Include="..\sgb\gb_viewer.cpp" />
     <ClCompile Include="..\sgb\gb_joypad.cpp" />
     <ClCompile Include="..\sgb\gb_cart.cpp" />
     <ClCompile Include="..\apu\apu.cpp" />

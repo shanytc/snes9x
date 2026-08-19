@@ -3228,6 +3228,13 @@ LRESULT CALLBACK WinProc(
 			}
 			break;
 		case ID_EMULATION_GB_LINK_DISCONNECT:
+			// A Same Game seat has no socket: leaving means closing its
+			// window. Only an Other Game peer unplugs a TCP link here.
+			if (S9xSGBViewerClientActive ())
+			{
+				PostMessage (GUI.hWnd, WM_CLOSE, 0, 0);
+				break;
+			}
 			if (S9xSGBLinkIsEnabled ())
 				WinToggleGBLink (WinGetGBLinkMode () ? WinGetGBLinkMode () : 1, 2);
 			break;
@@ -5909,14 +5916,18 @@ static void CheckMenuStates ()
 
 		if (show && Settings.GBLinkPeerInstance)
 		{
-			// A viewer seat is wired for the session's life: both items
-			// grey out, and closing the window is the way out.
+			// A viewer seat is wired for the session's life: Connect is a
+			// status tick, and its Disconnect leaves by closing the window.
 			const bool viewer = S9xSGBViewerClientActive ();
 			const bool linked = S9xSGBLinkIsEnabled () || viewer;
+			// The label follows the state: a live seat reads Connected, an
+			// unplugged Other Game peer offers Connect.
+			MENUITEMINFO mtext = { sizeof(mtext), MIIM_STRING };
+			mtext.dwTypeData = (LPTSTR)(linked ? TEXT("&Connected") : TEXT("&Connect"));
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_CONNECT, FALSE, &mtext);
 			mii.fState = linked ? (MFS_CHECKED | MFS_DISABLED) : MFS_UNCHECKED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_CONNECT, FALSE, &mii);
-			mii.fState = (linked && !viewer) ? MFS_UNCHECKED
-			                                 : (MFS_UNCHECKED | MFS_DISABLED);
+			mii.fState = linked ? MFS_UNCHECKED : (MFS_UNCHECKED | MFS_DISABLED);
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DISCONNECT, FALSE, &mii);
 		}
 		else if (show)

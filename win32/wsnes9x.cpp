@@ -3530,8 +3530,10 @@ LRESULT CALLBACK WinProc(
 	case WM_ACTIVATE:
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
-			// Never while linked: an unfocused pause reads as a dead cable.
-			if(GUI.InactivePause && !S9xSGBLinkIsEnabled ())
+			// Never while linked: an unfocused pause reads as a dead cable,
+			// and a parked viewer never reaches the force that unparks it.
+			if(GUI.InactivePause && !S9xSGBLinkIsEnabled () &&
+			   !S9xSGBViewerClientActive () && !S9xSGBViewerHostActive ())
 			{
 				S9xSetPause (PAUSE_INACTIVE_WINDOW);
 			}
@@ -3551,7 +3553,8 @@ LRESULT CALLBACK WinProc(
 		//                RealizePalette (GUI.WindowDC);
 		break;
 	case WM_SIZE:
-		if (wParam == SIZE_MINIMIZED && GUI.InactivePause && !S9xSGBLinkIsEnabled ())
+		if (wParam == SIZE_MINIMIZED && GUI.InactivePause && !S9xSGBLinkIsEnabled () &&
+		    !S9xSGBViewerClientActive () && !S9xSGBViewerHostActive ())
 		{
 			S9xSetPause(PAUSE_INACTIVE_WINDOW);
 		}
@@ -5121,6 +5124,9 @@ int WINAPI WinMain(
 	// After the ROM load, so the peer can tell same-game from other-game.
 	// No-op in a normal launch.
 	WinAutoStartGBLinkPeer ();
+	// A viewer spawns unfocused; force the responsive settings before the
+	// main loop can park on an inactive-window pause it can never clear.
+	GBLinkSyncResponsiveSettings ();
 
 	S9xUnmapAllControls();
 	S9xSetupDefaultKeymap();

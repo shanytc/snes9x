@@ -30,6 +30,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdlib>
+#include <ctime>
 
 #ifdef _WIN32
 #include <process.h>
@@ -395,6 +396,16 @@ struct PcWatch { uint16_t pc; uint8_t bank; const char *name; uint16_t var; };
 // bank 0xFF = unbanked ($0000-$3FFF); else must match the shadow $FFAB.
 // var: $C0xx/$C6xx -> wram, $FF8x+ -> hram.
 constexpr PcWatch kPcWatch[] = {
+	// Death Track boots its SC arm from RAM: log what D574 held when the
+	// arm ran, whether the ISR's adapter detect fired, and the role pick.
+	{ 0x1E69, 0xFF, "dt-arm",      0xD574 },
+	{ 0x1BBB, 0xFF, "dt-detect",   0xD572 },
+	{ 0x1BD6, 0xFF, "dt-got81",    0xD572 },
+	// The lobby-join gate: needs the 4-byte ping capture [FE,s,s,s]
+	// complete with presence nibbles, and wipes it on every failure.
+	{ 0x76F2, 0xFF, "dt-join-ok",  0xD753 },
+	{ 0x76F9, 0xFF, "dt-join-no",  0xD753 },
+	{ 0x76E8, 0xFF, "dt-join-hdr", 0xD752 },
 	// F-1 Hero's MULTI GAME menu gate: proceeds only on $FFC0 = 1 or 3.
 	{ 0x4480, 0xFF, "mg-gate",     0xFFC0 },
 	{ 0x08C3, 0xFF, "ev-dispatch", 0xC0B1 },
@@ -433,15 +444,18 @@ uint32_t g_pc_hits[sizeof kPcWatch / sizeof *kPcWatch][4] = {};
 
 void SerialPcHook(uint16_t pc, uint8_t, const CpuState &st)
 {
-	if (g_trace_seat < 0) return;
-	Memory *m = g_splitlink.m[g_trace_seat];
+	// Split tags the executing seat; a single-core instance session
+	// watches the primary, so multi-window runs get the PC trace too.
+	Memory *m; int seat;
+	if (g_trace_seat >= 0) { m = g_splitlink.m[g_trace_seat]; seat = g_trace_seat; }
+	else                   { m = g_active_mem;                seat = 0; }
 	if (!m) return;
 	for (size_t w = 0; w < sizeof kPcWatch / sizeof *kPcWatch; ++w)
 	{
 		const PcWatch &pw = kPcWatch[w];
 		if (pc != pw.pc) continue;
 		if (pw.bank != 0xFF && m->hram[0x2B] != pw.bank) continue;
-		uint32_t &hits = g_pc_hits[w][g_trace_seat];
+		uint32_t &hits = g_pc_hits[w][seat];
 		++hits;
 		// Hot spins: after 64 hits, one line per 256.
 		if (hits > 64 && (hits & 0xFF) != 0) return;
@@ -449,7 +463,7 @@ void SerialPcHook(uint16_t pc, uint8_t, const CpuState &st)
 		                ? m->hram[pw.var - 0xFF80]
 		                : m->wram[pw.var - 0xC000];
 		Trace("PC p%d %-11s v=%02X n=%u t=%lld",
-		      g_trace_seat + 1, pw.name, v, hits, (long long)st.t_cycles);
+		      seat + 1, pw.name, v, hits, (long long)st.t_cycles);
 		return;
 	}
 }
@@ -516,6 +530,7 @@ void PendingPush(int ch, Serial &s, uint8_t data, uint32_t i1)
 	const int tail = (s.pending_head + s.pending_len) % Serial::kPendingCap;
 	s.pending_data[tail] = data;
 	s.pending_i1[tail]   = i1;
+	s.pending_born[tail] = s.real_cycles;
 	if (s.pending_len == 0) s.pending_age = 0;
 	++s.pending_len;
 }
@@ -638,9 +653,11 @@ void HubApplyRemoteReply(int ch, uint32_t seq, uint8_t data, bool supplied)
 
 	if (tag.presence_wire >= 0)
 	{
-		// The $88 acks are what "connected" means for this port.
+		// Any non-idle reply means a console is plugged in and listening.
+		// Death Track's lobby gate needs the presence bits while a seat
+		// still only echoes its STAT; the $88 ack merely confirms it.
 		const uint8_t bit = static_cast<uint8_t>(1 << (5 + ch));
-		if (supplied && data == 0x88)
+		if (supplied && data != 0x00 && data != 0xFF)
 			g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
 		else
 			g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);
@@ -718,7 +735,22 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
 
 	s.passive       = false;
-	s.ext_gap_timer = ExtGapFloor(s);
+	// The gap preserves the wire's emission spacing, so a byte that
+	// already waited in the queue gets credit - releases must follow the
+	// hub's clock, not re-quantize to this game's arm phase. A fixed
+	// phase lock let Death Track's join gate fail the same way forever.
+	{
+		int32_t g = ExtGapFloor(s);
+		if (s.pending_len)
+		{
+			const int64_t waited =
+				s.real_cycles - s.pending_born[s.pending_head];
+			if (waited > 0) g -= static_cast<int32_t>(
+				waited > g ? g : waited);
+		}
+		if (g < kExtShiftTime) g = kExtShiftTime;
+		s.ext_gap_timer = g;
+	}
 	++g_direct.transfers;
 	g_direct.driving         = 2;
 	g_direct.last_drive_peer = s.real_cycles;
@@ -779,6 +811,7 @@ void SplitHoldClock(Serial &s, uint8_t data)
 	const int tail = (ps->pending_head + ps->pending_len) % Serial::kPendingCap;
 	ps->pending_data[tail] = data;
 	ps->pending_i1[tail]   = 0;
+	ps->pending_born[tail] = ps->real_cycles;
 	if (ps->pending_len == 0) ps->pending_age = 0;
 	++ps->pending_len;
 }
@@ -1078,10 +1111,10 @@ void HubInterpretLocal()
 
 			case 1:
 			case 2:
-				// The $88 acks are what "connected" means; while $AA rides
-				// these wires, player 1 stays counted (GBE+ rule) — even
-				// before the train is long enough to flip the phase.
-				if ((armed && (b == 0x88 || b == 0xAA)) || g_hub.begin_sync)
+				// Any non-idle reply counts as plugged in (the $88 ack
+				// only confirms it); $AA keeps player 1 counted while
+				// the train is still short.
+				if ((armed && b != 0x00 && b != 0xFF) || g_hub.begin_sync)
 					g_hub.status = static_cast<uint8_t>(g_hub.status | 0x10);
 				else
 					g_hub.status = static_cast<uint8_t>(g_hub.status & ~0x10);
@@ -1156,7 +1189,7 @@ void HubInterpretLocalSeats()
 		    (g_hub.prev_wire == 1 || g_hub.prev_wire == 2))
 		{
 			const uint8_t bit = static_cast<uint8_t>(1 << (4 + k));
-			if (armed && b == 0x88)
+			if (armed && b != 0x00 && b != 0xFF)
 				g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
 			else
 				g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);
@@ -2034,6 +2067,17 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	{
 		s.ts_send_timer = kTimestampInterval;
 		SendPacket(0, kCmdSync3, 0, 0, 0, Timestamp(s), true);
+
+		// A wall-clock beacon once a second, so logs from separate
+		// processes merge into one real-time timeline.
+		static int64_t last_wall = 0;
+		const int64_t wall = static_cast<int64_t>(time(nullptr));
+		if (wall != last_wall)
+		{
+			last_wall = wall;
+			Trace("[%lld] wall %lld", (long long)s.real_cycles,
+			      (long long)wall);
+		}
 	}
 }
 
@@ -2056,6 +2100,14 @@ LinkRole SerialLinkAutoStart(uint16_t port, int players, bool force_hub,
 		else
 			g_role = LinkRole::None;
 		return g_role;
+	}
+
+	// The PC tracer rides the CPU trace hook whenever the wire trace is
+	// on, socket sessions included — instance runs need it most.
+	if (TraceOn())
+	{
+		std::memset(g_pc_hits, 0, sizeof g_pc_hits);
+		Cpu::SetTraceHook(SerialPcHook);
 	}
 
 	if (players > 2 || force_hub)

@@ -2117,6 +2117,11 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 {
 	DbgPushCmd(cmd);
 
+	// No BIOS = a plain Game Boy: ignoring every SGB command keeps
+	// detection dead (no MLT_REQ reply, no palettes), so games behave
+	// exactly as on a DMG - including offering their link modes.
+	if (!Settings.SGB_BIOSModeActive) return;
+
 	if (cmd == 0x11 && len > 1)
 	{
 		const uint8_t mode = static_cast<uint8_t>(data[1] & 0x03);

@@ -2557,12 +2557,16 @@ constexpr int kEchoCap  = (SGB_MAX_LINK_PLAYERS - 4) * kEchoStep + 1;
 uint16_t g_echo_hist[kEchoCap];
 uint32_t g_echo_frames = 0;
 
-// Faceball's $554C spawn placer retries forever when the stage lacks a
-// free cell per player: master camped there white, every slave round-waiting.
-int      g_placer_window = 0;
-bool     g_placer_said   = false;
-uint32_t g_placer_hits[SGB_MAX_LINK_PLAYERS] = {};
-uint32_t g_placer_tot[SGB_MAX_LINK_PLAYERS]  = {};
+// Faceball's $554C spawn placer retries forever when the stage cannot seat
+// everyone: master camped there white, every slave round-waiting. A working
+// placement clears the loop within 4 frames even on a nearly full maze, so
+// half a second of it is already the unrecoverable spin.
+constexpr int kPlacerStuckFrames = 30;
+constexpr int kPlacerRearmFrames = 300;
+bool g_placer_said  = false;
+int  g_placer_clear = 0;
+bool g_placer_in[SGB_MAX_LINK_PLAYERS]    = {};
+int  g_placer_dwell[SGB_MAX_LINK_PLAYERS] = {};
 
 // Lift a completed frame out the moment VBlank latches it, then let the
 // core run on into the next frame; the blit reads the snapshot.
@@ -2579,33 +2583,57 @@ bool SplitSnapIfReady(SGB::Emulator *core, int i)
 }
 
 // Frame-end PCs bias into the VBlank ISR (the chase loop parks cores right
-// after their frame latch), so occupancy samples ride the 456-cycle chunks.
+// after their frame latch), so the samples ride the 456-cycle chunks.
 inline void SplitPlacerSample(SGB::Emulator *c, int i)
 {
 	const uint16_t pc = c->DebugImpl()->cpu.State().r.pc;
-	++g_placer_tot[i];
-	g_placer_hits[i] += (pc >= 0x554C && pc < 0x55C0) ? 1u : 0u;
+	if (pc >= 0x554C && pc < 0x55C0) g_placer_in[i] = true;
 }
 
-// A seat spending most of a ~5s window inside the placer is the
-// unrecoverable too-small-stage spin — say so once; a clean window re-arms.
-void SplitRingPlacerWatch(int n)
+// How many players the stage did seat: every object the placer got down
+// carries an active flag at $C200 + entry * 16.
+int SplitPlacerSeated(SGB::Emulator *c)
 {
-	if (++g_placer_window < 300) return;
-	bool spinning = false;
-	for (int i = 0; i < n && !spinning; ++i)
-		spinning = g_placer_tot[i] > 1000 && g_placer_hits[i] * 2 >= g_placer_tot[i];
-	if (spinning && !g_placer_said)
+	const uint8_t *wram = c->DebugImpl()->mem.wram;
+	int seated = 0;
+	for (int e = 0; e < 16; ++e)
+		if (wram[0x0200 + e * 16] & 1) ++seated;
+	return seated;
+}
+
+// A seat still in the placer half a second on is stuck there for good; say
+// how far the stage got, once. The spin can break and re-form as the ring
+// keeps trying, so only a placer-free stretch — a reset back to the menus —
+// arms the message again.
+void SplitRingPlacerWatch(SGB::Emulator *cs[], int n)
+{
+	int stuck = -1;
+	for (int i = 0; i < n; ++i)
 	{
-		char buf[96];
+		if (!g_placer_in[i]) { g_placer_dwell[i] = 0; continue; }
+		g_placer_in[i] = false;
+		if (++g_placer_dwell[i] >= kPlacerStuckFrames && stuck < 0) stuck = i;
+	}
+	if (stuck < 0)
+	{
+		if (g_placer_said && ++g_placer_clear >= kPlacerRearmFrames)
+			g_placer_said = false;
+		return;
+	}
+	g_placer_clear = 0;
+	if (g_placer_said) return;
+	g_placer_said = true;
+
+	const int seated = SplitPlacerSeated(cs[stuck]);
+	char buf[96];
+	if (seated > 0 && seated < n)
+		snprintf(buf, sizeof buf,
+		         "Maze seats only %d of %d players - select larger maze",
+		         seated, n);
+	else
 		snprintf(buf, sizeof buf,
 		         "Maze too small for %d players - select larger maze", n);
-		S9xMessage(S9X_INFO, S9X_NO_INFO, buf);
-	}
-	g_placer_said   = spinning;
-	g_placer_window = 0;
-	std::memset(g_placer_hits, 0, sizeof g_placer_hits);
-	std::memset(g_placer_tot,  0, sizeof g_placer_tot);
+	S9xMessage(S9X_INFO, S9X_NO_INFO, buf);
 }
 
 } // anonymous
@@ -2766,10 +2794,10 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	g_split_players = players;
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
 	g_echo_frames = 0;
-	g_placer_window = 0;
-	g_placer_said   = false;
-	std::memset(g_placer_hits, 0, sizeof g_placer_hits);
-	std::memset(g_placer_tot,  0, sizeof g_placer_tot);
+	g_placer_said  = false;
+	g_placer_clear = 0;
+	std::memset(g_placer_in,    0, sizeof g_placer_in);
+	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
 
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS];
@@ -2804,10 +2832,10 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
 	g_split_players = 0;
 	g_echo_frames   = 0;
-	g_placer_window = 0;
-	g_placer_said   = false;
-	std::memset(g_placer_hits, 0, sizeof g_placer_hits);
-	std::memset(g_placer_tot,  0, sizeof g_placer_tot);
+	g_placer_said  = false;
+	g_placer_clear = 0;
+	std::memset(g_placer_in,    0, sizeof g_placer_in);
+	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
 }
 
 bool S9xSGBSplitActive(void)  { return g_split_players >= 2; }
@@ -2965,7 +2993,7 @@ void S9xSGBSplitRunFrame(void)
 		SGB::SerialTraceMsg(pcline);
 	}
 
-	if (fb_ring) SplitRingPlacerWatch(n);
+	if (fb_ring) SplitRingPlacerWatch(cs, n);
 
 	// Audio rides the primary alone — the seats' sample rings overflow
 	// and drop silently. Same drain-rate steering as Emulator::RunFrame.

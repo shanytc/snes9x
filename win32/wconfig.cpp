@@ -25,6 +25,7 @@
 #include "../gfx.h"
 #include "../snapshot.h"
 #include "../sgb/gb_viewer.h"
+#include "../sgb/sgb.h"
 #ifdef NETPLAY_SUPPORT
 	#include "../netplay.h"
 	extern SNPServer NPServer;
@@ -318,9 +319,9 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 		if (end && *end == ',') seat    = strtol(end + 1, &end, 10);
 		if (end && *end == ',') players = strtol(end + 1, &end, 10);
 		if (seat < 2) seat = 2;
-		if (seat > 4) seat = 4;
+		if (seat > SGB_MAX_LINK_PLAYERS) seat = SGB_MAX_LINK_PLAYERS;
 		if (players < 2) players = 2;
-		if (players > 4) players = 4;
+		if (players > SGB_MAX_LINK_PLAYERS) players = SGB_MAX_LINK_PLAYERS;
 
 		// Peer housekeeping applies (muting, placement, no hosting).
 		// A viewer never emulates through the BIOS whatever the master

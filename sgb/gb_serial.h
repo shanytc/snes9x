@@ -135,13 +135,19 @@ bool SerialLinkShouldHoldFrame();
 int SerialLinkPlayerCount();
 
 // ---- Split screen (in-process multi-core link) ------------------------------
+// Seats an in-process session can hold. 15 is the Faceball ring's nibble
+// ceiling: enumeration returns $10+count, so a 16th player wraps to $20.
+constexpr int kLinkMaxSeats = 15;
+
 // Registers every core's serial port and bus, in player order, so the
 // cable (2 seats) or the DMG-07 (3-4 seats, adapter clocked by seat 0's
 // core) is resolved by direct exchange between the cores — no transport,
 // no packets, no processes. Attach drops any socket session first.
 // `force_hub` runs the adapter even with 2 seats (adapter-only games).
+// `ring` wires the seats as Faceball 2000's custom shift-ring cable
+// instead (up to kLinkMaxSeats); it overrides the hub.
 void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
-                       bool force_hub);
+                       bool force_hub, bool ring = false);
 void SerialSplitDetach();
 bool SerialSplitActive();
 
@@ -155,6 +161,7 @@ void SerialTraceSetRom(const char *label, bool from_path);
 
 // Tell the PC tracer which split seat is currently executing (-1 = none).
 void SerialSetTraceSeat(int seat);
+int  SerialGetTraceSeat();
 
 // One-line state for the OSD, e.g. "Link cable: connected (Master)". The
 // suffix appears only once a byte has crossed.

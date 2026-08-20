@@ -76,14 +76,23 @@ void S9xMainLoop (void)
 		// only wire the first controller. Split-screen seats each read
 		// their own controller slot.
 		const bool local_pads = S9xSGBViewerHostLocalPads();
-		S9xSGBSetJoypad(local_pads ? MovieGetJoypad(0) : 0);
+		const uint16 pad1 = local_pads ? (uint16)MovieGetJoypad(0) : 0;
+		S9xSGBSetJoypad(pad1);
 		// Viewer sessions: one window = one player, a seat hears only its
 		// viewer. Split screen: all seats share this window's controllers.
+		// Faceball's 15-player mode: seats 5+ replay Joypad #5 on a delay.
 		if (gb_split)
+		{
+			S9xSGBSplitEchoPush(local_pads ? (uint16)MovieGetJoypad(4) : 0);
 			for (int p = 2; p <= S9xSGBSplitPlayers(); p++)
-				S9xSGBSplitSetJoypad(p, S9xSGBViewerHostActive()
-				                        ? S9xSGBViewerHostPad(p)
-				                        : MovieGetJoypad(p - 1));
+			{
+				uint16 pad;
+				if (p >= 5)                        pad = S9xSGBSplitEchoPad(p);
+				else if (S9xSGBViewerHostActive()) pad = S9xSGBViewerHostPad(p);
+				else                               pad = (uint16)MovieGetJoypad(p - 1);
+				S9xSGBSplitSetJoypad(p, pad);
+			}
+		}
 
 		// Push timing knobs each frame so UI changes take effect live.
 		// Default GBClockMultiplier to 1.0 if it's been left at its

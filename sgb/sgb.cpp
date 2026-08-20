@@ -2528,27 +2528,35 @@ bool S9xSGBInit(void)               { return SGB::Instance().Init(); }
 // S9xSGBSplit* section further down.
 namespace {
 
-std::unique_ptr<SGB::Emulator> g_split_cores[3];
+std::unique_ptr<SGB::Emulator> g_split_cores[SGB_MAX_LINK_PLAYERS - 1];
 int g_split_players = 0;   // seats including the primary; 0 = off
 
 // Each seat's last completed frame, lifted out at its VBlank inside the
 // lockstep loop. Cores then never park while others run — a parked seat
 // cannot re-arm its serial port, and the adapter clocking bytes into it
 // shredded the data phase (F-1 Race's start grid garbled, then hung).
-uint16_t g_split_snap[4][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+uint16_t g_split_snap[SGB_MAX_LINK_PLAYERS][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
 // Raw DMG shades of the same frame, for recoloring seat frames through
 // the master's live SGB palettes in BIOS-mode sessions.
-uint8_t  g_split_snap_shades[4][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
-bool     g_split_snap_valid[4] = {false, false, false, false};
+uint8_t  g_split_snap_shades[SGB_MAX_LINK_PLAYERS][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+bool     g_split_snap_valid[SGB_MAX_LINK_PLAYERS] = {};
 
-int SplitCollect(SGB::Emulator *out[4])
+int SplitCollect(SGB::Emulator *out[SGB_MAX_LINK_PLAYERS])
 {
 	int n = 0;
 	out[n++] = &SGB::Instance();
-	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 		if (g_split_cores[k]) out[n++] = g_split_cores[k].get();
 	return n;
 }
+
+// Faceball 15-player test mode: one shared pad on a delay line for
+// seats 5+ (see sgb.h). 12 frames a seat clears the ring's enumeration
+// round-trip (~4 frames at 15 seats) with margin.
+constexpr int kEchoStep = 12;
+constexpr int kEchoCap  = (SGB_MAX_LINK_PLAYERS - 4) * kEchoStep + 1;
+uint16_t g_echo_hist[kEchoCap];
+uint32_t g_echo_frames = 0;
 
 // Lift a completed frame out the moment VBlank latches it, then let the
 // core run on into the next frame; the blit reads the snapshot.
@@ -2591,7 +2599,7 @@ static void SplitStaggerSeats(void)
 void S9xSGBReset(void)
 {
 	SGB::Instance().ColdReset();
-	for (int k = 0; k < 3; ++k)
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
 	SplitStaggerSeats();
 }
@@ -2601,7 +2609,7 @@ bool S9xSGBSoftReset(void)
 	const bool ok = SGB::Instance().SoftReset();
 	if (ok)
 	{
-		for (int k = 0; k < 3; ++k)
+		for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 			if (g_split_cores[k]) g_split_cores[k]->SoftReset();
 		SplitStaggerSeats();
 	}
@@ -2648,6 +2656,17 @@ bool S9xSGBCartNeedsDmg07(void)
 	return false;
 }
 
+// Faceball 2000: the published ROM still carries the 16-player code
+// written for its never-released ring cable; only it may open a 5..15
+// seat session. Header title, space-padded like the cart stores it.
+bool S9xSGBCartIsFaceball(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) return false;
+	return std::strcmp(prim.DebugImpl()->cart.header.title,
+	                   "FACEBALL 2000   ") == 0;
+}
+
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }
 int S9xSGBLinkPlayerCount(void)     { return SGB::SerialLinkPlayerCount(); }
 void S9xSGBLinkDisconnect(void)     { SGB::SerialLinkDisconnect(); }
@@ -2678,7 +2697,9 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	S9xSGBSplitStop(battery_base_path);
 
 	if (players < 2) return false;
-	if (players > 4) players = 4;
+	// Only Faceball's ring cable seats more than the DMG-07's four.
+	const int max_players = S9xSGBCartIsFaceball() ? SGB_MAX_LINK_PLAYERS : 4;
+	if (players > max_players) players = max_players;
 
 	SGB::Emulator &prim = SGB::Instance();
 	if (!prim.HasROM()) return false;
@@ -2694,7 +2715,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		// shared index-less .sav; each seat loads its own .savN below.
 		if (!core->Init() || !core->LoadROM(rom, size, nullptr))
 		{
-			for (int j = 0; j < 3; ++j) g_split_cores[j].reset();
+			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
 			return false;
 		}
 		// The SGB sniffers and the ICD2 LCD feed route to the process-
@@ -2707,19 +2728,21 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		g_split_cores[k] = std::move(core);
 	}
 	g_split_players = players;
-	for (int k = 0; k < 4; ++k) g_split_snap_valid[k] = false;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
+	g_echo_frames = 0;
 
-	SGB::Emulator *cs[4];
-	SGB::Serial   *ss[4];
-	SGB::Memory   *mm[4];
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS];
+	SGB::Memory   *mm[SGB_MAX_LINK_PLAYERS];
 	const int n = SplitCollect(cs);
 	for (int i = 0; i < n; ++i)
 	{
 		ss[i] = &cs[i]->DebugImpl()->serial;
 		mm[i] = &cs[i]->DebugImpl()->mem;
 	}
-	// Adapter-only games ride the DMG-07 even as a 2-seat split.
-	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07());
+	// Adapter-only games ride the DMG-07 even as a 2-seat split; five
+	// seats up is reachable only for Faceball and wires its ring cable.
+	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07(), n >= 5);
 
 	// A link session is Game Boys on a cable, and the SGB has no link
 	// port: the primary presents as a plain DMG too (KI hides its link
@@ -2737,9 +2760,10 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	S9xSGBSplitSaveBatteries(battery_base_path);
 	SGB::Instance().DebugImpl()->sgb_pkt.mute_commands = false;
 	SGB::SerialSplitDetach();
-	for (int k = 0; k < 3; ++k) g_split_cores[k].reset();
-	for (int k = 0; k < 4; ++k) g_split_snap_valid[k] = false;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k) g_split_cores[k].reset();
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
 	g_split_players = 0;
+	g_echo_frames   = 0;
 }
 
 bool S9xSGBSplitActive(void)  { return g_split_players >= 2; }
@@ -2748,13 +2772,44 @@ int  S9xSGBSplitPlayers(void) { return g_split_players; }
 void S9xSGBSplitSetJoypad(int player, uint16_t snes_pad_mask)
 {
 	const int k = player - 2;
-	if (k < 0 || k >= 3 || !g_split_cores[k]) return;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1 || !g_split_cores[k]) return;
 	g_split_cores[k]->SetJoypad(snes_pad_mask);
+}
+
+void S9xSGBSplitEchoPush(uint16_t pad)
+{
+	g_echo_hist[g_echo_frames % kEchoCap] = pad;
+	++g_echo_frames;
+}
+
+uint16_t S9xSGBSplitEchoPad(int player)
+{
+	if (player < 5 || player > SGB_MAX_LINK_PLAYERS) return 0;
+	const uint32_t delay = static_cast<uint32_t>(player - 4) * kEchoStep;
+	if (!g_echo_frames || delay >= g_echo_frames) return 0;
+	return g_echo_hist[(g_echo_frames - 1 - delay) % kEchoCap];
+}
+
+uint8_t S9xSGBSplitPeek(int player, uint16_t addr)
+{
+	SGB::Emulator *core;
+	if (player <= 1)
+		core = &SGB::Instance();
+	else
+	{
+		const int k = player - 2;
+		if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1 || !g_split_cores[k]) return 0xFF;
+		core = g_split_cores[k].get();
+	}
+	SGB::Memory &m = core->DebugImpl()->mem;
+	if (addr >= 0xC000 && addr <= 0xDFFF) return m.wram[addr - 0xC000];
+	if (addr >= 0xFF80 && addr <= 0xFFFE) return m.hram[addr - 0xFF80];
+	return 0xFF;
 }
 
 void S9xSGBSplitRunFrame(void)
 {
-	SGB::Emulator *cs[4];
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	const int n = SplitCollect(cs);
 	if (n < 2)
 	{
@@ -2794,8 +2849,8 @@ void S9xSGBSplitRunFrame(void)
 	// VBlank snapshots the finished frame and runs on, so the adapter can
 	// never clock a byte into a console that was merely waiting with its
 	// frame done. Every core runs the identical cycle total per call.
-	int32_t remaining[4];
-	bool    has[4], snapped[4];
+	int32_t remaining[SGB_MAX_LINK_PLAYERS];
+	bool    has[SGB_MAX_LINK_PLAYERS], snapped[SGB_MAX_LINK_PLAYERS];
 	for (int i = 0; i < n; ++i)
 	{
 		SGB::Emulator::Impl *im = cs[i]->DebugImpl();
@@ -2879,17 +2934,31 @@ void S9xSGBSplitRunFrame(void)
 	SGB::ApuSetClockHz(pi->apu, static_cast<int32_t>(base_hz * (1.0 + corr) + 0.5));
 }
 
+// Tile grid for the one-window blit: the original 2x2 quadrants up to
+// four seats, a 4-wide grid past that (Faceball's ring sessions).
+static int SplitGridCols(void)
+{
+	return g_split_players <= 4 ? 2 : 4;
+}
+
+static int SplitGridRows(void)
+{
+	const int c = SplitGridCols();
+	return (g_split_players + c - 1) / c;
+}
+
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	if (!dest || g_split_players < 2) return;
 
-	SGB::Emulator *cs[4];
-	const int n = SplitCollect(cs);
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	const int n    = SplitCollect(cs);
+	const int cols = SplitGridCols();
 
 	for (int i = 0; i < n; ++i)
 	{
-		uint16_t *tile = dest + (i & 1) * SGB_GB_SCREEN_W +
-		                 (i >> 1) * static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
+		uint16_t *tile = dest + (i % cols) * SGB_GB_SCREEN_W +
+		                 (i / cols) * static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
 		if (g_split_snap_valid[i])
 		{
 			// The frame captured at this seat's own VBlank; the core has
@@ -2905,19 +2974,21 @@ void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 		}
 	}
 
-	if (g_split_players == 3)
+	// Seatless tiles stay black (the fourth quadrant at three players,
+	// the sixteenth at fifteen).
+	for (int i = n; i < cols * SplitGridRows(); ++i)
 	{
-		// Three players: the empty quadrant stays black.
-		uint16_t *lower = dest + static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
+		uint16_t *tile = dest + (i % cols) * SGB_GB_SCREEN_W +
+		                 (i / cols) * static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
 		for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
-			std::memset(lower + y * pitch_pixels + SGB_GB_SCREEN_W, 0,
+			std::memset(tile + y * pitch_pixels, 0,
 			            SGB_GB_SCREEN_W * sizeof(uint16_t));
 	}
 }
 
 bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 {
-	SGB::Emulator *cs[4];
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	const int n = SplitCollect(cs);
 	const int i = player - 1;
 	if (!dest || i < 1 || i >= n) return false;
@@ -3017,18 +3088,20 @@ void S9xSGBDebugSgbCompare(const uint16_t *snes, uint32_t pitch_pixels,
 
 int S9xSGBSplitScreenWidth(void)
 {
-	return static_cast<int>(SGB_GB_SCREEN_W) * (g_split_players >= 2 ? 2 : 1);
+	if (g_split_players < 2) return static_cast<int>(SGB_GB_SCREEN_W);
+	return static_cast<int>(SGB_GB_SCREEN_W) * SplitGridCols();
 }
 
 int S9xSGBSplitScreenHeight(void)
 {
-	return static_cast<int>(SGB_GB_SCREEN_H) * (g_split_players >= 3 ? 2 : 1);
+	if (g_split_players < 2) return static_cast<int>(SGB_GB_SCREEN_H);
+	return static_cast<int>(SGB_GB_SCREEN_H) * SplitGridRows();
 }
 
 void S9xSGBSplitLoadBatteries(const char *battery_base_path)
 {
 	if (!battery_base_path || !*battery_base_path) return;
-	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
 		const std::string p = std::string(battery_base_path) + std::to_string(k + 2);
@@ -3039,7 +3112,7 @@ void S9xSGBSplitLoadBatteries(const char *battery_base_path)
 void S9xSGBSplitSaveBatteries(const char *battery_base_path)
 {
 	if (!battery_base_path || !*battery_base_path) return;
-	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
 		const std::string p = std::string(battery_base_path) + std::to_string(k + 2);
@@ -3078,7 +3151,7 @@ void S9xSGBGetCycleMeters(uint64_t *snes, uint64_t *gb)
 static void SplitRunSeatsSlaved(int32_t gb_cycles)
 {
 	if (g_split_players < 2 || !Settings.SGB_BIOSModeActive) return;
-	for (int k = 0; k < g_split_players - 1 && k < 3; ++k)
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		SGB::Emulator *core = g_split_cores[k].get();
 		if (!core || !core->DebugImpl()->has_rom) continue;

@@ -304,6 +304,10 @@ int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adap
 // Player Adapter, so even a 2-player session must host it.
 bool S9xSGBCartNeedsDmg07(void);
 
+// Faceball 2000: the one cart whose dormant 16-player mode can ride the
+// custom ring cable. Only it may open a 5..15-seat session.
+bool S9xSGBCartIsFaceball(void);
+
 // Role of the live session, or S9X_GBLINK_NONE when unplugged.
 int  S9xSGBLinkGetRole(void);
 
@@ -336,11 +340,23 @@ bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap);
 // three or four). BIOS-less GB mode only. Player N reads SNES joypad N;
 // seats past the first save to <base>.savN. Mutually exclusive with the
 // socket link.
+// Faceball 2000 alone may seat 5..SGB_MAX_LINK_PLAYERS, wired as its
+// custom ring cable.
+constexpr int SGB_MAX_LINK_PLAYERS = 15;
 bool S9xSGBSplitStart(int players, const char *battery_base_path);
 void S9xSGBSplitStop(const char *battery_base_path);  // saves seat batteries first
 bool S9xSGBSplitActive(void);
 int  S9xSGBSplitPlayers(void);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
+// Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
+// feeds Joypad #5), each seat (player-4)*12 frames behind, so identical
+// inputs still stagger the ring bring-up — the game makes whoever starts
+// the link first the master. Push once per host frame; read per seat.
+void     S9xSGBSplitEchoPush(uint16_t pad);
+uint16_t S9xSGBSplitEchoPad(int player /*5..15*/);
+// Debug peek at a seat's WRAM/HRAM (player 1 = primary). Returns 0xFF
+// outside $C000-$DFFF / $FF80-$FFFE. Harness diagnostics only.
+uint8_t  S9xSGBSplitPeek(int player, uint16_t addr);
 void S9xSGBSplitRunFrame(void);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 // One seat's latest finished frame (160x144) for the viewer transport.

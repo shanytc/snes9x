@@ -3183,10 +3183,20 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_LINK_SAME_4:
 			WinToggleGBLink (1, 4);
 			break;
+		case ID_EMULATION_GB_LINK_SAME_5:
+		case ID_EMULATION_GB_LINK_SAME_6:
+		case ID_EMULATION_GB_LINK_SAME_7:
+		case ID_EMULATION_GB_LINK_SAME_8:
+		case ID_EMULATION_GB_LINK_SAME_9:
+		case ID_EMULATION_GB_LINK_SAME_10:
+		case ID_EMULATION_GB_LINK_SAME_11:
+		case ID_EMULATION_GB_LINK_SAME_12:
+		case ID_EMULATION_GB_LINK_SAME_13:
+		case ID_EMULATION_GB_LINK_SAME_14:
 		case ID_EMULATION_GB_LINK_SAME_15:
-			// Faceball 2000's ring cable: 15 seats, the game's own lobby
-			// counts whoever joins (the item only exists for that cart).
-			WinToggleGBLink (1, 15);
+			// Faceball 2000's ring cable: the game's own lobby counts
+			// whoever joins (the submenu only exists for that cart).
+			WinToggleGBLink (1, (int)((wParam & 0xffff) - ID_EMULATION_GB_LINK_SAME_5 + 5));
 			break;
 		case ID_EMULATION_GB_LINK_DIFF:
 			WinToggleGBLink (2, 2);
@@ -5994,28 +6004,58 @@ static void CheckMenuStates ()
 					}
 				}
 			}
-			// Faceball 2000 alone gets the 15-seat ring item, right under
-			// 4 Players; every other cart's menu never shows it.
+			// Faceball 2000 alone gets the ring submenu (5..15 Players),
+			// right under 4 Players; every other cart never sees it. The
+			// popup is built once and re-attached as carts come and go —
+			// RemoveMenu detaches without destroying it.
 			if (s_gb_same_hmenu)
 			{
+				static HMENU s_ring_hmenu = NULL;
 				MENUITEMINFO probe15 = {};
 				probe15.cbSize = sizeof(probe15);
 				probe15.fMask  = MIIM_ID;
-				const bool in15   = GetMenuItemInfo (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SAME_15,
+				const bool in15   = GetMenuItemInfo (s_gb_same_hmenu,
+				                                     ID_EMULATION_GB_LINK_SAME_RING_POPUP,
 				                                     FALSE, &probe15) != FALSE;
 				const bool want15 = S9xSGBCartIsFaceball ();
 				if (want15 && !in15)
 				{
-					InsertMenu (s_gb_same_hmenu, 3, MF_BYPOSITION | MF_STRING,
-					            ID_EMULATION_GB_LINK_SAME_15, TEXT("5-&15 Players"));
+					if (!s_ring_hmenu)
+					{
+						s_ring_hmenu = CreatePopupMenu ();
+						for (int p = 5; p <= 15; p++)
+						{
+							TCHAR label[32];
+							_sntprintf (label, 32, TEXT("%d Players"), p);
+							AppendMenu (s_ring_hmenu, MF_STRING,
+							            ID_EMULATION_GB_LINK_SAME_5 + (p - 5), label);
+						}
+					}
+					MENUITEMINFO mring = {};
+					mring.cbSize     = sizeof(mring);
+					mring.fMask      = MIIM_ID | MIIM_SUBMENU | MIIM_STRING;
+					mring.wID        = ID_EMULATION_GB_LINK_SAME_RING_POPUP;
+					mring.hSubMenu   = s_ring_hmenu;
+					mring.dwTypeData = (LPTSTR)TEXT("5-15 &Players");
+					InsertMenuItem (s_gb_same_hmenu, 3, TRUE, &mring);
 					if (LocaleIsTranslated ()) LocalizeMenu (s_gb_same_hmenu);
 				}
 				else if (!want15 && in15)
-					RemoveMenu (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SAME_15, MF_BYCOMMAND);
+					RemoveMenu (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SAME_RING_POPUP,
+					            MF_BYCOMMAND);
 				if (want15)
 				{
-					mii.fState = (gblink == 1 && players == 15) ? MFS_CHECKED : same_off;
-					SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_15, FALSE, &mii);
+					// The popup greys with its Same Game family; the live
+					// seat count owns the tick inside it.
+					mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
+					SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_RING_POPUP,
+					                 FALSE, &mii);
+					for (int p = 5; p <= 15; p++)
+					{
+						mii.fState = (gblink == 1 && players == p) ? MFS_CHECKED : same_off;
+						SetMenuItemInfo (GUI.hMenu,
+						                 ID_EMULATION_GB_LINK_SAME_5 + (p - 5), FALSE, &mii);
+					}
 				}
 			}
 
@@ -10626,6 +10666,12 @@ DWORD GBLinkPartnerPid = 0;
 static DWORD GBLinkPeerPids[SGB_MAX_LINK_PLAYERS - 1] = {};
 static int   GBLinkSlotsStarted = 0;
 
+// The master window's shape from before a ring session dropped it to 1x
+// (the seats park at its size, so 1x is what makes a 5x3 grid fit);
+// teardown puts it back. 0 = nothing to restore.
+static int GBLinkPreRingW = 0;
+static int GBLinkPreRingH = 0;
+
 static bool GBLinkPidAlive (DWORD pid)
 {
 	if (!pid) return false;
@@ -11154,9 +11200,10 @@ void WinToggleGBLink (int mode, int players)
 	// Game still rides sockets.
 	if (mode == GBLINK_SAME && !Settings.GBLinkPeerInstance)
 	{
-		// A 15-seat grid outgrows the shared window's SNES-sized surface,
-		// so Faceball's ring sessions always take the viewer flavor.
-		if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive && players <= 4)
+		// Faceball's ring sessions share the window too: past four seats
+		// the blit drops to half-resolution tiles (5-wide grid) to fit
+		// the SNES-sized surface.
+		if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
 			WinStartGBSplit (players);
 		else
 			WinStartGBViewerSession (players);
@@ -11317,6 +11364,16 @@ static void WinStartGBSplit (int players)
 		S9xSetInfoString ("Split screen: could not start the extra consoles");
 		return;
 	}
+	if (S9xSGBSplitPlayers () != players)
+	{
+		char warn[96];
+		snprintf (warn, sizeof (warn),
+		          "Split screen: engine seated %d of %d players - do a clean rebuild",
+		          S9xSGBSplitPlayers (), players);
+		S9xSetInfoString (warn);
+		S9xSGBSplitStop (base);
+		return;
+	}
 
 	// All seats power up together; the primary may have been in demo.
 	// Hard, for the same reason as the socket session: a warm reset
@@ -11343,6 +11400,13 @@ static void WinStopGBSplit ()
 		GBLinkSyncResponsiveSettings ();
 	}
 	S9xSGBSplitStop (base);
+
+	// A ring session shrank the master to 1x; give the user's shape back.
+	if (GBLinkPreRingW > 0 && !GUI.FullScreen && !IsZoomed (GUI.hWnd))
+		SetWindowPos (GUI.hWnd, NULL, 0, 0, GBLinkPreRingW, GBLinkPreRingH,
+		              SWP_NOMOVE | SWP_NOZORDER);
+	GBLinkPreRingW = GBLinkPreRingH = 0;
+
 	S9xSetInfoString (viewer ? "Link cable: disconnected" : "Split screen: off");
 }
 
@@ -11371,6 +11435,19 @@ static void WinStartGBViewerSession (int players)
 		S9xSetInfoString ("Link cable: could not start the extra consoles");
 		return;
 	}
+	if (S9xSGBSplitPlayers () != players)
+	{
+		// The engine seated fewer than asked: the 15-seat arrays span
+		// sgb/ and win32/, so a shortfall means mixed objects from an
+		// incremental build. Say so instead of showing white windows.
+		char warn[96];
+		snprintf (warn, sizeof (warn),
+		          "Link cable: engine seated %d of %d players - do a clean rebuild",
+		          S9xSGBSplitPlayers (), players);
+		S9xSetInfoString (warn);
+		S9xSGBSplitStop (base);
+		return;
+	}
 	if (!S9xSGBViewerHostStart (players))
 	{
 		S9xSGBSplitStop (base);
@@ -11382,6 +11459,20 @@ static void WinStartGBViewerSession (int players)
 	GBLinkSessionPlayers = players;
 	GBLinkSlotsStarted   = 0;
 	GBLinkSyncResponsiveSettings ();
+
+	// Fifteen windows only fit the desktop as a 5x3 grid of small tiles,
+	// and every seat parks itself at the master's size: drop the master
+	// to 1x before spawning, and remember the shape for teardown.
+	if (players > 4 && !GUI.FullScreen && !IsZoomed (GUI.hWnd))
+	{
+		RECT wr;
+		if (GetWindowRect (GUI.hWnd, &wr))
+		{
+			GBLinkPreRingW = (int)(wr.right - wr.left);
+			GBLinkPreRingH = (int)(wr.bottom - wr.top);
+		}
+		SendMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_WINDOW_SIZE_1X, 0), 0);
+	}
 
 	// Seat identity rides the switch, so every window can come up at once —
 	// there is no port arrival order to keep.

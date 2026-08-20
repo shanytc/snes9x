@@ -2936,10 +2936,13 @@ void S9xSGBSplitRunFrame(void)
 }
 
 // Tile grid for the one-window blit: the original 2x2 quadrants up to
-// four seats, a 4-wide grid past that (Faceball's ring sessions).
+// four seats, a 5-wide grid past that — every tile native 160x144, so
+// fifteen seats compose to 800x432. The host composition buffer's row
+// stride (GFX_SCREEN_PITCH) is sized for exactly that; the window
+// scaling squeezes it to fit like any other source.
 static int SplitGridCols(void)
 {
-	return g_split_players <= 4 ? 2 : 4;
+	return g_split_players <= 4 ? 2 : 5;
 }
 
 static int SplitGridRows(void)
@@ -2956,27 +2959,25 @@ void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 	const int n    = SplitCollect(cs);
 	const int cols = SplitGridCols();
 
+	static uint16_t live[SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
 	for (int i = 0; i < n; ++i)
 	{
 		uint16_t *tile = dest + (i % cols) * SGB_GB_SCREEN_W +
 		                 (i / cols) * static_cast<size_t>(SGB_GB_SCREEN_H) * pitch_pixels;
-		if (g_split_snap_valid[i])
+		// The frame captured at this seat's own VBlank; the core has
+		// long run past it. No snapshot yet = the core's live frame.
+		const uint16_t *src = g_split_snap[i];
+		if (!g_split_snap_valid[i])
 		{
-			// The frame captured at this seat's own VBlank; the core has
-			// long run past it.
-			for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
-				std::memcpy(tile + y * pitch_pixels,
-				            g_split_snap[i] + y * SGB_GB_SCREEN_W,
-				            SGB_GB_SCREEN_W * sizeof(uint16_t));
+			cs[i]->BlitScreenGB(live, SGB_GB_SCREEN_W);
+			src = live;
 		}
-		else
-		{
-			cs[i]->BlitScreenGB(tile, pitch_pixels);
-		}
+		for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
+			std::memcpy(tile + y * pitch_pixels, src + y * SGB_GB_SCREEN_W,
+			            SGB_GB_SCREEN_W * sizeof(uint16_t));
 	}
 
-	// Seatless tiles stay black (the fourth quadrant at three players,
-	// the sixteenth at fifteen).
+	// Seatless tiles stay black (the fourth quadrant at three players).
 	for (int i = n; i < cols * SplitGridRows(); ++i)
 	{
 		uint16_t *tile = dest + (i % cols) * SGB_GB_SCREEN_W +

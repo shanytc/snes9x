@@ -14,9 +14,11 @@
 
 namespace {
 
-constexpr uint32_t kMagic   = 0x47425632;  // 'GBV2'
+constexpr uint32_t kMagic   = 0x47425633;  // 'GBV3' — seat[] grew to 14
 constexpr uint32_t kFrameW  = 160;
 constexpr uint32_t kFrameH  = 144;
+// Seats a master can share, i.e. players minus the master's own.
+constexpr int      kMaxViewSeats = SGB::kLinkMaxSeats - 1;
 // The SGB border plane and where the GB window sits inside it.
 constexpr uint32_t kSnesW   = 256;
 constexpr uint32_t kSnesH   = 224;
@@ -44,18 +46,18 @@ struct ViewShm
 	// Shared SGB border plane (BIOS-mode sessions); seq 0 = none pushed.
 	volatile uint32_t border_seq;
 	uint16_t border_px[kSnesW * kSnesH];
-	ViewSeat seat[3];
+	ViewSeat seat[kMaxViewSeats];
 };
 
 HANDLE   g_host_map = NULL;
 ViewShm *g_host     = nullptr;
 int      g_host_players = 0;
-uint32_t g_seen_beat[3];
-uint32_t g_beat_age[3];
+uint32_t g_seen_beat[kMaxViewSeats];
+uint32_t g_beat_age[kMaxViewSeats];
 
 HANDLE   g_cli_map = NULL;
 ViewShm *g_cli     = nullptr;
-int      g_cli_seat = 0;         // 2..4
+int      g_cli_seat = 0;         // 2..15
 
 bool g_bg_input = false;         // the user's own preference, not the forced one
 
@@ -81,7 +83,7 @@ extern bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest);
 bool S9xSGBViewerHostStart(int players)
 {
 	if (g_host) return true;
-	if (players < 2 || players > 4) return false;
+	if (players < 2 || players > SGB::kLinkMaxSeats) return false;
 
 	char name[64];
 	MapName(name, sizeof(name), GetCurrentProcessId());
@@ -101,7 +103,7 @@ bool S9xSGBViewerHostStart(int players)
 	g_host->magic   = kMagic;
 	g_host->alive   = 1;
 	g_host_players  = players;
-	for (int k = 0; k < 3; ++k) { g_seen_beat[k] = 0; g_beat_age[k] = 0; }
+	for (int k = 0; k < kMaxViewSeats; ++k) { g_seen_beat[k] = 0; g_beat_age[k] = 0; }
 	return true;
 }
 
@@ -121,7 +123,7 @@ bool S9xSGBViewerHostActive(void) { return g_host != nullptr; }
 void S9xSGBViewerHostPush(void)
 {
 	if (!g_host) return;
-	for (int k = 0; k < g_host_players - 1 && k < 3; ++k)
+	for (int k = 0; k < g_host_players - 1 && k < kMaxViewSeats; ++k)
 	{
 		ViewSeat &s = g_host->seat[k];
 		s.seq = s.seq + 1;               // odd: writer busy
@@ -139,7 +141,7 @@ void S9xSGBViewerHostPush(void)
 
 		// Trace the shm boundary: what the viewer publishes is the whole
 		// story of whether its input ever reaches this process.
-		static uint32_t last_pad[3], last_att[3] = {99, 99, 99};
+		static uint32_t last_pad[kMaxViewSeats], last_att[kMaxViewSeats] = {99, 99, 99};
 		if (s.attached != last_att[k] || s.pad != last_pad[k])
 		{
 			char line[96];
@@ -167,7 +169,7 @@ void S9xSGBViewerHostPushBorder(const uint16_t *snes_frame, uint32_t pitch_pixel
 uint16_t S9xSGBViewerHostPad(int player)
 {
 	const int k = player - 2;
-	if (!g_host || k < 0 || k >= 3) return 0;
+	if (!g_host || k < 0 || k >= kMaxViewSeats) return 0;
 	const ViewSeat &s = g_host->seat[k];
 	if (!s.attached || g_beat_age[k] >= kBeatTimeout) return 0;
 	return static_cast<uint16_t>(s.pad);
@@ -187,7 +189,7 @@ int S9xSGBViewerHostViewerCount(void)
 {
 	if (!g_host) return 0;
 	int n = 0;
-	for (int k = 0; k < g_host_players - 1 && k < 3; ++k)
+	for (int k = 0; k < g_host_players - 1 && k < kMaxViewSeats; ++k)
 		if (g_host->seat[k].attached && g_beat_age[k] < kBeatTimeout) ++n;
 	return n;
 }
@@ -195,7 +197,7 @@ int S9xSGBViewerHostViewerCount(void)
 bool S9xSGBViewerClientStart(unsigned long master_pid, int seat, int players)
 {
 	if (g_cli) return true;
-	if (seat < 2 || seat > 4) return false;
+	if (seat < 2 || seat > SGB::kLinkMaxSeats) return false;
 	(void)players;
 
 	char name[64];

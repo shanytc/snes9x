@@ -1312,6 +1312,12 @@ void WinSaveConfigFile()
 {
 	if(readOnlyConfig) return; // if user has lock on file, don't let Snes9x overwrite it
 
+	// A spawned link seat shares the master's config file but loaded it at
+	// spawn time: letting it save on exit would overwrite anything the user
+	// changed in the master mid-session (fifteen Faceball windows = fourteen
+	// stale writers racing the real one). Seats never own settings changes.
+	if(Settings.GBLinkPeerInstance) return;
+
 	ConfigFile&	conf = loaded_config_file;
 	conf.ClearUnused();
 

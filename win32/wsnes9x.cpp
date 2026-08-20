@@ -10695,8 +10695,9 @@ static void GBLinkPlacePeerWindow ()
 	const int h = (int)(host.bottom - host.top);
 	if (w <= 0 || h <= 0) return;
 
-	// 2x2 quadrants up to four players, a 4-wide grid for Faceball's ring.
-	const int cols   = GBLinkSessionPlayers > 4 ? 4 : 2;
+	// 2x2 quadrants up to four players; Faceball's ring parks its fifteen
+	// windows as a 5x3 grid, the master anchoring the top-left tile.
+	const int cols   = GBLinkSessionPlayers > 4 ? 5 : 2;
 	const int me     = (int)Settings.GBLinkPlayerIndex - 1;
 	const int anchor = GBLinkLauncherIndex - 1;
 	int x = host.left + (me % cols - anchor % cols) * w;

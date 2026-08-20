@@ -960,7 +960,20 @@
 #define ID_EMULATION_GB_LINK_CONNECT    40224
 #define ID_EMULATION_GB_LINK_DISCONNECT 40225
 #define ID_EMULATION_GB_LINK_SPLIT      40226
-#define ID_EMULATION_GB_LINK_SAME_15    40227
+// Faceball ring sessions: one item per seat count, a contiguous range so
+// the handler computes players from the id.
+#define ID_EMULATION_GB_LINK_SAME_5     40227
+#define ID_EMULATION_GB_LINK_SAME_6     40228
+#define ID_EMULATION_GB_LINK_SAME_7     40229
+#define ID_EMULATION_GB_LINK_SAME_8     40230
+#define ID_EMULATION_GB_LINK_SAME_9     40231
+#define ID_EMULATION_GB_LINK_SAME_10    40232
+#define ID_EMULATION_GB_LINK_SAME_11    40233
+#define ID_EMULATION_GB_LINK_SAME_12    40234
+#define ID_EMULATION_GB_LINK_SAME_13    40235
+#define ID_EMULATION_GB_LINK_SAME_14    40236
+#define ID_EMULATION_GB_LINK_SAME_15    40237
+#define ID_EMULATION_GB_LINK_SAME_RING_POPUP 40238
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

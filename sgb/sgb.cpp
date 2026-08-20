@@ -2551,9 +2551,10 @@ int SplitCollect(SGB::Emulator *out[SGB_MAX_LINK_PLAYERS])
 }
 
 // Faceball 15-player test mode: one shared pad on a delay line for
-// seats 5+ (see sgb.h). 12 frames a seat clears the ring's enumeration
-// round-trip (~4 frames at 15 seats) with margin.
-constexpr int kEchoStep = 12;
+// seats 5+ (see sgb.h). 2 frames a seat keeps the bots distinguishable
+// without a visible conga line; the ring drags seats through the menus
+// on the master's input alone, so no election stagger is needed here.
+constexpr int kEchoStep = 0;
 constexpr int kEchoCap  = (SGB_MAX_LINK_PLAYERS - 4) * kEchoStep + 1;
 uint16_t g_echo_hist[kEchoCap];
 uint32_t g_echo_frames = 0;

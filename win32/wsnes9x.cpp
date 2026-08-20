@@ -3317,6 +3317,11 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_LINK_SAME_4:
 			WinToggleGBLink (1, 4);
 			break;
+		case ID_EMULATION_GB_LINK_SAME_15:
+			// Faceball 2000's ring cable: 15 seats, the game's own lobby
+			// counts whoever joins (the item only exists for that cart).
+			WinToggleGBLink (1, 15);
+			break;
 		case ID_EMULATION_GB_LINK_DIFF:
 			WinToggleGBLink (2, 2);
 			break;
@@ -5863,9 +5868,12 @@ int WINAPI WinMain(
 			if (Settings.SGB_BIOSModeActive && S9xSGBViewerHostActive ())
 			{
 				// One window = one player: a seat's input is its viewer
-				// window, never the master's other controllers.
+				// window, never the master's other controllers. Faceball's
+				// 15-player mode: seats 5+ replay Joypad #5 on a delay.
+				S9xSGBSplitEchoPush ((uint16)MovieGetJoypad (4));
 				for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
-					S9xSGBSplitSetJoypad (p, S9xSGBViewerHostPad (p));
+					S9xSGBSplitSetJoypad (p, p >= 5 ? S9xSGBSplitEchoPad (p)
+					                                : S9xSGBViewerHostPad (p));
 				S9xSGBViewerHostPush ();
 				// The SNES frame doubles as the shared SGB border plane.
 				S9xSGBViewerHostPushBorder (GFX.Screen, GFX.RealPPL);
@@ -6785,6 +6793,31 @@ static void CheckMenuStates ()
 					}
 				}
 			}
+			// Faceball 2000 alone gets the 15-seat ring item, right under
+			// 4 Players; every other cart's menu never shows it.
+			if (s_gb_same_hmenu)
+			{
+				MENUITEMINFO probe15 = {};
+				probe15.cbSize = sizeof(probe15);
+				probe15.fMask  = MIIM_ID;
+				const bool in15   = GetMenuItemInfo (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SAME_15,
+				                                     FALSE, &probe15) != FALSE;
+				const bool want15 = S9xSGBCartIsFaceball ();
+				if (want15 && !in15)
+				{
+					InsertMenu (s_gb_same_hmenu, 3, MF_BYPOSITION | MF_STRING,
+					            ID_EMULATION_GB_LINK_SAME_15, TEXT("5-&15 Players"));
+					if (LocaleIsTranslated ()) LocalizeMenu (s_gb_same_hmenu);
+				}
+				else if (!want15 && in15)
+					RemoveMenu (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SAME_15, MF_BYCOMMAND);
+				if (want15)
+				{
+					mii.fState = (gblink == 1 && players == 15) ? MFS_CHECKED : same_off;
+					SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_15, FALSE, &mii);
+				}
+			}
+
 			if (s_gb_same_hmenu)
 			{
 				MENUITEMINFO present = {};
@@ -12213,7 +12246,7 @@ DWORD GBLinkPartnerPid = 0;
 // new ones. Spawning is sequential — the next seat is only brought up
 // once the previous one is on the port — so the seat a peer connects
 // into always matches the player number it was launched with.
-static DWORD GBLinkPeerPids[3]  = {0, 0, 0};
+static DWORD GBLinkPeerPids[SGB_MAX_LINK_PLAYERS - 1] = {};
 static int   GBLinkSlotsStarted = 0;
 
 static bool GBLinkPidAlive (DWORD pid)
@@ -12285,10 +12318,12 @@ static void GBLinkPlacePeerWindow ()
 	const int h = (int)(host.bottom - host.top);
 	if (w <= 0 || h <= 0) return;
 
+	// 2x2 quadrants up to four players, a 4-wide grid for Faceball's ring.
+	const int cols   = GBLinkSessionPlayers > 4 ? 4 : 2;
 	const int me     = (int)Settings.GBLinkPlayerIndex - 1;
 	const int anchor = GBLinkLauncherIndex - 1;
-	int x = host.left + ((me & 1) - (anchor & 1)) * w;
-	int y = host.top  + ((me >> 1) - (anchor >> 1)) * h;
+	int x = host.left + (me % cols - anchor % cols) * w;
+	int y = host.top  + (me / cols - anchor / cols) * h;
 
 	// Pull a tile that ran off the desktop back to the nearest edge.
 	const int vx = GetSystemMetrics (SM_XVIRTUALSCREEN);
@@ -12308,7 +12343,7 @@ static void GBLinkPlacePeerWindow ()
 // anyone else talks to its partner. Scoped by the session shape, so an
 // instance remembered from an earlier session of the other kind never
 // hears about pauses or savestates that are not its business.
-static int GBLinkKnownPids (DWORD out[4])
+static int GBLinkKnownPids (DWORD out[SGB_MAX_LINK_PLAYERS])
 {
 	int n = 0;
 
@@ -12317,7 +12352,7 @@ static int GBLinkKnownPids (DWORD out[4])
 	                       S9xSGBViewerHostActive ());
 	if (hub_host)
 	{
-		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < SGB_MAX_LINK_PLAYERS - 1; i++)
 			if (GBLinkPeerPids[i]) out[n++] = GBLinkPeerPids[i];
 		return n;
 	}
@@ -12331,11 +12366,11 @@ static int GBLinkKnownPids (DWORD out[4])
 // what scopes GBLinkKnownPids to the live session.
 static void GBLinkCloseInstances ()
 {
-	DWORD pids[4];
+	DWORD pids[SGB_MAX_LINK_PLAYERS];
 	const int n = GBLinkKnownPids (pids);
 	for (int i = 0; i < n; i++)
 		GBLinkPostToPid (pids[i], WM_CLOSE, 0, 0);
-	for (int i = 0; i < 3; i++) GBLinkPeerPids[i] = 0;
+	for (int i = 0; i < SGB_MAX_LINK_PLAYERS - 1; i++) GBLinkPeerPids[i] = 0;
 	GBLinkPartnerPid = 0;
 }
 
@@ -12377,7 +12412,7 @@ void GBLinkMirrorPause ()
 
 bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid)
 {
-	DWORD pids[4];
+	DWORD pids[SGB_MAX_LINK_PLAYERS];
 	const int n = GBLinkKnownPids (pids);
 
 	bool any = false;
@@ -12741,7 +12776,9 @@ void WinToggleGBLink (int mode, int players)
 	// Game still rides sockets.
 	if (mode == GBLINK_SAME && !Settings.GBLinkPeerInstance)
 	{
-		if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
+		// A 15-seat grid outgrows the shared window's SNES-sized surface,
+		// so Faceball's ring sessions always take the viewer flavor.
+		if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive && players <= 4)
 			WinStartGBSplit (players);
 		else
 			WinStartGBViewerSession (players);
@@ -13040,7 +13077,7 @@ static void GBLinkViewerWatch ()
 	// Every player window closed = out of the link setup, same as sockets.
 	if (GBLinkSlotsStarted > 0)
 	{
-		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < SGB_MAX_LINK_PLAYERS - 1; i++)
 			if (GBLinkPidAlive (GBLinkPeerPids[i])) return;
 		WinStopGBSplit ();
 		S9xSetInfoString ("Link cable: all instances closed - disconnected");
@@ -13077,7 +13114,7 @@ static int WinGetGBLinkLivePlayers ()
 {
 	int live = 1;
 	const int want = GBLinkSessionPlayers - 1;
-	for (int i = 0; i < want && i < 3; i++)
+	for (int i = 0; i < want && i < SGB_MAX_LINK_PLAYERS - 1; i++)
 		if (i >= GBLinkSlotsStarted || GBLinkPidAlive (GBLinkPeerPids[i]))
 			++live;
 

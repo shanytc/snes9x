@@ -10,11 +10,16 @@
 #include "port.h"
 #include <vector>
 
+// Row stride of the composition buffer, in pixels. Wider than any SNES
+// output so the Game Boy split view can seat five native 160px frames
+// per row; everything downstream reads Pitch/RealPPL, never the macro.
+#define GFX_SCREEN_PITCH 800
+
 struct SGFX
 {
-	const uint32 Pitch = sizeof(uint16) * MAX_SNES_WIDTH;
-	const uint32 RealPPL = MAX_SNES_WIDTH; // true PPL of Screen buffer
-	const uint32 ScreenSize =  MAX_SNES_WIDTH * MAX_SNES_HEIGHT;
+	const uint32 Pitch = sizeof(uint16) * GFX_SCREEN_PITCH;
+	const uint32 RealPPL = GFX_SCREEN_PITCH; // true PPL of Screen buffer
+	const uint32 ScreenSize = GFX_SCREEN_PITCH * MAX_SNES_HEIGHT;
 	std::vector<uint16> ScreenBuffer;
 	uint16	*Screen;
 	uint16	*SubScreen;

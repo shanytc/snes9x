@@ -391,7 +391,9 @@ void CDirect3D::CreateDrawSurface()
 
 	//we need at least 512 pixels (SNES_WIDTH * 2) so we can start with that value
 	quadTextureSize = 512;
-	neededSize = SNES_WIDTH * filterScale;
+	//the widest source the emulation hands us is the composition buffer's
+	//full stride (the GB split view's 5x160 grid), not just SNES output
+	neededSize = GFX_SCREEN_PITCH * filterScale;
 	while(quadTextureSize < neededSize)
 		quadTextureSize *=2;
 

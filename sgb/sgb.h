@@ -349,9 +349,8 @@ bool S9xSGBSplitActive(void);
 int  S9xSGBSplitPlayers(void);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 // Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
-// feeds Joypad #5), each seat (player-4)*kEchoStep frames behind — a
-// slight ripple that keeps the bots tellable apart. Push once per host
-// frame; read per seat.
+// feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero
+// today: the bots move in unison). Push once per host frame; read per seat.
 void     S9xSGBSplitEchoPush(uint16_t pad);
 uint16_t S9xSGBSplitEchoPad(int player /*5..15*/);
 // Debug peek at a seat's WRAM/HRAM (player 1 = primary). Returns 0xFF

@@ -2550,14 +2550,19 @@ int SplitCollect(SGB::Emulator *out[SGB_MAX_LINK_PLAYERS])
 	return n;
 }
 
-// Faceball 15-player test mode: one shared pad on a delay line for
-// seats 5+ (see sgb.h). 2 frames a seat keeps the bots distinguishable
-// without a visible conga line; the ring drags seats through the menus
-// on the master's input alone, so no election stagger is needed here.
+// Faceball 15-player test mode: one shared pad for seats 5+ (see sgb.h).
+// Zero delay by choice — the bots move as one squad; the delay line stays.
 constexpr int kEchoStep = 0;
 constexpr int kEchoCap  = (SGB_MAX_LINK_PLAYERS - 4) * kEchoStep + 1;
 uint16_t g_echo_hist[kEchoCap];
 uint32_t g_echo_frames = 0;
+
+// Faceball's $554C spawn placer retries forever when the stage lacks a
+// free cell per player: master camped there white, every slave round-waiting.
+int      g_placer_window = 0;
+bool     g_placer_said   = false;
+uint32_t g_placer_hits[SGB_MAX_LINK_PLAYERS] = {};
+uint32_t g_placer_tot[SGB_MAX_LINK_PLAYERS]  = {};
 
 // Lift a completed frame out the moment VBlank latches it, then let the
 // core run on into the next frame; the blit reads the snapshot.
@@ -2571,6 +2576,36 @@ bool SplitSnapIfReady(SGB::Emulator *core, int i)
 	g_split_snap_valid[i] = true;
 	im->ppu.frame_ready   = false;
 	return true;
+}
+
+// Frame-end PCs bias into the VBlank ISR (the chase loop parks cores right
+// after their frame latch), so occupancy samples ride the 456-cycle chunks.
+inline void SplitPlacerSample(SGB::Emulator *c, int i)
+{
+	const uint16_t pc = c->DebugImpl()->cpu.State().r.pc;
+	++g_placer_tot[i];
+	g_placer_hits[i] += (pc >= 0x554C && pc < 0x55C0) ? 1u : 0u;
+}
+
+// A seat spending most of a ~5s window inside the placer is the
+// unrecoverable too-small-stage spin — say so once; a clean window re-arms.
+void SplitRingPlacerWatch(int n)
+{
+	if (++g_placer_window < 300) return;
+	bool spinning = false;
+	for (int i = 0; i < n && !spinning; ++i)
+		spinning = g_placer_tot[i] > 1000 && g_placer_hits[i] * 2 >= g_placer_tot[i];
+	if (spinning && !g_placer_said)
+	{
+		char buf[96];
+		snprintf(buf, sizeof buf,
+		         "Maze too small for %d players - select larger maze", n);
+		S9xMessage(S9X_INFO, S9X_NO_INFO, buf);
+	}
+	g_placer_said   = spinning;
+	g_placer_window = 0;
+	std::memset(g_placer_hits, 0, sizeof g_placer_hits);
+	std::memset(g_placer_tot,  0, sizeof g_placer_tot);
 }
 
 } // anonymous
@@ -2731,6 +2766,10 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	g_split_players = players;
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
 	g_echo_frames = 0;
+	g_placer_window = 0;
+	g_placer_said   = false;
+	std::memset(g_placer_hits, 0, sizeof g_placer_hits);
+	std::memset(g_placer_tot,  0, sizeof g_placer_tot);
 
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS];
@@ -2765,6 +2804,10 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
 	g_split_players = 0;
 	g_echo_frames   = 0;
+	g_placer_window = 0;
+	g_placer_said   = false;
+	std::memset(g_placer_hits, 0, sizeof g_placer_hits);
+	std::memset(g_placer_tot,  0, sizeof g_placer_tot);
 }
 
 bool S9xSGBSplitActive(void)  { return g_split_players >= 2; }
@@ -2820,6 +2863,9 @@ void S9xSGBSplitRunFrame(void)
 
 	SGB::Emulator &prim = *cs[0];
 
+	// The placer watch is Faceball's alone; checked once, off the hot loops.
+	const bool fb_ring = n >= 5 && S9xSGBCartIsFaceball();
+
 	// Keep the seats on the primary's knobs; cheap and idempotent.
 	for (int i = 1; i < n; ++i)
 	{
@@ -2872,6 +2918,7 @@ void S9xSGBSplitRunFrame(void)
 			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(chunk);
 			remaining[i] -= chunk;
+			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
 			running = true;
 		}
@@ -2894,6 +2941,7 @@ void S9xSGBSplitRunFrame(void)
 			if (!has[i]) continue;
 			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(456);
+			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
 		}
 		chase -= 456;
@@ -2916,6 +2964,8 @@ void S9xSGBSplitRunFrame(void)
 		}
 		SGB::SerialTraceMsg(pcline);
 	}
+
+	if (fb_ring) SplitRingPlacerWatch(n);
 
 	// Audio rides the primary alone — the seats' sample rings overflow
 	// and drop silently. Same drain-rate steering as Emulator::RunFrame.

@@ -380,17 +380,34 @@ int g_hub_reported = -1;   // instances last announced on the OSD
 struct SplitLink
 {
 	int     count = 0;
-	Serial *s[4]  = {nullptr, nullptr, nullptr, nullptr};
-	Memory *m[4]  = {nullptr, nullptr, nullptr, nullptr};
+	Serial *s[kLinkMaxSeats] = {};
+	Memory *m[kLinkMaxSeats] = {};
 
 	// Wire bytes captured from seats 2..4 at the previous adapter event,
 	// interpreted one event later — the same hardware semantics as the
-	// hub's player 1.
-	uint8_t prev_seat[3]       = {0xFF, 0xFF, 0xFF};
-	bool    prev_seat_armed[3] = {false, false, false};
+	// hub's player 1. (Hub sessions only, so the 4-seat span suffices.)
+	uint8_t prev_seat[kLinkMaxSeats - 1]       = {0xFF, 0xFF, 0xFF};
+	bool    prev_seat_armed[kLinkMaxSeats - 1] = {};
 };
 
 SplitLink g_splitlink;
+
+// ---- Faceball 2000 sixteen-player ring --------------------------------------
+// The custom cable Faceball's dormant 16-player mode was written for:
+// every unit's serial-out feeds the next unit's serial-in on one shared
+// clock, so a transfer rotates the whole ring one hop at once. The game's
+// ISR does the store-and-forward, ID assignment ($1x hops, +1 per unit)
+// and count broadcast ($2x); the wire only has to shift. A port with SC.7
+// clear still shifts — hardware pass-through — just with no interrupt.
+struct FaceRing
+{
+	bool     active   = false;
+	bool     shifting = false;   // eight shared bit periods in flight
+	int32_t  timer    = 0;
+	uint64_t xfers    = 0;
+};
+
+FaceRing g_ring;
 
 // ---- Jantaku Boy PC tracer --------------------------------------------------
 // Breakpoint-style: logs hits on the game's lobby key addresses along
@@ -445,8 +462,22 @@ constexpr PcWatch kPcWatch[] = {
 	{ 0x197F, 0xFF, "tile-latch",  0xC0A5 },   // value spectator took as the tile
 	{ 0x1C80, 0xFF, "tile-follow", 0xC0A7 },   // owner's announce follow-up byte
 	{ 0x2106, 0xFF, "announce",    0xC0A7 },   // turn-entry broadcast helper
+	// Faceball 2000 ring bring-up ($101A) and round machinery.
+	{ 0x101A, 0xFF, "fb-linkup",   0xFF91 },   // bring-up entry, FF91 flags
+	{ 0x104F, 0xFF, "fb-elect",    0xFF92 },   // no activity seen -> master
+	{ 0x1032, 0xFF, "fb-wait-id",  0xFF92 },   // slave spins for its ring id
+	{ 0x1092, 0xFF, "fb-bcast",    0xC907 },   // master broadcasts $2x count
+	{ 0x1085, 0xFF, "fb-alone",    0xC907 },   // enumeration timed out
+	{ 0x1048, 0xFF, "fb-lnk-ok",   0xC907 },   // bring-up done, count known
+	{ 0x11E5, 0xFF, "fb-round-wt", 0xC90B },   // waiting a circulation home
+	{ 0x12A2, 0xFF, "fb-kick",     0xC90B },   // master's per-frame ring kick
+	{ 0x1246, 0xFF, "fb-teardown", 0xC910 },
+	{ 0x3D60, 0xFF, "fb-gamestart",0xDA2A },   // pre-game setup, calls $101A
+	{ 0x0F20, 0xFF, "fb-tok-home", 0xC909 },   // ISR matched own $30|id token
+	{ 0x0F48, 0xFF, "fb-rnd-home", 0xC90B },   // own bytes all returned
+	{ 0x0F4C, 0xFF, "fb-restart",  0xC909 },   // ISR round restart
 };
-uint32_t g_pc_hits[sizeof kPcWatch / sizeof *kPcWatch][4] = {};
+uint32_t g_pc_hits[sizeof kPcWatch / sizeof *kPcWatch][kLinkMaxSeats] = {};
 
 void SerialPcHook(uint16_t pc, uint8_t, const CpuState &st)
 {
@@ -1783,6 +1814,43 @@ uint8_t SerialReadSC(const Serial &s, const Memory &mem)
 	                            static_cast<uint8_t>(~used));
 }
 
+// One shared clock tick of eight bits: every seat's SB moves one hop down
+// the ring simultaneously. Armed ports (SC.7, either clock source) get the
+// completion interrupt; unarmed ones shift silently, which is also what
+// carries bytes across a unit still sitting in its menus.
+static void RingExchange()
+{
+	const int n = g_splitlink.count;
+	uint8_t out[kLinkMaxSeats];
+	for (int k = 0; k < n; ++k)
+		out[k] = g_splitlink.m[k] ? g_splitlink.m[k]->serial_data : 0xFF;
+
+	for (int k = 0; k < n; ++k)
+	{
+		Serial *ss = g_splitlink.s[k];
+		Memory *sm = g_splitlink.m[k];
+		if (!ss || !sm) continue;
+		sm->serial_data = out[(k + n - 1) % n];
+		if (sm->serial_control & 0x80)
+		{
+			sm->serial_control = static_cast<uint8_t>(sm->serial_control & 0x7F);
+			sm->if_            = static_cast<uint8_t>(sm->if_ | IRQ_SERIAL);
+			ss->active = ss->passive = false;
+		}
+	}
+	g_ring.shifting = false;
+	++g_ring.xfers;
+
+	if (TraceOn())
+	{
+		char line[16 + kLinkMaxSeats * 3];
+		int  p = 0;
+		for (int k = 0; k < n && p < (int)sizeof(line) - 4; ++k)
+			p += snprintf(line + p, sizeof(line) - (size_t)p, " %02X", out[k]);
+		Trace("ring %llu:%s", (unsigned long long)g_ring.xfers, line);
+	}
+}
+
 void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 {
 	mem.serial_control = value;
@@ -1830,6 +1898,33 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			s.peer_valid    = true;
 			s.peer_data     = 0xFF;
 			s.peer_supplied = false;
+			return;
+		}
+		s.active  = false;
+		s.passive = true;
+		return;
+	}
+
+	if (g_ring.active)
+	{
+		// Faceball's ring cable: the master's start bit clocks everyone,
+		// so arming is just bookkeeping — RingExchange completes every
+		// armed port at once when the eight bit periods elapse. A second
+		// $81 while a byte is in flight ORs into the same clock.
+		if (!(value & 0x80))
+		{
+			s.active = s.passive = false;
+			return;
+		}
+		if (value & 0x01)
+		{
+			if (g_serial_cb) g_serial_cb(mem.serial_data);
+			s.active = s.passive = false;
+			if (!g_ring.shifting)
+			{
+				g_ring.shifting = true;
+				g_ring.timer    = 8 * BitPeriod(s, value);
+			}
 			return;
 		}
 		s.active  = false;
@@ -1978,6 +2073,19 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		// are pure slaves with nothing of their own to step.
 		if (!g_hub.local || &s == g_splitlink.s[0])
 			HubStep(s, mem, real);
+		return;
+	}
+
+	if (g_ring.active)
+	{
+		// The shared clock advances on seat 0's core alone, like the hub;
+		// the ROM's master re-arms only from its ISR, milliseconds apart,
+		// so the one-slice skew between seats never outruns it.
+		if (g_ring.shifting && &s == g_splitlink.s[0])
+		{
+			g_ring.timer -= real;
+			if (g_ring.timer <= 0) RingExchange();
+		}
 		return;
 	}
 
@@ -2325,14 +2433,14 @@ int SerialLinkPlayerCount()
 }
 
 void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
-                       bool force_hub)
+                       bool force_hub, bool ring)
 {
 	// Split screen and the socket link are mutually exclusive sessions.
 	SerialLinkDisconnect();
 	SerialSplitDetach();
 
 	if (count < 2 || !serials || !mems) return;
-	if (count > 4) count = 4;
+	if (count > (ring ? kLinkMaxSeats : 4)) count = ring ? kLinkMaxSeats : 4;
 
 	g_splitlink.count = count;
 	for (int i = 0; i < count; ++i)
@@ -2343,7 +2451,12 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 		PendingClear(*serials[i]);
 	}
 
-	if (count > 2 || force_hub)
+	if (ring)
+	{
+		g_ring = FaceRing();
+		g_ring.active = true;
+	}
+	else if (count > 2 || force_hub)
 	{
 		// Three or four seats — or a forced 2-seat adapter session — ride
 		// the DMG-07, clocked by seat 0's core.
@@ -2354,7 +2467,8 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 		g_hub = fresh;
 	}
 	Trace("session: split x%d%s", count,
-	      g_hub.local ? " (local DMG-07)" : " (direct cable)");
+	      g_ring.active ? " (Faceball ring)" :
+	      g_hub.local   ? " (local DMG-07)" : " (direct cable)");
 
 	// The PC tracer rides the CPU trace hook while the wire trace is on.
 	if (TraceOn())
@@ -2369,6 +2483,7 @@ void SerialSplitDetach()
 	Cpu::SetTraceHook(nullptr);
 	g_trace_seat = -1;
 	if (g_hub.local) g_hub = Dmg07();
+	g_ring      = FaceRing();
 	g_splitlink = SplitLink();
 	// The seat cores are freed right after this; the last one to step
 	// may still be the active port, and everything null-checks it.
@@ -2421,6 +2536,11 @@ void SerialTraceSetRom(const char *label, bool from_path)
 void SerialSetTraceSeat(int seat)
 {
 	g_trace_seat = seat;
+}
+
+int SerialGetTraceSeat()
+{
+	return g_trace_seat;
 }
 
 bool SerialLinkTakeStatusChange(char *buf, size_t cap)

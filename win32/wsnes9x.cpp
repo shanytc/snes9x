@@ -11068,7 +11068,7 @@ static void GBLinkResetWhenLeftAlone ()
 		if (!Settings.GBLinkPeerInstance &&
 		    (GBLinkSessionPlayers > 2 || S9xSGBViewerHostActive ()))
 		{
-			for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+			for (int i = 0; i < GBLinkSessionPlayers - 1 && i < SGB_MAX_LINK_PLAYERS - 1; i++)
 				if (GBLinkPidAlive (GBLinkPeerPids[i])) { company = true; break; }
 		}
 		else

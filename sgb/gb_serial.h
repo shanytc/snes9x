@@ -155,6 +155,10 @@ bool SerialSplitActive();
 // Lets the split runner log per-core state the serial layer cannot see.
 void SerialTraceMsg(const char *msg);
 
+// Whether the wire trace is on, so callers can skip building a message
+// that would only be thrown away.
+bool SerialTraceEnabled();
+
 // Stamp the trace file name with the loaded cartridge's name. A label
 // derived from a file path outranks one from the cart's header title.
 void SerialTraceSetRom(const char *label, bool from_path);

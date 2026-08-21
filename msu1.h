@@ -45,6 +45,11 @@ void S9xResetMSU(void);
 void S9xMSU1Init(void);
 void S9xMSU1DeInit(void);
 bool S9xMSU1ROMExists(void);
+// True when an archive carries MSU-1 data. Frontends use this to spot a pack
+// handed over as a plain .zip, where S9xMSU1OpenFile can't reach the tracks.
+// Always declared: the frontends aren't built with UNZIP_SUPPORT, so they need
+// the symbol regardless, and it answers false in a build without zip support.
+bool S9xMSU1ZipHasMSU1Data(const char *zipname);
 STREAM S9xMSU1OpenFile(const char *msu_ext, bool skip_unpacked = FALSE);
 void S9xMSU1Init(void);
 void S9xMSU1Generate(size_t sample_count);

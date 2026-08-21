@@ -33,10 +33,14 @@
 #include "gtk_s9xwindow.h"
 
 #include "fmt/format.h"
+#include <algorithm>
 #include <array>
+#include <cctype>
+#include <filesystem>
 #include <utility>
 
 #include "snes9x.h"
+#include "msu1.h"
 #include "ppu.h"
 #include "controls.h"
 #include "movie.h"
@@ -891,7 +895,8 @@ std::string Snes9xWindow::open_rom_dialog(bool run)
         "*.gb", "*.GB", "*.gbc", "*.GBC", "*.sgb", "*.SGB"
     };
     const auto archive_extensions = {
-        "*.jma", "*.JMA", "*.zip", "*.ZIP", "*.gz", "*.GZ"
+        "*.jma", "*.JMA", "*.zip", "*.ZIP", "*.gz", "*.GZ",
+        "*.msu1", "*.MSU1"
     };
 
     pause_from_focus_change();
@@ -957,9 +962,63 @@ std::string Snes9xWindow::open_rom_dialog(bool run)
     return filename;
 }
 
-bool Snes9xWindow::try_open_rom(const std::string &filename)
+// An MSU-1 pack handed over as a plain .zip can't work: LoadZip() picks the
+// largest entry, which is a multi-megabyte .pcm track rather than the cartridge,
+// and S9xMSU1OpenFile() only reaches into an archive named <rom>.msu1. Renaming
+// the archive fixes both at once, so offer that instead of loading garbage.
+std::string Snes9xWindow::prompt_rename_msu1_pack(const std::string &filename)
+{
+    std::filesystem::path path(filename);
+    std::string extension = path.extension().string();
+
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    if (extension != ".zip")
+        return filename;
+
+    if (!S9xMSU1ZipHasMSU1Data(filename.c_str()))
+        return filename;
+
+    auto renamed = std::filesystem::path(path).replace_extension(".msu1");
+
+    if (std::filesystem::exists(renamed))
+    {
+        std::string message = _("This archive holds MSU-1 audio data, but ") +
+                              renamed.filename().string() +
+                              _(" already exists, so it can't be renamed. Load that file instead, or unpack the archive and load the ROM from the folder.");
+        Gtk::MessageDialog msg(*window.get(), message, false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_CLOSE, true);
+        msg.run();
+        return filename;
+    }
+
+    std::string message = path.filename().string() +
+                          _(" holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to ") +
+                          renamed.filename().string() + _(" and load it?");
+    Gtk::MessageDialog msg(*window.get(), message, false, Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_YES_NO, true);
+
+    if (msg.run() != Gtk::RESPONSE_YES)
+        return filename;
+
+    std::error_code error;
+    std::filesystem::rename(path, renamed, error);
+
+    if (error)
+    {
+        std::string failure = _("Couldn't rename the archive: ") + error.message();
+        Gtk::MessageDialog fail_msg(*window.get(), failure, false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_CLOSE, true);
+        fail_msg.run();
+        return filename;
+    }
+
+    return renamed.string();
+}
+
+bool Snes9xWindow::try_open_rom(const std::string &original_filename)
 {
     pause_from_focus_change();
+
+    auto filename = prompt_rename_msu1_pack(original_filename);
 
     Settings.Multi = false;
 

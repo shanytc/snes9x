@@ -6020,7 +6020,10 @@ static void WinEmulateFrame (void)
 				          GBSeatWindowCount () + 1, (long long)(wallAcc / frames),
 				          (long long)(emuAcc / frames), (long long)(blitAcc / frames),
 				          wallAcc ? 1000000.0 / ((double)wallAcc / frames) : 0.0);
-				S9xSetInfoString (msg);
+				// stdout.txt, not the OSD: an info string set once a
+				// second never expires, so the ImGui overlay was
+				// redrawing text every frame of what it measured.
+				printf ("%s\n", msg);
 				emuAcc = blitAcc = wallAcc = 0;
 				frames = 0;
 			}

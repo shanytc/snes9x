@@ -83,6 +83,11 @@ const int MAX_SNES_WIDTH_NTSC = ((SNES_NTSC_OUT_WIDTH(256) + 3) / 4) * 4;
 static bool show_lightgun_settings = true;
 static bool show_advanced_av_settings = true;
 
+// Keep the extension: this becomes Memory.ROMFilename, and every consumer
+// (S9xGetFilename for MSU-1/.cht/.rtc/soft patches, S9xMSU1ROMExists) runs
+// splitpath on it to swap in its own extension. Stripping it here made
+// splitpath take the last '.' inside the name as the extension, so a ROM
+// called "Super Mario Bros. (USA).sfc" looked for "Super Mario Bros-1.pcm".
 static void extract_basename(char *buf, const char *path, size_t size)
 {
     const char *base = strrchr(path, '/');
@@ -96,10 +101,6 @@ static void extract_basename(char *buf, const char *path, size_t size)
 
     strncpy(buf, base, size - 1);
     buf[size - 1] = '\0';
-
-    char *ext = strrchr(buf, '.');
-    if (ext)
-        *ext = '\0';
 }
 
 static void extract_directory(char *buf, const char *path, size_t size)

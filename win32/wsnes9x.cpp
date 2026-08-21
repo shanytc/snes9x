@@ -154,7 +154,6 @@ static void GBLinkViewerWatch();
 static void GBSeatWindowsCreate(int players);
 static void GBSeatWindowsDestroy();
 static void GBSeatPresentFrame();
-static int  GBSeatWindowCount();
 
 // The master window's shape from before a session resized it — down to 1x
 // for a viewer ring (the seats park at its size, so 1x is what makes a 5x3
@@ -5433,12 +5432,6 @@ int WINAPI WinMain(
 				}
 			}
 
-			// TEMPORARY seat-session frame-time probe. Two QPC reads a frame,
-			// averaged into the info string once a second. Remove once the
-			// 15-seat frame rate is understood.
-			LARGE_INTEGER seatT0;
-			QueryPerformanceCounter (&seatT0);
-
 			// Run-ahead rolls back through savestates that do not carry the
 			// split-screen seats; run those sessions plainly.
 			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused &&
@@ -5539,45 +5532,7 @@ int WINAPI WinMain(
 
 			// Seat windows live in this process now. The emulation thread
 			// only stages the frame; the render thread draws it.
-			LARGE_INTEGER seatT1;
-			QueryPerformanceCounter (&seatT1);
 			GBSeatPresentFrame ();
-
-			// TEMPORARY: emulation vs seat-blit split, plus the wall time a
-			// frame actually took, so a shortfall can be pinned on one of
-			// them instead of guessed at. 16667us of budget at 60fps.
-			if (GBSeatWindowCount () > 0)
-			{
-				LARGE_INTEGER seatT2, freq;
-				QueryPerformanceCounter (&seatT2);
-				QueryPerformanceFrequency (&freq);
-
-				static int64  emuAcc = 0, blitAcc = 0, wallAcc = 0;
-				static int    frames = 0;
-				static int64  prevT0 = 0;
-
-				const double us = 1000000.0 / (double)freq.QuadPart;
-				emuAcc  += (int64)((seatT1.QuadPart - seatT0.QuadPart) * us);
-				blitAcc += (int64)((seatT2.QuadPart - seatT1.QuadPart) * us);
-				if (prevT0) wallAcc += (int64)((seatT0.QuadPart - prevT0) * us);
-				prevT0 = seatT0.QuadPart;
-
-				if (++frames >= 60)
-				{
-					char msg[128];
-					snprintf (msg, sizeof (msg),
-					          "%d seats: frame %lldus (emu %lldus, blit %lldus) = %.1f fps",
-					          GBSeatWindowCount () + 1, (long long)(wallAcc / frames),
-					          (long long)(emuAcc / frames), (long long)(blitAcc / frames),
-					          wallAcc ? 1000000.0 / ((double)wallAcc / frames) : 0.0);
-					// stdout.txt, not the OSD: an info string set once a
-					// second never expires, so the ImGui overlay was
-					// redrawing text every frame of what it measured.
-					printf ("%s\n", msg);
-					emuAcc = blitAcc = wallAcc = 0;
-					frames = 0;
-				}
-			}
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			{
 				// Suspend achievement processing whenever remote inputs are
@@ -11611,8 +11566,6 @@ static void WinSizeWindowForRing (int players)
 
 static HWND GBSeatWnd[SGB_MAX_LINK_PLAYERS - 1] = {};
 static int  GBSeatCount = 0;
-
-static int GBSeatWindowCount () { return GBSeatCount; }
 
 // Worked out on the main thread while GUI.hWnd is safe to read, then handed
 // to the render thread that creates the windows.

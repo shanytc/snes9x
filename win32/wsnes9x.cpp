@@ -10733,6 +10733,66 @@ static bool GBLinkPostToPid (DWORD pid, UINT msg, WPARAM wParam, LPARAM lParam)
 	return true;
 }
 
+// A ring session gives every seat its own window, so the desktop has to
+// hold the whole grid: the shape and the zoom are chosen together, taking
+// the largest tiles the work area can take and never going under 1x. Five
+// seats therefore get room to grow where a fixed 5-wide row forced them
+// to 1x, and fifteen still land on the 5x3 grid of 1x tiles. Four seats
+// and under keep the 2x2 quadrants, sized by the user alone (factor 0).
+struct GBLinkRingGrid { int cols, rows, factor; };
+
+static GBLinkRingGrid GBLinkRingLayout (int players)
+{
+	if (players < 2) players = 2;
+	if (players <= 4) return { 2, (players + 1) / 2, 0 };
+
+	GBLinkRingGrid best = { 5, (players + 4) / 5, 1 };
+
+	RECT work;
+	if (!SystemParametersInfo (SPI_GETWORKAREA, 0, &work, 0))
+	{
+		work.left  = work.top = 0;
+		work.right = GetSystemMetrics (SM_CXSCREEN);
+		work.bottom= GetSystemMetrics (SM_CYSCREEN);
+	}
+	const int availW = work.right - work.left;
+	const int availH = work.bottom - work.top;
+	const int tileW  = GUI.AspectWidth > 0 ? GUI.AspectWidth : SNES_WIDTH;
+	const int tileH  = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
+
+	int bestFactor = 0, bestScore = 0;
+	for (int cols = 1; cols <= players; cols++)
+	{
+		const int rows = (players + cols - 1) / cols;
+		if (cols * rows - players >= cols) continue;   // a whole empty row
+
+		for (int factor = 4; factor >= 1; factor--)
+		{
+			RECT m = GetWindowMargins (GUI.hWnd, tileW * factor);
+			const int w = tileW * factor + m.left + m.right;
+			const int h = tileH * factor + m.top + m.bottom;
+			if (cols * w > availW || rows * h > availH) continue;
+
+			// Biggest tiles win. Between equal zooms take the grid shaped
+			// most like the desktop — as a percentage, so the screen's own
+			// size does not weigh in — nudged away from empty cells.
+			const long dev = labs ((long)cols * availH - (long)rows * availW);
+			const int score = (int)(100 * dev / ((long)rows * availW)) +
+			                  (cols * rows - players) * 8;
+			if (factor > bestFactor || (factor == bestFactor && score < bestScore))
+			{
+				bestFactor = factor;
+				bestScore  = score;
+				best.cols  = cols;
+				best.rows  = rows;
+				best.factor= factor;
+			}
+			break;   // this shape's largest zoom; no smaller one can win
+		}
+	}
+	return best;
+}
+
 // A spawned seat parks itself where split screen would draw it: the
 // launcher's window is the anchor tile and the player number picks the
 // quadrant, so the session comes up as the same 1x2 / 2x2 grid.
@@ -10750,9 +10810,9 @@ static void GBLinkPlacePeerWindow ()
 	const int h = (int)(host.bottom - host.top);
 	if (w <= 0 || h <= 0) return;
 
-	// 2x2 quadrants up to four players; Faceball's ring parks its fifteen
-	// windows as a 5x3 grid, the master anchoring the top-left tile.
-	const int cols   = GBLinkSessionPlayers > 4 ? 5 : 2;
+	// 2x2 quadrants up to four players; a ring takes the grid its seat
+	// count and the desktop agree on, the master anchoring its own tile.
+	const int cols   = GBLinkRingLayout (GBLinkSessionPlayers).cols;
 	const int me     = (int)Settings.GBLinkPlayerIndex - 1;
 	const int anchor = GBLinkLauncherIndex - 1;
 	int x = host.left + (me % cols - anchor % cols) * w;
@@ -11397,6 +11457,47 @@ static void WinSizeWindowForSplit ()
 	SetWindowPos (GUI.hWnd, NULL, x, y, winW, winH, SWP_NOZORDER);
 }
 
+// Every spawned seat parks itself at the master's size, so the master's
+// shape sets the whole ring: take the zoom the layout allows and sit where
+// the grid lands on the desktop. Remembered for teardown, as before.
+static void WinSizeWindowForRing (int players)
+{
+	if (GUI.FullScreen || GUI.EmulatedFullscreen || IsZoomed (GUI.hWnd)) return;
+
+	const GBLinkRingGrid grid = GBLinkRingLayout (players);
+	if (grid.factor <= 0) return;   // four seats and under keep the user's size
+
+	RECT wr, work;
+	if (!GetWindowRect (GUI.hWnd, &wr)) return;
+	if (!SystemParametersInfo (SPI_GETWORKAREA, 0, &work, 0))
+	{
+		work.left  = work.top = 0;
+		work.right = GetSystemMetrics (SM_CXSCREEN);
+		work.bottom= GetSystemMetrics (SM_CYSCREEN);
+	}
+
+	const int tileW = GUI.AspectWidth > 0 ? GUI.AspectWidth : SNES_WIDTH;
+	const int tileH = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
+	RECT m = GetWindowMargins (GUI.hWnd, tileW * grid.factor);
+	const int w = tileW * grid.factor + m.left + m.right;
+	const int h = tileH * grid.factor + m.top + m.bottom;
+
+	GBLinkPreRingW = (int)(wr.right - wr.left);
+	GBLinkPreRingH = (int)(wr.bottom - wr.top);
+
+	// The seats fan out from this tile, so place the grid, not the window.
+	const int anchor = GBLinkLauncherIndex - 1;
+	int gx = (int)wr.left - (anchor % grid.cols) * w;
+	int gy = (int)wr.top  - (anchor / grid.cols) * h;
+	if (gx + grid.cols * w > work.right)  gx = work.right  - grid.cols * w;
+	if (gy + grid.rows * h > work.bottom) gy = work.bottom - grid.rows * h;
+	if (gx < work.left) gx = work.left;
+	if (gy < work.top)  gy = work.top;
+
+	SetWindowPos (GUI.hWnd, NULL, gx + (anchor % grid.cols) * w,
+	              gy + (anchor / grid.cols) * h, w, h, SWP_NOZORDER);
+}
+
 // In-process split screen: no processes, no sockets — the SGB layer owns
 // the extra consoles and the local cable/adapter. The battery base path
 // hands each seat its own .savN next to the primary's .sav.
@@ -11520,19 +11621,7 @@ static void WinStartGBViewerSession (int players)
 	GBLinkSlotsStarted   = 0;
 	GBLinkSyncResponsiveSettings ();
 
-	// Fifteen windows only fit the desktop as a 5x3 grid of small tiles,
-	// and every seat parks itself at the master's size: drop the master
-	// to 1x before spawning, and remember the shape for teardown.
-	if (players > 4 && !GUI.FullScreen && !IsZoomed (GUI.hWnd))
-	{
-		RECT wr;
-		if (GetWindowRect (GUI.hWnd, &wr))
-		{
-			GBLinkPreRingW = (int)(wr.right - wr.left);
-			GBLinkPreRingH = (int)(wr.bottom - wr.top);
-		}
-		SendMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_WINDOW_SIZE_1X, 0), 0);
-	}
+	WinSizeWindowForRing (players);
 
 	// Seat identity rides the switch, so every window can come up at once —
 	// there is no port arrival order to keep.

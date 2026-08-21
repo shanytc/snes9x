@@ -8,6 +8,21 @@ ifneq (,$(findstring msvc2003,$(platform)))
 INCFLAGS += -I$(LIBRETRO_COMM_DIR)/include/compat/msvc
 endif
 
+# MSU-1 packs (<rom>.msu1) are zip archives, so reading one needs minizip and
+# zlib. Set HAVE_UNZIP=0 for a platform whose SDK has no zlib: MSU-1 still
+# works from loose .msu/.pcm files, only the packed form drops out. The
+# defines and libs are exported for each build to apply, since the Android
+# and standalone builds assemble their flags separately.
+HAVE_UNZIP ?= 1
+
+# link.exe takes no -lz, and the MSVC project files carry their own settings
+ifneq (,$(findstring msvc,$(platform)))
+   HAVE_UNZIP = 0
+endif
+
+UNZIP_DEFINES :=
+UNZIP_LIBS    :=
+
 SOURCES_C   := $(CORE_DIR)/filter/snes_ntsc.c
 SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/apu/bapu/dsp/sdsp.cpp \
@@ -78,3 +93,12 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/movie.cpp \
 				 $(CORE_DIR)/fscompat.cpp \
 				 $(CORE_DIR)/libretro/libretro.cpp
+
+ifeq ($(HAVE_UNZIP), 1)
+INCFLAGS      += -I$(CORE_DIR)/unzip
+SOURCES_CXX   += $(CORE_DIR)/loadzip.cpp
+SOURCES_C     += $(CORE_DIR)/unzip/unzip.c \
+				 $(CORE_DIR)/unzip/ioapi.c
+UNZIP_DEFINES += -DUNZIP_SUPPORT
+UNZIP_LIBS    += -lz
+endif

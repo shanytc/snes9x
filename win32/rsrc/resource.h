@@ -974,6 +974,7 @@
 #define ID_EMULATION_GB_LINK_SAME_14    40236
 #define ID_EMULATION_GB_LINK_SAME_15    40237
 #define ID_EMULATION_GB_LINK_SAME_RING_POPUP 40238
+#define ID_EMULATION_GB_LINK_UNLINK     40239
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

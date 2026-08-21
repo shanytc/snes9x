@@ -2491,14 +2491,17 @@ void S9xSGBRunCycles(int tcycles)   { SGB::Instance().RunCycles(static_cast<int3
 
 namespace {
 	int32_t g_snes_cycle_accum = 0;
+	// SGB2/DMG unspent SNES cycles, pre-multiplied by the GB clock.
+	int64_t g_snes_scaled_accum = 0;
 	int32_t g_sync_anchor      = 0;
 	int32_t g_h_max            = 1364;  // NTSC default; overwritten per-frame by cpuexec
 }
 
 void S9xSGBResetClockSync(void)
 {
-	g_snes_cycle_accum = 0;
-	g_sync_anchor      = 0;
+	g_snes_cycle_accum  = 0;
+	g_snes_scaled_accum = 0;
+	g_sync_anchor       = 0;
 }
 
 // Wall-rate meters for the viewer: emulated SNES / GB cycles.
@@ -2514,7 +2517,6 @@ void S9xSGBGetCycleMeters(uint64_t *snes, uint64_t *gb)
 void S9xSGBTickSnes(int snes_master_cycles)
 {
 	if (snes_master_cycles <= 0) return;
-	g_snes_cycle_accum += snes_master_cycles;
 
 	// Clock ratio depends on RunMode:
 	//   SGB1: GB clock = SNES master / 5 (≈ 4.295 MHz, slightly faster
@@ -2531,6 +2533,8 @@ void S9xSGBTickSnes(int snes_master_cycles)
 	const SGB::RunMode mode = SGB::Instance().GetRunMode();
 	if (mode == SGB::RunMode::SGB)
 	{
+		// Exact: subtracting gb_cycles*5 reverses accum/5 with no remainder.
+		g_snes_cycle_accum += snes_master_cycles;
 		gb_cycles = g_snes_cycle_accum / 5;
 		if (gb_cycles > 0)
 		{
@@ -2540,24 +2544,15 @@ void S9xSGBTickSnes(int snes_master_cycles)
 	}
 	else
 	{
-		// 64-bit math to avoid overflow: ratio = 4194304 / 21477272.
-		// gb_cycles = accum * gb_hz / 21477272. The ratio must use the
-		// same clock ApuSetClockHz was given for the current run mode:
-		// SGB1 clocks the GB from SNES master/5 (4.2955 MHz), while
-		// SGB2/DMG use the authentic 4.194304 MHz crystal. Slaving at
-		// DMG rate with the APU divisor set for SGB1 under-produced
-		// audio by a chronic 2.4% — the ring could never fill, so the
-		// host padded the shortfall with silence gaps (crackle) at any
-		// honest emulation speed.
-		const int64_t gb_hz =
-			(SGB::Instance().GetRunMode() == SGB::RunMode::SGB) ? 4295455 : 4194304;
-		const int64_t scaled = static_cast<int64_t>(g_snes_cycle_accum) * gb_hz;
-		gb_cycles = static_cast<int32_t>(scaled / 21477272);
+		// 64-bit to avoid overflow; the clock must match what
+		// ApuSetClockHz was given for this run mode or the pitch drifts.
+		// Accumulate pre-multiplied by it so the remainder carries exactly.
+		constexpr int64_t gb_hz = 4194304;
+		g_snes_scaled_accum += static_cast<int64_t>(snes_master_cycles) * gb_hz;
+		gb_cycles = static_cast<int32_t>(g_snes_scaled_accum / 21477272);
 		if (gb_cycles > 0)
 		{
-			// Subtract back the SNES-cycle equivalent of what we ran.
-			const int64_t consumed = (static_cast<int64_t>(gb_cycles) * 21477272) / gb_hz;
-			g_snes_cycle_accum -= static_cast<int32_t>(consumed);
+			g_snes_scaled_accum -= static_cast<int64_t>(gb_cycles) * 21477272;
 			g_gb_cycle_meter += (uint64_t)gb_cycles;
 			SGB::Instance().RunCycles(gb_cycles);
 		}

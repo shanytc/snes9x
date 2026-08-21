@@ -11582,7 +11582,16 @@ int WinGBSeatLivePlayers ()
 
 // Worked out on the main thread while GUI.hWnd is safe to read, then handed
 // to the render thread that creates the windows.
-static struct { int cols, x, y, w, h; } GBSeatGeom;
+// w/h space the grid (the master's tile); sw/sh size a seat so its client
+// matches the master's. They differ by the menu, which the master carries
+// and the seats do not — and which grows taller as the window narrows.
+static struct { int cols, x, y, w, h, sw, sh; } GBSeatGeom;
+
+#define GBSEAT_STYLE (WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX)
+// A normal caption, not WS_EX_TOOLWINDOW: the tool caption crams its close
+// button against the frame. The cost is a taskbar button per seat, which is
+// what the spawned windows had anyway.
+#define GBSEAT_EXSTYLE (0)
 
 // One staged frame: written by the emulation thread, read by the render
 // thread. The busy flag is the entire handshake — staging is skipped while
@@ -11759,10 +11768,9 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 	return DefWindowProc (hWnd, msg, wParam, lParam);
 }
 
-// Created on the render thread so their messages are serviced there. They
-// take no owner — an owned window across threads attaches the two input
-// queues, which is the coupling this thread exists to avoid — so
-// WS_EX_TOOLWINDOW keeps fourteen buttons out of the taskbar instead.
+// Created on the render thread so their messages are serviced there, and
+// unowned: an owned window across threads couples the two input queues,
+// which is the coupling this thread exists to avoid.
 static void GBSeatWindowsOpen ()
 {
 	static bool registered = false;
@@ -11784,15 +11792,20 @@ static void GBSeatWindowsOpen ()
 	const int vy = GetSystemMetrics (SM_YVIRTUALSCREEN);
 	const int vr = vx + GetSystemMetrics (SM_CXVIRTUALSCREEN);
 	const int vb = vy + GetSystemMetrics (SM_CYVIRTUALSCREEN);
-	const int w  = GBSeatGeom.w, h = GBSeatGeom.h;
+	// The grid steps by the master's tile; each seat is sized to its own.
+	const int w  = GBSeatGeom.w,  h  = GBSeatGeom.h;
+	const int sw = GBSeatGeom.sw, sh = GBSeatGeom.sh;
 
 	for (int k = 0; k < GBSeatCount; k++)
 	{
+		// Sit on the bottom of the tile, not the top: the master is taller
+		// only by the menu above its picture, so equal bottoms put every
+		// seat's picture on the master's line.
 		const int me = k + 1;   // the master holds tile 0
 		int x = GBSeatGeom.x + (me % GBSeatGeom.cols) * w;
-		int y = GBSeatGeom.y + (me / GBSeatGeom.cols) * h;
-		if (x + w > vr) x = vr - w;
-		if (y + h > vb) y = vb - h;
+		int y = GBSeatGeom.y + (me / GBSeatGeom.cols) * h + (h - sh);
+		if (x + sw > vr) x = vr - sw;
+		if (y + sh > vb) y = vb - sh;
 		if (x < vx) x = vx;
 		if (y < vy) y = vy;
 
@@ -11800,9 +11813,9 @@ static void GBSeatWindowsOpen ()
 		_sntprintf (title, 64, TEXT("Player %d"), k + 2);
 		title[63] = TEXT('\0');
 
-		HWND hWnd = CreateWindowEx (WS_EX_TOOLWINDOW, GBSEAT_WNDCLASS, title,
-		                            WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX,
-		                            x, y, w, h, NULL, NULL, g_hInst, NULL);
+		HWND hWnd = CreateWindowEx (GBSEAT_EXSTYLE, GBSEAT_WNDCLASS, title,
+		                            GBSEAT_STYLE,
+		                            x, y, sw, sh, NULL, NULL, g_hInst, NULL);
 		if (!hWnd) { GBSeatCount = k; break; }
 		SetWindowLongPtr (hWnd, GWLP_USERDATA, (LONG_PTR)k);
 		ShowWindow (hWnd, SW_SHOWNOACTIVATE);
@@ -11895,11 +11908,18 @@ static void GBSeatWindowsCreate (int players)
 {
 	GBSeatWindowsDestroy ();   // a restarted session never leaks its old set
 
-	RECT host;
+	RECT host, hostClient;
 	if (!GetWindowRect (GUI.hWnd, &host)) return;
+	if (!GetClientRect (GUI.hWnd, &hostClient)) return;
 	const int w = (int)(host.right - host.left);
 	const int h = (int)(host.bottom - host.top);
-	if (w <= 0 || h <= 0) return;
+	if (w <= 0 || h <= 0 || hostClient.right <= 0 || hostClient.bottom <= 0) return;
+
+	// A seat sized to the master's window would be taller inside it by the
+	// height of the menu the master has and it does not, and the blit would
+	// stretch to fill that. Size it to the master's client area instead.
+	RECT seat = { 0, 0, hostClient.right, hostClient.bottom };
+	AdjustWindowRectEx (&seat, GBSEAT_STYLE, FALSE, GBSEAT_EXSTYLE);
 
 	int count = players - 1;
 	if (count > SGB_MAX_LINK_PLAYERS - 1) count = SGB_MAX_LINK_PLAYERS - 1;
@@ -11910,6 +11930,8 @@ static void GBSeatWindowsCreate (int players)
 	GBSeatGeom.y    = (int)host.top;
 	GBSeatGeom.w    = w;
 	GBSeatGeom.h    = h;
+	GBSeatGeom.sw   = (int)(seat.right - seat.left);
+	GBSeatGeom.sh   = (int)(seat.bottom - seat.top);
 	GBSeatCount     = count;
 
 	GBSeatQuit  = 0;

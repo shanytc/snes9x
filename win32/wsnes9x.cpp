@@ -150,6 +150,10 @@ static void WinStartGBSplit(int players);
 static void WinStopGBSplit();
 static void WinStartGBViewerSession(int players);
 static void GBLinkViewerWatch();
+static void GBSeatWindowsCreate(int players);
+static void GBSeatWindowsDestroy();
+static void GBSeatBlitAll();
+static int  GBSeatWindowCount();
 
 // The master window's shape from before a session resized it — down to 1x
 // for a viewer ring (the seats park at its size, so 1x is what makes a 5x3
@@ -5425,6 +5429,12 @@ int WINAPI WinMain(
 				}
 			}
 
+			// TEMPORARY seat-session frame-time probe. Two QPC reads a frame,
+			// averaged into the info string once a second. Remove once the
+			// 15-seat frame rate is understood.
+			LARGE_INTEGER seatT0;
+			QueryPerformanceCounter (&seatT0);
+
 			// Run-ahead rolls back through savestates that do not carry the
 			// split-screen seats; run those sessions plainly.
 			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused &&
@@ -5507,23 +5517,59 @@ int WINAPI WinMain(
 				S9xMainLoop();
 			}
 
-			// BIOS-mode viewer sessions: the seats stepped inside the
-			// frame, slaved to the SNES clock; publish their frames and
-			// collect the viewer pads once per host frame. (BIOS-less
-			// sessions do this from the SGB branch in S9xMainLoop.)
+			// BIOS-mode sessions: the seats stepped inside the frame,
+			// slaved to the SNES clock, so their pads are collected once
+			// per host frame. (BIOS-less sessions do this from the SGB
+			// branch in S9xMainLoop.)
 			if (Settings.SGB_BIOSModeActive && S9xSGBViewerHostActive ())
 			{
-				// One window = one player: a seat's input is its viewer
-				// window, never the master's other controllers. Faceball's
+				// One window = one player, and every seat reads its own
+				// joypad number, so no window needs focus. Faceball's
 				// 15-player mode: seats 5+ replay Joypad #5 on a delay.
 				S9xSGBSplitEchoPush ((uint16)MovieGetJoypad (4));
 				for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
 					S9xSGBSplitSetJoypad (p, p >= 5 ? S9xSGBSplitEchoPad (p)
-					                                : S9xSGBViewerHostPad (p));
-				S9xSGBViewerHostPush ();
-				// The SNES frame doubles as the shared SGB border plane.
-				S9xSGBViewerHostPushBorder (GFX.Screen, GFX.RealPPL);
+					                                : (uint16)MovieGetJoypad (p - 1));
 				S9xSGBDebugSgbCompare (GFX.Screen, GFX.RealPPL, PPU.CGDATA);
+			}
+
+			// Seat windows live in this process now: paint them from the
+			// finished frame rather than shipping it anywhere.
+			LARGE_INTEGER seatT1;
+			QueryPerformanceCounter (&seatT1);
+			GBSeatBlitAll ();
+
+			// TEMPORARY: emulation vs seat-blit split, plus the wall time a
+			// frame actually took, so a shortfall can be pinned on one of
+			// them instead of guessed at. 16667us of budget at 60fps.
+			if (GBSeatWindowCount () > 0)
+			{
+				LARGE_INTEGER seatT2, freq;
+				QueryPerformanceCounter (&seatT2);
+				QueryPerformanceFrequency (&freq);
+
+				static int64  emuAcc = 0, blitAcc = 0, wallAcc = 0;
+				static int    frames = 0;
+				static int64  prevT0 = 0;
+
+				const double us = 1000000.0 / (double)freq.QuadPart;
+				emuAcc  += (int64)((seatT1.QuadPart - seatT0.QuadPart) * us);
+				blitAcc += (int64)((seatT2.QuadPart - seatT1.QuadPart) * us);
+				if (prevT0) wallAcc += (int64)((seatT0.QuadPart - prevT0) * us);
+				prevT0 = seatT0.QuadPart;
+
+				if (++frames >= 60)
+				{
+					char msg[128];
+					snprintf (msg, sizeof (msg),
+					          "%d seats: frame %lldus (emu %lldus, blit %lldus) = %.1f fps",
+					          GBSeatWindowCount () + 1, (long long)(wallAcc / frames),
+					          (long long)(emuAcc / frames), (long long)(blitAcc / frames),
+					          wallAcc ? 1000000.0 / ((double)wallAcc / frames) : 0.0);
+					S9xSetInfoString (msg);
+					emuAcc = blitAcc = wallAcc = 0;
+					frames = 0;
+				}
 			}
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			{
@@ -11498,6 +11544,244 @@ static void WinSizeWindowForRing (int players)
 	              gy + (anchor / grid.cols) * h, w, h, SWP_NOZORDER);
 }
 
+// ------------------------------------------------------------- seats ----
+// Every seat already emulates inside this process, so its window lives
+// here too rather than in a spawned copy of the exe. Fifteen players is
+// then one process instead of fifteen: no CreateProcess burst for a
+// security filter to walk, and no shared memory, because the frames come
+// straight off the split engine.
+#define GBSEAT_WNDCLASS TEXT("Snes9xGBSeat")
+
+static HWND GBSeatWnd[SGB_MAX_LINK_PLAYERS - 1] = {};
+static int  GBSeatCount = 0;
+
+static int GBSeatWindowCount () { return GBSeatCount; }
+
+// Seats compose into one 32-bit DIB section and blit from it. Handing GDI
+// the emulator's own 16-bit pixels instead costs a software convert per
+// pixel per window — at ten seats that was 8.3ms a frame, half the budget —
+// because a five-bit green at shift 6 matches no fast path. Converting
+// through a table into the desktop's own layout turns each seat's blit
+// into a straight copy.
+static HDC     GBSeatMemDC   = NULL;
+static HBITMAP GBSeatDibBmp  = NULL;
+static HGDIOBJ GBSeatDibPrev = NULL;
+static DWORD  *GBSeatBits    = nullptr;
+static DWORD  *GBSeatLut     = nullptr;
+static bool    GBSeatBordered = false;
+
+static void GBSeatSurfaceFree ()
+{
+	if (GBSeatMemDC)
+	{
+		SelectObject (GBSeatMemDC, GBSeatDibPrev);
+		DeleteDC (GBSeatMemDC);
+		GBSeatMemDC = NULL;
+	}
+	if (GBSeatDibBmp) { DeleteObject (GBSeatDibBmp); GBSeatDibBmp = NULL; }
+	delete[] GBSeatLut;
+	GBSeatLut  = nullptr;
+	GBSeatBits = nullptr;
+}
+
+// Rebuilt per session, so a display-format change between sessions is
+// picked up rather than baked in.
+static bool GBSeatSurfaceReady ()
+{
+	if (GBSeatMemDC && GBSeatBits && GBSeatLut) return true;
+	GBSeatSurfaceFree ();
+
+	const bool g6 = (GUI.GreenShift == 5);   // six-bit green only in 565
+	GBSeatLut = new DWORD[65536];
+	for (int v = 0; v < 65536; v++)
+	{
+		const int r = (v >> GUI.RedShift)  & 0x1F;
+		const int b = (v >> GUI.BlueShift) & 0x1F;
+		const int g = g6 ? ((v >> 5) & 0x3F) : ((v >> GUI.GreenShift) & 0x1F);
+		const int g8 = g6 ? ((g << 2) | (g >> 4)) : ((g << 3) | (g >> 2));
+		GBSeatLut[v] = ((DWORD)((r << 3) | (r >> 2)) << 16) |
+		               ((DWORD)g8 << 8) | (DWORD)((b << 3) | (b >> 2));
+	}
+
+	BITMAPINFO bi;
+	ZeroMemory (&bi, sizeof bi);
+	bi.bmiHeader.biSize        = sizeof (BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth       = SNES_WIDTH;
+	bi.bmiHeader.biHeight      = -SNES_HEIGHT;   // top-down
+	bi.bmiHeader.biPlanes      = 1;
+	bi.bmiHeader.biBitCount    = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+
+	HDC screen = GetDC (NULL);
+	GBSeatMemDC = CreateCompatibleDC (screen);
+	ReleaseDC (NULL, screen);
+	if (!GBSeatMemDC) { GBSeatSurfaceFree (); return false; }
+
+	GBSeatDibBmp = CreateDIBSection (GBSeatMemDC, &bi, DIB_RGB_COLORS,
+	                                 (void **)&GBSeatBits, NULL, 0);
+	if (!GBSeatDibBmp || !GBSeatBits) { GBSeatSurfaceFree (); return false; }
+	GBSeatDibPrev = SelectObject (GBSeatMemDC, GBSeatDibBmp);
+	return true;
+}
+
+static void GBSeatConvert (const uint16 *src, int srcPitch, int x, int y, int w, int h)
+{
+	for (int r = 0; r < h; r++)
+	{
+		const uint16 *s = src + r * srcPitch;
+		DWORD        *d = GBSeatBits + (y + r) * SNES_WIDTH + x;
+		for (int c = 0; c < w; c++) d[c] = GBSeatLut[s[c]];
+	}
+}
+
+static void GBSeatPresent (HWND hWnd, int sw, int sh)
+{
+	RECT rc;
+	if (!GetClientRect (hWnd, &rc) || rc.right <= 0 || rc.bottom <= 0) return;
+
+	HDC dc = GetDC (hWnd);
+	if (!dc) return;
+	if (rc.right == sw && rc.bottom == sh)
+		BitBlt (dc, 0, 0, sw, sh, GBSeatMemDC, 0, 0, SRCCOPY);
+	else
+	{
+		SetStretchBltMode (dc, COLORONCOLOR);
+		StretchBlt (dc, 0, 0, rc.right, rc.bottom, GBSeatMemDC, 0, 0, sw, sh, SRCCOPY);
+	}
+	ReleaseDC (hWnd, dc);
+}
+
+static void GBSeatBlit (int k)
+{
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return;
+	HWND hWnd = GBSeatWnd[k];
+	if (!hWnd || !IsWindowVisible (hWnd) || IsIconic (hWnd)) return;
+	if (!GBSeatSurfaceReady ()) return;
+
+	static uint16 gb[SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+	if (!S9xSGBSplitCopySeatFrame (k + 2, gb)) return;
+
+	// The border is already converted and every seat's screen lands in the
+	// same pane, so only the pane is redone per seat.
+	if (GBSeatBordered)
+	{
+		GBSeatConvert (gb, SGB_GB_SCREEN_W, 48, 40,
+		               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+		GBSeatPresent (hWnd, SNES_WIDTH, SNES_HEIGHT);
+	}
+	else
+	{
+		GBSeatConvert (gb, SGB_GB_SCREEN_W, 0, 0,
+		               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+		GBSeatPresent (hWnd, SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+	}
+}
+
+static void GBSeatBlitAll ()
+{
+	if (GBSeatCount <= 0 || !GBSeatSurfaceReady ()) return;
+
+	GBSeatBordered = false;
+	if (Settings.SGB_BIOSModeActive && GFX.Screen)
+	{
+		GBSeatConvert (GFX.Screen, (int)GFX.RealPPL, 0, 0, SNES_WIDTH, SNES_HEIGHT);
+		GBSeatBordered = true;
+	}
+
+	for (int k = 0; k < GBSeatCount; k++) GBSeatBlit (k);
+}
+
+static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+		case WM_ERASEBKGND:
+			return 1;   // the blit covers every pixel; erasing only flickers
+
+		case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			BeginPaint (hWnd, &ps);
+			EndPaint (hWnd, &ps);
+			GBSeatBlit ((int)GetWindowLongPtr (hWnd, GWLP_USERDATA));
+			return 0;
+		}
+
+		// Closing one seat ends the session, as closing the spawned
+		// windows did. The master owns the teardown, so it is posted.
+		case WM_CLOSE:
+			PostMessage (GUI.hWnd, WM_COMMAND,
+			             MAKEWPARAM (ID_EMULATION_GB_LINK_DISCONNECT, 0), 0);
+			return 0;
+	}
+	return DefWindowProc (hWnd, msg, wParam, lParam);
+}
+
+// The seats tile out from the master's window, which has already sized and
+// placed itself for the grid, so they read the same layout it did.
+static void GBSeatWindowsCreate (int players)
+{
+	GBSeatWindowsDestroy ();   // a restarted session never leaks its old set
+
+	static bool registered = false;
+	if (!registered)
+	{
+		WNDCLASS wc;
+		ZeroMemory (&wc, sizeof wc);
+		wc.lpfnWndProc   = GBSeatWndProc;
+		wc.hInstance     = g_hInst;
+		wc.hCursor       = LoadCursor (NULL, IDC_ARROW);
+		wc.hbrBackground = (HBRUSH)GetStockObject (BLACK_BRUSH);
+		wc.lpszClassName = GBSEAT_WNDCLASS;
+		wc.hIcon         = LoadIcon (g_hInst, MAKEINTRESOURCE (IDI_ICON1));
+		if (!RegisterClass (&wc)) return;
+		registered = true;
+	}
+
+	RECT host;
+	if (!GetWindowRect (GUI.hWnd, &host)) return;
+	const int w = (int)(host.right - host.left);
+	const int h = (int)(host.bottom - host.top);
+	if (w <= 0 || h <= 0) return;
+
+	const int cols = GBLinkRingLayout (players).cols;
+
+	GBSeatCount = 0;
+	for (int k = 0; k < players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		const int me = k + 1;   // the master holds tile 0
+		TCHAR title[64];
+		_sntprintf (title, 64, TEXT("Player %d"), k + 2);
+		title[63] = TEXT('\0');
+
+		// Owned by the master: they die with it however it exits, and an
+		// owned window keeps its own button out of the taskbar.
+		HWND hWnd = CreateWindowEx (0, GBSEAT_WNDCLASS, title,
+		                            WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX,
+		                            host.left + (me % cols) * w,
+		                            host.top  + (me / cols) * h,
+		                            w, h, GUI.hWnd, NULL, g_hInst, NULL);
+		if (!hWnd) break;
+
+		SetWindowLongPtr (hWnd, GWLP_USERDATA, (LONG_PTR)k);
+		ShowWindow (hWnd, SW_SHOWNOACTIVATE);
+		GBSeatWnd[k] = hWnd;
+		++GBSeatCount;
+	}
+
+	// The master keeps the keyboard: seats are displays, and every seat
+	// reads its own joypad number rather than whichever window has focus.
+	SetForegroundWindow (GUI.hWnd);
+}
+
+static void GBSeatWindowsDestroy ()
+{
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+		if (GBSeatWnd[k]) { DestroyWindow (GBSeatWnd[k]); GBSeatWnd[k] = NULL; }
+	GBSeatCount = 0;
+	GBSeatSurfaceFree ();
+}
+
 // In-process split screen: no processes, no sockets — the SGB layer owns
 // the extra consoles and the local cable/adapter. The battery base path
 // hands each seat its own .savN next to the primary's .sav.
@@ -11555,7 +11839,7 @@ static void WinStopGBSplit ()
 	const bool viewer = S9xSGBViewerHostActive ();
 	if (viewer)
 	{
-		GBLinkCloseInstances ();
+		GBSeatWindowsDestroy ();
 		S9xSGBViewerHostStop ();
 		GBLinkMode = GBLINK_OFF;
 		GBLinkSyncResponsiveSettings ();
@@ -11623,35 +11907,11 @@ static void WinStartGBViewerSession (int players)
 
 	WinSizeWindowForRing (players);
 
-	// Seat identity rides the switch, so every window can come up at once —
-	// there is no port arrival order to keep.
-	TCHAR exe[MAX_PATH];
-	if (GetModuleFileName (NULL, exe, MAX_PATH))
-	{
-		for (int k = 0; k < players - 1; k++)
-		{
-			TCHAR cmd[MAX_PATH * 3];
-			_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d \"%s\""),
-			            exe, GBVIEW_SWITCH, (unsigned long)GetCurrentProcessId (),
-			            k + 2, players, (TCHAR *)_tFromChar (Settings.GBRomPath));
-			cmd[MAX_PATH * 3 - 1] = TEXT('\0');
-
-			STARTUPINFO si;
-			PROCESS_INFORMATION pi;
-			ZeroMemory (&si, sizeof si);
-			ZeroMemory (&pi, sizeof pi);
-			si.cb = sizeof si;
-			if (!CreateProcess (NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
-			{
-				S9xSetInfoString ("Link cable: could not launch a player window");
-				break;
-			}
-			CloseHandle (pi.hThread);
-			CloseHandle (pi.hProcess);
-			GBLinkPeerPids[k] = pi.dwProcessId;
-			++GBLinkSlotsStarted;
-		}
-	}
+	// One window per seat, all in this process. Seat identity is the
+	// window's own, so they can all come up at once.
+	GBSeatWindowsCreate (players);
+	if (GBSeatCount < players - 1)
+		S9xSetInfoString ("Link cable: could not open every player window");
 
 	// All consoles power up together — hard, so no seat boots from
 	// half-initialized RAM.

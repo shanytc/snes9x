@@ -86,10 +86,11 @@ void S9xMainLoop (void)
 			S9xSGBSplitEchoPush(local_pads ? (uint16)MovieGetJoypad(4) : 0);
 			for (int p = 2; p <= S9xSGBSplitPlayers(); p++)
 			{
+				// Every seat plays its own joypad number, whether it is a
+				// tile in the split view or a window of its own.
 				uint16 pad;
-				if (p >= 5)                        pad = S9xSGBSplitEchoPad(p);
-				else if (S9xSGBViewerHostActive()) pad = S9xSGBViewerHostPad(p);
-				else                               pad = (uint16)MovieGetJoypad(p - 1);
+				if (p >= 5) pad = S9xSGBSplitEchoPad(p);
+				else        pad = (uint16)MovieGetJoypad(p - 1);
 				S9xSGBSplitSetJoypad(p, pad);
 			}
 		}

@@ -2568,6 +2568,9 @@ int  g_placer_clear = 0;
 bool g_placer_in[SGB_MAX_LINK_PLAYERS]    = {};
 int  g_placer_dwell[SGB_MAX_LINK_PLAYERS] = {};
 
+// Unspent seat cycles held back from the primary's per-opcode BIOS sync.
+int32_t g_seat_slave_accum = 0;
+
 // Lift a completed frame out the moment VBlank latches it, then let the
 // core run on into the next frame; the blit reads the snapshot.
 bool SplitSnapIfReady(SGB::Emulator *core, int i)
@@ -2844,6 +2847,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	g_placer_said  = false;
 	g_placer_clear = 0;
 	g_maze_seen    = 0;
+	g_seat_slave_accum = 0;
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
 
@@ -2883,6 +2887,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	g_placer_said  = false;
 	g_placer_clear = 0;
 	g_maze_seen    = 0;
+	g_seat_slave_accum = 0;
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
 }
@@ -3278,18 +3283,29 @@ void S9xSGBGetCycleMeters(uint64_t *snes, uint64_t *gb)
 	if (gb)   *gb   = g_gb_cycle_meter;
 }
 
-// BIOS mode drives the primary GB from the SNES clock, so split seats
-// slave to the same deltas; one tick is about a SNES scanline (~270 GB
-// cycles), finer than the split loop's own 456-cycle slices.
+// BIOS mode drives the primary GB from the SNES clock, and the sync doing
+// it runs per SNES opcode — so a tick is a cycle or two. The primary needs
+// that; the seats never touch the ICD2 registers it is for, and re-entering
+// fourteen cores per instruction costs more in cache misses than the cycles
+// are worth. They run in the 456-cycle slices the BIOS-less split loop
+// already interleaves them in.
+static constexpr int32_t kSeatSlaveSlice = 456;
+
 static void SplitRunSeatsSlaved(int32_t gb_cycles)
 {
 	if (g_split_players < 2 || !Settings.SGB_BIOSModeActive) return;
+
+	g_seat_slave_accum += gb_cycles;
+	if (g_seat_slave_accum < kSeatSlaveSlice) return;
+	const int32_t slice = g_seat_slave_accum;
+	g_seat_slave_accum = 0;
+
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		SGB::Emulator *core = g_split_cores[k].get();
 		if (!core || !core->DebugImpl()->has_rom) continue;
 		SGB::SerialSetTraceSeat(k + 1);
-		core->RunCycles(gb_cycles);
+		core->RunCycles(slice);
 		SplitSnapIfReady(core, k + 1);
 	}
 	SGB::SerialSetTraceSeat(-1);

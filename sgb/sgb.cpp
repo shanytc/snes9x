@@ -3166,21 +3166,35 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 		                         PPU.CGDATA[2] | PPU.CGDATA[3]) != 0;
 		const SGB::SgbState &st = SGB::Instance().DebugImpl()->sgb_state;
 		const uint8_t *sh  = g_split_snap_shades[i];
-		for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
-			for (uint32_t x = 0; x < SGB_GB_SCREEN_W; ++x)
+
+		// CGRAM is fixed for the frame and the attribute map is per 8x8
+		// tile, so a seat can only ever use these sixteen colors: resolve
+		// them once instead of calling SgbGetTilePalette and BgrToHost per
+		// pixel, which was 23040 lookups a seat and fourteen seats a frame.
+		uint16_t host[4][4];
+		for (int p = 0; p < 4; ++p)
+			for (int s = 0; s < 4; ++s)
 			{
-				const uint8_t shade = sh[y * SGB_GB_SCREEN_W + x] & 3;
 				uint16_t bgr;
-				if (!cgram_live)
-					bgr = kBiosPal[shade];
-				else if (shade == 0)
-					bgr = PPU.CGDATA[0] & 0x7FFF;
-				else
+				if (!cgram_live) bgr = kBiosPal[s];
+				else if (s == 0) bgr = PPU.CGDATA[0] & 0x7FFF;
+				else             bgr = PPU.CGDATA[p * 16 + s] & 0x7FFF;
+				host[p][s] = SGB::BgrToHost(bgr);
+			}
+
+		for (uint32_t ty = 0; ty < SGB_GB_SCREEN_H / 8; ++ty)
+			for (uint32_t tx = 0; tx < SGB_GB_SCREEN_W / 8; ++tx)
+			{
+				const uint8_t pal = cgram_live
+					? (SGB::SgbGetTilePalette(st, tx, ty) & 3) : 0;
+				const uint16_t *pc = host[pal];
+				for (uint32_t y = ty * 8; y < ty * 8 + 8; ++y)
 				{
-					const uint8_t pal = SGB::SgbGetTilePalette(st, x / 8, y / 8) & 3;
-					bgr = PPU.CGDATA[pal * 16 + shade] & 0x7FFF;
+					const uint8_t *srow = sh   + y * SGB_GB_SCREEN_W + tx * 8;
+					uint16_t      *drow = dest + y * SGB_GB_SCREEN_W + tx * 8;
+					for (uint32_t x = 0; x < 8; ++x)
+						drow[x] = pc[srow[x] & 3];
 				}
-				dest[y * SGB_GB_SCREEN_W + x] = SGB::BgrToHost(bgr);
 			}
 		return true;
 	}
@@ -3208,6 +3222,10 @@ const SGB::PacketState *S9xSGBGetPacketState(void)
 void S9xSGBDebugSgbCompare(const uint16_t *snes, uint32_t pitch_pixels,
                            const uint16_t *cgram)
 {
+	// Three trace lines built from twenty snprintfs — worth a frame's
+	// margin once a second if the log is never opened.
+	if (!SGB::SerialTraceEnabled()) return;
+
 	static int cd = 0;
 	if (++cd < 60) return;
 	cd = 0;

@@ -150,6 +150,14 @@ static void WinStartGBSplit(int players);
 static void WinStopGBSplit();
 static void WinStartGBViewerSession(int players);
 static void GBLinkViewerWatch();
+
+// The master window's shape from before a session resized it — down to 1x
+// for a viewer ring (the seats park at its size, so 1x is what makes a 5x3
+// grid fit), up to the tile grid for split screen. Teardown puts it back,
+// and so does the config on the way out. 0 = nothing to restore.
+static int GBLinkPreRingW = 0;
+static int GBLinkPreRingH = 0;
+
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -3573,6 +3581,13 @@ LRESULT CALLBACK WinProc(
 
 	case WM_CLOSE:
 		SaveMainWinPos();
+		// Quitting mid-session must not save the session's shape as the
+		// user's: a split grid or a ring's 1x would greet the next game.
+		if (GBLinkPreRingW > 0 && !GUI.FullScreen && !GUI.window_maximized)
+		{
+			GUI.window_size.right  = GUI.window_size.left + GBLinkPreRingW;
+			GUI.window_size.bottom = GUI.window_size.top  + GBLinkPreRingH;
+		}
 		break;
 
 	case WM_DESTROY:
@@ -10666,12 +10681,6 @@ DWORD GBLinkPartnerPid = 0;
 static DWORD GBLinkPeerPids[SGB_MAX_LINK_PLAYERS - 1] = {};
 static int   GBLinkSlotsStarted = 0;
 
-// The master window's shape from before a ring session dropped it to 1x
-// (the seats park at its size, so 1x is what makes a 5x3 grid fit);
-// teardown puts it back. 0 = nothing to restore.
-static int GBLinkPreRingW = 0;
-static int GBLinkPreRingH = 0;
-
 static bool GBLinkPidAlive (DWORD pid)
 {
 	if (!pid) return false;
@@ -11339,6 +11348,55 @@ void WinGBLinkHotkey (int what)
 	}
 }
 
+// One window carries every seat, so the grid needs room of its own: a
+// fifteen-player session composes 800x432 of native tiles, which a window
+// sized for a 256-wide SNES frame shrinks to a third. Size the client to
+// the tiles at the zoom the window was already running, stepping the
+// factor down until the desktop can hold it.
+static void WinSizeWindowForSplit ()
+{
+	if (GUI.FullScreen || GUI.EmulatedFullscreen || IsZoomed (GUI.hWnd)) return;
+
+	const int tilesW = S9xSGBSplitScreenWidth ();
+	const int tilesH = S9xSGBSplitScreenHeight ();
+	if (tilesW <= 0 || tilesH <= 0) return;
+
+	RECT wr, client, work;
+	if (!GetWindowRect (GUI.hWnd, &wr) || !GetClientRect (GUI.hWnd, &client)) return;
+	if (!SystemParametersInfo (SPI_GETWORKAREA, 0, &work, 0))
+	{
+		work.left  = work.top = 0;
+		work.right = GetSystemMetrics (SM_CXSCREEN);
+		work.bottom = GetSystemMetrics (SM_CYSCREEN);
+	}
+
+	const int aspectW = GUI.AspectWidth > 0 ? GUI.AspectWidth : SNES_WIDTH;
+	int factor = ((int)client.right + aspectW / 2) / aspectW;
+	int winW, winH;
+	for (;;)
+	{
+		if (factor < 1) factor = 1;
+		RECT m = GetWindowMargins (GUI.hWnd, tilesW * factor);
+		winW = tilesW * factor + m.left + m.right;
+		winH = tilesH * factor + m.top + m.bottom;
+		if (factor == 1 ||
+		    (winW <= work.right - work.left && winH <= work.bottom - work.top))
+			break;
+		--factor;
+	}
+
+	GBLinkPreRingW = (int)(wr.right - wr.left);
+	GBLinkPreRingH = (int)(wr.bottom - wr.top);
+
+	// Grow in place, but not off the desktop.
+	int x = wr.left, y = wr.top;
+	if (x + winW > work.right)  x = work.right - winW;
+	if (y + winH > work.bottom) y = work.bottom - winH;
+	if (x < work.left) x = work.left;
+	if (y < work.top)  y = work.top;
+	SetWindowPos (GUI.hWnd, NULL, x, y, winW, winH, SWP_NOZORDER);
+}
+
 // In-process split screen: no processes, no sockets — the SGB layer owns
 // the extra consoles and the local cable/adapter. The battery base path
 // hands each seat its own .savN next to the primary's .sav.
@@ -11374,6 +11432,8 @@ static void WinStartGBSplit (int players)
 		S9xSGBSplitStop (base);
 		return;
 	}
+
+	WinSizeWindowForSplit ();
 
 	// All seats power up together; the primary may have been in demo.
 	// Hard, for the same reason as the socket session: a warm reset

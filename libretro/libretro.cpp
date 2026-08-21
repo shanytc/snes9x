@@ -83,6 +83,27 @@ const int MAX_SNES_WIDTH_NTSC = ((SNES_NTSC_OUT_WIDTH(256) + 3) / 4) * 4;
 static bool show_lightgun_settings = true;
 static bool show_advanced_av_settings = true;
 
+// Content inside an archive arrives as a virtual path the frontend builds by
+// gluing the entry onto the archive with '#': "/roms/game.zip#game.sfc". Find
+// that '#' the way RetroArch writes it -- directly after an archive extension
+// -- so an archive or entry whose own name contains '#' doesn't split in the
+// wrong place.
+static const char *find_archive_delim(const char *path)
+{
+    static const char * const exts[] = { ".zip", ".7z", ".apk" };
+
+    for (const char *p = strchr(path, '#'); p; p = strchr(p + 1, '#'))
+        for (size_t i = 0; i < sizeof(exts) / sizeof(exts[0]); i++)
+        {
+            size_t len = strlen(exts[i]);
+
+            if ((size_t)(p - path) >= len && strncasecmp(p - len, exts[i], len) == 0)
+                return p;
+        }
+
+    return NULL;
+}
+
 // Keep the extension: this becomes Memory.ROMFilename, and every consumer
 // (S9xGetFilename for MSU-1/.cht/.rtc/soft patches, S9xMSU1ROMExists) runs
 // splitpath on it to swap in its own extension. Stripping it here made
@@ -90,6 +111,13 @@ static bool show_advanced_av_settings = true;
 // called "Super Mario Bros. (USA).sfc" looked for "Super Mario Bros-1.pcm".
 static void extract_basename(char *buf, const char *path, size_t size)
 {
+    // the cartridge is the entry behind the '#', not the archive in front of
+    // it: "game.zip#game.sfc" has to name the ROM "game.sfc", or S9xGetFilename
+    // goes looking for "game.zip#game.msu"
+    const char *delim = find_archive_delim(path);
+    if (delim)
+        path = delim + 1;
+
     const char *base = strrchr(path, '/');
     if (!base)
         base = strrchr(path, '\\');
@@ -107,6 +135,12 @@ static void extract_directory(char *buf, const char *path, size_t size)
 {
     strncpy(buf, path, size - 1);
     buf[size - 1] = '\0';
+
+    // an entry lives in the archive's directory, not in a directory named after
+    // the archive, so cut the entry off before looking for the last separator
+    char *delim = (char *) find_archive_delim(buf);
+    if (delim)
+        *delim = '\0';
 
     char *base = strrchr(buf, '/');
     if (!base)

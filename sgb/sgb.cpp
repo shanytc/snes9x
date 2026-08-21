@@ -3974,6 +3974,9 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		core->DebugImpl()->ppu.icd_feed = false;
 		core->DebugImpl()->mem.sgb_feed = false;
 		core->DebugImpl()->joypad.sgb_active = false;   // creation reset predates the flag
+		// Only the primary is heard, so a seat's mixer output is dead
+		// work — 12.5% of the profile at fifteen seats.
+		core->DebugImpl()->apu.discard_output = true;
 		g_split_cores[k] = std::move(core);
 	}
 	g_split_players = players;
@@ -4166,7 +4169,9 @@ void S9xSGBSplitRunFrame(void)
 	SGB::SerialSetTraceSeat(-1);
 
 	// Jantaku Boy investigation: each core's PC once per host frame — a
-	// core stuck in a tight spin shows the same PC every line.
+	// core stuck in a tight spin shows the same PC every line. Fifteen
+	// snprintfs a frame is not free, so it is built only when read.
+	if (SGB::SerialTraceEnabled())
 	{
 		char pcline[200];
 		int  pn = 0;

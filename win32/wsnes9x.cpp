@@ -11567,6 +11567,19 @@ static void WinSizeWindowForRing (int players)
 static HWND GBSeatWnd[SGB_MAX_LINK_PLAYERS - 1] = {};
 static int  GBSeatCount = 0;
 
+// A seat the user closed. Read by the emulation thread to skip its staging,
+// written by the render thread that owns the window.
+static volatile LONG GBSeatAlive[SGB_MAX_LINK_PLAYERS - 1] = {};
+
+// Seats still showing, master included — what the menu ticks against.
+int WinGBSeatLivePlayers ()
+{
+	if (GBSeatCount <= 0) return 0;
+	int live = 1;
+	for (int k = 0; k < GBSeatCount; k++) if (GBSeatAlive[k]) ++live;
+	return live;
+}
+
 // Worked out on the main thread while GUI.hWnd is safe to read, then handed
 // to the render thread that creates the windows.
 static struct { int cols, x, y, w, h; } GBSeatGeom;
@@ -11721,12 +11734,27 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 			return 0;
 		}
 
-		// Closing one seat ends the session. The master owns teardown, and
-		// it is on another thread, so this is posted rather than called.
+		// Closing a seat drops that player, as closing its spawned window
+		// used to. The session ends only when the last seat is gone and
+		// the master is alone again — teardown is the master's, so that
+		// is posted rather than called from this thread.
 		case WM_CLOSE:
-			PostMessage (GUI.hWnd, WM_COMMAND,
-			             MAKEWPARAM (ID_EMULATION_GB_LINK_DISCONNECT, 0), 0);
+		{
+			const int k = (int)GetWindowLongPtr (hWnd, GWLP_USERDATA);
+			if (k >= 0 && k < SGB_MAX_LINK_PLAYERS - 1)
+			{
+				InterlockedExchange (&GBSeatAlive[k], 0);
+				GBSeatWnd[k] = NULL;
+			}
+			DestroyWindow (hWnd);
+			// Unlink, not Disconnect: Disconnect is the peer's socket verb
+			// and does nothing for a split session. Unlink ends it and
+			// hard resets the master, which is alone again.
+			if (WinGBSeatLivePlayers () <= 1)
+				PostMessage (GUI.hWnd, WM_COMMAND,
+				             MAKEWPARAM (ID_EMULATION_GB_LINK_UNLINK, 0), 0);
 			return 0;
+		}
 	}
 	return DefWindowProc (hWnd, msg, wParam, lParam);
 }
@@ -11779,13 +11807,17 @@ static void GBSeatWindowsOpen ()
 		SetWindowLongPtr (hWnd, GWLP_USERDATA, (LONG_PTR)k);
 		ShowWindow (hWnd, SW_SHOWNOACTIVATE);
 		GBSeatWnd[k] = hWnd;
+		InterlockedExchange (&GBSeatAlive[k], 1);
 	}
 }
 
 static void GBSeatWindowsClose ()
 {
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		InterlockedExchange (&GBSeatAlive[k], 0);
 		if (GBSeatWnd[k]) { DestroyWindow (GBSeatWnd[k]); GBSeatWnd[k] = NULL; }
+	}
 	GBSeatSurfaceFree ();
 }
 
@@ -11835,8 +11867,11 @@ static void GBSeatPresentFrame ()
 		GBSeatStageBordered = true;
 	}
 
+	// A closed seat is not drawn, so it is not staged either — in BIOS mode
+	// that copy is a per-pixel recolor, not a memcpy.
 	for (int k = 0; k < GBSeatCount; k++)
-		S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
+		if (GBSeatAlive[k])
+			S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
 
 	SetEvent (GBSeatEvent);
 }
@@ -12104,6 +12139,11 @@ int WinGetGBLinkPlayers ()
 // from 4 Players to 3 when one is gone for good.
 static int WinGetGBLinkLivePlayers ()
 {
+	// In-process seats have no pid to outlive them: a closed window is the
+	// player leaving, so the tick follows the windows still open.
+	const int seats = WinGBSeatLivePlayers ();
+	if (seats > 0) return seats < 2 ? 2 : seats;
+
 	int live = 1;
 	const int want = GBLinkSessionPlayers - 1;
 	for (int i = 0; i < want && i < SGB_MAX_LINK_PLAYERS - 1; i++)

@@ -1445,6 +1445,8 @@ BEGIN
                 MENUITEM "S&plit Screen",               ID_EMULATION_GB_LINK_SPLIT,MFT_STRING,MFS_ENABLED
             END
             MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "&Unlink",                     ID_EMULATION_GB_LINK_UNLINK,MFT_STRING,MFS_ENABLED
         END
         POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED
         BEGIN

@@ -80,45 +80,25 @@ bool ProcessHasFocus()
 
 extern bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest);
 
+// The seats' windows live in the master process now, so hosting is just a
+// session flag: there is no second process to hand frames to, and the
+// section that used to carry them is gone with it.
 bool S9xSGBViewerHostStart(int players)
 {
-	if (g_host) return true;
+	if (g_host_players) return true;
 	if (players < 2 || players > SGB::kLinkMaxSeats) return false;
 
-	char name[64];
-	MapName(name, sizeof(name), GetCurrentProcessId());
-	g_host_map = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-	                                0, sizeof(ViewShm), name);
-	if (!g_host_map) return false;
-	g_host = static_cast<ViewShm *>(
-		MapViewOfFile(g_host_map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(ViewShm)));
-	if (!g_host)
-	{
-		CloseHandle(g_host_map);
-		g_host_map = NULL;
-		return false;
-	}
-	memset(g_host, 0, sizeof(ViewShm));
-	g_host->players = static_cast<uint32_t>(players);
-	g_host->magic   = kMagic;
-	g_host->alive   = 1;
-	g_host_players  = players;
+	g_host_players = players;
 	for (int k = 0; k < kMaxViewSeats; ++k) { g_seen_beat[k] = 0; g_beat_age[k] = 0; }
 	return true;
 }
 
 void S9xSGBViewerHostStop(void)
 {
-	if (!g_host) return;
-	g_host->alive = 0;
-	UnmapViewOfFile(g_host);
-	CloseHandle(g_host_map);
-	g_host     = nullptr;
-	g_host_map = NULL;
 	g_host_players = 0;
 }
 
-bool S9xSGBViewerHostActive(void) { return g_host != nullptr; }
+bool S9xSGBViewerHostActive(void) { return g_host_players != 0; }
 
 void S9xSGBViewerHostPush(void)
 {
@@ -185,13 +165,12 @@ void S9xSGBViewerSetBackgroundInput(bool on)
 	g_bg_input = on;
 }
 
+// In-process seats are up for as long as the session is.
 int S9xSGBViewerHostViewerCount(void)
 {
-	if (!g_host) return 0;
-	int n = 0;
-	for (int k = 0; k < g_host_players - 1 && k < kMaxViewSeats; ++k)
-		if (g_host->seat[k].attached && g_beat_age[k] < kBeatTimeout) ++n;
-	return n;
+	if (!g_host_players) return 0;
+	const int n = g_host_players - 1;
+	return n < kMaxViewSeats ? n : kMaxViewSeats;
 }
 
 bool S9xSGBViewerClientStart(unsigned long master_pid, int seat, int players)

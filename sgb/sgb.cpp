@@ -1395,8 +1395,27 @@ void Emulator::RunCycles(int32_t tcycles)
 	int32_t &apu_rem  = impl_->apu_ds_rem;
 	while (impl_->ppu.t_cycles < target_t)
 	{
-		PpuStep(impl_->ppu, impl_->mem, 1);
-		if (impl_->mem.double_speed) ds_extra += 1;
+		// The CPU cannot step until the PPU has given it kMaxOpcodeTCycles
+		// of headroom, so every dot before that point is one it provably
+		// cannot observe — the loop condition below is what forbids it.
+		// Running them in one call instead of re-entering per dot leaves
+		// the ExecPpuDot sequence and the CPU's step points identical.
+		// Double speed keeps the per-dot form: ds_extra advances with the
+		// dot, so the boundary moves while we walk to it.
+		if (!impl_->mem.double_speed)
+		{
+			int64_t dots = (impl_->cpu.State().t_cycles + kMaxOpcodeTCycles
+			                - ds_extra) - impl_->ppu.t_cycles;
+			const int64_t room = target_t - impl_->ppu.t_cycles;
+			if (dots < 1)    dots = 1;
+			if (dots > room) dots = room;
+			PpuStep(impl_->ppu, impl_->mem, static_cast<int32_t>(dots));
+		}
+		else
+		{
+			PpuStep(impl_->ppu, impl_->mem, 1);
+			ds_extra += 1;
+		}
 
 		while (impl_->cpu.State().t_cycles + kMaxOpcodeTCycles <=
 		       impl_->ppu.t_cycles + ds_extra)
@@ -2839,6 +2858,9 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		core->DebugImpl()->ppu.icd_feed = false;
 		core->DebugImpl()->mem.sgb_feed = false;
 		core->DebugImpl()->joypad.sgb_active = false;   // creation reset predates the flag
+		// Only the primary is heard, so a seat's mixer output is dead
+		// work — 12.5% of the profile at fifteen seats.
+		core->DebugImpl()->apu.discard_output = true;
 		g_split_cores[k] = std::move(core);
 	}
 	g_split_players = players;
@@ -3031,7 +3053,9 @@ void S9xSGBSplitRunFrame(void)
 	SGB::SerialSetTraceSeat(-1);
 
 	// Jantaku Boy investigation: each core's PC once per host frame — a
-	// core stuck in a tight spin shows the same PC every line.
+	// core stuck in a tight spin shows the same PC every line. Fifteen
+	// snprintfs a frame is not free, so it is built only when read.
+	if (SGB::SerialTraceEnabled())
 	{
 		char pcline[200];
 		int  pn = 0;

@@ -686,12 +686,18 @@ void ApuStep(Apu &a, int32_t tcycles)
 	const bool ch1_ultra = SquareAboveNyquist(a, a.ch1.freq);
 	const bool ch2_ultra = SquareAboveNyquist(a, a.ch2.freq);
 	const bool ch3_ultra = WaveAboveNyquist(a);
+	// The sample clock lands every ~131 cycles and is a chunk boundary only
+	// so the mixer sees constant output across a chunk. A discarded seat
+	// runs neither, so its chunks are bounded by the channel and frame-
+	// sequencer timers alone — the ones a game can actually observe.
+	const bool quiet = a.discard_output;
+
 	while (tcycles > 0)
 	{
 		// Determine the size of the next constant-output chunk. Master
 		// disable has a single event (sample emit) — timers don't tick.
 		int32_t chunk = tcycles;
-		if (a.sample_timer < chunk) chunk = a.sample_timer;
+		if (!quiet && a.sample_timer < chunk) chunk = a.sample_timer;
 
 		if (a.master_enabled)
 		{
@@ -704,7 +710,9 @@ void ApuStep(Apu &a, int32_t tcycles)
 		if (chunk < 1) chunk = 1;  // safety against zero-period corner cases
 
 		// Integrate channel output × chunk into the sample accumulator.
-		if (a.master_enabled)
+		// A discarded seat skips the mixer entirely: it is the one part of
+		// the APU whose only product is the sample nobody will hear.
+		if (a.master_enabled && !quiet)
 		{
 			int32_t l, r, chlv[4];
 			Mix(a, l, r, g_wave_capture ? chlv : nullptr);
@@ -714,10 +722,12 @@ void ApuStep(Apu &a, int32_t tcycles)
 				for (int ch = 0; ch < 4; ++ch)
 					g_ch_accum[ch] += chlv[ch] * chunk;
 		}
-		a.sample_accum_cnt += static_cast<uint32_t>(chunk);
-
-		// Advance timers by the same chunk size.
-		a.sample_timer -= chunk;
+		if (!quiet)
+		{
+			a.sample_accum_cnt += static_cast<uint32_t>(chunk);
+			// Advance timers by the same chunk size.
+			a.sample_timer     -= chunk;
+		}
 
 		if (a.master_enabled)
 		{
@@ -766,7 +776,7 @@ void ApuStep(Apu &a, int32_t tcycles)
 			}
 		}
 
-		if (a.sample_timer <= 0)
+		if (!quiet && a.sample_timer <= 0)
 		{
 			// Bresenham: reload with `cycles_per_sample` floor, plus
 			// occasionally an extra cycle when remainder accumulates

@@ -2498,6 +2498,8 @@ void SerialTraceMsg(const char *msg)
 	Trace("%s", msg);
 }
 
+bool SerialTraceEnabled() { return TraceOn(); }
+
 // Stamp the trace file with the cartridge so a folder of logs reads by
 // game. Renames an already-open file; spaces become underscores.
 void SerialTraceSetRom(const char *label, bool from_path)

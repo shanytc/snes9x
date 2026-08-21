@@ -889,7 +889,6 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 {
 	if (tcycles <= 0) return;
-	p.t_cycles += tcycles;
 
 	if (::g_cam_countdown > 0) { ::g_cam_countdown -= tcycles; if (::g_cam_countdown < 0) ::g_cam_countdown = 0; }
 
@@ -907,6 +906,7 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 	// RETI, right after POP AF).
 	if (!(p.lcdc & 0x80))
 	{
+		p.t_cycles      += tcycles;
 		p.mode           = PpuMode::HBlank;
 		p.ly             = 0;
 		p.mode_clock     = 0;
@@ -928,8 +928,15 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		return;
 	}
 
+	// The clock advances with each dot rather than ahead of the batch:
+	// ExecPpuDot stamps vblank_irq_at from t_cycles, so adding the whole
+	// count up front would date the VBlank IRQ a batch late. This keeps
+	// PpuStep(n) exactly n calls of PpuStep(1).
 	while (tcycles-- > 0)
+	{
+		p.t_cycles += 1;
 		ExecPpuDot(p, mem);
+	}
 }
 
 uint8_t PpuReadReg(const Ppu &p, uint16_t addr)

@@ -272,7 +272,11 @@ void S9xMessage (int type, int, const char *str)
     fprintf (out, "%s\n", str);
 #endif
 
-    S9xSetInfoString (str);
+    // A warning is meant to be read, not noticed: hold it half again as long.
+    if (type == S9X_WARNING)
+        S9xSetInfoStringLong (str);
+    else
+        S9xSetInfoString (str);
 
 	// if we can't draw on the screen, messagebox it
 	// also send to stderr/stdout depending on message type

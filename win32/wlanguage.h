@@ -160,7 +160,7 @@ Nintendo is a trademark.")
 #define HOTKEYS_LINK_4P TEXT("Same Game 4P:")
 #define HOTKEYS_LINK_SPLIT TEXT("Split Screen:")
 #define HOTKEYS_LINK_OTHER TEXT("Other Game:")
-#define HOTKEYS_LINK_END TEXT("Exit Link Cable:")
+#define HOTKEYS_LINK_END TEXT("Unlink:")
 
 // gaming buttons and axes
 #define GAMEDEVICE_JOYNUMPREFIX "(J%x)" // don't change this

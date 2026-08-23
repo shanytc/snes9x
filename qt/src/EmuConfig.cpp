@@ -711,6 +711,12 @@ void EmuConfig::config(const std::string &filename, bool write)
     String("EmulatorName", ra_emulator_name, "Client name reported to the RetroAchievements server");
     EndSection();
 
+    // The client name drives the RetroAchievements User-Agent, and only the
+    // registered "SuperSnes9x" identity is accepted there, so pin it on load
+    // rather than trusting whatever a stale or hand-edited config holds.
+    if (!write && ra_emulator_name != "SuperSnes9x")
+        ra_emulator_name = "SuperSnes9x";
+
     if (write)
     {
         ConfigFile::SetProgramName("SuperSnes9x");

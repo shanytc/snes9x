@@ -772,8 +772,10 @@ int Snes9xConfig::load_config_file()
     if (default_esc_behavior != ESC_TOGGLE_MENUBAR)
         fullscreen = false;
 
-    // The RA-registered emulator name must be non-empty (drives the User-Agent).
-    if (ra_emulator_name.empty())
+    // The client name drives the RetroAchievements User-Agent, and only the
+    // registered "SuperSnes9x" identity is accepted there, so pin it on load
+    // rather than trusting whatever a stale or hand-edited config holds.
+    if (ra_emulator_name != "SuperSnes9x")
         ra_emulator_name = "SuperSnes9x";
 
 #ifdef USE_HQ2X

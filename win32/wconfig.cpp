@@ -385,7 +385,7 @@ static const char* keyToAlternateString [256] =
 // and to allow us to manage custom types of config items, such as virtual key codes represented as strings
 
 enum ConfigItemType	{
-	CIT_BOOL, CIT_INT, CIT_UINT, CIT_STRING, CIT_INVBOOL, CIT_BOOLONOFF, CIT_INVBOOLONOFF, CIT_VKEY, CIT_VKEYMOD
+	CIT_BOOL, CIT_INT, CIT_UINT, CIT_STRING, CIT_ASTRING, CIT_INVBOOL, CIT_BOOLONOFF, CIT_INVBOOLONOFF, CIT_VKEY, CIT_VKEYMOD
 };
 
 struct ConfigItem
@@ -426,6 +426,14 @@ struct ConfigItem
 			case CIT_STRING:
 				lstrcpyn((TCHAR*)addr, _tFromChar(conf.GetString(name, reinterpret_cast<const char*>(def))), size-1);
 				((TCHAR*)addr)[size-1] = TEXT('\0');
+				break;
+			case CIT_ASTRING:
+				{
+					// narrow char[] target: never widen, and treat size as a byte count
+					const char* aval = conf.GetString(name, reinterpret_cast<const char*>(def));
+					lstrcpynA((char*)addr, aval ? aval : "", size);
+					((char*)addr)[size-1] = '\0';
+				}
 				break;
 			case CIT_INVBOOL:
 			case CIT_INVBOOLONOFF:
@@ -533,6 +541,10 @@ struct ConfigItem
 				if((TCHAR*)addr)
 					conf.SetString(name, std::string(_tToChar((TCHAR*)addr)), comment);
 				break;
+			case CIT_ASTRING:
+				if((char*)addr)
+					conf.SetString(name, std::string((const char*)addr), comment);
+				break;
 			case CIT_INVBOOL:
 				if(size	== 1) conf.SetBool(name, 0==(*(uint8 *)addr), "TRUE","FALSE", comment);
 				if(size	== 2) conf.SetBool(name, 0==(*(uint16*)addr), "TRUE","FALSE", comment);
@@ -602,6 +614,9 @@ std::vector<ConfigItem> configItems;
 #define AddInvBool2C(name, var, def, comment) AddItemC(name,var,def,comment,CIT_INVBOOLONOFF)
 #define AddStringC(name, var, buflen, def, comment) configItems.push_back(ConfigItem((const char*)(CATEGORY "::" name), (void*)var, buflen, (void*)(pint)def, (const char*)comment, CIT_STRING))
 #define AddString(name, var, buflen, def) AddStringC(name, var, buflen, def, "")
+// For char[] members (not TCHAR[]): buflen is a byte count and the value is
+// stored as-is, without the UTF-8 -> UTF-16 conversion CIT_STRING applies.
+#define AddAStringC(name, var, buflen, def, comment) configItems.push_back(ConfigItem((const char*)(CATEGORY "::" name), (void*)var, buflen, (void*)(pint)def, (const char*)comment, CIT_ASTRING))
 
 static char filterString [1024], filterString2 [1024], snapVerString [256];
 static bool niceAlignment, showComments, readOnlyConfig;
@@ -743,9 +758,21 @@ void WinPostLoad(ConfigFile& conf)
 	ConfigFile::SetTimeSort(configSort==1);
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
-	// Migration: RASnes9x/1.2 user agent was removed — force default
-	if (strcmp(GUI.RAEmulatorName, "RASnes9x") == 0)
+	// Repair configs written by builds that stored these char[] fields through
+	// CIT_STRING, which widened them to UTF-16: reading them back narrow stopped
+	// at the first embedded NUL, so "SuperSnes9x" was saved back out as "S" and
+	// the user agent went out as "S/1.63". The user agent is always SuperSnes9x,
+	// so anything else here is corrupt or the retired RASnes9x/1.2 identity.
+	if (strcmp(GUI.RAEmulatorName, "SuperSnes9x") != 0)
 		strcpy(GUI.RAEmulatorName, "SuperSnes9x");
+
+	// A token truncated the same way can never authenticate — drop the saved
+	// credentials so the user is prompted to log in again.
+	if (GUI.RAApiToken[0] && strlen(GUI.RAApiToken) < 8)
+	{
+		GUI.RAApiToken[0] = '\0';
+		GUI.RAUsername[0] = '\0';
+	}
 #endif
 
 	WinPostSave(conf);
@@ -965,7 +992,7 @@ void WinRegisterConfigItems()
 #ifdef NETPLAY_SUPPORT
 #define	CATEGORY "Netplay"
 	AddUInt("Port", Settings.Port, NP_DEFAULT_PORT);
-	AddString("Server", Settings.ServerName, 128, Settings.ServerName);
+	AddAStringC("Server", Settings.ServerName, 128, Settings.ServerName, "");
 	AddBool2("SyncByReset", NPServer.SyncByReset, true);
 	AddBool2("SendROMImageOnConnect", NPServer.SendROMImageOnConnect, false);
 	AddUInt("MaxFrameSkip", NetPlay.MaxFrameSkip, 10);
@@ -1029,7 +1056,7 @@ void WinRegisterConfigItems()
 #undef ADDXTB3
 #undef ADDXTBALL
 	// SDL device GUIDs for stable controller identification across sessions
-#define ADDGUID(n) AddStringC("Joypad" #n ":DeviceGUID", GUI.JoypadGUID[n-1], 64, "", "SDL device GUID for controller identity persistence")
+#define ADDGUID(n) AddAStringC("Joypad" #n ":DeviceGUID", GUI.JoypadGUID[n-1], 64, "", "SDL device GUID for controller identity persistence")
 	ADDGUID(1); ADDGUID(2); ADDGUID(3); ADDGUID(4); ADDGUID(5); ADDGUID(6); ADDGUID(7); ADDGUID(8);
 #undef ADDGUID
 	AddBool2C("Input:Background", GUI.BackgroundInput, false, "on to detect game keypresses and hotkeys while window is inactive, if PauseWhenInactive = FALSE.");
@@ -1120,9 +1147,9 @@ void WinRegisterConfigItems()
     AddBoolC("Enabled", GUI.RAEnabled, false, "true to enable RetroAchievements support");
     AddBoolC("HardcoreMode", GUI.RAHardcoreMode, false, "true to enable hardcore mode (disables save state loading, rewind, cheats)");
     AddBoolC("ShowChallengeImages", GUI.RAShowChallengeImages, true, "true to show active challenge achievements as on-screen badge images, false to show them as text toasts");
-    AddStringC("Username", GUI.RAUsername, 256, "", "RetroAchievements username");
-    AddStringC("ApiToken", GUI.RAApiToken, 256, "", "RetroAchievements API token (set automatically on login)");
-    AddStringC("EmulatorName", GUI.RAEmulatorName, 64, "SuperSnes9x", "Emulator name sent to RetroAchievements");
+    AddAStringC("Username", GUI.RAUsername, 256, "", "RetroAchievements username");
+    AddAStringC("ApiToken", GUI.RAApiToken, 256, "", "RetroAchievements API token (set automatically on login)");
+    AddAStringC("EmulatorName", GUI.RAEmulatorName, 64, "SuperSnes9x", "Emulator name sent to RetroAchievements");
 #undef CATEGORY
 #endif
 }

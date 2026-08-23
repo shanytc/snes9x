@@ -357,6 +357,10 @@ uint16_t S9xSGBSplitEchoPad(int player /*5..15*/);
 // outside $C000-$DFFF / $FF80-$FFFE. Harness diagnostics only.
 uint8_t  S9xSGBSplitPeek(int player, uint16_t addr);
 void S9xSGBSplitRunFrame(void);
+
+// Faceball ring stage warnings, once per host frame. RunFrame calls it
+// itself; BIOS mode never reaches RunFrame and must call it directly.
+void S9xSGBSplitRingWatch(void);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 // One seat's latest finished frame (160x144) for the viewer transport.
 bool S9xSGBSplitCopySeatFrame(int player /*2..4*/, uint16_t *dest);

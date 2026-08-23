@@ -5528,6 +5528,9 @@ int WINAPI WinMain(
 					S9xSGBSplitSetJoypad (p, p >= 5 ? S9xSGBSplitEchoPad (p)
 					                                : (uint16)MovieGetJoypad (p - 1));
 				S9xSGBDebugSgbCompare (GFX.Screen, GFX.RealPPL, PPU.CGDATA);
+				// RunFrame does this for BIOS-less sessions; this path is
+				// the only per-frame hook BIOS mode has.
+				S9xSGBSplitRingWatch ();
 			}
 
 			// Seat windows live in this process now. The emulation thread

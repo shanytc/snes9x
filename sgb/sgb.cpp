@@ -2617,11 +2617,27 @@ inline void SplitPlacerSample(SGB::Emulator *c, int i)
 // placer's draw phase-locks and reaches about four fifths of the floor cells
 // — a fifteen-cell stage seats twelve — so the seats can be weighed against
 // the maze while the cursor is still on it.
-uint32_t g_maze_seen = 0;
+//
+// Which screen has the buttons is the game's own to answer: $5A56 installs a
+// menu's handler table at $D9FC, and only one call site installs the level
+// list's. Without that the staged arena reads identically on the title and
+// mode screens, which is where the warning used to fire.
+constexpr uint16_t kArenaMenuTable = 0x6D9A;
+
+uint32_t g_maze_seen    = 0;
+bool     g_arena_menu   = false;
+bool     g_arena_enter  = false;
 
 void SplitRingMazePreview(SGB::Emulator *c, int n)
 {
 	const SGB::Memory &m = c->DebugImpl()->mem;
+
+	const uint16_t menu = (uint16_t)m.wram[0x19FC] | (uint16_t)m.wram[0x19FD] << 8;
+	if (menu != kArenaMenuTable) { g_arena_menu = false; return; }
+	// The handler stages the arena after the menu is installed, so hold the
+	// entry across the frames where the maze does not read back yet.
+	if (!g_arena_menu) { g_arena_menu = true; g_arena_enter = true; }
+
 	const int h = m.hram[0xFFF5 - 0xFF80], w = m.hram[0xFFF6 - 0xFF80];
 	if (w < 4 || w > 16 || h < 4 || h > 16) return;
 	// Anything already on the board means the round started: too late to
@@ -2638,25 +2654,31 @@ void SplitRingMazePreview(SGB::Emulator *c, int n)
 		if ((m.wram[0x0400 + (col << 4) + row] & 0x0F) != 0x0F) ++cells;
 	}
 
-	char     name[16] = {};
+	int      namelen = 0;
 	uint32_t id = (uint32_t)w << 8 | (uint32_t)h;
-	for (int i = 0; i + 1 < (int)sizeof name; ++i)
+	for (; namelen < 15; ++namelen)
 	{
-		const uint8_t ch = m.wram[0x1A2D + i];
+		const uint8_t ch = m.wram[0x1A2D + namelen];
 		if (ch < 0x20 || ch > 0x7E) break;
-		name[i] = (char)ch;
 		id = id * 31 + ch;
 	}
+	// A named arena is the signal that the game really staged one.
+	if (namelen < 3) return;
 	id = id * 31 + (uint32_t)cells;
-	if (id == g_maze_seen) return;
-	g_maze_seen = id;
+
+	// Once on the way in — the arena the list opens on is a default nobody
+	// chose — and again each time the cursor lands on a different one.
+	if (id == g_maze_seen && !g_arena_enter) return;
+	g_maze_seen  = id;
+	g_arena_enter = false;
 
 	const int seats = cells * 4 / 5;
 	if (n <= seats) return;
+
 	char buf[96];
-	snprintf(buf, sizeof buf, "%s holds about %d of %d players - pick a larger maze",
-	         name[0] ? name : "Maze", seats, n);
-	S9xMessage(S9X_INFO, S9X_NO_INFO, buf);
+	snprintf(buf, sizeof buf, "Map allows only %d players or less. Select a larger map.",
+	         seats);
+	S9xMessage(S9X_WARNING, S9X_NO_INFO, buf);
 }
 
 // How many players the stage did seat: every object the placer got down
@@ -2697,15 +2719,29 @@ void SplitRingPlacerWatch(SGB::Emulator *cs[], int n)
 	char buf[96];
 	if (seated > 0 && seated < n)
 		snprintf(buf, sizeof buf,
-		         "Maze seats only %d of %d players - select larger maze",
-		         seated, n);
+		         "Map allows only %d players or less. Select a larger map.",
+		         seated);
 	else
 		snprintf(buf, sizeof buf,
-		         "Maze too small for %d players - select larger maze", n);
-	S9xMessage(S9X_INFO, S9X_NO_INFO, buf);
+		         "Map is too small for %d players. Select a larger map.", n);
+	S9xMessage(S9X_WARNING, S9X_NO_INFO, buf);
 }
 
 } // anonymous
+
+// The ring's stage warnings, once per host frame. BIOS mode drives the
+// seats from the SNES clock and never reaches S9xSGBSplitRunFrame, so it
+// calls this itself rather than going without the warning that keeps a
+// too-small maze from hanging the placer.
+void S9xSGBSplitRingWatch(void)
+{
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	const int n = SplitCollect(cs);
+	if (n < 5 || !S9xSGBCartIsFaceball()) return;
+
+	SplitRingMazePreview(cs[0], n);
+	SplitRingPlacerWatch(cs, n);
+}
 
 void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
 
@@ -2869,6 +2905,8 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	g_placer_said  = false;
 	g_placer_clear = 0;
 	g_maze_seen    = 0;
+	g_arena_menu   = false;
+	g_arena_enter  = false;
 	g_seat_slave_accum = 0;
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
@@ -2909,6 +2947,8 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	g_placer_said  = false;
 	g_placer_clear = 0;
 	g_maze_seen    = 0;
+	g_arena_menu   = false;
+	g_arena_enter  = false;
 	g_seat_slave_accum = 0;
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
@@ -3071,11 +3111,7 @@ void S9xSGBSplitRunFrame(void)
 		SGB::SerialTraceMsg(pcline);
 	}
 
-	if (fb_ring)
-	{
-		SplitRingMazePreview(cs[0], n);
-		SplitRingPlacerWatch(cs, n);
-	}
+	if (fb_ring) S9xSGBSplitRingWatch();
 
 	// Audio rides the primary alone — the seats' sample rings overflow
 	// and drop silently. Same drain-rate steering as Emulator::RunFrame.

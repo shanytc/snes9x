@@ -2519,6 +2519,18 @@ void S9xSetInfoString (const char *string)
 	}
 }
 
+// Half again the usual dwell, for a warning that has to be read rather
+// than noticed — a sentence does not fit in MessageDisplayTime.
+void S9xSetInfoStringLong (const char *string)
+{
+	if (Settings.InitialInfoStringTimeout > 0)
+	{
+		GFX.InfoString = string;
+		GFX.InfoStringTimeout = Settings.InitialInfoStringTimeout * 3 / 2;
+		S9xReRefresh();
+	}
+}
+
 #include "var8x10font.h"
 static const int font_width = 8;
 static const int font_height = 10;

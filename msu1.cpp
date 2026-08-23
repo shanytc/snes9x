@@ -223,6 +223,40 @@ bool S9xMSU1ROMExists(void)
     return false;
 }
 
+bool S9xMSU1ZipHasMSU1Data(const char *zipname)
+{
+#ifdef UNZIP_SUPPORT
+	unzFile	file = unzOpen(zipname);
+
+	if (!file)
+		return false;
+
+	bool	found = false;
+	int		port = unzGoToFirstFile(file);
+
+	while (port == UNZ_OK && !found)
+	{
+		char			name[132];
+		unz_file_info	info;
+
+		if (unzGetCurrentFileInfo(file, &info, name, 128, NULL, 0, NULL, 0) != UNZ_OK)
+			break;
+
+		int	len = strlen(name);
+		if (len > 4 && strcasecmp(name + len - 4, ".msu") == 0)
+			found = true;
+
+		port = unzGoToNextFile(file);
+	}
+
+	unzClose(file);
+
+	return found;
+#else
+	return false;
+#endif
+}
+
 void S9xMSU1Generate(size_t sample_count)
 {
 	partial_frames += 4410 * (sample_count / 2);

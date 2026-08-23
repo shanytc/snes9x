@@ -48,6 +48,7 @@ class EmuMainWindow : public QMainWindow
   private:
     void idle();
     void createWidgets();
+    std::string promptRenameMSU1Pack(const std::string &filename);
 
     static const size_t recent_menu_size = 10;
 

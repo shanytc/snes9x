@@ -53,6 +53,7 @@ class Snes9xWindow : public GtkBuilderWindow
     void configure_widgets();
     void save_spc_dialog();
     bool try_open_rom(const std::string &filename);
+    std::string prompt_rename_msu1_pack(const std::string &filename);
     std::string open_movie_dialog(bool readonly);
     void movie_seek_dialog();
     void open_multicart_dialog();

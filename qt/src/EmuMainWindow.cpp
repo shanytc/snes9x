@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <QTimer>
 #include <QMenu>
 #include <QMenuBar>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QMessageBox>
 #include <QtEvents>
 #include <QGuiApplication>
 #include <QActionGroup>
@@ -36,6 +39,7 @@
 #include "EmuSettingsWindow.hpp"
 #include "memmap.h"
 #include "display.h"
+#include "msu1.h"
 #include "voicekun.h"
 
 #include <QMessageBox>
@@ -894,7 +898,7 @@ void EmuMainWindow::openFile()
     // .gb/.gbc route into the SGB subsystem in CMemory::LoadROM, and .sgb (plus
     // any GB dump under a foreign extension) is caught by the Nintendo-logo
     // content sniff, so Game Boy carts belong in the dialog alongside SNES ones.
-    dialog.setNameFilters({ tr("ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.gb *.gbc *.sgb *.msu *.zip *.gz)"),
+    dialog.setNameFilters({ tr("ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.gb *.gbc *.sgb *.msu *.msu1 *.zip *.gz)"),
                             tr("Super Nintendo ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin)"),
                             tr("Game Boy ROM Files (*.gb *.gbc *.sgb)"),
                             tr("All Files (*)") });
@@ -912,8 +916,61 @@ void EmuMainWindow::openFile()
     app->unpause();
 }
 
-bool EmuMainWindow::openFile(const std::string &filename)
+// An MSU-1 pack handed over as a plain .zip can't work: LoadZip() picks the
+// largest entry, which is a multi-megabyte .pcm track rather than the cartridge,
+// and S9xMSU1OpenFile() only reaches into an archive named <rom>.msu1. Renaming
+// the archive fixes both at once, so offer that instead of loading garbage.
+std::string EmuMainWindow::promptRenameMSU1Pack(const std::string &filename)
 {
+    QFileInfo info(QString::fromStdString(filename));
+
+    if (info.suffix().compare("zip", Qt::CaseInsensitive) != 0)
+        return filename;
+
+    if (!S9xMSU1ZipHasMSU1Data(filename.c_str()))
+        return filename;
+
+    QString renamed = info.dir().filePath(info.completeBaseName() + ".msu1");
+
+    if (QFileInfo::exists(renamed))
+    {
+        QMessageBox::warning(this, tr("MSU-1 Pack Detected"),
+            tr("\"%1\" holds MSU-1 audio data, but \"%2\" already exists, so it "
+               "can't be renamed. Load that file instead, or unpack the archive "
+               "and load the ROM from the folder.")
+                .arg(info.fileName(), QFileInfo(renamed).fileName()));
+        return filename;
+    }
+
+    auto answer = QMessageBox::question(this, tr("MSU-1 Pack Detected"),
+        tr("\"%1\" holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks "
+           "out of an archive named \".msu1\".\n\n"
+           "Rename it to \"%2\" and load it?")
+            .arg(info.fileName(), QFileInfo(renamed).fileName()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+
+    if (answer != QMessageBox::Yes)
+        return filename;
+
+    if (!QFile::rename(QString::fromStdString(filename), renamed))
+    {
+        QMessageBox::warning(this, tr("MSU-1 Pack Detected"),
+            tr("Couldn't rename \"%1\". Check that the folder is writable.")
+                .arg(info.fileName()));
+        return filename;
+    }
+
+    // the .zip is gone now, so don't leave it behind in the recent list
+    auto &ru = app->config->recently_used;
+    ru.erase(std::remove(ru.begin(), ru.end(), filename), ru.end());
+
+    return renamed.toStdString();
+}
+
+bool EmuMainWindow::openFile(const std::string &original_filename)
+{
+    auto filename = promptRenameMSU1Pack(original_filename);
+
     if (app->openFile(filename))
     {
         auto &ru = app->config->recently_used;

@@ -89,7 +89,8 @@ build_arch() {
     bash -euo pipefail -c '
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq
-      apt-get install -y -qq build-essential git >/dev/null
+      # zlib1g-dev: minizip reads MSU-1 .msu1 packs (HAVE_UNZIP in Makefile.common)
+      apt-get install -y -qq build-essential git zlib1g-dev >/dev/null
       git config --global --add safe.directory /build || true
       make clean >/dev/null 2>&1 || true
       make portable -j"$(nproc)"

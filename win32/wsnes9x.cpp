@@ -58,6 +58,7 @@
 #include "kaillera_client.h"
 #include "kaillera_server.h"
 #include "../apu/apu.h"
+#include "../msu1.h"
 #include "../sgb/sgb.h"
 #include "../sfcbox.h"
 #include "../movie.h"
@@ -5888,6 +5889,69 @@ static bool LoadROMMulti(const TCHAR *filename, const TCHAR *filename2)
 	return (FALSE);
 }
 
+static void RemoveFromRecentGames (const TCHAR *filename)
+{
+	for (int i = 0; i < MAX_RECENT_GAMES_LIST_SIZE; i++)
+	{
+		if (lstrcmp (filename, GUI.RecentGames[i]) != 0)
+			continue;
+
+		for (int j = i; j < MAX_RECENT_GAMES_LIST_SIZE - 1; j++)
+			lstrcpy (GUI.RecentGames[j], GUI.RecentGames[j + 1]);
+
+		GUI.RecentGames[MAX_RECENT_GAMES_LIST_SIZE - 1][0] = TEXT('\0');
+		break;
+	}
+}
+
+// An MSU-1 pack handed over as a plain .zip can't work: LoadZip() picks the
+// largest entry, which is a multi-megabyte .pcm track rather than the cartridge,
+// and S9xMSU1OpenFile() only reaches into an archive named <rom>.msu1. Renaming
+// the archive fixes both at once, so offer that instead of loading garbage.
+static bool PromptRenameMSU1Pack (const TCHAR *filename, TCHAR *renamed)
+{
+	const TCHAR	*ext = _tcsrchr (filename, TEXT('.'));
+
+	if (!ext || _tcsicmp (ext, TEXT(".zip")) != 0)
+		return false;
+
+	size_t	base_len = ext - filename;
+	if (base_len + lstrlen (TEXT(".msu1")) >= MAX_PATH)
+		return false;
+
+	if (!S9xMSU1ZipHasMSU1Data (_tToChar (filename)))
+		return false;
+
+	memcpy (renamed, filename, base_len * sizeof(TCHAR));
+	lstrcpy (renamed + base_len, TEXT(".msu1"));
+
+	TCHAR	message[MAX_PATH * 2 + 256];
+
+	if (GetFileAttributes (renamed) != INVALID_FILE_ATTRIBUTES)
+	{
+		_stprintf (message, TEXT("\"%s\" holds MSU-1 audio data, but \"%s\" already exists, so it can't be renamed.\n\nLoad that file instead, or unpack the archive and load the ROM from the folder."), filename, renamed);
+		MessageBox (GUI.hWnd, message, TEXT("MSU-1 Pack Detected"), MB_OK | MB_ICONEXCLAMATION);
+		return false;
+	}
+
+	_stprintf (message, TEXT("\"%s\" holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to \"%s\" and load it?"), filename, renamed);
+
+	if (MessageBox (GUI.hWnd, message, TEXT("MSU-1 Pack Detected"), MB_YESNO | MB_ICONQUESTION) != IDYES)
+		return false;
+
+	if (!MoveFile (filename, renamed))
+	{
+		_stprintf (message, TEXT("Couldn't rename \"%s\". Check that the folder is writable."), filename);
+		MessageBox (GUI.hWnd, message, TEXT("MSU-1 Pack Detected"), MB_OK | MB_ICONEXCLAMATION);
+		return false;
+	}
+
+	// the .zip is gone now, so don't leave it behind in the recent list
+	RemoveFromRecentGames (filename);
+
+	return true;
+}
+
 static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 
 #ifdef NETPLAY_SUPPORT
@@ -5898,6 +5962,11 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		return false;
 	}
 #endif
+
+	TCHAR	msu1_renamed[MAX_PATH];
+
+	if (!filename2 && filename && PromptRenameMSU1Pack (filename, msu1_renamed))
+		filename = msu1_renamed;
 
 	if (!Settings.StopEmulation) {
 		Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());

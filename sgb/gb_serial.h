@@ -150,6 +150,10 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
                        bool force_hub, bool ring = false);
 void SerialSplitDetach();
 bool SerialSplitActive();
+// True while the cable is still exactly as SerialSplitAttach left it. The
+// ring/hub state is shared and lives outside the cores, so a core-only
+// snapshot can only be restored at a moment this reports true.
+bool SerialSplitPristine();
 
 // Emit one line into the SGB_LINK_TRACE log (no-op when tracing is off).
 // Lets the split runner log per-core state the serial layer cannot see.

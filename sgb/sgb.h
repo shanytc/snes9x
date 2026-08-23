@@ -361,6 +361,22 @@ void S9xSGBSplitRunFrame(void);
 // Faceball ring stage warnings, once per host frame. RunFrame calls it
 // itself; BIOS mode never reaches RunFrame and must call it directly.
 void S9xSGBSplitRingWatch(void);
+
+// Power-cycle the seats with the master. The SGB BIOS resets the GB partway
+// through its boot; without this only the master reboots and the seats keep
+// the head start that puts them ahead for the rest of the session.
+void S9xSGBSplitResetSeats(void);
+
+// Seat cores for the BIOS-mode soft-reset checkpoint. They are not in
+// snes9x's freeze, and the unfreeze cold-resets them, so without these a
+// warm restart drops every seat back to the cart while the master resumes
+// mid-game. Only capture while S9xSGBSplitCheckpointable() — the shared
+// ring/hub state is rebuilt on load, which is exact only when the cable
+// has not arbitrated yet.
+bool    S9xSGBSplitCheckpointable(void);
+size_t  S9xSGBSplitStateSize(void);
+bool    S9xSGBSplitStateSave(uint8_t *buf, size_t cap);
+bool    S9xSGBSplitStateLoad(const uint8_t *buf, size_t size);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 // One seat's latest finished frame (160x144) for the viewer transport.
 bool S9xSGBSplitCopySeatFrame(int player /*2..4*/, uint16_t *dest);

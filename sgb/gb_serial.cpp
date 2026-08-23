@@ -2493,6 +2493,19 @@ void SerialSplitDetach()
 
 bool SerialSplitActive() { return g_splitlink.count > 0; }
 
+// True while the cable still holds exactly what SerialSplitAttach left: no
+// byte in flight and nothing arbitrated yet. The ring and the hub are shared
+// state living here, not in any core, so a snapshot of the cores alone can
+// only be restored honestly at a moment this reports true — the attach then
+// rebuilds the cable to the same clean state it had at session start.
+bool SerialSplitPristine()
+{
+	if (g_splitlink.count <= 0) return false;
+	if (g_ring.active) return !g_ring.shifting && g_ring.xfers == 0;
+	if (g_hub.local)   return g_hub.phase == kDmg07Ping && g_hub.bulk_stage == 0;
+	return true;   // plain two-seat cable: the attach clears what little there is
+}
+
 void SerialTraceMsg(const char *msg)
 {
 	Trace("%s", msg);

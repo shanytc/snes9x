@@ -1671,6 +1671,8 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 					icd.control = value;  // re-apply after Reset wiped it
 					if (!impl_->boot_rom_loaded)
 						PrimeBIOSHandshake();
+					// Every console on the cable power-cycles, not just this one.
+					S9xSGBSplitResetSeats();
 				}
 				else if (icd.queue_count == 0)
 				{
@@ -2555,10 +2557,54 @@ int g_split_players = 0;   // seats including the primary; 0 = off
 // cannot re-arm its serial port, and the adapter clocking bytes into it
 // shredded the data phase (F-1 Race's start grid garbled, then hung).
 uint16_t g_split_snap[SGB_MAX_LINK_PLAYERS][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+
 // Raw DMG shades of the same frame, for recoloring seat frames through
 // the master's live SGB palettes in BIOS-mode sessions.
+//
+// Held as a short ring because the two screens are not the same age. A
+// seat's frame is finished the instant its VBlank latches and goes
+// straight to its window; the master's has to cross the SGB path first —
+// CaptureScanline files 8-row bands into the ICD2 ring, the BIOS lifts a
+// band per pass into VRAM, and the SNES PPU draws the result a frame
+// later. Presenting each as it arrives leaves the seats ahead. Seats
+// present from the tail so both screens show the same moment.
 uint8_t  g_split_snap_shades[SGB_MAX_LINK_PLAYERS][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
 bool     g_split_snap_valid[SGB_MAX_LINK_PLAYERS] = {};
+
+// Drop every ring frame. A reset leaves the old picture in the windows
+// otherwise, and the seats would present pre-reset frames as if they were
+// current — so this is both the residue fix and part of staying in step.
+void SplitDropSnaps(void)
+{
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
+}
+
+// The sixteen colors a BIOS-mode GB screen can use, resolved once. CGRAM
+// is the ground truth the SNES itself renders from — our packet-decoded
+// palettes are not, which is why seats read it directly. Returns whether
+// CGRAM is live; when it is not, the attribute map means nothing either.
+bool BuildBiosPalette(uint16_t host[4][4])
+{
+	static constexpr uint16_t kBiosPal[4] = {0x67BE, 0x225D, 0x1956, 0x006A};
+	const bool cgram_live = (PPU.CGDATA[0] | PPU.CGDATA[1] |
+	                         PPU.CGDATA[2] | PPU.CGDATA[3]) != 0;
+	for (int p = 0; p < 4; ++p)
+		for (int s = 0; s < 4; ++s)
+		{
+			uint16_t bgr;
+			if (!cgram_live) bgr = kBiosPal[s];
+			else if (s == 0) bgr = PPU.CGDATA[0] & 0x7FFF;
+			else             bgr = PPU.CGDATA[p * 16 + s] & 0x7FFF;
+			host[p][s] = SGB::BgrToHost(bgr);
+		}
+	return cgram_live;
+}
+
+void SplitPushShades(int i, const uint8_t *fb)
+{
+	std::memcpy(g_split_snap_shades[i], fb,
+	            SGB_GB_SCREEN_W * SGB_GB_SCREEN_H);
+}
 
 int SplitCollect(SGB::Emulator *out[SGB_MAX_LINK_PLAYERS])
 {
@@ -2567,6 +2613,24 @@ int SplitCollect(SGB::Emulator *out[SGB_MAX_LINK_PLAYERS])
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 		if (g_split_cores[k]) out[n++] = g_split_cores[k].get();
 	return n;
+}
+
+// Wire the cable across every live core. Session start and checkpoint
+// restore both go through here so the cable comes up identically.
+void SplitAttachLink(void)
+{
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS];
+	SGB::Memory   *mm[SGB_MAX_LINK_PLAYERS];
+	const int n = SplitCollect(cs);
+	for (int i = 0; i < n; ++i)
+	{
+		ss[i] = &cs[i]->DebugImpl()->serial;
+		mm[i] = &cs[i]->DebugImpl()->mem;
+	}
+	// Adapter-only games ride the DMG-07 even as a 2-seat split; five
+	// seats up is reachable only for Faceball and wires its ring cable.
+	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07(), n >= 5);
 }
 
 // Faceball 15-player test mode: one shared pad for seats 5+ (see sgb.h).
@@ -2597,8 +2661,7 @@ bool SplitSnapIfReady(SGB::Emulator *core, int i)
 	SGB::Emulator::Impl *im = core->DebugImpl();
 	if (!im->ppu.frame_ready) return false;
 	core->BlitScreenGB(g_split_snap[i], SGB_GB_SCREEN_W);
-	std::memcpy(g_split_snap_shades[i], im->ppu.framebuffer,
-	            SGB_GB_SCREEN_W * SGB_GB_SCREEN_H);
+	SplitPushShades(i, im->ppu.framebuffer);
 	g_split_snap_valid[i] = true;
 	im->ppu.frame_ready   = false;
 	return true;
@@ -2770,7 +2833,97 @@ void S9xSGBReset(void)
 	SGB::Instance().ColdReset();
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
+	SplitDropSnaps();
+	g_seat_slave_accum = 0;
 	SplitStaggerSeats();
+}
+
+// Seat cores live outside snes9x's freeze, so the BIOS-mode soft-reset
+// checkpoint has to carry them itself. Without that, a restore leaves the
+// seats where the unfreeze's S9xReset put them — the cart's first
+// instruction — while the master resumes well into the game, and they
+// trail it for the rest of the session.
+//
+// Only offered while the cable is pristine: the ring/hub state is shared
+// and is not in here, so it can only be rebuilt (by SplitAttachLink) at a
+// moment when rebuilding it is exact.
+bool S9xSGBSplitCheckpointable(void)
+{
+	return g_split_players >= 2 && SGB::SerialSplitPristine();
+}
+
+size_t S9xSGBSplitStateSize(void)
+{
+	if (g_split_players < 2) return 0;
+	size_t n = 8;   // seat count + reserved
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		if (g_split_cores[k]) n += 4 + g_split_cores[k]->StateSize();
+	return n;
+}
+
+bool S9xSGBSplitStateSave(uint8_t *buf, size_t cap)
+{
+	const size_t need = S9xSGBSplitStateSize();
+	if (!buf || need == 0 || cap < need) return false;
+
+	const uint32_t players = (uint32_t)g_split_players, reserved = 0;
+	std::memcpy(buf,     &players,  4);
+	std::memcpy(buf + 4, &reserved, 4);
+
+	size_t p = 8;
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		SGB::Emulator *core = g_split_cores[k].get();
+		if (!core) return false;
+		const uint32_t sz = (uint32_t)core->StateSize();
+		std::memcpy(buf + p, &sz, 4);
+		p += 4;
+		core->StateSave(buf + p);
+		p += sz;
+	}
+	return true;
+}
+
+bool S9xSGBSplitStateLoad(const uint8_t *buf, size_t size)
+{
+	if (!buf || size < 8 || g_split_players < 2) return false;
+
+	// A session that grew or shrank since the capture is not this one.
+	uint32_t players = 0;
+	std::memcpy(&players, buf, 4);
+	if ((int)players != g_split_players) return false;
+
+	size_t p = 8;
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		SGB::Emulator *core = g_split_cores[k].get();
+		if (!core || p + 4 > size) return false;
+		uint32_t sz = 0;
+		std::memcpy(&sz, buf + p, 4);
+		p += 4;
+		if (p + sz > size || !core->StateLoad(buf + p, sz)) return false;
+		p += sz;
+	}
+
+	// The cable is shared state and was not in the blob; rebuild it exactly
+	// as session start does. Pre-reset frames go with it.
+	SplitAttachLink();
+	SplitDropSnaps();
+	g_seat_slave_accum = 0;
+	return true;
+}
+
+// The BIOS power-on-resets the master partway through its own boot. That
+// reboots one console out of fifteen: the seats carry on from wherever they
+// were and come out of it ahead, which is the same head start the boot-ROM
+// hold exists to remove. Power-cycle them together.
+void S9xSGBSplitResetSeats(void)
+{
+	if (g_split_players < 2) return;
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
+	SplitDropSnaps();
+	g_seat_slave_accum = 0;
 }
 
 bool S9xSGBSoftReset(void)
@@ -2780,6 +2933,8 @@ bool S9xSGBSoftReset(void)
 	{
 		for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 			if (g_split_cores[k]) g_split_cores[k]->SoftReset();
+		SplitDropSnaps();
+		g_seat_slave_accum = 0;
 		SplitStaggerSeats();
 	}
 	return ok;
@@ -2900,7 +3055,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		g_split_cores[k] = std::move(core);
 	}
 	g_split_players = players;
-	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
+	SplitDropSnaps();
 	g_echo_frames = 0;
 	g_placer_said  = false;
 	g_placer_clear = 0;
@@ -2911,23 +3066,12 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
 
-	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
-	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS];
-	SGB::Memory   *mm[SGB_MAX_LINK_PLAYERS];
-	const int n = SplitCollect(cs);
-	for (int i = 0; i < n; ++i)
-	{
-		ss[i] = &cs[i]->DebugImpl()->serial;
-		mm[i] = &cs[i]->DebugImpl()->mem;
-	}
-	// Adapter-only games ride the DMG-07 even as a 2-seat split; five
-	// seats up is reachable only for Faceball and wires its ring cable.
-	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07(), n >= 5);
+	SplitAttachLink();
 
 	// A link session is Game Boys on a cable, and the SGB has no link
 	// port: the primary presents as a plain DMG too (KI hides its link
 	// mode on an SGB), so no detection and no palettes for anyone.
-	cs[0]->DebugImpl()->sgb_pkt.mute_commands = true;
+	SGB::Instance().DebugImpl()->sgb_pkt.mute_commands = true;
 
 	S9xSGBSplitLoadBatteries(battery_base_path);
 	SplitStaggerSeats();
@@ -2941,7 +3085,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	SGB::Instance().DebugImpl()->sgb_pkt.mute_commands = false;
 	SGB::SerialSplitDetach();
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k) g_split_cores[k].reset();
-	for (int k = 0; k < SGB_MAX_LINK_PLAYERS; ++k) g_split_snap_valid[k] = false;
+	SplitDropSnaps();
 	g_split_players = 0;
 	g_echo_frames   = 0;
 	g_placer_said  = false;
@@ -3191,32 +3335,31 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 	const int i = player - 1;
 	if (!dest || i < 1 || i >= n) return false;
 
+	// No frame of its own yet — held at the cart's first instruction while
+	// the master runs its boot ROM, or freshly reset. The core's LCD is off
+	// and blitting it gives DMG white; the master shows black here, so a
+	// seat does too rather than flashing a white pane.
+	if (!g_split_snap_valid[i] && Settings.SGB_BIOSModeActive)
+	{
+		std::memset(dest, 0,
+		            SGB_GB_SCREEN_W * SGB_GB_SCREEN_H * sizeof(uint16_t));
+		return true;
+	}
+
 	// BIOS-mode sessions dress every seat straight from SNES CGRAM - the
 	// palette ground truth where game packets, the BIOS's per-title
 	// presets and the user's SGB-menu picks all land. Shade 0 is the
 	// shared backdrop color; our attribute decode picks the palette.
 	if (Settings.SGB_BIOSModeActive && g_split_snap_valid[i])
 	{
-		static constexpr uint16_t kBiosPal[4] = {0x67BE, 0x225D, 0x1956, 0x006A};
-		const bool cgram_live = (PPU.CGDATA[0] | PPU.CGDATA[1] |
-		                         PPU.CGDATA[2] | PPU.CGDATA[3]) != 0;
 		const SGB::SgbState &st = SGB::Instance().DebugImpl()->sgb_state;
-		const uint8_t *sh  = g_split_snap_shades[i];
+		const uint8_t *sh   = g_split_snap_shades[i];
 
-		// CGRAM is fixed for the frame and the attribute map is per 8x8
-		// tile, so a seat can only ever use these sixteen colors: resolve
-		// them once instead of calling SgbGetTilePalette and BgrToHost per
-		// pixel, which was 23040 lookups a seat and fourteen seats a frame.
+		// Resolved once rather than per pixel: SgbGetTilePalette and
+		// BgrToHost per pixel was 23040 lookups a seat, fourteen seats
+		// a frame.
 		uint16_t host[4][4];
-		for (int p = 0; p < 4; ++p)
-			for (int s = 0; s < 4; ++s)
-			{
-				uint16_t bgr;
-				if (!cgram_live) bgr = kBiosPal[s];
-				else if (s == 0) bgr = PPU.CGDATA[0] & 0x7FFF;
-				else             bgr = PPU.CGDATA[p * 16 + s] & 0x7FFF;
-				host[p][s] = SGB::BgrToHost(bgr);
-			}
+		const bool cgram_live = BuildBiosPalette(host);
 
 		for (uint32_t ty = 0; ty < SGB_GB_SCREEN_H / 8; ++ty)
 			for (uint32_t tx = 0; tx < SGB_GB_SCREEN_W / 8; ++tx)
@@ -3372,6 +3515,18 @@ static constexpr int32_t kSeatSlaveSlice = 456;
 static void SplitRunSeatsSlaved(int32_t gb_cycles)
 {
 	if (g_split_players < 2 || !Settings.SGB_BIOSModeActive) return;
+
+	// The BIOS power-on-resets the master when it releases it, which maps
+	// the GB boot ROM: the master then spends frames in it before reaching
+	// the cart at $0100. Seats have no boot ROM and would play through
+	// that window, coming out of it permanently ahead — the lead that no
+	// amount of frame delay ever moved. Hold them at the cart's first
+	// instruction until the master gets there.
+	if (SGB::Instance().DebugImpl()->mem.boot_rom_enabled)
+	{
+		g_seat_slave_accum = 0;
+		return;
+	}
 
 	g_seat_slave_accum += gb_cycles;
 	if (g_seat_slave_accum < kSeatSlaveSlice) return;

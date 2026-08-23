@@ -5557,9 +5557,22 @@ int WINAPI WinMain(
 			rewindContentFrame++;
 			if (Settings.SGB_BIOSModeActive)
 			{
-				static bool   sgbCpDone  = false;
-				static uint32 sgbCpPkts  = 0;
-				static uint32 sgbCpQuiet = 0;
+				static bool   sgbCpDone    = false;
+				static uint32 sgbCpPkts    = 0;
+				static uint32 sgbCpQuiet   = 0;
+				static int    sgbCpPlayers = 0;
+				// A checkpoint taken before the cable was plugged in holds no
+				// seats, and one taken for a different seat count is not this
+				// session. Either way, take it again.
+				const int sgbPlayers = S9xSGBSplitPlayers ();
+				if (sgbPlayers != sgbCpPlayers)
+				{
+					sgbCpPlayers = sgbPlayers;
+					S9xSGBInvalidateSoftResetCheckpoint ();
+					sgbCpDone  = false;
+					sgbCpPkts  = S9xSGBGetPacketCount ();
+					sgbCpQuiet = 0;
+				}
 				if (!S9xSGBBootHandoffCaptured())
 				{
 					S9xSGBInvalidateSoftResetCheckpoint();

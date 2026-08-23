@@ -171,6 +171,13 @@ static uint8  *sgb_softreset_state       = NULL;
 static uint32  sgb_softreset_state_size  = 0;
 static bool8   sgb_softreset_state_valid = FALSE;
 
+// The seats ride alongside: they are not in snes9x's freeze, and restoring
+// without them leaves every seat at the cart while the master resumes
+// mid-game. Zero size means the checkpoint was taken outside a link session.
+static uint8  *sgb_softreset_seats       = NULL;
+static size_t  sgb_softreset_seats_cap   = 0;
+static size_t  sgb_softreset_seats_size  = 0;
+
 void S9xSGBCaptureSoftResetCheckpoint (void)
 {
 	if (!Settings.SGB_BIOSModeActive)
@@ -185,6 +192,20 @@ void S9xSGBCaptureSoftResetCheckpoint (void)
 		sgb_softreset_state_size = sz;
 	}
 	sgb_softreset_state_valid = S9xFreezeGameMem(sgb_softreset_state, sgb_softreset_state_size);
+
+	sgb_softreset_seats_size = 0;
+	if (sgb_softreset_state_valid && S9xSGBSplitCheckpointable())
+	{
+		const size_t need = S9xSGBSplitStateSize();
+		if (need > sgb_softreset_seats_cap)
+		{
+			delete[] sgb_softreset_seats;
+			sgb_softreset_seats     = new uint8[need];
+			sgb_softreset_seats_cap = need;
+		}
+		if (S9xSGBSplitStateSave(sgb_softreset_seats, sgb_softreset_seats_cap))
+			sgb_softreset_seats_size = need;
+	}
 }
 
 void S9xSGBInvalidateSoftResetCheckpoint (void)
@@ -195,6 +216,13 @@ void S9xSGBInvalidateSoftResetCheckpoint (void)
 static bool8 S9xSGBRestoreSoftResetCheckpoint (void)
 {
 	if (!sgb_softreset_state_valid)
+		return FALSE;
+
+	// Decided before the unfreeze, because the unfreeze cold-resets every
+	// seat and there is no way back from that: a link session whose seats
+	// are not in this checkpoint has to power-cycle instead of restoring
+	// the master alone and leaving the seats behind it.
+	if (S9xSGBSplitActive() && sgb_softreset_seats_size == 0)
 		return FALSE;
 
 	size_t  sram_size = S9xSGBGetSRAMSize();
@@ -218,6 +246,13 @@ static bool8 S9xSGBRestoreSoftResetCheckpoint (void)
 			memcpy(live, sram_copy, sram_size);
 		delete[] sram_copy;
 	}
+
+	// After the unfreeze, so it lands on top of the seats S9xReset just
+	// cold-reset. A failure here would leave them at the cart with the
+	// master mid-game, so say so and let the caller power-cycle.
+	if (result == SUCCESS && S9xSGBSplitActive() && sgb_softreset_seats_size > 0 &&
+	    !S9xSGBSplitStateLoad(sgb_softreset_seats, sgb_softreset_seats_size))
+		return FALSE;
 
 	return (result == SUCCESS) ? TRUE : FALSE;
 }

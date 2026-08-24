@@ -11616,6 +11616,9 @@ static struct { int cols, x, y, w, h, sw, sh; } GBSeatGeom;
 static uint16 GBSeatStage[SGB_MAX_LINK_PLAYERS - 1][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
 static uint16 GBSeatStageBorder[SNES_WIDTH * SNES_HEIGHT];
 static bool   GBSeatStageBordered = false;
+// False while a seat has no frame of its own (master mid-boot): its window
+// then keeps the master's pane, so both play the same boot sequence.
+static bool   GBSeatStageOwn[SGB_MAX_LINK_PLAYERS - 1] = {};
 static volatile LONG GBSeatBusy = 0;
 
 static HANDLE        GBSeatEvent  = NULL;
@@ -11729,8 +11732,17 @@ static void GBSeatRenderStaged ()
 
 		if (GBSeatStageBordered)
 		{
-			GBSeatConvert (GBSeatStage[k], SGB_GB_SCREEN_W, 48, 40,
-			               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			// The DIB is shared across seats: a seat without its own frame
+			// restores the master's pane over the previous seat's. Row 39,
+			// not 40: the PPU skips line 0, so the whole picture — pane
+			// included — sits one line high in the rendered frame.
+			if (GBSeatStageOwn[k])
+				GBSeatConvert (GBSeatStage[k], SGB_GB_SCREEN_W, 48, 39,
+				               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			else
+				GBSeatConvert (GBSeatStageBorder + 39 * SNES_WIDTH + 48,
+				               SNES_WIDTH, 48, 39,
+				               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
 			GBSeatPresent (hWnd, SNES_WIDTH, SNES_HEIGHT);
 		}
 		else
@@ -11894,13 +11906,16 @@ static void GBSeatPresentFrame ()
 			memcpy (GBSeatStageBorder + y * SNES_WIDTH, GFX.Screen + y * pitch,
 			        SNES_WIDTH * sizeof (uint16));
 		GBSeatStageBordered = true;
+		// Date the pane on the frame being presented; the seat snapshots
+		// staged below present at the age it measures.
+		S9xSGBSplitMeasurePaneSync (GFX.Screen, GFX.RealPPL);
 	}
 
 	// A closed seat is not drawn, so it is not staged either — in BIOS mode
 	// that copy is a per-pixel recolor, not a memcpy.
 	for (int k = 0; k < GBSeatCount; k++)
 		if (GBSeatAlive[k])
-			S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
+			GBSeatStageOwn[k] = S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
 
 	SetEvent (GBSeatEvent);
 }

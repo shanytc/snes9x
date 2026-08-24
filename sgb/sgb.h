@@ -378,8 +378,29 @@ size_t  S9xSGBSplitStateSize(void);
 bool    S9xSGBSplitStateSave(uint8_t *buf, size_t cap);
 bool    S9xSGBSplitStateLoad(const uint8_t *buf, size_t size);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
-// One seat's latest finished frame (160x144) for the viewer transport.
+// One seat's frame (160x144) for its window. In BIOS mode the frame is the
+// snapshot the measured pane delay selects; false = the seat has nothing of
+// its own yet (master mid-boot) and its window should keep the master's pane.
 bool S9xSGBSplitCopySeatFrame(int player /*2..4*/, uint16_t *dest);
+
+// BIOS-mode pane-sync instrument. The master's pane crosses the ICD2 ring,
+// the BIOS's VRAM lifts and the SNES PPU before it is seen; the seats' panes
+// do not. MeasurePaneSync matches the presented SNES pane (per 8-pixel band)
+// against recent master frames to find the frame age actually on screen, and
+// derives the snapshot age seats present at so both show the same moment.
+// Call once per host frame with the frame being presented.
+struct SgbPaneSync
+{
+	bool     valid;         // a resolved measurement exists this frame
+	uint32_t newest_frame;  // master frames completed at measure time
+	int      lag_min;       // newest - matched frame, best band
+	int      lag_max;       // newest - matched frame, worst band
+	int      conf_pct;      // mean best-match percentage across bands
+	int      seat_delay;    // snapshot age seats present at (frames)
+	char     band_map[19];  // per-band lag digit, '=' ambiguous, '?' no match
+};
+void S9xSGBSplitMeasurePaneSync(const uint16_t *snes_frame, uint32_t pitch_pixels);
+void S9xSGBSplitGetPaneSync(SgbPaneSync *out);
 // Trace comparator: our decoded SGB palettes vs the BIOS's rendered truth.
 void S9xSGBDebugSgbCompare(const uint16_t *snes_frame, uint32_t pitch_pixels,
                            const uint16_t *cgram);

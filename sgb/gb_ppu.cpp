@@ -824,6 +824,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				}
 				p.mode          = PpuMode::VBlank;
 				p.frame_ready   = true;
+				++p.frame_no;
 				p.present_hold  = false;
 				p.window_line   = 0;
 				p.window_active = false;

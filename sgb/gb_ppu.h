@@ -199,6 +199,10 @@ struct Ppu
 	bool     icd_feed = true;
 
 	uint64_t vram_writes = 0;
+
+	// Completed frames since core creation (bumped where frame_ready
+	// latches). Pane-sync bookkeeping only; monotonic, not serialized.
+	uint32_t frame_no = 0;
 };
 
 void PpuReset(Ppu &p);

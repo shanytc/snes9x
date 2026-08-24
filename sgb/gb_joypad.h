@@ -38,6 +38,12 @@ struct Joypad
 	bool    sgb_active = false;
 	uint8_t sgb_index  = 0;
 	uint8_t sgb_pads[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+
+	// A split-screen seat is a Game Boy in its own Super Game Boy: it
+	// answers that same rotation probe, so its game colors itself like
+	// the master's, but its buttons are its own pad rather than a BIOS
+	// mirror of the SNES ones — there is no BIOS behind a seat.
+	bool    sgb_probe  = false;
 };
 
 enum : uint8_t

@@ -72,6 +72,12 @@ uint8_t JoypadRead(const Joypad &j)
 			if (sel_btns) low &= btns_n;
 		}
 	}
+	else if (j.sgb_probe && !sel_dpad && !sel_btns)
+	{
+		// Same probe answer, no BIOS behind it: a seat's own SGB says it
+		// is there, and the buttons below stay the seat's own.
+		low = static_cast<uint8_t>(~j.sgb_index & 0x0F);
+	}
 	else
 	{
 		if (sel_dpad) low &= j.dpad;

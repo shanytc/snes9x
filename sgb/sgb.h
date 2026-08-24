@@ -386,6 +386,8 @@ void S9xSGBDebugSgbCompare(const uint16_t *snes_frame, uint32_t pitch_pixels,
 // The primary core's decoded SGB state, for debug tooling.
 namespace SGB { struct SgbState; struct PacketState; }
 const SGB::SgbState *S9xSGBGetSgbState(void);
+// Per-seat (1..N, 1 = primary). Null when that seat is not running.
+const SGB::SgbState *S9xSGBSplitGetSgbState(int player);
 const SGB::PacketState *S9xSGBGetPacketState(void);
 int  S9xSGBSplitScreenWidth(void);
 int  S9xSGBSplitScreenHeight(void);
@@ -484,6 +486,9 @@ bool S9xSGBGetLayerEnabled(int layer);
 void S9xSGBCaptureScanline(const unsigned char *pixels);
 void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);
+// Same, for the core that owns the memory doing the write — a split-screen
+// seat sniffs its own packets, not the primary's. Null owner is a no-op.
+void S9xSGBOnJoyserWriteCore(void *core, uint8_t value);
 bool S9xSGBIsActive(void);
 
 // Composite the current frame (border + GB screen + mask mode) into a

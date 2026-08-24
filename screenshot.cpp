@@ -85,16 +85,20 @@ bool8 S9xDoScreenshot (int width, int height)
 	imgwidth  = width;
 	imgheight = height;
 
+	// A GB frame's pixels are already square: a split view is wider than 256
+	// because seats tile across it, not because the PPU went hi-res.
+	const bool gb_native = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+
 	if (Settings.StretchScreenshots == 1)
 	{
-		if (width > SNES_WIDTH && height <= SNES_HEIGHT_EXTENDED)
+		if (!gb_native && width > SNES_WIDTH && height <= SNES_HEIGHT_EXTENDED)
 			imgheight = height << 1;
 	}
 	else if (Settings.StretchScreenshots == 2)
 	{
-		if (width  <= SNES_WIDTH)
+		if (gb_native || width  <= SNES_WIDTH)
 			imgwidth  = width  << 1;
-		if (height <= SNES_HEIGHT_EXTENDED)
+		if (gb_native || height <= SNES_HEIGHT_EXTENDED)
 			imgheight = height << 1;
 	}
 

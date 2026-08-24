@@ -50,7 +50,7 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 // can be told apart, including by our own second-instance lookup.
 #define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
 
-// Marks the instance auto-launched by the Game Boy Link Cable menu.
+// Marks the instance auto-launched by the Link Cable menu.
 // "-gblinkpeer=<pid>,<launcher>,<index>,<players>,<bios>" carries the
 // launcher's process id and player index, this instance's own index, how
 // many players the session is for, and the launcher's booted BIOS mode
@@ -73,7 +73,7 @@ extern int GBLinkSessionPlayers;
 // spawned window tiles itself next to it split-screen style.
 extern int GBLinkLauncherIndex;
 
-// Link Same Game runs its players as in-process split screen instead of
+// Link Current Game runs its players as in-process split screen instead of
 // spawned instances. Persisted; consulted at session start.
 extern bool GBLinkSplitScreen;
 

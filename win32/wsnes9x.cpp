@@ -2123,7 +2123,7 @@ static void BuildLanguageMenu(HMENU bar)
 // Keep the menu open when the Split Screen preference is clicked: run the
 // toggle ourselves and swallow the click so the menu never dismisses.
 static HHOOK s_menu_filter_hook = NULL;
-// The "Link Same Game" popup, tracked by CheckMenuStates. While a menu is
+// The "Link Current Game" popup, tracked by CheckMenuStates. While a menu is
 // up the mouse is captured by the owner, so hit-test this handle directly.
 static HMENU s_gb_same_hmenu = NULL;
 
@@ -3258,7 +3258,7 @@ LRESULT CALLBACK WinProc(
 			}
 			break;
 		case ID_EMULATION_GB_LINK_DISCONNECT:
-			// A Same Game seat has no socket: leaving means closing its
+			// A Current Game seat has no socket: leaving means closing its
 			// window. Only an Other Game peer unplugs a TCP link here.
 			if (S9xSGBViewerClientActive ())
 			{
@@ -5953,7 +5953,7 @@ static void CheckMenuStates ()
 		                   !sgb1_bios) ||
 		                  S9xSGBLinkIsEnabled () ||
 		                  Settings.GBLinkPeerInstance;
-		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Link Cable"),
+		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("&Link Cable"),
 		                   ID_EMULATION_RUNAHEAD_POPUP, show, &s_link_hmenu, &s_link_parent);
 
 		// A spawned instance never chooses the session shape — only the
@@ -6026,7 +6026,7 @@ static void CheckMenuStates ()
 			mii.fState = gblink ? MFS_ENABLED : MFS_DISABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_UNLINK, FALSE, &mii);
 
-			// The whole Same Game submenu greys during an Other session.
+			// The whole Current Game submenu greys during an Other session.
 			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_POPUP, FALSE, &mii);
 
@@ -6089,7 +6089,7 @@ static void CheckMenuStates ()
 					            MF_BYCOMMAND);
 				if (want15)
 				{
-					// The popup greys with its Same Game family; the live
+					// The popup greys with its Current Game family; the live
 					// seat count owns the tick inside it.
 					mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
 					SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_RING_POPUP,
@@ -10666,12 +10666,12 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 }
 #endif
 
-// Game Boy link cable (Emulation > Game Boy Link Cable).
+// Game Boy link cable (Emulation > Link Cable).
 //
 // Ticking an item senses the role and, if this instance ends up hosting,
 // launches the missing instances with the item already ticked. Same-game
 // and other-game differ only in what the new instance loads; the player
-// count under "Link Same Game" decides between the direct cable and the
+// count under "Link Current Game" decides between the direct cable and the
 // DMG-07 adapter, which this instance hosts while the launched ones dial
 // in as ordinary clients.
 enum
@@ -10692,7 +10692,7 @@ int GBLinkSessionPlayers = 2;
 int GBLinkLauncherIndex = 1;
 int GBLinkUserBiosPref  = -1;
 
-// Link Same Game runs its 2-4 players as in-process split screen rather
+// Link Current Game runs its 2-4 players as in-process split screen rather
 // than spawned instances. A preference, not a session: it decides what
 // the next click of a players item does.
 bool GBLinkSplitScreen = false;
@@ -11216,7 +11216,7 @@ static void WinStartGBLink (int mode, int players)
 	{
 		MessageBox (GUI.hWnd,
 		            _tFromChar (err[0] ? err : "Could not open the link cable socket."),
-		            TEXT("Game Boy Link Cable"), MB_OK | MB_ICONERROR);
+		            TEXT("Link Cable"), MB_OK | MB_ICONERROR);
 		return;
 	}
 
@@ -11329,7 +11329,7 @@ void WinToggleGBLink (int mode, int players)
 		return;
 	}
 
-	// Every Same Game session runs on the split engine — the one
+	// Every Current Game session runs on the split engine — the one
 	// architecture that cannot desync. Split checked = one shared window
 	// (BIOS-less only), unchecked = a viewer window per player; in BIOS
 	// mode the seats slave to the SNES-driven GB clock. Only Link Other
@@ -11389,7 +11389,7 @@ void WinToggleGBLinkSplit ()
 
 // Hotkey face of the link menu, same gating: the opposite family blocks
 // mid-session, and a spawned seat never chooses the shape. what = 2..4
-// for Same Game, 0 for Other Game, -1 split toggle, -2 end the session.
+// for Current Game, 0 for Other Game, -1 split toggle, -2 end the session.
 void WinGBLinkHotkey (int what)
 {
 	const int  live      = WinGetGBLinkMode ();
@@ -11412,7 +11412,7 @@ void WinGBLinkHotkey (int what)
 			if (Settings.GBLinkPeerInstance) return;
 			if (same_live)
 			{
-				S9xSetInfoString ("Link cable: end the Same Game session first");
+				S9xSetInfoString ("Link cable: end the Current Game session first");
 				return;
 			}
 			WinToggleGBLink (GBLINK_DIFF, 2);
@@ -11443,8 +11443,8 @@ void WinGBLinkHotkey (int what)
 			if (GBLinkSplitScreen != was &&
 			    !S9xSGBSplitActive () && !S9xSGBLinkIsEnabled ())
 				S9xSetInfoString (GBLinkSplitScreen
-				                  ? "Split screen: on for the next Same Game session"
-				                  : "Split screen: off for the next Same Game session");
+				                  ? "Split screen: on for the next Current Game session"
+				                  : "Split screen: off for the next Current Game session");
 			return;
 		}
 
@@ -12072,7 +12072,7 @@ static void WinStopGBSplit ()
 	S9xSetInfoString (viewer ? "Link cable: disconnected" : "Split screen: off");
 }
 
-// The socketless Same Game session: every seat emulates inside this process
+// The socketless Current Game session: every seat emulates inside this process
 // on the split engine, so a desync is structurally impossible; the spawned
 // windows only view a seat over shared memory and send their joypad back.
 static void WinStartGBViewerSession (int players)
@@ -16329,7 +16329,7 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
-    // Tab 5: Game Boy Link Cable - the menu's session controls as keys.
+    // Tab 5: Link Cable - the menu's session controls as keys.
     {
         { &CustomKeys.Link2P,          &CustomKeysExtra.Link2P,          HOTKEYS_LINK_2P },
         { &CustomKeys.Link3P,          &CustomKeysExtra.Link3P,          HOTKEYS_LINK_3P },

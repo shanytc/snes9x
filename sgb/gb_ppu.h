@@ -347,6 +347,9 @@ struct Ppu
 	// 1820 dots of VBlank start (SameBoy frame_repeat_countdown): dots left
 	// before the deferred blank lands, 0 = none pending.
 	int16_t  blank_defer = 0;
+	// Completed frames since core creation (bumped where frame_ready
+	// latches). Pane-sync bookkeeping only; monotonic, not serialized.
+	uint32_t frame_no = 0;
 };
 
 void PpuReset(Ppu &p);

@@ -396,7 +396,7 @@ static void fx_with_r15 (void)
 
 // 30-3b - stw (rn) - store word
 #define FX_STW(reg) \
-	FX_CYC(GSU.vCostMem << 1); \
+	FX_RAM_WRITE_WORD \
 	GSU.vLastRamAdr = GSU.avReg[reg]; \
 	RAM(GSU.avReg[reg]) = (uint8) SREG; \
 	RAM(GSU.avReg[reg] ^ 1) = (uint8) (SREG >> 8); \
@@ -465,7 +465,7 @@ static void fx_stw_r11 (void)
 
 // 30-3b (ALT1) - stb (rn) - store byte
 #define FX_STB(reg) \
-	FX_CYC(GSU.vCostMem); \
+	FX_RAM_WRITE_BYTE \
 	GSU.vLastRamAdr = GSU.avReg[reg]; \
 	RAM(GSU.avReg[reg]) = (uint8) SREG; \
 	CLRFLAGS; \
@@ -569,7 +569,7 @@ static void fx_alt3 (void)
 
 // 40-4b - ldw (rn) - load word from RAM
 #define FX_LDW(reg) \
-	FX_CYC(GSU.vCostMem << 1); \
+	FX_SYNC_RAM \
 	uint32	v; \
 	GSU.vLastRamAdr = GSU.avReg[reg]; \
 	v = (uint32) RAM(GSU.avReg[reg]); \
@@ -641,7 +641,7 @@ static void fx_ldw_r11 (void)
 
 // 40-4b (ALT1) - ldb (rn) - load byte
 #define FX_LDB(reg) \
-	FX_CYC(GSU.vCostMem); \
+	FX_SYNC_RAM \
 	uint32	v; \
 	GSU.vLastRamAdr = GSU.avReg[reg]; \
 	v = (uint32) RAM(GSU.avReg[reg]); \
@@ -713,7 +713,6 @@ static void fx_ldb_r11 (void)
 // 4c - plot - plot pixel with R1, R2 as x, y and the color register as the color
 static void fx_plot_2bit (void)
 {
-	FX_CYC(((GSU.vCostMem << 1) >> 3) + 1);
 	uint32	x = USEX8(R1);
 	uint32	y = USEX8(R2);
 	uint8	*a;
@@ -730,6 +729,8 @@ static void fx_plot_2bit (void)
 
 	if (!(GSU.vPlotOptionReg & 0x01) && !(COLR & 0xf))
 		return;
+
+	FX_CYC(((GSU.vCostMem << 1) >> 3) + 1);
 
 	if (GSU.vPlotOptionReg & 0x02)
 		c = ((x ^ y) & 1) ? (uint8) (GSU.vColorReg >> 4) : (uint8) GSU.vColorReg;
@@ -779,7 +780,6 @@ static void fx_rpix_2bit (void)
 // 4c - plot - plot pixel with R1, R2 as x, y and the color register as the color
 static void fx_plot_4bit (void)
 {
-	FX_CYC(((GSU.vCostMem << 2) >> 3) + 1);
 	uint32	x = USEX8(R1);
 	uint32	y = USEX8(R2);
 	uint8	*a;
@@ -796,6 +796,8 @@ static void fx_plot_4bit (void)
 
 	if (!(GSU.vPlotOptionReg & 0x01) && !(COLR & 0xf))
 		return;
+
+	FX_CYC(((GSU.vCostMem << 2) >> 3) + 1);
 
 	if (GSU.vPlotOptionReg & 0x02)
 		c = ((x ^ y) & 1) ? (uint8) (GSU.vColorReg >> 4) : (uint8) GSU.vColorReg;
@@ -857,7 +859,6 @@ static void fx_rpix_4bit (void)
 // 4c - plot - plot pixel with R1, R2 as x, y and the color register as the color
 static void fx_plot_8bit (void)
 {
-	FX_CYC(GSU.vCostMem + 1);
 	uint32	x = USEX8(R1);
 	uint32	y = USEX8(R2);
 	uint8	*a;
@@ -881,6 +882,8 @@ static void fx_plot_8bit (void)
 	else
 	if (!(GSU.vPlotOptionReg & 0x01) && !c)
 		return;
+
+	FX_CYC(GSU.vCostMem + 1);
 
 	a = GSU.apvScreen[y >> 3] + GSU.x[x >> 3] + ((y & 7) << 1);
 	v = 128 >> (x & 7);
@@ -2536,7 +2539,7 @@ static void fx_umult_i15 (void)
 // 90 - sbk - store word to last accessed RAM address
 static void fx_sbk (void)
 {
-	FX_CYC(GSU.vCostMem << 1);
+	FX_RAM_WRITE_WORD
 	RAM(GSU.vLastRamAdr) = (uint8) SREG;
 	RAM(GSU.vLastRamAdr ^ 1) = (uint8) (SREG >> 8);
 	CLRFLAGS;
@@ -2838,11 +2841,11 @@ static void fx_ibt_r15 (void)
 
 // a0-af (ALT1) - lms rn, (yy) - load word from RAM (short address)
 #define FX_LMS(reg) \
-	FX_CYC(GSU.vCostMem << 1); \
 	GSU.vLastRamAdr = ((uint32) PIPE) << 1; \
 	R15++; \
 	FETCHPIPE; \
 	R15++; \
+	FX_SYNC_RAM \
 	GSU.avReg[reg] = (uint32) RAM(GSU.vLastRamAdr); \
 	GSU.avReg[reg] |= ((uint32) RAM(GSU.vLastRamAdr + 1)) << 8; \
 	CLRFLAGS
@@ -2932,10 +2935,10 @@ static void fx_lms_r15 (void)
 // XXX: If rn == r15, is the value of r15 before or after the extra byte is read ?
 #define FX_SMS(reg) \
 	uint32	v = GSU.avReg[reg]; \
-	FX_CYC(GSU.vCostMem << 1); \
 	GSU.vLastRamAdr = ((uint32) PIPE) << 1; \
 	R15++; \
 	FETCHPIPE; \
+	FX_RAM_WRITE_WORD \
 	RAM(GSU.vLastRamAdr) = (uint8) v; \
 	RAM(GSU.vLastRamAdr + 1) = (uint8) (v >> 8); \
 	CLRFLAGS; \
@@ -3584,6 +3587,7 @@ static void fx_getc (void)
 // df (ALT2) - ramb - set current RAM bank
 static void fx_ramb (void)
 {
+	FX_SYNC_RAM
 	GSU.vRamBankReg = SREG & (FX_RAM_BANKS - 1);
 	GSU.pvRamBank = GSU.apvRamBank[GSU.vRamBankReg & 0x3];
 	CLRFLAGS;
@@ -3593,6 +3597,7 @@ static void fx_ramb (void)
 // df (ALT3) - romb - set current ROM bank
 static void fx_romb (void)
 {
+	FX_SYNC_ROM
 	GSU.vRomBankReg = USEX8(SREG) & 0x7f;
 	GSU.pvRomBank = GSU.apvRomBank[GSU.vRomBankReg];
 	CLRFLAGS;
@@ -3688,7 +3693,7 @@ static void fx_getb (void)
 {
 	uint32	v;
 
-	FX_CYC(GSU.vCostMem);
+	FX_SYNC_ROM
 #ifndef FX_DO_ROMBUFFER
 	v = (uint32) ROM(R14);
 #else
@@ -3705,7 +3710,7 @@ static void fx_getbh (void)
 {
 	uint32	v;
 
-	FX_CYC(GSU.vCostMem);
+	FX_SYNC_ROM
 #ifndef FX_DO_ROMBUFFER
 	uint32	c = (uint32) ROM(R14);
 #else
@@ -3723,7 +3728,7 @@ static void fx_getbl (void)
 {
 	uint32	v;
 
-	FX_CYC(GSU.vCostMem);
+	FX_SYNC_ROM
 #ifndef FX_DO_ROMBUFFER
 	uint32	c = (uint32) ROM(R14);
 #else
@@ -3741,7 +3746,7 @@ static void fx_getbs (void)
 {
 	uint32	v;
 
-	FX_CYC(GSU.vCostMem);
+	FX_SYNC_ROM
 #ifndef FX_DO_ROMBUFFER
 	int8	c;
 	c = ROM(R14);
@@ -3850,7 +3855,6 @@ static void fx_iwt_r15 (void)
 
 // f0-ff (ALT1) - lm rn, (xx) - load word from RAM
 #define FX_LM(reg) \
-	FX_CYC(GSU.vCostMem << 1); \
 	GSU.vLastRamAdr = PIPE; \
 	R15++; \
 	FETCHPIPE; \
@@ -3858,6 +3862,7 @@ static void fx_iwt_r15 (void)
 	GSU.vLastRamAdr |= USEX8(PIPE) << 8; \
 	FETCHPIPE; \
 	R15++; \
+	FX_SYNC_RAM \
 	GSU.avReg[reg] = RAM(GSU.vLastRamAdr); \
 	GSU.avReg[reg] |= USEX8(RAM(GSU.vLastRamAdr ^ 1)) << 8; \
 	CLRFLAGS
@@ -3947,13 +3952,13 @@ static void fx_lm_r15 (void)
 // XXX: If rn == r15, is the value of r15 before or after the extra bytes are read ?
 #define FX_SM(reg) \
 	uint32	v = GSU.avReg[reg]; \
-	FX_CYC(GSU.vCostMem << 1); \
 	GSU.vLastRamAdr = PIPE; \
 	R15++; \
 	FETCHPIPE; \
 	R15++; \
 	GSU.vLastRamAdr |= USEX8(PIPE) << 8; \
 	FETCHPIPE; \
+	FX_RAM_WRITE_WORD \
 	RAM(GSU.vLastRamAdr) = (uint8) v; \
 	RAM(GSU.vLastRamAdr ^ 1) = (uint8) (v >> 8); \
 	CLRFLAGS; \
@@ -4047,8 +4052,10 @@ uint32 fx_run (uint32 nInstructions)
 	{
 		// nInstructions is a master-cycle budget in this mode; each FX_STEP
 		// accrues its real cost into GSU.vCycles (fetch source, memory ops).
-		GSU.vCycles = 0;
-		while (TF(G) && GSU.vCycles < nInstructions)
+		// vCycles runs monotonically so the ROM/RAM buffer ready-at
+		// timestamps stay valid across the per-line budget slices of a job.
+		uint32	vStart = GSU.vCycles;
+		while (TF(G) && GSU.vCycles - vStart < nInstructions)
 			FX_STEP;
 
 		return (0);

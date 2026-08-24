@@ -217,6 +217,8 @@ struct FxRegs_s
     uint32	vCostFmult;		// fmult/lmult: (MS0 ? 3 : 7) * (CLSR ? 1 : 2)
     uint32	vCostMult;		// mult/umult:   MS0 ? 1 : 2
     uint8	bCycleMode;		// 1 = cycle budget (default), 0 = legacy
+    uint32	vRomReadyAt;	// vCycles when the pending ROM buffer read lands
+    uint32	vRamReadyAt;	// vCycles when the pending RAM buffer write lands
 };
 
 extern struct FxRegs_s	GSU;
@@ -224,6 +226,42 @@ extern struct FxRegs_s	GSU;
 
 
 #define FX_CYC(n)	{ GSU.vCycles += (uint32) (n); }
+
+// Buffer-overlap timing (matching Mesen2): a ROM buffer read starts when R14
+// is set and a posted RAM write drains, both in the background while the GSU
+// keeps executing. An op touching the same bus stalls only for the cycles
+// still remaining, so well-scheduled code (set R14 early, then GETB) pays
+// nothing. Signed diffs keep the comparisons correct across vCycles wrap.
+#define FX_SYNC_ROM \
+{ \
+	int32 _rd = (int32) (GSU.vRomReadyAt - GSU.vCycles); \
+	if (_rd > 0) \
+		GSU.vCycles += (uint32) _rd; \
+}
+
+#define FX_SYNC_RAM \
+{ \
+	int32 _rd = (int32) (GSU.vRamReadyAt - GSU.vCycles); \
+	if (_rd > 0) \
+		GSU.vCycles += (uint32) _rd; \
+}
+
+// Post a byte/word to the RAM write buffer: stall for the previous write,
+// then the new one drains in the background. A word posts two bytes, and the
+// first byte's drain is what delays the second, so one access is charged up
+// front and one is left pending.
+#define FX_RAM_WRITE_BYTE \
+{ \
+	FX_SYNC_RAM; \
+	GSU.vRamReadyAt = GSU.vCycles + GSU.vCostMem; \
+}
+
+#define FX_RAM_WRITE_WORD \
+{ \
+	FX_SYNC_RAM; \
+	GSU.vCycles += GSU.vCostMem; \
+	GSU.vRamReadyAt = GSU.vCycles + GSU.vCostMem; \
+}
 
 // GSU registers
 #define GSU_R0			0x000
@@ -327,7 +365,13 @@ extern struct FxRegs_s	GSU;
 		GSU.vCycles += GSU.vCostCache; \
 	} \
 	else \
+	{ \
+		if (GSU.vPrgBankReg >= 0x70) \
+			FX_SYNC_RAM \
+		else \
+			FX_SYNC_ROM \
 		GSU.vCycles += GSU.vCostMem; \
+	} \
 }
 
 // ABS
@@ -349,8 +393,9 @@ extern struct FxRegs_s	GSU;
 
 #else
 
-// Read R14
-#define READR14			GSU.vRomBuffer = ROM(R14)
+// Read R14, starting the background ROM buffer load (the byte is latched
+// here; FX_SYNC_ROM charges whatever remains of the load when it's consumed)
+#define READR14			{ GSU.vRomBuffer = ROM(R14); GSU.vRomReadyAt = GSU.vCycles + GSU.vCostMem; }
 
 // Test and/or read R14
 #define TESTR14			if (GSU.pvDreg == &R14) READR14

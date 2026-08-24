@@ -557,10 +557,12 @@ struct Emulator::Impl
 	// next GB frame end decode the top-left 128×128 area of the rendered
 	// LCD into the canonical 4 KB byte stream the SGB tile/map handlers
 	// expect.
+	// Every bulk transfer arrives this way, not just the border's: the
+	// palette and attribute files (PAL_TRN, ATTR_TRN) are drawn as tiles
+	// exactly the same and read exactly the same wrong out of VRAM.
 	struct BorderCapture
 	{
-		enum Stage : uint8_t { Idle = 0, ChrTrn = 1, PctTrn = 2 };
-		Stage   stage = Idle;
+		uint8_t cmd = 0;        // 0 = idle, else the *_TRN awaiting a frame
 		// Frames to let the panel finish drawing before the read: the real
 		// BIOS reads its stream a frame after the command, and carts (DK)
 		// still paint the payload during the packet's frame.
@@ -605,11 +607,14 @@ struct Emulator::Impl
 	uint32_t handoff_frames           = 0;
 };
 
-// File-local trampoline — lets the process-global SgbCommandCallback
-// forward into the singleton Emulator's Impl.
-static void SgbCommandTrampoline(uint8_t cmd, const uint8_t *data, uint32_t len)
+// File-local trampoline — forwards the process-global SgbCommandCallback
+// into the core that produced the packet. Every core assembles its own,
+// and a seat's palettes are not the master's.
+static void SgbCommandTrampoline(void *owner, uint8_t cmd,
+                                 const uint8_t *data, uint32_t len)
 {
-	ActiveEmulator().OnSgbCommandInternal(cmd, data, len);
+	Emulator *core = static_cast<Emulator *>(owner);
+	(core ? *core : ActiveEmulator()).OnSgbCommandInternal(cmd, data, len);
 }
 
 Emulator::Emulator() : impl_(new Impl) {}
@@ -744,7 +749,7 @@ void Emulator::Reset()
 	}
 	MbcReset(impl_->cart.mbc);
 	MbcUnlReset(impl_->cart);
-	impl_->border_capture.stage = Impl::BorderCapture::Idle;
+	impl_->border_capture.cmd   = 0;
 	impl_->sgbc_trn.Reset();
 	impl_->sgbc_lcd.Reset();
 	impl_->border_transfers     = 0;
@@ -772,6 +777,16 @@ void Emulator::Reset()
 	impl_->icd2.joypad[2] = 0xFF;
 	impl_->icd2.joypad[3] = 0xFF;
 
+	// Nothing writes the ICD2 control register behind a seat, so the
+	// rotation its game watches for has to start here. The auto-drop puts
+	// it back to one player once the detection ritual has had its polls,
+	// which is what a game that only ever polls needs to see.
+	if (impl_->BiosMode() && !impl_->mem.sgb_feed)
+	{
+		impl_->icd2.mlt_players         = 2;
+		impl_->icd2.mlt_auto_drop_polls = 1;
+	}
+
 	// ICD2 joypad bridge — only active when the SNES BIOS is driving
 	// $6004-$6007 directly (BIOS mode). In BIOS-less mode the SetJoypad
 	// path feeds the standard JoypadSet flow instead, so we leave the
@@ -779,12 +794,17 @@ void Emulator::Reset()
 	// Only the core wired to the BIOS: split seats are plain DMGs whose
 	// pads come from SetJoypad — the bridge would read a frozen 0xFF.
 	impl_->joypad.sgb_active = impl_->BiosMode() && impl_->mem.sgb_feed;
+	// A seat has no BIOS to answer the probe for it, so it answers its
+	// own: without that its game runs as a plain DMG and sends none of
+	// the packets that color its window.
+	impl_->joypad.sgb_probe  = impl_->BiosMode() && !impl_->mem.sgb_feed;
 	impl_->joypad.sgb_index  = 0;
 	impl_->joypad.sgb_pads[0] = 0xFF;
 	impl_->joypad.sgb_pads[1] = 0xFF;
 	impl_->joypad.sgb_pads[2] = 0xFF;
 	impl_->joypad.sgb_pads[3] = 0xFF;
 
+	impl_->mem.sgb_owner = this;
 	impl_->mem.ppu    = &impl_->ppu;
 	impl_->mem.apu    = &impl_->apu;
 	impl_->mem.timer  = &impl_->timer;
@@ -1879,18 +1899,14 @@ static void DecodeBorderCapture(const uint8_t *raw_fb, uint8_t *out_4kb)
 			uint8_t *tile_out = &out_4kb[i * 16];
 			for (int row = 0; row < 8; ++row)
 			{
-				uint8_t plane0 = 0, plane1 = 0;
-				for (int px = 0; px < 8; ++px)
-				{
-					const uint8_t pix = static_cast<uint8_t>(
-						raw_fb[(ty * 8 + row) * GB_SCREEN_WIDTH + (tx * 8 + px)] & 0x03);
-					const int bit = 7 - px;
-					if (pix & 1) plane0 = static_cast<uint8_t>(plane0 | (1u << bit));
-					if (pix & 2) plane1 = static_cast<uint8_t>(plane1 | (1u << bit));
-				}
-				tile_out[row * 2 + 0] = plane0;
-				tile_out[row * 2 + 1] = plane1;
+				const uint8_t pix = static_cast<uint8_t>(
+					raw_fb[(ty * 8 + row) * GB_SCREEN_WIDTH + (tx * 8 + px)] & 0x03);
+				const int bit = 7 - px;
+				if (pix & 1) plane0 = static_cast<uint8_t>(plane0 | (1u << bit));
+				if (pix & 2) plane1 = static_cast<uint8_t>(plane1 | (1u << bit));
 			}
+			tile_out[row * 2 + 0] = plane0;
+			tile_out[row * 2 + 1] = plane1;
 		}
 	}
 }
@@ -2000,7 +2016,7 @@ void Emulator::RunCycles(int32_t tcycles)
 		impl_->cgb_overlay_ly = ly;
 	}
 
-	if (impl_->border_capture.stage != Impl::BorderCapture::Idle &&
+	if (impl_->border_capture.cmd != 0 &&
 	    impl_->ppu.frame_ready)
 	{
 		if (impl_->border_capture.skip)
@@ -2014,20 +2030,17 @@ void Emulator::RunCycles(int32_t tcycles)
 		uint8_t decoded[4096];
 		DecodeBorderCapture((impl_->sgbc && impl_->ppu.cgb) ? impl_->sgbc_trn.Frame()
 		                                                    : impl_->ppu.raw_framebuffer, decoded);
-		const uint8_t cmd =
-			(impl_->border_capture.stage == Impl::BorderCapture::ChrTrn)
-				? static_cast<uint8_t>(0x13)
-				: static_cast<uint8_t>(0x14);
+		const uint8_t cmd = impl_->border_capture.cmd;
 		++g_sgb_dbg.cap_fired;
-		SgbHandleCommand(impl_->sgb_state, cmd,
+		SgbHandleCommand(impl_->sgb_state, impl_->border_capture.cmd,
 		                 impl_->border_capture.pkt, 16,
 		                 decoded, impl_->ppu.framebuffer);
 		++impl_->border_plane;
 		if (cmd == 0x14) ++impl_->border_pct;
-		impl_->border_capture.stage = Impl::BorderCapture::Idle;
+		impl_->border_capture.cmd = 0;
 		// Don't clear frame_ready here — RunFrame's run-to-vblank loop
 		// reads it to know the frame completed. The tail can't re-fire
-		// because stage is now Idle.
+		// because the capture is idle now.
 	}
 }
 
@@ -3175,7 +3188,7 @@ void Emulator::OnJoyserWrite(uint8_t value)
 
 	// BIOS-less path — our internal packet assembler fires the dispatch
 	// callback into sgb_state.cpp (palettes / border / mask).
-	PacketFeed(impl_->sgb_pkt, value);
+	PacketFeed(impl_->sgb_pkt, value, this);
 
 	if (!impl_->BiosMode())
 	{
@@ -3211,7 +3224,9 @@ void Emulator::OnJoyserWrite(uint8_t value)
 
 void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)
 {
-	DbgPushCmd(cmd);
+	// One ring for the process, so only the console the OSD is reporting
+	// on writes to it; every seat now decodes commands of its own.
+	if (impl_->mem.sgb_feed) DbgPushCmd(cmd);
 
 	// End of the cart's power-on SGB setup: the border completes, or it hands
 	// the screen over. Both, because carts send one or the other, not always both.
@@ -3228,7 +3243,18 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 	// tool can wait out a cart's whole SGB init chatter.
 	++impl_->border_transfers;
 
-	if (cmd == 0x11 && len > 1)
+	// A core in a link session is a Game Boy on a cable: it answers no
+	// detection and spends no frame on a border it never draws. Palettes
+	// and attributes are pure bookkeeping, and a seat's window is colored
+	// from them - see S9xSGBSplitCopySeatFrame.
+	const bool passive = impl_->sgb_pkt.passive_commands;
+
+	// A seat stands in for the BIOS it does not have: on the master the
+	// SNES side sets the rotation up out of the packet FIFO, and without
+	// this a seat's game never sees the SGB it is sitting in.
+	const bool no_bios_behind_it = !impl_->mem.sgb_feed;
+
+	if (cmd == 0x11 && len > 1 && (!passive || no_bios_behind_it))
 	{
 		const uint8_t mode = static_cast<uint8_t>(data[1] & 0x03);
 		impl_->icd2.mlt_players = (mode == 1) ? 2u
@@ -3236,17 +3262,19 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 		impl_->icd2.mlt_auto_drop_polls = 0;
 	}
 
-	if (cmd == 0x13 || cmd == 0x14)
+	// The bulk transfers are read off the LCD a frame later, never out of
+	// VRAM (see BorderCapture). A seat's border is the master's SNES
+	// picture, so it only stages the two it colors itself with.
+	if (cmd == 0x0B || cmd == 0x13 || cmd == 0x14 || cmd == 0x15)
 	{
-		impl_->border_capture.stage = (cmd == 0x13)
-			? Impl::BorderCapture::ChrTrn
-			: Impl::BorderCapture::PctTrn;
+		if (passive && (cmd == 0x13 || cmd == 0x14)) return;
+		impl_->border_capture.cmd = cmd;
 		std::memcpy(impl_->border_capture.pkt, data, 16);
 		impl_->border_capture.skip = 1;
 		if (impl_->sgbc) impl_->sgbc_trn.Arm();
 		impl_->ppu.frame_ready = false;
 		if (cmd == 0x13) ++g_sgb_dbg.pkt_chr;
-		else             ++g_sgb_dbg.pkt_pct;
+		if (cmd == 0x14) ++g_sgb_dbg.pkt_pct;
 		return;
 	}
 
@@ -3574,6 +3602,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	}
 
 	// Relink Memory's pointer fields — they were serialized as garbage.
+	impl_->mem.sgb_owner = this;
 	impl_->mem.ppu    = &impl_->ppu;
 	impl_->mem.apu    = &impl_->apu;
 	impl_->mem.timer  = &impl_->timer;
@@ -3625,7 +3654,8 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	// not serialized (see VisitState), so a load with the BIOS not
 	// yet refreshing $6004 would otherwise leave the GB seeing stale
 	// "all buttons released" instead of the captured pad state.
-	impl_->joypad.sgb_active   = impl_->BiosMode();
+	impl_->joypad.sgb_active   = impl_->BiosMode() && impl_->mem.sgb_feed;
+	impl_->joypad.sgb_probe    = impl_->BiosMode() && !impl_->mem.sgb_feed;
 	impl_->joypad.sgb_pads[0]  = impl_->icd2.joypad[0];
 	impl_->joypad.sgb_pads[1]  = impl_->icd2.joypad[1];
 	impl_->joypad.sgb_pads[2]  = impl_->icd2.joypad[2];
@@ -3714,6 +3744,21 @@ bool BuildBiosPalette(uint16_t host[4][4])
 			host[p][s] = SGB::BgrToHost(bgr);
 		}
 	return cgram_live;
+}
+
+// The same sixteen for a seat. Only the master's packets reach the SNES,
+// so CGRAM holds the master's screen - right for a seat only while both
+// show the same thing, and these windows rarely do. A game that colors
+// itself is dressed from its own decoded palettes; one that never sends a
+// palette packet (the BIOS or the SGB menu chose for it) falls back to
+// CGRAM. Returns whether the attribute map means anything.
+bool BuildSeatPalette(const SGB::SgbState &st, uint16_t host[4][4])
+{
+	if (st.palette_writes == 0) return BuildBiosPalette(host);
+	for (int p = 0; p < 4; ++p)
+		for (int s = 0; s < 4; ++s)
+			host[p][s] = SGB::BgrToHost(st.active[p].colors[s] & 0x7FFF);
+	return true;
 }
 
 void SplitPushShades(int i, const uint8_t *fb)
@@ -4158,13 +4203,25 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
 			return false;
 		}
-		// The SGB sniffers and the ICD2 LCD feed route to the process-
-		// primary core: a seat feeding them pollutes the master's packet
-		// assemblers (the BIOS handshake cache!) and shreds its LCD ring.
-		core->DebugImpl()->sgb_pkt.mute_commands = true;
+		// A seat decodes its own packets into its own palettes and acts on
+		// nothing else in them (see OnSgbCommandInternal), and the ICD2
+		// LCD feed stays with the primary: a seat feeding it shreds the
+		// master's ring and the BIOS handshake cache with it.
+		core->DebugImpl()->sgb_pkt.passive_commands = true;
 		core->DebugImpl()->ppu.icd_feed = false;
 		core->DebugImpl()->mem.sgb_feed = false;
 		core->DebugImpl()->joypad.sgb_active = false;   // creation reset predates the flag
+		// In BIOS mode the master's game is talking to a Super Game Boy,
+		// so a seat's is too: it answers the detection probe itself and
+		// colors its own window off the packets that follow. Reset
+		// re-derives both - they are set here because the creation reset
+		// ran before sgb_feed said this core was a seat.
+		core->DebugImpl()->joypad.sgb_probe = Settings.SGB_BIOSModeActive;
+		if (Settings.SGB_BIOSModeActive)
+		{
+			core->DebugImpl()->icd2.mlt_players         = 2;
+			core->DebugImpl()->icd2.mlt_auto_drop_polls = 1;
+		}
 		// Only the primary is heard, so a seat's mixer output is dead
 		// work — 12.5% of the profile at fifteen seats.
 		core->DebugImpl()->apu.discard_output = true;
@@ -4185,9 +4242,11 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	SplitAttachLink();
 
 	// A link session is Game Boys on a cable, and the SGB has no link
-	// port: the primary presents as a plain DMG too (KI hides its link
-	// mode on an SGB), so no detection and no palettes for anyone.
-	SGB::Instance().DebugImpl()->sgb_pkt.mute_commands = true;
+	// port: with no BIOS running, nobody answers detection and the games
+	// offer their link modes (KI hides its own on an SGB). In BIOS mode
+	// the SNES answers for the master whatever we do here, which is why
+	// the seats answer for themselves — every window one kind of console.
+	SGB::Instance().DebugImpl()->sgb_pkt.passive_commands = true;
 
 	S9xSGBSplitLoadBatteries(battery_base_path);
 	SplitStaggerSeats();
@@ -4198,7 +4257,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 {
 	if (!g_split_players) return;
 	S9xSGBSplitSaveBatteries(battery_base_path);
-	SGB::Instance().DebugImpl()->sgb_pkt.mute_commands = false;
+	SGB::Instance().DebugImpl()->sgb_pkt.passive_commands = false;
 	SGB::SerialSplitDetach();
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k) g_split_cores[k].reset();
 	SplitDropSnaps();
@@ -4462,25 +4521,39 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 		return true;
 	}
 
-	// BIOS-mode sessions dress every seat straight from SNES CGRAM - the
-	// palette ground truth where game packets, the BIOS's per-title
-	// presets and the user's SGB-menu picks all land. Shade 0 is the
-	// shared backdrop color; our attribute decode picks the palette.
+	// A seat in BIOS mode is dressed from its own SGB state: the screen is
+	// its own, so the palette each tile draws through has to come from the
+	// packets its game sent. Colors fall back to CGRAM - the master's, and
+	// the BIOS's ground truth - for a game that sends none.
 	if (Settings.SGB_BIOSModeActive && g_split_snap_valid[i])
 	{
-		const SGB::SgbState &st = SGB::Instance().DebugImpl()->sgb_state;
+		const SGB::SgbState &st = cs[i]->DebugImpl()->sgb_state;
 		const uint8_t *sh   = g_split_snap_shades[i];
+		if (st.mask_mode == SGB::SGB_MASK_FREEZE && st.frozen_frame_valid)
+			sh = st.frozen_frame;
 
 		// Resolved once rather than per pixel: SgbGetTilePalette and
 		// BgrToHost per pixel was 23040 lookups a seat, fourteen seats
 		// a frame.
 		uint16_t host[4][4];
-		const bool cgram_live = BuildBiosPalette(host);
+		const bool colored = BuildSeatPalette(st, host);
+
+		// The master's screen is masked by the BIOS while a game uploads;
+		// a seat masks its own so both windows hide the same tile garbage.
+		if (st.mask_mode == SGB::SGB_MASK_BLACK ||
+		    st.mask_mode == SGB::SGB_MASK_BLANK)
+		{
+			const uint16_t flat = (st.mask_mode == SGB::SGB_MASK_BLACK)
+				? SGB::BgrToHost(0) : host[0][0];
+			for (uint32_t p = 0; p < SGB_GB_SCREEN_W * SGB_GB_SCREEN_H; ++p)
+				dest[p] = flat;
+			return true;
+		}
 
 		for (uint32_t ty = 0; ty < SGB_GB_SCREEN_H / 8; ++ty)
 			for (uint32_t tx = 0; tx < SGB_GB_SCREEN_W / 8; ++tx)
 			{
-				const uint8_t pal = cgram_live
+				const uint8_t pal = colored
 					? (SGB::SgbGetTilePalette(st, tx, ty) & 3) : 0;
 				const uint16_t *pc = host[pal];
 				for (uint32_t y = ty * 8; y < ty * 8 + 8; ++y)
@@ -4505,6 +4578,17 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 const SGB::SgbState *S9xSGBGetSgbState(void)
 {
 	return &SGB::Instance().DebugImpl()->sgb_state;
+}
+
+// A seat's own decoded SGB state — the palettes and attribute map its
+// window is colored from, which are not the master's.
+const SGB::SgbState *S9xSGBSplitGetSgbState(int player)
+{
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	const int n = SplitCollect(cs);
+	const int i = player - 1;
+	if (i < 0 || i >= n) return nullptr;
+	return &cs[i]->DebugImpl()->sgb_state;
 }
 
 const SGB::PacketState *S9xSGBGetPacketState(void)
@@ -4798,6 +4882,11 @@ void S9xSGBCaptureScanline(const unsigned char *pixels)
 }
 void S9xSGBSetJoypad(uint16_t m)    { SGB::Instance().SetJoypad(m); }
 void S9xSGBOnJoyserWrite(uint8_t v) { SGB::ActiveEmulator().OnJoyserWrite(v); }
+
+void S9xSGBOnJoyserWriteCore(void *core, uint8_t v)
+{
+	if (core) static_cast<SGB::Emulator *>(core)->OnJoyserWrite(v);
+}
 
 void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {

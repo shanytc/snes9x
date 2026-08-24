@@ -601,6 +601,18 @@ static void S9xApplyMidLineRaster (void)
 
 void S9xStartScreenRefresh (void)
 {
+	// Interlaced output is drawn one field per frame: this frame fills the
+	// even rows of the doubled-height buffer, the next one fills the odd
+	// rows. Dropping a frame therefore leaves its field unwritten, and a
+	// steady every-other-frame skip never renders the second field at all -
+	// half the scanlines stay black for as long as the interlaced screen is
+	// up (SHVC/SNSP Aging's hires BG mode screens, PSS-61's intro). Frame
+	// skipping is driven by how fast the host can present, so this only
+	// shows on machines slow enough for auto-frameskip to engage.
+	// Never drop a frame while an interlaced field pair is in flight.
+	if (!IPPU.RenderThisFrame && !Settings.InRunAhead && (IPPU.Interlace || GFX.DoInterlace))
+		IPPU.RenderThisFrame = TRUE;
+
 	if (GFX.DoInterlace)
 		GFX.DoInterlace--;
 

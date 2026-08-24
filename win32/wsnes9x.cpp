@@ -11709,8 +11709,23 @@ static void GBSeatPresent (HWND hWnd, int sw, int sh)
 		BitBlt (dc, 0, 0, sw, sh, GBSeatMemDC, 0, 0, SRCCOPY);
 	else
 	{
+		// The master's picture geometry, gaps included: a seat follows the
+		// same display settings (stretch, aspect, integer scaling) or its
+		// picture comes out taller than the master's at the same size.
+		const RECT dst = CalculateDisplayRect (sw, sh, rc.right, rc.bottom);
+		HBRUSH black = (HBRUSH)GetStockObject (BLACK_BRUSH);
+		RECT gap;
+		if (dst.top > 0)
+		{ gap = { 0, 0, rc.right, dst.top }; FillRect (dc, &gap, black); }
+		if (dst.bottom < rc.bottom)
+		{ gap = { 0, dst.bottom, rc.right, rc.bottom }; FillRect (dc, &gap, black); }
+		if (dst.left > 0)
+		{ gap = { 0, dst.top, dst.left, dst.bottom }; FillRect (dc, &gap, black); }
+		if (dst.right < rc.right)
+		{ gap = { dst.right, dst.top, rc.right, dst.bottom }; FillRect (dc, &gap, black); }
 		SetStretchBltMode (dc, COLORONCOLOR);
-		StretchBlt (dc, 0, 0, rc.right, rc.bottom, GBSeatMemDC, 0, 0, sw, sh, SRCCOPY);
+		StretchBlt (dc, dst.left, dst.top, dst.right - dst.left,
+		            dst.bottom - dst.top, GBSeatMemDC, 0, 0, sw, sh, SRCCOPY);
 	}
 	ReleaseDC (hWnd, dc);
 }

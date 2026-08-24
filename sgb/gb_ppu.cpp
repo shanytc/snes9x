@@ -1840,6 +1840,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 					p.stat_irq_delay = static_cast<uint8_t>(vp);
 				}
 				p.frame_ready   = true;
+				++p.frame_no;
 				p.present_hold  = false;
 				p.tm.window_line = -1;
 				p.om.window_line = -1;

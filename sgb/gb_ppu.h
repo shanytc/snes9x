@@ -194,8 +194,15 @@ struct Ppu
 	uint16_t color_fb[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT];
 
 	bool     frame_ready = false;
+	// Feeds the SGB BIOS's ICD2 LCD ring. Process-global routing: only
+	// the primary core may feed, or split seats shred the master's ring.
+	bool     icd_feed = true;
 
 	uint64_t vram_writes = 0;
+
+	// Completed frames since core creation (bumped where frame_ready
+	// latches). Pane-sync bookkeeping only; monotonic, not serialized.
+	uint32_t frame_no = 0;
 };
 
 void PpuReset(Ppu &p);

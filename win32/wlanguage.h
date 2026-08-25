@@ -155,6 +155,12 @@ Nintendo is a trademark.")
 #define HOTKEYS_KEYSWITCH_ON TEXT("Key Switch ON:")
 #define HOTKEYS_KEYSWITCH_2 TEXT("Key Switch 2:")
 #define HOTKEYS_KEYSWITCH_3 TEXT("Key Switch 3:")
+#define HOTKEYS_LINK_2P TEXT("Current Game 2P:")
+#define HOTKEYS_LINK_3P TEXT("Current Game 3P:")
+#define HOTKEYS_LINK_4P TEXT("Current Game 4P:")
+#define HOTKEYS_LINK_SPLIT TEXT("Split Screen:")
+#define HOTKEYS_LINK_OTHER TEXT("Other Game:")
+#define HOTKEYS_LINK_END TEXT("Unlink:")
 
 // gaming buttons and axes
 #define GAMEDEVICE_JOYNUMPREFIX "(J%x)" // don't change this
@@ -452,6 +458,8 @@ Nintendo is a trademark.")
 
 #define ERR_ROM_NOT_FOUND "ROM image \"%s\" was not found or could not be opened."
 #define SRM_SAVE_FAILED "Failed to save SRM file."
+#define SRM_SAVED "S-RAM saved."
+#define SRM_NO_BATTERY "This game has no battery-backed S-RAM."
 
 #define INFO_SAVE_SPC "Saving SPC Data."
 

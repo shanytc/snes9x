@@ -237,6 +237,13 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	if (Settings.SGB_BIOSPreference > 2) Settings.SGB_BIOSPreference = 2;
 	Settings.GBRomPath[0] = '\0';
 
+	// Game Boy link cable. Loopback only and no role to pick, so the port
+	// is the sole knob — and only here, for the rare case something else on
+	// the machine already owns 8765.
+	Settings.GBLinkPort                 =  static_cast<uint16>(conf.GetUInt("SGB::LinkPort", 8765));
+	Settings.GBLinkPlayerIndex          =  1;   // raised only by the -gblinkpeer launch
+	if (Settings.GBLinkPort == 0) Settings.GBLinkPort = 8765;
+
 	// Display
 
 	Settings.Transparency               =  conf.GetBool("Display::Transparency",               true);

@@ -178,6 +178,12 @@ struct Apu
 	uint32_t  dbg_ring_pushed  = 0;
 	uint32_t  dbg_ring_dropped = 0;
 	uint32_t  dbg_ring_drained = 0;
+
+	// A split seat's audio is thrown away — only the primary is heard — so
+	// the mixer and the sample ring are skipped for it. Everything a game
+	// can read back (channel enables, the frame sequencer, wave position,
+	// the LFSR) still steps exactly as it would with the mixer running.
+	bool      discard_output = false;
 };
 
 void ApuReset(Apu &a, bool cgb, bool post_boot = false);

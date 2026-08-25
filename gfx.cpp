@@ -58,7 +58,7 @@ bool8 S9xGraphicsInit (void)
 	S9xFixColourBrightness();
 	S9xBuildDirectColourMaps();
 
-	GFX.ScreenBuffer.resize(MAX_SNES_WIDTH * (MAX_SNES_HEIGHT + 64));
+	GFX.ScreenBuffer.resize(GFX_SCREEN_PITCH * (MAX_SNES_HEIGHT + 64));
 	GFX.Screen = &GFX.ScreenBuffer[GFX.RealPPL * 32];
 	GFX.ZERO = (uint16 *) malloc(sizeof(uint16) * 0x10000);
 	GFX.SubScreen  = (uint16 *) malloc(GFX.ScreenSize * sizeof(uint16));
@@ -2519,6 +2519,18 @@ void S9xSetInfoString (const char *string)
 	}
 }
 
+// Half again the usual dwell, for a warning that has to be read rather
+// than noticed — a sentence does not fit in MessageDisplayTime.
+void S9xSetInfoStringLong (const char *string)
+{
+	if (Settings.InitialInfoStringTimeout > 0)
+	{
+		GFX.InfoString = string;
+		GFX.InfoStringTimeout = Settings.InitialInfoStringTimeout * 3 / 2;
+		S9xReRefresh();
+	}
+}
+
 #include "var8x10font.h"
 static const int font_width = 8;
 static const int font_height = 10;
@@ -2544,7 +2556,7 @@ static int StringWidth(const char* str)
 	return pixcount;
 }
 
-static void VariableDisplayChar(int x, int y, uint8 c, bool monospace = false, int overlap = 0)
+static void VariableDisplayChar(int x, int y, uint8 c, bool monospace = false, int overlap = 0, bool backdrop = false)
 {
 	int cindex = c - 32;
 	int crow = cindex >> 4;
@@ -2559,20 +2571,19 @@ static void VariableDisplayChar(int x, int y, uint8 c, bool monospace = false, i
 
 	for (int h = 0; h < font_height; h++, line++, s += GFX.RealPPL - cwidth * scale)
 	{
-		for (int w = 0; w < cwidth; w++, s++)
+		for (int w = 0; w < cwidth; w++)
 		{
-			if (var8x10font[line][offset + w] == '#')
-				*s = Settings.DisplayColor;
-			else if (var8x10font[line][offset + w] == '.')
-				*s = 0x0000;
-			//            else if (!monospace && w >= overlap)
-			//                *s = (*s & 0xf7de) >> 1;
-			//                *s = (*s & 0xe79c) >> 2;
-
-			if (scale > 1)
+			const char px = var8x10font[line][offset + w];
+			for (int k = 0; k < scale; k++, s++)
 			{
-				s[1] = s[0];
-				s++;
+				if (px == '#')
+					*s = Settings.DisplayColor;
+				else if (px == '.')
+					*s = 0x0000;
+				// Dim the empty cell to 25% so white text stays readable
+				// over a white game screen; skip the kern-overlap column.
+				else if (backdrop && w >= overlap)
+					*s = (*s & 0xe79c) >> 2;
 			}
 		}
 	}
@@ -2584,7 +2595,8 @@ void S9xVariableDisplayString(const char* string, int linesFromBottom,	int pixel
 		return;
 
 	bool monospace = true;
-	if (type == S9X_NO_INFO)
+	const bool backdrop = (type == S9X_INFO_STRING);
+	if (type == S9X_NO_INFO || type == S9X_INFO_STRING)
 	{
 		if (linesFromBottom <= 0)
 			linesFromBottom = 1;
@@ -2635,6 +2647,7 @@ void S9xVariableDisplayString(const char* string, int linesFromBottom,	int pixel
 			linesFromBottom--;
 			dst_y = IPPU.RenderedScreenHeight - font_height * linesFromBottom;
 			dst_x = pixelsFromLeft;
+			overlap = 0;
 
 			if (dst_y >= IPPU.RenderedScreenHeight)
 				break;
@@ -2643,7 +2656,7 @@ void S9xVariableDisplayString(const char* string, int linesFromBottom,	int pixel
 		if (string[i] == '\n')
 			continue;
 
-		VariableDisplayChar(dst_x, dst_y, string[i], monospace, overlap);
+		VariableDisplayChar(dst_x, dst_y, string[i], monospace, overlap, backdrop);
 
 		dst_x += char_width - 1;
 		overlap = 1;
@@ -2912,7 +2925,7 @@ void S9xDisplayMessages (uint16 *screen, int ppl, int width, int height, int sca
 		S9xDisplayString(GFX.FrameDisplayString, 1, 1, false);
 
 	if (!GFX.InfoString.empty())
-		S9xDisplayString(GFX.InfoString.c_str(), 5, 1, true);
+		S9xDisplayStringType(GFX.InfoString.c_str(), 5, 1, true, S9X_INFO_STRING);
 }
 
 static uint16 get_crosshair_color (uint8 color)

@@ -355,6 +355,8 @@ list(APPEND SOURCES
     ../sgb/gb_ppu.cpp
     ../sgb/gb_apu.cpp
     ../sgb/gb_timer.cpp
+    ../sgb/gb_serial.cpp
+    ../sgb/gb_link.cpp
     ../sgb/gb_joypad.cpp
     ../sgb/gb_cart.cpp
     ../msu1.cpp
@@ -455,6 +457,10 @@ target_include_directories(snes9x-gtk PRIVATE ${INCLUDES})
 target_compile_options(snes9x-gtk PRIVATE ${ARGS})
 target_link_libraries(snes9x-gtk PRIVATE ${LIBS})
 target_compile_definitions(snes9x-gtk PRIVATE ${DEFINES})
+if(WIN32)
+    # sgb/gb_link.cpp (Game Boy link cable) needs winsock.
+    target_link_libraries(snes9x-gtk PRIVATE ws2_32)
+endif()
 
 if(USE_SLANG)
     add_executable(slang_test EXCLUDE_FROM_ALL

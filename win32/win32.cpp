@@ -17,6 +17,7 @@
 #include "../netplay.h"
 #include "../controls.h"
 #include "../sgb/sgb.h"
+#include "../sgb/gb_viewer.h"
 
 #include "wsnes9x.h"
 #include "kaillera.h"
@@ -271,7 +272,11 @@ void S9xMessage (int type, int, const char *str)
     fprintf (out, "%s\n", str);
 #endif
 
-    S9xSetInfoString (str);
+    // A warning is meant to be read, not noticed: hold it half again as long.
+    if (type == S9X_WARNING)
+        S9xSetInfoStringLong (str);
+    else
+        S9xSetInfoString (str);
 
 	// if we can't draw on the screen, messagebox it
 	// also send to stderr/stdout depending on message type
@@ -583,8 +588,16 @@ void S9xWinScanJoypads ()
     // Poll SDL to update Joystick[] state for all attached devices
     SDLInput_Poll();
 
+    // Link players 2-4 play on their own Joypad #N binding set, so all
+    // the instances can share one keyboard; the port and autohold state
+    // stay on slot 0. Viewer windows are seats too, just without a socket.
+    const int link_pad = (Settings.GBLinkPlayerIndex >= 2 && Settings.GBLinkPlayerIndex <= 4 &&
+                          (S9xSGBLinkIsEnabled () || S9xSGBViewerClientActive ()))
+                         ? Settings.GBLinkPlayerIndex - 1 : 0;
+
     for (int J = 0; J < 8; J++)
     {
+        const int B = (J == 0 && link_pad) ? link_pad : J;
         if (Joypad [J].Enabled)
         {
 			// toggle checks
@@ -606,38 +619,38 @@ void S9xWinScanJoypads ()
 				PadState[1] |= ToggleJoypadStorage[J].B||TurboToggleJoypadStorage[J].B           ? 128 : 0;
 			}
 			// auto-hold AND regular key/joystick presses
-			if(!AnyBindPressed(Joypad[J+8].Autohold, JoypadExtra[J+8].Left))
+			if(!AnyBindPressed(Joypad[B+8].Autohold, JoypadExtra[B+8].Left))
 			{
-				PadState[0] ^= (AnyBindPressed(Joypad[J].R, JoypadExtra[J].R)||AnyBindPressed(Joypad[J+8].R, JoypadExtra[J+8].R))      ?  16 : 0;
-				PadState[0] ^= (AnyBindPressed(Joypad[J].L, JoypadExtra[J].L)||AnyBindPressed(Joypad[J+8].L, JoypadExtra[J+8].L))      ?  32 : 0;
-				PadState[0] ^= (AnyBindPressed(Joypad[J].X, JoypadExtra[J].X)||AnyBindPressed(Joypad[J+8].X, JoypadExtra[J+8].X))      ?  64 : 0;
-				PadState[0] ^= (AnyBindPressed(Joypad[J].A, JoypadExtra[J].A)||AnyBindPressed(Joypad[J+8].A, JoypadExtra[J+8].A))      ? 128 : 0;
+				PadState[0] ^= (AnyBindPressed(Joypad[B].R, JoypadExtra[B].R)||AnyBindPressed(Joypad[B+8].R, JoypadExtra[B+8].R))      ?  16 : 0;
+				PadState[0] ^= (AnyBindPressed(Joypad[B].L, JoypadExtra[B].L)||AnyBindPressed(Joypad[B+8].L, JoypadExtra[B+8].L))      ?  32 : 0;
+				PadState[0] ^= (AnyBindPressed(Joypad[B].X, JoypadExtra[B].X)||AnyBindPressed(Joypad[B+8].X, JoypadExtra[B+8].X))      ?  64 : 0;
+				PadState[0] ^= (AnyBindPressed(Joypad[B].A, JoypadExtra[B].A)||AnyBindPressed(Joypad[B+8].A, JoypadExtra[B+8].A))      ? 128 : 0;
 
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Right, JoypadExtra[J].Right))           ? 1     : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Right_Up, JoypadExtra[J].Right_Up))     ? 1 + 8 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Right_Down, JoypadExtra[J].Right_Down)) ? 1 + 4 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Left, JoypadExtra[J].Left))             ? 2     : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Left_Up, JoypadExtra[J].Left_Up))       ? 2 + 8 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Left_Down, JoypadExtra[J].Left_Down))   ? 2 + 4 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Down, JoypadExtra[J].Down))             ?     4 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Up, JoypadExtra[J].Up))                 ?     8 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Start, JoypadExtra[J].Start)||AnyBindPressed(Joypad[J+8].Start, JoypadExtra[J+8].Start))     ?  16 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Select, JoypadExtra[J].Select)||AnyBindPressed(Joypad[J+8].Select, JoypadExtra[J+8].Select)) ?  32 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].Y, JoypadExtra[J].Y)||AnyBindPressed(Joypad[J+8].Y, JoypadExtra[J+8].Y))                     ?  64 : 0;
-				PadState[1] ^= (AnyBindPressed(Joypad[J].B, JoypadExtra[J].B)||AnyBindPressed(Joypad[J+8].B, JoypadExtra[J+8].B))                     ? 128 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Right, JoypadExtra[B].Right))           ? 1     : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Right_Up, JoypadExtra[B].Right_Up))     ? 1 + 8 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Right_Down, JoypadExtra[B].Right_Down)) ? 1 + 4 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Left, JoypadExtra[B].Left))             ? 2     : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Left_Up, JoypadExtra[B].Left_Up))       ? 2 + 8 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Left_Down, JoypadExtra[B].Left_Down))   ? 2 + 4 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Down, JoypadExtra[B].Down))             ?     4 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Up, JoypadExtra[B].Up))                 ?     8 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Start, JoypadExtra[B].Start)||AnyBindPressed(Joypad[B+8].Start, JoypadExtra[B+8].Start))     ?  16 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Select, JoypadExtra[B].Select)||AnyBindPressed(Joypad[B+8].Select, JoypadExtra[B+8].Select)) ?  32 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].Y, JoypadExtra[B].Y)||AnyBindPressed(Joypad[B+8].Y, JoypadExtra[B+8].Y))                     ?  64 : 0;
+				PadState[1] ^= (AnyBindPressed(Joypad[B].B, JoypadExtra[B].B)||AnyBindPressed(Joypad[B+8].B, JoypadExtra[B+8].B))                     ? 128 : 0;
 			}
 
-			bool turbofy = AnyBindPressed(Joypad[J+8].TempTurbo, JoypadExtra[J+8].Up); // All Mod for turbo
+			bool turbofy = AnyBindPressed(Joypad[B+8].TempTurbo, JoypadExtra[B+8].Up); // All Mod for turbo
 
 			//handle turbo case! (autofire / auto-fire)
-			if(turbofy || ((GUI.TurboMask&TURBO_A_MASK))&&(PadState[0]&128) || AnyBindPressed(Joypad[J+8].A, JoypadExtra[J+8].A)           ) PadState[0]^=(joypads[J]&128);
-			if(turbofy || ((GUI.TurboMask&TURBO_B_MASK))&&(PadState[1]&128) || AnyBindPressed(Joypad[J+8].B, JoypadExtra[J+8].B)           ) PadState[1]^=((joypads[J]&(128<<8))>>8);
-			if(turbofy || ((GUI.TurboMask&TURBO_Y_MASK))&&(PadState[1]&64) || AnyBindPressed(Joypad[J+8].Y, JoypadExtra[J+8].Y)            ) PadState[1]^=((joypads[J]&(64<<8))>>8);
-			if(turbofy || ((GUI.TurboMask&TURBO_X_MASK))&&(PadState[0]&64) || AnyBindPressed(Joypad[J+8].X, JoypadExtra[J+8].X)            ) PadState[0]^=(joypads[J]&64);
-			if(turbofy || ((GUI.TurboMask&TURBO_L_MASK))&&(PadState[0]&32) || AnyBindPressed(Joypad[J+8].L, JoypadExtra[J+8].L)            ) PadState[0]^=(joypads[J]&32);
-			if(turbofy || ((GUI.TurboMask&TURBO_R_MASK))&&(PadState[0]&16) || AnyBindPressed(Joypad[J+8].R, JoypadExtra[J+8].R)            ) PadState[0]^=(joypads[J]&16);
-			if(turbofy || ((GUI.TurboMask&TURBO_STA_MASK))&&(PadState[1]&16) || AnyBindPressed(Joypad[J+8].Start, JoypadExtra[J+8].Start)  ) PadState[1]^=((joypads[J]&(16<<8))>>8);
-			if(turbofy || ((GUI.TurboMask&TURBO_SEL_MASK))&&(PadState[1]&32) || AnyBindPressed(Joypad[J+8].Select, JoypadExtra[J+8].Select)) PadState[1]^=((joypads[J]&(32<<8))>>8);
+			if(turbofy || ((GUI.TurboMask&TURBO_A_MASK))&&(PadState[0]&128) || AnyBindPressed(Joypad[B+8].A, JoypadExtra[B+8].A)           ) PadState[0]^=(joypads[J]&128);
+			if(turbofy || ((GUI.TurboMask&TURBO_B_MASK))&&(PadState[1]&128) || AnyBindPressed(Joypad[B+8].B, JoypadExtra[B+8].B)           ) PadState[1]^=((joypads[J]&(128<<8))>>8);
+			if(turbofy || ((GUI.TurboMask&TURBO_Y_MASK))&&(PadState[1]&64) || AnyBindPressed(Joypad[B+8].Y, JoypadExtra[B+8].Y)            ) PadState[1]^=((joypads[J]&(64<<8))>>8);
+			if(turbofy || ((GUI.TurboMask&TURBO_X_MASK))&&(PadState[0]&64) || AnyBindPressed(Joypad[B+8].X, JoypadExtra[B+8].X)            ) PadState[0]^=(joypads[J]&64);
+			if(turbofy || ((GUI.TurboMask&TURBO_L_MASK))&&(PadState[0]&32) || AnyBindPressed(Joypad[B+8].L, JoypadExtra[B+8].L)            ) PadState[0]^=(joypads[J]&32);
+			if(turbofy || ((GUI.TurboMask&TURBO_R_MASK))&&(PadState[0]&16) || AnyBindPressed(Joypad[B+8].R, JoypadExtra[B+8].R)            ) PadState[0]^=(joypads[J]&16);
+			if(turbofy || ((GUI.TurboMask&TURBO_STA_MASK))&&(PadState[1]&16) || AnyBindPressed(Joypad[B+8].Start, JoypadExtra[B+8].Start)  ) PadState[1]^=((joypads[J]&(16<<8))>>8);
+			if(turbofy || ((GUI.TurboMask&TURBO_SEL_MASK))&&(PadState[1]&32) || AnyBindPressed(Joypad[B+8].Select, JoypadExtra[B+8].Select)) PadState[1]^=((joypads[J]&(32<<8))>>8);
 			if(           ((GUI.TurboMask&TURBO_LEFT_MASK))&&(PadState[1]&2)                                    ) PadState[1]^=((joypads[J]&(2<<8))>>8);
 			if(           ((GUI.TurboMask&TURBO_UP_MASK))&&(PadState[1]&8)                                      ) PadState[1]^=((joypads[J]&(8<<8))>>8);
 			if(           ((GUI.TurboMask&TURBO_RIGHT_MASK))&&(PadState[1]&1)                                   ) PadState[1]^=((joypads[J]&(1<<8))>>8);
@@ -858,6 +871,8 @@ void S9xSetPause (uint32 mask)
     // here; the audio thread otherwise underruns mid-waveform and clicks.
     if (!was_paused && S9xSoundOutput)
         S9xSoundOutput->OnPauseRequested();
+
+    GBLinkMirrorPause ();
 }
 
 void S9xClearPause (uint32 mask)
@@ -871,6 +886,8 @@ void S9xClearPause (uint32 mask)
         // Wake up the main loop thread just if its blocked in a GetMessage call.
         PostMessage (GUI.hWnd, WM_NULL, 0, 0);
     }
+
+    GBLinkMirrorPause ();
 }
 
 bool JustifierOffscreen()

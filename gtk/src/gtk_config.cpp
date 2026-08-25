@@ -220,7 +220,8 @@ int Snes9xConfig::load_defaults()
     Settings.DisplayPressedKeys = false;
     Settings.InitialInfoStringTimeout   =  120;
     Settings.SGB_BIOSPreference = 2;
-    
+    Settings.GBLinkPort = 8765;
+
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
     Settings.OneClockCycle = 6;
@@ -414,6 +415,7 @@ int Snes9xConfig::save_config_file()
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
+    outint("LinkPort", Settings.GBLinkPort, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
 
     section = "Input";
     controllers controller = CTL_NONE;
@@ -695,6 +697,10 @@ int Snes9xConfig::load_config_file()
     inint("BIOSPreference", Settings.SGB_BIOSPreference);
     if (Settings.SGB_BIOSPreference > 2)
         Settings.SGB_BIOSPreference = 2;
+
+    inint("LinkPort", Settings.GBLinkPort);
+    if (Settings.GBLinkPort == 0)
+        Settings.GBLinkPort = 8765;
 
     section = "Input";
 

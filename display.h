@@ -14,6 +14,8 @@ char * S9xParseArgs (char **, int);
 void S9xParseArgsForCheats (char **, int);
 void S9xLoadConfigFiles (char **, int);
 void S9xSetInfoString (const char *);
+// Same, held half again as long — for warnings meant to be read.
+void S9xSetInfoStringLong (const char *);
 
 // Routines the port has to implement even if it doesn't use them
 

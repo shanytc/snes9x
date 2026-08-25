@@ -9,6 +9,8 @@
 
 #include <cstdint>
 
+#include "gb_serial.h"
+
 namespace SGB {
 
 struct Cart;
@@ -37,6 +39,7 @@ struct Memory
 	Apu    *apu    = nullptr;
 	Timer  *timer  = nullptr;
 	Joypad *joypad = nullptr;
+	Serial *serial = nullptr;
 	// CPU clock, for PPU-register write-time reconstruction. In the per-dot
 	// interleave the CPU trails the PPU by up to kMaxOpcodeTCycles, so at the
 	// moment a store reaches PpuWriteReg the PPU has already rendered dots the
@@ -61,12 +64,25 @@ struct Memory
 	uint8_t  svbk = 1;            // 0xFF70
 	bool     key1_armed   = false;
 	bool     double_speed = false;
+	// True only for the core wired to the SGB BIOS - the primary. A seat
+	// has its own sniffers but nothing driving them from the SNES side,
+	// so this is what tells it to answer for itself.
+	bool     sgb_feed     = true;
+	// The Emulator these $FF00 writes belong to. Each core sniffs its own
+	// packets; before this they all landed on the primary's assemblers,
+	// which is why seats had to be cut out of the path entirely.
+	void    *sgb_owner    = nullptr;
 
 	uint8_t  hdma1 = 0, hdma2 = 0, hdma3 = 0, hdma4 = 0;  // 0xFF51-0xFF54
 	uint8_t  hdma5 = 0xFF;        // 0xFF55 status
 	uint16_t hdma_src = 0, hdma_dst = 0, hdma_len = 0;
 	bool     hdma_active = false;
 	bool     hdma_hblank_latch = false;
+
+	// Per-console, not per-process: split screen runs several cores in one
+	// process, so these cannot live in file-scope globals.
+	uint8_t  dma_last = 0xFF;         // 0xFF46 last written byte, echoed on reads
+	bool     dma_vram_bypass = false; // OAM DMA reads dodge the mode-3 VRAM block
 };
 
 uint8_t MemRead(Memory &m, uint16_t addr);
@@ -84,13 +100,6 @@ void MemHdmaHBlank(Memory &m);
 // LCD turned off outside HBlank with an HBlank HDMA armed: the off edge
 // counts as entering HBlank, so one pending block fires (SameBoy GB_lcd_off).
 void MemHdmaLcdOff(Memory &m);
-
-// Callback fires each time the CPU initiates a serial transfer (write
-// 0x80/0x81 to 0xFF02). The byte passed is whatever was in 0xFF01 at
-// the moment. Used by the test harness to capture Blargg output; P6a
-// may hook it too. nullptr disables.
-using SerialByteCallback = void (*)(uint8_t byte);
-void SetSerialCallback(SerialByteCallback cb);
 
 } // namespace SGB
 

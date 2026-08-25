@@ -1400,8 +1400,12 @@ BEGIN
         BEGIN
             MENUITEM "S&ave SPC Data",              ID_FILE_SAVE_SPC_DATA,MFT_STRING,MFS_ENABLED
             MENUITEM "Save Screenshot",             ID_SAVESCREENSHOT,MFT_STRING,MFS_ENABLED
-            MENUITEM "Sa&ve S-RAM Data",            ID_FILE_SAVE_SRAM_DATA,MFT_STRING,MFS_ENABLED
             MENUITEM "Save Memory Pack",            ID_SAVEMEMPACK,MFT_STRING,MFS_ENABLED
+        END
+        POPUP "S-&RAM",                        0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&Load S-RAM...",              ID_FILE_LOAD_SRAM_DATA,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Save S-RAM...",              ID_FILE_SAVE_SRAM_DATA,MFT_STRING,MFS_ENABLED
         END
         MENUITEM "ROM Information...",          IDM_ROM_INFO,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
@@ -1430,7 +1434,21 @@ BEGIN
         MENUITEM "Soft &Reset",                 ID_EMULATION_SOFT_RESET,MFT_STRING,MFS_ENABLED
         MENUITEM "&Hard Reset (Power Cycle)",   ID_EMULATION_HARD_RESET,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        POPUP "Run &Ahead",                     0,MFT_STRING,MFS_ENABLED
+        POPUP "&Link Cable",                    ID_EMULATION_GB_LINK,MFT_STRING,MFS_ENABLED
+        BEGIN
+            POPUP "Link &Current Game",             ID_EMULATION_GB_LINK_SAME_POPUP,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "&2 Players",                  ID_EMULATION_GB_LINK_SAME,MFT_STRING,MFS_ENABLED
+                MENUITEM "&3 Players",                  ID_EMULATION_GB_LINK_SAME_3,MFT_STRING,MFS_ENABLED
+                MENUITEM "&4 Players",                  ID_EMULATION_GB_LINK_SAME_4,MFT_STRING,MFS_ENABLED
+                MENUITEM MFT_SEPARATOR
+                MENUITEM "S&plit Screen",               ID_EMULATION_GB_LINK_SPLIT,MFT_STRING,MFS_ENABLED
+            END
+            MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "&Unlink",                     ID_EMULATION_GB_LINK_UNLINK,MFT_STRING,MFS_ENABLED
+        END
+        POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&0 (off)",                    ID_EMULATION_RUNAHEAD_OFF,MFT_STRING,MFS_ENABLED
             MENUITEM "&1 frame",                    ID_EMULATION_RUNAHEAD_1,MFT_STRING,MFS_ENABLED
@@ -1543,7 +1561,7 @@ BEGIN
             MENUITEM "&Attach Audio CD...",         ID_SOUND_VOICEKUN_ATTACH,MFT_STRING,MFS_ENABLED
             MENUITEM "&Eject Audio CD",             ID_SOUND_VOICEKUN_DETACH,MFT_STRING,MFS_GRAYED
         END
-        MENUITEM "Show Audio &Waveform",        ID_SOUND_AUDIOWAVEFORM,MFT_STRING,MFS_ENABLED
+        MENUITEM "Open Audio &Waveform",        ID_SOUND_AUDIOWAVEFORM,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Settings...\tAlt+T",         ID_SOUND_OPTIONS,MFT_STRING,MFS_ENABLED
     END
@@ -1573,7 +1591,7 @@ BEGIN
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Color Correction...",        ID_VIDEO_COLORCORRECTION,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        MENUITEM "&Display Configuration...\tAlt+F5", ID_OPTIONS_DISPLAY,MFT_STRING,MFS_ENABLED
+        MENUITEM "&Settings...\tAlt+F5",        ID_OPTIONS_DISPLAY,MFT_STRING,MFS_ENABLED
     END
     POPUP "&Cheat",                         0,MFT_STRING,MFS_ENABLED
     BEGIN

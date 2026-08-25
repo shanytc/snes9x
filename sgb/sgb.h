@@ -283,6 +283,138 @@ bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path
 void S9xSGBRunFrame(void);
 void S9xSGBRunCycles(int tcycles);
 
+// ---- Link cable ------------------------------------------------------------
+// Links emulator instances on this PC over loopback TCP (BGB 1.4
+// protocol). Two players is the direct cable, with the role sensed
+// rather than chosen; three or four makes this instance host an emulated
+// DMG-07 Four Player Adapter that the others dial into as ordinary
+// clients. See gb_serial.h.
+#define S9X_GBLINK_NONE   0
+#define S9X_GBLINK_SERVER 1
+#define S9X_GBLINK_CLIENT 2
+
+// Bring the cable up on Settings.GBLinkPort for a session of `players`
+// (2..4), returning the role taken. S9X_GBLINK_NONE means the socket
+// could not be opened; `err` says why. `force_adapter` hosts the DMG-07
+// even at 2 players (adapter-only games).
+int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter,
+                         bool client_only = false);
+
+// The loaded cart's multiplayer exists only through the DMG-07 Four
+// Player Adapter, so even a 2-player session must host it.
+bool S9xSGBCartNeedsDmg07(void);
+
+// Faceball 2000: the one cart whose dormant 16-player mode can ride the
+// custom ring cable. Only it may open a 5..15-seat session.
+bool S9xSGBCartIsFaceball(void);
+
+// Role of the live session, or S9X_GBLINK_NONE when unplugged.
+int  S9xSGBLinkGetRole(void);
+
+// Game Boys on the session including this one (0..4). Governs what a
+// disconnect means: on a direct cable one side leaving ends it for both,
+// on a hub only that seat empties.
+int  S9xSGBLinkPlayerCount(void);
+
+void S9xSGBLinkDisconnect(void);
+
+// Service the socket while the emulation loop is parked.
+void S9xSGBLinkPump(void);
+bool S9xSGBLinkShouldHoldFrame(void);
+
+// Enabled = a session exists (listening, connecting or connected).
+// Connected = a peer is attached and the version handshake is done.
+bool S9xSGBLinkIsEnabled(void);
+bool S9xSGBLinkIsConnected(void);
+
+// One-line state for the OSD, e.g. "Link cable: connected (Master)".
+void S9xSGBLinkGetStatusText(char *buf, size_t cap);
+
+// True once when the driving end changed and is worth re-announcing;
+// fills `buf` with the text to show. Poll it from the frame loop.
+bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap);
+
+// ---- Split screen -----------------------------------------------------------
+// Runs 2-4 cores of the same game inside this process, tiled into one
+// frame and linked in-process (direct cable at two seats, DMG-07 at
+// three or four). BIOS-less GB mode only. Player N reads SNES joypad N;
+// seats past the first save to <base>.savN. Mutually exclusive with the
+// socket link.
+// Faceball 2000 alone may seat 5..SGB_MAX_LINK_PLAYERS, wired as its
+// custom ring cable.
+constexpr int SGB_MAX_LINK_PLAYERS = 15;
+bool S9xSGBSplitStart(int players, const char *battery_base_path);
+void S9xSGBSplitStop(const char *battery_base_path);  // saves seat batteries first
+bool S9xSGBSplitActive(void);
+int  S9xSGBSplitPlayers(void);
+void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
+// Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
+// feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero
+// today: the bots move in unison). Push once per host frame; read per seat.
+void     S9xSGBSplitEchoPush(uint16_t pad);
+uint16_t S9xSGBSplitEchoPad(int player /*5..15*/);
+// Debug peek at a seat's WRAM/HRAM (player 1 = primary). Returns 0xFF
+// outside $C000-$DFFF / $FF80-$FFFE. Harness diagnostics only.
+uint8_t  S9xSGBSplitPeek(int player, uint16_t addr);
+void S9xSGBSplitRunFrame(void);
+
+// Faceball ring stage warnings, once per host frame. RunFrame calls it
+// itself; BIOS mode never reaches RunFrame and must call it directly.
+void S9xSGBSplitRingWatch(void);
+
+// Power-cycle the seats with the master. The SGB BIOS resets the GB partway
+// through its boot; without this only the master reboots and the seats keep
+// the head start that puts them ahead for the rest of the session.
+void S9xSGBSplitResetSeats(void);
+
+// Seat cores for the BIOS-mode soft-reset checkpoint. They are not in
+// snes9x's freeze, and the unfreeze cold-resets them, so without these a
+// warm restart drops every seat back to the cart while the master resumes
+// mid-game. Only capture while S9xSGBSplitCheckpointable() — the shared
+// ring/hub state is rebuilt on load, which is exact only when the cable
+// has not arbitrated yet.
+bool    S9xSGBSplitCheckpointable(void);
+size_t  S9xSGBSplitStateSize(void);
+bool    S9xSGBSplitStateSave(uint8_t *buf, size_t cap);
+bool    S9xSGBSplitStateLoad(const uint8_t *buf, size_t size);
+void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
+// One seat's frame (160x144) for its window. In BIOS mode the frame is the
+// snapshot the measured pane delay selects; false = the seat has nothing of
+// its own yet (master mid-boot) and its window should keep the master's pane.
+bool S9xSGBSplitCopySeatFrame(int player /*2..4*/, uint16_t *dest);
+
+// BIOS-mode pane-sync instrument. The master's pane crosses the ICD2 ring,
+// the BIOS's VRAM lifts and the SNES PPU before it is seen; the seats' panes
+// do not. MeasurePaneSync matches the presented SNES pane (per 8-pixel band)
+// against recent master frames to find the frame age actually on screen, and
+// derives the snapshot age seats present at so both show the same moment.
+// Call once per host frame with the frame being presented.
+struct SgbPaneSync
+{
+	bool     valid;         // a resolved measurement exists this frame
+	uint32_t newest_frame;  // master frames completed at measure time
+	int      lag_min;       // newest - matched frame, best band
+	int      lag_max;       // newest - matched frame, worst band
+	int      conf_pct;      // mean best-match percentage across bands
+	int      seat_delay;    // snapshot age seats present at (frames)
+	char     band_map[19];  // per-band lag digit, '=' ambiguous, '?' no match
+};
+void S9xSGBSplitMeasurePaneSync(const uint16_t *snes_frame, uint32_t pitch_pixels);
+void S9xSGBSplitGetPaneSync(SgbPaneSync *out);
+// Trace comparator: our decoded SGB palettes vs the BIOS's rendered truth.
+void S9xSGBDebugSgbCompare(const uint16_t *snes_frame, uint32_t pitch_pixels,
+                           const uint16_t *cgram);
+// The primary core's decoded SGB state, for debug tooling.
+namespace SGB { struct SgbState; struct PacketState; }
+const SGB::SgbState *S9xSGBGetSgbState(void);
+// Per-seat (1..N, 1 = primary). Null when that seat is not running.
+const SGB::SgbState *S9xSGBSplitGetSgbState(int player);
+const SGB::PacketState *S9xSGBGetPacketState(void);
+int  S9xSGBSplitScreenWidth(void);
+int  S9xSGBSplitScreenHeight(void);
+void S9xSGBSplitLoadBatteries(const char *battery_base_path);
+void S9xSGBSplitSaveBatteries(const char *battery_base_path);
+
 // Accumulator-based SNES→GB cycle stepping for BIOS mode. Call per
 // SNES opcode (or per H event) with the number of SNES master cycles
 // just consumed. Internally divides by 5 (SGB1 clock ratio) and steps
@@ -375,6 +507,9 @@ bool S9xSGBGetLayerEnabled(int layer);
 void S9xSGBCaptureScanline(const unsigned char *pixels);
 void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);
+// Same, for the core that owns the memory doing the write — a split-screen
+// seat sniffs its own packets, not the primary's. Null owner is a no-op.
+void S9xSGBOnJoyserWriteCore(void *core, uint8_t value);
 bool S9xSGBIsActive(void);
 
 // Composite the current frame (border + GB screen + mask mode) into a

@@ -85,15 +85,24 @@ struct PacketState
 	uint32_t    commands_received = 0;
 	uint32_t    packets_received  = 0;
 	uint32_t    last_cmd          = 0xFF;  // 0xFF = none yet
+
+	// A core in a link session decodes its packets but must not act on
+	// them: the SGB has no link port, so nobody answers detection. The
+	// palettes and attribute map still follow the game, because that is
+	// what colors the core's own window. Survives PacketReset.
+	bool        passive_commands  = false;
 };
 
 // Called when a complete multi-packet command has been assembled.
+// `owner` is whatever PacketFeed was handed — the core this $FF00
+// traffic came from, so a seat's packets land on its own palettes.
 // `data` points into the state's chain_buf — copy if you need to
 // outlive the call. `len` is total_pkts * 16.
-using SgbCommandCallback = void (*)(uint8_t cmd, const uint8_t *data, uint32_t len);
+using SgbCommandCallback = void (*)(void *owner, uint8_t cmd,
+                                    const uint8_t *data, uint32_t len);
 
 void PacketReset(PacketState &ps);
-void PacketFeed (PacketState &ps, uint8_t value);
+void PacketFeed (PacketState &ps, uint8_t value, void *owner);
 
 // Install a process-global callback. P6b/c/d hook this to dispatch into
 // the palette / border / sound-FX handlers. Pass nullptr to disable.

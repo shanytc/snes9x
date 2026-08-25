@@ -12,21 +12,16 @@
 #include "gb_timer.h"
 #include "gb_joypad.h"
 #include "gb_mbc.h"
+#include "gb_serial.h"
 #include "sgb.h"
 
 #include <cstring>
 
 namespace SGB {
 
-namespace {
-SerialByteCallback g_serial_cb = nullptr;
-uint8_t            g_dma_last  = 0xFF;  // 0xFF46 last written byte — register reads echo this.
-bool               g_dma_vram_bypass = false;
-}
-
 inline bool VramBlocked(const Memory &m)
 {
-	return !g_dma_vram_bypass && m.ppu &&
+	return !m.dma_vram_bypass && m.ppu &&
 	       m.ppu->mode == PpuMode::Transfer && (m.ppu->lcdc & 0x80);
 }
 
@@ -36,8 +31,6 @@ inline bool CramBlocked(const Memory &m)
 	       m.ppu->mode == PpuMode::Transfer && (m.ppu->lcdc & 0x80) &&
 	       m.ppu->mode_clock > GB_MODE3_SETUP_DOTS + m.ppu->mode3_sprite_stall;
 }
-
-void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
 
 void MemReset(Memory &m, bool cgb)
 {
@@ -52,7 +45,8 @@ void MemReset(Memory &m, bool cgb)
 	// GB CPU starts. boot_rom_enabled stays false until LoadBootROM sets it.
 	std::memset(m.boot_rom, 0, sizeof m.boot_rom);
 	m.boot_rom_enabled = false;
-	g_dma_last         = cgb ? 0x00 : 0xFF;
+	m.dma_last         = cgb ? 0x00 : 0xFF;
+	m.dma_vram_bypass  = false;
 
 	m.svbk         = 1;
 	m.key1_armed   = false;
@@ -251,11 +245,13 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 	{
 		case 0xFF00: return m.joypad ? JoypadRead(*m.joypad) : 0xFF;
 		case 0xFF01: return m.serial_data;
-		case 0xFF02: return static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
+		case 0xFF02:
+			return m.serial ? SerialReadSC(*m.serial, m)
+			                : static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
-		case 0xFF46: return g_dma_last;
+		case 0xFF46: return m.dma_last;
 		case 0xFF4D:
 			return (m.ppu && m.ppu->cgb)
 				? static_cast<uint8_t>((m.double_speed ? 0x80 : 0x00) |
@@ -293,29 +289,19 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 	{
 		case 0xFF00:
 			if (m.joypad) JoypadWrite(*m.joypad, value);
-			// Feed SGB command-packet sniffer. Benign when SGB mode inactive.
-			S9xSGBOnJoyserWrite(value);
+			// Feed this core's own SGB command-packet sniffer. Benign when
+			// SGB mode inactive.
+			S9xSGBOnJoyserWriteCore(m.sgb_owner, value);
 			return;
 		case 0xFF01:
 			m.serial_data = value;
 			return;
 		case 0xFF02:
-			m.serial_control = value;
-			// Internal clock (bit 0 = 1) completes instantly with no peer:
-			// push the byte to the observer callback and fire the serial IRQ,
-			// then clear the start bit. External clock (bit 0 = 0) has no
-			// partner clocking bits in, so bit 7 stays set and no IRQ fires —
-			// matching real DMG with a disconnected link cable. Games like
-			// Tetris Plus rely on this silence to detect "no link partner".
-			// SB latches $FF: disconnected MISO floats high, so each clock
-			// shifts in a 1. Alleyway's serial-IRQ input loop depends on this.
-			if ((value & 0x81) == 0x81)
-			{
-				if (g_serial_cb) g_serial_cb(m.serial_data);
-				m.serial_data    = 0xFF;
-				m.if_            = static_cast<uint8_t>(m.if_ | IRQ_SERIAL);
-				m.serial_control = static_cast<uint8_t>(value & 0x7F);
-			}
+			// gb_serial.cpp owns what a start bit means: unlinked it keeps
+			// the original instant-completion stub, linked it clocks eight
+			// real bit periods and swaps a byte with the peer.
+			if (m.serial) SerialWriteSC(*m.serial, m, value);
+			else          m.serial_control = value;
 			return;
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			if (m.timer) TimerWrite(*m.timer, addr, value);
@@ -324,7 +310,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			m.if_ = static_cast<uint8_t>((value & 0x1F) | 0xE0);
 			return;
 		case 0xFF46:
-			g_dma_last = value;
+			m.dma_last = value;
 			DoOamDma(m, value);
 			return;
 		case 0xFF50:
@@ -377,35 +363,35 @@ static void DoOamDma(Memory &m, uint8_t value)
 {
 	if (!m.ppu) return;
 	const uint16_t src = static_cast<uint16_t>(value << 8);
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (int i = 0; i < 0xA0; ++i)
 	{
 		m.ppu->oam[i] = MemRead(m, static_cast<uint16_t>(src + i));
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 }
 
 static void DoGdma(Memory &m, uint16_t src, uint16_t dst, uint16_t blocks)
 {
 	const uint32_t n = static_cast<uint32_t>(blocks) * 0x10u;
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < n; ++i)
 	{
 		const uint8_t b = MemRead(m, static_cast<uint16_t>(src + i));
 		MemWrite(m, static_cast<uint16_t>(0x8000 + ((dst + i) & 0x1FFF)), b);
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 }
 
 static void HdmaTransferBlock(Memory &m)
 {
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < 0x10; ++i)
 	{
 		const uint8_t b = MemRead(m, static_cast<uint16_t>(m.hdma_src + i));
 		MemWrite(m, static_cast<uint16_t>(0x8000 + ((m.hdma_dst + i) & 0x1FFF)), b);
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 	m.hdma_src = static_cast<uint16_t>(m.hdma_src + 0x10);
 	m.hdma_dst = static_cast<uint16_t>(m.hdma_dst + 0x10);
 	m.hdma1 = static_cast<uint8_t>(m.hdma_src >> 8);

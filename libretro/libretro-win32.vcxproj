@@ -108,6 +108,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -132,6 +133,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -155,6 +157,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>
       <SubSystem>Windows</SubSystem>
@@ -183,6 +186,7 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
+      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>
       <SubSystem>Windows</SubSystem>
@@ -262,6 +266,8 @@
     <ClInclude Include="..\sgb\gb_ops.h" />
     <ClInclude Include="..\sgb\gb_ppu.h" />
     <ClInclude Include="..\sgb\gb_timer.h" />
+    <ClInclude Include="..\sgb\gb_serial.h" />
+    <ClInclude Include="..\sgb\gb_link.h" />
     <ClInclude Include="..\sgb\sgb.h" />
     <ClInclude Include="..\sgb\sgb_packet.h" />
     <ClInclude Include="..\sgb\sgb_state.h" />
@@ -344,6 +350,8 @@
     <ClCompile Include="..\sgb\gb_ops_cb.cpp" />
     <ClCompile Include="..\sgb\gb_ppu.cpp" />
     <ClCompile Include="..\sgb\gb_timer.cpp" />
+    <ClCompile Include="..\sgb\gb_serial.cpp" />
+    <ClCompile Include="..\sgb\gb_link.cpp" />
     <ClCompile Include="..\sgb\sgb.cpp" />
     <ClCompile Include="..\sgb\sgb_packet.cpp" />
     <ClCompile Include="..\sgb\sgb_state.cpp" />

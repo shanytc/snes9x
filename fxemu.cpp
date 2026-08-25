@@ -281,6 +281,8 @@ static void FxReset (struct FxInfo_s *psFxInfo)
     GSU.vCostMem = 5;
     GSU.vCostFmult = 7;
     GSU.vCostMult = 2;
+    GSU.vRomReadyAt = 0;
+    GSU.vRamReadyAt = 0;
     GSU.bCycleMode = Settings.DisableGSUCycleMode ? 0 : 1;
 
 	fx_readRegisterSpace();

@@ -328,6 +328,7 @@ struct Emulator::Impl
 	{
 		uint8_t cmd = 0;        // 0 = idle, else the *_TRN awaiting a frame
 		uint8_t pkt[16] = {};   // saved packet bytes (cmd in [0], param in [1])
+		uint32_t staged_frame = 0;  // frame_no when the packet staged the capture
 	} border_capture;
 
 	// BIOS-mode border crossfade. Counts frames since both halves of
@@ -1319,6 +1320,14 @@ static void DbgPushCmd(uint8_t cmd)
 	++g_sgb_dbg.cmd_count;
 }
 
+// Append bytes as hex (space every 4) to a trace line under construction.
+static int TraceHex(char *dst, size_t cap, int at, const uint8_t *b, uint32_t n)
+{
+	for (uint32_t i = 0; i < n && at + 4 < (int)cap; ++i)
+		at += snprintf(dst + at, cap - (size_t)at, (i & 3) ? "%02X" : " %02X", b[i]);
+	return at;
+}
+
 
 // Reconstruct the 4 KB a *_TRN command sends, from the GB framebuffer
 // (2bpp raw indices). The game draws the block as 256 tiles across the
@@ -1486,6 +1495,20 @@ void Emulator::RunCycles(int32_t tcycles)
 		uint8_t decoded[4096];
 		DecodeBorderCapture(impl_->ppu.raw_framebuffer, decoded);
 		++g_sgb_dbg.cap_fired;
+		if (SerialTraceEnabled())
+		{
+			uint32_t sum = 0;
+			for (int i = 0; i < 4096; ++i) sum = sum * 31 + decoded[i];
+			const int ts = SerialGetTraceSeat();
+			char m[200];
+			int  n = snprintf(m, sizeof m, "sgbcap p%d f=%u c=%02X lag=%u sum=%08X",
+			                  impl_->mem.sgb_feed ? 1 : (ts >= 0 ? ts + 1 : 0),
+			                  impl_->ppu.frame_no, impl_->border_capture.cmd,
+			                  impl_->ppu.frame_no - impl_->border_capture.staged_frame,
+			                  sum);
+			n = TraceHex(m, sizeof m, n, decoded, 10);
+			SerialTraceMsg(m);
+		}
 		SgbHandleCommand(impl_->sgb_state, impl_->border_capture.cmd,
 		                 impl_->border_capture.pkt, 16,
 		                 decoded, impl_->ppu.framebuffer);
@@ -1635,6 +1658,14 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 				std::memcpy(icd.r7000_buf, icd.packet_queue[icd.queue_head], 16);
 				icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
 				icd.queue_count--;
+				if (SerialTraceEnabled())
+				{
+					char m[120];
+					int  n = snprintf(m, sizeof m, "sgbpop f=%u q=%u",
+					                  impl_->ppu.frame_no, icd.queue_count);
+					n = TraceHex(m, sizeof m, n, icd.r7000_buf, 16);
+					SerialTraceMsg(m);
+				}
 				IcdStageNextSynth(icd);
 				return 0x01;
 			}
@@ -2220,6 +2251,17 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 	// on writes to it; every seat now decodes commands of its own.
 	if (impl_->mem.sgb_feed) DbgPushCmd(cmd);
 
+	if (SerialTraceEnabled())
+	{
+		const int ts = SerialGetTraceSeat();
+		char m[200];
+		int  n = snprintf(m, sizeof m, "sgbcmd p%d f=%u c=%02X n=%u",
+		                  impl_->mem.sgb_feed ? 1 : (ts >= 0 ? ts + 1 : 0),
+		                  impl_->ppu.frame_no, cmd, len / 16u);
+		n = TraceHex(m, sizeof m, n, data, len < 32 ? len : 32);
+		SerialTraceMsg(m);
+	}
+
 	// No BIOS = a plain Game Boy: ignoring every SGB command keeps
 	// detection dead (no MLT_REQ reply, no palettes), so games behave
 	// exactly as on a DMG - including offering their link modes.
@@ -2250,6 +2292,7 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 	{
 		if (passive && (cmd == 0x13 || cmd == 0x14)) return;
 		impl_->border_capture.cmd = cmd;
+		impl_->border_capture.staged_frame = impl_->ppu.frame_no;
 		std::memcpy(impl_->border_capture.pkt, data, 16);
 		impl_->ppu.frame_ready = false;
 		if (cmd == 0x13) ++g_sgb_dbg.pkt_chr;
@@ -2674,13 +2717,15 @@ bool BuildBiosPalette(uint16_t host[4][4])
 	static constexpr uint16_t kBiosPal[4] = {0x67BE, 0x225D, 0x1956, 0x006A};
 	const bool cgram_live = (PPU.CGDATA[0] | PPU.CGDATA[1] |
 	                         PPU.CGDATA[2] | PPU.CGDATA[3]) != 0;
+	// The pane is a 2bpp layer: its four palettes sit at 4-entry strides
+	// (CGRAM 0-15), not on the 16-color rows the 4bpp layers use.
 	for (int p = 0; p < 4; ++p)
 		for (int s = 0; s < 4; ++s)
 		{
 			uint16_t bgr;
 			if (!cgram_live) bgr = kBiosPal[s];
 			else if (s == 0) bgr = PPU.CGDATA[0] & 0x7FFF;
-			else             bgr = PPU.CGDATA[p * 16 + s] & 0x7FFF;
+			else             bgr = PPU.CGDATA[p * 4 + s] & 0x7FFF;
 			host[p][s] = SGB::BgrToHost(bgr);
 		}
 	return cgram_live;
@@ -2860,9 +2905,8 @@ void PaneHistCaptureIfNewFrame(void)
 	e.valid    = true;
 
 	const SGB::SgbState &st = im->sgb_state;
-	// Packet-decoded palettes, NOT the CGRAM rows: sgbcmp proves st.active
-	// matches the rendered pane, while CGDATA[p*16] only coincides for
-	// palette 0 — the BIOS keeps the pane palettes in another CGRAM block.
+	// Packet-decoded palettes: the pane's CGRAM copy lives at 2bpp 4-entry
+	// strides (see BuildBiosPalette), and st.active tracks it packet-exact.
 	uint16_t host[4][4];
 	const bool colored = BuildSeatPalette(st, host);
 	if (st.mask_mode == SGB::SGB_MASK_BLACK ||
@@ -3664,11 +3708,14 @@ void S9xSGBDebugSgbCompare(const uint16_t *snes, uint32_t pitch_pixels,
 		              st.active[p].colors[2], st.active[p].colors[3]);
 	SGB::SerialTraceMsg(line);
 
+	// 2bpp pane palettes: 4-entry strides at CGRAM 0-15 (then the next
+	// block for context). Reading 16-color rows here once hid palettes
+	// 1-3 behind BIOS border colors.
 	n = snprintf(line, sizeof(line), "sgbcmp cgram");
 	for (int p = 0; p < 8; ++p)
 		n += snprintf(line + n, sizeof(line) - (size_t)n, " %d:%04X,%04X,%04X,%04X",
-		              p, cgram[p * 16], cgram[p * 16 + 1],
-		              cgram[p * 16 + 2], cgram[p * 16 + 3]);
+		              p, cgram[p * 4], cgram[p * 4 + 1],
+		              cgram[p * 4 + 2], cgram[p * 4 + 3]);
 	SGB::SerialTraceMsg(line);
 
 	static const uint8_t sx[6] = {8, 80, 152, 8, 80, 152};

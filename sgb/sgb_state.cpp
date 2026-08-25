@@ -77,6 +77,8 @@ void ApplyAttrFile(SgbState &s, uint8_t num)
 void HandlePal(SgbState &s, int first_idx, int second_idx, const uint8_t *d)
 {
 	const uint16_t c0 = Rd16(d + 1);
+	// Color 0 is the one shared backdrop: a PAL write lands it in all four.
+	for (int p = 0; p < 4; ++p) s.active[p].colors[0] = c0;
 	SetPaletteShared(s, first_idx,  c0, d + 3);
 	SetPaletteShared(s, second_idx, c0, d + 9);
 	++s.palette_writes;
@@ -99,8 +101,8 @@ void HandlePal(SgbState &s, int first_idx, int second_idx, const uint8_t *d)
 
 void HandleAttrBlk(SgbState &s, const uint8_t *d, uint32_t len)
 {
-	uint8_t count = d[1] & 0x1F;
-	if (count > 18) count = 18;
+	const uint8_t count = d[1];
+	if (count > 18) return;   // hardware rejects the whole command
 
 	for (uint8_t i = 0; i < count; ++i)
 	{
@@ -108,7 +110,9 @@ void HandleAttrBlk(SgbState &s, const uint8_t *d, uint32_t len)
 		if (off + 6 > len) break;
 		const uint8_t *ds = &d[off];
 
-		const uint8_t control     = static_cast<uint8_t>(ds[0] & 0x07);
+		bool paint_in  = (ds[0] & 0x01) != 0;
+		bool paint_bd  = (ds[0] & 0x02) != 0;
+		bool paint_out = (ds[0] & 0x04) != 0;
 		const uint8_t pal_byte    = ds[1];
 		const uint8_t x1          = static_cast<uint8_t>(ds[2] & 0x1F);
 		const uint8_t y1          = static_cast<uint8_t>(ds[3] & 0x1F);
@@ -116,8 +120,12 @@ void HandleAttrBlk(SgbState &s, const uint8_t *d, uint32_t len)
 		const uint8_t y2          = static_cast<uint8_t>(ds[5] & 0x1F);
 
 		const uint8_t pal_inside  = static_cast<uint8_t>(pal_byte & 0x03);
-		const uint8_t pal_border  = static_cast<uint8_t>((pal_byte >> 2) & 0x03);
+		uint8_t       pal_border  = static_cast<uint8_t>((pal_byte >> 2) & 0x03);
 		const uint8_t pal_outside = static_cast<uint8_t>((pal_byte >> 4) & 0x03);
+
+		// A lone inside or outside request paints the border line too.
+		if (paint_in && !paint_bd && !paint_out)  { paint_bd = true; pal_border = pal_inside; }
+		else if (paint_out && !paint_bd && !paint_in) { paint_bd = true; pal_border = pal_outside; }
 
 		for (uint32_t y = 0; y < SGB_TILE_ROWS; ++y)
 		{
@@ -131,9 +139,9 @@ void HandleAttrBlk(SgbState &s, const uint8_t *d, uint32_t len)
 				uint8_t pal = s.attr_map[y * SGB_TILE_COLS + x];
 				bool write = false;
 
-				if (inside  && (control & 0x01)) { pal = pal_inside;  write = true; }
-				if (on_border && (control & 0x02)) { pal = pal_border;  write = true; }
-				if (outside && (control & 0x04)) { pal = pal_outside; write = true; }
+				if (inside  && paint_in)    { pal = pal_inside;  write = true; }
+				if (on_border && paint_bd)  { pal = pal_border;  write = true; }
+				if (outside && paint_out)   { pal = pal_outside; write = true; }
 
 				if (write) s.attr_map[y * SGB_TILE_COLS + x] = pal;
 			}
@@ -150,7 +158,7 @@ void HandleAttrBlk(SgbState &s, const uint8_t *d, uint32_t len)
 //   [2..]    one byte per set:
 //              bits 0-4  line number (row or column)
 //              bits 5-6  palette (0..3)
-//              bit  7    direction (0 = horizontal row, 1 = vertical column)
+//              bit  7    direction (0 = vertical column, 1 = horizontal row)
 
 void HandleAttrLin(SgbState &s, const uint8_t *d, uint32_t len)
 {
@@ -164,7 +172,7 @@ void HandleAttrLin(SgbState &s, const uint8_t *d, uint32_t len)
 		const uint8_t b       = d[off];
 		const uint8_t line    = static_cast<uint8_t>(b & 0x1F);
 		const uint8_t pal     = static_cast<uint8_t>((b >> 5) & 0x03);
-		const bool    vert    = (b & 0x80) != 0;
+		const bool    vert    = (b & 0x80) == 0;
 
 		if (vert)
 		{
@@ -187,31 +195,31 @@ void HandleAttrLin(SgbState &s, const uint8_t *d, uint32_t len)
 // ------------------------------------------------------------------
 // Data layout:
 //   [1]  control:
-//          bits 0-1  palette for one side
-//          bits 2-3  palette for the other side
+//          bits 0-1  palette after the split line
+//          bits 2-3  palette before the split line
 //          bits 4-5  palette for the divider line
-//          bit  6    direction (0 = horizontal split at row Y,
-//                                1 = vertical   split at col X)
+//          bit  6    direction (0 = vertical split at col X,
+//                                1 = horizontal split at row Y)
 //   [2]  split line number
 
 void HandleAttrDiv(SgbState &s, const uint8_t *d)
 {
 	const uint8_t info       = d[1];
-	const uint8_t split      = d[2];
-	const uint8_t pal_below  = static_cast<uint8_t>(info & 0x03);
-	const uint8_t pal_above  = static_cast<uint8_t>((info >> 2) & 0x03);
+	const uint8_t split      = static_cast<uint8_t>(d[2] & 0x1F);
+	const uint8_t pal_after  = static_cast<uint8_t>(info & 0x03);
+	const uint8_t pal_before = static_cast<uint8_t>((info >> 2) & 0x03);
 	const uint8_t pal_line   = static_cast<uint8_t>((info >> 4) & 0x03);
-	const bool    vertical   = (info & 0x40) != 0;
+	const bool    horizontal = (info & 0x40) != 0;
 
 	for (uint32_t y = 0; y < SGB_TILE_ROWS; ++y)
 	{
 		for (uint32_t x = 0; x < SGB_TILE_COLS; ++x)
 		{
-			uint32_t key = vertical ? x : y;
+			uint32_t key = horizontal ? y : x;
 			uint8_t  pal;
-			if (key <  split)      pal = pal_above;
+			if (key <  split)      pal = pal_before;
 			else if (key == split) pal = pal_line;
-			else                    pal = pal_below;
+			else                    pal = pal_after;
 			s.attr_map[y * SGB_TILE_COLS + x] = pal;
 		}
 	}
@@ -272,25 +280,24 @@ void HandleAttrChr(SgbState &s, const uint8_t *d, uint32_t len)
 
 void HandlePalSet(SgbState &s, const uint8_t *d)
 {
-	if (!s.system_palettes_loaded) return;
-
-	const uint16_t idx[4] = {
-		Rd16(d + 1), Rd16(d + 3), Rd16(d + 5), Rd16(d + 7)
-	};
+	// 9-bit indices straight out of palette RAM — hardware has no "loaded"
+	// gate (unloaded RAM just reads back zero) and never skips the ATF bits.
 	for (int i = 0; i < 4; ++i)
 	{
-		if (idx[i] >= 512) continue;
-		const uint16_t *src = &s.system_palettes[idx[i] * 4];
+		const uint16_t idx = static_cast<uint16_t>(
+			d[1 + i * 2] | ((d[2 + i * 2] & 1) << 8));
+		const uint16_t *src = &s.system_palettes[idx * 4];
 		for (int c = 0; c < 4; ++c) s.active[i].colors[c] = src[c];
 	}
+	// Color 0 stays the one shared backdrop: palette 0's wins.
+	for (int p = 1; p < 4; ++p) s.active[p].colors[0] = s.active[0].colors[0];
 
 	const uint8_t atf_ctrl = d[9];
 	if (atf_ctrl & 0x80)
 	{
 		ApplyAttrFile(s, static_cast<uint8_t>(atf_ctrl & 0x3F));
 	}
-	// Bit 6 cancels MASK_EN; P6d will honor this once mask rendering lands.
-	if (atf_ctrl & 0x40) s.mask_mode = 0;
+	if (atf_ctrl & 0x40) s.mask_mode = SGB_MASK_CANCEL;
 
 	++s.palette_writes;
 }

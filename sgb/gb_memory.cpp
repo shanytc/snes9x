@@ -34,10 +34,13 @@ inline bool CpuVisibleMode0(const Memory &m)
 	       m.ppu->lcd_x >= GB_SCREEN_WIDTH - ub;
 }
 
-inline bool VramBlocked(const Memory &m)
+inline bool VramBlocked(const Memory &m, bool write = false)
 {
 	if (g_dma_vram_bypass || !m.ppu || !(m.ppu->lcdc & 0x80)) return false;
 	if (m.ppu->mode == PpuMode::Transfer) return !CpuVisibleMode0(m);
+	// Only READS lock ahead of the transfer; writes pass until mode 3
+	// (Coffee GB isVramAvailableForCpu; mooneye lcdon_write_timing).
+	if (write) return false;
 	static int vh = -1;
 	if (vh < 0) { const char *e = getenv("ACID_VH"); vh = e ? atoi(e) : 0; }
 	if (vh > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
@@ -46,7 +49,7 @@ inline bool VramBlocked(const Memory &m)
 	// The lock engages a few dots before the machine's mode-3 entry, in
 	// step with the visible STAT flip (mooneye lcdon_timing VRAM table).
 	static int vlk = -1;
-	if (vlk < 0) { const char *e = getenv("ACID_VLK"); vlk = e ? atoi(e) : 0; }
+	if (vlk < 0) { const char *e = getenv("ACID_VLK"); vlk = e ? atoi(e) : 5; }
 	return vlk > 0 && !m.ppu->cgb && m.ppu->mode == PpuMode::OamScan &&
 	       !m.ppu->lcdon_first && m.ppu->mode_clock >= 87 - vlk;
 }
@@ -117,7 +120,9 @@ static int AccessedOamRow(const Memory &m)
 	const Ppu *p = m.ppu;
 	if (!p || p->cgb || !(p->lcdc & 0x80)) return -1;
 	if (p->mode != PpuMode::OamScan || p->lcdon_first) return -1;
-	const int d = p->mode_clock;   // true line dot on our -4 grid
+	static int obw = -99;
+	if (obw < -90) { const char *e = getenv("ACID_OBW"); obw = e ? atoi(e) : -4; }
+	const int d = p->mode_clock + obw;   // true line dot on our -4 grid
 	if (d < 0 || d >= 82) return -1;
 	if (d < 2)  return 0;
 	int i = (d - 2) >> 1;
@@ -177,6 +182,23 @@ static void OamBugReadCorrupt(Memory &m)
 	}
 	for (int i = 0; i < 8; ++i)
 		oam[row + i] = oam[row - 8 + i];
+}
+
+// OAM WRITE blocking differs from read blocking: it engages later in the
+// scan and releases for the scan's last dots (Coffee GB
+// isOamAvailableForCpu(write); mooneye lcdon_write_timing).
+static bool OamWriteBlocked(const Memory &m)
+{
+	if (!m.ppu || !(m.ppu->lcdc & 0x80)) return false;
+	const Ppu &p = *m.ppu;
+	if (p.cgb) return OamBlocked(m);
+	if (p.mode == PpuMode::Transfer) return !CpuVisibleMode0(m);
+	if (p.mode != PpuMode::OamScan || p.lcdon_first) return false;
+	static int oew = -99, owf = -99;
+	if (oew < -90) { const char *e = getenv("ACID_OEW"); oew = e ? atoi(e) : 5;
+	                 const char *f = getenv("ACID_OWF"); owf = f ? atoi(f) : 82; }
+	if (owf > 0 && p.mode_clock >= owf && p.mode_clock < owf + 4) return false;
+	return p.mode_clock >= oew;
 }
 
 // Hook for 16-bit inc/dec whose register value sits on the bus.
@@ -444,7 +466,7 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 	{
 		if (m.ppu)
 		{
-			if (VramBlocked(m)) return;
+			if (VramBlocked(m, true)) return;
 			m.ppu->vram[(addr - 0x8000) + VramBankBase(m)] = value;
 			m.ppu->vram_writes++;
 		}
@@ -479,12 +501,19 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 	{
 		if (!m.dma_active && AccessedOamRow(m) >= 0)
 		{
-			OamBugWriteCorrupt(m);
-			return;
+			// The scan's row reads finish a few dots before mode 2 ends; a
+			// store landing after that goes through normally.
+			static int kw = -99;
+			if (kw < -90) { const char *e = getenv("ACID_KW"); kw = e ? atoi(e) : 76; }
+			if (m.ppu->mode_clock < kw)
+			{
+				OamBugWriteCorrupt(m);
+				return;
+			}
 		}
 		if (addr >= 0xFEA0) return;      // unusable
 		if (m.dma_active) return;        // OAM writes lost during OAM DMA
-		if (m.ppu && !OamBlocked(m))
+		if (m.ppu && !OamWriteBlocked(m))
 			m.ppu->oam[addr - 0xFE00] = value;
 		return;
 	}

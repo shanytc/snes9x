@@ -295,6 +295,9 @@ struct Ppu
 	// True for the whole first line after LCD enable (its shifted machine
 	// already reads at hardware dots, so the visible-mode lead is skipped).
 	bool     lcdon_line = false;
+	// FF44 read lag for the most recent LY flip (the enable line's flip
+	// shows earlier than steady-state ones).
+	uint8_t  ly_lag = 0;
 	// LCDC as of the end of the previous dot — the DMG pixel mix samples
 	// BG/OBJ enable one dot behind the register (m3_lcdc_bg_en_change).
 	uint8_t  lcdc_shadow = 0x91;

@@ -1441,7 +1441,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 			if (p.lcdon_first)
 			{
 				static int lp = 99;
-				if (lp == 99) { const char *e = getenv("ACID_LPAD"); lp = e ? atoi(e) : 0; }
+				if (lp == 99) { const char *e = getenv("ACID_LPAD"); lp = e ? atoi(e) : -4; }
 				p.lcdon_pad = static_cast<int16_t>(lp);
 			}
 		}
@@ -1886,7 +1886,7 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// STAT interrupt) have begun (SameBoy / mooneye lcdon tests).
 			{
 				static int msk = -1, v3 = -1, v0 = -1;
-				if (msk < 0) { const char *e = getenv("ACID_MSK"); msk = e ? atoi(e) : 0;
+				if (msk < 0) { const char *e = getenv("ACID_MSK"); msk = e ? atoi(e) : -3;
 				               const char *f = getenv("ACID_V3"); v3 = f ? atoi(f) : 0;
 				               const char *g = getenv("ACID_V0"); v0 = g ? atoi(g) : 0; }
 				if (!p.cgb && p.mode == PpuMode::OamScan &&
@@ -1912,8 +1912,8 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// then a matches-nothing gap, then the new LY (Mesen LyForCompare;
 			// mooneye lcdon_timing).
 			static int cmp1 = -1, cmp2 = -1;
-			if (cmp1 < 0) { const char *e = getenv("ACID_CMP1"); cmp1 = e ? atoi(e) : 0;
-			                const char *f = getenv("ACID_CMP2"); cmp2 = f ? atoi(f) : 0; }
+			if (cmp1 < 0) { const char *e = getenv("ACID_CMP1"); cmp1 = e ? atoi(e) : 4;
+			                const char *f = getenv("ACID_CMP2"); cmp2 = f ? atoi(f) : 4; }
 			if (p.ly == p.ly_prev + 1)
 			{
 				const int64_t dt = p.t_cycles - p.ly_change_t;
@@ -1935,8 +1935,8 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// FF44 reads lag the internal counter by a few dots — the
 			// LY flip lands mid-line-start pipeline (hblank_ly_scx).
 			static int lyk = -1;
-			if (lyk < 0) { const char *e = getenv("ACID_LYK"); lyk = e ? atoi(e) : 0; }
-			if (p.t_cycles - p.ly_change_t < lyk && p.ly == p.ly_prev + 1)
+			if (lyk < 0) { const char *e = getenv("ACID_LYK"); lyk = e ? atoi(e) : 4; }
+			if (!p.cgb && p.t_cycles - p.ly_change_t < lyk && p.ly == p.ly_prev + 1)
 				return p.ly_prev;
 			return p.ly;
 		}

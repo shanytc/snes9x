@@ -38,7 +38,7 @@ inline bool CpuVisibleMode0(const Memory &m)
 // the timing skeleton, and the CPU's locks follow the pixels.
 inline bool PpuStillRendering(const Memory &m)
 {
-	return m.ppu->mode == PpuMode::Transfer || !m.ppu->om.done;
+	return PpuLcdDraining(*m.ppu);
 }
 
 inline bool VramBlocked(const Memory &m, bool write = false)

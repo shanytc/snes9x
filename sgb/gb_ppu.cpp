@@ -157,7 +157,7 @@ void RecomputeStatLine(Ppu &p, Memory &mem, bool defer_irq = false)
 			{
 				const char *e;
 				d2 = (e = getenv("ACID_D2")) ? atoi(e) : 7;
-				d0 = (e = getenv("ACID_D0")) ? atoi(e) : 1;
+				d0 = (e = getenv("ACID_D0")) ? atoi(e) : 0;
 				dv = (e = getenv("ACID_DV")) ? atoi(e) : 9;
 				dl = (e = getenv("ACID_DL")) ? atoi(e) : -1;   // -1 = mode-based
 				static int dlc = -2;
@@ -1316,10 +1316,27 @@ static bool PpuRendering(const Ppu &p)
 	return p.mode == PpuMode::Transfer || !p.om.done;
 }
 
+bool PpuLcdDraining(const Ppu &p) { return PpuRendering(p); }
+
+// STAT's mode bits trail the machine by a fixed LCD lag, not by however
+// far the output machine has drifted behind the timing skeleton.
+static bool StatShowsTransfer(const Ppu &p)
+{
+	if (p.mode == PpuMode::Transfer) return true;
+	static int hold = -99, holdl = -99;
+	if (hold < -90) { const char *e = getenv("ACID_HOLDN"); hold = e ? atoi(e) : 1;
+	                  const char *f = getenv("ACID_HOLDL"); holdl = f ? atoi(f) : 4; }
+	return !p.om.done && p.mode_clock < (p.lcdon_line ? holdl : hold);
+}
+
 void PpuSetPalUnit(int unit) { g_pal_unit = unit; }
 
 void PpuReset(Ppu &p)
 {
+	{
+		const char *e = getenv("ACID_BSKEW");
+		p.boot_skew = static_cast<uint8_t>(e ? atoi(e) : 1);
+	}
 	std::memset(p.vram,        0, sizeof p.vram);
 	std::memset(p.oam,         0, sizeof p.oam);
 	std::memset(p.framebuffer,     0, sizeof p.framebuffer);
@@ -1773,7 +1790,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				if ((p.stat & 0x20) && !p.stat_line_high && p.stat_irq_delay == 0)
 				{
 					static int vp = -1;
-					if (vp < 0) { const char *e = getenv("ACID_VP"); vp = e ? atoi(e) : 7; }
+					if (vp < 0) { const char *e = getenv("ACID_VP"); vp = e ? atoi(e) : 8; }
 					p.stat_irq_delay = static_cast<uint8_t>(vp);
 				}
 				p.frame_ready   = true;
@@ -1954,10 +1971,22 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		// flag — the comparator is frozen while the LCD is off, so bit 2
 		// holds its disable-time value (see RecomputeStatLine / Mr. Do!).
 		p.stat = static_cast<uint8_t>(p.stat & 0xFC);
+		// An LCD that gets switched on from here goes through the CPU's
+		// write, which sets the grid on its own.
+		p.boot_skew = 0;
 		(void)mem;
 		return;
 	}
 
+	// A DMG LCD-enable write lands three dots into its machine cycle, so
+	// the grid it starts is offset from the CPU's; the CGB write lands at
+	// the cycle end and stays aligned. A BIOS-less start is handed LCDC
+	// already on, so it has to take that offset here instead.
+	if (p.boot_skew > 0)
+	{
+		if (mem.cgb_hw) p.boot_skew = 0;
+		else while (p.boot_skew > 0 && tcycles > 0) { --p.boot_skew; --tcycles; }
+	}
 	while (tcycles-- > 0)
 		ExecPpuDot(p, mem);
 }
@@ -1998,7 +2027,7 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 				         v0 > 0 && p.tm.lcd_x >= GB_SCREEN_WIDTH - v0)
 					v = static_cast<uint8_t>(v & ~0x03);
 				else if (!p.cgb && p.mode == PpuMode::HBlank &&
-				         (p.lcdc & 0x80) && p.stop_display == 0 && !p.om.done)
+				         (p.lcdc & 0x80) && p.stop_display == 0 && StatShowsTransfer(p))
 				{
 					// STAT keeps reading mode 3 while the LCD is still
 					// taking this line's last pixels.
@@ -2035,7 +2064,7 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// dot earlier than a steady line does.
 			static int lyk = -1, lyks = -1;
 			if (lyk < 0) { const char *e = getenv("ACID_LYK"); lyk = e ? atoi(e) : 4;
-			               const char *f = getenv("ACID_LYKS"); lyks = f ? atoi(f) : 5; }
+			               const char *f = getenv("ACID_LYKS"); lyks = f ? atoi(f) : 4; }
 			// The enable line owns both the reads inside it and the reads
 			// just after the flip that ends it.
 			const int lag = (p.lcdon_line || p.ly_lag) ? lyk : lyks;

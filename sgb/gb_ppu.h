@@ -310,6 +310,9 @@ struct Ppu
 	// machine and not the other (Coffee GB's windowDisplayOverride /
 	// windowXOverride queues; mealybug win_en_change_multiple_wx).
 	uint8_t  wx_d1 = 0, wx_d2 = 0, wx_d3 = 0, wx_d4 = 0;
+	// Dots to swallow before the very first one, so a BIOS-less start
+	// picks up the dot grid a CPU-driven LCD enable would have set.
+	uint8_t  boot_skew = 0;
 };
 
 void PpuReset(Ppu &p);
@@ -318,6 +321,10 @@ void PpuReset(Ppu &p);
 // mealybug "blob" unit (old|new OR pixel), 1 = daid's unit (clean switch).
 // Real DMGs photograph differently here; the shootout refs span both.
 void PpuSetPalUnit(int unit);
+
+// True while the LCD is still taking this line's pixels: mode 3, plus the
+// few dots the output machine trails the timing skeleton by.
+bool PpuLcdDraining(const Ppu &p);
 void PpuStep(Ppu &p, Memory &mem, int32_t tcycles);
 
 // CPU entered STOP with the LCD on: DMG panels go white, CGB panels go

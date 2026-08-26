@@ -1214,19 +1214,9 @@ static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
 	return got == 256;
 }
 
-// Locate a stand-alone Game Boy / Game Boy Color boot ROM — the thing that
-// draws the scrolling Nintendo logo before the cart takes over. Unlike the
-// SGB boot ROM this one runs with no SNES-side BIOS alongside; it's the whole
-// feature. Nothing is bundled, so a missing file just means the cart keeps
-// starting at $0100 exactly as it always has.
-//
-// Same directory search order as FindSGB_BIOS. `cgb` picks the Game Boy Color
-// boot ROM over the monochrome one. Accepted sizes: 256 (DMG), and 2304 or
-// 2048 (CGB, with or without the $0100-$01FF cart-header window baked into the
-// file). Both real boot ROMs open with `LD SP,$FFFE` (31 FE FF) — checking
-// that alongside the size keeps a mis-named or truncated dump from being
-// staged, which would hang the GB at $0000 with no way for the user to tell
-// what went wrong. Fills `out_bytes` when non-null so callers don't re-read.
+// Find a GB/GBC boot ROM (the scrolling-logo animation). Same search order as
+// FindSGB_BIOS; size + the LD SP,$FFFE opening reject a bad dump, which would
+// otherwise hang the GB at $0000. Fills out_bytes when non-null.
 static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
                              std::string &out_path, std::vector<uint8> *out_bytes)
 {
@@ -1260,8 +1250,7 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 
 			uint8 buf[0x900];
 			const size_t n = fread(buf, 1, sizeof buf, f);
-			// A file longer than the largest legal boot ROM isn't one.
-			const bool oversize = (fgetc(f) != EOF);
+			const bool oversize = (fgetc(f) != EOF);   // longer than any boot ROM
 			fclose(f);
 
 			if (oversize) continue;
@@ -1689,20 +1678,11 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
     Settings.InitialInfoStringTimeout = saved;
 }
 
-// Shared tail of the two BIOS-less GB load paths. No SNES-side BIOS is in
-// play, but if the user dropped a dmg_boot.bin / cgb_boot.bin next to the ROM
-// (or in BIOS_DIR) we stage it so the cart gets the authentic power-on logo
-// animation and boot ding before it starts. Purely additive: with no boot ROM
-// found — the default, since nothing is bundled — this leaves the emulator on
-// the exact legacy path, cart running from $0100.
-//
-// Returns the banner mode to report: 3 = Game Boy BIOS, 4 = Game Boy Color
-// BIOS, 0 = BIOS-less. Call between S9xSGBInit() and S9xSGBLoadROM*().
-// True when the user's GB/GBC boot ROM should be taken *in preference to* the
-// SGB BIOS — i.e. they picked "Game Boy [Color] BIOS" from the BIOS menu while
-// an SGB BIOS also happens to be installed. At preference 1 (the default) the
-// boot ROM is only used once the SGB attempts have come up empty, which keeps
-// SGB mode the default for anyone who has a Super Game Boy BIOS on disk.
+// Stage a GB/GBC boot ROM for the BIOS-less paths; with none found the cart
+// starts at $0100 as before. Call between S9xSGBInit() and S9xSGBLoadROM*().
+// Returns the banner mode: 3 = GB BIOS, 4 = GBC BIOS, 0 = BIOS-less.
+// True when the user explicitly picked the GB/GBC boot ROM over an installed
+// SGB BIOS. At the default preference 1 the SGB ladder runs first.
 static bool GBBootROMOutranksSGB (bool gbCgb, const char *filename)
 {
     return Settings.GB_BIOSPreference >= 2 &&
@@ -1720,8 +1700,7 @@ static uint8 StageGBBootROM (bool gbCgb, const char *filename)
         !FindGB_BootROM(gbCgb, filename, boot_path, &boot) ||
         !S9xSGBLoadBootROMBytes(boot.data(), boot.size()))
     {
-        // Clear any boot ROM left staged by a previous BIOS-mode session.
-        S9xSGBLoadBootROMBytes(nullptr, 0);
+        S9xSGBLoadBootROMBytes(nullptr, 0);   // drop any from a prior session
         return 0;
     }
 
@@ -1777,9 +1756,8 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     const uint8 gbFlag    = GbBytesCgbFlag(rom, (size_t)size);
     const bool  gbCgb     = (gbFlag & 0x80) != 0;
 
-    // The user picking "Game Boy [Color] BIOS" from the BIOS menu outranks an
-    // installed SGB BIOS; otherwise the SGB ladder runs first exactly as before
-    // and the boot ROM is the last step before BIOS-less.
+    // An explicit GB/GBC BIOS choice outranks the SGB ladder; otherwise the
+    // boot ROM is the last step before BIOS-less.
     std::string bios_path;
     uint8 bios_mode = 0;
     if (!GBBootROMOutranksSGB(gbCgb, filename))
@@ -1861,8 +1839,7 @@ bool8 CMemory::LoadROM (const char *filename)
         const uint8 gbFlag    = GbFileCgbFlag(filename);
         const bool  gbCgb     = (gbFlag & 0x80) != 0;
 
-        // See the LoadGBFromBytes twin: an explicit GB/GBC BIOS choice wins
-        // over an installed SGB BIOS, otherwise the SGB ladder runs first.
+        // See the LoadGBFromBytes twin.
         std::string bios_path;
         uint8 bios_mode = 0;
         if (!GBBootROMOutranksSGB(gbCgb, filename))

@@ -195,10 +195,8 @@ struct EmuConfig
     // Settings.SGB_BIOSPreference; the BIOS menu keeps this in sync.
     int sgb_bios_preference;
 
-    // GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the scrolling-logo
-    // animation: 0 = never, 1 = when no SGB BIOS is in play, 2 = in preference
-    // to the SGB BIOS. Persisted under [SGB] GBBIOSPreference, applied to
-    // Settings.GB_BIOSPreference; the BIOS menu keeps this in sync.
+    // GB/GBC boot ROM: 0 = never, 1 = when no SGB BIOS is in play, 2 = in
+    // preference to it. Persisted as [SGB] GBBIOSPreference.
     int gb_bios_preference;
 
     // Files

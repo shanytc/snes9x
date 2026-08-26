@@ -224,14 +224,11 @@ inline bool S9xInterlaceField()
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *, uint32);
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
-// True when a usable Game Boy (cgb=FALSE) or Game Boy Color (cgb=TRUE) boot
-// ROM is present in the ROM's directory, BIOS_DIR, or the working directory.
-// The BIOS menu greys out its GB/GBC entry when this is false.
+// True when a GB (cgb=FALSE) or GBC (cgb=TRUE) boot ROM is present in the ROM
+// dir, BIOS_DIR, or cwd. The BIOS menu greys out its entry when false.
 bool8 S9xGBBIOSAvailable(bool8 cgb, const char *gb_rom_path);
 
-// True when the loaded GB cart carries the CGB flag ($0143 bit 7), i.e. the
-// Emulation->BIOS entry should read "Game Boy Color BIOS" and cgb_boot.bin is
-// the file to look for. False for a plain Game Boy cart or none at all.
+// True when the loaded GB cart carries the CGB flag ($0143 bit 7).
 bool8 S9xGBCartIsCgb(void);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away

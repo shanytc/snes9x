@@ -235,9 +235,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
                                       ? 2
                                       : (uint8)config->sgb_bios_preference;
 
-    // Plain GB/GBC boot ROM (scrolling-logo animation). Nothing is bundled, so
-    // this only does anything once the user drops a dmg_boot.bin / cgb_boot.bin
-    // into the BIOS directory.
+    // GB/GBC boot ROM; inert until the user supplies dmg_boot.bin/cgb_boot.bin.
     Settings.GB_BIOSPreference = (config->gb_bios_preference < 0 || config->gb_bios_preference > 2)
                                      ? 1
                                      : (uint8)config->gb_bios_preference;

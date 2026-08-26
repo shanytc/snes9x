@@ -145,12 +145,8 @@ struct Emulator::Impl
 	bool        cgb_compat  = false;
 	bool        sgb_authentic = false;
 
-	// Staged GB-side boot ROM. Copied into mem.boot_rom on Reset when
-	// boot_rom_loaded is true (SGB BIOS mode, or GB/GBC BIOS mode where the
-	// user supplied a dmg_boot.bin / cgb_boot.bin). Staging is kept separate
-	// because MemReset zeroes mem.boot_rom. Always normalized to the mapped
-	// layout: 0x100 for DMG/SGB, 0x900 for CGB (with the 0x100-0x1FF cart
-	// header window zero-filled — MemRead never reads it).
+	// Staged boot ROM, copied into mem.boot_rom on Reset (MemReset zeroes it).
+	// Held in mapped layout: 0x100 DMG/SGB, 0x900 CGB with the hole zeroed.
 	uint8_t     boot_rom_staging[0x900];
 	uint16_t    boot_rom_staging_size = 0;
 	bool        boot_rom_loaded = false;
@@ -603,14 +599,8 @@ void Emulator::Reset()
 		}
 	}
 
-	// If a GB-side boot ROM was staged, overlay it and start the CPU at
-	// 0x0000. The boot code scrolls the Nintendo logo, and under an SGB
-	// boot ROM also sends the 5-packet handshake the SNES-side BIOS is
-	// waiting for, then writes 0xFF50 to disable itself — at which point
-	// the cart takes over exactly as it would on real hardware. This is
-	// the SGB BIOS-mode path and the GB/GBC BIOS-mode path both; the
-	// latter runs with Settings.SGB_BIOSModeActive false (no 65816 BIOS
-	// alongside), so only the logo animation and the boot ding happen.
+	// Staged boot ROM: overlay it and start at 0x0000. It scrolls the logo
+	// (plus the SGB handshake in BIOS mode), then writes 0xFF50 to hand off.
 	if (impl_->boot_rom_loaded)
 	{
 		// Real power-on has the LCD OFF; the boot ROM fills VRAM with the
@@ -650,22 +640,19 @@ bool Emulator::LoadBootROM(const uint8_t *data, size_t size)
 	std::memset(impl_->boot_rom_staging, 0, sizeof impl_->boot_rom_staging);
 	if (size == 0x100)
 	{
-		// DMG / SGB1 / SGB2 boot ROM.
+		// DMG / SGB1 / SGB2.
 		std::memcpy(impl_->boot_rom_staging, data, 0x100);
 		impl_->boot_rom_staging_size = 0x100;
 	}
 	else if (size == 0x900)
 	{
-		// CGB boot ROM as commonly dumped: the 0x100-0x1FF cart-header
-		// window is present in the file as padding. Copy it verbatim —
-		// MemRead skips that range.
+		// CGB as dumped: header window included as padding, MemRead skips it.
 		std::memcpy(impl_->boot_rom_staging, data, 0x900);
 		impl_->boot_rom_staging_size = 0x900;
 	}
 	else if (size == 0x800)
 	{
-		// Same CGB code with the header window stripped out. Re-insert the
-		// hole so both file layouts map identically.
+		// CGB with the header window stripped — re-insert the hole.
 		std::memcpy(impl_->boot_rom_staging,         data,         0x100);
 		std::memcpy(impl_->boot_rom_staging + 0x200, data + 0x100, 0x700);
 		impl_->boot_rom_staging_size = 0x900;
@@ -927,8 +914,7 @@ void Emulator::UnloadROM()
 	CartUnload(impl_->cart);
 	impl_->has_rom = false;
 	impl_->cgb_mode = false;
-	// Drop any staged boot ROM so a subsequent BIOS-less load starts at
-	// $0100 with the normal post-boot register state.
+	// Drop the staged boot ROM so the next load starts at $0100.
 	impl_->boot_rom_loaded       = false;
 	impl_->boot_rom_staging_size = 0;
 }

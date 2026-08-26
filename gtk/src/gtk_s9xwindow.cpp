@@ -190,12 +190,9 @@ void Snes9xWindow::connect_signals()
 #endif
     });
 
-    // The four entries are one choice, but they live in two settings so that
-    // switching to the GB/GBC boot ROM and back doesn't forget which Super
-    // Game Boy BIOS you had picked. Selecting an SGB entry only demotes the
-    // boot ROM from "in preference to SGB" back to "when SGB isn't in play".
-    // GTK persists straight out of Settings (see gtk_config.cpp), so there is
-    // no separate config field to keep in sync here.
+    // One choice across two settings, so switching to the boot ROM and back
+    // remembers which SGB BIOS was picked (an SGB entry only demotes 2 to 1).
+    // GTK persists straight out of Settings, so there's no config field here.
     auto apply_bios_choice = [&](uint8_t sgb_pref, uint8_t gb_pref) {
         if (refreshing_bios_menu)
             return;
@@ -1437,14 +1434,13 @@ void Snes9xWindow::configure_widgets()
         enable_widget("bios_sgb1_item", S9xSGBBIOSAvailable(1, Settings.GBRomPath));
         enable_widget("bios_sgb2_item", S9xSGBBIOSAvailable(2, Settings.GBRomPath));
 
-        // One entry for the cart's own console, labelled to match it.
+        // Labelled from the cart's CGB flag.
         auto gb_item = get_object<Gtk::RadioMenuItem>("bios_gb_item");
         gb_item->set_label(cgb_cart ? _("_Game Boy Color BIOS") : _("_Game Boy BIOS"));
         gb_item->set_use_underline(true);
         enable_widget("bios_gb_item", S9xGBBIOSAvailable(cgb_cart, Settings.GBRomPath));
 
-        // Check what is actually running, not what was requested — a
-        // preference whose BIOS file is missing silently falls back.
+        // Check what is running, not what was asked for: a missing file falls back.
         const char *active_name;
         if (Settings.SGB_BIOSModeActive)
             active_name = (Settings.GameBoyRunMode == 2) ? "bios_sgb2_item" : "bios_sgb1_item";

@@ -218,13 +218,12 @@ void EmuMainWindow::refreshBiosMenu()
     const bool cgb_cart = S9xGBCartIsCgb();
     bios_sgb1_action->setEnabled(S9xSGBBIOSAvailable(1, Settings.GBRomPath));
     bios_sgb2_action->setEnabled(S9xSGBBIOSAvailable(2, Settings.GBRomPath));
-    // One entry for the cart's own console, labelled to match it.
+    // Labelled from the cart's CGB flag.
     bios_gb_action->setText(cgb_cart ? tr("&Game Boy Color BIOS")
                                      : tr("&Game Boy BIOS"));
     bios_gb_action->setEnabled(S9xGBBIOSAvailable(cgb_cart, Settings.GBRomPath));
 
-    // Check what is actually running, not what was requested — a preference
-    // whose BIOS file is missing silently falls back.
+    // Check what is running, not what was asked for: a missing file falls back.
     bios_sgb2_action->setChecked(Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 2);
     bios_sgb1_action->setChecked(Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode != 2);
     bios_gb_action->setChecked(!Settings.SGB_BIOSModeActive && Settings.GB_BIOSActive);
@@ -516,14 +515,12 @@ void EmuMainWindow::createWidgets()
         a->setCheckable(true);
         bios_group->addAction(a);
     }
-    // The four entries are one choice, but they live in two settings so that
-    // switching to the GB/GBC boot ROM and back doesn't forget which Super
-    // Game Boy BIOS you had picked. Selecting an SGB entry only demotes the
-    // boot ROM from "in preference to SGB" back to "when SGB isn't in play".
+    // One choice across two settings, so switching to the boot ROM and back
+    // remembers which SGB BIOS was picked (an SGB entry only demotes 2 to 1).
     auto apply_bios_choice = [this](uint8_t sgb_pref, uint8_t gb_pref) {
         Settings.SGB_BIOSPreference = sgb_pref;
         Settings.GB_BIOSPreference  = gb_pref;
-        app->config->sgb_bios_preference = sgb_pref;  // persist to the config file
+        app->config->sgb_bios_preference = sgb_pref;  // persist
         app->config->gb_bios_preference  = gb_pref;
         if (Settings.GBRomPath[0])
             openFile(std::string(Settings.GBRomPath));

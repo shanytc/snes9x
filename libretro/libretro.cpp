@@ -670,9 +670,8 @@ static void update_variables(void)
             Settings.SGB_BIOSPreference = 2;
     }
 
-    // Plain Game Boy / Game Boy Color boot ROM (the scrolling-logo animation).
-    // Looked for in the system dir as dmg_boot.bin / cgb_boot.bin; nothing is
-    // bundled, so with no file present this changes nothing.
+    // GB/GBC boot ROM (scrolling-logo animation), looked for in the system dir
+    // as dmg_boot.bin / cgb_boot.bin. Nothing bundled; absent = no change.
     var.key = "snes9x_gb_bios";
     var.value = NULL;
     Settings.GB_BIOSPreference = 1;

@@ -219,10 +219,7 @@ void MemReset(Memory &m, bool cgb)
 	m.serial_data    = 0;
 	m.serial_control = 0;
 	m.serial_bits    = 0;
-	// Boot ROM staging — zeroed on reset. S9xSGBLoadBootROM fills these
-	// in from the user-provided sgb.boot.rom / sgb2.boot.rom / dmg_boot.bin
-	// / cgb_boot.bin before the GB CPU starts. boot_rom_enabled stays false
-	// until LoadBootROM sets it.
+	// Zeroed on reset; S9xSGBLoadBootROM refills before the GB CPU starts.
 	std::memset(m.boot_rom, 0, sizeof m.boot_rom);
 	m.boot_rom_size    = 0;
 	m.boot_rom_enabled = false;
@@ -371,13 +368,8 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	if (m.dma_active && !m.dma_vram_bypass && addr < 0xFE00 &&
 	    DmaBusOf(m, m.dma_src) == DmaBusOf(m, addr))
 		return m.dma_bus_byte;
-	// Boot ROM overlay — the first 256 bytes mirror the DMG/SGB/CGB boot ROM
-	// while it's still enabled, and a CGB boot ROM (boot_rom_size 0x900)
-	// additionally covers 0x0200-0x08FF. The 0x0100-0x01FF gap between the
-	// two halves stays cart ROM on real hardware, which is how the CGB boot
-	// code reads the header it colorizes from. The boot code writes 0x01 to
-	// 0xFF50 as its final act, which clears boot_rom_enabled and exposes the
-	// cart bytes underneath.
+	// Boot ROM overlay. A CGB boot ROM also covers 0x0200-0x08FF; the gap at
+	// 0x0100-0x01FF stays cart ROM, which is where it reads the header from.
 	if (m.boot_rom_enabled &&
 	    (addr < 0x0100 || (addr >= 0x0200 && addr < m.boot_rom_size)))
 	{

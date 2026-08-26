@@ -2931,11 +2931,8 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_BIOS_SGB2:
 			{
 				const UINT bios_id = LOWORD(wParam);
-				// The four entries are one choice, but they live in two
-				// settings so that switching to the GB/GBC boot ROM and back
-				// doesn't forget which Super Game Boy BIOS you had picked.
-				// Selecting an SGB entry only demotes the boot ROM from "in
-				// preference to SGB" back to "when SGB isn't in play".
+				// One choice across two settings, so switching to the boot ROM
+				// and back remembers which SGB BIOS was picked.
 				const uint8 demoted_gb =
 					(Settings.GB_BIOSPreference >= 2) ? 1 : Settings.GB_BIOSPreference;
 				switch (bios_id)
@@ -5553,8 +5550,8 @@ static void CheckMenuStates ()
 
 		if (gb_loaded && s_bios_hmenu)
 		{
-			// Relabel the cart's-own-console entry to match what's loaded.
-			// Only on a change: retitling every time would fight LocalizeMenu.
+			// Relabel from the cart's CGB flag, only on a change so repeated
+			// retitling doesn't fight LocalizeMenu.
 			const bool cgb_cart = S9xGBCartIsCgb() != FALSE;
 			static int s_bios_gb_label = -1;
 			if (s_bios_gb_label != (int)cgb_cart)
@@ -5571,8 +5568,7 @@ static void CheckMenuStates ()
 					LocalizeMenu(s_bios_hmenu);
 			}
 
-			// Check what is actually running, not what was requested — a
-			// preference whose BIOS file is missing silently falls back.
+			// Check what is running, not what was asked for: a missing file falls back.
 			const bool sgb_on = Settings.SGB_BIOSModeActive != FALSE;
 			const int  active = sgb_on ? ((Settings.GameBoyRunMode == 2) ? 3 : 2)
 			                           : (Settings.GB_BIOSActive ? 1 : 0);

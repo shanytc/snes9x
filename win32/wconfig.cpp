@@ -959,6 +959,7 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
+	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to boot GB/GBC ROMs through dmg_boot.bin / cgb_boot.bin when one is found, for the scrolling-logo animation. Nothing is bundled; drop the file in the BIOS directory.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

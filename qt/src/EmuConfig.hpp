@@ -195,6 +195,11 @@ struct EmuConfig
     // Settings.SGB_BIOSPreference; the BIOS menu keeps this in sync.
     int sgb_bios_preference;
 
+    // Boot plain GB/GBC carts through a user-supplied dmg_boot.bin /
+    // cgb_boot.bin (the scrolling-logo animation) when one is found.
+    // Persisted under [SGB] GBBIOSEnabled, applied to Settings.GB_BIOSEnabled.
+    bool gb_bios_enabled;
+
     // Files
     enum FileLocation
     {

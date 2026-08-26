@@ -146,9 +146,13 @@ struct Emulator::Impl
 	bool        sgb_authentic = false;
 
 	// Staged GB-side boot ROM. Copied into mem.boot_rom on Reset when
-	// boot_rom_loaded is true (authentic BIOS mode only). Staging is kept
-	// separate because MemReset zeroes mem.boot_rom.
-	uint8_t     boot_rom_staging[0x100];
+	// boot_rom_loaded is true (SGB BIOS mode, or GB/GBC BIOS mode where the
+	// user supplied a dmg_boot.bin / cgb_boot.bin). Staging is kept separate
+	// because MemReset zeroes mem.boot_rom. Always normalized to the mapped
+	// layout: 0x100 for DMG/SGB, 0x900 for CGB (with the 0x100-0x1FF cart
+	// header window zero-filled — MemRead never reads it).
+	uint8_t     boot_rom_staging[0x900];
+	uint16_t    boot_rom_staging_size = 0;
 	bool        boot_rom_loaded = false;
 
 	// ICD2 state — the SGB cart-chip register set exposed at 0x6000-0x7FFF
@@ -599,11 +603,14 @@ void Emulator::Reset()
 		}
 	}
 
-	// If a GB-side boot ROM was staged (authentic BIOS mode), overlay it
-	// at 0x0000-0x00FF and start the CPU there. The boot code will scroll
-	// the Nintendo logo, send the 5-packet SGB handshake the BIOS is
-	// waiting for, then write 0xFF50 to disable itself — at which point
-	// the cart takes over exactly as it would on real hardware.
+	// If a GB-side boot ROM was staged, overlay it and start the CPU at
+	// 0x0000. The boot code scrolls the Nintendo logo, and under an SGB
+	// boot ROM also sends the 5-packet handshake the SNES-side BIOS is
+	// waiting for, then writes 0xFF50 to disable itself — at which point
+	// the cart takes over exactly as it would on real hardware. This is
+	// the SGB BIOS-mode path and the GB/GBC BIOS-mode path both; the
+	// latter runs with Settings.SGB_BIOSModeActive false (no 65816 BIOS
+	// alongside), so only the logo animation and the boot ding happen.
 	if (impl_->boot_rom_loaded)
 	{
 		// Real power-on has the LCD OFF; the boot ROM fills VRAM with the
@@ -617,7 +624,8 @@ void Emulator::Reset()
 		impl_->ppu.window_line = 0;
 		impl_->ppu.stat_line_high = false;
 
-		std::memcpy(impl_->mem.boot_rom, impl_->boot_rom_staging, sizeof impl_->mem.boot_rom);
+		std::memcpy(impl_->mem.boot_rom, impl_->boot_rom_staging, impl_->boot_rom_staging_size);
+		impl_->mem.boot_rom_size    = impl_->boot_rom_staging_size;
 		impl_->mem.boot_rom_enabled = true;
 		cs.r.af = 0x0000;
 		cs.r.bc = 0x0000;
@@ -634,11 +642,41 @@ bool Emulator::LoadBootROM(const uint8_t *data, size_t size)
 {
 	if (!data || size == 0)
 	{
-		impl_->boot_rom_loaded = false;
+		impl_->boot_rom_loaded       = false;
+		impl_->boot_rom_staging_size = 0;
 		return true;
 	}
-	if (size != sizeof impl_->boot_rom_staging) return false;
-	std::memcpy(impl_->boot_rom_staging, data, size);
+
+	std::memset(impl_->boot_rom_staging, 0, sizeof impl_->boot_rom_staging);
+	if (size == 0x100)
+	{
+		// DMG / SGB1 / SGB2 boot ROM.
+		std::memcpy(impl_->boot_rom_staging, data, 0x100);
+		impl_->boot_rom_staging_size = 0x100;
+	}
+	else if (size == 0x900)
+	{
+		// CGB boot ROM as commonly dumped: the 0x100-0x1FF cart-header
+		// window is present in the file as padding. Copy it verbatim —
+		// MemRead skips that range.
+		std::memcpy(impl_->boot_rom_staging, data, 0x900);
+		impl_->boot_rom_staging_size = 0x900;
+	}
+	else if (size == 0x800)
+	{
+		// Same CGB code with the header window stripped out. Re-insert the
+		// hole so both file layouts map identically.
+		std::memcpy(impl_->boot_rom_staging,         data,         0x100);
+		std::memcpy(impl_->boot_rom_staging + 0x200, data + 0x100, 0x700);
+		impl_->boot_rom_staging_size = 0x900;
+	}
+	else
+	{
+		impl_->boot_rom_loaded       = false;
+		impl_->boot_rom_staging_size = 0;
+		return false;
+	}
+
 	impl_->boot_rom_loaded = true;
 	return true;
 }
@@ -891,7 +929,8 @@ void Emulator::UnloadROM()
 	impl_->cgb_mode = false;
 	// Drop any staged boot ROM so a subsequent BIOS-less load starts at
 	// $0100 with the normal post-boot register state.
-	impl_->boot_rom_loaded = false;
+	impl_->boot_rom_loaded       = false;
+	impl_->boot_rom_staging_size = 0;
 }
 
 bool Emulator::HasROM() const { return impl_->has_rom; }
@@ -964,6 +1003,13 @@ bool Emulator::IsCgbRender() const
 const uint16_t *Emulator::CgbColorFB() const
 {
 	return impl_->has_rom ? impl_->ppu.color_fb : nullptr;
+}
+
+bool Emulator::CartFlags(uint8_t *cgb_flag, uint8_t *sgb_flag) const
+{
+	if (cgb_flag) *cgb_flag = impl_->has_rom ? impl_->cart.header.cgb_flag : 0;
+	if (sgb_flag) *sgb_flag = impl_->has_rom ? impl_->cart.header.sgb_flag : 0;
+	return impl_->has_rom;
 }
 
 const uint8_t *Emulator::DebugVRAM() const
@@ -2726,6 +2772,12 @@ void S9xSGBApplyAutoBlend(void) { SGB::Instance().ApplyAutoBlend(); }
 bool S9xSGBIsCgb(void) { return SGB::Instance().IsCgb(); }
 bool S9xSGBIsCgbRender(void) { return SGB::Instance().IsCgbRender(); }
 const uint16_t *S9xSGBGetCgbColorFB(void) { return SGB::Instance().CgbColorFB(); }
+
+bool S9xSGBGetCartFlags(unsigned char *cgb_flag, unsigned char *sgb_flag)
+{
+	return SGB::Instance().CartFlags(static_cast<uint8_t *>(cgb_flag),
+	                                 static_cast<uint8_t *>(sgb_flag));
+}
 const uint8_t  *S9xSGBGetVRAM(void)           { return SGB::Instance().DebugVRAM(); }
 const uint8_t  *S9xSGBGetOAM(void)            { return SGB::Instance().DebugOAM(); }
 const uint8_t  *S9xSGBGetCgbBgPal(void)       { return SGB::Instance().DebugCgbBgPal(); }

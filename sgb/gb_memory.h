@@ -59,12 +59,18 @@ struct Memory
 	uint8_t serial_bits = 0; // internal-clock transfer: bits left to shift (0 = idle)
 	uint8_t serial_guard = 0; // ticks after arming during which edges don't clock
 
-	// GB boot ROM (256 bytes). Overlays cart ROM at 0x0000-0x00FF while
-	// boot_rom_enabled is true; cleared by the first write to 0xFF50.
-	// Populated by S9xSGBLoadBootROM in authentic BIOS mode; untouched in
-	// BIOS-less mode (boot_rom_enabled stays false, cart is visible from reset).
-	uint8_t boot_rom[0x100];
-	bool    boot_rom_enabled;
+	// GB boot ROM. Two layouts, selected by boot_rom_size:
+	//   0x100  DMG / SGB boot ROM — overlays cart ROM at 0x0000-0x00FF.
+	//   0x900  CGB boot ROM — overlays 0x0000-0x00FF *and* 0x0200-0x08FF,
+	//          leaving the cart header at 0x0100-0x01FF visible in between
+	//          (the boot code reads the title/logo through that window).
+	// Cleared by the first write to 0xFF50. Populated by S9xSGBLoadBootROM
+	// in authentic SGB BIOS mode and in GB/GBC BIOS mode; untouched when no
+	// boot ROM is in use (boot_rom_enabled stays false, cart is visible
+	// from reset).
+	uint8_t  boot_rom[0x900];
+	uint16_t boot_rom_size;
+	bool     boot_rom_enabled;
 
 	uint8_t  svbk = 1;            // 0xFF70
 	bool     key1_armed   = false;

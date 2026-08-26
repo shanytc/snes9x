@@ -66,6 +66,9 @@ class EmuMainWindow : public QMainWindow
     QAction *bios_none_action = nullptr;
     QAction *bios_sgb1_action = nullptr;
     QAction *bios_sgb2_action = nullptr;
+    // Shown in place of the SGB entries for plain GB/GBC carts; its label
+    // switches between "Game Boy" and "Game Boy Color" per cart.
+    QAction *bios_gb_action = nullptr;
     void refreshBiosMenu();
 
     QMenu *voicekun_menu = nullptr;

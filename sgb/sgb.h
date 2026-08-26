@@ -96,6 +96,12 @@ public:
 	bool IsCgbRender() const;
 	const uint16_t *CgbColorFB() const;
 
+	// Raw cart-header flags for the loaded GB ROM: $0143 (CGB: $80
+	// enhanced / $C0 only) and $0146 (SGB: $03 = SGB-enhanced). Both are
+	// set to 0 and false is returned when no cart is loaded. Unlike
+	// IsCgb() these describe the cart, not the mode it's running in.
+	bool CartFlags(uint8_t *cgb_flag, uint8_t *sgb_flag) const;
+
 	// Debug viewer accessors — side-effect-free reads of live PPU state.
 	const uint8_t  *DebugVRAM() const;       // 0x4000: bank0 [0..0x1FFF], bank1 [0x2000..]
 	const uint8_t  *DebugOAM() const;        // 0xA0
@@ -143,9 +149,11 @@ public:
 	uint8_t       *CheatHRAM(uint32_t *size) const;   // 0x7F
 	const uint8_t *CheatROM(uint32_t *size) const;
 
-	// Install the 256-byte DMG/SGB GB-side boot ROM. Takes effect on the
-	// next Reset. Call with nullptr/size=0 to clear. Only loaded in
-	// authentic BIOS mode — BIOS-less continues to start at 0x0100.
+	// Install the GB-side boot ROM. Accepted sizes: 256 (DMG / SGB1 / SGB2)
+	// and 2304 or 2048 (CGB, with or without the 0x100-0x1FF cart-header
+	// window baked into the file). Takes effect on the next Reset. Call
+	// with nullptr/size=0 to clear; any other size is rejected. Without a
+	// boot ROM the CPU starts at 0x0100 with post-boot register state.
 	bool LoadBootROM(const uint8_t *data, size_t size);
 
 	// Populate the 5-packet boot-ROM handshake from the current cart's
@@ -294,10 +302,12 @@ void S9xSGBReset(void);
 bool S9xSGBSoftReset(void);
 bool S9xSGBLoadROM(const char *filename);
 
-// Hand the 256-byte GB-side boot ROM to the SGB core. Only used in
-// authentic BIOS mode — boot ROM scrolls the Nintendo logo and sends
-// 5 SGB handshake packets that the BIOS is waiting for before it
-// transitions out of its splash screen.
+// Hand the GB-side boot ROM to the SGB core. 256 bytes for a DMG/SGB
+// boot ROM, 2304 (or 2048) for a CGB one. In SGB BIOS mode the boot ROM
+// scrolls the Nintendo logo and sends the 5 SGB handshake packets the
+// SNES-side BIOS waits on before it transitions out of its splash; in
+// GB/GBC BIOS mode it just plays the boot animation and hands off to
+// the cart.
 bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size);
 
 // Install the built-in SGB1 (mode=1) or SGB2 (mode=2) boot ROM. Used
@@ -384,6 +394,12 @@ bool S9xSGBIsCgb(void);
 // See Emulator::IsCgbRender / CgbColorFB.
 bool S9xSGBIsCgbRender(void);
 const uint16_t *S9xSGBGetCgbColorFB(void);
+
+// Raw cart-header flags of the loaded GB ROM — $0143 (CGB) and $0146
+// (SGB). Either pointer may be null. Returns false with both zeroed when
+// no GB cart is loaded. The BIOS menu uses these to decide which boot-ROM
+// choices to offer.
+bool S9xSGBGetCartFlags(unsigned char *cgb_flag, unsigned char *sgb_flag);
 
 // ---- Debug viewer accessors (GB/GBC/SGB tile/tilemap/sprite viewers) --------
 struct SgbPpuRegs

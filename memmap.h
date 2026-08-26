@@ -224,6 +224,26 @@ inline bool S9xInterlaceField()
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *, uint32);
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
+// True when a usable Game Boy (cgb=FALSE) or Game Boy Color (cgb=TRUE) boot
+// ROM is present in the ROM's directory, BIOS_DIR, or the working directory.
+// The BIOS menu greys out its GB/GBC entry when this is false.
+bool8 S9xGBBIOSAvailable(bool8 cgb, const char *gb_rom_path);
+
+// Which set of choices Emulation->BIOS should offer for the loaded cart.
+// Super Game Boy carts (and anything already running on an SGB BIOS) keep
+// the SGB1/SGB2 choices; a plain Game Boy or Game Boy Color cart is offered
+// its own console's boot ROM instead, since that's the only thing its boot
+// animation can come from.
+enum S9xGBBiosMenuKind
+{
+	S9X_GB_BIOS_MENU_NONE = 0,  // no GB cart loaded — hide the menu
+	S9X_GB_BIOS_MENU_SGB,       // No BIOS / SGB1 / SGB2
+	S9X_GB_BIOS_MENU_GB,        // No BIOS / Game Boy BIOS
+	S9X_GB_BIOS_MENU_GBC        // No BIOS / Game Boy Color BIOS
+};
+// `sgb_bios_available` is the caller's existing S9xSGBBIOSAvailable(1|2)
+// result, passed in so opening the menu doesn't re-probe the filesystem.
+S9xGBBiosMenuKind S9xGBBiosMenuKindForLoadedCart(bool8 sgb_bios_available);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away
 // from the SNES/BS-X/Sufami load paths.

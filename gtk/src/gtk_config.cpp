@@ -220,6 +220,7 @@ int Snes9xConfig::load_defaults()
     Settings.DisplayPressedKeys = false;
     Settings.InitialInfoStringTimeout   =  120;
     Settings.SGB_BIOSPreference = 2;
+    Settings.GB_BIOSEnabled = TRUE;
     
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
@@ -414,6 +415,7 @@ int Snes9xConfig::save_config_file()
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
+    outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Boot GB/GBC ROMs through dmg_boot.bin / cgb_boot.bin when one is found, for the scrolling-logo animation (default true)");
 
     section = "Input";
     controllers controller = CTL_NONE;
@@ -695,6 +697,7 @@ int Snes9xConfig::load_config_file()
     inint("BIOSPreference", Settings.SGB_BIOSPreference);
     if (Settings.SGB_BIOSPreference > 2)
         Settings.SGB_BIOSPreference = 2;
+    inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
 
     section = "Input";
 

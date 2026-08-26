@@ -670,6 +670,15 @@ static void update_variables(void)
             Settings.SGB_BIOSPreference = 2;
     }
 
+    // Plain Game Boy / Game Boy Color boot ROM (the scrolling-logo animation).
+    // Looked for in the system dir as dmg_boot.bin / cgb_boot.bin; nothing is
+    // bundled, so with no file present this changes nothing.
+    var.key = "snes9x_gb_bios";
+    var.value = NULL;
+    Settings.GB_BIOSEnabled = TRUE;
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+        Settings.GB_BIOSEnabled = strcmp(var.value, "disabled") ? TRUE : FALSE;
+
     // Per-source SGB mix volumes (0..100). Consumed by S9xMixSpcOverGB;
     // only affect GB/SGB content. Defaults match the desktop frontends.
     var.key = "snes9x_sgb_mix_volume_spc";

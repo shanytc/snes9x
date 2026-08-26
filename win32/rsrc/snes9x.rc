@@ -1441,6 +1441,7 @@ BEGIN
         POPUP "&BIOS",                          ID_EMULATION_BIOS,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&No BIOS",                    ID_EMULATION_BIOS_NONE,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Game Boy BIOS",              ID_EMULATION_BIOS_GB,MFT_STRING,MFS_ENABLED
             MENUITEM "&SGB1",                       ID_EMULATION_BIOS_SGB1,MFT_STRING,MFS_ENABLED
             MENUITEM "SGB&2",                       ID_EMULATION_BIOS_SGB2,MFT_STRING,MFS_ENABLED
         END

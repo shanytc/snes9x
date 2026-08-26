@@ -1719,6 +1719,16 @@
                               </object>
                             </child>
                             <child>
+                              <object class="GtkRadioMenuItem" id="bios_gb_item">
+                                <property name="label" translatable="yes">_Game Boy BIOS</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                                <property name="group">bios_none_item</property>
+                              </object>
+                            </child>
+                            <child>
                               <object class="GtkRadioMenuItem" id="bios_sgb1_item">
                                 <property name="label" translatable="yes">Super Game Boy (_SGB1)</property>
                                 <property name="visible">True</property>

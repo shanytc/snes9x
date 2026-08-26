@@ -787,6 +787,8 @@ static bool8 is_SGB_BIOS      (const uint8 *data, uint32 size, uint8 *out_mode /
 static bool8 FindSGB_BIOS     (uint8 mode, const char *gb_rom_path, std::string &out_path);
 static bool8 FindSGB_BootROM  (uint8 mode, const char *gb_rom_path, std::string &out_path);
 static bool8 LoadSGBBootROM   (const char *path, std::vector<uint8> &out_bytes);
+static bool8 FindGB_BootROM   (bool cgb, const char *gb_rom_path, std::string &out_path,
+                               std::vector<uint8> *out_bytes);
 static uint32 caCRC32 (uint8 *, uint32, uint32 crc32 = 0xffffffff);
 static bool8 ReadUPSPatch (Stream *, long, int32 &);
 static long ReadInt (Stream *, unsigned);
@@ -1212,6 +1214,98 @@ static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
 	return got == 256;
 }
 
+// Locate a stand-alone Game Boy / Game Boy Color boot ROM — the thing that
+// draws the scrolling Nintendo logo before the cart takes over. Unlike the
+// SGB boot ROM this one runs with no SNES-side BIOS alongside; it's the whole
+// feature. Nothing is bundled, so a missing file just means the cart keeps
+// starting at $0100 exactly as it always has.
+//
+// Same directory search order as FindSGB_BIOS. `cgb` picks the Game Boy Color
+// boot ROM over the monochrome one. Accepted sizes: 256 (DMG), and 2304 or
+// 2048 (CGB, with or without the $0100-$01FF cart-header window baked into the
+// file). Both real boot ROMs open with `LD SP,$FFFE` (31 FE FF) — checking
+// that alongside the size keeps a mis-named or truncated dump from being
+// staged, which would hang the GB at $0000 with no way for the user to tell
+// what went wrong. Fills `out_bytes` when non-null so callers don't re-read.
+static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
+                             std::string &out_path, std::vector<uint8> *out_bytes)
+{
+	static const char *dmg_names[] = {
+		"dmg_boot.bin", "DMG_boot.bin", "dmg_bios.bin", "gb_bios.bin",
+		"dmg.boot.rom", "dmg_boot.rom", "DMG_ROM.bin", nullptr
+	};
+	static const char *cgb_names[] = {
+		"cgb_boot.bin", "CGB_boot.bin", "cgb_bios.bin", "gbc_bios.bin",
+		"cgb.boot.rom", "cgb_boot.rom", "CGB_ROM.bin", nullptr
+	};
+	const char **names = cgb ? cgb_names : dmg_names;
+
+	std::vector<std::string> dirs;
+	if (gb_rom_path && *gb_rom_path)
+	{
+		std::string p(gb_rom_path);
+		const size_t sep = p.find_last_of("/\\");
+		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
+	}
+	dirs.push_back(S9xGetDirectory(BIOS_DIR));
+	dirs.push_back(".");
+
+	for (const auto &dir : dirs)
+	{
+		for (int i = 0; names[i]; ++i)
+		{
+			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
+			FILE *f = fopen(full.c_str(), "rb");
+			if (!f) continue;
+
+			uint8 buf[0x900];
+			const size_t n = fread(buf, 1, sizeof buf, f);
+			// A file longer than the largest legal boot ROM isn't one.
+			const bool oversize = (fgetc(f) != EOF);
+			fclose(f);
+
+			if (oversize) continue;
+			if (cgb ? (n != 0x900 && n != 0x800) : (n != 0x100)) continue;
+			if (buf[0] != 0x31 || buf[1] != 0xFE || buf[2] != 0xFF) continue;
+
+			out_path = full;
+			if (out_bytes) out_bytes->assign(buf, buf + n);
+			return (TRUE);
+		}
+	}
+	return (FALSE);
+}
+
+bool8 S9xGBBIOSAvailable (bool8 cgb, const char *gb_rom_path)
+{
+	std::string dummy;
+	return FindGB_BootROM(cgb != FALSE, gb_rom_path, dummy, nullptr);
+}
+
+S9xGBBiosMenuKind S9xGBBiosMenuKindForLoadedCart (bool8 sgb_bios_available)
+{
+	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+		return (S9X_GB_BIOS_MENU_NONE);
+
+	// Already running on an SGB BIOS: show the SGB choices whatever the cart
+	// is, so "No BIOS" is there to get back out of it.
+	if (Settings.SGB_BIOSModeActive)
+		return (S9X_GB_BIOS_MENU_SGB);
+
+	unsigned char cgb_flag = 0, sgb_flag = 0;
+	if (!S9xSGBGetCartFlags(&cgb_flag, &sgb_flag))
+		return (S9X_GB_BIOS_MENU_NONE);
+
+	// SGB-enhanced cart with an SGB BIOS on disk — the SGB is the better host
+	// for it, so keep offering that and nothing else. Without a BIOS to pick
+	// there'd be no live entry in the SGB menu at all, so fall through to the
+	// cart's own console instead.
+	if (sgb_flag == 0x03 && sgb_bios_available)
+		return (S9X_GB_BIOS_MENU_SGB);
+
+	return ((cgb_flag & 0x80) ? S9X_GB_BIOS_MENU_GBC : S9X_GB_BIOS_MENU_GB);
+}
+
 int CMemory::ScoreHiROM (bool8 skip_header, int32 romoff)
 {
 	uint8	*buf = ROM + 0xff00 + romoff + (skip_header ? 0x200 : 0);
@@ -1468,7 +1562,9 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
         Settings.SuperGameBoy       = FALSE;
         Settings.SGB_BIOSModeActive = FALSE;
     }
-    Settings.GBRomPath[0] = '\0';
+    Settings.GB_BIOSActive  = FALSE;
+    Settings.GB_BIOSPath[0] = '\0';
+    Settings.GBRomPath[0]   = '\0';
 
     // LoadROMInt only ever needs one retry (the interleave-detection
     // flip-flop); bound the loop so a deterministic failure — e.g. an
@@ -1598,12 +1694,47 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
         snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy 2", name.c_str(), region);
     else if (bios_mode == 1)
         snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy", name.c_str(), region);
+    else if (bios_mode == 4)
+        snprintf(msg, sizeof msg, "\"%s\" (%s) via Game Boy Color BIOS", name.c_str(), region);
+    else if (bios_mode == 3)
+        snprintf(msg, sizeof msg, "\"%s\" (%s) via Game Boy BIOS", name.c_str(), region);
     else
         snprintf(msg, sizeof msg, "\"%s\" (%s)", name.c_str(), region);
     const uint32 saved = Settings.InitialInfoStringTimeout;
     Settings.InitialInfoStringTimeout = 60 * 5;
     S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
     Settings.InitialInfoStringTimeout = saved;
+}
+
+// Shared tail of the two BIOS-less GB load paths. No SNES-side BIOS is in
+// play, but if the user dropped a dmg_boot.bin / cgb_boot.bin next to the ROM
+// (or in BIOS_DIR) we stage it so the cart gets the authentic power-on logo
+// animation and boot ding before it starts. Purely additive: with no boot ROM
+// found — the default, since nothing is bundled — this leaves the emulator on
+// the exact legacy path, cart running from $0100.
+//
+// Returns the banner mode to report: 3 = Game Boy BIOS, 4 = Game Boy Color
+// BIOS, 0 = BIOS-less. Call between S9xSGBInit() and S9xSGBLoadROM*().
+static uint8 StageGBBootROM (bool gbCgb, const char *filename)
+{
+    Settings.GB_BIOSActive  = FALSE;
+    Settings.GB_BIOSPath[0] = '\0';
+
+    std::string boot_path;
+    std::vector<uint8> boot;
+    if (!Settings.GB_BIOSEnabled ||
+        !FindGB_BootROM(gbCgb, filename, boot_path, &boot) ||
+        !S9xSGBLoadBootROMBytes(boot.data(), boot.size()))
+    {
+        // Clear any boot ROM left staged by a previous BIOS-mode session.
+        S9xSGBLoadBootROMBytes(nullptr, 0);
+        return 0;
+    }
+
+    Settings.GB_BIOSActive = TRUE;
+    strncpy(Settings.GB_BIOSPath, boot_path.c_str(), sizeof Settings.GB_BIOSPath - 1);
+    Settings.GB_BIOSPath[sizeof Settings.GB_BIOSPath - 1] = '\0';
+    return gbCgb ? 4 : 3;
 }
 
 // Game Boy header $0143 CGB flag: $80 = CGB-enhanced, $C0 = CGB-only. Both
@@ -1687,11 +1818,18 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     Settings.FrameTime         = Settings.FrameTimeNTSC;
     ROMFramesPerSecond         = 60;
 
-    if (!S9xSGBInit() ||
-        !S9xSGBLoadROMBytes(rom, static_cast<size_t>(size), filename))
+    if (!S9xSGBInit())
     {
         Settings.SuperGameBoy = FALSE;
         Settings.GBRomPath[0] = '\0';
+        return -1;
+    }
+    const uint8 gb_banner = StageGBBootROM(gbCgb, filename);
+    if (!S9xSGBLoadROMBytes(rom, static_cast<size_t>(size), filename))
+    {
+        Settings.SuperGameBoy  = FALSE;
+        Settings.GB_BIOSActive = FALSE;
+        Settings.GBRomPath[0]  = '\0';
         return -1;
     }
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
@@ -1701,7 +1839,7 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
         ROMFilename = filename;
         S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
     }
-    EmitSGBLoadBanner(filename, 0);
+    EmitSGBLoadBanner(filename, gb_banner);
     return 1;
 }
 
@@ -1757,17 +1895,25 @@ bool8 CMemory::LoadROM (const char *filename)
         Settings.FrameTime         = Settings.FrameTimeNTSC;
         ROMFramesPerSecond         = 60;
 
-        if (!S9xSGBInit() || !S9xSGBLoadROM(filename))
+        if (!S9xSGBInit())
         {
             Settings.SuperGameBoy = FALSE;
             Settings.GBRomPath[0] = '\0';
+            return FALSE;
+        }
+        const uint8 gb_banner = StageGBBootROM(gbCgb, filename);
+        if (!S9xSGBLoadROM(filename))
+        {
+            Settings.SuperGameBoy  = FALSE;
+            Settings.GB_BIOSActive = FALSE;
+            Settings.GBRomPath[0]  = '\0';
             return FALSE;
         }
         S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
         S9xInitCheatData();
         ROMFilename = filename;
         S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
-        EmitSGBLoadBanner(filename, 0);
+        EmitSGBLoadBanner(filename, gb_banner);
         return TRUE;
     }
 
@@ -1778,7 +1924,9 @@ bool8 CMemory::LoadROM (const char *filename)
         Settings.SuperGameBoy       = FALSE;
         Settings.SGB_BIOSModeActive = FALSE;
     }
-    Settings.GBRomPath[0] = '\0';
+    Settings.GB_BIOSActive  = FALSE;
+    Settings.GB_BIOSPath[0] = '\0';
+    Settings.GBRomPath[0]   = '\0';
 
     S9xResetSaveTimer(FALSE); // reset oops timer here so that .oops file has rom name of previous rom
 

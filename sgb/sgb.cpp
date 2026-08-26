@@ -137,6 +137,13 @@ struct Emulator::Impl
 	int         cgb_override = -1;   // -1 auto, 0 force DMG, 1 force CGB
 	bool        sgb_cgb_hack = false;
 
+	// Completed CGB frame for the SGB+GBC overlay. Under the SGB BIOS the GB
+	// is slaved per-opcode rather than frame-locked, so reading color_fb live
+	// hands the compositor a half-drawn frame; latch it at the GB's VBlank.
+	uint16_t    cgb_overlay_fb[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
+	bool        cgb_overlay_valid = false;
+	uint8_t     cgb_overlay_ly = 0;
+
 	// The SGB BIOS normally forces CGB off (a real SGB boots CGB carts as DMG);
 	// sgb_cgb_hack keeps colour hardware on underneath it.
 	bool CgbActive() const
@@ -1552,6 +1559,18 @@ void Emulator::RunCycles(int32_t tcycles)
 		}
 	}
 
+	if (impl_->sgb_cgb_hack && impl_->ppu.cgb)
+	{
+		const uint8_t ly = impl_->ppu.ly;
+		if (ly >= GB_SCREEN_HEIGHT && impl_->cgb_overlay_ly < GB_SCREEN_HEIGHT)
+		{
+			std::memcpy(impl_->cgb_overlay_fb, impl_->ppu.color_fb,
+			            sizeof impl_->cgb_overlay_fb);
+			impl_->cgb_overlay_valid = true;
+		}
+		impl_->cgb_overlay_ly = ly;
+	}
+
 	if (impl_->border_capture.stage != Impl::BorderCapture::Idle &&
 	    impl_->ppu.frame_ready)
 	{
@@ -2083,13 +2102,20 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 
 	// Wait for the GB boot ROM to hand off, so the overlay shows the game
 	// rather than the boot logo the BIOS is still capturing.
-	if (!impl_->boot_handoff_captured) return;
+	if (!impl_->boot_handoff_captured || !impl_->cgb_overlay_valid) return;
 
 	// Lores only — the offsets below assume the 256x224 SGB frame.
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
 	if (width > SNES_WIDTH || (int) PPU.ScreenHeight < 40 + (int) GB_SCREEN_HEIGHT) return;
 
-	BlitScreenGB(dest + 40u * pitch_pixels + 48u, pitch_pixels);
+	// color_fb is BGR555, so each pixel still needs the host conversion.
+	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
+	{
+		const uint16_t *src = impl_->cgb_overlay_fb + y * GB_SCREEN_WIDTH;
+		uint16_t *dst = dest + (40u + y) * pitch_pixels + 48u;
+		for (uint32_t x = 0; x < GB_SCREEN_WIDTH; ++x)
+			dst[x] = BgrToHost(src[x]);
+	}
 }
 
 int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)

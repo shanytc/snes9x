@@ -234,6 +234,9 @@
     <ClInclude Include="..\sgb\gb_cart.h">
       <Filter>SGB</Filter>
     </ClInclude>
+    <ClInclude Include="..\sgb\acid.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>APU</Filter>
     </ClInclude>
@@ -436,6 +439,9 @@
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="CGBTileViewerDlg.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="AcidTestsDlg.h">
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="CGBTilemapViewerDlg.h">
@@ -761,6 +767,9 @@
     <ClCompile Include="..\sgb\gb_cart.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
+    <ClCompile Include="..\sgb\acid.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
     <ClCompile Include="..\apu\apu.cpp">
       <Filter>APU</Filter>
     </ClCompile>
@@ -948,6 +957,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CGBSpriteViewerDlg.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="AcidTestsDlg.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="debug_viewer_common.cpp">

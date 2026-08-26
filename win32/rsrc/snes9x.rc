@@ -1463,6 +1463,7 @@ BEGIN
         END
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Hacks...",                   ID_EMULATION_HACKS,MFT_STRING,MFS_ENABLED
+        MENUITEM "&Acid Tests...",              ID_EMULATION_ACIDTESTS,MFT_STRING,MFS_ENABLED
         MENUITEM "&Settings...\tAlt+F8",        ID_OPTIONS_SETTINGS,MFT_STRING,MFS_ENABLED
     END
     POPUP "&Input",                         0,MFT_STRING,MFS_ENABLED
@@ -1648,6 +1649,18 @@ BEGIN
     PUSHBUTTON      "Close",IDCANCEL,204,280,50,14
 END
 #endif
+
+IDD_ACID_TESTS DIALOGEX 0, 0, 460, 300
+STYLE DS_SETFONT | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "Acid Tests — GB Emulator Shootout"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    LTEXT           "Ready.",IDC_ACID_STATUS,6,5,392,10
+    CONTROL         "",IDC_ACID_PROGRESS,"msctls_progress32",WS_BORDER,6,17,448,9
+    CONTROL         "",IDC_ACID_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER | WS_BORDER | WS_TABSTOP,6,30,448,244
+    DEFPUSHBUTTON   "&Run All",IDC_ACID_RUN,6,280,60,14
+    PUSHBUTTON      "Close",IDCANCEL,404,280,50,14
+END
 
 /////////////////////////////////////////////////////////////////////////////
 //

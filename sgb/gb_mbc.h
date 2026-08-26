@@ -80,11 +80,18 @@ struct MbcState
 	// the menu's title during its one-shot handshake, which usually
 	// looks badly inverted.
 	bool     mmm01_just_locked       = false;
+
+	// MBC3 RTC oscillator: T-cycles toward the next one-second tick.
+	int32_t  rtc_sub_cycles          = 0;
 };
 
 struct Cart;
 
 void MbcReset(MbcState &s);
+
+// Advance the MBC3 RTC by `tcycles` real-time T-cycles (one second per
+// 4194304). No-op for carts without an RTC or with the halt bit set.
+void MbcTickRtc(MbcState &s, int32_t tcycles);
 uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<uint8_t> &sram, uint16_t addr, bool mbc1_multicart = false);
 void    MbcWrite(Cart &c, uint16_t addr, uint8_t value);
 

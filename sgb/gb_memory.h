@@ -50,6 +50,8 @@ struct Memory
 	uint8_t if_;            // 0xFF0F
 	uint8_t serial_data;    // 0xFF01 last written byte
 	uint8_t serial_control; // 0xFF02 last written; bit 7 stays set on external-clock waits
+	uint8_t serial_bits = 0; // internal-clock transfer: bits left to shift (0 = idle)
+	uint8_t serial_guard = 0; // ticks after arming during which edges don't clock
 
 	// GB boot ROM (256 bytes). Overlays cart ROM at 0x0000-0x00FF while
 	// boot_rom_enabled is true; cleared by the first write to 0xFF50.
@@ -62,12 +64,42 @@ struct Memory
 	bool     key1_armed   = false;
 	bool     double_speed = false;
 
+	// CGB undocumented registers ($FF72/$FF73/$FF74 R/W, $FF75 bits 6-4).
+	uint8_t  ff72 = 0, ff73 = 0, ff74 = 0, ff75 = 0;
+
+	// True when the machine is CGB hardware, including its DMG-compat
+	// mode (ppu->cgb is false there). STOP display + speed-switch gates.
+	bool     cgb_hw = false;
+
 	uint8_t  hdma1 = 0, hdma2 = 0, hdma3 = 0, hdma4 = 0;  // 0xFF51-0xFF54
 	uint8_t  hdma5 = 0xFF;        // 0xFF55 status
 	uint16_t hdma_src = 0, hdma_dst = 0, hdma_len = 0;
 	bool     hdma_active = false;
 	bool     hdma_hblank_latch = false;
+
+	// Double-speed odd-cycle carry for MemTick's CPU→PPU/APU clock halving.
+	// Transient (never serialized).
+	uint8_t  ds_tick_rem = 0;
+
+	// OAM DMA engine — one byte per M-cycle in the CPU clock domain, with
+	// a 1-M-cycle startup delay after the $FF46 write. While a transfer
+	// runs, CPU reads of OAM return $FF and reads on the bus the DMA
+	// source occupies return the byte currently on the DMA bus.
+	bool     dma_active   = false;  // a transfer is moving bytes
+	int16_t  dma_index    = 0;      // next byte 0..159
+	uint16_t dma_src      = 0;      // source base (page << 8, echo-folded)
+	int8_t   dma_setup    = 0;      // M-cycles until dma_pending goes live
+	uint16_t dma_src_next = 0;      // source staged by the latest $FF46 write
+	uint8_t  dma_bus_byte = 0xFF;   // byte currently on the DMA bus
+	uint8_t  dma_oam_old[0xA0];     // OAM content as of DMA start (scan-slot rewind)
 };
+
+// Advance the world by `tcycles` CPU T-cycles: timer runs in the CPU clock
+// domain, PPU and APU in real time (half rate under CGB double-speed). The
+// CPU core calls this once per machine cycle BEFORE each bus access, so
+// reads/writes observe hardware state at their exact M-cycle.
+void MemTick(Memory &m, int32_t tcycles, bool tick_dma = true);
+void MemOamBugIncDec(Memory &m, uint16_t value);
 
 uint8_t MemRead(Memory &m, uint16_t addr);
 void    MemWrite(Memory &m, uint16_t addr, uint8_t value);
@@ -80,6 +112,12 @@ void MemReset(Memory &m, bool cgb);
 
 // Transfer one 0x10-byte CGB HDMA block during HBlank. No-op when inactive.
 void MemHdmaHBlank(Memory &m);
+
+// DMG LCDC write conflict (SameBoy GB_CONFLICT_DMG_LCDC): one dot before
+// the real value lands, the register briefly holds a blend — BG-enable
+// applies early, and OBJ-disable applies early at pixel 0 or mid object
+// fetch. Returns false when no conflict write is needed (CGB).
+bool MemLcdcPartial(Memory &m, uint8_t value, uint8_t *partial);
 
 // LCD turned off outside HBlank with an HBlank HDMA armed: the off edge
 // counts as entering HBlank, so one pending block fires (SameBoy GB_lcd_off).

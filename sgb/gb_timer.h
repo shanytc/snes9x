@@ -25,12 +25,19 @@ struct Timer
 	uint8_t  tac  = 0;
 	bool     tima_overflow_pending = false;  // 4-T-cycle delay before TMA reload
 	int8_t   reload_delay = 0;               // T-cycles remaining until reload fires
+	// Nonzero for the M-cycle in which the TMA reload just landed: TIMA
+	// writes are ignored there and TMA writes propagate into TIMA.
+	int8_t   reload_just  = 0;
 };
 
 void TimerReset(Timer &t);
 void TimerStep(Timer &t, Memory &mem, int32_t tcycles);
 uint8_t TimerRead(const Timer &t, uint16_t addr);
-void    TimerWrite(Timer &t, uint16_t addr, uint8_t value);
+void    TimerWrite(Timer &t, Memory &mem, uint16_t addr, uint8_t value);
+
+// Shared DIV reset used by the $FF04 write and the STOP instruction —
+// fires the TIMA falling-edge quirk and the DIV-APU sequencer edge.
+void TimerResetDiv(Timer &t, Memory &mem);
 
 } // namespace SGB
 

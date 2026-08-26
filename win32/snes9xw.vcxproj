@@ -336,6 +336,7 @@
     <ClInclude Include="..\sgb\gb_timer.h" />
     <ClInclude Include="..\sgb\gb_joypad.h" />
     <ClInclude Include="..\sgb\gb_cart.h" />
+    <ClInclude Include="..\sgb\acid.h" />
     <ClInclude Include="..\apu\apu.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_common.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_config.h" />
@@ -497,6 +498,7 @@
     <ClInclude Include="CTilemapViewerDlg.h" />
     <ClInclude Include="CSpriteViewerDlg.h" />
     <ClInclude Include="CGBTileViewerDlg.h" />
+    <ClInclude Include="AcidTestsDlg.h" />
     <ClInclude Include="CGBTilemapViewerDlg.h" />
     <ClInclude Include="CGBSpriteViewerDlg.h" />
     <ClInclude Include="gb_viewer_common.h" />
@@ -541,6 +543,7 @@
     <ClCompile Include="..\sgb\gb_timer.cpp" />
     <ClCompile Include="..\sgb\gb_joypad.cpp" />
     <ClCompile Include="..\sgb\gb_cart.cpp" />
+    <ClCompile Include="..\sgb\acid.cpp" />
     <ClCompile Include="..\apu\apu.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\sdsp.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\SPC_DSP.cpp">
@@ -742,6 +745,7 @@
     <ClCompile Include="CGBTileViewerDlg.cpp" />
     <ClCompile Include="CGBTilemapViewerDlg.cpp" />
     <ClCompile Include="CGBSpriteViewerDlg.cpp" />
+    <ClCompile Include="AcidTestsDlg.cpp" />
     <ClCompile Include="debug_viewer_common.cpp" />
     <ClCompile Include="debug_viewer_export.cpp" />
     <ClCompile Include="CVulkan.cpp" />

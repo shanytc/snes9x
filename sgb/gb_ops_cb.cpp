@@ -12,13 +12,10 @@
 //               or bit number (for BIT/RES/SET, n = 0..7)
 //   bits 2:0  = operand register: 0=B 1=C 2=D 3=E 4=H 5=L 6=(HL) 7=A
 //
-// Cycle counts (Pan Docs):
-//   op on register:            8 T-cycles
-//   BIT n,(HL):               12
-//   RES/SET/shift on (HL):    16
-//
-// Caller (gb_ops.cpp, case 0xCB) has already fetched the prefix and
-// the CB byte itself. We add the full T-cycle cost here.
+// The caller (gb_ops.cpp, case 0xCB) has already fetched the prefix and
+// the CB byte itself (two ticked M-cycles); the (HL) forms add their
+// read/write bus cycles here via BusRead/BusWrite, reproducing the
+// Pan Docs totals (reg op 8 T, BIT (HL) 12 T, RES/SET/shift (HL) 16 T).
 
 #include "gb_ops.h"
 
@@ -84,60 +81,35 @@ void DispatchCB(CpuState &s, Memory &mem, uint8_t op)
 	const uint8_t sub_op  = (op >> 3) & 0x07;     // shift kind or bit number
 
 	// Read operand.
-	uint8_t v = is_hl ? MemRead(mem, s.r.hl) : GetReg(s, reg_idx);
+	uint8_t v = is_hl ? BusRead(s, mem, s.r.hl) : GetReg(s, reg_idx);
 
 	switch (klass)
 	{
 	case 0:  // shift / rotate / swap
 	{
 		uint8_t r = RunShiftRotate(s, sub_op, v);
-		if (is_hl)
-		{
-			MemWrite(mem, s.r.hl, r);
-			s.t_cycles += 16;
-		}
-		else
-		{
-			SetReg(s, reg_idx, r);
-			s.t_cycles += 8;
-		}
+		if (is_hl) BusWrite(s, mem, s.r.hl, r);
+		else       SetReg(s, reg_idx, r);
 		break;
 	}
 
 	case 1:  // BIT n,r / BIT n,(HL) — read-only
 		AluBit(s, sub_op, v);
-		s.t_cycles += is_hl ? 12 : 8;
 		break;
 
 	case 2:  // RES n,r / RES n,(HL)
 	{
 		uint8_t r = AluRes(sub_op, v);
-		if (is_hl)
-		{
-			MemWrite(mem, s.r.hl, r);
-			s.t_cycles += 16;
-		}
-		else
-		{
-			SetReg(s, reg_idx, r);
-			s.t_cycles += 8;
-		}
+		if (is_hl) BusWrite(s, mem, s.r.hl, r);
+		else       SetReg(s, reg_idx, r);
 		break;
 	}
 
 	case 3:  // SET n,r / SET n,(HL)
 	{
 		uint8_t r = AluSet(sub_op, v);
-		if (is_hl)
-		{
-			MemWrite(mem, s.r.hl, r);
-			s.t_cycles += 16;
-		}
-		else
-		{
-			SetReg(s, reg_idx, r);
-			s.t_cycles += 8;
-		}
+		if (is_hl) BusWrite(s, mem, s.r.hl, r);
+		else       SetReg(s, reg_idx, r);
 		break;
 	}
 	}

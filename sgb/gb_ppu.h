@@ -78,6 +78,7 @@ struct Ppu
 	struct SpriteHit {
 		int16_t  x;        // OAM X-8 (screen-space leftmost pixel)
 		uint8_t  oam_idx;  // 0..39
+		uint8_t  y;        // raw OAM Y latched at scan (row source for the fetch)
 	};
 	SpriteHit sprites[40];
 	uint8_t   sprite_count    = 0;
@@ -91,6 +92,7 @@ struct Ppu
 	// Set at mode 2 → 3 transition. Real DMG extends mode 3 by ~6 dots
 	// per OAM-scan-hit sprite and delays pixel emission by the same.
 	int16_t   mode3_sprite_stall = 0;
+	int16_t   mode3_hold = -1;    // STAT keeps reading mode 3 for 4 dots past the last pixel
 
 	// WX snapshot taken at mode 2 → 3. The renderer uses this instead
 	// of live p.wx so STAT-handler-driven mid-mode-3 WX writes don't tear
@@ -177,6 +179,11 @@ struct Ppu
 	bool     hold_present_on_enable = true;
 	bool     present_hold = false;
 
+	// STOP-mode display override: 0 = normal, 1 = white panel (DMG stop),
+	// 2 = black (CGB stop outside mode 3), 3 = hold current frame (CGB
+	// stop during mode 3). Set by the STOP opcode, cleared on wake.
+	uint8_t  stop_display = 0;
+
 	uint8_t  framebuffer[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT];
 
 	// Per-frame raw 2-bit BG/window/sprite indices (pre-BGP/OBP). The
@@ -196,10 +203,120 @@ struct Ppu
 	bool     frame_ready = false;
 
 	uint64_t vram_writes = 0;
+
+	// ---- Mode-3 pixel pipeline (pandocs fetcher/FIFO model) ----------
+	// The background fetcher runs a 4-stage cycle (tile#, data lo, data
+	// hi, push — 2 dots each, push retried every dot until the FIFO is
+	// empty), pixels pop to the LCD one per dot, and sprite fetches
+	// pause popping while stealing the fetcher. Registers are sampled
+	// live at their consuming stage, which is what gives mid-scanline
+	// register writes their hardware-exact artifacts (mealybug tests).
+	uint8_t  bgf_color[8];      // BG FIFO — 2-bit colors
+	uint8_t  bgf_attr[8];       // CGB map attribute byte
+	uint8_t  bgf_layer[8];      // 0 = background, 1 = window
+	uint8_t  bgf_head  = 0;
+	uint8_t  bgf_count = 0;
+
+	uint8_t  objf_color[8];     // OBJ FIFO, aligned to the next 8 pops
+	uint8_t  objf_flags[8];     // raw OAM flags of the owning sprite
+	uint8_t  objf_owner[8];     // OAM index of the owning sprite (CGB priority)
+	uint8_t  objf_valid[8];     // slot holds a fetched (maybe 0) pixel
+
+	uint8_t  fetch_stage   = 0; // 0 tile#, 1 data lo, 2 data hi, 3 push
+	uint8_t  fetch_dot     = 0; // first/second dot of the stage
+	uint8_t  fetch_tile    = 0;
+	uint8_t  fetch_attr    = 0;
+	uint8_t  fetch_lo      = 0;
+	uint8_t  fetch_hi      = 0;
+	uint8_t  fetch_tile_x  = 0; // fetcher's tile-column counter
+	bool     fetch_is_window = false;
+	bool     first_fetch_discard = false;
+	uint8_t  fetch_pause = 0;    // idle fetcher dots after the discarded first fetch
+	uint8_t  wx_write_cooldown = 0; // dots since a WX write (suppresses the pos+6 early trigger)
+	int16_t  win_pos_base = 0;      // mode_clock of the pixel-0 pop (virtual LCD position origin)
+	bool     lcdon_first = false;   // first line after LCD enable: STAT reads mode 0, no OAM int
+	int16_t  lcdon_pad = 0;         // HBlank pad keeping the glitched enable line at 456 dots
+	int64_t  ly_change_t = 0;       // t_cycles of the last ly increment (read-side latch)
+	uint8_t  ly_prev = 0;           // value FF44 returns until the latch expires
+	bool     bgf_insert = false;    // one extra blank pixel pops before the FIFO (WX re-match glitch)
+	bool     win_fresh = false;     // window activated, no pixel popped yet (suppresses WX re-match)
+	uint16_t fetch_map_addr  = 0;  // latched on the fetch stage's first dot
+	uint16_t fetch_data_addr = 0;
+	uint8_t  pal_glitch = 0;     // dots left of the DMG palette-write OR window
+	uint8_t  pal_glitch_reg = 0; // 0=BGP 1=OBP0 2=OBP1
+	uint8_t  pal_glitch_next = 0;  // line's first fetch is refetched
+	uint8_t  fifo_discard  = 0; // SCX&7 pixels dropped before lcd_x 0
+	int16_t  lcd_x         = 0; // pixels emitted this line (0..160)
+
+	uint8_t  obj_fetch_state = 0;  // 0 idle, 200 waiting on fetcher, 6..1 fetch dots
+	uint8_t  obj_fetch_slot  = 0;  // sprites[] index being fetched
+	bool     obj_fetch_pending = false;  // unused (kept for savestate layout)
+	uint64_t sprite_used_mask  = 0;      // sprites already fetched this line
+
+	// ---- SameBoy position_in_line machine ----
+	// pos is the PPU's own X counter (starts at -16, unsigned wrap); lcd_x is
+	// the panel's — a WX desync makes them diverge (strikethrough fill).
+	uint8_t  pos = 0xF0;
+	uint8_t  entry_wait = 0;      // dots between STAT mode-3 and the render loop
+	bool     iter_resume = false; // WX=0+SCX&7 activation slept one dot mid-iteration
+	bool     obj_overlay = false; // fetched object row merges at next dot start
+	bool     during_obj = false;  // object fetch in flight (CGB column, abort window)
+	bool     win_carry = false;   // WX=166 at line end pre-arms next line's window
+	uint8_t  obj_tile_bus = 0;    // OAM tile byte latched mid-fetch
+	uint8_t  obj_flags_bus = 0;   // OAM flags byte latched mid-fetch
+	uint8_t  obj_lo = 0, obj_hi = 0;
+	// Window disabled mid-fetch kills the push-stage insertion glitch for
+	// the rest of the line (SameBoy disable_window_pixel_insertion_glitch).
+	bool     win_insert_disable = false;
+	// OBJ FIFO ring cursor + fill (pops advance head; a rewind restores one).
+	uint8_t  objf_head = 0;
+	uint8_t  objf_size = 0;
+	uint8_t  objf_uflow = 0;      // pops taken while empty (rewind cancels these first)
+	// WX==pos+7 match seen while an LCDC.5-off pulse had the window disabled;
+	// re-enabling within 3 dots activates as if at the match (Coffee GB).
+	int16_t  win_catchup_pos = -1;
+	bool     win_activated_line = false; // re-activations start their fetch a dot late
+	// A WX comparator match holds its activation pending for one dot; a WX
+	// or LCDC.5 change landing in that dot cancels it with no side effects
+	// (Coffee GB windowPendingTicks; wewx cancel rows).
+	uint8_t  win_pend = 0;
+	uint8_t  win_pend_wx = 0;
+	uint8_t  win_pend_pos = 0;
+	uint8_t  machine_stall = 0;   // full-dot stalls (WX=0 fine-scroll activation)
+	// PPU OAM bus latches — the last Y/X (or fetch tile) bytes the PPU read.
+	// A scan slot under active OAM DMA reads nothing and keeps these stale
+	// values (SameBoy mode2_y_bus/x_bus; ashiepaws/strikethrough).
+	uint8_t  scan_y_bus = 0;
+	uint8_t  scan_x_bus = 0;
+	// CGB (D and later) caches the fetcher's Y at the tile-number stage;
+	// the data reads reuse it, so mid-fetch SCY writes can't tear a tile
+	// (SameBoy fetcher_y; cgb-acid-hell). DMG reads Y live at each stage.
+	uint8_t  fetch_y_latch = 0;
+	// True for the whole first line after LCD enable (its shifted machine
+	// already reads at hardware dots, so the visible-mode lead is skipped).
+	bool     lcdon_line = false;
+	// LCDC as of the end of the previous dot — the DMG pixel mix samples
+	// BG/OBJ enable one dot behind the register (m3_lcdc_bg_en_change).
+	uint8_t  lcdc_shadow = 0x91;
+	// Deeper history for the window machinery: LCDC.5 crosses an LCD
+	// output latch before the comparator sees it (Coffee GB override).
+	uint8_t  lcdc_d2 = 0x91, lcdc_d3 = 0x91, lcdc_d4 = 0x91;
 };
 
 void PpuReset(Ppu &p);
+
+// DMG unit personality for the palette write transition pixel: 0 = the
+// mealybug "blob" unit (old|new OR pixel), 1 = daid's unit (clean switch).
+// Real DMGs photograph differently here; the shootout refs span both.
+void PpuSetPalUnit(int unit);
 void PpuStep(Ppu &p, Memory &mem, int32_t tcycles);
+
+// CPU entered STOP with the LCD on: DMG panels go white, CGB panels go
+// black unless stopped during mode 3 (VRAM stays readable — the frame
+// keeps displaying). Fills the framebuffer accordingly and freezes
+// further pixel emission until PpuOnCpuStopEnd.
+void PpuOnCpuStop(Ppu &p, bool cgb_hw);
+void PpuOnCpuStopEnd(Ppu &p);
 
 // Register I/O — 0xFF40 .. 0xFF4B (LCDC/STAT/SCY/SCX/LY/LYC/DMA/BGP/OBP0/OBP1/WY/WX).
 uint8_t PpuReadReg(const Ppu &p, uint16_t addr);

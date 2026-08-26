@@ -42,6 +42,7 @@
 #include "CTilemapViewerDlg.h"
 #include "CSpriteViewerDlg.h"
 #include "CGBTileViewerDlg.h"
+#include "AcidTestsDlg.h"
 #include "CGBTilemapViewerDlg.h"
 #include "CGBSpriteViewerDlg.h"
 #include "debug_viewer_common.h"
@@ -2945,6 +2946,34 @@ LRESULT CALLBACK WinProc(
 					}
 					RestoreSNESDisplay();
 				}
+			}
+			break;
+		case ID_EMULATION_ACIDTESTS:
+			{
+				RestoreGUIDisplay();
+				CloseSoundDevice();   // the suite drives the GB core on this thread
+				const bool8 saved_bios_active = Settings.SGB_BIOSModeActive;
+				const bool8 saved_mute        = Settings.Mute;
+				Settings.SGB_BIOSModeActive = FALSE;
+				Settings.Mute = TRUE;
+				WinShowAcidTestsDialog();
+				Settings.SGB_BIOSModeActive = saved_bios_active;
+				Settings.Mute = saved_mute;
+				S9xSGBSetForceModel(0);
+				// The run destroyed the GB session — reload whatever was in.
+				const char *reload = Settings.GBRomPath[0] ? Settings.GBRomPath
+				                   : Memory.ROMFilename.c_str();
+				if (reload[0])
+				{
+					TCHAR wpath[_MAX_PATH];
+					Utf8ToWide u8(reload);
+					_tcsncpy(wpath, u8, _MAX_PATH - 1);
+					wpath[_MAX_PATH - 1] = 0;
+					if (LoadROM(wpath))
+						S9xReset();
+				}
+				ReInitSound();
+				RestoreSNESDisplay();
 			}
 			break;
 		case ID_SOUND_VOICEKUN_ATTACH:

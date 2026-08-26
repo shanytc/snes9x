@@ -24,17 +24,173 @@ uint8_t            g_dma_last  = 0xFF;  // 0xFF46 last written byte — register
 bool               g_dma_vram_bypass = false;
 }
 
+// CPU-visible unblock leads the render machine's mode-0 entry by a few
+// dots, like the STAT mode bits (mooneye lcdon_timing access tables).
+inline bool CpuVisibleMode0(const Memory &m)
+{
+	static int ub = -1;
+	if (ub < 0) { const char *e = getenv("ACID_UB"); ub = e ? atoi(e) : 0; }
+	return ub > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
+	       m.ppu->lcd_x >= GB_SCREEN_WIDTH - ub;
+}
+
 inline bool VramBlocked(const Memory &m)
 {
-	return !g_dma_vram_bypass && m.ppu &&
-	       m.ppu->mode == PpuMode::Transfer && (m.ppu->lcdc & 0x80);
+	if (g_dma_vram_bypass || !m.ppu || !(m.ppu->lcdc & 0x80)) return false;
+	if (m.ppu->mode == PpuMode::Transfer) return !CpuVisibleMode0(m);
+	static int vh = -1;
+	if (vh < 0) { const char *e = getenv("ACID_VH"); vh = e ? atoi(e) : 0; }
+	if (vh > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
+	    m.ppu->mode == PpuMode::HBlank && m.ppu->mode_clock < vh)
+		return true;
+	// The lock engages a few dots before the machine's mode-3 entry, in
+	// step with the visible STAT flip (mooneye lcdon_timing VRAM table).
+	static int vlk = -1;
+	if (vlk < 0) { const char *e = getenv("ACID_VLK"); vlk = e ? atoi(e) : 0; }
+	return vlk > 0 && !m.ppu->cgb && m.ppu->mode == PpuMode::OamScan &&
+	       !m.ppu->lcdon_first && m.ppu->mode_clock >= 87 - vlk;
+}
+
+// OAM is CPU-inaccessible during the OAM scan and pixel transfer. The scan
+// state is entered 4 dots early on our grid; the hardware lock engages at
+// line dot 1 (SameBoy), i.e. mode_clock 1.
+inline bool OamBlocked(const Memory &m)
+{
+	if (!m.ppu || !(m.ppu->lcdc & 0x80)) return false;
+	if (m.ppu->mode == PpuMode::Transfer) return !CpuVisibleMode0(m);
+	// the CPU-side lock releases a couple of dots into mode 0
+	static int oh = -1;
+	if (oh < 0) { const char *e = getenv("ACID_OH"); oh = e ? atoi(e) : 0; }
+	if (oh > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
+	    m.ppu->mode == PpuMode::HBlank && m.ppu->mode_clock < oh)
+		return true;
+	// The glitched first line after LCD enable never locks OAM until its
+	// (early) mode 3 (mooneye lcdon_write_timing).
+	static int oe = -99;
+	if (oe < -90) { const char *e = getenv("ACID_OE"); oe = e ? atoi(e) : 1; }
+	return m.ppu->mode == PpuMode::OamScan && !m.ppu->lcdon_first &&
+	       m.ppu->mode_clock >= oe;
+}
+
+// ------------------------------------------------------------------
+// DMG OAM corruption bug (SameBoy memory.c port). A CPU access — or a
+// 16-bit inc/dec whose register rides the bus — with an address in
+// $FE00-$FEFF while the PPU scans OAM garbles the row being scanned.
+// ------------------------------------------------------------------
+static inline uint16_t BgGlitch(uint16_t a, uint16_t b, uint16_t c)
+{
+	return static_cast<uint16_t>(((a ^ c) & (b ^ c)) ^ c);
+}
+static inline uint16_t BgGlitchRead(uint16_t a, uint16_t b, uint16_t c)
+{
+	return static_cast<uint16_t>(b | (a & c));
+}
+static inline uint16_t BgGlitchReadSec(uint16_t a, uint16_t b, uint16_t c, uint16_t d)
+{
+	return static_cast<uint16_t>((b & (a | c | d)) | (a & c & d));
+}
+static inline uint16_t BgGlitchTert1(uint16_t a, uint16_t b, uint16_t c, uint16_t d, uint16_t e)
+{
+	return static_cast<uint16_t>(c | (a & b & d & e));
+}
+static inline uint16_t BgGlitchTert2(uint16_t a, uint16_t b, uint16_t c, uint16_t d, uint16_t e)
+{
+	return static_cast<uint16_t>((c & (a | b | d | e)) | (a & b & d & e));
+}
+static inline uint16_t BgGlitchTert3(uint16_t a, uint16_t b, uint16_t c, uint16_t d, uint16_t e)
+{
+	return static_cast<uint16_t>((c & (a | b | d | e)) | (b & d & e));
+}
+static inline uint16_t BgGlitchQuatDmg(uint16_t a, uint16_t b, uint16_t c, uint16_t d,
+                                       uint16_t e, uint16_t f, uint16_t g, uint16_t h)
+{
+	(void)a;
+	return static_cast<uint16_t>((e & (h | g | (~d & f) | c | b)) | (c & g & h));
+}
+
+static inline uint16_t OamW(const uint8_t *o) { return static_cast<uint16_t>(o[0] | (o[1] << 8)); }
+static inline void OamWSet(uint8_t *o, uint16_t v) { o[0] = static_cast<uint8_t>(v); o[1] = static_cast<uint8_t>(v >> 8); }
+
+// Row (byte offset) the OAM scan is currently touching, or -1.
+static int AccessedOamRow(const Memory &m)
+{
+	const Ppu *p = m.ppu;
+	if (!p || p->cgb || !(p->lcdc & 0x80)) return -1;
+	if (p->mode != PpuMode::OamScan || p->lcdon_first) return -1;
+	const int d = p->mode_clock;   // true line dot on our -4 grid
+	if (d < 0 || d >= 82) return -1;
+	if (d < 2)  return 0;
+	int i = (d - 2) >> 1;
+	if (i > 39) i = 39;
+	return (i & ~1) * 4 + 8;
+}
+
+static void OamBugWriteCorrupt(Memory &m)
+{
+	const int row = AccessedOamRow(m);
+	if (row < 8 || row > 0x98) return;
+	uint8_t *oam = m.ppu->oam;
+	OamWSet(&oam[row], BgGlitch(OamW(&oam[row]), OamW(&oam[row - 8]), OamW(&oam[row - 4])));
+	for (int i = 2; i < 8; ++i)
+		oam[row + i] = oam[row - 8 + i];
+}
+
+static void OamBugReadCorrupt(Memory &m)
+{
+	const int row = AccessedOamRow(m);
+	if (row < 8 || row > 0x98) return;
+	uint8_t *oam = m.ppu->oam;
+	if ((row & 0x18) == 0x10)
+	{
+		OamWSet(&oam[row - 8],
+			BgGlitchReadSec(OamW(&oam[row - 0x10]), OamW(&oam[row - 8]),
+			                OamW(&oam[row]), OamW(&oam[row - 4])));
+		for (int i = 0; i < 8; ++i)
+			oam[row - 0x10 + i] = oam[row - 0x08 + i];
+	}
+	else if ((row & 0x18) == 0x00)
+	{
+		if (row == 0x40)
+		{
+			OamWSet(&oam[row - 8],
+				BgGlitchQuatDmg(OamW(&oam[0]), OamW(&oam[row]), OamW(&oam[row - 4]),
+				                OamW(&oam[row - 6]), OamW(&oam[row - 8]),
+				                OamW(&oam[row - 14]), OamW(&oam[row - 16]),
+				                OamW(&oam[row - 32])));
+		}
+		else
+		{
+			uint16_t (*op)(uint16_t, uint16_t, uint16_t, uint16_t, uint16_t) =
+				row == 0x20 ? BgGlitchTert2 : row == 0x60 ? BgGlitchTert3 : BgGlitchTert1;
+			OamWSet(&oam[row - 8],
+				op(OamW(&oam[row]), OamW(&oam[row - 4]), OamW(&oam[row - 8]),
+				   OamW(&oam[row - 16]), OamW(&oam[row - 32])));
+		}
+		for (int i = 0; i < 8; ++i)
+			oam[row - 0x10 + i] = oam[row - 0x20 + i] = oam[row - 0x08 + i];
+	}
+	else
+	{
+		const uint16_t v = BgGlitchRead(OamW(&oam[row]), OamW(&oam[row - 8]), OamW(&oam[row - 4]));
+		OamWSet(&oam[row], v);
+		OamWSet(&oam[row - 8], v);
+	}
+	for (int i = 0; i < 8; ++i)
+		oam[row + i] = oam[row - 8 + i];
+}
+
+// Hook for 16-bit inc/dec whose register value sits on the bus.
+void MemOamBugIncDec(Memory &m, uint16_t value)
+{
+	if (value >= 0xFE00 && value < 0xFF00)
+		OamBugWriteCorrupt(m);
 }
 
 inline bool CramBlocked(const Memory &m)
 {
 	return m.ppu && m.ppu->cgb &&
 	       m.ppu->mode == PpuMode::Transfer && (m.ppu->lcdc & 0x80) &&
-	       m.ppu->mode_clock > GB_MODE3_SETUP_DOTS + m.ppu->mode3_sprite_stall;
+	       m.ppu->mode_clock > GB_MODE3_SETUP_DOTS;
 }
 
 void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
@@ -47,6 +203,7 @@ void MemReset(Memory &m, bool cgb)
 	m.if_            = 0xE1;   // bits 5-7 always set, VBlank latent
 	m.serial_data    = 0;
 	m.serial_control = 0;
+	m.serial_bits    = 0;
 	// Boot ROM staging — zeroed on reset. S9xSGBLoadBootROM fills these
 	// in from the user-provided sgb.boot.rom / sgb2.boot.rom before the
 	// GB CPU starts. boot_rom_enabled stays false until LoadBootROM sets it.
@@ -57,16 +214,24 @@ void MemReset(Memory &m, bool cgb)
 	m.svbk         = 1;
 	m.key1_armed   = false;
 	m.double_speed = false;
+	m.ff72 = m.ff73 = m.ff74 = m.ff75 = 0;
 	m.hdma1 = m.hdma2 = m.hdma3 = m.hdma4 = 0;
 	m.hdma5        = 0xFF;
 	m.hdma_src = m.hdma_dst = m.hdma_len = 0;
 	m.hdma_active  = false;
 	m.hdma_hblank_latch = false;
+	m.ds_tick_rem  = 0;
+	m.cgb_hw       = cgb;
+	m.dma_active   = false;
+	m.dma_index    = 0;
+	m.dma_src      = 0;
+	m.dma_setup    = 0;
+	m.dma_src_next = 0;
+	m.dma_bus_byte = 0xFF;
 }
 
 static uint8_t ReadIO(Memory &m, uint16_t addr);
 static void    WriteIO(Memory &m, uint16_t addr, uint8_t value);
-static void    DoOamDma(Memory &m, uint8_t value);
 static void    HdmaTrigger(Memory &m, uint8_t value);
 
 namespace {
@@ -92,8 +257,103 @@ inline void CgbWritePalette(uint8_t *pal, uint8_t &idx, uint8_t value, bool stor
 }
 } // namespace
 
+// Which physical bus an address lives on for OAM-DMA conflict purposes:
+// 0 = external (ROM/SRAM, plus WRAM on DMG), 1 = video (VRAM), 2 = the
+// CGB's separate WRAM bus.
+static int DmaBusOf(const Memory &m, uint16_t addr)
+{
+	if (addr >= 0x8000 && addr < 0xA000) return 1;
+	if (m.ppu && m.ppu->cgb && addr >= 0xC000) return 2;
+	return 0;
+}
+
+// DMA's own source reads: normal address decoding but no PPU blocking, and
+// the echo region + $FE00-$FFFF fold down to WRAM (external-bus mirror).
+static uint8_t DmaReadByte(Memory &m, uint16_t addr)
+{
+	if (addr >= 0xE000) addr = static_cast<uint16_t>(addr - 0x2000);
+	if (addr < 0x8000)
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+	if (addr < 0xA000)
+		return m.ppu ? m.ppu->vram[(addr - 0x8000) + VramBankBase(m)] : 0xFF;
+	if (addr < 0xC000)
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+	if (addr < 0xD000)
+		return m.wram[addr - 0xC000];
+	return m.wram[WramBankBase(m) + (addr - 0xD000)];
+}
+
+// Advance the OAM DMA engine by one M-cycle.
+static void DmaTickM(Memory &m)
+{
+	if (m.dma_setup > 0)
+	{
+		// The staged transfer goes live one M-cycle after the $FF46 write;
+		// an already-running transfer keeps copying during that window.
+		if (--m.dma_setup == 0)
+		{
+			m.dma_active = true;
+			m.dma_index  = 0;
+			m.dma_src    = m.dma_src_next;
+			if (m.ppu)
+				std::memcpy(m.dma_oam_old, m.ppu->oam, sizeof m.dma_oam_old);
+		}
+	}
+	if (m.dma_active)
+	{
+		if (m.dma_index >= 0xA0)
+		{
+			m.dma_active = false;
+			return;
+		}
+		const uint8_t b = DmaReadByte(m, static_cast<uint16_t>(m.dma_src + m.dma_index));
+		m.dma_bus_byte  = b;
+		if (m.ppu) m.ppu->oam[m.dma_index] = b;
+		++m.dma_index;
+		// The bus stays claimed through the last byte's M-cycle; the
+		// head-of-tick check above releases it one cycle later
+		// (mooneye oam_dma_timing wants the +161 cycle still blocked).
+	}
+}
+
+void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
+{
+	// STOP halts the oscillator: DIV/TIMA and OAM DMA freeze; the APU
+	// freezes too on DMG (it keeps running on CGB hardware).
+	const bool stopped = m.cpu && m.cpu->stopped;
+
+	if (!stopped && m.timer) TimerStep(*m.timer, m, tcycles);
+
+	// One DMA byte per 4 CPU T-cycles (a split write cycle ticks DMA only
+	// in its first half so the engine still sees whole M-cycles).
+	if (!stopped && tick_dma)
+		for (int32_t t = 0; t < tcycles; t += 4)
+			DmaTickM(m);
+
+	int32_t rt = tcycles;
+	if (m.double_speed)
+	{
+		const int32_t acc = m.ds_tick_rem + tcycles;
+		rt            = acc >> 1;
+		m.ds_tick_rem = static_cast<uint8_t>(acc & 1);
+	}
+	if (rt > 0)
+	{
+		if (m.ppu) PpuStep(*m.ppu, m, rt);
+		if (m.apu && !(stopped && !m.cgb_hw)) ApuStep(*m.apu, rt);
+		if (m.cart) MbcTickRtc(m.cart->mbc, rt);
+	}
+}
+
+
 uint8_t MemRead(Memory &m, uint16_t addr)
 {
+	// OAM DMA bus conflict: a CPU read on the bus the DMA source occupies
+	// returns the byte currently on the DMA bus (OAM itself reads $FF,
+	// handled below; HRAM/IO live on neither bus).
+	if (m.dma_active && !g_dma_vram_bypass && addr < 0xFE00 &&
+	    DmaBusOf(m, m.dma_src) == DmaBusOf(m, addr))
+		return m.dma_bus_byte;
 	// Boot ROM overlay — first 256 bytes mirror the DMG/SGB boot ROM
 	// while it's still enabled. The boot code writes 0x01 to 0xFF50
 	// as its final act, which clears boot_rom_enabled and exposes the
@@ -141,13 +401,16 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	{
 		return m.wram[WramBankBase(m) + (addr - 0xF000)];  // Echo of D000-DDFF
 	}
-	if (addr < 0xFEA0)
-	{
-		return m.ppu ? m.ppu->oam[addr - 0xFE00] : 0xFF;
-	}
 	if (addr < 0xFF00)
 	{
-		return 0xFF;  // unusable
+		if (!m.dma_active && AccessedOamRow(m) >= 0)
+		{
+			OamBugReadCorrupt(m);
+			return 0xFF;
+		}
+		if (addr >= 0xFEA0) return 0xFF;   // unusable
+		if (m.dma_active || OamBlocked(m)) return 0xFF;
+		return m.ppu ? m.ppu->oam[addr - 0xFE00] : 0xFF;
 	}
 	if (addr < 0xFF80)
 	{
@@ -162,6 +425,12 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 
 void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 {
+	// OAM DMA bus conflict — CPU writes on the DMA source's bus are lost
+	// (BullyGB "DMA allows RAM writes"). MBC register writes below $8000
+	// still land: the cart latches them off the address/data lines.
+	if (m.dma_active && !g_dma_vram_bypass && addr >= 0x8000 && addr < 0xFE00 &&
+	    DmaBusOf(m, m.dma_src) == DmaBusOf(m, addr))
+		return;
 	if (addr < 0x8000)
 	{
 		if (m.cart) MbcWrite(*m.cart, addr, value);
@@ -206,14 +475,18 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 		m.wram[WramBankBase(m) + (addr - 0xF000)] = value;
 		return;
 	}
-	if (addr < 0xFEA0)
-	{
-		if (m.ppu) m.ppu->oam[addr - 0xFE00] = value;
-		return;
-	}
 	if (addr < 0xFF00)
 	{
-		return;  // unusable
+		if (!m.dma_active && AccessedOamRow(m) >= 0)
+		{
+			OamBugWriteCorrupt(m);
+			return;
+		}
+		if (addr >= 0xFEA0) return;      // unusable
+		if (m.dma_active) return;        // OAM writes lost during OAM DMA
+		if (m.ppu && !OamBlocked(m))
+			m.ppu->oam[addr - 0xFE00] = value;
+		return;
 	}
 	if (addr < 0xFF80)
 	{
@@ -266,15 +539,27 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 		case 0xFF55:
 			return (m.ppu && m.ppu->cgb) ? m.hdma5 : 0xFF;
 		case 0xFF68:
-			return (m.ppu && m.ppu->cgb) ? m.ppu->bcps : 0xFF;
+			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.ppu->bcps | 0x40) : 0xFF;
 		case 0xFF69:
 			return (m.ppu && m.ppu->cgb) ? m.ppu->bg_pal[m.ppu->bcps & 0x3F] : 0xFF;
 		case 0xFF6A:
-			return (m.ppu && m.ppu->cgb) ? m.ppu->ocps : 0xFF;
+			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.ppu->ocps | 0x40) : 0xFF;
 		case 0xFF6B:
 			return (m.ppu && m.ppu->cgb) ? m.ppu->obj_pal[m.ppu->ocps & 0x3F] : 0xFF;
 		case 0xFF70:
 			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.svbk | 0xF8) : 0xFF;
+		case 0xFF72:
+			return (m.ppu && m.ppu->cgb) ? m.ff72 : 0xFF;
+		case 0xFF73:
+			return (m.ppu && m.ppu->cgb) ? m.ff73 : 0xFF;
+		case 0xFF74:
+			return (m.ppu && m.ppu->cgb) ? m.ff74 : 0xFF;
+		case 0xFF75:
+			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.ff75 | 0x8F) : 0xFF;
+		case 0xFF76:
+			return (m.ppu && m.ppu->cgb && m.apu) ? ApuReadPcm12(*m.apu) : 0xFF;
+		case 0xFF77:
+			return (m.ppu && m.ppu->cgb && m.apu) ? ApuReadPcm34(*m.apu) : 0xFF;
 	}
 	if (addr >= 0xFF10 && addr <= 0xFF3F)
 	{
@@ -312,21 +597,31 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			if ((value & 0x81) == 0x81)
 			{
 				if (g_serial_cb) g_serial_cb(m.serial_data);
-				m.serial_data    = 0xFF;
-				m.if_            = static_cast<uint8_t>(m.if_ | IRQ_SERIAL);
-				m.serial_control = static_cast<uint8_t>(value & 0x7F);
+				m.serial_bits  = 8;  // clocked off DIV bit 8 in TimerStep
+				m.serial_guard = 0;
 			}
+			else
+				m.serial_bits = 0;
 			return;
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
-			if (m.timer) TimerWrite(*m.timer, addr, value);
+			if (m.timer) TimerWrite(*m.timer, m, addr, value);
 			return;
 		case 0xFF0F:
 			m.if_ = static_cast<uint8_t>((value & 0x1F) | 0xE0);
 			return;
 		case 0xFF46:
+		{
 			g_dma_last = value;
-			DoOamDma(m, value);
+			// Echo-fold the page so the bus-conflict test and source reads
+			// see the address the hardware actually drives.
+			uint16_t src = static_cast<uint16_t>(value << 8);
+			if (src >= 0xE000) src = static_cast<uint16_t>(src - 0x2000);
+			m.dma_src_next = src;
+			// Goes live after one free M-cycle (DmaTickM counts this down);
+			// a transfer already running keeps copying until then.
+			m.dma_setup = 2; /*DMASETUP*/
 			return;
+		}
 		case 0xFF50:
 			// Boot-ROM disable: writing any non-zero value (canonically 0x01)
 			// latches off the boot overlay so the cart bytes at 0x0000-0x00FF
@@ -353,10 +648,15 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		case 0xFF6A: if (m.ppu && m.ppu->cgb) m.ppu->ocps = value; return;
 		case 0xFF6B: if (m.ppu && m.ppu->cgb) CgbWritePalette(m.ppu->obj_pal, m.ppu->ocps, value, !CramBlocked(m)); return;
 		case 0xFF70: if (m.ppu && m.ppu->cgb) m.svbk = value & 0x07; return;
+		case 0xFF72: if (m.ppu && m.ppu->cgb) m.ff72 = value; return;
+		case 0xFF73: if (m.ppu && m.ppu->cgb) m.ff73 = value; return;
+		case 0xFF74: if (m.ppu && m.ppu->cgb) m.ff74 = value; return;
+		case 0xFF75: if (m.ppu && m.ppu->cgb) m.ff75 = static_cast<uint8_t>(value & 0x70); return;
 	}
 	if (addr >= 0xFF10 && addr <= 0xFF3F)
 	{
-		if (m.apu) ApuWrite(*m.apu, addr, value, m.ppu && m.ppu->cgb);
+		if (m.apu) ApuWrite(*m.apu, addr, value, m.ppu && m.ppu->cgb,
+		                    m.timer ? m.timer->div_counter : 0, m.double_speed);
 		return;
 	}
 	if (addr >= 0xFF40 && addr <= 0xFF4B)
@@ -365,24 +665,6 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		return;
 	}
 	// Remaining I/O addresses (CGB regs, etc.) are ignored.
-}
-
-// ---------------------------------------------------------------------------
-// OAM DMA — instant copy of 160 bytes from (value << 8) to OAM.
-// Real HW takes 160 T-cycles and blocks non-HRAM access during that time.
-// P3 may tighten the timing; most games are unaffected by the simplification.
-// ---------------------------------------------------------------------------
-
-static void DoOamDma(Memory &m, uint8_t value)
-{
-	if (!m.ppu) return;
-	const uint16_t src = static_cast<uint16_t>(value << 8);
-	g_dma_vram_bypass = true;
-	for (int i = 0; i < 0xA0; ++i)
-	{
-		m.ppu->oam[i] = MemRead(m, static_cast<uint16_t>(src + i));
-	}
-	g_dma_vram_bypass = false;
 }
 
 static void DoGdma(Memory &m, uint16_t src, uint16_t dst, uint16_t blocks)
@@ -430,6 +712,9 @@ static void HdmaTrigger(Memory &m, uint8_t value)
 	const uint16_t dst    = static_cast<uint16_t>(((m.hdma3 << 8) | m.hdma4) & 0x1FF0);
 	const uint16_t blocks = static_cast<uint16_t>((value & 0x7F) + 1);
 
+	// Every HDMA5 write reloads the step counter — including the pause
+	// write, whose low bits + 1 become the new remaining count (SameBoy;
+	// samesuite hdma_mode0/hdma_lcd_off read $80 after pausing with $00).
 	if (value & 0x80)
 	{
 		m.hdma_src    = src;
@@ -451,6 +736,7 @@ static void HdmaTrigger(Memory &m, uint8_t value)
 	else if (m.hdma_active)
 	{
 		m.hdma_active = false;
+		m.hdma_len    = blocks;
 		m.hdma5       = static_cast<uint8_t>(0x80 | ((m.hdma_len - 1) & 0x7F));
 	}
 	else
@@ -464,6 +750,17 @@ static void HdmaTrigger(Memory &m, uint8_t value)
 		m.hdma4 = static_cast<uint8_t>(end_dst & 0xF0);
 		m.hdma5 = 0xFF;
 	}
+}
+
+bool MemLcdcPartial(Memory &m, uint8_t value, uint8_t *partial)
+{
+	if (!m.ppu || m.ppu->cgb) return false;
+	const Ppu &p = *m.ppu;
+	uint8_t old = p.lcdc;
+	if (!(value & 0x02) && (p.pos == 0 || p.during_obj))
+		old = static_cast<uint8_t>(old & ~0x02);
+	*partial = static_cast<uint8_t>(old | (value & 0x01));
+	return true;
 }
 
 void MemHdmaHBlank(Memory &m)

@@ -22,6 +22,9 @@
 #include "gb_timer.h"
 #include "gb_memory.h"
 #include "gb_cpu.h"
+#include "gb_apu.h"
+#include <cstdio>
+int g_div_probe = 8;
 
 namespace SGB {
 
@@ -56,12 +59,15 @@ void TimerReset(Timer &t)
 	t.tac                    = 0;
 	t.tima_overflow_pending  = false;
 	t.reload_delay           = 0;
+	t.reload_just            = 0;
 }
 
 void TimerStep(Timer &t, Memory &mem, int32_t tcycles)
 {
 	for (int32_t i = 0; i < tcycles; ++i)
 	{
+		if (t.reload_just > 0) --t.reload_just;
+
 		// Pending overflow: tick down, then reload and raise IRQ.
 		if (t.tima_overflow_pending)
 		{
@@ -69,6 +75,7 @@ void TimerStep(Timer &t, Memory &mem, int32_t tcycles)
 			{
 				t.tima                  = t.tma;
 				t.tima_overflow_pending = false;
+				t.reload_just           = 4;
 				mem.if_ = static_cast<uint8_t>(mem.if_ | IRQ_TIMER);
 			}
 		}
@@ -82,6 +89,50 @@ void TimerStep(Timer &t, Memory &mem, int32_t tcycles)
 			if (DivBit(prev_div, bit) && !DivBit(t.div_counter, bit))
 				ClockTima(t);
 		}
+
+		// Internal-clock serial: one bit per falling edge of DIV bit 8
+		// (8192 Hz); disconnected MISO shifts in 1s. The byte lands and
+		// the IRQ fires when the 8th bit clocks (mooneye boot_sclk_align).
+		if (mem.serial_guard > 0)
+			--mem.serial_guard;
+		else if (mem.serial_bits > 0 &&
+		    DivBit(static_cast<uint16_t>(prev_div + 4), 8) &&
+		    !DivBit(static_cast<uint16_t>(t.div_counter + 4), 8))
+		{
+			mem.serial_data = static_cast<uint8_t>((mem.serial_data << 1) | 1);
+			if (--mem.serial_bits == 0)
+			{
+				mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
+				mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
+			}
+		}
+
+		// DIV-APU: the primary event fires on the falling edge of DIV
+		// bit 12 (13 in double speed), the secondary on the rising edge.
+		if (mem.apu)
+		{
+			const uint8_t abit = mem.double_speed ? 13 : 12;
+			const bool was = DivBit(prev_div, abit);
+			const bool now = DivBit(t.div_counter, abit);
+			if (was && !now)      ApuDivEvent(*mem.apu, mem.double_speed);
+			else if (!was && now) ApuDivSecondaryEvent(*mem.apu);
+		}
+	}
+}
+
+// DIV reset (FF04 write / STOP): both the TIMA mux and the DIV-APU see
+// any resulting falling edge.
+void TimerResetDiv(Timer &t, Memory &mem)
+{
+	const uint16_t old = t.div_counter;
+	t.div_counter = 0;
+	if ((t.tac & 0x04) && DivBit(old, TIMA_BIT[t.tac & 0x03]))
+		ClockTima(t);
+	if (mem.apu)
+	{
+		const uint8_t abit = mem.double_speed ? 13 : 12;
+		if (DivBit(old, abit))
+			ApuDivEvent(*mem.apu, mem.double_speed);
 	}
 }
 
@@ -89,7 +140,11 @@ uint8_t TimerRead(const Timer &t, uint16_t addr)
 {
 	switch (addr)
 	{
-		case 0xFF04: return static_cast<uint8_t>(t.div_counter >> 8);
+		case 0xFF04:
+		{
+			if (::g_div_probe > 0) { --::g_div_probe; fprintf(stderr, "[divprobe] %04X\n", t.div_counter); }
+			return static_cast<uint8_t>(t.div_counter >> 8);
+		}
 		case 0xFF05: return t.tima;
 		case 0xFF06: return t.tma;
 		case 0xFF07: return static_cast<uint8_t>(t.tac | 0xF8);
@@ -97,33 +152,29 @@ uint8_t TimerRead(const Timer &t, uint16_t addr)
 	return 0xFF;
 }
 
-void TimerWrite(Timer &t, uint16_t addr, uint8_t value)
+void TimerWrite(Timer &t, Memory &mem, uint16_t addr, uint8_t value)
 {
 	switch (addr)
 	{
 		case 0xFF04:
-		{
-			// DIV reset. If the currently-selected TIMA bit was 1, a
-			// 1 → 0 transition happens on the internal counter and TIMA
-			// spuriously ticks — this is the DIV-write quirk Blargg
-			// timing tests exercise.
-			const uint16_t old = t.div_counter;
-			t.div_counter = 0;
-			if ((t.tac & 0x04) && DivBit(old, TIMA_BIT[t.tac & 0x03]))
-				ClockTima(t);
+			// DIV reset — spurious TIMA tick + DIV-APU edge handled in
+			// the shared helper.
+			TimerResetDiv(t, mem);
 			return;
-		}
 
 		case 0xFF05:
 			// Writing TIMA during the 4-cycle reload delay cancels the
-			// pending reload + IRQ. After the reload cycle, writes land
-			// normally on the reloaded TMA.
+			// pending reload + IRQ. A write landing on the reload cycle
+			// itself is ignored — TMA wins.
+			if (t.reload_just > 0) return;
 			if (t.tima_overflow_pending) t.tima_overflow_pending = false;
 			t.tima = value;
 			return;
 
 		case 0xFF06:
 			t.tma = value;
+			// TMA written on the reload cycle propagates into TIMA too.
+			if (t.reload_just > 0) t.tima = value;
 			return;
 
 		case 0xFF07:

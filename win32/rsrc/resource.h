@@ -692,6 +692,7 @@
 #define ID_EMULATION_BIOS_NONE          44346
 #define ID_EMULATION_BIOS_SGB1          44347
 #define ID_EMULATION_BIOS_SGB2          44348
+#define ID_EMULATION_ACIDTESTS          44349
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361
@@ -720,6 +721,11 @@
 #define IDD_GB_TILE_VIEWER              180
 #define IDD_GB_TILEMAP_VIEWER           181
 #define IDD_GB_SPRITE_VIEWER            182
+#define IDD_ACID_TESTS                  189
+#define IDC_ACID_LIST                   3368
+#define IDC_ACID_PROGRESS               3369
+#define IDC_ACID_STATUS                 3370
+#define IDC_ACID_RUN                    3371
 
 #define ID_DEBUG_VRAM_VIEWER            40200
 #define ID_DEBUG_TILEMAP_VIEWER         40201
@@ -894,9 +900,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        189
+#define _APS_NEXT_RESOURCE_VALUE        190
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3368
+#define _APS_NEXT_CONTROL_VALUE         3372
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

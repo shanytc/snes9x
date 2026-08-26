@@ -94,6 +94,7 @@ void PacketFeed(PacketState &ps, uint8_t value)
 	if (cur == 0x00 && prev != 0x00)
 	{
 		ps.phase = PacketPhase::InReset;
+		ps.pending_bit = -1;
 		ResetPacketBuf(ps);
 		return;
 	}
@@ -107,12 +108,17 @@ void PacketFeed(PacketState &ps, uint8_t value)
 
 	if (ps.phase != PacketPhase::Receiving) return;
 
-	// Bit encoding: from both-high (0x30) we watch which line drops.
-	//   P14 falls (0x30 → 0x20) = bit 0
-	//   P15 falls (0x30 → 0x10) = bit 1
-	// The "back to 0x30" edge between bits is ignored; we don't need it.
-	if (prev == 0x30 && cur == 0x20)      AppendBit(ps, 0);
-	else if (prev == 0x30 && cur == 0x10) AppendBit(ps, 1);
+	// Bit encoding: a line pulled low arms a bit (P14 low = 0, P15 low =
+	// 1) and the ICD latches it only when both lines go high again. A
+	// second pulse before that overrides the first, and a both-low pulse
+	// in between is a reset that discards it (cpp/sgb-ext-test).
+	if (cur == 0x20)      ps.pending_bit = 0;
+	else if (cur == 0x10) ps.pending_bit = 1;
+	else if (cur == 0x30 && ps.pending_bit >= 0)
+	{
+		AppendBit(ps, static_cast<uint8_t>(ps.pending_bit));
+		ps.pending_bit = -1;
+	}
 }
 
 void SetSgbCommandCallback(SgbCommandCallback cb)

@@ -969,6 +969,8 @@ void ObjMachineDot(Ppu &p, Memory &mem)
 	switch (p.obj_fetch_state)
 	{
 	case 200:
+		// The object fetch waits for the BG fetcher to reach its data-high
+		// read with pixels queued (SameBoy), then steals it.
 		if (((p.fetch_stage == 2 && p.fetch_dot == 1) || p.fetch_stage == 3) &&
 		    p.bgf_count > 0)
 		{

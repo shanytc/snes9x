@@ -55,6 +55,10 @@ struct CpuState
 	bool     halt_bug;     // HALT-with-IME-off-and-pending-IRQ oddity
 	int64_t  t_cycles;     // monotonic T-cycle counter
 	uint32_t illegal_ops;  // count of the 11 undefined opcodes executed
+	// Dots the previous bus cycle borrowed from this one. A register write
+	// that has to reach into the next machine cycle pays it back here, so
+	// the pair still costs 8 T. Transient (never serialized).
+	uint8_t  tick_borrow = 0;
 };
 
 // Debug trace — called before each instruction dispatch.

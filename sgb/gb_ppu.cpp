@@ -727,6 +727,23 @@ inline uint16_t FetchDataAddr(const Ppu &p, const PixelMachine &m, int hi)
 	return static_cast<uint16_t>(bank + addr + fine_y * 2 + hi);
 }
 
+// CGB: a tile-data read landing on the glitch dot left by an LCDC.4 change
+// sees the tile number on the bus instead of the row - or, if the fetch had
+// latched the 8800 set, whatever byte was driven last (SameBoy
+// data_for_tile_sel_glitch; cgb-acid-hell).
+inline uint8_t FetchDataByte(Ppu &p, const PixelMachine &m, bool high)
+{
+	const uint8_t bus = p.vram[m.fetch_data_addr];
+	if (!p.cgb || !p.tile_sel_glitch)
+	{
+		if (high) p.sel_glitch_data = bus;
+		return bus;
+	}
+	if (!m.fetch_tileset) return p.sel_glitch_data;
+	p.sel_glitch_data = bus;
+	return (m.fetch_tile & 0x80) ? bus : m.fetch_tile;
+}
+
 inline bool WinEnView(const Ppu &p, const PixelMachine &m)
 {
 	static int wd = -1;
@@ -854,22 +871,24 @@ void FetcherDot(Ppu &p, PixelMachine &m)
 		if (m.fetch_dot == 0)
 		{
 			m.fetch_data_addr = FetchDataAddr(p, m, 0);
+			m.fetch_tileset   = (p.lcdc & 0x10) != 0;
 			m.fetch_dot = 1;
 			return;
 		}
 		m.fetch_dot = 0;
-		m.fetch_lo = p.vram[m.fetch_data_addr];
+		m.fetch_lo = FetchDataByte(p, m, false);
 		m.fetch_stage = 2;
 		return;
 	case 2:  // data high
 		if (m.fetch_dot == 0)
 		{
 			m.fetch_data_addr = FetchDataAddr(p, m, 1);
+			m.fetch_tileset   = (p.lcdc & 0x10) != 0;
 			m.fetch_dot = 1;
 			return;
 		}
 		m.fetch_dot = 0;
-		m.fetch_hi = p.vram[m.fetch_data_addr];
+		m.fetch_hi = FetchDataByte(p, m, true);
 		if (m.fetch_is_window)
 			m.fetch_tile_x = static_cast<uint8_t>((m.fetch_tile_x + 1) & 31);
 		m.fetch_stage = 3;

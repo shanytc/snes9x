@@ -67,6 +67,7 @@ struct PixelMachine
 	bool     fetch_is_window = false;
 	uint8_t  fetch_pause   = 0;    // idle fetcher dots (re-activation starts late)
 	uint16_t fetch_map_addr  = 0;  // latched on the fetch stage's first dot
+	bool     fetch_tileset = false; // LCDC.4 as latched by this fetch's T1
 	uint16_t fetch_data_addr = 0;
 	uint8_t  fetch_y_latch = 0;    // CGB caches the fetcher Y at the tile stage
 
@@ -313,6 +314,10 @@ struct Ppu
 	// Dots to swallow before the very first one, so a BIOS-less start
 	// picks up the dot grid a CPU-driven LCD enable would have set.
 	uint8_t  boot_skew = 0;
+	// A CGB LCDC.4 change leaves the tile fetcher's bus glitched for one
+	// dot; sel_glitch_data is the byte last driven onto it.
+	uint8_t  tile_sel_glitch = 0;
+	uint8_t  sel_glitch_data = 0;
 };
 
 void PpuReset(Ppu &p);

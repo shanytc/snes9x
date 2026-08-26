@@ -730,7 +730,7 @@ inline uint16_t FetchDataAddr(const Ppu &p, const PixelMachine &m, int hi)
 inline bool WinEnView(const Ppu &p, const PixelMachine &m)
 {
 	static int wd = -1;
-	if (wd < 0) { const char *e = getenv("ACID_WD"); wd = e ? atoi(e) : 3; }
+	if (wd < 0) { const char *e = getenv("ACID_WD"); wd = e ? atoi(e) : 1; }
 	const int d = m.emits ? wd : 0;   // the skeleton reads the live register
 	const uint8_t v = d == 0 ? p.lcdc
 	                : d == 1 ? p.lcdc_shadow
@@ -1145,7 +1145,7 @@ bool WindowCheckDot(Ppu &p, PixelMachine &m)
 	if (!p.cgb && m.win_catchup_pos >= 0 && !m.win_activated_line)
 	{
 		static int dmg = -1;
-		if (dmg < 0) { const char *e = getenv("ACID_DMG"); dmg = e ? atoi(e) : 3; }
+		if (dmg < 0) { const char *e = getenv("ACID_DMG"); dmg = e ? atoi(e) : 0; }
 		const int gap = static_cast<int>(m.pos) - m.win_catchup_pos;
 		if (gap >= 0 && gap <= dmg)
 		{
@@ -1505,7 +1505,7 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 		// still early (through the map read); later stages complete and
 		// push their window tile (Coffee GB; m3_lcdc_win_en_change_multiple).
 		if (!p.cgb && m.fetch_is_window && !WinEnView(p, m) &&
-		    m.fetch_stage <= 1)
+		    m.obj_fetch_state == 0 && m.fetch_stage <= 1)
 		{
 			if (m.fetch_stage != 0 || m.fetch_dot != 0)
 			{

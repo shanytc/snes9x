@@ -93,6 +93,7 @@ struct PixelMachine
 	int32_t  window_line = -1;     // internal window line counter (per machine)
 	bool     win_fresh = false;    // window activated, no pixel popped yet
 	bool     win_insert_disable = false;  // LCDC.5 dropped mid-fetch: no insertion glitch
+	bool     win_en_prev = true;   // window-enable view on the previous dot
 	int16_t  win_catchup_pos = -1; // WX match masked by an LCDC.5-off pulse
 	bool     win_activated_line = false;  // a re-activation starts its fetch a dot late
 	uint8_t  win_pend = 0;         // activation held pending for one dot

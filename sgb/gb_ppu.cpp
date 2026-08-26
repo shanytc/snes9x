@@ -760,7 +760,10 @@ void BgPushAttempt(Ppu &p, PixelMachine &m)
 	// Window-disable pixel insertion (SameBoy #278): with WY armed
 	// but the window bit off, a WX match at the push slot injects a
 	// single blank pixel instead of the tile row (m2_win_en_toggle).
-	if (!p.cgb && p.wy_triggered && !WinEnView(p, m) && !m.win_insert_disable)
+	static int wdi = -99;
+	if (wdi < -90) { const char *e = getenv("ACID_WDI"); wdi = e ? atoi(e) : -1; }
+	const bool win_en_ins = wdi < 0 ? WinEnView(p, m) : ((p.lcdc & 0x20) != 0);
+	if (!p.cgb && p.wy_triggered && !win_en_ins && !m.win_insert_disable)
 	{
 		uint8_t lp = static_cast<uint8_t>(m.pos + 7);
 		if (lp > 167) lp = 0;
@@ -1137,7 +1140,11 @@ void EmitPixel(Ppu &p, PixelMachine &m, uint8_t bg_color, uint8_t bg_attr, bool 
 bool WindowCheckDot(Ppu &p, PixelMachine &m)
 {
 	const uint8_t wxv = WxView(p, m);
-	if (m.fetch_is_window || !p.wy_triggered || !WinEnView(p, m))
+	static int wdc = -99;
+	if (wdc < -90) { const char *e = getenv("ACID_WDC"); wdc = e ? atoi(e) : -1; }
+	const bool win_en_cmp = wdc < 0 ? WinEnView(p, m) : (wdc == 0 ? ((p.lcdc & 0x20) != 0)
+	                                                              : ((p.lcdc_shadow & 0x20) != 0));
+	if (m.fetch_is_window || !p.wy_triggered || !win_en_cmp)
 		return false;
 	// DMG LCD/PPU desync catch-up: a WX match was masked by an LCDC.5-off
 	// pulse; re-enabling within 3 dots activates as if at the match dot,
@@ -1189,7 +1196,9 @@ bool WindowCheckDot(Ppu &p, PixelMachine &m)
 			// DMG LCD/PPU desync: the comparator fires a dot early and
 			// rolls the panel back one pixel (strikethrough).
 			act = true;
-			if (m.lcd_x > 0) --m.lcd_x;
+			static int wdsy = -1;
+			if (wdsy < 0) { const char *e = getenv("ACID_WDSY"); wdsy = e ? atoi(e) : 0; }
+			if (wdsy && m.lcd_x > 0) --m.lcd_x;
 		}
 	}
 	if (act)
@@ -1480,7 +1489,9 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 			m.win_pend = 0;
 			if (p.wx == m.win_pend_wx && (p.cgb || WinEnView(p, m)))
 			{
-				if (m.pos != m.win_pend_pos)
+				static int wroll = -1;
+				if (wroll < 0) { const char *e = getenv("ACID_WROLL"); wroll = e ? atoi(e) : 1; }
+				if (wroll && m.pos != m.win_pend_pos)
 				{
 					RewindPixel(m);
 					m.pos = m.win_pend_pos;
@@ -1517,6 +1528,17 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 			}
 			m.fetch_is_window = false;
 			m.win_fresh       = false;
+		}
+		// A window that dies while its first tile is still being fetched
+		// disables the push-stage insertion glitch for the rest of the
+		// line. Each machine sees the drop on its own dot, so latch it
+		// here rather than at the CPU write (SameBoy
+		// disable_window_pixel_insertion_glitch).
+		{
+			const bool win_en_now = WinEnView(p, m);
+			if (m.win_en_prev && !win_en_now && m.win_fresh)
+				m.win_insert_disable = true;
+			m.win_en_prev = win_en_now;
 		}
 		// A WX match landing while the pulse has the window off arms the
 		// desync catch-up (only before the line's first activation).

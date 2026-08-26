@@ -654,7 +654,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
         bios_paths[i] = S9xGetBiosPath(i);
     Bool("GBBIOSEnabled", gb_bios_enabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
-    Int("GBBootPolicy", gb_boot_policy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=auto prefer GB, 4=auto prefer GBC, 5=auto prefer SGB (default), 6=SGB+GBC");
+    Int("GBBootPolicy", gb_boot_policy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default)");
     EndSection();
 
     // Explicit BIOS file paths; empty means fall back to the by-name search.

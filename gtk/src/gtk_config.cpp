@@ -424,7 +424,7 @@ int Snes9xConfig::save_config_file()
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
     outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
-    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=auto prefer GB, 4=auto prefer GBC, 5=auto prefer SGB (default), 6=SGB+GBC");
+    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default)");
 
     section = "Input";
     controllers controller = CTL_NONE;

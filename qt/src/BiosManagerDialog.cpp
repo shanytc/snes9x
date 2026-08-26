@@ -146,6 +146,7 @@ void BiosManagerDialog::applyAndClose()
     Settings.GBBootPolicy = (uint8) gb_default->currentIndex();
     // An SGB-involving policy is meaningless with the SGB BIOS switched off.
     if ((Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+         Settings.GBBootPolicy == S9X_GBBOOT_SGB2 ||
          Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
          Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB) &&
         Settings.SGB_BIOSPreference == 0)

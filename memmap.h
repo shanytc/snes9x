@@ -237,11 +237,12 @@ enum S9xGBBootPolicy
 {
 	S9X_GBBOOT_GB = 0,       // force Game Boy
 	S9X_GBBOOT_GBC,          // force Game Boy Color
-	S9X_GBBOOT_SGB,          // force Super Game Boy
+	S9X_GBBOOT_SGB,          // force Super Game Boy (SGB1)
+	S9X_GBBOOT_SGB_GBC,      // SGB border + real CGB colour (hack, not real HW)
+	S9X_GBBOOT_SGB2,         // force Super Game Boy 2
 	S9X_GBBOOT_AUTO_GB,      // automatic, prefer GB   (GB > GBC > SGB)
 	S9X_GBBOOT_AUTO_GBC,     // automatic, prefer GBC  (GBC > SGB > GB)
 	S9X_GBBOOT_AUTO_SGB,     // automatic, prefer SGB  (SGB > GBC > GB) — default
-	S9X_GBBOOT_SGB_GBC,      // SGB border + real CGB colour (hack, not real HW)
 	S9X_NUM_GBBOOT_POLICIES
 };
 

@@ -212,13 +212,6 @@ void Snes9xWindow::connect_signals()
         if (Settings.GBRomPath[0])
             try_open_rom(std::string(Settings.GBRomPath));
     };
-    // Leave an SGB-capable policy alone; otherwise move back to prefer-SGB.
-    auto sgb_policy = [] {
-        return (Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
-                Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
-                Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB)
-                   ? -1 : (int) S9X_GBBOOT_AUTO_SGB;
-    };
     auto on_pick = [&](const char *name, auto handler) {
         get_object<Gtk::RadioMenuItem>(name)->signal_toggled().connect([this, name, handler] {
             if (get_object<Gtk::RadioMenuItem>(name)->get_active())
@@ -227,8 +220,8 @@ void Snes9xWindow::connect_signals()
     };
     on_pick("bios_none_item", [apply_bios_choice] { apply_bios_choice(0, false, -1); });
     on_pick("bios_gb_item",   [apply_bios_choice] { apply_bios_choice(0, true,  -1); });
-    on_pick("bios_sgb1_item", [apply_bios_choice, sgb_policy] { apply_bios_choice(1, Settings.GB_BIOSEnabled, sgb_policy()); });
-    on_pick("bios_sgb2_item", [apply_bios_choice, sgb_policy] { apply_bios_choice(2, Settings.GB_BIOSEnabled, sgb_policy()); });
+    on_pick("bios_sgb1_item", [apply_bios_choice] { apply_bios_choice(1, Settings.GB_BIOSEnabled, S9X_GBBOOT_SGB); });
+    on_pick("bios_sgb2_item", [apply_bios_choice] { apply_bios_choice(2, Settings.GB_BIOSEnabled, S9X_GBBOOT_SGB2); });
 
     for (int i = 0; i <= 4; i++)
     {

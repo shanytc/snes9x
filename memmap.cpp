@@ -1336,8 +1336,10 @@ S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag,
 			return (S9X_GBCON_GBC);
 
 		case S9X_GBBOOT_SGB:
-			// Forcing SGB without a BIOS would just be BIOS-less DMG; say so.
-			return (sgb_available ? S9X_GBCON_SGB : S9X_GBCON_GB);
+		case S9X_GBBOOT_SGB2:
+			// Forcing SGB without its BIOS would just be BIOS-less DMG.
+			if (sgb_available) return (S9X_GBCON_SGB);
+			return (does_gbc ? S9X_GBCON_GBC : S9X_GBCON_GB);
 
 		case S9X_GBBOOT_SGB_GBC:
 			// Only meaningful on a colour-capable cart; a mono cart has no CGB
@@ -1374,10 +1376,11 @@ const char *S9xGBBootPolicyName (int policy)
 		case S9X_GBBOOT_GB:       return ("Game Boy");
 		case S9X_GBBOOT_GBC:      return ("Game Boy Color");
 		case S9X_GBBOOT_SGB:      return ("Super Game Boy");
-		case S9X_GBBOOT_AUTO_GB:  return ("Automatic, prefer GB (defaults to GB for triple boot games)");
-		case S9X_GBBOOT_AUTO_GBC: return ("Automatic, prefer GBC (defaults to GBC for triple boot games)");
-		case S9X_GBBOOT_AUTO_SGB: return ("Automatic, prefer SGB (defaults to SGB for triple boot games)");
 		case S9X_GBBOOT_SGB_GBC:  return ("Super Game Boy + Game Boy Color");
+		case S9X_GBBOOT_SGB2:     return ("Super Game Boy 2");
+		case S9X_GBBOOT_AUTO_GB:  return ("Automatic, prefer GB");
+		case S9X_GBBOOT_AUTO_GBC: return ("Automatic, prefer GBC");
+		case S9X_GBBOOT_AUTO_SGB: return ("Automatic, prefer SGB");
 		default:                  return ("");
 	}
 }
@@ -1801,8 +1804,19 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, const char *f
     out_bios_path.clear();
     out_bios_mode = 0;
 
+    // "Super Game Boy" / "Super Game Boy 2" pin the variant; everything else
+    // follows the SGB_BIOSPreference ladder (SGB2, then SGB1).
     std::string sgb_path;
-    if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, sgb_path))
+    const uint8 pinned = (Settings.GBBootPolicy == S9X_GBBOOT_SGB)  ? 1
+                       : (Settings.GBBootPolicy == S9X_GBBOOT_SGB2) ? 2 : 0;
+    if (Settings.SGB_BIOSPreference == 0)
+        ;   // SGB switched off entirely (Emulation -> BIOS "No BIOS")
+    else if (pinned)
+    {
+        if (FindSGB_BIOS(pinned, filename, sgb_path)) out_bios_mode = pinned;
+        else sgb_path.clear();
+    }
+    else if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, sgb_path))
         out_bios_mode = 2;
     else if (Settings.SGB_BIOSPreference >= 1)
     {

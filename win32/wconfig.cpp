@@ -970,7 +970,7 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. Nothing is bundled; drop the file in the BIOS directory.");
-	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 5, "console for GB content: 0=GB, 1=GBC, 2=SGB, 3=auto prefer GB, 4=auto prefer GBC, 5=auto prefer SGB (default), 6=SGB+GBC.");
+	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default).");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

@@ -2940,10 +2940,6 @@ LRESULT CALLBACK WinProc(
 				const UINT bios_id = LOWORD(wParam);
 				// Quick per-cart override of the BIOS Manager's console policy.
 				// Choosing SGB moves the policy back when it was pinned elsewhere.
-				const bool sgb_policy_ok =
-					(Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
-					 Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
-					 Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB);
 				switch (bios_id)
 				{
 					case ID_EMULATION_BIOS_NONE:
@@ -2956,11 +2952,11 @@ LRESULT CALLBACK WinProc(
 						break;
 					case ID_EMULATION_BIOS_SGB1:
 						Settings.SGB_BIOSPreference = 1;
-						if (!sgb_policy_ok) Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
+						Settings.GBBootPolicy       = S9X_GBBOOT_SGB;
 						break;
 					default:
 						Settings.SGB_BIOSPreference = 2;
-						if (!sgb_policy_ok) Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
+						Settings.GBBootPolicy       = S9X_GBBOOT_SGB2;
 						break;
 				}
 				if (Settings.GBRomPath[0])
@@ -8922,6 +8918,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 				Settings.GBBootPolicy = (uint8) pick;
 			// An SGB-involving policy is meaningless with the SGB BIOS off.
 			if ((Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+				 Settings.GBBootPolicy == S9X_GBBOOT_SGB2 ||
 				 Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
 				 Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB) &&
 				Settings.SGB_BIOSPreference == 0)

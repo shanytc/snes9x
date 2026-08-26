@@ -1294,7 +1294,7 @@ void RenderDot(Ppu &p, PixelMachine &m, Memory &mem)
 	// (SameBoy fires it at the last pixel; ours lands early to match the
 	// CPU-observed grid).
 	static int m0pre = -1;
-	if (m0pre < 0) { const char *e = getenv("ACID_M0PRE"); m0pre = e ? atoi(e) : 1; }
+	if (m0pre < 0) { const char *e = getenv("ACID_M0PRE"); m0pre = e ? atoi(e) : -1; }
 	if (!m.emits && m.lcd_x == GB_SCREEN_WIDTH - m0pre &&
 	    (p.lcdc & 0x80) && (p.stat & 0x08) && !p.stat_line_high)
 	{
@@ -1333,7 +1333,14 @@ void PpuReset(Ppu &p)
 	p.bgp = 0xFC; p.obp0 = 0xFF; p.obp1 = 0xFF;
 	p.wy = p.wx = 0;
 	p.mode = PpuMode::OamScan;
-	p.mode_clock    = 0;
+	// Every line starts its OAM scan a few dots before LY advances; boot
+	// has to start on that same phase or the first frames run skewed.
+	{
+		static int lsw0 = -1, boot = -99;
+		if (lsw0 < 0) { const char *e = getenv("ACID_LSW"); lsw0 = e ? atoi(e) : 4;
+		                const char *f = getenv("ACID_BOOT"); boot = f ? atoi(f) : 0; }
+		p.mode_clock = -lsw0 + boot;
+	}
 	p.tm = PixelMachine{};
 	p.om = PixelMachine{};
 	p.om.emits = true;
@@ -1734,6 +1741,14 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 			p.mode_clock -= mode0_length;
 			p.mode_clock -= 4;
 			p.lcdon_pad = 0;
+			{
+				// The LCD's output stage needs a few lines to settle after
+				// an enable; those flips read back on the enable-line grid.
+				static int lyn = -1;
+				if (lyn < 0) { const char *e = getenv("ACID_LYN"); lyn = e ? atoi(e) : 2; }
+				if (p.lcdon_line) p.ly_lag = static_cast<uint8_t>(lyn);
+				else if (p.ly_lag) --p.ly_lag;
+			}
 			p.lcdon_line  = false;
 			p.ly_prev     = p.ly;
 			p.ly_change_t = p.t_cycles;
@@ -2008,9 +2023,17 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 		{
 			// FF44 reads lag the internal counter by a few dots — the
 			// LY flip lands mid-line-start pipeline (hblank_ly_scx).
-			static int lyk = -1;
-			if (lyk < 0) { const char *e = getenv("ACID_LYK"); lyk = e ? atoi(e) : 4; }
-			if (!p.cgb && p.t_cycles - p.ly_change_t < lyk && p.ly == p.ly_prev + 1)
+			// The shortened line after an LCD enable reads its flip back a
+			// dot earlier than a steady line does.
+			static int lyk = -1, lyks = -1;
+			if (lyk < 0) { const char *e = getenv("ACID_LYK"); lyk = e ? atoi(e) : 4;
+			               const char *f = getenv("ACID_LYKS"); lyks = f ? atoi(f) : 5; }
+			// The enable line owns both the reads inside it and the reads
+			// just after the flip that ends it.
+			const int lag = (p.lcdon_line || p.ly_lag) ? lyk : lyks;
+			const bool oldv = !p.cgb && p.t_cycles - p.ly_change_t < lag &&
+			                  p.ly == p.ly_prev + 1;
+			if (oldv)
 				return p.ly_prev;
 			return p.ly;
 		}

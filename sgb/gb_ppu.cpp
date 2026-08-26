@@ -1501,11 +1501,14 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 				m.win_activated_line = true;
 			}
 		}
+		// How far into the tile a window fetch can still be killed.
+		static int wks = -99;
+		if (wks < -90) { const char *e = getenv("ACID_WKS"); wks = e ? atoi(e) : 0; }
 		// DMG: clearing LCDC.5 kills the window fetch only while it is
 		// still early (through the map read); later stages complete and
 		// push their window tile (Coffee GB; m3_lcdc_win_en_change_multiple).
 		if (!p.cgb && m.fetch_is_window && !WinEnView(p, m) &&
-		    m.obj_fetch_state == 0 && m.fetch_stage <= 1)
+		    m.obj_fetch_state == 0 && m.fetch_stage <= wks)
 		{
 			if (m.fetch_stage != 0 || m.fetch_dot != 0)
 			{

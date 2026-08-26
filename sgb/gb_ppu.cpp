@@ -1129,11 +1129,13 @@ bool WindowCheckDot(Ppu &p)
 	// rolling the emitted pixels back (Coffee GB windowCatchUpPos).
 	if (!p.cgb && p.win_catchup_pos >= 0 && !p.win_activated_line)
 	{
+		static int dmg = -1;
+		if (dmg < 0) { const char *e = getenv("ACID_DMG"); dmg = e ? atoi(e) : 3; }
 		const int gap = static_cast<int>(p.pos) - p.win_catchup_pos;
-		if (gap >= 0 && gap <= 3)
+		if (gap >= 0 && gap <= dmg)
 		{
 			int target = p.win_catchup_pos;
-			if (gap == 3)
+			if (gap == dmg)
 				++target;   // dmg_blob retains one more LCD pixel at max gap
 			while (static_cast<int>(p.pos) > target)
 			{

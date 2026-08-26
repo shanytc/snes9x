@@ -72,6 +72,13 @@ void Dispatch(CpuState &s, Memory &mem, uint8_t op)
 					TickM(s, mem);
 			}
 			if (mem.timer) TimerResetDiv(*mem.timer, mem);
+			// The display clock resumes a few dots out of step with the
+			// CPU's first post-switch cycle (daid speed_switch_timing_stat).
+			{
+				static int ssd = -99;
+				if (ssd < -90) { const char *e = getenv("ACID_SSD"); ssd = e ? atoi(e) : 0; }
+				if (ssd > 0 && mem.ppu) PpuStep(*mem.ppu, mem, ssd);
+			}
 		}
 		else
 		{

@@ -1974,7 +1974,9 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// the mode bits still read 0 even though the OAM scan (and its
 			// STAT interrupt) have begun (SameBoy / mooneye lcdon tests).
 			{
-				static int msk = -1, v3 = -1, v0 = -1;
+				static int msk = -1, v3 = -1, v0 = -1, v3c = -99, mskc = -99;
+				if (v3c < -90) { const char *q = getenv("ACID_V3C"); v3c = q ? atoi(q) : 4;
+				                 const char *w = getenv("ACID_MSKC"); mskc = w ? atoi(w) : 0; }
 				if (msk < 0) { const char *e = getenv("ACID_MSK"); msk = e ? atoi(e) : -3;
 				               const char *f = getenv("ACID_V3"); v3 = f ? atoi(f) : 0;
 				               const char *g = getenv("ACID_V0"); v0 = g ? atoi(g) : 0; }
@@ -1983,6 +1985,12 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 					v = static_cast<uint8_t>(v & ~0x03);
 				// The CPU-visible mode runs a few dots ahead of the render
 				// machine (mooneye lcdon_timing pins the absolute grid).
+				else if (p.cgb && p.mode == PpuMode::OamScan && mskc >= 0 &&
+				         p.mode_clock <= mskc)
+					v = static_cast<uint8_t>(v & ~0x03);
+				else if (p.cgb && p.mode == PpuMode::OamScan && v3c > 0 &&
+				         p.mode_clock >= MODE2_DOTS + 7 - v3c)
+					v = static_cast<uint8_t>((v & ~0x03) | 0x03);
 				else if (!p.cgb && !p.lcdon_line && p.mode == PpuMode::OamScan &&
 				         p.mode_clock >= MODE2_DOTS + 7 - v3)
 					v = static_cast<uint8_t>((v & ~0x03) | 0x03);

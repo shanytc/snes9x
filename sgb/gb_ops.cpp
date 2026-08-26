@@ -67,7 +67,7 @@ void Dispatch(CpuState &s, Memory &mem, uint8_t op)
 			// ~143 lines), then DIV restarts from zero.
 			{
 				static int stl = -1;
-				if (stl < 0) { const char *e = getenv("ACID_STL"); stl = e ? atoi(e) : 32769; }
+				if (stl < 0) { const char *e = getenv("ACID_STL"); stl = e ? atoi(e) : 32770; }
 				for (int i = 0; i < stl; ++i)
 					TickM(s, mem);
 			}

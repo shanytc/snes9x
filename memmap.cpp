@@ -30,6 +30,7 @@
 #include "apu/apu.h"
 #include "cheats.h"
 #include "sgb/sgb.h"
+#include "biosmanager.h"
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
@@ -1114,6 +1115,25 @@ static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out
 	};
 	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
 
+	// A path set in the BIOS Manager wins over the by-name search.
+	const std::string assigned = S9xResolveBiosPath(mode == 2 ? S9X_BIOS_SGB2 : S9X_BIOS_SGB1);
+	if (!assigned.empty())
+	{
+		FILE *f = fopen(assigned.c_str(), "rb");
+		if (f)
+		{
+			uint8 hdr[0x8000];
+			const size_t n = fread(hdr, 1, sizeof hdr, f);
+			fclose(f);
+			uint8 got_mode = 0;
+			if (n >= 0x8000 && is_SGB_BIOS(hdr, (uint32) n, &got_mode) && got_mode == mode)
+			{
+				out_path = assigned;
+				return (TRUE);
+			}
+		}
+	}
+
 	std::vector<std::string> dirs;
 	if (gb_rom_path && *gb_rom_path)
 	{
@@ -1229,6 +1249,28 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 		"cgb.boot.rom", "cgb_boot.rom", "CGB_ROM.bin", nullptr
 	};
 	const char **names = cgb ? cgb_names : dmg_names;
+
+	// A path set in the BIOS Manager wins over the by-name search.
+	const std::string assigned = S9xResolveBiosPath(cgb ? S9X_BIOS_GBC : S9X_BIOS_GB);
+	if (!assigned.empty())
+	{
+		FILE *f = fopen(assigned.c_str(), "rb");
+		if (f)
+		{
+			uint8 buf[0x900];
+			const size_t n = fread(buf, 1, sizeof buf, f);
+			const bool oversize = (fgetc(f) != EOF);
+			fclose(f);
+			const bool sized = cgb ? (n == 0x900 || n == 0x800) : (n == 0x100);
+			if (!oversize && sized &&
+			    buf[0] == 0x31 && buf[1] == 0xFE && buf[2] == 0xFF)
+			{
+				out_path = assigned;
+				if (out_bytes) out_bytes->assign(buf, buf + n);
+				return (TRUE);
+			}
+		}
+	}
 
 	std::vector<std::string> dirs;
 	if (gb_rom_path && *gb_rom_path)
@@ -2442,7 +2484,9 @@ bool8 CMemory::LoadMultiCartInt ()
 
         FILE	*fp;
 	    size_t	size;
-		std::string path = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "STBIOS.bin";
+		std::string path = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
+		if (path.empty())
+			path = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "STBIOS.bin";
 
 	    fp = fopen(path.c_str(), "rb");
 	    if (fp)

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include "snes9x.h"
 #include "memmap.h"
+#include "biosmanager.h"
 #include "display.h"
 #include "movie.h"
 #include "hd64180.h"
@@ -1347,8 +1348,22 @@ void S9xSFCBoxPostLoadState (void)
 // ---------------------------------------------------------------------------
 // BIOS loading
 
-static bool8 LoadBIOSFile (const char *name, uint8 *dest, uint32 size, uint32 minsize)
+static bool8 LoadBIOSFile (const char *name, uint8 *dest, uint32 size, uint32 minsize,
+						   int bios_slot = -1)
 {
+	// A path set in the BIOS Manager wins over the by-name search.
+	std::string assigned = (bios_slot >= 0) ? S9xResolveBiosPath(bios_slot) : std::string();
+	if (!assigned.empty())
+	{
+		FILE *af = fopen(assigned.c_str(), "rb");
+		if (af)
+		{
+			const size_t got = fread(dest, 1, size, af);
+			fclose(af);
+			if (got >= minsize) return (TRUE);
+		}
+	}
+
 	// Probe order: the port's configured BIOS folder, then the ROM's own
 	// directory, then the conventional BIOS/ folder inside or beside the
 	// ROM folder (games in Roms/, BIOS files in a sibling BIOS/), then
@@ -1388,7 +1403,7 @@ static bool8 LoadBIOSFile (const char *name, uint8 *dest, uint32 size, uint32 mi
 
 bool8 S9xSFCBoxLoadKROM (void)
 {
-	if (!LoadBIOSFile("KROM1.BIN", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE) &&
+	if (!LoadBIOSFile("KROM1.BIN", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE, S9X_BIOS_SFCBOX_KROM) &&
 		!LoadBIOSFile("KROM.BIN",  SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE) &&
 		!LoadBIOSFile("krom1.bin", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE))
 	{
@@ -1398,7 +1413,7 @@ bool8 S9xSFCBoxLoadKROM (void)
 	}
 
 	SFCBox.OSD.FontLoaded =
-		LoadBIOSFile("MB90082.BIN", SFCBox.OSD.Font, SFCBOX_FONT_SIZE, SFCBOX_FONT_SIZE);
+		LoadBIOSFile("MB90082.BIN", SFCBox.OSD.Font, SFCBOX_FONT_SIZE, SFCBOX_FONT_SIZE, S9X_BIOS_SFCBOX_FONT);
 	if (!SFCBox.OSD.FontLoaded)
 		printf("SFC-Box: MB90082.BIN (OSD font) not found; the supervisor overlay will be invisible.\n");
 

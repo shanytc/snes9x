@@ -17,6 +17,7 @@ namespace fs = std::filesystem;
 // the Qt port a documented, human-readable config with a comment toggle.
 // Included last so snes9x.h's macros don't leak into the Qt headers above.
 #include "conffile.h"
+#include "biosmanager.h"
 
 static const char *shortcut_names[] =
 {
@@ -348,6 +349,7 @@ bool EmuConfig::setDefaults(int section)
         sound_filter = eGaussian;
         sgb_bios_preference = 2;
         gb_bios_preference = 1;
+        for (auto &p : bios_paths) p.clear();
     }
 
     if (section == -1 || section == 4)
@@ -647,7 +649,15 @@ void EmuConfig::config(const std::string &filename, bool write)
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     BeginSection("SGB");
     Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+        bios_paths[i] = S9xGetBiosPath(i);
     Int("GBBIOSPreference", gb_bios_preference, "GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the power-on logo animation: 0=never, 1=when no SGB BIOS is in play (default), 2=in preference to the SGB BIOS");
+    EndSection();
+
+    // Explicit BIOS file paths; empty means fall back to the by-name search.
+    BeginSection("BIOS");
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+        String(S9xGetBiosSlotInfo(i)->key, bios_paths[i], S9xGetBiosSlotInfo(i)->label);
     EndSection();
 
     BeginSection("Ports");

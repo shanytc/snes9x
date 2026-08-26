@@ -52,6 +52,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/globals.cpp \
 				 $(CORE_DIR)/hd64180.cpp \
 				 $(CORE_DIR)/memmap.cpp \
+				 $(CORE_DIR)/biosmanager.cpp \
 				 $(CORE_DIR)/obc1.cpp \
 				 $(CORE_DIR)/msu1.cpp \
 				 $(CORE_DIR)/voicekun.cpp \

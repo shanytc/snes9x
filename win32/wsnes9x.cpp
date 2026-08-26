@@ -50,6 +50,7 @@
 
 #include "../snes9x.h"
 #include "../memmap.h"
+#include "../biosmanager.h"
 #include "../cpuexec.h"
 #include "../display.h"
 #include "../screenshot.h"
@@ -127,6 +128,7 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 
 INT_PTR CALLBACK DlgOpenROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgMultiROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK DlgChildSplitProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -2924,6 +2926,11 @@ LRESULT CALLBACK WinProc(
 			break;
 		case ID_EMULATION_RUNAHEAD_4:
 			Settings.RunAhead = 4;
+			break;
+		case ID_FILE_BIOSMANAGER:
+			if (DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSMANAGER), GUI.hWnd,
+							   DlgBiosManagerProc, (LPARAM) NULL) > 0)
+				WinSaveConfigFile();
 			break;
 		case ID_EMULATION_BIOS_NONE:
 		case ID_EMULATION_BIOS_GB:
@@ -8805,6 +8812,135 @@ void ListFilesFromFolder(HWND hDlg, RomDataList** prdl)
 	*prdl=rdl;
 	ListView_SetItemCountEx (GetDlgItem(hDlg, IDC_ROMLIST), count, 0);
 	ListView_SetItemState (GetDlgItem(hDlg,IDC_ROMLIST), 0, LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);
+}
+
+
+// File -> BIOS Manager: one row per supported BIOS, plus the default boot mode
+// for Game Boy content. Blank rows fall back to the search by filename.
+static void BiosManagerRefreshStatus(HWND hDlg, int slot)
+{
+	TCHAR wtext[S9X_BIOS_PATH_MAX];
+	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+	if (wtext[0] == TEXT('\0'))
+	{
+		SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, TEXT(""));
+		return;
+	}
+
+	// Validate the typed text without disturbing the stored path.
+	char saved[S9X_BIOS_PATH_MAX];
+	strncpy(saved, S9xGetBiosPath(slot), S9X_BIOS_PATH_MAX - 1);
+	saved[S9X_BIOS_PATH_MAX - 1] = '\0';
+	S9xSetBiosPath(slot, WideToUtf8(wtext));
+	const bool8 ok = S9xBiosPathUsable(slot);
+	S9xSetBiosPath(slot, saved);
+
+	const bool exists = (GetFileAttributes(wtext) != INVALID_FILE_ATTRIBUTES);
+	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot,
+				   !exists ? TEXT("not found") : (ok ? TEXT("OK") : TEXT("unexpected size")));
+}
+
+INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog(hDlg);
+		for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		{
+			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
+						   Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
+			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
+			BiosManagerRefreshStatus(hDlg, slot);
+		}
+
+		HWND combo = GetDlgItem(hDlg, IDC_BIOSMGR_DEFAULT);
+		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("No BIOS"));
+		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("Game Boy / Game Boy Color BIOS"));
+		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("Super Game Boy"));
+		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("Super Game Boy 2"));
+
+		// Mirrors the Emulation -> BIOS menu; see CheckMenuStates.
+		int sel;
+		if (Settings.GB_BIOSPreference >= 2)       sel = 1;
+		else if (Settings.SGB_BIOSPreference == 2) sel = 3;
+		else if (Settings.SGB_BIOSPreference == 1) sel = 2;
+		else                                       sel = Settings.GB_BIOSPreference ? 1 : 0;
+		SendMessage(combo, CB_SETCURSEL, sel, 0);
+		return true;
+	}
+
+	case WM_COMMAND:
+	{
+		const int id = LOWORD(wParam);
+
+		if (id >= IDC_BIOSMGR_EDIT0 && id < IDC_BIOSMGR_EDIT0 + S9X_NUM_BIOS_SLOTS &&
+			HIWORD(wParam) == EN_CHANGE)
+		{
+			BiosManagerRefreshStatus(hDlg, id - IDC_BIOSMGR_EDIT0);
+			return true;
+		}
+
+		if (id >= IDC_BIOSMGR_BROWSE0 && id < IDC_BIOSMGR_BROWSE0 + S9X_NUM_BIOS_SLOTS)
+		{
+			const int slot = id - IDC_BIOSMGR_BROWSE0;
+			TCHAR filename[MAX_PATH] = TEXT("");
+			GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename, MAX_PATH);
+
+			OPENFILENAME ofn;
+			ZeroMemory(&ofn, sizeof(ofn));
+			ofn.lStructSize     = sizeof(ofn);
+			ofn.hwndOwner       = hDlg;
+			ofn.lpstrFile       = filename;
+			ofn.nMaxFile        = MAX_PATH;
+			ofn.lpstrFilter     = TEXT("BIOS files\0*.bin;*.rom;*.sfc;*.smc\0All files\0*.*\0\0");
+			ofn.lpstrInitialDir = S9xGetDirectoryT(BIOS_DIR);
+			ofn.lpstrTitle      = TEXT("Select BIOS File");
+			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
+			if (GetOpenFileName(&ofn))
+				SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename);
+			return true;
+		}
+
+		if (id >= IDC_BIOSMGR_CLEAR0 && id < IDC_BIOSMGR_CLEAR0 + S9X_NUM_BIOS_SLOTS)
+		{
+			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + (id - IDC_BIOSMGR_CLEAR0), TEXT(""));
+			return true;
+		}
+
+		switch (id)
+		{
+		case IDOK:
+		{
+			for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+			{
+				TCHAR wtext[S9X_BIOS_PATH_MAX];
+				GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+				S9xSetBiosPath(slot, WideToUtf8(wtext));
+			}
+
+			// 0 = none, 1 = GB/GBC boot ROM, 2 = SGB1, 3 = SGB2. GB_BIOSPreference
+			// 2 means "in preference to SGB", which an explicit pick asks for.
+			switch (SendDlgItemMessage(hDlg, IDC_BIOSMGR_DEFAULT, CB_GETCURSEL, 0, 0))
+			{
+			case 1:  Settings.GB_BIOSPreference = 2; break;
+			case 2:  Settings.SGB_BIOSPreference = 1; Settings.GB_BIOSPreference = 1; break;
+			case 3:  Settings.SGB_BIOSPreference = 2; Settings.GB_BIOSPreference = 1; break;
+			default: Settings.SGB_BIOSPreference = 0; Settings.GB_BIOSPreference = 0; break;
+			}
+
+			EndDialog(hDlg, 1);
+			return true;
+		}
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return true;
+		}
+		break;
+	}
+	}
+	return false;
 }
 
 // load multicart rom dialog

@@ -10,6 +10,7 @@ namespace fs = std::filesystem;
 #include "memmap.h"
 #include "apu/apu.h"
 #include "sgb/sgb.h"
+#include "biosmanager.h"
 #include "gfx.h"
 #include "ppu.h"
 #include "snapshot.h"
@@ -239,6 +240,9 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.GB_BIOSPreference = (config->gb_bios_preference < 0 || config->gb_bios_preference > 2)
                                      ? 1
                                      : (uint8)config->gb_bios_preference;
+
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+        S9xSetBiosPath(i, config->bios_paths[i].c_str());
 
     if (rewind_buffer_size != config->rewind_buffer_size && active)
     {

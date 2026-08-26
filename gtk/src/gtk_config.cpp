@@ -13,6 +13,7 @@
 #include "gtk_s9x.h"
 #include "gtk_display.h"
 #include "conffile.h"
+#include "biosmanager.h"
 #include "cheats.h"
 #include "apu/apu.h"
 #include "netplay.h"
@@ -413,6 +414,11 @@ int Snes9xConfig::save_config_file()
 
     // Key path "SGB::BIOSPreference" matches the win32 config (wconfig.cpp) and
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
+    section = "BIOS";
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+        outstring(S9xGetBiosSlotInfo(i)->key, S9xGetBiosPath(i),
+                  S9xGetBiosSlotInfo(i)->label);
+
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
     outint("GBBIOSPreference", Settings.GB_BIOSPreference, "GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the power-on logo animation: 0=never, 1=when no SGB BIOS is in play (default), 2=in preference to the SGB BIOS");
@@ -692,6 +698,14 @@ int Snes9xConfig::load_config_file()
     bool OverclockCPU = false;
     inbool("OverclockCPU", OverclockCPU);
     inbool("EchoBufferHack", Settings.SeparateEchoBuffer);
+
+    section = "BIOS";
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+    {
+        std::string path;
+        instr(S9xGetBiosSlotInfo(i)->key, path);
+        S9xSetBiosPath(i, path.c_str());
+    }
 
     section = "SGB";
     inint("BIOSPreference", Settings.SGB_BIOSPreference);

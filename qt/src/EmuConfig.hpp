@@ -199,6 +199,9 @@ struct EmuConfig
     // preference to it. Persisted as [SGB] GBBIOSPreference.
     int gb_bios_preference;
 
+    // BIOS Manager paths, indexed by S9xBiosSlot. Persisted under [BIOS].
+    std::string bios_paths[8];
+
     // Files
     enum FileLocation
     {

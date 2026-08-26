@@ -1476,6 +1476,14 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkMenuItem" id="bios_manager_item">
+                        <property name="label" translatable="yes">_BIOS Manager…</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkSeparatorMenuItem" id="separatormenuitem2">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>

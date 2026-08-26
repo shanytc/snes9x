@@ -21,6 +21,7 @@
 #include "gtk_state_preview_dialog.h"
 
 #include "gtk_s9x.h"
+#include "gtk_bios_manager.h"
 #include "gtk_preferences.h"
 #include "gtk_display.h"
 #include "gtk_file.h"
@@ -170,6 +171,10 @@ void Snes9xWindow::connect_signals()
 
     get_object<Gtk::MenuItem>("fullscreen_item")->signal_activate().connect([&] {
         toggle_fullscreen_mode();
+    });
+
+    get_object<Gtk::MenuItem>("bios_manager_item")->signal_activate().connect([&] {
+        S9xGtkBiosManagerDialog(window.get());
     });
 
     get_object<Gtk::MenuItem>("open_rom_item")->signal_activate().connect([&] {

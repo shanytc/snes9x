@@ -21,6 +21,7 @@
 #include "wlanguage.h"
 #include "../display.h"
 #include "../conffile.h"
+#include "../biosmanager.h"
 #include "../spc7110.h"
 #include "../gfx.h"
 #include "../snapshot.h"
@@ -959,6 +960,15 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
+#undef CATEGORY
+#define	CATEGORY "BIOS"
+	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+		configItems.push_back(ConfigItem(
+			(std::string("BIOS::") + S9xGetBiosSlotInfo(i)->key).c_str(),
+			(void *) S9xGetBiosPathBuffer(i), S9X_BIOS_PATH_MAX, (void *) "",
+			S9xGetBiosSlotInfo(i)->label, CIT_STRING));
+#undef CATEGORY
+#define	CATEGORY "SGB"
 	AddUIntC("GBBIOSPreference", Settings.GB_BIOSPreference, 1, "GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the power-on logo animation: 0=never, 1=when no SGB BIOS is in play (default), 2=in preference to the SGB BIOS. Nothing is bundled; drop the file in the BIOS directory.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"

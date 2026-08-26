@@ -11,6 +11,7 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "biosmanager.h"
 #include "display.h"
 #include <math.h>
 
@@ -1206,7 +1207,10 @@ static bool8 BSX_LoadBIOS (void)
 	FILE	*fp;
 	bool8	r = FALSE;
 
-	std::string name = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bin";
+	// A path set in the BIOS Manager wins over the by-name search.
+	std::string name = S9xResolveBiosPath(S9X_BIOS_BSX);
+	if (name.empty())
+		name = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bin";
 
 	fp = fopen(name.c_str(), "rb");
 	if (!fp)

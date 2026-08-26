@@ -17,6 +17,7 @@
 #include "cheats.h"
 #include "display.h"
 #include "conffile.h"
+#include "biosmanager.h"
 #ifdef NETPLAY_SUPPORT
 #include "netplay.h"
 #endif
@@ -235,6 +236,12 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	Settings.AudioFidelity              =  conf.GetInt ("Sound::AudioFidelity",                1); // 1 = windowed-sinc
 	Settings.SGB_BIOSPreference         =  static_cast<uint8>(conf.GetUInt("SGB::BIOSPreference", 2));
 	if (Settings.SGB_BIOSPreference > 2) Settings.SGB_BIOSPreference = 2;
+	// BIOS Manager paths, tried before the by-name search in BIOS_DIR.
+	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+	{
+		const std::string key = std::string("BIOS::") + S9xGetBiosSlotInfo(i)->key;
+		S9xSetBiosPath(i, conf.GetString(key.c_str(), ""));
+	}
 	Settings.GB_BIOSPreference          =  static_cast<uint8>(conf.GetUInt("SGB::GBBIOSPreference", 1));
 	if (Settings.GB_BIOSPreference > 2) Settings.GB_BIOSPreference = 1;
 	Settings.GB_BIOSActive              =  FALSE;

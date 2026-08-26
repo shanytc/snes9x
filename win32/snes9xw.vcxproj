@@ -656,6 +656,7 @@
     <ClCompile Include="..\jma\winout.cpp" />
     <ClCompile Include="..\hd64180.cpp" />
     <ClCompile Include="..\loadzip.cpp" />
+    <ClCompile Include="..\biosmanager.cpp" />
     <ClCompile Include="..\memmap.cpp" />
     <ClCompile Include="..\movie.cpp" />
     <ClCompile Include="..\msu1.cpp" />

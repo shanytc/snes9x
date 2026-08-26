@@ -88,6 +88,7 @@ set(SNES9X_CORE_SOURCES
     ../srtc.cpp
     ../gfx.cpp
     ../memmap.cpp
+    ../biosmanager.cpp
     ../clip.cpp
     ../ppu.cpp
     ../dma.cpp
@@ -290,6 +291,7 @@ list(APPEND QT_GUI_SOURCES
     src/EmuApplication.cpp
     src/EmuMainWindow.cpp
     src/Snes9xController.cpp
+    src/BiosManagerDialog.cpp
     src/EmuSettingsWindow.cpp
     src/EmuConfig.cpp
     src/EmuPoTranslator.cpp

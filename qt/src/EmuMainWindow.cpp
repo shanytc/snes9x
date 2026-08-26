@@ -35,6 +35,7 @@
 #include "EmuCanvasVulkan.hpp"
 #endif
 #include "EmuMainWindow.hpp"
+#include "BiosManagerDialog.hpp"
 #include "EmuPoTranslator.hpp"
 #include "EmuSettingsWindow.hpp"
 #include "memmap.h"
@@ -384,6 +385,14 @@ void EmuMainWindow::createWidgets()
         this->statePreviewDialog(false);
     });
     core_actions.push_back(load_preview_item);
+
+    file_menu->addSeparator();
+    auto bios_manager_item = file_menu->addAction(tr("&BIOS Manager..."));
+    connect(bios_manager_item, &QAction::triggered, this, [this] {
+        BiosManagerDialog dialog(this, app);
+        if (dialog.exec() == QDialog::Accepted)
+            app->config->saveFile(EmuConfig::findConfigFile());
+    });
 
     auto languages = EmuPoTranslator::availableLanguages();
     if (languages.size() > 1)

@@ -694,6 +694,14 @@
 #define ID_EMULATION_BIOS_SGB2          44348
 #define ID_EMULATION_BIOS_GB            44351
 #define ID_TESTS_ACIDTESTS          44349
+#define ID_FILE_BIOSMANAGER             44369
+#define IDD_BIOSMANAGER                 191
+#define IDC_BIOSMGR_LABEL0              3400
+#define IDC_BIOSMGR_EDIT0               3410
+#define IDC_BIOSMGR_BROWSE0             3420
+#define IDC_BIOSMGR_CLEAR0              3430
+#define IDC_BIOSMGR_STATUS0             3440
+#define IDC_BIOSMGR_DEFAULT             3450
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361
@@ -921,9 +929,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        191
+#define _APS_NEXT_RESOURCE_VALUE        192
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3391
+#define _APS_NEXT_CONTROL_VALUE         3451
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

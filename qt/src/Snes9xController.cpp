@@ -89,7 +89,7 @@ void Snes9xController::init()
     Settings.ShowOverscan = false;
     Settings.InitialInfoStringTimeout = 120;
     Settings.SGB_BIOSPreference = 2;
-    Settings.GB_BIOSEnabled = true;
+    Settings.GB_BIOSPreference = 1;
     /* Embed a screenshot in each snapshot so the save/load-with-preview
      * dialog has something to show, as win32 does by default. */
     Settings.SnapshotScreenshots = true;
@@ -238,7 +238,9 @@ void Snes9xController::updateSettings(EmuConfig *config)
     // Plain GB/GBC boot ROM (scrolling-logo animation). Nothing is bundled, so
     // this only does anything once the user drops a dmg_boot.bin / cgb_boot.bin
     // into the BIOS directory.
-    Settings.GB_BIOSEnabled = config->gb_bios_enabled;
+    Settings.GB_BIOSPreference = (config->gb_bios_preference < 0 || config->gb_bios_preference > 2)
+                                     ? 1
+                                     : (uint8)config->gb_bios_preference;
 
     if (rewind_buffer_size != config->rewind_buffer_size && active)
     {

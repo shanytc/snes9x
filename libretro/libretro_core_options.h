@@ -81,13 +81,14 @@ struct retro_core_option_definition option_defs_us[] = {
    {
       "snes9x_gb_bios",
       "Game Boy / Color Boot ROM (Reload Game)",
-      "Play the original power-on animation - the Nintendo logo scrolling down the screen, followed by the boot chime - before Game Boy and Game Boy Color content starts. Requires a boot ROM in the system directory: dmg_boot.bin (256 bytes) for Game Boy, cgb_boot.bin (2304 bytes) for Game Boy Color. None is bundled, and with no matching file present the cart simply starts immediately as before. Does not apply when Super Game Boy BIOS mode is driving the game - that has its own boot sequence.",
+      "Play the original power-on animation - the Nintendo logo scrolling down the screen, followed by the boot chime - before Game Boy and Game Boy Color content starts. Requires a boot ROM in the system directory: dmg_boot.bin (256 bytes) for Game Boy, cgb_boot.bin (2304 bytes) for Game Boy Color. None is bundled, and with no matching file present the cart simply starts immediately as before. 'When no SGB BIOS is in play' leaves Super Game Boy mode in charge whenever an SGB BIOS is also installed, since that has its own boot sequence; 'Prefer over SGB BIOS' runs GB/GBC content on its own console instead.",
       {
-         { "enabled",  NULL },
-         { "disabled", NULL },
+         { "auto",     "When no SGB BIOS is in play" },
+         { "prefer",   "Prefer over SGB BIOS" },
+         { "disabled", "Disabled" },
          { NULL, NULL },
       },
-      "enabled"
+      "auto"
    },
    {
       "snes9x_sgb_mix_volume_spc",

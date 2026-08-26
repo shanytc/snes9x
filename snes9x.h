@@ -246,7 +246,7 @@ struct SSettings
 	bool8	SGB_BIOSModeActive;  // runtime: the currently-loaded ROM is running on the real SGB BIOS
 	char	SGB_BIOSPath[260];   // runtime: absolute path of the BIOS .sfc in use (empty in BIOS-less mode)
 	uint8	SGB_BIOSPreference;  // user-selected BIOS mode: 0=No BIOS, 1=SGB1, 2=SGB2 (default 2)
-	bool8	GB_BIOSEnabled;      // user preference: boot GB/GBC carts through dmg_boot.bin / cgb_boot.bin when one is found (default on)
+	uint8	GB_BIOSPreference;   // GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin): 0=never, 1=when no SGB BIOS is in play, 2=in preference to the SGB BIOS (default 1)
 	bool8	GB_BIOSActive;       // runtime: the currently-loaded GB/GBC cart is booting through such a boot ROM
 	char	GB_BIOSPath[260];    // runtime: absolute path of the GB/GBC boot ROM in use (empty otherwise)
 	char	GBRomPath[260];      // runtime: path of the currently-loaded GB/GBC ROM (for BIOS-mode reload)

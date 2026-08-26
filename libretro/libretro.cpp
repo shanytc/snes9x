@@ -675,9 +675,16 @@ static void update_variables(void)
     // bundled, so with no file present this changes nothing.
     var.key = "snes9x_gb_bios";
     var.value = NULL;
-    Settings.GB_BIOSEnabled = TRUE;
+    Settings.GB_BIOSPreference = 1;
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-        Settings.GB_BIOSEnabled = strcmp(var.value, "disabled") ? TRUE : FALSE;
+    {
+        if (!strcmp(var.value, "disabled"))
+            Settings.GB_BIOSPreference = 0;
+        else if (!strcmp(var.value, "prefer"))
+            Settings.GB_BIOSPreference = 2;
+        else
+            Settings.GB_BIOSPreference = 1;
+    }
 
     // Per-source SGB mix volumes (0..100). Consumed by S9xMixSpcOverGB;
     // only affect GB/SGB content. Defaults match the desktop frontends.

@@ -215,35 +215,20 @@ void EmuMainWindow::refreshBiosMenu()
     if (!gb_loaded)
         return;
 
-    const bool sgb1_avail = S9xSGBBIOSAvailable(1, Settings.GBRomPath);
-    const bool sgb2_avail = S9xSGBBIOSAvailable(2, Settings.GBRomPath);
-    const auto kind = S9xGBBiosMenuKindForLoadedCart(sgb1_avail || sgb2_avail);
-    const bool sgb_kind = (kind == S9X_GB_BIOS_MENU_SGB);
-    const bool cgb_kind = (kind == S9X_GB_BIOS_MENU_GBC);
-
-    bios_sgb1_action->setVisible(sgb_kind);
-    bios_sgb2_action->setVisible(sgb_kind);
-    bios_gb_action->setVisible(!sgb_kind);
-
-    bios_sgb1_action->setEnabled(sgb1_avail);
-    bios_sgb2_action->setEnabled(sgb2_avail);
-
-    if (sgb_kind)
-    {
-        uint8_t active = 0;
-        if (Settings.SGB_BIOSModeActive)
-            active = (Settings.GameBoyRunMode == 2) ? 2 : 1;
-        bios_none_action->setChecked(active == 0);
-        bios_sgb1_action->setChecked(active == 1);
-        bios_sgb2_action->setChecked(active == 2);
-        return;
-    }
-
-    bios_gb_action->setText(cgb_kind ? tr("&Game Boy Color BIOS")
+    const bool cgb_cart = S9xGBCartIsCgb();
+    bios_sgb1_action->setEnabled(S9xSGBBIOSAvailable(1, Settings.GBRomPath));
+    bios_sgb2_action->setEnabled(S9xSGBBIOSAvailable(2, Settings.GBRomPath));
+    // One entry for the cart's own console, labelled to match it.
+    bios_gb_action->setText(cgb_cart ? tr("&Game Boy Color BIOS")
                                      : tr("&Game Boy BIOS"));
-    bios_gb_action->setEnabled(S9xGBBIOSAvailable(cgb_kind, Settings.GBRomPath));
-    bios_gb_action->setChecked(Settings.GB_BIOSActive);
-    bios_none_action->setChecked(!Settings.GB_BIOSActive);
+    bios_gb_action->setEnabled(S9xGBBIOSAvailable(cgb_cart, Settings.GBRomPath));
+
+    // Check what is actually running, not what was requested — a preference
+    // whose BIOS file is missing silently falls back.
+    bios_sgb2_action->setChecked(Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 2);
+    bios_sgb1_action->setChecked(Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode != 2);
+    bios_gb_action->setChecked(!Settings.SGB_BIOSModeActive && Settings.GB_BIOSActive);
+    bios_none_action->setChecked(!Settings.SGB_BIOSModeActive && !Settings.GB_BIOSActive);
 }
 
 void EmuMainWindow::refreshVoicekunMenu()
@@ -531,33 +516,25 @@ void EmuMainWindow::createWidgets()
         a->setCheckable(true);
         bios_group->addAction(a);
     }
-    auto reload = [this] {
+    // The four entries are one choice, but they live in two settings so that
+    // switching to the GB/GBC boot ROM and back doesn't forget which Super
+    // Game Boy BIOS you had picked. Selecting an SGB entry only demotes the
+    // boot ROM from "in preference to SGB" back to "when SGB isn't in play".
+    auto apply_bios_choice = [this](uint8_t sgb_pref, uint8_t gb_pref) {
+        Settings.SGB_BIOSPreference = sgb_pref;
+        Settings.GB_BIOSPreference  = gb_pref;
+        app->config->sgb_bios_preference = sgb_pref;  // persist to the config file
+        app->config->gb_bios_preference  = gb_pref;
         if (Settings.GBRomPath[0])
             openFile(std::string(Settings.GBRomPath));
     };
-    auto reload_with_pref = [this, reload](uint8_t pref) {
-        Settings.SGB_BIOSPreference = pref;
-        app->config->sgb_bios_preference = pref; // persist the choice to the config file
-        reload();
-    };
-    // The GB/GBC boot ROM is a separate knob from the SGB preference: the two
-    // entries are never on screen together, and toggling one must not silently
-    // reconfigure the other for the next cart.
-    auto reload_with_gb_bios = [this, reload](bool enabled) {
-        Settings.GB_BIOSEnabled = enabled;
-        app->config->gb_bios_enabled = enabled;
-        reload();
-    };
-    connect(bios_none_action, &QAction::triggered, [this, reload_with_pref, reload_with_gb_bios] {
-        // "No BIOS" means whichever BIOS the menu is currently offering.
-        if (bios_gb_action->isVisible())
-            reload_with_gb_bios(false);
-        else
-            reload_with_pref(0);
+    auto demoted_gb = [] { return Settings.GB_BIOSPreference >= 2 ? 1 : Settings.GB_BIOSPreference; };
+    connect(bios_none_action, &QAction::triggered, [apply_bios_choice] { apply_bios_choice(0, 0); });
+    connect(bios_gb_action,   &QAction::triggered, [apply_bios_choice] {
+        apply_bios_choice(Settings.SGB_BIOSPreference, 2);
     });
-    connect(bios_gb_action,   &QAction::triggered, [reload_with_gb_bios] { reload_with_gb_bios(true); });
-    connect(bios_sgb1_action, &QAction::triggered, [reload_with_pref] { reload_with_pref(1); });
-    connect(bios_sgb2_action, &QAction::triggered, [reload_with_pref] { reload_with_pref(2); });
+    connect(bios_sgb1_action, &QAction::triggered, [apply_bios_choice, demoted_gb] { apply_bios_choice(1, demoted_gb()); });
+    connect(bios_sgb2_action, &QAction::triggered, [apply_bios_choice, demoted_gb] { apply_bios_choice(2, demoted_gb()); });
     bios_menu_action = emulation_menu->addMenu(bios_menu);
     bios_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshBiosMenu);

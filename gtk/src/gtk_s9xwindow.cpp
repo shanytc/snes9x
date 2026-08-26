@@ -190,50 +190,33 @@ void Snes9xWindow::connect_signals()
 #endif
     });
 
-    auto reload_with_bios_pref = [&](uint8_t pref) {
+    // The four entries are one choice, but they live in two settings so that
+    // switching to the GB/GBC boot ROM and back doesn't forget which Super
+    // Game Boy BIOS you had picked. Selecting an SGB entry only demotes the
+    // boot ROM from "in preference to SGB" back to "when SGB isn't in play".
+    // GTK persists straight out of Settings (see gtk_config.cpp), so there is
+    // no separate config field to keep in sync here.
+    auto apply_bios_choice = [&](uint8_t sgb_pref, uint8_t gb_pref) {
         if (refreshing_bios_menu)
             return;
-        if (Settings.SGB_BIOSPreference == pref)
+        if (Settings.SGB_BIOSPreference == sgb_pref && Settings.GB_BIOSPreference == gb_pref)
             return;
-        Settings.SGB_BIOSPreference = pref;
+        Settings.SGB_BIOSPreference = sgb_pref;
+        Settings.GB_BIOSPreference  = gb_pref;
         if (Settings.GBRomPath[0])
             try_open_rom(std::string(Settings.GBRomPath));
     };
-    // The GB/GBC boot ROM is a separate knob from the SGB preference: the two
-    // sets of entries are never on screen together, and toggling one must not
-    // silently reconfigure the other for the next cart.
-    auto reload_with_gb_bios = [&](bool enabled) {
-        if (refreshing_bios_menu)
-            return;
-        if ((Settings.GB_BIOSEnabled != FALSE) == enabled)
-            return;
-        // GTK persists straight out of Settings (see gtk_config.cpp), so
-        // there's no separate config field to keep in sync here.
-        Settings.GB_BIOSEnabled = enabled;
-        if (Settings.GBRomPath[0])
-            try_open_rom(std::string(Settings.GBRomPath));
+    auto demoted_gb = [] { return Settings.GB_BIOSPreference >= 2 ? 1 : Settings.GB_BIOSPreference; };
+    auto on_pick = [&](const char *name, auto handler) {
+        get_object<Gtk::RadioMenuItem>(name)->signal_toggled().connect([this, name, handler] {
+            if (get_object<Gtk::RadioMenuItem>(name)->get_active())
+                handler();
+        });
     };
-    get_object<Gtk::RadioMenuItem>("bios_none_item")->signal_toggled().connect([&, reload_with_bios_pref, reload_with_gb_bios] {
-        if (!get_object<Gtk::RadioMenuItem>("bios_none_item")->get_active())
-            return;
-        // "No BIOS" means whichever BIOS the menu is currently offering.
-        if (get_object<Gtk::RadioMenuItem>("bios_gb_item")->get_visible())
-            reload_with_gb_bios(false);
-        else
-            reload_with_bios_pref(0);
-    });
-    get_object<Gtk::RadioMenuItem>("bios_gb_item")->signal_toggled().connect([&, reload_with_gb_bios] {
-        if (get_object<Gtk::RadioMenuItem>("bios_gb_item")->get_active())
-            reload_with_gb_bios(true);
-    });
-    get_object<Gtk::RadioMenuItem>("bios_sgb1_item")->signal_toggled().connect([&, reload_with_bios_pref] {
-        if (get_object<Gtk::RadioMenuItem>("bios_sgb1_item")->get_active())
-            reload_with_bios_pref(1);
-    });
-    get_object<Gtk::RadioMenuItem>("bios_sgb2_item")->signal_toggled().connect([&, reload_with_bios_pref] {
-        if (get_object<Gtk::RadioMenuItem>("bios_sgb2_item")->get_active())
-            reload_with_bios_pref(2);
-    });
+    on_pick("bios_none_item", [apply_bios_choice] { apply_bios_choice(0, 0); });
+    on_pick("bios_gb_item",   [apply_bios_choice] { apply_bios_choice(Settings.SGB_BIOSPreference, 2); });
+    on_pick("bios_sgb1_item", [apply_bios_choice, demoted_gb] { apply_bios_choice(1, demoted_gb()); });
+    on_pick("bios_sgb2_item", [apply_bios_choice, demoted_gb] { apply_bios_choice(2, demoted_gb()); });
 
     for (int i = 0; i <= 4; i++)
     {
@@ -1450,35 +1433,24 @@ void Snes9xWindow::configure_widgets()
     show_widget("bios_separator", gb_loaded);
     if (gb_loaded)
     {
-        const bool sgb1_avail = S9xSGBBIOSAvailable(1, Settings.GBRomPath);
-        const bool sgb2_avail = S9xSGBBIOSAvailable(2, Settings.GBRomPath);
-        const auto kind = S9xGBBiosMenuKindForLoadedCart(sgb1_avail || sgb2_avail);
-        const bool sgb_kind = (kind == S9X_GB_BIOS_MENU_SGB);
-        const bool cgb_kind = (kind == S9X_GB_BIOS_MENU_GBC);
+        const bool cgb_cart = S9xGBCartIsCgb();
+        enable_widget("bios_sgb1_item", S9xSGBBIOSAvailable(1, Settings.GBRomPath));
+        enable_widget("bios_sgb2_item", S9xSGBBIOSAvailable(2, Settings.GBRomPath));
 
-        show_widget("bios_sgb1_item", sgb_kind);
-        show_widget("bios_sgb2_item", sgb_kind);
-        show_widget("bios_gb_item", !sgb_kind);
-        enable_widget("bios_sgb1_item", sgb1_avail);
-        enable_widget("bios_sgb2_item", sgb2_avail);
+        // One entry for the cart's own console, labelled to match it.
+        auto gb_item = get_object<Gtk::RadioMenuItem>("bios_gb_item");
+        gb_item->set_label(cgb_cart ? _("_Game Boy Color BIOS") : _("_Game Boy BIOS"));
+        gb_item->set_use_underline(true);
+        enable_widget("bios_gb_item", S9xGBBIOSAvailable(cgb_cart, Settings.GBRomPath));
 
+        // Check what is actually running, not what was requested — a
+        // preference whose BIOS file is missing silently falls back.
         const char *active_name;
-        if (sgb_kind)
-        {
-            uint8_t active = 0;
-            if (Settings.SGB_BIOSModeActive)
-                active = (Settings.GameBoyRunMode == 2) ? 2 : 1;
-            const char *names[3] = { "bios_none_item", "bios_sgb1_item", "bios_sgb2_item" };
-            active_name = names[active];
-        }
+        if (Settings.SGB_BIOSModeActive)
+            active_name = (Settings.GameBoyRunMode == 2) ? "bios_sgb2_item" : "bios_sgb1_item";
         else
-        {
-            auto gb_item = get_object<Gtk::RadioMenuItem>("bios_gb_item");
-            gb_item->set_label(cgb_kind ? _("_Game Boy Color BIOS") : _("_Game Boy BIOS"));
-            gb_item->set_use_underline(true);
-            enable_widget("bios_gb_item", S9xGBBIOSAvailable(cgb_kind, Settings.GBRomPath));
             active_name = Settings.GB_BIOSActive ? "bios_gb_item" : "bios_none_item";
-        }
+
         refreshing_bios_menu = true;
         get_object<Gtk::RadioMenuItem>(active_name)->set_active(true);
         refreshing_bios_menu = false;

@@ -347,7 +347,7 @@ bool EmuConfig::setDefaults(int section)
         superfx_clock_multiplier = 100;
         sound_filter = eGaussian;
         sgb_bios_preference = 2;
-        gb_bios_enabled = true;
+        gb_bios_preference = 1;
     }
 
     if (section == -1 || section == 4)
@@ -647,7 +647,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     BeginSection("SGB");
     Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
-    Bool("GBBIOSEnabled", gb_bios_enabled, "Boot GB/GBC ROMs through dmg_boot.bin / cgb_boot.bin when one is found, for the scrolling-logo animation (default true)");
+    Int("GBBIOSPreference", gb_bios_preference, "GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the power-on logo animation: 0=never, 1=when no SGB BIOS is in play (default), 2=in preference to the SGB BIOS");
     EndSection();
 
     BeginSection("Ports");

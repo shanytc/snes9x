@@ -1282,28 +1282,11 @@ bool8 S9xGBBIOSAvailable (bool8 cgb, const char *gb_rom_path)
 	return FindGB_BootROM(cgb != FALSE, gb_rom_path, dummy, nullptr);
 }
 
-S9xGBBiosMenuKind S9xGBBiosMenuKindForLoadedCart (bool8 sgb_bios_available)
+bool8 S9xGBCartIsCgb (void)
 {
-	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
-		return (S9X_GB_BIOS_MENU_NONE);
-
-	// Already running on an SGB BIOS: show the SGB choices whatever the cart
-	// is, so "No BIOS" is there to get back out of it.
-	if (Settings.SGB_BIOSModeActive)
-		return (S9X_GB_BIOS_MENU_SGB);
-
-	unsigned char cgb_flag = 0, sgb_flag = 0;
-	if (!S9xSGBGetCartFlags(&cgb_flag, &sgb_flag))
-		return (S9X_GB_BIOS_MENU_NONE);
-
-	// SGB-enhanced cart with an SGB BIOS on disk — the SGB is the better host
-	// for it, so keep offering that and nothing else. Without a BIOS to pick
-	// there'd be no live entry in the SGB menu at all, so fall through to the
-	// cart's own console instead.
-	if (sgb_flag == 0x03 && sgb_bios_available)
-		return (S9X_GB_BIOS_MENU_SGB);
-
-	return ((cgb_flag & 0x80) ? S9X_GB_BIOS_MENU_GBC : S9X_GB_BIOS_MENU_GB);
+	unsigned char cgb_flag = 0;
+	if (!S9xSGBGetCartFlags(&cgb_flag, nullptr)) return (FALSE);
+	return ((cgb_flag & 0x80) ? TRUE : FALSE);
 }
 
 int CMemory::ScoreHiROM (bool8 skip_header, int32 romoff)
@@ -1715,6 +1698,17 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
 //
 // Returns the banner mode to report: 3 = Game Boy BIOS, 4 = Game Boy Color
 // BIOS, 0 = BIOS-less. Call between S9xSGBInit() and S9xSGBLoadROM*().
+// True when the user's GB/GBC boot ROM should be taken *in preference to* the
+// SGB BIOS — i.e. they picked "Game Boy [Color] BIOS" from the BIOS menu while
+// an SGB BIOS also happens to be installed. At preference 1 (the default) the
+// boot ROM is only used once the SGB attempts have come up empty, which keeps
+// SGB mode the default for anyone who has a Super Game Boy BIOS on disk.
+static bool GBBootROMOutranksSGB (bool gbCgb, const char *filename)
+{
+    return Settings.GB_BIOSPreference >= 2 &&
+           S9xGBBIOSAvailable(gbCgb ? TRUE : FALSE, filename);
+}
+
 static uint8 StageGBBootROM (bool gbCgb, const char *filename)
 {
     Settings.GB_BIOSActive  = FALSE;
@@ -1722,7 +1716,7 @@ static uint8 StageGBBootROM (bool gbCgb, const char *filename)
 
     std::string boot_path;
     std::vector<uint8> boot;
-    if (!Settings.GB_BIOSEnabled ||
+    if (!Settings.GB_BIOSPreference ||
         !FindGB_BootROM(gbCgb, filename, boot_path, &boot) ||
         !S9xSGBLoadBootROMBytes(boot.data(), boot.size()))
     {
@@ -1783,17 +1777,23 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     const uint8 gbFlag    = GbBytesCgbFlag(rom, (size_t)size);
     const bool  gbCgb     = (gbFlag & 0x80) != 0;
 
+    // The user picking "Game Boy [Color] BIOS" from the BIOS menu outranks an
+    // installed SGB BIOS; otherwise the SGB ladder runs first exactly as before
+    // and the boot ROM is the last step before BIOS-less.
     std::string bios_path;
     uint8 bios_mode = 0;
-    if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
+    if (!GBBootROMOutranksSGB(gbCgb, filename))
     {
-        bios_mode = 2;
-    }
-    else if (Settings.SGB_BIOSPreference >= 1)
-    {
-        bios_path.clear();
-        if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
-        else bios_path.clear();
+        if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
+        {
+            bios_mode = 2;
+        }
+        else if (Settings.SGB_BIOSPreference >= 1)
+        {
+            bios_path.clear();
+            if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
+            else bios_path.clear();
+        }
     }
 
     if (bios_mode &&
@@ -1861,17 +1861,22 @@ bool8 CMemory::LoadROM (const char *filename)
         const uint8 gbFlag    = GbFileCgbFlag(filename);
         const bool  gbCgb     = (gbFlag & 0x80) != 0;
 
+        // See the LoadGBFromBytes twin: an explicit GB/GBC BIOS choice wins
+        // over an installed SGB BIOS, otherwise the SGB ladder runs first.
         std::string bios_path;
         uint8 bios_mode = 0;
-        if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
+        if (!GBBootROMOutranksSGB(gbCgb, filename))
         {
-            bios_mode = 2;
-        }
-        else if (Settings.SGB_BIOSPreference >= 1)
-        {
-            bios_path.clear();
-            if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
-            else bios_path.clear();
+            if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
+            {
+                bios_mode = 2;
+            }
+            else if (Settings.SGB_BIOSPreference >= 1)
+            {
+                bios_path.clear();
+                if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
+                else bios_path.clear();
+            }
         }
 
         if (bios_mode && LoadROMWithSGBBIOS(filename, bios_path.c_str()))

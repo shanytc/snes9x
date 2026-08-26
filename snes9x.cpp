@@ -235,7 +235,8 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	Settings.AudioFidelity              =  conf.GetInt ("Sound::AudioFidelity",                1); // 1 = windowed-sinc
 	Settings.SGB_BIOSPreference         =  static_cast<uint8>(conf.GetUInt("SGB::BIOSPreference", 2));
 	if (Settings.SGB_BIOSPreference > 2) Settings.SGB_BIOSPreference = 2;
-	Settings.GB_BIOSEnabled             =  conf.GetBool("SGB::GBBIOSEnabled",                  true);
+	Settings.GB_BIOSPreference          =  static_cast<uint8>(conf.GetUInt("SGB::GBBIOSPreference", 1));
+	if (Settings.GB_BIOSPreference > 2) Settings.GB_BIOSPreference = 1;
 	Settings.GB_BIOSActive              =  FALSE;
 	Settings.GB_BIOSPath[0] = '\0';
 	Settings.GBRomPath[0] = '\0';

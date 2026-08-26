@@ -2931,25 +2931,31 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_BIOS_SGB2:
 			{
 				const UINT bios_id = LOWORD(wParam);
-				// The SGB entries and the GB/GBC entry are never shown together
-				// (see the menu refresh below), so "No BIOS" means whichever
-				// BIOS the menu is currently offering and the two preferences
-				// stay independent of each other.
-				const bool sgb_avail =
-					S9xSGBBIOSAvailable(1, Settings.GBRomPath) != FALSE ||
-					S9xSGBBIOSAvailable(2, Settings.GBRomPath) != FALSE;
-				const bool gb_kind =
-					S9xGBBiosMenuKindForLoadedCart(sgb_avail) != S9X_GB_BIOS_MENU_SGB;
-
-				if (bios_id == ID_EMULATION_BIOS_GB)
-					Settings.GB_BIOSEnabled = TRUE;
-				else if (bios_id == ID_EMULATION_BIOS_NONE && gb_kind)
-					Settings.GB_BIOSEnabled = FALSE;
-				else
-					Settings.SGB_BIOSPreference =
-						(bios_id == ID_EMULATION_BIOS_NONE) ? 0
-					  : (bios_id == ID_EMULATION_BIOS_SGB1) ? 1
-					                                        : 2;
+				// The four entries are one choice, but they live in two
+				// settings so that switching to the GB/GBC boot ROM and back
+				// doesn't forget which Super Game Boy BIOS you had picked.
+				// Selecting an SGB entry only demotes the boot ROM from "in
+				// preference to SGB" back to "when SGB isn't in play".
+				const uint8 demoted_gb =
+					(Settings.GB_BIOSPreference >= 2) ? 1 : Settings.GB_BIOSPreference;
+				switch (bios_id)
+				{
+					case ID_EMULATION_BIOS_NONE:
+						Settings.SGB_BIOSPreference = 0;
+						Settings.GB_BIOSPreference  = 0;
+						break;
+					case ID_EMULATION_BIOS_GB:
+						Settings.GB_BIOSPreference  = 2;
+						break;
+					case ID_EMULATION_BIOS_SGB1:
+						Settings.SGB_BIOSPreference = 1;
+						Settings.GB_BIOSPreference  = demoted_gb;
+						break;
+					default:
+						Settings.SGB_BIOSPreference = 2;
+						Settings.GB_BIOSPreference  = demoted_gb;
+						break;
+				}
 				if (Settings.GBRomPath[0])
 				{
 					TCHAR wpath[_MAX_PATH];
@@ -5547,64 +5553,47 @@ static void CheckMenuStates ()
 
 		if (gb_loaded && s_bios_hmenu)
 		{
-			// Which half of the submenu is live depends on the cart: a Super
-			// Game Boy title keeps the SGB1/SGB2 pair, a plain Game Boy or
-			// Game Boy Color one gets its own console's boot ROM instead.
-			// Win32 has no per-item visibility, so swap the entries in place
-			// and only when the kind actually changes.
-			const S9xGBBiosMenuKind kind =
-				S9xGBBiosMenuKindForLoadedCart(sgb1_avail || sgb2_avail);
-			static S9xGBBiosMenuKind s_bios_kind = S9X_GB_BIOS_MENU_NONE;
-			if (kind != s_bios_kind)
+			// Relabel the cart's-own-console entry to match what's loaded.
+			// Only on a change: retitling every time would fight LocalizeMenu.
+			const bool cgb_cart = S9xGBCartIsCgb() != FALSE;
+			static int s_bios_gb_label = -1;
+			if (s_bios_gb_label != (int)cgb_cart)
 			{
-				s_bios_kind = kind;
-				DeleteMenu(s_bios_hmenu, ID_EMULATION_BIOS_GB,   MF_BYCOMMAND);
-				DeleteMenu(s_bios_hmenu, ID_EMULATION_BIOS_SGB1, MF_BYCOMMAND);
-				DeleteMenu(s_bios_hmenu, ID_EMULATION_BIOS_SGB2, MF_BYCOMMAND);
-				if (kind == S9X_GB_BIOS_MENU_SGB)
-				{
-					AppendMenu(s_bios_hmenu, MF_STRING, ID_EMULATION_BIOS_SGB1, TEXT("&SGB1"));
-					AppendMenu(s_bios_hmenu, MF_STRING, ID_EMULATION_BIOS_SGB2, TEXT("SGB&2"));
-				}
-				else
-				{
-					AppendMenu(s_bios_hmenu, MF_STRING, ID_EMULATION_BIOS_GB,
-					           (kind == S9X_GB_BIOS_MENU_GBC) ? TEXT("&Game Boy Color BIOS")
-					                                          : TEXT("&Game Boy BIOS"));
-				}
+				s_bios_gb_label = (int)cgb_cart;
+				MENUITEMINFO txt = {};
+				txt.cbSize     = sizeof(txt);
+				txt.fMask      = MIIM_STRING;
+				TCHAR gb_txt[] = TEXT("&Game Boy BIOS");
+				TCHAR gbc_txt[] = TEXT("&Game Boy Color BIOS");
+				txt.dwTypeData = cgb_cart ? gbc_txt : gb_txt;
+				SetMenuItemInfo(s_bios_hmenu, ID_EMULATION_BIOS_GB, FALSE, &txt);
 				if (LocaleIsTranslated())
 					LocalizeMenu(s_bios_hmenu);
 			}
 
-			if (kind == S9X_GB_BIOS_MENU_SGB)
-			{
-				uint8 active = 0;
-				if (Settings.SGB_BIOSModeActive) active = (Settings.GameBoyRunMode == 2) ? 2 : 1;
+			// Check what is actually running, not what was requested — a
+			// preference whose BIOS file is missing silently falls back.
+			const bool sgb_on = Settings.SGB_BIOSModeActive != FALSE;
+			const int  active = sgb_on ? ((Settings.GameBoyRunMode == 2) ? 3 : 2)
+			                           : (Settings.GB_BIOSActive ? 1 : 0);
 
-				const int biosIds[3] = {
-					ID_EMULATION_BIOS_NONE,
-					ID_EMULATION_BIOS_SGB1,
-					ID_EMULATION_BIOS_SGB2
-				};
-				const bool avail[3] = { true, sgb1_avail, sgb2_avail };
-				for (int i = 0; i < 3; i++)
-				{
-					mii.fState = (i == active) ? MFS_CHECKED : MFS_UNCHECKED;
-					if (!avail[i]) mii.fState |= MFS_DISABLED;
-					SetMenuItemInfo(GUI.hMenu, biosIds[i], FALSE, &mii);
-				}
-			}
-			else
+			const int  biosIds[4] = {
+				ID_EMULATION_BIOS_NONE,
+				ID_EMULATION_BIOS_GB,
+				ID_EMULATION_BIOS_SGB1,
+				ID_EMULATION_BIOS_SGB2
+			};
+			const bool avail[4] = {
+				true,
+				S9xGBBIOSAvailable(cgb_cart ? TRUE : FALSE, Settings.GBRomPath) != FALSE,
+				sgb1_avail,
+				sgb2_avail
+			};
+			for (int i = 0; i < 4; i++)
 			{
-				const bool gb_avail = S9xGBBIOSAvailable(
-					kind == S9X_GB_BIOS_MENU_GBC, Settings.GBRomPath) != FALSE;
-				const bool gb_on    = Settings.GB_BIOSActive != FALSE;
-
-				mii.fState = gb_on ? MFS_UNCHECKED : MFS_CHECKED;
-				SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_NONE, FALSE, &mii);
-				mii.fState = gb_on ? MFS_CHECKED : MFS_UNCHECKED;
-				if (!gb_avail) mii.fState |= MFS_DISABLED;
-				SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_GB, FALSE, &mii);
+				mii.fState = (i == active) ? MFS_CHECKED : MFS_UNCHECKED;
+				if (!avail[i]) mii.fState |= MFS_DISABLED;
+				SetMenuItemInfo(GUI.hMenu, biosIds[i], FALSE, &mii);
 			}
 		}
 	}

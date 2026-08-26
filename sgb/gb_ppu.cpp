@@ -1512,6 +1512,17 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 				m.win_activated_line = true;
 			}
 		}
+		// A window dying while its first tile is still being fetched
+		// disables the push-stage insertion glitch for the rest of the
+		// line. This has to be sampled before the kill below, which
+		// clears the very flag it keys off (SameBoy
+		// disable_window_pixel_insertion_glitch).
+		{
+			const bool win_en_now = WinEnView(p, m);
+			if (m.win_en_prev && !win_en_now && m.win_fresh)
+				m.win_insert_disable = true;
+			m.win_en_prev = win_en_now;
+		}
 		// How far into the tile a window fetch can still be killed.
 		static int wks = -99;
 		if (wks < -90) { const char *e = getenv("ACID_WKS"); wks = e ? atoi(e) : 0; }
@@ -1534,12 +1545,6 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 		// line. Each machine sees the drop on its own dot, so latch it
 		// here rather than at the CPU write (SameBoy
 		// disable_window_pixel_insertion_glitch).
-		{
-			const bool win_en_now = WinEnView(p, m);
-			if (m.win_en_prev && !win_en_now && m.win_fresh)
-				m.win_insert_disable = true;
-			m.win_en_prev = win_en_now;
-		}
 		// A WX match landing while the pulse has the window off arms the
 		// desync catch-up (only before the line's first activation).
 		if (!p.cgb && !m.fetch_is_window && !WinEnView(p, m) &&

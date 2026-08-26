@@ -114,9 +114,11 @@ struct CMemory
 	uint32	FileLoader (uint8 *, const char *, uint32);
     bool8   LoadROMMem (const uint8 *, uint32, const char* optional_rom_filename = NULL);
 	bool8	LoadROM (const char *);
-	bool8	LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path);
+	bool8	LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path,
+	                            bool skip_gb_boot_rom = false);
 	bool8	LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
-	                                  const char *gb_path, const char *bios_path);
+	                                  const char *gb_path, const char *bios_path,
+	                                  bool skip_gb_boot_rom = false);
 	// Detect+load a Game Boy ROM from a memory buffer, routing it into the
 	// SGB subsystem. Returns 1 = handled (loaded as GB/SGB), 0 = not a GB
 	// ROM, -1 = GB ROM but the load failed.
@@ -227,6 +229,33 @@ bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
 // True when a GB (cgb=FALSE) or GBC (cgb=TRUE) boot ROM is present in the ROM
 // dir, BIOS_DIR, or cwd. The BIOS menu greys out its entry when false.
 bool8 S9xGBBIOSAvailable(bool8 cgb, const char *gb_rom_path);
+
+// Which console GB content runs on (Settings.GBBootPolicy). The Automatic
+// entries pick from what the cart supports, breaking ties in the stated
+// direction — that tie is what "triple boot" carts (DMG + CGB + SGB) hit.
+enum S9xGBBootPolicy
+{
+	S9X_GBBOOT_GB = 0,       // force Game Boy
+	S9X_GBBOOT_GBC,          // force Game Boy Color
+	S9X_GBBOOT_SGB,          // force Super Game Boy
+	S9X_GBBOOT_AUTO_GB,      // automatic, prefer GB   (GB > GBC > SGB)
+	S9X_GBBOOT_AUTO_GBC,     // automatic, prefer GBC  (GBC > SGB > GB)
+	S9X_GBBOOT_AUTO_SGB,     // automatic, prefer SGB  (SGB > GBC > GB) — default
+	S9X_GBBOOT_SGB_GBC,      // SGB border + real CGB colour (hack, not real HW)
+	S9X_NUM_GBBOOT_POLICIES
+};
+
+enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
+
+// Resolve Settings.GBBootPolicy against the cart's header flags. `cgb_flag` is
+// $0143 and `sgb_flag` is $0146; `sgb_available` says whether an SGB BIOS was
+// found, since SGB can't be picked without one. `out_force_cgb` comes back true
+// for the SGB+GBC hack, where the SGB BIOS runs with CGB hardware enabled.
+S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag,
+                                 bool8 sgb_available, bool8 *out_force_cgb);
+
+// Display name for each policy, for the BIOS Manager selector.
+const char *S9xGBBootPolicyName(int policy);
 
 // True when the loaded GB cart carries the CGB flag ($0143 bit 7).
 bool8 S9xGBCartIsCgb(void);

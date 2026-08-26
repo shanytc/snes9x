@@ -134,6 +134,15 @@ struct Emulator::Impl
 	FrameBuffer fb{};
 	bool        has_rom   = false;
 	bool        cgb_mode  = false;
+	int         cgb_override = -1;   // -1 auto, 0 force DMG, 1 force CGB
+	bool        sgb_cgb_hack = false;
+
+	// The SGB BIOS normally forces CGB off (a real SGB boots CGB carts as DMG);
+	// sgb_cgb_hack keeps colour hardware on underneath it.
+	bool CgbActive() const
+	{
+		return cgb_mode && (!Settings.SGB_BIOSModeActive || sgb_cgb_hack);
+	}
 	float       clock_mul = 1.0f;
 
 	// Hardware-model override for the acid-test runner: 0 = follow the
@@ -307,6 +316,9 @@ struct Emulator::Impl
 		// renderer; $7800 reads decode planar bytes inline from this
 		// buffer (live, no snapshot).
 		uint8_t  lcd_ring[4][8 * 160];
+		// $7800-window reads, per frame — diagnostics only.
+		uint32_t lcd_reads = 0;
+		uint32_t lcd_reads_prev = 0;
 	} icd2;
 
 	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
@@ -448,7 +460,7 @@ static double DrcSteadyStateCorr(bool cgb_mode, RunMode m)
 void Emulator::Reset()
 {
 	impl_->cpu.Reset();
-	MemReset(impl_->mem, impl_->cgb_mode && !Settings.SGB_BIOSModeActive);
+	MemReset(impl_->mem, impl_->CgbActive());
 	PpuReset(impl_->ppu);
 	// A DMG LCD-enable write takes hold three dots into its machine cycle,
 	// so a BIOS-less start has to swallow that much to land on the same dot
@@ -456,7 +468,7 @@ void Emulator::Reset()
 	// where the model is settled - leaving it to the first dot made it
 	// depend on when that dot happened to run.
 	if (impl_->mem.cgb_hw) impl_->ppu.boot_skew = 0;
-	ApuReset(impl_->apu, impl_->cgb_mode && !Settings.SGB_BIOSModeActive, !impl_->boot_rom_loaded);
+	ApuReset(impl_->apu, impl_->CgbActive(), !impl_->boot_rom_loaded);
 	TimerReset(impl_->timer);
 	JoypadReset(impl_->joypad);
 	PacketReset(impl_->sgb_pkt);
@@ -507,7 +519,7 @@ void Emulator::Reset()
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
-	impl_->ppu.cgb = impl_->cgb_mode && !impl_->cgb_compat && !Settings.SGB_BIOSModeActive;
+	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -823,7 +835,9 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	if (!CartLoad(impl_->cart, data, size, path))
 		return false;
 	impl_->has_rom = true;
-	impl_->cgb_mode = (impl_->cart.header.cgb_flag & 0x80) != 0;
+	impl_->cgb_mode = (impl_->cgb_override >= 0)
+	                ? (impl_->cgb_override != 0)
+	                : ((impl_->cart.header.cgb_flag & 0x80) != 0);
 	impl_->cgb_compat = false;
 	impl_->sgb_authentic = false;
 	if (impl_->force_model == 1)
@@ -978,7 +992,17 @@ const uint8_t *Emulator::GBLayerMask() const
 
 bool Emulator::IsCgb() const
 {
-	return impl_->has_rom && impl_->cgb_mode && !Settings.SGB_BIOSModeActive;
+	return impl_->has_rom && impl_->CgbActive();
+}
+
+void Emulator::SetSgbCgbHack(bool enabled)
+{
+	impl_->sgb_cgb_hack = enabled;
+}
+
+void Emulator::SetCgbOverride(int mode)
+{
+	impl_->cgb_override = (mode < 0) ? -1 : (mode ? 1 : 0);
 }
 
 bool Emulator::IsCgbRender() const
@@ -1449,7 +1473,7 @@ void Emulator::RunCycles(int32_t tcycles)
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
 	// garbage. Gate the color path off whenever the BIOS is driving.
-	impl_->ppu.cgb = impl_->cgb_mode && !impl_->cgb_compat && !Settings.SGB_BIOSModeActive;
+	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -1511,6 +1535,18 @@ void Emulator::RunCycles(int32_t tcycles)
 		if (was_boot && !impl_->mem.boot_rom_enabled &&
 		    !impl_->boot_handoff_captured)
 		{
+			// SGB+GBC hack: the SGB boot ROM hands off DMG-style register
+			// state, so patch in the CGB signature the cart tests for.
+			// The boot ROM itself must still run — the BIOS validates the
+			// cart from the logo it scrolls.
+			if (impl_->sgb_cgb_hack && impl_->cgb_mode)
+			{
+				CpuState &cs = impl_->cpu.State();
+				cs.r.af = 0x1180;
+				cs.r.bc = 0x0000;
+				cs.r.de = 0xFF56;
+				cs.r.hl = 0x000D;
+			}
 			impl_->boot_handoff_captured = true;
 			impl_->boot_handoff_regs     = impl_->cpu.State().r;
 		}
@@ -1610,6 +1646,7 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 	// scroll — the BIOS reads $7800 while the GB is still mid-drawing.
 	if (a >= 0x7800 && a <= 0x780F)
 	{
+		icd.lcd_reads++;
 		const uint16_t pos = icd.read_position;
 		icd.read_position  = static_cast<uint16_t>((icd.read_position + 1) & 0x1FF);
 		if (pos >= 320)
@@ -1846,6 +1883,9 @@ void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
 
+	impl_->icd2.lcd_reads_prev = impl_->icd2.lcd_reads;
+	impl_->icd2.lcd_reads      = 0;
+
 	// ProcessVBlank: just `_row = 0;`. _bank is intentionally
 	// NOT reset — it persists across frames, so the bank-to-band
 	// mapping shifts each frame (frame 1 starts at bank 0, frame 2
@@ -2032,6 +2072,24 @@ void Emulator::OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
 	                                                 : SNES_WIDTH;
 	uint16_t *row = dest + (uint32_t)last_y * pitch_pixels;
 	for (int x = 0; x < width; ++x) row[x] = 0;
+}
+
+void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
+{
+	// SGB+GBC hack: the BIOS drew the GB area from the LCD ring, which carries
+	// shade indices only, so colour there came out of the SGB palettes. Paint
+	// the GB core's real CGB output over it, keeping the SNES-drawn border.
+	if (!impl_->has_rom || !dest || !impl_->sgb_cgb_hack || !impl_->ppu.cgb) return;
+
+	// Wait for the GB boot ROM to hand off, so the overlay shows the game
+	// rather than the boot logo the BIOS is still capturing.
+	if (!impl_->boot_handoff_captured) return;
+
+	// Lores only — the offsets below assume the 256x224 SGB frame.
+	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
+	if (width > SNES_WIDTH || (int) PPU.ScreenHeight < 40 + (int) GB_SCREEN_HEIGHT) return;
+
+	BlitScreenGB(dest + 40u * pitch_pixels + 48u, pitch_pixels);
 }
 
 int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)
@@ -2589,7 +2647,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
-	impl_->ppu.cgb = impl_->cgb_mode && !impl_->cgb_compat && !Settings.SGB_BIOSModeActive;
+	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -2758,6 +2816,13 @@ void S9xSGBApplyAutoBlend(void) { SGB::Instance().ApplyAutoBlend(); }
 bool S9xSGBIsCgb(void) { return SGB::Instance().IsCgb(); }
 bool S9xSGBIsCgbRender(void) { return SGB::Instance().IsCgbRender(); }
 const uint16_t *S9xSGBGetCgbColorFB(void) { return SGB::Instance().CgbColorFB(); }
+void S9xSGBSetCgbOverride(int mode) { SGB::Instance().SetCgbOverride(mode); }
+void S9xSGBSetSgbCgbHack(bool enabled) { SGB::Instance().SetSgbCgbHack(enabled); }
+
+void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
+{
+	SGB::Instance().OverlayCgbScreen(dest, pitch_pixels);
+}
 
 bool S9xSGBGetCartFlags(unsigned char *cgb_flag, unsigned char *sgb_flag)
 {

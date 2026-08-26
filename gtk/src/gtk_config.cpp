@@ -13,6 +13,7 @@
 #include "gtk_s9x.h"
 #include "gtk_display.h"
 #include "conffile.h"
+#include "memmap.h"
 #include "biosmanager.h"
 #include "cheats.h"
 #include "apu/apu.h"
@@ -221,7 +222,8 @@ int Snes9xConfig::load_defaults()
     Settings.DisplayPressedKeys = false;
     Settings.InitialInfoStringTimeout   =  120;
     Settings.SGB_BIOSPreference = 2;
-    Settings.GB_BIOSPreference = 1;
+    Settings.GB_BIOSEnabled = TRUE;
+    Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
     
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
@@ -421,7 +423,8 @@ int Snes9xConfig::save_config_file()
 
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
-    outint("GBBIOSPreference", Settings.GB_BIOSPreference, "GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the power-on logo animation: 0=never, 1=when no SGB BIOS is in play (default), 2=in preference to the SGB BIOS");
+    outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
+    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=auto prefer GB, 4=auto prefer GBC, 5=auto prefer SGB (default), 6=SGB+GBC");
 
     section = "Input";
     controllers controller = CTL_NONE;
@@ -711,9 +714,10 @@ int Snes9xConfig::load_config_file()
     inint("BIOSPreference", Settings.SGB_BIOSPreference);
     if (Settings.SGB_BIOSPreference > 2)
         Settings.SGB_BIOSPreference = 2;
-    inint("GBBIOSPreference", Settings.GB_BIOSPreference);
-    if (Settings.GB_BIOSPreference > 2)
-        Settings.GB_BIOSPreference = 1;
+    inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
+    inint("GBBootPolicy", Settings.GBBootPolicy);
+    if (Settings.GBBootPolicy >= S9X_NUM_GBBOOT_POLICIES)
+        Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
 
     section = "Input";
 

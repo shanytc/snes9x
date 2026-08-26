@@ -198,27 +198,37 @@ void Snes9xWindow::connect_signals()
     // One choice across two settings, so switching to the boot ROM and back
     // remembers which SGB BIOS was picked (an SGB entry only demotes 2 to 1).
     // GTK persists straight out of Settings, so there's no config field here.
-    auto apply_bios_choice = [&](uint8_t sgb_pref, uint8_t gb_pref) {
+    auto apply_bios_choice = [&](uint8_t sgb_pref, bool gb_boot, int policy) {
         if (refreshing_bios_menu)
             return;
-        if (Settings.SGB_BIOSPreference == sgb_pref && Settings.GB_BIOSPreference == gb_pref)
+        const uint8_t new_policy = (policy >= 0) ? (uint8_t) policy : Settings.GBBootPolicy;
+        if (Settings.SGB_BIOSPreference == sgb_pref &&
+            (Settings.GB_BIOSEnabled != FALSE) == gb_boot &&
+            Settings.GBBootPolicy == new_policy)
             return;
         Settings.SGB_BIOSPreference = sgb_pref;
-        Settings.GB_BIOSPreference  = gb_pref;
+        Settings.GB_BIOSEnabled     = gb_boot;
+        Settings.GBBootPolicy       = new_policy;
         if (Settings.GBRomPath[0])
             try_open_rom(std::string(Settings.GBRomPath));
     };
-    auto demoted_gb = [] { return Settings.GB_BIOSPreference >= 2 ? 1 : Settings.GB_BIOSPreference; };
+    // Leave an SGB-capable policy alone; otherwise move back to prefer-SGB.
+    auto sgb_policy = [] {
+        return (Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+                Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
+                Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB)
+                   ? -1 : (int) S9X_GBBOOT_AUTO_SGB;
+    };
     auto on_pick = [&](const char *name, auto handler) {
         get_object<Gtk::RadioMenuItem>(name)->signal_toggled().connect([this, name, handler] {
             if (get_object<Gtk::RadioMenuItem>(name)->get_active())
                 handler();
         });
     };
-    on_pick("bios_none_item", [apply_bios_choice] { apply_bios_choice(0, 0); });
-    on_pick("bios_gb_item",   [apply_bios_choice] { apply_bios_choice(Settings.SGB_BIOSPreference, 2); });
-    on_pick("bios_sgb1_item", [apply_bios_choice, demoted_gb] { apply_bios_choice(1, demoted_gb()); });
-    on_pick("bios_sgb2_item", [apply_bios_choice, demoted_gb] { apply_bios_choice(2, demoted_gb()); });
+    on_pick("bios_none_item", [apply_bios_choice] { apply_bios_choice(0, false, -1); });
+    on_pick("bios_gb_item",   [apply_bios_choice] { apply_bios_choice(0, true,  -1); });
+    on_pick("bios_sgb1_item", [apply_bios_choice, sgb_policy] { apply_bios_choice(1, Settings.GB_BIOSEnabled, sgb_policy()); });
+    on_pick("bios_sgb2_item", [apply_bios_choice, sgb_policy] { apply_bios_choice(2, Settings.GB_BIOSEnabled, sgb_policy()); });
 
     for (int i = 0; i <= 4; i++)
     {

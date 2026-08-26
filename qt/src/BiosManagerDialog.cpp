@@ -12,6 +12,7 @@
 #include <QGroupBox>
 
 #include "snes9x.h"
+#include "memmap.h"
 
 BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
     : QDialog(parent), app(app)
@@ -63,23 +64,21 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
     auto box = new QGroupBox(tr("Default for Game Boy content"));
     auto box_layout = new QHBoxLayout(box);
     gb_default = new QComboBox();
-    gb_default->addItem(tr("No BIOS"));
-    gb_default->addItem(tr("Game Boy / Game Boy Color BIOS"));
-    gb_default->addItem(tr("Super Game Boy"));
-    gb_default->addItem(tr("Super Game Boy 2"));
+    for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
+        gb_default->addItem(tr(S9xGBBootPolicyName(i)));
+    gb_default->setItemData(S9X_GBBOOT_GBC,
+        tr("Colourises Game Boy Color carts. Mono-only carts are experimental — "
+           "DMG-compatibility colourisation is not implemented yet."), Qt::ToolTipRole);
+    gb_default->setItemData(S9X_GBBOOT_SGB_GBC,
+        tr("Experimental: Game Boy Color colours inside a Super Game Boy border — "
+           "on real hardware an SGB runs colour carts in monochrome."), Qt::ToolTipRole);
     box_layout->addWidget(gb_default);
     box_layout->addStretch(1);
     outer->addWidget(box);
 
-    // Mirrors the Emulation -> BIOS menu; see EmuMainWindow::refreshBiosMenu.
-    if (Settings.GB_BIOSPreference >= 2)
-        gb_default->setCurrentIndex(1);
-    else if (Settings.SGB_BIOSPreference == 2)
-        gb_default->setCurrentIndex(3);
-    else if (Settings.SGB_BIOSPreference == 1)
-        gb_default->setCurrentIndex(2);
-    else
-        gb_default->setCurrentIndex(Settings.GB_BIOSPreference ? 1 : 0);
+    gb_default->setCurrentIndex(Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES
+                                    ? Settings.GBBootPolicy
+                                    : S9X_GBBOOT_AUTO_SGB);
 
     auto buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     outer->addWidget(buttons);
@@ -144,17 +143,17 @@ void BiosManagerDialog::applyAndClose()
         app->config->bios_paths[slot] = path;
     }
 
-    // 0 = none, 1 = GB/GBC boot ROM, 2 = SGB1, 3 = SGB2. GB_BIOSPreference 2
-    // means "in preference to SGB", which is what an explicit pick asks for.
-    switch (gb_default->currentIndex())
-    {
-    case 1:  Settings.GB_BIOSPreference = 2; break;
-    case 2:  Settings.SGB_BIOSPreference = 1; Settings.GB_BIOSPreference = 1; break;
-    case 3:  Settings.SGB_BIOSPreference = 2; Settings.GB_BIOSPreference = 1; break;
-    default: Settings.SGB_BIOSPreference = 0; Settings.GB_BIOSPreference = 0; break;
-    }
+    Settings.GBBootPolicy = (uint8) gb_default->currentIndex();
+    // An SGB-involving policy is meaningless with the SGB BIOS switched off.
+    if ((Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+         Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
+         Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB) &&
+        Settings.SGB_BIOSPreference == 0)
+        Settings.SGB_BIOSPreference = 2;
+
+    app->config->gb_boot_policy      = Settings.GBBootPolicy;
     app->config->sgb_bios_preference = Settings.SGB_BIOSPreference;
-    app->config->gb_bios_preference = Settings.GB_BIOSPreference;
+    app->config->gb_bios_enabled     = Settings.GB_BIOSEnabled;
 
     accept();
 }

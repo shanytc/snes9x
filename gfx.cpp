@@ -945,7 +945,11 @@ void S9xEndScreenRefresh (void)
 		// S9xDisplayMessages so the snes9x OSD still draws on top.
 		// No-op until both halves of CHR_TRN + PCT_TRN have arrived.
 		if (Settings.SGB_BIOSModeActive)
+		{
 			S9xSGBOverlayBiosBorder(GFX.Screen, GFX.RealPPL);
+			// SGB+GBC hack: real CGB colour inside the SGB border.
+			S9xSGBOverlayCgbScreen(GFX.Screen, GFX.RealPPL);
+		}
 
 		// SFC-Box: the MB90082 superimposes its character plane on the
 		// composite output — draw it over the finished SNES frame (and

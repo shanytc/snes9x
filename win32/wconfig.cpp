@@ -969,7 +969,8 @@ void WinRegisterConfigItems()
 			S9xGetBiosSlotInfo(i)->label, CIT_STRING));
 #undef CATEGORY
 #define	CATEGORY "SGB"
-	AddUIntC("GBBIOSPreference", Settings.GB_BIOSPreference, 1, "GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the power-on logo animation: 0=never, 1=when no SGB BIOS is in play (default), 2=in preference to the SGB BIOS. Nothing is bundled; drop the file in the BIOS directory.");
+	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. Nothing is bundled; drop the file in the BIOS directory.");
+	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 5, "console for GB content: 0=GB, 1=GBC, 2=SGB, 3=auto prefer GB, 4=auto prefer GBC, 5=auto prefer SGB (default), 6=SGB+GBC.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

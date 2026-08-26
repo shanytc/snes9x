@@ -1313,6 +1313,75 @@ bool8 S9xGBBIOSAvailable (bool8 cgb, const char *gb_rom_path)
 	return FindGB_BootROM(cgb != FALSE, gb_rom_path, dummy, nullptr);
 }
 
+// A real Super Game Boy accepts any Game Boy cart, so SGB is "supported"
+// whenever a BIOS is installed — the exception is a CGB-only cart, which
+// shows its own lockout screen on DMG-class hardware.
+S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag,
+                                  bool8 sgb_available, bool8 *out_force_cgb)
+{
+	(void) sgb_flag;
+	if (out_force_cgb) *out_force_cgb = FALSE;
+
+	const bool cgb_only  = (cgb_flag == 0xC0);
+	const bool does_gbc  = (cgb_flag & 0x80) != 0;
+	const bool does_gb   = !cgb_only;
+	const bool does_sgb  = sgb_available && !cgb_only;
+
+	switch (Settings.GBBootPolicy)
+	{
+		case S9X_GBBOOT_GB:
+			return (S9X_GBCON_GB);
+
+		case S9X_GBBOOT_GBC:
+			return (S9X_GBCON_GBC);
+
+		case S9X_GBBOOT_SGB:
+			// Forcing SGB without a BIOS would just be BIOS-less DMG; say so.
+			return (sgb_available ? S9X_GBCON_SGB : S9X_GBCON_GB);
+
+		case S9X_GBBOOT_SGB_GBC:
+			// Only meaningful on a colour-capable cart; a mono cart has no CGB
+			// output to overlay, so leave it as a plain SGB session.
+			if (sgb_available)
+			{
+				if (out_force_cgb) *out_force_cgb = does_gbc ? TRUE : FALSE;
+				return (S9X_GBCON_SGB);
+			}
+			return (does_gbc ? S9X_GBCON_GBC : S9X_GBCON_GB);
+
+		case S9X_GBBOOT_AUTO_GB:
+			if (does_gb)  return (S9X_GBCON_GB);
+			if (does_gbc) return (S9X_GBCON_GBC);
+			return (does_sgb ? S9X_GBCON_SGB : S9X_GBCON_GB);
+
+		case S9X_GBBOOT_AUTO_GBC:
+			if (does_gbc) return (S9X_GBCON_GBC);
+			if (does_sgb) return (S9X_GBCON_SGB);
+			return (S9X_GBCON_GB);
+
+		case S9X_GBBOOT_AUTO_SGB:
+		default:
+			if (does_sgb) return (S9X_GBCON_SGB);
+			if (does_gbc) return (S9X_GBCON_GBC);
+			return (S9X_GBCON_GB);
+	}
+}
+
+const char *S9xGBBootPolicyName (int policy)
+{
+	switch (policy)
+	{
+		case S9X_GBBOOT_GB:       return ("Game Boy");
+		case S9X_GBBOOT_GBC:      return ("Game Boy Color");
+		case S9X_GBBOOT_SGB:      return ("Super Game Boy");
+		case S9X_GBBOOT_AUTO_GB:  return ("Automatic, prefer GB (defaults to GB for triple boot games)");
+		case S9X_GBBOOT_AUTO_GBC: return ("Automatic, prefer GBC (defaults to GBC for triple boot games)");
+		case S9X_GBBOOT_AUTO_SGB: return ("Automatic, prefer SGB (defaults to SGB for triple boot games)");
+		case S9X_GBBOOT_SGB_GBC:  return ("Super Game Boy + Game Boy Color");
+		default:                  return ("");
+	}
+}
+
 bool8 S9xGBCartIsCgb (void)
 {
 	unsigned char cgb_flag = 0;
@@ -1723,12 +1792,42 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
 // Stage a GB/GBC boot ROM for the BIOS-less paths; with none found the cart
 // starts at $0100 as before. Call between S9xSGBInit() and S9xSGBLoadROM*().
 // Returns the banner mode: 3 = GB BIOS, 4 = GBC BIOS, 0 = BIOS-less.
-// True when the user explicitly picked the GB/GBC boot ROM over an installed
-// SGB BIOS. At the default preference 1 the SGB ladder runs first.
-static bool GBBootROMOutranksSGB (bool gbCgb, const char *filename)
+// Pick the console for this cart and, when it's SGB, which BIOS to run it on.
+// out_bios_mode is 0 (not SGB), 1 (SGB1) or 2 (SGB2).
+static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, const char *filename,
+                                   std::string &out_bios_path, uint8 &out_bios_mode,
+                                   bool8 &out_force_cgb)
 {
-    return Settings.GB_BIOSPreference >= 2 &&
-           S9xGBBIOSAvailable(gbCgb ? TRUE : FALSE, filename);
+    out_bios_path.clear();
+    out_bios_mode = 0;
+
+    std::string sgb_path;
+    if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, sgb_path))
+        out_bios_mode = 2;
+    else if (Settings.SGB_BIOSPreference >= 1)
+    {
+        sgb_path.clear();
+        if (FindSGB_BIOS(1, filename, sgb_path)) out_bios_mode = 1;
+        else sgb_path.clear();
+    }
+
+    const S9xGBConsole console = S9xResolveGBConsole(
+        cgb_flag, sgb_flag, out_bios_mode ? TRUE : FALSE, &out_force_cgb);
+
+    if (console == S9X_GBCON_SGB)
+        out_bios_path = sgb_path;
+    else
+        out_bios_mode = 0;
+
+    // The SGB BIOS forces DMG on real hardware; the SGB+GBC hack overrides
+    // that, and a forced GB/GBC console overrides the cart header.
+    S9xSGBSetSgbCgbHack(console == S9X_GBCON_SGB && out_force_cgb);
+    if (console == S9X_GBCON_SGB)
+        S9xSGBSetCgbOverride(out_force_cgb ? 1 : -1);
+    else
+        S9xSGBSetCgbOverride(console == S9X_GBCON_GBC ? 1 : 0);
+
+    return console;
 }
 
 static uint8 StageGBBootROM (bool gbCgb, const char *filename)
@@ -1738,7 +1837,7 @@ static uint8 StageGBBootROM (bool gbCgb, const char *filename)
 
     std::string boot_path;
     std::vector<uint8> boot;
-    if (!Settings.GB_BIOSPreference ||
+    if (!Settings.GB_BIOSEnabled ||
         !FindGB_BootROM(gbCgb, filename, boot_path, &boot) ||
         !S9xSGBLoadBootROMBytes(boot.data(), boot.size()))
     {
@@ -1761,19 +1860,25 @@ static uint8 GbBytesCgbFlag(const uint8 *rom, size_t size)
     return size > 0x143 ? rom[0x143] : 0;
 }
 
-static uint8 GbFileCgbFlag(const char *filename)
+static uint8 GbBytesSgbFlag(const uint8 *rom, size_t size)
+{
+    return size > 0x146 ? rom[0x146] : 0;
+}
+
+static uint8 GbFileByte(const char *filename, long offset)
 {
     FILE *f = fopen(filename, "rb");
     if (!f) return 0;
-    uint8 flag = 0;
-    if (fseek(f, 0x143, SEEK_SET) == 0)
+    uint8 v = 0;
+    if (fseek(f, offset, SEEK_SET) == 0)
     {
         int c = fgetc(f);
-        if (c != EOF) flag = (uint8)c;
+        if (c != EOF) v = (uint8)c;
     }
     fclose(f);
-    return flag;
+    return v;
 }
+
 
 // Detect and load a Game Boy ROM straight from a memory buffer. Mirrors the
 // content-sniff branch in LoadROM so in-memory callers (LoadROMMem, and thus
@@ -1795,26 +1900,13 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     else
         Settings.GBRomPath[0] = '\0';
 
-    const uint8 gbFlag    = GbBytesCgbFlag(rom, (size_t)size);
-    const bool  gbCgb     = (gbFlag & 0x80) != 0;
-
-    // An explicit GB/GBC BIOS choice outranks the SGB ladder; otherwise the
-    // boot ROM is the last step before BIOS-less.
     std::string bios_path;
     uint8 bios_mode = 0;
-    if (!GBBootROMOutranksSGB(gbCgb, filename))
-    {
-        if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
-        {
-            bios_mode = 2;
-        }
-        else if (Settings.SGB_BIOSPreference >= 1)
-        {
-            bios_path.clear();
-            if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
-            else bios_path.clear();
-        }
-    }
+    bool8 force_cgb = FALSE;
+    const S9xGBConsole console = PickGBConsole(GbBytesCgbFlag(rom, (size_t)size),
+                                               GbBytesSgbFlag(rom, (size_t)size),
+                                               filename, bios_path, bios_mode, force_cgb);
+    const bool gbCgb = (console == S9X_GBCON_GBC);
 
     if (bios_mode &&
         LoadROMWithSGBBIOSBytes(rom, size, filename, bios_path.c_str()))
@@ -1878,25 +1970,14 @@ bool8 CMemory::LoadROM (const char *filename)
         strncpy(Settings.GBRomPath, filename, sizeof(Settings.GBRomPath) - 1);
         Settings.GBRomPath[sizeof(Settings.GBRomPath) - 1] = '\0';
 
-        const uint8 gbFlag    = GbFileCgbFlag(filename);
-        const bool  gbCgb     = (gbFlag & 0x80) != 0;
-
         // See the LoadGBFromBytes twin.
         std::string bios_path;
         uint8 bios_mode = 0;
-        if (!GBBootROMOutranksSGB(gbCgb, filename))
-        {
-            if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, bios_path))
-            {
-                bios_mode = 2;
-            }
-            else if (Settings.SGB_BIOSPreference >= 1)
-            {
-                bios_path.clear();
-                if (FindSGB_BIOS(1, filename, bios_path)) bios_mode = 1;
-                else bios_path.clear();
-            }
-        }
+        bool8 force_cgb = FALSE;
+        const S9xGBConsole console = PickGBConsole(GbFileByte(filename, 0x143),
+                                                   GbFileByte(filename, 0x146),
+                                                   filename, bios_path, bios_mode, force_cgb);
+        const bool gbCgb = (console == S9X_GBCON_GBC);
 
         if (bios_mode && LoadROMWithSGBBIOS(filename, bios_path.c_str()))
         {
@@ -2013,7 +2094,7 @@ static bool8 LoadSGBBIOSBytes (const char *bios_path, std::vector<uint8> &out_bi
     return TRUE;
 }
 
-bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
+bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path, bool skip_gb_boot_rom)
 {
     if (!gb_path || !bios_path) return FALSE;
 
@@ -2049,7 +2130,12 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
     }
 
     if (!S9xSGBInit()) return FALSE;
-    if (user_boot_is_sgb)
+    // SGB+GBC hack: with no GB-side boot ROM the synthesized handshake carries
+    // the session and Reset hands the cart CGB post-boot state (A=$11), which
+    // is what lets a CGB-only game get past its lockout screen.
+    if (skip_gb_boot_rom)
+        S9xSGBLoadBootROMBytes(nullptr, 0);
+    else if (user_boot_is_sgb)
         S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
     else
         S9xSGBLoadEmbeddedBootROM(mode);
@@ -2080,7 +2166,8 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
 }
 
 bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
-                                         const char *gb_path, const char *bios_path)
+                                         const char *gb_path, const char *bios_path,
+                                         bool skip_gb_boot_rom)
 {
     if (!gb_bytes || !gb_size || !bios_path) return FALSE;
 
@@ -2113,7 +2200,12 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
     }
 
     if (!S9xSGBInit()) return FALSE;
-    if (user_boot_is_sgb)
+    // SGB+GBC hack: with no GB-side boot ROM the synthesized handshake carries
+    // the session and Reset hands the cart CGB post-boot state (A=$11), which
+    // is what lets a CGB-only game get past its lockout screen.
+    if (skip_gb_boot_rom)
+        S9xSGBLoadBootROMBytes(nullptr, 0);
+    else if (user_boot_is_sgb)
         S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
     else
         S9xSGBLoadEmbeddedBootROM(mode);

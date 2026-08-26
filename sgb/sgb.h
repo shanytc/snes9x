@@ -96,6 +96,13 @@ public:
 	bool IsCgbRender() const;
 	const uint16_t *CgbColorFB() const;
 
+	// Override the cart-derived CGB mode: -1 auto, 0 force DMG, 1 force CGB.
+	// Set before LoadROM; the BIOS Manager's console policy drives it.
+	void SetCgbOverride(int mode);
+
+	// Keep CGB rendering on under the SGB BIOS (the SGB+GBC hack).
+	void SetSgbCgbHack(bool enabled);
+
 	// Cart-header flags $0143 (CGB) and $0146 (SGB); zeroed with false when
 	// no cart. Describes the cart, not the mode it runs in (cf. IsCgb()).
 	bool CartFlags(uint8_t *cgb_flag, uint8_t *sgb_flag) const;
@@ -229,6 +236,10 @@ public:
 	// full description. Renders the captured custom border on top of
 	// the SNES-rendered output, sparing the central 20×18 GB area.
 	void  OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
+
+	// SGB+GBC hack: paint the GB core's CGB output over the GB area of the
+	// SNES frame, so the game keeps its SGB border but gains real colour.
+	void  OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
 
 	// Write a one-line status snapshot — PC, SP, A, halt/stop flag,
 	// total T-cycles, illegal-op count.
@@ -386,6 +397,14 @@ bool S9xSGBIsCgb(void);
 bool S9xSGBIsCgbRender(void);
 const uint16_t *S9xSGBGetCgbColorFB(void);
 
+// -1 auto (cart header), 0 force DMG, 1 force CGB. Call before S9xSGBLoadROM*.
+void S9xSGBSetCgbOverride(int mode);
+
+// Keep CGB rendering on while the SNES-side SGB BIOS drives the session — the
+// "Super Game Boy + Game Boy Color" hack: SGB border plus real CGB colour,
+// which real hardware can't do. Pairs with S9xSGBOverlayCgbScreen.
+void S9xSGBSetSgbCgbHack(bool enabled);
+
 // Cart-header flags $0143 (CGB) and $0146 (SGB); either pointer may be null.
 // Returns false with both zeroed when no GB cart is loaded.
 bool S9xSGBGetCartFlags(unsigned char *cgb_flag, unsigned char *sgb_flag);
@@ -446,6 +465,9 @@ constexpr uint32_t SGB_GB_SCREEN_H = 144;
 // the overlay isn't clobbered by the PPU blit and the snes9x OSD
 // still draws on top.
 void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
+
+// SGB+GBC hack — see Emulator::OverlayCgbScreen. No-op unless it is active.
+void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
 
 // Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
 // contract. `count_int16s` is the number of int16 samples (stereo frame

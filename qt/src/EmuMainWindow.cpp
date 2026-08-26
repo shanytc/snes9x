@@ -524,23 +524,30 @@ void EmuMainWindow::createWidgets()
         a->setCheckable(true);
         bios_group->addAction(a);
     }
-    // One choice across two settings, so switching to the boot ROM and back
-    // remembers which SGB BIOS was picked (an SGB entry only demotes 2 to 1).
-    auto apply_bios_choice = [this](uint8_t sgb_pref, uint8_t gb_pref) {
+    // Quick per-cart override of the console policy set in the BIOS Manager.
+    // policy < 0 leaves the policy alone.
+    auto apply_bios_choice = [this](uint8_t sgb_pref, bool gb_boot, int policy) {
         Settings.SGB_BIOSPreference = sgb_pref;
-        Settings.GB_BIOSPreference  = gb_pref;
-        app->config->sgb_bios_preference = sgb_pref;  // persist
-        app->config->gb_bios_preference  = gb_pref;
+        Settings.GB_BIOSEnabled     = gb_boot;
+        if (policy >= 0)
+            Settings.GBBootPolicy = (uint8_t) policy;
+        app->config->sgb_bios_preference = Settings.SGB_BIOSPreference;  // persist
+        app->config->gb_bios_enabled     = Settings.GB_BIOSEnabled;
+        app->config->gb_boot_policy      = Settings.GBBootPolicy;
         if (Settings.GBRomPath[0])
             openFile(std::string(Settings.GBRomPath));
     };
-    auto demoted_gb = [] { return Settings.GB_BIOSPreference >= 2 ? 1 : Settings.GB_BIOSPreference; };
-    connect(bios_none_action, &QAction::triggered, [apply_bios_choice] { apply_bios_choice(0, 0); });
-    connect(bios_gb_action,   &QAction::triggered, [apply_bios_choice] {
-        apply_bios_choice(Settings.SGB_BIOSPreference, 2);
-    });
-    connect(bios_sgb1_action, &QAction::triggered, [apply_bios_choice, demoted_gb] { apply_bios_choice(1, demoted_gb()); });
-    connect(bios_sgb2_action, &QAction::triggered, [apply_bios_choice, demoted_gb] { apply_bios_choice(2, demoted_gb()); });
+    // Leave an SGB-capable policy alone; otherwise move back to prefer-SGB.
+    auto sgb_policy = [] {
+        return (Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+                Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
+                Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB)
+                   ? -1 : (int) S9X_GBBOOT_AUTO_SGB;
+    };
+    connect(bios_none_action, &QAction::triggered, [apply_bios_choice] { apply_bios_choice(0, false, -1); });
+    connect(bios_gb_action,   &QAction::triggered, [apply_bios_choice] { apply_bios_choice(0, true,  -1); });
+    connect(bios_sgb1_action, &QAction::triggered, [apply_bios_choice, sgb_policy] { apply_bios_choice(1, Settings.GB_BIOSEnabled, sgb_policy()); });
+    connect(bios_sgb2_action, &QAction::triggered, [apply_bios_choice, sgb_policy] { apply_bios_choice(2, Settings.GB_BIOSEnabled, sgb_policy()); });
     bios_menu_action = emulation_menu->addMenu(bios_menu);
     bios_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshBiosMenu);

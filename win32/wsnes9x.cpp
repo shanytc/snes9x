@@ -2938,26 +2938,29 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_BIOS_SGB2:
 			{
 				const UINT bios_id = LOWORD(wParam);
-				// One choice across two settings, so switching to the boot ROM
-				// and back remembers which SGB BIOS was picked.
-				const uint8 demoted_gb =
-					(Settings.GB_BIOSPreference >= 2) ? 1 : Settings.GB_BIOSPreference;
+				// Quick per-cart override of the BIOS Manager's console policy.
+				// Choosing SGB moves the policy back when it was pinned elsewhere.
+				const bool sgb_policy_ok =
+					(Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+					 Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
+					 Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB);
 				switch (bios_id)
 				{
 					case ID_EMULATION_BIOS_NONE:
 						Settings.SGB_BIOSPreference = 0;
-						Settings.GB_BIOSPreference  = 0;
+						Settings.GB_BIOSEnabled     = FALSE;
 						break;
 					case ID_EMULATION_BIOS_GB:
-						Settings.GB_BIOSPreference  = 2;
+						Settings.SGB_BIOSPreference = 0;
+						Settings.GB_BIOSEnabled     = TRUE;
 						break;
 					case ID_EMULATION_BIOS_SGB1:
 						Settings.SGB_BIOSPreference = 1;
-						Settings.GB_BIOSPreference  = demoted_gb;
+						if (!sgb_policy_ok) Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
 						break;
 					default:
 						Settings.SGB_BIOSPreference = 2;
-						Settings.GB_BIOSPreference  = demoted_gb;
+						if (!sgb_policy_ok) Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
 						break;
 				}
 				if (Settings.GBRomPath[0])
@@ -8856,18 +8859,12 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		}
 
 		HWND combo = GetDlgItem(hDlg, IDC_BIOSMGR_DEFAULT);
-		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("No BIOS"));
-		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("Game Boy / Game Boy Color BIOS"));
-		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("Super Game Boy"));
-		SendMessage(combo, CB_ADDSTRING, 0, (LPARAM) TEXT("Super Game Boy 2"));
-
-		// Mirrors the Emulation -> BIOS menu; see CheckMenuStates.
-		int sel;
-		if (Settings.GB_BIOSPreference >= 2)       sel = 1;
-		else if (Settings.SGB_BIOSPreference == 2) sel = 3;
-		else if (Settings.SGB_BIOSPreference == 1) sel = 2;
-		else                                       sel = Settings.GB_BIOSPreference ? 1 : 0;
-		SendMessage(combo, CB_SETCURSEL, sel, 0);
+		for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
+			SendMessage(combo, CB_ADDSTRING, 0,
+						(LPARAM) (wchar_t *) Utf8ToWide(S9xGBBootPolicyName(i)));
+		SendMessage(combo, CB_SETCURSEL,
+					(Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
+						? Settings.GBBootPolicy : S9X_GBBOOT_AUTO_SGB, 0);
 		return true;
 	}
 
@@ -8920,15 +8917,15 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 				S9xSetBiosPath(slot, WideToUtf8(wtext));
 			}
 
-			// 0 = none, 1 = GB/GBC boot ROM, 2 = SGB1, 3 = SGB2. GB_BIOSPreference
-			// 2 means "in preference to SGB", which an explicit pick asks for.
-			switch (SendDlgItemMessage(hDlg, IDC_BIOSMGR_DEFAULT, CB_GETCURSEL, 0, 0))
-			{
-			case 1:  Settings.GB_BIOSPreference = 2; break;
-			case 2:  Settings.SGB_BIOSPreference = 1; Settings.GB_BIOSPreference = 1; break;
-			case 3:  Settings.SGB_BIOSPreference = 2; Settings.GB_BIOSPreference = 1; break;
-			default: Settings.SGB_BIOSPreference = 0; Settings.GB_BIOSPreference = 0; break;
-			}
+			const LRESULT pick = SendDlgItemMessage(hDlg, IDC_BIOSMGR_DEFAULT, CB_GETCURSEL, 0, 0);
+			if (pick >= 0 && pick < S9X_NUM_GBBOOT_POLICIES)
+				Settings.GBBootPolicy = (uint8) pick;
+			// An SGB-involving policy is meaningless with the SGB BIOS off.
+			if ((Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+				 Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
+				 Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB) &&
+				Settings.SGB_BIOSPreference == 0)
+				Settings.SGB_BIOSPreference = 2;
 
 			EndDialog(hDlg, 1);
 			return true;

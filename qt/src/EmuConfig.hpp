@@ -197,7 +197,9 @@ struct EmuConfig
 
     // GB/GBC boot ROM: 0 = never, 1 = when no SGB BIOS is in play, 2 = in
     // preference to it. Persisted as [SGB] GBBIOSPreference.
-    int gb_bios_preference;
+    bool gb_bios_enabled;
+    // Console for GB content; see S9xGBBootPolicy. Persisted as [SGB] GBBootPolicy.
+    int gb_boot_policy;
 
     // BIOS Manager paths, indexed by S9xBiosSlot. Persisted under [BIOS].
     std::string bios_paths[8];

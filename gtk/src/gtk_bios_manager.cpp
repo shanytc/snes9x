@@ -145,10 +145,12 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
 
     auto *frame = Gtk::manage(new Gtk::Frame(_("Default for Game Boy content")));
     auto *combo = Gtk::manage(new Gtk::ComboBoxText());
-    combo->append(_("No BIOS"));
-    combo->append(_("Game Boy / Game Boy Color BIOS"));
-    combo->append(_("Super Game Boy"));
-    combo->append(_("Super Game Boy 2"));
+    for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
+        combo->append(_(S9xGBBootPolicyName(i)));
+    combo->set_tooltip_text(
+        _("\"Super Game Boy + Game Boy Color\" gives colour carts an SGB border and "
+          "GBC colours at once, which real hardware cannot do. Experimental, as is "
+          "\"Game Boy Color\" on a monochrome-only cart."));
     combo->set_margin_start(8);
     combo->set_margin_end(8);
     combo->set_margin_top(6);
@@ -156,15 +158,9 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
     frame->add(*combo);
     content->pack_start(*frame, Gtk::PACK_SHRINK);
 
-    // Mirrors the Emulation -> BIOS menu; see gtk_s9xwindow.cpp.
-    if (Settings.GB_BIOSPreference >= 2)
-        combo->set_active(1);
-    else if (Settings.SGB_BIOSPreference == 2)
-        combo->set_active(3);
-    else if (Settings.SGB_BIOSPreference == 1)
-        combo->set_active(2);
-    else
-        combo->set_active(Settings.GB_BIOSPreference ? 1 : 0);
+    combo->set_active(Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES
+                          ? Settings.GBBootPolicy
+                          : S9X_GBBOOT_AUTO_SGB);
 
     for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
         refresh_row(slot, rows[slot]);
@@ -176,15 +172,13 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
     for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
         S9xSetBiosPath(slot, rows[slot].entry->get_text().c_str());
 
-    // 0 = none, 1 = GB/GBC boot ROM, 2 = SGB1, 3 = SGB2. GB_BIOSPreference 2
-    // means "in preference to SGB", which is what an explicit pick asks for.
-    switch (combo->get_active_row_number())
-    {
-    case 1:  Settings.GB_BIOSPreference = 2; break;
-    case 2:  Settings.SGB_BIOSPreference = 1; Settings.GB_BIOSPreference = 1; break;
-    case 3:  Settings.SGB_BIOSPreference = 2; Settings.GB_BIOSPreference = 1; break;
-    default: Settings.SGB_BIOSPreference = 0; Settings.GB_BIOSPreference = 0; break;
-    }
+    Settings.GBBootPolicy = (uint8) combo->get_active_row_number();
+    // An SGB-involving policy is meaningless with the SGB BIOS switched off.
+    if ((Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+         Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
+         Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB) &&
+        Settings.SGB_BIOSPreference == 0)
+        Settings.SGB_BIOSPreference = 2;
 
     gui_config->save_config_file();
 }

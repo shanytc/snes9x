@@ -17,6 +17,7 @@ namespace fs = std::filesystem;
 // the Qt port a documented, human-readable config with a comment toggle.
 // Included last so snes9x.h's macros don't leak into the Qt headers above.
 #include "conffile.h"
+#include "memmap.h"
 #include "biosmanager.h"
 
 static const char *shortcut_names[] =
@@ -348,7 +349,8 @@ bool EmuConfig::setDefaults(int section)
         superfx_clock_multiplier = 100;
         sound_filter = eGaussian;
         sgb_bios_preference = 2;
-        gb_bios_preference = 1;
+        gb_bios_enabled = true;
+        gb_boot_policy = S9X_GBBOOT_AUTO_SGB;
         for (auto &p : bios_paths) p.clear();
     }
 
@@ -651,7 +653,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
         bios_paths[i] = S9xGetBiosPath(i);
-    Int("GBBIOSPreference", gb_bios_preference, "GB/GBC boot ROM (dmg_boot.bin / cgb_boot.bin) for the power-on logo animation: 0=never, 1=when no SGB BIOS is in play (default), 2=in preference to the SGB BIOS");
+    Bool("GBBIOSEnabled", gb_bios_enabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
+    Int("GBBootPolicy", gb_boot_policy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=auto prefer GB, 4=auto prefer GBC, 5=auto prefer SGB (default), 6=SGB+GBC");
     EndSection();
 
     // Explicit BIOS file paths; empty means fall back to the by-name search.

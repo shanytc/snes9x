@@ -23,8 +23,6 @@
 #include "gb_memory.h"
 #include "gb_cpu.h"
 #include "gb_apu.h"
-#include <cstdio>
-int g_div_probe = 8;
 
 namespace SGB {
 
@@ -141,10 +139,7 @@ uint8_t TimerRead(const Timer &t, uint16_t addr)
 	switch (addr)
 	{
 		case 0xFF04:
-		{
-			if (::g_div_probe > 0) { --::g_div_probe; fprintf(stderr, "[divprobe] %04X\n", t.div_counter); }
 			return static_cast<uint8_t>(t.div_counter >> 8);
-		}
 		case 0xFF05: return t.tima;
 		case 0xFF06: return t.tma;
 		case 0xFF07: return static_cast<uint8_t>(t.tac | 0xF8);

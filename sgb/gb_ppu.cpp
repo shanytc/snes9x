@@ -64,6 +64,7 @@
 #include "sgb.h"
 
 #include <cstring>
+#include <initializer_list>
 #include <cstdio>
 #include <cstdlib>
 
@@ -234,7 +235,7 @@ inline uint8_t SampleWindowPixel(const Ppu &p, int x)
 {
 	const uint16_t map_base = (p.lcdc & 0x40) ? 0x1C00 : 0x1800;
 	const bool     tiles_un = (p.lcdc & 0x10) != 0;
-	const uint32_t win_y    = static_cast<uint32_t>(p.window_line);
+	const uint32_t win_y    = static_cast<uint32_t>(p.om.window_line);
 	const uint32_t tile_row = win_y >> 3;
 	const uint32_t fine_y   = win_y & 7;
 	const int      wx       = static_cast<int>(p.latched_wx) - 7;
@@ -396,7 +397,7 @@ inline BgPixelCgb SampleBgPixelCgb(const Ppu &p, int x, bool window)
 	if (window)
 	{
 		map_base = (p.lcdc & 0x40) ? 0x1C00 : 0x1800;
-		const uint32_t win_y = static_cast<uint32_t>(p.window_line);
+		const uint32_t win_y = static_cast<uint32_t>(p.om.window_line);
 		tile_row = win_y >> 3;
 		fine_y   = win_y & 7;
 		const int win_col = x - (static_cast<int>(p.latched_wx) - 7);
@@ -593,7 +594,7 @@ void RenderPixel(Ppu &p)
 			// glitch is what lines the BG sides up with the window (without it
 			// the inner screen is 1px left of the frame).
 			const int hit = static_cast<int>(p.latched_wx) - 7;
-			if (p.window_line > 1 && (p.lcdc & 0x20) == 0 &&
+			if (p.om.window_line > 1 && (p.lcdc & 0x20) == 0 &&
 				hit >= 0 && hit < GB_SCREEN_WIDTH &&
 				(static_cast<int>(p.latched_wx) & 7) ==
 					7 - (static_cast<int>(p.scx) & 7))
@@ -671,98 +672,121 @@ void FinalizeScanline(Ppu &p)
 // the mid-scanline write artifacts the mealybug-tearoom tests verify.
 // ===================================================================
 
-inline void BgFifoClear(Ppu &p)
+inline void BgFifoClear(PixelMachine &m)
 {
-	p.bgf_head  = 0;
-	p.bgf_count = 0;
+	m.bgf_head  = 0;
+	m.bgf_count = 0;
 }
 
-inline void ObjFifoClear(Ppu &p)
+inline void ObjFifoClear(PixelMachine &m)
 {
-	std::memset(p.objf_color, 0, sizeof p.objf_color);
-	std::memset(p.objf_flags, 0, sizeof p.objf_flags);
-	std::memset(p.objf_owner, 0xFF, sizeof p.objf_owner);
-	std::memset(p.objf_valid, 0, sizeof p.objf_valid);
-	p.objf_head = p.objf_size = p.objf_uflow = 0;
+	std::memset(m.objf_color, 0, sizeof m.objf_color);
+	std::memset(m.objf_flags, 0, sizeof m.objf_flags);
+	std::memset(m.objf_owner, 0xFF, sizeof m.objf_owner);
+	std::memset(m.objf_valid, 0, sizeof m.objf_valid);
+	m.objf_head = m.objf_size = m.objf_uflow = 0;
 }
 
 // Un-pop one pixel (window-activation rollback). The OBJ ring still holds
 // the popped slot's data, so stepping head back restores alignment; pops
 // taken while the ring was empty cancel first (Coffee GB SpriteFifo).
-inline void RewindPixel(Ppu &p)
+inline void RewindPixel(PixelMachine &m)
 {
-	if (p.lcd_x <= 0) return;
-	if (p.objf_uflow > 0)
-		--p.objf_uflow;
-	else if (p.objf_size < 8)
+	if (m.lcd_x <= 0) return;
+	if (m.objf_uflow > 0)
+		--m.objf_uflow;
+	else if (m.objf_size < 8)
 	{
-		p.objf_head = static_cast<uint8_t>((p.objf_head - 1) & 7);
-		++p.objf_size;
+		m.objf_head = static_cast<uint8_t>((m.objf_head - 1) & 7);
+		++m.objf_size;
 	}
-	--p.lcd_x;
-	p.draw_x = p.lcd_x;
+	--m.lcd_x;
 }
 
-inline uint16_t FetchDataAddr(const Ppu &p, int hi)
+inline uint16_t FetchDataAddr(const Ppu &p, const PixelMachine &m, int hi)
 {
 	uint32_t fine_y;
 	if (p.cgb)
-		fine_y = p.fetch_y_latch & 7;
-	else if (p.fetch_is_window)
-		fine_y = static_cast<uint32_t>(p.window_line) & 7;
+		fine_y = m.fetch_y_latch & 7;
+	else if (m.fetch_is_window)
+		fine_y = static_cast<uint32_t>(m.window_line) & 7;
 	else
 		fine_y = static_cast<uint8_t>(p.ly + p.scy) & 7;
 
 	uint32_t bank = 0;
 	if (p.cgb)
 	{
-		if (p.fetch_attr & 0x08) bank = 0x2000;
-		if (p.fetch_attr & 0x40) fine_y = 7 - fine_y;
+		if (m.fetch_attr & 0x08) bank = 0x2000;
+		if (m.fetch_attr & 0x40) fine_y = 7 - fine_y;
 	}
 	uint16_t addr;
 	if (p.lcdc & 0x10)
-		addr = static_cast<uint16_t>(p.fetch_tile * 16);
+		addr = static_cast<uint16_t>(m.fetch_tile * 16);
 	else
-		addr = static_cast<uint16_t>(0x1000 + static_cast<int8_t>(p.fetch_tile) * 16);
+		addr = static_cast<uint16_t>(0x1000 + static_cast<int8_t>(m.fetch_tile) * 16);
 	return static_cast<uint16_t>(bank + addr + fine_y * 2 + hi);
+}
+
+inline bool WinEnView(const Ppu &p, const PixelMachine &m)
+{
+	static int wd = -1;
+	if (wd < 0) { const char *e = getenv("ACID_WD"); wd = e ? atoi(e) : 3; }
+	const int d = m.emits ? wd : 0;   // the skeleton reads the live register
+	const uint8_t v = d == 0 ? p.lcdc
+	                : d == 1 ? p.lcdc_shadow
+	                : d == 2 ? p.lcdc_d2
+	                : d == 3 ? p.lcdc_d3 : p.lcdc_d4;
+	return (v & 0x20) != 0;
+}
+
+// WX as this machine sees it (same latch as the window-enable view).
+inline uint8_t WxView(const Ppu &p, const PixelMachine &m)
+{
+	static int wxd = -99;
+	if (wxd < -90) { const char *e = getenv("ACID_WXD"); wxd = e ? atoi(e) : 0; }
+	const int d = m.emits ? wxd : 0;
+	return d == 0 ? p.wx
+	     : d == 1 ? p.wx_d1
+	     : d == 2 ? p.wx_d2
+	     : d == 3 ? p.wx_d3 : p.wx_d4;
 }
 
 // Push attempt — retried every dot until the FIFO has drained. Returns
 // without pushing while pixels remain.
-void BgPushAttempt(Ppu &p)
+void BgPushAttempt(Ppu &p, PixelMachine &m)
 {
-	if (p.bgf_count != 0)
+	if (m.bgf_count != 0)
 		return;
 	// Window-disable pixel insertion (SameBoy #278): with WY armed
 	// but the window bit off, a WX match at the push slot injects a
 	// single blank pixel instead of the tile row (m2_win_en_toggle).
-	if (!p.cgb && p.wy_triggered && !(p.lcdc & 0x20) && !p.win_insert_disable)
+	if (!p.cgb && p.wy_triggered && !WinEnView(p, m) && !m.win_insert_disable)
 	{
-		uint8_t lp = static_cast<uint8_t>(p.pos + 7);
+		uint8_t lp = static_cast<uint8_t>(m.pos + 7);
 		if (lp > 167) lp = 0;
-		if (p.wx == lp)
+		if (WxView(p, m) == lp)
 		{
-			p.bgf_color[p.bgf_head] = 0;
-			p.bgf_attr[p.bgf_head]  = 0;
-			p.bgf_layer[p.bgf_head] = 0;
-			p.bgf_count = 1;
+			m.bgf_color[m.bgf_head] = 0;
+			m.bgf_attr[m.bgf_head]  = 0;
+			m.bgf_layer[m.bgf_head] = 0;
+			m.bgf_count = 1;
 			return;
 		}
 	}
-	const bool flip = p.cgb && (p.fetch_attr & 0x20);
+	const bool flip = p.cgb && (m.fetch_attr & 0x20);
 	for (int i = 0; i < 8; ++i)
 	{
 		const int bit = flip ? i : (7 - i);
 		const uint8_t c = static_cast<uint8_t>(
-			(((p.fetch_hi >> bit) & 1) << 1) | ((p.fetch_lo >> bit) & 1));
-		const int slot = (p.bgf_head + p.bgf_count) & 7;
-		p.bgf_color[slot] = c;
-		p.bgf_attr[slot]  = p.fetch_attr;
-		p.bgf_layer[slot] = p.fetch_is_window ? 1 : 0;
-		++p.bgf_count;
+			(((m.fetch_hi >> bit) & 1) << 1) | ((m.fetch_lo >> bit) & 1));
+		const int slot = (m.bgf_head + m.bgf_count) & 7;
+		m.bgf_color[slot] = c;
+		m.bgf_attr[slot]  = m.fetch_attr;
+		m.bgf_layer[slot] = m.fetch_is_window ? 1 : 0;
+		++m.bgf_count;
 	}
-	p.fetch_stage = 0;
-	p.fetch_dot   = 0;
+	m.fetch_stage = 0;
+	m.fetch_dot   = 0;
 }
 
 // One dot of the background/window fetcher. Each 2-dot stage latches its
@@ -770,86 +794,86 @@ void BgPushAttempt(Ppu &p)
 // VRAM read on the second — SameBoy's T1/T2 split, which is what decides
 // exactly which mid-scanline register write lands in which tile. The
 // data-high read falls through to a same-dot push attempt (SameBoy H2).
-void FetcherDot(Ppu &p)
+void FetcherDot(Ppu &p, PixelMachine &m)
 {
-	if (p.fetch_pause > 0)
+	if (m.fetch_pause > 0)
 	{
-		--p.fetch_pause;
+		--m.fetch_pause;
 		return;
 	}
-	switch (p.fetch_stage)
+	switch (m.fetch_stage)
 	{
 	case 0:  // tile number
-		if (p.fetch_dot == 0)
+		if (m.fetch_dot == 0)
 		{
 			// CGB: the window dies the instant LCDC.5 goes low (SameBoy T1).
 			// DMG runs the early-fetch abort rule in the render loop instead.
 			if (p.cgb && !(p.lcdc & 0x20))
-				p.fetch_is_window = false;
+				m.fetch_is_window = false;
 			uint16_t map_base;
 			uint32_t row, col;
-			if (p.fetch_is_window)
+			if (m.fetch_is_window)
 			{
 				map_base = (p.lcdc & 0x40) ? 0x1C00 : 0x1800;
 				// The hardware window-line counter is 8 bits — double
 				// activations per line can wrap it within a frame.
-				row = (static_cast<uint32_t>(p.window_line) & 0xFF) >> 3;
-				col = p.fetch_tile_x & 31;
+				row = (static_cast<uint32_t>(m.window_line) & 0xFF) >> 3;
+				col = m.fetch_tile_x & 31;
 			}
 			else
 			{
 				map_base = (p.lcdc & 0x08) ? 0x1C00 : 0x1800;
 				row = static_cast<uint8_t>(p.ly + p.scy) >> 3;
-				if (static_cast<uint8_t>(p.pos + 16) < 8)
+				if (static_cast<uint8_t>(m.pos + 16) < 8)
 					col = p.scx >> 3;
 				else
 				{
 					// Hardware derives the column from live SCX plus the
 					// PPU position, so mid-line SCX writes (even the fine
 					// bits) re-steer the fetch (mealybug m3_scx_*).
-					const uint32_t adj = (p.cgb && !p.during_obj) ? 1 : 0;
-					col = ((static_cast<uint32_t>(p.scx) + p.pos + 8 - adj) >> 3) & 31;
+					const uint32_t adj = (p.cgb && !m.during_obj) ? 1 : 0;
+					col = ((static_cast<uint32_t>(p.scx) + m.pos + 8 - adj) >> 3) & 31;
 				}
 			}
-			p.fetch_map_addr = static_cast<uint16_t>(map_base + row * 32 + col);
-			p.fetch_y_latch  = p.fetch_is_window
-				? static_cast<uint8_t>(p.window_line)
+			m.fetch_map_addr = static_cast<uint16_t>(map_base + row * 32 + col);
+			m.fetch_y_latch  = m.fetch_is_window
+				? static_cast<uint8_t>(m.window_line)
 				: static_cast<uint8_t>(p.ly + p.scy);
-			p.fetch_dot = 1;
+			m.fetch_dot = 1;
 			return;
 		}
-		p.fetch_dot = 0;
-		p.fetch_tile = p.vram[p.fetch_map_addr];
-		p.fetch_attr = p.cgb ? p.vram[0x2000 + p.fetch_map_addr] : 0;
-		p.fetch_stage = 1;
+		m.fetch_dot = 0;
+		m.fetch_tile = p.vram[m.fetch_map_addr];
+		m.fetch_attr = p.cgb ? p.vram[0x2000 + m.fetch_map_addr] : 0;
+		m.fetch_stage = 1;
 		return;
 	case 1:  // data low
-		if (p.fetch_dot == 0)
+		if (m.fetch_dot == 0)
 		{
-			p.fetch_data_addr = FetchDataAddr(p, 0);
-			p.fetch_dot = 1;
+			m.fetch_data_addr = FetchDataAddr(p, m, 0);
+			m.fetch_dot = 1;
 			return;
 		}
-		p.fetch_dot = 0;
-		p.fetch_lo = p.vram[p.fetch_data_addr];
-		p.fetch_stage = 2;
+		m.fetch_dot = 0;
+		m.fetch_lo = p.vram[m.fetch_data_addr];
+		m.fetch_stage = 2;
 		return;
 	case 2:  // data high
-		if (p.fetch_dot == 0)
+		if (m.fetch_dot == 0)
 		{
-			p.fetch_data_addr = FetchDataAddr(p, 1);
-			p.fetch_dot = 1;
+			m.fetch_data_addr = FetchDataAddr(p, m, 1);
+			m.fetch_dot = 1;
 			return;
 		}
-		p.fetch_dot = 0;
-		p.fetch_hi = p.vram[p.fetch_data_addr];
-		if (p.fetch_is_window)
-			p.fetch_tile_x = static_cast<uint8_t>((p.fetch_tile_x + 1) & 31);
-		p.fetch_stage = 3;
-		BgPushAttempt(p);
+		m.fetch_dot = 0;
+		m.fetch_hi = p.vram[m.fetch_data_addr];
+		if (m.fetch_is_window)
+			m.fetch_tile_x = static_cast<uint8_t>((m.fetch_tile_x + 1) & 31);
+		m.fetch_stage = 3;
+		BgPushAttempt(p, m);
 		return;
 	default: // parked at push
-		BgPushAttempt(p);
+		BgPushAttempt(p, m);
 		return;
 	}
 }
@@ -859,88 +883,88 @@ void FetcherDot(Ppu &p)
 // blanks, transparent pixels never write, an opaque pixel replaces a
 // transparent slot, and on CGB also a slot owned by a higher OAM index —
 // DMG first-opaque-wins and X/OAM priority fall out of the fetch order.
-void ObjOverlayRow(Ppu &p, uint8_t lo, uint8_t hi, uint8_t flags, uint8_t oi)
+void ObjOverlayRow(Ppu &p, PixelMachine &m, uint8_t lo, uint8_t hi, uint8_t flags, uint8_t oi)
 {
-	p.objf_uflow = 0;
-	while (p.objf_size < 8)
+	m.objf_uflow = 0;
+	while (m.objf_size < 8)
 	{
-		const int slot = (p.objf_head + p.objf_size) & 7;
-		p.objf_color[slot] = 0;
-		p.objf_flags[slot] = 0;
-		p.objf_owner[slot] = 0xFF;
-		p.objf_valid[slot] = 1;
-		++p.objf_size;
+		const int slot = (m.objf_head + m.objf_size) & 7;
+		m.objf_color[slot] = 0;
+		m.objf_flags[slot] = 0;
+		m.objf_owner[slot] = 0xFF;
+		m.objf_valid[slot] = 1;
+		++m.objf_size;
 	}
 	for (int j = 0; j < 8; ++j)
 	{
 		const int bit  = (flags & 0x20) ? j : (7 - j);
-		const int slot = (p.objf_head + j) & 7;
+		const int slot = (m.objf_head + j) & 7;
 		const uint8_t c = static_cast<uint8_t>(
 			(((hi >> bit) & 1) << 1) | ((lo >> bit) & 1));
 		if (c == 0) continue;
-		if (p.objf_color[slot] != 0)
+		if (m.objf_color[slot] != 0)
 		{
 			if (!p.cgb) continue;
-			if (p.objf_owner[slot] <= oi) continue;
+			if (m.objf_owner[slot] <= oi) continue;
 		}
-		p.objf_color[slot] = c;
-		p.objf_flags[slot] = flags;
-		p.objf_owner[slot] = oi;
+		m.objf_color[slot] = c;
+		m.objf_flags[slot] = flags;
+		m.objf_owner[slot] = oi;
 	}
 }
 
 // VRAM address of the fetched object's current row — OBJ size and flip are
 // sampled live at each data read (SameBoy get_object_line_address).
-uint16_t ObjLineAddr(const Ppu &p, uint8_t raw_y)
+uint16_t ObjLineAddr(const Ppu &p, const PixelMachine &m, uint8_t raw_y)
 {
 	const bool h16 = (p.lcdc & 0x04) != 0;
 	uint8_t ty = static_cast<uint8_t>((p.ly - raw_y) & (h16 ? 15 : 7));
-	if (p.obj_flags_bus & 0x40) ty ^= h16 ? 15 : 7;
+	if (m.obj_flags_bus & 0x40) ty ^= h16 ? 15 : 7;
 	uint16_t la = static_cast<uint16_t>(
-		(h16 ? (p.obj_tile_bus & 0xFE) : p.obj_tile_bus) * 16 + ty * 2);
-	if (p.cgb && (p.obj_flags_bus & 0x08)) la = static_cast<uint16_t>(la + 0x2000);
+		(h16 ? (m.obj_tile_bus & 0xFE) : m.obj_tile_bus) * 16 + ty * 2);
+	if (p.cgb && (m.obj_flags_bus & 0x08)) la = static_cast<uint16_t>(la + 0x2000);
 	return la;
 }
 
 // no_sprite_limit extras merge in one shot so mode-3 timing ignores them.
-void ObjFetchInstant(Ppu &p, int s)
+void ObjFetchInstant(Ppu &p, PixelMachine &m, int s)
 {
 	const Ppu::SpriteHit &h = p.sprites[s];
-	const uint8_t saved_t = p.obj_tile_bus, saved_f = p.obj_flags_bus;
-	p.obj_tile_bus  = p.oam[h.oam_idx * 4 + 2];
-	p.obj_flags_bus = p.oam[h.oam_idx * 4 + 3];
-	const uint16_t la = ObjLineAddr(p, h.y);
-	ObjOverlayRow(p, p.vram[la], p.vram[la + 1], p.obj_flags_bus, h.oam_idx);
-	p.obj_tile_bus = saved_t;
-	p.obj_flags_bus = saved_f;
+	const uint8_t saved_t = m.obj_tile_bus, saved_f = m.obj_flags_bus;
+	m.obj_tile_bus  = p.oam[h.oam_idx * 4 + 2];
+	m.obj_flags_bus = p.oam[h.oam_idx * 4 + 3];
+	const uint16_t la = ObjLineAddr(p, m, h.y);
+	ObjOverlayRow(p, m, p.vram[la], p.vram[la + 1], m.obj_flags_bus, h.oam_idx);
+	m.obj_tile_bus = saved_t;
+	m.obj_flags_bus = saved_f;
 }
 
 // SameBoy x_for_object_match: raw OAM X the position counter is passing.
-inline uint8_t XForObjMatch(const Ppu &p)
+inline uint8_t XForObjMatch(const PixelMachine &m)
 {
-	const uint8_t ret = static_cast<uint8_t>(p.pos + 8);
+	const uint8_t ret = static_cast<uint8_t>(m.pos + 8);
 	return (ret > 0xF0) ? 0 : ret;
 }
 
 // Retire sprites the position counter has passed — this runs even with
 // OBJ disabled on DMG (m3_lcdc_obj_en_change: re-enabling never fetches
 // stale sprites).
-void SpriteDiscardPassed(Ppu &p, uint8_t x_match)
+void SpriteDiscardPassed(const Ppu &p, PixelMachine &m, uint8_t x_match)
 {
 	for (uint8_t i = 0; i < p.sprite_count; ++i)
 	{
-		if (p.sprite_used_mask & (1ull << i)) continue;
+		if (m.sprite_used_mask & (1ull << i)) continue;
 		const uint8_t raw = static_cast<uint8_t>(p.sprites[i].x + 8);
-		if (raw < x_match) p.sprite_used_mask |= 1ull << i;
+		if (raw < x_match) m.sprite_used_mask |= 1ull << i;
 	}
 }
 
 // First unfetched sprite at exactly x_match, in OAM-scan order.
-int SpriteMatchAt(const Ppu &p, uint8_t x_match)
+int SpriteMatchAt(const Ppu &p, const PixelMachine &m, uint8_t x_match)
 {
 	for (uint8_t i = 0; i < p.sprite_count; ++i)
 	{
-		if (p.sprite_used_mask & (1ull << i)) continue;
+		if (m.sprite_used_mask & (1ull << i)) continue;
 		if (static_cast<uint8_t>(p.sprites[i].x + 8) == x_match) return i;
 	}
 	return -1;
@@ -948,11 +972,11 @@ int SpriteMatchAt(const Ppu &p, uint8_t x_match)
 
 // Rendering (and scroll adjustment) stalls while an OAM-X=0 object is
 // still pending (SameBoy render_pixel_if_possible head).
-bool SpritePendingAtRaw0(const Ppu &p)
+bool SpritePendingAtRaw0(const Ppu &p, const PixelMachine &m)
 {
 	for (uint8_t i = 0; i < p.sprite_count; ++i)
 	{
-		if (p.sprite_used_mask & (1ull << i)) continue;
+		if (m.sprite_used_mask & (1ull << i)) continue;
 		if (static_cast<uint8_t>(p.sprites[i].x + 8) == 0) return true;
 	}
 	return false;
@@ -963,82 +987,83 @@ bool SpritePendingAtRaw0(const Ppu &p)
 // dots (SameBoy sleeps 1+2+2+1 plus the two fetcher advances) with the
 // OAM/VRAM reads landing on their hardware dots. The row merges at the
 // start of the following dot (obj_overlay).
-void ObjMachineDot(Ppu &p, Memory &mem)
+void ObjMachineDot(Ppu &p, PixelMachine &m, Memory &mem)
 {
-	const Ppu::SpriteHit &h = p.sprites[p.obj_fetch_slot];
-	switch (p.obj_fetch_state)
+	const Ppu::SpriteHit &h = p.sprites[m.obj_fetch_slot];
+	switch (m.obj_fetch_state)
 	{
 	case 200:
 		// The object fetch waits for the BG fetcher to reach its data-high
 		// read with pixels queued (SameBoy), then steals it.
-		if (((p.fetch_stage == 2 && p.fetch_dot == 1) || p.fetch_stage == 3) &&
-		    p.bgf_count > 0)
+		if (((m.fetch_stage == 2 && m.fetch_dot == 1) || m.fetch_stage == 3) &&
+		    m.bgf_count > 0)
 		{
-			FetcherDot(p);
-			p.obj_fetch_state = 5;
+			FetcherDot(p, m);
+			m.obj_fetch_state = 5;
 			return;
 		}
-		FetcherDot(p);
+		FetcherDot(p, m);
 		return;
 	case 5:
-		FetcherDot(p);
+		FetcherDot(p, m);
 		if (mem.dma_active && !p.cgb && mem.dma_index > 0 && mem.dma_index < 0xA0)
 		{
 			// DMA holds the OAM bus during the fetch's OAM read too.
-			p.obj_tile_bus  = p.oam[mem.dma_index & ~1];
-			p.obj_flags_bus = p.oam[(mem.dma_index & ~1) | 1];
+			m.obj_tile_bus  = p.oam[mem.dma_index & ~1];
+			m.obj_flags_bus = p.oam[(mem.dma_index & ~1) | 1];
 		}
 		else
 		{
-			p.obj_tile_bus  = p.oam[h.oam_idx * 4 + 2];
-			p.obj_flags_bus = p.oam[h.oam_idx * 4 + 3];
+			m.obj_tile_bus  = p.oam[h.oam_idx * 4 + 2];
+			m.obj_flags_bus = p.oam[h.oam_idx * 4 + 3];
 		}
-		p.scan_y_bus = p.obj_tile_bus;
-		p.obj_fetch_state = 4;
+		p.scan_y_bus = m.obj_tile_bus;
+		m.obj_fetch_state = 4;
 		return;
-	case 4: p.obj_fetch_state = 3; return;
+	case 4: m.obj_fetch_state = 3; return;
 	case 3:
-		p.obj_lo = p.vram[ObjLineAddr(p, h.y)];
-		p.obj_fetch_state = 2;
+		m.obj_lo = p.vram[ObjLineAddr(p, m, h.y)];
+		m.obj_fetch_state = 2;
 		return;
-	case 2: p.obj_fetch_state = 1; return;
+	case 2: m.obj_fetch_state = 1; return;
 	default:
-		p.obj_hi = p.vram[static_cast<uint16_t>(ObjLineAddr(p, h.y) + 1)];
-		p.during_obj = false;
-		p.obj_fetch_state = 0;
-		p.obj_overlay = true;
+		m.obj_hi = p.vram[static_cast<uint16_t>(ObjLineAddr(p, m, h.y) + 1)];
+		m.during_obj = false;
+		m.obj_fetch_state = 0;
+		m.obj_overlay = true;
 		return;
 	}
 }
 
 // Handle every unfetched sprite matching the current column. Returns true
 // when a real fetch started and consumed this dot.
-bool ObjHandleMatches(Ppu &p, Memory &mem)
+bool ObjHandleMatches(Ppu &p, PixelMachine &m, Memory &mem)
 {
 	if (!((p.lcdc & 0x02) || p.cgb)) return false;
 	int s;
-	while ((s = SpriteMatchAt(p, XForObjMatch(p))) >= 0)
+	while ((s = SpriteMatchAt(p, m, XForObjMatch(m))) >= 0)
 	{
-		p.sprite_used_mask |= 1ull << s;
+		m.sprite_used_mask |= 1ull << s;
 		if (s >= GB_OAM_SCAN_LIMIT)
 		{
-			ObjFetchInstant(p, s);
+			ObjFetchInstant(p, m, s);
 			continue;
 		}
-		p.obj_fetch_slot = static_cast<uint8_t>(s);
-		p.during_obj = true;
-		p.obj_fetch_state = 200;
-		ObjMachineDot(p, mem);
+		m.obj_fetch_slot = static_cast<uint8_t>(s);
+		m.during_obj = true;
+		m.obj_fetch_state = 200;
+		ObjMachineDot(p, m, mem);
 		return true;
 	}
 	return false;
 }
 
 // Emit the popped BG pixel (+ the popped OBJ FIFO pixel) to the framebuffer.
-void EmitPixel(Ppu &p, uint8_t bg_color, uint8_t bg_attr, bool is_window,
+void EmitPixel(Ppu &p, PixelMachine &m, uint8_t bg_color, uint8_t bg_attr, bool is_window,
                uint8_t obj_c, uint8_t obj_flags)
 {
-	const int x = p.lcd_x;
+	if (!m.emits) return;   // the timing skeleton produces no pixels
+	const int x = m.lcd_x;
 	if (x < 0 || x >= GB_SCREEN_WIDTH || p.ly >= GB_SCREEN_HEIGHT) return;
 
 	uint8_t  *const line  = &p.framebuffer[p.ly * GB_SCREEN_WIDTH];
@@ -1106,172 +1131,162 @@ void EmitPixel(Ppu &p, uint8_t bg_color, uint8_t bg_attr, bool is_window,
 
 // LCDC.5 as the window comparator/disable machinery sees it — a few dots
 // behind the CPU write (the LCD output-latch crossing; env ACID_WD).
-inline bool WinEnView(const Ppu &p)
-{
-	static int wd = -1;
-	if (wd < 0) { const char *e = getenv("ACID_WD"); wd = e ? atoi(e) : 3; }
-	const uint8_t v = wd == 0 ? p.lcdc
-	                : wd == 1 ? p.lcdc_shadow
-	                : wd == 2 ? p.lcdc_d2
-	                : wd == 3 ? p.lcdc_d3 : p.lcdc_d4;
-	return (v & 0x20) != 0;
-}
-
 // Window activation comparator (SameBoy render loop head). Runs once per
 // loop iteration, before object handling. Returns true when the WX=0 +
 // fine-scroll case burns the dot (the iteration resumes next dot).
-bool WindowCheckDot(Ppu &p)
+bool WindowCheckDot(Ppu &p, PixelMachine &m)
 {
-	if (p.fetch_is_window || !p.wy_triggered || !WinEnView(p))
+	const uint8_t wxv = WxView(p, m);
+	if (m.fetch_is_window || !p.wy_triggered || !WinEnView(p, m))
 		return false;
 	// DMG LCD/PPU desync catch-up: a WX match was masked by an LCDC.5-off
 	// pulse; re-enabling within 3 dots activates as if at the match dot,
 	// rolling the emitted pixels back (Coffee GB windowCatchUpPos).
-	if (!p.cgb && p.win_catchup_pos >= 0 && !p.win_activated_line)
+	if (!p.cgb && m.win_catchup_pos >= 0 && !m.win_activated_line)
 	{
 		static int dmg = -1;
 		if (dmg < 0) { const char *e = getenv("ACID_DMG"); dmg = e ? atoi(e) : 3; }
-		const int gap = static_cast<int>(p.pos) - p.win_catchup_pos;
+		const int gap = static_cast<int>(m.pos) - m.win_catchup_pos;
 		if (gap >= 0 && gap <= dmg)
 		{
-			int target = p.win_catchup_pos;
+			int target = m.win_catchup_pos;
 			if (gap == dmg)
 				++target;   // dmg_blob retains one more LCD pixel at max gap
-			while (static_cast<int>(p.pos) > target)
+			while (static_cast<int>(m.pos) > target)
 			{
-				RewindPixel(p);
-				--p.pos;
+				RewindPixel(m);
+				--m.pos;
 			}
-			p.win_catchup_pos = -1;
-			++p.window_line;
-			p.fetch_is_window = true;
-			p.win_fresh       = true;
-			p.fetch_tile_x    = 0;
-			BgFifoClear(p);
-			p.fetch_stage = 0;
-			p.fetch_dot   = 0;
+			m.win_catchup_pos = -1;
+			++m.window_line;
+			m.fetch_is_window = true;
+			m.win_fresh       = true;
+			m.fetch_tile_x    = 0;
+			BgFifoClear(m);
+			m.fetch_stage = 0;
+			m.fetch_dot   = 0;
 			p.window_active  = true;
-			p.window_start_x = p.lcd_x;
-			p.win_activated_line = true;
-			FetcherDot(p);   // the fetch restarted back at the match dot
+			p.window_start_x = m.lcd_x;
+			m.win_activated_line = true;
+			FetcherDot(p, m);   // the fetch restarted back at the match dot
 			return false;
 		}
 	}
 	bool act = false;
-	if (p.wx == 0)
+	if (wxv == 0)
 	{
-		if (p.pos == 0xF9) act = true;                       // -7
-		else if (p.pos == 0xF0 && (p.scx & 7)) act = true;   // -16 + fine scroll
-		else if (p.pos >= 0xF1 && p.pos <= 0xF8) act = true; // -15..-8
+		if (m.pos == 0xF9) act = true;                       // -7
+		else if (m.pos == 0xF0 && (p.scx & 7)) act = true;   // -16 + fine scroll
+		else if (m.pos >= 0xF1 && m.pos <= 0xF8) act = true; // -15..-8
 	}
-	else if (p.wx < 166u + (p.cgb ? 1u : 0u))
+	else if (wxv < 166u + (p.cgb ? 1u : 0u))
 	{
-		if (p.wx == static_cast<uint8_t>(p.pos + 7))
+		if (wxv == static_cast<uint8_t>(m.pos + 7))
 			act = true;
-		else if (!p.cgb && p.wx == static_cast<uint8_t>(p.pos + 6) &&
+		else if (!p.cgb && wxv == static_cast<uint8_t>(m.pos + 6) &&
 		         p.wx_write_cooldown == 0)
 		{
 			// DMG LCD/PPU desync: the comparator fires a dot early and
 			// rolls the panel back one pixel (strikethrough).
 			act = true;
-			if (p.lcd_x > 0) --p.lcd_x;
+			if (m.lcd_x > 0) --m.lcd_x;
 		}
 	}
 	if (act)
 	{
-		++p.window_line;
-		p.fetch_tile_x = 0;
-		BgFifoClear(p);
-		p.fetch_is_window = true;
-		p.fetch_stage = 0;
-		p.fetch_dot   = 0;
-		p.win_fresh   = true;
+		++m.window_line;
+		m.fetch_tile_x = 0;
+		BgFifoClear(m);
+		m.fetch_is_window = true;
+		m.fetch_stage = 0;
+		m.fetch_dot   = 0;
+		m.win_fresh   = true;
 		p.window_active  = true;
-		p.window_start_x = p.lcd_x;
-		if (p.wx == 0 && (p.scx & 7) && !p.cgb)
+		p.window_start_x = m.lcd_x;
+		if (wxv == 0 && (p.scx & 7) && !p.cgb)
 		{
-			p.iter_resume = true;   // the activation itself costs a dot
+			m.iter_resume = true;   // the activation itself costs a dot
 			return true;
 		}
 	}
-	else if (!p.cgb && p.wx == 166 && p.wx == static_cast<uint8_t>(p.pos + 7))
+	else if (!p.cgb && wxv == 166 && wxv == static_cast<uint8_t>(m.pos + 7))
 	{
 		// WX=166 matches but never engages — the line counter still ticks
 		// (dmg-acid2 WIL test).
-		++p.window_line;
+		++m.window_line;
 	}
 	return false;
 }
 
 // SameBoy render_pixel_if_possible: pop one pixel, run the position
 // machine's scroll-discard states, emit when on-screen.
-void RenderDot(Ppu &p, Memory &mem)
+void RenderDot(Ppu &p, PixelMachine &m, Memory &mem)
 {
-	if (((p.lcdc & 0x02) || p.cgb) && SpritePendingAtRaw0(p))
+	if (((p.lcdc & 0x02) || p.cgb) && SpritePendingAtRaw0(p, m))
 		return;
-	if (p.bgf_count == 0)
+	if (m.bgf_count == 0)
 		return;
 
 	uint8_t c, at;
 	bool win;
-	if (p.bgf_insert)
+	if (m.bgf_insert)
 	{
-		p.bgf_insert = false;
-		c = 0; at = 0; win = p.fetch_is_window;
+		m.bgf_insert = false;
+		c = 0; at = 0; win = m.fetch_is_window;
 	}
 	else
 	{
-		c   = p.bgf_color[p.bgf_head];
-		at  = p.bgf_attr[p.bgf_head];
-		win = p.bgf_layer[p.bgf_head] != 0;
-		p.bgf_head = static_cast<uint8_t>((p.bgf_head + 1) & 7);
-		--p.bgf_count;
+		c   = m.bgf_color[m.bgf_head];
+		at  = m.bgf_attr[m.bgf_head];
+		win = m.bgf_layer[m.bgf_head] != 0;
+		m.bgf_head = static_cast<uint8_t>((m.bgf_head + 1) & 7);
+		--m.bgf_count;
 	}
 	// The OBJ FIFO pops in step with every BG pop — dropped pixels consume
 	// sprite pixels too (left-edge clipping falls out of this).
 	uint8_t obj_c = 0, obj_fl = 0;
-	if (p.objf_size > 0)
+	if (m.objf_size > 0)
 	{
-		obj_c  = p.objf_color[p.objf_head];
-		obj_fl = p.objf_flags[p.objf_head];
-		p.objf_head = static_cast<uint8_t>((p.objf_head + 1) & 7);
-		--p.objf_size;
+		obj_c  = m.objf_color[m.objf_head];
+		obj_fl = m.objf_flags[m.objf_head];
+		m.objf_head = static_cast<uint8_t>((m.objf_head + 1) & 7);
+		--m.objf_size;
 	}
 	else
 	{
-		++p.objf_uflow;
+		++m.objf_uflow;
 	}
 
-	if (static_cast<uint8_t>(p.pos + 16) < 8)
+	if (static_cast<uint8_t>(m.pos + 16) < 8)
 	{
-		if ((p.pos & 7) == (p.scx & 7))
-			p.pos = 0xF8;
-		else if (p.win_fresh && (p.pos & 7) == 6 && (p.scx & 7) == 7)
-			p.pos = 0xF8;
-		else if (p.pos == 0xF7)
+		if ((m.pos & 7) == (p.scx & 7))
+			m.pos = 0xF8;
+		else if (m.win_fresh && (m.pos & 7) == 6 && (p.scx & 7) == 7)
+			m.pos = 0xF8;
+		else if (m.pos == 0xF7)
 		{
-			p.pos = 0xF0;
+			m.pos = 0xF0;
 			return;
 		}
 	}
-	p.win_fresh = false;
+	m.win_fresh = false;
 
-	if (p.pos >= 160)
+	if (m.pos >= 160)
 	{
-		++p.pos;
+		++m.pos;
 		return;
 	}
 
-	EmitPixel(p, c, at, win, obj_c, obj_fl);
-	++p.pos;
-	++p.lcd_x;
-	p.draw_x = p.lcd_x;
+	EmitPixel(p, m, c, at, win, obj_c, obj_fl);
+	++m.pos;
+	++m.lcd_x;
+	p.draw_x = m.lcd_x;
 	// The mode-0 STAT source pulses a few dots before the visible flip
 	// (SameBoy fires it at the last pixel; ours lands early to match the
 	// CPU-observed grid).
 	static int m0pre = -1;
-	if (m0pre < 0) { const char *e = getenv("ACID_M0PRE"); m0pre = e ? atoi(e) : 5; }
-	if (p.lcd_x == GB_SCREEN_WIDTH - m0pre &&
+	if (m0pre < 0) { const char *e = getenv("ACID_M0PRE"); m0pre = e ? atoi(e) : 1; }
+	if (!m.emits && m.lcd_x == GB_SCREEN_WIDTH - m0pre &&
 	    (p.lcdc & 0x80) && (p.stat & 0x08) && !p.stat_line_high)
 	{
 		mem.if_ = static_cast<uint8_t>(mem.if_ | IRQ_LCDSTAT);
@@ -1282,6 +1297,15 @@ void RenderDot(Ppu &p, Memory &mem)
 } // anonymous
 
 namespace { int g_pal_unit = 0; }
+
+// True while the LCD is still receiving pixels for this line. The output
+// machine trails the timing skeleton, so a write landing just after the
+// skeleton's mode-3 ends is still a mid-line write as far as the pixels
+// are concerned.
+static bool PpuRendering(const Ppu &p)
+{
+	return p.mode == PpuMode::Transfer || !p.om.done;
+}
 
 void PpuSetPalUnit(int unit) { g_pal_unit = unit; }
 
@@ -1301,32 +1325,18 @@ void PpuReset(Ppu &p)
 	p.wy = p.wx = 0;
 	p.mode = PpuMode::OamScan;
 	p.mode_clock    = 0;
-	p.window_line   = -1;
+	p.tm = PixelMachine{};
+	p.om = PixelMachine{};
+	p.om.emits = true;
+	p.wx_write_cooldown = 0;
 	p.lcdon_first   = false;
 	p.lcdon_pad     = 0;
+	p.lcdon_line    = false;
 	p.stop_display  = 0;
 	p.mode3_hold    = -1;
-	p.fetch_pause   = 0;
 	p.pal_glitch    = 0;
-	p.wx_write_cooldown = 0;
-	p.win_pos_base  = 0;
-	p.pos           = 0xF0;
-	p.entry_wait    = 0;
-	p.iter_resume   = false;
-	p.obj_overlay   = false;
-	p.during_obj    = false;
-	p.win_carry     = false;
-	p.bgf_insert    = false;
-	p.win_fresh     = false;
-	p.win_insert_disable = false;
-	p.win_catchup_pos = -1;
-	p.win_activated_line = false;
-	p.win_pend = 0;
-	p.machine_stall = 0;
-	p.objf_head = p.objf_size = p.objf_uflow = 0;
-	p.lcdc_shadow   = p.lcdc;
-	p.obj_fetch_state = 0;
-	p.sprite_used_mask = 0;
+	p.ly_lag        = 0;
+	p.scan_y_bus = p.scan_x_bus = 0;
 	p.stat_line_high = false;
 	p.vblank_irq_at = 0;
 	p.stat_irq_delay = 0;
@@ -1349,21 +1359,16 @@ void PpuReset(Ppu &p)
 }
 
 // Mode-3 exit: strikethrough fill, WX=166 carry, stall math, HBlank.
-static bool Mode3Exit(Ppu &p, Memory &mem)
+// The output machine finished its line: fill any pixels the LCD never
+// received (a WX desync leaves lcd_x short) and publish the scanline.
+static void Mode3OutputExit(Ppu &p, PixelMachine &m)
 {
-	{
-		static int vb_env = -1;
-		if (vb_env < 0) { vb_env = 1;
-			const char *v = getenv("ACID_VB"); if (v) GB_VBLANK_IRQ_OFFSET = atoi(v); }
-	}
-	// LCD/PPU desync (WX pos+6 trigger): the panel never got its last
-	// pixels — hardware repeats the last driven color to the edge.
-	if (p.lcd_x < GB_SCREEN_WIDTH && p.ly < GB_SCREEN_HEIGHT)
+	if (m.lcd_x < GB_SCREEN_WIDTH && p.ly < GB_SCREEN_HEIGHT)
 	{
 		uint8_t  *const line  = &p.framebuffer[p.ly * GB_SCREEN_WIDTH];
 		uint8_t  *const lay   = &p.layer[p.ly * GB_SCREEN_WIDTH];
 		uint16_t *const cline = &p.color_fb[p.ly * GB_SCREEN_WIDTH];
-		for (int x = p.lcd_x; x < GB_SCREEN_WIDTH; ++x)
+		for (int x = m.lcd_x; x < GB_SCREEN_WIDTH; ++x)
 		{
 			p.scanline_raw[x]    = x ? p.scanline_raw[x - 1] : 0;
 			p.scanline_bg_raw[x] = x ? p.scanline_bg_raw[x - 1] : 0;
@@ -1375,23 +1380,178 @@ static bool Mode3Exit(Ppu &p, Memory &mem)
 				cline[x] = x ? cline[x - 1] : CgbColor(p.bg_pal, 0, 0);
 			}
 		}
-		p.lcd_x = GB_SCREEN_WIDTH;
+		m.lcd_x = GB_SCREEN_WIDTH;
 	}
-	// WX=166 at line end: the window pre-arms for the next line with
-	// tile_x=1 and the line counter ticks once more (SameBoy).
+	FinalizeScanline(p);
+}
+
+// WX=166 at line end: the window pre-arms for the next line with
+// tile_x=1 and the line counter ticks once more (SameBoy). Per machine.
+static void Mode3WxCarry(Ppu &p, PixelMachine &m)
+{
 	if (!p.cgb && p.wy_triggered && (p.lcdc & 0x20) && p.wx == 166)
 	{
-		p.win_carry = true;
-		++p.window_line;
+		m.win_carry = true;
+		++m.window_line;
 	}
+}
+
+// The timing skeleton finished: mode 3 ends here, which is what STAT, LY,
+// the interrupts and the CPU's memory locks follow.
+static bool Mode3Exit(Ppu &p, PixelMachine &m, Memory &mem)
+{
+	Mode3WxCarry(p, m);
 	// Mode-3 length is emergent; expose the overrun as the legacy
 	// "sprite stall" so HBlank shrinks to keep the 456-dot line.
 	p.mode3_sprite_stall = static_cast<int16_t>(p.mode_clock - MODE3_DOTS);
 	p.mode_clock  = 0;
 	p.mode        = PpuMode::HBlank;
-	FinalizeScanline(p);
 	MemHdmaHBlank(mem);
 	return true;
+}
+
+// One dot of one mode-3 machine. Returns true when this machine has
+// finished the line (pos reached 160).
+static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
+{
+
+	// --- SameBoy position_in_line render loop, one dot per call ---
+	if (m.entry_wait > 0)
+	{
+		--m.entry_wait;
+		return false;
+	}
+	if (m.machine_stall > 0)
+	{
+		--m.machine_stall;
+		return false;
+	}
+	// ACID_XS=1: the mode-0 transition lands one dot after the last
+	// pop (SameBoy sleeps once between the loop break and the STAT
+	// flip); the extra dot renders nothing.
+	{
+		static int xs = -1;
+		if (xs < 0) { const char *e = getenv("ACID_XS"); xs = e ? atoi(e) : 0; }
+		if (xs > 0 && m.pos == 160 && m.entry_wait == 0)
+		{
+			if (p.mode3_hold < 0)
+			{
+				p.mode3_hold = static_cast<int16_t>(xs);
+				return false;
+			}
+			if (p.mode3_hold > 0 && --p.mode3_hold > 0)
+				return false;
+			p.mode3_hold = -1;
+			return true;
+		}
+	}
+
+	// An in-flight object fetch owns the dot outright (pops paused).
+	if (m.obj_fetch_state > 0)
+	{
+		ObjMachineDot(p, m, mem);
+		return false;
+	}
+
+	bool to_render = false;
+	if (m.obj_overlay)
+	{
+		// The fetched row lands now; a chained object at the same column
+		// starts immediately, otherwise the iteration falls through to
+		// the pop (the loop head does NOT re-run mid-iteration).
+		m.obj_overlay = false;
+		ObjOverlayRow(p, m, m.obj_lo, m.obj_hi, m.obj_flags_bus,
+		              p.sprites[m.obj_fetch_slot].oam_idx);
+		if (ObjHandleMatches(p, m, mem))
+			return false;
+		to_render = true;
+	}
+
+	if (!to_render)
+	{
+		const bool skip_head = m.iter_resume;
+		m.iter_resume = false;
+		// Commit or drop a pending window activation: the match dot's
+		// register state must survive one dot or the fetch never starts
+		// (Coffee GB windowPendingTicks). The pixel popped during the
+		// pending dot rolls back so the activation lands at the match.
+		if (m.win_pend)
+		{
+			m.win_pend = 0;
+			if (p.wx == m.win_pend_wx && (p.cgb || WinEnView(p, m)))
+			{
+				if (m.pos != m.win_pend_pos)
+				{
+					RewindPixel(m);
+					m.pos = m.win_pend_pos;
+				}
+				++m.window_line;
+				m.fetch_tile_x = 0;
+				BgFifoClear(m);
+				m.fetch_is_window = true;
+				m.fetch_stage = 0;
+				m.fetch_dot   = 0;
+				m.win_fresh   = true;
+				p.window_active  = true;
+				p.window_start_x = m.lcd_x;
+				if (p.wx == 0 && (p.scx & 7) && !p.cgb)
+					m.machine_stall = 1;
+				if (!m.win_activated_line)
+					FetcherDot(p, m);   // the fetch restarted back at the match dot
+				m.win_activated_line = true;
+			}
+		}
+		// DMG: clearing LCDC.5 kills the window fetch only while it is
+		// still early (through the map read); later stages complete and
+		// push their window tile (Coffee GB; m3_lcdc_win_en_change_multiple).
+		if (!p.cgb && m.fetch_is_window && !WinEnView(p, m) &&
+		    m.fetch_stage <= 1)
+		{
+			if (m.fetch_stage != 0 || m.fetch_dot != 0)
+			{
+				m.fetch_stage = 0;
+				m.fetch_dot   = 0;
+			}
+			m.fetch_is_window = false;
+			m.win_fresh       = false;
+		}
+		// A WX match landing while the pulse has the window off arms the
+		// desync catch-up (only before the line's first activation).
+		if (!p.cgb && !m.fetch_is_window && !WinEnView(p, m) &&
+		    !m.win_activated_line && p.wy_triggered &&
+		    p.wx >= 7 && p.wx < 166 && p.wx_write_cooldown == 0 &&
+		    p.wx == static_cast<uint8_t>(m.pos + 7))
+			m.win_catchup_pos = static_cast<int16_t>(m.pos);
+		if (!skip_head && WindowCheckDot(p, m))
+			return false;
+		// WX re-match while the window is active with a fresh tile fetch
+		// queued: one blank pixel squeezes into the stream (SameBoy
+		// insert_bg_pixel; mealybug m3_wx_4/5/6_change).
+		if (p.wx == static_cast<uint8_t>(m.pos + 7) && (!p.cgb || p.wx == 0) &&
+		    m.fetch_is_window && !m.win_fresh &&
+		    m.fetch_stage == 0 && m.fetch_dot == 0 && m.bgf_count == 8)
+			m.bgf_insert = true;
+
+		SpriteDiscardPassed(p, m, XForObjMatch(m));
+		if (ObjHandleMatches(p, m, mem))
+			return false;
+	}
+
+	RenderDot(p, m, mem);
+	FetcherDot(p, m);
+
+	if (m.pos == 160)
+	{
+		{
+			static int xs2 = -1;
+			if (xs2 < 0) { const char *e = getenv("ACID_XS"); xs2 = e ? atoi(e) : 0; }
+			if (xs2 > 0)
+				return false;   // exit handled at the top of the next dot
+		}
+		return true;
+	}
+
+	return false;
 }
 
 // One GB t-cycle's worth of PPU work. Drives mode 2 sprite eval (latched
@@ -1459,50 +1619,34 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 			// hardware OAM scan's outcome) in scan order — the FIFO's
 			// fetch order then produces X/OAM priority naturally.
 			EvalSprites(p, mem);
-			p.draw_x        = 0;
-			p.window_active = p.win_carry;
 
-			// Prime the pixel pipeline: the BG FIFO starts with 8 junk
-			// pixels (the position machine's prefix drops them) and the
-			// render loop starts a few dots into STAT mode 3 (SameBoy
-			// sleeps 3+2 there; 4 lands pixel 0 on our calibrated grid).
-			BgFifoClear(p);
-			ObjFifoClear(p);
-			for (int i = 0; i < 8; ++i)
+			// Prime both dot machines. Each starts with 8 junk pixels in
+			// its BG FIFO (the position machine's prefix drops them). The
+			// skeleton runs from the STAT flip; the output machine trails
+			// it so its register and VRAM reads land on the hardware dots.
+			static int entry = -1, entryc = -1, entryl = -1;
+			if (entry < 0) { const char *e = getenv("ACID_ENTRY"); entry = e ? atoi(e) : 4;
+			                 const char *f = getenv("ACID_ENTRYC"); entryc = f ? atoi(f) : 4;
+			                 const char *g = getenv("ACID_ENTRYL"); entryl = g ? atoi(g) : entry; }
+			const int odelay = was_lcdon ? entryl : p.cgb ? entryc : entry;
+			for (int mi = 0; mi < 2; ++mi)
 			{
-				p.bgf_color[i] = 0;
-				p.bgf_attr[i]  = 0;
-				p.bgf_layer[i] = 0;
+				PixelMachine &pm = mi ? p.om : p.tm;
+				const bool carry = pm.win_carry;
+				const int32_t wline = pm.window_line;
+				pm = PixelMachine{};
+				pm.emits       = (mi != 0);
+				pm.entry_delay = static_cast<uint8_t>(mi ? odelay : 0);
+				pm.entry_wait  = pm.entry_delay;
+				pm.window_line = wline;
+				pm.bgf_count   = 8;
+				pm.fetch_is_window = carry;
+				pm.fetch_tile_x    = carry ? 1 : 0;
+				pm.win_activated_line = carry;
+				std::memset(pm.objf_owner, 0xFF, sizeof pm.objf_owner);
 			}
-			p.bgf_count           = 8;
-			p.fetch_stage         = 0;
-			p.fetch_dot           = 0;
-			p.fetch_is_window     = p.win_carry;
-			p.fetch_tile_x        = p.win_carry ? 1 : 0;
-			p.win_carry           = false;
-			p.pos                 = 0xF0;
-			{
-				static int entry = -1, entryc = -1, entryl = -1;
-				if (entry < 0) { const char *e = getenv("ACID_ENTRY"); entry = e ? atoi(e) : 4;
-				                 const char *f = getenv("ACID_ENTRYC"); entryc = f ? atoi(f) : 4;
-				                 const char *g = getenv("ACID_ENTRYL"); entryl = g ? atoi(g) : entry; }
-				p.entry_wait = static_cast<uint8_t>(
-					was_lcdon ? entryl : p.cgb ? entryc : entry);
-			}
-			p.lcd_x               = 0;
-			p.obj_fetch_state     = 0;
-			p.obj_overlay         = false;
-			p.during_obj          = false;
-			p.iter_resume         = false;
-			p.win_fresh           = false;
-			p.bgf_insert          = false;
-			p.win_insert_disable  = false;
-			p.win_catchup_pos     = -1;
-			p.win_activated_line  = p.window_active;
-			p.win_pend            = 0;
-			p.machine_stall       = 0;
-			p.fetch_pause         = 0;
-			p.sprite_used_mask    = 0;
+			p.draw_x        = 0;
+			p.window_active = p.om.fetch_is_window;
 			p.mode3_sprite_stall  = 0;
 
 			// Legacy latches — kept for savestate layout and the SGB
@@ -1519,147 +1663,37 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 
 	case PpuMode::Transfer:
 	{
-		// --- SameBoy position_in_line render loop, one dot per call ---
-		if (p.entry_wait > 0)
+// Both machines advance on every mode-3 dot. The skeleton decides when
+// mode 3 ends; the output machine trails it by entry_delay dots and keeps
+// running into HBlank until it has produced all 160 pixels.
+		if (!p.tm.done && Mode3Dot(p, p.tm, mem))
 		{
-			--p.entry_wait;
-			break;
+			p.tm.done = true;
+			transitioned = Mode3Exit(p, p.tm, mem);
 		}
-		if (p.machine_stall > 0)
+		if (!p.om.done && Mode3Dot(p, p.om, mem))
 		{
-			--p.machine_stall;
-			break;
+			p.om.done = true;
+			Mode3WxCarry(p, p.om);
+			Mode3OutputExit(p, p.om);
 		}
-		// ACID_XS=1: the mode-0 transition lands one dot after the last
-		// pop (SameBoy sleeps once between the loop break and the STAT
-		// flip); the extra dot renders nothing.
-		{
-			static int xs = -1;
-			if (xs < 0) { const char *e = getenv("ACID_XS"); xs = e ? atoi(e) : 0; }
-			if (xs > 0 && p.pos == 160 && p.entry_wait == 0)
-			{
-				if (p.mode3_hold < 0)
-				{
-					p.mode3_hold = static_cast<int16_t>(xs);
-					break;
-				}
-				if (p.mode3_hold > 0 && --p.mode3_hold > 0)
-					break;
-				p.mode3_hold = -1;
-				transitioned = Mode3Exit(p, mem);
-				break;
-			}
-		}
-
-		// An in-flight object fetch owns the dot outright (pops paused).
-		if (p.obj_fetch_state > 0)
-		{
-			ObjMachineDot(p, mem);
-			break;
-		}
-
-		bool to_render = false;
-		if (p.obj_overlay)
-		{
-			// The fetched row lands now; a chained object at the same column
-			// starts immediately, otherwise the iteration falls through to
-			// the pop (the loop head does NOT re-run mid-iteration).
-			p.obj_overlay = false;
-			ObjOverlayRow(p, p.obj_lo, p.obj_hi, p.obj_flags_bus,
-			              p.sprites[p.obj_fetch_slot].oam_idx);
-			if (ObjHandleMatches(p, mem))
-				break;
-			to_render = true;
-		}
-
-		if (!to_render)
-		{
-			const bool skip_head = p.iter_resume;
-			p.iter_resume = false;
-			// Commit or drop a pending window activation: the match dot's
-			// register state must survive one dot or the fetch never starts
-			// (Coffee GB windowPendingTicks). The pixel popped during the
-			// pending dot rolls back so the activation lands at the match.
-			if (p.win_pend)
-			{
-				p.win_pend = 0;
-				if (p.wx == p.win_pend_wx && (p.cgb || WinEnView(p)))
-				{
-					if (p.pos != p.win_pend_pos)
-					{
-						RewindPixel(p);
-						p.pos = p.win_pend_pos;
-					}
-					++p.window_line;
-					p.fetch_tile_x = 0;
-					BgFifoClear(p);
-					p.fetch_is_window = true;
-					p.fetch_stage = 0;
-					p.fetch_dot   = 0;
-					p.win_fresh   = true;
-					p.window_active  = true;
-					p.window_start_x = p.lcd_x;
-					if (p.wx == 0 && (p.scx & 7) && !p.cgb)
-						p.machine_stall = 1;
-					if (!p.win_activated_line)
-						FetcherDot(p);   // the fetch restarted back at the match dot
-					p.win_activated_line = true;
-				}
-			}
-			// DMG: clearing LCDC.5 kills the window fetch only while it is
-			// still early (through the map read); later stages complete and
-			// push their window tile (Coffee GB; m3_lcdc_win_en_change_multiple).
-			if (!p.cgb && p.fetch_is_window && !WinEnView(p) &&
-			    p.fetch_stage <= 1)
-			{
-				if (p.fetch_stage != 0 || p.fetch_dot != 0)
-				{
-					p.fetch_stage = 0;
-					p.fetch_dot   = 0;
-				}
-				p.fetch_is_window = false;
-				p.win_fresh       = false;
-			}
-			// A WX match landing while the pulse has the window off arms the
-			// desync catch-up (only before the line's first activation).
-			if (!p.cgb && !p.fetch_is_window && !WinEnView(p) &&
-			    !p.win_activated_line && p.wy_triggered &&
-			    p.wx >= 7 && p.wx < 166 && p.wx_write_cooldown == 0 &&
-			    p.wx == static_cast<uint8_t>(p.pos + 7))
-				p.win_catchup_pos = static_cast<int16_t>(p.pos);
-			if (!skip_head && WindowCheckDot(p))
-				break;
-			// WX re-match while the window is active with a fresh tile fetch
-			// queued: one blank pixel squeezes into the stream (SameBoy
-			// insert_bg_pixel; mealybug m3_wx_4/5/6_change).
-			if (p.wx == static_cast<uint8_t>(p.pos + 7) && (!p.cgb || p.wx == 0) &&
-			    p.fetch_is_window && !p.win_fresh &&
-			    p.fetch_stage == 0 && p.fetch_dot == 0 && p.bgf_count == 8)
-				p.bgf_insert = true;
-
-			SpriteDiscardPassed(p, XForObjMatch(p));
-			if (ObjHandleMatches(p, mem))
-				break;
-		}
-
-		RenderDot(p, mem);
-		FetcherDot(p);
-
-		if (p.pos == 160)
-		{
-			{
-				static int xs2 = -1;
-				if (xs2 < 0) { const char *e = getenv("ACID_XS"); xs2 = e ? atoi(e) : 0; }
-				if (xs2 > 0)
-					break;   // exit handled at the top of the next dot
-			}
-			transitioned = Mode3Exit(p, mem);
-		}
+		p.draw_x        = p.om.lcd_x;
+		p.window_active = p.om.fetch_is_window || p.om.win_carry;
 		break;
 	}
 
 	case PpuMode::HBlank:
 	{
+		// The output machine trails the skeleton, so it finishes its line a
+		// few dots into HBlank.
+		if (!p.om.done && Mode3Dot(p, p.om, mem))
+		{
+			p.om.done = true;
+			Mode3WxCarry(p, p.om);
+			Mode3OutputExit(p, p.om);
+			p.draw_x = p.om.lcd_x;
+		}
+
 		// Mode 0 absorbs the sprite stall so the scanline still totals 456
 		// dots — including the 4-dot line-start window (below) during which
 		// STAT still reads mode 0 while LY has already advanced.
@@ -1699,7 +1733,8 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				}
 				p.frame_ready   = true;
 				p.present_hold  = false;
-				p.window_line   = -1;
+				p.tm.window_line = -1;
+				p.om.window_line = -1;
 				p.window_active = false;
 				p.wy_triggered  = false;
 				p.vblank_irq_at = p.t_cycles + GB_VBLANK_IRQ_OFFSET;
@@ -1767,6 +1802,10 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 	p.lcdc_d3 = p.lcdc_d2;
 	p.lcdc_d2 = p.lcdc_shadow;
 	p.lcdc_shadow = p.lcdc;
+	p.wx_d4 = p.wx_d3;
+	p.wx_d3 = p.wx_d2;
+	p.wx_d2 = p.wx_d1;
+	p.wx_d1 = p.wx;
 }
 
 void PpuOnCpuStop(Ppu &p, bool cgb_hw)
@@ -1855,7 +1894,8 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		p.mode           = PpuMode::HBlank;
 		p.ly             = 0;
 		p.mode_clock     = 0;
-		p.window_line    = -1;
+		p.tm.window_line = -1;
+		p.om.window_line = -1;
 		p.stat_line_high = (p.stat & 0x40) && (p.stat & 0x04);
 		p.vblank_irq_at = 0;
 		p.stat_irq_delay = 0;
@@ -1902,14 +1942,14 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 				         p.mode_clock >= MODE2_DOTS + 7 - v3)
 					v = static_cast<uint8_t>((v & ~0x03) | 0x03);
 				else if (!p.cgb && !p.lcdon_line && p.mode == PpuMode::Transfer &&
-				         v0 > 0 && p.lcd_x >= GB_SCREEN_WIDTH - v0)
+				         v0 > 0 && p.tm.lcd_x >= GB_SCREEN_WIDTH - v0)
 					v = static_cast<uint8_t>(v & ~0x03);
-				else if (!p.cgb && !p.lcdon_line && p.mode == PpuMode::HBlank)
+				else if (!p.cgb && p.mode == PpuMode::HBlank &&
+				         (p.lcdc & 0x80) && p.stop_display == 0 && !p.om.done)
 				{
-					static int h1 = -1;
-					if (h1 < 0) { const char *e = getenv("ACID_H1"); h1 = e ? atoi(e) : 0; }
-					if (p.mode_clock < h1)
-						v = static_cast<uint8_t>((v & ~0x03) | 0x03);
+					// STAT keeps reading mode 3 while the LCD is still
+					// taking this line's last pixels.
+					v = static_cast<uint8_t>((v & ~0x03) | 0x03);
 				}
 			}
 			// Around a line flip the coincidence flag walks old-LY compare,
@@ -1963,16 +2003,17 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			const bool was_on = (p.lcdc & 0x80) != 0;
 			// DMG: dropping OBJ enable mid-object-fetch aborts the fetch
 			// (SameBoy object_fetch_aborted; m3_lcdc_obj_en_change).
-			if (!p.cgb && (p.lcdc & 0x02) && !(value & 0x02) && p.during_obj)
+			if (!p.cgb && (p.lcdc & 0x02) && !(value & 0x02))
 			{
-				p.obj_fetch_state = 0;
-				p.during_obj = false;
+				for (PixelMachine *pm : { &p.tm, &p.om })
+					if (pm->during_obj) { pm->obj_fetch_state = 0; pm->during_obj = false; }
 			}
 			// Window bit dropped while the window row is still fetching:
 			// the insertion glitch stays off for the rest of the line.
-			if (!p.cgb && (p.lcdc & 0x20) && !(value & 0x20) && p.win_fresh &&
-			    p.mode == PpuMode::Transfer)
-				p.win_insert_disable = true;
+			if (!p.cgb && (p.lcdc & 0x20) && !(value & 0x20) &&
+			    PpuRendering(p))
+				for (PixelMachine *pm : { &p.tm, &p.om })
+					if (pm->win_fresh) pm->win_insert_disable = true;
 			p.lcdc = value;
 			const bool is_on  = (p.lcdc & 0x80) != 0;
 			if (was_on && !is_on && p.cgb && p.mode != PpuMode::HBlank)
@@ -1983,7 +2024,8 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.ly          = 0;
 				p.mode        = PpuMode::OamScan;
 				p.mode_clock  = 0;
-				p.window_line = -1;
+				p.tm.window_line = -1;
+				p.om.window_line = -1;
 				p.lcdon_first = true;
 				p.present_hold = p.hold_present_on_enable;
 			}
@@ -2050,7 +2092,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 		{
 			// DMG palette-write glitch: the dot the store lands on renders
 			// with (old | new); the clean value takes hold next dot.
-			if (!p.cgb && p.mode == PpuMode::Transfer && g_pal_unit == 0)
+			if (!p.cgb && PpuRendering(p) && g_pal_unit == 0)
 			{
 				{ static int pgl = -1;
 				  if (pgl < 0) { const char *e = getenv("ACID_PGL"); pgl = e ? atoi(e) : 2; }
@@ -2061,7 +2103,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			}
 			else
 				p.bgp = value;
-			if (p.mode == PpuMode::Transfer)
+			if (PpuRendering(p))
 				p.latched_bgp = value;
 			// DMG raster write-time reconstruction. In the per-dot interleave
 			// the CPU trails the PPU by up to kMaxOpcodeTCycles, so by the
@@ -2128,7 +2170,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			break;
 		}
 		case 0xFF48:
-			if (!p.cgb && p.mode == PpuMode::Transfer && g_pal_unit == 0)
+			if (!p.cgb && PpuRendering(p) && g_pal_unit == 0)
 			{
 				{ static int pgl = -1;
 				  if (pgl < 0) { const char *e = getenv("ACID_PGL"); pgl = e ? atoi(e) : 2; }
@@ -2141,7 +2183,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.obp0 = value;
 			break;
 		case 0xFF49:
-			if (!p.cgb && p.mode == PpuMode::Transfer && g_pal_unit == 0)
+			if (!p.cgb && PpuRendering(p) && g_pal_unit == 0)
 			{
 				{ static int pgl = -1;
 				  if (pgl < 0) { const char *e = getenv("ACID_PGL"); pgl = e ? atoi(e) : 2; }

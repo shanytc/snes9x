@@ -31,21 +31,23 @@ inline bool CpuVisibleMode0(const Memory &m)
 	static int ub = -1;
 	if (ub < 0) { const char *e = getenv("ACID_UB"); ub = e ? atoi(e) : 0; }
 	return ub > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
-	       m.ppu->lcd_x >= GB_SCREEN_WIDTH - ub;
+	       m.ppu->tm.lcd_x >= GB_SCREEN_WIDTH - ub;
+}
+
+// The LCD is still taking pixels for this line: the output machine trails
+// the timing skeleton, and the CPU's locks follow the pixels.
+inline bool PpuStillRendering(const Memory &m)
+{
+	return m.ppu->mode == PpuMode::Transfer || !m.ppu->om.done;
 }
 
 inline bool VramBlocked(const Memory &m, bool write = false)
 {
 	if (g_dma_vram_bypass || !m.ppu || !(m.ppu->lcdc & 0x80)) return false;
-	if (m.ppu->mode == PpuMode::Transfer) return !CpuVisibleMode0(m);
+	if (PpuStillRendering(m)) return !CpuVisibleMode0(m);
 	// Only READS lock ahead of the transfer; writes pass until mode 3
 	// (Coffee GB isVramAvailableForCpu; mooneye lcdon_write_timing).
 	if (write) return false;
-	static int vh = -1;
-	if (vh < 0) { const char *e = getenv("ACID_VH"); vh = e ? atoi(e) : 0; }
-	if (vh > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
-	    m.ppu->mode == PpuMode::HBlank && m.ppu->mode_clock < vh)
-		return true;
 	// The lock engages a few dots before the machine's mode-3 entry, in
 	// step with the visible STAT flip (mooneye lcdon_timing VRAM table).
 	static int vlk = -1;
@@ -60,13 +62,7 @@ inline bool VramBlocked(const Memory &m, bool write = false)
 inline bool OamBlocked(const Memory &m)
 {
 	if (!m.ppu || !(m.ppu->lcdc & 0x80)) return false;
-	if (m.ppu->mode == PpuMode::Transfer) return !CpuVisibleMode0(m);
-	// the CPU-side lock releases a couple of dots into mode 0
-	static int oh = -1;
-	if (oh < 0) { const char *e = getenv("ACID_OH"); oh = e ? atoi(e) : 0; }
-	if (oh > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
-	    m.ppu->mode == PpuMode::HBlank && m.ppu->mode_clock < oh)
-		return true;
+	if (PpuStillRendering(m)) return !CpuVisibleMode0(m);
 	// The glitched first line after LCD enable never locks OAM until its
 	// (early) mode 3 (mooneye lcdon_write_timing).
 	static int oe = -99;
@@ -192,7 +188,7 @@ static bool OamWriteBlocked(const Memory &m)
 	if (!m.ppu || !(m.ppu->lcdc & 0x80)) return false;
 	const Ppu &p = *m.ppu;
 	if (p.cgb) return OamBlocked(m);
-	if (p.mode == PpuMode::Transfer) return !CpuVisibleMode0(m);
+	if (PpuStillRendering(m)) return !CpuVisibleMode0(m);
 	if (p.mode != PpuMode::OamScan || p.lcdon_first) return false;
 	static int oew = -99, owf = -99;
 	if (oew < -90) { const char *e = getenv("ACID_OEW"); oew = e ? atoi(e) : 5;
@@ -786,7 +782,7 @@ bool MemLcdcPartial(Memory &m, uint8_t value, uint8_t *partial)
 	if (!m.ppu || m.ppu->cgb) return false;
 	const Ppu &p = *m.ppu;
 	uint8_t old = p.lcdc;
-	if (!(value & 0x02) && (p.pos == 0 || p.during_obj))
+	if (!(value & 0x02) && (p.om.pos == 0 || p.om.during_obj || p.tm.during_obj))
 		old = static_cast<uint8_t>(old & ~0x02);
 	*partial = static_cast<uint8_t>(old | (value & 0x01));
 	return true;

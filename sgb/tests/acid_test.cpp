@@ -224,32 +224,52 @@ int main(int argc, char **argv)
 	std::vector<AcidTests::ReportRow> rows;
 	rows.reserve(tests.size());
 	for (size_t i = 0; i < tests.size(); ++i)
-		rows.push_back({ &tests[i], &results[i] });
+	{
+		AcidTests::ReportRow row;
+		row.test   = &tests[i];
+		row.result = &results[i];
+		rows.push_back(std::move(row));
+	}
 
-	AcidTests::Baseline base;
+	// Every folder under acid/baseline/ is compared against; --baseline adds
+	// one from anywhere else.
+	std::vector<AcidTests::Baseline> baselines =
+		AcidTests::DiscoverBaselines(opts.acid_dir);
 	if (!compare_baseline.empty())
 	{
-		if (!AcidTests::LoadBaseline(compare_baseline.c_str(), base, err))
+		AcidTests::Baseline extra;
+		if (!AcidTests::LoadBaseline(compare_baseline.c_str(), extra, err))
 		{
 			fprintf(stderr, "baseline: %s\n", err.c_str());
 			return 255;
 		}
-		info.baseline = &base;
-		int same = 0, differ = 0, missing = 0;
+		extra.name = compare_baseline;
+		baselines.push_back(std::move(extra));
+	}
+	if (!baselines.empty())
+	{
+		info.baselines = &baselines;
+		std::vector<int> same(baselines.size()), differ(baselines.size()),
+		                 missing(baselines.size());
 		for (AcidTests::ReportRow &r : rows)
 		{
-			r.match = AcidTests::CompareToBaseline(base, *r.test, r.result->shot,
-			                                       r.diff_px);
-			if      (r.match == AcidTests::Match::Same)    ++same;
-			else if (r.match == AcidTests::Match::Differs) ++differ;
-			else if (r.match == AcidTests::Match::NoImage) ++missing;
-			if (r.match == AcidTests::Match::Differs)
-				printf("DIFF  %-58s %d px off the baseline\n",
-				       r.test->name.c_str(), r.diff_px);
+			r.match.resize(baselines.size());
+			r.diff_px.resize(baselines.size());
+			for (size_t b = 0; b < baselines.size(); ++b)
+			{
+				r.match[b] = AcidTests::CompareToBaseline(
+					baselines[b], *r.test, r.result->shot, r.diff_px[b]);
+				if      (r.match[b] == AcidTests::Match::Same)    ++same[b];
+				else if (r.match[b] == AcidTests::Match::Differs) ++differ[b];
+				else if (r.match[b] == AcidTests::Match::NoImage) ++missing[b];
+				if (r.match[b] == AcidTests::Match::Differs)
+					printf("DIFF  %-48s %-14s %d px\n", r.test->name.c_str(),
+					       baselines[b].name.c_str(), r.diff_px[b]);
+			}
 		}
-		printf("baseline %s%s%s: %d same, %d differ, %d missing\n",
-		       compare_baseline.c_str(), base.title.empty() ? "" : " / ",
-		       base.title.c_str(), same, differ, missing);
+		for (size_t b = 0; b < baselines.size(); ++b)
+			printf("baseline %-16s %d same, %d differ, %d missing\n",
+			       baselines[b].name.c_str(), same[b], differ[b], missing[b]);
 	}
 
 	if (!save_baseline.empty())

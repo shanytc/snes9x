@@ -68,6 +68,18 @@ struct Filter
 	std::string Describe() const;     // for report headers; "all tests" when empty
 };
 
+// Layout under the acid directory: ROMs in tests/, screenshots in
+// baseline/<name>/ sharing one set of relative paths, so a second opinion
+// is just another folder beside default/.
+constexpr const char *kRomDir          = "tests";
+constexpr const char *kBaselineDir     = "baseline";
+constexpr const char *kDefaultBaseline = "default";
+
+std::string RomPath(const std::string &acid_dir, const std::string &rom);
+std::string BaselinePath(const std::string &acid_dir, const std::string &name);
+std::string ImagePath(const std::string &acid_dir, const std::string &baseline,
+                      const std::string &image);
+
 // A captured GB frame: 160x144 RGB triplets, row 0 at the top. Empty when
 // the test never got far enough to render one.
 constexpr int kShotWidth  = 160;

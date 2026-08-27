@@ -45,8 +45,8 @@ constexpr int kShowPending = 4;
 constexpr int kShowDiffers = 5;
 constexpr int kShowMissing = 6;
 
-// List columns.
-enum { kColNum, kColTest, kColModel, kColResult, kColBaseline, kColDetail };
+// Fixed list columns; one per baseline follows, then Detail last.
+enum { kColNum, kColTest, kColModel, kColResult, kColBaseline };
 
 struct AcidDlgState
 {
@@ -58,11 +58,12 @@ struct AcidDlgState
 	std::vector<AcidTests::Result> results;
 	std::string       acid_dir;
 
-	// Frames to diff against, and how each test came out. Empty dir = none
-	// loaded, which leaves every match at None and the column blank.
-	AcidTests::Baseline           baseline;
-	std::vector<AcidTests::Match> match;
-	std::vector<int>              diff_px;
+	// Every folder under acid/baseline/, one list column each, and how each
+	// test came out against each of them - indexed [test][baseline].
+	std::vector<AcidTests::Baseline>           baselines;
+	std::vector<std::vector<AcidTests::Match>> match;
+	std::vector<std::vector<int>>              diff_px;
+	int col_detail = kColBaseline;   // shifts right as baselines are found
 
 	// Filter state. An all-clear vector means "no restriction".
 	std::string              search;
@@ -154,32 +155,52 @@ bool HasResult(const AcidDlgState *st, int test)
 
 bool HaveBaseline(const AcidDlgState *st)
 {
-	return !st->baseline.dir.empty();
+	return !st->baselines.empty();
 }
 
-// Re-diff one test against the loaded baseline.
+// Re-diff one test against every baseline.
 void RecomputeMatch(AcidDlgState *st, int test)
 {
-	if (!HaveBaseline(st))
-	{
-		st->match[test]   = AcidTests::Match::None;
-		st->diff_px[test] = 0;
-		return;
-	}
-	st->match[test] = AcidTests::CompareToBaseline(
-		st->baseline, st->tests[test], st->results[test].shot, st->diff_px[test]);
+	st->match[test].assign(st->baselines.size(), AcidTests::Match::None);
+	st->diff_px[test].assign(st->baselines.size(), 0);
+	for (size_t b = 0; b < st->baselines.size(); ++b)
+		st->match[test][b] = AcidTests::CompareToBaseline(
+			st->baselines[b], st->tests[test], st->results[test].shot,
+			st->diff_px[test][b]);
 }
 
-void BaselineText(const AcidDlgState *st, int test, char *buf, size_t n)
+// True when any baseline says so - what the Show filter asks.
+bool MatchIsAny(const AcidDlgState *st, int test, AcidTests::Match want)
 {
-	switch (st->match[test])
+	for (AcidTests::Match m : st->match[test])
+		if (m == want) return true;
+	return false;
+}
+
+void BaselineText(const AcidDlgState *st, int test, size_t b, char *buf, size_t n)
+{
+	const AcidTests::Match m = b < st->match[test].size()
+	                           ? st->match[test][b] : AcidTests::Match::None;
+	switch (m)
 	{
 		case AcidTests::Match::Same:    snprintf(buf, n, "SAME");    break;
 		case AcidTests::Match::NoImage: snprintf(buf, n, "MISSING"); break;
 		case AcidTests::Match::NoFrame: snprintf(buf, n, "-");       break;
 		case AcidTests::Match::Differs:
-			snprintf(buf, n, "DIFF %d px", st->diff_px[test]);       break;
+			snprintf(buf, n, "DIFF %d px", st->diff_px[test][b]);    break;
 		default: buf[0] = 0;
+	}
+}
+
+// Fill or clear every baseline cell on one row.
+void SetBaselineCells(AcidDlgState *st, int row, int test, bool clear)
+{
+	char buf[64];
+	for (size_t b = 0; b < st->baselines.size(); ++b)
+	{
+		if (clear) buf[0] = 0;
+		else       BaselineText(st, test, b, buf, sizeof buf);
+		SetItemText(st->hList, row, kColBaseline + (int)b, buf);
 	}
 }
 
@@ -223,10 +244,39 @@ bool ShowStatus(const AcidDlgState *st, int test)
 	const int slot = (s == kPending || s == kRunning) ? kShowPending : s;
 	if (st->show_on[slot]) return true;
 	if (st->show_on[kShowDiffers] &&
-	    st->match[test] == AcidTests::Match::Differs) return true;
+	    MatchIsAny(st, test, AcidTests::Match::Differs)) return true;
 	if (st->show_on[kShowMissing] &&
-	    st->match[test] == AcidTests::Match::NoImage) return true;
+	    MatchIsAny(st, test, AcidTests::Match::NoImage)) return true;
 	return false;
+}
+
+void InsertCol(AcidDlgState *st, int idx, const char *name, int width)
+{
+	Utf8ToWide wname(name);
+	LVCOLUMN lvc = {};
+	lvc.mask    = LVCF_TEXT | LVCF_WIDTH;
+	lvc.pszText = (LPTSTR)(const TCHAR *)wname;
+	lvc.cx      = width;
+	ListView_InsertColumn(st->hList, idx, &lvc);
+}
+
+// Fixed columns, then one per baseline, then Detail. Rebuilt whenever the
+// baseline folder is rescanned.
+void RebuildColumns(AcidDlgState *st)
+{
+	while (ListView_DeleteColumn(st->hList, 0)) {}
+	struct { const char *name; int width; } fixed[] = {
+		{ "#",      34 },
+		{ "Test",  330 },
+		{ "Model",  44 },
+		{ "Result", 50 },
+	};
+	int col = 0;
+	for (const auto &f : fixed) InsertCol(st, col++, f.name, f.width);
+	for (const AcidTests::Baseline &b : st->baselines)
+		InsertCol(st, col++, b.name.c_str(), 88);
+	st->col_detail = col;
+	InsertCol(st, col, "Detail", 200);
 }
 
 void PopulateList(AcidDlgState *st)
@@ -251,8 +301,7 @@ void PopulateList(AcidDlgState *st)
 		const int s = st->status[i];
 		SetItemText(st->hList, (int)row, kColResult,
 		            s == kRunning ? "RUN" : s == kPending ? "" : kStatusNames[s]);
-		BaselineText(st, i, buf, sizeof buf);
-		SetItemText(st->hList, (int)row, kColBaseline, buf);
+		SetBaselineCells(st, (int)row, i, false);
 		buf[0] = 0;
 		if (HasResult(st, i))
 		{
@@ -260,7 +309,7 @@ void PopulateList(AcidDlgState *st)
 			snprintf(buf, sizeof buf, "%d frames%s%s", r.frames,
 			         r.detail.empty() ? "" : "; ", r.detail.c_str());
 		}
-		SetItemText(st->hList, (int)row, kColDetail, buf);
+		SetItemText(st->hList, (int)row, st->col_detail, buf);
 	}
 	SetWindowRedraw(st->hList, TRUE);
 }
@@ -295,6 +344,8 @@ void UpdateFilterButtons(AcidDlgState *st)
 
 void UpdateShotCaption(AcidDlgState *st);
 void SelectShot(AcidDlgState *st, int test);
+std::vector<size_t> BaselinesWithFrame(const AcidDlgState *st, int test);
+void RescanBaselines(AcidDlgState *st, bool quiet);
 
 // Recompute which tests are listed and rebuild the view around them.
 void ApplyFilter(AcidDlgState *st)
@@ -387,12 +438,17 @@ void UpdateShotCaption(AcidDlgState *st)
 		                 st->tests[st->shown].name.c_str(),
 		                 s == kRunning ? "running..." :
 		                 s == kPending ? "not run yet" : kStatusNames[s]);
-		if (n > 0 && n < (int)sizeof buf && HaveBaseline(st))
+		// Frames are stacked in this order, so name them in it too.
+		const std::vector<size_t> drawn = BaselinesWithFrame(st, st->shown);
+		if (n > 0 && n < (int)sizeof buf && !drawn.empty())
+			n += snprintf(buf + n, sizeof buf - n, "\r\nours on top");
+		for (size_t b : drawn)
 		{
-			char base[128];
-			BaselineText(st, st->shown, base, sizeof base);
-			snprintf(buf + n, sizeof buf - n,
-			         "\r\ntop: ours, bottom: baseline\r\n%s", base);
+			if (n <= 0 || n >= (int)sizeof buf) break;
+			char verdict[64];
+			BaselineText(st, st->shown, b, verdict, sizeof verdict);
+			n += snprintf(buf + n, sizeof buf - n, "\r\n%s: %s",
+			              st->baselines[b].name.c_str(), verdict);
 		}
 	}
 	SetCtrlText(st->hShotCap, buf);
@@ -406,9 +462,9 @@ void SelectShot(AcidDlgState *st, int test)
 	InvalidateRect(st->hShot, NULL, TRUE);
 }
 
-// One frame at x,y scaled by `scale`. The core hands back R,G,B; a DIB
-// wants B,G,R.
-void BlitShot(HDC dc, const std::vector<uint8_t> &rgb, int x, int y, int scale)
+// One frame drawn into x,y,w,h. The core hands back R,G,B; a DIB wants
+// B,G,R.
+void BlitShot(HDC dc, const std::vector<uint8_t> &rgb, int x, int y, int w, int h)
 {
 	static std::vector<uint8_t> bgr;
 	bgr = rgb;
@@ -423,26 +479,42 @@ void BlitShot(HDC dc, const std::vector<uint8_t> &rgb, int x, int y, int scale)
 	bi.bmiHeader.biBitCount    = 24;
 	bi.bmiHeader.biCompression = BI_RGB;
 	SetStretchBltMode(dc, COLORONCOLOR);   // keep the pixels crisp
-	StretchDIBits(dc, x, y, AcidTests::kShotWidth * scale,
-	              AcidTests::kShotHeight * scale,
+	StretchDIBits(dc, x, y, w, h,
 	              0, 0, AcidTests::kShotWidth, AcidTests::kShotHeight,
 	              bgr.data(), &bi, DIB_RGB_COLORS, SRCCOPY);
 }
 
-// Our frame, and the baseline's stacked under it when one is loaded, each
-// at the largest whole scale that fits.
+// Baselines with a frame for this test, in column order. NoImage is the
+// only state that means there is nothing on disk to show.
+std::vector<size_t> BaselinesWithFrame(const AcidDlgState *st, int test)
+{
+	std::vector<size_t> out;
+	if (test < 0 || test >= (int)st->tests.size()) return out;
+	for (size_t b = 0; b < st->baselines.size(); ++b)
+		if (b < st->match[test].size() &&
+		    st->match[test][b] != AcidTests::Match::NoImage &&
+		    st->match[test][b] != AcidTests::Match::None)
+			out.push_back(b);
+	return out;
+}
+
+// Our frame with each baseline's stacked under it, at the largest whole
+// scale that fits - or shrunk to fit when there are too many for 1:1.
 void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
 {
 	RECT rc = dis->rcItem;
 	FillRect(dis->hDC, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
 
-	const std::vector<uint8_t> *rgb = ShotOf(st, st->shown);
-	std::vector<uint8_t> ref;
-	const bool have_ref = HaveBaseline(st) && st->shown >= 0 &&
-	                      st->shown < (int)st->tests.size() &&
-	                      AcidTests::LoadBaselineFrame(st->baseline,
-	                                                   st->tests[st->shown], ref);
-	if (!rgb && !have_ref)
+	std::vector<std::vector<uint8_t>> frames;
+	if (const std::vector<uint8_t> *ours = ShotOf(st, st->shown))
+		frames.push_back(*ours);
+	for (size_t b : BaselinesWithFrame(st, st->shown))
+	{
+		std::vector<uint8_t> ref;
+		if (AcidTests::LoadBaselineFrame(st->baselines[b], st->tests[st->shown], ref))
+			frames.push_back(std::move(ref));
+	}
+	if (frames.empty())
 	{
 		SetBkMode(dis->hDC, TRANSPARENT);
 		SetTextColor(dis->hDC, RGB(140, 140, 140));
@@ -451,23 +523,37 @@ void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
 		return;
 	}
 
-	const int gap  = 4;
-	const int rows = have_ref ? 2 : 1;
+	const int gap = 4, n = (int)frames.size();
 	const int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
-	int scale = cw / AcidTests::kShotWidth;
-	const int vscale = (ch - gap * (rows - 1)) / (AcidTests::kShotHeight * rows);
-	if (vscale < scale) scale = vscale;
-	if (scale < 1) scale = 1;
+	const int availh = ch - gap * (n - 1);
+	int w, h;
+	const int scale = std::min(cw / AcidTests::kShotWidth,
+	                           availh / (AcidTests::kShotHeight * n));
+	if (scale >= 1)
+	{
+		w = AcidTests::kShotWidth * scale;
+		h = AcidTests::kShotHeight * scale;
+	}
+	else
+	{
+		// Too many for 1:1 - fit them rather than clip the last ones away.
+		h = availh / n;
+		if (h < 1) h = 1;
+		w = AcidTests::kShotWidth * h / AcidTests::kShotHeight;
+		if (w > cw)
+		{
+			w = cw;
+			h = AcidTests::kShotHeight * w / AcidTests::kShotWidth;
+		}
+	}
 
-	const int w = AcidTests::kShotWidth * scale;
-	const int h = AcidTests::kShotHeight * scale;
 	const int x = rc.left + (cw - w) / 2;
-	int y = rc.top + (ch - (h * rows + gap * (rows - 1))) / 2;
-
-	if (rgb) BlitShot(dis->hDC, *rgb, x, y, scale);
-	if (!have_ref) return;
-	y += h + gap;
-	BlitShot(dis->hDC, ref, x, y, scale);
+	int y = rc.top + (ch - (h * n + gap * (n - 1))) / 2;
+	for (const std::vector<uint8_t> &f : frames)
+	{
+		BlitShot(dis->hDC, f, x, y, w, h);
+		y += h + gap;
+	}
 }
 
 /*--------------------------------------------------------------------------
@@ -521,13 +607,13 @@ void AcidStart(void *user, int run_index, const AcidTests::Test &)
 	st->status[i] = kRunning;
 	++st->in_flight;
 	st->results[i] = AcidTests::Result();
-	st->match[i]   = AcidTests::Match::None;
+	st->match[i].assign(st->baselines.size(), AcidTests::Match::None);
 	const int row = st->row_of[i];
 	if (row >= 0)
 	{
 		SetItemText(st->hList, row, kColResult, "RUN");
-		SetItemText(st->hList, row, kColBaseline, "");
-		SetItemText(st->hList, row, kColDetail, "");
+		SetBaselineCells(st, row, i, true);
+		SetItemText(st->hList, row, st->col_detail, "");
 		ListView_RedrawItems(st->hList, row, row);
 	}
 	if (i == st->shown) { UpdateShotCaption(st); InvalidateRect(st->hShot, NULL, TRUE); }
@@ -541,7 +627,7 @@ void AcidRunning(void *user, int run_index, int frames_done, int frames_total)
 	if (i < 0 || st->status[i] != kRunning || st->row_of[i] < 0) return;
 	char det[64];
 	snprintf(det, sizeof det, "frame %d/%d", frames_done, frames_total);
-	SetItemText(st->hList, st->row_of[i], kColDetail, det);
+	SetItemText(st->hList, st->row_of[i], st->col_detail, det);
 }
 
 void AcidResult(void *user, int run_index, const AcidTests::Test &,
@@ -559,12 +645,11 @@ void AcidResult(void *user, int run_index, const AcidTests::Test &,
 	if (row >= 0)
 	{
 		SetItemText(st->hList, row, kColResult, kStatusNames[(int)result.status]);
+		SetBaselineCells(st, row, i, false);
 		char det[288];
-		BaselineText(st, i, det, sizeof det);
-		SetItemText(st->hList, row, kColBaseline, det);
 		snprintf(det, sizeof det, "%d frames%s%s", result.frames,
 		         result.detail.empty() ? "" : "; ", result.detail.c_str());
-		SetItemText(st->hList, row, kColDetail, det);
+		SetItemText(st->hList, row, st->col_detail, det);
 		ListView_RedrawItems(st->hList, row, row);
 	}
 
@@ -592,7 +677,7 @@ std::vector<AcidTests::ReportRow> ReportRows(AcidDlgState *st)
 		row.result  = HasResult(st, i) ? &st->results[i] : nullptr;
 		row.match   = st->match[i];
 		row.diff_px = st->diff_px[i];
-		rows.push_back(row);
+		rows.push_back(std::move(row));
 	}
 	return rows;
 }
@@ -605,7 +690,7 @@ AcidTests::ReportInfo MakeReportInfo(AcidDlgState *st)
 	info.source  = st->acid_dir;
 	info.threads = st->threads;
 	info.seconds = st->last_secs;
-	if (HaveBaseline(st)) info.baseline = &st->baseline;
+	if (HaveBaseline(st)) info.baselines = &st->baselines;
 	return info;
 }
 
@@ -691,7 +776,17 @@ void ExportResults(AcidDlgState *st)
   Baselines
 --------------------------------------------------------------------------*/
 
-bool AskFolder(HWND hDlg, const TCHAR *title, TCHAR *path, int len)
+// Open the browser already sitting on `start`, so a new baseline lands
+// beside the others by default.
+int CALLBACK BrowseInitProc(HWND hwnd, UINT msg, LPARAM, LPARAM data)
+{
+	if (msg == BFFM_INITIALIZED && data)
+		SendMessage(hwnd, BFFM_SETSELECTION, TRUE, data);
+	return 0;
+}
+
+bool AskFolder(HWND hDlg, const TCHAR *title, const TCHAR *start,
+               TCHAR *path, int len)
 {
 	path[0] = 0;
 	TCHAR display[MAX_PATH] = { 0 };
@@ -700,6 +795,11 @@ bool AskFolder(HWND hDlg, const TCHAR *title, TCHAR *path, int len)
 	bi.pszDisplayName = display;
 	bi.lpszTitle      = title;
 	bi.ulFlags        = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX;
+	if (start && start[0])
+	{
+		bi.lpfn   = BrowseInitProc;
+		bi.lParam = (LPARAM)start;
+	}
 	LPITEMIDLIST idl = SHBrowseForFolder(&bi);
 	if (!idl) return false;
 	const BOOL got = SHGetPathFromIDList(idl, path);
@@ -712,9 +812,12 @@ bool AskFolder(HWND hDlg, const TCHAR *title, TCHAR *path, int len)
 
 void SaveBaseline(AcidDlgState *st)
 {
+	// A folder dropped in here is picked up as a column on the next scan.
+	Utf8ToWide wroot(AcidTests::BaselinePath(st->acid_dir, "").c_str());
 	TCHAR dir[MAX_PATH];
-	if (!AskFolder(st->hDlg, TEXT("Save the captured frames as a baseline in:"),
-	               dir, MAX_PATH))
+	if (!AskFolder(st->hDlg,
+	               TEXT("Save the captured frames as a baseline in a new folder under acid\\baseline:"),
+	               wroot, dir, MAX_PATH))
 		return;
 
 	WideToUtf8 udir(dir);
@@ -766,6 +869,9 @@ void SaveBaseline(AcidDlgState *st)
 	SetCtrlText(st->hStat, buf);
 	MessageBox(st->hDlg, TEXT("Test baseline saved!"), TEXT("Save baseline"),
 	           MB_OK | MB_ICONINFORMATION);
+	// Saved under acid/baseline? Then it is a column now.
+	RescanBaselines(st, true);
+	SetCtrlText(st->hStat, buf);
 }
 
 void RecomputeAllMatches(AcidDlgState *st)
@@ -773,59 +879,47 @@ void RecomputeAllMatches(AcidDlgState *st)
 	for (size_t i = 0; i < st->tests.size(); ++i) RecomputeMatch(st, (int)i);
 }
 
-void CompareBaseline(AcidDlgState *st)
-{
-	TCHAR dir[MAX_PATH];
-	if (!AskFolder(st->hDlg, TEXT("Compare this run against the frames in:"),
-	               dir, MAX_PATH))
-		return;
+void RebuildColumns(AcidDlgState *st);
 
-	WideToUtf8 udir(dir);
-	AcidTests::Baseline loaded;
-	std::string err;
-	if (!AcidTests::LoadBaseline((const char *)udir, loaded, err))
+// Pick up whatever is in acid/baseline/ now, rebuild the columns and
+// re-diff against the new set.
+void RescanBaselines(AcidDlgState *st, bool quiet)
+{
+	st->baselines = AcidTests::DiscoverBaselines(st->acid_dir.c_str());
+	if (!HaveBaseline(st))
 	{
-		Utf8ToWide werr(err.c_str());
-		MessageBox(st->hDlg, werr, TEXT("Compare with baseline"),
-		           MB_OK | MB_ICONERROR);
-		return;
+		// Those two only make sense while a baseline does; left set they
+		// would go on hiding rows with nothing to explain why.
+		st->show_on[kShowDiffers] = 0;
+		st->show_on[kShowMissing] = 0;
 	}
-	st->baseline = loaded;
+	RebuildColumns(st);
 	RecomputeAllMatches(st);
+	ApplyFilter(st);
+	InvalidateRect(st->hShot, NULL, TRUE);
+	UpdateShotCaption(st);
+	if (quiet) return;
 
-	int same = 0, differs = 0, missing = 0, noframe = 0;
-	for (int i : st->rows)
-		switch (st->match[i])
+	std::string msg = "Baselines: ";
+	if (!HaveBaseline(st)) msg += "none in " +
+		AcidTests::BaselinePath(st->acid_dir, "");
+	for (size_t b = 0; b < st->baselines.size(); ++b)
+	{
+		int same = 0, differs = 0, missing = 0;
+		for (int i : st->rows)
 		{
-			case AcidTests::Match::Same:    ++same;    break;
-			case AcidTests::Match::Differs: ++differs; break;
-			case AcidTests::Match::NoImage: ++missing; break;
-			case AcidTests::Match::NoFrame: ++noframe; break;
-			default: break;
+			if (b >= st->match[i].size()) continue;
+			if      (st->match[i][b] == AcidTests::Match::Same)    ++same;
+			else if (st->match[i][b] == AcidTests::Match::Differs) ++differs;
+			else if (st->match[i][b] == AcidTests::Match::NoImage) ++missing;
 		}
-
-	ApplyFilter(st);
-	char buf[MAX_PATH + 160];
-	snprintf(buf, sizeof buf,
-	         "Baseline %s%s%s: %d same, %d differ, %d missing, %d not run yet",
-	         (const char *)udir, st->baseline.title.empty() ? "" : " / ",
-	         st->baseline.title.c_str(), same, differs, missing, noframe);
-	SetCtrlText(st->hStat, buf);
-	InvalidateRect(st->hShot, NULL, TRUE);
-	UpdateShotCaption(st);
-}
-
-void ClearBaseline(AcidDlgState *st)
-{
-	st->baseline = AcidTests::Baseline();
-	// Those two only exist while a baseline does; left set they would go on
-	// hiding rows with nothing to explain why.
-	st->show_on[kShowDiffers] = 0;
-	st->show_on[kShowMissing] = 0;
-	RecomputeAllMatches(st);
-	ApplyFilter(st);
-	InvalidateRect(st->hShot, NULL, TRUE);
-	UpdateShotCaption(st);
+		char one[192];
+		snprintf(one, sizeof one, "%s%s: %d same, %d differ, %d missing",
+		         b ? "   " : "", st->baselines[b].name.c_str(), same, differs,
+		         missing);
+		msg += one;
+	}
+	SetCtrlText(st->hStat, msg.c_str());
 }
 
 void BaselineMenu(AcidDlgState *st)
@@ -839,19 +933,16 @@ void BaselineMenu(AcidDlgState *st)
 	HMENU menu = CreatePopupMenu();
 	if (!menu) return;
 	AppendMenu(menu, MF_STRING | (any_shot ? MF_ENABLED : MF_GRAYED), 1,
-	           TEXT("&Save shown frames as baseline..."));
-	AppendMenu(menu, MF_STRING, 2, TEXT("&Compare with baseline..."));
+	           TEXT("&Save shown frames as a baseline..."));
 	AppendMenu(menu, MF_SEPARATOR, 0, NULL);
-	AppendMenu(menu, MF_STRING | (HaveBaseline(st) ? MF_ENABLED : MF_GRAYED), 3,
-	           TEXT("Cl&ear comparison"));
+	AppendMenu(menu, MF_STRING, 2, TEXT("&Rescan acid\\baseline"));
 	const int cmd = (int)TrackPopupMenu(menu,
 		TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN |
 		TPM_LEFTBUTTON, rc.left, rc.top, 0, st->hDlg, NULL);
 	DestroyMenu(menu);
 
 	if      (cmd == 1) SaveBaseline(st);
-	else if (cmd == 2) CompareBaseline(st);
-	else if (cmd == 3) ClearBaseline(st);
+	else if (cmd == 2) RescanBaselines(st, false);
 }
 
 /*--------------------------------------------------------------------------
@@ -880,10 +971,10 @@ void RunSuite(AcidDlgState *st)
 		subset.push_back(st->tests[i]);
 		st->status[i]  = kPending;
 		st->results[i] = AcidTests::Result();
-		st->match[i]   = AcidTests::Match::None;
+		st->match[i].assign(st->baselines.size(), AcidTests::Match::None);
 		SetItemText(st->hList, st->row_of[i], kColResult, "");
-		SetItemText(st->hList, st->row_of[i], kColBaseline, "");
-		SetItemText(st->hList, st->row_of[i], kColDetail, "");
+		SetBaselineCells(st, st->row_of[i], i, true);
+		SetItemText(st->hList, st->row_of[i], st->col_detail, "");
 	}
 
 	st->running   = true;
@@ -1011,36 +1102,21 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		ListView_SetExtendedListViewStyle(st->hList,
 			LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-		struct { const TCHAR *name; int width; } cols[] = {
-			{ TEXT("#"),        34 },
-			{ TEXT("Test"),    330 },
-			{ TEXT("Model"),    44 },
-			{ TEXT("Result"),   50 },
-			{ TEXT("Baseline"), 82 },
-			{ TEXT("Detail"),  200 },
-		};
-		for (int i = 0; i < (int)(sizeof cols / sizeof cols[0]); ++i)
-		{
-			LVCOLUMN lvc = {};
-			lvc.mask     = LVCF_TEXT | LVCF_WIDTH;
-			lvc.pszText  = (LPTSTR)cols[i].name;
-			lvc.cx       = cols[i].width;
-			ListView_InsertColumn(st->hList, i, &lvc);
-		}
 
 		st->acid_dir = ResolveAcidDir();
 		std::string err;
 		bool loaded = AcidTests::LoadManifest(st->acid_dir.c_str(), st->tests, err);
 		st->status.assign(st->tests.size(), kPending);
 		st->results.assign(st->tests.size(), AcidTests::Result());
-		st->match.assign(st->tests.size(), AcidTests::Match::None);
-		st->diff_px.assign(st->tests.size(), 0);
+		st->match.assign(st->tests.size(), std::vector<AcidTests::Match>());
+		st->diff_px.assign(st->tests.size(), std::vector<int>());
 		st->suites   = AcidTests::SuitesOf(st->tests);
 		st->suite_on.assign(st->suites.size(), 0);
 		st->model_on.assign(3, 0);
 		st->show_on.assign(kShowCount, 0);
 
-		ApplyFilter(st);
+		// Builds the columns and applies the filter as a side effect.
+		RescanBaselines(st, true);
 		if (!loaded)
 		{
 			SetCtrlText(st->hStat, ("Cannot load manifest: " + err).c_str());

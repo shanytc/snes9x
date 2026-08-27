@@ -24,6 +24,7 @@ namespace AcidTests {
 struct Baseline
 {
 	std::string dir;
+	std::string name;     // folder under baseline/, and the column heading
 	std::string title;    // emulator named in baseline.txt, when it has one
 	std::string created;
 	// Test name -> image path relative to `dir`, from the index file.
@@ -44,8 +45,13 @@ struct Baseline
 
 // Read <dir>/baseline.txt if it is there. A folder without one still loads:
 // images are then found by their derived path, so a foreign dump laid out
-// like acid/ works with no index at all.
+// like the suite works with no index at all.
 bool LoadBaseline(const char *dir, Baseline &out, std::string &err);
+
+// Every folder under <acid_dir>/baseline/, loaded, with default first and
+// the rest in name order. Dropping a folder in is all it takes to have it
+// compared against.
+std::vector<Baseline> DiscoverBaselines(const char *acid_dir);
 
 // The baseline's frame for a test, as 160x144 RGB. False when it has none.
 // With `prefer` set, and a test that lists several acceptable screens, the

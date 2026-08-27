@@ -12,6 +12,9 @@
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <windows.h>
+#else
+#include <dirent.h>
 #endif
 
 #include "stb_image.h"
@@ -41,6 +44,39 @@ void MakeDir(const std::string &path)
 #else
 	mkdir(path.c_str(), 0755);
 #endif
+}
+
+// Immediate subdirectory names of `dir`, unsorted. Empty when it is not
+// there.
+std::vector<std::string> SubDirs(const std::string &dir)
+{
+	std::vector<std::string> out;
+#ifdef _WIN32
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) return out;
+	do
+	{
+		if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+		const std::string n = fd.cFileName;
+		if (n == "." || n == "..") continue;
+		out.push_back(n);
+	} while (FindNextFileA(h, &fd));
+	FindClose(h);
+#else
+	DIR *d = opendir(dir.c_str());
+	if (!d) return out;
+	while (struct dirent *e = readdir(d))
+	{
+		const std::string n = e->d_name;
+		if (n == "." || n == "..") continue;
+		struct stat sb;
+		if (stat((dir + "/" + n).c_str(), &sb) == 0 && S_ISDIR(sb.st_mode))
+			out.push_back(n);
+	}
+	closedir(d);
+#endif
+	return out;
 }
 
 // Create every directory along `path`, which names a file.
@@ -160,6 +196,28 @@ bool LoadBaseline(const char *dir, Baseline &out, std::string &err)
 	}
 	fclose(f);
 	return true;
+}
+
+std::vector<Baseline> DiscoverBaselines(const char *acid_dir)
+{
+	std::vector<Baseline> out;
+	const std::string root = acid_dir ? acid_dir : "acid";
+	std::vector<std::string> names = SubDirs(Join(root, kBaselineDir));
+	// default carries the suite's own screens, so it leads.
+	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
+		if ((a == kDefaultBaseline) != (b == kDefaultBaseline))
+			return a == kDefaultBaseline;
+		return a < b;
+	});
+	for (const std::string &n : names)
+	{
+		Baseline b;
+		std::string err;
+		if (!LoadBaseline(BaselinePath(root, n).c_str(), b, err)) continue;
+		b.name = n;
+		out.push_back(std::move(b));
+	}
+	return out;
 }
 
 bool LoadBaselineFrame(const Baseline &b, const Test &t,

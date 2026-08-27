@@ -9,11 +9,24 @@ from the [GB Emulator Shootout](https://tomek.rekawek.eu/GBEmulatorShootout/)
 
 ## Layout
 
+ROMs and screenshots share one set of relative paths but live under separate
+roots, so a second opinion is just another folder beside `default/`:
+
+    acid/tests/blargg/halt_bug.gb
+    acid/baseline/default/blargg/halt_bug.png
+    acid/baseline/supersnes9x/blargg/halt_bug.png
+
 - `manifest.txt` — one test per line: `name|model|runtime|rom|pass_images|fail_images`.
-  Image lists are `;`-separated, empty pass list = info-only test.
-- `acid/`, `blargg/`, `daid/`, `ax6/`, `mooneye/`, `samesuite/`, `ashiepaws/`,
-  `cpp/`, `mealybug/` — ROMs plus their reference PNGs, kept in the upstream
-  suite layout.
+  `rom` is relative to `tests/`, images to `baseline/<name>/`. Image lists are
+  `;`-separated, empty pass list = info-only test.
+- `tests/` — the ROMs in the upstream suite layout, plus the sources daid
+  ships with them.
+- `baseline/default/` — the reference screenshots the suite ships. These are
+  what decides PASS and FAIL, so the manifest's `pass_images` and
+  `fail_images` always resolve here however many other baselines exist.
+- `baseline/<anything else>/` — a set of frames to diff against, ours from an
+  earlier build or another emulator's dump. Every folder found here becomes
+  its own column; dropping one in is all it takes.
 - `defs/` — the upstream Python test definitions the manifest was generated
   from (`make_manifest.py` re-generates it).
 
@@ -68,30 +81,33 @@ the dialog's Export button:
 
 ## Baselines
 
-The manifest's reference PNGs are one particular emulator's idea of correct.
-A baseline is a second opinion: a folder of captured frames to diff a run
-against, either ours from an earlier build or another emulator's dump.
+`baseline/default/` is one particular emulator's idea of correct. A second
+baseline is a second opinion: a folder of captured frames to diff a run
+against. Every folder under `baseline/` is picked up automatically and gets
+its own column, `default` included, so adding one means creating a folder
+and nothing else.
 
-    ./acid_test --save-baseline ../../out/base     # write our frames there
-    ./acid_test --baseline ../../out/base          # diff this run against them
-    ./acid_test --baseline ../../acid              # or against the references
+    ./acid_test                                    # diffs against every baseline
+    ./acid_test --save-baseline ../../acid/baseline/supersnes9x
+    ./acid_test --baseline ../../out/somewhere-else # one more, from anywhere
 
-In the dialog the Baseline button saves the shown frames, loads a folder to
-compare against, or clears the comparison. A Baseline column then reads
-SAME, DIFF *n* px, MISSING or `-`, the preview pane stacks our frame over
-the baseline's, and the Show filter grows entries for what differs or is
-missing. Comparison uses the same rule as a pass: grayscale, 50/255 per
+In the dialog the Baseline button saves the shown frames as a new baseline
+or rescans the folder. Each baseline's column reads SAME, DIFF *n* px,
+MISSING or `-`; the preview pane stacks our frame over each baseline's; and
+the Show filter grows entries for what differs from or is missing from any
+of them. Comparison uses the same rule as a pass: grayscale, 50/255 per
 pixel.
 
 Saving into a folder that already holds frames asks first, naming how many
 would be replaced and who wrote the index it is about to overwrite. Saving
 into a folder that has a `manifest.txt` is refused outright: that is the
-test suite itself, whose reference PNGs sit at the very paths a save writes.
+suite root, not a baseline.
 
 Images are named after the test with a trailing `.gb`/`.gbc` dropped, so
-`blargg/halt_bug.gb` is saved as `blargg/halt_bug.png` — the layout the
-suite's own reference images already use. That means `acid/` itself works as
-a baseline with no index, and so does any foreign dump laid out the same
-way. Ours also carries a `baseline.txt` index recording the emulator, the
-timestamp and each test's verdict, which wins over the derived path when it
-is present.
+`blargg/halt_bug.gb` is saved as `blargg/halt_bug.png` — the same relative
+path `baseline/default/` uses, which is why any foreign dump laid out that
+way works unchanged. Thirty tests keep their reference somewhere the name
+does not predict (`m3_bgp_change_dmg_blob.png`), so lookup also tries the
+images the manifest names. Ours additionally carries a `baseline.txt`
+recording the emulator, the timestamp and each verdict, which wins over the
+derived path when present.

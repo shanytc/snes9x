@@ -29,9 +29,16 @@ struct ReportRow
 {
 	const Test   *test   = nullptr;
 	const Result *result = nullptr;
-	// How the frame compared with the loaded baseline, if there is one.
-	Match match   = Match::None;
-	int   diff_px = 0;
+	// How the frame compared with each baseline, in ReportInfo::baselines
+	// order. Empty when none were discovered.
+	std::vector<Match> match;
+	std::vector<int>   diff_px;
+
+	Match MatchAt(size_t i) const
+	{
+		return i < match.size() ? match[i] : Match::None;
+	}
+	int DiffAt(size_t i) const { return i < diff_px.size() ? diff_px[i] : 0; }
 };
 
 struct ReportInfo
@@ -45,9 +52,9 @@ struct ReportInfo
 	double      seconds   = 0.0;
 	int         threads   = 1;
 	bool        cancelled = false;
-	// Baseline the run was compared against, so the HTML can put its frame
-	// beside ours. Null when there is none.
-	const Baseline *baseline = nullptr;
+	// Baselines the run was compared against, so the HTML can put their
+	// frames beside ours. Null or empty when there are none.
+	const std::vector<Baseline> *baselines = nullptr;
 };
 
 // Render a finished run. Returned as a string rather than written, so the

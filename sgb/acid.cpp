@@ -242,6 +242,22 @@ bool ReadWholeFile(const std::string &path, std::vector<uint8_t> &out)
 
 } // anonymous
 
+std::string RomPath(const std::string &acid_dir, const std::string &rom)
+{
+	return JoinPath(JoinPath(acid_dir, kRomDir), rom);
+}
+
+std::string BaselinePath(const std::string &acid_dir, const std::string &name)
+{
+	return JoinPath(JoinPath(acid_dir, kBaselineDir), name);
+}
+
+std::string ImagePath(const std::string &acid_dir, const std::string &baseline,
+                      const std::string &image)
+{
+	return JoinPath(BaselinePath(acid_dir, baseline), image);
+}
+
 const char *ModelName(Model m)
 {
 	return m == Model::CGB ? "CGB" : m == Model::SGB ? "SGB" : "DMG";
@@ -416,22 +432,26 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 	std::string serial;
 	std::vector<std::vector<uint8_t>> pass_refs, fail_refs;
 	bool ref_error = false;
+	// Pass and fail screens are the suite's own verdict, so they always
+	// come from baseline/default however many other baselines exist.
 	for (const std::string &img : t.pass_images)
 	{
 		std::vector<uint8_t> g;
-		if (!LoadReferenceGray(JoinPath(dir, img), g, r.detail)) { ref_error = true; break; }
+		if (!LoadReferenceGray(ImagePath(dir, kDefaultBaseline, img), g, r.detail))
+		{ ref_error = true; break; }
 		pass_refs.push_back(std::move(g));
 	}
 	for (const std::string &img : t.fail_images)
 	{
 		if (ref_error) break;
 		std::vector<uint8_t> g;
-		if (!LoadReferenceGray(JoinPath(dir, img), g, r.detail)) { ref_error = true; break; }
+		if (!LoadReferenceGray(ImagePath(dir, kDefaultBaseline, img), g, r.detail))
+		{ ref_error = true; break; }
 		fail_refs.push_back(std::move(g));
 	}
 
 	std::vector<uint8_t> rom;
-	if (!ref_error && !ReadWholeFile(JoinPath(dir, t.rom), rom))
+	if (!ref_error && !ReadWholeFile(RomPath(dir, t.rom), rom))
 	{
 		ref_error = true;
 		r.detail = "cannot read ROM " + t.rom;

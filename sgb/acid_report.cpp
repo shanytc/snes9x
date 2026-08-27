@@ -17,6 +17,19 @@ namespace AcidTests {
 
 namespace {
 
+#if defined(__GNUC__)
+__attribute__((format(printf, 1, 2)))
+#endif
+std::string Fmt(const char *fmt, ...)
+{
+	char buf[1024];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof buf, fmt, ap);
+	va_end(ap);
+	return buf;
+}
+
 const char *StatusWord(const ReportRow &r)
 {
 	if (!r.result) return "skipped";
@@ -35,33 +48,41 @@ const char *StatusTag(const ReportRow &r)
 }
 
 // Short baseline verdict for the text and HTML tables.
-std::string MatchTag(const ReportRow &r)
+std::string MatchTag(Match m, int diff_px, bool with_count)
 {
-	switch (r.match)
+	switch (m)
 	{
 		case Match::Same:    return "SAME";
-		case Match::Differs: return "DIFF";
+		case Match::Differs: return with_count ? Fmt("DIFF %d", diff_px) : "DIFF";
 		case Match::NoImage: return "MISSING";
 		case Match::NoFrame: return "-";
 		default:             return "";
 	}
 }
 
-// True once any row carries a baseline verdict.
-bool AnyBaseline(const std::vector<ReportRow> &rows)
+// How many baselines the rows were compared against.
+size_t BaselineCount(const std::vector<ReportRow> &rows, const ReportInfo &info)
 {
-	for (const ReportRow &r : rows)
-		if (r.match != Match::None) return true;
-	return false;
+	if (info.baselines) return info.baselines->size();
+	size_t n = 0;
+	for (const ReportRow &r : rows) n = std::max(n, r.match.size());
+	return n;
+}
+
+std::string BaselineName(const ReportInfo &info, size_t i)
+{
+	if (!info.baselines || i >= info.baselines->size()) return Fmt("baseline %d", (int)i + 1);
+	const Baseline &b = (*info.baselines)[i];
+	return b.name.empty() ? b.dir : b.name;
 }
 
 struct MatchCounts
 {
 	int same = 0, differs = 0, missing = 0, noframe = 0;
 
-	void Add(const ReportRow &r)
+	void Add(Match m)
 	{
-		switch (r.match)
+		switch (m)
 		{
 			case Match::Same:    ++same;    break;
 			case Match::Differs: ++differs; break;
@@ -71,6 +92,14 @@ struct MatchCounts
 		}
 	}
 };
+
+std::vector<MatchCounts> TallyMatches(const std::vector<ReportRow> &rows, size_t n)
+{
+	std::vector<MatchCounts> out(n);
+	for (const ReportRow &r : rows)
+		for (size_t i = 0; i < n; ++i) out[i].Add(r.MatchAt(i));
+	return out;
+}
 
 struct Counts
 {
@@ -129,19 +158,6 @@ std::string Timestamp()
 }
 
 namespace {
-
-#if defined(__GNUC__)
-__attribute__((format(printf, 1, 2)))
-#endif
-std::string Fmt(const char *fmt, ...)
-{
-	char buf[1024];
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(buf, sizeof buf, fmt, ap);
-	va_end(ap);
-	return buf;
-}
 
 /*--------------------------------------------------------------------------
   PNG writer. Self-contained so the headless CLI needs no image library.
@@ -439,8 +455,7 @@ std::string ScoreLine(const Counts &c)
 std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &info)
 {
 	Counts total;
-	MatchCounts mc;
-	const bool base = AnyBaseline(rows);
+	const size_t nbase = BaselineCount(rows, info);
 	std::string o;
 	o += "# " + info.title + " - GB Emulator Shootout\n";
 	o += "# generated " + info.generated;
@@ -448,10 +463,11 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	         info.seconds);
 	o += "# filter: " + info.filter + "\n";
 	if (!info.source.empty()) o += "# tests: " + info.source + "\n";
-	if (base && info.baseline)
+	for (size_t i = 0; i < nbase; ++i)
 	{
-		o += "# baseline: " + info.baseline->dir;
-		if (!info.baseline->title.empty()) o += " (" + info.baseline->title + ")";
+		o += "# baseline " + BaselineName(info, i);
+		if (info.baselines && !(*info.baselines)[i].title.empty())
+			o += " (" + (*info.baselines)[i].title + ")";
 		o += "\n";
 	}
 	if (!info.env.empty())    o += "# timing overrides in effect: " + info.env + "\n";
@@ -462,12 +478,9 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	{
 		if (!r.test) continue;
 		total.Add(r);
-		mc.Add(r);
 		o += Fmt("%-5s %-60s ", StatusTag(r), r.test->name.c_str());
-		if (base)
-			o += Fmt("%-8s ", r.match == Match::Differs
-			                  ? Fmt("DIFF %d", r.diff_px).c_str()
-			                  : MatchTag(r).c_str());
+		for (size_t i = 0; i < nbase; ++i)
+			o += Fmt("%-10s ", MatchTag(r.MatchAt(i), r.DiffAt(i), true).c_str());
 		if (r.result) o += r.result->detail;
 		o += "\n";
 	}
@@ -480,9 +493,11 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 		         s.c.pass, s.c.fail, s.c.info, s.c.err, s.c.skip);
 
 	o += "\n" + ScoreLine(total) + (info.cancelled ? ", cancelled" : "") + "\n";
-	if (base)
-		o += Fmt("baseline: %d same, %d differ, %d missing, %d not run\n",
-		         mc.same, mc.differs, mc.missing, mc.noframe);
+	const std::vector<MatchCounts> mcs = TallyMatches(rows, nbase);
+	for (size_t i = 0; i < nbase; ++i)
+		o += Fmt("baseline %-20s %d same, %d differ, %d missing, %d not run\n",
+		         BaselineName(info, i).c_str(), mcs[i].same, mcs[i].differs,
+		         mcs[i].missing, mcs[i].noframe);
 	return o;
 }
 
@@ -509,17 +524,23 @@ std::string RenderJson(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	         total.skip, total.Ok(), total.Scored());
 	o += ",\n";
 
-	if (AnyBaseline(rows))
+	const size_t nbase = BaselineCount(rows, info);
+	if (nbase)
 	{
-		MatchCounts mc;
-		for (const ReportRow &r : rows) mc.Add(r);
-		o += "  \"baseline\": {";
-		o += "\"dir\": " + JsonStr(info.baseline ? info.baseline->dir : std::string());
-		o += ", \"emulator\": " +
-		     JsonStr(info.baseline ? info.baseline->title : std::string());
-		o += Fmt(", \"same\": %d, \"differs\": %d, \"missing\": %d, \"not_run\": %d}",
-		         mc.same, mc.differs, mc.missing, mc.noframe);
-		o += ",\n";
+		const std::vector<MatchCounts> mcs = TallyMatches(rows, nbase);
+		o += "  \"baselines\": [\n";
+		for (size_t i = 0; i < nbase; ++i)
+		{
+			const Baseline *b = info.baselines ? &(*info.baselines)[i] : nullptr;
+			o += "    {\"name\": " + JsonStr(BaselineName(info, i));
+			o += ", \"dir\": " + JsonStr(b ? b->dir : std::string());
+			o += ", \"emulator\": " + JsonStr(b ? b->title : std::string());
+			o += Fmt(", \"same\": %d, \"differs\": %d, \"missing\": %d, "
+			         "\"not_run\": %d}", mcs[i].same, mcs[i].differs,
+			         mcs[i].missing, mcs[i].noframe);
+			o += (i + 1 < nbase) ? ",\n" : "\n";
+		}
+		o += "  ],\n";
 	}
 
 	o += "  \"suites\": [\n";
@@ -558,9 +579,18 @@ std::string RenderJson(const std::vector<ReportRow> &rows, const ReportInfo &inf
 		o += Fmt(", \"frames\": %d", r.result ? r.result->frames : 0);
 		o += ", \"detail\": " + JsonStr(r.result ? r.result->detail : std::string());
 		o += Fmt(", \"ran\": %s", r.result ? "true" : "false");
-		if (r.match != Match::None)
-			o += ", \"baseline\": " + JsonStr(MatchName(r.match)) +
-			     Fmt(", \"baseline_diff_px\": %d", r.diff_px);
+		if (nbase)
+		{
+			o += ", \"baselines\": {";
+			for (size_t i = 0; i < nbase; ++i)
+			{
+				if (i) o += ", ";
+				o += JsonStr(BaselineName(info, i)) + ": {\"match\": " +
+				     JsonStr(MatchName(r.MatchAt(i))) +
+				     Fmt(", \"diff_px\": %d}", r.DiffAt(i));
+			}
+			o += "}";
+		}
 		o += "}";
 	}
 	o += "\n  ]\n}\n";
@@ -622,6 +652,13 @@ var q = document.getElementById('q'), suite = document.getElementById('suite'),
     model = document.getElementById('model'), stat = document.getElementById('stat'),
     shots = document.getElementById('shots'), count = document.getElementById('count'),
     table = document.getElementById('tests');
+// 'b-<verdict>' asks of any baseline, 'b<i>-<verdict>' of one.
+function baseOk(d, st) {
+  if (st.slice(0, 2) === 'b-')
+    return (' ' + (d.baseline || '') + ' ').indexOf(' ' + st.slice(2) + ' ') >= 0;
+  var dash = st.indexOf('-');
+  return d['b' + st.slice(1, dash)] === st.slice(dash + 1);
+}
 function apply() {
   var t = q.value.toLowerCase(), s = suite.value, m = model.value, st = stat.value, n = 0;
   for (var i = 0; i < rows.length; i++) {
@@ -629,7 +666,7 @@ function apply() {
     var ok = (!t || d.name.indexOf(t) >= 0) && (!s || d.suite === s) &&
              (!m || d.model === m) &&
              (!st || (st === 'bad' ? (d.status === 'fail' || d.status === 'error')
-                    : st.slice(0, 2) === 'b-' ? d.baseline === st.slice(2)
+                    : st.charAt(0) === 'b' ? baseOk(d, st)
                                    : d.status === st));
     r.style.display = ok ? '' : 'none';
     if (ok) n++;
@@ -663,9 +700,8 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 
 	const bool any_shot = std::any_of(rows.begin(), rows.end(),
 		[](const ReportRow &r) { return r.result && !r.result->shot.empty(); });
-	const bool base = AnyBaseline(rows);
-	MatchCounts mc;
-	for (const ReportRow &r : rows) mc.Add(r);
+	const size_t nbase = BaselineCount(rows, info);
+	const std::vector<MatchCounts> mcs = TallyMatches(rows, nbase);
 
 	std::string o;
 	o += "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n";
@@ -681,15 +717,14 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += "filter: " + Html(info.filter);
 	if (!info.source.empty()) o += " &middot; " + Html(info.source);
 	o += "</p>\n";
-	if (base && info.baseline)
+	for (size_t i = 0; i < nbase; ++i)
 	{
-		o += "<p class=\"meta\">Compared against baseline " +
-		     Html(info.baseline->dir);
-		if (!info.baseline->title.empty())
-			o += " (" + Html(info.baseline->title) + ")";
-		o += Fmt(" &mdash; %d same, %d differ, %d missing", mc.same, mc.differs,
-		         mc.missing);
-		if (mc.noframe) o += Fmt(", %d not run", mc.noframe);
+		o += "<p class=\"meta\">Baseline <b>" + Html(BaselineName(info, i)) + "</b>";
+		if (info.baselines && !(*info.baselines)[i].title.empty())
+			o += " (" + Html((*info.baselines)[i].title) + ")";
+		o += Fmt(" &mdash; %d same, %d differ, %d missing", mcs[i].same,
+		         mcs[i].differs, mcs[i].missing);
+		if (mcs[i].noframe) o += Fmt(", %d not run", mcs[i].noframe);
 		o += "</p>\n";
 	}
 	if (!info.env.empty())
@@ -707,10 +742,12 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += Fmt("<div class=\"card\"><b class=\"error\">%d</b><span>errors</span></div>\n", total.err);
 	if (total.skip)
 		o += Fmt("<div class=\"card\"><b class=\"skipped\">%d</b><span>not run</span></div>\n", total.skip);
-	if (base)
-		o += Fmt("<div class=\"card\"><b class=\"%s\">%d</b>"
-		         "<span>differ from baseline</span></div>\n",
-		         mc.differs ? "differs" : "same", mc.differs);
+	for (size_t i = 0; i < nbase; ++i)
+	{
+		o += Fmt("<div class=\"card\"><b class=\"%s\">%d</b><span>differ from ",
+		         mcs[i].differs ? "differs" : "same", mcs[i].differs);
+		o += Html(BaselineName(info, i)) + "</span></div>\n";
+	}
 	o += "</div>\n";
 
 	o += "<h2>Suites</h2>\n<table>\n<thead><tr><th>Suite</th><th>Score</th>"
@@ -742,10 +779,17 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	     "<option value=\"info\">Informational</option>"
 	     "<option value=\"error\">Errors</option>"
 	     "<option value=\"skipped\">Not run</option>";
-	if (base)
-		o += "<option value=\"b-differs\">Differs from baseline</option>"
-		     "<option value=\"b-same\">Matches baseline</option>"
-		     "<option value=\"b-missing\">Missing from baseline</option>";
+	if (nbase)
+		o += "<option value=\"b-differs\">Differs from any baseline</option>"
+		     "<option value=\"b-same\">Matches a baseline</option>"
+		     "<option value=\"b-missing\">Missing from a baseline</option>";
+	if (nbase > 1)
+		for (size_t i = 0; i < nbase; ++i)
+		{
+			const std::string n = Html(BaselineName(info, i));
+			o += Fmt("<option value=\"b%d-differs\">Differs from ", (int)i) + n + "</option>";
+			o += Fmt("<option value=\"b%d-missing\">Missing from ", (int)i) + n + "</option>";
+		}
 	o += "</select>\n";
 	o += "<label><input type=\"checkbox\" id=\"shots\"";
 	o += any_shot ? " checked" : "";
@@ -755,9 +799,11 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	if (!any_shot) o += " class=\"hideshots\"";
 	o += ">\n<thead><tr><th>#</th><th>Test</th><th>Suite</th><th>Model</th>"
 	     "<th>Result</th>";
-	if (base) o += "<th>Baseline</th>";
+	for (size_t i = 0; i < nbase; ++i)
+		o += "<th>" + Html(BaselineName(info, i)) + "</th>";
 	o += "<th>Frames</th><th>Detail</th><th class=\"shotcol\">Screen</th>";
-	if (base) o += "<th class=\"shotcol\">Baseline frame</th>";
+	for (size_t i = 0; i < nbase; ++i)
+		o += "<th class=\"shotcol\">" + Html(BaselineName(info, i)) + "</th>";
 	o += "</tr></thead>\n<tbody>\n";
 
 	int n = 0;
@@ -770,21 +816,32 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 		lower = t.name;
 		for (char &c : lower) if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
 
+		// data-baseline lists every verdict, so "differs from any" is a
+		// word lookup; data-b<i> answers the per-baseline questions.
+		std::string all;
+		for (size_t i = 0; i < nbase; ++i)
+		{
+			if (!all.empty()) all += " ";
+			all += MatchName(r.MatchAt(i));
+		}
 		o += "<tr data-name=\"" + Html(lower) + "\" data-suite=\"" +
 		     Html(t.suite) + "\" data-model=\"" + ModelName(t.model) +
-		     "\" data-status=\"" + st + "\" data-baseline=\"" +
-		     MatchName(r.match) + "\">";
+		     "\" data-status=\"" + st + "\" data-baseline=\"" + all + "\"";
+		for (size_t i = 0; i < nbase; ++i)
+			o += Fmt(" data-b%d=\"%s\"", (int)i, MatchName(r.MatchAt(i)));
+		o += ">";
 		o += Fmt("<td class=\"num\">%d</td>", ++n);
 		o += "<td class=\"name\">" + Html(t.name) + "</td>";
 		o += "<td>" + Html(t.suite) + "</td>";
 		o += Fmt("<td>%s</td>", ModelName(t.model));
 		o += Fmt("<td class=\"result %s\">%s</td>", st, StatusTag(r));
-		if (base)
+		for (size_t i = 0; i < nbase; ++i)
 		{
-			o += Fmt("<td class=\"result %s\">%s", MatchName(r.match),
-			         MatchTag(r).c_str());
-			if (r.match == Match::Differs)
-				o += Fmt(" <span class=\"frames\">%d px</span>", r.diff_px);
+			const Match m = r.MatchAt(i);
+			o += Fmt("<td class=\"result %s\">%s", MatchName(m),
+			         MatchTag(m, 0, false).c_str());
+			if (m == Match::Differs)
+				o += Fmt(" <span class=\"frames\">%d px</span>", r.DiffAt(i));
 			o += "</td>";
 		}
 		o += Fmt("<td class=\"frames\">%d</td>", r.result ? r.result->frames : 0);
@@ -792,11 +849,11 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 		     Html(r.result ? r.result->detail : std::string()) + "</td>";
 		o += "<td class=\"shotcol\">" + ShotCell(r.result ? &r.result->shot : nullptr) +
 		     "</td>";
-		if (base)
+		for (size_t i = 0; i < nbase; ++i)
 		{
 			std::vector<uint8_t> ref;
-			const bool have = info.baseline &&
-			                  LoadBaselineFrame(*info.baseline, t, ref);
+			const bool have = info.baselines &&
+			                  LoadBaselineFrame((*info.baselines)[i], t, ref);
 			o += "<td class=\"shotcol\">" + ShotCell(have ? &ref : nullptr) + "</td>";
 		}
 		o += "</tr>\n";

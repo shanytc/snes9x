@@ -718,8 +718,41 @@ void SaveBaseline(AcidDlgState *st)
 		return;
 
 	WideToUtf8 udir(dir);
+	const std::vector<AcidTests::ReportRow> rows = ReportRows(st);
+
+	// Saving into a folder that already holds frames replaces them, and the
+	// index goes with them even for tests this save does not cover.
+	const AcidTests::BaselineClash clash =
+		AcidTests::CheckBaseline((const char *)udir, rows);
+	if (clash.Any())
+	{
+		std::string msg = "Baseline already exists, override?\r\n\r\n";
+		msg += (const char *)udir;
+		msg += "\r\n";
+		if (clash.images)
+		{
+			char n[64];
+			snprintf(n, sizeof n, "Replaces %d frame%s. ", clash.images,
+			         clash.images == 1 ? "" : "s");
+			msg += n;
+		}
+		if (clash.index)
+		{
+			msg += "Replaces the existing index";
+			std::string who = clash.title;
+			if (!clash.created.empty())
+				who += who.empty() ? clash.created : ", " + clash.created;
+			if (!who.empty()) msg += " (" + who + ")";
+			msg += ".";
+		}
+		Utf8ToWide wmsg(msg.c_str());
+		if (MessageBox(st->hDlg, wmsg, TEXT("Save baseline"),
+		               MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
+			return;
+	}
+
 	std::string err;
-	const int n = AcidTests::WriteBaseline((const char *)udir, ReportRows(st),
+	const int n = AcidTests::WriteBaseline((const char *)udir, rows,
 	                                       MakeReportInfo(st), err);
 	if (n < 0)
 	{
@@ -731,6 +764,8 @@ void SaveBaseline(AcidDlgState *st)
 	snprintf(buf, sizeof buf, "Saved %d frame%s to %s", n, n == 1 ? "" : "s",
 	         (const char *)udir);
 	SetCtrlText(st->hStat, buf);
+	MessageBox(st->hDlg, TEXT("Test baseline saved!"), TEXT("Save baseline"),
+	           MB_OK | MB_ICONINFORMATION);
 }
 
 void RecomputeAllMatches(AcidDlgState *st)

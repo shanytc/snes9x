@@ -202,6 +202,32 @@ Match CompareToBaseline(const Baseline &b, const Test &t,
 	return best ? Match::Differs : Match::Same;
 }
 
+BaselineClash CheckBaseline(const char *dir, const std::vector<ReportRow> &rows)
+{
+	BaselineClash c;
+	const std::string root = dir ? dir : "";
+	if (root.empty()) return c;
+
+	Baseline existing;
+	std::string err;
+	LoadBaseline(root.c_str(), existing, err);   // for the index's provenance
+	c.title   = existing.title;
+	c.created = existing.created;
+
+	struct stat sb;
+	c.index = stat(Join(root, "baseline.txt").c_str(), &sb) == 0;
+
+	// The paths WriteBaseline would use, which ignore any existing index.
+	Baseline naming;
+	for (const ReportRow &r : rows)
+	{
+		if (!r.test || !r.result || r.result->shot.empty()) continue;
+		if (stat(Join(root, naming.ImageFor(*r.test)).c_str(), &sb) == 0)
+			++c.images;
+	}
+	return c;
+}
+
 int WriteBaseline(const char *dir, const std::vector<ReportRow> &rows,
                   const ReportInfo &info, std::string &err)
 {
@@ -209,6 +235,16 @@ int WriteBaseline(const char *dir, const std::vector<ReportRow> &rows,
 	if (root.empty())
 	{
 		err = "no baseline directory given";
+		return -1;
+	}
+	// A folder with a manifest is the test suite itself, whose reference
+	// PNGs sit at the very paths a save would write.
+	struct stat sb;
+	if (stat(Join(root, "manifest.txt").c_str(), &sb) == 0 &&
+	    stat(Join(root, "baseline.txt").c_str(), &sb) != 0)
+	{
+		err = "refusing to overwrite the test suite in " + root +
+		      " - save the baseline somewhere else";
 		return -1;
 	}
 	MakeParents(root + "/");

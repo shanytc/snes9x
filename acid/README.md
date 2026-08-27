@@ -83,6 +83,11 @@ the baseline's, and the Show filter grows entries for what differs or is
 missing. Comparison uses the same rule as a pass: grayscale, 50/255 per
 pixel.
 
+Saving into a folder that already holds frames asks first, naming how many
+would be replaced and who wrote the index it is about to overwrite. Saving
+into a folder that has a `manifest.txt` is refused outright: that is the
+test suite itself, whose reference PNGs sit at the very paths a save writes.
+
 Images are named after the test with a trailing `.gb`/`.gbc` dropped, so
 `blargg/halt_bug.gb` is saved as `blargg/halt_bug.png` — the layout the
 suite's own reference images already use. That means `acid/` itself works as

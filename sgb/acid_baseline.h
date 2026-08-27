@@ -60,6 +60,21 @@ bool LoadBaselineFrame(const Baseline &b, const Test &t,
 Match CompareToBaseline(const Baseline &b, const Test &t,
                         const std::vector<uint8_t> &shot, int &diff_px);
 
+// What a save into `dir` would overwrite. A foreign dump has no index but
+// its frames still count, so this asks the only question that matters:
+// which files already exist.
+struct BaselineClash
+{
+	int  images = 0;      // frames that would be replaced
+	bool index  = false;  // an existing baseline.txt would be replaced
+	std::string title;    // what that index says about itself
+	std::string created;
+
+	bool Any() const { return images > 0 || index; }
+};
+
+BaselineClash CheckBaseline(const char *dir, const std::vector<ReportRow> &rows);
+
 // Write every frame in `rows` under `dir` as a PNG, plus a baseline.txt
 // index. Returns how many were written, -1 with a message in `err` on
 // failure.

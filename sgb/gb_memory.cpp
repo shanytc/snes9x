@@ -5,6 +5,7 @@
 \*****************************************************************************/
 
 #include "gb_memory.h"
+#include "gb_knob.h"
 #include "gb_cart.h"
 #include "gb_cpu.h"
 #include "gb_ppu.h"
@@ -19,17 +20,13 @@
 namespace SGB {
 
 namespace {
-SerialByteCallback g_serial_cb = nullptr;
-uint8_t            g_dma_last  = 0xFF;  // 0xFF46 last written byte — register reads echo this.
-bool               g_dma_vram_bypass = false;
 }
 
 // CPU-visible unblock leads the render machine's mode-0 entry by a few
 // dots, like the STAT mode bits (mooneye lcdon_timing access tables).
 inline bool CpuVisibleMode0(const Memory &m)
 {
-	static int ub = -1;
-	if (ub < 0) { const char *e = getenv("ACID_UB"); ub = e ? atoi(e) : 0; }
+	static const int ub = AcidKnob("ACID_UB", 0);
 	return ub > 0 && !m.ppu->cgb && !m.ppu->lcdon_line &&
 	       m.ppu->tm.lcd_x >= GB_SCREEN_WIDTH - ub;
 }
@@ -43,15 +40,14 @@ inline bool PpuStillRendering(const Memory &m)
 
 inline bool VramBlocked(const Memory &m, bool write = false)
 {
-	if (g_dma_vram_bypass || !m.ppu || !(m.ppu->lcdc & 0x80)) return false;
+	if (m.dma_vram_bypass || !m.ppu || !(m.ppu->lcdc & 0x80)) return false;
 	if (PpuStillRendering(m)) return !CpuVisibleMode0(m);
 	// Only READS lock ahead of the transfer; writes pass until mode 3
 	// (Coffee GB isVramAvailableForCpu; mooneye lcdon_write_timing).
 	if (write) return false;
 	// The lock engages a few dots before the machine's mode-3 entry, in
 	// step with the visible STAT flip (mooneye lcdon_timing VRAM table).
-	static int vlk = -1;
-	if (vlk < 0) { const char *e = getenv("ACID_VLK"); vlk = e ? atoi(e) : 5; }
+	static const int vlk = AcidKnob("ACID_VLK", 5);
 	return vlk > 0 && !m.ppu->cgb && m.ppu->mode == PpuMode::OamScan &&
 	       !m.ppu->lcdon_first && m.ppu->mode_clock >= 87 - vlk;
 }
@@ -65,8 +61,7 @@ inline bool OamBlocked(const Memory &m)
 	if (PpuStillRendering(m)) return !CpuVisibleMode0(m);
 	// The glitched first line after LCD enable never locks OAM until its
 	// (early) mode 3 (mooneye lcdon_write_timing).
-	static int oe = -99;
-	if (oe < -90) { const char *e = getenv("ACID_OE"); oe = e ? atoi(e) : 1; }
+	static const int oe = AcidKnob("ACID_OE", 1);
 	return m.ppu->mode == PpuMode::OamScan && !m.ppu->lcdon_first &&
 	       m.ppu->mode_clock >= oe;
 }
@@ -116,8 +111,7 @@ static int AccessedOamRow(const Memory &m)
 	const Ppu *p = m.ppu;
 	if (!p || p->cgb || !(p->lcdc & 0x80)) return -1;
 	if (p->mode != PpuMode::OamScan || p->lcdon_first) return -1;
-	static int obw = -99;
-	if (obw < -90) { const char *e = getenv("ACID_OBW"); obw = e ? atoi(e) : -4; }
+	static const int obw = AcidKnob("ACID_OBW", -4);
 	const int d = p->mode_clock + obw;   // true line dot on our -4 grid
 	if (d < 0 || d >= 82) return -1;
 	if (d < 2)  return 0;
@@ -190,9 +184,8 @@ static bool OamWriteBlocked(const Memory &m)
 	if (p.cgb) return OamBlocked(m);
 	if (PpuStillRendering(m)) return !CpuVisibleMode0(m);
 	if (p.mode != PpuMode::OamScan || p.lcdon_first) return false;
-	static int oew = -99, owf = -99;
-	if (oew < -90) { const char *e = getenv("ACID_OEW"); oew = e ? atoi(e) : 5;
-	                 const char *f = getenv("ACID_OWF"); owf = f ? atoi(f) : 82; }
+	static const int oew = AcidKnob("ACID_OEW", 5);
+	static const int owf = AcidKnob("ACID_OWF", 82);
 	if (owf > 0 && p.mode_clock >= owf && p.mode_clock < owf + 4) return false;
 	return p.mode_clock >= oew;
 }
@@ -211,7 +204,11 @@ inline bool CramBlocked(const Memory &m)
 	       m.ppu->mode_clock > GB_MODE3_SETUP_DOTS;
 }
 
-void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
+void SetSerialCallback(Memory &m, SerialByteCallback cb, void *user)
+{
+	m.serial_cb   = cb;
+	m.serial_user = user;
+}
 
 void MemReset(Memory &m, bool cgb)
 {
@@ -227,7 +224,7 @@ void MemReset(Memory &m, bool cgb)
 	// GB CPU starts. boot_rom_enabled stays false until LoadBootROM sets it.
 	std::memset(m.boot_rom, 0, sizeof m.boot_rom);
 	m.boot_rom_enabled = false;
-	g_dma_last         = cgb ? 0x00 : 0xFF;
+	m.dma_last         = cgb ? 0x00 : 0xFF;
 
 	m.svbk         = 1;
 	m.key1_armed   = false;
@@ -369,7 +366,7 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	// OAM DMA bus conflict: a CPU read on the bus the DMA source occupies
 	// returns the byte currently on the DMA bus (OAM itself reads $FF,
 	// handled below; HRAM/IO live on neither bus).
-	if (m.dma_active && !g_dma_vram_bypass && addr < 0xFE00 &&
+	if (m.dma_active && !m.dma_vram_bypass && addr < 0xFE00 &&
 	    DmaBusOf(m, m.dma_src) == DmaBusOf(m, addr))
 		return m.dma_bus_byte;
 	// Boot ROM overlay — first 256 bytes mirror the DMG/SGB boot ROM
@@ -446,7 +443,7 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 	// OAM DMA bus conflict — CPU writes on the DMA source's bus are lost
 	// (BullyGB "DMA allows RAM writes"). MBC register writes below $8000
 	// still land: the cart latches them off the address/data lines.
-	if (m.dma_active && !g_dma_vram_bypass && addr >= 0x8000 && addr < 0xFE00 &&
+	if (m.dma_active && !m.dma_vram_bypass && addr >= 0x8000 && addr < 0xFE00 &&
 	    DmaBusOf(m, m.dma_src) == DmaBusOf(m, addr))
 		return;
 	if (addr < 0x8000)
@@ -499,8 +496,7 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 		{
 			// The scan's row reads finish a few dots before mode 2 ends; a
 			// store landing after that goes through normally.
-			static int kw = -99;
-			if (kw < -90) { const char *e = getenv("ACID_KW"); kw = e ? atoi(e) : 76; }
+			static const int kw = AcidKnob("ACID_KW", 76);
 			if (m.ppu->mode_clock < kw)
 			{
 				OamBugWriteCorrupt(m);
@@ -553,7 +549,7 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
-		case 0xFF46: return g_dma_last;
+		case 0xFF46: return m.dma_last;
 		case 0xFF4D:
 			return (m.ppu && m.ppu->cgb)
 				? static_cast<uint8_t>((m.double_speed ? 0x80 : 0x00) |
@@ -621,7 +617,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			// shifts in a 1. Alleyway's serial-IRQ input loop depends on this.
 			if ((value & 0x81) == 0x81)
 			{
-				if (g_serial_cb) g_serial_cb(m.serial_data);
+				if (m.serial_cb) m.serial_cb(m.serial_user, m.serial_data);
 				m.serial_bits  = 8;  // clocked off DIV bit 8 in TimerStep
 				m.serial_guard = 0;
 			}
@@ -636,7 +632,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			return;
 		case 0xFF46:
 		{
-			g_dma_last = value;
+			m.dma_last = value;
 			// Echo-fold the page so the bus-conflict test and source reads
 			// see the address the hardware actually drives.
 			uint16_t src = static_cast<uint16_t>(value << 8);
@@ -695,24 +691,24 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 static void DoGdma(Memory &m, uint16_t src, uint16_t dst, uint16_t blocks)
 {
 	const uint32_t n = static_cast<uint32_t>(blocks) * 0x10u;
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < n; ++i)
 	{
 		const uint8_t b = MemRead(m, static_cast<uint16_t>(src + i));
 		MemWrite(m, static_cast<uint16_t>(0x8000 + ((dst + i) & 0x1FFF)), b);
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 }
 
 static void HdmaTransferBlock(Memory &m)
 {
-	g_dma_vram_bypass = true;
+	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < 0x10; ++i)
 	{
 		const uint8_t b = MemRead(m, static_cast<uint16_t>(m.hdma_src + i));
 		MemWrite(m, static_cast<uint16_t>(0x8000 + ((m.hdma_dst + i) & 0x1FFF)), b);
 	}
-	g_dma_vram_bypass = false;
+	m.dma_vram_bypass = false;
 	m.hdma_src = static_cast<uint16_t>(m.hdma_src + 0x10);
 	m.hdma_dst = static_cast<uint16_t>(m.hdma_dst + 0x10);
 	m.hdma1 = static_cast<uint8_t>(m.hdma_src >> 8);

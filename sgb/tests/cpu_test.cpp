@@ -45,7 +45,7 @@ namespace {
 
 std::string g_serial;
 
-void OnSerial(uint8_t b)
+void OnSerial(void *, uint8_t b)
 {
 	g_serial.push_back(static_cast<char>(b));
 	fputc(b, stdout);
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
 	S9xSGBSetRunMode(mode);
 	S9xSGBSetClockMultiplier(mul);
 	S9xSGBSetAudioRate(32000);
-	SGB::SetSerialCallback(&OnSerial);
+	SGB::Instance().SetSerialSink(&OnSerial, nullptr);
 
 	fprintf(stderr,
 		"rom=%s frames=%d mode=%d mul=%.2f\n",

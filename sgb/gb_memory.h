@@ -30,6 +30,12 @@ struct CpuState;
 //   0xFF00-0xFF7F  I/O
 //   0xFF80-0xFFFE  HRAM
 //   0xFFFF         IE register
+// Callback fires each time the CPU initiates a serial transfer (write
+// 0x80/0x81 to 0xFF02). The byte passed is whatever was in 0xFF01 at
+// the moment. Used by the test harness to capture Blargg output; P6a
+// may hook it too. nullptr disables.
+using SerialByteCallback = void (*)(void *user, uint8_t byte);
+
 struct Memory
 {
 	Cart   *cart   = nullptr;
@@ -92,6 +98,15 @@ struct Memory
 	uint16_t dma_src_next = 0;      // source staged by the latest $FF46 write
 	uint8_t  dma_bus_byte = 0xFF;   // byte currently on the DMA bus
 	uint8_t  dma_oam_old[0xA0];     // OAM content as of DMA start (scan-slot rewind)
+	uint8_t  dma_last     = 0xFF;   // last byte written to $FF46; reads echo it
+	// Set while a DMA/HDMA block moves bytes, so its own reads and writes
+	// bypass the CPU-visible VRAM/OAM locks. Transient (never serialized).
+	bool     dma_vram_bypass = false;
+
+	// Fires each time the CPU starts a serial transfer. Per instance so
+	// parallel cores can each capture their own output.
+	SerialByteCallback serial_cb   = nullptr;
+	void              *serial_user = nullptr;
 };
 
 // Advance the world by `tcycles` CPU T-cycles: timer runs in the CPU clock
@@ -123,12 +138,7 @@ bool MemLcdcPartial(Memory &m, uint8_t value, uint8_t *partial);
 // counts as entering HBlank, so one pending block fires (SameBoy GB_lcd_off).
 void MemHdmaLcdOff(Memory &m);
 
-// Callback fires each time the CPU initiates a serial transfer (write
-// 0x80/0x81 to 0xFF02). The byte passed is whatever was in 0xFF01 at
-// the moment. Used by the test harness to capture Blargg output; P6a
-// may hook it too. nullptr disables.
-using SerialByteCallback = void (*)(uint8_t byte);
-void SetSerialCallback(SerialByteCallback cb);
+void SetSerialCallback(Memory &m, SerialByteCallback cb, void *user = nullptr);
 
 } // namespace SGB
 

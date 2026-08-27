@@ -67,7 +67,6 @@ struct PixelMachine
 	bool     fetch_is_window = false;
 	uint8_t  fetch_pause   = 0;    // idle fetcher dots (re-activation starts late)
 	uint16_t fetch_map_addr  = 0;  // latched on the fetch stage's first dot
-	bool     fetch_tileset = false; // LCDC.4 as latched by this fetch's T1
 	uint16_t fetch_data_addr = 0;
 	uint8_t  fetch_y_latch = 0;    // CGB caches the fetcher Y at the tile stage
 
@@ -101,6 +100,7 @@ struct PixelMachine
 	uint8_t  win_pend_wx = 0;
 	uint8_t  win_pend_pos = 0;
 	uint8_t  machine_stall = 0;    // full-dot stalls (WX=0 fine-scroll activation)
+	bool     fetch_tileset = false; // LCDC.4 latched by this fetch's T1
 };
 
 struct Ppu
@@ -321,11 +321,6 @@ struct Ppu
 };
 
 void PpuReset(Ppu &p);
-
-// DMG unit personality for the palette write transition pixel: 0 = the
-// mealybug "blob" unit (old|new OR pixel), 1 = daid's unit (clean switch).
-// Real DMGs photograph differently here; the shootout refs span both.
-void PpuSetPalUnit(int unit);
 
 // True while the LCD is still taking this line's pixels: mode 3, plus the
 // few dots the output machine trails the timing skeleton by.

@@ -105,6 +105,12 @@ public:
 	const uint8_t  *DebugSgbAttrMap() const; // SGB_TILES (360)
 	void            DebugGetPpuRegs(uint8_t out[12]) const;
 
+	// Serial-out tap: fires when the CPU starts a transfer, with whatever
+	// is in SB at that moment. Per instance, so parallel cores each
+	// capture their own output. nullptr disables.
+	void SetSerialSink(void (*fn)(void *user, uint8_t byte), void *user);
+
+
 	// Live-frame layer visibility (0=BG, 1=window, 2=OBJ). Display-only.
 	void SetLayerEnabled(int layer, bool enabled);
 	bool GetLayerEnabled(int layer) const;
@@ -260,6 +266,24 @@ private:
 
 // Global singleton — snes9x keeps one active SGB core.
 Emulator &Instance();
+
+// The emulator whose frame is currently being run on this thread: the
+// singleton unless a ScopedActiveEmulator says otherwise. The core's host
+// hooks (scanline capture, HBlank/VBlank, JOYSER writes) route through it.
+Emulator &ActiveEmulator();
+
+// Binds ActiveEmulator() for the current thread. Parallel test runners
+// wrap each RunFrame so a worker core never reaches into the singleton.
+class ScopedActiveEmulator
+{
+public:
+	explicit ScopedActiveEmulator(Emulator &e);
+	~ScopedActiveEmulator();
+	ScopedActiveEmulator(const ScopedActiveEmulator &) = delete;
+	ScopedActiveEmulator &operator=(const ScopedActiveEmulator &) = delete;
+private:
+	Emulator *prev_;
+};
 
 } // namespace SGB
 

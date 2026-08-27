@@ -369,7 +369,7 @@ struct Emulator::Impl
 // forward into the singleton Emulator's Impl.
 static void SgbCommandTrampoline(uint8_t cmd, const uint8_t *data, uint32_t len)
 {
-	Instance().OnSgbCommandInternal(cmd, data, len);
+	ActiveEmulator().OnSgbCommandInternal(cmd, data, len);
 }
 
 Emulator::Emulator() : impl_(new Impl) {}
@@ -450,6 +450,12 @@ void Emulator::Reset()
 	impl_->cpu.Reset();
 	MemReset(impl_->mem, impl_->cgb_mode && !Settings.SGB_BIOSModeActive);
 	PpuReset(impl_->ppu);
+	// A DMG LCD-enable write takes hold three dots into its machine cycle,
+	// so a BIOS-less start has to swallow that much to land on the same dot
+	// grid; the CGB write is cycle-aligned and needs none. Resolved here,
+	// where the model is settled - leaving it to the first dot made it
+	// depend on when that dot happened to run.
+	if (impl_->mem.cgb_hw) impl_->ppu.boot_skew = 0;
 	ApuReset(impl_->apu, impl_->cgb_mode && !Settings.SGB_BIOSModeActive, !impl_->boot_rom_loaded);
 	TimerReset(impl_->timer);
 	JoypadReset(impl_->joypad);
@@ -1831,6 +1837,11 @@ void Emulator::OnPpuVBlank()
 		impl_->handoff_frames++;
 }
 
+void Emulator::SetSerialSink(void (*fn)(void *user, uint8_t byte), void *user)
+{
+	if (impl_) SetSerialCallback(impl_->mem, fn, user);
+}
+
 void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
@@ -2566,6 +2577,18 @@ Emulator &Instance()
 	return g;
 }
 
+// The core's host hooks are free functions, so they need to know which
+// emulator called them. Normal play only ever runs the singleton and
+// leaves this null; a worker thread driving its own instance binds it
+// for the duration (see ScopedActiveEmulator).
+namespace { thread_local Emulator *g_active_emu = nullptr; }
+
+Emulator &ActiveEmulator() { return g_active_emu ? *g_active_emu : Instance(); }
+
+ScopedActiveEmulator::ScopedActiveEmulator(Emulator &e)
+	: prev_(g_active_emu) { g_active_emu = &e; }
+ScopedActiveEmulator::~ScopedActiveEmulator() { g_active_emu = prev_; }
+
 } // namespace SGB
 
 // C-style facade used by snes9x integration code.
@@ -2687,8 +2710,8 @@ void S9xSGBSyncToSnesCycle(int32_t cpu_cycles)
 	if (delta > 0) S9xSGBTickSnes(delta);
 }
 
-void S9xSGBOnPpuHBlank(void) { SGB::Instance().OnPpuHBlank(); }
-void S9xSGBOnPpuVBlank(void) { SGB::Instance().OnPpuVBlank(); }
+void S9xSGBOnPpuHBlank(void) { SGB::ActiveEmulator().OnPpuHBlank(); }
+void S9xSGBOnPpuVBlank(void) { SGB::ActiveEmulator().OnPpuVBlank(); }
 uint32_t S9xSGBGetGBFrameCount(void) { return SGB::g_gb_vblank_count; }
 uint32_t S9xSGBGetPacketCount(void) { return SGB::Instance().GetPacketCount(); }
 const uint8_t *S9xSGBGetGBLayerMask(void) { return SGB::Instance().GBLayerMask(); }
@@ -2716,10 +2739,10 @@ void S9xSGBSetNoSpriteLimit(bool enabled) { SGB::Instance().SetNoSpriteLimit(ena
 bool S9xSGBGetLayerEnabled(int layer) { return SGB::Instance().GetLayerEnabled(layer); }
 void S9xSGBCaptureScanline(const unsigned char *pixels)
 {
-	SGB::Instance().CaptureScanline(static_cast<const uint8_t *>(pixels));
+	SGB::ActiveEmulator().CaptureScanline(static_cast<const uint8_t *>(pixels));
 }
 void S9xSGBSetJoypad(uint16_t m)    { SGB::Instance().SetJoypad(m); }
-void S9xSGBOnJoyserWrite(uint8_t v) { SGB::Instance().OnJoyserWrite(v); }
+void S9xSGBOnJoyserWrite(uint8_t v) { SGB::ActiveEmulator().OnJoyserWrite(v); }
 
 void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {

@@ -12,6 +12,7 @@
 
 #include "gb_cpu.h"
 #include "gb_memory.h"
+#include "gb_knob.h"
 #include "gb_ppu.h"
 
 namespace SGB {
@@ -32,8 +33,7 @@ void DispatchCB(CpuState &s, Memory &mem, uint8_t op);
 inline void TickM(CpuState &s, Memory &mem)
 {
 	s.t_cycles += 4;
-	MemTick(mem, 4 - s.tick_borrow);
-	s.tick_borrow = 0;
+	MemTick(mem, 4);
 }
 
 inline uint8_t BusRead(CpuState &s, Memory &mem, uint16_t addr)
@@ -57,42 +57,37 @@ inline void BusWrite(CpuState &s, Memory &mem, uint16_t addr, uint8_t v)
 		// lands after the comparator has seen the old value one extra dot).
 		// CGB hardware uses its own conflict map: palette writes land at a
 		// different dot than on DMG even in compatibility mode.
-		static int wph = -1, cpph = -1;
-		if (wph < 0) { const char *e = getenv("ACID_WPH"); wph = e ? atoi(e) : 3;
-		               const char *f = getenv("ACID_CPPH"); cpph = f ? atoi(f) : 4; }
+		static const int wph = AcidKnob("ACID_WPH", 3);
+		static const int cpph = AcidKnob("ACID_CPPH", 4);
 		int phase = (addr == 0xFF4B) ? wph : 1;
 		if (mem.cgb_hw && addr >= 0xFF47 && addr <= 0xFF49)
 			phase = cpph;
-		static int cscy = -1;
-		if (cscy < 0) { const char *g = getenv("ACID_CSCY"); cscy = g ? atoi(g) : 1; }
+		static const int cscy = AcidKnob("ACID_CSCY", 1);
 		if (mem.cgb_hw && (addr == 0xFF42 || addr == 0xFF43))
 			phase = cscy;
 		// Changing LCDC.4 on CGB re-steers the tile-data address mid-fetch:
 		// a read landing a couple of dots later picks the tile number off
 		// the bus instead of the row (SameBoy tile_sel_glitch).
-		static int tsg = -99;
-		if (tsg < -90) { const char *t = getenv("ACID_TSG"); tsg = t ? atoi(t) : 2; }
+		static const int tsg = AcidKnob("ACID_TSG", 2);
 		const bool sel_glitch = mem.cgb_hw && addr == 0xFF40 && tsg >= 0 &&
 		                        ((mem.ppu->lcdc ^ v) & 0x10) != 0;
 		s.t_cycles += 4;
-		const int pre = phase - s.tick_borrow;
-		s.tick_borrow = 0;
 		if (sel_glitch)
 		{
-			// The glitch dot is borrowed from the next machine cycle.
-			for (int d = 0; d < pre + 4; ++d)
+			// Same four dots as any other write; the glitch just marks one
+			// of them, so the cycle still costs exactly what it should.
+			for (int d = 0; d < 4; ++d)
 			{
-				if (d == pre) MemWrite(mem, addr, v);
+				if (d == phase) MemWrite(mem, addr, v);
 				mem.ppu->tile_sel_glitch =
-					static_cast<uint8_t>(d == pre + tsg ? 1 : 0);
-				MemTick(mem, 1, d < pre);
+					static_cast<uint8_t>(d == phase + tsg ? 1 : 0);
+				MemTick(mem, 1, d < phase);
 			}
 			mem.ppu->tile_sel_glitch = 0;
-			s.tick_borrow = 1;
 		}
 		else
 		{
-			MemTick(mem, pre);
+			MemTick(mem, phase);
 			MemWrite(mem, addr, v);
 			MemTick(mem, 4 - phase, false);
 		}

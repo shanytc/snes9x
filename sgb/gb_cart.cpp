@@ -388,9 +388,9 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	// DMG palette-transition unit personality: daid's ppu_scanline_bgp
 	// reference photos come from a unit with a clean palette switch, unlike
 	// the mealybug blob's OR pixel (Coffee GB keeps the same per-ROM split).
-	PpuSetPalUnit(c.rom.size() == 0x8000 &&
+	c.pal_unit = (c.rom.size() == 0x8000 &&
 	              c.rom[0x14D] == 0xE7 && c.rom[0x14E] == 0xB6 &&
-	              c.rom[0x14F] == 0x86 ? 1 : 0);
+	              c.rom[0x14F] == 0x86) ? 1 : 0;
 	c.mbc5_multicart = (c.mbc.type == MbcType::MBC5) && LooksLikeMbc5Multicart(c.rom);
 	MbcReset(c.mbc);
 

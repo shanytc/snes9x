@@ -20,6 +20,7 @@
 
 #include "gb_ops.h"
 #include "gb_ppu.h"
+#include "gb_knob.h"
 #include "gb_timer.h"
 
 namespace SGB {
@@ -58,16 +59,14 @@ void Dispatch(CpuState &s, Memory &mem, uint8_t op)
 			{
 				// The CPU/PPU clock-divider phase re-aligns at the switch
 				// (daid speed_switch_timing_stat samples land on it).
-				static int dsa = -1;
-				if (dsa < 0) { const char *e = getenv("ACID_DSA"); dsa = e ? atoi(e) : -2; }
+				static const int dsa = AcidKnob("ACID_DSA", -2);
 				if (dsa >= 0) mem.ds_tick_rem = static_cast<uint8_t>(dsa);
 			}
 			// The switch stalls the CPU for roughly a frame while the PPU
 			// keeps scanning (daid speed_switch_timing_ly sees LY advance
 			// ~143 lines), then DIV restarts from zero.
 			{
-				static int stl = -1;
-				if (stl < 0) { const char *e = getenv("ACID_STL"); stl = e ? atoi(e) : 32770; }
+				static const int stl = AcidKnob("ACID_STL", 32770);
 				for (int i = 0; i < stl; ++i)
 					TickM(s, mem);
 			}
@@ -75,8 +74,7 @@ void Dispatch(CpuState &s, Memory &mem, uint8_t op)
 			// The display clock resumes a few dots out of step with the
 			// CPU's first post-switch cycle (daid speed_switch_timing_stat).
 			{
-				static int ssd = -99;
-				if (ssd < -90) { const char *e = getenv("ACID_SSD"); ssd = e ? atoi(e) : 0; }
+				static const int ssd = AcidKnob("ACID_SSD", 0);
 				if (ssd > 0 && mem.ppu) PpuStep(*mem.ppu, mem, ssd);
 			}
 		}

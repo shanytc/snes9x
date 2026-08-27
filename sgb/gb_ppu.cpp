@@ -59,6 +59,8 @@
 
 #include "gb_ppu.h"
 #include "gb_memory.h"
+#include "gb_knob.h"
+#include "gb_cart.h"
 #include "gb_joypad.h"
 #include "gb_cpu.h"
 #include "sgb.h"
@@ -152,18 +154,11 @@ void RecomputeStatLine(Ppu &p, Memory &mem, bool defer_irq = false)
 	{
 		if (defer_irq)
 		{
-			static int d2 = -1, d0 = -1, dv = -1, dl = -1;
-			if (d2 < 0)
-			{
-				const char *e;
-				d2 = (e = getenv("ACID_D2")) ? atoi(e) : 7;
-				d0 = (e = getenv("ACID_D0")) ? atoi(e) : 0;
-				dv = (e = getenv("ACID_DV")) ? atoi(e) : 9;
-				dl = (e = getenv("ACID_DL")) ? atoi(e) : -1;   // -1 = mode-based
-				static int dlc = -2;
-				if (dlc < -1) { const char *f = getenv("ACID_DLC"); dlc = f ? atoi(f) : dl; }
-				if (mem.cgb_hw) dl = dlc;
-			}
+			static const int d2 = AcidKnob("ACID_D2", 7);
+			static const int d0 = AcidKnob("ACID_D0", 0);
+			static const int dv = AcidKnob("ACID_DV", 9);
+			static const int dl = AcidKnob("ACID_DL", -1);
+			static const int dlc = AcidKnob("ACID_DLC", dl);
 			// An edge driven purely by the LYC comparator reaches IF one
 			// dot before the mode-2 source (daid ppu_scanline_bgp's
 			// halt-wake grid is anchored to it, unquantized).
@@ -173,8 +168,11 @@ void RecomputeStatLine(Ppu &p, Memory &mem, bool defer_irq = false)
 				  ((p.stat & 0x08) && p.mode == PpuMode::HBlank));
 			int d = (p.mode == PpuMode::OamScan) ? d2
 			      : (p.mode == PpuMode::HBlank)  ? d0 : dv;
-			if (lyc_driven && dl >= 0)
-				d = dl;
+			// Chosen per call, not cached: DMG and CGB want different
+			// delays and cores can run different models at the same time.
+			const int dl_now = mem.cgb_hw ? dlc : dl;
+			if (lyc_driven && dl_now >= 0)
+				d = dl_now;
 			if (d <= 0)
 				mem.if_ = static_cast<uint8_t>(mem.if_ | IRQ_LCDSTAT);
 			else if (p.stat_irq_delay == 0)
@@ -273,9 +271,8 @@ void EvalSprites(Ppu &p, Memory &mem)
 	// DMA; ashiepaws/strikethrough). The scan already happened dot-by-dot
 	// when we latch here, so rebuild per-slot DMA activity from the
 	// transfer schedule (1 byte per 4 dots).
-	static int scb = -1, dph = -1;
-	if (scb < 0) { const char *e = getenv("ACID_SCB"); scb = e ? atoi(e) : 4;
-	               const char *f = getenv("ACID_DPH"); dph = f ? atoi(f) : 0; }
+	static const int scb = AcidKnob("ACID_SCB", 4);
+	static const int dph = AcidKnob("ACID_DPH", 0);
 	const bool dma_scan = mem.dma_active && !p.cgb;
 	const int  eval_dot = p.mode_clock + 80;
 
@@ -746,8 +743,7 @@ inline uint8_t FetchDataByte(Ppu &p, const PixelMachine &m, bool high)
 
 inline bool WinEnView(const Ppu &p, const PixelMachine &m)
 {
-	static int wd = -1;
-	if (wd < 0) { const char *e = getenv("ACID_WD"); wd = e ? atoi(e) : 1; }
+	static const int wd = AcidKnob("ACID_WD", 1);
 	const int d = m.emits ? wd : 0;   // the skeleton reads the live register
 	const uint8_t v = d == 0 ? p.lcdc
 	                : d == 1 ? p.lcdc_shadow
@@ -759,8 +755,7 @@ inline bool WinEnView(const Ppu &p, const PixelMachine &m)
 // WX as this machine sees it (same latch as the window-enable view).
 inline uint8_t WxView(const Ppu &p, const PixelMachine &m)
 {
-	static int wxd = -99;
-	if (wxd < -90) { const char *e = getenv("ACID_WXD"); wxd = e ? atoi(e) : 0; }
+	static const int wxd = AcidKnob("ACID_WXD", 0);
 	const int d = m.emits ? wxd : 0;
 	return d == 0 ? p.wx
 	     : d == 1 ? p.wx_d1
@@ -777,8 +772,7 @@ void BgPushAttempt(Ppu &p, PixelMachine &m)
 	// Window-disable pixel insertion (SameBoy #278): with WY armed
 	// but the window bit off, a WX match at the push slot injects a
 	// single blank pixel instead of the tile row (m2_win_en_toggle).
-	static int wdi = -99;
-	if (wdi < -90) { const char *e = getenv("ACID_WDI"); wdi = e ? atoi(e) : -1; }
+	static const int wdi = AcidKnob("ACID_WDI", -1);
 	const bool win_en_ins = wdi < 0 ? WinEnView(p, m) : ((p.lcdc & 0x20) != 0);
 	if (!p.cgb && p.wy_triggered && !win_en_ins && !m.win_insert_disable)
 	{
@@ -1159,8 +1153,7 @@ void EmitPixel(Ppu &p, PixelMachine &m, uint8_t bg_color, uint8_t bg_attr, bool 
 bool WindowCheckDot(Ppu &p, PixelMachine &m)
 {
 	const uint8_t wxv = WxView(p, m);
-	static int wdc = -99;
-	if (wdc < -90) { const char *e = getenv("ACID_WDC"); wdc = e ? atoi(e) : -1; }
+	static const int wdc = AcidKnob("ACID_WDC", -1);
 	const bool win_en_cmp = wdc < 0 ? WinEnView(p, m) : (wdc == 0 ? ((p.lcdc & 0x20) != 0)
 	                                                              : ((p.lcdc_shadow & 0x20) != 0));
 	if (m.fetch_is_window || !p.wy_triggered || !win_en_cmp)
@@ -1170,8 +1163,7 @@ bool WindowCheckDot(Ppu &p, PixelMachine &m)
 	// rolling the emitted pixels back (Coffee GB windowCatchUpPos).
 	if (!p.cgb && m.win_catchup_pos >= 0 && !m.win_activated_line)
 	{
-		static int dmg = -1;
-		if (dmg < 0) { const char *e = getenv("ACID_DMG"); dmg = e ? atoi(e) : 0; }
+		static const int dmg = AcidKnob("ACID_DMG", 0);
 		const int gap = static_cast<int>(m.pos) - m.win_catchup_pos;
 		if (gap >= 0 && gap <= dmg)
 		{
@@ -1215,8 +1207,7 @@ bool WindowCheckDot(Ppu &p, PixelMachine &m)
 			// DMG LCD/PPU desync: the comparator fires a dot early and
 			// rolls the panel back one pixel (strikethrough).
 			act = true;
-			static int wdsy = -1;
-			if (wdsy < 0) { const char *e = getenv("ACID_WDSY"); wdsy = e ? atoi(e) : 0; }
+			static const int wdsy = AcidKnob("ACID_WDSY", 0);
 			if (wdsy && m.lcd_x > 0) --m.lcd_x;
 		}
 	}
@@ -1312,8 +1303,7 @@ void RenderDot(Ppu &p, PixelMachine &m, Memory &mem)
 	// The mode-0 STAT source pulses a few dots before the visible flip
 	// (SameBoy fires it at the last pixel; ours lands early to match the
 	// CPU-observed grid).
-	static int m0pre = -1;
-	if (m0pre < 0) { const char *e = getenv("ACID_M0PRE"); m0pre = e ? atoi(e) : -1; }
+	static const int m0pre = AcidKnob("ACID_M0PRE", -1);
 	if (!m.emits && m.lcd_x == GB_SCREEN_WIDTH - m0pre &&
 	    (p.lcdc & 0x80) && (p.stat & 0x08) && !p.stat_line_high)
 	{
@@ -1323,8 +1313,6 @@ void RenderDot(Ppu &p, PixelMachine &m, Memory &mem)
 }
 
 } // anonymous
-
-namespace { int g_pal_unit = 0; }
 
 // True while the LCD is still receiving pixels for this line. The output
 // machine trails the timing skeleton, so a write landing just after the
@@ -1337,18 +1325,21 @@ static bool PpuRendering(const Ppu &p)
 
 bool PpuLcdDraining(const Ppu &p) { return PpuRendering(p); }
 
+// The palette-write transition pixel only shows on "blob" DMG units.
+static bool BlobPalUnit(const Memory &mem)
+{
+	return !mem.cart || mem.cart->pal_unit == 0;
+}
+
 // STAT's mode bits trail the machine by a fixed LCD lag, not by however
 // far the output machine has drifted behind the timing skeleton.
 static bool StatShowsTransfer(const Ppu &p)
 {
 	if (p.mode == PpuMode::Transfer) return true;
-	static int hold = -99, holdl = -99;
-	if (hold < -90) { const char *e = getenv("ACID_HOLDN"); hold = e ? atoi(e) : 1;
-	                  const char *f = getenv("ACID_HOLDL"); holdl = f ? atoi(f) : 4; }
+	static const int hold = AcidKnob("ACID_HOLDN", 1);
+	static const int holdl = AcidKnob("ACID_HOLDL", 4);
 	return !p.om.done && p.mode_clock < (p.lcdon_line ? holdl : hold);
 }
-
-void PpuSetPalUnit(int unit) { g_pal_unit = unit; }
 
 void PpuReset(Ppu &p)
 {
@@ -1372,9 +1363,8 @@ void PpuReset(Ppu &p)
 	// Every line starts its OAM scan a few dots before LY advances; boot
 	// has to start on that same phase or the first frames run skewed.
 	{
-		static int lsw0 = -1, boot = -99;
-		if (lsw0 < 0) { const char *e = getenv("ACID_LSW"); lsw0 = e ? atoi(e) : 4;
-		                const char *f = getenv("ACID_BOOT"); boot = f ? atoi(f) : 0; }
+		static const int lsw0 = AcidKnob("ACID_LSW", 4);
+		static const int boot = AcidKnob("ACID_BOOT", 0);
 		p.mode_clock = -lsw0 + boot;
 	}
 	p.tm = PixelMachine{};
@@ -1482,8 +1472,7 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 	// pop (SameBoy sleeps once between the loop break and the STAT
 	// flip); the extra dot renders nothing.
 	{
-		static int xs = -1;
-		if (xs < 0) { const char *e = getenv("ACID_XS"); xs = e ? atoi(e) : 0; }
+		static const int xs = AcidKnob("ACID_XS", 0);
 		if (xs > 0 && m.pos == 160 && m.entry_wait == 0)
 		{
 			if (p.mode3_hold < 0)
@@ -1532,8 +1521,7 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 			m.win_pend = 0;
 			if (p.wx == m.win_pend_wx && (p.cgb || WinEnView(p, m)))
 			{
-				static int wroll = -1;
-				if (wroll < 0) { const char *e = getenv("ACID_WROLL"); wroll = e ? atoi(e) : 1; }
+				static const int wroll = AcidKnob("ACID_WROLL", 1);
 				if (wroll && m.pos != m.win_pend_pos)
 				{
 					RewindPixel(m);
@@ -1567,8 +1555,7 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 			m.win_en_prev = win_en_now;
 		}
 		// How far into the tile a window fetch can still be killed.
-		static int wks = -99;
-		if (wks < -90) { const char *e = getenv("ACID_WKS"); wks = e ? atoi(e) : 0; }
+		static const int wks = AcidKnob("ACID_WKS", 0);
 		// DMG: clearing LCDC.5 kills the window fetch only while it is
 		// still early (through the map read); later stages complete and
 		// push their window tile (Coffee GB; m3_lcdc_win_en_change_multiple).
@@ -1616,8 +1603,7 @@ static bool Mode3Dot(Ppu &p, PixelMachine &m, Memory &mem)
 	if (m.pos == 160)
 	{
 		{
-			static int xs2 = -1;
-			if (xs2 < 0) { const char *e = getenv("ACID_XS"); xs2 = e ? atoi(e) : 0; }
+			static const int xs2 = AcidKnob("ACID_XS", 0);
 			if (xs2 > 0)
 				return false;   // exit handled at the top of the next dot
 		}
@@ -1670,15 +1656,13 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 		// Keeping the subtraction at 80 hands mode 3 a 4-dot head start on
 		// mode_clock, which the stall math turns into a 4-dot-shorter HBlank.
 		{
-			static int lk = 99, xv = -1;
-			if (lk == 99) { const char *e = getenv("ACID_LCDON"); lk = e ? atoi(e) : 1;
-			                const char *f = getenv("ACID_XV"); xv = f ? atoi(f) : 7; }
+			static const int lk = AcidKnob("ACID_LCDON", 1);
+			static const int xv = AcidKnob("ACID_XV", 7);
 			if (p.mode_clock < MODE2_DOTS + (p.lcdon_first ? lk : xv))
 				break;
 			if (p.lcdon_first)
 			{
-				static int lp = 99;
-				if (lp == 99) { const char *e = getenv("ACID_LPAD"); lp = e ? atoi(e) : -4; }
+				static const int lp = AcidKnob("ACID_LPAD", -4);
 				p.lcdon_pad = static_cast<int16_t>(lp);
 			}
 		}
@@ -1697,10 +1681,9 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 			// its BG FIFO (the position machine's prefix drops them). The
 			// skeleton runs from the STAT flip; the output machine trails
 			// it so its register and VRAM reads land on the hardware dots.
-			static int entry = -1, entryc = -1, entryl = -1;
-			if (entry < 0) { const char *e = getenv("ACID_ENTRY"); entry = e ? atoi(e) : 4;
-			                 const char *f = getenv("ACID_ENTRYC"); entryc = f ? atoi(f) : 4;
-			                 const char *g = getenv("ACID_ENTRYL"); entryl = g ? atoi(g) : entry; }
+			static const int entry = AcidKnob("ACID_ENTRY", 4);
+			static const int entryc = AcidKnob("ACID_ENTRYC", 4);
+			static const int entryl = AcidKnob("ACID_ENTRYL", entry);
 			const int odelay = was_lcdon ? entryl : p.cgb ? entryc : entry;
 			for (int mi = 0; mi < 2; ++mi)
 			{
@@ -1780,8 +1763,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 			{
 				// The LCD's output stage needs a few lines to settle after
 				// an enable; those flips read back on the enable-line grid.
-				static int lyn = -1;
-				if (lyn < 0) { const char *e = getenv("ACID_LYN"); lyn = e ? atoi(e) : 2; }
+				static const int lyn = AcidKnob("ACID_LYN", 2);
 				if (p.lcdon_line) p.ly_lag = static_cast<uint8_t>(lyn);
 				else if (p.ly_lag) --p.ly_lag;
 			}
@@ -1808,8 +1790,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				// same cycle as the vblank IRQ (mooneye vblank_stat_intr).
 				if ((p.stat & 0x20) && !p.stat_line_high && p.stat_irq_delay == 0)
 				{
-					static int vp = -1;
-					if (vp < 0) { const char *e = getenv("ACID_VP"); vp = e ? atoi(e) : 8; }
+					static const int vp = AcidKnob("ACID_VP", 8);
 					p.stat_irq_delay = static_cast<uint8_t>(vp);
 				}
 				p.frame_ready   = true;
@@ -1997,15 +1978,9 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		return;
 	}
 
-	// A DMG LCD-enable write lands three dots into its machine cycle, so
-	// the grid it starts is offset from the CPU's; the CGB write lands at
-	// the cycle end and stays aligned. A BIOS-less start is handed LCDC
-	// already on, so it has to take that offset here instead.
-	if (p.boot_skew > 0)
-	{
-		if (mem.cgb_hw) p.boot_skew = 0;
-		else while (p.boot_skew > 0 && tcycles > 0) { --p.boot_skew; --tcycles; }
-	}
+	// Swallow the dots a CPU-driven LCD enable would have consumed before
+	// its first one (Emulator::Reset decides how many).
+	while (p.boot_skew > 0 && tcycles > 0) { --p.boot_skew; --tcycles; }
 	while (tcycles-- > 0)
 		ExecPpuDot(p, mem);
 }
@@ -2022,12 +1997,11 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// the mode bits still read 0 even though the OAM scan (and its
 			// STAT interrupt) have begun (SameBoy / mooneye lcdon tests).
 			{
-				static int msk = -1, v3 = -1, v0 = -1, v3c = -99, mskc = -99;
-				if (v3c < -90) { const char *q = getenv("ACID_V3C"); v3c = q ? atoi(q) : 4;
-				                 const char *w = getenv("ACID_MSKC"); mskc = w ? atoi(w) : 0; }
-				if (msk < 0) { const char *e = getenv("ACID_MSK"); msk = e ? atoi(e) : -3;
-				               const char *f = getenv("ACID_V3"); v3 = f ? atoi(f) : 0;
-				               const char *g = getenv("ACID_V0"); v0 = g ? atoi(g) : 0; }
+				static const int msk  = AcidKnob("ACID_MSK", -3);
+				static const int v3   = AcidKnob("ACID_V3", 0);
+				static const int v0   = AcidKnob("ACID_V0", 0);
+				static const int v3c  = AcidKnob("ACID_V3C", 4);
+				static const int mskc = AcidKnob("ACID_MSKC", 0);
 				if (!p.cgb && p.mode == PpuMode::OamScan &&
 				    (p.mode_clock <= -msk || p.lcdon_first))
 					v = static_cast<uint8_t>(v & ~0x03);
@@ -2056,9 +2030,8 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// Around a line flip the coincidence flag walks old-LY compare,
 			// then a matches-nothing gap, then the new LY (Mesen LyForCompare;
 			// mooneye lcdon_timing).
-			static int cmp1 = -1, cmp2 = -1;
-			if (cmp1 < 0) { const char *e = getenv("ACID_CMP1"); cmp1 = e ? atoi(e) : 4;
-			                const char *f = getenv("ACID_CMP2"); cmp2 = f ? atoi(f) : 4; }
+			static const int cmp1 = AcidKnob("ACID_CMP1", 4);
+			static const int cmp2 = AcidKnob("ACID_CMP2", 4);
 			if (p.ly == p.ly_prev + 1)
 			{
 				const int64_t dt = p.t_cycles - p.ly_change_t;
@@ -2081,9 +2054,8 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 			// LY flip lands mid-line-start pipeline (hblank_ly_scx).
 			// The shortened line after an LCD enable reads its flip back a
 			// dot earlier than a steady line does.
-			static int lyk = -1, lyks = -1;
-			if (lyk < 0) { const char *e = getenv("ACID_LYK"); lyk = e ? atoi(e) : 4;
-			               const char *f = getenv("ACID_LYKS"); lyks = f ? atoi(f) : 4; }
+			static const int lyk = AcidKnob("ACID_LYK", 4);
+			static const int lyks = AcidKnob("ACID_LYKS", 4);
 			// The enable line owns both the reads inside it and the reads
 			// just after the flip that ends it.
 			const int lag = (p.lcdon_line || p.ly_lag) ? lyk : lyks;
@@ -2201,10 +2173,9 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 		{
 			// DMG palette-write glitch: the dot the store lands on renders
 			// with (old | new); the clean value takes hold next dot.
-			if (!p.cgb && PpuRendering(p) && g_pal_unit == 0)
+			if (!p.cgb && PpuRendering(p) && BlobPalUnit(mem))
 			{
-				{ static int pgl = -1;
-				  if (pgl < 0) { const char *e = getenv("ACID_PGL"); pgl = e ? atoi(e) : 2; }
+				{ static const int pgl = AcidKnob("ACID_PGL", 2);
 				  p.pal_glitch = static_cast<uint8_t>(pgl); }
 				p.pal_glitch_reg= 0;
 				p.pal_glitch_next = value;
@@ -2279,10 +2250,9 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			break;
 		}
 		case 0xFF48:
-			if (!p.cgb && PpuRendering(p) && g_pal_unit == 0)
+			if (!p.cgb && PpuRendering(p) && BlobPalUnit(mem))
 			{
-				{ static int pgl = -1;
-				  if (pgl < 0) { const char *e = getenv("ACID_PGL"); pgl = e ? atoi(e) : 2; }
+				{ static const int pgl = AcidKnob("ACID_PGL", 2);
 				  p.pal_glitch = static_cast<uint8_t>(pgl); }
 				p.pal_glitch_reg= 1;
 				p.pal_glitch_next = value;
@@ -2292,10 +2262,9 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.obp0 = value;
 			break;
 		case 0xFF49:
-			if (!p.cgb && PpuRendering(p) && g_pal_unit == 0)
+			if (!p.cgb && PpuRendering(p) && BlobPalUnit(mem))
 			{
-				{ static int pgl = -1;
-				  if (pgl < 0) { const char *e = getenv("ACID_PGL"); pgl = e ? atoi(e) : 2; }
+				{ static const int pgl = AcidKnob("ACID_PGL", 2);
 				  p.pal_glitch = static_cast<uint8_t>(pgl); }
 				p.pal_glitch_reg= 2;
 				p.pal_glitch_next = value;

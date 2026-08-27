@@ -5,6 +5,7 @@
 \*****************************************************************************/
 
 #include "acid.h"
+#include "acid_report.h"
 #include "sgb.h"
 #include "gb_memory.h"
 
@@ -204,6 +205,27 @@ std::string OneLine(const std::string &s, size_t cap)
 	return r;
 }
 
+char Lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c; }
+
+std::string LowerCopy(const std::string &s)
+{
+	std::string r = s;
+	for (char &c : r) c = Lower(c);
+	return r;
+}
+
+bool ContainsFold(const std::string &hay, const std::string &needle)
+{
+	return LowerCopy(hay).find(LowerCopy(needle)) != std::string::npos;
+}
+
+// "mooneye/acceptance/boot_div-S.gb" -> "mooneye".
+std::string SuiteOfName(const std::string &name)
+{
+	const size_t slash = name.find_first_of("/\\");
+	return slash == std::string::npos ? std::string("other") : name.substr(0, slash);
+}
+
 bool ReadWholeFile(const std::string &path, std::vector<uint8_t> &out)
 {
 	FILE *f = fopen(path.c_str(), "rb");
@@ -219,6 +241,62 @@ bool ReadWholeFile(const std::string &path, std::vector<uint8_t> &out)
 }
 
 } // anonymous
+
+const char *ModelName(Model m)
+{
+	return m == Model::CGB ? "CGB" : m == Model::SGB ? "SGB" : "DMG";
+}
+
+// Suites match on a substring so upstream's own names work - "mealybug"
+// finds mealybug-tearoom-tests.
+bool Filter::Matches(const Test &t) const
+{
+	if (models && !(models & ModelBit(t.model))) return false;
+	if (!text.empty() && !ContainsFold(t.name, text)) return false;
+	if (suites.empty()) return true;
+	for (const std::string &s : suites)
+		if (ContainsFold(t.suite, s)) return true;
+	return false;
+}
+
+std::string Filter::Describe() const
+{
+	if (Empty()) return "all tests";
+	std::string d;
+	auto add = [&](const std::string &s) { if (!d.empty()) d += ", "; d += s; };
+	if (!suites.empty())
+	{
+		std::string list;
+		for (const std::string &s : suites)
+		{
+			if (!list.empty()) list += "+";
+			list += s;
+		}
+		add("suite " + list);
+	}
+	if (models)
+	{
+		std::string list;
+		for (Model m : { Model::DMG, Model::CGB, Model::SGB })
+		{
+			if (!(models & ModelBit(m))) continue;
+			if (!list.empty()) list += "+";
+			list += ModelName(m);
+		}
+		add("model " + list);
+	}
+	if (!text.empty()) add("name contains \"" + text + "\"");
+	return d;
+}
+
+std::vector<std::string> SuitesOf(const std::vector<Test> &tests)
+{
+	std::vector<std::string> out;
+	for (const Test &t : tests)
+		if (std::find(out.begin(), out.end(), t.suite) == out.end())
+			out.push_back(t.suite);
+	return out;
+}
 
 bool LoadManifest(const char *acid_dir, std::vector<Test> &out, std::string &err)
 {
@@ -273,6 +351,7 @@ bool LoadManifest(const char *acid_dir, std::vector<Test> &out, std::string &err
 		};
 		split(fields[4], t.pass_images);
 		if (fields.size() >= 6) split(fields[5], t.fail_images);
+		t.suite = SuiteOfName(t.name);
 		out.push_back(std::move(t));
 	}
 	fclose(f);
@@ -454,15 +533,24 @@ Summary Run(const RunOptions &opts)
 		fprintf(stderr, "acid: %s\n", err.c_str());
 		return sum;
 	}
-	if (opts.filter && *opts.filter)
+	if (!opts.filter.Empty())
 	{
 		std::vector<Test> kept;
 		for (auto &t : tests)
-			if (t.name.find(opts.filter) != std::string::npos)
-				kept.push_back(std::move(t));
+			if (opts.filter.Matches(t)) kept.push_back(std::move(t));
 		tests.swap(kept);
 	}
+	return RunTests(tests, opts);
+}
+
+Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
+                 std::vector<Result> *out_results)
+{
+	Summary sum;
+	const std::string dir = opts.acid_dir ? opts.acid_dir : "acid";
 	if (tests.empty()) return sum;
+
+	const auto wall_start = std::chrono::steady_clock::now();
 
 	if (opts.dump_failures)
 	{
@@ -485,6 +573,7 @@ Summary Run(const RunOptions &opts)
 	                 [&](size_t a, size_t b) { return tests[a].runtime > tests[b].runtime; });
 
 	std::vector<Result> results(tests.size());
+	std::vector<char>   ran(tests.size(), 0);   // false for cancelled-away tests
 	std::atomic<size_t> next_test{0};
 	std::atomic<bool>   cancel{false};
 	std::atomic<int>    live{nthreads};
@@ -520,7 +609,8 @@ Summary Run(const RunOptions &opts)
 				if (aborted) break;
 				std::lock_guard<std::mutex> lk(done_mu);
 				results[i] = std::move(r);
-				events.push_back({ i, EvFinished, r.frames, r.frames });
+				ran[i] = 1;
+				events.push_back({ i, EvFinished, results[i].frames, results[i].frames });
 			}
 		}
 		live.fetch_sub(1);
@@ -598,26 +688,25 @@ Summary Run(const RunOptions &opts)
 	sum.cancelled = cancelled ? 1 : 0;
 
 	// The report goes out in manifest order, whichever worker produced it.
-	if (FILE *report = fopen(JoinPath(dir, "results.txt").c_str(), "wb"))
+	if (opts.report && *opts.report)
 	{
-		const std::string env = EnvOverrides();
-		if (!env.empty())
-			fprintf(report, "# timing overrides in effect: %s\n\n", env.c_str());
-		static const char *kStatus[] = { "PASS", "FAIL", "INFO", "ERROR" };
+		ReportInfo info;
+		info.env       = EnvOverrides();
+		info.filter    = opts.filter.Describe();
+		info.source    = dir;
+		info.threads   = nthreads;
+		info.cancelled = cancelled;
+		info.seconds   = std::chrono::duration<double>(
+		                     std::chrono::steady_clock::now() - wall_start).count();
+		std::vector<ReportRow> rows;
+		rows.reserve(tests.size());
 		for (size_t i = 0; i < tests.size(); ++i)
-		{
-			if (results[i].frames == 0 && results[i].detail.empty() &&
-			    results[i].status == Status::Error && cancelled)
-				continue;   // never ran
-			fprintf(report, "%-5s %-60s %s\n",
-			        kStatus[static_cast<int>(results[i].status)],
-			        tests[i].name.c_str(), results[i].detail.c_str());
-		}
-		fprintf(report, "\n%d/%d passed (%d failed, %d info, %d errors%s)\n",
-		        sum.passed, sum.passed + sum.failed, sum.failed, sum.info,
-		        sum.errors, cancelled ? ", cancelled" : "");
-		fclose(report);
+			rows.push_back({ &tests[i], ran[i] ? &results[i] : nullptr });
+		const std::string path = JoinPath(dir, opts.report);
+		std::string err;
+		WriteReport(path.c_str(), FormatFromPath(opts.report), rows, info, err);
 	}
+	if (out_results) *out_results = std::move(results);
 	return sum;
 }
 

@@ -39,6 +39,30 @@ struct Test
 	std::string rom;              // path relative to the acid directory
 	std::vector<std::string> pass_images;
 	std::vector<std::string> fail_images;
+	// First path segment of the name ("blargg", "mooneye", ...).
+	std::string suite;
+};
+
+// Bit for a model in Filter::models.
+constexpr unsigned ModelBit(Model m) { return 1u << static_cast<unsigned>(m); }
+
+// "DMG" / "CGB" / "SGB".
+const char *ModelName(Model m);
+
+// Which tests a run covers, mirroring the shootout's --test/--model command
+// line. A default-constructed Filter matches everything.
+struct Filter
+{
+	std::string text;                 // substring of the name, case-insensitive
+	std::vector<std::string> suites;  // case-insensitive; empty = every suite
+	unsigned    models = 0;           // ModelBit mask; 0 = every model
+
+	bool Empty() const
+	{
+		return text.empty() && suites.empty() && models == 0;
+	}
+	bool Matches(const Test &t) const;
+	std::string Describe() const;     // for report headers; "all tests" when empty
 };
 
 // A captured GB frame: 160x144 RGB triplets, row 0 at the top. Empty when
@@ -79,8 +103,11 @@ using RunningFn = void (*)(void *user, int test_index, int frames_done,
 struct RunOptions
 {
 	const char *acid_dir = "acid";  // directory holding manifest.txt + ROMs
-	const char *filter   = nullptr; // substring filter on test names
+	Filter      filter;             // which manifest tests to run
 	bool        dump_failures = false; // write _failures/<name>.ppm frames
+	// Report written next to the manifest when the run ends. Set to null to
+	// write nothing; ".json"/".html" pick those formats.
+	const char *report   = "results.txt";
 	ProgressFn  progress  = nullptr;
 	ResultFn    on_result = nullptr;
 	StartFn     on_start  = nullptr;
@@ -102,6 +129,9 @@ struct Summary
 // Parse acid/manifest.txt. Returns false with a message in `err`.
 bool LoadManifest(const char *acid_dir, std::vector<Test> &out, std::string &err);
 
+// Every suite named in `tests`, in first-seen (manifest) order.
+std::vector<std::string> SuitesOf(const std::vector<Test> &tests);
+
 // One emulator core per hardware thread, the runner's default.
 int DefaultThreadCount();
 
@@ -111,12 +141,20 @@ int DefaultThreadCount();
 // rather than letting them change results silently. Empty when clean.
 std::string EnvOverrides();
 
-// Run every (filtered) manifest test and write <acid_dir>/results.txt.
-// Tests are spread over RunOptions::threads private emulator instances, so
-// the caller's own GB session is left alone. Every callback - start,
-// progress and result - is invoked on the calling thread, whichever worker
-// the work happened on.
+// Run every (filtered) manifest test and write RunOptions::report next to
+// the manifest. Tests are spread over RunOptions::threads private emulator
+// instances, so the caller's own GB session is left alone. Every callback -
+// start, progress and result - is invoked on the calling thread, whichever
+// worker the work happened on.
 Summary Run(const RunOptions &opts);
+
+// Run a caller-supplied set of tests, already filtered and in the order the
+// caller wants to see them; the indices handed to the callbacks are into
+// `tests`. Run() is this with the manifest loaded and the filter applied.
+// `results` receives one entry per test when non-null - the verdict a
+// report needs. Cancelled tests keep their default Error/0-frame entry.
+Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
+                 std::vector<Result> *results = nullptr);
 
 } // namespace AcidTests
 

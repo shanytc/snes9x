@@ -731,6 +731,13 @@
 #define IDC_ACID_PAUSE                  3374
 #define IDC_ACID_SHOT                   3375
 #define IDC_ACID_SHOTCAP                3376
+#define IDC_ACID_SEARCH                 3377
+#define IDC_ACID_SUITES                 3378
+#define IDC_ACID_MODELS                 3379
+#define IDC_ACID_SHOW                   3380
+#define IDC_ACID_CLEAR                  3381
+#define IDC_ACID_EXPORT                 3382
+#define IDC_ACID_FILTER_LABEL           3383
 
 #define ID_DEBUG_VRAM_VIEWER            40200
 #define ID_DEBUG_TILEMAP_VIEWER         40201
@@ -907,7 +914,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        190
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3377
+#define _APS_NEXT_CONTROL_VALUE         3384
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

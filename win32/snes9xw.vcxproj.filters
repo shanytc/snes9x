@@ -237,6 +237,9 @@
     <ClInclude Include="..\sgb\acid.h">
       <Filter>SGB</Filter>
     </ClInclude>
+    <ClInclude Include="..\sgb\acid_report.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>APU</Filter>
     </ClInclude>
@@ -768,6 +771,9 @@
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\acid.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\acid_report.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\apu\apu.cpp">

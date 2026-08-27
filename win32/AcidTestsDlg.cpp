@@ -964,29 +964,57 @@ void RescanBaselines(AcidDlgState *st, bool quiet)
 	UpdateShotCaption(st);
 	if (quiet) return;
 
-	std::string msg = "Baselines: ";
-	if (!HaveBaseline(st)) msg += "none in " +
-		AcidTests::BaselinePath(st->acid_dir, "");
-	for (size_t b = 0; b < st->baselines.size(); ++b)
+	// Just what was found - one line cannot hold a tally for twenty of
+	// them, so those live in the Baseline menu instead.
+	if (!HaveBaseline(st))
 	{
-		int same = 0, differs = 0, missing = 0, na = 0;
-		for (int i : st->rows)
-		{
-			if (b >= st->match[i].size()) continue;
-			if      (st->match[i][b] == AcidTests::Match::Same)    ++same;
-			else if (st->match[i][b] == AcidTests::Match::Differs) ++differs;
-			else if (st->match[i][b] == AcidTests::Match::NoImage) ++missing;
-			else if (st->match[i][b] == AcidTests::Match::NoRef)   ++na;
-		}
-		char one[192];
-		snprintf(one, sizeof one, "%s%s: %d same, %d differ, %d missing, %d n/a",
-		         b ? "   " : "", st->baselines[b].name.c_str(), same, differs,
-		         missing, na);
-		msg += one;
+		SetCtrlText(st->hStat, ("No baselines in " +
+			AcidTests::BaselinePath(st->acid_dir, "")).c_str());
+		return;
 	}
-	SetCtrlText(st->hStat, msg.c_str());
+	std::string names;
+	const size_t show = st->baselines.size() < 5 ? st->baselines.size() : 5;
+	for (size_t b = 0; b < show; ++b)
+	{
+		if (b) names += ", ";
+		names += st->baselines[b].name;
+	}
+	char more[32] = { 0 };
+	if (st->baselines.size() > show)
+		snprintf(more, sizeof more, " and %d more",
+		         (int)(st->baselines.size() - show));
+	char buf[320];
+	snprintf(buf, sizeof buf, "%d baseline%s: %s%s", (int)st->baselines.size(),
+	         st->baselines.size() == 1 ? "" : "s", names.c_str(), more);
+	SetCtrlText(st->hStat, buf);
 }
 
+// How the shown tests came out against one baseline.
+void BaselineTally(const AcidDlgState *st, size_t b, char *buf, size_t n)
+{
+	int same = 0, differs = 0, missing = 0, na = 0, pending = 0;
+	for (int i : st->rows)
+	{
+		const AcidTests::Match m = b < st->match[i].size()
+		                           ? st->match[i][b] : AcidTests::Match::None;
+		switch (m)
+		{
+			case AcidTests::Match::Same:    ++same;    break;
+			case AcidTests::Match::Differs: ++differs; break;
+			case AcidTests::Match::NoImage: ++missing; break;
+			case AcidTests::Match::NoRef:   ++na;      break;
+			default:                        ++pending; break;
+		}
+	}
+	int k = snprintf(buf, n, "%d same, %d differ", same, differs);
+	if (missing) k += snprintf(buf + k, n - k, ", %d missing", missing);
+	if (na)      k += snprintf(buf + k, n - k, ", %d n/a", na);
+	if (pending) snprintf(buf + k, n - k, ", %d not run", pending);
+}
+
+// The menu is where the per-baseline tallies live: with twenty of them
+// there is no line long enough, and a popup can be as tall as it likes.
+// Picking one puts its frame in the preview.
 void BaselineMenu(AcidDlgState *st)
 {
 	bool any_shot = false;
@@ -999,8 +1027,16 @@ void BaselineMenu(AcidDlgState *st)
 	if (!menu) return;
 	AppendMenu(menu, MF_STRING | (any_shot ? MF_ENABLED : MF_GRAYED), 1,
 	           TEXT("&Save shown frames as a baseline..."));
-	AppendMenu(menu, MF_SEPARATOR, 0, NULL);
 	AppendMenu(menu, MF_STRING, 2, TEXT("&Rescan acid\\baseline"));
+	if (HaveBaseline(st)) AppendMenu(menu, MF_SEPARATOR, 0, NULL);
+	for (size_t b = 0; b < st->baselines.size(); ++b)
+	{
+		char tally[128], line[256];
+		BaselineTally(st, b, tally, sizeof tally);
+		snprintf(line, sizeof line, "%s\t%s", st->baselines[b].name.c_str(), tally);
+		AppendMenu(menu, MF_STRING | (b == (size_t)st->shot_src ? MF_CHECKED : 0),
+		           (UINT_PTR)(10 + b), Utf8ToWide(line));
+	}
 	const int cmd = (int)TrackPopupMenu(menu,
 		TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN |
 		TPM_LEFTBUTTON, rc.left, rc.top, 0, st->hDlg, NULL);
@@ -1008,6 +1044,12 @@ void BaselineMenu(AcidDlgState *st)
 
 	if      (cmd == 1) SaveBaseline(st);
 	else if (cmd == 2) RescanBaselines(st, false);
+	else if (cmd >= 10 && cmd - 10 < (int)st->baselines.size())
+	{
+		st->shot_src = cmd - 10;
+		InvalidateRect(st->hShot, NULL, TRUE);
+		UpdateShotCaption(st);
+	}
 }
 
 /*--------------------------------------------------------------------------

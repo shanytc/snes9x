@@ -93,8 +93,10 @@ and nothing else.
     ./acid_test --save-baseline ../../acid/baseline/supersnes9x
     ./acid_test --baseline ../../out/somewhere-else # one more, from anywhere
 
-In the dialog the Baseline button saves the shown frames as a new baseline
-or rescans the folder. Each baseline's column reads:
+In the dialog the Baseline button saves the shown frames as a new baseline,
+rescans the folder, and lists every baseline with its tally — twenty of
+those will not fit on a status line, but a menu can be as tall as it likes.
+Picking one puts its frame in the preview. Each baseline's column reads:
 
 | | |
 |---|---|

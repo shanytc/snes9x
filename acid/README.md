@@ -25,10 +25,12 @@ roots, so a second opinion is just another folder beside `default/`:
   what decides PASS and FAIL, so the manifest's `pass_images` and
   `fail_images` always resolve here however many other baselines exist.
 - `baseline/<anything else>/` — a set of frames to diff against, ours from an
-  earlier build or another emulator's dump. Every folder found here becomes
-  its own column; dropping one in is all it takes.
+  earlier build or another emulator's. Every folder found here becomes its
+  own column; dropping one in is all it takes.
 - `defs/` — the upstream Python test definitions the manifest was generated
   from (`make_manifest.py` re-generates it).
+- `fetch_baselines.py` — pulls a baseline per emulator off the shootout's
+  published table (`--list` to see them, `--only <slug>` to pick).
 
 ## Comparison semantics (upstream-compatible)
 
@@ -108,6 +110,28 @@ frame. They land on the same pixels, so flipping makes a difference blink
 out rather than having to be hunted for between two smaller images. The Show
 filter grows entries for what differs from or is missing from any baseline.
 Comparison uses the same rule as a pass: grayscale, 50/255 per pixel.
+
+### Other emulators
+
+`fetch_baselines.py` fills `baseline/<emulator>/` from the shootout's
+published table, which carries a screenshot for every emulator/test pair
+inlined as base64 — so the whole set comes down in one page fetch rather
+than thousands of requests. 19 emulators, 4439 frames, 4.1 MB.
+
+    python fetch_baselines.py --list            # slugs on offer
+    python fetch_baselines.py                   # all of them
+    python fetch_baselines.py --only sameboy --only bgb
+
+Frames are filed under the test's own name rather than the manifest's
+`pass_images`, because two tests can share one of those — `bully.gb` on DMG
+and on GBC both point at `ashiepaws/bully.png` — and one frame would
+overwrite the other.
+
+How much a baseline agrees with us tracks its accuracy score: Coffee GB 261
+of 264, docboy 256, SameBoy 251, down to 38 for VisualBoyAdvance. The three
+Coffee GB disagreements are the two informational ROMs, which have no
+correct answer, and `ppu_scanline_bgp`, which the manifest gives three
+acceptable screens — they render one, we render another, and both pass.
 
 Saving into a folder that already holds frames asks first, naming how many
 would be replaced and who wrote the index it is about to overwrite. Saving

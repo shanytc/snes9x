@@ -527,8 +527,10 @@ void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
 	const int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
 	const int availh = ch - gap * (n - 1);
 	int w, h;
-	const int scale = std::min(cw / AcidTests::kShotWidth,
-	                           availh / (AcidTests::kShotHeight * n));
+	// Not std::min: windows.h has already made min a macro.
+	int scale = cw / AcidTests::kShotWidth;
+	const int vscale = availh / (AcidTests::kShotHeight * n);
+	if (vscale < scale) scale = vscale;
 	if (scale >= 1)
 	{
 		w = AcidTests::kShotWidth * scale;

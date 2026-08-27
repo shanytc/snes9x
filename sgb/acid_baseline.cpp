@@ -12,6 +12,10 @@
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
+// Only FindFirstFile is wanted here, and min/max as macros would break
+// std::min/std::max in anything that later includes this.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 #else
 #include <dirent.h>

@@ -65,7 +65,7 @@ size_t BaselineCount(const std::vector<ReportRow> &rows, const ReportInfo &info)
 {
 	if (info.baselines) return info.baselines->size();
 	size_t n = 0;
-	for (const ReportRow &r : rows) n = std::max(n, r.match.size());
+	for (const ReportRow &r : rows) if (r.match.size() > n) n = r.match.size();
 	return n;
 }
 

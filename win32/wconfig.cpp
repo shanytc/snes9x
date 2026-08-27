@@ -962,11 +962,16 @@ void WinRegisterConfigItems()
 	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
 #undef CATEGORY
 #define	CATEGORY "BIOS"
+	// ConfigItem keeps `name` as a bare pointer, so the key strings need
+	// storage that outlives this call — a temporary std::string would dangle.
+	static char bios_keys[S9X_NUM_BIOS_SLOTS][64];
 	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+	{
+		snprintf(bios_keys[i], sizeof bios_keys[i], "BIOS::%s", S9xGetBiosSlotInfo(i)->key);
 		configItems.push_back(ConfigItem(
-			(std::string("BIOS::") + S9xGetBiosSlotInfo(i)->key).c_str(),
-			(void *) S9xGetBiosPathBuffer(i), S9X_BIOS_PATH_MAX, (void *) "",
-			S9xGetBiosSlotInfo(i)->label, CIT_STRING));
+			bios_keys[i], (void *) S9xGetBiosPathBuffer(i), S9X_BIOS_PATH_MAX,
+			(void *) "", S9xGetBiosSlotInfo(i)->label, CIT_STRING));
+	}
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. Nothing is bundled; drop the file in the BIOS directory.");

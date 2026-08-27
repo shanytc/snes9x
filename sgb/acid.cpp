@@ -282,6 +282,7 @@ const char *MatchName(Match m)
 		case Match::Differs: return "differs";
 		case Match::NoImage: return "missing";
 		case Match::NoFrame: return "noframe";
+		case Match::NoRef:   return "noref";
 		default:             return "none";
 	}
 }

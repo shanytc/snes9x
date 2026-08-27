@@ -257,7 +257,10 @@ Match CompareToBaseline(const Baseline &b, const Test &t,
 	if (b.dir.empty()) return Match::None;
 	std::vector<uint8_t> ref;
 	int best = -1;
-	if (!LoadBaselineFrame(b, t, ref, &shot, &best)) return Match::NoImage;
+	// A test with no reference of its own is informational: nothing is
+	// expected here, as opposed to something being absent.
+	if (!LoadBaselineFrame(b, t, ref, &shot, &best))
+		return t.pass_images.empty() ? Match::NoRef : Match::NoImage;
 	if (shot.empty()) return Match::NoFrame;
 	if (best < 0) return Match::NoImage;
 	diff_px = best;

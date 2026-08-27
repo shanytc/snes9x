@@ -92,8 +92,17 @@ and nothing else.
     ./acid_test --baseline ../../out/somewhere-else # one more, from anywhere
 
 In the dialog the Baseline button saves the shown frames as a new baseline
-or rescans the folder. Each baseline's column reads SAME, DIFF *n* px,
-MISSING or `-`; the preview pane stacks our frame over each baseline's; and
+or rescans the folder. Each baseline's column reads:
+
+| | |
+|---|---|
+| `SAME` | matches, within the 50/255 tolerance |
+| `DIFF n px` | differs, with the pixel count |
+| `MISSING` | this baseline has no image for a test that has a reference |
+| `n/a` | the test defines no reference at all, so none is expected |
+| `-` | not run yet, so there is no frame of ours to compare |
+
+The preview pane stacks our frame over each baseline's, and
 the Show filter grows entries for what differs from or is missing from any
 of them. Comparison uses the same rule as a pass: grayscale, 50/255 per
 pixel.

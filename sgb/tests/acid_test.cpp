@@ -250,7 +250,7 @@ int main(int argc, char **argv)
 	{
 		info.baselines = &baselines;
 		std::vector<int> same(baselines.size()), differ(baselines.size()),
-		                 missing(baselines.size());
+		                 missing(baselines.size()), na(baselines.size());
 		for (AcidTests::ReportRow &r : rows)
 		{
 			r.match.resize(baselines.size());
@@ -262,14 +262,16 @@ int main(int argc, char **argv)
 				if      (r.match[b] == AcidTests::Match::Same)    ++same[b];
 				else if (r.match[b] == AcidTests::Match::Differs) ++differ[b];
 				else if (r.match[b] == AcidTests::Match::NoImage) ++missing[b];
+				else if (r.match[b] == AcidTests::Match::NoRef)   ++na[b];
 				if (r.match[b] == AcidTests::Match::Differs)
 					printf("DIFF  %-48s %-14s %d px\n", r.test->name.c_str(),
 					       baselines[b].name.c_str(), r.diff_px[b]);
 			}
 		}
 		for (size_t b = 0; b < baselines.size(); ++b)
-			printf("baseline %-16s %d same, %d differ, %d missing\n",
-			       baselines[b].name.c_str(), same[b], differ[b], missing[b]);
+			printf("baseline %-16s %d same, %d differ, %d missing, %d n/a\n",
+			       baselines[b].name.c_str(), same[b], differ[b], missing[b],
+			       na[b]);
 	}
 
 	if (!save_baseline.empty())

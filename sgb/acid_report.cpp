@@ -56,6 +56,7 @@ std::string MatchTag(Match m, int diff_px, bool with_count)
 		case Match::Differs: return with_count ? Fmt("DIFF %d", diff_px) : "DIFF";
 		case Match::NoImage: return "MISSING";
 		case Match::NoFrame: return "-";
+		case Match::NoRef:   return "n/a";
 		default:             return "";
 	}
 }
@@ -78,7 +79,7 @@ std::string BaselineName(const ReportInfo &info, size_t i)
 
 struct MatchCounts
 {
-	int same = 0, differs = 0, missing = 0, noframe = 0;
+	int same = 0, differs = 0, missing = 0, noframe = 0, noref = 0;
 
 	void Add(Match m)
 	{
@@ -88,6 +89,7 @@ struct MatchCounts
 			case Match::Differs: ++differs; break;
 			case Match::NoImage: ++missing; break;
 			case Match::NoFrame: ++noframe; break;
+			case Match::NoRef:   ++noref;   break;
 			default: break;
 		}
 	}
@@ -495,9 +497,9 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += "\n" + ScoreLine(total) + (info.cancelled ? ", cancelled" : "") + "\n";
 	const std::vector<MatchCounts> mcs = TallyMatches(rows, nbase);
 	for (size_t i = 0; i < nbase; ++i)
-		o += Fmt("baseline %-20s %d same, %d differ, %d missing, %d not run\n",
-		         BaselineName(info, i).c_str(), mcs[i].same, mcs[i].differs,
-		         mcs[i].missing, mcs[i].noframe);
+		o += Fmt("baseline %-20s %d same, %d differ, %d missing, %d n/a, "
+		         "%d not run\n", BaselineName(info, i).c_str(), mcs[i].same,
+		         mcs[i].differs, mcs[i].missing, mcs[i].noref, mcs[i].noframe);
 	return o;
 }
 
@@ -536,8 +538,9 @@ std::string RenderJson(const std::vector<ReportRow> &rows, const ReportInfo &inf
 			o += ", \"dir\": " + JsonStr(b ? b->dir : std::string());
 			o += ", \"emulator\": " + JsonStr(b ? b->title : std::string());
 			o += Fmt(", \"same\": %d, \"differs\": %d, \"missing\": %d, "
-			         "\"not_run\": %d}", mcs[i].same, mcs[i].differs,
-			         mcs[i].missing, mcs[i].noframe);
+			         "\"not_applicable\": %d, \"not_run\": %d}", mcs[i].same,
+			         mcs[i].differs, mcs[i].missing, mcs[i].noref,
+			         mcs[i].noframe);
 			o += (i + 1 < nbase) ? ",\n" : "\n";
 		}
 		o += "  ],\n";
@@ -629,7 +632,7 @@ td.detail { color:var(--dim) }
 .pass{color:var(--pass)} .fail{color:var(--fail)} .info{color:var(--info)}
 .error{color:var(--err)} .skipped{color:var(--skip)}
 .same{color:var(--pass)} .differs{color:var(--fail)} .missing{color:var(--skip)}
-.noframe{color:var(--skip)} .none{color:var(--skip)}
+.noframe{color:var(--skip)} .none{color:var(--skip)} .noref{color:var(--skip)}
 td.result { font-weight:600 }
 img.shot { width:160px; height:144px; image-rendering:pixelated;
   border:1px solid var(--line); border-radius:3px; background:#000 }
@@ -724,6 +727,7 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 			o += " (" + Html((*info.baselines)[i].title) + ")";
 		o += Fmt(" &mdash; %d same, %d differ, %d missing", mcs[i].same,
 		         mcs[i].differs, mcs[i].missing);
+		if (mcs[i].noref)   o += Fmt(", %d n/a", mcs[i].noref);
 		if (mcs[i].noframe) o += Fmt(", %d not run", mcs[i].noframe);
 		o += "</p>\n";
 	}

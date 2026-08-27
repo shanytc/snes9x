@@ -185,6 +185,7 @@ void BaselineText(const AcidDlgState *st, int test, size_t b, char *buf, size_t 
 	{
 		case AcidTests::Match::Same:    snprintf(buf, n, "SAME");    break;
 		case AcidTests::Match::NoImage: snprintf(buf, n, "MISSING"); break;
+		case AcidTests::Match::NoRef:   snprintf(buf, n, "n/a");     break;
 		case AcidTests::Match::NoFrame: snprintf(buf, n, "-");       break;
 		case AcidTests::Match::Differs:
 			snprintf(buf, n, "DIFF %d px", st->diff_px[test][b]);    break;
@@ -491,10 +492,14 @@ std::vector<size_t> BaselinesWithFrame(const AcidDlgState *st, int test)
 	std::vector<size_t> out;
 	if (test < 0 || test >= (int)st->tests.size()) return out;
 	for (size_t b = 0; b < st->baselines.size(); ++b)
-		if (b < st->match[test].size() &&
-		    st->match[test][b] != AcidTests::Match::NoImage &&
-		    st->match[test][b] != AcidTests::Match::None)
-			out.push_back(b);
+	{
+		if (b >= st->match[test].size()) continue;
+		const AcidTests::Match m = st->match[test][b];
+		if (m == AcidTests::Match::NoImage || m == AcidTests::Match::NoRef ||
+		    m == AcidTests::Match::None)
+			continue;   // nothing on disk to draw
+		out.push_back(b);
+	}
 	return out;
 }
 
@@ -907,18 +912,19 @@ void RescanBaselines(AcidDlgState *st, bool quiet)
 		AcidTests::BaselinePath(st->acid_dir, "");
 	for (size_t b = 0; b < st->baselines.size(); ++b)
 	{
-		int same = 0, differs = 0, missing = 0;
+		int same = 0, differs = 0, missing = 0, na = 0;
 		for (int i : st->rows)
 		{
 			if (b >= st->match[i].size()) continue;
 			if      (st->match[i][b] == AcidTests::Match::Same)    ++same;
 			else if (st->match[i][b] == AcidTests::Match::Differs) ++differs;
 			else if (st->match[i][b] == AcidTests::Match::NoImage) ++missing;
+			else if (st->match[i][b] == AcidTests::Match::NoRef)   ++na;
 		}
 		char one[192];
-		snprintf(one, sizeof one, "%s%s: %d same, %d differ, %d missing",
+		snprintf(one, sizeof one, "%s%s: %d same, %d differ, %d missing, %d n/a",
 		         b ? "   " : "", st->baselines[b].name.c_str(), same, differs,
-		         missing);
+		         missing, na);
 		msg += one;
 	}
 	SetCtrlText(st->hStat, msg.c_str());

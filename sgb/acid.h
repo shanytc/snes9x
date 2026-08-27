@@ -103,7 +103,10 @@ enum class Match : uint8_t
 	Same,      // within the shootout's tolerance
 	Differs,
 	NoImage,   // the baseline has nothing for this test
-	NoFrame    // this test has not been run, so there is nothing to compare
+	NoFrame,   // this test has not been run, so there is nothing to compare
+	// The test defines no reference at all - an informational one - so no
+	// baseline is expected to hold a screen for it.
+	NoRef
 };
 
 const char *MatchName(Match m);   // "same" / "differs" / "missing" / ...

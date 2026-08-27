@@ -52,18 +52,18 @@ blargg/cgb_sound/02-len_ctr.gb|FAIL|0|blargg/cgb_sound/02-len_ctr.png
 blargg/cgb_sound/03-trigger.gb|FAIL|0|blargg/cgb_sound/03-trigger.png
 blargg/cgb_sound/04-sweep.gb|FAIL|0|blargg/cgb_sound/04-sweep.png
 blargg/cgb_sound/05-sweep_details.gb|FAIL|0|blargg/cgb_sound/05-sweep_details.png
-blargg/cgb_sound/06-overflow_on_trigger.gb|FAIL|0|blargg/cgb_sound/06-overflow_on_trigger.png
+blargg/cgb_sound/06-overflow_on_trigger.gb|PASS|0|blargg/cgb_sound/06-overflow_on_trigger.png
 blargg/cgb_sound/07-len_sweep_period_sync.gb|FAIL|0|blargg/cgb_sound/07-len_sweep_period_sync.png
 blargg/cgb_sound/08-len_ctr_during_power.gb|FAIL|0|blargg/cgb_sound/08-len_ctr_during_power.png
 blargg/cgb_sound/09-wave_read_while_on.gb|FAIL|0|blargg/cgb_sound/09-wave_read_while_on.png
-blargg/cgb_sound/10-wave_trigger_while_on.gb|PASS|0|blargg/cgb_sound/10-wave_trigger_while_on.png
+blargg/cgb_sound/10-wave_trigger_while_on.gb|FAIL|0|blargg/cgb_sound/10-wave_trigger_while_on.png
 blargg/cgb_sound/11-regs_after_power.gb|FAIL|0|blargg/cgb_sound/11-regs_after_power.png
 blargg/cgb_sound/12-wave.gb|FAIL|0|blargg/cgb_sound/12-wave.png
 daid/ppu_scanline_bgp.gb (DMG)|FAIL|0|daid/ppu_scanline_bgp.gb (DMG).png
 daid/ppu_scanline_bgp.gb (GBC)|FAIL|0|daid/ppu_scanline_bgp.gb (GBC).png
 daid/stop_instr.gb (DMG)|PASS|0|daid/stop_instr.gb (DMG).png
-daid/stop_instr.gb (GBC)|FAIL|0|daid/stop_instr.gb (GBC).png
-daid/stop_instr_gbc_mode3.gb|PASS|0|daid/stop_instr_gbc_mode3.png
+daid/stop_instr.gb (GBC)|PASS|0|daid/stop_instr.gb (GBC).png
+daid/stop_instr_gbc_mode3.gb|FAIL|0|daid/stop_instr_gbc_mode3.png
 daid/speed_switch_timing_div.gbc|FAIL|0|daid/speed_switch_timing_div.png
 daid/speed_switch_timing_ly.gbc|FAIL|0|daid/speed_switch_timing_ly.png
 daid/speed_switch_timing_stat.gbc|FAIL|0|daid/speed_switch_timing_stat.png
@@ -151,8 +151,6 @@ mooneye/emulator-only/mbc1/rom_4Mb.gb|PASS|0|mooneye/emulator-only/mbc1/rom_4Mb.
 mooneye/emulator-only/mbc1/rom_512kb.gb|PASS|0|mooneye/emulator-only/mbc1/rom_512kb.png
 mooneye/emulator-only/mbc1/rom_8Mb.gb|FAIL|0|mooneye/emulator-only/mbc1/rom_8Mb.png
 mooneye/emulator-only/mbc2/bits_ramg.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_ramg.png
-mooneye/emulator-only/mbc2/bits_romb.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_romb.png
-mooneye/emulator-only/mbc2/bits_unused.gb|PASS|0|mooneye/emulator-only/mbc2/bits_unused.png
 mooneye/emulator-only/mbc2/ram.gb|FAIL|0|mooneye/emulator-only/mbc2/ram.png
 mooneye/emulator-only/mbc2/rom_1Mb.gb|PASS|0|mooneye/emulator-only/mbc2/rom_1Mb.png
 mooneye/emulator-only/mbc2/rom_2Mb.gb|PASS|0|mooneye/emulator-only/mbc2/rom_2Mb.png
@@ -172,17 +170,20 @@ samesuite/apu/channel_1/channel_1_sweep_restart_2.gb|FAIL|0|samesuite/apu/channe
 samesuite/apu/channel_3/channel_3_wave_ram_locked_write.gb|FAIL|0|samesuite/apu/channel_3/channel_3_wave_ram_locked_write.png
 samesuite/apu/div_write_trigger.gb|FAIL|0|samesuite/apu/div_write_trigger.png
 samesuite/apu/div_write_trigger_10.gb|FAIL|0|samesuite/apu/div_write_trigger_10.png
-samesuite/dma/gbc_dma_cont.gb|PASS|0|samesuite/dma/gbc_dma_cont.png
+samesuite/dma/gbc_dma_cont.gb|FAIL|0|samesuite/dma/gbc_dma_cont.png
 samesuite/dma/gdma_addr_mask.gb|FAIL|0|samesuite/dma/gdma_addr_mask.png
 samesuite/dma/hdma_lcd_off.gb|FAIL|0|samesuite/dma/hdma_lcd_off.png
-samesuite/dma/hdma_mode0.gb|PASS|0|samesuite/dma/hdma_mode0.png
-samesuite/ppu/blocking_bgpi_increase.gb|PASS|0|samesuite/ppu/blocking_bgpi_increase.png
+samesuite/dma/hdma_mode0.gb|FAIL|0|samesuite/dma/hdma_mode0.png
+samesuite/ppu/blocking_bgpi_increase.gb|FAIL|0|samesuite/ppu/blocking_bgpi_increase.png
+samesuite/sgb/command_mlt_req.gb|FAIL|0|samesuite/sgb/command_mlt_req.png
+samesuite/sgb/command_mlt_req_1_incrementing.gb|FAIL|0|samesuite/sgb/command_mlt_req_1_incrementing.png
 ashiepaws/bully.gb (DMG)|FAIL|0|ashiepaws/bully.gb (DMG).png
 ashiepaws/bully.gb (GBC)|FAIL|0|ashiepaws/bully.gb (GBC).png
 ashiepaws/strikethrough.gb|FAIL|0|ashiepaws/strikethrough.png
 cpp/rtc-invalid-banks-test.gb|FAIL|0|cpp/rtc-invalid-banks-test.png
 cpp/latch-rtc-test.gb|FAIL|0|cpp/latch-rtc-test.png
 cpp/ramg-mbc3-test.gb|PASS|0|cpp/ramg-mbc3-test.png
+cpp/sgb-ext-test.gb|FAIL|0|cpp/sgb-ext-test.png
 mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG)|FAIL|0|mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG).png
 mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG)|FAIL|0|mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG).png
 mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)|FAIL|0|mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG).png

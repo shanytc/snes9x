@@ -6,7 +6,7 @@
 acid/which.gb (DMG)|INFO|0|acid/which.gb (DMG).png
 acid/which.gb (GBC)|INFO|0|acid/which.gb (GBC).png
 acid/dmg-acid2.gb|FAIL|0|acid/dmg-acid2.png
-acid/cgb-acid2.gbc|PASS|0|acid/cgb-acid2.png
+acid/cgb-acid2.gbc|FAIL|0|acid/cgb-acid2.png
 acid/cgb-acid-hell.gbc|FAIL|0|acid/cgb-acid-hell.png
 blargg/cpu_instrs/01-special.gb|PASS|0|blargg/cpu_instrs/01-special.png
 blargg/cpu_instrs/02-interrupts.gb|PASS|0|blargg/cpu_instrs/02-interrupts.png
@@ -21,7 +21,7 @@ blargg/cpu_instrs/10-bit_ops.gb|PASS|0|blargg/cpu_instrs/10-bit_ops.png
 blargg/cpu_instrs/11-op_a,(hl).gb|PASS|0|blargg/cpu_instrs/11-op_a,(hl).png
 blargg/halt_bug.gb|FAIL|0|blargg/halt_bug.png
 blargg/instr_timing.gb|FAIL|0|blargg/instr_timing.png
-blargg/interrupt_time.gb|PASS|0|blargg/interrupt_time.png
+blargg/interrupt_time.gb|FAIL|0|blargg/interrupt_time.png
 blargg/mem_timing/01-read_timing.gb|FAIL|0|blargg/mem_timing/01-read_timing.png
 blargg/mem_timing/02-write_timing.gb|FAIL|0|blargg/mem_timing/02-write_timing.png
 blargg/mem_timing/03-modify_timing.gb|FAIL|0|blargg/mem_timing/03-modify_timing.png
@@ -47,28 +47,29 @@ blargg/dmg_sound/09-wave_read_while_on.gb|FAIL|0|blargg/dmg_sound/09-wave_read_w
 blargg/dmg_sound/10-wave_trigger_while_on.gb|FAIL|0|blargg/dmg_sound/10-wave_trigger_while_on.png
 blargg/dmg_sound/11-regs_after_power.gb|FAIL|0|blargg/dmg_sound/11-regs_after_power.png
 blargg/dmg_sound/12-wave_write_while_on.gb|FAIL|0|blargg/dmg_sound/12-wave_write_while_on.png
-blargg/cgb_sound/01-registers.gb|PASS|0|blargg/cgb_sound/01-registers.png
-blargg/cgb_sound/02-len_ctr.gb|PASS|0|blargg/cgb_sound/02-len_ctr.png
-blargg/cgb_sound/03-trigger.gb|PASS|0|blargg/cgb_sound/03-trigger.png
-blargg/cgb_sound/04-sweep.gb|PASS|0|blargg/cgb_sound/04-sweep.png
-blargg/cgb_sound/05-sweep_details.gb|PASS|0|blargg/cgb_sound/05-sweep_details.png
-blargg/cgb_sound/06-overflow_on_trigger.gb|PASS|0|blargg/cgb_sound/06-overflow_on_trigger.png
-blargg/cgb_sound/07-len_sweep_period_sync.gb|PASS|0|blargg/cgb_sound/07-len_sweep_period_sync.png
-blargg/cgb_sound/08-len_ctr_during_power.gb|PASS|0|blargg/cgb_sound/08-len_ctr_during_power.png
-blargg/cgb_sound/09-wave_read_while_on.gb|PASS|0|blargg/cgb_sound/09-wave_read_while_on.png
-blargg/cgb_sound/10-wave_trigger_while_on.gb|PASS|0|blargg/cgb_sound/10-wave_trigger_while_on.png
-blargg/cgb_sound/11-regs_after_power.gb|PASS|0|blargg/cgb_sound/11-regs_after_power.png
-blargg/cgb_sound/12-wave.gb|PASS|0|blargg/cgb_sound/12-wave.png
+blargg/cgb_sound/01-registers.gb|FAIL|0|blargg/cgb_sound/01-registers.png
+blargg/cgb_sound/02-len_ctr.gb|FAIL|0|blargg/cgb_sound/02-len_ctr.png
+blargg/cgb_sound/03-trigger.gb|FAIL|0|blargg/cgb_sound/03-trigger.png
+blargg/cgb_sound/04-sweep.gb|FAIL|0|blargg/cgb_sound/04-sweep.png
+blargg/cgb_sound/05-sweep_details.gb|FAIL|0|blargg/cgb_sound/05-sweep_details.png
+blargg/cgb_sound/06-overflow_on_trigger.gb|FAIL|0|blargg/cgb_sound/06-overflow_on_trigger.png
+blargg/cgb_sound/07-len_sweep_period_sync.gb|FAIL|0|blargg/cgb_sound/07-len_sweep_period_sync.png
+blargg/cgb_sound/08-len_ctr_during_power.gb|FAIL|0|blargg/cgb_sound/08-len_ctr_during_power.png
+blargg/cgb_sound/09-wave_read_while_on.gb|FAIL|0|blargg/cgb_sound/09-wave_read_while_on.png
+blargg/cgb_sound/10-wave_trigger_while_on.gb|FAIL|0|blargg/cgb_sound/10-wave_trigger_while_on.png
+blargg/cgb_sound/11-regs_after_power.gb|FAIL|0|blargg/cgb_sound/11-regs_after_power.png
+blargg/cgb_sound/12-wave.gb|FAIL|0|blargg/cgb_sound/12-wave.png
 daid/ppu_scanline_bgp.gb (DMG)|FAIL|0|daid/ppu_scanline_bgp.gb (DMG).png
 daid/ppu_scanline_bgp.gb (GBC)|FAIL|0|daid/ppu_scanline_bgp.gb (GBC).png
 daid/stop_instr.gb (DMG)|FAIL|0|daid/stop_instr.gb (DMG).png
 daid/stop_instr.gb (GBC)|FAIL|0|daid/stop_instr.gb (GBC).png
 daid/stop_instr_gbc_mode3.gb|FAIL|0|daid/stop_instr_gbc_mode3.png
-daid/speed_switch_timing_div.gbc|PASS|0|daid/speed_switch_timing_div.png
+daid/speed_switch_timing_div.gbc|FAIL|0|daid/speed_switch_timing_div.png
 daid/speed_switch_timing_ly.gbc|FAIL|0|daid/speed_switch_timing_ly.png
 daid/speed_switch_timing_stat.gbc|FAIL|0|daid/speed_switch_timing_stat.png
-ax6/rtc3test-1.gb|PASS|0|ax6/rtc3test-1.png
-ax6/rtc3test-2.gb|PASS|0|ax6/rtc3test-2.png
+daid/rom_and_ram.gb|INFO|0|daid/rom_and_ram.png
+ax6/rtc3test-1.gb|FAIL|0|ax6/rtc3test-1.png
+ax6/rtc3test-2.gb|FAIL|0|ax6/rtc3test-2.png
 ax6/rtc3test-3.gb|FAIL|0|ax6/rtc3test-3.png
 mooneye/acceptance/add_sp_e_timing.gb|FAIL|0|mooneye/acceptance/add_sp_e_timing.png
 mooneye/acceptance/bits/mem_oam.gb|PASS|0|mooneye/acceptance/bits/mem_oam.png
@@ -151,7 +152,7 @@ mooneye/emulator-only/mbc1/rom_512kb.gb|FAIL|0|mooneye/emulator-only/mbc1/rom_51
 mooneye/emulator-only/mbc1/rom_8Mb.gb|FAIL|0|mooneye/emulator-only/mbc1/rom_8Mb.png
 mooneye/emulator-only/mbc2/bits_ramg.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_ramg.png
 mooneye/emulator-only/mbc2/bits_romb.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_romb.png
-mooneye/emulator-only/mbc2/bits_unused.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_unused.png
+mooneye/emulator-only/mbc2/bits_unused.gb|PASS|0|mooneye/emulator-only/mbc2/bits_unused.png
 mooneye/emulator-only/mbc2/ram.gb|FAIL|0|mooneye/emulator-only/mbc2/ram.png
 mooneye/emulator-only/mbc2/rom_1Mb.gb|FAIL|0|mooneye/emulator-only/mbc2/rom_1Mb.png
 mooneye/emulator-only/mbc2/rom_2Mb.gb|PASS|0|mooneye/emulator-only/mbc2/rom_2Mb.png
@@ -166,21 +167,25 @@ mooneye/emulator-only/mbc5/rom_64Mb.gb|FAIL|0|mooneye/emulator-only/mbc5/rom_64M
 mooneye/emulator-only/mbc5/rom_8Mb.gb|FAIL|0|mooneye/emulator-only/mbc5/rom_8Mb.png
 mooneye/manual-only/sprite_priority.gb|FAIL|0|mooneye/manual-only/sprite_priority.png
 mooneye/misc/boot_div-cgbABCDE.gb|FAIL|0|mooneye/misc/boot_div-cgbABCDE.png
-mooneye/misc/boot_regs-cgb.gb|PASS|0|mooneye/misc/boot_regs-cgb.png
+mooneye/misc/boot_regs-cgb.gb|FAIL|0|mooneye/misc/boot_regs-cgb.png
 samesuite/apu/channel_1/channel_1_sweep_restart_2.gb|FAIL|0|samesuite/apu/channel_1/channel_1_sweep_restart_2.png
-samesuite/apu/channel_3/channel_3_wave_ram_locked_write.gb|PASS|0|samesuite/apu/channel_3/channel_3_wave_ram_locked_write.png
+samesuite/apu/channel_3/channel_3_wave_ram_locked_write.gb|FAIL|0|samesuite/apu/channel_3/channel_3_wave_ram_locked_write.png
 samesuite/apu/div_write_trigger.gb|FAIL|0|samesuite/apu/div_write_trigger.png
 samesuite/apu/div_write_trigger_10.gb|FAIL|0|samesuite/apu/div_write_trigger_10.png
-samesuite/dma/gbc_dma_cont.gb|PASS|0|samesuite/dma/gbc_dma_cont.png
+samesuite/dma/gbc_dma_cont.gb|FAIL|0|samesuite/dma/gbc_dma_cont.png
 samesuite/dma/gdma_addr_mask.gb|FAIL|0|samesuite/dma/gdma_addr_mask.png
 samesuite/dma/hdma_lcd_off.gb|FAIL|0|samesuite/dma/hdma_lcd_off.png
-samesuite/dma/hdma_mode0.gb|PASS|0|samesuite/dma/hdma_mode0.png
-samesuite/ppu/blocking_bgpi_increase.gb|PASS|0|samesuite/ppu/blocking_bgpi_increase.png
+samesuite/dma/hdma_mode0.gb|FAIL|0|samesuite/dma/hdma_mode0.png
+samesuite/ppu/blocking_bgpi_increase.gb|FAIL|0|samesuite/ppu/blocking_bgpi_increase.png
+samesuite/sgb/command_mlt_req.gb|FAIL|0|samesuite/sgb/command_mlt_req.png
+samesuite/sgb/command_mlt_req_1_incrementing.gb|FAIL|0|samesuite/sgb/command_mlt_req_1_incrementing.png
 ashiepaws/bully.gb (DMG)|FAIL|0|ashiepaws/bully.gb (DMG).png
+ashiepaws/bully.gb (GBC)|FAIL|0|ashiepaws/bully.gb (GBC).png
 ashiepaws/strikethrough.gb|FAIL|0|ashiepaws/strikethrough.png
 cpp/rtc-invalid-banks-test.gb|FAIL|0|cpp/rtc-invalid-banks-test.png
 cpp/latch-rtc-test.gb|FAIL|0|cpp/latch-rtc-test.png
 cpp/ramg-mbc3-test.gb|FAIL|0|cpp/ramg-mbc3-test.png
+cpp/sgb-ext-test.gb|FAIL|0|cpp/sgb-ext-test.png
 mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG)|FAIL|0|mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG).png
 mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG)|FAIL|0|mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG).png
 mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)|FAIL|0|mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG).png

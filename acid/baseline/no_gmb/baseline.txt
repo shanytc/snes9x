@@ -63,7 +63,7 @@ daid/ppu_scanline_bgp.gb (DMG)|FAIL|0|daid/ppu_scanline_bgp.gb (DMG).png
 daid/ppu_scanline_bgp.gb (GBC)|FAIL|0|daid/ppu_scanline_bgp.gb (GBC).png
 daid/stop_instr.gb (DMG)|FAIL|0|daid/stop_instr.gb (DMG).png
 daid/stop_instr.gb (GBC)|FAIL|0|daid/stop_instr.gb (GBC).png
-daid/stop_instr_gbc_mode3.gb|FAIL|0|daid/stop_instr_gbc_mode3.png
+daid/stop_instr_gbc_mode3.gb|PASS|0|daid/stop_instr_gbc_mode3.png
 daid/speed_switch_timing_div.gbc|FAIL|0|daid/speed_switch_timing_div.png
 daid/speed_switch_timing_ly.gbc|FAIL|0|daid/speed_switch_timing_ly.png
 daid/speed_switch_timing_stat.gbc|FAIL|0|daid/speed_switch_timing_stat.png
@@ -111,7 +111,6 @@ mooneye/acceptance/ppu/intr_2_mode0_timing.gb|FAIL|0|mooneye/acceptance/ppu/intr
 mooneye/acceptance/ppu/intr_2_mode0_timing_sprites.gb|FAIL|0|mooneye/acceptance/ppu/intr_2_mode0_timing_sprites.png
 mooneye/acceptance/ppu/intr_2_mode3_timing.gb|FAIL|0|mooneye/acceptance/ppu/intr_2_mode3_timing.png
 mooneye/acceptance/ppu/intr_2_oam_ok_timing.gb|FAIL|0|mooneye/acceptance/ppu/intr_2_oam_ok_timing.png
-mooneye/acceptance/ppu/lcdon_timing-GS.gb|FAIL|0|mooneye/acceptance/ppu/lcdon_timing-GS.png
 mooneye/acceptance/ppu/lcdon_write_timing-GS.gb|FAIL|0|mooneye/acceptance/ppu/lcdon_write_timing-GS.png
 mooneye/acceptance/ppu/stat_irq_blocking.gb|FAIL|0|mooneye/acceptance/ppu/stat_irq_blocking.png
 mooneye/acceptance/ppu/stat_lyc_onoff.gb|FAIL|0|mooneye/acceptance/ppu/stat_lyc_onoff.png
@@ -172,14 +171,13 @@ samesuite/apu/channel_1/channel_1_sweep_restart_2.gb|FAIL|0|samesuite/apu/channe
 samesuite/apu/channel_3/channel_3_wave_ram_locked_write.gb|FAIL|0|samesuite/apu/channel_3/channel_3_wave_ram_locked_write.png
 samesuite/apu/div_write_trigger.gb|FAIL|0|samesuite/apu/div_write_trigger.png
 samesuite/apu/div_write_trigger_10.gb|FAIL|0|samesuite/apu/div_write_trigger_10.png
-samesuite/dma/gbc_dma_cont.gb|FAIL|0|samesuite/dma/gbc_dma_cont.png
+samesuite/dma/gbc_dma_cont.gb|PASS|0|samesuite/dma/gbc_dma_cont.png
 samesuite/dma/gdma_addr_mask.gb|FAIL|0|samesuite/dma/gdma_addr_mask.png
 samesuite/dma/hdma_lcd_off.gb|FAIL|0|samesuite/dma/hdma_lcd_off.png
-samesuite/dma/hdma_mode0.gb|FAIL|0|samesuite/dma/hdma_mode0.png
-samesuite/ppu/blocking_bgpi_increase.gb|FAIL|0|samesuite/ppu/blocking_bgpi_increase.png
-ashiepaws/bully.gb (DMG)|FAIL|0|ashiepaws/bully.gb (DMG).png
-ashiepaws/bully.gb (GBC)|FAIL|0|ashiepaws/bully.gb (GBC).png
-ashiepaws/strikethrough.gb|FAIL|0|ashiepaws/strikethrough.png
+samesuite/dma/hdma_mode0.gb|PASS|0|samesuite/dma/hdma_mode0.png
+samesuite/ppu/blocking_bgpi_increase.gb|PASS|0|samesuite/ppu/blocking_bgpi_increase.png
+samesuite/sgb/command_mlt_req.gb|INFO|0|samesuite/sgb/command_mlt_req.png
+samesuite/sgb/command_mlt_req_1_incrementing.gb|INFO|0|samesuite/sgb/command_mlt_req_1_incrementing.png
 cpp/rtc-invalid-banks-test.gb|FAIL|0|cpp/rtc-invalid-banks-test.png
 cpp/latch-rtc-test.gb|FAIL|0|cpp/latch-rtc-test.png
 cpp/ramg-mbc3-test.gb|FAIL|0|cpp/ramg-mbc3-test.png

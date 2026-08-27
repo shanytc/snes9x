@@ -84,11 +84,18 @@ def parse(page):
         name = re.sub(r'<span class="tooltiptext">.*?</span>', "", th.group(1), flags=re.S)
         name = htmllib.unescape(re.sub("<[^>]+>", "", name)).replace("​", "").strip()
 
+        # Every <td>, including the bare ones a not-run test leaves behind.
+        # Matching only <td class='...'> drops those and shifts every
+        # column to their right onto the wrong emulator.
         cells = []
-        for td in re.findall(r"<td class='([^']*)'>(.*?)</td>", tr, re.S):
-            status, body = td
+        for attrs, body in re.findall(r"<td([^>]*)>(.*?)</td>", tr, re.S):
+            cls = re.search(r"class='([^']*)'", attrs)
             img = re.search(r"src='data:image/png;base64,([A-Za-z0-9+/=]+)'", body)
-            cells.append((status, base64.b64decode(img.group(1)) if img else None))
+            cells.append((cls.group(1) if cls else "NONE",
+                          base64.b64decode(img.group(1)) if img else None))
+        if len(cells) != len(emulators):
+            raise SystemExit("row %r has %d cells for %d emulators - the table "
+                             "layout has changed" % (name, len(cells), len(emulators)))
         rows.append((name, cells))
     return updated, emulators, rows
 

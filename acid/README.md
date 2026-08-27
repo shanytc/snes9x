@@ -127,11 +127,21 @@ Frames are filed under the test's own name rather than the manifest's
 and on GBC both point at `ashiepaws/bully.png` — and one frame would
 overwrite the other.
 
-How much a baseline agrees with us tracks its accuracy score: Coffee GB 261
-of 264, docboy 256, SameBoy 251, down to 38 for VisualBoyAdvance. The three
-Coffee GB disagreements are the two informational ROMs, which have no
-correct answer, and `ppu_scanline_bgp`, which the manifest gives three
-acceptable screens — they render one, we render another, and both pass.
+A test an emulator was not run on leaves a bare `<td>No result</td>` in the
+table. Those still take a column, so the parser has to count them; matching
+only `<td class=...>` drops them and slides every emulator to their right
+onto the wrong column. The check that catches it is the published score:
+extracted PASS + INFO and the cell total should equal the `(n/m)` in each
+header, and they do for 18 of 19. The odd one is No$gmb, whose header says
+205 where its own row cells only carry 202 results.
+
+Agreement tracks each emulator's pass count closely, which is what it should
+do if we are right — we agree with them on the tests they get right. Coffee
+GB 261 of 264, Emulicious 252, docboy 255, SameBoy 249, bgb 202, mGBA 150,
+down to ares 23. Where we part from Coffee GB it is twice on informational
+ROMs, which have no correct answer, and once on `ppu_scanline_bgp`, which
+the manifest gives three acceptable screens — they draw one, we draw
+another, both pass.
 
 Saving into a folder that already holds frames asks first, naming how many
 would be replaced and who wrote the index it is about to overwrite. Saving

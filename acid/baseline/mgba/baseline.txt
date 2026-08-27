@@ -203,12 +203,12 @@ samesuite/apu/channel_3/channel_3_and_glitch.gb|FAIL|0|samesuite/apu/channel_3/c
 samesuite/apu/channel_3/channel_3_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_delay.png
 samesuite/apu/channel_3/channel_3_first_sample.gb|FAIL|0|samesuite/apu/channel_3/channel_3_first_sample.png
 samesuite/apu/channel_3/channel_3_freq_change_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_freq_change_delay.png
-samesuite/apu/channel_3/channel_3_restart_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_restart_delay.png
+samesuite/apu/channel_3/channel_3_restart_delay.gb|PASS|0|samesuite/apu/channel_3/channel_3_restart_delay.png
 samesuite/apu/channel_3/channel_3_restart_during_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_restart_during_delay.png
 samesuite/apu/channel_3/channel_3_restart_stop_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_restart_stop_delay.png
-samesuite/apu/channel_3/channel_3_shift_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_shift_delay.png
+samesuite/apu/channel_3/channel_3_shift_delay.gb|PASS|0|samesuite/apu/channel_3/channel_3_shift_delay.png
 samesuite/apu/channel_3/channel_3_shift_skip_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_shift_skip_delay.png
-samesuite/apu/channel_3/channel_3_stop_delay.gb|PASS|0|samesuite/apu/channel_3/channel_3_stop_delay.png
+samesuite/apu/channel_3/channel_3_stop_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_stop_delay.png
 samesuite/apu/channel_3/channel_3_stop_div.gb|FAIL|0|samesuite/apu/channel_3/channel_3_stop_div.png
 samesuite/apu/channel_3/channel_3_wave_ram_locked_write.gb|PASS|0|samesuite/apu/channel_3/channel_3_wave_ram_locked_write.png
 samesuite/apu/channel_3/channel_3_wave_ram_sync.gb|FAIL|0|samesuite/apu/channel_3/channel_3_wave_ram_sync.png
@@ -217,14 +217,14 @@ samesuite/apu/channel_4/channel_4_delay.gb|FAIL|0|samesuite/apu/channel_4/channe
 samesuite/apu/channel_4/channel_4_equivalent_frequencies.gb|FAIL|0|samesuite/apu/channel_4/channel_4_equivalent_frequencies.png
 samesuite/apu/channel_4/channel_4_frequency_alignment.gb|FAIL|0|samesuite/apu/channel_4/channel_4_frequency_alignment.png
 samesuite/apu/channel_4/channel_4_freq_change.gb|FAIL|0|samesuite/apu/channel_4/channel_4_freq_change.png
-samesuite/apu/channel_4/channel_4_lfsr.gb|PASS|0|samesuite/apu/channel_4/channel_4_lfsr.png
-samesuite/apu/channel_4/channel_4_lfsr15.gb|PASS|0|samesuite/apu/channel_4/channel_4_lfsr15.png
-samesuite/apu/channel_4/channel_4_lfsr_15_7.gb|PASS|0|samesuite/apu/channel_4/channel_4_lfsr_15_7.png
+samesuite/apu/channel_4/channel_4_lfsr.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr.png
+samesuite/apu/channel_4/channel_4_lfsr15.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr15.png
+samesuite/apu/channel_4/channel_4_lfsr_15_7.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_15_7.png
 samesuite/apu/channel_4/channel_4_lfsr_7_15.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_7_15.png
 samesuite/apu/channel_4/channel_4_lfsr_restart.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_restart.png
 samesuite/apu/channel_4/channel_4_lfsr_restart_fast.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_restart_fast.png
-samesuite/apu/channel_4/channel_4_volume_div.gb|FAIL|0|samesuite/apu/channel_4/channel_4_volume_div.png
-samesuite/apu/div_trigger_volume_10.gb|FAIL|0|samesuite/apu/div_trigger_volume_10.png
+samesuite/apu/channel_4/channel_4_volume_div.gb|PASS|0|samesuite/apu/channel_4/channel_4_volume_div.png
+samesuite/apu/div_trigger_volume_10.gb|PASS|0|samesuite/apu/div_trigger_volume_10.png
 samesuite/apu/div_write_trigger.gb|FAIL|0|samesuite/apu/div_write_trigger.png
 samesuite/apu/div_write_trigger_10.gb|FAIL|0|samesuite/apu/div_write_trigger_10.png
 samesuite/apu/div_write_trigger_volume.gb|FAIL|0|samesuite/apu/div_write_trigger_volume.png
@@ -234,8 +234,8 @@ samesuite/dma/gdma_addr_mask.gb|PASS|0|samesuite/dma/gdma_addr_mask.png
 samesuite/dma/hdma_lcd_off.gb|FAIL|0|samesuite/dma/hdma_lcd_off.png
 samesuite/dma/hdma_mode0.gb|FAIL|0|samesuite/dma/hdma_mode0.png
 samesuite/ppu/blocking_bgpi_increase.gb|PASS|0|samesuite/ppu/blocking_bgpi_increase.png
-samesuite/sgb/command_mlt_req.gb|FAIL|0|samesuite/sgb/command_mlt_req.png
-samesuite/sgb/command_mlt_req_1_incrementing.gb|FAIL|0|samesuite/sgb/command_mlt_req_1_incrementing.png
+samesuite/sgb/command_mlt_req.gb|PASS|0|samesuite/sgb/command_mlt_req.png
+samesuite/sgb/command_mlt_req_1_incrementing.gb|PASS|0|samesuite/sgb/command_mlt_req_1_incrementing.png
 ashiepaws/bully.gb (DMG)|FAIL|0|ashiepaws/bully.gb (DMG).png
 ashiepaws/bully.gb (GBC)|FAIL|0|ashiepaws/bully.gb (GBC).png
 ashiepaws/strikethrough.gb|FAIL|0|ashiepaws/strikethrough.png

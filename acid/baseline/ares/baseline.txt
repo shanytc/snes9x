@@ -4,7 +4,10 @@
 # source: https://tomek.rekawek.eu/GBEmulatorShootout/
 # name|status|frames|image
 acid/which.gb (DMG)|INFO|0|acid/which.gb (DMG).png
+acid/which.gb (GBC)|INFO|0|acid/which.gb (GBC).png
 acid/dmg-acid2.gb|FAIL|0|acid/dmg-acid2.png
+acid/cgb-acid2.gbc|PASS|0|acid/cgb-acid2.png
+acid/cgb-acid-hell.gbc|FAIL|0|acid/cgb-acid-hell.png
 blargg/cpu_instrs/01-special.gb|FAIL|0|blargg/cpu_instrs/01-special.png
 blargg/cpu_instrs/02-interrupts.gb|FAIL|0|blargg/cpu_instrs/02-interrupts.png
 blargg/cpu_instrs/03-op_sp,hl.gb|FAIL|0|blargg/cpu_instrs/03-op_sp,hl.png
@@ -18,6 +21,7 @@ blargg/cpu_instrs/10-bit_ops.gb|FAIL|0|blargg/cpu_instrs/10-bit_ops.png
 blargg/cpu_instrs/11-op_a,(hl).gb|FAIL|0|blargg/cpu_instrs/11-op_a,(hl).png
 blargg/halt_bug.gb|FAIL|0|blargg/halt_bug.png
 blargg/instr_timing.gb|FAIL|0|blargg/instr_timing.png
+blargg/interrupt_time.gb|PASS|0|blargg/interrupt_time.png
 blargg/mem_timing/01-read_timing.gb|FAIL|0|blargg/mem_timing/01-read_timing.png
 blargg/mem_timing/02-write_timing.gb|FAIL|0|blargg/mem_timing/02-write_timing.png
 blargg/mem_timing/03-modify_timing.gb|FAIL|0|blargg/mem_timing/03-modify_timing.png
@@ -43,8 +47,30 @@ blargg/dmg_sound/09-wave_read_while_on.gb|FAIL|0|blargg/dmg_sound/09-wave_read_w
 blargg/dmg_sound/10-wave_trigger_while_on.gb|FAIL|0|blargg/dmg_sound/10-wave_trigger_while_on.png
 blargg/dmg_sound/11-regs_after_power.gb|FAIL|0|blargg/dmg_sound/11-regs_after_power.png
 blargg/dmg_sound/12-wave_write_while_on.gb|FAIL|0|blargg/dmg_sound/12-wave_write_while_on.png
+blargg/cgb_sound/01-registers.gb|PASS|0|blargg/cgb_sound/01-registers.png
+blargg/cgb_sound/02-len_ctr.gb|PASS|0|blargg/cgb_sound/02-len_ctr.png
+blargg/cgb_sound/03-trigger.gb|PASS|0|blargg/cgb_sound/03-trigger.png
+blargg/cgb_sound/04-sweep.gb|PASS|0|blargg/cgb_sound/04-sweep.png
+blargg/cgb_sound/05-sweep_details.gb|PASS|0|blargg/cgb_sound/05-sweep_details.png
+blargg/cgb_sound/06-overflow_on_trigger.gb|PASS|0|blargg/cgb_sound/06-overflow_on_trigger.png
+blargg/cgb_sound/07-len_sweep_period_sync.gb|PASS|0|blargg/cgb_sound/07-len_sweep_period_sync.png
+blargg/cgb_sound/08-len_ctr_during_power.gb|PASS|0|blargg/cgb_sound/08-len_ctr_during_power.png
+blargg/cgb_sound/09-wave_read_while_on.gb|PASS|0|blargg/cgb_sound/09-wave_read_while_on.png
+blargg/cgb_sound/10-wave_trigger_while_on.gb|PASS|0|blargg/cgb_sound/10-wave_trigger_while_on.png
+blargg/cgb_sound/11-regs_after_power.gb|PASS|0|blargg/cgb_sound/11-regs_after_power.png
+blargg/cgb_sound/12-wave.gb|PASS|0|blargg/cgb_sound/12-wave.png
 daid/ppu_scanline_bgp.gb (DMG)|FAIL|0|daid/ppu_scanline_bgp.gb (DMG).png
+daid/ppu_scanline_bgp.gb (GBC)|FAIL|0|daid/ppu_scanline_bgp.gb (GBC).png
 daid/stop_instr.gb (DMG)|FAIL|0|daid/stop_instr.gb (DMG).png
+daid/stop_instr.gb (GBC)|FAIL|0|daid/stop_instr.gb (GBC).png
+daid/stop_instr_gbc_mode3.gb|FAIL|0|daid/stop_instr_gbc_mode3.png
+daid/speed_switch_timing_div.gbc|PASS|0|daid/speed_switch_timing_div.png
+daid/speed_switch_timing_ly.gbc|FAIL|0|daid/speed_switch_timing_ly.png
+daid/speed_switch_timing_stat.gbc|FAIL|0|daid/speed_switch_timing_stat.png
+daid/rom_and_ram.gb|INFO|0|daid/rom_and_ram.png
+ax6/rtc3test-1.gb|PASS|0|ax6/rtc3test-1.png
+ax6/rtc3test-2.gb|PASS|0|ax6/rtc3test-2.png
+ax6/rtc3test-3.gb|FAIL|0|ax6/rtc3test-3.png
 mooneye/acceptance/add_sp_e_timing.gb|FAIL|0|mooneye/acceptance/add_sp_e_timing.png
 mooneye/acceptance/bits/mem_oam.gb|FAIL|0|mooneye/acceptance/bits/mem_oam.png
 mooneye/acceptance/bits/reg_f.gb|FAIL|0|mooneye/acceptance/bits/reg_f.png
@@ -85,6 +111,7 @@ mooneye/acceptance/ppu/intr_2_mode0_timing.gb|FAIL|0|mooneye/acceptance/ppu/intr
 mooneye/acceptance/ppu/intr_2_mode0_timing_sprites.gb|FAIL|0|mooneye/acceptance/ppu/intr_2_mode0_timing_sprites.png
 mooneye/acceptance/ppu/intr_2_mode3_timing.gb|FAIL|0|mooneye/acceptance/ppu/intr_2_mode3_timing.png
 mooneye/acceptance/ppu/intr_2_oam_ok_timing.gb|FAIL|0|mooneye/acceptance/ppu/intr_2_oam_ok_timing.png
+mooneye/acceptance/ppu/lcdon_timing-GS.gb|FAIL|0|mooneye/acceptance/ppu/lcdon_timing-GS.png
 mooneye/acceptance/ppu/lcdon_write_timing-GS.gb|FAIL|0|mooneye/acceptance/ppu/lcdon_write_timing-GS.png
 mooneye/acceptance/ppu/stat_irq_blocking.gb|FAIL|0|mooneye/acceptance/ppu/stat_irq_blocking.png
 mooneye/acceptance/ppu/stat_lyc_onoff.gb|FAIL|0|mooneye/acceptance/ppu/stat_lyc_onoff.png
@@ -124,6 +151,8 @@ mooneye/emulator-only/mbc1/rom_4Mb.gb|FAIL|0|mooneye/emulator-only/mbc1/rom_4Mb.
 mooneye/emulator-only/mbc1/rom_512kb.gb|FAIL|0|mooneye/emulator-only/mbc1/rom_512kb.png
 mooneye/emulator-only/mbc1/rom_8Mb.gb|FAIL|0|mooneye/emulator-only/mbc1/rom_8Mb.png
 mooneye/emulator-only/mbc2/bits_ramg.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_ramg.png
+mooneye/emulator-only/mbc2/bits_romb.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_romb.png
+mooneye/emulator-only/mbc2/bits_unused.gb|FAIL|0|mooneye/emulator-only/mbc2/bits_unused.png
 mooneye/emulator-only/mbc2/ram.gb|FAIL|0|mooneye/emulator-only/mbc2/ram.png
 mooneye/emulator-only/mbc2/rom_1Mb.gb|FAIL|0|mooneye/emulator-only/mbc2/rom_1Mb.png
 mooneye/emulator-only/mbc2/rom_2Mb.gb|FAIL|0|mooneye/emulator-only/mbc2/rom_2Mb.png
@@ -137,6 +166,77 @@ mooneye/emulator-only/mbc5/rom_512kb.gb|FAIL|0|mooneye/emulator-only/mbc5/rom_51
 mooneye/emulator-only/mbc5/rom_64Mb.gb|FAIL|0|mooneye/emulator-only/mbc5/rom_64Mb.png
 mooneye/emulator-only/mbc5/rom_8Mb.gb|FAIL|0|mooneye/emulator-only/mbc5/rom_8Mb.png
 mooneye/manual-only/sprite_priority.gb|FAIL|0|mooneye/manual-only/sprite_priority.png
+mooneye/misc/boot_div-cgbABCDE.gb|FAIL|0|mooneye/misc/boot_div-cgbABCDE.png
+mooneye/misc/boot_regs-cgb.gb|PASS|0|mooneye/misc/boot_regs-cgb.png
+samesuite/apu/channel_1/channel_1_align.gb|FAIL|0|samesuite/apu/channel_1/channel_1_align.png
+samesuite/apu/channel_1/channel_1_align_cpu.gb|FAIL|0|samesuite/apu/channel_1/channel_1_align_cpu.png
+samesuite/apu/channel_1/channel_1_delay.gb|FAIL|0|samesuite/apu/channel_1/channel_1_delay.png
+samesuite/apu/channel_1/channel_1_duty.gb|FAIL|0|samesuite/apu/channel_1/channel_1_duty.png
+samesuite/apu/channel_1/channel_1_duty_delay.gb|FAIL|0|samesuite/apu/channel_1/channel_1_duty_delay.png
+samesuite/apu/channel_1/channel_1_freq_change.gb|FAIL|0|samesuite/apu/channel_1/channel_1_freq_change.png
+samesuite/apu/channel_1/channel_1_nrx2_glitch.gb|FAIL|0|samesuite/apu/channel_1/channel_1_nrx2_glitch.png
+samesuite/apu/channel_1/channel_1_nrx2_speed_change.gb|FAIL|0|samesuite/apu/channel_1/channel_1_nrx2_speed_change.png
+samesuite/apu/channel_1/channel_1_restart.gb|FAIL|0|samesuite/apu/channel_1/channel_1_restart.png
+samesuite/apu/channel_1/channel_1_restart_nrx2_glitch.gb|FAIL|0|samesuite/apu/channel_1/channel_1_restart_nrx2_glitch.png
+samesuite/apu/channel_1/channel_1_stop_div.gb|FAIL|0|samesuite/apu/channel_1/channel_1_stop_div.png
+samesuite/apu/channel_1/channel_1_stop_restart.gb|FAIL|0|samesuite/apu/channel_1/channel_1_stop_restart.png
+samesuite/apu/channel_1/channel_1_sweep.gb|FAIL|0|samesuite/apu/channel_1/channel_1_sweep.png
+samesuite/apu/channel_1/channel_1_sweep_restart.gb|FAIL|0|samesuite/apu/channel_1/channel_1_sweep_restart.png
+samesuite/apu/channel_1/channel_1_sweep_restart_2.gb|FAIL|0|samesuite/apu/channel_1/channel_1_sweep_restart_2.png
+samesuite/apu/channel_1/channel_1_volume.gb|FAIL|0|samesuite/apu/channel_1/channel_1_volume.png
+samesuite/apu/channel_1/channel_1_volume_div.gb|FAIL|0|samesuite/apu/channel_1/channel_1_volume_div.png
+samesuite/apu/channel_2/channel_2_align.gb|FAIL|0|samesuite/apu/channel_2/channel_2_align.png
+samesuite/apu/channel_2/channel_2_align_cpu.gb|FAIL|0|samesuite/apu/channel_2/channel_2_align_cpu.png
+samesuite/apu/channel_2/channel_2_delay.gb|FAIL|0|samesuite/apu/channel_2/channel_2_delay.png
+samesuite/apu/channel_2/channel_2_duty.gb|FAIL|0|samesuite/apu/channel_2/channel_2_duty.png
+samesuite/apu/channel_2/channel_2_duty_delay.gb|FAIL|0|samesuite/apu/channel_2/channel_2_duty_delay.png
+samesuite/apu/channel_2/channel_2_freq_change.gb|FAIL|0|samesuite/apu/channel_2/channel_2_freq_change.png
+samesuite/apu/channel_2/channel_2_nrx2_glitch.gb|FAIL|0|samesuite/apu/channel_2/channel_2_nrx2_glitch.png
+samesuite/apu/channel_2/channel_2_nrx2_speed_change.gb|FAIL|0|samesuite/apu/channel_2/channel_2_nrx2_speed_change.png
+samesuite/apu/channel_2/channel_2_restart.gb|FAIL|0|samesuite/apu/channel_2/channel_2_restart.png
+samesuite/apu/channel_2/channel_2_restart_nrx2_glitch.gb|FAIL|0|samesuite/apu/channel_2/channel_2_restart_nrx2_glitch.png
+samesuite/apu/channel_2/channel_2_stop_div.gb|FAIL|0|samesuite/apu/channel_2/channel_2_stop_div.png
+samesuite/apu/channel_2/channel_2_stop_restart.gb|FAIL|0|samesuite/apu/channel_2/channel_2_stop_restart.png
+samesuite/apu/channel_2/channel_2_volume.gb|FAIL|0|samesuite/apu/channel_2/channel_2_volume.png
+samesuite/apu/channel_2/channel_2_volume_div.gb|FAIL|0|samesuite/apu/channel_2/channel_2_volume_div.png
+samesuite/apu/channel_3/channel_3_and_glitch.gb|FAIL|0|samesuite/apu/channel_3/channel_3_and_glitch.png
+samesuite/apu/channel_3/channel_3_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_delay.png
+samesuite/apu/channel_3/channel_3_first_sample.gb|FAIL|0|samesuite/apu/channel_3/channel_3_first_sample.png
+samesuite/apu/channel_3/channel_3_freq_change_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_freq_change_delay.png
+samesuite/apu/channel_3/channel_3_restart_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_restart_delay.png
+samesuite/apu/channel_3/channel_3_restart_during_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_restart_during_delay.png
+samesuite/apu/channel_3/channel_3_restart_stop_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_restart_stop_delay.png
+samesuite/apu/channel_3/channel_3_shift_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_shift_delay.png
+samesuite/apu/channel_3/channel_3_shift_skip_delay.gb|FAIL|0|samesuite/apu/channel_3/channel_3_shift_skip_delay.png
+samesuite/apu/channel_3/channel_3_stop_delay.gb|PASS|0|samesuite/apu/channel_3/channel_3_stop_delay.png
+samesuite/apu/channel_3/channel_3_stop_div.gb|FAIL|0|samesuite/apu/channel_3/channel_3_stop_div.png
+samesuite/apu/channel_3/channel_3_wave_ram_locked_write.gb|PASS|0|samesuite/apu/channel_3/channel_3_wave_ram_locked_write.png
+samesuite/apu/channel_3/channel_3_wave_ram_sync.gb|FAIL|0|samesuite/apu/channel_3/channel_3_wave_ram_sync.png
+samesuite/apu/channel_4/channel_4_align.gb|FAIL|0|samesuite/apu/channel_4/channel_4_align.png
+samesuite/apu/channel_4/channel_4_delay.gb|FAIL|0|samesuite/apu/channel_4/channel_4_delay.png
+samesuite/apu/channel_4/channel_4_equivalent_frequencies.gb|FAIL|0|samesuite/apu/channel_4/channel_4_equivalent_frequencies.png
+samesuite/apu/channel_4/channel_4_frequency_alignment.gb|FAIL|0|samesuite/apu/channel_4/channel_4_frequency_alignment.png
+samesuite/apu/channel_4/channel_4_freq_change.gb|FAIL|0|samesuite/apu/channel_4/channel_4_freq_change.png
+samesuite/apu/channel_4/channel_4_lfsr.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr.png
+samesuite/apu/channel_4/channel_4_lfsr15.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr15.png
+samesuite/apu/channel_4/channel_4_lfsr_15_7.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_15_7.png
+samesuite/apu/channel_4/channel_4_lfsr_7_15.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_7_15.png
+samesuite/apu/channel_4/channel_4_lfsr_restart.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_restart.png
+samesuite/apu/channel_4/channel_4_lfsr_restart_fast.gb|FAIL|0|samesuite/apu/channel_4/channel_4_lfsr_restart_fast.png
+samesuite/apu/channel_4/channel_4_volume_div.gb|FAIL|0|samesuite/apu/channel_4/channel_4_volume_div.png
+samesuite/apu/div_trigger_volume_10.gb|FAIL|0|samesuite/apu/div_trigger_volume_10.png
+samesuite/apu/div_write_trigger.gb|FAIL|0|samesuite/apu/div_write_trigger.png
+samesuite/apu/div_write_trigger_10.gb|FAIL|0|samesuite/apu/div_write_trigger_10.png
+samesuite/apu/div_write_trigger_volume.gb|FAIL|0|samesuite/apu/div_write_trigger_volume.png
+samesuite/apu/div_write_trigger_volume_10.gb|FAIL|0|samesuite/apu/div_write_trigger_volume_10.png
+samesuite/dma/gbc_dma_cont.gb|PASS|0|samesuite/dma/gbc_dma_cont.png
+samesuite/dma/gdma_addr_mask.gb|FAIL|0|samesuite/dma/gdma_addr_mask.png
+samesuite/dma/hdma_lcd_off.gb|FAIL|0|samesuite/dma/hdma_lcd_off.png
+samesuite/dma/hdma_mode0.gb|PASS|0|samesuite/dma/hdma_mode0.png
+samesuite/ppu/blocking_bgpi_increase.gb|PASS|0|samesuite/ppu/blocking_bgpi_increase.png
+ashiepaws/bully.gb (DMG)|FAIL|0|ashiepaws/bully.gb (DMG).png
+ashiepaws/bully.gb (GBC)|FAIL|0|ashiepaws/bully.gb (GBC).png
+ashiepaws/strikethrough.gb|FAIL|0|ashiepaws/strikethrough.png
 cpp/rtc-invalid-banks-test.gb|FAIL|0|cpp/rtc-invalid-banks-test.png
 cpp/latch-rtc-test.gb|FAIL|0|cpp/latch-rtc-test.png
 cpp/ramg-mbc3-test.gb|FAIL|0|cpp/ramg-mbc3-test.png

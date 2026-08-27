@@ -234,15 +234,12 @@ samesuite/dma/gdma_addr_mask.gb|PASS|0|samesuite/dma/gdma_addr_mask.png
 samesuite/dma/hdma_lcd_off.gb|PASS|0|samesuite/dma/hdma_lcd_off.png
 samesuite/dma/hdma_mode0.gb|PASS|0|samesuite/dma/hdma_mode0.png
 samesuite/ppu/blocking_bgpi_increase.gb|PASS|0|samesuite/ppu/blocking_bgpi_increase.png
-samesuite/sgb/command_mlt_req.gb|FAIL|0|samesuite/sgb/command_mlt_req.png
-samesuite/sgb/command_mlt_req_1_incrementing.gb|FAIL|0|samesuite/sgb/command_mlt_req_1_incrementing.png
 ashiepaws/bully.gb (DMG)|PASS|0|ashiepaws/bully.gb (DMG).png
 ashiepaws/bully.gb (GBC)|PASS|0|ashiepaws/bully.gb (GBC).png
 ashiepaws/strikethrough.gb|PASS|0|ashiepaws/strikethrough.png
 cpp/rtc-invalid-banks-test.gb|PASS|0|cpp/rtc-invalid-banks-test.png
 cpp/latch-rtc-test.gb|PASS|0|cpp/latch-rtc-test.png
 cpp/ramg-mbc3-test.gb|PASS|0|cpp/ramg-mbc3-test.png
-cpp/sgb-ext-test.gb|FAIL|0|cpp/sgb-ext-test.png
 mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG)|PASS|0|mealybug-tearoom-tests/ppu/m2_win_en_toggle.gb (DMG).png
 mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG)|PASS|0|mealybug-tearoom-tests/ppu/m3_bgp_change.gb (DMG).png
 mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG)|PASS|0|mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb (DMG).png

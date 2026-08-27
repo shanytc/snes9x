@@ -651,16 +651,20 @@ void EmuConfig::config(const std::string &filename, bool write)
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     BeginSection("SGB");
     Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
-    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
-        bios_paths[i] = S9xGetBiosPath(i);
     Bool("GBBIOSEnabled", gb_bios_enabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
     Int("GBBootPolicy", gb_boot_policy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default)");
     EndSection();
 
     // Explicit BIOS file paths; empty means fall back to the by-name search.
+    // bios_paths is the source of truth here; push it into the core on read so
+    // the two agree no matter when the core is constructed relative to this.
     BeginSection("BIOS");
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+    {
         String(S9xGetBiosSlotInfo(i)->key, bios_paths[i], S9xGetBiosSlotInfo(i)->label);
+        if (!write)
+            S9xSetBiosPath(i, bios_paths[i].c_str());
+    }
     EndSection();
 
     BeginSection("Ports");

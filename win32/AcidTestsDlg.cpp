@@ -162,6 +162,22 @@ bool HaveBaseline(const AcidDlgState *st)
 	return !st->baselines.empty();
 }
 
+// A report covers whatever is shown, so it is only worth writing once every
+// shown test has a verdict. A part-finished set would export as mostly
+// SKIP.
+bool CanExport(const AcidDlgState *st)
+{
+	if (st->running || st->rows.empty()) return false;
+	for (int i : st->rows)
+		if (!HasResult(st, i)) return false;
+	return true;
+}
+
+void UpdateExportButton(AcidDlgState *st)
+{
+	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_EXPORT), CanExport(st));
+}
+
 // Re-diff one test against every baseline.
 void RecomputeMatch(AcidDlgState *st, int test)
 {
@@ -372,6 +388,8 @@ void ApplyFilter(AcidDlgState *st)
 	SetCtrlText(GetDlgItem(st->hDlg, IDC_ACID_RUN),
 	            filtered ? "&Run Shown" : "&Run All");
 	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_RUN), !st->rows.empty());
+	// Filtering can bring un-run tests into view, which takes it away again.
+	UpdateExportButton(st);
 
 	if (!st->running)
 	{
@@ -1123,10 +1141,13 @@ void ShowDiagnosis(AcidDlgState *st)
 
 void EnableFilterBar(AcidDlgState *st, BOOL on)
 {
+	// Export is not in here: it follows whether a full set of results is
+	// shown, not merely whether a run is in progress.
 	const int ids[] = { IDC_ACID_SEARCH, IDC_ACID_SUITES, IDC_ACID_MODELS,
-	                    IDC_ACID_SHOW, IDC_ACID_CLEAR, IDC_ACID_EXPORT,
+	                    IDC_ACID_SHOW, IDC_ACID_CLEAR,
 	                    IDC_ACID_SAVEBASE, IDC_ACID_RESCAN, IDC_ACID_DIAG };
 	for (int id : ids) EnableWindow(GetDlgItem(st->hDlg, id), on);
+	UpdateExportButton(st);
 }
 
 void RunSuite(AcidDlgState *st)
@@ -1446,7 +1467,7 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		case IDC_ACID_EXPORT:
 		{
 			AcidDlgState *st = GetState(hDlg);
-			if (st && !st->running) ExportResults(st);
+			if (st && CanExport(st)) ExportResults(st);
 			return TRUE;
 		}
 		case IDC_ACID_PAUSE:

@@ -70,7 +70,8 @@ mealybug` finds `mealybug-tearoom-tests`. Filters combine: suites and models
 are OR-ed within themselves and AND-ed with each other and the name filter.
 
 Reports come in three formats, from `--txt`/`--json`/`--html` on the CLI or
-the dialog's Export button:
+the dialog's Export button, which stays disabled until every shown test has
+a verdict — a part-finished set would export as mostly SKIP:
 
 - **txt** — the per-test table with a per-suite breakdown, the format
   `results.txt` has always used.

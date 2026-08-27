@@ -5449,6 +5449,74 @@ static void CheckMenuStates ()
 			}
 		}
 
+		// Acid Tests drives the vendored GB Emulator Shootout, which ships
+		// as a separate download. Show the entry only while that pack is
+		// unpacked next to the exe; remember where it sat in the menu so it
+		// can come back if the user installs it without restarting.
+		{
+			static HMENU s_acid_parent = NULL;
+			static UINT  s_acid_pos    = 0;
+			static TCHAR s_acid_text[64] = { 0 };
+			if (!s_acid_parent)
+			{
+				const int top_n = GetMenuItemCount(GUI.hMenu);
+				for (int t = 0; t < top_n && !s_acid_parent; t++)
+				{
+					HMENU sub = GetSubMenu(GUI.hMenu, t);
+					if (!sub) continue;
+					const int sub_n = GetMenuItemCount(sub);
+					for (int j = 0; j < sub_n; j++)
+					{
+						MENUITEMINFO probe = {};
+						probe.cbSize     = sizeof(probe);
+						probe.fMask      = MIIM_ID | MIIM_STRING;
+						probe.dwTypeData = s_acid_text;
+						probe.cch        = _countof(s_acid_text) - 1;
+						if (GetMenuItemInfo(sub, j, TRUE, &probe) &&
+						    probe.wID == ID_EMULATION_ACIDTESTS)
+						{
+							s_acid_parent = sub;
+							s_acid_pos    = (UINT)j;
+							break;
+						}
+					}
+				}
+			}
+
+			if (s_acid_parent)
+			{
+				MENUITEMINFO present = {};
+				present.cbSize = sizeof(present);
+				present.fMask  = MIIM_ID;
+				const bool in_menu =
+					GetMenuItemInfo(s_acid_parent, ID_EMULATION_ACIDTESTS,
+					                FALSE, &present) != FALSE;
+				const bool have_pack = WinAcidTestsAvailable();
+				if (have_pack && !in_menu)
+				{
+					MENUITEMINFO ins = {};
+					ins.cbSize     = sizeof(ins);
+					ins.fMask      = MIIM_STRING | MIIM_ID | MIIM_FTYPE;
+					ins.fType      = MFT_STRING;
+					ins.wID        = ID_EMULATION_ACIDTESTS;
+					ins.dwTypeData = s_acid_text;
+					ins.cch        = (UINT)_tcslen(s_acid_text);
+					UINT pos = s_acid_pos;
+					const UINT count = (UINT)GetMenuItemCount(s_acid_parent);
+					if (pos > count) pos = count;
+					InsertMenuItem(s_acid_parent, pos, TRUE, &ins);
+					if (LocaleIsTranslated())
+						LocalizeMenu(s_acid_parent);
+					DrawMenuBar(GUI.hWnd);
+				}
+				else if (!have_pack && in_menu)
+				{
+					RemoveMenu(s_acid_parent, ID_EMULATION_ACIDTESTS, MF_BYCOMMAND);
+					DrawMenuBar(GUI.hWnd);
+				}
+			}
+		}
+
 		if (gb_loaded)
 		{
 			uint8 active = 0;

@@ -54,9 +54,9 @@ AcidDlgState *GetState(HWND hDlg)
 	return (AcidDlgState *)GetWindowLongPtr(hDlg, DWLP_USER);
 }
 
-// The acid folder ships at the repo root; try next to the exe, one level up
-// (running from win32 build output), then the working directory.
-std::string ResolveAcidDir()
+// The pack unpacks next to the exe; also accept one or two levels up so a
+// build tree finds the copy at the repo root. Empty when it is not there.
+std::string FindAcidDir()
 {
 	char exe[MAX_PATH];
 	if (GetModuleFileNameA(NULL, exe, MAX_PATH))
@@ -75,7 +75,13 @@ std::string ResolveAcidDir()
 			}
 		}
 	}
-	return "acid";
+	return std::string();
+}
+
+std::string ResolveAcidDir()
+{
+	const std::string found = FindAcidDir();
+	return found.empty() ? std::string("acid") : found;
 }
 
 void SetItemText(HWND hList, int row, int col, const char *text)
@@ -530,6 +536,11 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 
 } // anonymous
+
+bool WinAcidTestsAvailable()
+{
+	return !FindAcidDir().empty();
+}
 
 void WinShowAcidTestsDialog()
 {

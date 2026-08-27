@@ -49,6 +49,9 @@ constexpr unsigned ModelBit(Model m) { return 1u << static_cast<unsigned>(m); }
 // "DMG" / "CGB" / "SGB".
 const char *ModelName(Model m);
 
+// "PASS" / "FAIL" / "INFO" / "ERROR".
+const char *StatusName(Status s);
+
 // Which tests a run covers, mirroring the shootout's --test/--model command
 // line. A default-constructed Filter matches everything.
 struct Filter
@@ -80,6 +83,25 @@ struct Result
 	// shows beside each test.
 	std::vector<uint8_t> shot;
 };
+
+// How a captured frame compares with a baseline's.
+enum class Match : uint8_t
+{
+	None,      // no baseline loaded
+	Same,      // within the shootout's tolerance
+	Differs,
+	NoImage,   // the baseline has nothing for this test
+	NoFrame    // this test has not been run, so there is nothing to compare
+};
+
+const char *MatchName(Match m);   // "same" / "differs" / "missing" / ...
+
+// The shootout's screenshot rule applied to two RGB frames: both sides to
+// grayscale, a pixel counts as different when it is over 50/255 off.
+// Returns how many are, so a near miss reads differently from a blank
+// screen. -1 when the buffers are not both `count` pixels.
+int DiffPixels(const std::vector<uint8_t> &a, const std::vector<uint8_t> &b,
+               int count);
 
 // Called as tests finish (and periodically while they run). test_index and
 // frames_done both carry the number completed so far - with several cores

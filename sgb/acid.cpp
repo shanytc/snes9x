@@ -247,6 +247,43 @@ const char *ModelName(Model m)
 	return m == Model::CGB ? "CGB" : m == Model::SGB ? "SGB" : "DMG";
 }
 
+const char *StatusName(Status s)
+{
+	switch (s)
+	{
+		case Status::Pass: return "PASS";
+		case Status::Fail: return "FAIL";
+		case Status::Info: return "INFO";
+		default:           return "ERROR";
+	}
+}
+
+const char *MatchName(Match m)
+{
+	switch (m)
+	{
+		case Match::Same:    return "same";
+		case Match::Differs: return "differs";
+		case Match::NoImage: return "missing";
+		case Match::NoFrame: return "noframe";
+		default:             return "none";
+	}
+}
+
+int DiffPixels(const std::vector<uint8_t> &a, const std::vector<uint8_t> &b,
+               int count)
+{
+	if ((int)a.size() < count * 3 || (int)b.size() < count * 3) return -1;
+	int n = 0;
+	for (int i = 0; i < count; ++i)
+	{
+		const int ga = Luma(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]);
+		const int gb = Luma(b[i * 3], b[i * 3 + 1], b[i * 3 + 2]);
+		if (ga - gb > TOLERANCE || gb - ga > TOLERANCE) ++n;
+	}
+	return n;
+}
+
 // Suites match on a substring so upstream's own names work - "mealybug"
 // finds mealybug-tearoom-tests.
 bool Filter::Matches(const Test &t) const

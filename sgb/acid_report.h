@@ -21,12 +21,17 @@ namespace AcidTests {
 
 enum class Format { Text, Json, Html };
 
+struct Baseline;
+
 // A test and how it went. `result` is null when the test was listed but
 // never ran - filtered out, or dropped by a cancel.
 struct ReportRow
 {
 	const Test   *test   = nullptr;
 	const Result *result = nullptr;
+	// How the frame compared with the loaded baseline, if there is one.
+	Match match   = Match::None;
+	int   diff_px = 0;
 };
 
 struct ReportInfo
@@ -40,6 +45,9 @@ struct ReportInfo
 	double      seconds   = 0.0;
 	int         threads   = 1;
 	bool        cancelled = false;
+	// Baseline the run was compared against, so the HTML can put its frame
+	// beside ours. Null when there is none.
+	const Baseline *baseline = nullptr;
 };
 
 // Render a finished run. Returned as a string rather than written, so the
@@ -53,6 +61,9 @@ bool WriteReport(const char *path, Format fmt, const std::vector<ReportRow> &row
 
 // .json / .html by extension, Text otherwise.
 Format FormatFromPath(const char *path);
+
+// Local "YYYY-MM-DD HH:MM:SS", for report and baseline headers.
+std::string Timestamp();
 
 // A 160x144 RGB frame as a PNG, for embedding a screenshot in a report.
 std::vector<uint8_t> EncodePng(const uint8_t *rgb, int w, int h);

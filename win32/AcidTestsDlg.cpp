@@ -13,6 +13,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <shlobj.h>
 #include <tchar.h>
 #include <stdio.h>
 #include <algorithm>
@@ -26,6 +27,7 @@
 #include "../snes9x.h"
 #include "../sgb/acid.h"
 #include "../sgb/acid_report.h"
+#include "../sgb/acid_baseline.h"
 
 extern HINSTANCE g_hInst;
 
@@ -34,9 +36,17 @@ namespace {
 // Filter menu entries for the two fixed lists.
 const char *kModelNames[]  = { "DMG", "CGB", "SGB" };
 const char *kStatusNames[] = { "PASS", "FAIL", "INFO", "ERROR" };
+// Slots 0-3 line up with Status; the rest are the runner's own states.
 const char *kShowNames[]   = { "Passed", "Failed", "Informational", "Errors",
-                               "Not run" };
-constexpr int kShowPending = 4;   // the extra "Not run" row
+                               "Not run", "Differs from baseline",
+                               "Missing from baseline" };
+constexpr int kShowCount   = 7;
+constexpr int kShowPending = 4;
+constexpr int kShowDiffers = 5;
+constexpr int kShowMissing = 6;
+
+// List columns.
+enum { kColNum, kColTest, kColModel, kColResult, kColBaseline, kColDetail };
 
 struct AcidDlgState
 {
@@ -47,6 +57,12 @@ struct AcidDlgState
 	// matching status is no longer pending/running.
 	std::vector<AcidTests::Result> results;
 	std::string       acid_dir;
+
+	// Frames to diff against, and how each test came out. Empty dir = none
+	// loaded, which leaves every match at None and the column blank.
+	AcidTests::Baseline           baseline;
+	std::vector<AcidTests::Match> match;
+	std::vector<int>              diff_px;
 
 	// Filter state. An all-clear vector means "no restriction".
 	std::string              search;
@@ -136,6 +152,37 @@ bool HasResult(const AcidDlgState *st, int test)
 	return st->status[test] >= 0;
 }
 
+bool HaveBaseline(const AcidDlgState *st)
+{
+	return !st->baseline.dir.empty();
+}
+
+// Re-diff one test against the loaded baseline.
+void RecomputeMatch(AcidDlgState *st, int test)
+{
+	if (!HaveBaseline(st))
+	{
+		st->match[test]   = AcidTests::Match::None;
+		st->diff_px[test] = 0;
+		return;
+	}
+	st->match[test] = AcidTests::CompareToBaseline(
+		st->baseline, st->tests[test], st->results[test].shot, st->diff_px[test]);
+}
+
+void BaselineText(const AcidDlgState *st, int test, char *buf, size_t n)
+{
+	switch (st->match[test])
+	{
+		case AcidTests::Match::Same:    snprintf(buf, n, "SAME");    break;
+		case AcidTests::Match::NoImage: snprintf(buf, n, "MISSING"); break;
+		case AcidTests::Match::NoFrame: snprintf(buf, n, "-");       break;
+		case AcidTests::Match::Differs:
+			snprintf(buf, n, "DIFF %d px", st->diff_px[test]);       break;
+		default: buf[0] = 0;
+	}
+}
+
 /*--------------------------------------------------------------------------
   Filtering
 --------------------------------------------------------------------------*/
@@ -168,12 +215,18 @@ std::string FilterDescription(const AcidDlgState *st)
 	return d + ", showing " + list;
 }
 
+// Checked entries are OR-ed, so Failed plus Differs shows both sets.
 bool ShowStatus(const AcidDlgState *st, int test)
 {
 	if (!AnyOn(st->show_on)) return true;
 	const int s = st->status[test];
 	const int slot = (s == kPending || s == kRunning) ? kShowPending : s;
-	return st->show_on[slot] != 0;
+	if (st->show_on[slot]) return true;
+	if (st->show_on[kShowDiffers] &&
+	    st->match[test] == AcidTests::Match::Differs) return true;
+	if (st->show_on[kShowMissing] &&
+	    st->match[test] == AcidTests::Match::NoImage) return true;
+	return false;
 }
 
 void PopulateList(AcidDlgState *st)
@@ -192,12 +245,14 @@ void PopulateList(AcidDlgState *st)
 		Utf8ToWide wnum(buf);
 		lvi.pszText = (LPTSTR)(const TCHAR *)wnum;
 		ListView_InsertItem(st->hList, &lvi);
-		SetItemText(st->hList, (int)row, 1, t.name.c_str());
-		SetItemText(st->hList, (int)row, 2, AcidTests::ModelName(t.model));
+		SetItemText(st->hList, (int)row, kColTest, t.name.c_str());
+		SetItemText(st->hList, (int)row, kColModel, AcidTests::ModelName(t.model));
 
 		const int s = st->status[i];
-		SetItemText(st->hList, (int)row, 3,
+		SetItemText(st->hList, (int)row, kColResult,
 		            s == kRunning ? "RUN" : s == kPending ? "" : kStatusNames[s]);
+		BaselineText(st, i, buf, sizeof buf);
+		SetItemText(st->hList, (int)row, kColBaseline, buf);
 		buf[0] = 0;
 		if (HasResult(st, i))
 		{
@@ -205,7 +260,7 @@ void PopulateList(AcidDlgState *st)
 			snprintf(buf, sizeof buf, "%d frames%s%s", r.frames,
 			         r.detail.empty() ? "" : "; ", r.detail.c_str());
 		}
-		SetItemText(st->hList, (int)row, 4, buf);
+		SetItemText(st->hList, (int)row, kColDetail, buf);
 	}
 	SetWindowRedraw(st->hList, TRUE);
 }
@@ -328,9 +383,17 @@ void UpdateShotCaption(AcidDlgState *st)
 	else
 	{
 		const int s = st->status[st->shown];
-		snprintf(buf, sizeof buf, "%s\r\n%s", st->tests[st->shown].name.c_str(),
-		         s == kRunning ? "running..." :
-		         s == kPending ? "not run yet" : kStatusNames[s]);
+		int n = snprintf(buf, sizeof buf, "%s\r\n%s",
+		                 st->tests[st->shown].name.c_str(),
+		                 s == kRunning ? "running..." :
+		                 s == kPending ? "not run yet" : kStatusNames[s]);
+		if (n > 0 && n < (int)sizeof buf && HaveBaseline(st))
+		{
+			char base[128];
+			BaselineText(st, st->shown, base, sizeof base);
+			snprintf(buf + n, sizeof buf - n,
+			         "\r\ntop: ours, bottom: baseline\r\n%s", base);
+		}
 	}
 	SetCtrlText(st->hShotCap, buf);
 }
@@ -343,33 +406,12 @@ void SelectShot(AcidDlgState *st, int test)
 	InvalidateRect(st->hShot, NULL, TRUE);
 }
 
-// 160x144 scaled by the largest whole factor that fits, centred.
-void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
+// One frame at x,y scaled by `scale`. The core hands back R,G,B; a DIB
+// wants B,G,R.
+void BlitShot(HDC dc, const std::vector<uint8_t> &rgb, int x, int y, int scale)
 {
-	RECT rc = dis->rcItem;
-	FillRect(dis->hDC, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
-
-	const std::vector<uint8_t> *rgb = ShotOf(st, st->shown);
-	if (!rgb)
-	{
-		SetBkMode(dis->hDC, TRANSPARENT);
-		SetTextColor(dis->hDC, RGB(140, 140, 140));
-		DrawText(dis->hDC, TEXT("No screenshot"), -1, &rc,
-		         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-		return;
-	}
-
-	const int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
-	int scale = cw / AcidTests::kShotWidth;
-	const int vscale = ch / AcidTests::kShotHeight;
-	if (vscale < scale) scale = vscale;
-	if (scale < 1) scale = 1;
-	const int w = AcidTests::kShotWidth * scale, h = AcidTests::kShotHeight * scale;
-	const int x = rc.left + (cw - w) / 2, y = rc.top + (ch - h) / 2;
-
-	// The core hands back R,G,B; a DIB wants B,G,R.
 	static std::vector<uint8_t> bgr;
-	bgr = *rgb;
+	bgr = rgb;
 	for (size_t i = 0; i + 2 < bgr.size(); i += 3)
 		std::swap(bgr[i], bgr[i + 2]);
 
@@ -380,10 +422,52 @@ void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
 	bi.bmiHeader.biPlanes      = 1;
 	bi.bmiHeader.biBitCount    = 24;
 	bi.bmiHeader.biCompression = BI_RGB;
-	SetStretchBltMode(dis->hDC, COLORONCOLOR);   // keep the pixels crisp
-	StretchDIBits(dis->hDC, x, y, w, h,
+	SetStretchBltMode(dc, COLORONCOLOR);   // keep the pixels crisp
+	StretchDIBits(dc, x, y, AcidTests::kShotWidth * scale,
+	              AcidTests::kShotHeight * scale,
 	              0, 0, AcidTests::kShotWidth, AcidTests::kShotHeight,
 	              bgr.data(), &bi, DIB_RGB_COLORS, SRCCOPY);
+}
+
+// Our frame, and the baseline's stacked under it when one is loaded, each
+// at the largest whole scale that fits.
+void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
+{
+	RECT rc = dis->rcItem;
+	FillRect(dis->hDC, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+
+	const std::vector<uint8_t> *rgb = ShotOf(st, st->shown);
+	std::vector<uint8_t> ref;
+	const bool have_ref = HaveBaseline(st) && st->shown >= 0 &&
+	                      st->shown < (int)st->tests.size() &&
+	                      AcidTests::LoadBaselineFrame(st->baseline,
+	                                                   st->tests[st->shown], ref);
+	if (!rgb && !have_ref)
+	{
+		SetBkMode(dis->hDC, TRANSPARENT);
+		SetTextColor(dis->hDC, RGB(140, 140, 140));
+		DrawText(dis->hDC, TEXT("No screenshot"), -1, &rc,
+		         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		return;
+	}
+
+	const int gap  = 4;
+	const int rows = have_ref ? 2 : 1;
+	const int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
+	int scale = cw / AcidTests::kShotWidth;
+	const int vscale = (ch - gap * (rows - 1)) / (AcidTests::kShotHeight * rows);
+	if (vscale < scale) scale = vscale;
+	if (scale < 1) scale = 1;
+
+	const int w = AcidTests::kShotWidth * scale;
+	const int h = AcidTests::kShotHeight * scale;
+	const int x = rc.left + (cw - w) / 2;
+	int y = rc.top + (ch - (h * rows + gap * (rows - 1))) / 2;
+
+	if (rgb) BlitShot(dis->hDC, *rgb, x, y, scale);
+	if (!have_ref) return;
+	y += h + gap;
+	BlitShot(dis->hDC, ref, x, y, scale);
 }
 
 /*--------------------------------------------------------------------------
@@ -437,11 +521,13 @@ void AcidStart(void *user, int run_index, const AcidTests::Test &)
 	st->status[i] = kRunning;
 	++st->in_flight;
 	st->results[i] = AcidTests::Result();
+	st->match[i]   = AcidTests::Match::None;
 	const int row = st->row_of[i];
 	if (row >= 0)
 	{
-		SetItemText(st->hList, row, 3, "RUN");
-		SetItemText(st->hList, row, 4, "");
+		SetItemText(st->hList, row, kColResult, "RUN");
+		SetItemText(st->hList, row, kColBaseline, "");
+		SetItemText(st->hList, row, kColDetail, "");
 		ListView_RedrawItems(st->hList, row, row);
 	}
 	if (i == st->shown) { UpdateShotCaption(st); InvalidateRect(st->hShot, NULL, TRUE); }
@@ -455,7 +541,7 @@ void AcidRunning(void *user, int run_index, int frames_done, int frames_total)
 	if (i < 0 || st->status[i] != kRunning || st->row_of[i] < 0) return;
 	char det[64];
 	snprintf(det, sizeof det, "frame %d/%d", frames_done, frames_total);
-	SetItemText(st->hList, st->row_of[i], 4, det);
+	SetItemText(st->hList, st->row_of[i], kColDetail, det);
 }
 
 void AcidResult(void *user, int run_index, const AcidTests::Test &,
@@ -467,15 +553,18 @@ void AcidResult(void *user, int run_index, const AcidTests::Test &,
 	if (st->status[i] == kRunning && st->in_flight > 0) --st->in_flight;
 	st->status[i]  = (int)result.status;
 	st->results[i] = result;
+	RecomputeMatch(st, i);   // fills the Baseline column live during a run
 
 	const int row = st->row_of[i];
 	if (row >= 0)
 	{
-		SetItemText(st->hList, row, 3, kStatusNames[(int)result.status]);
+		SetItemText(st->hList, row, kColResult, kStatusNames[(int)result.status]);
 		char det[288];
+		BaselineText(st, i, det, sizeof det);
+		SetItemText(st->hList, row, kColBaseline, det);
 		snprintf(det, sizeof det, "%d frames%s%s", result.frames,
 		         result.detail.empty() ? "" : "; ", result.detail.c_str());
-		SetItemText(st->hList, row, 4, det);
+		SetItemText(st->hList, row, kColDetail, det);
 		ListView_RedrawItems(st->hList, row, row);
 	}
 
@@ -497,7 +586,14 @@ std::vector<AcidTests::ReportRow> ReportRows(AcidDlgState *st)
 	std::vector<AcidTests::ReportRow> rows;
 	rows.reserve(st->rows.size());
 	for (int i : st->rows)
-		rows.push_back({ &st->tests[i], HasResult(st, i) ? &st->results[i] : nullptr });
+	{
+		AcidTests::ReportRow row;
+		row.test    = &st->tests[i];
+		row.result  = HasResult(st, i) ? &st->results[i] : nullptr;
+		row.match   = st->match[i];
+		row.diff_px = st->diff_px[i];
+		rows.push_back(row);
+	}
 	return rows;
 }
 
@@ -509,6 +605,7 @@ AcidTests::ReportInfo MakeReportInfo(AcidDlgState *st)
 	info.source  = st->acid_dir;
 	info.threads = st->threads;
 	info.seconds = st->last_secs;
+	if (HaveBaseline(st)) info.baseline = &st->baseline;
 	return info;
 }
 
@@ -591,13 +688,146 @@ void ExportResults(AcidDlgState *st)
 }
 
 /*--------------------------------------------------------------------------
+  Baselines
+--------------------------------------------------------------------------*/
+
+bool AskFolder(HWND hDlg, const TCHAR *title, TCHAR *path, int len)
+{
+	path[0] = 0;
+	TCHAR display[MAX_PATH] = { 0 };
+	BROWSEINFO bi = {};
+	bi.hwndOwner      = hDlg;
+	bi.pszDisplayName = display;
+	bi.lpszTitle      = title;
+	bi.ulFlags        = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX;
+	LPITEMIDLIST idl = SHBrowseForFolder(&bi);
+	if (!idl) return false;
+	const BOOL got = SHGetPathFromIDList(idl, path);
+	LPMALLOC mal = NULL;
+	if (SUCCEEDED(SHGetMalloc(&mal)) && mal) mal->Free(idl);
+	if (!got) return false;
+	path[len - 1] = 0;
+	return path[0] != 0;
+}
+
+void SaveBaseline(AcidDlgState *st)
+{
+	TCHAR dir[MAX_PATH];
+	if (!AskFolder(st->hDlg, TEXT("Save the captured frames as a baseline in:"),
+	               dir, MAX_PATH))
+		return;
+
+	WideToUtf8 udir(dir);
+	std::string err;
+	const int n = AcidTests::WriteBaseline((const char *)udir, ReportRows(st),
+	                                       MakeReportInfo(st), err);
+	if (n < 0)
+	{
+		Utf8ToWide werr(err.c_str());
+		MessageBox(st->hDlg, werr, TEXT("Save baseline"), MB_OK | MB_ICONERROR);
+		return;
+	}
+	char buf[MAX_PATH + 64];
+	snprintf(buf, sizeof buf, "Saved %d frame%s to %s", n, n == 1 ? "" : "s",
+	         (const char *)udir);
+	SetCtrlText(st->hStat, buf);
+}
+
+void RecomputeAllMatches(AcidDlgState *st)
+{
+	for (size_t i = 0; i < st->tests.size(); ++i) RecomputeMatch(st, (int)i);
+}
+
+void CompareBaseline(AcidDlgState *st)
+{
+	TCHAR dir[MAX_PATH];
+	if (!AskFolder(st->hDlg, TEXT("Compare this run against the frames in:"),
+	               dir, MAX_PATH))
+		return;
+
+	WideToUtf8 udir(dir);
+	AcidTests::Baseline loaded;
+	std::string err;
+	if (!AcidTests::LoadBaseline((const char *)udir, loaded, err))
+	{
+		Utf8ToWide werr(err.c_str());
+		MessageBox(st->hDlg, werr, TEXT("Compare with baseline"),
+		           MB_OK | MB_ICONERROR);
+		return;
+	}
+	st->baseline = loaded;
+	RecomputeAllMatches(st);
+
+	int same = 0, differs = 0, missing = 0, noframe = 0;
+	for (int i : st->rows)
+		switch (st->match[i])
+		{
+			case AcidTests::Match::Same:    ++same;    break;
+			case AcidTests::Match::Differs: ++differs; break;
+			case AcidTests::Match::NoImage: ++missing; break;
+			case AcidTests::Match::NoFrame: ++noframe; break;
+			default: break;
+		}
+
+	ApplyFilter(st);
+	char buf[MAX_PATH + 160];
+	snprintf(buf, sizeof buf,
+	         "Baseline %s%s%s: %d same, %d differ, %d missing, %d not run yet",
+	         (const char *)udir, st->baseline.title.empty() ? "" : " / ",
+	         st->baseline.title.c_str(), same, differs, missing, noframe);
+	SetCtrlText(st->hStat, buf);
+	InvalidateRect(st->hShot, NULL, TRUE);
+	UpdateShotCaption(st);
+}
+
+void ClearBaseline(AcidDlgState *st)
+{
+	st->baseline = AcidTests::Baseline();
+	// Those two only exist while a baseline does; left set they would go on
+	// hiding rows with nothing to explain why.
+	st->show_on[kShowDiffers] = 0;
+	st->show_on[kShowMissing] = 0;
+	RecomputeAllMatches(st);
+	ApplyFilter(st);
+	InvalidateRect(st->hShot, NULL, TRUE);
+	UpdateShotCaption(st);
+}
+
+void BaselineMenu(AcidDlgState *st)
+{
+	bool any_shot = false;
+	for (int i : st->rows)
+		if (!st->results[i].shot.empty()) { any_shot = true; break; }
+
+	RECT rc;
+	GetWindowRect(GetDlgItem(st->hDlg, IDC_ACID_BASELINE), &rc);
+	HMENU menu = CreatePopupMenu();
+	if (!menu) return;
+	AppendMenu(menu, MF_STRING | (any_shot ? MF_ENABLED : MF_GRAYED), 1,
+	           TEXT("&Save shown frames as baseline..."));
+	AppendMenu(menu, MF_STRING, 2, TEXT("&Compare with baseline..."));
+	AppendMenu(menu, MF_SEPARATOR, 0, NULL);
+	AppendMenu(menu, MF_STRING | (HaveBaseline(st) ? MF_ENABLED : MF_GRAYED), 3,
+	           TEXT("Cl&ear comparison"));
+	const int cmd = (int)TrackPopupMenu(menu,
+		TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN |
+		TPM_LEFTBUTTON, rc.left, rc.top, 0, st->hDlg, NULL);
+	DestroyMenu(menu);
+
+	if      (cmd == 1) SaveBaseline(st);
+	else if (cmd == 2) CompareBaseline(st);
+	else if (cmd == 3) ClearBaseline(st);
+}
+
+/*--------------------------------------------------------------------------
   The run
 --------------------------------------------------------------------------*/
 
 void EnableFilterBar(AcidDlgState *st, BOOL on)
 {
 	const int ids[] = { IDC_ACID_SEARCH, IDC_ACID_SUITES, IDC_ACID_MODELS,
-	                    IDC_ACID_SHOW, IDC_ACID_CLEAR, IDC_ACID_EXPORT };
+	                    IDC_ACID_SHOW, IDC_ACID_CLEAR, IDC_ACID_EXPORT,
+	                    IDC_ACID_BASELINE };
 	for (int id : ids) EnableWindow(GetDlgItem(st->hDlg, id), on);
 }
 
@@ -615,8 +845,10 @@ void RunSuite(AcidDlgState *st)
 		subset.push_back(st->tests[i]);
 		st->status[i]  = kPending;
 		st->results[i] = AcidTests::Result();
-		SetItemText(st->hList, st->row_of[i], 3, "");
-		SetItemText(st->hList, st->row_of[i], 4, "");
+		st->match[i]   = AcidTests::Match::None;
+		SetItemText(st->hList, st->row_of[i], kColResult, "");
+		SetItemText(st->hList, st->row_of[i], kColBaseline, "");
+		SetItemText(st->hList, st->row_of[i], kColDetail, "");
 	}
 
 	st->running   = true;
@@ -661,7 +893,7 @@ void RunSuite(AcidDlgState *st)
 		st->status[i] = kPending;
 		if (st->row_of[i] >= 0)
 		{
-			SetItemText(st->hList, st->row_of[i], 3, "");
+			SetItemText(st->hList, st->row_of[i], kColResult, "");
 			ListView_RedrawItems(st->hList, st->row_of[i], st->row_of[i]);
 		}
 	}
@@ -695,7 +927,8 @@ void RunSuite(AcidDlgState *st)
 	EnableFilterBar(st, TRUE);
 	UpdateShotCaption(st);
 
-	// A by-result filter now hides or reveals rows the run just changed.
+	// A by-result or by-baseline filter now hides or reveals rows the run
+	// just changed.
 	if (AnyOn(st->show_on) && !st->close_when_done)
 	{
 		const std::string status = buf;
@@ -744,13 +977,14 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		ListView_SetExtendedListViewStyle(st->hList,
 			LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
 		struct { const TCHAR *name; int width; } cols[] = {
-			{ TEXT("#"),      34 },
-			{ TEXT("Test"),  330 },
-			{ TEXT("Model"),  44 },
-			{ TEXT("Result"), 50 },
-			{ TEXT("Detail"),200 },
+			{ TEXT("#"),        34 },
+			{ TEXT("Test"),    330 },
+			{ TEXT("Model"),    44 },
+			{ TEXT("Result"),   50 },
+			{ TEXT("Baseline"), 82 },
+			{ TEXT("Detail"),  200 },
 		};
-		for (int i = 0; i < 5; ++i)
+		for (int i = 0; i < (int)(sizeof cols / sizeof cols[0]); ++i)
 		{
 			LVCOLUMN lvc = {};
 			lvc.mask     = LVCF_TEXT | LVCF_WIDTH;
@@ -764,10 +998,12 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		bool loaded = AcidTests::LoadManifest(st->acid_dir.c_str(), st->tests, err);
 		st->status.assign(st->tests.size(), kPending);
 		st->results.assign(st->tests.size(), AcidTests::Result());
+		st->match.assign(st->tests.size(), AcidTests::Match::None);
+		st->diff_px.assign(st->tests.size(), 0);
 		st->suites   = AcidTests::SuitesOf(st->tests);
 		st->suite_on.assign(st->suites.size(), 0);
 		st->model_on.assign(3, 0);
-		st->show_on.assign(5, 0);
+		st->show_on.assign(kShowCount, 0);
 
 		ApplyFilter(st);
 		if (!loaded)
@@ -873,9 +1109,16 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			AcidDlgState *st = GetState(hDlg);
 			if (st)
 			{
-				const std::vector<std::string> names(kShowNames, kShowNames + 5);
+				const std::vector<std::string> names(kShowNames,
+					kShowNames + (HaveBaseline(st) ? kShowCount : kShowPending + 1));
 				CheckMenu(st, IDC_ACID_SHOW, names, st->show_on, "All results");
 			}
+			return TRUE;
+		}
+		case IDC_ACID_BASELINE:
+		{
+			AcidDlgState *st = GetState(hDlg);
+			if (st && !st->running) BaselineMenu(st);
 			return TRUE;
 		}
 		case IDC_ACID_CLEAR:

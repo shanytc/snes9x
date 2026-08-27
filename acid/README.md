@@ -65,3 +65,28 @@ the dialog's Export button:
   summary cards, per-suite scores and a filterable table with every captured
   frame embedded as a PNG. One file, no external assets; a full 264-test run
   comes to about 640 KB.
+
+## Baselines
+
+The manifest's reference PNGs are one particular emulator's idea of correct.
+A baseline is a second opinion: a folder of captured frames to diff a run
+against, either ours from an earlier build or another emulator's dump.
+
+    ./acid_test --save-baseline ../../out/base     # write our frames there
+    ./acid_test --baseline ../../out/base          # diff this run against them
+    ./acid_test --baseline ../../acid              # or against the references
+
+In the dialog the Baseline button saves the shown frames, loads a folder to
+compare against, or clears the comparison. A Baseline column then reads
+SAME, DIFF *n* px, MISSING or `-`, the preview pane stacks our frame over
+the baseline's, and the Show filter grows entries for what differs or is
+missing. Comparison uses the same rule as a pass: grayscale, 50/255 per
+pixel.
+
+Images are named after the test with a trailing `.gb`/`.gbc` dropped, so
+`blargg/halt_bug.gb` is saved as `blargg/halt_bug.png` — the layout the
+suite's own reference images already use. That means `acid/` itself works as
+a baseline with no index, and so does any foreign dump laid out the same
+way. Ours also carries a `baseline.txt` index recording the emulator, the
+timestamp and each test's verdict, which wins over the derived path when it
+is present.

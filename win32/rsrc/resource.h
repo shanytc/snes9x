@@ -738,6 +738,7 @@
 #define IDC_ACID_CLEAR                  3381
 #define IDC_ACID_EXPORT                 3382
 #define IDC_ACID_FILTER_LABEL           3383
+#define IDC_ACID_BASELINE               3384
 
 #define ID_DEBUG_VRAM_VIEWER            40200
 #define ID_DEBUG_TILEMAP_VIEWER         40201
@@ -914,7 +915,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        190
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3384
+#define _APS_NEXT_CONTROL_VALUE         3385
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

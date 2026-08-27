@@ -338,6 +338,7 @@
     <ClInclude Include="..\sgb\gb_cart.h" />
     <ClInclude Include="..\sgb\acid.h" />
     <ClInclude Include="..\sgb\acid_report.h" />
+    <ClInclude Include="..\sgb\acid_baseline.h" />
     <ClInclude Include="..\apu\apu.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_common.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_config.h" />
@@ -546,6 +547,7 @@
     <ClCompile Include="..\sgb\gb_cart.cpp" />
     <ClCompile Include="..\sgb\acid.cpp" />
     <ClCompile Include="..\sgb\acid_report.cpp" />
+    <ClCompile Include="..\sgb\acid_baseline.cpp" />
     <ClCompile Include="..\apu\apu.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\sdsp.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\SPC_DSP.cpp">

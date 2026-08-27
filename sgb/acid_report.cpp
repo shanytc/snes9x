@@ -5,6 +5,7 @@
 \*****************************************************************************/
 
 #include "acid_report.h"
+#include "acid_baseline.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -30,15 +31,46 @@ const char *StatusWord(const ReportRow &r)
 
 const char *StatusTag(const ReportRow &r)
 {
-	if (!r.result) return "SKIP";
-	switch (r.result->status)
+	return r.result ? StatusName(r.result->status) : "SKIP";
+}
+
+// Short baseline verdict for the text and HTML tables.
+std::string MatchTag(const ReportRow &r)
+{
+	switch (r.match)
 	{
-		case Status::Pass:  return "PASS";
-		case Status::Fail:  return "FAIL";
-		case Status::Info:  return "INFO";
-		default:            return "ERROR";
+		case Match::Same:    return "SAME";
+		case Match::Differs: return "DIFF";
+		case Match::NoImage: return "MISSING";
+		case Match::NoFrame: return "-";
+		default:             return "";
 	}
 }
+
+// True once any row carries a baseline verdict.
+bool AnyBaseline(const std::vector<ReportRow> &rows)
+{
+	for (const ReportRow &r : rows)
+		if (r.match != Match::None) return true;
+	return false;
+}
+
+struct MatchCounts
+{
+	int same = 0, differs = 0, missing = 0, noframe = 0;
+
+	void Add(const ReportRow &r)
+	{
+		switch (r.match)
+		{
+			case Match::Same:    ++same;    break;
+			case Match::Differs: ++differs; break;
+			case Match::NoImage: ++missing; break;
+			case Match::NoFrame: ++noframe; break;
+			default: break;
+		}
+	}
+};
 
 struct Counts
 {
@@ -80,7 +112,9 @@ std::vector<SuiteCount> TallySuites(const std::vector<ReportRow> &rows)
 	return out;
 }
 
-std::string Now()
+} // anonymous
+
+std::string Timestamp()
 {
 	const std::time_t t = std::time(nullptr);
 	std::tm tm = {};
@@ -93,6 +127,8 @@ std::string Now()
 	std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", &tm);
 	return buf;
 }
+
+namespace {
 
 #if defined(__GNUC__)
 __attribute__((format(printf, 1, 2)))
@@ -403,6 +439,8 @@ std::string ScoreLine(const Counts &c)
 std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &info)
 {
 	Counts total;
+	MatchCounts mc;
+	const bool base = AnyBaseline(rows);
 	std::string o;
 	o += "# " + info.title + " - GB Emulator Shootout\n";
 	o += "# generated " + info.generated;
@@ -410,6 +448,12 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	         info.seconds);
 	o += "# filter: " + info.filter + "\n";
 	if (!info.source.empty()) o += "# tests: " + info.source + "\n";
+	if (base && info.baseline)
+	{
+		o += "# baseline: " + info.baseline->dir;
+		if (!info.baseline->title.empty()) o += " (" + info.baseline->title + ")";
+		o += "\n";
+	}
 	if (!info.env.empty())    o += "# timing overrides in effect: " + info.env + "\n";
 	if (info.cancelled)       o += "# run was cancelled - some tests never ran\n";
 	o += "\n";
@@ -418,7 +462,12 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	{
 		if (!r.test) continue;
 		total.Add(r);
+		mc.Add(r);
 		o += Fmt("%-5s %-60s ", StatusTag(r), r.test->name.c_str());
+		if (base)
+			o += Fmt("%-8s ", r.match == Match::Differs
+			                  ? Fmt("DIFF %d", r.diff_px).c_str()
+			                  : MatchTag(r).c_str());
 		if (r.result) o += r.result->detail;
 		o += "\n";
 	}
@@ -431,6 +480,9 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 		         s.c.pass, s.c.fail, s.c.info, s.c.err, s.c.skip);
 
 	o += "\n" + ScoreLine(total) + (info.cancelled ? ", cancelled" : "") + "\n";
+	if (base)
+		o += Fmt("baseline: %d same, %d differ, %d missing, %d not run\n",
+		         mc.same, mc.differs, mc.missing, mc.noframe);
 	return o;
 }
 
@@ -456,6 +508,19 @@ std::string RenderJson(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	         total.total, total.pass, total.fail, total.info, total.err,
 	         total.skip, total.Ok(), total.Scored());
 	o += ",\n";
+
+	if (AnyBaseline(rows))
+	{
+		MatchCounts mc;
+		for (const ReportRow &r : rows) mc.Add(r);
+		o += "  \"baseline\": {";
+		o += "\"dir\": " + JsonStr(info.baseline ? info.baseline->dir : std::string());
+		o += ", \"emulator\": " +
+		     JsonStr(info.baseline ? info.baseline->title : std::string());
+		o += Fmt(", \"same\": %d, \"differs\": %d, \"missing\": %d, \"not_run\": %d}",
+		         mc.same, mc.differs, mc.missing, mc.noframe);
+		o += ",\n";
+	}
 
 	o += "  \"suites\": [\n";
 	const std::vector<SuiteCount> suites = TallySuites(rows);
@@ -492,7 +557,11 @@ std::string RenderJson(const std::vector<ReportRow> &rows, const ReportInfo &inf
 		o += "], \"status\": " + JsonStr(StatusWord(r));
 		o += Fmt(", \"frames\": %d", r.result ? r.result->frames : 0);
 		o += ", \"detail\": " + JsonStr(r.result ? r.result->detail : std::string());
-		o += Fmt(", \"ran\": %s}", r.result ? "true" : "false");
+		o += Fmt(", \"ran\": %s", r.result ? "true" : "false");
+		if (r.match != Match::None)
+			o += ", \"baseline\": " + JsonStr(MatchName(r.match)) +
+			     Fmt(", \"baseline_diff_px\": %d", r.diff_px);
+		o += "}";
 	}
 	o += "\n  ]\n}\n";
 	return o;
@@ -529,6 +598,8 @@ td.name,td.detail { font-family:ui-monospace,Consolas,monospace; font-size:12px 
 td.detail { color:var(--dim) }
 .pass{color:var(--pass)} .fail{color:var(--fail)} .info{color:var(--info)}
 .error{color:var(--err)} .skipped{color:var(--skip)}
+.same{color:var(--pass)} .differs{color:var(--fail)} .missing{color:var(--skip)}
+.noframe{color:var(--skip)} .none{color:var(--skip)}
 td.result { font-weight:600 }
 img.shot { width:160px; height:144px; image-rendering:pixelated;
   border:1px solid var(--line); border-radius:3px; background:#000 }
@@ -558,6 +629,7 @@ function apply() {
     var ok = (!t || d.name.indexOf(t) >= 0) && (!s || d.suite === s) &&
              (!m || d.model === m) &&
              (!st || (st === 'bad' ? (d.status === 'fail' || d.status === 'error')
+                    : st.slice(0, 2) === 'b-' ? d.baseline === st.slice(2)
                                    : d.status === st));
     r.style.display = ok ? '' : 'none';
     if (ok) n++;
@@ -574,6 +646,14 @@ shots.addEventListener('change', function () {
 apply();
 )JS";
 
+// One screenshot cell: the frame as an embedded PNG, or a dash.
+std::string ShotCell(const std::vector<uint8_t> *rgb)
+{
+	if (!rgb || rgb->empty()) return "<span class=\"noshot\">&mdash;</span>";
+	return "<img class=\"shot\" loading=\"lazy\" alt=\"\" src=\"data:image/png;base64," +
+	       Base64(EncodePng(rgb->data(), kShotWidth, kShotHeight)) + "\">";
+}
+
 std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &info)
 {
 	Counts total;
@@ -583,6 +663,9 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 
 	const bool any_shot = std::any_of(rows.begin(), rows.end(),
 		[](const ReportRow &r) { return r.result && !r.result->shot.empty(); });
+	const bool base = AnyBaseline(rows);
+	MatchCounts mc;
+	for (const ReportRow &r : rows) mc.Add(r);
 
 	std::string o;
 	o += "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n";
@@ -598,6 +681,17 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += "filter: " + Html(info.filter);
 	if (!info.source.empty()) o += " &middot; " + Html(info.source);
 	o += "</p>\n";
+	if (base && info.baseline)
+	{
+		o += "<p class=\"meta\">Compared against baseline " +
+		     Html(info.baseline->dir);
+		if (!info.baseline->title.empty())
+			o += " (" + Html(info.baseline->title) + ")";
+		o += Fmt(" &mdash; %d same, %d differ, %d missing", mc.same, mc.differs,
+		         mc.missing);
+		if (mc.noframe) o += Fmt(", %d not run", mc.noframe);
+		o += "</p>\n";
+	}
 	if (!info.env.empty())
 		o += "<p class=\"warn\">Timing overrides in effect: " + Html(info.env) +
 		     " &mdash; not comparable with a clean run.</p>\n";
@@ -613,6 +707,10 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += Fmt("<div class=\"card\"><b class=\"error\">%d</b><span>errors</span></div>\n", total.err);
 	if (total.skip)
 		o += Fmt("<div class=\"card\"><b class=\"skipped\">%d</b><span>not run</span></div>\n", total.skip);
+	if (base)
+		o += Fmt("<div class=\"card\"><b class=\"%s\">%d</b>"
+		         "<span>differ from baseline</span></div>\n",
+		         mc.differs ? "differs" : "same", mc.differs);
 	o += "</div>\n";
 
 	o += "<h2>Suites</h2>\n<table>\n<thead><tr><th>Suite</th><th>Score</th>"
@@ -643,7 +741,12 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	     "<option value=\"bad\">Failed or errored</option>"
 	     "<option value=\"info\">Informational</option>"
 	     "<option value=\"error\">Errors</option>"
-	     "<option value=\"skipped\">Not run</option></select>\n";
+	     "<option value=\"skipped\">Not run</option>";
+	if (base)
+		o += "<option value=\"b-differs\">Differs from baseline</option>"
+		     "<option value=\"b-same\">Matches baseline</option>"
+		     "<option value=\"b-missing\">Missing from baseline</option>";
+	o += "</select>\n";
 	o += "<label><input type=\"checkbox\" id=\"shots\"";
 	o += any_shot ? " checked" : "";
 	o += "> screenshots</label>\n<span id=\"count\"></span>\n</div>\n";
@@ -651,8 +754,11 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += "<table id=\"tests\"";
 	if (!any_shot) o += " class=\"hideshots\"";
 	o += ">\n<thead><tr><th>#</th><th>Test</th><th>Suite</th><th>Model</th>"
-	     "<th>Result</th><th>Frames</th><th>Detail</th>"
-	     "<th class=\"shotcol\">Screen</th></tr></thead>\n<tbody>\n";
+	     "<th>Result</th>";
+	if (base) o += "<th>Baseline</th>";
+	o += "<th>Frames</th><th>Detail</th><th class=\"shotcol\">Screen</th>";
+	if (base) o += "<th class=\"shotcol\">Baseline frame</th>";
+	o += "</tr></thead>\n<tbody>\n";
 
 	int n = 0;
 	std::string lower;
@@ -666,27 +772,34 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 
 		o += "<tr data-name=\"" + Html(lower) + "\" data-suite=\"" +
 		     Html(t.suite) + "\" data-model=\"" + ModelName(t.model) +
-		     "\" data-status=\"" + st + "\">";
+		     "\" data-status=\"" + st + "\" data-baseline=\"" +
+		     MatchName(r.match) + "\">";
 		o += Fmt("<td class=\"num\">%d</td>", ++n);
 		o += "<td class=\"name\">" + Html(t.name) + "</td>";
 		o += "<td>" + Html(t.suite) + "</td>";
 		o += Fmt("<td>%s</td>", ModelName(t.model));
 		o += Fmt("<td class=\"result %s\">%s</td>", st, StatusTag(r));
+		if (base)
+		{
+			o += Fmt("<td class=\"result %s\">%s", MatchName(r.match),
+			         MatchTag(r).c_str());
+			if (r.match == Match::Differs)
+				o += Fmt(" <span class=\"frames\">%d px</span>", r.diff_px);
+			o += "</td>";
+		}
 		o += Fmt("<td class=\"frames\">%d</td>", r.result ? r.result->frames : 0);
 		o += "<td class=\"detail\">" +
 		     Html(r.result ? r.result->detail : std::string()) + "</td>";
-		o += "<td class=\"shotcol\">";
-		if (r.result && !r.result->shot.empty())
+		o += "<td class=\"shotcol\">" + ShotCell(r.result ? &r.result->shot : nullptr) +
+		     "</td>";
+		if (base)
 		{
-			const std::vector<uint8_t> png =
-				EncodePng(r.result->shot.data(), kShotWidth, kShotHeight);
-			o += "<img class=\"shot\" loading=\"lazy\" alt=\"\" src=\"data:image/png;base64,";
-			o += Base64(png);
-			o += "\">";
+			std::vector<uint8_t> ref;
+			const bool have = info.baseline &&
+			                  LoadBaselineFrame(*info.baseline, t, ref);
+			o += "<td class=\"shotcol\">" + ShotCell(have ? &ref : nullptr) + "</td>";
 		}
-		else
-			o += "<span class=\"noshot\">&mdash;</span>";
-		o += "</td></tr>\n";
+		o += "</tr>\n";
 	}
 
 	o += "</tbody>\n</table>\n<script>";
@@ -749,7 +862,7 @@ std::string RenderReport(Format fmt, const std::vector<ReportRow> &rows,
                          const ReportInfo &in)
 {
 	ReportInfo info = in;
-	if (info.generated.empty()) info.generated = Now();
+	if (info.generated.empty()) info.generated = Timestamp();
 	switch (fmt)
 	{
 		case Format::Json: return RenderJson(rows, info);

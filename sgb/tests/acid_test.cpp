@@ -27,6 +27,9 @@
 //   --dump            write failing frames to <acid_dir>/_failures
 //   --quiet           only print failures
 //   --txt/--json/--html PATH   also write a report in that format
+//   --save-baseline DIR   write the captured frames to DIR as a baseline
+//   --baseline DIR        diff the run against a baseline (ours or another
+//                         emulator's dump laid out like acid/)
 //
 // Exit code: number of failed tests (capped at 200), 255 on setup error.
 
@@ -43,6 +46,7 @@
 
 #include "../acid.h"
 #include "../acid_report.h"
+#include "../acid_baseline.h"
 
 // snes9x globals the sgb/ subsystem links against.
 struct SSettings   Settings;
@@ -96,6 +100,7 @@ int main(int argc, char **argv)
 	AcidTests::RunOptions opts;
 	Ctx ctx;
 	std::vector<Output> outputs;
+	std::string save_baseline, compare_baseline;
 	bool list_tests = false, list_suites = false;
 	opts.acid_dir = "../../acid";
 	opts.progress = &OnProgress;
@@ -128,6 +133,10 @@ int main(int argc, char **argv)
 			outputs.push_back({ AcidTests::Format::Json, argv[++i] });
 		else if (!std::strcmp(arg, "--html") && has_next)
 			outputs.push_back({ AcidTests::Format::Html, argv[++i] });
+		else if (!std::strcmp(arg, "--save-baseline") && has_next)
+			save_baseline = argv[++i];
+		else if (!std::strcmp(arg, "--baseline") && has_next)
+			compare_baseline = argv[++i];
 		else if (!std::strcmp(arg, "--list"))
 			list_tests = true;
 		else if (!std::strcmp(arg, "--suites"))
@@ -206,25 +215,56 @@ int main(int argc, char **argv)
 	       s.passed, s.passed + s.failed, s.failed, s.info, s.errors,
 	       s.cancelled ? ", cancelled" : "");
 
-	if (!outputs.empty())
+	AcidTests::ReportInfo info;
+	info.env     = AcidTests::EnvOverrides();
+	info.filter  = opts.filter.Describe();
+	info.source  = opts.acid_dir;
+	info.seconds = secs;
+	info.threads = opts.threads > 0 ? opts.threads : AcidTests::DefaultThreadCount();
+	std::vector<AcidTests::ReportRow> rows;
+	rows.reserve(tests.size());
+	for (size_t i = 0; i < tests.size(); ++i)
+		rows.push_back({ &tests[i], &results[i] });
+
+	AcidTests::Baseline base;
+	if (!compare_baseline.empty())
 	{
-		AcidTests::ReportInfo info;
-		info.env     = AcidTests::EnvOverrides();
-		info.filter  = opts.filter.Describe();
-		info.source  = opts.acid_dir;
-		info.seconds = secs;
-		info.threads = opts.threads > 0 ? opts.threads : AcidTests::DefaultThreadCount();
-		std::vector<AcidTests::ReportRow> rows;
-		rows.reserve(tests.size());
-		for (size_t i = 0; i < tests.size(); ++i)
-			rows.push_back({ &tests[i], &results[i] });
-		for (const Output &o : outputs)
+		if (!AcidTests::LoadBaseline(compare_baseline.c_str(), base, err))
 		{
-			if (AcidTests::WriteReport(o.path.c_str(), o.fmt, rows, info, err))
-				printf("wrote %s\n", o.path.c_str());
-			else
-				fprintf(stderr, "%s\n", err.c_str());
+			fprintf(stderr, "baseline: %s\n", err.c_str());
+			return 255;
 		}
+		info.baseline = &base;
+		int same = 0, differ = 0, missing = 0;
+		for (AcidTests::ReportRow &r : rows)
+		{
+			r.match = AcidTests::CompareToBaseline(base, *r.test, r.result->shot,
+			                                       r.diff_px);
+			if      (r.match == AcidTests::Match::Same)    ++same;
+			else if (r.match == AcidTests::Match::Differs) ++differ;
+			else if (r.match == AcidTests::Match::NoImage) ++missing;
+			if (r.match == AcidTests::Match::Differs)
+				printf("DIFF  %-58s %d px off the baseline\n",
+				       r.test->name.c_str(), r.diff_px);
+		}
+		printf("baseline %s%s%s: %d same, %d differ, %d missing\n",
+		       compare_baseline.c_str(), base.title.empty() ? "" : " / ",
+		       base.title.c_str(), same, differ, missing);
+	}
+
+	if (!save_baseline.empty())
+	{
+		const int n = AcidTests::WriteBaseline(save_baseline.c_str(), rows, info, err);
+		if (n < 0) fprintf(stderr, "%s\n", err.c_str());
+		else       printf("wrote %d frames to %s\n", n, save_baseline.c_str());
+	}
+
+	for (const Output &o : outputs)
+	{
+		if (AcidTests::WriteReport(o.path.c_str(), o.fmt, rows, info, err))
+			printf("wrote %s\n", o.path.c_str());
+		else
+			fprintf(stderr, "%s\n", err.c_str());
 	}
 
 	return s.failed + s.errors > 200 ? 200 : s.failed + s.errors;

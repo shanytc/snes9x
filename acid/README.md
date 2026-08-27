@@ -93,10 +93,12 @@ and nothing else.
     ./acid_test --save-baseline ../../acid/baseline/supersnes9x
     ./acid_test --baseline ../../out/somewhere-else # one more, from anywhere
 
-In the dialog the Baseline button saves the shown frames as a new baseline,
-rescans the folder, and lists every baseline with its tally — twenty of
-those will not fit on a status line, but a menu can be as tall as it likes.
-Picking one puts its frame in the preview. Each baseline's column reads:
+In the dialog, Save Baseline writes the shown frames as a new one, Rescan
+picks up a folder added since, and Diagnosis opens a table of how the shown
+tests came out against every baseline — same, differ, missing, n/a, not run
+— which is more than a status line can hold once there are twenty of them.
+Choosing a row there puts that baseline's frame in the preview. Each
+baseline's column reads:
 
 | | |
 |---|---|

@@ -989,75 +989,132 @@ void RescanBaselines(AcidDlgState *st, bool quiet)
 	SetCtrlText(st->hStat, buf);
 }
 
-// How the shown tests came out against one baseline.
-void BaselineTally(const AcidDlgState *st, size_t b, char *buf, size_t n)
+/*--------------------------------------------------------------------------
+  Test Diagnosis - how the shown tests came out against every baseline
+--------------------------------------------------------------------------*/
+
+INT_PTR CALLBACK DiagDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	int same = 0, differs = 0, missing = 0, na = 0, pending = 0;
-	for (int i : st->rows)
+	AcidDlgState *st = (AcidDlgState *)GetWindowLongPtr(hDlg, DWLP_USER);
+	switch (msg)
 	{
-		const AcidTests::Match m = b < st->match[i].size()
-		                           ? st->match[i][b] : AcidTests::Match::None;
-		switch (m)
+	case WM_INITDIALOG:
+	{
+		st = (AcidDlgState *)lParam;
+		SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)st);
+		HWND list = GetDlgItem(hDlg, IDC_ACID_DIAG_LIST);
+		ListView_SetExtendedListViewStyle(list,
+			LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES);
+		struct { const TCHAR *name; int width; int fmt; } cols[] = {
+			{ TEXT("Baseline"), 130, LVCFMT_LEFT  },
+			{ TEXT("Same"),      52, LVCFMT_RIGHT },
+			{ TEXT("Differ"),    52, LVCFMT_RIGHT },
+			{ TEXT("Missing"),   56, LVCFMT_RIGHT },
+			{ TEXT("n/a"),       40, LVCFMT_RIGHT },
+			{ TEXT("Not run"),   56, LVCFMT_RIGHT },
+			{ TEXT("Frames"),    50, LVCFMT_RIGHT },
+			{ TEXT("Emulator"), 150, LVCFMT_LEFT  },
+		};
+		for (int i = 0; i < (int)(sizeof cols / sizeof cols[0]); ++i)
 		{
-			case AcidTests::Match::Same:    ++same;    break;
-			case AcidTests::Match::Differs: ++differs; break;
-			case AcidTests::Match::NoImage: ++missing; break;
-			case AcidTests::Match::NoRef:   ++na;      break;
-			default:                        ++pending; break;
+			LVCOLUMN lvc = {};
+			lvc.mask    = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+			lvc.pszText = (LPTSTR)cols[i].name;
+			lvc.cx      = cols[i].width;
+			lvc.fmt     = cols[i].fmt;
+			ListView_InsertColumn(list, i, &lvc);
 		}
+
+		char head[256];
+		snprintf(head, sizeof head,
+		         "%d of %d tests, against %d baseline%s.\r\n"
+		         "Pick one to show its frame in the preview.",
+		         (int)st->rows.size(), (int)st->tests.size(),
+		         (int)st->baselines.size(),
+		         st->baselines.size() == 1 ? "" : "s");
+		SetCtrlText(GetDlgItem(hDlg, IDC_ACID_DIAG_HEAD), head);
+
+		char buf[64];
+		for (size_t b = 0; b < st->baselines.size(); ++b)
+		{
+			int n[5] = { 0, 0, 0, 0, 0 };   // same, differ, missing, n/a, pending
+			for (int i : st->rows)
+			{
+				const AcidTests::Match m = b < st->match[i].size()
+					? st->match[i][b] : AcidTests::Match::None;
+				switch (m)
+				{
+					case AcidTests::Match::Same:    ++n[0]; break;
+					case AcidTests::Match::Differs: ++n[1]; break;
+					case AcidTests::Match::NoImage: ++n[2]; break;
+					case AcidTests::Match::NoRef:   ++n[3]; break;
+					default:                        ++n[4]; break;
+				}
+			}
+			LVITEM lvi = {};
+			lvi.mask  = LVIF_TEXT | LVIF_PARAM;
+			lvi.iItem = (int)b;
+			lvi.lParam = (LPARAM)b;
+			Utf8ToWide wname(st->baselines[b].name.c_str());
+			lvi.pszText = (LPTSTR)(const TCHAR *)wname;
+			ListView_InsertItem(list, &lvi);
+			for (int c = 0; c < 5; ++c)
+			{
+				snprintf(buf, sizeof buf, "%d", n[c]);
+				SetItemText(list, (int)b, c + 1, buf);
+			}
+			// Frames it actually holds for the shown tests. Counting the
+			// index would read 0 for default, which has no index but 313
+			// screenshots.
+			snprintf(buf, sizeof buf, "%d", n[0] + n[1] + n[4]);
+			SetItemText(list, (int)b, 6, buf);
+			SetItemText(list, (int)b, 7, st->baselines[b].title.c_str());
+		}
+		if (st->shot_src >= 0 && st->shot_src < (int)st->baselines.size())
+			ListView_SetItemState(list, st->shot_src,
+			                      LVIS_SELECTED | LVIS_FOCUSED,
+			                      LVIS_SELECTED | LVIS_FOCUSED);
+		return TRUE;
 	}
-	int k = snprintf(buf, n, "%d same, %d differ", same, differs);
-	if (missing) k += snprintf(buf + k, n - k, ", %d missing", missing);
-	if (na)      k += snprintf(buf + k, n - k, ", %d n/a", na);
-	if (pending) snprintf(buf + k, n - k, ", %d not run", pending);
+
+	case WM_NOTIFY:
+	{
+		NMHDR *nm = (NMHDR *)lParam;
+		if (st && nm->idFrom == IDC_ACID_DIAG_LIST && nm->code == NM_DBLCLK)
+		{
+			const int row = ((NMITEMACTIVATE *)lParam)->iItem;
+			if (row >= 0) { st->shot_src = row; EndDialog(hDlg, 1); }
+			return TRUE;
+		}
+		break;
+	}
+
+	case WM_COMMAND:
+		if (LOWORD(wParam) == IDCANCEL)
+		{
+			// Whatever is selected on the way out is what the preview
+			// shows, so the list doubles as a way to get to a baseline.
+			HWND list = GetDlgItem(hDlg, IDC_ACID_DIAG_LIST);
+			const int sel = ListView_GetNextItem(list, -1, LVNI_SELECTED);
+			if (st && sel >= 0) st->shot_src = sel;
+			EndDialog(hDlg, 0);
+			return TRUE;
+		}
+		break;
+
+	case WM_CLOSE:
+		EndDialog(hDlg, 0);
+		return TRUE;
+	}
+	return FALSE;
 }
 
-// The menu is where the per-baseline tallies live: with twenty of them
-// there is no line long enough, and a popup can be as tall as it likes.
-// Picking one puts its frame in the preview.
-void BaselineMenu(AcidDlgState *st)
+void ShowDiagnosis(AcidDlgState *st)
 {
-	bool any_shot = false;
-	for (int i : st->rows)
-		if (!st->results[i].shot.empty()) { any_shot = true; break; }
-
-	RECT rc;
-	GetWindowRect(GetDlgItem(st->hDlg, IDC_ACID_BASELINE), &rc);
-	HMENU menu = CreatePopupMenu();
-	if (!menu) return;
-	AppendMenu(menu, MF_STRING | (any_shot ? MF_ENABLED : MF_GRAYED), 1,
-	           TEXT("&Save shown frames as a baseline..."));
-	AppendMenu(menu, MF_STRING, 2, TEXT("&Rescan acid\\baseline"));
-	if (HaveBaseline(st))
-	{
-		// Say what the rows below are, since they read as settings
-		// otherwise rather than as a tally you can jump from.
-		AppendMenu(menu, MF_SEPARATOR, 0, NULL);
-		AppendMenu(menu, MF_STRING | MF_DISABLED | MF_GRAYED, 0,
-		           TEXT("Compared against \x2014 click one to preview it"));
-		AppendMenu(menu, MF_SEPARATOR, 0, NULL);
-	}
-	for (size_t b = 0; b < st->baselines.size(); ++b)
-	{
-		char tally[128], line[256];
-		BaselineTally(st, b, tally, sizeof tally);
-		snprintf(line, sizeof line, "%s\t%s", st->baselines[b].name.c_str(), tally);
-		AppendMenu(menu, MF_STRING | (b == (size_t)st->shot_src ? MF_CHECKED : 0),
-		           (UINT_PTR)(10 + b), Utf8ToWide(line));
-	}
-	const int cmd = (int)TrackPopupMenu(menu,
-		TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN |
-		TPM_LEFTBUTTON, rc.left, rc.top, 0, st->hDlg, NULL);
-	DestroyMenu(menu);
-
-	if      (cmd == 1) SaveBaseline(st);
-	else if (cmd == 2) RescanBaselines(st, false);
-	else if (cmd >= 10 && cmd - 10 < (int)st->baselines.size())
-	{
-		st->shot_src = cmd - 10;
-		InvalidateRect(st->hShot, NULL, TRUE);
-		UpdateShotCaption(st);
-	}
+	DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_ACID_DIAG), st->hDlg,
+	               DiagDlgProc, (LPARAM)st);
+	InvalidateRect(st->hShot, NULL, TRUE);
+	UpdateShotCaption(st);
 }
 
 /*--------------------------------------------------------------------------
@@ -1068,7 +1125,7 @@ void EnableFilterBar(AcidDlgState *st, BOOL on)
 {
 	const int ids[] = { IDC_ACID_SEARCH, IDC_ACID_SUITES, IDC_ACID_MODELS,
 	                    IDC_ACID_SHOW, IDC_ACID_CLEAR, IDC_ACID_EXPORT,
-	                    IDC_ACID_BASELINE };
+	                    IDC_ACID_SAVEBASE, IDC_ACID_RESCAN, IDC_ACID_DIAG };
 	for (int id : ids) EnableWindow(GetDlgItem(st->hDlg, id), on);
 }
 
@@ -1341,10 +1398,22 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			}
 			return TRUE;
 		}
-		case IDC_ACID_BASELINE:
+		case IDC_ACID_SAVEBASE:
 		{
 			AcidDlgState *st = GetState(hDlg);
-			if (st && !st->running) BaselineMenu(st);
+			if (st && !st->running) SaveBaseline(st);
+			return TRUE;
+		}
+		case IDC_ACID_RESCAN:
+		{
+			AcidDlgState *st = GetState(hDlg);
+			if (st && !st->running) RescanBaselines(st, false);
+			return TRUE;
+		}
+		case IDC_ACID_DIAG:
+		{
+			AcidDlgState *st = GetState(hDlg);
+			if (st && !st->running && HaveBaseline(st)) ShowDiagnosis(st);
 			return TRUE;
 		}
 		case IDC_ACID_SHOTPREV:

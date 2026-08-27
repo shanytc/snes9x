@@ -1028,7 +1028,15 @@ void BaselineMenu(AcidDlgState *st)
 	AppendMenu(menu, MF_STRING | (any_shot ? MF_ENABLED : MF_GRAYED), 1,
 	           TEXT("&Save shown frames as a baseline..."));
 	AppendMenu(menu, MF_STRING, 2, TEXT("&Rescan acid\\baseline"));
-	if (HaveBaseline(st)) AppendMenu(menu, MF_SEPARATOR, 0, NULL);
+	if (HaveBaseline(st))
+	{
+		// Say what the rows below are, since they read as settings
+		// otherwise rather than as a tally you can jump from.
+		AppendMenu(menu, MF_SEPARATOR, 0, NULL);
+		AppendMenu(menu, MF_STRING | MF_DISABLED | MF_GRAYED, 0,
+		           TEXT("Compared against \x2014 click one to preview it"));
+		AppendMenu(menu, MF_SEPARATOR, 0, NULL);
+	}
 	for (size_t b = 0; b < st->baselines.size(); ++b)
 	{
 		char tally[128], line[256];

@@ -15,7 +15,7 @@
 //   cd sgb/tests && make acid_test
 //
 // Run (from sgb/tests, or pass the acid dir explicitly):
-//   ./acid_test [acid_dir] [--filter substring] [--dump] [--quiet]
+//   ./acid_test [acid_dir] [--filter substring] [--dump] [--quiet] [--threads N]
 //
 // Exit code: number of failed tests (capped at 200), 255 on setup error.
 
@@ -86,6 +86,8 @@ int main(int argc, char **argv)
 			opts.dump_failures = true;
 		else if (!std::strcmp(argv[i], "--quiet"))
 			ctx.quiet = true;
+		else if (!std::strcmp(argv[i], "--threads") && i + 1 < argc)
+			opts.threads = std::atoi(argv[++i]);
 		else
 			opts.acid_dir = argv[i];
 	}

@@ -12,12 +12,28 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
+#include <functional>
+#include <utility>
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <thread>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
 #endif
 
 #include "stb_image.h"
+
+// The process environment, for reporting inherited ACID_* timing overrides.
+#ifdef _WIN32
+extern "C" char **_environ;
+#define ACID_ENVIRON _environ
+#else
+extern "C" char **environ;
+#define ACID_ENVIRON environ
+#endif
 
 
 namespace AcidTests {
@@ -70,11 +86,11 @@ bool LoadReferenceGray(const std::string &path, std::vector<uint8_t> &out,
 // Snapshot the current GB frame as grayscale. DMG/SGB/compat frames are
 // 2-bit shade indices (0 = lightest); native-CGB frames come from the raw
 // BGR555 color framebuffer with full-range 5→8 bit expansion.
-void CaptureFrameGray(uint8_t out[GB_W * GB_H])
+void CaptureFrameGray(SGB::Emulator &emu, uint8_t out[GB_W * GB_H])
 {
-	if (S9xSGBIsCgbRender())
+	if (emu.IsCgbRender())
 	{
-		const uint16_t *fb = S9xSGBGetCgbColorFB();
+		const uint16_t *fb = emu.CgbColorFB();
 		for (int i = 0; i < GB_W * GB_H; ++i)
 		{
 			const uint16_t c = fb[i];
@@ -86,10 +102,58 @@ void CaptureFrameGray(uint8_t out[GB_W * GB_H])
 	}
 	else
 	{
-		const SGB::FrameBuffer &fb = SGB::Instance().GetFrameBuffer();
+		const SGB::FrameBuffer &fb = emu.GetFrameBuffer();
 		for (int i = 0; i < GB_W * GB_H; ++i)
 			out[i] = static_cast<uint8_t>((3 - (fb.pixels[i] & 3)) * 85);
 	}
+}
+
+// The same frame in colour, for the UI. Native-CGB output is real BGR555;
+// everything else is 2-bit shades, which the reference images also show as
+// gray.
+void CaptureFrameRgb(SGB::Emulator &emu, std::vector<uint8_t> &out)
+{
+	out.resize(GB_W * GB_H * 3);
+	if (emu.IsCgbRender())
+	{
+		const uint16_t *fb = emu.CgbColorFB();
+		for (int i = 0; i < GB_W * GB_H; ++i)
+		{
+			const uint16_t c = fb[i];
+			const int r5 = c & 0x1F, g5 = (c >> 5) & 0x1F, b5 = (c >> 10) & 0x1F;
+			out[i * 3 + 0] = static_cast<uint8_t>((r5 << 3) | (r5 >> 2));
+			out[i * 3 + 1] = static_cast<uint8_t>((g5 << 3) | (g5 >> 2));
+			out[i * 3 + 2] = static_cast<uint8_t>((b5 << 3) | (b5 >> 2));
+		}
+	}
+	else
+	{
+		const SGB::FrameBuffer &fb = emu.GetFrameBuffer();
+		for (int i = 0; i < GB_W * GB_H; ++i)
+		{
+			const uint8_t g = static_cast<uint8_t>((3 - (fb.pixels[i] & 3)) * 85);
+			out[i * 3 + 0] = out[i * 3 + 1] = out[i * 3 + 2] = g;
+		}
+	}
+}
+
+// How far off the closest reference is, for a failure report: a handful of
+// pixels reads very differently from a screen that never got there.
+int ClosestDiff(const uint8_t *frame,
+                const std::vector<std::vector<uint8_t>> &refs)
+{
+	int best = -1;
+	for (const auto &ref : refs)
+	{
+		int n = 0;
+		for (int i = 0; i < GB_W * GB_H; ++i)
+		{
+			const int d = static_cast<int>(frame[i]) - static_cast<int>(ref[i]);
+			if (d > TOLERANCE || d < -TOLERANCE) ++n;
+		}
+		if (best < 0 || n < best) best = n;
+	}
+	return best;
 }
 
 bool FramesMatch(const uint8_t *a, const uint8_t *b)
@@ -122,12 +186,11 @@ void DumpGrayPpm(const std::string &path, const uint8_t *gray)
 
 // Serial capture — blargg ROMs print their diagnosis here; keeping it makes
 // failure reports self-explaining.
-std::string *g_serial_sink = nullptr;
-
-void OnSerialByte(uint8_t b)
+void OnSerialByte(void *user, uint8_t b)
 {
-	if (g_serial_sink && g_serial_sink->size() < 4096)
-		g_serial_sink->push_back(static_cast<char>(b));
+	std::string *sink = static_cast<std::string *>(user);
+	if (sink && sink->size() < 4096)
+		sink->push_back(static_cast<char>(b));
 }
 
 std::string OneLine(const std::string &s, size_t cap)
@@ -222,6 +285,163 @@ bool LoadManifest(const char *acid_dir, std::vector<Test> &out, std::string &err
 	return true;
 }
 
+namespace {
+
+// One test, start to finish, on one core. Everything it touches is either
+// its own emulator instance or a local, so several of these run in
+// parallel without interfering.
+Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
+                  bool dump_failures, const std::atomic<bool> &cancel,
+                  const std::atomic<bool> *pause,
+                  const std::function<void(int, int)> &tick, bool &aborted)
+{
+	aborted = false;
+	Result r;
+	std::string serial;
+	std::vector<std::vector<uint8_t>> pass_refs, fail_refs;
+	bool ref_error = false;
+	for (const std::string &img : t.pass_images)
+	{
+		std::vector<uint8_t> g;
+		if (!LoadReferenceGray(JoinPath(dir, img), g, r.detail)) { ref_error = true; break; }
+		pass_refs.push_back(std::move(g));
+	}
+	for (const std::string &img : t.fail_images)
+	{
+		if (ref_error) break;
+		std::vector<uint8_t> g;
+		if (!LoadReferenceGray(JoinPath(dir, img), g, r.detail)) { ref_error = true; break; }
+		fail_refs.push_back(std::move(g));
+	}
+
+	std::vector<uint8_t> rom;
+	if (!ref_error && !ReadWholeFile(JoinPath(dir, t.rom), rom))
+	{
+		ref_error = true;
+		r.detail = "cannot read ROM " + t.rom;
+	}
+	if (ref_error)
+	{
+		r.status = Status::Error;
+		return r;
+	}
+
+	// Model setup must precede LoadROM — LoadROM cold-resets with it.
+	emu.SetForceModel(t.model == Model::CGB ? 2 : t.model == Model::SGB ? 3 : 1);
+	emu.SetRunMode(t.model == Model::SGB ? SGB::RunMode::SGB : SGB::RunMode::DMG);
+	emu.SetClockMultiplier(1.0f);
+
+	if (!emu.LoadROM(rom.data(), rom.size(), nullptr))
+	{
+		r.status = Status::Error;
+		r.detail = "core rejected ROM " + t.rom;
+		return r;
+	}
+
+	// SGB1 pushes ~61.2 GB frames per second; everything else 59.73.
+	const double fps = (t.model == Model::SGB) ? 61.2 : 59.7275;
+	// Match the shootout's wall clock: runtime + startup_time (1s) + 5s.
+	const int frames_total = static_cast<int>(std::ceil((t.runtime + 6.0) * fps));
+
+	// Armed here, not earlier: it points at a local, and every path above
+	// returns without running a frame.
+	emu.SetSerialSink(&OnSerialByte, &serial);
+	struct SinkGuard
+	{
+		SGB::Emulator &e;
+		~SinkGuard() { e.SetSerialSink(nullptr, nullptr); }
+	} sink_guard{ emu };
+
+	uint8_t frame[GB_W * GB_H];
+	r.status = pass_refs.empty() ? Status::Info : Status::Fail;
+	for (int fr = 0; fr < frames_total; ++fr)
+	{
+		emu.RunFrame();
+		r.frames = fr + 1;
+
+		if (!pass_refs.empty() || !fail_refs.empty())
+		{
+			CaptureFrameGray(emu, frame);
+			bool decided = false;
+			for (const auto &ref : pass_refs)
+			{
+				if (FramesMatch(frame, ref.data()))
+				{
+					r.status = Status::Pass;
+					decided = true;
+					break;
+				}
+			}
+			if (!decided)
+			{
+				for (const auto &ref : fail_refs)
+				{
+					if (FramesMatch(frame, ref.data()))
+					{
+						r.status = Status::Fail;
+						r.detail = "matched fail image";
+						decided = true;
+						break;
+					}
+				}
+			}
+			if (decided) break;
+		}
+
+		if ((fr & 63) == 63)
+		{
+			if (cancel.load(std::memory_order_relaxed))
+			{
+				aborted = true;
+				return r;   // being cancelled; this one has no verdict
+			}
+			tick(fr + 1, frames_total);
+			while (pause && pause->load(std::memory_order_relaxed) &&
+			       !cancel.load(std::memory_order_relaxed))
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+	}
+
+	if (r.status == Status::Fail && r.detail.empty())
+	{
+		CaptureFrameGray(emu, frame);
+		const int off = ClosestDiff(frame, pass_refs);
+		r.detail = "timeout after " + std::to_string(r.frames) + " frames";
+		if (off >= 0)
+			r.detail += "; " + std::to_string(off) + " px off the closest reference";
+		if (!serial.empty())
+			r.detail += "; serial: \"" + OneLine(serial, 160) + "\"";
+	}
+	if (r.status == Status::Fail && dump_failures)
+	{
+		CaptureFrameGray(emu, frame);
+		DumpGrayPpm(JoinPath(dir, "_failures/" + FlattenName(t.name) + ".ppm"), frame);
+	}
+	CaptureFrameRgb(emu, r.shot);
+	return r;
+}
+
+} // anonymous
+
+std::string EnvOverrides()
+{
+	std::string out;
+	char **env = ACID_ENVIRON;
+	for (; env && *env; ++env)
+	{
+		if (std::strncmp(*env, "ACID_", 5) != 0) continue;
+		if (!out.empty()) out += ' ';
+		out += *env;
+	}
+	return out;
+}
+
+int DefaultThreadCount()
+{
+	const unsigned hw = std::thread::hardware_concurrency();
+	return hw ? static_cast<int>(hw) : 1;
+}
+
 Summary Run(const RunOptions &opts)
 {
 	Summary sum;
@@ -242,12 +462,7 @@ Summary Run(const RunOptions &opts)
 				kept.push_back(std::move(t));
 		tests.swap(kept);
 	}
-
-	S9xSGBInit();
-
-	std::string serial;
-	g_serial_sink = &serial;
-	SGB::SetSerialCallback(&OnSerialByte);
+	if (tests.empty()) return sum;
 
 	if (opts.dump_failures)
 	{
@@ -258,168 +473,151 @@ Summary Run(const RunOptions &opts)
 #endif
 	}
 
-	const std::string report_path = JoinPath(dir, "results.txt");
-	FILE *report = fopen(report_path.c_str(), "wb");
+	int nthreads = opts.threads > 0 ? opts.threads : DefaultThreadCount();
+	if (nthreads > static_cast<int>(tests.size())) nthreads = static_cast<int>(tests.size());
+	if (nthreads < 1) nthreads = 1;
 
-	std::vector<std::vector<uint8_t>> pass_refs, fail_refs;
-	std::vector<uint8_t> frame(GB_W * GB_H);
-	bool cancelled = false;
+	// Longest test first: the slowest ROM decides when the last core goes
+	// idle, so starting it early keeps the tail short.
+	std::vector<size_t> order(tests.size());
+	for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+	std::stable_sort(order.begin(), order.end(),
+	                 [&](size_t a, size_t b) { return tests[a].runtime > tests[b].runtime; });
 
-	for (size_t ti = 0; ti < tests.size() && !cancelled; ++ti)
+	std::vector<Result> results(tests.size());
+	std::atomic<size_t> next_test{0};
+	std::atomic<bool>   cancel{false};
+	std::atomic<int>    live{nthreads};
+	std::mutex          done_mu;
+	// What the workers have to say, in the order they said it.
+	struct Event { size_t index; int kind; int done; int total; };
+	enum { EvStart, EvRunning, EvFinished };
+	std::vector<Event> events;
+
+	// Every worker owns a core of its own; the scoped bind keeps the GB
+	// side's host hooks pointed at it instead of the singleton.
+	auto worker = [&]() {
+		SGB::Emulator emu;
+		SGB::ScopedActiveEmulator bind(emu);
+		if (emu.Init())
+		{
+			for (;;)
+			{
+				const size_t slot = next_test.fetch_add(1);
+				if (slot >= order.size() || cancel.load()) break;
+				const size_t i = order[slot];
+				{
+					std::lock_guard<std::mutex> lk(done_mu);
+					events.push_back({ i, EvStart, 0, 0 });
+				}
+				auto tick = [&](int done, int total) {
+					std::lock_guard<std::mutex> lk(done_mu);
+					events.push_back({ i, EvRunning, done, total });
+				};
+				bool aborted = false;
+				Result r = RunOneTest(emu, dir, tests[i], opts.dump_failures,
+				                      cancel, opts.pause, tick, aborted);
+				if (aborted) break;
+				std::lock_guard<std::mutex> lk(done_mu);
+				results[i] = std::move(r);
+				events.push_back({ i, EvFinished, r.frames, r.frames });
+			}
+		}
+		live.fetch_sub(1);
+	};
+
+	std::vector<std::thread> pool;
+	pool.reserve(nthreads);
+	for (int i = 0; i < nthreads; ++i) pool.emplace_back(worker);
+
+	// Results are reported from THIS thread, so a UI caller's callbacks
+	// stay on the thread that owns its windows.
+	size_t reported = 0;
+	size_t last_seen = 0;
+	for (;;)
 	{
-		const Test &t = tests[ti];
-		Result r;
-		serial.clear();
-
-		// SGB1 pushes ~61.2 GB frames per second; everything else 59.73.
-		const double fps = (t.model == Model::SGB) ? 61.2 : 59.7275;
-		// Match the shootout's wall clock: runtime + startup_time (1s) + 5s.
-		const int frames_total = static_cast<int>(std::ceil((t.runtime + 6.0) * fps));
-
-		if (opts.progress &&
-		    !opts.progress(opts.user, static_cast<int>(ti),
-		                   static_cast<int>(tests.size()), t, 0, frames_total))
+		std::vector<Event> batch;
 		{
-			cancelled = true;
-			break;
+			std::lock_guard<std::mutex> lk(done_mu);
+			batch.swap(events);
 		}
-
-		pass_refs.clear();
-		fail_refs.clear();
-		bool ref_error = false;
-		for (const std::string &img : t.pass_images)
+		for (const auto &ev : batch)
 		{
-			std::vector<uint8_t> g;
-			if (!LoadReferenceGray(JoinPath(dir, img), g, r.detail)) { ref_error = true; break; }
-			pass_refs.push_back(std::move(g));
-		}
-		for (const std::string &img : t.fail_images)
-		{
-			std::vector<uint8_t> g;
-			if (ref_error) break;
-			if (!LoadReferenceGray(JoinPath(dir, img), g, r.detail)) { ref_error = true; break; }
-			fail_refs.push_back(std::move(g));
-		}
-
-		std::vector<uint8_t> rom;
-		if (!ref_error && !ReadWholeFile(JoinPath(dir, t.rom), rom))
-		{
-			ref_error = true;
-			r.detail = "cannot read ROM " + t.rom;
-		}
-
-		if (ref_error)
-		{
-			r.status = Status::Error;
-		}
-		else
-		{
-			// Model setup must precede LoadROM — LoadROM cold-resets with it.
-			S9xSGBSetForceModel(t.model == Model::CGB ? 2 :
-			                    t.model == Model::SGB ? 3 : 1);
-			S9xSGBSetRunMode(t.model == Model::SGB ? 1 : 0);
-			S9xSGBSetClockMultiplier(1.0f);
-
-			if (!S9xSGBLoadROMBytes(rom.data(), rom.size(), nullptr))
+			const size_t idx = ev.index;
+			last_seen = idx;
+			if (ev.kind == EvStart)
 			{
-				r.status = Status::Error;
-				r.detail = "core rejected ROM " + t.rom;
+				if (opts.on_start)
+					opts.on_start(opts.user, static_cast<int>(idx), tests[idx]);
+				continue;
 			}
-			else
+			if (ev.kind == EvRunning)
 			{
-				r.status = pass_refs.empty() ? Status::Info : Status::Fail;
-				for (int fr = 0; fr < frames_total; ++fr)
-				{
-					S9xSGBRunFrame();
-					r.frames = fr + 1;
-
-					if (!pass_refs.empty() || !fail_refs.empty())
-					{
-						CaptureFrameGray(frame.data());
-						bool decided = false;
-						for (const auto &ref : pass_refs)
-						{
-							if (FramesMatch(frame.data(), ref.data()))
-							{
-								r.status = Status::Pass;
-								decided = true;
-								break;
-							}
-						}
-						if (!decided)
-						{
-							for (const auto &ref : fail_refs)
-							{
-								if (FramesMatch(frame.data(), ref.data()))
-								{
-									r.status = Status::Fail;
-									r.detail = "matched fail image";
-									decided = true;
-									break;
-								}
-							}
-						}
-						if (decided) break;
-					}
-
-					if (opts.progress && (fr & 63) == 63 &&
-					    !opts.progress(opts.user, static_cast<int>(ti),
-					                   static_cast<int>(tests.size()), t,
-					                   fr + 1, frames_total))
-					{
-						cancelled = true;
-						break;
-					}
-				}
-
-				if (r.status == Status::Fail && r.detail.empty())
-				{
-					r.detail = "timeout after " + std::to_string(r.frames) + " frames";
-					if (!serial.empty())
-						r.detail += "; serial: \"" + OneLine(serial, 160) + "\"";
-				}
-				if (r.status == Status::Fail && opts.dump_failures)
-				{
-					CaptureFrameGray(frame.data());
-					DumpGrayPpm(JoinPath(dir, "_failures/" + FlattenName(t.name) + ".ppm"),
-					            frame.data());
-				}
+				if (opts.on_running)
+					opts.on_running(opts.user, static_cast<int>(idx), ev.done, ev.total);
+				continue;
 			}
+			const Result &r = results[idx];
+			switch (r.status)
+			{
+				case Status::Pass:  ++sum.passed; break;
+				case Status::Fail:  ++sum.failed; break;
+				case Status::Info:  ++sum.info;   break;
+				case Status::Error: ++sum.errors; break;
+			}
+			++sum.total;
+			++reported;
+			if (opts.on_result)
+				opts.on_result(opts.user, static_cast<int>(idx), tests[idx], r);
 		}
+		if (opts.progress && !batch.empty() &&
+		    !opts.progress(opts.user, static_cast<int>(reported),
+		                   static_cast<int>(tests.size()), tests[last_seen],
+		                   static_cast<int>(reported), static_cast<int>(tests.size())))
+			cancel.store(true);
 
-		switch (r.status)
+		if (live.load() == 0)
 		{
-			case Status::Pass:  ++sum.passed; break;
-			case Status::Fail:  ++sum.failed; break;
-			case Status::Info:  ++sum.info;   break;
-			case Status::Error: ++sum.errors; break;
+			std::lock_guard<std::mutex> lk(done_mu);
+			if (events.empty()) break;
+			continue;
 		}
-		++sum.total;
-
-		if (report)
+		if (batch.empty())
 		{
-			static const char *kStatus[] = { "PASS", "FAIL", "INFO", "ERROR" };
-			fprintf(report, "%-5s %-60s %s\n",
-			        kStatus[static_cast<int>(r.status)], t.name.c_str(),
-			        r.detail.c_str());
-			fflush(report);
+			if (opts.progress &&
+			    !opts.progress(opts.user, static_cast<int>(reported),
+			                   static_cast<int>(tests.size()), tests[last_seen],
+			                   static_cast<int>(reported), static_cast<int>(tests.size())))
+				cancel.store(true);
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
-		if (opts.on_result)
-			opts.on_result(opts.user, static_cast<int>(ti), t, r);
 	}
+	for (auto &th : pool) th.join();
 
+	const bool cancelled = cancel.load();
 	sum.cancelled = cancelled ? 1 : 0;
-	if (report)
+
+	// The report goes out in manifest order, whichever worker produced it.
+	if (FILE *report = fopen(JoinPath(dir, "results.txt").c_str(), "wb"))
 	{
+		const std::string env = EnvOverrides();
+		if (!env.empty())
+			fprintf(report, "# timing overrides in effect: %s\n\n", env.c_str());
+		static const char *kStatus[] = { "PASS", "FAIL", "INFO", "ERROR" };
+		for (size_t i = 0; i < tests.size(); ++i)
+		{
+			if (results[i].frames == 0 && results[i].detail.empty() &&
+			    results[i].status == Status::Error && cancelled)
+				continue;   // never ran
+			fprintf(report, "%-5s %-60s %s\n",
+			        kStatus[static_cast<int>(results[i].status)],
+			        tests[i].name.c_str(), results[i].detail.c_str());
+		}
 		fprintf(report, "\n%d/%d passed (%d failed, %d info, %d errors%s)\n",
 		        sum.passed, sum.passed + sum.failed, sum.failed, sum.info,
 		        sum.errors, cancelled ? ", cancelled" : "");
 		fclose(report);
 	}
-
-	SGB::SetSerialCallback(nullptr);
-	g_serial_sink = nullptr;
-	S9xSGBSetForceModel(0);
 	return sum;
 }
 

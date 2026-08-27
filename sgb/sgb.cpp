@@ -1456,12 +1456,19 @@ void Emulator::RunCycles(int32_t tcycles)
 	// serviced at the next instruction boundary, matching the SM83.
 	//
 	// An instruction can overshoot the requested budget by a few dots, so
-	// the target is tracked as a persistent absolute credit (run_target):
-	// the excess consumed this call is automatically deducted from the
-	// next, keeping BIOS-mode SNES↔GB slaving rate-exact.
-	int64_t target_t = impl_->run_target;
-	if (target_t < impl_->ppu.t_cycles) target_t = impl_->ppu.t_cycles;
-	target_t += tcycles;
+	// the target is a persistent absolute credit (run_target) and the
+	// excess is deducted from the next call - if we have already run past
+	// the new target the loop below simply does nothing this time.
+	//
+	// It must NOT be re-anchored to the current position here: overshoot
+	// is the normal case, so clamping it away forgives the excess on every
+	// call. In BIOS mode the SNES re-syncs on every ICD2 access, often only
+	// a dot or two at a time, and forgiving 4-24 dots each time runs the GB
+	// far faster than the SNES asked for - which is the "bank-read timing
+	// against our slice writes" drift S9xSGBTickSnes warns about, and shows
+	// up as torn rows. Reset() and the savestate load re-anchor it; those
+	// are the only real discontinuities.
+	int64_t target_t = impl_->run_target + tcycles;
 	impl_->run_target = target_t;
 
 	while (impl_->ppu.t_cycles < target_t)

@@ -85,6 +85,10 @@ struct AcidDlgState
 	int  threads   = 1;
 	int  in_flight = 0;   // tests currently held by a worker
 	int  shown     = -1;  // test the preview pane is showing
+	// Which frame of that test the pane is on: -1 is ours, 0+ indexes
+	// baselines. Kept across rows so flipping down the list stays on the
+	// same source.
+	int  shot_src  = -1;
 	DWORD started  = 0;   // GetTickCount at the start of the run
 	double last_secs = 0.0;   // wall clock of the last finished run
 };
@@ -345,6 +349,7 @@ void UpdateFilterButtons(AcidDlgState *st)
 
 void UpdateShotCaption(AcidDlgState *st);
 void SelectShot(AcidDlgState *st, int test);
+void UpdateShotNav(AcidDlgState *st);
 std::vector<size_t> BaselinesWithFrame(const AcidDlgState *st, int test);
 void RescanBaselines(AcidDlgState *st, bool quiet);
 
@@ -420,6 +425,16 @@ void CheckMenu(AcidDlgState *st, int btn_id, const std::vector<std::string> &ite
   Preview pane
 --------------------------------------------------------------------------*/
 
+// One frame the pane can show: ours, or a baseline that has one. -1 is
+// ours, so the source survives a change of row.
+struct ShotSource
+{
+	int         id;      // -1 = ours, else index into baselines
+	std::string label;
+};
+
+std::vector<ShotSource> ShotSources(const AcidDlgState *st, int test);
+
 const std::vector<uint8_t> *ShotOf(AcidDlgState *st, int test)
 {
 	if (test < 0 || test >= (int)st->results.size()) return nullptr;
@@ -439,11 +454,8 @@ void UpdateShotCaption(AcidDlgState *st)
 		                 st->tests[st->shown].name.c_str(),
 		                 s == kRunning ? "running..." :
 		                 s == kPending ? "not run yet" : kStatusNames[s]);
-		// Frames are stacked in this order, so name them in it too.
-		const std::vector<size_t> drawn = BaselinesWithFrame(st, st->shown);
-		if (n > 0 && n < (int)sizeof buf && !drawn.empty())
-			n += snprintf(buf + n, sizeof buf - n, "\r\nours on top");
-		for (size_t b : drawn)
+		// Every baseline's verdict, whether or not it has a frame to show.
+		for (size_t b = 0; b < st->baselines.size(); ++b)
 		{
 			if (n <= 0 || n >= (int)sizeof buf) break;
 			char verdict[64];
@@ -453,6 +465,7 @@ void UpdateShotCaption(AcidDlgState *st)
 		}
 	}
 	SetCtrlText(st->hShotCap, buf);
+	UpdateShotNav(st);
 }
 
 void SelectShot(AcidDlgState *st, int test)
@@ -461,6 +474,14 @@ void SelectShot(AcidDlgState *st, int test)
 	st->shown = test;
 	UpdateShotCaption(st);
 	InvalidateRect(st->hShot, NULL, TRUE);
+}
+
+// The arrows only mean anything with more than one frame to step between.
+void UpdateShotNav(AcidDlgState *st)
+{
+	const BOOL on = ShotSources(st, st->shown).size() > 1;
+	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_SHOTPREV), on);
+	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_SHOTNEXT), on);
 }
 
 // One frame drawn into x,y,w,h. The core hands back R,G,B; a DIB wants
@@ -485,8 +506,8 @@ void BlitShot(HDC dc, const std::vector<uint8_t> &rgb, int x, int y, int w, int 
 	              bgr.data(), &bi, DIB_RGB_COLORS, SRCCOPY);
 }
 
-// Baselines with a frame for this test, in column order. NoImage is the
-// only state that means there is nothing on disk to show.
+// Baselines with a frame for this test, in column order. NoImage and NoRef
+// both mean there is nothing on disk to show.
 std::vector<size_t> BaselinesWithFrame(const AcidDlgState *st, int test)
 {
 	std::vector<size_t> out;
@@ -503,64 +524,100 @@ std::vector<size_t> BaselinesWithFrame(const AcidDlgState *st, int test)
 	return out;
 }
 
-// Our frame with each baseline's stacked under it, at the largest whole
-// scale that fits - or shrunk to fit when there are too many for 1:1.
+std::vector<ShotSource> ShotSources(const AcidDlgState *st, int test)
+{
+	std::vector<ShotSource> out;
+	if (test < 0 || test >= (int)st->tests.size()) return out;
+	if (!st->results[test].shot.empty()) out.push_back({ -1, "ours" });
+	for (size_t b : BaselinesWithFrame(st, test))
+		out.push_back({ (int)b, st->baselines[b].name });
+	return out;
+}
+
+// Where shot_src sits in that list, 0 when it is not in it any more.
+size_t ShotPos(const std::vector<ShotSource> &src, int want)
+{
+	for (size_t i = 0; i < src.size(); ++i)
+		if (src[i].id == want) return i;
+	return 0;
+}
+
+bool LoadShotFrame(const AcidDlgState *st, int test, const ShotSource &src,
+                   std::vector<uint8_t> &out)
+{
+	if (src.id < 0)
+	{
+		out = st->results[test].shot;
+		return !out.empty();
+	}
+	return AcidTests::LoadBaselineFrame(st->baselines[src.id], st->tests[test],
+	                                    out);
+}
+
+// Step the pane to another frame of the same test.
+void StepShot(AcidDlgState *st, int delta)
+{
+	const std::vector<ShotSource> src = ShotSources(st, st->shown);
+	if (src.size() < 2) return;
+	size_t pos = ShotPos(src, st->shot_src);
+	pos = (pos + src.size() + delta) % src.size();
+	st->shot_src = src[pos].id;
+	InvalidateRect(st->hShot, NULL, TRUE);
+	UpdateShotCaption(st);
+}
+
+// One frame at a time, named above it, with < and > stepping between them.
+// Flipping beats stacking for this: the frames land on the same pixels, so
+// a difference blinks out at you rather than having to be hunted for.
 void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
 {
 	RECT rc = dis->rcItem;
 	FillRect(dis->hDC, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+	SetBkMode(dis->hDC, TRANSPARENT);
 
-	std::vector<std::vector<uint8_t>> frames;
-	if (const std::vector<uint8_t> *ours = ShotOf(st, st->shown))
-		frames.push_back(*ours);
-	for (size_t b : BaselinesWithFrame(st, st->shown))
+	const std::vector<ShotSource> src = ShotSources(st, st->shown);
+	std::vector<uint8_t> frame;
+	const size_t pos = ShotPos(src, st->shot_src);
+	if (src.empty() || !LoadShotFrame(st, st->shown, src[pos], frame))
 	{
-		std::vector<uint8_t> ref;
-		if (AcidTests::LoadBaselineFrame(st->baselines[b], st->tests[st->shown], ref))
-			frames.push_back(std::move(ref));
-	}
-	if (frames.empty())
-	{
-		SetBkMode(dis->hDC, TRANSPARENT);
 		SetTextColor(dis->hDC, RGB(140, 140, 140));
 		DrawText(dis->hDC, TEXT("No screenshot"), -1, &rc,
 		         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 		return;
 	}
 
-	const int gap = 4, n = (int)frames.size();
-	const int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
-	const int availh = ch - gap * (n - 1);
-	int w, h;
-	// Not std::min: windows.h has already made min a macro.
-	int scale = cw / AcidTests::kShotWidth;
-	const int vscale = availh / (AcidTests::kShotHeight * n);
-	if (vscale < scale) scale = vscale;
-	if (scale >= 1)
-	{
-		w = AcidTests::kShotWidth * scale;
-		h = AcidTests::kShotHeight * scale;
-	}
-	else
-	{
-		// Too many for 1:1 - fit them rather than clip the last ones away.
-		h = availh / n;
-		if (h < 1) h = 1;
-		w = AcidTests::kShotWidth * h / AcidTests::kShotHeight;
-		if (w > cw)
-		{
-			w = cw;
-			h = AcidTests::kShotHeight * w / AcidTests::kShotWidth;
-		}
-	}
+	HFONT font = (HFONT)SendMessage(st->hDlg, WM_GETFONT, 0, 0);
+	HGDIOBJ old = font ? SelectObject(dis->hDC, font) : NULL;
+	const int line = 14;
 
-	const int x = rc.left + (cw - w) / 2;
-	int y = rc.top + (ch - (h * n + gap * (n - 1))) / 2;
-	for (const std::vector<uint8_t> &f : frames)
+	// Named on the image itself, using the same word as the column header,
+	// so which frame this is never has to be worked out from the order.
+	RECT hr = { rc.left + 2, rc.top + 2, rc.right - 2, rc.top + 2 + line };
+	SetTextColor(dis->hDC, RGB(230, 230, 230));
+	Utf8ToWide whead(src[pos].label.c_str());
+	DrawText(dis->hDC, whead, -1, &hr, DT_CENTER | DT_SINGLELINE);
+
+	if (src.size() > 1)
 	{
-		BlitShot(dis->hDC, f, x, y, w, h);
-		y += h + gap;
+		char pos_text[32];
+		snprintf(pos_text, sizeof pos_text, "%d / %d", (int)pos + 1,
+		         (int)src.size());
+		RECT pr = { rc.left + 2, rc.bottom - 2 - line, rc.right - 2, rc.bottom - 2 };
+		SetTextColor(dis->hDC, RGB(150, 150, 150));
+		Utf8ToWide wpos(pos_text);
+		DrawText(dis->hDC, wpos, -1, &pr, DT_CENTER | DT_SINGLELINE);
 	}
+	if (old) SelectObject(dis->hDC, old);
+
+	const int top = rc.top + line + 4, bot = rc.bottom - line - 4;
+	const int cw = rc.right - rc.left, ch = bot - top;
+	int scale = cw / AcidTests::kShotWidth;
+	const int vscale = ch / AcidTests::kShotHeight;
+	if (vscale < scale) scale = vscale;   // not std::min: windows.h took it
+	if (scale < 1) scale = 1;
+	const int w = AcidTests::kShotWidth * scale;
+	const int h = AcidTests::kShotHeight * scale;
+	BlitShot(dis->hDC, frame, rc.left + (cw - w) / 2, top + (ch - h) / 2, w, h);
 }
 
 /*--------------------------------------------------------------------------
@@ -1238,6 +1295,21 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		{
 			AcidDlgState *st = GetState(hDlg);
 			if (st && !st->running) BaselineMenu(st);
+			return TRUE;
+		}
+		case IDC_ACID_SHOTPREV:
+		case IDC_ACID_SHOTNEXT:
+		{
+			AcidDlgState *st = GetState(hDlg);
+			if (st) StepShot(st, LOWORD(wParam) == IDC_ACID_SHOTNEXT ? 1 : -1);
+			return TRUE;
+		}
+		case IDC_ACID_SHOT:
+		{
+			// Clicking the frame steps on, which is the quickest way to
+			// blink one against the next.
+			AcidDlgState *st = GetState(hDlg);
+			if (st && HIWORD(wParam) == STN_CLICKED) StepShot(st, 1);
 			return TRUE;
 		}
 		case IDC_ACID_CLEAR:

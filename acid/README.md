@@ -102,10 +102,12 @@ or rescans the folder. Each baseline's column reads:
 | `n/a` | the test defines no reference at all, so none is expected |
 | `-` | not run yet, so there is no frame of ours to compare |
 
-The preview pane stacks our frame over each baseline's, and
-the Show filter grows entries for what differs from or is missing from any
-of them. Comparison uses the same rule as a pass: grayscale, 50/255 per
-pixel.
+The preview pane shows one frame at a time — ours, then each baseline that
+has one — named on the image and stepped with `<`, `>` or a click on the
+frame. They land on the same pixels, so flipping makes a difference blink
+out rather than having to be hunted for between two smaller images. The Show
+filter grows entries for what differs from or is missing from any baseline.
+Comparison uses the same rule as a pass: grayscale, 50/255 per pixel.
 
 Saving into a folder that already holds frames asks first, naming how many
 would be replaced and who wrote the index it is about to overwrite. Saving

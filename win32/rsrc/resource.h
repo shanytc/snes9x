@@ -726,6 +726,11 @@
 #define IDC_ACID_PROGRESS               3369
 #define IDC_ACID_STATUS                 3370
 #define IDC_ACID_RUN                    3371
+#define IDC_ACID_THREADS                3372
+#define IDC_ACID_THREADS_LABEL          3373
+#define IDC_ACID_PAUSE                  3374
+#define IDC_ACID_SHOT                   3375
+#define IDC_ACID_SHOTCAP                3376
 
 #define ID_DEBUG_VRAM_VIEWER            40200
 #define ID_DEBUG_TILEMAP_VIEWER         40201
@@ -902,7 +907,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        190
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3372
+#define _APS_NEXT_CONTROL_VALUE         3377
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

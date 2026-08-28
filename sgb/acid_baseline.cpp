@@ -106,6 +106,21 @@ std::string DerivedName(const std::string &name)
 	return s + ".png";
 }
 
+// Is there a frame at this path? The IHDR answers it, which beats decoding
+// a PNG only to ask whether it was there.
+bool PngIsShot(const std::string &path)
+{
+	FILE *f = fopen(path.c_str(), "rb");
+	if (!f) return false;
+	unsigned char h[24];
+	const bool got = fread(h, 1, sizeof h, f) == sizeof h;
+	fclose(f);
+	if (!got || std::memcmp(h, "\x89PNG\r\n\x1a\n", 8) != 0) return false;
+	const int w = (h[16] << 24) | (h[17] << 16) | (h[18] << 8) | h[19];
+	const int y = (h[20] << 24) | (h[21] << 16) | (h[22] << 8) | h[23];
+	return w == kShotWidth && y == kShotHeight;
+}
+
 // One 160x144 RGB frame off disk.
 bool LoadPng(const std::string &path, std::vector<uint8_t> &rgb)
 {
@@ -255,13 +270,22 @@ Match CompareToBaseline(const Baseline &b, const Test &t,
 {
 	diff_px = 0;
 	if (b.dir.empty()) return Match::None;
-	std::vector<uint8_t> ref;
-	int best = -1;
 	// A test with no reference of its own is informational: nothing is
 	// expected here, as opposed to something being absent.
+	const bool none = t.pass_images.empty();
+	// Nothing of ours to diff yet, so whether the baseline holds a frame is
+	// the whole answer - and that is a header read, not a decode. Before a
+	// run that is every cell in the table.
+	if (shot.empty())
+	{
+		for (const std::string &rel : b.CandidatesFor(t))
+			if (PngIsShot(Join(b.dir, rel))) return Match::NoFrame;
+		return none ? Match::NoRef : Match::NoImage;
+	}
+	std::vector<uint8_t> ref;
+	int best = -1;
 	if (!LoadBaselineFrame(b, t, ref, &shot, &best))
-		return t.pass_images.empty() ? Match::NoRef : Match::NoImage;
-	if (shot.empty()) return Match::NoFrame;
+		return none ? Match::NoRef : Match::NoImage;
 	if (best < 0) return Match::NoImage;
 	diff_px = best;
 	return best ? Match::Differs : Match::Same;

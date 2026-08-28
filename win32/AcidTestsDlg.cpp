@@ -9,6 +9,10 @@
 // The filter bar narrows the list the way the shootout's --test/--model
 // flags do, plus a by-result filter for re-running failures; Run covers
 // whatever is shown, and Export writes that same set as .txt/.json/.html.
+//
+// Diffing every test against every baseline is thousands of files, so it
+// runs on its own thread behind the progress bar: the dialog is up and
+// usable first, and the baseline columns arrive when they are ready.
 
 #include <windows.h>
 #include <commctrl.h>
@@ -19,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "AcidTestsDlg.h"
@@ -47,6 +52,18 @@ constexpr int kShowMissing = 6;
 
 // Fixed list columns; one per baseline follows, then Detail last.
 enum { kColNum, kColTest, kColModel, kColResult, kColBaseline };
+
+// Posted by the baseline scan thread: how far it has got, then the tables.
+constexpr UINT WM_ACID_SCANPROG = WM_APP + 20;
+constexpr UINT WM_ACID_SCANDONE = WM_APP + 21;
+
+// One scan's output. Built on the worker, adopted by the dialog thread.
+struct ScanResult
+{
+	std::vector<AcidTests::Baseline>           baselines;
+	std::vector<std::vector<AcidTests::Match>> match;
+	std::vector<std::vector<int>>              diff_px;
+};
 
 struct AcidDlgState
 {
@@ -82,6 +99,16 @@ struct AcidDlgState
 	bool cancelled = false;
 	bool close_when_done = false;   // Close pressed mid-run
 	std::atomic<bool> paused{false};
+
+	// The baseline scan. It reads tests and captured frames and writes only
+	// its own tables, so it needs no lock - a run, the one thing that
+	// rewrites those, cannot start while it is going.
+	std::thread       scan_thread;
+	std::atomic<bool> scan_abort{false};
+	bool        scanning = false;
+	bool        scan_announce = false;   // Rescan says what it found
+	std::string scan_status;             // status line to restore afterwards
+
 	int  threads   = 1;
 	int  in_flight = 0;   // tests currently held by a worker
 	int  shown     = -1;  // test the preview pane is showing
@@ -167,7 +194,7 @@ bool HaveBaseline(const AcidDlgState *st)
 // SKIP.
 bool CanExport(const AcidDlgState *st)
 {
-	if (st->running || st->rows.empty()) return false;
+	if (st->running || st->scanning || st->rows.empty()) return false;
 	for (int i : st->rows)
 		if (!HasResult(st, i)) return false;
 	return true;
@@ -367,7 +394,7 @@ void UpdateShotCaption(AcidDlgState *st);
 void SelectShot(AcidDlgState *st, int test);
 void UpdateShotNav(AcidDlgState *st);
 std::vector<size_t> BaselinesWithFrame(const AcidDlgState *st, int test);
-void RescanBaselines(AcidDlgState *st, bool quiet);
+void StartScan(AcidDlgState *st, bool announce);
 
 // Recompute which tests are listed and rebuild the view around them.
 void ApplyFilter(AcidDlgState *st)
@@ -387,7 +414,8 @@ void ApplyFilter(AcidDlgState *st)
 	const bool filtered = st->rows.size() != st->tests.size();
 	SetCtrlText(GetDlgItem(st->hDlg, IDC_ACID_RUN),
 	            filtered ? "&Run Shown" : "&Run All");
-	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_RUN), !st->rows.empty());
+	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_RUN),
+	             !st->rows.empty() && !st->scanning);
 	// Filtering can bring un-run tests into view, which takes it away again.
 	UpdateExportButton(st);
 
@@ -951,23 +979,84 @@ void SaveBaseline(AcidDlgState *st)
 	SetCtrlText(st->hStat, buf);
 	MessageBox(st->hDlg, TEXT("Test baseline saved!"), TEXT("Save baseline"),
 	           MB_OK | MB_ICONINFORMATION);
-	// Saved under acid/baseline? Then it is a column now.
-	RescanBaselines(st, true);
-	SetCtrlText(st->hStat, buf);
-}
-
-void RecomputeAllMatches(AcidDlgState *st)
-{
-	for (size_t i = 0; i < st->tests.size(); ++i) RecomputeMatch(st, (int)i);
+	// Saved under acid/baseline? Then it is a column now. The scan puts this
+	// line back when it lands.
+	st->scan_status = buf;
+	StartScan(st, false);
 }
 
 void RebuildColumns(AcidDlgState *st);
 
-// Pick up whatever is in acid/baseline/ now, rebuild the columns and
-// re-diff against the new set.
-void RescanBaselines(AcidDlgState *st, bool quiet)
+/*--------------------------------------------------------------------------
+  The baseline scan
+--------------------------------------------------------------------------*/
+
+// Diff every test against every folder under acid/baseline/. Twenty of them
+// over 264 tests is thousands of files - about a second - which is why this
+// is not on the message thread.
+void ScanThread(AcidDlgState *st, ScanResult *out)
 {
-	st->baselines = AcidTests::DiscoverBaselines(st->acid_dir.c_str());
+	out->baselines = AcidTests::DiscoverBaselines(st->acid_dir.c_str());
+	const size_t n = st->tests.size(), nb = out->baselines.size();
+	out->match.assign(n, std::vector<AcidTests::Match>(nb, AcidTests::Match::None));
+	out->diff_px.assign(n, std::vector<int>(nb, 0));
+	for (size_t i = 0; i < n; ++i)
+	{
+		if (st->scan_abort.load()) break;
+		for (size_t b = 0; b < nb; ++b)
+			out->match[i][b] = AcidTests::CompareToBaseline(
+				out->baselines[b], st->tests[i], st->results[i].shot,
+				out->diff_px[i][b]);
+		if ((i & 15) == 15)
+			PostMessage(st->hDlg, WM_ACID_SCANPROG, (WPARAM)(i + 1), 0);
+	}
+	// Aborted means the dialog is closing and will never read this.
+	if (st->scan_abort.load()) { delete out; return; }
+	PostMessage(st->hDlg, WM_ACID_SCANDONE, 0, (LPARAM)out);
+}
+
+// Kick one off. The buttons that would move the ground under it wait.
+void StartScan(AcidDlgState *st, bool announce)
+{
+	if (st->running || st->scanning) return;
+	if (st->scan_thread.joinable()) st->scan_thread.join();
+	st->scanning      = true;
+	st->scan_announce = announce;
+	st->scan_abort.store(false);
+	const int off[] = { IDC_ACID_RUN, IDC_ACID_SAVEBASE, IDC_ACID_RESCAN,
+	                    IDC_ACID_DIAG };
+	for (int id : off) EnableWindow(GetDlgItem(st->hDlg, id), FALSE);
+	UpdateExportButton(st);
+	SendMessage(st->hProg, PBM_SETRANGE32, 0, (LPARAM)st->tests.size());
+	SendMessage(st->hProg, PBM_SETPOS, 0, 0);
+	SetCtrlText(st->hStat, "Scanning baselines...");
+	st->scan_thread = std::thread(ScanThread, st, new ScanResult);
+}
+
+// The worker is gone before the state it reads is.
+void StopScan(AcidDlgState *st)
+{
+	if (!st->scan_thread.joinable()) return;
+	st->scan_abort.store(true);
+	st->scan_thread.join();
+	// It may have posted the result just before it saw the flag.
+	MSG msg;
+	while (PeekMessage(&msg, st->hDlg, WM_ACID_SCANDONE, WM_ACID_SCANDONE,
+	                   PM_REMOVE))
+		delete (ScanResult *)msg.lParam;
+}
+
+// Swap the finished tables in and redraw around them - all of that on this
+// thread, where the windows live.
+void ScanDone(AcidDlgState *st, ScanResult *res)
+{
+	st->baselines.swap(res->baselines);
+	st->match.swap(res->match);
+	st->diff_px.swap(res->diff_px);
+	delete res;
+	if (st->scan_thread.joinable()) st->scan_thread.join();
+	st->scanning = false;
+
 	if (!HaveBaseline(st))
 	{
 		// Those two only make sense while a baseline does; left set they
@@ -976,14 +1065,24 @@ void RescanBaselines(AcidDlgState *st, bool quiet)
 		st->show_on[kShowMissing] = 0;
 	}
 	RebuildColumns(st);
-	RecomputeAllMatches(st);
-	ApplyFilter(st);
+	ApplyFilter(st);        // re-enables Run and Export
 	InvalidateRect(st->hShot, NULL, TRUE);
 	UpdateShotCaption(st);
-	if (quiet) return;
+	const int on[] = { IDC_ACID_SAVEBASE, IDC_ACID_RESCAN, IDC_ACID_DIAG };
+	for (int id : on) EnableWindow(GetDlgItem(st->hDlg, id), TRUE);
+	SendMessage(st->hProg, PBM_SETPOS, 0, 0);
+
+	// Whatever asked for the scan has the last word on the status line.
+	if (!st->scan_status.empty())
+	{
+		SetCtrlText(st->hStat, st->scan_status.c_str());
+		st->scan_status.clear();
+		return;
+	}
+	if (!st->scan_announce) return;
 
 	// Just what was found - one line cannot hold a tally for twenty of
-	// them, so those live in the Baseline menu instead.
+	// them, so those live in the Diagnosis dialog instead.
 	if (!HaveBaseline(st))
 	{
 		SetCtrlText(st->hStat, ("No baselines in " +
@@ -1308,14 +1407,39 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		st->model_on.assign(3, 0);
 		st->show_on.assign(kShowCount, 0);
 
-		// Builds the columns and applies the filter as a side effect.
-		RescanBaselines(st, true);
-		if (!loaded)
+		// The list first, so the dialog comes up with it filled in; the
+		// baselines are a thread's worth of work behind it.
+		RebuildColumns(st);
+		ApplyFilter(st);
+		if (loaded)
+			StartScan(st, false);
+		else
 		{
 			SetCtrlText(st->hStat, ("Cannot load manifest: " + err).c_str());
 			EnableWindow(GetDlgItem(hDlg, IDC_ACID_RUN), FALSE);
 			EnableFilterBar(st, FALSE);
 		}
+		return TRUE;
+	}
+
+	case WM_ACID_SCANPROG:
+	{
+		AcidDlgState *st = GetState(hDlg);
+		if (!st || !st->scanning) return TRUE;
+		SendMessage(st->hProg, PBM_SETPOS, wParam, 0);
+		char buf[96];
+		snprintf(buf, sizeof buf, "Scanning baselines... %d/%d",
+		         (int)wParam, (int)st->tests.size());
+		SetCtrlText(st->hStat, buf);
+		return TRUE;
+	}
+
+	case WM_ACID_SCANDONE:
+	{
+		AcidDlgState *st = GetState(hDlg);
+		ScanResult *res = (ScanResult *)lParam;
+		if (st && st->scanning) ScanDone(st, res);
+		else                    delete res;
 		return TRUE;
 	}
 
@@ -1428,7 +1552,7 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		case IDC_ACID_RESCAN:
 		{
 			AcidDlgState *st = GetState(hDlg);
-			if (st && !st->running) RescanBaselines(st, false);
+			if (st) StartScan(st, true);
 			return TRUE;
 		}
 		case IDC_ACID_DIAG:
@@ -1517,6 +1641,7 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 	{
 		AcidDlgState *st = GetState(hDlg);
 		SetWindowLongPtr(hDlg, DWLP_USER, 0);
+		if (st) StopScan(st);   // it reads the state, so it goes first
 		delete st;
 		return TRUE;
 	}

@@ -127,6 +127,12 @@ than thousands of requests. 19 emulators, 4439 frames, 4.1 MB.
     python fetch_baselines.py                   # all of them
     python fetch_baselines.py --only sameboy --only bgb
 
+Those folders are **not** tracked — one command re-creates all of them, so
+`.gitignore` keeps everything under `baseline/` out of the repository except
+`default/` (the suite's own reference screens, which decide pass and fail)
+and `supersnes9x/` (ours, the regression baseline). Run the script once
+after cloning to get the comparison columns back.
+
 Frames are filed under the test's own name rather than the manifest's
 `pass_images`, because two tests can share one of those — `bully.gb` on DMG
 and on GBC both point at `ashiepaws/bully.png` — and one frame would

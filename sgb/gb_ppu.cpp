@@ -1848,6 +1848,11 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				}
 				RelatchLyc(p, mem);
 			}
+			// The WY latch clears at frame start, not at vblank entry:
+			// LY already reads 0 for the last 452 dots of line 153, so a
+			// window armed by a write in that gap must not reach line 0
+			// (SameBoy clears it at current_line = 0).
+			if (p.mode == PpuMode::OamScan) p.wy_triggered = false;
 			transitioned = true;
 		}
 		break;
@@ -2075,6 +2080,16 @@ uint8_t PpuReadReg(const Ppu &p, uint16_t addr)
 	return 0xFF;
 }
 
+// The WY comparator is not a mode-2-only event: hardware re-runs it after
+// every LCDC and WY write, so enabling the window mid-line on the WY line
+// still arms it (SameBoy wy_check_scheduled). Toy Story's pause banner turns
+// LCDC.5 on from a LY=WY raster interrupt, long past mode 2.
+inline void WyRecheck(Ppu &p)
+{
+	if ((p.lcdc & 0x80) && (p.lcdc & 0x20) && p.ly == p.wy)
+		p.wy_triggered = true;
+}
+
 void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 {
 	switch (addr)
@@ -2111,6 +2126,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.present_hold = p.hold_present_on_enable;
 			}
 			if (is_on) RecomputeStatLine(p, mem);
+			WyRecheck(p);
 			break;
 		}
 		case 0xFF41:
@@ -2273,7 +2289,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			else
 				p.obp1 = value;
 			break;
-		case 0xFF4A: p.wy = value;   break;
+		case 0xFF4A: p.wy = value; WyRecheck(p); break;
 		case 0xFF4B:
 			p.wx = value; p.wx_write_cooldown = 1; break;
 	}

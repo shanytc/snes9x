@@ -8,9 +8,12 @@
 #define _SGB_GB_OPS_H_
 
 #include <cstdint>
+#include <cstdlib>
 
 #include "gb_cpu.h"
 #include "gb_memory.h"
+#include "gb_knob.h"
+#include "gb_ppu.h"
 
 namespace SGB {
 
@@ -23,10 +26,83 @@ void Dispatch(CpuState &s, Memory &mem, uint8_t op);
 // CB-prefixed opcodes live in gb_ops_cb.cpp (P1c).
 void DispatchCB(CpuState &s, Memory &mem, uint8_t op);
 
+// M-cycle plumbing. Every bus access costs one machine cycle (4 T); the
+// world (timer/PPU/APU) advances through that cycle BEFORE the access, so
+// reads and writes observe hardware state at their exact position within
+// the instruction. TickM alone models an internal (no-bus) machine cycle.
+inline void TickM(CpuState &s, Memory &mem)
+{
+	s.t_cycles += 4;
+	MemTick(mem, 4);
+}
+
+inline uint8_t BusRead(CpuState &s, Memory &mem, uint16_t addr)
+{
+	TickM(s, mem);
+	return MemRead(mem, addr);
+}
+
+inline void BusWrite(CpuState &s, Memory &mem, uint16_t addr, uint8_t v)
+{
+	// PPU/timer register writes land mid-machine-cycle on hardware: the new
+	// value takes hold partway through the cycle's 4 dots (mealybug m3_*
+	// write races). Everything else keeps the tick-then-access convention
+	// the rest of the core is calibrated against.
+	const bool disp_reg = (addr >= 0xFF40 && addr <= 0xFF4B) ||
+	                      (addr >= 0xFF68 && addr <= 0xFF6B);
+	const bool ppu_reg = disp_reg || addr == 0xFF07 || addr == 0xFF02;
+	if (ppu_reg)
+	{
+		// WX latches late in the write cycle (SameBoy GB_CONFLICT_WX_DMG
+		// lands after the comparator has seen the old value one extra dot).
+		// CGB hardware uses its own conflict map: palette writes land at a
+		// different dot than on DMG even in compatibility mode.
+		static const int wph = AcidKnob("ACID_WPH", 3);
+		static const int cpph = AcidKnob("ACID_CPPH", 4);
+		int phase = (addr == 0xFF4B) ? wph : 1;
+		if (mem.cgb_hw && addr >= 0xFF47 && addr <= 0xFF49)
+			phase = cpph;
+		static const int cscy = AcidKnob("ACID_CSCY", 1);
+		if (mem.cgb_hw && (addr == 0xFF42 || addr == 0xFF43))
+			phase = cscy;
+		// Changing LCDC.4 on CGB re-steers the tile-data address mid-fetch:
+		// a read landing a couple of dots later picks the tile number off
+		// the bus instead of the row (SameBoy tile_sel_glitch).
+		static const int tsg = AcidKnob("ACID_TSG", 2);
+		const bool sel_glitch = mem.cgb_hw && addr == 0xFF40 && tsg >= 0 &&
+		                        ((mem.ppu->lcdc ^ v) & 0x10) != 0;
+		s.t_cycles += 4;
+		if (sel_glitch)
+		{
+			// Same four dots as any other write; the glitch just marks one
+			// of them, so the cycle still costs exactly what it should.
+			for (int d = 0; d < 4; ++d)
+			{
+				if (d == phase) MemWrite(mem, addr, v);
+				mem.ppu->tile_sel_glitch =
+					static_cast<uint8_t>(d == phase + tsg ? 1 : 0);
+				MemTick(mem, 1, d < phase);
+			}
+			mem.ppu->tile_sel_glitch = 0;
+		}
+		else
+		{
+			MemTick(mem, phase);
+			MemWrite(mem, addr, v);
+			MemTick(mem, 4 - phase, false);
+		}
+	}
+	else
+	{
+		TickM(s, mem);
+		MemWrite(mem, addr, v);
+	}
+}
+
 // Fetch helpers — post-increment PC.
 inline uint8_t Fetch8(CpuState &s, Memory &mem)
 {
-	uint8_t b = MemRead(mem, s.r.pc);
+	uint8_t b = BusRead(s, mem, s.r.pc);
 	s.r.pc++;
 	return b;
 }
@@ -38,17 +114,24 @@ inline uint16_t Fetch16(CpuState &s, Memory &mem)
 	return static_cast<uint16_t>(lo | (hi << 8));
 }
 
+// PUSH schedule: one internal SP-adjust cycle, then high byte, then low.
 inline void Push16(CpuState &s, Memory &mem, uint16_t v)
 {
-	s.r.sp -= 2;
-	MemWrite16(mem, s.r.sp, v);
+	TickM(s, mem);
+	MemOamBugIncDec(mem, s.r.sp);
+	s.r.sp--;
+	BusWrite(s, mem, s.r.sp, static_cast<uint8_t>(v >> 8));
+	s.r.sp--;
+	BusWrite(s, mem, s.r.sp, static_cast<uint8_t>(v & 0xFF));
 }
 
 inline uint16_t Pop16(CpuState &s, Memory &mem)
 {
-	uint16_t v = MemRead16(mem, s.r.sp);
-	s.r.sp += 2;
-	return v;
+	uint16_t lo = BusRead(s, mem, s.r.sp);
+	s.r.sp++;
+	uint16_t hi = BusRead(s, mem, s.r.sp);
+	s.r.sp++;
+	return static_cast<uint16_t>(lo | (hi << 8));
 }
 
 // Flag helpers. GB F layout: Z N H C 0 0 0 0.

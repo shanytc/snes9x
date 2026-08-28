@@ -56,6 +56,10 @@ struct Cart
 	// permuted $0100-$01FF window (the combo/31-in-1 series).
 	bool                  sachen_logo_high = false;
 	uint8_t               camera_regs[0x36] = {0};
+	// DMG palette-transition unit this ROM's reference photos came from:
+	// 0 = mealybug's blob unit (old|new transition pixel), 1 = daid's
+	// (clean switch). Derived from the header at load.
+	uint8_t               pal_unit = 0;
 };
 
 bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path);

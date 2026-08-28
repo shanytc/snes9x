@@ -90,6 +90,12 @@ public:
 
 	bool IsCgb() const;
 
+	// True when the CGB color render path is active (false in the CGB's
+	// DMG-compatibility mode, where output is 2-bit shades). CgbColorFB
+	// is the raw 160x144 BGR555 frame it produces.
+	bool IsCgbRender() const;
+	const uint16_t *CgbColorFB() const;
+
 	// Debug viewer accessors — side-effect-free reads of live PPU state.
 	const uint8_t  *DebugVRAM() const;       // 0x4000: bank0 [0..0x1FFF], bank1 [0x2000..]
 	const uint8_t  *DebugOAM() const;        // 0xA0
@@ -98,6 +104,12 @@ public:
 	const uint16_t *DebugSgbActivePalettes() const;  // 16 (4 palettes x 4 colors)
 	const uint8_t  *DebugSgbAttrMap() const; // SGB_TILES (360)
 	void            DebugGetPpuRegs(uint8_t out[12]) const;
+
+	// Serial-out tap: fires when the CPU starts a transfer, with whatever
+	// is in SB at that moment. Per instance, so parallel cores each
+	// capture their own output. nullptr disables.
+	void SetSerialSink(void (*fn)(void *user, uint8_t byte), void *user);
+
 
 	// Live-frame layer visibility (0=BG, 1=window, 2=OBJ). Display-only.
 	void SetLayerEnabled(int layer, bool enabled);
@@ -145,6 +157,12 @@ public:
 
 	void SetRunMode(RunMode m);
 	RunMode GetRunMode() const;
+
+	// Hardware-model override for the next LoadROM: 0 = follow the cart
+	// header's CGB flag (default), 1 = force DMG, 2 = force CGB (a non-CGB
+	// cart then runs in the CGB's DMG-compatibility mode). Acid-test runner
+	// knob; not persisted.
+	void SetForceModel(uint8_t m);
 
 	// Advance the GB core by one whole video frame (ends at VBlank entry).
 	void RunFrame();
@@ -249,6 +267,24 @@ private:
 // Global singleton — snes9x keeps one active SGB core.
 Emulator &Instance();
 
+// The emulator whose frame is currently being run on this thread: the
+// singleton unless a ScopedActiveEmulator says otherwise. The core's host
+// hooks (scanline capture, HBlank/VBlank, JOYSER writes) route through it.
+Emulator &ActiveEmulator();
+
+// Binds ActiveEmulator() for the current thread. Parallel test runners
+// wrap each RunFrame so a worker core never reaches into the singleton.
+class ScopedActiveEmulator
+{
+public:
+	explicit ScopedActiveEmulator(Emulator &e);
+	~ScopedActiveEmulator();
+	ScopedActiveEmulator(const ScopedActiveEmulator &) = delete;
+	ScopedActiveEmulator &operator=(const ScopedActiveEmulator &) = delete;
+private:
+	Emulator *prev_;
+};
+
 } // namespace SGB
 
 // C-style facade used by snes9x integration code (matches S9x* naming).
@@ -345,6 +381,9 @@ void S9xSGBApplyAutoBlend(void);
 
 // True when the loaded cart runs in Game Boy Color mode (color output).
 bool S9xSGBIsCgb(void);
+// See Emulator::IsCgbRender / CgbColorFB.
+bool S9xSGBIsCgbRender(void);
+const uint16_t *S9xSGBGetCgbColorFB(void);
 
 // ---- Debug viewer accessors (GB/GBC/SGB tile/tilemap/sprite viewers) --------
 struct SgbPpuRegs
@@ -440,6 +479,8 @@ int32_t S9xSGBGetAudioCpsRemainderStep(void);
 // registers until the next Reset).
 void    S9xSGBSetRunMode(uint8_t mode /* 0=DMG, 1=SGB1, 2=SGB2 */);
 void    S9xSGBSetClockMultiplier(float mul);
+// See Emulator::SetForceModel — 0=auto, 1=force DMG, 2=force CGB.
+void    S9xSGBSetForceModel(unsigned char m);
 
 // Save-state bridge — snapshot.cpp branches on Settings.SuperGameBoy
 // and writes/reads the SGB state directly to/from the save file.

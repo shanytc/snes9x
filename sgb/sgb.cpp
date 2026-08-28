@@ -106,7 +106,7 @@ struct Emulator::Impl
 	// accumulated extra T-cycle budget from double-speed dots; it must
 	// persist across RunCycles calls — re-deriving it from
 	// cpu.t_cycles - ppu.t_cycles each call forgives whatever lag
-	// (≤ kMaxOpcodeTCycles) the CPU ended the previous call with, which
+	// (<= kMaxOpcodeTCycles) the CPU ended the previous call with, which
 	// bleeds ~2% of CPU throughput in double-speed and desyncs
 	// cycle-counted raster loops (Demotronic's mid-scanline SCY waves).
 	// -1 = re-derive at next RunCycles (fresh reset / savestate load).
@@ -116,6 +116,14 @@ struct Emulator::Impl
 	int64_t     ds_extra   = -1;
 	int32_t     apu_ds_rem = 0;
 	double      drc_integ  = 0.0;
+
+	// RunCycles absolute cycle credit (see the loop comment) — lets an
+	// instruction's overshoot carry into the next call. Reset to the
+	// PPU clock on Reset/StateLoad.
+	int64_t     run_target = 0;
+
+	// Last P1 select bits seen by the BIOS-less MLT_REQ rotation edge.
+	uint8_t     mlt_prev_sel = 0x30;
 
 	// 256×224 composite staging buffer — heap-resident to keep a
 	// ~112 KB allocation off the stack of whatever thread drives
@@ -127,6 +135,15 @@ struct Emulator::Impl
 	bool        has_rom   = false;
 	bool        cgb_mode  = false;
 	float       clock_mul = 1.0f;
+
+	// Hardware-model override for the acid-test runner: 0 = follow the
+	// cart header, 1 = force DMG, 2 = force CGB, 3 = authentic BIOS-less
+	// SGB (SGB command processing active). Applied at LoadROM.
+	// cgb_compat marks a forced-CGB run of a non-CGB cart (real CGB's
+	// "DMG compatibility mode": A=$11 handoff, DMG rendering).
+	uint8_t     force_model = 0;
+	bool        cgb_compat  = false;
+	bool        sgb_authentic = false;
 
 	// Staged GB-side boot ROM. Copied into mem.boot_rom on Reset when
 	// boot_rom_loaded is true (authentic BIOS mode only). Staging is kept
@@ -352,7 +369,7 @@ struct Emulator::Impl
 // forward into the singleton Emulator's Impl.
 static void SgbCommandTrampoline(uint8_t cmd, const uint8_t *data, uint32_t len)
 {
-	Instance().OnSgbCommandInternal(cmd, data, len);
+	ActiveEmulator().OnSgbCommandInternal(cmd, data, len);
 }
 
 Emulator::Emulator() : impl_(new Impl) {}
@@ -433,6 +450,12 @@ void Emulator::Reset()
 	impl_->cpu.Reset();
 	MemReset(impl_->mem, impl_->cgb_mode && !Settings.SGB_BIOSModeActive);
 	PpuReset(impl_->ppu);
+	// A DMG LCD-enable write takes hold three dots into its machine cycle,
+	// so a BIOS-less start has to swallow that much to land on the same dot
+	// grid; the CGB write is cycle-aligned and needs none. Resolved here,
+	// where the model is settled - leaving it to the first dot made it
+	// depend on when that dot happened to run.
+	if (impl_->mem.cgb_hw) impl_->ppu.boot_skew = 0;
 	ApuReset(impl_->apu, impl_->cgb_mode && !Settings.SGB_BIOSModeActive, !impl_->boot_rom_loaded);
 	TimerReset(impl_->timer);
 	JoypadReset(impl_->joypad);
@@ -446,6 +469,7 @@ void Emulator::Reset()
 	impl_->handoff_frames        = 0;
 	impl_->ds_extra              = -1;
 	impl_->apu_ds_rem            = 0;
+	impl_->run_target            = 0;
 	impl_->drc_integ             = DrcSteadyStateCorr(impl_->cgb_mode, impl_->run_mode);
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
 	// 4-bank LCD ring starts at $00 (matches Mesen2 SuperGameboy::Reset).
@@ -483,7 +507,7 @@ void Emulator::Reset()
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
-	impl_->ppu.cgb = impl_->cgb_mode && !Settings.SGB_BIOSModeActive;
+	impl_->ppu.cgb = impl_->cgb_mode && !impl_->cgb_compat && !Settings.SGB_BIOSModeActive;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -515,12 +539,64 @@ void Emulator::Reset()
 
 	// CGB hands the cart A=0x11 (the value games test to detect Color
 	// hardware). Applied after the run-mode block so it wins for CGB carts.
+	// DMG-compat mode (non-CGB cart forced onto CGB hardware) hands off
+	// DE=$0008 HL=$007C instead (Pan Docs power-up sequence).
 	if (impl_->cgb_mode && !impl_->boot_rom_loaded)
 	{
 		cs.r.af = 0x1180;
 		cs.r.bc = 0x0000;
-		cs.r.de = 0xFF56;
-		cs.r.hl = 0x000D;
+		cs.r.de = impl_->cgb_compat ? 0x0008 : 0xFF56;
+		cs.r.hl = impl_->cgb_compat ? 0x007C : 0x000D;
+	}
+
+	// BIOS-less boots start at $0100 with DIV already advanced by the boot
+	// ROM's runtime — mooneye boot_div-* / BullyGB measure it.
+	if (!impl_->boot_rom_loaded)
+	{
+		if (impl_->cgb_mode)
+			impl_->timer.div_counter = impl_->cgb_compat ? 0x2674 : 0x1E74;
+		else
+			impl_->timer.div_counter = 0xABC8;
+	}
+
+	// The boot ROM also leaves the Nintendo logo expanded in VRAM and its
+	// tilemap row laid out (BullyGB checks both). Synthesize that for
+	// BIOS-less starts: each header logo nibble bit-doubles into a plane-0
+	// row byte written twice (vertical doubling), then the (R) tile.
+	if (!impl_->boot_rom_loaded && impl_->cart.rom.size() >= 0x134)
+	{
+		uint8_t *vram = impl_->ppu.vram;
+		uint32_t a = 0x0010;
+		for (int i = 0; i < 48; ++i)
+		{
+			const uint8_t b = impl_->cart.rom[0x104 + i];
+			for (int half = 0; half < 2; ++half)
+			{
+				const uint8_t nib = half ? (b & 0x0F) : (b >> 4);
+				uint8_t e = 0;
+				for (int bit = 0; bit < 4; ++bit)
+					if (nib & (1u << bit)) e = static_cast<uint8_t>(e | (3u << (bit * 2)));
+				vram[a] = e; a += 2;
+				vram[a] = e; a += 2;
+			}
+		}
+		static const uint8_t kRegTile[8] =
+			{ 0x3C, 0x42, 0xB9, 0xA5, 0xB9, 0xA5, 0x42, 0x3C };
+		for (int i = 0; i < 8; ++i)
+		{
+			vram[a] = kRegTile[i]; a += 2;
+		}
+		// The CGB boot wipes the BG map before handoff; only DMG/SGB boots
+		// leave the logo map rows behind.
+		if (!impl_->cgb_mode)
+		{
+			for (int i = 0; i < 12; ++i)
+			{
+				vram[0x1904 + i] = static_cast<uint8_t>(i + 1);    // $9904-$990F
+				vram[0x1924 + i] = static_cast<uint8_t>(i + 13);   // $9924-$992F
+			}
+			vram[0x1910] = 0x19;                                   // (R) tile
+		}
 	}
 
 	// If a GB-side boot ROM was staged (authentic BIOS mode), overlay it
@@ -723,6 +799,22 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 		return false;
 	impl_->has_rom = true;
 	impl_->cgb_mode = (impl_->cart.header.cgb_flag & 0x80) != 0;
+	impl_->cgb_compat = false;
+	impl_->sgb_authentic = false;
+	if (impl_->force_model == 1)
+	{
+		impl_->cgb_mode = false;
+	}
+	else if (impl_->force_model == 2)
+	{
+		impl_->cgb_compat = !impl_->cgb_mode;
+		impl_->cgb_mode   = true;
+	}
+	else if (impl_->force_model == 3)
+	{
+		impl_->cgb_mode      = false;
+		impl_->sgb_authentic = true;
+	}
 	ApplyAutoBlend();   // pick blend from the per-title table when Auto is on
 	ColdReset();   // new cart → start fresh, drop any stale handshake cache
 	return true;
@@ -862,6 +954,16 @@ const uint8_t *Emulator::GBLayerMask() const
 bool Emulator::IsCgb() const
 {
 	return impl_->has_rom && impl_->cgb_mode && !Settings.SGB_BIOSModeActive;
+}
+
+bool Emulator::IsCgbRender() const
+{
+	return impl_->has_rom && impl_->ppu.cgb;
+}
+
+const uint16_t *Emulator::CgbColorFB() const
+{
+	return impl_->has_rom ? impl_->ppu.color_fb : nullptr;
 }
 
 const uint8_t *Emulator::DebugVRAM() const
@@ -1129,6 +1231,11 @@ void Emulator::SetRunMode(RunMode m)
 }
 RunMode Emulator::GetRunMode() const { return impl_->run_mode; }
 
+void Emulator::SetForceModel(uint8_t m)
+{
+	impl_->force_model = (m <= 3) ? m : 0;
+}
+
 void Emulator::RunFrame()
 {
 	if (!impl_->has_rom) return;
@@ -1310,7 +1417,7 @@ void Emulator::RunCycles(int32_t tcycles)
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
 	// garbage. Gate the color path off whenever the BIOS is driving.
-	impl_->ppu.cgb = impl_->cgb_mode && !Settings.SGB_BIOSModeActive;
+	impl_->ppu.cgb = impl_->cgb_mode && !impl_->cgb_compat && !Settings.SGB_BIOSModeActive;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -1341,60 +1448,39 @@ void Emulator::RunCycles(int32_t tcycles)
 		}
 	}
 
-	// Per-dot CPU/PPU interleaving. Advance PPU one t-cycle at a time;
-	// after each dot, run CPU as far as it can go without overshooting
-	// PPU. STAT IRQs raised by PPU mode transitions (HBlank entry, mode
-	// 2, LYC match) are serviced by CPU before PPU advances further, so
-	// games that update SCX/BGP/WX from the HBlank IRQ between scan-
-	// lines (Wario Land 2 cloud parallax, Balloon Fight title) have
-	// their new register value in place by the time PPU starts the next
-	// mode 3. cycle_debt is no longer needed — the per-dot model only
-	// steps CPU when it has kMaxOpcodeTCycles of headroom.
-	// CGB double-speed: the CPU runs twice per PPU dot. ds_extra is the
-	// accumulated lead of the CPU clock over the PPU clock; it is 0 whenever
-	// double-speed has never engaged, so the DMG/SGB gate is byte-identical.
-	// It lives in Impl and persists across calls — see the field comment.
-	const int64_t target_t = impl_->ppu.t_cycles + tcycles;
-	if (impl_->ds_extra < 0)
-	{
-		impl_->ds_extra = impl_->cpu.State().t_cycles - impl_->ppu.t_cycles;
-		if (impl_->ds_extra < 0) impl_->ds_extra = 0;
-	}
-	int64_t &ds_extra = impl_->ds_extra;
-	int32_t &apu_rem  = impl_->apu_ds_rem;
+	// CPU-driven machine-cycle interleave. Cpu::Step advances the world
+	// (timer in the CPU clock domain, PPU/APU in real time — see MemTick)
+	// one M-cycle at a time BEFORE each of its bus accesses, so every read
+	// and write observes PPU/timer/APU state at its exact hardware cycle.
+	// STAT/VBlank IRQs raised by PPU transitions inside an instruction are
+	// serviced at the next instruction boundary, matching the SM83.
+	//
+	// An instruction can overshoot the requested budget by a few dots, so
+	// the target is a persistent absolute credit (run_target) and the
+	// excess is deducted from the next call - if we have already run past
+	// the new target the loop below simply does nothing this time.
+	//
+	// It must NOT be re-anchored to the current position here: overshoot
+	// is the normal case, so clamping it away forgives the excess on every
+	// call. In BIOS mode the SNES re-syncs on every ICD2 access, often only
+	// a dot or two at a time, and forgiving 4-24 dots each time runs the GB
+	// far faster than the SNES asked for - which is the "bank-read timing
+	// against our slice writes" drift S9xSGBTickSnes warns about, and shows
+	// up as torn rows. Reset() and the savestate load re-anchor it; those
+	// are the only real discontinuities.
+	int64_t target_t = impl_->run_target + tcycles;
+	impl_->run_target = target_t;
+
 	while (impl_->ppu.t_cycles < target_t)
 	{
-		PpuStep(impl_->ppu, impl_->mem, 1);
-		if (impl_->mem.double_speed) ds_extra += 1;
+		const bool was_boot = impl_->mem.boot_rom_enabled;
+		impl_->cpu.Step(impl_->mem);
 
-		while (impl_->cpu.State().t_cycles + kMaxOpcodeTCycles <=
-		       impl_->ppu.t_cycles + ds_extra)
+		if (was_boot && !impl_->mem.boot_rom_enabled &&
+		    !impl_->boot_handoff_captured)
 		{
-			const bool was_boot = impl_->mem.boot_rom_enabled;
-			const int64_t pre_t = impl_->cpu.State().t_cycles;
-			impl_->cpu.Step(impl_->mem);
-			int32_t consumed = static_cast<int32_t>(
-				impl_->cpu.State().t_cycles - pre_t);
-			if (consumed <= 0) consumed = 4;
-
-			if (was_boot && !impl_->mem.boot_rom_enabled &&
-			    !impl_->boot_handoff_captured)
-			{
-				impl_->boot_handoff_captured = true;
-				impl_->boot_handoff_regs     = impl_->cpu.State().r;
-			}
-
-			// Timer runs in the CPU clock domain (DIV doubles in double-
-			// speed); the APU stays real-time so audio pitch is unchanged.
-			TimerStep(impl_->timer, impl_->mem, consumed);
-			int32_t apu_in = consumed;
-			if (impl_->mem.double_speed)
-			{
-				apu_rem += consumed;
-				apu_in   = apu_rem >> 1;
-				apu_rem &= 1;
-			}
-			ApuStep(impl_->apu, apu_in);
+			impl_->boot_handoff_captured = true;
+			impl_->boot_handoff_regs     = impl_->cpu.State().r;
 		}
 	}
 
@@ -1758,6 +1844,11 @@ void Emulator::OnPpuVBlank()
 		impl_->handoff_frames++;
 }
 
+void Emulator::SetSerialSink(void (*fn)(void *user, uint8_t byte), void *user)
+{
+	if (impl_) SetSerialCallback(impl_->mem, fn, user);
+}
+
 void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
@@ -2083,9 +2174,28 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	++g_sgb_dbg.joy_writes;
 	if ((value & 0x30) == 0x00) ++g_sgb_dbg.rst_pulses;
 
+	// BIOS-less MLT_REQ joypad rotation: the SGB advances the returned
+	// controller index on each RISING edge of P15 (JOYP bit 5) while a
+	// multi-controller mode is active. Evaluated BEFORE the packet
+	// assembler, so a write that also completes an MLT_REQ packet counts
+	// its edge with the OLD player count (SameBoy GB_sgb_write order).
+	const bool mlt_edge = (value & 0x20) && !(impl_->mlt_prev_sel & 0x20);
+	if (!Settings.SGB_BIOSModeActive && mlt_edge &&
+	    (impl_->sgb_state.mlt_players & 1) == 0)
+	{
+		SgbAdvancePlayer(impl_->sgb_state);
+	}
+	impl_->mlt_prev_sel = static_cast<uint8_t>(value & 0x30);
+
 	// BIOS-less path — our internal packet assembler fires the dispatch
 	// callback into sgb_state.cpp (palettes / border / mask).
 	PacketFeed(impl_->sgb_pkt, value);
+
+	if (!Settings.SGB_BIOSModeActive)
+	{
+		impl_->joypad.mlt_players = impl_->sgb_state.mlt_players;
+		impl_->joypad.mlt_index   = impl_->sgb_state.mlt_current_player;
+	}
 
 	// BIOS-mode path — independent decoder that parks completed packets
 	// in the single-slot ICD2 FIFO. Harmless when no BIOS is running
@@ -2119,8 +2229,9 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 
 	// No BIOS = a plain Game Boy: ignoring every SGB command keeps
 	// detection dead (no MLT_REQ reply, no palettes), so games behave
-	// exactly as on a DMG - including offering their link modes.
-	if (!Settings.SGB_BIOSModeActive) return;
+	// exactly as on a DMG - including offering their link modes. The
+	// acid-test runner's authentic-SGB mode re-enables processing.
+	if (!Settings.SGB_BIOSModeActive && !impl_->sgb_authentic) return;
 
 	if (cmd == 0x11 && len > 1)
 	{
@@ -2253,8 +2364,8 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 	IoField(c, impl.apu.nr50);
 	IoField(c, impl.apu.nr51);
 	IoField(c, impl.apu.master_enabled);
-	IoField(c, impl.apu.frame_seq_timer);
-	IoField(c, impl.apu.frame_seq_step);
+	IoField(c, impl.apu.div_divider);
+	IoField(c, impl.apu.lf_div);
 
 	// ----- Timer / Joypad -----
 	IoField(c, impl.timer);
@@ -2427,6 +2538,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->cart.sram_dirty = false;
 	impl_->ds_extra        = -1;
 	impl_->apu_ds_rem      = 0;
+	impl_->run_target      = impl_->ppu.t_cycles;
 	impl_->drc_integ       = DrcSteadyStateCorr(impl_->cgb_mode, impl_->run_mode);
 
 	// Reset only the sub-sample integration accumulator. The ring buffer
@@ -2445,7 +2557,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
-	impl_->ppu.cgb = impl_->cgb_mode && !Settings.SGB_BIOSModeActive;
+	impl_->ppu.cgb = impl_->cgb_mode && !impl_->cgb_compat && !Settings.SGB_BIOSModeActive;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -2471,6 +2583,18 @@ Emulator &Instance()
 	static Emulator g;
 	return g;
 }
+
+// The core's host hooks are free functions, so they need to know which
+// emulator called them. Normal play only ever runs the singleton and
+// leaves this null; a worker thread driving its own instance binds it
+// for the duration (see ScopedActiveEmulator).
+namespace { thread_local Emulator *g_active_emu = nullptr; }
+
+Emulator &ActiveEmulator() { return g_active_emu ? *g_active_emu : Instance(); }
+
+ScopedActiveEmulator::ScopedActiveEmulator(Emulator &e)
+	: prev_(g_active_emu) { g_active_emu = &e; }
+ScopedActiveEmulator::~ScopedActiveEmulator() { g_active_emu = prev_; }
 
 } // namespace SGB
 
@@ -2593,13 +2717,15 @@ void S9xSGBSyncToSnesCycle(int32_t cpu_cycles)
 	if (delta > 0) S9xSGBTickSnes(delta);
 }
 
-void S9xSGBOnPpuHBlank(void) { SGB::Instance().OnPpuHBlank(); }
-void S9xSGBOnPpuVBlank(void) { SGB::Instance().OnPpuVBlank(); }
+void S9xSGBOnPpuHBlank(void) { SGB::ActiveEmulator().OnPpuHBlank(); }
+void S9xSGBOnPpuVBlank(void) { SGB::ActiveEmulator().OnPpuVBlank(); }
 uint32_t S9xSGBGetGBFrameCount(void) { return SGB::g_gb_vblank_count; }
 uint32_t S9xSGBGetPacketCount(void) { return SGB::Instance().GetPacketCount(); }
 const uint8_t *S9xSGBGetGBLayerMask(void) { return SGB::Instance().GBLayerMask(); }
 void S9xSGBApplyAutoBlend(void) { SGB::Instance().ApplyAutoBlend(); }
 bool S9xSGBIsCgb(void) { return SGB::Instance().IsCgb(); }
+bool S9xSGBIsCgbRender(void) { return SGB::Instance().IsCgbRender(); }
+const uint16_t *S9xSGBGetCgbColorFB(void) { return SGB::Instance().CgbColorFB(); }
 const uint8_t  *S9xSGBGetVRAM(void)           { return SGB::Instance().DebugVRAM(); }
 const uint8_t  *S9xSGBGetOAM(void)            { return SGB::Instance().DebugOAM(); }
 const uint8_t  *S9xSGBGetCgbBgPal(void)       { return SGB::Instance().DebugCgbBgPal(); }
@@ -2620,10 +2746,10 @@ void S9xSGBSetNoSpriteLimit(bool enabled) { SGB::Instance().SetNoSpriteLimit(ena
 bool S9xSGBGetLayerEnabled(int layer) { return SGB::Instance().GetLayerEnabled(layer); }
 void S9xSGBCaptureScanline(const unsigned char *pixels)
 {
-	SGB::Instance().CaptureScanline(static_cast<const uint8_t *>(pixels));
+	SGB::ActiveEmulator().CaptureScanline(static_cast<const uint8_t *>(pixels));
 }
 void S9xSGBSetJoypad(uint16_t m)    { SGB::Instance().SetJoypad(m); }
-void S9xSGBOnJoyserWrite(uint8_t v) { SGB::Instance().OnJoyserWrite(v); }
+void S9xSGBOnJoyserWrite(uint8_t v) { SGB::ActiveEmulator().OnJoyserWrite(v); }
 
 void S9xSGBBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
@@ -2729,6 +2855,11 @@ void S9xSGBSetRunMode(uint8_t mode)
 		default: m = SGB::RunMode::SGB;  break;
 	}
 	SGB::Instance().SetRunMode(m);
+}
+
+void S9xSGBSetForceModel(unsigned char m)
+{
+	SGB::Instance().SetForceModel(m);
 }
 
 void S9xSGBSetClockMultiplier(float mul)

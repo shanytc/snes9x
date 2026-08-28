@@ -71,6 +71,10 @@ struct PacketState
 {
 	PacketPhase phase           = PacketPhase::Idle;
 	uint8_t     prev_joyser_val = 0x30;
+	// Bit value held while a line is low; the ICD latches it when both
+	// lines go high again, so a second pulse before that overrides the
+	// first (cpp/sgb-ext-test). -1 = nothing pending.
+	int8_t      pending_bit     = -1;
 
 	uint8_t     bit_count       = 0;   // 0..7 within packet_buf[byte_count]
 	uint8_t     byte_count      = 0;   // 0..15 within current packet

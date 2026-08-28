@@ -1,0 +1,9 @@
+results.txt
+_failures/
+
+# Baselines pulled from the shootout's published table with
+# fetch_baselines.py: ~4700 PNGs that any checkout can re-create in one page
+# fetch, so only the suite's own reference set and ours are tracked.
+baseline/*
+!baseline/default/
+!baseline/supersnes9x/

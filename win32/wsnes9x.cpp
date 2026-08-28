@@ -42,6 +42,7 @@
 #include "CTilemapViewerDlg.h"
 #include "CSpriteViewerDlg.h"
 #include "CGBTileViewerDlg.h"
+#include "AcidTestsDlg.h"
 #include "CGBTilemapViewerDlg.h"
 #include "CGBSpriteViewerDlg.h"
 #include "debug_viewer_common.h"
@@ -538,6 +539,7 @@ void RestoreGUIDisplay ();
 void RestoreSNESDisplay ();
 void CheckDirectoryIsWritable (const char *filename);
 static void CheckMenuStates ();
+static void UpdateTestsMenu ();
 static bool RateSupportedByDriver (unsigned int rate, int driver);
 static bool RateUsefulForMode (unsigned int rate);
 static void AudioWaveEffectiveMasks (uint8 *outSpc, uint8 *outGb);
@@ -2947,6 +2949,24 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			break;
+		case ID_TESTS_ACIDTESTS:
+			{
+				RestoreGUIDisplay();
+				CloseSoundDevice();
+				// The suite runs on its own emulator instances, so the
+				// loaded session survives; these two only steer how the
+				// test cores boot and whether they bother mixing audio.
+				const bool8 saved_bios_active = Settings.SGB_BIOSModeActive;
+				const bool8 saved_mute        = Settings.Mute;
+				Settings.SGB_BIOSModeActive = FALSE;
+				Settings.Mute = TRUE;
+				WinShowAcidTestsDialog();
+				Settings.SGB_BIOSModeActive = saved_bios_active;
+				Settings.Mute = saved_mute;
+				ReInitSound();
+				RestoreSNESDisplay();
+			}
+			break;
 		case ID_SOUND_VOICEKUN_ATTACH:
 			{
 				if (Settings.StopEmulation || S9xVoiceKunAttached())
@@ -4118,6 +4138,9 @@ BOOL WinInit( HINSTANCE hInstance)
 	{
 		BuildLanguageMenu(GUI.hMenu);
 		LocalizeMenu(GUI.hMenu);
+		// Before the bar is ever shown: a missing test pack must not flash
+		// a Tests menu that only disappears once a menu loop runs.
+		UpdateTestsMenu();
 	}
 
     TCHAR buf [100];
@@ -5313,6 +5336,79 @@ void CheckDirectoryIsWritable (const char *filename)
     }
 }
 
+// Acid Tests drives the vendored GB Emulator Shootout, which ships as a
+// separate download, so the whole Tests menu comes and goes with it. Keep
+// the popup and its caption once found: RemoveMenu on the bar detaches
+// without destroying, so it can go back if the user unpacks the pack
+// without restarting.
+//
+// Called at menu build time as well as from CheckMenuStates: a top-level
+// menu is on the bar from the moment the window opens, where the old
+// in-Emulation item was not visible until a menu loop had already run.
+static void UpdateTestsMenu ()
+{
+	if (!GUI.hMenu) return;
+
+	static HMENU s_tests_menu = NULL;
+	static UINT  s_tests_pos  = 0;
+	static TCHAR s_tests_text[64] = { 0 };
+	if (!s_tests_menu)
+	{
+		const int top_n = GetMenuItemCount(GUI.hMenu);
+		for (int t = 0; t < top_n; t++)
+		{
+			HMENU sub = GetSubMenu(GUI.hMenu, t);
+			MENUITEMINFO owns = {};
+			owns.cbSize = sizeof(owns);
+			owns.fMask  = MIIM_ID;
+			if (!sub || !GetMenuItemInfo(sub, ID_TESTS_ACIDTESTS, FALSE, &owns))
+				continue;
+			MENUITEMINFO cap = {};
+			cap.cbSize     = sizeof(cap);
+			cap.fMask      = MIIM_STRING;
+			cap.dwTypeData = s_tests_text;
+			cap.cch        = _countof(s_tests_text) - 1;
+			GetMenuItemInfo(GUI.hMenu, (UINT)t, TRUE, &cap);
+			s_tests_menu = sub;
+			s_tests_pos  = (UINT)t;
+			break;
+		}
+	}
+	if (!s_tests_menu) return;
+
+	// Where it sits now — other top-level menus can come and go.
+	int at = -1;
+	const int top_n = GetMenuItemCount(GUI.hMenu);
+	for (int t = 0; t < top_n && at < 0; t++)
+		if (GetSubMenu(GUI.hMenu, t) == s_tests_menu) at = t;
+
+	const bool have_pack = WinAcidTestsAvailable();
+	if (have_pack && at < 0)
+	{
+		MENUITEMINFO ins = {};
+		ins.cbSize     = sizeof(ins);
+		ins.fMask      = MIIM_STRING | MIIM_SUBMENU | MIIM_FTYPE;
+		ins.fType      = MFT_STRING;
+		ins.hSubMenu   = s_tests_menu;
+		ins.dwTypeData = s_tests_text;
+		ins.cch        = (UINT)_tcslen(s_tests_text);
+		UINT pos = s_tests_pos;
+		const UINT count = (UINT)GetMenuItemCount(GUI.hMenu);
+		if (pos > count) pos = count;
+		InsertMenuItem(GUI.hMenu, pos, TRUE, &ins);
+		if (LocaleIsTranslated())
+			LocalizeMenu(GUI.hMenu);   // also the bar caption
+	}
+	else if (!have_pack && at >= 0)
+	{
+		RemoveMenu(GUI.hMenu, (UINT)at, MF_BYPOSITION);
+	}
+	else
+		return;
+
+	if (GUI.hWnd) DrawMenuBar(GUI.hWnd);   // no window yet at build time
+}
+
 static void CheckMenuStates ()
 {
     MENUITEMINFO mii;
@@ -5429,6 +5525,8 @@ static void CheckMenuStates ()
 				DrawMenuBar(GUI.hWnd);
 			}
 		}
+
+		UpdateTestsMenu();
 
 		if (gb_loaded)
 		{

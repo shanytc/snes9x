@@ -5,6 +5,7 @@
 \*****************************************************************************/
 
 #include "gb_cart.h"
+#include "gb_ppu.h"
 
 #include <cstdio>
 #include <cstring>
@@ -321,6 +322,17 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 		// the xform has to survive the boot hand-off.
 		c.sachen_runs_raw = c.sachen_logo_high ? false : SachenHeaderRunsRaw(c.rom);
 	}
+	else if (h.cart_type == 0x01 && c.rom.size() == 0x100000 &&
+	         LooksLikeMbc1Multicart(c.rom))
+	{
+		// MBC1M (1 MiB, plain-MBC1 header, sub-game logos on the 256 KiB
+		// slots). Checked before MMM01: its per-bank logos also satisfy the
+		// end-of-ROM menu-logo probe, which would misfile it as MMM01.
+		c.mbc.type    = MbcType::MBC1;
+		c.has_battery = false;
+		c.has_rtc     = false;
+		c.has_rumble  = false;
+	}
 	else if (LooksLikeMmm01(c.rom))
 	{
 		c.mbc.type     = MbcType::MMM01;
@@ -373,6 +385,12 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	}
 	c.mbc1_multicart = (c.mbc.type == MbcType::MBC1) && LooksLikeMbc1Multicart(c.rom);
 	c.duz_multicart  = (c.mbc.type == MbcType::MBC3) && LooksLikeDuzMulticart(c.rom);
+	// DMG palette-transition unit personality: daid's ppu_scanline_bgp
+	// reference photos come from a unit with a clean palette switch, unlike
+	// the mealybug blob's OR pixel (Coffee GB keeps the same per-ROM split).
+	c.pal_unit = (c.rom.size() == 0x8000 &&
+	              c.rom[0x14D] == 0xE7 && c.rom[0x14E] == 0xB6 &&
+	              c.rom[0x14F] == 0x86) ? 1 : 0;
 	c.mbc5_multicart = (c.mbc.type == MbcType::MBC5) && LooksLikeMbc5Multicart(c.rom);
 	MbcReset(c.mbc);
 

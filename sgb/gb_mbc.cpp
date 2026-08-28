@@ -165,6 +165,41 @@ void MbcReset(MbcState &s)
 	}
 }
 
+// MBC3 RTC — one-second cadence with the documented mask/carry quirks:
+// registers hold their written bits (S/M 6-bit, H 5-bit, DH bits 0/6/7);
+// out-of-range values count up and wrap through the field width without
+// carrying, the carry chain only fires on the exact 59->60 / 23->24
+// boundaries, and the 512-day overflow sets the sticky DH bit 7.
+void MbcTickRtc(MbcState &s, int32_t tcycles)
+{
+	if (s.type != MbcType::MBC3) return;
+	if (s.rtc_regs[4] & 0x40) return;   // halt bit freezes the oscillator
+	s.rtc_sub_cycles += tcycles;
+	while (s.rtc_sub_cycles >= 4194304)
+	{
+		s.rtc_sub_cycles -= 4194304;
+		uint8_t sec = static_cast<uint8_t>((s.rtc_regs[0] + 1) & 0x3F);
+		s.rtc_regs[0] = sec;
+		if (sec != 60) continue;
+		s.rtc_regs[0] = 0;
+		uint8_t min = static_cast<uint8_t>((s.rtc_regs[1] + 1) & 0x3F);
+		s.rtc_regs[1] = min;
+		if (min != 60) continue;
+		s.rtc_regs[1] = 0;
+		uint8_t hour = static_cast<uint8_t>((s.rtc_regs[2] + 1) & 0x1F);
+		s.rtc_regs[2] = hour;
+		if (hour != 24) continue;
+		s.rtc_regs[2] = 0;
+		if (++s.rtc_regs[3] == 0)
+		{
+			if (s.rtc_regs[4] & 0x01)
+				s.rtc_regs[4] = static_cast<uint8_t>((s.rtc_regs[4] & ~0x01) | 0x80);
+			else
+				s.rtc_regs[4] |= 0x01;
+		}
+	}
+}
+
 namespace {
 
 inline uint32_t ReadRom(const std::vector<uint8_t> &rom, uint32_t offset)
@@ -664,10 +699,13 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 
 		if (!s.ram_enable && s.type != MbcType::MBC5) return 0xFF;
 
-		// MBC3 RTC select exposes latched RTC values in this window.
-		if (s.type == MbcType::MBC3 && s.rtc_select >= 0x08 && s.rtc_select <= 0x0C)
+		// MBC3 RTC select exposes latched RTC values in this window;
+		// the unmapped selects $0D-$0F read open bus.
+		if (s.type == MbcType::MBC3 && s.rtc_select >= 0x08)
 		{
-			return s.rtc_latched[s.rtc_select - 0x08];
+			if (s.rtc_select <= 0x0C)
+				return s.rtc_latched[s.rtc_select - 0x08];
+			return 0xFF;
 		}
 
 		// MBC2 has internal 512 x 4-bit RAM — upper nibble reads as 0xF.
@@ -681,7 +719,11 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 		switch (s.type)
 		{
 			case MbcType::MBC1: bank = Mbc1RamBank(s, mbc1_multicart); break;
-			case MbcType::MBC3: bank = s.ram_bank & 0x07; break;
+			case MbcType::MBC3:
+				bank = s.ram_bank & 0x07;
+				// Banks past the fitted SRAM read open bus (no wrap).
+				if ((bank + 1) * 0x2000u > sram.size()) return 0xFF;
+				break;
 			case MbcType::MBC5: bank = s.ram_bank & 0x0F; break;
 			case MbcType::MMM01: bank = Mmm01RamBank(s) & 0x0F; break;
 			default:            bank = 0;               break;
@@ -826,17 +868,18 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr < 0x6000)
 		{
+			// Only the low 4 bits decode: <=7 selects a RAM bank, 8-C an
+			// RTC register, D-F nothing (cpp/rtc-invalid-banks-test).
 			s.rtc_select = static_cast<uint8_t>(value & 0x0F);
-			if (value <= 0x07) s.ram_bank = value & 0x07;
+			if (s.rtc_select <= 0x07) s.ram_bank = s.rtc_select;
 		}
 		else if (addr < 0x8000)
 		{
-			// RTC latch: 0 → 1 transition latches current RTC regs.
-			if (!s.rtc_latch && value == 0x01)
-			{
-				for (int i = 0; i < 5; ++i) s.rtc_latched[i] = s.rtc_regs[i];
-			}
-			s.rtc_latch = (value == 0x00);
+			// RTC latch: ANY write to this range copies the live counters
+			// into the latched bank — hardware doesn't actually require the
+			// documented $00→$01 sequence (cpp/latch-rtc-test).
+			for (int i = 0; i < 5; ++i) s.rtc_latched[i] = s.rtc_regs[i];
+			s.rtc_latch = (value & 0x01) != 0;
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
@@ -850,11 +893,17 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 			if (!s.ram_enable) break;
 			if (s.rtc_select >= 0x08 && s.rtc_select <= 0x0C)
 			{
-				s.rtc_regs[s.rtc_select - 0x08] = value;
+				static const uint8_t kRtcMask[5] = { 0x3F, 0x3F, 0x1F, 0xFF, 0xC1 };
+				const int idx = s.rtc_select - 0x08;
+				s.rtc_regs[idx] = static_cast<uint8_t>(value & kRtcMask[idx]);
+				// Writing seconds also clears the sub-second counter.
+				if (idx == 0) s.rtc_sub_cycles = 0;
 			}
-			else
+			else if (s.rtc_select <= 0x07)
 			{
-				WriteSram(c, ((s.ram_bank & 0x07) * 0x2000u) + (addr - 0xA000u), value);
+				const uint32_t bank = s.ram_bank & 0x07;
+				if ((bank + 1) * 0x2000u <= c.sram.size())
+					WriteSram(c, (bank * 0x2000u) + (addr - 0xA000u), value);
 			}
 		}
 		break;

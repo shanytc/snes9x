@@ -7,6 +7,7 @@
 #include "gb_cpu.h"
 #include "gb_memory.h"
 #include "gb_ops.h"
+#include "gb_ppu.h"
 
 namespace SGB {
 
@@ -46,7 +47,7 @@ void Cpu::Step(Memory &mem)
 			state_.halted = false;
 		else
 		{
-			state_.t_cycles += 4;
+			TickM(state_, mem);
 			return;
 		}
 	}
@@ -57,10 +58,13 @@ void Cpu::Step(Memory &mem)
 	if (state_.stopped)
 	{
 		if (mem.if_ & IRQ_JOYPAD)
+		{
 			state_.stopped = false;
+			if (mem.ppu) PpuOnCpuStopEnd(*mem.ppu);
+		}
 		else
 		{
-			state_.t_cycles += 4;
+			TickM(state_, mem);
 			return;
 		}
 	}
@@ -92,7 +96,9 @@ void Cpu::Step(Memory &mem)
 
 	if (promote_ime_after)
 	{
-		state_.ime         = true;
+		// DI in the EI-delay slot cancels the pending enable (rapid_di_ei).
+		if (op != 0xF3)
+			state_.ime = true;
 		state_.ime_pending = false;
 	}
 }
@@ -106,23 +112,39 @@ int Cpu::ServiceInterrupts(Memory &mem)
 	if (!pending)
 		return 0;
 
-	// Priority order matches bit order: VBlank(0) > LCDSTAT(1) > Timer(2)
-	// > Serial(3) > Joypad(4). Service the lowest set bit first.
-	uint8_t bit = 0;
-	while (!(pending & (1u << bit)))
-		++bit;
-	const uint16_t vector = static_cast<uint16_t>(0x40 + bit * 8);
-
-	mem.if_       = static_cast<uint8_t>(mem.if_ & ~(1u << bit));
 	state_.ime    = false;
 	state_.halted = false;
 
-	// Push PC, then jump to vector.
-	Push16(state_, mem, state_.r.pc);
-	state_.r.pc = vector;
+	// Dispatch is 5 M-cycles = 20 T-cycles: two internal delay cycles, the
+	// PCH push, the PCL push, then the vector-load cycle. The vector (and
+	// which IF bit clears) is decided from IE & IF sampled AFTER the PCH
+	// push — a push that lands on IE ($FFFF) can redirect the dispatch or
+	// cancel it entirely, in which case the CPU jumps to $0000
+	// (mooneye interrupts/ie_push).
+	TickM(state_, mem);
+	TickM(state_, mem);
 
-	// Dispatch is 5 M-cycles = 20 T-cycles per Pan Docs.
-	state_.t_cycles += 20;
+	state_.r.sp--;
+	BusWrite(state_, mem, state_.r.sp, static_cast<uint8_t>(state_.r.pc >> 8));
+
+	uint16_t vector = 0x0000;
+	const uint8_t pend2 = mem.ie & mem.if_ & IRQ_ALL;
+	if (pend2)
+	{
+		// Priority order matches bit order: VBlank(0) > LCDSTAT(1) >
+		// Timer(2) > Serial(3) > Joypad(4). Lowest set bit wins.
+		uint8_t bit = 0;
+		while (!(pend2 & (1u << bit)))
+			++bit;
+		mem.if_ = static_cast<uint8_t>(mem.if_ & ~(1u << bit));
+		vector  = static_cast<uint16_t>(0x40 + bit * 8);
+	}
+
+	state_.r.sp--;
+	BusWrite(state_, mem, state_.r.sp, static_cast<uint8_t>(state_.r.pc & 0xFF));
+
+	TickM(state_, mem);
+	state_.r.pc = vector;
 	return 20;
 }
 

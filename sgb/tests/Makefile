@@ -15,8 +15,11 @@ CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -pedantic
 ROOT     := $(abspath ../..)
 SGBDIR   := $(ROOT)/sgb
 
-# All sgb/ sources except the test itself.
+# All sgb/ sources except the test itself. sgb/acid.cpp decodes reference
+# PNGs through stb_image, so its implementation TU rides along.
 SGBSRCS := $(filter-out $(SGBDIR)/tests/%.cpp,$(wildcard $(SGBDIR)/*.cpp))
+STBSRC  := $(ROOT)/external/stb/stb_image_implementation.cpp
+INCS    := -I$(ROOT) -I$(SGBDIR) -I$(ROOT)/external/stb
 
 TARGET := sgb_test
 SRCS   := cpu_test.cpp
@@ -24,9 +27,13 @@ SRCS   := cpu_test.cpp
 all: $(TARGET)
 
 $(TARGET): $(SRCS) $(SGBSRCS)
-	$(CXX) $(CXXFLAGS) -I$(ROOT) -I$(SGBDIR) $(SRCS) $(SGBSRCS) -o $@
+	$(CXX) $(CXXFLAGS) $(INCS) $(SRCS) $(SGBSRCS) $(STBSRC) -o $@
+
+# Headless GB Emulator Shootout runner — see acid_test.cpp.
+acid_test: acid_test.cpp $(SGBSRCS)
+	$(CXX) $(CXXFLAGS) $(INCS) acid_test.cpp $(SGBSRCS) $(STBSRC) -o $@
 
 clean:
-	rm -f $(TARGET) sgb_out.ppm sgb_out.rgb
+	rm -f $(TARGET) acid_test sgb_out.ppm sgb_out.rgb
 
 .PHONY: all clean

@@ -12,7 +12,8 @@ namespace SGB {
 
 void JoypadReset(Joypad &j)
 {
-	j.select    = 0x30;
+	// Boot hands off with both select lines driven low (P1 reads $CF).
+	j.select    = 0x00;
 	j.dpad      = 0x0F;
 	j.btns      = 0x0F;
 	j.prev_mask = 0;
@@ -74,6 +75,12 @@ uint8_t JoypadRead(const Joypad &j)
 	}
 	else
 	{
+		if (!sel_dpad && !sel_btns && j.mlt_players > 1)
+		{
+			// BIOS-less SGB MLT_REQ: idle reads return the inverted
+			// joypad-rotation index (samesuite sgb/command_mlt_req).
+			low = static_cast<uint8_t>(~j.mlt_index & 0x0F);
+		}
 		if (sel_dpad) low &= j.dpad;
 		if (sel_btns) low &= j.btns;
 	}

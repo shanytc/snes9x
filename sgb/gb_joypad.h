@@ -38,6 +38,12 @@ struct Joypad
 	bool    sgb_active = false;
 	uint8_t sgb_index  = 0;
 	uint8_t sgb_pads[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+
+	// BIOS-less MLT_REQ mirror: when mlt_players > 1, a read with both
+	// select lines idle returns ~mlt_index in the low nibble (the SGB
+	// joypad-rotation byte). Maintained by Emulator::OnJoyserWrite.
+	uint8_t mlt_players = 1;
+	uint8_t mlt_index   = 0;
 };
 
 enum : uint8_t

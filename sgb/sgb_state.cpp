@@ -415,15 +415,17 @@ void HandleSound(SgbState &s, const uint8_t *d)
 
 void HandleMltReq(SgbState &s, const uint8_t *d)
 {
-	const uint8_t mlt = static_cast<uint8_t>(d[1] & 0x03);
-	switch (mlt)
-	{
-		case 1:  s.mlt_players = 2; break;
-		case 3:  s.mlt_players = 4; break;
-		default: s.mlt_players = 1; break;
-	}
-	if (s.mlt_current_player >= s.mlt_players)
-		s.mlt_current_player = 0;
+	// Player count is mode + 1. The unsupported mode 2 keeps the odd
+	// count of 3 (so edge rotation stays off), and the command itself
+	// bumps-and-clamps the index into the "glitched player 3" slot:
+	// current = (current + 1) & 2 — decoded from samesuite's
+	// sgb/command_mlt_req expected table.
+	const uint8_t mlt_mode = static_cast<uint8_t>(d[1] & 0x03);
+	s.mlt_players = static_cast<uint8_t>(mlt_mode + 1);
+	if (mlt_mode == 2)
+		s.mlt_current_player = static_cast<uint8_t>((s.mlt_current_player + 1) & 2);
+	else
+		s.mlt_current_player = static_cast<uint8_t>(s.mlt_current_player & (s.mlt_players - 1));
 }
 
 } // anonymous
@@ -520,7 +522,7 @@ uint16_t SgbResolveColor(const SgbState &s, uint32_t tile_x, uint32_t tile_y,
 void SgbAdvancePlayer(SgbState &s)
 {
 	if (s.mlt_players == 0) { s.mlt_current_player = 0; return; }
-	s.mlt_current_player = static_cast<uint8_t>((s.mlt_current_player + 1) % s.mlt_players);
+	s.mlt_current_player = static_cast<uint8_t>((s.mlt_current_player + 1) & (s.mlt_players - 1));
 }
 
 void SgbRenderBorder(const SgbState &s, uint16_t *out)

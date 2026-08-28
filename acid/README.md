@@ -4,7 +4,7 @@ Vendored copy of the test ROMs, reference screenshots and test definitions
 from the [GB Emulator Shootout](https://tomek.rekawek.eu/GBEmulatorShootout/)
 (github.com/trekawek/GBEmulatorShootout, commit
 `da23b88682fa422bb5c699055892b7fd3eb8300f`, 2026-07-22). These drive the
-**Emulation → Acid Tests** menu item in the win32 port and the headless
+**Tests → Acid Tests** menu item in the win32 port and the headless
 `sgb/tests/acid_test` runner.
 
 ## Layout
@@ -48,7 +48,7 @@ as INFO, matching the shootout.
 
 ## Running
 
-- GUI: Emulation → Acid Tests. The filter bar narrows the list by name,
+- GUI: Tests → Acid Tests. The filter bar narrows the list by name,
   suite, model and result; Run covers whatever is shown, and Export writes
   that set as `.txt`, `.json` or `.html`.
 - Headless: `cd sgb/tests && make acid_test && ./acid_test [acid-dir]

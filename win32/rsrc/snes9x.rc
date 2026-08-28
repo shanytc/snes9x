@@ -1463,7 +1463,6 @@ BEGIN
         END
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Hacks...",                   ID_EMULATION_HACKS,MFT_STRING,MFS_ENABLED
-        MENUITEM "&Acid Tests...",              ID_EMULATION_ACIDTESTS,MFT_STRING,MFS_ENABLED
         MENUITEM "&Settings...\tAlt+F8",        ID_OPTIONS_SETTINGS,MFT_STRING,MFS_ENABLED
     END
     POPUP "&Input",                         0,MFT_STRING,MFS_ENABLED
@@ -1612,6 +1611,10 @@ BEGIN
         MENUITEM "&View Profile",               ID_RA_VIEW_PROFILE,MFT_STRING,MFS_GRAYED
     END
 #endif
+    POPUP "&Tests",                         0,MFT_STRING,MFS_ENABLED
+    BEGIN
+        MENUITEM "&Acid Tests...",              ID_TESTS_ACIDTESTS,MFT_STRING,MFS_ENABLED
+    END
     POPUP "&Help",                          0,MFT_STRING,MFS_ENABLED
     BEGIN
         MENUITEM "&About...",                   ID_HELP_ABOUT,MFT_STRING,MFS_ENABLED

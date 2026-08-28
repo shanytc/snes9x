@@ -8,7 +8,7 @@
 //
 // Runs every test in acid/manifest.txt through the SGB core with the
 // shootout's screenshot-compare rule and prints a per-test PASS/FAIL table.
-// The same runner backs the win32 Emulation > Acid Tests menu entry, so a
+// The same runner backs the win32 Tests > Acid Tests menu entry, so a
 // green run here is a green run in the GUI.
 //
 // Build:

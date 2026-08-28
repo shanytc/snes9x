@@ -1,4 +1,4 @@
-// Emulation > Acid Tests — GB Emulator Shootout runner (see sgb/acid.h).
+// Tests > Acid Tests — GB Emulator Shootout runner (see sgb/acid.h).
 // Modal dialog. The tests are independent ROMs, so the runner keeps one
 // emulator core busy per worker thread, each picking up the next test as it
 // finishes; the Threads box picks how many and defaults to the machine's
@@ -1653,7 +1653,22 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
 bool WinAcidTestsAvailable()
 {
-	return !FindAcidDir().empty();
+	const std::string dir = FindAcidDir();
+	if (dir.empty()) return false;
+	// A manifest on its own is not a usable pack: the ROMs live under
+	// tests/ and the screens that decide pass and fail under
+	// baseline/default/. Half an unpack should leave the menu hidden.
+	const std::string need[] = {
+		dir + "\\" + AcidTests::kRomDir,
+		AcidTests::BaselinePath(dir, AcidTests::kDefaultBaseline)
+	};
+	for (const std::string &p : need)
+	{
+		const DWORD a = GetFileAttributesA(p.c_str());
+		if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY))
+			return false;
+	}
+	return true;
 }
 
 void WinShowAcidTestsDialog()

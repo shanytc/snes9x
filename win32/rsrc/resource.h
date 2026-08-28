@@ -692,7 +692,7 @@
 #define ID_EMULATION_BIOS_NONE          44346
 #define ID_EMULATION_BIOS_SGB1          44347
 #define ID_EMULATION_BIOS_SGB2          44348
-#define ID_EMULATION_ACIDTESTS          44349
+#define ID_TESTS_ACIDTESTS          44349
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361

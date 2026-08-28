@@ -288,26 +288,27 @@ void EvalSprites(Ppu &p, Memory &mem)
 	{
 		uint8_t oy, ox;
 		bool stale = false;
+		bool pre_dma = false;
 		if (dma_scan)
 		{
 			const int back = eval_dot - (scb + 2 * i);
 			const int dest = mem.dma_index - ((back + dph) >> 2);
 			stale = dest >= 0 && dest <= 0xA0;
-			if (!stale && dest < 0)
+			pre_dma = !stale && dest < 0;
+			if (pre_dma)
 			{
-				// slot read before the transfer went live: original bytes
+				// Slot read before the transfer went live, so it saw OAM as
+				// it was then. Reading p.oam here instead would hand it the
+				// bytes the transfer has since landed — a table meant for a
+				// later part of the screen, whose sprites then show up as
+				// one-scanline slivers (Prehistorik Man's LY=50 swap).
 				p.scan_y_bus = mem.dma_oam_old[i * 4 + 0];
 				p.scan_x_bus = mem.dma_oam_old[i * 4 + 1];
 			}
 		}
-		if (!stale && !dma_scan)
+		if (!stale && !pre_dma)
 		{
-			p.scan_y_bus = p.oam[i * 4 + 0];
-			p.scan_x_bus = p.oam[i * 4 + 1];
-		}
-		else if (!stale && dma_scan)
-		{
-			// slot read after the transfer finished: live bytes
+			// No transfer in the way, or the slot read after it finished.
 			p.scan_y_bus = p.oam[i * 4 + 0];
 			p.scan_x_bus = p.oam[i * 4 + 1];
 		}

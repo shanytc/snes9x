@@ -8998,17 +8998,25 @@ INT_PTR CALLBACK DlgMultiROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		LocalizeDialog(hDlg);
 		WinRefreshDisplay();
 		TCHAR path[MAX_PATH];
-		SetCurrentDirectory(S9xGetDirectoryT(BIOS_DIR));
-		_tfullpath(path, TEXT("stbios.bin"), MAX_PATH);
-		SetDlgItemText(hDlg, IDC_MULTICART_BIOSEDIT, path);
-		FILE* ftemp = _tfopen(path, TEXT("rb"));
-		if(ftemp)
-		{
-			fclose(ftemp);
-			SetDlgItemText(hDlg, IDC_MULTICART_BIOSNOTFOUND, MULTICART_BIOS_FOUND);
-		}
+		// Same order the loader uses: the BIOS Manager's slot, then stbios.bin.
+		const std::string assigned = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
+		bool found = !assigned.empty();
+		if(found)
+			lstrcpyn(path, _tFromChar(assigned.c_str()), MAX_PATH);
 		else
-			SetDlgItemText(hDlg, IDC_MULTICART_BIOSNOTFOUND, MULTICART_BIOS_NOT_FOUND);
+		{
+			SetCurrentDirectory(S9xGetDirectoryT(BIOS_DIR));
+			_tfullpath(path, TEXT("stbios.bin"), MAX_PATH);
+			FILE* ftemp = _tfopen(path, TEXT("rb"));
+			if(ftemp)
+			{
+				fclose(ftemp);
+				found = true;
+			}
+		}
+		SetDlgItemText(hDlg, IDC_MULTICART_BIOSEDIT, path);
+		SetDlgItemText(hDlg, IDC_MULTICART_BIOSNOTFOUND,
+			found ? MULTICART_BIOS_FOUND : MULTICART_BIOS_NOT_FOUND);
 		SetDlgItemText(hDlg, IDC_MULTICART_EDITA, multiRomA);
 		SetDlgItemText(hDlg, IDC_MULTICART_EDITB, multiRomB);
 		break;}

@@ -783,6 +783,7 @@ static bool8 is_SufamiTurbo_BIOS (const uint8 *, uint32);
 static bool8 is_SufamiTurbo_Cart (const uint8 *, uint32);
 static bool8 is_BSCart_BIOS (const uint8 *, uint32);
 static bool8 is_BSCartSA1_BIOS(const uint8 *, uint32);
+static bool8 is_BSX_Shell (const uint8 *, uint32);
 static bool8 is_GNEXT_Add_On (const uint8 *, uint32);
 static bool8 is_SGB_BIOS      (const uint8 *data, uint32 size, uint8 *out_mode /*1 or 2*/);
 static bool8 FindSGB_BIOS     (uint8 mode, const char *gb_rom_path, std::string &out_path);
@@ -1076,6 +1077,16 @@ static bool8 is_BSCartSA1_BIOS (const uint8 *data, uint32 size)
 
 	//Checks if the game is Itoi's Bass Fishing No. 1 (ZBPJ) or SD Gundam G-NEXT (ZX3J)
 	if (strncmp((char *)(data + 0x7fb2), "ZBPJ", 4) == 0 || strncmp((char *)(data + 0x7fb2), "ZX3J", 4) == 0)
+		return (TRUE);
+	else
+		return (FALSE);
+}
+
+// The Satellaview shell cart. is_BSCart_BIOS matches ordinary carts too, so
+// diverting a File -> Load Game needs this stricter signature.
+static bool8 is_BSX_Shell (const uint8 *data, uint32 size)
+{
+	if (size == 0x100000 && strncmp((char *) (data + 0x7fc0), "Satellaview BS-X     ", 21) == 0)
 		return (TRUE);
 	else
 		return (FALSE);
@@ -2089,6 +2100,14 @@ bool8 CMemory::LoadROM (const char *filename)
 
         CheckForAnyPatch(filename, HeaderCount != 0, totalFileSize);
 
+        // Sufami Turbo / Satellaview images divert before scoring: their
+        // BIOS has to be staged into ROM[] first.
+        {
+            int paired = LoadBIOSPairedCart(filename, totalFileSize);
+            if (paired >= 0)
+                return paired > 0;
+        }
+
         if (LoadROMInt(totalFileSize))
             return TRUE;
     }
@@ -2498,6 +2517,22 @@ bool8 CMemory::LoadROMInt (int32 ROMfillSize)
     return (TRUE);
 }
 
+// Sufami Turbo carts and the Satellaview shell only run with their BIOS
+// alongside. The BIOS Manager holds it, so File -> Load Game can take them
+// directly and File -> Load MultiCart is only needed to fill both slots.
+// ROM already holds the image at offset 0 and Multi has been cleared.
+int CMemory::LoadBIOSPairedCart (const char *filename, int32 size)
+{
+	if (!is_SufamiTurbo_Cart(ROM, size) && !is_BSX_Shell(ROM, size))
+		return (-1);
+
+	Multi.cartSizeA = size;
+	strncpy(Multi.fileNameA, filename, sizeof(Multi.fileNameA) - 1);
+	Multi.fileNameA[sizeof(Multi.fileNameA) - 1] = '\0';
+
+	return (LoadMultiCartInt() ? 1 : 0);
+}
+
 bool8 CMemory::LoadMultiCartMem (const uint8 *sourceA, uint32 sourceASize,
                                  const uint8 *sourceB, uint32 sourceBSize,
                                  const uint8 *bios, uint32 biosSize)
@@ -2619,13 +2654,20 @@ bool8 CMemory::LoadMultiCartInt ()
 		{
 			const std::string named = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "STBIOS.bin";
 			FILE *fp = fopen(named.c_str(), "rb");
-			if (!fp)
-				return (FALSE);
-			const size_t size = fread((void *) ROM, 1, 0x40000, fp);
-			fclose(fp);
-			if (!is_SufamiTurbo_BIOS(ROM, (uint32) size))
-				return (FALSE);
-			path = named;
+			if (fp)
+			{
+				const size_t size = fread((void *) ROM, 1, 0x40000, fp);
+				fclose(fp);
+				if (is_SufamiTurbo_BIOS(ROM, (uint32) size))
+					path = named;
+			}
+		}
+
+		if (path.empty())
+		{
+			S9xMessage(S9X_ERROR, S9X_ROM_INFO,
+				"Sufami Turbo BIOS not found - assign it in File -> BIOS Manager.");
+			return (FALSE);
 		}
 
         ROMFilename = path;

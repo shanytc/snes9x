@@ -127,6 +127,10 @@ struct CMemory
     bool8   LoadMultiCartMem (const uint8 *, uint32, const uint8 *, uint32, const uint8 *, uint32);
 	bool8	LoadMultiCart (const char *, const char *);
     bool8	LoadMultiCartInt ();
+	// Carts that need a BIOS beside them (Sufami Turbo, the Satellaview
+	// shell) so File -> Load Game handles them. 1 = loaded, 0 = failed,
+	// -1 = not one of these formats.
+	int		LoadBIOSPairedCart (const char *filename, int32 size);
 	bool8	LoadSufamiTurbo ();
 	bool8	LoadBSCart ();
 	bool8	LoadSFCBox (int32);

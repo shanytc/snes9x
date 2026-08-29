@@ -535,8 +535,17 @@ static double DrcSteadyStateCorr(bool cgb_mode, RunMode m)
 	return 70224.0 * SNES_FPS / base_hz - 1.0;
 }
 
+// Defined further down with the PPU callbacks; Reset() clears it so the
+// host frame blender can see a session restart.
+static uint32_t g_gb_vblank_count = 0;
+
 void Emulator::Reset()
 {
+	// Frames this GB session has produced. The host frame blender treats a
+	// decrease as "new session, re-prime": without it the +GBC hack's
+	// mid-session restart is invisible to it and it keeps blending against a
+	// prev buffer holding pre-restart frames, which shows up as residue.
+	g_gb_vblank_count = 0;
 	impl_->cpu.Reset();
 	MemReset(impl_->mem, impl_->CgbActive());
 	PpuReset(impl_->ppu);
@@ -1969,8 +1978,7 @@ uint32_t Emulator::GetPacketCount() const
 // both BIOS and BIOS-less modes). The frame-blend hook samples this once per
 // SNES frame to tell a genuinely new GB frame from a duplicate/skip caused by
 // the GB↔SNES refresh-rate beat, so it can pair frames correctly. Display-only,
-// not serialized.
-static uint32_t g_gb_vblank_count = 0;
+// not serialized. Defined above Reset(), which clears it.
 
 void Emulator::OnPpuHBlank()
 {

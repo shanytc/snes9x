@@ -2227,15 +2227,21 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	// result degrades to a plain SGB session instead of a blank screen.
 	if (!impl_->ppu.cgb_pal_written) return;
 
-	// Lores only — the offsets below assume the 256x224 SGB frame.
+	// Lores only — the offsets below assume the 256x224 SGB frame. The BIOS
+	// puts the GB picture at y=39, not the y=40 the tile grid suggests: the
+	// rows that animate under a plain SGB session are 39..182. Painting at 40
+	// left the BIOS's own row 39 showing above the overlay as a stripe of
+	// stale GB pixels, and put GB row 143 over border row 183.
+	const uint32_t ORIGIN_X = 48, ORIGIN_Y = 39;
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
-	if (width > SNES_WIDTH || (int) PPU.ScreenHeight < 40 + (int) GB_SCREEN_HEIGHT) return;
+	if (width > SNES_WIDTH ||
+	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return;
 
 	// color_fb is BGR555, so each pixel still needs the host conversion.
 	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
 	{
 		const uint16_t *src = impl_->cgb_overlay_fb + y * GB_SCREEN_WIDTH;
-		uint16_t *dst = dest + (40u + y) * pitch_pixels + 48u;
+		uint16_t *dst = dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X;
 		for (uint32_t x = 0; x < GB_SCREEN_WIDTH; ++x)
 			dst[x] = BgrToHost(src[x]);
 	}

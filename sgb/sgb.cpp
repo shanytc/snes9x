@@ -498,6 +498,24 @@ void Emulator::StartColourPass()
 	}
 
 	impl_->icd2 = icd;
+
+	// ...but not the parts that track where the GB's LCD is. Those are
+	// GB-side, and the GB has just restarted at line 0: carrying the old
+	// row/bank over leaves the BIOS's band mapping off by however many rows
+	// were already scanned, which shows up as a stray line for the rest of
+	// the session. Same for a half-assembled packet, whose remaining bits
+	// the restarted cart will never send.
+	Emulator::Impl::Icd2 &live = impl_->icd2;
+	live.sgb_row = live.sgb_bank = 0;
+	live.sgb_row_latched = live.sgb_bank_latched = 0;
+	live.read_position   = 0;
+	live.lcd_reads       = live.lcd_reads_prev = 0;
+	live.frame_6001_count = 0;
+	live.bit_accumulator = 0;
+	live.packet_bit = live.packet_byte = 0;
+	std::memset(live.assembly_buf, 0, sizeof live.assembly_buf);
+	std::memset(live.lcd_ring, 0, sizeof live.lcd_ring);
+
 	impl_->cgb_overlay_valid = false;
 }
 

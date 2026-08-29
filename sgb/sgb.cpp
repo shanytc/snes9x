@@ -2416,6 +2416,27 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	const uint32_t pre_received = impl_->icd2.packets_received;
 	IcdFeedJoypad(impl_->icd2, value);
 
+	// SGB+GBC hack, colour pass: the border pass already captured the one the
+	// cart meant for this host, so drop any further CHR_TRN/PCT_TRN. The
+	// second boot no longer sees the SGB1 signature it was handed the first
+	// time - A is the CGB $11 now, not $01 - so a cart that palettes its
+	// border per host picks the other variant and overwrites the right one.
+	// Tetris DX does exactly that: its SGB1 border appears, then the second
+	// transfer replaces it with the SGB2 one.
+	if (impl_->sgb_cgb_hack && impl_->hack_pass != 0 &&
+	    impl_->icd2.packets_received > pre_received)
+	{
+		const uint8_t cmd = static_cast<uint8_t>(impl_->icd2.assembly_buf[0] >> 3);
+		if (cmd == 0x13 || cmd == 0x14)
+		{
+			// Un-push it: the BIOS only reads the payload off the LCD once it
+			// has drained the packet, so never handing it over is enough.
+			Emulator::Impl::Icd2 &icd = impl_->icd2;
+			icd.queue_tail = static_cast<uint8_t>((icd.queue_tail - 1) & 63);
+			if (icd.queue_count) icd.queue_count--;
+		}
+	}
+
 	// SGB+GBC hack, border pass: hand over on MASK_EN cancel. Games mask the
 	// GB screen while they set the SGB up and unmask when that is done, so
 	// this is the game itself saying its border and palettes are in place —

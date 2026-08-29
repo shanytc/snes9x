@@ -7780,12 +7780,13 @@ INT_PTR CALLBACK DlgEmulatorHacksProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM
         // is hidden, collapse the space it'd occupy: everything below it
         // slides up by its height and the dialog shrinks by the total.
         //
-        // Settings.SuperGameBoy is TRUE only for a GB/GBC cart running on the
-        // BIOS-less GB core — the SGB BIOS path clears it and sets
-        // SGB_BIOSModeActive instead, and S9xMainLoop forces the hack off
-        // there, so the hidden box can never be silently in effect.
+        // Settings.SuperGameBoy is TRUE only for a GB/GBC cart on the BIOS-less
+        // GB core; the SGB BIOS path clears it and sets SGB_BIOSModeActive
+        // instead. Both run the same GB PPU, so both get the row — gating on
+        // SuperGameBoy alone hid it for every SGB/SGB2 and +GBC session.
         {
-            const bool gb_hack_row = Settings.SuperGameBoy != 0;
+            const bool gb_hack_row = Settings.SuperGameBoy != 0 ||
+                                     Settings.SGB_BIOSModeActive != 0;
             ShowWindow(GetDlgItem(hDlg, IDC_NO_SPRITE_LIMIT_GB), gb_hack_row ? SW_SHOW : SW_HIDE);
 
             const int boxrows[] = { IDC_SFCBOX_OSD_BACKDROP, IDC_SFCBOX_OSD_LANGUAGE_LABEL,

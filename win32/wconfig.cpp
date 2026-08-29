@@ -22,6 +22,7 @@
 #include "../display.h"
 #include "../conffile.h"
 #include "../biosmanager.h"
+#include "../memmap.h"
 #include "../spc7110.h"
 #include "../gfx.h"
 #include "../snapshot.h"
@@ -39,6 +40,12 @@ HANDLE configMutex = NULL;
 
 extern TCHAR multiRomA[MAX_PATH]; // lazy, should put in sGUI and add init to {0} somewhere
 extern TCHAR multiRomB[MAX_PATH];
+
+// Emulation -> BIOS is a session-only override, so the config binds to these
+// rather than to the live Settings; only the BIOS Manager writes them back.
+static uint8 biosDefaultPreference;
+static uint8 biosDefaultGBPolicy;
+static uint8 biosDefaultGBBIOS;
 
 void S9xParseArg (char **argv, int &i, int argc)
 {
@@ -776,7 +783,49 @@ void WinPostLoad(ConfigFile& conf)
 	}
 #endif
 
+	// Same repair for the BIOS Manager paths: builds that stored them through
+	// CIT_STRING wrote each pair of path bytes out as one UTF-8 character, so
+	// widening the saved text back to UTF-16 recovers the original bytes.
+	// Only adopt the result when it names a readable file of the expected size.
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+	{
+		char saved[S9X_BIOS_PATH_MAX];
+		strncpy(saved, S9xGetBiosPath(slot), S9X_BIOS_PATH_MAX - 1);
+		saved[S9X_BIOS_PATH_MAX - 1] = '\0';
+		if (!saved[0] || S9xBiosPathUsable(slot))
+			continue;
+
+		wchar_t wide[S9X_BIOS_PATH_MAX] = { 0 };
+		if (MultiByteToWideChar(CP_UTF8, 0, saved, -1, wide, S9X_BIOS_PATH_MAX / 2) <= 0)
+			continue;
+
+		char recovered[S9X_BIOS_PATH_MAX];
+		strncpy(recovered, (const char *) wide, S9X_BIOS_PATH_MAX - 1);
+		recovered[S9X_BIOS_PATH_MAX - 1] = '\0';
+
+		S9xSetBiosPath(slot, recovered);
+		if (!S9xBiosPathUsable(slot))
+			S9xSetBiosPath(slot, saved);
+	}
+
+	// Start every session on the BIOS Manager's choices; Emulation -> BIOS
+	// overrides them in memory only.
+	Settings.SGB_BIOSPreference = (biosDefaultPreference > 2) ? 2 : biosDefaultPreference;
+	Settings.GBBootPolicy       = (biosDefaultGBPolicy >= S9X_NUM_GBBOOT_POLICIES)
+									  ? (uint8) S9X_GBBOOT_AUTO_SGB : biosDefaultGBPolicy;
+	Settings.GB_BIOSEnabled     = biosDefaultGBBIOS ? TRUE : FALSE;
+
 	WinPostSave(conf);
+}
+
+// Promote the live BIOS choices to the saved defaults. Only the BIOS Manager
+// calls this, so the Emulation -> BIOS overrides never reach the config.
+// GBBIOSEnabled is deliberately absent: the manager has no control for it, so
+// capturing it here would persist the menu's override by the back door.
+void WinSaveBiosDefaults ()
+{
+	biosDefaultPreference = Settings.SGB_BIOSPreference;
+	biosDefaultGBPolicy   = Settings.GBBootPolicy;
 }
 
 void WinPreLoad(ConfigFile& conf)
@@ -959,23 +1008,25 @@ void WinRegisterConfigItems()
 	AddIntC("AudioFidelity", Settings.AudioFidelity, 1, "resampler used to convert the SPC's 32040 Hz to 'Rate': 0 = Hermite (legacy), 1 = Windowed-Sinc");
 #undef CATEGORY
 #define	CATEGORY "SGB"
-	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
+	AddUIntC("BIOSPreference", biosDefaultPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
 #undef CATEGORY
 #define	CATEGORY "BIOS"
 	// ConfigItem keeps `name` as a bare pointer, so the key strings need
 	// storage that outlives this call — a temporary std::string would dangle.
+	// CIT_ASTRING: the slots are narrow char[] and S9X_BIOS_PATH_MAX is a byte
+	// count, so CIT_STRING would widen them and overrun the buffer.
 	static char bios_keys[S9X_NUM_BIOS_SLOTS][64];
 	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
 	{
 		snprintf(bios_keys[i], sizeof bios_keys[i], "BIOS::%s", S9xGetBiosSlotInfo(i)->key);
 		configItems.push_back(ConfigItem(
 			bios_keys[i], (void *) S9xGetBiosPathBuffer(i), S9X_BIOS_PATH_MAX,
-			(void *) "", S9xGetBiosSlotInfo(i)->label, CIT_STRING));
+			(void *) "", S9xGetBiosSlotInfo(i)->label, CIT_ASTRING));
 	}
 #undef CATEGORY
 #define	CATEGORY "SGB"
-	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. Nothing is bundled; drop the file in the BIOS directory.");
-	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default).");
+	AddBoolC("GBBIOSEnabled", biosDefaultGBBIOS, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. Nothing is bundled; drop the file in the BIOS directory.");
+	AddUIntC("GBBootPolicy", biosDefaultGBPolicy, 7, "console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default).");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");
@@ -1106,6 +1157,7 @@ void WinRegisterConfigItems()
     ADD(CheatEditorDialog);
     ADD(CheatSearchDialog);
     ADD(InsertCoin);
+    ADD(BiosManager);
 	ADDN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
 #undef ADD
@@ -1138,6 +1190,7 @@ void WinRegisterConfigItems()
 	ADDXALL(CheatEditorDialog);
 	ADDXALL(CheatSearchDialog);
 	ADDXALL(InsertCoin);
+	ADDXALL(BiosManager);
 	ADDXALLN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDXALLN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDXALLN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDXALLN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDXALLN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
 #undef ADDX

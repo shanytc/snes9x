@@ -9,6 +9,7 @@
 
 #include "port.h"
 #include <string>
+#include <vector>
 
 // User-assigned BIOS file paths, edited through File -> BIOS Manager. A slot
 // with a path set is tried before the legacy by-name search in BIOS_DIR, so
@@ -53,5 +54,18 @@ bool8 S9xBiosPathUsable (int slot);
 // Assigned path when it is readable, otherwise "". Loaders call this first and
 // fall through to their own by-name search when it comes back empty.
 std::string S9xResolveBiosPath (int slot);
+
+// Vets one candidate image; return true to accept it. `size` is how much was
+// read (capped at max_size), `full_size` the candidate's real length — they
+// differ when a caller only wants a header prefix, and a filter that cares
+// about exact sizes must test `full_size`. `ctx` is passed through.
+typedef bool (*S9xBiosAcceptFn) (const uint8 *data, uint32 size, uint32 full_size,
+                                 void *ctx);
+
+// Read a BIOS image into `out`, at most `max_size` bytes. `path` may be a plain
+// file or a .zip, in which case its members are inflated in memory and the
+// largest accepted one wins. A NULL `accept` takes anything non-empty.
+bool8 S9xReadBiosImage (const char *path, std::vector<uint8> &out, uint32 max_size,
+                        S9xBiosAcceptFn accept = NULL, void *ctx = NULL);
 
 #endif

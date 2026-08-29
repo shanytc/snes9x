@@ -1557,6 +1557,13 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             }
             hitHotKey = true;
         }
+        if(HKmatch(BiosManager))
+        {
+            // Through the menu command so the save + GB reload it does aren't
+            // duplicated here.
+            SendMenuCommand(ID_FILE_BIOSMANAGER);
+            hitHotKey = true;
+        }
         if(HKmatch(CheatSearchDialog))
         {
             // update menu state
@@ -2928,9 +2935,54 @@ LRESULT CALLBACK WinProc(
 			Settings.RunAhead = 4;
 			break;
 		case ID_FILE_BIOSMANAGER:
-			if (DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSMANAGER), GUI.hWnd,
-							   DlgBiosManagerProc, (LPARAM) NULL) > 0)
+			{
+				// The console and the four GB-side BIOS files are only consulted
+				// at load time, so a running .gb/.gbc has to be reloaded for the
+				// new choice to show — otherwise the session keeps whatever the
+				// Emulation -> BIOS menu last picked.
+				const uint8 was_policy = Settings.GBBootPolicy;
+				const uint8 was_pref   = Settings.SGB_BIOSPreference;
+				const bool8 was_gbbios = Settings.GB_BIOSEnabled;
+				static const int gb_slots[] = {
+					S9X_BIOS_GB, S9X_BIOS_GBC, S9X_BIOS_SGB1, S9X_BIOS_SGB2
+				};
+				std::string was_paths[4];
+				for (int i = 0; i < 4; i++)
+					was_paths[i] = S9xGetBiosPath(gb_slots[i]);
+
+				// Restore the GUI surface ourselves: reached by hotkey there is
+				// no menu loop to have switched away from the render target.
+				RestoreGUIDisplay();
+				const INT_PTR picked = DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSMANAGER),
+													  GUI.hWnd, DlgBiosManagerProc, (LPARAM) NULL);
+				RestoreSNESDisplay();
+				if (picked <= 0)
+					break;
+
+				WinSaveBiosDefaults();
 				WinSaveConfigFile();
+
+				bool gb_changed = was_policy != Settings.GBBootPolicy ||
+								  was_pref   != Settings.SGB_BIOSPreference ||
+								  was_gbbios != Settings.GB_BIOSEnabled;
+				for (int i = 0; i < 4 && !gb_changed; i++)
+					gb_changed = was_paths[i] != S9xGetBiosPath(gb_slots[i]);
+
+				if (gb_changed && Settings.GBRomPath[0])
+				{
+					TCHAR wpath[_MAX_PATH];
+					Utf8ToWide u8(Settings.GBRomPath);
+					_tcsncpy(wpath, u8, _MAX_PATH - 1);
+					wpath[_MAX_PATH - 1] = 0;
+					RestoreGUIDisplay();
+					if (LoadROM(wpath))
+					{
+						S9xReset();
+						ReInitSound();
+					}
+					RestoreSNESDisplay();
+				}
+			}
 			break;
 		case ID_EMULATION_BIOS_NONE:
 		case ID_EMULATION_BIOS_GB:
@@ -8887,7 +8939,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			ofn.hwndOwner       = hDlg;
 			ofn.lpstrFile       = filename;
 			ofn.nMaxFile        = MAX_PATH;
-			ofn.lpstrFilter     = TEXT("BIOS files\0*.bin;*.rom;*.sfc;*.smc\0All files\0*.*\0\0");
+			ofn.lpstrFilter     = TEXT("BIOS files\0*.zip;*.bin;*.sfc;*.gb;*.gbc\0All files\0*.*\0\0");
 			ofn.lpstrInitialDir = S9xGetDirectoryT(BIOS_DIR);
 			ofn.lpstrTitle      = TEXT("Select BIOS File");
 			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
@@ -14135,7 +14187,7 @@ struct hotkey_dialog_item {
 // hidden slots — the dialog template lays out 18 of them in a 2x9 grid; tabs that
 // have fewer items leave the trailing ones hidden.
 static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES][MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
-    // Tab 0: Emulation (15 items)
+    // Tab 0: Emulation (17 items)
     {
         // Column 1
         { &CustomKeys.SpeedUp,           &CustomKeysExtra.SpeedUp,           HOTKEYS_LABEL_1_1 },
@@ -14155,7 +14207,8 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { &CustomKeys.ResetGame,         &CustomKeysExtra.ResetGame,         HOTKEYS_LABEL_1_13 },
         { &CustomKeys.SaveScreenShot,    &CustomKeysExtra.SaveScreenShot,    HOTKEYS_LABEL_1_14 },
         { &CustomKeys.QuitS9X,           &CustomKeysExtra.QuitS9X,           HOTKEYS_LABEL_1_12 },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { &CustomKeys.BiosManager,       &CustomKeysExtra.BiosManager,       HOTKEYS_BIOS_MANAGER },
+        { NULL, NULL, _T("") },
     },
     // Tab 1: States — uses dedicated controls (g_savestatesControls), no entries here.
     {

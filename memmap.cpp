@@ -1024,6 +1024,12 @@ static bool8 allASCII (uint8 *b, int size)
 	return (TRUE);
 }
 
+static bool AcceptSufamiBIOS (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) size; (void) ctx;
+	return is_SufamiTurbo_BIOS(data, full_size) != FALSE;
+}
+
 static bool8 is_SufamiTurbo_BIOS (const uint8 *data, uint32 size)
 {
 	if (size == 0x40000 &&
@@ -1097,6 +1103,16 @@ static bool8 is_SGB_BIOS (const uint8 *data, uint32 size, uint8 *out_mode)
 	return (TRUE);
 }
 
+// S9xReadBiosImage filter: the first 32 KB must carry the SGB header for the
+// requested variant. `ctx` is the uint8 mode.
+static bool AcceptSGBMode (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) full_size;
+	uint8 got = 0;
+	return size >= 0x8000 && is_SGB_BIOS(data, size, &got) &&
+	       got == *(const uint8 *) ctx;
+}
+
 // Look for an SGB BIOS file matching `mode`. Search order:
 //   1. Same directory as the GB ROM (if path known)
 //   2. BIOS_DIR — snes9x's configured BIOS search path
@@ -1115,22 +1131,16 @@ static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out
 	};
 	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
 
-	// A path set in the BIOS Manager wins over the by-name search.
+	// A path set in the BIOS Manager wins over the by-name search; it may be a
+	// .zip, which S9xReadBiosImage inflates far enough to check the header.
 	const std::string assigned = S9xResolveBiosPath(mode == 2 ? S9X_BIOS_SGB2 : S9X_BIOS_SGB1);
 	if (!assigned.empty())
 	{
-		FILE *f = fopen(assigned.c_str(), "rb");
-		if (f)
+		std::vector<uint8> img;
+		if (S9xReadBiosImage(assigned.c_str(), img, 0x8000, AcceptSGBMode, &mode))
 		{
-			uint8 hdr[0x8000];
-			const size_t n = fread(hdr, 1, sizeof hdr, f);
-			fclose(f);
-			uint8 got_mode = 0;
-			if (n >= 0x8000 && is_SGB_BIOS(hdr, (uint32) n, &got_mode) && got_mode == mode)
-			{
-				out_path = assigned;
-				return (TRUE);
-			}
+			out_path = assigned;
+			return (TRUE);
 		}
 	}
 
@@ -1234,6 +1244,16 @@ static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
 	return got == 256;
 }
 
+// S9xReadBiosImage filter for a boot ROM: exact size for the console plus the
+// LD SP,$FFFE opening. `ctx` is a bool, true for CGB.
+static bool AcceptGBBootROM (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) size;
+	const bool cgb = *(const bool *) ctx;
+	if (cgb ? (full_size != 0x900 && full_size != 0x800) : (full_size != 0x100)) return (false);
+	return data[0] == 0x31 && data[1] == 0xFE && data[2] == 0xFF;
+}
+
 // Find a GB/GBC boot ROM (the scrolling-logo animation). Same search order as
 // FindSGB_BIOS; size + the LD SP,$FFFE opening reject a bad dump, which would
 // otherwise hang the GB at $0000. Fills out_bytes when non-null.
@@ -1250,25 +1270,19 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 	};
 	const char **names = cgb ? cgb_names : dmg_names;
 
-	// A path set in the BIOS Manager wins over the by-name search.
+	// A path set in the BIOS Manager wins over the by-name search, and may be a
+	// .zip. Reading one byte past the largest valid size lets the filter reject
+	// anything longer, as the plain-file path used to with its EOF probe.
 	const std::string assigned = S9xResolveBiosPath(cgb ? S9X_BIOS_GBC : S9X_BIOS_GB);
 	if (!assigned.empty())
 	{
-		FILE *f = fopen(assigned.c_str(), "rb");
-		if (f)
+		bool want_cgb = cgb;
+		std::vector<uint8> img;
+		if (S9xReadBiosImage(assigned.c_str(), img, 0x901, AcceptGBBootROM, &want_cgb))
 		{
-			uint8 buf[0x900];
-			const size_t n = fread(buf, 1, sizeof buf, f);
-			const bool oversize = (fgetc(f) != EOF);
-			fclose(f);
-			const bool sized = cgb ? (n == 0x900 || n == 0x800) : (n == 0x100);
-			if (!oversize && sized &&
-			    buf[0] == 0x31 && buf[1] == 0xFE && buf[2] == 0xFF)
-			{
-				out_path = assigned;
-				if (out_bytes) out_bytes->assign(buf, buf + n);
-				return (TRUE);
-			}
+			out_path = assigned;
+			if (out_bytes) *out_bytes = img;
+			return (TRUE);
 		}
 	}
 
@@ -2091,20 +2105,20 @@ bool8 CMemory::LoadROM (const char *filename)
 // ORDER MATTERS: GB core init happens FIRST because LoadROMMem below
 // memsets ROM[] — the GB bytes would be gone before our SGB::Cart could
 // copy them out.
+static bool AcceptSGBAny (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+    (void) full_size; (void) ctx;
+    return is_SGB_BIOS(data, size, NULL) != FALSE;
+}
+
+// bios_path may be a .zip; S9xReadBiosImage picks the member that carries an
+// SGB header and inflates it.
 static bool8 LoadSGBBIOSBytes (const char *bios_path, std::vector<uint8> &out_bios, uint8 &out_mode)
 {
-    FILE *f = fopen(bios_path, "rb");
-    if (!f) return FALSE;
-    fseek(f, 0, SEEK_END);
-    const long bios_size = ftell(f);
-    if (bios_size <= 0 || bios_size > (long)CMemory::MAX_ROM_SIZE) { fclose(f); return FALSE; }
-    fseek(f, 0, SEEK_SET);
-    out_bios.assign((size_t)bios_size, 0);
-    const bool ok = (fread(out_bios.data(), 1, bios_size, f) == (size_t)bios_size);
-    fclose(f);
-    if (!ok) return FALSE;
+    if (!S9xReadBiosImage(bios_path, out_bios, CMemory::MAX_ROM_SIZE, AcceptSGBAny, NULL))
+        return FALSE;
     out_mode = 1;
-    if (!is_SGB_BIOS(out_bios.data(), (uint32)out_bios.size(), &out_mode)) return FALSE;
+    is_SGB_BIOS(out_bios.data(), (uint32) out_bios.size(), &out_mode);
     return TRUE;
 }
 
@@ -2588,22 +2602,31 @@ bool8 CMemory::LoadMultiCartInt ()
         else if(Multi.cartOffsetB) // clear cart A so the bios can detect that it's not present
             memset(ROM, 0, Multi.cartOffsetB);
 
-        FILE	*fp;
-	    size_t	size;
-		std::string path = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
+        // The BIOS Manager path wins and may be a .zip; a bad file there still
+        // falls through to STBIOS.bin in BIOS_DIR.
+		std::string path;
+		const std::string assigned = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
+		if (!assigned.empty())
+		{
+			std::vector<uint8> img;
+			if (S9xReadBiosImage(assigned.c_str(), img, 0x40000, AcceptSufamiBIOS, NULL))
+			{
+				memcpy(ROM, img.data(), img.size());
+				path = assigned;
+			}
+		}
 		if (path.empty())
-			path = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "STBIOS.bin";
-
-	    fp = fopen(path.c_str(), "rb");
-	    if (fp)
-	    {
-		    size = fread((void *) ROM, 1, 0x40000, fp);
-		    fclose(fp);
-		    if (!is_SufamiTurbo_BIOS(ROM, size))
-			    return (FALSE);
-	    }
-	    else
-		    return (FALSE);
+		{
+			const std::string named = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "STBIOS.bin";
+			FILE *fp = fopen(named.c_str(), "rb");
+			if (!fp)
+				return (FALSE);
+			const size_t size = fread((void *) ROM, 1, 0x40000, fp);
+			fclose(fp);
+			if (!is_SufamiTurbo_BIOS(ROM, (uint32) size))
+				return (FALSE);
+			path = named;
+		}
 
         ROMFilename = path;
     }

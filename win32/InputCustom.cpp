@@ -362,6 +362,7 @@ int GetNumHotKeysAssignedTo (WORD Key, int modifiers)
         if(MATCHES_KEY(Mute))              count++;
 		if(MATCHES_KEY(ToggleBackdrop))    count++;
 		if(MATCHES_KEY(InsertCoin))        count++;
+		if(MATCHES_KEY(BiosManager))       count++;
 		for(int i = 0 ; i < 5 ; i++)
 			if(MATCHES_KEY(SFCBoxKeyswitch[i])) count++;
 

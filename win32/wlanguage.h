@@ -148,6 +148,7 @@ Nintendo is a trademark.")
 #define HOTKEYS_CHEAT_EDITOR_DIALOG TEXT("Cheats Editor Dialog:")
 #define HOTKEYS_CHEAT_SEARCH_DIALOG TEXT("Cheats Search Dialog:")
 #define HOTKEYS_INSERT_COIN TEXT("Insert Coin:")
+#define HOTKEYS_BIOS_MANAGER TEXT("BIOS Manager:")
 // Keep these short enough for the 72-DLU IDC_LABEL_HK* statics: longer text
 // word-wraps and the clipped second line shows as pixel garbage under the label.
 #define HOTKEYS_KEYSWITCH_1 TEXT("Key Switch 1:")

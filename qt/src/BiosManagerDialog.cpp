@@ -98,7 +98,7 @@ void BiosManagerDialog::browse(int slot)
 
     const QString file = QFileDialog::getOpenFileName(
         this, tr("Select %1 BIOS").arg(QString::fromUtf8(info->label)), start,
-        tr("BIOS files (*.bin *.rom *.sfc *.smc *.BIN);;All files (*)"));
+        tr("BIOS files (*.zip *.bin *.sfc *.gb *.gbc *.BIN);;All files (*)"));
 
     if (!file.isEmpty())
         rows[slot].edit->setText(file);

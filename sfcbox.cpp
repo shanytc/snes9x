@@ -1348,19 +1348,28 @@ void S9xSFCBoxPostLoadState (void)
 // ---------------------------------------------------------------------------
 // BIOS loading
 
+// Picks the archive member of exactly the size the caller asked for, so a zip
+// holding both SFC Box ROMs resolves each slot to the right one.
+static bool AcceptExactSize (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) data; (void) size;
+	return full_size == *(const uint32 *) ctx;
+}
+
 static bool8 LoadBIOSFile (const char *name, uint8 *dest, uint32 size, uint32 minsize,
 						   int bios_slot = -1)
 {
-	// A path set in the BIOS Manager wins over the by-name search.
+	// A path set in the BIOS Manager wins over the by-name search, and may be a
+	// .zip.
 	std::string assigned = (bios_slot >= 0) ? S9xResolveBiosPath(bios_slot) : std::string();
 	if (!assigned.empty())
 	{
-		FILE *af = fopen(assigned.c_str(), "rb");
-		if (af)
+		std::vector<uint8> img;
+		if (S9xReadBiosImage(assigned.c_str(), img, size, AcceptExactSize, &size) &&
+			img.size() >= minsize)
 		{
-			const size_t got = fread(dest, 1, size, af);
-			fclose(af);
-			if (got >= minsize) return (TRUE);
+			memcpy(dest, img.data(), img.size());
+			return (TRUE);
 		}
 	}
 

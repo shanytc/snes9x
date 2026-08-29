@@ -435,6 +435,7 @@ struct SCustomKeys {
 	SCustomKey MasterHotkey;
 	SCustomKey InsertCoin;           // SFC-Box front-panel coin switch
 	SCustomKey SFCBoxKeyswitch[5];   // rotary positions, panel order 1/OFF/ON/2/3
+	SCustomKey BiosManager;          // opens File -> BIOS Manager
 };
 
 struct SCustomKeyExtra {
@@ -492,6 +493,7 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra CheatSearchDialog;
 	SCustomKeyExtra InsertCoin;
 	SCustomKeyExtra SFCBoxKeyswitch[5];
+	SCustomKeyExtra BiosManager;
 };
 
 struct SJoypad {
@@ -643,6 +645,7 @@ void S9xWinRemoveRegistryKeys();
 bool RegisterProgid();
 void RegisterExts(void);
 void WinSaveConfigFile();
+void WinSaveBiosDefaults();
 
 std::wstring GetDlgItemTextWstring(HWND hDlg, int nIDDlgItem);
 std::wstring GetTextWstring(HWND hWnd);

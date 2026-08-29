@@ -127,7 +127,7 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
 
             auto filter = Gtk::FileFilter::create();
             filter->set_name(_("BIOS files"));
-            for (const char *pat : { "*.bin", "*.BIN", "*.rom", "*.sfc", "*.smc" })
+            for (const char *pat : { "*.zip", "*.bin", "*.BIN", "*.sfc", "*.gb", "*.gbc" })
                 filter->add_pattern(pat);
             chooser.add_filter(filter);
             auto all = Gtk::FileFilter::create();

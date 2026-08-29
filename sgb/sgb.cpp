@@ -172,6 +172,9 @@ struct Emulator::Impl
 	// Hardware-model override for the acid-test runner: 0 = follow the
 	// cart header, 1 = force DMG, 2 = force CGB, 3 = authentic BIOS-less
 	// SGB (SGB command processing active). Applied at LoadROM.
+	// CGB hardware running a DMG cart: BGP/OBP still select from the boot
+	// ROM's compatibility palettes. Mirrored into Ppu::dmg_compat.
+	bool        dmg_compat_cgb = false;
 	// cgb_compat marks a forced-CGB run of a non-CGB cart (real CGB's
 	// "DMG compatibility mode": A=$11 handoff, DMG rendering).
 	uint8_t     force_model = 0;
@@ -568,6 +571,7 @@ void Emulator::Reset()
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
 	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
+	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -883,10 +887,14 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	if (!CartLoad(impl_->cart, data, size, path))
 		return false;
 	impl_->has_rom = true;
+	const bool cart_is_cgb = (impl_->cart.header.cgb_flag & 0x80) != 0;
 	impl_->cgb_mode = (impl_->cgb_override >= 0)
 	                ? (impl_->cgb_override != 0)
-	                : ((impl_->cart.header.cgb_flag & 0x80) != 0);
+	                : cart_is_cgb;
 	impl_->cgb_compat = false;
+	// A real Color runs a cart with no CGB flag in DMG-compatibility mode:
+	// the boot ROM's palettes, still indexed through the cart's BGP/OBP.
+	impl_->dmg_compat_cgb = impl_->cgb_mode && !cart_is_cgb;
 	impl_->sgb_authentic = false;
 	if (impl_->force_model == 1)
 	{
@@ -1533,6 +1541,7 @@ void Emulator::RunCycles(int32_t tcycles)
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
 	// garbage. Gate the color path off whenever the BIOS is driving.
 	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
+	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -2763,6 +2772,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
 	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
+	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 

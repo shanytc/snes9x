@@ -318,6 +318,16 @@ struct Ppu
 	// dot; sel_glitch_data is the byte last driven onto it.
 	uint8_t  tile_sel_glitch = 0;
 	uint8_t  sel_glitch_data = 0;
+
+	// CGB hardware running a cart with no CGB flag — the boot ROM's DMG
+	// compatibility mode. Colour still comes from CGB palette RAM, which the
+	// boot ROM fills from the title hash, but the 2-bit index is routed
+	// through BGP/OBP first, as the hardware does in this mode. Skipping that
+	// renders any game that permutes BGP with its shades scrambled: Killer
+	// Instinct writes $1B, a full inversion. New fields go at the END — a
+	// mid-struct insert desynchronises anything compiled against the old
+	// layout.
+	bool     dmg_compat = false;
 };
 
 void PpuReset(Ppu &p);

@@ -231,9 +231,9 @@ void Snes9xController::updateSettings(EmuConfig *config)
     // but never applied here.
     Settings.SeparateEchoBuffer = config->enable_shadow_buffer;
 
-    // SGB BIOS mode preference for GB/GBC ROMs (0=No BIOS, 1=SGB1, 2=SGB2). The
-    // BIOS menu also writes this back into config so the choice persists.
-    Settings.SGB_BIOSPreference = (config->sgb_bios_preference < 0 || config->sgb_bios_preference > 2)
+    // Which SGB BIOS the Automatic consoles prefer (1=SGB1, 2=SGB2). 0 was the
+    // old "No BIOS" entry, which the menu can no longer set.
+    Settings.SGB_BIOSPreference = (config->sgb_bios_preference < 1 || config->sgb_bios_preference > 2)
                                       ? 2
                                       : (uint8)config->sgb_bios_preference;
 

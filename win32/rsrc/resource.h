@@ -689,10 +689,8 @@
 #define ID_EMULATION_RUNAHEAD_3         40195
 #define ID_EMULATION_RUNAHEAD_4         40196
 #define ID_EMULATION_BIOS               44345
-#define ID_EMULATION_BIOS_NONE          44346
-#define ID_EMULATION_BIOS_SGB1          44347
-#define ID_EMULATION_BIOS_SGB2          44348
-#define ID_EMULATION_BIOS_GB            44351
+// One per S9xGBBootPolicy, in enum order; the handler indexes off POLICY0.
+#define ID_EMULATION_BIOS_POLICY0       44370
 #define ID_TESTS_ACIDTESTS          44349
 #define ID_FILE_BIOSMANAGER             44369
 #define IDD_BIOSMANAGER                 191
@@ -701,7 +699,6 @@
 #define IDC_BIOSMGR_BROWSE0             3420
 #define IDC_BIOSMGR_CLEAR0              3430
 #define IDC_BIOSMGR_STATUS0             3440
-#define IDC_BIOSMGR_DEFAULT             3450
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361

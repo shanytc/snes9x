@@ -61,25 +61,6 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
         rows.push_back({ edit, status });
     }
 
-    auto box = new QGroupBox(tr("Default for Game Boy content"));
-    auto box_layout = new QHBoxLayout(box);
-    gb_default = new QComboBox();
-    for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
-        gb_default->addItem(tr(S9xGBBootPolicyName(i)));
-    gb_default->setItemData(S9X_GBBOOT_GBC,
-        tr("Colourises Game Boy Color carts. Mono-only carts are experimental — "
-           "DMG-compatibility colourisation is not implemented yet."), Qt::ToolTipRole);
-    gb_default->setItemData(S9X_GBBOOT_SGB_GBC,
-        tr("Experimental: Game Boy Color colours inside a Super Game Boy border — "
-           "on real hardware an SGB runs colour carts in monochrome."), Qt::ToolTipRole);
-    box_layout->addWidget(gb_default);
-    box_layout->addStretch(1);
-    outer->addWidget(box);
-
-    gb_default->setCurrentIndex(Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES
-                                    ? Settings.GBBootPolicy
-                                    : S9X_GBBOOT_AUTO_SGB);
-
     auto buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     outer->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, this, &BiosManagerDialog::applyAndClose);
@@ -142,19 +123,6 @@ void BiosManagerDialog::applyAndClose()
         S9xSetBiosPath(slot, path.c_str());
         app->config->bios_paths[slot] = path;
     }
-
-    Settings.GBBootPolicy = (uint8) gb_default->currentIndex();
-    // An SGB-involving policy is meaningless with the SGB BIOS switched off.
-    if ((Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
-         Settings.GBBootPolicy == S9X_GBBOOT_SGB2 ||
-         Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
-         Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB) &&
-        Settings.SGB_BIOSPreference == 0)
-        Settings.SGB_BIOSPreference = 2;
-
-    app->config->gb_boot_policy      = Settings.GBBootPolicy;
-    app->config->sgb_bios_preference = Settings.SGB_BIOSPreference;
-    app->config->gb_bios_enabled     = Settings.GB_BIOSEnabled;
 
     accept();
 }

@@ -41,12 +41,6 @@ HANDLE configMutex = NULL;
 extern TCHAR multiRomA[MAX_PATH]; // lazy, should put in sGUI and add init to {0} somewhere
 extern TCHAR multiRomB[MAX_PATH];
 
-// Emulation -> BIOS is a session-only override, so the config binds to these
-// rather than to the live Settings; only the BIOS Manager writes them back.
-static uint8 biosDefaultPreference;
-static uint8 biosDefaultGBPolicy;
-static uint8 biosDefaultGBBIOS;
-
 void S9xParseArg (char **argv, int &i, int argc)
 {
 	if (strcasecmp (argv [i], "-removeregistrykeys") == 0)
@@ -808,24 +802,15 @@ void WinPostLoad(ConfigFile& conf)
 			S9xSetBiosPath(slot, saved);
 	}
 
-	// Start every session on the BIOS Manager's choices; Emulation -> BIOS
-	// overrides them in memory only.
-	Settings.SGB_BIOSPreference = (biosDefaultPreference > 2) ? 2 : biosDefaultPreference;
-	Settings.GBBootPolicy       = (biosDefaultGBPolicy >= S9X_NUM_GBBOOT_POLICIES)
-									  ? (uint8) S9X_GBBOOT_AUTO_SGB : biosDefaultGBPolicy;
-	Settings.GB_BIOSEnabled     = biosDefaultGBBIOS ? TRUE : FALSE;
+	// Emulation -> BIOS is the console selector now, so a hand-edited value
+	// has to be caught here rather than trusted straight out of the file.
+	if (Settings.GBBootPolicy >= S9X_NUM_GBBOOT_POLICIES)
+		Settings.GBBootPolicy = (uint8) S9X_GBBOOT_AUTO_SGB;
+	// 0 was the old "No BIOS" entry, which the menu can no longer set.
+	if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
+		Settings.SGB_BIOSPreference = 2;
 
 	WinPostSave(conf);
-}
-
-// Promote the live BIOS choices to the saved defaults. Only the BIOS Manager
-// calls this, so the Emulation -> BIOS overrides never reach the config.
-// GBBIOSEnabled is deliberately absent: the manager has no control for it, so
-// capturing it here would persist the menu's override by the back door.
-void WinSaveBiosDefaults ()
-{
-	biosDefaultPreference = Settings.SGB_BIOSPreference;
-	biosDefaultGBPolicy   = Settings.GBBootPolicy;
 }
 
 void WinPreLoad(ConfigFile& conf)
@@ -1008,7 +993,7 @@ void WinRegisterConfigItems()
 	AddIntC("AudioFidelity", Settings.AudioFidelity, 1, "resampler used to convert the SPC's 32040 Hz to 'Rate': 0 = Hermite (legacy), 1 = Windowed-Sinc");
 #undef CATEGORY
 #define	CATEGORY "SGB"
-	AddUIntC("BIOSPreference", biosDefaultPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
+	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "which Super Game Boy BIOS the non-pinned consoles prefer: 1=SGB1, 2=SGB2 (default). The Super Game Boy and Super Game Boy 2 entries in Emulation -> BIOS pin one outright.");
 #undef CATEGORY
 #define	CATEGORY "BIOS"
 	// ConfigItem keeps `name` as a bare pointer, so the key strings need
@@ -1025,8 +1010,8 @@ void WinRegisterConfigItems()
 	}
 #undef CATEGORY
 #define	CATEGORY "SGB"
-	AddBoolC("GBBIOSEnabled", biosDefaultGBBIOS, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. Nothing is bundled; drop the file in the BIOS directory.");
-	AddUIntC("GBBootPolicy", biosDefaultGBPolicy, 7, "console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default).");
+	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
+	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> BIOS: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default), 8=SGB2+GBC.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

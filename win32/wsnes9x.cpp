@@ -2936,13 +2936,8 @@ LRESULT CALLBACK WinProc(
 			break;
 		case ID_FILE_BIOSMANAGER:
 			{
-				// The console and the four GB-side BIOS files are only consulted
-				// at load time, so a running .gb/.gbc has to be reloaded for the
-				// new choice to show — otherwise the session keeps whatever the
-				// Emulation -> BIOS menu last picked.
-				const uint8 was_policy = Settings.GBBootPolicy;
-				const uint8 was_pref   = Settings.SGB_BIOSPreference;
-				const bool8 was_gbbios = Settings.GB_BIOSEnabled;
+				// The GB-side BIOS files are only consulted at load time, so a
+				// running .gb/.gbc has to be reloaded for a new one to show.
 				static const int gb_slots[] = {
 					S9X_BIOS_GB, S9X_BIOS_GBC, S9X_BIOS_SGB1, S9X_BIOS_SGB2
 				};
@@ -2959,12 +2954,9 @@ LRESULT CALLBACK WinProc(
 				if (picked <= 0)
 					break;
 
-				WinSaveBiosDefaults();
 				WinSaveConfigFile();
 
-				bool gb_changed = was_policy != Settings.GBBootPolicy ||
-								  was_pref   != Settings.SGB_BIOSPreference ||
-								  was_gbbios != Settings.GB_BIOSEnabled;
+				bool gb_changed = false;
 				for (int i = 0; i < 4 && !gb_changed; i++)
 					gb_changed = was_paths[i] != S9xGetBiosPath(gb_slots[i]);
 
@@ -2984,33 +2976,24 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			break;
-		case ID_EMULATION_BIOS_NONE:
-		case ID_EMULATION_BIOS_GB:
-		case ID_EMULATION_BIOS_SGB1:
-		case ID_EMULATION_BIOS_SGB2:
+		case ID_EMULATION_BIOS_POLICY0 + 0:
+		case ID_EMULATION_BIOS_POLICY0 + 1:
+		case ID_EMULATION_BIOS_POLICY0 + 2:
+		case ID_EMULATION_BIOS_POLICY0 + 3:
+		case ID_EMULATION_BIOS_POLICY0 + 4:
+		case ID_EMULATION_BIOS_POLICY0 + 5:
+		case ID_EMULATION_BIOS_POLICY0 + 6:
+		case ID_EMULATION_BIOS_POLICY0 + 7:
+		case ID_EMULATION_BIOS_POLICY0 + 8:
 			{
-				const UINT bios_id = LOWORD(wParam);
-				// Quick per-cart override of the BIOS Manager's console policy.
-				// Choosing SGB moves the policy back when it was pinned elsewhere.
-				switch (bios_id)
-				{
-					case ID_EMULATION_BIOS_NONE:
-						Settings.SGB_BIOSPreference = 0;
-						Settings.GB_BIOSEnabled     = FALSE;
-						break;
-					case ID_EMULATION_BIOS_GB:
-						Settings.SGB_BIOSPreference = 0;
-						Settings.GB_BIOSEnabled     = TRUE;
-						break;
-					case ID_EMULATION_BIOS_SGB1:
-						Settings.SGB_BIOSPreference = 1;
-						Settings.GBBootPolicy       = S9X_GBBOOT_SGB;
-						break;
-					default:
-						Settings.SGB_BIOSPreference = 2;
-						Settings.GBBootPolicy       = S9X_GBBOOT_SGB2;
-						break;
-				}
+				// Which console GB content runs on. The BIOS for it is used when
+				// one is assigned and skipped when not, so there is nothing else
+				// to pick here.
+				const uint8 policy = (uint8) (LOWORD(wParam) - ID_EMULATION_BIOS_POLICY0);
+				if (policy == Settings.GBBootPolicy)
+					break;
+				Settings.GBBootPolicy = policy;
+				WinSaveConfigFile();
 				if (Settings.GBRomPath[0])
 				{
 					TCHAR wpath[_MAX_PATH];
@@ -5540,8 +5523,6 @@ static void CheckMenuStates ()
 
 	{
 		const bool gb_loaded = (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
-		const bool sgb1_avail = gb_loaded && S9xSGBBIOSAvailable(1, Settings.GBRomPath) != FALSE;
-		const bool sgb2_avail = gb_loaded && S9xSGBBIOSAvailable(2, Settings.GBRomPath) != FALSE;
 
 		static HMENU s_bios_hmenu  = NULL;
 		static HMENU s_bios_parent = NULL;
@@ -5608,46 +5589,15 @@ static void CheckMenuStates ()
 
 		if (gb_loaded && s_bios_hmenu)
 		{
-			// Relabel from the cart's CGB flag, only on a change so repeated
-			// retitling doesn't fight LocalizeMenu.
-			const bool cgb_cart = S9xGBCartIsCgb() != FALSE;
-			static int s_bios_gb_label = -1;
-			if (s_bios_gb_label != (int)cgb_cart)
+			// Radio-check the chosen console, not the one that ended up running:
+			// this is a saved preference, and a policy whose BIOS is missing
+			// still runs the cart BIOS-less rather than picking something else.
+			const uint8 policy = (Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
+									 ? Settings.GBBootPolicy : (uint8) S9X_GBBOOT_AUTO_SGB;
+			for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
 			{
-				s_bios_gb_label = (int)cgb_cart;
-				MENUITEMINFO txt = {};
-				txt.cbSize     = sizeof(txt);
-				txt.fMask      = MIIM_STRING;
-				TCHAR gb_txt[] = TEXT("&Game Boy BIOS");
-				TCHAR gbc_txt[] = TEXT("&Game Boy Color BIOS");
-				txt.dwTypeData = cgb_cart ? gbc_txt : gb_txt;
-				SetMenuItemInfo(s_bios_hmenu, ID_EMULATION_BIOS_GB, FALSE, &txt);
-				if (LocaleIsTranslated())
-					LocalizeMenu(s_bios_hmenu);
-			}
-
-			// Check what is running, not what was asked for: a missing file falls back.
-			const bool sgb_on = Settings.SGB_BIOSModeActive != FALSE;
-			const int  active = sgb_on ? ((Settings.GameBoyRunMode == 2) ? 3 : 2)
-			                           : (Settings.GB_BIOSActive ? 1 : 0);
-
-			const int  biosIds[4] = {
-				ID_EMULATION_BIOS_NONE,
-				ID_EMULATION_BIOS_GB,
-				ID_EMULATION_BIOS_SGB1,
-				ID_EMULATION_BIOS_SGB2
-			};
-			const bool avail[4] = {
-				true,
-				S9xGBBIOSAvailable(cgb_cart ? TRUE : FALSE, Settings.GBRomPath) != FALSE,
-				sgb1_avail,
-				sgb2_avail
-			};
-			for (int i = 0; i < 4; i++)
-			{
-				mii.fState = (i == active) ? MFS_CHECKED : MFS_UNCHECKED;
-				if (!avail[i]) mii.fState |= MFS_DISABLED;
-				SetMenuItemInfo(GUI.hMenu, biosIds[i], FALSE, &mii);
+				mii.fState = (i == policy) ? MFS_CHECKED : MFS_UNCHECKED;
+				SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, FALSE, &mii);
 			}
 		}
 	}
@@ -8905,14 +8855,6 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
 			BiosManagerRefreshStatus(hDlg, slot);
 		}
-
-		HWND combo = GetDlgItem(hDlg, IDC_BIOSMGR_DEFAULT);
-		for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
-			SendMessage(combo, CB_ADDSTRING, 0,
-						(LPARAM) (wchar_t *) Utf8ToWide(S9xGBBootPolicyName(i)));
-		SendMessage(combo, CB_SETCURSEL,
-					(Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
-						? Settings.GBBootPolicy : S9X_GBBOOT_AUTO_SGB, 0);
 		return true;
 	}
 
@@ -8964,18 +8906,6 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 				GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
 				S9xSetBiosPath(slot, WideToUtf8(wtext));
 			}
-
-			const LRESULT pick = SendDlgItemMessage(hDlg, IDC_BIOSMGR_DEFAULT, CB_GETCURSEL, 0, 0);
-			if (pick >= 0 && pick < S9X_NUM_GBBOOT_POLICIES)
-				Settings.GBBootPolicy = (uint8) pick;
-			// An SGB-involving policy is meaningless with the SGB BIOS off.
-			if ((Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
-				 Settings.GBBootPolicy == S9X_GBBOOT_SGB2 ||
-				 Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC ||
-				 Settings.GBBootPolicy == S9X_GBBOOT_AUTO_SGB) &&
-				Settings.SGB_BIOSPreference == 0)
-				Settings.SGB_BIOSPreference = 2;
-
 			EndDialog(hDlg, 1);
 			return true;
 		}

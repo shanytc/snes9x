@@ -63,6 +63,10 @@ public:
 	// should fall back to a full power-cycle.
 	bool SoftReset();
 
+	// SGB+GBC hack only: end the border pass and restart the cart with the
+	// CGB signature. Driven internally from RunCycles.
+	void StartColourPass();
+
 	bool LoadROM(const uint8_t *data, size_t size, const char *path = nullptr);
 	void UnloadROM();
 	bool HasROM() const;

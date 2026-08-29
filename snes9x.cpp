@@ -235,7 +235,10 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	Settings.InterpolationMethod        =  conf.GetInt ("Sound::InterpolationMethod",          2);
 	Settings.AudioFidelity              =  conf.GetInt ("Sound::AudioFidelity",                1); // 1 = windowed-sinc
 	Settings.SGB_BIOSPreference         =  static_cast<uint8>(conf.GetUInt("SGB::BIOSPreference", 2));
-	if (Settings.SGB_BIOSPreference > 2) Settings.SGB_BIOSPreference = 2;
+	// 0 was the old "No BIOS" and no desktop UI can set it any more, so a
+	// leftover would disable SGB with no way to turn it back on.
+	if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
+		Settings.SGB_BIOSPreference = 2;
 	// BIOS Manager paths, tried before the by-name search in BIOS_DIR.
 	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
 	{

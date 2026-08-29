@@ -422,9 +422,9 @@ int Snes9xConfig::save_config_file()
                   S9xGetBiosSlotInfo(i)->label);
 
     section = "SGB";
-    outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
+    outint("BIOSPreference", Settings.SGB_BIOSPreference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
     outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
-    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default)");
+    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> BIOS: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default), 8=SGB2+GBC");
 
     section = "Input";
     controllers controller = CTL_NONE;
@@ -712,7 +712,8 @@ int Snes9xConfig::load_config_file()
 
     section = "SGB";
     inint("BIOSPreference", Settings.SGB_BIOSPreference);
-    if (Settings.SGB_BIOSPreference > 2)
+    // 0 was the old "No BIOS" entry, which the menu can no longer set.
+    if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
         Settings.SGB_BIOSPreference = 2;
     inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
     inint("GBBootPolicy", Settings.GBBootPolicy);

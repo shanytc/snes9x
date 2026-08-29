@@ -144,11 +144,28 @@ struct Emulator::Impl
 	bool        cgb_overlay_valid = false;
 	uint8_t     cgb_overlay_ly = 0;
 
+	// The SGB+GBC hack runs the cart twice. Pass 0 boots it as a plain SGB
+	// game so it transfers its custom border: a cart handed the CGB signature
+	// takes its colour path and many (Zelda DX, Men in Black) then never send
+	// one. Pass 1 warm-restarts it with the CGB signature for real colour —
+	// the border is SNES-side by then and survives. The handover is the
+	// game's own MASK_EN cancel; hack_frames only feeds the failsafe.
+	uint8_t     hack_pass       = 0;
+	uint32_t    hack_frames     = 0;
+	uint32_t    hack_restart_at = 0;   // 0 = not armed
+
+	// Pure failsafe, in GB VBlanks: the handover is driven by the game's own
+	// MASK_EN cancel (see OnJoyserWrite), and every cart measured sends one by
+	// frame 183. This only stops a cart that never unmasks from being stranded
+	// in monochrome, so it is deliberately far past any real value.
+	static const uint32_t kHackBorderLimit = 600;
+
 	// The SGB BIOS normally forces CGB off (a real SGB boots CGB carts as DMG);
-	// sgb_cgb_hack keeps colour hardware on underneath it.
+	// sgb_cgb_hack keeps colour hardware on underneath it, from pass 1 on.
 	bool CgbActive() const
 	{
-		return cgb_mode && (!Settings.SGB_BIOSModeActive || sgb_cgb_hack);
+		return cgb_mode && (!Settings.SGB_BIOSModeActive ||
+		                    (sgb_cgb_hack && hack_pass != 0));
 	}
 	float       clock_mul = 1.0f;
 
@@ -446,6 +463,30 @@ bool Emulator::SoftReset()
 	impl_->handoff_frames        = handoff_count;
 	impl_->icd2.control          = control;
 	return true;
+}
+
+// SGB+GBC hack: hand the border pass over to the colour pass. The border the
+// cart just transferred lives in SNES VRAM, which nothing here touches, so a
+// warm restart of the GB alone keeps it. SoftReset skips the GB boot ROM, so
+// no second handshake reaches the BIOS's validator, and Reset()'s post-boot
+// block hands the cart the CGB signature once CgbActive() is true.
+void Emulator::StartColourPass()
+{
+	if (impl_->hack_pass != 0) return;
+
+	impl_->hack_pass       = 1;
+	impl_->hack_restart_at = 0;
+
+	// Mid-splash the BIOS has not handed the cart control yet; there is
+	// nothing to restart, so stay on the border pass and retry next frame.
+	if (!SoftReset())
+	{
+		impl_->hack_pass = 0;
+		impl_->hack_restart_at = impl_->hack_frames + 1;
+		return;
+	}
+
+	impl_->cgb_overlay_valid = false;
 }
 
 // The frame-locked RunFrame runs exactly one 70224-T-cycle GB frame per
@@ -1005,6 +1046,10 @@ bool Emulator::IsCgb() const
 void Emulator::SetSgbCgbHack(bool enabled)
 {
 	impl_->sgb_cgb_hack = enabled;
+	// Called once per load, before the ROM goes in: start the border pass.
+	impl_->hack_pass       = 0;
+	impl_->hack_frames     = 0;
+	impl_->hack_restart_at = 0;
 }
 
 void Emulator::SetCgbOverride(int mode)
@@ -1477,6 +1522,13 @@ void Emulator::RunCycles(int32_t tcycles)
 	if (!impl_->has_rom) return;
 	if (tcycles <= 0) return;
 
+	// SGB+GBC hack: the border pass has either got the border or run out of
+	// time, so restart the cart in colour. Done before the PPU mode is read
+	// below so the whole slice runs as one hardware model.
+	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0 &&
+	    impl_->hack_restart_at && impl_->hack_frames >= impl_->hack_restart_at)
+		StartColourPass();
+
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
 	// garbage. Gate the color path off whenever the BIOS is driving.
@@ -1545,8 +1597,9 @@ void Emulator::RunCycles(int32_t tcycles)
 			// SGB+GBC hack: the SGB boot ROM hands off DMG-style register
 			// state, so patch in the CGB signature the cart tests for.
 			// The boot ROM itself must still run — the BIOS validates the
-			// cart from the logo it scrolls.
-			if (impl_->sgb_cgb_hack && impl_->cgb_mode)
+			// cart from the logo it scrolls. Not on the border pass: the
+			// whole point of that one is that the cart sees an SGB.
+			if (impl_->sgb_cgb_hack && impl_->cgb_mode && impl_->hack_pass != 0)
 			{
 				CpuState &cs = impl_->cpu.State();
 				cs.r.af = 0x1180;
@@ -1902,6 +1955,15 @@ void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
 
+	// SGB+GBC hack border-pass clock, for the never-unmasks failsafe only.
+	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0)
+	{
+		impl_->hack_frames++;
+		if (!impl_->hack_restart_at &&
+		    impl_->hack_frames >= Impl::kHackBorderLimit)
+			impl_->hack_restart_at = impl_->hack_frames;
+	}
+
 	impl_->icd2.lcd_reads_prev = impl_->icd2.lcd_reads;
 	impl_->icd2.lcd_reads      = 0;
 
@@ -1944,6 +2006,16 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 {
 	if (!impl_ || !pixels) return;
 	Emulator::Impl::Icd2 &icd = impl_->icd2;
+
+	// The BIOS lifts CHR_TRN / PCT_TRN payloads off this ring, and a payload
+	// byte is the raw 2bpp tile index — on a DMG that is exactly what the LCD
+	// carries, because a transferring game sets an identity BGP. Under the
+	// SGB+GBC hack the GB renders in colour, so `pixels` is CGB output and the
+	// border decodes to garbage. Feed the raw indices instead; the BIOS's own
+	// drawing of the GB area is overpainted by OverlayCgbScreen anyway.
+	if (impl_->sgb_cgb_hack && impl_->ppu.cgb && impl_->ppu.ly < GB_SCREEN_HEIGHT)
+		pixels = &impl_->ppu.raw_framebuffer[impl_->ppu.ly * GB_SCREEN_WIDTH];
+
 	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);
 	std::memcpy(&icd.lcd_ring[bank][row * 160], pixels, 160);
@@ -2318,6 +2390,23 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	// (nothing reads $7000-$700F).
 	const uint32_t pre_received = impl_->icd2.packets_received;
 	IcdFeedJoypad(impl_->icd2, value);
+
+	// SGB+GBC hack, border pass: hand over on MASK_EN cancel. Games mask the
+	// GB screen while they set the SGB up and unmask when that is done, so
+	// this is the game itself saying its border and palettes are in place —
+	// which is also the moment the BIOS makes the border visible. Waiting a
+	// fixed number of frames after PCT_TRN instead gets it wrong both ways:
+	// the BIOS ingests a transfer in a single frame, but Men in Black does
+	// not unmask until 34 frames later and restarting before that loses the
+	// border entirely.
+	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0 &&
+	    impl_->icd2.packets_received > pre_received)
+	{
+		const uint8_t cmd  = static_cast<uint8_t>(impl_->icd2.assembly_buf[0] >> 3);
+		const uint8_t mask = static_cast<uint8_t>(impl_->icd2.assembly_buf[1] & 0x03);
+		if (cmd == 0x17 && mask == 0)
+			impl_->hack_restart_at = impl_->hack_frames;
+	}
 
 	impl_->joypad.sgb_index = impl_->icd2.input_index;
 	// If a new packet completed (packets_received grew), and our cache

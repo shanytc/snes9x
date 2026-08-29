@@ -230,25 +230,32 @@ inline bool S9xInterlaceField()
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *, uint32);
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
-// True when a GB (cgb=FALSE) or GBC (cgb=TRUE) boot ROM is present in the ROM
-// dir, BIOS_DIR, or cwd. The BIOS menu greys out its entry when false.
-bool8 S9xGBBIOSAvailable(bool8 cgb, const char *gb_rom_path);
 
 // Which console GB content runs on (Settings.GBBootPolicy). The Automatic
 // entries pick from what the cart supports, breaking ties in the stated
 // direction — that tie is what "triple boot" carts (DMG + CGB + SGB) hit.
+//
+// These are saved as integers in every port's config, so a new entry goes on
+// the END and the menus order themselves with S9xGBBootPolicyMenuOrder.
 enum S9xGBBootPolicy
 {
 	S9X_GBBOOT_GB = 0,       // force Game Boy
 	S9X_GBBOOT_GBC,          // force Game Boy Color
 	S9X_GBBOOT_SGB,          // force Super Game Boy (SGB1)
-	S9X_GBBOOT_SGB_GBC,      // SGB border + real CGB colour (hack, not real HW)
+	S9X_GBBOOT_SGB_GBC,      // SGB1 border + real CGB colour (hack, not real HW)
 	S9X_GBBOOT_SGB2,         // force Super Game Boy 2
 	S9X_GBBOOT_AUTO_GB,      // automatic, prefer GB   (GB > GBC > SGB)
 	S9X_GBBOOT_AUTO_GBC,     // automatic, prefer GBC  (GBC > SGB > GB)
 	S9X_GBBOOT_AUTO_SGB,     // automatic, prefer SGB  (SGB > GBC > GB) — default
+	S9X_GBBOOT_SGB2_GBC,     // SGB2 border + real CGB colour (hack, not real HW)
 	S9X_NUM_GBBOOT_POLICIES
 };
+
+// Menu order, which is not enum order: the four real consoles, then the two
+// colour hacks, then the Automatic entries. Ports walk this order and start a
+// new group — a separator — wherever S9xGBBootPolicyGroup changes.
+extern const uint8 S9xGBBootPolicyMenuOrder[S9X_NUM_GBBOOT_POLICIES];
+int S9xGBBootPolicyGroup(int policy);
 
 enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
 
@@ -259,11 +266,8 @@ enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
 S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag,
                                  bool8 sgb_available, bool8 *out_force_cgb);
 
-// Display name for each policy, for the BIOS Manager selector.
+// Display name for each policy, for the Emulation -> BIOS menu.
 const char *S9xGBBootPolicyName(int policy);
-
-// True when the loaded GB cart carries the CGB flag ($0143 bit 7).
-bool8 S9xGBCartIsCgb(void);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away
 // from the SNES/BS-X/Sufami load paths.

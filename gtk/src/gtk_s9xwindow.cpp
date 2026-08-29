@@ -53,6 +53,18 @@
 #include "display.h"
 #include "voicekun.h"
 
+// Emulation -> BIOS radio items, one per S9xGBBootPolicy, named in snes9x.ui.
+static const char *bios_policy_item_name(int policy)
+{
+    static const char *names[S9X_NUM_GBBOOT_POLICIES] = {
+        "bios_policy0_item", "bios_policy1_item", "bios_policy2_item", "bios_policy3_item",
+        "bios_policy4_item", "bios_policy5_item", "bios_policy6_item", "bios_policy7_item",
+        "bios_policy8_item"
+    };
+    return names[(policy >= 0 && policy < S9X_NUM_GBBOOT_POLICIES) ? policy
+                                                                  : S9X_GBBOOT_AUTO_SGB];
+}
+
 static Glib::RefPtr<Gtk::FileFilter> get_save_states_file_filter()
 {
     const auto extensions = { "*.sst", "*.000", "*.001", "*.002", "*.003", "*.004",
@@ -195,33 +207,22 @@ void Snes9xWindow::connect_signals()
 #endif
     });
 
-    // One choice across two settings, so switching to the boot ROM and back
-    // remembers which SGB BIOS was picked (an SGB entry only demotes 2 to 1).
-    // GTK persists straight out of Settings, so there's no config field here.
-    auto apply_bios_choice = [&](uint8_t sgb_pref, bool gb_boot, int policy) {
-        if (refreshing_bios_menu)
-            return;
-        const uint8_t new_policy = (policy >= 0) ? (uint8_t) policy : Settings.GBBootPolicy;
-        if (Settings.SGB_BIOSPreference == sgb_pref &&
-            (Settings.GB_BIOSEnabled != FALSE) == gb_boot &&
-            Settings.GBBootPolicy == new_policy)
-            return;
-        Settings.SGB_BIOSPreference = sgb_pref;
-        Settings.GB_BIOSEnabled     = gb_boot;
-        Settings.GBBootPolicy       = new_policy;
-        if (Settings.GBRomPath[0])
-            try_open_rom(std::string(Settings.GBRomPath));
-    };
-    auto on_pick = [&](const char *name, auto handler) {
-        get_object<Gtk::RadioMenuItem>(name)->signal_toggled().connect([this, name, handler] {
-            if (get_object<Gtk::RadioMenuItem>(name)->get_active())
-                handler();
+    // Which console GB content runs on. Its BIOS is used when one is assigned
+    // and skipped when not, so there is nothing else to pick here. GTK persists
+    // straight out of Settings, so there's no config field to mirror.
+    for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
+    {
+        auto item = get_object<Gtk::RadioMenuItem>(bios_policy_item_name(i));
+        item->signal_toggled().connect([this, i, item] {
+            if (refreshing_bios_menu || !item->get_active())
+                return;
+            if (Settings.GBBootPolicy == (uint8_t) i)
+                return;
+            Settings.GBBootPolicy = (uint8_t) i;
+            if (Settings.GBRomPath[0])
+                try_open_rom(std::string(Settings.GBRomPath));
         });
-    };
-    on_pick("bios_none_item", [apply_bios_choice] { apply_bios_choice(0, false, -1); });
-    on_pick("bios_gb_item",   [apply_bios_choice] { apply_bios_choice(0, true,  -1); });
-    on_pick("bios_sgb1_item", [apply_bios_choice] { apply_bios_choice(1, Settings.GB_BIOSEnabled, S9X_GBBOOT_SGB); });
-    on_pick("bios_sgb2_item", [apply_bios_choice] { apply_bios_choice(2, Settings.GB_BIOSEnabled, S9X_GBBOOT_SGB2); });
+    }
 
     for (int i = 0; i <= 4; i++)
     {
@@ -1438,25 +1439,14 @@ void Snes9xWindow::configure_widgets()
     show_widget("bios_separator", gb_loaded);
     if (gb_loaded)
     {
-        const bool cgb_cart = S9xGBCartIsCgb();
-        enable_widget("bios_sgb1_item", S9xSGBBIOSAvailable(1, Settings.GBRomPath));
-        enable_widget("bios_sgb2_item", S9xSGBBIOSAvailable(2, Settings.GBRomPath));
-
-        // Labelled from the cart's CGB flag.
-        auto gb_item = get_object<Gtk::RadioMenuItem>("bios_gb_item");
-        gb_item->set_label(cgb_cart ? _("_Game Boy Color BIOS") : _("_Game Boy BIOS"));
-        gb_item->set_use_underline(true);
-        enable_widget("bios_gb_item", S9xGBBIOSAvailable(cgb_cart, Settings.GBRomPath));
-
-        // Check what is running, not what was asked for: a missing file falls back.
-        const char *active_name;
-        if (Settings.SGB_BIOSModeActive)
-            active_name = (Settings.GameBoyRunMode == 2) ? "bios_sgb2_item" : "bios_sgb1_item";
-        else
-            active_name = Settings.GB_BIOSActive ? "bios_gb_item" : "bios_none_item";
-
+        // Check the chosen console, not the one that ended up running: this is a
+        // saved preference, and a policy whose BIOS is missing still runs the
+        // cart BIOS-less rather than picking something else.
+        const uint8_t policy = (Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
+                                   ? Settings.GBBootPolicy
+                                   : (uint8_t) S9X_GBBOOT_AUTO_SGB;
         refreshing_bios_menu = true;
-        get_object<Gtk::RadioMenuItem>(active_name)->set_active(true);
+        get_object<Gtk::RadioMenuItem>(bios_policy_item_name(policy))->set_active(true);
         refreshing_bios_menu = false;
     }
 

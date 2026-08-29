@@ -3,15 +3,14 @@
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
-#include <QComboBox>
 #include <vector>
 
 #include "biosmanager.h"
 
 class EmuApplication;
 
-// File -> BIOS Manager: one row per supported BIOS, plus the default boot
-// mode for Game Boy content. Paths are applied to the core on close.
+// File -> BIOS Manager: one row per supported BIOS. Paths are applied to the
+// core on close; the console for GB content lives in Emulation -> BIOS.
 class BiosManagerDialog : public QDialog
 {
     Q_OBJECT
@@ -32,5 +31,4 @@ class BiosManagerDialog : public QDialog
 
     EmuApplication  *app;
     std::vector<Row> rows;
-    QComboBox       *gb_default;
 };

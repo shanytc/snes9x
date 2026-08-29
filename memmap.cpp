@@ -1332,12 +1332,6 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 	return (FALSE);
 }
 
-bool8 S9xGBBIOSAvailable (bool8 cgb, const char *gb_rom_path)
-{
-	std::string dummy;
-	return FindGB_BootROM(cgb != FALSE, gb_rom_path, dummy, nullptr);
-}
-
 // A real Super Game Boy accepts any Game Boy cart, so SGB is "supported"
 // whenever a BIOS is installed — the exception is a CGB-only cart, which
 // shows its own lockout screen on DMG-class hardware.
@@ -1367,6 +1361,7 @@ S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag,
 			return (does_gbc ? S9X_GBCON_GBC : S9X_GBCON_GB);
 
 		case S9X_GBBOOT_SGB_GBC:
+		case S9X_GBBOOT_SGB2_GBC:
 			// Only meaningful on a colour-capable cart; a mono cart has no CGB
 			// output to overlay, so leave it as a plain SGB session.
 			if (sgb_available)
@@ -1401,8 +1396,9 @@ const char *S9xGBBootPolicyName (int policy)
 		case S9X_GBBOOT_GB:       return ("Game Boy");
 		case S9X_GBBOOT_GBC:      return ("Game Boy Color");
 		case S9X_GBBOOT_SGB:      return ("Super Game Boy");
-		case S9X_GBBOOT_SGB_GBC:  return ("Super Game Boy + Game Boy Color");
+		case S9X_GBBOOT_SGB_GBC:  return ("Super Game Boy + Game Boy Color (hack)");
 		case S9X_GBBOOT_SGB2:     return ("Super Game Boy 2");
+		case S9X_GBBOOT_SGB2_GBC: return ("Super Game Boy 2 + Game Boy Color (hack)");
 		case S9X_GBBOOT_AUTO_GB:  return ("Automatic, prefer GB");
 		case S9X_GBBOOT_AUTO_GBC: return ("Automatic, prefer GBC");
 		case S9X_GBBOOT_AUTO_SGB: return ("Automatic, prefer SGB");
@@ -1410,11 +1406,29 @@ const char *S9xGBBootPolicyName (int policy)
 	}
 }
 
-bool8 S9xGBCartIsCgb (void)
+const uint8 S9xGBBootPolicyMenuOrder[S9X_NUM_GBBOOT_POLICIES] = {
+	S9X_GBBOOT_GB,       S9X_GBBOOT_GBC,
+	S9X_GBBOOT_SGB,      S9X_GBBOOT_SGB2,
+	S9X_GBBOOT_SGB_GBC,  S9X_GBBOOT_SGB2_GBC,
+	S9X_GBBOOT_AUTO_GB,  S9X_GBBOOT_AUTO_GBC, S9X_GBBOOT_AUTO_SGB
+};
+
+int S9xGBBootPolicyGroup (int policy)
 {
-	unsigned char cgb_flag = 0;
-	if (!S9xSGBGetCartFlags(&cgb_flag, nullptr)) return (FALSE);
-	return ((cgb_flag & 0x80) ? TRUE : FALSE);
+	switch (policy)
+	{
+		case S9X_GBBOOT_SGB_GBC:
+		case S9X_GBBOOT_SGB2_GBC:
+			return (1);   // the two colour hacks, no real hardware equivalent
+
+		case S9X_GBBOOT_AUTO_GB:
+		case S9X_GBBOOT_AUTO_GBC:
+		case S9X_GBBOOT_AUTO_SGB:
+			return (2);   // pick from what the cart supports
+
+		default:
+			return (0);   // a real console, forced
+	}
 }
 
 int CMemory::ScoreHiROM (bool8 skip_header, int32 romoff)
@@ -1829,25 +1843,36 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, const char *f
     out_bios_path.clear();
     out_bios_mode = 0;
 
-    // "Super Game Boy" / "Super Game Boy 2" pin the variant; everything else
-    // follows the SGB_BIOSPreference ladder (SGB2, then SGB1).
+    // Every named Super Game Boy policy pins its variant, the two colour hacks
+    // included, and none of them falls back to the other one: asking for SGB2
+    // and silently getting SGB1 is not what was picked. Only the Automatic
+    // entries search, and SGB_BIOSPreference just orders that search.
     std::string sgb_path;
-    const uint8 pinned = (Settings.GBBootPolicy == S9X_GBBOOT_SGB)  ? 1
-                       : (Settings.GBBootPolicy == S9X_GBBOOT_SGB2) ? 2 : 0;
+    const uint8 pinned = (Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
+                          Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC)  ? 1
+                       : (Settings.GBBootPolicy == S9X_GBBOOT_SGB2 ||
+                          Settings.GBBootPolicy == S9X_GBBOOT_SGB2_GBC) ? 2 : 0;
+
     if (Settings.SGB_BIOSPreference == 0)
-        ;   // SGB switched off entirely (Emulation -> BIOS "No BIOS")
+        ;   // SGB switched off entirely (libretro's snes9x_sgb_bios=off)
     else if (pinned)
     {
         if (FindSGB_BIOS(pinned, filename, sgb_path)) out_bios_mode = pinned;
         else sgb_path.clear();
     }
-    else if (Settings.SGB_BIOSPreference >= 2 && FindSGB_BIOS(2, filename, sgb_path))
-        out_bios_mode = 2;
-    else if (Settings.SGB_BIOSPreference >= 1)
+    else
     {
-        sgb_path.clear();
-        if (FindSGB_BIOS(1, filename, sgb_path)) out_bios_mode = 1;
-        else sgb_path.clear();
+        const uint8 first = (Settings.SGB_BIOSPreference == 1) ? 1 : 2;
+        if (FindSGB_BIOS(first, filename, sgb_path))
+            out_bios_mode = first;
+        else
+        {
+            sgb_path.clear();
+            if (FindSGB_BIOS(first == 2 ? 1 : 2, filename, sgb_path))
+                out_bios_mode = (first == 2) ? 1 : 2;
+            else
+                sgb_path.clear();
+        }
     }
 
     const S9xGBConsole console = S9xResolveGBConsole(

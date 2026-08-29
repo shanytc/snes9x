@@ -652,7 +652,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     BeginSection("SGB");
     Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
     Bool("GBBIOSEnabled", gb_bios_enabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
-    Int("GBBootPolicy", gb_boot_policy, "Console for GB content: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default)");
+    Int("GBBootPolicy", gb_boot_policy, "Console for GB content, chosen in Emulation -> BIOS: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default), 8=SGB2+GBC");
     EndSection();
 
     // Explicit BIOS file paths; empty means fall back to the by-name search.

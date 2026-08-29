@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QTimer>
 #include "EmuCanvas.hpp"
+#include "memmap.h"   // S9X_NUM_GBBOOT_POLICIES sizes the BIOS menu array
 
 class EmuApplication;
 class CheatsDialog;
@@ -63,11 +64,8 @@ class EmuMainWindow : public QMainWindow
     QMenu *recent_menu;
     QMenu *bios_menu = nullptr;
     QAction *bios_menu_action = nullptr;
-    QAction *bios_none_action = nullptr;
-    QAction *bios_sgb1_action = nullptr;
-    QAction *bios_sgb2_action = nullptr;
-    // Label switches between "Game Boy" and "Game Boy Color" per cart.
-    QAction *bios_gb_action = nullptr;
+    // One per S9xGBBootPolicy, in enum order.
+    QAction *bios_policy_actions[S9X_NUM_GBBOOT_POLICIES] = {};
     void refreshBiosMenu();
 
     QMenu *voicekun_menu = nullptr;

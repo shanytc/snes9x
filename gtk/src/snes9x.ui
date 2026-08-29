@@ -1718,8 +1718,8 @@
                           <object class="GtkMenu" id="bios_menu">
                             <property name="can_focus">False</property>
                             <child>
-                              <object class="GtkRadioMenuItem" id="bios_none_item">
-                                <property name="label" translatable="yes">_No BIOS</property>
+                              <object class="GtkRadioMenuItem" id="bios_policy0_item">
+                                <property name="label" translatable="yes">_Game Boy</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>
@@ -1727,33 +1727,95 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkRadioMenuItem" id="bios_gb_item">
-                                <property name="label" translatable="yes">_Game Boy BIOS</property>
+                              <object class="GtkRadioMenuItem" id="bios_policy1_item">
+                                <property name="label" translatable="yes">Game Boy _Color</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>
                                 <property name="draw_as_radio">True</property>
-                                <property name="group">bios_none_item</property>
+                                <property name="group">bios_policy0_item</property>
                               </object>
                             </child>
                             <child>
-                              <object class="GtkRadioMenuItem" id="bios_sgb1_item">
-                                <property name="label" translatable="yes">Super Game Boy (_SGB1)</property>
+                              <object class="GtkRadioMenuItem" id="bios_policy2_item">
+                                <property name="label" translatable="yes">_Super Game Boy</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>
                                 <property name="draw_as_radio">True</property>
-                                <property name="group">bios_none_item</property>
+                                <property name="group">bios_policy0_item</property>
                               </object>
                             </child>
                             <child>
-                              <object class="GtkRadioMenuItem" id="bios_sgb2_item">
-                                <property name="label" translatable="yes">Super Game Boy 2 (SGB_2)</property>
+                              <object class="GtkRadioMenuItem" id="bios_policy4_item">
+                                <property name="label" translatable="yes">Super Game Boy _2</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>
                                 <property name="draw_as_radio">True</property>
-                                <property name="group">bios_none_item</property>
+                                <property name="group">bios_policy0_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkSeparatorMenuItem" id="bios_hack_separator">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="bios_policy3_item">
+                                <property name="label" translatable="yes">Super Game Boy + Game Boy Co_lor (hack)</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                                <property name="group">bios_policy0_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="bios_policy8_item">
+                                <property name="label" translatable="yes">Super Game Boy 2 + Game Boy Colo_r (hack)</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                                <property name="group">bios_policy0_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkSeparatorMenuItem" id="bios_policy_separator">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="bios_policy5_item">
+                                <property name="label" translatable="yes">Automatic, prefer G_B</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                                <property name="group">bios_policy0_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="bios_policy6_item">
+                                <property name="label" translatable="yes">Automatic, prefer GB_C</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                                <property name="group">bios_policy0_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="bios_policy7_item">
+                                <property name="label" translatable="yes">Automatic, prefer S_GB</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                                <property name="group">bios_policy0_item</property>
                               </object>
                             </child>
                           </object>

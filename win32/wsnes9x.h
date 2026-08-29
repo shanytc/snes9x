@@ -645,7 +645,6 @@ void S9xWinRemoveRegistryKeys();
 bool RegisterProgid();
 void RegisterExts(void);
 void WinSaveConfigFile();
-void WinSaveBiosDefaults();
 
 std::wstring GetDlgItemTextWstring(HWND hDlg, int nIDDlgItem);
 std::wstring GetTextWstring(HWND hWnd);

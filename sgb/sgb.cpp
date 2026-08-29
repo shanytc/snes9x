@@ -480,6 +480,14 @@ void Emulator::StartColourPass()
 	impl_->hack_pass       = 1;
 	impl_->hack_restart_at = 0;
 
+	// Only the GB machine restarts. The ICD2 block is the live link to the
+	// SNES-side BIOS, which keeps running across the handover, so carry it
+	// over whole: Reset() zeroes it, and a game that re-runs its SGB
+	// handshake on the second boot then waits forever for a reply that the
+	// wiped link can no longer produce — Game & Watch Gallery 3 switches the
+	// LCD off and spins.
+	const Impl::Icd2 icd = impl_->icd2;
+
 	// Mid-splash the BIOS has not handed the cart control yet; there is
 	// nothing to restart, so stay on the border pass and retry next frame.
 	if (!SoftReset())
@@ -489,6 +497,7 @@ void Emulator::StartColourPass()
 		return;
 	}
 
+	impl_->icd2 = icd;
 	impl_->cgb_overlay_valid = false;
 }
 
@@ -2184,6 +2193,13 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	// Wait for the GB boot ROM to hand off, so the overlay shows the game
 	// rather than the boot logo the BIOS is still capturing.
 	if (!impl_->boot_handoff_captured || !impl_->cgb_overlay_valid) return;
+
+	// Some carts take their SGB path on the colour pass rather than the CGB
+	// one (Game & Watch Gallery 3), so they never write CGB palettes and
+	// color_fb is the reset white. Leave the BIOS's own picture alone rather
+	// than painting that over it: the border still came from pass 0, so the
+	// result degrades to a plain SGB session instead of a blank screen.
+	if (!impl_->ppu.cgb_pal_written) return;
 
 	// Lores only — the offsets below assume the 256x224 SGB frame.
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;

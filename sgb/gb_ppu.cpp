@@ -1422,6 +1422,7 @@ void PpuReset(Ppu &p)
 	p.bcps = p.ocps = 0;
 	std::memset(p.bg_pal,  0xFF, sizeof p.bg_pal);
 	std::memset(p.obj_pal, 0xFF, sizeof p.obj_pal);
+	p.cgb_pal_written = false;
 }
 
 // Mode-3 exit: strikethrough fill, WX=166 carry, stall math, HBlank.

@@ -663,9 +663,9 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		case 0xFF54: if (m.ppu && m.ppu->cgb) m.hdma4 = value; return;
 		case 0xFF55: if (m.ppu && m.ppu->cgb) HdmaTrigger(m, value); return;
 		case 0xFF68: if (m.ppu && m.ppu->cgb) m.ppu->bcps = value; return;
-		case 0xFF69: if (m.ppu && m.ppu->cgb) CgbWritePalette(m.ppu->bg_pal, m.ppu->bcps, value, !CramBlocked(m)); return;
+		case 0xFF69: if (m.ppu && m.ppu->cgb) { CgbWritePalette(m.ppu->bg_pal, m.ppu->bcps, value, !CramBlocked(m)); m.ppu->cgb_pal_written = true; } return;
 		case 0xFF6A: if (m.ppu && m.ppu->cgb) m.ppu->ocps = value; return;
-		case 0xFF6B: if (m.ppu && m.ppu->cgb) CgbWritePalette(m.ppu->obj_pal, m.ppu->ocps, value, !CramBlocked(m)); return;
+		case 0xFF6B: if (m.ppu && m.ppu->cgb) { CgbWritePalette(m.ppu->obj_pal, m.ppu->ocps, value, !CramBlocked(m)); m.ppu->cgb_pal_written = true; } return;
 		case 0xFF70: if (m.ppu && m.ppu->cgb) m.svbk = value & 0x07; return;
 		case 0xFF72: if (m.ppu && m.ppu->cgb) m.ff72 = value; return;
 		case 0xFF73: if (m.ppu && m.ppu->cgb) m.ff73 = value; return;

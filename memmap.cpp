@@ -1413,6 +1413,27 @@ const uint8 S9xGBBootPolicyMenuOrder[S9X_NUM_GBBOOT_POLICIES] = {
 	S9X_GBBOOT_AUTO_GB,  S9X_GBBOOT_AUTO_GBC, S9X_GBBOOT_AUTO_SGB
 };
 
+bool8 S9xGBBootPolicyAvailable (int policy, const char *gb_rom_path)
+{
+	switch (policy)
+	{
+		// The Game Boy and Game Boy Color entries name hardware we emulate
+		// either way — their boot ROM only adds the startup animation, and
+		// GB_BIOSEnabled exists to skip it deliberately. The Automatic entries
+		// pick from whatever is present, so they always resolve.
+		case S9X_GBBOOT_SGB:
+		case S9X_GBBOOT_SGB_GBC:
+			return (S9xSGBBIOSAvailable(1, gb_rom_path));
+
+		case S9X_GBBOOT_SGB2:
+		case S9X_GBBOOT_SGB2_GBC:
+			return (S9xSGBBIOSAvailable(2, gb_rom_path));
+
+		default:
+			return (TRUE);
+	}
+}
+
 int S9xGBBootPolicyGroup (int policy)
 {
 	switch (policy)

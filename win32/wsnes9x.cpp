@@ -1579,9 +1579,13 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             // Same route as clicking the menu entry: it saves the choice and
             // reloads the cart on the new console. Posted, not sent, so the
             // reload and hard reset run from the message loop rather than
-            // nested inside key handling. It is also what makes these no-ops
-            // with no Game Boy content loaded, since the submenu is out of the
-            // menu bar then and the command cannot find the item.
+            // nested inside key handling.
+            //
+            // Going through the menu is also the whole gate. PostMenuCommand
+            // refreshes the menu state and drops the command if the entry is
+            // greyed for a missing BIOS, or missing entirely because no Game
+            // Boy content is loaded - so the key can never reach a console the
+            // menu would not let you pick either.
             PostMenuCommand(ID_EMULATION_BIOS_POLICY0 + g_gbModelHotkeyPolicy[gbm]);
             hitHotKey = true;
         }
@@ -5611,13 +5615,17 @@ static void CheckMenuStates ()
 		if (gb_loaded && s_bios_hmenu)
 		{
 			// Radio-check the chosen console, not the one that ended up running:
-			// this is a saved preference, and a policy whose BIOS is missing
-			// still runs the cart BIOS-less rather than picking something else.
+			// this is a saved preference, and one whose BIOS has gone missing
+			// stays checked, greyed, so the menu says what was picked and that
+			// it cannot be honoured. Greying is per entry: only the Super Game
+			// Boy ones need a BIOS to be the console they name.
 			const uint8 policy = (Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
 									 ? Settings.GBBootPolicy : (uint8) S9X_GBBOOT_AUTO_SGB;
 			for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
 			{
 				mii.fState = (i == policy) ? MFS_CHECKED : MFS_UNCHECKED;
+				if (!S9xGBBootPolicyAvailable(i, Settings.GBRomPath))
+					mii.fState |= MFS_DISABLED;
 				SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, FALSE, &mii);
 			}
 		}

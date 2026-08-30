@@ -268,6 +268,12 @@ S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag,
 
 // Display name for each policy, for the Emulation -> Game Boy Model menu.
 const char *S9xGBBootPolicyName(int policy);
+
+// Whether a policy can deliver the console it names. Only the Super Game Boy
+// entries can fail: without their BIOS they quietly run the cart as GBC/GB
+// instead, so a menu should grey them out. `gb_rom_path` joins the BIOS search
+// (the cart's own directory is one of the places it looks); NULL is fine.
+bool8 S9xGBBootPolicyAvailable(int policy, const char *gb_rom_path);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away
 // from the SNES/BS-X/Sufami load paths.

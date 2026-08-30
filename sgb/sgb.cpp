@@ -154,11 +154,41 @@ struct Emulator::Impl
 	uint32_t    hack_frames     = 0;
 	uint32_t    hack_restart_at = 0;   // 0 = not armed
 
-	// Pure failsafe, in GB VBlanks: the handover is driven by the game's own
-	// MASK_EN cancel (see OnJoyserWrite), and every cart measured sends one by
-	// frame 183. This only stops a cart that never unmasks from being stranded
-	// in monochrome, so it is deliberately far past any real value.
-	static const uint32_t kHackBorderLimit = 600;
+	// Border-pass progress: bit 0 = CHR_TRN seen, bit 1 = PCT_TRN seen. The
+	// handover waits on bit 1; a cart that unmasks first transfers later.
+	uint8_t     hack_border_seen = 0;
+	// Border-pass frame at which an unmask-with-no-border-yet stops waiting.
+	uint32_t    hack_grace_end   = 0;
+	// Border-pass frame at which a transferred-but-never-unmasked cart stops
+	// waiting for the unmask that would otherwise drive the handover.
+	uint32_t    hack_settle_end  = 0;
+	static const uint8_t kBorderChr = 1, kBorderPct = 2;
+
+	// GB frames a first unmask buys the cart to start transferring. The widest
+	// gap over the 316-cart SGB set is Harvest Moon GBC's 407.
+	static const uint32_t kHackBorderGrace = 480;
+
+	// GB frames a finished PCT_TRN waits for the unmask that normally ends the
+	// border pass. Long enough for the BIOS to have read the payload off the
+	// LCD (Men in Black unmasks 34 frames later), short enough that the 17
+	// carts that never unmask reach colour well before the failsafe.
+	static const uint32_t kHackPctSettle = 240;
+
+	// Failsafe for the 17 measured carts that transfer but never unmask; the
+	// slowest, Super Fighters 99, finishes at frame 624. A half-done transfer
+	// (CHR_TRN, no PCT_TRN yet) pushes it out to the second limit.
+	static const uint32_t kHackBorderLimit    = 720;
+	static const uint32_t kHackBorderLimitMax = 1200;
+
+	// Colour pass: pin the $FF00 player-rotation index so the cart cannot see
+	// the SGB, and takes its plain-CGB path instead of an SGB-flavoured one.
+	// Latched off when the border pass got no border - transferring late is
+	// then the cart's only remaining chance at one.
+	bool     hack_hide_sgb = false;
+	bool HideSgbFromCart() const
+	{
+		return sgb_cgb_hack && hack_pass != 0 && hack_hide_sgb;
+	}
 
 	// The SGB BIOS normally forces CGB off (a real SGB boots CGB carts as DMG);
 	// sgb_cgb_hack keeps colour hardware on underneath it, from pass 1 on.
@@ -479,6 +509,7 @@ void Emulator::StartColourPass()
 
 	impl_->hack_pass       = 1;
 	impl_->hack_restart_at = 0;
+	impl_->hack_hide_sgb   = (impl_->hack_border_seen & Impl::kBorderPct) != 0;
 
 	// Only the GB machine restarts. The ICD2 block is the live link to the
 	// SNES-side BIOS, which keeps running across the handover, so carry it
@@ -1091,9 +1122,13 @@ void Emulator::SetSgbCgbHack(bool enabled)
 {
 	impl_->sgb_cgb_hack = enabled;
 	// Called once per load, before the ROM goes in: start the border pass.
-	impl_->hack_pass       = 0;
-	impl_->hack_frames     = 0;
-	impl_->hack_restart_at = 0;
+	impl_->hack_pass        = 0;
+	impl_->hack_frames      = 0;
+	impl_->hack_restart_at  = 0;
+	impl_->hack_border_seen = 0;
+	impl_->hack_grace_end   = 0;
+	impl_->hack_settle_end  = 0;
+	impl_->hack_hide_sgb    = false;
 }
 
 void Emulator::SetCgbOverride(int mode)
@@ -1705,7 +1740,9 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	         "b0s=%02X%02X%02X%02X%02X%02X "
 	         "p0=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
 	         "r7000_ring=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
-	         "R:6002=%u 7000=%u W:6001=%u 6003=%u",
+	         "R:6002=%u 7000=%u W:6001=%u 6003=%u "
+	         "chr=%u pct=%u cap=%u hack=%u hackfr=%u restart=%u bseen=%u grace=%u "
+	         "cmds=%02X%02X%02X%02X%02X%02X%02X%02X",
 	              s.r.pc, icd.control,
 	              icd.packets_received,
 	              icd.f1_packets,
@@ -1716,7 +1753,14 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	              rv[0],  rv[1],  rv[2],  rv[3],  rv[4],  rv[5],  rv[6],  rv[7],
 	              rv[8],  rv[9],  rv[10], rv[11], rv[12], rv[13], rv[14], rv[15],
 	              icd.r_6002, icd.r_7000,
-	              icd.w_6001, icd.w_6003);
+	              icd.w_6001, icd.w_6003,
+	              g_sgb_dbg.pkt_chr, g_sgb_dbg.pkt_pct, g_sgb_dbg.cap_fired,
+	              impl_->hack_pass, impl_->hack_frames, impl_->hack_restart_at,
+	              impl_->hack_border_seen, impl_->hack_grace_end,
+	              g_sgb_dbg.cmd_ring[0], g_sgb_dbg.cmd_ring[1],
+	              g_sgb_dbg.cmd_ring[2], g_sgb_dbg.cmd_ring[3],
+	              g_sgb_dbg.cmd_ring[4], g_sgb_dbg.cmd_ring[5],
+	              g_sgb_dbg.cmd_ring[6], g_sgb_dbg.cmd_ring[7]);
 }
 
 // ICD2 register mirrors repeat every 16 bytes across each kB window
@@ -1999,11 +2043,27 @@ void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
 
-	// SGB+GBC hack border-pass clock, for the never-unmasks failsafe only.
+	// SGB+GBC hack border-pass clock: the grace an unmask-before-any-transfer
+	// bought the cart, plus the never-unmasks failsafe.
 	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0)
 	{
 		impl_->hack_frames++;
-		if (!impl_->hack_restart_at &&
+		// Grace expired with nothing started: this cart has no border to wait
+		// for. Anything started means the next unmask is the real one.
+		if (impl_->hack_grace_end && !impl_->hack_restart_at &&
+		    impl_->hack_frames >= impl_->hack_grace_end)
+		{
+			if (!impl_->hack_border_seen)
+				impl_->hack_restart_at = impl_->hack_frames;
+			impl_->hack_grace_end = 0;
+		}
+		if (impl_->hack_settle_end && !impl_->hack_restart_at &&
+		    impl_->hack_frames >= impl_->hack_settle_end)
+			impl_->hack_restart_at = impl_->hack_frames;
+		const bool mid_transfer =
+			impl_->hack_border_seen == Impl::kBorderChr &&
+			impl_->hack_frames < Impl::kHackBorderLimitMax;
+		if (!impl_->hack_restart_at && !mid_transfer &&
 		    impl_->hack_frames >= Impl::kHackBorderLimit)
 			impl_->hack_restart_at = impl_->hack_frames;
 	}
@@ -2455,7 +2515,10 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	// border per host picks the other variant and overwrites the right one.
 	// Tetris DX does exactly that: its SGB1 border appears, then the second
 	// transfer replaces it with the SGB2 one.
+	// Only when the border pass actually got one: with nothing to protect,
+	// a late transfer is the only border this session will ever have.
 	if (impl_->sgb_cgb_hack && impl_->hack_pass != 0 &&
+	    (impl_->hack_border_seen & Impl::kBorderPct) &&
 	    impl_->icd2.packets_received > pre_received)
 	{
 		const uint8_t cmd = static_cast<uint8_t>(impl_->icd2.assembly_buf[0] >> 3);
@@ -2469,24 +2532,33 @@ void Emulator::OnJoyserWrite(uint8_t value)
 		}
 	}
 
-	// SGB+GBC hack, border pass: hand over on MASK_EN cancel. Games mask the
-	// GB screen while they set the SGB up and unmask when that is done, so
-	// this is the game itself saying its border and palettes are in place —
-	// which is also the moment the BIOS makes the border visible. Waiting a
-	// fixed number of frames after PCT_TRN instead gets it wrong both ways:
-	// the BIOS ingests a transfer in a single frame, but Men in Black does
-	// not unmask until 34 frames later and restarting before that loses the
-	// border entirely.
+	// SGB+GBC hack, border pass: hand over on the MASK_EN cancel that follows
+	// the border transfer. Games mask the GB screen while they set the SGB up
+	// and unmask when that is done, so this is the game itself saying its
+	// border and palettes are in place — which is also the moment the BIOS
+	// makes the border visible. Waiting a fixed number of frames after PCT_TRN
+	// instead gets it wrong both ways: the BIOS ingests a transfer in a single
+	// frame, but Men in Black does not unmask until 34 frames later and
+	// restarting before that loses the border entirely.
+	//
+	// An unmask with nothing transferred yet is not that moment - it is a cart
+	// showing its splash first, so give it kHackBorderGrace frames to start.
 	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0 &&
 	    impl_->icd2.packets_received > pre_received)
 	{
 		const uint8_t cmd  = static_cast<uint8_t>(impl_->icd2.assembly_buf[0] >> 3);
 		const uint8_t mask = static_cast<uint8_t>(impl_->icd2.assembly_buf[1] & 0x03);
 		if (cmd == 0x17 && mask == 0)
-			impl_->hack_restart_at = impl_->hack_frames;
+		{
+			if (impl_->hack_border_seen & Impl::kBorderPct)
+				impl_->hack_restart_at = impl_->hack_frames;
+			else if (!impl_->hack_grace_end)
+				impl_->hack_grace_end =
+					impl_->hack_frames + Impl::kHackBorderGrace;
+		}
 	}
 
-	impl_->joypad.sgb_index = impl_->icd2.input_index;
+	impl_->joypad.sgb_index = impl_->HideSgbFromCart() ? 0 : impl_->icd2.input_index;
 	// If a new packet completed (packets_received grew), and our cache
 	// isn't full yet, append a copy. The SGB2 BIOS's handshake validator
 	// at $B119 compares each packet's byte 1 across TWO separate GB
@@ -2533,6 +2605,12 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 		impl_->ppu.frame_ready = false;
 		if (cmd == 0x13) ++g_sgb_dbg.pkt_chr;
 		else             ++g_sgb_dbg.pkt_pct;
+		// SGB+GBC hack: tells the border pass it has something to wait for,
+		// and starts the clock on a cart that will never unmask.
+		impl_->hack_border_seen |= (cmd == 0x13) ? Impl::kBorderChr
+		                                         : Impl::kBorderPct;
+		if (impl_->hack_pass == 0 && cmd == 0x14 && !impl_->hack_restart_at)
+			impl_->hack_settle_end = impl_->hack_frames + Impl::kHackPctSettle;
 		return;
 	}
 
@@ -2854,7 +2932,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->joypad.sgb_pads[1]  = impl_->icd2.joypad[1];
 	impl_->joypad.sgb_pads[2]  = impl_->icd2.joypad[2];
 	impl_->joypad.sgb_pads[3]  = impl_->icd2.joypad[3];
-	impl_->joypad.sgb_index    = impl_->icd2.input_index;
+	impl_->joypad.sgb_index    = impl_->HideSgbFromCart() ? 0 : impl_->icd2.input_index;
 
 	return true;
 }

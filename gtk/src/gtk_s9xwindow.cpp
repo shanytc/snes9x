@@ -217,11 +217,7 @@ void Snes9xWindow::connect_signals()
         item->signal_toggled().connect([this, i, item] {
             if (refreshing_bios_menu || !item->get_active())
                 return;
-            if (Settings.GBBootPolicy == (uint8_t) i)
-                return;
-            Settings.GBBootPolicy = (uint8_t) i;
-            if (Settings.GBRomPath[0])
-                try_open_rom(std::string(Settings.GBRomPath));
+            set_gb_boot_policy(i);
         });
     }
 
@@ -1820,6 +1816,19 @@ void Snes9xWindow::center_mouse()
     gdk_mouse_y = y + half_h;
 
     window->get_display()->get_default_seat()->get_pointer()->warp(window->get_screen(), gdk_mouse_x, gdk_mouse_y);
+}
+
+void Snes9xWindow::set_gb_boot_policy(int policy)
+{
+    // Same gates the menu shows: nothing to switch with no Game Boy content
+    // loaded, and nothing to switch to when the console has no BIOS installed.
+    if (!Settings.GBRomPath[0] || Settings.GBBootPolicy == (uint8_t) policy)
+        return;
+    if (!S9xGBBootPolicyAvailable(policy, Settings.GBRomPath))
+        return;
+
+    Settings.GBBootPolicy = (uint8_t) policy;
+    try_open_rom(std::string(Settings.GBRomPath));
 }
 
 void Snes9xWindow::toggle_grab_mouse()

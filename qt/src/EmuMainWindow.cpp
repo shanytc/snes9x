@@ -206,6 +206,20 @@ void EmuMainWindow::setCoreActionsEnabled(bool enable)
         a->setEnabled(enable);
 }
 
+void EmuMainWindow::setGBBootPolicy(int policy)
+{
+    // Same gates the menu shows: nothing to switch with no Game Boy content
+    // loaded, and nothing to switch to when the console has no BIOS installed.
+    if (!Settings.GBRomPath[0] || Settings.GBBootPolicy == (uint8_t) policy)
+        return;
+    if (!S9xGBBootPolicyAvailable(policy, Settings.GBRomPath))
+        return;
+
+    Settings.GBBootPolicy       = (uint8_t) policy;
+    app->config->gb_boot_policy = Settings.GBBootPolicy;
+    openFile(std::string(Settings.GBRomPath));
+}
+
 void EmuMainWindow::refreshBiosMenu()
 {
     if (!bios_menu_action)
@@ -387,9 +401,15 @@ void EmuMainWindow::createWidgets()
     file_menu->addSeparator();
     auto bios_manager_item = file_menu->addAction(tr("&BIOS Manager..."));
     connect(bios_manager_item, &QAction::triggered, this, [this] {
+        const std::string was = S9xGBBiosFingerprint();
         BiosManagerDialog dialog(this, app);
-        if (dialog.exec() == QDialog::Accepted)
-            app->config->saveFile(EmuConfig::findConfigFile());
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        app->config->saveFile(EmuConfig::findConfigFile());
+        // The GB-side BIOS files are only consulted at load time, so a running
+        // .gb/.gbc has to be reloaded for a new one to show.
+        if (Settings.GBRomPath[0] && was != S9xGBBiosFingerprint())
+            openFile(std::string(Settings.GBRomPath));
     });
 
     auto languages = EmuPoTranslator::availableLanguages();
@@ -528,14 +548,7 @@ void EmuMainWindow::createWidgets()
         a->setCheckable(true);
         bios_group->addAction(a);
         bios_policy_actions[i] = a;
-        connect(a, &QAction::triggered, [this, i] {
-            if (Settings.GBBootPolicy == (uint8_t) i)
-                return;
-            Settings.GBBootPolicy       = (uint8_t) i;
-            app->config->gb_boot_policy = Settings.GBBootPolicy;
-            if (Settings.GBRomPath[0])
-                openFile(std::string(Settings.GBRomPath));
-        });
+        connect(a, &QAction::triggered, [this, i] { setGBBootPolicy(i); });
     }
     bios_policy_actions[S9X_GBBOOT_GBC]->setToolTip(
         tr("Colourises Game Boy Color carts. Mono-only carts are experimental — "

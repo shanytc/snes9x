@@ -15,6 +15,7 @@
 
 #include "snes9x.h"
 #include "controls.h"
+#include "memmap.h"
 #include "display.h"
 #include "gfx.h"
 
@@ -129,6 +130,12 @@ const BindingLink b_links[] =
         { "b_swap_controllers",    "GTK_swap_controllers" },
         { "b_rewind",              "GTK_rewind"        },
         { "b_grab_mouse",          "GTK_grab_mouse"    },
+        { "b_gb_model_gb",         "GTK_gb_model_0"    },
+        { "b_gb_model_gbc",        "GTK_gb_model_1"    },
+        { "b_gb_model_sgb",        "GTK_gb_model_2"    },
+        { "b_gb_model_sgb2",       "GTK_gb_model_3"    },
+        { "b_gb_model_sgb_gbc",    "GTK_gb_model_4"    },
+        { "b_gb_model_sgb2_gbc",   "GTK_gb_model_5"    },
 
         { nullptr, nullptr }
 };
@@ -142,7 +149,7 @@ const int b_breaks[] =
         43, /* End of Graphic options */
         85, /* End of save/load states */
         94, /* End of sound buttons */
-        102, /* End of miscellaneous buttons */
+        108, /* End of miscellaneous buttons */
         -1
 };
 
@@ -408,6 +415,12 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         {
             top_level->toggle_grab_mouse();
         }
+        else if (cmd.port[0] >= PORT_GBMODEL0 &&
+                 cmd.port[0] < PORT_GBMODEL0 + S9xGBModelHotkeyCount)
+        {
+            top_level->set_gb_boot_policy(
+                S9xGBModelHotkeys[cmd.port[0] - PORT_GBMODEL0].policy);
+        }
     }
 }
 
@@ -463,6 +476,10 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strcasecmp(name, "GTK_swap_controllers"))
     {
         cmd.port[0] = PORT_SWAP_CONTROLLERS;
+    }
+    else if (!strncasecmp(name, "GTK_gb_model_", 13))
+    {
+        cmd.port[0] = PORT_GBMODEL0 + (name[13] - '0');
     }
     else if (!strcasecmp(name, "GTK_rewind"))
     {

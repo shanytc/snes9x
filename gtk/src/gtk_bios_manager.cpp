@@ -147,6 +147,7 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
         refresh_row(slot, rows[slot]);
 
     dialog.show_all();
+    const std::string was = S9xGBBiosFingerprint();
     if (dialog.run() != Gtk::RESPONSE_OK)
         return;
 
@@ -154,4 +155,9 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
         S9xSetBiosPath(slot, rows[slot].entry->get_text().c_str());
 
     gui_config->save_config_file();
+
+    // The GB-side BIOS files are only consulted at load time, so a running
+    // .gb/.gbc has to be reloaded for a new one to show.
+    if (Settings.GBRomPath[0] && was != S9xGBBiosFingerprint())
+        top_level->try_open_rom(std::string(Settings.GBRomPath));
 }

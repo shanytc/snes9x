@@ -84,7 +84,10 @@ enum {
     PORT_DIALOGSAVE         = 48,
     PORT_DIALOGLOAD         = 49,
     PORT_FILESAVE           = 50,
-    PORT_FILELOAD           = 51
+    PORT_FILELOAD           = 51,
+    // Emulation -> Game Boy Model, one per console the menu offers. Ordered as
+    // S9xGBModelHotkeys, so the offset from PORT_GBMODEL0 is its index there.
+    PORT_GBMODEL0           = 52
 };
 
 typedef struct BindingLink
@@ -97,7 +100,7 @@ typedef struct BindingLink
 extern const BindingLink b_links[];
 extern const int b_breaks[];
 const int NUM_JOYPAD_LINKS = 24;
-const int NUM_EMU_LINKS = 78;
+const int NUM_EMU_LINKS = 84;   // + the six Game Boy Model consoles
 
 typedef struct JoypadBinding
 {

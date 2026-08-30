@@ -1412,6 +1412,29 @@ const uint8 S9xGBBootPolicyMenuOrder[] = {
 const int S9xGBBootPolicyMenuCount =
 	(int) (sizeof(S9xGBBootPolicyMenuOrder) / sizeof(S9xGBBootPolicyMenuOrder[0]));
 
+std::string S9xGBBiosFingerprint (void)
+{
+	static const int slots[] = { S9X_BIOS_GB, S9X_BIOS_GBC, S9X_BIOS_SGB1, S9X_BIOS_SGB2 };
+	std::string out;
+	for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++)
+	{
+		out += S9xGetBiosPath(slots[i]);
+		out += '\n';
+	}
+	return (out);
+}
+
+const S9xGBModelHotkey S9xGBModelHotkeys[] = {
+	{ "GBModelGB",       "Game Boy",                 S9X_GBBOOT_GB       },
+	{ "GBModelGBC",      "Game Boy Color",           S9X_GBBOOT_GBC      },
+	{ "GBModelSGB",      "Super Game Boy",           S9X_GBBOOT_SGB      },
+	{ "GBModelSGB2",     "Super Game Boy 2",         S9X_GBBOOT_SGB2     },
+	{ "GBModelSGBGBC",   "SGB + GBC (hack)",         S9X_GBBOOT_SGB_GBC  },
+	{ "GBModelSGB2GBC",  "SGB2 + GBC (hack)",        S9X_GBBOOT_SGB2_GBC },
+};
+const int S9xGBModelHotkeyCount =
+	(int) (sizeof(S9xGBModelHotkeys) / sizeof(S9xGBModelHotkeys[0]));
+
 uint8 S9xNormalizeGBBootPolicy (int policy)
 {
 	if (policy < 0 || policy >= S9X_NUM_GBBOOT_POLICIES) return (S9X_GBBOOT_AUTO);

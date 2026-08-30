@@ -245,7 +245,8 @@ struct EmuConfig
 
     static const int allowed_bindings = 4;
     static const int num_controller_bindings = 18;
-    static const int num_shortcuts = 71;
+    // The last six are the Game Boy Model consoles, in S9xGBModelHotkeys order.
+    static const int num_shortcuts = 77;
 
     /* Save states are organized in banks of slots, as on win32. The state
      * file extension is the flat index, bank * save_slots_per_bank + slot. */

@@ -93,6 +93,14 @@ static const char *shortcut_names[] =
     "BeginRecordingMovie",
     "EndRecordingMovie",
     "SeekToFrame",
+    // Game Boy Model: keys match S9xGBModelHotkeys so every port names them
+    // the same in its config.
+    "GBModelGB",
+    "GBModelGBC",
+    "GBModelSGB",
+    "GBModelSGB2",
+    "GBModelSGBGBC",
+    "GBModelSGB2GBC",
 };
 
 static const char *default_controller_keys[] =
@@ -170,7 +178,13 @@ static const char *default_controller_keys[] =
     "", //    eToggleAllSoundChannels
     "", //    eStartRecording
     "", //    eStopRecording
-    ""
+    "", //    eSeekToFrame
+    "", //    Game Boy
+    "", //    Game Boy Color
+    "", //    Super Game Boy
+    "", //    Super Game Boy 2
+    "", //    SGB + GBC (hack)
+    ""  //    SGB2 + GBC (hack)
 };
 
 const char **EmuConfig::getDefaultShortcutKeys()

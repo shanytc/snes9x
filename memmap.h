@@ -266,6 +266,24 @@ int S9xGBBootPolicyGroup(int policy);
 // the two retired Automatic entries both become S9X_GBBOOT_AUTO.
 uint8 S9xNormalizeGBBootPolicy(int policy);
 
+// The consoles a port offers as a hotkey: the four real ones and the two colour
+// hacks, in menu order. `key` is the name a config file stores the binding
+// under, so every port spells them the same. Automatic is not here — it is a
+// rule, not a console, and picking it by key would say nothing about what runs.
+struct S9xGBModelHotkey
+{
+	const char *key;     // config key / shortcut name
+	const char *label;   // short label for a bindings list
+	uint8       policy;  // S9xGBBootPolicy it selects
+};
+extern const S9xGBModelHotkey S9xGBModelHotkeys[];
+extern const int              S9xGBModelHotkeyCount;
+
+// The BIOS paths a loaded Game Boy cart was started against. They are only read
+// at load time, so a running cart has to be reloaded for a change to any of them
+// to take effect: take this before opening the BIOS Manager and compare after.
+std::string S9xGBBiosFingerprint();
+
 enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
 
 // Resolve Settings.GBBootPolicy against the cart's header. `cgb_flag` is $0143,

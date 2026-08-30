@@ -181,13 +181,6 @@ constexpr int HOTKEY_TAB_TURBO      = 2;
 constexpr int HOTKEY_TAB_DISPLAY    = 3;
 constexpr int HOTKEY_TAB_GBMODEL    = 5;
 
-// Which console each Game Boy Model hotkey slot picks. Menu order, which is not
-// enum order, so the tab reads down the way the menu does.
-static const uint8 g_gbModelHotkeyPolicy[GB_MODEL_HOTKEYS] = {
-	S9X_GBBOOT_GB,      S9X_GBBOOT_GBC,     S9X_GBBOOT_SGB,
-	S9X_GBBOOT_SGB2,    S9X_GBBOOT_SGB_GBC, S9X_GBBOOT_SGB2_GBC,
-};
-
 #ifdef UNICODE
 #define S9XW_SHARD_PATH SHARD_PATHW
 #else
@@ -1586,7 +1579,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             // greyed for a missing BIOS, or missing entirely because no Game
             // Boy content is loaded - so the key can never reach a console the
             // menu would not let you pick either.
-            PostMenuCommand(ID_EMULATION_BIOS_POLICY0 + g_gbModelHotkeyPolicy[gbm]);
+            PostMenuCommand(ID_EMULATION_BIOS_POLICY0 + S9xGBModelHotkeys[gbm].policy);
             hitHotKey = true;
         }
         if(HKmatch(CheatSearchDialog))
@@ -2963,12 +2956,7 @@ LRESULT CALLBACK WinProc(
 			{
 				// The GB-side BIOS files are only consulted at load time, so a
 				// running .gb/.gbc has to be reloaded for a new one to show.
-				static const int gb_slots[] = {
-					S9X_BIOS_GB, S9X_BIOS_GBC, S9X_BIOS_SGB1, S9X_BIOS_SGB2
-				};
-				std::string was_paths[4];
-				for (int i = 0; i < 4; i++)
-					was_paths[i] = S9xGetBiosPath(gb_slots[i]);
+				const std::string was_paths = S9xGBBiosFingerprint();
 
 				// Restore the GUI surface ourselves: reached by hotkey there is
 				// no menu loop to have switched away from the render target.
@@ -2981,11 +2969,7 @@ LRESULT CALLBACK WinProc(
 
 				WinSaveConfigFile();
 
-				bool gb_changed = false;
-				for (int i = 0; i < 4 && !gb_changed; i++)
-					gb_changed = was_paths[i] != S9xGetBiosPath(gb_slots[i]);
-
-				if (gb_changed && Settings.GBRomPath[0])
+				if (Settings.GBRomPath[0] && was_paths != S9xGBBiosFingerprint())
 				{
 					TCHAR wpath[_MAX_PATH];
 					Utf8ToWide u8(Settings.GBRomPath);

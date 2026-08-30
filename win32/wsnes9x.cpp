@@ -2839,7 +2839,12 @@ LRESULT CALLBACK WinProc(
 					if(S9xMoviePlaying())
 						S9xMovieStop (TRUE);
 					if (cmd_id == ID_EMULATION_HARD_RESET)
+					{
 						S9xReset ();
+						// Only a power-cycle the user asked for: S9xReset also runs
+						// inside every non-fast state load, soft reset included.
+						S9xAnnounceGBBios();
+					}
 					else
 						S9xSoftReset ();
 					ReInitSound();
@@ -5153,21 +5158,38 @@ int WINAPI WinMain(
 			rewindContentFrame++;
 			if (Settings.SGB_BIOSModeActive)
 			{
+				// Where a soft reset should land: the cart's border up and its title
+				// on screen. Waiting for the packet stream to fall quiet instead put
+				// the checkpoint wherever the game next went silent - mid-intro.
+				const uint32 kCpMinAge = 240;   // clear the BIOS splash first
+				const uint32 kCpQuiet  = 30;    // no packets = setup finished
+				const uint32 kCpShown  = 150;   // up and staying up: title, not blank
 				static bool   sgbCpDone  = false;
 				static uint32 sgbCpPkts  = 0;
+				static uint32 sgbCpAge   = 0;
 				static uint32 sgbCpQuiet = 0;
+				static uint32 sgbCpShown = 0;
 				if (!S9xSGBBootHandoffCaptured())
 				{
 					S9xSGBInvalidateSoftResetCheckpoint();
 					sgbCpDone  = false;
 					sgbCpPkts  = S9xSGBGetPacketCount();
+					sgbCpAge   = 0;
 					sgbCpQuiet = 0;
+					sgbCpShown = 0;
 				}
 				else if (!sgbCpDone)
 				{
-					uint32 pkts = S9xSGBGetPacketCount();
+					const uint32 pkts = S9xSGBGetPacketCount();
 					if (pkts != sgbCpPkts) { sgbCpPkts = pkts; sgbCpQuiet = 0; }
-					else if (++sgbCpQuiet >= 120)
+					else ++sgbCpQuiet;
+
+					// Shown AND staying shown: the mask flickers off for single
+					// frames mid-setup, and a capture there is an all-black frame.
+					if (S9xSGBScreenVisible()) ++sgbCpShown; else sgbCpShown = 0;
+
+					if (++sgbCpAge >= kCpMinAge && sgbCpShown >= kCpShown &&
+					    (S9xSGBBootSetupComplete() || sgbCpQuiet >= kCpQuiet))
 					{
 						S9xSGBCaptureSoftResetCheckpoint();
 						sgbCpDone = true;
@@ -8849,12 +8871,17 @@ void ListFilesFromFolder(HWND hDlg, RomDataList** prdl)
 
 // File -> BIOS Manager: one row per supported BIOS, plus the default boot mode
 // for Game Boy content. Blank rows fall back to the search by filename.
+// Per-row verdict, kept for WM_CTLCOLORSTATIC: red text is what makes a bad
+// file read as a complaint rather than a caption.
+static S9xBiosPathStatus s_bios_status[S9X_NUM_BIOS_SLOTS];
+
 static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 {
 	TCHAR wtext[S9X_BIOS_PATH_MAX];
 	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
 	if (wtext[0] == TEXT('\0'))
 	{
+		s_bios_status[slot] = S9X_BIOS_PATH_UNSET;
 		SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, TEXT(""));
 		return;
 	}
@@ -8864,18 +8891,45 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	strncpy(saved, S9xGetBiosPath(slot), S9X_BIOS_PATH_MAX - 1);
 	saved[S9X_BIOS_PATH_MAX - 1] = '\0';
 	S9xSetBiosPath(slot, WideToUtf8(wtext));
-	const bool8 ok = S9xBiosPathUsable(slot);
+	std::string why;
+	const S9xBiosPathStatus st = S9xCheckBiosPath(slot, &why);
+	s_bios_status[slot] = st;
 	S9xSetBiosPath(slot, saved);
 
+	// The reason is the useful half: which size the slot wanted, or what the
+	// file turned out to be. Falls back to the status when there is none.
 	const bool exists = (GetFileAttributes(wtext) != INVALID_FILE_ATTRIBUTES);
-	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot,
-				   !exists ? TEXT("not found") : (ok ? TEXT("OK") : TEXT("unexpected size")));
+	Utf8ToWide  why_w(why.c_str());
+	LPCTSTR     text;
+	if (!exists || st == S9X_BIOS_PATH_MISSING) text = TEXT("not found");
+	else if (st == S9X_BIOS_PATH_OK)            text = TEXT("OK");
+	else if (!why.empty())                      text = (LPCTSTR) (wchar_t *) why_w;
+	else if (st == S9X_BIOS_PATH_BAD_IMAGE)     text = TEXT("wrong image");
+	else                                        text = TEXT("unexpected size");
+	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text);
 }
 
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
+	case WM_CTLCOLORSTATIC:
+	{
+		const int id = GetDlgCtrlID((HWND) lParam);
+		if (id >= IDC_BIOSMGR_STATUS0 && id < IDC_BIOSMGR_STATUS0 + S9X_NUM_BIOS_SLOTS)
+		{
+			const S9xBiosPathStatus st = s_bios_status[id - IDC_BIOSMGR_STATUS0];
+			if (st != S9X_BIOS_PATH_UNSET)
+			{
+				SetTextColor((HDC) wParam, st == S9X_BIOS_PATH_OK
+				                           ? RGB(0x1E, 0x8B, 0x3A) : RGB(0xC0, 0x39, 0x2B));
+				SetBkMode((HDC) wParam, TRANSPARENT);
+				return (INT_PTR) GetSysColorBrush(COLOR_BTNFACE);
+			}
+		}
+		break;
+	}
+
 	case WM_INITDIALOG:
 	{
 		LocalizeDialog(hDlg);
@@ -8912,7 +8966,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			ofn.hwndOwner       = hDlg;
 			ofn.lpstrFile       = filename;
 			ofn.nMaxFile        = MAX_PATH;
-			ofn.lpstrFilter     = TEXT("BIOS files\0*.zip;*.bin;*.sfc;*.gb;*.gbc\0All files\0*.*\0\0");
+			ofn.lpstrFilter     = TEXT("BIOS files\0*.zip;*.bin;*.rom;*.sfc;*.gb;*.gbc\0All files\0*.*\0\0");
 			ofn.lpstrInitialDir = S9xGetDirectoryT(BIOS_DIR);
 			ofn.lpstrTitle      = TEXT("Select BIOS File");
 			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;

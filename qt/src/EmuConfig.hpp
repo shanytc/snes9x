@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "EmuBinding.hpp"
+#include "biosmanager.h"   // S9X_NUM_BIOS_SLOTS
 
 struct EmuConfig
 {
@@ -202,7 +203,7 @@ struct EmuConfig
     int gb_boot_policy;
 
     // BIOS Manager paths, indexed by S9xBiosSlot. Persisted under [BIOS].
-    std::string bios_paths[8];
+    std::string bios_paths[S9X_NUM_BIOS_SLOTS];
 
     // Files
     enum FileLocation

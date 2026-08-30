@@ -49,11 +49,20 @@ void refresh_row(int slot, Row &row)
     char saved[S9X_BIOS_PATH_MAX];
     snprintf(saved, sizeof saved, "%s", S9xGetBiosPath(slot));
     S9xSetBiosPath(slot, text.c_str());
-    const bool ok = S9xBiosPathUsable(slot);
+    std::string why;
+    const S9xBiosPathStatus st = S9xCheckBiosPath(slot, &why);
     S9xSetBiosPath(slot, saved);
 
-    row.status->set_markup(ok ? "<span foreground='#27ae60'>OK</span>"
-                              : "<span foreground='#d68910'>unexpected size</span>");
+    // The reason is the useful half: which size the slot wanted, or what the
+    // file turned out to be. Falls back to the status when there is none.
+    if (st == S9X_BIOS_PATH_OK)
+        row.status->set_markup("<span foreground='#27ae60'>OK</span>");
+    else if (st == S9X_BIOS_PATH_MISSING)
+        row.status->set_markup("<span foreground='#c0392b'>not found</span>");
+    else
+        row.status->set_markup("<span foreground='#c0392b'>" +
+                               Glib::Markup::escape_text(why.empty() ? "unusable" : why) +
+                               "</span>");
 }
 
 } // namespace
@@ -127,7 +136,7 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
 
             auto filter = Gtk::FileFilter::create();
             filter->set_name(_("BIOS files"));
-            for (const char *pat : { "*.zip", "*.bin", "*.BIN", "*.sfc", "*.gb", "*.gbc" })
+            for (const char *pat : { "*.zip", "*.bin", "*.BIN", "*.rom", "*.sfc", "*.gb", "*.gbc" })
                 filter->add_pattern(pat);
             chooser.add_filter(filter);
             auto all = Gtk::FileFilter::create();

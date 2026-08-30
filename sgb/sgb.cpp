@@ -169,6 +169,12 @@ struct Emulator::Impl
 	int64_t     hack_cycle_mark  = 0;
 	static const uint8_t kBorderChr = 1, kBorderPct = 2;
 
+	// The cart has finished its power-on SGB setup: it sent the MASK_EN
+	// cancel that says its border and palettes are in place. Protocol, not
+	// wall clock — the frontend checkpoints on this rather than guessing
+	// with a frame count, which lands wherever the game next goes quiet.
+	bool        boot_setup_done = false;
+
 	// GB frames a first unmask buys the cart to start transferring. The widest
 	// gap over the 316-cart SGB set is Harvest Moon GBC's 407.
 	static const uint32_t kHackBorderGrace = 480;
@@ -649,6 +655,7 @@ void Emulator::Reset()
 	impl_->border_capture.stage = Impl::BorderCapture::Idle;
 	impl_->border_fade_frames   = 0;
 	impl_->boot_handoff_captured = false;
+	impl_->boot_setup_done       = false;
 	impl_->boot_handoff_regs     = {};
 	impl_->handoff_frames        = 0;
 	impl_->ds_extra              = -1;
@@ -2067,6 +2074,20 @@ bool Emulator::IsBootHandoffCaptured() const
 	return impl_->boot_handoff_captured;
 }
 
+// The cart has transferred its border. Says nothing about whether the screen
+// is up yet - see IsScreenVisible - and a silent cart never sets it.
+bool Emulator::IsBootSetupComplete() const
+{
+	return impl_->boot_setup_done;
+}
+
+// Is the GB window on screen? Read as state, not as a command: a cart may
+// clear its mask through PAL_SET bit 6 rather than a MASK_EN cancel.
+bool Emulator::IsScreenVisible() const
+{
+	return impl_->sgb_state.mask_mode == SGB_MASK_CANCEL;
+}
+
 uint32_t Emulator::GetPacketCount() const
 {
 	if (!impl_) return 0;
@@ -2571,6 +2592,7 @@ void Emulator::OnJoyserWrite(uint8_t value)
 		}
 	}
 
+
 	// SGB+GBC hack, border pass: hand over on the MASK_EN cancel that follows
 	// the border transfer. Games mask the GB screen while they set the SGB up
 	// and unmask when that is done, so this is the game itself saying its
@@ -2620,6 +2642,11 @@ void Emulator::OnJoyserWrite(uint8_t value)
 void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)
 {
 	DbgPushCmd(cmd);
+
+	// End of the cart's power-on SGB setup: the border completes, or it hands
+	// the screen over. Both, because carts send one or the other, not always both.
+	if (cmd == 0x14 || (cmd == 0x17 && len >= 2 && (data[1] & 0x03) == 0))
+		impl_->boot_setup_done = true;
 
 	// No BIOS = a plain Game Boy: ignoring every SGB command keeps
 	// detection dead (no MLT_REQ reply, no palettes), so games behave
@@ -3404,6 +3431,16 @@ bool S9xSGBBIOSHandshakePending(void)
 bool S9xSGBBootHandoffCaptured(void)
 {
 	return SGB::Instance().IsBootHandoffCaptured();
+}
+
+bool S9xSGBBootSetupComplete(void)
+{
+	return SGB::Instance().IsBootSetupComplete();
+}
+
+bool S9xSGBScreenVisible(void)
+{
+	return SGB::Instance().IsScreenVisible();
 }
 
 bool S9xSGBGetROMBytes(const unsigned char **out_data, size_t *out_size)

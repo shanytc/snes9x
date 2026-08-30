@@ -6,6 +6,7 @@
 
 #include "snes9x.h"
 #include "biosmanager.h"
+#include "memmap.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -28,6 +29,8 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "GameBoyColor",  "Game Boy Color",    "cgb_boot.bin", 0        },
 	{ "SGB1",          "Super Game Boy",    "sgb.sfc",      0        },
 	{ "SGB2",          "Super Game Boy 2",  "sgb2.sfc",     0        },
+	{ "SGB1BootROM",   "SGB boot ROM",      "sgb.boot.rom", 0x100    },
+	{ "SGB2BootROM",   "SGB2 boot ROM",     "sgb2.boot.rom",0x100    },
 	{ "SFCBoxKROM",    "SFC Box (KROM)",    "KROM1.BIN",    0x10000  },
 	{ "SFCBoxFont",    "SFC Box (MB90082)", "MB90082.BIN",  9216     },
 	{ "BSX",           "Satellaview / BS-X","BS-X.bin",     0x100000 },
@@ -94,7 +97,7 @@ static bool IsZipFile (const char *path)
 // judging every member on its contents.
 static bool HasBiosMemberExt (const char *name)
 {
-	static const char *exts[] = { ".bin", ".sfc", ".gb", ".gbc", NULL };
+	static const char *exts[] = { ".bin", ".rom", ".sfc", ".gb", ".gbc", NULL };
 	const size_t len = strlen(name);
 	for (int i = 0; exts[i]; i++)
 	{
@@ -117,10 +120,10 @@ static bool SizeOkForSlot (int slot, uint32 n)
 	return (kSlots[slot].size == 0 || n == kSlots[slot].size);
 }
 
-bool8 S9xBiosPathUsable (int slot)
+// The size half of the check, zip-aware. Kept separate so the status can say
+// which test failed.
+static bool8 SizeOkForPath (int slot)
 {
-	if (!SlotValid(slot) || !g_paths[slot][0]) return (FALSE);
-
 	// Judge an archive off the central directory rather than inflating it —
 	// the dialog re-checks on every keystroke.
 	if (IsZipFile(g_paths[slot]))
@@ -155,6 +158,137 @@ bool8 S9xBiosPathUsable (int slot)
 	const long n = FileSize(g_paths[slot]);
 	if (n < 0) return (FALSE);
 	return SizeOkForSlot(slot, (uint32) n) ? TRUE : FALSE;
+}
+
+// What an image is, judged from its own bytes, so a slot can say what the file
+// turned out to be instead of only that it was wrong.
+enum BiosImageKind
+{
+	KIND_UNKNOWN = 0,
+	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
+	KIND_SGB1_CART, KIND_SGB2_CART
+};
+
+static const char *KindName (int kind)
+{
+	switch (kind)
+	{
+		case KIND_DMG_BOOT:  return ("Game Boy boot ROM");
+		case KIND_CGB_BOOT:  return ("Game Boy Color boot ROM");
+		case KIND_SGB1_BOOT: return ("Super Game Boy boot ROM");
+		case KIND_SGB2_BOOT: return ("Super Game Boy 2 boot ROM");
+		case KIND_SGB1_CART: return ("Super Game Boy image");
+		case KIND_SGB2_CART: return ("Super Game Boy 2 image");
+		default:             return ("unrecognised image");
+	}
+}
+
+// A boot ROM opens LD SP,$FFFE; the SGB one then sets P1 to $30, and its $FD
+// byte is the A it hands the cart — $01 on SGB1, $FF on SGB2.
+static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
+{
+	uint8 sgb_mode = 0;
+	if (S9xIsSGBBIOSImage(d, n, &sgb_mode))
+		return (sgb_mode == 2) ? KIND_SGB2_CART : KIND_SGB1_CART;
+
+	if (n >= 7 && d[0] == 0x31 && d[1] == 0xFE && d[2] == 0xFF)
+	{
+		if (full == 0x100 && n >= 0x100)
+		{
+			if (d[3] != 0x3E || d[4] != 0x30 || d[5] != 0xE0 || d[6] != 0x00)
+				return (KIND_DMG_BOOT);
+			return (d[0xFD] == 0xFF) ? KIND_SGB2_BOOT : KIND_SGB1_BOOT;
+		}
+		if (full == 0x800 || full == 0x900) return (KIND_CGB_BOOT);
+	}
+	return (KIND_UNKNOWN);
+}
+
+// Slots the loader identifies by content as well as size. The rest are known
+// only by an exact byte count, so size is the whole test there.
+static int ExpectedKind (int slot)
+{
+	switch (slot)
+	{
+		case S9X_BIOS_GB:        return (KIND_DMG_BOOT);
+		case S9X_BIOS_GBC:       return (KIND_CGB_BOOT);
+		case S9X_BIOS_SGB1:      return (KIND_SGB1_CART);
+		case S9X_BIOS_SGB2:      return (KIND_SGB2_CART);
+		case S9X_BIOS_SGB1_BOOT: return (KIND_SGB1_BOOT);
+		case S9X_BIOS_SGB2_BOOT: return (KIND_SGB2_BOOT);
+		default:                 return (KIND_UNKNOWN);
+	}
+}
+
+struct KindProbe { int want; int seen; };
+
+static bool AcceptKind (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	KindProbe *p = (KindProbe *) ctx;
+	const int  k = ClassifyImage(data, size, full_size);
+	if (p->seen == KIND_UNKNOWN) p->seen = k;
+	return (k == p->want);
+}
+
+// "need 256 bytes" beats "unexpected size" when the fix is to find another dump.
+static std::string SizeWanted (int slot)
+{
+	char buf[64];
+	if (slot == S9X_BIOS_GBC) return ("wrong size: need 2048 or 2304 bytes");
+	if (kSlots[slot].size == 0) return ("empty file");
+	snprintf(buf, sizeof buf, "wrong size: need %u bytes", (unsigned) kSlots[slot].size);
+	return (std::string(buf));
+}
+
+// The Super Game Boy slots hold a cart, not a fixed-size blob, so size alone
+// says almost nothing: FindSGB_BIOS accepts an image only if it carries the
+// right console's header, and a file that fails that would read as OK here
+// while the menu entry stayed greyed with no explanation.
+static bool AcceptSGBSlot (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) full_size;
+	uint8 got = 0;
+	return size >= 0x8000 && S9xIsSGBBIOSImage(data, size, &got) &&
+	       got == *(const uint8 *) ctx;
+}
+
+S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *reason)
+{
+	if (reason) reason->clear();
+	if (!SlotValid(slot) || !g_paths[slot][0])
+		return (S9X_BIOS_PATH_UNSET);
+	if (FileSize(g_paths[slot]) < 0)
+		return (S9X_BIOS_PATH_MISSING);
+	if (!SizeOkForPath(slot))
+	{
+		if (reason) *reason = SizeWanted(slot);
+		return (S9X_BIOS_PATH_BAD_SIZE);
+	}
+
+	// Every slot, size-only ones included: an SGB cart is exactly Sufami
+	// Turbo's 262144 bytes. Only ever rejects on positive identification.
+	const int want = ExpectedKind(slot);
+	KindProbe          probe = { want, KIND_UNKNOWN };
+	std::vector<uint8> img;
+	if (!S9xReadBiosImage(g_paths[slot], img, 0x8000, AcceptKind, &probe))
+	{
+		// Say it is wrong, not just what it is, or the row reads as a caption
+		// for whatever was dropped on it.
+		if (reason)
+			*reason = probe.seen != KIND_UNKNOWN
+			       ? std::string("wrong file: ") + KindName(probe.seen)
+			       : want != KIND_UNKNOWN
+			       ? std::string("not a ") + KindName(want)
+			       : std::string("unreadable");
+		return (S9X_BIOS_PATH_BAD_IMAGE);
+	}
+
+	return (S9X_BIOS_PATH_OK);
+}
+
+bool8 S9xBiosPathUsable (int slot)
+{
+	return (S9xCheckBiosPath(slot, NULL) == S9X_BIOS_PATH_OK) ? TRUE : FALSE;
 }
 
 std::string S9xResolveBiosPath (int slot)

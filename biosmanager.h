@@ -20,6 +20,8 @@ enum S9xBiosSlot
 	S9X_BIOS_GBC,           // cgb_boot.bin — Game Boy Color boot ROM
 	S9X_BIOS_SGB1,          // sgb.sfc      — Super Game Boy
 	S9X_BIOS_SGB2,          // sgb2.sfc     — Super Game Boy 2
+	S9X_BIOS_SGB1_BOOT,     // sgb.boot.rom — Super Game Boy GB-side boot ROM
+	S9X_BIOS_SGB2_BOOT,     // sgb2.boot.rom — the SGB2 one
 	S9X_BIOS_SFCBOX_KROM,   // KROM1.BIN    — Super Famicom Box supervisor
 	S9X_BIOS_SFCBOX_FONT,   // MB90082.BIN  — Super Famicom Box OSD font
 	S9X_BIOS_BSX,           // BS-X.bin     — Satellaview
@@ -46,9 +48,23 @@ void        S9xSetBiosPath (int slot, const char *path);
 // Raw buffer for config backends that bind a char array (win32 wconfig).
 char *S9xGetBiosPathBuffer (int slot);
 
-// FALSE when the slot is unassigned, the file is unreadable, or its size
-// doesn't match. The dialog flags these; loaders still try the path and fall
-// back on failure, so a wrong-sized file is a warning rather than a block.
+// Why an assigned path is or isn't loadable, for the dialog's status column.
+enum S9xBiosPathStatus
+{
+	S9X_BIOS_PATH_UNSET = 0,   // no path assigned to this slot
+	S9X_BIOS_PATH_MISSING,     // assigned, but nothing readable is there
+	S9X_BIOS_PATH_BAD_SIZE,    // readable, but not a size this slot takes
+	S9X_BIOS_PATH_BAD_IMAGE,   // right size, but the loader's header check fails
+	S9X_BIOS_PATH_OK
+};
+
+// Runs the same tests the loader will, so OK means the file will actually be
+// used. `reason` (optional) comes back with a short phrase for the dialog:
+// the size the slot wanted, or what the file turned out to be instead.
+S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *reason = NULL);
+
+// Shorthand for S9xCheckBiosPath(slot) == S9X_BIOS_PATH_OK. Loaders still try
+// the path and fall back on failure, so a bad file is a warning, not a block.
 bool8 S9xBiosPathUsable (int slot);
 
 // Assigned path when it is readable, otherwise "". Loaders call this first and

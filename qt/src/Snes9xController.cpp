@@ -1120,6 +1120,9 @@ bool Snes9xController::isAbnormalSpeed()
 void Snes9xController::reset()
 {
     S9xReset();
+    // Only a power-cycle the user asked for: S9xReset also runs inside every
+    // non-fast state load, soft reset included.
+    S9xAnnounceGBBios();
 }
 
 void Snes9xController::softReset()

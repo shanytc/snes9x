@@ -264,6 +264,8 @@ public:
 	bool    IsHandshakePending() const;
 
 	bool    IsBootHandoffCaptured() const;
+	bool    IsBootSetupComplete() const;
+	bool    IsScreenVisible() const;
 	uint32_t GetPacketCount() const;
 
 	// GB PPU scanline event hooks for SGB row/bank counter advance.
@@ -556,6 +558,10 @@ bool          S9xSGBBIOSGBIsReleased (void);
 bool          S9xSGBBIOSHandshakePending (void);
 
 bool          S9xSGBBootHandoffCaptured (void);
+// True once the cart sent the MASK_EN cancel ending its power-on SGB setup.
+bool          S9xSGBBootSetupComplete (void);
+// Is the GB window on screen, or masked away by MASK_EN?
+bool          S9xSGBScreenVisible (void);
 
 // ---- Integration hooks for RetroAchievements -------------------------------
 // Expose the loaded GB ROM so the platform can hash it under the GameBoy /

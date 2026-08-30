@@ -202,6 +202,9 @@ void Snes9xWindow::connect_signals()
 
     get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&] {
         S9xReset();
+        // Only a power-cycle the user asked for: S9xReset also runs inside
+        // every non-fast state load, soft reset included.
+        S9xAnnounceGBBios();
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif

@@ -785,7 +785,6 @@ static bool8 is_BSCart_BIOS (const uint8 *, uint32);
 static bool8 is_BSCartSA1_BIOS(const uint8 *, uint32);
 static bool8 is_BSX_Shell (const uint8 *, uint32);
 static bool8 is_GNEXT_Add_On (const uint8 *, uint32);
-static bool8 is_SGB_BIOS      (const uint8 *data, uint32 size, uint8 *out_mode /*1 or 2*/);
 static bool8 FindSGB_BIOS     (uint8 mode, const char *gb_rom_path, std::string &out_path);
 static bool8 FindSGB_BootROM  (uint8 mode, const char *gb_rom_path, std::string &out_path);
 static bool8 LoadSGBBootROM   (const char *path, std::vector<uint8> &out_bytes);
@@ -1105,7 +1104,7 @@ static bool8 is_GNEXT_Add_On (const uint8 *data, uint32 size)
 // SGB2 appends a '2'. Canonical file sizes are 256 KB / 512 KB respectively
 // but we only validate the title here — callers typically read a partial
 // buffer (header-sized) so ROM-size checks live outside this helper.
-static bool8 is_SGB_BIOS (const uint8 *data, uint32 size, uint8 *out_mode)
+bool8 S9xIsSGBBIOSImage (const uint8 *data, uint32 size, uint8 *out_mode)
 {
 	if (!data || size < 0x8000) return (FALSE);
 	if (memcmp(data + 0x7FC0, "Super GAMEBOY", 13) != 0) return (FALSE);
@@ -1120,7 +1119,7 @@ static bool AcceptSGBMode (const uint8 *data, uint32 size, uint32 full_size, voi
 {
 	(void) full_size;
 	uint8 got = 0;
-	return size >= 0x8000 && is_SGB_BIOS(data, size, &got) &&
+	return size >= 0x8000 && S9xIsSGBBIOSImage(data, size, &got) &&
 	       got == *(const uint8 *) ctx;
 }
 
@@ -1179,7 +1178,7 @@ static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out
 			if (n < 0x8000) continue;
 
 			uint8 got_mode = 0;
-			if (is_SGB_BIOS(hdr, static_cast<uint32>(n), &got_mode) && got_mode == mode)
+			if (S9xIsSGBBIOSImage(hdr, static_cast<uint32>(n), &got_mode) && got_mode == mode)
 			{
 				out_path = full;
 				return (TRUE);
@@ -1215,6 +1214,19 @@ static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &
 	};
 	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
 
+	// A path set in the BIOS Manager wins over the by-name search.
+	const std::string assigned =
+		S9xResolveBiosPath(mode == 2 ? S9X_BIOS_SGB2_BOOT : S9X_BIOS_SGB1_BOOT);
+	if (!assigned.empty())
+	{
+		std::vector<uint8> img;
+		if (S9xReadBiosImage(assigned.c_str(), img, 256) && img.size() == 256)
+		{
+			out_path = assigned;
+			return (TRUE);
+		}
+	}
+
 	std::vector<std::string> dirs;
 	if (gb_rom_path && *gb_rom_path)
 	{
@@ -1247,12 +1259,23 @@ static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &
 
 static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
 {
-	FILE *f = fopen(path, "rb");
-	if (!f) return (FALSE);
-	out_bytes.assign(256, 0);
-	const size_t got = fread(out_bytes.data(), 1, 256, f);
-	fclose(f);
-	return got == 256;
+	// May be a .zip — an assigned slot takes one wherever a plain file goes.
+	return S9xReadBiosImage(path, out_bytes, 256) && out_bytes.size() == 256;
+}
+
+// A real SGB boot ROM, or a plain DMG one wearing the name? Nintendo's dump
+// sets P1 to $30 on entry, which a DMG boot ROM never does; SameBoy's drives
+// P1 through C instead, so take its LD A,$F1 as well.
+static bool8 IsSGBBootROM (const std::vector<uint8> &d)
+{
+	if (d.size() >= 7 && d[0] == 0x31 && d[1] == 0xFE && d[2] == 0xFF &&
+	    d[3] == 0x3E && d[4] == 0x30 && d[5] == 0xE0 && d[6] == 0x00)
+		return (TRUE);
+
+	for (size_t k = 0; k + 1 < d.size(); ++k)
+		if (d[k] == 0x3E && d[k + 1] == 0xF1) return (TRUE);
+
+	return (FALSE);
 }
 
 // S9xReadBiosImage filter for a boot ROM: exact size for the console plus the
@@ -1849,6 +1872,24 @@ static std::string GBGameNameFromPath(const char *path)
     return s;
 }
 
+static std::string BaseName(const char *path)
+{
+    if (!path || !*path) return std::string();
+    const std::string s(path);
+    const size_t sep = s.find_last_of("/\\");
+    return sep == std::string::npos ? s : s.substr(sep + 1);
+}
+
+// Did the last SGB-BIOS load run the user's own GB-side boot ROM? Worth saying,
+// because the embedded SameBoy one is the usual case; not worth the filename,
+// which is long and there is only ever one per console.
+static bool s_sgb_user_boot = false;
+
+// The last banner's console, so a hard reset can say the same thing. A reset
+// keeps whatever BIOS is already staged - it does not re-resolve the slot -
+// so re-announcing it is accurate by construction.
+static uint8 s_last_bios_mode = 0;
+
 static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
 {
     const std::string name = GBGameNameFromPath(gb_path);
@@ -1864,10 +1905,40 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
         snprintf(msg, sizeof msg, "\"%s\" (%s) via Game Boy BIOS", name.c_str(), region);
     else
         snprintf(msg, sizeof msg, "\"%s\" (%s)", name.c_str(), region);
+
+    // With a BIOS Manager slot, a by-name fallback and ten plausible dumps in
+    // a folder, "via Super Game Boy 2" no longer says which file that was.
+    std::string from;
+    if (bios_mode == 1 || bios_mode == 2)
+    {
+        from = BaseName(Settings.SGB_BIOSPath);
+        if (s_sgb_user_boot) from += " + boot ROM";
+    }
+    else if (bios_mode == 3 || bios_mode == 4)
+        from = BaseName(Settings.GB_BIOSPath);
+    else
+        from = "no BIOS";
+
+    if (!from.empty())
+    {
+        const size_t n = strlen(msg);
+        snprintf(msg + n, sizeof msg - n, "  [%s]", from.c_str());
+    }
+
+    s_last_bios_mode = bios_mode;
+
     const uint32 saved = Settings.InitialInfoStringTimeout;
     Settings.InitialInfoStringTimeout = 60 * 5;
     S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
     Settings.InitialInfoStringTimeout = saved;
+}
+
+// Re-announce on a hard reset: the console and BIOS are the ones staged at
+// load, and a reset is exactly when you want to be told what is booting.
+void S9xAnnounceGBBios (void)
+{
+    if (!Settings.GBRomPath[0]) return;
+    EmitSGBLoadBanner(Settings.GBRomPath, s_last_bios_mode);
 }
 
 // Stage a GB/GBC boot ROM for the BIOS-less paths; with none found the cart
@@ -1936,6 +2007,7 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lic
 
 static uint8 StageGBBootROM (bool gbCgb, const char *filename)
 {
+    s_sgb_user_boot = false;   // no SGB BIOS on this path
     Settings.GB_BIOSActive  = FALSE;
     Settings.GB_BIOSPath[0] = '\0';
 
@@ -2201,7 +2273,7 @@ bool8 CMemory::LoadROM (const char *filename)
 static bool AcceptSGBAny (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
 {
     (void) full_size; (void) ctx;
-    return is_SGB_BIOS(data, size, NULL) != FALSE;
+    return S9xIsSGBBIOSImage(data, size, NULL) != FALSE;
 }
 
 // bios_path may be a .zip; S9xReadBiosImage picks the member that carries an
@@ -2211,7 +2283,7 @@ static bool8 LoadSGBBIOSBytes (const char *bios_path, std::vector<uint8> &out_bi
     if (!S9xReadBiosImage(bios_path, out_bios, CMemory::MAX_ROM_SIZE, AcceptSGBAny, NULL))
         return FALSE;
     out_mode = 1;
-    is_SGB_BIOS(out_bios.data(), (uint32) out_bios.size(), &out_mode);
+    S9xIsSGBBIOSImage(out_bios.data(), (uint32) out_bios.size(), &out_mode);
     return TRUE;
 }
 
@@ -2223,25 +2295,15 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path, b
     uint8 mode = 1;
     if (!LoadSGBBIOSBytes(bios_path, bios, mode)) return FALSE;
 
-    // GB-side boot ROM. Publicly dumped sgb*.boot.rom files are almost
-    // always plain DMG boot ROMs that don't send the 5-packet SGB
-    // handshake the BIOS expects. Heuristic: a real SGB boot ROM contains
-    // a `3E F1` sequence (LD A, $F1) somewhere in its body as the first
-    // handshake command byte. If we don't find that, fall back to the
-    // embedded LIJI32/SameBoy SGB boot ROM.
+    // GB-side boot ROM: the user's if it really is an SGB one, otherwise the
+    // embedded LIJI32/SameBoy fallback. See IsSGBBootROM.
     std::string boot_path;
     std::vector<uint8> user_boot;
     const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
                                LoadSGBBootROM(boot_path.c_str(), user_boot);
-    bool user_boot_is_sgb = false;
-    if (user_has_boot)
-    {
-        for (size_t k = 0; k + 1 < user_boot.size(); ++k)
-        {
-            if (user_boot[k] == 0x3E && user_boot[k + 1] == 0xF1)
-            { user_boot_is_sgb = true; break; }
-        }
-    }
+    const bool user_boot_is_sgb = user_has_boot && IsSGBBootROM(user_boot) != FALSE;
+    // The +GBC hack stages no boot ROM at all, so do not claim one there.
+    s_sgb_user_boot = (!skip_gb_boot_rom && user_boot_is_sgb);
 
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
@@ -2300,15 +2362,9 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
     std::vector<uint8> user_boot;
     const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
                                LoadSGBBootROM(boot_path.c_str(), user_boot);
-    bool user_boot_is_sgb = false;
-    if (user_has_boot)
-    {
-        for (size_t k = 0; k + 1 < user_boot.size(); ++k)
-        {
-            if (user_boot[k] == 0x3E && user_boot[k + 1] == 0xF1)
-            { user_boot_is_sgb = true; break; }
-        }
-    }
+    const bool user_boot_is_sgb = user_has_boot && IsSGBBootROM(user_boot) != FALSE;
+    // The +GBC hack stages no boot ROM at all, so do not claim one there.
+    s_sgb_user_boot = (!skip_gb_boot_rom && user_boot_is_sgb);
 
     // Snapshot the GB bytes before LoadROMMem clobbers ROM[].
     std::vector<uint8> gb_copy(gb_bytes, gb_bytes + gb_size);

@@ -231,6 +231,14 @@ void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *, uint32);
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
 
+// TRUE when `data` is a Super Game Boy BIOS cart image, judged the way the
+// loader judges it: *out_mode comes back 1 for SGB1, 2 for SGB2.
+bool8 S9xIsSGBBIOSImage(const uint8 *data, uint32 size, uint8 *out_mode);
+
+// Re-show the load banner ("<game>" (NTSC) via Super Game Boy 2  [sgb2.sfc]).
+// No-op unless Game Boy content is loaded.
+void S9xAnnounceGBBios(void);
+
 // Which console GB content runs on (Settings.GBBootPolicy). The Automatic
 // entries pick from what the cart supports, breaking ties in the stated
 // direction — that tie is what "triple boot" carts (DMG + CGB + SGB) hit.

@@ -79,7 +79,7 @@ void BiosManagerDialog::browse(int slot)
 
     const QString file = QFileDialog::getOpenFileName(
         this, tr("Select %1 BIOS").arg(QString::fromUtf8(info->label)), start,
-        tr("BIOS files (*.zip *.bin *.sfc *.gb *.gbc *.BIN);;All files (*)"));
+        tr("BIOS files (*.zip *.bin *.rom *.sfc *.gb *.gbc *.BIN);;All files (*)"));
 
     if (!file.isEmpty())
         rows[slot].edit->setText(file);
@@ -108,11 +108,20 @@ void BiosManagerDialog::refreshRow(int slot)
     const char *saved = S9xGetBiosPath(slot);
     const std::string keep(saved ? saved : "");
     S9xSetBiosPath(slot, text.toUtf8().constData());
-    const bool ok = S9xBiosPathUsable(slot);
+    std::string why;
+    const S9xBiosPathStatus st = S9xCheckBiosPath(slot, &why);
     S9xSetBiosPath(slot, keep.c_str());
 
-    status->setText(ok ? tr("OK") : tr("unexpected size"));
-    status->setStyleSheet(ok ? "color: #27ae60;" : "color: #d68910;");
+    // The reason is the useful half: which size the slot wanted, or what the
+    // file turned out to be. Falls back to the status when there is none.
+    const bool ok = (st == S9X_BIOS_PATH_OK);
+    status->setText(
+          ok                            ? tr("OK")
+        : st == S9X_BIOS_PATH_MISSING   ? tr("not found")
+        : !why.empty()                  ? QString::fromStdString(why)
+        : st == S9X_BIOS_PATH_BAD_IMAGE ? tr("wrong image")
+        : tr("unexpected size"));
+    status->setStyleSheet(ok ? "color: #27ae60;" : "color: #c0392b;");
 }
 
 void BiosManagerDialog::applyAndClose()

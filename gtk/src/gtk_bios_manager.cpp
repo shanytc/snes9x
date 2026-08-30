@@ -147,7 +147,6 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
         refresh_row(slot, rows[slot]);
 
     dialog.show_all();
-    const std::string was = S9xGBBiosFingerprint();
     if (dialog.run() != Gtk::RESPONSE_OK)
         return;
 
@@ -156,8 +155,9 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
 
     gui_config->save_config_file();
 
-    // The GB-side BIOS files are only consulted at load time, so a running
-    // .gb/.gbc has to be reloaded for a new one to show.
-    if (Settings.GBRomPath[0] && was != S9xGBBiosFingerprint())
-        top_level->try_open_rom(std::string(Settings.GBRomPath));
+    // The running cart keeps the BIOS it was loaded against - these paths are
+    // only read at load time. What changes is which Game Boy Model entries are
+    // selectable, and this menu is only rebuilt here and on a load, so it has
+    // to be asked for explicitly.
+    top_level->configure_widgets();
 }

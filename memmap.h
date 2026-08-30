@@ -279,10 +279,6 @@ struct S9xGBModelHotkey
 extern const S9xGBModelHotkey S9xGBModelHotkeys[];
 extern const int              S9xGBModelHotkeyCount;
 
-// The BIOS paths a loaded Game Boy cart was started against. They are only read
-// at load time, so a running cart has to be reloaded for a change to any of them
-// to take effect: take this before opening the BIOS Manager and compare after.
-std::string S9xGBBiosFingerprint();
 
 enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
 

@@ -234,12 +234,20 @@ void EmuMainWindow::refreshBiosMenu()
     // saved preference, and one whose BIOS has gone missing stays checked but
     // greyed, so the menu says what was picked and that it cannot be honoured.
     const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+    const QString missing = tr(" (Missing BIOS)");
     for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
     {
         const int i = S9xGBBootPolicyMenuOrder[n];
+        const bool have = S9xGBBootPolicyAvailable(i, Settings.GBRomPath);
         bios_policy_actions[i]->setChecked(i == policy);
-        bios_policy_actions[i]->setEnabled(
-            S9xGBBootPolicyAvailable(i, Settings.GBRomPath));
+        bios_policy_actions[i]->setEnabled(have);
+
+        // Say why it is greyed, on the item. Taken off the current text rather
+        // than a cached original, so a retranslation still lands on the base.
+        QString base = bios_policy_actions[i]->text();
+        if (base.endsWith(missing))
+            base.chop(missing.size());
+        bios_policy_actions[i]->setText(have ? base : base + missing);
     }
 }
 
@@ -401,15 +409,14 @@ void EmuMainWindow::createWidgets()
     file_menu->addSeparator();
     auto bios_manager_item = file_menu->addAction(tr("&BIOS Manager..."));
     connect(bios_manager_item, &QAction::triggered, this, [this] {
-        const std::string was = S9xGBBiosFingerprint();
         BiosManagerDialog dialog(this, app);
         if (dialog.exec() != QDialog::Accepted)
             return;
         app->config->saveFile(EmuConfig::findConfigFile());
-        // The GB-side BIOS files are only consulted at load time, so a running
-        // .gb/.gbc has to be reloaded for a new one to show.
-        if (Settings.GBRomPath[0] && was != S9xGBBiosFingerprint())
-            openFile(std::string(Settings.GBRomPath));
+        // The running cart keeps the BIOS it was loaded against - these paths
+        // are only read at load time. What changes is which Game Boy Model
+        // entries are selectable.
+        refreshBiosMenu();
     });
 
     auto languages = EmuPoTranslator::availableLanguages();

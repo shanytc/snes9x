@@ -151,6 +151,10 @@ Nintendo is a trademark.")
 #define HOTKEYS_BIOS_MANAGER TEXT("BIOS Manager:")
 // Emulation -> Game Boy Model. The hack entries are abbreviated to keep every
 // label inside the 72-DLU statics; the tab name supplies the context.
+// Appended to a greyed Emulation -> Game Boy Model entry, so the item says why
+// it cannot be picked instead of leaving it to guesswork.
+#define GBMODEL_MISSING_BIOS TEXT(" (Missing BIOS)")
+
 #define HOTKEYS_GBMODEL_GB TEXT("Game Boy:")
 #define HOTKEYS_GBMODEL_GBC TEXT("Game Boy Color:")
 #define HOTKEYS_GBMODEL_SGB TEXT("Super Game Boy:")

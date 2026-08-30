@@ -2954,10 +2954,6 @@ LRESULT CALLBACK WinProc(
 			break;
 		case ID_FILE_BIOSMANAGER:
 			{
-				// The GB-side BIOS files are only consulted at load time, so a
-				// running .gb/.gbc has to be reloaded for a new one to show.
-				const std::string was_paths = S9xGBBiosFingerprint();
-
 				// Restore the GUI surface ourselves: reached by hotkey there is
 				// no menu loop to have switched away from the render target.
 				RestoreGUIDisplay();
@@ -2969,20 +2965,13 @@ LRESULT CALLBACK WinProc(
 
 				WinSaveConfigFile();
 
-				if (Settings.GBRomPath[0] && was_paths != S9xGBBiosFingerprint())
-				{
-					TCHAR wpath[_MAX_PATH];
-					Utf8ToWide u8(Settings.GBRomPath);
-					_tcsncpy(wpath, u8, _MAX_PATH - 1);
-					wpath[_MAX_PATH - 1] = 0;
-					RestoreGUIDisplay();
-					if (LoadROM(wpath))
-					{
-						S9xReset();
-						ReInitSound();
-					}
-					RestoreSNESDisplay();
-				}
+				// The running cart keeps the BIOS it was loaded against - these
+				// paths are only read at load time, and re-reading them would
+				// mean restarting a game that is already playing. What does
+				// change is which Game Boy Model entries are selectable, so
+				// refresh the menu rather than the emulator.
+				CheckMenuStates();
+				DrawMenuBar(GUI.hWnd);
 			}
 			break;
 		case ID_EMULATION_BIOS_POLICY0 + 0:
@@ -5607,10 +5596,32 @@ static void CheckMenuStates ()
 			for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
 			{
 				const int i = S9xGBBootPolicyMenuOrder[n];
+				const bool have = S9xGBBootPolicyAvailable(i, Settings.GBRomPath) != FALSE;
 				mii.fState = (i == policy) ? MFS_CHECKED : MFS_UNCHECKED;
-				if (!S9xGBBootPolicyAvailable(i, Settings.GBRomPath))
+				if (!have)
 					mii.fState |= MFS_DISABLED;
 				SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, FALSE, &mii);
+
+				// Say why it is greyed, on the item. Derived from whatever text
+				// the item carries now rather than a cached original, so a
+				// language switch that rewrote it still lands on the right base.
+				TCHAR cur[256] = TEXT("");
+				GetMenuString(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, cur,
+							  _countof(cur), MF_BYCOMMAND);
+				std::wstring base(cur);
+				const std::wstring suffix(GBMODEL_MISSING_BIOS);
+				if (base.size() > suffix.size() &&
+					base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0)
+					base.erase(base.size() - suffix.size());
+				const std::wstring want = have ? base : base + suffix;
+				if (want != cur)
+				{
+					MENUITEMINFO txt = {};
+					txt.cbSize     = sizeof(txt);
+					txt.fMask      = MIIM_STRING;
+					txt.dwTypeData = (LPTSTR) want.c_str();
+					SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, FALSE, &txt);
+				}
 			}
 		}
 	}

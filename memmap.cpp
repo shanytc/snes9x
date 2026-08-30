@@ -1412,18 +1412,6 @@ const uint8 S9xGBBootPolicyMenuOrder[] = {
 const int S9xGBBootPolicyMenuCount =
 	(int) (sizeof(S9xGBBootPolicyMenuOrder) / sizeof(S9xGBBootPolicyMenuOrder[0]));
 
-std::string S9xGBBiosFingerprint (void)
-{
-	static const int slots[] = { S9X_BIOS_GB, S9X_BIOS_GBC, S9X_BIOS_SGB1, S9X_BIOS_SGB2 };
-	std::string out;
-	for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++)
-	{
-		out += S9xGetBiosPath(slots[i]);
-		out += '\n';
-	}
-	return (out);
-}
-
 const S9xGBModelHotkey S9xGBModelHotkeys[] = {
 	{ "GBModelGB",       "Game Boy",                 S9X_GBBOOT_GB       },
 	{ "GBModelGBC",      "Game Boy Color",           S9X_GBBOOT_GBC      },

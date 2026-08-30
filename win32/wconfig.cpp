@@ -1012,7 +1012,7 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
-	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default), 8=SGB2+GBC.");
+	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 7=automatic (default), 8=SGB2+GBC. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

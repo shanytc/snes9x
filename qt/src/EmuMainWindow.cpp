@@ -217,13 +217,15 @@ void EmuMainWindow::refreshBiosMenu()
         return;
 
     // Check the chosen console, not the one that ended up running: this is a
-    // saved preference, and a policy whose BIOS is missing still runs the cart
-    // BIOS-less rather than picking something else.
+    // saved preference, and one whose BIOS has gone missing stays checked but
+    // greyed, so the menu says what was picked and that it cannot be honoured.
     const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
     for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
     {
         const int i = S9xGBBootPolicyMenuOrder[n];
         bios_policy_actions[i]->setChecked(i == policy);
+        bios_policy_actions[i]->setEnabled(
+            S9xGBBootPolicyAvailable(i, Settings.GBRomPath));
     }
 }
 

@@ -1441,9 +1441,17 @@ void Snes9xWindow::configure_widgets()
     if (gb_loaded)
     {
         // Check the chosen console, not the one that ended up running: this is a
-        // saved preference, and a policy whose BIOS is missing still runs the
-        // cart BIOS-less rather than picking something else.
+        // saved preference, and one whose BIOS has gone missing stays checked
+        // but greyed, so the menu says what was picked and that it cannot be
+        // honoured. Refreshed with the rest of the widgets, so a BIOS that
+        // appears mid-session shows up on the next load rather than at once.
         const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+        for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
+        {
+            const int i = S9xGBBootPolicyMenuOrder[n];
+            get_object<Gtk::RadioMenuItem>(bios_policy_item_name(i))
+                ->set_sensitive(S9xGBBootPolicyAvailable(i, Settings.GBRomPath));
+        }
         refreshing_bios_menu = true;
         get_object<Gtk::RadioMenuItem>(bios_policy_item_name(policy))->set_active(true);
         refreshing_bios_menu = false;

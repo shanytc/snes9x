@@ -162,6 +162,11 @@ struct Emulator::Impl
 	// Border-pass frame at which a transferred-but-never-unmasked cart stops
 	// waiting for the unmask that would otherwise drive the handover.
 	uint32_t    hack_settle_end  = 0;
+	// GB cycles run since the last VBlank, and where they were last sampled.
+	// The border-pass clock is the VBlank, so a cart that parks with the LCD
+	// off freezes it; this keeps a wall clock on that case.
+	uint64_t    hack_dark_cycles = 0;
+	int64_t     hack_cycle_mark  = 0;
 	static const uint8_t kBorderChr = 1, kBorderPct = 2;
 
 	// GB frames a first unmask buys the cart to start transferring. The widest
@@ -179,6 +184,37 @@ struct Emulator::Impl
 	// (CHR_TRN, no PCT_TRN yet) pushes it out to the second limit.
 	static const uint32_t kHackBorderLimit    = 720;
 	static const uint32_t kHackBorderLimitMax = 1200;
+
+	// GB cycles of LCD-off before the border pass gives up on the VBlank ever
+	// coming back. Joryuu Janshi ni Chousen GB parks here for good: shown the
+	// SGB2 boot signature it spins with the screen off waiting for a link
+	// partner, so the colour pass - which hands it the CGB signature instead -
+	// is the only way the cart ever runs. 240 frames' worth, far past any
+	// legitimate LCD-off window.
+	static const uint64_t kHackDarkCycles = 240ull * 70224ull;
+
+	// Border-pass deadlines, all in GB frames. Called from the VBlank and, for
+	// a cart sitting with the LCD off, from the cycle clock in RunCycles.
+	void TickBorderPass()
+	{
+		// Grace expired with nothing started: this cart has no border to wait
+		// for. Anything started means the next unmask is the real one.
+		if (hack_grace_end && !hack_restart_at && hack_frames >= hack_grace_end)
+		{
+			if (!hack_border_seen) hack_restart_at = hack_frames;
+			hack_grace_end = 0;
+		}
+		if (hack_settle_end && !hack_restart_at && hack_frames >= hack_settle_end)
+			hack_restart_at = hack_frames;
+		const bool mid_transfer = hack_border_seen == kBorderChr &&
+		                          hack_frames < kHackBorderLimitMax;
+		if (!hack_restart_at && !mid_transfer && hack_frames >= kHackBorderLimit)
+			hack_restart_at = hack_frames;
+		// A frozen VBlank clock leaves every deadline above unreachable, so
+		// the dark-cycle count arms the handover on its own.
+		if (!hack_restart_at && hack_dark_cycles >= kHackDarkCycles)
+			hack_restart_at = hack_frames ? hack_frames : 1;
+	}
 
 	// Colour pass: pin the $FF00 player-rotation index so the cart cannot see
 	// the SGB, and takes its plain-CGB path instead of an SGB-flavoured one.
@@ -1129,6 +1165,8 @@ void Emulator::SetSgbCgbHack(bool enabled)
 	impl_->hack_grace_end   = 0;
 	impl_->hack_settle_end  = 0;
 	impl_->hack_hide_sgb    = false;
+	impl_->hack_dark_cycles = 0;
+	impl_->hack_cycle_mark  = 0;
 }
 
 void Emulator::SetCgbOverride(int mode)
@@ -1604,9 +1642,16 @@ void Emulator::RunCycles(int32_t tcycles)
 	// SGB+GBC hack: the border pass has either got the border or run out of
 	// time, so restart the cart in colour. Done before the PPU mode is read
 	// below so the whole slice runs as one hardware model.
-	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0 &&
-	    impl_->hack_restart_at && impl_->hack_frames >= impl_->hack_restart_at)
-		StartColourPass();
+	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0)
+	{
+		const int64_t now = impl_->ppu.t_cycles;
+		if (now >= impl_->hack_cycle_mark)
+			impl_->hack_dark_cycles += (uint64_t) (now - impl_->hack_cycle_mark);
+		impl_->hack_cycle_mark = now;
+		impl_->TickBorderPass();
+		if (impl_->hack_restart_at && impl_->hack_frames >= impl_->hack_restart_at)
+			StartColourPass();
+	}
 
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
@@ -2048,24 +2093,8 @@ void Emulator::OnPpuVBlank()
 	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0)
 	{
 		impl_->hack_frames++;
-		// Grace expired with nothing started: this cart has no border to wait
-		// for. Anything started means the next unmask is the real one.
-		if (impl_->hack_grace_end && !impl_->hack_restart_at &&
-		    impl_->hack_frames >= impl_->hack_grace_end)
-		{
-			if (!impl_->hack_border_seen)
-				impl_->hack_restart_at = impl_->hack_frames;
-			impl_->hack_grace_end = 0;
-		}
-		if (impl_->hack_settle_end && !impl_->hack_restart_at &&
-		    impl_->hack_frames >= impl_->hack_settle_end)
-			impl_->hack_restart_at = impl_->hack_frames;
-		const bool mid_transfer =
-			impl_->hack_border_seen == Impl::kBorderChr &&
-			impl_->hack_frames < Impl::kHackBorderLimitMax;
-		if (!impl_->hack_restart_at && !mid_transfer &&
-		    impl_->hack_frames >= Impl::kHackBorderLimit)
-			impl_->hack_restart_at = impl_->hack_frames;
+		impl_->hack_dark_cycles = 0;
+		impl_->TickBorderPass();
 	}
 
 	impl_->icd2.lcd_reads_prev = impl_->icd2.lcd_reads;

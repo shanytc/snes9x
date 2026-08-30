@@ -1489,7 +1489,7 @@ BEGIN
             MENUITEM "&3 frames",                   ID_EMULATION_RUNAHEAD_3,MFT_STRING,MFS_ENABLED
             MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
         END
-        POPUP "&BIOS",                          ID_EMULATION_BIOS,MFT_STRING,MFS_ENABLED
+        POPUP "Game &Boy Model",                ID_EMULATION_BIOS,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Game Boy",                   (ID_EMULATION_BIOS_POLICY0+0),MFT_STRING,MFS_ENABLED
             MENUITEM "Game Boy &Color",             (ID_EMULATION_BIOS_POLICY0+1),MFT_STRING,MFS_ENABLED

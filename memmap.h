@@ -266,7 +266,7 @@ enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
 S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag,
                                  bool8 sgb_available, bool8 *out_force_cgb);
 
-// Display name for each policy, for the Emulation -> BIOS menu.
+// Display name for each policy, for the Emulation -> Game Boy Model menu.
 const char *S9xGBBootPolicyName(int policy);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away

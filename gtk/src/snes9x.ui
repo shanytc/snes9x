@@ -1710,7 +1710,7 @@
                     </child>
                     <child>
                       <object class="GtkMenuItem" id="bios_item">
-                        <property name="label" translatable="yes">_BIOS</property>
+                        <property name="label" translatable="yes">Game _Boy Model</property>
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="use_underline">True</property>

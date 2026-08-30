@@ -509,7 +509,7 @@ void EmuMainWindow::createWidgets()
 
     // Which console GB content runs on. Its BIOS is used when one is assigned
     // and skipped when not, so there is nothing else to pick here.
-    bios_menu = new QMenu(tr("&BIOS"));
+    bios_menu = new QMenu(tr("Game &Boy Model"));
     auto bios_group = new QActionGroup(this);
     bios_group->setExclusive(true);
     int prev_group = -1;

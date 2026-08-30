@@ -53,7 +53,8 @@
 #include "display.h"
 #include "voicekun.h"
 
-// Emulation -> BIOS radio items, one per S9xGBBootPolicy, named in snes9x.ui.
+// Emulation -> Game Boy Model radio items, one per S9xGBBootPolicy,
+// named in snes9x.ui.
 static const char *bios_policy_item_name(int policy)
 {
     static const char *names[S9X_NUM_GBBOOT_POLICIES] = {

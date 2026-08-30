@@ -10,7 +10,8 @@
 class EmuApplication;
 
 // File -> BIOS Manager: one row per supported BIOS. Paths are applied to the
-// core on close; the console for GB content lives in Emulation -> BIOS.
+// core on close; the console for GB content lives in
+// Emulation -> Game Boy Model.
 class BiosManagerDialog : public QDialog
 {
     Q_OBJECT

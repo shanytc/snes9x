@@ -802,8 +802,8 @@ void WinPostLoad(ConfigFile& conf)
 			S9xSetBiosPath(slot, saved);
 	}
 
-	// Emulation -> BIOS is the console selector now, so a hand-edited value
-	// has to be caught here rather than trusted straight out of the file.
+	// Emulation -> Game Boy Model is the console selector now, so a hand-edited
+	// value has to be caught here rather than trusted straight out of the file.
 	if (Settings.GBBootPolicy >= S9X_NUM_GBBOOT_POLICIES)
 		Settings.GBBootPolicy = (uint8) S9X_GBBOOT_AUTO_SGB;
 	// 0 was the old "No BIOS" entry, which the menu can no longer set.
@@ -993,7 +993,7 @@ void WinRegisterConfigItems()
 	AddIntC("AudioFidelity", Settings.AudioFidelity, 1, "resampler used to convert the SPC's 32040 Hz to 'Rate': 0 = Hermite (legacy), 1 = Windowed-Sinc");
 #undef CATEGORY
 #define	CATEGORY "SGB"
-	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "which Super Game Boy BIOS the non-pinned consoles prefer: 1=SGB1, 2=SGB2 (default). The Super Game Boy and Super Game Boy 2 entries in Emulation -> BIOS pin one outright.");
+	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "which Super Game Boy BIOS the non-pinned consoles prefer: 1=SGB1, 2=SGB2 (default). The Super Game Boy and Super Game Boy 2 entries in Emulation -> Game Boy Model pin one outright.");
 #undef CATEGORY
 #define	CATEGORY "BIOS"
 	// ConfigItem keeps `name` as a bare pointer, so the key strings need
@@ -1011,7 +1011,7 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
-	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> BIOS: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default), 8=SGB2+GBC.");
+	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 5=auto prefer GB, 6=auto prefer GBC, 7=auto prefer SGB (default), 8=SGB2+GBC.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

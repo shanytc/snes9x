@@ -2989,7 +2989,13 @@ LRESULT CALLBACK WinProc(
 				// to pick here.
 				const uint8 policy = (uint8) (LOWORD(wParam) - ID_EMULATION_BIOS_POLICY0);
 				if (policy == Settings.GBBootPolicy)
+				{
+					// Nothing to reload, but still write it: a file holding one of
+					// the retired Automatic values loads as this one, so the menu
+					// shows it chosen while the file still says 5 or 6.
+					WinSaveConfigFile();
 					break;
+				}
 				Settings.GBBootPolicy = policy;
 				WinSaveConfigFile();
 				if (Settings.GBRomPath[0])

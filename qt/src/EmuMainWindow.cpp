@@ -210,14 +210,19 @@ void EmuMainWindow::setGBBootPolicy(int policy)
 {
     // Same gates the menu shows: nothing to switch with no Game Boy content
     // loaded, and nothing to switch to when the console has no BIOS installed.
-    if (!Settings.GBRomPath[0] || Settings.GBBootPolicy == (uint8_t) policy)
+    if (!Settings.GBRomPath[0])
         return;
     if (!S9xGBBootPolicyAvailable(policy, Settings.GBRomPath))
         return;
 
+    // Reload only on a real change, but write it either way: a config holding
+    // one of the retired Automatic values loads as this one, so the menu shows
+    // it chosen while the file still says 5 or 6.
+    const bool changed = (Settings.GBBootPolicy != (uint8_t) policy);
     Settings.GBBootPolicy       = (uint8_t) policy;
     app->config->gb_boot_policy = Settings.GBBootPolicy;
-    openFile(std::string(Settings.GBRomPath));
+    if (changed)
+        openFile(std::string(Settings.GBRomPath));
 }
 
 void EmuMainWindow::refreshBiosMenu()

@@ -193,6 +193,22 @@ struct Emulator::Impl
 	// legitimate LCD-off window.
 	static const uint64_t kHackDarkCycles = 240ull * 70224ull;
 
+	// Back to the border pass. Every power-on runs it: a hard reset that kept
+	// hack_pass at 1 would hand the cart the CGB signature from its first
+	// frame, on which it never transfers a border at all.
+	void RestartBorderPass()
+	{
+		hack_pass        = 0;
+		hack_frames      = 0;
+		hack_restart_at  = 0;
+		hack_border_seen = 0;
+		hack_grace_end   = 0;
+		hack_settle_end  = 0;
+		hack_hide_sgb    = false;
+		hack_dark_cycles = 0;
+		hack_cycle_mark  = 0;
+	}
+
 	// Border-pass deadlines, all in GB frames. Called from the VBlank and, for
 	// a cart sitting with the LCD off, from the cycle clock in RunCycles.
 	void TickBorderPass()
@@ -508,6 +524,8 @@ void Emulator::ColdReset()
 	impl_->cached_count = 0;
 	impl_->cache_valid  = false;
 	impl_->replays_done = 0;
+	// A power cycle is a fresh cart as far as the +GBC hack is concerned.
+	impl_->RestartBorderPass();
 	Reset();
 }
 
@@ -1157,16 +1175,8 @@ bool Emulator::IsCgb() const
 void Emulator::SetSgbCgbHack(bool enabled)
 {
 	impl_->sgb_cgb_hack = enabled;
-	// Called once per load, before the ROM goes in: start the border pass.
-	impl_->hack_pass        = 0;
-	impl_->hack_frames      = 0;
-	impl_->hack_restart_at  = 0;
-	impl_->hack_border_seen = 0;
-	impl_->hack_grace_end   = 0;
-	impl_->hack_settle_end  = 0;
-	impl_->hack_hide_sgb    = false;
-	impl_->hack_dark_cycles = 0;
-	impl_->hack_cycle_mark  = 0;
+	// Called once per load, before the ROM goes in.
+	impl_->RestartBorderPass();
 }
 
 void Emulator::SetCgbOverride(int mode)

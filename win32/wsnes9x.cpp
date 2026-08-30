@@ -5567,7 +5567,7 @@ static void CheckMenuStates ()
 				ins.fType      = MFT_STRING;
 				ins.wID        = ID_EMULATION_BIOS;
 				ins.hSubMenu   = s_bios_hmenu;
-				TCHAR txt[]    = TEXT("&BIOS");
+				TCHAR txt[]    = TEXT("Game &Boy Model");
 				ins.dwTypeData = txt;
 				ins.cch        = (UINT)_tcslen(txt);
 				UINT pos = s_bios_pos;

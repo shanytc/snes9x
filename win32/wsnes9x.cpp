@@ -173,12 +173,20 @@ void S9xWinScanJoypads();
 #define WM_CHEATS_ADDED (WM_APP + 1)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 5;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 6;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
 constexpr int HOTKEY_TAB_TURBO      = 2;
 constexpr int HOTKEY_TAB_DISPLAY    = 3;
+constexpr int HOTKEY_TAB_GBMODEL    = 5;
+
+// Which console each Game Boy Model hotkey slot picks. Menu order, which is not
+// enum order, so the tab reads down the way the menu does.
+static const uint8 g_gbModelHotkeyPolicy[GB_MODEL_HOTKEYS] = {
+	S9X_GBBOOT_GB,      S9X_GBBOOT_GBC,     S9X_GBBOOT_SGB,
+	S9X_GBBOOT_SGB2,    S9X_GBBOOT_SGB_GBC, S9X_GBBOOT_SGB2_GBC,
+};
 
 #ifdef UNICODE
 #define S9XW_SHARD_PATH SHARD_PATHW
@@ -1562,6 +1570,19 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             // Through the menu command so the save + GB reload it does aren't
             // duplicated here.
             SendMenuCommand(ID_FILE_BIOSMANAGER);
+            hitHotKey = true;
+        }
+        for(int gbm = 0; gbm < GB_MODEL_HOTKEYS; gbm++)
+        {
+            if(!HKmatch(GBModel[gbm]))
+                continue;
+            // Same route as clicking the menu entry: it saves the choice and
+            // reloads the cart on the new console. Posted, not sent, so the
+            // reload and hard reset run from the message loop rather than
+            // nested inside key handling. It is also what makes these no-ops
+            // with no Game Boy content loaded, since the submenu is out of the
+            // menu bar then and the command cannot find the item.
+            PostMenuCommand(ID_EMULATION_BIOS_POLICY0 + g_gbModelHotkeyPolicy[gbm]);
             hitHotKey = true;
         }
         if(HKmatch(CheatSearchDialog))
@@ -14214,6 +14235,20 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
+    // Tab 5: Emulation -> Game Boy Model. Each one picks the console the menu
+    // entry picks, reloading the cart on it; the order matches the menu's.
+    {
+        { &CustomKeys.GBModel[0], &CustomKeysExtra.GBModel[0], HOTKEYS_GBMODEL_GB },
+        { &CustomKeys.GBModel[1], &CustomKeysExtra.GBModel[1], HOTKEYS_GBMODEL_GBC },
+        { &CustomKeys.GBModel[2], &CustomKeysExtra.GBModel[2], HOTKEYS_GBMODEL_SGB },
+        { &CustomKeys.GBModel[3], &CustomKeysExtra.GBModel[3], HOTKEYS_GBMODEL_SGB2 },
+        { &CustomKeys.GBModel[4], &CustomKeysExtra.GBModel[4], HOTKEYS_GBMODEL_SGB_GBC },
+        { &CustomKeys.GBModel[5], &CustomKeysExtra.GBModel[5], HOTKEYS_GBMODEL_SGB2_GBC },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -14382,7 +14417,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box")
+				TEXT("SFC Box"), TEXT("Game Boy Model")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

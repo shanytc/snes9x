@@ -1145,6 +1145,9 @@ void WinRegisterConfigItems()
     ADD(BiosManager);
 	ADDN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
+	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
+	ADDN(GBModel[4],GBModelSGBGBC);  ADDN(GBModel[5],GBModelSGB2GBC);
 #undef ADD
 #undef ADDN
 
@@ -1178,6 +1181,9 @@ void WinRegisterConfigItems()
 	ADDXALL(BiosManager);
 	ADDXALLN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDXALLN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDXALLN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDXALLN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDXALLN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
+	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
+	ADDXALLN(GBModel[4],GBModelSGBGBC);  ADDXALLN(GBModel[5],GBModelSGB2GBC);
 #undef ADDX
 #undef ADDXN
 #undef ADDXALL

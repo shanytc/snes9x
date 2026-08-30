@@ -246,9 +246,8 @@ void S9xLoadConfigFiles (char **argv, int argc)
 		S9xSetBiosPath(i, conf.GetString(key.c_str(), ""));
 	}
 	Settings.GB_BIOSEnabled             =  conf.GetBool("SGB::GBBIOSEnabled",                  true);
-	Settings.GBBootPolicy               =  static_cast<uint8>(conf.GetUInt("SGB::GBBootPolicy", S9X_GBBOOT_AUTO_SGB));
-	if (Settings.GBBootPolicy >= S9X_NUM_GBBOOT_POLICIES)
-		Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
+	Settings.GBBootPolicy               =  S9xNormalizeGBBootPolicy(
+		static_cast<int>(conf.GetUInt("SGB::GBBootPolicy", S9X_GBBOOT_AUTO)));
 	Settings.GB_BIOSActive              =  FALSE;
 	Settings.GB_BIOSPath[0] = '\0';
 	Settings.GBRomPath[0] = '\0';

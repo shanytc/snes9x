@@ -1499,9 +1499,7 @@ BEGIN
             MENUITEM "Super Game Boy + Game Boy Co&lor (hack)",(ID_EMULATION_BIOS_POLICY0+3),MFT_STRING,MFS_ENABLED
             MENUITEM "Super Game Boy 2 + Game Boy Colo&r (hack)",(ID_EMULATION_BIOS_POLICY0+8),MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
-            MENUITEM "Automatic, prefer G&B",       (ID_EMULATION_BIOS_POLICY0+5),MFT_STRING,MFS_ENABLED
-            MENUITEM "Automatic, prefer G&BC",      (ID_EMULATION_BIOS_POLICY0+6),MFT_STRING,MFS_ENABLED
-            MENUITEM "Automatic, prefer S&GB",      (ID_EMULATION_BIOS_POLICY0+7),MFT_STRING,MFS_ENABLED
+            MENUITEM "&Automatic",                  (ID_EMULATION_BIOS_POLICY0+7),MFT_STRING,MFS_ENABLED
         END
         MENUITEM MFT_SEPARATOR
         POPUP "&S-PPU",                         0,MFT_STRING,MFS_ENABLED

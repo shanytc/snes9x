@@ -350,7 +350,7 @@ bool EmuConfig::setDefaults(int section)
         sound_filter = eGaussian;
         sgb_bios_preference = 2;
         gb_bios_enabled = true;
-        gb_boot_policy = S9X_GBBOOT_AUTO_SGB;
+        gb_boot_policy = S9X_GBBOOT_AUTO;
         for (auto &p : bios_paths) p.clear();
     }
 

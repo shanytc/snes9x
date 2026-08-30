@@ -91,7 +91,7 @@ void Snes9xController::init()
     Settings.InitialInfoStringTimeout = 120;
     Settings.SGB_BIOSPreference = 2;
     Settings.GB_BIOSEnabled = true;
-    Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
+    Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
     /* Embed a screenshot in each snapshot so the save/load-with-preview
      * dialog has something to show, as win32 does by default. */
     Settings.SnapshotScreenshots = true;
@@ -239,10 +239,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
 
     // GB/GBC boot ROM; inert until the user supplies dmg_boot.bin/cgb_boot.bin.
     Settings.GB_BIOSEnabled = config->gb_bios_enabled;
-    Settings.GBBootPolicy = (config->gb_boot_policy < 0 ||
-                             config->gb_boot_policy >= S9X_NUM_GBBOOT_POLICIES)
-                                ? (uint8) S9X_GBBOOT_AUTO_SGB
-                                : (uint8) config->gb_boot_policy;
+    Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(config->gb_boot_policy);
 
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
         S9xSetBiosPath(i, config->bios_paths[i].c_str());

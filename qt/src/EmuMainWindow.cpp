@@ -219,11 +219,12 @@ void EmuMainWindow::refreshBiosMenu()
     // Check the chosen console, not the one that ended up running: this is a
     // saved preference, and a policy whose BIOS is missing still runs the cart
     // BIOS-less rather than picking something else.
-    const uint8_t policy = (Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
-                               ? Settings.GBBootPolicy
-                               : (uint8_t) S9X_GBBOOT_AUTO_SGB;
-    for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
+    const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+    for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
+    {
+        const int i = S9xGBBootPolicyMenuOrder[n];
         bios_policy_actions[i]->setChecked(i == policy);
+    }
 }
 
 void EmuMainWindow::refreshVoicekunMenu()
@@ -513,7 +514,7 @@ void EmuMainWindow::createWidgets()
     auto bios_group = new QActionGroup(this);
     bios_group->setExclusive(true);
     int prev_group = -1;
-    for (int n = 0; n < S9X_NUM_GBBOOT_POLICIES; n++)
+    for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
     {
         const int i     = S9xGBBootPolicyMenuOrder[n];
         const int group = S9xGBBootPolicyGroup(i);

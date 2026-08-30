@@ -53,17 +53,16 @@
 #include "display.h"
 #include "voicekun.h"
 
-// Emulation -> Game Boy Model radio items, one per S9xGBBootPolicy,
-// named in snes9x.ui.
+// Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the two
+// retired Automatic values, which have no item any more.
 static const char *bios_policy_item_name(int policy)
 {
     static const char *names[S9X_NUM_GBBOOT_POLICIES] = {
         "bios_policy0_item", "bios_policy1_item", "bios_policy2_item", "bios_policy3_item",
-        "bios_policy4_item", "bios_policy5_item", "bios_policy6_item", "bios_policy7_item",
+        "bios_policy4_item", NULL, NULL, "bios_policy7_item",
         "bios_policy8_item"
     };
-    return names[(policy >= 0 && policy < S9X_NUM_GBBOOT_POLICIES) ? policy
-                                                                  : S9X_GBBOOT_AUTO_SGB];
+    return names[S9xNormalizeGBBootPolicy(policy)];
 }
 
 static Glib::RefPtr<Gtk::FileFilter> get_save_states_file_filter()
@@ -211,8 +210,9 @@ void Snes9xWindow::connect_signals()
     // Which console GB content runs on. Its BIOS is used when one is assigned
     // and skipped when not, so there is nothing else to pick here. GTK persists
     // straight out of Settings, so there's no config field to mirror.
-    for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
+    for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
     {
+        const int i = S9xGBBootPolicyMenuOrder[n];
         auto item = get_object<Gtk::RadioMenuItem>(bios_policy_item_name(i));
         item->signal_toggled().connect([this, i, item] {
             if (refreshing_bios_menu || !item->get_active())
@@ -1443,9 +1443,7 @@ void Snes9xWindow::configure_widgets()
         // Check the chosen console, not the one that ended up running: this is a
         // saved preference, and a policy whose BIOS is missing still runs the
         // cart BIOS-less rather than picking something else.
-        const uint8_t policy = (Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
-                                   ? Settings.GBBootPolicy
-                                   : (uint8_t) S9X_GBBOOT_AUTO_SGB;
+        const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
         refreshing_bios_menu = true;
         get_object<Gtk::RadioMenuItem>(bios_policy_item_name(policy))->set_active(true);
         refreshing_bios_menu = false;

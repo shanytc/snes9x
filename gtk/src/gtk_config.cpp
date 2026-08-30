@@ -223,7 +223,7 @@ int Snes9xConfig::load_defaults()
     Settings.InitialInfoStringTimeout   =  120;
     Settings.SGB_BIOSPreference = 2;
     Settings.GB_BIOSEnabled = TRUE;
-    Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
+    Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
     
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
@@ -717,8 +717,7 @@ int Snes9xConfig::load_config_file()
         Settings.SGB_BIOSPreference = 2;
     inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
     inint("GBBootPolicy", Settings.GBBootPolicy);
-    if (Settings.GBBootPolicy >= S9X_NUM_GBBOOT_POLICIES)
-        Settings.GBBootPolicy = S9X_GBBOOT_AUTO_SGB;
+    Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
 
     section = "Input";
 

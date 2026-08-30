@@ -244,26 +244,38 @@ enum S9xGBBootPolicy
 	S9X_GBBOOT_SGB,          // force Super Game Boy (SGB1)
 	S9X_GBBOOT_SGB_GBC,      // SGB1 border + real CGB colour (hack, not real HW)
 	S9X_GBBOOT_SGB2,         // force Super Game Boy 2
-	S9X_GBBOOT_AUTO_GB,      // automatic, prefer GB   (GB > GBC > SGB)
-	S9X_GBBOOT_AUTO_GBC,     // automatic, prefer GBC  (GBC > SGB > GB)
-	S9X_GBBOOT_AUTO_SGB,     // automatic, prefer SGB  (SGB > GBC > GB) — default
+	// 5 and 6 were "Automatic, prefer GB" and "prefer GBC". One Automatic
+	// replaced all three; they survive only so a saved config still loads, and
+	// S9xNormalizeGBBootPolicy folds them into S9X_GBBOOT_AUTO.
+	S9X_GBBOOT_AUTO_GB_LEGACY,
+	S9X_GBBOOT_AUTO_GBC_LEGACY,
+	S9X_GBBOOT_AUTO,         // read the cart header: SGB > GBC > GB — default
 	S9X_GBBOOT_SGB2_GBC,     // SGB2 border + real CGB colour (hack, not real HW)
 	S9X_NUM_GBBOOT_POLICIES
 };
 
 // Menu order, which is not enum order: the four real consoles, then the two
-// colour hacks, then the Automatic entries. Ports walk this order and start a
-// new group — a separator — wherever S9xGBBootPolicyGroup changes.
-extern const uint8 S9xGBBootPolicyMenuOrder[S9X_NUM_GBBOOT_POLICIES];
+// colour hacks, then Automatic. Ports walk this order and start a new group —
+// a separator — wherever S9xGBBootPolicyGroup changes. Shorter than the enum,
+// which still carries the two retired Automatic values.
+extern const uint8 S9xGBBootPolicyMenuOrder[];
+extern const int   S9xGBBootPolicyMenuCount;
 int S9xGBBootPolicyGroup(int policy);
+
+// A saved policy folded onto one a menu still offers: out-of-range values and
+// the two retired Automatic entries both become S9X_GBBOOT_AUTO.
+uint8 S9xNormalizeGBBootPolicy(int policy);
 
 enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
 
-// Resolve Settings.GBBootPolicy against the cart's header flags. `cgb_flag` is
-// $0143 and `sgb_flag` is $0146; `sgb_available` says whether an SGB BIOS was
-// found, since SGB can't be picked without one. `out_force_cgb` comes back true
-// for the SGB+GBC hack, where the SGB BIOS runs with CGB hardware enabled.
-S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag,
+// Resolve Settings.GBBootPolicy against the cart's header. `cgb_flag` is $0143,
+// `sgb_flag` is $0146 and `old_licensee` is $014B — the Super Game Boy ignores
+// command packets unless the latter two are $03 and $33, so both are needed to
+// know whether a cart is really SGB-enhanced. `sgb_available` says whether an
+// SGB BIOS was found, since SGB can't be picked without one. `out_force_cgb`
+// comes back true for the SGB+GBC hack, where the SGB BIOS runs with CGB
+// hardware enabled.
+S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag, uint8 old_licensee,
                                  bool8 sgb_available, bool8 *out_force_cgb);
 
 // Display name for each policy, for the Emulation -> Game Boy Model menu.

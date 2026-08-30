@@ -1335,15 +1335,17 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 // A real Super Game Boy accepts any Game Boy cart, so SGB is "supported"
 // whenever a BIOS is installed — the exception is a CGB-only cart, which
 // shows its own lockout screen on DMG-class hardware.
-S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag,
+S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_licensee,
                                   bool8 sgb_available, bool8 *out_force_cgb)
 {
-	(void) sgb_flag;
 	if (out_force_cgb) *out_force_cgb = FALSE;
 
 	const bool cgb_only  = (cgb_flag == 0xC0);
 	const bool does_gbc  = (cgb_flag & 0x80) != 0;
-	const bool does_gb   = !cgb_only;
+	// A forced Super Game Boy takes any cart, the way the hardware does, so the
+	// header's SGB flag only gates the Automatic entry. $014B is part of that
+	// flag: an SGB ignores command packets unless the old licensee code is $33.
+	const bool sgb_enhanced = (sgb_flag == 0x03 && old_licensee == 0x33);
 	const bool does_sgb  = sgb_available && !cgb_only;
 
 	switch (Settings.GBBootPolicy)
@@ -1371,20 +1373,15 @@ S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag,
 			}
 			return (does_gbc ? S9X_GBCON_GBC : S9X_GBCON_GB);
 
-		case S9X_GBBOOT_AUTO_GB:
-			if (does_gb)  return (S9X_GBCON_GB);
-			if (does_gbc) return (S9X_GBCON_GBC);
-			return (does_sgb ? S9X_GBCON_SGB : S9X_GBCON_GB);
-
-		case S9X_GBBOOT_AUTO_GBC:
-			if (does_gbc) return (S9X_GBCON_GBC);
-			if (does_sgb) return (S9X_GBCON_SGB);
-			return (S9X_GBCON_GB);
-
-		case S9X_GBBOOT_AUTO_SGB:
+		// Automatic, and the two retired ones a stale config can still name.
+		// Take the best console the cart says it was built for: a Super Game
+		// Boy when it carries SGB features, colour when it carries those, plain
+		// Game Boy otherwise. Never a colour hack - that is what the two hack
+		// entries are for. A CGB-only cart is kept off the SGB because it would
+		// only reach its own lockout screen there.
 		default:
-			if (does_sgb) return (S9X_GBCON_SGB);
-			if (does_gbc) return (S9X_GBCON_GBC);
+			if (does_sgb && sgb_enhanced) return (S9X_GBCON_SGB);
+			if (does_gbc)                 return (S9X_GBCON_GBC);
 			return (S9X_GBCON_GB);
 	}
 }
@@ -1399,19 +1396,29 @@ const char *S9xGBBootPolicyName (int policy)
 		case S9X_GBBOOT_SGB_GBC:  return ("Super Game Boy + Game Boy Color (hack)");
 		case S9X_GBBOOT_SGB2:     return ("Super Game Boy 2");
 		case S9X_GBBOOT_SGB2_GBC: return ("Super Game Boy 2 + Game Boy Color (hack)");
-		case S9X_GBBOOT_AUTO_GB:  return ("Automatic, prefer GB");
-		case S9X_GBBOOT_AUTO_GBC: return ("Automatic, prefer GBC");
-		case S9X_GBBOOT_AUTO_SGB: return ("Automatic, prefer SGB");
+		case S9X_GBBOOT_AUTO_GB_LEGACY:
+		case S9X_GBBOOT_AUTO_GBC_LEGACY:
+		case S9X_GBBOOT_AUTO:     return ("Automatic");
 		default:                  return ("");
 	}
 }
 
-const uint8 S9xGBBootPolicyMenuOrder[S9X_NUM_GBBOOT_POLICIES] = {
+const uint8 S9xGBBootPolicyMenuOrder[] = {
 	S9X_GBBOOT_GB,       S9X_GBBOOT_GBC,
 	S9X_GBBOOT_SGB,      S9X_GBBOOT_SGB2,
 	S9X_GBBOOT_SGB_GBC,  S9X_GBBOOT_SGB2_GBC,
-	S9X_GBBOOT_AUTO_GB,  S9X_GBBOOT_AUTO_GBC, S9X_GBBOOT_AUTO_SGB
+	S9X_GBBOOT_AUTO
 };
+const int S9xGBBootPolicyMenuCount =
+	(int) (sizeof(S9xGBBootPolicyMenuOrder) / sizeof(S9xGBBootPolicyMenuOrder[0]));
+
+uint8 S9xNormalizeGBBootPolicy (int policy)
+{
+	if (policy < 0 || policy >= S9X_NUM_GBBOOT_POLICIES) return (S9X_GBBOOT_AUTO);
+	if (policy == S9X_GBBOOT_AUTO_GB_LEGACY ||
+	    policy == S9X_GBBOOT_AUTO_GBC_LEGACY) return (S9X_GBBOOT_AUTO);
+	return ((uint8) policy);
+}
 
 bool8 S9xGBBootPolicyAvailable (int policy, const char *gb_rom_path)
 {
@@ -1442,9 +1449,9 @@ int S9xGBBootPolicyGroup (int policy)
 		case S9X_GBBOOT_SGB2_GBC:
 			return (1);   // the two colour hacks, no real hardware equivalent
 
-		case S9X_GBBOOT_AUTO_GB:
-		case S9X_GBBOOT_AUTO_GBC:
-		case S9X_GBBOOT_AUTO_SGB:
+		case S9X_GBBOOT_AUTO_GB_LEGACY:
+		case S9X_GBBOOT_AUTO_GBC_LEGACY:
+		case S9X_GBBOOT_AUTO:
 			return (2);   // pick from what the cart supports
 
 		default:
@@ -1857,7 +1864,8 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
 // Returns the banner mode: 3 = GB BIOS, 4 = GBC BIOS, 0 = BIOS-less.
 // Pick the console for this cart and, when it's SGB, which BIOS to run it on.
 // out_bios_mode is 0 (not SGB), 1 (SGB1) or 2 (SGB2).
-static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, const char *filename,
+static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_licensee,
+                                   const char *filename,
                                    std::string &out_bios_path, uint8 &out_bios_mode,
                                    bool8 &out_force_cgb)
 {
@@ -1897,7 +1905,7 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, const char *f
     }
 
     const S9xGBConsole console = S9xResolveGBConsole(
-        cgb_flag, sgb_flag, out_bios_mode ? TRUE : FALSE, &out_force_cgb);
+        cgb_flag, sgb_flag, old_licensee, out_bios_mode ? TRUE : FALSE, &out_force_cgb);
 
     if (console == S9X_GBCON_SGB)
         out_bios_path = sgb_path;
@@ -1950,6 +1958,13 @@ static uint8 GbBytesSgbFlag(const uint8 *rom, size_t size)
     return size > 0x146 ? rom[0x146] : 0;
 }
 
+// $014B. The SGB flag only counts when this is $33, so the console picker needs
+// both bytes to know whether a cart is really SGB-enhanced.
+static uint8 GbBytesLicensee(const uint8 *rom, size_t size)
+{
+    return size > 0x14B ? rom[0x14B] : 0;
+}
+
 static uint8 GbFileByte(const char *filename, long offset)
 {
     FILE *f = fopen(filename, "rb");
@@ -1990,6 +2005,7 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     bool8 force_cgb = FALSE;
     const S9xGBConsole console = PickGBConsole(GbBytesCgbFlag(rom, (size_t)size),
                                                GbBytesSgbFlag(rom, (size_t)size),
+                                               GbBytesLicensee(rom, (size_t)size),
                                                filename, bios_path, bios_mode, force_cgb);
     const bool gbCgb = (console == S9X_GBCON_GBC);
 
@@ -2061,6 +2077,7 @@ bool8 CMemory::LoadROM (const char *filename)
         bool8 force_cgb = FALSE;
         const S9xGBConsole console = PickGBConsole(GbFileByte(filename, 0x143),
                                                    GbFileByte(filename, 0x146),
+                                                   GbFileByte(filename, 0x14B),
                                                    filename, bios_path, bios_mode, force_cgb);
         const bool gbCgb = (console == S9X_GBCON_GBC);
 

@@ -5619,10 +5619,10 @@ static void CheckMenuStates ()
 			// stays checked, greyed, so the menu says what was picked and that
 			// it cannot be honoured. Greying is per entry: only the Super Game
 			// Boy ones need a BIOS to be the console they name.
-			const uint8 policy = (Settings.GBBootPolicy < S9X_NUM_GBBOOT_POLICIES)
-									 ? Settings.GBBootPolicy : (uint8) S9X_GBBOOT_AUTO_SGB;
-			for (int i = 0; i < S9X_NUM_GBBOOT_POLICIES; i++)
+			const uint8 policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+			for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
 			{
+				const int i = S9xGBBootPolicyMenuOrder[n];
 				mii.fState = (i == policy) ? MFS_CHECKED : MFS_UNCHECKED;
 				if (!S9xGBBootPolicyAvailable(i, Settings.GBRomPath))
 					mii.fState |= MFS_DISABLED;

@@ -804,8 +804,9 @@ void WinPostLoad(ConfigFile& conf)
 
 	// Emulation -> Game Boy Model is the console selector now, so a hand-edited
 	// value has to be caught here rather than trusted straight out of the file.
-	if (Settings.GBBootPolicy >= S9X_NUM_GBBOOT_POLICIES)
-		Settings.GBBootPolicy = (uint8) S9X_GBBOOT_AUTO_SGB;
+	// This also folds the two retired Automatic entries onto the one that
+	// replaced them.
+	Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
 	// 0 was the old "No BIOS" entry, which the menu can no longer set.
 	if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
 		Settings.SGB_BIOSPreference = 2;

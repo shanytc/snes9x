@@ -1789,28 +1789,8 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkRadioMenuItem" id="bios_policy5_item">
-                                <property name="label" translatable="yes">Automatic, prefer G_B</property>
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="use_underline">True</property>
-                                <property name="draw_as_radio">True</property>
-                                <property name="group">bios_policy0_item</property>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkRadioMenuItem" id="bios_policy6_item">
-                                <property name="label" translatable="yes">Automatic, prefer GB_C</property>
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="use_underline">True</property>
-                                <property name="draw_as_radio">True</property>
-                                <property name="group">bios_policy0_item</property>
-                              </object>
-                            </child>
-                            <child>
                               <object class="GtkRadioMenuItem" id="bios_policy7_item">
-                                <property name="label" translatable="yes">Automatic, prefer S_GB</property>
+                                <property name="label" translatable="yes">_Automatic</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>

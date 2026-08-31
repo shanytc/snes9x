@@ -5624,7 +5624,9 @@ static void CheckMenuStates ()
 			for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
 			{
 				const int i = S9xGBBootPolicyMenuOrder[n];
-				const bool have = S9xGBBootPolicyAvailable(i, Settings.GBRomPath) != FALSE;
+				const S9xGBPolicyBlock why =
+					S9xGBBootPolicyBlocked(i, Settings.GBRomPath);
+				const bool have = (why == S9X_GBPOLICY_OK);
 				mii.fState = (i == policy) ? MFS_CHECKED : MFS_UNCHECKED;
 				if (!have)
 					mii.fState |= MFS_DISABLED;
@@ -5641,7 +5643,10 @@ static void CheckMenuStates ()
 				if (base.size() > suffix.size() &&
 					base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0)
 					base.erase(base.size() - suffix.size());
-				const std::wstring want = have ? base : base + suffix;
+				// Only when a BIOS is what is missing: a hack greyed because the
+				// cart is mono has nothing missing to install.
+				const std::wstring want =
+					why == S9X_GBPOLICY_NO_BIOS ? base + suffix : base;
 				if (want != cur)
 				{
 					MENUITEMINFO txt = {};

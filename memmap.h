@@ -307,6 +307,16 @@ const char *S9xGBBootPolicyName(int policy);
 // entries can fail: without their BIOS they quietly run the cart as GBC/GB
 // instead, so a menu should grey them out. `gb_rom_path` joins the BIOS search
 // (the cart's own directory is one of the places it looks); NULL is fine.
+// Why an entry cannot be picked, so a menu can say "(Missing BIOS)" only when
+// that is the actual reason rather than for anything unavailable.
+enum S9xGBPolicyBlock
+{
+	S9X_GBPOLICY_OK = 0,
+	S9X_GBPOLICY_NO_BIOS,   // the console it names has no BIOS installed
+	S9X_GBPOLICY_CART       // the loaded cart cannot use it
+};
+S9xGBPolicyBlock S9xGBBootPolicyBlocked(int policy, const char *gb_rom_path);
+
 bool8 S9xGBBootPolicyAvailable(int policy, const char *gb_rom_path);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away

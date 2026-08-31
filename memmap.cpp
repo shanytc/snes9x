@@ -1454,38 +1454,62 @@ uint8 S9xNormalizeGBBootPolicy (int policy)
 	return ((uint8) policy);
 }
 
-bool8 S9xGBBootPolicyAvailable (int policy, const char *gb_rom_path)
+// True when the loaded cart renders in colour. The +GBC hacks overlay a CGB
+// framebuffer, which a mono cart never produces.
+static bool8 GBLoadedCartIsColour (void)
+{
+	uint8 cgb_flag = 0, sgb_flag = 0;
+	if (!S9xSGBGetCartFlags(&cgb_flag, &sgb_flag)) return (TRUE);
+	return (cgb_flag == 0x80 || cgb_flag == 0xC0);
+}
+
+S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
 {
 	switch (policy)
 	{
 		// Game Boy runs either way, its boot ROM only adding the animation, and
-		// the Automatic entries pick from whatever is present. Game Boy Color
-		// depends on the cart — see below.
+		// the Automatic entries pick from whatever is present.
 		case S9X_GBBOOT_SGB:
-		case S9X_GBBOOT_SGB_GBC:
-			return (S9xSGBBIOSAvailable(1, gb_rom_path));
+			return (S9xSGBBIOSAvailable(1, gb_rom_path) ? S9X_GBPOLICY_OK
+			                                            : S9X_GBPOLICY_NO_BIOS);
 
 		case S9X_GBBOOT_SGB2:
+			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
+			                                            : S9X_GBPOLICY_NO_BIOS);
+
+		// The colour half of a hack has nothing to add to a mono cart: measured,
+		// it renders frame-for-frame the same as plain Super Game Boy.
+		case S9X_GBBOOT_SGB_GBC:
+			if (!GBLoadedCartIsColour())                 return (S9X_GBPOLICY_CART);
+			return (S9xSGBBIOSAvailable(1, gb_rom_path) ? S9X_GBPOLICY_OK
+			                                            : S9X_GBPOLICY_NO_BIOS);
+
 		case S9X_GBBOOT_SGB2_GBC:
-			return (S9xSGBBIOSAvailable(2, gb_rom_path));
+			if (!GBLoadedCartIsColour())                 return (S9X_GBPOLICY_CART);
+			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
+			                                            : S9X_GBPOLICY_NO_BIOS);
 
 		case S9X_GBBOOT_GBC:
 		{
-			// A colour cart runs either way. A mono one needs the boot ROM:
-			// it is what puts the CGB in DMG-compatibility mode and picks the
-			// palette, and without it the screen stays blank.
-			uint8 cgb_flag = 0, sgb_flag = 0;
-			if (!S9xSGBGetCartFlags(&cgb_flag, &sgb_flag)) return (TRUE);
-			if (cgb_flag == 0x80 || cgb_flag == 0xC0)      return (TRUE);
-			if (!Settings.GB_BIOSEnabled)                  return (FALSE);
+			// A colour cart runs either way. A mono one needs the boot ROM: it is
+			// what puts the CGB in DMG-compatibility mode and picks the palette,
+			// and without it the screen stays blank.
+			if (GBLoadedCartIsColour())   return (S9X_GBPOLICY_OK);
+			if (!Settings.GB_BIOSEnabled) return (S9X_GBPOLICY_NO_BIOS);
 
 			std::string boot;
-			return (FindGB_BootROM(true, gb_rom_path, boot, NULL));
+			return (FindGB_BootROM(true, gb_rom_path, boot, NULL) ? S9X_GBPOLICY_OK
+			                                                      : S9X_GBPOLICY_NO_BIOS);
 		}
 
 		default:
-			return (TRUE);
+			return (S9X_GBPOLICY_OK);
 	}
+}
+
+bool8 S9xGBBootPolicyAvailable (int policy, const char *gb_rom_path)
+{
+	return (S9xGBBootPolicyBlocked(policy, gb_rom_path) == S9X_GBPOLICY_OK);
 }
 
 int S9xGBBootPolicyGroup (int policy)

@@ -1449,7 +1449,9 @@ void Snes9xWindow::configure_widgets()
         for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
         {
             const int i = S9xGBBootPolicyMenuOrder[n];
-            const bool have = S9xGBBootPolicyAvailable(i, Settings.GBRomPath);
+            const S9xGBPolicyBlock why =
+                S9xGBBootPolicyBlocked(i, Settings.GBRomPath);
+            const bool have = (why == S9X_GBPOLICY_OK);
             auto item = get_object<Gtk::RadioMenuItem>(bios_policy_item_name(i));
             item->set_sensitive(have);
 
@@ -1460,7 +1462,9 @@ void Snes9xWindow::configure_widgets()
             if (base.size() > missing.size() &&
                 base.compare(base.size() - missing.size(), missing.size(), missing) == 0)
                 base.erase(base.size() - missing.size());
-            item->set_label(have ? base : base + missing);
+            // Only when a BIOS is what is missing: a hack greyed because the
+            // cart is mono has nothing missing to install.
+            item->set_label(why == S9X_GBPOLICY_NO_BIOS ? base + missing : base);
         }
         refreshing_bios_menu = true;
         get_object<Gtk::RadioMenuItem>(bios_policy_item_name(policy))->set_active(true);

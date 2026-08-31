@@ -243,7 +243,8 @@ void EmuMainWindow::refreshBiosMenu()
     for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
     {
         const int i = S9xGBBootPolicyMenuOrder[n];
-        const bool have = S9xGBBootPolicyAvailable(i, Settings.GBRomPath);
+        const S9xGBPolicyBlock why = S9xGBBootPolicyBlocked(i, Settings.GBRomPath);
+        const bool have = (why == S9X_GBPOLICY_OK);
         bios_policy_actions[i]->setChecked(i == policy);
         bios_policy_actions[i]->setEnabled(have);
 
@@ -252,7 +253,10 @@ void EmuMainWindow::refreshBiosMenu()
         QString base = bios_policy_actions[i]->text();
         if (base.endsWith(missing))
             base.chop(missing.size());
-        bios_policy_actions[i]->setText(have ? base : base + missing);
+        // Only when a BIOS is what is missing: a hack greyed because the cart
+        // is mono has nothing missing to install.
+        bios_policy_actions[i]->setText(
+            why == S9X_GBPOLICY_NO_BIOS ? base + missing : base);
     }
 }
 

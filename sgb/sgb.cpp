@@ -276,6 +276,10 @@ struct Emulator::Impl
 	bool        boot_rom_loaded = false;
 	// Staged boot ROM is our embedded fallback, not one the user supplied.
 	bool        boot_rom_silent = false;
+	// Raw GB frame as the boot left it, for the boot-logo hold below.
+	uint8_t     boot_logo_ref[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
+	bool        boot_logo_ref_valid = false;
+	uint16_t    boot_logo_frames = 0;
 
 	// ICD2 state — the SGB cart-chip register set exposed at 0x6000-0x7FFF
 	// on the SNES side when running under a real BIOS. Layout mirrors the
@@ -826,16 +830,19 @@ void Emulator::Reset()
 		cs.r.sp = 0x0000;
 		cs.r.pc = 0x0000;
 
-		// Embedded fallback: no boot ROM was assigned, so it runs only for the
-		// handshake and the handoff — hide its logo scroll. In BIOS mode the
-		// ICD2 ring then carries blank lines and the splash plays over an
-		// empty GB window.
-		if (impl_->boot_rom_silent)
+		// Hide the logo scroll when it is not the boot animation the user asked
+		// for: an embedded fallback nobody assigned, or any boot ROM under the
+		// SGB BIOS, where the SNES splash is the boot animation and the GB one
+		// only plays behind it. The ICD2 ring then carries blank lines.
+		if (impl_->boot_rom_silent || Settings.SGB_BIOSModeActive)
 		{
 			impl_->ppu.present_hold   = true;
 			impl_->ppu.boot_logo_hold = true;
 		}
 	}
+
+	impl_->boot_logo_ref_valid = false;
+	impl_->boot_logo_frames    = 0;
 
 	impl_->cart.mbc.sachen_locked = impl_->mem.boot_rom_enabled || !impl_->cart.sachen_runs_raw;
 }
@@ -2181,6 +2188,36 @@ void Emulator::OnPpuVBlank()
 	    impl_->has_rom && impl_->cart.header.sgb_flag == 0x03;
 	if (impl_->boot_handoff_captured && sgb_enhanced)
 		impl_->handoff_frames++;
+
+	UpdateBootLogoHold();
+}
+
+// The boot leaves its logo in VRAM and plenty of carts never redraw it — they
+// inherit it and fade it with BGP, which changes no raw pixel. So hold the
+// panel on the picture the boot handed over and release when the cart draws
+// something else; raw_framebuffer is written even while present_hold is on.
+void Emulator::UpdateBootLogoHold()
+{
+	// Nothing to hide, or the boot ROM is still scrolling it into place.
+	if (!impl_->ppu.boot_logo_hold || impl_->mem.boot_rom_enabled) return;
+
+	const uint8_t *raw = impl_->ppu.raw_framebuffer;
+	if (!impl_->boot_logo_ref_valid)
+	{
+		// A flat frame means the boot left no picture to hide.
+		bool flat = true;
+		for (size_t i = 1; i < sizeof impl_->boot_logo_ref; ++i)
+			if (raw[i] != raw[0]) { flat = false; break; }
+		if (flat) { impl_->ppu.boot_logo_hold = false; return; }
+		std::memcpy(impl_->boot_logo_ref, raw, sizeof impl_->boot_logo_ref);
+		impl_->boot_logo_ref_valid = true;
+		return;
+	}
+
+	// Bounded so a cart that somehow never redraws cannot strand a blank panel.
+	if (std::memcmp(raw, impl_->boot_logo_ref, sizeof impl_->boot_logo_ref) != 0 ||
+	    ++impl_->boot_logo_frames > 900)
+		impl_->ppu.boot_logo_hold = false;
 }
 
 void Emulator::SetSerialSink(void (*fn)(void *user, uint8_t byte), void *user)

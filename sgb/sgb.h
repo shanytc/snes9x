@@ -283,6 +283,9 @@ public:
 	Impl *DebugImpl() const { return impl_; }
 
 private:
+	// Per-frame hook for the boot-logo hold; see the definition.
+	void UpdateBootLogoHold();
+
 	Impl *impl_;
 };
 

@@ -19,10 +19,11 @@ void S9xSetInfoString (const char *);
 // instead. Queued rather than shown: the loader emits its own ROM-info line
 // afterwards, which would overwrite it. Shown for half again the usual time.
 // NULL clears a queued notice and the flag below; call it when a load starts.
-void S9xSetBiosNotice (const char *);
+// Clear `unrunnable` for a BIOS whose absence only degrades the run.
+void S9xSetBiosNotice (const char *, bool8 unrunnable = TRUE);
 void S9xShowBiosNotice (void);
-// True once a notice has been shown: a cart is mapped but cannot run, so the
-// UI should stay in its no-game state rather than offer resets and viewers.
+// True once an unrunnable notice has been shown: a cart is mapped but cannot
+// run, so the UI should stay in its no-game state rather than offer resets.
 bool8 S9xBiosMissing (void);
 
 // Routines the port has to implement even if it doesn't use them

@@ -1412,21 +1412,22 @@ static bool8 LoadBIOSFile (const char *name, uint8 *dest, uint32 size, uint32 mi
 
 bool8 S9xSFCBoxLoadKROM (void)
 {
-	if (!LoadBIOSFile("KROM1.BIN", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE, S9X_BIOS_SFCBOX_KROM) &&
-		!LoadBIOSFile("KROM.BIN",  SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE) &&
-		!LoadBIOSFile("krom1.bin", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE))
-	{
+	const bool8	krom =
+		LoadBIOSFile("KROM1.BIN", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE, S9X_BIOS_SFCBOX_KROM) ||
+		LoadBIOSFile("KROM.BIN",  SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE) ||
+		LoadBIOSFile("krom1.bin", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE);
+	if (!krom)
 		printf("SFC-Box: KROM1.BIN not found in the BIOS directory (get it from "
 			   "https://archive.org/details/super-famicom-box-bios).\n");
-		return (FALSE);
-	}
 
+	// Probed even when the KROM is missing: the box needs both files, and the
+	// caller names whichever are actually absent.
 	SFCBox.OSD.FontLoaded =
 		LoadBIOSFile("MB90082.BIN", SFCBox.OSD.Font, SFCBOX_FONT_SIZE, SFCBOX_FONT_SIZE, S9X_BIOS_SFCBOX_FONT);
 	if (!SFCBox.OSD.FontLoaded)
 		printf("SFC-Box: MB90082.BIN (OSD font) not found; the supervisor overlay will be invisible.\n");
 
-	return (TRUE);
+	return (krom);
 }
 
 // ---------------------------------------------------------------------------

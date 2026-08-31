@@ -2524,18 +2524,20 @@ void S9xSetInfoString (const char *string)
 }
 
 static std::string s_bios_notice;
+static bool8      s_bios_notice_fatal = FALSE;
 static bool8      s_bios_missing = FALSE;
 
-void S9xSetBiosNotice (const char *string)
+void S9xSetBiosNotice (const char *string, bool8 unrunnable)
 {
 	s_bios_notice = string ? string : "";
+	s_bios_notice_fatal = !s_bios_notice.empty() && unrunnable;
 	if (s_bios_notice.empty()) s_bios_missing = FALSE;
 }
 
 void S9xShowBiosNotice (void)
 {
 	if (s_bios_notice.empty()) return;
-	s_bios_missing = TRUE;
+	if (s_bios_notice_fatal) s_bios_missing = TRUE;
 	const uint32 saved = Settings.InitialInfoStringTimeout;
 	Settings.InitialInfoStringTimeout = saved + saved / 2;
 	S9xMessage(S9X_INFO, S9X_ROM_INFO, s_bios_notice.c_str());

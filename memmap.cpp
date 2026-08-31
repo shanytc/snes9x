@@ -3078,13 +3078,24 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 			printf("SFC-Box: trailing data after the slot 0 image is not a valid second cart; ignoring it.\n");
 	}
 
-	if (!S9xSFCBoxLoadKROM())
+	// The box needs both files: KROM is the supervisor itself, MB90082 the font
+	// its screens are drawn with. Name whichever are missing rather than the
+	// first one checked. Only a missing KROM stops the box running.
+	const bool8	krom = S9xSFCBoxLoadKROM();
+	if (!krom || !SFCBox.OSD.FontLoaded)
 	{
+		const char	*why;
+		if (!krom && !SFCBox.OSD.FontLoaded)
+			why = "Super Famicom Box BIOS missing: KROM and MB90082 (OSD font) - assign them in File -> BIOS Manager.";
+		else if (!krom)
+			why = "Super Famicom Box BIOS missing: KROM - assign it in File -> BIOS Manager.";
+		else
+			why = "Super Famicom Box BIOS missing: MB90082 (OSD font) - the supervisor screens will be blank. Assign it in File -> BIOS Manager.";
+
 		// As above: a failed load never renders, so carry on with an empty
 		// supervisor and say why.
-		memset(SFCBox.KROM, 0, SFCBOX_KROM_SIZE);
-		S9xSetBiosNotice(
-			"Super Famicom Box BIOS (KROM) not found - assign it in File -> BIOS Manager.");
+		if (!krom) memset(SFCBox.KROM, 0, SFCBOX_KROM_SIZE);
+		S9xSetBiosNotice(why, !krom);
 	}
 
 	//// Identity

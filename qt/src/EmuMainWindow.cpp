@@ -567,10 +567,10 @@ void EmuMainWindow::createWidgets()
         connect(a, &QAction::triggered, [this, i] { setGBBootPolicy(i); });
     }
     bios_policy_actions[S9X_GBBOOT_GBC]->setToolTip(
-        tr("Colourises Game Boy Color carts. Mono-only carts are experimental — "
-           "DMG-compatibility colourisation is not implemented yet."));
-    const QString hack = tr("Experimental: Game Boy Color colours inside a %1 border — "
-                            "on real hardware a Super Game Boy runs colour carts in monochrome.");
+        tr("Colorizes Game Boy Color carts. Mono-only carts are experimental — "
+           "DMG-compatibility colorization is not implemented yet."));
+    const QString hack = tr("Experimental: Game Boy Color colors inside a %1 border — "
+                            "on real hardware a Super Game Boy runs color carts in monochrome.");
     bios_policy_actions[S9X_GBBOOT_SGB_GBC]->setToolTip(hack.arg(tr("Super Game Boy")));
     bios_policy_actions[S9X_GBBOOT_SGB2_GBC]->setToolTip(hack.arg(tr("Super Game Boy 2")));
     bios_menu_action = emulation_menu->addMenu(bios_menu);

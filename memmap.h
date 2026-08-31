@@ -250,7 +250,7 @@ enum S9xGBBootPolicy
 	S9X_GBBOOT_GB = 0,       // force Game Boy
 	S9X_GBBOOT_GBC,          // force Game Boy Color
 	S9X_GBBOOT_SGB,          // force Super Game Boy (SGB1)
-	S9X_GBBOOT_SGB_GBC,      // SGB1 border + real CGB colour (hack, not real HW)
+	S9X_GBBOOT_SGB_GBC,      // SGB1 border + real CGB color (hack, not real HW)
 	S9X_GBBOOT_SGB2,         // force Super Game Boy 2
 	// 5 and 6 were "Automatic, prefer GB" and "prefer GBC". One Automatic
 	// replaced all three; they survive only so a saved config still loads, and
@@ -258,12 +258,12 @@ enum S9xGBBootPolicy
 	S9X_GBBOOT_AUTO_GB_LEGACY,
 	S9X_GBBOOT_AUTO_GBC_LEGACY,
 	S9X_GBBOOT_AUTO,         // read the cart header: SGB > GBC > GB — default
-	S9X_GBBOOT_SGB2_GBC,     // SGB2 border + real CGB colour (hack, not real HW)
+	S9X_GBBOOT_SGB2_GBC,     // SGB2 border + real CGB color (hack, not real HW)
 	S9X_NUM_GBBOOT_POLICIES
 };
 
 // Menu order, which is not enum order: the four real consoles, then the two
-// colour hacks, then Automatic. Ports walk this order and start a new group —
+// color hacks, then Automatic. Ports walk this order and start a new group —
 // a separator — wherever S9xGBBootPolicyGroup changes. Shorter than the enum,
 // which still carries the two retired Automatic values.
 extern const uint8 S9xGBBootPolicyMenuOrder[];
@@ -274,7 +274,7 @@ int S9xGBBootPolicyGroup(int policy);
 // the two retired Automatic entries both become S9X_GBBOOT_AUTO.
 uint8 S9xNormalizeGBBootPolicy(int policy);
 
-// The consoles a port offers as a hotkey: the four real ones and the two colour
+// The consoles a port offers as a hotkey: the four real ones and the two color
 // hacks, in menu order. `key` is the name a config file stores the binding
 // under, so every port spells them the same. Automatic is not here — it is a
 // rule, not a console, and picking it by key would say nothing about what runs.

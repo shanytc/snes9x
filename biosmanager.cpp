@@ -25,12 +25,12 @@
 // SGB carts ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
-	{ "GameBoy",       "Game Boy",          "dmg_boot.bin", 0x100,   "optional, adds the boot logo" },
-	{ "GameBoyColor",  "Game Boy Color",    "cgb_boot.bin", 0,       "optional, boot logo and mono colours" },
+	{ "GameBoy",       "Game Boy",          "dmg_boot.bin", 0x100,   "Optional, adds the boot logo" },
+	{ "GameBoyColor",  "Game Boy Color",    "cgb_boot.bin", 0,       "Optional, adds boot logo and GB colors" },
 	{ "SGB1",          "Super Game Boy",    "sgb.sfc",      0,       NULL },
 	{ "SGB2",          "Super Game Boy 2",  "sgb2.sfc",     0,       NULL },
-	{ "SGB1BootROM",   "SGB boot ROM",      "sgb.boot.rom", 0x100,   "optional, built-in is used" },
-	{ "SGB2BootROM",   "SGB2 boot ROM",     "sgb2.boot.rom",0x100,   "optional, built-in is used" },
+	{ "SGB1BootROM",   "SGB boot ROM",      "sgb.boot.rom", 0x100,   "Optional, built-in is used" },
+	{ "SGB2BootROM",   "SGB2 boot ROM",     "sgb2.boot.rom",0x100,   "Optional, built-in is used" },
 	{ "SFCBoxKROM",    "SFC Box (KROM)",    "KROM1.BIN",    0x10000, NULL },
 	{ "SFCBoxFont",    "SFC Box (MB90082)", "MB90082.BIN",  9216,    NULL },
 	{ "BSX",           "Satellaview / BS-X","BS-X.bin",     0x100000,NULL },

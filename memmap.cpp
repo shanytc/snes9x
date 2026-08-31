@@ -1387,7 +1387,7 @@ S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lice
 
 		case S9X_GBBOOT_SGB_GBC:
 		case S9X_GBBOOT_SGB2_GBC:
-			// Only meaningful on a colour-capable cart; a mono cart has no CGB
+			// Only meaningful on a color-capable cart; a mono cart has no CGB
 			// output to overlay, so leave it as a plain SGB session.
 			if (sgb_available)
 			{
@@ -1398,8 +1398,8 @@ S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lice
 
 		// Automatic, and the two retired ones a stale config can still name.
 		// Take the best console the cart says it was built for: a Super Game
-		// Boy when it carries SGB features, colour when it carries those, plain
-		// Game Boy otherwise. Never a colour hack - that is what the two hack
+		// Boy when it carries SGB features, color when it carries those, plain
+		// Game Boy otherwise. Never a color hack - that is what the two hack
 		// entries are for. A CGB-only cart is kept off the SGB because it would
 		// only reach its own lockout screen there.
 		default:
@@ -1454,9 +1454,9 @@ uint8 S9xNormalizeGBBootPolicy (int policy)
 	return ((uint8) policy);
 }
 
-// True when the loaded cart renders in colour. The +GBC hacks overlay a CGB
+// True when the loaded cart renders in color. The +GBC hacks overlay a CGB
 // framebuffer, which a mono cart never produces.
-static bool8 GBLoadedCartIsColour (void)
+static bool8 GBLoadedCartIsColor (void)
 {
 	uint8 cgb_flag = 0, sgb_flag = 0;
 	if (!S9xSGBGetCartFlags(&cgb_flag, &sgb_flag)) return (TRUE);
@@ -1477,24 +1477,24 @@ S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
 			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
-		// The colour half of a hack has nothing to add to a mono cart: measured,
+		// The color half of a hack has nothing to add to a mono cart: measured,
 		// it renders frame-for-frame the same as plain Super Game Boy.
 		case S9X_GBBOOT_SGB_GBC:
-			if (!GBLoadedCartIsColour())                 return (S9X_GBPOLICY_CART);
+			if (!GBLoadedCartIsColor())                 return (S9X_GBPOLICY_CART);
 			return (S9xSGBBIOSAvailable(1, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
 		case S9X_GBBOOT_SGB2_GBC:
-			if (!GBLoadedCartIsColour())                 return (S9X_GBPOLICY_CART);
+			if (!GBLoadedCartIsColor())                 return (S9X_GBPOLICY_CART);
 			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
 		case S9X_GBBOOT_GBC:
 		{
-			// A colour cart runs either way. A mono one needs the boot ROM: it is
+			// A color cart runs either way. A mono one needs the boot ROM: it is
 			// what puts the CGB in DMG-compatibility mode and picks the palette,
 			// and without it the screen stays blank.
-			if (GBLoadedCartIsColour())   return (S9X_GBPOLICY_OK);
+			if (GBLoadedCartIsColor())   return (S9X_GBPOLICY_OK);
 			if (!Settings.GB_BIOSEnabled) return (S9X_GBPOLICY_NO_BIOS);
 
 			std::string boot;
@@ -1518,7 +1518,7 @@ int S9xGBBootPolicyGroup (int policy)
 	{
 		case S9X_GBBOOT_SGB_GBC:
 		case S9X_GBBOOT_SGB2_GBC:
-			return (1);   // the two colour hacks, no real hardware equivalent
+			return (1);   // the two color hacks, no real hardware equivalent
 
 		case S9X_GBBOOT_AUTO_GB_LEGACY:
 		case S9X_GBBOOT_AUTO_GBC_LEGACY:
@@ -1991,7 +1991,7 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lic
     out_bios_path.clear();
     out_bios_mode = 0;
 
-    // Every named Super Game Boy policy pins its variant, the two colour hacks
+    // Every named Super Game Boy policy pins its variant, the two color hacks
     // included, and none of them falls back to the other one: asking for SGB2
     // and silently getting SGB1 is not what was picked. Only the Automatic
     // entries search, and SGB_BIOSPreference just orders that search.
@@ -2067,7 +2067,7 @@ static uint8 StageGBBootROM (bool gbCgb, const char *filename)
 // Game Boy header $0143 CGB flag: $80 = CGB-enhanced, $C0 = CGB-only. Both
 // honour the SGB-BIOS preference: under the SGB BIOS a CGB-only cart boots
 // monochrome and shows its own "designed only for Game Boy Color" lockout,
-// exactly as on real hardware. The BIOS-less fallback runs CGB carts in colour.
+// exactly as on real hardware. The BIOS-less fallback runs CGB carts in color.
 static uint8 GbBytesCgbFlag(const uint8 *rom, size_t size)
 {
     return size > 0x143 ? rom[0x143] : 0;

@@ -65,7 +65,7 @@ public:
 
 	// SGB+GBC hack only: end the border pass and restart the cart with the
 	// CGB signature. Driven internally from RunCycles.
-	void StartColourPass();
+	void StartColorPass();
 
 	bool LoadROM(const uint8_t *data, size_t size, const char *path = nullptr);
 	void UnloadROM();
@@ -242,7 +242,7 @@ public:
 	void  OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
 
 	// SGB+GBC hack: paint the GB core's CGB output over the GB area of the
-	// SNES frame, so the game keeps its SGB border but gains real colour.
+	// SNES frame, so the game keeps its SGB border but gains real color.
 	void  OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
 
 	// Write a one-line status snapshot — PC, SP, A, halt/stop flag,
@@ -407,7 +407,7 @@ const uint16_t *S9xSGBGetCgbColorFB(void);
 void S9xSGBSetCgbOverride(int mode);
 
 // Keep CGB rendering on while the SNES-side SGB BIOS drives the session — the
-// "Super Game Boy + Game Boy Color" hack: SGB border plus real CGB colour,
+// "Super Game Boy + Game Boy Color" hack: SGB border plus real CGB color,
 // which real hardware can't do. Pairs with S9xSGBOverlayCgbScreen.
 void S9xSGBSetSgbCgbHack(bool enabled);
 

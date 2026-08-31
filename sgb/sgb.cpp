@@ -146,8 +146,8 @@ struct Emulator::Impl
 
 	// The SGB+GBC hack runs the cart twice. Pass 0 boots it as a plain SGB
 	// game so it transfers its custom border: a cart handed the CGB signature
-	// takes its colour path and many (Zelda DX, Men in Black) then never send
-	// one. Pass 1 warm-restarts it with the CGB signature for real colour —
+	// takes its color path and many (Zelda DX, Men in Black) then never send
+	// one. Pass 1 warm-restarts it with the CGB signature for real color —
 	// the border is SNES-side by then and survives. The handover is the
 	// game's own MASK_EN cancel; hack_frames only feeds the failsafe.
 	uint8_t     hack_pass       = 0;
@@ -182,7 +182,7 @@ struct Emulator::Impl
 	// GB frames a finished PCT_TRN waits for the unmask that normally ends the
 	// border pass. Long enough for the BIOS to have read the payload off the
 	// LCD (Men in Black unmasks 34 frames later), short enough that the 17
-	// carts that never unmask reach colour well before the failsafe.
+	// carts that never unmask reach color well before the failsafe.
 	static const uint32_t kHackPctSettle = 240;
 
 	// Failsafe for the 17 measured carts that transfer but never unmask; the
@@ -194,7 +194,7 @@ struct Emulator::Impl
 	// GB cycles of LCD-off before the border pass gives up on the VBlank ever
 	// coming back. Joryuu Janshi ni Chousen GB parks here for good: shown the
 	// SGB2 boot signature it spins with the screen off waiting for a link
-	// partner, so the colour pass - which hands it the CGB signature instead -
+	// partner, so the color pass - which hands it the CGB signature instead -
 	// is the only way the cart ever runs. 240 frames' worth, far past any
 	// legitimate LCD-off window.
 	static const uint64_t kHackDarkCycles = 240ull * 70224ull;
@@ -238,7 +238,7 @@ struct Emulator::Impl
 			hack_restart_at = hack_frames ? hack_frames : 1;
 	}
 
-	// Colour pass: pin the $FF00 player-rotation index so the cart cannot see
+	// Color pass: pin the $FF00 player-rotation index so the cart cannot see
 	// the SGB, and takes its plain-CGB path instead of an SGB-flavoured one.
 	// Latched off when the border pass got no border - transferring late is
 	// then the cart's only remaining chance at one.
@@ -249,7 +249,7 @@ struct Emulator::Impl
 	}
 
 	// The SGB BIOS normally forces CGB off (a real SGB boots CGB carts as DMG);
-	// sgb_cgb_hack keeps colour hardware on underneath it, from pass 1 on.
+	// sgb_cgb_hack keeps color hardware on underneath it, from pass 1 on.
 	bool CgbActive() const
 	{
 		return cgb_mode && (!Settings.SGB_BIOSModeActive ||
@@ -558,12 +558,12 @@ bool Emulator::SoftReset()
 	return true;
 }
 
-// SGB+GBC hack: hand the border pass over to the colour pass. The border the
+// SGB+GBC hack: hand the border pass over to the color pass. The border the
 // cart just transferred lives in SNES VRAM, which nothing here touches, so a
 // warm restart of the GB alone keeps it. SoftReset skips the GB boot ROM, so
 // no second handshake reaches the BIOS's validator, and Reset()'s post-boot
 // block hands the cart the CGB signature once CgbActive() is true.
-void Emulator::StartColourPass()
+void Emulator::StartColorPass()
 {
 	if (impl_->hack_pass != 0) return;
 
@@ -1657,7 +1657,7 @@ void Emulator::RunCycles(int32_t tcycles)
 	if (tcycles <= 0) return;
 
 	// SGB+GBC hack: the border pass has either got the border or run out of
-	// time, so restart the cart in colour. Done before the PPU mode is read
+	// time, so restart the cart in color. Done before the PPU mode is read
 	// below so the whole slice runs as one hardware model.
 	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0)
 	{
@@ -1667,7 +1667,7 @@ void Emulator::RunCycles(int32_t tcycles)
 		impl_->hack_cycle_mark = now;
 		impl_->TickBorderPass();
 		if (impl_->hack_restart_at && impl_->hack_frames >= impl_->hack_restart_at)
-			StartColourPass();
+			StartColorPass();
 	}
 
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
@@ -2174,7 +2174,7 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 	// The BIOS lifts CHR_TRN / PCT_TRN payloads off this ring, and a payload
 	// byte is the raw 2bpp tile index — on a DMG that is exactly what the LCD
 	// carries, because a transferring game sets an identity BGP. Under the
-	// SGB+GBC hack the GB renders in colour, so `pixels` is CGB output and the
+	// SGB+GBC hack the GB renders in color, so `pixels` is CGB output and the
 	// border decodes to garbage. Feed the raw indices instead; the BIOS's own
 	// drawing of the GB area is overpainted by OverlayCgbScreen anyway.
 	if (impl_->sgb_cgb_hack && impl_->ppu.cgb && impl_->ppu.ly < GB_SCREEN_HEIGHT)
@@ -2332,7 +2332,7 @@ void Emulator::OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
 void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	// SGB+GBC hack: the BIOS drew the GB area from the LCD ring, which carries
-	// shade indices only, so colour there came out of the SGB palettes. Paint
+	// shade indices only, so color there came out of the SGB palettes. Paint
 	// the GB core's real CGB output over it, keeping the SNES-drawn border.
 	if (!impl_->has_rom || !dest || !impl_->sgb_cgb_hack || !impl_->ppu.cgb) return;
 
@@ -2340,7 +2340,7 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	// rather than the boot logo the BIOS is still capturing.
 	if (!impl_->boot_handoff_captured || !impl_->cgb_overlay_valid) return;
 
-	// Some carts take their SGB path on the colour pass rather than the CGB
+	// Some carts take their SGB path on the color pass rather than the CGB
 	// one (Game & Watch Gallery 3), so they never write CGB palettes and
 	// color_fb is the reset white. Leave the BIOS's own picture alone rather
 	// than painting that over it: the border still came from pass 0, so the
@@ -2568,7 +2568,7 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	const uint32_t pre_received = impl_->icd2.packets_received;
 	IcdFeedJoypad(impl_->icd2, value);
 
-	// SGB+GBC hack, colour pass: the border pass already captured the one the
+	// SGB+GBC hack, color pass: the border pass already captured the one the
 	// cart meant for this host, so drop any further CHR_TRN/PCT_TRN. The
 	// second boot no longer sees the SGB1 signature it was handed the first
 	// time - A is the CGB $11 now, not $01 - so a cart that palettes its

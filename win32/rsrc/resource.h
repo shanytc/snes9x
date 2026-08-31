@@ -750,6 +750,29 @@
 #define IDC_ACID_RESCAN                 3387
 #define IDC_ACID_DIAG                   3388
 #define IDD_ACID_DIAG                   190
+#define ID_TESTS_AUDITTESTS         44399
+#define IDD_AUDIT_TESTS                 192
+#define IDC_AUDIT_LIST                  3451
+#define IDC_AUDIT_PROGRESS              3452
+#define IDC_AUDIT_STATUS                3453
+#define IDC_AUDIT_RUN                   3454
+#define IDC_AUDIT_THREADS               3455
+#define IDC_AUDIT_THREADS_LABEL         3456
+#define IDC_AUDIT_PAUSE                 3457
+#define IDC_AUDIT_SHOT                  3458
+#define IDC_AUDIT_SHOTCAP               3459
+#define IDC_AUDIT_SEARCH                3460
+#define IDC_AUDIT_FOLDERS               3461
+#define IDC_AUDIT_SHOW                  3462
+#define IDC_AUDIT_CLEAR                 3463
+#define IDC_AUDIT_FILTER_LABEL          3464
+#define IDC_AUDIT_SAVEBASE              3465
+#define IDC_AUDIT_SHOTPREV              3466
+#define IDC_AUDIT_SHOTNEXT              3467
+#define IDC_AUDIT_RESCAN                3468
+#define IDC_AUDIT_BASEPICK              3469
+#define IDC_AUDIT_RUNSEL                3470
+#define IDC_AUDIT_SAVERUN               3471
 #define IDC_ACID_DIAG_LIST              3389
 #define IDC_ACID_DIAG_HEAD              3390
 
@@ -926,9 +949,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        192
+#define _APS_NEXT_RESOURCE_VALUE        193
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3451
+#define _APS_NEXT_CONTROL_VALUE         3472
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

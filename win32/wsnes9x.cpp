@@ -43,6 +43,7 @@
 #include "CSpriteViewerDlg.h"
 #include "CGBTileViewerDlg.h"
 #include "AcidTestsDlg.h"
+#include "AuditTestsDlg.h"
 #include "CGBTilemapViewerDlg.h"
 #include "CGBSpriteViewerDlg.h"
 #include "debug_viewer_common.h"
@@ -3039,6 +3040,23 @@ LRESULT CALLBACK WinProc(
 				RestoreSNESDisplay();
 			}
 			break;
+		case ID_TESTS_AUDITTESTS:
+			{
+				RestoreGUIDisplay();
+				CloseSoundDevice();
+				// Same isolation as the Acid runner: private cores, muted,
+				// no SGB BIOS steering how the audit cores boot.
+				const bool8 saved_bios_active = Settings.SGB_BIOSModeActive;
+				const bool8 saved_mute        = Settings.Mute;
+				Settings.SGB_BIOSModeActive = FALSE;
+				Settings.Mute = TRUE;
+				WinShowAuditTestsDialog();
+				Settings.SGB_BIOSModeActive = saved_bios_active;
+				Settings.Mute = saved_mute;
+				ReInitSound();
+				RestoreSNESDisplay();
+			}
+			break;
 		case ID_SOUND_VOICEKUN_ATTACH:
 			{
 				if (Settings.StopEmulation || S9xVoiceKunAttached())
@@ -5471,7 +5489,15 @@ static void UpdateTestsMenu ()
 	for (int t = 0; t < top_n && at < 0; t++)
 		if (GetSubMenu(GUI.hMenu, t) == s_tests_menu) at = t;
 
-	const bool have_pack = WinAcidTestsAvailable();
+	const bool have_acid  = WinAcidTestsAvailable();
+	const bool have_audit = WinAuditTestsAvailable();
+	const bool have_pack  = have_acid || have_audit;
+	// The menu shows when either pack is near the exe; each entry only
+	// lights up over its own folder.
+	EnableMenuItem(s_tests_menu, ID_TESTS_ACIDTESTS,
+	               MF_BYCOMMAND | (have_acid  ? MF_ENABLED : MF_GRAYED));
+	EnableMenuItem(s_tests_menu, ID_TESTS_AUDITTESTS,
+	               MF_BYCOMMAND | (have_audit ? MF_ENABLED : MF_GRAYED));
 	if (have_pack && at < 0)
 	{
 		MENUITEMINFO ins = {};

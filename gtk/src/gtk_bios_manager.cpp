@@ -34,7 +34,11 @@ void refresh_row(int slot, Row &row)
     const std::string text = row.entry->get_text();
     if (text.empty())
     {
-        row.status->set_markup("");
+        // Empty is fine for some slots and not others, so say which.
+        const char *note = S9xGetBiosSlotInfo(slot)->note;
+        row.status->set_markup(note ? "<span foreground='#7f8c8d'>" +
+                                      Glib::Markup::escape_text(_(note)) + "</span>"
+                                    : std::string());
         return;
     }
 
@@ -56,7 +60,9 @@ void refresh_row(int slot, Row &row)
     // The reason is the useful half: which size the slot wanted, or what the
     // file turned out to be. Falls back to the status when there is none.
     if (st == S9X_BIOS_PATH_OK)
-        row.status->set_markup("<span foreground='#27ae60'>OK</span>");
+        row.status->set_markup("<span foreground='#27ae60'>OK</span>" +
+                               (why.empty() ? std::string()
+                                            : "   " + Glib::Markup::escape_text(why)));
     else if (st == S9X_BIOS_PATH_MISSING)
         row.status->set_markup("<span foreground='#c0392b'>not found</span>");
     else

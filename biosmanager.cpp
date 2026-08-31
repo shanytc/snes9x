@@ -25,16 +25,16 @@
 // SGB carts ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
-	{ "GameBoy",       "Game Boy",          "dmg_boot.bin", 0x100    },
-	{ "GameBoyColor",  "Game Boy Color",    "cgb_boot.bin", 0        },
-	{ "SGB1",          "Super Game Boy",    "sgb.sfc",      0        },
-	{ "SGB2",          "Super Game Boy 2",  "sgb2.sfc",     0        },
-	{ "SGB1BootROM",   "SGB boot ROM",      "sgb.boot.rom", 0x100    },
-	{ "SGB2BootROM",   "SGB2 boot ROM",     "sgb2.boot.rom",0x100    },
-	{ "SFCBoxKROM",    "SFC Box (KROM)",    "KROM1.BIN",    0x10000  },
-	{ "SFCBoxFont",    "SFC Box (MB90082)", "MB90082.BIN",  9216     },
-	{ "BSX",           "Satellaview / BS-X","BS-X.bin",     0x100000 },
-	{ "SufamiTurbo",   "Sufami Turbo",      "STBIOS.bin",   0x40000  },
+	{ "GameBoy",       "Game Boy",          "dmg_boot.bin", 0x100,   "optional, adds the boot logo" },
+	{ "GameBoyColor",  "Game Boy Color",    "cgb_boot.bin", 0,       "optional, boot logo and mono colours" },
+	{ "SGB1",          "Super Game Boy",    "sgb.sfc",      0,       NULL },
+	{ "SGB2",          "Super Game Boy 2",  "sgb2.sfc",     0,       NULL },
+	{ "SGB1BootROM",   "SGB boot ROM",      "sgb.boot.rom", 0x100,   "optional, built-in is used" },
+	{ "SGB2BootROM",   "SGB2 boot ROM",     "sgb2.boot.rom",0x100,   "optional, built-in is used" },
+	{ "SFCBoxKROM",    "SFC Box (KROM)",    "KROM1.BIN",    0x10000, NULL },
+	{ "SFCBoxFont",    "SFC Box (MB90082)", "MB90082.BIN",  9216,    NULL },
+	{ "BSX",           "Satellaview / BS-X","BS-X.bin",     0x100000,NULL },
+	{ "SufamiTurbo",   "Sufami Turbo",      "STBIOS.bin",   0x40000, NULL },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -220,6 +220,22 @@ static int ExpectedKind (int slot)
 	}
 }
 
+// What tells one SGB dump from another: the SNES header version and
+// destination. Every retail image says Japan; only the 1994 Europe beta
+// carries a different destination code.
+static std::string SgbRevision (const uint8 *img)
+{
+	static const char *dest[] = {
+		"Japan", "USA", "Europe", "Scandinavia", "Finland", "Netherlands",
+		"Spain", "Germany", "Italy", "China", "Indonesia", "Korea"
+	};
+	const unsigned ver = img[0x7FDB], d = img[0x7FD9];
+	char buf[64];
+	snprintf(buf, sizeof buf, "v1.%u %s", ver,
+	         d < sizeof dest / sizeof dest[0] ? dest[d] : "region ?");
+	return (std::string(buf));
+}
+
 struct KindProbe { int want; int seen; };
 
 static bool AcceptKind (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
@@ -252,16 +268,16 @@ static bool AcceptSGBSlot (const uint8 *data, uint32 size, uint32 full_size, voi
 	       got == *(const uint8 *) ctx;
 }
 
-S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *reason)
+S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 {
-	if (reason) reason->clear();
+	if (detail) detail->clear();
 	if (!SlotValid(slot) || !g_paths[slot][0])
 		return (S9X_BIOS_PATH_UNSET);
 	if (FileSize(g_paths[slot]) < 0)
 		return (S9X_BIOS_PATH_MISSING);
 	if (!SizeOkForPath(slot))
 	{
-		if (reason) *reason = SizeWanted(slot);
+		if (detail) *detail = SizeWanted(slot);
 		return (S9X_BIOS_PATH_BAD_SIZE);
 	}
 
@@ -274,14 +290,20 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *reason)
 	{
 		// Say it is wrong, not just what it is, or the row reads as a caption
 		// for whatever was dropped on it.
-		if (reason)
-			*reason = probe.seen != KIND_UNKNOWN
+		if (detail)
+			*detail = probe.seen != KIND_UNKNOWN
 			       ? std::string("wrong file: ") + KindName(probe.seen)
 			       : want != KIND_UNKNOWN
 			       ? std::string("not a ") + KindName(want)
 			       : std::string("unreadable");
 		return (S9X_BIOS_PATH_BAD_IMAGE);
 	}
+
+	// Nine plausible Super Game Boy dumps look alike in a file picker, so
+	// say which one this is once it has been accepted.
+	if (detail && img.size() >= 0x8000 &&
+	    (want == KIND_SGB1_CART || want == KIND_SGB2_CART))
+		*detail = SgbRevision(img.data());
 
 	return (S9X_BIOS_PATH_OK);
 }

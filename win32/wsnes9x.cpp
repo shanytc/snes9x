@@ -8881,8 +8881,11 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
 	if (wtext[0] == TEXT('\0'))
 	{
+		// Empty is fine for some slots and not others, so say which.
 		s_bios_status[slot] = S9X_BIOS_PATH_UNSET;
-		SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, TEXT(""));
+		const char *note = S9xGetBiosSlotInfo(slot)->note;
+		Utf8ToWide  note_w(note ? note : "");
+		SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, (wchar_t *) note_w);
 		return;
 	}
 
@@ -8899,14 +8902,18 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	// The reason is the useful half: which size the slot wanted, or what the
 	// file turned out to be. Falls back to the status when there is none.
 	const bool exists = (GetFileAttributes(wtext) != INVALID_FILE_ATTRIBUTES);
-	Utf8ToWide  why_w(why.c_str());
-	LPCTSTR     text;
+	Utf8ToWide   why_w(why.c_str());
+	std::wstring text;
 	if (!exists || st == S9X_BIOS_PATH_MISSING) text = TEXT("not found");
-	else if (st == S9X_BIOS_PATH_OK)            text = TEXT("OK");
-	else if (!why.empty())                      text = (LPCTSTR) (wchar_t *) why_w;
+	else if (st == S9X_BIOS_PATH_OK)
+	{
+		text = TEXT("OK");
+		if (!why.empty()) text += TEXT("   ") + std::wstring((wchar_t *) why_w);
+	}
+	else if (!why.empty())                      text = (wchar_t *) why_w;
 	else if (st == S9X_BIOS_PATH_BAD_IMAGE)     text = TEXT("wrong image");
 	else                                        text = TEXT("unexpected size");
-	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text);
+	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text.c_str());
 }
 
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)

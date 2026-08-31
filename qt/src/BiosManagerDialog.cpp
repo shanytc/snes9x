@@ -97,6 +97,15 @@ void BiosManagerDialog::refreshRow(int slot)
         return;
     }
 
+    if (text.isEmpty())
+    {
+        // Empty is fine for some slots and not others, so say which.
+        const char *note = S9xGetBiosSlotInfo(slot)->note;
+        status->setText(note ? tr(note) : QString());
+        status->setStyleSheet("color: palette(mid);");
+        return;
+    }
+
     QFileInfo fi(text);
     if (!fi.isFile())
     {
@@ -115,10 +124,12 @@ void BiosManagerDialog::refreshRow(int slot)
     // The reason is the useful half: which size the slot wanted, or what the
     // file turned out to be. Falls back to the status when there is none.
     const bool ok = (st == S9X_BIOS_PATH_OK);
+    const QString detail = QString::fromStdString(why);
     status->setText(
-          ok                            ? tr("OK")
+          ok && why.empty()             ? tr("OK")
+        : ok                            ? tr("OK") + "   " + detail
         : st == S9X_BIOS_PATH_MISSING   ? tr("not found")
-        : !why.empty()                  ? QString::fromStdString(why)
+        : !why.empty()                  ? detail
         : st == S9X_BIOS_PATH_BAD_IMAGE ? tr("wrong image")
         : tr("unexpected size"));
     status->setStyleSheet(ok ? "color: #27ae60;" : "color: #c0392b;");

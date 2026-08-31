@@ -1458,10 +1458,9 @@ bool8 S9xGBBootPolicyAvailable (int policy, const char *gb_rom_path)
 {
 	switch (policy)
 	{
-		// The Game Boy and Game Boy Color entries name hardware we emulate
-		// either way — their boot ROM only adds the startup animation, and
-		// GB_BIOSEnabled exists to skip it deliberately. The Automatic entries
-		// pick from whatever is present, so they always resolve.
+		// Game Boy runs either way, its boot ROM only adding the animation, and
+		// the Automatic entries pick from whatever is present. Game Boy Color
+		// depends on the cart — see below.
 		case S9X_GBBOOT_SGB:
 		case S9X_GBBOOT_SGB_GBC:
 			return (S9xSGBBIOSAvailable(1, gb_rom_path));
@@ -1469,6 +1468,20 @@ bool8 S9xGBBootPolicyAvailable (int policy, const char *gb_rom_path)
 		case S9X_GBBOOT_SGB2:
 		case S9X_GBBOOT_SGB2_GBC:
 			return (S9xSGBBIOSAvailable(2, gb_rom_path));
+
+		case S9X_GBBOOT_GBC:
+		{
+			// A colour cart runs either way. A mono one needs the boot ROM:
+			// it is what puts the CGB in DMG-compatibility mode and picks the
+			// palette, and without it the screen stays blank.
+			uint8 cgb_flag = 0, sgb_flag = 0;
+			if (!S9xSGBGetCartFlags(&cgb_flag, &sgb_flag)) return (TRUE);
+			if (cgb_flag == 0x80 || cgb_flag == 0xC0)      return (TRUE);
+			if (!Settings.GB_BIOSEnabled)                  return (FALSE);
+
+			std::string boot;
+			return (FindGB_BootROM(true, gb_rom_path, boot, NULL));
+		}
 
 		default:
 			return (TRUE);

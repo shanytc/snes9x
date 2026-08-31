@@ -35,6 +35,7 @@ struct S9xBiosSlotInfo
 	const char *label;     // dialog row label
 	const char *filename;  // conventional name, shown as the hint
 	uint32      size;      // expected byte count, 0 = any
+	const char *note;      // shown while the slot is empty, NULL if required
 };
 
 #define S9X_BIOS_PATH_MAX 512
@@ -59,9 +60,9 @@ enum S9xBiosPathStatus
 };
 
 // Runs the same tests the loader will, so OK means the file will actually be
-// used. `reason` (optional) comes back with a short phrase for the dialog:
-// the size the slot wanted, or what the file turned out to be instead.
-S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *reason = NULL);
+// used. `detail` (optional) comes back with a short phrase for the dialog:
+// on failure why, and on success which revision, where that is worth saying.
+S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail = NULL);
 
 // Shorthand for S9xCheckBiosPath(slot) == S9X_BIOS_PATH_OK. Loaders still try
 // the path and fall back on failure, so a bad file is a warning, not a block.

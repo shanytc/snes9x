@@ -2832,12 +2832,14 @@ bool8 CMemory::LoadMultiCartInt ()
 
 		if (path.empty())
 		{
-			S9xMessage(S9X_ERROR, S9X_ROM_INFO,
+			// Carry on like the Satellaview path: a failed load never renders a
+			// frame, so the notice would never be seen. Empty BIOS, black screen.
+			memset(ROM, 0, 0x40000);
+			S9xSetBiosNotice(
 				"Sufami Turbo BIOS not found - assign it in File -> BIOS Manager.");
-			return (FALSE);
 		}
-
-        ROMFilename = path;
+		else
+			ROMFilename = path;
     }
 
 	switch (Multi.cartType)
@@ -3071,7 +3073,13 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 	}
 
 	if (!S9xSFCBoxLoadKROM())
-		return (FALSE);
+	{
+		// As above: a failed load never renders, so carry on with an empty
+		// supervisor and say why.
+		memset(SFCBox.KROM, 0, SFCBOX_KROM_SIZE);
+		S9xSetBiosNotice(
+			"Super Famicom Box BIOS (KROM) not found - assign it in File -> BIOS Manager.");
+	}
 
 	//// Identity
 	LoROM = TRUE;
@@ -3156,6 +3164,8 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 			SFCBox.SlotPresent[1] ? " + slot1" : " only",
 			Size(), Settings.DSP ? "DSP1" : "no DSP", ROMCRC32);
 	S9xMessage(S9X_INFO, S9X_ROM_INFO, String);
+
+	S9xShowBiosNotice();
 
 	S9xReset();
 
@@ -3902,6 +3912,8 @@ void CMemory::InitROM (void)
 
 	if (!Settings.GBRomPath[0])
 		S9xMessage(S9X_INFO, S9X_ROM_INFO, GetMultilineROMInfo().c_str());
+
+	S9xShowBiosNotice();
 
 	Settings.ForceLoROM = FALSE;
 	Settings.ForceHiROM = FALSE;

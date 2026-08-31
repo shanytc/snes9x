@@ -1317,7 +1317,7 @@ void S9xInitBSX (void)
 				memset(BIOSROM, 0, BIOS_SIZE);
 				// The reset vector lives in the BIOS, so the cart would boot to a
 				// black screen with nothing said.
-				S9xMessage(S9X_ERROR, S9X_ROM_INFO,
+				S9xSetBiosNotice(
 					"Satellaview BS-X BIOS not found - assign it in File -> BIOS Manager.");
 			}
 		}

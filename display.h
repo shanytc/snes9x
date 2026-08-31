@@ -14,6 +14,12 @@ char * S9xParseArgs (char **, int);
 void S9xParseArgsForCheats (char **, int);
 void S9xLoadConfigFiles (char **, int);
 void S9xSetInfoString (const char *);
+// Missing-BIOS notice. S9xMessage's error path opens a modal box whenever
+// Settings.StopEmulation is set, which every ROM load is, so put it on the OSD
+// instead. Queued rather than shown: the loader emits its own ROM-info line
+// afterwards, which would overwrite it. Shown for half again the usual time.
+void S9xSetBiosNotice (const char *);
+void S9xShowBiosNotice (void);
 
 // Routines the port has to implement even if it doesn't use them
 

@@ -2523,6 +2523,23 @@ void S9xSetInfoString (const char *string)
 	}
 }
 
+static std::string s_bios_notice;
+
+void S9xSetBiosNotice (const char *string)
+{
+	s_bios_notice = string ? string : "";
+}
+
+void S9xShowBiosNotice (void)
+{
+	if (s_bios_notice.empty()) return;
+	const uint32 saved = Settings.InitialInfoStringTimeout;
+	Settings.InitialInfoStringTimeout = saved + saved / 2;
+	S9xMessage(S9X_INFO, S9X_ROM_INFO, s_bios_notice.c_str());
+	Settings.InitialInfoStringTimeout = saved;
+	s_bios_notice.clear();
+}
+
 #include "var8x10font.h"
 static const int font_width = 8;
 static const int font_height = 10;

@@ -288,11 +288,11 @@ static uint8_t DmaReadByte(Memory &m, uint16_t addr)
 {
 	if (addr >= 0xE000) addr = static_cast<uint16_t>(addr - 0x2000);
 	if (addr < 0x8000)
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xA000)
 		return m.ppu ? m.ppu->vram[(addr - 0x8000) + VramBankBase(m)] : 0xFF;
 	if (addr < 0xC000)
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xD000)
 		return m.wram[addr - 0xC000];
 	return m.wram[WramBankBase(m) + (addr - 0xD000)];
@@ -385,10 +385,14 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	{
 		uint8_t logo;
 		if (SachenBootLogoByte(*m.cart, addr, logo)) return logo;
+		// Rocket carts feed the logo morph only to a CGB boot (size > 256);
+		// a DMG boot reads the raw Rocket logo and fails, as on hardware.
+		if (m.boot_rom_size > 0x100 &&
+		    RocketBootLogoByte(*m.cart, addr, logo)) return logo;
 	}
 	if (addr < 0x8000)
 	{
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	}
 	if (addr < 0xA000)
 	{
@@ -397,7 +401,7 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	}
 	if (addr < 0xC000)
 	{
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	}
 	if (addr < 0xD000)
 	{

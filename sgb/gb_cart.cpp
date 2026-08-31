@@ -217,6 +217,161 @@ bool LooksLikeDuzMulticart(const std::vector<uint8_t> &rom)
 	return true;
 }
 
+// Datel "Rocket Games" GBC carts (ATV Racing, Karate Joe, ...): the header
+// stores the Rocket logo, identified by its byte sum the way hhugboy does
+// (2756; 4850 is the Smartcom variant). The real mapper morphs those bytes
+// into the Nintendo logo for the CGB boot's reads — see RocketBootLogoByte.
+bool LooksLikeRocket(const std::vector<uint8_t> &rom)
+{
+	int sum = 0;
+	for (int i = 0; i < 48; ++i) sum += rom[0x0104 + i];
+	return sum == 2756 || sum == 4850;
+}
+
+// Flat-banking unlicensed carts hiding behind garbage $0147 bytes, identified
+// by title: Gowin's Taiwan releases ($30/$38/$B0), the "SONIC5" pirates
+// (Sonic 3D Blast 5 / Super Donkey Kong 3 — $EA is code spilling into the
+// header, per hhugboy), and the Xploder GB cheat cart ($69). All of them
+// bank like a plain MBC1.
+bool LooksLikeFlatUnlicensed(const CartHeader &h)
+{
+	if (std::strncmp(h.title, "GOWIN", 5) == 0) return true;
+	if (std::strstr(h.title, "SONIC5") != nullptr) return true;
+	if (h.cart_type == 0x69 &&
+	    std::strncmp(h.title, "*Future Console", 15) == 0) return true;
+	return false;
+}
+
+// Makon/NT early carts (taizou's RE in hhugboy): forged MBC headers, real
+// mapper picked by licensee "MK" + known title (the single-cart series), or
+// by the known multicart menus. Returns None when this is not a Makon cart.
+MbcType LooksLikeMakonOld(const std::vector<uint8_t> &rom, const CartHeader &h)
+{
+	const bool mk = rom[0x144] == 'M' && rom[0x145] == 'K';
+	if (std::strcmp(h.title, "POKEBOM USA") == 0 && rom.size() > 512 * 1024)
+	{
+		if (rom[0x102] == 0xE0) return MbcType::NtOld2;   // 23-in-1 w/ Mario
+		if (rom[0x102] == 0xC0) return MbcType::NtOld1;   // 25-in-1 w/ Rockman
+	}
+	if ((std::strcmp(h.title, " - TRUMP  BOY -") == 0 ||
+	     std::strcmp(h.title, "QBILLION") == 0) && rom.size() > 512 * 1024)
+		return MbcType::NtOld2;
+	if (std::strcmp(h.title, "ROCKMAN 99") == 0 && !mk &&
+	    rom.size() > 0x8001 && rom[0x8001] != 0xB7)
+		return MbcType::NtOld1;
+	if (mk && rom[0x148] == 0x03 &&
+	    (std::strcmp(h.title, "SONIC 7") == 0 ||
+	     std::strcmp(h.title, "SUPER MARIO 3") == 0 ||
+	     std::strcmp(h.title, "DONKEY\tKONG 5") == 0 ||
+	     std::strcmp(h.title, "ROCKMAN 99") == 0))
+		return MbcType::NtOld2;
+	return MbcType::None;
+}
+
+// Canonical $0184 header logos of the scrambled unlicensed families, taken
+// byte-exact from verified carts. hhugboy keys on byte sums, but sums
+// collide with licensed games (Lemmings, Jungle Book, Q-bert...), so the
+// full bitmap is matched instead.
+constexpr uint8_t kLogoBbd[48] = {
+	0x00, 0x00, 0x00, 0x00, 0xFB, 0xBB, 0xEF, 0x3E, 0x00, 0x00, 0xFB, 0xBB,
+	0xEF, 0x3E, 0x00, 0x00, 0xFB, 0xBB, 0xEF, 0x33, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0xBB, 0xBF, 0xF3, 0xFE, 0x00, 0x00, 0xBB, 0xBF,
+	0xF3, 0xFE, 0x00, 0x00, 0xBB, 0xBF, 0x33, 0xFE, 0x00, 0x00, 0x00, 0x00,
+};
+constexpr uint8_t kLogoBbdSgbc[48] = {
+	0x36, 0x63, 0xE3, 0x0E, 0x00, 0x07, 0x00, 0x0E, 0x36, 0x66, 0xE3, 0x07,
+	0x76, 0x67, 0xE3, 0x3E, 0x36, 0x66, 0xE3, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x06, 0x30, 0x33, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x66, 0x30, 0x33, 0xF0,
+	0x66, 0x70, 0x33, 0xE0, 0x66, 0x30, 0x03, 0xE0, 0x00, 0x00, 0x00, 0x00,
+};
+constexpr uint8_t kLogoBbdFiver[48] = {
+	0xF8, 0x8E, 0x54, 0x44, 0x88, 0x88, 0xD9, 0x99, 0xE0, 0x0C, 0xF8, 0x8F,
+	0x08, 0x80, 0xF8, 0x8E, 0x55, 0x55, 0xE1, 0x1E, 0x46, 0x65, 0x13, 0x35,
+	0x88, 0x80, 0x44, 0x40, 0x55, 0x20, 0x11, 0x10, 0x00, 0xE0, 0xA9, 0x80,
+	0x00, 0x80, 0x88, 0x80, 0x55, 0x50, 0x42, 0x10, 0x54, 0x40, 0x59, 0x90,
+};
+constexpr uint8_t kLogoGgb81[48] = {
+	0x07, 0x22, 0x0F, 0x00, 0x00, 0x88, 0x0F, 0x22, 0x08, 0x00, 0x07, 0x88,
+	0x0F, 0x0F, 0x00, 0x08, 0x0F, 0x22, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x22, 0x70, 0x00, 0xF0, 0x88, 0x00, 0x22, 0xF0, 0x00, 0x80, 0x88, 0x70,
+	0x11, 0xF0, 0x88, 0x00, 0x22, 0xF0, 0x00, 0x80, 0x0E, 0xE0, 0x00, 0x00,
+};
+constexpr uint8_t kLogoHitek[48] = {
+	0x01, 0x33, 0x0F, 0x10, 0x00, 0x80, 0x0C, 0xCD, 0x06, 0xC8, 0x00, 0x00,
+	0x00, 0x00, 0x0F, 0xCC, 0x0C, 0x66, 0x01, 0x10, 0x08, 0x8D, 0x0C, 0xC8,
+	0x33, 0x31, 0x71, 0x1F, 0x88, 0x80, 0xFD, 0xCC, 0x08, 0xC6, 0x03, 0x30,
+	0x08, 0x80, 0xFD, 0xCC, 0xC8, 0xC6, 0x00, 0x11, 0x7D, 0x88, 0x08, 0xCC,
+};
+constexpr uint8_t kLogoLiCheng[48] = {
+	0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
+	0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+	0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDC, 0xBB, 0xBE, 0x33, 0x33, 0x66, 0x63,
+	0x66, 0x6C, 0xDD, 0xD7, 0xBB, 0xB1, 0x11, 0x1F, 0xBB, 0xB1, 0x3F, 0x0E,
+};
+constexpr uint8_t kLogoSintax[48] = {
+	0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
+	0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+	0x99, 0x89, 0x93, 0x73, 0x22, 0x0D, 0x44, 0x0B, 0xCC, 0xC3, 0xCD, 0xC3,
+	0x3F, 0x3C, 0x20, 0x2F, 0x57, 0x78, 0x22, 0x87, 0x66, 0xE1, 0xDD, 0x1E,
+};
+constexpr uint8_t kLogoSintax2[48] = {
+	0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
+	0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+	0x99, 0x89, 0x93, 0x73, 0x22, 0x0D, 0x44, 0x0B, 0xCC, 0xC3, 0xCD, 0xC3,
+	0x3F, 0x3C, 0x2D, 0x2F, 0x57, 0x78, 0x22, 0x87, 0x66, 0xE1, 0xDD, 0x1E,
+};
+constexpr uint8_t kLogoSkobLee8[48] = {
+	0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83,
+	0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+	0x14, 0x97, 0xCC, 0x81, 0xDD, 0xD8, 0xBB, 0xBF, 0x33, 0x3B, 0x66, 0x63,
+	0x66, 0x6C, 0xDD, 0xD7, 0x99, 0x9C, 0x99, 0x9F, 0x88, 0x9D, 0x6C, 0x8E,
+};
+constexpr uint8_t kLogoVf[48] = {
+	0x33, 0x31, 0x11, 0x1B, 0x88, 0x81, 0x36, 0x6F, 0x84, 0x08, 0x00, 0xF0,
+	0x00, 0x8C, 0x00, 0x36, 0x00, 0xB4, 0x00, 0x8D, 0x00, 0xF8, 0x00, 0x8C,
+	0x10, 0x00, 0xBE, 0xE4, 0x00, 0x66, 0x66, 0x66, 0x01, 0x10, 0xF8, 0x8F,
+	0xCC, 0xC7, 0x66, 0x66, 0x44, 0x44, 0xDD, 0xDC, 0xF8, 0x8F, 0xC0, 0x48,
+};
+constexpr uint8_t kLogoVfDigi[48] = {
+	0x00, 0x00, 0x33, 0xCC, 0xF0, 0x01, 0xC6, 0x68, 0x10, 0x11, 0xF6, 0x88,
+	0x81, 0x36, 0xF8, 0x00, 0xE1, 0x10, 0x08, 0x80, 0x30, 0x33, 0xFC, 0x00,
+	0x33, 0xCF, 0x00, 0x0F, 0x16, 0x68, 0x80, 0x17, 0x66, 0x8E, 0x01, 0x10,
+	0xC8, 0x8F, 0x70, 0x1E, 0xFF, 0xCC, 0x00, 0x3F, 0xCC, 0x0C, 0x00, 0x00,
+};
+constexpr uint8_t kLogoVfSoul[48] = {
+	0x01, 0x77, 0x7C, 0x0F, 0xF0, 0x0F, 0xCE, 0x08, 0x13, 0x7E, 0xF8, 0x01,
+	0xF7, 0xEC, 0x13, 0x7E, 0xC8, 0x01, 0x37, 0xEC, 0x93, 0x7E, 0xC8, 0x00,
+	0x0E, 0x70, 0x00, 0xF0, 0x37, 0xE0, 0x93, 0x30, 0xC8, 0xF0, 0x37, 0xE0,
+	0x93, 0x30, 0xC8, 0xF0, 0x37, 0xE0, 0x93, 0x70, 0xC8, 0xF0, 0x00, 0xF0,
+};
+
+// The mapper for a $0184 family logo, or None. Decrypted re-dumps keep the
+// logo but plain banking - hhugboy's last-bank-byte test spots them and
+// they fall through to the standard header decode.
+MbcType LooksLikeScrambledUnl(const std::vector<uint8_t> &rom)
+{
+	if (rom.size() < 0x10000) return MbcType::None;
+	const uint8_t *logo = &rom[0x184];
+	auto is = [&](const uint8_t (&ref)[48]) {
+		return std::memcmp(logo, ref, 48) == 0;
+	};
+	const bool bbd_plain    = rom[0x7FFF] == 0x01 && rom[0xBFFF] == 0x02;
+	const bool sintax_plain = rom[0x7FFF] == 0x00 || rom[0x7FFF] == 0x01;
+	if (is(kLogoBbd) || is(kLogoBbdSgbc) || is(kLogoBbdFiver))
+		return bbd_plain ? MbcType::None : MbcType::BBD;
+	if (is(kLogoGgb81))    return MbcType::Ggb81;
+	if (is(kLogoHitek))    return MbcType::Hitek;
+	if (is(kLogoLiCheng))  return MbcType::LiCheng;
+	if (is(kLogoSintax) || is(kLogoSintax2))
+		return sintax_plain ? MbcType::None : MbcType::Sintax;
+	// Some decrypted SKOB dumps carry the bank markers swapped (D-3: 02/01).
+	if (is(kLogoSkobLee8))
+		return (bbd_plain || (rom[0x7FFF] == 0x02 && rom[0xBFFF] == 0x01))
+		       ? MbcType::None : MbcType::SkobLee8;
+	if (is(kLogoVf) || is(kLogoVfDigi) || is(kLogoVfSoul)) return MbcType::Vf001;
+	return MbcType::None;
+}
+
 // "23 in 1"-style MBC5 multicart: a genuine MBC5 whose menu latches a base bank
 // and bank mask through $5001/$5002. Identified by the crowd of sub-game Nintendo
 // logos sitting on bank boundaries — a single-game cart carries exactly one.
@@ -252,6 +407,14 @@ std::string MakeSavPath(const std::string &rom_path)
 bool SachenBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out)
 {
 	if (c.mbc.type != MbcType::SachenMMC1) return false;
+	if (addr < 0x0104u || addr > 0x0133u) return false;
+	out = kGbNintendoLogo[addr - 0x0104u];
+	return true;
+}
+
+bool RocketBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out)
+{
+	if (c.mbc.type != MbcType::Rocket) return false;
 	if (addr < 0x0104u || addr > 0x0133u) return false;
 	out = kGbNintendoLogo[addr - 0x0104u];
 	return true;
@@ -362,6 +525,72 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 		c.has_rtc     = false;
 		c.has_rumble  = false;
 	}
+	else if (LooksLikeRocket(c.rom))
+	{
+		// Datel Rocket Games — $0147 reads $97/$99, neither a real type.
+		c.mbc.type    = MbcType::Rocket;
+		c.has_battery = false;
+		c.has_rtc     = false;
+		c.has_rumble  = false;
+	}
+	else if (LooksLikeMakonOld(c.rom, h) != MbcType::None)
+	{
+		c.mbc.type    = LooksLikeMakonOld(c.rom, h);
+		c.has_rtc     = false;
+		c.has_rumble  = (c.mbc.type == MbcType::NtOld2);
+		// The big NT-old1 menu multicarts carry battery-backed 8K RAM the
+		// header never declares (hhugboy's sizing).
+		c.has_battery = (c.mbc.type == MbcType::NtOld1 &&
+		                 c.rom.size() > 512 * 1024);
+		if (c.has_battery && h.ram_size < 8 * 1024) h.ram_size = 8 * 1024;
+	}
+	else if (LooksLikeScrambledUnl(c.rom) != MbcType::None)
+	{
+		c.mbc.type    = LooksLikeScrambledUnl(c.rom);
+		c.has_battery = false;
+		c.has_rtc     = false;
+		c.has_rumble  = false;
+		// Per-family RAM fitting (hhugboy's sizing where headers lie).
+		switch (c.mbc.type)
+		{
+			case MbcType::Ggb81:
+				h.ram_size = 32 * 1024;
+				break;
+			case MbcType::LiCheng:
+			case MbcType::Sintax:
+				c.has_battery = true;
+				h.ram_size = 32 * 1024;
+				break;
+			case MbcType::Vf001:
+				// Vast Fame boards fit 8K when the header claims any RAM,
+				// battery included; some claim none and have none.
+				if (h.ram_size > 0)
+				{
+					c.has_battery = true;
+					h.ram_size = 8 * 1024;
+				}
+				c.vf_alt_board = (std::memcmp(&c.rom[0x184], kLogoVfDigi, 48) == 0);
+				break;
+			default:
+				break;
+		}
+	}
+	else if ((c.rom[0x144] == 'M' ? c.rom[0x145] == 'K'
+	                              : (c.rom[0x144] == 'G' && c.rom[0x145] == 'C')) &&
+	         h.global_sum != 0x1ABB)
+	{
+		// ($1ABB = the MBC1-converted "Pokemon Adventure" re-dump, which
+		// still carries a dead NT arm write - it runs as its header says.)
+		// Every other Makon/NT cart (licensee "MK"/"GC"): the later NT
+		// board. It banks exactly like MBC5 until a game arms the $14xx
+		// split port, so decrypted re-dumps keep working too. Battery-backed
+		// 32K RAM per hhugboy - many carts have it undeclared.
+		c.mbc.type    = MbcType::NtNew;
+		c.has_battery = true;
+		c.has_rtc     = false;
+		c.has_rumble  = true;
+		if (h.ram_size < 32 * 1024) h.ram_size = 32 * 1024;
+	}
 	else if (DecodeCartType(h.cart_type, c.mbc.type, c.has_battery, c.has_rtc, c.has_rumble))
 	{
 		// Recognized standard cart type — fields set by DecodeCartType.
@@ -378,6 +607,13 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 		c.sachen_runs_raw = false;
 		c.sachen_logo_high = false;
 	}
+	else if (LooksLikeFlatUnlicensed(h))
+	{
+		c.mbc.type    = MbcType::MBC1;
+		c.has_battery = false;
+		c.has_rtc     = false;
+		c.has_rumble  = false;
+	}
 	else
 	{
 		c.rom.clear();
@@ -392,7 +628,14 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	              c.rom[0x14D] == 0xE7 && c.rom[0x14E] == 0xB6 &&
 	              c.rom[0x14F] == 0x86) ? 1 : 0;
 	c.mbc5_multicart = (c.mbc.type == MbcType::MBC5) && LooksLikeMbc5Multicart(c.rom);
+	// Dev override for unlicensed-cart bring-up: SGB_UNL_FORCE=<MbcType #>.
+	if (const char *f = getenv("SGB_UNL_FORCE"))
+	{
+		const int t = atoi(f);
+		if (t > 0 && t <= (int)MbcType::Vf001) c.mbc.type = (MbcType)t;
+	}
 	MbcReset(c.mbc);
+	MbcUnlReset(c);
 
 	// ----- Cart RAM allocation -----
 	// Initialize fresh SRAM to $FF. Real hardware SRAM cells with no
@@ -449,6 +692,8 @@ void CartUnload(Cart &c)
 	c.sachen_logo_high = false;
 	MbcReset(c.mbc);
 	c.mbc.type    = MbcType::None;
+	c.unl = MbcUnl();
+	c.vf_alt_board = false;
 }
 
 bool CartSaveBatteryToPath(const Cart &c, const char *path)

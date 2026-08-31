@@ -208,6 +208,102 @@ inline uint32_t ReadRom(const std::vector<uint8_t> &rom, uint32_t offset)
 	return rom[offset % rom.size()];
 }
 
+// Makon/NT "weird mode" bank-bit reorders and the bank-write transform
+// (hhugboy's switchOrder + writeMemory, taizou's RE). reorder[x] names the
+// source bit (from MSB) that lands in result bit 7-x.
+inline uint8_t NtSwitchOrder(uint8_t v, const uint8_t *reorder)
+{
+	uint8_t out = 0;
+	for (int x = 0; x < 8; ++x)
+		out |= static_cast<uint8_t>(((v >> (7 - reorder[x])) & 1) << (7 - x));
+	return out;
+}
+
+inline uint32_t NtBankValue(const MbcState &s, uint8_t value)
+{
+	static const uint8_t kFlipOld1[8] = { 0, 1, 2, 4, 3, 6, 5, 7 };
+	static const uint8_t kFlipOld2[8] = { 0, 1, 2, 3, 4, 7, 5, 6 };
+	uint8_t v = value;
+	if (s.type == MbcType::NtOld1) v &= 0x1F;
+	if (v == 0) v = 1;
+	if (s.mbc1_mode)
+		v = NtSwitchOrder(v, s.type == MbcType::NtOld1 ? kFlipOld1 : kFlipOld2);
+	return v;
+}
+
+// $4000-$7FFF bank, masked to the sub-game window: sachen_outer_mask holds
+// 1..5 = 32K<<n-1 sub-game size ($5002 write), 0 = whole file (power-on).
+inline uint32_t NtBankN(const MbcState &s)
+{
+	uint32_t bank = s.rom_bank;
+	if (s.sachen_outer_mask)
+		bank &= (2u << (s.sachen_outer_mask - 1)) - 1;
+	return bank + s.sachen_outer_bank * 2u;
+}
+
+// Scramble tables for the BBD-family and Sintax mappers (taizou's and
+// NewRisingSun's RE in hhugboy; same reorder[x]-names-source-bit format).
+constexpr uint8_t kBbdData[8][8] = {
+	{0,1,2,3,4,5,6,7}, {0,1,2,3,4,5,6,7}, {0,1,5,6,4,2,3,7}, {0,1,2,3,4,5,6,7},
+	{0,1,5,3,4,6,2,7}, {0,1,2,6,4,5,3,7}, {0,1,2,3,4,5,6,7}, {0,1,5,3,4,2,6,7},
+};
+constexpr uint8_t kBbdBank[8][8] = {
+	{0,1,2,3,4,5,6,7}, {0,1,2,3,4,5,6,7}, {0,1,2,3,4,5,6,7}, {0,1,2,6,7,5,3,4},
+	{0,1,2,3,4,5,6,7}, {0,1,2,7,3,4,5,6}, {0,1,2,3,4,5,6,7}, {0,1,2,3,4,5,6,7},
+};
+constexpr uint8_t kGgb81Data[8][8] = {
+	{0,1,2,3,4,5,6,7}, {0,2,1,3,4,6,5,7}, {0,6,5,3,4,2,1,7}, {0,1,5,3,4,6,2,7},
+	{0,1,6,3,4,5,2,7}, {0,6,2,3,4,1,5,7}, {0,2,5,3,4,1,6,7}, {0,6,1,3,4,2,5,7},
+};
+constexpr uint8_t kHitekData[8][8] = {
+	{0,1,2,3,4,5,6,7}, {0,5,6,3,4,2,1,7}, {0,6,5,3,4,1,2,7}, {0,6,2,3,4,5,1,7},
+	{0,5,2,3,4,6,1,7}, {0,5,2,3,4,1,6,7}, {0,2,6,3,4,1,5,7}, {0,2,6,3,4,5,1,7},
+};
+constexpr uint8_t kHitekBank[8][8] = {
+	{0,1,2,3,4,5,6,7}, {0,1,2,3,7,6,5,4}, {0,1,2,3,4,7,6,5}, {0,1,2,3,5,4,7,6},
+	{0,1,2,3,6,5,4,7}, {0,1,2,3,6,7,4,5}, {0,1,2,3,5,6,7,4}, {0,1,2,3,6,4,7,5},
+};
+// Sintax bank reorders keyed by the low nibble of the $5x1x mode.
+inline const uint8_t *SintaxBankTable(uint8_t mode)
+{
+	static const uint8_t k00[8] = {0,7,2,1,4,3,6,5};
+	static const uint8_t k01[8] = {7,6,1,0,3,2,5,4};
+	static const uint8_t k05[8] = {0,1,6,7,4,5,2,3};
+	static const uint8_t k07[8] = {5,7,4,6,2,3,0,1};
+	static const uint8_t k09[8] = {3,2,5,4,7,6,1,0};
+	static const uint8_t k0b[8] = {5,4,7,6,1,0,3,2};
+	static const uint8_t k0d[8] = {6,7,0,1,2,3,4,5};
+	static const uint8_t kid[8] = {0,1,2,3,4,5,6,7};
+	switch (mode & 0x0F)
+	{
+		case 0x00: return k00;  case 0x01: return k01;
+		case 0x05: return k05;  case 0x07: return k07;
+		case 0x09: return k09;  case 0x0B: return k0b;
+		case 0x0D: return k0d;  default:   return kid;
+	}
+}
+// SkobLee8: modes 5 and 7 share one table, everything else is identity.
+inline const uint8_t *SkobLeeBankTable(uint8_t mode)
+{
+	static const uint8_t k57[8] = {1,3,2,0,5,4,7,6};
+	static const uint8_t kid[8] = {0,1,2,3,4,5,6,7};
+	return ((mode & 0x07) == 5 || (mode & 0x07) == 7) ? k57 : kid;
+}
+
+// Banked-area read transform for the scrambled families.
+inline uint8_t UnlDataTransform(const MbcState &s, const MbcUnl &u, uint8_t v)
+{
+	switch (s.type)
+	{
+		case MbcType::BBD:      return NtSwitchOrder(v, kBbdData[u.mode & 7]);
+		case MbcType::Ggb81:    return NtSwitchOrder(v, kGgb81Data[u.mode & 7]);
+		case MbcType::Hitek:    return NtSwitchOrder(v, kHitekData[u.mode & 7]);
+		case MbcType::Sintax:
+		case MbcType::SkobLee8: return static_cast<uint8_t>(v ^ u.cur_xor);
+		default:                return v;
+	}
+}
+
 inline uint8_t ReadSram(const std::vector<uint8_t> &sram, uint32_t offset)
 {
 	if (sram.empty()) return 0xFF;
@@ -553,10 +649,45 @@ uint8_t Mbc6Read(const MbcState &s, const std::vector<uint8_t> &rom, const std::
 
 } // anonymous
 
-uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<uint8_t> &sram, uint16_t addr, bool mbc1_multicart)
+uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<uint8_t> &sram, uint16_t addr, bool mbc1_multicart, MbcUnl *unl)
 {
 	if (s.type == MbcType::MBC6)
 		return Mbc6Read(s, rom, sram, addr);
+	// Vast Fame protection: an armed byte sequence hijacks ROM reads once
+	// its trigger address is read, and the bank-0 overlay window shadows
+	// part of $0000-$3FFF from another bank.
+	if (s.type == MbcType::Vf001 && unl && addr < 0x8000)
+	{
+		MbcUnl &u = *unl;
+		const bool trigger_zone =
+			(u.vf_seq_bank == 0 && addr < 0x4000) ||
+			(u.vf_seq_bank == s.rom_bank && addr >= 0x4000);
+		if (trigger_zone && addr == u.vf_seq_addr &&
+		    u.vf_seq_left == 0 && u.vf_seq_len)
+			u.vf_seq_left = u.vf_seq_len;
+		if (u.vf_seq_left > 0)
+		{
+			--u.vf_seq_left;
+			return u.vf_seq[u.vf_seq_len - u.vf_seq_left - 1];
+		}
+		if (u.vf_repl_on && addr >= u.vf_repl_addr && addr < 0x4000)
+			return static_cast<uint8_t>(ReadRom(rom,
+				(static_cast<uint32_t>(u.vf_repl_bank) << 14) + addr));
+	}
+	// Makon NT-new split mode: each 8K half of the switchable window banks
+	// independently once its register has been written.
+	if (s.type == MbcType::NtNew && unl && unl->mode &&
+	    addr >= 0x4000 && addr < 0x8000)
+	{
+		const bool low = addr < 0x6000;
+		if (low ? unl->xors[2] : unl->xors[3])
+		{
+			uint32_t off = static_cast<uint32_t>(low ? unl->xors[0] : unl->xors[1]) << 13;
+			if (!rom.empty()) off %= rom.size();
+			if (off < 0x4000) off += 0x4000;   // banks 0-1 not selectable
+			return static_cast<uint8_t>(ReadRom(rom, off + (addr & 0x1FFFu)));
+		}
+	}
 	if (s.type == MbcType::M161 && addr < 0x8000)
 	{
 		// One 32 KiB page covers the whole $0000-$7FFF window.
@@ -591,6 +722,14 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 		{
 			bank = Mbc5MultiBank(s, 0);   // no-op until a 23-in-1 menu sets the mask
 		}
+		else if (s.type == MbcType::Rocket)
+		{
+			bank = s.sachen_outer_bank;   // 2-in-1 outer bank moves the fixed area too
+		}
+		else if (s.type == MbcType::NtOld1 || s.type == MbcType::NtOld2)
+		{
+			bank = s.sachen_outer_bank * 2u;   // multicart 32K page base
+		}
 		return static_cast<uint8_t>(ReadRom(rom, (bank * 0x4000u) + eff_addr));
 	}
 	if (addr < 0x8000)
@@ -609,11 +748,29 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 			case MbcType::MBC2: bank = (s.rom_bank & 0x0F) ? (s.rom_bank & 0x0F) : 1; break;
 			case MbcType::SachenMMC1: bank = SachenBankN(s); break;
 			case MbcType::MMM01:      bank = Mmm01RomBank(s, rom.size()); break;
+			case MbcType::Rocket:
+				bank = s.sachen_outer_bank | (s.rom_bank ? s.rom_bank : 1);
+				break;
+			case MbcType::NtOld1:
+			case MbcType::NtOld2: bank = NtBankN(s); break;
+			case MbcType::BBD:
+			case MbcType::Ggb81:
+			case MbcType::Hitek:
+			case MbcType::Sintax:
+			case MbcType::SkobLee8:
+			case MbcType::LiCheng:
+			case MbcType::NtNew:
+			case MbcType::Vf001:  bank = s.rom_bank; break;
+			case MbcType::PokeJadeDia:
+				bank = s.rom_bank ? s.rom_bank : 1;
+				break;
 			default:            bank = 1; break;
 		}
 		if (s.type == MbcType::SachenMMC1 && SachenBankAbsent(rom, bank))
 			return 0xFF;
-		return static_cast<uint8_t>(ReadRom(rom, (bank * 0x4000u) + (addr - 0x4000u)));
+		uint8_t v = static_cast<uint8_t>(ReadRom(rom, (bank * 0x4000u) + (addr - 0x4000u)));
+		if (unl) v = UnlDataTransform(s, *unl, v);
+		return v;
 	}
 	if (addr >= 0xA000 && addr < 0xC000)
 	{
@@ -697,7 +854,21 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 			return ReadSram(sram, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u));
 		}
 
-		if (!s.ram_enable && s.type != MbcType::MBC5) return 0xFF;
+		// Makon Pokemon Jade/Diamond: unused RTC selects $0D-$0F hide the
+		// protection register pair; real RTC selects read as 0 (no RTC).
+		if (s.type == MbcType::PokeJadeDia && unl)
+		{
+			if (!s.ram_enable) return 0xFF;
+			const uint8_t r = unl->mode;
+			if (r >= 0x08 && r <= 0x0C) return 0x00;
+			if (r == 0x0D) return unl->xors[0];
+			if (r == 0x0E) return unl->xors[1];
+			if (r == 0x0F) return 0x00;
+			return ReadSram(sram, ((s.ram_bank & 0x03) * 0x2000u) + (addr - 0xA000u));
+		}
+		// Rocket has no RAM-enable gate at all - its RAM is always wired.
+		if (!s.ram_enable && s.type != MbcType::MBC5 &&
+		    s.type != MbcType::Rocket) return 0xFF;
 
 		// MBC3 RTC select exposes latched RTC values in this window;
 		// the unmapped selects $0D-$0F read open bus.
@@ -726,6 +897,14 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 				break;
 			case MbcType::MBC5: bank = s.ram_bank & 0x0F; break;
 			case MbcType::MMM01: bank = Mmm01RamBank(s) & 0x0F; break;
+			case MbcType::BBD:
+			case MbcType::Ggb81:
+			case MbcType::Hitek:
+			case MbcType::Sintax:
+			case MbcType::SkobLee8:
+			case MbcType::LiCheng:
+			case MbcType::NtNew:
+			case MbcType::Vf001: bank = s.ram_bank & 0x0F; break;
 			default:            bank = 0;               break;
 		}
 		return ReadSram(sram, (bank * 0x2000u) + (addr - 0xA000u));
@@ -799,6 +978,371 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		if (addr >= 0xA000 && addr < 0xC000)
 		{
 			WriteSram(c, addr - 0xA000, value);
+		}
+		break;
+
+	case MbcType::NtOld1:
+	case MbcType::NtOld2:
+		// Makon/NT (taizou's RE in hhugboy). Banking like MBC1/MBC3 but a
+		// $5000-$5FFF port picks a multicart 32K-page base (reg 1), the
+		// sub-game ROM size (reg 2) and "weird mode" (reg 3 bit 4), which
+		// runs bank numbers through a per-type bit reorder.
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0A) == 0x0A);
+		}
+		else if (addr < 0x4000)
+		{
+			s.rom_bank = NtBankValue(s, value);
+		}
+		else if ((addr & 0xF000) == 0x5000)
+		{
+			switch (addr & 0x03)
+			{
+			case 0x01:
+				s.sachen_outer_bank = value & 0x3F;
+				break;
+			case 0x02:
+				switch (value & 0x0F)
+				{
+					case 0x00: s.sachen_outer_mask = 5; break;  // 512K
+					case 0x08: s.sachen_outer_mask = 4; break;  // 256K
+					case 0x0C: s.sachen_outer_mask = 3; break;  // 128K
+					case 0x0E: s.sachen_outer_mask = 2; break;  //  64K
+					case 0x0F: s.sachen_outer_mask = 1; break;  //  32K
+					default:   s.sachen_outer_mask = 5; break;
+				}
+				break;
+			case 0x03:
+				// Mode flips take effect on the current bank at once.
+				s.mbc1_mode = (value & 0x10) != 0;
+				s.rom_bank  = NtBankValue(s, static_cast<uint8_t>(s.rom_bank));
+				break;
+			}
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (s.ram_enable) WriteSram(c, addr - 0xA000u, value);
+		}
+		break;
+
+	case MbcType::BBD:
+	case MbcType::Ggb81:
+	case MbcType::Hitek:
+	{
+		// BBD family: MBC5 with a data scramble picked at $2001 and a bank
+		// scramble at $2080; only exact $x000/$x001/$x080 addresses hit the
+		// registers. Hitek powers up scrambled and has no $3xxx register.
+		MbcUnl &u = c.unl;
+		if ((addr & 0xF0FF) == 0x2001) { u.mode  = value & 0x07; break; }
+		if ((addr & 0xF0FF) == 0x2080) { u.mode2 = value & 0x07; break; }
+		if (s.type == MbcType::Hitek && (addr & 0xF000) == 0x3000) break;
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0F) == 0x0A);
+		}
+		else if (addr < 0x3000)
+		{
+			uint32_t v = value;
+			if ((addr & 0xF0FF) == 0x2000)
+			{
+				if (s.type == MbcType::BBD)   v = NtSwitchOrder(value, kBbdBank[u.mode2 & 7]);
+				if (s.type == MbcType::Hitek) v = NtSwitchOrder(value, kHitekBank[u.mode2 & 7]);
+			}
+			s.rom_bank = (s.rom_bank & 0x100) | v;
+		}
+		else if (addr < 0x4000)
+		{
+			s.rom_bank = (s.rom_bank & 0x0FF) | (static_cast<uint32_t>(value & 0x01) << 8);
+		}
+		else if (addr < 0x6000)
+		{
+			s.ram_bank = value & 0x0F;
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (!s.ram_enable) break;
+			WriteSram(c, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
+		}
+		break;
+	}
+
+	case MbcType::Sintax:
+	{
+		// Sintax: MBC5 whose banked reads XOR against one of four keys
+		// ($7x2x-$7x5x) picked by raw bank & 3, and whose bank numbers pass
+		// through a reorder picked at $5x1x. Mode changes re-select at once.
+		MbcUnl &u = c.unl;
+		if ((addr & 0xF0F0) == 0x5010)
+		{
+			u.mode = value & 0x0F;
+			s.rom_bank = (s.rom_bank & 0x100) |
+			             NtSwitchOrder(u.raw_bank, SintaxBankTable(u.mode));
+			u.cur_xor = u.xors[u.raw_bank & 3];
+			break;
+		}
+		if (addr >= 0x7000 && addr < 0x8000)
+		{
+			const int slot = static_cast<int>((addr & 0x00F0) >> 4) - 2;
+			if (slot >= 0 && slot < 4) u.xors[slot] = value;
+			u.cur_xor = u.xors[u.raw_bank & 3];
+			break;
+		}
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0F) == 0x0A);
+		}
+		else if (addr < 0x3000)
+		{
+			u.raw_bank = value;
+			s.rom_bank = (s.rom_bank & 0x100) |
+			             NtSwitchOrder(value, SintaxBankTable(u.mode));
+			u.cur_xor  = u.xors[value & 3];
+		}
+		else if (addr < 0x4000)
+		{
+			s.rom_bank = (s.rom_bank & 0x0FF) | (static_cast<uint32_t>(value & 0x01) << 8);
+		}
+		else if (addr < 0x6000)
+		{
+			s.ram_bank = value & 0x0F;
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (!s.ram_enable) break;
+			WriteSram(c, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
+		}
+		break;
+	}
+
+	case MbcType::SkobLee8:
+	{
+		// SKOB LEE8: Sintax-like, with preset power-on XOR keys, key slots
+		// at $7000|(addr&3) and the reorder mode at $5xx1.
+		MbcUnl &u = c.unl;
+		if ((addr & 0xF003) == 0x5001)
+		{
+			u.mode = value & 0x07;
+			const uint8_t v = NtSwitchOrder(u.raw_bank, SkobLeeBankTable(u.mode));
+			s.rom_bank = (s.rom_bank & 0x100) | v;
+			u.cur_xor  = u.xors[v & 3];
+			break;
+		}
+		if (addr >= 0x7000 && addr < 0x8000)
+		{
+			u.xors[addr & 0x03] = value;
+			u.cur_xor = u.xors[static_cast<uint8_t>(s.rom_bank) & 3];
+			break;
+		}
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0F) == 0x0A);
+		}
+		else if (addr < 0x3000)
+		{
+			u.raw_bank = value;
+			const uint8_t v = NtSwitchOrder(value, SkobLeeBankTable(u.mode));
+			s.rom_bank = (s.rom_bank & 0x100) | v;
+			u.cur_xor  = u.xors[v & 3];
+		}
+		else if (addr < 0x4000)
+		{
+			s.rom_bank = (s.rom_bank & 0x0FF) | (static_cast<uint32_t>(value & 0x01) << 8);
+		}
+		else if (addr < 0x6000)
+		{
+			s.ram_bank = value & 0x0F;
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (!s.ram_enable) break;
+			WriteSram(c, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
+		}
+		break;
+	}
+
+	case MbcType::LiCheng:
+		// Li Cheng: MBC5 that ignores the decoy bank writes above $2100
+		// (run as MBC5 those select garbage banks; $2100 itself must work).
+		if (addr > 0x2100 && addr < 0x3000) break;
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0F) == 0x0A);
+		}
+		else if (addr < 0x3000)
+		{
+			s.rom_bank = (s.rom_bank & 0x100) | value;
+		}
+		else if (addr < 0x4000)
+		{
+			s.rom_bank = (s.rom_bank & 0x0FF) | (static_cast<uint32_t>(value & 0x01) << 8);
+		}
+		else if (addr < 0x6000)
+		{
+			s.ram_bank = value & 0x0F;
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (!s.ram_enable) break;
+			WriteSram(c, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
+		}
+		break;
+
+	case MbcType::NtNew:
+	{
+		// Makon later carts: MBC5 until $55 lands on $14xx, which arms two
+		// independent 8K half-bank windows set through $20xx / $24xx.
+		MbcUnl &u = c.unl;
+		if ((addr & 0xFF00) == 0x1400 && value == 0x55) { u.mode = 1; break; }
+		if (u.mode && (addr & 0xFF00) == 0x2000)
+		{ u.xors[0] = value; u.xors[2] = 1; break; }
+		if (u.mode && (addr & 0xFF00) == 0x2400)
+		{ u.xors[1] = value; u.xors[3] = 1; break; }
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0F) == 0x0A);
+		}
+		else if (addr < 0x3000)
+		{
+			s.rom_bank = (s.rom_bank & 0x100) | value;
+		}
+		else if (addr < 0x4000)
+		{
+			s.rom_bank = (s.rom_bank & 0x0FF) | (static_cast<uint32_t>(value & 0x01) << 8);
+		}
+		else if (addr < 0x6000)
+		{
+			s.ram_bank = value & 0x0F;
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (!s.ram_enable) break;
+			WriteSram(c, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
+		}
+		break;
+	}
+
+	case MbcType::PokeJadeDia:
+	{
+		// Makon Pokemon Jade/Diamond: MBC3 whose unused RTC selects $0D-$0F
+		// hide a protection register pair (taizou's RE).
+		MbcUnl &u = c.unl;
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0F) == 0x0A);
+		}
+		else if (addr < 0x4000)
+		{
+			const uint32_t v = value & 0x7F;
+			s.rom_bank = v ? v : 1;
+		}
+		else if (addr < 0x6000)
+		{
+			u.mode = value;
+			s.ram_bank = value & 0x03;
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (!s.ram_enable) break;
+			if (u.mode == 0x0D) { u.xors[0] = value; break; }
+			if (u.mode == 0x0E) { u.xors[1] = value; break; }
+			if (u.mode == 0x0F)
+			{
+				switch (value)
+				{
+					case 0x11: --u.xors[0]; break;
+					case 0x12: --u.xors[1]; break;
+					case 0x41: u.xors[0] = static_cast<uint8_t>(u.xors[0] + u.xors[1]); break;
+					case 0x42: u.xors[1] = static_cast<uint8_t>(u.xors[1] + u.xors[0]); break;
+					case 0x51: ++u.xors[0]; break;
+					case 0x52: --u.xors[1]; break;
+				}
+				break;
+			}
+			if (u.mode >= 0x08) break;
+			WriteSram(c, ((s.ram_bank & 0x03) * 0x2000u) + (addr - 0xA000u), value);
+		}
+		break;
+	}
+
+	case MbcType::Vf001:
+	{
+		// Vast Fame: MBC5 + a rotate-XOR protection engine configured via
+		// $7000=$96 .. $700F=$96, arming read-triggered byte sequences and
+		// a bank-0 overlay window (taizou's RE).
+		MbcUnl &u = c.unl;
+		if (addr >= 0x6000 && addr < 0x8000)
+		{
+			const uint16_t ea = addr & 0xF00F;
+			if (ea == 0x7000 && value == 0x96)
+			{
+				u.vf_config  = 1;
+				u.vf_running = c.vf_alt_board ? 0x10 : 0x00;
+				break;
+			}
+			if (ea == 0x700F && value == 0x96) { u.vf_config = 0; break; }
+			if (!u.vf_config) break;
+			if (ea >= 0x700B || (ea > 0x6000 && ea < 0x7000)) break;
+			u.vf_running = static_cast<uint8_t>(((u.vf_running & 1) ? 0x80 : 0) + (u.vf_running >> 1));
+			u.vf_running ^= value;
+			if (ea >= 0x7000)      u.vf_700x[ea & 0x0F] = u.vf_running;
+			else if (ea == 0x6000) u.vf_6000 = u.vf_running;
+			if (ea == 0x7000)
+			{
+				u.vf_seq_bank = u.vf_700x[3];
+				u.vf_seq_addr = static_cast<uint16_t>((u.vf_700x[2] << 8) | u.vf_700x[1]);
+				u.vf_seq[0] = u.vf_700x[4];  u.vf_seq[1] = u.vf_700x[5];
+				u.vf_seq[2] = u.vf_700x[6];  u.vf_seq[3] = u.vf_700x[7];
+				const uint8_t n = u.vf_700x[0] & 7;
+				u.vf_seq_len  = (n >= 4) ? static_cast<uint8_t>(n - 3) : 0;
+				u.vf_seq_left = 0;
+			}
+			if (ea == 0x7008)
+			{
+				u.vf_repl_addr = static_cast<uint16_t>((u.vf_700x[10] << 8) | u.vf_700x[9]);
+				u.vf_repl_bank = u.vf_6000;
+				u.vf_repl_on   = ((u.vf_700x[8] & 0x0F) == 0x0F);
+			}
+			break;
+		}
+		if (addr < 0x2000)
+		{
+			s.ram_enable = ((value & 0x0F) == 0x0A);
+		}
+		else if (addr < 0x3000)
+		{
+			s.rom_bank = (s.rom_bank & 0x100) | value;
+		}
+		else if (addr < 0x4000)
+		{
+			s.rom_bank = (s.rom_bank & 0x0FF) | (static_cast<uint32_t>(value & 0x01) << 8);
+		}
+		else if (addr < 0x6000)
+		{
+			s.ram_bank = value & 0x0F;
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			if (!s.ram_enable) break;
+			WriteSram(c, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u), value);
+		}
+		break;
+	}
+
+	case MbcType::Rocket:
+		// Registers at two exact addresses (NewRisingSun's RE): $3F00 is
+		// the switchable bank, $3FC0 the outer 16-bank slot on 2-in-1s.
+		if (addr == 0x3F00)
+		{
+			s.rom_bank = value ? value : 1;
+		}
+		else if (addr == 0x3FC0)
+		{
+			s.sachen_outer_bank = static_cast<uint8_t>(value << 4);
+		}
+		else if (addr >= 0xA000 && addr < 0xC000)
+		{
+			WriteSram(c, addr - 0xA000u, value);
 		}
 		break;
 
@@ -1210,6 +1754,27 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 
 	default:
 		break;
+	}
+}
+
+void MbcUnlReset(Cart &c)
+{
+	c.unl = MbcUnl();
+	// Hitek boards power up with both scrambles at 7; SKOB LEE8 boards with
+	// reorder mode $0F and preset XOR keys (applied from the first bank
+	// write - the power-on xor is 0, matching hhugboy).
+	if (c.mbc.type == MbcType::Hitek)
+	{
+		c.unl.mode  = 7;
+		c.unl.mode2 = 7;
+	}
+	else if (c.mbc.type == MbcType::SkobLee8)
+	{
+		c.unl.mode    = 0x0F;
+		c.unl.xors[0] = 0x55;
+		c.unl.xors[1] = 0xAA;
+		c.unl.xors[2] = 0xF0;
+		c.unl.xors[3] = 0x0F;
 	}
 }
 

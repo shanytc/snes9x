@@ -27,7 +27,49 @@ enum class MbcType : uint8_t
 	SachenMMC1 = 11, // Sachen 4B-series unlicensed multicarts
 	TAMA5      = 12, // Bandai Tamagotchi — register port + EEPROM + RTC
 	M161       = 13, // write-once 32 KiB-page multicart (Mani 4-in-1 "Tetris Set")
-	Camera     = 14  // Game Boy Camera (Pocket Camera) — MBC3-like + M64282FP sensor
+	Camera     = 14, // Game Boy Camera (Pocket Camera) — MBC3-like + M64282FP sensor
+	Rocket     = 15, // Datel "Rocket Games" unlicensed GBC carts (per NewRisingSun's RE)
+	NtOld1     = 16, // Makon/NT early carts: $5000-port mode set, 5-bit bank flip
+	NtOld2     = 17, // Makon/NT later singles (Sonic Adventure 8 etc.): 8-bit bank flip
+	BBD        = 18, // BBD: MBC5 + bit-scrambled banked ROM + scrambled bank numbers
+	Ggb81      = 19, // DSH-GGB-81 (BBD sibling): data scramble only
+	Hitek      = 20, // Gaoke/Hitek (BBD sibling): powers up scrambled, no $3xxx reg
+	Sintax     = 21, // Sintax: MBC5 + per-(bank&3) XOR on banked reads + bank reorder
+	SkobLee8   = 22, // SKOB LEE8 PCBs: Sintax-like XOR with preset defaults
+	LiCheng    = 23, // Li Cheng/Niutoude: MBC5 that ignores $2101-$2FFF bank writes
+	NtNew      = 24, // Makon/NT later: MBC5 + $55-armed 8K half-bank split windows
+	PokeJadeDia= 25, // Makon Pokemon Jade/Diamond: MBC3 + fake-RTC D/E/F registers
+	Vf001      = 26  // Vast Fame: MBC5 + rotate-XOR protection engine
+};
+
+// Extra state for the scrambled unlicensed mappers - lives beside MbcState in
+// the Cart (v7 savestate blob, append-only). Field use per type:
+//   BBD/Ggb81/Hitek : mode = data-scramble mode, mode2 = bank-scramble mode
+//   Sintax          : mode = reorder mode, xors[4], raw_bank, cur_xor
+//   SkobLee8        : mode = reorder mode, xors[4], cur_xor
+//   NtNew           : mode = split armed, xors[0..1] = 8K half-bank regs
+//   PokeJadeDia     : mode = "not-RTC" select, xors[0..1] = registers D/E
+//   Vf001           : the vf_* protection engine (taizou's RE)
+struct MbcUnl
+{
+	uint8_t  mode      = 0;
+	uint8_t  mode2     = 0;
+	uint8_t  xors[4]   = {0, 0, 0, 0};
+	uint8_t  raw_bank  = 1;
+	uint8_t  cur_xor   = 0;
+
+	uint8_t  vf_config    = 0;
+	uint8_t  vf_running   = 0;
+	uint8_t  vf_6000      = 0;
+	uint8_t  vf_700x[15]  = {0};
+	uint8_t  vf_seq_bank  = 0;
+	uint16_t vf_seq_addr  = 0;
+	uint8_t  vf_seq_len   = 0;
+	uint8_t  vf_seq[4]    = {0};
+	uint8_t  vf_seq_left  = 0;
+	uint8_t  vf_repl_on   = 0;
+	uint16_t vf_repl_addr = 0;
+	uint8_t  vf_repl_bank = 0;
 };
 
 struct MbcState
@@ -88,11 +130,16 @@ struct MbcState
 struct Cart;
 
 void MbcReset(MbcState &s);
+// Reset the Cart's MbcUnl to the mapper's power-on state (Hitek and
+// SkobLee8 boards power up with non-zero scramble settings).
+void MbcUnlReset(Cart &c);
 
 // Advance the MBC3 RTC by `tcycles` real-time T-cycles (one second per
 // 4194304). No-op for carts without an RTC or with the halt bit set.
 void MbcTickRtc(MbcState &s, int32_t tcycles);
-uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<uint8_t> &sram, uint16_t addr, bool mbc1_multicart = false);
+// `unl` (the Cart's MbcUnl) is required for the scrambled unlicensed types;
+// peeks may pass null and get raw bytes with no protection side effects.
+uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<uint8_t> &sram, uint16_t addr, bool mbc1_multicart = false, MbcUnl *unl = nullptr);
 void    MbcWrite(Cart &c, uint16_t addr, uint8_t value);
 
 // Notify the mapper of a CPU write to addr >= 0x8000 (VRAM/WRAM/SRAM/HRAM/IO).

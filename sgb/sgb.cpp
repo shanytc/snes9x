@@ -732,6 +732,7 @@ void Emulator::Reset()
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
 	MbcReset(impl_->cart.mbc);
+	MbcUnlReset(impl_->cart);
 	impl_->border_capture.stage = Impl::BorderCapture::Idle;
 	impl_->border_fade_frames   = 0;
 	impl_->boot_handoff_captured = false;
@@ -2887,7 +2888,7 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 //     VBK/SVBK/KEY1/double-speed, HDMA. v1-3 loads skip the v4 block and
 //     the CGB fields keep their reset defaults (correct for DMG/SGB carts).
 // v6: add mem.key0 - CGB boot CPU-mode select; dmg_compat derives from it.
-constexpr uint32_t SGB_STATE_VERSION = 6;
+constexpr uint32_t SGB_STATE_VERSION = 7;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3088,6 +3089,12 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 	if (c.version >= 6)
 	{
 		IoField(c, impl.mem.key0);
+	}
+
+	// v7: scrambled-unlicensed mapper state (BBD/Sintax/Vast Fame etc.).
+	if (c.version >= 7)
+	{
+		IoField(c, impl.cart.unl);
 	}
 }
 

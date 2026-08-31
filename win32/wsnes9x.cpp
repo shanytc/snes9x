@@ -2054,7 +2054,9 @@ LRESULT CALLBACK WinProc(
 	case WM_INITMENUPOPUP:
 	{
 		HMENU hPopup = (HMENU)wParam;
-		bool romLoaded  = !Settings.StopEmulation;
+		// A cart whose BIOS is missing is mapped but cannot run, so it counts
+		// as no ROM here — same as the state before anything was loaded.
+		bool romLoaded  = !Settings.StopEmulation && !S9xBiosMissing();
 		bool gbActive   = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
 		// SGB BIOS mode runs the real 65816/S-PPU (border + GB screen tiles),
 		// so the S-PPU viewers stay live there; only the BIOS-less GB path
@@ -5736,7 +5738,7 @@ static void CheckMenuStates ()
 	}
 
     mii.fState = MFS_UNCHECKED;
-    if (Settings.StopEmulation)
+    if (Settings.StopEmulation || S9xBiosMissing())
         mii.fState |= MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SPC_DATA, FALSE, &mii);
     SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SRAM_DATA, FALSE, &mii);
@@ -6218,7 +6220,9 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
             stateMan.init(GUI.rewindBufferSize * 1024 * 1024);
 		}
 #ifdef RETROACHIEVEMENTS_SUPPORT
-		RA_OnLoadROM();
+		// No session for a cart that cannot run for want of its BIOS.
+		if (!S9xBiosMissing())
+			RA_OnLoadROM();
 #endif
 
 		// The loaded ROM decides the mode, and the mode can invalidate the

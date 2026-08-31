@@ -1764,6 +1764,8 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
     if(!source || sourceSize > MAX_ROM_SIZE)
         return FALSE;
 
+    S9xSetBiosNotice(NULL);
+
     if (optional_rom_filename)
         ROMFilename = optional_rom_filename;
     else
@@ -2180,6 +2182,8 @@ bool8 CMemory::LoadROM (const char *filename)
 {
     if(!filename || !*filename)
         return FALSE;
+
+    S9xSetBiosNotice(NULL);   // a fresh load owns the missing-BIOS state
 
     // .gb / .gbc — hand off to the SGB subsystem. The 65816 path below
     // is bypassed entirely; S9xMainLoop gates on Settings.SuperGameBoy
@@ -2771,6 +2775,8 @@ bool8 CMemory::LoadMultiCart (const char *cartA, const char *cartB)
 
 bool8 CMemory::LoadMultiCartInt ()
 {
+	S9xSetBiosNotice(NULL);   // File -> Load MultiCart does not pass through LoadROM
+
 	bool8	r = TRUE;
 
 	CalculatedSize = 0;

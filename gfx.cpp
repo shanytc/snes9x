@@ -2524,20 +2524,28 @@ void S9xSetInfoString (const char *string)
 }
 
 static std::string s_bios_notice;
+static bool8      s_bios_missing = FALSE;
 
 void S9xSetBiosNotice (const char *string)
 {
 	s_bios_notice = string ? string : "";
+	if (s_bios_notice.empty()) s_bios_missing = FALSE;
 }
 
 void S9xShowBiosNotice (void)
 {
 	if (s_bios_notice.empty()) return;
+	s_bios_missing = TRUE;
 	const uint32 saved = Settings.InitialInfoStringTimeout;
 	Settings.InitialInfoStringTimeout = saved + saved / 2;
 	S9xMessage(S9X_INFO, S9X_ROM_INFO, s_bios_notice.c_str());
 	Settings.InitialInfoStringTimeout = saved;
 	s_bios_notice.clear();
+}
+
+bool8 S9xBiosMissing (void)
+{
+	return s_bios_missing;
 }
 
 #include "var8x10font.h"

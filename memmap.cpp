@@ -1467,8 +1467,9 @@ S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
 {
 	switch (policy)
 	{
-		// Game Boy runs either way, its boot ROM only adding the animation, and
-		// the Automatic entries pick from whatever is present.
+		// Game Boy and Game Boy Color run either way - a boot ROM only adds
+		// the animation, and Reset synthesizes the CGB compatibility palettes
+		// a mono cart needs. The Automatic entries pick from what is present.
 		case S9X_GBBOOT_SGB:
 			return (S9xSGBBIOSAvailable(1, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
@@ -1488,19 +1489,6 @@ S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
 			if (!GBLoadedCartIsColor())                 return (S9X_GBPOLICY_CART);
 			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
-
-		case S9X_GBBOOT_GBC:
-		{
-			// A color cart runs either way. A mono one needs the boot ROM: it is
-			// what puts the CGB in DMG-compatibility mode and picks the palette,
-			// and without it the screen stays blank.
-			if (GBLoadedCartIsColor())   return (S9X_GBPOLICY_OK);
-			if (!Settings.GB_BIOSEnabled) return (S9X_GBPOLICY_NO_BIOS);
-
-			std::string boot;
-			return (FindGB_BootROM(true, gb_rom_path, boot, NULL) ? S9X_GBPOLICY_OK
-			                                                      : S9X_GBPOLICY_NO_BIOS);
-		}
 
 		default:
 			return (S9X_GBPOLICY_OK);

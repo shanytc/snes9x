@@ -90,6 +90,81 @@ static const uint8_t kSgb2BootRom[256] = {
     0xEE, 0x00, 0xE0, 0x50
 };
 
+// DMG-compat colorization the CGB boot ROM performs for mono carts: licensee
+// gate, title checksum, then one of its palette combinations. Tables from the
+// same SameBoy source as the boot ROMs above (BootROMs/cgb_boot.asm).
+static const uint8_t kCgbCompatChecksums[94] = {
+	0x00, 0x88, 0x16, 0x36, 0xD1, 0xDB, 0xF2, 0x3C, 0x8C, 0x92, 0x3D, 0x5C, 0x58, 0xC9,
+	0x3E, 0x70, 0x1D, 0x59, 0x69, 0x19, 0x35, 0xA8, 0x14, 0xAA, 0x75, 0x95, 0x99, 0x34,
+	0x6F, 0x15, 0xFF, 0x97, 0x4B, 0x90, 0x17, 0x10, 0x39, 0xF7, 0xF6, 0xA2, 0x49, 0x4E,
+	0x43, 0x68, 0xE0, 0x8B, 0xF0, 0xCE, 0x0C, 0x29, 0xE8, 0xB7, 0x86, 0x9A, 0x52, 0x01,
+	0x9D, 0x71, 0x9C, 0xBD, 0x5D, 0x6D, 0x67, 0x3F, 0x6B, 0xB3, 0x46, 0x28, 0xA5, 0xC6,
+	0xD3, 0x27, 0x61, 0x18, 0x66, 0x6A, 0xBF, 0x0D, 0xF4, 0xB3, 0x46, 0x28, 0xA5, 0xC6,
+	0xD3, 0x27, 0x61, 0x18, 0x66, 0x6A, 0xBF, 0x0D, 0xF4, 0xB3
+};
+static const char kCgbCompat4thLetters[] = "BEFAARBEKEK R-URAR INAILICE R";
+static const uint8_t kCgbCompatComboIdx[94] = {
+	 0,  4,  5, 35, 34,  3, 31, 15, 10,  5, 19, 36,  7, 37,
+	30, 44, 21, 32, 31, 20,  5, 33, 13, 14,  5, 29,  5, 18,
+	 9,  3,  2, 26, 25, 25, 41, 42, 26, 45, 42, 45, 36, 38,
+	26, 42, 30, 41, 34, 34,  5, 42,  6,  5, 33, 25, 42, 42,
+	40,  2, 16, 25, 42, 42,  5,  0, 39, 36, 22, 25,  6, 32,
+	12, 36, 11, 39, 18, 39, 24, 31, 50, 17, 46,  6, 27,  0,
+	47, 41, 41,  0,  0, 19, 34, 23, 18, 29
+};
+static const uint8_t kCgbCompatCombos[51][3] = {
+	{ 32, 32,232}, {144,144,144}, {160,160,160}, {192,192,192}, { 72, 72, 72}, {  0,  0,  0},
+	{216,216,216}, { 40, 40, 40}, { 96, 96, 96}, {208,208,208}, {128, 64, 64}, { 32,224,224},
+	{ 32, 16, 16}, { 24, 32, 32}, { 32,232,232}, {224, 32,224}, { 16,136, 16}, {128,128, 64},
+	{ 32, 32, 56}, { 32, 32,144}, { 32, 32,160}, {152,152, 72}, { 30, 30, 88}, {136,136, 16},
+	{ 32, 32, 16}, { 32, 32, 24}, {224,224,  0}, { 24, 24,  0}, {  0,  0,  8}, {144,176,144},
+	{160,176,160}, {192,176,192}, {128,176, 64}, {136, 32,104}, {222,  0,112}, {222, 32,120},
+	{152,182, 72}, {128,224, 80}, { 32,184,224}, {136,176, 16}, { 32,  0, 16}, { 32,224, 24},
+	{224, 24,  0}, { 24,224, 32}, {168,224, 32}, { 24,224,  0}, {200, 24,224}, {  0,224, 64},
+	{ 32, 24,224}, {224, 24, 48}, { 32,224,232},
+};
+static const uint16_t kCgbCompatPalettes[128] = {
+	0x7FFF, 0x32BF, 0x00D0, 0x0000, 0x639F, 0x4279, 0x15B0, 0x04CB,
+	0x7FFF, 0x6E31, 0x454A, 0x0000, 0x7FFF, 0x1BEF, 0x0200, 0x0000,
+	0x7FFF, 0x421F, 0x1CF2, 0x0000, 0x7FFF, 0x5294, 0x294A, 0x0000,
+	0x7FFF, 0x03FF, 0x012F, 0x0000, 0x7FFF, 0x03EF, 0x01D6, 0x0000,
+	0x7FFF, 0x42B5, 0x3DC8, 0x0000, 0x7E74, 0x03FF, 0x0180, 0x0000,
+	0x67FF, 0x77AC, 0x1A13, 0x2D6B, 0x7ED6, 0x4BFF, 0x2175, 0x0000,
+	0x53FF, 0x4A5F, 0x7E52, 0x0000, 0x4FFF, 0x7ED2, 0x3A4C, 0x1CE0,
+	0x03ED, 0x7FFF, 0x255F, 0x0000, 0x036A, 0x021F, 0x03FF, 0x7FFF,
+	0x7FFF, 0x01DF, 0x0112, 0x0000, 0x231F, 0x035F, 0x00F2, 0x0009,
+	0x7FFF, 0x03EA, 0x011F, 0x0000, 0x299F, 0x001A, 0x000C, 0x0000,
+	0x7FFF, 0x027F, 0x001F, 0x0000, 0x7FFF, 0x03E0, 0x0206, 0x0120,
+	0x7FFF, 0x7EEB, 0x001F, 0x7C00, 0x7FFF, 0x3FFF, 0x7E00, 0x001F,
+	0x7FFF, 0x03FF, 0x001F, 0x0000, 0x03FF, 0x001F, 0x000C, 0x0000,
+	0x7FFF, 0x033F, 0x0193, 0x0000, 0x0000, 0x4200, 0x037F, 0x7FFF,
+	0x7FFF, 0x7E8C, 0x7C00, 0x0000, 0x7FFF, 0x1BEF, 0x6180, 0x0000,
+	0x7FFF, 0x7FEA, 0x7D5F, 0x0000, 0x4778, 0x3290, 0x1D87, 0x0861
+};
+
+// Pick the boot ROM's palette combination for a mono cart: OBJ0/OBJ1/BG as
+// byte offsets into kCgbCompatPalettes. Non-Nintendo carts get combination 0.
+static const uint8_t *CgbCompatCombo(const uint8_t *rom, size_t size)
+{
+	uint8_t pick = 0;
+	const bool nintendo = size >= 0x150 &&
+		(rom[0x14B] == 0x01 ||
+		 (rom[0x14B] == 0x33 && rom[0x144] == '0' && rom[0x145] == '1'));
+	if (nintendo)
+	{
+		uint8_t sum = 0;
+		for (int i = 0x134; i <= 0x143; ++i) sum = static_cast<uint8_t>(sum + rom[i]);
+		for (int i = 0; i < 94; ++i)
+		{
+			if (kCgbCompatChecksums[i] != sum) continue;
+			if (i >= 65 && rom[0x137] != (uint8_t) kCgbCompat4thLetters[i - 65]) continue;
+			pick = kCgbCompatComboIdx[i];
+			break;
+		}
+	}
+	return kCgbCompatCombos[pick];
+}
+
 struct Emulator::Impl
 {
 	Cpu         cpu;
@@ -275,7 +350,6 @@ struct Emulator::Impl
 	uint16_t    boot_rom_staging_size = 0;
 	bool        boot_rom_loaded = false;
 	// Staged boot ROM is our embedded fallback, not one the user supplied.
-	bool        boot_rom_silent = false;
 	// Raw GB frame as the boot left it, for the boot-logo hold below.
 	uint8_t     boot_logo_ref[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 	bool        boot_logo_ref_valid = false;
@@ -705,7 +779,9 @@ void Emulator::Reset()
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
 	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
-	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb;
+	// The boot ROM runs in full CGB mode; its KEY0 write enters compat.
+	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
+		!impl_->boot_rom_loaded;
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -743,8 +819,9 @@ void Emulator::Reset()
 	{
 		cs.r.af = 0x1180;
 		cs.r.bc = 0x0000;
-		cs.r.de = impl_->cgb_compat ? 0x0008 : 0xFF56;
-		cs.r.hl = impl_->cgb_compat ? 0x007C : 0x000D;
+		const bool compat = impl_->cgb_compat || impl_->dmg_compat_cgb;
+		cs.r.de = compat ? 0x0008 : 0xFF56;
+		cs.r.hl = compat ? 0x007C : 0x000D;
 	}
 
 	// BIOS-less boots start at $0100 with DIV already advanced by the boot
@@ -752,9 +829,38 @@ void Emulator::Reset()
 	if (!impl_->boot_rom_loaded)
 	{
 		if (impl_->cgb_mode)
-			impl_->timer.div_counter = impl_->cgb_compat ? 0x2674 : 0x1E74;
+			impl_->timer.div_counter = (impl_->cgb_compat || impl_->dmg_compat_cgb)
+			                         ? 0x2674 : 0x1E74;
 		else
 			impl_->timer.div_counter = 0xABC8;
+	}
+
+	// A mono cart on a Color renders through the boot ROM's compatibility
+	// palettes. With no boot ROM staged, pick and write them here or the
+	// whole panel comes out one color. The game-write flag stays clear.
+	if (impl_->ppu.cgb && impl_->ppu.dmg_compat && !impl_->boot_rom_loaded &&
+	    impl_->cart.rom.size() >= 0x150)
+	{
+		const uint8_t *co = CgbCompatCombo(impl_->cart.rom.data(), impl_->cart.rom.size());
+		// The boot ROM whitens all BG palettes, then writes BG0, OBJ0, OBJ1.
+		for (int i = 0; i < 64; i += 2)
+		{
+			impl_->ppu.bg_pal[i]     = 0xFF;
+			impl_->ppu.bg_pal[i + 1] = 0x7F;
+		}
+		// Palette-select registers as the boot ROM leaves them: BG index wraps
+		// over the 64-byte whitening back to 0 then advances 8; OBJ advances 16.
+		impl_->ppu.bcps = 0x88;
+		impl_->ppu.ocps = 0x90;
+		impl_->mem.key0 = 0x04;
+		uint8_t *dst[3] = { impl_->ppu.obj_pal, impl_->ppu.obj_pal + 8, impl_->ppu.bg_pal };
+		for (int s = 0; s < 3; ++s)
+			for (int k = 0; k < 4; ++k)
+			{
+				const uint16_t c = kCgbCompatPalettes[co[s] / 2 + k];
+				dst[s][k * 2]     = static_cast<uint8_t>(c & 0xFF);
+				dst[s][k * 2 + 1] = static_cast<uint8_t>(c >> 8);
+			}
 	}
 
 	// The boot ROM also leaves the Nintendo logo expanded in VRAM and its
@@ -794,14 +900,6 @@ void Emulator::Reset()
 				vram[0x1924 + i] = static_cast<uint8_t>(i + 13);   // $9924-$992F
 			}
 			vram[0x1910] = 0x19;                                   // (R) tile
-			// No boot ROM ran, so nothing animated that logo into place: keep it
-			// in VRAM but off the panel. Not in BIOS mode — there the border pass
-			// transfers through the framebuffer a hold would blank.
-			if (!Settings.SGB_BIOSModeActive)
-			{
-				impl_->ppu.present_hold   = true;
-				impl_->ppu.boot_logo_hold = true;
-			}
 		}
 	}
 
@@ -830,15 +928,11 @@ void Emulator::Reset()
 		cs.r.sp = 0x0000;
 		cs.r.pc = 0x0000;
 
-		// Hide the logo scroll when it is not the boot animation the user asked
-		// for: an embedded fallback nobody assigned, or any boot ROM under the
-		// SGB BIOS, where the SNES splash is the boot animation and the GB one
-		// only plays behind it. The ICD2 ring then carries blank lines.
-		if (impl_->boot_rom_silent || Settings.SGB_BIOSModeActive)
-		{
-			impl_->ppu.present_hold   = true;
+		// Under the SGB BIOS the SNES splash is the boot animation; the GB logo
+		// scroll only plays behind it. Cover it on the finished SNES frame - the
+		// ICD2 ring it renders into also carries the cart's border payload.
+		if (Settings.SGB_BIOSModeActive)
 			impl_->ppu.boot_logo_hold = true;
-		}
 	}
 
 	impl_->boot_logo_ref_valid = false;
@@ -847,9 +941,8 @@ void Emulator::Reset()
 	impl_->cart.mbc.sachen_locked = impl_->mem.boot_rom_enabled || !impl_->cart.sachen_runs_raw;
 }
 
-bool Emulator::LoadBootROM(const uint8_t *data, size_t size, bool silent)
+bool Emulator::LoadBootROM(const uint8_t *data, size_t size)
 {
-	impl_->boot_rom_silent = false;
 	if (!data || size == 0)
 	{
 		impl_->boot_rom_loaded       = false;
@@ -885,7 +978,6 @@ bool Emulator::LoadBootROM(const uint8_t *data, size_t size, bool silent)
 	}
 
 	impl_->boot_rom_loaded = true;
-	impl_->boot_rom_silent = silent;
 	return true;
 }
 
@@ -1703,7 +1795,8 @@ void Emulator::RunCycles(int32_t tcycles)
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
 	// garbage. Gate the color path off whenever the BIOS is driving.
 	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
-	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb;
+	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
+		(!impl_->mem.boot_rom_enabled || (impl_->mem.key0 & 0x04));
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -2388,6 +2481,30 @@ void Emulator::OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
 	for (int x = 0; x < width; ++x) row[x] = 0;
 }
 
+// BIOS-mode boot-logo hold. The GB picture reaches the screen through the
+// ICD2 ring, which also carries the cart's CHR_TRN/PCT_TRN payloads, so the
+// logo has to be covered here rather than suppressed at the source. Flood the
+// GB window with its own corner pixel: the logo never reaches the corner, so
+// that is the BIOS's background, and sampling it per frame follows the fade.
+void Emulator::OverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels)
+{
+	if (!impl_->has_rom || !dest || !impl_->ppu.boot_logo_hold) return;
+	// Mid-splash the window shows BIOS graphics, not the ring: leave it.
+	if (!IsGBReleased()) return;
+
+	const uint32_t ORIGIN_X = 48, ORIGIN_Y = 39;
+	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
+	if (width > SNES_WIDTH ||
+	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return;
+
+	const uint16_t bg = dest[ORIGIN_Y * pitch_pixels + ORIGIN_X];
+	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
+	{
+		uint16_t *dst = dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X;
+		for (uint32_t x = 0; x < GB_SCREEN_WIDTH; ++x) dst[x] = bg;
+	}
+}
+
 void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	// SGB+GBC hack: the BIOS drew the GB area from the LCD ring, which carries
@@ -2769,7 +2886,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v4: add CGB state - VRAM bank 1, WRAM banks 2-7, BG/OBJ palette RAM,
 //     VBK/SVBK/KEY1/double-speed, HDMA. v1-3 loads skip the v4 block and
 //     the CGB fields keep their reset defaults (correct for DMG/SGB carts).
-constexpr uint32_t SGB_STATE_VERSION = 5;
+// v6: add mem.key0 - CGB boot CPU-mode select; dmg_compat derives from it.
+constexpr uint32_t SGB_STATE_VERSION = 6;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -2966,6 +3084,11 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 	{
 		IoField(c, impl.ppu.wy_triggered);
 	}
+
+	if (c.version >= 6)
+	{
+		IoField(c, impl.mem.key0);
+	}
 }
 
 } // anonymous
@@ -3044,7 +3167,8 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
 	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
-	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb;
+	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
+		(!impl_->mem.boot_rom_enabled || (impl_->mem.key0 & 0x04));
 	impl_->ppu.hold_present_on_enable = !Settings.SGB_BIOSModeActive &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
@@ -3266,6 +3390,11 @@ void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels)
 	SGB::Instance().OverlayBiosBorder(dest, pitch_pixels);
 }
 
+void S9xSGBOverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels)
+{
+	SGB::Instance().OverlayBootLogo(dest, pitch_pixels);
+}
+
 int32_t S9xSGBGetSampleCount(void)
 {
 	// Hand the host whatever the GB APU has produced. S9xMixSamples is
@@ -3435,7 +3564,7 @@ bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size)
 bool S9xSGBLoadEmbeddedBootROM(unsigned char mode)
 {
 	const uint8_t *src = (mode == 2) ? SGB::kSgb2BootRom : SGB::kSgbBootRom;
-	return SGB::Instance().LoadBootROM(src, 256, true);
+	return SGB::Instance().LoadBootROM(src, 256);
 }
 
 void S9xSGBPrimeBIOSHandshake(void)

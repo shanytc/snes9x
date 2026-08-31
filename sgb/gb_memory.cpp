@@ -229,6 +229,7 @@ void MemReset(Memory &m, bool cgb)
 	m.key1_armed   = false;
 	m.double_speed = false;
 	m.ff72 = m.ff73 = m.ff74 = m.ff75 = 0;
+	m.key0 = 0;
 	m.hdma1 = m.hdma2 = m.hdma3 = m.hdma4 = 0;
 	m.hdma5        = 0xFF;
 	m.hdma_src = m.hdma_dst = m.hdma_len = 0;
@@ -548,6 +549,8 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
 		case 0xFF46: return m.dma_last;
+		case 0xFF4C:
+			return (m.ppu && m.ppu->cgb) ? m.key0 : 0xFF;
 		case 0xFF4D:
 			return (m.ppu && m.ppu->cgb)
 				? static_cast<uint8_t>((m.double_speed ? 0x80 : 0x00) |
@@ -649,6 +652,15 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			{
 				m.boot_rom_enabled = false;
 				if (m.cart && m.cart->sachen_runs_raw) m.cart->mbc.sachen_locked = false;
+			}
+			return;
+		case 0xFF4C:
+			// KEY0: only the boot ROM may pick the CPU mode; bit 2 flips the
+			// renderer to DMG-through-palette-0 compat the way hardware does.
+			if (m.ppu && m.ppu->cgb && m.boot_rom_enabled)
+			{
+				m.key0 = value;
+				m.ppu->dmg_compat = (value & 0x04) != 0;
 			}
 			return;
 		case 0xFF4D:

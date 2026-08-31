@@ -1820,7 +1820,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 					p.stat_irq_delay = static_cast<uint8_t>(vp);
 				}
 				p.frame_ready   = true;
-				p.present_hold  = p.boot_logo_hold;
+				p.present_hold  = false;
 				p.tm.window_line = -1;
 				p.om.window_line = -1;
 				p.window_active = false;
@@ -2149,7 +2149,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.tm.window_line = -1;
 				p.om.window_line = -1;
 				p.lcdon_first = true;
-				p.present_hold = p.hold_present_on_enable || p.boot_logo_hold;
+				p.present_hold = p.hold_present_on_enable;
 			}
 			if (is_on) RecomputeStatLine(p, mem);
 			WyRecheck(p);

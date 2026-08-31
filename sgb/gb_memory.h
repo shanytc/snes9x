@@ -72,6 +72,8 @@ struct Memory
 
 	// CGB undocumented registers ($FF72/$FF73/$FF74 R/W, $FF75 bits 6-4).
 	uint8_t  ff72 = 0, ff73 = 0, ff74 = 0, ff75 = 0;
+	// KEY0 $FF4C: boot ROM CPU-mode select; bit 2 = DMG-compat. Locked at $FF50.
+	uint8_t  key0 = 0;
 
 	// True when the machine is CGB hardware, including its DMG-compat
 	// mode (ppu->cgb is false there). STOP display + speed-switch gates.

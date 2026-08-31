@@ -162,7 +162,7 @@ public:
 	// 256 (DMG/SGB), 2304 or 2048 (CGB). nullptr/0 clears, else rejected.
 	// `silent` runs it with its video held off the panel — for the embedded
 	// fallback, which the user never asked for. See Emulator::Reset.
-	bool LoadBootROM(const uint8_t *data, size_t size, bool silent = false);
+	bool LoadBootROM(const uint8_t *data, size_t size);
 
 	// Populate the 5-packet boot-ROM handshake from the current cart's
 	// header and queue the first packet as if the GB boot ROM had sent
@@ -246,6 +246,7 @@ public:
 	// SGB+GBC hack: paint the GB core's CGB output over the GB area of the
 	// SNES frame, so the game keeps its SGB border but gains real color.
 	void  OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
+	void  OverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
 
 	// Write a one-line status snapshot — PC, SP, A, halt/stop flag,
 	// total T-cycles, illegal-op count.
@@ -476,6 +477,9 @@ constexpr uint32_t SGB_GB_SCREEN_H = 144;
 // the overlay isn't clobbered by the PPU blit and the snes9x OSD
 // still draws on top.
 void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
+
+// BIOS-mode half of the boot-logo hold — see Emulator::OverlayBootLogo.
+void S9xSGBOverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
 
 // SGB+GBC hack — see Emulator::OverlayCgbScreen. No-op unless it is active.
 void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);

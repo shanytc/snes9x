@@ -160,7 +160,9 @@ public:
 
 	// Install the GB-side boot ROM; takes effect on the next Reset. Sizes:
 	// 256 (DMG/SGB), 2304 or 2048 (CGB). nullptr/0 clears, else rejected.
-	bool LoadBootROM(const uint8_t *data, size_t size);
+	// `silent` runs it with its video held off the panel — for the embedded
+	// fallback, which the user never asked for. See Emulator::Reset.
+	bool LoadBootROM(const uint8_t *data, size_t size, bool silent = false);
 
 	// Populate the 5-packet boot-ROM handshake from the current cart's
 	// header and queue the first packet as if the GB boot ROM had sent

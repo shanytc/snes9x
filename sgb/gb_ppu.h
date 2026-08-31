@@ -249,6 +249,10 @@ struct Ppu
 	bool     hold_present_on_enable = true;
 	bool     present_hold = false;
 
+	// Holds a Nintendo logo the user never asked for off the panel until the
+	// cart's first LCDC or VRAM write. Set in Emulator::Reset.
+	bool     boot_logo_hold = false;
+
 	// STOP-mode display override: 0 = normal, 1 = white panel (DMG stop),
 	// 2 = black (CGB stop outside mode 3), 3 = hold current frame (CGB
 	// stop during mode 3). Set by the STOP opcode, cleared on wake.

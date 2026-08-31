@@ -274,6 +274,8 @@ struct Emulator::Impl
 	uint8_t     boot_rom_staging[0x900];
 	uint16_t    boot_rom_staging_size = 0;
 	bool        boot_rom_loaded = false;
+	// Staged boot ROM is our embedded fallback, not one the user supplied.
+	bool        boot_rom_silent = false;
 
 	// ICD2 state — the SGB cart-chip register set exposed at 0x6000-0x7FFF
 	// on the SNES side when running under a real BIOS. Layout mirrors the
@@ -788,6 +790,14 @@ void Emulator::Reset()
 				vram[0x1924 + i] = static_cast<uint8_t>(i + 13);   // $9924-$992F
 			}
 			vram[0x1910] = 0x19;                                   // (R) tile
+			// No boot ROM ran, so nothing animated that logo into place: keep it
+			// in VRAM but off the panel. Not in BIOS mode — there the border pass
+			// transfers through the framebuffer a hold would blank.
+			if (!Settings.SGB_BIOSModeActive)
+			{
+				impl_->ppu.present_hold   = true;
+				impl_->ppu.boot_logo_hold = true;
+			}
 		}
 	}
 
@@ -815,13 +825,24 @@ void Emulator::Reset()
 		cs.r.hl = 0x0000;
 		cs.r.sp = 0x0000;
 		cs.r.pc = 0x0000;
+
+		// Embedded fallback: no boot ROM was assigned, so it runs only for the
+		// handshake and the handoff — hide its logo scroll. In BIOS mode the
+		// ICD2 ring then carries blank lines and the splash plays over an
+		// empty GB window.
+		if (impl_->boot_rom_silent)
+		{
+			impl_->ppu.present_hold   = true;
+			impl_->ppu.boot_logo_hold = true;
+		}
 	}
 
 	impl_->cart.mbc.sachen_locked = impl_->mem.boot_rom_enabled || !impl_->cart.sachen_runs_raw;
 }
 
-bool Emulator::LoadBootROM(const uint8_t *data, size_t size)
+bool Emulator::LoadBootROM(const uint8_t *data, size_t size, bool silent)
 {
+	impl_->boot_rom_silent = false;
 	if (!data || size == 0)
 	{
 		impl_->boot_rom_loaded       = false;
@@ -857,6 +878,7 @@ bool Emulator::LoadBootROM(const uint8_t *data, size_t size)
 	}
 
 	impl_->boot_rom_loaded = true;
+	impl_->boot_rom_silent = silent;
 	return true;
 }
 
@@ -3376,7 +3398,7 @@ bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size)
 bool S9xSGBLoadEmbeddedBootROM(unsigned char mode)
 {
 	const uint8_t *src = (mode == 2) ? SGB::kSgb2BootRom : SGB::kSgbBootRom;
-	return SGB::Instance().LoadBootROM(src, 256);
+	return SGB::Instance().LoadBootROM(src, 256, true);
 }
 
 void S9xSGBPrimeBIOSHandshake(void)

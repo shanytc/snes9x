@@ -1407,6 +1407,7 @@ void PpuReset(Ppu &p)
 	p.vblank_irq_at = 0;
 	p.stat_irq_delay = 0;
 	p.present_hold  = false;
+	p.boot_logo_hold = false;
 	p.frame_ready   = false;
 	p.t_cycles      = 0;
 	p.draw_x        = 0;
@@ -1819,7 +1820,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 					p.stat_irq_delay = static_cast<uint8_t>(vp);
 				}
 				p.frame_ready   = true;
-				p.present_hold  = false;
+				p.present_hold  = p.boot_logo_hold;
 				p.tm.window_line = -1;
 				p.om.window_line = -1;
 				p.window_active = false;
@@ -2136,6 +2137,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				for (PixelMachine *pm : { &p.tm, &p.om })
 					if (pm->win_fresh) pm->win_insert_disable = true;
 			p.lcdc = value;
+			if (!mem.boot_rom_enabled) p.boot_logo_hold = false;
 			const bool is_on  = (p.lcdc & 0x80) != 0;
 			if (was_on && !is_on && p.cgb && p.mode != PpuMode::HBlank)
 				MemHdmaLcdOff(mem);
@@ -2148,7 +2150,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.tm.window_line = -1;
 				p.om.window_line = -1;
 				p.lcdon_first = true;
-				p.present_hold = p.hold_present_on_enable;
+				p.present_hold = p.hold_present_on_enable || p.boot_logo_hold;
 			}
 			if (is_on) RecomputeStatLine(p, mem);
 			WyRecheck(p);

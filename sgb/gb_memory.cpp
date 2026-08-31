@@ -460,6 +460,9 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 			if (VramBlocked(m, true)) return;
 			m.ppu->vram[(addr - 0x8000) + VramBankBase(m)] = value;
 			m.ppu->vram_writes++;
+			// Cart is drawing — release the boot-logo hold. Writes made while
+			// the boot ROM is still mapped are its own, not the cart's.
+			if (!m.boot_rom_enabled) m.ppu->boot_logo_hold = false;
 		}
 		return;
 	}

@@ -1316,7 +1316,15 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		st->audit_dir = FindDirNearExe("audit");
 		if (st->audit_dir.empty()) st->audit_dir = "audit";
-		st->roms_dir = FindDirNearExe("Roms");
+		// The app's configured ROM folder first (the one Open ROM uses);
+		// the near-exe Roms/ search is the fallback.
+		if (GUI.RomDir[0])
+		{
+			const DWORD a = GetFileAttributes(GUI.RomDir);
+			if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
+				st->roms_dir = (const char *)WideToUtf8(GUI.RomDir);
+		}
+		if (st->roms_dir.empty()) st->roms_dir = FindDirNearExe("Roms");
 		if (st->roms_dir.empty()) st->roms_dir = "Roms";
 
 		st->linkmeta = LoadLinkMeta(st->audit_dir.c_str());

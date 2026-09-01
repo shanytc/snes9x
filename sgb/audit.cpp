@@ -463,25 +463,27 @@ std::string RomBootClass(const Rom &r)
 	return RomSgbEnhanced(r) ? "GB+SGB" : "GB";
 }
 
-// The same rules the app's boot-policy menu applies: everything runs on GB,
-// GBC and SGB except a CGB-only cart (locked out of mono consoles); the
-// border columns need a cart that declares SGB support.
+// Which columns a cart gets. Any cart plays on SGB1/SGB2 - the model
+// menu only gates the +GBC hacks (color carts) and the SGB BIOS files -
+// so those columns always apply; the plain GB columns skip CGB-only
+// carts, and the border columns need the cart to speak SGB at all.
 bool ComboApplies(Combo c, const Rom &r)
 {
 	switch (c)
 	{
 		case Combo::GB:
 		case Combo::GB_Bios:
+			return !RomCgbOnly(r);
 		case Combo::SGB1:
 		case Combo::SGB2:
-			return !RomCgbOnly(r);
+			return true;
 		case Combo::GBC:
 		case Combo::GBC_Bios:
 			return true;
 		case Combo::SGB1_CB:
 		case Combo::SGB2_CB:
 			// Only carts that declare SGB support upload custom borders.
-			return RomSgbEnhanced(r) && !RomCgbOnly(r);
+			return RomSgbEnhanced(r);
 		default:
 			return false;
 	}

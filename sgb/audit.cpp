@@ -7,6 +7,7 @@
 #include "audit.h"
 #include "acid_report.h"   // EncodePng
 #include "sgb.h"
+#include "../snes9x.h"     // DECOMPOSE_PIXEL - BlitScreen emits host pixels
 
 #include <algorithm>
 #include <chrono>
@@ -256,8 +257,9 @@ void CapturePanelRgb(SGB::Emulator &emu, Capture &cap, int frame)
 	cap.png = AcidTests::EncodePng(rgb.data(), cap.w, cap.h);
 }
 
-// SGB modes render into palettes, so BlitScreen's BGR555 composite is the
-// picture the user sees - border and panel both.
+// SGB modes render into palettes; BlitScreen's composite is the picture the
+// user sees - border and panel both - in HOST pixel format (BUILD_PIXEL),
+// so it must be split with DECOMPOSE_PIXEL, not read as raw BGR555.
 void CaptureSgbRgb(SGB::Emulator &emu, Capture &cap, int frame)
 {
 	cap.frame = frame;
@@ -270,7 +272,8 @@ void CaptureSgbRgb(SGB::Emulator &emu, Capture &cap, int frame)
 	for (int i = 0; i < kSgbW * kSgbH; ++i)
 	{
 		const uint16_t c = bgr[i];
-		const int r5 = c & 0x1F, g5 = (c >> 5) & 0x1F, b5 = (c >> 10) & 0x1F;
+		uint32_t r5, g5, b5;
+		DECOMPOSE_PIXEL(c, r5, g5, b5);
 		rgb[i * 3 + 0] = (uint8_t)((r5 << 3) | (r5 >> 2));
 		rgb[i * 3 + 1] = (uint8_t)((g5 << 3) | (g5 >> 2));
 		rgb[i * 3 + 2] = (uint8_t)((b5 << 3) | (b5 >> 2));
@@ -411,25 +414,25 @@ bool GrayShowsBootLogo(const std::vector<uint8_t> &gray,
 
 const char *ComboId(Combo c)
 {
-	static const char *ids[] = { "gb", "gb+bios", "gbc", "gbc+bios",
-	                             "sgb1", "sgb2", "sgb1+gbc", "sgb2+gbc" };
+	static const char *ids[] = { "gb+bios", "gb", "gbc+bios", "gbc",
+	                             "sgb1", "sgb2", "sgb1+cb", "sgb2+cb" };
 	return ids[(int)c];
 }
 
 const char *ComboName(Combo c)
 {
-	static const char *names[] = { "GB", "GB BIOS", "GBC", "GBC BIOS",
-	                               "SGB1", "SGB2", "SGB1+GBC", "SGB2+GBC" };
+	static const char *names[] = { "GB BIOS", "GB", "GBC BIOS", "GBC",
+	                               "SGB1", "SGB2",
+	                               "SGB1 Border", "SGB2 Border" };
 	return names[(int)c];
 }
 
-bool ComboUsesSgb(Combo c)  { return c >= Combo::SGB1; }
+bool ComboIsRing(Combo c)   { return c >= Combo::SGB1; }
 bool ComboNeedsBoot(Combo c) { return c == Combo::GB_Bios || c == Combo::GBC_Bios; }
 
-const char *ShotId(Shot s)
+const char *ComboShotId(Combo c)
 {
-	static const char *ids[] = { "title", "mid", "border" };
-	return ids[(int)s];
+	return ComboIsRing(c) ? "border" : "title";
 }
 
 const char *MatchName(Match m)
@@ -460,8 +463,8 @@ std::string RomBootClass(const Rom &r)
 }
 
 // The same rules the app's boot-policy menu applies: everything runs on GB,
-// GBC and SGB except a CGB-only cart (locked out of mono consoles) and the
-// color hacks, which need a color cart to have any color to show.
+// GBC and SGB except a CGB-only cart (locked out of mono consoles); the
+// border columns need a cart that declares SGB support.
 bool ComboApplies(Combo c, const Rom &r)
 {
 	switch (c)
@@ -474,9 +477,10 @@ bool ComboApplies(Combo c, const Rom &r)
 		case Combo::GBC:
 		case Combo::GBC_Bios:
 			return true;
-		case Combo::SGB1_GBC:
-		case Combo::SGB2_GBC:
-			return RomCgbCapable(r);
+		case Combo::SGB1_CB:
+		case Combo::SGB2_CB:
+			// Only carts that declare SGB support upload custom borders.
+			return RomSgbEnhanced(r) && !RomCgbOnly(r);
 		default:
 			return false;
 	}
@@ -493,40 +497,6 @@ bool Capture::Decode(std::vector<uint8_t> &rgb) const
 	if (ok) rgb.assign(px, px + (size_t)dw * dh * 3);
 	stbi_image_free(px);
 	return ok;
-}
-
-Match ComboResult::Cell() const
-{
-	Match worst = Match::None;
-	auto rank = [](Match m) {
-		switch (m)
-		{
-			case Match::Error:   return 6;
-			case Match::Differs: return 5;
-			case Match::Slip:    return 4;
-			case Match::NoBase:  return 3;
-			case Match::Same:    return 2;
-			case Match::Skip:    return 1;
-			default:             return 0;
-		}
-	};
-	for (const ShotVerdict &v : verdict)
-		if (rank(v.m) > rank(worst)) worst = v.m;
-	return worst;
-}
-
-int ComboResult::CellDiff() const
-{
-	int n = 0;
-	for (const ShotVerdict &v : verdict) n += v.diff_px;
-	return n;
-}
-
-int ComboResult::CellSlip() const
-{
-	for (const ShotVerdict &v : verdict)
-		if (v.m == Match::Slip) return v.slip;
-	return 0;
 }
 
 bool RomResult::AllPassed(const Rom &r) const
@@ -666,14 +636,14 @@ std::string LinkLabelFor(const std::map<std::string, std::string> &meta,
   Baseline IO
 --------------------------------------------------------------------------*/
 
-static std::string EntryKey(const std::string &rom_key, Combo c, Shot s)
+static std::string EntryKey(const std::string &rom_key, Combo c)
 {
-	return rom_key + "|" + ComboId(c) + "|" + ShotId(s);
+	return rom_key + "|" + ComboId(c) + "|" + ComboShotId(c);
 }
 
-const BaselineEntry *Baseline::Find(const Rom &r, Combo c, Shot s) const
+const BaselineEntry *Baseline::Find(const Rom &r, Combo c) const
 {
-	const auto it = entries.find(EntryKey(r.key, c, s));
+	const auto it = entries.find(EntryKey(r.key, c));
 	return it == entries.end() ? nullptr : &it->second;
 }
 
@@ -828,43 +798,38 @@ int WriteBaseline(const char *dir, const std::vector<Rom> &roms,
 		for (int c = 0; c < kComboCount; ++c)
 		{
 			const ComboResult &cr = results[i].combos[c];
-			if (!cr.ran) continue;
-			for (int s = 0; s < kShotCount; ++s)
+			if (!cr.ran || cr.shot.Empty()) continue;
+			const Capture &cap = cr.shot;
+			const std::string shard = ShardDir(roms[i]);
+			if (!shard_made.count(shard))
 			{
-				const Capture &cap = cr.shots[s];
-				if (cap.Empty()) continue;
-				const std::string shard = ShardDir(roms[i]);
-				if (!shard_made.count(shard))
-				{
 #ifdef _WIN32
-					_mkdir(Join(root, shard).c_str());
+				_mkdir(Join(root, shard).c_str());
 #else
-					mkdir(Join(root, shard).c_str(), 0755);
+				mkdir(Join(root, shard).c_str(), 0755);
 #endif
-					shard_made[shard] = 1;
-				}
-				const std::string file = shard + "/" + Sanitize(roms[i].key) +
-					"." + ComboId((Combo)c) + "." + ShotId((Shot)s) + ".png";
-				// Captures are held as PNG already - straight to disk.
-				const std::vector<uint8_t> &png = cap.png;
-				FILE *f = fopen(Join(root, file).c_str(), "wb");
-				if (!f) { err = "cannot write " + file; return -1; }
-				const bool ok = fwrite(png.data(), 1, png.size(), f) == png.size();
-				fclose(f);
-				if (!ok) { err = "short write on " + file; return -1; }
-				// A pre-shard save of this shot kept it in the folder root;
-				// drop that copy so the folder migrates as it is re-saved.
-				const auto old = existing.entries.find(
-					roms[i].key + "|" + ComboId((Combo)c) + "|" + ShotId((Shot)s));
-				if (old != existing.entries.end() && old->second.image != file)
-					remove(Join(root, old->second.image).c_str());
-				char line[1024];
-				snprintf(line, sizeof line, "%s|%s|%s|%d|%s\n",
-				         roms[i].key.c_str(), ComboId((Combo)c),
-				         ShotId((Shot)s), cap.frame, file.c_str());
-				index += line;
-				++written;
+				shard_made[shard] = 1;
 			}
+			const std::string file = shard + "/" + Sanitize(roms[i].key) +
+				"." + ComboId((Combo)c) + "." + ComboShotId((Combo)c) + ".png";
+			// Captures are held as PNG already - straight to disk.
+			const std::vector<uint8_t> &png = cap.png;
+			FILE *f = fopen(Join(root, file).c_str(), "wb");
+			if (!f) { err = "cannot write " + file; return -1; }
+			const bool ok = fwrite(png.data(), 1, png.size(), f) == png.size();
+			fclose(f);
+			if (!ok) { err = "short write on " + file; return -1; }
+			// A pre-shard save of this shot kept it in the folder root;
+			// drop that copy so the folder migrates as it is re-saved.
+			const auto old = existing.entries.find(EntryKey(roms[i].key, (Combo)c));
+			if (old != existing.entries.end() && old->second.image != file)
+				remove(Join(root, old->second.image).c_str());
+			char line[1024];
+			snprintf(line, sizeof line, "%s|%s|%s|%d|%s\n",
+			         roms[i].key.c_str(), ComboId((Combo)c),
+			         ComboShotId((Combo)c), cap.frame, file.c_str());
+			index += line;
+			++written;
 		}
 	}
 
@@ -932,12 +897,16 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 			emu.SetRunMode(c == Combo::SGB1 ? SGB::RunMode::SGB
 			                                : SGB::RunMode::SGB2);
 			break;
-		case Combo::SGB1_GBC:
-		case Combo::SGB2_GBC:
-			emu.SetSgbCgbHack(true);
-			emu.SetCgbOverride(1);
-			emu.SetRunMode(c == Combo::SGB1_GBC ? SGB::RunMode::SGB
-			                                    : SGB::RunMode::SGB2);
+		case Combo::SGB1_CB:
+		case Combo::SGB2_CB:
+			// Authentic SGB: force model 3 keeps command processing and the
+			// idle 2-player ID rotation live, so carts detect the SGB and
+			// upload their custom borders.
+			emu.SetSgbCgbHack(false);
+			emu.SetCgbOverride(-1);
+			emu.SetForceModel(3);
+			emu.SetRunMode(c == Combo::SGB1_CB ? SGB::RunMode::SGB
+			                                   : SGB::RunMode::SGB2);
 			break;
 		default:
 			err = "bad combo";
@@ -947,8 +916,20 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 	const std::vector<uint8_t> *boot = nullptr;
 	if (c == Combo::GB_Bios)  boot = dmg_boot;
 	if (c == Combo::GBC_Bios) boot = cgb_boot;
-	if (!emu.LoadBootROM(boot && !boot->empty() ? boot->data() : nullptr,
-	                     boot ? boot->size() : 0))
+	bool boot_ok;
+	if (c == Combo::SGB1_CB || c == Combo::SGB2_CB)
+	{
+		// Authentic SGB boots through the embedded SGB boot ROM so the
+		// cart sees the real handoff signature and engages its SGB path.
+		boot_ok = emu.LoadBootROM(
+			SGB::SgbEmbeddedBootRom(c == Combo::SGB2_CB ? 2 : 1), 256);
+	}
+	else
+	{
+		boot_ok = emu.LoadBootROM(boot && !boot->empty() ? boot->data() : nullptr,
+		                          boot ? boot->size() : 0);
+	}
+	if (!boot_ok)
 	{
 		err = "boot ROM rejected";
 		return false;
@@ -969,21 +950,118 @@ constexpr int kFirstActiveCap = 900;
 constexpr int kTitleSettle    = 90;    // earliest title shot after activity
 constexpr int kTitleStable    = 3;     // frames the picture must hold still
 constexpr int kTitleWaitCap   = 240;   // perpetual animation: shoot here anyway
-constexpr int kMidDelay       = 1500;
 
-struct Pins
+// The custom-border columns: authentic SGB through the embedded SGB boot
+// ROM, waiting for the cart's own border upload.
+// The shot is taken on EVENTS, not a fixed frame: nothing captures until a
+// PCT_TRN has actually landed (carts blank the border first, chat palettes
+// for a while, or upload late), then the border plane must hold still for
+// kBorderHold frames - a staged build or a second border restarts the
+// clock. Command silence is only a tiebreaker for a clean panel; a cart
+// that chatters forever is shot once the plane alone has held kBorderChatty.
+// A settled ring that is one flat color is a BLANKING upload (Arcade
+// Classics), not the border - keep waiting. A cart that never shows one
+// documents whatever the ring holds at the cap.
+constexpr int kBorderWaitCap = 3600;
+constexpr int kBorderHold    = 120;
+constexpr int kBorderChatty  = 600;
+
+// True when every border-ring pixel of BlitScreen is (near) one color.
+bool BorderRingUniform(SGB::Emulator &emu)
 {
-	int title = -1, mid = -1, border = -1;
-	int Last(bool sgb) const
-	{
-		int last = title > mid ? title : mid;
-		if (sgb && border > last) last = border;
-		return last;
-	}
-};
+	static thread_local std::vector<uint16_t> px;
+	px.assign(kSgbW * kSgbH, 0);
+	emu.BlitScreen(px.data(), kSgbW);
+	uint32_t r0 = 0, g0 = 0, b0 = 0;
+	DECOMPOSE_PIXEL(px[0], r0, g0, b0);
+	for (int y = 0; y < kSgbH; ++y)
+		for (int x = 0; x < kSgbW; ++x)
+		{
+			if (x >= 48 && x < 208 && y >= 40 && y < 184) continue;
+			uint32_t r, g, b;
+			DECOMPOSE_PIXEL(px[y * kSgbW + x], r, g, b);
+			if ((r > r0 ? r - r0 : r0 - r) > 1 ||
+			    (g > g0 ? g - g0 : g0 - g) > 1 ||
+			    (b > b0 ? b - b0 : b0 - b) > 1)
+				return false;
+		}
+	return true;
+}
 
-// One combo of one ROM, on one private core. Fills captures and, with a
-// baseline, the verdicts.
+void RunBorderCombo(SGB::Emulator &emu, const Rom &r, Combo c,
+                    ComboResult &out, const std::vector<uint8_t> &rom,
+                    const Baseline *base,
+                    const std::atomic<bool> &cancel,
+                    const std::atomic<bool> *pause,
+                    const std::function<void(int, int)> &tick)
+{
+	out = ComboResult();
+
+	std::string err;
+	if (!ConfigureAndLoad(emu, c, rom, nullptr, nullptr, err))
+	{
+		out.error = err;
+		out.verdict.m = Match::Error;
+		return;
+	}
+	out.ran = true;
+
+	const BaselineEntry *be = base ? base->Find(r, c) : nullptr;
+	const int pin = be ? be->frame : -1;
+
+	int frame = 0, last_cmd = 0, last_plane = 0;
+	uint32_t seen_cmd = 0, seen_plane = 0;
+	for (;;)
+	{
+		emu.RunFrame();
+		++frame;
+		if (pin >= 0)
+		{
+			if (frame >= pin) break;
+		}
+		else
+		{
+			const uint32_t nc = emu.BorderTransferCount();
+			const uint32_t np = emu.BorderPlaneVersion();
+			if (nc != seen_cmd)   { seen_cmd = nc;   last_cmd = frame; }
+			if (np != seen_plane) { seen_plane = np; last_plane = frame; }
+			// The (frame & 15) throttle keeps the blit off the hot loop
+			// while a blanked ring waits out its real border.
+			if (emu.BorderPctCount() > 0 &&
+			    frame >= last_plane + kBorderHold &&
+			    (frame >= last_cmd + kBorderHold ||
+			     frame >= last_plane + kBorderChatty) &&
+			    (frame & 15) == 0 &&
+			    !BorderRingUniform(emu))
+				break;
+			if (frame >= kBorderWaitCap) break;
+		}
+		if ((frame & 63) == 63)
+		{
+			if (cancel.load(std::memory_order_relaxed)) return;
+			tick(frame, pin >= 0 ? pin : kBorderWaitCap);
+			while (pause && pause->load(std::memory_order_relaxed) &&
+			       !cancel.load(std::memory_order_relaxed))
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+	}
+	CaptureSgbRgb(emu, out.shot, frame);
+
+	ShotVerdict &v = out.verdict;
+	if (!base) return;
+	if (!be) { v.m = Match::NoBase; return; }
+	std::vector<uint8_t> ref;
+	int rw = 0, rh = 0;
+	if (!LoadBaselineShot(*base, *be, ref, rw, rh)) { v.m = Match::Error; return; }
+	std::vector<uint8_t> ours;
+	if (!out.shot.Decode(ours) || rw != out.shot.w || rh != out.shot.h)
+	{ v.m = Match::Error; return; }
+	v.diff_px = DiffRgb(ours, ref);
+	v.m = (v.diff_px == 0) ? Match::Same : Match::Differs;
+}
+
+// One column of one ROM, on one private core: run to the column's event -
+// the settled boot logo or the settled title - take THE shot, compare.
 void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
               const std::vector<uint8_t> &rom,
               const std::vector<uint8_t> *dmg_boot,
@@ -993,11 +1071,10 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
               const std::function<void(int, int)> &tick)
 {
 	out = ComboResult();
-	for (int s = 0; s < kShotCount; ++s) out.verdict[s].m = Match::None;
 
 	if (!ComboApplies(c, r))
 	{
-		for (int s = 0; s < kShotCount; ++s) out.verdict[s].m = Match::Skip;
+		out.verdict.m = Match::Skip;
 		return;
 	}
 	if (ComboNeedsBoot(c))
@@ -1006,36 +1083,34 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 			c == Combo::GB_Bios ? dmg_boot : cgb_boot;
 		if (!boot || boot->empty())
 		{
-			for (int s = 0; s < kShotCount; ++s) out.verdict[s].m = Match::Skip;
+			out.verdict.m = Match::Skip;
 			out.error = "no boot ROM in audit/";
 			return;
 		}
+	}
+
+	if (c == Combo::SGB1_CB || c == Combo::SGB2_CB)
+	{
+		RunBorderCombo(emu, r, c, out, rom, base, cancel, pause, tick);
+		return;
 	}
 
 	std::string err;
 	if (!ConfigureAndLoad(emu, c, rom, dmg_boot, cgb_boot, err))
 	{
 		out.error = err;
-		for (int s = 0; s < kShotCount; ++s) out.verdict[s].m = Match::Error;
+		out.verdict.m = Match::Error;
 		return;
 	}
 	out.ran = true;
 
-	const bool sgb = ComboUsesSgb(c);
+	const bool ring = ComboIsRing(c);   // SGB1/SGB2: 256x224 bezel composite
 
-	// Pinned frames: the baseline's when it has this combo, else auto-pick.
-	Pins pins;
-	const BaselineEntry *be[kShotCount] = { nullptr, nullptr, nullptr };
-	if (base)
-	{
-		be[0] = base->Find(r, c, Shot::Title);
-		be[1] = base->Find(r, c, Shot::Mid);
-		be[2] = sgb ? base->Find(r, c, Shot::Border) : nullptr;
-		if (be[0]) pins.title  = be[0]->frame;
-		if (be[1]) pins.mid    = be[1]->frame;
-		if (be[2]) pins.border = be[2]->frame;
-	}
-	const bool pinned = pins.title >= 0 || pins.mid >= 0 || pins.border >= 0;
+	// The baseline pins the frame when it has this column, else the shot
+	// lands at the settle event and that frame becomes the pin.
+	const BaselineEntry *be = base ? base->Find(r, c) : nullptr;
+	int pin = be ? be->frame : -1;
+	const bool pinned = pin >= 0;
 
 	// Slip history: panel grayscale of the recent frames.
 	std::vector<std::vector<uint8_t>> history;
@@ -1047,7 +1122,7 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 	// in VRAM (games expect that), so a match running from frame 1 until
 	// the game clears the screen is legitimate residue, not a boot.
 	const std::vector<uint8_t> logo_mask =
-		sgb ? DecodeHeaderLogo(rom) : std::vector<uint8_t>();
+		ring ? DecodeHeaderLogo(rom) : std::vector<uint8_t>();
 	int  logo_frame   = -1;
 	bool logo_residue = true;
 
@@ -1055,14 +1130,8 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 	int stable = 0;
 	int first_active = -1;
 	int frame = 0;
-	int last_needed = pinned ? pins.Last(sgb) + (slip_window > 0 ? slip_window : 0)
-	                         : kFirstActiveCap + kMidDelay;
-
-	auto capture_at = [&](Shot s) {
-		Capture &cap = out.shots[(int)s];
-		if (s == Shot::Border) CaptureSgbRgb(emu, cap, frame);
-		else                   CapturePanelRgb(emu, cap, frame);
-	};
+	int last_needed = pinned ? pin + (slip_window > 0 ? slip_window : 0)
+	                         : kFirstActiveCap + kTitleSettle + kTitleWaitCap;
 
 	while (frame < last_needed)
 	{
@@ -1079,45 +1148,39 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 			if (!logo_now) logo_residue = false;
 		}
 
-		if (!pinned)
+		if (!pinned && pin < 0)
 		{
-			// Only tracked while the title shot is still being hunted.
-			if (pins.title < 0)
+			stable = (!prev_gray.empty() && gray == prev_gray)
+			         ? stable + 1 : 0;
+			prev_gray = gray;
+			if (first_active >= 0)
 			{
-				stable = (!prev_gray.empty() && gray == prev_gray)
-				         ? stable + 1 : 0;
-				prev_gray = gray;
-			}
-			// Title: the first frame past the settle delay where the picture
-			// has held still, so a logo wipe caught mid-flight never becomes
-			// the shot. A title that never stops moving is shot at the cap.
-			if (first_active >= 0 && pins.title < 0)
-			{
+				// The first frame past the settle delay where the picture
+				// has held still - a logo wipe caught mid-flight never
+				// becomes the shot; perpetual motion is shot at the cap.
 				const int earliest = first_active + kTitleSettle;
 				if (frame >= earliest &&
 				    (stable >= kTitleStable || frame >= earliest + kTitleWaitCap))
 				{
-					pins.title  = frame;
-					pins.mid    = frame + kMidDelay;
-					pins.border = sgb ? pins.mid : -1;
-					last_needed = pins.Last(sgb);
+					pin = frame;
+					last_needed = frame;
 				}
 			}
-			else if (first_active < 0 && frame >= kFirstActiveCap && pins.title < 0)
+			else if (frame >= kFirstActiveCap)
 			{
-				// Never drew a thing: pin the caps so the captures exist and
-				// are deterministic, and say so.
-				pins.title  = kFirstActiveCap;
-				pins.mid    = kFirstActiveCap + kMidDelay;
-				pins.border = sgb ? pins.mid : -1;
-				last_needed = pins.Last(sgb);
-				out.error   = "no picture by frame " + std::to_string(frame);
+				// Never drew a thing: shoot here so the capture exists and
+				// is deterministic, and say so.
+				pin = frame;
+				last_needed = frame;
+				out.error = "no picture by frame " + std::to_string(frame);
 			}
 		}
 
-		if (frame == pins.title)  capture_at(Shot::Title);
-		if (frame == pins.mid)    capture_at(Shot::Mid);
-		if (sgb && frame == pins.border) capture_at(Shot::Border);
+		if (frame == pin)
+		{
+			if (ring) CaptureSgbRgb(emu, out.shot, frame);
+			else      CapturePanelRgb(emu, out.shot, frame);
+		}
 
 		// Only kept when a slipped picture may need to be found later.
 		if (pinned && slip_window > 0)
@@ -1141,65 +1204,53 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 		}
 	}
 
-	// The Nintendo boot logo in an SGB mode fails the combo outright: the
+	// The Nintendo boot logo in an SGB mode fails the column outright: the
 	// game must start straight after the splash, never through the scroll.
 	if (logo_frame >= 0)
 	{
 		out.error = "Nintendo boot logo on panel at frame " +
 		            std::to_string(logo_frame);
-		for (int s = 0; s < kShotCount; ++s) out.verdict[s].m = Match::Error;
+		out.verdict.m = Match::Error;
 		return;
 	}
 
-	// Verdicts against the baseline.
+	// Verdict against the baseline.
+	ShotVerdict &v = out.verdict;
 	if (!base) return;
-	for (int s = 0; s < kShotCount; ++s)
+	if (!be) { v.m = Match::NoBase; return; }
+
+	std::vector<uint8_t> ref;
+	int rw = 0, rh = 0;
+	if (!LoadBaselineShot(*base, *be, ref, rw, rh)) { v.m = Match::Error; return; }
+	std::vector<uint8_t> ours;
+	if (!out.shot.Decode(ours) || rw != out.shot.w || rh != out.shot.h)
+	{ v.m = Match::Error; return; }
+	v.diff_px = DiffRgb(ours, ref);
+	if (v.diff_px == 0) { v.m = Match::Same; return; }
+
+	// The picture may simply be late or early: look for it in the panel
+	// history around the pinned frame. Ring shots do not slip per frame.
+	v.m = Match::Differs;
+	if (ring || slip_window <= 0) return;
+	std::vector<uint8_t> ref_gray;
+	RgbToGray(ref, ref_gray);
+	int best = -1, best_dist = 0;
+	for (size_t k = 0; k < history.size(); ++k)
 	{
-		ShotVerdict &v = out.verdict[s];
-		if (s == (int)Shot::Border && !sgb) { v.m = Match::Skip; continue; }
-		if (!be[s]) { v.m = Match::NoBase; continue; }
-
-		std::vector<uint8_t> ref;
-		int rw = 0, rh = 0;
-		if (!LoadBaselineShot(*base, *be[s], ref, rw, rh))
+		if (history_frame[k] == out.shot.frame) continue;
+		if (DiffGray(history[k], ref_gray) != 0) continue;
+		const int dist = history_frame[k] - out.shot.frame;
+		const int a = dist < 0 ? -dist : dist;
+		if (best < 0 || a < (best_dist < 0 ? -best_dist : best_dist))
 		{
-			v.m = Match::Error;
-			continue;
+			best = (int)k;
+			best_dist = dist;
 		}
-		const Capture &cap = out.shots[s];
-		std::vector<uint8_t> ours;
-		if (!cap.Decode(ours) || rw != cap.w || rh != cap.h)
-		{
-			v.m = Match::Error;
-			continue;
-		}
-		v.diff_px = DiffRgb(ours, ref);
-		if (v.diff_px == 0) { v.m = Match::Same; continue; }
-
-		// The picture may simply be late or early: look for it in the panel
-		// history around the pinned frame. Borders do not slip per frame.
-		v.m = Match::Differs;
-		if (s == (int)Shot::Border || slip_window <= 0) continue;
-		std::vector<uint8_t> ref_gray;
-		RgbToGray(ref, ref_gray);
-		int best = -1, best_dist = 0;
-		for (size_t k = 0; k < history.size(); ++k)
-		{
-			if (history_frame[k] == cap.frame) continue;
-			if (DiffGray(history[k], ref_gray) != 0) continue;
-			const int dist = history_frame[k] - cap.frame;
-			const int a = dist < 0 ? -dist : dist;
-			if (best < 0 || a < (best_dist < 0 ? -best_dist : best_dist))
-			{
-				best = (int)k;
-				best_dist = dist;
-			}
-		}
-		if (best >= 0)
-		{
-			v.m    = Match::Slip;
-			v.slip = best_dist;
-		}
+	}
+	if (best >= 0)
+	{
+		v.m    = Match::Slip;
+		v.slip = best_dist;
 	}
 }
 
@@ -1285,8 +1336,7 @@ Summary RunAudit(const std::vector<Rom> &roms, const RunOptions &opts,
 					for (int c = 0; c < kComboCount; ++c)
 					{
 						rr.combos[c].error = "cannot read ROM";
-						for (int s = 0; s < kShotCount; ++s)
-							rr.combos[c].verdict[s].m = Match::Error;
+						rr.combos[c].verdict.m = Match::Error;
 					}
 				}
 				else

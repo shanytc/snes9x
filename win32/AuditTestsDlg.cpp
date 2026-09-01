@@ -30,11 +30,13 @@ namespace {
 
 using namespace AuditTests;
 
+// The status entries are OR-ed together; "SGB enhanced" is an attribute
+// gate that ANDs with them (filter to SGB carts, in any state).
 const char *kShowNames[] = { "Passed", "Failed", "Errors", "Not run",
-                             "Missing from baseline" };
-constexpr int kShowCount  = 5;
+                             "Missing from baseline", "SGB enhanced" };
+constexpr int kShowCount  = 6;
 constexpr int kShowPass = 0, kShowFail = 1, kShowError = 2, kShowPending = 3,
-              kShowMissing = 4;
+              kShowMissing = 4, kShowSgb = 5;
 
 // Fixed columns; the combo cells follow, then Verdict and Detail.
 enum { kColNum, kColRom, kColType, kColSgb, kColBoot, kColLink, kColCombo };
@@ -89,6 +91,8 @@ struct AuditDlgState
 	int   shown_combo = -1;  // combo the preview is on; -1 = every combo
 	int   shot_src  = 0;     // index into ShotSources
 	DWORD started   = 0;
+	// Wall time spent paused, kept out of the ETA math.
+	DWORD pause_accum = 0, pause_since = 0;
 };
 
 AuditDlgState *GetState(HWND hDlg)
@@ -296,7 +300,7 @@ bool MissingFromBaseline(const AuditDlgState *st, int i)
 	for (int c = 0; c < kComboCount; ++c)
 	{
 		if (!ComboApplies((Combo)c, r)) continue;
-		if (!b->Find(r, (Combo)c, Shot::Title)) return true;
+		if (!b->Find(r, (Combo)c)) return true;
 	}
 	return false;
 }
@@ -312,9 +316,13 @@ bool ShowRom(const AuditDlgState *st, int i)
 			if (st->folder_on[f] && st->folders[f] == r.folder) on = true;
 		if (!on) return false;
 	}
-	if (!AnyOn(st->show_on)) return true;
+	if (st->show_on[kShowSgb] && !RomSgbEnhanced(r)) return false;
+	bool any_status = false;
+	for (int k = 0; k < kShowSgb; ++k)
+		if (st->show_on[k]) any_status = true;
+	if (!any_status) return true;
 
-	// Checked entries are OR-ed together.
+	// Checked status entries are OR-ed together.
 	bool ok;
 	if (st->status[i] != kDone)
 		ok = st->show_on[kShowPending] != 0;
@@ -523,7 +531,7 @@ void PickBaseline(AuditDlgState *st)
 
 struct ShotSource
 {
-	int  combo, shot;
+	int  combo;
 	bool ours;                 // false = baseline image
 	std::string label;
 };
@@ -536,28 +544,23 @@ std::vector<ShotSource> ShotSources(const AuditDlgState *st, int rom)
 	for (int c = 0; c < kComboCount; ++c)
 	{
 		if (!ComboApplies((Combo)c, st->roms[rom])) continue;
-		for (int s = 0; s < kShotCount; ++s)
+		// Whatever has landed so far - mid-run the list grows as each
+		// column finishes.
+		const Capture &cap = st->results[rom].combos[c].shot;
+		const BaselineEntry *be = base
+			? base->Find(st->roms[rom], (Combo)c) : nullptr;
+		char label[96];
+		if (!cap.Empty())
 		{
-			// Whatever has landed so far - mid-run the list grows as each
-			// combo finishes.
-			const bool have_ours =
-				!st->results[rom].combos[c].shots[s].Empty();
-			const BaselineEntry *be = base
-				? base->Find(st->roms[rom], (Combo)c, (Shot)s) : nullptr;
-			char label[96];
-			if (have_ours)
-			{
-				snprintf(label, sizeof label, "%s/%s (ours, f%d)",
-				         ComboId((Combo)c), ShotId((Shot)s),
-				         st->results[rom].combos[c].shots[s].frame);
-				out.push_back({ c, s, true, label });
-			}
-			if (be)
-			{
-				snprintf(label, sizeof label, "%s/%s (base, f%d)",
-				         ComboId((Combo)c), ShotId((Shot)s), be->frame);
-				out.push_back({ c, s, false, label });
-			}
+			snprintf(label, sizeof label, "%s (ours, f%d)",
+			         ComboName((Combo)c), cap.frame);
+			out.push_back({ c, true, label });
+		}
+		if (be)
+		{
+			snprintf(label, sizeof label, "%s (base, f%d)",
+			         ComboName((Combo)c), be->frame);
+			out.push_back({ c, false, label });
 		}
 	}
 	return out;
@@ -568,15 +571,14 @@ bool LoadShotFrame(const AuditDlgState *st, int rom, const ShotSource &src,
 {
 	if (src.ours)
 	{
-		const Capture &cap = st->results[rom].combos[src.combo].shots[src.shot];
+		const Capture &cap = st->results[rom].combos[src.combo].shot;
 		if (!cap.Decode(rgb)) return false;
 		w = cap.w; h = cap.h;
 		return true;
 	}
 	const Baseline *base = ActiveBaseline(st);
 	if (!base) return false;
-	const BaselineEntry *be = base->Find(st->roms[rom], (Combo)src.combo,
-	                                     (Shot)src.shot);
+	const BaselineEntry *be = base->Find(st->roms[rom], (Combo)src.combo);
 	return be && LoadBaselineShot(*base, *be, rgb, w, h);
 }
 
@@ -608,13 +610,13 @@ void UpdateShotCaption(AuditDlgState *st)
 			CellText(st, st->shown, cur.combo, cell, sizeof cell);
 			n += snprintf(buf + n, sizeof buf - n, "\r\n%s: %s",
 			              ComboName((Combo)cur.combo), cell);
-			const ShotVerdict &v = cr.verdict[cur.shot];
+			const ShotVerdict &v = cr.verdict;
 			if (v.m == Match::Differs)
-				n += snprintf(buf + n, sizeof buf - n, "\r\n%s: %d px moved",
-				              ShotId((Shot)cur.shot), v.diff_px);
+				n += snprintf(buf + n, sizeof buf - n, "\r\n%d px moved",
+				              v.diff_px);
 			if (v.m == Match::Slip)
-				n += snprintf(buf + n, sizeof buf - n, "\r\n%s: slipped %+d frames",
-				              ShotId((Shot)cur.shot), v.slip);
+				n += snprintf(buf + n, sizeof buf - n, "\r\nslipped %+d frames",
+				              v.slip);
 		}
 	}
 	SetCtrlText(st->hShotCap, buf);
@@ -733,11 +735,25 @@ bool AuditProgress(void *user, int done, int total)
 {
 	AuditDlgState *st = (AuditDlgState *)user;
 	if (st->close_when_done) { PumpMessages(st); return false; }
-	const double secs = (GetTickCount() - st->started) / 1000.0;
+	DWORD paused_ms = st->pause_accum;
+	if (st->paused.load()) paused_ms += GetTickCount() - st->pause_since;
+	const double secs = (GetTickCount() - st->started - paused_ms) / 1000.0;
 	const int live = st->threads_live.load();
+	const double pct = total > 0 ? done * 100.0 / total : 0.0;
+	// ETA from the run's own average pace; meaningless until a few finish.
+	char eta[48] = "";
+	if (done >= 3 && done < total && secs > 1.0)
+	{
+		const int left = (int)(secs / done * (total - done) + 0.5);
+		if (left >= 3600)
+			snprintf(eta, sizeof eta, " — ETA %d:%02d:%02d",
+			         left / 3600, (left / 60) % 60, left % 60);
+		else
+			snprintf(eta, sizeof eta, " — ETA %d:%02d", left / 60, left % 60);
+	}
 	char buf[256];
-	snprintf(buf, sizeof buf, "%d/%d ROMs done on %d thread%s — %.1fs%s",
-	         done, total, live, live == 1 ? "" : "s", secs,
+	snprintf(buf, sizeof buf, "%d/%d ROMs (%.1f%%) on %d thread%s — %.1fs%s%s",
+	         done, total, pct, live, live == 1 ? "" : "s", secs, eta,
 	         st->paused.load() ? " — PAUSED" : "");
 	SetCtrlText(st->hStat, buf);
 	SendMessage(st->hProg, PBM_SETPOS, done, 0);
@@ -972,16 +988,12 @@ int LoadRunState(AuditDlgState *st)
 		for (int c = 0; c < kComboCount; ++c)
 		{
 			ComboResult &cr = st->results[i].combos[c];
-			for (int s = 0; s < kShotCount; ++s)
+			const BaselineEntry *be = state.Find(st->roms[i], (Combo)c);
+			if (!be) continue;
+			if (LoadCapturePng(state, *be, cr.shot))
 			{
-				const BaselineEntry *be =
-					state.Find(st->roms[i], (Combo)c, (Shot)s);
-				if (!be) continue;
-				if (LoadCapturePng(state, *be, cr.shots[s]))
-				{
-					cr.ran = true;
-					any = true;
-				}
+				cr.ran = true;
+				any = true;
 			}
 		}
 		if (any)
@@ -1119,6 +1131,8 @@ void RunAuditUI(AuditDlgState *st, bool selected_only)
 	const int sel = (int)SendMessage(st->hThreads, CB_GETCURSEL, 0, 0);
 	st->threads = (sel == CB_ERR) ? 1 : sel + 1;
 	st->started = GetTickCount();
+	st->pause_accum = 0;
+	st->pause_since = 0;
 
 	RunOptions opts;
 	opts.audit_dir = st->audit_dir.c_str();
@@ -1444,6 +1458,8 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			if (!st || !st->running) return TRUE;
 			const bool now = !st->paused.load();
 			st->paused.store(now);
+			if (now) st->pause_since = GetTickCount();
+			else     st->pause_accum += GetTickCount() - st->pause_since;
 			SetWindowText(st->hPause, now ? TEXT("&Resume") : TEXT("&Pause"));
 			return TRUE;
 		}

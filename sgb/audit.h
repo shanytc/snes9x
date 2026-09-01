@@ -7,10 +7,11 @@
 #ifndef _SGB_AUDIT_H_
 #define _SGB_AUDIT_H_
 
-// Regression audit ("Audit Tests"). Runs every ROM under Roms/ on every boot
-// combination the cart supports - plain GB and GBC with and without a boot
-// ROM, SGB1/SGB2 (with borders), and the +GBC hacks - and compares pinned
-// frames (title screen, mid-game, border) against a saved baseline under
+// Regression audit ("Audit Tests"). Runs every ROM under Roms/ on every
+// boot column the cart supports - each column is ONE capture with one
+// meaning: the boot logos (GB/GBC BIOS), the title (GB/GBC), the SGB rings
+// with the default bezel (SGB1/SGB2), and the cart's custom border
+// (SGB1/SGB2 Border) - compared against a saved baseline under
 // audit/baseline/. A mismatch reports how many pixels moved and, when the
 // same picture exists nearby, how many frames it slipped. Shared by the
 // win32 Tests menu entry and the headless harness probe.
@@ -27,24 +28,30 @@ namespace AuditTests {
   Combos and ROM classification
 --------------------------------------------------------------------------*/
 
+// One column = ONE capture with one meaning, ordered like the real
+// power-on flow of each model. Baselines key combos by id string, not
+// position, so the order can change without invalidating saved captures.
 enum class Combo : uint8_t
 {
-	GB,        // plain Game Boy, no boot ROM
-	GB_Bios,   // plain Game Boy through dmg_boot
-	GBC,       // Game Boy Color, no boot ROM (compat palettes synthesized)
-	GBC_Bios,  // Game Boy Color through cgb_boot
-	SGB1,      // Super Game Boy, BIOS-less core mode - captures the border
-	SGB2,      // Super Game Boy 2, likewise
-	SGB1_GBC,  // SGB1 border + real CGB color (hack; color carts only)
-	SGB2_GBC,  // SGB2 border + real CGB color (hack; color carts only)
+	GB_Bios,   // the DMG boot ROM's settled Nintendo logo
+	GB,        // the game's title, monochrome
+	GBC_Bios,  // the CGB boot ROM's settled color logo
+	GBC,       // the game's title in color
+	SGB1,      // the SGB1 ring (default bezel) around the settled title
+	SGB2,      // the SGB2 ring, likewise
+	SGB1_CB,   // the cart's custom border, once uploaded and settled
+	SGB2_CB,   // likewise on SGB2 (both: SGB-enhanced carts only)
 	Count
 };
 constexpr int kComboCount = static_cast<int>(Combo::Count);
 
 const char *ComboId(Combo c);     // "gb", "gb+bios", ... (baseline index key)
 const char *ComboName(Combo c);   // "GB", "GB BIOS", ... (column heading)
-bool ComboUsesSgb(Combo c);       // a border shot exists for it
+bool ComboIsRing(Combo c);        // 256x224 SGB composite (vs 160x144 panel)
 bool ComboNeedsBoot(Combo c);     // needs audit/dmg_boot.bin or cgb_boot.bin
+// Baseline shot id per column: panel shots store as "title", ring shots as
+// "border" - captures from the older multi-shot layout keep matching.
+const char *ComboShotId(Combo c);
 
 struct Rom
 {
@@ -70,11 +77,7 @@ bool ComboApplies(Combo c, const Rom &r);
   Captures
 --------------------------------------------------------------------------*/
 
-enum class Shot : uint8_t { Title, Mid, Border, Count };
-constexpr int kShotCount = static_cast<int>(Shot::Count);
-const char *ShotId(Shot s);    // "title" / "mid" / "border"
-
-constexpr int kPanelW = 160, kPanelH = 144;   // Title / Mid
+constexpr int kPanelW = 160, kPanelH = 144;   // panel shots
 constexpr int kSgbW   = 256, kSgbH   = 224;   // Border (full SGB composite)
 // Where the settled DMG boot logo sits on the panel, and its size.
 constexpr int kLogoX = 32, kLogoY = 64, kLogoW = 96, kLogoH = 16;
@@ -116,18 +119,17 @@ struct ComboResult
 {
 	bool        ran = false;
 	std::string error;                    // load failure etc.
-	Capture     shots[kShotCount];
-	ShotVerdict verdict[kShotCount];
-	// Worst of the shot verdicts, for the cell.
-	Match Cell() const;
-	int   CellDiff() const;
-	int   CellSlip() const;
+	Capture     shot;                     // THE column's one capture
+	ShotVerdict verdict;
+	Match Cell() const { return verdict.m; }
+	int   CellDiff() const { return verdict.diff_px; }
+	int   CellSlip() const { return verdict.slip; }
 };
 
 struct RomResult
 {
 	ComboResult combos[kComboCount];
-	// PASS when every applicable combo compared Same everywhere.
+	// PASS when every applicable combo compared Same.
 	bool AllPassed(const Rom &r) const;
 };
 
@@ -151,7 +153,7 @@ struct Baseline
 	std::map<std::string, BaselineEntry> entries;
 
 	bool Empty() const { return entries.empty(); }
-	const BaselineEntry *Find(const Rom &r, Combo c, Shot s) const;
+	const BaselineEntry *Find(const Rom &r, Combo c) const;
 };
 
 bool LoadBaseline(const char *dir, Baseline &out, std::string &err);

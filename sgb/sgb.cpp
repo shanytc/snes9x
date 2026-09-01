@@ -544,6 +544,10 @@ struct Emulator::Impl
 	{
 		enum Stage : uint8_t { Idle = 0, ChrTrn = 1, PctTrn = 2 };
 		Stage   stage = Idle;
+		// Frames to let the panel finish drawing before the read: the real
+		// BIOS reads its stream a frame after the command, and carts (DK)
+		// still paint the payload during the packet's frame.
+		uint8_t skip  = 0;
 		uint8_t pkt[16] = {};   // saved packet bytes (cmd in [0], param in [1])
 	} border_capture;
 
@@ -555,6 +559,14 @@ struct Emulator::Impl
 	// frame eases out into the game's arcade machine instead of
 	// snapping in on a single frame.
 	uint16_t border_fade_frames = 0;
+
+	// SGB commands processed this session (audit border probe; counts every
+	// dispatched command in modes that process them). Never serialized.
+	uint32_t border_transfers = 0;
+	// Border-plane mutations (CHR_TRN or PCT_TRN commits) and completed
+	// PCT_TRN map uploads - the audit's "border arrived / settled" events.
+	uint32_t border_plane     = 0;
+	uint32_t border_pct       = 0;
 
 	// One-shot snapshot of GB CPU registers at the moment the boot
 	// ROM unmapped itself (FF50 write). DK / Pokémon / etc. read
@@ -731,9 +743,31 @@ void Emulator::Reset()
 	JoypadReset(impl_->joypad);
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
+	// BIOS-less SGB shows the console's built-in bezel until a cart
+	// uploads its own border; in BIOS mode the real BIOS paints it.
+	if (impl_->run_mode != RunMode::DMG && !Settings.SGB_BIOSModeActive)
+	{
+		SgbInstallDefaultBorder(impl_->sgb_state,
+		                        impl_->run_mode == RunMode::SGB2);
+		// The stock SGB BIOS idles the ICD2 in 2-player rotation, and THAT
+		// is how carts detect an SGB without MLT_REQ: an idle $30 read
+		// answers $FE once the ID has stepped (DK '94 does exactly this).
+		// Authentic mode only - the plain BIOS-less combos keep detection
+		// dead on purpose so carts behave as on a DMG.
+		// Only when booting through the SGB boot ROM: a cold instant boot
+		// stays 1-player until MLT_REQ (samesuite command_mlt_req).
+		if (impl_->sgb_authentic && impl_->boot_rom_loaded)
+		{
+			impl_->sgb_state.mlt_players = 2;
+			impl_->joypad.mlt_players    = 2;
+		}
+	}
 	MbcReset(impl_->cart.mbc);
 	MbcUnlReset(impl_->cart);
 	impl_->border_capture.stage = Impl::BorderCapture::Idle;
+	impl_->border_transfers     = 0;
+	impl_->border_plane         = 0;
+	impl_->border_pct           = 0;
 	impl_->border_fade_frames   = 0;
 	impl_->boot_handoff_captured = false;
 	impl_->boot_setup_done       = false;
@@ -1744,17 +1778,18 @@ static void DbgPushCmd(uint8_t cmd)
 }
 
 
-// Reconstruct 4 KB of byte data from the top-left 16x16 tile area
-// (128x128 pixels, 2bpp raw indices) of the GB framebuffer. Output
-// bytes are in canonical GB-tile order — exactly the sequence
-// CHR_TRN / PCT_TRN delivers to the SGB BIOS over the LCD signal.
+// Reconstruct 4 KB of byte data from the rendered GB frame. The SGB
+// streams the LCD as 20 tiles per row, top-down (never a 16x16 corner -
+// see the DK '94 border), so 256 GB tiles' worth spans the first 12.8
+// tile rows. Output bytes are in canonical GB-tile order — exactly the
+// sequence CHR_TRN / PCT_TRN delivers to the SGB BIOS over the LCD.
 static void DecodeBorderCapture(const uint8_t *raw_fb, uint8_t *out_4kb)
 {
-	for (int ty = 0; ty < 16; ++ty)
+	for (int i = 0; i < 256; ++i)
 	{
-		for (int tx = 0; tx < 16; ++tx)
+		const int tx = i % 20, ty = i / 20;
 		{
-			uint8_t *tile_out = &out_4kb[(ty * 16 + tx) * 16];
+			uint8_t *tile_out = &out_4kb[i * 16];
 			for (int row = 0; row < 8; ++row)
 			{
 				uint8_t plane0 = 0, plane1 = 0;
@@ -1892,6 +1927,14 @@ void Emulator::RunCycles(int32_t tcycles)
 	if (impl_->border_capture.stage != Impl::BorderCapture::Idle &&
 	    impl_->ppu.frame_ready)
 	{
+		if (impl_->border_capture.skip)
+		{
+			// Not this frame: re-arm the vblank wait exactly like the
+			// command write does.
+			--impl_->border_capture.skip;
+			impl_->ppu.frame_ready = false;
+			return;
+		}
 		uint8_t decoded[4096];
 		DecodeBorderCapture(impl_->ppu.raw_framebuffer, decoded);
 		const uint8_t cmd =
@@ -1902,6 +1945,8 @@ void Emulator::RunCycles(int32_t tcycles)
 		SgbHandleCommand(impl_->sgb_state, cmd,
 		                 impl_->border_capture.pkt, 16,
 		                 decoded, impl_->ppu.framebuffer);
+		++impl_->border_plane;
+		if (cmd == 0x14) ++impl_->border_pct;
 		impl_->border_capture.stage = Impl::BorderCapture::Idle;
 		// Don't clear frame_ready here — RunFrame's run-to-vblank loop
 		// reads it to know the frame completed. The tail can't re-fire
@@ -1910,6 +1955,11 @@ void Emulator::RunCycles(int32_t tcycles)
 }
 
 const FrameBuffer &Emulator::GetFrameBuffer() const { return impl_->fb; }
+
+uint32_t Emulator::BorderTransferCount() const { return impl_->border_transfers; }
+
+uint32_t Emulator::BorderPlaneVersion() const { return impl_->border_plane; }
+uint32_t Emulator::BorderPctCount() const     { return impl_->border_pct; }
 
 void Emulator::GetStatus(char *buf, size_t cap) const
 {
@@ -2831,6 +2881,10 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 	// acid-test runner's authentic-SGB mode re-enables processing.
 	if (!Settings.SGB_BIOSModeActive && !impl_->sgb_authentic) return;
 
+	// Audit border probe: every processed command bumps this, so the
+	// runner can wait out a cart's whole SGB init chatter.
+	++impl_->border_transfers;
+
 	if (cmd == 0x11 && len > 1)
 	{
 		const uint8_t mode = static_cast<uint8_t>(data[1] & 0x03);
@@ -2845,6 +2899,7 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 			? Impl::BorderCapture::ChrTrn
 			: Impl::BorderCapture::PctTrn;
 		std::memcpy(impl_->border_capture.pkt, data, 16);
+		impl_->border_capture.skip = 1;
 		impl_->ppu.frame_ready = false;
 		if (cmd == 0x13) ++g_sgb_dbg.pkt_chr;
 		else             ++g_sgb_dbg.pkt_pct;
@@ -3572,6 +3627,11 @@ bool S9xSGBLoadEmbeddedBootROM(unsigned char mode)
 {
 	const uint8_t *src = (mode == 2) ? SGB::kSgb2BootRom : SGB::kSgbBootRom;
 	return SGB::Instance().LoadBootROM(src, 256);
+}
+
+const unsigned char *SGB::SgbEmbeddedBootRom(int revision)
+{
+	return revision == 2 ? SGB::kSgb2BootRom : SGB::kSgbBootRom;
 }
 
 void S9xSGBPrimeBIOSHandshake(void)

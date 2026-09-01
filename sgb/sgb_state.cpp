@@ -22,8 +22,33 @@
 #include "sgb_state.h"
 
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 
 namespace SGB {
+
+#include "sgb_default_border.inc"
+
+// Stage the console's own default frame into the border plane, so the
+// BIOS-less SGB modes show the real bezel until a cart uploads its border
+// (in BIOS mode the real BIOS paints it and owns the crossfade instead).
+void SgbInstallDefaultBorder(SgbState &s, bool sgb2)
+{
+	const uint8_t  *tiles = sgb2 ? kSgb2BorderTiles : kSgb1BorderTiles;
+	const size_t    tn    = sgb2 ? sizeof kSgb2BorderTiles : sizeof kSgb1BorderTiles;
+	const uint16_t *map   = sgb2 ? kSgb2BorderMap : kSgb1BorderMap;
+	const uint8_t  *pals  = sgb2 ? kSgb2BorderPals : kSgb1BorderPals;
+
+	std::memset(&s.border, 0, sizeof s.border);
+	std::memcpy(s.border.tiles, tiles, tn);
+	std::memcpy(s.border.tile_map, map, 32 * 28 * sizeof(uint16_t));
+	for (int p = 0; p < 4; ++p)
+		for (int c = 0; c < 16; ++c)
+			s.border.palettes[p][c] = static_cast<uint16_t>(
+				pals[(p * 16 + c) * 2] | (pals[(p * 16 + c) * 2 + 1] << 8));
+	s.border.tiles_loaded = true;
+	s.border.map_loaded   = true;
+}
 
 namespace {
 

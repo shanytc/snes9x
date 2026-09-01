@@ -117,6 +117,11 @@ public:
 	const uint8_t  *DebugCgbBgPal() const;   // 64
 	const uint8_t  *DebugCgbObjPal() const;  // 64
 	const uint16_t *DebugSgbActivePalettes() const;  // 16 (4 palettes x 4 colors)
+	// Audit border-probe events, all reset with the console: SGB commands
+	// processed, border-plane mutations (CHR/PCT commits), PCT map uploads.
+	uint32_t        BorderTransferCount() const;
+	uint32_t        BorderPlaneVersion() const;
+	uint32_t        BorderPctCount() const;
 	const uint8_t  *DebugSgbAttrMap() const; // SGB_TILES (360)
 	void            DebugGetPpuRegs(uint8_t out[12]) const;
 
@@ -329,6 +334,12 @@ bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size);
 // files are plain DMG boot ROMs without the handshake, so we ship the
 // real SGB-specific variants (from LIJI32/SameBoy under MIT).
 bool S9xSGBLoadEmbeddedBootROM(unsigned char mode);
+
+namespace SGB {
+// The embedded 256-byte SGB1/SGB2 boot ROM bytes themselves, for callers
+// holding a private Emulator (the audit's border combos).
+const unsigned char *SgbEmbeddedBootRom(int revision);
+}
 
 // Prime the 5-packet SGB handshake from the loaded cart. Call after
 // S9xSGBLoadROM/S9xSGBLoadROMBytes in BIOS mode — boot ROM dumps in

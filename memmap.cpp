@@ -1207,10 +1207,12 @@ bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path)
 static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &out_path)
 {
 	static const char *sgb1_names[] = {
-		"sgb.boot.rom", "sgb1.boot.rom", "sgb_bios.bin", nullptr
+		"sgb.boot.rom", "sgb1.boot.rom", "sgb_bios.bin", "sgb_boot.bin",
+		"Super Game Boy SGB-CPU (World) (Enhancement Chip).bin", nullptr
 	};
 	static const char *sgb2_names[] = {
-		"sgb2.boot.rom", "sgb2_bios.bin", nullptr
+		"sgb2.boot.rom", "sgb2_bios.bin", "sgb2_boot.bin",
+		"Super Game Boy 2 SGB2-CPU (Japan) (Enhancement Chip).bin", nullptr
 	};
 	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
 
@@ -1235,6 +1237,8 @@ static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &
 		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
 	}
 	dirs.push_back(S9xGetDirectory(BIOS_DIR));
+	// Chip dumps commonly live beside the SGB .sfc images.
+	dirs.push_back(S9xGetDirectory(BIOS_DIR) + SLASH_STR + "SGB");
 	dirs.push_back(".");
 
 	for (const auto &dir : dirs)

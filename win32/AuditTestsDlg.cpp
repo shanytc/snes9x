@@ -1317,12 +1317,32 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		st->audit_dir = FindDirNearExe("audit");
 		if (st->audit_dir.empty()) st->audit_dir = "audit";
 		// The app's configured ROM folder first (the one Open ROM uses);
-		// the near-exe Roms/ search is the fallback.
+		// the near-exe Roms/ search is the fallback. The config stores it
+		// relative (".\Roms"), so resolve against the exe folder, never
+		// the CWD - file dialogs move the CWD, which would strand every
+		// scanned path (the double-click load hit "invalid zip archive").
 		if (GUI.RomDir[0])
 		{
-			const DWORD a = GetFileAttributes(GUI.RomDir);
+			std::string rd = (const char *)WideToUtf8(GUI.RomDir);
+			if (rd.size() >= 2 && rd[0] == '.' &&
+			    (rd[1] == '\\' || rd[1] == '/'))
+				rd = rd.substr(2);
+			const bool absolute = rd.size() > 1 &&
+				(rd[1] == ':' || (rd[0] == '\\' && rd[1] == '\\'));
+			if (!absolute)
+			{
+				char exe[MAX_PATH];
+				if (GetModuleFileNameA(NULL, exe, MAX_PATH))
+				{
+					const std::string base(exe);
+					const size_t s = base.find_last_of("\\/");
+					if (s != std::string::npos)
+						rd = base.substr(0, s) + "\\" + rd;
+				}
+			}
+			const DWORD a = GetFileAttributesA(rd.c_str());
 			if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
-				st->roms_dir = (const char *)WideToUtf8(GUI.RomDir);
+				st->roms_dir = rd;
 		}
 		if (st->roms_dir.empty()) st->roms_dir = FindDirNearExe("Roms");
 		if (st->roms_dir.empty()) st->roms_dir = "Roms";

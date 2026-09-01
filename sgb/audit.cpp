@@ -8,6 +8,7 @@
 #include "acid_report.h"   // EncodePng
 #include "sgb.h"
 #include "gb_cart.h"
+#include "../biosmanager.h"
 #include "../snes9x.h"     // DECOMPOSE_PIXEL - BlitScreen emits host pixels
 
 #include <algorithm>
@@ -416,7 +417,8 @@ bool GrayShowsBootLogo(const std::vector<uint8_t> &gray,
 const char *ComboId(Combo c)
 {
 	static const char *ids[] = { "gb+bios", "gb", "gbc+bios", "gbc",
-	                             "sgb1", "sgb2", "sgb1+cb", "sgb2+cb" };
+	                             "sgb1", "sgb2", "sgb1+cb", "sgb2+cb",
+	                             "sgb1+gbc", "sgb2+gbc" };
 	return ids[(int)c];
 }
 
@@ -424,7 +426,8 @@ const char *ComboName(Combo c)
 {
 	static const char *names[] = { "GB BIOS", "GB", "GBC BIOS", "GBC",
 	                               "SGB1", "SGB2",
-	                               "SGB1 Border", "SGB2 Border" };
+	                               "SGB1 Border", "SGB2 Border",
+	                               "SGB1+GBC", "SGB2+GBC" };
 	return names[(int)c];
 }
 
@@ -463,27 +466,29 @@ std::string RomBootClass(const Rom &r)
 	return RomSgbEnhanced(r) ? "GB+SGB" : "GB";
 }
 
-// Which columns a cart gets. Any cart plays on SGB1/SGB2 - the model
-// menu only gates the +GBC hacks (color carts) and the SGB BIOS files -
-// so those columns always apply; the plain GB columns skip CGB-only
-// carts, and the border columns need the cart to speak SGB at all.
+// Which columns a cart gets: every cart boots on every plain model - a
+// CGB-only cart runs forced-DMG on GB/SGB and its own lockout screen (or
+// garbage) is the capture. Only the border and hack columns are gated,
+// on what the cart itself claims to support.
 bool ComboApplies(Combo c, const Rom &r)
 {
 	switch (c)
 	{
 		case Combo::GB:
 		case Combo::GB_Bios:
-			return !RomCgbOnly(r);
-		case Combo::SGB1:
-		case Combo::SGB2:
-			return true;
 		case Combo::GBC:
 		case Combo::GBC_Bios:
+		case Combo::SGB1:
+		case Combo::SGB2:
 			return true;
 		case Combo::SGB1_CB:
 		case Combo::SGB2_CB:
 			// Only carts that declare SGB support upload custom borders.
 			return RomSgbEnhanced(r);
+		case Combo::SGB1_GBC:
+		case Combo::SGB2_GBC:
+			// The model menu's hack entries: color carts only.
+			return RomCgbCapable(r);
 		default:
 			return false;
 	}
@@ -1100,6 +1105,9 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 {
 	emu.SetForceModel(0);
 	emu.SetClockMultiplier(1.0f);
+	// Private core: keep BIOS-less semantics even while the app session
+	// runs the SGB BIOS (Settings.SGB_BIOSModeActive is global).
+	emu.SetHostBiosMode(0);
 	switch (c)
 	{
 		case Combo::GB:
@@ -1116,8 +1124,11 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 			break;
 		case Combo::SGB1:
 		case Combo::SGB2:
+			// Plain SGB forces DMG, as real hardware and the real BIOS do:
+			// a color cart boots mono, and a CGB-only cart shows its own
+			// lockout screen in the default bezel - that is the capture.
 			emu.SetSgbCgbHack(false);
-			emu.SetCgbOverride(-1);
+			emu.SetCgbOverride(0);
 			emu.SetRunMode(c == Combo::SGB1 ? SGB::RunMode::SGB
 			                                : SGB::RunMode::SGB2);
 			break;
@@ -1132,6 +1143,29 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 			emu.SetRunMode(c == Combo::SGB1_CB ? SGB::RunMode::SGB
 			                                   : SGB::RunMode::SGB2);
 			break;
+		case Combo::SGB1_GBC:
+		case Combo::SGB2_GBC:
+		{
+			// The "SGB + GBC (hack)" view. The core boots the cart once,
+			// on the color pass; for an SGB-enhanced cart (flag + the
+			// $33 licensee, like hardware) its ColdReset first harvests
+			// the border in a hidden prelude core. A plain color cart
+			// has no border to fetch and shows the default bezel. Either
+			// way this is the app's exact path.
+			const bool sgb_cart = rom.size() > 0x14B &&
+				rom[0x146] == 0x03 && rom[0x14B] == 0x33;
+			emu.SetSgbCgbHack(true);
+			if (sgb_cart)
+			{
+				emu.SetForceModel(3);
+				emu.SetCgbOverride(-1);
+			}
+			else
+				emu.SetCgbOverride(1);
+			emu.SetRunMode(c == Combo::SGB1_GBC ? SGB::RunMode::SGB
+			                                    : SGB::RunMode::SGB2);
+			break;
+		}
 		default:
 			err = "bad combo";
 			return false;
@@ -1141,12 +1175,26 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 	if (c == Combo::GB_Bios)  boot = dmg_boot;
 	if (c == Combo::GBC_Bios) boot = cgb_boot;
 	bool boot_ok;
-	if (c == Combo::SGB1_CB || c == Combo::SGB2_CB)
+	const bool hack_sgb_boot =
+		(c == Combo::SGB1_GBC || c == Combo::SGB2_GBC) &&
+		rom.size() > 0x14B && rom[0x146] == 0x03 && rom[0x14B] == 0x33;
+	if (c == Combo::SGB1_CB || c == Combo::SGB2_CB || hack_sgb_boot)
 	{
-		// Authentic SGB boots through the embedded SGB boot ROM so the
-		// cart sees the real handoff signature and engages its SGB path.
-		boot_ok = emu.LoadBootROM(
-			SGB::SgbEmbeddedBootRom(c == Combo::SGB2_CB ? 2 : 1), 256);
+		// Authentic SGB boots through the SGB-side boot ROM: the BIOS
+		// manager's dump when one is assigned, else the embedded SameBoy
+		// one. Either way the cart sees the real handoff signature and
+		// engages its SGB path.
+		const int rev = (c == Combo::SGB2_CB || c == Combo::SGB2_GBC) ? 2 : 1;
+		std::vector<uint8_t> mgr;
+		const std::string p = S9xResolveBiosPath(
+			rev == 2 ? S9X_BIOS_SGB2_BOOT : S9X_BIOS_SGB1_BOOT);
+		if (!p.empty())
+			S9xReadBiosImage(p.c_str(), mgr, 256,
+			    [](const uint8 *, uint32, uint32 full, void *) {
+			        return full == 256u; });
+		boot_ok = mgr.size() == 256
+			? emu.LoadBootROM(mgr.data(), 256)
+			: emu.LoadBootROM(SGB::SgbEmbeddedBootRom(rev), 256);
 	}
 	else
 	{
@@ -1308,7 +1356,7 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 		if (!boot || boot->empty())
 		{
 			out.verdict.m = Match::Skip;
-			out.error = "no boot ROM in audit/";
+			out.error = "no boot ROM (BIOS manager or audit/)";
 			return;
 		}
 	}
@@ -1328,7 +1376,13 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 	}
 	out.ran = true;
 
-	const bool ring = ComboIsRing(c);   // SGB1/SGB2: 256x224 bezel composite
+	const bool ring = ComboIsRing(c);   // 256x224 bezel composite
+
+	// Hack combos on an SGB-flagged cart run the mono border pass first,
+	// and nothing it shows is the shot: hold every clock until the color
+	// restart, and give the pass room on top of the title budget.
+	const bool hack_wait =
+		(c == Combo::SGB1_GBC || c == Combo::SGB2_GBC) && RomSgbEnhanced(r);
 
 	// The baseline pins the frame when it has this column, else the shot
 	// lands at the settle event and that frame becomes the pin.
@@ -1345,8 +1399,10 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 	// the panel is a handoff regression. The handoff itself leaves the logo
 	// in VRAM (games expect that), so a match running from frame 1 until
 	// the game clears the screen is legitimate residue, not a boot.
+	// (Not for hack combos: their authentic border pass legitimately runs
+	// the SGB boot ROM's logo before the color restart.)
 	const std::vector<uint8_t> logo_mask =
-		ring ? DecodeHeaderLogo(rom) : std::vector<uint8_t>();
+		ring && !hack_wait ? DecodeHeaderLogo(rom) : std::vector<uint8_t>();
 	int  logo_frame   = -1;
 	bool logo_residue = true;
 
@@ -1356,6 +1412,8 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 	int frame = 0;
 	int last_needed = pinned ? pin + (slip_window > 0 ? slip_window : 0)
 	                         : kFirstActiveCap + kTitleSettle + kTitleWaitCap;
+	// The border pass self-limits at 1200 frames (core failsafes).
+	if (hack_wait && !pinned) last_needed += 1200;
 
 	while (frame < last_needed)
 	{
@@ -1363,7 +1421,9 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 		++frame;
 
 		PanelGray(emu, gray);
-		if (first_active < 0 && !GrayUniform(gray)) first_active = frame;
+		const bool color_ready = !hack_wait || emu.SgbHackColorPass();
+		if (first_active < 0 && color_ready && !GrayUniform(gray))
+			first_active = frame;
 		if (!logo_mask.empty())
 		{
 			const bool logo_now = GrayShowsBootLogo(gray, logo_mask);
@@ -1390,7 +1450,7 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 					last_needed = frame;
 				}
 			}
-			else if (frame >= kFirstActiveCap)
+			else if (frame >= kFirstActiveCap && color_ready)
 			{
 				// Never drew a thing: shoot here so the capture exists and
 				// is deterministic, and say so.
@@ -1497,11 +1557,26 @@ Summary RunAudit(const std::vector<Rom> &roms, const RunOptions &opts,
 	if (roms.empty()) return sum;
 	const std::string dir = opts.audit_dir ? opts.audit_dir : "audit";
 
-	// Boot ROMs the pack pins for the +BIOS combos, read once and shared;
-	// missing files just turn those combos into SKIP.
+	// Boot ROMs for the +BIOS combos, read once and shared: the BIOS
+	// manager's assigned files first - through S9xReadBiosImage, which
+	// inflates zipped dumps exactly like the app's loaders - then the
+	// audit pack's dmg_boot.bin / cgb_boot.bin; missing everywhere turns
+	// them into SKIP.
 	std::vector<uint8_t> dmg_boot, cgb_boot;
-	ReadWholeFile(Join(dir, "dmg_boot.bin"), dmg_boot);
-	ReadWholeFile(Join(dir, "cgb_boot.bin"), cgb_boot);
+	const std::string mgr_dmg = S9xResolveBiosPath(S9X_BIOS_GB);
+	const std::string mgr_cgb = S9xResolveBiosPath(S9X_BIOS_GBC);
+	if (!mgr_dmg.empty() &&
+	    !S9xReadBiosImage(mgr_dmg.c_str(), dmg_boot, 0x100,
+	        [](const uint8 *, uint32, uint32 full, void *) {
+	            return full == 0x100u; }))
+		dmg_boot.clear();
+	if (dmg_boot.empty()) ReadWholeFile(Join(dir, "dmg_boot.bin"), dmg_boot);
+	if (!mgr_cgb.empty() &&
+	    !S9xReadBiosImage(mgr_cgb.c_str(), cgb_boot, 0x900,
+	        [](const uint8 *, uint32, uint32 full, void *) {
+	            return full == 0x900u || full == 0x800u; }))
+		cgb_boot.clear();
+	if (cgb_boot.empty()) ReadWholeFile(Join(dir, "cgb_boot.bin"), cgb_boot);
 
 	int nthreads = opts.threads > 0 ? opts.threads : DefaultThreadCount();
 	if (nthreads > (int)roms.size()) nthreads = (int)roms.size();

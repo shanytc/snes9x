@@ -37,10 +37,12 @@ enum class Combo : uint8_t
 	GB,        // the game's title, monochrome
 	GBC_Bios,  // the CGB boot ROM's settled color logo
 	GBC,       // the game's title in color
-	SGB1,      // the SGB1 ring (default bezel) around the settled title
-	SGB2,      // the SGB2 ring, likewise
+	SGB1,      // plain SGB: forced-DMG boot in the default bezel - a
+	SGB2,      // CGB-only cart's own lockout screen is the capture
 	SGB1_CB,   // the cart's custom border, once uploaded and settled
 	SGB2_CB,   // likewise on SGB2 (both: SGB-enhanced carts only)
+	SGB1_GBC,  // "SGB + GBC (hack)": CGB colors inside the SGB frame -
+	SGB2_GBC,  // cart border when SGB-flagged, the default bezel otherwise
 	Count
 };
 constexpr int kComboCount = static_cast<int>(Combo::Count);
@@ -48,7 +50,8 @@ constexpr int kComboCount = static_cast<int>(Combo::Count);
 const char *ComboId(Combo c);     // "gb", "gb+bios", ... (baseline index key)
 const char *ComboName(Combo c);   // "GB", "GB BIOS", ... (column heading)
 bool ComboIsRing(Combo c);        // 256x224 SGB composite (vs 160x144 panel)
-bool ComboNeedsBoot(Combo c);     // needs audit/dmg_boot.bin or cgb_boot.bin
+bool ComboNeedsBoot(Combo c);     // needs the DMG/CGB boot ROM (the BIOS
+                                  // manager's file, else audit/*_boot.bin)
 // Baseline shot id per column: panel shots store as "title", ring shots as
 // "border" - captures from the older multi-shot layout keep matching.
 const char *ComboShotId(Combo c);

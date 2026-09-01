@@ -20,6 +20,8 @@
 
 #include "AuditTestsDlg.h"
 #include "wsnes9x.h"
+#include "win32_display.h"
+#include "win32_sound.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
 #include "../sgb/audit.h"
@@ -29,6 +31,9 @@ extern HINSTANCE g_hInst;
 namespace {
 
 using namespace AuditTests;
+
+// Modeless dialog handle - one instance, NULL when closed.
+HWND s_hAuditDlg = NULL;
 
 // The status entries are OR-ed together; "SGB enhanced" is an attribute
 // gate that ANDs with them (filter to SGB carts, in any state).
@@ -1214,7 +1219,20 @@ void RunAuditUI(AuditDlgState *st, bool selected_only)
 	opts.threads      = st->threads;
 	opts.threads_live = &st->threads_live;
 	opts.pause     = &st->paused;
+	// The audit cores share Settings with the live session, so the modal
+	// launcher's old dialog-lifetime overrides now scope to the run:
+	// BIOS-less silent boots while workers are up, sound device released.
+	CloseSoundDevice();
+	const bool8 saved_bios_active = Settings.SGB_BIOSModeActive;
+	const bool8 saved_mute        = Settings.Mute;
+	Settings.SGB_BIOSModeActive = FALSE;
+	Settings.Mute = TRUE;
+
 	Summary sum = RunAudit(subset, opts, nullptr);
+
+	Settings.SGB_BIOSModeActive = saved_bios_active;
+	Settings.Mute = saved_mute;
+	ReInitSound();
 
 	for (int i : st->run_map)
 		if (st->status[i] == kRunning)
@@ -1258,7 +1276,10 @@ void RunAuditUI(AuditDlgState *st, bool selected_only)
 	}
 
 	if (st->close_when_done)
-		EndDialog(st->hDlg, 0);
+	{
+		DestroyWindow(st->hDlg);   // frees st - nothing may touch it after
+		RestoreSNESDisplay();
+	}
 }
 
 INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -1352,6 +1373,20 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		NMHDR *nm = (NMHDR *)lParam;
 		AuditDlgState *st = GetState(hDlg);
 		if (!st) break;
+		if (nm->idFrom == IDC_AUDIT_LIST && nm->code == NM_DBLCLK)
+		{
+			// Double-click plays the ROM in the emulator behind us -
+			// through the full app load path, exactly like drag-drop.
+			const NMITEMACTIVATE *ia = (const NMITEMACTIVATE *)lParam;
+			if (!st->running && ia->iItem >= 0 &&
+			    ia->iItem < (int)st->rows.size())
+			{
+				const Rom &r = st->roms[st->rows[ia->iItem]];
+				Utf8ToWide wpath(r.path.c_str());
+				WinLoadROMFromDialog(wpath);
+			}
+			return TRUE;
+		}
 		if (nm->idFrom == IDC_AUDIT_LIST && nm->code == LVN_ITEMCHANGED)
 		{
 			NMLISTVIEW *lv = (NMLISTVIEW *)lParam;
@@ -1562,7 +1597,8 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				SetWindowText(st->hStat, TEXT("Stopping..."));
 				return TRUE;
 			}
-			EndDialog(hDlg, 0);
+			DestroyWindow(hDlg);
+			RestoreSNESDisplay();
 			return TRUE;
 		}
 		}
@@ -1579,7 +1615,8 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			SetWindowText(st->hStat, TEXT("Stopping..."));
 			return TRUE;
 		}
-		EndDialog(hDlg, 0);
+		DestroyWindow(hDlg);
+		RestoreSNESDisplay();
 		return TRUE;
 	}
 
@@ -1589,6 +1626,7 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		SetWindowLongPtr(hDlg, DWLP_USER, 0);
 		if (st) StopScan(st);   // it posts to this window, so it goes first
 		delete st;
+		s_hAuditDlg = NULL;
 		return TRUE;
 	}
 	}
@@ -1604,5 +1642,18 @@ bool WinAuditTestsAvailable()
 
 void WinShowAuditTestsDialog()
 {
-	DialogBox(g_hInst, MAKEINTRESOURCE(IDD_AUDIT_TESTS), GUI.hWnd, AuditDlgProc);
+	if (s_hAuditDlg)
+	{
+		SetForegroundWindow(s_hAuditDlg);
+		return;
+	}
+	// Modeless - the loaded session keeps running behind the list; the
+	// audit cores' Settings overrides are scoped to the run (RunAuditUI).
+	RestoreGUIDisplay();
+	s_hAuditDlg = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_AUDIT_TESTS),
+	                           GUI.hWnd, AuditDlgProc);
+	if (s_hAuditDlg) ShowWindow(s_hAuditDlg, SW_SHOW);
+	else             RestoreSNESDisplay();
 }
+
+HWND WinAuditTestsDialogHwnd() { return s_hAuditDlg; }

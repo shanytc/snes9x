@@ -3041,21 +3041,10 @@ LRESULT CALLBACK WinProc(
 			}
 			break;
 		case ID_TESTS_AUDITTESTS:
-			{
-				RestoreGUIDisplay();
-				CloseSoundDevice();
-				// Same isolation as the Acid runner: private cores, muted,
-				// no SGB BIOS steering how the audit cores boot.
-				const bool8 saved_bios_active = Settings.SGB_BIOSModeActive;
-				const bool8 saved_mute        = Settings.Mute;
-				Settings.SGB_BIOSModeActive = FALSE;
-				Settings.Mute = TRUE;
-				WinShowAuditTestsDialog();
-				Settings.SGB_BIOSModeActive = saved_bios_active;
-				Settings.Mute = saved_mute;
-				ReInitSound();
-				RestoreSNESDisplay();
-			}
+			// Modeless - the session keeps running behind the list, and
+			// RunAuditUI scopes the mute/BIOS-less steering to the run
+			// that the modal launcher used to hold for the whole dialog.
+			WinShowAuditTestsDialog();
 			break;
 		case ID_SOUND_VOICEKUN_ATTACH:
 			{
@@ -4403,6 +4392,10 @@ void S9xOnSNESPadRead()
 				if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
 					continue;
 
+				HWND hAuditDlg = WinAuditTestsDialogHwnd();
+				if (hAuditDlg && IsDialogMessage (hAuditDlg, &msg))
+					continue;
+
 				if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
 				{
 					TranslateMessage (&msg);
@@ -4943,6 +4936,10 @@ int WINAPI WinMain(
 #endif
 
             if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
+                continue;
+
+            HWND hAuditDlg = WinAuditTestsDialogHwnd();
+            if (hAuditDlg && IsDialogMessage (hAuditDlg, &msg))
                 continue;
 
             if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
@@ -6102,6 +6099,13 @@ static void ResetFrameTimer ()
 {
 	// determines if we can do sound sync
 	GUI.AllowSoundSync = Settings.PAL ? Settings.FrameTime == Settings.FrameTimePAL : Settings.FrameTime == Settings.FrameTimeNTSC;
+}
+
+// Full app load path for the audit dialog's double-click-to-play (LoadROM
+// is static; the dialog lives in its own TU).
+bool WinLoadROMFromDialog(const TCHAR *path)
+{
+	return LoadROM(path);
 }
 
 static bool LoadROMPlain(const TCHAR *filename)

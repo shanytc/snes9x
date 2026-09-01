@@ -6,5 +6,11 @@
 
 bool WinAuditTestsAvailable();
 void WinShowAuditTestsDialog();
+// Modeless: NULL when the dialog is not up. The main message pumps route
+// keyboard through IsDialogMessage with it.
+HWND WinAuditTestsDialogHwnd();
+// Defined in wsnes9x.cpp: the full app load path (the drag-drop one), for
+// the dialog's double-click-to-play.
+bool WinLoadROMFromDialog(const TCHAR *path);
 
 #endif

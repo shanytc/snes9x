@@ -63,6 +63,9 @@ struct Rom
 	uint8_t     sgb_flag = 0;   // header $0146
 	bool        gbc_file = false;   // the image inside is .gbc
 	uint32_t    size     = 0;
+	// Mapper-family bucket ("Official", "Sachen", "MBC1M", ...) from the
+	// core's cart detection over the full image; cached across scans.
+	std::string cart_type;
 };
 
 bool RomSgbEnhanced(const Rom &r);   // $0146 == $03
@@ -183,7 +186,9 @@ int WriteBaseline(const char *dir, const std::vector<Rom> &roms,
 // .gb/.gbc entry. `progress` (done, total files) may return false to
 // abort - the scan then returns what it has.
 using ScanProgressFn = bool (*)(void *user, int done, int total);
-std::vector<Rom> ScanRoms(const char *roms_dir,
+// Cart types come from the core's mapper detection (a full-image read),
+// memoized in audit_dir/cart_types.txt so later scans stay header-quick.
+std::vector<Rom> ScanRoms(const char *roms_dir, const char *audit_dir,
                           ScanProgressFn progress = nullptr,
                           void *user = nullptr);
 

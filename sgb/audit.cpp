@@ -7,6 +7,7 @@
 #include "audit.h"
 #include "acid_report.h"   // EncodePng
 #include "sgb.h"
+#include "gb_cart.h"
 #include "../snes9x.h"     // DECOMPOSE_PIXEL - BlitScreen emits host pixels
 
 #include <algorithm>
@@ -517,8 +518,205 @@ bool RomResult::AllPassed(const Rom &r) const
   Scanning
 --------------------------------------------------------------------------*/
 
-std::vector<Rom> ScanRoms(const char *roms_dir, ScanProgressFn progress,
-                          void *user)
+// Mapper-family display bucket, from the core's own detection.
+const char *CartTypeBucket(const SGB::Cart &c)
+{
+	using SGB::MbcType;
+	switch (c.mbc.type)
+	{
+		case MbcType::SachenMMC1:  return "Sachen";
+		case MbcType::Rocket:      return "Rocket";
+		case MbcType::NtOld1:
+		case MbcType::NtOld2:
+		case MbcType::NtNew:
+		case MbcType::PokeJadeDia: return "Makon/NT";
+		case MbcType::BBD:
+		case MbcType::Ggb81:
+		case MbcType::Hitek:       return "BBD";
+		case MbcType::Sintax:
+		case MbcType::SkobLee8:    return "Sintax";
+		case MbcType::LiCheng:     return "Li Cheng";
+		case MbcType::Vf001:       return "Vast Fame";
+		case MbcType::MMM01:       return "MMM01";
+		case MbcType::M161:        return "M161";
+		case MbcType::MBC6:        return "MBC6";
+		case MbcType::MBC7:        return "MBC7";
+		case MbcType::HuC1:        return "HuC1";
+		case MbcType::HuC3:        return "HuC3";
+		case MbcType::TAMA5:       return "TAMA5";
+		case MbcType::Camera:      return "Camera";
+		default: break;
+	}
+	if (c.mbc1_multicart)  return "MBC1M";
+	if (c.duz_multicart)   return "Duz 2-in-1";
+	if (c.mbc5_multicart)  return "MBC5 multi";
+	if (c.flat_unlicensed) return "Unl MBC1";
+	return "Official";
+}
+
+constexpr uint8_t kNintendoLogo48[48] = {
+	0xCE,0xED,0x66,0x66,0xCC,0x0D,0x00,0x0B,0x03,0x73,0x00,0x83,
+	0x00,0x0C,0x00,0x0D,0x00,0x08,0x11,0x1F,0x88,0x89,0x00,0x0E,
+	0xDC,0xCC,0x6E,0xE6,0xDD,0xDD,0xD9,0x99,0xBB,0xBB,0x67,0x63,
+	0x6E,0x0E,0xEC,0xCC,0xDD,0xDC,0x99,0x9F,0xBB,0xB9,0x33,0x3E };
+
+// Sub-game headers (logo + valid header checksum) at 32 KiB boundaries -
+// two or more marks a multicart family no structural probe knows yet (the
+// 36-in-1 hides its first sub-game at $120000, out of every probe's sight).
+int CountSubHeaders(const std::vector<uint8_t> &img)
+{
+	int n = 0;
+	for (size_t b = 0x8000; b + 0x150 <= img.size(); b += 0x8000)
+	{
+		bool logo = true;
+		for (int i = 0; i < 48 && logo; ++i)
+			if (img[b + 0x104 + i] != kNintendoLogo48[i]) logo = false;
+		if (!logo) continue;
+		uint8_t sum = 0;
+		for (size_t i = b + 0x134; i <= b + 0x14C; ++i)
+			sum = static_cast<uint8_t>(sum - img[i] - 1);
+		if (sum != img[b + 0x14D]) continue;
+		// Mirror padding repeats the cart's own header (Yars' Revenge is
+		// 16 copies of itself); only a DIFFERENT title marks a sub-game.
+		if (std::memcmp(&img[b + 0x134], &img[0x134], 11) == 0) continue;
+		++n;
+	}
+	return n;
+}
+
+// LotCheck-grade forensics. The boot ROM only enforces the logo and header
+// checksum, which every bootleg forges; official releases also pass the
+// publishing checks Nintendo's LotCheck ran before manufacture.
+bool LotCheckClean(const std::vector<uint8_t> &img)
+{
+	if (img.size() < 0x150) return false;
+
+	// Global checksum: every ROM byte except its own two.
+	uint16_t sum = 0;
+	for (size_t i = 0; i < img.size(); ++i)
+		if (i != 0x14E && i != 0x14F) sum = static_cast<uint16_t>(sum + img[i]);
+	if (sum != ((img[0x14E] << 8) | img[0x14F])) return false;
+
+	// ROM-size byte must match the image; RAM-size byte must be a
+	// documented code, and $00 on an MBC2 (its 512x4 RAM is internal).
+	const uint8_t sz = img[0x148];
+	const size_t expect = sz <= 8    ? (size_t)0x8000 << sz
+	                    : sz == 0x52 ? 0x120000
+	                    : sz == 0x53 ? 0x140000
+	                    : sz == 0x54 ? 0x180000 : 0;
+	if (expect != img.size()) return false;
+	if (img[0x149] > 5) return false;
+	if ((img[0x147] == 0x05 || img[0x147] == 0x06) && img[0x149] != 0)
+		return false;
+
+	// CGB flag is $80/$C0 or a plain title byte - never $80 with low bits.
+	const uint8_t cgb = img[0x143];
+	const bool cgb_hdr = (cgb & 0x80) != 0;
+	if (cgb_hdr && cgb != 0x80 && cgb != 0xC0) return false;
+
+	// GBC and SGB releases must use the new-licensee scheme: $014B = $33
+	// with a two-character alphanumeric publisher ID at $0144.
+	if ((cgb_hdr || img[0x146] == 0x03) && img[0x14B] != 0x33) return false;
+	auto alnum = [](uint8_t ch) {
+		return (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z');
+	};
+	if (img[0x14B] == 0x33 && (!alnum(img[0x144]) || !alnum(img[0x145])))
+		return false;
+
+	// Title: text with $00 padding and no text after it. On CGB carts the
+	// 4-char manufacturer code at $013F may follow the padding - but early
+	// CGB releases still run plain titles to 15 chars (POKEMON YELLOW), so
+	// the 11-char truncation can't be a hard rule. Extended bytes pass:
+	// Gluecksrad ships "GL\x9ACKSRAD", a codepage-850 umlaut.
+	const size_t tend = cgb_hdr ? 0x143 : 0x144;
+	bool padding = false;
+	for (size_t i = 0x134; i < tend; ++i)
+	{
+		const uint8_t ch = img[i];
+		if (ch == 0) { padding = true; continue; }
+		if (ch < 0x20) return false;
+		if (padding)
+		{
+			// Text resuming after padding is only the manufacturer code.
+			if (!cgb_hdr || i < 0x13F) return false;
+			for (size_t j = 0x13F; j < 0x143; ++j)
+				if (img[j] < 0x20 || img[j] > 0x7E) return false;
+			break;
+		}
+	}
+	return true;
+}
+
+// Full-image classification - the unlicensed families and multicart wirings
+// only show up to the core's structural detection, never the header byte.
+std::string ClassifyCartType(const std::string &path)
+{
+	std::vector<uint8_t> img;
+	bool gbc = false;
+	if (!LoadGBImage(path, img, gbc) || img.empty()) return "Unknown";
+	SGB::Cart cart;
+	if (!SGB::CartLoad(cart, img.data(), img.size(), nullptr)) return "Unknown";
+	const std::string bucket = CartTypeBucket(cart);
+	// A cart no probe recognizes can still betray itself: hidden sub-game
+	// headers, or hardware-valid header fields that fail LotCheck.
+	if (bucket == "Official")
+	{
+		if (CountSubHeaders(img) >= 2) return "Multicart";
+		if (!LotCheckClean(img))       return "Bootleg";
+	}
+	return bucket;
+}
+
+// Cart-type cache: audit/cart_types.txt, "<size>\t<type>\t<key>" lines under
+// a version header. Bump kCartTypeCacheVer whenever detection changes.
+constexpr int kCartTypeCacheVer = 4;
+
+std::map<std::string, std::string> LoadCartTypeCache(const std::string &file)
+{
+	std::map<std::string, std::string> m;
+	FILE *f = fopen(file.c_str(), "rb");
+	if (!f) return m;
+	char line[1024];
+	bool ver_ok = false;
+	while (fgets(line, sizeof line, f))
+	{
+		if (char *nl = strpbrk(line, "\r\n")) *nl = 0;
+		if (!ver_ok)
+		{
+			ver_ok = atoi(line) == kCartTypeCacheVer;
+			if (!ver_ok) break;
+			continue;
+		}
+		char *type = strchr(line, '\t');
+		if (!type) continue;
+		*type++ = 0;
+		char *key = strchr(type, '\t');
+		if (!key) continue;
+		*key++ = 0;
+		m[std::string(key) + "|" + line] = type;
+	}
+	fclose(f);
+	return m;
+}
+
+void SaveCartTypeCache(const std::string &file,
+                       const std::map<std::string, std::string> &m)
+{
+	FILE *f = fopen(file.c_str(), "wb");
+	if (!f) return;
+	fprintf(f, "%d\n", kCartTypeCacheVer);
+	for (const auto &kv : m)
+	{
+		const size_t bar = kv.first.rfind('|');
+		if (bar == std::string::npos) continue;
+		fprintf(f, "%s\t%s\t%s\n", kv.first.c_str() + bar + 1,
+		        kv.second.c_str(), kv.first.substr(0, bar).c_str());
+	}
+	fclose(f);
+}
+
+std::vector<Rom> ScanRoms(const char *roms_dir, const char *audit_dir,
+                          ScanProgressFn progress, void *user)
 {
 	std::vector<Rom> out;
 	const std::string root = roms_dir ? roms_dir : "Roms";
@@ -540,6 +738,13 @@ std::vector<Rom> ScanRoms(const char *roms_dir, ScanProgressFn progress,
 	collect(root, "");
 	for (const std::string &d : dirs)
 		collect(Join(root, d), d);
+
+	// Cart-type cache - classification reads whole images, so remember.
+	const std::string cache_file =
+		Join(audit_dir ? audit_dir : "audit", "cart_types.txt");
+	std::map<std::string, std::string> type_cache = LoadCartTypeCache(cache_file);
+	std::mutex cache_mtx;
+	bool cache_dirty = false;
 
 	// Phase 2: classify, spread over the cores - each header probe is an
 	// independent file open. Slots keep the output in list order, and the
@@ -576,6 +781,22 @@ std::vector<Rom> ScanRoms(const char *roms_dir, ScanProgressFn progress,
 				r.cgb_flag = hdr[0x143];
 				r.sgb_flag = hdr[0x146];
 				r.size     = full;
+				// Cart type from the cache, else the full-image detection.
+				char ck[32];
+				snprintf(ck, sizeof ck, "|%u", full);
+				const std::string cache_key = r.key + ck;
+				{
+					std::lock_guard<std::mutex> lk(cache_mtx);
+					auto it = type_cache.find(cache_key);
+					if (it != type_cache.end()) r.cart_type = it->second;
+				}
+				if (r.cart_type.empty())
+				{
+					r.cart_type = ClassifyCartType(r.path);
+					std::lock_guard<std::mutex> lk(cache_mtx);
+					type_cache[cache_key] = r.cart_type;
+					cache_dirty = true;
+				}
 				slots[i] = std::move(r);
 				keep[i]  = 1;
 			}
@@ -595,6 +816,7 @@ std::vector<Rom> ScanRoms(const char *roms_dir, ScanProgressFn progress,
 
 	for (size_t i = 0; i < cands.size(); ++i)
 		if (keep[i]) out.push_back(std::move(slots[i]));
+	if (cache_dirty) SaveCartTypeCache(cache_file, type_cache);
 	if (progress) progress(user, (int)cands.size(), (int)cands.size());
 	return out;
 }

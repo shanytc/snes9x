@@ -39,7 +39,7 @@ constexpr int kShowPass = 0, kShowFail = 1, kShowError = 2, kShowPending = 3,
               kShowMissing = 4, kShowSgb = 5;
 
 // Fixed columns; the combo cells follow, then Verdict and Detail.
-enum { kColNum, kColRom, kColType, kColSgb, kColBoot, kColLink, kColCombo };
+enum { kColNum, kColRom, kColType, kColCart, kColSgb, kColBoot, kColLink, kColCombo };
 constexpr int kColVerdict = kColCombo + kComboCount;
 constexpr int kColDetail  = kColVerdict + 1;
 
@@ -65,6 +65,8 @@ struct AuditDlgState
 	std::string       search;
 	std::vector<std::string> folders;
 	std::vector<char> folder_on;
+	std::vector<std::string> carttypes;
+	std::vector<char> carttype_on;
 	std::vector<char> show_on;
 
 	std::vector<int> rows;      // list row -> rom index
@@ -90,6 +92,11 @@ struct AuditDlgState
 	int   shown     = -1;    // rom the preview is on
 	int   shown_combo = -1;  // combo the preview is on; -1 = every combo
 	int   shot_src  = 0;     // index into ShotSources
+	// Sync Position: keep the preview on the same column (and ours/base
+	// side) across ROM hops; a ROM without it falls back to the first.
+	bool  sync_pos   = false;
+	int   sync_combo = -1;
+	bool  sync_ours  = true;
 	DWORD started   = 0;
 	// Wall time spent paused, kept out of the ETA math.
 	DWORD pause_accum = 0, pause_since = 0;
@@ -220,7 +227,7 @@ void RefreshRow(AuditDlgState *st, int rom)
 // under a header line, so it pastes straight into a sheet or a bug report.
 void CopySelectedRows(AuditDlgState *st)
 {
-	std::string text = "#\tROM\tType\tSGB\tBoot\tLink";
+	std::string text = "#\tROM\tType\tCart\tSGB\tBoot\tLink";
 	for (int c = 0; c < kComboCount; ++c)
 	{
 		text += '\t';
@@ -240,6 +247,7 @@ void CopySelectedRows(AuditDlgState *st)
 		text += buf;
 		text += r.name;
 		text += r.gbc_file ? "\tGBC" : "\tGB";
+		text += '\t'; text += r.cart_type;
 		text += RomSgbEnhanced(r) ? "\tyes" : "\t-";
 		text += '\t'; text += RomBootClass(r);
 		text += '\t'; text += LinkLabelFor(st->linkmeta, r);
@@ -316,6 +324,13 @@ bool ShowRom(const AuditDlgState *st, int i)
 			if (st->folder_on[f] && st->folders[f] == r.folder) on = true;
 		if (!on) return false;
 	}
+	if (AnyOn(st->carttype_on))
+	{
+		bool on = false;
+		for (size_t t = 0; t < st->carttypes.size(); ++t)
+			if (st->carttype_on[t] && st->carttypes[t] == r.cart_type) on = true;
+		if (!on) return false;
+	}
 	if (st->show_on[kShowSgb] && !RomSgbEnhanced(r)) return false;
 	bool any_status = false;
 	for (int k = 0; k < kShowSgb; ++k)
@@ -358,6 +373,7 @@ void RebuildColumns(AuditDlgState *st)
 		{ "#",     34 },
 		{ "ROM",  240 },
 		{ "Type",  38 },
+		{ "Cart",  60 },
 		{ "SGB",   34 },
 		{ "Boot",  56 },
 		{ "Link",  64 },
@@ -388,6 +404,7 @@ void PopulateList(AuditDlgState *st)
 		ListView_InsertItem(st->hList, &lvi);
 		SetItemText(st->hList, (int)row, kColRom, r.name.c_str());
 		SetItemText(st->hList, (int)row, kColType, r.gbc_file ? "GBC" : "GB");
+		SetItemText(st->hList, (int)row, kColCart, r.cart_type.c_str());
 		SetItemText(st->hList, (int)row, kColSgb, RomSgbEnhanced(r) ? "yes" : "-");
 		SetItemText(st->hList, (int)row, kColBoot, RomBootClass(r).c_str());
 		SetItemText(st->hList, (int)row, kColLink,
@@ -413,6 +430,19 @@ void UpdateFilterButtons(AuditDlgState *st)
 	}
 	else snprintf(buf, sizeof buf, "Folders: %d", nf);
 	SetCtrlText(GetDlgItem(st->hDlg, IDC_AUDIT_FOLDERS), buf);
+
+	const int nc = (int)std::count(st->carttype_on.begin(),
+	                               st->carttype_on.end(), 1);
+	if (nc == 0) snprintf(buf, sizeof buf, "Cart: all");
+	else if (nc == 1)
+	{
+		const size_t k = std::find(st->carttype_on.begin(),
+		                           st->carttype_on.end(),
+		                           (char)1) - st->carttype_on.begin();
+		snprintf(buf, sizeof buf, "Cart: %s", st->carttypes[k].c_str());
+	}
+	else snprintf(buf, sizeof buf, "Cart: %d", nc);
+	SetCtrlText(GetDlgItem(st->hDlg, IDC_AUDIT_CARTTYPE), buf);
 
 	const int ns = (int)std::count(st->show_on.begin(), st->show_on.end(), 1);
 	if (ns == 0) snprintf(buf, sizeof buf, "Show: all");
@@ -623,12 +653,38 @@ void UpdateShotCaption(AuditDlgState *st)
 	UpdateShotNav(st);
 }
 
+// Sync Position: the remembered column (and ours/base side) in this ROM's
+// capture list; the same column on the other side beats falling back.
+int SyncShotIndex(const std::vector<ShotSource> &src, int combo, bool ours)
+{
+	for (int i = 0; i < (int)src.size(); ++i)
+		if (src[i].combo == combo && src[i].ours == ours) return i;
+	for (int i = 0; i < (int)src.size(); ++i)
+		if (src[i].combo == combo) return i;
+	return 0;
+}
+
+void RememberShotPos(AuditDlgState *st)
+{
+	const std::vector<ShotSource> src = ShotSources(st, st->shown);
+	if (src.empty()) return;
+	const ShotSource &cur = src[st->shot_src % (int)src.size()];
+	st->sync_combo = cur.combo;
+	st->sync_ours  = cur.ours;
+}
+
 void SelectShot(AuditDlgState *st, int rom, int combo)
 {
 	if (rom == st->shown && combo == st->shown_combo) return;
 	st->shown = rom;
 	st->shown_combo = combo;
 	st->shot_src = 0;
+	if (st->sync_pos && st->sync_combo >= 0)
+	{
+		const std::vector<ShotSource> src = ShotSources(st, rom);
+		if (!src.empty())
+			st->shot_src = SyncShotIndex(src, st->sync_combo, st->sync_ours);
+	}
 	UpdateShotCaption(st);
 	InvalidateRect(st->hShot, NULL, TRUE);
 }
@@ -638,6 +694,7 @@ void StepShot(AuditDlgState *st, int delta)
 	const std::vector<ShotSource> src = ShotSources(st, st->shown);
 	if (src.size() < 2) return;
 	st->shot_src = (int)((st->shot_src + src.size() + delta) % src.size());
+	RememberShotPos(st);
 	InvalidateRect(st->hShot, NULL, TRUE);
 	UpdateShotCaption(st);
 }
@@ -1029,7 +1086,7 @@ bool ScanProgressCB(void *user, int done, int total)
 void ScanThread(AuditDlgState *st)
 {
 	std::vector<Rom> *out = new std::vector<Rom>(
-		ScanRoms(st->roms_dir.c_str(), ScanProgressCB, st));
+		ScanRoms(st->roms_dir.c_str(), st->audit_dir.c_str(), ScanProgressCB, st));
 	if (st->scan_abort.load()) { delete out; return; }
 	PostMessage(st->hDlg, WM_AUDIT_SCANDONE, 0, (LPARAM)out);
 }
@@ -1061,6 +1118,17 @@ void ScanDone(AuditDlgState *st, std::vector<Rom> *roms)
 		    == st->folders.end())
 			st->folders.push_back(r.folder);
 	st->folder_on.assign(st->folders.size(), 0);
+
+	st->carttypes.clear();
+	for (const Rom &r : st->roms)
+		if (std::find(st->carttypes.begin(), st->carttypes.end(), r.cart_type)
+		    == st->carttypes.end())
+			st->carttypes.push_back(r.cart_type);
+	std::sort(st->carttypes.begin(), st->carttypes.end());
+	// "Official" leads; the exotic families follow alphabetically.
+	auto of = std::find(st->carttypes.begin(), st->carttypes.end(), "Official");
+	if (of != st->carttypes.end()) std::rotate(st->carttypes.begin(), of, of + 1);
+	st->carttype_on.assign(st->carttypes.size(), 0);
 
 	st->baselines = DiscoverBaselines(st->audit_dir.c_str());
 	if (!st->baselines.empty()) st->base_sel = 0;
@@ -1391,6 +1459,13 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			                  "All folders");
 			return TRUE;
 		}
+		case IDC_AUDIT_CARTTYPE:
+		{
+			AuditDlgState *st = GetState(hDlg);
+			if (st) CheckMenu(st, IDC_AUDIT_CARTTYPE, st->carttypes,
+			                  st->carttype_on, "All cart types");
+			return TRUE;
+		}
 		case IDC_AUDIT_SHOW:
 		{
 			AuditDlgState *st = GetState(hDlg);
@@ -1428,6 +1503,18 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			if (st && !st->running) RescanBaselines(st);
 			return TRUE;
 		}
+		case IDC_AUDIT_SYNCPOS:
+		{
+			AuditDlgState *st = GetState(hDlg);
+			if (st)
+			{
+				st->sync_pos =
+					IsDlgButtonChecked(hDlg, IDC_AUDIT_SYNCPOS) == BST_CHECKED;
+				// Anchor on whatever the pane is showing right now.
+				if (st->sync_pos) RememberShotPos(st);
+			}
+			return TRUE;
+		}
 		case IDC_AUDIT_SHOTPREV:
 		case IDC_AUDIT_SHOTNEXT:
 		{
@@ -1447,6 +1534,7 @@ INT_PTR CALLBACK AuditDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			if (!st || st->running) return TRUE;
 			st->search.clear();
 			std::fill(st->folder_on.begin(), st->folder_on.end(), (char)0);
+			std::fill(st->carttype_on.begin(), st->carttype_on.end(), (char)0);
 			std::fill(st->show_on.begin(), st->show_on.end(), (char)0);
 			SetWindowText(st->hSearch, TEXT(""));
 			ApplyFilter(st);

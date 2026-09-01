@@ -773,6 +773,8 @@
 #define IDC_AUDIT_BASEPICK              3469
 #define IDC_AUDIT_RUNSEL                3470
 #define IDC_AUDIT_SAVERUN               3471
+#define IDC_AUDIT_SYNCPOS               3472
+#define IDC_AUDIT_CARTTYPE              3473
 #define IDC_ACID_DIAG_LIST              3389
 #define IDC_ACID_DIAG_HEAD              3390
 
@@ -951,7 +953,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3472
+#define _APS_NEXT_CONTROL_VALUE         3474
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

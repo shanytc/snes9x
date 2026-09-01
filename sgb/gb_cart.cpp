@@ -474,6 +474,7 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	// Mani claims MBC1/MBC3), so we identify them by structural markers
 	// instead. Sachen: bit-permuted logo at $0104-$01FF. MMM01: an
 	// additional Nintendo logo at the last 32 KiB of ROM (the boot menu).
+	c.flat_unlicensed = false;
 	if (LooksLikeSachenScrambledLogo(c.rom))
 	{
 		c.mbc.type      = MbcType::SachenMMC1;
@@ -610,6 +611,7 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	else if (LooksLikeFlatUnlicensed(h))
 	{
 		c.mbc.type    = MbcType::MBC1;
+		c.flat_unlicensed = true;
 		c.has_battery = false;
 		c.has_rtc     = false;
 		c.has_rumble  = false;
@@ -690,6 +692,7 @@ void CartUnload(Cart &c)
 	c.mbc5_multicart = false;
 	c.sachen_runs_raw  = false;
 	c.sachen_logo_high = false;
+	c.flat_unlicensed  = false;
 	MbcReset(c.mbc);
 	c.mbc.type    = MbcType::None;
 	c.unl = MbcUnl();

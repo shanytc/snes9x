@@ -947,10 +947,7 @@ void S9xEndScreenRefresh (void)
 		if (Settings.SGB_BIOSModeActive)
 		{
 			S9xSGBOverlayBiosBorder(GFX.Screen, GFX.RealPPL);
-			// SGB+GBC hack: the cart never sends its border on the color
-			// pass, so the prelude-harvested one is painted over the ring.
-			S9xSGBOverlayCartBorder(GFX.Screen, GFX.RealPPL);
-			// SGB+GBC hack: real CGB colour inside the SGB border.
+			// SGB+GBC hack: real CGB colour inside the BIOS's default frame.
 			S9xSGBOverlayCgbScreen(GFX.Screen, GFX.RealPPL);
 			// MASK_EN pane cover — the BIOS's own freeze doesn't
 			// engage under our slaving (see Emulator::OverlayBiosMask).

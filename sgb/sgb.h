@@ -264,9 +264,6 @@ public:
 	// SNES frame, so the game keeps its SGB border but gains real color.
 	void  OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
 	void  OverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
-	// SGB+GBC hack, BIOS mode: paint the prelude-harvested cart border
-	// over the BIOS's default frame. No-op without a harvested border.
-	void  OverlayCartBorder(uint16_t *dest, uint32_t pitch_pixels);
 
 	// Write a one-line status snapshot — PC, SP, A, halt/stop flag,
 	// total T-cycles, illegal-op count.
@@ -306,10 +303,6 @@ public:
 private:
 	// Per-frame hook for the boot-logo hold; see the definition.
 	void UpdateBootLogoHold();
-
-	// SGB+GBC hack: harvest the cart's border by running a hidden scratch
-	// core through the classic mono border pass. See the definition.
-	void RunBorderPrelude();
 
 	Impl *impl_;
 };
@@ -516,9 +509,6 @@ void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
 
 // BIOS-mode MASK_EN pane cover — see Emulator::OverlayBiosMask.
 void S9xSGBOverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
-
-// SGB+GBC hack cart border — see Emulator::OverlayCartBorder.
-void S9xSGBOverlayCartBorder(uint16_t *dest, uint32_t pitch_pixels);
 
 // Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
 // contract. `count_int16s` is the number of int16 samples (stereo frame

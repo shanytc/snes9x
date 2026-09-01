@@ -353,7 +353,6 @@ struct Emulator::Impl
 	// Raw GB frame as the boot left it, for the boot-logo hold below.
 	uint8_t     boot_logo_ref[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 	bool        boot_logo_ref_valid = false;
-	uint16_t    boot_logo_frames = 0;
 
 	// ICD2 state — the SGB cart-chip register set exposed at 0x6000-0x7FFF
 	// on the SNES side when running under a real BIOS. Layout mirrors the
@@ -971,7 +970,6 @@ void Emulator::Reset()
 	}
 
 	impl_->boot_logo_ref_valid = false;
-	impl_->boot_logo_frames    = 0;
 
 	impl_->cart.mbc.sachen_locked = impl_->mem.boot_rom_enabled || !impl_->cart.sachen_runs_raw;
 }
@@ -2337,30 +2335,52 @@ void Emulator::OnPpuVBlank()
 }
 
 // The boot leaves its logo in VRAM and plenty of carts never redraw it — they
-// inherit it and fade it with BGP, which changes no raw pixel. So hold the
-// panel on the picture the boot handed over and release when the cart draws
-// something else; raw_framebuffer is written even while present_hold is on.
+// inherit it, fade it with BGP (no raw pixel changes), or blank the screen
+// and flash it back before their first real draw (Test Drive Off-Road 3). So
+// hold the panel on the picture the boot handed over, ride out flat frames
+// that display as white — they are staging, and the cover looks the same —
+// and release on the first frame that is neither. A cart that composes a
+// logo screen of its own (Castlevania Legends) changes the pixels, so its
+// version shows. State checks only: no frame counts, no time bounds.
 void Emulator::UpdateBootLogoHold()
 {
 	// Nothing to hide, or the boot ROM is still scrolling it into place.
 	if (!impl_->ppu.boot_logo_hold || impl_->mem.boot_rom_enabled) return;
 
 	const uint8_t *raw = impl_->ppu.raw_framebuffer;
+	bool    flat    = true;
+	uint8_t present = 0;
+	for (size_t i = 0; i < sizeof impl_->boot_logo_ref; ++i)
+	{
+		present |= static_cast<uint8_t>(1u << (raw[i] & 3));
+		if (raw[i] != raw[0]) flat = false;
+	}
+	// raw is pre-palette; what matters is the displayed result. With BGP
+	// mapping every present shade to the lightest color the frame shows as
+	// blank white no matter what the cart staged underneath it (Test Drive
+	// Off-Road 3 builds its first screen under BGP=00 cover).
+	bool disp_white = true;
+	for (int s = 0; s < 4; ++s)
+		if (((present >> s) & 1) && ((impl_->ppu.bgp >> (2 * s)) & 3) != 0)
+			disp_white = false;
+
 	if (!impl_->boot_logo_ref_valid)
 	{
-		// A flat frame means the boot left no picture to hide.
-		bool flat = true;
-		for (size_t i = 1; i < sizeof impl_->boot_logo_ref; ++i)
-			if (raw[i] != raw[0]) { flat = false; break; }
-		if (flat) { impl_->ppu.boot_logo_hold = false; return; }
+		if (disp_white) return;   // white staging: wait for the picture
+		if (flat)
+		{
+			// A visible flat frame is the cart's own (fade-in lead);
+			// covering it would repaint it.
+			impl_->ppu.boot_logo_hold = false;
+			return;
+		}
 		std::memcpy(impl_->boot_logo_ref, raw, sizeof impl_->boot_logo_ref);
 		impl_->boot_logo_ref_valid = true;
 		return;
 	}
 
-	// Bounded so a cart that somehow never redraws cannot strand a blank panel.
-	if (std::memcmp(raw, impl_->boot_logo_ref, sizeof impl_->boot_logo_ref) != 0 ||
-	    ++impl_->boot_logo_frames > 900)
+	if (std::memcmp(raw, impl_->boot_logo_ref, sizeof impl_->boot_logo_ref) != 0 &&
+	    !disp_white)
 		impl_->ppu.boot_logo_hold = false;
 }
 

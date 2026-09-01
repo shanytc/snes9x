@@ -22,7 +22,7 @@ STBSRC  := $(ROOT)/external/stb/stb_image_implementation.cpp
 INCS    := -I$(ROOT) -I$(SGBDIR) -I$(ROOT)/external/stb
 
 TARGET := sgb_test
-SRCS   := cpu_test.cpp
+SRCS   := cpu_test.cpp host_stubs.cpp
 
 all: $(TARGET)
 
@@ -30,8 +30,8 @@ $(TARGET): $(SRCS) $(SGBSRCS)
 	$(CXX) $(CXXFLAGS) $(INCS) $(SRCS) $(SGBSRCS) $(STBSRC) -o $@
 
 # Headless GB Emulator Shootout runner — see acid_test.cpp.
-acid_test: acid_test.cpp $(SGBSRCS)
-	$(CXX) $(CXXFLAGS) $(INCS) acid_test.cpp $(SGBSRCS) $(STBSRC) -o $@
+acid_test: acid_test.cpp host_stubs.cpp $(SGBSRCS)
+	$(CXX) $(CXXFLAGS) $(INCS) acid_test.cpp host_stubs.cpp $(SGBSRCS) $(STBSRC) -o $@
 
 clean:
 	rm -f $(TARGET) acid_test sgb_out.ppm sgb_out.rgb

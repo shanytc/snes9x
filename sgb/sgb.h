@@ -248,6 +248,10 @@ public:
 	// the SNES-rendered output, sparing the central 20×18 GB area.
 	void  OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
 
+	// BIOS-mode MASK_EN honored on the composed frame — see the .cpp note
+	// on why the BIOS's own freeze does not engage under our slaving.
+	void OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
+
 	// SGB+GBC hack: paint the GB core's CGB output over the GB area of the
 	// SNES frame, so the game keeps its SGB border but gains real color.
 	void  OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
@@ -494,6 +498,9 @@ void S9xSGBOverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
 
 // SGB+GBC hack — see Emulator::OverlayCgbScreen. No-op unless it is active.
 void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
+
+// BIOS-mode MASK_EN pane cover — see Emulator::OverlayBiosMask.
+void S9xSGBOverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
 
 // Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
 // contract. `count_int16s` is the number of int16 samples (stereo frame

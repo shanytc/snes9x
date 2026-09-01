@@ -949,6 +949,9 @@ void S9xEndScreenRefresh (void)
 			S9xSGBOverlayBiosBorder(GFX.Screen, GFX.RealPPL);
 			// SGB+GBC hack: real CGB colour inside the SGB border.
 			S9xSGBOverlayCgbScreen(GFX.Screen, GFX.RealPPL);
+			// MASK_EN pane cover — the BIOS's own freeze doesn't
+			// engage under our slaving (see Emulator::OverlayBiosMask).
+			S9xSGBOverlayBiosMask(GFX.Screen, GFX.RealPPL);
 			// Boot logo the user has no BIOS for: covered here, not suppressed,
 			// so the ring still carries the cart's border payload.
 			S9xSGBOverlayBootLogo(GFX.Screen, GFX.RealPPL);

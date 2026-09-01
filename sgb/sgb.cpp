@@ -219,6 +219,17 @@ struct Emulator::Impl
 	bool        cgb_overlay_valid = false;
 	uint8_t     cgb_overlay_ly = 0;
 
+	// BIOS-mode MASK_EN: bios_mask_pane is a ROLLING copy of the last
+	// unmasked pane — captured before the mask, because at mask time the
+	// pane can already hold TRN payload (what a freeze must not show);
+	// bios_mask_under tracks the underlying masked-era pane, so the cover
+	// can outlive the cancel until the BIOS's refresh shows fresh content.
+	uint16_t    bios_mask_pane[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
+	uint16_t    bios_mask_under[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
+	bool        bios_mask_valid = false;
+	bool        bios_mask_roll  = false;  // bios_mask_pane holds a rolling pre-mask copy
+	uint8_t     bios_mask_mode  = 0;   // last non-cancel mode covered with
+
 	// The SGB+GBC hack runs the cart twice. Pass 0 boots it as a plain SGB
 	// game so it transfers its custom border: a cart handed the CGB signature
 	// takes its color path and many (Zelda DX, Men in Black) then never send
@@ -728,6 +739,9 @@ void Emulator::Reset()
 	// mid-session restart is invisible to it and it keeps blending against a
 	// prev buffer holding pre-restart frames, which shows up as residue.
 	g_gb_vblank_count = 0;
+	impl_->bios_mask_valid = false;
+	impl_->bios_mask_roll  = false;
+	impl_->bios_mask_mode  = 0;
 	impl_->cpu.Reset();
 	MemReset(impl_->mem, impl_->CgbActive());
 	PpuReset(impl_->ppu);
@@ -2614,6 +2628,112 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	}
 }
 
+// BIOS-mode MASK_EN. The BIOS's own freeze never engages under our slaving —
+// its ring→BG3 refill keeps running — so a cart that paints its TRN payload
+// onto a "frozen" screen leaks it into the pane (Choro Q's stripes). The mask
+// state is tracked off the packet stream even in BIOS mode, so honor it on
+// the composed frame: freeze holds the pane as it stood when the mask
+// landed, black/blank fill it.
+void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
+{
+	if (!impl_->has_rom || !dest) return;
+
+	const uint32_t ORIGIN_X = 48, ORIGIN_Y = 39;
+	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
+	if (width > SNES_WIDTH ||
+	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return;
+
+	// GB LCD off is an implicit freeze: the ring stops, and a real SGB's
+	// pane holds its last picture. Ours can slip onto the BIOS's sequential
+	// capture tilemap instead (the ping-pong drift artifact) — Ken Griffey
+	// Jr. MLB does its whole SGB setup LCD-off, unmasked, and showed the
+	// same stripe pattern as a desynced masked transfer.
+	// (Not on the hack's color pass — there OverlayCgbScreen owns the pane
+	// and already holds its own last-VBlank frame across LCD-off.)
+	uint8_t mode_now = impl_->sgb_state.mask_mode;
+	if (mode_now == SGB_MASK_CANCEL && !(impl_->ppu.lcdc & 0x80) &&
+	    !impl_->CgbActive())
+		mode_now = SGB_MASK_FREEZE;
+	uint8_t mode = mode_now;
+
+	if (mode_now == SGB_MASK_CANCEL)
+	{
+		if (!impl_->bios_mask_valid)
+		{
+			// Unmasked steady state: keep a rolling copy of the pane. On
+			// the mask's arrival this is the pre-mask picture a freeze
+			// shows — the pane itself may already carry payload by then
+			// (the BIOS's own freeze latches a frame late under our
+			// slaving for the same reason, which is what showed Choro Q's
+			// stripes: a correctly frozen pane frozen on the wrong frame).
+			if (IsGBReleased() && impl_->boot_handoff_captured)
+			{
+				for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
+					std::memcpy(impl_->bios_mask_pane + y * GB_SCREEN_WIDTH,
+					            dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X,
+					            GB_SCREEN_WIDTH * sizeof(uint16_t));
+				impl_->bios_mask_roll = true;
+			}
+			return;
+		}
+		// Past the cancel the pane still shows masked-era content until the
+		// BIOS's next refresh lands. Keep covering while the pane underneath
+		// still equals the last masked-era frame, and hand it back the
+		// moment fresh content arrives.
+		bool stale = true;
+		for (uint32_t y = 0; stale && y < GB_SCREEN_HEIGHT; ++y)
+			stale = std::memcmp(dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X,
+			                    impl_->bios_mask_under + y * GB_SCREEN_WIDTH,
+			                    GB_SCREEN_WIDTH * sizeof(uint16_t)) == 0;
+		if (!stale)
+		{
+			impl_->bios_mask_valid = false;
+			return;
+		}
+		mode = impl_->bios_mask_mode;
+	}
+	else
+	{
+		// Mid-splash the pane is the BIOS's own presentation: leave it.
+		if (!IsGBReleased() || !impl_->boot_handoff_captured) return;
+
+		if (!impl_->bios_mask_valid)
+		{
+			// No rolling pre-mask copy yet (mask on the very first live
+			// frame): the current pane is the best available.
+			if (!impl_->bios_mask_roll)
+				for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
+					std::memcpy(impl_->bios_mask_pane + y * GB_SCREEN_WIDTH,
+					            dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X,
+					            GB_SCREEN_WIDTH * sizeof(uint16_t));
+			impl_->bios_mask_valid = true;
+		}
+		impl_->bios_mask_mode = mode_now;
+		for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
+			std::memcpy(impl_->bios_mask_under + y * GB_SCREEN_WIDTH,
+			            dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X,
+			            GB_SCREEN_WIDTH * sizeof(uint16_t));
+	}
+
+	if (mode == SGB_MASK_FREEZE)
+	{
+		for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
+			std::memcpy(dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X,
+			            impl_->bios_mask_pane + y * GB_SCREEN_WIDTH,
+			            GB_SCREEN_WIDTH * sizeof(uint16_t));
+		return;
+	}
+
+	const uint16_t fill = (mode == SGB_MASK_BLACK)
+		? 0x0000
+		: BgrToHost(impl_->sgb_state.active[0].colors[0]);
+	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
+	{
+		uint16_t *row = dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X;
+		for (uint32_t x = 0; x < GB_SCREEN_WIDTH; ++x) row[x] = fill;
+	}
+}
+
 int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)
 {
 	return ApuDrain(impl_->apu, out, max_samples);
@@ -3436,6 +3556,11 @@ void S9xSGBSetSgbCgbHack(bool enabled) { SGB::Instance().SetSgbCgbHack(enabled);
 void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	SGB::Instance().OverlayCgbScreen(dest, pitch_pixels);
+}
+
+void S9xSGBOverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
+{
+	SGB::Instance().OverlayBiosMask(dest, pitch_pixels);
 }
 
 bool S9xSGBGetCartFlags(unsigned char *cgb_flag, unsigned char *sgb_flag)

@@ -2834,13 +2834,24 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0 &&
 	    impl_->icd2.packets_received > pre_received)
 	{
-		const uint8_t cmd  = static_cast<uint8_t>(impl_->icd2.assembly_buf[0] >> 3);
-		const uint8_t mask = static_cast<uint8_t>(impl_->icd2.assembly_buf[1] & 0x03);
-		if (cmd == 0x17 && mask == 0)
+		const uint8_t *pkt = impl_->icd2.assembly_buf;
+		const uint8_t  cmd = static_cast<uint8_t>(pkt[0] >> 3);
+		// The cancel also rides PAL_SET/ATTR_SET bit 6 (Balloon Fight GB
+		// unmasks only through PAL_SET; missing it left the settle timer
+		// to restart the cart mid-title). Those count post-border only —
+		// the grace clock stays calibrated to MASK_EN cancels.
+		const bool cancel_mask = (cmd == 0x17 && (pkt[1] & 0x03) == 0);
+		const bool cancel_atf  = (cmd == 0x0A && (pkt[9] & 0x40) != 0) ||
+		                         (cmd == 0x16 && (pkt[1] & 0x40) != 0);
+		if (cancel_mask || cancel_atf)
 		{
-			if (impl_->hack_border_seen & Impl::kBorderPct)
+			// An ATF cancel restarts only once the PCT payload has
+			// committed - cutting the LCD read mid-payload loses the
+			// border (the settle timer still covers that case).
+			if ((impl_->hack_border_seen & Impl::kBorderPct) &&
+			    (cancel_mask || impl_->border_pct != 0))
 				impl_->hack_restart_at = impl_->hack_frames;
-			else if (!impl_->hack_grace_end)
+			else if (cancel_mask && !impl_->hack_grace_end)
 				impl_->hack_grace_end =
 					impl_->hack_frames + Impl::kHackBorderGrace;
 		}

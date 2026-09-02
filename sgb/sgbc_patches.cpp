@@ -172,6 +172,16 @@ const SgbcPatch kPatches[] = {
 	// retarget_jr_to_sgb_entry
 	{ 0x7C1B, "JINSEI TOMOACJJ\200", "Jinsei Game - Tomodachi Takusan Tsukurou yo! (Japan)", 1,
 	  { { 0x002F0E, 2, { 0x18, 0x4A }, { 0x18, 0x00 } } } },
+	// manual: CGB boot through the SGB init block
+	{ 0xC45B, "KARAMUCHO OBOOJ\200", "Karamuchou wa Oosawagi! - Okawari! (Japan) (SGB Enhanced, GB Compatible) (NP)", 3,
+	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
+	    { 0x00018F, 2, { 0x18, 0x1E }, { 0x18, 0x00 } },
+	    { 0x000191, 2, { 0x3E, 0x04 }, { 0x3E, 0x85 } } } },
+	// manual: CGB boot through the SGB init block
+	{ 0xF8D0, "KARAMUCHO SAWAG\200", "Karamuchou wa Oosawagi! - Polinkies to Okashina Nakama-tachi (Japan)", 3,
+	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
+	    { 0x00018F, 2, { 0x18, 0x1E }, { 0x18, 0x00 } },
+	    { 0x000191, 2, { 0x3E, 0x04 }, { 0x3E, 0x85 } } } },
 	// manual: flag routine answers SGB2
 	{ 0x5650, "MUSCLERANK2B6KJ\200", "Kinniku Banzuke GB 2 - Mezase! Muscle Champion (Japan)", 1,
 	  { { 0x00025B, 2, { 0xCB, 0x4E }, { 0xAF, 0x00 } } } },
@@ -237,6 +247,12 @@ const SgbcPatch kPatches[] = {
 	  { { 0x000F6D, 2, { 0x28, 0x13 }, { 0x00, 0x00 } },
 	    { 0x000F73, 2, { 0x28, 0x0D }, { 0x00, 0x00 } },
 	    { 0x000F7F, 2, { 0xE0, 0x80 }, { 0x00, 0x00 } } } },
+	// manual: Color init falls into the SGB detect
+	{ 0x3B5C, "MADDEN 2000", "Madden NFL 2000 (USA, Europe) (Beta)", 1,
+	  { { 0x00018F, 3, { 0xC3, 0xC4, 0x01 }, { 0xC3, 0xAD, 0x01 } } } },
+	// manual: Color init falls into the SGB detect
+	{ 0xF678, "MADDEN 2000AEME\200", "Madden NFL 2000 (USA, Europe)", 1,
+	  { { 0x00018F, 3, { 0xC3, 0xC4, 0x01 }, { 0xC3, 0xAD, 0x01 } } } },
 	// nop_skip_branch
 	{ 0xBE50, "MAHJONGJOOHA56J\200", "Mahjong Joou (Japan)", 2,
 	  { { 0x001097, 1, { 0xC8 }, { 0x00 } },
@@ -250,12 +266,21 @@ const SgbcPatch kPatches[] = {
 	// force_jr
 	{ 0x5C51, "OHASTA Y&R", "Ohasuta Yama-chan & Raymond (Japan)", 1,
 	  { { 0x010450, 2, { 0x20, 0x09 }, { 0x18, 0x09 } } } },
+	// manual: CGB boot through the SGB init block
+	{ 0xD7CB, "PACHISUROU", "Pachipachi Pachisurou - New Pulsar Hen (Japan)", 3,
+	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
+	    { 0x00018F, 2, { 0x18, 0x1E }, { 0x18, 0x00 } },
+	    { 0x000191, 2, { 0x3E, 0x04 }, { 0x3E, 0x85 } } } },
 	// nop_skip_branch
 	{ 0x99CA, "PHANTOMZONABKZJ\200", "Phantom Zona (Japan)", 1,
 	  { { 0x000180, 2, { 0x28, 0x17 }, { 0x00, 0x00 } } } },
 	// force_jr
 	{ 0x41CB, "POKEBOM USA", "Pocket Bomberman (USA, Europe)", 1,
 	  { { 0x00024B, 2, { 0x20, 0x24 }, { 0x18, 0x24 } } } },
+	// manual: detect, console stays CGB
+	{ 0xF8B7, "POCKET KINGAV5J\200", "Pocket King (Japan)", 2,
+	  { { 0x0001C1, 2, { 0x20, 0x04 }, { 0x18, 0x04 } },
+	    { 0x0001D5, 2, { 0x3E, 0x01 }, { 0x3E, 0x02 } } } },
 	// nop_early_ret
 	{ 0x1D34, "POKEMON_SLVAAXJ\200", "Pocket Monsters Gin (Japan) (Rev 1)", 1,
 	  { { 0x009C59, 1, { 0xC0 }, { 0x00 } } } },
@@ -305,6 +330,15 @@ const SgbcPatch kPatches[] = {
 	// nop_early_ret
 	{ 0x365F, "POKEMON_GOLD_US\200", "Pokemon Gold (Taiwan) (En) (Unl)", 1,
 	  { { 0x009C59, 1, { 0xC0 }, { 0x00 } } } },
+	// manual: CGB flag kept, SGB detect taken
+	{ 0x1A21, "POKEMONPINBVPHP\200", "Pokemon Pinball (Europe) (En,Fr,De,Es,It) (Rumble Version)", 1,
+	  { { 0x00020A, 2, { 0x20, 0x0C }, { 0x00, 0x00 } } } },
+	// manual: CGB flag kept, SGB detect taken
+	{ 0xD7B0, "POKEPINBALLVPHJ\200", "Pokemon Pinball (Japan) (Rumble Version)", 1,
+	  { { 0x00020A, 2, { 0x20, 0x16 }, { 0x00, 0x00 } } } },
+	// manual: CGB flag kept, SGB detect taken
+	{ 0xDA60, "POKEPINBALLVPHE\200", "Pokemon Pinball (USA, Australia) (Rumble Version)", 1,
+	  { { 0x00020A, 2, { 0x20, 0x16 }, { 0x00, 0x00 } } } },
 	// manual: detect, console stays CGB
 	{ 0xB440, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Es,It) (Rev 1)", 3,
 	  { { 0x00033E, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
@@ -378,10 +412,17 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0x46E9, "CHASE HQ", "Taito Memorial - Chase H.Q. - Secret Police (Japan)", 1,
 	  { { 0x0001C0, 2, { 0x28, 0x12 }, { 0x00, 0x00 } } } },
+	// manual: SGB2 detect, type CGB|SGB2
+	{ 0x5ADB, "TOPNARIKIRIAN6J\200", "Tales of Phantasia - Narikiri Dungeon (Japan)", 2,
+	  { { 0x004108, 2, { 0x28, 0x22 }, { 0x28, 0x0E } },
+	    { 0x004128, 2, { 0x3E, 0x06 }, { 0x3E, 0x07 } } } },
 	// manual: both flag tests off
 	{ 0xDDE6, "TNN FISHINGAFCE\200", "TNN Outdoors Fishing Champ (USA)", 2,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },
 	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } } } },
+	// manual: Color init falls into the SGB detect
+	{ 0xA16C, "TOYSTORY 2", "Toy Story 2 (USA, Europe)", 1,
+	  { { 0x000293, 2, { 0x18, 0x59 }, { 0x18, 0x3B } } } },
 	// nop_skip_branch
 	{ 0x9524, "TURISENSEI2AF2J\200", "Tsuri Sensei 2 (Japan)", 1,
 	  { { 0x000220, 2, { 0x28, 0x03 }, { 0x00, 0x00 } } } },

@@ -26,25 +26,27 @@ bool ApplyIps(std::vector<uint8_t> &rom, const uint8_t *ips, size_t len);
 // against (SHA-256 of the pristine 512 KB image). True when `bios` was patched.
 bool PatchSgbcBios(std::vector<uint8_t> &bios);
 
-// One byte run in a cart image: `old` is verified before `neu` is written.
+// One byte run in a cart image, up to three bytes (a jump, a store): `old`
+// is verified before `neu` is written.
 struct SgbcEdit
 {
-	uint32_t       addr;
-	uint8_t        len;
-	const uint8_t *old;
-	const uint8_t *neu;
+	uint32_t addr;
+	uint8_t  len;
+	uint8_t  old[3];
+	uint8_t  neu[3];
 };
 
 // A dual cart picks its branch from A at $0100 and runs no SGB code on the
 // Color branch, so the BIOS never gets its border or sound packets. These
-// edits make a known game run its SGB init as well.
+// edits make a known game run its SGB init as well: one row per cart, its
+// edits inline (three at most so far; unused slots stay zero).
 struct SgbcPatch
 {
-	uint16_t        global_sum;   // header $014E-$014F, big-endian as stored
-	const char     *title;        // header $0134.., up to the first NUL
-	const char     *name;         // shown on the load banner
-	const SgbcEdit *edits;
-	int             edit_count;
+	uint16_t    global_sum;   // header $014E-$014F, big-endian as stored
+	const char *title;        // header $0134.., up to the first NUL
+	const char *name;         // shown on the load banner
+	uint8_t     edit_count;
+	SgbcEdit    edits[3];
 };
 
 const SgbcPatch *FindSgbcPatch(const uint8_t *rom, size_t size);

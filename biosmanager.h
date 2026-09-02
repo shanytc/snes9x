@@ -49,6 +49,10 @@ void        S9xSetBiosPath (int slot, const char *path);
 // Raw buffer for config backends that bind a char array (win32 wconfig).
 char *S9xGetBiosPathBuffer (int slot);
 
+// Every slot's path in one string: keep one and compare later to learn
+// whether the BIOS Manager changed anything in between.
+std::string S9xBiosPathsFingerprint (void);
+
 // Why an assigned path is or isn't loadable, for the dialog's status column.
 enum S9xBiosPathStatus
 {

@@ -67,6 +67,17 @@ char *S9xGetBiosPathBuffer (int slot)
 	return SlotValid(slot) ? g_paths[slot] : NULL;
 }
 
+std::string S9xBiosPathsFingerprint (void)
+{
+	std::string out;
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+	{
+		out += g_paths[slot];
+		out += '\n';
+	}
+	return (out);
+}
+
 // Byte count, or -1 when unreadable.
 static long FileSize (const char *path)
 {

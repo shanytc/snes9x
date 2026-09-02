@@ -556,6 +556,7 @@ static void RestartSnes9x ();
 static void ResetFrameTimer ();
 static bool LoadROM (const TCHAR *filename, const TCHAR *filename2 = NULL);
 static bool LoadROMMulti (const TCHAR *filename, const TCHAR *filename2);
+static bool ReloadLoadedGame ();
 bool8 S9xLoadROMImage (const TCHAR *string);
 #ifdef NETPLAY_SUPPORT
 static void EnableServer (bool8 enable);
@@ -2843,10 +2844,17 @@ LRESULT CALLBACK WinProc(
 						S9xMovieStop (TRUE);
 					if (cmd_id == ID_EMULATION_HARD_RESET)
 					{
-						S9xReset ();
-						// Only a power-cycle the user asked for: S9xReset also runs
-						// inside every non-fast state load, soft reset included.
-						S9xAnnounceGBBios();
+						// A BIOS assigned since the cart loaded is only read by a
+						// load, and a power cycle is when it should take over.
+						if (S9xBiosChangedSinceLoad())
+							ReloadLoadedGame();
+						else
+						{
+							S9xReset ();
+							// Only a power-cycle the user asked for: S9xReset also runs
+							// inside every non-fast state load, soft reset included.
+							S9xAnnounceGBBios();
+						}
 					}
 					else
 						S9xSoftReset ();
@@ -2973,11 +2981,11 @@ LRESULT CALLBACK WinProc(
 
 				WinSaveConfigFile();
 
-				// The running cart keeps the BIOS it was loaded against - these
-				// paths are only read at load time, and re-reading them would
-				// mean restarting a game that is already playing. What does
-				// change is which Game Boy Model entries are selectable, so
-				// refresh the menu rather than the emulator.
+				// The running cart keeps the BIOS it was loaded against until a
+				// hard reset or the next load: the paths are only read by a
+				// load, and forcing one here would restart a game already
+				// playing. What does change now is which Game Boy Model entries
+				// are selectable, so refresh the menu rather than the emulator.
 				CheckMenuStates();
 				DrawMenuBar(GUI.hWnd);
 			}
@@ -3006,20 +3014,8 @@ LRESULT CALLBACK WinProc(
 				}
 				Settings.GBBootPolicy = policy;
 				WinSaveConfigFile();
-				if (Settings.GBRomPath[0])
-				{
-					TCHAR wpath[_MAX_PATH];
-					Utf8ToWide u8(Settings.GBRomPath);
-					_tcsncpy(wpath, u8, _MAX_PATH - 1);
-					wpath[_MAX_PATH - 1] = 0;
-					RestoreGUIDisplay();
-					if (LoadROM(wpath))
-					{
-						S9xReset();
-						ReInitSound();
-					}
-					RestoreSNESDisplay();
-				}
+				if (Settings.GBRomPath[0] && ReloadLoadedGame())
+					ReInitSound();
 			}
 			break;
 		case ID_TESTS_ACIDTESTS:
@@ -6285,6 +6281,39 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 	}
 
 	return !Settings.StopEmulation;
+}
+
+// Load the running game from its file(s) again, the way File -> Load Game or
+// Load MultiCart did, for what only a load reads: the BIOS Manager's paths.
+static bool ReloadLoadedGame ()
+{
+	std::string a, b;
+	if (Settings.GBRomPath[0])
+		a = Settings.GBRomPath;
+	else if (Multi.fileNameB[0])
+	{
+		// Only a two-file load fills slot B's name; a cart paired with its
+		// BIOS by the loader has just A, and reloads as a single file.
+		a = Multi.fileNameA;
+		b = Multi.fileNameB;
+	}
+	else
+		a = Memory.ROMFilename;
+	if (a.empty() && b.empty())
+		return false;
+
+	TCHAR wa[_MAX_PATH], wb[_MAX_PATH];
+	Utf8ToWide ua(a.c_str()), ub(b.c_str());
+	_tcsncpy(wa, ua, _MAX_PATH - 1);
+	_tcsncpy(wb, ub, _MAX_PATH - 1);
+	wa[_MAX_PATH - 1] = wb[_MAX_PATH - 1] = 0;
+
+	RestoreGUIDisplay();
+	const bool ok = LoadROM(wa, b.empty() ? NULL : wb);
+	if (ok)
+		S9xReset();
+	RestoreSNESDisplay();
+	return ok;
 }
 
 bool8 S9xLoadROMImage (const TCHAR *string)

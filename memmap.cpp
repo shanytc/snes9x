@@ -1751,12 +1751,24 @@ uint32 CMemory::FileLoader (uint8 *buffer, const char *filename, uint32 maxsize)
 	return ((uint32) totalSize);
 }
 
+// The BIOS Manager's paths as they stood when the cart loaded.
+static std::string s_bios_paths_at_load;
+
+bool8 S9xBiosChangedSinceLoad (void)
+{
+    // Only a cart that took one of the files has anything to pick up.
+    const bool takes_bios = Settings.GBRomPath[0] || Settings.BS ||
+                            Multi.cartType || SFCBox.Active;
+    return takes_bios && s_bios_paths_at_load != S9xBiosPathsFingerprint();
+}
+
 bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* optional_rom_filename /*= NULL*/)
 {
     if(!source || sourceSize > MAX_ROM_SIZE)
         return FALSE;
 
     S9xSetBiosNotice(NULL);
+    s_bios_paths_at_load = S9xBiosPathsFingerprint();
 
     if (optional_rom_filename)
         ROMFilename = optional_rom_filename;
@@ -2176,6 +2188,7 @@ bool8 CMemory::LoadROM (const char *filename)
         return FALSE;
 
     S9xSetBiosNotice(NULL);   // a fresh load owns the missing-BIOS state
+    s_bios_paths_at_load = S9xBiosPathsFingerprint();
 
     // .gb / .gbc — hand off to the SGB subsystem. The 65816 path below
     // is bypassed entirely; S9xMainLoop gates on Settings.SuperGameBoy
@@ -2768,6 +2781,7 @@ bool8 CMemory::LoadMultiCart (const char *cartA, const char *cartB)
 bool8 CMemory::LoadMultiCartInt ()
 {
 	S9xSetBiosNotice(NULL);   // File -> Load MultiCart does not pass through LoadROM
+	s_bios_paths_at_load = S9xBiosPathsFingerprint();
 
 	bool8	r = TRUE;
 

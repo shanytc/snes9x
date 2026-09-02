@@ -239,6 +239,10 @@ bool8 S9xIsSGBBIOSImage(const uint8 *data, uint32 size, uint8 *out_mode);
 // No-op unless Game Boy content is loaded.
 void S9xAnnounceGBBios(void);
 
+// TRUE when the BIOS Manager changed a path after the loaded cart took its
+// BIOS. The paths are only read by a load, so a hard reset wants one then.
+bool8 S9xBiosChangedSinceLoad(void);
+
 // Which console GB content runs on (Settings.GBBootPolicy). The Automatic
 // entries pick from what the cart supports, breaking ties in the stated
 // direction — that tie is what "triple boot" carts (DMG + CGB + SGB) hit.

@@ -1049,6 +1049,21 @@ void S9xEndScreenRefresh (void)
 	}
 }
 
+// The brightness and backdrop a line was rendered with, for a compositor that
+// runs after the frame: by then INIDISP may already be force-blanked for
+// VBlank and PPU.Brightness reads 0 (the SGB BIOS does exactly that).
+void S9xGetLineRenderState (int line, uint8 &brightness, uint16 &backdrop)
+{
+	if (line < 0 || line >= 240)
+	{
+		brightness = PPU.Brightness;
+		backdrop   = PPU.CGDATA[0];
+		return;
+	}
+	brightness = line_brightness[line];
+	backdrop   = line_backdrop[line];
+}
+
 void RenderLine (uint8 C)
 {
 	if (IPPU.RenderThisFrame)

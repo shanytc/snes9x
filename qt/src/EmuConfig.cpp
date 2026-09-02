@@ -99,8 +99,7 @@ static const char *shortcut_names[] =
     "GBModelGBC",
     "GBModelSGB",
     "GBModelSGB2",
-    "GBModelSGBGBC",
-    "GBModelSGB2GBC",
+    "GBModelSGBC",
 };
 
 static const char *default_controller_keys[] =
@@ -183,8 +182,7 @@ static const char *default_controller_keys[] =
     "", //    Game Boy Color
     "", //    Super Game Boy
     "", //    Super Game Boy 2
-    "", //    SGB + GBC (hack)
-    ""  //    SGB2 + GBC (hack)
+    ""  //    Super Game Boy Color
 };
 
 const char **EmuConfig::getDefaultShortcutKeys()
@@ -666,7 +664,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     BeginSection("SGB");
     Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
     Bool("GBBIOSEnabled", gb_bios_enabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
-    Int("GBBootPolicy", gb_boot_policy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 7=automatic (default), 8=SGB2+GBC. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7");
+    Int("GBBootPolicy", gb_boot_policy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
     EndSection();
 
     // Explicit BIOS file paths; empty means fall back to the by-name search.

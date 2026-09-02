@@ -53,14 +53,14 @@
 #include "display.h"
 #include "voicekun.h"
 
-// Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the two
-// retired Automatic values, which have no item any more.
+// Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the
+// retired values, which have no item any more (normalized away first).
 static const char *bios_policy_item_name(int policy)
 {
     static const char *names[S9X_NUM_GBBOOT_POLICIES] = {
-        "bios_policy0_item", "bios_policy1_item", "bios_policy2_item", "bios_policy3_item",
+        "bios_policy0_item", "bios_policy1_item", "bios_policy2_item", NULL,
         "bios_policy4_item", NULL, NULL, "bios_policy7_item",
-        "bios_policy8_item"
+        NULL, "bios_policy9_item"
     };
     return names[S9xNormalizeGBBootPolicy(policy)];
 }

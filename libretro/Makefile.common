@@ -71,6 +71,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/sgb/sgb.cpp \
 				 $(CORE_DIR)/sgb/sgb_packet.cpp \
 				 $(CORE_DIR)/sgb/sgb_state.cpp \
+				 $(CORE_DIR)/sgb/sgbc_patches.cpp \
 				 $(CORE_DIR)/sgb/gb_cpu.cpp \
 				 $(CORE_DIR)/sgb/gb_ops.cpp \
 				 $(CORE_DIR)/sgb/gb_ops_cb.cpp \

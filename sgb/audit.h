@@ -41,8 +41,8 @@ enum class Combo : uint8_t
 	SGB2,      // CGB-only cart's own lockout screen is the capture
 	SGB1_CB,   // the cart's custom border, once uploaded and settled
 	SGB2_CB,   // likewise on SGB2 (both: SGB-enhanced carts only)
-	SGB1_GBC,  // "SGB + GBC (hack)": CGB colors inside the SGB frame -
-	SGB2_GBC,  // cart border when SGB-flagged, the default bezel otherwise
+	SGBC,      // Super Game Boy Color: CGB colors (compat ones for a mono
+	           // cart) inside the SGB2 frame, the cart's border if it sends one
 	Count
 };
 constexpr int kComboCount = static_cast<int>(Combo::Count);

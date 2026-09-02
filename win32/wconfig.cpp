@@ -1012,7 +1012,7 @@ void WinRegisterConfigItems()
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
-	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 7=automatic (default), 8=SGB2+GBC. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7.");
+	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");
@@ -1148,7 +1148,7 @@ void WinRegisterConfigItems()
 	ADDN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
-	ADDN(GBModel[4],GBModelSGBGBC);  ADDN(GBModel[5],GBModelSGB2GBC);
+	ADDN(GBModel[4],GBModelSGBC);
 #undef ADD
 #undef ADDN
 
@@ -1184,7 +1184,7 @@ void WinRegisterConfigItems()
 	ADDXALLN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDXALLN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
-	ADDXALLN(GBModel[4],GBModelSGBGBC);  ADDXALLN(GBModel[5],GBModelSGB2GBC);
+	ADDXALLN(GBModel[4],GBModelSGBC);
 #undef ADDX
 #undef ADDXN
 #undef ADDXALL

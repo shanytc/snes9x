@@ -114,11 +114,9 @@ struct CMemory
 	uint32	FileLoader (uint8 *, const char *, uint32);
     bool8   LoadROMMem (const uint8 *, uint32, const char* optional_rom_filename = NULL);
 	bool8	LoadROM (const char *);
-	bool8	LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path,
-	                            bool skip_gb_boot_rom = false);
+	bool8	LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path);
 	bool8	LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
-	                                  const char *gb_path, const char *bios_path,
-	                                  bool skip_gb_boot_rom = false);
+	                                  const char *gb_path, const char *bios_path);
 	// Detect+load a Game Boy ROM from a memory buffer, routing it into the
 	// SGB subsystem. Returns 1 = handled (loaded as GB/SGB), 0 = not a GB
 	// ROM, -1 = GB ROM but the load failed.
@@ -254,7 +252,10 @@ enum S9xGBBootPolicy
 	S9X_GBBOOT_GB = 0,       // force Game Boy
 	S9X_GBBOOT_GBC,          // force Game Boy Color
 	S9X_GBBOOT_SGB,          // force Super Game Boy (SGB1)
-	S9X_GBBOOT_SGB_GBC,      // SGB1 border + real CGB color (hack, not real HW)
+	// 3 and 8 were the "SGB + GBC (hack)" entries. Super Game Boy Color
+	// replaced both; they survive only so a saved config still loads, and
+	// S9xNormalizeGBBootPolicy folds them into S9X_GBBOOT_SGBC.
+	S9X_GBBOOT_SGB_GBC_LEGACY,
 	S9X_GBBOOT_SGB2,         // force Super Game Boy 2
 	// 5 and 6 were "Automatic, prefer GB" and "prefer GBC". One Automatic
 	// replaced all three; they survive only so a saved config still loads, and
@@ -262,24 +263,29 @@ enum S9xGBBootPolicy
 	S9X_GBBOOT_AUTO_GB_LEGACY,
 	S9X_GBBOOT_AUTO_GBC_LEGACY,
 	S9X_GBBOOT_AUTO,         // read the cart header: SGB > GBC > GB — default
-	S9X_GBBOOT_SGB2_GBC,     // SGB2 border + real CGB color (hack, not real HW)
+	S9X_GBBOOT_SGB2_GBC_LEGACY,
+	// Super Game Boy Color: the SGB2 BIOS (patched in memory) around a Game
+	// Boy Color core. Every cart runs in color; a mono cart gets the boot
+	// ROM's compatibility palettes, the way a Color handles one.
+	S9X_GBBOOT_SGBC,
 	S9X_NUM_GBBOOT_POLICIES
 };
 
-// Menu order, which is not enum order: the four real consoles, then the two
-// color hacks, then Automatic. Ports walk this order and start a new group —
+// Menu order, which is not enum order: the four real consoles, then Super
+// Game Boy Color, then Automatic. Ports walk this order and start a new group —
 // a separator — wherever S9xGBBootPolicyGroup changes. Shorter than the enum,
-// which still carries the two retired Automatic values.
+// which still carries the retired values.
 extern const uint8 S9xGBBootPolicyMenuOrder[];
 extern const int   S9xGBBootPolicyMenuCount;
 int S9xGBBootPolicyGroup(int policy);
 
 // A saved policy folded onto one a menu still offers: out-of-range values and
-// the two retired Automatic entries both become S9X_GBBOOT_AUTO.
+// the two retired Automatic entries become S9X_GBBOOT_AUTO, the two retired
+// color hacks become S9X_GBBOOT_SGBC.
 uint8 S9xNormalizeGBBootPolicy(int policy);
 
-// The consoles a port offers as a hotkey: the four real ones and the two color
-// hacks, in menu order. `key` is the name a config file stores the binding
+// The consoles a port offers as a hotkey: the four real ones and Super Game
+// Boy Color, in menu order. `key` is the name a config file stores the binding
 // under, so every port spells them the same. Automatic is not here — it is a
 // rule, not a console, and picking it by key would say nothing about what runs.
 struct S9xGBModelHotkey
@@ -299,7 +305,7 @@ enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
 // command packets unless the latter two are $03 and $33, so both are needed to
 // know whether a cart is really SGB-enhanced. `sgb_available` says whether an
 // SGB BIOS was found, since SGB can't be picked without one. `out_force_cgb`
-// comes back true for the SGB+GBC hack, where the SGB BIOS runs with CGB
+// comes back true for Super Game Boy Color, where the SGB2 BIOS runs with CGB
 // hardware enabled.
 S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag, uint8 old_licensee,
                                  bool8 sgb_available, bool8 *out_force_cgb);

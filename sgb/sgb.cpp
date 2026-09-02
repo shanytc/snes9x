@@ -11,6 +11,8 @@
 #include "../ppu.h"      // PPU.OAMData (sprite zero at handoff)
                           // (used for the border-capture diagnostic OSD,
                           // matching the pattern dropped in bd2a5479).
+#include "../gfx.h"      // mul_brightness + the per-line render state the
+                          // Super Game Boy Color compositor matches against
 #include "../messages.h" // S9X_INFO / S9X_ROM_INFO type tags.
 
 #include "gb_cpu.h"
@@ -22,6 +24,7 @@
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
+#include "sgbc_patches.h"
 
 #include <cstdio>
 #include <cstring>
@@ -165,6 +168,43 @@ static const uint8_t *CgbCompatCombo(const uint8_t *rom, size_t size)
 	return kCgbCompatCombos[pick];
 }
 
+// Leave the PPU the way the CGB boot ROM leaves it for a mono cart: every BG
+// palette whitened, then BG0 / OBJ0 / OBJ1 from the picked combination, the
+// palette-select registers where the boot ROM's writes park them, and KEY0's
+// compatibility bit. The game-write flag stays clear.
+static void InstallCgbCompatPalettes(Ppu &ppu, Memory &mem, const uint8_t co[3])
+{
+	for (int i = 0; i < 64; i += 2)
+	{
+		ppu.bg_pal[i]     = 0xFF;
+		ppu.bg_pal[i + 1] = 0x7F;
+	}
+	// BG index wraps over the 64-byte whitening back to 0 then advances 8;
+	// OBJ advances 16.
+	ppu.bcps = 0x88;
+	ppu.ocps = 0x90;
+	mem.key0 = 0x04;
+	uint8_t *dst[3] = { ppu.obj_pal, ppu.obj_pal + 8, ppu.bg_pal };
+	for (int s = 0; s < 3; ++s)
+		for (int k = 0; k < 4; ++k)
+		{
+			const uint16_t c = kCgbCompatPalettes[co[s] / 2 + k];
+			dst[s][k * 2]     = static_cast<uint8_t>(c & 0xFF);
+			dst[s][k * 2 + 1] = static_cast<uint8_t>(c >> 8);
+		}
+}
+
+// Super Game Boy Color header marker, stamped into $014A (the destination
+// code, which nothing else reads). The SGB boot ROM ships the header to the
+// SNES, and the patched BIOS keys its pane only when it sees this.
+static const uint8_t kSgbcHeaderMarker = 0x43;   // 'C'
+
+// The keys the patched BIOS paints GB shades 1-3 of the pane in (CGRAM
+// entries 1-3 of palettes 0-3; entry 0, the shared backdrop, stays the
+// cart's). R31 B31 with G 0/8/16 keeps them apart through the brightness LUT
+// except near black, where nothing is visible anyway.
+static const uint16_t kSgbcKey[3] = { 0x7C1F, 0x7D1F, 0x7E1F };
+
 struct Emulator::Impl
 {
 	Cpu         cpu;
@@ -210,7 +250,14 @@ struct Emulator::Impl
 	bool        has_rom   = false;
 	bool        cgb_mode  = false;
 	int         cgb_override = -1;   // -1 auto, 0 force DMG, 1 force CGB
-	bool        sgb_cgb_hack = false;
+	// Super Game Boy Color: the Color core kept on under the SGB2 BIOS.
+	bool        sgbc = false;
+	// PrepareSgbcCart: the file's bytes before the in-memory edits (hashes
+	// read these), the compatibility-palette pick made from them, and the
+	// per-game patch that applied.
+	std::vector<uint8_t> sgbc_pristine;
+	const uint8_t *sgbc_compat_combo = nullptr;
+	char        sgbc_patch_name[96] = {};
 
 	// Whether this instance runs BIOS-mode semantics. -1 follows the app
 	// session (Settings.SGB_BIOSModeActive); private cores pin 0 so an
@@ -222,9 +269,10 @@ struct Emulator::Impl
 		                          : host_bios_mode != 0;
 	}
 
-	// Completed CGB frame for the SGB+GBC overlay. Under the SGB BIOS the GB
-	// is slaved per-opcode rather than frame-locked, so reading color_fb live
-	// hands the compositor a half-drawn frame; latch it at the GB's VBlank.
+	// Completed CGB frame for the Super Game Boy Color pane. Under the SGB
+	// BIOS the GB is slaved per-opcode rather than frame-locked, so reading
+	// color_fb live hands the compositor a half-drawn frame; latch it at the
+	// GB's VBlank.
 	uint16_t    cgb_overlay_fb[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 	bool        cgb_overlay_valid = false;
 	uint8_t     cgb_overlay_ly = 0;
@@ -240,116 +288,39 @@ struct Emulator::Impl
 	bool        bios_mask_roll  = false;  // bios_mask_pane holds a rolling pre-mask copy
 	uint8_t     bios_mask_mode  = 0;   // last non-cancel mode covered with
 
-	// The SGB+GBC hack runs the cart twice. Pass 0 boots it as a plain SGB
-	// game so it transfers its custom border: a cart handed the CGB signature
-	// takes its color path and many (Zelda DX, Men in Black) then never send
-	// one. Pass 1 warm-restarts it with the CGB signature for real color —
-	// the border is SNES-side by then and survives. The handover is the
-	// game's own MASK_EN cancel; hack_frames only feeds the failsafe.
-	uint8_t     hack_pass       = 0;
-	uint32_t    hack_frames     = 0;
-	uint32_t    hack_restart_at = 0;   // 0 = not armed
-
-	// Border-pass progress: bit 0 = CHR_TRN seen, bit 1 = PCT_TRN seen. The
-	// handover waits on bit 1; a cart that unmasks first transfers later.
-	uint8_t     hack_border_seen = 0;
-	// Border-pass frame at which an unmask-with-no-border-yet stops waiting.
-	uint32_t    hack_grace_end   = 0;
-	// Border-pass frame at which a transferred-but-never-unmasked cart stops
-	// waiting for the unmask that would otherwise drive the handover.
-	uint32_t    hack_settle_end  = 0;
-	// GB cycles run since the last VBlank, and where they were last sampled.
-	// The border-pass clock is the VBlank, so a cart that parks with the LCD
-	// off freezes it; this keeps a wall clock on that case.
-	uint64_t    hack_dark_cycles = 0;
-	int64_t     hack_cycle_mark  = 0;
-	static const uint8_t kBorderChr = 1, kBorderPct = 2;
-
 	// The cart has finished its power-on SGB setup: it sent the MASK_EN
 	// cancel that says its border and palettes are in place. Protocol, not
 	// wall clock — the frontend checkpoints on this rather than guessing
 	// with a frame count, which lands wherever the game next goes quiet.
 	bool        boot_setup_done = false;
 
-	// GB frames a first unmask buys the cart to start transferring. The widest
-	// gap over the 316-cart SGB set is Harvest Moon GBC's 407.
-	static const uint32_t kHackBorderGrace = 480;
-
-	// GB frames a finished PCT_TRN waits for the unmask that normally ends the
-	// border pass. Long enough for the BIOS to have read the payload off the
-	// LCD (Men in Black unmasks 34 frames later), short enough that the 17
-	// carts that never unmask reach color well before the failsafe.
-	static const uint32_t kHackPctSettle = 240;
-
-	// Failsafe for the 17 measured carts that transfer but never unmask; the
-	// slowest, Super Fighters 99, finishes at frame 624. A half-done transfer
-	// (CHR_TRN, no PCT_TRN yet) pushes it out to the second limit.
-	static const uint32_t kHackBorderLimit    = 720;
-	static const uint32_t kHackBorderLimitMax = 1200;
-
-	// GB cycles of LCD-off before the border pass gives up on the VBlank ever
-	// coming back. Joryuu Janshi ni Chousen GB parks here for good: shown the
-	// SGB2 boot signature it spins with the screen off waiting for a link
-	// partner, so the color pass - which hands it the CGB signature instead -
-	// is the only way the cart ever runs. 240 frames' worth, far past any
-	// legitimate LCD-off window.
-	static const uint64_t kHackDarkCycles = 240ull * 70224ull;
-
-	// Back to the border pass. Every power-on runs it: a hard reset that kept
-	// hack_pass at 1 would hand the cart the CGB signature from its first
-	// frame, on which it never transfers a border at all.
-	void RestartBorderPass()
-	{
-		hack_pass        = 0;
-		hack_frames      = 0;
-		hack_restart_at  = 0;
-		hack_border_seen = 0;
-		hack_grace_end   = 0;
-		hack_settle_end  = 0;
-		hack_hide_sgb    = false;
-		hack_dark_cycles = 0;
-		hack_cycle_mark  = 0;
-	}
-
-	// Border-pass deadlines, all in GB frames. Called from the VBlank and, for
-	// a cart sitting with the LCD off, from the cycle clock in RunCycles.
-	void TickBorderPass()
-	{
-		// Grace expired with nothing started: this cart has no border to wait
-		// for. Anything started means the next unmask is the real one.
-		if (hack_grace_end && !hack_restart_at && hack_frames >= hack_grace_end)
-		{
-			if (!hack_border_seen) hack_restart_at = hack_frames;
-			hack_grace_end = 0;
-		}
-		if (hack_settle_end && !hack_restart_at && hack_frames >= hack_settle_end)
-			hack_restart_at = hack_frames;
-		const bool mid_transfer = hack_border_seen == kBorderChr &&
-		                          hack_frames < kHackBorderLimitMax;
-		if (!hack_restart_at && !mid_transfer && hack_frames >= kHackBorderLimit)
-			hack_restart_at = hack_frames;
-		// A frozen VBlank clock leaves every deadline above unreachable, so
-		// the dark-cycle count arms the handover on its own.
-		if (!hack_restart_at && hack_dark_cycles >= kHackDarkCycles)
-			hack_restart_at = hack_frames ? hack_frames : 1;
-	}
-
-	// Color pass: pin the $FF00 player-rotation index so the cart cannot see
-	// the SGB, and takes its plain-CGB path instead of an SGB-flavoured one.
-	// Latched off when the border pass got no border - transferring late is
-	// then the cart's only remaining chance at one.
-	bool     hack_hide_sgb = false;
-	bool HideSgbFromCart() const
-	{
-		return sgb_cgb_hack && hack_pass != 0 && hack_hide_sgb;
-	}
-
 	// The SGB BIOS normally forces CGB off (a real SGB boots CGB carts as DMG);
-	// sgb_cgb_hack keeps color hardware on underneath it, from pass 1 on.
+	// Super Game Boy Color keeps color hardware on underneath it.
 	bool CgbActive() const
 	{
-		return cgb_mode && (!BiosMode() ||
-		                    (sgb_cgb_hack && hack_pass != 0));
+		return cgb_mode && (!BiosMode() || sgbc);
+	}
+
+	// Super Game Boy Color at the boot ROM's handoff: the SGB boot ROM leaves
+	// DMG-style registers, so hand the cart what a Color would — the CGB
+	// signature, and for a mono cart the compatibility registers and the
+	// boot ROM's palettes for it.
+	void SgbcHandoff()
+	{
+		CpuState &cs = cpu.State();
+		const bool compat = dmg_compat_cgb;
+		cs.r.af = 0x1180;
+		cs.r.bc = 0x0000;
+		cs.r.de = compat ? 0x0008 : 0xFF56;
+		cs.r.hl = compat ? 0x007C : 0x000D;
+		if (compat)
+		{
+			ppu.dmg_compat = true;
+			const uint8_t *co = sgbc_compat_combo
+				? sgbc_compat_combo
+				: CgbCompatCombo(cart.rom.data(), cart.rom.size());
+			InstallCgbCompatPalettes(ppu, mem, co);
+		}
 	}
 	float       clock_mul = 1.0f;
 
@@ -642,24 +613,6 @@ void Emulator::ColdReset()
 	impl_->cached_count = 0;
 	impl_->cache_valid  = false;
 	impl_->replays_done = 0;
-	// A power cycle is a fresh cart as far as the +GBC hack is concerned.
-	impl_->RestartBorderPass();
-	// The +GBC hack boots the cart exactly once, on the color pass, with the
-	// CGB signature — never as a plain Game Boy, and never a visible mono SGB
-	// pass. In BIOS mode the SNES BIOS keeps its own default bezel and the
-	// cart runs in real CGB color inside it; no cart border is forced.
-	if (impl_->sgb_cgb_hack && impl_->has_rom)
-	{
-		impl_->hack_pass = 1;
-		// BIOS mode never cleared cgb_mode; BIOS-less needs it on from the
-		// first frame so the color session renders CGB rather than mono.
-		if (!impl_->BiosMode() && (impl_->cart.header.cgb_flag & 0x80))
-		{
-			impl_->cgb_mode       = true;
-			impl_->cgb_compat     = false;
-			impl_->dmg_compat_cgb = false;
-		}
-	}
 	Reset();
 }
 
@@ -686,69 +639,6 @@ bool Emulator::SoftReset()
 	return true;
 }
 
-// SGB+GBC hack: hand the border pass over to the color pass. The border the
-// cart just transferred lives in SNES VRAM, which nothing here touches, so a
-// warm restart of the GB alone keeps it. SoftReset skips the GB boot ROM, so
-// no second handshake reaches the BIOS's validator, and Reset()'s post-boot
-// block hands the cart the CGB signature once CgbActive() is true.
-void Emulator::StartColorPass()
-{
-	if (impl_->hack_pass != 0) return;
-
-	impl_->hack_pass       = 1;
-	impl_->hack_restart_at = 0;
-	impl_->hack_hide_sgb   = (impl_->hack_border_seen & Impl::kBorderPct) != 0;
-
-	// BIOS-less: authentic mode boots the cart mono for the border pass, so
-	// flip to color here for the restart - BIOS mode never cleared cgb_mode
-	// and gets this from CgbActive's hack_pass term instead.
-	if (!impl_->BiosMode() &&
-	    (impl_->cart.header.cgb_flag & 0x80))
-	{
-		impl_->cgb_mode       = true;
-		impl_->cgb_compat     = false;
-		impl_->dmg_compat_cgb = false;
-	}
-
-	// Only the GB machine restarts. The ICD2 block is the live link to the
-	// SNES-side BIOS, which keeps running across the handover, so carry it
-	// over whole: Reset() zeroes it, and a game that re-runs its SGB
-	// handshake on the second boot then waits forever for a reply that the
-	// wiped link can no longer produce — Game & Watch Gallery 3 switches the
-	// LCD off and spins.
-	const Impl::Icd2 icd = impl_->icd2;
-
-	// Mid-splash the BIOS has not handed the cart control yet; there is
-	// nothing to restart, so stay on the border pass and retry next frame.
-	if (!SoftReset())
-	{
-		impl_->hack_pass = 0;
-		impl_->hack_restart_at = impl_->hack_frames + 1;
-		return;
-	}
-
-	impl_->icd2 = icd;
-
-	// ...but not the parts that track where the GB's LCD is. Those are
-	// GB-side, and the GB has just restarted at line 0: carrying the old
-	// row/bank over leaves the BIOS's band mapping off by however many rows
-	// were already scanned, which shows up as a stray line for the rest of
-	// the session. Same for a half-assembled packet, whose remaining bits
-	// the restarted cart will never send.
-	Emulator::Impl::Icd2 &live = impl_->icd2;
-	live.sgb_row = live.sgb_bank = 0;
-	live.sgb_row_latched = live.sgb_bank_latched = 0;
-	live.read_position   = 0;
-	live.lcd_reads       = live.lcd_reads_prev = 0;
-	live.frame_6001_count = 0;
-	live.bit_accumulator = 0;
-	live.packet_bit = live.packet_byte = 0;
-	std::memset(live.assembly_buf, 0, sizeof live.assembly_buf);
-	std::memset(live.lcd_ring, 0, sizeof live.lcd_ring);
-
-	impl_->cgb_overlay_valid = false;
-}
-
 // The frame-locked RunFrame runs exactly one 70224-T-cycle GB frame per
 // SNES frame, so nominal APU sample production per host frame is
 // 70224*rate/clock against a fixed rate/SNES_FPS drain — the steady-state
@@ -772,10 +662,10 @@ static uint32_t g_gb_vblank_count = 0;
 void Emulator::Reset()
 {
 	// Frames this GB session has produced. The host frame blender treats a
-	// decrease as "new session, re-prime": without it the +GBC hack's
-	// mid-session restart is invisible to it and it keeps blending against a
-	// prev buffer holding pre-restart frames, which shows up as residue.
+	// decrease as "new session, re-prime", so it never blends against a prev
+	// buffer holding pre-reset frames, which shows up as residue.
 	g_gb_vblank_count = 0;
+	impl_->cgb_overlay_valid = false;
 	impl_->bios_mask_valid = false;
 	impl_->bios_mask_roll  = false;
 	impl_->bios_mask_mode  = 0;
@@ -925,28 +815,8 @@ void Emulator::Reset()
 	// whole panel comes out one color. The game-write flag stays clear.
 	if (impl_->ppu.cgb && impl_->ppu.dmg_compat && !impl_->boot_rom_loaded &&
 	    impl_->cart.rom.size() >= 0x150)
-	{
-		const uint8_t *co = CgbCompatCombo(impl_->cart.rom.data(), impl_->cart.rom.size());
-		// The boot ROM whitens all BG palettes, then writes BG0, OBJ0, OBJ1.
-		for (int i = 0; i < 64; i += 2)
-		{
-			impl_->ppu.bg_pal[i]     = 0xFF;
-			impl_->ppu.bg_pal[i + 1] = 0x7F;
-		}
-		// Palette-select registers as the boot ROM leaves them: BG index wraps
-		// over the 64-byte whitening back to 0 then advances 8; OBJ advances 16.
-		impl_->ppu.bcps = 0x88;
-		impl_->ppu.ocps = 0x90;
-		impl_->mem.key0 = 0x04;
-		uint8_t *dst[3] = { impl_->ppu.obj_pal, impl_->ppu.obj_pal + 8, impl_->ppu.bg_pal };
-		for (int s = 0; s < 3; ++s)
-			for (int k = 0; k < 4; ++k)
-			{
-				const uint16_t c = kCgbCompatPalettes[co[s] / 2 + k];
-				dst[s][k * 2]     = static_cast<uint8_t>(c & 0xFF);
-				dst[s][k * 2 + 1] = static_cast<uint8_t>(c >> 8);
-			}
-	}
+		InstallCgbCompatPalettes(impl_->ppu, impl_->mem,
+		                         CgbCompatCombo(impl_->cart.rom.data(), impl_->cart.rom.size()));
 
 	// The boot ROM also leaves the Nintendo logo expanded in VRAM and its
 	// tilemap row laid out (BullyGB checks both). Synthesize that for
@@ -1317,6 +1187,9 @@ void Emulator::UnloadROM()
 	CartUnload(impl_->cart);
 	impl_->has_rom = false;
 	impl_->cgb_mode = false;
+	impl_->sgbc_pristine.clear();
+	impl_->sgbc_compat_combo = nullptr;
+	impl_->sgbc_patch_name[0] = 0;
 	// Drop the staged boot ROM so the next load starts at $0100.
 	impl_->boot_rom_loaded       = false;
 	impl_->boot_rom_staging_size = 0;
@@ -1349,15 +1222,19 @@ bool Emulator::TakeSramDirty()
 	return true;
 }
 
+// The file's bytes: under Super Game Boy Color the running image carries the
+// in-memory edits, and a hash of those would name no known game.
 const uint8_t *Emulator::GetROMData() const
 {
 	if (!impl_->has_rom || impl_->cart.rom.empty()) return nullptr;
+	if (!impl_->sgbc_pristine.empty()) return impl_->sgbc_pristine.data();
 	return impl_->cart.rom.data();
 }
 
 size_t Emulator::GetROMSize() const
 {
 	if (!impl_->has_rom) return 0;
+	if (!impl_->sgbc_pristine.empty()) return impl_->sgbc_pristine.size();
 	return impl_->cart.rom.size();
 }
 
@@ -1384,11 +1261,60 @@ bool Emulator::IsCgb() const
 	return impl_->has_rom && impl_->CgbActive();
 }
 
-void Emulator::SetSgbCgbHack(bool enabled)
+void Emulator::SetSgbc(bool enabled)
 {
-	impl_->sgb_cgb_hack = enabled;
-	// Called once per load, before the ROM goes in.
-	impl_->RestartBorderPass();
+	impl_->sgbc = enabled;
+}
+
+bool Emulator::Sgbc() const
+{
+	return impl_->sgbc;
+}
+
+const char *Emulator::SgbcPatchName() const
+{
+	return impl_->sgbc_patch_name;
+}
+
+void Emulator::PrepareSgbcCart()
+{
+	Impl &im = *impl_;
+	im.sgbc_patch_name[0] = 0;
+	im.sgbc_pristine.clear();
+	im.sgbc_compat_combo = nullptr;
+	if (!im.sgbc || !im.has_rom || im.cart.rom.size() < 0x150) return;
+	std::vector<uint8_t> &rom = im.cart.rom;
+
+	// Everything below rewrites the image in memory, so keep the file's bytes
+	// for the hashes and for the compatibility-palette pick, which reads the
+	// licensee bytes the marker overwrites.
+	im.sgbc_pristine = rom;
+	im.sgbc_compat_combo = CgbCompatCombo(im.sgbc_pristine.data(), im.sgbc_pristine.size());
+
+	// A Sachen cart scrambles its header window; the boot ROM sees it
+	// through the mapper, so leave it be. MMM01's real header is the menu
+	// bank's, at the end of ROM.
+	if (im.cart.mbc.type == MbcType::SachenMMC1) return;
+	const size_t base = (im.cart.mbc.type == MbcType::MMM01 && rom.size() >= 0x8000)
+	                  ? rom.size() - 0x8000 : 0;
+	if (base + 0x150 > rom.size()) return;
+
+	// The BIOS honours packets only from a cart flagged $03/$33 and keys its
+	// pane only on the marker; all three reach it in the boot ROM's header
+	// packets. The header checksum keeps a real boot-ROM dump from locking up.
+	uint8_t *h = rom.data() + base;
+	h[0x146] = 0x03;
+	h[0x14B] = 0x33;
+	h[0x14A] = kSgbcHeaderMarker;
+	uint8_t sum = 0;
+	for (int i = 0x134; i <= 0x14C; ++i) sum = static_cast<uint8_t>(sum - h[i] - 1);
+	h[0x14D] = sum;
+
+	// Per-game edits from the built-in table (sgbc_patches.cpp). Plain
+	// snprintf: the win32 port maps it through a macro.
+	const SgbcPatch *p = FindSgbcPatch(rom.data(), rom.size());
+	if (p && ApplySgbcPatch(*p, rom.data(), rom.size()))
+		snprintf(im.sgbc_patch_name, sizeof im.sgbc_patch_name, "%s", p->name);
 }
 
 void Emulator::SetCgbOverride(int mode)
@@ -1416,6 +1342,11 @@ bool Emulator::CartFlags(uint8_t *cgb_flag, uint8_t *sgb_flag) const
 	if (cgb_flag) *cgb_flag = impl_->has_rom ? impl_->cart.header.cgb_flag : 0;
 	if (sgb_flag) *sgb_flag = impl_->has_rom ? impl_->cart.header.sgb_flag : 0;
 	return impl_->has_rom;
+}
+
+uint32_t Emulator::CurrentRomBank() const
+{
+	return impl_->has_rom ? impl_->cart.mbc.rom_bank : 0;
 }
 
 const uint8_t *Emulator::DebugVRAM() const
@@ -1867,20 +1798,6 @@ void Emulator::RunCycles(int32_t tcycles)
 	if (!impl_->has_rom) return;
 	if (tcycles <= 0) return;
 
-	// SGB+GBC hack: the border pass has either got the border or run out of
-	// time, so restart the cart in color. Done before the PPU mode is read
-	// below so the whole slice runs as one hardware model.
-	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0)
-	{
-		const int64_t now = impl_->ppu.t_cycles;
-		if (now >= impl_->hack_cycle_mark)
-			impl_->hack_dark_cycles += (uint64_t) (now - impl_->hack_cycle_mark);
-		impl_->hack_cycle_mark = now;
-		impl_->TickBorderPass();
-		if (impl_->hack_restart_at && impl_->hack_frames >= impl_->hack_restart_at)
-			StartColorPass();
-	}
-
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
 	// garbage. Gate the color path off whenever the BIOS is driving.
@@ -1948,25 +1865,18 @@ void Emulator::RunCycles(int32_t tcycles)
 		if (was_boot && !impl_->mem.boot_rom_enabled &&
 		    !impl_->boot_handoff_captured)
 		{
-			// SGB+GBC hack: the SGB boot ROM hands off DMG-style register
-			// state, so patch in the CGB signature the cart tests for.
-			// The boot ROM itself must still run — the BIOS validates the
-			// cart from the logo it scrolls. Not on the border pass: the
-			// whole point of that one is that the cart sees an SGB.
-			if (impl_->sgb_cgb_hack && impl_->cgb_mode && impl_->hack_pass != 0)
-			{
-				CpuState &cs = impl_->cpu.State();
-				cs.r.af = 0x1180;
-				cs.r.bc = 0x0000;
-				cs.r.de = 0xFF56;
-				cs.r.hl = 0x000D;
-			}
+			// Super Game Boy Color: the SGB boot ROM hands off DMG-style
+			// register state, so patch in what a Color hands the cart. The
+			// boot ROM itself must still run — the BIOS validates the cart
+			// from the logo it scrolls.
+			if (impl_->sgbc && impl_->cgb_mode)
+				impl_->SgbcHandoff();
 			impl_->boot_handoff_captured = true;
 			impl_->boot_handoff_regs     = impl_->cpu.State().r;
 		}
 	}
 
-	if (impl_->sgb_cgb_hack && impl_->ppu.cgb)
+	if (impl_->sgbc && impl_->ppu.cgb)
 	{
 		const uint8_t ly = impl_->ppu.ly;
 		if (ly >= GB_SCREEN_HEIGHT && impl_->cgb_overlay_ly < GB_SCREEN_HEIGHT)
@@ -2015,8 +1925,6 @@ uint32_t Emulator::BorderTransferCount() const { return impl_->border_transfers;
 uint32_t Emulator::BorderPlaneVersion() const { return impl_->border_plane; }
 uint32_t Emulator::BorderPctCount() const     { return impl_->border_pct; }
 
-bool Emulator::SgbHackColorPass() const { return impl_->hack_pass != 0; }
-
 void Emulator::GetStatus(char *buf, size_t cap) const
 {
 	if (!buf || cap == 0) return;
@@ -2032,7 +1940,7 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	         "p0=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
 	         "r7000_ring=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X "
 	         "R:6002=%u 7000=%u W:6001=%u 6003=%u "
-	         "chr=%u pct=%u cap=%u hack=%u hackfr=%u restart=%u bseen=%u grace=%u "
+	         "chr=%u pct=%u cap=%u sgbc=%u "
 	         "cmds=%02X%02X%02X%02X%02X%02X%02X%02X",
 	              s.r.pc, icd.control,
 	              icd.packets_received,
@@ -2046,8 +1954,7 @@ void Emulator::GetStatus(char *buf, size_t cap) const
 	              icd.r_6002, icd.r_7000,
 	              icd.w_6001, icd.w_6003,
 	              g_sgb_dbg.pkt_chr, g_sgb_dbg.pkt_pct, g_sgb_dbg.cap_fired,
-	              impl_->hack_pass, impl_->hack_frames, impl_->hack_restart_at,
-	              impl_->hack_border_seen, impl_->hack_grace_end,
+	              impl_->sgbc ? 1u : 0u,
 	              g_sgb_dbg.cmd_ring[0], g_sgb_dbg.cmd_ring[1],
 	              g_sgb_dbg.cmd_ring[2], g_sgb_dbg.cmd_ring[3],
 	              g_sgb_dbg.cmd_ring[4], g_sgb_dbg.cmd_ring[5],
@@ -2348,15 +2255,6 @@ void Emulator::OnPpuVBlank()
 {
 	if (!impl_) return;
 
-	// SGB+GBC hack border-pass clock: the grace an unmask-before-any-transfer
-	// bought the cart, plus the never-unmasks failsafe.
-	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0)
-	{
-		impl_->hack_frames++;
-		impl_->hack_dark_cycles = 0;
-		impl_->TickBorderPass();
-	}
-
 	impl_->icd2.lcd_reads_prev = impl_->icd2.lcd_reads;
 	impl_->icd2.lcd_reads      = 0;
 
@@ -2454,11 +2352,11 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 
 	// The BIOS lifts CHR_TRN / PCT_TRN payloads off this ring, and a payload
 	// byte is the raw 2bpp tile index — on a DMG that is exactly what the LCD
-	// carries, because a transferring game sets an identity BGP. Under the
-	// SGB+GBC hack the GB renders in color, so `pixels` is CGB output and the
-	// border decodes to garbage. Feed the raw indices instead; the BIOS's own
-	// drawing of the GB area is overpainted by OverlayCgbScreen anyway.
-	if (impl_->sgb_cgb_hack && impl_->ppu.cgb && impl_->ppu.ly < GB_SCREEN_HEIGHT)
+	// carries, because a transferring game sets an identity BGP. Under Super
+	// Game Boy Color the GB renders in color, so `pixels` is CGB output and
+	// the border decodes to garbage. Feed the raw indices instead; the BIOS's
+	// own drawing of the GB area is keyed and overpainted anyway.
+	if (impl_->sgbc && impl_->ppu.cgb && impl_->ppu.ly < GB_SCREEN_HEIGHT)
 		pixels = &impl_->ppu.raw_framebuffer[impl_->ppu.ly * GB_SCREEN_WIDTH];
 
 	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
@@ -2634,23 +2532,29 @@ void Emulator::OverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels)
 	}
 }
 
+// A BGR555 color as the SNES PPU draws one at brightness LUT `xb`: the LUT
+// per channel, the user's color adjustments, then the host pixel format —
+// the same steps S9xFixColourBrightness takes for a CGRAM entry.
+static inline uint16_t BgrToHostBright(uint16_t bgr, const uint8 *xb)
+{
+	uint8 r = xb[bgr & 0x1F];
+	uint8 g = xb[(bgr >> 5) & 0x1F];
+	uint8 b = xb[(bgr >> 10) & 0x1F];
+	S9xApplyColorAdjustments(r, g, b, 0x1F);
+	return static_cast<uint16_t>(BUILD_PIXEL(r, g, b));
+}
+
 void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
-	// SGB+GBC hack: the BIOS drew the GB area from the LCD ring, which carries
-	// shade indices only, so color there came out of the SGB palettes. Paint
-	// the GB core's real CGB output over it, keeping the SNES-drawn border.
-	if (!impl_->has_rom || !dest || !impl_->sgb_cgb_hack || !impl_->ppu.cgb) return;
+	// Super Game Boy Color: the BIOS drew the GB area from the LCD ring, which
+	// carries shade indices only, and the patched BIOS paints those shades in
+	// the keys. Fill every keyed pixel with the GB core's real CGB output,
+	// keeping whatever the SNES drew over the pane (border, OBJ, its menus).
+	if (!impl_->has_rom || !dest || !impl_->sgbc || !impl_->ppu.cgb) return;
 
-	// Wait for the GB boot ROM to hand off, so the overlay shows the game
-	// rather than the boot logo the BIOS is still capturing.
-	if (!impl_->boot_handoff_captured || !impl_->cgb_overlay_valid) return;
-
-	// Some carts take their SGB path on the color pass rather than the CGB
-	// one (Game & Watch Gallery 3), so they never write CGB palettes and
-	// color_fb is the reset white. Leave the BIOS's own picture alone rather
-	// than painting that over it: the border still came from pass 0, so the
-	// result degrades to a plain SGB session instead of a blank screen.
-	if (!impl_->ppu.cgb_pal_written) return;
+	// Keyed only once the cart has taken over. Until then (splash, logo
+	// scroll) and on an unpatched dump the pane is the BIOS's own picture.
+	if (PPU.CGDATA[1] != kSgbcKey[0]) return;
 
 	// Lores only — the offsets below assume the 256x224 SGB frame. The BIOS
 	// puts the GB picture at y=39, not the y=40 the tile grid suggests: the
@@ -2662,13 +2566,63 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	if (width > SNES_WIDTH ||
 	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return;
 
-	// color_fb is BGR555, so each pixel still needs the host conversion.
+	// No CGB frame yet (first frames after the handoff), or a cart that has
+	// not written CGB palettes and whose color_fb is the reset white (Game &
+	// Watch Gallery 3 takes its SGB path even on the Color signature; Dragon
+	// Warrior draws its logos before its first palette): show the shades the
+	// keys stand for in the SGB palette the cart asked for, which the packet
+	// mirror tracks under the BIOS too. Nothing blank, nothing magenta.
+	const bool color = impl_->boot_handoff_captured && impl_->cgb_overlay_valid &&
+	                   (impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
+	// The patched BIOS stashes the palette its keys displaced in its state
+	// block ($7E:CE00: magic 'S' 'C', state, then colors 1-3 of palettes 0-3
+	// from +8) — the cart's colours as the BIOS resolved them, PAL_TRN and
+	// PAL_SET included, which the packet mirror cannot follow under the BIOS.
+	const uint8 *st = ::Memory.RAM + 0xCE00;   // the SNES's, not SGB::Memory
+	uint16_t fallback[3];
+	for (int k = 0; k < 3; ++k)
+		fallback[k] = (st[0] == 'S' && st[1] == 'C' && st[2] == 1)
+			? static_cast<uint16_t>(st[8 + k * 2] | (st[9 + k * 2] << 8))
+			: impl_->sgb_state.active[0].colors[k + 1];
+
+	// The keys and the backdrop exactly as the PPU drew each line — its
+	// brightness and backdrop at render time, not now: the BIOS force-blanks
+	// at VBlank, so PPU.Brightness already reads 0 here. The replacement
+	// pixels take the same LUT, so the pane fades with the border.
+	int      last_b    = -1;
+	uint16_t last_back = 0xFFFF;
+	const uint8 *xb = nullptr;
+	uint16_t key[3] = {}, mono[3] = {}, back = 0;
+
 	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
 	{
+		uint8  b;
+		uint16 bd;
+		S9xGetLineRenderState((int) (ORIGIN_Y + y), b, bd);
+		if ((int) b != last_b || bd != last_back)
+		{
+			last_b    = b;
+			last_back = bd;
+			xb = mul_brightness[b];
+			for (int k = 0; k < 3; ++k)
+			{
+				key[k]  = BgrToHostBright(kSgbcKey[k], xb);
+				mono[k] = BgrToHostBright(fallback[k], xb);
+			}
+			back = BgrToHostBright(bd, xb);
+		}
+
 		const uint16_t *src = impl_->cgb_overlay_fb + y * GB_SCREEN_WIDTH;
 		uint16_t *dst = dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X;
 		for (uint32_t x = 0; x < GB_SCREEN_WIDTH; ++x)
-			dst[x] = BgrToHost(src[x]);
+		{
+			const uint16_t px = dst[x];
+			if (px == key[0] || px == key[1] || px == key[2])
+				dst[x] = color ? BgrToHostBright(src[x], xb)
+				               : mono[px == key[0] ? 0 : px == key[1] ? 1 : 2];
+			else if (px == back && color)
+				dst[x] = BgrToHostBright(src[x], xb);
+		}
 	}
 }
 
@@ -2692,7 +2646,7 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 	// capture tilemap instead (the ping-pong drift artifact) — Ken Griffey
 	// Jr. MLB does its whole SGB setup LCD-off, unmasked, and showed the
 	// same stripe pattern as a desynced masked transfer.
-	// (Not on the hack's color pass — there OverlayCgbScreen owns the pane
+	// (Not under Super Game Boy Color — there OverlayCgbScreen owns the pane
 	// and already holds its own last-VBlank frame across LCD-off.)
 	uint8_t mode_now = impl_->sgb_state.mask_mode;
 	if (mode_now == SGB_MASK_CANCEL && !(impl_->ppu.lcdc & 0x80) &&
@@ -2979,69 +2933,7 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	const uint32_t pre_received = impl_->icd2.packets_received;
 	IcdFeedJoypad(impl_->icd2, value);
 
-	// SGB+GBC hack, color pass: the border pass already captured the one the
-	// cart meant for this host, so drop any further CHR_TRN/PCT_TRN. The
-	// second boot no longer sees the SGB1 signature it was handed the first
-	// time - A is the CGB $11 now, not $01 - so a cart that palettes its
-	// border per host picks the other variant and overwrites the right one.
-	// Tetris DX does exactly that: its SGB1 border appears, then the second
-	// transfer replaces it with the SGB2 one.
-	// Only when the border pass actually got one: with nothing to protect,
-	// a late transfer is the only border this session will ever have.
-	if (impl_->sgb_cgb_hack && impl_->hack_pass != 0 &&
-	    (impl_->hack_border_seen & Impl::kBorderPct) &&
-	    impl_->icd2.packets_received > pre_received)
-	{
-		const uint8_t cmd = static_cast<uint8_t>(impl_->icd2.assembly_buf[0] >> 3);
-		if (cmd == 0x13 || cmd == 0x14)
-		{
-			// Un-push it: the BIOS only reads the payload off the LCD once it
-			// has drained the packet, so never handing it over is enough.
-			Emulator::Impl::Icd2 &icd = impl_->icd2;
-			icd.queue_tail = static_cast<uint8_t>((icd.queue_tail - 1) & 63);
-			if (icd.queue_count) icd.queue_count--;
-		}
-	}
-
-
-	// SGB+GBC hack, border pass: hand over on the MASK_EN cancel that follows
-	// the border transfer. Games mask the GB screen while they set the SGB up
-	// and unmask when that is done, so this is the game itself saying its
-	// border and palettes are in place — which is also the moment the BIOS
-	// makes the border visible. Waiting a fixed number of frames after PCT_TRN
-	// instead gets it wrong both ways: the BIOS ingests a transfer in a single
-	// frame, but Men in Black does not unmask until 34 frames later and
-	// restarting before that loses the border entirely.
-	//
-	// An unmask with nothing transferred yet is not that moment - it is a cart
-	// showing its splash first, so give it kHackBorderGrace frames to start.
-	if (impl_->sgb_cgb_hack && impl_->hack_pass == 0 &&
-	    impl_->icd2.packets_received > pre_received)
-	{
-		const uint8_t *pkt = impl_->icd2.assembly_buf;
-		const uint8_t  cmd = static_cast<uint8_t>(pkt[0] >> 3);
-		// The cancel also rides PAL_SET/ATTR_SET bit 6 (Balloon Fight GB
-		// unmasks only through PAL_SET; missing it left the settle timer
-		// to restart the cart mid-title). Those count post-border only —
-		// the grace clock stays calibrated to MASK_EN cancels.
-		const bool cancel_mask = (cmd == 0x17 && (pkt[1] & 0x03) == 0);
-		const bool cancel_atf  = (cmd == 0x0A && (pkt[9] & 0x40) != 0) ||
-		                         (cmd == 0x16 && (pkt[1] & 0x40) != 0);
-		if (cancel_mask || cancel_atf)
-		{
-			// An ATF cancel restarts only once the PCT payload has
-			// committed - cutting the LCD read mid-payload loses the
-			// border (the settle timer still covers that case).
-			if ((impl_->hack_border_seen & Impl::kBorderPct) &&
-			    (cancel_mask || impl_->border_pct != 0))
-				impl_->hack_restart_at = impl_->hack_frames;
-			else if (cancel_mask && !impl_->hack_grace_end)
-				impl_->hack_grace_end =
-					impl_->hack_frames + Impl::kHackBorderGrace;
-		}
-	}
-
-	impl_->joypad.sgb_index = impl_->HideSgbFromCart() ? 0 : impl_->icd2.input_index;
+	impl_->joypad.sgb_index = impl_->icd2.input_index;
 	// If a new packet completed (packets_received grew), and our cache
 	// isn't full yet, append a copy. The SGB2 BIOS's handshake validator
 	// at $B119 compares each packet's byte 1 across TWO separate GB
@@ -3098,12 +2990,6 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 		impl_->ppu.frame_ready = false;
 		if (cmd == 0x13) ++g_sgb_dbg.pkt_chr;
 		else             ++g_sgb_dbg.pkt_pct;
-		// SGB+GBC hack: tells the border pass it has something to wait for,
-		// and starts the clock on a cart that will never unmask.
-		impl_->hack_border_seen |= (cmd == 0x13) ? Impl::kBorderChr
-		                                         : Impl::kBorderPct;
-		if (impl_->hack_pass == 0 && cmd == 0x14 && !impl_->hack_restart_at)
-			impl_->hack_settle_end = impl_->hack_frames + Impl::kHackPctSettle;
 		return;
 	}
 
@@ -3138,7 +3024,9 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 //     VBK/SVBK/KEY1/double-speed, HDMA. v1-3 loads skip the v4 block and
 //     the CGB fields keep their reset defaults (correct for DMG/SGB carts).
 // v6: add mem.key0 - CGB boot CPU-mode select; dmg_compat derives from it.
-constexpr uint32_t SGB_STATE_VERSION = 7;
+// v8: add the Super Game Boy Color flag, so a state names the kind of session
+//     it came from (the SNES ROM differs: SGBC runs a patched BIOS).
+constexpr uint32_t SGB_STATE_VERSION = 8;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3151,6 +3039,7 @@ struct IoCtx
 	IoMode         mode;
 	bool           ok;
 	uint32_t       version;
+	bool           sgbc_mismatch = false;
 };
 
 inline void IoBytes(IoCtx &c, void *data, size_t n)
@@ -3346,6 +3235,17 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 	{
 		IoField(c, impl.cart.unl);
 	}
+
+	// v8: which kind of session made the state. A Super Game Boy Color
+	// session runs a patched SGB2 BIOS on the SNES side, so a state from the
+	// other kind would resume inside code that is not there.
+	if (c.version >= 8)
+	{
+		uint8_t sgbc = impl.sgbc ? 1 : 0;
+		IoField(c, sgbc);
+		if (c.mode == IoMode::Load && (sgbc != 0) != impl.sgbc)
+			c.sgbc_mismatch = true;
+	}
 }
 
 } // anonymous
@@ -3392,6 +3292,13 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	IoCtx c{nullptr, buffer + 12, 0, plen, IoMode::Load, true, version};
 	VisitState(*impl_, c);
 	if (!c.ok) return false;
+	if (c.sgbc_mismatch)
+	{
+		S9xMessage(S9X_INFO, S9X_ROM_INFO,
+		           impl_->sgbc ? "State was not saved in Super Game Boy Color mode"
+		                       : "State was saved in Super Game Boy Color mode");
+		return false;
+	}
 
 	// Relink Memory's pointer fields — they were serialized as garbage.
 	impl_->mem.ppu    = &impl_->ppu;
@@ -3438,7 +3345,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->joypad.sgb_pads[1]  = impl_->icd2.joypad[1];
 	impl_->joypad.sgb_pads[2]  = impl_->icd2.joypad[2];
 	impl_->joypad.sgb_pads[3]  = impl_->icd2.joypad[3];
-	impl_->joypad.sgb_index    = impl_->HideSgbFromCart() ? 0 : impl_->icd2.input_index;
+	impl_->joypad.sgb_index    = impl_->icd2.input_index;
 
 	return true;
 }
@@ -3595,7 +3502,10 @@ bool S9xSGBIsCgb(void) { return SGB::Instance().IsCgb(); }
 bool S9xSGBIsCgbRender(void) { return SGB::Instance().IsCgbRender(); }
 const uint16_t *S9xSGBGetCgbColorFB(void) { return SGB::Instance().CgbColorFB(); }
 void S9xSGBSetCgbOverride(int mode) { SGB::Instance().SetCgbOverride(mode); }
-void S9xSGBSetSgbCgbHack(bool enabled) { SGB::Instance().SetSgbCgbHack(enabled); }
+void S9xSGBSetSgbc(bool enabled) { SGB::Instance().SetSgbc(enabled); }
+bool S9xSGBSgbcActive(void) { return SGB::Instance().Sgbc(); }
+void S9xSGBPrepareSgbcCart(void) { SGB::Instance().PrepareSgbcCart(); }
+const char *S9xSGBSgbcPatchName(void) { return SGB::Instance().SgbcPatchName(); }
 
 void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {

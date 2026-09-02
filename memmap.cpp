@@ -30,6 +30,7 @@
 #include "apu/apu.h"
 #include "cheats.h"
 #include "sgb/sgb.h"
+#include "sgb/sgbc_patches.h"
 #include "biosmanager.h"
 #include "fxemu.h"
 #include "sdd1.h"
@@ -1389,23 +1390,25 @@ S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lice
 			if (sgb_available) return (S9X_GBCON_SGB);
 			return (does_gbc ? S9X_GBCON_GBC : S9X_GBCON_GB);
 
-		case S9X_GBBOOT_SGB_GBC:
-		case S9X_GBBOOT_SGB2_GBC:
-			// Only meaningful on a color-capable cart; a mono cart has no CGB
-			// output to overlay, so leave it as a plain SGB session.
+		case S9X_GBBOOT_SGBC:
+		case S9X_GBBOOT_SGB_GBC_LEGACY:
+		case S9X_GBBOOT_SGB2_GBC_LEGACY:
+			// Super Game Boy Color: the SGB2 BIOS around a Color core, every
+			// cart in color (a mono one through the compatibility palettes).
+			// Without the BIOS it is just a Game Boy Color.
 			if (sgb_available)
 			{
-				if (out_force_cgb) *out_force_cgb = does_gbc ? TRUE : FALSE;
+				if (out_force_cgb) *out_force_cgb = TRUE;
 				return (S9X_GBCON_SGB);
 			}
-			return (does_gbc ? S9X_GBCON_GBC : S9X_GBCON_GB);
+			return (S9X_GBCON_GBC);
 
 		// Automatic, and the two retired ones a stale config can still name.
 		// Take the best console the cart says it was built for: a Super Game
 		// Boy when it carries SGB features, color when it carries those, plain
-		// Game Boy otherwise. Never a color hack - that is what the two hack
-		// entries are for. A CGB-only cart is kept off the SGB because it would
-		// only reach its own lockout screen there.
+		// Game Boy otherwise. Never Super Game Boy Color - that is its own
+		// entry. A CGB-only cart is kept off the SGB because it would only
+		// reach its own lockout screen there.
 		default:
 			if (does_sgb && sgb_enhanced) return (S9X_GBCON_SGB);
 			if (does_gbc)                 return (S9X_GBCON_GBC);
@@ -1420,9 +1423,10 @@ const char *S9xGBBootPolicyName (int policy)
 		case S9X_GBBOOT_GB:       return ("Game Boy");
 		case S9X_GBBOOT_GBC:      return ("Game Boy Color");
 		case S9X_GBBOOT_SGB:      return ("Super Game Boy");
-		case S9X_GBBOOT_SGB_GBC:  return ("Super Game Boy + Game Boy Color (hack)");
 		case S9X_GBBOOT_SGB2:     return ("Super Game Boy 2");
-		case S9X_GBBOOT_SGB2_GBC: return ("Super Game Boy 2 + Game Boy Color (hack)");
+		case S9X_GBBOOT_SGB_GBC_LEGACY:
+		case S9X_GBBOOT_SGB2_GBC_LEGACY:
+		case S9X_GBBOOT_SGBC:     return ("Super Game Boy Color");
 		case S9X_GBBOOT_AUTO_GB_LEGACY:
 		case S9X_GBBOOT_AUTO_GBC_LEGACY:
 		case S9X_GBBOOT_AUTO:     return ("Automatic");
@@ -1433,19 +1437,18 @@ const char *S9xGBBootPolicyName (int policy)
 const uint8 S9xGBBootPolicyMenuOrder[] = {
 	S9X_GBBOOT_GB,       S9X_GBBOOT_GBC,
 	S9X_GBBOOT_SGB,      S9X_GBBOOT_SGB2,
-	S9X_GBBOOT_SGB_GBC,  S9X_GBBOOT_SGB2_GBC,
+	S9X_GBBOOT_SGBC,
 	S9X_GBBOOT_AUTO
 };
 const int S9xGBBootPolicyMenuCount =
 	(int) (sizeof(S9xGBBootPolicyMenuOrder) / sizeof(S9xGBBootPolicyMenuOrder[0]));
 
 const S9xGBModelHotkey S9xGBModelHotkeys[] = {
-	{ "GBModelGB",       "Game Boy",                 S9X_GBBOOT_GB       },
-	{ "GBModelGBC",      "Game Boy Color",           S9X_GBBOOT_GBC      },
-	{ "GBModelSGB",      "Super Game Boy",           S9X_GBBOOT_SGB      },
-	{ "GBModelSGB2",     "Super Game Boy 2",         S9X_GBBOOT_SGB2     },
-	{ "GBModelSGBGBC",   "SGB + GBC (hack)",         S9X_GBBOOT_SGB_GBC  },
-	{ "GBModelSGB2GBC",  "SGB2 + GBC (hack)",        S9X_GBBOOT_SGB2_GBC },
+	{ "GBModelGB",       "Game Boy",                 S9X_GBBOOT_GB   },
+	{ "GBModelGBC",      "Game Boy Color",           S9X_GBBOOT_GBC  },
+	{ "GBModelSGB",      "Super Game Boy",           S9X_GBBOOT_SGB  },
+	{ "GBModelSGB2",     "Super Game Boy 2",         S9X_GBBOOT_SGB2 },
+	{ "GBModelSGBC",     "Super Game Boy Color",     S9X_GBBOOT_SGBC },
 };
 const int S9xGBModelHotkeyCount =
 	(int) (sizeof(S9xGBModelHotkeys) / sizeof(S9xGBModelHotkeys[0]));
@@ -1455,16 +1458,9 @@ uint8 S9xNormalizeGBBootPolicy (int policy)
 	if (policy < 0 || policy >= S9X_NUM_GBBOOT_POLICIES) return (S9X_GBBOOT_AUTO);
 	if (policy == S9X_GBBOOT_AUTO_GB_LEGACY ||
 	    policy == S9X_GBBOOT_AUTO_GBC_LEGACY) return (S9X_GBBOOT_AUTO);
+	if (policy == S9X_GBBOOT_SGB_GBC_LEGACY ||
+	    policy == S9X_GBBOOT_SGB2_GBC_LEGACY) return (S9X_GBBOOT_SGBC);
 	return ((uint8) policy);
-}
-
-// True when the loaded cart renders in color. The +GBC hacks overlay a CGB
-// framebuffer, which a mono cart never produces.
-static bool8 GBLoadedCartIsColor (void)
-{
-	uint8 cgb_flag = 0, sgb_flag = 0;
-	if (!S9xSGBGetCartFlags(&cgb_flag, &sgb_flag)) return (TRUE);
-	return (cgb_flag == 0x80 || cgb_flag == 0xC0);
 }
 
 S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
@@ -1478,19 +1474,9 @@ S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
 			return (S9xSGBBIOSAvailable(1, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
+		// Super Game Boy Color takes any cart, like the SGB2 it is built on.
 		case S9X_GBBOOT_SGB2:
-			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
-			                                            : S9X_GBPOLICY_NO_BIOS);
-
-		// The color half of a hack has nothing to add to a mono cart: measured,
-		// it renders frame-for-frame the same as plain Super Game Boy.
-		case S9X_GBBOOT_SGB_GBC:
-			if (!GBLoadedCartIsColor())                 return (S9X_GBPOLICY_CART);
-			return (S9xSGBBIOSAvailable(1, gb_rom_path) ? S9X_GBPOLICY_OK
-			                                            : S9X_GBPOLICY_NO_BIOS);
-
-		case S9X_GBBOOT_SGB2_GBC:
-			if (!GBLoadedCartIsColor())                 return (S9X_GBPOLICY_CART);
+		case S9X_GBBOOT_SGBC:
 			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
@@ -1508,9 +1494,8 @@ int S9xGBBootPolicyGroup (int policy)
 {
 	switch (policy)
 	{
-		case S9X_GBBOOT_SGB_GBC:
-		case S9X_GBBOOT_SGB2_GBC:
-			return (1);   // the two color hacks, no real hardware equivalent
+		case S9X_GBBOOT_SGBC:
+			return (1);   // no real hardware equivalent
 
 		case S9X_GBBOOT_AUTO_GB_LEGACY:
 		case S9X_GBBOOT_AUTO_GBC_LEGACY:
@@ -1933,12 +1918,19 @@ static bool s_sgb_user_boot = false;
 // so re-announcing it is accurate by construction.
 static uint8 s_last_bios_mode = 0;
 
+// Whether the SGB2 dump the Super Game Boy Color session runs took the
+// built-in patch (a dump the patch was not built against runs unpatched).
+static bool s_sgbc_bios_patched = false;
+
 static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
 {
     const std::string name = GBGameNameFromPath(gb_path);
     const char *region = Settings.PAL ? "PAL" : "NTSC";
+    const bool sgbc = (bios_mode == 2) && S9xSGBSgbcActive();
     char msg[1024];
-    if (bios_mode == 2)
+    if (sgbc)
+        snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy Color", name.c_str(), region);
+    else if (bios_mode == 2)
         snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy 2", name.c_str(), region);
     else if (bios_mode == 1)
         snprintf(msg, sizeof msg, "\"%s\" (%s) via Super Game Boy", name.c_str(), region);
@@ -1955,7 +1947,17 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
     if (bios_mode == 1 || bios_mode == 2)
     {
         from = BaseName(Settings.SGB_BIOSPath);
+        if (sgbc)
+            from += s_sgbc_bios_patched ? " + built-in patch"
+                                        : " (unpatched: dump not recognised)";
         if (s_sgb_user_boot) from += " + boot ROM";
+        // The per-game patch that made a dual cart run its SGB init too.
+        const char *game_patch = sgbc ? S9xSGBSgbcPatchName() : NULL;
+        if (game_patch && *game_patch)
+        {
+            from += " + ";
+            from += game_patch;
+        }
     }
     else if (bios_mode == 3 || bios_mode == 4)
         from = BaseName(Settings.GB_BIOSPath);
@@ -1997,15 +1999,16 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lic
     out_bios_path.clear();
     out_bios_mode = 0;
 
-    // Every named Super Game Boy policy pins its variant, the two color hacks
-    // included, and none of them falls back to the other one: asking for SGB2
-    // and silently getting SGB1 is not what was picked. Only the Automatic
-    // entries search, and SGB_BIOSPreference just orders that search.
+    // Every named Super Game Boy policy pins its variant, Super Game Boy Color
+    // (built on the SGB2) included, and none of them falls back to the other
+    // one: asking for SGB2 and silently getting SGB1 is not what was picked.
+    // Only the Automatic entries search, and SGB_BIOSPreference just orders
+    // that search.
     std::string sgb_path;
-    const uint8 pinned = (Settings.GBBootPolicy == S9X_GBBOOT_SGB ||
-                          Settings.GBBootPolicy == S9X_GBBOOT_SGB_GBC)  ? 1
-                       : (Settings.GBBootPolicy == S9X_GBBOOT_SGB2 ||
-                          Settings.GBBootPolicy == S9X_GBBOOT_SGB2_GBC) ? 2 : 0;
+    const uint8 policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+    const uint8 pinned = (policy == S9X_GBBOOT_SGB)  ? 1
+                       : (policy == S9X_GBBOOT_SGB2 ||
+                          policy == S9X_GBBOOT_SGBC) ? 2 : 0;
 
     if (Settings.SGB_BIOSPreference == 0)
         ;   // SGB switched off entirely (libretro's snes9x_sgb_bios=off)
@@ -2037,9 +2040,10 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lic
     else
         out_bios_mode = 0;
 
-    // The SGB BIOS forces DMG on real hardware; the SGB+GBC hack overrides
-    // that, and a forced GB/GBC console overrides the cart header.
-    S9xSGBSetSgbCgbHack(console == S9X_GBCON_SGB && out_force_cgb);
+    // The SGB BIOS forces DMG on real hardware; Super Game Boy Color keeps the
+    // Color core on under it, and a forced GB/GBC console overrides the cart
+    // header.
+    S9xSGBSetSgbc(console == S9X_GBCON_SGB && out_force_cgb);
     if (console == S9X_GBCON_SGB)
         S9xSGBSetCgbOverride(out_force_cgb ? 1 : -1);
     else
@@ -2323,23 +2327,37 @@ static bool AcceptSGBAny (const uint8 *data, uint32 size, uint32 full_size, void
 }
 
 // bios_path may be a .zip; S9xReadBiosImage picks the member that carries an
-// SGB header and inflates it.
-static bool8 LoadSGBBIOSBytes (const char *bios_path, std::vector<uint8> &out_bios, uint8 &out_mode)
+// SGB header and inflates it. Super Game Boy Color takes the SGB2 dump through
+// the built-in patch (SHA-256 gated: an unknown dump runs unpatched, and the
+// pane then shows the BIOS's own mono picture).
+static bool8 LoadSGBBIOSBytes (const char *bios_path, std::vector<uint8> &out_bios, uint8 &out_mode,
+                               bool sgbc)
 {
     if (!S9xReadBiosImage(bios_path, out_bios, CMemory::MAX_ROM_SIZE, AcceptSGBAny, NULL))
         return FALSE;
     out_mode = 1;
     S9xIsSGBBIOSImage(out_bios.data(), (uint32) out_bios.size(), &out_mode);
+    s_sgbc_bios_patched = sgbc && out_mode == 2 && SGB::PatchSgbcBios(out_bios);
+    if (s_sgbc_bios_patched && !S9xIsSGBBIOSImage(out_bios.data(), (uint32) out_bios.size(), NULL))
+        return FALSE;   // the patch must never touch the header title
     return TRUE;
 }
 
-bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path, bool skip_gb_boot_rom)
+// Super Game Boy Color is the SGB2 policy with the Color core kept on: the
+// resolver only lands on an SGB console here when that BIOS was found.
+static bool SgbcSessionRequested (void)
+{
+    return S9xNormalizeGBBootPolicy(Settings.GBBootPolicy) == S9X_GBBOOT_SGBC;
+}
+
+bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
 {
     if (!gb_path || !bios_path) return FALSE;
 
+    const bool sgbc = SgbcSessionRequested();
     std::vector<uint8> bios;
     uint8 mode = 1;
-    if (!LoadSGBBIOSBytes(bios_path, bios, mode)) return FALSE;
+    if (!LoadSGBBIOSBytes(bios_path, bios, mode, sgbc)) return FALSE;
 
     // GB-side boot ROM: the user's if it really is an SGB one, otherwise the
     // embedded LIJI32/SameBoy fallback. See IsSGBBootROM.
@@ -2348,8 +2366,7 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path, b
     const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
                                LoadSGBBootROM(boot_path.c_str(), user_boot);
     const bool user_boot_is_sgb = user_has_boot && IsSGBBootROM(user_boot) != FALSE;
-    // The +GBC hack stages no boot ROM at all, so do not claim one there.
-    s_sgb_user_boot = (!skip_gb_boot_rom && user_boot_is_sgb);
+    s_sgb_user_boot = user_boot_is_sgb;
 
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
@@ -2359,16 +2376,13 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path, b
     }
 
     if (!S9xSGBInit()) return FALSE;
-    // SGB+GBC hack: with no GB-side boot ROM the synthesized handshake carries
-    // the session and Reset hands the cart CGB post-boot state (A=$11), which
-    // is what lets a CGB-only game get past its lockout screen.
-    if (skip_gb_boot_rom)
-        S9xSGBLoadBootROMBytes(nullptr, 0);
-    else if (user_boot_is_sgb)
+    if (user_boot_is_sgb)
         S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
     else
         S9xSGBLoadEmbeddedBootROM(mode);
     if (!S9xSGBLoadROM(gb_path)) return FALSE;
+    // Header marker + per-game patch, in memory, before the BIOS ever runs.
+    if (sgbc) S9xSGBPrepareSgbcCart();
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
     if (!LoadROMMem(bios.data(), (uint32)bios.size(), bios_path))
@@ -2395,22 +2409,21 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path, b
 }
 
 bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
-                                         const char *gb_path, const char *bios_path,
-                                         bool skip_gb_boot_rom)
+                                         const char *gb_path, const char *bios_path)
 {
     if (!gb_bytes || !gb_size || !bios_path) return FALSE;
 
+    const bool sgbc = SgbcSessionRequested();
     std::vector<uint8> bios;
     uint8 mode = 1;
-    if (!LoadSGBBIOSBytes(bios_path, bios, mode)) return FALSE;
+    if (!LoadSGBBIOSBytes(bios_path, bios, mode, sgbc)) return FALSE;
 
     std::string boot_path;
     std::vector<uint8> user_boot;
     const bool user_has_boot = FindSGB_BootROM(mode, gb_path, boot_path) &&
                                LoadSGBBootROM(boot_path.c_str(), user_boot);
     const bool user_boot_is_sgb = user_has_boot && IsSGBBootROM(user_boot) != FALSE;
-    // The +GBC hack stages no boot ROM at all, so do not claim one there.
-    s_sgb_user_boot = (!skip_gb_boot_rom && user_boot_is_sgb);
+    s_sgb_user_boot = user_boot_is_sgb;
 
     // Snapshot the GB bytes before LoadROMMem clobbers ROM[].
     std::vector<uint8> gb_copy(gb_bytes, gb_bytes + gb_size);
@@ -2423,17 +2436,14 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
     }
 
     if (!S9xSGBInit()) return FALSE;
-    // SGB+GBC hack: with no GB-side boot ROM the synthesized handshake carries
-    // the session and Reset hands the cart CGB post-boot state (A=$11), which
-    // is what lets a CGB-only game get past its lockout screen.
-    if (skip_gb_boot_rom)
-        S9xSGBLoadBootROMBytes(nullptr, 0);
-    else if (user_boot_is_sgb)
+    if (user_boot_is_sgb)
         S9xSGBLoadBootROMBytes(user_boot.data(), user_boot.size());
     else
         S9xSGBLoadEmbeddedBootROM(mode);
     if (!S9xSGBLoadROMBytes(gb_copy.data(), gb_copy.size(), gb_path))
         return FALSE;
+    // Header marker + per-game patch, in memory, before the BIOS ever runs.
+    if (sgbc) S9xSGBPrepareSgbcCart();
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
     if (!LoadROMMem(bios.data(), (uint32)bios.size(), bios_path))

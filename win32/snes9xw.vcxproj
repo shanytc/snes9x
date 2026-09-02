@@ -537,6 +537,7 @@
     <ClCompile Include="..\sgb\sgb.cpp" />
     <ClCompile Include="..\sgb\sgb_packet.cpp" />
     <ClCompile Include="..\sgb\sgb_state.cpp" />
+    <ClCompile Include="..\sgb\sgbc_patches.cpp" />
     <ClCompile Include="..\sgb\gb_cpu.cpp" />
     <ClCompile Include="..\sgb\gb_ops.cpp" />
     <ClCompile Include="..\sgb\gb_ops_cb.cpp" />

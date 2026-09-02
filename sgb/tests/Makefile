@@ -16,9 +16,10 @@ ROOT     := $(abspath ../..)
 SGBDIR   := $(ROOT)/sgb
 
 # All sgb/ sources except the test itself. sgb/acid.cpp decodes reference
-# PNGs through stb_image, so its implementation TU rides along.
+# PNGs through stb_image, so its implementation TU rides along, and
+# sgb/sgbc_patches.cpp hashes the SGB2 BIOS, so the host's sha256 does too.
 SGBSRCS := $(filter-out $(SGBDIR)/tests/%.cpp,$(wildcard $(SGBDIR)/*.cpp))
-STBSRC  := $(ROOT)/external/stb/stb_image_implementation.cpp
+STBSRC  := $(ROOT)/external/stb/stb_image_implementation.cpp $(ROOT)/sha256.cpp
 INCS    := -I$(ROOT) -I$(SGBDIR) -I$(ROOT)/external/stb
 
 TARGET := sgb_test

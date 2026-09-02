@@ -433,12 +433,7 @@
      </row>
      <row>
       <property name="text">
-       <string>Game Boy Model: SGB + GBC (hack)</string>
-      </property>
-     </row>
-     <row>
-      <property name="text">
-       <string>Game Boy Model: SGB2 + GBC (hack)</string>
+       <string>Game Boy Model: Super Game Boy Color</string>
       </property>
      </row>
      <column>

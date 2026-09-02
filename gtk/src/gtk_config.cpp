@@ -424,7 +424,7 @@ int Snes9xConfig::save_config_file()
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
     outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
-    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 3=SGB+GBC, 4=SGB2, 7=automatic (default), 8=SGB2+GBC. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7");
+    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
 
     section = "Input";
     controllers controller = CTL_NONE;

@@ -348,6 +348,7 @@ list(APPEND SOURCES
     ../sgb/sgb.cpp
     ../sgb/sgb_packet.cpp
     ../sgb/sgb_state.cpp
+    ../sgb/sgbc_patches.cpp
     ../sgb/gb_cpu.cpp
     ../sgb/gb_ops.cpp
     ../sgb/gb_ops_cb.cpp

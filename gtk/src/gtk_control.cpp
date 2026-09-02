@@ -134,8 +134,7 @@ const BindingLink b_links[] =
         { "b_gb_model_gbc",        "GTK_gb_model_1"    },
         { "b_gb_model_sgb",        "GTK_gb_model_2"    },
         { "b_gb_model_sgb2",       "GTK_gb_model_3"    },
-        { "b_gb_model_sgb_gbc",    "GTK_gb_model_4"    },
-        { "b_gb_model_sgb2_gbc",   "GTK_gb_model_5"    },
+        { "b_gb_model_sgbc",       "GTK_gb_model_4"    },
 
         { nullptr, nullptr }
 };

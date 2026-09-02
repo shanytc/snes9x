@@ -384,8 +384,8 @@ struct SCustomKey {
 };
 
 // Consoles offered as Emulation -> Game Boy Model hotkeys: the four real ones
-// plus the two +GBC hacks, in menu order. The Automatic entries are not bound.
-#define GB_MODEL_HOTKEYS 6
+// plus Super Game Boy Color, in menu order. Automatic is not bound.
+#define GB_MODEL_HOTKEYS 5
 
 struct SCustomKeys {
 	SCustomKey SpeedUp;

@@ -1506,8 +1506,7 @@ BEGIN
             MENUITEM "&Super Game Boy",             (ID_EMULATION_BIOS_POLICY0+2),MFT_STRING,MFS_ENABLED
             MENUITEM "Super Game Boy &2",           (ID_EMULATION_BIOS_POLICY0+4),MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
-            MENUITEM "Super Game Boy + Game Boy Co&lor (hack)",(ID_EMULATION_BIOS_POLICY0+3),MFT_STRING,MFS_ENABLED
-            MENUITEM "Super Game Boy 2 + Game Boy Colo&r (hack)",(ID_EMULATION_BIOS_POLICY0+8),MFT_STRING,MFS_ENABLED
+            MENUITEM "Super Game Boy Co&lor",       (ID_EMULATION_BIOS_POLICY0+9),MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
             MENUITEM "&Automatic",                  (ID_EMULATION_BIOS_POLICY0+7),MFT_STRING,MFS_ENABLED
         END

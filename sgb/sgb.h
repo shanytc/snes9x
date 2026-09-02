@@ -63,10 +63,6 @@ public:
 	// should fall back to a full power-cycle.
 	bool SoftReset();
 
-	// SGB+GBC hack only: end the border pass and restart the cart with the
-	// CGB signature. Driven internally from RunCycles.
-	void StartColorPass();
-
 	bool LoadROM(const uint8_t *data, size_t size, const char *path = nullptr);
 	void UnloadROM();
 	bool HasROM() const;
@@ -104,18 +100,30 @@ public:
 	// Set before LoadROM; the BIOS Manager's console policy drives it.
 	void SetCgbOverride(int mode);
 
-	// Keep CGB rendering on under the SGB BIOS (the SGB+GBC hack).
-	void SetSgbCgbHack(bool enabled);
+	// Super Game Boy Color: keep CGB rendering on under the SGB2 BIOS.
+	void SetSgbc(bool enabled);
+	bool Sgbc() const;
+
+	// Super Game Boy Color, after LoadROM: stamp the header marker the patched
+	// BIOS keys its pane on, then the built-in per-game patch for this cart
+	// (sgbc_patches.cpp). All in memory; the file stays pristine.
+	void PrepareSgbcCart();
+	// The per-game patch PrepareSgbcCart applied, or "" when none did.
+	const char *SgbcPatchName() const;
 
 	// Pin whether this instance behaves as a BIOS-mode core: -1 follows
 	// Settings.SGB_BIOSModeActive (the live core), 0/1 pins it. Private
-	// cores (audit workers, the hack's border prelude) pin 0 so they keep
-	// BIOS-less semantics even while the app session runs the SGB BIOS.
+	// cores (audit workers) pin 0 so they keep BIOS-less semantics even
+	// while the app session runs the SGB BIOS.
 	void SetHostBiosMode(int mode);
 
 	// Cart-header flags $0143 (CGB) and $0146 (SGB); zeroed with false when
 	// no cart. Describes the cart, not the mode it runs in (cf. IsCgb()).
 	bool CartFlags(uint8_t *cgb_flag, uint8_t *sgb_flag) const;
+
+	// The MBC's current $4000-$7FFF ROM bank, for trace tools that map a PC
+	// back to a file offset. 0 when no cart.
+	uint32_t CurrentRomBank() const;
 
 	// Debug viewer accessors — side-effect-free reads of live PPU state.
 	const uint8_t  *DebugVRAM() const;       // 0x4000: bank0 [0..0x1FFF], bank1 [0x2000..]
@@ -128,8 +136,6 @@ public:
 	uint32_t        BorderTransferCount() const;
 	uint32_t        BorderPlaneVersion() const;
 	uint32_t        BorderPctCount() const;
-	// SGB+GBC hack: true once the color pass has taken over.
-	bool            SgbHackColorPass() const;
 	const uint8_t  *DebugSgbAttrMap() const; // SGB_TILES (360)
 	void            DebugGetPpuRegs(uint8_t out[12]) const;
 
@@ -260,8 +266,8 @@ public:
 	// on why the BIOS's own freeze does not engage under our slaving.
 	void OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
 
-	// SGB+GBC hack: paint the GB core's CGB output over the GB area of the
-	// SNES frame, so the game keeps its SGB border but gains real color.
+	// Super Game Boy Color: fill the pane the patched BIOS keyed with the GB
+	// core's CGB output, so the game keeps its SGB border and gains real color.
 	void  OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
 	void  OverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
 
@@ -435,10 +441,14 @@ const uint16_t *S9xSGBGetCgbColorFB(void);
 // -1 auto (cart header), 0 force DMG, 1 force CGB. Call before S9xSGBLoadROM*.
 void S9xSGBSetCgbOverride(int mode);
 
-// Keep CGB rendering on while the SNES-side SGB BIOS drives the session — the
-// "Super Game Boy + Game Boy Color" hack: SGB border plus real CGB color,
-// which real hardware can't do. Pairs with S9xSGBOverlayCgbScreen.
-void S9xSGBSetSgbCgbHack(bool enabled);
+// Super Game Boy Color: keep CGB rendering on while the SNES-side SGB2 BIOS
+// drives the session — SGB border plus real CGB color, which real hardware
+// can't do. Pairs with S9xSGBOverlayCgbScreen. Call before S9xSGBLoadROM*.
+void S9xSGBSetSgbc(bool enabled);
+bool S9xSGBSgbcActive(void);
+// See Emulator::PrepareSgbcCart / SgbcPatchName.
+void S9xSGBPrepareSgbcCart(void);
+const char *S9xSGBSgbcPatchName(void);
 
 // Cart-header flags $0143 (CGB) and $0146 (SGB); either pointer may be null.
 // Returns false with both zeroed when no GB cart is loaded.
@@ -504,7 +514,7 @@ void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
 // BIOS-mode half of the boot-logo hold — see Emulator::OverlayBootLogo.
 void S9xSGBOverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
 
-// SGB+GBC hack — see Emulator::OverlayCgbScreen. No-op unless it is active.
+// Super Game Boy Color — see Emulator::OverlayCgbScreen. No-op unless active.
 void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
 
 // BIOS-mode MASK_EN pane cover — see Emulator::OverlayBiosMask.

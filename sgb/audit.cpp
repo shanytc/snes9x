@@ -418,7 +418,7 @@ const char *ComboId(Combo c)
 {
 	static const char *ids[] = { "gb+bios", "gb", "gbc+bios", "gbc",
 	                             "sgb1", "sgb2", "sgb1+cb", "sgb2+cb",
-	                             "sgb1+gbc", "sgb2+gbc" };
+	                             "sgbc" };
 	return ids[(int)c];
 }
 
@@ -427,7 +427,7 @@ const char *ComboName(Combo c)
 	static const char *names[] = { "GB BIOS", "GB", "GBC BIOS", "GBC",
 	                               "SGB1", "SGB2",
 	                               "SGB1 Border", "SGB2 Border",
-	                               "SGB1+GBC", "SGB2+GBC" };
+	                               "SGBC" };
 	return names[(int)c];
 }
 
@@ -468,8 +468,8 @@ std::string RomBootClass(const Rom &r)
 
 // Which columns a cart gets: every cart boots on every plain model - a
 // CGB-only cart runs forced-DMG on GB/SGB and its own lockout screen (or
-// garbage) is the capture. Only the border and hack columns are gated,
-// on what the cart itself claims to support.
+// garbage) is the capture. Only the border columns are gated, on what the
+// cart itself claims to support; Super Game Boy Color takes any cart.
 bool ComboApplies(Combo c, const Rom &r)
 {
 	switch (c)
@@ -480,15 +480,12 @@ bool ComboApplies(Combo c, const Rom &r)
 		case Combo::GBC_Bios:
 		case Combo::SGB1:
 		case Combo::SGB2:
+		case Combo::SGBC:
 			return true;
 		case Combo::SGB1_CB:
 		case Combo::SGB2_CB:
 			// Only carts that declare SGB support upload custom borders.
 			return RomSgbEnhanced(r);
-		case Combo::SGB1_GBC:
-		case Combo::SGB2_GBC:
-			// The model menu's hack entries: color carts only.
-			return RomCgbCapable(r);
 		default:
 			return false;
 	}
@@ -1112,13 +1109,13 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 	{
 		case Combo::GB:
 		case Combo::GB_Bios:
-			emu.SetSgbCgbHack(false);
+			emu.SetSgbc(false);
 			emu.SetCgbOverride(0);
 			emu.SetRunMode(SGB::RunMode::DMG);
 			break;
 		case Combo::GBC:
 		case Combo::GBC_Bios:
-			emu.SetSgbCgbHack(false);
+			emu.SetSgbc(false);
 			emu.SetCgbOverride(1);
 			emu.SetRunMode(SGB::RunMode::DMG);
 			break;
@@ -1127,7 +1124,7 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 			// Plain SGB forces DMG, as real hardware and the real BIOS do:
 			// a color cart boots mono, and a CGB-only cart shows its own
 			// lockout screen in the default bezel - that is the capture.
-			emu.SetSgbCgbHack(false);
+			emu.SetSgbc(false);
 			emu.SetCgbOverride(0);
 			emu.SetRunMode(c == Combo::SGB1 ? SGB::RunMode::SGB
 			                                : SGB::RunMode::SGB2);
@@ -1137,35 +1134,21 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 			// Authentic SGB: force model 3 keeps command processing and the
 			// idle 2-player ID rotation live, so carts detect the SGB and
 			// upload their custom borders.
-			emu.SetSgbCgbHack(false);
+			emu.SetSgbc(false);
 			emu.SetCgbOverride(-1);
 			emu.SetForceModel(3);
 			emu.SetRunMode(c == Combo::SGB1_CB ? SGB::RunMode::SGB
 			                                   : SGB::RunMode::SGB2);
 			break;
-		case Combo::SGB1_GBC:
-		case Combo::SGB2_GBC:
-		{
-			// The "SGB + GBC (hack)" view. The core boots the cart once,
-			// on the color pass; for an SGB-enhanced cart (flag + the
-			// $33 licensee, like hardware) its ColdReset first harvests
-			// the border in a hidden prelude core. A plain color cart
-			// has no border to fetch and shows the default bezel. Either
-			// way this is the app's exact path.
-			const bool sgb_cart = rom.size() > 0x14B &&
-				rom[0x146] == 0x03 && rom[0x14B] == 0x33;
-			emu.SetSgbCgbHack(true);
-			if (sgb_cart)
-			{
-				emu.SetForceModel(3);
-				emu.SetCgbOverride(-1);
-			}
-			else
-				emu.SetCgbOverride(1);
-			emu.SetRunMode(c == Combo::SGB1_GBC ? SGB::RunMode::SGB
-			                                    : SGB::RunMode::SGB2);
+		case Combo::SGBC:
+			// Super Game Boy Color: the Color core under the SGB2 boot ROM,
+			// the way the app runs it (its per-game patch included, through
+			// PrepareSgbcCart after the load). Every cart gets the Color
+			// signature; a mono one runs through the compatibility palettes.
+			emu.SetSgbc(true);
+			emu.SetCgbOverride(1);
+			emu.SetRunMode(SGB::RunMode::SGB2);
 			break;
-		}
 		default:
 			err = "bad combo";
 			return false;
@@ -1175,16 +1158,13 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 	if (c == Combo::GB_Bios)  boot = dmg_boot;
 	if (c == Combo::GBC_Bios) boot = cgb_boot;
 	bool boot_ok;
-	const bool hack_sgb_boot =
-		(c == Combo::SGB1_GBC || c == Combo::SGB2_GBC) &&
-		rom.size() > 0x14B && rom[0x146] == 0x03 && rom[0x14B] == 0x33;
-	if (c == Combo::SGB1_CB || c == Combo::SGB2_CB || hack_sgb_boot)
+	if (c == Combo::SGB1_CB || c == Combo::SGB2_CB || c == Combo::SGBC)
 	{
 		// Authentic SGB boots through the SGB-side boot ROM: the BIOS
 		// manager's dump when one is assigned, else the embedded SameBoy
 		// one. Either way the cart sees the real handoff signature and
 		// engages its SGB path.
-		const int rev = (c == Combo::SGB2_CB || c == Combo::SGB2_GBC) ? 2 : 1;
+		const int rev = (c == Combo::SGB2_CB || c == Combo::SGBC) ? 2 : 1;
 		std::vector<uint8_t> mgr;
 		const std::string p = S9xResolveBiosPath(
 			rev == 2 ? S9X_BIOS_SGB2_BOOT : S9X_BIOS_SGB1_BOOT);
@@ -1211,6 +1191,9 @@ bool ConfigureAndLoad(SGB::Emulator &emu, Combo c, const std::vector<uint8_t> &r
 		err = "core rejected ROM";
 		return false;
 	}
+	// The app's load path stamps the header marker and applies the per-game
+	// patch after the load.
+	if (c == Combo::SGBC) emu.PrepareSgbcCart();
 	return true;
 }
 
@@ -1378,12 +1361,6 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 
 	const bool ring = ComboIsRing(c);   // 256x224 bezel composite
 
-	// Hack combos on an SGB-flagged cart run the mono border pass first,
-	// and nothing it shows is the shot: hold every clock until the color
-	// restart, and give the pass room on top of the title budget.
-	const bool hack_wait =
-		(c == Combo::SGB1_GBC || c == Combo::SGB2_GBC) && RomSgbEnhanced(r);
-
 	// The baseline pins the frame when it has this column, else the shot
 	// lands at the settle event and that frame becomes the pin.
 	const BaselineEntry *be = base ? base->Find(r, c) : nullptr;
@@ -1399,10 +1376,8 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 	// the panel is a handoff regression. The handoff itself leaves the logo
 	// in VRAM (games expect that), so a match running from frame 1 until
 	// the game clears the screen is legitimate residue, not a boot.
-	// (Not for hack combos: their authentic border pass legitimately runs
-	// the SGB boot ROM's logo before the color restart.)
 	const std::vector<uint8_t> logo_mask =
-		ring && !hack_wait ? DecodeHeaderLogo(rom) : std::vector<uint8_t>();
+		ring ? DecodeHeaderLogo(rom) : std::vector<uint8_t>();
 	int  logo_frame   = -1;
 	bool logo_residue = true;
 
@@ -1412,8 +1387,6 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 	int frame = 0;
 	int last_needed = pinned ? pin + (slip_window > 0 ? slip_window : 0)
 	                         : kFirstActiveCap + kTitleSettle + kTitleWaitCap;
-	// The border pass self-limits at 1200 frames (core failsafes).
-	if (hack_wait && !pinned) last_needed += 1200;
 
 	while (frame < last_needed)
 	{
@@ -1421,8 +1394,7 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 		++frame;
 
 		PanelGray(emu, gray);
-		const bool color_ready = !hack_wait || emu.SgbHackColorPass();
-		if (first_active < 0 && color_ready && !GrayUniform(gray))
+		if (first_active < 0 && !GrayUniform(gray))
 			first_active = frame;
 		if (!logo_mask.empty())
 		{
@@ -1450,7 +1422,7 @@ void RunCombo(SGB::Emulator &emu, const Rom &r, Combo c, ComboResult &out,
 					last_needed = frame;
 				}
 			}
-			else if (frame >= kFirstActiveCap && color_ready)
+			else if (frame >= kFirstActiveCap)
 			{
 				// Never drew a thing: shoot here so the capture exists and
 				// is deterministic, and say so.

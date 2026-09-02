@@ -203,6 +203,8 @@ struct COLOR_SUB
 void S9xStartScreenRefresh (void);
 void S9xEndScreenRefresh (void);
 void S9xRecordMidLineBrightness (int line, int x, uint8 oldBright, uint8 newBright);
+// The brightness and CGRAM entry 0 a rendered line was drawn with (see gfx.cpp).
+void S9xGetLineRenderState (int line, uint8 &brightness, uint16 &backdrop);
 void S9xRecordMidLineWindowSel (int reg, uint8 oldVal, uint8 newVal);
 void S9xRecordMidLineScroll (int reg, uint16 oldVal, uint16 newVal);
 void S9xBuildDirectColourMaps (void);

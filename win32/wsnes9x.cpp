@@ -2993,17 +2993,15 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_BIOS_POLICY0 + 0:
 		case ID_EMULATION_BIOS_POLICY0 + 1:
 		case ID_EMULATION_BIOS_POLICY0 + 2:
-		case ID_EMULATION_BIOS_POLICY0 + 3:
 		case ID_EMULATION_BIOS_POLICY0 + 4:
-		case ID_EMULATION_BIOS_POLICY0 + 5:
-		case ID_EMULATION_BIOS_POLICY0 + 6:
 		case ID_EMULATION_BIOS_POLICY0 + 7:
-		case ID_EMULATION_BIOS_POLICY0 + 8:
+		case ID_EMULATION_BIOS_POLICY0 + 9:
 			{
 				// Which console GB content runs on. The BIOS for it is used when
 				// one is assigned and skipped when not, so there is nothing else
 				// to pick here.
-				const uint8 policy = (uint8) (LOWORD(wParam) - ID_EMULATION_BIOS_POLICY0);
+				const uint8 policy = S9xNormalizeGBBootPolicy(
+					(int) (LOWORD(wParam) - ID_EMULATION_BIOS_POLICY0));
 				if (policy == Settings.GBBootPolicy)
 				{
 					// Nothing to reload, but still write it: a file holding one of
@@ -14380,8 +14378,8 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { &CustomKeys.GBModel[1], &CustomKeysExtra.GBModel[1], HOTKEYS_GBMODEL_GBC },
         { &CustomKeys.GBModel[2], &CustomKeysExtra.GBModel[2], HOTKEYS_GBMODEL_SGB },
         { &CustomKeys.GBModel[3], &CustomKeysExtra.GBModel[3], HOTKEYS_GBMODEL_SGB2 },
-        { &CustomKeys.GBModel[4], &CustomKeysExtra.GBModel[4], HOTKEYS_GBMODEL_SGB_GBC },
-        { &CustomKeys.GBModel[5], &CustomKeysExtra.GBModel[5], HOTKEYS_GBMODEL_SGB2_GBC },
+        { &CustomKeys.GBModel[4], &CustomKeysExtra.GBModel[4], HOTKEYS_GBMODEL_SGBC },
+        { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },

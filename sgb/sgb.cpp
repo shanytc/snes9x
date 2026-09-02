@@ -258,6 +258,7 @@ struct Emulator::Impl
 	std::vector<uint8_t> sgbc_pristine;
 	const uint8_t *sgbc_compat_combo = nullptr;
 	char        sgbc_patch_name[96] = {};
+	bool        sgbc_table = true;
 
 	// Whether this instance runs BIOS-mode semantics. -1 follows the app
 	// session (Settings.SGB_BIOSModeActive); private cores pin 0 so an
@@ -1276,6 +1277,11 @@ const char *Emulator::SgbcPatchName() const
 	return impl_->sgbc_patch_name;
 }
 
+void Emulator::SetSgbcTable(bool enabled)
+{
+	impl_->sgbc_table = enabled;
+}
+
 void Emulator::PrepareSgbcCart()
 {
 	Impl &im = *impl_;
@@ -1312,7 +1318,7 @@ void Emulator::PrepareSgbcCart()
 
 	// Per-game edits from the built-in table (sgbc_patches.cpp). Plain
 	// snprintf: the win32 port maps it through a macro.
-	const SgbcPatch *p = FindSgbcPatch(rom.data(), rom.size());
+	const SgbcPatch *p = im.sgbc_table ? FindSgbcPatch(rom.data(), rom.size()) : nullptr;
 	if (p && ApplySgbcPatch(*p, rom.data(), rom.size()))
 		snprintf(im.sgbc_patch_name, sizeof im.sgbc_patch_name, "%s", p->name);
 }
@@ -3506,6 +3512,7 @@ void S9xSGBSetSgbc(bool enabled) { SGB::Instance().SetSgbc(enabled); }
 bool S9xSGBSgbcActive(void) { return SGB::Instance().Sgbc(); }
 void S9xSGBPrepareSgbcCart(void) { SGB::Instance().PrepareSgbcCart(); }
 const char *S9xSGBSgbcPatchName(void) { return SGB::Instance().SgbcPatchName(); }
+void S9xSGBSetSgbcTable(bool enabled) { SGB::Instance().SetSgbcTable(enabled); }
 
 void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {

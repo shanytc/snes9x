@@ -110,6 +110,9 @@ public:
 	void PrepareSgbcCart();
 	// The per-game patch PrepareSgbcCart applied, or "" when none did.
 	const char *SgbcPatchName() const;
+	// Tools only: skip the built-in per-game table in PrepareSgbcCart, so a
+	// candidate edit can be tested on the pristine image.
+	void SetSgbcTable(bool enabled);
 
 	// Pin whether this instance behaves as a BIOS-mode core: -1 follows
 	// Settings.SGB_BIOSModeActive (the live core), 0/1 pins it. Private
@@ -449,6 +452,7 @@ bool S9xSGBSgbcActive(void);
 // See Emulator::PrepareSgbcCart / SgbcPatchName.
 void S9xSGBPrepareSgbcCart(void);
 const char *S9xSGBSgbcPatchName(void);
+void S9xSGBSetSgbcTable(bool enabled);
 
 // Cart-header flags $0143 (CGB) and $0146 (SGB); either pointer may be null.
 // Returns false with both zeroed when no GB cart is loaded.

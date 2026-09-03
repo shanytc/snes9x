@@ -411,12 +411,21 @@ const SgbcPatch kPatches[] = {
 	// manual: console type 1 (CGB) runs the SGB init too
 	{ 0x1AC7, "QUEST FANTASY  \200", "Quest - Fantasy Challenge (USA)", 1,
 	  { { 0x0001B9, 1, { 0x02 }, { 0x01 } } } },
-	// nop_skip_branch
-	{ 0x9C19, "STAR", "Robopon - Star Version (USA) (Proto)", 1,
-	  { { 0x063210, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0xDA57, "SUN", "Robopon - Sun Version (USA)", 1,
-	  { { 0x063210, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
+	// manual: SGB detect on the CGB path, $11 passes the border gate, BGP=0 write turned into LCDC=$FF
+	{ 0x9C19, "STAR", "Robopon - Star Version (USA) (Proto)", 3,
+	  { { 0x063210, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
+	    { 0x0FE26B, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } },
+	    { 0x0FE312, 3, { 0xAF, 0xE0, 0x47 }, { 0x3D, 0xE0, 0x40 } } } },
+	// manual: SGB detect on the CGB path, $11 passes the border gate, BGP=0 write turned into LCDC=$FF
+	{ 0xDA57, "SUN", "Robopon - Sun Version (USA)", 3,
+	  { { 0x063210, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
+	    { 0x0FE26D, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } },
+	    { 0x0FE314, 3, { 0xAF, 0xE0, 0x47 }, { 0x3D, 0xE0, 0x40 } } } },
+	// manual: SGB detect on the CGB path, $11 passes the border gate, BGP=0 write turned into LCDC=$FF
+	{ 0x5D30, "SUN", "Robopon - Sun Version (USA) (Beta)", 3,
+	  { { 0x063205, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
+	    { 0x0FE27B, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } },
+	    { 0x0FE322, 3, { 0xAF, 0xE0, 0x47 }, { 0x3D, 0xE0, 0x40 } } } },
 	// nop_skip_branch
 	{ 0x4527, "ROBO BOM", "Robot Poncots - Comic Bom Bom Special Version (Japan)", 1,
 	  { { 0x063145, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },

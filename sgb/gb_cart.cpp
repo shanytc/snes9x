@@ -571,6 +571,7 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 					h.ram_size = 8 * 1024;
 				}
 				c.vf_alt_board = (std::memcmp(&c.rom[0x184], kLogoVfDigi, 48) == 0);
+				c.vf_zook = (std::memcmp(&c.rom[0x134], "ZOCK2000", 8) == 0);
 				break;
 			default:
 				break;
@@ -697,6 +698,7 @@ void CartUnload(Cart &c)
 	c.mbc.type    = MbcType::None;
 	c.unl = MbcUnl();
 	c.vf_alt_board = false;
+	c.vf_zook = false;
 }
 
 bool CartSaveBatteryToPath(const Cart &c, const char *path)

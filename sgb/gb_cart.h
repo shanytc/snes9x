@@ -59,6 +59,8 @@ struct Cart
 	MbcUnl                unl;
 	// Vast Fame "A" boards seed the protection running value with $10.
 	bool                  vf_alt_board = false;
+	// Zook Z (USA): the English board's code-driven banking and challenge chip.
+	bool                  vf_zook = false;
 	// Sachen carts that keep the boot logo in the RA7-high half of the
 	// permuted $0100-$01FF window (the combo/31-in-1 series).
 	bool                  sachen_logo_high = false;

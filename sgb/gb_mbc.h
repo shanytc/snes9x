@@ -70,6 +70,17 @@ struct MbcUnl
 	uint8_t  vf_repl_on   = 0;
 	uint16_t vf_repl_addr = 0;
 	uint8_t  vf_repl_bank = 0;
+
+	uint8_t  vf_pad       = 0;   // the v7 blob's tail padding, kept explicit
+
+	// Zook Z (USA) board (v9 savestates, appended): the chip banks through
+	// 4-byte codes at $7081 and answers $7x80 byte sequences at $Ax80.
+	uint8_t  vfz_on         = 0;
+	uint8_t  vfz_after_read = 0;
+	uint8_t  vfz_len        = 0;
+	uint8_t  vfz_code_n     = 0;
+	uint8_t  vfz_code[4]    = {0};
+	uint8_t  vfz_seq[32]    = {0};
 };
 
 struct MbcState

@@ -28,6 +28,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstddef>
 #include <vector>
 
 namespace SGB {
@@ -3055,7 +3056,7 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v6: add mem.key0 - CGB boot CPU-mode select; dmg_compat derives from it.
 // v8: add the Super Game Boy Color flag, so a state names the kind of session
 //     it came from (the SNES ROM differs: SGBC runs a patched BIOS).
-constexpr uint32_t SGB_STATE_VERSION = 8;
+constexpr uint32_t SGB_STATE_VERSION = 9;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3259,10 +3260,15 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		IoField(c, impl.mem.key0);
 	}
 
-	// v7: scrambled-unlicensed mapper state (BBD/Sintax/Vast Fame etc.).
-	if (c.version >= 7)
+	// v7: scrambled-unlicensed mapper state (BBD/Sintax/Vast Fame etc.);
+	// v9 appended the Zook Z fields, so older blobs stop at the old size.
+	if (c.version >= 9)
 	{
 		IoField(c, impl.cart.unl);
+	}
+	else if (c.version >= 7)
+	{
+		IoBytes(c, &impl.cart.unl, offsetof(MbcUnl, vfz_on));
 	}
 
 	// v8: which kind of session made the state. A Super Game Boy Color

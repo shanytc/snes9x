@@ -14,13 +14,13 @@ namespace SGB {
 
 namespace {
 
-// SHA-256 of the pristine SGB2 dump the patch was built against.
+// In-Memory patch applies to SGB2 (SHA-256) only.
 const unsigned char kSgbcBiosBaseSha256[32] = {
 	0xC1, 0x72, 0x49, 0x8A, 0x23, 0xD1, 0x17, 0x66, 0x72, 0x93, 0x1B, 0xAB, 0x33, 0xB6, 0x29, 0xC7,
 	0xD2, 0x8F, 0x91, 0x4A, 0x43, 0xDC, 0xA9, 0xE5, 0x40, 0xB8, 0xAF, 0x1B, 0x37, 0xCC, 0xF2, 0xC6,
 };
 
-// Enable colors
+// In-Memory patch (original code) to enable SGBC support in an empty code cave
 const unsigned char kSgbcBiosIps[] = {
 	0x50, 0x41, 0x54, 0x43, 0x48, 0x00, 0x04, 0x8F, 0x00, 0x06, 0x22, 0xA7, 0xD9, 0x82, 0x80, 0xE6,
 	0x00, 0x39, 0xBE, 0x00, 0x04, 0x5C, 0x15, 0xDA, 0x82, 0x00, 0x44, 0xBF, 0x00, 0x04, 0x5C, 0x4A,
@@ -54,13 +54,7 @@ const unsigned char kSgbcBiosIps[] = {
 
 const size_t kSgbcBiosIpsSize = 446;
 
-// ---- Enable SGB support in games that don't check for it ----
-// Patterns: nop_skip_branch / nop_early_ret = the Color path jumps over (or
-// returns before) the SGB code the SGB path falls into, so the branch is
-// NOPed; retarget_jr/jp_to_sgb_entry = the Color init block ends in a jump
-// over the SGB block (Dragon Warrior's shape), so that jump lands on the SGB
-// block instead and both run.
-
+// In-Memory patch to support SGBc in games that don't check for it
 const SgbcPatch kPatches[] = {
 	// nop_early_ret
 	{ 0x8A70, "POKEMON_GLDAAUJ\200", "36 in 1 (Taiwan) (SL36-0032) (Unl)", 1,

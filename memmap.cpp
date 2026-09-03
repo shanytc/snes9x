@@ -2375,6 +2375,10 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
     const bool user_boot_is_sgb = user_has_boot && IsSGBBootROM(user_boot) != FALSE;
     s_sgb_user_boot = user_boot_is_sgb;
 
+    // Retire the outgoing session's cheats while the core they were applied
+    // to is still up; this game's .cht is reloaded at the end.
+    S9xDeleteCheats();
+
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
         S9xSGBDeinit();
@@ -2399,6 +2403,10 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
         return FALSE;
     }
 
+    // InitROM ran with ROMFilename set to the BIOS image, so it loaded a .cht
+    // for the BIOS's name. Drop it while the engine still targets SNES memory.
+    S9xDeleteCheats();
+
     Settings.SGB_BIOSModeActive = TRUE;
     strncpy(Settings.SGB_BIOSPath, bios_path, sizeof Settings.SGB_BIOSPath - 1);
     Settings.SGB_BIOSPath[sizeof Settings.SGB_BIOSPath - 1] = 0;
@@ -2413,6 +2421,7 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
 
     ROMFilename = gb_path;
     S9xInitCheatData();
+    S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
     return TRUE;
 }
 
@@ -2435,6 +2444,9 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
 
     // Snapshot the GB bytes before LoadROMMem clobbers ROM[].
     std::vector<uint8> gb_copy(gb_bytes, gb_bytes + gb_size);
+
+    // See the LoadROMWithSGBBIOS twin.
+    S9xDeleteCheats();
 
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
@@ -2461,6 +2473,10 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
         return FALSE;
     }
 
+    // InitROM ran with ROMFilename set to the BIOS image, so it loaded a .cht
+    // for the BIOS's name. Drop it while the engine still targets SNES memory.
+    S9xDeleteCheats();
+
     Settings.SGB_BIOSModeActive = TRUE;
     strncpy(Settings.SGB_BIOSPath, bios_path, sizeof Settings.SGB_BIOSPath - 1);
     Settings.SGB_BIOSPath[sizeof Settings.SGB_BIOSPath - 1] = 0;
@@ -2475,6 +2491,8 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
 
     ROMFilename = gb_path ? gb_path : "GameBoy ROM";
     S9xInitCheatData();
+    if (gb_path && *gb_path)
+        S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
     return TRUE;
 }
 

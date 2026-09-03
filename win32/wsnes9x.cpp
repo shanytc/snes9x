@@ -5713,11 +5713,17 @@ static void CheckMenuStates ()
     mii.fState = Settings.StopEmulation ? MFS_DISABLED : MFS_ENABLED;
     SetMenuItemInfo(GUI.hMenu, ID_RA_ACHIEVEMENTS_LIST, FALSE, &mii);
 
-    // User agent is always SuperSnes9x — keep it checked and enabled
+    // User agent is always SuperSnes9x — keep it checked and enabled. The
+    // label is built from the same macros as the HTTP header (see
+    // retroachievements_win32.cpp) so the menu always shows what is sent;
+    // the .rc entry is only a placeholder.
     if (!GUI.RAEmulatorName[0])
         strcpy(GUI.RAEmulatorName, "SuperSnes9x");
+    mii.fMask = MIIM_STATE | MIIM_STRING;
     mii.fState = MFS_CHECKED;
+    mii.dwTypeData = (LPTSTR)TEXT("User Agent: SuperSnes9x/") TEXT(VERSION) TEXT(".") TEXT(RA_MINOR_VERSION);
     SetMenuItemInfo(GUI.hMenu, ID_RA_UA_SUPERSNES9X, FALSE, &mii);
+    mii.fMask = MIIM_STATE;
 #endif
 
     mii.fState = MFS_UNCHECKED;

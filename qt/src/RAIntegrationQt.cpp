@@ -74,9 +74,8 @@ static void ra_curl_http_thread(CurlHttpRequest *req)
 
     const char *emuName = (g_app && !g_app->config->ra_emulator_name.empty())
         ? g_app->config->ra_emulator_name.c_str() : "SuperSnes9x";
-    const char *emuVer = VERSION;
     char user_agent[256];
-    snprintf(user_agent, sizeof(user_agent), "%s/%s", emuName, emuVer);
+    snprintf(user_agent, sizeof(user_agent), "%s/%s.%s", emuName, VERSION, RA_MINOR_VERSION);
 
     curl_easy_setopt(curl, CURLOPT_URL, req->url.c_str());
     curl_easy_setopt(curl, CURLOPT_USERAGENT, user_agent);

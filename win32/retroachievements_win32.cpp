@@ -42,9 +42,8 @@ static unsigned __stdcall ra_http_thread(void *param)
     std::string response_body;
 
     const char *emuName = GUI.RAEmulatorName[0] ? GUI.RAEmulatorName : "SuperSnes9x";
-    const char *emuVer = VERSION;
     char user_agent[256];
-    snprintf(user_agent, sizeof(user_agent), "%s/%s", emuName, emuVer);
+    snprintf(user_agent, sizeof(user_agent), "%s/%s.%s", emuName, VERSION, RA_MINOR_VERSION);
 
     HINTERNET hInet = InternetOpenA(user_agent, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInet)

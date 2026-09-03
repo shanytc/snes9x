@@ -36,7 +36,7 @@ bool8 S9xDoScreenshot (int width, int height)
 	ss << "-" << std::put_time(current_time, "%Y-%m-%d-%H-%M-%S");
 	std::string fname = S9xGetFilename(ss.str() + ".png", SCREENSHOT_DIR);
 
-	for (int i = 0; i < 1000; i++)
+	for (int i = 0; i < 60; i++)
 	{
 		FILE *fp = fopen(fname.c_str(), "r");
 
@@ -55,32 +55,8 @@ bool8 S9xDoScreenshot (int width, int height)
 	}
 
 	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-	if (!png_ptr)
-	{
-		fclose(fp);
-		remove(fname.c_str());
-		S9xMessage(S9X_ERROR, 0, "Failed to take screenshot.");
-		return (FALSE);
-	}
-
 	info_ptr = png_create_info_struct(png_ptr);
-	if (!info_ptr)
-	{
-		png_destroy_write_struct(&png_ptr, (png_infopp) NULL);
-		fclose(fp);
-		remove(fname.c_str());
-		S9xMessage(S9X_ERROR, 0, "Failed to take screenshot.");
-		return (FALSE);
-	}
-
-	if (setjmp(png_jmpbuf(png_ptr)))
-	{
-		png_destroy_write_struct(&png_ptr, &info_ptr);
-		fclose(fp);
-		remove(fname.c_str());
-		S9xMessage(S9X_ERROR, 0, "Failed to take screenshot.");
-		return (FALSE);
-	}
+	setjmp(png_jmpbuf(png_ptr));
 
 	imgwidth  = width;
 	imgheight = height;

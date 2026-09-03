@@ -32,23 +32,16 @@ if [ ! -f "$LINUXDEPLOY" ]; then
 fi
 
 DESTDIR=$PWD/AppDir cmake --install . --prefix /usr --strip
-"./$LINUXDEPLOY" --appimage-extract-and-run --appdir=AppDir \
-	--exclude-library="libX*" \
-	--exclude-library="libglib*" \
-	--exclude-library="libgobject*" \
-	--exclude-library="libgdk_pixbuf*" \
-	--exclude-library="libwayland*" \
-	--exclude-library="libgmodule*" \
-	--exclude-library="libgio*" \
-	--exclude-library="libxcb*" \
-	--exclude-library="libxkbcommon*" \
-	--exclude-library="libdb*"
+"./$LINUXDEPLOY" --appimage-extract-and-run --appdir=AppDir
 
-# Replace any copied root icon with a symlink into the icon theme dir
-# (which root-level icon linuxdeploy leaves varies by version/arch).
-rm -f AppDir/snes9x.png
+# linuxdeploy leaves copies of the icon, desktop file and AppRun at the AppDir
+# root; replace them with symlinks into the installed tree (which root-level
+# files it copies varies by version/arch, hence rm -f).
 pushd AppDir
+rm -f snes9x.png super-snes9x-gtk.desktop AppRun
 ln -sf usr/share/icons/hicolor/256x256/apps/snes9x.png snes9x.png
+ln -sf usr/share/applications/super-snes9x-gtk.desktop super-snes9x-gtk.desktop
+ln -sf usr/bin/snes9x-gtk AppRun
 chmod +x AppRun
 popd
 "./$APPIMAGETOOL" --appimage-extract-and-run AppDir "$OUT"

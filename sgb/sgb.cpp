@@ -261,8 +261,8 @@ struct Emulator::Impl
 	bool        sgbc_table = true;
 
 	// Whether this instance runs BIOS-mode semantics. -1 follows the app
-	// session (Settings.SGB_BIOSModeActive); private cores pin 0 so an
-	// audit worker stays BIOS-less under a BIOS-mode session.
+	// session (Settings.SGB_BIOSModeActive); private cores pin 0 so a
+	// headless tool stays BIOS-less under a BIOS-mode session.
 	int         host_bios_mode = -1;
 	bool BiosMode() const
 	{
@@ -552,11 +552,11 @@ struct Emulator::Impl
 	// snapping in on a single frame.
 	uint16_t border_fade_frames = 0;
 
-	// SGB commands processed this session (audit border probe; counts every
+	// SGB commands processed this session (border probe; counts every
 	// dispatched command in modes that process them). Never serialized.
 	uint32_t border_transfers = 0;
 	// Border-plane mutations (CHR_TRN or PCT_TRN commits) and completed
-	// PCT_TRN map uploads - the audit's "border arrived / settled" events.
+	// PCT_TRN map uploads - the probes' "border arrived / settled" events.
 	uint32_t border_plane     = 0;
 	uint32_t border_pct       = 0;
 
@@ -2974,8 +2974,8 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 	// acid-test runner's authentic-SGB mode re-enables processing.
 	if (!impl_->BiosMode() && !impl_->sgb_authentic) return;
 
-	// Audit border probe: every processed command bumps this, so the
-	// runner can wait out a cart's whole SGB init chatter.
+	// Border probe: every processed command bumps this, so a headless
+	// tool can wait out a cart's whole SGB init chatter.
 	++impl_->border_transfers;
 
 	if (cmd == 0x11 && len > 1)
@@ -3744,11 +3744,6 @@ bool S9xSGBLoadEmbeddedBootROM(unsigned char mode)
 {
 	const uint8_t *src = (mode == 2) ? SGB::kSgb2BootRom : SGB::kSgbBootRom;
 	return SGB::Instance().LoadBootROM(src, 256);
-}
-
-const unsigned char *SGB::SgbEmbeddedBootRom(int revision)
-{
-	return revision == 2 ? SGB::kSgb2BootRom : SGB::kSgbBootRom;
 }
 
 void S9xSGBPrimeBIOSHandshake(void)

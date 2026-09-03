@@ -43,7 +43,6 @@
 #include "CSpriteViewerDlg.h"
 #include "CGBTileViewerDlg.h"
 #include "AcidTestsDlg.h"
-#include "AuditTestsDlg.h"
 #include "CGBTilemapViewerDlg.h"
 #include "CGBSpriteViewerDlg.h"
 #include "debug_viewer_common.h"
@@ -3034,12 +3033,6 @@ LRESULT CALLBACK WinProc(
 				RestoreSNESDisplay();
 			}
 			break;
-		case ID_TESTS_AUDITTESTS:
-			// Modeless - the session keeps running behind the list, and
-			// RunAuditUI scopes the mute/BIOS-less steering to the run
-			// that the modal launcher used to hold for the whole dialog.
-			WinShowAuditTestsDialog();
-			break;
 		case ID_SOUND_VOICEKUN_ATTACH:
 			{
 				if (Settings.StopEmulation || S9xVoiceKunAttached())
@@ -4386,10 +4379,6 @@ void S9xOnSNESPadRead()
 				if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
 					continue;
 
-				HWND hAuditDlg = WinAuditTestsDialogHwnd();
-				if (hAuditDlg && IsDialogMessage (hAuditDlg, &msg))
-					continue;
-
 				if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
 				{
 					TranslateMessage (&msg);
@@ -4930,10 +4919,6 @@ int WINAPI WinMain(
 #endif
 
             if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
-                continue;
-
-            HWND hAuditDlg = WinAuditTestsDialogHwnd();
-            if (hAuditDlg && IsDialogMessage (hAuditDlg, &msg))
                 continue;
 
             if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
@@ -5481,15 +5466,10 @@ static void UpdateTestsMenu ()
 		if (GetSubMenu(GUI.hMenu, t) == s_tests_menu) at = t;
 
 	const bool have_acid  = WinAcidTestsAvailable();
-	const bool have_audit = WinAuditTestsAvailable();
-	const bool have_pack  = have_acid || have_audit;
-	// The menu shows when either pack is near the exe; each entry only
-	// lights up over its own folder.
+	// The menu only shows when the pack is near the exe.
 	EnableMenuItem(s_tests_menu, ID_TESTS_ACIDTESTS,
 	               MF_BYCOMMAND | (have_acid  ? MF_ENABLED : MF_GRAYED));
-	EnableMenuItem(s_tests_menu, ID_TESTS_AUDITTESTS,
-	               MF_BYCOMMAND | (have_audit ? MF_ENABLED : MF_GRAYED));
-	if (have_pack && at < 0)
+	if (have_acid && at < 0)
 	{
 		MENUITEMINFO ins = {};
 		ins.cbSize     = sizeof(ins);
@@ -5505,7 +5485,7 @@ static void UpdateTestsMenu ()
 		if (LocaleIsTranslated())
 			LocalizeMenu(GUI.hMenu);   // also the bar caption
 	}
-	else if (!have_pack && at >= 0)
+	else if (!have_acid && at >= 0)
 	{
 		RemoveMenu(GUI.hMenu, (UINT)at, MF_BYPOSITION);
 	}
@@ -6093,13 +6073,6 @@ static void ResetFrameTimer ()
 {
 	// determines if we can do sound sync
 	GUI.AllowSoundSync = Settings.PAL ? Settings.FrameTime == Settings.FrameTimePAL : Settings.FrameTime == Settings.FrameTimeNTSC;
-}
-
-// Full app load path for the audit dialog's double-click-to-play (LoadROM
-// is static; the dialog lives in its own TU).
-bool WinLoadROMFromDialog(const TCHAR *path)
-{
-	return LoadROM(path);
 }
 
 static bool LoadROMPlain(const TCHAR *filename)

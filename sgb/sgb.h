@@ -116,7 +116,7 @@ public:
 
 	// Pin whether this instance behaves as a BIOS-mode core: -1 follows
 	// Settings.SGB_BIOSModeActive (the live core), 0/1 pins it. Private
-	// cores (audit workers) pin 0 so they keep BIOS-less semantics even
+	// cores (headless tools) pin 0 so they keep BIOS-less semantics even
 	// while the app session runs the SGB BIOS.
 	void SetHostBiosMode(int mode);
 
@@ -134,7 +134,7 @@ public:
 	const uint8_t  *DebugCgbBgPal() const;   // 64
 	const uint8_t  *DebugCgbObjPal() const;  // 64
 	const uint16_t *DebugSgbActivePalettes() const;  // 16 (4 palettes x 4 colors)
-	// Audit border-probe events, all reset with the console: SGB commands
+	// Border-probe events, all reset with the console: SGB commands
 	// processed, border-plane mutations (CHR/PCT commits), PCT map uploads.
 	uint32_t        BorderTransferCount() const;
 	uint32_t        BorderPlaneVersion() const;
@@ -355,12 +355,6 @@ bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size);
 // files are plain DMG boot ROMs without the handshake, so we ship the
 // real SGB-specific variants (from LIJI32/SameBoy under MIT).
 bool S9xSGBLoadEmbeddedBootROM(unsigned char mode);
-
-namespace SGB {
-// The embedded 256-byte SGB1/SGB2 boot ROM bytes themselves, for callers
-// holding a private Emulator (the audit's border combos).
-const unsigned char *SgbEmbeddedBootRom(int revision);
-}
 
 // Prime the 5-packet SGB handshake from the loaded cart. Call after
 // S9xSGBLoadROM/S9xSGBLoadROMBytes in BIOS mode — boot ROM dumps in

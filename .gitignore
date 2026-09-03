@@ -10,7 +10,6 @@ win32/Screenshots
 win32/Movies
 win32/SPCs
 win32/BIOS
-win32/audit
 wind32/libpng/src
 .claude/
 *.smc

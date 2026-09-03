@@ -339,7 +339,6 @@
     <ClInclude Include="..\sgb\acid.h" />
     <ClInclude Include="..\sgb\acid_report.h" />
     <ClInclude Include="..\sgb\acid_baseline.h" />
-    <ClInclude Include="..\sgb\audit.h" />
     <ClInclude Include="..\apu\apu.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_common.h" />
     <ClInclude Include="..\apu\bapu\dsp\blargg_config.h" />
@@ -502,7 +501,6 @@
     <ClInclude Include="CSpriteViewerDlg.h" />
     <ClInclude Include="CGBTileViewerDlg.h" />
     <ClInclude Include="AcidTestsDlg.h" />
-    <ClInclude Include="AuditTestsDlg.h" />
     <ClInclude Include="CGBTilemapViewerDlg.h" />
     <ClInclude Include="CGBSpriteViewerDlg.h" />
     <ClInclude Include="gb_viewer_common.h" />
@@ -551,7 +549,6 @@
     <ClCompile Include="..\sgb\acid.cpp" />
     <ClCompile Include="..\sgb\acid_report.cpp" />
     <ClCompile Include="..\sgb\acid_baseline.cpp" />
-    <ClCompile Include="..\sgb\audit.cpp" />
     <ClCompile Include="..\apu\apu.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\sdsp.cpp" />
     <ClCompile Include="..\apu\bapu\dsp\SPC_DSP.cpp">
@@ -755,7 +752,6 @@
     <ClCompile Include="CGBTilemapViewerDlg.cpp" />
     <ClCompile Include="CGBSpriteViewerDlg.cpp" />
     <ClCompile Include="AcidTestsDlg.cpp" />
-    <ClCompile Include="AuditTestsDlg.cpp" />
     <ClCompile Include="debug_viewer_common.cpp" />
     <ClCompile Include="debug_viewer_export.cpp" />
     <ClCompile Include="CVulkan.cpp" />

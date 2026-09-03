@@ -243,9 +243,6 @@
     <ClInclude Include="..\sgb\acid_baseline.h">
       <Filter>SGB</Filter>
     </ClInclude>
-    <ClInclude Include="..\sgb\audit.h">
-      <Filter>SGB</Filter>
-    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>APU</Filter>
     </ClInclude>
@@ -451,9 +448,6 @@
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="AcidTestsDlg.h">
-      <Filter>GUI</Filter>
-    </ClInclude>
-    <ClInclude Include="AuditTestsDlg.h">
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="CGBTilemapViewerDlg.h">
@@ -791,9 +785,6 @@
     <ClCompile Include="..\sgb\acid_baseline.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
-    <ClCompile Include="..\sgb\audit.cpp">
-      <Filter>SGB</Filter>
-    </ClCompile>
     <ClCompile Include="..\apu\apu.cpp">
       <Filter>APU</Filter>
     </ClCompile>
@@ -984,9 +975,6 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="AcidTestsDlg.cpp">
-      <Filter>GUI</Filter>
-    </ClCompile>
-    <ClCompile Include="AuditTestsDlg.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="debug_viewer_common.cpp">

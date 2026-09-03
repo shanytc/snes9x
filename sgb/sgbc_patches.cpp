@@ -376,6 +376,18 @@ const SgbcPatch kPatches[] = {
 	{ 0x26A6, "POKECARD", "Pokemon Trading Card Game (USA, Australia)", 2,
 	  { { 0x00034D, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
 	    { 0x000359, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
+	// manual: SGB detect called ahead of the CGB init, type 5 (CGB|SGB1)
+	{ 0xB727, "PP SUCSESS", "Power Pro Kun Pocket (Japan) (Rev 1)", 2,
+	  { { 0x05AB0E, 1, { 0xC2 }, { 0xCD } },
+	    { 0x05AB1A, 1, { 0x04 }, { 0x05 } } } },
+	// manual: SGB detect called ahead of the CGB init, type 5 (CGB|SGB1)
+	{ 0xC4E9, "PP SUCSESS", "Power Pro Kun Pocket (Japan)", 2,
+	  { { 0x05AB0E, 1, { 0xC2 }, { 0xCD } },
+	    { 0x05AB1A, 1, { 0x04 }, { 0x05 } } } },
+	// manual: SGB detect called ahead of the CGB init, type 5 (CGB|SGB1)
+	{ 0xA977, "PAWA POKE2", "Power Pro Kun Pocket 2 (Japan)", 2,
+	  { { 0x05A6CE, 1, { 0xC2 }, { 0xCD } },
+	    { 0x05A6DA, 1, { 0x04 }, { 0x05 } } } },
 	// manual: CGB type runs the SGB init, palette gates take $11
 	{ 0x19D6, "TUWAMONO   AQDJ\200", "Pro Mahjong Tsuwamono GB (Japan)", 3,
 	  { { 0x0001FF, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },

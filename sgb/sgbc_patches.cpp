@@ -180,6 +180,11 @@ const SgbcPatch kPatches[] = {
 	// retarget_jr_to_sgb_entry
 	{ 0x7C1B, "JINSEI TOMOACJJ\200", "Jinsei Game - Tomodachi Takusan Tsukurou yo! (Japan)", 1,
 	  { { 0x002F0E, 2, { 0x18, 0x4A }, { 0x18, 0x00 } } } },
+	// manual: CGB type runs the SGB init, palette gates take $11
+	{ 0x20D7, "TUWAMONO   A55J\200", "Joryuu Janshi ni Chousen GB - Watashi-tachi ni Chousen Shitene! (Japan)", 3,
+	  { { 0x0001FC, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
+	    { 0x0014CE, 1, { 0x01 }, { 0x11 } },
+	    { 0x001599, 1, { 0x01 }, { 0x11 } } } },
 	// manual: CGB boot through the SGB init block
 	{ 0xC45B, "KARAMUCHO OBOOJ\200", "Karamuchou wa Oosawagi! - Okawari! (Japan) (SGB Enhanced, GB Compatible) (NP)", 3,
 	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
@@ -371,6 +376,11 @@ const SgbcPatch kPatches[] = {
 	{ 0x26A6, "POKECARD", "Pokemon Trading Card Game (USA, Australia)", 2,
 	  { { 0x00034D, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
 	    { 0x000359, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
+	// manual: CGB type runs the SGB init, palette gates take $11
+	{ 0x19D6, "TUWAMONO   AQDJ\200", "Pro Mahjong Tsuwamono GB (Japan)", 3,
+	  { { 0x0001FF, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
+	    { 0x0011B1, 1, { 0x01 }, { 0x11 } },
+	    { 0x001242, 1, { 0x01 }, { 0x11 } } } },
 	// nop_skip_branch
 	{ 0x48E6, "PUCHI CARATAIQP\200", "Puchi Carat (Europe)", 1,
 	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } } } },
@@ -407,6 +417,11 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0xFD8C, "ROBOPON SUN", "Robot Poncots - Sun Version (Japan)", 1,
 	  { { 0x063143, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
+	// manual: CGB type runs the SGB init, MASK_EN freeze, PAL_SET gate hopped
+	{ 0x5089, "SD HIRYUEX", "SD Hiryuu no Ken EX (Japan)", 3,
+	  { { 0x0023E9, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
+	    { 0x00194E, 1, { 0x01 }, { 0x11 } },
+	    { 0x0019DA, 3, { 0x02, 0xFA, 0x86 }, { 0x01, 0x18, 0x08 } } } },
 	// nop_skip_branch
 	{ 0x43D3, "SENKAIIBUNRBHSJ\200", "Senkai Ibunroku Juntei Taisen - TV Animation Senkaiden Houshin Engi Yori (Japan)", 1,
 	  { { 0x0001D7, 2, { 0x28, 0x0C }, { 0x00, 0x00 } } } },
@@ -472,6 +487,15 @@ const SgbcPatch kPatches[] = {
 };
 // GENERATED-END
 
+// ---- Super Game Boy compatibility edits ----------------------------------
+// The cart's own SGB path stops under a BIOS the game never handled.
+const SgbcPatch kSgbPatches[] = {
+	// Boot A $FF (SGB2) survives the detect, and the first scene then loops
+	// forever (01:$4052 `cp $FF / jr nz`): take the jump for every type.
+	{ 0x20D7, "TUWAMONO   A55J\200", "SGB2 park skipped", 1,
+	  { { 0x004057, 2, { 0x20, 0x05 }, { 0x18, 0x05 } } } },
+};
+
 bool TitleMatches(const uint8_t *rom, const char *title)
 {
 	for (int i = 0; i < 16; ++i)
@@ -529,13 +553,23 @@ bool PatchSgbcBios(std::vector<uint8_t> &bios)
 	return ApplyIps(bios, kSgbcBiosIps, kSgbcBiosIpsSize);
 }
 
-const SgbcPatch *FindSgbcPatch(const uint8_t *rom, size_t size)
+static const SgbcPatch *FindIn(const SgbcPatch *table, size_t count, const uint8_t *rom, size_t size)
 {
 	if (!rom || size < 0x150) return nullptr;
 	const uint16_t gsum = static_cast<uint16_t>((rom[0x14E] << 8) | rom[0x14F]);
-	for (const SgbcPatch &p : kPatches)
-		if (p.global_sum == gsum && TitleMatches(rom, p.title)) return &p;
+	for (size_t i = 0; i < count; ++i)
+		if (table[i].global_sum == gsum && TitleMatches(rom, table[i].title)) return &table[i];
 	return nullptr;
+}
+
+const SgbcPatch *FindSgbcPatch(const uint8_t *rom, size_t size)
+{
+	return FindIn(kPatches, sizeof kPatches / sizeof kPatches[0], rom, size);
+}
+
+const SgbcPatch *FindSgbPatch(const uint8_t *rom, size_t size)
+{
+	return FindIn(kSgbPatches, sizeof kSgbPatches / sizeof kSgbPatches[0], rom, size);
 }
 
 bool ApplySgbcPatch(const SgbcPatch &p, uint8_t *rom, size_t size)

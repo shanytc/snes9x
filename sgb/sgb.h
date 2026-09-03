@@ -110,6 +110,11 @@ public:
 	void PrepareSgbcCart();
 	// The per-game patch PrepareSgbcCart applied, or "" when none did.
 	const char *SgbcPatchName() const;
+	// After LoadROM under any SGB BIOS: PrepareSgbcCart when in Super Game
+	// Boy Color, then the compatibility edit for this cart (sgbc_patches.cpp).
+	void PrepareBiosCart();
+	// The compatibility edit PrepareBiosCart applied, or "" when none did.
+	const char *SgbPatchName() const;
 	// Tools only: skip the built-in per-game table in PrepareSgbcCart, so a
 	// candidate edit can be tested on the pristine image.
 	void SetSgbcTable(bool enabled);
@@ -446,6 +451,9 @@ bool S9xSGBSgbcActive(void);
 // See Emulator::PrepareSgbcCart / SgbcPatchName.
 void S9xSGBPrepareSgbcCart(void);
 const char *S9xSGBSgbcPatchName(void);
+// See Emulator::PrepareBiosCart / SgbPatchName.
+void S9xSGBPrepareBiosCart(void);
+const char *S9xSGBSgbPatchName(void);
 void S9xSGBSetSgbcTable(bool enabled);
 
 // Cart-header flags $0143 (CGB) and $0146 (SGB); either pointer may be null.

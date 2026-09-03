@@ -258,6 +258,7 @@ struct Emulator::Impl
 	std::vector<uint8_t> sgbc_pristine;
 	const uint8_t *sgbc_compat_combo = nullptr;
 	char        sgbc_patch_name[96] = {};
+	char        sgb_patch_name[96] = {};   // PrepareBiosCart's compatibility edit
 	bool        sgbc_table = true;
 
 	// Whether this instance runs BIOS-mode semantics. -1 follows the app
@@ -1191,6 +1192,7 @@ void Emulator::UnloadROM()
 	impl_->sgbc_pristine.clear();
 	impl_->sgbc_compat_combo = nullptr;
 	impl_->sgbc_patch_name[0] = 0;
+	impl_->sgb_patch_name[0] = 0;
 	// Drop the staged boot ROM so the next load starts at $0100.
 	impl_->boot_rom_loaded       = false;
 	impl_->boot_rom_staging_size = 0;
@@ -1321,6 +1323,27 @@ void Emulator::PrepareSgbcCart()
 	const SgbcPatch *p = im.sgbc_table ? FindSgbcPatch(rom.data(), rom.size()) : nullptr;
 	if (p && ApplySgbcPatch(*p, rom.data(), rom.size()))
 		snprintf(im.sgbc_patch_name, sizeof im.sgbc_patch_name, "%s", p->name);
+}
+
+const char *Emulator::SgbPatchName() const
+{
+	return impl_->sgb_patch_name;
+}
+
+void Emulator::PrepareBiosCart()
+{
+	Impl &im = *impl_;
+	im.sgb_patch_name[0] = 0;
+	// Look the cart up before PrepareSgbcCart rewrites its header.
+	const SgbcPatch *p = (im.has_rom && im.sgbc_table)
+	                   ? FindSgbPatch(im.cart.rom.data(), im.cart.rom.size()) : nullptr;
+	PrepareSgbcCart();
+	if (!p) return;
+	std::vector<uint8_t> &rom = im.cart.rom;
+	// Hashes read the file's bytes, so keep them if SGBC did not already.
+	if (im.sgbc_pristine.empty()) im.sgbc_pristine = rom;
+	if (ApplySgbcPatch(*p, rom.data(), rom.size()))
+		snprintf(im.sgb_patch_name, sizeof im.sgb_patch_name, "%s", p->name);
 }
 
 void Emulator::SetCgbOverride(int mode)
@@ -3512,6 +3535,8 @@ void S9xSGBSetSgbc(bool enabled) { SGB::Instance().SetSgbc(enabled); }
 bool S9xSGBSgbcActive(void) { return SGB::Instance().Sgbc(); }
 void S9xSGBPrepareSgbcCart(void) { SGB::Instance().PrepareSgbcCart(); }
 const char *S9xSGBSgbcPatchName(void) { return SGB::Instance().SgbcPatchName(); }
+void S9xSGBPrepareBiosCart(void) { SGB::Instance().PrepareBiosCart(); }
+const char *S9xSGBSgbPatchName(void) { return SGB::Instance().SgbPatchName(); }
 void S9xSGBSetSgbcTable(bool enabled) { SGB::Instance().SetSgbcTable(enabled); }
 
 void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)

@@ -1958,6 +1958,13 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
             from += " + ";
             from += game_patch;
         }
+        // The compatibility edit for a cart whose SGB path stops under this BIOS.
+        const char *compat = S9xSGBSgbPatchName();
+        if (compat && *compat)
+        {
+            from += " + ";
+            from += compat;
+        }
     }
     else if (bios_mode == 3 || bios_mode == 4)
         from = BaseName(Settings.GB_BIOSPath);
@@ -2381,8 +2388,9 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
     else
         S9xSGBLoadEmbeddedBootROM(mode);
     if (!S9xSGBLoadROM(gb_path)) return FALSE;
-    // Header marker + per-game patch, in memory, before the BIOS ever runs.
-    if (sgbc) S9xSGBPrepareSgbcCart();
+    // SGBC header marker + per-game patch, then the SGB compatibility edit,
+    // all in memory before the BIOS ever runs.
+    S9xSGBPrepareBiosCart();
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
     if (!LoadROMMem(bios.data(), (uint32)bios.size(), bios_path))
@@ -2442,8 +2450,9 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
         S9xSGBLoadEmbeddedBootROM(mode);
     if (!S9xSGBLoadROMBytes(gb_copy.data(), gb_copy.size(), gb_path))
         return FALSE;
-    // Header marker + per-game patch, in memory, before the BIOS ever runs.
-    if (sgbc) S9xSGBPrepareSgbcCart();
+    // SGBC header marker + per-game patch, then the SGB compatibility edit,
+    // all in memory before the BIOS ever runs.
+    S9xSGBPrepareBiosCart();
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
 
     if (!LoadROMMem(bios.data(), (uint32)bios.size(), bios_path))

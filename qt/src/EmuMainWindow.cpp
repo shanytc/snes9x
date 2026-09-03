@@ -732,7 +732,7 @@ void EmuMainWindow::createWidgets()
         RA_SetHardcoreEnabled(checked);
     });
 
-    auto ra_ua_action = ra_menu->addAction(QString("User Agent: SuperSnes9x/%1").arg(VERSION));
+    auto ra_ua_action = ra_menu->addAction(QString("User Agent: SuperSnes9x/%1.%2").arg(VERSION).arg(RA_MINOR_VERSION));
     ra_ua_action->setCheckable(true);
     ra_ua_action->setChecked(true);
     ra_ua_action->setEnabled(true);

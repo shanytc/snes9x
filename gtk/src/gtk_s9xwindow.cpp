@@ -447,6 +447,18 @@ void Snes9xWindow::connect_signals()
         RA_SetHardcoreEnabled(checked);
     });
 
+    // Informational, as on win32/Qt: shows the exact User-Agent sent to the
+    // RetroAchievements server (see gtk_retroachievements.cpp). Built from the
+    // same macros as the HTTP header so it can never drift from what is sent.
+    // It is always checked and clicking it does not change anything.
+    auto ra_ua_item = get_object<Gtk::CheckMenuItem>("ra_user_agent_item");
+    ra_ua_item->set_label("User Agent: SuperSnes9x/" VERSION "." RA_MINOR_VERSION);
+    ra_ua_item->set_active(true);
+    ra_ua_item->signal_toggled().connect([ra_ua_item] {
+        if (!ra_ua_item->get_active())
+            ra_ua_item->set_active(true);
+    });
+
     get_object<Gtk::MenuItem>("ra_achievement_list_item")->signal_activate().connect([] {
         RA_ShowAchievementList();
     });

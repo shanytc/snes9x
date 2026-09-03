@@ -8,6 +8,15 @@
 #include "rc_client.h"
 
 // ---------------------------------------------------------------------------
+// Client version reported to RetroAchievements
+// ---------------------------------------------------------------------------
+// The HTTP User-Agent is "<emulator name>/<VERSION>.<RA_MINOR_VERSION>",
+// e.g. "SuperSnes9x/1.63.1". VERSION (snes9x.h) is the core version; bump
+// RA_MINOR_VERSION when RetroAchievements needs to distinguish a new client
+// release without a core version change.
+#define RA_MINOR_VERSION "1"
+
+// ---------------------------------------------------------------------------
 // Platform callbacks — must be registered before calling RA_Init()
 // ---------------------------------------------------------------------------
 struct RAPlatformCallbacks

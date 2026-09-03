@@ -155,6 +155,9 @@ const SgbcPatch kPatches[] = {
 	// force_jr
 	{ 0x271C, "H-MOON2 CGBBM2E\200", "Harvest Moon 2 GBC (USA)", 1,
 	  { { 0x0001B1, 2, { 0x28, 0x39 }, { 0x18, 0x39 } } } },
+	// manual: console type 1 (CGB) runs the SGB init too
+	{ 0x87FD, "HOLY MAGIC     \200", "Holy Magic Century (Europe) (En,Fr,De)", 1,
+	  { { 0x0001B9, 1, { 0x02 }, { 0x01 } } } },
 	// nop_skip_branch
 	{ 0x6920, "MAHJONGOH", "Honkaku Yonin Uchi Mahjong - Mahjong Ou (Japan)", 1,
 	  { { 0x0003CD, 3, { 0xC2, 0xD8, 0x03 }, { 0x00, 0x00, 0x00 } } } },
@@ -383,6 +386,9 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0xDCBF, "QUARTET", "Quartet (World) (Aftermarket) (Unl)", 1,
 	  { { 0x0044A1, 2, { 0x20, 0x28 }, { 0x00, 0x00 } } } },
+	// manual: console type 1 (CGB) runs the SGB init too
+	{ 0x1AC7, "QUEST FANTASY  \200", "Quest - Fantasy Challenge (USA)", 1,
+	  { { 0x0001B9, 1, { 0x02 }, { 0x01 } } } },
 	// nop_skip_branch
 	{ 0x9C19, "STAR", "Robopon - Star Version (USA) (Proto)", 1,
 	  { { 0x063210, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },

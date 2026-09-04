@@ -39,14 +39,14 @@ struct SgbcEdit
 // A dual cart picks its branch from A at $0100 and runs no SGB code on the
 // Color branch, so the BIOS never gets its border or sound packets. These
 // edits make a known game run its SGB init as well: one row per cart, its
-// edits inline (three at most so far; unused slots stay zero).
+// edits inline (four at most so far; unused slots stay zero).
 struct SgbcPatch
 {
 	uint16_t    global_sum;   // header $014E-$014F, big-endian as stored
 	const char *title;        // header $0134.., up to the first NUL
 	const char *name;         // shown on the load banner
 	uint8_t     edit_count;
-	SgbcEdit    edits[3];
+	SgbcEdit    edits[4];
 };
 
 const SgbcPatch *FindSgbcPatch(const uint8_t *rom, size_t size);

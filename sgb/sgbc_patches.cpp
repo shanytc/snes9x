@@ -405,9 +405,13 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0x99CA, "PHANTOMZONABKZJ\200", "Phantom Zona (Japan)", 1,
 	  { { 0x000180, 2, { 0x28, 0x17 }, { 0x00, 0x00 } } } },
-	// force_jr
-	{ 0x41CB, "POKEBOM USA", "Pocket Bomberman (USA, Europe)", 1,
-	  { { 0x00024B, 2, { 0x20, 0x24 }, { 0x18, 0x24 } } } },
+	// manual: the Color branch skips the SGB block; enter it where they rejoin,
+	// keep the Color type, and take the two border gates that test the SGB one
+	{ 0x41CB, "POKEBOM USA", "Pocket Bomberman (USA, Europe)", 4,
+	  { { 0x00026F, 3, { 0x18, 0x61, 0xCD }, { 0xC3, 0x82, 0x02 } },
+	    { 0x00029B, 1, { 0x01 }, { 0x02 } },
+	    { 0x00317F, 1, { 0x01 }, { 0x02 } },
+	    { 0x003661, 1, { 0x01 }, { 0x02 } } } },
 	// manual: run the Color init after the SGB block
 	{ 0xEFB7, "POCKET DENSYA2", "Pocket Densha 2 (Japan)", 1,
 	  { { 0x0002DC, 3, { 0xC3, 0x54, 0x03 }, { 0xC3, 0xF7, 0x01 } } } },
@@ -745,7 +749,7 @@ const SgbcPatch *FindSgbPatch(const uint8_t *rom, size_t size)
 bool ApplySgbcPatch(const SgbcPatch &p, uint8_t *rom, size_t size)
 {
 	if (!rom) return false;
-	const int n = p.edit_count < 3 ? p.edit_count : 3;
+	const int n = p.edit_count < 4 ? p.edit_count : 4;
 	for (int i = 0; i < n; ++i)
 	{
 		const SgbcEdit &e = p.edits[i];

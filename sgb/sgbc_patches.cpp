@@ -71,6 +71,10 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0x6824, "BARDIGUN", "Barcode Taisen Bardigun (Japan)", 1,
 	  { { 0x000182, 3, { 0xC2, 0x1B, 0x02 }, { 0x00, 0x00, 0x00 } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0x04D6, "BIKKURIMAN", "Bikkuriman 2000 - Charging Card GB (Japan)", 2,
+	  { { 0x001A57, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x001AB2, 1, { 0x3C }, { 0x3D } } } },
 	// retarget_jr_to_sgb_entry
 	{ 0x20D8, "B MASTER", "Blaster Master - Enemy Below (USA, Europe)", 1,
 	  { { 0x00016E, 2, { 0x18, 0x1D }, { 0x18, 0x00 } } } },
@@ -83,12 +87,12 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0xEAA7, "BOMBERQUESTAVQE\200", "Bomberman Quest (USA)", 1,
 	  { { 0x0001C3, 3, { 0xCA, 0x77, 0x02 }, { 0x00, 0x00, 0x00 } } } },
-	// force_jr
+	// manual: the Color branch skips the SGB block; enter it where they rejoin
 	{ 0xB84C, "BUGS LIFE", "Bug's Life, A (Europe)", 1,
-	  { { 0x000265, 2, { 0x20, 0x4A }, { 0x18, 0x4A } } } },
-	// force_jr
+	  { { 0x0002AF, 3, { 0x18, 0x65, 0xCD }, { 0xC3, 0xF9, 0x02 } } } },
+	// manual: the Color branch skips the SGB block; enter it where they rejoin
 	{ 0xB74C, "BUGS LIFE", "Bug's Life, A (USA)", 1,
-	  { { 0x000265, 2, { 0x20, 0x4A }, { 0x18, 0x4A } } } },
+	  { { 0x0002AF, 3, { 0x18, 0x65, 0xCD }, { 0xC3, 0xF9, 0x02 } } } },
 	// nop_skip_branch
 	{ 0x015F, "CHASE HQ", "Chase H.Q. - Secret Police (Europe)", 1,
 	  { { 0x0001C0, 2, { 0x28, 0x12 }, { 0x00, 0x00 } } } },
@@ -114,6 +118,10 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0x7961, "C C RACING ARLP\200", "Cross Country Racing (Europe) (En,Fr,De)", 1,
 	  { { 0x0001D2, 3, { 0xCA, 0xE0, 0x01 }, { 0x00, 0x00, 0x00 } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0xAA02, "DN SWEETADVBSAJ\200", "Dear Daniel no Sweet Adventure - Kitty-chan o Sagashite (Japan)", 2,
+	  { { 0x00135F, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x0013BE, 1, { 0x3C }, { 0x3D } } } },
 	// nop_early_ret
 	{ 0x24D4, "DINO4", "Dino Breeder 4 (Japan)", 1,
 	  { { 0x002EF5, 1, { 0xC8 }, { 0x00 } } } },
@@ -141,6 +149,9 @@ const SgbcPatch kPatches[] = {
 	// retarget_jr_to_sgb_entry
 	{ 0x853C, "DWM2-T", "Dragon Warrior Monsters 2 - Tara's Adventure (USA)", 1,
 	  { { 0x0001D1, 2, { 0x18, 0x05 }, { 0x18, 0x00 } } } },
+	// manual: an SGB detect suppresses the Color flag; stop it
+	{ 0x33C8, "DRAGONYHM", "Dragonyhm (World) (v1.0.0) (Demo) (Aftermarket) (Unl)", 1,
+	  { { 0x188367, 2, { 0x20, 0x0D }, { 0x00, 0x00 } } } },
 	// nop_skip_branch
 	{ 0xA73A, "DT GAMEBOY BBDJ\200", "DT - Lords of Genomes (Japan)", 1,
 	  { { 0x0001B4, 2, { 0x28, 0x06 }, { 0x00, 0x00 } } } },
@@ -148,6 +159,10 @@ const SgbcPatch kPatches[] = {
 	{ 0xFC46, "MONOPOLYGB", "DX Monopoly GB (Japan)", 2,
 	  { { 0x0004AA, 2, { 0x20, 0x4B }, { 0x00, 0x00 } },
 	    { 0x0037C2, 1, { 0xC0 }, { 0x00 } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0x0A05, "ATELIERELIEA8EJ\200", "Elie no Atelier GB (Japan)", 2,
+	  { { 0x000EB0, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000F0F, 1, { 0x3C }, { 0x3D } } } },
 	// nop_skip_branch
 	{ 0x8B00, "PRO FISHINGAFCP\200", "EuroSport Pro Champ Fishing (Europe) (Proto)", 2,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },
@@ -164,6 +179,42 @@ const SgbcPatch kPatches[] = {
 	{ 0x1689, "FIFA 2000", "FIFA 2000 (USA, Europe)", 2,
 	  { { 0x000349, 2, { 0x20, 0x27 }, { 0x18, 0x27 } },
 	    { 0x000384, 2, { 0xE0, 0x9E }, { 0x00, 0x00 } } } },
+	// manual: run the Color init, then fall into the border routine past its gate
+	{ 0x6517, "G&W GALLERY2", "Game & Watch Gallery 2 (USA, Europe)", 3,
+	  { { 0x000C11, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000C5E, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
+	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } } },
+	// manual: run the Color init, then fall into the border routine past its gate
+	{ 0x8133, "G&WGALLERY3AGQE\200", "Game & Watch Gallery 3 (USA, Europe)", 3,
+	  { { 0x000DC5, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000E07, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
+	    { 0x000E17, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1D, 0x0E } } } },
+	// manual: run the Color init, then fall into the border routine past its gate
+	{ 0x6EB3, "GB GALLERY2", "Game Boy Gallery 2 (Japan) (Possible Proto) (NP)", 3,
+	  { { 0x000C11, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000C5E, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
+	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } } },
+	// manual: run the Color init, then fall into the border routine past its gate
+	{ 0xDACE, "GB GALLERY3", "Game Boy Gallery 3 (Australia)", 3,
+	  { { 0x000C11, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000C5E, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
+	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } } },
+	// manual: run the Color init, then fall into the border routine past its gate
+	{ 0x3192, "GB GALLERY3AGQJ\200", "Game Boy Gallery 3 (Japan)", 3,
+	  { { 0x000DC6, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000E08, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
+	    { 0x000E18, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1E, 0x0E } } } },
+	// manual: run the Color init, then fall into the border routine past its gate
+	{ 0x2458, "GB GALLERY4AGQU\200", "Game Boy Gallery 4 (Australia)", 3,
+	  { { 0x000DC5, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000E07, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
+	    { 0x000E17, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1D, 0x0E } } } },
+	// manual: the SGB branch maps the console type; give it the Color value
+	{ 0x3E6E, "GLOCAL HEXCITE", "Glocal Hexcite (Japan)", 1,
+	  { { 0x00071E, 1, { 0x02 }, { 0x04 } } } },
+	// manual: the SGB path hangs on LY with the LCD off; take the Color one
+	{ 0x2E53, "T-GREAT-B-PAGVJ\200", "Great Battle Pocket, The (Japan)", 1,
+	  { { 0x0004D9, 1, { 0x03 }, { 0x00 } } } },
 	// nop_skip_branch+nop_store
 	{ 0x7652, "HAMSTAR PRADISE\200", "Hamster Paradise (Japan)", 3,
 	  { { 0x0015CD, 2, { 0x28, 0x13 }, { 0x00, 0x00 } },
@@ -181,6 +232,21 @@ const SgbcPatch kPatches[] = {
 	// force_jr
 	{ 0x271C, "H-MOON2 CGBBM2E\200", "Harvest Moon 2 GBC (USA)", 1,
 	  { { 0x0001B1, 2, { 0x28, 0x39 }, { 0x18, 0x39 } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0x4DCF, "KTBZFACTORYAHBJ\200", "Hello Kitty no Beads Factory (Japan)", 3,
+	  { { 0x0027FE, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x00285D, 1, { 0x3C }, { 0x3D } },
+	    { 0x00295A, 1, { 0x3C }, { 0x3D } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0xC4BD, "KT SWEETADVBKTJ\200", "Hello Kitty no Sweet Adventure - Daniel-kun ni Aitai (Japan)", 2,
+	  { { 0x00135F, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x0013BE, 1, { 0x3C }, { 0x3D } } } },
+	// manual: the SGB branch maps the console type; give it the Color value
+	{ 0x0C33, "HEXCITE", "Hexcite (Europe) (En,Fr,De) (Proto)", 1,
+	  { { 0x0006A7, 1, { 0x03 }, { 0x04 } } } },
+	// manual: the SGB branch maps the console type; give it the Color value
+	{ 0xB919, "HEXCITE", "Hexcite - The Shapes of Victory (USA, Europe)", 1,
+	  { { 0x00069B, 1, { 0x03 }, { 0x04 } } } },
 	// manual: console type 1 (CGB) runs the SGB init too
 	{ 0x87FD, "HOLY MAGIC     \200", "Holy Magic Century (Europe) (En,Fr,De)", 1,
 	  { { 0x0001B9, 1, { 0x02 }, { 0x01 } } } },
@@ -211,6 +277,10 @@ const SgbcPatch kPatches[] = {
 	  { { 0x0001FC, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
 	    { 0x0014CE, 1, { 0x01 }, { 0x11 } },
 	    { 0x001599, 1, { 0x01 }, { 0x11 } } } },
+	// manual: the SGB flag gates the Color path; clear it, retune the border gate
+	{ 0x32BD, "MONSTER KANAQPJ\200", "Kanzume Monsters Parfait (Japan)", 2,
+	  { { 0x0003EC, 1, { 0x03 }, { 0x00 } },
+	    { 0x00047F, 1, { 0x03 }, { 0x00 } } } },
 	// manual: CGB boot through the SGB init block
 	{ 0xC45B, "KARAMUCHO OBOOJ\200", "Karamuchou wa Oosawagi! - Okawari! (Japan) (SGB Enhanced, GB Compatible) (NP)", 3,
 	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
@@ -221,6 +291,14 @@ const SgbcPatch kPatches[] = {
 	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
 	    { 0x00018F, 2, { 0x18, 0x1E }, { 0x18, 0x00 } },
 	    { 0x000191, 2, { 0x3E, 0x04 }, { 0x3E, 0x85 } } } },
+	// manual: an SGB flag bit gates the Color path; clear it, ungate the sender
+	{ 0x1789, "BEAST WARS", "Kettou Transformers Beast Wars - Beast Senshi Saikyou Ketteisen (Japan)", 2,
+	  { { 0x0001DE, 2, { 0xCB, 0xFE }, { 0xCB, 0xBE } },
+	    { 0x00020A, 1, { 0xC8 }, { 0x00 } } } },
+	// manual: an SGB flag bit gates the Color path; clear it, ungate the sender
+	{ 0x8005, "KINDAICHI", "Kindaichi Shounen no Jikenbo - 10 Nenme no Shoutaijou (Japan)", 2,
+	  { { 0x0001DE, 2, { 0xCB, 0xFE }, { 0xCB, 0xBE } },
+	    { 0x00020A, 1, { 0xC8 }, { 0x00 } } } },
 	// manual: flag routine answers SGB2
 	{ 0x5650, "MUSCLERANK2B6KJ\200", "Kinniku Banzuke GB 2 - Mezase! Muscle Champion (Japan)", 1,
 	  { { 0x00025B, 2, { 0xCB, 0x4E }, { 0xAF, 0x00 } } } },
@@ -296,9 +374,23 @@ const SgbcPatch kPatches[] = {
 	{ 0xBE50, "MAHJONGJOOHA56J\200", "Mahjong Joou (Japan)", 2,
 	  { { 0x001097, 1, { 0xC8 }, { 0x00 } },
 	    { 0x000BB9, 3, { 0xC2, 0xD3, 0x0B }, { 0x00, 0x00, 0x00 } } } },
-	// force_jr
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0xE932, "ATELIERMARIA8MJ\200", "Marie no Atelier GB (Japan)", 2,
+	  { { 0x000EB0, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x000F0F, 1, { 0x3C }, { 0x3D } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0x9837, "MEDACARDKBTA8CJ\200", "Medarot Cardrobottle - Kabuto Version (Japan)", 3,
+	  { { 0x0012E1, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x001340, 1, { 0x3C }, { 0x3D } },
+	    { 0x00144D, 1, { 0x3C }, { 0x3D } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0x980B, "MEDACARDKWGA9CJ\200", "Medarot Cardrobottle - Kuwagata Version (Japan)", 3,
+	  { { 0x0012E1, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x001340, 1, { 0x3C }, { 0x3D } },
+	    { 0x00144D, 1, { 0x3C }, { 0x3D } } } },
+	// manual: the Color branch skips the SGB block; enter it where they rejoin
 	{ 0xD1EF, "MEN IN BLACK", "Men in Black - The Series (USA, Europe)", 1,
-	  { { 0x00026B, 2, { 0x20, 0x4C }, { 0x18, 0x4C } } } },
+	  { { 0x0002B7, 3, { 0x18, 0x67, 0xCD }, { 0xC3, 0x03, 0x03 } } } },
 	// force_jr
 	{ 0xA0C5, "NHL 2000", "NHL 2000 (USA, Europe)", 1,
 	  { { 0x00021F, 2, { 0x20, 0x4C }, { 0x18, 0x4C } } } },
@@ -316,6 +408,9 @@ const SgbcPatch kPatches[] = {
 	// force_jr
 	{ 0x41CB, "POKEBOM USA", "Pocket Bomberman (USA, Europe)", 1,
 	  { { 0x00024B, 2, { 0x20, 0x24 }, { 0x18, 0x24 } } } },
+	// manual: run the Color init after the SGB block
+	{ 0xEFB7, "POCKET DENSYA2", "Pocket Densha 2 (Japan)", 1,
+	  { { 0x0002DC, 3, { 0xC3, 0x54, 0x03 }, { 0xC3, 0xF7, 0x01 } } } },
 	// manual: detect, console stays CGB
 	{ 0xF8B7, "POCKET KINGAV5J\200", "Pocket King (Japan)", 2,
 	  { { 0x0001C1, 2, { 0x20, 0x04 }, { 0x18, 0x04 } },
@@ -464,6 +559,22 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0xFD8C, "ROBOPON SUN", "Robot Poncots - Sun Version (Japan)", 1,
 	  { { 0x063143, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0xE12A, "TIMENETPAST", "Sanrio Timenet - Kako Hen (Japan)", 2,
+	  { { 0x010004, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x010063, 1, { 0x3C }, { 0x3D } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0xF0B1, "TIMENETPAST", "Sanrio Timenet - Kako Hen (Japan) (Rev 1)", 2,
+	  { { 0x010004, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x010063, 1, { 0x3C }, { 0x3D } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0x3135, "TIMENETFUTURE", "Sanrio Timenet - Mirai Hen (Japan)", 2,
+	  { { 0x010004, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x010063, 1, { 0x3C }, { 0x3D } } } },
+	// manual: SGB detect wins over the Color branch; keep the type
+	{ 0x3A4E, "TIMENETFUTURE", "Sanrio Timenet - Mirai Hen (Japan) (Rev 1)", 2,
+	  { { 0x010004, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
+	    { 0x010063, 1, { 0x3C }, { 0x3D } } } },
 	// manual: CGB type runs the SGB init, MASK_EN freeze, PAL_SET gate hopped
 	{ 0x5089, "SD HIRYUEX", "SD Hiryuu no Ken EX (Japan)", 3,
 	  { { 0x0023E9, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
@@ -493,9 +604,18 @@ const SgbcPatch kPatches[] = {
 	{ 0xDDE6, "TNN FISHINGAFCE\200", "TNN Outdoors Fishing Champ (USA)", 2,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },
 	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } } } },
+	// manual: an SGB detect suppresses the Color flag; stop it
+	{ 0xCEC1, "TOOLSOFNEXAURA", "Tools of Nexaura (World) (v0.4) (Demo) (Aftermarket) (Unl)", 1,
+	  { { 0x058367, 2, { 0x20, 0x0D }, { 0x00, 0x00 } } } },
 	// manual: Color init falls into the SGB detect
 	{ 0xA16C, "TOYSTORY 2", "Toy Story 2 (USA, Europe)", 1,
 	  { { 0x000293, 2, { 0x18, 0x59 }, { 0x18, 0x3B } } } },
+	// manual: bit-mask console type; add the Color bit to the SGB value
+	{ 0xD855, "CARD HERO", "Trade & Battle Card Hero (Japan)", 1,
+	  { { 0x0049F1, 1, { 0x82 }, { 0x86 } } } },
+	// manual: bit-mask console type; add the Color bit to the SGB value
+	{ 0x270B, "CARD HERO", "Trade & Battle Card Hero (Japan) (Rev 1) (3DS Virtual Console)", 1,
+	  { { 0x0049F1, 1, { 0x82 }, { 0x86 } } } },
 	// nop_skip_branch
 	{ 0x9524, "TURISENSEI2AF2J\200", "Tsuri Sensei 2 (Japan)", 1,
 	  { { 0x000220, 2, { 0x28, 0x03 }, { 0x00, 0x00 } } } },
@@ -531,6 +651,10 @@ const SgbcPatch kPatches[] = {
 	{ 0x3885, "ZOIDS GENOBBGZJ\200", "Zoids - Jashin Fukkatsu! Genobreaker Hen (Japan)", 2,
 	  { { 0x018010, 1, { 0xC8 }, { 0x00 } },
 	    { 0x018017, 2, { 0x28, 0x01 }, { 0x18, 0x01 } } } },
+
+
+
+
 };
 
 // ---- Super Game Boy compatibility edits ----------------------------------

@@ -38,7 +38,7 @@ void refresh_row(int slot, Row &row)
         const char *note = S9xGetBiosSlotInfo(slot)->note;
         row.status->set_markup(note ? "<span foreground='#7f8c8d'>" +
                                       Glib::Markup::escape_text(_(note)) + "</span>"
-                                    : std::string());
+                                    : Glib::ustring());
         return;
     }
 
@@ -61,7 +61,7 @@ void refresh_row(int slot, Row &row)
     // file turned out to be. Falls back to the status when there is none.
     if (st == S9X_BIOS_PATH_OK)
         row.status->set_markup("<span foreground='#27ae60'>OK</span>" +
-                               (why.empty() ? std::string()
+                               (why.empty() ? Glib::ustring()
                                             : "   " + Glib::Markup::escape_text(why)));
     else if (st == S9X_BIOS_PATH_MISSING)
         row.status->set_markup("<span foreground='#c0392b'>not found</span>");

@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QTimer>
 #include "EmuCanvas.hpp"
+#include "snes9x.h"   // memmap.h relies on its types/macros being in scope
 #include "memmap.h"   // S9X_NUM_GBBOOT_POLICIES sizes the BIOS menu array
 
 class EmuApplication;

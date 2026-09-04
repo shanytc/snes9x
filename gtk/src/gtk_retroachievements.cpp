@@ -570,6 +570,11 @@ static void ra_gtk_credentials_changed(const char *username, const char *token)
     g_idle_add(ra_gtk_apply_credentials, u);
 }
 
+static bool ra_gtk_game_running()
+{
+    return gui_config && gui_config->rom_loaded;
+}
+
 // ---------------------------------------------------------------------------
 // Public: register callbacks with the core
 // ---------------------------------------------------------------------------
@@ -591,6 +596,7 @@ void RA_Gtk_RegisterCallbacks()
     cb.on_credentials_changed = ra_gtk_credentials_changed;
     cb.on_login_result = ra_gtk_on_login_result;
     cb.reset_emulator = ra_gtk_reset_emulator;
+    cb.is_game_running = ra_gtk_game_running;
     RA_RegisterPlatformCallbacks(cb);
 }
 

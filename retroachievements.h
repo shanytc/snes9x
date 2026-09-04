@@ -47,6 +47,10 @@ struct RAPlatformCallbacks
     // Reset request for achievement integrity. May be called from a background
     // thread — implementations must marshal to the emulation thread.
     void (*reset_emulator)();
+
+    // True while a ROM is running. Frontends disagree on Settings.StopEmulation
+    // (Qt never clears it), so each one reports its own flag here.
+    bool (*is_game_running)();
 };
 
 void RA_RegisterPlatformCallbacks(const RAPlatformCallbacks &callbacks);

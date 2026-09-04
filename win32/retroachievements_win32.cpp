@@ -648,6 +648,11 @@ static void ra_win32_credentials_changed(const char *username, const char *token
     WinSaveConfigFile();
 }
 
+static bool ra_win32_game_running()
+{
+    return !Settings.StopEmulation;
+}
+
 // ---------------------------------------------------------------------------
 // Public: Register Win32 callbacks
 // ---------------------------------------------------------------------------
@@ -662,6 +667,7 @@ void RA_Win32_RegisterCallbacks()
     cb.on_credentials_changed = ra_win32_credentials_changed;
     cb.on_login_result = ra_win32_on_login_result;
     cb.reset_emulator = ra_win32_reset_emulator;
+    cb.is_game_running = ra_win32_game_running;
     RA_RegisterPlatformCallbacks(cb);
 }
 

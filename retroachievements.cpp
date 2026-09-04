@@ -448,6 +448,33 @@ static void RC_CCONV ra_event_handler(const rc_client_event_t *event, rc_client_
     }
 }
 
+// A game load is already in flight. One started before login completed parks on
+// AWAIT_LOGIN and resumes by itself, so restarting it only aborts and re-issues
+// the same requests.
+static bool ra_load_in_progress()
+{
+    switch (rc_client_get_load_game_state(g_rcClient))
+    {
+    case RC_CLIENT_LOAD_GAME_STATE_AWAIT_LOGIN:
+    case RC_CLIENT_LOAD_GAME_STATE_IDENTIFYING_GAME:
+    case RC_CLIENT_LOAD_GAME_STATE_FETCHING_GAME_DATA:
+    case RC_CLIENT_LOAD_GAME_STATE_STARTING_SESSION:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// A ROM is running: ask the frontend, since Settings.StopEmulation is only
+// maintained by some of them.
+static bool ra_game_running()
+{
+    if (g_callbacks.is_game_running)
+        return g_callbacks.is_game_running();
+
+    return !Settings.StopEmulation;
+}
+
 // ---------------------------------------------------------------------------
 // Login callback
 // ---------------------------------------------------------------------------
@@ -475,12 +502,13 @@ static void RC_CCONV ra_login_callback(int result, const char *error_message,
             if (g_callbacks.on_login_result)
                 g_callbacks.on_login_result(true, msg, user_initiated);
 
-            if (!Settings.StopEmulation)
+            if (ra_game_running())
             {
                 // Achievements arm mid-session: reset once the game is
                 // identified so the session starts from power-on.
                 g_resetPendingOnLoad = true;
-                RA_OnLoadROM();
+                if (!ra_load_in_progress())
+                    RA_OnLoadROM();
             }
         }
     }
@@ -504,6 +532,10 @@ static void RC_CCONV ra_login_callback(int result, const char *error_message,
 static void RC_CCONV ra_game_loaded_callback(int result, const char *error_message,
                                               rc_client_t *client, void *userdata)
 {
+    // A newer load replaced this one; it owns the pending reset and the result.
+    if (result == RC_ABORTED)
+        return;
+
     const bool reset_pending = g_resetPendingOnLoad;
     g_resetPendingOnLoad = false;
 
@@ -523,7 +555,7 @@ static void RC_CCONV ra_game_loaded_callback(int result, const char *error_messa
 
             // Login happened while this game was already running — restart it
             // so achievement/hardcore state is valid from power-on.
-            if (reset_pending && !Settings.StopEmulation && g_callbacks.reset_emulator)
+            if (reset_pending && ra_game_running() && g_callbacks.reset_emulator)
                 g_callbacks.reset_emulator();
         }
     }

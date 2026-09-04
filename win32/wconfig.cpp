@@ -990,6 +990,7 @@ void WinRegisterConfigItems()
 	AddBoolC("Mute", GUI.Mute, false, "true to mute sound output (does not disable the sound CPU)");
 	AddBool("DynamicRateControl", Settings.DynamicRateControl, false);
 	AddBool("AutomaticInputRate", GUI.AutomaticInputRate, false);
+	AddBoolC("SuppressNRxGlitches", Settings.GBSuppressNRxGlitches, true, "Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the DMG/CGB 'zombie' glitch). false = exact hardware behaviour, which clicks on every note in some games");
 	AddIntC("InterpolationMethod", Settings.InterpolationMethod, 2, "0 = None, 1 = Linear, 2 = Gaussian (accurate), 3 = Cubic, 4 = Sinc");
 	AddIntC("AudioFidelity", Settings.AudioFidelity, 1, "resampler used to convert the SPC's 32040 Hz to 'Rate': 0 = Hermite (legacy), 1 = Windowed-Sinc");
 #undef CATEGORY

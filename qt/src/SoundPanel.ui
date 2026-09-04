@@ -164,6 +164,16 @@
          </widget>
         </item>
         <item>
+         <widget class="QCheckBox" name="checkBox_suppress_nrx_glitches">
+          <property name="whatsThis">
+           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Game Boy only: hides the volume jump a channel makes when a game rewrites NRx2 while the channel is still enabled (the &quot;zombie&quot; glitch). Off = exact hardware behaviour, which clicks on every note in some games.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          </property>
+          <property name="text">
+           <string>Suppress NRx glitches</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QCheckBox" name="checkBox_adjust_input_rate">
           <property name="whatsThis">
            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;This option stretches the emulated audio output to coincide exactly with your display's refresh rate. It automatically handles the &lt;span style=&quot; font-style:italic;&quot;&gt;Input Rate&lt;/span&gt; option.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>

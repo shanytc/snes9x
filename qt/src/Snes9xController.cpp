@@ -222,6 +222,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.DynamicRateControl = config->dynamic_rate_control;
 
     Settings.DynamicRateLimit = config->dynamic_rate_limit * 1000;
+    Settings.GBSuppressNRxGlitches = config->suppress_nrx_glitches;
 
     Settings.SuperFXClockMultiplier  = config->superfx_clock_multiplier;
 

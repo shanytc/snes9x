@@ -371,6 +371,7 @@ struct SSettings
 	int		Gamma;       // signed: -100..+100, 0 = no change
 	int		Contrast;    // signed: -100..+100, 0 = no change
 	int		Saturation;  // signed: -100..+100, 0 = no change
+	bool8	GBSuppressNRxGlitches; // Game Boy: an NRx2 rewrite on a live channel never raises its volume (hides the zombie-mode click; off = exact hardware)
 };
 
 struct SSNESGameFixes

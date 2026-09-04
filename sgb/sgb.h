@@ -125,6 +125,11 @@ public:
 	// while the app session runs the SGB BIOS.
 	void SetHostBiosMode(int mode);
 
+	// Whether an NRx2 rewrite on a live channel may raise its volume (the
+	// DMG/CGB "zombie" glitch): -1 follows Settings.GBSuppressNRxGlitches,
+	// 0/1 pins it. The Acid runner pins 0 so it scores exact hardware.
+	void SetSuppressNrxGlitches(int mode);
+
 	// Cart-header flags $0143 (CGB) and $0146 (SGB); zeroed with false when
 	// no cart. Describes the cart, not the mode it runs in (cf. IsCgb()).
 	bool CartFlags(uint8_t *cgb_flag, uint8_t *sgb_flag) const;

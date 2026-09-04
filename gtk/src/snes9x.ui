@@ -4745,6 +4745,21 @@
                                       </packing>
                                     </child>
                                     <child>
+                                      <object class="GtkCheckButton" id="suppress_nrx_glitches">
+                                        <property name="label" translatable="yes">Suppress NRx glitches</property>
+                                        <property name="visible">True</property>
+                                        <property name="can_focus">True</property>
+                                        <property name="receives_default">False</property>
+                                        <property name="tooltip_text" translatable="yes">Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the "zombie" glitch). Off = exact hardware behaviour, which clicks on every note in some games</property>
+                                        <property name="draw_indicator">True</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">False</property>
+                                        <property name="position">3</property>
+                                      </packing>
+                                    </child>
+                                    <child>
                                       <object class="GtkCheckButton" id="mute_sound_check">
                                         <property name="label" translatable="yes">Mute sound output</property>
                                         <property name="visible">True</property>
@@ -4757,7 +4772,7 @@
                                       <packing>
                                         <property name="expand">False</property>
                                         <property name="fill">False</property>
-                                        <property name="position">3</property>
+                                        <property name="position">4</property>
                                       </packing>
                                     </child>
                                     <child>
@@ -4773,7 +4788,7 @@
                                       <packing>
                                         <property name="expand">False</property>
                                         <property name="fill">False</property>
-                                        <property name="position">4</property>
+                                        <property name="position">5</property>
                                       </packing>
                                     </child>
                                     <child>

@@ -6755,6 +6755,9 @@ static void SoundConfUpdateModeState(HWND hDlg, bool force)
     EnableWindow(GetDlgItem(hDlg, IDC_EDIT_GAIN_GB),          gb);
     EnableWindow(GetDlgItem(hDlg, IDC_STATIC_GAIN_GB_LABEL),  gb);
 
+    // Game Boy APU only; hidden outright for SNES titles.
+    ShowWindow(GetDlgItem(hDlg, IDC_SUPPRESS_NRX_GLITCHES), gb ? SW_SHOW : SW_HIDE);
+
     // Audio Fidelity only drives the SPC/MSU-1/Voicer-kun resamplers. The GB
     // core synthesises straight at the output rate and never touches them, so
     // the control is dead in BIOS-less .gb/.gbc — but still live in SGB BIOS
@@ -6841,6 +6844,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
             CreateToolTip(IDC_SLIDER_GAIN_REGULAR, hDlg, TEXT("Master pre-amp applied after the Volume percentages. 0 dB is unchanged; boosting can clip loud material."));
             CreateToolTip(IDC_SLIDER_GAIN_SPC, hDlg, TEXT("Pre-amp on the SPC side of the SGB mix, applied after its Volume percentage."));
             CreateToolTip(IDC_SLIDER_GAIN_GB, hDlg, TEXT("Pre-amp on the GB side of the SGB mix, applied after its Volume percentage."));
+            CreateToolTip(IDC_SUPPRESS_NRX_GLITCHES, hDlg, TEXT("Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the 'zombie' glitch). Off = exact hardware behaviour, which clicks on every note in some games."));
 
             HWND output_dropdown = GetDlgItem(hDlg, IDC_OUTPUT_DEVICE);
             UpdateAudioDeviceDropdown(output_dropdown);
@@ -6961,6 +6965,9 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
             if (Settings.SoundSync)
                 SendDlgItemMessage(hDlg, IDC_SYNC_TO_SOUND_CPU, BM_SETCHECK, BST_CHECKED, 0);
+
+            if (Settings.GBSuppressNRxGlitches)
+                SendDlgItemMessage(hDlg, IDC_SUPPRESS_NRX_GLITCHES, BM_SETCHECK, BST_CHECKED, 0);
 
             if (GUI.AutomaticInputRate)
                 SendDlgItemMessage(hDlg, IDC_AUTOMATICINPUTRATE, BM_SETCHECK, BST_CHECKED, 0);
@@ -7131,6 +7138,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 										SendDlgItemMessage(hDlg, IDC_DRIVER, CB_GETCURSEL, 0,0),0);
 					Settings.DynamicRateControl=IsDlgButtonChecked(hDlg, IDC_DYNRATECONTROL);
 					Settings.SoundSync=IsDlgButtonChecked(hDlg, IDC_SYNC_TO_SOUND_CPU);
+					Settings.GBSuppressNRxGlitches=IsDlgButtonChecked(hDlg, IDC_SUPPRESS_NRX_GLITCHES);
 					GUI.Mute=IsDlgButtonChecked(hDlg, IDC_MUTE);
 					GUI.FAMute=IsDlgButtonChecked(hDlg, IDC_FAMT)!=0;
 

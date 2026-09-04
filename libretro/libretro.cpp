@@ -676,6 +676,7 @@ static void update_variables(void)
     var.value = NULL;
     Settings.GB_BIOSEnabled = TRUE;
     Settings.GBBootPolicy   = S9X_GBBOOT_AUTO;
+    Settings.GBSuppressNRxGlitches = TRUE;
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
     {
         if (!strcmp(var.value, "disabled"))

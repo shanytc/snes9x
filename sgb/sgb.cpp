@@ -272,6 +272,14 @@ struct Emulator::Impl
 		                          : host_bios_mode != 0;
 	}
 
+	// Same shape for the NRx2 zombie-glitch clamp (see Apu::suppress_nrx2_glitch).
+	int         host_nrx_glitch = -1;
+	bool SuppressNrxGlitches() const
+	{
+		return host_nrx_glitch < 0 ? Settings.GBSuppressNRxGlitches != FALSE
+		                           : host_nrx_glitch != 0;
+	}
+
 	// Completed CGB frame for the Super Game Boy Color pane. Under the SGB
 	// BIOS the GB is slaved per-opcode rather than frame-locked, so reading
 	// color_fb live hands the compositor a half-drawn frame; latch it at the
@@ -1357,6 +1365,11 @@ void Emulator::SetHostBiosMode(int mode)
 	impl_->host_bios_mode = (mode < 0) ? -1 : (mode ? 1 : 0);
 }
 
+void Emulator::SetSuppressNrxGlitches(int mode)
+{
+	impl_->host_nrx_glitch = (mode < 0) ? -1 : (mode ? 1 : 0);
+}
+
 bool Emulator::IsCgbRender() const
 {
 	return impl_->has_rom && impl_->ppu.cgb;
@@ -1654,6 +1667,7 @@ void Emulator::RunFrame()
 	if (!impl_->has_rom) return;
 
 	impl_->ppu.frame_ready = false;
+	impl_->apu.suppress_nrx2_glitch = impl_->SuppressNrxGlitches();
 
 	// Cycle budget per SNES frame depends on run mode and the user
 	// overclock/underclock knob:
@@ -1827,6 +1841,7 @@ void Emulator::RunCycles(int32_t tcycles)
 {
 	if (!impl_->has_rom) return;
 	if (tcycles <= 0) return;
+	impl_->apu.suppress_nrx2_glitch = impl_->SuppressNrxGlitches();
 
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read

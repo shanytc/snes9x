@@ -331,6 +331,7 @@ bool EmuConfig::setDefaults(int section)
         input_rate = 32040;
         dynamic_rate_control = false;
         dynamic_rate_limit = 0.005;
+        suppress_nrx_glitches = true;
         mute_audio = false;
         mute_audio_during_alternate_speed = false;
 
@@ -612,6 +613,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("InputRate", input_rate, "APU sample rate in Hz resampled to the output rate; default 32040. Nudges pitch/sync");
     Bool("DynamicRateControl", dynamic_rate_control, "Slightly bend the sample rate to keep the buffer full and avoid dropouts");
     Double("DynamicRateLimit", dynamic_rate_limit, "How far Dynamic Rate Control may bend the rate, as a fraction (e.g. 0.005 = 0.5%)");
+    Bool("SuppressNRxGlitches", suppress_nrx_glitches, "Game Boy: an NRx2 rewrite on a live channel never raises its volume (hides the zombie-mode click; off = exact hardware behaviour)");
     Bool("Mute", mute_audio, "Silence all audio output");
     Bool("MuteAudioDuringAlternateSpeed", mute_audio_during_alternate_speed, "Silence audio while fast-forwarding or rewinding");
     Int("MasterVolumeRegular", master_volume_regular, "Master output volume during normal play (0..100, percent)");

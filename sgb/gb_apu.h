@@ -120,6 +120,9 @@ struct Apu
 
 	bool      is_active[4] = { false, false, false, false };
 	bool      cgb = false;       // model at last reset (DMG-B vs CGB-E)
+	// Host policy (not serialized): an NRx2 rewrite on a live channel may
+	// never raise its volume — see Nrx2Glitch.
+	bool      suppress_nrx2_glitch = false;
 
 	// DIV-APU divider chain state.
 	uint8_t   div_divider    = 0;

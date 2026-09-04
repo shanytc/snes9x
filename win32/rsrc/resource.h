@@ -447,6 +447,7 @@
 #define IDC_NO_SPRITE_LIMIT             3037
 #define IDC_NO_SPRITE_LIMIT_GB          3362
 #define IDC_HACKS_WARNING_ICON          3363
+#define IDC_SUPPRESS_NRX_GLITCHES       3474
 #define IDC_ALLOW_EXE_ICON              3321
 #define IDC_PF94_TIME                   3322
 #define IDC_PF94_TIME_LABEL             3323
@@ -928,7 +929,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3474
+#define _APS_NEXT_CONTROL_VALUE         3475
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

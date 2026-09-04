@@ -130,6 +130,7 @@ struct EmuConfig
     int input_rate;
     bool dynamic_rate_control;
     double dynamic_rate_limit;
+    bool suppress_nrx_glitches;
     bool mute_audio;
     bool mute_audio_during_alternate_speed;
 

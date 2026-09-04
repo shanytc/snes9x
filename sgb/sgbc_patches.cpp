@@ -104,11 +104,13 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0xCD62, "BUBBOB", "Classic Bubble Bobble (USA)", 1,
 	  { { 0x0001A6, 3, { 0xCA, 0x8D, 0x02 }, { 0x00, 0x00, 0x00 } } } },
-	// manual: boot far-call retargeted to the border transfers
+	// manual: the boot far-call's jump-table entry rerouted through the dead
+	// DMG title-scene stub, so the CGB palette preload still runs ahead of the
+	// border transfers (retargeting the call itself dropped the preload).
 	{ 0x7EB9, "CONKER CGB", "Conker's Pocket Tales (USA, Europe) (En,Fr,De)", 3,
-	  { { 0x1E004B, 1, { 0x7F }, { 0x41 } },
-	    { 0x1E0050, 1, { 0xE5 }, { 0xD2 } },
-	    { 0x1E0055, 1, { 0x7E }, { 0x04 } } } },
+	  { { 0x0005C8, 2, { 0x46, 0x4B }, { 0x76, 0x49 } },
+	    { 0x0005D0, 3, { 0xA2, 0x40, 0xCD }, { 0xD2, 0x41, 0xC9 } },
+	    { 0x1FBFE6, 2, { 0x76, 0x49 }, { 0xC7, 0x05 } } } },
 	// nop_skip_branch
 	{ 0x7961, "C C RACING ARLP\200", "Cross Country Racing (Europe) (En,Fr,De)", 1,
 	  { { 0x0001D2, 3, { 0xCA, 0xE0, 0x01 }, { 0x00, 0x00, 0x00 } } } },

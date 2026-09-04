@@ -460,14 +460,26 @@ static gboolean ra_gtk_apply_credentials(gpointer data)
     {
         gui_config->ra_username = u->username;
         gui_config->ra_api_token = u->token;
-        gui_config->ra_enabled = u->logged_in;
+        // A successful login turns the feature on, but logging out must not
+        // turn it off — that would grey out the Login item you need to get back in.
+        if (u->logged_in)
+            gui_config->ra_enabled = true;
         gui_config->save_config_file();
     }
 
-    // Only refresh the Login/Logout label. The "Enabled" check item is left
-    // untouched here — toggling it would re-fire its handler and recurse.
+    // Refresh the Login/Logout label and the "Enabled" check item; the toggle
+    // handler ignores a state that already matches the config, so setting it
+    // here cannot recurse.
     if (global_builder)
     {
+        auto enabled_obj = global_builder->get_object("ra_enabled_item");
+        if (enabled_obj)
+        {
+            auto item = Glib::RefPtr<Gtk::CheckMenuItem>::cast_static(enabled_obj);
+            if (item && gui_config)
+                item->set_active(gui_config->ra_enabled);
+        }
+
         auto login_obj = global_builder->get_object("ra_login_item");
         if (login_obj)
         {

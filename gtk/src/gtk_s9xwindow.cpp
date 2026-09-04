@@ -408,6 +408,8 @@ void Snes9xWindow::connect_signals()
     get_object<Gtk::CheckMenuItem>("ra_enabled_item")->set_active(gui_config->ra_enabled);
     get_object<Gtk::CheckMenuItem>("ra_enabled_item")->signal_toggled().connect([this] {
         bool checked = get_object<Gtk::CheckMenuItem>("ra_enabled_item")->get_active();
+        if (checked == gui_config->ra_enabled)
+            return;
         gui_config->ra_enabled = checked;
         gui_config->save_config_file();
         RA_SetEnabled(checked);

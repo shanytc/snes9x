@@ -407,7 +407,10 @@ static void ra_qt_credentials_changed(const char *username, const char *token)
     QMetaObject::invokeMethod(QApplication::instance(), [=]() {
         g_app->config->ra_username = u;
         g_app->config->ra_api_token = t;
-        g_app->config->ra_enabled = logged_in;
+        // A successful login turns the feature on, but logging out must not
+        // turn it off — that would grey out the Login item you need to get back in.
+        if (logged_in)
+            g_app->config->ra_enabled = true;
         g_app->config->saveFile(EmuConfig::findConfigFile());
 
         if (!g_app->window)

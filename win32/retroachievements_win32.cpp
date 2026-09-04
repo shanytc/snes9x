@@ -644,7 +644,10 @@ static void ra_win32_credentials_changed(const char *username, const char *token
     strncpy(GUI.RAApiToken, token ? token : "", sizeof(GUI.RAApiToken) - 1);
     GUI.RAApiToken[sizeof(GUI.RAApiToken) - 1] = '\0';
 
-    GUI.RAEnabled = (username && username[0] && token && token[0]);
+    // A successful login turns the feature on, but logging out must not turn it
+    // off — that would grey out the Login item you need to get back in.
+    if (username && username[0] && token && token[0])
+        GUI.RAEnabled = true;
     WinSaveConfigFile();
 }
 

@@ -757,6 +757,7 @@ void EmuMainWindow::createWidgets()
 
     connect(ra_menu, &QMenu::aboutToShow, [this] {
         bool enabled = app->config->ra_enabled;
+        ra_enabled_action->setChecked(enabled);
         ra_login_action->setEnabled(enabled);
         ra_hardcore_action->setEnabled(enabled);
         ra_achievements_action->setEnabled(enabled && app->isCoreActive() && RA_IsLoggedIn());

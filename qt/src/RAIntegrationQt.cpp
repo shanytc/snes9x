@@ -407,7 +407,10 @@ static void ra_qt_credentials_changed(const char *username, const char *token)
     QMetaObject::invokeMethod(QApplication::instance(), [=]() {
         g_app->config->ra_username = u;
         g_app->config->ra_api_token = t;
-        g_app->config->ra_enabled = logged_in;
+        // A successful login turns the feature on, but logging out must not
+        // turn it off — that would grey out the Login item you need to get back in.
+        if (logged_in)
+            g_app->config->ra_enabled = true;
         g_app->config->saveFile(EmuConfig::findConfigFile());
 
         if (!g_app->window)
@@ -462,6 +465,13 @@ static void ra_qt_reset_emulator()
         g_app->powerCycle();
 }
 
+// core->active is the Qt frontend's "a ROM is running" flag; it never clears
+// Settings.StopEmulation.
+static bool ra_qt_game_running()
+{
+    return g_app && g_app->isCoreActive();
+}
+
 // ---------------------------------------------------------------------------
 // Public: Register Qt callbacks
 // ---------------------------------------------------------------------------
@@ -486,6 +496,7 @@ void RA_Qt_RegisterCallbacks(EmuApplication *app)
     cb.on_credentials_changed = ra_qt_credentials_changed;
     cb.on_login_result = ra_qt_on_login_result;
     cb.reset_emulator = ra_qt_reset_emulator;
+    cb.is_game_running = ra_qt_game_running;
     RA_RegisterPlatformCallbacks(cb);
 }
 

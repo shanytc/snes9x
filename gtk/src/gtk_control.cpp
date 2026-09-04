@@ -135,9 +135,16 @@ const BindingLink b_links[] =
         { "b_gb_model_sgb",        "GTK_gb_model_2"    },
         { "b_gb_model_sgb2",       "GTK_gb_model_3"    },
         { "b_gb_model_sgbc",       "GTK_gb_model_4"    },
+        { "b_bios_manager",        "GTK_bios_manager"  },
 
         { nullptr, nullptr }
 };
+
+// Adding a binding without moving NUM_EMU_LINKS leaves the shortcut array short
+// and walks focus_next() onto the terminator, so make it a build error instead.
+static_assert(sizeof(b_links) / sizeof(b_links[0]) ==
+                  NUM_JOYPAD_LINKS + NUM_EMU_LINKS + 1,
+              "b_links is out of step with NUM_JOYPAD_LINKS + NUM_EMU_LINKS");
 
 /* Where the page breaks occur in the preferences pane */
 const int b_breaks[] =
@@ -148,7 +155,7 @@ const int b_breaks[] =
         43, /* End of Graphic options */
         85, /* End of save/load states */
         94, /* End of sound buttons */
-        108, /* End of miscellaneous buttons */
+        NUM_JOYPAD_LINKS + NUM_EMU_LINKS, /* End of miscellaneous buttons */
         -1
 };
 
@@ -420,6 +427,10 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
             top_level->set_gb_boot_policy(
                 S9xGBModelHotkeys[cmd.port[0] - PORT_GBMODEL0].policy);
         }
+        else if (cmd.port[0] == PORT_BIOS_MANAGER)
+        {
+            top_level->open_bios_manager();
+        }
     }
 }
 
@@ -479,6 +490,10 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strncasecmp(name, "GTK_gb_model_", 13))
     {
         cmd.port[0] = PORT_GBMODEL0 + (name[13] - '0');
+    }
+    else if (!strcasecmp(name, "GTK_bios_manager"))
+    {
+        cmd.port[0] = PORT_BIOS_MANAGER;
     }
     else if (!strcasecmp(name, "GTK_rewind"))
     {

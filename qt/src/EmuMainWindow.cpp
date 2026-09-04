@@ -225,6 +225,31 @@ void EmuMainWindow::setGBBootPolicy(int policy)
         openFile(std::string(Settings.GBRomPath));
 }
 
+void EmuMainWindow::openBiosManager()
+{
+    BiosManagerDialog dialog(this, app);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    app->config->saveFile(EmuConfig::findConfigFile());
+    // The running cart keeps the BIOS it was loaded against until a hard reset
+    // or the next load - these paths are only read by a load. What changes now
+    // is which Game Boy Model entries are selectable.
+    refreshBiosMenu();
+}
+
+void EmuMainWindow::powerCycle()
+{
+    // A BIOS assigned since the cart loaded is only read by a load, and a power
+    // cycle is when it should take over; reload or reset, never both. Qt has no
+    // multicart UI, so the one file the game came from is enough to load it.
+    const std::string path = Settings.GBRomPath[0] ? std::string(Settings.GBRomPath)
+                                                   : Memory.ROMFilename;
+    if (S9xBiosChangedSinceLoad() && !path.empty())
+        openFile(path);
+    else
+        app->powerCycle();
+}
+
 void EmuMainWindow::refreshBiosMenu()
 {
     if (!bios_menu_action)
@@ -418,14 +443,7 @@ void EmuMainWindow::createWidgets()
     file_menu->addSeparator();
     auto bios_manager_item = file_menu->addAction(tr("&BIOS Manager..."));
     connect(bios_manager_item, &QAction::triggered, this, [this] {
-        BiosManagerDialog dialog(this, app);
-        if (dialog.exec() != QDialog::Accepted)
-            return;
-        app->config->saveFile(EmuConfig::findConfigFile());
-        // The running cart keeps the BIOS it was loaded against - these paths
-        // are only read at load time. What changes is which Game Boy Model
-        // entries are selectable.
-        refreshBiosMenu();
+        openBiosManager();
     });
 
     auto languages = EmuPoTranslator::availableLanguages();
@@ -498,7 +516,7 @@ void EmuMainWindow::createWidgets()
 
     auto hard_reset_item = emulation_menu->addAction(QIcon(iconset + "reset.svg"), tr("&Hard Reset"));
     connect(hard_reset_item, &QAction::triggered, [&] {
-        app->powerCycle();
+        powerCycle();
         if (manual_pause)
         {
             manual_pause = false;

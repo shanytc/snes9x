@@ -66,9 +66,15 @@ void refresh_row(int slot, Row &row)
     else if (st == S9X_BIOS_PATH_MISSING)
         row.status->set_markup("<span foreground='#c0392b'>not found</span>");
     else
+    {
+        // Name the failure the way win32 does when there is no reason to give.
+        const std::string reason =
+            !why.empty()                    ? why
+            : st == S9X_BIOS_PATH_BAD_IMAGE ? std::string("wrong image")
+                                            : std::string("unexpected size");
         row.status->set_markup("<span foreground='#c0392b'>" +
-                               Glib::Markup::escape_text(why.empty() ? "unusable" : why) +
-                               "</span>");
+                               Glib::Markup::escape_text(reason) + "</span>");
+    }
 }
 
 } // namespace

@@ -100,6 +100,7 @@ static const char *shortcut_names[] =
     "GBModelSGB",
     "GBModelSGB2",
     "GBModelSGBC",
+    "BiosManager",
 };
 
 static const char *default_controller_keys[] =
@@ -182,7 +183,8 @@ static const char *default_controller_keys[] =
     "", //    Game Boy Color
     "", //    Super Game Boy
     "", //    Super Game Boy 2
-    ""  //    Super Game Boy Color
+    "", //    Super Game Boy Color
+    ""  //    BIOS Manager
 };
 
 const char **EmuConfig::getDefaultShortcutKeys()
@@ -662,9 +664,17 @@ void EmuConfig::config(const std::string &filename, bool write)
     // Key path "SGB::BIOSPreference" matches the win32 config (wconfig.cpp) and
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     BeginSection("SGB");
-    Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
+    Int("BIOSPreference", sgb_bios_preference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
     Bool("GBBIOSEnabled", gb_bios_enabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
     Int("GBBootPolicy", gb_boot_policy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
+    // Normalize what we hold, not just what the core is handed, or a config
+    // naming a retired console keeps saying so however often it is loaded.
+    if (!write)
+    {
+        if (sgb_bios_preference < 1 || sgb_bios_preference > 2)
+            sgb_bios_preference = 2;
+        gb_boot_policy = S9xNormalizeGBBootPolicy(gb_boot_policy);
+    }
     EndSection();
 
     // Explicit BIOS file paths; empty means fall back to the by-name search.

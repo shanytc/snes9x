@@ -93,12 +93,6 @@ void BiosManagerDialog::refreshRow(int slot)
 
     if (text.isEmpty())
     {
-        status->clear();
-        return;
-    }
-
-    if (text.isEmpty())
-    {
         // Empty is fine for some slots and not others, so say which.
         const char *note = S9xGetBiosSlotInfo(slot)->note;
         status->setText(note ? tr(note) : QString());

@@ -186,7 +186,7 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("bios_manager_item")->signal_activate().connect([&] {
-        S9xGtkBiosManagerDialog(window.get());
+        open_bios_manager();
     });
 
     get_object<Gtk::MenuItem>("open_rom_item")->signal_activate().connect([&] {
@@ -201,10 +201,18 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&] {
-        S9xReset();
-        // Only a power-cycle the user asked for: S9xReset also runs inside
-        // every non-fast state load, soft reset included.
-        S9xAnnounceGBBios();
+        // A BIOS assigned since the cart loaded is only read by a load, and a
+        // power cycle is when it should take over. Reload or reset, never both:
+        // a failed reload has already unloaded the cart.
+        if (S9xBiosChangedSinceLoad())
+            reload_loaded_game();
+        else
+        {
+            S9xReset();
+            // Only a power-cycle the user asked for: S9xReset also runs inside
+            // every non-fast state load, soft reset included.
+            S9xAnnounceGBBios();
+        }
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
@@ -1847,6 +1855,36 @@ void Snes9xWindow::set_gb_boot_policy(int policy)
 
     Settings.GBBootPolicy = (uint8_t) policy;
     try_open_rom(std::string(Settings.GBRomPath));
+}
+
+void Snes9xWindow::open_bios_manager()
+{
+    S9xGtkBiosManagerDialog(window.get());
+}
+
+// Load the running game from its file(s) again, the way File -> Load Game or
+// Load MultiCart did, for what only a load reads: the BIOS Manager's paths.
+bool Snes9xWindow::reload_loaded_game()
+{
+    if (Settings.GBRomPath[0])
+        return try_open_rom(std::string(Settings.GBRomPath));
+
+    // Only a two-file load fills slot B's name; a cart the loader paired with
+    // its BIOS has just A, and reloads as a single file.
+    if (Multi.fileNameB[0])
+    {
+        snprintf(Settings.CartAName, sizeof Settings.CartAName, "%s", Multi.fileNameA);
+        snprintf(Settings.CartBName, sizeof Settings.CartBName, "%s", Multi.fileNameB);
+        Settings.Multi = true;
+        pause_from_focus_change();
+        const bool ok = (S9xOpenROM(nullptr) == 0);
+        unpause_from_focus_change();
+        return ok;
+    }
+
+    if (Memory.ROMFilename.empty())
+        return false;
+    return try_open_rom(Memory.ROMFilename);
 }
 
 void Snes9xWindow::toggle_grab_mouse()

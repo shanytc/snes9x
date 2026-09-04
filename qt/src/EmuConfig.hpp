@@ -196,8 +196,8 @@ struct EmuConfig
     // Settings.SGB_BIOSPreference; the BIOS menu keeps this in sync.
     int sgb_bios_preference;
 
-    // GB/GBC boot ROM: 0 = never, 1 = when no SGB BIOS is in play, 2 = in
-    // preference to it. Persisted as [SGB] GBBIOSPreference.
+    // Use dmg_boot.bin / cgb_boot.bin for the power-on logo when running as
+    // GB/GBC. Persisted as [SGB] GBBIOSEnabled.
     bool gb_bios_enabled;
     // Console for GB content; see S9xGBBootPolicy. Persisted as [SGB] GBBootPolicy.
     int gb_boot_policy;
@@ -246,8 +246,9 @@ struct EmuConfig
 
     static const int allowed_bindings = 4;
     static const int num_controller_bindings = 18;
-    // The last five are the Game Boy Model consoles, in S9xGBModelHotkeys order.
-    static const int num_shortcuts = 76;
+    // Then the five Game Boy Model consoles in S9xGBModelHotkeys order, and
+    // the BIOS Manager last.
+    static const int num_shortcuts = 77;
 
     /* Save states are organized in banks of slots, as on win32. The state
      * file extension is the flat index, bank * save_slots_per_bank + slot. */

@@ -39,6 +39,8 @@ class EmuMainWindow : public QMainWindow
     // Emulation -> Game Boy Model, shared by the menu entries and their
     // hotkeys so both apply the same gates and reload the same way.
     void setGBBootPolicy(int policy);
+    void openBiosManager();
+    void powerCycle();
     bool openFile(const std::string &filename);
     void recreateUIAssets();
     void shaderChanged();

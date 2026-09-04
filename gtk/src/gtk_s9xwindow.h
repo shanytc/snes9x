@@ -46,6 +46,8 @@ class Snes9xWindow : public GtkBuilderWindow
     // Emulation -> Game Boy Model, shared by the menu items and their
     // hotkeys so both apply the same gates and reload the same way.
     void set_gb_boot_policy(int policy);
+    void open_bios_manager();
+    bool reload_loaded_game();
     void center_mouse();
 
     /* Rom-related functions */

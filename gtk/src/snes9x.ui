@@ -1765,7 +1765,7 @@
                             </child>
                             <child>
                               <object class="GtkRadioMenuItem" id="bios_policy9_item">
-                                <property name="label" translatable="yes">Super Game Boy Co_lor</property>
+                                <property name="label" translatable="yes">Super Game Boy Co_lor (Experimental)</property>
                                 <property name="tooltip_text" translatable="yes">A Super Game Boy 2 with a Game Boy Color inside: real Color graphics in the SGB border, with the cart's SGB sound and border packets. No such hardware exists; the SGB2 BIOS is patched in memory for it.</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>

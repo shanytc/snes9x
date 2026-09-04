@@ -154,6 +154,7 @@ Nintendo is a trademark.")
 // Appended to a greyed Emulation -> Game Boy Model entry, so the item says why
 // it cannot be picked instead of leaving it to guesswork.
 #define GBMODEL_MISSING_BIOS TEXT(" (Missing BIOS)")
+#define GBMODEL_EXPERIMENTAL TEXT(" (Experimental)")
 
 #define HOTKEYS_GBMODEL_GB TEXT("Game Boy:")
 #define HOTKEYS_GBMODEL_GBC TEXT("Game Boy Color:")

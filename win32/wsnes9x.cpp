@@ -5639,13 +5639,18 @@ static void CheckMenuStates ()
 							  _countof(cur), MF_BYCOMMAND);
 				std::wstring base(cur);
 				const std::wstring suffix(GBMODEL_MISSING_BIOS);
-				if (base.size() > suffix.size() &&
-					base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0)
-					base.erase(base.size() - suffix.size());
+				const std::wstring experimental(GBMODEL_EXPERIMENTAL);
+				const std::wstring *tails[] = { &suffix, &experimental };
+				for (const std::wstring *tail : tails)
+					if (base.size() > tail->size() &&
+						base.compare(base.size() - tail->size(), tail->size(), *tail) == 0)
+						base.erase(base.size() - tail->size());
 				// Only when a BIOS is what is missing: a hack greyed because the
-				// cart is mono has nothing missing to install.
+				// cart is mono has nothing missing to install. The experimental
+				// tag yields to it rather than stacking.
 				const std::wstring want =
-					why == S9X_GBPOLICY_NO_BIOS ? base + suffix : base;
+					why == S9X_GBPOLICY_NO_BIOS ? base + suffix :
+					i == S9X_GBBOOT_SGBC        ? base + experimental : base;
 				if (want != cur)
 				{
 					MENUITEMINFO txt = {};

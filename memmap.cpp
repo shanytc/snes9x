@@ -1426,7 +1426,7 @@ const char *S9xGBBootPolicyName (int policy)
 		case S9X_GBBOOT_SGB2:     return ("Super Game Boy 2");
 		case S9X_GBBOOT_SGB_GBC_LEGACY:
 		case S9X_GBBOOT_SGB2_GBC_LEGACY:
-		case S9X_GBBOOT_SGBC:     return ("Super Game Boy Color");
+		case S9X_GBBOOT_SGBC:     return ("Super Game Boy Color (Experimental)");
 		case S9X_GBBOOT_AUTO_GB_LEGACY:
 		case S9X_GBBOOT_AUTO_GBC_LEGACY:
 		case S9X_GBBOOT_AUTO:     return ("Automatic");

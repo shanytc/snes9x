@@ -12,6 +12,8 @@
 #include "../ppu.h"
 #include "../gfx.h"
 
+#include <cstring>
+
 namespace SGB {
 
 // The keys the patched BIOS paints GB shades 1-3 of the pane in. Kept beside
@@ -125,6 +127,30 @@ void SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 				dst[x] = BgrToHostBright(src[x], xb);
 		}
 	}
+}
+
+// A frame later than the command: the cart may still be painting now.
+void SgbcTrnHold::Arm() { arm_ = 2; }
+
+void SgbcTrnHold::OnVBlank(const uint8_t *raw_frame)
+{
+	if (arm_)
+	{
+		// One frame is all the tail of the read needs, and short enough not to
+		// reach the next transfer of a back-to-back run.
+		if (--arm_ == 0 && raw_frame)
+		{
+			std::memcpy(frame_, raw_frame, sizeof frame_);
+			hold_ = 1;
+		}
+	}
+	else if (hold_)
+		--hold_;
+}
+
+const uint8_t *SgbcTrnHold::Line(const uint8_t *live, uint32_t ly) const
+{
+	return (hold_ && ly < GB_SCREEN_HEIGHT) ? &frame_[ly * GB_SCREEN_WIDTH] : live;
 }
 
 } // namespace SGB

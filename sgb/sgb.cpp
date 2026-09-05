@@ -555,6 +555,8 @@ struct Emulator::Impl
 		uint8_t pkt[16] = {};   // saved packet bytes (cmd in [0], param in [1])
 	} border_capture;
 
+	SgbcTrnHold sgbc_trn;   // see sgbc.h; armed only under SGBC
+
 	// BIOS-mode border crossfade. Counts frames since both halves of
 	// CHR_TRN + PCT_TRN landed; 0 = no custom border yet (BIOS default
 	// shows through), >= BORDER_FADE_FRAMES = full overlay. In between,
@@ -718,6 +720,7 @@ void Emulator::Reset()
 	MbcReset(impl_->cart.mbc);
 	MbcUnlReset(impl_->cart);
 	impl_->border_capture.stage = Impl::BorderCapture::Idle;
+	impl_->sgbc_trn.Reset();
 	impl_->border_transfers     = 0;
 	impl_->border_plane         = 0;
 	impl_->border_pct           = 0;
@@ -2318,6 +2321,8 @@ void Emulator::OnPpuVBlank()
 	impl_->icd2.frame_6001_count = 0;
 	++g_gb_vblank_count;
 
+	impl_->sgbc_trn.OnVBlank(impl_->ppu.raw_framebuffer);
+
 	// Clean up VRAM areas the BIOS uses for the boot-handoff capture.
 	// GB-SNES scanline timing drift makes the BIOS's IRQ DMA read from the
 	// wrong ping-pong buffer, producing striped/Nintendo-logo artifacts in
@@ -2406,7 +2411,9 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 	// the border decodes to garbage. Feed the raw indices instead; the BIOS's
 	// own drawing of the GB area is keyed and overpainted anyway.
 	if (impl_->sgbc && impl_->ppu.cgb && impl_->ppu.ly < GB_SCREEN_HEIGHT)
-		pixels = &impl_->ppu.raw_framebuffer[impl_->ppu.ly * GB_SCREEN_WIDTH];
+		pixels = impl_->sgbc_trn.Line(
+			&impl_->ppu.raw_framebuffer[impl_->ppu.ly * GB_SCREEN_WIDTH],
+			impl_->ppu.ly);
 
 	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);
@@ -2985,6 +2992,7 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 			: Impl::BorderCapture::PctTrn;
 		std::memcpy(impl_->border_capture.pkt, data, 16);
 		impl_->border_capture.skip = 1;
+		if (impl_->sgbc) impl_->sgbc_trn.Arm();
 		impl_->ppu.frame_ready = false;
 		if (cmd == 0x13) ++g_sgb_dbg.pkt_chr;
 		else             ++g_sgb_dbg.pkt_pct;

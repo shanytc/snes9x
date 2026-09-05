@@ -2663,8 +2663,18 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 		{
 			const uint16_t px = dst[x];
 			if (px == key[0] || px == key[1] || px == key[2])
+			{
+				// Fallback: the key stands for a GB colour INDEX, because in CGB
+				// mode the framebuffer feeding the BIOS ring carries indices, not
+				// shades. Put it through BGP like the DMG the fallback imitates,
+				// or a game that blanks with BGP=$00 still shows the *_TRN payload
+				// its blank was meant to hide (Dragon Dance, Doraemon Kart 2).
+				const int idx = (px == key[0]) ? 1 : (px == key[1]) ? 2 : 3;
+				const int sh  = (impl_->ppu.bgp >> (idx * 2)) & 3;
 				dst[x] = color ? BgrToHostBright(src[x], xb)
-				               : mono[px == key[0] ? 0 : px == key[1] ? 1 : 2];
+				       : sh   ? mono[sh - 1]
+				               : back;
+			}
 			else if (px == back && color)
 				dst[x] = BgrToHostBright(src[x], xb);
 		}

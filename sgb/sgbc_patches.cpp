@@ -236,9 +236,10 @@ const SgbcPatch kPatches[] = {
 	// manual: the SGB branch maps the console type; give it the Color value
 	{ 0x3E6E, "GLOCAL HEXCITE", "Glocal Hexcite (Japan)", 1,
 	  { { 0x00071E, 1, { 0x02 }, { 0x04 } } } },
-	// manual: the SGB path hangs on LY with the LCD off; take the Color one
+	// manual: on a CGB the border routine's vblank helper turns the LCD off, and
+	// the transfer that follows waits for LY $91 forever; call the delay instead
 	{ 0x2E53, "T-GREAT-B-PAGVJ\200", "Great Battle Pocket, The (Japan)", 1,
-	  { { 0x0004D9, 1, { 0x03 }, { 0x00 } } } },
+	  { { 0x00059B, 2, { 0x55, 0x14 }, { 0xC7, 0x25 } } } },
 	// nop_skip_branch+nop_store
 	{ 0x7652, "HAMSTAR PRADISE\200", "Hamster Paradise (Japan)", 3,
 	  { { 0x0015CD, 2, { 0x28, 0x13 }, { 0x00, 0x00 } },

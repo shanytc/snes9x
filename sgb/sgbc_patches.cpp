@@ -240,6 +240,10 @@ const SgbcPatch kPatches[] = {
 	// the transfer that follows waits for LY $91 forever; call the delay instead
 	{ 0x2E53, "T-GREAT-B-PAGVJ\200", "Great Battle Pocket, The (Japan)", 1,
 	  { { 0x00059B, 2, { 0x55, 0x14 }, { 0xC7, 0x25 } } } },
+	// manual: the SGB init clears $D000-$EFFE, wiping the boot A the cart keeps
+	// at $DFFF; clear $C000-$DFFE instead, exactly as its own boot clear does
+	{ 0xD849, "GURU2 G", "Guruguru Garakutas (Japan)", 1,
+	  { { 0x02428C, 1, { 0xD0 }, { 0xC0 } } } },
 	// nop_skip_branch+nop_store
 	{ 0x7652, "HAMSTAR PRADISE\200", "Hamster Paradise (Japan)", 3,
 	  { { 0x0015CD, 2, { 0x28, 0x13 }, { 0x00, 0x00 } },

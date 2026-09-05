@@ -395,6 +395,9 @@
     <ClCompile Include="..\sgb\sgbc_patches.cpp">
       <Filter>s9x-source\SGB</Filter>
     </ClCompile>
+    <ClCompile Include="..\sgb\sgbc.cpp">
+      <Filter>s9x-source\SGB</Filter>
+    </ClCompile>
     <ClCompile Include="..\sgb\gb_cpu.cpp">
       <Filter>s9x-source\SGB</Filter>
     </ClCompile>

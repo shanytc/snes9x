@@ -348,6 +348,7 @@
     <ClCompile Include="..\sgb\sgb_packet.cpp" />
     <ClCompile Include="..\sgb\sgb_state.cpp" />
     <ClCompile Include="..\sgb\sgbc_patches.cpp" />
+    <ClCompile Include="..\sgb\sgbc.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -746,6 +746,9 @@
     <ClCompile Include="..\sgb\sgbc_patches.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
+    <ClCompile Include="..\sgb\sgbc.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
     <ClCompile Include="..\sgb\gb_cpu.cpp">
       <Filter>SGB</Filter>
     </ClCompile>

@@ -26,6 +26,18 @@ bool ApplyIps(std::vector<uint8_t> &rom, const uint8_t *ips, size_t len);
 // against (SHA-256 of the pristine 512 KB image). True when `bios` was patched.
 bool PatchSgbcBios(std::vector<uint8_t> &bios);
 
+// Per-cart display quirks, applied by the SGBC compositor (sgbc.cpp) and by
+// nothing else. A cart whose row leaves `quirks` at 0 is untouched.
+//   BGP_BLANK: the cart blanks its screen the DMG way, mapping every colour
+//   index to shade 0 through BGP. CGB rendering ignores BGP, so without this
+//   the *_TRN payload the blank was hiding stays on the pane.
+static const uint32_t SGBC_QUIRK_BGP_BLANK = 1u << 0;
+//   HOLD_PAYLOAD: the cart leaves its *_TRN payload on the Color screen between
+//   the transfer and its first real draw, where a real SGB2 shows the DMG
+//   path's blank. Blank the pane while the CGB frame looks like payload (a
+//   tile grid: few colours, very dense horizontal colour changes).
+static const uint32_t SGBC_QUIRK_HOLD_PAYLOAD = 1u << 1;
+
 // One byte run in a cart image, up to three bytes (a jump, a store): `old`
 // is verified before `neu` is written.
 struct SgbcEdit
@@ -39,14 +51,15 @@ struct SgbcEdit
 // A dual cart picks its branch from A at $0100 and runs no SGB code on the
 // Color branch, so the BIOS never gets its border or sound packets. These
 // edits make a known game run its SGB init as well: one row per cart, its
-// edits inline (four at most so far; unused slots stay zero).
+// edits inline (eight at most so far; unused slots stay zero).
 struct SgbcPatch
 {
 	uint16_t    global_sum;   // header $014E-$014F, big-endian as stored
 	const char *title;        // header $0134.., up to the first NUL
 	const char *name;         // shown on the load banner
 	uint8_t     edit_count;
-	SgbcEdit    edits[4];
+	SgbcEdit    edits[8];
+	uint32_t    quirks = 0;   // SGBC_QUIRK_* bits; 0 for almost every row
 };
 
 const SgbcPatch *FindSgbcPatch(const uint8_t *rom, size_t size);

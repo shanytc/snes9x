@@ -128,6 +128,18 @@ const SgbcPatch kPatches[] = {
 	// nop_early_ret
 	{ 0x3FDF, "DOKAPON", "Dokapon! - Millennium Quest (Japan)", 1,
 	  { { 0x1ED106, 1, { 0xC8 }, { 0x00 } } } },
+	// display quirks only: *_TRN payload stays on the Color screen after the transfer
+	{ 0xC0F9, "DORAEMON KART2", "Doraemon Kart 2 (Japan)", 0, {},
+	  SGBC_QUIRK_BGP_BLANK | SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirks only: *_TRN payload stays on the Color screen after the transfer
+	{ 0x49E0, "DRAGONDANCEBDAP\200", "Dragon Dance (Europe) (Proto)", 0, {},
+	  SGBC_QUIRK_BGP_BLANK | SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirks only: *_TRN payload stays on the Color screen after the transfer
+	{ 0x49E0, "DRAGONDANCEBDAE\200", "Dragon Dance (USA)", 0, {},
+	  SGBC_QUIRK_BGP_BLANK | SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirks only: *_TRN payload stays on the Color screen after the transfer
+	{ 0x4CE1, "DRAGONDANCEAD5E\200", "Dragon Dance (USA) (Beta 1, Beta 2)", 0, {},
+	  SGBC_QUIRK_BGP_BLANK | SGBC_QUIRK_HOLD_PAYLOAD },
 	// retarget_jr_to_sgb_entry
 	{ 0xC280, "DQ1&2", "Dragon Quest I & II (Japan)", 1,
 	  { { 0x0001BE, 2, { 0x18, 0x05 }, { 0x18, 0x00 } } } },
@@ -154,7 +166,8 @@ const SgbcPatch kPatches[] = {
 	  { { 0x188367, 2, { 0x20, 0x0D }, { 0x00, 0x00 } } } },
 	// nop_skip_branch
 	{ 0xA73A, "DT GAMEBOY BBDJ\200", "DT - Lords of Genomes (Japan)", 1,
-	  { { 0x0001B4, 2, { 0x28, 0x06 }, { 0x00, 0x00 } } } },
+	  { { 0x0001B4, 2, { 0x28, 0x06 }, { 0x00, 0x00 } } },
+	  SGBC_QUIRK_HOLD_PAYLOAD },
 	// nop_early_ret
 	{ 0xFC46, "MONOPOLYGB", "DX Monopoly GB (Japan)", 2,
 	  { { 0x0004AA, 2, { 0x20, 0x4B }, { 0x00, 0x00 } },
@@ -167,14 +180,25 @@ const SgbcPatch kPatches[] = {
 	{ 0x8B00, "PRO FISHINGAFCP\200", "EuroSport Pro Champ Fishing (Europe) (Proto)", 2,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },
 	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } } } },
-	// nop_early_ret+imm_pre_fork
-	{ 0x8DB6, "FAIRY   KITTY", "Fairy Kitty no Kaiun Jiten - Yousei no Kuni no Uranai Shugyou (Japan) (Rev 1)", 2,
+	// type $DE80 (1 CGB, $FF SGB): run the SGB detect on the Color boot but keep type 1,
+	// and let 1 through the four SGB gates and two packet delays that test `cp $FF`
+	{ 0x8DB6, "FAIRY   KITTY", "Fairy Kitty no Kaiun Jiten - Yousei no Kuni no Uranai Shugyou (Japan) (Rev 1)", 7,
 	  { { 0x0380FD, 1, { 0xC8 }, { 0x00 } },
-	    { 0x038103, 2, { 0x3E, 0xFF }, { 0x3E, 0x0A } } } },
-	// nop_early_ret+imm_pre_fork
-	{ 0xA958, "FAIRY   KITTY", "Fairy Kitty no Kaiun Jiten - Yousei no Kuni no Uranai Shugyou (Japan)", 2,
+	    { 0x038104, 1, { 0xFF }, { 0x01 } },
+	    { 0x038179, 1, { 0xFF }, { 0x01 } },
+	    { 0x03825E, 1, { 0xFF }, { 0x01 } },
+	    { 0x038412, 1, { 0xFF }, { 0x01 } },
+	    { 0x0012A2, 3, { 0xFE, 0xFF, 0xC0 }, { 0xB7, 0xC8, 0x00 } },
+	    { 0x0012B4, 3, { 0xFE, 0xFF, 0xC0 }, { 0xB7, 0xC8, 0x00 } } } },
+	// same as Rev 1; its bank-0 delays sit 8 bytes earlier
+	{ 0xA958, "FAIRY   KITTY", "Fairy Kitty no Kaiun Jiten - Yousei no Kuni no Uranai Shugyou (Japan)", 7,
 	  { { 0x0380FD, 1, { 0xC8 }, { 0x00 } },
-	    { 0x038103, 2, { 0x3E, 0xFF }, { 0x3E, 0x0A } } } },
+	    { 0x038104, 1, { 0xFF }, { 0x01 } },
+	    { 0x038179, 1, { 0xFF }, { 0x01 } },
+	    { 0x03825E, 1, { 0xFF }, { 0x01 } },
+	    { 0x038412, 1, { 0xFF }, { 0x01 } },
+	    { 0x00129A, 3, { 0xFE, 0xFF, 0xC0 }, { 0xB7, 0xC8, 0x00 } },
+	    { 0x0012AC, 3, { 0xFE, 0xFF, 0xC0 }, { 0xB7, 0xC8, 0x00 } } } },
 	// force_jr+nop_store
 	{ 0x1689, "FIFA 2000", "FIFA 2000 (USA, Europe)", 2,
 	  { { 0x000349, 2, { 0x20, 0x27 }, { 0x18, 0x27 } },
@@ -659,6 +683,8 @@ const SgbcPatch kPatches[] = {
 
 
 
+
+
 };
 
 // ---- Super Game Boy compatibility edits ----------------------------------
@@ -749,7 +775,7 @@ const SgbcPatch *FindSgbPatch(const uint8_t *rom, size_t size)
 bool ApplySgbcPatch(const SgbcPatch &p, uint8_t *rom, size_t size)
 {
 	if (!rom) return false;
-	const int n = p.edit_count < 4 ? p.edit_count : 4;
+	const int n = p.edit_count < 8 ? p.edit_count : 8;
 	for (int i = 0; i < n; ++i)
 	{
 		const SgbcEdit &e = p.edits[i];

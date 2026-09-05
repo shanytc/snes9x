@@ -51,6 +51,7 @@ set(SNES9X_CORE_SOURCES
     ../sgb/sgb_packet.cpp
     ../sgb/sgb_state.cpp
     ../sgb/sgbc_patches.cpp
+    ../sgb/sgbc.cpp
     ../sgb/gb_cpu.cpp
     ../sgb/gb_ops.cpp
     ../sgb/gb_ops_cb.cpp

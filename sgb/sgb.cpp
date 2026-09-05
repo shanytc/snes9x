@@ -25,6 +25,7 @@
 #include "sgb_packet.h"
 #include "sgb_state.h"
 #include "sgbc_patches.h"
+#include "sgbc.h"
 
 #include <cstdio>
 #include <cstring>
@@ -261,6 +262,7 @@ struct Emulator::Impl
 	char        sgbc_patch_name[96] = {};
 	char        sgb_patch_name[96] = {};   // PrepareBiosCart's compatibility edit
 	bool        sgbc_table = true;
+	uint32_t    sgbc_quirks = 0;   // SGBC_QUIRK_* from the cart's table row
 
 	// Whether this instance runs BIOS-mode semantics. -1 follows the app
 	// session (Settings.SGB_BIOSModeActive); private cores pin 0 so a
@@ -1299,6 +1301,7 @@ void Emulator::PrepareSgbcCart()
 	im.sgbc_patch_name[0] = 0;
 	im.sgbc_pristine.clear();
 	im.sgbc_compat_combo = nullptr;
+	im.sgbc_quirks = 0;
 	if (!im.sgbc || !im.has_rom || im.cart.rom.size() < 0x150) return;
 	std::vector<uint8_t> &rom = im.cart.rom;
 
@@ -1330,6 +1333,7 @@ void Emulator::PrepareSgbcCart()
 	// Per-game edits from the built-in table (sgbc_patches.cpp). Plain
 	// snprintf: the win32 port maps it through a macro.
 	const SgbcPatch *p = im.sgbc_table ? FindSgbcPatch(rom.data(), rom.size()) : nullptr;
+	if (p) im.sgbc_quirks = p->quirks;
 	if (p && ApplySgbcPatch(*p, rom.data(), rom.size()))
 		snprintf(im.sgbc_patch_name, sizeof im.sgbc_patch_name, "%s", p->name);
 }
@@ -2591,94 +2595,33 @@ static inline uint16_t BgrToHostBright(uint16_t bgr, const uint8 *xb)
 
 void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
-	// Super Game Boy Color: the BIOS drew the GB area from the LCD ring, which
-	// carries shade indices only, and the patched BIOS paints those shades in
-	// the keys. Fill every keyed pixel with the GB core's real CGB output,
-	// keeping whatever the SNES drew over the pane (border, OBJ, its menus).
+	// Super Game Boy Color only, and only on a Color cart: a plain SGB session
+	// and a mono cart both stop here. The painting itself lives in sgbc.cpp.
 	if (!impl_->has_rom || !dest || !impl_->sgbc || !impl_->ppu.cgb) return;
 
 	// Keyed only once the cart has taken over. Until then (splash, logo
 	// scroll) and on an unpatched dump the pane is the BIOS's own picture.
 	if (PPU.CGDATA[1] != kSgbcKey[0]) return;
 
-	// Lores only — the offsets below assume the 256x224 SGB frame. The BIOS
-	// puts the GB picture at y=39, not the y=40 the tile grid suggests: the
-	// rows that animate under a plain SGB session are 39..182. Painting at 40
-	// left the BIOS's own row 39 showing above the overlay as a stripe of
-	// stale GB pixels, and put GB row 143 over border row 183.
-	const uint32_t ORIGIN_X = 48, ORIGIN_Y = 39;
-	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
-	if (width > SNES_WIDTH ||
-	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return;
+	SgbcPane in;
+	in.color_fb = impl_->cgb_overlay_fb;
+	// No CGB frame yet, or a cart that has not written CGB palettes and whose
+	// color_fb is the reset white: fall back to the shades the keys stand for.
+	in.color = impl_->boot_handoff_captured && impl_->cgb_overlay_valid &&
+	           (impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
+	in.bgp    = impl_->ppu.bgp;
+	in.quirks = impl_->sgbc_quirks;
 
-	// No CGB frame yet (first frames after the handoff), or a cart that has
-	// not written CGB palettes and whose color_fb is the reset white (Game &
-	// Watch Gallery 3 takes its SGB path even on the Color signature; Dragon
-	// Warrior draws its logos before its first palette): show the shades the
-	// keys stand for in the SGB palette the cart asked for, which the packet
-	// mirror tracks under the BIOS too. Nothing blank, nothing magenta.
-	const bool color = impl_->boot_handoff_captured && impl_->cgb_overlay_valid &&
-	                   (impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
 	// The patched BIOS stashes the palette its keys displaced in its state
 	// block ($7E:CE00: magic 'S' 'C', state, then colors 1-3 of palettes 0-3
-	// from +8) — the cart's colours as the BIOS resolved them, PAL_TRN and
-	// PAL_SET included, which the packet mirror cannot follow under the BIOS.
+	// from +8) - the cart's colours as the BIOS resolved them.
 	const uint8 *st = ::Memory.RAM + 0xCE00;   // the SNES's, not SGB::Memory
-	uint16_t fallback[3];
 	for (int k = 0; k < 3; ++k)
-		fallback[k] = (st[0] == 'S' && st[1] == 'C' && st[2] == 1)
+		in.fallback[k] = (st[0] == 'S' && st[1] == 'C' && st[2] == 1)
 			? static_cast<uint16_t>(st[8 + k * 2] | (st[9 + k * 2] << 8))
 			: impl_->sgb_state.active[0].colors[k + 1];
 
-	// The keys and the backdrop exactly as the PPU drew each line — its
-	// brightness and backdrop at render time, not now: the BIOS force-blanks
-	// at VBlank, so PPU.Brightness already reads 0 here. The replacement
-	// pixels take the same LUT, so the pane fades with the border.
-	int      last_b    = -1;
-	uint16_t last_back = 0xFFFF;
-	const uint8 *xb = nullptr;
-	uint16_t key[3] = {}, mono[3] = {}, back = 0;
-
-	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
-	{
-		uint8  b;
-		uint16 bd;
-		S9xGetLineRenderState((int) (ORIGIN_Y + y), b, bd);
-		if ((int) b != last_b || bd != last_back)
-		{
-			last_b    = b;
-			last_back = bd;
-			xb = mul_brightness[b];
-			for (int k = 0; k < 3; ++k)
-			{
-				key[k]  = BgrToHostBright(kSgbcKey[k], xb);
-				mono[k] = BgrToHostBright(fallback[k], xb);
-			}
-			back = BgrToHostBright(bd, xb);
-		}
-
-		const uint16_t *src = impl_->cgb_overlay_fb + y * GB_SCREEN_WIDTH;
-		uint16_t *dst = dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X;
-		for (uint32_t x = 0; x < GB_SCREEN_WIDTH; ++x)
-		{
-			const uint16_t px = dst[x];
-			if (px == key[0] || px == key[1] || px == key[2])
-			{
-				// Fallback: the key stands for a GB colour INDEX, because in CGB
-				// mode the framebuffer feeding the BIOS ring carries indices, not
-				// shades. Put it through BGP like the DMG the fallback imitates,
-				// or a game that blanks with BGP=$00 still shows the *_TRN payload
-				// its blank was meant to hide (Dragon Dance, Doraemon Kart 2).
-				const int idx = (px == key[0]) ? 1 : (px == key[1]) ? 2 : 3;
-				const int sh  = (impl_->ppu.bgp >> (idx * 2)) & 3;
-				dst[x] = color ? BgrToHostBright(src[x], xb)
-				       : sh   ? mono[sh - 1]
-				               : back;
-			}
-			else if (px == back && color)
-				dst[x] = BgrToHostBright(src[x], xb);
-		}
-	}
+	SgbcComposePane(dest, pitch_pixels, in);
 }
 
 // BIOS-mode MASK_EN. The BIOS's own freeze never engages under our slaving —

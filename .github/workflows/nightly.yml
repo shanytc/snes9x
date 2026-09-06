@@ -86,10 +86,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: qt-x86_64,  script: qt/scripts/makeappimage-docker.sh,      out: qt/build-appimage/*.AppImage }
-          - { name: qt-x86,     script: qt/scripts/makeappimage-x86-docker.sh,  out: qt/build-appimage-x86/*.AppImage }
-          - { name: gtk-x86_64, script: gtk/scripts/makeappimage-docker.sh,     out: gtk/build-appimage/*.AppImage }
-          - { name: gtk-x86,    script: gtk/scripts/makeappimage-x86-docker.sh, out: gtk/build-appimage-x86/*.AppImage }
+          - { name: qt-x86_64,  script: qt/scripts/makeappimage-docker.sh,      out: qt/build-appimage/super-snes9x-*.AppImage }
+          - { name: qt-x86,     script: qt/scripts/makeappimage-x86-docker.sh,  out: qt/build-appimage-x86/super-snes9x-*.AppImage }
+          - { name: gtk-x86_64, script: gtk/scripts/makeappimage-docker.sh,     out: gtk/build-appimage/super-snes9x-*.AppImage }
+          - { name: gtk-x86,    script: gtk/scripts/makeappimage-x86-docker.sh, out: gtk/build-appimage-x86/super-snes9x-*.AppImage }
     steps:
       - uses: actions/checkout@v4
       - name: Fetch submodules

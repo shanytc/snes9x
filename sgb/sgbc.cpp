@@ -62,6 +62,44 @@ static bool LooksLikePayload(const uint16_t *fb)
 	return ncols <= 8 && transitions >= 72u * 24u;
 }
 
+bool SgbcBootCover::Hold(const Ppu &ppu)
+{
+	// Blank is what the pane DISPLAYS, and a Color cart displays its CGB
+	// palettes: Pocket Bomberman draws its whole logo screen under BGP=$00,
+	// which sgb.cpp's BGP test would call white forever. Before the cart has
+	// palettes of its own the pane is still shaded, so BGP still rules.
+	bool blank = true;
+	if (ppu.cgb_pal_written)
+	{
+		for (uint32_t i = 0; i < GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT; ++i)
+			if (ppu.color_fb[i] != 0x7FFF) { blank = false; break; }
+	}
+	else
+	{
+		uint8_t present = 0;
+		for (size_t i = 0; i < sizeof ref_; ++i)
+			present |= static_cast<uint8_t>(1u << (ppu.raw_framebuffer[i] & 3));
+		for (int s = 0; s < 4; ++s)
+			if (((present >> s) & 1) && ((ppu.bgp >> (2 * s)) & 3) != 0)
+				blank = false;
+	}
+
+	const uint8_t *raw = ppu.raw_framebuffer;
+	if (!ref_valid_)
+	{
+		if (blank) return true;   // still staging: the cover looks the same
+		// A visible flat frame is the cart's own fade-in lead, not the logo.
+		bool flat = true;
+		for (size_t i = 0; i < sizeof ref_; ++i)
+			if (raw[i] != raw[0]) { flat = false; break; }
+		if (flat) return false;
+		std::memcpy(ref_, raw, sizeof ref_);
+		ref_valid_ = true;
+		return true;
+	}
+	return blank || std::memcmp(raw, ref_, sizeof ref_) == 0;
+}
+
 void SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 {
 

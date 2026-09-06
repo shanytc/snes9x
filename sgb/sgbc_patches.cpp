@@ -134,6 +134,12 @@ const SgbcPatch kPatches[] = {
 	// nop_early_ret
 	{ 0x3FDF, "DOKAPON", "Dokapon! - Millennium Quest (Japan)", 1,
 	  { { 0x1ED106, 1, { 0xC8 }, { 0x00 } } } },
+	// manual: the SGB flow clears VRAM with the LCD on under BGP=$00 - white on
+	// a DMG, a torn wipe in colour - so turn the LCD off first (the zeroed
+	// flag byte it replaces is never read)
+	{ 0x8C16, "POYON'S DUNGEON\200", "Daikaijuu Monogatari - Poyon no Dungeon Room (Japan)", 2,
+	  { { 0x01C003, 3, { 0xAF, 0xEA, 0x70 }, { 0xCD, 0x6F, 0x09 } },
+	    { 0x01C006, 1, { 0xC3 }, { 0x00 } } } },
 	// display quirks only: *_TRN payload stays on the Color screen after the transfer
 	{ 0xC0F9, "DORAEMON KART2", "Doraemon Kart 2 (Japan)", 0, {},
 	  SGBC_QUIRK_BGP_BLANK | SGBC_QUIRK_HOLD_PAYLOAD },
@@ -536,12 +542,20 @@ const SgbcPatch kPatches[] = {
 	  { { 0x000180, 2, { 0x28, 0x17 }, { 0x00, 0x00 } },
 	    { 0x000194, 1, { 0xAF }, { 0x00 } } } },
 	// manual: the Color branch skips the SGB block; enter it where they rejoin,
-	// keep the Color type, and take the two border gates that test the SGB one
-	{ 0x41CB, "POKEBOM USA", "Pocket Bomberman (USA, Europe)", 4,
+	// keep the Color type, take all four border gates that test the SGB one,
+	// and keep the logo's own palette so the second pass is not grey
+	{ 0x41CB, "POKEBOM USA", "Pocket Bomberman (USA, Europe)", 7,
 	  { { 0x00026F, 3, { 0x18, 0x61, 0xCD }, { 0xC3, 0x82, 0x02 } },
 	    { 0x00029B, 1, { 0x01 }, { 0x02 } },
+	    { 0x0004AB, 3, { 0xCD, 0x0E, 0x05 }, { 0x00, 0x00, 0x00 } },
 	    { 0x00317F, 1, { 0x01 }, { 0x02 } },
-	    { 0x003661, 1, { 0x01 }, { 0x02 } } } },
+	    { 0x003661, 1, { 0x01 }, { 0x02 } },
+	    { 0x0036C1, 1, { 0x01 }, { 0x02 } },
+	    { 0x003721, 1, { 0x01 }, { 0x02 } } } },
+	// display quirk only: the boot border's MASK_EN is cancelled with the payload
+	// still on screen under BGP=$00, white on a DMG
+	{ 0x6370, "POCKET CL BLOCK\200", "Pocket Color Block (Japan)", 0, {},
+	  SGBC_QUIRK_BGP_BLANK | SGBC_QUIRK_HOLD_PAYLOAD },
 	// manual: run the Color init after the SGB block
 	{ 0xEFB7, "POCKET DENSYA2", "Pocket Densha 2 (Japan)", 1,
 	  { { 0x0002DC, 3, { 0xC3, 0x54, 0x03 }, { 0xC3, 0xF7, 0x01 } } } },

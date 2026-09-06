@@ -18,6 +18,8 @@
 
 namespace SGB {
 
+struct Ppu;
+
 // What the compositor needs from the emulator, gathered by the caller so this
 // file does not depend on Emulator::Impl.
 struct SgbcPane
@@ -30,6 +32,23 @@ struct SgbcPane
 	uint8_t         fb_lcdc;     // pane is showing, which the live pair is not
 	uint16_t        fallback[3]; // shades 1-3 when !color
 	uint32_t        quirks;      // SGBC_QUIRK_* for this cart
+};
+
+// The boot-logo cover, Super Game Boy Color's own. sgb.cpp holds the panel on
+// the picture the boot handed over and releases on the first frame that is
+// neither that picture nor a blank one - but it reads "blank" off BGP, which a
+// Color cart never touches, so its cover would never lift. Same rule, asked of
+// the color frame. The caller owns one of these and drives it.
+class SgbcBootCover
+{
+public:
+	void Reset() { ref_valid_ = false; }
+	// Should the cover stay up? Once per frame, past the boot ROM's handoff.
+	bool Hold(const Ppu &ppu);
+
+private:
+	bool    ref_valid_ = false;
+	uint8_t ref_[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 };
 
 // Paint the GB pane of a composed 256x224 SNES frame.

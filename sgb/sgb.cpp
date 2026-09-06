@@ -558,6 +558,7 @@ struct Emulator::Impl
 	} border_capture;
 
 	SgbcTrnHold sgbc_trn;   // see sgbc.h; armed only under SGBC
+	SgbcBootCover sgbc_cover;   // and its boot-logo cover
 
 	// BIOS-mode border crossfade. Counts frames since both halves of
 	// CHR_TRN + PCT_TRN landed; 0 = no custom border yet (BIOS default
@@ -909,6 +910,7 @@ void Emulator::Reset()
 	}
 
 	impl_->boot_logo_ref_valid = false;
+	impl_->sgbc_cover.Reset();
 
 	impl_->cart.mbc.sachen_locked = impl_->mem.boot_rom_enabled || !impl_->cart.sachen_runs_raw;
 }
@@ -2360,6 +2362,13 @@ void Emulator::UpdateBootLogoHold()
 {
 	// Nothing to hide, or the boot ROM is still scrolling it into place.
 	if (!impl_->ppu.boot_logo_hold || impl_->mem.boot_rom_enabled) return;
+
+	// Super Game Boy Color runs its own cover - SgbcBootCover in sgbc.cpp.
+	if (impl_->sgbc && impl_->ppu.cgb)
+	{
+		impl_->ppu.boot_logo_hold = impl_->sgbc_cover.Hold(impl_->ppu);
+		return;
+	}
 
 	const uint8_t *raw = impl_->ppu.raw_framebuffer;
 	bool    flat    = true;

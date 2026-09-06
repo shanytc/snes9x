@@ -2617,6 +2617,7 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	in.color = impl_->boot_handoff_captured && impl_->cgb_overlay_valid &&
 	           (impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
 	in.bgp    = impl_->ppu.bgp;
+	in.lcdc   = impl_->ppu.lcdc;
 	in.quirks = impl_->sgbc_quirks;
 
 	// The patched BIOS stashes the palette its keys displaced in its state

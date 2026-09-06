@@ -34,7 +34,8 @@ bool PatchSgbcBios(std::vector<uint8_t> &bios);
 static const uint32_t SGBC_QUIRK_BGP_BLANK = 1u << 0;
 //   HOLD_PAYLOAD: the cart leaves its *_TRN payload on the Color screen between
 //   the transfer and its first real draw, where a real SGB2 shows the DMG
-//   path's blank. Blank the pane while the CGB frame looks like payload (a
+//   path's blank. Blank the pane while the cart shows no picture of its own
+//   (BGP all shade 0, or LCD/BG off) and the CGB frame looks like payload (a
 //   tile grid: few colours, very dense horizontal colour changes).
 static const uint32_t SGBC_QUIRK_HOLD_PAYLOAD = 1u << 1;
 

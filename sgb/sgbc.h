@@ -25,6 +25,7 @@ struct SgbcPane
 	const uint16_t *color_fb;    // latched CGB frame, 160x144
 	bool            color;       // trust color_fb (cart has real CGB palettes)
 	uint8_t         bgp;         // the cart's BGP right now
+	uint8_t         lcdc;        // and its LCDC
 	uint16_t        fallback[3]; // shades 1-3 when !color
 	uint32_t        quirks;      // SGBC_QUIRK_* for this cart
 };

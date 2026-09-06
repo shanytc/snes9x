@@ -333,6 +333,12 @@ const SgbcPatch kPatches[] = {
 	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
 	    { 0x00018F, 2, { 0x18, 0x1E }, { 0x18, 0x00 } },
 	    { 0x000191, 2, { 0x3E, 0x04 }, { 0x3E, 0x85 } } } },
+	// manual: the cart skips CGB double speed when it detects an SGB, which
+	// starves its VBlank VRAM queue; switch after the border, via a bank-0 thunk
+	{ 0x2E79, "KASEKI REBORN2", "Kaseki Sousei Reborn II - Monster Digger (Japan)", 3,
+	  { { 0x000B38, 2, { 0xB8, 0x03 }, { 0xA0, 0x3F } },
+	    { 0x003FA0, 3, { 0x00, 0x00, 0x00 }, { 0xCD, 0xB8, 0x03 } },
+	    { 0x003FA3, 3, { 0x00, 0x00, 0x00 }, { 0xC3, 0xFC, 0x19 } } } },
 	// manual: an SGB flag bit gates the Color path; clear it, ungate the sender
 	{ 0x1789, "BEAST WARS", "Kettou Transformers Beast Wars - Beast Senshi Saikyou Ketteisen (Japan)", 2,
 	  { { 0x0001DE, 2, { 0xCB, 0xFE }, { 0xCB, 0xBE } },

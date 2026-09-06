@@ -476,6 +476,11 @@ const SgbcPatch kPatches[] = {
 	{ 0xBE50, "MAHJONGJOOHA56J\200", "Mahjong Joou (Japan)", 2,
 	  { { 0x001097, 1, { 0xC8 }, { 0x00 } },
 	    { 0x000BB9, 3, { 0xC2, 0xD3, 0x0B }, { 0x00, 0x00, 0x00 } } } },
+	// manual: the boot SGB init masks the screen but the unmask helper is gated
+	// on the console byte, so a Color console stays behind a black MASK_EN
+	{ 0xA0F8, "MAHJONG QUEST", "Mahjong Quest (Japan)", 2,
+	  { { 0x088009, 1, { 0xC0 }, { 0x00 } },
+	    { 0x088020, 1, { 0xC0 }, { 0x00 } } } },
 	// manual: the scene driver runs its SGB and its Color script on one shared
 	// state byte and deadlocks; drop the SGB flag once the border palettes are in
 	{ 0x45F9, "KISEKAEMONOA23J\200", "Majokko Mari-chan no Kisekae Monogatari (Japan) (Rev 1)", 5,

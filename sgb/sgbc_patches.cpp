@@ -244,14 +244,18 @@ const SgbcPatch kPatches[] = {
 	// at $DFFF; clear $C000-$DFFE instead, exactly as its own boot clear does
 	{ 0xD849, "GURU2 G", "Guruguru Garakutas (Japan)", 1,
 	  { { 0x02428C, 1, { 0xD0 }, { 0xC0 } } } },
-	// nop_skip_branch+nop_store
-	{ 0x7652, "HAMSTAR PRADISE\200", "Hamster Paradise (Japan)", 3,
+	// nop_skip_branch+nop_store, plus: the SGB senders ask $179E "is this an
+	// SGB?", which answers no for the Color type it now keeps - open that gate
+	{ 0x7652, "HAMSTAR PRADISE\200", "Hamster Paradise (Japan)", 4,
 	  { { 0x0015CD, 2, { 0x28, 0x13 }, { 0x00, 0x00 } },
 	    { 0x0015D3, 2, { 0x28, 0x0D }, { 0x00, 0x00 } },
-	    { 0x0015DF, 2, { 0xE0, 0x80 }, { 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0x8980, "TENTEN", "Hanasaka Tenshi Tenten-kun no Beat Breaker (Japan)", 1,
-	  { { 0x0001A9, 3, { 0xCA, 0x8D, 0x02 }, { 0x00, 0x00, 0x00 } } } },
+	    { 0x0015DF, 2, { 0xE0, 0x80 }, { 0x00, 0x00 } },
+	    { 0x0017A3, 2, { 0x28, 0x08 }, { 0x00, 0x00 } } } },
+	// nop_skip_branch, plus: the branch it kills is the Color arm's jump to the
+	// Color init, so end the SGB block there instead of at the common tail
+	{ 0x8980, "TENTEN", "Hanasaka Tenshi Tenten-kun no Beat Breaker (Japan)", 2,
+	  { { 0x0001A9, 3, { 0xCA, 0x8D, 0x02 }, { 0x00, 0x00, 0x00 } },
+	    { 0x00028B, 2, { 0x97, 0x02 }, { 0x8D, 0x02 } } } },
 	// force_jr
 	{ 0xE5F7, "H-MOON2 CGBBM2P\200", "Harvest Moon 2 GBC (Europe)", 1,
 	  { { 0x0001B1, 2, { 0x28, 0x39 }, { 0x18, 0x39 } } } },

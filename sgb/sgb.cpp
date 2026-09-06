@@ -2651,11 +2651,14 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 	// capture tilemap instead (the ping-pong drift artifact) — Ken Griffey
 	// Jr. MLB does its whole SGB setup LCD-off, unmasked, and showed the
 	// same stripe pattern as a desynced masked transfer.
-	// (Not under Super Game Boy Color — there OverlayCgbScreen owns the pane
-	// and already holds its own last-VBlank frame across LCD-off.)
+	// Under Super Game Boy Color OverlayCgbScreen owns the pane and holds its
+	// own last-VBlank frame across LCD-off - but only once the cart has CGB
+	// palettes; before that it repaints from the BIOS's live picture, which a
+	// transfer fills with payload (Hamster Paradise).
+	const bool cgb_holds_pane = impl_->CgbActive() &&
+		(impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
 	uint8_t mode_now = impl_->sgb_state.mask_mode;
-	if (mode_now == SGB_MASK_CANCEL && !(impl_->ppu.lcdc & 0x80) &&
-	    !impl_->CgbActive())
+	if (mode_now == SGB_MASK_CANCEL && !(impl_->ppu.lcdc & 0x80) && !cgb_holds_pane)
 		mode_now = SGB_MASK_FREEZE;
 	uint8_t mode = mode_now;
 

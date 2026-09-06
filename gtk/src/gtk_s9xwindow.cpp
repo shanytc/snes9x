@@ -2022,7 +2022,15 @@ void Snes9xWindow::update_accelerators()
     }
     accelerators.clear();
 
-    std::initializer_list<const char *[2]> pairs  =
+    /* A plain struct array rather than std::initializer_list<const char *[2]>:
+     * GCC 11 (Ubuntu 22.04, the AppImage baseline) cannot brace-initialize
+     * array elements inside an initializer_list. */
+    struct AcceleratorBinding
+    {
+        const char *accelerator;
+        const char *binding;
+    };
+    const AcceleratorBinding pairs[] =
     {
         { "fullscreen_item", "GTK_fullscreen" },
         { "reset_item", "SoftReset" },

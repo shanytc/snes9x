@@ -518,9 +518,13 @@ const SgbcPatch kPatches[] = {
 	// detect so the border loads without giving up the Color flag
 	{ 0xA0C5, "NHL 2000", "NHL 2000 (USA, Europe)", 1,
 	  { { 0x00026C, 1, { 0x5C }, { 0x36 } } } },
-	// force_jr
-	{ 0x5C51, "OHASTA Y&R", "Ohasuta Yama-chan & Raymond (Japan)", 1,
-	  { { 0x010450, 2, { 0x20, 0x09 }, { 0x18, 0x09 } } } },
+	// manual: one mode byte holds DMG/SGB/Color, so run the SGB block but stop
+	// the detect from downgrading it, and follow the unmask it now skips
+	{ 0x5C51, "OHASTA Y&R", "Ohasuta Yama-chan & Raymond (Japan)", 4,
+	  { { 0x001EB6, 2, { 0xFE, 0x01 }, { 0xFE, 0x11 } },
+	    { 0x01045A, 1, { 0xC9 }, { 0x00 } },
+	    { 0x010591, 3, { 0xEA, 0x4E, 0xCE }, { 0x00, 0x00, 0x00 } },
+	    { 0x0105E9, 1, { 0x34 }, { 0x00 } } } },
 	// manual: CGB boot through the SGB init block
 	{ 0xD7CB, "PACHISUROU", "Pachipachi Pachisurou - New Pulsar Hen (Japan)", 3,
 	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },

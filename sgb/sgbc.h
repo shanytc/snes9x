@@ -24,10 +24,10 @@ struct SgbcPane
 {
 	const uint16_t *color_fb;    // latched CGB frame, 160x144
 	bool            color;       // trust color_fb (cart has real CGB palettes)
+	bool            fb_valid;    // color_fb holds a real frame (no palettes yet)
 	uint8_t         bgp;         // the cart's BGP right now
-	uint8_t         lcdc;        // and its LCDC
-	uint8_t         fb_bgp;      // and the pair that drew color_fb, for when
-	uint8_t         fb_lcdc;     // the LCD is off and the pane is frozen on it
+	uint8_t         fb_bgp;      // and the pair that drew color_fb - what the
+	uint8_t         fb_lcdc;     // pane is showing, which the live pair is not
 	uint16_t        fallback[3]; // shades 1-3 when !color
 	uint32_t        quirks;      // SGBC_QUIRK_* for this cart
 };

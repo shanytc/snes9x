@@ -2620,8 +2620,8 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	// color_fb is the reset white: fall back to the shades the keys stand for.
 	in.color = impl_->boot_handoff_captured && impl_->cgb_overlay_valid &&
 	           (impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
-	in.bgp    = impl_->ppu.bgp;
-	in.lcdc   = impl_->ppu.lcdc;
+	in.fb_valid = impl_->boot_handoff_captured && impl_->cgb_overlay_valid;
+	in.bgp     = impl_->ppu.bgp;
 	in.fb_bgp  = impl_->cgb_overlay_bgp;
 	in.fb_lcdc = impl_->cgb_overlay_lcdc;
 	in.quirks = impl_->sgbc_quirks;

@@ -410,6 +410,54 @@ const SgbcPatch kPatches[] = {
 	// force_jr
 	{ 0x259C, "LODOSS WAR GB", "Lodoss-tou Senki - Eiyuu Kishiden GB (Japan)", 1,
 	  { { 0x00019B, 2, { 0x28, 0x39 }, { 0x18, 0x39 } } } },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x14B0, "LOPPI-HIR2", "Loppi Puzzle Magazine - Hirameku Puzzle Dai-2-gou (Japan) (Rev 1) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x32DD, "LOPPI-HIR2PB52J\200", "Loppi Puzzle Magazine - Hirameku Puzzle Dai-2-gou (Japan) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x6F9E, "LOPPI-HIR3", "Loppi Puzzle Magazine - Hirameku Puzzle Dai-3-gou (Japan) (Rev 1) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x8DCB, "LOPPI-HIR3PB53J\200", "Loppi Puzzle Magazine - Hirameku Puzzle Dai-3-gou (Japan) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0xFFFE, "LOPPI-HIR1", "Loppi Puzzle Magazine - Hirameku Puzzle Soukangou (Japan) (Rev 1) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x229A, "LOPPI-HIR1PB5IJ\200", "Loppi Puzzle Magazine - Hirameku Puzzle Soukangou (Japan) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x5106, "LOPPI-KAN2", "Loppi Puzzle Magazine - Kangaeru Puzzle Dai-2-gou (Japan) (Rev 1) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x7BC0, "LOPPI-KAN2PB62J\200", "Loppi Puzzle Magazine - Kangaeru Puzzle Dai-2-gou (Japan) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x6D45, "LOPPI-KAN3", "Loppi Puzzle Magazine - Kangaeru Puzzle Dai-3-gou (Japan) (Rev 1) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x7F8F, "LOPPI-KAN3PB63J\200", "Loppi Puzzle Magazine - Kangaeru Puzzle Dai-3-gou (Japan) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x6DA4, "LOPPI-KAN1", "Loppi Puzzle Magazine - Kangaeru Puzzle Soukangou (Japan) (Rev 1) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0x97EA, "LOPPI-KAN1PB6IJ\200", "Loppi Puzzle Magazine - Kangaeru Puzzle Soukangou (Japan) (NP)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
 	// nop_skip_branch+nop_store
 	{ 0xD6BB, "NUMBERPLACEARCJ\200", "Luca no Puzzle de Daibouken! (Japan)", 3,
 	  { { 0x000F6D, 2, { 0x28, 0x13 }, { 0x00, 0x00 } },
@@ -425,6 +473,22 @@ const SgbcPatch kPatches[] = {
 	{ 0xBE50, "MAHJONGJOOHA56J\200", "Mahjong Joou (Japan)", 2,
 	  { { 0x001097, 1, { 0xC8 }, { 0x00 } },
 	    { 0x000BB9, 3, { 0xC2, 0xD3, 0x0B }, { 0x00, 0x00, 0x00 } } } },
+	// manual: the scene driver runs its SGB and its Color script on one shared
+	// state byte and deadlocks; drop the SGB flag once the border palettes are in
+	{ 0x45F9, "KISEKAEMONOA23J\200", "Majokko Mari-chan no Kisekae Monogatari (Japan) (Rev 1)", 5,
+	  { { 0x0002F6, 3, { 0xCD, 0xF6, 0x0C }, { 0xC3, 0x10, 0x3A } },
+	    { 0x003A10, 3, { 0x00, 0x00, 0x00 }, { 0xCD, 0xF6, 0x0C } },
+	    { 0x003A13, 3, { 0x00, 0x00, 0x00 }, { 0xAF, 0xEA, 0x00 } },
+	    { 0x003A16, 3, { 0x00, 0x00, 0x00 }, { 0xDC, 0xC3, 0xF9 } },
+	    { 0x003A19, 1, { 0x00 }, { 0x02 } } } },
+	// manual: the scene driver runs its SGB and its Color script on one shared
+	// state byte and deadlocks; drop the SGB flag once the border palettes are in
+	{ 0xD3E8, "KISEKAEMONOA23J\200", "Majokko Mari-chan no Kisekae Monogatari (Japan)", 5,
+	  { { 0x0002ED, 3, { 0xCD, 0xED, 0x0C }, { 0xC3, 0x10, 0x3A } },
+	    { 0x003A10, 3, { 0x00, 0x00, 0x00 }, { 0xCD, 0xED, 0x0C } },
+	    { 0x003A13, 3, { 0x00, 0x00, 0x00 }, { 0xAF, 0xEA, 0x00 } },
+	    { 0x003A16, 3, { 0x00, 0x00, 0x00 }, { 0xDC, 0xC3, 0xF0 } },
+	    { 0x003A19, 1, { 0x00 }, { 0x02 } } } },
 	// manual: SGB detect wins over the Color branch; keep the type
 	{ 0xE932, "ATELIERMARIA8MJ\200", "Marie no Atelier GB (Japan)", 2,
 	  { { 0x000EB0, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },

@@ -757,9 +757,10 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0x24C7, "CGBWARIOLAND2", "Wario Land II (USA, Europe)", 1,
 	  { { 0x00025D, 3, { 0xC2, 0x55, 0x03 }, { 0x00, 0x00, 0x00 } } } },
-	// force_jr
+	// manual: the console test's answer overwrites the console byte, so widen
+	// the border gate to accept a Color console instead of forcing the SGB code
 	{ 0x439C, "WETRIX GB", "Wetrix GB (Japan)", 1,
-	  { { 0x000BA6, 2, { 0x20, 0x03 }, { 0x18, 0x03 } } } },
+	  { { 0x0001B5, 2, { 0xFE, 0x02 }, { 0xFE, 0x01 } } } },
 	// nop_early_ret
 	{ 0x9874, "ZELDA", "Zelda no Densetsu - Yume o Miru Shima DX (Japan) (Beta) (1998-11-09)", 1,
 	  { { 0x0F2A25, 1, { 0xC0 }, { 0x00 } } } },

@@ -458,11 +458,14 @@ const SgbcPatch kPatches[] = {
 	// clear - a DMG blanks the BG on that, a Color does not
 	{ 0x97EA, "LOPPI-KAN1PB6IJ\200", "Loppi Puzzle Magazine - Kangaeru Puzzle Soukangou (Japan) (NP)", 0, {},
 	  SGBC_QUIRK_HOLD_PAYLOAD },
-	// nop_skip_branch+nop_store
-	{ 0xD6BB, "NUMBERPLACEARCJ\200", "Luca no Puzzle de Daibouken! (Japan)", 3,
-	  { { 0x000F6D, 2, { 0x28, 0x13 }, { 0x00, 0x00 } },
-	    { 0x000F73, 2, { 0x28, 0x0D }, { 0x00, 0x00 } },
-	    { 0x000F7F, 2, { 0xE0, 0x80 }, { 0x00, 0x00 } } } },
+	// manual: run the SGB init and both border loaders on a Color console, and
+	// keep $FF80 at $11 so everything else still picks the Color assets
+	{ 0xD6BB, "NUMBERPLACEARCJ\200", "Luca no Puzzle de Daibouken! (Japan)", 5,
+	  { { 0x000F73, 2, { 0x28, 0x0D }, { 0x00, 0x00 } },
+	    { 0x000F7F, 2, { 0xE0, 0x80 }, { 0x00, 0x00 } },
+	    { 0x000FBA, 1, { 0xD0 }, { 0x00 } },
+	    { 0x000FFC, 1, { 0xD0 }, { 0x00 } },
+	    { 0x00103F, 1, { 0xD0 }, { 0x00 } } } },
 	// manual: Color init falls into the SGB detect
 	{ 0x3B5C, "MADDEN 2000", "Madden NFL 2000 (USA, Europe) (Beta)", 1,
 	  { { 0x00018F, 3, { 0xC3, 0xC4, 0x01 }, { 0xC3, 0xAD, 0x01 } } } },

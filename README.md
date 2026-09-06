@@ -77,6 +77,17 @@ cleared: `xattr -dr com.apple.quarantine <path>`.
 
 See [qt/docs/README-macos.md](qt/docs/README-macos.md) for details.
 
+## Nightly builds
+
+[![Nightly builds](https://github.com/shanytc/snes9x/actions/workflows/nightly.yml/badge.svg?branch=master)](https://github.com/shanytc/snes9x/actions/workflows/nightly.yml)
+
+Every night that `master` has new commits, GitHub Actions builds Windows
+(32-bit and 64-bit), Linux (Qt and GTK AppImages, x86_64 and x86) and macOS
+(Apple Silicon) and publishes them as the rolling
+[nightly pre-release](https://github.com/shanytc/snes9x/releases/tag/nightly).
+These are untested snapshots and may be broken. For stable builds use the
+[latest release](https://github.com/shanytc/snes9x/releases/latest).
+
 ## Upstream builds (plain snes9x, not SuperSnes9x)
 
 Official upstream snes9x builds, for reference:

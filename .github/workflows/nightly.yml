@@ -1,0 +1,176 @@
+name: Nightly builds
+
+# Builds master every night there are new commits and publishes the results
+# as the rolling "nightly" pre-release:
+#   https://github.com/shanytc/snes9x/releases/tag/nightly
+#
+# Scheduled runs only ever use the default branch (master). The manual
+# "Run workflow" button (workflow_dispatch) always builds, even with no new
+# commits.
+
+on:
+  schedule:
+    - cron: '17 3 * * *'   # 03:17 UTC daily (off the busy top-of-hour slot)
+  workflow_dispatch:
+
+permissions:
+  contents: write           # publish job creates the nightly pre-release
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+env:
+  # Submodules the Linux and macOS builds need. Skips the win32-only ones
+  # (libpng from SourceForge, the pinned SDL3 fork) that are slow to clone.
+  UNIX_SUBMODULES: external/cubeb external/glslang external/SPIRV-Cross external/rcheevos external/vulkan-headers
+
+jobs:
+  changed:
+    name: New commits since yesterday?
+    runs-on: ubuntu-latest
+    outputs:
+      yes: ${{ steps.check.outputs.yes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || \
+             [ -n "$(git log -1 --since='24 hours ago' --format=%h)" ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No commits in the last 24 hours, skipping the build."
+            echo "yes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  win32:
+    name: Windows ${{ matrix.arch }}
+    needs: changed
+    if: needs.changed.outputs.yes == 'true'
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: Win32, arch: win32,     exe: super-snes9x.exe }
+          - { platform: x64,   arch: win32-x64, exe: super-snes9x-x64.exe }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build
+        run: msbuild win32\snes9xw.sln /m /p:Configuration="Release Unicode" /p:Platform=${{ matrix.platform }}
+      - name: Package
+        shell: cmd
+        run: |
+          mkdir pkg
+          copy win32\${{ matrix.exe }} pkg
+          copy docs\changes.txt pkg
+          copy LICENSE pkg
+          copy data\cheats.bml pkg
+          copy win32\docs\faqs-windows.txt pkg
+          copy win32\docs\readme-windows.txt pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: super-snes9x-${{ matrix.arch }}
+          path: pkg
+          retention-days: 7
+
+  linux:
+    name: Linux ${{ matrix.name }}
+    needs: changed
+    if: needs.changed.outputs.yes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: qt-x86_64,  script: qt/scripts/makeappimage-docker.sh,      out: qt/build-appimage/*.AppImage }
+          - { name: qt-x86,     script: qt/scripts/makeappimage-x86-docker.sh,  out: qt/build-appimage-x86/*.AppImage }
+          - { name: gtk-x86_64, script: gtk/scripts/makeappimage-docker.sh,     out: gtk/build-appimage/*.AppImage }
+          - { name: gtk-x86,    script: gtk/scripts/makeappimage-x86-docker.sh, out: gtk/build-appimage-x86/*.AppImage }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch submodules
+        run: git submodule update --init --recursive --depth 1 $UNIX_SUBMODULES
+      - name: Build AppImage (in Docker)
+        run: ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: super-snes9x-${{ matrix.name }}
+          path: ${{ matrix.out }}
+          retention-days: 7
+
+  macos:
+    name: macOS arm64
+    needs: changed
+    if: needs.changed.outputs.yes == 'true'
+    runs-on: macos-latest   # Apple Silicon
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch submodules
+        run: git submodule update --init --recursive --depth 1 $UNIX_SUBMODULES
+      - name: Install dependencies
+        run: brew install cmake ninja pkg-config qt libpng
+      - name: Build
+        run: |
+          export PKG_CONFIG_PATH="$(brew --prefix libpng)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          cmake -S qt -B qt/build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          cmake --build qt/build-macos -j"$(sysctl -n hw.ncpu)"
+      - name: Package .app
+        run: |
+          qt/scripts/makeapp-macos.sh
+          ditto -c -k --keepParent qt/build-macos/super-snes9x-qt.app super-snes9x-qt-macos-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: super-snes9x-qt-macos-arm64
+          path: super-snes9x-qt-macos-arm64.zip
+          retention-days: 7
+
+  publish:
+    name: Publish nightly pre-release
+    needs: [win32, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Collect files
+        run: |
+          shopt -s nullglob
+          mkdir out
+          # Windows artifacts are folders: zip them.
+          for d in dist/super-snes9x-win32*; do
+            (cd "$d" && zip -qr "../../out/$(basename "$d").zip" .)
+          done
+          # AppImages and the macOS zip are single files already.
+          for f in dist/*/*.AppImage dist/*/*.zip; do
+            mv "$f" "out/$(basename "$f")"
+          done
+          # Mark every file as a nightly so it cannot be mistaken for a release.
+          for f in out/super-snes9x-*; do
+            mv "$f" "${f/super-snes9x-/super-snes9x-nightly-}"
+          done
+          ls -l out
+          [ -n "$(ls out)" ] || { echo "nothing to publish"; exit 1; }
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --cleanup-tag -y --repo "$GITHUB_REPOSITORY" || true
+          gh release create nightly \
+             --repo "$GITHUB_REPOSITORY" \
+             --target "$GITHUB_SHA" \
+             --prerelease --latest=false \
+             --title "Nightly $(date -u +%F) (${GITHUB_SHA::8})" \
+             --notes "Automated build of \`master\` at ${GITHUB_SHA}.
+
+          These are untested snapshots and may be broken. For stable builds use the [latest release](https://github.com/${GITHUB_REPOSITORY}/releases/latest).
+
+          Windows: unzip and run. Linux: \`chmod +x\` the AppImage. macOS: the app is self-signed, so after copying it run \`xattr -dr com.apple.quarantine super-snes9x-qt.app\`." \
+             out/*

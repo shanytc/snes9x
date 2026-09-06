@@ -530,9 +530,11 @@ const SgbcPatch kPatches[] = {
 	  { { 0x000172, 2, { 0x28, 0x1D }, { 0x28, 0x08 } },
 	    { 0x00018F, 2, { 0x18, 0x1E }, { 0x18, 0x00 } },
 	    { 0x000191, 2, { 0x3E, 0x04 }, { 0x3E, 0x85 } } } },
-	// nop_skip_branch
-	{ 0x99CA, "PHANTOMZONABKZJ\200", "Phantom Zona (Japan)", 1,
-	  { { 0x000180, 2, { 0x28, 0x17 }, { 0x00, 0x00 } } } },
+	// manual: run the SGB block on a Color console too, and drop the XOR that
+	// would clear the Color flag on the way out of it
+	{ 0x99CA, "PHANTOMZONABKZJ\200", "Phantom Zona (Japan)", 2,
+	  { { 0x000180, 2, { 0x28, 0x17 }, { 0x00, 0x00 } },
+	    { 0x000194, 1, { 0xAF }, { 0x00 } } } },
 	// manual: the Color branch skips the SGB block; enter it where they rejoin,
 	// keep the Color type, and take the two border gates that test the SGB one
 	{ 0x41CB, "POKEBOM USA", "Pocket Bomberman (USA, Europe)", 4,

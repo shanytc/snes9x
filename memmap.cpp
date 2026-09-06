@@ -1951,20 +1951,14 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
             from += s_sgbc_bios_patched ? " + built-in patch"
                                         : " (unpatched: dump not recognised)";
         if (s_sgb_user_boot) from += " + boot ROM";
-        // The per-game patch that made a dual cart run its SGB init too.
+        // The per-game patch that made a dual cart run its SGB init too, and
+        // the compatibility edit for a cart whose SGB path stops under this
+        // BIOS. Both rows are named for their game, which the banner has
+        // already said, so list what was applied instead.
         const char *game_patch = sgbc ? S9xSGBSgbcPatchName() : NULL;
-        if (game_patch && *game_patch)
-        {
-            from += " + ";
-            from += game_patch;
-        }
-        // The compatibility edit for a cart whose SGB path stops under this BIOS.
+        if (game_patch && *game_patch) from += " + cart patch";
         const char *compat = S9xSGBSgbPatchName();
-        if (compat && *compat)
-        {
-            from += " + ";
-            from += compat;
-        }
+        if (compat && *compat) from += " + SGB compat patch";
     }
     else if (bios_mode == 3 || bios_mode == 4)
         from = BaseName(Settings.GB_BIOSPath);

@@ -78,15 +78,21 @@ const SgbcPatch kPatches[] = {
 	// retarget_jr_to_sgb_entry
 	{ 0x20D8, "B MASTER", "Blaster Master - Enemy Below (USA, Europe)", 1,
 	  { { 0x00016E, 2, { 0x18, 0x1D }, { 0x18, 0x00 } } } },
-	// nop_skip_branch
-	{ 0xAC39, "BOMBERQUESTAQVP\200", "Bomberman Quest (Europe) (En,Fr,De)", 1,
-	  { { 0x0001BE, 3, { 0xCA, 0x72, 0x02 }, { 0x00, 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0xE735, "BOMBERMAN QUEST\200", "Bomberman Quest (Japan)", 1,
-	  { { 0x0001C3, 3, { 0xCA, 0x77, 0x02 }, { 0x00, 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0xEAA7, "BOMBERQUESTAVQE\200", "Bomberman Quest (USA)", 1,
-	  { { 0x0001C3, 3, { 0xCA, 0x77, 0x02 }, { 0x00, 0x00, 0x00 } } } },
+	// manual: the boot fork, then fall the Color arm of the mode jump table
+	// through into the SGB arm so the border routine runs as well
+	{ 0xAC39, "BOMBERQUESTAQVP\200", "Bomberman Quest (Europe) (En,Fr,De)", 2,
+	  { { 0x0001BE, 3, { 0xCA, 0x72, 0x02 }, { 0x00, 0x00, 0x00 } },
+	    { 0x00188E, 1, { 0x08 }, { 0x00 } } } },
+	// manual: the boot fork, then fall the Color arm of the mode jump table
+	// through into the SGB arm so the border routine runs as well
+	{ 0xE735, "BOMBERMAN QUEST\200", "Bomberman Quest (Japan)", 2,
+	  { { 0x0001C3, 3, { 0xCA, 0x77, 0x02 }, { 0x00, 0x00, 0x00 } },
+	    { 0x001890, 1, { 0x08 }, { 0x00 } } } },
+	// manual: the boot fork, then fall the Color arm of the mode jump table
+	// through into the SGB arm so the border routine runs as well
+	{ 0xEAA7, "BOMBERQUESTAVQE\200", "Bomberman Quest (USA)", 2,
+	  { { 0x0001C3, 3, { 0xCA, 0x77, 0x02 }, { 0x00, 0x00, 0x00 } },
+	    { 0x001883, 1, { 0x08 }, { 0x00 } } } },
 	// manual: the Color branch skips the SGB block; enter it where they rejoin
 	{ 0xB84C, "BUGS LIFE", "Bug's Life, A (Europe)", 1,
 	  { { 0x0002AF, 3, { 0x18, 0x65, 0xCD }, { 0xC3, 0xF9, 0x02 } } } },

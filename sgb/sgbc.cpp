@@ -66,11 +66,16 @@ void SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 {
 
 	// Only while the cart is showing no picture of its own - BGP mapping every
-	// index to shade 0, or LCD/BG off - because the payload is what that blank
+	// index to shade 0, or the BG off - because the payload is what that blank
 	// was hiding. Content alone is not enough: a real picture can look like a
 	// tile grid too (a shougi board matched for the whole game).
+	// With the LCD off the pane is frozen on an older frame, so judge it by the
+	// registers that drew that frame: a cart can blank, transfer, then draw a
+	// real picture and turn the LCD off over it (Katou Hifumi's board).
+	const uint8_t fb_bgp  = (in.lcdc & 0x80) ? in.bgp  : in.fb_bgp;
+	const uint8_t fb_lcdc = (in.lcdc & 0x80) ? in.lcdc : in.fb_lcdc;
 	const bool hold = (in.quirks & SGBC_QUIRK_HOLD_PAYLOAD) && in.color &&
-	                  (in.bgp == 0 || (in.lcdc & 0x81) != 0x81) &&
+	                  (fb_bgp == 0 || !(fb_lcdc & 0x01)) &&
 	                  LooksLikePayload(in.color_fb);
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
 	if (!dest || width > SNES_WIDTH ||

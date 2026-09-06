@@ -288,6 +288,8 @@ struct Emulator::Impl
 	// GB's VBlank.
 	uint16_t    cgb_overlay_fb[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 	bool        cgb_overlay_valid = false;
+	uint8_t     cgb_overlay_bgp  = 0;   // BGP/LCDC as of that snapshot
+	uint8_t     cgb_overlay_lcdc = 0;
 	uint8_t     cgb_overlay_ly = 0;
 
 	// BIOS-mode MASK_EN: bios_mask_pane is a ROLLING copy of the last
@@ -1936,6 +1938,8 @@ void Emulator::RunCycles(int32_t tcycles)
 			std::memcpy(impl_->cgb_overlay_fb, impl_->ppu.color_fb,
 			            sizeof impl_->cgb_overlay_fb);
 			impl_->cgb_overlay_valid = true;
+			impl_->cgb_overlay_bgp   = impl_->ppu.bgp;
+			impl_->cgb_overlay_lcdc  = impl_->ppu.lcdc;
 		}
 		impl_->cgb_overlay_ly = ly;
 	}
@@ -2618,6 +2622,8 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	           (impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
 	in.bgp    = impl_->ppu.bgp;
 	in.lcdc   = impl_->ppu.lcdc;
+	in.fb_bgp  = impl_->cgb_overlay_bgp;
+	in.fb_lcdc = impl_->cgb_overlay_lcdc;
 	in.quirks = impl_->sgbc_quirks;
 
 	// The patched BIOS stashes the palette its keys displaced in its state

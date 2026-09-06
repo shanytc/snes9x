@@ -339,6 +339,9 @@ const SgbcPatch kPatches[] = {
 	  { { 0x000B38, 2, { 0xB8, 0x03 }, { 0xA0, 0x3F } },
 	    { 0x003FA0, 3, { 0x00, 0x00, 0x00 }, { 0xCD, 0xB8, 0x03 } },
 	    { 0x003FA3, 3, { 0x00, 0x00, 0x00 }, { 0xC3, 0xFC, 0x19 } } } },
+	// display quirks only: *_TRN payload stays on the Color screen after the transfer
+	{ 0x9081, "KATOU123   AKHJ\200", "Katou Hifumi Kudan - Shougi Kyoushitsu (Japan)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
 	// manual: an SGB flag bit gates the Color path; clear it, ungate the sender
 	{ 0x1789, "BEAST WARS", "Kettou Transformers Beast Wars - Beast Senshi Saikyou Ketteisen (Japan)", 2,
 	  { { 0x0001DE, 2, { 0xCB, 0xFE }, { 0xCB, 0xBE } },

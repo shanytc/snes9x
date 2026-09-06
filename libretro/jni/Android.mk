@@ -4,10 +4,11 @@ CORE_DIR := $(LOCAL_PATH)/../..
 
 include $(CORE_DIR)/libretro/Makefile.common
 
-# MINIZIP_FOPEN_NO_64: bionic only declares fopen64/fseeko64/ftello64 from
-# API 24, and APP_PLATFORM is android-21. minizip's own switch maps them to
-# the plain fopen/fseeko/ftello, which is plenty for ROM-sized archives.
-COREFLAGS := -DANDROID -D__LIBRETRO__ -DHAVE_STRINGS_H -DRIGHTSHIFT_IS_SAR $(INCFLAGS) $(UNZIP_DEFINES) -DMINIZIP_FOPEN_NO_64
+# USE_FILE32API: bionic only declares fopen64/fseeko64/ftello64 -- and even
+# fseeko/ftello -- from API 24, while APP_PLATFORM is android-21. minizip's
+# own switch maps its file layer to fopen/fseek/ftell, which exist on every
+# API level and are plenty for ROM-sized archives.
+COREFLAGS := -DANDROID -D__LIBRETRO__ -DHAVE_STRINGS_H -DRIGHTSHIFT_IS_SAR $(INCFLAGS) $(UNZIP_DEFINES) -DUSE_FILE32API
 
 GIT_VERSION := " $(shell git rev-parse --short HEAD || echo unknown)"
 ifneq ($(GIT_VERSION)," unknown")

@@ -559,10 +559,15 @@ const SgbcPatch kPatches[] = {
 	// manual: run the Color init after the SGB block
 	{ 0xEFB7, "POCKET DENSYA2", "Pocket Densha 2 (Japan)", 1,
 	  { { 0x0002DC, 3, { 0xC3, 0x54, 0x03 }, { 0xC3, 0xF7, 0x01 } } } },
-	// manual: detect, console stays CGB
-	{ 0xF8B7, "POCKET KINGAV5J\200", "Pocket King (Japan)", 2,
+	// manual: detect with one more frame before it polls (the patched BIOS
+	// answers MLT_REQ a frame late), console stays CGB, and the SGB block -
+	// the only mask cancel there is - runs for a Color console too
+	{ 0xF8B7, "POCKET KINGAV5J\200", "Pocket King (Japan)", 5,
 	  { { 0x0001C1, 2, { 0x20, 0x04 }, { 0x18, 0x04 } },
-	    { 0x0001D5, 2, { 0x3E, 0x01 }, { 0x3E, 0x02 } } } },
+	    { 0x0001D5, 2, { 0x3E, 0x01 }, { 0x3E, 0x02 } },
+	    { 0x036C10, 1, { 0x04 }, { 0x08 } },
+	    { 0x036CDE, 1, { 0x01 }, { 0x02 } },
+	    { 0x036CE5, 1, { 0xC8 }, { 0x00 } } } },
 	// nop_early_ret
 	{ 0x1D34, "POKEMON_SLVAAXJ\200", "Pocket Monsters Gin (Japan) (Rev 1)", 1,
 	  { { 0x009C59, 1, { 0xC0 }, { 0x00 } } } },
@@ -605,10 +610,16 @@ const SgbcPatch kPatches[] = {
 	// nop_early_ret
 	{ 0xCE0C, "POKEMON_GLDAAUI\200", "Pokemon - Versione Oro (Italy)", 1,
 	  { { 0x009CC3, 1, { 0xC0 }, { 0x00 } } } },
-	// nop_skip_branch+imm_pre_fork
-	{ 0xD526, "POKEMON CARD GB\200", "Pokemon Card GB (Japan)", 2,
+	// manual: detect (no answer stays Color), console stays CGB, and the SGB
+	// bank's four border gates take a Color console
+	{ 0xD526, "POKEMON CARD GB\200", "Pokemon Card GB (Japan)", 7,
 	  { { 0x000337, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
-	    { 0x000343, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
+	    { 0x00033D, 1, { 0x00 }, { 0x02 } },
+	    { 0x000343, 2, { 0x06, 0x01 }, { 0x06, 0x02 } },
+	    { 0x070004, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x07001C, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x070073, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x070086, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } } } },
 	// nop_early_ret
 	{ 0x365F, "POKEMON_GOLD_US\200", "Pokemon Gold (Taiwan) (En) (Unl)", 1,
 	  { { 0x009C59, 1, { 0xC0 }, { 0x00 } } } },
@@ -621,30 +632,52 @@ const SgbcPatch kPatches[] = {
 	// manual: CGB flag kept, SGB detect taken
 	{ 0xDA60, "POKEPINBALLVPHE\200", "Pokemon Pinball (USA, Australia) (Rumble Version)", 1,
 	  { { 0x00020A, 2, { 0x20, 0x16 }, { 0x00, 0x00 } } } },
-	// manual: detect, console stays CGB
-	{ 0xB440, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Es,It) (Rev 1)", 3,
+	// manual: detect, console stays CGB, SGB bank's border gates widened
+	{ 0xB440, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Es,It) (Rev 1)", 7,
 	  { { 0x00033E, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
 	    { 0x000343, 2, { 0x06, 0x00 }, { 0x06, 0x02 } },
-	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
-	// manual: detect, console stays CGB
-	{ 0xC869, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Es,It)", 3,
+	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } },
+	    { 0x038004, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x03801C, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038073, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038086, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } } } },
+	// manual: detect, console stays CGB, SGB bank's border gates widened
+	{ 0xC869, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Es,It)", 7,
 	  { { 0x00033E, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
 	    { 0x000343, 2, { 0x06, 0x00 }, { 0x06, 0x02 } },
-	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
-	// manual: detect, console stays CGB
-	{ 0x49CD, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Fr,De) (Rev 1)", 3,
+	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } },
+	    { 0x038004, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x03801C, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038073, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038086, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } } } },
+	// manual: detect, console stays CGB, SGB bank's border gates widened
+	{ 0x49CD, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Fr,De) (Rev 1)", 7,
 	  { { 0x00033E, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
 	    { 0x000343, 2, { 0x06, 0x00 }, { 0x06, 0x02 } },
-	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
-	// manual: detect, console stays CGB
-	{ 0x5E22, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Fr,De)", 3,
+	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } },
+	    { 0x038004, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x03801C, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038073, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038086, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } } } },
+	// manual: detect, console stays CGB, SGB bank's border gates widened
+	{ 0x5E22, "POKECARD", "Pokemon Trading Card Game (Europe) (En,Fr,De)", 7,
 	  { { 0x00033E, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
 	    { 0x000343, 2, { 0x06, 0x00 }, { 0x06, 0x02 } },
-	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
-	// nop_skip_branch+imm_pre_fork
-	{ 0x26A6, "POKECARD", "Pokemon Trading Card Game (USA, Australia)", 2,
+	    { 0x00034A, 2, { 0x06, 0x01 }, { 0x06, 0x02 } },
+	    { 0x038004, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x03801C, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038073, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x038086, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } } } },
+	// manual: detect (no answer stays Color), console stays CGB, and the SGB
+	// bank's four border gates (CP $01 / RET NZ) take a Color console
+	{ 0x26A6, "POKECARD", "Pokemon Trading Card Game (USA, Australia)", 7,
 	  { { 0x00034D, 2, { 0x28, 0x0C }, { 0x00, 0x00 } },
-	    { 0x000359, 2, { 0x06, 0x01 }, { 0x06, 0x02 } } } },
+	    { 0x000353, 1, { 0x00 }, { 0x02 } },
+	    { 0x000359, 2, { 0x06, 0x01 }, { 0x06, 0x02 } },
+	    { 0x070004, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x07001C, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x070073, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } },
+	    { 0x070086, 2, { 0x01, 0xC0 }, { 0x00, 0xC8 } } } },
 	// manual: SGB detect called ahead of the CGB init, type 5 (CGB|SGB1)
 	{ 0xB727, "PP SUCSESS", "Power Pro Kun Pocket (Japan) (Rev 1)", 2,
 	  { { 0x05AB0E, 1, { 0xC2 }, { 0xCD } },
@@ -662,18 +695,26 @@ const SgbcPatch kPatches[] = {
 	  { { 0x0001FF, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
 	    { 0x0011B1, 1, { 0x01 }, { 0x11 } },
 	    { 0x001242, 1, { 0x01 }, { 0x11 } } } },
-	// nop_skip_branch
-	{ 0x48E6, "PUCHI CARATAIQP\200", "Puchi Carat (Europe)", 1,
-	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0xF6BD, "PUCHI CARATACUJ\200", "Puchi Carat (Japan)", 1,
-	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0x7926, "PUCHI CARATAIQE\200", "Puchi Carat (USA) (Proto 1)", 1,
-	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0x1CF8, "PUCHI CARATAIQE\200", "Puchi Carat (USA) (Proto 2)", 1,
-	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } } } },
+	// manual: a Color console runs the SGB init, then its own init after it
+	// (the Color flag and double speed the old row skipped)
+	{ 0x48E6, "PUCHI CARATAIQP\200", "Puchi Carat (Europe)", 2,
+	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } },
+	    { 0x004121, 1, { 0x3A }, { 0x23 } } } },
+	// manual: a Color console runs the SGB init, then its own init after it
+	// (the Color flag and double speed the old row skipped)
+	{ 0xF6BD, "PUCHI CARATACUJ\200", "Puchi Carat (Japan)", 2,
+	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } },
+	    { 0x004121, 1, { 0x3A }, { 0x23 } } } },
+	// manual: a Color console runs the SGB init, then its own init after it
+	// (the Color flag and double speed the old row skipped)
+	{ 0x7926, "PUCHI CARATAIQE\200", "Puchi Carat (USA) (Proto 1)", 2,
+	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } },
+	    { 0x004121, 1, { 0x3A }, { 0x23 } } } },
+	// manual: a Color console runs the SGB init, then its own init after it
+	// (the Color flag and double speed the old row skipped)
+	{ 0x1CF8, "PUCHI CARATAIQE\200", "Puchi Carat (USA) (Proto 2)", 2,
+	  { { 0x00404D, 3, { 0xCA, 0x23, 0x41 }, { 0x00, 0x00, 0x00 } },
+	    { 0x004121, 1, { 0x3A }, { 0x23 } } } },
 	// nop_skip_branch
 	{ 0xDCBF, "QUARTET", "Quartet (World) (Aftermarket) (Unl)", 1,
 	  { { 0x0044A1, 2, { 0x20, 0x28 }, { 0x00, 0x00 } } } },

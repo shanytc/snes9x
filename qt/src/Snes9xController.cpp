@@ -10,6 +10,7 @@ namespace fs = std::filesystem;
 #include "memmap.h"
 #include "apu/apu.h"
 #include "sgb/sgb.h"
+#include "biosmanager.h"
 #include "gfx.h"
 #include "ppu.h"
 #include "snapshot.h"
@@ -89,6 +90,8 @@ void Snes9xController::init()
     Settings.ShowOverscan = false;
     Settings.InitialInfoStringTimeout = 120;
     Settings.SGB_BIOSPreference = 2;
+    Settings.GB_BIOSEnabled = true;
+    Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
     /* Embed a screenshot in each snapshot so the save/load-with-preview
      * dialog has something to show, as win32 does by default. */
     Settings.SnapshotScreenshots = true;
@@ -219,6 +222,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.DynamicRateControl = config->dynamic_rate_control;
 
     Settings.DynamicRateLimit = config->dynamic_rate_limit * 1000;
+    Settings.GBSuppressNRxGlitches = config->suppress_nrx_glitches;
 
     Settings.SuperFXClockMultiplier  = config->superfx_clock_multiplier;
 
@@ -228,11 +232,18 @@ void Snes9xController::updateSettings(EmuConfig *config)
     // but never applied here.
     Settings.SeparateEchoBuffer = config->enable_shadow_buffer;
 
-    // SGB BIOS mode preference for GB/GBC ROMs (0=No BIOS, 1=SGB1, 2=SGB2). The
-    // BIOS menu also writes this back into config so the choice persists.
-    Settings.SGB_BIOSPreference = (config->sgb_bios_preference < 0 || config->sgb_bios_preference > 2)
+    // Which SGB BIOS the Automatic consoles prefer (1=SGB1, 2=SGB2). 0 was the
+    // old "No BIOS" entry, which the menu can no longer set.
+    Settings.SGB_BIOSPreference = (config->sgb_bios_preference < 1 || config->sgb_bios_preference > 2)
                                       ? 2
                                       : (uint8)config->sgb_bios_preference;
+
+    // GB/GBC boot ROM; inert until the user supplies dmg_boot.bin/cgb_boot.bin.
+    Settings.GB_BIOSEnabled = config->gb_bios_enabled;
+    Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(config->gb_boot_policy);
+
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+        S9xSetBiosPath(i, config->bios_paths[i].c_str());
 
     if (rewind_buffer_size != config->rewind_buffer_size && active)
     {
@@ -1110,6 +1121,9 @@ bool Snes9xController::isAbnormalSpeed()
 void Snes9xController::reset()
 {
     S9xReset();
+    // Only a power-cycle the user asked for: S9xReset also runs inside every
+    // non-fast state load, soft reset included.
+    S9xAnnounceGBBios();
 }
 
 void Snes9xController::softReset()

@@ -13,6 +13,8 @@
 #include "gtk_s9x.h"
 #include "gtk_display.h"
 #include "conffile.h"
+#include "memmap.h"
+#include "biosmanager.h"
 #include "cheats.h"
 #include "apu/apu.h"
 #include "netplay.h"
@@ -220,6 +222,9 @@ int Snes9xConfig::load_defaults()
     Settings.DisplayPressedKeys = false;
     Settings.InitialInfoStringTimeout   =  120;
     Settings.SGB_BIOSPreference = 2;
+    Settings.GB_BIOSEnabled = TRUE;
+    Settings.GBSuppressNRxGlitches = TRUE;
+    Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
     
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
@@ -324,6 +329,7 @@ int Snes9xConfig::save_config_file()
     outbool("DynamicRateControl", Settings.DynamicRateControl, "Slightly bend the sample rate to keep the buffer full and avoid crackle/dropouts");
     outint("DynamicRateControlLimit", Settings.DynamicRateLimit, "How far Dynamic Rate Control may bend the rate (stored as the UI ratio x 1000; larger = more correction)");
     outbool("AutomaticInputRate", auto_input_rate, "Guess input rate by asking the monitor what its refresh rate is");
+    outbool("SuppressNRxGlitches", Settings.GBSuppressNRxGlitches, "Game Boy: an NRx2 rewrite on a live channel never raises its volume (hides the zombie-mode click; off = exact hardware behaviour)");
     outint("PlaybackRate", gui_config->sound_playback_rate, "1: 8000Hz, 2: 11025Hz, 3: 16000Hz, 4: 22050Hz, 5: 32000Hz, 6: 44100Hz, 7: 48000Hz");
     outint("MasterVolumeRegular", master_volume_regular, "Master output volume during normal play (0..100, percent)");
     outint("MasterVolumeFastForward", master_volume_fast_forward, "Master output volume during turbo/rewind (0..100, percent)");
@@ -412,8 +418,15 @@ int Snes9xConfig::save_config_file()
 
     // Key path "SGB::BIOSPreference" matches the win32 config (wconfig.cpp) and
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
+    section = "BIOS";
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+        outstring(S9xGetBiosSlotInfo(i)->key, S9xGetBiosPath(i),
+                  S9xGetBiosSlotInfo(i)->label);
+
     section = "SGB";
-    outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
+    outint("BIOSPreference", Settings.SGB_BIOSPreference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
+    outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
+    outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
 
     section = "Input";
     controllers controller = CTL_NONE;
@@ -594,6 +607,7 @@ int Snes9xConfig::load_config_file()
     inbool("DynamicRateControl", Settings.DynamicRateControl);
     inint("DynamicRateControlLimit", Settings.DynamicRateLimit);
     inbool("AutomaticInputRate", auto_input_rate);
+    inbool("SuppressNRxGlitches", Settings.GBSuppressNRxGlitches);
     inint("PlaybackRate", gui_config->sound_playback_rate);
     inint("MasterVolumeRegular", master_volume_regular);
     inint("MasterVolumeFastForward", master_volume_fast_forward);
@@ -691,10 +705,22 @@ int Snes9xConfig::load_config_file()
     inbool("OverclockCPU", OverclockCPU);
     inbool("EchoBufferHack", Settings.SeparateEchoBuffer);
 
+    section = "BIOS";
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+    {
+        std::string path;
+        instr(S9xGetBiosSlotInfo(i)->key, path);
+        S9xSetBiosPath(i, path.c_str());
+    }
+
     section = "SGB";
     inint("BIOSPreference", Settings.SGB_BIOSPreference);
-    if (Settings.SGB_BIOSPreference > 2)
+    // 0 was the old "No BIOS" entry, which the menu can no longer set.
+    if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
         Settings.SGB_BIOSPreference = 2;
+    inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
+    inint("GBBootPolicy", Settings.GBBootPolicy);
+    Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
 
     section = "Input";
 

@@ -17,6 +17,7 @@
 #include "cheats.h"
 #include "display.h"
 #include "conffile.h"
+#include "biosmanager.h"
 #ifdef NETPLAY_SUPPORT
 #include "netplay.h"
 #endif
@@ -223,6 +224,7 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	// Sound
 
 	Settings.SoundSync                  =  conf.GetBool("Sound::Sync",                         false);
+	Settings.GBSuppressNRxGlitches      =  conf.GetBool("Sound::SuppressNRxGlitches",          true);
 	Settings.SixteenBitSound            =  conf.GetBool("Sound::16BitSound",                   true);
 	Settings.Stereo                     =  conf.GetBool("Sound::Stereo",                       true);
 	Settings.ReverseStereo              =  conf.GetBool("Sound::ReverseStereo",                false);
@@ -234,7 +236,21 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	Settings.InterpolationMethod        =  conf.GetInt ("Sound::InterpolationMethod",          2);
 	Settings.AudioFidelity              =  conf.GetInt ("Sound::AudioFidelity",                1); // 1 = windowed-sinc
 	Settings.SGB_BIOSPreference         =  static_cast<uint8>(conf.GetUInt("SGB::BIOSPreference", 2));
-	if (Settings.SGB_BIOSPreference > 2) Settings.SGB_BIOSPreference = 2;
+	// 0 was the old "No BIOS" and no desktop UI can set it any more, so a
+	// leftover would disable SGB with no way to turn it back on.
+	if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
+		Settings.SGB_BIOSPreference = 2;
+	// BIOS Manager paths, tried before the by-name search in BIOS_DIR.
+	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+	{
+		const std::string key = std::string("BIOS::") + S9xGetBiosSlotInfo(i)->key;
+		S9xSetBiosPath(i, conf.GetString(key.c_str(), ""));
+	}
+	Settings.GB_BIOSEnabled             =  conf.GetBool("SGB::GBBIOSEnabled",                  true);
+	Settings.GBBootPolicy               =  S9xNormalizeGBBootPolicy(
+		static_cast<int>(conf.GetUInt("SGB::GBBootPolicy", S9X_GBBOOT_AUTO)));
+	Settings.GB_BIOSActive              =  FALSE;
+	Settings.GB_BIOSPath[0] = '\0';
 	Settings.GBRomPath[0] = '\0';
 
 	// Display

@@ -21,6 +21,7 @@
 #include "gtk_state_preview_dialog.h"
 
 #include "gtk_s9x.h"
+#include "gtk_bios_manager.h"
 #include "gtk_preferences.h"
 #include "gtk_display.h"
 #include "gtk_file.h"
@@ -51,6 +52,18 @@
 #include "netplay.h"
 #include "display.h"
 #include "voicekun.h"
+
+// Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the
+// retired values, which have no item any more (normalized away first).
+static const char *bios_policy_item_name(int policy)
+{
+    static const char *names[S9X_NUM_GBBOOT_POLICIES] = {
+        "bios_policy0_item", "bios_policy1_item", "bios_policy2_item", NULL,
+        "bios_policy4_item", NULL, NULL, "bios_policy7_item",
+        NULL, "bios_policy9_item"
+    };
+    return names[S9xNormalizeGBBootPolicy(policy)];
+}
 
 static Glib::RefPtr<Gtk::FileFilter> get_save_states_file_filter()
 {
@@ -172,6 +185,10 @@ void Snes9xWindow::connect_signals()
         toggle_fullscreen_mode();
     });
 
+    get_object<Gtk::MenuItem>("bios_manager_item")->signal_activate().connect([&] {
+        open_bios_manager();
+    });
+
     get_object<Gtk::MenuItem>("open_rom_item")->signal_activate().connect([&] {
         open_rom_dialog();
     });
@@ -184,33 +201,36 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&] {
-        S9xReset();
+        // A BIOS assigned since the cart loaded is only read by a load, and a
+        // power cycle is when it should take over. Reload or reset, never both:
+        // a failed reload has already unloaded the cart.
+        if (S9xBiosChangedSinceLoad())
+            reload_loaded_game();
+        else
+        {
+            S9xReset();
+            // Only a power-cycle the user asked for: S9xReset also runs inside
+            // every non-fast state load, soft reset included.
+            S9xAnnounceGBBios();
+        }
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
     });
 
-    auto reload_with_bios_pref = [&](uint8_t pref) {
-        if (refreshing_bios_menu)
-            return;
-        if (Settings.SGB_BIOSPreference == pref)
-            return;
-        Settings.SGB_BIOSPreference = pref;
-        if (Settings.GBRomPath[0])
-            try_open_rom(std::string(Settings.GBRomPath));
-    };
-    get_object<Gtk::RadioMenuItem>("bios_none_item")->signal_toggled().connect([&, reload_with_bios_pref] {
-        if (get_object<Gtk::RadioMenuItem>("bios_none_item")->get_active())
-            reload_with_bios_pref(0);
-    });
-    get_object<Gtk::RadioMenuItem>("bios_sgb1_item")->signal_toggled().connect([&, reload_with_bios_pref] {
-        if (get_object<Gtk::RadioMenuItem>("bios_sgb1_item")->get_active())
-            reload_with_bios_pref(1);
-    });
-    get_object<Gtk::RadioMenuItem>("bios_sgb2_item")->signal_toggled().connect([&, reload_with_bios_pref] {
-        if (get_object<Gtk::RadioMenuItem>("bios_sgb2_item")->get_active())
-            reload_with_bios_pref(2);
-    });
+    // Which console GB content runs on. Its BIOS is used when one is assigned
+    // and skipped when not, so there is nothing else to pick here. GTK persists
+    // straight out of Settings, so there's no config field to mirror.
+    for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
+    {
+        const int i = S9xGBBootPolicyMenuOrder[n];
+        auto item = get_object<Gtk::RadioMenuItem>(bios_policy_item_name(i));
+        item->signal_toggled().connect([this, i, item] {
+            if (refreshing_bios_menu || !item->get_active())
+                return;
+            set_gb_boot_policy(i);
+        });
+    }
 
     for (int i = 0; i <= 4; i++)
     {
@@ -1427,16 +1447,39 @@ void Snes9xWindow::configure_widgets()
     show_widget("bios_separator", gb_loaded);
     if (gb_loaded)
     {
-        const bool sgb1_avail = S9xSGBBIOSAvailable(1, Settings.GBRomPath);
-        const bool sgb2_avail = S9xSGBBIOSAvailable(2, Settings.GBRomPath);
-        enable_widget("bios_sgb1_item", sgb1_avail);
-        enable_widget("bios_sgb2_item", sgb2_avail);
-        uint8_t active = 0;
-        if (Settings.SGB_BIOSModeActive)
-            active = (Settings.GameBoyRunMode == 2) ? 2 : 1;
-        const char *names[3] = { "bios_none_item", "bios_sgb1_item", "bios_sgb2_item" };
+        // Check the chosen console, not the one that ended up running: this is a
+        // saved preference, and one whose BIOS has gone missing stays checked
+        // but greyed, so the menu says what was picked and that it cannot be
+        // honoured. Refreshed with the rest of the widgets, so a BIOS that
+        // appears mid-session shows up on the next load rather than at once.
+        const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+        const std::string missing      = _(" (Missing BIOS)");
+        const std::string experimental = _(" (Experimental)");
+        for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
+        {
+            const int i = S9xGBBootPolicyMenuOrder[n];
+            const S9xGBPolicyBlock why =
+                S9xGBBootPolicyBlocked(i, Settings.GBRomPath);
+            const bool have = (why == S9X_GBPOLICY_OK);
+            auto item = get_object<Gtk::RadioMenuItem>(bios_policy_item_name(i));
+            item->set_sensitive(have);
+
+            // Say why it is greyed, on the item. Taken off the current label
+            // rather than a cached original, so a retranslation still lands on
+            // the base.
+            std::string base = item->get_label();
+            for (const std::string *tail : { &missing, &experimental })
+                if (base.size() > tail->size() &&
+                    base.compare(base.size() - tail->size(), tail->size(), *tail) == 0)
+                    base.erase(base.size() - tail->size());
+            // Only when a BIOS is what is missing: a hack greyed because the
+            // cart is mono has nothing missing to install. The experimental
+            // tag yields to it rather than stacking.
+            item->set_label(why == S9X_GBPOLICY_NO_BIOS ? base + missing :
+                            i == S9X_GBBOOT_SGBC        ? base + experimental : base);
+        }
         refreshing_bios_menu = true;
-        get_object<Gtk::RadioMenuItem>(names[active])->set_active(true);
+        get_object<Gtk::RadioMenuItem>(bios_policy_item_name(policy))->set_active(true);
         refreshing_bios_menu = false;
     }
 
@@ -1803,6 +1846,49 @@ void Snes9xWindow::center_mouse()
     gdk_mouse_y = y + half_h;
 
     window->get_display()->get_default_seat()->get_pointer()->warp(window->get_screen(), gdk_mouse_x, gdk_mouse_y);
+}
+
+void Snes9xWindow::set_gb_boot_policy(int policy)
+{
+    // Same gates the menu shows: nothing to switch with no Game Boy content
+    // loaded, and nothing to switch to when the console has no BIOS installed.
+    if (!Settings.GBRomPath[0] || Settings.GBBootPolicy == (uint8_t) policy)
+        return;
+    if (!S9xGBBootPolicyAvailable(policy, Settings.GBRomPath))
+        return;
+
+    Settings.GBBootPolicy = (uint8_t) policy;
+    try_open_rom(std::string(Settings.GBRomPath));
+}
+
+void Snes9xWindow::open_bios_manager()
+{
+    S9xGtkBiosManagerDialog(window.get());
+}
+
+// Load the running game from its file(s) again, the way File -> Load Game or
+// Load MultiCart did, for what only a load reads: the BIOS Manager's paths.
+bool Snes9xWindow::reload_loaded_game()
+{
+    if (Settings.GBRomPath[0])
+        return try_open_rom(std::string(Settings.GBRomPath));
+
+    // Only a two-file load fills slot B's name; a cart the loader paired with
+    // its BIOS has just A, and reloads as a single file.
+    if (Multi.fileNameB[0])
+    {
+        snprintf(Settings.CartAName, sizeof Settings.CartAName, "%s", Multi.fileNameA);
+        snprintf(Settings.CartBName, sizeof Settings.CartBName, "%s", Multi.fileNameB);
+        Settings.Multi = true;
+        pause_from_focus_change();
+        const bool ok = (S9xOpenROM(nullptr) == 0);
+        unpause_from_focus_change();
+        return ok;
+    }
+
+    if (Memory.ROMFilename.empty())
+        return false;
+    return try_open_rom(Memory.ROMFilename);
 }
 
 void Snes9xWindow::toggle_grab_mouse()

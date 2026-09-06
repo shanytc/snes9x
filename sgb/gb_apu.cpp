@@ -160,6 +160,7 @@ void Nrx2GlitchOne(uint8_t &volume, uint8_t value, uint8_t old_value,
 void Nrx2Glitch(const Apu &a, uint8_t &volume, uint8_t value, uint8_t old_value,
                 uint8_t &countdown, ApuEnvClock &lock)
 {
+	const uint8_t before = volume;
 	// Pre-CGB-D revisions pass through an intermediate all-ones value.
 	if (!a.cgb)
 	{
@@ -170,6 +171,10 @@ void Nrx2Glitch(const Apu &a, uint8_t &volume, uint8_t value, uint8_t old_value,
 	{
 		Nrx2GlitchOne(volume, value, old_value, countdown, lock);
 	}
+	// The rewrite can park the channel at full volume until the trigger that
+	// follows (~20 us) — a click per note in drivers that never disable it.
+	if (a.suppress_nrx2_glitch && volume > before)
+		volume = before;
 }
 
 void TickSquareEnvelope(Apu &a, int idx)

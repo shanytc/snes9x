@@ -43,6 +43,11 @@ class Snes9xWindow : public GtkBuilderWindow
     void show_mouse_cursor();
     void hide_mouse_cursor();
     void toggle_grab_mouse();
+    // Emulation -> Game Boy Model, shared by the menu items and their
+    // hotkeys so both apply the same gates and reload the same way.
+    void set_gb_boot_policy(int policy);
+    void open_bios_manager();
+    bool reload_loaded_game();
     void center_mouse();
 
     /* Rom-related functions */

@@ -42,6 +42,22 @@ Then copy `supersnes9x_libretro.so` together with
 place the SGB BIOS ROMs (`SGB1.sfc` / `SGB2.sfc`) in RetroArch's system
 directory — without them, GB content runs on the built-in BIOS-less core.
 
+For the original Game Boy / Game Boy Color power-on animation (the Nintendo
+logo scrolling down, then the boot chime), drop a boot ROM in the same place:
+`dmg_boot.bin` (256 bytes) for Game Boy and `cgb_boot.bin` (2304 bytes) for
+Game Boy Color. The desktop builds also look next to the ROM and in the
+configured BIOS directory — note that a *relative* BIOS directory in the config
+resolves against the working directory the emulator was launched from, so an
+absolute path is safer. None is bundled — with no matching file present, carts
+start immediately exactly as before.
+
+Emulation → BIOS then lists it alongside the Super Game Boy entries: **No BIOS**,
+**Game Boy BIOS** (or **Game Boy Color BIOS**, matching the loaded cart),
+**SGB1**, **SGB2**. Entries whose BIOS file is missing are greyed out, and the
+checked entry is whatever is actually running. With both an SGB BIOS and a GB
+boot ROM installed, SGB mode stays the default; picking the Game Boy entry runs
+the cart on its own console instead, and picking an SGB entry hands it back.
+
 Or you can build all versions: appimage, linux, android (requires docker).
 
 ```bash

@@ -59,12 +59,12 @@ struct Memory
 	uint8_t serial_bits = 0; // internal-clock transfer: bits left to shift (0 = idle)
 	uint8_t serial_guard = 0; // ticks after arming during which edges don't clock
 
-	// GB boot ROM (256 bytes). Overlays cart ROM at 0x0000-0x00FF while
-	// boot_rom_enabled is true; cleared by the first write to 0xFF50.
-	// Populated by S9xSGBLoadBootROM in authentic BIOS mode; untouched in
-	// BIOS-less mode (boot_rom_enabled stays false, cart is visible from reset).
-	uint8_t boot_rom[0x100];
-	bool    boot_rom_enabled;
+	// Boot ROM overlay, cleared by the first write to 0xFF50. boot_rom_size
+	// picks the layout: 0x100 = DMG/SGB (0x0000-0x00FF), 0x900 = CGB (also
+	// 0x0200-0x08FF, leaving the cart header at 0x0100-0x01FF visible).
+	uint8_t  boot_rom[0x900];
+	uint16_t boot_rom_size;
+	bool     boot_rom_enabled;
 
 	uint8_t  svbk = 1;            // 0xFF70
 	bool     key1_armed   = false;
@@ -72,6 +72,8 @@ struct Memory
 
 	// CGB undocumented registers ($FF72/$FF73/$FF74 R/W, $FF75 bits 6-4).
 	uint8_t  ff72 = 0, ff73 = 0, ff74 = 0, ff75 = 0;
+	// KEY0 $FF4C: boot ROM CPU-mode select; bit 2 = DMG-compat. Locked at $FF50.
+	uint8_t  key0 = 0;
 
 	// True when the machine is CGB hardware, including its DMG-compat
 	// mode (ppu->cgb is false there). STOP display + speed-switch gates.

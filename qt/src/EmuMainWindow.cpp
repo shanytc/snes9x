@@ -35,6 +35,7 @@
 #include "EmuCanvasVulkan.hpp"
 #endif
 #include "EmuMainWindow.hpp"
+#include "BiosManagerDialog.hpp"
 #include "EmuPoTranslator.hpp"
 #include "EmuSettingsWindow.hpp"
 #include "memmap.h"
@@ -205,6 +206,50 @@ void EmuMainWindow::setCoreActionsEnabled(bool enable)
         a->setEnabled(enable);
 }
 
+void EmuMainWindow::setGBBootPolicy(int policy)
+{
+    // Same gates the menu shows: nothing to switch with no Game Boy content
+    // loaded, and nothing to switch to when the console has no BIOS installed.
+    if (!Settings.GBRomPath[0])
+        return;
+    if (!S9xGBBootPolicyAvailable(policy, Settings.GBRomPath))
+        return;
+
+    // Reload only on a real change, but write it either way: a config holding
+    // one of the retired Automatic values loads as this one, so the menu shows
+    // it chosen while the file still says 5 or 6.
+    const bool changed = (Settings.GBBootPolicy != (uint8_t) policy);
+    Settings.GBBootPolicy       = (uint8_t) policy;
+    app->config->gb_boot_policy = Settings.GBBootPolicy;
+    if (changed)
+        openFile(std::string(Settings.GBRomPath));
+}
+
+void EmuMainWindow::openBiosManager()
+{
+    BiosManagerDialog dialog(this, app);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    app->config->saveFile(EmuConfig::findConfigFile());
+    // The running cart keeps the BIOS it was loaded against until a hard reset
+    // or the next load - these paths are only read by a load. What changes now
+    // is which Game Boy Model entries are selectable.
+    refreshBiosMenu();
+}
+
+void EmuMainWindow::powerCycle()
+{
+    // A BIOS assigned since the cart loaded is only read by a load, and a power
+    // cycle is when it should take over; reload or reset, never both. Qt has no
+    // multicart UI, so the one file the game came from is enough to load it.
+    const std::string path = Settings.GBRomPath[0] ? std::string(Settings.GBRomPath)
+                                                   : Memory.ROMFilename;
+    if (S9xBiosChangedSinceLoad() && !path.empty())
+        openFile(path);
+    else
+        app->powerCycle();
+}
+
 void EmuMainWindow::refreshBiosMenu()
 {
     if (!bios_menu_action)
@@ -215,17 +260,33 @@ void EmuMainWindow::refreshBiosMenu()
     if (!gb_loaded)
         return;
 
-    const bool sgb1_avail = S9xSGBBIOSAvailable(1, Settings.GBRomPath);
-    const bool sgb2_avail = S9xSGBBIOSAvailable(2, Settings.GBRomPath);
-    bios_sgb1_action->setEnabled(sgb1_avail);
-    bios_sgb2_action->setEnabled(sgb2_avail);
+    // Check the chosen console, not the one that ended up running: this is a
+    // saved preference, and one whose BIOS has gone missing stays checked but
+    // greyed, so the menu says what was picked and that it cannot be honoured.
+    const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+    const QString missing      = tr(" (Missing BIOS)");
+    const QString experimental = tr(" (Experimental)");
+    for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
+    {
+        const int i = S9xGBBootPolicyMenuOrder[n];
+        const S9xGBPolicyBlock why = S9xGBBootPolicyBlocked(i, Settings.GBRomPath);
+        const bool have = (why == S9X_GBPOLICY_OK);
+        bios_policy_actions[i]->setChecked(i == policy);
+        bios_policy_actions[i]->setEnabled(have);
 
-    uint8_t active = 0;
-    if (Settings.SGB_BIOSModeActive)
-        active = (Settings.GameBoyRunMode == 2) ? 2 : 1;
-    bios_none_action->setChecked(active == 0);
-    bios_sgb1_action->setChecked(active == 1);
-    bios_sgb2_action->setChecked(active == 2);
+        // Say why it is greyed, on the item. Taken off the current text rather
+        // than a cached original, so a retranslation still lands on the base.
+        QString base = bios_policy_actions[i]->text();
+        for (const QString &tail : { missing, experimental })
+            if (base.endsWith(tail))
+                base.chop(tail.size());
+        // Only when a BIOS is what is missing: a hack greyed because the cart
+        // is mono has nothing missing to install.
+        // The experimental tag yields to a missing-BIOS note rather than stacking.
+        bios_policy_actions[i]->setText(
+            why == S9X_GBPOLICY_NO_BIOS ? base + missing :
+            i == S9X_GBBOOT_SGBC        ? base + experimental : base);
+    }
 }
 
 void EmuMainWindow::refreshVoicekunMenu()
@@ -383,6 +444,12 @@ void EmuMainWindow::createWidgets()
     });
     core_actions.push_back(load_preview_item);
 
+    file_menu->addSeparator();
+    auto bios_manager_item = file_menu->addAction(tr("&BIOS Manager..."));
+    connect(bios_manager_item, &QAction::triggered, this, [this] {
+        openBiosManager();
+    });
+
     auto languages = EmuPoTranslator::availableLanguages();
     if (languages.size() > 1)
     {
@@ -453,7 +520,7 @@ void EmuMainWindow::createWidgets()
 
     auto hard_reset_item = emulation_menu->addAction(QIcon(iconset + "reset.svg"), tr("&Hard Reset"));
     connect(hard_reset_item, &QAction::triggered, [&] {
-        app->powerCycle();
+        powerCycle();
         if (manual_pause)
         {
             manual_pause = false;
@@ -501,26 +568,33 @@ void EmuMainWindow::createWidgets()
         run_ahead_actions[n]->setChecked(true);
     });
 
-    bios_menu = new QMenu(tr("&BIOS"));
+    // Which console GB content runs on. Its BIOS is used when one is assigned
+    // and skipped when not, so there is nothing else to pick here.
+    bios_menu = new QMenu(tr("Game &Boy Model"));
     auto bios_group = new QActionGroup(this);
     bios_group->setExclusive(true);
-    bios_none_action = bios_menu->addAction(tr("&No BIOS"));
-    bios_sgb1_action = bios_menu->addAction(tr("Super Game Boy (&SGB1)"));
-    bios_sgb2_action = bios_menu->addAction(tr("Super Game Boy 2 (SGB&2)"));
-    for (auto a : { bios_none_action, bios_sgb1_action, bios_sgb2_action })
+    int prev_group = -1;
+    for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
     {
+        const int i     = S9xGBBootPolicyMenuOrder[n];
+        const int group = S9xGBBootPolicyGroup(i);
+        if (prev_group >= 0 && group != prev_group)
+            bios_menu->addSeparator();
+        prev_group = group;
+
+        QAction *a = bios_menu->addAction(tr(S9xGBBootPolicyName(i)));
         a->setCheckable(true);
         bios_group->addAction(a);
+        bios_policy_actions[i] = a;
+        connect(a, &QAction::triggered, [this, i] { setGBBootPolicy(i); });
     }
-    auto reload_with_pref = [this](uint8_t pref) {
-        Settings.SGB_BIOSPreference = pref;
-        app->config->sgb_bios_preference = pref; // persist the choice to the config file
-        if (Settings.GBRomPath[0])
-            openFile(std::string(Settings.GBRomPath));
-    };
-    connect(bios_none_action, &QAction::triggered, [reload_with_pref] { reload_with_pref(0); });
-    connect(bios_sgb1_action, &QAction::triggered, [reload_with_pref] { reload_with_pref(1); });
-    connect(bios_sgb2_action, &QAction::triggered, [reload_with_pref] { reload_with_pref(2); });
+    bios_policy_actions[S9X_GBBOOT_GBC]->setToolTip(
+        tr("Colorizes Game Boy Color carts. Mono-only carts are experimental — "
+           "DMG-compatibility colorization is not implemented yet."));
+    bios_policy_actions[S9X_GBBOOT_SGBC]->setToolTip(
+        tr("A Super Game Boy 2 with a Game Boy Color inside: real Color graphics in the "
+           "SGB border, with the cart's SGB sound and border packets. No such hardware "
+           "exists; the SGB2 BIOS is patched in memory for it."));
     bios_menu_action = emulation_menu->addMenu(bios_menu);
     bios_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshBiosMenu);

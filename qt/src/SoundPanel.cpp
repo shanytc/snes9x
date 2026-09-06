@@ -63,6 +63,11 @@ SoundPanel::SoundPanel(EmuApplication *app_)
         app->updateSettings();
     });
 
+    connect(checkBox_suppress_nrx_glitches, &QCheckBox::clicked, [&](bool checked) {
+        app->config->suppress_nrx_glitches = checked;
+        app->updateSettings();
+    });
+
     connect(doubleSpinBox_dynamic_rate_limit, &QDoubleSpinBox::valueChanged, [&](double value) {
         app->config->dynamic_rate_limit = value;
         app->updateSettings();
@@ -217,6 +222,9 @@ void SoundPanel::updateSGBVolumeEnableState()
     spinBox_gain_gb->setEnabled(bios_mode);
     label_gain_gb->setEnabled(bios_mode);
 
+    // Game Boy APU only; hidden outright for SNES titles.
+    checkBox_suppress_nrx_glitches->setVisible(Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+
     if (bios_less_gb)
     {
         suppress_volume_sync = true;
@@ -271,6 +279,7 @@ void SoundPanel::showEvent(QShowEvent *event)
     updateInputRate();
     horizontalSlider_input_rate->setValue(config->input_rate);
     checkBox_dynamic_rate_control->setChecked(config->dynamic_rate_control);
+    checkBox_suppress_nrx_glitches->setChecked(config->suppress_nrx_glitches);
     doubleSpinBox_dynamic_rate_limit->setValue(config->dynamic_rate_limit);
 
     checkBox_mute_sound->setChecked(config->mute_audio);

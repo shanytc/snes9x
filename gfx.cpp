@@ -945,7 +945,17 @@ void S9xEndScreenRefresh (void)
 		// S9xDisplayMessages so the snes9x OSD still draws on top.
 		// No-op until both halves of CHR_TRN + PCT_TRN have arrived.
 		if (Settings.SGB_BIOSModeActive)
+		{
 			S9xSGBOverlayBiosBorder(GFX.Screen, GFX.RealPPL);
+			// SGB+GBC hack: real CGB colour inside the BIOS's default frame.
+			S9xSGBOverlayCgbScreen(GFX.Screen, GFX.RealPPL);
+			// MASK_EN pane cover — the BIOS's own freeze doesn't
+			// engage under our slaving (see Emulator::OverlayBiosMask).
+			S9xSGBOverlayBiosMask(GFX.Screen, GFX.RealPPL);
+			// Boot logo the user has no BIOS for: covered here, not suppressed,
+			// so the ring still carries the cart's border payload.
+			S9xSGBOverlayBootLogo(GFX.Screen, GFX.RealPPL);
+		}
 
 		// SFC-Box: the MB90082 superimposes its character plane on the
 		// composite output — draw it over the finished SNES frame (and
@@ -1037,6 +1047,21 @@ void S9xEndScreenRefresh (void)
 			}
 		}
 	}
+}
+
+// The brightness and backdrop a line was rendered with, for a compositor that
+// runs after the frame: by then INIDISP may already be force-blanked for
+// VBlank and PPU.Brightness reads 0 (the SGB BIOS does exactly that).
+void S9xGetLineRenderState (int line, uint8 &brightness, uint16 &backdrop)
+{
+	if (line < 0 || line >= 240)
+	{
+		brightness = PPU.Brightness;
+		backdrop   = PPU.CGDATA[0];
+		return;
+	}
+	brightness = line_brightness[line];
+	backdrop   = line_backdrop[line];
 }
 
 void RenderLine (uint8 C)
@@ -2517,6 +2542,33 @@ void S9xSetInfoString (const char *string)
 		GFX.InfoStringTimeout = Settings.InitialInfoStringTimeout;
 		S9xReRefresh();
 	}
+}
+
+static std::string s_bios_notice;
+static bool8      s_bios_notice_fatal = FALSE;
+static bool8      s_bios_missing = FALSE;
+
+void S9xSetBiosNotice (const char *string, bool8 unrunnable)
+{
+	s_bios_notice = string ? string : "";
+	s_bios_notice_fatal = !s_bios_notice.empty() && unrunnable;
+	if (s_bios_notice.empty()) s_bios_missing = FALSE;
+}
+
+void S9xShowBiosNotice (void)
+{
+	if (s_bios_notice.empty()) return;
+	if (s_bios_notice_fatal) s_bios_missing = TRUE;
+	const uint32 saved = Settings.InitialInfoStringTimeout;
+	Settings.InitialInfoStringTimeout = saved + saved / 2;
+	S9xMessage(S9X_INFO, S9X_ROM_INFO, s_bios_notice.c_str());
+	Settings.InitialInfoStringTimeout = saved;
+	s_bios_notice.clear();
+}
+
+bool8 S9xBiosMissing (void)
+{
+	return s_bios_missing;
 }
 
 #include "var8x10font.h"

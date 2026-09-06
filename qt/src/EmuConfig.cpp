@@ -17,6 +17,8 @@ namespace fs = std::filesystem;
 // the Qt port a documented, human-readable config with a comment toggle.
 // Included last so snes9x.h's macros don't leak into the Qt headers above.
 #include "conffile.h"
+#include "memmap.h"
+#include "biosmanager.h"
 
 static const char *shortcut_names[] =
 {
@@ -91,6 +93,14 @@ static const char *shortcut_names[] =
     "BeginRecordingMovie",
     "EndRecordingMovie",
     "SeekToFrame",
+    // Game Boy Model: keys match S9xGBModelHotkeys so every port names them
+    // the same in its config.
+    "GBModelGB",
+    "GBModelGBC",
+    "GBModelSGB",
+    "GBModelSGB2",
+    "GBModelSGBC",
+    "BiosManager",
 };
 
 static const char *default_controller_keys[] =
@@ -168,7 +178,13 @@ static const char *default_controller_keys[] =
     "", //    eToggleAllSoundChannels
     "", //    eStartRecording
     "", //    eStopRecording
-    ""
+    "", //    eSeekToFrame
+    "", //    Game Boy
+    "", //    Game Boy Color
+    "", //    Super Game Boy
+    "", //    Super Game Boy 2
+    "", //    Super Game Boy Color
+    ""  //    BIOS Manager
 };
 
 const char **EmuConfig::getDefaultShortcutKeys()
@@ -315,6 +331,7 @@ bool EmuConfig::setDefaults(int section)
         input_rate = 32040;
         dynamic_rate_control = false;
         dynamic_rate_limit = 0.005;
+        suppress_nrx_glitches = true;
         mute_audio = false;
         mute_audio_during_alternate_speed = false;
 
@@ -347,6 +364,9 @@ bool EmuConfig::setDefaults(int section)
         superfx_clock_multiplier = 100;
         sound_filter = eGaussian;
         sgb_bios_preference = 2;
+        gb_bios_enabled = true;
+        gb_boot_policy = S9X_GBBOOT_AUTO;
+        for (auto &p : bios_paths) p.clear();
     }
 
     if (section == -1 || section == 4)
@@ -593,6 +613,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("InputRate", input_rate, "APU sample rate in Hz resampled to the output rate; default 32040. Nudges pitch/sync");
     Bool("DynamicRateControl", dynamic_rate_control, "Slightly bend the sample rate to keep the buffer full and avoid dropouts");
     Double("DynamicRateLimit", dynamic_rate_limit, "How far Dynamic Rate Control may bend the rate, as a fraction (e.g. 0.005 = 0.5%)");
+    Bool("SuppressNRxGlitches", suppress_nrx_glitches, "Game Boy: an NRx2 rewrite on a live channel never raises its volume (hides the zombie-mode click; off = exact hardware behaviour)");
     Bool("Mute", mute_audio, "Silence all audio output");
     Bool("MuteAudioDuringAlternateSpeed", mute_audio_during_alternate_speed, "Silence audio while fast-forwarding or rewinding");
     Int("MasterVolumeRegular", master_volume_regular, "Master output volume during normal play (0..100, percent)");
@@ -645,7 +666,29 @@ void EmuConfig::config(const std::string &filename, bool write)
     // Key path "SGB::BIOSPreference" matches the win32 config (wconfig.cpp) and
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     BeginSection("SGB");
-    Int("BIOSPreference", sgb_bios_preference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
+    Int("BIOSPreference", sgb_bios_preference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
+    Bool("GBBIOSEnabled", gb_bios_enabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
+    Int("GBBootPolicy", gb_boot_policy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
+    // Normalize what we hold, not just what the core is handed, or a config
+    // naming a retired console keeps saying so however often it is loaded.
+    if (!write)
+    {
+        if (sgb_bios_preference < 1 || sgb_bios_preference > 2)
+            sgb_bios_preference = 2;
+        gb_boot_policy = S9xNormalizeGBBootPolicy(gb_boot_policy);
+    }
+    EndSection();
+
+    // Explicit BIOS file paths; empty means fall back to the by-name search.
+    // bios_paths is the source of truth here; push it into the core on read so
+    // the two agree no matter when the core is constructed relative to this.
+    BeginSection("BIOS");
+    for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+    {
+        String(S9xGetBiosSlotInfo(i)->key, bios_paths[i], S9xGetBiosSlotInfo(i)->label);
+        if (!write)
+            S9xSetBiosPath(i, bios_paths[i].c_str());
+    }
     EndSection();
 
     BeginSection("Ports");

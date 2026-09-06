@@ -84,7 +84,12 @@ enum {
     PORT_DIALOGSAVE         = 48,
     PORT_DIALOGLOAD         = 49,
     PORT_FILESAVE           = 50,
-    PORT_FILELOAD           = 51
+    PORT_FILELOAD           = 51,
+    // Emulation -> Game Boy Model, one per console the menu offers. Ordered as
+    // S9xGBModelHotkeys, so the offset from PORT_GBMODEL0 is its index there.
+    PORT_GBMODEL0           = 52,
+    // File -> BIOS Manager, above the five consoles PORT_GBMODEL0 covers.
+    PORT_BIOS_MANAGER       = 57
 };
 
 typedef struct BindingLink
@@ -97,7 +102,9 @@ typedef struct BindingLink
 extern const BindingLink b_links[];
 extern const int b_breaks[];
 const int NUM_JOYPAD_LINKS = 24;
-const int NUM_EMU_LINKS = 78;
+// Emulator-wide entries in b_links, after the NUM_JOYPAD_LINKS joypad ones; a
+// static_assert in gtk_control.cpp pins it to that table's real length.
+const int NUM_EMU_LINKS = 84;
 
 typedef struct JoypadBinding
 {

@@ -96,12 +96,59 @@ public:
 	bool IsCgbRender() const;
 	const uint16_t *CgbColorFB() const;
 
+	// Override the cart-derived CGB mode: -1 auto, 0 force DMG, 1 force CGB.
+	// Set before LoadROM; the BIOS Manager's console policy drives it.
+	void SetCgbOverride(int mode);
+
+	// Super Game Boy Color: keep CGB rendering on under the SGB2 BIOS.
+	void SetSgbc(bool enabled);
+	bool Sgbc() const;
+
+	// Super Game Boy Color, after LoadROM: stamp the header marker the patched
+	// BIOS keys its pane on, then the built-in per-game patch for this cart
+	// (sgbc_patches.cpp). All in memory; the file stays pristine.
+	void PrepareSgbcCart();
+	// The per-game patch PrepareSgbcCart applied, or "" when none did.
+	const char *SgbcPatchName() const;
+	// After LoadROM under any SGB BIOS: PrepareSgbcCart when in Super Game
+	// Boy Color, then the compatibility edit for this cart (sgbc_patches.cpp).
+	void PrepareBiosCart();
+	// The compatibility edit PrepareBiosCart applied, or "" when none did.
+	const char *SgbPatchName() const;
+	// Tools only: skip the built-in per-game table in PrepareSgbcCart, so a
+	// candidate edit can be tested on the pristine image.
+	void SetSgbcTable(bool enabled);
+
+	// Pin whether this instance behaves as a BIOS-mode core: -1 follows
+	// Settings.SGB_BIOSModeActive (the live core), 0/1 pins it. Private
+	// cores (headless tools) pin 0 so they keep BIOS-less semantics even
+	// while the app session runs the SGB BIOS.
+	void SetHostBiosMode(int mode);
+
+	// Whether an NRx2 rewrite on a live channel may raise its volume (the
+	// DMG/CGB "zombie" glitch): -1 follows Settings.GBSuppressNRxGlitches,
+	// 0/1 pins it. The Acid runner pins 0 so it scores exact hardware.
+	void SetSuppressNrxGlitches(int mode);
+
+	// Cart-header flags $0143 (CGB) and $0146 (SGB); zeroed with false when
+	// no cart. Describes the cart, not the mode it runs in (cf. IsCgb()).
+	bool CartFlags(uint8_t *cgb_flag, uint8_t *sgb_flag) const;
+
+	// The MBC's current $4000-$7FFF ROM bank, for trace tools that map a PC
+	// back to a file offset. 0 when no cart.
+	uint32_t CurrentRomBank() const;
+
 	// Debug viewer accessors — side-effect-free reads of live PPU state.
 	const uint8_t  *DebugVRAM() const;       // 0x4000: bank0 [0..0x1FFF], bank1 [0x2000..]
 	const uint8_t  *DebugOAM() const;        // 0xA0
 	const uint8_t  *DebugCgbBgPal() const;   // 64
 	const uint8_t  *DebugCgbObjPal() const;  // 64
 	const uint16_t *DebugSgbActivePalettes() const;  // 16 (4 palettes x 4 colors)
+	// Border-probe events, all reset with the console: SGB commands
+	// processed, border-plane mutations (CHR/PCT commits), PCT map uploads.
+	uint32_t        BorderTransferCount() const;
+	uint32_t        BorderPlaneVersion() const;
+	uint32_t        BorderPctCount() const;
 	const uint8_t  *DebugSgbAttrMap() const; // SGB_TILES (360)
 	void            DebugGetPpuRegs(uint8_t out[12]) const;
 
@@ -143,9 +190,10 @@ public:
 	uint8_t       *CheatHRAM(uint32_t *size) const;   // 0x7F
 	const uint8_t *CheatROM(uint32_t *size) const;
 
-	// Install the 256-byte DMG/SGB GB-side boot ROM. Takes effect on the
-	// next Reset. Call with nullptr/size=0 to clear. Only loaded in
-	// authentic BIOS mode — BIOS-less continues to start at 0x0100.
+	// Install the GB-side boot ROM; takes effect on the next Reset. Sizes:
+	// 256 (DMG/SGB), 2304 or 2048 (CGB). nullptr/0 clears, else rejected.
+	// `silent` runs it with its video held off the panel — for the embedded
+	// fallback, which the user never asked for. See Emulator::Reset.
 	bool LoadBootROM(const uint8_t *data, size_t size);
 
 	// Populate the 5-packet boot-ROM handshake from the current cart's
@@ -227,6 +275,15 @@ public:
 	// the SNES-rendered output, sparing the central 20×18 GB area.
 	void  OverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
 
+	// BIOS-mode MASK_EN honored on the composed frame — see the .cpp note
+	// on why the BIOS's own freeze does not engage under our slaving.
+	void OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
+
+	// Super Game Boy Color: fill the pane the patched BIOS keyed with the GB
+	// core's CGB output, so the game keeps its SGB border and gains real color.
+	void  OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
+	void  OverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
+
 	// Write a one-line status snapshot — PC, SP, A, halt/stop flag,
 	// total T-cycles, illegal-op count.
 	void  GetStatus(char *buf, size_t cap) const;
@@ -246,6 +303,8 @@ public:
 	bool    IsHandshakePending() const;
 
 	bool    IsBootHandoffCaptured() const;
+	bool    IsBootSetupComplete() const;
+	bool    IsScreenVisible() const;
 	uint32_t GetPacketCount() const;
 
 	// GB PPU scanline event hooks for SGB row/bank counter advance.
@@ -261,6 +320,9 @@ public:
 	Impl *DebugImpl() const { return impl_; }
 
 private:
+	// Per-frame hook for the boot-logo hold; see the definition.
+	void UpdateBootLogoHold();
+
 	Impl *impl_;
 };
 
@@ -294,10 +356,8 @@ void S9xSGBReset(void);
 bool S9xSGBSoftReset(void);
 bool S9xSGBLoadROM(const char *filename);
 
-// Hand the 256-byte GB-side boot ROM to the SGB core. Only used in
-// authentic BIOS mode — boot ROM scrolls the Nintendo logo and sends
-// 5 SGB handshake packets that the BIOS is waiting for before it
-// transitions out of its splash screen.
+// Hand the GB-side boot ROM to the SGB core — 256 bytes for DMG/SGB, 2304
+// (or 2048) for CGB. See Emulator::LoadBootROM.
 bool S9xSGBLoadBootROMBytes(const unsigned char *data, size_t size);
 
 // Install the built-in SGB1 (mode=1) or SGB2 (mode=2) boot ROM. Used
@@ -385,6 +445,26 @@ bool S9xSGBIsCgb(void);
 bool S9xSGBIsCgbRender(void);
 const uint16_t *S9xSGBGetCgbColorFB(void);
 
+// -1 auto (cart header), 0 force DMG, 1 force CGB. Call before S9xSGBLoadROM*.
+void S9xSGBSetCgbOverride(int mode);
+
+// Super Game Boy Color: keep CGB rendering on while the SNES-side SGB2 BIOS
+// drives the session — SGB border plus real CGB color, which real hardware
+// can't do. Pairs with S9xSGBOverlayCgbScreen. Call before S9xSGBLoadROM*.
+void S9xSGBSetSgbc(bool enabled);
+bool S9xSGBSgbcActive(void);
+// See Emulator::PrepareSgbcCart / SgbcPatchName.
+void S9xSGBPrepareSgbcCart(void);
+const char *S9xSGBSgbcPatchName(void);
+// See Emulator::PrepareBiosCart / SgbPatchName.
+void S9xSGBPrepareBiosCart(void);
+const char *S9xSGBSgbPatchName(void);
+void S9xSGBSetSgbcTable(bool enabled);
+
+// Cart-header flags $0143 (CGB) and $0146 (SGB); either pointer may be null.
+// Returns false with both zeroed when no GB cart is loaded.
+bool S9xSGBGetCartFlags(unsigned char *cgb_flag, unsigned char *sgb_flag);
+
 // ---- Debug viewer accessors (GB/GBC/SGB tile/tilemap/sprite viewers) --------
 struct SgbPpuRegs
 {
@@ -441,6 +521,15 @@ constexpr uint32_t SGB_GB_SCREEN_H = 144;
 // the overlay isn't clobbered by the PPU blit and the snes9x OSD
 // still draws on top.
 void S9xSGBOverlayBiosBorder(uint16_t *dest, uint32_t pitch_pixels);
+
+// BIOS-mode half of the boot-logo hold — see Emulator::OverlayBootLogo.
+void S9xSGBOverlayBootLogo(uint16_t *dest, uint32_t pitch_pixels);
+
+// Super Game Boy Color — see Emulator::OverlayCgbScreen. No-op unless active.
+void S9xSGBOverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels);
+
+// BIOS-mode MASK_EN pane cover — see Emulator::OverlayBiosMask.
+void S9xSGBOverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
 
 // Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
 // contract. `count_int16s` is the number of int16 samples (stereo frame
@@ -525,6 +614,10 @@ bool          S9xSGBBIOSGBIsReleased (void);
 bool          S9xSGBBIOSHandshakePending (void);
 
 bool          S9xSGBBootHandoffCaptured (void);
+// True once the cart sent the MASK_EN cancel ending its power-on SGB setup.
+bool          S9xSGBBootSetupComplete (void);
+// Is the GB window on screen, or masked away by MASK_EN?
+bool          S9xSGBScreenVisible (void);
 
 // ---- Integration hooks for RetroAchievements -------------------------------
 // Expose the loaded GB ROM so the platform can hash it under the GameBoy /

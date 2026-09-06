@@ -323,6 +323,7 @@ list(APPEND SOURCES
     src/gtk_s9xcore.h
     src/gtk_s9x.cpp
     src/gtk_s9x.h
+    src/gtk_bios_manager.cpp
     src/gtk_s9xwindow.cpp
     src/gtk_s9xwindow.h
     src/gtk_sound.cpp
@@ -347,6 +348,8 @@ list(APPEND SOURCES
     ../sgb/sgb.cpp
     ../sgb/sgb_packet.cpp
     ../sgb/sgb_state.cpp
+    ../sgb/sgbc_patches.cpp
+    ../sgb/sgbc.cpp
     ../sgb/gb_cpu.cpp
     ../sgb/gb_ops.cpp
     ../sgb/gb_ops_cb.cpp
@@ -385,6 +388,7 @@ list(APPEND SOURCES
     ../srtc.cpp
     ../gfx.cpp
     ../memmap.cpp
+    ../biosmanager.cpp
     ../clip.cpp
     ../ppu.cpp
     ../dma.cpp

@@ -368,6 +368,9 @@ void Snes9xPreferences::update_sgb_volume_enable_state()
     enable_widget("sgb_mix_gain_gb",          bios_mode);
     enable_widget("sgb_mix_gain_gb_label",    bios_mode);
 
+    // Game Boy APU only; hidden outright for SNES titles.
+    show_widget("suppress_nrx_glitches", Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+
     if (bios_less_gb)
     {
         suppress_volume_sync = true;
@@ -660,6 +663,7 @@ void Snes9xPreferences::move_settings_to_dialog()
     set_spin  ("sound_buffer_size",         config->sound_buffer_size);
     set_label ("milliseconds_label", ngettext("millisecond", "milliseconds", get_spin("sound_buffer_size")));
     set_check ("dynamic_rate_control",      Settings.DynamicRateControl);
+    set_check ("suppress_nrx_glitches",     Settings.GBSuppressNRxGlitches);
     set_spin  ("dynamic_rate_limit",        Settings.DynamicRateLimit / 1000.0);
     set_spin  ("rewind_buffer_size",        config->rewind_buffer_size);
     set_spin  ("rewind_granularity",        config->rewind_granularity);
@@ -841,6 +845,7 @@ void Snes9xPreferences::get_settings_from_dialog()
     config->sgb_mix_gain_spc = (int)get_slider("sgb_mix_gain_spc");
     config->sgb_mix_gain_gb  = (int)get_slider("sgb_mix_gain_gb");
     Settings.DynamicRateControl       = get_check("dynamic_rate_control");
+    Settings.GBSuppressNRxGlitches    = get_check("suppress_nrx_glitches");
     Settings.DynamicRateLimit         = (uint32) (get_spin("dynamic_rate_limit") * 1000);
     store_ntsc_settings();
     config->ntsc_scanline_intensity   = get_combo("ntsc_scanline_intensity");

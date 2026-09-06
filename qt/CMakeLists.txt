@@ -50,6 +50,8 @@ set(SNES9X_CORE_SOURCES
     ../sgb/sgb.cpp
     ../sgb/sgb_packet.cpp
     ../sgb/sgb_state.cpp
+    ../sgb/sgbc_patches.cpp
+    ../sgb/sgbc.cpp
     ../sgb/gb_cpu.cpp
     ../sgb/gb_ops.cpp
     ../sgb/gb_ops_cb.cpp
@@ -88,6 +90,7 @@ set(SNES9X_CORE_SOURCES
     ../srtc.cpp
     ../gfx.cpp
     ../memmap.cpp
+    ../biosmanager.cpp
     ../clip.cpp
     ../ppu.cpp
     ../dma.cpp
@@ -289,6 +292,7 @@ list(APPEND QT_GUI_SOURCES
     src/EmuApplication.cpp
     src/EmuMainWindow.cpp
     src/Snes9xController.cpp
+    src/BiosManagerDialog.cpp
     src/EmuSettingsWindow.cpp
     src/EmuConfig.cpp
     src/EmuPoTranslator.cpp

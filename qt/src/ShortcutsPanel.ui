@@ -411,6 +411,36 @@
        <string>Seek to Frame</string>
       </property>
      </row>
+     <row>
+      <property name="text">
+       <string>Game Boy Model: Game Boy</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>Game Boy Model: Game Boy Color</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>Game Boy Model: Super Game Boy</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>Game Boy Model: Super Game Boy 2</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>Game Boy Model: Super Game Boy Color</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>BIOS Manager</string>
+      </property>
+     </row>
      <column>
       <property name="text">
        <string>Binding #1</string>

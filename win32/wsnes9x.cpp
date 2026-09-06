@@ -50,6 +50,7 @@
 
 #include "../snes9x.h"
 #include "../memmap.h"
+#include "../biosmanager.h"
 #include "../cpuexec.h"
 #include "../display.h"
 #include "../screenshot.h"
@@ -127,6 +128,7 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 
 INT_PTR CALLBACK DlgOpenROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgMultiROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK DlgChildSplitProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -171,12 +173,13 @@ void S9xWinScanJoypads();
 #define WM_CHEATS_ADDED (WM_APP + 1)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 5;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 6;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
 constexpr int HOTKEY_TAB_TURBO      = 2;
 constexpr int HOTKEY_TAB_DISPLAY    = 3;
+constexpr int HOTKEY_TAB_GBMODEL    = 5;
 
 #ifdef UNICODE
 #define S9XW_SHARD_PATH SHARD_PATHW
@@ -552,6 +555,7 @@ static void RestartSnes9x ();
 static void ResetFrameTimer ();
 static bool LoadROM (const TCHAR *filename, const TCHAR *filename2 = NULL);
 static bool LoadROMMulti (const TCHAR *filename, const TCHAR *filename2);
+static bool ReloadLoadedGame ();
 bool8 S9xLoadROMImage (const TCHAR *string);
 #ifdef NETPLAY_SUPPORT
 static void EnableServer (bool8 enable);
@@ -1555,6 +1559,30 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             }
             hitHotKey = true;
         }
+        if(HKmatch(BiosManager))
+        {
+            // Through the menu command so the save + GB reload it does aren't
+            // duplicated here.
+            SendMenuCommand(ID_FILE_BIOSMANAGER);
+            hitHotKey = true;
+        }
+        for(int gbm = 0; gbm < GB_MODEL_HOTKEYS; gbm++)
+        {
+            if(!HKmatch(GBModel[gbm]))
+                continue;
+            // Same route as clicking the menu entry: it saves the choice and
+            // reloads the cart on the new console. Posted, not sent, so the
+            // reload and hard reset run from the message loop rather than
+            // nested inside key handling.
+            //
+            // Going through the menu is also the whole gate. PostMenuCommand
+            // refreshes the menu state and drops the command if the entry is
+            // greyed for a missing BIOS, or missing entirely because no Game
+            // Boy content is loaded - so the key can never reach a console the
+            // menu would not let you pick either.
+            PostMenuCommand(ID_EMULATION_BIOS_POLICY0 + S9xGBModelHotkeys[gbm].policy);
+            hitHotKey = true;
+        }
         if(HKmatch(CheatSearchDialog))
         {
             // update menu state
@@ -2027,7 +2055,9 @@ LRESULT CALLBACK WinProc(
 	case WM_INITMENUPOPUP:
 	{
 		HMENU hPopup = (HMENU)wParam;
-		bool romLoaded  = !Settings.StopEmulation;
+		// A cart whose BIOS is missing is mapped but cannot run, so it counts
+		// as no ROM here — same as the state before anything was loaded.
+		bool romLoaded  = !Settings.StopEmulation && !S9xBiosMissing();
 		bool gbActive   = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
 		// SGB BIOS mode runs the real 65816/S-PPU (border + GB screen tiles),
 		// so the S-PPU viewers stay live there; only the BIOS-less GB path
@@ -2812,7 +2842,19 @@ LRESULT CALLBACK WinProc(
 					if(S9xMoviePlaying())
 						S9xMovieStop (TRUE);
 					if (cmd_id == ID_EMULATION_HARD_RESET)
-						S9xReset ();
+					{
+						// A BIOS assigned since the cart loaded is only read by a
+						// load, and a power cycle is when it should take over.
+						if (S9xBiosChangedSinceLoad())
+							ReloadLoadedGame();
+						else
+						{
+							S9xReset ();
+							// Only a power-cycle the user asked for: S9xReset also runs
+							// inside every non-fast state load, soft reset included.
+							S9xAnnounceGBBios();
+						}
+					}
 					else
 						S9xSoftReset ();
 					ReInitSound();
@@ -2925,28 +2967,52 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_RUNAHEAD_4:
 			Settings.RunAhead = 4;
 			break;
-		case ID_EMULATION_BIOS_NONE:
-		case ID_EMULATION_BIOS_SGB1:
-		case ID_EMULATION_BIOS_SGB2:
+		case ID_FILE_BIOSMANAGER:
 			{
-				const uint8 new_pref = (LOWORD(wParam) == ID_EMULATION_BIOS_NONE) ? 0
-				                     : (LOWORD(wParam) == ID_EMULATION_BIOS_SGB1) ? 1
-				                     : 2;
-				Settings.SGB_BIOSPreference = new_pref;
-				if (Settings.GBRomPath[0])
+				// Restore the GUI surface ourselves: reached by hotkey there is
+				// no menu loop to have switched away from the render target.
+				RestoreGUIDisplay();
+				const INT_PTR picked = DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSMANAGER),
+													  GUI.hWnd, DlgBiosManagerProc, (LPARAM) NULL);
+				RestoreSNESDisplay();
+				if (picked <= 0)
+					break;
+
+				WinSaveConfigFile();
+
+				// The running cart keeps the BIOS it was loaded against until a
+				// hard reset or the next load: the paths are only read by a
+				// load, and forcing one here would restart a game already
+				// playing. What does change now is which Game Boy Model entries
+				// are selectable, so refresh the menu rather than the emulator.
+				CheckMenuStates();
+				DrawMenuBar(GUI.hWnd);
+			}
+			break;
+		case ID_EMULATION_BIOS_POLICY0 + 0:
+		case ID_EMULATION_BIOS_POLICY0 + 1:
+		case ID_EMULATION_BIOS_POLICY0 + 2:
+		case ID_EMULATION_BIOS_POLICY0 + 4:
+		case ID_EMULATION_BIOS_POLICY0 + 7:
+		case ID_EMULATION_BIOS_POLICY0 + 9:
+			{
+				// Which console GB content runs on. The BIOS for it is used when
+				// one is assigned and skipped when not, so there is nothing else
+				// to pick here.
+				const uint8 policy = S9xNormalizeGBBootPolicy(
+					(int) (LOWORD(wParam) - ID_EMULATION_BIOS_POLICY0));
+				if (policy == Settings.GBBootPolicy)
 				{
-					TCHAR wpath[_MAX_PATH];
-					Utf8ToWide u8(Settings.GBRomPath);
-					_tcsncpy(wpath, u8, _MAX_PATH - 1);
-					wpath[_MAX_PATH - 1] = 0;
-					RestoreGUIDisplay();
-					if (LoadROM(wpath))
-					{
-						S9xReset();
-						ReInitSound();
-					}
-					RestoreSNESDisplay();
+					// Nothing to reload, but still write it: a file holding one of
+					// the retired Automatic values loads as this one, so the menu
+					// shows it chosen while the file still says 5 or 6.
+					WinSaveConfigFile();
+					break;
 				}
+				Settings.GBBootPolicy = policy;
+				WinSaveConfigFile();
+				if (Settings.GBRomPath[0] && ReloadLoadedGame())
+					ReInitSound();
 			}
 			break;
 		case ID_TESTS_ACIDTESTS:
@@ -5088,21 +5154,38 @@ int WINAPI WinMain(
 			rewindContentFrame++;
 			if (Settings.SGB_BIOSModeActive)
 			{
+				// Where a soft reset should land: the cart's border up and its title
+				// on screen. Waiting for the packet stream to fall quiet instead put
+				// the checkpoint wherever the game next went silent - mid-intro.
+				const uint32 kCpMinAge = 240;   // clear the BIOS splash first
+				const uint32 kCpQuiet  = 30;    // no packets = setup finished
+				const uint32 kCpShown  = 150;   // up and staying up: title, not blank
 				static bool   sgbCpDone  = false;
 				static uint32 sgbCpPkts  = 0;
+				static uint32 sgbCpAge   = 0;
 				static uint32 sgbCpQuiet = 0;
+				static uint32 sgbCpShown = 0;
 				if (!S9xSGBBootHandoffCaptured())
 				{
 					S9xSGBInvalidateSoftResetCheckpoint();
 					sgbCpDone  = false;
 					sgbCpPkts  = S9xSGBGetPacketCount();
+					sgbCpAge   = 0;
 					sgbCpQuiet = 0;
+					sgbCpShown = 0;
 				}
 				else if (!sgbCpDone)
 				{
-					uint32 pkts = S9xSGBGetPacketCount();
+					const uint32 pkts = S9xSGBGetPacketCount();
 					if (pkts != sgbCpPkts) { sgbCpPkts = pkts; sgbCpQuiet = 0; }
-					else if (++sgbCpQuiet >= 120)
+					else ++sgbCpQuiet;
+
+					// Shown AND staying shown: the mask flickers off for single
+					// frames mid-setup, and a capture there is an all-black frame.
+					if (S9xSGBScreenVisible()) ++sgbCpShown; else sgbCpShown = 0;
+
+					if (++sgbCpAge >= kCpMinAge && sgbCpShown >= kCpShown &&
+					    (S9xSGBBootSetupComplete() || sgbCpQuiet >= kCpQuiet))
 					{
 						S9xSGBCaptureSoftResetCheckpoint();
 						sgbCpDone = true;
@@ -5382,8 +5465,11 @@ static void UpdateTestsMenu ()
 	for (int t = 0; t < top_n && at < 0; t++)
 		if (GetSubMenu(GUI.hMenu, t) == s_tests_menu) at = t;
 
-	const bool have_pack = WinAcidTestsAvailable();
-	if (have_pack && at < 0)
+	const bool have_acid  = WinAcidTestsAvailable();
+	// The menu only shows when the pack is near the exe.
+	EnableMenuItem(s_tests_menu, ID_TESTS_ACIDTESTS,
+	               MF_BYCOMMAND | (have_acid  ? MF_ENABLED : MF_GRAYED));
+	if (have_acid && at < 0)
 	{
 		MENUITEMINFO ins = {};
 		ins.cbSize     = sizeof(ins);
@@ -5399,7 +5485,7 @@ static void UpdateTestsMenu ()
 		if (LocaleIsTranslated())
 			LocalizeMenu(GUI.hMenu);   // also the bar caption
 	}
-	else if (!have_pack && at >= 0)
+	else if (!have_acid && at >= 0)
 	{
 		RemoveMenu(GUI.hMenu, (UINT)at, MF_BYPOSITION);
 	}
@@ -5462,8 +5548,6 @@ static void CheckMenuStates ()
 
 	{
 		const bool gb_loaded = (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
-		const bool sgb1_avail = gb_loaded && S9xSGBBIOSAvailable(1, Settings.GBRomPath) != FALSE;
-		const bool sgb2_avail = gb_loaded && S9xSGBBIOSAvailable(2, Settings.GBRomPath) != FALSE;
 
 		static HMENU s_bios_hmenu  = NULL;
 		static HMENU s_bios_parent = NULL;
@@ -5508,7 +5592,7 @@ static void CheckMenuStates ()
 				ins.fType      = MFT_STRING;
 				ins.wID        = ID_EMULATION_BIOS;
 				ins.hSubMenu   = s_bios_hmenu;
-				TCHAR txt[]    = TEXT("&BIOS");
+				TCHAR txt[]    = TEXT("Game &Boy Model");
 				ins.dwTypeData = txt;
 				ins.cch        = (UINT)_tcslen(txt);
 				UINT pos = s_bios_pos;
@@ -5528,22 +5612,53 @@ static void CheckMenuStates ()
 
 		UpdateTestsMenu();
 
-		if (gb_loaded)
+		if (gb_loaded && s_bios_hmenu)
 		{
-			uint8 active = 0;
-			if (Settings.SGB_BIOSModeActive) active = (Settings.GameBoyRunMode == 2) ? 2 : 1;
-
-			const int biosIds[3] = {
-				ID_EMULATION_BIOS_NONE,
-				ID_EMULATION_BIOS_SGB1,
-				ID_EMULATION_BIOS_SGB2
-			};
-			const bool avail[3] = { true, sgb1_avail, sgb2_avail };
-			for (int i = 0; i < 3; i++)
+			// Radio-check the chosen console, not the one that ended up running:
+			// this is a saved preference, and one whose BIOS has gone missing
+			// stays checked, greyed, so the menu says what was picked and that
+			// it cannot be honoured. Greying is per entry: only the Super Game
+			// Boy ones need a BIOS to be the console they name.
+			const uint8 policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+			for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
 			{
-				mii.fState = (i == active) ? MFS_CHECKED : MFS_UNCHECKED;
-				if (!avail[i]) mii.fState |= MFS_DISABLED;
-				SetMenuItemInfo(GUI.hMenu, biosIds[i], FALSE, &mii);
+				const int i = S9xGBBootPolicyMenuOrder[n];
+				const S9xGBPolicyBlock why =
+					S9xGBBootPolicyBlocked(i, Settings.GBRomPath);
+				const bool have = (why == S9X_GBPOLICY_OK);
+				mii.fState = (i == policy) ? MFS_CHECKED : MFS_UNCHECKED;
+				if (!have)
+					mii.fState |= MFS_DISABLED;
+				SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, FALSE, &mii);
+
+				// Say why it is greyed, on the item. Derived from whatever text
+				// the item carries now rather than a cached original, so a
+				// language switch that rewrote it still lands on the right base.
+				TCHAR cur[256] = TEXT("");
+				GetMenuString(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, cur,
+							  _countof(cur), MF_BYCOMMAND);
+				std::wstring base(cur);
+				const std::wstring suffix(GBMODEL_MISSING_BIOS);
+				const std::wstring experimental(GBMODEL_EXPERIMENTAL);
+				const std::wstring *tails[] = { &suffix, &experimental };
+				for (const std::wstring *tail : tails)
+					if (base.size() > tail->size() &&
+						base.compare(base.size() - tail->size(), tail->size(), *tail) == 0)
+						base.erase(base.size() - tail->size());
+				// Only when a BIOS is what is missing: a hack greyed because the
+				// cart is mono has nothing missing to install. The experimental
+				// tag yields to it rather than stacking.
+				const std::wstring want =
+					why == S9X_GBPOLICY_NO_BIOS ? base + suffix :
+					i == S9X_GBBOOT_SGBC        ? base + experimental : base;
+				if (want != cur)
+				{
+					MENUITEMINFO txt = {};
+					txt.cbSize     = sizeof(txt);
+					txt.fMask      = MIIM_STRING;
+					txt.dwTypeData = (LPTSTR) want.c_str();
+					SetMenuItemInfo(GUI.hMenu, ID_EMULATION_BIOS_POLICY0 + i, FALSE, &txt);
+				}
 			}
 		}
 	}
@@ -5625,7 +5740,7 @@ static void CheckMenuStates ()
 	}
 
     mii.fState = MFS_UNCHECKED;
-    if (Settings.StopEmulation)
+    if (Settings.StopEmulation || S9xBiosMissing())
         mii.fState |= MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SPC_DATA, FALSE, &mii);
     SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SRAM_DATA, FALSE, &mii);
@@ -6107,7 +6222,9 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
             stateMan.init(GUI.rewindBufferSize * 1024 * 1024);
 		}
 #ifdef RETROACHIEVEMENTS_SUPPORT
-		RA_OnLoadROM();
+		// No session for a cart that cannot run for want of its BIOS.
+		if (!S9xBiosMissing())
+			RA_OnLoadROM();
 #endif
 
 		// The loaded ROM decides the mode, and the mode can invalidate the
@@ -6140,6 +6257,39 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 	}
 
 	return !Settings.StopEmulation;
+}
+
+// Load the running game from its file(s) again, the way File -> Load Game or
+// Load MultiCart did, for what only a load reads: the BIOS Manager's paths.
+static bool ReloadLoadedGame ()
+{
+	std::string a, b;
+	if (Settings.GBRomPath[0])
+		a = Settings.GBRomPath;
+	else if (Multi.fileNameB[0])
+	{
+		// Only a two-file load fills slot B's name; a cart paired with its
+		// BIOS by the loader has just A, and reloads as a single file.
+		a = Multi.fileNameA;
+		b = Multi.fileNameB;
+	}
+	else
+		a = Memory.ROMFilename;
+	if (a.empty() && b.empty())
+		return false;
+
+	TCHAR wa[_MAX_PATH], wb[_MAX_PATH];
+	Utf8ToWide ua(a.c_str()), ub(b.c_str());
+	_tcsncpy(wa, ua, _MAX_PATH - 1);
+	_tcsncpy(wb, ub, _MAX_PATH - 1);
+	wa[_MAX_PATH - 1] = wb[_MAX_PATH - 1] = 0;
+
+	RestoreGUIDisplay();
+	const bool ok = LoadROM(wa, b.empty() ? NULL : wb);
+	if (ok)
+		S9xReset();
+	RestoreSNESDisplay();
+	return ok;
 }
 
 bool8 S9xLoadROMImage (const TCHAR *string)
@@ -6610,6 +6760,9 @@ static void SoundConfUpdateModeState(HWND hDlg, bool force)
     EnableWindow(GetDlgItem(hDlg, IDC_EDIT_GAIN_GB),          gb);
     EnableWindow(GetDlgItem(hDlg, IDC_STATIC_GAIN_GB_LABEL),  gb);
 
+    // Game Boy APU only; hidden outright for SNES titles.
+    ShowWindow(GetDlgItem(hDlg, IDC_SUPPRESS_NRX_GLITCHES), gb ? SW_SHOW : SW_HIDE);
+
     // Audio Fidelity only drives the SPC/MSU-1/Voicer-kun resamplers. The GB
     // core synthesises straight at the output rate and never touches them, so
     // the control is dead in BIOS-less .gb/.gbc — but still live in SGB BIOS
@@ -6696,6 +6849,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
             CreateToolTip(IDC_SLIDER_GAIN_REGULAR, hDlg, TEXT("Master pre-amp applied after the Volume percentages. 0 dB is unchanged; boosting can clip loud material."));
             CreateToolTip(IDC_SLIDER_GAIN_SPC, hDlg, TEXT("Pre-amp on the SPC side of the SGB mix, applied after its Volume percentage."));
             CreateToolTip(IDC_SLIDER_GAIN_GB, hDlg, TEXT("Pre-amp on the GB side of the SGB mix, applied after its Volume percentage."));
+            CreateToolTip(IDC_SUPPRESS_NRX_GLITCHES, hDlg, TEXT("Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the 'zombie' glitch). Off = exact hardware behaviour, which clicks on every note in some games."));
 
             HWND output_dropdown = GetDlgItem(hDlg, IDC_OUTPUT_DEVICE);
             UpdateAudioDeviceDropdown(output_dropdown);
@@ -6816,6 +6970,9 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
             if (Settings.SoundSync)
                 SendDlgItemMessage(hDlg, IDC_SYNC_TO_SOUND_CPU, BM_SETCHECK, BST_CHECKED, 0);
+
+            if (Settings.GBSuppressNRxGlitches)
+                SendDlgItemMessage(hDlg, IDC_SUPPRESS_NRX_GLITCHES, BM_SETCHECK, BST_CHECKED, 0);
 
             if (GUI.AutomaticInputRate)
                 SendDlgItemMessage(hDlg, IDC_AUTOMATICINPUTRATE, BM_SETCHECK, BST_CHECKED, 0);
@@ -6986,6 +7143,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 										SendDlgItemMessage(hDlg, IDC_DRIVER, CB_GETCURSEL, 0,0),0);
 					Settings.DynamicRateControl=IsDlgButtonChecked(hDlg, IDC_DYNRATECONTROL);
 					Settings.SoundSync=IsDlgButtonChecked(hDlg, IDC_SYNC_TO_SOUND_CPU);
+					Settings.GBSuppressNRxGlitches=IsDlgButtonChecked(hDlg, IDC_SUPPRESS_NRX_GLITCHES);
 					GUI.Mute=IsDlgButtonChecked(hDlg, IDC_MUTE);
 					GUI.FAMute=IsDlgButtonChecked(hDlg, IDC_FAMT)!=0;
 
@@ -7726,12 +7884,13 @@ INT_PTR CALLBACK DlgEmulatorHacksProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM
         // is hidden, collapse the space it'd occupy: everything below it
         // slides up by its height and the dialog shrinks by the total.
         //
-        // Settings.SuperGameBoy is TRUE only for a GB/GBC cart running on the
-        // BIOS-less GB core — the SGB BIOS path clears it and sets
-        // SGB_BIOSModeActive instead, and S9xMainLoop forces the hack off
-        // there, so the hidden box can never be silently in effect.
+        // Settings.SuperGameBoy is TRUE only for a GB/GBC cart on the BIOS-less
+        // GB core; the SGB BIOS path clears it and sets SGB_BIOSModeActive
+        // instead. Both run the same GB PPU, so both get the row — gating on
+        // SuperGameBoy alone hid it for every SGB/SGB2 and +GBC session.
         {
-            const bool gb_hack_row = Settings.SuperGameBoy != 0;
+            const bool gb_hack_row = Settings.SuperGameBoy != 0 ||
+                                     Settings.SGB_BIOSModeActive != 0;
             ShowWindow(GetDlgItem(hDlg, IDC_NO_SPRITE_LIMIT_GB), gb_hack_row ? SW_SHOW : SW_HIDE);
 
             const int boxrows[] = { IDC_SFCBOX_OSD_BACKDROP, IDC_SFCBOX_OSD_LANGUAGE_LABEL,
@@ -8761,6 +8920,149 @@ void ListFilesFromFolder(HWND hDlg, RomDataList** prdl)
 	ListView_SetItemState (GetDlgItem(hDlg,IDC_ROMLIST), 0, LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);
 }
 
+
+// File -> BIOS Manager: one row per supported BIOS, plus the default boot mode
+// for Game Boy content. Blank rows fall back to the search by filename.
+// Per-row verdict, kept for WM_CTLCOLORSTATIC: red text is what makes a bad
+// file read as a complaint rather than a caption.
+static S9xBiosPathStatus s_bios_status[S9X_NUM_BIOS_SLOTS];
+
+static void BiosManagerRefreshStatus(HWND hDlg, int slot)
+{
+	TCHAR wtext[S9X_BIOS_PATH_MAX];
+	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+	if (wtext[0] == TEXT('\0'))
+	{
+		// Empty is fine for some slots and not others, so say which.
+		s_bios_status[slot] = S9X_BIOS_PATH_UNSET;
+		const char *note = S9xGetBiosSlotInfo(slot)->note;
+		Utf8ToWide  note_w(note ? note : "");
+		SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, (wchar_t *) note_w);
+		return;
+	}
+
+	// Validate the typed text without disturbing the stored path.
+	char saved[S9X_BIOS_PATH_MAX];
+	strncpy(saved, S9xGetBiosPath(slot), S9X_BIOS_PATH_MAX - 1);
+	saved[S9X_BIOS_PATH_MAX - 1] = '\0';
+	S9xSetBiosPath(slot, WideToUtf8(wtext));
+	std::string why;
+	const S9xBiosPathStatus st = S9xCheckBiosPath(slot, &why);
+	s_bios_status[slot] = st;
+	S9xSetBiosPath(slot, saved);
+
+	// The reason is the useful half: which size the slot wanted, or what the
+	// file turned out to be. Falls back to the status when there is none.
+	const bool exists = (GetFileAttributes(wtext) != INVALID_FILE_ATTRIBUTES);
+	Utf8ToWide   why_w(why.c_str());
+	std::wstring text;
+	if (!exists || st == S9X_BIOS_PATH_MISSING) text = TEXT("not found");
+	else if (st == S9X_BIOS_PATH_OK)
+	{
+		text = TEXT("OK");
+		if (!why.empty()) text += TEXT("   ") + std::wstring((wchar_t *) why_w);
+	}
+	else if (!why.empty())                      text = (wchar_t *) why_w;
+	else if (st == S9X_BIOS_PATH_BAD_IMAGE)     text = TEXT("wrong image");
+	else                                        text = TEXT("unexpected size");
+	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text.c_str());
+}
+
+INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_CTLCOLORSTATIC:
+	{
+		const int id = GetDlgCtrlID((HWND) lParam);
+		if (id >= IDC_BIOSMGR_STATUS0 && id < IDC_BIOSMGR_STATUS0 + S9X_NUM_BIOS_SLOTS)
+		{
+			const S9xBiosPathStatus st = s_bios_status[id - IDC_BIOSMGR_STATUS0];
+			if (st != S9X_BIOS_PATH_UNSET)
+			{
+				SetTextColor((HDC) wParam, st == S9X_BIOS_PATH_OK
+				                           ? RGB(0x1E, 0x8B, 0x3A) : RGB(0xC0, 0x39, 0x2B));
+				SetBkMode((HDC) wParam, TRANSPARENT);
+				return (INT_PTR) GetSysColorBrush(COLOR_BTNFACE);
+			}
+		}
+		break;
+	}
+
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog(hDlg);
+		for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		{
+			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
+						   Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
+			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
+			BiosManagerRefreshStatus(hDlg, slot);
+		}
+		return true;
+	}
+
+	case WM_COMMAND:
+	{
+		const int id = LOWORD(wParam);
+
+		if (id >= IDC_BIOSMGR_EDIT0 && id < IDC_BIOSMGR_EDIT0 + S9X_NUM_BIOS_SLOTS &&
+			HIWORD(wParam) == EN_CHANGE)
+		{
+			BiosManagerRefreshStatus(hDlg, id - IDC_BIOSMGR_EDIT0);
+			return true;
+		}
+
+		if (id >= IDC_BIOSMGR_BROWSE0 && id < IDC_BIOSMGR_BROWSE0 + S9X_NUM_BIOS_SLOTS)
+		{
+			const int slot = id - IDC_BIOSMGR_BROWSE0;
+			TCHAR filename[MAX_PATH] = TEXT("");
+			GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename, MAX_PATH);
+
+			OPENFILENAME ofn;
+			ZeroMemory(&ofn, sizeof(ofn));
+			ofn.lStructSize     = sizeof(ofn);
+			ofn.hwndOwner       = hDlg;
+			ofn.lpstrFile       = filename;
+			ofn.nMaxFile        = MAX_PATH;
+			ofn.lpstrFilter     = TEXT("BIOS files\0*.zip;*.bin;*.rom;*.sfc;*.gb;*.gbc\0All files\0*.*\0\0");
+			ofn.lpstrInitialDir = S9xGetDirectoryT(BIOS_DIR);
+			ofn.lpstrTitle      = TEXT("Select BIOS File");
+			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
+			if (GetOpenFileName(&ofn))
+				SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename);
+			return true;
+		}
+
+		if (id >= IDC_BIOSMGR_CLEAR0 && id < IDC_BIOSMGR_CLEAR0 + S9X_NUM_BIOS_SLOTS)
+		{
+			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + (id - IDC_BIOSMGR_CLEAR0), TEXT(""));
+			return true;
+		}
+
+		switch (id)
+		{
+		case IDOK:
+		{
+			for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+			{
+				TCHAR wtext[S9X_BIOS_PATH_MAX];
+				GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+				S9xSetBiosPath(slot, WideToUtf8(wtext));
+			}
+			EndDialog(hDlg, 1);
+			return true;
+		}
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return true;
+		}
+		break;
+	}
+	}
+	return false;
+}
+
 // load multicart rom dialog
 INT_PTR CALLBACK DlgMultiROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -8770,17 +9072,25 @@ INT_PTR CALLBACK DlgMultiROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		LocalizeDialog(hDlg);
 		WinRefreshDisplay();
 		TCHAR path[MAX_PATH];
-		SetCurrentDirectory(S9xGetDirectoryT(BIOS_DIR));
-		_tfullpath(path, TEXT("stbios.bin"), MAX_PATH);
-		SetDlgItemText(hDlg, IDC_MULTICART_BIOSEDIT, path);
-		FILE* ftemp = _tfopen(path, TEXT("rb"));
-		if(ftemp)
-		{
-			fclose(ftemp);
-			SetDlgItemText(hDlg, IDC_MULTICART_BIOSNOTFOUND, MULTICART_BIOS_FOUND);
-		}
+		// Same order the loader uses: the BIOS Manager's slot, then stbios.bin.
+		const std::string assigned = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
+		bool found = !assigned.empty();
+		if(found)
+			lstrcpyn(path, _tFromChar(assigned.c_str()), MAX_PATH);
 		else
-			SetDlgItemText(hDlg, IDC_MULTICART_BIOSNOTFOUND, MULTICART_BIOS_NOT_FOUND);
+		{
+			SetCurrentDirectory(S9xGetDirectoryT(BIOS_DIR));
+			_tfullpath(path, TEXT("stbios.bin"), MAX_PATH);
+			FILE* ftemp = _tfopen(path, TEXT("rb"));
+			if(ftemp)
+			{
+				fclose(ftemp);
+				found = true;
+			}
+		}
+		SetDlgItemText(hDlg, IDC_MULTICART_BIOSEDIT, path);
+		SetDlgItemText(hDlg, IDC_MULTICART_BIOSNOTFOUND,
+			found ? MULTICART_BIOS_FOUND : MULTICART_BIOS_NOT_FOUND);
 		SetDlgItemText(hDlg, IDC_MULTICART_EDITA, multiRomA);
 		SetDlgItemText(hDlg, IDC_MULTICART_EDITB, multiRomB);
 		break;}
@@ -13959,7 +14269,7 @@ struct hotkey_dialog_item {
 // hidden slots — the dialog template lays out 18 of them in a 2x9 grid; tabs that
 // have fewer items leave the trailing ones hidden.
 static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES][MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
-    // Tab 0: Emulation (15 items)
+    // Tab 0: Emulation (17 items)
     {
         // Column 1
         { &CustomKeys.SpeedUp,           &CustomKeysExtra.SpeedUp,           HOTKEYS_LABEL_1_1 },
@@ -13979,7 +14289,8 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { &CustomKeys.ResetGame,         &CustomKeysExtra.ResetGame,         HOTKEYS_LABEL_1_13 },
         { &CustomKeys.SaveScreenShot,    &CustomKeysExtra.SaveScreenShot,    HOTKEYS_LABEL_1_14 },
         { &CustomKeys.QuitS9X,           &CustomKeysExtra.QuitS9X,           HOTKEYS_LABEL_1_12 },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { &CustomKeys.BiosManager,       &CustomKeysExtra.BiosManager,       HOTKEYS_BIOS_MANAGER },
+        { NULL, NULL, _T("") },
     },
     // Tab 1: States — uses dedicated controls (g_savestatesControls), no entries here.
     {
@@ -14041,6 +14352,20 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { &CustomKeys.SFCBoxKeyswitch[2], &CustomKeysExtra.SFCBoxKeyswitch[2], HOTKEYS_KEYSWITCH_ON },
         { &CustomKeys.SFCBoxKeyswitch[3], &CustomKeysExtra.SFCBoxKeyswitch[3], HOTKEYS_KEYSWITCH_2 },
         { &CustomKeys.SFCBoxKeyswitch[4], &CustomKeysExtra.SFCBoxKeyswitch[4], HOTKEYS_KEYSWITCH_3 },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
+    // Tab 5: Emulation -> Game Boy Model. Each one picks the console the menu
+    // entry picks, reloading the cart on it; the order matches the menu's.
+    {
+        { &CustomKeys.GBModel[0], &CustomKeysExtra.GBModel[0], HOTKEYS_GBMODEL_GB },
+        { &CustomKeys.GBModel[1], &CustomKeysExtra.GBModel[1], HOTKEYS_GBMODEL_GBC },
+        { &CustomKeys.GBModel[2], &CustomKeysExtra.GBModel[2], HOTKEYS_GBMODEL_SGB },
+        { &CustomKeys.GBModel[3], &CustomKeysExtra.GBModel[3], HOTKEYS_GBMODEL_SGB2 },
+        { &CustomKeys.GBModel[4], &CustomKeysExtra.GBModel[4], HOTKEYS_GBMODEL_SGBC },
+        { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
@@ -14214,7 +14539,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box")
+				TEXT("SFC Box"), TEXT("Game Boy Model")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

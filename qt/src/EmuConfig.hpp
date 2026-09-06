@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "EmuBinding.hpp"
+#include "biosmanager.h"   // S9X_NUM_BIOS_SLOTS
 
 struct EmuConfig
 {
@@ -129,6 +130,7 @@ struct EmuConfig
     int input_rate;
     bool dynamic_rate_control;
     double dynamic_rate_limit;
+    bool suppress_nrx_glitches;
     bool mute_audio;
     bool mute_audio_during_alternate_speed;
 
@@ -195,6 +197,15 @@ struct EmuConfig
     // Settings.SGB_BIOSPreference; the BIOS menu keeps this in sync.
     int sgb_bios_preference;
 
+    // Use dmg_boot.bin / cgb_boot.bin for the power-on logo when running as
+    // GB/GBC. Persisted as [SGB] GBBIOSEnabled.
+    bool gb_bios_enabled;
+    // Console for GB content; see S9xGBBootPolicy. Persisted as [SGB] GBBootPolicy.
+    int gb_boot_policy;
+
+    // BIOS Manager paths, indexed by S9xBiosSlot. Persisted under [BIOS].
+    std::string bios_paths[S9X_NUM_BIOS_SLOTS];
+
     // Files
     enum FileLocation
     {
@@ -236,7 +247,9 @@ struct EmuConfig
 
     static const int allowed_bindings = 4;
     static const int num_controller_bindings = 18;
-    static const int num_shortcuts = 71;
+    // Then the five Game Boy Model consoles in S9xGBModelHotkeys order, and
+    // the BIOS Manager last.
+    static const int num_shortcuts = 77;
 
     /* Save states are organized in banks of slots, as on win32. The state
      * file extension is the flat index, bank * save_slots_per_bank + slot. */

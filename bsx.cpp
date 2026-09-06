@@ -11,6 +11,7 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "biosmanager.h"
 #include "display.h"
 #include <math.h>
 
@@ -1206,20 +1207,30 @@ static bool8 BSX_LoadBIOS (void)
 	FILE	*fp;
 	bool8	r = FALSE;
 
-	std::string name = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bin";
-
-	fp = fopen(name.c_str(), "rb");
-	if (!fp)
+	// A path set in the BIOS Manager wins over the by-name search and may be a
+	// .zip; a bad file there still falls through to the names in BIOS_DIR.
+	const std::string assigned = S9xResolveBiosPath(S9X_BIOS_BSX);
+	if (!assigned.empty())
 	{
-		name = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bios";
-		fp = fopen(name.c_str(), "rb");
+		std::vector<uint8> img;
+		if (S9xReadBiosImage(assigned.c_str(), img, BIOS_SIZE) && img.size() == BIOS_SIZE)
+		{
+			memcpy(BIOSROM, img.data(), BIOS_SIZE);
+			r = TRUE;
+		}
 	}
 
-	if (fp)
+	const std::string names[2] = {
+		S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bin",
+		S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bios"
+	};
+	for (int i = 0; i < 2 && !r; i++)
 	{
-		size_t	size;
+		fp = fopen(names[i].c_str(), "rb");
+		if (!fp)
+			continue;
 
-		size = fread((void *) BIOSROM, 1, BIOS_SIZE, fp);
+		const size_t size = fread((void *) BIOSROM, 1, BIOS_SIZE, fp);
 		fclose(fp);
 		if (size == BIOS_SIZE)
 			r = TRUE;
@@ -1304,6 +1315,10 @@ void S9xInitBSX (void)
 			{
 				BSX.bootup = FALSE;
 				memset(BIOSROM, 0, BIOS_SIZE);
+				// The reset vector lives in the BIOS, so the cart would boot to a
+				// black screen with nothing said.
+				S9xSetBiosNotice(
+					"Satellaview BS-X BIOS not found - assign it in File -> BIOS Manager.");
 			}
 		}
 	}

@@ -148,6 +148,19 @@ Nintendo is a trademark.")
 #define HOTKEYS_CHEAT_EDITOR_DIALOG TEXT("Cheats Editor Dialog:")
 #define HOTKEYS_CHEAT_SEARCH_DIALOG TEXT("Cheats Search Dialog:")
 #define HOTKEYS_INSERT_COIN TEXT("Insert Coin:")
+#define HOTKEYS_BIOS_MANAGER TEXT("BIOS Manager:")
+// Emulation -> Game Boy Model. Every label has to fit the 72-DLU statics; the
+// tab name supplies the context.
+// Appended to a greyed Emulation -> Game Boy Model entry, so the item says why
+// it cannot be picked instead of leaving it to guesswork.
+#define GBMODEL_MISSING_BIOS TEXT(" (Missing BIOS)")
+#define GBMODEL_EXPERIMENTAL TEXT(" (Experimental)")
+
+#define HOTKEYS_GBMODEL_GB TEXT("Game Boy:")
+#define HOTKEYS_GBMODEL_GBC TEXT("Game Boy Color:")
+#define HOTKEYS_GBMODEL_SGB TEXT("Super Game Boy:")
+#define HOTKEYS_GBMODEL_SGB2 TEXT("Super Game Boy 2:")
+#define HOTKEYS_GBMODEL_SGBC TEXT("Super GB Color:")
 // Keep these short enough for the 72-DLU IDC_LABEL_HK* statics: longer text
 // word-wraps and the clipped second line shows as pixel garbage under the label.
 #define HOTKEYS_KEYSWITCH_1 TEXT("Key Switch 1:")

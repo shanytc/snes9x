@@ -5,6 +5,8 @@
 #include <QMainWindow>
 #include <QTimer>
 #include "EmuCanvas.hpp"
+#include "snes9x.h"   // memmap.h relies on its types/macros being in scope
+#include "memmap.h"   // S9X_NUM_GBBOOT_POLICIES sizes the BIOS menu array
 
 class EmuApplication;
 class CheatsDialog;
@@ -35,6 +37,11 @@ class EmuMainWindow : public QMainWindow
     void pauseContinue();
     bool isActivelyDrawing();
     void openFile();
+    // Emulation -> Game Boy Model, shared by the menu entries and their
+    // hotkeys so both apply the same gates and reload the same way.
+    void setGBBootPolicy(int policy);
+    void openBiosManager();
+    void powerCycle();
     bool openFile(const std::string &filename);
     void recreateUIAssets();
     void shaderChanged();
@@ -63,9 +70,8 @@ class EmuMainWindow : public QMainWindow
     QMenu *recent_menu;
     QMenu *bios_menu = nullptr;
     QAction *bios_menu_action = nullptr;
-    QAction *bios_none_action = nullptr;
-    QAction *bios_sgb1_action = nullptr;
-    QAction *bios_sgb2_action = nullptr;
+    // One per S9xGBBootPolicy, in enum order.
+    QAction *bios_policy_actions[S9X_NUM_GBBOOT_POLICIES] = {};
     void refreshBiosMenu();
 
     QMenu *voicekun_menu = nullptr;

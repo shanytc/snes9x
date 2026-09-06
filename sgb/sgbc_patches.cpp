@@ -514,9 +514,10 @@ const SgbcPatch kPatches[] = {
 	// manual: the Color branch skips the SGB block; enter it where they rejoin
 	{ 0xD1EF, "MEN IN BLACK", "Men in Black - The Series (USA, Europe)", 1,
 	  { { 0x0002B7, 3, { 0x18, 0x67, 0xCD }, { 0xC3, 0x03, 0x03 } } } },
-	// force_jr
+	// manual: the Color branch skips the SGB block outright; rejoin it at the
+	// detect so the border loads without giving up the Color flag
 	{ 0xA0C5, "NHL 2000", "NHL 2000 (USA, Europe)", 1,
-	  { { 0x00021F, 2, { 0x20, 0x4C }, { 0x18, 0x4C } } } },
+	  { { 0x00026C, 1, { 0x5C }, { 0x36 } } } },
 	// force_jr
 	{ 0x5C51, "OHASTA Y&R", "Ohasuta Yama-chan & Raymond (Japan)", 1,
 	  { { 0x010450, 2, { 0x20, 0x09 }, { 0x18, 0x09 } } } },

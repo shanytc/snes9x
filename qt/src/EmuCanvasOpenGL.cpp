@@ -232,6 +232,8 @@ bool EmuCanvasOpenGL::createContext()
     context->make_current();
     gladLoaderLoadGL();
 
+    opengl_thread = QThread::currentThread();
+
     if (config->display_messages == EmuConfig::eOnscreen)
     {
         recreateUIAssets();
@@ -377,25 +379,42 @@ void EmuCanvasOpenGL::paintEvent(QPaintEvent *event)
     if (!context || !isVisible())
         return;
 
-    if (output_data.ready)
-    {
-        if (!dynamic_cast<EmuMainWindow *>(main_window)->isActivelyDrawing())
-            draw();
-        return;
-    }
+    auto paint_function = [&] {
+        if (output_data.ready)
+        {
+            if (!dynamic_cast<EmuMainWindow *>(main_window)->isActivelyDrawing())
+                draw();
+            return;
+        }
 
-    context->resize();
+        context->resize();
 
 #ifdef __APPLE__
-    // This runs on the main thread while the emulation thread owns the
-    // context. NSOpenGL current-context state is per-thread, so the clear
-    // below would otherwise be issued with no context bound at all.
-    context->make_current();
+        // On macOS the context is created on the main thread (see
+        // EmuMainWindow), so opengl_thread is the main thread and the
+        // dispatch below is a no-op while the emulation thread holds the
+        // context current. NSOpenGL current-context state is per-thread, so
+        // the clear would otherwise be issued with no context bound at all.
+        context->make_current();
 #endif
 
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    context->swap_buffers();
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        context->swap_buffers();
+    };
+
+    if (QThread::currentThread() != opengl_thread)
+    {
+        QMetaObject::invokeMethod(opengl_thread,
+                                  "runOnThread",
+                                  Qt::BlockingQueuedConnection,
+                                  Q_ARG(std::function<void()>, paint_function),
+                                  Q_ARG(bool, true));
+    }
+    else
+    {
+        paint_function();
+    }
 }
 
 void EmuCanvasOpenGL::deinit()

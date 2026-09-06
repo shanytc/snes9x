@@ -14,11 +14,6 @@ EmuCanvasVulkan::EmuCanvasVulkan(EmuConfig *config, QWidget *main_window)
     setUpdatesEnabled(false);
     setAutoFillBackground(false);
 
-    setAttribute(Qt::WA_NoSystemBackground, true);
-    setAttribute(Qt::WA_NativeWindow, true);
-    setAttribute(Qt::WA_PaintOnScreen, true);
-    setAttribute(Qt::WA_OpaquePaintEvent, true);
-
     if (QGuiApplication::platformName() == "wayland")
     {
         main_window->createWinId();
@@ -26,6 +21,11 @@ EmuCanvasVulkan::EmuCanvasVulkan(EmuConfig *config, QWidget *main_window)
     }
     else
     {
+        setAttribute(Qt::WA_NoSystemBackground, true);
+        setAttribute(Qt::WA_NativeWindow, true);
+        setAttribute(Qt::WA_PaintOnScreen, true);
+        setAttribute(Qt::WA_OpaquePaintEvent, true);
+
         createWinId();
         window = windowHandle();
     }
@@ -44,7 +44,7 @@ bool EmuCanvasVulkan::initImGui()
         return false;
     }
 
-    ImGui_ImplVulkan_LoadFunctions([](const char *function, void *instance) {
+    ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_1, [](const char *function, void *instance) {
         return VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(*((VkInstance *)instance), function);
     }, &context->instance.get());
 
@@ -67,16 +67,12 @@ bool EmuCanvasVulkan::initImGui()
     init_info.Queue = context->queue;
     // static_cast: on 32-bit targets vulkan-hpp only allows explicit
     // conversion from wrapper types to raw non-dispatchable handles.
+    init_info.PipelineInfoMain.RenderPass = static_cast<VkRenderPass>(context->swapchain->get_render_pass());
     init_info.DescriptorPool = static_cast<VkDescriptorPool>(imgui_descriptor_pool.get());
-    init_info.Subpass = 0;
     init_info.MinImageCount = context->swapchain->get_num_frames();
     init_info.ImageCount = context->swapchain->get_num_frames();
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    ImGui_ImplVulkan_Init(&init_info, static_cast<VkRenderPass>(context->swapchain->get_render_pass()));
+    ImGui_ImplVulkan_Init(&init_info);
 
-    auto cmd = context->begin_cmd_buffer();
-    ImGui_ImplVulkan_CreateFontsTexture(cmd);
-    context->end_cmd_buffer();
     context->wait_idle();
 
     return true;
@@ -324,9 +320,9 @@ void EmuCanvasVulkan::deinit()
     {
         if (context)
             context->wait_idle();
-        imgui_descriptor_pool.reset();
         ImGui_ImplVulkan_Shutdown();
         ImGui::DestroyContext();
+        imgui_descriptor_pool.reset();
     }
 
     simple_output.reset();

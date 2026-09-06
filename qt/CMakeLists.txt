@@ -154,7 +154,6 @@ else()
     list(APPEND INCLUDES ${CURL_INCLUDE_DIRS})
     list(APPEND LIBS ${CURL_LIBRARIES})
 endif()
-list(APPEND INCLUDES ${Qt6Gui_PRIVATE_INCLUDE_DIRS})
 
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)

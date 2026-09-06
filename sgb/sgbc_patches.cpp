@@ -283,6 +283,9 @@ const SgbcPatch kPatches[] = {
 	// manual: console type 1 (CGB) runs the SGB init too
 	{ 0x87FD, "HOLY MAGIC     \200", "Holy Magic Century (Europe) (En,Fr,De)", 1,
 	  { { 0x0001B9, 1, { 0x02 }, { 0x01 } } } },
+	// display quirk only: *_TRN payload on the Color screen after the transfer
+	{ 0xE092, "SHOGI OH", "Honkaku Shougi - Shougi Ou (Japan)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
 	// nop_skip_branch
 	{ 0x6920, "MAHJONGOH", "Honkaku Yonin Uchi Mahjong - Mahjong Ou (Japan)", 1,
 	  { { 0x0003CD, 3, { 0xC2, 0xD8, 0x03 }, { 0x00, 0x00, 0x00 } } } },

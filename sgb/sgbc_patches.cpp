@@ -330,9 +330,14 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0xB9F1, "ITS W_RALLYARLJ\200", "It's a World Rally (Japan)", 1,
 	  { { 0x0001D2, 3, { 0xCA, 0xDD, 0x01 }, { 0x00, 0x00, 0x00 } } } },
-	// retarget_jr_to_sgb_entry
-	{ 0x7C1B, "JINSEI TOMOACJJ\200", "Jinsei Game - Tomodachi Takusan Tsukurou yo! (Japan)", 1,
-	  { { 0x002F0E, 2, { 0x18, 0x4A }, { 0x18, 0x00 } } } },
+	// manual: SGB route with the CGB bit set - the script's platform gate reads a
+	// constant SGB, the palette loader takes CGB colours, the SGB handler uploads them
+	{ 0x7C1B, "JINSEI TOMOACJJ\200", "Jinsei Game - Tomodachi Takusan Tsukurou yo! (Japan)", 5,
+	  { { 0x002F0E, 2, { 0x18, 0x4A }, { 0x18, 0x00 } },
+	    { 0x002F23, 1, { 0x08 }, { 0x09 } },
+	    { 0x0018C4, 3, { 0xFA, 0x97, 0xC3 }, { 0x3E, 0x08, 0x00 } },
+	    { 0x003375, 1, { 0x0A }, { 0x02 } },
+	    { 0x0207F1, 2, { 0xB2, 0x47 }, { 0xC4, 0x47 } } } },
 	// manual: CGB type runs the SGB init, palette gates take $11
 	{ 0x20D7, "TUWAMONO   A55J\200", "Joryuu Janshi ni Chousen GB - Watashi-tachi ni Chousen Shitene! (Japan)", 3,
 	  { { 0x0001FC, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },

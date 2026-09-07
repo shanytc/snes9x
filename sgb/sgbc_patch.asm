@@ -1,9 +1,12 @@
 ; ===========================================================================
 ;  Super Game Boy Color patch
 ;
+;  The BIOS runs in bank $00 (bank $80 is its FastROM mirror), so every JML
+;  back into it names bank $00.
+;
 ;  Three hooks, all exact-size drop-ins:
 ;    $80:848F  JSR nullsub_1 / JMP $847B  ->  JSL sgbc_frame  / BRA $847B
-;    $80:B9BE  LDA $006000                ->  JML sgbc_tick
+;    $80:BA84  LDA $0280 / EOR #1         ->  JML sgbc_gbframe / NOP
 ;    $80:C4BF  SEI / LDA $4210            ->  JML sgbc_commit
 ; ===========================================================================
 
@@ -23,7 +26,7 @@ ST        = $CE00
 ST_MAG0   = ST+0
 ST_MAG1   = ST+1
 ST_STATE  = ST+2
-ST_BAND   = ST+3        ; last ICD2 band seen, to service once a GB frame
+ST_BAND   = ST+3        ; unused since the per-frame hook moved to sub_80BA84
 ST_FIXES  = ST+4        ; diagnostic: reassert count, saturating
 ST_TMP    = ST+5
 ST_SAVE   = ST+8
@@ -108,12 +111,12 @@ sf_done:
     RTL
 
 ; ===========================================================================
-;  sgbc_tick -- displaces the LDA $006000 at the head of sub_80B9BE, the ICD2
-;  row scanner, which is the one thing that keeps running once the cart owns
-;  the screen.  
+;  sgbc_gbframe -- displaces the LDA $0280 / EOR #1 at the head of sub_80BA84,
+;  which the ICD2 row scanner calls once per Game Boy frame (band wrap).  Cold:
+;  the scanner's own entry is polled hundreds of times a frame.
 ; ===========================================================================
     .width ax=8
-sgbc_tick:
+sgbc_gbframe:
     PHP
     PHB
     REP #$30
@@ -125,25 +128,21 @@ sgbc_tick:
     LDA #$7E
     PHA
     PLB
-    LDA BAND
-    CMP ST_BAND
-    BEQ st_out              ; same band as last time: nothing new
-    STA ST_BAND
-    CMP #0
-    BNE st_out              ; only the wrap to band 0 is once-a-GB-frame
     LDA ST_MAG0             ; sgbc_frame owns initialisation; if it has not
     CMP #MAGIC0             ; run yet there is nothing to maintain
-    BNE st_out
+    BNE sg_out
     JSR service
-st_out:
+sg_out:
     REP #$30
     PLY
     PLX
     PLA
     PLB
     PLP
-    LDA $006000             ; the instruction we displaced
-    JML $80B9C2
+    .width ax=8             ; PLP put M back; the assembler cannot see that
+    LDA $0280               ; the two instructions we displaced (DB = $7E here)
+    EOR #1
+    JML $00BA89
 
 ; ===========================================================================
 ;  sgbc_commit -- displaces the SEI at the head of sub_80C4BF, the wrapper
@@ -180,7 +179,7 @@ sc_out:
     PLB
     PLP
     LDA $004210             ; the displaced LDA RDNMI
-    JML $80C4C3
+    JML $00C4C3
 
 ; ===========================================================================
 ;  service -- keep the keys installed.  Called from both per-frame hooks.
@@ -272,33 +271,30 @@ sp_out:
     RTS
 
 ; ---------------------------------------------------------------------------
-;  check_keys -- carry set when every keyed entry still holds its key.
+;  check_keys -- carry set when the keys are still installed.  Once a GB frame
+;  and inside the scanner, so cheap: one entry per buffer a palette write
+;  cannot miss (PAL01/03 hit palette 0, PAL23/12 palette 2, schemes LIVEPAL).
 ; ---------------------------------------------------------------------------
     .width ax=8
 check_keys:
-    LDY #2
-ck_pal:
-    LDX #0
-ck_col:
-    LDA sgbc_keys,X
-    CMP SGBPAL,Y
+    LDA SGBPAL+2            ; palette 0, color 1
+    CMP #$1F
     BNE ck_bad
-    INX
-    INY
-    CPX #6
-    BNE ck_col
-    INY
-    INY
-    CPY #34
-    BNE ck_pal
-    LDX #0
-ck_live:
-    LDA sgbc_keys,X
-    CMP LIVEPAL+2,X
+    LDA SGBPAL+3
+    CMP #$7C
     BNE ck_bad
-    INX
-    CPX #6
-    BNE ck_live
+    LDA SGBPAL+18           ; palette 2, color 1
+    CMP #$1F
+    BNE ck_bad
+    LDA SGBPAL+19
+    CMP #$7C
+    BNE ck_bad
+    LDA LIVEPAL+2
+    CMP #$1F
+    BNE ck_bad
+    LDA LIVEPAL+3
+    CMP #$7C
+    BNE ck_bad
     SEC
     RTS
 ck_bad:

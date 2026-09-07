@@ -754,18 +754,22 @@ const SgbcPatch kPatches[] = {
 	  { { 0x063205, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
 	    { 0x0FE27B, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } },
 	    { 0x0FE322, 3, { 0xAF, 0xE0, 0x47 }, { 0x3D, 0xE0, 0x40 } } } },
-	// nop_skip_branch
-	{ 0x4527, "ROBO BOM", "Robot Poncots - Comic Bom Bom Special Version (Japan)", 1,
-	  { { 0x063145, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0x9E0A, "ROBO MOON", "Robot Poncots - Moon Version (Japan)", 1,
-	  { { 0x063145, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0x0453, "ROBOPON STAR", "Robot Poncots - Star Version (Japan)", 1,
-	  { { 0x063143, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
-	// nop_skip_branch
-	{ 0xFD8C, "ROBOPON SUN", "Robot Poncots - Sun Version (Japan)", 1,
-	  { { 0x063143, 2, { 0x28, 0x2A }, { 0x00, 0x00 } } } },
+	// manual: SGB detect on the CGB path, $11 passes the border gate
+	{ 0x4527, "ROBO BOM", "Robot Poncots - Comic Bom Bom Special Version (Japan)", 2,
+	  { { 0x063145, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
+	    { 0x0FE36C, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } } } },
+	// manual: SGB detect on the CGB path, $11 passes the border gate
+	{ 0x9E0A, "ROBO MOON", "Robot Poncots - Moon Version (Japan)", 2,
+	  { { 0x063145, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
+	    { 0x0FE2AA, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } } } },
+	// manual: SGB detect on the CGB path, $11 passes the border gate
+	{ 0x0453, "ROBOPON STAR", "Robot Poncots - Star Version (Japan)", 2,
+	  { { 0x063143, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
+	    { 0x0FE123, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } } } },
+	// manual: SGB detect on the CGB path, $11 passes the border gate
+	{ 0xFD8C, "ROBOPON SUN", "Robot Poncots - Sun Version (Japan)", 2,
+	  { { 0x063143, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
+	    { 0x0FE125, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } } } },
 	// manual: SGB detect wins over the Color branch; keep the type
 	{ 0xE12A, "TIMENETPAST", "Sanrio Timenet - Kako Hen (Japan)", 2,
 	  { { 0x010004, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },

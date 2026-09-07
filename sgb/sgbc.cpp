@@ -188,15 +188,40 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 // A frame later than the command: the cart may still be painting now.
 void SgbcTrnHold::Arm() { arm_ = 2; }
 
-void SgbcTrnHold::OnVBlank(const uint8_t *raw_frame)
+void SgbcTrnHold::Scanline(const Ppu &p)
+{
+	if (p.ly >= GB_SCREEN_HEIGHT) return;
+	const uint8_t *const lay = &p.layer[p.ly * GB_SCREEN_WIDTH];
+	uint8_t *const out = &view_[p.ly * GB_SCREEN_WIDTH];
+	const uint8_t  lcdc  = p.lcdc;
+	const uint16_t bgmap = (lcdc & 0x08) ? 0x1C00 : 0x1800;
+	const uint16_t wmap  = (lcdc & 0x40) ? 0x1C00 : 0x1800;
+	const uint32_t wline = static_cast<uint32_t>(p.om.window_line);
+	for (int x = 0; x < GB_SCREEN_WIDTH; ++x)
+	{
+		if (lay[x] == GB_PIXEL_OBJ) { out[x] = p.scanline_raw[x]; continue; }
+		if (!(lcdc & 0x01))         { out[x] = 0; continue; }
+		uint16_t map; uint32_t px, py;
+		if (lay[x] == GB_PIXEL_WINDOW) { map = wmap;  px = static_cast<uint32_t>(x + 7 - p.wx); py = wline; }
+		else                           { map = bgmap; px = static_cast<uint8_t>(x + p.scx); py = static_cast<uint8_t>(p.ly + p.scy); }
+		const uint8_t tn = p.vram[map + ((py & 0xFF) >> 3) * 32 + ((px & 0xFF) >> 3)];
+		uint16_t addr = (lcdc & 0x10) ? static_cast<uint16_t>(tn * 16)
+		                              : static_cast<uint16_t>(0x1000 + static_cast<int8_t>(tn) * 16);
+		addr = static_cast<uint16_t>(addr + (py & 7) * 2);
+		const uint8_t bit = static_cast<uint8_t>(7 - (px & 7));
+		out[x] = static_cast<uint8_t>((((p.vram[addr + 1] >> bit) & 1) << 1) | ((p.vram[addr] >> bit) & 1));
+	}
+}
+
+void SgbcTrnHold::OnVBlank()
 {
 	if (arm_)
 	{
 		// One frame is all the tail of the read needs, and short enough not to
 		// reach the next transfer of a back-to-back run.
-		if (--arm_ == 0 && raw_frame)
+		if (--arm_ == 0)
 		{
-			std::memcpy(frame_, raw_frame, sizeof frame_);
+			std::memcpy(frame_, view_, sizeof frame_);
 			hold_ = 1;
 		}
 	}
@@ -204,9 +229,10 @@ void SgbcTrnHold::OnVBlank(const uint8_t *raw_frame)
 		--hold_;
 }
 
-const uint8_t *SgbcTrnHold::Line(const uint8_t *live, uint32_t ly) const
+const uint8_t *SgbcTrnHold::Line(uint32_t ly) const
 {
-	return (hold_ && ly < GB_SCREEN_HEIGHT) ? &frame_[ly * GB_SCREEN_WIDTH] : live;
+	const uint8_t *src = hold_ ? frame_ : view_;
+	return &src[(ly < GB_SCREEN_HEIGHT ? ly : 0) * GB_SCREEN_WIDTH];
 }
 
 } // namespace SGB

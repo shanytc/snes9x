@@ -1963,7 +1963,8 @@ void Emulator::RunCycles(int32_t tcycles)
 			return;
 		}
 		uint8_t decoded[4096];
-		DecodeBorderCapture(impl_->ppu.raw_framebuffer, decoded);
+		DecodeBorderCapture((impl_->sgbc && impl_->ppu.cgb) ? impl_->sgbc_trn.Frame()
+		                                                    : impl_->ppu.raw_framebuffer, decoded);
 		const uint8_t cmd =
 			(impl_->border_capture.stage == Impl::BorderCapture::ChrTrn)
 				? static_cast<uint8_t>(0x13)
@@ -2332,7 +2333,7 @@ void Emulator::OnPpuVBlank()
 	impl_->icd2.frame_6001_count = 0;
 	++g_gb_vblank_count;
 
-	impl_->sgbc_trn.OnVBlank(impl_->ppu.raw_framebuffer);
+	impl_->sgbc_trn.OnVBlank();
 
 	// Clean up VRAM areas the BIOS uses for the boot-handoff capture.
 	// GB-SNES scanline timing drift makes the BIOS's IRQ DMA read from the
@@ -2426,12 +2427,13 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 	// byte is the raw 2bpp tile index — on a DMG that is exactly what the LCD
 	// carries, because a transferring game sets an identity BGP. Under Super
 	// Game Boy Color the GB renders in color, so `pixels` is CGB output and
-	// the border decodes to garbage. Feed the raw indices instead; the BIOS's
-	// own drawing of the GB area is keyed and overpainted anyway.
+	// the border decodes to garbage. Feed the line a DMG would fetch instead;
+	// the BIOS's own drawing of the GB area is keyed and overpainted anyway.
 	if (impl_->sgbc && impl_->ppu.cgb && impl_->ppu.ly < GB_SCREEN_HEIGHT)
-		pixels = impl_->sgbc_trn.Line(
-			&impl_->ppu.raw_framebuffer[impl_->ppu.ly * GB_SCREEN_WIDTH],
-			impl_->ppu.ly);
+	{
+		impl_->sgbc_trn.Scanline(impl_->ppu);
+		pixels = impl_->sgbc_trn.Line(impl_->ppu.ly);
+	}
 
 	const uint8_t bank = static_cast<uint8_t>(icd.sgb_bank & 0x03);
 	const uint8_t row  = static_cast<uint8_t>(icd.sgb_row  & 0x07);

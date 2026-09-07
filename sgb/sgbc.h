@@ -66,13 +66,19 @@ class SgbcTrnHold
 public:
 	void Reset() { arm_ = 0; hold_ = 0; }
 	void Arm();                                   // a CHR_TRN / PCT_TRN went out
-	void OnVBlank(const uint8_t *raw_frame);      // that frame's raw indices
+	// The line a DMG would fetch from this VRAM - bank-0 map and tiles, no CGB
+	// attributes - which is what a DMG-era BIOS reads off the ring. Once per
+	// finished scanline; sprites stay as drawn.
+	void Scanline(const Ppu &ppu);
+	void OnVBlank();                              // latch the frame just rendered
 	// The scanline to feed the capture ring: the held frame while one is held.
-	const uint8_t *Line(const uint8_t *live, uint32_t ly) const;
+	const uint8_t *Line(uint32_t ly) const;
+	const uint8_t *Frame() const { return view_; }   // this frame's DMG view
 
 private:
 	uint8_t arm_  = 0;   // VBlanks until the frame is latched
 	uint8_t hold_ = 0;   // VBlanks the latched frame is served for
+	uint8_t view_[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 	uint8_t frame_[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 };
 

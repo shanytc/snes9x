@@ -38,6 +38,10 @@ static const uint32_t SGBC_QUIRK_BGP_BLANK = 1u << 0;
 //   (BGP all shade 0, or LCD/BG off) and the CGB frame looks like payload (a
 //   tile grid: few colours, very dense horizontal colour changes).
 static const uint32_t SGBC_QUIRK_HOLD_PAYLOAD = 1u << 1;
+//   DMG_BLANK: the cart's SGB path blanks its screen the DMG way - BGP, OBP0
+//   and OBP1 all zero, a flat shade-0 frame there. CGB rendering ignores all
+//   three and keeps the sprites up; paint the pane in colour 0 instead.
+static const uint32_t SGBC_QUIRK_DMG_BLANK = 1u << 2;
 
 // One byte run in a cart image, up to three bytes (a jump, a store): `old`
 // is verified before `neu` is written.

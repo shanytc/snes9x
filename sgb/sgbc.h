@@ -30,6 +30,8 @@ struct SgbcPane
 	uint8_t         bgp;         // the cart's BGP right now
 	uint8_t         fb_bgp;      // and the pair that drew color_fb - what the
 	uint8_t         fb_lcdc;     // pane is showing, which the live pair is not
+	uint8_t         fb_obp0;     // OBP0/OBP1 that drew color_fb, for DMG_BLANK
+	uint8_t         fb_obp1;
 	uint16_t        fallback[3]; // shades 1-3 when !color
 	uint32_t        quirks;      // SGBC_QUIRK_* for this cart
 };
@@ -51,8 +53,9 @@ private:
 	uint8_t ref_[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 };
 
-// Paint the GB pane of a composed 256x224 SNES frame.
-void SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in);
+// Paint the GB pane of a composed 256x224 SNES frame. True when DMG_BLANK
+// painted it flat: colour 0 by the cart's own registers.
+bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in);
 
 // A Color cart can swap its *_TRN screen mid-frame (GDMA) while the BIOS is
 // still draining the payload off the capture ring, which tears it. Repeats the

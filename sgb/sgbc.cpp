@@ -100,7 +100,7 @@ bool SgbcBootCover::Hold(const Ppu &ppu)
 	return blank || std::memcmp(raw, ref_, sizeof ref_) == 0;
 }
 
-void SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
+bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 {
 
 	// Only while the cart is showing no picture of its own - BGP mapping every
@@ -119,13 +119,18 @@ void SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 	                  (!in.color || LooksLikePayload(in.color_fb));
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
 	if (!dest || width > SNES_WIDTH ||
-	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return;
+	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return false;
 
 	// A cart that blanks the DMG way - BGP mapping every index to shade 0 -
 	// means it for the pane too, but the Color renderer ignores BGP, so the
 	// *_TRN payload the blank was hiding stays up. Only carts whose table row
 	// asks for this are affected.
 	const bool bgp_blank = (in.quirks & SGBC_QUIRK_BGP_BLANK) != 0;
+
+	// The cart's SGB path blanks the DMG way - BGP, OBP0 and OBP1 all zero, a
+	// flat colour-0 frame there - but the Color renderer keeps its sprites up.
+	const bool dmg_blank = (in.quirks & SGBC_QUIRK_DMG_BLANK) && in.fb_valid &&
+	                       in.fb_bgp == 0 && in.fb_obp0 == 0 && in.fb_obp1 == 0;
 
 	// The keys and the backdrop exactly as the PPU drew each line - its
 	// brightness and backdrop at render time, not now: the BIOS force-blanks
@@ -168,15 +173,16 @@ void SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 				// point BGP means nothing to a Color game - Dragon Dance leaves
 				// it at $00 for the whole boot while drawing in colour, and
 				// blanking on it there erases the picture.
-				if (hold)                  dst[x] = back;
+				if (hold || dmg_blank)     dst[x] = back;
 				else if (in.color)         dst[x] = BgrToHostBright(src[x], xb);
 				else if (bgp_blank && !sh) dst[x] = back;
 				else                       dst[x] = sh ? mono[sh - 1] : back;
 			}
-			else if (px == back && in.color && !hold)
+			else if (px == back && in.color && !hold && !dmg_blank)
 				dst[x] = BgrToHostBright(src[x], xb);
 		}
 	}
+	return dmg_blank;
 }
 
 // A frame later than the command: the cart may still be painting now.

@@ -216,36 +216,48 @@ const SgbcPatch kPatches[] = {
 	{ 0x1689, "FIFA 2000", "FIFA 2000 (USA, Europe)", 2,
 	  { { 0x000349, 2, { 0x20, 0x27 }, { 0x18, 0x27 } },
 	    { 0x000384, 2, { 0xE0, 0x9E }, { 0x00, 0x00 } } } },
-	// manual: run the Color init, then fall into the border routine past its gate
+	// manual: run the Color init, then fall into the border routine past its gate;
+	// DMG_BLANK: its screen changes blank through BGP/OBP0/OBP1 = 0
 	{ 0x6517, "G&W GALLERY2", "Game & Watch Gallery 2 (USA, Europe)", 3,
 	  { { 0x000C11, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
 	    { 0x000C5E, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
-	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } } },
-	// manual: run the Color init, then fall into the border routine past its gate
+	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } },
+	  SGBC_QUIRK_DMG_BLANK },
+	// manual: run the Color init, then fall into the border routine past its gate;
+	// DMG_BLANK: its screen changes blank through BGP/OBP0/OBP1 = 0
 	{ 0x8133, "G&WGALLERY3AGQE\200", "Game & Watch Gallery 3 (USA, Europe)", 3,
 	  { { 0x000DC5, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
 	    { 0x000E07, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
-	    { 0x000E17, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1D, 0x0E } } } },
-	// manual: run the Color init, then fall into the border routine past its gate
+	    { 0x000E17, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1D, 0x0E } } },
+	  SGBC_QUIRK_DMG_BLANK },
+	// manual: run the Color init, then fall into the border routine past its gate;
+	// DMG_BLANK: its screen changes blank through BGP/OBP0/OBP1 = 0
 	{ 0x6EB3, "GB GALLERY2", "Game Boy Gallery 2 (Japan) (Possible Proto) (NP)", 3,
 	  { { 0x000C11, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
 	    { 0x000C5E, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
-	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } } },
-	// manual: run the Color init, then fall into the border routine past its gate
+	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } },
+	  SGBC_QUIRK_DMG_BLANK },
+	// manual: run the Color init, then fall into the border routine past its gate;
+	// DMG_BLANK: its screen changes blank through BGP/OBP0/OBP1 = 0
 	{ 0xDACE, "GB GALLERY3", "Game Boy Gallery 3 (Australia)", 3,
 	  { { 0x000C11, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
 	    { 0x000C5E, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
-	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } } },
-	// manual: run the Color init, then fall into the border routine past its gate
+	    { 0x000C6E, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x74, 0x0C } } },
+	  SGBC_QUIRK_DMG_BLANK },
+	// manual: run the Color init, then fall into the border routine past its gate;
+	// DMG_BLANK: its screen changes blank through BGP/OBP0/OBP1 = 0
 	{ 0x3192, "GB GALLERY3AGQJ\200", "Game Boy Gallery 3 (Japan)", 3,
 	  { { 0x000DC6, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
 	    { 0x000E08, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
-	    { 0x000E18, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1E, 0x0E } } } },
-	// manual: run the Color init, then fall into the border routine past its gate
+	    { 0x000E18, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1E, 0x0E } } },
+	  SGBC_QUIRK_DMG_BLANK },
+	// manual: run the Color init, then fall into the border routine past its gate;
+	// DMG_BLANK: its screen changes blank through BGP/OBP0/OBP1 = 0
 	{ 0x2458, "GB GALLERY4AGQU\200", "Game Boy Gallery 4 (Australia)", 3,
 	  { { 0x000DC5, 3, { 0xEA, 0x00, 0xC7 }, { 0x00, 0x00, 0x00 } },
 	    { 0x000E07, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
-	    { 0x000E17, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1D, 0x0E } } } },
+	    { 0x000E17, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1D, 0x0E } } },
+	  SGBC_QUIRK_DMG_BLANK },
 	// manual: the SGB branch maps the console type; give it the Color value
 	{ 0x3E6E, "GLOCAL HEXCITE", "Glocal Hexcite (Japan)", 1,
 	  { { 0x00071E, 1, { 0x02 }, { 0x04 } } } },

@@ -290,6 +290,7 @@ struct Emulator::Impl
 	bool        cgb_overlay_valid = false;
 	uint8_t     cgb_overlay_bgp  = 0;   // BGP/LCDC as of that snapshot
 	uint8_t     cgb_overlay_lcdc = 0;
+	uint8_t     cgb_overlay_obp0 = 0, cgb_overlay_obp1 = 0;
 	uint8_t     cgb_overlay_ly = 0;
 
 	// BIOS-mode MASK_EN: bios_mask_pane is a ROLLING copy of the last
@@ -302,6 +303,7 @@ struct Emulator::Impl
 	bool        bios_mask_valid = false;
 	bool        bios_mask_roll  = false;  // bios_mask_pane holds a rolling pre-mask copy
 	uint8_t     bios_mask_mode  = 0;   // last non-cancel mode covered with
+	bool        sgbc_dmg_blank  = false;  // the Color compositor painted a DMG_BLANK pane
 
 	// The cart has finished its power-on SGB setup: it sent the MASK_EN
 	// cancel that says its border and palettes are in place. Protocol, not
@@ -686,6 +688,7 @@ void Emulator::Reset()
 	impl_->cgb_overlay_valid = false;
 	impl_->bios_mask_valid = false;
 	impl_->bios_mask_roll  = false;
+	impl_->sgbc_dmg_blank  = false;
 	impl_->bios_mask_mode  = 0;
 	impl_->cpu.Reset();
 	MemReset(impl_->mem, impl_->CgbActive());
@@ -1942,6 +1945,8 @@ void Emulator::RunCycles(int32_t tcycles)
 			impl_->cgb_overlay_valid = true;
 			impl_->cgb_overlay_bgp   = impl_->ppu.bgp;
 			impl_->cgb_overlay_lcdc  = impl_->ppu.lcdc;
+			impl_->cgb_overlay_obp0  = impl_->ppu.obp0;
+			impl_->cgb_overlay_obp1  = impl_->ppu.obp1;
 		}
 		impl_->cgb_overlay_ly = ly;
 	}
@@ -2617,6 +2622,7 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 {
 	// Super Game Boy Color only, and only on a Color cart: a plain SGB session
 	// and a mono cart both stop here. The painting itself lives in sgbc.cpp.
+	impl_->sgbc_dmg_blank = false;
 	if (!impl_->has_rom || !dest || !impl_->sgbc || !impl_->ppu.cgb) return;
 
 	// Keyed only once the cart has taken over. Until then (splash, logo
@@ -2633,6 +2639,8 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	in.bgp     = impl_->ppu.bgp;
 	in.fb_bgp  = impl_->cgb_overlay_bgp;
 	in.fb_lcdc = impl_->cgb_overlay_lcdc;
+	in.fb_obp0 = impl_->cgb_overlay_obp0;
+	in.fb_obp1 = impl_->cgb_overlay_obp1;
 	in.quirks = impl_->sgbc_quirks;
 
 	// The patched BIOS stashes the palette its keys displaced in its state
@@ -2644,7 +2652,7 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 			? static_cast<uint16_t>(st[8 + k * 2] | (st[9 + k * 2] << 8))
 			: impl_->sgb_state.active[0].colors[k + 1];
 
-	SgbcComposePane(dest, pitch_pixels, in);
+	impl_->sgbc_dmg_blank = SgbcComposePane(dest, pitch_pixels, in);
 }
 
 // BIOS-mode MASK_EN. The BIOS's own freeze never engages under our slaving —
@@ -2707,7 +2715,9 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 			stale = std::memcmp(dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X,
 			                    impl_->bios_mask_under + y * GB_SCREEN_WIDTH,
 			                    GB_SCREEN_WIDTH * sizeof(uint16_t)) == 0;
-		if (!stale)
+		// A DMG_BLANK pane is colour 0 by the cart's own registers - what SGB2
+		// shows past the cancel - so there is nothing there to wait out.
+		if (!stale || impl_->sgbc_dmg_blank)
 		{
 			impl_->bios_mask_valid = false;
 			return;

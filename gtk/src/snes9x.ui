@@ -1448,14 +1448,51 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkImageMenuItem" id="save_spc_item">
-                        <property name="label" translatable="yes">Save SPC…</property>
+                      <object class="GtkMenuItem" id="save_other_item">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Save Ot_her</property>
                         <property name="use_underline">True</property>
-                        <property name="image">image4</property>
-                        <property name="use_stock">False</property>
-                        <signal name="activate" handler="save_spc" swapped="no"/>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="save_other_item_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkImageMenuItem" id="save_spc_item">
+                                <property name="label" translatable="yes">Save SPC…</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="image">image4</property>
+                                <property name="use_stock">False</property>
+                                <signal name="activate" handler="save_spc" swapped="no"/>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="save_screenshot_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Save S_creenshot</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="save_sram_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Save S-_RAM Data</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="save_mempack_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Save _Memory Pack</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
                       </object>
                     </child>
                     <child>

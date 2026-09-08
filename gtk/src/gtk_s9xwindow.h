@@ -52,6 +52,9 @@ class Snes9xWindow : public GtkBuilderWindow
     void state_preview_dialog(bool is_save);
     void configure_widgets();
     void save_spc_dialog();
+    void save_screenshot();
+    void save_sram();
+    void save_memory_pack();
     bool try_open_rom(const std::string &filename);
     std::string prompt_rename_msu1_pack(const std::string &filename);
     std::string open_movie_dialog(bool readonly);

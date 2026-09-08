@@ -22,6 +22,11 @@ class Snes9xController
     void loadUndoState();
     bool saveState(const std::string &filename);
     bool saveState(int slot);
+    void saveSPC();
+    void takeScreenshot(bool paused);
+    bool saveSRAM();
+    bool saveMemoryPack();
+    bool hasMemoryPack();
     void updateSettings(EmuConfig *config);
     void updateBindings(const EmuConfig * const config);
     void reportBinding(EmuBinding b, bool active);

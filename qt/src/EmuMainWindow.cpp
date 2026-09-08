@@ -383,6 +383,43 @@ void EmuMainWindow::createWidgets()
     });
     core_actions.push_back(load_preview_item);
 
+    file_menu->addSeparator();
+
+    // File->Save Other submenu: the dialog-less exports from the win32 File menu.
+    auto save_other_menu = new QMenu(tr("Save Ot&her"), file_menu);
+
+    auto save_spc_item = save_other_menu->addAction(tr("Save &SPC Data"));
+    connect(save_spc_item, &QAction::triggered, [&] {
+        app->saveSPC();
+    });
+    core_actions.push_back(save_spc_item);
+
+    auto save_screenshot_item = save_other_menu->addAction(tr("Save S&creenshot"));
+    connect(save_screenshot_item, &QAction::triggered, [&] {
+        app->takeScreenshot();
+    });
+    core_actions.push_back(save_screenshot_item);
+
+    auto save_sram_item = save_other_menu->addAction(tr("Save S-&RAM Data"));
+    connect(save_sram_item, &QAction::triggered, [&] {
+        app->saveSRAM();
+    });
+    core_actions.push_back(save_sram_item);
+
+    auto save_mempack_item = save_other_menu->addAction(tr("Save &Memory Pack"));
+    connect(save_mempack_item, &QAction::triggered, [&] {
+        app->saveMemoryPack();
+    });
+    core_actions.push_back(save_mempack_item);
+    // Only BS-X and Sufami-style multicarts carry a memory pack, so re-check
+    // each time the submenu opens (the game may have changed since).
+    connect(save_other_menu, &QMenu::aboutToShow, this, [this, save_mempack_item] {
+        save_mempack_item->setEnabled(app->isCoreActive() && app->hasMemoryPack());
+    });
+
+    file_menu->addMenu(save_other_menu);
+    file_menu->addSeparator();
+
     auto languages = EmuPoTranslator::availableLanguages();
     if (languages.size() > 1)
     {

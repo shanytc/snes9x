@@ -83,6 +83,11 @@ struct EmuApplication
     std::string getStateFolder();
     std::string getStateFilename(int slot);
     void loadUndoState();
+    void saveSPC();
+    void takeScreenshot();
+    void saveSRAM();
+    void saveMemoryPack();
+    bool hasMemoryPack();
     uint8_t getSoundChannelMask();
     void setSoundChannelMask(uint8_t mask);
     void startGame();

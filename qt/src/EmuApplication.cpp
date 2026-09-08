@@ -834,6 +834,42 @@ void EmuApplication::loadUndoState()
     });
 }
 
+void EmuApplication::saveSPC()
+{
+    emu_thread->runOnThread([&] {
+        core->saveSPC();
+    });
+}
+
+void EmuApplication::takeScreenshot()
+{
+    // A paused thread still services runOnThread, it just doesn't render, so
+    // tell the core whether to write the current screen itself.
+    bool paused = isPaused();
+    emu_thread->runOnThread([&, paused] {
+        core->takeScreenshot(paused);
+    });
+}
+
+void EmuApplication::saveSRAM()
+{
+    emu_thread->runOnThread([&] {
+        core->saveSRAM();
+    });
+}
+
+void EmuApplication::saveMemoryPack()
+{
+    emu_thread->runOnThread([&] {
+        core->saveMemoryPack();
+    });
+}
+
+bool EmuApplication::hasMemoryPack()
+{
+    return core->hasMemoryPack();
+}
+
 uint8_t EmuApplication::getSoundChannelMask()
 {
     return S9xGetSoundChannelMask();

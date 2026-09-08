@@ -13,6 +13,7 @@ namespace fs = std::filesystem;
 #include "gfx.h"
 #include "ppu.h"
 #include "snapshot.h"
+#include "screenshot.h"
 #include "controls.h"
 #include "cheats.h"
 #include "movie.h"
@@ -1120,6 +1121,74 @@ void Snes9xController::softReset()
 bool Snes9xController::saveState(int slot)
 {
     return saveState(save_slot_path(slot).string());
+}
+
+// File->Save Other: the dialog-less exports from the win32 File menu.
+void Snes9xController::saveSPC()
+{
+    if (!active)
+        return;
+
+    // Same as the SaveSPC hotkey: the DSP writes the numbered .spc file into
+    // the export folder on the next key-on, so the dump starts cleanly.
+    S9xDumpSPCSnapshot();
+    S9xSetInfoString("Saving SPC data");
+}
+
+void Snes9xController::takeScreenshot(bool paused)
+{
+    if (!active)
+        return;
+
+    // The next rendered frame writes the file (S9xEndScreenRefresh), which for
+    // a paused game would only happen on resume: capture it right away.
+    Settings.TakeScreenshot = true;
+    if (paused)
+        S9xDoScreenshot(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
+}
+
+bool Snes9xController::saveSRAM()
+{
+    if (!active)
+        return false;
+
+    auto filename = S9xGetFilename(".srm", SRAM_DIR);
+    if (Memory.SaveSRAM(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return true;
+    }
+
+    fprintf(stderr, "Couldn't save S-RAM file: %s\n", filename.c_str());
+    S9xSetInfoString("Couldn't save S-RAM file");
+    return false;
+}
+
+bool Snes9xController::saveMemoryPack()
+{
+    if (!active)
+        return false;
+
+    // Numbered like win32 so repeated dumps never overwrite each other.
+    auto filename = S9xGetFilenameInc(".bs", SRAM_DIR);
+    if (Memory.SaveMPAK(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return true;
+    }
+
+    fprintf(stderr, "Couldn't save Memory Pack file: %s\n", filename.c_str());
+    S9xSetInfoString("Couldn't save Memory Pack file");
+    return false;
+}
+
+bool Snes9xController::hasMemoryPack()
+{
+    // Only BS-X and Sufami-style multicarts carry a memory pack; this is the
+    // same test CMemory::SaveMPAK makes before it agrees to write one.
+    return active && (Settings.BS || (Multi.cartSizeB && Multi.cartType == 3));
 }
 
 void Snes9xController::setMessage(const std::string &message)

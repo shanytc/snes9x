@@ -48,6 +48,7 @@
 #include "memmap.h"
 #include "cpuexec.h"
 #include "snapshot.h"
+#include "screenshot.h"
 #include "netplay.h"
 #include "display.h"
 #include "voicekun.h"
@@ -266,6 +267,18 @@ void Snes9xWindow::connect_signals()
 
     get_object<Gtk::MenuItem>("save_spc_item")->signal_activate().connect([&] {
         save_spc_dialog();
+    });
+
+    get_object<Gtk::MenuItem>("save_screenshot_item")->signal_activate().connect([&] {
+        save_screenshot();
+    });
+
+    get_object<Gtk::MenuItem>("save_sram_item")->signal_activate().connect([&] {
+        save_sram();
+    });
+
+    get_object<Gtk::MenuItem>("save_mempack_item")->signal_activate().connect([&] {
+        save_memory_pack();
     });
 
     get_object<Gtk::MenuItem>("open_movie_item")->signal_activate().connect([&] {
@@ -1225,6 +1238,53 @@ void Snes9xWindow::save_spc_dialog()
     unpause_from_focus_change();
 }
 
+/* File->Save Other: the dialog-less exports from the win32 File menu. */
+void Snes9xWindow::save_screenshot()
+{
+    /* The next rendered frame writes the file (S9xEndScreenRefresh), which
+     * for a paused game would only happen on resume: capture it right away. */
+    Settings.TakeScreenshot = true;
+    if (is_paused())
+        S9xDoScreenshot(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
+}
+
+void Snes9xWindow::save_sram()
+{
+    auto filename = S9xGetFilename(".srm", SRAM_DIR);
+
+    if (Memory.SaveSRAM(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return;
+    }
+
+    pause_from_focus_change();
+    std::string message = _("Couldn't save S-RAM file:");
+    message += " " + filename;
+    Gtk::MessageDialog(*window.get(), message, false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_CLOSE, true).run();
+    unpause_from_focus_change();
+}
+
+void Snes9xWindow::save_memory_pack()
+{
+    /* Numbered like win32 so repeated dumps never overwrite each other. */
+    auto filename = S9xGetFilenameInc(".bs", SRAM_DIR);
+
+    if (Memory.SaveMPAK(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return;
+    }
+
+    pause_from_focus_change();
+    std::string message = _("Couldn't save Memory Pack file:");
+    message += " " + filename;
+    Gtk::MessageDialog(*window.get(), message, false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_CLOSE, true).run();
+    unpause_from_focus_change();
+}
+
 void Snes9xWindow::set_menu_item_selected(const char *name)
 {
     get_object<Gtk::CheckMenuItem>(name)->set_active(true);
@@ -1397,7 +1457,10 @@ void Snes9xWindow::configure_widgets()
         "save_state_item",
         "save_state_preview_item",
         "load_state_preview_item",
+        "save_other_item",
         "save_spc_item",
+        "save_screenshot_item",
+        "save_sram_item",
         "hard_reset_item",
         "record_movie_item",
         "stop_recording_item",
@@ -1409,6 +1472,11 @@ void Snes9xWindow::configure_widgets()
     };
     for (auto &widget : enable_when_rom_loaded)
         enable_widget(widget, config->rom_loaded);
+
+    /* Only BS-X and Sufami-style multicarts carry a memory pack; this is the
+     * same test CMemory::SaveMPAK makes before it agrees to write one. */
+    const bool has_memory_pack = Settings.BS || (Multi.cartSizeB && Multi.cartType == 3);
+    enable_widget("save_mempack_item", config->rom_loaded && has_memory_pack);
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
     // The achievement list only makes sense with a game loaded and a user
@@ -2040,6 +2108,7 @@ void Snes9xWindow::update_accelerators()
         { "from_file1", "GTK_state_file_load" },
         { "to_file1", "GTK_state_file_save" },
         { "save_spc_item", "GTK_save_spc" },
+        { "save_screenshot_item", "Screenshot" },
         { "open_rom_item", "GTK_open_rom" },
         { "record_movie_item", "BeginRecordingMovie" },
         { "open_movie_item", "LoadMovie" },

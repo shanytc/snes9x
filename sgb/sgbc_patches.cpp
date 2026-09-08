@@ -830,6 +830,21 @@ const SgbcPatch kPatches[] = {
 	// held *_TRN payload until the first real frame
 	{ 0x862D, "SBOMBLISSDXA2OJ\200", "Super Bombliss DX (Japan) (En)", 0, {},
 	  SGBC_QUIRK_LCD_BLANK },
+	// manual: it now detects the SGB (see the ICD2 MLT_REQ latch) and sends its
+	// border, but on that path it colours through packets and its Color palettes
+	// go stale. Clear the cart's own SGB flag; the border init still runs.
+	{ 0x45FD, "SURVIVALKIDAVKE\200", "Survival Kids (USA)", 1,
+	  { { 0x0001D7, 2, { 0x3E, 0xFF }, { 0x3E, 0x00 } } } },
+	// manual: it now detects the SGB (see the ICD2 MLT_REQ latch) and sends its
+	// border, but on that path it colours through packets and its Color palettes
+	// go stale. Clear the cart's own SGB flag; the border init still runs.
+	{ 0xB828, "SURVIVALKIDAVKJ\200", "Survival Kids - Kotou no Boukensha (Japan)", 1,
+	  { { 0x0001D7, 2, { 0x3E, 0xFF }, { 0x3E, 0x00 } } } },
+	// manual: same engine as Survival Kids - the SGB path leaves its Color
+	// palettes stale (Konami logo magenta on green). Clear the cart's SGB flag;
+	// the border init still runs. One row: both dumps share header and sum.
+	{ 0x1E17, "SURVIVAL K2B2VJ\200", "Survival Kids 2 - Dasshutsu!! Futago-Jima! (Japan)", 1,
+	  { { 0x0001F4, 2, { 0x3E, 0xFF }, { 0x3E, 0x00 } } } },
 	// manual: flag routine answers SGB2
 	{ 0xEEFE, "SYLVANIAN", "Sylvanian Families - Otogi no Kuni no Pendant (Japan)", 1,
 	  { { 0x000256, 2, { 0xCB, 0x4E }, { 0xAF, 0x00 } } } },

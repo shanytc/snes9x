@@ -802,6 +802,22 @@ const SgbcPatch kPatches[] = {
 	// nop_skip_branch
 	{ 0x43D3, "SENKAIIBUNRBHSJ\200", "Senkai Ibunroku Juntei Taisen - TV Animation Senkaiden Houshin Engi Yori (Japan)", 1,
 	  { { 0x0001D7, 2, { 0x28, 0x0C }, { 0x00, 0x00 } } } },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0xEE57, "SHANGHAI POCKET\200", "Shanghai Pocket (Europe)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0xDFDA, "SHANGHAI POCKET\200", "Shanghai Pocket (Europe) (Rev 1)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0xEE58, "SHANGHAI POCKET\200", "Shanghai Pocket (USA)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
+	// display quirk only: *_TRN payload on the Color screen while LCDC bit 0 is
+	// clear - a DMG blanks the BG on that, a Color does not
+	{ 0xDFDB, "SHANGHAI POCKET\200", "Shanghai Pocket (USA) (Rev 1) (Proto)", 0, {},
+	  SGBC_QUIRK_HOLD_PAYLOAD },
 	// manual: both flag tests off
 	{ 0xC16E, "BASS POCKET 3", "Super Black Bass Pocket 3 (Japan)", 2,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },

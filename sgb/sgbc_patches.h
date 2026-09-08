@@ -42,6 +42,10 @@ static const uint32_t SGBC_QUIRK_HOLD_PAYLOAD = 1u << 1;
 //   and OBP1 all zero, a flat shade-0 frame there. CGB rendering ignores all
 //   three and keeps the sprites up; paint the pane in colour 0 instead.
 static const uint32_t SGBC_QUIRK_DMG_BLANK = 1u << 2;
+//   LCD_BLANK: the cart cancels its mask while its LCD is still off, so the
+//   frame the pane holds is masked-era *_TRN payload. Keep the cover, filled
+//   with colour 0, until the first frame drawn after the LCD comes back on.
+static const uint32_t SGBC_QUIRK_LCD_BLANK = 1u << 3;
 
 // One byte run in a cart image, up to three bytes (a jump, a store): `old`
 // is verified before `neu` is written.

@@ -258,6 +258,10 @@ const SgbcPatch kPatches[] = {
 	    { 0x000E07, 3, { 0x3D, 0x20, 0x0E }, { 0x00, 0x00, 0x00 } },
 	    { 0x000E17, 3, { 0xC9, 0xFA, 0x00 }, { 0xC3, 0x1D, 0x0E } } },
 	  SGBC_QUIRK_DMG_BLANK },
+	// display quirk only: the mask is cancelled with the LCD off, so the pane
+	// held *_TRN payload until the first real frame
+	{ 0xC17F, "MUSHI-CLUB", "Get Chuu Club - Minna no Konchuu Daizukan (Japan) (Rumble Version)", 0, {},
+	  SGBC_QUIRK_LCD_BLANK },
 	// manual: the SGB branch maps the console type; give it the Color value
 	{ 0x3E6E, "GLOCAL HEXCITE", "Glocal Hexcite (Japan)", 1,
 	  { { 0x00071E, 1, { 0x02 }, { 0x04 } } } },
@@ -770,6 +774,10 @@ const SgbcPatch kPatches[] = {
 	{ 0xFD8C, "ROBOPON SUN", "Robot Poncots - Sun Version (Japan)", 2,
 	  { { 0x063143, 2, { 0x28, 0x2A }, { 0x00, 0x00 } },
 	    { 0x0FE125, 3, { 0xC8, 0xFE, 0x01 }, { 0x00, 0xFE, 0x11 } } } },
+	// display quirk only: the mask is cancelled with the LCD off, so the pane
+	// held *_TRN payload until the first real frame
+	{ 0x01D7, "RENJYU", "Sakata Gorou Kudan no Renju Kyoushitsu (Japan)", 0, {},
+	  SGBC_QUIRK_LCD_BLANK },
 	// manual: SGB detect wins over the Color branch; keep the type
 	{ 0xE12A, "TIMENETPAST", "Sanrio Timenet - Kako Hen (Japan)", 2,
 	  { { 0x010004, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },
@@ -798,6 +806,10 @@ const SgbcPatch kPatches[] = {
 	{ 0xC16E, "BASS POCKET 3", "Super Black Bass Pocket 3 (Japan)", 2,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },
 	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } } } },
+	// display quirk only: the mask is cancelled with the LCD off, so the pane
+	// held *_TRN payload until the first real frame
+	{ 0x862D, "SBOMBLISSDXA2OJ\200", "Super Bombliss DX (Japan) (En)", 0, {},
+	  SGBC_QUIRK_LCD_BLANK },
 	// manual: flag routine answers SGB2
 	{ 0xEEFE, "SYLVANIAN", "Sylvanian Families - Otogi no Kuni no Pendant (Japan)", 1,
 	  { { 0x000256, 2, { 0xCB, 0x4E }, { 0xAF, 0x00 } } } },

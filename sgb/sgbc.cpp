@@ -235,4 +235,13 @@ const uint8_t *SgbcTrnHold::Line(uint32_t ly) const
 	return &src[(ly < GB_SCREEN_HEIGHT ? ly : 0) * GB_SCREEN_WIDTH];
 }
 
+bool SgbcLcdBlank::Blank(bool lcd_on, uint32_t quirks)
+{
+	if (!(quirks & SGBC_QUIRK_LCD_BLANK)) { armed_ = false; return false; }
+	if (!lcd_on) { armed_ = true; off_at_ = frames_; return true; }
+	if (armed_ && frames_ == off_at_) return true;   // on again, nothing drawn yet
+	armed_ = false;
+	return false;
+}
+
 } // namespace SGB

@@ -82,6 +82,20 @@ private:
 	uint8_t frame_[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
 };
 
+// LCD off, or back on with nothing drawn yet: past a mask cancel the pane
+// can only be holding masked-era content until the next VBlank. LCD_BLANK rows only.
+class SgbcLcdBlank
+{
+public:
+	void Reset() { frames_ = 0; armed_ = false; }
+	void OnVBlank() { ++frames_; }
+	bool Blank(bool lcd_on, uint32_t quirks);
+private:
+	uint32_t frames_ = 0;   // VBlanks so far
+	uint32_t off_at_ = 0;   // frames_ when the LCD was last seen off
+	bool     armed_  = false;
+};
+
 } // namespace SGB
 
 #endif

@@ -560,6 +560,7 @@ struct Emulator::Impl
 	} border_capture;
 
 	SgbcTrnHold sgbc_trn;   // see sgbc.h; armed only under SGBC
+	SgbcLcdBlank sgbc_lcd;  // and its LCD-off tracker
 	SgbcBootCover sgbc_cover;   // and its boot-logo cover
 
 	// BIOS-mode border crossfade. Counts frames since both halves of
@@ -727,6 +728,7 @@ void Emulator::Reset()
 	MbcUnlReset(impl_->cart);
 	impl_->border_capture.stage = Impl::BorderCapture::Idle;
 	impl_->sgbc_trn.Reset();
+	impl_->sgbc_lcd.Reset();
 	impl_->border_transfers     = 0;
 	impl_->border_plane         = 0;
 	impl_->border_pct           = 0;
@@ -2334,6 +2336,7 @@ void Emulator::OnPpuVBlank()
 	++g_gb_vblank_count;
 
 	impl_->sgbc_trn.OnVBlank();
+	impl_->sgbc_lcd.OnVBlank();
 
 	// Clean up VRAM areas the BIOS uses for the boot-handoff capture.
 	// GB-SNES scanline timing drift makes the BIOS's IRQ DMA read from the
@@ -2683,10 +2686,13 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 	// transfer fills with payload (Hamster Paradise).
 	const bool cgb_holds_pane = impl_->CgbActive() &&
 		(impl_->ppu.cgb_pal_written || impl_->ppu.dmg_compat);
+	// ...and that held frame is masked-era content while the LCD is off.
+	const bool cgb_blank = impl_->sgbc_lcd.Blank((impl_->ppu.lcdc & 0x80) != 0, impl_->sgbc_quirks) && cgb_holds_pane;
 	uint8_t mode_now = impl_->sgb_state.mask_mode;
 	if (mode_now == SGB_MASK_CANCEL && !(impl_->ppu.lcdc & 0x80) && !cgb_holds_pane)
 		mode_now = SGB_MASK_FREEZE;
 	uint8_t mode = mode_now;
+	bool    blank_c0 = false;   // fill with the pane's colour 0 as the BIOS has it
 
 	if (mode_now == SGB_MASK_CANCEL)
 	{
@@ -2719,12 +2725,15 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 			                    GB_SCREEN_WIDTH * sizeof(uint16_t)) == 0;
 		// A DMG_BLANK pane is colour 0 by the cart's own registers - what SGB2
 		// shows past the cancel - so there is nothing there to wait out.
-		if (!stale || impl_->sgbc_dmg_blank)
+		if ((!stale && !cgb_blank) || impl_->sgbc_dmg_blank)
 		{
 			impl_->bios_mask_valid = false;
 			return;
 		}
-		mode = impl_->bios_mask_mode;
+		// A Color LCD off past the cancel shows colour 0, as the SGB path's
+		// BGP=$00 blank does on SGB2 (Sakata Gorou).
+		mode     = cgb_blank ? SGB_MASK_BLANK : impl_->bios_mask_mode;
+		blank_c0 = cgb_blank;
 	}
 	else
 	{
@@ -2760,7 +2769,7 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 
 	const uint16_t fill = (mode == SGB_MASK_BLACK)
 		? 0x0000
-		: BgrToHost(impl_->sgb_state.active[0].colors[0]);
+		: BgrToHost(blank_c0 ? PPU.CGDATA[0] : impl_->sgb_state.active[0].colors[0]);
 	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
 	{
 		uint16_t *row = dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X;

@@ -46,6 +46,11 @@ static const uint32_t SGBC_QUIRK_DMG_BLANK = 1u << 2;
 //   frame the pane holds is masked-era *_TRN payload. Keep the cover, filled
 //   with colour 0, until the first frame drawn after the LCD comes back on.
 static const uint32_t SGBC_QUIRK_LCD_BLANK = 1u << 3;
+//   BGP_SHADOW: the cart hides a redraw by blanking through BGP, but on the
+//   Color path it stops copying its BGP shadow to the register, so the
+//   register says nothing. Read the shadow it keeps at $FF9C instead: while
+//   every index there maps to one shade, paint the pane that shade.
+static const uint32_t SGBC_QUIRK_BGP_SHADOW = 1u << 4;
 
 // One byte run in a cart image, up to three bytes (a jump, a store): `old`
 // is verified before `neu` is written.

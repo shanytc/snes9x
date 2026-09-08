@@ -132,6 +132,18 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 	const bool dmg_blank = (in.quirks & SGBC_QUIRK_DMG_BLANK) && in.fb_valid &&
 	                       in.fb_bgp == 0 && in.fb_obp0 == 0 && in.fb_obp1 == 0;
 
+	// The cart blanks through BGP while it rebuilds the screen, but on the Color
+	// path it stops copying its shadow to the register, so the register lags the
+	// blank by tens of frames and the rebuild shows. Follow the shadow instead.
+	bool bgp_shadow = false;
+	if (in.quirks & SGBC_QUIRK_BGP_SHADOW)
+	{
+		const int s0 = in.hram_bgp & 3;
+		bgp_shadow = ((in.hram_bgp >> 2) & 3) == s0 &&
+		             ((in.hram_bgp >> 4) & 3) == s0 &&
+		             ((in.hram_bgp >> 6) & 3) == s0;
+	}
+
 	// The keys and the backdrop exactly as the PPU drew each line - its
 	// brightness and backdrop at render time, not now: the BIOS force-blanks
 	// at VBlank, so PPU.Brightness already reads 0 here.
@@ -173,11 +185,15 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 				// point BGP means nothing to a Color game - Dragon Dance leaves
 				// it at $00 for the whole boot while drawing in colour, and
 				// blanking on it there erases the picture.
-				if (hold || dmg_blank)     dst[x] = back;
+				if (bgp_shadow)            dst[x] = (in.hram_bgp & 3)
+				                                    ? mono[(in.hram_bgp & 3) - 1] : back;
+				else if (hold || dmg_blank) dst[x] = back;
 				else if (in.color)         dst[x] = BgrToHostBright(src[x], xb);
 				else if (bgp_blank && !sh) dst[x] = back;
 				else                       dst[x] = sh ? mono[sh - 1] : back;
 			}
+			else if (px == back && bgp_shadow)
+				dst[x] = (in.hram_bgp & 3) ? mono[(in.hram_bgp & 3) - 1] : back;
 			else if (px == back && !hold && !dmg_blank)
 			{
 				// Index 0 goes through BGP on a DMG too: BGP=$FF blanks the

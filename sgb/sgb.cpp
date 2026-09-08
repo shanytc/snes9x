@@ -2654,6 +2654,8 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	in.fb_obp0 = impl_->cgb_overlay_obp0;
 	in.fb_obp1 = impl_->cgb_overlay_obp1;
 	in.quirks = impl_->sgbc_quirks;
+	// $FF9C is where this engine keeps its BGP shadow; harmless to read always.
+	in.hram_bgp = impl_->mem.hram[0xFF9C - 0xFF80];
 
 	// The patched BIOS stashes the palette its keys displaced in its state
 	// block ($7E:CE00: magic 'S' 'C', state, then colors 1-3 of palettes 0-3

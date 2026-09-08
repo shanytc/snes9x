@@ -178,8 +178,14 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 				else if (bgp_blank && !sh) dst[x] = back;
 				else                       dst[x] = sh ? mono[sh - 1] : back;
 			}
-			else if (px == back && in.color && !hold && !dmg_blank)
-				dst[x] = BgrToHostBright(src[x], xb);
+			else if (px == back && !hold && !dmg_blank)
+			{
+				// Index 0 goes through BGP on a DMG too: BGP=$FF blanks the
+				// whole screen to shade 3, not just the drawn pixels.
+				const int sh0 = in.bgp & 3;
+				if (in.color)  dst[x] = BgrToHostBright(src[x], xb);
+				else if (sh0)  dst[x] = mono[sh0 - 1];
+			}
 		}
 	}
 	return dmg_blank;

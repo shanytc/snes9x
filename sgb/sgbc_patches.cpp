@@ -818,10 +818,14 @@ const SgbcPatch kPatches[] = {
 	// clear - a DMG blanks the BG on that, a Color does not
 	{ 0xDFDB, "SHANGHAI POCKET\200", "Shanghai Pocket (USA) (Rev 1) (Proto)", 0, {},
 	  SGBC_QUIRK_HOLD_PAYLOAD },
-	// manual: both flag tests off
-	{ 0xC16E, "BASS POCKET 3", "Super Black Bass Pocket 3 (Japan)", 2,
+	// manual: force the SGB detect so the cart sends its border, then drop the
+	// SGB flag once the border is up - on that path it colours through packets
+	// and leaves the Color palettes flat, which blanks every later screen.
+	// The third edit re-points a post-unmask wait at the ROM's own clear.
+	{ 0xC16E, "BASS POCKET 3", "Super Black Bass Pocket 3 (Japan)", 3,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },
-	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } } } },
+	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
+	    { 0x001741, 3, { 0xCD, 0xDC, 0x09 }, { 0xCD, 0x3A, 0x16 } } } },
 	// display quirk only: the mask is cancelled with the LCD off, so the pane
 	// held *_TRN payload until the first real frame
 	{ 0x862D, "SBOMBLISSDXA2OJ\200", "Super Bombliss DX (Japan) (En)", 0, {},
@@ -839,10 +843,14 @@ const SgbcPatch kPatches[] = {
 	{ 0x5ADB, "TOPNARIKIRIAN6J\200", "Tales of Phantasia - Narikiri Dungeon (Japan)", 2,
 	  { { 0x004108, 2, { 0x28, 0x22 }, { 0x28, 0x0E } },
 	    { 0x004128, 2, { 0x3E, 0x06 }, { 0x3E, 0x07 } } } },
-	// manual: both flag tests off
-	{ 0xDDE6, "TNN FISHINGAFCE\200", "TNN Outdoors Fishing Champ (USA)", 2,
+	// manual: force the SGB detect so the cart sends its border, then drop the
+	// SGB flag once the border is up - on that path it colours through packets
+	// and leaves the Color palettes flat, which blanks every later screen.
+	// The third edit re-points a post-unmask wait at the ROM's own clear.
+	{ 0xDDE6, "TNN FISHINGAFCE\200", "TNN Outdoors Fishing Champ (USA)", 3,
 	  { { 0x0002DE, 2, { 0x20, 0x07 }, { 0x00, 0x00 } },
-	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } } } },
+	    { 0x0002E2, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
+	    { 0x001739, 3, { 0xCD, 0xDC, 0x09 }, { 0xCD, 0x3E, 0x16 } } } },
 	// manual: an SGB detect suppresses the Color flag; stop it
 	{ 0xCEC1, "TOOLSOFNEXAURA", "Tools of Nexaura (World) (v0.4) (Demo) (Aftermarket) (Unl)", 1,
 	  { { 0x058367, 2, { 0x20, 0x0D }, { 0x00, 0x00 } } } },

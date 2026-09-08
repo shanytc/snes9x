@@ -184,6 +184,15 @@ class Snes9xConfig
     JoyDevices joysticks;
     int joystick_threshold;
     bool enable_rumble;
+
+    /* Controller-port devices (ControllerOption in gtk_control.h). A ROM's
+     * NSRT header may pick the devices itself and narrow the menu to the ones
+     * the game supports; the choice it displaced comes back on the next load
+     * unless the user has picked something by hand since. */
+    int controller_option;
+    bool superscope_crosshair_visible;
+    int valid_controller_options;
+    int controller_option_before_rom;
 };
 
 std::string get_config_dir();

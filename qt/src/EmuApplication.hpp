@@ -64,7 +64,19 @@ struct EmuApplication
     void pollJoysticks();
     void updateRumble();
     void reportPointer(int x, int y);
+    void reportPointerAbsolute(int x, int y);
     void reportMouseButton(int button, bool pressed);
+
+    /* Controller-port devices, as win32's Input menu offers them. A ROM's
+     * NSRT header may pick the devices itself and narrow the menu to the ones
+     * the game supports; the choice it displaced comes back on the next load
+     * unless the user has picked something by hand since. */
+    void setPortConfiguration(int configuration);
+    void setSuperScopeCrosshairVisible(bool visible);
+    bool isPortConfigurationValid(int configuration);
+    void applyRomControllerHints();
+    int valid_port_configurations = 0xffff;
+    int port_configuration_before_rom = -1;
     void restartAudio();
     void writeSamples(int16_t *data, int samples);
     void mainLoop();

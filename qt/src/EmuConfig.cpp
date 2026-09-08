@@ -354,7 +354,8 @@ bool EmuConfig::setDefaults(int section)
         automap_gamepads = true;
         enable_rumble = true;
         // Controllers
-        port_configuration = 0;
+        port_configuration = eJoypads;
+        superscope_crosshair_visible = true;
         memset(binding.controller, 0, sizeof(binding.controller));
 
         const char *button_list[] = { "Up", "Down", "Left", "Right", "d", "c", "s", "x", "z", "a", "Return", "Space" };
@@ -651,10 +652,15 @@ void EmuConfig::config(const std::string &filename, bool write)
     BeginSection("Ports");
     Bool("AutomapGamepads", automap_gamepads, "Automatically map newly connected gamepads to a sensible default layout");
     Bool("EnableRumble", enable_rumble, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad");
-    Enum("PortConfiguration", port_configuration, { "OneController", "TwoControllers", "Mouse", "SuperScope", "Multitap" }, "What is plugged into the console's controller ports: OneController, TwoControllers, Mouse, SuperScope, or Multitap");
+    // Names follow the PortConfiguration enum order. The first three
+    // devices keep the values older configs wrote; the two legacy joypad
+    // names (OneController, TwoControllers) simply fall through to the
+    // Joypads default.
+    Enum("PortConfiguration", port_configuration, { "Joypads", "Mouse", "SuperScope", "Multitap", "Justifier", "MouseSwapped", "Multitap8", "DualJustifiers", "MacsRifle" }, "What is plugged into the console's controller ports: Joypads, Mouse, SuperScope, Multitap, Justifier, MouseSwapped, Multitap8, DualJustifiers, or MacsRifle");
+    Bool("SuperScopeCrosshair", superscope_crosshair_visible, "true to draw the Super Scope's crosshair on screen");
     EndSection();
 
-    for (int c = 0; c < 5; c++)
+    for (int c = 0; c < num_controllers; c++)
     {
         BeginSection("Controller_" + std::to_string(c));
 
@@ -754,5 +760,31 @@ void EmuConfig::setVRRConfig(bool enable)
         input_rate = saved_input_rate;
         speed_sync_method = saved_speed_sync_method;
         enable_vsync = saved_enable_vsync;
+    }
+}
+
+bool EmuConfig::portConfigurationUsesPointer(int configuration)
+{
+    switch (configuration)
+    {
+    case eMouse:
+    case eMouseSwapped:
+        return true;
+    default:
+        return portConfigurationUsesGun(configuration);
+    }
+}
+
+bool EmuConfig::portConfigurationUsesGun(int configuration)
+{
+    switch (configuration)
+    {
+    case eSuperScope:
+    case eJustifier:
+    case eDualJustifiers:
+    case eMacsRifle:
+        return true;
+    default:
+        return false;
     }
 }

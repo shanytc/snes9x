@@ -237,11 +237,50 @@ void Snes9xWindow::connect_signals()
         gtk_shader_parameters_dialog(get_window());
     });
 
-    const std::vector<const char *> port_items = { "joypad1", "mouse1", "superscope1", "joypad2", "mouse2", "multitap2", "superscope2", "nothingpluggedin2" };
-    for (auto &name : port_items)
+    // win32's Input menu device list: what is plugged into the two
+    // controller ports. Radio items drawn as checks, as on win32.
+    const std::pair<const char *, int> device_items[] = {
+        { "input_joypad_item", CONTROLLER_JOYPADS },
+        { "input_mouse_item", CONTROLLER_MOUSE },
+        { "input_superscope_enable_item", CONTROLLER_SUPERSCOPE },
+        { "input_multitap5_item", CONTROLLER_MULTITAP5 },
+        { "input_justifier_item", CONTROLLER_JUSTIFIER },
+        { "input_mouse_swapped_item", CONTROLLER_MOUSE_SWAPPED },
+        { "input_multitap8_item", CONTROLLER_MULTITAP8 },
+        { "input_dual_justifiers_item", CONTROLLER_DUAL_JUSTIFIERS },
+        { "input_macsrifle_item", CONTROLLER_MACSRIFLE },
+    };
+    for (auto &[name, option] : device_items)
     {
-        get_object<Gtk::MenuItem>(name)->signal_activate().connect(sigc::bind<const char *>(sigc::mem_fun(*this, &Snes9xWindow::port_activate), name));
+        auto item = get_object<Gtk::RadioMenuItem>(name);
+        item->signal_toggled().connect([this, item, option] {
+            if (refreshing_controller_menu || !item->get_active())
+                return;
+            if (S9xMovieActive())
+            {
+                Gtk::MessageDialog msg(*window.get(), _("That setting is locked while a movie is active."), false,
+                                       Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
+                msg.run();
+            }
+            else
+            {
+                S9xSetControllerOption(option);
+            }
+            update_controller_option_menu();
+        });
     }
+
+    auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
+    crosshair_item->signal_toggled().connect([this, crosshair_item] {
+        if (refreshing_controller_menu)
+            return;
+        config->superscope_crosshair_visible = crosshair_item->get_active();
+        S9xApplySuperScopeCrosshair();
+    });
+
+    get_object<Gtk::Menu>("input_menu_item_menu")->signal_show().connect([this] {
+        update_controller_option_menu();
+    });
 
     build_state_menus();
 
@@ -310,6 +349,16 @@ void Snes9xWindow::connect_signals()
 
     get_object<Gtk::MenuItem>("preferences_item")->signal_activate().connect([&] {
         snes9x_preferences_open(this);
+    });
+
+    // win32's Input->Input Configuration... and Customize Hotkeys...: the
+    // Joypads and Shortcuts tabs of the preferences dialog.
+    get_object<Gtk::MenuItem>("input_configuration_item")->signal_activate().connect([&] {
+        snes9x_preferences_open(this, 4);
+    });
+
+    get_object<Gtk::MenuItem>("customize_hotkeys_item")->signal_activate().connect([&] {
+        snes9x_preferences_open(this, 5);
     });
 
     get_object<Gtk::MenuItem>("open_netplay_item")->signal_activate().connect([&] {
@@ -552,35 +601,36 @@ bool Snes9xWindow::motion_notify(GdkEventMotion *event)
     return false;
 }
 
-void Snes9xWindow::port_activate(const char *name)
+void Snes9xWindow::update_controller_option_menu()
 {
-    auto item = get_object<Gtk::CheckMenuItem>(name);
-    if (!item->get_active())
-        return;
-
-    struct {
-        const char *name;
-        int port;
-        enum controllers controller;
-        int8_t id1, id2, id3, id4;
-    } map[] = {
-        { "joypad1", 0, CTL_JOYPAD, 0, 0, 0, 0 },
-        { "joypad2", 1, CTL_JOYPAD, 1, 0, 0, 0 },
-        { "mouse1", 0, CTL_MOUSE, 0, 0, 0, 0 },
-        { "mouse2", 1, CTL_MOUSE, 0, 0, 0, 0 },
-        { "superscope1", 0, CTL_SUPERSCOPE, 0, 0, 0, 0 },
-        { "superscope2", 1, CTL_SUPERSCOPE, 0, 0, 0, 0 },
-        { "multitap1", 0, CTL_MP5, 0, 1, 2, 3 },
-        { "multitap2", 1, CTL_MP5, 1, 2, 3, 4 },
-        { "nothingpluggedin2", 1, CTL_NONE, 0, 0, 0, 0}
+    const std::pair<const char *, int> device_items[] = {
+        { "input_joypad_item", CONTROLLER_JOYPADS },
+        { "input_mouse_item", CONTROLLER_MOUSE },
+        { "input_superscope_enable_item", CONTROLLER_SUPERSCOPE },
+        { "input_multitap5_item", CONTROLLER_MULTITAP5 },
+        { "input_justifier_item", CONTROLLER_JUSTIFIER },
+        { "input_mouse_swapped_item", CONTROLLER_MOUSE_SWAPPED },
+        { "input_multitap8_item", CONTROLLER_MULTITAP8 },
+        { "input_dual_justifiers_item", CONTROLLER_DUAL_JUSTIFIERS },
+        { "input_macsrifle_item", CONTROLLER_MACSRIFLE },
     };
 
-    for (auto &m : map)
-        if (!strcasecmp(m.name, name))
-        {
-            S9xSetController(m.port, m.controller, m.id1, m.id2, m.id3, m.id4);
-            break;
-        }
+    // As on win32: a ROM's NSRT header greys the devices it doesn't support,
+    // and nothing can be swapped once a movie is past its first frame.
+    const bool movie_locked = S9xMovieActive() && S9xMovieGetFrameCounter();
+
+    refreshing_controller_menu = true;
+    for (auto &[name, option] : device_items)
+    {
+        auto item = get_object<Gtk::RadioMenuItem>(name);
+        item->set_active(config->controller_option == option);
+        item->set_sensitive(S9xControllerOptionValid(option) && !movie_locked);
+    }
+
+    auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
+    crosshair_item->set_active(config->superscope_crosshair_visible);
+    crosshair_item->set_sensitive(config->controller_option == CONTROLLER_SUPERSCOPE);
+    refreshing_controller_menu = false;
 }
 
 bool Snes9xWindow::event_key(GdkEventKey *event)
@@ -1539,6 +1589,7 @@ void Snes9xWindow::configure_widgets()
     }
 
     propagate_pause_state();
+    update_controller_option_menu();
 
     if (config->rom_loaded && !Settings.Paused)
         hide_mouse_cursor();

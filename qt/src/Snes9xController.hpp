@@ -32,6 +32,8 @@ class Snes9xController
     void reportBinding(EmuBinding b, bool active);
     void reportMouseButton(int button, bool pressed);
     void reportPointer(int x, int y);
+    void reportPointerAbsolute(int x, int y);
+    void setSuperScopeCrosshairVisible(bool visible);
     void updateSoundBufferLevel(int, int);
     bool acceptsCommand(const char *command);
     bool isAbnormalSpeed();
@@ -84,6 +86,8 @@ class Snes9xController
   private:
     void SamplesAvailable();
     void mainLoopWithRunAhead();
+    // Light guns keep the pointer within the screen; the SNES mouse is free.
+    bool clamp_pointer = false;
 
     // Savestate scratch buffer for run-ahead. Sized per ROM (freeze size
     // depends on which special chips the cart uses), so openFile clears it.

@@ -6,6 +6,8 @@
 
 #pragma once
 #include <queue>
+#include <vector>
+#include <string>
 #include <array>
 
 #include "gtk_binding.h"
@@ -14,7 +16,37 @@
 #undef vector
 #undef bool
 
-const int NUM_JOYPADS = 10;
+/* Binding slots: pads 1-5, their "+" alternates, then pads 6-8 and their
+ * alternates, appended so older configs keep their slot numbers. Eight pads
+ * cover two multitaps, as on win32. joypad_player() maps a slot to its pad. */
+const int NUM_JOYPADS = 16;
+
+inline int joypad_player(int slot)
+{
+    if (slot < 5)
+        return slot;
+    if (slot < 10)
+        return slot - 5;
+    if (slot < 13)
+        return slot - 10 + 5;
+    return slot - 13 + 5;
+}
+
+/* What is plugged into the two controller ports: win32's Input menu device
+ * list, in its enum order (the NSRT auto-detection table depends on it). */
+enum ControllerOption
+{
+    CONTROLLER_JOYPADS = 0,
+    CONTROLLER_MOUSE,
+    CONTROLLER_SUPERSCOPE,
+    CONTROLLER_MULTITAP5,
+    CONTROLLER_JUSTIFIER,
+    CONTROLLER_MOUSE_SWAPPED,
+    CONTROLLER_MULTITAP8,
+    CONTROLLER_DUAL_JUSTIFIERS,
+    CONTROLLER_MACSRIFLE,
+    NUM_CONTROLLER_OPTIONS
+};
 
 /* Save states are organized in banks of slots, as on win32. The state file
  * extension is the flat index, i.e. bank * SAVE_SLOTS_PER_BANK + slot. */
@@ -171,3 +203,14 @@ class JoyDevices
 void S9xDeinitInputDevices();
 Binding S9xGetBindingByName(const char *name);
 bool S9xIsMousePluggedIn();
+
+/* Controller-port devices (see ControllerOption). Apply seats the devices
+ * from gui_config, Set is a user pick, AutoDetect applies a freshly loaded
+ * ROM's NSRT hints, and the last two add the joypad buttons that also work
+ * the device in the neighbouring port to a pad's bindings. */
+void S9xApplyControllerOption();
+void S9xApplySuperScopeCrosshair();
+void S9xSetControllerOption(int option);
+void S9xAutoDetectControllerOption();
+bool S9xControllerOptionValid(int option);
+void S9xJoypadDeviceCommands(int option, int player, const char *button, std::vector<std::string> &commands);

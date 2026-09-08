@@ -33,27 +33,47 @@
       <widget class="QComboBox" name="portComboBox">
        <item>
         <property name="text">
-         <string>One Controller</string>
+         <string>SNES Joypad(s)</string>
         </property>
        </item>
        <item>
         <property name="text">
-         <string>Two Controllers</string>
+         <string>SNES Mouse</string>
         </property>
        </item>
        <item>
         <property name="text">
-         <string>Mouse + Controller</string>
+         <string>Super Scope</string>
         </property>
        </item>
        <item>
         <property name="text">
-         <string>SuperScope + Controller</string>
+         <string>Super Multitap (5-player)</string>
         </property>
        </item>
        <item>
         <property name="text">
-         <string>Controller + Multitap</string>
+         <string>Konami Justifier</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>Mouse in alternate port</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>Multitaps (8-player)</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>Dual Justifiers</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>M.A.C.S. Rifle</string>
         </property>
        </item>
       </widget>
@@ -110,6 +130,21 @@
        <item>
         <property name="text">
          <string>SNES Controller 5 (Multitap)</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>SNES Controller 6 (Multitaps, 8-player)</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>SNES Controller 7 (Multitaps, 8-player)</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>SNES Controller 8 (Multitaps, 8-player)</string>
         </property>
        </item>
       </widget>

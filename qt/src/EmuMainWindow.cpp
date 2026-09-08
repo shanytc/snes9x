@@ -574,6 +574,76 @@ void EmuMainWindow::createWidgets()
 
     menuBar()->addMenu(emulation_menu);
 
+    // win32's Input menu: the configuration dialogs, rumble, and the device
+    // list for the two controller ports.
+    auto input_menu = new QMenu(tr("&Input"));
+
+    // The Controllers and Shortcuts settings panels (indices into the
+    // Options menu's setting_panels list below).
+    auto input_configuration_item = input_menu->addAction(QIcon(iconset + "joypad.svg"), tr("&Input Configuration..."));
+    QObject::connect(input_configuration_item, &QAction::triggered, [&] {
+        if (!g_emu_settings_window)
+            g_emu_settings_window = new EmuSettingsWindow(this, app);
+        g_emu_settings_window->show(4);
+    });
+    auto customize_hotkeys_item = input_menu->addAction(QIcon(iconset + "keyboard.svg"), tr("&Customize Hotkeys..."));
+    QObject::connect(customize_hotkeys_item, &QAction::triggered, [&] {
+        if (!g_emu_settings_window)
+            g_emu_settings_window = new EmuSettingsWindow(this, app);
+        g_emu_settings_window->show(5);
+    });
+
+    input_menu->addSeparator();
+
+    // win32's Input->Enable Rumble (Shake): pass LRG rumble-cart motor
+    // effects to the port-1 gamepad.
+    auto rumble_item = input_menu->addAction(tr("Enable &Rumble (Shake)"));
+    rumble_item->setCheckable(true);
+    rumble_item->setChecked(app->config->enable_rumble);
+    QObject::connect(rumble_item, &QAction::triggered, [&](bool checked) {
+        app->config->enable_rumble = checked;
+    });
+
+    input_menu->addSeparator();
+
+    // What is plugged into the two controller ports. Items a ROM's NSRT
+    // header rules out are greyed.
+    port_configuration_actions.assign(EmuConfig::eNumPortConfigurations, nullptr);
+    auto add_device_item = [&](QMenu *menu, int configuration, const QString &text) {
+        auto action = menu->addAction(text);
+        action->setCheckable(true);
+        QObject::connect(action, &QAction::triggered, [&, configuration] {
+            app->setPortConfiguration(configuration);
+            updatePortConfigurationMenu();
+        });
+        port_configuration_actions[configuration] = action;
+    };
+
+    add_device_item(input_menu, EmuConfig::eJoypads, tr("Use SNES &Joypad(s)"));
+    add_device_item(input_menu, EmuConfig::eMouse, tr("Use SNES &Mouse"));
+
+    auto superscope_menu = input_menu->addMenu(tr("Use Super &Scope"));
+    add_device_item(superscope_menu, EmuConfig::eSuperScope, tr("&Enable"));
+    superscope_crosshair_action = superscope_menu->addAction(tr("Show &Crosshair"));
+    superscope_crosshair_action->setCheckable(true);
+    QObject::connect(superscope_crosshair_action, &QAction::triggered, [&](bool checked) {
+        app->setSuperScopeCrosshairVisible(checked);
+    });
+
+    add_device_item(input_menu, EmuConfig::eMultitap5, tr("Use Super Multi&tap (5-player)"));
+    add_device_item(input_menu, EmuConfig::eJustifier, tr("Use Konami &Justifier"));
+    add_device_item(input_menu, EmuConfig::eMouseSwapped, tr("Use Mouse in &alternate port"));
+    add_device_item(input_menu, EmuConfig::eMultitap8, tr("Use Multitaps (&8-player)"));
+    add_device_item(input_menu, EmuConfig::eDualJustifiers, tr("Use &Dual Justifiers"));
+    add_device_item(input_menu, EmuConfig::eMacsRifle, tr("Use M.A.C.S. &Rifle"));
+
+    QObject::connect(input_menu, &QMenu::aboutToShow, [&] {
+        updatePortConfigurationMenu();
+    });
+    updatePortConfigurationMenu();
+
+    menuBar()->addMenu(input_menu);
+
     // Sound Menu, mirroring win32's Sound menu (Channels popup + Mute).
     auto sound_menu = new QMenu(tr("&Sound"));
 
@@ -708,17 +778,6 @@ void EmuMainWindow::createWidgets()
     });
     options_menu->addAction(shader_settings_item);
     updateShaderSettingsItem();
-
-    options_menu->addSeparator();
-
-    // win32's Input->Enable Rumble (Shake): pass LRG rumble-cart motor
-    // effects to the port-1 gamepad.
-    auto rumble_item = options_menu->addAction(tr("Enable &Rumble (Shake)"));
-    rumble_item->setCheckable(true);
-    rumble_item->setChecked(app->config->enable_rumble);
-    QObject::connect(rumble_item, &QAction::triggered, [&](bool checked) {
-        app->config->enable_rumble = checked;
-    });
 
     menuBar()->addMenu(options_menu);
 
@@ -1132,10 +1191,26 @@ bool EmuMainWindow::event(QEvent *event)
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonRelease:
     {
-        if (!mouse_grabbed)
+        if (!mouse_grabbed && !gunAimsAtPointer())
             break;
         auto mouse_event = (QMouseEvent *)event;
-        app->reportMouseButton(mouse_event->button(), event->type() == QEvent::MouseButtonPress);
+        int button = 0;
+        switch (mouse_event->button())
+        {
+        case Qt::LeftButton:
+            button = 1;
+            break;
+        case Qt::RightButton:
+            button = 2;
+            break;
+        case Qt::MiddleButton:
+            button = 3;
+            break;
+        default:
+            break;
+        }
+        if (button)
+            app->reportMouseButton(button, event->type() == QEvent::MouseButtonPress);
         break;
     }
     case QEvent::MouseMove:
@@ -1148,6 +1223,10 @@ bool EmuMainWindow::event(QEvent *event)
                 break;
             app->reportPointer(delta.x(), delta.y());
             QCursor::setPos(center);
+        }
+        else if (gunAimsAtPointer())
+        {
+            reportGunAim(((QMouseEvent *)event)->globalPosition().toPoint());
         }
         if (!cursor_visible)
         {
@@ -1315,6 +1394,47 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+}
+
+bool EmuMainWindow::gunAimsAtPointer()
+{
+    return canvas && app->isCoreActive() &&
+           EmuConfig::portConfigurationUsesGun(app->config->port_configuration);
+}
+
+void EmuMainWindow::reportGunAim(const QPoint &global_pos)
+{
+    // Map the pointer through the letterboxed image onto the SNES screen,
+    // the way the GTK port aims an ungrabbed gun. Outside the image counts
+    // as off-screen, which the core reads as such.
+    auto ratio = canvas->devicePixelRatio();
+    auto image = canvas->applyAspect(QRect(0, 0, canvas->width() * ratio, canvas->height() * ratio));
+    if (image.width() <= 0 || image.height() <= 0)
+        return;
+
+    auto pos = canvas->mapFromGlobal(global_pos) * ratio;
+    int height = app->config->show_overscan ? 239 : 224;
+    int x = (pos.x() - image.x()) * 256 / image.width();
+    int y = (pos.y() - image.y()) * height / image.height();
+    app->reportPointerAbsolute(x, y);
+}
+
+void EmuMainWindow::updatePortConfigurationMenu()
+{
+    for (int i = 0; i < (int)port_configuration_actions.size(); i++)
+    {
+        auto action = port_configuration_actions[i];
+        if (!action)
+            continue;
+        action->setChecked(app->config->port_configuration == i);
+        action->setEnabled(app->isPortConfigurationValid(i));
+    }
+
+    if (superscope_crosshair_action)
+    {
+        superscope_crosshair_action->setChecked(app->config->superscope_crosshair_visible);
+        superscope_crosshair_action->setEnabled(app->config->port_configuration == EmuConfig::eSuperScope);
+    }
 }
 
 void EmuMainWindow::toggleMouseGrab()

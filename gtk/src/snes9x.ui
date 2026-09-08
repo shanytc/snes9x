@@ -1104,7 +1104,25 @@
       <row>
         <col id="0" translatable="yes">5+</col>
       </row>
-    </data>
+          <row>
+        <col id="0" translatable="yes">6</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">6+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8+</col>
+      </row>
+</data>
   </object>
   <object class="GtkListStore" id="liststore3">
     <columns>
@@ -1142,7 +1160,25 @@
       <row>
         <col id="0" translatable="yes">5+</col>
       </row>
-    </data>
+          <row>
+        <col id="0" translatable="yes">6</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">6+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8+</col>
+      </row>
+</data>
   </object>
   <object class="GtkListStore" id="liststore4">
     <columns>
@@ -1813,6 +1849,167 @@
               </object>
             </child>
             <child>
+              <object class="GtkMenuItem" id="input_menu_item">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="label" translatable="yes">_Input</property>
+                <property name="use_underline">True</property>
+                <child type="submenu">
+                  <object class="GtkMenu" id="input_menu_item_menu">
+                    <property name="can_focus">False</property>
+                    <child>
+                      <object class="GtkMenuItem" id="input_configuration_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Input Configuration...</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="customize_hotkeys_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Customize Hotkeys...</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="input_configuration_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkCheckMenuItem" id="enable_rumble_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Enable _Rumble (Shake)</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="input_devices_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_joypad_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use SNES _Joypad(s)</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="active">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_mouse_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use SNES _Mouse</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="input_superscope_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Super _Scope</property>
+                        <property name="use_underline">True</property>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="input_superscope_item_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="input_superscope_enable_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">_Enable</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">False</property>
+                                <property name="group">input_joypad_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="input_superscope_crosshair_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Show _Crosshair</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_multitap5_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Super Multi_tap (5-player)</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_justifier_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Konami _Justifier</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_mouse_swapped_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Mouse in _alternate port</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_multitap8_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Multitaps (_8-player)</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_dual_justifiers_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use _Dual Justifiers</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_macsrifle_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use M.A.C.S. _Rifle</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
               <object class="GtkMenuItem" id="sound_menu_item">
                 <property name="label" translatable="yes">_Sound</property>
                 <property name="visible">True</property>
@@ -2126,142 +2323,6 @@
                 <child type="submenu">
                   <object class="GtkMenu" id="options_menu_item_menu">
                     <property name="can_focus">False</property>
-                    <child>
-                      <object class="GtkMenuItem" id="controller_ports_item">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">Controller Ports</property>
-                        <property name="use_underline">True</property>
-                        <child type="submenu">
-                          <object class="GtkMenu" id="controller_ports_item_menu">
-                            <property name="can_focus">False</property>
-                            <child>
-                              <object class="GtkMenuItem" id="snes_port_1">
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">SNES Port 1</property>
-                                <property name="use_underline">True</property>
-                                <signal name="activate" handler="on_snes_port_1_activate" swapped="no"/>
-                                <child type="submenu">
-                                  <object class="GtkMenu" id="snes_port_1_menu">
-                                    <property name="can_focus">False</property>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="joypad1">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Joypad</property>
-                                        <property name="use_underline">True</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="mouse1">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Mouse</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="group">joypad1</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="superscope1">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Superscope</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="active">True</property>
-                                        <property name="group">joypad1</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkMenuItem" id="snes_port_2">
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">SNES Port 2</property>
-                                <property name="use_underline">True</property>
-                                <signal name="activate" handler="on_snes_port_2_activate" swapped="no"/>
-                                <child type="submenu">
-                                  <object class="GtkMenu" id="snes_port_2_menu">
-                                    <property name="can_focus">False</property>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="joypad2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Joypad</property>
-                                        <property name="use_underline">True</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="mouse2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Mouse</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="multitap2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Multitap</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="superscope2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Superscope</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="active">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="nothingpluggedin2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes" context="SNES port 2">None</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="active">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkCheckMenuItem" id="enable_rumble_item">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">Enable _Rumble (Shake)</property>
-                        <property name="use_underline">True</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkSeparatorMenuItem" id="separator6">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                      </object>
-                    </child>
                     <child>
                       <object class="GtkMenuItem" id="cheats_item">
                         <property name="visible">True</property>

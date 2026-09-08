@@ -67,6 +67,7 @@ class Snes9xWindow : public GtkBuilderWindow
     /* GTK-base-related functions */
     void show();
     void set_menu_item_selected(const char *name);
+    void update_controller_option_menu();
     void set_mouseable_area(int x, int y, int width, int height);
     void set_accelerator_to_binding(const char *name,
                                         const char *binding);
@@ -84,7 +85,6 @@ class Snes9xWindow : public GtkBuilderWindow
     int get_auto_input_rate();
     void connect_signals();
     bool event_key(GdkEventKey *event);
-    void port_activate(const char *name);
     bool button_press(GdkEventButton *event);
     bool button_release(GdkEventButton *event);
     bool motion_notify(GdkEventMotion *event);
@@ -95,6 +95,7 @@ class Snes9xWindow : public GtkBuilderWindow
     Snes9xConfig *config;
     bool refreshing_bios_menu = false;
     bool refreshing_runahead_menu = false;
+    bool refreshing_controller_menu = false;
     int user_pause, sys_pause;
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;

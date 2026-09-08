@@ -183,11 +183,14 @@ int Snes9xConfig::load_defaults()
     shader_filename.clear();
     reduce_input_lag = false;
 
+    controller_option = CONTROLLER_JOYPADS;
+    superscope_crosshair_visible = true;
+    valid_controller_options = 0xffff;
+    controller_option_before_rom = -1;
+
     /* Snes9x Variables */
-    Settings.MouseMaster = true;
-    Settings.SuperScopeMaster = true;
-    Settings.JustifierMaster = true;
-    Settings.MultiPlayer5Master = true;
+    // The controller-device master flags are set per controller option in
+    // S9xApplyControllerOption().
     Settings.UpAndDown = false;
     Settings.AutoSaveDelay = 0;
     Settings.SkipFrames = THROTTLE_TIMER_FRAMESKIP;
@@ -237,6 +240,12 @@ int Snes9xConfig::load_defaults()
 
     return 0;
 }
+
+// Config-file names for ControllerOption, in enum order.
+static const char *controller_option_names[NUM_CONTROLLER_OPTIONS] = {
+    "joypads", "mouse", "superscope", "multitap5", "justifier",
+    "mouse_swapped", "multitap8", "dual_justifiers", "macsrifle"
+};
 
 int Snes9xConfig::save_config_file()
 {
@@ -416,40 +425,9 @@ int Snes9xConfig::save_config_file()
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default)");
 
     section = "Input";
-    controllers controller = CTL_NONE;
-    int8 id[4];
-
-    for (int i = 0; i < 2; i++)
-    {
-        std::string name;
-        std::string value;
-
-        name = "ControllerPort" + std::to_string(i);
-        S9xGetController(i, &controller, &id[0], &id[1], &id[2], &id[3]);
-
-        switch (controller)
-        {
-        case CTL_JOYPAD:
-            value = "joypad";
-            break;
-        case CTL_MOUSE:
-            value = "mouse";
-            break;
-        case CTL_SUPERSCOPE:
-            value = "superscope";
-            break;
-        case CTL_MP5:
-            value = "multitap";
-            break;
-        case CTL_JUSTIFIER:
-            value = "justifier";
-            break;
-        default:
-            value = "none";
-        }
-
-        outstring(name, value, "Device in this port: none, joypad, mouse, superscope, justifier, or multitap");
-    }
+    outstring("ControllerOption", controller_option_names[controller_option],
+              "What is plugged into the controller ports: joypads, mouse, superscope, multitap5, justifier, mouse_swapped, multitap8, dual_justifiers, or macsrifle");
+    outbool("SuperScopeCrosshair", superscope_crosshair_visible, "on to draw the Super Scope's crosshair on screen");
 
     outint("JoystickThreshold", joystick_threshold, "How far an analog stick/trigger must move to register as pressed (percent, 1-100)");
     outbool("EnableRumble", enable_rumble, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad");
@@ -698,23 +676,39 @@ int Snes9xConfig::load_config_file()
 
     section = "Input";
 
-    for (int i = 0; i < 2; i++)
+    std::string option;
+    instr("ControllerOption", option);
+    if (!option.empty())
     {
-        std::string name = "ControllerPort" + std::to_string(i);
-        std::string value;
-        instr(name, value);
-
-        if (value.find("joypad") != std::string::npos)
-            S9xSetController(i, CTL_JOYPAD, i, 0, 0, 0);
-        else if (value.find("multitap") != std::string::npos)
-            S9xSetController(i, CTL_MP5, i, i + 1, i + 2, i + 3);
-        else if (value.find("superscope") != std::string::npos)
-            S9xSetController(i, CTL_SUPERSCOPE, 0, 0, 0, 0);
-        else if (value.find("mouse") != std::string::npos)
-            S9xSetController(i, CTL_MOUSE, i, 0, 0, 0);
-        else if (value.find("none") != std::string::npos)
-            S9xSetController(i, CTL_NONE, 0, 0, 0, 0);
+        for (int i = 0; i < NUM_CONTROLLER_OPTIONS; i++)
+            if (option == controller_option_names[i])
+                controller_option = i;
     }
+    else
+    {
+        // Older configs stored a device per port; map the pairs the menu can
+        // still express onto its options.
+        std::string port0, port1;
+        instr("ControllerPort0", port0);
+        instr("ControllerPort1", port1);
+        auto is = [](const std::string &value, const char *device) {
+            return value.find(device) != std::string::npos;
+        };
+
+        if (is(port0, "mouse"))
+            controller_option = CONTROLLER_MOUSE;
+        else if (is(port1, "mouse"))
+            controller_option = CONTROLLER_MOUSE_SWAPPED;
+        else if (is(port0, "superscope") || is(port1, "superscope"))
+            controller_option = CONTROLLER_SUPERSCOPE;
+        else if (is(port1, "justifier"))
+            controller_option = CONTROLLER_JUSTIFIER;
+        else if (is(port1, "multitap"))
+            controller_option = is(port0, "multitap") ? CONTROLLER_MULTITAP8 : CONTROLLER_MULTITAP5;
+        else
+            controller_option = CONTROLLER_JOYPADS;
+    }
+    inbool("SuperScopeCrosshair", superscope_crosshair_visible);
 
     inint("JoystickThreshold", joystick_threshold);
     inbool("EnableRumble", enable_rumble);
@@ -831,6 +825,8 @@ void Snes9xConfig::rebind_keys()
     for (int joypad_i = 0; joypad_i < NUM_JOYPADS; joypad_i++)
     {
         auto &bin = pad[joypad_i].data;
+        const int player = joypad_player(joypad_i);
+        const std::string joypad = "Joypad" + std::to_string(player + 1) + " ";
 
         for (int button_i = 0; button_i < NUM_JOYPAD_LINKS; button_i++)
         {
@@ -843,21 +839,25 @@ void Snes9xConfig::rebind_keys()
             if (dupe < NUM_JOYPAD_LINKS || bin[button_i].hex() == 0)
                 continue;
 
-            string = "Joypad" + std::to_string((joypad_i % 5) + 1) + " ";
-            string += b_links[button_i].snes9x_name;
+            // The pad button, plus whatever it also works on the device in
+            // the neighbouring port, plus any other buttons sharing the key.
+            std::vector<std::string> commands;
+            commands.push_back(joypad + b_links[button_i].snes9x_name);
+            S9xJoypadDeviceCommands(controller_option, player, b_links[button_i].snes9x_name, commands);
 
-            bool ismulti = false;
             for (dupe = button_i - 1; dupe > 0; dupe--)
             {
                 if (bin[button_i] == bin[dupe])
                 {
-                    ismulti = true;
-                    string += ",Joypad" + std::to_string((joypad_i % 5) + 1) + " ";
-                    string += b_links[dupe].snes9x_name;
+                    commands.push_back(joypad + b_links[dupe].snes9x_name);
+                    S9xJoypadDeviceCommands(controller_option, player, b_links[dupe].snes9x_name, commands);
                 }
             }
 
-            if (ismulti)
+            string = commands[0];
+            for (size_t i = 1; i < commands.size(); i++)
+                string += "," + commands[i];
+            if (commands.size() > 1)
                 string = std::string("{") + string + "}";
 
             cmd = S9xGetPortCommandT(string.c_str());
@@ -874,16 +874,23 @@ void Snes9xConfig::rebind_keys()
                      false);
     }
 
-    cmd = S9xGetPortCommandT("Pointer Mouse1+Superscope+Justifier1");
+    // The host pointer aims every device that can sit in a port, whichever
+    // one is plugged in. The second Justifier is the exception: as on win32
+    // it is steered from pad 2's D-pad through a pseudo pointer (see
+    // S9xJoypadDeviceCommands), so it must not also be claimed by the mouse.
+    cmd = S9xGetPortCommandT("Pointer Mouse1+Mouse2+Superscope+Justifier1+MacsRifle");
     S9xMapPointer(BINDING_MOUSE_POINTER, cmd, true);
 
-    cmd = S9xGetPortCommandT("{Mouse1 L,Superscope Fire,Justifier1 Trigger}");
+    cmd = S9xGetPortCommandT("Pointer Justifier2");
+    S9xMapPointer(PseudoPointerBase, cmd, false);
+
+    cmd = S9xGetPortCommandT("{Mouse1 L,Mouse2 L,Superscope Fire,Justifier1 Trigger,MacsRifle Trigger}");
     S9xMapButton(BINDING_MOUSE_BUTTON0, cmd, false);
 
     cmd = S9xGetPortCommandT("Superscope ToggleTurbo");
     S9xMapButton(BINDING_MOUSE_BUTTON1, cmd, false);
 
-    cmd = S9xGetPortCommandT("{Mouse1 R,Superscope Pause,Justifier1 Start}");
+    cmd = S9xGetPortCommandT("{Mouse1 R,Mouse2 R,Superscope Pause,Justifier1 Start}");
     S9xMapButton(BINDING_MOUSE_BUTTON2, cmd, false);
 
     cmd = S9xGetPortCommandT("Superscope Cursor");

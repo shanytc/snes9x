@@ -98,35 +98,9 @@ int main(int argc, char *argv[])
 
     S9xPortSoundInit();
 
+    S9xApplyControllerOption();
     S9xReportControllers();
-    for (int port = 0; port < 2; port++)
-    {
-        enum controllers type;
-        int8 id;
-        S9xGetController(port, &type, &id, &id, &id, &id);
-        std::string device_type;
-
-        switch (type)
-        {
-        case CTL_MP5:
-            device_type = "multitap";
-            break;
-        case CTL_MOUSE:
-            device_type = "mouse";
-            break;
-        case CTL_SUPERSCOPE:
-            device_type = "superscope";
-            break;
-        case CTL_JOYPAD:
-            device_type = "joypad";
-            break;
-        default:
-            device_type = "nothingpluggedin";
-        }
-
-        device_type += std::to_string(port + 1);
-        top_level->set_menu_item_selected(device_type.c_str());
-    }
+    top_level->update_controller_option_menu();
 
     gui_config->rebind_keys();
     top_level->update_accelerators();
@@ -227,6 +201,7 @@ void S9xROMLoaded()
 {
     gui_config->rom_loaded = true;
     run_ahead_buffer.clear();
+    S9xAutoDetectControllerOption();
     top_level->configure_widgets();
 
 #ifdef RETROACHIEVEMENTS_SUPPORT

@@ -15,6 +15,9 @@
 
 #include "snes9x.h"
 #include "controls.h"
+#include "crosshairs.h"
+#include "memmap.h"
+#include "movie.h"
 #include "display.h"
 #include "gfx.h"
 
@@ -158,14 +161,15 @@ bool S9xPollAxis(uint32 id, int16 *value)
     return true;
 }
 
-static bool using_superscope()
+// A light gun can only point at the screen, unlike the free-roaming mouse.
+static bool using_gun()
 {
     for (int i = 0; i < 2; i++)
     {
         enum controllers ctl;
         int8_t id1, id2, id3, id4;
         S9xGetController(i, &ctl, &id1, &id2, &id3, &id4);
-        if (ctl == CTL_SUPERSCOPE)
+        if (ctl == CTL_SUPERSCOPE || ctl == CTL_JUSTIFIER || ctl == CTL_MACSRIFLE)
             return true;
     }
 
@@ -174,7 +178,7 @@ static bool using_superscope()
 
 bool S9xPollPointer(uint32 id, int16 *x, int16 *y)
 {
-    if (using_superscope())
+    if (using_gun())
     {
         top_level->snes_mouse_x = std::clamp(top_level->snes_mouse_x, 0.0, 256.0);
         top_level->snes_mouse_y = std::clamp(top_level->snes_mouse_y, 0.0, 239.0);
@@ -194,11 +198,279 @@ bool S9xIsMousePluggedIn()
     for (int i = 0; i <= 1; i++)
     {
         S9xGetController(i, &ctl, &id1, &id2, &id3, &id4);
-        if (ctl == CTL_MOUSE || ctl == CTL_SUPERSCOPE)
+        if (ctl == CTL_MOUSE || ctl == CTL_SUPERSCOPE || ctl == CTL_JUSTIFIER || ctl == CTL_MACSRIFLE)
             return true;
     }
 
     return false;
+}
+
+/* Mirrors win32's ChangeInputDevice(): raise only the selected device's
+ * master flag and seat the devices where they sit on real hardware (a mouse
+ * or pad in port 1, a gun or multitap in port 2). Pad N is driven by the
+ * "Joypad N" bindings. */
+void S9xApplyControllerOption()
+{
+    Settings.MouseMaster = false;
+    Settings.JustifierMaster = false;
+    Settings.SuperScopeMaster = false;
+    Settings.MultiPlayer5Master = false;
+    Settings.MacsRifleMaster = false;
+
+    switch (gui_config->controller_option)
+    {
+    case CONTROLLER_MOUSE:
+        Settings.MouseMaster = true;
+        S9xSetController(0, CTL_MOUSE, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JOYPAD, 1, 0, 0, 0);
+        break;
+    case CONTROLLER_MOUSE_SWAPPED:
+        Settings.MouseMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_MOUSE, 1, 0, 0, 0);
+        break;
+    case CONTROLLER_SUPERSCOPE:
+        Settings.SuperScopeMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_SUPERSCOPE, 0, 0, 0, 0);
+        break;
+    case CONTROLLER_MULTITAP5:
+        Settings.MultiPlayer5Master = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_MP5, 1, 2, 3, 4);
+        break;
+    case CONTROLLER_MULTITAP8:
+        Settings.MultiPlayer5Master = true;
+        S9xSetController(0, CTL_MP5, 0, 1, 2, 3);
+        S9xSetController(1, CTL_MP5, 4, 5, 6, 7);
+        break;
+    case CONTROLLER_JUSTIFIER:
+        Settings.JustifierMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JUSTIFIER, 0, 0, 0, 0);
+        break;
+    case CONTROLLER_DUAL_JUSTIFIERS:
+        Settings.JustifierMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JUSTIFIER, 1, 0, 0, 0);
+        break;
+    case CONTROLLER_MACSRIFLE:
+        Settings.MacsRifleMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_MACSRIFLE, 0, 0, 0, 0);
+        break;
+    case CONTROLLER_JOYPADS:
+    default:
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JOYPAD, 1, 0, 0, 0);
+        break;
+    }
+
+    S9xApplySuperScopeCrosshair();
+}
+
+void S9xApplySuperScopeCrosshair()
+{
+    if (gui_config->superscope_crosshair_visible)
+        S9xSetControllerCrosshair(X_SUPERSCOPE, 2, "White", "Black");
+    else
+        S9xSetControllerCrosshair(X_SUPERSCOPE, 0, "Trans", "Trans");
+}
+
+void S9xSetControllerOption(int option)
+{
+    if (option < 0 || option >= NUM_CONTROLLER_OPTIONS)
+        return;
+
+    gui_config->controller_option = option;
+    // A manual pick is the new baseline: nothing to restore on the next ROM.
+    gui_config->controller_option_before_rom = -1;
+    S9xApplyControllerOption();
+    gui_config->rebind_keys();
+}
+
+bool S9xControllerOptionValid(int option)
+{
+    return (gui_config->valid_controller_options >> option) & 1;
+}
+
+void S9xAutoDetectControllerOption()
+{
+    // Port of win32's S9xPostRomInit(): undo whatever the previous ROM
+    // forced, then let this ROM's NSRT header (or the M.A.C.S. rifle title)
+    // choose the devices and restrict the menu to the ones it supports.
+    if (S9xMovieActive())
+        return;
+
+    const int applied = gui_config->controller_option;
+
+    if (gui_config->controller_option_before_rom >= 0)
+        gui_config->controller_option = gui_config->controller_option_before_rom;
+
+    const int previous = gui_config->controller_option;
+    int &option = gui_config->controller_option;
+    int &valid = gui_config->valid_controller_options;
+    valid = 0xffff;
+
+    if (!Settings.DisableGameSpecificHacks && strncmp(Memory.ROMName, "MAC:Basic Rifle", 15) == 0)
+        option = CONTROLLER_MACSRIFLE;
+
+    if (!strncmp((const char *)Memory.NSRTHeader + 24, "NSRT", 4))
+    {
+        switch (Memory.NSRTHeader[29])
+        {
+        default: // unknown or unsupported
+            break;
+        case 0x00: // Gamepad / Gamepad
+            option = CONTROLLER_JOYPADS;
+            valid = (1 << CONTROLLER_JOYPADS);
+            break;
+        case 0x10: // Mouse / Gamepad
+            option = CONTROLLER_MOUSE;
+            valid = (1 << CONTROLLER_MOUSE);
+            break;
+        case 0x20: // Mouse_or_Gamepad / Gamepad
+            if (option == CONTROLLER_MOUSE_SWAPPED)
+                option = CONTROLLER_MOUSE;
+            if (option != CONTROLLER_MOUSE)
+                option = CONTROLLER_JOYPADS;
+            valid = (1 << CONTROLLER_JOYPADS) | (1 << CONTROLLER_MOUSE);
+            break;
+        case 0x01: // Gamepad / Mouse
+            option = CONTROLLER_MOUSE_SWAPPED;
+            valid = (1 << CONTROLLER_MOUSE_SWAPPED);
+            break;
+        case 0x22: // Mouse_or_Gamepad / Mouse_or_Gamepad
+            if (option != CONTROLLER_MOUSE && option != CONTROLLER_MOUSE_SWAPPED)
+                option = CONTROLLER_JOYPADS;
+            valid = (1 << CONTROLLER_JOYPADS) | (1 << CONTROLLER_MOUSE) | (1 << CONTROLLER_MOUSE_SWAPPED);
+            break;
+        case 0x03: // Gamepad / Superscope
+            option = CONTROLLER_SUPERSCOPE;
+            valid = (1 << CONTROLLER_SUPERSCOPE);
+            break;
+        case 0x04: // Gamepad / Gamepad_or_Superscope
+            if (option == CONTROLLER_JUSTIFIER || option == CONTROLLER_DUAL_JUSTIFIERS)
+                option = CONTROLLER_SUPERSCOPE;
+            if (option != CONTROLLER_SUPERSCOPE)
+                option = CONTROLLER_JOYPADS;
+            valid = (1 << CONTROLLER_JOYPADS) | (1 << CONTROLLER_SUPERSCOPE);
+            break;
+        case 0x05: // Gamepad / Justifier
+            if (option != CONTROLLER_DUAL_JUSTIFIERS)
+                option = CONTROLLER_JUSTIFIER;
+            valid = (1 << CONTROLLER_JUSTIFIER) | (1 << CONTROLLER_DUAL_JUSTIFIERS);
+            break;
+        case 0x06: // Gamepad / Multitap_or_Gamepad
+            option = CONTROLLER_MULTITAP5;
+            valid = (1 << CONTROLLER_MULTITAP5) | (1 << CONTROLLER_JOYPADS);
+            break;
+        case 0x66: // Multitap_or_Gamepad / Multitap_or_Gamepad
+            option = CONTROLLER_MULTITAP8;
+            valid = (1 << CONTROLLER_MULTITAP8) | (1 << CONTROLLER_MULTITAP5) | (1 << CONTROLLER_JOYPADS);
+            break;
+        case 0x24: // Gamepad_or_Mouse / Gamepad_or_Superscope
+            if (option == CONTROLLER_JUSTIFIER || option == CONTROLLER_DUAL_JUSTIFIERS)
+                option = CONTROLLER_SUPERSCOPE;
+            if (option != CONTROLLER_SUPERSCOPE && option != CONTROLLER_MOUSE)
+                option = CONTROLLER_JOYPADS;
+            valid = (1 << CONTROLLER_JOYPADS) | (1 << CONTROLLER_MOUSE) | (1 << CONTROLLER_SUPERSCOPE);
+            break;
+        case 0x27: // Gamepad_or_Mouse / Gamepad_or_Mouse_or_Superscope
+            if (option == CONTROLLER_JUSTIFIER || option == CONTROLLER_DUAL_JUSTIFIERS)
+                option = CONTROLLER_SUPERSCOPE;
+            if (option != CONTROLLER_SUPERSCOPE && option != CONTROLLER_MOUSE && option != CONTROLLER_MOUSE_SWAPPED)
+                option = CONTROLLER_JOYPADS;
+            valid = (1 << CONTROLLER_JOYPADS) | (1 << CONTROLLER_MOUSE) | (1 << CONTROLLER_MOUSE_SWAPPED) | (1 << CONTROLLER_SUPERSCOPE);
+            break;
+        case 0x08: // Gamepad / Mouse_or_Multitap_or_Gamepad
+            if (option == CONTROLLER_MOUSE)
+                option = CONTROLLER_MOUSE_SWAPPED;
+            if (option == CONTROLLER_MULTITAP8)
+                option = CONTROLLER_MULTITAP5;
+            if (option != CONTROLLER_MULTITAP5 && option != CONTROLLER_MOUSE_SWAPPED)
+                option = CONTROLLER_JOYPADS;
+            valid = (1 << CONTROLLER_MOUSE_SWAPPED) | (1 << CONTROLLER_MULTITAP5) | (1 << CONTROLLER_JOYPADS);
+            break;
+        }
+    }
+
+    // Remember what (if anything) the devices were forced away from.
+    gui_config->controller_option_before_rom = previous;
+
+    if (option != applied)
+    {
+        S9xApplyControllerOption();
+        gui_config->rebind_keys();
+    }
+}
+
+/* The joypad buttons that also drive the device in the neighbouring port,
+ * as win32's S9xPollButton() lets them: pad 1 works the mouse or Justifier
+ * that replaces it, pad 2 fires the gun or second mouse in port 2. In Dual
+ * Justifiers mode pad 2's D-pad also steers the second gun, which is aimed
+ * through pseudo pointer 1 (see rebind_keys). */
+struct DeviceButton
+{
+    int option;
+    int player;
+    const char *button;
+    const char *command;
+};
+
+static const DeviceButton device_buttons[] = {
+    { CONTROLLER_MOUSE, 0, "A", "Mouse1 L" },
+    { CONTROLLER_MOUSE, 0, "L", "Mouse1 L" },
+    { CONTROLLER_MOUSE, 0, "B", "Mouse1 R" },
+    { CONTROLLER_MOUSE, 0, "R", "Mouse1 R" },
+
+    { CONTROLLER_MOUSE_SWAPPED, 1, "A", "Mouse2 L" },
+    { CONTROLLER_MOUSE_SWAPPED, 1, "L", "Mouse2 L" },
+    { CONTROLLER_MOUSE_SWAPPED, 1, "B", "Mouse2 R" },
+    { CONTROLLER_MOUSE_SWAPPED, 1, "R", "Mouse2 R" },
+
+    { CONTROLLER_SUPERSCOPE, 1, "A", "Superscope Fire" },
+    { CONTROLLER_SUPERSCOPE, 1, "L", "Superscope Fire" },
+    { CONTROLLER_SUPERSCOPE, 1, "B", "Superscope Cursor" },
+    { CONTROLLER_SUPERSCOPE, 1, "R", "Superscope Cursor" },
+    { CONTROLLER_SUPERSCOPE, 1, "Y", "Superscope ToggleTurbo" },
+    { CONTROLLER_SUPERSCOPE, 1, "Start", "Superscope Pause" },
+    { CONTROLLER_SUPERSCOPE, 1, "Select", "Superscope Pause" },
+    { CONTROLLER_SUPERSCOPE, 1, "X", "Superscope AimOffscreen" },
+
+    { CONTROLLER_JUSTIFIER, 0, "A", "Justifier1 Trigger" },
+    { CONTROLLER_JUSTIFIER, 0, "L", "Justifier1 Trigger" },
+    { CONTROLLER_JUSTIFIER, 0, "B", "Justifier1 Start" },
+    { CONTROLLER_JUSTIFIER, 0, "R", "Justifier1 Start" },
+    { CONTROLLER_JUSTIFIER, 0, "X", "Justifier1 AimOffscreen" },
+    { CONTROLLER_JUSTIFIER, 0, "Start", "Justifier1 AimOffscreen" },
+
+    { CONTROLLER_DUAL_JUSTIFIERS, 0, "A", "Justifier1 Trigger" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 0, "L", "Justifier1 Trigger" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 0, "B", "Justifier1 Start" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 0, "R", "Justifier1 Start" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 0, "X", "Justifier1 AimOffscreen" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 0, "Start", "Justifier1 AimOffscreen" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "A", "Justifier2 Trigger" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "L", "Justifier2 Trigger" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "B", "Justifier2 Start" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "R", "Justifier2 Start" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "X", "Justifier2 AimOffscreen" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "Start", "Justifier2 AimOffscreen" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "Up", "ButtonToPointer 1u Med" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "Down", "ButtonToPointer 1d Med" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "Left", "ButtonToPointer 1l Med" },
+    { CONTROLLER_DUAL_JUSTIFIERS, 1, "Right", "ButtonToPointer 1r Med" },
+
+    { CONTROLLER_MACSRIFLE, 1, "A", "MacsRifle Trigger" },
+    { CONTROLLER_MACSRIFLE, 1, "L", "MacsRifle Trigger" },
+};
+
+void S9xJoypadDeviceCommands(int option, int player, const char *button, std::vector<std::string> &commands)
+{
+    for (auto &d : device_buttons)
+        if (d.option == option && d.player == player && !strcmp(d.button, button))
+            commands.push_back(d.command);
 }
 
 bool S9xGrabJoysticks()

@@ -41,6 +41,7 @@ class EmuMainWindow : public QMainWindow
     void updateShaderSettingsItem();
     void gameChanging();
     void toggleMouseGrab();
+    void updatePortConfigurationMenu();
     std::vector<std::string> getDisplayDeviceList();
     EmuApplication *app = nullptr;
     EmuCanvas *canvas = nullptr;
@@ -78,6 +79,12 @@ class EmuMainWindow : public QMainWindow
 
     QTimer mouse_timer;
     bool cursor_visible = true;
+    // Light guns aim at the spot under the (ungrabbed) host pointer.
+    bool gunAimsAtPointer();
+    void reportGunAim(const QPoint &global_pos);
+    // Input menu device list, one per EmuConfig::PortConfiguration.
+    std::vector<QAction *> port_configuration_actions;
+    QAction *superscope_crosshair_action = nullptr;
     QAction *shader_settings_item;
     std::vector<QAction *> core_actions;
     std::vector<QAction *> recent_menu_items;

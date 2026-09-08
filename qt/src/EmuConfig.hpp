@@ -224,15 +224,33 @@ struct EmuConfig
     std::string ra_api_token;
     std::string ra_emulator_name = "SuperSnes9x";
 
+    /* What is plugged into the two controller ports. One entry per item of
+     * win32's Input menu device list, in the same order as its enum, so the
+     * NSRT auto-detection table can be shared verbatim. */
     enum PortConfiguration
     {
-        eOneController = 0,
-        eTwoControllers,
-        eMousePlusController,
-        eSuperScopePlusController,
-        eControllerPlusMultitap
+        eJoypads = 0,
+        eMouse,
+        eSuperScope,
+        eMultitap5,
+        eJustifier,
+        eMouseSwapped,
+        eMultitap8,
+        eDualJustifiers,
+        eMacsRifle,
+        eNumPortConfigurations
     };
     int port_configuration;
+    bool superscope_crosshair_visible;
+
+    // A mouse or light gun is aimed with the host pointer.
+    static bool portConfigurationUsesPointer(int configuration);
+    // Light guns aim at absolute screen positions; the SNES Mouse is relative.
+    static bool portConfigurationUsesGun(int configuration);
+
+    /* Bindings for SNES pads 1-8: two on the console, up to eight with a
+     * multitap in each port, as on win32. */
+    static const int num_controllers = 8;
 
     static const int allowed_bindings = 4;
     static const int num_controller_bindings = 18;
@@ -251,7 +269,7 @@ struct EmuConfig
         struct
         {
             EmuBinding buttons[num_controller_bindings * allowed_bindings];
-        } controller[5];
+        } controller[num_controllers];
 
         EmuBinding shortcuts[num_shortcuts * allowed_bindings];
     } binding;

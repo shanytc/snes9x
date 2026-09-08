@@ -114,9 +114,14 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 	// DMG would have drawn nothing, so the blank signal alone decides - and a
 	// real picture can look like a tile grid too (a shougi board matched for the
 	// whole game), which is what the content test is there to reject.
-	const bool hold = (in.quirks & SGBC_QUIRK_HOLD_PAYLOAD) && in.fb_valid &&
-	                  (in.fb_bgp == 0 || !(in.fb_lcdc & 0x01)) &&
-	                  (!in.color || LooksLikePayload(in.color_fb));
+	// BGP_OBJ_BLANK needs no content test: the cart it is set for blanks with
+	// sprites off, and turns them back on for every screen it means to show.
+	const bool hold = in.fb_valid &&
+	                  (((in.quirks & SGBC_QUIRK_HOLD_PAYLOAD) &&
+	                    (in.fb_bgp == 0 || !(in.fb_lcdc & 0x01)) &&
+	                    (!in.color || LooksLikePayload(in.color_fb))) ||
+	                   ((in.quirks & SGBC_QUIRK_BGP_OBJ_BLANK) &&
+	                    in.fb_bgp == 0 && !(in.fb_lcdc & 0x02)));
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
 	if (!dest || width > SNES_WIDTH ||
 	    (int) PPU.ScreenHeight < (int) (ORIGIN_Y + GB_SCREEN_HEIGHT)) return false;

@@ -895,6 +895,10 @@ const SgbcPatch kPatches[] = {
 	// Color path only its $FF9C shadow says so - the register never follows
 	{ 0x40B0, "YU-GI MCGB\000AYCJ\200", "Yu-Gi-Oh! - Monster Capsule GB (Japan)", 0, {},
 	  SGBC_QUIRK_BGP_SHADOW },
+	// display quirk only: blanks its intro transfers and redraws through BGP,
+	// which the Color path ignores, so the payload showed on the pane
+	{ 0x9813, "YUGIOUDM2\000\000AYKJ\200", "Yu-Gi-Oh! Duel Monsters II - Dark Duel Stories (Japan)", 0, {},
+	  SGBC_QUIRK_BGP_OBJ_BLANK },
 	// nop_early_ret
 	{ 0x9874, "ZELDA", "Zelda no Densetsu - Yume o Miru Shima DX (Japan) (Beta) (1998-11-09)", 1,
 	  { { 0x0F2A25, 1, { 0xC0 }, { 0x00 } } } },

@@ -51,6 +51,10 @@ static const uint32_t SGBC_QUIRK_LCD_BLANK = 1u << 3;
 //   register says nothing. Read the shadow it keeps at $FF9C instead: while
 //   every index there maps to one shade, paint the pane that shade.
 static const uint32_t SGBC_QUIRK_BGP_SHADOW = 1u << 4;
+//   BGP_OBJ_BLANK: the cart blanks by writing BGP=$00 with sprites off, and
+//   its Color path then leaves BGP at $00 over real screens, so the register
+//   alone says nothing. Cover the pane only while OBJ is off with it.
+static const uint32_t SGBC_QUIRK_BGP_OBJ_BLANK = 1u << 5;
 
 // One byte run in a cart image, up to three bytes (a jump, a store): `old`
 // is verified before `neu` is written.

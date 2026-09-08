@@ -1040,6 +1040,13 @@ static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 			icd.last_data_trn_addr =
 				static_cast<uint16_t>(pkt[2] | (pkt[3] << 8));
 			break;
+		case 0x11:
+			// MLT_REQ: the ICD2 latches the player count as the packet lands.
+			// Waiting for the BIOS to program it loses the race against a cart
+			// that probes the rotation right after (Survival Kids and friends).
+			icd.mlt_players = ((pkt[1] & 3) == 1) ? 2u : ((pkt[1] & 3) == 3) ? 4u : 1u;
+			icd.mlt_auto_drop_polls = 0;
+			break;
 		case 0x12:
 			icd.jump_packets++;
 			icd.last_jump_addr =

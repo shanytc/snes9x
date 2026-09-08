@@ -140,13 +140,17 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 	// The cart blanks through BGP while it rebuilds the screen, but on the Color
 	// path it stops copying its shadow to the register, so the register lags the
 	// blank by tens of frames and the rebuild shows. Follow the shadow instead.
+	// ...and only while the register is that same palette bar the step it
+	// missed: the fade ramps index 0 alone, so indices 1-3 already agree.
+	// $FF9C holds other values over screens the cart means to show.
 	bool bgp_shadow = false;
 	if (in.quirks & SGBC_QUIRK_BGP_SHADOW)
 	{
 		const int s0 = in.hram_bgp & 3;
 		bgp_shadow = ((in.hram_bgp >> 2) & 3) == s0 &&
 		             ((in.hram_bgp >> 4) & 3) == s0 &&
-		             ((in.hram_bgp >> 6) & 3) == s0;
+		             ((in.hram_bgp >> 6) & 3) == s0 &&
+		             (in.fb_bgp >> 2) == (in.hram_bgp >> 2);
 	}
 
 	// The keys and the backdrop exactly as the PPU drew each line - its

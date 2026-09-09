@@ -20,6 +20,7 @@ namespace fs = std::filesystem;
 #include "crosshairs.h"
 #include "cheats.h"
 #include "movie.h"
+#include "common/recording/avi_recorder.hpp"
 
 #ifdef KAILLERA_SUPPORT
 #include "kaillera_client.h"
@@ -304,6 +305,9 @@ bool Snes9xController::openFile(const std::string &filename)
 {
     if (active)
         S9xAutoSaveSRAM();
+    // A recording belongs to one game: the next one may have another frame
+    // rate or screen size. (LoadROM itself ends any movie.)
+    S9xAVIStop();
     active = false;
     auto result = Memory.LoadROM(filename.c_str());
     if (result)
@@ -466,6 +470,8 @@ void Snes9xController::mainLoop()
         mainLoopWithRunAhead();
     else
         S9xMainLoop();
+
+    S9xAVIEndFrame();
 }
 
 void Snes9xController::setPaused(bool paused)
@@ -525,6 +531,11 @@ bool8 S9xDeinitUpdate(int width, int height)
     }
 
     uint16_t *screen_view = GFX.Screen + (yoffset * (int)GFX.RealPPL);
+
+    // The AVI gets the frame as the SNES drew it, before the hi-res effect
+    // and software filter reshape it for the window.
+    if (!Settings.Paused)
+        S9xAVICaptureFrame(screen_view, GFX.Pitch, width, height);
 
     auto hires_effect = Snes9xController::get()->high_resolution_effect;
     if (!Settings.Paused)
@@ -781,7 +792,9 @@ bool S9xPollPointer(unsigned int, short *, short *)
 void Snes9xController::SamplesAvailable()
 {
     static std::vector<int16_t> data;
-    if (sound_output_function)
+    // An AVI takes every sample, whether or not a sound device is there to
+    // play it.
+    if (sound_output_function || S9xAVIRecording())
     {
         // SGB BIOS mode fires this ~per scanline with only a few GB samples;
         // writing those dribbles starves the driver into static. Like win32,
@@ -807,7 +820,9 @@ void Snes9xController::SamplesAvailable()
 
         S9xMixSamples((uint8_t *)data.data(), samples);
         S9xMixSpcOverGB(data.data(), samples);
-        sound_output_function(data.data(), samples);
+        S9xAVIAddSamples(data.data(), samples);
+        if (sound_output_function)
+            sound_output_function(data.data(), samples);
     }
     else
     {
@@ -1252,13 +1267,24 @@ bool Snes9xController::isAbnormalSpeed()
     return (Settings.TurboMode || rewinding);
 }
 
+/* As on win32's Emulation->Reset: a movie being recorded gets the reset as
+ * an input event, and a movie being played back ends. */
+static void movieResetHook()
+{
+    S9xMovieUpdateOnReset();
+    if (S9xMoviePlaying())
+        S9xMovieStop(true);
+}
+
 void Snes9xController::reset()
 {
+    movieResetHook();
     S9xReset();
 }
 
 void Snes9xController::softReset()
 {
+    movieResetHook();
     S9xSoftReset();
 }
 
@@ -1333,6 +1359,91 @@ bool Snes9xController::hasMemoryPack()
     // Only BS-X and Sufami-style multicarts carry a memory pack; this is the
     // same test CMemory::SaveMPAK makes before it agrees to write one.
     return active && (Settings.BS || (Multi.cartSizeB && Multi.cartType == 3));
+}
+
+int Snes9xController::openMovie(const std::string &filename, bool read_only)
+{
+    if (!active)
+        return FILE_NOT_FOUND;
+    if (S9xMovieActive())
+        S9xMovieStop(true);
+    return S9xMovieOpen(filename.c_str(), read_only);
+}
+
+int Snes9xController::createMovie(const std::string &filename, uint8_t controllers_mask,
+                                  bool from_reset, bool clear_sram, const std::wstring &metadata)
+{
+    if (!active)
+        return FILE_NOT_FOUND;
+    if (S9xMovieActive())
+        S9xMovieStop(true);
+
+    if (from_reset && clear_sram)
+    {
+        // A movie from reset with clean SRAM: drop the battery save on disk
+        // and reload, which leaves the SRAM zeroed. Same as win32.
+        std::error_code ec;
+        fs::remove(S9xGetFilename(".srm", SRAM_DIR), ec);
+        fs::remove(S9xGetFilename(".srm", ROMFILENAME_DIR), ec);
+        Memory.LoadSRAM(S9xGetFilename(".srm", SRAM_DIR).c_str());
+    }
+
+    // win32 pads the author text to 32 characters; keep the files identical.
+    std::wstring padded = metadata;
+    while (padded.size() < 32)
+        padded += L' ';
+    if (padded.size() > MOVIE_MAX_METADATA)
+        padded.resize(MOVIE_MAX_METADATA);
+
+    return S9xMovieCreate(filename.c_str(), controllers_mask,
+                          from_reset ? MOVIE_OPT_FROM_RESET : MOVIE_OPT_FROM_SNAPSHOT,
+                          padded.c_str(), (int)padded.size());
+}
+
+void Snes9xController::stopMovie()
+{
+    if (S9xMovieActive())
+        S9xMovieStop(false);
+}
+
+bool Snes9xController::movieActive()
+{
+    return active && S9xMovieActive();
+}
+
+bool Snes9xController::saveAndCheckSRAM()
+{
+    if (!active)
+        return false;
+    auto filename = S9xGetFilename(".srm", SRAM_DIR);
+    Memory.SaveSRAM(filename.c_str());
+    std::error_code ec;
+    return fs::exists(filename, ec) &&
+           (fs::status(filename, ec).permissions() & fs::perms::owner_write) != fs::perms::none;
+}
+
+bool Snes9xController::startAVIRecording(const std::string &filename, bool hires, bool include_audio, std::string &error)
+{
+    if (!active)
+    {
+        error = "No game is running.";
+        return false;
+    }
+    S9xAVIOptions options;
+    options.hires = hires;
+    options.overscan = Settings.ShowOverscan;
+    options.include_audio = include_audio;
+    return S9xAVIStart(filename, options, &error);
+}
+
+void Snes9xController::stopAVIRecording()
+{
+    S9xAVIStop();
+}
+
+bool Snes9xController::aviRecording()
+{
+    return S9xAVIRecording();
 }
 
 void Snes9xController::setMessage(const std::string &message)

@@ -41,6 +41,12 @@ struct EmuConfig
     int current_save_bank = 0;
     std::vector<std::string> recently_used;
 
+    // Last choices made in the movie dialogs, remembered like win32's
+    // MovieDefault* settings.
+    bool movie_default_read_only = true;
+    bool movie_default_from_reset = false;
+    bool movie_default_clear_sram = false;
+
     // General
     bool fullscreen_on_open;
     bool disable_screensaver;
@@ -163,6 +169,10 @@ struct EmuConfig
     int rewind_frame_interval;
 
     int run_ahead_frames;
+
+    // File->AVI Recording writes 512x448 frames instead of 256x224, like
+    // win32's "Hi-Res AVI Recording" option.
+    bool avi_hires;
 
     // Emulation/Hacks
 

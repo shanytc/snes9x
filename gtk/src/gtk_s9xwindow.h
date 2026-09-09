@@ -57,7 +57,12 @@ class Snes9xWindow : public GtkBuilderWindow
     void save_memory_pack();
     bool try_open_rom(const std::string &filename);
     std::string prompt_rename_msu1_pack(const std::string &filename);
-    std::string open_movie_dialog(bool readonly);
+    /* File->Movie Play/Record/Stop and AVI Recording, as on win32. */
+    void play_movie_dialog();
+    void record_movie_dialog();
+    void stop_movie();
+    void toggle_avi_recording();
+    void update_movie_menu();
     void movie_seek_dialog();
     void open_multicart_dialog();
     void open_voicekun_dialog();

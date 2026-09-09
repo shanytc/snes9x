@@ -15,6 +15,7 @@
 
 #include "CheatsDialog.hpp"
 #include "ColorCorrectionDialog.hpp"
+#include "MovieDialogs.hpp"
 #include "StatePreviewDialog.hpp"
 #include "EmuApplication.hpp"
 #include "EmuConfig.hpp"
@@ -41,6 +42,9 @@
 #include "display.h"
 #include "msu1.h"
 #include "voicekun.h"
+#include "movie.h"
+#include "snapshot.h"
+#include "fscompat.h"
 
 #include <QMessageBox>
 #include <QDesktopServices>
@@ -418,6 +422,42 @@ void EmuMainWindow::createWidgets()
     });
 
     file_menu->addMenu(save_other_menu);
+    file_menu->addSeparator();
+
+    // win32's movie items: play back or record an input movie (.smv).
+    auto movie_play_item = file_menu->addAction(tr("Movie &Play..."));
+    connect(movie_play_item, &QAction::triggered, [&] {
+        playMovieDialog();
+    });
+    core_actions.push_back(movie_play_item);
+
+    auto movie_record_item = file_menu->addAction(tr("Movie &Record..."));
+    connect(movie_record_item, &QAction::triggered, [&] {
+        recordMovieDialog();
+    });
+    core_actions.push_back(movie_record_item);
+
+    movie_stop_action = file_menu->addAction(tr("Movie &Stop"));
+    connect(movie_stop_action, &QAction::triggered, [&] {
+        app->stopMovie();
+    });
+    core_actions.push_back(movie_stop_action);
+
+    file_menu->addSeparator();
+
+    // One item that starts or stops, relabelled like win32's.
+    avi_recording_action = file_menu->addAction(tr("Start &AVI Recording..."));
+    connect(avi_recording_action, &QAction::triggered, [&] {
+        toggleAVIRecording();
+    });
+    core_actions.push_back(avi_recording_action);
+
+    connect(file_menu, &QMenu::aboutToShow, this, [this] {
+        movie_stop_action->setEnabled(app->isCoreActive() && app->isMovieActive());
+        avi_recording_action->setText(app->isAVIRecording() ? tr("Stop &AVI Recording")
+                                                            : tr("Start &AVI Recording..."));
+    });
+
     file_menu->addSeparator();
 
     auto languages = EmuPoTranslator::availableLanguages();
@@ -980,6 +1020,87 @@ void EmuMainWindow::chooseState(bool save)
         app->loadState(filename.toStdString());
     else
         app->saveState(filename.toStdString());
+
+    app->unpause();
+}
+
+void EmuMainWindow::playMovieDialog()
+{
+    if (!app->isCoreActive())
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore("Movie playback"))
+        return;
+#endif
+
+    app->pause();
+
+    PlayMovieDialog dialog(app, this);
+    if (dialog.exec() && !dialog.path().empty())
+    {
+        app->config->movie_default_read_only = dialog.readOnly();
+        int result = app->playMovie(dialog.path(), dialog.readOnly());
+        if (result != SUCCESS)
+            QMessageBox::warning(this, tr("Play Movie"), movieErrorString(result, false));
+    }
+
+    app->unpause();
+}
+
+void EmuMainWindow::recordMovieDialog()
+{
+    if (!app->isCoreActive())
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore("Movie recording"))
+        return;
+#endif
+
+    app->pause();
+
+    // Written out first so the dialog can tell whether there is a battery
+    // save that "Clear SRAM" would remove, as win32 does.
+    bool sram_exists = app->movieSRAMExists();
+
+    RecordMovieDialog dialog(app, this, sram_exists);
+    if (dialog.exec() && !dialog.path().empty())
+    {
+        int result = app->recordMovie(dialog.path(), dialog.controllersMask(),
+                                      dialog.fromReset(), dialog.clearSRAM(), dialog.metadata());
+        if (result != SUCCESS)
+            QMessageBox::warning(this, tr("Record Movie"), movieErrorString(result, false));
+    }
+
+    app->unpause();
+}
+
+void EmuMainWindow::toggleAVIRecording()
+{
+    if (!app->isCoreActive())
+        return;
+
+    if (app->isAVIRecording())
+    {
+        app->stopAVIRecording();
+        return;
+    }
+
+    app->pause();
+
+    QFileDialog dialog(this, tr("Record AVI"));
+    dialog.setFileMode(QFileDialog::AnyFile);
+    dialog.setAcceptMode(QFileDialog::AcceptSave);
+    dialog.setDefaultSuffix("avi");
+    dialog.setDirectory(QString::fromStdString(S9xGetDirectory(SCREENSHOT_DIR)));
+    dialog.selectFile(QString::fromStdString(S9xBasename(S9xGetFilename(".avi", SCREENSHOT_DIR))));
+    dialog.setNameFilters({ tr("AVI Files (*.avi)"), tr("All Files (*)") });
+
+    if (dialog.exec() && !dialog.selectedFiles().empty())
+    {
+        std::string error;
+        if (!app->startAVIRecording(dialog.selectedFiles()[0].toStdString(), error))
+            QMessageBox::warning(this, tr("Record AVI"), QString::fromStdString(error));
+    }
 
     app->unpause();
 }

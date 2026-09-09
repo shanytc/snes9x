@@ -27,6 +27,22 @@ class Snes9xController
     bool saveSRAM();
     bool saveMemoryPack();
     bool hasMemoryPack();
+
+    /* File->Movie Play/Record/Stop, as on win32. The open/create results are
+     * movie.cpp's SUCCESS/FILE_NOT_FOUND/WRONG_FORMAT/WRONG_VERSION. */
+    int openMovie(const std::string &filename, bool read_only);
+    int createMovie(const std::string &filename, uint8_t controllers_mask,
+                    bool from_reset, bool clear_sram, const std::wstring &metadata);
+    void stopMovie();
+    bool movieActive();
+    /* Writes the battery save out so the Record Movie dialog can tell whether
+     * there is one to clear; returns whether it exists and is writable. */
+    bool saveAndCheckSRAM();
+
+    /* File->AVI Recording. */
+    bool startAVIRecording(const std::string &filename, bool hires, bool include_audio, std::string &error);
+    void stopAVIRecording();
+    bool aviRecording();
     void updateSettings(EmuConfig *config);
     void updateBindings(const EmuConfig * const config);
     void reportBinding(EmuBinding b, bool active);

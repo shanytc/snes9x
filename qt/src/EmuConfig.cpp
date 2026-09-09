@@ -338,6 +338,8 @@ bool EmuConfig::setDefaults(int section)
 
         run_ahead_frames = 0;
 
+        avi_hires = false;
+
         allow_invalid_vram_access = false;
         snapshot_screenshots = true;
         allow_opposing_dpad_directions = false;
@@ -505,6 +507,9 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("CheatDialogHeight", cheat_dialog_height);
     Int("CurrentSaveSlot", current_save_slot, "Currently selected save-state slot within the bank (remembered automatically)");
     Int("CurrentSaveBank", current_save_bank, "Currently selected save-state bank (remembered automatically)");
+    Bool("MovieDefaultReadOnly", movie_default_read_only, "Last state of the Play Movie dialog's Open Read-Only box (remembered automatically)");
+    Bool("MovieDefaultStartFromReset", movie_default_from_reset, "Last state of the Record Movie dialog's Record from reset choice (remembered automatically)");
+    Bool("MovieDefaultClearSRAM", movie_default_clear_sram, "Last state of the Record Movie dialog's Clear SRAM box (remembered automatically)");
 
     if (!write)
     {
@@ -612,6 +617,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("RewindBufferSize", rewind_buffer_size, "Memory (in MB) reserved for rewind; 0 disables rewind");
     Int("RewindFrameInterval", rewind_frame_interval, "Save a rewind snapshot every N frames");
     Int("RunAhead", run_ahead_frames, "Number of frames to run ahead for reduced input latency (0 = off, 1-4)");
+    Bool("AVIHiRes", avi_hires, "true to record AVI in Hi-Res scale (512x448 instead of 256x224)");
     Bool("AllowInvalidVRAMAccess", allow_invalid_vram_access, "Let games make the VRAM accesses real hardware blocks (off for accuracy; on only for a few broken hacks)");
     Bool("SnapshotScreenshots", snapshot_screenshots, "Store a screenshot inside each save state, for the save/load-with-preview dialog");
     Bool("AllowOpposingDpadDirections", allow_opposing_dpad_directions, "Allow the D-Pad to press both left+right or up+down at once");

@@ -111,6 +111,10 @@ int Snes9xConfig::load_defaults()
     sound_playback_rate = 7;
     sound_input_rate = 32040;
     auto_input_rate = false;
+    movie_default_read_only = true;
+    movie_default_from_reset = false;
+    movie_default_clear_sram = false;
+    avi_hires = false;
     master_volume_regular = 100;
     master_volume_fast_forward = 100;
     sgb_mix_volume_spc = 50;
@@ -398,6 +402,9 @@ int Snes9xConfig::save_config_file()
     outint("RewindGranularity", rewind_granularity, "Only save rewind snapshots every N frames");
     outint("CurrentSaveSlot", current_save_slot, "Currently selected save-state slot within the bank (remembered automatically)");
     outint("CurrentSaveBank", current_save_bank, "Currently selected save-state bank (remembered automatically)");
+    outbool("MovieDefaultReadOnly", movie_default_read_only, "Last state of the Play Movie dialog's Open Read-Only box (remembered automatically)");
+    outbool("MovieDefaultStartFromReset", movie_default_from_reset, "Last state of the Record Movie dialog's Record from reset choice (remembered automatically)");
+    outbool("MovieDefaultClearSRAM", movie_default_clear_sram, "Last state of the Record Movie dialog's Clear SRAM box (remembered automatically)");
 
     section = "Emulation";
     outbool("EmulateTransparency", Settings.Transparency, "Render the SNES color/transparency effects (turn off only for troubleshooting)");
@@ -411,6 +418,7 @@ int Snes9xConfig::save_config_file()
     outbool("BlockInvalidVRAMAccess", Settings.BlockInvalidVRAMAccessMaster, "Emulate the real hardware's VRAM access restrictions (on for accuracy; off only for a few broken ROMs/hacks)");
     outbool("AllowDPadContradictions", Settings.UpAndDown, "Allow the D-Pad to press both up + down at the same time, or left + right");
     outint("RunAhead", Settings.RunAhead, "Number of frames to run ahead for reduced input latency (0 = off, 1-4)");
+    outbool("AVIHiRes", avi_hires, "true to record AVI in Hi-Res scale (512x448 instead of 256x224)");
 
     section = "Hacks";
     outint("SuperFXClockMultiplier", Settings.SuperFXClockMultiplier, "SuperFX (GSU) chip speed as a percentage of normal (50-400; 100 = accurate). Higher reduces slowdown in Star Fox and other SuperFX games");
@@ -629,6 +637,9 @@ int Snes9xConfig::load_config_file()
     inint("RewindGranularity", rewind_granularity);
     inint("CurrentSaveSlot", current_save_slot);
     inint("CurrentSaveBank", current_save_bank);
+    inbool("MovieDefaultReadOnly", movie_default_read_only);
+    inbool("MovieDefaultStartFromReset", movie_default_from_reset);
+    inbool("MovieDefaultClearSRAM", movie_default_clear_sram);
 
     /* Older configs stored a flat 0-999 slot index. Split it into a bank and
      * an in-bank slot so the selection survives the upgrade. */
@@ -654,6 +665,7 @@ int Snes9xConfig::load_config_file()
     inbool("DisplayIndicators", Settings.DisplayIndicators);
     inbool("SnapshotScreenshots", Settings.SnapshotScreenshots);
     inint("RunAhead", Settings.RunAhead);
+    inbool("AVIHiRes", avi_hires);
     if (Settings.RunAhead < 0)
         Settings.RunAhead = 0;
     if (Settings.RunAhead > 4)

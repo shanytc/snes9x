@@ -173,6 +173,16 @@ class Snes9xConfig
     int current_save_slot;
     int current_save_bank;
 
+    /* Last choices made in the movie dialogs, remembered like win32's
+     * MovieDefault* settings. */
+    bool movie_default_read_only;
+    bool movie_default_from_reset;
+    bool movie_default_clear_sram;
+
+    /* File->AVI Recording writes 512x448 frames instead of 256x224, like
+     * win32's "Hi-Res AVI Recording" option. */
+    bool avi_hires;
+
     XRRScreenResources *xrr_screen_resources;
     XRRCrtcInfo *xrr_crtc_info;
 

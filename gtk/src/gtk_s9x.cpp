@@ -23,6 +23,7 @@
 #include "apu/apu.h"
 #include "netplay.h"
 #include "movie.h"
+#include "common/recording/avi_recorder.hpp"
 #include "controls.h"
 #include "snapshot.h"
 #include "gfx.h"
@@ -144,6 +145,10 @@ int main(int argc, char *argv[])
 
 int S9xOpenROM(const char *rom_filename)
 {
+    // A recording belongs to one game: the next one may have another frame
+    // rate or screen size. (LoadROM itself ends any movie.)
+    S9xAVIStop();
+
     if (gui_config->rom_loaded)
     {
         S9xAutoSaveSRAM();
@@ -412,6 +417,7 @@ static void game_loop()
             S9xMainLoop();
         }
 
+        S9xAVIEndFrame();
         S9xUpdateRumble();
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -677,6 +683,8 @@ static void check_pointer_timer()
 /* Final exit point, issues exit (0) */
 void S9xExit()
 {
+    S9xAVIStop();
+
     gui_config->save_config_file();
 
 #ifdef RETROACHIEVEMENTS_SUPPORT

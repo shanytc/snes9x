@@ -599,6 +599,14 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         {
             top_level->movie_seek_dialog();
         }
+        else if (cmd.port[0] == PORT_RECORD_MOVIE)
+        {
+            top_level->record_movie_dialog();
+        }
+        else if (cmd.port[0] == PORT_PLAY_MOVIE)
+        {
+            top_level->play_movie_dialog();
+        }
         else if (cmd.port[0] == PORT_SWAP_CONTROLLERS)
         {
             swap_controllers_1_2();
@@ -727,6 +735,16 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strcasecmp(name, "GTK_seek_to_frame"))
     {
         cmd.port[0] = PORT_SEEK_TO_FRAME;
+    }
+    // The core's own versions of these are stubs; the port shows the File
+    // menu's dialogs instead. The config keys stay the same.
+    else if (!strcasecmp(name, "BeginRecordingMovie"))
+    {
+        cmd.port[0] = PORT_RECORD_MOVIE;
+    }
+    else if (!strcasecmp(name, "LoadMovie"))
+    {
+        cmd.port[0] = PORT_PLAY_MOVIE;
     }
     else if (!strcasecmp(name, "GTK_quit"))
     {

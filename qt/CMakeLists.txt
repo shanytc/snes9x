@@ -137,6 +137,12 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Gui)
 list(APPEND LIBS Qt6::Widgets Qt6::Gui)
+# main.cpp reads the platform theme's palette back on Qt 6.2/6.3 (the
+# QTBUG-98762 workaround), and QPlatformTheme is QPA API: private headers,
+# which Ubuntu 22.04's qt6-base-private-dev provides.
+if(NOT WIN32 AND NOT APPLE AND Qt6_VERSION VERSION_LESS 6.3.2)
+    list(APPEND LIBS Qt6::GuiPrivate)
+endif()
 
 # Must come before the first pkg_check_modules() call below. It used to sit
 # after the libcurl lookup and only worked because something else in the

@@ -351,6 +351,11 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
         memset(out, 0, sample_count << 1);
         S9xClearSamples();
         spc::sound_in_sync = true;
+        // Flat-line the viewer's SPC lane while muted instead of freezing
+        // it on stale audio; the host pushes the (zeroed) mix itself.
+        if (audiowave::enabled)
+            audiowave::push_silence(audiowave::buf_spc, audiowave::wpos_spc,
+                                    sample_count / 2);
         CaptureLastOut(out, sample_count);
         return true;
     }
@@ -363,6 +368,13 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
     }
 
     spc::resampler.read((short *)out, sample_count);
+
+    // The viewer's SPC lane: the SGB BIOS mix path feeds it from
+    // S9xPullSpcOutput, so the plain SNES path has to do it here, before
+    // MSU1 / Voicer-kun audio is layered on top.
+    if (audiowave::enabled)
+        audiowave::push(audiowave::buf_spc, audiowave::wpos_spc,
+                        out, sample_count / 2);
 
     if (Settings.MSU1)
     {

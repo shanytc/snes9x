@@ -12,6 +12,7 @@ namespace fs = std::filesystem;
 #include "memmap.h"
 #include "apu/apu.h"
 #include "sgb/sgb.h"
+#include "common/audio/audio_waveform.hpp"
 #include "gfx.h"
 #include "ppu.h"
 #include "snapshot.h"
@@ -698,35 +699,21 @@ bool S9xPollButton(unsigned int, bool *)
     return false;
 }
 
-static uint8_t sound_channel_mask = 255;
-
-static void applySoundChannelMask()
-{
-    S9xSetSoundControl(sound_channel_mask);
-    // Channels 1-4 double as the GB APU's CH1-CH4 (pulse A, pulse B, wave,
-    // noise) so the mask also works for GB/SGB games, as on win32.
-    S9xSGBSetSoundChannelMask(sound_channel_mask & 0x0f);
-}
-
+/* Sound > Channels. The masks live in the shared audio waveform module so
+ * the viewer's mute/solo overlay composes with them, as on win32. */
 uint8_t S9xGetSoundChannelMask()
 {
-    return sound_channel_mask;
+    return audiowave::spc_mask();
 }
 
 void S9xSetSoundChannelMask(uint8_t mask)
 {
-    sound_channel_mask = mask;
-    applySoundChannelMask();
+    audiowave::set_channel_mask(mask);
 }
 
 void S9xToggleSoundChannel(int c)
 {
-    if (c == 8)
-        sound_channel_mask = 255;
-    else
-        sound_channel_mask ^= 1 << c;
-
-    applySoundChannelMask();
+    audiowave::toggle_channel(c);
 }
 
 std::string S9xGetFilenameInc(std::string e, enum s9x_getdirtype dirtype)

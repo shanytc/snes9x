@@ -12,6 +12,7 @@
 #include "gtk_s9x.h"
 #include "gtk_control.h"
 #include "gtk_sound.h"
+#include "gtk_audio_waveform.h"
 #include "gtk_display.h"
 #include "gtk_netplay.h"
 #include "gtk_retroachievements.h"
@@ -684,6 +685,7 @@ static void check_pointer_timer()
 void S9xExit()
 {
     S9xAVIStop();
+    S9xCloseAudioWaveformWindow();
 
     gui_config->save_config_file();
 

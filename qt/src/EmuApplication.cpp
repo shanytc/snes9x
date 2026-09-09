@@ -5,6 +5,7 @@
 #include "common/audio/s9x_sound_driver_sdl3.hpp"
 #include "common/audio/s9x_sound_driver_cubeb.hpp"
 #include "apu/apu.h"
+#include "common/audio/audio_waveform.hpp"
 #ifdef USE_PULSEAUDIO
 #include "common/audio/s9x_sound_driver_pulse.hpp"
 #endif
@@ -1095,6 +1096,14 @@ void EmuApplication::setSoundChannelMask(uint8_t mask)
 {
     emu_thread->runOnThread([mask] {
         S9xSetSoundChannelMask(mask);
+    });
+}
+
+void EmuApplication::enableAllSoundChannels()
+{
+    // All on audibly: also drops any solo engaged in the waveform viewer.
+    emu_thread->runOnThread([] {
+        audiowave::enable_all_channels();
     });
 }
 

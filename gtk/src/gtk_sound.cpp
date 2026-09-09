@@ -12,6 +12,7 @@
 #include "snes9x.h"
 #include "apu/apu.h"
 #include "sgb/sgb.h"
+#include "common/audio/audio_waveform.hpp"
 #include "common/recording/avi_recorder.hpp"
 
 #ifdef USE_PORTAUDIO
@@ -297,34 +298,19 @@ bool8 S9xOpenSoundDevice()
     return driver->open_device(Settings.SoundPlaybackRate, gui_config->sound_buffer_size);
 }
 
-/* This really shouldn't be in the port layer */
-static uint8_t sound_channel_mask = 255;
-
-static void apply_sound_channel_mask()
-{
-    S9xSetSoundControl(sound_channel_mask);
-    // Channels 1-4 double as the GB APU's CH1-CH4 (pulse A, pulse B, wave,
-    // noise) so the mask also works for GB/SGB games, as on win32.
-    S9xSGBSetSoundChannelMask(sound_channel_mask & 0x0f);
-}
-
+/* Sound > Channels. The masks live in the shared audio waveform module so
+ * the viewer's mute/solo overlay composes with them, as on win32. */
 uint8_t S9xGetSoundChannelMask()
 {
-    return sound_channel_mask;
+    return audiowave::spc_mask();
 }
 
 void S9xSetSoundChannelMask(uint8_t mask)
 {
-    sound_channel_mask = mask;
-    apply_sound_channel_mask();
+    audiowave::set_channel_mask(mask);
 }
 
 void S9xToggleSoundChannel(int c)
 {
-    if (c == 8)
-        sound_channel_mask = 255;
-    else
-        sound_channel_mask ^= 1 << c;
-
-    apply_sound_channel_mask();
+    audiowave::toggle_channel(c);
 }

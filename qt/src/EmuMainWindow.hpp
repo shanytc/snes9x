@@ -3,11 +3,13 @@
 
 #include <QAction>
 #include <QMainWindow>
+#include <QPointer>
 #include <QTimer>
 #include "EmuCanvas.hpp"
 
 class EmuApplication;
 class CheatsDialog;
+class AudioWaveformWindow;
 
 class EmuMainWindow : public QMainWindow
 {
@@ -43,6 +45,11 @@ class EmuMainWindow : public QMainWindow
     void shaderChanged();
     void updateShaderSettingsItem();
     void gameChanging();
+    void toggleAudioWaveform();
+    /* "Pause emulation when unfocused". The audio waveform viewer counts as
+     * part of this window: moving between the two doesn't pause, leaving
+     * from either does, so the viewer reports its focus changes here too. */
+    void handleFocusChange(bool active);
     void toggleMouseGrab();
     void updatePortConfigurationMenu();
     std::vector<std::string> getDisplayDeviceList();
@@ -57,6 +64,8 @@ class EmuMainWindow : public QMainWindow
     static const size_t recent_menu_size = 10;
 
     std::unique_ptr<CheatsDialog> cheats_dialog;
+    // Sound->Show Audio Waveform; deletes itself on close, so this goes null.
+    QPointer<AudioWaveformWindow> audio_waveform_window;
 
     bool manual_pause = false;
     bool focus_pause = false;

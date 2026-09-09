@@ -7,12 +7,14 @@
 #include <QMessageBox>
 #include <QtEvents>
 #include <QGuiApplication>
+#include <QApplication>
 #include <QActionGroup>
 
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
 #endif
 
+#include "AudioWaveformWindow.hpp"
 #include "CheatsDialog.hpp"
 #include "ColorCorrectionDialog.hpp"
 #include "MovieDialogs.hpp"
@@ -707,7 +709,7 @@ void EmuMainWindow::createWidgets()
     channels_menu->addSeparator();
     auto enable_all_channels_item = channels_menu->addAction(tr("Enable All"));
     connect(enable_all_channels_item, &QAction::triggered, [&] {
-        app->setSoundChannelMask(255);
+        app->enableAllSoundChannels();
     });
     core_actions.push_back(sound_menu->addMenu(channels_menu));
 
@@ -723,6 +725,15 @@ void EmuMainWindow::createWidgets()
 
     sound_menu->addSeparator();
 
+    // win32's Show Audio Waveform: the track viewer of the audio rings.
+    auto waveform_item = sound_menu->addAction(tr("Show Audio &Waveform"));
+    waveform_item->setCheckable(true);
+    connect(waveform_item, &QAction::triggered, [&] {
+        toggleAudioWaveform();
+    });
+
+    sound_menu->addSeparator();
+
     auto sound_settings_item = sound_menu->addAction(QIcon(iconset + "sound.svg"), tr("&Settings..."));
     connect(sound_settings_item, &QAction::triggered, [&] {
         if (!g_emu_settings_window)
@@ -730,19 +741,24 @@ void EmuMainWindow::createWidgets()
         g_emu_settings_window->show(2); // the Sound panel
     });
 
-    connect(sound_menu, &QMenu::aboutToShow, this, [this, channel_actions, mute_item] {
-        const uint8_t mask = app->getSoundChannelMask();
+    connect(sound_menu, &QMenu::aboutToShow, this, [this, channel_actions, mute_item, waveform_item] {
+        // Checkmarks show the effective state — the user mask composed with
+        // any waveform-viewer solo — so soloing V3 leaves only Channel 3 checked.
+        uint8_t spc_mask, gb_mask;
+        audiowave::effective_masks(&spc_mask, &gb_mask);
         // Channels 1-4 drive both SPC voices 1-4 and the GB APU's CH1-CH4.
         // In BIOS-less GB mode the SPC isn't running, so 5-8 control
         // nothing — grey them there, as on win32.
         const bool gb_only = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+        const uint8_t low_bits = gb_only ? gb_mask : spc_mask;
         for (int i = 0; i < 8; i++)
         {
-            channel_actions[i]->setChecked(mask & (1 << i));
+            channel_actions[i]->setChecked((i < 4 ? low_bits : spc_mask) & (1 << i));
             if (i >= 4)
                 channel_actions[i]->setEnabled(!gb_only);
         }
         mute_item->setChecked(app->config->mute_audio);
+        waveform_item->setChecked(audio_waveform_window != nullptr);
     });
 
     menuBar()->addMenu(sound_menu);
@@ -1274,24 +1290,15 @@ bool EmuMainWindow::event(QEvent *event)
         }
         break;
     case QEvent::WindowActivate:
-        if (focus_pause)
-        {
-            focus_pause = false;
-            app->unpause();
-        }
+        handleFocusChange(true);
         break;
     case QEvent::WindowDeactivate:
         if (mouse_grabbed)
             toggleMouseGrab();
-        if (app->config->pause_emulation_when_unfocused && !focus_pause
-#ifdef KAILLERA_SUPPORT
-            && !KailleraClientIsPlaying()
-#endif
-        )
-        {
-            focus_pause = true;
-            app->pause();
-        }
+        // Focus moving to the audio waveform viewer stays within the
+        // emulator. Qt has already made it the active window at this point.
+        if (!(audio_waveform_window && QApplication::activeWindow() == audio_waveform_window.data()))
+            handleFocusChange(false);
         break;
     case QEvent::WindowStateChange:
     {
@@ -1515,6 +1522,40 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+}
+
+void EmuMainWindow::toggleAudioWaveform()
+{
+    if (audio_waveform_window)
+    {
+        audio_waveform_window->close();
+        return;
+    }
+    audio_waveform_window = new AudioWaveformWindow(this, app);
+    audio_waveform_window->show();
+}
+
+void EmuMainWindow::handleFocusChange(bool active)
+{
+    if (active)
+    {
+        if (focus_pause)
+        {
+            focus_pause = false;
+            app->unpause();
+        }
+        return;
+    }
+
+    if (app->config->pause_emulation_when_unfocused && !focus_pause
+#ifdef KAILLERA_SUPPORT
+        && !KailleraClientIsPlaying()
+#endif
+    )
+    {
+        focus_pause = true;
+        app->pause();
+    }
 }
 
 bool EmuMainWindow::gunAimsAtPointer()

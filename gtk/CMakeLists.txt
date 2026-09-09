@@ -305,6 +305,12 @@ list(APPEND SOURCES
     src/gtk_config.h
     src/gtk_control.cpp
     src/gtk_control.h
+    src/gtk_movie.cpp
+    src/gtk_movie.h
+    ../common/recording/avi_writer.cpp
+    ../common/recording/avi_writer.hpp
+    ../common/recording/avi_recorder.cpp
+    ../common/recording/avi_recorder.hpp
     src/gtk_display.cpp
     src/gtk_display_driver_gtk.cpp
     src/gtk_display_driver_gtk.h

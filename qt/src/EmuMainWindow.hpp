@@ -36,6 +36,9 @@ class EmuMainWindow : public QMainWindow
     bool isActivelyDrawing();
     void openFile();
     bool openFile(const std::string &filename);
+    void playMovieDialog();
+    void recordMovieDialog();
+    void toggleAVIRecording();
     void recreateUIAssets();
     void shaderChanged();
     void updateShaderSettingsItem();
@@ -86,6 +89,8 @@ class EmuMainWindow : public QMainWindow
     std::vector<QAction *> port_configuration_actions;
     QAction *superscope_crosshair_action = nullptr;
     QAction *shader_settings_item;
+    QAction *movie_stop_action = nullptr;
+    QAction *avi_recording_action = nullptr;
     std::vector<QAction *> core_actions;
     std::vector<QAction *> recent_menu_items;
 

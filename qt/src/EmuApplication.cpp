@@ -495,10 +495,14 @@ void EmuApplication::updateBindings()
             if (binding.type != EmuBinding::None)
             {
                 /* The core's QuickSave/QuickLoad commands address absolute
-                 * slots; handle them here so they apply to the current bank. */
-                bool bank_relative = strncmp(name, "QuickSave", 9) == 0 ||
-                                     strncmp(name, "QuickLoad", 9) == 0;
-                auto handler = (!bank_relative && core->acceptsCommand(name)) ? Core : UI;
+                 * slots; handle them here so they apply to the current bank.
+                 * The movie commands open the dialogs of the File menu. */
+                bool ui_handled = strncmp(name, "QuickSave", 9) == 0 ||
+                                  strncmp(name, "QuickLoad", 9) == 0 ||
+                                  strcmp(name, "BeginRecordingMovie") == 0 ||
+                                  strcmp(name, "LoadMovie") == 0 ||
+                                  strcmp(name, "EndRecordingMovie") == 0;
+                auto handler = (!ui_handled && core->acceptsCommand(name)) ? Core : UI;
                 bindings.insert({ binding.hash(), { name, handler } });
             }
         }
@@ -707,6 +711,18 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
             {
                 if (EmuConfig::portConfigurationUsesPointer(config->port_configuration))
                     window->toggleMouseGrab();
+            }
+            else if (name == "BeginRecordingMovie")
+            {
+                window->recordMovieDialog();
+            }
+            else if (name == "LoadMovie")
+            {
+                window->playMovieDialog();
+            }
+            else if (name == "EndRecordingMovie")
+            {
+                stopMovie();
             }
         }
     }
@@ -1004,6 +1020,70 @@ void EmuApplication::saveMemoryPack()
 bool EmuApplication::hasMemoryPack()
 {
     return core->hasMemoryPack();
+}
+
+int EmuApplication::playMovie(const std::string &filename, bool read_only)
+{
+    int result = 0;
+    emu_thread->runOnThread([&] {
+        result = core->openMovie(filename, read_only);
+    }, true);
+    return result;
+}
+
+int EmuApplication::recordMovie(const std::string &filename, uint8_t controllers_mask,
+                                bool from_reset, bool clear_sram, const std::wstring &metadata)
+{
+    int result = 0;
+    emu_thread->runOnThread([&] {
+        result = core->createMovie(filename, controllers_mask, from_reset, clear_sram, metadata);
+    }, true);
+    return result;
+}
+
+void EmuApplication::stopMovie()
+{
+    emu_thread->runOnThread([&] {
+        core->stopMovie();
+    });
+}
+
+bool EmuApplication::isMovieActive()
+{
+    return core->movieActive();
+}
+
+bool EmuApplication::movieSRAMExists()
+{
+    bool exists = false;
+    emu_thread->runOnThread([&] {
+        exists = core->saveAndCheckSRAM();
+    }, true);
+    return exists;
+}
+
+bool EmuApplication::startAVIRecording(const std::string &filename, std::string &error)
+{
+    bool result = false;
+    emu_thread->runOnThread([&] {
+        // Like win32, a muted emulator records a silent movie.
+        result = core->startAVIRecording(filename, config->avi_hires, !config->mute_audio, error);
+    }, true);
+    return result;
+}
+
+void EmuApplication::stopAVIRecording()
+{
+    emu_thread->runOnThread([&] {
+        core->stopAVIRecording();
+    }, true);
+    // The recording pinned the audio input rate; put the configured one back.
+    updateSettings();
+}
+
+bool EmuApplication::isAVIRecording()
+{
+    return core->aviRecording();
 }
 
 uint8_t EmuApplication::getSoundChannelMask()

@@ -28,6 +28,7 @@
 #include "gtk_control.h"
 #include "gtk_cheat.h"
 #include "gtk_netplay.h"
+#include "gtk_movie.h"
 #include "gtk_retroachievements.h"
 #include "retroachievements.h"
 #include "gtk_s9xwindow.h"
@@ -37,6 +38,7 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <unistd.h>
 #include <utility>
 
 #include "snes9x.h"
@@ -44,6 +46,8 @@
 #include "ppu.h"
 #include "controls.h"
 #include "movie.h"
+#include "snapshot.h"
+#include "common/recording/avi_recorder.hpp"
 #include "apu/apu.h"
 #include "memmap.h"
 #include "cpuexec.h"
@@ -177,14 +181,24 @@ void Snes9xWindow::connect_signals()
         open_rom_dialog();
     });
 
-    get_object<Gtk::MenuItem>("reset_item")->signal_activate().connect([&] {
+    // As on win32's Emulation->Reset: a movie being recorded gets the reset
+    // as an input event, and a movie being played back ends.
+    auto movie_reset_hook = [] {
+        S9xMovieUpdateOnReset();
+        if (S9xMoviePlaying())
+            S9xMovieStop(true);
+    };
+
+    get_object<Gtk::MenuItem>("reset_item")->signal_activate().connect([&, movie_reset_hook] {
+        movie_reset_hook();
         S9xSoftReset();
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
     });
 
-    get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&] {
+    get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&, movie_reset_hook] {
+        movie_reset_hook();
         S9xReset();
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
@@ -321,15 +335,11 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("open_movie_item")->signal_activate().connect([&] {
-        if (S9xMovieActive())
-            S9xMovieStop(false);
-
-        S9xMovieOpen(open_movie_dialog(true).c_str(), false);
+        play_movie_dialog();
     });
 
     get_object<Gtk::MenuItem>("stop_recording_item")->signal_activate().connect([&] {
-        if (S9xMovieActive())
-            S9xMovieStop(false);
+        stop_movie();
     });
 
     get_object<Gtk::MenuItem>("jump_to_frame_item")->signal_activate().connect([&] {
@@ -337,10 +347,15 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("record_movie_item")->signal_activate().connect([&] {
-        if (S9xMovieActive())
-            S9xMovieStop(false);
+        record_movie_dialog();
+    });
 
-        S9xMovieCreate(open_movie_dialog(false).c_str(), 0xFF, MOVIE_OPT_FROM_RESET, nullptr, 0);
+    get_object<Gtk::MenuItem>("avi_recording_item")->signal_activate().connect([&] {
+        toggle_avi_recording();
+    });
+
+    get_object<Gtk::Menu>("file_menu_item_menu")->signal_show().connect([this] {
+        update_movie_menu();
     });
 
     get_object<Gtk::MenuItem>("cheats_item")->signal_activate().connect([&] {
@@ -907,54 +922,151 @@ void Snes9xWindow::open_multicart_dialog()
     unpause_from_focus_change();
 }
 
-std::string Snes9xWindow::open_movie_dialog(bool readonly)
+void Snes9xWindow::play_movie_dialog()
 {
-    this->pause_from_focus_change();
+    if (!config->rom_loaded)
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore(_("Movie playback")))
+        return;
+#endif
 
-    std::string title;
-    Gtk::FileChooserAction action;
+    pause_from_focus_change();
 
-    if (readonly)
+    MoviePlayChoice choice;
+    if (S9xPlayMovieDialog(choice))
     {
-        title = _("Open SNES Movie");
-        action = Gtk::FILE_CHOOSER_ACTION_OPEN;
-    }
-    else
-    {
-        title = _("New SNES Movie");
-        action = Gtk::FILE_CHOOSER_ACTION_SAVE;
+        if (S9xMovieActive())
+            S9xMovieStop(true);
+
+        int result = S9xMovieOpen(choice.path.c_str(), choice.read_only);
+        if (result != SUCCESS)
+        {
+            Gtk::MessageDialog msg(*window.get(), S9xMovieErrorString(result, false), false,
+                                   Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+            msg.run();
+        }
     }
 
-    Gtk::FileChooserDialog dialog(*window.get(), title, action);
+    unpause_from_focus_change();
+}
+
+void Snes9xWindow::record_movie_dialog()
+{
+    if (!config->rom_loaded)
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore(_("Movie recording")))
+        return;
+#endif
+
+    pause_from_focus_change();
+
+    // Written out first so the dialog can tell whether there is a battery
+    // save that "Clear SRAM" would remove, as win32 does.
+    auto sram_filename = S9xGetFilename(".srm", SRAM_DIR);
+    Memory.SaveSRAM(sram_filename.c_str());
+    const bool sram_exists = access(sram_filename.c_str(), R_OK | W_OK) == 0;
+
+    MovieRecordChoice choice;
+    if (S9xRecordMovieDialog(sram_exists, choice))
+    {
+        if (S9xMovieActive())
+            S9xMovieStop(true);
+
+        if (choice.from_reset && choice.clear_sram)
+        {
+            // A movie from reset with clean SRAM: drop the battery save on
+            // disk and reload, which leaves the SRAM zeroed. Same as win32.
+            std::error_code ec;
+            std::filesystem::remove(sram_filename, ec);
+            std::filesystem::remove(S9xGetFilename(".srm", ROMFILENAME_DIR), ec);
+            Memory.LoadSRAM(sram_filename.c_str());
+        }
+
+        // win32 pads the author text to 32 characters; keep the files identical.
+        std::wstring metadata = choice.metadata;
+        while (metadata.size() < 32)
+            metadata += L' ';
+        if (metadata.size() > MOVIE_MAX_METADATA)
+            metadata.resize(MOVIE_MAX_METADATA);
+
+        int result = S9xMovieCreate(choice.path.c_str(), choice.controllers_mask,
+                                    choice.from_reset ? MOVIE_OPT_FROM_RESET : MOVIE_OPT_FROM_SNAPSHOT,
+                                    metadata.c_str(), (int)metadata.size());
+        if (result != SUCCESS)
+        {
+            Gtk::MessageDialog msg(*window.get(), S9xMovieErrorString(result, false), false,
+                                   Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+            msg.run();
+        }
+    }
+
+    unpause_from_focus_change();
+}
+
+void Snes9xWindow::stop_movie()
+{
+    if (S9xMovieActive())
+        S9xMovieStop(false);
+}
+
+void Snes9xWindow::toggle_avi_recording()
+{
+    if (!config->rom_loaded)
+        return;
+
+    if (S9xAVIRecording())
+    {
+        S9xAVIStop();
+        return;
+    }
+
+    pause_from_focus_change();
+
+    Gtk::FileChooserDialog dialog(*window.get(), _("Record AVI"), Gtk::FILE_CHOOSER_ACTION_SAVE);
     dialog.add_button(Gtk::StockID("gtk-cancel"), Gtk::RESPONSE_CANCEL);
-    if (readonly)
-        dialog.add_button(Gtk::StockID("gtk-open"), Gtk::RESPONSE_ACCEPT);
-    else
-        dialog.add_button(Gtk::StockID("gtk-save"), Gtk::RESPONSE_ACCEPT);
-
-    if (!readonly)
-    {
-        auto default_name = S9xGetFilename(".smv", s9x_getdirtype::ROM_DIR);
-        dialog.set_current_name(default_name);
-
-    }
+    dialog.add_button(Gtk::StockID("gtk-save"), Gtk::RESPONSE_ACCEPT);
+    dialog.set_do_overwrite_confirmation(true);
+    dialog.set_current_folder(S9xGetDirectory(SCREENSHOT_DIR));
+    dialog.set_current_name(S9xBasename(S9xGetFilename(".avi", SCREENSHOT_DIR)));
 
     auto filter = Gtk::FileFilter::create();
-    filter->set_name(_("SNES Movies"));
-    filter->add_pattern("*.smv");
-    filter->add_pattern("*.SMV");
+    filter->set_name(_("AVI Files"));
+    filter->add_pattern("*.avi");
+    filter->add_pattern("*.AVI");
     dialog.add_filter(filter);
     dialog.add_filter(get_all_files_filter());
 
-    dialog.set_current_folder(S9xGetDirectory(SRAM_DIR));
     auto result = dialog.run();
     dialog.hide();
-    this->unpause_from_focus_change();
 
     if (result == Gtk::RESPONSE_ACCEPT)
-        return dialog.get_filename();
+    {
+        S9xAVIOptions options;
+        options.hires = config->avi_hires;
+        options.overscan = config->overscan;
+        // Like win32, a muted emulator records a silent movie.
+        options.include_audio = !config->mute_sound;
 
-    return std::string{};
+        std::string error;
+        if (!S9xAVIStart(dialog.get_filename(), options, &error))
+        {
+            Gtk::MessageDialog msg(*window.get(), error, false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+            msg.run();
+        }
+    }
+
+    unpause_from_focus_change();
+}
+
+/* Movie Stop only applies to a running movie, and the AVI item reads Start
+ * or Stop for whichever comes next, as on win32. */
+void Snes9xWindow::update_movie_menu()
+{
+    enable_widget("stop_recording_item", config->rom_loaded && S9xMovieActive());
+    get_object<Gtk::MenuItem>("avi_recording_item")->set_label(S9xAVIRecording() ? _("Stop _AVI Recording")
+                                                                                : _("Start _AVI Recording…"));
 }
 
 std::string Snes9xWindow::open_rom_dialog(bool run)
@@ -1516,6 +1628,7 @@ void Snes9xWindow::configure_widgets()
         "stop_recording_item",
         "open_movie_item",
         "jump_to_frame_item",
+        "avi_recording_item",
         "cheats_item",
         "rom_info_item",
         "run_ahead_item"

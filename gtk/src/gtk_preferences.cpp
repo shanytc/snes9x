@@ -664,6 +664,7 @@ void Snes9xPreferences::move_settings_to_dialog()
     set_spin  ("rewind_buffer_size",        config->rewind_buffer_size);
     set_spin  ("rewind_granularity",        config->rewind_granularity);
     set_spin  ("run_ahead_frames",          Settings.RunAhead);
+    set_check ("avi_hires",                 config->avi_hires);
     set_spin  ("superfx_multiplier",        Settings.SuperFXClockMultiplier);
     set_combo ("splash_background",         config->splash_image);
     set_check ("force_enable_icons",        config->enable_icons);
@@ -853,6 +854,7 @@ void Snes9xPreferences::get_settings_from_dialog()
     config->rewind_buffer_size        = get_spin("rewind_buffer_size");
     config->rewind_granularity        = get_spin("rewind_granularity");
     Settings.RunAhead                 = get_spin("run_ahead_frames");
+    config->avi_hires                 = get_check("avi_hires");
     config->joystick_threshold        = get_spin("joystick_threshold");
 
 #ifdef ALLOW_CPU_OVERCLOCK

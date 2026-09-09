@@ -15,6 +15,7 @@
 #include "snes9x.h"
 #include "gfx.h"
 #include "netplay.h"
+#include "common/recording/avi_recorder.hpp"
 
 #if defined(USE_XV) && defined(GDK_WINDOWING_X11)
 #include "gtk_display_driver_xv.h"
@@ -875,6 +876,11 @@ bool8 S9xDeinitUpdate(int width, int height)
     }
 
     uint16_t *screen_view = GFX.Screen + (yoffset * (int)GFX.RealPPL);
+
+    // The AVI gets the frame as the SNES drew it, before the hi-res effect
+    // and software filter reshape it for the window.
+    if (!Settings.Paused && !NetPlay.Paused)
+        S9xAVICaptureFrame(screen_view, GFX.Pitch, width, height);
 
     if (!Settings.Paused && !NetPlay.Paused)
 

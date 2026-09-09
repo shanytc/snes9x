@@ -309,6 +309,12 @@ list(APPEND QT_GUI_SOURCES
     src/StatePreviewDialog.hpp
     src/ColorCorrectionDialog.cpp
     src/ColorCorrectionDialog.hpp
+    src/MovieDialogs.cpp
+    src/MovieDialogs.hpp
+    ../common/recording/avi_writer.cpp
+    ../common/recording/avi_writer.hpp
+    ../common/recording/avi_recorder.cpp
+    ../common/recording/avi_recorder.hpp
     src/SoftwareScalers.cpp
     src/SoftwareFilters.cpp
     src/SoftwareFilters.hpp

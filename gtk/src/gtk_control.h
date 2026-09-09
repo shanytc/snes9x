@@ -116,7 +116,9 @@ enum {
     PORT_DIALOGSAVE         = 48,
     PORT_DIALOGLOAD         = 49,
     PORT_FILESAVE           = 50,
-    PORT_FILELOAD           = 51
+    PORT_FILELOAD           = 51,
+    PORT_RECORD_MOVIE       = 52,
+    PORT_PLAY_MOVIE         = 53
 };
 
 typedef struct BindingLink

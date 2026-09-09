@@ -100,6 +100,19 @@ struct EmuApplication
     void saveSRAM();
     void saveMemoryPack();
     bool hasMemoryPack();
+
+    /* File->Movie Play/Record/Stop and AVI Recording, run on the emulation
+     * thread. The movie results are movie.cpp's SUCCESS / FILE_NOT_FOUND /
+     * WRONG_FORMAT / WRONG_VERSION. */
+    int playMovie(const std::string &filename, bool read_only);
+    int recordMovie(const std::string &filename, uint8_t controllers_mask,
+                    bool from_reset, bool clear_sram, const std::wstring &metadata);
+    void stopMovie();
+    bool isMovieActive();
+    bool movieSRAMExists();
+    bool startAVIRecording(const std::string &filename, std::string &error);
+    void stopAVIRecording();
+    bool isAVIRecording();
     uint8_t getSoundChannelMask();
     void setSoundChannelMask(uint8_t mask);
     void startGame();

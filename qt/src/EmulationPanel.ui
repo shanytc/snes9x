@@ -293,6 +293,25 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="groupBox_5">
+     <property name="title">
+      <string>AVI Recording</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_6">
+      <item>
+       <widget class="QCheckBox" name="checkBox_avi_hires">
+        <property name="whatsThis">
+         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Record File → AVI Recording at twice the SNES resolution (512x448, or 512x478 with overscan shown) so hi-res and interlaced games keep their detail. Doubles the file size.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+        </property>
+        <property name="text">
+         <string>Hi-Res AVI Recording</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QGroupBox" name="groupBox_3">
      <property name="title">
       <string>Hacks</string>

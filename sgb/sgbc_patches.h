@@ -55,6 +55,10 @@ static const uint32_t SGBC_QUIRK_BGP_SHADOW = 1u << 4;
 //   its Color path then leaves BGP at $00 over real screens, so the register
 //   alone says nothing. Cover the pane only while OBJ is off with it.
 static const uint32_t SGBC_QUIRK_BGP_OBJ_BLANK = 1u << 5;
+//   STATIC_UNMASK: the cart cancels its mask onto a screen it then leaves
+//   alone, so the wait for the pane to change never ends and the cover sits
+//   there. Its Color pane is its own frame already; hand it back at the cancel.
+static const uint32_t SGBC_QUIRK_STATIC_UNMASK = 1u << 6;
 
 // One byte run in a cart image, up to three bytes (a jump, a store): `old`
 // is verified before `neu` is written.

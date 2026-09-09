@@ -2727,7 +2727,10 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 		// BIOS's next refresh lands. Keep covering while the pane underneath
 		// still equals the last masked-era frame, and hand it back the
 		// moment fresh content arrives.
-		bool stale = true;
+		// ...unless the row says the cart draws a static screen there: a pane
+		// the CGB overlay owns is its own frame, so it has nothing to wait for.
+		bool stale = !(cgb_holds_pane &&
+		               (impl_->sgbc_quirks & SGBC_QUIRK_STATIC_UNMASK));
 		for (uint32_t y = 0; stale && y < GB_SCREEN_HEIGHT; ++y)
 			stale = std::memcmp(dest + (ORIGIN_Y + y) * pitch_pixels + ORIGIN_X,
 			                    impl_->bios_mask_under + y * GB_SCREEN_WIDTH,

@@ -311,10 +311,14 @@ list(APPEND QT_GUI_SOURCES
     src/ColorCorrectionDialog.hpp
     src/MovieDialogs.cpp
     src/MovieDialogs.hpp
+    src/AudioWaveformWindow.cpp
+    src/AudioWaveformWindow.hpp
     ../common/recording/avi_writer.cpp
     ../common/recording/avi_writer.hpp
     ../common/recording/avi_recorder.cpp
     ../common/recording/avi_recorder.hpp
+    ../common/audio/audio_waveform.cpp
+    ../common/audio/audio_waveform.hpp
     src/SoftwareScalers.cpp
     src/SoftwareFilters.cpp
     src/SoftwareFilters.hpp

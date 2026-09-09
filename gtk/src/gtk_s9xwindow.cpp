@@ -29,6 +29,8 @@
 #include "gtk_cheat.h"
 #include "gtk_netplay.h"
 #include "gtk_movie.h"
+#include "gtk_audio_waveform.h"
+#include "common/audio/audio_waveform.hpp"
 #include "gtk_retroachievements.h"
 #include "retroachievements.h"
 #include "gtk_s9xwindow.h"
@@ -433,7 +435,16 @@ void Snes9xWindow::connect_signals()
     }
 
     get_object<Gtk::MenuItem>("enable_all_channels_item")->signal_activate().connect([] {
-        S9xSetSoundChannelMask(255);
+        // All on audibly: also drops any solo engaged in the waveform viewer.
+        audiowave::enable_all_channels();
+    });
+
+    // win32's Sound->Show Audio Waveform: the track viewer of the audio rings.
+    auto waveform_item = get_object<Gtk::CheckMenuItem>("audio_waveform_item");
+    waveform_item->signal_toggled().connect([waveform_item] {
+        // The menu-open sync also flips the item; only act on real changes.
+        if (waveform_item->get_active() != S9xAudioWaveformWindowOpen())
+            S9xToggleAudioWaveformWindow();
     });
 
     get_object<Gtk::MenuItem>("color_correction_item")->signal_activate().connect([this] {
@@ -465,20 +476,25 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("sound_menu_item")->signal_activate().connect([this] {
-        uint8_t mask = S9xGetSoundChannelMask();
+        // Checkmarks show the effective state — the user mask composed with
+        // any waveform-viewer solo — so soloing V3 leaves only Channel 3 checked.
+        uint8_t spc_mask, gb_mask;
+        audiowave::effective_masks(&spc_mask, &gb_mask);
         // Channels 1-4 drive both SPC voices 1-4 and the GB APU's CH1-CH4.
         // In BIOS-less GB mode the SPC isn't running, so 5-8 control
         // nothing — grey them there, as on win32.
         bool gb_only = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+        const uint8_t low_bits = gb_only ? gb_mask : spc_mask;
         for (int i = 0; i < 8; i++)
         {
             std::string name = "sound_channel_" + std::to_string(i + 1) + "_item";
             auto item = get_object<Gtk::CheckMenuItem>(name.c_str());
-            item->set_active((mask & (1 << i)) != 0);
+            item->set_active(((i < 4 ? low_bits : spc_mask) & (1 << i)) != 0);
             if (i >= 4)
                 item->set_sensitive(!gb_only);
         }
         get_object<Gtk::CheckMenuItem>("mute_item")->set_active(gui_config->mute_sound);
+        get_object<Gtk::CheckMenuItem>("audio_waveform_item")->set_active(S9xAudioWaveformWindowOpen());
     });
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -807,7 +823,10 @@ void Snes9xWindow::focus_notify(bool state)
 {
     focused = state;
 
-    if (!state && config->pause_emulation_on_switch && !paused_from_focus_loss)
+    // Focus moving to the audio waveform viewer is not leaving the emulator,
+    // so the focus-loss pause is suspended for as long as the viewer is open.
+    if (!state && config->pause_emulation_on_switch && !paused_from_focus_loss &&
+        !S9xAudioWaveformWindowOpen())
     {
         sys_pause++;
         propagate_pause_state();

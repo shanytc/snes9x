@@ -307,10 +307,14 @@ list(APPEND SOURCES
     src/gtk_control.h
     src/gtk_movie.cpp
     src/gtk_movie.h
+    src/gtk_audio_waveform.cpp
+    src/gtk_audio_waveform.h
     ../common/recording/avi_writer.cpp
     ../common/recording/avi_writer.hpp
     ../common/recording/avi_recorder.cpp
     ../common/recording/avi_recorder.hpp
+    ../common/audio/audio_waveform.cpp
+    ../common/audio/audio_waveform.hpp
     src/gtk_display.cpp
     src/gtk_display_driver_gtk.cpp
     src/gtk_display_driver_gtk.h

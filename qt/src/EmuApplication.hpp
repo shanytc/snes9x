@@ -115,6 +115,7 @@ struct EmuApplication
     bool isAVIRecording();
     uint8_t getSoundChannelMask();
     void setSoundChannelMask(uint8_t mask);
+    void enableAllSoundChannels();
     void startGame();
     void startThread();
     void stopThread();

@@ -292,6 +292,9 @@ struct Emulator::Impl
 	uint8_t     cgb_overlay_lcdc = 0;
 	uint8_t     cgb_overlay_obp0 = 0, cgb_overlay_obp1 = 0;
 	uint8_t     cgb_overlay_ly = 0;
+	// DMG_BLANK judged on the whole drawn frame: a cart that lifts its blank
+	// mid-frame leaves the pane half-painted for one frame otherwise.
+	bool        cgb_overlay_blank_any = false, cgb_blank_run = false;
 
 	// BIOS-mode MASK_EN: bios_mask_pane is a ROLLING copy of the last
 	// unmasked pane — captured before the mask, because at mask time the
@@ -1947,6 +1950,9 @@ void Emulator::RunCycles(int32_t tcycles)
 	if (impl_->sgbc && impl_->ppu.cgb)
 	{
 		const uint8_t ly = impl_->ppu.ly;
+		if (ly < GB_SCREEN_HEIGHT && impl_->ppu.bgp == 0 &&
+		    impl_->ppu.obp0 == 0 && impl_->ppu.obp1 == 0)
+			impl_->cgb_blank_run = true;
 		if (ly >= GB_SCREEN_HEIGHT && impl_->cgb_overlay_ly < GB_SCREEN_HEIGHT)
 		{
 			std::memcpy(impl_->cgb_overlay_fb, impl_->ppu.color_fb,
@@ -1956,6 +1962,8 @@ void Emulator::RunCycles(int32_t tcycles)
 			impl_->cgb_overlay_lcdc  = impl_->ppu.lcdc;
 			impl_->cgb_overlay_obp0  = impl_->ppu.obp0;
 			impl_->cgb_overlay_obp1  = impl_->ppu.obp1;
+			impl_->cgb_overlay_blank_any = impl_->cgb_blank_run;
+			impl_->cgb_blank_run = false;
 		}
 		impl_->cgb_overlay_ly = ly;
 	}
@@ -2653,6 +2661,7 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	in.fb_lcdc = impl_->cgb_overlay_lcdc;
 	in.fb_obp0 = impl_->cgb_overlay_obp0;
 	in.fb_obp1 = impl_->cgb_overlay_obp1;
+	in.fb_blank_any = impl_->cgb_overlay_blank_any;
 	in.quirks = impl_->sgbc_quirks;
 	// $FF9C is where this engine keeps its BGP shadow; harmless to read always.
 	in.hram_bgp = impl_->mem.hram[0xFF9C - 0xFF80];

@@ -139,8 +139,11 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 
 	// The cart's SGB path blanks the DMG way - BGP, OBP0 and OBP1 all zero, a
 	// flat colour-0 frame there - but the Color renderer keeps its sprites up.
+	// ...over any line of the frame the pane is showing: lifting the blank
+	// mid-frame paints the top of it in the old palettes for one frame.
 	const bool dmg_blank = (in.quirks & SGBC_QUIRK_DMG_BLANK) && in.fb_valid &&
-	                       in.fb_bgp == 0 && in.fb_obp0 == 0 && in.fb_obp1 == 0;
+	                       ((in.fb_bgp == 0 && in.fb_obp0 == 0 && in.fb_obp1 == 0) ||
+	                        in.fb_blank_any);
 
 	// The cart blanks through BGP while it rebuilds the screen, but on the Color
 	// path it stops copying its shadow to the register, so the register lags the

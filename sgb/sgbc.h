@@ -32,6 +32,7 @@ struct SgbcPane
 	uint8_t         fb_lcdc;     // pane is showing, which the live pair is not
 	uint8_t         fb_obp0;     // OBP0/OBP1 that drew color_fb, for DMG_BLANK
 	uint8_t         fb_obp1;
+	bool            fb_blank_any;// the DMG blank held over any line of that frame
 	uint16_t        fallback[3]; // shades 1-3 when !color
 	uint32_t        quirks;      // SGBC_QUIRK_* for this cart
 	uint8_t         hram_bgp;    // the cart's BGP shadow at $FF9C (BGP_SHADOW)

@@ -336,17 +336,31 @@ const SgbcPatch kPatches[] = {
 	  { { 0x0001D2, 3, { 0xCA, 0xDD, 0x01 }, { 0x00, 0x00, 0x00 } } } },
 	// manual: SGB route with the CGB bit set - the script's platform gate reads a
 	// constant SGB, the palette loader takes CGB colours, the SGB handler uploads them
-	{ 0x7C1B, "JINSEI TOMOACJJ\200", "Jinsei Game - Tomodachi Takusan Tsukurou yo! (Japan)", 5,
+	// and returns rather than spending 20 frames a step on packets the Color pane never
+	// reads; the rest load all six palette descriptors and fade every palette, not four.
+	{ 0x7C1B, "JINSEI TOMOACJJ\200", "Jinsei Game - Tomodachi Takusan Tsukurou yo! (Japan)", 8,
 	  { { 0x002F0E, 2, { 0x18, 0x4A }, { 0x18, 0x00 } },
 	    { 0x002F23, 1, { 0x08 }, { 0x09 } },
 	    { 0x0018C4, 3, { 0xFA, 0x97, 0xC3 }, { 0x3E, 0x08, 0x00 } },
 	    { 0x003375, 1, { 0x0A }, { 0x02 } },
-	    { 0x0207F1, 2, { 0xB2, 0x47 }, { 0xC4, 0x47 } } } },
+	    { 0x0207F1, 3, { 0xB2, 0x47, 0x21 }, { 0xC4, 0x47, 0xC9 } },
+	    { 0x020BC4, 1, { 0x0A }, { 0x00 } },
+	    { 0x003415, 1, { 0x0A }, { 0x00 } },
+	    { 0x003655, 1, { 0x0A }, { 0x00 } } } },
 	// manual: CGB type runs the SGB init, palette gates take $11
 	{ 0x20D7, "TUWAMONO   A55J\200", "Joryuu Janshi ni Chousen GB - Watashi-tachi ni Chousen Shitene! (Japan)", 3,
 	  { { 0x0001FC, 2, { 0x20, 0x03 }, { 0x00, 0x00 } },
 	    { 0x0014CE, 1, { 0x01 }, { 0x11 } },
 	    { 0x001599, 1, { 0x01 }, { 0x11 } } } },
+	// manual: the Color branch sets the platform byte to 4, which every SGB
+	// sender rejects - the mask raised for a transfer never gets its cancel
+	{ 0x0D5E, "KANJIBOY\000\000\000AWKJ\200", "Kanji Boy (Japan)", 2,
+	  { { 0x008005, 1, { 0x28 }, { 0x18 } },
+	    { 0x00801F, 1, { 0x28 }, { 0x18 } } } },
+	// manual: same engine, same gate - see Kanji Boy
+	{ 0x40AB, "KANJIBOY2\000\000A2CJ\200", "Kanji Boy 2 (Japan)", 2,
+	  { { 0x008005, 1, { 0x28 }, { 0x18 } },
+	    { 0x00801F, 1, { 0x28 }, { 0x18 } } } },
 	// manual: the SGB flag gates the Color path; clear it, retune the border gate
 	{ 0x32BD, "MONSTER KANAQPJ\200", "Kanzume Monsters Parfait (Japan)", 2,
 	  { { 0x0003EC, 1, { 0x03 }, { 0x00 } },

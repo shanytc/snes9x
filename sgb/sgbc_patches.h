@@ -59,6 +59,9 @@ static const uint32_t SGBC_QUIRK_BGP_OBJ_BLANK = 1u << 5;
 //   alone, so the wait for the pane to change never ends and the cover sits
 //   there. Its Color pane is its own frame already; hand it back at the cancel.
 static const uint32_t SGBC_QUIRK_STATIC_UNMASK = 1u << 6;
+//   DENSE_PAYLOAD: the cart repaints its palettes mid-transfer, so the payload
+//   test's colour cap rejects it; judge this row's payload on density alone.
+static const uint32_t SGBC_QUIRK_DENSE_PAYLOAD = 1u << 7;
 
 // One byte run in a cart image, up to three bytes (a jump, a store): `old`
 // is verified before `neu` is written.

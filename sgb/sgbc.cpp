@@ -37,7 +37,7 @@ static inline uint16_t BgrToHostBright(uint16_t bgr, const uint8 *xb)
 // is a 2bpp tile grid: at most a handful of colours, and a colour change every
 // couple of pixels across the whole row. Text and art change colour far less
 // often per row, and art uses far more colours.
-static bool LooksLikePayload(const uint16_t *fb)
+static bool LooksLikePayload(const uint16_t *fb, bool dense)
 {
 	uint16_t cols[9]; int ncols = 0;
 	uint32_t transitions = 0;
@@ -58,7 +58,10 @@ static bool LooksLikePayload(const uint16_t *fb)
 		}
 	}
 	// 72 rows sampled: payload measured 37-94 changes per row on three carts,
-	// a dense text screen about 18, art far more colours than 8.
+	// a dense text screen about 18, art far more colours than 8. A row that
+	// repaints its palettes mid-transfer blows the colour cap, so let density
+	// alone carry it there - well above anything that cart draws for real.
+	if (dense && transitions >= 72u * 45u) return true;
 	return ncols <= 8 && transitions >= 72u * 24u;
 }
 
@@ -119,7 +122,9 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 	const bool hold = in.fb_valid &&
 	                  (((in.quirks & SGBC_QUIRK_HOLD_PAYLOAD) &&
 	                    (in.fb_bgp == 0 || !(in.fb_lcdc & 0x01)) &&
-	                    (!in.color || LooksLikePayload(in.color_fb))) ||
+	                    (!in.color ||
+	                     LooksLikePayload(in.color_fb,
+	                                      (in.quirks & SGBC_QUIRK_DENSE_PAYLOAD) != 0))) ||
 	                   ((in.quirks & SGBC_QUIRK_BGP_OBJ_BLANK) &&
 	                    in.fb_bgp == 0 && !(in.fb_lcdc & 0x02)));
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;

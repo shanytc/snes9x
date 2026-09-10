@@ -846,7 +846,7 @@ const SgbcPatch kPatches[] = {
 	// display quirk only: the mask is cancelled with the LCD off, so the pane
 	// held *_TRN payload until the first real frame
 	{ 0x862D, "SBOMBLISSDXA2OJ\200", "Super Bombliss DX (Japan) (En)", 0, {},
-	  SGBC_QUIRK_LCD_BLANK },
+	  SGBC_QUIRK_LCD_BLANK | SGBC_QUIRK_HOLD_PAYLOAD | SGBC_QUIRK_DENSE_PAYLOAD },
 	// manual: it now detects the SGB (see the ICD2 MLT_REQ latch) and sends its
 	// border, but on that path it colours through packets and its Color palettes
 	// go stale. Clear the cart's own SGB flag; the border init still runs.

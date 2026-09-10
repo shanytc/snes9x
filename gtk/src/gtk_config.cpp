@@ -85,6 +85,7 @@ int Snes9xConfig::load_defaults()
     scale_method = 0;
     hires_scale_method = 0;
     overscan = false;
+    blend_hires = true;
     save_sram_after_secs = 0;
     rom_loaded = false;
     multithreading = false;
@@ -149,6 +150,10 @@ int Snes9xConfig::load_defaults()
     Settings.GBFrameBlend = 0;
     Settings.GBFrameBlendLayer = 0;
     Settings.GBFrameBlendAuto = true;
+    // Game Boy Camera webcam feed (Display Settings > Game Boy Image), stored in
+    // Settings like on win32. Off by default; index into the enumerated list.
+    Settings.GBVideoCamera = false;
+    Settings.GBVideoCameraIndex = 0;
     Settings.ColorCorrection = false;
     Settings.AdjustmentsEnabled = false;
     Settings.Gamma = 0;
@@ -199,6 +204,9 @@ int Snes9xConfig::load_defaults()
     Settings.AutoSaveDelay = 0;
     Settings.SkipFrames = THROTTLE_TIMER_FRAMESKIP;
     Settings.Transparency = true;
+    // Draw messages into the SNES image (pixel font) instead of the on-screen
+    // overlay, so they also land in screenshots, AVIs and the XV/Cairo drivers.
+    Settings.AutoDisplayMessages = false;
     Settings.DisplayTime = false;
     Settings.DisplayFrameRate = false;
     Settings.DisplayIndicators = false;
@@ -279,6 +287,8 @@ int Snes9xConfig::save_config_file()
     outbool("ChangeDisplayResolution", change_display_resolution, "Set the resolution in fullscreen mode");
     outbool("ScaleToFit", scale_to_fit, "Scale the image to fit the window size");
     outbool("ShowOverscanArea", overscan, "Show the overscan area at the top and bottom that most games hide");
+    outbool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
+    outbool("MessagesInImage", Settings.AutoDisplayMessages, "Draw messages inside the SNES image (they get into AVIs, screenshots and filters) instead of the on-screen overlay");
     outbool("MaintainAspectRatio", maintain_aspect_ratio, "Resize the screen to the proportions set by aspect ratio option");
     outbool("Multithreading", multithreading, "Apply filters using multiple threads");
     outbool("BilinearFilter", Settings.BilinearFilter, "Smoothes scaled image");
@@ -299,6 +309,8 @@ int Snes9xConfig::save_config_file()
     outint("BlendGBFrames", Settings.GBFrameBlend, "Game Boy frame-blend mode (Super Game Boy only): 0=off, 1=Simple Blend (mix each frame 50/50 with the previous, fixes flicker-based fake transparency e.g. ZAS), 2=LCD Blend (slow-decay LCD-style ghosting)");
     outint("BlendGBFramesLayer", Settings.GBFrameBlendLayer, "Which Game Boy layer the frame-blend applies to: 0=all, 1=background (keeps moving sprites crisp), 2=window, 3=sprites");
     outbool("BlendGBFramesAuto", Settings.GBFrameBlendAuto, "Auto-pick the GB frame-blend per game from a built-in known-flicker-game table at load (off for unlisted games); when false the manual mode/layer apply to every GB game");
+    outbool("GBVideoCamera", Settings.GBVideoCamera, "Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor");
+    outint("GBVideoCameraIndex", Settings.GBVideoCameraIndex, "Index of the selected webcam in the device list (set via Display Settings > Game Boy Image)");
     outbool("ColorCorrection", Settings.ColorCorrection, "Enable accurate SNES color correction (simulates SNES CRT output)");
     outbool("AdjustmentsEnabled", Settings.AdjustmentsEnabled, "Apply the Gamma/Contrast/Saturation adjustments below");
     outint("Gamma", Settings.Gamma, "Gamma adjustment (-100..+100, 0 = no change)");
@@ -532,6 +544,8 @@ int Snes9xConfig::load_config_file()
     inint("SoftwareScaleFilterHires", hires_scale_method);
     inint("ScanlineFilterIntensity", scanline_filter_intensity);
     inbool("ShowOverscanArea", overscan);
+    inbool("BlendHiRes", blend_hires);
+    inbool("MessagesInImage", Settings.AutoDisplayMessages);
     inint("HiresEffect", hires_effect);
     inbool("ForceInvertedByteOrder", force_inverted_byte_order);
     inbool("Multithreading", multithreading);
@@ -545,6 +559,8 @@ int Snes9xConfig::load_config_file()
     inint("BlendGBFrames", Settings.GBFrameBlend);
     inint("BlendGBFramesLayer", Settings.GBFrameBlendLayer);
     inbool("BlendGBFramesAuto", Settings.GBFrameBlendAuto);
+    inbool("GBVideoCamera", Settings.GBVideoCamera);
+    inint("GBVideoCameraIndex", Settings.GBVideoCameraIndex);
     inbool("ColorCorrection", Settings.ColorCorrection);
     inbool("AdjustmentsEnabled", Settings.AdjustmentsEnabled);
     inint("Gamma", Settings.Gamma);

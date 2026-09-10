@@ -284,6 +284,8 @@ bool EmuConfig::setDefaults(int section)
         aspect_ratio_numerator = 4;
         aspect_ratio_denominator = 3;
         show_overscan = false;
+        transparency_effects = true;
+        blend_hires = true;
         high_resolution_effect = eLeaveAlone;
 
         software_filter = {};
@@ -295,6 +297,8 @@ bool EmuConfig::setDefaults(int section)
         gb_frame_blend = eGBBlendOff;
         gb_frame_blend_layer = eGBBlendLayerAll;
         gb_frame_blend_auto = true;
+        gb_video_camera = false;
+        gb_video_camera_index = 0;
 
         color_correction = false;
         color_adjustments_enabled = false;
@@ -558,6 +562,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("AspectRatioNumerator", aspect_ratio_numerator, "Aspect-ratio width term (e.g. 4 in 4:3)");
     Int("AspectRatioDenominator", aspect_ratio_denominator, "Aspect-ratio height term (e.g. 3 in 4:3)");
     Bool("ShowOverscan", show_overscan, "Show the overscan area at the top and bottom that most games hide");
+    Bool("Transparency", transparency_effects, "Render the SNES colour-math/transparency effects (turn off only for troubleshooting)");
+    Bool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
     Enum("HighResolutionEffect", high_resolution_effect, { "LeaveAlone", "ScaleDown", "ScaleUp" }, "How to handle hi-res (512-wide) frames: LeaveAlone, ScaleDown, or ScaleUp");
 
     String("SoftwareFilter", software_filter, "Software scaling filter name, e.g. \"HQ2x\" or \"Blargg's NTSC (Composite)\"; empty means none");
@@ -571,6 +577,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     Enum("BlendGBFrames", gb_frame_blend, { "Off", "SimpleBlend", "LCDBlend" }, "Game Boy frame-blend (Super Game Boy only): Off, SimpleBlend (fixes flicker fake-transparency), or LCDBlend (LCD-style ghosting)");
     Enum("BlendGBFramesLayer", gb_frame_blend_layer, { "All", "Background", "Window", "Sprites" }, "Which Game Boy layer the frame-blend applies to: All, Background, Window, or Sprites");
     Bool("BlendGBFramesAuto", gb_frame_blend_auto, "Auto-pick the GB frame-blend per game from a built-in known-flicker table");
+    Bool("GBVideoCamera", gb_video_camera, "Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor");
+    Int("GBVideoCameraIndex", gb_video_camera_index, "Index of the selected webcam in the device list under Display > Game Boy Image");
 
     Bool("ColorCorrection", color_correction, "Enable accurate SNES color correction (simulates SNES CRT output)");
     Bool("AdjustmentsEnabled", color_adjustments_enabled, "Apply the gamma/contrast/saturation adjustments below");

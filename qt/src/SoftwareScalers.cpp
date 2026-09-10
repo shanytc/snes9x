@@ -41,3 +41,22 @@ void S9xMergeHires(void *buffer, int pitch, int &width, int &height)
 
     width >>= 1;
 }
+
+void S9xBlendHires(void *buffer, int pitch, int width, int height)
+{
+    if (width < 512)
+        return;
+
+    for (int y = 0; y < height; y++)
+    {
+        uint16_t *line = (uint16_t *)((uint8_t *)buffer + y * pitch);
+        uint16_t left = 0;
+
+        for (int x = 0; x < width; x++)
+        {
+            uint16_t right = line[x];
+            line[x] = average_565(left, right);
+            left = right;
+        }
+    }
+}

@@ -237,3 +237,8 @@ void S9xApplySoftwareFilter(int filter,
     else
         filter_table[filter].func(src, src_pitch, dst, dst_pitch, width, height);
 }
+
+bool S9xSoftwareFilterBlendsHires(int filter)
+{
+    return filter >= FILTER_NTSC_COMPOSITE && filter <= FILTER_NTSC_MONOCHROME;
+}

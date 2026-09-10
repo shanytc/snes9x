@@ -12,6 +12,8 @@ class DisplayPanel :
     void populateDevices();
     void selectShaderDialog();
     void updateGBBlendEnabledState();
+    void populateCameras();
+    void updateGBCameraEnabledState();
 
     std::vector<std::pair<int, std::string>> driver_list;
     bool updating = true;

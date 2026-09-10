@@ -76,6 +76,11 @@ struct EmuConfig
     int aspect_ratio_numerator;
     int aspect_ratio_denominator;
     bool show_overscan;
+    // The rest of win32's "SNES Image" box: the core's colour-math/transparency
+    // effects (Settings.Transparency) and a horizontal blend of 512-wide hi-res
+    // frames before the software filter ("Blend Hi-Res Images").
+    bool transparency_effects;
+    bool blend_hires;
     enum HighResolutionEffect
     {
         eLeaveAlone = 0,
@@ -118,6 +123,10 @@ struct EmuConfig
     };
     int gb_frame_blend_layer;
     bool gb_frame_blend_auto;
+    // Feed a webcam into the Game Boy Camera cartridge (win32 "Enable Video
+    // Camera"); the index is the device's position in the enumerated list.
+    bool gb_video_camera;
+    int gb_video_camera_index;
 
     bool color_correction;
     bool color_adjustments_enabled;

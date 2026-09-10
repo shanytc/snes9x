@@ -186,19 +186,6 @@
           </property>
          </widget>
         </item>
-        <item row="1" column="0">
-         <widget class="QCheckBox" name="checkBox_overscan">
-          <property name="toolTip">
-           <string>Show the areas on the top and bottom of the screen that are normally black and hidden by the TV. Some games will draw in these areas.</string>
-          </property>
-          <property name="whatsThis">
-           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;On classic CRT televisions, some areas of the screen were covered by the bezel, so weren't used often in games. This option allows you to show that area, but it will usually be just black bars.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-          </property>
-          <property name="text">
-           <string>Show overscan area</string>
-          </property>
-         </widget>
-        </item>
         <item row="0" column="1">
          <widget class="QCheckBox" name="checkBox_integer_scaling">
           <property name="toolTip">
@@ -373,11 +360,48 @@ Output directly will cause the screen to change between the two modes and look w
     </widget>
    </item>
    <item>
-    <widget class="QGroupBox" name="groupBox_4">
+    <widget class="QGroupBox" name="groupBox_snes_image">
      <property name="title">
-      <string>Messages</string>
+      <string>SNES Image</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_5">
+      <item>
+       <layout class="QGridLayout" name="gridLayout_snes_image">
+        <item row="0" column="0">
+         <widget class="QCheckBox" name="checkBox_transparency">
+          <property name="toolTip">
+           <string>Render the SNES colour-math and transparency effects. Turn off only for troubleshooting.</string>
+          </property>
+          <property name="text">
+           <string>Transparency Effects</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QCheckBox" name="checkBox_blend_hires">
+          <property name="toolTip">
+           <string>Horizontally blend hi-res (512-wide) images, so games that alternate columns for a transparency effect look as intended with filters that do not account for this.</string>
+          </property>
+          <property name="text">
+           <string>Blend Hi-Res Images</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QCheckBox" name="checkBox_overscan">
+          <property name="toolTip">
+           <string>Display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240.</string>
+          </property>
+          <property name="whatsThis">
+           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;On classic CRT televisions, some areas of the screen were covered by the bezel, so weren't used often in games. This option allows you to show that area, but it will usually be just black bars.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          </property>
+          <property name="text">
+           <string>Extend Height of SNES Image</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
       <item>
        <layout class="QGridLayout" name="gridLayout_5">
         <item row="0" column="0">
@@ -566,6 +590,52 @@ Output directly will cause the screen to change between the two modes and look w
         </item>
         <item row="0" column="2">
          <spacer name="horizontalSpacer_gb_blend">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="checkBox_gb_video_camera">
+        <property name="toolTip">
+         <string>Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor. With this off (or no camera connected) the in-game viewfinder is blank.</string>
+        </property>
+        <property name="text">
+         <string>Enable Video Camera</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_gb_camera">
+        <item>
+         <widget class="QComboBox" name="comboBox_gb_camera">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>240</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string>The webcam to feed into the Game Boy Camera. Cameras that only offer compressed (MJPEG) video produce a blank image.</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_gb_camera">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
           </property>

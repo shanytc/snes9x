@@ -65,6 +65,9 @@ class Snes9xConfig
     int scale_method;
     int hires_scale_method;
     bool overscan;
+    /* win32's "Blend Hi-Res Images": horizontally blend 512-wide hi-res frames
+       before the software filter. */
+    bool blend_hires;
     bool multithreading;
     int hires_effect;
     bool force_inverted_byte_order;

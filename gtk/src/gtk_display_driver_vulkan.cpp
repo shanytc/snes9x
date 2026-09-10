@@ -147,7 +147,8 @@ int S9xVulkanDisplayDriver::init()
     }
 
     device = context->device;
-    init_imgui();
+    if (!Settings.AutoDisplayMessages)
+        init_imgui();
 
     if (!gui_config->shader_filename.empty() && gui_config->use_shaders)
     {

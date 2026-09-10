@@ -16,6 +16,7 @@
 #include "gtk_display.h"
 #include "gtk_netplay.h"
 #include "gtk_retroachievements.h"
+#include "common/video/gb_camera_v4l2.hpp"
 #include "retroachievements.h"
 #include "statemanager.h"
 #include "background_particles.h"
@@ -99,6 +100,11 @@ int main(int argc, char *argv[])
     S9xInitDisplay(argc, argv);
 
     S9xPortSoundInit();
+
+    // Game Boy Camera webcam feed, started here when the config says so and
+    // re-applied from the preferences dialog.
+    S9xGBCameraRegister();
+    S9xGBCameraApply();
 
     S9xApplyControllerOption();
     S9xReportControllers();
@@ -685,6 +691,7 @@ static void check_pointer_timer()
 void S9xExit()
 {
     S9xAVIStop();
+    S9xGBCameraStop();
     S9xCloseAudioWaveformWindow();
 
     gui_config->save_config_file();

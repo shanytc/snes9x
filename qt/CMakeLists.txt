@@ -323,6 +323,8 @@ list(APPEND QT_GUI_SOURCES
     ../common/recording/avi_writer.hpp
     ../common/recording/avi_recorder.cpp
     ../common/recording/avi_recorder.hpp
+    ../common/video/gb_camera_v4l2.cpp
+    ../common/video/gb_camera_v4l2.hpp
     ../common/audio/audio_waveform.cpp
     ../common/audio/audio_waveform.hpp
     src/SoftwareScalers.cpp

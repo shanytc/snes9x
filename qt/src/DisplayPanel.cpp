@@ -2,6 +2,7 @@
 #include "EmuMainWindow.hpp"
 #include "EmuConfig.hpp"
 #include "SoftwareFilters.hpp"
+#include "common/video/gb_camera_v4l2.hpp"
 #include <QFileDialog>
 
 #include "snes9x.h"
@@ -72,6 +73,16 @@ DisplayPanel::DisplayPanel(EmuApplication *app_)
 
     connect(checkBox_overscan, &QCheckBox::clicked, [&](bool checked) {
         app->config->show_overscan = checked;
+        app->updateSettings();
+    });
+
+    connect(checkBox_transparency, &QCheckBox::clicked, [&](bool checked) {
+        app->config->transparency_effects = checked;
+        app->updateSettings();
+    });
+
+    connect(checkBox_blend_hires, &QCheckBox::clicked, [&](bool checked) {
+        app->config->blend_hires = checked;
         app->updateSettings();
     });
 
@@ -151,20 +162,66 @@ DisplayPanel::DisplayPanel(EmuApplication *app_)
         app->config->gb_frame_blend_layer = index;
         app->updateSettings();
     });
+
+    // Game Boy Camera webcam feed. Unlike the blend options this is not tied to
+    // the loaded game: applying the settings (re)starts or stops the capture.
+    comboBox_gb_camera->setPlaceholderText(tr("No video camera found"));
+
+    connect(checkBox_gb_video_camera, &QCheckBox::clicked, [&](bool checked) {
+        app->config->gb_video_camera = checked;
+        updateGBCameraEnabledState();
+        app->updateSettings();
+    });
+
+    connect(comboBox_gb_camera, &QComboBox::activated, [&](int index) {
+        app->config->gb_video_camera_index = index;
+        app->updateSettings();
+    });
+}
+
+void DisplayPanel::populateCameras()
+{
+    std::vector<std::string> names;
+    S9xGBCameraEnumerate(names);
+
+    comboBox_gb_camera->clear();
+    for (auto &name : names)
+        comboBox_gb_camera->addItem(QString::fromStdString(name));
+
+    // A remembered index past the end of the list falls back to the first
+    // camera, as on win32.
+    auto &index = app->config->gb_video_camera_index;
+    if (names.empty())
+        comboBox_gb_camera->setCurrentIndex(-1);
+    else
+    {
+        if (index < 0 || index >= (int)names.size())
+            index = 0;
+        comboBox_gb_camera->setCurrentIndex(index);
+    }
+}
+
+void DisplayPanel::updateGBCameraEnabledState()
+{
+    comboBox_gb_camera->setEnabled(checkBox_gb_video_camera->isChecked() &&
+                                   comboBox_gb_camera->count() > 0);
 }
 
 void DisplayPanel::updateGBBlendEnabledState()
 {
-    // The Game Boy Image options only apply to a Game Boy / GBC / SGB game — grey
+    // The frame-blend options only apply to a Game Boy / GBC / SGB game — grey
     // them out for SNES titles (or when nothing is loaded). With Auto on, the two
     // dropdowns are list-driven so they're greyed too; the layer one also needs
-    // blending to be on (mode != Off).
+    // blending to be on (mode != Off). The webcam controls further down the
+    // group stay available regardless, as on win32.
     bool gb_active = (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
     bool manual = gb_active && !app->config->gb_frame_blend_auto;
-    groupBox_gb_image->setEnabled(gb_active);
+    bool layer = manual && app->config->gb_frame_blend != EmuConfig::eGBBlendOff;
     checkBox_gb_frame_blend_auto->setEnabled(gb_active);
+    label_gb_frame_blend->setEnabled(manual);
     comboBox_gb_frame_blend->setEnabled(manual);
-    comboBox_gb_frame_blend_layer->setEnabled(manual && app->config->gb_frame_blend != EmuConfig::eGBBlendOff);
+    label_gb_frame_blend_layer->setEnabled(layer);
+    comboBox_gb_frame_blend_layer->setEnabled(layer);
 }
 
 void DisplayPanel::selectShaderDialog()
@@ -233,6 +290,8 @@ void DisplayPanel::showEvent(QShowEvent *event)
     checkBox_maintain_aspect_ratio->setChecked(config->maintain_aspect_ratio);
     checkBox_integer_scaling->setChecked(config->use_integer_scaling);
     checkBox_overscan->setChecked(config->show_overscan);
+    checkBox_transparency->setChecked(config->transparency_effects);
+    checkBox_blend_hires->setChecked(config->blend_hires);
 
     if (config->aspect_ratio_numerator == 4)
         comboBox_aspect_ratio->setCurrentIndex(0);
@@ -263,6 +322,10 @@ void DisplayPanel::showEvent(QShowEvent *event)
     comboBox_gb_frame_blend->setCurrentIndex(config->gb_frame_blend);
     comboBox_gb_frame_blend_layer->setCurrentIndex(config->gb_frame_blend_layer);
     updateGBBlendEnabledState();
+
+    populateCameras();
+    checkBox_gb_video_camera->setChecked(config->gb_video_camera);
+    updateGBCameraEnabledState();
 
     QWidget::showEvent(event);
 }

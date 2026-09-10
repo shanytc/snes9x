@@ -22,6 +22,7 @@ namespace fs = std::filesystem;
 #include "cheats.h"
 #include "movie.h"
 #include "common/recording/avi_recorder.hpp"
+#include "common/video/gb_camera_v4l2.hpp"
 
 #ifdef KAILLERA_SUPPORT
 #include "kaillera_client.h"
@@ -119,11 +120,16 @@ void Snes9xController::init()
     S9xUnmapAllControls();
     S9xCheatsEnable();
 
+    // Game Boy Camera webcam feed; the capture itself is started by
+    // updateSettings() once the config says so.
+    S9xGBCameraRegister();
+
     active = false;
 }
 
 void Snes9xController::deinit()
 {
+    S9xGBCameraStop();
     if (active)
         S9xAutoSaveSRAM();
     S9xGraphicsDeinit();
@@ -258,6 +264,8 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.TwoClockCycles = overclock_cycles[config->overclock][0] * 2;
 
     Settings.ShowOverscan = config->show_overscan;
+    Settings.Transparency = config->transparency_effects;
+    blend_hires = config->blend_hires;
 
     // Game Boy frame-blend (Super Game Boy). Push the stored mode/layer first, then,
     // when "Auto Layer Transparency" is on, let the per-title table in sgb.cpp pick
@@ -274,6 +282,11 @@ void Snes9xController::updateSettings(EmuConfig *config)
         config->gb_frame_blend       = Settings.GBFrameBlend;
         config->gb_frame_blend_layer = Settings.GBFrameBlendLayer;
     }
+
+    // Game Boy Camera webcam feed: (re)start or stop the capture to match.
+    Settings.GBVideoCamera = config->gb_video_camera;
+    Settings.GBVideoCameraIndex = (uint8)std::clamp(config->gb_video_camera_index, 0, 255);
+    S9xGBCameraApply();
 
     high_resolution_effect = config->high_resolution_effect;
     software_filter = S9xSoftwareFilterFromName(config->software_filter);
@@ -538,7 +551,9 @@ bool8 S9xDeinitUpdate(int width, int height)
     if (!Settings.Paused)
         S9xAVICaptureFrame(screen_view, GFX.Pitch, width, height);
 
-    auto hires_effect = Snes9xController::get()->high_resolution_effect;
+    auto controller = Snes9xController::get();
+    auto hires_effect = controller->high_resolution_effect;
+    const bool native_hires = (width == 512);
     if (!Settings.Paused)
     {
         if (hires_effect == EmuConfig::eScaleUp)
@@ -556,8 +571,18 @@ bool8 S9xDeinitUpdate(int width, int height)
     // Hi-res frames get their own filter selection, like the win32 port's
     // second "Hi Res" box under Output Image Processing.
     bool hires_frame = (width == 512 || height > SNES_HEIGHT_EXTENDED);
-    int filter = hires_frame ? Snes9xController::get()->software_filter_hires
-                             : Snes9xController::get()->software_filter;
+    int filter = hires_frame ? controller->software_filter_hires
+                             : controller->software_filter;
+
+    // "Blend Hi-Res Images": average each pixel of a 512-wide frame with its
+    // left neighbour, keeping the width, so games that alternate columns for
+    // a transparency effect blend them (win32's BlendHiRes). Frames the game
+    // drew in low-res and merged frames are left alone, as is a filter that
+    // consumes the hi-res columns itself.
+    if (!Settings.Paused && controller->blend_hires && native_hires && width == 512 &&
+        !S9xSoftwareFilterBlendsHires(filter))
+        S9xBlendHires(screen_view, GFX.Pitch, width, height);
+
     if (filter != 0)
     {
         // The filters can only grow the image, so the scratch buffer sized for

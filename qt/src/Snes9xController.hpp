@@ -84,6 +84,7 @@ class Snes9xController
     std::string bios_folder;
     int16_t mouse_x, mouse_y;
     int high_resolution_effect;
+    bool blend_hires = true;
     int software_filter = 0;
     int software_filter_hires = 0;
     int rewind_buffer_size;

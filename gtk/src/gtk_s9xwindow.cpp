@@ -31,6 +31,8 @@
 #include "gtk_movie.h"
 #include "gtk_audio_waveform.h"
 #include "common/audio/audio_waveform.hpp"
+#include "common/desktop/xdg_app_icon.hpp"
+#include "gtk_logos.h"
 #include "gtk_retroachievements.h"
 #include "retroachievements.h"
 #include "gtk_s9xwindow.h"
@@ -97,20 +99,7 @@ Snes9xWindow::Snes9xWindow(Snes9xConfig *config)
     cairo_owned = false;
     mouse_grabbed = false;
 
-    if (Gtk::IconTheme::get_default()->has_icon("snes9x"))
-    {
-        Gtk::Window::set_default_icon_name("snes9x");
-    }
-    else
-    {
-        extern int mini_icon_size;
-        extern unsigned char mini_icon[];
-        auto loader = Gdk::PixbufLoader::create();
-        loader->write(mini_icon, mini_icon_size);
-        loader->close();
-        if (auto pixbuf = loader->get_pixbuf())
-            Gtk::Window::set_default_icon(pixbuf);
-    }
+    apply_window_icon();
 
     drawing_area = get_object<Gtk::DrawingArea>("drawingarea").get();
     window->show();
@@ -129,6 +118,117 @@ Snes9xWindow::Snes9xWindow(Snes9xConfig *config)
     window->get_window()->set_cursor();
 
     resize(config->window_width, config->window_height);
+}
+
+// File->Choose Icon: the four bundled logos, 1-4 like win32's Window:Icon.
+static const char *launcher_icon_name = "snes9x"; // Icon= of super-snes9x-gtk.desktop
+
+static int clamp_logo_index(int n)
+{
+    return (n < 1 || n > 4) ? 1 : n;
+}
+
+static Glib::RefPtr<Gdk::Pixbuf> logo_pixbuf(const LogoImage &img)
+{
+    auto loader = Gdk::PixbufLoader::create();
+    loader->write(img.data, *img.length);
+    loader->close();
+    return loader->get_pixbuf();
+}
+
+void Snes9xWindow::apply_window_icon()
+{
+    int index = clamp_logo_index(config->window_icon);
+    if (index == 1)
+    {
+        // Stock look: an icon theme that ships its own snes9x icon still wins
+        // here, as it always has.
+        Gtk::Window::set_default_icon_list({});
+        if (Gtk::IconTheme::get_default()->has_icon("snes9x"))
+        {
+            Gtk::Window::set_default_icon_name("snes9x");
+        }
+        else
+        {
+            extern int mini_icon_size;
+            extern unsigned char mini_icon[];
+            auto loader = Gdk::PixbufLoader::create();
+            loader->write(mini_icon, mini_icon_size);
+            loader->close();
+            if (auto pixbuf = loader->get_pixbuf())
+                Gtk::Window::set_default_icon(pixbuf);
+        }
+        return;
+    }
+
+    std::vector<Glib::RefPtr<Gdk::Pixbuf>> icons;
+    for (const auto &img : logo_images[index - 1])
+        if (auto pixbuf = logo_pixbuf(img))
+            icons.push_back(pixbuf);
+    Gtk::Window::set_default_icon_list(icons);
+}
+
+void Snes9xWindow::choose_window_icon(int index)
+{
+    index = clamp_logo_index(index);
+    if (index == clamp_logo_index(config->window_icon))
+        return;
+    config->window_icon = index;
+    apply_window_icon();
+    config->save_config_file();
+    if (config->write_icon_to_launcher)
+        sync_launcher_icon();
+}
+
+void Snes9xWindow::set_write_icon_to_launcher(bool enabled)
+{
+    config->write_icon_to_launcher = enabled;
+    config->save_config_file();
+    sync_launcher_icon();
+}
+
+// The Linux stand-in for win32 rewriting the .exe icon: put the chosen logo
+// into the user's icon theme (or take it out again when the option is off) so
+// the launcher, dock and task bar follow the window.
+void Snes9xWindow::sync_launcher_icon()
+{
+    // What the shipped super-snes9x-gtk.desktop says, for the entry written
+    // when the program is not installed.
+    static const XdgAppIcon::DesktopEntry entry = {
+        "super-snes9x-gtk", "Super Snes9x", "A Super Nintendo emulator", "Game;Emulator;",
+        "application/vnd.nintendo.snes.rom;application/x-snes-rom;application/x-gameboy-rom;"
+        "application/x-gameboy-color-rom;"
+    };
+    std::string error;
+    bool ok;
+    if (!config->write_icon_to_launcher)
+    {
+        ok = XdgAppIcon::Restore(launcher_icon_name, entry, error);
+    }
+    else
+    {
+        int index = clamp_logo_index(config->window_icon);
+        std::vector<XdgAppIcon::Image> images;
+        for (const auto &img : logo_images[index - 1])
+            images.push_back({ img.size, std::vector<uint8_t>(img.data, img.data + *img.length) });
+        ok = XdgAppIcon::Install(launcher_icon_name, images, entry, error);
+    }
+    if (!ok)
+    {
+        Gtk::MessageDialog msg(*window.get(), _("Couldn't update the launcher icon."), false,
+                               Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
+        msg.set_secondary_text(error);
+        msg.run();
+    }
+}
+
+void Snes9xWindow::update_icon_menu()
+{
+    refreshing_icon_menu = true;
+    std::string name = "window_icon_" + std::to_string(clamp_logo_index(config->window_icon)) + "_item";
+    get_object<Gtk::RadioMenuItem>(name.c_str())->set_active(true);
+    get_object<Gtk::CheckMenuItem>("write_icon_to_launcher_item")->set_active(config->write_icon_to_launcher);
+    refreshing_icon_menu = false;
 }
 
 void Snes9xWindow::connect_signals()
@@ -248,6 +348,43 @@ void Snes9xWindow::connect_signals()
         get_object<Gtk::RadioMenuItem>(name.c_str())->set_active(true);
         refreshing_runahead_menu = false;
     });
+
+    // win32's File->Choose Icon. The logo is drawn next to each label like
+    // win32's menu bitmaps; the check mark comes from the radio item itself.
+    for (int i = 1; i <= NUM_LOGOS; i++)
+    {
+        std::string name = "window_icon_" + std::to_string(i) + "_item";
+        auto item = get_object<Gtk::RadioMenuItem>(name.c_str());
+        if (auto label = dynamic_cast<Gtk::Label *>(item->get_child()))
+        {
+            Glib::ustring text = label->get_label();
+            item->remove();
+            auto box = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 6));
+            auto image = Gtk::manage(new Gtk::Image(logo_pixbuf(logo_images[i - 1][0])));
+            auto new_label = Gtk::manage(new Gtk::Label(text, true));
+            new_label->set_xalign(0.0);
+            new_label->set_mnemonic_widget(*item.get());
+            box->pack_start(*image, false, false);
+            box->pack_start(*new_label, true, true);
+            item->add(*box);
+            box->show_all();
+        }
+        item->signal_toggled().connect([this, item, i] {
+            if (refreshing_icon_menu || !item->get_active())
+                return;
+            choose_window_icon(i);
+        });
+    }
+    auto launcher_item = get_object<Gtk::CheckMenuItem>("write_icon_to_launcher_item");
+    launcher_item->signal_toggled().connect([this, launcher_item] {
+        if (refreshing_icon_menu)
+            return;
+        set_write_icon_to_launcher(launcher_item->get_active());
+    });
+    get_object<Gtk::Menu>("choose_icon_menu")->signal_show().connect([this] {
+        update_icon_menu();
+    });
+    update_icon_menu();
 
     get_object<Gtk::MenuItem>("shader_parameters_item")->signal_activate().connect([&] {
         gtk_shader_parameters_dialog(get_window());

@@ -59,6 +59,13 @@ struct EmuConfig
 
     std::string language;
 
+    // File->Choose Icon: which of the four bundled logos (1-4) the window
+    // shows, like win32's Window:Icon, and whether the choice is also written
+    // into the user's icon theme so launchers and docks pick it up (the Linux
+    // stand-in for win32's WriteIconToExe).
+    int window_icon;
+    bool write_icon_to_launcher;
+
     // Display
     std::string display_driver;
     int display_device_index;

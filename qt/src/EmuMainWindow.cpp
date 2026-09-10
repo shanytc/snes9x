@@ -4,6 +4,7 @@
 #include <QMenuBar>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFile>
 #include <QMessageBox>
 #include <QtEvents>
 #include <QGuiApplication>
@@ -21,6 +22,9 @@
 #include "StatePreviewDialog.hpp"
 #include "EmuApplication.hpp"
 #include "EmuConfig.hpp"
+#if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)
+#include "common/desktop/xdg_app_icon.hpp"
+#endif
 #include "snes9x.h"
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "RAIntegrationQt.hpp"
@@ -294,13 +298,97 @@ void EmuMainWindow::voicekunDetach()
     }
 }
 
+// File->Choose Icon: the four bundled logos, 1-4 like win32's Window:Icon.
+static const int logo_sizes[] = { 16, 24, 32, 48, 64, 128, 256 };
+static const char *launcher_icon_name = "snes9x"; // Icon= of super-snes9x-qt.desktop
+
+static int clampLogoIndex(int n)
+{
+    return (n < 1 || n > 4) ? 1 : n;
+}
+
+QIcon EmuMainWindow::logoIcon(int index)
+{
+    QIcon icon;
+    for (int size : logo_sizes)
+        icon.addFile(QString(":/icons/logos/logo%1_%2.png").arg(clampLogoIndex(index)).arg(size),
+                     QSize(size, size));
+    return icon;
+}
+
+void EmuMainWindow::applyWindowIcon()
+{
+    int index = clampLogoIndex(app->config->window_icon);
+    // Icon 1 is the stock look, so an icon theme that ships its own snes9x
+    // icon still wins there, as it always has.
+    if (index == 1)
+        setWindowIcon(QIcon::fromTheme("snes9x", QIcon(":/icons/snes9x.svg")));
+    else
+        setWindowIcon(logoIcon(index));
+}
+
+void EmuMainWindow::chooseWindowIcon(int index)
+{
+    index = clampLogoIndex(index);
+    if (index == clampLogoIndex(app->config->window_icon))
+        return;
+    app->config->window_icon = index;
+    applyWindowIcon();
+    app->config->saveFile(EmuConfig::findConfigFile());
+    if (app->config->write_icon_to_launcher)
+        syncLauncherIcon();
+}
+
+void EmuMainWindow::setWriteIconToLauncher(bool enabled)
+{
+    app->config->write_icon_to_launcher = enabled;
+    app->config->saveFile(EmuConfig::findConfigFile());
+    syncLauncherIcon();
+}
+
+// The Linux stand-in for win32 rewriting the .exe icon: put the chosen logo
+// into the user's icon theme (or take it out again when the option is off) so
+// the launcher, dock and task bar follow the window.
+void EmuMainWindow::syncLauncherIcon()
+{
+#if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)
+    // What the shipped super-snes9x-qt.desktop says, for the entry written
+    // when the program is not installed.
+    static const XdgAppIcon::DesktopEntry entry = {
+        "super-snes9x-qt", "Super Snes9x", "A Super Nintendo emulator", "Game;Emulator;",
+        "application/vnd.nintendo.snes.rom;application/x-snes-rom;application/x-gameboy-rom;"
+        "application/x-gameboy-color-rom;"
+    };
+    std::string error;
+    bool ok;
+    if (!app->config->write_icon_to_launcher)
+    {
+        ok = XdgAppIcon::Restore(launcher_icon_name, entry, error);
+    }
+    else
+    {
+        int index = clampLogoIndex(app->config->window_icon);
+        std::vector<XdgAppIcon::Image> images;
+        for (int size : logo_sizes)
+        {
+            QFile file(QString(":/icons/logos/logo%1_%2.png").arg(index).arg(size));
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+            QByteArray png = file.readAll();
+            images.push_back({ size, std::vector<uint8_t>(png.begin(), png.end()) });
+        }
+        ok = XdgAppIcon::Install(launcher_icon_name, images, entry, error);
+    }
+    if (!ok)
+        QMessageBox::warning(this, tr("Choose Icon"),
+                             tr("Couldn't update the launcher icon.\n\n%1").arg(QString::fromStdString(error)));
+#endif
+}
+
 void EmuMainWindow::createWidgets()
 {
     setWindowTitle(QString("SuperSnes9x %1").arg(VERSION_DISPLAY));
-    if (QIcon::hasThemeIcon("snes9x"))
-        setWindowIcon(QIcon::fromTheme("snes9x"));
-    else
-        setWindowIcon(QIcon(":/icons/snes9x.svg"));
+    applyWindowIcon();
 
 #ifdef Q_OS_WIN
     HWND hwnd = reinterpret_cast<HWND>(winId());
@@ -460,6 +548,37 @@ void EmuMainWindow::createWidgets()
                                                             : tr("Start &AVI Recording..."));
     });
 
+    file_menu->addSeparator();
+
+    // win32's File->Choose Icon: one of four bundled logos for the window and
+    // task bar. There is no .exe icon to rewrite on Linux, so the launcher
+    // item writes the logo into the user's icon theme instead.
+    auto icon_menu = new QMenu(tr("Choose &Icon"), file_menu);
+    auto icon_group = new QActionGroup(icon_menu);
+    std::vector<QAction *> icon_actions;
+    for (int i = 1; i <= 4; i++)
+    {
+        auto action = icon_menu->addAction(logoIcon(i), tr("Icon &%1").arg(i));
+        action->setCheckable(true);
+        action->setActionGroup(icon_group);
+        connect(action, &QAction::triggered, this, [this, i] { chooseWindowIcon(i); });
+        icon_actions.push_back(action);
+    }
+    QAction *launcher_action = nullptr;
+#if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)
+    icon_menu->addSeparator();
+    launcher_action = icon_menu->addAction(tr("Apply to &Launcher Icon"));
+    launcher_action->setCheckable(true);
+    connect(launcher_action, &QAction::triggered, this, [this](bool checked) {
+        setWriteIconToLauncher(checked);
+    });
+#endif
+    connect(icon_menu, &QMenu::aboutToShow, this, [this, icon_actions, launcher_action] {
+        icon_actions[clampLogoIndex(app->config->window_icon) - 1]->setChecked(true);
+        if (launcher_action)
+            launcher_action->setChecked(app->config->write_icon_to_launcher);
+    });
+    file_menu->addMenu(icon_menu);
     file_menu->addSeparator();
 
     auto languages = EmuPoTranslator::availableLanguages();

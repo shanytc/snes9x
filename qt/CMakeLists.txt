@@ -249,6 +249,8 @@ else()
     ../common/video/wayland/viewporter-client-protocol.h
     ../common/video/wayland/wayland-idle-inhibit-unstable-v1.c
     ../common/video/wayland/wayland-idle-inhibit-unstable-v1.h
+    ../common/desktop/xdg_app_icon.cpp
+    ../common/desktop/xdg_app_icon.hpp
     ../external/glad/src/glx.c
     ../external/glad/src/egl.c)
 endif()

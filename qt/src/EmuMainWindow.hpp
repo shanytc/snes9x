@@ -52,6 +52,11 @@ class EmuMainWindow : public QMainWindow
     void handleFocusChange(bool active);
     void toggleMouseGrab();
     void updatePortConfigurationMenu();
+    void applyWindowIcon();
+    void chooseWindowIcon(int index);
+    void setWriteIconToLauncher(bool enabled);
+    void syncLauncherIcon();
+    static QIcon logoIcon(int index);
     std::vector<std::string> getDisplayDeviceList();
     EmuApplication *app = nullptr;
     EmuCanvas *canvas = nullptr;

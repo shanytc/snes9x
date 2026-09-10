@@ -132,6 +132,8 @@ int Snes9xConfig::load_defaults()
     shader_parameters_width = -1;
     shader_parameters_height = -1;
     enable_icons = true;
+    window_icon = 1;
+    write_icon_to_launcher = true;
     current_display_tab = 0;
     sram_directory.clear();
     export_directory.clear();
@@ -381,6 +383,8 @@ int Snes9xConfig::save_config_file()
     outint("CurrentDisplayTab", current_display_tab, "Last-selected tab in the Preferences window");
     outbool("UIVisible", ui_visible, "Show the menu bar");
     outbool("EnableIcons", enable_icons, "Show icons next to menu items");
+    outint("Icon", window_icon, "Which of the four bundled logos (1-4) the window shows, chosen via File > Choose Icon");
+    outbool("WriteIconToLauncher", write_icon_to_launcher, "Also write the chosen logo into ~/.local/share/icons so the launcher, dock and task bar show it (turn off to put the original icon back)");
     if (default_esc_behavior != ESC_TOGGLE_MENUBAR)
         outbool("Fullscreen", false);
     else
@@ -626,6 +630,8 @@ int Snes9xConfig::load_config_file()
     inbool("UIVisible", ui_visible);
     inbool("Fullscreen", fullscreen);
     inbool("EnableIcons", enable_icons);
+    inint("Icon", window_icon);
+    inbool("WriteIconToLauncher", write_icon_to_launcher);
 
     section = "Netplay";
     inbool("ActAsServer", netplay_is_server);

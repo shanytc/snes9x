@@ -30,6 +30,34 @@
     <file>whiteicons/exit.svg</file>
     <file>whiteicons/fullscreen.svg</file>
     <file>snes9x.svg</file>
+    <file alias="logos/logo1_16.png">../../../data/logos/logo1_16.png</file>
+    <file alias="logos/logo1_24.png">../../../data/logos/logo1_24.png</file>
+    <file alias="logos/logo1_32.png">../../../data/logos/logo1_32.png</file>
+    <file alias="logos/logo1_48.png">../../../data/logos/logo1_48.png</file>
+    <file alias="logos/logo1_64.png">../../../data/logos/logo1_64.png</file>
+    <file alias="logos/logo1_128.png">../../../data/logos/logo1_128.png</file>
+    <file alias="logos/logo1_256.png">../../../data/logos/logo1_256.png</file>
+    <file alias="logos/logo2_16.png">../../../data/logos/logo2_16.png</file>
+    <file alias="logos/logo2_24.png">../../../data/logos/logo2_24.png</file>
+    <file alias="logos/logo2_32.png">../../../data/logos/logo2_32.png</file>
+    <file alias="logos/logo2_48.png">../../../data/logos/logo2_48.png</file>
+    <file alias="logos/logo2_64.png">../../../data/logos/logo2_64.png</file>
+    <file alias="logos/logo2_128.png">../../../data/logos/logo2_128.png</file>
+    <file alias="logos/logo2_256.png">../../../data/logos/logo2_256.png</file>
+    <file alias="logos/logo3_16.png">../../../data/logos/logo3_16.png</file>
+    <file alias="logos/logo3_24.png">../../../data/logos/logo3_24.png</file>
+    <file alias="logos/logo3_32.png">../../../data/logos/logo3_32.png</file>
+    <file alias="logos/logo3_48.png">../../../data/logos/logo3_48.png</file>
+    <file alias="logos/logo3_64.png">../../../data/logos/logo3_64.png</file>
+    <file alias="logos/logo3_128.png">../../../data/logos/logo3_128.png</file>
+    <file alias="logos/logo3_256.png">../../../data/logos/logo3_256.png</file>
+    <file alias="logos/logo4_16.png">../../../data/logos/logo4_16.png</file>
+    <file alias="logos/logo4_24.png">../../../data/logos/logo4_24.png</file>
+    <file alias="logos/logo4_32.png">../../../data/logos/logo4_32.png</file>
+    <file alias="logos/logo4_48.png">../../../data/logos/logo4_48.png</file>
+    <file alias="logos/logo4_64.png">../../../data/logos/logo4_64.png</file>
+    <file alias="logos/logo4_128.png">../../../data/logos/logo4_128.png</file>
+    <file alias="logos/logo4_256.png">../../../data/logos/logo4_256.png</file>
     <file>blackicons/settings.svg</file>
     <file>blackicons/folders.svg</file>
     <file>blackicons/emulation.svg</file>

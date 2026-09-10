@@ -260,6 +260,8 @@ bool EmuConfig::setDefaults(int section)
         show_pressed_keys = false;
         show_time = false;
         language = "";
+        window_icon = 1;
+        write_icon_to_launcher = true;
     }
 
     if (section == -1 || section == 1)
@@ -543,6 +545,11 @@ void EmuConfig::config(const std::string &filename, bool write)
     Bool("ShowPressedKeys", show_pressed_keys, "Show the controller buttons being pressed on screen");
     Bool("ShowTime", show_time, "Show the current wall-clock time on screen");
     String("Language", language, "UI language code (e.g. en, es); empty follows the system locale");
+    EndSection();
+
+    BeginSection("Window");
+    Int("Icon", window_icon, "Which of the four bundled logos (1-4) the window shows, chosen via File > Choose Icon");
+    Bool("WriteIconToLauncher", write_icon_to_launcher, "Also write the chosen logo into ~/.local/share/icons so the launcher, dock and task bar show it (turn off to put the original icon back)");
     EndSection();
 
     BeginSection("Display");

@@ -163,6 +163,13 @@ class Snes9xConfig
     bool modal_dialogs;
     bool enable_icons;
 
+    /* File->Choose Icon: which of the four bundled logos (1-4) the window
+     * shows, like win32's Window:Icon, and whether the choice is also written
+     * into the user's icon theme so launchers and docks pick it up (the Linux
+     * stand-in for win32's WriteIconToExe). */
+    int window_icon;
+    bool write_icon_to_launcher;
+
     // Control the appearance of the on-disk config file itself (mirrors win32).
     bool config_show_comments;
     bool config_nice_alignment;

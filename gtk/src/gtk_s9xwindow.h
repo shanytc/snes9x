@@ -73,6 +73,11 @@ class Snes9xWindow : public GtkBuilderWindow
     void show();
     void set_menu_item_selected(const char *name);
     void update_controller_option_menu();
+    void apply_window_icon();
+    void choose_window_icon(int index);
+    void set_write_icon_to_launcher(bool enabled);
+    void sync_launcher_icon();
+    void update_icon_menu();
     void set_mouseable_area(int x, int y, int width, int height);
     void set_accelerator_to_binding(const char *name,
                                         const char *binding);
@@ -101,6 +106,7 @@ class Snes9xWindow : public GtkBuilderWindow
     bool refreshing_bios_menu = false;
     bool refreshing_runahead_menu = false;
     bool refreshing_controller_menu = false;
+    bool refreshing_icon_menu = false;
     int user_pause, sys_pause;
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;

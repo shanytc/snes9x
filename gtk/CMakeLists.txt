@@ -81,7 +81,9 @@ list(APPEND SOURCES src/gtk_display_driver_opengl.cpp
                     ../external/glad/src/gl.c
                     src/gtk_shader_parameters.cpp
                     ../common/video/std_chrono_throttle.cpp
-                    ../common/video/std_chrono_throttle.hpp)
+                    ../common/video/std_chrono_throttle.hpp
+                    ../common/desktop/xdg_app_icon.cpp
+                    ../common/desktop/xdg_app_icon.hpp)
 list(APPEND INCLUDES ../external/glad/include)
 
 if(USE_SLANG)
@@ -461,7 +463,22 @@ add_custom_command(
     COMMAND sourcify ${CMAKE_CURRENT_SOURCE_DIR}/data/mini_icon.png ${CMAKE_CURRENT_BINARY_DIR}/mini_icon.cpp mini_icon
     DEPENDS sourcify ${CMAKE_CURRENT_SOURCE_DIR}/data/mini_icon.png)
 
-add_executable(snes9x-gtk ${SOURCES} ${jma} ${CMAKE_CURRENT_BINARY_DIR}/gtk_snes9x_ui.cpp ${CMAKE_CURRENT_BINARY_DIR}/mini_icon.cpp)
+# The four File->Choose Icon logos at every size, one array each (declared in
+# src/gtk_logos.h).
+set(LOGO_SOURCES)
+foreach(logo RANGE 1 4)
+    foreach(size 16 24 32 48 64 128 256)
+        set(logo_png ${CMAKE_CURRENT_SOURCE_DIR}/../data/logos/logo${logo}_${size}.png)
+        set(logo_cpp ${CMAKE_CURRENT_BINARY_DIR}/logo${logo}_${size}.cpp)
+        add_custom_command(
+            OUTPUT ${logo_cpp}
+            COMMAND sourcify ${logo_png} ${logo_cpp} logo${logo}_${size}
+            DEPENDS sourcify ${logo_png})
+        list(APPEND LOGO_SOURCES ${logo_cpp})
+    endforeach()
+endforeach()
+
+add_executable(snes9x-gtk ${SOURCES} ${jma} ${CMAKE_CURRENT_BINARY_DIR}/gtk_snes9x_ui.cpp ${CMAKE_CURRENT_BINARY_DIR}/mini_icon.cpp ${LOGO_SOURCES})
 set_target_properties(snes9x-gtk PROPERTIES OUTPUT_NAME super-snes9x-gtk)
 target_include_directories(snes9x-gtk PRIVATE ${INCLUDES})
 target_compile_options(snes9x-gtk PRIVATE ${ARGS})

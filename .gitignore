@@ -524,3 +524,4 @@ gtk/build-appimage-x86/
 *.dmg
 Roms/
 Bios/
+tools/

@@ -922,11 +922,21 @@ const SgbcPatch kPatches[] = {
 	{ 0x9524, "TURISENSEI2AF2J\200", "Tsuri Sensei 2 (Japan)", 1,
 	  { { 0x000220, 2, { 0x28, 0x03 }, { 0x00, 0x00 } } } },
 	// nop_skip_branch
-	{ 0x968F, "CGBWARIOLAND2", "Wario Land 2 (Japan)", 1,
-	  { { 0x00025D, 3, { 0xC2, 0x55, 0x03 }, { 0x00, 0x00, 0x00 } } } },
+	// ...plus: the SGB path's stub VBlank handler pushes AF alone, and the Color
+	// builder then patches $C804 into a jump whose epilogue pops four pairs.
+	// Install the ROM's own 4-push copy of that stub ($1700) instead.
+	{ 0x968F, "CGBWARIOLAND2", "Wario Land 2 (Japan)", 3,
+	  { { 0x00025D, 3, { 0xC2, 0x55, 0x03 }, { 0x00, 0x00, 0x00 } },
+	    { 0x051447, 2, { 0x52, 0x54 }, { 0x00, 0x17 } },
+	    { 0x05144D, 1, { 0x08 }, { 0x0E } } } },
 	// nop_skip_branch
-	{ 0x24C7, "CGBWARIOLAND2", "Wario Land II (USA, Europe)", 1,
-	  { { 0x00025D, 3, { 0xC2, 0x55, 0x03 }, { 0x00, 0x00, 0x00 } } } },
+	// ...plus: the SGB path's stub VBlank handler pushes AF alone, and the Color
+	// builder then patches $C804 into a jump whose epilogue pops four pairs.
+	// Install the ROM's own 4-push copy of that stub ($1700) instead.
+	{ 0x24C7, "CGBWARIOLAND2", "Wario Land II (USA, Europe)", 3,
+	  { { 0x00025D, 3, { 0xC2, 0x55, 0x03 }, { 0x00, 0x00, 0x00 } },
+	    { 0x051447, 2, { 0x52, 0x54 }, { 0x00, 0x17 } },
+	    { 0x05144D, 1, { 0x08 }, { 0x0E } } } },
 	// manual: the console test's answer overwrites the console byte, so widen
 	// the border gate to accept a Color console instead of forcing the SGB code
 	{ 0x439C, "WETRIX GB", "Wetrix GB (Japan)", 1,

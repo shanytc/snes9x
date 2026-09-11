@@ -405,6 +405,11 @@ const SgbcPatch kPatches[] = {
 	{ 0x8005, "KINDAICHI", "Kindaichi Shounen no Jikenbo - 10 Nenme no Shoutaijou (Japan)", 2,
 	  { { 0x0001DE, 2, { 0xCB, 0xFE }, { 0xCB, 0xBE } },
 	    { 0x00020A, 1, { 0xC8 }, { 0x00 } } } },
+	// manual: the SGB arm of the logo scene reaches the CGB palette loader with
+	// a stale HL (a DMG returns before it), so take the Color arm at both forks
+	{ 0x925C, "MUSCLE RANKA5KJ\200", "Kinniku Banzuke GB - Chousensha wa Kimida! (Japan)", 2,
+	  { { 0x0051ED, 1, { 0x28 }, { 0x18 } },
+	    { 0x005279, 1, { 0x28 }, { 0x18 } } } },
 	// manual: flag routine answers SGB2
 	{ 0x5650, "MUSCLERANK2B6KJ\200", "Kinniku Banzuke GB 2 - Mezase! Muscle Champion (Japan)", 1,
 	  { { 0x00025B, 2, { 0xCB, 0x4E }, { 0xAF, 0x00 } } } },

@@ -285,15 +285,28 @@ const SgbcPatch kPatches[] = {
 	{ 0x8980, "TENTEN", "Hanasaka Tenshi Tenten-kun no Beat Breaker (Japan)", 2,
 	  { { 0x0001A9, 3, { 0xCA, 0x8D, 0x02 }, { 0x00, 0x00, 0x00 } },
 	    { 0x00028B, 2, { 0x97, 0x02 }, { 0x8D, 0x02 } } } },
-	// force_jr
-	{ 0xE5F7, "H-MOON2 CGBBM2P\200", "Harvest Moon 2 GBC (Europe)", 1,
-	  { { 0x0001B1, 2, { 0x28, 0x39 }, { 0x18, 0x39 } } } },
-	// force_jr
-	{ 0xB3DC, "H-MOON2 CGBBM2D\200", "Harvest Moon 2 GBC (Germany)", 1,
-	  { { 0x0001B1, 2, { 0x28, 0x39 }, { 0x18, 0x39 } } } },
-	// force_jr
-	{ 0x271C, "H-MOON2 CGBBM2E\200", "Harvest Moon 2 GBC (USA)", 1,
-	  { { 0x0001B1, 2, { 0x28, 0x39 }, { 0x18, 0x39 } } } },
+	// Harvest Moon 2 GBC (Europe/Germany/USA) had force_jr rows here. The cart
+	// sends no border (pct=0 on a real SGB2), and its SGB path leaves the CGB
+	// palettes junk, so the row only cost the colour: no row is the fix.
+
+	// manual: the SGB flag zeroes the boot logo's Color fade counter, so the
+	// logo draws under white CGB palettes; take the Color arm instead.
+	// DMG_BLANK: it blanks between scenes through BGP/OBP0/OBP1 = 0
+	{ 0xA6D6, "HARVEST-MOON GB\200", "Harvest Moon GB (Europe)", 1,
+	  { { 0x075737, 1, { 0x28 }, { 0x18 } } },
+	  SGBC_QUIRK_DMG_BLANK },
+	// manual: the SGB flag zeroes the boot logo's Color fade counter, so the
+	// logo draws under white CGB palettes; take the Color arm instead.
+	// DMG_BLANK: it blanks between scenes through BGP/OBP0/OBP1 = 0
+	{ 0x4F63, "HARVEST-MOON GB\200", "Harvest Moon GB (Germany)", 1,
+	  { { 0x07576F, 1, { 0x28 }, { 0x18 } } },
+	  SGBC_QUIRK_DMG_BLANK },
+	// manual: the SGB flag zeroes the boot logo's Color fade counter, so the
+	// logo draws under white CGB palettes; take the Color arm instead.
+	// DMG_BLANK: it blanks between scenes through BGP/OBP0/OBP1 = 0
+	{ 0x834C, "HARVEST-MOON GB\200", "Harvest Moon GBC (USA)", 1,
+	  { { 0x075737, 1, { 0x28 }, { 0x18 } } },
+	  SGBC_QUIRK_DMG_BLANK },
 	// manual: SGB detect wins over the Color branch; keep the type
 	{ 0x4DCF, "KTBZFACTORYAHBJ\200", "Hello Kitty no Beads Factory (Japan)", 3,
 	  { { 0x0027FE, 3, { 0xEA, 0xF0, 0xC1 }, { 0x00, 0x00, 0x00 } },

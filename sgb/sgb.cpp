@@ -3093,7 +3093,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v6: add mem.key0 - CGB boot CPU-mode select; dmg_compat derives from it.
 // v8: add the Super Game Boy Color flag, so a state names the kind of session
 //     it came from (the SNES ROM differs: SGBC runs a patched BIOS).
-constexpr uint32_t SGB_STATE_VERSION = 9;
+// v10: add ppu.cgb_pal_written. Older states derive it from the palette RAM.
+constexpr uint32_t SGB_STATE_VERSION = 10;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3318,6 +3319,16 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		if (c.mode == IoMode::Load && (sgbc != 0) != impl.sgbc)
 			c.sgbc_mismatch = true;
 	}
+
+	// v10: has the cart written CGB palettes? The palette RAM itself is in
+	// the v4 block, but the flag gates the Super Game Boy Color pane on the
+	// colour frame - without it a load (the BIOS-mode soft reset restores
+	// one) drops the pane to the mono fallback until the cart's next palette
+	// write, which a static screen never makes.
+	if (c.version >= 10)
+	{
+		IoField(c, impl.ppu.cgb_pal_written);
+	}
 }
 
 } // anonymous
@@ -3401,6 +3412,15 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->fb.width  = GB_SCREEN_WIDTH;
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
+
+	// Pre-v10 states carry no cgb_pal_written: reset leaves the palette RAM
+	// all $FF, so anything else is a cart that has written its own.
+	if (version < 10)
+	{
+		impl_->ppu.cgb_pal_written = false;
+		for (size_t i = 0; i < sizeof impl_->ppu.bg_pal; ++i)
+			if (impl_->ppu.bg_pal[i] != 0xFF) { impl_->ppu.cgb_pal_written = true; break; }
+	}
 
 	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
 	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&

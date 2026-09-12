@@ -195,6 +195,9 @@
     <ClInclude Include="..\msu1.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\biosmanager.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\bml.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
@@ -375,6 +378,9 @@
       <Filter>libretro</Filter>
     </ClCompile>
     <ClCompile Include="..\msu1.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\biosmanager.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\bml.cpp">

@@ -126,10 +126,6 @@ msgstr[1] "cuadros de retraso"
 msgid "Same location as current game"
 msgstr "El mismo lugar que el juego actual"
 
-#: src/gtk_preferences.cpp:110
-msgid "{0:Ld}×{1:Ld} @ {2:.3Lf} Hz"
-msgstr "{0:Ld}×{1:Ld} @ {2:.3Lf} Hz"
-
 #: src/gtk_preferences.cpp:143
 msgid "OpenGL – Use 3D graphics hardware"
 msgstr "OpenGL - Usar aceleración 3D por hardware"
@@ -181,14 +177,6 @@ msgstr ""
 #: src/gtk_preferences.cpp:298
 msgid "Select directory"
 msgstr "Seleccione el directorio"
-
-#: src/gtk_preferences.cpp:323
-msgid "{0:.4Lf} Hz"
-msgstr "{0:.4Lf} Hz"
-
-#: src/gtk_preferences.cpp:328
-msgid "{0:Ld} Hz"
-msgstr "{0:Ld} Hz"
 
 #: src/gtk_preferences.cpp:379
 msgid "Select Shader File"
@@ -251,26 +239,6 @@ msgstr "Todos los archivos"
 msgid "Couldn't load files."
 msgstr "No se pudo cargar los archivos."
 
-#: src/gtk_s9xwindow.cpp:637
-msgid "Open SNES Movie"
-msgstr "Abrir video de SNES"
-
-#: src/gtk_s9xwindow.cpp:642
-msgid "New SNES Movie"
-msgstr "Nuevo video de SNES"
-
-#: src/gtk_s9xwindow.cpp:661
-msgid "SNES Movies"
-msgstr "Videos de SNES"
-
-#: src/gtk_s9xwindow.cpp:690
-msgid "Open SNES ROM Image"
-msgstr "Abrir imagen ROM de SNES"
-
-#: src/gtk_s9xwindow.cpp:695
-msgid "SNES ROM Images"
-msgstr "Imagenes ROM de SNES"
-
 #: src/gtk_s9xwindow.cpp:740
 msgid "Couldn't load file: "
 msgstr "No se puedieron cargar los archivos: "
@@ -294,45 +262,6 @@ msgstr "Guardar archivo SPC..."
 #: src/gtk_s9xwindow.cpp:872
 msgid "Couldn't save SPC file:"
 msgstr "No se pudo guardar el archivo SPC:"
-
-#: src/gtk_s9xwindow.cpp:888
-#, c-format
-msgid ""
-"<b>Information for %s</b>\n"
-"\n"
-"<i>Name:</i> %s\n"
-"<i>Speed:</i> %02X/%s\n"
-"<i>Map:</i> %s\n"
-"<i>Type:</i> %02x\n"
-"<i>Contents:</i> %s\n"
-"<i>ROM Size:</i> %s\n"
-"<i>Calculated Size:</i> %d\n"
-"<i>SRAM Size:</i> %s\n"
-"<i>Header Checksum:</i> %04X\n"
-"<i>Checksum Complement:</i> %04X\n"
-"<i>Actual Checksum:</i> %04X\n"
-"<i>Video:</i> %s\n"
-"<i>CRC32:</i> %08X\n"
-"<i>Revision:</i> %s\n"
-"<b><i>%s%s</i></b>"
-msgstr ""
-"<b>Información de %s</b>\n"
-"\n"
-"<i>Nombre: </i> %s\n"
-"<i>Velocidad: </i> %02X / %s\n"
-"<i>Mapa: </i> %s\n"
-"<i>Tipo: </i> %02x\n"
-"<i>Contenido: </i> %s\n"
-"<i>Tamaño de la ROM: </i> %s\n"
-"<i>Tamaño Calculado: </i> %d\n"
-"<i>Tamaño de SRAM: </i> %s\n"
-"<i>Suma de verificación de la cabezera: </i> %04X\n"
-"<i>Suma de verificación cumplida: </i> %04X\n"
-"<i>Suma de verificación actual: </i> %04X\n"
-"<i>Vídeo: </i> %s\n"
-"<i>Suma CRC32: </i> %08X\n"
-"<i>Revisión: </i> %s\n"
-"<b><i>%s%s</i></b>"
 
 #: src/gtk_s9xwindow.cpp:924
 msgid ""
@@ -667,46 +596,6 @@ msgstr "Abrir _MultiCartucho…"
 msgid "_Load State"
 msgstr "_Cargar Partida"
 
-#: src/snes9x.ui:1276 src/snes9x.ui:1410
-msgid "Slot _0"
-msgstr "Posición _0"
-
-#: src/snes9x.ui:1285 src/snes9x.ui:1419
-msgid "Slot _1"
-msgstr "Posición _1"
-
-#: src/snes9x.ui:1294 src/snes9x.ui:1428
-msgid "Slot _2"
-msgstr "Posición _2"
-
-#: src/snes9x.ui:1303 src/snes9x.ui:1437
-msgid "Slot _3"
-msgstr "Posición _3"
-
-#: src/snes9x.ui:1312 src/snes9x.ui:1446
-msgid "Slot _4"
-msgstr "Posición _4"
-
-#: src/snes9x.ui:1321 src/snes9x.ui:1455
-msgid "Slot _5"
-msgstr "Posición _5"
-
-#: src/snes9x.ui:1330 src/snes9x.ui:1464
-msgid "Slot _6"
-msgstr "Posición _6"
-
-#: src/snes9x.ui:1339 src/snes9x.ui:1473
-msgid "Slot _7"
-msgstr "Posición _7"
-
-#: src/snes9x.ui:1348 src/snes9x.ui:1482
-msgid "Slot _8"
-msgstr "Posición _8"
-
-#: src/snes9x.ui:1357 src/snes9x.ui:1491
-msgid "Slot _9"
-msgstr "Posición _9"
-
 #: src/snes9x.ui:1372
 msgid "From _File…"
 msgstr "Desde arc_hivo…"
@@ -746,18 +635,6 @@ msgstr "Correr / _Continuar"
 #: src/snes9x.ui:1589
 msgid "_Pause"
 msgstr "_Pausar"
-
-#: src/snes9x.ui:1607
-msgid "Load _Movie…"
-msgstr "Cargar víde_o…"
-
-#: src/snes9x.ui:1619
-msgid "R_ecord Movie…"
-msgstr "Graba_r vídeo…"
-
-#: src/snes9x.ui:1631
-msgid "_Stop Recording"
-msgstr "_Detener grabación"
 
 #: src/snes9x.ui:1643
 msgid "_Jump to Frame…"
@@ -827,46 +704,9 @@ msgstr "_9×"
 msgid "1_0×"
 msgstr "1_0×"
 
-#: src/snes9x.ui:1844
-msgid "gtk-fullscreen"
-msgstr "pantalla completa"
-
 #: src/snes9x.ui:1858
 msgid "_Options"
 msgstr "_Opciones"
-
-#: src/snes9x.ui:1867
-msgid "Controller Ports"
-msgstr "Control de mandos"
-
-#: src/snes9x.ui:1876
-msgid "SNES Port 1"
-msgstr "Puerto SNES 1"
-
-#: src/snes9x.ui:1886 src/snes9x.ui:1930
-msgid "Joypad"
-msgstr "Mando"
-
-#: src/snes9x.ui:1895 src/snes9x.ui:1939
-msgid "Mouse"
-msgstr "Ratón"
-
-#: src/snes9x.ui:1905 src/snes9x.ui:1959
-msgid "Superscope"
-msgstr "Superscope"
-
-#: src/snes9x.ui:1920
-msgid "SNES Port 2"
-msgstr "Puerto SNES 2"
-
-#: src/snes9x.ui:1949
-msgid "Multitap"
-msgstr "Multitap"
-
-#: src/snes9x.ui:1970
-msgctxt "SNES port 2"
-msgid "None"
-msgstr "Nada"
 
 #: src/snes9x.ui:1996
 msgid "_Cheats…"
@@ -1034,14 +874,6 @@ msgstr "Mostrar teclas pulsadas"
 #: src/snes9x.ui:2857
 msgid "Show fast‑forward and pause indicators"
 msgstr "Mostrar indicadores de avance rápido y pausa"
-
-#: src/snes9x.ui:2872
-msgid "Use overscanned height"
-msgstr "Usar altura sobrescaneada"
-
-#: src/snes9x.ui:2876
-msgid "Use SNES extended height. Will probably cause letterboxing"
-msgstr "Usar altura extendida del SNES. Esto podría causar bordes negros"
 
 #: src/snes9x.ui:2898
 msgid "On‑screen display size:"
@@ -1605,14 +1437,6 @@ msgstr "Disminuir los cuadros por segundo"
 msgid "Pause"
 msgstr "Pausa"
 
-#: src/snes9x.ui:6891
-msgid "Toggle turbo"
-msgstr "Alternar turbo"
-
-#: src/snes9x.ui:6905
-msgid "Enable turbo"
-msgstr "Activar Turbo"
-
 #: src/snes9x.ui:6920
 msgid "Open ROM"
 msgstr "Abrir ROM"
@@ -1676,14 +1500,6 @@ msgstr "Incrementar Posición"
 #: src/snes9x.ui:7641
 msgid "Decrement slot"
 msgstr "Disminuir Posición"
-
-#: src/snes9x.ui:7685
-msgid "<b>Quick save state</b>"
-msgstr "<b>Guardar Partida Rápida</b>"
-
-#: src/snes9x.ui:7700
-msgid "<b>Quick load state</b>"
-msgstr "<b>Cargar Partida Rápida</b>"
 
 #: src/snes9x.ui:7715 src/snes9x.ui:7855
 msgid "Slot 0"
@@ -1832,1120 +1648,6 @@ msgstr "<b>Protector de pantalla</b>"
 #: src/snes9x.ui:9310
 msgid "UI"
 msgstr "IU"
-
-#: src/snes9x.ui:9344
-msgid ""
-"  Snes9x – A Portable Super Nintendo Entertainment System™ Emulator\n"
-"\n"
-"  Snes9x homepage: http://www.snes9x.com/\n"
-"  SuperSnes9x source code: https://github.com/shanytc/snes9x/\n"
-"\n"
-"  Permission to use, copy, modify and/or distribute Snes9x in both binary\n"
-"  and source form, for non‑commercial purposes, is hereby granted without\n"
-"  fee, providing that this license information and copyright notice appear\n"
-"  with all copies and any derived work.\n"
-"\n"
-"  This software is provided ‘as‑is’, without any express or implied\n"
-"  warranty. In no event shall the authors be held liable for any damages\n"
-"  arising from the use of this software or it’s derivatives.\n"
-"\n"
-"  Snes9x is freeware for PERSONAL USE only. Commercial users should\n"
-"  seek permission of the copyright holders first. Commercial use includes,\n"
-"  but is not limited to, charging money for Snes9x or software derived from\n"
-"  Snes9x, including Snes9x or derivatives in commercial game bundles, and/"
-"or\n"
-"  using Snes9x as a promotion for your commercial product.\n"
-"\n"
-"  The copyright holders request that bug fixes and improvements to the code\n"
-"  should be forwarded to them so everyone can benefit from the "
-"modifications\n"
-"  in future versions.\n"
-"\n"
-"  Super NES and Super Nintendo Entertainment System are trademarks of\n"
-"  Nintendo Co., Limited and its subsidiary companies."
-msgstr ""
-"  SuperSnes9x - Emulador portátil de Super Nintendo Entertainment System™ .\n"
-"\n"
-"  Página principal de Snes9x: http://www.snes9x.com/\n"
-"  Código fuente de SuperSnes9x: https://github.com/shanytc/snes9x/\n"
-"\n"
-"  Se concede permiso para usar, copiar, modificar y/o distribuir SuperSnes9x "
-"tanto\n"
-"  en forma binaria como en forma de código fuente, con fines no "
-"comerciales,\n"
-"  sin costo alguno, siempre que esta información de licencia y el aviso de\n"
-"  derechos de autor aparezcan con todas las copias y cualquier trabajo "
-"derivado.\n"
-"\n"
-"  Este software se proporciona «tal cual», sin ningún tipo expreso o "
-"implícito de\n"
-"  garantía. En ningún caso los autores serán responsables por daños y "
-"perjuicios\n"
-"  derivado del uso de este software o sus derivados.\n"
-"\n"
-"  SuperSnes9x es freeware para uso solamente PERSONAL.\n"
-"  Los usuarios comerciales deben buscar el permiso de los titulares de\n"
-"  derechos de autor primero. El uso comercial incluye, pero no se limita a,\n"
-"  cobrar dinero por SuperSnes9x o software derivado de SuperSnes9x,\n"
-"  incluidos SuperSnes9x o derivados en paquetes de juegos comerciales, y/o\n"
-"  utilizando SuperSnes9x como promoción para su producto comercial.\n"
-"\n"
-"  Los titulares de los derechos de autor solicitan que las correciones de "
-"errores\n"
-"  y mejoras al código deban ser enviadas a ellos para que todos\n"
-"  puedan beneficiarse de las modificaciones en futuras versiones.\n"
-"\n"
-"  Super NES y Super Nintendo Entertainment System son marcas comerciales de\n"
-"  Nintendo Co., Limited y sus filiales."
-
-#~ msgid "label106"
-#~ msgstr "etiqueta106"
-
-#~ msgid "Game Genie"
-#~ msgstr "Game Genie"
-
-#~ msgid "Pro Action Replay"
-#~ msgstr "Pro Action Replay"
-
-#~ msgid "Goldfinger"
-#~ msgstr "Goldfinger"
-
-#~ msgid "SuperEagle"
-#~ msgstr "SuperEagle"
-
-#~ msgid "2xSaI"
-#~ msgstr "2xSai"
-
-#~ msgid "Super2xSaI"
-#~ msgstr "Super2xSai"
-
-#~ msgid "EPX"
-#~ msgstr "EPX"
-
-#~ msgid "EPX Smooth"
-#~ msgstr "EPX Suave"
-
-#~ msgid "Blargg's NTSC"
-#~ msgstr "NTSC de Blargg"
-
-#~ msgid "Scanlines"
-#~ msgstr "Líneas de escaneado"
-
-#~ msgid "Simple2x"
-#~ msgstr "Simple 2x"
-
-#~ msgid "Simple3x"
-#~ msgstr "Simple 3x"
-
-#~ msgid "Simple4x"
-#~ msgstr "Simple 4x"
-
-#~ msgid "48000 hz"
-#~ msgstr "48.000 hz"
-
-#~ msgid "44100 hz"
-#~ msgstr "44.100 hz"
-
-#~ msgid "32000 hz"
-#~ msgstr "32.000 hz"
-
-#~ msgid "22050 hz"
-#~ msgstr "22.050 hz"
-
-#~ msgid "16000 hz"
-#~ msgstr "16.000 hz"
-
-#~ msgid "11025 hz"
-#~ msgstr "11.025 hz"
-
-#~ msgid "8000 hz"
-#~ msgstr "8.000 hz"
-
-#~ msgid "0 hz"
-#~ msgstr "0 hz"
-
-#~ msgid "Save SPC..."
-#~ msgstr "Guardar SPC..."
-
-#~ msgid "_Quit"
-#~ msgstr "_Salir"
-
-#~ msgid "Load _Movie..."
-#~ msgstr "Cargar _vídeo..."
-
-#~ msgid "_1x"
-#~ msgstr "_1x"
-
-#~ msgid "_2x"
-#~ msgstr "_2x"
-
-#~ msgid "_3x"
-#~ msgstr "_3x"
-
-#~ msgid "_4x"
-#~ msgstr "_4x"
-
-#~ msgid "_5x"
-#~ msgstr "_5x"
-
-#~ msgid "_6x"
-#~ msgstr "_6x"
-
-#~ msgid "_7x"
-#~ msgstr "_7x"
-
-#~ msgid "_8x"
-#~ msgstr "_8x"
-
-#~ msgid "_9x"
-#~ msgstr "_9x"
-
-#~ msgid "1_0x"
-#~ msgstr "1_0x"
-
-#~ msgid "_Cheats..."
-#~ msgstr "_Trucos..."
-
-#~ msgid "_Shader Parameters..."
-#~ msgstr "Parametro_s de Shaders..."
-
-#~ msgid "label"
-#~ msgstr "etiqueta"
-
-#~ msgid "BG layering hack"
-#~ msgstr "Hack de capas de fondo"
-
-#, c-format
-#~ msgid "Keyboard %s%s%s%s"
-#~ msgstr "Teclado %s%s%s%s"
-
-#, c-format
-#~ msgid "Axis %u %s %u%%"
-#~ msgstr "Eje %u %s %u%%"
-
-#~ msgid "HQ2x"
-#~ msgstr "HQ 2x"
-
-#~ msgid "HQ3x"
-#~ msgstr "HQ 3x"
-
-#~ msgid "HQ4x"
-#~ msgstr "HQ 4x"
-
-#~ msgid "2xBRZ"
-#~ msgstr "2x BRZ"
-
-#~ msgid "3xBRZ"
-#~ msgstr "3x BRZ"
-
-#~ msgid "4xBRZ"
-#~ msgstr "4x BRZ"
-
-#~ msgid "PortAudio"
-#~ msgstr "Port Audio"
-
-#~ msgid "Open Sound System"
-#~ msgstr "Open Sound System"
-
-#~ msgid "SDL"
-#~ msgstr "SDL"
-
-#~ msgid "ALSA"
-#~ msgstr "ALSA"
-
-#~ msgid "PulseAudio"
-#~ msgstr "PulseAudio"
-
-#, c-format
-#~ msgid "Error opening: %s\n"
-#~ msgstr "Error abriendo: %s\n"
-
-#, c-format
-#~ msgid "Couldn't load file '%s'"
-#~ msgstr "No se pudo cargar el archivo «%s»"
-
-#~ msgid "SPC Files"
-#~ msgstr "Archivos SPC"
-
-#~ msgid "Reduce input lag with sync control"
-#~ msgstr "Reducir la latencia de entrada (input lag) con sync_control"
-
-#~ msgid ""
-#~ "More modern method for syncing the program with the video output to "
-#~ "reduce input latency. Allows GUI events to occur in the meantime"
-#~ msgstr ""
-#~ "Método mas moderno para sincronizar el programa con la salida de vídeo después de cada cuadro "
-#~ "mostrado para reducir la latencia de entrada, pero permite que ocurran "
-#~ "eventos de GUI mientras tanto"
-
-#~ msgid "Allow non-power-of-two textures"
-#~ msgstr "Permitir texturas que no sean múltiplos de dos"
-
-#~ msgid "Prevents edge artifacts, but can slow performance"
-#~ msgstr ""
-#~ "Previene artefactos en los bordes, pero puede disminuir el rendimiento"
-
-#~ msgid "Use pixel-buffer objects"
-#~ msgstr "Usar objetos del búfer de píxeles"
-
-#~ msgid "Can be faster or slower depending on drivers"
-#~ msgstr "Puede ser más rápido o más lento dependiendo de los controladores"
-
-#~ msgid "Different formats can yield highly different performance"
-#~ msgstr "Diferentes formatos pueden producir rendimientos muy diferentes"
-
-#~ msgid "Pixel-buffer format:"
-#~ msgstr "Formato del búfer de píxeles:"
-
-#~ msgid "GLSL Shader Parameters"
-#~ msgstr "Parámetros de Shader GLSL"
-
-#~ msgid "Speed throttle:"
-#~ msgstr "Limitador de velocidad:"
-
-#~ msgid "Overclock S-CPU hack (dangerous)"
-#~ msgstr "Hack para overclockear el S-CPU (peligroso)"
-
-#~ msgid "Reduce slowdown at severe accuracy cost"
-#~ msgstr "Reducir la lentitud a cambio de un severo costo de precisión"
-
-#~ msgid "Will break games relying on proper behavior"
-#~ msgstr "Romperá juegos que dependen de un comportamiento apropiado"
-
-#~ msgid "<b>Accuracy</b>"
-#~ msgstr "<b>Precisión</b>"
-
-#~ msgid "<b>Window Switching</b>"
-#~ msgstr "<b>Intercambio de ventanas</b>"
-
-#~ msgid "%sHosting NetPlay - %s"
-#~ msgstr "%sAnfitrión del juego en red - %s"
-
-#~ msgid "Paused - "
-#~ msgstr "Pausado - "
-
-#~ msgid "%s%s on NetPlay %s:%d - Player %d"
-#~ msgstr "%s%s en juego en red %s:%d - Jugador %d"
-
-#~ msgid "_Hide Menu"
-#~ msgstr "_Ocultar menú"
-
-#~ msgid "_Status Bar"
-#~ msgstr "_Barra de estado"
-
-#~ msgid "<b>Image Adjustments</b>"
-#~ msgstr "<b>Ajustes de imagen</b>"
-
-#~ msgid "<b>NTSC Filter</b>"
-#~ msgstr "<b>Filtro NTSC</b>"
-
-#~ msgid "<b>Scanline Filter</b>"
-#~ msgstr "<b>Filtro de líneas de escaneado</b>"
-
-#~ msgid "Stereo"
-#~ msgstr "Estéreo"
-
-#~ msgid "Output two channels, left and right"
-#~ msgstr "Salida con dos canales, izquierda y derecha"
-
-#~ msgid "32000 hz (SNES Default)"
-#~ msgstr "32.000 hz (predeterminado de SNES)"
-
-#~ msgid "Automatic"
-#~ msgstr "Automático"
-
-#~ msgid "0"
-#~ msgstr "0"
-
-#~ msgid "6"
-#~ msgstr "6"
-
-#~ msgid "7"
-#~ msgstr "7"
-
-#~ msgid "8"
-#~ msgstr "8"
-
-#~ msgid "9"
-#~ msgstr "9"
-
-#~ msgid "16-bit (GL_BGRA)"
-#~ msgstr "16 bits (GL_BGRA)"
-
-#~ msgid "Synchronize with sound"
-#~ msgstr "Sincronizar con el sonido"
-
-#~ msgid "Base emulation speed on the rate sound is output"
-#~ msgstr ""
-#~ "La velocidad base de emulación se basa en la tasa de sonido que se emite"
-
-#~ msgid "Frameskip:"
-#~ msgstr "Salto de cuadro:"
-
-#~ msgid ""
-#~ "  Snes9x - Portable Super Nintendo Entertainment System (TM) emulator.\n"
-#~ "\n"
-#~ "  (c) Copyright 1996 - 2002  Gary Henderson "
-#~ "(gary.henderson@ntlworld.com),\n"
-#~ "                             Jerremy Koot (jkoot@snes9x.com)\n"
-#~ "\n"
-#~ "  (c) Copyright 2002 - 2004  Matthew Kendora\n"
-#~ "\n"
-#~ "  (c) Copyright 2002 - 2005  Peter Bortas (peter@bortas.org)\n"
-#~ "\n"
-#~ "  (c) Copyright 2004 - 2005  Joel Yliluoma (http://iki.fi/bisqwit/)\n"
-#~ "\n"
-#~ "  (c) Copyright 2001 - 2006  John Weidman (jweidman@slip.net)\n"
-#~ "\n"
-#~ "  (c) Copyright 2002 - 2006  funkyass (funkyass@spam.shaw.ca),\n"
-#~ "                             Kris Bleakley (codeviolation@hotmail.com)\n"
-#~ "\n"
-#~ "  (c) Copyright 2002 - 2010  Brad Jorsch (anomie@users.sourceforge.net),\n"
-#~ "                             Nach (n-a-c-h@users.sourceforge.net),\n"
-#~ "\n"
-#~ "  (c) Copyright 2002 - 2011  zones (kasumitokoduck@yahoo.com)\n"
-#~ "\n"
-#~ "  (c) Copyright 2006 - 2007  nitsuja\n"
-#~ "\n"
-#~ "  (c) Copyright 2009 - 2018  BearOso,\n"
-#~ "                             OV2\n"
-#~ "\n"
-#~ "  (c) Copyright 2017         qwertymodo\n"
-#~ "\n"
-#~ "  (c) Copyright 2011 - 2017  Hans-Kristian Arntzen,\n"
-#~ "                             Daniel De Matteis\n"
-#~ "                             (Under no circumstances will commercial "
-#~ "rights be given)\n"
-#~ "\n"
-#~ "\n"
-#~ "  BS-X C emulator code\n"
-#~ "  (c) Copyright 2005 - 2006  Dreamer Nom,\n"
-#~ "                             zones\n"
-#~ "\n"
-#~ "  C4 x86 assembler and some C emulation code\n"
-#~ "  (c) Copyright 2000 - 2003  _Demo_ (_demo_@zsnes.com),\n"
-#~ "                             Nach,\n"
-#~ "                             zsKnight (zsknight@zsnes.com)\n"
-#~ "\n"
-#~ "  C4 C++ code\n"
-#~ "  (c) Copyright 2003 - 2006  Brad Jorsch,\n"
-#~ "                             Nach\n"
-#~ "\n"
-#~ "  DSP-1 emulator code\n"
-#~ "  (c) Copyright 1998 - 2006  _Demo_,\n"
-#~ "                             Andreas Naive (andreasnaive@gmail.com),\n"
-#~ "                             Gary Henderson,\n"
-#~ "                             Ivar (ivar@snes9x.com),\n"
-#~ "                             John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Matthew Kendora,\n"
-#~ "                             Nach,\n"
-#~ "                             neviksti (neviksti@hotmail.com)\n"
-#~ "\n"
-#~ "  DSP-2 emulator code\n"
-#~ "  (c) Copyright 2003         John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Lord Nightmare "
-#~ "(lord_nightmare@users.sourceforge.net),\n"
-#~ "                             Matthew Kendora,\n"
-#~ "                             neviksti\n"
-#~ "\n"
-#~ "  DSP-3 emulator code\n"
-#~ "  (c) Copyright 2003 - 2006  John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Lancer,\n"
-#~ "                             z80 gaiden\n"
-#~ "\n"
-#~ "  DSP-4 emulator code\n"
-#~ "  (c) Copyright 2004 - 2006  Dreamer Nom,\n"
-#~ "                             John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Nach,\n"
-#~ "                             z80 gaiden\n"
-#~ "\n"
-#~ "  OBC1 emulator code\n"
-#~ "  (c) Copyright 2001 - 2004  zsKnight,\n"
-#~ "                             pagefault (pagefault@zsnes.com),\n"
-#~ "                             Kris Bleakley\n"
-#~ "                             Ported from x86 assembler to C by "
-#~ "sanmaiwashi\n"
-#~ "\n"
-#~ "  SPC7110 and RTC C++ emulator code used in 1.39-1.51\n"
-#~ "  (c) Copyright 2002         Matthew Kendora with research by\n"
-#~ "                             zsKnight,\n"
-#~ "                             John Weidman,\n"
-#~ "                             Dark Force\n"
-#~ "\n"
-#~ "  SPC7110 and RTC C++ emulator code used in 1.52+\n"
-#~ "  (c) Copyright 2009         byuu,\n"
-#~ "                             neviksti\n"
-#~ "\n"
-#~ "  S-DD1 C emulator code\n"
-#~ "  (c) Copyright 2003         Brad Jorsch with research by\n"
-#~ "                             Andreas Naive,\n"
-#~ "                             John Weidman\n"
-#~ "\n"
-#~ "  S-RTC C emulator code\n"
-#~ "  (c) Copyright 2001 - 2006  byuu,\n"
-#~ "                             John Weidman\n"
-#~ "\n"
-#~ "  ST010 C++ emulator code\n"
-#~ "  (c) Copyright 2003         Feather,\n"
-#~ "                             John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Matthew Kendora\n"
-#~ "\n"
-#~ "  Super FX x86 assembler emulator code\n"
-#~ "  (c) Copyright 1998 - 2003  _Demo_,\n"
-#~ "                             pagefault,\n"
-#~ "                             zsKnight\n"
-#~ "\n"
-#~ "  Super FX C emulator code\n"
-#~ "  (c) Copyright 1997 - 1999  Ivar,\n"
-#~ "                             Gary Henderson,\n"
-#~ "                             John Weidman\n"
-#~ "\n"
-#~ "  Sound emulator code used in 1.5-1.51\n"
-#~ "  (c) Copyright 1998 - 2003  Brad Martin\n"
-#~ "  (c) Copyright 1998 - 2006  Charles Bilyue'\n"
-#~ "\n"
-#~ "  Sound emulator code used in 1.52+\n"
-#~ "  (c) Copyright 2004 - 2007  Shay Green (gblargg@gmail.com)\n"
-#~ "\n"
-#~ "  S-SMP emulator code used in 1.54+\n"
-#~ "  (c) Copyright 2016         byuu\n"
-#~ "\n"
-#~ "  SH assembler code partly based on x86 assembler code\n"
-#~ "  (c) Copyright 2002 - 2004  Marcus Comstedt (marcus@mc.pp.se)\n"
-#~ "\n"
-#~ "  2xSaI filter\n"
-#~ "  (c) Copyright 1999 - 2001  Derek Liauw Kie Fa\n"
-#~ "\n"
-#~ "  HQ2x, HQ3x, HQ4x filters\n"
-#~ "  (c) Copyright 2003         Maxim Stepin (maxim@hiend3d.com)\n"
-#~ "\n"
-#~ "  NTSC filter\n"
-#~ "  (c) Copyright 2006 - 2007  Shay Green\n"
-#~ "\n"
-#~ "  GTK+ GUI code\n"
-#~ "  (c) Copyright 2004 - 2018  BearOso\n"
-#~ "\n"
-#~ "  Win32 GUI code\n"
-#~ "  (c) Copyright 2003 - 2006  blip,\n"
-#~ "                             funkyass,\n"
-#~ "                             Matthew Kendora,\n"
-#~ "                             Nach,\n"
-#~ "                             nitsuja\n"
-#~ "  (c) Copyright 2009 - 2018  OV2\n"
-#~ "\n"
-#~ "  Mac OS GUI code\n"
-#~ "  (c) Copyright 1998 - 2001  John Stiles\n"
-#~ "  (c) Copyright 2001 - 2011  zones\n"
-#~ "  Libretro port\n"
-#~ "  (c) Copyright 2011 - 2017  Hans-Kristian Arntzen,\n"
-#~ "                             Daniel De Matteis\n"
-#~ "                             (Under no circumstances will commercial "
-#~ "rights be given)\n"
-#~ "\n"
-#~ "\n"
-#~ "  Specific ports contains the works of other authors. See headers in\n"
-#~ "  individual files.\n"
-#~ "\n"
-#~ "\n"
-#~ "  Snes9x homepage: http://www.snes9x.com/\n"
-#~ "\n"
-#~ "  Permission to use, copy, modify and/or distribute Snes9x in both "
-#~ "binary\n"
-#~ "  and source form, for non-commercial purposes, is hereby granted "
-#~ "without\n"
-#~ "  fee, providing that this license information and copyright notice "
-#~ "appear\n"
-#~ "  with all copies and any derived work.\n"
-#~ "\n"
-#~ "  This software is provided 'as-is', without any express or implied\n"
-#~ "  warranty. In no event shall the authors be held liable for any damages\n"
-#~ "  arising from the use of this software or it's derivatives.\n"
-#~ "\n"
-#~ "  Snes9x is freeware for PERSONAL USE only. Commercial users should\n"
-#~ "  seek permission of the copyright holders first. Commercial use "
-#~ "includes,\n"
-#~ "  but is not limited to, charging money for Snes9x or software derived "
-#~ "from\n"
-#~ "  Snes9x, including Snes9x or derivatives in commercial game bundles, and/"
-#~ "or\n"
-#~ "  using Snes9x as a promotion for your commercial product.\n"
-#~ "\n"
-#~ "  The copyright holders request that bug fixes and improvements to the "
-#~ "code\n"
-#~ "  should be forwarded to them so everyone can benefit from the "
-#~ "modifications\n"
-#~ "  in future versions.\n"
-#~ "\n"
-#~ "  Super NES and Super Nintendo Entertainment System are trademarks of\n"
-#~ "  Nintendo Co., Limited and its subsidiary companies."
-#~ msgstr ""
-#~ "Snes9x - Emulador portable de Super Nintendo Entertainment System (TM).\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 1996-2002 Gary Henderson "
-#~ "(gary.henderson@ntlworld.com),\n"
-#~ "                             Jerremy Koot (jkoot@snes9x.com)\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2002-2004 Matthew Kendora\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2002-2005 Peter Bortas (peter@bortas.org)\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2004-2005 Joel Yliluoma (http://iki.fi/bisqwit/)\n"
-#~ "\n"
-#~ "  (C) Copyright 2001 - Juan 2006 Weidman (jweidman@slip.net)\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2002-2006 funkyass (funkyass@spam.shaw.ca),\n"
-#~ "                             Kris Bleakley (codeviolation@hotmail.com)\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2002-2010 Brad Jorsch "
-#~ "(anomie@users.sourceforge.net),\n"
-#~ "                             Nach (n-a-c-h@users.sourceforge.net),\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2002-2011 zones (kasumitokoduck@yahoo.com)\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2006-2007 nitsuja\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2009-2016 BearOso,\n"
-#~ "                             OV2\n"
-#~ "\n"
-#~ "  (c) Derechos de autor 2017      qwertymodo\n"
-#~ "\n"
-#~ "  (C) Derechos de autor 2011-2017  Hans-Kristian Arntzen,\n"
-#~ "                             Daniel De Matteis\n"
-#~ "                       (Bajo ninguna circunstancia se darán derechos "
-#~ "comerciales)\n"
-#~ "\n"
-#~ "\n"
-#~ "  Código emulador de BS-X C\n"
-#~ "  (C) Derechos de autor 2005-2006 Dreamer Nom,\n"
-#~ "                             zones\n"
-#~ "\n"
-#~ "  Ensamblador C4 x86 y un código de emulación C\n"
-#~ "  (C) Derechos de autor 2000-2003 _Demo_ (_demo_@zsnes.com),\n"
-#~ "                             nach,\n"
-#~ "                             zsKnight (zsknight@zsnes.com)\n"
-#~ "\n"
-#~ "  Código C4 C ++\n"
-#~ "  (C) Derechos de autor 2003-2006 Brad Jorsch,\n"
-#~ "                             nach\n"
-#~ "\n"
-#~ "  Código emulador DSP-1\n"
-#~ "  (C) Derechos de autor 1998-2006 _Demo_,\n"
-#~ "                             Andreas Naive (andreasnaive@gmail.com),\n"
-#~ "                             Gary Henderson,\n"
-#~ "                             Ivar (ivar@snes9x.com),\n"
-#~ "                             John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Matthew Kendora,\n"
-#~ "                             nach,\n"
-#~ "                             neviksti (neviksti@hotmail.com)\n"
-#~ "\n"
-#~ "  Código emulador DSP-2\n"
-#~ "  (C) Derechos de autor 2003 John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Lord Nightmare "
-#~ "(lord_nightmare@users.sourceforge.net),\n"
-#~ "                             Matthew Kendora,\n"
-#~ "                             neviksti\n"
-#~ "\n"
-#~ "  Código emulador DSP-3\n"
-#~ "  (C) Derechos de autor 2003-2006 John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Lancer,\n"
-#~ "                             gaiden z80\n"
-#~ "\n"
-#~ "  Código emulador DSP-4\n"
-#~ "  (C) Derechos de autor 2004-2006 Dreamer Nom,\n"
-#~ "                             John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             nach,\n"
-#~ "                             gaiden z80\n"
-#~ "\n"
-#~ "  Emulador de código OBC1\n"
-#~ "  (C) Derechos de autor 2001-2004 zsKnight,\n"
-#~ "                             pagefault (pagefault@zsnes.com),\n"
-#~ "                             Kris Bleakley\n"
-#~ "                             Adaptado desde el ensamblador x86 a C por "
-#~ "sanmaiwashi\n"
-#~ "\n"
-#~ "  Código emulador SPC7110 y RTC C ++ utilizado en 1.39-1.51\n"
-#~ "  (C) Derechos de autor 2002 Matthew Kendora con la investigación por\n"
-#~ "                             zsKnight,\n"
-#~ "                             John Weidman,\n"
-#~ "                             Dark Force\n"
-#~ "\n"
-#~ "  Código emulador SPC7110 y RTC C ++ utilizado en 1.52+\n"
-#~ "  (C) Derechos de autor 2009 byuu,\n"
-#~ "                             neviksti\n"
-#~ "\n"
-#~ "  Código emulador S-DD1 C\n"
-#~ "  (C) Derechos de autor 2003 Brad Jorsch con la investigación por\n"
-#~ "                             Andreas Naive,\n"
-#~ "                             John Weidman\n"
-#~ "\n"
-#~ "  Código emulador S-RTC C\n"
-#~ "  (C) Derechos de autor 2001-2006 byuu,\n"
-#~ "                             John Weidman\n"
-#~ "\n"
-#~ "  Código emulador ST010 C ++\n"
-#~ "  (C) Derechos de autor 2003 Feather,\n"
-#~ "                             John Weidman,\n"
-#~ "                             Kris Bleakley,\n"
-#~ "                             Matthew Kendora\n"
-#~ "\n"
-#~ "  Código emulador de ensambladir Super FX x86\n"
-#~ "  (C) Derechos de autor 1998-2003 _Demo_,\n"
-#~ "                             pagefaulr,\n"
-#~ "                             zsKnight\n"
-#~ "\n"
-#~ "  Código de emulador Super FX C\n"
-#~ "  (C) Derechos de autor 1997-1999 Ivar,\n"
-#~ "                             Gary Henderson,\n"
-#~ "                             John Weidman\n"
-#~ "\n"
-#~ "  Código de emulador de sonido utilizado en 1,5-1,51\n"
-#~ "  (C) Derechos de autor 1998-2003 Brad Martin\n"
-#~ "  (C) Derechos de autor 1998-2006 Charles Bilyue'\n"
-#~ "\n"
-#~ "  Código de emulador de sonido utilizado en 1.52+\n"
-#~ "  (C) Derechos de autor 2004-2007 Shay Green (gblargg@gmail.com)\n"
-#~ "\n"
-#~ "  Código de emulador de S-SMP utilizado en 1.54+\n"
-#~ "  (C) Derechos de autor 2016      byuu\n"
-#~ "\n"
-#~ "  Código ensamblador SH en parte basado en el código ensamblador x86\n"
-#~ "  (C) Derechos de autor 2002-2004 Marcus Comstedt (marcus@mc.pp.se)\n"
-#~ "\n"
-#~ "  Filtro 2x SaI\n"
-#~ "  (C) Derechos de autor 1999-2001 Derek Liauw Kie Fa\n"
-#~ "\n"
-#~ "  Filtros HQ 2x, HQ 3x, HQ 4x\n"
-#~ "  (C) Derechos de autor 2003 Maxim Stepin (maxim@hiend3d.com)\n"
-#~ "\n"
-#~ "  Filtro NTSC\n"
-#~ "  (C) Derechos de autor 2006-2007 Shay Green\n"
-#~ "\n"
-#~ "  Código GUI GTK+\n"
-#~ "  (C) Derechos de autor 2004-2011 BearOso\n"
-#~ "\n"
-#~ "  Código de GUI Win32\n"
-#~ "  (C) Derechos de autor 2003-2006 blip,\n"
-#~ "                             funkyass,\n"
-#~ "                             Matthew Kendora,\n"
-#~ "                             nach,\n"
-#~ "                             nitsuja\n"
-#~ "  (C) Derechos de autor 2009-2011 OV2\n"
-#~ "\n"
-#~ "  Código de interfaz de Mac OS\n"
-#~ "  (C) Derechos de autor 1998-2001 John Stiles\n"
-#~ "  (C) Derechos de autor 2001-2011 zones\n"
-#~ "\n"
-#~ "  Puerto Libretro\n"
-#~ "  (C) Derechos de autor 2011-2017  Hans-Kristian Arntzen,\n"
-#~ "                             Daniel De Matteis\n"
-#~ "                       (Bajo ninguna circunstancia se darán derechos "
-#~ "comerciales)\n"
-#~ "\n"
-#~ "  Adaptaciones específicas contienen el trabajo de otros autores. Véase "
-#~ "las cabeceras de\n"
-#~ "  los archivos individuales.\n"
-#~ "\n"
-#~ "\n"
-#~ "  Página de inicio de Snes9x: http://www.snes9x.com/\n"
-#~ "\n"
-#~ "  El permiso para usar, copiar, modificar y o distribuir Snes9x tanto en "
-#~ "binario\n"
-#~ "  y en código fuente, con fines no comerciales, Con la presente se es "
-#~ "otorgado\n"
-#~ "  sin pago, siempre que esta información de licencia y aviso de derechos "
-#~ "de\n"
-#~ "  autor se distribuya con todas las copias y cualquier obra derivada.\n"
-#~ "\n"
-#~ "  Este software se proporciona «tal cual», sin ningún tipo expreso o "
-#~ "implícito\n"
-#~ "  de garantía. En ningún caso podrán ser declarados responsables los "
-#~ "autores\n"
-#~ "  de los daños derivados de la utilización de este software o sus "
-#~ "derivados.\n"
-#~ "\n"
-#~ "  Snes9x es gratuito para uso PERSONAL. Los usuarios comerciales deben\n"
-#~ "  solicitar el permiso a los propietarios de los derechis de autir en "
-#~ "primer\n"
-#~ "  lugar. El uso comercial incluye, pero no se limita a, la carga de "
-#~ "dinero\n"
-#~ "  para Snes9x o software derivado de Snes9x, incluyendo Snes9x o\n"
-#~ "  derivados en conjuntos de juegos comerciales y o utilizar Snes9x como\n"
-#~ "  una promoción para su producto comercial.\n"
-#~ "\n"
-#~ "  Los titulares de los derechos de autor solicitan que las correcciones "
-#~ "de errores\n"
-#~ "  y mejoras al código deban ser enviardas a ellos para que todos puedan\n"
-#~ "  beneficiarse de estas en futuras versiones.\n"
-#~ "\n"
-#~ "  Super Nintendo Entertainment System y Super NES son marcas comerciales "
-#~ "de\n"
-#~ "  Nintendo Co., Limitada y sus empresas filiales."
-
-#~ msgid "Rotate all axes to their maximum values, then press OK"
-#~ msgstr ""
-#~ "Ruede todos los ejes hasta su máximo valor, entonces presione OK/Aceptar"
-
-#~ msgid ""
-#~ "\n"
-#~ "Features enabled:<i>"
-#~ msgstr ""
-#~ "\n"
-#~ "Características habilitadas:<i>"
-
-#~ msgid " OpenGL"
-#~ msgstr " OpenGL"
-
-#~ msgid " XVideo"
-#~ msgstr " Vídeo X"
-
-#~ msgid " XRandR"
-#~ msgstr " XRandR"
-
-#~ msgid " Joystick"
-#~ msgstr " Mando"
-
-#~ msgid " NetPlay"
-#~ msgstr " Juego en red"
-
-#~ msgid "Alsa"
-#~ msgstr "Alsa"
-
-#~ msgid " - Saved"
-#~ msgstr " - Guardado"
-
-#~ msgid "Version Info"
-#~ msgstr "Informción de la version"
-
-#~ msgid "gtk-add"
-#~ msgstr "Añadir"
-
-#~ msgid "gtk-cancel"
-#~ msgstr "Cancelar"
-
-#~ msgid "gtk-close"
-#~ msgstr "Cerrar"
-
-#~ msgid "gtk-connect"
-#~ msgstr "Conectar"
-
-#~ msgid "gtk-ok"
-#~ msgstr "Aceptar"
-
-#~ msgid "gtk-remove"
-#~ msgstr "Eliminar"
-
-#~ msgid "saved"
-#~ msgstr "guardado"
-
-#~ msgid "loaded"
-#~ msgstr "cargado"
-
-#~ msgid "Mbits"
-#~ msgstr " Mbits"
-
-#~ msgid "Kbits"
-#~ msgstr " kbts"
-
-#~ msgid "Super NES Emulator"
-#~ msgstr "Emulador de Super NES"
-
-#~ msgid "Tab"
-#~ msgstr "Tab"
-
-#~ msgid "snes9x"
-#~ msgstr "Snes9x"
-
-#~ msgid "HiROM"
-#~ msgstr "HiROM"
-
-#~ msgid "LoROM"
-#~ msgstr "LoROM"
-
-#~ msgid "bad option name: %s\n"
-#~ msgstr "Opción incorrecta: %s\n"
-
-#~ msgid "failure to read snes9x node"
-#~ msgstr "Falla al leer nodo de snes9x"
-
-#~ msgid "Couldn't open config file: %s\n"
-#~ msgstr "Imposible abrir archivo de configuración: %s\n"
-
-#~ msgid "pixel_buffer_object extension not supported.\n"
-#~ msgstr "pixel_bufer_object extensión no soportada.\n"
-
-#~ msgid " Only barebones features enabled<i>"
-#~ msgstr " Solo características mínimas activas<i>"
-
-#~ msgid ""
-#~ "0%\n"
-#~ "12.5%\n"
-#~ "25%\n"
-#~ "50%\n"
-#~ "100%"
-#~ msgstr ""
-#~ "0%\n"
-#~ "12.5%\n"
-#~ "25%\n"
-#~ "50%\n"
-#~ "100%"
-
-#~ msgid ""
-#~ "1\n"
-#~ "2\n"
-#~ "3\n"
-#~ "4\n"
-#~ "5\n"
-#~ "6\n"
-#~ "7\n"
-#~ "8"
-#~ msgstr ""
-#~ "1\n"
-#~ "2\n"
-#~ "3\n"
-#~ "4\n"
-#~ "5\n"
-#~ "6\n"
-#~ "7\n"
-#~ "8"
-
-#~ msgid ""
-#~ "12.5%\n"
-#~ "25%\n"
-#~ "50%\n"
-#~ "100%"
-#~ msgstr ""
-#~ "12.5%\n"
-#~ "25%\n"
-#~ "50%\n"
-#~ "100%"
-
-#~ msgid "16 Bit audio output"
-#~ msgstr "16 Bits"
-
-#~ msgid ""
-#~ "16-bit (GL_BGRA)\n"
-#~ "24-bit (GL_RGB)\n"
-#~ "32-bit (GL_BGRA)"
-#~ msgstr ""
-#~ "16bit (GL_BGRA)\n"
-#~ "24-bit (GL_RGB)\n"
-#~ "32-bit (GL_BGRA)"
-
-#~ msgid ""
-#~ "48000 hz\n"
-#~ "44100 hz\n"
-#~ "32000 hz (SNES Default)\n"
-#~ "22050 hz\n"
-#~ "16000 hz\n"
-#~ "11025 hz\n"
-#~ "8000 hz\n"
-#~ "0 hz"
-#~ msgstr ""
-#~ "48000 hz\n"
-#~ "44100 hz\n"
-#~ "32000 hz (Real del SNES)\n"
-#~ "22050 hz\n"
-#~ "16000 hz\n"
-#~ "11025 hz\n"
-#~ "8000 hz\n"
-#~ "0 hz"
-
-#~ msgid ""
-#~ "8:7 Square pixels\n"
-#~ "4:3 SNES correct aspect"
-#~ msgstr ""
-#~ "8:7 Píxeles cuadrados\n"
-#~ "4:3 Corrección de aspecto"
-
-#~ msgid "<b>Game Data</b>"
-#~ msgstr "<b>Datos del juego</b>"
-
-#~ msgid "Allow emulation of SNES echo effects"
-#~ msgstr "Permitir emulación de efectos eco del SNES"
-
-#~ msgid ""
-#~ "Allows games to use transparency effects. Recommended for correct graphics"
-#~ msgstr ""
-#~ "Permitir efectos de transparencia en los juegos. Recomendado para tener"
-#~ "gráficos correctos"
-
-#~ msgid "Artifacts"
-#~ msgstr "Artefactos"
-
-#~ msgid ""
-#~ "Automatic\n"
-#~ "0\n"
-#~ "1\n"
-#~ "2\n"
-#~ "3\n"
-#~ "4\n"
-#~ "5\n"
-#~ "6\n"
-#~ "7\n"
-#~ "8\n"
-#~ "9"
-#~ msgstr ""
-#~ "Automatico\n"
-#~ "0\n"
-#~ "1\n"
-#~ "2\n"
-#~ "3\n"
-#~ "4\n"
-#~ "5\n"
-#~ "6\n"
-#~ "7\n"
-#~ "8\n"
-#~ "9"
-
-#~ msgid ""
-#~ "Composite\n"
-#~ "S-Video\n"
-#~ "RGB"
-#~ msgstr ""
-#~ "Compuesto\n"
-#~ "S-Video\n"
-#~ "RGB"
-
-#~ msgid "Correct Aspect"
-#~ msgstr "Aspecto correcto"
-
-#~ msgid "Custom folder:"
-#~ msgstr "Carpeta Especificada : "
-
-#~ msgid ""
-#~ "Detects frames that are not output by Snes9x in hires, and scales them"
-#~ msgstr ""
-#~ "Detecta cuadros que no son mostrados en snes9x en hires, y los "
-#~ "ajusta"
-
-#~ msgid "Echo effects"
-#~ msgstr "Efectos de eco"
-
-#~ msgid "Enable HDMA"
-#~ msgstr "Activar HDMA"
-
-#~ msgid "Enable HDMA. Required feature for compatibility with some games"
-#~ msgstr "Activar HDMA. Requerido para compatibilidad con algunos juegos"
-
-#~ msgid "Enable hacks that may improve performance, but can cause errors"
-#~ msgstr ""
-#~ "Activar hacks puede aumentar el rendimiento, pero puede causar errores"
-
-#~ msgid "Enable speed hacks"
-#~ msgstr "Activar hacks de velocidad"
-
-#~ msgid "Enable transparency"
-#~ msgstr "Activar transparencia"
-
-#~ msgid "Exact Pixels"
-#~ msgstr "Pixeles exactos"
-
-#~ msgid "Force SNES-hires output"
-#~ msgstr "Forzar salida de hires"
-
-#~ msgid ""
-#~ "Game Genie\n"
-#~ "Pro Action Replay\n"
-#~ "Goldfinger"
-#~ msgstr ""
-#~ "Game genie\n"
-#~ "Pro Action replay\n"
-#~ "Goldfinger"
-
-#~ msgid "Gaussian interpolation"
-#~ msgstr "Interpolacion gaussian"
-
-#~ msgid ""
-#~ "Interpolates between samples. Smoothes the sound output to match the real "
-#~ "SNES"
-#~ msgstr ""
-#~ "Interpolar entre muestras. Suaviza el sonido para igualar al SNES Real"
-
-#~ msgid "Maintain aspect-ratio:"
-#~ msgstr "Mantener proporción de aspecto :"
-
-#~ msgid ""
-#~ "None\n"
-#~ "SuperEagle\n"
-#~ "2xSaI\n"
-#~ "Super2xSaI\n"
-#~ "hq2x\n"
-#~ "hq3x\n"
-#~ "hq4x\n"
-#~ "EPX\n"
-#~ "Blargg's NTSC\n"
-#~ "Scanlines"
-#~ msgstr ""
-#~ "None\n"
-#~ "SuperEagle\n"
-#~ "2xSaI\n"
-#~ "Super2xSaI\n"
-#~ "hq2x\n"
-#~ "hq3x\n"
-#~ "hq4x\n"
-#~ "EPX\n"
-#~ "Blargg's NTSC\n"
-#~ "Scanlines"
-
-#~ msgid "Outputs at 16 bits per sample instead of 8 bits. More accurate sound"
-#~ msgstr ""
-#~ "Salida a 16 bits por muestra en lugar de 8 bits. Precisa mejor el sonido"
-
-#~ msgid "ROM folder"
-#~ msgstr "Carpeta de ROMs"
-
-#~ msgid "Reverse stereo"
-#~ msgstr "Invertir estéreo"
-
-#~ msgid "Save data in:"
-#~ msgstr "Guardar datos en: "
-
-#~ msgid "Smoothens (blurs) the image"
-#~ msgstr "Suaviza (borrosa) la imagen "
-
-#~ msgid "Snes9x configuration folder"
-#~ msgstr "Carpeta de configuración del snes9x"
-
-#~ msgid "Store data in $HOME/.snes9x/sram"
-#~ msgstr "Guardar datos en $HOME/.snes9x/sram"
-
-#~ msgid "Store data in the same folder as the ROM file used"
-#~ msgstr "Guardar datos en la misma carpeta del ROM usado"
-
-#~ msgid "Swap the left and right sound channels"
-#~ msgstr "Intercambiar el derecho e izquierdo de los canales de sonido"
-
-#~ msgid "Toggle sound interpolation"
-#~ msgstr "Alternar interpolación de sonido"
-
-#~ msgid ""
-#~ "Toggle the menu bar\n"
-#~ "Exit fullscreen mode\n"
-#~ "Quit Snes9x"
-#~ msgstr ""
-#~ "Alternar barra de menu\n"
-#~ "Salir de pantalla completa\n"
-#~ "Salir de Snes9x"
-
-#~ msgid "Type:"
-#~ msgstr "Tipo:"
-
-#~ msgid "Volume envelope height reading"
-#~ msgstr "Envoltura de volumen en lectura de altura"
-
-#~ msgid "_Open ROM..."
-#~ msgstr "_Abrir ROM..."
-
-# === Win32 strings (added by i18n/extract_strings.py) ===
 
 #: win32/rsrc/snes9x.rc
 msgid "!= (Not Equal To)"
@@ -4264,10 +2966,6 @@ msgid "Mute"
 msgstr "Silenciar"
 
 #: win32/rsrc/snes9x.rc
-msgid "Mute Sound"
-msgstr "Silenciar sonido"
-
-#: win32/rsrc/snes9x.rc
 msgid "Mute sound"
 msgstr "Silenciar sonido"
 
@@ -4282,10 +2980,6 @@ msgstr "Opciones de juego en red"
 #: win32/rsrc/snes9x.rc
 msgid "New Value"
 msgstr "Valor nuevo"
-
-#: win32/rsrc/snes9x.rc
-msgid "No BIOS"
-msgstr "Sin BIOS"
 
 #: win32/wlanguage.h
 msgid "Not a ROM"
@@ -4872,14 +3566,6 @@ msgid "SGB Mix"
 msgstr "Mezcla SGB"
 
 #: win32/rsrc/snes9x.rc
-msgid "SGB1"
-msgstr "SGB1"
-
-#: win32/rsrc/snes9x.rc
-msgid "SGB2"
-msgstr "SGB2"
-
-#: win32/rsrc/snes9x.rc
 msgid "Show Audio Waveform"
 msgstr "Mostrar audio Waveform"
 
@@ -5086,10 +3772,6 @@ msgstr "Estado"
 #: win32/rsrc/snes9x.rc
 msgid "Stretch Image"
 msgstr "Estirar imagen"
-
-#: win32/rsrc/snes9x.rc
-msgid "SuperFX Clock Speed %:"
-msgstr "Velocidad de reloj SuperFX %:"
 
 #: win32/rsrc/snes9x.rc
 msgid "SuperFX speed:"
@@ -5447,8 +4129,6 @@ msgstr "Su contraseña solo se utiliza para obtener un token de API.\nNunca se a
 msgid "Zoom:"
 msgstr "Zoom:"
 
-# === Win32 strings (added by i18n/extract_strings.py) ===
-
 #: win32/CSpriteViewerDlg.cpp
 msgid "Export Selected to PNG"
 msgstr "Exportar selección a PNG"
@@ -5470,16 +4150,8 @@ msgid "Toggle Visibility"
 msgstr "Alternar visibilidad"
 
 #: win32/wsnes9x.cpp
-msgid "Translations"
-msgstr "Traducciones"
-
-# === Win32 strings (added by i18n/extract_strings.py) ===
-
-#: win32/wsnes9x.cpp
 msgid "Language"
 msgstr "Idioma"
-
-# === Win32 strings (added by i18n/extract_strings.py) ===
 
 #: qt/src/SoundPanel.ui
 msgid "44100 Hz"
@@ -5798,10 +4470,6 @@ msgid "Controller %1"
 msgstr "Mando %1"
 
 #: qt/src/ControllerPanel.ui
-msgid "Controller + Multitap"
-msgstr "Mando + Multitap"
-
-#: qt/src/ControllerPanel.ui
 msgid "Controller Ports:"
 msgstr "Puertos de mando:"
 
@@ -5957,14 +4625,6 @@ msgstr "MB"
 msgid "Merge the fields of the high-resolution lines"
 msgstr "Mezclar los campos de las líneas de alta resolución"
 
-#: qt/src/DisplayPanel.ui
-msgid "Messages"
-msgstr "Mensajes"
-
-#: qt/src/ControllerPanel.ui
-msgid "Mouse + Controller"
-msgstr "Ratón + Mando"
-
 #: qt/src/SoundPanel.ui
 msgid "ms"
 msgstr "ms"
@@ -5992,10 +4652,6 @@ msgstr "No hay archivos recientes"
 #: qt/src/EmulationPanel.ui
 msgid "None - Run unthrottled, unless vsync is turned on"
 msgstr "Ninguno - Correr sin regulación, salvo que la sincronización vertical (vsync) esté activada"
-
-#: qt/src/ControllerPanel.ui
-msgid "One Controller"
-msgstr "Un mando"
 
 #: qt/src/DisplayPanel.ui
 msgid "Onscreen - High resolution"
@@ -6253,14 +4909,6 @@ msgstr "Configuración de Shader"
 msgid "Show fast-forward and pause icons"
 msgstr "Mostrar iconos de avance rápido y pausa"
 
-#: qt/src/DisplayPanel.ui
-msgid "Show overscan area"
-msgstr "Mostrar el área de sobrescaneo"
-
-#: qt/src/DisplayPanel.ui
-msgid "Show the areas on the top and bottom of the screen that are normally black and hidden by the TV. Some games will draw in these areas."
-msgstr "Mostrar las áreas de la parte superior e inferior de la pantalla que normalmente son negras y están ocultas por el televisor. Algunos juegos dibujan en estas áreas."
-
 #: qt/src/GeneralPanel.ui
 msgid "Show the time"
 msgstr "Mostrar la hora"
@@ -6336,10 +4984,6 @@ msgstr "Super Game Boy 2"
 #: qt/src/EmulationPanel.ui
 msgid "SuperFX clock speed:"
 msgstr "Velocidad de reloj del SuperFX:"
-
-#: qt/src/ControllerPanel.ui
-msgid "SuperScope + Controller"
-msgstr "SuperScope + Mando"
 
 #: qt/src/ShortcutsPanel.ui
 msgid "Swap Controllers 1 and 2"
@@ -6485,10 +5129,6 @@ msgstr "Turbo X"
 msgid "Turbo Y"
 msgstr "Turbo Y"
 
-#: qt/src/ControllerPanel.ui
-msgid "Two Controllers"
-msgstr "Dos mandos"
-
 #: qt/src/EmuMainWindow.cpp
 msgid "Unable to create a %1 context. Attempting to use %2."
 msgstr "No se pudo crear un contexto %1. Intentando usar %2."
@@ -6540,8 +5180,6 @@ msgstr "Al entrar en el modo de pantalla completa, cambia temporalmente otras op
 #: qt/src/DisplayPanel.ui
 msgid "When scaling up, only use integer multiples of the original height."
 msgstr "Al escalar, usar solo múltiplos enteros de la altura original."
-
-# === Win32 strings (added by i18n/extract_strings.py) ===
 
 #: qt/src/EmuMainWindow.cpp
 msgid "\"%1\" holds MSU-1 audio data, but \"%2\" already exists, so it"
@@ -7289,4 +5927,856 @@ msgstr ""
 
 #: qt/src/AudioWaveformWindow.cpp
 msgid "zoom"
+msgstr ""
+
+# === GTK strings (added by hand scan of gtk/src; xgettext unavailable) ===
+
+#: gtk/src/snes9x.ui
+msgid "6"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "7"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "8"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "6+"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "7+"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "8+"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Sa_ve with Preview…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Loa_d with Preview…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save Ot_her"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save S_creenshot"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save S-_RAM Data"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save _Memory Pack"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_BIOS Manager…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Movie _Play…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Movie _Record…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Movie S_top"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Start _AVI Recording…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Choose _Icon"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _1"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _3"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _4"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Apply to _Launcher Icon"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Run _Ahead"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_0 (off)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_1 frame"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_2 frames"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_3 frames"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_4 frames"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Game _Boy Model"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Game Boy"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Game Boy _Color"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Colorizes Game Boy Color carts. Mono-only carts are experimental — DMG-compatibility colorization is not implemented yet."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Super Game Boy"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Super Game Boy _2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Super Game Boy Co_lor (Experimental)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "A Super Game Boy 2 with a Game Boy Color inside: real Color graphics in the SGB border, with the cart's SGB sound and border packets. No such hardware exists; the SGB2 BIOS is patched in memory for it."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Automatic"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Voicer-_kun"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Attach Audio CD…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Eject Audio CD"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Input"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Input Configuration..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Customize Hotkeys..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Enable _Rumble (Shake)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use SNES _Joypad(s)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use SNES _Mouse"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Super _Scope"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Enable"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Show _Crosshair"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Super Multi_tap (5-player)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Konami _Justifier"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Mouse in _alternate port"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Multitaps (_8-player)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use _Dual Justifiers"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use M.A.C.S. _Rifle"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Sound"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Channels"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _1"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _3"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _4"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _5"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _6"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _7"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _8"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Mute"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Show Audio _Waveform"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Settings…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Color Correction…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_RetroAchievements"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Enabled"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Login..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Hardcore Mode"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Achievement List..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_View Profile"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "\n                              </object>\n                              <packing>\n                                <property name=\"expand\">False"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Render the SNES colour‑math and transparency effects. Turn off only for troubleshooting."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Blend Hi‑Res Images"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Horizontally blend hi‑res (512‑wide) images, so games that alternate columns for a transparency effect look as intended with filters that do not account for this."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Draw text inside the SNES image with a pixel font instead of the on‑screen overlay (it will get into AVIs, screenshots, and filters). The only way to see messages with the XVideo and software drivers."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>SNES Image</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Pick the blend per game from a built-in list of known flicker-transparency games (off for the rest). Uncheck to set the mode and layer manually for every Game Boy game."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Simple Blend = 50/50 of the last two frames (cancels flicker-transparency); LCD Blend = slow-decay LCD-style ghosting."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Which Game Boy layer to blend: Background keeps moving sprites crisp; Window = the window/HUD layer; Sprites = objects only; All blends everything."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Feed a connected USB webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor. With this off (or no camera connected) the in‑game viewfinder is blank."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Game Boy Image</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Hi-res scaling filter:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Filter used instead of the one above when the frame is high-resolution (512 pixels wide or interlaced)."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the \"zombie\" glitch). Off = exact hardware behaviour, which clicks on every note in some games"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Regular volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Master output volume during normal play. Drags the per-source SGB sliders by the same amount."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Fast-forward volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Master output volume during turbo and rewind."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB SPC volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB BIOS mix: SPC channel volume. Only active in SGB1/SGB2 BIOS mode — BIOS-less GB playback discards SPC output."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB GB volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB BIOS mix: GB channel volume. Active in SGB BIOS mode; in BIOS-less GB playback mirrors the Regular master."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Regular gain (dB):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Master pre-amp applied after the volume percentages. 0 dB is unchanged; boosting can clip loud material."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB SPC gain (dB):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Pre-amp on the SPC side of the SGB mix, applied after its volume percentage. Only active in SGB1/SGB2 BIOS mode."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB GB gain (dB):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Pre-amp on the GB side of the SGB mix, applied after its volume percentage. Only active in SGB1/SGB2 BIOS mode."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Frames to run ahead to reduce input latency (0 to disable):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Emulates the selected number of frames ahead of the displayed one so input appears to take effect sooner. Uses more CPU time. One frame is safe for most games; higher values can glitch games that poll input mid-frame."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Run Ahead</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Record File → AVI Recording at twice the SNES resolution (512x448) so hi-res and interlaced games keep their detail. Doubles the file size."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>AVI Recording</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Toggle Fast Forward"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Fast Forward"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Increment bank"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Decrement bank"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save with preview"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Load with preview"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save to file"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Load from file"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Quick save state (current bank)</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Quick load state (current bank)</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Select save slot (current bank)</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 0"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 1"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 3"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 4"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 5"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 6"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 7"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 8"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 9"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "Save WAV file..."
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "_Cancel"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "_Save"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "WAV audio"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "Couldn't save WAV file:"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "Resolved BIOS: "
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "_OK"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "Select…"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "Select BIOS File"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "_Open"
+msgstr ""
+
+#: gtk/src/gtk_cheat.cpp
+msgid "Added Codes"
+msgstr ""
+
+#: gtk/src/gtk_cheat.cpp
+msgid "Found and added codes from database: "
+msgstr ""
+
+#: gtk/src/gtk_control.cpp
+msgid "Rewind is not allowed in Hardcore mode"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Joypad {}"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "SuperSnes9x Movie Files"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "_Browse…"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Current ROM: {}"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Movie's ROM: {}"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid " <-- MISMATCH !!!"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Path: {}"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Login"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Your password is only used to obtain a login token.\nIt is never saved."
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Missable"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Progression"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Win Condition"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Unlocked (Hardcore)"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Unlocked"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Locked"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Inactive"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "%s — %u of %u achievements, %u of %u points"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Logged in as "
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid " - Hardcore"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Not logged in"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "No game loaded"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Close"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Title"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Points"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Progress"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Type"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "This action"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid " is not allowed while Hardcore mode is active."
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "RetroAchievements — Hardcore Mode"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Disable Hardcore mode to proceed?\n(Achievement progress for this session will be lost.)"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Logout "
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Logout"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "RetroAchievements — Login Failed"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't update the launcher icon."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "That setting is locked while a movie is active."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Voicer-kun: audio CD ejected"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Audio CD Images"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "This audio CD was not accepted:\n{}"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Movie playback"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Movie recording"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "AVI Files"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Stop _AVI Recording"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "This archive holds MSU-1 audio data, but "
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " already exists, so it can't be renamed. Load that file instead, or unpack the archive and load the ROM from the folder."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to "
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " and load it?"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't rename the archive: "
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Loading save states"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't save S-RAM file:"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't save Memory Pack file:"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " (Missing BIOS)"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " (Experimental)"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Bank #_{}"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Slot #_{}"
+msgstr ""
+
+#: gtk/src/gtk_state_preview_dialog.cpp
+msgid "Bank #{}"
+msgstr ""
+
+#: gtk/src/gtk_state_preview_dialog.cpp
+msgid "Slot #{}"
+msgstr ""
+
+# === Template entries added from snes9x.pot ===
+
+#: src/gtk_s9xwindow.cpp:839
+msgid "Open ROM Image"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:850
+msgid "ROM Images"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:857
+msgid "Super Nintendo ROM Images"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:862
+msgid "Game Boy ROM Images"
+msgstr ""
+
+#: src/snes9x.ui:9344
+msgid ""
+"  Snes9x – A Portable Super Nintendo Entertainment System™ Emulator\n"
+"\n"
+"  Snes9x homepage: http://www.snes9x.com/\n"
+"  Snes9x source code: https://github.com/shanytc/snes9x/\n"
+"\n"
+"  Permission to use, copy, modify and/or distribute Snes9x in both binary\n"
+"  and source form, for non‑commercial purposes, is hereby granted without\n"
+"  fee, providing that this license information and copyright notice appear\n"
+"  with all copies and any derived work.\n"
+"\n"
+"  This software is provided ‘as‑is’, without any express or implied\n"
+"  warranty. In no event shall the authors be held liable for any damages\n"
+"  arising from the use of this software or it’s derivatives.\n"
+"\n"
+"  Snes9x is freeware for PERSONAL USE only. Commercial users should\n"
+"  seek permission of the copyright holders first. Commercial use includes,\n"
+"  but is not limited to, charging money for Snes9x or software derived from\n"
+"  Snes9x, including Snes9x or derivatives in commercial game bundles, and/"
+"or\n"
+"  using Snes9x as a promotion for your commercial product.\n"
+"\n"
+"  The copyright holders request that bug fixes and improvements to the code\n"
+"  should be forwarded to them so everyone can benefit from the "
+"modifications\n"
+"  in future versions.\n"
+"\n"
+"  Super NES and Super Nintendo Entertainment System are trademarks of\n"
+"  Nintendo Co., Limited and its subsidiary companies."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "None"
 msgstr ""

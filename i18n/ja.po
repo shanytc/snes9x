@@ -22,26 +22,6 @@ msgstr ""
 msgid "Unknown"
 msgstr "不明"
 
-#: src/gtk_binding.cpp:264
-#, c-format
-msgid "Keyboard %s%s%s%s"
-msgstr "キーボード %s%s%s%s"
-
-#: src/gtk_binding.cpp:275
-#, c-format
-msgid "Axis %u %s %u%%"
-msgstr "軸 %u %s %u%%"
-
-#: src/gtk_binding.cpp:280
-#, c-format
-msgid "Button %u"
-msgstr "ボタン %u"
-
-#: src/gtk_binding.cpp:282
-#, c-format
-msgid "Joystick %u %s"
-msgstr "ジョイスティック %u %s"
-
 #: src/gtk_binding.cpp:287
 #, c-format
 msgid "Unset"
@@ -83,11 +63,6 @@ msgstr "データベースファイル <b>cheats.bml</b> が見つかりませ�
 msgid "No matching game was found in the databases. If you are using a non-official translation or modified copy, you may be able to find and manually enter the codes."
 msgstr "データベース内に一致するゲームが見つかりませんでした。非公式の翻訳版や改変版を使用している場合は、コードを探して手動で入力することができる場合があります。"
 
-#: src/gtk_config.cpp:442
-#, c-format
-msgid "Couldn't create config directory: %s\n"
-msgstr "コンフィグディレクトリを作成できません: %s\n"
-
 #: src/gtk_netplay.cpp:62
 msgid "Connection Error"
 msgstr "接続エラー"
@@ -128,91 +103,13 @@ msgstr "警告: ファイルを上書きします"
 msgid "Select Folder"
 msgstr "フォルダ選択"
 
-#: src/gtk_preferences.cpp:1104
-msgid "HQ2x"
-msgstr "HQ2x"
-
-#: src/gtk_preferences.cpp:1105
-msgid "HQ3x"
-msgstr "HQ3x"
-
-#: src/gtk_preferences.cpp:1106
-msgid "HQ4x"
-msgstr "HQ4x"
-
-#: src/gtk_preferences.cpp:1111
-msgid "2xBRZ"
-msgstr "2xBRZ"
-
-#: src/gtk_preferences.cpp:1112
-msgid "3xBRZ"
-msgstr "3xBRZ"
-
-#: src/gtk_preferences.cpp:1113
-msgid "4xBRZ"
-msgstr "4xBRZ"
-
-#: src/gtk_preferences.cpp:1118
-msgid "None - Use software scaler"
-msgstr "使用しない - ソフトウェアレンダリング"
-
-#: src/gtk_preferences.cpp:1122
-msgid "OpenGL - Use 3D graphics hardware"
-msgstr "OpenGL - 3Dグラフィックハードウェアを使用する"
-
-#: src/gtk_preferences.cpp:1126
-msgid "XVideo - Use hardware video blitter"
-msgstr "XVideo - ハードウェアビデオブリッターを使用する"
-
-#: src/gtk_preferences.cpp:1132
-msgid "PortAudio"
-msgstr "PortAudio"
-
-#: src/gtk_preferences.cpp:1136
-msgid "Open Sound System"
-msgstr "Open Sound System"
-
-#: src/gtk_preferences.cpp:1139
-msgid "SDL"
-msgstr "SDL"
-
-#: src/gtk_preferences.cpp:1142
-msgid "ALSA"
-msgstr "ALSA"
-
-#: src/gtk_preferences.cpp:1146
-msgid "PulseAudio"
-msgstr "PulseAudio"
-
-#: src/gtk_s9x.cpp:205
-#, c-format
-msgid "Error opening: %s\n"
-msgstr "エラー: %s を開けません\n"
-
 #: src/gtk_s9xwindow.cpp:863
 msgid "Couldn't load files."
 msgstr "ファイルをロードできません。"
 
-#: src/gtk_s9xwindow.cpp:892
-msgid "Open SNES Movie"
-msgstr "SNESムービーを開く"
-
-#: src/gtk_s9xwindow.cpp:911
-msgid "New SNES Movie"
-msgstr "新しいSNESムービー"
-
-#: src/gtk_s9xwindow.cpp:924
-msgid "SNES Movies"
-msgstr "SNESムービー"
-
 #: src/gtk_s9xwindow.cpp:932 src/gtk_s9xwindow.cpp:1080 src/gtk_s9xwindow.cpp:1200 src/gtk_s9xwindow.cpp:1265 src/gtk_file.cpp:440
 msgid "All Files"
 msgstr "すべてのファイル"
-
-#: src/gtk_s9xwindow.cpp:993
-#, c-format
-msgid "Couldn't load file '%s'"
-msgstr "%s が開けません"
 
 #: src/gtk_s9xwindow.cpp:1052
 msgid "Load Saved State"
@@ -222,11 +119,6 @@ msgstr "ステートセーブをロード"
 msgid "Save States"
 msgstr "ステートセーブ"
 
-#: src/gtk_s9xwindow.cpp:1120
-#, c-format
-msgid "The current frame in the movie is <b>%d</b>."
-msgstr "ムービー内の現在のフレームは <b>%d</b> です。"
-
 #: src/gtk_s9xwindow.cpp:1170
 msgid "Save State"
 msgstr "ステートセーブ"
@@ -234,52 +126,6 @@ msgstr "ステートセーブ"
 #: src/gtk_s9xwindow.cpp:1246
 msgid "Save SPC file..."
 msgstr "SPCを保存..."
-
-#: src/gtk_s9xwindow.cpp:1259
-msgid "SPC Files"
-msgstr "SPCファイル"
-
-#: src/gtk_s9xwindow.cpp:1290
-#, c-format
-msgid "Couldn't save SPC file '%s'"
-msgstr "SPCファイル %s を保存できません"
-
-#: src/gtk_s9xwindow.cpp:1330
-#, c-format
-msgid ""
-"<b>Information for %s</b>\n"
-"\n"
-"<i>Name:</i> %s\n"
-"<i>Speed:</i> %02X/%s\n"
-"<i>Map:</i> %s\n"
-"<i>Type:</i> %02x\n"
-"<i>Contents:</i> %s\n"
-"<i>ROM Size:</i> %s\n"
-"<i>Calculated Size:</i> %d\n"
-"<i>SRAM Size:</i> %s\n"
-"<i>Header Checksum:</i> %04X\n"
-"<i>Checksum Compliment:</i> %04X\n"
-"<i>Actual Checksum:</i> %04X\n"
-"<i>Video:</i> %s\n"
-"<i>CRC32:</i> %08X\n"
-"<i>Revision:</i> %s<b><i>%s%s</i></b>"
-msgstr ""
-"<b>%s の情報</b>\n"
-"\n"
-"<i>名前:</i> %s\n"
-"<i>速度:</i> %02X/%s\n"
-"<i>マップ:</i> %s\n"
-"<i>タイプ:</i> %02x\n"
-"<i>内容:</i> %s\n"
-"<i>ROMサイズ:</i> %s\n"
-"<i>計算上のサイズ:</i> %d\n"
-"<i>SRAMサイズ:</i> %s\n"
-"<i>ヘッダチェックサム:</i> %04X\n"
-"<i>チェックサム補数:</i> %04X\n"
-"<i>実際のチェックサム:</i> %04X\n"
-"<i>ビデオ:</i> %s\n"
-"<i>CRC32:</i> %08X\n"
-"<i>リビジョン:</i> %s<b><i>%s%s</i></b>"
 
 #: src/gtk_s9xwindow.cpp:1366
 msgid ""
@@ -317,21 +163,9 @@ msgstr "シェーダープリセット"
 msgid "Shader Parameters"
 msgstr "シェーダーパラメーター"
 
-#: src/gtk_file.cpp:424
-msgid "Open SNES ROM Image"
-msgstr "SNES ROMイメージを開く"
-
-#: src/gtk_file.cpp:432
-msgid "SNES ROM Images"
-msgstr "SNES ロムイメージ"
-
 #: src/snes9x.ui:9
 msgid "About SuperSnes9x"
 msgstr "SuperSnes9xについて"
-
-#: src/snes9x.ui:48
-msgid "label106"
-msgstr "label106"
 
 #: src/snes9x.ui:271
 msgid "SuperSnes9x Cheats"
@@ -369,10 +203,6 @@ msgstr "フレームまで進める"
 msgid "The current frame in the movie is"
 msgstr "ムービー内の現在のフレームは"
 
-#: src/snes9x.ui:651
-msgid "Fast-forward to frame"
-msgstr "フレームまで早送り"
-
 #: src/snes9x.ui:812
 msgid "Black"
 msgstr "黒"
@@ -401,18 +231,6 @@ msgstr "星空"
 msgid "Snow"
 msgstr "雪"
 
-#: src/snes9x.ui:841
-msgid "Game Genie"
-msgstr "ゲームジニー"
-
-#: src/snes9x.ui:844
-msgid "Pro Action Replay"
-msgstr "プロアクションリプレイ"
-
-#: src/snes9x.ui:847
-msgid "Goldfinger"
-msgstr "ゴールドフィンガー"
-
 #: src/snes9x.ui:858 src/snes9x.ui:881
 msgid "12.5%"
 msgstr "12.5%"
@@ -436,46 +254,6 @@ msgstr "0%"
 #: src/snes9x.ui:901 src/snes9x.ui:1928
 msgid "None"
 msgstr "なし"
-
-#: src/snes9x.ui:904
-msgid "SuperEagle"
-msgstr "SuperEagle"
-
-#: src/snes9x.ui:907
-msgid "2xSaI"
-msgstr "2xSaI"
-
-#: src/snes9x.ui:910
-msgid "Super2xSaI"
-msgstr "Super2xSaI"
-
-#: src/snes9x.ui:913
-msgid "EPX"
-msgstr "EPX"
-
-#: src/snes9x.ui:916
-msgid "EPX Smooth"
-msgstr "EPX Smooth"
-
-#: src/snes9x.ui:919
-msgid "Blargg's NTSC"
-msgstr "Blargg's NTSC"
-
-#: src/snes9x.ui:922
-msgid "Scanlines"
-msgstr "走査線"
-
-#: src/snes9x.ui:925
-msgid "Simple2x"
-msgstr "Simple2x"
-
-#: src/snes9x.ui:928
-msgid "Simple3x"
-msgstr "Simple3x"
-
-#: src/snes9x.ui:931
-msgid "Simple4x"
-msgstr "Simple4x"
 
 #: src/snes9x.ui:942
 msgid "8:7 Square pixels"
@@ -508,10 +286,6 @@ msgstr "隣接するペアを結合"
 #: src/snes9x.ui:977
 msgid "Output directly"
 msgstr "直接出力"
-
-#: src/snes9x.ui:980
-msgid "Scale low-resolution screens"
-msgstr "低解像度の画面を拡大する"
 
 #: src/snes9x.ui:991 src/snes9x.ui:1029
 msgid "1"
@@ -565,14 +339,6 @@ msgstr "フルスクリーンモードをやめる"
 msgid "Quit SuperSnes9x"
 msgstr "SuperSnes9xを終了"
 
-#: src/snes9x.ui:1084
-msgid "Timer-based"
-msgstr "タイマーベース"
-
-#: src/snes9x.ui:1087
-msgid "Timer-based with automatic frame-skipping"
-msgstr "タイマーベース（自動フレームスキップ）"
-
 #: src/snes9x.ui:1090
 msgid "Sound buffer synchronization"
 msgstr "サウンドバッファ同期"
@@ -580,46 +346,6 @@ msgstr "サウンドバッファ同期"
 #: src/snes9x.ui:1093
 msgid "No throttling, use vsync to control speed"
 msgstr "スロットリングなし、垂直同期で速度を制御"
-
-#: src/snes9x.ui:1104
-msgid "48000 hz"
-msgstr "48000 Hz"
-
-#: src/snes9x.ui:1107
-msgid "44100 hz"
-msgstr "44100 Hz"
-
-#: src/snes9x.ui:1110
-msgid "32000 hz"
-msgstr "32000 Hz"
-
-#: src/snes9x.ui:1113
-msgid "22050 hz"
-msgstr "22050 Hz"
-
-#: src/snes9x.ui:1116
-msgid "16000 hz"
-msgstr "16000 Hz"
-
-#: src/snes9x.ui:1119
-msgid "11025 hz"
-msgstr "11025 Hz"
-
-#: src/snes9x.ui:1122
-msgid "8000 hz"
-msgstr "8000 Hz"
-
-#: src/snes9x.ui:1125
-msgid "0 hz"
-msgstr "0 Hz"
-
-#: src/snes9x.ui:1142
-msgid "16-bit (GL_RGB)"
-msgstr "16ビット (GL_RGB)"
-
-#: src/snes9x.ui:1145
-msgid "32-bit (GL_BGRA)"
-msgstr "32ビット (GL_BGRA)"
 
 #: src/snes9x.ui:1156
 msgid "Nearest"
@@ -649,73 +375,17 @@ msgstr "SuperSnes9x"
 msgid "_File"
 msgstr "ファイル(_F)"
 
-#: src/snes9x.ui:1208
-msgid "_Open ROM Image..."
-msgstr "ROMイメージを開く(_O)..."
-
 #: src/snes9x.ui:1222
 msgid "Open Recent"
 msgstr "最近開いたROM"
-
-#: src/snes9x.ui:1234
-msgid "Open with _NetPlay..."
-msgstr "ネットプレイ(_N)..."
 
 #: src/snes9x.ui:1237
 msgid "Open a ROM to use with NetPlay"
 msgstr "ネットプレイするROMを開く"
 
-#: src/snes9x.ui:1248
-msgid "Open _MultiCart..."
-msgstr "マルチROMを開く(_M)..."
-
 #: src/snes9x.ui:1263
 msgid "_Load State"
 msgstr "ステートセーブをロード(_L)"
-
-#: src/snes9x.ui:1273 src/snes9x.ui:1407
-msgid "Slot _0"
-msgstr "スロット0 (_0)"
-
-#: src/snes9x.ui:1282 src/snes9x.ui:1416
-msgid "Slot _1"
-msgstr "スロット1 (_1)"
-
-#: src/snes9x.ui:1291 src/snes9x.ui:1425
-msgid "Slot _2"
-msgstr "スロット2 (_2)"
-
-#: src/snes9x.ui:1300 src/snes9x.ui:1434
-msgid "Slot _3"
-msgstr "スロット3 (_3)"
-
-#: src/snes9x.ui:1309 src/snes9x.ui:1443
-msgid "Slot _4"
-msgstr "スロット4 (_4)"
-
-#: src/snes9x.ui:1318 src/snes9x.ui:1452
-msgid "Slot _5"
-msgstr "スロット5 (_5)"
-
-#: src/snes9x.ui:1327 src/snes9x.ui:1461
-msgid "Slot _6"
-msgstr "スロット6 (_6)"
-
-#: src/snes9x.ui:1336 src/snes9x.ui:1470
-msgid "Slot _7"
-msgstr "スロット7 (_7)"
-
-#: src/snes9x.ui:1345 src/snes9x.ui:1479
-msgid "Slot _8"
-msgstr "スロット8 (_8)"
-
-#: src/snes9x.ui:1354 src/snes9x.ui:1488
-msgid "Slot _9"
-msgstr "スロット9 (_9)"
-
-#: src/snes9x.ui:1369
-msgid "From _File..."
-msgstr "ファイルを読み込む(_F)..."
 
 #: src/snes9x.ui:1384
 msgid "_Undo Load State"
@@ -724,22 +394,6 @@ msgstr "ステートセーブをロード(_U)"
 #: src/snes9x.ui:1397
 msgid "_Save State"
 msgstr "ステートセーブ(_S)"
-
-#: src/snes9x.ui:1503
-msgid "To _File..."
-msgstr "ファイルに保存(_F)..."
-
-#: src/snes9x.ui:1520
-msgid "Save SPC..."
-msgstr "SPCを保存..."
-
-#: src/snes9x.ui:1537
-msgid "Show ROM _Info..."
-msgstr "ROM情報を表示(_I)..."
-
-#: src/snes9x.ui:1554
-msgid "_Quit"
-msgstr "終了(_Q)"
 
 #: src/snes9x.ui:1571
 msgid "_Emulation"
@@ -752,22 +406,6 @@ msgstr "実行/再開(_C)"
 #: src/snes9x.ui:1589
 msgid "_Pause"
 msgstr "ポーズ(_P)"
-
-#: src/snes9x.ui:1607
-msgid "Load _Movie..."
-msgstr "ムービーをロード(_M)..."
-
-#: src/snes9x.ui:1619
-msgid "R_ecord Movie..."
-msgstr "ムービーを録画(_E)..."
-
-#: src/snes9x.ui:1631
-msgid "_Stop Recording"
-msgstr "録画を停止(_S)"
-
-#: src/snes9x.ui:1643
-msgid "_Jump to Frame..."
-msgstr "フレームに飛ぶ(_J)..."
 
 #: src/snes9x.ui:1661
 msgid "Sy_nc Clients"
@@ -793,73 +431,9 @@ msgstr "メニューバーの表示/非表示を切り替え"
 msgid "_Change Size"
 msgstr "サイズ変更(_C)"
 
-#: src/snes9x.ui:1746
-msgid "_1x"
-msgstr "1x (_1)"
-
-#: src/snes9x.ui:1755
-msgid "_2x"
-msgstr "2x (_2)"
-
-#: src/snes9x.ui:1764
-msgid "_3x"
-msgstr "3x (_3)"
-
-#: src/snes9x.ui:1773
-msgid "_4x"
-msgstr "4x (_4)"
-
-#: src/snes9x.ui:1782
-msgid "_5x"
-msgstr "5x (_5)"
-
-#: src/snes9x.ui:1799
-msgid "_Fullscreen"
-msgstr "フルスクリーン(_F)"
-
 #: src/snes9x.ui:1816
 msgid "_Options"
 msgstr "オプション(_O)"
-
-#: src/snes9x.ui:1825
-msgid "Controller Ports"
-msgstr "コントローラーポート"
-
-#: src/snes9x.ui:1834
-msgid "SNES Port 1"
-msgstr "ポート1"
-
-#: src/snes9x.ui:1844 src/snes9x.ui:1888
-msgid "Joypad"
-msgstr "ジョイパッド"
-
-#: src/snes9x.ui:1853 src/snes9x.ui:1897
-msgid "Mouse"
-msgstr "マウス"
-
-#: src/snes9x.ui:1863 src/snes9x.ui:1917
-msgid "Superscope"
-msgstr "スーパースコープ"
-
-#: src/snes9x.ui:1878
-msgid "SNES Port 2"
-msgstr "ポート2"
-
-#: src/snes9x.ui:1907
-msgid "Multitap"
-msgstr "マルチタップ"
-
-#: src/snes9x.ui:1954
-msgid "_Cheats..."
-msgstr "チート(_C)..."
-
-#: src/snes9x.ui:1968
-msgid "_Shader Parameters..."
-msgstr "シェーダーパラメータ(_S)..."
-
-#: src/snes9x.ui:1984
-msgid "_Preferences..."
-msgstr "設定(_P)..."
 
 #: src/snes9x.ui:2029
 msgid "Open Multiple ROM Images (MultiCart)"
@@ -888,10 +462,6 @@ msgstr "SuperSnes9x ネットプレイ"
 #: src/snes9x.ui:2249
 msgid "The game chosen will be loaded before connecting. This field can be blank if the server will send the ROM image"
 msgstr "選んだROMはサーバー接続前にロードされます。この欄はサーバーからROMイメージを転送する場合空欄でも構いません"
-
-#: src/snes9x.ui:2264 src/snes9x.ui:3982 src/snes9x.ui:5097 src/snes9x.ui:5112 src/snes9x.ui:5129 src/snes9x.ui:5146 src/snes9x.ui:5163
-msgid "Browse..."
-msgstr "参照..."
 
 #: src/snes9x.ui:2286
 msgid "Clear entry"
@@ -999,14 +569,6 @@ msgstr "フレームレートを表示"
 msgid "Show pressed keys"
 msgstr "押されたキーを表示"
 
-#: src/snes9x.ui:2817
-msgid "Use overscanned height"
-msgstr "オーバースキャンの高さで表示する"
-
-#: src/snes9x.ui:2821
-msgid "Use SNES extended height. Will probably cause letterboxing"
-msgstr "SNESの拡張高さを使用します。おそらくレターボックスが発生します"
-
 #: src/snes9x.ui:2838
 msgid "Change fullscreen resolution:"
 msgstr "フルスクリーン時の解像度を変更する:"
@@ -1031,29 +593,13 @@ msgstr "黒い縁が表示されないように映像を拡大縮小します"
 msgid "Aspect ratio:"
 msgstr "アスペクト比を維持する:"
 
-#: src/snes9x.ui:2985
-msgid "Maintain aspect-ratio"
-msgstr "アスペクト比を維持する"
-
 #: src/snes9x.ui:2989
 msgid "Scales the image as large as possible without distortion"
 msgstr "アスペクト比を維持して映像を拡大する"
 
-#: src/snes9x.ui:3006
-msgid "Use "
-msgstr "フィルタリングやスケーリングに"
-
 #: src/snes9x.ui:3010
 msgid "Allows scaling and filtering to use multiple processors"
 msgstr "フィルタリングとスケーリングに複数プロセスを使用することを許可します"
-
-#: src/snes9x.ui:3042
-msgid "threads for filtering and scaling"
-msgstr "スレッド使用する"
-
-#: src/snes9x.ui:3066
-msgid "High-resolution effect:"
-msgstr "ハイレゾリューションエフェクト:"
 
 #: src/snes9x.ui:3109
 msgid "Apply scaling filter:"
@@ -1066,10 +612,6 @@ msgstr "ビデオプリセット:"
 #: src/snes9x.ui:3191
 msgid "Composite"
 msgstr "コンポジット"
-
-#: src/snes9x.ui:3205
-msgid "S-Video"
-msgstr "S端子"
 
 #: src/snes9x.ui:3219
 msgid "RGB"
@@ -1131,10 +673,6 @@ msgstr "走査線の強度:"
 msgid "Scaling"
 msgstr "スケーリング"
 
-#: src/snes9x.ui:3793
-msgid "Bilinear-filter output"
-msgstr "バイリニアフィルタ出力"
-
 #: src/snes9x.ui:3814
 msgid "Sync to vertical blank"
 msgstr "垂直同期"
@@ -1143,57 +681,13 @@ msgstr "垂直同期"
 msgid "Sync the image to the vertical retrace to stop tearing"
 msgstr "ティアリングを防ぐために映像を垂直帰線に同期します"
 
-#: src/snes9x.ui:3830
-msgid "Reduce input lag with glFinish"
-msgstr "glFinishで入力遅延を低減"
-
 #: src/snes9x.ui:3834
 msgid "Sync the program with the video output after every displayed frame to reduce input latency"
 msgstr "入力遅延を軽減するために、表示フレームごとにプログラムを映像出力と同期します"
 
-#: src/snes9x.ui:3845
-msgid "Reduce input lag with sync control"
-msgstr "同期制御で入力遅延を低減"
-
-#: src/snes9x.ui:3849
-msgid "More modern method for syncing the program with the video output to reduce input latency. Allows GUI events to occur in the meantime"
-msgstr "入力遅延を軽減するためにプログラムを映像出力と同期する、より新しい方式です。その間にGUIイベントの発生を許可します"
-
-#: src/snes9x.ui:3860
-msgid "Allow non-power-of-two textures"
-msgstr "non-power-of-twoテクスチャを許可する"
-
-#: src/snes9x.ui:3864
-msgid "Prevents edge artifacts, but can slow performance"
-msgstr "エッジのアーティファクトを防ぎますが、パフォーマンスが低下する場合があります"
-
-#: src/snes9x.ui:3875
-msgid "Use pixel-buffer objects"
-msgstr "ピクセルバッファオブジェクトを使用する"
-
-#: src/snes9x.ui:3880
-msgid "Can be faster or slower depending on drivers"
-msgstr "速度はドライバに依存します"
-
-#: src/snes9x.ui:3900
-msgid "Different formats can yield highly different performance"
-msgstr "フォーマットによってパフォーマンスが大きく異なる場合があります"
-
-#: src/snes9x.ui:3907
-msgid "Pixel-buffer format:"
-msgstr "ピクセルバッファフォーマット:"
-
 #: src/snes9x.ui:3950
 msgid "Shader:"
 msgstr "シェーダー:"
-
-#: src/snes9x.ui:4014
-msgid "Force an inverted byte-ordering"
-msgstr "バイトオーダーの反転を強制する"
-
-#: src/snes9x.ui:4018
-msgid "Forces a swapped byte-ordering for cases where the system's endian is used instead of the video card"
-msgstr "ビデオカードではなくシステムのエンディアンが使用される場合に、バイトオーダーの反転を強制します"
 
 #: src/snes9x.ui:4042
 msgid "Hardware Acceleration"
@@ -1210,10 +704,6 @@ msgstr "サウンドドライバ:"
 #: src/snes9x.ui:4159
 msgid "Automatically adjust input rate to display"
 msgstr "入力周波数をディスプレイに合わせて自動調整する"
-
-#: src/snes9x.ui:4163
-msgid "Sets the correct input rate based on the display's refresh rate"
-msgstr "ディスプレイのリフレッシュレートに基づいて正しい入力周波数を設定します"
 
 #: src/snes9x.ui:4175
 msgid "Dynamic rate control"
@@ -1243,10 +733,6 @@ msgstr "ターボや巻き戻しを使用する際の音声出力を無効にし
 msgid "Playback rate:"
 msgstr "出力周波数:"
 
-#: src/snes9x.ui:4268
-msgid "milliseconds"
-msgstr "ミリ秒"
-
 #: src/snes9x.ui:4291
 msgid "Buffer size:"
 msgstr "バッファサイズ:"
@@ -1259,17 +745,9 @@ msgstr "ダイナミックレート制限:"
 msgid "Input rate:"
 msgstr "入力周波数:"
 
-#: src/snes9x.ui:4363
-msgid "Adjust to produce more or less data. Decrease the rate if experiencing crackling. Increase the rate if experiencing frame-rate stuttering. Best used with the \"Synchronize with sound\" option"
-msgstr "生成するデータ量を増減するよう調整します。ノイズが発生する場合はレートを下げてください。フレームレートがカクつく場合はレートを上げてください。「サウンドと同期」オプションと併用するのが最適です"
-
 #: src/snes9x.ui:4412
 msgid "Video rate:"
 msgstr "ビデオレート:"
-
-#: src/snes9x.ui:4425
-msgid "label"
-msgstr "ラベル"
 
 #: src/snes9x.ui:4450
 msgid "<b>Sound Settings</b>"
@@ -1387,14 +865,6 @@ msgstr "<b>ゲームデータフォルダ</b>"
 msgid "Save SRAM:"
 msgstr "SRAMを"
 
-#: src/snes9x.ui:5306
-msgid "Automatically save the game's SRAM at this interval. Setting this to 0 will only save when quitting or changing ROMs"
-msgstr "自動セーブの間隔です。0に設定した時はゲーム終了時とROM変更時のみセーブされます"
-
-#: src/snes9x.ui:5325
-msgid "seconds after change"
-msgstr "秒ごとに保存"
-
 #: src/snes9x.ui:5341
 msgid "<b>Automatic Saving</b>"
 msgstr "<b>自動セーブ</b>"
@@ -1418,10 +888,6 @@ msgstr "設定を入れ替える:"
 #: src/snes9x.ui:5506
 msgid "_Swap"
 msgstr "と入れ替え(_S)"
-
-#: src/snes9x.ui:5528
-msgid "Use modifier keys (CTRL, SHIFT, ALT) directly"
-msgstr "装飾キー(Ctrl,Shift,Alt)を単体で使用する"
 
 #: src/snes9x.ui:5532
 msgid "Allow using modifier keys as independent keys instead of modifiers"
@@ -1525,14 +991,6 @@ msgstr "<b>アナログパッド調整</b>"
 msgid "Joystick Options"
 msgstr "ジョイスティックオプション"
 
-#: src/snes9x.ui:6662 src/snes9x.ui:9014
-msgid ""
-"<small>Click an entry and then press the desired keys or joystick button\n"
-"<i>Escape</i>: Move to next<i>  Shift-Escape</i>: Clear selected</small>"
-msgstr ""
-"<small>エントリを選びキーかボタンを押してください\n"
-"<i>ESC</i>: 次へ移動 <i>Shift+ESC</i>: クリア</small>"
-
 #: src/snes9x.ui:6700
 msgid "Joypads"
 msgstr "ジョイパッド"
@@ -1569,14 +1027,6 @@ msgstr "フレームレートを下げる"
 msgid "Pause"
 msgstr "ポーズ"
 
-#: src/snes9x.ui:6876
-msgid "Toggle turbo"
-msgstr "ターボをオン/オフ"
-
-#: src/snes9x.ui:6890
-msgid "Enable turbo"
-msgstr "ターボ(押してる間だけ)"
-
 #: src/snes9x.ui:6905
 msgid "Open ROM"
 msgstr "ROMを開く"
@@ -1600,10 +1050,6 @@ msgstr "背景レイヤー3を表示/非表示"
 #: src/snes9x.ui:7218
 msgid "Toggle sprites"
 msgstr "スプライトを表示/非表示"
-
-#: src/snes9x.ui:7232
-msgid "BG layering hack"
-msgstr "背景レイヤリングハック"
 
 #: src/snes9x.ui:7246
 msgid "Screenshot"
@@ -1640,14 +1086,6 @@ msgstr "スロットを進める"
 #: src/snes9x.ui:7626
 msgid "Decrement slot"
 msgstr "スロットを戻す"
-
-#: src/snes9x.ui:7670
-msgid "<b>Quick save state</b>"
-msgstr "<b>クイックセーブ</b>"
-
-#: src/snes9x.ui:7685
-msgid "<b>Quick load state</b>"
-msgstr "<b>クイックロード</b>"
 
 #: src/snes9x.ui:7700 src/snes9x.ui:7840
 msgid "Slot 0"
@@ -1769,14 +1207,6 @@ msgstr "ショートカット"
 msgid "Pause emulation when switching away from SuperSnes9x"
 msgstr "ウィンドウが非アクティブ時にポーズする"
 
-#: src/snes9x.ui:9105
-msgid "Force-enable button and menu icons"
-msgstr "ボタンとメニューアイコンを強制的に有効化"
-
-#: src/snes9x.ui:9126
-msgid "The ESC key should:"
-msgstr "ESCキー:"
-
 #: src/snes9x.ui:9168
 msgid "Initial background:"
 msgstr "初期背景:"
@@ -1796,61 +1226,6 @@ msgstr "<b>スクリーンセーバー</b>"
 #: src/snes9x.ui:9293
 msgid "UI"
 msgstr "UI"
-
-#: src/snes9x.ui:9327
-msgid ""
-"  SuperSnes9x - Portable Super Nintendo Entertainment System (TM) emulator.\n"
-"\n"
-"  Snes9x homepage: http://www.snes9x.com/\n"
-"  SuperSnes9x source code: https://github.com/shanytc/snes9x/\n"
-"\n"
-"  Permission to use, copy, modify and/or distribute SuperSnes9x in both binary\n"
-"  and source form, for non-commercial purposes, is hereby granted without\n"
-"  fee, providing that this license information and copyright notice appear\n"
-"  with all copies and any derived work.\n"
-"\n"
-"  This software is provided 'as-is', without any express or implied\n"
-"  warranty. In no event shall the authors be held liable for any damages\n"
-"  arising from the use of this software or it's derivatives.\n"
-"\n"
-"  SuperSnes9x is freeware for PERSONAL USE only. Commercial users should\n"
-"  seek permission of the copyright holders first. Commercial use includes,\n"
-"  but is not limited to, charging money for SuperSnes9x or software derived from\n"
-"  Snes9x, including SuperSnes9x or derivatives in commercial game bundles, and/or\n"
-"  using SuperSnes9x as a promotion for your commercial product.\n"
-"\n"
-"  The copyright holders request that bug fixes and improvements to the code\n"
-"  should be forwarded to them so everyone can benefit from the modifications\n"
-"  in future versions.\n"
-"\n"
-"  Super NES and Super Nintendo Entertainment System are trademarks of\n"
-"  Nintendo Co., Limited and its subsidiary companies."
-msgstr ""
-"  SuperSnes9x - ポータブル スーパーファミコン (TM) エミュレーター。\n"
-"\n"
-"  SuperSnes9x ホームページ: http://www.snes9x.com/\n"
-"  SuperSnes9x ソースコード: https://github.com/shanytc/snes9x/\n"
-"\n"
-"  非営利目的での SuperSnes9x の使用、複製、改変、および/または配布を、バイナリ\n"
-"  形式およびソース形式の両方で、無償で許可します。ただし、このライセンス\n"
-"  情報および著作権表示が、すべての複製および派生物に付随することを条件と\n"
-"  します。\n"
-"\n"
-"  本ソフトウェアは「現状のまま」提供され、明示または黙示を問わずいかなる\n"
-"  保証もありません。本ソフトウェアまたはその派生物の使用により生じるいか\n"
-"  なる損害についても、作者は一切責任を負いません。\n"
-"\n"
-"  SuperSnes9x は個人使用のみを目的としたフリーウェアです。商用利用者はまず著作\n"
-"  権者の許可を求める必要があります。商用利用には、Snes9x または SuperSnes9x か\n"
-"  ら派生したソフトウェアに対して料金を請求すること、Snes9x またはその派生\n"
-"  物を商用ゲームバンドルに含めること、および/または SuperSnes9x を商用製品の\n"
-"  宣伝として使用することが含まれますが、これらに限定されません。\n"
-"\n"
-"  著作権者は、将来のバージョンで誰もが改良の恩恵を受けられるよう、バグ修\n"
-"  正やコードの改善を著作権者に転送することを求めます。\n"
-"\n"
-"  Super NES および Super Nintendo Entertainment System は、Nintendo Co.,\n"
-"  Limited およびその子会社の商標です。"
 
 # === Win32 strings (added by i18n/extract_strings.py) ===
 #: win32/rsrc/snes9x.rc
@@ -2104,10 +1479,6 @@ msgstr "すべてのファイル"
 #: win32/rsrc/snes9x.rc
 msgid "all of SuperSnes9x's settings are stored in this file"
 msgstr "SuperSnes9xのすべての設定はこのファイルに保存されます"
-
-#: win32/rsrc/snes9x.rc
-msgid "Allow executable logo override"
-msgstr "実行ファイルのロゴ上書きを許可"
 
 #: win32/rsrc/snes9x.rc
 msgid "Allow Invalid VRAM Access"
@@ -3184,10 +2555,6 @@ msgid "Mute"
 msgstr "ミュート"
 
 #: win32/rsrc/snes9x.rc
-msgid "Mute Sound"
-msgstr "サウンドをミュート"
-
-#: win32/rsrc/snes9x.rc
 msgid "Mute sound"
 msgstr "サウンドをミュート"
 
@@ -3202,10 +2569,6 @@ msgstr "ネットプレイオプション"
 #: win32/rsrc/snes9x.rc
 msgid "New Value"
 msgstr "新しい値"
-
-#: win32/rsrc/snes9x.rc
-msgid "No BIOS"
-msgstr "BIOSなし"
 
 #: win32/wlanguage.h
 msgid "Not a ROM"
@@ -3788,14 +3151,6 @@ msgid "SGB Mix"
 msgstr "SGB Mix"
 
 #: win32/rsrc/snes9x.rc
-msgid "SGB1"
-msgstr "SGB1"
-
-#: win32/rsrc/snes9x.rc
-msgid "SGB2"
-msgstr "SGB2"
-
-#: win32/rsrc/snes9x.rc
 msgid "Show Audio Waveform"
 msgstr "オーディオ波形を表示"
 
@@ -4002,10 +3357,6 @@ msgstr "ステータス"
 #: win32/rsrc/snes9x.rc
 msgid "Stretch Image"
 msgstr "画像を引き伸ばす"
-
-#: win32/rsrc/snes9x.rc
-msgid "SuperFX Clock Speed %:"
-msgstr "SuperFXクロック速度 %:"
 
 #: win32/rsrc/snes9x.rc
 msgid "SuperFX speed:"
@@ -4388,10 +3739,6 @@ msgstr "選択したオブジェクトのみ表示"
 msgid "Toggle Visibility"
 msgstr "表示を切り替え"
 
-#: win32/wsnes9x.cpp
-msgid "Translations"
-msgstr "翻訳"
-
 # === Win32 strings (added by i18n/extract_strings.py) ===
 #: win32/wsnes9x.cpp
 msgid "Language"
@@ -4454,10 +3801,6 @@ msgstr "<html><head/><body><p>音声を最初にどの程度引き伸ばすか�
 msgid "<html><head/><body><p>Determines where to look for optional BIOS / boot ROM files (Super Game Boy boot ROM, BS-X.bin, etc).</p><p><span style=\" font-style:italic;\">ROM Folder</span> looks next to the loaded ROM.</p><p><span style=\" font-style:italic;\">Config Folder</span> uses a \"bios\" subfolder of the config folder.</p><p><span style=\" font-style:italic;\">Custom</span> uses an explicit path (default: \"Bios\" relative to the working directory).</p></body></html>"
 msgstr "<html><head/><body><p>オプションのBIOS / ブートROMファイル（Super Game BoyブートROM、BS-X.binなど）を探す場所を指定します。</p><p><span style=\" font-style:italic;\">ROMフォルダ</span>は、ロードしたROMと同じ場所を参照します。</p><p><span style=\" font-style:italic;\">設定フォルダ</span>は、設定フォルダ内の「bios」サブフォルダを使用します。</p><p><span style=\" font-style:italic;\">カスタム</span>は、明示的に指定したパスを使用します（既定: 作業ディレクトリからの相対パス「Bios」）。</p></body></html>"
 
-#: qt/src/FoldersPanel.ui
-msgid "<html><head/><body><p>Determines where to save these files.</p><p><span style=\" font-style:italic;\">ROM Folder</span> will always save to the same folder as the ROM.</p><p><span style=\" font-style:italic;\">Config Folder</span> will save to a subfolder of the config folder that is shown. If there is a snes9x.conf file next to your executable, SuperSnes9x will operate in portable mode and the config folder will be the folder the executable is in.</p><p><span style=\" font-style:italic;\">Custom</span> allows you to specify exactly where to save these files.</p></body></html>"
-msgstr "<html><head/><body><p>これらのファイルの保存先を指定します。</p><p><span style=\" font-style:italic;\">ROMフォルダ</span>は、常にROMと同じフォルダに保存します。</p><p><span style=\" font-style:italic;\">設定フォルダ</span>は、表示されている設定フォルダのサブフォルダに保存します。実行ファイルの隣にsnes9x.confファイルがある場合、Snes9xはポータブルモードで動作し、設定フォルダは実行ファイルのあるフォルダになります。</p><p><span style=\" font-style:italic;\">カスタム</span>では、これらのファイルの保存先を正確に指定できます。</p></body></html>"
-
 #: qt/src/SoundPanel.ui
 msgid "<html><head/><body><p>Erases all emulated sound output and just sends out silence.</p></body></html>"
 msgstr "<html><head/><body><p>エミュレートされた音声出力をすべて消去し、無音だけを出力します。</p></body></html>"
@@ -4493,10 +3836,6 @@ msgstr "<html><head/><body><p>エミュレートするシステムのフレー�
 #: qt/src/SoundPanel.ui
 msgid "<html><head/><body><p>Selects the driver to output sound with.</p><p><span style=\" font-style:italic;\">Cubeb: </span>The recommended option.</p><p><span style=\" font-style:italic;\">SDL</span>: If Cubeb doesn't work.</p><p><span style=\" font-style:italic;\">PulseAudio:</span> Unix only. May have less latency.</p></body></html>"
 msgstr "<html><head/><body><p>サウンドを出力するドライバを選択します。</p><p><span style=\" font-style:italic;\">Cubeb: </span>推奨オプションです。</p><p><span style=\" font-style:italic;\">SDL</span>: Cubebが動作しない場合に使用します。</p><p><span style=\" font-style:italic;\">PulseAudio:</span> Unixのみ。レイテンシが少ない場合があります。</p></body></html>"
-
-#: qt/src/FoldersPanel.ui
-msgid "<html><head/><body><p>Setting this to anything other than 0 will save the SRAM (internal game saves) file regularly. If it is set to to 0, it will only save when exiting SuperSnes9x or changing games, and you will lose any progress since the last save if your device crashes.</p></body></html>"
-msgstr "<html><head/><body><p>これを0以外に設定すると、SRAM（ゲーム内部のセーブ）ファイルを定期的に保存します。0に設定した場合は、Snes9xの終了時またはゲームの変更時にのみ保存され、デバイスがクラッシュすると前回の保存以降の進行状況が失われます。</p></body></html>"
 
 #: qt/src/SoundPanel.ui
 msgid "<html><head/><body><p>SGB BIOS mix: GB channel volume. Active in SGB1/SGB2 BIOS mode; in BIOS-less mode this mirrors the Regular master, which is what actually scales GB output.</p></body></html>"
@@ -4717,10 +4056,6 @@ msgid "Controller %1"
 msgstr "コントローラー %1"
 
 #: qt/src/ControllerPanel.ui
-msgid "Controller + Multitap"
-msgstr "コントローラー + マルチタップ"
-
-#: qt/src/ControllerPanel.ui
 msgid "Controller Ports:"
 msgstr "コントローラーポート:"
 
@@ -4880,14 +4215,6 @@ msgstr "MB"
 msgid "Merge the fields of the high-resolution lines"
 msgstr "高解像度ラインのフィールドを結合する"
 
-#: qt/src/DisplayPanel.ui
-msgid "Messages"
-msgstr "メッセージ"
-
-#: qt/src/ControllerPanel.ui
-msgid "Mouse + Controller"
-msgstr "マウス + コントローラー"
-
 #: qt/src/SoundPanel.ui
 msgid "ms"
 msgstr "ms"
@@ -4915,10 +4242,6 @@ msgstr "最近開いたファイルはありません"
 #: qt/src/EmulationPanel.ui
 msgid "None - Run unthrottled, unless vsync is turned on"
 msgstr "なし - 垂直同期がオンの場合を除き、制限なしで実行"
-
-#: qt/src/ControllerPanel.ui
-msgid "One Controller"
-msgstr "コントローラー1台"
 
 #: qt/src/DisplayPanel.ui
 msgid "Onscreen - High resolution"
@@ -5180,14 +4503,6 @@ msgstr "シェーダー設定"
 msgid "Show fast-forward and pause icons"
 msgstr "早送りとポーズのアイコンを表示"
 
-#: qt/src/DisplayPanel.ui
-msgid "Show overscan area"
-msgstr "オーバースキャン領域を表示"
-
-#: qt/src/DisplayPanel.ui
-msgid "Show the areas on the top and bottom of the screen that are normally black and hidden by the TV. Some games will draw in these areas."
-msgstr "通常は黒くテレビに隠されている画面上部と下部の領域を表示します。一部のゲームはこれらの領域に描画します。"
-
 #: qt/src/GeneralPanel.ui
 msgid "Show the time"
 msgstr "時刻を表示"
@@ -5263,10 +4578,6 @@ msgstr "Super Game Boy 2"
 #: qt/src/EmulationPanel.ui
 msgid "SuperFX clock speed:"
 msgstr "SuperFXクロック速度:"
-
-#: qt/src/ControllerPanel.ui
-msgid "SuperScope + Controller"
-msgstr "スーパースコープ + コントローラー"
 
 #: qt/src/ShortcutsPanel.ui
 msgid "Swap Controllers 1 and 2"
@@ -5419,10 +4730,6 @@ msgstr "ターボ X"
 #: qt/src/ControllerPanel.ui
 msgid "Turbo Y"
 msgstr "ターボ Y"
-
-#: qt/src/ControllerPanel.ui
-msgid "Two Controllers"
-msgstr "コントローラー2台"
 
 #: qt/src/EmuMainWindow.cpp
 msgid "Unable to create a %1 context. Attempting to use %2."
@@ -5734,102 +5041,6 @@ msgstr "32040Hz (SNES 固有)"
 #: win32/rsrc/snes9x.rc
 msgid "Audio Fidelity:"
 msgstr "ｵｰﾃﾞｨｵ再現性"
-
-#~ msgid "<b>Accuracy</b>"
-#~ msgstr "<b>エミュレーションの正確性</b>"
-
-#~ msgid "%sHosting NetPlay - %s"
-#~ msgstr "%sネットプレイをホストする - %s"
-
-#~ msgid "Paused - "
-#~ msgstr "ポーズ - "
-
-#~ msgid "_Hide Menu"
-#~ msgstr "メニューを隠す(_H)"
-
-#~ msgid "_Status Bar"
-#~ msgstr "ステータスバー(_S)"
-
-#~ msgid "<b>Image Adjustments</b>"
-#~ msgstr "<b>映像設定</b>"
-
-#~ msgid "<b>NTSC Filter</b>"
-#~ msgstr "<b>NTSCフィルター</b>"
-
-#~ msgid "<b>Scanline Filter</b>"
-#~ msgstr "<b>走査線フィルタ</b>"
-
-#~ msgid "Stereo"
-#~ msgstr "ステレオ"
-
-#~ msgid "Output two channels, left and right"
-#~ msgstr "左右2チャンネルで出力します"
-
-#~ msgid "32000 hz (SNES Default)"
-#~ msgstr "32000 Hz (SNESデフォルト)"
-
-#~ msgid "Code does not match Game Genie, ProAction Replay, or GoldFinger format."
-#~ msgstr "コードはプロアクションリプレイ、Game Genie、GoldFingerのいずれのフォーマットにもマッチしませんでした"
-
-#~ msgid "bad option name: %s\n"
-#~ msgstr "不正なオプション: %s\n"
-
-#~ msgid "failure to read SuperSnes9x node"
-#~ msgstr "Snes9xノードが読み込めません"
-
-#~ msgid "Couldn't open config file: %s\n"
-#~ msgstr "コンフィグファイルが開けません: %s\n"
-
-#~ msgid "Cannot load GLSL shader functions.\n"
-#~ msgstr "GLGLシェーダー関数がロードできません\n"
-
-#~ msgid "Cannot read shader file.\n"
-#~ msgstr "シェーダーファイルが開けません\n"
-
-#~ msgid "File %s is not a shader file.\n"
-#~ msgstr "%s はシェーダーファイルではありません\n"
-
-#~ msgid "Shader lacks any programs.\n"
-#~ msgstr "シェーダーはなにかプログラムが不足しています\n"
-
-#~ msgid "pixel_buffer_object extension not supported.\n"
-#~ msgstr "ピクセルバッファオブジェクト拡張はサポートされてません\n"
-
-#~ msgid "Couldn't create an OpenGL context.\n"
-#~ msgstr "OpenGLコンテキストを作成できません\n"
-
-#~ msgid ""
-#~ "\n"
-#~ "Features enabled:<i>"
-#~ msgstr ""
-#~ "\n"
-#~ "有効な機能:<i>"
-
-#~ msgid " Only barebones features enabled<i>"
-#~ msgstr "基本機能のみ有効<i>"
-
-#~ msgid " Joystick"
-#~ msgstr " ジョイスティック"
-
-#~ msgid " NetPlay"
-#~ msgstr " ネットプレイ"
-
-#~ msgid "Automatic"
-#~ msgstr "自動"
-
-#~ msgid "Synchronize with sound"
-#~ msgstr "音声を同期"
-
-#~ msgid "Base emulation speed on the rate sound is output"
-#~ msgstr "エミュレータの速度は音声出力に依存するようになります"
-
-#~ msgid "Frameskip:"
-#~ msgstr "フレームスキップ:"
-
-#~ msgid "Maintain aspect-ratio:"
-#~ msgstr "アスペクト比を維持する:"
-
-# === Win32 strings (added by i18n/extract_strings.py) ===
 
 #: qt/src/EmuMainWindow.cpp
 msgid "\"%1\" holds MSU-1 audio data, but \"%2\" already exists, so it"
@@ -6349,4 +5560,1186 @@ msgstr ""
 
 #: qt/src/AudioWaveformWindow.cpp
 msgid "zoom"
+msgstr ""
+
+# === GTK strings (added by hand scan of gtk/src; xgettext unavailable) ===
+
+#: gtk/src/snes9x.ui
+msgid "6"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "7"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "8"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "6+"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "7+"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "8+"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Sa_ve with Preview…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Loa_d with Preview…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save Ot_her"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save S_creenshot"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save S-_RAM Data"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save _Memory Pack"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_BIOS Manager…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Movie _Play…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Movie _Record…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Movie S_top"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Start _AVI Recording…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Choose _Icon"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _1"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _3"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Icon _4"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Apply to _Launcher Icon"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Run _Ahead"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_0 (off)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_1 frame"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_2 frames"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_3 frames"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_4 frames"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Game _Boy Model"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Game Boy"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Game Boy _Color"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Colorizes Game Boy Color carts. Mono-only carts are experimental — DMG-compatibility colorization is not implemented yet."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Super Game Boy"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Super Game Boy _2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Super Game Boy Co_lor (Experimental)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "A Super Game Boy 2 with a Game Boy Color inside: real Color graphics in the SGB border, with the cart's SGB sound and border packets. No such hardware exists; the SGB2 BIOS is patched in memory for it."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Automatic"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Voicer-_kun"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Attach Audio CD…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Eject Audio CD"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Input"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Input Configuration..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Customize Hotkeys..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Enable _Rumble (Shake)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use SNES _Joypad(s)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use SNES _Mouse"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Super _Scope"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Enable"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Show _Crosshair"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Super Multi_tap (5-player)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Konami _Justifier"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Mouse in _alternate port"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Multitaps (_8-player)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use _Dual Justifiers"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use M.A.C.S. _Rifle"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Sound"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Channels"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _1"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _3"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _4"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _5"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _6"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _7"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Channel _8"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Mute"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Show Audio _Waveform"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Settings…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Color Correction…"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_RetroAchievements"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Enabled"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Login..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Hardcore Mode"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Achievement List..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_View Profile"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "\n                              </object>\n                              <packing>\n                                <property name=\"expand\">False"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Render the SNES colour‑math and transparency effects. Turn off only for troubleshooting."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Blend Hi‑Res Images"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Horizontally blend hi‑res (512‑wide) images, so games that alternate columns for a transparency effect look as intended with filters that do not account for this."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Draw text inside the SNES image with a pixel font instead of the on‑screen overlay (it will get into AVIs, screenshots, and filters). The only way to see messages with the XVideo and software drivers."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>SNES Image</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Pick the blend per game from a built-in list of known flicker-transparency games (off for the rest). Uncheck to set the mode and layer manually for every Game Boy game."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Simple Blend = 50/50 of the last two frames (cancels flicker-transparency); LCD Blend = slow-decay LCD-style ghosting."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Which Game Boy layer to blend: Background keeps moving sprites crisp; Window = the window/HUD layer; Sprites = objects only; All blends everything."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Feed a connected USB webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor. With this off (or no camera connected) the in‑game viewfinder is blank."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Game Boy Image</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Hi-res scaling filter:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Filter used instead of the one above when the frame is high-resolution (512 pixels wide or interlaced)."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the \"zombie\" glitch). Off = exact hardware behaviour, which clicks on every note in some games"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Regular volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Master output volume during normal play. Drags the per-source SGB sliders by the same amount."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Fast-forward volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Master output volume during turbo and rewind."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB SPC volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB BIOS mix: SPC channel volume. Only active in SGB1/SGB2 BIOS mode — BIOS-less GB playback discards SPC output."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB GB volume:"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB BIOS mix: GB channel volume. Active in SGB BIOS mode; in BIOS-less GB playback mirrors the Regular master."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Regular gain (dB):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Master pre-amp applied after the volume percentages. 0 dB is unchanged; boosting can clip loud material."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB SPC gain (dB):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Pre-amp on the SPC side of the SGB mix, applied after its volume percentage. Only active in SGB1/SGB2 BIOS mode."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "SGB GB gain (dB):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Pre-amp on the GB side of the SGB mix, applied after its volume percentage. Only active in SGB1/SGB2 BIOS mode."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Frames to run ahead to reduce input latency (0 to disable):"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Emulates the selected number of frames ahead of the displayed one so input appears to take effect sooner. Uses more CPU time. One frame is safe for most games; higher values can glitch games that poll input mid-frame."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Run Ahead</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Record File → AVI Recording at twice the SNES resolution (512x448) so hi-res and interlaced games keep their detail. Doubles the file size."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>AVI Recording</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Toggle Fast Forward"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Fast Forward"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Increment bank"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Decrement bank"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save with preview"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Load with preview"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save to file"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Load from file"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Quick save state (current bank)</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Quick load state (current bank)</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "<b>Select save slot (current bank)</b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 0"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 1"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 3"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 4"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 5"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 6"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 7"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 8"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Select slot 9"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "Save WAV file..."
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "_Cancel"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "_Save"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "WAV audio"
+msgstr ""
+
+#: gtk/src/gtk_audio_waveform.cpp
+msgid "Couldn't save WAV file:"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "Resolved BIOS: "
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "_OK"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "Select…"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "Select BIOS File"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "_Open"
+msgstr ""
+
+#: gtk/src/gtk_cheat.cpp
+msgid "Added Codes"
+msgstr ""
+
+#: gtk/src/gtk_cheat.cpp
+msgid "Found and added codes from database: "
+msgstr ""
+
+#: gtk/src/gtk_control.cpp
+msgid "Rewind is not allowed in Hardcore mode"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Joypad {}"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "SuperSnes9x Movie Files"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "_Browse…"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Current ROM: {}"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Movie's ROM: {}"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid " <-- MISMATCH !!!"
+msgstr ""
+
+#: gtk/src/gtk_movie.cpp
+msgid "Path: {}"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Login"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Your password is only used to obtain a login token.\nIt is never saved."
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Missable"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Progression"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Win Condition"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Unlocked (Hardcore)"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Unlocked"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Locked"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Inactive"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "%s — %u of %u achievements, %u of %u points"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Logged in as "
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid " - Hardcore"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Not logged in"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "No game loaded"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Close"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Title"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Points"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Progress"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Type"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "This action"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid " is not allowed while Hardcore mode is active."
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "RetroAchievements — Hardcore Mode"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "Disable Hardcore mode to proceed?\n(Achievement progress for this session will be lost.)"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Logout "
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "_Logout"
+msgstr ""
+
+#: gtk/src/gtk_retroachievements.cpp
+msgid "RetroAchievements — Login Failed"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't update the launcher icon."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "That setting is locked while a movie is active."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Voicer-kun: audio CD ejected"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Audio CD Images"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "This audio CD was not accepted:\n{}"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Movie playback"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Movie recording"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "AVI Files"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Stop _AVI Recording"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "This archive holds MSU-1 audio data, but "
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " already exists, so it can't be renamed. Load that file instead, or unpack the archive and load the ROM from the folder."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to "
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " and load it?"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't rename the archive: "
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Loading save states"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't save S-RAM file:"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Couldn't save Memory Pack file:"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " (Missing BIOS)"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " (Experimental)"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Bank #_{}"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Slot #_{}"
+msgstr ""
+
+#: gtk/src/gtk_state_preview_dialog.cpp
+msgid "Bank #{}"
+msgstr ""
+
+#: gtk/src/gtk_state_preview_dialog.cpp
+msgid "Slot #{}"
+msgstr ""
+
+# === Template entries added from snes9x.pot ===
+
+#: src/gtk_binding.cpp:257
+msgid "Keyboard {}{}{}{}"
+msgstr ""
+
+#: src/gtk_binding.cpp:267
+msgid "Axis {} {} {}%"
+msgstr ""
+
+#: src/gtk_binding.cpp:272
+msgid "Button {}"
+msgstr ""
+
+#: src/gtk_binding.cpp:274
+msgid "Joystick {} {}"
+msgstr ""
+
+#: src/gtk_config.cpp:407
+msgid "Couldn't create config directory: {}\n"
+msgstr ""
+
+#: src/gtk_netplay_dialog.cpp:31
+msgid "frame behind"
+msgid_plural "frames behind"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/gtk_preferences.cpp:143
+msgid "OpenGL – Use 3D graphics hardware"
+msgstr ""
+
+#: src/gtk_preferences.cpp:145
+msgid "XVideo – Use hardware video blitter"
+msgstr ""
+
+#: src/gtk_preferences.cpp:147
+msgid "Vulkan"
+msgstr ""
+
+#: src/gtk_preferences.cpp:149
+msgid "None – Use software scaler"
+msgstr ""
+
+#: src/gtk_preferences.cpp:179 src/gtk_preferences.cpp:446
+msgid "thread for filtering and scaling"
+msgid_plural "threads for filtering and scaling"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/gtk_preferences.cpp:236 src/gtk_preferences.cpp:500
+msgid "millisecond"
+msgid_plural "milliseconds"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/gtk_preferences.cpp:260 src/gtk_preferences.cpp:476
+msgid "second after change"
+msgid_plural "seconds after change"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/gtk_preferences.cpp:298
+msgid "Select directory"
+msgstr ""
+
+#: src/gtk_preferences.cpp:379
+msgid "Select Shader File"
+msgstr ""
+
+#: src/gtk_s9x.cpp:206
+msgid "Using rewind buffer of {0}\n"
+msgstr ""
+
+#: src/gtk_s9x.cpp:598
+msgid ""
+"GTK port options:\n"
+"-filter [option]               Use a filter to scale the image.\n"
+"                               [option] is one of: none supereagle 2xsai\n"
+"                               super2xsai hq2x hq3x hq4x 2xbrz 3xbrz 4xbrz "
+"epx ntsc\n"
+"\n"
+"-mutesound                     Disables sound output.\n"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:839
+msgid "Open ROM Image"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:850
+msgid "ROM Images"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:857
+msgid "Super Nintendo ROM Images"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:862
+msgid "Game Boy ROM Images"
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:740
+msgid "Couldn't load file: "
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:796
+msgid "The current frame in the movie is <b>{0:Ld}</b>."
+msgstr ""
+
+#: src/gtk_s9xwindow.cpp:872
+msgid "Couldn't save SPC file:"
+msgstr ""
+
+#: src/snes9x.ui:663
+msgid "Fast‑forward to frame"
+msgstr ""
+
+#: src/snes9x.ui:895
+msgctxt "filter list"
+msgid "None"
+msgstr ""
+
+#: src/snes9x.ui:974
+msgid "Scale low‑resolution screens"
+msgstr ""
+
+#: src/snes9x.ui:1078
+msgid "Timer‑based"
+msgstr ""
+
+#: src/snes9x.ui:1081
+msgid "Timer‑based with automatic frame-skipping"
+msgstr ""
+
+#: src/snes9x.ui:1098
+msgid "48,000 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1101
+msgid "44,100 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1104
+msgid "32,000 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1107
+msgid "22,050 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1110
+msgid "16,000 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1113
+msgid "11,025 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1116
+msgid "8,000 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1119
+msgid "0 Hz"
+msgstr ""
+
+#: src/snes9x.ui:1136
+msgid "16‑bit (GL_RGB)"
+msgstr ""
+
+#: src/snes9x.ui:1139
+msgid "32‑bit (GL_BGRA)"
+msgstr ""
+
+#: src/snes9x.ui:1202
+msgid "_Open ROM Image…"
+msgstr ""
+
+#: src/snes9x.ui:1225
+msgid "Clear Recent Items"
+msgstr ""
+
+#: src/snes9x.ui:1237
+msgid "Open with _NetPlay…"
+msgstr ""
+
+#: src/snes9x.ui:1251
+msgid "Open _MultiCart…"
+msgstr ""
+
+#: src/snes9x.ui:1372
+msgid "From _File…"
+msgstr ""
+
+#: src/snes9x.ui:1506
+msgid "To _File…"
+msgstr ""
+
+#: src/snes9x.ui:1523
+msgid "Save SPC…"
+msgstr ""
+
+#: src/snes9x.ui:1540
+msgid "Show ROM _Info…"
+msgstr ""
+
+#: src/snes9x.ui:1557
+msgid "gtk-quit"
+msgstr ""
+
+#: src/snes9x.ui:1643
+msgid "_Jump to Frame…"
+msgstr ""
+
+#: src/snes9x.ui:1746
+msgid "_1×"
+msgstr ""
+
+#: src/snes9x.ui:1755
+msgid "_2×"
+msgstr ""
+
+#: src/snes9x.ui:1764
+msgid "_3×"
+msgstr ""
+
+#: src/snes9x.ui:1773
+msgid "_4×"
+msgstr ""
+
+#: src/snes9x.ui:1782
+msgid "_5×"
+msgstr ""
+
+#: src/snes9x.ui:1791
+msgid "_6×"
+msgstr ""
+
+#: src/snes9x.ui:1800
+msgid "_7×"
+msgstr ""
+
+#: src/snes9x.ui:1809
+msgid "_8×"
+msgstr ""
+
+#: src/snes9x.ui:1818
+msgid "_9×"
+msgstr ""
+
+#: src/snes9x.ui:1827
+msgid "1_0×"
+msgstr ""
+
+#: src/snes9x.ui:1996
+msgid "_Cheats…"
+msgstr ""
+
+#: src/snes9x.ui:2010
+msgid "_Shader Parameters…"
+msgstr ""
+
+#: src/snes9x.ui:2026
+msgid "gtk-preferences"
+msgstr ""
+
+#: src/snes9x.ui:2303 src/snes9x.ui:4001 src/snes9x.ui:5116 src/snes9x.ui:5131
+#: src/snes9x.ui:5148 src/snes9x.ui:5165 src/snes9x.ui:5182
+msgid "Browse…"
+msgstr ""
+
+#: src/snes9x.ui:2857
+msgid "Show fast‑forward and pause indicators"
+msgstr ""
+
+#: src/snes9x.ui:2898
+msgid "On‑screen display size:"
+msgstr ""
+
+#: src/snes9x.ui:2909
+msgid "The size of on‑screen display messages in pixels"
+msgstr ""
+
+#: src/snes9x.ui:3111
+msgid "Use"
+msgstr ""
+
+#: src/snes9x.ui:3170
+msgid "High‑resolution effect:"
+msgstr ""
+
+#: src/snes9x.ui:3309
+msgid "S‑Video"
+msgstr ""
+
+#: src/snes9x.ui:3897
+msgid "Bilinear‐filter output"
+msgstr ""
+
+#: src/snes9x.ui:3912
+msgid "Use best settings for FreeSync/G‑Sync when in fullscreen"
+msgstr ""
+
+#: src/snes9x.ui:4033
+msgid "Force an inverted byte‑ordering"
+msgstr ""
+
+#: src/snes9x.ui:4037
+msgid ""
+"Forces a swapped byte‑ordering for cases where the system’s endian is used "
+"instead of the video card"
+msgstr ""
+
+#: src/snes9x.ui:4182
+msgid "Sets the correct input rate based on the display’s refresh rate"
+msgstr ""
+
+#: src/snes9x.ui:4382
+msgid ""
+"Adjust to produce more or less data. Decrease the rate if experiencing "
+"crackling. Increase the rate if experiencing frame rate stuttering. Best "
+"used with the “Sound buffer synchronization” option."
+msgstr ""
+
+#: src/snes9x.ui:5325
+msgid ""
+"Automatically save the game’s SRAM at this interval. Setting this to 0 will "
+"only save when quitting or changing ROMs"
+msgstr ""
+
+#: src/snes9x.ui:5542
+msgid "Use _modifier keys (Ctrl, Shift, Alt) directly"
+msgstr ""
+
+#: src/snes9x.ui:6677 src/snes9x.ui:9029
+msgid ""
+"<small>Click an entry and then press the desired keys or joystick button\n"
+"<tt>Escape</tt>: Move to next  <tt>Shift+Escape</tt>: Clear selected</small>"
+msgstr ""
+
+#: src/snes9x.ui:7247
+msgid "Toggle forced backdrop color"
+msgstr ""
+
+#: src/snes9x.ui:9120
+msgid "Force‑enable button and menu icons"
+msgstr ""
+
+#: src/snes9x.ui:9141
+msgid "The <tt>Esc</tt> key should:"
+msgstr ""
+
+#: src/snes9x.ui:9344
+msgid ""
+"  Snes9x – A Portable Super Nintendo Entertainment System™ Emulator\n"
+"\n"
+"  Snes9x homepage: http://www.snes9x.com/\n"
+"  Snes9x source code: https://github.com/shanytc/snes9x/\n"
+"\n"
+"  Permission to use, copy, modify and/or distribute Snes9x in both binary\n"
+"  and source form, for non‑commercial purposes, is hereby granted without\n"
+"  fee, providing that this license information and copyright notice appear\n"
+"  with all copies and any derived work.\n"
+"\n"
+"  This software is provided ‘as‑is’, without any express or implied\n"
+"  warranty. In no event shall the authors be held liable for any damages\n"
+"  arising from the use of this software or it’s derivatives.\n"
+"\n"
+"  Snes9x is freeware for PERSONAL USE only. Commercial users should\n"
+"  seek permission of the copyright holders first. Commercial use includes,\n"
+"  but is not limited to, charging money for Snes9x or software derived from\n"
+"  Snes9x, including Snes9x or derivatives in commercial game bundles, and/"
+"or\n"
+"  using Snes9x as a promotion for your commercial product.\n"
+"\n"
+"  The copyright holders request that bug fixes and improvements to the code\n"
+"  should be forwarded to them so everyone can benefit from the "
+"modifications\n"
+"  in future versions.\n"
+"\n"
+"  Super NES and Super Nintendo Entertainment System are trademarks of\n"
+"  Nintendo Co., Limited and its subsidiary companies."
 msgstr ""

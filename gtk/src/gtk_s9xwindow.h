@@ -57,9 +57,17 @@ class Snes9xWindow : public GtkBuilderWindow
     void state_preview_dialog(bool is_save);
     void configure_widgets();
     void save_spc_dialog();
+    void save_screenshot();
+    void save_sram();
+    void save_memory_pack();
     bool try_open_rom(const std::string &filename);
     std::string prompt_rename_msu1_pack(const std::string &filename);
-    std::string open_movie_dialog(bool readonly);
+    /* File->Movie Play/Record/Stop and AVI Recording, as on win32. */
+    void play_movie_dialog();
+    void record_movie_dialog();
+    void stop_movie();
+    void toggle_avi_recording();
+    void update_movie_menu();
     void movie_seek_dialog();
     void open_multicart_dialog();
     void open_voicekun_dialog();
@@ -69,6 +77,12 @@ class Snes9xWindow : public GtkBuilderWindow
     /* GTK-base-related functions */
     void show();
     void set_menu_item_selected(const char *name);
+    void update_controller_option_menu();
+    void apply_window_icon();
+    void choose_window_icon(int index);
+    void set_write_icon_to_launcher(bool enabled);
+    void sync_launcher_icon();
+    void update_icon_menu();
     void set_mouseable_area(int x, int y, int width, int height);
     void set_accelerator_to_binding(const char *name,
                                         const char *binding);
@@ -86,7 +100,6 @@ class Snes9xWindow : public GtkBuilderWindow
     int get_auto_input_rate();
     void connect_signals();
     bool event_key(GdkEventKey *event);
-    void port_activate(const char *name);
     bool button_press(GdkEventButton *event);
     bool button_release(GdkEventButton *event);
     bool motion_notify(GdkEventMotion *event);
@@ -97,6 +110,8 @@ class Snes9xWindow : public GtkBuilderWindow
     Snes9xConfig *config;
     bool refreshing_bios_menu = false;
     bool refreshing_runahead_menu = false;
+    bool refreshing_controller_menu = false;
+    bool refreshing_icon_menu = false;
     int user_pause, sys_pause;
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;

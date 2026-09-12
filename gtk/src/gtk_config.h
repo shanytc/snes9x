@@ -65,6 +65,9 @@ class Snes9xConfig
     int scale_method;
     int hires_scale_method;
     bool overscan;
+    /* win32's "Blend Hi-Res Images": horizontally blend 512-wide hi-res frames
+       before the software filter. */
+    bool blend_hires;
     bool multithreading;
     int hires_effect;
     bool force_inverted_byte_order;
@@ -160,6 +163,13 @@ class Snes9xConfig
     bool modal_dialogs;
     bool enable_icons;
 
+    /* File->Choose Icon: which of the four bundled logos (1-4) the window
+     * shows, like win32's Window:Icon, and whether the choice is also written
+     * into the user's icon theme so launchers and docks pick it up (the Linux
+     * stand-in for win32's WriteIconToExe). */
+    int window_icon;
+    bool write_icon_to_launcher;
+
     // Control the appearance of the on-disk config file itself (mirrors win32).
     bool config_show_comments;
     bool config_nice_alignment;
@@ -173,6 +183,16 @@ class Snes9xConfig
     int current_save_slot;
     int current_save_bank;
 
+    /* Last choices made in the movie dialogs, remembered like win32's
+     * MovieDefault* settings. */
+    bool movie_default_read_only;
+    bool movie_default_from_reset;
+    bool movie_default_clear_sram;
+
+    /* File->AVI Recording writes 512x448 frames instead of 256x224, like
+     * win32's "Hi-Res AVI Recording" option. */
+    bool avi_hires;
+
     XRRScreenResources *xrr_screen_resources;
     XRRCrtcInfo *xrr_crtc_info;
 
@@ -184,6 +204,15 @@ class Snes9xConfig
     JoyDevices joysticks;
     int joystick_threshold;
     bool enable_rumble;
+
+    /* Controller-port devices (ControllerOption in gtk_control.h). A ROM's
+     * NSRT header may pick the devices itself and narrow the menu to the ones
+     * the game supports; the choice it displaced comes back on the next load
+     * unless the user has picked something by hand since. */
+    int controller_option;
+    bool superscope_crosshair_visible;
+    int valid_controller_options;
+    int controller_option_before_rom;
 };
 
 std::string get_config_dir();

@@ -140,6 +140,12 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Gui)
 list(APPEND LIBS Qt6::Widgets Qt6::Gui)
+# main.cpp reads the platform theme's palette back on Qt 6.2/6.3 (the
+# QTBUG-98762 workaround), and QPlatformTheme is QPA API: private headers,
+# which Ubuntu 22.04's qt6-base-private-dev provides.
+if(NOT WIN32 AND NOT APPLE AND Qt6_VERSION VERSION_LESS 6.3.2)
+    list(APPEND LIBS Qt6::GuiPrivate)
+endif()
 
 # Must come before the first pkg_check_modules() call below. It used to sit
 # after the libcurl lookup and only worked because something else in the
@@ -157,7 +163,6 @@ else()
     list(APPEND INCLUDES ${CURL_INCLUDE_DIRS})
     list(APPEND LIBS ${CURL_LIBRARIES})
 endif()
-list(APPEND INCLUDES ${Qt6Gui_PRIVATE_INCLUDE_DIRS})
 
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
@@ -247,6 +252,8 @@ else()
     ../common/video/wayland/viewporter-client-protocol.h
     ../common/video/wayland/wayland-idle-inhibit-unstable-v1.c
     ../common/video/wayland/wayland-idle-inhibit-unstable-v1.h
+    ../common/desktop/xdg_app_icon.cpp
+    ../common/desktop/xdg_app_icon.hpp
     ../external/glad/src/glx.c
     ../external/glad/src/egl.c)
 endif()
@@ -314,6 +321,18 @@ list(APPEND QT_GUI_SOURCES
     src/StatePreviewDialog.hpp
     src/ColorCorrectionDialog.cpp
     src/ColorCorrectionDialog.hpp
+    src/MovieDialogs.cpp
+    src/MovieDialogs.hpp
+    src/AudioWaveformWindow.cpp
+    src/AudioWaveformWindow.hpp
+    ../common/recording/avi_writer.cpp
+    ../common/recording/avi_writer.hpp
+    ../common/recording/avi_recorder.cpp
+    ../common/recording/avi_recorder.hpp
+    ../common/video/gb_camera_v4l2.cpp
+    ../common/video/gb_camera_v4l2.hpp
+    ../common/audio/audio_waveform.cpp
+    ../common/audio/audio_waveform.hpp
     src/SoftwareScalers.cpp
     src/SoftwareFilters.cpp
     src/SoftwareFilters.hpp

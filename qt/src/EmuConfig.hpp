@@ -42,6 +42,12 @@ struct EmuConfig
     int current_save_bank = 0;
     std::vector<std::string> recently_used;
 
+    // Last choices made in the movie dialogs, remembered like win32's
+    // MovieDefault* settings.
+    bool movie_default_read_only = true;
+    bool movie_default_from_reset = false;
+    bool movie_default_clear_sram = false;
+
     // General
     bool fullscreen_on_open;
     bool disable_screensaver;
@@ -53,6 +59,13 @@ struct EmuConfig
     bool show_time;
 
     std::string language;
+
+    // File->Choose Icon: which of the four bundled logos (1-4) the window
+    // shows, like win32's Window:Icon, and whether the choice is also written
+    // into the user's icon theme so launchers and docks pick it up (the Linux
+    // stand-in for win32's WriteIconToExe).
+    int window_icon;
+    bool write_icon_to_launcher;
 
     // Display
     std::string display_driver;
@@ -71,6 +84,11 @@ struct EmuConfig
     int aspect_ratio_numerator;
     int aspect_ratio_denominator;
     bool show_overscan;
+    // The rest of win32's "SNES Image" box: the core's colour-math/transparency
+    // effects (Settings.Transparency) and a horizontal blend of 512-wide hi-res
+    // frames before the software filter ("Blend Hi-Res Images").
+    bool transparency_effects;
+    bool blend_hires;
     enum HighResolutionEffect
     {
         eLeaveAlone = 0,
@@ -113,6 +131,10 @@ struct EmuConfig
     };
     int gb_frame_blend_layer;
     bool gb_frame_blend_auto;
+    // Feed a webcam into the Game Boy Camera cartridge (win32 "Enable Video
+    // Camera"); the index is the device's position in the enumerated list.
+    bool gb_video_camera;
+    int gb_video_camera_index;
 
     bool color_correction;
     bool color_adjustments_enabled;
@@ -165,6 +187,10 @@ struct EmuConfig
     int rewind_frame_interval;
 
     int run_ahead_frames;
+
+    // File->AVI Recording writes 512x448 frames instead of 256x224, like
+    // win32's "Hi-Res AVI Recording" option.
+    bool avi_hires;
 
     // Emulation/Hacks
 
@@ -235,15 +261,33 @@ struct EmuConfig
     std::string ra_api_token;
     std::string ra_emulator_name = "SuperSnes9x";
 
+    /* What is plugged into the two controller ports. One entry per item of
+     * win32's Input menu device list, in the same order as its enum, so the
+     * NSRT auto-detection table can be shared verbatim. */
     enum PortConfiguration
     {
-        eOneController = 0,
-        eTwoControllers,
-        eMousePlusController,
-        eSuperScopePlusController,
-        eControllerPlusMultitap
+        eJoypads = 0,
+        eMouse,
+        eSuperScope,
+        eMultitap5,
+        eJustifier,
+        eMouseSwapped,
+        eMultitap8,
+        eDualJustifiers,
+        eMacsRifle,
+        eNumPortConfigurations
     };
     int port_configuration;
+    bool superscope_crosshair_visible;
+
+    // A mouse or light gun is aimed with the host pointer.
+    static bool portConfigurationUsesPointer(int configuration);
+    // Light guns aim at absolute screen positions; the SNES Mouse is relative.
+    static bool portConfigurationUsesGun(int configuration);
+
+    /* Bindings for SNES pads 1-8: two on the console, up to eight with a
+     * multitap in each port, as on win32. */
+    static const int num_controllers = 8;
 
     static const int allowed_bindings = 4;
     static const int num_controller_bindings = 18;
@@ -264,7 +308,7 @@ struct EmuConfig
         struct
         {
             EmuBinding buttons[num_controller_bindings * allowed_bindings];
-        } controller[5];
+        } controller[num_controllers];
 
         EmuBinding shortcuts[num_shortcuts * allowed_bindings];
     } binding;

@@ -4,20 +4,27 @@
 #include <QMenuBar>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFile>
 #include <QMessageBox>
 #include <QtEvents>
 #include <QGuiApplication>
+#include <QApplication>
 #include <QActionGroup>
 
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
 #endif
 
+#include "AudioWaveformWindow.hpp"
 #include "CheatsDialog.hpp"
 #include "ColorCorrectionDialog.hpp"
+#include "MovieDialogs.hpp"
 #include "StatePreviewDialog.hpp"
 #include "EmuApplication.hpp"
 #include "EmuConfig.hpp"
+#if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)
+#include "common/desktop/xdg_app_icon.hpp"
+#endif
 #include "snes9x.h"
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "RAIntegrationQt.hpp"
@@ -42,6 +49,9 @@
 #include "display.h"
 #include "msu1.h"
 #include "voicekun.h"
+#include "movie.h"
+#include "snapshot.h"
+#include "fscompat.h"
 
 #include <QMessageBox>
 #include <QDesktopServices>
@@ -349,13 +359,97 @@ void EmuMainWindow::voicekunDetach()
     }
 }
 
+// File->Choose Icon: the four bundled logos, 1-4 like win32's Window:Icon.
+static const int logo_sizes[] = { 16, 24, 32, 48, 64, 128, 256 };
+static const char *launcher_icon_name = "snes9x"; // Icon= of super-snes9x-qt.desktop
+
+static int clampLogoIndex(int n)
+{
+    return (n < 1 || n > 4) ? 1 : n;
+}
+
+QIcon EmuMainWindow::logoIcon(int index)
+{
+    QIcon icon;
+    for (int size : logo_sizes)
+        icon.addFile(QString(":/icons/logos/logo%1_%2.png").arg(clampLogoIndex(index)).arg(size),
+                     QSize(size, size));
+    return icon;
+}
+
+void EmuMainWindow::applyWindowIcon()
+{
+    int index = clampLogoIndex(app->config->window_icon);
+    // Icon 1 is the stock look, so an icon theme that ships its own snes9x
+    // icon still wins there, as it always has.
+    if (index == 1)
+        setWindowIcon(QIcon::fromTheme("snes9x", QIcon(":/icons/snes9x.svg")));
+    else
+        setWindowIcon(logoIcon(index));
+}
+
+void EmuMainWindow::chooseWindowIcon(int index)
+{
+    index = clampLogoIndex(index);
+    if (index == clampLogoIndex(app->config->window_icon))
+        return;
+    app->config->window_icon = index;
+    applyWindowIcon();
+    app->config->saveFile(EmuConfig::findConfigFile());
+    if (app->config->write_icon_to_launcher)
+        syncLauncherIcon();
+}
+
+void EmuMainWindow::setWriteIconToLauncher(bool enabled)
+{
+    app->config->write_icon_to_launcher = enabled;
+    app->config->saveFile(EmuConfig::findConfigFile());
+    syncLauncherIcon();
+}
+
+// The Linux stand-in for win32 rewriting the .exe icon: put the chosen logo
+// into the user's icon theme (or take it out again when the option is off) so
+// the launcher, dock and task bar follow the window.
+void EmuMainWindow::syncLauncherIcon()
+{
+#if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)
+    // What the shipped super-snes9x-qt.desktop says, for the entry written
+    // when the program is not installed.
+    static const XdgAppIcon::DesktopEntry entry = {
+        "super-snes9x-qt", "Super Snes9x", "A Super Nintendo emulator", "Game;Emulator;",
+        "application/vnd.nintendo.snes.rom;application/x-snes-rom;application/x-gameboy-rom;"
+        "application/x-gameboy-color-rom;"
+    };
+    std::string error;
+    bool ok;
+    if (!app->config->write_icon_to_launcher)
+    {
+        ok = XdgAppIcon::Restore(launcher_icon_name, entry, error);
+    }
+    else
+    {
+        int index = clampLogoIndex(app->config->window_icon);
+        std::vector<XdgAppIcon::Image> images;
+        for (int size : logo_sizes)
+        {
+            QFile file(QString(":/icons/logos/logo%1_%2.png").arg(index).arg(size));
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+            QByteArray png = file.readAll();
+            images.push_back({ size, std::vector<uint8_t>(png.begin(), png.end()) });
+        }
+        ok = XdgAppIcon::Install(launcher_icon_name, images, entry, error);
+    }
+    if (!ok)
+        QMessageBox::warning(this, tr("Choose Icon"),
+                             tr("Couldn't update the launcher icon.\n\n%1").arg(QString::fromStdString(error)));
+#endif
+}
+
 void EmuMainWindow::createWidgets()
 {
     setWindowTitle(QString("SuperSnes9x %1").arg(VERSION_DISPLAY));
-    if (QIcon::hasThemeIcon("snes9x"))
-        setWindowIcon(QIcon::fromTheme("snes9x"));
-    else
-        setWindowIcon(QIcon(":/icons/snes9x.svg"));
+    applyWindowIcon();
 
 #ifdef Q_OS_WIN
     HWND hwnd = reinterpret_cast<HWND>(winId());
@@ -445,10 +539,114 @@ void EmuMainWindow::createWidgets()
     core_actions.push_back(load_preview_item);
 
     file_menu->addSeparator();
+
+    // File->Save Other submenu: the dialog-less exports from the win32 File menu.
+    auto save_other_menu = new QMenu(tr("Save Ot&her"), file_menu);
+
+    auto save_spc_item = save_other_menu->addAction(tr("Save &SPC Data"));
+    connect(save_spc_item, &QAction::triggered, [&] {
+        app->saveSPC();
+    });
+    core_actions.push_back(save_spc_item);
+
+    auto save_screenshot_item = save_other_menu->addAction(tr("Save S&creenshot"));
+    connect(save_screenshot_item, &QAction::triggered, [&] {
+        app->takeScreenshot();
+    });
+    core_actions.push_back(save_screenshot_item);
+
+    auto save_sram_item = save_other_menu->addAction(tr("Save S-&RAM Data"));
+    connect(save_sram_item, &QAction::triggered, [&] {
+        app->saveSRAM();
+    });
+    core_actions.push_back(save_sram_item);
+
+    auto save_mempack_item = save_other_menu->addAction(tr("Save &Memory Pack"));
+    connect(save_mempack_item, &QAction::triggered, [&] {
+        app->saveMemoryPack();
+    });
+    core_actions.push_back(save_mempack_item);
+    // Only BS-X and Sufami-style multicarts carry a memory pack, so re-check
+    // each time the submenu opens (the game may have changed since).
+    connect(save_other_menu, &QMenu::aboutToShow, this, [this, save_mempack_item] {
+        save_mempack_item->setEnabled(app->isCoreActive() && app->hasMemoryPack());
+    });
+
+    file_menu->addMenu(save_other_menu);
+
     auto bios_manager_item = file_menu->addAction(tr("&BIOS Manager..."));
     connect(bios_manager_item, &QAction::triggered, this, [this] {
         openBiosManager();
     });
+
+    file_menu->addSeparator();
+
+    // win32's movie items: play back or record an input movie (.smv).
+    auto movie_play_item = file_menu->addAction(tr("Movie &Play..."));
+    connect(movie_play_item, &QAction::triggered, [&] {
+        playMovieDialog();
+    });
+    core_actions.push_back(movie_play_item);
+
+    auto movie_record_item = file_menu->addAction(tr("Movie &Record..."));
+    connect(movie_record_item, &QAction::triggered, [&] {
+        recordMovieDialog();
+    });
+    core_actions.push_back(movie_record_item);
+
+    movie_stop_action = file_menu->addAction(tr("Movie &Stop"));
+    connect(movie_stop_action, &QAction::triggered, [&] {
+        app->stopMovie();
+    });
+    core_actions.push_back(movie_stop_action);
+
+    file_menu->addSeparator();
+
+    // One item that starts or stops, relabelled like win32's.
+    avi_recording_action = file_menu->addAction(tr("Start &AVI Recording..."));
+    connect(avi_recording_action, &QAction::triggered, [&] {
+        toggleAVIRecording();
+    });
+    core_actions.push_back(avi_recording_action);
+
+    connect(file_menu, &QMenu::aboutToShow, this, [this] {
+        movie_stop_action->setEnabled(app->isCoreActive() && app->isMovieActive());
+        avi_recording_action->setText(app->isAVIRecording() ? tr("Stop &AVI Recording")
+                                                            : tr("Start &AVI Recording..."));
+    });
+
+    file_menu->addSeparator();
+
+    // win32's File->Choose Icon: one of four bundled logos for the window and
+    // task bar. There is no .exe icon to rewrite on Linux, so the launcher
+    // item writes the logo into the user's icon theme instead.
+    auto icon_menu = new QMenu(tr("Choose &Icon"), file_menu);
+    auto icon_group = new QActionGroup(icon_menu);
+    std::vector<QAction *> icon_actions;
+    for (int i = 1; i <= 4; i++)
+    {
+        auto action = icon_menu->addAction(logoIcon(i), tr("Icon &%1").arg(i));
+        action->setCheckable(true);
+        action->setActionGroup(icon_group);
+        connect(action, &QAction::triggered, this, [this, i] { chooseWindowIcon(i); });
+        icon_actions.push_back(action);
+    }
+    QAction *launcher_action = nullptr;
+#if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)
+    icon_menu->addSeparator();
+    launcher_action = icon_menu->addAction(tr("Apply to &Launcher Icon"));
+    launcher_action->setCheckable(true);
+    connect(launcher_action, &QAction::triggered, this, [this](bool checked) {
+        setWriteIconToLauncher(checked);
+    });
+#endif
+    connect(icon_menu, &QMenu::aboutToShow, this, [this, icon_actions, launcher_action] {
+        icon_actions[clampLogoIndex(app->config->window_icon) - 1]->setChecked(true);
+        if (launcher_action)
+            launcher_action->setChecked(app->config->write_icon_to_launcher);
+    });
+    file_menu->addMenu(icon_menu);
+    file_menu->addSeparator();
 
     auto languages = EmuPoTranslator::availableLanguages();
     if (languages.size() > 1)
@@ -611,6 +809,76 @@ void EmuMainWindow::createWidgets()
 
     menuBar()->addMenu(emulation_menu);
 
+    // win32's Input menu: the configuration dialogs, rumble, and the device
+    // list for the two controller ports.
+    auto input_menu = new QMenu(tr("&Input"));
+
+    // The Controllers and Shortcuts settings panels (indices into the
+    // Options menu's setting_panels list below).
+    auto input_configuration_item = input_menu->addAction(QIcon(iconset + "joypad.svg"), tr("&Input Configuration..."));
+    QObject::connect(input_configuration_item, &QAction::triggered, [&] {
+        if (!g_emu_settings_window)
+            g_emu_settings_window = new EmuSettingsWindow(this, app);
+        g_emu_settings_window->show(4);
+    });
+    auto customize_hotkeys_item = input_menu->addAction(QIcon(iconset + "keyboard.svg"), tr("&Customize Hotkeys..."));
+    QObject::connect(customize_hotkeys_item, &QAction::triggered, [&] {
+        if (!g_emu_settings_window)
+            g_emu_settings_window = new EmuSettingsWindow(this, app);
+        g_emu_settings_window->show(5);
+    });
+
+    input_menu->addSeparator();
+
+    // win32's Input->Enable Rumble (Shake): pass LRG rumble-cart motor
+    // effects to the port-1 gamepad.
+    auto rumble_item = input_menu->addAction(tr("Enable &Rumble (Shake)"));
+    rumble_item->setCheckable(true);
+    rumble_item->setChecked(app->config->enable_rumble);
+    QObject::connect(rumble_item, &QAction::triggered, [&](bool checked) {
+        app->config->enable_rumble = checked;
+    });
+
+    input_menu->addSeparator();
+
+    // What is plugged into the two controller ports. Items a ROM's NSRT
+    // header rules out are greyed.
+    port_configuration_actions.assign(EmuConfig::eNumPortConfigurations, nullptr);
+    auto add_device_item = [&](QMenu *menu, int configuration, const QString &text) {
+        auto action = menu->addAction(text);
+        action->setCheckable(true);
+        QObject::connect(action, &QAction::triggered, [&, configuration] {
+            app->setPortConfiguration(configuration);
+            updatePortConfigurationMenu();
+        });
+        port_configuration_actions[configuration] = action;
+    };
+
+    add_device_item(input_menu, EmuConfig::eJoypads, tr("Use SNES &Joypad(s)"));
+    add_device_item(input_menu, EmuConfig::eMouse, tr("Use SNES &Mouse"));
+
+    auto superscope_menu = input_menu->addMenu(tr("Use Super &Scope"));
+    add_device_item(superscope_menu, EmuConfig::eSuperScope, tr("&Enable"));
+    superscope_crosshair_action = superscope_menu->addAction(tr("Show &Crosshair"));
+    superscope_crosshair_action->setCheckable(true);
+    QObject::connect(superscope_crosshair_action, &QAction::triggered, [&](bool checked) {
+        app->setSuperScopeCrosshairVisible(checked);
+    });
+
+    add_device_item(input_menu, EmuConfig::eMultitap5, tr("Use Super Multi&tap (5-player)"));
+    add_device_item(input_menu, EmuConfig::eJustifier, tr("Use Konami &Justifier"));
+    add_device_item(input_menu, EmuConfig::eMouseSwapped, tr("Use Mouse in &alternate port"));
+    add_device_item(input_menu, EmuConfig::eMultitap8, tr("Use Multitaps (&8-player)"));
+    add_device_item(input_menu, EmuConfig::eDualJustifiers, tr("Use &Dual Justifiers"));
+    add_device_item(input_menu, EmuConfig::eMacsRifle, tr("Use M.A.C.S. &Rifle"));
+
+    QObject::connect(input_menu, &QMenu::aboutToShow, [&] {
+        updatePortConfigurationMenu();
+    });
+    updatePortConfigurationMenu();
+
+    menuBar()->addMenu(input_menu);
+
     // Sound Menu, mirroring win32's Sound menu (Channels popup + Mute).
     auto sound_menu = new QMenu(tr("&Sound"));
 
@@ -634,7 +902,7 @@ void EmuMainWindow::createWidgets()
     channels_menu->addSeparator();
     auto enable_all_channels_item = channels_menu->addAction(tr("Enable All"));
     connect(enable_all_channels_item, &QAction::triggered, [&] {
-        app->setSoundChannelMask(255);
+        app->enableAllSoundChannels();
     });
     core_actions.push_back(sound_menu->addMenu(channels_menu));
 
@@ -650,6 +918,15 @@ void EmuMainWindow::createWidgets()
 
     sound_menu->addSeparator();
 
+    // win32's Show Audio Waveform: the track viewer of the audio rings.
+    auto waveform_item = sound_menu->addAction(tr("Show Audio &Waveform"));
+    waveform_item->setCheckable(true);
+    connect(waveform_item, &QAction::triggered, [&] {
+        toggleAudioWaveform();
+    });
+
+    sound_menu->addSeparator();
+
     auto sound_settings_item = sound_menu->addAction(QIcon(iconset + "sound.svg"), tr("&Settings..."));
     connect(sound_settings_item, &QAction::triggered, [&] {
         if (!g_emu_settings_window)
@@ -657,19 +934,24 @@ void EmuMainWindow::createWidgets()
         g_emu_settings_window->show(2); // the Sound panel
     });
 
-    connect(sound_menu, &QMenu::aboutToShow, this, [this, channel_actions, mute_item] {
-        const uint8_t mask = app->getSoundChannelMask();
+    connect(sound_menu, &QMenu::aboutToShow, this, [this, channel_actions, mute_item, waveform_item] {
+        // Checkmarks show the effective state — the user mask composed with
+        // any waveform-viewer solo — so soloing V3 leaves only Channel 3 checked.
+        uint8_t spc_mask, gb_mask;
+        audiowave::effective_masks(&spc_mask, &gb_mask);
         // Channels 1-4 drive both SPC voices 1-4 and the GB APU's CH1-CH4.
         // In BIOS-less GB mode the SPC isn't running, so 5-8 control
         // nothing — grey them there, as on win32.
         const bool gb_only = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+        const uint8_t low_bits = gb_only ? gb_mask : spc_mask;
         for (int i = 0; i < 8; i++)
         {
-            channel_actions[i]->setChecked(mask & (1 << i));
+            channel_actions[i]->setChecked((i < 4 ? low_bits : spc_mask) & (1 << i));
             if (i >= 4)
                 channel_actions[i]->setEnabled(!gb_only);
         }
         mute_item->setChecked(app->config->mute_audio);
+        waveform_item->setChecked(audio_waveform_window != nullptr);
     });
 
     menuBar()->addMenu(sound_menu);
@@ -745,17 +1027,6 @@ void EmuMainWindow::createWidgets()
     });
     options_menu->addAction(shader_settings_item);
     updateShaderSettingsItem();
-
-    options_menu->addSeparator();
-
-    // win32's Input->Enable Rumble (Shake): pass LRG rumble-cart motor
-    // effects to the port-1 gamepad.
-    auto rumble_item = options_menu->addAction(tr("Enable &Rumble (Shake)"));
-    rumble_item->setCheckable(true);
-    rumble_item->setChecked(app->config->enable_rumble);
-    QObject::connect(rumble_item, &QAction::triggered, [&](bool checked) {
-        app->config->enable_rumble = checked;
-    });
 
     menuBar()->addMenu(options_menu);
 
@@ -962,6 +1233,87 @@ void EmuMainWindow::chooseState(bool save)
     app->unpause();
 }
 
+void EmuMainWindow::playMovieDialog()
+{
+    if (!app->isCoreActive())
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore("Movie playback"))
+        return;
+#endif
+
+    app->pause();
+
+    PlayMovieDialog dialog(app, this);
+    if (dialog.exec() && !dialog.path().empty())
+    {
+        app->config->movie_default_read_only = dialog.readOnly();
+        int result = app->playMovie(dialog.path(), dialog.readOnly());
+        if (result != SUCCESS)
+            QMessageBox::warning(this, tr("Play Movie"), movieErrorString(result, false));
+    }
+
+    app->unpause();
+}
+
+void EmuMainWindow::recordMovieDialog()
+{
+    if (!app->isCoreActive())
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore("Movie recording"))
+        return;
+#endif
+
+    app->pause();
+
+    // Written out first so the dialog can tell whether there is a battery
+    // save that "Clear SRAM" would remove, as win32 does.
+    bool sram_exists = app->movieSRAMExists();
+
+    RecordMovieDialog dialog(app, this, sram_exists);
+    if (dialog.exec() && !dialog.path().empty())
+    {
+        int result = app->recordMovie(dialog.path(), dialog.controllersMask(),
+                                      dialog.fromReset(), dialog.clearSRAM(), dialog.metadata());
+        if (result != SUCCESS)
+            QMessageBox::warning(this, tr("Record Movie"), movieErrorString(result, false));
+    }
+
+    app->unpause();
+}
+
+void EmuMainWindow::toggleAVIRecording()
+{
+    if (!app->isCoreActive())
+        return;
+
+    if (app->isAVIRecording())
+    {
+        app->stopAVIRecording();
+        return;
+    }
+
+    app->pause();
+
+    QFileDialog dialog(this, tr("Record AVI"));
+    dialog.setFileMode(QFileDialog::AnyFile);
+    dialog.setAcceptMode(QFileDialog::AcceptSave);
+    dialog.setDefaultSuffix("avi");
+    dialog.setDirectory(QString::fromStdString(S9xGetDirectory(SCREENSHOT_DIR)));
+    dialog.selectFile(QString::fromStdString(S9xBasename(S9xGetFilename(".avi", SCREENSHOT_DIR))));
+    dialog.setNameFilters({ tr("AVI Files (*.avi)"), tr("All Files (*)") });
+
+    if (dialog.exec() && !dialog.selectedFiles().empty())
+    {
+        std::string error;
+        if (!app->startAVIRecording(dialog.selectedFiles()[0].toStdString(), error))
+            QMessageBox::warning(this, tr("Record AVI"), QString::fromStdString(error));
+    }
+
+    app->unpause();
+}
+
 void EmuMainWindow::openFile()
 {
     app->pause();
@@ -1131,24 +1483,15 @@ bool EmuMainWindow::event(QEvent *event)
         }
         break;
     case QEvent::WindowActivate:
-        if (focus_pause)
-        {
-            focus_pause = false;
-            app->unpause();
-        }
+        handleFocusChange(true);
         break;
     case QEvent::WindowDeactivate:
         if (mouse_grabbed)
             toggleMouseGrab();
-        if (app->config->pause_emulation_when_unfocused && !focus_pause
-#ifdef KAILLERA_SUPPORT
-            && !KailleraClientIsPlaying()
-#endif
-        )
-        {
-            focus_pause = true;
-            app->pause();
-        }
+        // Focus moving to the audio waveform viewer stays within the
+        // emulator. Qt has already made it the active window at this point.
+        if (!(audio_waveform_window && QApplication::activeWindow() == audio_waveform_window.data()))
+            handleFocusChange(false);
         break;
     case QEvent::WindowStateChange:
     {
@@ -1169,10 +1512,26 @@ bool EmuMainWindow::event(QEvent *event)
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonRelease:
     {
-        if (!mouse_grabbed)
+        if (!mouse_grabbed && !gunAimsAtPointer())
             break;
         auto mouse_event = (QMouseEvent *)event;
-        app->reportMouseButton(mouse_event->button(), event->type() == QEvent::MouseButtonPress);
+        int button = 0;
+        switch (mouse_event->button())
+        {
+        case Qt::LeftButton:
+            button = 1;
+            break;
+        case Qt::RightButton:
+            button = 2;
+            break;
+        case Qt::MiddleButton:
+            button = 3;
+            break;
+        default:
+            break;
+        }
+        if (button)
+            app->reportMouseButton(button, event->type() == QEvent::MouseButtonPress);
         break;
     }
     case QEvent::MouseMove:
@@ -1185,6 +1544,10 @@ bool EmuMainWindow::event(QEvent *event)
                 break;
             app->reportPointer(delta.x(), delta.y());
             QCursor::setPos(center);
+        }
+        else if (gunAimsAtPointer())
+        {
+            reportGunAim(((QMouseEvent *)event)->globalPosition().toPoint());
         }
         if (!cursor_visible)
         {
@@ -1352,6 +1715,81 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+}
+
+void EmuMainWindow::toggleAudioWaveform()
+{
+    if (audio_waveform_window)
+    {
+        audio_waveform_window->close();
+        return;
+    }
+    audio_waveform_window = new AudioWaveformWindow(this, app);
+    audio_waveform_window->show();
+}
+
+void EmuMainWindow::handleFocusChange(bool active)
+{
+    if (active)
+    {
+        if (focus_pause)
+        {
+            focus_pause = false;
+            app->unpause();
+        }
+        return;
+    }
+
+    if (app->config->pause_emulation_when_unfocused && !focus_pause
+#ifdef KAILLERA_SUPPORT
+        && !KailleraClientIsPlaying()
+#endif
+    )
+    {
+        focus_pause = true;
+        app->pause();
+    }
+}
+
+bool EmuMainWindow::gunAimsAtPointer()
+{
+    return canvas && app->isCoreActive() &&
+           EmuConfig::portConfigurationUsesGun(app->config->port_configuration);
+}
+
+void EmuMainWindow::reportGunAim(const QPoint &global_pos)
+{
+    // Map the pointer through the letterboxed image onto the SNES screen,
+    // the way the GTK port aims an ungrabbed gun. Outside the image counts
+    // as off-screen, which the core reads as such.
+    auto ratio = canvas->devicePixelRatio();
+    auto image = canvas->applyAspect(QRect(0, 0, canvas->width() * ratio, canvas->height() * ratio));
+    if (image.width() <= 0 || image.height() <= 0)
+        return;
+
+    auto pos = canvas->mapFromGlobal(global_pos) * ratio;
+    int height = app->config->show_overscan ? 239 : 224;
+    int x = (pos.x() - image.x()) * 256 / image.width();
+    int y = (pos.y() - image.y()) * height / image.height();
+    app->reportPointerAbsolute(x, y);
+}
+
+void EmuMainWindow::updatePortConfigurationMenu()
+{
+    for (int i = 0; i < (int)port_configuration_actions.size(); i++)
+    {
+        auto action = port_configuration_actions[i];
+        if (!action)
+            continue;
+        action->setChecked(app->config->port_configuration == i);
+        action->setEnabled(app->isPortConfigurationValid(i));
+    }
+
+    if (superscope_crosshair_action)
+    {
+        superscope_crosshair_action->setChecked(app->config->superscope_crosshair_visible);
+        superscope_crosshair_action->setEnabled(app->config->port_configuration == EmuConfig::eSuperScope);
+    }
 }
 
 void EmuMainWindow::toggleMouseGrab()

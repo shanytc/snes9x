@@ -5,6 +5,7 @@
 #include "common/audio/s9x_sound_driver_sdl3.hpp"
 #include "common/audio/s9x_sound_driver_cubeb.hpp"
 #include "apu/apu.h"
+#include "common/audio/audio_waveform.hpp"
 #ifdef USE_PULSEAUDIO
 #include "common/audio/s9x_sound_driver_pulse.hpp"
 #endif
@@ -297,11 +298,141 @@ bool EmuApplication::openFile(const std::string &filename)
 #endif
     auto result = core->openFile(filename);
     unsuspendThread();
+    if (result)
+        applyRomControllerHints();
 #ifdef RETROACHIEVEMENTS_SUPPORT
     if (result)
         RA_OnLoadROM();
 #endif
     return result;
+}
+
+void EmuApplication::setPortConfiguration(int configuration)
+{
+    if (configuration < 0 || configuration >= EmuConfig::eNumPortConfigurations)
+        return;
+    config->port_configuration = configuration;
+    // A manual pick is the new baseline: nothing to restore on the next ROM.
+    port_configuration_before_rom = -1;
+    updateBindings();
+}
+
+void EmuApplication::setSuperScopeCrosshairVisible(bool visible)
+{
+    config->superscope_crosshair_visible = visible;
+    suspendThread();
+    core->setSuperScopeCrosshairVisible(visible);
+    unsuspendThread();
+}
+
+bool EmuApplication::isPortConfigurationValid(int configuration)
+{
+    return (valid_port_configurations >> configuration) & 1;
+}
+
+void EmuApplication::applyRomControllerHints()
+{
+    // Port of win32's S9xPostRomInit(): undo whatever the previous ROM
+    // forced, then let this ROM's NSRT header (or the M.A.C.S. rifle title)
+    // choose the devices and restrict the menu to the ones it supports.
+    using PC = EmuConfig;
+    const int applied = config->port_configuration;
+
+    if (port_configuration_before_rom >= 0)
+        config->port_configuration = port_configuration_before_rom;
+
+    const int previous = config->port_configuration;
+    int &option = config->port_configuration;
+    valid_port_configurations = 0xffff;
+
+    if (!Settings.DisableGameSpecificHacks && strncmp(Memory.ROMName, "MAC:Basic Rifle", 15) == 0)
+        option = PC::eMacsRifle;
+
+    if (!strncmp((const char *)Memory.NSRTHeader + 24, "NSRT", 4))
+    {
+        switch (Memory.NSRTHeader[29])
+        {
+        default: // unknown or unsupported
+            break;
+        case 0x00: // Gamepad / Gamepad
+            option = PC::eJoypads;
+            valid_port_configurations = (1 << PC::eJoypads);
+            break;
+        case 0x10: // Mouse / Gamepad
+            option = PC::eMouse;
+            valid_port_configurations = (1 << PC::eMouse);
+            break;
+        case 0x20: // Mouse_or_Gamepad / Gamepad
+            if (option == PC::eMouseSwapped)
+                option = PC::eMouse;
+            if (option != PC::eMouse)
+                option = PC::eJoypads;
+            valid_port_configurations = (1 << PC::eJoypads) | (1 << PC::eMouse);
+            break;
+        case 0x01: // Gamepad / Mouse
+            option = PC::eMouseSwapped;
+            valid_port_configurations = (1 << PC::eMouseSwapped);
+            break;
+        case 0x22: // Mouse_or_Gamepad / Mouse_or_Gamepad
+            if (option != PC::eMouse && option != PC::eMouseSwapped)
+                option = PC::eJoypads;
+            valid_port_configurations = (1 << PC::eJoypads) | (1 << PC::eMouse) | (1 << PC::eMouseSwapped);
+            break;
+        case 0x03: // Gamepad / Superscope
+            option = PC::eSuperScope;
+            valid_port_configurations = (1 << PC::eSuperScope);
+            break;
+        case 0x04: // Gamepad / Gamepad_or_Superscope
+            if (option == PC::eJustifier || option == PC::eDualJustifiers)
+                option = PC::eSuperScope;
+            if (option != PC::eSuperScope)
+                option = PC::eJoypads;
+            valid_port_configurations = (1 << PC::eJoypads) | (1 << PC::eSuperScope);
+            break;
+        case 0x05: // Gamepad / Justifier
+            if (option != PC::eDualJustifiers)
+                option = PC::eJustifier;
+            valid_port_configurations = (1 << PC::eJustifier) | (1 << PC::eDualJustifiers);
+            break;
+        case 0x06: // Gamepad / Multitap_or_Gamepad
+            option = PC::eMultitap5;
+            valid_port_configurations = (1 << PC::eMultitap5) | (1 << PC::eJoypads);
+            break;
+        case 0x66: // Multitap_or_Gamepad / Multitap_or_Gamepad
+            option = PC::eMultitap8;
+            valid_port_configurations = (1 << PC::eMultitap8) | (1 << PC::eMultitap5) | (1 << PC::eJoypads);
+            break;
+        case 0x24: // Gamepad_or_Mouse / Gamepad_or_Superscope
+            if (option == PC::eJustifier || option == PC::eDualJustifiers)
+                option = PC::eSuperScope;
+            if (option != PC::eSuperScope && option != PC::eMouse)
+                option = PC::eJoypads;
+            valid_port_configurations = (1 << PC::eJoypads) | (1 << PC::eMouse) | (1 << PC::eSuperScope);
+            break;
+        case 0x27: // Gamepad_or_Mouse / Gamepad_or_Mouse_or_Superscope
+            if (option == PC::eJustifier || option == PC::eDualJustifiers)
+                option = PC::eSuperScope;
+            if (option != PC::eSuperScope && option != PC::eMouse && option != PC::eMouseSwapped)
+                option = PC::eJoypads;
+            valid_port_configurations = (1 << PC::eJoypads) | (1 << PC::eMouse) | (1 << PC::eMouseSwapped) | (1 << PC::eSuperScope);
+            break;
+        case 0x08: // Gamepad / Mouse_or_Multitap_or_Gamepad
+            if (option == PC::eMouse)
+                option = PC::eMouseSwapped;
+            if (option == PC::eMultitap8)
+                option = PC::eMultitap5;
+            if (option != PC::eMultitap5 && option != PC::eMouseSwapped)
+                option = PC::eJoypads;
+            valid_port_configurations = (1 << PC::eMouseSwapped) | (1 << PC::eMultitap5) | (1 << PC::eJoypads);
+            break;
+        }
+    }
+
+    // Remember what (if anything) the devices were forced away from.
+    port_configuration_before_rom = previous;
+
+    if (option != applied)
+        updateBindings();
 }
 
 void EmuApplication::mainLoop()
@@ -365,10 +496,14 @@ void EmuApplication::updateBindings()
             if (binding.type != EmuBinding::None)
             {
                 /* The core's QuickSave/QuickLoad commands address absolute
-                 * slots; handle them here so they apply to the current bank. */
-                bool bank_relative = strncmp(name, "QuickSave", 9) == 0 ||
-                                     strncmp(name, "QuickLoad", 9) == 0;
-                auto handler = (!bank_relative && core->acceptsCommand(name)) ? Core : UI;
+                 * slots; handle them here so they apply to the current bank.
+                 * The movie commands open the dialogs of the File menu. */
+                bool ui_handled = strncmp(name, "QuickSave", 9) == 0 ||
+                                  strncmp(name, "QuickLoad", 9) == 0 ||
+                                  strcmp(name, "BeginRecordingMovie") == 0 ||
+                                  strcmp(name, "LoadMovie") == 0 ||
+                                  strcmp(name, "EndRecordingMovie") == 0;
+                auto handler = (!ui_handled && core->acceptsCommand(name)) ? Core : UI;
                 bindings.insert({ binding.hash(), { name, handler } });
             }
         }
@@ -575,9 +710,20 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
             }
             else if (name == "GrabMouse")
             {
-                if (config->port_configuration == EmuConfig::eMousePlusController ||
-                    config->port_configuration == EmuConfig::eSuperScopePlusController)
+                if (EmuConfig::portConfigurationUsesPointer(config->port_configuration))
                     window->toggleMouseGrab();
+            }
+            else if (name == "BeginRecordingMovie")
+            {
+                window->recordMovieDialog();
+            }
+            else if (name == "LoadMovie")
+            {
+                window->playMovieDialog();
+            }
+            else if (name == "EndRecordingMovie")
+            {
+                stopMovie();
             }
         }
     }
@@ -753,6 +899,12 @@ void EmuApplication::reportPointer(int x, int y)
     });
 }
 
+void EmuApplication::reportPointerAbsolute(int x, int y)
+{
+    if (core->active)
+        core->reportPointerAbsolute(x, y);
+}
+
 void EmuApplication::reportMouseButton(int button, bool pressed)
 {
     emu_thread->runOnThread([&, button, pressed] {
@@ -849,6 +1001,106 @@ void EmuApplication::loadUndoState()
     });
 }
 
+void EmuApplication::saveSPC()
+{
+    emu_thread->runOnThread([&] {
+        core->saveSPC();
+    });
+}
+
+void EmuApplication::takeScreenshot()
+{
+    // A paused thread still services runOnThread, it just doesn't render, so
+    // tell the core whether to write the current screen itself.
+    bool paused = isPaused();
+    emu_thread->runOnThread([&, paused] {
+        core->takeScreenshot(paused);
+    });
+}
+
+void EmuApplication::saveSRAM()
+{
+    emu_thread->runOnThread([&] {
+        core->saveSRAM();
+    });
+}
+
+void EmuApplication::saveMemoryPack()
+{
+    emu_thread->runOnThread([&] {
+        core->saveMemoryPack();
+    });
+}
+
+bool EmuApplication::hasMemoryPack()
+{
+    return core->hasMemoryPack();
+}
+
+int EmuApplication::playMovie(const std::string &filename, bool read_only)
+{
+    int result = 0;
+    emu_thread->runOnThread([&] {
+        result = core->openMovie(filename, read_only);
+    }, true);
+    return result;
+}
+
+int EmuApplication::recordMovie(const std::string &filename, uint8_t controllers_mask,
+                                bool from_reset, bool clear_sram, const std::wstring &metadata)
+{
+    int result = 0;
+    emu_thread->runOnThread([&] {
+        result = core->createMovie(filename, controllers_mask, from_reset, clear_sram, metadata);
+    }, true);
+    return result;
+}
+
+void EmuApplication::stopMovie()
+{
+    emu_thread->runOnThread([&] {
+        core->stopMovie();
+    });
+}
+
+bool EmuApplication::isMovieActive()
+{
+    return core->movieActive();
+}
+
+bool EmuApplication::movieSRAMExists()
+{
+    bool exists = false;
+    emu_thread->runOnThread([&] {
+        exists = core->saveAndCheckSRAM();
+    }, true);
+    return exists;
+}
+
+bool EmuApplication::startAVIRecording(const std::string &filename, std::string &error)
+{
+    bool result = false;
+    emu_thread->runOnThread([&] {
+        // Like win32, a muted emulator records a silent movie.
+        result = core->startAVIRecording(filename, config->avi_hires, !config->mute_audio, error);
+    }, true);
+    return result;
+}
+
+void EmuApplication::stopAVIRecording()
+{
+    emu_thread->runOnThread([&] {
+        core->stopAVIRecording();
+    }, true);
+    // The recording pinned the audio input rate; put the configured one back.
+    updateSettings();
+}
+
+bool EmuApplication::isAVIRecording()
+{
+    return core->aviRecording();
+}
+
 uint8_t EmuApplication::getSoundChannelMask()
 {
     return S9xGetSoundChannelMask();
@@ -858,6 +1110,14 @@ void EmuApplication::setSoundChannelMask(uint8_t mask)
 {
     emu_thread->runOnThread([mask] {
         S9xSetSoundChannelMask(mask);
+    });
+}
+
+void EmuApplication::enableAllSoundChannels()
+{
+    // All on audibly: also drops any solo engaged in the waveform viewer.
+    emu_thread->runOnThread([] {
+        audiowave::enable_all_channels();
     });
 }
 
@@ -891,6 +1151,13 @@ void EmuApplication::enableCheat(int index)
 {
     emu_thread->runOnThread([&, index] {
         core->enableCheat(index);
+    });
+}
+
+void EmuApplication::moveCheat(int from, int to)
+{
+    emu_thread->runOnThread([&, from, to] {
+        core->moveCheat(from, to);
     });
 }
 

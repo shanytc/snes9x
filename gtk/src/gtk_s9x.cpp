@@ -12,9 +12,11 @@
 #include "gtk_s9x.h"
 #include "gtk_control.h"
 #include "gtk_sound.h"
+#include "gtk_audio_waveform.h"
 #include "gtk_display.h"
 #include "gtk_netplay.h"
 #include "gtk_retroachievements.h"
+#include "common/video/gb_camera_v4l2.hpp"
 #include "retroachievements.h"
 #include "statemanager.h"
 #include "background_particles.h"
@@ -23,6 +25,7 @@
 #include "apu/apu.h"
 #include "netplay.h"
 #include "movie.h"
+#include "common/recording/avi_recorder.hpp"
 #include "controls.h"
 #include "snapshot.h"
 #include "gfx.h"
@@ -98,35 +101,14 @@ int main(int argc, char *argv[])
 
     S9xPortSoundInit();
 
+    // Game Boy Camera webcam feed, started here when the config says so and
+    // re-applied from the preferences dialog.
+    S9xGBCameraRegister();
+    S9xGBCameraApply();
+
+    S9xApplyControllerOption();
     S9xReportControllers();
-    for (int port = 0; port < 2; port++)
-    {
-        enum controllers type;
-        int8 id;
-        S9xGetController(port, &type, &id, &id, &id, &id);
-        std::string device_type;
-
-        switch (type)
-        {
-        case CTL_MP5:
-            device_type = "multitap";
-            break;
-        case CTL_MOUSE:
-            device_type = "mouse";
-            break;
-        case CTL_SUPERSCOPE:
-            device_type = "superscope";
-            break;
-        case CTL_JOYPAD:
-            device_type = "joypad";
-            break;
-        default:
-            device_type = "nothingpluggedin";
-        }
-
-        device_type += std::to_string(port + 1);
-        top_level->set_menu_item_selected(device_type.c_str());
-    }
+    top_level->update_controller_option_menu();
 
     gui_config->rebind_keys();
     top_level->update_accelerators();
@@ -170,6 +152,10 @@ int main(int argc, char *argv[])
 
 int S9xOpenROM(const char *rom_filename)
 {
+    // A recording belongs to one game: the next one may have another frame
+    // rate or screen size. (LoadROM itself ends any movie.)
+    S9xAVIStop();
+
     if (gui_config->rom_loaded)
     {
         S9xAutoSaveSRAM();
@@ -227,6 +213,7 @@ void S9xROMLoaded()
 {
     gui_config->rom_loaded = true;
     run_ahead_buffer.clear();
+    S9xAutoDetectControllerOption();
     top_level->configure_widgets();
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -437,6 +424,7 @@ static void game_loop()
             S9xMainLoop();
         }
 
+        S9xAVIEndFrame();
         S9xUpdateRumble();
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -702,6 +690,10 @@ static void check_pointer_timer()
 /* Final exit point, issues exit (0) */
 void S9xExit()
 {
+    S9xAVIStop();
+    S9xGBCameraStop();
+    S9xCloseAudioWaveformWindow();
+
     gui_config->save_config_file();
 
 #ifdef RETROACHIEVEMENTS_SUPPORT

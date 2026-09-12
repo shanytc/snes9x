@@ -29,6 +29,11 @@
 #include "gtk_control.h"
 #include "gtk_cheat.h"
 #include "gtk_netplay.h"
+#include "gtk_movie.h"
+#include "gtk_audio_waveform.h"
+#include "common/audio/audio_waveform.hpp"
+#include "common/desktop/xdg_app_icon.hpp"
+#include "gtk_logos.h"
 #include "gtk_retroachievements.h"
 #include "retroachievements.h"
 #include "gtk_s9xwindow.h"
@@ -38,6 +43,7 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <unistd.h>
 #include <utility>
 
 #include "snes9x.h"
@@ -45,10 +51,13 @@
 #include "ppu.h"
 #include "controls.h"
 #include "movie.h"
+#include "snapshot.h"
+#include "common/recording/avi_recorder.hpp"
 #include "apu/apu.h"
 #include "memmap.h"
 #include "cpuexec.h"
 #include "snapshot.h"
+#include "screenshot.h"
 #include "netplay.h"
 #include "display.h"
 #include "voicekun.h"
@@ -103,20 +112,7 @@ Snes9xWindow::Snes9xWindow(Snes9xConfig *config)
     cairo_owned = false;
     mouse_grabbed = false;
 
-    if (Gtk::IconTheme::get_default()->has_icon("snes9x"))
-    {
-        Gtk::Window::set_default_icon_name("snes9x");
-    }
-    else
-    {
-        extern int mini_icon_size;
-        extern unsigned char mini_icon[];
-        auto loader = Gdk::PixbufLoader::create();
-        loader->write(mini_icon, mini_icon_size);
-        loader->close();
-        if (auto pixbuf = loader->get_pixbuf())
-            Gtk::Window::set_default_icon(pixbuf);
-    }
+    apply_window_icon();
 
     drawing_area = get_object<Gtk::DrawingArea>("drawingarea").get();
     window->show();
@@ -135,6 +131,117 @@ Snes9xWindow::Snes9xWindow(Snes9xConfig *config)
     window->get_window()->set_cursor();
 
     resize(config->window_width, config->window_height);
+}
+
+// File->Choose Icon: the four bundled logos, 1-4 like win32's Window:Icon.
+static const char *launcher_icon_name = "snes9x"; // Icon= of super-snes9x-gtk.desktop
+
+static int clamp_logo_index(int n)
+{
+    return (n < 1 || n > 4) ? 1 : n;
+}
+
+static Glib::RefPtr<Gdk::Pixbuf> logo_pixbuf(const LogoImage &img)
+{
+    auto loader = Gdk::PixbufLoader::create();
+    loader->write(img.data, *img.length);
+    loader->close();
+    return loader->get_pixbuf();
+}
+
+void Snes9xWindow::apply_window_icon()
+{
+    int index = clamp_logo_index(config->window_icon);
+    if (index == 1)
+    {
+        // Stock look: an icon theme that ships its own snes9x icon still wins
+        // here, as it always has.
+        Gtk::Window::set_default_icon_list({});
+        if (Gtk::IconTheme::get_default()->has_icon("snes9x"))
+        {
+            Gtk::Window::set_default_icon_name("snes9x");
+        }
+        else
+        {
+            extern int mini_icon_size;
+            extern unsigned char mini_icon[];
+            auto loader = Gdk::PixbufLoader::create();
+            loader->write(mini_icon, mini_icon_size);
+            loader->close();
+            if (auto pixbuf = loader->get_pixbuf())
+                Gtk::Window::set_default_icon(pixbuf);
+        }
+        return;
+    }
+
+    std::vector<Glib::RefPtr<Gdk::Pixbuf>> icons;
+    for (const auto &img : logo_images[index - 1])
+        if (auto pixbuf = logo_pixbuf(img))
+            icons.push_back(pixbuf);
+    Gtk::Window::set_default_icon_list(icons);
+}
+
+void Snes9xWindow::choose_window_icon(int index)
+{
+    index = clamp_logo_index(index);
+    if (index == clamp_logo_index(config->window_icon))
+        return;
+    config->window_icon = index;
+    apply_window_icon();
+    config->save_config_file();
+    if (config->write_icon_to_launcher)
+        sync_launcher_icon();
+}
+
+void Snes9xWindow::set_write_icon_to_launcher(bool enabled)
+{
+    config->write_icon_to_launcher = enabled;
+    config->save_config_file();
+    sync_launcher_icon();
+}
+
+// The Linux stand-in for win32 rewriting the .exe icon: put the chosen logo
+// into the user's icon theme (or take it out again when the option is off) so
+// the launcher, dock and task bar follow the window.
+void Snes9xWindow::sync_launcher_icon()
+{
+    // What the shipped super-snes9x-gtk.desktop says, for the entry written
+    // when the program is not installed.
+    static const XdgAppIcon::DesktopEntry entry = {
+        "super-snes9x-gtk", "Super Snes9x", "A Super Nintendo emulator", "Game;Emulator;",
+        "application/vnd.nintendo.snes.rom;application/x-snes-rom;application/x-gameboy-rom;"
+        "application/x-gameboy-color-rom;"
+    };
+    std::string error;
+    bool ok;
+    if (!config->write_icon_to_launcher)
+    {
+        ok = XdgAppIcon::Restore(launcher_icon_name, entry, error);
+    }
+    else
+    {
+        int index = clamp_logo_index(config->window_icon);
+        std::vector<XdgAppIcon::Image> images;
+        for (const auto &img : logo_images[index - 1])
+            images.push_back({ img.size, std::vector<uint8_t>(img.data, img.data + *img.length) });
+        ok = XdgAppIcon::Install(launcher_icon_name, images, entry, error);
+    }
+    if (!ok)
+    {
+        Gtk::MessageDialog msg(*window.get(), _("Couldn't update the launcher icon."), false,
+                               Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
+        msg.set_secondary_text(error);
+        msg.run();
+    }
+}
+
+void Snes9xWindow::update_icon_menu()
+{
+    refreshing_icon_menu = true;
+    std::string name = "window_icon_" + std::to_string(clamp_logo_index(config->window_icon)) + "_item";
+    get_object<Gtk::RadioMenuItem>(name.c_str())->set_active(true);
+    get_object<Gtk::CheckMenuItem>("write_icon_to_launcher_item")->set_active(config->write_icon_to_launcher);
+    refreshing_icon_menu = false;
 }
 
 void Snes9xWindow::connect_signals()
@@ -193,14 +300,24 @@ void Snes9xWindow::connect_signals()
         open_rom_dialog();
     });
 
-    get_object<Gtk::MenuItem>("reset_item")->signal_activate().connect([&] {
+    // As on win32's Emulation->Reset: a movie being recorded gets the reset
+    // as an input event, and a movie being played back ends.
+    auto movie_reset_hook = [] {
+        S9xMovieUpdateOnReset();
+        if (S9xMoviePlaying())
+            S9xMovieStop(true);
+    };
+
+    get_object<Gtk::MenuItem>("reset_item")->signal_activate().connect([&, movie_reset_hook] {
+        movie_reset_hook();
         S9xSoftReset();
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
     });
 
-    get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&] {
+    get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&, movie_reset_hook] {
+        movie_reset_hook();
         // A BIOS assigned since the cart loaded is only read by a load, and a
         // power cycle is when it should take over. Reload or reset, never both:
         // a failed reload has already unloaded the cart.
@@ -252,15 +369,91 @@ void Snes9xWindow::connect_signals()
         refreshing_runahead_menu = false;
     });
 
+    // win32's File->Choose Icon. The logo is drawn next to each label like
+    // win32's menu bitmaps; the check mark comes from the radio item itself.
+    for (int i = 1; i <= NUM_LOGOS; i++)
+    {
+        std::string name = "window_icon_" + std::to_string(i) + "_item";
+        auto item = get_object<Gtk::RadioMenuItem>(name.c_str());
+        if (auto label = dynamic_cast<Gtk::Label *>(item->get_child()))
+        {
+            Glib::ustring text = label->get_label();
+            item->remove();
+            auto box = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 6));
+            auto image = Gtk::manage(new Gtk::Image(logo_pixbuf(logo_images[i - 1][0])));
+            auto new_label = Gtk::manage(new Gtk::Label(text, true));
+            new_label->set_xalign(0.0);
+            new_label->set_mnemonic_widget(*item.get());
+            box->pack_start(*image, false, false);
+            box->pack_start(*new_label, true, true);
+            item->add(*box);
+            box->show_all();
+        }
+        item->signal_toggled().connect([this, item, i] {
+            if (refreshing_icon_menu || !item->get_active())
+                return;
+            choose_window_icon(i);
+        });
+    }
+    auto launcher_item = get_object<Gtk::CheckMenuItem>("write_icon_to_launcher_item");
+    launcher_item->signal_toggled().connect([this, launcher_item] {
+        if (refreshing_icon_menu)
+            return;
+        set_write_icon_to_launcher(launcher_item->get_active());
+    });
+    get_object<Gtk::Menu>("choose_icon_menu")->signal_show().connect([this] {
+        update_icon_menu();
+    });
+    update_icon_menu();
+
     get_object<Gtk::MenuItem>("shader_parameters_item")->signal_activate().connect([&] {
         gtk_shader_parameters_dialog(get_window());
     });
 
-    const std::vector<const char *> port_items = { "joypad1", "mouse1", "superscope1", "joypad2", "mouse2", "multitap2", "superscope2", "nothingpluggedin2" };
-    for (auto &name : port_items)
+    // win32's Input menu device list: what is plugged into the two
+    // controller ports. Radio items drawn as checks, as on win32.
+    const std::pair<const char *, int> device_items[] = {
+        { "input_joypad_item", CONTROLLER_JOYPADS },
+        { "input_mouse_item", CONTROLLER_MOUSE },
+        { "input_superscope_enable_item", CONTROLLER_SUPERSCOPE },
+        { "input_multitap5_item", CONTROLLER_MULTITAP5 },
+        { "input_justifier_item", CONTROLLER_JUSTIFIER },
+        { "input_mouse_swapped_item", CONTROLLER_MOUSE_SWAPPED },
+        { "input_multitap8_item", CONTROLLER_MULTITAP8 },
+        { "input_dual_justifiers_item", CONTROLLER_DUAL_JUSTIFIERS },
+        { "input_macsrifle_item", CONTROLLER_MACSRIFLE },
+    };
+    for (auto &[name, option] : device_items)
     {
-        get_object<Gtk::MenuItem>(name)->signal_activate().connect(sigc::bind<const char *>(sigc::mem_fun(*this, &Snes9xWindow::port_activate), name));
+        auto item = get_object<Gtk::RadioMenuItem>(name);
+        item->signal_toggled().connect([this, item, option] {
+            if (refreshing_controller_menu || !item->get_active())
+                return;
+            if (S9xMovieActive())
+            {
+                Gtk::MessageDialog msg(*window.get(), _("That setting is locked while a movie is active."), false,
+                                       Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
+                msg.run();
+            }
+            else
+            {
+                S9xSetControllerOption(option);
+            }
+            update_controller_option_menu();
+        });
     }
+
+    auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
+    crosshair_item->signal_toggled().connect([this, crosshair_item] {
+        if (refreshing_controller_menu)
+            return;
+        config->superscope_crosshair_visible = crosshair_item->get_active();
+        S9xApplySuperScopeCrosshair();
+    });
+
+    get_object<Gtk::Menu>("input_menu_item_menu")->signal_show().connect([this] {
+        update_controller_option_menu();
+    });
 
     build_state_menus();
 
@@ -288,16 +481,24 @@ void Snes9xWindow::connect_signals()
         save_spc_dialog();
     });
 
-    get_object<Gtk::MenuItem>("open_movie_item")->signal_activate().connect([&] {
-        if (S9xMovieActive())
-            S9xMovieStop(false);
+    get_object<Gtk::MenuItem>("save_screenshot_item")->signal_activate().connect([&] {
+        save_screenshot();
+    });
 
-        S9xMovieOpen(open_movie_dialog(true).c_str(), false);
+    get_object<Gtk::MenuItem>("save_sram_item")->signal_activate().connect([&] {
+        save_sram();
+    });
+
+    get_object<Gtk::MenuItem>("save_mempack_item")->signal_activate().connect([&] {
+        save_memory_pack();
+    });
+
+    get_object<Gtk::MenuItem>("open_movie_item")->signal_activate().connect([&] {
+        play_movie_dialog();
     });
 
     get_object<Gtk::MenuItem>("stop_recording_item")->signal_activate().connect([&] {
-        if (S9xMovieActive())
-            S9xMovieStop(false);
+        stop_movie();
     });
 
     get_object<Gtk::MenuItem>("jump_to_frame_item")->signal_activate().connect([&] {
@@ -305,10 +506,15 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("record_movie_item")->signal_activate().connect([&] {
-        if (S9xMovieActive())
-            S9xMovieStop(false);
+        record_movie_dialog();
+    });
 
-        S9xMovieCreate(open_movie_dialog(false).c_str(), 0xFF, MOVIE_OPT_FROM_RESET, nullptr, 0);
+    get_object<Gtk::MenuItem>("avi_recording_item")->signal_activate().connect([&] {
+        toggle_avi_recording();
+    });
+
+    get_object<Gtk::Menu>("file_menu_item_menu")->signal_show().connect([this] {
+        update_movie_menu();
     });
 
     get_object<Gtk::MenuItem>("cheats_item")->signal_activate().connect([&] {
@@ -317,6 +523,16 @@ void Snes9xWindow::connect_signals()
 
     get_object<Gtk::MenuItem>("preferences_item")->signal_activate().connect([&] {
         snes9x_preferences_open(this);
+    });
+
+    // win32's Input->Input Configuration... and Customize Hotkeys...: the
+    // Joypads and Shortcuts tabs of the preferences dialog.
+    get_object<Gtk::MenuItem>("input_configuration_item")->signal_activate().connect([&] {
+        snes9x_preferences_open(this, 4);
+    });
+
+    get_object<Gtk::MenuItem>("customize_hotkeys_item")->signal_activate().connect([&] {
+        snes9x_preferences_open(this, 5);
     });
 
     get_object<Gtk::MenuItem>("open_netplay_item")->signal_activate().connect([&] {
@@ -376,7 +592,16 @@ void Snes9xWindow::connect_signals()
     }
 
     get_object<Gtk::MenuItem>("enable_all_channels_item")->signal_activate().connect([] {
-        S9xSetSoundChannelMask(255);
+        // All on audibly: also drops any solo engaged in the waveform viewer.
+        audiowave::enable_all_channels();
+    });
+
+    // win32's Sound->Show Audio Waveform: the track viewer of the audio rings.
+    auto waveform_item = get_object<Gtk::CheckMenuItem>("audio_waveform_item");
+    waveform_item->signal_toggled().connect([waveform_item] {
+        // The menu-open sync also flips the item; only act on real changes.
+        if (waveform_item->get_active() != S9xAudioWaveformWindowOpen())
+            S9xToggleAudioWaveformWindow();
     });
 
     get_object<Gtk::MenuItem>("color_correction_item")->signal_activate().connect([this] {
@@ -408,20 +633,25 @@ void Snes9xWindow::connect_signals()
     });
 
     get_object<Gtk::MenuItem>("sound_menu_item")->signal_activate().connect([this] {
-        uint8_t mask = S9xGetSoundChannelMask();
+        // Checkmarks show the effective state — the user mask composed with
+        // any waveform-viewer solo — so soloing V3 leaves only Channel 3 checked.
+        uint8_t spc_mask, gb_mask;
+        audiowave::effective_masks(&spc_mask, &gb_mask);
         // Channels 1-4 drive both SPC voices 1-4 and the GB APU's CH1-CH4.
         // In BIOS-less GB mode the SPC isn't running, so 5-8 control
         // nothing — grey them there, as on win32.
         bool gb_only = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+        const uint8_t low_bits = gb_only ? gb_mask : spc_mask;
         for (int i = 0; i < 8; i++)
         {
             std::string name = "sound_channel_" + std::to_string(i + 1) + "_item";
             auto item = get_object<Gtk::CheckMenuItem>(name.c_str());
-            item->set_active((mask & (1 << i)) != 0);
+            item->set_active(((i < 4 ? low_bits : spc_mask) & (1 << i)) != 0);
             if (i >= 4)
                 item->set_sensitive(!gb_only);
         }
         get_object<Gtk::CheckMenuItem>("mute_item")->set_active(gui_config->mute_sound);
+        get_object<Gtk::CheckMenuItem>("audio_waveform_item")->set_active(S9xAudioWaveformWindowOpen());
     });
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -559,35 +789,36 @@ bool Snes9xWindow::motion_notify(GdkEventMotion *event)
     return false;
 }
 
-void Snes9xWindow::port_activate(const char *name)
+void Snes9xWindow::update_controller_option_menu()
 {
-    auto item = get_object<Gtk::CheckMenuItem>(name);
-    if (!item->get_active())
-        return;
-
-    struct {
-        const char *name;
-        int port;
-        enum controllers controller;
-        int8_t id1, id2, id3, id4;
-    } map[] = {
-        { "joypad1", 0, CTL_JOYPAD, 0, 0, 0, 0 },
-        { "joypad2", 1, CTL_JOYPAD, 1, 0, 0, 0 },
-        { "mouse1", 0, CTL_MOUSE, 0, 0, 0, 0 },
-        { "mouse2", 1, CTL_MOUSE, 0, 0, 0, 0 },
-        { "superscope1", 0, CTL_SUPERSCOPE, 0, 0, 0, 0 },
-        { "superscope2", 1, CTL_SUPERSCOPE, 0, 0, 0, 0 },
-        { "multitap1", 0, CTL_MP5, 0, 1, 2, 3 },
-        { "multitap2", 1, CTL_MP5, 1, 2, 3, 4 },
-        { "nothingpluggedin2", 1, CTL_NONE, 0, 0, 0, 0}
+    const std::pair<const char *, int> device_items[] = {
+        { "input_joypad_item", CONTROLLER_JOYPADS },
+        { "input_mouse_item", CONTROLLER_MOUSE },
+        { "input_superscope_enable_item", CONTROLLER_SUPERSCOPE },
+        { "input_multitap5_item", CONTROLLER_MULTITAP5 },
+        { "input_justifier_item", CONTROLLER_JUSTIFIER },
+        { "input_mouse_swapped_item", CONTROLLER_MOUSE_SWAPPED },
+        { "input_multitap8_item", CONTROLLER_MULTITAP8 },
+        { "input_dual_justifiers_item", CONTROLLER_DUAL_JUSTIFIERS },
+        { "input_macsrifle_item", CONTROLLER_MACSRIFLE },
     };
 
-    for (auto &m : map)
-        if (!strcasecmp(m.name, name))
-        {
-            S9xSetController(m.port, m.controller, m.id1, m.id2, m.id3, m.id4);
-            break;
-        }
+    // As on win32: a ROM's NSRT header greys the devices it doesn't support,
+    // and nothing can be swapped once a movie is past its first frame.
+    const bool movie_locked = S9xMovieActive() && S9xMovieGetFrameCounter();
+
+    refreshing_controller_menu = true;
+    for (auto &[name, option] : device_items)
+    {
+        auto item = get_object<Gtk::RadioMenuItem>(name);
+        item->set_active(config->controller_option == option);
+        item->set_sensitive(S9xControllerOptionValid(option) && !movie_locked);
+    }
+
+    auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
+    crosshair_item->set_active(config->superscope_crosshair_visible);
+    crosshair_item->set_sensitive(config->controller_option == CONTROLLER_SUPERSCOPE);
+    refreshing_controller_menu = false;
 }
 
 bool Snes9xWindow::event_key(GdkEventKey *event)
@@ -749,7 +980,10 @@ void Snes9xWindow::focus_notify(bool state)
 {
     focused = state;
 
-    if (!state && config->pause_emulation_on_switch && !paused_from_focus_loss)
+    // Focus moving to the audio waveform viewer is not leaving the emulator,
+    // so the focus-loss pause is suspended for as long as the viewer is open.
+    if (!state && config->pause_emulation_on_switch && !paused_from_focus_loss &&
+        !S9xAudioWaveformWindowOpen())
     {
         sys_pause++;
         propagate_pause_state();
@@ -864,54 +1098,151 @@ void Snes9xWindow::open_multicart_dialog()
     unpause_from_focus_change();
 }
 
-std::string Snes9xWindow::open_movie_dialog(bool readonly)
+void Snes9xWindow::play_movie_dialog()
 {
-    this->pause_from_focus_change();
+    if (!config->rom_loaded)
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore(_("Movie playback")))
+        return;
+#endif
 
-    std::string title;
-    Gtk::FileChooserAction action;
+    pause_from_focus_change();
 
-    if (readonly)
+    MoviePlayChoice choice;
+    if (S9xPlayMovieDialog(choice))
     {
-        title = _("Open SNES Movie");
-        action = Gtk::FILE_CHOOSER_ACTION_OPEN;
-    }
-    else
-    {
-        title = _("New SNES Movie");
-        action = Gtk::FILE_CHOOSER_ACTION_SAVE;
+        if (S9xMovieActive())
+            S9xMovieStop(true);
+
+        int result = S9xMovieOpen(choice.path.c_str(), choice.read_only);
+        if (result != SUCCESS)
+        {
+            Gtk::MessageDialog msg(*window.get(), S9xMovieErrorString(result, false), false,
+                                   Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+            msg.run();
+        }
     }
 
-    Gtk::FileChooserDialog dialog(*window.get(), title, action);
+    unpause_from_focus_change();
+}
+
+void Snes9xWindow::record_movie_dialog()
+{
+    if (!config->rom_loaded)
+        return;
+#ifdef RETROACHIEVEMENTS_SUPPORT
+    if (!RA_WarnDisableHardcore(_("Movie recording")))
+        return;
+#endif
+
+    pause_from_focus_change();
+
+    // Written out first so the dialog can tell whether there is a battery
+    // save that "Clear SRAM" would remove, as win32 does.
+    auto sram_filename = S9xGetFilename(".srm", SRAM_DIR);
+    Memory.SaveSRAM(sram_filename.c_str());
+    const bool sram_exists = access(sram_filename.c_str(), R_OK | W_OK) == 0;
+
+    MovieRecordChoice choice;
+    if (S9xRecordMovieDialog(sram_exists, choice))
+    {
+        if (S9xMovieActive())
+            S9xMovieStop(true);
+
+        if (choice.from_reset && choice.clear_sram)
+        {
+            // A movie from reset with clean SRAM: drop the battery save on
+            // disk and reload, which leaves the SRAM zeroed. Same as win32.
+            std::error_code ec;
+            std::filesystem::remove(sram_filename, ec);
+            std::filesystem::remove(S9xGetFilename(".srm", ROMFILENAME_DIR), ec);
+            Memory.LoadSRAM(sram_filename.c_str());
+        }
+
+        // win32 pads the author text to 32 characters; keep the files identical.
+        std::wstring metadata = choice.metadata;
+        while (metadata.size() < 32)
+            metadata += L' ';
+        if (metadata.size() > MOVIE_MAX_METADATA)
+            metadata.resize(MOVIE_MAX_METADATA);
+
+        int result = S9xMovieCreate(choice.path.c_str(), choice.controllers_mask,
+                                    choice.from_reset ? MOVIE_OPT_FROM_RESET : MOVIE_OPT_FROM_SNAPSHOT,
+                                    metadata.c_str(), (int)metadata.size());
+        if (result != SUCCESS)
+        {
+            Gtk::MessageDialog msg(*window.get(), S9xMovieErrorString(result, false), false,
+                                   Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+            msg.run();
+        }
+    }
+
+    unpause_from_focus_change();
+}
+
+void Snes9xWindow::stop_movie()
+{
+    if (S9xMovieActive())
+        S9xMovieStop(false);
+}
+
+void Snes9xWindow::toggle_avi_recording()
+{
+    if (!config->rom_loaded)
+        return;
+
+    if (S9xAVIRecording())
+    {
+        S9xAVIStop();
+        return;
+    }
+
+    pause_from_focus_change();
+
+    Gtk::FileChooserDialog dialog(*window.get(), _("Record AVI"), Gtk::FILE_CHOOSER_ACTION_SAVE);
     dialog.add_button(Gtk::StockID("gtk-cancel"), Gtk::RESPONSE_CANCEL);
-    if (readonly)
-        dialog.add_button(Gtk::StockID("gtk-open"), Gtk::RESPONSE_ACCEPT);
-    else
-        dialog.add_button(Gtk::StockID("gtk-save"), Gtk::RESPONSE_ACCEPT);
-
-    if (!readonly)
-    {
-        auto default_name = S9xGetFilename(".smv", s9x_getdirtype::ROM_DIR);
-        dialog.set_current_name(default_name);
-
-    }
+    dialog.add_button(Gtk::StockID("gtk-save"), Gtk::RESPONSE_ACCEPT);
+    dialog.set_do_overwrite_confirmation(true);
+    dialog.set_current_folder(S9xGetDirectory(SCREENSHOT_DIR));
+    dialog.set_current_name(S9xBasename(S9xGetFilename(".avi", SCREENSHOT_DIR)));
 
     auto filter = Gtk::FileFilter::create();
-    filter->set_name(_("SNES Movies"));
-    filter->add_pattern("*.smv");
-    filter->add_pattern("*.SMV");
+    filter->set_name(_("AVI Files"));
+    filter->add_pattern("*.avi");
+    filter->add_pattern("*.AVI");
     dialog.add_filter(filter);
     dialog.add_filter(get_all_files_filter());
 
-    dialog.set_current_folder(S9xGetDirectory(SRAM_DIR));
     auto result = dialog.run();
     dialog.hide();
-    this->unpause_from_focus_change();
 
     if (result == Gtk::RESPONSE_ACCEPT)
-        return dialog.get_filename();
+    {
+        S9xAVIOptions options;
+        options.hires = config->avi_hires;
+        options.overscan = config->overscan;
+        // Like win32, a muted emulator records a silent movie.
+        options.include_audio = !config->mute_sound;
 
-    return std::string{};
+        std::string error;
+        if (!S9xAVIStart(dialog.get_filename(), options, &error))
+        {
+            Gtk::MessageDialog msg(*window.get(), error, false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_OK, true);
+            msg.run();
+        }
+    }
+
+    unpause_from_focus_change();
+}
+
+/* Movie Stop only applies to a running movie, and the AVI item reads Start
+ * or Stop for whichever comes next, as on win32. */
+void Snes9xWindow::update_movie_menu()
+{
+    enable_widget("stop_recording_item", config->rom_loaded && S9xMovieActive());
+    get_object<Gtk::MenuItem>("avi_recording_item")->set_label(S9xAVIRecording() ? _("Stop _AVI Recording")
+                                                                                : _("Start _AVI Recording…"));
 }
 
 std::string Snes9xWindow::open_rom_dialog(bool run)
@@ -1245,6 +1576,53 @@ void Snes9xWindow::save_spc_dialog()
     unpause_from_focus_change();
 }
 
+/* File->Save Other: the dialog-less exports from the win32 File menu. */
+void Snes9xWindow::save_screenshot()
+{
+    /* The next rendered frame writes the file (S9xEndScreenRefresh), which
+     * for a paused game would only happen on resume: capture it right away. */
+    Settings.TakeScreenshot = true;
+    if (is_paused())
+        S9xDoScreenshot(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
+}
+
+void Snes9xWindow::save_sram()
+{
+    auto filename = S9xGetFilename(".srm", SRAM_DIR);
+
+    if (Memory.SaveSRAM(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return;
+    }
+
+    pause_from_focus_change();
+    std::string message = _("Couldn't save S-RAM file:");
+    message += " " + filename;
+    Gtk::MessageDialog(*window.get(), message, false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_CLOSE, true).run();
+    unpause_from_focus_change();
+}
+
+void Snes9xWindow::save_memory_pack()
+{
+    /* Numbered like win32 so repeated dumps never overwrite each other. */
+    auto filename = S9xGetFilenameInc(".bs", SRAM_DIR);
+
+    if (Memory.SaveMPAK(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return;
+    }
+
+    pause_from_focus_change();
+    std::string message = _("Couldn't save Memory Pack file:");
+    message += " " + filename;
+    Gtk::MessageDialog(*window.get(), message, false, Gtk::MESSAGE_ERROR, Gtk::BUTTONS_CLOSE, true).run();
+    unpause_from_focus_change();
+}
+
 void Snes9xWindow::set_menu_item_selected(const char *name)
 {
     get_object<Gtk::CheckMenuItem>(name)->set_active(true);
@@ -1417,18 +1795,27 @@ void Snes9xWindow::configure_widgets()
         "save_state_item",
         "save_state_preview_item",
         "load_state_preview_item",
+        "save_other_item",
         "save_spc_item",
+        "save_screenshot_item",
+        "save_sram_item",
         "hard_reset_item",
         "record_movie_item",
         "stop_recording_item",
         "open_movie_item",
         "jump_to_frame_item",
+        "avi_recording_item",
         "cheats_item",
         "rom_info_item",
         "run_ahead_item"
     };
     for (auto &widget : enable_when_rom_loaded)
         enable_widget(widget, config->rom_loaded);
+
+    /* Only BS-X and Sufami-style multicarts carry a memory pack; this is the
+     * same test CMemory::SaveMPAK makes before it agrees to write one. */
+    const bool has_memory_pack = Settings.BS || (Multi.cartSizeB && Multi.cartType == 3);
+    enable_widget("save_mempack_item", config->rom_loaded && has_memory_pack);
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
     // The achievement list only makes sense with a game loaded and a user
@@ -1514,6 +1901,7 @@ void Snes9xWindow::configure_widgets()
     }
 
     propagate_pause_state();
+    update_controller_option_menu();
 
     if (config->rom_loaded && !Settings.Paused)
         hide_mouse_cursor();
@@ -2108,7 +2496,15 @@ void Snes9xWindow::update_accelerators()
     }
     accelerators.clear();
 
-    std::initializer_list<const char *[2]> pairs  =
+    /* A plain struct array rather than std::initializer_list<const char *[2]>:
+     * GCC 11 (Ubuntu 22.04, the AppImage baseline) cannot brace-initialize
+     * array elements inside an initializer_list. */
+    struct AcceleratorBinding
+    {
+        const char *accelerator;
+        const char *binding;
+    };
+    const AcceleratorBinding pairs[] =
     {
         { "fullscreen_item", "GTK_fullscreen" },
         { "reset_item", "SoftReset" },
@@ -2118,6 +2514,7 @@ void Snes9xWindow::update_accelerators()
         { "from_file1", "GTK_state_file_load" },
         { "to_file1", "GTK_state_file_save" },
         { "save_spc_item", "GTK_save_spc" },
+        { "save_screenshot_item", "Screenshot" },
         { "open_rom_item", "GTK_open_rom" },
         { "record_movie_item", "BeginRecordingMovie" },
         { "open_movie_item", "LoadMovie" },

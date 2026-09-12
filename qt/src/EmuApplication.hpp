@@ -64,7 +64,19 @@ struct EmuApplication
     void pollJoysticks();
     void updateRumble();
     void reportPointer(int x, int y);
+    void reportPointerAbsolute(int x, int y);
     void reportMouseButton(int button, bool pressed);
+
+    /* Controller-port devices, as win32's Input menu offers them. A ROM's
+     * NSRT header may pick the devices itself and narrow the menu to the ones
+     * the game supports; the choice it displaced comes back on the next load
+     * unless the user has picked something by hand since. */
+    void setPortConfiguration(int configuration);
+    void setSuperScopeCrosshairVisible(bool visible);
+    bool isPortConfigurationValid(int configuration);
+    void applyRomControllerHints();
+    int valid_port_configurations = 0xffff;
+    int port_configuration_before_rom = -1;
     void restartAudio();
     void writeSamples(int16_t *data, int samples);
     void mainLoop();
@@ -83,8 +95,27 @@ struct EmuApplication
     std::string getStateFolder();
     std::string getStateFilename(int slot);
     void loadUndoState();
+    void saveSPC();
+    void takeScreenshot();
+    void saveSRAM();
+    void saveMemoryPack();
+    bool hasMemoryPack();
+
+    /* File->Movie Play/Record/Stop and AVI Recording, run on the emulation
+     * thread. The movie results are movie.cpp's SUCCESS / FILE_NOT_FOUND /
+     * WRONG_FORMAT / WRONG_VERSION. */
+    int playMovie(const std::string &filename, bool read_only);
+    int recordMovie(const std::string &filename, uint8_t controllers_mask,
+                    bool from_reset, bool clear_sram, const std::wstring &metadata);
+    void stopMovie();
+    bool isMovieActive();
+    bool movieSRAMExists();
+    bool startAVIRecording(const std::string &filename, std::string &error);
+    void stopAVIRecording();
+    bool isAVIRecording();
     uint8_t getSoundChannelMask();
     void setSoundChannelMask(uint8_t mask);
+    void enableAllSoundChannels();
     void startGame();
     void startThread();
     void stopThread();
@@ -98,6 +129,7 @@ struct EmuApplication
     void disableCheat(int index);
     bool addCheat(const std::string &description, const std::string &code);
     void deleteCheat(int index);
+    void moveCheat(int from, int to);
     void deleteAllCheats();
     int tryImportCheats(const std::string &filename);
     std::string validateCheat(const std::string &code);
@@ -109,7 +141,7 @@ struct EmuApplication
         Core = 0,
         UI   = 1
     };
-    std::map<uint32_t, std::pair<std::string, Handler>> bindings;
+    std::unordered_map<uint32_t, std::pair<std::string, Handler>> bindings;
     std::unique_ptr<QTimer> poll_input_timer;
     std::function<void(EmuBinding)> binding_callback = nullptr;
     std::function<void()> joypads_changed_callback = nullptr;

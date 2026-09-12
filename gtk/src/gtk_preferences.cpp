@@ -6,6 +6,7 @@
 
 #include "gtk_compat.h"
 #include "gtk_preferences.h"
+#include "common/video/gb_camera_v4l2.hpp"
 #include "gtk_config.h"
 #include "gtk_control.h"
 #include "gtk_sound.h"
@@ -175,6 +176,9 @@ void Snes9xPreferences::connect_signals()
     });
     get_object<Gtk::ComboBox>("gb_frame_blend")->signal_changed().connect([&] {
         update_gb_blend_enable_state();
+    });
+    get_object<Gtk::CheckButton>("gb_video_camera")->signal_toggled().connect([&] {
+        update_gb_camera_enable_state();
     });
     // Handle plurals on GtkLabel “threads_for_filtering_and_scaling_label”
     get_object<Gtk::SpinButton>("num_threads")->signal_value_changed().connect([&] {
@@ -385,16 +389,46 @@ void Snes9xPreferences::update_gb_blend_enable_state()
     // titles (or when nothing is loaded). With "Auto Layer Transparency" on, the two
     // dropdowns are list-driven so they are greyed too; the layer dropdown also needs
     // blending to be on (mode != Off). Mirrors the win32 and Qt frontends.
+    // The webcam controls further down the frame are not tied to the loaded
+    // game, so only the frame's title and the blend widgets are greyed.
     bool gb_active = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
     bool manual = gb_active && !get_check("gb_frame_blend_auto");
     bool layer = manual && get_combo("gb_frame_blend") != 0;
 
-    enable_widget("gb_image_frame",             gb_active);
+    enable_widget("gb_image_label",             gb_active);
     enable_widget("gb_frame_blend_auto",        gb_active);
     enable_widget("gb_frame_blend",             manual);
     enable_widget("gb_frame_blend_label",       manual);
     enable_widget("gb_frame_blend_layer",       layer);
     enable_widget("gb_frame_blend_layer_label", layer);
+}
+
+void Snes9xPreferences::populate_gb_cameras()
+{
+    std::vector<std::string> names;
+    S9xGBCameraEnumerate(names);
+
+    auto combo = get_object<Gtk::ComboBox>("gb_camera_combo");
+    Glib::RefPtr<Gtk::ListStore>::cast_dynamic(combo->get_model())->clear();
+    for (auto &name : names)
+        combo_box_append(combo.get(), name.c_str());
+
+    // A remembered index past the end of the list falls back to the first
+    // camera, as on win32.
+    if (!names.empty())
+    {
+        int index = Settings.GBVideoCameraIndex;
+        if (index < 0 || index >= (int)names.size())
+            index = 0;
+        set_combo("gb_camera_combo", index);
+    }
+}
+
+void Snes9xPreferences::update_gb_camera_enable_state()
+{
+    auto combo = get_object<Gtk::ComboBox>("gb_camera_combo");
+    bool have_cameras = combo->get_model()->children().size() > 0;
+    enable_widget("gb_camera_combo", get_check("gb_video_camera") && have_cameras);
 }
 
 void Snes9xPreferences::about_dialog()
@@ -572,10 +606,16 @@ void Snes9xPreferences::move_settings_to_dialog()
     set_spin("osd_size",                   config->osd_size);
     set_check("change_display_resolution", config->change_display_resolution);
     set_check("scale_to_fit",              config->scale_to_fit);
+    set_check("transparency_effects",      Settings.Transparency);
+    set_check("blend_hires",               config->blend_hires);
     set_check("overscan",                  config->overscan);
+    set_check("messages_in_image",         Settings.AutoDisplayMessages);
     set_combo("gb_frame_blend",            Settings.GBFrameBlend);
     set_combo("gb_frame_blend_layer",      Settings.GBFrameBlendLayer);
     set_check("gb_frame_blend_auto",       Settings.GBFrameBlendAuto);
+    populate_gb_cameras();
+    set_check("gb_video_camera",           Settings.GBVideoCamera);
+    update_gb_camera_enable_state();
     set_check("multithreading",            config->multithreading);
     enable_widget("num_threads", get_check("multithreading"));
     set_label("threads_for_filtering_and_scaling_label",
@@ -668,6 +708,7 @@ void Snes9xPreferences::move_settings_to_dialog()
     set_spin  ("rewind_buffer_size",        config->rewind_buffer_size);
     set_spin  ("rewind_granularity",        config->rewind_granularity);
     set_spin  ("run_ahead_frames",          Settings.RunAhead);
+    set_check ("avi_hires",                 config->avi_hires);
     set_spin  ("superfx_multiplier",        Settings.SuperFXClockMultiplier);
     set_combo ("splash_background",         config->splash_image);
     set_check ("force_enable_icons",        config->enable_icons);
@@ -778,6 +819,9 @@ void Snes9xPreferences::get_settings_from_dialog()
     if (config->osd_size != get_spin("osd_size"))
         gfx_needs_restart = true;
 
+    if ((bool)Settings.AutoDisplayMessages != get_check("messages_in_image"))
+        gfx_needs_restart = true;
+
 
     config->enable_icons = get_check("force_enable_icons");
     auto settings = Gtk::Settings::get_default();
@@ -791,7 +835,10 @@ void Snes9xPreferences::get_settings_from_dialog()
     Settings.DisplayIndicators        = get_check("show_indicators");
     config->osd_size                  = get_spin("osd_size");
     config->scale_to_fit              = get_check("scale_to_fit");
+    Settings.Transparency             = get_check("transparency_effects");
+    config->blend_hires               = get_check("blend_hires");
     config->overscan                  = get_check("overscan");
+    Settings.AutoDisplayMessages      = get_check("messages_in_image");
     // Game Boy frame-blend. Settings.GBFrameBlend* is the single stored value (saved
     // straight to the config file), exactly like win32. When "Auto Layer Transparency"
     // is on, the per-title table in sgb.cpp picks the mode/layer and overwrites it in
@@ -805,6 +852,11 @@ void Snes9xPreferences::get_settings_from_dialog()
         set_combo("gb_frame_blend",       Settings.GBFrameBlend);
         set_combo("gb_frame_blend_layer", Settings.GBFrameBlendLayer);
     }
+    // Game Boy Camera webcam feed: (re)start or stop the capture to match.
+    Settings.GBVideoCamera            = get_check("gb_video_camera");
+    if (get_combo("gb_camera_combo") >= 0)
+        Settings.GBVideoCameraIndex   = get_combo("gb_camera_combo");
+    S9xGBCameraApply();
     config->maintain_aspect_ratio     = get_check("maintain_aspect_ratio");
     config->aspect_ratio              = get_combo("aspect_ratio");
     config->scale_method              = get_combo("scale_method_combo");
@@ -858,6 +910,7 @@ void Snes9xPreferences::get_settings_from_dialog()
     config->rewind_buffer_size        = get_spin("rewind_buffer_size");
     config->rewind_granularity        = get_spin("rewind_granularity");
     Settings.RunAhead                 = get_spin("run_ahead_frames");
+    config->avi_hires                 = get_check("avi_hires");
     config->joystick_threshold        = get_spin("joystick_threshold");
 
 #ifdef ALLOW_CPU_OVERCLOCK

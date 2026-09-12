@@ -1048,6 +1048,12 @@
       </row>
     </data>
   </object>
+  <object class="GtkListStore" id="liststore_gb_camera">
+    <columns>
+      <!-- column-name item -->
+      <column type="gchararray"/>
+    </columns>
+  </object>
   <object class="GtkListStore" id="liststore_gb_blend_layer">
     <columns>
       <!-- column-name item -->
@@ -1104,7 +1110,25 @@
       <row>
         <col id="0" translatable="yes">5+</col>
       </row>
-    </data>
+          <row>
+        <col id="0" translatable="yes">6</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">6+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8+</col>
+      </row>
+</data>
   </object>
   <object class="GtkListStore" id="liststore3">
     <columns>
@@ -1142,7 +1166,25 @@
       <row>
         <col id="0" translatable="yes">5+</col>
       </row>
-    </data>
+          <row>
+        <col id="0" translatable="yes">6</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">6+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">7+</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">8+</col>
+      </row>
+</data>
   </object>
   <object class="GtkListStore" id="liststore4">
     <columns>
@@ -1448,14 +1490,51 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkImageMenuItem" id="save_spc_item">
-                        <property name="label" translatable="yes">Save SPC…</property>
+                      <object class="GtkMenuItem" id="save_other_item">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Save Ot_her</property>
                         <property name="use_underline">True</property>
-                        <property name="image">image4</property>
-                        <property name="use_stock">False</property>
-                        <signal name="activate" handler="save_spc" swapped="no"/>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="save_other_item_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkImageMenuItem" id="save_spc_item">
+                                <property name="label" translatable="yes">Save SPC…</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="image">image4</property>
+                                <property name="use_stock">False</property>
+                                <signal name="activate" handler="save_spc" swapped="no"/>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="save_screenshot_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Save S_creenshot</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="save_sram_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Save S-_RAM Data</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="save_mempack_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Save _Memory Pack</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
                       </object>
                     </child>
                     <child>
@@ -1481,6 +1560,146 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="movie_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkImageMenuItem" id="open_movie_item">
+                        <property name="label" translatable="yes">Movie _Play…</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
+                        <property name="use_underline">True</property>
+                        <property name="image">image8</property>
+                        <property name="use_stock">False</property>
+                        <signal name="activate" handler="open_movie" swapped="no"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkImageMenuItem" id="record_movie_item">
+                        <property name="label" translatable="yes">Movie _Record…</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
+                        <property name="use_underline">True</property>
+                        <property name="image">image19</property>
+                        <property name="use_stock">False</property>
+                        <signal name="activate" handler="record_movie" swapped="no"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkImageMenuItem" id="stop_recording_item">
+                        <property name="label" translatable="yes">Movie S_top</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
+                        <property name="use_underline">True</property>
+                        <property name="image">image9</property>
+                        <property name="use_stock">False</property>
+                        <signal name="activate" handler="stop_recording" swapped="no"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkImageMenuItem" id="jump_to_frame_item">
+                        <property name="label" translatable="yes">_Jump to Frame…</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
+                        <property name="use_underline">True</property>
+                        <property name="image">image10</property>
+                        <property name="use_stock">False</property>
+                        <signal name="activate" handler="jump_to_frame" swapped="no"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="avi_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="avi_recording_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Start _AVI Recording…</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="choose_icon_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="choose_icon_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Choose _Icon</property>
+                        <property name="use_underline">True</property>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="choose_icon_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="window_icon_1_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Icon _1</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">False</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="window_icon_2_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Icon _2</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">False</property>
+                                <property name="group">window_icon_1_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="window_icon_3_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Icon _3</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">False</property>
+                                <property name="group">window_icon_1_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="window_icon_4_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Icon _4</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">False</property>
+                                <property name="group">window_icon_1_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkSeparatorMenuItem" id="choose_icon_launcher_separator">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="write_icon_to_launcher_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Apply to _Launcher Icon</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
                       </object>
                     </child>
                     <child>
@@ -1537,60 +1756,6 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkImageMenuItem" id="open_movie_item">
-                        <property name="label" translatable="yes">Load _Movie…</property>
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
-                        <property name="use_underline">True</property>
-                        <property name="image">image8</property>
-                        <property name="use_stock">False</property>
-                        <signal name="activate" handler="open_movie" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkImageMenuItem" id="record_movie_item">
-                        <property name="label" translatable="yes">R_ecord Movie…</property>
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
-                        <property name="use_underline">True</property>
-                        <property name="image">image19</property>
-                        <property name="use_stock">False</property>
-                        <signal name="activate" handler="record_movie" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkImageMenuItem" id="stop_recording_item">
-                        <property name="label" translatable="yes">_Stop Recording</property>
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
-                        <property name="use_underline">True</property>
-                        <property name="image">image9</property>
-                        <property name="use_stock">False</property>
-                        <signal name="activate" handler="stop_recording" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkImageMenuItem" id="jump_to_frame_item">
-                        <property name="label" translatable="yes">_Jump to Frame…</property>
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="events">GDK_POINTER_MOTION_MASK | GDK_POINTER_MOTION_HINT_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK</property>
-                        <property name="use_underline">True</property>
-                        <property name="image">image10</property>
-                        <property name="use_stock">False</property>
-                        <signal name="activate" handler="jump_to_frame" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkSeparatorMenuItem" id="separator1">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
                       </object>
                     </child>
                     <child>
@@ -1828,6 +1993,167 @@
               </object>
             </child>
             <child>
+              <object class="GtkMenuItem" id="input_menu_item">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="label" translatable="yes">_Input</property>
+                <property name="use_underline">True</property>
+                <child type="submenu">
+                  <object class="GtkMenu" id="input_menu_item_menu">
+                    <property name="can_focus">False</property>
+                    <child>
+                      <object class="GtkMenuItem" id="input_configuration_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Input Configuration...</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="customize_hotkeys_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Customize Hotkeys...</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="input_configuration_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkCheckMenuItem" id="enable_rumble_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Enable _Rumble (Shake)</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="input_devices_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_joypad_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use SNES _Joypad(s)</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="active">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_mouse_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use SNES _Mouse</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="input_superscope_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Super _Scope</property>
+                        <property name="use_underline">True</property>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="input_superscope_item_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="input_superscope_enable_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">_Enable</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">False</property>
+                                <property name="group">input_joypad_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="input_superscope_crosshair_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Show _Crosshair</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_multitap5_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Super Multi_tap (5-player)</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_justifier_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Konami _Justifier</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_mouse_swapped_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Mouse in _alternate port</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_multitap8_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use Multitaps (_8-player)</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_dual_justifiers_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use _Dual Justifiers</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkRadioMenuItem" id="input_macsrifle_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Use M.A.C.S. _Rifle</property>
+                        <property name="use_underline">True</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
               <object class="GtkMenuItem" id="sound_menu_item">
                 <property name="label" translatable="yes">_Sound</property>
                 <property name="visible">True</property>
@@ -1944,6 +2270,20 @@
                     <child>
                       <object class="GtkCheckMenuItem" id="mute_item">
                         <property name="label" translatable="yes">_Mute</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="audio_waveform_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkCheckMenuItem" id="audio_waveform_item">
+                        <property name="label" translatable="yes">Show Audio _Waveform</property>
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="use_underline">True</property>
@@ -2141,142 +2481,6 @@
                 <child type="submenu">
                   <object class="GtkMenu" id="options_menu_item_menu">
                     <property name="can_focus">False</property>
-                    <child>
-                      <object class="GtkMenuItem" id="controller_ports_item">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">Controller Ports</property>
-                        <property name="use_underline">True</property>
-                        <child type="submenu">
-                          <object class="GtkMenu" id="controller_ports_item_menu">
-                            <property name="can_focus">False</property>
-                            <child>
-                              <object class="GtkMenuItem" id="snes_port_1">
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">SNES Port 1</property>
-                                <property name="use_underline">True</property>
-                                <signal name="activate" handler="on_snes_port_1_activate" swapped="no"/>
-                                <child type="submenu">
-                                  <object class="GtkMenu" id="snes_port_1_menu">
-                                    <property name="can_focus">False</property>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="joypad1">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Joypad</property>
-                                        <property name="use_underline">True</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="mouse1">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Mouse</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="group">joypad1</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="superscope1">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Superscope</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="active">True</property>
-                                        <property name="group">joypad1</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkMenuItem" id="snes_port_2">
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">SNES Port 2</property>
-                                <property name="use_underline">True</property>
-                                <signal name="activate" handler="on_snes_port_2_activate" swapped="no"/>
-                                <child type="submenu">
-                                  <object class="GtkMenu" id="snes_port_2_menu">
-                                    <property name="can_focus">False</property>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="joypad2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Joypad</property>
-                                        <property name="use_underline">True</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="mouse2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Mouse</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="multitap2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Multitap</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="superscope2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes">Superscope</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="active">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioMenuItem" id="nothingpluggedin2">
-                                        <property name="visible">True</property>
-                                        <property name="can_focus">False</property>
-                                        <property name="label" translatable="yes" context="SNES port 2">None</property>
-                                        <property name="use_underline">True</property>
-                                        <property name="active">True</property>
-                                        <property name="group">joypad2</property>
-                                        <signal name="activate" handler="on_port_activate" swapped="no"/>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkCheckMenuItem" id="enable_rumble_item">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="label" translatable="yes">Enable _Rumble (Shake)</property>
-                        <property name="use_underline">True</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkSeparatorMenuItem" id="separator6">
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                      </object>
-                    </child>
                     <child>
                       <object class="GtkMenuItem" id="cheats_item">
                         <property name="visible">True</property>
@@ -3226,14 +3430,142 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkCheckButton" id="overscan">
-                                <property name="label" translatable="yes">Use overscanned height</property>
+                              <object class="GtkFrame" id="snes_image_frame">
                                 <property name="visible">True</property>
-                                <property name="can_focus">True</property>
-                                <property name="receives_default">False</property>
-                                <property name="tooltip_text" translatable="yes">Use SNES extended height. Will probably cause letterboxing</property>
-                                <property name="use_underline">True</property>
-                                <property name="draw_indicator">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label_xalign">0</property>
+                                <property name="shadow_type">none</property>
+                                <child>
+                                  <object class="GtkAlignment" id="snes_image_alignment">
+                                    <property name="visible">True</property>
+                                    <property name="can_focus">False</property>
+                                    <property name="left_padding">12</property>
+                                    <child>
+                                      <object class="GtkVBox" id="snes_image_vbox">
+                                        <property name="visible">True</property>
+                                        <property name="can_focus">False</property>
+                                        <property name="border_width">5</property>
+                                        <property name="spacing">5</property>
+                                        <child>
+                                          <object class="GtkCheckButton" id="transparency_effects">
+                                            <property name="label" translatable="yes">Transparency Effects</property>
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">True</property>
+                                            <property name="receives_default">False</property>
+                                            <property name="tooltip_text" translatable="yes">Render the SNES colour‑math and transparency effects. Turn off only for troubleshooting.</property>
+                                            <property name="use_underline">True</property>
+                                            <property name="draw_indicator">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">0</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkCheckButton" id="blend_hires">
+                                            <property name="label" translatable="yes">Blend Hi‑Res Images</property>
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">True</property>
+                                            <property name="receives_default">False</property>
+                                            <property name="tooltip_text" translatable="yes">Horizontally blend hi‑res (512‑wide) images, so games that alternate columns for a transparency effect look as intended with filters that do not account for this.</property>
+                                            <property name="use_underline">True</property>
+                                            <property name="draw_indicator">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">1</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkCheckButton" id="overscan">
+                                            <property name="label" translatable="yes">Extend Height of SNES Image</property>
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">True</property>
+                                            <property name="receives_default">False</property>
+                                            <property name="tooltip_text" translatable="yes">Display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240.</property>
+                                            <property name="use_underline">True</property>
+                                            <property name="draw_indicator">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">2</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkCheckButton" id="messages_in_image">
+                                            <property name="label" translatable="yes">Display messages inside SNES image</property>
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">True</property>
+                                            <property name="receives_default">False</property>
+                                            <property name="tooltip_text" translatable="yes">Draw text inside the SNES image with a pixel font instead of the on‑screen overlay (it will get into AVIs, screenshots, and filters). The only way to see messages with the XVideo and software drivers.</property>
+                                            <property name="use_underline">True</property>
+                                            <property name="draw_indicator">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">3</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkHBox" id="osd_box">
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">False</property>
+                                            <property name="spacing">12</property>
+                                            <child>
+                                              <object class="GtkLabel" id="osdlabel">
+                                                <property name="visible">True</property>
+                                                <property name="can_focus">False</property>
+                                                <property name="label" translatable="yes">On‑screen display size:</property>
+                                              </object>
+                                              <packing>
+                                                <property name="expand">False</property>
+                                                <property name="fill">False</property>
+                                                <property name="position">0</property>
+                                              </packing>
+                                            </child>
+                                            <child>
+                                              <object class="GtkSpinButton" id="osd_size">
+                                                <property name="visible">True</property>
+                                                <property name="can_focus">True</property>
+                                                <property name="tooltip_text" translatable="yes">The size of on‑screen display messages in pixels</property>
+                                                <property name="primary_icon_activatable">False</property>
+                                                <property name="secondary_icon_activatable">False</property>
+                                                <property name="primary_icon_sensitive">True</property>
+                                                <property name="secondary_icon_sensitive">True</property>
+                                                <property name="adjustment">osd_size_adjustment</property>
+                                                <property name="snap_to_ticks">True</property>
+                                                <property name="width_chars">6</property>
+                                                <property name="numeric">True</property>
+                                              </object>
+                                              <packing>
+                                                <property name="expand">False</property>
+                                                <property name="fill">False</property>
+                                                <property name="position">1</property>
+                                              </packing>
+                                            </child>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">4</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child type="label">
+                                  <object class="GtkLabel" id="snes_image_label">
+                                    <property name="visible">True</property>
+                                    <property name="can_focus">False</property>
+                                    <property name="label" translatable="yes">&lt;b&gt;SNES Image&lt;/b&gt;</property>
+                                    <property name="use_markup">True</property>
+                                  </object>
+                                </child>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
@@ -3361,6 +3693,53 @@
                                             <property name="position">2</property>
                                           </packing>
                                         </child>
+                                        <child>
+                                          <object class="GtkCheckButton" id="gb_video_camera">
+                                            <property name="label" translatable="yes">Enable Video Camera</property>
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">True</property>
+                                            <property name="receives_default">False</property>
+                                            <property name="tooltip_text" translatable="yes">Feed a connected USB webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor. With this off (or no camera connected) the in‑game viewfinder is blank.</property>
+                                            <property name="use_underline">True</property>
+                                            <property name="draw_indicator">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">3</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkHBox" id="gb_camera_box">
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">False</property>
+                                            <property name="spacing">12</property>
+                                            <child>
+                                              <object class="GtkComboBox" id="gb_camera_combo">
+                                                <property name="visible">True</property>
+                                                <property name="can_focus">False</property>
+                                                <property name="model">liststore_gb_camera</property>
+                                                <property name="tooltip_text" translatable="yes">The webcam to feed into the Game Boy Camera. Cameras that only offer compressed (MJPEG) video produce a blank image.</property>
+                                                <child>
+                                                  <object class="GtkCellRendererText" id="gb_camera_renderer"/>
+                                                  <attributes>
+                                                    <attribute name="text">0</attribute>
+                                                  </attributes>
+                                                </child>
+                                              </object>
+                                              <packing>
+                                                <property name="expand">True</property>
+                                                <property name="fill">True</property>
+                                                <property name="position">0</property>
+                                              </packing>
+                                            </child>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">4</property>
+                                          </packing>
+                                        </child>
                                       </object>
                                     </child>
                                   </object>
@@ -3380,51 +3759,6 @@
                                 <property name="position">6</property>
                               </packing>
                             </child>
-
-                            <child>
-                              <object class="GtkHBox" id="osd_box">
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="spacing">12</property>
-
-                                <child>
-                                  <object class="GtkLabel" id="osdlabel">
-                                    <property name="visible">True</property>
-                                   <property name="can_focus">False</property>
-                                   <property name="label" translatable="yes">On‑screen display size:</property>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">False</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkSpinButton" id="osd_size">
-                                    <property name="visible">True</property>
-                                    <property name="can_focus">True</property>
-                                    <property name="tooltip_text" translatable="yes">The size of on‑screen display messages in pixels</property>
-                                    <property name="primary_icon_activatable">False</property>
-                                    <property name="secondary_icon_activatable">False</property>
-                                    <property name="primary_icon_sensitive">True</property>
-                                    <property name="secondary_icon_sensitive">True</property>
-                                    <property name="adjustment">osd_size_adjustment</property>
-                                    <property name="snap_to_ticks">True</property>
-                                    <property name="width_chars">6</property>
-                                    <property name="numeric">True</property>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">False</property>
-                                  </packing>
-                                </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">False</property>
-                                <property name="position">7</property>
-                              </packing>
-                            </child>
-
 
                             <child>
                               <object class="GtkHBox" id="resolution_box">
@@ -3469,7 +3803,7 @@
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">False</property>
-                                <property name="position">6</property>
+                                <property name="position">7</property>
                               </packing>
                             </child>
 
@@ -5600,6 +5934,58 @@
                               </packing>
                             </child>
                             <child>
+                              <object class="GtkFrame" id="avisettingsframe">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="border_width">5</property>
+                                <property name="label_xalign">0</property>
+                                <property name="shadow_type">none</property>
+                                <child>
+                                  <object class="GtkAlignment" id="alignmentavisettings">
+                                    <property name="visible">True</property>
+                                    <property name="can_focus">False</property>
+                                    <property name="left_padding">12</property>
+                                    <child>
+                                      <object class="GtkVBox" id="vboxavisettings">
+                                        <property name="visible">True</property>
+                                        <property name="can_focus">False</property>
+                                        <property name="border_width">5</property>
+                                        <property name="spacing">5</property>
+                                        <child>
+                                          <object class="GtkCheckButton" id="avi_hires">
+                                            <property name="label" translatable="yes">Hi-Res AVI Recording</property>
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">True</property>
+                                            <property name="receives_default">False</property>
+                                            <property name="tooltip_text" translatable="yes">Record File → AVI Recording at twice the SNES resolution (512x448) so hi-res and interlaced games keep their detail. Doubles the file size.</property>
+                                            <property name="draw_indicator">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">True</property>
+                                            <property name="position">0</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child type="label">
+                                  <object class="GtkLabel" id="labelavisettingsframe">
+                                    <property name="visible">True</property>
+                                    <property name="can_focus">False</property>
+                                    <property name="label" translatable="yes">&lt;b&gt;AVI Recording&lt;/b&gt;</property>
+                                    <property name="use_markup">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">False</property>
+                                <property name="position">3</property>
+                              </packing>
+                            </child>
+                            <child>
                               <object class="GtkFrame" id="hacksettingsframe">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
@@ -5791,7 +6177,7 @@
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">False</property>
-                                <property name="position">3</property>
+                                <property name="position">4</property>
                               </packing>
                             </child>
                           </object>

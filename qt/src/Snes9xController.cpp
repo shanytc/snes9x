@@ -4,6 +4,8 @@
 #include "SoftwareFilters.hpp"
 #include "fscompat.h"
 #include <filesystem>
+#include <algorithm>
+#include <cstring>
 namespace fs = std::filesystem;
 
 #include "snes9x.h"
@@ -11,12 +13,17 @@ namespace fs = std::filesystem;
 #include "apu/apu.h"
 #include "sgb/sgb.h"
 #include "biosmanager.h"
+#include "common/audio/audio_waveform.hpp"
 #include "gfx.h"
 #include "ppu.h"
 #include "snapshot.h"
+#include "screenshot.h"
 #include "controls.h"
+#include "crosshairs.h"
 #include "cheats.h"
 #include "movie.h"
+#include "common/recording/avi_recorder.hpp"
+#include "common/video/gb_camera_v4l2.hpp"
 
 #ifdef KAILLERA_SUPPORT
 #include "kaillera_client.h"
@@ -51,10 +58,8 @@ Snes9xController *Snes9xController::get()
 
 void Snes9xController::init()
 {
-    Settings.MouseMaster = true;
-    Settings.SuperScopeMaster = true;
-    Settings.JustifierMaster = true;
-    Settings.MultiPlayer5Master = true;
+    // The controller-device master flags are set per port configuration in
+    // updateBindings().
     Settings.Transparency = true;
     Settings.Stereo = true;
     Settings.ReverseStereo = false;
@@ -118,11 +123,16 @@ void Snes9xController::init()
     S9xUnmapAllControls();
     S9xCheatsEnable();
 
+    // Game Boy Camera webcam feed; the capture itself is started by
+    // updateSettings() once the config says so.
+    S9xGBCameraRegister();
+
     active = false;
 }
 
 void Snes9xController::deinit()
 {
+    S9xGBCameraStop();
     if (active)
         S9xAutoSaveSRAM();
     S9xGraphicsDeinit();
@@ -265,6 +275,8 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.TwoClockCycles = overclock_cycles[config->overclock][0] * 2;
 
     Settings.ShowOverscan = config->show_overscan;
+    Settings.Transparency = config->transparency_effects;
+    blend_hires = config->blend_hires;
 
     // Game Boy frame-blend (Super Game Boy). Push the stored mode/layer first, then,
     // when "Auto Layer Transparency" is on, let the per-title table in sgb.cpp pick
@@ -281,6 +293,11 @@ void Snes9xController::updateSettings(EmuConfig *config)
         config->gb_frame_blend       = Settings.GBFrameBlend;
         config->gb_frame_blend_layer = Settings.GBFrameBlendLayer;
     }
+
+    // Game Boy Camera webcam feed: (re)start or stop the capture to match.
+    Settings.GBVideoCamera = config->gb_video_camera;
+    Settings.GBVideoCameraIndex = (uint8)std::clamp(config->gb_video_camera_index, 0, 255);
+    S9xGBCameraApply();
 
     high_resolution_effect = config->high_resolution_effect;
     software_filter = S9xSoftwareFilterFromName(config->software_filter);
@@ -313,6 +330,9 @@ bool Snes9xController::openFile(const std::string &filename)
 {
     if (active)
         S9xAutoSaveSRAM();
+    // A recording belongs to one game: the next one may have another frame
+    // rate or screen size. (LoadROM itself ends any movie.)
+    S9xAVIStop();
     active = false;
     auto result = Memory.LoadROM(filename.c_str());
     if (result)
@@ -475,6 +495,8 @@ void Snes9xController::mainLoop()
         mainLoopWithRunAhead();
     else
         S9xMainLoop();
+
+    S9xAVIEndFrame();
 }
 
 void Snes9xController::setPaused(bool paused)
@@ -535,7 +557,14 @@ bool8 S9xDeinitUpdate(int width, int height)
 
     uint16_t *screen_view = GFX.Screen + (yoffset * (int)GFX.RealPPL);
 
-    auto hires_effect = Snes9xController::get()->high_resolution_effect;
+    // The AVI gets the frame as the SNES drew it, before the hi-res effect
+    // and software filter reshape it for the window.
+    if (!Settings.Paused)
+        S9xAVICaptureFrame(screen_view, GFX.Pitch, width, height);
+
+    auto controller = Snes9xController::get();
+    auto hires_effect = controller->high_resolution_effect;
+    const bool native_hires = (width == 512);
     if (!Settings.Paused)
     {
         if (hires_effect == EmuConfig::eScaleUp)
@@ -553,8 +582,18 @@ bool8 S9xDeinitUpdate(int width, int height)
     // Hi-res frames get their own filter selection, like the win32 port's
     // second "Hi Res" box under Output Image Processing.
     bool hires_frame = (width == 512 || height > SNES_HEIGHT_EXTENDED);
-    int filter = hires_frame ? Snes9xController::get()->software_filter_hires
-                             : Snes9xController::get()->software_filter;
+    int filter = hires_frame ? controller->software_filter_hires
+                             : controller->software_filter;
+
+    // "Blend Hi-Res Images": average each pixel of a 512-wide frame with its
+    // left neighbour, keeping the width, so games that alternate columns for
+    // a transparency effect blend them (win32's BlendHiRes). Frames the game
+    // drew in low-res and merged frames are left alone, as is a filter that
+    // consumes the hi-res columns itself.
+    if (!Settings.Paused && controller->blend_hires && native_hires && width == 512 &&
+        !S9xSoftwareFilterBlendsHires(filter))
+        S9xBlendHires(screen_view, GFX.Pitch, width, height);
+
     if (filter != 0)
     {
         // The filters can only grow the image, so the scratch buffer sized for
@@ -696,35 +735,21 @@ bool S9xPollButton(unsigned int, bool *)
     return false;
 }
 
-static uint8_t sound_channel_mask = 255;
-
-static void applySoundChannelMask()
-{
-    S9xSetSoundControl(sound_channel_mask);
-    // Channels 1-4 double as the GB APU's CH1-CH4 (pulse A, pulse B, wave,
-    // noise) so the mask also works for GB/SGB games, as on win32.
-    S9xSGBSetSoundChannelMask(sound_channel_mask & 0x0f);
-}
-
+/* Sound > Channels. The masks live in the shared audio waveform module so
+ * the viewer's mute/solo overlay composes with them, as on win32. */
 uint8_t S9xGetSoundChannelMask()
 {
-    return sound_channel_mask;
+    return audiowave::spc_mask();
 }
 
 void S9xSetSoundChannelMask(uint8_t mask)
 {
-    sound_channel_mask = mask;
-    applySoundChannelMask();
+    audiowave::set_channel_mask(mask);
 }
 
 void S9xToggleSoundChannel(int c)
 {
-    if (c == 8)
-        sound_channel_mask = 255;
-    else
-        sound_channel_mask ^= 1 << c;
-
-    applySoundChannelMask();
+    audiowave::toggle_channel(c);
 }
 
 std::string S9xGetFilenameInc(std::string e, enum s9x_getdirtype dirtype)
@@ -790,7 +815,9 @@ bool S9xPollPointer(unsigned int, short *, short *)
 void Snes9xController::SamplesAvailable()
 {
     static std::vector<int16_t> data;
-    if (sound_output_function)
+    // An AVI takes every sample, whether or not a sound device is there to
+    // play it.
+    if (sound_output_function || S9xAVIRecording())
     {
         // SGB BIOS mode fires this ~per scanline with only a few GB samples;
         // writing those dribbles starves the driver into static. Like win32,
@@ -816,7 +843,9 @@ void Snes9xController::SamplesAvailable()
 
         S9xMixSamples((uint8_t *)data.data(), samples);
         S9xMixSpcOverGB(data.data(), samples);
-        sound_output_function(data.data(), samples);
+        S9xAVIAddSamples(data.data(), samples);
+        if (sound_output_function)
+            sound_output_function(data.data(), samples);
     }
     else
     {
@@ -885,6 +914,86 @@ bool Snes9xController::acceptsCommand(const char *command)
     return !(cmd.type == S9xNoMapping || cmd.type == S9xBadMapping);
 }
 
+/* The joypad buttons that also drive the device in the neighbouring port,
+ * as win32's S9xPollButton() lets them: pad 1 works the mouse or Justifier
+ * that replaces it, pad 2 fires the gun or second mouse in port 2. In
+ * Dual Justifiers mode pad 2's D-pad also steers the second gun's pseudo
+ * pointer (pseudo pointer 1 = PseudoPointerBase, mapped in updateBindings). */
+struct DeviceButton
+{
+    int configuration;
+    int player;
+    const char *button;
+    const char *command;
+};
+
+static const DeviceButton device_buttons[] = {
+    { EmuConfig::eMouse, 0, "A", "Mouse1 L" },
+    { EmuConfig::eMouse, 0, "L", "Mouse1 L" },
+    { EmuConfig::eMouse, 0, "B", "Mouse1 R" },
+    { EmuConfig::eMouse, 0, "R", "Mouse1 R" },
+
+    { EmuConfig::eMouseSwapped, 1, "A", "Mouse2 L" },
+    { EmuConfig::eMouseSwapped, 1, "L", "Mouse2 L" },
+    { EmuConfig::eMouseSwapped, 1, "B", "Mouse2 R" },
+    { EmuConfig::eMouseSwapped, 1, "R", "Mouse2 R" },
+
+    { EmuConfig::eSuperScope, 1, "A", "Superscope Fire" },
+    { EmuConfig::eSuperScope, 1, "L", "Superscope Fire" },
+    { EmuConfig::eSuperScope, 1, "B", "Superscope Cursor" },
+    { EmuConfig::eSuperScope, 1, "R", "Superscope Cursor" },
+    { EmuConfig::eSuperScope, 1, "Y", "Superscope ToggleTurbo" },
+    { EmuConfig::eSuperScope, 1, "Start", "Superscope Pause" },
+    { EmuConfig::eSuperScope, 1, "Select", "Superscope Pause" },
+    { EmuConfig::eSuperScope, 1, "X", "Superscope AimOffscreen" },
+
+    { EmuConfig::eJustifier, 0, "A", "Justifier1 Trigger" },
+    { EmuConfig::eJustifier, 0, "L", "Justifier1 Trigger" },
+    { EmuConfig::eJustifier, 0, "B", "Justifier1 Start" },
+    { EmuConfig::eJustifier, 0, "R", "Justifier1 Start" },
+    { EmuConfig::eJustifier, 0, "X", "Justifier1 AimOffscreen" },
+    { EmuConfig::eJustifier, 0, "Start", "Justifier1 AimOffscreen" },
+
+    { EmuConfig::eDualJustifiers, 0, "A", "Justifier1 Trigger" },
+    { EmuConfig::eDualJustifiers, 0, "L", "Justifier1 Trigger" },
+    { EmuConfig::eDualJustifiers, 0, "B", "Justifier1 Start" },
+    { EmuConfig::eDualJustifiers, 0, "R", "Justifier1 Start" },
+    { EmuConfig::eDualJustifiers, 0, "X", "Justifier1 AimOffscreen" },
+    { EmuConfig::eDualJustifiers, 0, "Start", "Justifier1 AimOffscreen" },
+    { EmuConfig::eDualJustifiers, 1, "A", "Justifier2 Trigger" },
+    { EmuConfig::eDualJustifiers, 1, "L", "Justifier2 Trigger" },
+    { EmuConfig::eDualJustifiers, 1, "B", "Justifier2 Start" },
+    { EmuConfig::eDualJustifiers, 1, "R", "Justifier2 Start" },
+    { EmuConfig::eDualJustifiers, 1, "X", "Justifier2 AimOffscreen" },
+    { EmuConfig::eDualJustifiers, 1, "Start", "Justifier2 AimOffscreen" },
+    { EmuConfig::eDualJustifiers, 1, "Up", "ButtonToPointer 1u Med" },
+    { EmuConfig::eDualJustifiers, 1, "Down", "ButtonToPointer 1d Med" },
+    { EmuConfig::eDualJustifiers, 1, "Left", "ButtonToPointer 1l Med" },
+    { EmuConfig::eDualJustifiers, 1, "Right", "ButtonToPointer 1r Med" },
+
+    { EmuConfig::eMacsRifle, 1, "A", "MacsRifle Trigger" },
+    { EmuConfig::eMacsRifle, 1, "L", "MacsRifle Trigger" },
+};
+
+static s9xcommand_t joypadCommand(int port_configuration, int player, const char *button)
+{
+    std::string name = "Joypad" + std::to_string(player + 1) + " " + button;
+    bool multi = false;
+
+    for (auto &d : device_buttons)
+    {
+        if (d.configuration != port_configuration || d.player != player || strcmp(d.button, button))
+            continue;
+        name += std::string(",") + d.command;
+        multi = true;
+    }
+
+    if (multi)
+        name = "{" + name + "}";
+
+    return S9xGetCommandT(name.c_str());
+}
+
 void Snes9xController::updateBindings(const EmuConfig *const config)
 {
     const char *snes9x_names[] = {
@@ -910,30 +1019,69 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
 
     S9xUnmapAllControls();
 
+    // Mirrors win32's ChangeInputDevice(): raise only the master flag of the
+    // selected device, and seat the devices where they sit on real hardware
+    // (a mouse or pad in port 1, a gun or multitap in port 2). Pad N is
+    // driven by the "SNES Controller N" bindings.
+    Settings.MouseMaster = false;
+    Settings.JustifierMaster = false;
+    Settings.SuperScopeMaster = false;
+    Settings.MultiPlayer5Master = false;
+    Settings.MacsRifleMaster = false;
+
     switch (config->port_configuration)
     {
-    case EmuConfig::eTwoControllers:
-        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
-        S9xSetController(1, CTL_JOYPAD, 1, 1, 1, 1);
-        break;
-    case EmuConfig::eMousePlusController:
+    case EmuConfig::eMouse:
+        Settings.MouseMaster = true;
         S9xSetController(0, CTL_MOUSE, 0, 0, 0, 0);
-        S9xSetController(1, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JOYPAD, 1, 0, 0, 0);
         break;
-    case EmuConfig::eSuperScopePlusController:
-        S9xSetController(0, CTL_SUPERSCOPE, 0, 0, 0, 0);
-        S9xSetController(1, CTL_JOYPAD, 0, 0, 0, 0);
+    case EmuConfig::eMouseSwapped:
+        Settings.MouseMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_MOUSE, 1, 0, 0, 0);
         break;
-    case EmuConfig::eControllerPlusMultitap:
+    case EmuConfig::eSuperScope:
+        Settings.SuperScopeMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_SUPERSCOPE, 0, 0, 0, 0);
+        break;
+    case EmuConfig::eMultitap5:
+        Settings.MultiPlayer5Master = true;
         S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
         S9xSetController(1, CTL_MP5, 1, 2, 3, 4);
         break;
+    case EmuConfig::eMultitap8:
+        Settings.MultiPlayer5Master = true;
+        S9xSetController(0, CTL_MP5, 0, 1, 2, 3);
+        S9xSetController(1, CTL_MP5, 4, 5, 6, 7);
+        break;
+    case EmuConfig::eJustifier:
+        Settings.JustifierMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JUSTIFIER, 0, 0, 0, 0);
+        break;
+    case EmuConfig::eDualJustifiers:
+        Settings.JustifierMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JUSTIFIER, 1, 0, 0, 0);
+        break;
+    case EmuConfig::eMacsRifle:
+        Settings.MacsRifleMaster = true;
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_MACSRIFLE, 0, 0, 0, 0);
+        break;
+    case EmuConfig::eJoypads:
     default:
         S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
-        S9xSetController(1, CTL_NONE, 0, 0, 0, 0);
+        S9xSetController(1, CTL_JOYPAD, 1, 0, 0, 0);
+        break;
     }
 
-    for (int controller_number = 0; controller_number < 5; controller_number++)
+    setSuperScopeCrosshairVisible(config->superscope_crosshair_visible);
+    clamp_pointer = EmuConfig::portConfigurationUsesGun(config->port_configuration);
+
+    for (int controller_number = 0; controller_number < EmuConfig::num_controllers; controller_number++)
     {
         auto &controller = config->binding.controller[controller_number];
         for (int i = 0; i < EmuConfig::num_controller_bindings; i++)
@@ -943,11 +1091,8 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
                 auto binding = controller.buttons[i * EmuConfig::allowed_bindings + b];
                 if (binding.hash() == 0)
                     continue;
-                std::string name = "Joypad" +
-                                    std::to_string(controller_number + 1) + " " +
-                                    snes9x_names[i];
 
-                auto cmd = S9xGetCommandT(name.c_str());
+                auto cmd = joypadCommand(config->port_configuration, controller_number, snes9x_names[i]);
                 S9xMapButton(binding.hash(), cmd, false);
             }
         }
@@ -980,9 +1125,7 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
             auto binding = additional.buttons[i];
             if (binding.hash() == 0)
                 continue;
-            std::string name = std::string("Joypad1 ") +
-                               additional_names[i];
-            auto cmd = S9xGetCommandT(name.c_str());
+            auto cmd = joypadCommand(config->port_configuration, 0, additional_names[i]);
             S9xMapButton(binding.hash(), cmd, false);
         }
     }
@@ -1001,20 +1144,35 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
         }
     }
 
-    auto cmd = S9xGetCommandT("Pointer Mouse1+Superscope+Justifier1");
+    // The host pointer aims every device that can sit in a port, whichever
+    // one is plugged in. The second Justifier is the exception: as on win32
+    // it is steered from pad 2's D-pad through a pseudo pointer (see
+    // joypadCommand), so it must not also be claimed by the mouse.
+    auto cmd = S9xGetCommandT("Pointer Mouse1+Mouse2+Superscope+Justifier1+MacsRifle");
     S9xMapPointer(EmuBinding::MOUSE_POINTER, cmd, false);
     mouse_x = mouse_y = 0;
     S9xReportPointer(EmuBinding::MOUSE_POINTER, mouse_x, mouse_y);
 
-    cmd = S9xGetCommandT("{Mouse1 L,Superscope Fire,Justifier1 Trigger}");
+    cmd = S9xGetCommandT("Pointer Justifier2");
+    S9xMapPointer(PseudoPointerBase, cmd, false);
+
+    cmd = S9xGetCommandT("{Mouse1 L,Mouse2 L,Superscope Fire,Justifier1 Trigger,MacsRifle Trigger}");
     S9xMapButton(EmuBinding::MOUSE_BUTTON1, cmd, false);
 
     cmd = S9xGetCommandT("{Justifier1 AimOffscreen Trigger,Superscope AimOffscreen}");
     S9xMapButton(EmuBinding::MOUSE_BUTTON3, cmd, false);
 
-    cmd = S9xGetCommandT("{Mouse1 R,Superscope Cursor,Justifier1 Start}");
+    cmd = S9xGetCommandT("{Mouse1 R,Mouse2 R,Superscope Cursor,Justifier1 Start}");
     S9xMapButton(EmuBinding::MOUSE_BUTTON2, cmd, false);
 
+}
+
+void Snes9xController::setSuperScopeCrosshairVisible(bool visible)
+{
+    if (visible)
+        S9xSetControllerCrosshair(X_SUPERSCOPE, 2, "White", "Black");
+    else
+        S9xSetControllerCrosshair(X_SUPERSCOPE, 0, "Trans", "Trans");
 }
 
 void Snes9xController::reportBinding(EmuBinding b, bool active)
@@ -1031,6 +1189,20 @@ void Snes9xController::reportPointer(int x, int y)
 {
     mouse_x += x;
     mouse_y += y;
+    if (clamp_pointer)
+    {
+        // A light gun can only point at the screen, so keep a grabbed
+        // pointer from wandering off into the void.
+        mouse_x = std::clamp<int16_t>(mouse_x, 0, 256);
+        mouse_y = std::clamp<int16_t>(mouse_y, 0, 239);
+    }
+    S9xReportPointer(EmuBinding::MOUSE_POINTER, mouse_x, mouse_y);
+}
+
+void Snes9xController::reportPointerAbsolute(int x, int y)
+{
+    mouse_x = x;
+    mouse_y = y;
     S9xReportPointer(EmuBinding::MOUSE_POINTER, mouse_x, mouse_y);
 }
 
@@ -1118,8 +1290,18 @@ bool Snes9xController::isAbnormalSpeed()
     return (Settings.TurboMode || rewinding);
 }
 
+/* As on win32's Emulation->Reset: a movie being recorded gets the reset as
+ * an input event, and a movie being played back ends. */
+static void movieResetHook()
+{
+    S9xMovieUpdateOnReset();
+    if (S9xMoviePlaying())
+        S9xMovieStop(true);
+}
+
 void Snes9xController::reset()
 {
+    movieResetHook();
     S9xReset();
     // Only a power-cycle the user asked for: S9xReset also runs inside every
     // non-fast state load, soft reset included.
@@ -1128,12 +1310,166 @@ void Snes9xController::reset()
 
 void Snes9xController::softReset()
 {
+    movieResetHook();
     S9xSoftReset();
 }
 
 bool Snes9xController::saveState(int slot)
 {
     return saveState(save_slot_path(slot).string());
+}
+
+// File->Save Other: the dialog-less exports from the win32 File menu.
+void Snes9xController::saveSPC()
+{
+    if (!active)
+        return;
+
+    // Same as the SaveSPC hotkey: the DSP writes the numbered .spc file into
+    // the export folder on the next key-on, so the dump starts cleanly.
+    S9xDumpSPCSnapshot();
+    S9xSetInfoString("Saving SPC data");
+}
+
+void Snes9xController::takeScreenshot(bool paused)
+{
+    if (!active)
+        return;
+
+    // The next rendered frame writes the file (S9xEndScreenRefresh), which for
+    // a paused game would only happen on resume: capture it right away.
+    Settings.TakeScreenshot = true;
+    if (paused)
+        S9xDoScreenshot(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
+}
+
+bool Snes9xController::saveSRAM()
+{
+    if (!active)
+        return false;
+
+    auto filename = S9xGetFilename(".srm", SRAM_DIR);
+    if (Memory.SaveSRAM(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return true;
+    }
+
+    fprintf(stderr, "Couldn't save S-RAM file: %s\n", filename.c_str());
+    S9xSetInfoString("Couldn't save S-RAM file");
+    return false;
+}
+
+bool Snes9xController::saveMemoryPack()
+{
+    if (!active)
+        return false;
+
+    // Numbered like win32 so repeated dumps never overwrite each other.
+    auto filename = S9xGetFilenameInc(".bs", SRAM_DIR);
+    if (Memory.SaveMPAK(filename.c_str()))
+    {
+        auto info_string = filename + " saved";
+        S9xSetInfoString(info_string.c_str());
+        return true;
+    }
+
+    fprintf(stderr, "Couldn't save Memory Pack file: %s\n", filename.c_str());
+    S9xSetInfoString("Couldn't save Memory Pack file");
+    return false;
+}
+
+bool Snes9xController::hasMemoryPack()
+{
+    // Only BS-X and Sufami-style multicarts carry a memory pack; this is the
+    // same test CMemory::SaveMPAK makes before it agrees to write one.
+    return active && (Settings.BS || (Multi.cartSizeB && Multi.cartType == 3));
+}
+
+int Snes9xController::openMovie(const std::string &filename, bool read_only)
+{
+    if (!active)
+        return FILE_NOT_FOUND;
+    if (S9xMovieActive())
+        S9xMovieStop(true);
+    return S9xMovieOpen(filename.c_str(), read_only);
+}
+
+int Snes9xController::createMovie(const std::string &filename, uint8_t controllers_mask,
+                                  bool from_reset, bool clear_sram, const std::wstring &metadata)
+{
+    if (!active)
+        return FILE_NOT_FOUND;
+    if (S9xMovieActive())
+        S9xMovieStop(true);
+
+    if (from_reset && clear_sram)
+    {
+        // A movie from reset with clean SRAM: drop the battery save on disk
+        // and reload, which leaves the SRAM zeroed. Same as win32.
+        std::error_code ec;
+        fs::remove(S9xGetFilename(".srm", SRAM_DIR), ec);
+        fs::remove(S9xGetFilename(".srm", ROMFILENAME_DIR), ec);
+        Memory.LoadSRAM(S9xGetFilename(".srm", SRAM_DIR).c_str());
+    }
+
+    // win32 pads the author text to 32 characters; keep the files identical.
+    std::wstring padded = metadata;
+    while (padded.size() < 32)
+        padded += L' ';
+    if (padded.size() > MOVIE_MAX_METADATA)
+        padded.resize(MOVIE_MAX_METADATA);
+
+    return S9xMovieCreate(filename.c_str(), controllers_mask,
+                          from_reset ? MOVIE_OPT_FROM_RESET : MOVIE_OPT_FROM_SNAPSHOT,
+                          padded.c_str(), (int)padded.size());
+}
+
+void Snes9xController::stopMovie()
+{
+    if (S9xMovieActive())
+        S9xMovieStop(false);
+}
+
+bool Snes9xController::movieActive()
+{
+    return active && S9xMovieActive();
+}
+
+bool Snes9xController::saveAndCheckSRAM()
+{
+    if (!active)
+        return false;
+    auto filename = S9xGetFilename(".srm", SRAM_DIR);
+    Memory.SaveSRAM(filename.c_str());
+    std::error_code ec;
+    return fs::exists(filename, ec) &&
+           (fs::status(filename, ec).permissions() & fs::perms::owner_write) != fs::perms::none;
+}
+
+bool Snes9xController::startAVIRecording(const std::string &filename, bool hires, bool include_audio, std::string &error)
+{
+    if (!active)
+    {
+        error = "No game is running.";
+        return false;
+    }
+    S9xAVIOptions options;
+    options.hires = hires;
+    options.overscan = Settings.ShowOverscan;
+    options.include_audio = include_audio;
+    return S9xAVIStart(filename, options, &error);
+}
+
+void Snes9xController::stopAVIRecording()
+{
+    S9xAVIStop();
+}
+
+bool Snes9xController::aviRecording()
+{
+    return S9xAVIRecording();
 }
 
 void Snes9xController::setMessage(const std::string &message)
@@ -1180,6 +1516,11 @@ bool Snes9xController::addCheat(const std::string &description,
 void Snes9xController::deleteCheat(int index)
 {
     S9xDeleteCheatGroup(index);
+}
+
+void Snes9xController::moveCheat(int from, int to)
+{
+    S9xMoveCheatGroup(from, to);
 }
 
 void Snes9xController::deleteAllCheats()

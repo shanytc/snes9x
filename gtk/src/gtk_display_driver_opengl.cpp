@@ -437,7 +437,7 @@ int S9xOpenGLDisplayDriver::init()
 
     context->swap_interval(config->sync_to_vblank);
 
-    if (version >= 33)
+    if (version >= 33 && !Settings.AutoDisplayMessages)
     {
         auto defaults = S9xImGuiGetDefaults();
         defaults.font_size = gui_config->osd_size;

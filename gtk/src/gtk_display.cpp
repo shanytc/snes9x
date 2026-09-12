@@ -15,6 +15,7 @@
 #include "snes9x.h"
 #include "gfx.h"
 #include "netplay.h"
+#include "common/recording/avi_recorder.hpp"
 
 #if defined(USE_XV) && defined(GDK_WINDOWING_X11)
 #include "gtk_display_driver_xv.h"
@@ -360,6 +361,28 @@ static void S9xMergeHires(void *buffer, int pitch, int &width, int &height)
     }
 
     width >>= 1;
+}
+
+/* In-place horizontal blend of a 512-wide frame that keeps its width: each
+   pixel becomes the average of itself and its left neighbour (win32's
+   RenderMergeHires behind "Blend Hi-Res Images"). */
+static void S9xBlendHires(void *buffer, int pitch, int width, int height)
+{
+    if (width < 512)
+        return;
+
+    for (int y = 0; y < height; y++)
+    {
+        uint16 *line = (uint16 *)((uint8 *)buffer + y * pitch);
+        uint16 left = 0;
+
+        for (int x = 0; x < width; x++)
+        {
+            uint16 right = line[x];
+            line[x] = average_565(left, right);
+            left = right;
+        }
+    }
 }
 
 void filter_2x(uint8 *src,
@@ -876,6 +899,12 @@ bool8 S9xDeinitUpdate(int width, int height)
 
     uint16_t *screen_view = GFX.Screen + (yoffset * (int)GFX.RealPPL);
 
+    // The AVI gets the frame as the SNES drew it, before the hi-res effect
+    // and software filter reshape it for the window.
+    if (!Settings.Paused && !NetPlay.Paused)
+        S9xAVICaptureFrame(screen_view, GFX.Pitch, width, height);
+
+    const bool native_hires = (width == 512);
     if (!Settings.Paused && !NetPlay.Paused)
 
     {
@@ -895,6 +924,15 @@ bool8 S9xDeinitUpdate(int width, int height)
        second "Hi Res" box under Output Image Processing. */
     bool hires_frame = (width == 512 || height > SNES_HEIGHT_EXTENDED);
     active_filter = hires_frame ? gui_config->hires_scale_method : gui_config->scale_method;
+
+    /* "Blend Hi-Res Images": average each pixel of a 512-wide frame with its
+       left neighbour, keeping the width, so games that alternate columns for a
+       transparency effect blend them. Frames the game drew in low-res and
+       merged frames are left alone; so is Blargg's NTSC filter, which merges
+       the hi-res columns itself (win32's GetFilterBlendSupport). */
+    if (!Settings.Paused && !NetPlay.Paused && gui_config->blend_hires &&
+        native_hires && width == 512 && active_filter != FILTER_NTSC)
+        S9xBlendHires(screen_view, GFX.Pitch, width, height);
 
     if (active_filter > 0)
     {

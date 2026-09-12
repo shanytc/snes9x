@@ -12,6 +12,8 @@
 #include "snes9x.h"
 #include "apu/apu.h"
 #include "sgb/sgb.h"
+#include "common/audio/audio_waveform.hpp"
+#include "common/recording/avi_recorder.hpp"
 
 #ifdef USE_PORTAUDIO
 #include "common/audio/s9x_sound_driver_portaudio.hpp"
@@ -192,15 +194,18 @@ void S9xSamplesAvailable(void *userdata)
     if (space_free < samples)
         samples = space_free & ~1;
 
-    if (samples == 0)
+    // An AVI takes every sample; the device only gets what it has room for.
+    const int mixed = S9xAVIRecording() ? S9xGetSampleCount() : samples;
+
+    if (mixed == 0)
     {
         if (!sgb_bios)
             S9xClearSamples();
         return;
     }
 
-    if ((int)temp_buffer.size() < samples)
-        temp_buffer.resize(samples);
+    if ((int)temp_buffer.size() < mixed)
+        temp_buffer.resize(mixed);
 
     // Sync per-source SGB BIOS-mix gains into the apu globals before mixing.
     // (Cheap; lets the user adjust SPC/GB live without going through a
@@ -234,8 +239,16 @@ void S9xSamplesAvailable(void *userdata)
     else
         S9xSpcSyncReset();
 
-    S9xMixSamples((uint8_t *)temp_buffer.data(), samples);
-    S9xMixSpcOverGB(temp_buffer.data(), samples);
+    S9xMixSamples((uint8_t *)temp_buffer.data(), mixed);
+    S9xMixSpcOverGB(temp_buffer.data(), mixed);
+    S9xAVIAddSamples(temp_buffer.data(), mixed);
+
+    if (samples == 0)
+    {
+        if (clear_leftover_samples)
+            S9xClearSamples();
+        return;
+    }
 
     // Master volume — Regular during normal play, FastForward in turbo/rewind.
     // Scaling is in-place; no driver here exposes a host-side volume API.
@@ -285,34 +298,19 @@ bool8 S9xOpenSoundDevice()
     return driver->open_device(Settings.SoundPlaybackRate, gui_config->sound_buffer_size);
 }
 
-/* This really shouldn't be in the port layer */
-static uint8_t sound_channel_mask = 255;
-
-static void apply_sound_channel_mask()
-{
-    S9xSetSoundControl(sound_channel_mask);
-    // Channels 1-4 double as the GB APU's CH1-CH4 (pulse A, pulse B, wave,
-    // noise) so the mask also works for GB/SGB games, as on win32.
-    S9xSGBSetSoundChannelMask(sound_channel_mask & 0x0f);
-}
-
+/* Sound > Channels. The masks live in the shared audio waveform module so
+ * the viewer's mute/solo overlay composes with them, as on win32. */
 uint8_t S9xGetSoundChannelMask()
 {
-    return sound_channel_mask;
+    return audiowave::spc_mask();
 }
 
 void S9xSetSoundChannelMask(uint8_t mask)
 {
-    sound_channel_mask = mask;
-    apply_sound_channel_mask();
+    audiowave::set_channel_mask(mask);
 }
 
 void S9xToggleSoundChannel(int c)
 {
-    if (c == 8)
-        sound_channel_mask = 255;
-    else
-        sound_channel_mask ^= 1 << c;
-
-    apply_sound_channel_mask();
+    audiowave::toggle_channel(c);
 }

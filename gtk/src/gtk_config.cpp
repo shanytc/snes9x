@@ -87,6 +87,7 @@ int Snes9xConfig::load_defaults()
     scale_method = 0;
     hires_scale_method = 0;
     overscan = false;
+    blend_hires = true;
     save_sram_after_secs = 0;
     rom_loaded = false;
     multithreading = false;
@@ -113,6 +114,10 @@ int Snes9xConfig::load_defaults()
     sound_playback_rate = 7;
     sound_input_rate = 32040;
     auto_input_rate = false;
+    movie_default_read_only = true;
+    movie_default_from_reset = false;
+    movie_default_clear_sram = false;
+    avi_hires = false;
     master_volume_regular = 100;
     master_volume_fast_forward = 100;
     sgb_mix_volume_spc = 50;
@@ -129,6 +134,8 @@ int Snes9xConfig::load_defaults()
     shader_parameters_width = -1;
     shader_parameters_height = -1;
     enable_icons = true;
+    window_icon = 1;
+    write_icon_to_launcher = true;
     current_display_tab = 0;
     sram_directory.clear();
     export_directory.clear();
@@ -147,6 +154,10 @@ int Snes9xConfig::load_defaults()
     Settings.GBFrameBlend = 0;
     Settings.GBFrameBlendLayer = 0;
     Settings.GBFrameBlendAuto = true;
+    // Game Boy Camera webcam feed (Display Settings > Game Boy Image), stored in
+    // Settings like on win32. Off by default; index into the enumerated list.
+    Settings.GBVideoCamera = false;
+    Settings.GBVideoCameraIndex = 0;
     Settings.ColorCorrection = false;
     Settings.AdjustmentsEnabled = false;
     Settings.Gamma = 0;
@@ -185,15 +196,21 @@ int Snes9xConfig::load_defaults()
     shader_filename.clear();
     reduce_input_lag = false;
 
+    controller_option = CONTROLLER_JOYPADS;
+    superscope_crosshair_visible = true;
+    valid_controller_options = 0xffff;
+    controller_option_before_rom = -1;
+
     /* Snes9x Variables */
-    Settings.MouseMaster = true;
-    Settings.SuperScopeMaster = true;
-    Settings.JustifierMaster = true;
-    Settings.MultiPlayer5Master = true;
+    // The controller-device master flags are set per controller option in
+    // S9xApplyControllerOption().
     Settings.UpAndDown = false;
     Settings.AutoSaveDelay = 0;
     Settings.SkipFrames = THROTTLE_TIMER_FRAMESKIP;
     Settings.Transparency = true;
+    // Draw messages into the SNES image (pixel font) instead of the on-screen
+    // overlay, so they also land in screenshots, AVIs and the XV/Cairo drivers.
+    Settings.AutoDisplayMessages = false;
     Settings.DisplayTime = false;
     Settings.DisplayFrameRate = false;
     Settings.DisplayIndicators = false;
@@ -243,6 +260,12 @@ int Snes9xConfig::load_defaults()
     return 0;
 }
 
+// Config-file names for ControllerOption, in enum order.
+static const char *controller_option_names[NUM_CONTROLLER_OPTIONS] = {
+    "joypads", "mouse", "superscope", "multitap5", "justifier",
+    "mouse_swapped", "multitap8", "dual_justifiers", "macsrifle"
+};
+
 int Snes9xConfig::save_config_file()
 {
     ConfigFile cf;
@@ -271,6 +294,8 @@ int Snes9xConfig::save_config_file()
     outbool("ChangeDisplayResolution", change_display_resolution, "Set the resolution in fullscreen mode");
     outbool("ScaleToFit", scale_to_fit, "Scale the image to fit the window size");
     outbool("ShowOverscanArea", overscan, "Show the overscan area at the top and bottom that most games hide");
+    outbool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
+    outbool("MessagesInImage", Settings.AutoDisplayMessages, "Draw messages inside the SNES image (they get into AVIs, screenshots and filters) instead of the on-screen overlay");
     outbool("MaintainAspectRatio", maintain_aspect_ratio, "Resize the screen to the proportions set by aspect ratio option");
     outbool("Multithreading", multithreading, "Apply filters using multiple threads");
     outbool("BilinearFilter", Settings.BilinearFilter, "Smoothes scaled image");
@@ -291,6 +316,8 @@ int Snes9xConfig::save_config_file()
     outint("BlendGBFrames", Settings.GBFrameBlend, "Game Boy frame-blend mode (Super Game Boy only): 0=off, 1=Simple Blend (mix each frame 50/50 with the previous, fixes flicker-based fake transparency e.g. ZAS), 2=LCD Blend (slow-decay LCD-style ghosting)");
     outint("BlendGBFramesLayer", Settings.GBFrameBlendLayer, "Which Game Boy layer the frame-blend applies to: 0=all, 1=background (keeps moving sprites crisp), 2=window, 3=sprites");
     outbool("BlendGBFramesAuto", Settings.GBFrameBlendAuto, "Auto-pick the GB frame-blend per game from a built-in known-flicker-game table at load (off for unlisted games); when false the manual mode/layer apply to every GB game");
+    outbool("GBVideoCamera", Settings.GBVideoCamera, "Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor");
+    outint("GBVideoCameraIndex", Settings.GBVideoCameraIndex, "Index of the selected webcam in the device list (set via Display Settings > Game Boy Image)");
     outbool("ColorCorrection", Settings.ColorCorrection, "Enable accurate SNES color correction (simulates SNES CRT output)");
     outbool("AdjustmentsEnabled", Settings.AdjustmentsEnabled, "Apply the Gamma/Contrast/Saturation adjustments below");
     outint("Gamma", Settings.Gamma, "Gamma adjustment (-100..+100, 0 = no change)");
@@ -362,6 +389,8 @@ int Snes9xConfig::save_config_file()
     outint("CurrentDisplayTab", current_display_tab, "Last-selected tab in the Preferences window");
     outbool("UIVisible", ui_visible, "Show the menu bar");
     outbool("EnableIcons", enable_icons, "Show icons next to menu items");
+    outint("Icon", window_icon, "Which of the four bundled logos (1-4) the window shows, chosen via File > Choose Icon");
+    outbool("WriteIconToLauncher", write_icon_to_launcher, "Also write the chosen logo into ~/.local/share/icons so the launcher, dock and task bar show it (turn off to put the original icon back)");
     if (default_esc_behavior != ESC_TOGGLE_MENUBAR)
         outbool("Fullscreen", false);
     else
@@ -395,6 +424,9 @@ int Snes9xConfig::save_config_file()
     outint("RewindGranularity", rewind_granularity, "Only save rewind snapshots every N frames");
     outint("CurrentSaveSlot", current_save_slot, "Currently selected save-state slot within the bank (remembered automatically)");
     outint("CurrentSaveBank", current_save_bank, "Currently selected save-state bank (remembered automatically)");
+    outbool("MovieDefaultReadOnly", movie_default_read_only, "Last state of the Play Movie dialog's Open Read-Only box (remembered automatically)");
+    outbool("MovieDefaultStartFromReset", movie_default_from_reset, "Last state of the Record Movie dialog's Record from reset choice (remembered automatically)");
+    outbool("MovieDefaultClearSRAM", movie_default_clear_sram, "Last state of the Record Movie dialog's Clear SRAM box (remembered automatically)");
 
     section = "Emulation";
     outbool("EmulateTransparency", Settings.Transparency, "Render the SNES color/transparency effects (turn off only for troubleshooting)");
@@ -408,6 +440,7 @@ int Snes9xConfig::save_config_file()
     outbool("BlockInvalidVRAMAccess", Settings.BlockInvalidVRAMAccessMaster, "Emulate the real hardware's VRAM access restrictions (on for accuracy; off only for a few broken ROMs/hacks)");
     outbool("AllowDPadContradictions", Settings.UpAndDown, "Allow the D-Pad to press both up + down at the same time, or left + right");
     outint("RunAhead", Settings.RunAhead, "Number of frames to run ahead for reduced input latency (0 = off, 1-4)");
+    outbool("AVIHiRes", avi_hires, "true to record AVI in Hi-Res scale (512x448 instead of 256x224)");
 
     section = "Hacks";
     outint("SuperFXClockMultiplier", Settings.SuperFXClockMultiplier, "SuperFX (GSU) chip speed as a percentage of normal (50-400; 100 = accurate). Higher reduces slowdown in Star Fox and other SuperFX games");
@@ -429,40 +462,9 @@ int Snes9xConfig::save_config_file()
     outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
 
     section = "Input";
-    controllers controller = CTL_NONE;
-    int8 id[4];
-
-    for (int i = 0; i < 2; i++)
-    {
-        std::string name;
-        std::string value;
-
-        name = "ControllerPort" + std::to_string(i);
-        S9xGetController(i, &controller, &id[0], &id[1], &id[2], &id[3]);
-
-        switch (controller)
-        {
-        case CTL_JOYPAD:
-            value = "joypad";
-            break;
-        case CTL_MOUSE:
-            value = "mouse";
-            break;
-        case CTL_SUPERSCOPE:
-            value = "superscope";
-            break;
-        case CTL_MP5:
-            value = "multitap";
-            break;
-        case CTL_JUSTIFIER:
-            value = "justifier";
-            break;
-        default:
-            value = "none";
-        }
-
-        outstring(name, value, "Device in this port: none, joypad, mouse, superscope, justifier, or multitap");
-    }
+    outstring("ControllerOption", controller_option_names[controller_option],
+              "What is plugged into the controller ports: joypads, mouse, superscope, multitap5, justifier, mouse_swapped, multitap8, dual_justifiers, or macsrifle");
+    outbool("SuperScopeCrosshair", superscope_crosshair_visible, "on to draw the Super Scope's crosshair on screen");
 
     outint("JoystickThreshold", joystick_threshold, "How far an analog stick/trigger must move to register as pressed (percent, 1-100)");
     outbool("EnableRumble", enable_rumble, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad");
@@ -559,6 +561,8 @@ int Snes9xConfig::load_config_file()
     inint("SoftwareScaleFilterHires", hires_scale_method);
     inint("ScanlineFilterIntensity", scanline_filter_intensity);
     inbool("ShowOverscanArea", overscan);
+    inbool("BlendHiRes", blend_hires);
+    inbool("MessagesInImage", Settings.AutoDisplayMessages);
     inint("HiresEffect", hires_effect);
     inbool("ForceInvertedByteOrder", force_inverted_byte_order);
     inbool("Multithreading", multithreading);
@@ -572,6 +576,8 @@ int Snes9xConfig::load_config_file()
     inint("BlendGBFrames", Settings.GBFrameBlend);
     inint("BlendGBFramesLayer", Settings.GBFrameBlendLayer);
     inbool("BlendGBFramesAuto", Settings.GBFrameBlendAuto);
+    inbool("GBVideoCamera", Settings.GBVideoCamera);
+    inint("GBVideoCameraIndex", Settings.GBVideoCameraIndex);
     inbool("ColorCorrection", Settings.ColorCorrection);
     inbool("AdjustmentsEnabled", Settings.AdjustmentsEnabled);
     inint("Gamma", Settings.Gamma);
@@ -638,6 +644,8 @@ int Snes9xConfig::load_config_file()
     inbool("UIVisible", ui_visible);
     inbool("Fullscreen", fullscreen);
     inbool("EnableIcons", enable_icons);
+    inint("Icon", window_icon);
+    inbool("WriteIconToLauncher", write_icon_to_launcher);
 
     section = "Netplay";
     inbool("ActAsServer", netplay_is_server);
@@ -665,6 +673,9 @@ int Snes9xConfig::load_config_file()
     inint("RewindGranularity", rewind_granularity);
     inint("CurrentSaveSlot", current_save_slot);
     inint("CurrentSaveBank", current_save_bank);
+    inbool("MovieDefaultReadOnly", movie_default_read_only);
+    inbool("MovieDefaultStartFromReset", movie_default_from_reset);
+    inbool("MovieDefaultClearSRAM", movie_default_clear_sram);
 
     /* Older configs stored a flat 0-999 slot index. Split it into a bank and
      * an in-bank slot so the selection survives the upgrade. */
@@ -690,6 +701,7 @@ int Snes9xConfig::load_config_file()
     inbool("DisplayIndicators", Settings.DisplayIndicators);
     inbool("SnapshotScreenshots", Settings.SnapshotScreenshots);
     inint("RunAhead", Settings.RunAhead);
+    inbool("AVIHiRes", avi_hires);
     if (Settings.RunAhead < 0)
         Settings.RunAhead = 0;
     if (Settings.RunAhead > 4)
@@ -724,23 +736,39 @@ int Snes9xConfig::load_config_file()
 
     section = "Input";
 
-    for (int i = 0; i < 2; i++)
+    std::string option;
+    instr("ControllerOption", option);
+    if (!option.empty())
     {
-        std::string name = "ControllerPort" + std::to_string(i);
-        std::string value;
-        instr(name, value);
-
-        if (value.find("joypad") != std::string::npos)
-            S9xSetController(i, CTL_JOYPAD, i, 0, 0, 0);
-        else if (value.find("multitap") != std::string::npos)
-            S9xSetController(i, CTL_MP5, i, i + 1, i + 2, i + 3);
-        else if (value.find("superscope") != std::string::npos)
-            S9xSetController(i, CTL_SUPERSCOPE, 0, 0, 0, 0);
-        else if (value.find("mouse") != std::string::npos)
-            S9xSetController(i, CTL_MOUSE, i, 0, 0, 0);
-        else if (value.find("none") != std::string::npos)
-            S9xSetController(i, CTL_NONE, 0, 0, 0, 0);
+        for (int i = 0; i < NUM_CONTROLLER_OPTIONS; i++)
+            if (option == controller_option_names[i])
+                controller_option = i;
     }
+    else
+    {
+        // Older configs stored a device per port; map the pairs the menu can
+        // still express onto its options.
+        std::string port0, port1;
+        instr("ControllerPort0", port0);
+        instr("ControllerPort1", port1);
+        auto is = [](const std::string &value, const char *device) {
+            return value.find(device) != std::string::npos;
+        };
+
+        if (is(port0, "mouse"))
+            controller_option = CONTROLLER_MOUSE;
+        else if (is(port1, "mouse"))
+            controller_option = CONTROLLER_MOUSE_SWAPPED;
+        else if (is(port0, "superscope") || is(port1, "superscope"))
+            controller_option = CONTROLLER_SUPERSCOPE;
+        else if (is(port1, "justifier"))
+            controller_option = CONTROLLER_JUSTIFIER;
+        else if (is(port1, "multitap"))
+            controller_option = is(port0, "multitap") ? CONTROLLER_MULTITAP8 : CONTROLLER_MULTITAP5;
+        else
+            controller_option = CONTROLLER_JOYPADS;
+    }
+    inbool("SuperScopeCrosshair", superscope_crosshair_visible);
 
     inint("JoystickThreshold", joystick_threshold);
     inbool("EnableRumble", enable_rumble);
@@ -857,6 +885,8 @@ void Snes9xConfig::rebind_keys()
     for (int joypad_i = 0; joypad_i < NUM_JOYPADS; joypad_i++)
     {
         auto &bin = pad[joypad_i].data;
+        const int player = joypad_player(joypad_i);
+        const std::string joypad = "Joypad" + std::to_string(player + 1) + " ";
 
         for (int button_i = 0; button_i < NUM_JOYPAD_LINKS; button_i++)
         {
@@ -869,21 +899,25 @@ void Snes9xConfig::rebind_keys()
             if (dupe < NUM_JOYPAD_LINKS || bin[button_i].hex() == 0)
                 continue;
 
-            string = "Joypad" + std::to_string((joypad_i % 5) + 1) + " ";
-            string += b_links[button_i].snes9x_name;
+            // The pad button, plus whatever it also works on the device in
+            // the neighbouring port, plus any other buttons sharing the key.
+            std::vector<std::string> commands;
+            commands.push_back(joypad + b_links[button_i].snes9x_name);
+            S9xJoypadDeviceCommands(controller_option, player, b_links[button_i].snes9x_name, commands);
 
-            bool ismulti = false;
             for (dupe = button_i - 1; dupe > 0; dupe--)
             {
                 if (bin[button_i] == bin[dupe])
                 {
-                    ismulti = true;
-                    string += ",Joypad" + std::to_string((joypad_i % 5) + 1) + " ";
-                    string += b_links[dupe].snes9x_name;
+                    commands.push_back(joypad + b_links[dupe].snes9x_name);
+                    S9xJoypadDeviceCommands(controller_option, player, b_links[dupe].snes9x_name, commands);
                 }
             }
 
-            if (ismulti)
+            string = commands[0];
+            for (size_t i = 1; i < commands.size(); i++)
+                string += "," + commands[i];
+            if (commands.size() > 1)
                 string = std::string("{") + string + "}";
 
             cmd = S9xGetPortCommandT(string.c_str());
@@ -900,16 +934,23 @@ void Snes9xConfig::rebind_keys()
                      false);
     }
 
-    cmd = S9xGetPortCommandT("Pointer Mouse1+Superscope+Justifier1");
+    // The host pointer aims every device that can sit in a port, whichever
+    // one is plugged in. The second Justifier is the exception: as on win32
+    // it is steered from pad 2's D-pad through a pseudo pointer (see
+    // S9xJoypadDeviceCommands), so it must not also be claimed by the mouse.
+    cmd = S9xGetPortCommandT("Pointer Mouse1+Mouse2+Superscope+Justifier1+MacsRifle");
     S9xMapPointer(BINDING_MOUSE_POINTER, cmd, true);
 
-    cmd = S9xGetPortCommandT("{Mouse1 L,Superscope Fire,Justifier1 Trigger}");
+    cmd = S9xGetPortCommandT("Pointer Justifier2");
+    S9xMapPointer(PseudoPointerBase, cmd, false);
+
+    cmd = S9xGetPortCommandT("{Mouse1 L,Mouse2 L,Superscope Fire,Justifier1 Trigger,MacsRifle Trigger}");
     S9xMapButton(BINDING_MOUSE_BUTTON0, cmd, false);
 
     cmd = S9xGetPortCommandT("Superscope ToggleTurbo");
     S9xMapButton(BINDING_MOUSE_BUTTON1, cmd, false);
 
-    cmd = S9xGetPortCommandT("{Mouse1 R,Superscope Pause,Justifier1 Start}");
+    cmd = S9xGetPortCommandT("{Mouse1 R,Mouse2 R,Superscope Pause,Justifier1 Start}");
     S9xMapButton(BINDING_MOUSE_BUTTON2, cmd, false);
 
     cmd = S9xGetPortCommandT("Superscope Cursor");

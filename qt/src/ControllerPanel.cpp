@@ -33,7 +33,7 @@ ControllerPanel::ControllerPanel(EmuApplication *app_)
     });
 
     auto swap_menu = edit_menu.addMenu(QObject::tr("Swap With"));
-    for (auto i = 0; i < 5; i++)
+    for (auto i = 0; i < EmuConfig::num_controllers; i++)
     {
         action = swap_menu->addAction(QObject::tr("Controller %1").arg(i + 1));
         connect(action, &QAction::triggered, [&, i](bool) {
@@ -63,9 +63,11 @@ ControllerPanel::ControllerPanel(EmuApplication *app_)
         app->updateBindings();
     });
 
+    // Same setting as the Input menu's device list.
     connect(portComboBox, &QComboBox::currentIndexChanged, [&](int index) {
-        this->app->config->port_configuration = index;
-        app->updateBindings();
+        if (index < 0 || index == this->app->config->port_configuration)
+            return;
+        app->setPortConfiguration(index);
     });
 }
 

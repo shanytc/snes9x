@@ -15,8 +15,54 @@
 #include <QStyle>
 #include <QStyleHints>
 
+// Qt 6.2.3 through 6.3.1 drop QPalette::setBrush()'s resolve bit when the
+// brush is unchanged (qtbase 56bd1b76d2, undone by 9334e06bdf for 6.3.2 and
+// 6.4: QTBUG-98762). The built-in KDE platform theme fills a default
+// black-and-white QPalette from kdeglobals, so any colour that is exactly
+// black or white stays "unset" and QApplication takes it from Fusion's light
+// palette instead: dark colour schemes with pure white text (Nobara's, for
+// one) come up with black menubar text on a black bar. The Ubuntu 22.04
+// AppImage ships Qt 6.2.4. Reading the theme palette back is QPA API.
+#if !defined(_WIN32) && !defined(__APPLE__) && QT_VERSION < QT_VERSION_CHECK(6, 3, 2)
+#define REAPPLY_THEME_PALETTE
+#include <qpa/qplatformtheme.h>
+#include <private/qguiapplication_p.h>
+#endif
+
 #ifndef _WIN32
 #include <csignal>
+#endif
+
+#ifdef REAPPLY_THEME_PALETTE
+// Copy the theme's colours over the resolved application palette. setBrush()
+// only flags the roles that differ, so the roles the theme got through stay
+// as they were and a healthy palette is left alone.
+static void reapplyPlatformThemePalette()
+{
+    const QPlatformTheme *theme = QGuiApplicationPrivate::platformTheme();
+    const QPalette *themePalette = theme ? theme->palette() : nullptr;
+    if (!themePalette)
+        return;
+
+    // The roles QKdeTheme fills in from kdeglobals.
+    static const QPalette::ColorRole roles[] = {
+        QPalette::Window, QPalette::WindowText, QPalette::Base, QPalette::AlternateBase,
+        QPalette::Text, QPalette::Button, QPalette::ButtonText, QPalette::Highlight,
+        QPalette::HighlightedText, QPalette::Link, QPalette::LinkVisited,
+        QPalette::ToolTipBase, QPalette::ToolTipText
+    };
+    static const QPalette::ColorGroup groups[] = {
+        QPalette::Active, QPalette::Inactive, QPalette::Disabled
+    };
+
+    QPalette palette = QApplication::palette();
+    for (auto role : roles)
+        for (auto group : groups)
+            palette.setBrush(group, role, themePalette->brush(group, role));
+
+    if (palette != QApplication::palette())
+        QApplication::setPalette(palette);
+}
 #endif
 
 #ifdef _WIN32
@@ -88,6 +134,9 @@ int main(int argc, char *argv[])
             QApplication::setStyle("windowsvista");
         }
     }
+#ifdef REAPPLY_THEME_PALETTE
+    reapplyPlatformThemePalette();
+#endif
 
 #ifndef _WIN32
     auto quit_handler = [](int) { QApplication::quit(); };

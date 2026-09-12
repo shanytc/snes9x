@@ -3,6 +3,7 @@
 
 #include <QAction>
 #include <QMainWindow>
+#include <QPointer>
 #include <QTimer>
 #include "EmuCanvas.hpp"
 #include "snes9x.h"   // memmap.h relies on its types/macros being in scope
@@ -10,6 +11,7 @@
 
 class EmuApplication;
 class CheatsDialog;
+class AudioWaveformWindow;
 
 class EmuMainWindow : public QMainWindow
 {
@@ -43,11 +45,25 @@ class EmuMainWindow : public QMainWindow
     void openBiosManager();
     void powerCycle();
     bool openFile(const std::string &filename);
+    void playMovieDialog();
+    void recordMovieDialog();
+    void toggleAVIRecording();
     void recreateUIAssets();
     void shaderChanged();
     void updateShaderSettingsItem();
     void gameChanging();
+    void toggleAudioWaveform();
+    /* "Pause emulation when unfocused". The audio waveform viewer counts as
+     * part of this window: moving between the two doesn't pause, leaving
+     * from either does, so the viewer reports its focus changes here too. */
+    void handleFocusChange(bool active);
     void toggleMouseGrab();
+    void updatePortConfigurationMenu();
+    void applyWindowIcon();
+    void chooseWindowIcon(int index);
+    void setWriteIconToLauncher(bool enabled);
+    void syncLauncherIcon();
+    static QIcon logoIcon(int index);
     std::vector<std::string> getDisplayDeviceList();
     EmuApplication *app = nullptr;
     EmuCanvas *canvas = nullptr;
@@ -60,6 +76,8 @@ class EmuMainWindow : public QMainWindow
     static const size_t recent_menu_size = 10;
 
     std::unique_ptr<CheatsDialog> cheats_dialog;
+    // Sound->Show Audio Waveform; deletes itself on close, so this goes null.
+    QPointer<AudioWaveformWindow> audio_waveform_window;
 
     bool manual_pause = false;
     bool focus_pause = false;
@@ -84,7 +102,15 @@ class EmuMainWindow : public QMainWindow
 
     QTimer mouse_timer;
     bool cursor_visible = true;
+    // Light guns aim at the spot under the (ungrabbed) host pointer.
+    bool gunAimsAtPointer();
+    void reportGunAim(const QPoint &global_pos);
+    // Input menu device list, one per EmuConfig::PortConfiguration.
+    std::vector<QAction *> port_configuration_actions;
+    QAction *superscope_crosshair_action = nullptr;
     QAction *shader_settings_item;
+    QAction *movie_stop_action = nullptr;
+    QAction *avi_recording_action = nullptr;
     std::vector<QAction *> core_actions;
     std::vector<QAction *> recent_menu_items;
 

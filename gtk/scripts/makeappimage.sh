@@ -41,7 +41,7 @@ pushd AppDir
 rm -f snes9x.png super-snes9x-gtk.desktop AppRun
 ln -sf usr/share/icons/hicolor/256x256/apps/snes9x.png snes9x.png
 ln -sf usr/share/applications/super-snes9x-gtk.desktop super-snes9x-gtk.desktop
-ln -sf usr/bin/snes9x-gtk AppRun
+ln -sf usr/bin/super-snes9x-gtk AppRun
 chmod +x AppRun
 popd
 "./$APPIMAGETOOL" --appimage-extract-and-run AppDir "$OUT"

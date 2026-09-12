@@ -276,6 +276,8 @@ bool EmuConfig::setDefaults(int section)
         show_pressed_keys = false;
         show_time = false;
         language = "";
+        window_icon = 1;
+        write_icon_to_launcher = true;
     }
 
     if (section == -1 || section == 1)
@@ -300,6 +302,8 @@ bool EmuConfig::setDefaults(int section)
         aspect_ratio_numerator = 4;
         aspect_ratio_denominator = 3;
         show_overscan = false;
+        transparency_effects = true;
+        blend_hires = true;
         high_resolution_effect = eLeaveAlone;
 
         software_filter = {};
@@ -311,6 +315,8 @@ bool EmuConfig::setDefaults(int section)
         gb_frame_blend = eGBBlendOff;
         gb_frame_blend_layer = eGBBlendLayerAll;
         gb_frame_blend_auto = true;
+        gb_video_camera = false;
+        gb_video_camera_index = 0;
 
         color_correction = false;
         color_adjustments_enabled = false;
@@ -355,6 +361,8 @@ bool EmuConfig::setDefaults(int section)
 
         run_ahead_frames = 0;
 
+        avi_hires = false;
+
         allow_invalid_vram_access = false;
         snapshot_screenshots = true;
         allow_opposing_dpad_directions = false;
@@ -374,7 +382,8 @@ bool EmuConfig::setDefaults(int section)
         automap_gamepads = true;
         enable_rumble = true;
         // Controllers
-        port_configuration = 0;
+        port_configuration = eJoypads;
+        superscope_crosshair_visible = true;
         memset(binding.controller, 0, sizeof(binding.controller));
 
         const char *button_list[] = { "Up", "Down", "Left", "Right", "d", "c", "s", "x", "z", "a", "Return", "Space" };
@@ -524,6 +533,9 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("CheatDialogHeight", cheat_dialog_height);
     Int("CurrentSaveSlot", current_save_slot, "Currently selected save-state slot within the bank (remembered automatically)");
     Int("CurrentSaveBank", current_save_bank, "Currently selected save-state bank (remembered automatically)");
+    Bool("MovieDefaultReadOnly", movie_default_read_only, "Last state of the Play Movie dialog's Open Read-Only box (remembered automatically)");
+    Bool("MovieDefaultStartFromReset", movie_default_from_reset, "Last state of the Record Movie dialog's Record from reset choice (remembered automatically)");
+    Bool("MovieDefaultClearSRAM", movie_default_clear_sram, "Last state of the Record Movie dialog's Clear SRAM box (remembered automatically)");
 
     if (!write)
     {
@@ -555,6 +567,11 @@ void EmuConfig::config(const std::string &filename, bool write)
     String("Language", language, "UI language code (e.g. en, es); empty follows the system locale");
     EndSection();
 
+    BeginSection("Window");
+    Int("Icon", window_icon, "Which of the four bundled logos (1-4) the window shows, chosen via File > Choose Icon");
+    Bool("WriteIconToLauncher", write_icon_to_launcher, "Also write the chosen logo into ~/.local/share/icons so the launcher, dock and task bar show it (turn off to put the original icon back)");
+    EndSection();
+
     BeginSection("Display");
     String("DisplayDriver", display_driver, "Rendering backend (e.g. vulkan, opengl)");
     Int("DisplayDevice", display_device_index, "Index of the GPU/output to render on (0 = default)");
@@ -572,6 +589,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("AspectRatioNumerator", aspect_ratio_numerator, "Aspect-ratio width term (e.g. 4 in 4:3)");
     Int("AspectRatioDenominator", aspect_ratio_denominator, "Aspect-ratio height term (e.g. 3 in 4:3)");
     Bool("ShowOverscan", show_overscan, "Show the overscan area at the top and bottom that most games hide");
+    Bool("Transparency", transparency_effects, "Render the SNES colour-math/transparency effects (turn off only for troubleshooting)");
+    Bool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
     Enum("HighResolutionEffect", high_resolution_effect, { "LeaveAlone", "ScaleDown", "ScaleUp" }, "How to handle hi-res (512-wide) frames: LeaveAlone, ScaleDown, or ScaleUp");
 
     String("SoftwareFilter", software_filter, "Software scaling filter name, e.g. \"HQ2x\" or \"Blargg's NTSC (Composite)\"; empty means none");
@@ -585,6 +604,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     Enum("BlendGBFrames", gb_frame_blend, { "Off", "SimpleBlend", "LCDBlend" }, "Game Boy frame-blend (Super Game Boy only): Off, SimpleBlend (fixes flicker fake-transparency), or LCDBlend (LCD-style ghosting)");
     Enum("BlendGBFramesLayer", gb_frame_blend_layer, { "All", "Background", "Window", "Sprites" }, "Which Game Boy layer the frame-blend applies to: All, Background, Window, or Sprites");
     Bool("BlendGBFramesAuto", gb_frame_blend_auto, "Auto-pick the GB frame-blend per game from a built-in known-flicker table");
+    Bool("GBVideoCamera", gb_video_camera, "Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor");
+    Int("GBVideoCameraIndex", gb_video_camera_index, "Index of the selected webcam in the device list under Display > Game Boy Image");
 
     Bool("ColorCorrection", color_correction, "Enable accurate SNES color correction (simulates SNES CRT output)");
     Bool("AdjustmentsEnabled", color_adjustments_enabled, "Apply the gamma/contrast/saturation adjustments below");
@@ -632,6 +653,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("RewindBufferSize", rewind_buffer_size, "Memory (in MB) reserved for rewind; 0 disables rewind");
     Int("RewindFrameInterval", rewind_frame_interval, "Save a rewind snapshot every N frames");
     Int("RunAhead", run_ahead_frames, "Number of frames to run ahead for reduced input latency (0 = off, 1-4)");
+    Bool("AVIHiRes", avi_hires, "true to record AVI in Hi-Res scale (512x448 instead of 256x224)");
     Bool("AllowInvalidVRAMAccess", allow_invalid_vram_access, "Let games make the VRAM accesses real hardware blocks (off for accuracy; on only for a few broken hacks)");
     Bool("SnapshotScreenshots", snapshot_screenshots, "Store a screenshot inside each save state, for the save/load-with-preview dialog");
     Bool("AllowOpposingDpadDirections", allow_opposing_dpad_directions, "Allow the D-Pad to press both left+right or up+down at once");
@@ -694,10 +716,15 @@ void EmuConfig::config(const std::string &filename, bool write)
     BeginSection("Ports");
     Bool("AutomapGamepads", automap_gamepads, "Automatically map newly connected gamepads to a sensible default layout");
     Bool("EnableRumble", enable_rumble, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad");
-    Enum("PortConfiguration", port_configuration, { "OneController", "TwoControllers", "Mouse", "SuperScope", "Multitap" }, "What is plugged into the console's controller ports: OneController, TwoControllers, Mouse, SuperScope, or Multitap");
+    // Names follow the PortConfiguration enum order. The first three
+    // devices keep the values older configs wrote; the two legacy joypad
+    // names (OneController, TwoControllers) simply fall through to the
+    // Joypads default.
+    Enum("PortConfiguration", port_configuration, { "Joypads", "Mouse", "SuperScope", "Multitap", "Justifier", "MouseSwapped", "Multitap8", "DualJustifiers", "MacsRifle" }, "What is plugged into the console's controller ports: Joypads, Mouse, SuperScope, Multitap, Justifier, MouseSwapped, Multitap8, DualJustifiers, or MacsRifle");
+    Bool("SuperScopeCrosshair", superscope_crosshair_visible, "true to draw the Super Scope's crosshair on screen");
     EndSection();
 
-    for (int c = 0; c < 5; c++)
+    for (int c = 0; c < num_controllers; c++)
     {
         BeginSection("Controller_" + std::to_string(c));
 
@@ -797,5 +824,31 @@ void EmuConfig::setVRRConfig(bool enable)
         input_rate = saved_input_rate;
         speed_sync_method = saved_speed_sync_method;
         enable_vsync = saved_enable_vsync;
+    }
+}
+
+bool EmuConfig::portConfigurationUsesPointer(int configuration)
+{
+    switch (configuration)
+    {
+    case eMouse:
+    case eMouseSwapped:
+        return true;
+    default:
+        return portConfigurationUsesGun(configuration);
+    }
+}
+
+bool EmuConfig::portConfigurationUsesGun(int configuration)
+{
+    switch (configuration)
+    {
+    case eSuperScope:
+    case eJustifier:
+    case eDualJustifiers:
+    case eMacsRifle:
+        return true;
+    default:
+        return false;
     }
 }

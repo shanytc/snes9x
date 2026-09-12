@@ -22,11 +22,34 @@ class Snes9xController
     void loadUndoState();
     bool saveState(const std::string &filename);
     bool saveState(int slot);
+    void saveSPC();
+    void takeScreenshot(bool paused);
+    bool saveSRAM();
+    bool saveMemoryPack();
+    bool hasMemoryPack();
+
+    /* File->Movie Play/Record/Stop, as on win32. The open/create results are
+     * movie.cpp's SUCCESS/FILE_NOT_FOUND/WRONG_FORMAT/WRONG_VERSION. */
+    int openMovie(const std::string &filename, bool read_only);
+    int createMovie(const std::string &filename, uint8_t controllers_mask,
+                    bool from_reset, bool clear_sram, const std::wstring &metadata);
+    void stopMovie();
+    bool movieActive();
+    /* Writes the battery save out so the Record Movie dialog can tell whether
+     * there is one to clear; returns whether it exists and is writable. */
+    bool saveAndCheckSRAM();
+
+    /* File->AVI Recording. */
+    bool startAVIRecording(const std::string &filename, bool hires, bool include_audio, std::string &error);
+    void stopAVIRecording();
+    bool aviRecording();
     void updateSettings(EmuConfig *config);
     void updateBindings(const EmuConfig * const config);
     void reportBinding(EmuBinding b, bool active);
     void reportMouseButton(int button, bool pressed);
     void reportPointer(int x, int y);
+    void reportPointerAbsolute(int x, int y);
+    void setSuperScopeCrosshairVisible(bool visible);
     void updateSoundBufferLevel(int, int);
     bool acceptsCommand(const char *command);
     bool isAbnormalSpeed();
@@ -42,6 +65,7 @@ class Snes9xController
     void disableCheat(int index);
     bool addCheat(const std::string &description, const std::string &code);
     void deleteCheat(int index);
+    void moveCheat(int from, int to);
     void deleteAllCheats();
     int tryImportCheats(const std::string &filename);
     std::string validateCheat(const std::string &code);
@@ -60,6 +84,7 @@ class Snes9xController
     std::string bios_folder;
     int16_t mouse_x, mouse_y;
     int high_resolution_effect;
+    bool blend_hires = true;
     int software_filter = 0;
     int software_filter_hires = 0;
     int rewind_buffer_size;
@@ -78,6 +103,8 @@ class Snes9xController
   private:
     void SamplesAvailable();
     void mainLoopWithRunAhead();
+    // Light guns keep the pointer within the screen; the SNES mouse is free.
+    bool clamp_pointer = false;
 
     // Savestate scratch buffer for run-ahead. Sized per ROM (freeze size
     // depends on which special chips the cart uses), so openFile clears it.

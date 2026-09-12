@@ -2665,6 +2665,7 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 	in.quirks = impl_->sgbc_quirks;
 	// $FF9C is where this engine keeps its BGP shadow; harmless to read always.
 	in.hram_bgp = impl_->mem.hram[0xFF9C - 0xFF80];
+	in.cgb_c0   = static_cast<uint16_t>(impl_->ppu.bg_pal[0] | (impl_->ppu.bg_pal[1] << 8));
 
 	// The patched BIOS stashes the palette its keys displaced in its state
 	// block ($7E:CE00: magic 'S' 'C', state, then colors 1-3 of palettes 0-3
@@ -2788,8 +2789,15 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 		return;
 	}
 
-	const uint16_t fill = (mode == SGB_MASK_BLACK)
-		? 0x0000
+	// Colour 0 of the pane being masked. Under Super Game Boy Color that is the
+	// cart's own CGB colour 0, written or not: the SGB palette belongs to the mono
+	// presentation the Color pane replaced, and a cart on the Color arm stops
+	// sending the PAL packets that would keep it in step. Before its first write
+	// the palette RAM is the white a Color boots to, which is what it shows there.
+	const bool cgb_zero = impl_->sgbc && impl_->ppu.cgb;
+	const uint16_t fill = (mode == SGB_MASK_BLACK) ? 0x0000
+		: cgb_zero
+		? BgrToHost(static_cast<uint16_t>(impl_->ppu.bg_pal[0] | (impl_->ppu.bg_pal[1] << 8)))
 		: BgrToHost(blank_c0 ? PPU.CGDATA[0] : impl_->sgb_state.active[0].colors[0]);
 	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
 	{

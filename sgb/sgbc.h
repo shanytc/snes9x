@@ -36,6 +36,7 @@ struct SgbcPane
 	uint16_t        fallback[3]; // shades 1-3 when !color
 	uint32_t        quirks;      // SGBC_QUIRK_* for this cart
 	uint8_t         hram_bgp;    // the cart's BGP shadow at $FF9C (BGP_SHADOW)
+	uint16_t        cgb_c0;      // the cart's CGB BG palette 0, colour 0
 };
 
 // The boot-logo cover, Super Game Boy Color's own. sgb.cpp holds the panel on

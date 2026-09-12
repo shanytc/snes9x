@@ -141,7 +141,11 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 	// flat colour-0 frame there - but the Color renderer keeps its sprites up.
 	// ...over any line of the frame the pane is showing: lifting the blank
 	// mid-frame paints the top of it in the old palettes for one frame.
+	// ...and only once the cart has CGB palettes of its own: before its first
+	// write BGP still drives the pane, and blanking on it there is the mono
+	// path's job, which already reads BGP.
 	const bool dmg_blank = (in.quirks & SGBC_QUIRK_DMG_BLANK) && in.fb_valid &&
+	                       in.color &&
 	                       ((in.fb_bgp == 0 && in.fb_obp0 == 0 && in.fb_obp1 == 0) ||
 	                        in.fb_blank_any);
 
@@ -167,7 +171,7 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 	int      last_b    = -1;
 	uint16_t last_back = 0xFFFF;
 	const uint8 *xb = nullptr;
-	uint16_t key[3] = {}, mono[3] = {}, back = 0;
+	uint16_t key[3] = {}, mono[3] = {}, back = 0, blank = 0;
 
 	for (uint32_t y = 0; y < GB_SCREEN_HEIGHT; ++y)
 	{
@@ -185,6 +189,9 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 				mono[k] = BgrToHostBright(in.fallback[k], xb);
 			}
 			back = BgrToHostBright(bd, xb);
+			// A DMG_BLANK pane is colour 0 as the CART has it. The SNES backdrop is
+			// the SGB palette's, which a cart on the Color arm leaves scenes stale.
+			blank = BgrToHostBright(in.cgb_c0, xb);
 		}
 
 		const uint16_t *src = in.color_fb + y * GB_SCREEN_WIDTH;
@@ -204,14 +211,16 @@ bool SgbcComposePane(uint16_t *dest, uint32_t pitch_pixels, const SgbcPane &in)
 				// blanking on it there erases the picture.
 				if (bgp_shadow)            dst[x] = (in.hram_bgp & 3)
 				                                    ? mono[(in.hram_bgp & 3) - 1] : back;
-				else if (hold || dmg_blank) dst[x] = back;
+				else if (dmg_blank)        dst[x] = blank;
+				else if (hold)             dst[x] = back;
 				else if (in.color)         dst[x] = BgrToHostBright(src[x], xb);
 				else if (bgp_blank && !sh) dst[x] = back;
 				else                       dst[x] = sh ? mono[sh - 1] : back;
 			}
 			else if (px == back && bgp_shadow)
 				dst[x] = (in.hram_bgp & 3) ? mono[(in.hram_bgp & 3) - 1] : back;
-			else if (px == back && !hold && !dmg_blank)
+			else if (px == back && dmg_blank) dst[x] = blank;
+			else if (px == back && !hold)
 			{
 				// Index 0 goes through BGP on a DMG too: BGP=$FF blanks the
 				// whole screen to shade 3, not just the drawn pixels.

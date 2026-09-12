@@ -248,8 +248,6 @@ constexpr int64_t kRoleReportInterval = 3 * 4194304;
 
 LinkRole g_role = LinkRole::None;
 
-SerialByteCallback g_serial_cb = nullptr;
-
 // ---- DMG-07 Four Player Adapter --------------------------------------------
 // Timing from Pan Docs, in real T-cycles at 4.194304 MHz (1 ms = 4194).
 constexpr int32_t kCyclesPerMs = 4194;
@@ -1699,8 +1697,6 @@ void HubStep(Serial &s, Memory &mem, int32_t real_cycles)
 
 } // anonymous
 
-void SetSerialCallback(SerialByteCallback cb) { g_serial_cb = cb; }
-
 void SerialReset(Serial &s, bool cgb)
 {
 	// A reset does not unplug the cable, so only the transfer machinery is
@@ -1854,6 +1850,7 @@ static void RingExchange()
 void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 {
 	mem.serial_control = value;
+	mem.serial_bits    = 0;   // every SC write re-decides the unlinked stub below
 
 	if (value & 0x80)
 	{
@@ -1887,7 +1884,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		{
 			// Driving the internal clock under the adapter reads the idle
 			// wire, but only after the real eight bit periods.
-			if (g_serial_cb) g_serial_cb(mem.serial_data);
+			if (mem.serial_cb) mem.serial_cb(mem.serial_user, mem.serial_data);
 			Trace("[%lld] MASTER WRITE under hub -> timed $FF",
 			      (long long)s.real_cycles);
 			s.passive       = false;
@@ -1918,7 +1915,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		}
 		if (value & 0x01)
 		{
-			if (g_serial_cb) g_serial_cb(mem.serial_data);
+			if (mem.serial_cb) mem.serial_cb(mem.serial_user, mem.serial_data);
 			s.active = s.passive = false;
 			if (!g_ring.shifting)
 			{
@@ -1944,7 +1941,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		}
 		if (value & 0x01)
 		{
-			if (g_serial_cb) g_serial_cb(mem.serial_data);
+			if (mem.serial_cb) mem.serial_cb(mem.serial_user, mem.serial_data);
 			s.passive       = false;
 			s.active        = true;
 			s.bits_left     = 8;
@@ -1964,20 +1961,16 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 
 	if (!LinkIsConnected())
 	{
-		// Unlinked stub path: internal clock shifts the idle wire's $FF in
-		// over the real eight bit periods; external leaves bit 7 set,
-		// which is how games spot a missing cable.
+		// No cable: the core's own stub shifts the idle wire's $FF in,
+		// clocked off DIV bit 8 in TimerStep so it lands where hardware
+		// does (mooneye boot_sclk_align). External clock leaves bit 7
+		// set, which is how games spot a missing cable.
 		s.active = s.passive = false;
 		if ((value & 0x81) == 0x81)
 		{
-			if (g_serial_cb) g_serial_cb(mem.serial_data);
-			s.active        = true;
-			s.bits_left     = 8;
-			s.bit_period    = BitPeriod(s, value);
-			s.bit_timer     = s.bit_period;
-			s.peer_valid    = true;
-			s.peer_data     = 0xFF;
-			s.peer_supplied = false;
+			if (mem.serial_cb) mem.serial_cb(mem.serial_user, mem.serial_data);
+			mem.serial_bits  = 8;
+			mem.serial_guard = 0;
 		}
 		return;
 	}
@@ -1993,7 +1986,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 	{
 		// Internal clock: we drive. Byte goes out now; the bit countdown
 		// decides when the answer is due.
-		if (g_serial_cb) g_serial_cb(mem.serial_data);
+		if (mem.serial_cb) mem.serial_cb(mem.serial_user, mem.serial_data);
 
 		s.passive       = false;
 		s.active        = true;

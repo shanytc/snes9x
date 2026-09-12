@@ -51,11 +51,11 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 #define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
 
 // Marks the instance auto-launched by the Link Cable menu.
-// "-gblinkpeer=<pid>,<launcher>,<index>,<players>,<bios>" carries the
+// "-gblinkpeer=<pid>,<launcher>,<index>,<players>,<model>" carries the
 // launcher's process id and player index, this instance's own index, how
-// many players the session is for, and the launcher's booted BIOS mode
-// (0 = BIOS-less, 1/2 = SGB1/2) — the seat must boot the way the master
-// did, whatever the shared config says.
+// many players the session is for, and the launcher's Game Boy Model (an
+// S9xGBBootPolicy value) — the seat boots on the console the master
+// picked, whatever the shared config says.
 #define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
 #define GBLINK_PEER_SWITCH_A "-gblinkpeer"
 #define GBVIEW_SWITCH TEXT("-gbview")
@@ -77,9 +77,9 @@ extern int GBLinkLauncherIndex;
 // spawned instances. Persisted; consulted at session start.
 extern bool GBLinkSplitScreen;
 
-// The user's own BIOS preference, captured before a launch switch
+// The user's own Game Boy Model, captured before a launch switch
 // overrides it; the config file keeps this, not the session's value.
-extern int GBLinkUserBiosPref;   // -1 = not a spawned instance
+extern int GBLinkUserModel;      // -1 = not a spawned instance
 
 // Mirror this instance's pause to the paired one, so a Game Boy that
 // stops answering never reads as an unplugged cable. Called from the

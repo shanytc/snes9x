@@ -326,12 +326,12 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 		if (players > SGB_MAX_LINK_PLAYERS) players = SGB_MAX_LINK_PLAYERS;
 
 		// Peer housekeeping applies (muting, placement, no hosting).
-		// A viewer never emulates through the BIOS whatever the master
-		// runs; the config file keeps the user's own preference.
+		// A viewer never emulates, so it runs as a plain Game Boy whatever
+		// the master boots; the config file keeps the user's own model.
 		Settings.GBLinkPeerInstance = TRUE;
 		Settings.GBLinkPlayerIndex  = (uint8)seat;
-		GBLinkUserBiosPref          = Settings.SGB_BIOSPreference;
-		Settings.SGB_BIOSPreference = 0;
+		GBLinkUserModel             = Settings.GBBootPolicy;
+		Settings.GBBootPolicy       = S9X_GBBOOT_GB;
 		GBLinkPartnerPid     = (DWORD)pid;
 		GBLinkLauncherIndex  = 1;
 		GBLinkSessionPlayers = (int)players;
@@ -357,15 +357,15 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			char *end = NULL;
 			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
 
-			// "<pid>,<launcher>,<index>,<players>,<bios>": our own index is
+			// "<pid>,<launcher>,<index>,<players>,<model>": our own index is
 			// spelled out so a hub seat keeps its player number. The old
 			// two-value form only names the launcher; we are the other half
 			// of that pair, so {1,2} still falls out.
-			long launcher = 0, index = 0, players = 0, bios = -1;
+			long launcher = 0, index = 0, players = 0, model = -1;
 			if (end && *end == ',') launcher = strtol(end + 1, &end, 10);
 			if (end && *end == ',') index    = strtol(end + 1, &end, 10);
 			if (end && *end == ',') players  = strtol(end + 1, &end, 10);
-			if (end && *end == ',') bios     = strtol(end + 1, &end, 10);
+			if (end && *end == ',') model    = strtol(end + 1, &end, 10);
 
 			if (index < 1) index = (launcher == 1) ? 2 : 1;
 			if (index > 4) index = 4;
@@ -375,12 +375,12 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 			if (launcher > 4) launcher = 4;
 			GBLinkLauncherIndex = (int)launcher;
 
-			// The master's booted BIOS mode overrides the shared config,
-			// which may have been saved under a different preference.
-			if (bios >= 0 && bios <= 2)
+			// The master's Game Boy Model overrides the shared config, which
+			// may have been saved under a different pick.
+			if (model >= 0 && model < S9X_NUM_GBBOOT_POLICIES)
 			{
-				GBLinkUserBiosPref          = Settings.SGB_BIOSPreference;
-				Settings.SGB_BIOSPreference = (uint8)bios;
+				GBLinkUserModel       = Settings.GBBootPolicy;
+				Settings.GBBootPolicy = S9xNormalizeGBBootPolicy((int)model);
 			}
 
 			if (players < 2) players = 2;
@@ -1402,10 +1402,10 @@ void WinSaveConfigFile()
 	const bool liveMute = GUI.Mute;
 	if(muteForced) GUI.Mute = userMute;
 
-	// And its forced BIOS preference (a launch switch overrode the file's).
-	const uint8 liveBios = Settings.SGB_BIOSPreference;
-	if(GBLinkUserBiosPref >= 0)
-		Settings.SGB_BIOSPreference = (uint8)GBLinkUserBiosPref;
+	// And its forced Game Boy Model (a launch switch overrode the file's).
+	const uint8 liveModel = Settings.GBBootPolicy;
+	if(GBLinkUserModel >= 0)
+		Settings.GBBootPolicy = (uint8)GBLinkUserModel;
 
 	for(unsigned int i = 0 ; i < configItems.size()	; i++)
 		configItems[i].Set(conf);
@@ -1416,7 +1416,7 @@ void WinSaveConfigFile()
 		GUI.BackgroundInput = liveBackground;
 	}
 	if(muteForced) GUI.Mute = liveMute;
-	if(GBLinkUserBiosPref >= 0) Settings.SGB_BIOSPreference = liveBios;
+	if(GBLinkUserModel >= 0) Settings.GBBootPolicy = liveModel;
 
 	bool wasLocked = locked_file!=NULL;
 	if(wasLocked) WinUnlockConfigFile();

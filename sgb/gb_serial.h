@@ -75,11 +75,6 @@ struct Serial
 	bool     grant_valid   = false;
 };
 
-// Fires when the CPU starts an internal-clock transfer; the GB test
-// harness reads Blargg's pass/fail text through it. nullptr disables.
-using SerialByteCallback = void (*)(uint8_t byte);
-void SetSerialCallback(SerialByteCallback cb);
-
 void SerialReset(Serial &s, bool cgb);
 
 // Rebuilt, not restored: a state captures one side of a cable whose peer

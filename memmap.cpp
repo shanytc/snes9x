@@ -1124,37 +1124,10 @@ static bool AcceptSGBMode (const uint8 *data, uint32 size, uint32 full_size, voi
 	       got == *(const uint8 *) ctx;
 }
 
-// Look for an SGB BIOS file matching `mode`. Search order:
-//   1. Same directory as the GB ROM (if path known)
-//   2. BIOS_DIR — snes9x's configured BIOS search path
-//   3. Current working directory
-// Candidate filenames per mode are tried in order; the header is verified
-// before a match is accepted. Writes the full path to `out_path` on hit.
-static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out_path)
+// The folders a Game Boy-side search covers, in order: the cart's own folder,
+// the BIOS folder with its subfolders, the working directory.
+static std::vector<std::string> GBSearchDirs (const char *gb_rom_path)
 {
-	static const char *sgb1_names[] = {
-		"sgb.sfc", "SGB.sfc", "sgb1.sfc", "SGB1.sfc",
-		"Super Game Boy (World).sfc", nullptr
-	};
-	static const char *sgb2_names[] = {
-		"sgb2.sfc", "SGB2.sfc",
-		"Super Game Boy 2 (Japan).sfc", nullptr
-	};
-	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
-
-	// A path set in the BIOS Manager wins over the by-name search; it may be a
-	// .zip, which S9xReadBiosImage inflates far enough to check the header.
-	const std::string assigned = S9xResolveBiosPath(mode == 2 ? S9X_BIOS_SGB2 : S9X_BIOS_SGB1);
-	if (!assigned.empty())
-	{
-		std::vector<uint8> img;
-		if (S9xReadBiosImage(assigned.c_str(), img, 0x8000, AcceptSGBMode, &mode))
-		{
-			out_path = assigned;
-			return (TRUE);
-		}
-	}
-
 	std::vector<std::string> dirs;
 	if (gb_rom_path && *gb_rom_path)
 	{
@@ -1162,39 +1135,32 @@ static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out
 		const size_t sep = p.find_last_of("/\\");
 		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
 	}
-	dirs.push_back(S9xGetDirectory(BIOS_DIR));
+	const std::vector<std::string> bios = S9xBiosSearchDirs();
+	dirs.insert(dirs.end(), bios.begin(), bios.end());
 	dirs.push_back(".");
+	return (dirs);
+}
 
-	for (const auto &dir : dirs)
+// Look for an SGB BIOS file matching `mode`: the assigned path first, then
+// the slot's filenames across GBSearchDirs, plain or zipped. The header is
+// verified before a match is accepted. Writes the path to `out_path` on hit.
+static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out_path)
+{
+	const int          slot = (mode == 2) ? S9X_BIOS_SGB2 : S9X_BIOS_SGB1;
+	std::vector<uint8> img;
+
+	// A path set in the BIOS Manager wins over the by-name search; it may be a
+	// .zip, which S9xReadBiosImage inflates far enough to check the header.
+	const std::string assigned = S9xResolveBiosPath(slot);
+	if (!assigned.empty() &&
+	    S9xReadBiosImage(assigned.c_str(), img, 0x8000, AcceptSGBMode, &mode))
 	{
-		for (int i = 0; names[i]; ++i)
-		{
-			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
-			FILE *f = fopen(full.c_str(), "rb");
-			if (!f) continue;
-
-			uint8 hdr[0x8000];
-			const size_t n = fread(hdr, 1, sizeof hdr, f);
-			fclose(f);
-			if (n < 0x8000) continue;
-
-			uint8 got_mode = 0;
-			if (S9xIsSGBBIOSImage(hdr, static_cast<uint32>(n), &got_mode) && got_mode == mode)
-			{
-				out_path = full;
-				return (TRUE);
-			}
-		}
+		out_path = assigned;
+		return (TRUE);
 	}
-	// On miss, stash the search roots into out_path so the caller can
-	// show the user which directories were probed.
-	out_path.clear();
-	for (const auto &dir : dirs)
-	{
-		if (!out_path.empty()) out_path += " ; ";
-		out_path += dir.empty() ? std::string(".") : dir;
-	}
-	return (FALSE);
+
+	out_path = S9xFindBiosByName(slot, GBSearchDirs(gb_rom_path), img, 0x8000, AcceptSGBMode, &mode);
+	return out_path.empty() ? FALSE : TRUE;
 }
 
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path)
@@ -1203,63 +1169,30 @@ bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path)
 	return FindSGB_BIOS(mode, gb_rom_path, dummy);
 }
 
-// Locate the 256-byte GB-side boot ROM that accompanies the SGB BIOS.
-// Common names and the same directory-search order as the .sfc.
+// S9xReadBiosImage filter: a boot ROM is exactly 256 bytes.
+static bool AcceptBootROMSize (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) data; (void) size; (void) ctx;
+	return full_size == 256;
+}
+
+// Locate the 256-byte GB-side boot ROM that accompanies the SGB BIOS. Same
+// search as the .sfc.
 static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &out_path)
 {
-	static const char *sgb1_names[] = {
-		"sgb.boot.rom", "sgb1.boot.rom", "sgb_bios.bin", "sgb_boot.bin",
-		"Super Game Boy SGB-CPU (World) (Enhancement Chip).bin", nullptr
-	};
-	static const char *sgb2_names[] = {
-		"sgb2.boot.rom", "sgb2_bios.bin", "sgb2_boot.bin",
-		"Super Game Boy 2 SGB2-CPU (Japan) (Enhancement Chip).bin", nullptr
-	};
-	const char **names = (mode == 2) ? sgb2_names : sgb1_names;
+	const int          slot = (mode == 2) ? S9X_BIOS_SGB2_BOOT : S9X_BIOS_SGB1_BOOT;
+	std::vector<uint8> img;
 
 	// A path set in the BIOS Manager wins over the by-name search.
-	const std::string assigned =
-		S9xResolveBiosPath(mode == 2 ? S9X_BIOS_SGB2_BOOT : S9X_BIOS_SGB1_BOOT);
-	if (!assigned.empty())
+	const std::string assigned = S9xResolveBiosPath(slot);
+	if (!assigned.empty() && S9xReadBiosImage(assigned.c_str(), img, 256) && img.size() == 256)
 	{
-		std::vector<uint8> img;
-		if (S9xReadBiosImage(assigned.c_str(), img, 256) && img.size() == 256)
-		{
-			out_path = assigned;
-			return (TRUE);
-		}
+		out_path = assigned;
+		return (TRUE);
 	}
 
-	std::vector<std::string> dirs;
-	if (gb_rom_path && *gb_rom_path)
-	{
-		std::string p(gb_rom_path);
-		const size_t sep = p.find_last_of("/\\");
-		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
-	}
-	dirs.push_back(S9xGetDirectory(BIOS_DIR));
-	// Chip dumps commonly live beside the SGB .sfc images.
-	dirs.push_back(S9xGetDirectory(BIOS_DIR) + SLASH_STR + "SGB");
-	dirs.push_back(".");
-
-	for (const auto &dir : dirs)
-	{
-		for (int i = 0; names[i]; ++i)
-		{
-			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
-			FILE *f = fopen(full.c_str(), "rb");
-			if (!f) continue;
-			fseek(f, 0, SEEK_END);
-			const long sz = ftell(f);
-			fclose(f);
-			if (sz == 256)
-			{
-				out_path = full;
-				return (TRUE);
-			}
-		}
-	}
-	return (FALSE);
+	out_path = S9xFindBiosByName(slot, GBSearchDirs(gb_rom_path), img, 256, AcceptBootROMSize, NULL);
+	return out_path.empty() ? FALSE : TRUE;
 }
 
 static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
@@ -1299,65 +1232,24 @@ static bool AcceptGBBootROM (const uint8 *data, uint32 size, uint32 full_size, v
 static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
                              std::string &out_path, std::vector<uint8> *out_bytes)
 {
-	static const char *dmg_names[] = {
-		"dmg_boot.bin", "DMG_boot.bin", "dmg_bios.bin", "gb_bios.bin",
-		"dmg.boot.rom", "dmg_boot.rom", "DMG_ROM.bin", nullptr
-	};
-	static const char *cgb_names[] = {
-		"cgb_boot.bin", "CGB_boot.bin", "cgb_bios.bin", "gbc_bios.bin",
-		"cgb.boot.rom", "cgb_boot.rom", "CGB_ROM.bin", nullptr
-	};
-	const char **names = cgb ? cgb_names : dmg_names;
+	const int          slot     = cgb ? S9X_BIOS_GBC : S9X_BIOS_GB;
+	bool               want_cgb = cgb;
+	std::vector<uint8> img;
 
 	// A path set in the BIOS Manager wins over the by-name search, and may be a
 	// .zip. Reading one byte past the largest valid size lets the filter reject
 	// anything longer, as the plain-file path used to with its EOF probe.
-	const std::string assigned = S9xResolveBiosPath(cgb ? S9X_BIOS_GBC : S9X_BIOS_GB);
-	if (!assigned.empty())
-	{
-		bool want_cgb = cgb;
-		std::vector<uint8> img;
-		if (S9xReadBiosImage(assigned.c_str(), img, 0x901, AcceptGBBootROM, &want_cgb))
-		{
-			out_path = assigned;
-			if (out_bytes) *out_bytes = img;
-			return (TRUE);
-		}
-	}
+	const std::string assigned = S9xResolveBiosPath(slot);
+	if (!assigned.empty() &&
+	    S9xReadBiosImage(assigned.c_str(), img, 0x901, AcceptGBBootROM, &want_cgb))
+		out_path = assigned;
+	else
+		out_path = S9xFindBiosByName(slot, GBSearchDirs(gb_rom_path), img, 0x901,
+		                             AcceptGBBootROM, &want_cgb);
 
-	std::vector<std::string> dirs;
-	if (gb_rom_path && *gb_rom_path)
-	{
-		std::string p(gb_rom_path);
-		const size_t sep = p.find_last_of("/\\");
-		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
-	}
-	dirs.push_back(S9xGetDirectory(BIOS_DIR));
-	dirs.push_back(".");
-
-	for (const auto &dir : dirs)
-	{
-		for (int i = 0; names[i]; ++i)
-		{
-			std::string full = dir.empty() ? names[i] : (dir + SLASH_STR + names[i]);
-			FILE *f = fopen(full.c_str(), "rb");
-			if (!f) continue;
-
-			uint8 buf[0x900];
-			const size_t n = fread(buf, 1, sizeof buf, f);
-			const bool oversize = (fgetc(f) != EOF);   // longer than any boot ROM
-			fclose(f);
-
-			if (oversize) continue;
-			if (cgb ? (n != 0x900 && n != 0x800) : (n != 0x100)) continue;
-			if (buf[0] != 0x31 || buf[1] != 0xFE || buf[2] != 0xFF) continue;
-
-			out_path = full;
-			if (out_bytes) out_bytes->assign(buf, buf + n);
-			return (TRUE);
-		}
-	}
-	return (FALSE);
+	if (out_path.empty()) return (FALSE);
+	if (out_bytes) *out_bytes = img;
+	return (TRUE);
 }
 
 // A real Super Game Boy accepts any Game Boy cart, so SGB is "supported"
@@ -2848,30 +2740,18 @@ bool8 CMemory::LoadMultiCartInt ()
             memset(ROM, 0, Multi.cartOffsetB);
 
         // The BIOS Manager path wins and may be a .zip; a bad file there still
-        // falls through to STBIOS.bin in BIOS_DIR.
-		std::string path;
-		const std::string assigned = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
-		if (!assigned.empty())
-		{
-			std::vector<uint8> img;
-			if (S9xReadBiosImage(assigned.c_str(), img, 0x40000, AcceptSufamiBIOS, NULL))
-			{
-				memcpy(ROM, img.data(), img.size());
-				path = assigned;
-			}
-		}
-		if (path.empty())
-		{
-			const std::string named = S9xGetDirectory(BIOS_DIR) + SLASH_STR + "STBIOS.bin";
-			FILE *fp = fopen(named.c_str(), "rb");
-			if (fp)
-			{
-				const size_t size = fread((void *) ROM, 1, 0x40000, fp);
-				fclose(fp);
-				if (is_SufamiTurbo_BIOS(ROM, (uint32) size))
-					path = named;
-			}
-		}
+        // falls through to the slot's filenames in the BIOS folder.
+		std::string        path;
+		std::vector<uint8> img;
+		const std::string  assigned = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
+		if (!assigned.empty() &&
+		    S9xReadBiosImage(assigned.c_str(), img, 0x40000, AcceptSufamiBIOS, NULL))
+			path = assigned;
+		else
+			path = S9xFindBiosByName(S9X_BIOS_SUFAMI, S9xBiosSearchDirs(), img, 0x40000,
+			                         AcceptSufamiBIOS, NULL);
+		if (!path.empty())
+			memcpy(ROM, img.data(), img.size());
 
 		if (path.empty())
 		{

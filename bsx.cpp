@@ -1202,39 +1202,28 @@ uint8 * S9xGetBasePointerBSX (uint32 address)
 	return (MapROM);
 }
 
+// S9xReadBiosImage filter: the BIOS is exactly one megabyte.
+static bool AcceptBSXSize (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) data; (void) size; (void) ctx;
+	return full_size == BIOS_SIZE;
+}
+
 static bool8 BSX_LoadBIOS (void)
 {
-	FILE	*fp;
-	bool8	r = FALSE;
+	std::vector<uint8>	img;
+	bool8				r = FALSE;
 
 	// A path set in the BIOS Manager wins over the by-name search and may be a
-	// .zip; a bad file there still falls through to the names in BIOS_DIR.
+	// .zip; a bad file there still falls through to the names in the BIOS
+	// folder and its subfolders.
 	const std::string assigned = S9xResolveBiosPath(S9X_BIOS_BSX);
-	if (!assigned.empty())
-	{
-		std::vector<uint8> img;
-		if (S9xReadBiosImage(assigned.c_str(), img, BIOS_SIZE) && img.size() == BIOS_SIZE)
-		{
-			memcpy(BIOSROM, img.data(), BIOS_SIZE);
-			r = TRUE;
-		}
-	}
-
-	const std::string names[2] = {
-		S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bin",
-		S9xGetDirectory(BIOS_DIR) + SLASH_STR + "BS-X.bios"
-	};
-	for (int i = 0; i < 2 && !r; i++)
-	{
-		fp = fopen(names[i].c_str(), "rb");
-		if (!fp)
-			continue;
-
-		const size_t size = fread((void *) BIOSROM, 1, BIOS_SIZE, fp);
-		fclose(fp);
-		if (size == BIOS_SIZE)
-			r = TRUE;
-	}
+	if (!assigned.empty() && S9xReadBiosImage(assigned.c_str(), img, BIOS_SIZE) && img.size() == BIOS_SIZE)
+		r = TRUE;
+	else if (!S9xFindBiosByName(S9X_BIOS_BSX, S9xBiosSearchDirs(), img, BIOS_SIZE, AcceptBSXSize, NULL).empty())
+		r = TRUE;
+	if (r)
+		memcpy(BIOSROM, img.data(), BIOS_SIZE);
 
 #ifdef BSX_DEBUG
 	if (r)

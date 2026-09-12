@@ -3,6 +3,7 @@
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <vector>
 
 #include "biosmanager.h"
@@ -22,12 +23,14 @@ class BiosManagerDialog : public QDialog
   private:
     struct Row
     {
-        QLineEdit *edit;
-        QLabel    *status;
+        QLineEdit   *edit;
+        QLabel      *status;
+        QPushButton *clear;
     };
 
     void browse(int slot);
     void refreshRow(int slot);
+    void refreshRowStatus(int slot);
     void applyAndClose();
 
     EmuApplication  *app;

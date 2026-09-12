@@ -16,25 +16,60 @@
 #  endif
 #endif
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#ifndef __WIN32__
+#  include <dirent.h>
+#  include <sys/stat.h>
+#endif
+
+// Filenames each loader's by-name search tries, in order, when its slot is
+// blank. Kept here so the BIOS Manager can run the very same search.
+static const char *const kNamesGB[] = {
+	"dmg_boot.bin", "DMG_boot.bin", "dmg_bios.bin", "gb_bios.bin",
+	"dmg.boot.rom", "dmg_boot.rom", "DMG_ROM.bin", NULL
+};
+static const char *const kNamesGBC[] = {
+	"cgb_boot.bin", "CGB_boot.bin", "cgb_bios.bin", "gbc_bios.bin",
+	"cgb.boot.rom", "cgb_boot.rom", "CGB_ROM.bin", NULL
+};
+static const char *const kNamesSGB1[] = {
+	"sgb.sfc", "SGB.sfc", "sgb1.sfc", "SGB1.sfc",
+	"Super Game Boy (World).sfc", NULL
+};
+static const char *const kNamesSGB2[] = {
+	"sgb2.sfc", "SGB2.sfc", "Super Game Boy 2 (Japan).sfc", NULL
+};
+static const char *const kNamesSGB1Boot[] = {
+	"sgb.boot.rom", "sgb1.boot.rom", "sgb_bios.bin", "sgb_boot.bin",
+	"Super Game Boy SGB-CPU (World) (Enhancement Chip).bin", NULL
+};
+static const char *const kNamesSGB2Boot[] = {
+	"sgb2.boot.rom", "sgb2_bios.bin", "sgb2_boot.bin",
+	"Super Game Boy 2 SGB2-CPU (Japan) (Enhancement Chip).bin", NULL
+};
+static const char *const kNamesKROM[]   = { "KROM1.BIN", "KROM.BIN", "krom1.bin", NULL };
+static const char *const kNamesFont[]   = { "MB90082.BIN", NULL };
+static const char *const kNamesBSX[]    = { "BS-X.bin", "BS-X.bios", NULL };
+static const char *const kNamesSufami[] = { "STBIOS.bin", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read. 0 = don't care (the
 // SGB carts ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
-	{ "GameBoy",       "Game Boy",          "dmg_boot.bin", 0x100,   "Optional, adds the boot logo" },
-	{ "GameBoyColor",  "Game Boy Color",    "cgb_boot.bin", 0,       "Optional, adds boot logo and GB colors" },
-	{ "SGB1",          "Super Game Boy",    "sgb.sfc",      0,       NULL },
-	{ "SGB2",          "Super Game Boy 2",  "sgb2.sfc",     0,       NULL },
-	{ "SGB1BootROM",   "SGB boot ROM",      "sgb.boot.rom", 0x100,   "Optional, built-in is used" },
-	{ "SGB2BootROM",   "SGB2 boot ROM",     "sgb2.boot.rom",0x100,   "Optional, built-in is used" },
-	{ "SFCBoxKROM",    "SFC Box (KROM)",    "KROM1.BIN",    0x10000, NULL },
-	{ "SFCBoxFont",    "SFC Box (MB90082)", "MB90082.BIN",  9216,    NULL },
-	{ "BSX",           "Satellaview / BS-X","BS-X.bin",     0x100000,NULL },
-	{ "SufamiTurbo",   "Sufami Turbo",      "STBIOS.bin",   0x40000, NULL },
+	{ "GameBoy",       "Game Boy",          kNamesGB,       0x100,   "Optional, adds the boot logo" },
+	{ "GameBoyColor",  "Game Boy Color",    kNamesGBC,      0,       "Optional, adds boot logo and GB colors" },
+	{ "SGB1",          "Super Game Boy",    kNamesSGB1,     0,       NULL },
+	{ "SGB2",          "Super Game Boy 2",  kNamesSGB2,     0,       NULL },
+	{ "SGB1BootROM",   "SGB boot ROM",      kNamesSGB1Boot, 0x100,   "Optional, built-in is used" },
+	{ "SGB2BootROM",   "SGB2 boot ROM",     kNamesSGB2Boot, 0x100,   "Optional, built-in is used" },
+	{ "SFCBoxKROM",    "SFC Box (KROM)",    kNamesKROM,     0x10000, NULL },
+	{ "SFCBoxFont",    "SFC Box (MB90082)", kNamesFont,     9216,    NULL },
+	{ "BSX",           "Satellaview / BS-X",kNamesBSX,      0x100000,NULL },
+	{ "SufamiTurbo",   "Sufami Turbo",      kNamesSufami,   0x40000, NULL },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -177,7 +212,7 @@ enum BiosImageKind
 {
 	KIND_UNKNOWN = 0,
 	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
-	KIND_SGB1_CART, KIND_SGB2_CART
+	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS
 };
 
 static const char *KindName (int kind)
@@ -190,6 +225,8 @@ static const char *KindName (int kind)
 		case KIND_SGB2_BOOT: return ("Super Game Boy 2 boot ROM");
 		case KIND_SGB1_CART: return ("Super Game Boy image");
 		case KIND_SGB2_CART: return ("Super Game Boy 2 image");
+		case KIND_BSX_BIOS:  return ("Satellaview BIOS");
+		case KIND_SUFAMI_BIOS: return ("Sufami Turbo BIOS");
 		default:             return ("unrecognised image");
 	}
 }
@@ -201,6 +238,15 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 	uint8 sgb_mode = 0;
 	if (S9xIsSGBBIOSImage(d, n, &sgb_mode))
 		return (sgb_mode == 2) ? KIND_SGB2_CART : KIND_SGB1_CART;
+
+	// The Satellaview and Sufami Turbo BIOSes carry their titles in the SNES
+	// header and at the top of the image, the same tests their loaders run.
+	if (full == 0x100000 && n >= 0x7FD5 &&
+	    memcmp(d + 0x7FC0, "Satellaview BS-X     ", 21) == 0)
+		return (KIND_BSX_BIOS);
+	if (full == 0x40000 && n >= 0x1E &&
+	    memcmp(d, "BANDAI SFC-ADX", 14) == 0 && memcmp(d + 0x10, "SFC-ADX BACKUP", 14) == 0)
+		return (KIND_SUFAMI_BIOS);
 
 	if (n >= 7 && d[0] == 0x31 && d[1] == 0xFE && d[2] == 0xFF)
 	{
@@ -215,8 +261,9 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 	return (KIND_UNKNOWN);
 }
 
-// Slots the loader identifies by content as well as size. The rest are known
-// only by an exact byte count, so size is the whole test there.
+// Slots whose image carries a signature. The SFC Box ROMs are known only by
+// an exact byte count, so size is the whole test there, and the by-name
+// search never matches them by content.
 static int ExpectedKind (int slot)
 {
 	switch (slot)
@@ -227,6 +274,8 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_SGB2:      return (KIND_SGB2_CART);
 		case S9X_BIOS_SGB1_BOOT: return (KIND_SGB1_BOOT);
 		case S9X_BIOS_SGB2_BOOT: return (KIND_SGB2_BOOT);
+		case S9X_BIOS_BSX:       return (KIND_BSX_BIOS);
+		case S9X_BIOS_SUFAMI:    return (KIND_SUFAMI_BIOS);
 		default:                 return (KIND_UNKNOWN);
 	}
 }
@@ -292,8 +341,9 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 		return (S9X_BIOS_PATH_BAD_SIZE);
 	}
 
-	// Every slot, size-only ones included: an SGB cart is exactly Sufami
-	// Turbo's 262144 bytes. Only ever rejects on positive identification.
+	// Every slot, the size-only SFC Box ones included, so a known kind of
+	// file in the wrong slot is named; those two reject only on a positive
+	// identification.
 	const int want = ExpectedKind(slot);
 	KindProbe          probe = { want, KIND_UNKNOWN };
 	std::vector<uint8> img;
@@ -303,7 +353,7 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 		// for whatever was dropped on it.
 		if (detail)
 			*detail = probe.seen != KIND_UNKNOWN
-			       ? std::string("wrong file: ") + KindName(probe.seen)
+			       ? std::string("Wrong BIOS (") + KindName(probe.seen) + ") selected."
 			       : want != KIND_UNKNOWN
 			       ? std::string("not a ") + KindName(want)
 			       : std::string("unreadable");
@@ -329,6 +379,164 @@ std::string S9xResolveBiosPath (int slot)
 	if (!SlotValid(slot) || !g_paths[slot][0])  return (std::string());
 	if (FileSize(g_paths[slot]) < 0)            return (std::string());
 	return (std::string(g_paths[slot]));
+}
+
+// ---------------------------------------------------------------------------
+// The by-name search
+
+// What sits directly inside `dir`: regular files and folders, each sorted so
+// the search order is the same run to run and machine to machine.
+static void ListDir (const std::string &dir, std::vector<std::string> &files,
+                     std::vector<std::string> &subs)
+{
+	files.clear();
+	subs.clear();
+#ifdef __WIN32__
+	WIN32_FIND_DATAA fd;
+	HANDLE           h = FindFirstFileA((dir + "\\*").c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) return;
+	do
+	{
+		if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+		((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? subs : files).push_back(fd.cFileName);
+	}
+	while (FindNextFileA(h, &fd));
+	FindClose(h);
+#else
+	DIR *d = opendir(dir.c_str());
+	if (!d) return;
+	while (struct dirent *e = readdir(d))
+	{
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+		struct stat st;
+		if (stat((dir + SLASH_STR + e->d_name).c_str(), &st) != 0) continue;
+		if (S_ISDIR(st.st_mode))      subs.push_back(e->d_name);
+		else if (S_ISREG(st.st_mode)) files.push_back(e->d_name);
+	}
+	closedir(d);
+#endif
+	std::sort(files.begin(), files.end());
+	std::sort(subs.begin(), subs.end());
+}
+
+std::vector<std::string> S9xBiosSearchDirs (void)
+{
+	// Breadth first, so a file nearer the root wins over a deeper namesake.
+	std::vector<std::string> dirs(1, S9xGetDirectory(BIOS_DIR));
+	std::vector<std::string> files, subs;
+	size_t                   level_begin = 0;
+	for (int depth = 0; depth < MAX_BIOS_DEEP_SEARCH; depth++)
+	{
+		const size_t level_end = dirs.size();
+		for (size_t i = level_begin; i < level_end; i++)
+		{
+			ListDir(dirs[i], files, subs);
+			for (size_t s = 0; s < subs.size(); s++)
+				dirs.push_back(dirs[i] + SLASH_STR + subs[s]);
+		}
+		level_begin = level_end;
+	}
+	return (dirs);
+}
+
+struct Candidate
+{
+	std::string path;
+	bool        by_content;   // found by scanning rather than by a listed name
+};
+
+// Every path the search for `slot` would open, in order. The listed names
+// come first, as plain files and packed (dmg_boot.bin also as dmg_boot.zip
+// and dmg_boot.bin.zip), across every folder in `dirs`, so a conventional
+// name beats any other dump. Then, for a slot whose image carries a
+// signature, every other file under the BIOS folder, so a dump under any
+// name still counts once its contents say what it is.
+static std::vector<Candidate> Candidates (int slot, const std::vector<std::string> &dirs)
+{
+	std::vector<Candidate> out;
+	for (size_t d = 0; d < dirs.size(); d++)
+		for (const char *const *n = kSlots[slot].names; *n; n++)
+		{
+			const std::string        name(*n);
+			const size_t             dot = name.find_last_of('.');
+			std::vector<std::string> forms(1, name);
+			if (dot != std::string::npos && dot > 0) forms.push_back(name.substr(0, dot) + ".zip");
+			forms.push_back(name + ".zip");
+			for (size_t f = 0; f < forms.size(); f++)
+			{
+				const Candidate c = { dirs[d].empty() ? forms[f] : dirs[d] + SLASH_STR + forms[f], false };
+				if (FileSize(c.path.c_str()) >= 0) out.push_back(c);
+			}
+		}
+
+	if (ExpectedKind(slot) == KIND_UNKNOWN) return (out);
+	const std::vector<std::string> tree = S9xBiosSearchDirs();
+	std::vector<std::string>       files, subs;
+	for (size_t d = 0; d < tree.size(); d++)
+	{
+		ListDir(tree[d], files, subs);
+		for (size_t f = 0; f < files.size(); f++)
+		{
+			const Candidate c = { tree[d] + SLASH_STR + files[f], true };
+			out.push_back(c);
+		}
+	}
+	return (out);
+}
+
+// A file found by content gets the slot's signature test before the caller's
+// own filter, which for a size-only slot would take any file of that length.
+struct ContentGate { S9xBiosAcceptFn accept; void *ctx; int kind; };
+
+static bool AcceptContent (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	const ContentGate *g = (const ContentGate *) ctx;
+	if (ClassifyImage(data, size, full_size) != g->kind) return (false);
+	return !g->accept || g->accept(data, size, full_size, g->ctx);
+}
+
+std::string S9xFindBiosByName (int slot, const std::vector<std::string> &dirs,
+                               std::vector<uint8> &out, uint32 max_size,
+                               S9xBiosAcceptFn accept, void *ctx)
+{
+	out.clear();
+	if (!SlotValid(slot)) return (std::string());
+	const std::vector<Candidate> cands = Candidates(slot, dirs);
+	ContentGate                  gate  = { accept, ctx, ExpectedKind(slot) };
+	for (size_t i = 0; i < cands.size(); i++)
+	{
+		const bool ok = cands[i].by_content
+		              ? S9xReadBiosImage(cands[i].path.c_str(), out, max_size, AcceptContent, &gate)
+		              : S9xReadBiosImage(cands[i].path.c_str(), out, max_size, accept, ctx);
+		if (ok) return (cands[i].path);
+	}
+	out.clear();
+	return (std::string());
+}
+
+std::string S9xFindBiosInBiosDir (int slot, std::string *detail)
+{
+	if (detail) detail->clear();
+	if (!SlotValid(slot)) return (std::string());
+
+	// Each candidate goes through the assigned-path check, which already asks
+	// for the signature, so "found" means what "OK" does on a typed path.
+	// Borrows the slot and puts it back.
+	const std::string            root  = S9xGetDirectory(BIOS_DIR) + SLASH_STR;
+	const std::vector<Candidate> cands = Candidates(slot, S9xBiosSearchDirs());
+	char saved[S9X_BIOS_PATH_MAX];
+	memcpy(saved, g_paths[slot], sizeof saved);
+	std::string hit;
+	for (size_t i = 0; i < cands.size() && hit.empty(); i++)
+	{
+		const std::string &p = cands[i].path;
+		S9xSetBiosPath(slot, p.c_str());
+		if (S9xCheckBiosPath(slot, detail) == S9X_BIOS_PATH_OK)
+			hit = p.compare(0, root.size(), root) == 0 ? p.substr(root.size()) : p;
+	}
+	memcpy(g_paths[slot], saved, sizeof saved);
+	if (hit.empty() && detail) detail->clear();
+	return (hit);
 }
 
 // ---------------------------------------------------------------------------

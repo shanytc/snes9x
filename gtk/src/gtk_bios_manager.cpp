@@ -24,16 +24,32 @@ namespace {
 
 struct Row
 {
-    Gtk::Entry *entry;
-    Gtk::Label *status;
+    Gtk::Entry  *entry;
+    Gtk::Label  *status;
+    Gtk::Button *clear;
 };
 
 // Green OK / amber size warning / red missing, matching the Qt dialog.
-void refresh_row(int slot, Row &row)
+void refresh_row_status(int slot, Row &row)
 {
     const std::string text = row.entry->get_text();
+    row.clear->set_sensitive(!text.empty());   // nothing to clear on a blank row
     if (text.empty())
     {
+        // People forget what they dropped into BIOS/: when the by-name search
+        // turns up a usable file there, say so, since that is what will load.
+        std::string detail;
+        std::string found = S9xFindBiosInBiosDir(slot, &detail);
+        if (!found.empty())
+        {
+            if (!detail.empty())
+                found += " (" + detail + ")";
+            row.status->set_markup("<span foreground='#27ae60'>" +
+                                   Glib::Markup::escape_text(_("Resolved BIOS: ") + found) +
+                                   "</span>");
+            return;
+        }
+
         // Empty is fine for some slots and not others, so say which.
         const char *note = S9xGetBiosSlotInfo(slot)->note;
         row.status->set_markup(note ? "<span foreground='#7f8c8d'>" +
@@ -77,6 +93,13 @@ void refresh_row(int slot, Row &row)
     }
 }
 
+void refresh_row(int slot, Row &row)
+{
+    refresh_row_status(slot, row);
+    // The full line on hover, for when a long path gets cut short.
+    row.status->set_tooltip_text(row.status->get_text());
+}
+
 } // namespace
 
 void S9xGtkBiosManagerDialog(Gtk::Window *parent)
@@ -115,7 +138,7 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
 
         auto *entry = Gtk::manage(new Gtk::Entry());
         entry->set_text(S9xGetBiosPath(slot));
-        entry->set_placeholder_text(info->filename);
+        entry->set_placeholder_text(info->names[0]);
         entry->set_width_chars(44);
         entry->set_hexpand(true);
 
@@ -132,7 +155,7 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
         grid->attach(*clear,  3, slot, 1, 1);
         grid->attach(*status, 4, slot, 1, 1);
 
-        rows[slot] = { entry, status };
+        rows[slot] = { entry, status, clear };
 
         select->signal_clicked().connect([&dialog, &rows, slot, info] {
             Gtk::FileChooserDialog chooser(dialog, _("Select BIOS File"),

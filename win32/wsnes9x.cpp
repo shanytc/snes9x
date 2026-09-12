@@ -8924,20 +8924,56 @@ void ListFilesFromFolder(HWND hDlg, RomDataList** prdl)
 // File -> BIOS Manager: one row per supported BIOS, plus the default boot mode
 // for Game Boy content. Blank rows fall back to the search by filename.
 // Per-row verdict, kept for WM_CTLCOLORSTATIC: red text is what makes a bad
-// file read as a complaint rather than a caption.
+// file read as a complaint rather than a caption. s_bios_found marks a blank
+// row whose file the by-name search already turns up in the BIOS folder.
 static S9xBiosPathStatus s_bios_status[S9X_NUM_BIOS_SLOTS];
+static bool              s_bios_found[S9X_NUM_BIOS_SLOTS];
+static HWND              s_bios_tip;   // one tooltip over the ten status labels
+
+// The status label and its tooltip say the same thing: the tip is there for
+// when a long path gets cut short.
+static void BiosManagerSetStatus(HWND hDlg, int slot, const TCHAR *text)
+{
+	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text);
+	if (!s_bios_tip) return;
+	TOOLINFO ti = { 0 };
+	ti.cbSize   = sizeof(ti);
+	ti.hwnd     = hDlg;
+	ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+	ti.uId      = (UINT_PTR) GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot);
+	ti.lpszText = (LPTSTR) text;
+	SendMessage(s_bios_tip, TTM_UPDATETIPTEXT, 0, (LPARAM) &ti);
+}
 
 static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 {
 	TCHAR wtext[S9X_BIOS_PATH_MAX];
 	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+	// Nothing to clear on a blank row.
+	EnableWindow(GetDlgItem(hDlg, IDC_BIOSMGR_CLEAR0 + slot), wtext[0] != TEXT('\0'));
+	s_bios_found[slot] = false;
 	if (wtext[0] == TEXT('\0'))
 	{
-		// Empty is fine for some slots and not others, so say which.
 		s_bios_status[slot] = S9X_BIOS_PATH_UNSET;
+
+		// People forget what they dropped into BIOS/: when the by-name search
+		// turns up a usable file there, say so, since that is what will load.
+		std::string       detail;
+		const std::string found = S9xFindBiosInBiosDir(slot, &detail);
+		if (!found.empty())
+		{
+			std::string text = "Resolved BIOS: " + found;
+			if (!detail.empty()) text += " (" + detail + ")";
+			s_bios_found[slot] = true;
+			Utf8ToWide text_w(text.c_str());
+			BiosManagerSetStatus(hDlg, slot, (wchar_t *) text_w);
+			return;
+		}
+
+		// Empty is fine for some slots and not others, so say which.
 		const char *note = S9xGetBiosSlotInfo(slot)->note;
 		Utf8ToWide  note_w(note ? note : "");
-		SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, (wchar_t *) note_w);
+		BiosManagerSetStatus(hDlg, slot, (wchar_t *) note_w);
 		return;
 	}
 
@@ -8965,7 +9001,7 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	else if (!why.empty())                      text = (wchar_t *) why_w;
 	else if (st == S9X_BIOS_PATH_BAD_IMAGE)     text = TEXT("wrong image");
 	else                                        text = TEXT("unexpected size");
-	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text.c_str());
+	BiosManagerSetStatus(hDlg, slot, text.c_str());
 }
 
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -8977,10 +9013,11 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		const int id = GetDlgCtrlID((HWND) lParam);
 		if (id >= IDC_BIOSMGR_STATUS0 && id < IDC_BIOSMGR_STATUS0 + S9X_NUM_BIOS_SLOTS)
 		{
-			const S9xBiosPathStatus st = s_bios_status[id - IDC_BIOSMGR_STATUS0];
-			if (st != S9X_BIOS_PATH_UNSET)
+			const int               slot = id - IDC_BIOSMGR_STATUS0;
+			const S9xBiosPathStatus st   = s_bios_status[slot];
+			if (st != S9X_BIOS_PATH_UNSET || s_bios_found[slot])
 			{
-				SetTextColor((HDC) wParam, st == S9X_BIOS_PATH_OK
+				SetTextColor((HDC) wParam, st == S9X_BIOS_PATH_OK || s_bios_found[slot]
 				                           ? RGB(0x1E, 0x8B, 0x3A) : RGB(0xC0, 0x39, 0x2B));
 				SetBkMode((HDC) wParam, TRANSPARENT);
 				return (INT_PTR) GetSysColorBrush(COLOR_BTNFACE);
@@ -8992,6 +9029,23 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 	case WM_INITDIALOG:
 	{
 		LocalizeDialog(hDlg);
+
+		// Hovering a status label shows its full text.
+		s_bios_tip = CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
+									WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+									CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+									hDlg, NULL, g_hInst, NULL);
+		for (int slot = 0; s_bios_tip && slot < S9X_NUM_BIOS_SLOTS; slot++)
+		{
+			TOOLINFO ti = { 0 };
+			ti.cbSize   = sizeof(ti);
+			ti.hwnd     = hDlg;
+			ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+			ti.uId      = (UINT_PTR) GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot);
+			ti.lpszText = (LPTSTR) TEXT("");
+			SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+		}
+
 		for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
 		{
 			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
@@ -9036,7 +9090,10 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 
 		if (id >= IDC_BIOSMGR_CLEAR0 && id < IDC_BIOSMGR_CLEAR0 + S9X_NUM_BIOS_SLOTS)
 		{
-			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + (id - IDC_BIOSMGR_CLEAR0), TEXT(""));
+			const int slot = id - IDC_BIOSMGR_CLEAR0;
+			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, TEXT(""));
+			// The button just disabled itself under the focus; hand that to the row.
+			SendMessage(hDlg, WM_NEXTDLGCTL, (WPARAM) GetDlgItem(hDlg, IDC_BIOSMGR_EDIT0 + slot), TRUE);
 			return true;
 		}
 
@@ -9059,6 +9116,10 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		}
 		break;
 	}
+
+	case WM_DESTROY:
+		s_bios_tip = NULL;   // goes down with the dialog
+		break;
 	}
 	return false;
 }

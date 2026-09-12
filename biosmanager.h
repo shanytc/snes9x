@@ -31,11 +31,11 @@ enum S9xBiosSlot
 
 struct S9xBiosSlotInfo
 {
-	const char *key;       // config key under [BIOS]
-	const char *label;     // dialog row label
-	const char *filename;  // conventional name, shown as the hint
-	uint32      size;      // expected byte count, 0 = any
-	const char *note;      // shown while the slot is empty, NULL if required
+	const char *key;           // config key under [BIOS]
+	const char *label;         // dialog row label
+	const char *const *names;  // filenames the loader looks for, NULL-ended; [0] is the hint
+	uint32      size;          // expected byte count, 0 = any
+	const char *note;          // shown while the slot is empty, NULL if required
 };
 
 #define S9X_BIOS_PATH_MAX 512
@@ -88,5 +88,29 @@ typedef bool (*S9xBiosAcceptFn) (const uint8 *data, uint32 size, uint32 full_siz
 // largest accepted one wins. A NULL `accept` takes anything non-empty.
 bool8 S9xReadBiosImage (const char *path, std::vector<uint8> &out, uint32 max_size,
                         S9xBiosAcceptFn accept = NULL, void *ctx = NULL);
+
+// How far below the BIOS folder the by-name search descends: 3 takes
+// BIOS/level1/level2/level3.
+#define MAX_BIOS_DEEP_SEARCH 3
+
+// Folders the by-name search covers, in order: the BIOS folder, then every
+// folder inside it down to MAX_BIOS_DEEP_SEARCH levels, breadth first and
+// sorted within a level, so a tree split by system works unaided.
+std::vector<std::string> S9xBiosSearchDirs (void);
+
+// The fallback for a blank slot. First every listed name, as a plain file
+// and as a .zip, across `dirs` in order; then, for a slot whose image carries
+// a signature, every other file under the BIOS folder, matched by content, so
+// a dump under any name counts. The first file `accept` takes wins (a content
+// match must pass the signature as well). Its bytes land in `out` (at most
+// `max_size`) and its path is returned; "" on a miss.
+std::string S9xFindBiosByName (int slot, const std::vector<std::string> &dirs,
+                               std::vector<uint8> &out, uint32 max_size,
+                               S9xBiosAcceptFn accept = NULL, void *ctx = NULL);
+
+// The same search over the BIOS folder alone, vetted like an assigned path:
+// the file it would take, named relative to that folder, or "". `detail` as
+// for S9xCheckBiosPath. Lets a dialog say that a file already there counts.
+std::string S9xFindBiosInBiosDir (int slot, std::string *detail = NULL);
 
 #endif

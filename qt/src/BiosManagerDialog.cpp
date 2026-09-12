@@ -35,7 +35,7 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
         const auto *info = S9xGetBiosSlotInfo(slot);
 
         auto edit = new QLineEdit(QString::fromUtf8(S9xGetBiosPath(slot)));
-        edit->setPlaceholderText(QString::fromUtf8(info->filename));
+        edit->setPlaceholderText(QString::fromUtf8(info->names[0]));
         edit->setMinimumWidth(340);
         auto status = new QLabel();
 
@@ -58,7 +58,7 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
         });
         connect(edit, &QLineEdit::textChanged, this, [this, slot] { refreshRow(slot); });
 
-        rows.push_back({ edit, status });
+        rows.push_back({ edit, status, clear });
     }
 
     auto buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -87,12 +87,34 @@ void BiosManagerDialog::browse(int slot)
 
 void BiosManagerDialog::refreshRow(int slot)
 {
+    refreshRowStatus(slot);
+    // The full line on hover, for when a long path gets cut short.
+    rows[slot].status->setToolTip(rows[slot].status->text());
+}
+
+void BiosManagerDialog::refreshRowStatus(int slot)
+{
     // Validate against the live text, not the stored path, so typing shows up.
     const QString text = rows[slot].edit->text();
     QLabel *status = rows[slot].status;
+    rows[slot].clear->setEnabled(!text.isEmpty());   // nothing to clear on a blank row
 
     if (text.isEmpty())
     {
+        // People forget what they dropped into BIOS/: when the by-name search
+        // turns up a usable file there, say so, since that is what will load.
+        std::string detail;
+        const std::string found = S9xFindBiosInBiosDir(slot, &detail);
+        if (!found.empty())
+        {
+            QString shown = tr("Resolved BIOS: ") + QString::fromStdString(found);
+            if (!detail.empty())
+                shown += " (" + QString::fromStdString(detail) + ")";
+            status->setText(shown);
+            status->setStyleSheet("color: #27ae60;");
+            return;
+        }
+
         // Empty is fine for some slots and not others, so say which.
         const char *note = S9xGetBiosSlotInfo(slot)->note;
         status->setText(note ? tr(note) : QString());

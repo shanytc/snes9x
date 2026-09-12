@@ -979,6 +979,12 @@ namespace SGB {
 			// forever (01:$4052 `cp $FF / jr nz`): take the jump for every type.
 			{ 0x20D7, "TUWAMONO   A55J\200", "SGB2 park skipped", 1,
 			  { { 0x004057, 2, { 0x20, 0x05 }, { 0x18, 0x05 } } } },
+			// The MASK_EN cancel after its border goes out with IME on and the VBlank
+			// joypad poll lands in the packet ($B9 00 -> $9A 0B): send it via a DI/EI stub.
+			{ 0xE11B, "Super Fight's", "MASK_EN cancel sent with IRQs off", 3,
+			  { { 0x0002AD, 3, { 0xCD, 0xC0, 0x02 }, { 0xCD, 0xCA, 0x3F } },
+				{ 0x003FCA, 3, { 0xFF, 0xFF, 0xFF }, { 0xF3, 0xCD, 0xC0 } },
+				{ 0x003FCD, 3, { 0xFF, 0xFF, 0xFF }, { 0x02, 0xFB, 0xC9 } } } },
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

@@ -169,7 +169,8 @@ def existing_msgids(path):
 
 
 def append_block(path, keys, srcs):
-    new = [k for k in keys if k not in existing_msgids(path)]
+    present = existing_msgids(path)
+    new = [k for k in keys if k not in present]
     if not new:
         return 0
     body = open(path, encoding="utf-8", errors="replace").read()

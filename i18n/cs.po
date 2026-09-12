@@ -4285,8 +4285,8 @@ msgid "Use Super Scope"
 msgstr "Použít Super Scope"
 
 #: win32/rsrc/snes9x.rc
-msgid "User Agent: SuperSnes9x/1.63"
-msgstr "User Agent: SuperSnes9x/1.63"
+msgid "User Agent: SuperSnes9x"
+msgstr "User Agent: SuperSnes9x"
 
 #: win32/rsrc/snes9x.rc
 msgid "Username:"
@@ -5075,8 +5075,8 @@ msgid "Rewind buffer size (0 to disable):"
 msgstr "Velikost vyrovnávací paměti přetáčení (0 pro zakázání):"
 
 #: qt/src/EmuMainWindow.cpp
-msgid "ROM Files (*.sfc *.smc *.bin *.fig *.msu *.zip)"
-msgstr "Soubory ROM (*.sfc *.smc *.bin *.fig *.msu *.zip)"
+msgid "ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.gb *.gbc *.sgb *.msu *.msu1 *.zip *.gz)"
+msgstr "Soubory ROM (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.gb *.gbc *.sgb *.msu *.msu1 *.zip *.gz)"
 
 #: qt/src/FoldersPanel.ui
 msgid "ROM Folder"
@@ -5235,12 +5235,12 @@ msgid "Stop Recording"
 msgstr "Zastavit záznam"
 
 #: qt/src/EmuMainWindow.cpp
-msgid "Super Game Boy (SGB1)"
-msgstr "Super Game Boy (SGB1)"
+msgid "Super Game Boy"
+msgstr "Super Game Boy"
 
 #: qt/src/EmuMainWindow.cpp
-msgid "Super Game Boy 2 (SGB2)"
-msgstr "Super Game Boy 2 (SGB2)"
+msgid "Super Game Boy 2"
+msgstr "Super Game Boy 2"
 
 #: qt/src/EmulationPanel.ui
 msgid "SuperFX clock speed:"
@@ -5450,3 +5450,761 @@ msgstr "Při přechodu do režimu celé obrazovky dočasně upravit ostatní nas
 #: qt/src/DisplayPanel.ui
 msgid "When scaling up, only use integer multiples of the original height."
 msgstr "Při zvětšování obrazu používat výhradně celočíselné násobky původní výšky."
+
+# === Win32 strings (added by i18n/extract_strings.py) ===
+
+#: qt/src/EmuMainWindow.cpp
+msgid "\"%1\" holds MSU-1 audio data, but \"%2\" already exists, so it"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "\"%1\" holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "%1 frames"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "(Experimental)"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "(Missing BIOS)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".bs"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".fig"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".gb"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".gbc"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".sfc"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".smc"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".st"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid ".swc"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "32040Hz (SNES native)"
+msgstr ""
+
+#: qt/src/FoldersPanel.ui
+msgid "<html><head/><body><p>Determines where to save these files.</p><p><span style=\" font-style:italic;\">ROM Folder</span> will always save to the same folder as the ROM.</p><p><span style=\" font-style:italic;\">Config Folder</span> will save to a subfolder of the config folder that is shown. If there is a snes9x.conf file next to your executable, Snes9x will operate in portable mode and the config folder will be the folder the executable is in.</p><p><span style=\" font-style:italic;\">Custom</span> allows you to specify exactly where to save these files.</p></body></html>"
+msgstr ""
+
+#: qt/src/EmulationPanel.ui
+msgid "<html><head/><body><p>Emulates the selected number of frames ahead of the displayed frame, so your input appears to take effect sooner. Reduces input latency at the cost of extra processing every frame.</p><p>One frame is safe for most games; higher values can cause glitches in games that poll input mid-frame.</p></body></html>"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "<html><head/><body><p>Game Boy only: hides the volume jump a channel makes when a game rewrites NRx2 while the channel is still enabled (the \"zombie\" glitch). Off = exact hardware behaviour, which clicks on every note in some games.</p></body></html>"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "<html><head/><body><p>Master pre-amp applied after the volume percentages. 0 dB is unchanged; boosting can clip loud material.</p></body></html>"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "<html><head/><body><p>Pre-amp on the GB side of the SGB mix, applied after its volume percentage. Only active in SGB1/SGB2 BIOS mode.</p></body></html>"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "<html><head/><body><p>Pre-amp on the SPC side of the SGB mix, applied after its volume percentage. Only active in SGB1/SGB2 BIOS mode.</p></body></html>"
+msgstr ""
+
+#: qt/src/EmulationPanel.ui
+msgid "<html><head/><body><p>Record File → AVI Recording at twice the SNES resolution (512x448, or 512x478 with overscan shown) so hi-res and interlaced games keep their detail. Doubles the file size.</p></body></html>"
+msgstr ""
+
+#: qt/src/FoldersPanel.ui
+msgid "<html><head/><body><p>Setting this to anything other than 0 will save the SRAM (internal game saves) file regularly. If it is set to to 0, it will only save when exiting Snes9x or changing games, and you will lose any progress since the last save if your device crashes.</p></body></html>"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "A Super Game Boy 2 with a Game Boy Color inside: real Color graphics in the"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Acid Tests"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Acid Tests - Test SGB/GB/GBC Cores"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "All"
+msgstr ""
+
+#: qt/src/ColorCorrectionDialog.cpp
+msgid "Apply adjustments"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Apply to Launcher Icon"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Attach Audio CD"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Attach Audio CD (.cue or .zip)"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Audio CD Images (*.cue *.zip)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Audio Fidelity:"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "Audio Waveform  (click SPC/GB to expand channels)"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Auto Layer Transparency: pick the blend per game from a built-in list of known flicker-transparency games (off for the rest). Uncheck to set the mode and layer manually for every Game Boy game."
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Automatic"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "AVI Files (*.avi)"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Background"
+msgstr ""
+
+#: qt/src/StatePreviewDialog.cpp
+msgid "Bank #%1"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Bank %1"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "BIOS files (*.zip *.bin *.rom *.sfc *.gb *.gbc *.BIN);;All files (*)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "BIOS Manager"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "BIOS Manager:"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Blend layer:"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Channel %1"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Choose a file name for the movie."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Colorizes Game Boy Color carts. Mono-only carts are experimental —"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Couldn't rename \"%1\". Check that the folder is writable."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Couldn't update the launcher icon.\n\n%1"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "Couldn't write %1"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "crc32=%1, name=%2"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Current ROM: %1"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "dB"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Decrease Current Save Bank"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Diagnosis"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240."
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "Dual Justifiers"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Eject Audio CD"
+msgstr ""
+
+#: qt/src/StatePreviewDialog.cpp
+msgid "Empty"
+msgstr ""
+
+#: qt/src/ColorCorrectionDialog.cpp
+msgid "Enable color correction (accurate SNES colors)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Enable Rumble (Shake)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Enable Video Camera"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Export"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor. With this off (or no camera connected) the in-game viewfinder is blank."
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Filter used instead of the one above when the frame is high-resolution (512 pixels wide or interlaced), like the win32 \"Hi Res\" box. Also applies when the high-resolution mode above is set to \"Scale up\"."
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Filter:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Find:"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Frame blend:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Gain (dB)"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "Gain:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game Boy"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game Boy Color"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Game Boy Color:"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Game Boy frame-blend mode: Simple Blend = 50/50 of the last two frames (cancels flicker-transparency); LCD Blend = slow-decay LCD-style ghosting."
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game Boy Model"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Game Boy Model: Game Boy"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Game Boy Model: Game Boy Color"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Game Boy Model: Super Game Boy"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Game Boy Model: Super Game Boy 2"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Game Boy Model: Super Game Boy Color"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Game Boy ROM Files (*.gb *.gbc *.sgb)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game Boy:"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "GB gain:"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Hi-res filter:"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Horizontally blend hi-res (512-wide) images, so games that alternate columns for a transparency effect look as intended with filters that do not account for this."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Icon %1"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Increase Current Save Bank"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Insert Coin"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Insert Coin:"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Joypad %1"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch 1:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch 2:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch 3:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch OFF:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch ON:"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "Konami Justifier"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "LCD Blend"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Load State from File"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Load State with Preview"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "M.A.C.S. Rifle"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Models: all"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "Mouse in alternate port"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Movie File:"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Movie's ROM: %1"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Movie's ROM: (not stored in movie file)"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "MSU-1 Pack Detected"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "Multitaps (8-player)"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "muted"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "No Sprite Limit (GameBoy)"
+msgstr ""
+
+#: qt/src/DisplayPanel.cpp
+msgid "No video camera found"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Off"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Open Movie"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Override with executable icon"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Path: %1"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Pause Emulation"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "Point each entry at its BIOS file. Anything left blank"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Point each entry at its BIOS file. Anything left blank falls back to the usual search by filename in the BIOS folder."
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "PowerFest '94 Time Limit:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "PowerFest '94 Timer:"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Process the image on the CPU before display. These are the same filters as the \"Output Image Processing\" options in the Windows port. For GPU shader-based processing, use a shader preset instead."
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "rate"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Ready."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Record AVI"
+msgstr ""
+
+#: qt/src/EmulationPanel.ui
+msgid "Reduces input latency by emulating frames ahead of the visible one. Uses more CPU time."
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Render the SNES colour-math and transparency effects. Turn off only for troubleshooting."
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Rescan"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "reset channels on close"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "Resolved BIOS:"
+msgstr ""
+
+#: qt/src/EmulationPanel.ui
+msgid "Run ahead (0 to disable):"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Run All"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Save Baseline"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "Save Recording"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Save State to File"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Save State with Preview"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "Select %1 BIOS"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Select at least one controller to record."
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 0"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 1"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 2"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 3"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 4"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 5"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 6"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 7"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 8"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Select Slot 9"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "SFC-Box Keyswitch:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "SFC-Box OSD backdrop"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "SFC-Box OSD Language:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Show: all"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Simple Blend"
+msgstr ""
+
+#: qt/src/StatePreviewDialog.cpp
+msgid "Slot #%1"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "SNES Controller 6 (Multitaps, 8-player)"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "SNES Controller 7 (Multitaps, 8-player)"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "SNES Controller 8 (Multitaps, 8-player)"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "SNES Joypad(s)"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "SNES Mouse"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "SNES:"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "SPC gain:"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Start AVI Recording"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "stats for nerds"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Stop AVI Recording"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Suites: all"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Super Game Boy 2:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Super Game Boy Color (Experimental)"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Super Game Boy:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Super GB Color:"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "Super Multitap (5-player)"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Super Nintendo ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin)"
+msgstr ""
+
+#: qt/src/ControllerPanel.ui
+msgid "Super Scope"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "SuperSnes9x Movie Files (*.smv)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Suppress NRx Glitches"
+msgstr ""
+
+#: qt/src/SoundPanel.ui
+msgid "Suppress NRx glitches"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Test Diagnosis"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Tests"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "The settings in this dialog should only be used for compatibility with old ROM hacks or if you otherwise know what you're doing. If any problems occur, click \"Set Defaults\" to reset the options to normal."
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "The webcam to feed into the Game Boy Camera. Cameras that only offer compressed (MJPEG) video produce a blank image."
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "These options only apply to Game Boy games played through the Super Game Boy."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "This audio CD was not accepted:\n%1"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Threads:"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "unexpected size"
+msgstr ""
+
+#: qt/src/MovieDialogs.cpp
+msgid "Unsupported movie version. You need a different version of SuperSnes9x to play this movie."
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "View Profile"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Voicer-kun"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Voicer-kun: %1 verified, %2 tracks (%3)"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "WAV audio (*.wav)"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Which Game Boy layer to blend: Background (BG) keeps moving sprites crisp; Window = the window/HUD layer; Sprites = objects only; All blends everything."
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Window"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "wrong image"
+msgstr ""
+
+#: qt/src/AudioWaveformWindow.cpp
+msgid "zoom"
+msgstr ""

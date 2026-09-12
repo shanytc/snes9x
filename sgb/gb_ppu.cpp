@@ -1955,6 +1955,7 @@ void PpuOnCpuStopEnd(Ppu &p)
 void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 {
 	if (tcycles <= 0) return;
+	p.t_cycles += tcycles;
 
 	// STOP display override — keep the clock advancing (mode machinery
 	// stays live for the host frame loop) but freeze pixel output.
@@ -2004,7 +2005,6 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 	// RETI, right after POP AF).
 	if (!(p.lcdc & 0x80))
 	{
-		p.t_cycles      += tcycles;
 		p.mode           = PpuMode::HBlank;
 		p.ly             = 0;
 		p.mode_clock     = 0;
@@ -2034,10 +2034,7 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 	// its first one (Emulator::Reset decides how many).
 	while (p.boot_skew > 0 && tcycles > 0) { --p.boot_skew; --tcycles; }
 	while (tcycles-- > 0)
-	{
-		p.t_cycles += 1;
 		ExecPpuDot(p, mem);
-	}
 }
 
 uint8_t PpuReadReg(const Ppu &p, uint16_t addr)

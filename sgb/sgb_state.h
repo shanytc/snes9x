@@ -111,6 +111,8 @@ struct SgbState
 };
 
 void     SgbReset(SgbState &s);
+// Load the built-in SGB1/SGB2 default bezel into the border plane.
+void     SgbInstallDefaultBorder(SgbState &s, bool sgb2);
 
 // Dispatch a complete SGB command. `vram_4kb` points at the first 4KB
 // of GB VRAM (GB 0x8000..0x8FFF) — used by the *_TRN bulk-load

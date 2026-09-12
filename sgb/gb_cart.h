@@ -52,6 +52,15 @@ struct Cart
 	// both in 2-bank units (register value << 1).
 	bool                  mbc5_multicart = false;
 	bool                  sachen_runs_raw = false;
+	// $0147 was garbage but a real logo+entry ran it as plain MBC1
+	// (Gowin / SONIC5 / Xploder-style flat unlicensed boards).
+	bool                  flat_unlicensed = false;
+	// Scrambled-unlicensed mapper state (BBD/Sintax/VF etc.), v7 savestates.
+	MbcUnl                unl;
+	// Vast Fame "A" boards seed the protection running value with $10.
+	bool                  vf_alt_board = false;
+	// Zook Z (USA): the English board's code-driven banking and challenge chip.
+	bool                  vf_zook = false;
 	// Sachen carts that keep the boot logo in the RA7-high half of the
 	// permuted $0100-$01FF window (the combo/31-in-1 series).
 	bool                  sachen_logo_high = false;
@@ -79,6 +88,12 @@ bool CartLoadBatteryFromPath(Cart &c, const char *path);
 // for a SachenMMC1 cart in that range; callers gate this on boot_rom_enabled so
 // the running game still reads its real (address-swapped) header afterwards.
 bool SachenBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out);
+
+// Rocket Games carts store Datel's own logo in the header; the mapper morphs
+// $0104-$0133 into the Nintendo logo while the boot ROM reads it, so the CGB
+// boot check passes and the game later reads its real (Rocket) header. DMG
+// boots read it raw and fail — the carts are GBC-only, as on hardware.
+bool RocketBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out);
 
 } // namespace SGB
 

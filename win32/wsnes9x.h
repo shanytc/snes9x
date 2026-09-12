@@ -383,6 +383,10 @@ struct SCustomKey {
 	WORD modifiers;
 };
 
+// Consoles offered as Emulation -> Game Boy Model hotkeys: the four real ones
+// plus Super Game Boy Color, in menu order. Automatic is not bound.
+#define GB_MODEL_HOTKEYS 5
+
 struct SCustomKeys {
 	SCustomKey SpeedUp;
 	SCustomKey SpeedDown;
@@ -435,6 +439,10 @@ struct SCustomKeys {
 	SCustomKey MasterHotkey;
 	SCustomKey InsertCoin;           // SFC-Box front-panel coin switch
 	SCustomKey SFCBoxKeyswitch[5];   // rotary positions, panel order 1/OFF/ON/2/3
+	SCustomKey BiosManager;          // opens File -> BIOS Manager
+	// Emulation -> Game Boy Model, one per console the menu offers; see
+	// g_gbModelHotkeyPolicy for which policy each slot picks.
+	SCustomKey GBModel[GB_MODEL_HOTKEYS];
 };
 
 struct SCustomKeyExtra {
@@ -492,6 +500,8 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra CheatSearchDialog;
 	SCustomKeyExtra InsertCoin;
 	SCustomKeyExtra SFCBoxKeyswitch[5];
+	SCustomKeyExtra BiosManager;
+	SCustomKeyExtra GBModel[GB_MODEL_HOTKEYS];
 };
 
 struct SJoypad {

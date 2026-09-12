@@ -21,6 +21,8 @@
 #include "wlanguage.h"
 #include "../display.h"
 #include "../conffile.h"
+#include "../biosmanager.h"
+#include "../memmap.h"
 #include "../spc7110.h"
 #include "../gfx.h"
 #include "../snapshot.h"
@@ -775,6 +777,40 @@ void WinPostLoad(ConfigFile& conf)
 	}
 #endif
 
+	// Same repair for the BIOS Manager paths: builds that stored them through
+	// CIT_STRING wrote each pair of path bytes out as one UTF-8 character, so
+	// widening the saved text back to UTF-16 recovers the original bytes.
+	// Only adopt the result when it names a readable file of the expected size.
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+	{
+		char saved[S9X_BIOS_PATH_MAX];
+		strncpy(saved, S9xGetBiosPath(slot), S9X_BIOS_PATH_MAX - 1);
+		saved[S9X_BIOS_PATH_MAX - 1] = '\0';
+		if (!saved[0] || S9xBiosPathUsable(slot))
+			continue;
+
+		wchar_t wide[S9X_BIOS_PATH_MAX] = { 0 };
+		if (MultiByteToWideChar(CP_UTF8, 0, saved, -1, wide, S9X_BIOS_PATH_MAX / 2) <= 0)
+			continue;
+
+		char recovered[S9X_BIOS_PATH_MAX];
+		strncpy(recovered, (const char *) wide, S9X_BIOS_PATH_MAX - 1);
+		recovered[S9X_BIOS_PATH_MAX - 1] = '\0';
+
+		S9xSetBiosPath(slot, recovered);
+		if (!S9xBiosPathUsable(slot))
+			S9xSetBiosPath(slot, saved);
+	}
+
+	// Emulation -> Game Boy Model is the console selector now, so a hand-edited
+	// value has to be caught here rather than trusted straight out of the file.
+	// This also folds the two retired Automatic entries onto the one that
+	// replaced them.
+	Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+	// 0 was the old "No BIOS" entry, which the menu can no longer set.
+	if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
+		Settings.SGB_BIOSPreference = 2;
+
 	WinPostSave(conf);
 }
 
@@ -954,11 +990,30 @@ void WinRegisterConfigItems()
 	AddBoolC("Mute", GUI.Mute, false, "true to mute sound output (does not disable the sound CPU)");
 	AddBool("DynamicRateControl", Settings.DynamicRateControl, false);
 	AddBool("AutomaticInputRate", GUI.AutomaticInputRate, false);
+	AddBoolC("SuppressNRxGlitches", Settings.GBSuppressNRxGlitches, true, "Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the DMG/CGB 'zombie' glitch). false = exact hardware behaviour, which clicks on every note in some games");
 	AddIntC("InterpolationMethod", Settings.InterpolationMethod, 2, "0 = None, 1 = Linear, 2 = Gaussian (accurate), 3 = Cubic, 4 = Sinc");
 	AddIntC("AudioFidelity", Settings.AudioFidelity, 1, "resampler used to convert the SPC's 32040 Hz to 'Rate': 0 = Hermite (legacy), 1 = Windowed-Sinc");
 #undef CATEGORY
 #define	CATEGORY "SGB"
-	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "BIOS mode for GB/GBC ROMs: 0=No BIOS (BIOS-less), 1=SGB1, 2=SGB2 (default).");
+	AddUIntC("BIOSPreference", Settings.SGB_BIOSPreference, 2, "which Super Game Boy BIOS the non-pinned consoles prefer: 1=SGB1, 2=SGB2 (default). The Super Game Boy and Super Game Boy 2 entries in Emulation -> Game Boy Model pin one outright.");
+#undef CATEGORY
+#define	CATEGORY "BIOS"
+	// ConfigItem keeps `name` as a bare pointer, so the key strings need
+	// storage that outlives this call — a temporary std::string would dangle.
+	// CIT_ASTRING: the slots are narrow char[] and S9X_BIOS_PATH_MAX is a byte
+	// count, so CIT_STRING would widen them and overrun the buffer.
+	static char bios_keys[S9X_NUM_BIOS_SLOTS][64];
+	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+	{
+		snprintf(bios_keys[i], sizeof bios_keys[i], "BIOS::%s", S9xGetBiosSlotInfo(i)->key);
+		configItems.push_back(ConfigItem(
+			bios_keys[i], (void *) S9xGetBiosPathBuffer(i), S9X_BIOS_PATH_MAX,
+			(void *) "", S9xGetBiosSlotInfo(i)->label, CIT_ASTRING));
+	}
+#undef CATEGORY
+#define	CATEGORY "SGB"
+	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
+	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");
@@ -1089,8 +1144,12 @@ void WinRegisterConfigItems()
     ADD(CheatEditorDialog);
     ADD(CheatSearchDialog);
     ADD(InsertCoin);
+    ADD(BiosManager);
 	ADDN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
+	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
+	ADDN(GBModel[4],GBModelSGBC);
 #undef ADD
 #undef ADDN
 
@@ -1121,8 +1180,12 @@ void WinRegisterConfigItems()
 	ADDXALL(CheatEditorDialog);
 	ADDXALL(CheatSearchDialog);
 	ADDXALL(InsertCoin);
+	ADDXALL(BiosManager);
 	ADDXALLN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDXALLN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDXALLN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDXALLN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDXALLN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
+	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
+	ADDXALLN(GBModel[4],GBModelSGBC);
 #undef ADDX
 #undef ADDXN
 #undef ADDXALL

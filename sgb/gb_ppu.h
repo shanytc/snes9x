@@ -249,6 +249,10 @@ struct Ppu
 	bool     hold_present_on_enable = true;
 	bool     present_hold = false;
 
+	// Holds a Nintendo logo the user never asked for off the panel. Set in
+	// Emulator::Reset, released by Emulator::UpdateBootLogoHold.
+	bool     boot_logo_hold = false;
+
 	// STOP-mode display override: 0 = normal, 1 = white panel (DMG stop),
 	// 2 = black (CGB stop outside mode 3), 3 = hold current frame (CGB
 	// stop during mode 3). Set by the STOP opcode, cleared on wake.
@@ -318,6 +322,22 @@ struct Ppu
 	// dot; sel_glitch_data is the byte last driven onto it.
 	uint8_t  tile_sel_glitch = 0;
 	uint8_t  sel_glitch_data = 0;
+
+	// CGB hardware running a cart with no CGB flag — the boot ROM's DMG
+	// compatibility mode. Colour still comes from CGB palette RAM, which the
+	// boot ROM fills from the title hash, but the 2-bit index is routed
+	// through BGP/OBP first, as the hardware does in this mode. Skipping that
+	// renders any game that permutes BGP with its shades scrambled: Killer
+	// Instinct writes $1B, a full inversion. New fields go at the END — a
+	// mid-struct insert desynchronises anything compiled against the old
+	// layout.
+	bool     dmg_compat = false;
+
+	// The cart has written CGB palette RAM, so its colour output is real.
+	// The SGB+GBC hack needs this: a cart that takes its SGB path on the
+	// second boot never writes these, and overlaying the reset-white palette
+	// would hide the picture the BIOS is drawing perfectly well.
+	bool     cgb_pal_written = false;
 };
 
 void PpuReset(Ppu &p);

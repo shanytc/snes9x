@@ -535,6 +535,8 @@
     <ClCompile Include="..\sgb\sgb.cpp" />
     <ClCompile Include="..\sgb\sgb_packet.cpp" />
     <ClCompile Include="..\sgb\sgb_state.cpp" />
+    <ClCompile Include="..\sgb\sgbc_patches.cpp" />
+    <ClCompile Include="..\sgb\sgbc.cpp" />
     <ClCompile Include="..\sgb\gb_cpu.cpp" />
     <ClCompile Include="..\sgb\gb_ops.cpp" />
     <ClCompile Include="..\sgb\gb_ops_cb.cpp" />
@@ -656,6 +658,7 @@
     <ClCompile Include="..\jma\winout.cpp" />
     <ClCompile Include="..\hd64180.cpp" />
     <ClCompile Include="..\loadzip.cpp" />
+    <ClCompile Include="..\biosmanager.cpp" />
     <ClCompile Include="..\memmap.cpp" />
     <ClCompile Include="..\movie.cpp" />
     <ClCompile Include="..\msu1.cpp" />

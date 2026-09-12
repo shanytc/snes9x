@@ -125,6 +125,10 @@ struct CMemory
     bool8   LoadMultiCartMem (const uint8 *, uint32, const uint8 *, uint32, const uint8 *, uint32);
 	bool8	LoadMultiCart (const char *, const char *);
     bool8	LoadMultiCartInt ();
+	// Carts that need a BIOS beside them (Sufami Turbo, the Satellaview
+	// shell) so File -> Load Game handles them. 1 = loaded, 0 = failed,
+	// -1 = not one of these formats.
+	int		LoadBIOSPairedCart (const char *filename, int32 size);
 	bool8	LoadSufamiTurbo ();
 	bool8	LoadBSCart ();
 	bool8	LoadSFCBox (int32);
@@ -224,6 +228,106 @@ inline bool S9xInterlaceField()
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *, uint32);
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
+
+// TRUE when `data` is a Super Game Boy BIOS cart image, judged the way the
+// loader judges it: *out_mode comes back 1 for SGB1, 2 for SGB2.
+bool8 S9xIsSGBBIOSImage(const uint8 *data, uint32 size, uint8 *out_mode);
+
+// Re-show the load banner ("<game>" (NTSC) via Super Game Boy 2  [sgb2.sfc]).
+// No-op unless Game Boy content is loaded.
+void S9xAnnounceGBBios(void);
+
+// TRUE when the BIOS Manager changed a path after the loaded cart took its
+// BIOS. The paths are only read by a load, so a hard reset wants one then.
+bool8 S9xBiosChangedSinceLoad(void);
+
+// Which console GB content runs on (Settings.GBBootPolicy). The Automatic
+// entries pick from what the cart supports, breaking ties in the stated
+// direction — that tie is what "triple boot" carts (DMG + CGB + SGB) hit.
+//
+// These are saved as integers in every port's config, so a new entry goes on
+// the END and the menus order themselves with S9xGBBootPolicyMenuOrder.
+enum S9xGBBootPolicy
+{
+	S9X_GBBOOT_GB = 0,       // force Game Boy
+	S9X_GBBOOT_GBC,          // force Game Boy Color
+	S9X_GBBOOT_SGB,          // force Super Game Boy (SGB1)
+	// 3 and 8 were the "SGB + GBC (hack)" entries. Super Game Boy Color
+	// replaced both; they survive only so a saved config still loads, and
+	// S9xNormalizeGBBootPolicy folds them into S9X_GBBOOT_SGBC.
+	S9X_GBBOOT_SGB_GBC_LEGACY,
+	S9X_GBBOOT_SGB2,         // force Super Game Boy 2
+	// 5 and 6 were "Automatic, prefer GB" and "prefer GBC". One Automatic
+	// replaced all three; they survive only so a saved config still loads, and
+	// S9xNormalizeGBBootPolicy folds them into S9X_GBBOOT_AUTO.
+	S9X_GBBOOT_AUTO_GB_LEGACY,
+	S9X_GBBOOT_AUTO_GBC_LEGACY,
+	S9X_GBBOOT_AUTO,         // read the cart header: SGB > GBC > GB — default
+	S9X_GBBOOT_SGB2_GBC_LEGACY,
+	// Super Game Boy Color: the SGB2 BIOS (patched in memory) around a Game
+	// Boy Color core. Every cart runs in color; a mono cart gets the boot
+	// ROM's compatibility palettes, the way a Color handles one.
+	S9X_GBBOOT_SGBC,
+	S9X_NUM_GBBOOT_POLICIES
+};
+
+// Menu order, which is not enum order: the four real consoles, then Super
+// Game Boy Color, then Automatic. Ports walk this order and start a new group —
+// a separator — wherever S9xGBBootPolicyGroup changes. Shorter than the enum,
+// which still carries the retired values.
+extern const uint8 S9xGBBootPolicyMenuOrder[];
+extern const int   S9xGBBootPolicyMenuCount;
+int S9xGBBootPolicyGroup(int policy);
+
+// A saved policy folded onto one a menu still offers: out-of-range values and
+// the two retired Automatic entries become S9X_GBBOOT_AUTO, the two retired
+// color hacks become S9X_GBBOOT_SGBC.
+uint8 S9xNormalizeGBBootPolicy(int policy);
+
+// The consoles a port offers as a hotkey: the four real ones and Super Game
+// Boy Color, in menu order. `key` is the name a config file stores the binding
+// under, so every port spells them the same. Automatic is not here — it is a
+// rule, not a console, and picking it by key would say nothing about what runs.
+struct S9xGBModelHotkey
+{
+	const char *key;     // config key / shortcut name
+	const char *label;   // short label for a bindings list
+	uint8       policy;  // S9xGBBootPolicy it selects
+};
+extern const S9xGBModelHotkey S9xGBModelHotkeys[];
+extern const int              S9xGBModelHotkeyCount;
+
+
+enum S9xGBConsole { S9X_GBCON_GB = 0, S9X_GBCON_GBC, S9X_GBCON_SGB };
+
+// Resolve Settings.GBBootPolicy against the cart's header. `cgb_flag` is $0143,
+// `sgb_flag` is $0146 and `old_licensee` is $014B — the Super Game Boy ignores
+// command packets unless the latter two are $03 and $33, so both are needed to
+// know whether a cart is really SGB-enhanced. `sgb_available` says whether an
+// SGB BIOS was found, since SGB can't be picked without one. `out_force_cgb`
+// comes back true for Super Game Boy Color, where the SGB2 BIOS runs with CGB
+// hardware enabled.
+S9xGBConsole S9xResolveGBConsole(uint8 cgb_flag, uint8 sgb_flag, uint8 old_licensee,
+                                 bool8 sgb_available, bool8 *out_force_cgb);
+
+// Display name for each policy, for the Emulation -> Game Boy Model menu.
+const char *S9xGBBootPolicyName(int policy);
+
+// Whether a policy can deliver the console it names. Only the Super Game Boy
+// entries can fail: without their BIOS they quietly run the cart as GBC/GB
+// instead, so a menu should grey them out. `gb_rom_path` joins the BIOS search
+// (the cart's own directory is one of the places it looks); NULL is fine.
+// Why an entry cannot be picked, so a menu can say "(Missing BIOS)" only when
+// that is the actual reason rather than for anything unavailable.
+enum S9xGBPolicyBlock
+{
+	S9X_GBPOLICY_OK = 0,
+	S9X_GBPOLICY_NO_BIOS,   // the console it names has no BIOS installed
+	S9X_GBPOLICY_CART       // the loaded cart cannot use it
+};
+S9xGBPolicyBlock S9xGBBootPolicyBlocked(int policy, const char *gb_rom_path);
+
+bool8 S9xGBBootPolicyAvailable(int policy, const char *gb_rom_path);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away
 // from the SNES/BS-X/Sufami load paths.

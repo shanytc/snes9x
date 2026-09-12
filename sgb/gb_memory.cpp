@@ -219,10 +219,9 @@ void MemReset(Memory &m, bool cgb)
 	m.serial_data    = 0;
 	m.serial_control = 0;
 	m.serial_bits    = 0;
-	// Boot ROM staging — zeroed on reset. S9xSGBLoadBootROM fills these
-	// in from the user-provided sgb.boot.rom / sgb2.boot.rom before the
-	// GB CPU starts. boot_rom_enabled stays false until LoadBootROM sets it.
+	// Zeroed on reset; S9xSGBLoadBootROM refills before the GB CPU starts.
 	std::memset(m.boot_rom, 0, sizeof m.boot_rom);
+	m.boot_rom_size    = 0;
 	m.boot_rom_enabled = false;
 	m.dma_last         = cgb ? 0x00 : 0xFF;
 
@@ -230,6 +229,7 @@ void MemReset(Memory &m, bool cgb)
 	m.key1_armed   = false;
 	m.double_speed = false;
 	m.ff72 = m.ff73 = m.ff74 = m.ff75 = 0;
+	m.key0 = 0;
 	m.hdma1 = m.hdma2 = m.hdma3 = m.hdma4 = 0;
 	m.hdma5        = 0xFF;
 	m.hdma_src = m.hdma_dst = m.hdma_len = 0;
@@ -288,11 +288,11 @@ static uint8_t DmaReadByte(Memory &m, uint16_t addr)
 {
 	if (addr >= 0xE000) addr = static_cast<uint16_t>(addr - 0x2000);
 	if (addr < 0x8000)
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xA000)
 		return m.ppu ? m.ppu->vram[(addr - 0x8000) + VramBankBase(m)] : 0xFF;
 	if (addr < 0xC000)
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xD000)
 		return m.wram[addr - 0xC000];
 	return m.wram[WramBankBase(m) + (addr - 0xD000)];
@@ -369,11 +369,10 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	if (m.dma_active && !m.dma_vram_bypass && addr < 0xFE00 &&
 	    DmaBusOf(m, m.dma_src) == DmaBusOf(m, addr))
 		return m.dma_bus_byte;
-	// Boot ROM overlay — first 256 bytes mirror the DMG/SGB boot ROM
-	// while it's still enabled. The boot code writes 0x01 to 0xFF50
-	// as its final act, which clears boot_rom_enabled and exposes the
-	// cart bytes underneath.
-	if (m.boot_rom_enabled && addr < 0x0100)
+	// Boot ROM overlay. A CGB boot ROM also covers 0x0200-0x08FF; the gap at
+	// 0x0100-0x01FF stays cart ROM, which is where it reads the header from.
+	if (m.boot_rom_enabled &&
+	    (addr < 0x0100 || (addr >= 0x0200 && addr < m.boot_rom_size)))
 	{
 		return m.boot_rom[addr];
 	}
@@ -386,10 +385,14 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	{
 		uint8_t logo;
 		if (SachenBootLogoByte(*m.cart, addr, logo)) return logo;
+		// Rocket carts feed the logo morph only to a CGB boot (size > 256);
+		// a DMG boot reads the raw Rocket logo and fails, as on hardware.
+		if (m.boot_rom_size > 0x100 &&
+		    RocketBootLogoByte(*m.cart, addr, logo)) return logo;
 	}
 	if (addr < 0x8000)
 	{
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	}
 	if (addr < 0xA000)
 	{
@@ -398,7 +401,7 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	}
 	if (addr < 0xC000)
 	{
-		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart) : 0xFF;
+		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	}
 	if (addr < 0xD000)
 	{
@@ -550,6 +553,8 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
 		case 0xFF46: return m.dma_last;
+		case 0xFF4C:
+			return (m.ppu && m.ppu->cgb) ? m.key0 : 0xFF;
 		case 0xFF4D:
 			return (m.ppu && m.ppu->cgb)
 				? static_cast<uint8_t>((m.double_speed ? 0x80 : 0x00) |
@@ -653,6 +658,15 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 				if (m.cart && m.cart->sachen_runs_raw) m.cart->mbc.sachen_locked = false;
 			}
 			return;
+		case 0xFF4C:
+			// KEY0: only the boot ROM may pick the CPU mode; bit 2 flips the
+			// renderer to DMG-through-palette-0 compat the way hardware does.
+			if (m.ppu && m.ppu->cgb && m.boot_rom_enabled)
+			{
+				m.key0 = value;
+				m.ppu->dmg_compat = (value & 0x04) != 0;
+			}
+			return;
 		case 0xFF4D:
 			if (m.ppu && m.ppu->cgb) m.key1_armed = (value & 0x01) != 0;
 			return;
@@ -665,9 +679,9 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		case 0xFF54: if (m.ppu && m.ppu->cgb) m.hdma4 = value; return;
 		case 0xFF55: if (m.ppu && m.ppu->cgb) HdmaTrigger(m, value); return;
 		case 0xFF68: if (m.ppu && m.ppu->cgb) m.ppu->bcps = value; return;
-		case 0xFF69: if (m.ppu && m.ppu->cgb) CgbWritePalette(m.ppu->bg_pal, m.ppu->bcps, value, !CramBlocked(m)); return;
+		case 0xFF69: if (m.ppu && m.ppu->cgb) { CgbWritePalette(m.ppu->bg_pal, m.ppu->bcps, value, !CramBlocked(m)); m.ppu->cgb_pal_written = true; } return;
 		case 0xFF6A: if (m.ppu && m.ppu->cgb) m.ppu->ocps = value; return;
-		case 0xFF6B: if (m.ppu && m.ppu->cgb) CgbWritePalette(m.ppu->obj_pal, m.ppu->ocps, value, !CramBlocked(m)); return;
+		case 0xFF6B: if (m.ppu && m.ppu->cgb) { CgbWritePalette(m.ppu->obj_pal, m.ppu->ocps, value, !CramBlocked(m)); m.ppu->cgb_pal_written = true; } return;
 		case 0xFF70: if (m.ppu && m.ppu->cgb) m.svbk = value & 0x07; return;
 		case 0xFF72: if (m.ppu && m.ppu->cgb) m.ff72 = value; return;
 		case 0xFF73: if (m.ppu && m.ppu->cgb) m.ff73 = value; return;

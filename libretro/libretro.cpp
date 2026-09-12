@@ -670,6 +670,25 @@ static void update_variables(void)
             Settings.SGB_BIOSPreference = 2;
     }
 
+    // GB/GBC boot ROM (scrolling-logo animation), looked for in the system dir
+    // as dmg_boot.bin / cgb_boot.bin. Nothing bundled; absent = no change.
+    var.key = "snes9x_gb_bios";
+    var.value = NULL;
+    Settings.GB_BIOSEnabled = TRUE;
+    Settings.GBBootPolicy   = S9X_GBBOOT_AUTO;
+    Settings.GBSuppressNRxGlitches = TRUE;
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+    {
+        if (!strcmp(var.value, "disabled"))
+            Settings.GB_BIOSEnabled = FALSE;
+        else if (!strcmp(var.value, "prefer"))
+            // "Prefer over SGB BIOS": run the cart on its own console. The old
+            // Automatic-prefer-GBC policy said this and is gone; forcing Game
+            // Boy Color says it outright, and a mono cart there is what a real
+            // Game Boy Color does with one.
+            Settings.GBBootPolicy = S9X_GBBOOT_GBC;
+    }
+
     // Per-source SGB mix volumes (0..100). Consumed by S9xMixSpcOverGB;
     // only affect GB/SGB content. Defaults match the desktop frontends.
     var.key = "snes9x_sgb_mix_volume_spc";

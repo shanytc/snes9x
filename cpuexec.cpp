@@ -124,6 +124,9 @@ void S9xMainLoop (void)
 	{
 		S9xSGBSetHMax(Timings.H_Max);
 		S9xSGBResetSyncAnchor(CPU.Cycles);
+		// Same per-frame push the BIOS-less branch above does, so the Emulator
+		// Hacks checkbox reaches the GB core under a running SGB BIOS too.
+		S9xSGBSetNoSpriteLimit(Settings.GBNoSpriteLimit);
 	}
 
 	for (;;)

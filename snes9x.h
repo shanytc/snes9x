@@ -246,6 +246,10 @@ struct SSettings
 	bool8	SGB_BIOSModeActive;  // runtime: the currently-loaded ROM is running on the real SGB BIOS
 	char	SGB_BIOSPath[260];   // runtime: absolute path of the BIOS .sfc in use (empty in BIOS-less mode)
 	uint8	SGB_BIOSPreference;  // user-selected BIOS mode: 0=No BIOS, 1=SGB1, 2=SGB2 (default 2)
+	bool8	GB_BIOSEnabled;      // use dmg_boot.bin / cgb_boot.bin for the power-on logo when running as GB/GBC (default on)
+	uint8	GBBootPolicy;        // which console GB content runs on: see S9xGBBootPolicy (default S9X_GBBOOT_AUTO)
+	bool8	GB_BIOSActive;       // runtime: the currently-loaded GB/GBC cart is booting through such a boot ROM
+	char	GB_BIOSPath[260];    // runtime: absolute path of the GB/GBC boot ROM in use (empty otherwise)
 	char	GBRomPath[260];      // runtime: path of the currently-loaded GB/GBC ROM (for BIOS-mode reload)
 	bool8	MouseMaster;
 	bool8	SuperScopeMaster;
@@ -367,6 +371,7 @@ struct SSettings
 	int		Gamma;       // signed: -100..+100, 0 = no change
 	int		Contrast;    // signed: -100..+100, 0 = no change
 	int		Saturation;  // signed: -100..+100, 0 = no change
+	bool8	GBSuppressNRxGlitches; // Game Boy: an NRx2 rewrite on a live channel never raises its volume (hides the zombie-mode click; off = exact hardware)
 };
 
 struct SSNESGameFixes

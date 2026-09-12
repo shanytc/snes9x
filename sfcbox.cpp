@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include "snes9x.h"
 #include "memmap.h"
+#include "biosmanager.h"
 #include "display.h"
 #include "movie.h"
 #include "hd64180.h"
@@ -1347,62 +1348,70 @@ void S9xSFCBoxPostLoadState (void)
 // ---------------------------------------------------------------------------
 // BIOS loading
 
-static bool8 LoadBIOSFile (const char *name, uint8 *dest, uint32 size, uint32 minsize)
+// Picks the archive member of exactly the size the caller asked for, so a zip
+// holding both SFC Box ROMs resolves each slot to the right one.
+static bool AcceptExactSize (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
 {
-	// Probe order: the port's configured BIOS folder, then the ROM's own
-	// directory, then the conventional BIOS/ folder inside or beside the
+	(void) data; (void) size;
+	return full_size == *(const uint32 *) ctx;
+}
+
+static bool8 LoadBIOSFile (int bios_slot, uint8 *dest, uint32 size, uint32 minsize)
+{
+	// A path set in the BIOS Manager wins over the by-name search, and may be a
+	// .zip.
+	std::vector<uint8>	img;
+	std::string			assigned = S9xResolveBiosPath(bios_slot);
+	if (!assigned.empty() &&
+		S9xReadBiosImage(assigned.c_str(), img, size, AcceptExactSize, &size) &&
+		img.size() >= minsize)
+	{
+		memcpy(dest, img.data(), img.size());
+		return (TRUE);
+	}
+
+	// Probe order: the port's BIOS folder and its subfolders, then the ROM's
+	// own directory, then the conventional BIOS/ folder inside or beside the
 	// ROM folder (games in Roms/, BIOS files in a sibling BIOS/), then
 	// whatever directory ROMFilename carries (libretro passes only the
 	// basename to the loader, so it may have none).
-	std::string	romdir = S9xGetDirectory(ROMFILENAME_DIR);
-	std::string	dirs[5];
-	int			ndirs = 0;
-
-	dirs[ndirs++] = S9xGetDirectory(BIOS_DIR);
+	std::string					romdir = S9xGetDirectory(ROMFILENAME_DIR);
+	std::vector<std::string>	dirs = S9xBiosSearchDirs();
 	if (!romdir.empty())
 	{
-		dirs[ndirs++] = romdir;
-		dirs[ndirs++] = romdir + SLASH_STR + "BIOS";
-		dirs[ndirs++] = romdir + SLASH_STR + ".." + SLASH_STR + "BIOS";
+		dirs.push_back(romdir);
+		dirs.push_back(romdir + SLASH_STR + "BIOS");
+		dirs.push_back(romdir + SLASH_STR + ".." + SLASH_STR + "BIOS");
 	}
 
 	std::string	fromname = Memory.ROMFilename;
 	size_t		slash = fromname.find_last_of("/\\");
 	if (slash != std::string::npos)
-		dirs[ndirs++] = fromname.substr(0, slash);
+		dirs.push_back(fromname.substr(0, slash));
 
-	FILE	*fp = NULL;
-	for (int i = 0; i < ndirs && !fp; i++)
-	{
-		std::string	path = dirs[i] + SLASH_STR + name;
-		fp = fopen(path.c_str(), "rb");
-	}
-
-	if (!fp)
+	if (S9xFindBiosByName(bios_slot, dirs, img, size, AcceptExactSize, &size).empty() ||
+		img.size() < minsize)
 		return (FALSE);
-
-	size_t	got = fread(dest, 1, size, fp);
-	fclose(fp);
-	return (got >= minsize);
+	memcpy(dest, img.data(), img.size());
+	return (TRUE);
 }
 
 bool8 S9xSFCBoxLoadKROM (void)
 {
-	if (!LoadBIOSFile("KROM1.BIN", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE) &&
-		!LoadBIOSFile("KROM.BIN",  SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE) &&
-		!LoadBIOSFile("krom1.bin", SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE))
-	{
+	const bool8	krom =
+		LoadBIOSFile(S9X_BIOS_SFCBOX_KROM, SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE);
+	if (!krom)
 		printf("SFC-Box: KROM1.BIN not found in the BIOS directory (get it from "
 			   "https://archive.org/details/super-famicom-box-bios).\n");
-		return (FALSE);
-	}
 
+	// Probed even when the KROM is missing: the box needs both files, and the
+	// caller names whichever are actually absent.
 	SFCBox.OSD.FontLoaded =
-		LoadBIOSFile("MB90082.BIN", SFCBox.OSD.Font, SFCBOX_FONT_SIZE, SFCBOX_FONT_SIZE);
+		LoadBIOSFile(S9X_BIOS_SFCBOX_FONT, SFCBox.OSD.Font, SFCBOX_FONT_SIZE, SFCBOX_FONT_SIZE);
 	if (!SFCBox.OSD.FontLoaded)
 		printf("SFC-Box: MB90082.BIN (OSD font) not found; the supervisor overlay will be invisible.\n");
 
-	return (TRUE);
+	return (krom);
 }
 
 // ---------------------------------------------------------------------------

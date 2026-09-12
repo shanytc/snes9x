@@ -740,6 +740,20 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
     {
         window->close();
     }
+    else if (name == "BiosManager" && pressed)
+    {
+        window->openBiosManager();
+    }
+    else if (pressed && name.compare(0, 7, "GBModel") == 0)
+    {
+        // Same route as the menu entry, gates included.
+        for (int i = 0; i < S9xGBModelHotkeyCount; i++)
+            if (name == S9xGBModelHotkeys[i].key)
+            {
+                window->setGBBootPolicy(S9xGBModelHotkeys[i].policy);
+                break;
+            }
+    }
 }
 
 bool EmuApplication::isBound(const EmuBinding &b)

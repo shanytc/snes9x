@@ -386,6 +386,27 @@ inline uint16_t CgbColor(const uint8_t *pal, uint8_t palette, uint8_t color)
 	return static_cast<uint16_t>((pal[idx] | (pal[idx + 1] << 8)) & 0x7FFF);
 }
 
+// Colour for the CGB renderers. In DMG-compatibility mode the cart wrote no
+// CGB palettes or bank-1 attributes, so the index goes through the DMG
+// palette register and lands in palette 0 (BG) or the one the DMG OBP-select
+// flag picks (OBJ) — the entries the boot ROM set up.
+inline uint16_t CgbBgColor(const Ppu &p, uint8_t bgp, uint8_t pal, uint8_t color)
+{
+	if (p.dmg_compat)
+		return CgbColor(p.bg_pal, 0, ApplyPalette(bgp, color));
+	return CgbColor(p.bg_pal, pal, color);
+}
+
+inline uint16_t CgbObjColor(const Ppu &p, uint8_t pal, uint8_t color, uint8_t flags)
+{
+	if (p.dmg_compat)
+	{
+		const uint8_t obp = (flags & 0x10) ? p.obp1 : p.obp0;
+		return CgbColor(p.obj_pal, (flags & 0x10) ? 1 : 0, ApplyPalette(obp, color));
+	}
+	return CgbColor(p.obj_pal, pal, color);
+}
+
 struct BgPixelCgb { uint8_t color; uint8_t pal; bool priority; };
 
 inline BgPixelCgb SampleBgPixelCgb(const Ppu &p, int x, bool window)
@@ -435,11 +456,12 @@ inline BgPixelCgb SampleBgPixelCgb(const Ppu &p, int x, bool window)
 	return BgPixelCgb{ color, static_cast<uint8_t>(attr & 0x07), (attr & 0x80) != 0 };
 }
 
-struct SpritePixelCgb { bool covered; uint8_t color; uint8_t pal; bool bg_over; };
+struct SpritePixelCgb { bool covered; uint8_t color; uint8_t pal; bool bg_over;
+                        uint8_t flags; };
 
 inline SpritePixelCgb SampleSpritePixelCgb(const Ppu &p, int x)
 {
-	SpritePixelCgb out{ false, 0, 0, false };
+	SpritePixelCgb out{ false, 0, 0, false, 0 };
 	if (!(p.lcdc & 0x02)) return out;
 
 	const bool large    = (p.lcdc & 0x04) != 0;
@@ -478,6 +500,7 @@ inline SpritePixelCgb SampleSpritePixelCgb(const Ppu &p, int x)
 		out.color   = color_idx;
 		out.pal     = static_cast<uint8_t>(flags & 0x07);
 		out.bg_over = (flags & 0x80) != 0;
+		out.flags   = flags;
 		return out;
 	}
 	return out;
@@ -513,8 +536,8 @@ void RenderPixelCgb(Ppu &p, int x)
 	{
 		line[x]  = bg.color;
 		lay[x]   = win_active_here ? GB_PIXEL_WINDOW : GB_PIXEL_BG;
-		cline[x] = bg_hidden ? CgbColor(p.bg_pal, 0, 0)
-		                     : CgbColor(p.bg_pal, bg.pal, bg.color);
+		cline[x] = bg_hidden ? CgbBgColor(p, p.bgp, 0, 0)
+		                     : CgbBgColor(p, p.bgp, bg.pal, bg.color);
 	}
 
 	const SpritePixelCgb sp = SampleSpritePixelCgb(p, x);
@@ -529,7 +552,7 @@ void RenderPixelCgb(Ppu &p, int x)
 			{
 				line[x]  = sp.color;
 				lay[x]   = GB_PIXEL_OBJ;
-				cline[x] = CgbColor(p.obj_pal, sp.pal, sp.color);
+				cline[x] = CgbObjColor(p, sp.pal, sp.color, sp.flags);
 			}
 		}
 	}
@@ -1124,8 +1147,8 @@ void EmitPixel(Ppu &p, PixelMachine &m, uint8_t bg_color, uint8_t bg_attr, bool 
 		{
 			line[x]  = bg_color;
 			lay[x]   = is_window ? GB_PIXEL_WINDOW : GB_PIXEL_BG;
-			cline[x] = bg_hidden ? CgbColor(p.bg_pal, 0, 0)
-			                     : CgbColor(p.bg_pal, bg_attr & 0x07, bg_color);
+			cline[x] = bg_hidden ? CgbBgColor(p, p.bgp, 0, 0)
+			                     : CgbBgColor(p, p.bgp, bg_attr & 0x07, bg_color);
 		}
 		if (p.show_obj && (p.lcdc & 0x02) && obj_c != 0)
 		{
@@ -1139,7 +1162,7 @@ void EmitPixel(Ppu &p, PixelMachine &m, uint8_t bg_color, uint8_t bg_attr, bool 
 				{
 					line[x]  = obj_c;
 					lay[x]   = GB_PIXEL_OBJ;
-					cline[x] = CgbColor(p.obj_pal, obj_flags & 0x07, obj_c);
+					cline[x] = CgbObjColor(p, obj_flags & 0x07, obj_c, obj_flags);
 				}
 			}
 		}
@@ -1384,6 +1407,7 @@ void PpuReset(Ppu &p)
 	p.vblank_irq_at = 0;
 	p.stat_irq_delay = 0;
 	p.present_hold  = false;
+	p.boot_logo_hold = false;
 	p.frame_ready   = false;
 	p.t_cycles      = 0;
 	p.draw_x        = 0;
@@ -1399,6 +1423,7 @@ void PpuReset(Ppu &p)
 	p.bcps = p.ocps = 0;
 	std::memset(p.bg_pal,  0xFF, sizeof p.bg_pal);
 	std::memset(p.obj_pal, 0xFF, sizeof p.obj_pal);
+	p.cgb_pal_written = false;
 }
 
 // Mode-3 exit: strikethrough fill, WX=166 carry, stall math, HBlank.
@@ -1420,7 +1445,7 @@ static void Mode3OutputExit(Ppu &p, PixelMachine &m)
 				line[x]  = x ? line[x - 1]
 				             : (p.cgb ? 0 : ApplyPalette(p.bgp, 0));
 				lay[x]   = x ? lay[x - 1] : GB_PIXEL_BG;
-				cline[x] = x ? cline[x - 1] : CgbColor(p.bg_pal, 0, 0);
+				cline[x] = x ? cline[x - 1] : CgbBgColor(p, p.bgp, 0, 0);
 			}
 		}
 		m.lcd_x = GB_SCREEN_WIDTH;

@@ -646,6 +646,7 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 	auto worker = [&]() {
 		SGB::Emulator emu;
 		SGB::ScopedActiveEmulator bind(emu);
+		emu.SetSuppressNrxGlitches(0);   // the shootout scores exact hardware behaviour
 		if (emu.Init())
 		{
 			for (;;)

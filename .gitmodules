@@ -1,6 +1,7 @@
 [submodule "win32/libpng/src"]
 	path = win32/libpng/src
 	url = https://git.code.sf.net/p/libpng/code
+	ignore = untracked
 [submodule "win32/zlib/src"]
 	path = win32/zlib/src
 	url = https://github.com/madler/zlib.git

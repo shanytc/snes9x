@@ -359,6 +359,8 @@ void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
 	const bool stopped = m.cpu && m.cpu->stopped;
 
 	if (!stopped && m.timer) TimerStep(*m.timer, m, tcycles);
+	// The link cable shares the timer's clock domain (DIV doubles in double speed).
+	if (m.serial) SerialStep(*m.serial, m, tcycles);
 
 	// One DMA byte per 4 CPU T-cycles (a split write cycle ticks DMA only
 	// in its first half so the engine still sees whole M-cycles).

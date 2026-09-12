@@ -381,6 +381,7 @@ list(APPEND SOURCES
     ../sgb/gb_timer.cpp
     ../sgb/gb_serial.cpp
     ../sgb/gb_link.cpp
+    ../sgb/gb_viewer.cpp
     ../sgb/gb_joypad.cpp
     ../sgb/gb_cart.cpp
     ../msu1.cpp

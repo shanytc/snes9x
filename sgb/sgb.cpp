@@ -726,7 +726,7 @@ void Emulator::Reset()
 	// A live link survives a GB reset — only the in-flight transfer is
 	// dropped, exactly like yanking the console's power with the cable
 	// still plugged in.
-	SerialReset(impl_->serial, impl_->cgb_mode && !Settings.SGB_BIOSModeActive);
+	SerialReset(impl_->serial, impl_->CgbActive());
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
 	// BIOS-less SGB shows the console's built-in bezel until a cart
@@ -1904,14 +1904,18 @@ static void DecodeBorderCapture(const uint8_t *raw_fb, uint8_t *out_4kb)
 			uint8_t *tile_out = &out_4kb[i * 16];
 			for (int row = 0; row < 8; ++row)
 			{
-				const uint8_t pix = static_cast<uint8_t>(
-					raw_fb[(ty * 8 + row) * GB_SCREEN_WIDTH + (tx * 8 + px)] & 0x03);
-				const int bit = 7 - px;
-				if (pix & 1) plane0 = static_cast<uint8_t>(plane0 | (1u << bit));
-				if (pix & 2) plane1 = static_cast<uint8_t>(plane1 | (1u << bit));
+				uint8_t plane0 = 0, plane1 = 0;
+				for (int px = 0; px < 8; ++px)
+				{
+					const uint8_t pix = static_cast<uint8_t>(
+						raw_fb[(ty * 8 + row) * GB_SCREEN_WIDTH + (tx * 8 + px)] & 0x03);
+					const int bit = 7 - px;
+					if (pix & 1) plane0 = static_cast<uint8_t>(plane0 | (1u << bit));
+					if (pix & 2) plane1 = static_cast<uint8_t>(plane1 | (1u << bit));
+				}
+				tile_out[row * 2 + 0] = plane0;
+				tile_out[row * 2 + 1] = plane1;
 			}
-			tile_out[row * 2 + 0] = plane0;
-			tile_out[row * 2 + 1] = plane1;
 		}
 	}
 }

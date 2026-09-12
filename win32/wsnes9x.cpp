@@ -1003,6 +1003,13 @@ static void WinRequestScreenshot()
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
 static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
 
+// Super Game Boy Color has no link cable yet: every session start refuses
+// while it is the picked Game Boy Model, and the submenu hides with it.
+static bool GBLinkBlockedBySgbc ()
+{
+	return S9xNormalizeGBBootPolicy (Settings.GBBootPolicy) == S9X_GBBOOT_SGBC;
+}
+
 // A held link hotkey re-fires (key auto-repeat, plus the background-input
 // scanner a new session switches on mid-press): gate to one shot per press.
 struct SLinkHotkeyGate { WPARAM key; DWORD lastSeen; };
@@ -3313,15 +3320,14 @@ LRESULT CALLBACK WinProc(
 			WinToggleGBLinkSplit ();
 			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
-			// lParam rides the master's booted BIOS mode + 1 (0 = not
-			// specified): a reused window may sit in another mode and has
-			// to reboot into the master's before dialing in.
-			if (lParam >= 1 && lParam <= 3)
+			// lParam rides the master's Game Boy Model + 1 (0 = not
+			// specified): a reused window may sit on another console and
+			// has to reboot onto the master's before dialing in.
+			if (lParam >= 1 && lParam <= S9X_NUM_GBBOOT_POLICIES)
 			{
-				const uint8 want   = (uint8)(lParam - 1);
-				const uint8 active = Settings.SGB_BIOSModeActive
-				                   ? Settings.GameBoyRunMode : 0;
-				Settings.SGB_BIOSPreference = want;   // covers a later cart pick too
+				const uint8 want   = S9xNormalizeGBBootPolicy ((int) (lParam - 1));
+				const uint8 active = S9xNormalizeGBBootPolicy (Settings.GBBootPolicy);
+				Settings.GBBootPolicy = want;   // covers a later cart pick too
 				if (Settings.GBRomPath[0] && want != active)
 				{
 					TCHAR wpath[_MAX_PATH];
@@ -3418,6 +3424,11 @@ LRESULT CALLBACK WinProc(
 					WinSaveConfigFile();
 					break;
 				}
+				// No link cable under Super Game Boy Color yet: a live
+				// session ends before the game reboots onto it.
+				if (policy == S9X_GBBOOT_SGBC &&
+				    (S9xSGBLinkIsEnabled () || S9xSGBSplitActive ()))
+					WinGBLinkUnlink ();
 				Settings.GBBootPolicy = policy;
 				WinSaveConfigFile();
 				if (Settings.GBRomPath[0] && ReloadLoadedGame())
@@ -6086,14 +6097,6 @@ static void UpdateTestsMenu ()
 	if (GUI.hWnd) DrawMenuBar(GUI.hWnd);   // no window yet at build time
 }
 
-// Pull a whole submenu out of the menu bar when it doesn't apply and put
-// it back when it does. The Game Boy submenus are hidden rather than greyed
-// (see the BIOS submenu below, which does this inline). Removal loses the
-// handle, so the first pass caches it while the item is still there.
-//
-// Placement is expressed as "before before_id" rather than a remembered
-// index: the BIOS submenu sits in the same popup and is itself inserted
-// and removed at runtime, so any absolute position drifts under it.
 // Show or hide a whole submenu, the way the BIOS one below does inline.
 // Placement is "before before_id" because an absolute index would drift
 // under the BIOS submenu, which is itself inserted and removed.
@@ -6247,7 +6250,7 @@ static void CheckMenuStates ()
 		const bool sgb1_bios = Settings.SGB_BIOSModeActive &&
 		                       Settings.GameBoyRunMode == 1;
 		const bool show = ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
-		                   !sgb1_bios) ||
+		                   !sgb1_bios && !GBLinkBlockedBySgbc ()) ||
 		                  S9xSGBLinkIsEnabled () ||
 		                  Settings.GBLinkPeerInstance;
 		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("&Link Cable"),
@@ -11855,7 +11858,7 @@ int GBLinkSessionPlayers = 2;
 // Player number of the instance that spawned this one; anchors the
 // split-screen-style window placement of a spawned seat.
 int GBLinkLauncherIndex = 1;
-int GBLinkUserBiosPref  = -1;
+int GBLinkUserModel     = -1;
 
 // Link Current Game runs its 2-4 players as in-process split screen rather
 // than spawned instances. A preference, not a session: it decides what
@@ -12140,23 +12143,21 @@ bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPi
 // Launch one instance, or ask a surviving one to re-tick its item so a
 // re-link reuses that window instead of piling up a new one each time.
 // The switch carries our pid and index, the launched side's index, the
-// session's player count and our booted BIOS mode, so the pairing is
-// known from both ends and the seat boots the way the master did.
+// session's player count and our Game Boy Model, so the pairing is known
+// from both ends and the seat boots on the console the master picked.
 static DWORD GBLinkLaunchInstance (DWORD reusePid, int mode, int playerIndex, int players)
 {
-	// What this instance actually booted, not what the shared config
-	// file happens to say right now.
-	const int bios = Settings.SGB_BIOSModeActive ? Settings.GameBoyRunMode : 0;
+	const int model = S9xNormalizeGBBootPolicy (Settings.GBBootPolicy);
 
 	if (GBLinkPidAlive (reusePid))
 	{
 		// Connect senses the role: our port is up, so it dials in — and
 		// being idempotent, it cannot unplug an instance already linked.
-		// lParam rides our BIOS mode + 1 so a window sitting in another
-		// mode reboots into ours first.
+		// lParam rides our Game Boy Model + 1 so a window sitting on
+		// another console reboots onto ours first.
 		if (GBLinkPostToPid (reusePid, WM_COMMAND,
 		                     MAKEWPARAM (ID_EMULATION_GB_LINK_CONNECT, 0),
-		                     (LPARAM)(bios + 1)))
+		                     (LPARAM)(model + 1)))
 			return reusePid;
 	}
 
@@ -12169,11 +12170,11 @@ static DWORD GBLinkLaunchInstance (DWORD reusePid, int mode, int playerIndex, in
 	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
 		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
 		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
-		            playerIndex, players, bios, (TCHAR *)_tFromChar (Settings.GBRomPath));
+		            playerIndex, players, model, (TCHAR *)_tFromChar (Settings.GBRomPath));
 	else
 		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d,%d"), exe, GBLINK_PEER_SWITCH,
 		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
-		            playerIndex, players, bios);
+		            playerIndex, players, model);
 	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
 
 	STARTUPINFO si;
@@ -12490,7 +12491,12 @@ void WinToggleGBLink (int mode, int players)
 
 	if (Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1)
 	{
-		S9xSetInfoString ("Link cable: the Super Game Boy 1 has no link port - use SGB2");
+		S9xSetInfoString ("Link cable: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2 in Emulation > Game Boy Model");
+		return;
+	}
+	if (GBLinkBlockedBySgbc ())
+	{
+		S9xSetInfoString ("Link cable: not available under Super Game Boy Color yet - pick another Game Boy Model");
 		return;
 	}
 
@@ -12525,7 +12531,7 @@ void WinToggleGBLinkSplit ()
 		// BIOS-mode viewer session into a dead end.
 		if (Settings.SGB_BIOSModeActive)
 		{
-			S9xSetInfoString ("Split screen needs the BIOS-less GB mode - set Emulation > BIOS > No BIOS");
+			S9xSetInfoString ("Split screen needs a plain Game Boy - pick Game Boy or Game Boy Color in Emulation > Game Boy Model");
 			return;
 		}
 		// Restart the live session in the other flavor, same seat count:
@@ -12600,7 +12606,7 @@ void WinGBLinkHotkey (int what)
 			}
 			if (Settings.SGB_BIOSModeActive)
 			{
-				S9xSetInfoString ("Split screen needs the BIOS-less GB mode - set Emulation > BIOS > No BIOS");
+				S9xSetInfoString ("Split screen needs a plain Game Boy - pick Game Boy or Game Boy Color in Emulation > Game Boy Model");
 				return;
 			}
 			const bool was = GBLinkSplitScreen;
@@ -13169,9 +13175,14 @@ static void GBSeatWindowsCreate (int players)
 // hands each seat its own .savN next to the primary's .sav.
 static void WinStartGBSplit (int players)
 {
+	if (GBLinkBlockedBySgbc ())
+	{
+		S9xSetInfoString ("Link cable: not available under Super Game Boy Color yet - pick another Game Boy Model");
+		return;
+	}
 	if (Settings.SGB_BIOSModeActive)
 	{
-		S9xSetInfoString ("Split screen needs the BIOS-less GB mode - set Emulation > BIOS > No BIOS");
+		S9xSetInfoString ("Split screen needs a plain Game Boy - pick Game Boy or Game Boy Color in Emulation > Game Boy Model");
 		return;
 	}
 	if (!Settings.SuperGameBoy)
@@ -13244,7 +13255,12 @@ static void WinStartGBViewerSession (int players)
 {
 	if (Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1)
 	{
-		S9xSetInfoString ("Link cable: the Super Game Boy 1 has no link port - use SGB2");
+		S9xSetInfoString ("Link cable: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2 in Emulation > Game Boy Model");
+		return;
+	}
+	if (GBLinkBlockedBySgbc ())
+	{
+		S9xSetInfoString ("Link cable: not available under Super Game Boy Color yet - pick another Game Boy Model");
 		return;
 	}
 	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)

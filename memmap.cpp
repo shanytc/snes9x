@@ -2230,7 +2230,7 @@ static bool8 LoadSGBBIOSBytes (const char *bios_path, std::vector<uint8> &out_bi
         return FALSE;
     out_mode = 1;
     S9xIsSGBBIOSImage(out_bios.data(), (uint32) out_bios.size(), &out_mode);
-    s_sgbc_bios_patched = sgbc && out_mode == 2 && SGB::PatchSgbcBios(out_bios);
+    s_sgbc_bios_patched = sgbc && out_mode == 2 && SGB::PatchSgb2BiosForSgbc(out_bios);
     if (s_sgbc_bios_patched && !S9xIsSGBBIOSImage(out_bios.data(), (uint32) out_bios.size(), NULL))
         return FALSE;   // the patch must never touch the header title
     return TRUE;

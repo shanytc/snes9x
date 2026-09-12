@@ -1354,9 +1354,9 @@ void Emulator::PrepareSgbcCart()
 
 	// Per-game edits from the built-in table (sgbc_patches.cpp). Plain
 	// snprintf: the win32 port maps it through a macro.
-	const SgbcPatch *p = im.sgbc_table ? FindSgbcPatch(rom.data(), rom.size()) : nullptr;
+	const CartPatch *p = im.sgbc_table ? FindSgbcCartPatch(rom.data(), rom.size()) : nullptr;
 	if (p) im.sgbc_quirks = p->quirks;
-	if (p && ApplySgbcPatch(*p, rom.data(), rom.size()))
+	if (p && ApplyCartPatch(*p, rom.data(), rom.size()))
 		snprintf(im.sgbc_patch_name, sizeof im.sgbc_patch_name, "%s", p->name);
 }
 
@@ -1370,14 +1370,14 @@ void Emulator::PrepareBiosCart()
 	Impl &im = *impl_;
 	im.sgb_patch_name[0] = 0;
 	// Look the cart up before PrepareSgbcCart rewrites its header.
-	const SgbcPatch *p = (im.has_rom && im.sgbc_table)
-	                   ? FindSgbPatch(im.cart.rom.data(), im.cart.rom.size()) : nullptr;
+	const CartPatch *p = (im.has_rom && im.sgbc_table)
+	                   ? FindSgbCartPatch(im.cart.rom.data(), im.cart.rom.size()) : nullptr;
 	PrepareSgbcCart();
 	if (!p) return;
 	std::vector<uint8_t> &rom = im.cart.rom;
 	// Hashes read the file's bytes, so keep them if SGBC did not already.
 	if (im.sgbc_pristine.empty()) im.sgbc_pristine = rom;
-	if (ApplySgbcPatch(*p, rom.data(), rom.size()))
+	if (ApplyCartPatch(*p, rom.data(), rom.size()))
 		snprintf(im.sgb_patch_name, sizeof im.sgb_patch_name, "%s", p->name);
 }
 

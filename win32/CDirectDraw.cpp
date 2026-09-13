@@ -450,8 +450,11 @@ void CDirectDraw::Render(SSurface Src)
 			int width = dstRect.right - dstRect.left;
 			int height = dstRect.bottom - dstRect.top;
 
-			int oldWidth = GUI.AspectWidth;
-			int oldHeight = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
+			// Game Boy content keeps its own shape, like the other backends.
+			unsigned int contentWidth, contentHeight;
+			WinGetContentSize(&contentWidth, &contentHeight);
+			int oldWidth = (int)contentWidth;
+			int oldHeight = (int)contentHeight;
 			int newWidth, newHeight;
 
 			if(oldWidth * height > oldHeight * width)

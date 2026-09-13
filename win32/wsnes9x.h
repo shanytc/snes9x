@@ -46,6 +46,10 @@
 constexpr int ASPECT_WIDTH_4_3 = 256;
 constexpr int ASPECT_WIDTH_8_7 = 299;
 
+// Video -> Window Size offers 1x..10x, on consecutive command IDs from
+// ID_WINDOW_SIZE_1X.
+constexpr unsigned int WINDOW_SIZE_FACTORS = 10;
+
 #include "_tfwopen.h"
 #ifdef UNICODE
 #define _tToChar WideToUtf8

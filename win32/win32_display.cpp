@@ -259,6 +259,34 @@ void WinDisplayApplyChanges()
 	S9xDisplayOutput->ApplyDisplayChanges();
 }
 
+void WinGetContentSize(unsigned int *width, unsigned int *height)
+{
+	// Without the Super Game Boy BIOS the Game Boy core renders its own
+	// 160x144 picture into the frame buffer; with it, the SNES draws the
+	// border and the screen is an ordinary SNES one.
+	const bool gb = (Settings.SuperGameBoy != FALSE);
+	unsigned int w, h;
+
+	if (!gb)
+	{
+		h = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
+		w = GUI.AspectWidth;
+	}
+	else
+	{
+		// GUI.AspectWidth is the SNES's width at its nominal 224 lines: 256
+		// leaves the picture unstretched, 299 makes it 4:3. The Game Boy takes
+		// the shape that names, not the pixel count.
+		h = SGB_GB_SCREEN_H;
+		w = (GUI.AspectWidth == SNES_WIDTH)
+		  ? SGB_GB_SCREEN_W
+		  : (unsigned int)((double)h * GUI.AspectWidth / SNES_HEIGHT + 0.5);
+	}
+
+	if (width)  *width  = w;
+	if (height) *height = h;
+}
+
 RECT CalculateDisplayRect(unsigned int sourceWidth,unsigned int sourceHeight,
 						  unsigned int displayWidth,unsigned int displayHeight)
 {
@@ -266,8 +294,11 @@ RECT CalculateDisplayRect(unsigned int sourceWidth,unsigned int sourceHeight,
 	double yFactor;
 	double minFactor;
 	double renderWidthCalc,renderHeightCalc;
-	int hExtend = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
-	double snesAspect = (double)GUI.AspectWidth/hExtend;
+	unsigned int contentWidth, contentHeight;
+	WinGetContentSize(&contentWidth, &contentHeight);
+	// The shape the picture is held to. Game Boy content keeps its own, so a
+	// window sized from Video -> Window Size has no bars.
+	double snesAspect = (double)contentWidth/contentHeight;
 	RECT drawRect;
 
 	if(GUI.Stretch) {

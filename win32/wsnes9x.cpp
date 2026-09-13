@@ -2767,8 +2767,11 @@ LRESULT CALLBACK WinProc(
 			UINT factor, newWidth, newHeight;
 			RECT margins;
 			factor = (wParam & 0xffff) - ID_WINDOW_SIZE_1X + 1;
-			newWidth = GUI.AspectWidth * factor;
-			newHeight = (Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT) * factor;
+			// Multiples of the loaded content's own picture, so a Game Boy
+			// cart gets 160x144 steps rather than the SNES's.
+			WinGetContentSize(&newWidth, &newHeight);
+			newWidth *= factor;
+			newHeight *= factor;
 
 			margins = GetWindowMargins(GUI.hWnd,newWidth);
 			newHeight += margins.top + margins.bottom;
@@ -5517,6 +5520,31 @@ static void CheckMenuStates ()
 	if(!GUI.Stretch)
 		mii.fState |= MFS_DISABLED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_BILINEAR, FALSE, &mii);
+
+	{
+		// Tick the Window Size the window currently has. Measured off the
+		// client area rather than remembered, so dragging the frame to any
+		// other size, or loading content whose picture is a different size,
+		// simply leaves none ticked.
+		unsigned int baseWidth, baseHeight;
+		WinGetContentSize(&baseWidth, &baseHeight);
+		RECT client;
+		UINT current = 0;   // 0 = none of them
+		if (!GUI.FullScreen && !GUI.EmulatedFullscreen &&
+		    GetClientRect(GUI.hWnd, &client) && baseWidth && baseHeight)
+		{
+			const UINT w = client.right - client.left;
+			const UINT h = client.bottom - client.top;
+			if (w % baseWidth == 0 && h % baseHeight == 0 &&
+			    w / baseWidth == h / baseHeight)
+				current = w / baseWidth;
+		}
+		for (UINT f = 1; f <= WINDOW_SIZE_FACTORS; f++)
+		{
+			mii.fState = (f == current) ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo(GUI.hMenu, ID_WINDOW_SIZE_1X + f - 1, FALSE, &mii);
+		}
+	}
 
 	mii.fState = Settings.DisplayFrameRate ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_VIDEO_SHOWFRAMERATE, FALSE, &mii);

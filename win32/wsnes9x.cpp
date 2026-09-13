@@ -2955,7 +2955,7 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_PAUSEWHENINACTIVE:
 			GUI.InactivePause = !GUI.InactivePause;
 			break;
-		case ID_EMULATION_ALWAYSONTOP:
+		case ID_VIDEO_ALWAYSONTOP:
 			GUI.AlwaysOnTop = !GUI.AlwaysOnTop;
 			WinApplyAlwaysOnTop();
 			break;
@@ -5567,7 +5567,7 @@ static void CheckMenuStates ()
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
 
 	mii.fState = (GUI.AlwaysOnTop) ? MFS_CHECKED : MFS_UNCHECKED;
-    SetMenuItemInfo (GUI.hMenu, ID_EMULATION_ALWAYSONTOP, FALSE, &mii);
+    SetMenuItemInfo (GUI.hMenu, ID_VIDEO_ALWAYSONTOP, FALSE, &mii);
 
 	{
 		int runAheadIds[5] = {

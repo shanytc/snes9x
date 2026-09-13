@@ -953,6 +953,7 @@ void WinRegisterConfigItems()
 	AddBoolC("AssociateUseExeIcon", GUI.AssocUseExeIcon, false, "when AddToRegistry is set, use the File > Choose Icon selection for every registered type instead of the per-type icons");
 	AddBoolC("AVIHiRes", GUI.AVIHiRes, false, "true to record AVI in Hi-Res scale");
 	AddBoolC("ConfirmSaveLoad", GUI.ConfirmSaveLoad, false, "true to ask for confirmation when saving/loading");
+	AddBoolC("DisableResize", GUI.DisableResize, false, "true to lock the window size, so the frame cannot be dragged with the mouse (avoids accidental resizes in Super Scope games)");
 	AddStringC("Language", GUI.UILanguage, 64, "", "UI language: code matching a file in i18n\\<code>.po (e.g. ja, de, pt_BR); empty = English");
 	AddBoolC("FrameAdvanceSkipsNonInput", GUI.FASkipsNonInput, false, "causes frame advance to fast-forward past frames where the game is definitely not checking input, such as during lag or loading time. EXPERIMENTAL");
 	AddBool("MovieDefaultClearSRAM", GUI.MovieClearSRAM, false);

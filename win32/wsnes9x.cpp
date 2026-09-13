@@ -4224,6 +4224,8 @@ BOOL WinInit( HINSTANCE hInstance)
     rect.bottom = MAX_SNES_HEIGHT;
     dwExStyle = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
     dwStyle = WS_OVERLAPPEDWINDOW;
+    if (GUI.DisableResize)
+        dwStyle &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
 
     AdjustWindowRectEx (&rect, dwStyle, FALSE, dwExStyle);
     if ((GUI.hWnd = CreateWindowEx (
@@ -6684,6 +6686,33 @@ RECT GetWindowMargins(HWND hwnd, UINT width)
 	return rcMargins;
 }
 
+// Only the drag border and the maximize box go away -- programmatic resizes
+// (the Window size menu, fullscreen) still work.
+void WinApplyResizeLock()
+{
+	if (!GUI.hWnd || GUI.FullScreen || GUI.EmulatedFullscreen)
+		return;
+
+	const DWORD style = (DWORD)GetWindowLongPtr(GUI.hWnd, GWL_STYLE);
+	const DWORD wanted = GUI.DisableResize
+		? (style & ~(WS_THICKFRAME | WS_MAXIMIZEBOX))
+		: (style | WS_THICKFRAME | WS_MAXIMIZEBOX);
+	if (wanted == style)
+		return;
+
+	RECT client;
+	GetClientRect(GUI.hWnd, &client);
+	SetWindowLongPtr(GUI.hWnd, GWL_STYLE, (LONG_PTR)wanted);
+
+	// the frame thickness changes with the style, so keep the picture the
+	// same size rather than the window
+	RECT margins = GetWindowMargins(GUI.hWnd, client.right);
+	SetWindowPos(GUI.hWnd, NULL, 0, 0,
+		client.right + margins.left + margins.right,
+		client.bottom + margins.top + margins.bottom,
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
 void WinDeleteRecentGamesList ()
 {
 	for(int i=0;i<MAX_RECENT_GAMES_LIST_SIZE;i++)
@@ -8418,6 +8447,7 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			LayoutAssocChecks(hDlg, GUI.AddToRegistry);
 			CheckDlgButton(hDlg,IDC_HIRESAVI,GUI.AVIHiRes ? BST_CHECKED : BST_UNCHECKED);
 			CheckDlgButton(hDlg, IDC_CONFIRMSAVELOAD, GUI.ConfirmSaveLoad ? BST_CHECKED : BST_UNCHECKED);
+			CheckDlgButton(hDlg, IDC_DISABLE_RESIZE, GUI.DisableResize ? BST_CHECKED : BST_UNCHECKED);
 
 			int inum = 0;
 			lstrcpy(paths[inum++],GUI.RomDir);
@@ -8513,6 +8543,8 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 					GUI.CustomRomOpen = (BST_CHECKED==IsDlgButtonChecked(hDlg, IDC_CUSTOMROMOPEN));
 					GUI.AVIHiRes = (BST_CHECKED==IsDlgButtonChecked(hDlg, IDC_HIRESAVI));
 					GUI.ConfirmSaveLoad = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_CONFIRMSAVELOAD));
+					GUI.DisableResize = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_DISABLE_RESIZE));
+					WinApplyResizeLock();
 					bool AddRegistryChecked = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_ADD_REGISTRY));
 					// store first: RegisterExt consults these to decide per type
 					GUI.AssocSfc = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_ASSOC_SFC));

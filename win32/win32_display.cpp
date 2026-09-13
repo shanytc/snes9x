@@ -660,8 +660,9 @@ void ToggleFullScreen ()
 			GetMonitorInfo(hm,&mi);
 			SetWindowPos (GUI.hWnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_DRAWFRAME|SWP_FRAMECHANGED);
 		} else {
-			SetWindowLongPtr( GUI.hWnd, GWL_STYLE, WS_POPUPWINDOW|WS_CAPTION|
-                   WS_THICKFRAME|WS_VISIBLE|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_CLIPCHILDREN|WS_CLIPSIBLINGS);
+			SetWindowLongPtr( GUI.hWnd, GWL_STYLE, GUI.DisableResize
+                   ? (WS_POPUPWINDOW|WS_CAPTION|WS_VISIBLE|WS_MINIMIZEBOX|WS_CLIPCHILDREN|WS_CLIPSIBLINGS)
+                   : (WS_POPUPWINDOW|WS_CAPTION|WS_THICKFRAME|WS_VISIBLE|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_CLIPCHILDREN|WS_CLIPSIBLINGS));
 			SetMenu(GUI.hWnd,GUI.hMenu);
 			SetWindowPos (GUI.hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_DRAWFRAME|SWP_FRAMECHANGED);
 			RestoreMainWinPos();
@@ -679,8 +680,9 @@ void ToggleFullScreen ()
                 SetWindowPos(GUI.hWnd, HWND_TOPMOST, 0, 0, GUI.FullscreenMode.width, GUI.FullscreenMode.height, SWP_DRAWFRAME | SWP_FRAMECHANGED);
 		}
 		if(!GUI.FullScreen) {
-			SetWindowLongPtr(GUI.hWnd, GWL_STYLE, WS_POPUPWINDOW|WS_CAPTION|
-                   WS_THICKFRAME|WS_VISIBLE|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_CLIPCHILDREN|WS_CLIPSIBLINGS);
+			SetWindowLongPtr(GUI.hWnd, GWL_STYLE, GUI.DisableResize
+                   ? (WS_POPUPWINDOW|WS_CAPTION|WS_VISIBLE|WS_MINIMIZEBOX|WS_CLIPCHILDREN|WS_CLIPSIBLINGS)
+                   : (WS_POPUPWINDOW|WS_CAPTION|WS_THICKFRAME|WS_VISIBLE|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_CLIPCHILDREN|WS_CLIPSIBLINGS));
             SetWindowLongPtr(GUI.hWnd, GWL_EXSTYLE, WS_EX_ACCEPTFILES | WS_EX_APPWINDOW);
 			SetMenu(GUI.hWnd,GUI.hMenu);
 			S9xDisplayOutput->SetFullscreen(false);

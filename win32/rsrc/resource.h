@@ -63,6 +63,7 @@
 #define IDC_ASSOC_LABEL_SNES            3360
 #define IDC_ASSOC_LABEL_GB              3361
 #define IDC_ASSOC_EXEICON               3367
+#define IDC_DISABLE_RESIZE              3475
 #define IDD_DIALOG_HACKS                164
 #define IDD_DIALOG_LOAD_PREVIEW         167
 #define IDD_CHEAT_GROUP                 169
@@ -930,7 +931,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
 #define _APS_NEXT_COMMAND_VALUE         40216
-#define _APS_NEXT_CONTROL_VALUE         3475
+#define _APS_NEXT_CONTROL_VALUE         3476
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

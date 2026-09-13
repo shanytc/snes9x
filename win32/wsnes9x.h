@@ -350,6 +350,9 @@ struct sGUI {
 
 	// all registered types use the File > Choose Icon selection as their shell icon
 	bool AssocUseExeIcon;
+
+	// drop the sizing border so the frame cannot be dragged (Super Scope aiming)
+	bool DisableResize;
 };
 
 //TURBO masks
@@ -647,6 +650,7 @@ int GetFilterScale(RenderFilter filterID);
 bool GetFilterHiResSupport(RenderFilter filterID);
 const TCHAR * S9xGetDirectoryT (enum s9x_getdirtype);
 RECT GetWindowMargins(HWND hwnd, UINT width);
+void WinApplyResizeLock();
 void GetSlotFilename(int slot, char filename[_MAX_PATH + 1]);
 void FreezeUnfreezeSlot(int slot, bool8 freeze);
 void FreezeUnfreezeDialog(bool8 freeze);

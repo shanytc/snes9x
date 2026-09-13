@@ -2955,6 +2955,10 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_PAUSEWHENINACTIVE:
 			GUI.InactivePause = !GUI.InactivePause;
 			break;
+		case ID_EMULATION_ALWAYSONTOP:
+			GUI.AlwaysOnTop = !GUI.AlwaysOnTop;
+			WinApplyAlwaysOnTop();
+			break;
 		case ID_EMULATION_RUNAHEAD_OFF:
 			Settings.RunAhead = 0;
 			break;
@@ -4223,6 +4227,8 @@ BOOL WinInit( HINSTANCE hInstance)
     rect.right = MAX_SNES_WIDTH;
     rect.bottom = MAX_SNES_HEIGHT;
     dwExStyle = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
+    if (GUI.AlwaysOnTop)
+        dwExStyle |= WS_EX_TOPMOST;
     dwStyle = WS_OVERLAPPEDWINDOW;
     if (GUI.DisableResize)
         dwStyle &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
@@ -5560,6 +5566,9 @@ static void CheckMenuStates ()
 	mii.fState = (GUI.InactivePause) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_EMULATION_PAUSEWHENINACTIVE, FALSE, &mii);
 
+	mii.fState = (GUI.AlwaysOnTop) ? MFS_CHECKED : MFS_UNCHECKED;
+    SetMenuItemInfo (GUI.hMenu, ID_EMULATION_ALWAYSONTOP, FALSE, &mii);
+
 	{
 		int runAheadIds[5] = {
 			ID_EMULATION_RUNAHEAD_OFF,
@@ -6711,6 +6720,16 @@ void WinApplyResizeLock()
 		client.right + margins.left + margins.right,
 		client.bottom + margins.top + margins.bottom,
 		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+// Fullscreen owns the z-order while it lasts, so leaving it re-applies this.
+void WinApplyAlwaysOnTop()
+{
+	if (!GUI.hWnd || GUI.FullScreen)
+		return;
+
+	SetWindowPos(GUI.hWnd, GUI.AlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+		0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void WinDeleteRecentGamesList ()

@@ -353,6 +353,9 @@ struct sGUI {
 
 	// drop the sizing border so the frame cannot be dragged (Super Scope aiming)
 	bool DisableResize;
+
+	// keep the window above every other one (reading a FAQ or map while playing)
+	bool AlwaysOnTop;
 };
 
 //TURBO masks
@@ -651,6 +654,7 @@ bool GetFilterHiResSupport(RenderFilter filterID);
 const TCHAR * S9xGetDirectoryT (enum s9x_getdirtype);
 RECT GetWindowMargins(HWND hwnd, UINT width);
 void WinApplyResizeLock();
+void WinApplyAlwaysOnTop();
 void GetSlotFilename(int slot, char filename[_MAX_PATH + 1]);
 void FreezeUnfreezeSlot(int slot, bool8 freeze);
 void FreezeUnfreezeDialog(bool8 freeze);

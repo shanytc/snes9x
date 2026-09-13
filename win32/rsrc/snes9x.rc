@@ -1486,6 +1486,8 @@ BEGIN
     END
     POPUP "&Emulation",                     0,MFT_STRING,MFS_ENABLED
     BEGIN
+        MENUITEM "Always on &Top",              ID_EMULATION_ALWAYSONTOP,MFT_STRING,MFS_ENABLED
+        MENUITEM MFT_SEPARATOR
         MENUITEM "&Pause",                      ID_FILE_PAUSE,MFT_STRING,MFS_ENABLED
         MENUITEM "Pause &When Inactive",        ID_EMULATION_PAUSEWHENINACTIVE,MFT_STRING,MFS_ENABLED
         MENUITEM "&Frame Advance",              ID_FRAME_ADVANCE,MFT_STRING,MFS_ENABLED

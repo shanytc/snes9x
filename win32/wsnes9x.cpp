@@ -2959,6 +2959,10 @@ LRESULT CALLBACK WinProc(
 			GUI.AlwaysOnTop = !GUI.AlwaysOnTop;
 			WinApplyAlwaysOnTop();
 			break;
+		case ID_VIDEO_LOCKRESIZE:
+			GUI.DisableResize = !GUI.DisableResize;
+			WinApplyResizeLock();
+			break;
 		case ID_EMULATION_RUNAHEAD_OFF:
 			Settings.RunAhead = 0;
 			break;
@@ -5568,6 +5572,9 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.AlwaysOnTop) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_VIDEO_ALWAYSONTOP, FALSE, &mii);
+
+	mii.fState = (GUI.DisableResize) ? MFS_CHECKED : MFS_UNCHECKED;
+    SetMenuItemInfo (GUI.hMenu, ID_VIDEO_LOCKRESIZE, FALSE, &mii);
 
 	{
 		int runAheadIds[5] = {
@@ -8465,7 +8472,6 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			LayoutAssocChecks(hDlg, GUI.AddToRegistry);
 			CheckDlgButton(hDlg,IDC_HIRESAVI,GUI.AVIHiRes ? BST_CHECKED : BST_UNCHECKED);
 			CheckDlgButton(hDlg, IDC_CONFIRMSAVELOAD, GUI.ConfirmSaveLoad ? BST_CHECKED : BST_UNCHECKED);
-			CheckDlgButton(hDlg, IDC_DISABLE_RESIZE, GUI.DisableResize ? BST_CHECKED : BST_UNCHECKED);
 
 			int inum = 0;
 			lstrcpy(paths[inum++],GUI.RomDir);
@@ -8560,8 +8566,6 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 					GUI.CustomRomOpen = (BST_CHECKED==IsDlgButtonChecked(hDlg, IDC_CUSTOMROMOPEN));
 					GUI.AVIHiRes = (BST_CHECKED==IsDlgButtonChecked(hDlg, IDC_HIRESAVI));
 					GUI.ConfirmSaveLoad = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_CONFIRMSAVELOAD));
-					GUI.DisableResize = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_DISABLE_RESIZE));
-					WinApplyResizeLock();
 					bool AddRegistryChecked = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_ADD_REGISTRY));
 					// store first: RegisterExt consults these to decide per type
 					GUI.AssocSfc = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_ASSOC_SFC));

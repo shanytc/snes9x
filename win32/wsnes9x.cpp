@@ -6194,7 +6194,7 @@ static bool PromptRenameMSU1Pack (const TCHAR *filename, TCHAR *renamed)
 		return false;
 	}
 
-	_stprintf (message, TEXT("\"%s\" holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to \"%s\" and load it?"), filename, renamed);
+	_stprintf (message, TEXT("\"%s\" holds MSU-1 audio data. SuperSnes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to \"%s\" and load it?"), filename, renamed);
 
 	if (MessageBox (GUI.hWnd, message, TEXT("MSU-1 Pack Detected"), MB_YESNO | MB_ICONQUESTION) != IDYES)
 		return false;

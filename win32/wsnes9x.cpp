@@ -2906,6 +2906,26 @@ LRESULT CALLBACK WinProc(
 		case ID_DEBUG_GB_SPRITE_VIEWER:
             WinShowGBSpriteViewerDialog();
 			break;
+		// The 1-5 hotkeys drive the same mask, and the checkmarks are derived
+		// in CheckMenuStates, so the two stay in step either way round.
+		case ID_DEBUG_SHOW_BG1:
+		case ID_DEBUG_SHOW_BG2:
+		case ID_DEBUG_SHOW_BG3:
+		case ID_DEBUG_SHOW_BG4:
+		case ID_DEBUG_SHOW_SPRITES: {
+			int layer = LOWORD(wParam) - ID_DEBUG_SHOW_BG1;
+			uint8 bit = (uint8)(1 << layer);
+			Settings.BG_Forced ^= bit;
+			static const char *layerNames[] = {
+				WINPROC_BG1, WINPROC_BG2, WINPROC_BG3, WINPROC_BG4, WINPROC_SPRITES
+			};
+			S9xDisplayStateChange(layerNames[layer], !(Settings.BG_Forced & bit));
+			break;
+		}
+		case ID_DEBUG_CLIPWINDOWS:
+			Settings.DisableGraphicWindows = !Settings.DisableGraphicWindows;
+			S9xDisplayStateChange(WINPROC_CLIPWIN, !Settings.DisableGraphicWindows);
+			break;
 		case ID_DEBUG_GB_SHOW_BG:
 		case ID_DEBUG_GB_SHOW_WIN:
 		case ID_DEBUG_GB_SHOW_OBJ: {
@@ -5572,6 +5592,23 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.AlwaysOnTop) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_VIDEO_ALWAYSONTOP, FALSE, &mii);
+
+	{
+		// BG1-4 and sprites are bits 1..16 of the forced-off mask, which the
+		// core clears on every ROM load -- so read it rather than remember it.
+		static const int layerIds[5] = {
+			ID_DEBUG_SHOW_BG1, ID_DEBUG_SHOW_BG2, ID_DEBUG_SHOW_BG3,
+			ID_DEBUG_SHOW_BG4, ID_DEBUG_SHOW_SPRITES
+		};
+		for (int layer = 0; layer < 5; layer++)
+		{
+			mii.fState = (Settings.BG_Forced & (1 << layer)) ? MFS_UNCHECKED : MFS_CHECKED;
+			SetMenuItemInfo(GUI.hMenu, layerIds[layer], FALSE, &mii);
+		}
+	}
+
+	mii.fState = (Settings.DisableGraphicWindows) ? MFS_UNCHECKED : MFS_CHECKED;
+    SetMenuItemInfo (GUI.hMenu, ID_DEBUG_CLIPWINDOWS, FALSE, &mii);
 
 	mii.fState = (GUI.DisableResize) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_VIDEO_LOCKRESIZE, FALSE, &mii);

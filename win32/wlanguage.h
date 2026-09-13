@@ -274,11 +274,11 @@ Nintendo is a trademark.")
 #define WINPROC_TURBOMODE_ON "Fast-Forward Activated"
 #define WINPROC_TURBOMODE_OFF "Fast-Forward Deactivated"
 #define WINPROC_TURBOMODE_TEXT "Fast-Forward"
-#define WINPROC_BG1 "BG#1" //Background Layers
-#define WINPROC_BG2 "BG#2"
-#define WINPROC_BG3 "BG#3"
-#define WINPROC_BG4 "BG#4"
-#define WINPROC_SPRITES "Sprites"
+#define WINPROC_BG1 "Graphics Layer #1" //Background Layers
+#define WINPROC_BG2 "Graphics Layer #2"
+#define WINPROC_BG3 "Graphics Layer #3"
+#define WINPROC_BG4 "Graphics Layer #4"
+#define WINPROC_SPRITES "Sprites Layer"
 #define WINPROC_GB_BG "GB Background"
 #define WINPROC_GB_WINDOW "GB Window"
 #define WINPROC_GB_SPRITES "GB Sprites"

@@ -1516,6 +1516,13 @@ BEGIN
             MENUITEM "&Tile Viewer...",             ID_DEBUG_VRAM_VIEWER,MFT_STRING,MFS_ENABLED
             MENUITEM "&Tilemap Viewer...",          ID_DEBUG_TILEMAP_VIEWER,MFT_STRING,MFS_ENABLED
             MENUITEM "&Sprite Viewer...",           ID_DEBUG_SPRITE_VIEWER,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "Graphics Layer &1",           ID_DEBUG_SHOW_BG1,MFT_STRING,MFS_ENABLED | MFS_CHECKED
+            MENUITEM "Graphics Layer &2",           ID_DEBUG_SHOW_BG2,MFT_STRING,MFS_ENABLED | MFS_CHECKED
+            MENUITEM "Graphics Layer &3",           ID_DEBUG_SHOW_BG3,MFT_STRING,MFS_ENABLED | MFS_CHECKED
+            MENUITEM "Graphics Layer &4",           ID_DEBUG_SHOW_BG4,MFT_STRING,MFS_ENABLED | MFS_CHECKED
+            MENUITEM "S&prites Layer",              ID_DEBUG_SHOW_SPRITES,MFT_STRING,MFS_ENABLED | MFS_CHECKED
+            MENUITEM "Clipping &Windows",           ID_DEBUG_CLIPWINDOWS,MFT_STRING,MFS_ENABLED | MFS_CHECKED
         END
         POPUP "&GB-PPU",                        0,MFT_STRING,MFS_ENABLED
         BEGIN

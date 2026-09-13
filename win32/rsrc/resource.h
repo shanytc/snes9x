@@ -765,6 +765,12 @@
 #define ID_DEBUG_GB_SHOW_BG             40206
 #define ID_DEBUG_GB_SHOW_WIN            40207
 #define ID_DEBUG_GB_SHOW_OBJ            40208
+#define ID_DEBUG_SHOW_BG1               40218
+#define ID_DEBUG_SHOW_BG2               40219
+#define ID_DEBUG_SHOW_BG3               40220
+#define ID_DEBUG_SHOW_BG4               40221
+#define ID_DEBUG_SHOW_SPRITES           40222
+#define ID_DEBUG_CLIPWINDOWS            40223
 
 #define IDC_VRAMV_CANVAS                3120
 #define IDC_VRAMV_PALETTE               3121
@@ -930,7 +936,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
-#define _APS_NEXT_COMMAND_VALUE         40218
+#define _APS_NEXT_COMMAND_VALUE         40224
 #define _APS_NEXT_CONTROL_VALUE         3475
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

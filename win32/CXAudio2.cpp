@@ -544,6 +544,71 @@ bool CXAudio2::SetupSound()
     return true;
 }
 
+/*  CXAudio2::FlushSoundOutput
+drops everything queued and re-primes the voice with silence, without tearing
+the voices down. Used in place of a DeInitVoices/InitVoices pair when the output
+format is unchanged (a ROM load): CreateMasteringVoice has to reacquire the
+endpoint, and the audio engine then restarts the stream.
+*/
+bool CXAudio2::FlushSoundOutput()
+{
+	if (!initDone || !pSourceVoice || !soundBuffer)
+		return false;
+	// The drain thread owns soundBuffer while it runs; don't race it.
+	if (drainThread)
+		return false;
+
+	// Drop the previous game's audio.
+	pSourceVoice->Stop(0);
+	pSourceVoice->FlushSourceBuffers();
+
+	// The flushed buffers are reported through OnBufferEnd on XAudio2's own
+	// thread, and each of those decrements bufferCount. Let the queue drain
+	// before resetting the accounting: a callback landing afterwards would
+	// leave the count too low, and ProcessSound would then overwrite a buffer
+	// the voice is still reading. If it won't drain, say we can't be reused
+	// and let the caller do the full reopen.
+	for (int spin = 0; spin < 100; spin++)
+	{
+		XAUDIO2_VOICE_STATE state;
+		pSourceVoice->GetState(&state);
+		if (state.BuffersQueued == 0)
+			break;
+		Sleep(1);
+	}
+	XAUDIO2_VOICE_STATE state;
+	pSourceVoice->GetState(&state);
+	if (state.BuffersQueued != 0)
+		return false;
+
+	InterlockedExchange(&bufferCount, 0);
+	writeOffset = 0;
+	partialOffset = 0;
+	last_sample_l = 0;
+	last_sample_r = 0;
+	InterlockedExchange(&fadeout_in_flight, 0);
+	fade_in_pos = kFadeFrames;
+	// The next real block starts from silence again.
+	InterlockedExchange(&fade_in_pending, 1);
+
+	// Keep the voice fed while the caller finishes loading. PushBuffer leaves
+	// fade_in_pending armed for silent buffers, so the first real block still
+	// gets its head ramp.
+	// writeOffset is a byte offset into soundBuffer, not a block index.
+	for (UINT32 i = 0; i < blockCount - 1; i++)
+	{
+		uint8 *curBuffer = soundBuffer + writeOffset;
+		memset(curBuffer, 0, singleBufferBytes);
+		PushBuffer(singleBufferBytes, curBuffer, NULL);
+		writeOffset += singleBufferBytes;
+		writeOffset %= sum_bufferSize;
+	}
+
+	BeginPlayback();
+
+	return true;
+}
+
 void CXAudio2::SetVolume(double volume)
 {
 	pSourceVoice->SetVolume(volume);

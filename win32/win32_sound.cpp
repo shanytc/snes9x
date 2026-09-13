@@ -25,6 +25,47 @@ IS9xSoundOutput *S9xSoundOutput = &S9xXAudio2;
 
 static double last_volume = 1.0;
 
+/*  The format of the output device is fixed when it is opened, and opening it
+    is expensive in a way that is not obvious: the audio engine starts a stream
+    for it, and the first write afterwards blocks for about a third of a second.
+    A ROM load calls ReInitSound and changes none of the format, so remember
+    what the open device was set up with and flush it instead of reopening.
+*/
+static struct
+{
+    bool         open;
+    int          driver;
+    unsigned int rate;
+    int          buffer_ms;
+    TCHAR        device[MAX_AUDIO_NAME_LENGTH];
+} s_open_device = { false, -1, 0, 0, { 0 } };
+
+static bool OpenDeviceMatchesSettings()
+{
+    return s_open_device.open && S9xSoundOutput &&
+           s_open_device.driver    == GUI.SoundDriver &&
+           s_open_device.rate      == (unsigned int)Settings.SoundPlaybackRate &&
+           s_open_device.buffer_ms == GUI.SoundBufferSize &&
+           lstrcmp(s_open_device.device, GUI.AudioDevice) == 0;
+}
+
+// Record what the device ended up with, not what was asked for: a backend may
+// snap the rate (XAudio2 rejects rates that aren't a whole number of samples
+// per its 10ms quantum).
+static void RememberOpenDevice()
+{
+    s_open_device.driver    = GUI.SoundDriver;
+    s_open_device.rate      = (unsigned int)Settings.SoundPlaybackRate;
+    s_open_device.buffer_ms = GUI.SoundBufferSize;
+    lstrcpyn(s_open_device.device, GUI.AudioDevice, MAX_AUDIO_NAME_LENGTH);
+    s_open_device.open      = true;
+}
+
+void S9xForgetOpenSoundDevice()
+{
+    s_open_device.open = false;
+}
+
 /*  ReInitSound
 reinitializes the sound core with current settings
 IN:
@@ -67,8 +108,14 @@ bool ReInitSound()
 
 	ApplyLiveSoundSettings();
 	Settings.SoundPlaybackRate = CLAMP(Settings.SoundPlaybackRate,8000, 48000);
-	if(S9xSoundOutput)
+
+	// Only close the device when the format it was opened with is changing.
+	// S9xOpenSoundDevice below reuses it otherwise.
+	if(S9xSoundOutput && !OpenDeviceMatchesSettings())
+	{
 		S9xSoundOutput->DeInitSoundOutput();
+		S9xForgetOpenSoundDevice();
+	}
 
     last_volume = 1.0;
     return S9xInitSound(25);
@@ -76,6 +123,7 @@ bool ReInitSound()
 
 void CloseSoundDevice() {
 	S9xSoundOutput->DeInitSoundOutput();
+	S9xForgetOpenSoundDevice();
 	S9xSetSamplesAvailableCallback(NULL,NULL);
 }
 
@@ -88,6 +136,20 @@ returns true if successful, false otherwise
 bool8 S9xOpenSoundDevice ()
 {
 	S9xSetSamplesAvailableCallback (NULL, NULL);
+
+	// Driver, device, rate and buffer size all unchanged: the device that is
+	// already open can serve, so flush it rather than closing and reopening.
+	// Reopening restarts the audio engine's stream and the first write after
+	// that blocks for ~1/3 s, which on a ROM load is a third of a second of
+	// the new game not appearing. A backend that can't be reused says so and
+	// we fall through to the full open (SetupSound tears down first).
+	if (OpenDeviceMatchesSettings() && S9xSoundOutput->FlushSoundOutput())
+	{
+		S9xSetSamplesAvailableCallback (S9xSoundCallback, NULL);
+		return TRUE;
+	}
+	S9xForgetOpenSoundDevice();
+
 	// point the interface to the correct output object
 	switch(GUI.SoundDriver) {
 		case WIN_WAVEOUT_DRIVER:
@@ -105,7 +167,8 @@ bool8 S9xOpenSoundDevice ()
 	
 	if(!S9xSoundOutput->SetupSound())
 		return false;
-	
+
+	RememberOpenDevice();
 	S9xSetSamplesAvailableCallback (S9xSoundCallback, NULL);
 	return true;
 }

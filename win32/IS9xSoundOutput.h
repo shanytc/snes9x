@@ -26,6 +26,17 @@ public:
 	// (re)start playback
 	virtual bool SetupSound()=0;
 
+	// FlushSoundOutput should drop everything queued and leave the output ready
+	// to take new samples, WITHOUT closing the device. Callers use it in place
+	// of a close/open pair when the output format has not changed: an output
+	// that is closed and reopened, or simply left with an empty queue for more
+	// than ~125ms, has its stream restarted by the audio engine, and the next
+	// write then blocks for about a third of a second. Backends should re-prime
+	// the queue with silence so the stream stays alive across the caller's work.
+	// Returning false means "I can't be reused" (device lost, never opened) and
+	// the caller must fall back to a full open.
+	virtual bool FlushSoundOutput() { return false; }
+
 	// SetVolume should set a new volume level (between 0.0 and 1.0)
 	virtual void SetVolume(double volume) = 0;
 

@@ -6390,6 +6390,11 @@ void S9xAddToRecentGames (const TCHAR *filename)
 	const bool underMax = (i < MAX_RECENT_GAMES_LIST_SIZE);
 	if(underMax && *GUI.RecentGames[i])
 	{
+		// Already the most recent one: the list, the menu and the jump list
+		// all say so already, so there is nothing to rebuild.
+		if (i == 0)
+			return;
+
 		// It is in the list, move it to the head of the list.
 		TCHAR temp [MAX_PATH];
 		lstrcpy(temp, GUI.RecentGames[i]);
@@ -6436,6 +6441,20 @@ void S9xRemoveFromRecentGames (int i)
 */
 typedef HRESULT (STDAPICALLTYPE *SHCIFPN) (__in PCWSTR pszPath, __in_opt IBindCtx *pbc, __in REFIID riid, __deref_out void **ppv);
 
+/* The shell's jump-list rebuild costs about a third of a second of COM work,
+   and it used to run on the GUI thread inside every ROM load, where the user
+   sees it as the new game taking that long to appear. It runs on this worker
+   instead, over a snapshot of the list; requests coalesce, so a burst of loads
+   rebuilds once.
+*/
+static HANDLE           s_jumplist_thread = NULL;
+static HANDLE           s_jumplist_wake   = NULL;   // auto-reset: coalesces
+static HANDLE           s_jumplist_quit   = NULL;
+static CRITICAL_SECTION s_jumplist_lock;
+static bool             s_jumplist_ready  = false;
+static TCHAR            s_jumplist_games[MAX_RECENT_GAMES_LIST_SIZE][MAX_PATH];
+static UINT             s_jumplist_max    = 0;
+
 HRESULT Win7_JLSetRecentGames(ICustomDestinationList *pcdl, IObjectArray *poaRemoved, UINT maxSlots)
 {
     IObjectCollection *poc;
@@ -6451,10 +6470,18 @@ HRESULT Win7_JLSetRecentGames(ICustomDestinationList *pcdl, IObjectArray *poaRem
                     CLSCTX_INPROC_SERVER,
                     IID_PPV_ARGS(&poc));
     if (SUCCEEDED(hr)) {
-		UINT max_list = MIN(maxSlots,GUI.MaxRecentGames);
-		for (UINT i = 0; i < max_list && *GUI.RecentGames[i]; i++) {
+		// Read the snapshot the GUI thread left, never GUI.RecentGames: this
+		// runs on the jump-list worker.
+		TCHAR games[MAX_RECENT_GAMES_LIST_SIZE][MAX_PATH];
+		UINT  max_list;
+		EnterCriticalSection(&s_jumplist_lock);
+		memcpy(games, s_jumplist_games, sizeof(games));
+		max_list = MIN(maxSlots, s_jumplist_max);
+		LeaveCriticalSection(&s_jumplist_lock);
+
+		for (UINT i = 0; i < max_list && *games[i]; i++) {
             IShellItem *psi;
-			if(SUCCEEDED(SHCreateIFPN(GUI.RecentGames[i],NULL,IID_PPV_ARGS(&psi)))) {
+			if(SUCCEEDED(SHCreateIFPN(games[i],NULL,IID_PPV_ARGS(&psi)))) {
                 hr = poc->AddObject(psi);
                 psi->Release();
             }
@@ -6492,6 +6519,74 @@ void Win7_CreateJumpList()
         }
 		pcdl->Release();
     }
+}
+
+static DWORD WINAPI Win7_JumpListThread (LPVOID)
+{
+	HANDLE waits[2] = { s_jumplist_quit, s_jumplist_wake };
+
+	// The shell objects are used entirely within this thread, so it gets its
+	// own apartment.
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	while (WaitForMultipleObjects(2, waits, FALSE, INFINITE) == WAIT_OBJECT_0 + 1)
+		Win7_CreateJumpList();
+	CoUninitialize();
+	return 0;
+}
+
+// Publish the current recent list to the worker. GUI thread only.
+void Win7_QueueJumpListUpdate ()
+{
+	if (!s_jumplist_ready)
+	{
+		InitializeCriticalSection(&s_jumplist_lock);
+		s_jumplist_ready = true;
+	}
+
+	EnterCriticalSection(&s_jumplist_lock);
+	for (int i = 0; i < MAX_RECENT_GAMES_LIST_SIZE; i++)
+		lstrcpyn(s_jumplist_games[i], GUI.RecentGames[i], MAX_PATH);
+	s_jumplist_max = (UINT)GUI.MaxRecentGames;
+	LeaveCriticalSection(&s_jumplist_lock);
+
+	static bool worker_failed = false;
+	if (!s_jumplist_thread && !worker_failed)
+	{
+		s_jumplist_wake = CreateEvent(NULL, FALSE, FALSE, NULL);
+		s_jumplist_quit = CreateEvent(NULL, TRUE,  FALSE, NULL);
+		if (s_jumplist_wake && s_jumplist_quit)
+			s_jumplist_thread = CreateThread(NULL, 0, Win7_JumpListThread, NULL, 0, NULL);
+		if (!s_jumplist_thread)
+		{
+			if (s_jumplist_wake) { CloseHandle(s_jumplist_wake); s_jumplist_wake = NULL; }
+			if (s_jumplist_quit) { CloseHandle(s_jumplist_quit); s_jumplist_quit = NULL; }
+			worker_failed = true;   // don't retry on every load
+		}
+	}
+
+	if (!s_jumplist_thread)
+	{
+		// No worker: better a slow jump list than none.
+		Win7_CreateJumpList();
+		return;
+	}
+
+	SetEvent(s_jumplist_wake);
+}
+
+// Let an in-flight rebuild finish rather than having the shell see a half
+// written list, then drop the worker.
+void Win7_ShutdownJumpList ()
+{
+	if (!s_jumplist_thread)
+		return;
+
+	SetEvent(s_jumplist_quit);
+	WaitForSingleObject(s_jumplist_thread, 3000);
+	CloseHandle(s_jumplist_thread);
+	s_jumplist_thread = NULL;
+	CloseHandle(s_jumplist_wake); s_jumplist_wake = NULL;
+	CloseHandle(s_jumplist_quit); s_jumplist_quit = NULL;
 }
 #endif
 
@@ -6562,7 +6657,7 @@ void S9xSetRecentGames ()
 				InsertMenuItem(recent, mii.wID, FALSE, &mii);
 			}
 #ifdef UNICODE
-			Win7_CreateJumpList();
+			Win7_QueueJumpListUpdate();
 #endif
         }
     }

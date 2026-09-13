@@ -777,6 +777,10 @@ void InitSnes9x( void)
 void DeinitS9x()
 {
     SDLInput_Shutdown();
+#ifdef UNICODE
+	// Before CoUninitialize below: the worker holds shell objects.
+	Win7_ShutdownJumpList();
+#endif
 #ifdef KAILLERA_SUPPORT
 	KailleraServerUnpublish();
 	KailleraServerStop();

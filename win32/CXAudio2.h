@@ -99,6 +99,7 @@ public:
 	bool InitSoundOutput(void) { return InitXAudio2(); }
 	void DeInitSoundOutput(void) { DeInitXAudio2(); }
 	bool SetupSound(void);
+	bool FlushSoundOutput(void);
 	void SetVolume(double volume);
 	std::vector<std::wstring> GetDeviceList();
 	int FindDeviceIndex(TCHAR *audio_device);

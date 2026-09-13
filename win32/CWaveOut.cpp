@@ -373,17 +373,11 @@ void CWaveOut::OnResumeRequested()
     // underrun; nothing to do here.
 }
 
-// Fill the set of blocks preceding writeOffset with silence and write them
-// to the output to get the buffer back to 50%
-void CWaveOut::RecoverFromUnderrun()
+// Queue `blocks` blocks of silence from writeOffset. Deliberately bypasses
+// SubmitBlock so fade_in_pending stays armed for the eventual real block.
+void CWaveOut::PrimeWithSilence(UINT32 blocks)
 {
-    // The partial block predates the underrun; letting it play later would
-    // insert a stale-audio blip after the silence cushion.
-    partialOffset = 0;
-
-    writeOffset = (writeOffset - (blockCount / 2) + blockCount) % blockCount;
-
-    for (int i = 0; i < blockCount / 2; i++)
+    for (UINT32 i = 0; i < blocks; i++)
     {
         memset(waveHeaders[writeOffset].lpData, 0, singleBufferBytes);
         if (waveOutWrite(hWaveOut, &waveHeaders[writeOffset], sizeof(WAVEHDR)) == MMSYSERR_NOERROR)
@@ -394,6 +388,70 @@ void CWaveOut::RecoverFromUnderrun()
         writeOffset++;
         writeOffset %= blockCount;
     }
+}
+
+// Fill the set of blocks preceding writeOffset with silence and write them
+// to the output to get the buffer back to 50%
+void CWaveOut::RecoverFromUnderrun()
+{
+    // The partial block predates the underrun; letting it play later would
+    // insert a stale-audio blip after the silence cushion.
+    partialOffset = 0;
+
+    writeOffset = (writeOffset - (blockCount / 2) + blockCount) % blockCount;
+
+    PrimeWithSilence(blockCount / 2);
+}
+
+/*  CWaveOut::FlushSoundOutput
+drops everything queued and re-primes the device with silence, without closing
+it. Used in place of a close/open pair when the output format is unchanged (a
+ROM load): reopening restarts the audio engine's stream and the first write
+after that blocks for about a third of a second.
+*/
+bool CWaveOut::FlushSoundOutput()
+{
+    if (!hWaveOut || !initDone || waveHeaders.empty())
+        return false;
+
+    // Drop the previous game's audio. Every header is marked done by this, so
+    // they can all be rewritten below.
+    waveOutReset(hWaveOut);
+
+    // winmm reports those buffers through WaveCallback on its own thread, and
+    // each of those decrements bufferCount. Let them land before resetting the
+    // accounting: a callback arriving afterwards would leave the count too low,
+    // and ProcessSound would then overwrite a buffer still being played. If
+    // they don't land, say we can't be reused and let the caller reopen.
+    for (int spin = 0; spin < 100 && bufferCount > 0; spin++)
+        Sleep(1);
+    if (bufferCount > 0)
+        return false;
+
+    // waveOutReset restarts the device's play cursor at zero, so the accounting
+    // that derives free space from it has to restart with it.
+    bufferCount = 0;
+    submittedBytes = 0;
+    playedBytesAccum = 0;
+    lastPosBytes = 0;
+    writeOffset = 0;
+    partialOffset = 0;
+    last_sample_l = 0;
+    last_sample_r = 0;
+    InterlockedExchange(&fadeout_in_flight, 0);
+    fade_in_pos = kFadeFrames;
+    // The next real block starts from silence again.
+    InterlockedExchange(&fade_in_pending, 1);
+
+    // Fill the queue, less one block so ProcessSound always has somewhere to
+    // write. This is what keeps the stream alive while the caller finishes
+    // loading: an empty queue for more than ~125ms costs a stream restart.
+    PrimeWithSilence(blockCount - 1);
+
+    // waveOutReset leaves a paused device paused; the queue above has to play.
+    waveOutRestart(hWaveOut);
+
+    return true;
 }
 
 void CWaveOut::ProcessSound()

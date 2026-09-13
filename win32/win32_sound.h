@@ -17,6 +17,9 @@ bool ReInitSound();
 void ApplyLiveSoundSettings();   // no device rebuild - see win32_sound.cpp
 void S9xSoundCallback(void *data);
 void CloseSoundDevice();
+// Drops the record of what format the open output device has, so the next
+// ReInitSound opens it again instead of reusing it.
+void S9xForgetOpenSoundDevice();
 std::vector<std::wstring> GetAvailableSoundDevices();
 int FindAudioDeviceIndex(TCHAR *audio_device);
 

@@ -20,6 +20,7 @@ class CWaveOut : public IS9xSoundOutput
     int GetAvailableBytes();
     void RecoverFromUnderrun();
     void SubmitBlock(WAVEHDR &header);
+    void PrimeWithSilence(UINT32 blocks);
 
     HWAVEOUT hWaveOut;
     bool initDone;
@@ -65,6 +66,7 @@ class CWaveOut : public IS9xSoundOutput
     bool InitSoundOutput(void);
     void DeInitSoundOutput(void);
     bool SetupSound(void);
+    bool FlushSoundOutput(void);
     void SetVolume(double volume);
 	std::vector<std::wstring> GetDeviceList();
 	int FindDeviceIndex(TCHAR *audio_device);

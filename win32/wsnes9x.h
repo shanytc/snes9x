@@ -657,6 +657,11 @@ void S9xWinRemoveRegistryKeys();
 bool RegisterProgid();
 void RegisterExts(void);
 void WinSaveConfigFile();
+#ifdef UNICODE
+// Jump-list rebuilds run on a worker thread; this lets an in-flight one finish
+// at shutdown. See wsnes9x.cpp.
+void Win7_ShutdownJumpList();
+#endif
 
 std::wstring GetDlgItemTextWstring(HWND hDlg, int nIDDlgItem);
 std::wstring GetTextWstring(HWND hWnd);

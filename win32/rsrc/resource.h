@@ -103,7 +103,6 @@
 #define IDC_SPIN_MAX_SKIP               1062
 #define IDC_SPIN_TURBO_SKIP             1063
 #define IDC_ROM_DIR                     1064
-#define IDC_INACTIVE_PAUSE              1064
 #define IDC_INTERLEAVE                  1065
 #define IDC_CONFIG_NAME_BOX             1065
 #define IDC_VIDEO_MODE                  1066

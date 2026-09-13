@@ -276,6 +276,7 @@ void EmuMainWindow::refreshBiosMenu()
     const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
     const QString missing      = tr(" (Missing BIOS)");
     const QString experimental = tr(" (Experimental)");
+    const QString unsupported  = tr(" (game not supported)");
     for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
     {
         const int i = S9xGBBootPolicyMenuOrder[n];
@@ -287,13 +288,14 @@ void EmuMainWindow::refreshBiosMenu()
         // Say why it is greyed, on the item. Taken off the current text rather
         // than a cached original, so a retranslation still lands on the base.
         QString base = bios_policy_actions[i]->text();
-        for (const QString &tail : { missing, experimental })
+        for (const QString &tail : { missing, experimental, unsupported })
             if (base.endsWith(tail))
                 base.chop(tail.size());
-        // Only when a BIOS is what is missing: a hack greyed because the cart
-        // is mono has nothing missing to install.
-        // The experimental tag yields to a missing-BIOS note rather than stacking.
+        // A cart that cannot use the entry outranks a missing BIOS, which
+        // installing would not cure. The experimental tag yields to both
+        // rather than stacking.
         bios_policy_actions[i]->setText(
+            why == S9X_GBPOLICY_CART    ? base + unsupported :
             why == S9X_GBPOLICY_NO_BIOS ? base + missing :
             i == S9X_GBBOOT_SGBC        ? base + experimental : base);
     }

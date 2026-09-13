@@ -1842,6 +1842,7 @@ void Snes9xWindow::configure_widgets()
         const uint8_t policy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
         const std::string missing      = _(" (Missing BIOS)");
         const std::string experimental = _(" (Experimental)");
+        const std::string unsupported  = _(" (game not supported)");
         for (int n = 0; n < S9xGBBootPolicyMenuCount; n++)
         {
             const int i = S9xGBBootPolicyMenuOrder[n];
@@ -1855,14 +1856,15 @@ void Snes9xWindow::configure_widgets()
             // rather than a cached original, so a retranslation still lands on
             // the base.
             std::string base = item->get_label();
-            for (const std::string *tail : { &missing, &experimental })
+            for (const std::string *tail : { &missing, &experimental, &unsupported })
                 if (base.size() > tail->size() &&
                     base.compare(base.size() - tail->size(), tail->size(), *tail) == 0)
                     base.erase(base.size() - tail->size());
-            // Only when a BIOS is what is missing: a hack greyed because the
-            // cart is mono has nothing missing to install. The experimental
-            // tag yields to it rather than stacking.
-            item->set_label(why == S9X_GBPOLICY_NO_BIOS ? base + missing :
+            // A cart that cannot use the entry outranks a missing BIOS, which
+            // installing would not cure. The experimental tag yields to both
+            // rather than stacking.
+            item->set_label(why == S9X_GBPOLICY_CART    ? base + unsupported :
+                            why == S9X_GBPOLICY_NO_BIOS ? base + missing :
                             i == S9X_GBBOOT_SGBC        ? base + experimental : base);
         }
         refreshing_bios_menu = true;

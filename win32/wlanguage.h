@@ -155,6 +155,7 @@ Nintendo is a trademark.")
 // it cannot be picked instead of leaving it to guesswork.
 #define GBMODEL_MISSING_BIOS TEXT(" (Missing BIOS)")
 #define GBMODEL_EXPERIMENTAL TEXT(" (Experimental)")
+#define GBMODEL_NOT_SUPPORTED TEXT(" (game not supported)")
 
 #define HOTKEYS_GBMODEL_GB TEXT("Game Boy:")
 #define HOTKEYS_GBMODEL_GBC TEXT("Game Boy Color:")

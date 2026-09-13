@@ -1252,6 +1252,20 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 	return (TRUE);
 }
 
+// $0146 = $03 and $014B = $33: an SGB ignores command packets unless both say
+// so, so the flag alone does not make a cart SGB-enhanced.
+static bool GbHeaderSgbEnhanced (uint8 sgb_flag, uint8 old_licensee)
+{
+	return (sgb_flag == 0x03 && old_licensee == 0x33);
+}
+
+// Whether the running cart is SGB-enhanced, from the header bytes it was
+// loaded by: the Super Game Boy Color path rewrites $0146/$014B in memory.
+static bool8 s_gb_cart_sgb_enhanced = FALSE;
+// This load turned a saved Super Game Boy Color pick into Automatic because
+// the cart is not SGB-enhanced; the load banner says so.
+static bool8 s_sgbc_declined = FALSE;
+
 // A real Super Game Boy accepts any Game Boy cart, so SGB is "supported"
 // whenever a BIOS is installed — the exception is a CGB-only cart, which
 // shows its own lockout screen on DMG-class hardware.
@@ -1263,9 +1277,8 @@ S9xGBConsole S9xResolveGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lice
 	const bool cgb_only  = (cgb_flag == 0xC0);
 	const bool does_gbc  = (cgb_flag & 0x80) != 0;
 	// A forced Super Game Boy takes any cart, the way the hardware does, so the
-	// header's SGB flag only gates the Automatic entry. $014B is part of that
-	// flag: an SGB ignores command packets unless the old licensee code is $33.
-	const bool sgb_enhanced = (sgb_flag == 0x03 && old_licensee == 0x33);
+	// header's SGB flag only gates the Automatic entry here.
+	const bool sgb_enhanced = GbHeaderSgbEnhanced(sgb_flag, old_licensee);
 	const bool does_sgb  = sgb_available && !cgb_only;
 
 	switch (Settings.GBBootPolicy)
@@ -1366,9 +1379,16 @@ S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
 			return (S9xSGBBIOSAvailable(1, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
-		// Super Game Boy Color takes any cart, like the SGB2 it is built on.
 		case S9X_GBBOOT_SGB2:
+			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
+			                                            : S9X_GBPOLICY_NO_BIOS);
+
+		// Super Game Boy Color is offered for SGB-enhanced carts only; any
+		// other greys it as unsupported, ahead of a BIOS it might also lack.
 		case S9X_GBBOOT_SGBC:
+			if ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
+			    !s_gb_cart_sgb_enhanced)
+				return (S9X_GBPOLICY_CART);
 			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
@@ -1862,6 +1882,13 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
         const size_t n = strlen(msg);
         snprintf(msg + n, sizeof msg - n, "  [%s]", from.c_str());
     }
+    if (s_sgbc_declined)
+    {
+        const size_t n = strlen(msg);
+        snprintf(msg + n, sizeof msg - n,
+                 "  [Super Game Boy Color: game not supported, switched to Automatic]");
+        s_sgbc_declined = FALSE;
+    }
 
     s_last_bios_mode = bios_mode;
 
@@ -1891,6 +1918,14 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lic
 {
     out_bios_path.clear();
     out_bios_mode = 0;
+
+    // Super Game Boy Color is for SGB-enhanced carts only: loading any other
+    // under it moves the saved pick to Automatic, which then decides below.
+    s_gb_cart_sgb_enhanced = GbHeaderSgbEnhanced(sgb_flag, old_licensee);
+    s_sgbc_declined = (S9xNormalizeGBBootPolicy(Settings.GBBootPolicy) == S9X_GBBOOT_SGBC &&
+                       !s_gb_cart_sgb_enhanced);
+    if (s_sgbc_declined)
+        Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
 
     // Every named Super Game Boy policy pins its variant, Super Game Boy Color
     // (built on the SGB2) included, and none of them falls back to the other

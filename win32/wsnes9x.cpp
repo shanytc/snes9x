@@ -1577,9 +1577,9 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
             //
             // Going through the menu is also the whole gate. PostMenuCommand
             // refreshes the menu state and drops the command if the entry is
-            // greyed for a missing BIOS, or missing entirely because no Game
-            // Boy content is loaded - so the key can never reach a console the
-            // menu would not let you pick either.
+            // greyed (missing BIOS, or a cart the console cannot take), or
+            // missing entirely because no Game Boy content is loaded - so the
+            // key can never reach a console the menu would not let you pick.
             PostMenuCommand(ID_EMULATION_BIOS_POLICY0 + S9xGBModelHotkeys[gbm].policy);
             hitHotKey = true;
         }
@@ -5640,15 +5640,17 @@ static void CheckMenuStates ()
 				std::wstring base(cur);
 				const std::wstring suffix(GBMODEL_MISSING_BIOS);
 				const std::wstring experimental(GBMODEL_EXPERIMENTAL);
-				const std::wstring *tails[] = { &suffix, &experimental };
+				const std::wstring unsupported(GBMODEL_NOT_SUPPORTED);
+				const std::wstring *tails[] = { &suffix, &experimental, &unsupported };
 				for (const std::wstring *tail : tails)
 					if (base.size() > tail->size() &&
 						base.compare(base.size() - tail->size(), tail->size(), *tail) == 0)
 						base.erase(base.size() - tail->size());
-				// Only when a BIOS is what is missing: a hack greyed because the
-				// cart is mono has nothing missing to install. The experimental
-				// tag yields to it rather than stacking.
+				// A cart that cannot use the entry outranks a missing BIOS, which
+				// installing would not cure. The experimental tag yields to both
+				// rather than stacking.
 				const std::wstring want =
+					why == S9X_GBPOLICY_CART    ? base + unsupported :
 					why == S9X_GBPOLICY_NO_BIOS ? base + suffix :
 					i == S9X_GBBOOT_SGBC        ? base + experimental : base;
 				if (want != cur)

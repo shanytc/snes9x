@@ -265,8 +265,8 @@ enum S9xGBBootPolicy
 	S9X_GBBOOT_AUTO,         // read the cart header: SGB > GBC > GB — default
 	S9X_GBBOOT_SGB2_GBC_LEGACY,
 	// Super Game Boy Color: the SGB2 BIOS (patched in memory) around a Game
-	// Boy Color core. Every cart runs in color; a mono cart gets the boot
-	// ROM's compatibility palettes, the way a Color handles one.
+	// Boy Color core, for SGB-enhanced carts only. Loading any other cart
+	// under it moves the saved pick to Automatic.
 	S9X_GBBOOT_SGBC,
 	S9X_NUM_GBBOOT_POLICIES
 };
@@ -315,15 +315,16 @@ const char *S9xGBBootPolicyName(int policy);
 
 // Whether a policy can deliver the console it names. Only the Super Game Boy
 // entries can fail: without their BIOS they quietly run the cart as GBC/GB
-// instead, so a menu should grey them out. `gb_rom_path` joins the BIOS search
-// (the cart's own directory is one of the places it looks); NULL is fine.
+// instead, so a menu should grey them out. Super Game Boy Color is also greyed
+// while the running cart is not SGB-enhanced. `gb_rom_path` joins the BIOS
+// search (the cart's own directory is one of the places it looks); NULL is fine.
 // Why an entry cannot be picked, so a menu can say "(Missing BIOS)" only when
 // that is the actual reason rather than for anything unavailable.
 enum S9xGBPolicyBlock
 {
 	S9X_GBPOLICY_OK = 0,
 	S9X_GBPOLICY_NO_BIOS,   // the console it names has no BIOS installed
-	S9X_GBPOLICY_CART       // the loaded cart cannot use it
+	S9X_GBPOLICY_CART       // the loaded cart cannot use it (SGBC: not SGB-enhanced)
 };
 S9xGBPolicyBlock S9xGBBootPolicyBlocked(int policy, const char *gb_rom_path);
 

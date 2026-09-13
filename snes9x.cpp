@@ -240,7 +240,7 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	// leftover would disable SGB with no way to turn it back on.
 	if (Settings.SGB_BIOSPreference == 0 || Settings.SGB_BIOSPreference > 2)
 		Settings.SGB_BIOSPreference = 2;
-	// BIOS Manager paths, tried before the by-name search in BIOS_DIR.
+	// BIOS Manager paths, the only source of a BIOS for each slot.
 	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
 	{
 		const std::string key = std::string("BIOS::") + S9xGetBiosSlotInfo(i)->key;

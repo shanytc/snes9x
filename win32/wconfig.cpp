@@ -970,7 +970,7 @@ void WinRegisterConfigItems()
 	AddStringC("Dir:SRAM", GUI.SRAMFileDir, _MAX_PATH, ".\\Saves", "directory where battery saves will be created and loaded from");
 	AddStringC("Dir:Cheats", GUI.CheatDir, _MAX_PATH, ".\\Cheats", "directory in which cheats (.cht files) will be looked for");
 	AddStringC("Dir:Patches", GUI.PatchDir, _MAX_PATH, ".\\Patches", "directory in which ROM patches (.ips/.bps/.ups files) will be looked for");
-	AddStringC("Dir:Bios", GUI.BiosDir, _MAX_PATH, ".\\BIOS", "directory where BIOS files (such as \"BS-X.bios\") will be located");
+	AddStringC("Dir:Bios", GUI.BiosDir, _MAX_PATH, ".\\BIOS", "folder the BIOS Manager's Select... dialog starts in; blank or missing = next to the executable");
 	AddStringC("Dir:SatData", GUI.SatDir, _MAX_PATH, ".\\SatData", "directory where Satellaview Signal Data files will be located");
 	AddBoolC("Dir:Lock", GUI.LockDirectories, false, "true to prevent Snes9x from changing configured directories when you browse to a new location");
 	#define ADD(n) AddString("Rom:RecentGame" #n, GUI.RecentGames[n-1], MAX_PATH, "")

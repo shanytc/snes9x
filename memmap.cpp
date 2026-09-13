@@ -1124,43 +1124,22 @@ static bool AcceptSGBMode (const uint8 *data, uint32 size, uint32 full_size, voi
 	       got == *(const uint8 *) ctx;
 }
 
-// The folders a Game Boy-side search covers, in order: the cart's own folder,
-// the BIOS folder with its subfolders, the working directory.
-static std::vector<std::string> GBSearchDirs (const char *gb_rom_path)
-{
-	std::vector<std::string> dirs;
-	if (gb_rom_path && *gb_rom_path)
-	{
-		std::string p(gb_rom_path);
-		const size_t sep = p.find_last_of("/\\");
-		if (sep != std::string::npos) dirs.push_back(p.substr(0, sep));
-	}
-	const std::vector<std::string> bios = S9xBiosSearchDirs();
-	dirs.insert(dirs.end(), bios.begin(), bios.end());
-	dirs.push_back(".");
-	return (dirs);
-}
-
-// Look for an SGB BIOS file matching `mode`: the assigned path first, then
-// the slot's filenames across GBSearchDirs, plain or zipped. The header is
-// verified before a match is accepted. Writes the path to `out_path` on hit.
+// The SGB BIOS for `mode`: the BIOS Manager slot, nothing else. It may be a
+// .zip, which S9xReadBiosImage inflates far enough to check the header, and
+// that header must say the right console. Writes the path to `out_path`.
 static bool8 FindSGB_BIOS (uint8 mode, const char *gb_rom_path, std::string &out_path)
 {
+	(void) gb_rom_path;
 	const int          slot = (mode == 2) ? S9X_BIOS_SGB2 : S9X_BIOS_SGB1;
 	std::vector<uint8> img;
 
-	// A path set in the BIOS Manager wins over the by-name search; it may be a
-	// .zip, which S9xReadBiosImage inflates far enough to check the header.
+	out_path.clear();
 	const std::string assigned = S9xResolveBiosPath(slot);
-	if (!assigned.empty() &&
-	    S9xReadBiosImage(assigned.c_str(), img, 0x8000, AcceptSGBMode, &mode))
-	{
-		out_path = assigned;
-		return (TRUE);
-	}
-
-	out_path = S9xFindBiosByName(slot, GBSearchDirs(gb_rom_path), img, 0x8000, AcceptSGBMode, &mode);
-	return out_path.empty() ? FALSE : TRUE;
+	if (assigned.empty() ||
+	    !S9xReadBiosImage(assigned.c_str(), img, 0x8000, AcceptSGBMode, &mode))
+		return (FALSE);
+	out_path = assigned;
+	return (TRUE);
 }
 
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path)
@@ -1176,23 +1155,21 @@ static bool AcceptBootROMSize (const uint8 *data, uint32 size, uint32 full_size,
 	return full_size == 256;
 }
 
-// Locate the 256-byte GB-side boot ROM that accompanies the SGB BIOS. Same
-// search as the .sfc.
+// The 256-byte GB-side boot ROM that accompanies the SGB BIOS, from its own
+// BIOS Manager slot.
 static bool8 FindSGB_BootROM (uint8 mode, const char *gb_rom_path, std::string &out_path)
 {
+	(void) gb_rom_path;
 	const int          slot = (mode == 2) ? S9X_BIOS_SGB2_BOOT : S9X_BIOS_SGB1_BOOT;
 	std::vector<uint8> img;
 
-	// A path set in the BIOS Manager wins over the by-name search.
+	out_path.clear();
 	const std::string assigned = S9xResolveBiosPath(slot);
-	if (!assigned.empty() && S9xReadBiosImage(assigned.c_str(), img, 256) && img.size() == 256)
-	{
-		out_path = assigned;
-		return (TRUE);
-	}
-
-	out_path = S9xFindBiosByName(slot, GBSearchDirs(gb_rom_path), img, 256, AcceptBootROMSize, NULL);
-	return out_path.empty() ? FALSE : TRUE;
+	if (assigned.empty() ||
+	    !S9xReadBiosImage(assigned.c_str(), img, 256, AcceptBootROMSize, NULL))
+		return (FALSE);
+	out_path = assigned;
+	return (TRUE);
 }
 
 static bool8 LoadSGBBootROM (const char *path, std::vector<uint8> &out_bytes)
@@ -1226,28 +1203,26 @@ static bool AcceptGBBootROM (const uint8 *data, uint32 size, uint32 full_size, v
 	return data[0] == 0x31 && data[1] == 0xFE && data[2] == 0xFF;
 }
 
-// Find a GB/GBC boot ROM (the scrolling-logo animation). Same search order as
-// FindSGB_BIOS; size + the LD SP,$FFFE opening reject a bad dump, which would
-// otherwise hang the GB at $0000. Fills out_bytes when non-null.
+// The GB/GBC boot ROM (the scrolling-logo animation) from its BIOS Manager
+// slot, which may be a .zip. Size + the LD SP,$FFFE opening reject a bad
+// dump, which would otherwise hang the GB at $0000. Fills out_bytes when
+// non-null.
 static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
                              std::string &out_path, std::vector<uint8> *out_bytes)
 {
+	(void) gb_rom_path;
 	const int          slot     = cgb ? S9X_BIOS_GBC : S9X_BIOS_GB;
 	bool               want_cgb = cgb;
 	std::vector<uint8> img;
 
-	// A path set in the BIOS Manager wins over the by-name search, and may be a
-	// .zip. Reading one byte past the largest valid size lets the filter reject
-	// anything longer, as the plain-file path used to with its EOF probe.
+	// Reading one byte past the largest valid size lets the filter reject
+	// anything longer.
+	out_path.clear();
 	const std::string assigned = S9xResolveBiosPath(slot);
-	if (!assigned.empty() &&
-	    S9xReadBiosImage(assigned.c_str(), img, 0x901, AcceptGBBootROM, &want_cgb))
-		out_path = assigned;
-	else
-		out_path = S9xFindBiosByName(slot, GBSearchDirs(gb_rom_path), img, 0x901,
-		                             AcceptGBBootROM, &want_cgb);
-
-	if (out_path.empty()) return (FALSE);
+	if (assigned.empty() ||
+	    !S9xReadBiosImage(assigned.c_str(), img, 0x901, AcceptGBBootROM, &want_cgb))
+		return (FALSE);
+	out_path = assigned;
 	if (out_bytes) *out_bytes = img;
 	return (TRUE);
 }
@@ -1265,6 +1240,9 @@ static bool8 s_gb_cart_sgb_enhanced = FALSE;
 // This load turned a saved Super Game Boy Color pick into Automatic because
 // the cart is not SGB-enhanced; the load banner says so.
 static bool8 s_sgbc_declined = FALSE;
+// This load turned a saved Super Game Boy pick into Automatic because its
+// BIOS is not assigned: the policy that was dropped, 0 when none was.
+static uint8 s_sgb_no_bios_policy = 0;
 
 // A real Super Game Boy accepts any Game Boy cart, so SGB is "supported"
 // whenever a BIOS is installed — the exception is a CGB-only cart, which
@@ -1383,14 +1361,16 @@ S9xGBPolicyBlock S9xGBBootPolicyBlocked (int policy, const char *gb_rom_path)
 			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
 			                                            : S9X_GBPOLICY_NO_BIOS);
 
-		// Super Game Boy Color is offered for SGB-enhanced carts only; any
-		// other greys it as unsupported, ahead of a BIOS it might also lack.
+		// Super Game Boy Color needs the SGB2 BIOS first of all; with one, it
+		// is offered for SGB-enhanced carts only and any other greys it as
+		// unsupported.
 		case S9X_GBBOOT_SGBC:
+			if (!S9xSGBBIOSAvailable(2, gb_rom_path))
+				return (S9X_GBPOLICY_NO_BIOS);
 			if ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
 			    !s_gb_cart_sgb_enhanced)
 				return (S9X_GBPOLICY_CART);
-			return (S9xSGBBIOSAvailable(2, gb_rom_path) ? S9X_GBPOLICY_OK
-			                                            : S9X_GBPOLICY_NO_BIOS);
+			return (S9X_GBPOLICY_OK);
 
 		default:
 			return (S9X_GBPOLICY_OK);
@@ -1853,8 +1833,8 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
     else
         snprintf(msg, sizeof msg, "\"%s\" (%s)", name.c_str(), region);
 
-    // With a BIOS Manager slot, a by-name fallback and ten plausible dumps in
-    // a folder, "via Super Game Boy 2" no longer says which file that was.
+    // With ten plausible dumps to point a slot at, "via Super Game Boy 2"
+    // alone does not say which file that was.
     std::string from;
     if (bios_mode == 1 || bios_mode == 2)
     {
@@ -1877,17 +1857,28 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
     else
         from = "no BIOS";
 
+    // Each note on its own row: both OSD renderers break on the newline.
     if (!from.empty())
     {
         const size_t n = strlen(msg);
-        snprintf(msg + n, sizeof msg - n, "  [%s]", from.c_str());
+        snprintf(msg + n, sizeof msg - n, "\n(%s)", from.c_str());
     }
     if (s_sgbc_declined)
     {
         const size_t n = strlen(msg);
         snprintf(msg + n, sizeof msg - n,
-                 "  [Super Game Boy Color: game not supported, switched to Automatic]");
+                 "\n(Super Game Boy Color: game not supported, switched to Automatic)");
         s_sgbc_declined = FALSE;
+    }
+    if (s_sgb_no_bios_policy)
+    {
+        const char *which = (s_sgb_no_bios_policy == S9X_GBBOOT_SGB)  ? "Super Game Boy"
+                          : (s_sgb_no_bios_policy == S9X_GBBOOT_SGB2) ? "Super Game Boy 2"
+                                                                      : "Super Game Boy Color";
+        const size_t n = strlen(msg);
+        snprintf(msg + n, sizeof msg - n,
+                 "\n(%s: BIOS not assigned, switched to Automatic)", which);
+        s_sgb_no_bios_policy = 0;
     }
 
     s_last_bios_mode = bios_mode;
@@ -1926,6 +1917,22 @@ static S9xGBConsole PickGBConsole (uint8 cgb_flag, uint8 sgb_flag, uint8 old_lic
                        !s_gb_cart_sgb_enhanced);
     if (s_sgbc_declined)
         Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
+
+    // A pinned Super Game Boy without its BIOS would only be a BIOS-less Game
+    // Boy under the wrong menu tick, so the saved pick moves to Automatic,
+    // which then takes the best console actually available.
+    {
+        const uint8 want = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+        const uint8 need = (want == S9X_GBBOOT_SGB)  ? 1
+                         : (want == S9X_GBBOOT_SGB2 ||
+                            want == S9X_GBBOOT_SGBC) ? 2 : 0;
+        std::string probe;
+        if (need && (Settings.SGB_BIOSPreference == 0 || !FindSGB_BIOS(need, filename, probe)))
+        {
+            s_sgb_no_bios_policy = want;
+            Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
+        }
+    }
 
     // Every named Super Game Boy policy pins its variant, Super Game Boy Color
     // (built on the SGB2) included, and none of them falls back to the other
@@ -2774,19 +2781,16 @@ bool8 CMemory::LoadMultiCartInt ()
         else if(Multi.cartOffsetB) // clear cart A so the bios can detect that it's not present
             memset(ROM, 0, Multi.cartOffsetB);
 
-        // The BIOS Manager path wins and may be a .zip; a bad file there still
-        // falls through to the slot's filenames in the BIOS folder.
+        // The BIOS Manager slot, which may be a .zip, is the only source.
 		std::string        path;
 		std::vector<uint8> img;
 		const std::string  assigned = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
 		if (!assigned.empty() &&
 		    S9xReadBiosImage(assigned.c_str(), img, 0x40000, AcceptSufamiBIOS, NULL))
+		{
 			path = assigned;
-		else
-			path = S9xFindBiosByName(S9X_BIOS_SUFAMI, S9xBiosSearchDirs(), img, 0x40000,
-			                         AcceptSufamiBIOS, NULL);
-		if (!path.empty())
 			memcpy(ROM, img.data(), img.size());
+		}
 
 		if (path.empty())
 		{

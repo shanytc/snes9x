@@ -376,7 +376,7 @@ int Snes9xConfig::save_config_file()
     outstring("CheatDirectory", cheat_directory, "Where cheat files (.cht) are stored");
     outstring("PatchDirectory", patch_directory, "Where ROM patches (IPS/UPS/BPS) are looked for");
     outstring("ExportDirectory", export_directory, "Where exported files (e.g. SPC dumps) are written");
-    outstring("BIOSDirectory", bios_directory, "Where BIOS images (e.g. the Super Game Boy boot ROM) are looked for");
+    outstring("BIOSDirectory", bios_directory, "Where the BIOS Manager's file picker starts");
 
     // Window sizes and UI state, remembered automatically between sessions.
     section = "Window State";

@@ -16,17 +16,12 @@
 #  endif
 #endif
 
-#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
-#ifndef __WIN32__
-#  include <dirent.h>
-#  include <sys/stat.h>
-#endif
 
-// Filenames each loader's by-name search tries, in order, when its slot is
-// blank. Kept here so the BIOS Manager can run the very same search.
+// Conventional filenames per slot: [0] is the dialog's placeholder, and the
+// libretro port seeds a blank slot from them in its system directory.
 static const char *const kNamesGB[] = {
 	"dmg_boot.bin", "DMG_boot.bin", "dmg_bios.bin", "gb_bios.bin",
 	"dmg.boot.rom", "dmg_boot.rom", "DMG_ROM.bin", NULL
@@ -379,164 +374,6 @@ std::string S9xResolveBiosPath (int slot)
 	if (!SlotValid(slot) || !g_paths[slot][0])  return (std::string());
 	if (FileSize(g_paths[slot]) < 0)            return (std::string());
 	return (std::string(g_paths[slot]));
-}
-
-// ---------------------------------------------------------------------------
-// The by-name search
-
-// What sits directly inside `dir`: regular files and folders, each sorted so
-// the search order is the same run to run and machine to machine.
-static void ListDir (const std::string &dir, std::vector<std::string> &files,
-                     std::vector<std::string> &subs)
-{
-	files.clear();
-	subs.clear();
-#ifdef __WIN32__
-	WIN32_FIND_DATAA fd;
-	HANDLE           h = FindFirstFileA((dir + "\\*").c_str(), &fd);
-	if (h == INVALID_HANDLE_VALUE) return;
-	do
-	{
-		if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
-		((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? subs : files).push_back(fd.cFileName);
-	}
-	while (FindNextFileA(h, &fd));
-	FindClose(h);
-#else
-	DIR *d = opendir(dir.c_str());
-	if (!d) return;
-	while (struct dirent *e = readdir(d))
-	{
-		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
-		struct stat st;
-		if (stat((dir + SLASH_STR + e->d_name).c_str(), &st) != 0) continue;
-		if (S_ISDIR(st.st_mode))      subs.push_back(e->d_name);
-		else if (S_ISREG(st.st_mode)) files.push_back(e->d_name);
-	}
-	closedir(d);
-#endif
-	std::sort(files.begin(), files.end());
-	std::sort(subs.begin(), subs.end());
-}
-
-std::vector<std::string> S9xBiosSearchDirs (void)
-{
-	// Breadth first, so a file nearer the root wins over a deeper namesake.
-	std::vector<std::string> dirs(1, S9xGetDirectory(BIOS_DIR));
-	std::vector<std::string> files, subs;
-	size_t                   level_begin = 0;
-	for (int depth = 0; depth < MAX_BIOS_DEEP_SEARCH; depth++)
-	{
-		const size_t level_end = dirs.size();
-		for (size_t i = level_begin; i < level_end; i++)
-		{
-			ListDir(dirs[i], files, subs);
-			for (size_t s = 0; s < subs.size(); s++)
-				dirs.push_back(dirs[i] + SLASH_STR + subs[s]);
-		}
-		level_begin = level_end;
-	}
-	return (dirs);
-}
-
-struct Candidate
-{
-	std::string path;
-	bool        by_content;   // found by scanning rather than by a listed name
-};
-
-// Every path the search for `slot` would open, in order. The listed names
-// come first, as plain files and packed (dmg_boot.bin also as dmg_boot.zip
-// and dmg_boot.bin.zip), across every folder in `dirs`, so a conventional
-// name beats any other dump. Then, for a slot whose image carries a
-// signature, every other file under the BIOS folder, so a dump under any
-// name still counts once its contents say what it is.
-static std::vector<Candidate> Candidates (int slot, const std::vector<std::string> &dirs)
-{
-	std::vector<Candidate> out;
-	for (size_t d = 0; d < dirs.size(); d++)
-		for (const char *const *n = kSlots[slot].names; *n; n++)
-		{
-			const std::string        name(*n);
-			const size_t             dot = name.find_last_of('.');
-			std::vector<std::string> forms(1, name);
-			if (dot != std::string::npos && dot > 0) forms.push_back(name.substr(0, dot) + ".zip");
-			forms.push_back(name + ".zip");
-			for (size_t f = 0; f < forms.size(); f++)
-			{
-				const Candidate c = { dirs[d].empty() ? forms[f] : dirs[d] + SLASH_STR + forms[f], false };
-				if (FileSize(c.path.c_str()) >= 0) out.push_back(c);
-			}
-		}
-
-	if (ExpectedKind(slot) == KIND_UNKNOWN) return (out);
-	const std::vector<std::string> tree = S9xBiosSearchDirs();
-	std::vector<std::string>       files, subs;
-	for (size_t d = 0; d < tree.size(); d++)
-	{
-		ListDir(tree[d], files, subs);
-		for (size_t f = 0; f < files.size(); f++)
-		{
-			const Candidate c = { tree[d] + SLASH_STR + files[f], true };
-			out.push_back(c);
-		}
-	}
-	return (out);
-}
-
-// A file found by content gets the slot's signature test before the caller's
-// own filter, which for a size-only slot would take any file of that length.
-struct ContentGate { S9xBiosAcceptFn accept; void *ctx; int kind; };
-
-static bool AcceptContent (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
-{
-	const ContentGate *g = (const ContentGate *) ctx;
-	if (ClassifyImage(data, size, full_size) != g->kind) return (false);
-	return !g->accept || g->accept(data, size, full_size, g->ctx);
-}
-
-std::string S9xFindBiosByName (int slot, const std::vector<std::string> &dirs,
-                               std::vector<uint8> &out, uint32 max_size,
-                               S9xBiosAcceptFn accept, void *ctx)
-{
-	out.clear();
-	if (!SlotValid(slot)) return (std::string());
-	const std::vector<Candidate> cands = Candidates(slot, dirs);
-	ContentGate                  gate  = { accept, ctx, ExpectedKind(slot) };
-	for (size_t i = 0; i < cands.size(); i++)
-	{
-		const bool ok = cands[i].by_content
-		              ? S9xReadBiosImage(cands[i].path.c_str(), out, max_size, AcceptContent, &gate)
-		              : S9xReadBiosImage(cands[i].path.c_str(), out, max_size, accept, ctx);
-		if (ok) return (cands[i].path);
-	}
-	out.clear();
-	return (std::string());
-}
-
-std::string S9xFindBiosInBiosDir (int slot, std::string *detail)
-{
-	if (detail) detail->clear();
-	if (!SlotValid(slot)) return (std::string());
-
-	// Each candidate goes through the assigned-path check, which already asks
-	// for the signature, so "found" means what "OK" does on a typed path.
-	// Borrows the slot and puts it back.
-	const std::string            root  = S9xGetDirectory(BIOS_DIR) + SLASH_STR;
-	const std::vector<Candidate> cands = Candidates(slot, S9xBiosSearchDirs());
-	char saved[S9X_BIOS_PATH_MAX];
-	memcpy(saved, g_paths[slot], sizeof saved);
-	std::string hit;
-	for (size_t i = 0; i < cands.size() && hit.empty(); i++)
-	{
-		const std::string &p = cands[i].path;
-		S9xSetBiosPath(slot, p.c_str());
-		if (S9xCheckBiosPath(slot, detail) == S9X_BIOS_PATH_OK)
-			hit = p.compare(0, root.size(), root) == 0 ? p.substr(root.size()) : p;
-	}
-	memcpy(g_paths[slot], saved, sizeof saved);
-	if (hit.empty() && detail) detail->clear();
-	return (hit);
 }
 
 // ---------------------------------------------------------------------------

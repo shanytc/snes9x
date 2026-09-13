@@ -5674,9 +5674,9 @@ static void CheckMenuStates ()
 					if (base.size() > tail->size() &&
 						base.compare(base.size() - tail->size(), tail->size(), *tail) == 0)
 						base.erase(base.size() - tail->size());
-				// A cart that cannot use the entry outranks a missing BIOS, which
-				// installing would not cure. The experimental tag yields to both
-				// rather than stacking.
+				// The core reports a missing BIOS ahead of a cart that cannot use
+				// the entry. The experimental tag yields to both rather than
+				// stacking.
 				const std::wstring want =
 					why == S9X_GBPOLICY_CART    ? base + unsupported :
 					why == S9X_GBPOLICY_NO_BIOS ? base + suffix :
@@ -8951,14 +8951,96 @@ void ListFilesFromFolder(HWND hDlg, RomDataList** prdl)
 }
 
 
-// File -> BIOS Manager: one row per supported BIOS, plus the default boot mode
-// for Game Boy content. Blank rows fall back to the search by filename.
+// File -> BIOS Manager: one row per supported BIOS. A blank row means that
+// BIOS is unavailable; nothing is searched for.
 // Per-row verdict, kept for WM_CTLCOLORSTATIC: red text is what makes a bad
-// file read as a complaint rather than a caption. s_bios_found marks a blank
-// row whose file the by-name search already turns up in the BIOS folder.
+// file read as a complaint rather than a caption.
 static S9xBiosPathStatus s_bios_status[S9X_NUM_BIOS_SLOTS];
-static bool              s_bios_found[S9X_NUM_BIOS_SLOTS];
 static HWND              s_bios_tip;   // one tooltip over the ten status labels
+static int               s_bios_fit_width;   // client width after the first fit, 0 before
+
+// Size the status column to its widest text and the dialog to match, so the
+// window is as wide as its contents and no wider. After the first layout it
+// only ever widens, so a status that changes while typing does not make the
+// window jiggle. The intro line sets the floor.
+static void BiosManagerFitWidth(HWND hDlg)
+{
+	HFONT   font = (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0);
+	HDC     hdc  = GetDC(hDlg);
+	HGDIOBJ old  = SelectObject(hdc, font);
+	TCHAR   text[S9X_BIOS_PATH_MAX];
+	SIZE    sz   = { 0 };
+	int     widest = 0;
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+	{
+		GetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text, _countof(text));
+		if (GetTextExtentPoint32(hdc, text, lstrlen(text), &sz) && sz.cx > widest)
+			widest = sz.cx;
+	}
+	GetDlgItemText(hDlg, IDC_BIOSMGR_INTRO, text, _countof(text));
+	GetTextExtentPoint32(hdc, text, lstrlen(text), &sz);
+	const int intro_width = sz.cx;
+	SelectObject(hdc, old);
+	ReleaseDC(hDlg, hdc);
+
+	RECT client, status, intro;
+	GetClientRect(hDlg, &client);
+	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0), &status);
+	MapWindowPoints(NULL, hDlg, (POINT *) &status, 2);
+	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_INTRO), &intro);
+	MapWindowPoints(NULL, hDlg, (POINT *) &intro, 2);
+
+	// The .rc's gap right of the intro line is the right margin to keep.
+	const int margin  = client.right - intro.right;
+	const int content = (status.left + widest + 4 > intro.left + intro_width)
+	                  ? status.left + widest + 4 : intro.left + intro_width;
+	const int want    = content + margin;
+	const int dx      = want - client.right;
+	if (dx == 0 || (s_bios_fit_width && dx < 0))
+	{
+		s_bios_fit_width = client.right;
+		return;
+	}
+
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		SetWindowPos(GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot), NULL, 0, 0,
+		             content - status.left, status.bottom - status.top,
+		             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	SetWindowPos(GetDlgItem(hDlg, IDC_BIOSMGR_INTRO), NULL, 0, 0,
+	             content - intro.left, intro.bottom - intro.top,
+	             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+	// The buttons keep their distance from the right edge.
+	static const int buttons[] = { IDOK, IDCANCEL };
+	for (int i = 0; i < 2; i++)
+	{
+		RECT rc;
+		GetWindowRect(GetDlgItem(hDlg, buttons[i]), &rc);
+		MapWindowPoints(NULL, hDlg, (POINT *) &rc, 2);
+		SetWindowPos(GetDlgItem(hDlg, buttons[i]), NULL, rc.left + dx, rc.top, 0, 0,
+		             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+
+	// Resize about the centre, where DS_CENTER put the dialog.
+	RECT win;
+	GetWindowRect(hDlg, &win);
+	SetWindowPos(hDlg, NULL, win.left - dx / 2, win.top,
+	             (win.right - win.left) + dx, win.bottom - win.top,
+	             SWP_NOZORDER | SWP_NOACTIVATE);
+	s_bios_fit_width = want;
+}
+
+// Select... starts in the BIOS folder from Emulation -> Settings when one is
+// set and exists, otherwise beside the executable. Resolved here rather than
+// through S9xGetDirectoryT, which would create the folder.
+static const TCHAR *BiosSelectInitialDir(void)
+{
+	static TCHAR dir[MAX_PATH];
+	if (GUI.BiosDir[0] &&
+	    PathCombine(dir, S9xGetDirectoryT(DEFAULT_DIR), GUI.BiosDir) && PathIsDirectory(dir))
+		return dir;
+	return S9xGetDirectoryT(DEFAULT_DIR);
+}
 
 // The status label and its tooltip say the same thing: the tip is there for
 // when a long path gets cut short.
@@ -8981,24 +9063,9 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
 	// Nothing to clear on a blank row.
 	EnableWindow(GetDlgItem(hDlg, IDC_BIOSMGR_CLEAR0 + slot), wtext[0] != TEXT('\0'));
-	s_bios_found[slot] = false;
 	if (wtext[0] == TEXT('\0'))
 	{
 		s_bios_status[slot] = S9X_BIOS_PATH_UNSET;
-
-		// People forget what they dropped into BIOS/: when the by-name search
-		// turns up a usable file there, say so, since that is what will load.
-		std::string       detail;
-		const std::string found = S9xFindBiosInBiosDir(slot, &detail);
-		if (!found.empty())
-		{
-			std::string text = "Resolved BIOS: " + found;
-			if (!detail.empty()) text += " (" + detail + ")";
-			s_bios_found[slot] = true;
-			Utf8ToWide text_w(text.c_str());
-			BiosManagerSetStatus(hDlg, slot, (wchar_t *) text_w);
-			return;
-		}
 
 		// Empty is fine for some slots and not others, so say which.
 		const char *note = S9xGetBiosSlotInfo(slot)->note;
@@ -9045,9 +9112,9 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		{
 			const int               slot = id - IDC_BIOSMGR_STATUS0;
 			const S9xBiosPathStatus st   = s_bios_status[slot];
-			if (st != S9X_BIOS_PATH_UNSET || s_bios_found[slot])
+			if (st != S9X_BIOS_PATH_UNSET)
 			{
-				SetTextColor((HDC) wParam, st == S9X_BIOS_PATH_OK || s_bios_found[slot]
+				SetTextColor((HDC) wParam, st == S9X_BIOS_PATH_OK
 				                           ? RGB(0x1E, 0x8B, 0x3A) : RGB(0xC0, 0x39, 0x2B));
 				SetBkMode((HDC) wParam, TRANSPARENT);
 				return (INT_PTR) GetSysColorBrush(COLOR_BTNFACE);
@@ -9059,6 +9126,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 	case WM_INITDIALOG:
 	{
 		LocalizeDialog(hDlg);
+		s_bios_fit_width = 0;
 
 		// Hovering a status label shows its full text.
 		s_bios_tip = CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
@@ -9083,6 +9151,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
 			BiosManagerRefreshStatus(hDlg, slot);
 		}
+		BiosManagerFitWidth(hDlg);
 		return true;
 	}
 
@@ -9094,6 +9163,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			HIWORD(wParam) == EN_CHANGE)
 		{
 			BiosManagerRefreshStatus(hDlg, id - IDC_BIOSMGR_EDIT0);
+			BiosManagerFitWidth(hDlg);
 			return true;
 		}
 
@@ -9110,7 +9180,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			ofn.lpstrFile       = filename;
 			ofn.nMaxFile        = MAX_PATH;
 			ofn.lpstrFilter     = TEXT("BIOS files\0*.zip;*.bin;*.rom;*.sfc;*.gb;*.gbc\0All files\0*.*\0\0");
-			ofn.lpstrInitialDir = S9xGetDirectoryT(BIOS_DIR);
+			ofn.lpstrInitialDir = BiosSelectInitialDir();
 			ofn.lpstrTitle      = TEXT("Select BIOS File");
 			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
 			if (GetOpenFileName(&ofn))
@@ -9163,22 +9233,12 @@ INT_PTR CALLBACK DlgMultiROMProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		LocalizeDialog(hDlg);
 		WinRefreshDisplay();
 		TCHAR path[MAX_PATH];
-		// Same order the loader uses: the BIOS Manager's slot, then stbios.bin.
+		// The loader takes the BIOS Manager's slot and nothing else.
 		const std::string assigned = S9xResolveBiosPath(S9X_BIOS_SUFAMI);
-		bool found = !assigned.empty();
+		const bool found = !assigned.empty();
+		path[0] = TEXT('\0');
 		if(found)
 			lstrcpyn(path, _tFromChar(assigned.c_str()), MAX_PATH);
-		else
-		{
-			SetCurrentDirectory(S9xGetDirectoryT(BIOS_DIR));
-			_tfullpath(path, TEXT("stbios.bin"), MAX_PATH);
-			FILE* ftemp = _tfopen(path, TEXT("rb"));
-			if(ftemp)
-			{
-				fclose(ftemp);
-				found = true;
-			}
-		}
 		SetDlgItemText(hDlg, IDC_MULTICART_BIOSEDIT, path);
 		SetDlgItemText(hDlg, IDC_MULTICART_BIOSNOTFOUND,
 			found ? MULTICART_BIOS_FOUND : MULTICART_BIOS_NOT_FOUND);

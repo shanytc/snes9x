@@ -36,20 +36,6 @@ void refresh_row_status(int slot, Row &row)
     row.clear->set_sensitive(!text.empty());   // nothing to clear on a blank row
     if (text.empty())
     {
-        // People forget what they dropped into BIOS/: when the by-name search
-        // turns up a usable file there, say so, since that is what will load.
-        std::string detail;
-        std::string found = S9xFindBiosInBiosDir(slot, &detail);
-        if (!found.empty())
-        {
-            if (!detail.empty())
-                found += " (" + detail + ")";
-            row.status->set_markup("<span foreground='#27ae60'>" +
-                                   Glib::Markup::escape_text(_("Resolved BIOS: ") + found) +
-                                   "</span>");
-            return;
-        }
-
         // Empty is fine for some slots and not others, so say which.
         const char *note = S9xGetBiosSlotInfo(slot)->note;
         row.status->set_markup(note ? "<span foreground='#7f8c8d'>" +
@@ -115,8 +101,8 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
     content->set_border_width(10);
 
     auto *intro = Gtk::manage(new Gtk::Label());
-    intro->set_text(_("Point each entry at its BIOS file. Anything left blank falls back "
-                      "to the usual search by filename in the BIOS folder."));
+    intro->set_text(_("Point each entry at its BIOS file. Nothing is searched for: "
+                      "a blank entry means that BIOS is unavailable."));
     intro->set_line_wrap(true);
     intro->set_max_width_chars(70);
     intro->set_xalign(0.0f);

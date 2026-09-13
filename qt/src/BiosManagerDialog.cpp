@@ -21,8 +21,8 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
 
     auto outer = new QVBoxLayout(this);
 
-    auto intro = new QLabel(tr("Point each entry at its BIOS file. Anything left blank "
-                               "falls back to the usual search by filename in the BIOS folder."));
+    auto intro = new QLabel(tr("Point each entry at its BIOS file. Nothing is searched for: "
+                               "a blank entry means that BIOS is unavailable."));
     intro->setWordWrap(true);
     outer->addWidget(intro);
 
@@ -101,20 +101,6 @@ void BiosManagerDialog::refreshRowStatus(int slot)
 
     if (text.isEmpty())
     {
-        // People forget what they dropped into BIOS/: when the by-name search
-        // turns up a usable file there, say so, since that is what will load.
-        std::string detail;
-        const std::string found = S9xFindBiosInBiosDir(slot, &detail);
-        if (!found.empty())
-        {
-            QString shown = tr("Resolved BIOS: ") + QString::fromStdString(found);
-            if (!detail.empty())
-                shown += " (" + QString::fromStdString(detail) + ")";
-            status->setText(shown);
-            status->setStyleSheet("color: #27ae60;");
-            return;
-        }
-
         // Empty is fine for some slots and not others, so say which.
         const char *note = S9xGetBiosSlotInfo(slot)->note;
         status->setText(note ? tr(note) : QString());

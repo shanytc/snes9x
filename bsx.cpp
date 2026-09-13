@@ -1214,13 +1214,10 @@ static bool8 BSX_LoadBIOS (void)
 	std::vector<uint8>	img;
 	bool8				r = FALSE;
 
-	// A path set in the BIOS Manager wins over the by-name search and may be a
-	// .zip; a bad file there still falls through to the names in the BIOS
-	// folder and its subfolders.
+	// The BIOS Manager slot, which may be a .zip, is the only source.
 	const std::string assigned = S9xResolveBiosPath(S9X_BIOS_BSX);
-	if (!assigned.empty() && S9xReadBiosImage(assigned.c_str(), img, BIOS_SIZE) && img.size() == BIOS_SIZE)
-		r = TRUE;
-	else if (!S9xFindBiosByName(S9X_BIOS_BSX, S9xBiosSearchDirs(), img, BIOS_SIZE, AcceptBSXSize, NULL).empty())
+	if (!assigned.empty() &&
+	    S9xReadBiosImage(assigned.c_str(), img, BIOS_SIZE, AcceptBSXSize, NULL))
 		r = TRUE;
 	if (r)
 		memcpy(BIOSROM, img.data(), BIOS_SIZE);

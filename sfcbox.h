@@ -124,7 +124,7 @@ struct SSFCBox
 extern struct SSFCBox	SFCBox;
 
 // Loader side (memmap.cpp calls these)
-bool8	S9xSFCBoxLoadKROM (void);		// KROM1.BIN (+MB90082.BIN) from BIOS/ROM dir
+bool8	S9xSFCBoxLoadKROM (void);		// KROM1.BIN (+MB90082.BIN) from their BIOS Manager slots
 void	S9xSFCBoxPowerOn (void);		// full board reset; SNES ends up held
 void	S9xSFCBoxDeactivate (void);
 

@@ -700,6 +700,7 @@
 #define IDC_BIOSMGR_BROWSE0             3420
 #define IDC_BIOSMGR_CLEAR0              3430
 #define IDC_BIOSMGR_STATUS0             3440
+#define IDC_BIOSMGR_INTRO               3450
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361

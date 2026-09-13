@@ -3,6 +3,7 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "biosmanager.h"
 #include "srtc.h"
 #include "apu/apu.h"
 #include "apu/bapu/snes/snes.hpp"
@@ -1511,6 +1512,27 @@ static void check_system_specs(void)
     environ_cb(RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL, &level);
 }
 
+// No BIOS Manager dialog here: the frontend's system directory stands in for
+// it. A blank slot takes the first of its conventional filenames found there,
+// plain files only, and that is then the only place the loader looks.
+static void seed_bios_slots_from_system_dir(void)
+{
+    for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+    {
+        if (S9xGetBiosPath(slot)[0]) continue;
+        for (const char *const *n = S9xGetBiosSlotInfo(slot)->names; *n; n++)
+        {
+            char path[PATH_MAX + 1];
+            snprintf(path, sizeof path, "%s%s%s", retro_system_directory, SLASH_STR, *n);
+            FILE *f = fopen(path, "rb");
+            if (!f) continue;
+            fclose(f);
+            S9xSetBiosPath(slot, path);
+            break;
+        }
+    }
+}
+
 void retro_init(void)
 {
     struct retro_log_callback log;
@@ -1526,6 +1548,7 @@ void retro_init(void)
         snprintf(retro_system_directory, sizeof(retro_system_directory), "%s", dir);
     else
         snprintf(retro_system_directory, sizeof(retro_system_directory), "%s", ".");
+    seed_bios_slots_from_system_dir();
 
     if (environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &dir) && dir)
         snprintf(retro_save_directory, sizeof(retro_save_directory), "%s", dir);

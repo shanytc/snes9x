@@ -701,7 +701,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     }
     EndSection();
 
-    // Explicit BIOS file paths; empty means fall back to the by-name search.
+    // Explicit BIOS file paths; empty means that BIOS is unavailable.
     // bios_paths is the source of truth here; push it into the core on read so
     // the two agree no matter when the core is constructed relative to this.
     BeginSection("BIOS");

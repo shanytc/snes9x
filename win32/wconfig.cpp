@@ -26,6 +26,8 @@
 #include "../spc7110.h"
 #include "../gfx.h"
 #include "../snapshot.h"
+#include "../sgb/gb_viewer.h"
+#include "../sgb/sgb.h"
 #ifdef NETPLAY_SUPPORT
 	#include "../netplay.h"
 	extern SNPServer NPServer;
@@ -302,6 +304,94 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 	{
 		if(!strcasecmp(parameters[i], "/?") || !strcasecmp(parameters[i], "-h"))
 			S9xUsage();
+	}
+
+	// A viewer seat: map the master's session before anything else runs, so
+	// the whole GUI comes up already knowing it never emulates.
+	const size_t gbview_len = strlen(GBVIEW_SWITCH_A);
+	for (int i = 0; i < count; i++)
+	{
+		if (strncasecmp(parameters[i], GBVIEW_SWITCH_A, gbview_len) != 0 ||
+		    parameters[i][gbview_len] != '=')
+			continue;
+
+		char *end = NULL;
+		const unsigned long pid = strtoul(parameters[i] + gbview_len + 1, &end, 10);
+		long seat = 0, players = 0;
+		if (end && *end == ',') seat    = strtol(end + 1, &end, 10);
+		if (end && *end == ',') players = strtol(end + 1, &end, 10);
+		if (seat < 2) seat = 2;
+		if (seat > SGB_MAX_LINK_PLAYERS) seat = SGB_MAX_LINK_PLAYERS;
+		if (players < 2) players = 2;
+		if (players > SGB_MAX_LINK_PLAYERS) players = SGB_MAX_LINK_PLAYERS;
+
+		// Peer housekeeping applies (muting, placement, no hosting).
+		// A viewer never emulates, so it runs as a plain Game Boy whatever
+		// the master boots; the config file keeps the user's own model.
+		Settings.GBLinkPeerInstance = TRUE;
+		Settings.GBLinkPlayerIndex  = (uint8)seat;
+		GBLinkUserModel             = Settings.GBBootPolicy;
+		Settings.GBBootPolicy       = S9X_GBBOOT_GB;
+		GBLinkPartnerPid     = (DWORD)pid;
+		GBLinkLauncherIndex  = 1;
+		GBLinkSessionPlayers = (int)players;
+		S9xSGBViewerClientStart(pid, (int)seat, (int)players);
+
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
+	}
+
+	// Strip before the portable parser sees it: S9xParseArgs would take the
+	// unknown option for a ROM name.
+	const size_t gblink_len = strlen(GBLINK_PEER_SWITCH_A);
+	for (int i = 0; i < count; i++)
+	{
+		if (strncasecmp(parameters[i], GBLINK_PEER_SWITCH_A, gblink_len) != 0)
+			continue;
+
+		Settings.GBLinkPeerInstance = TRUE;
+		if (parameters[i][gblink_len] == '=')
+		{
+			char *end = NULL;
+			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
+
+			// "<pid>,<launcher>,<index>,<players>,<model>": our own index is
+			// spelled out so a hub seat keeps its player number. The old
+			// two-value form only names the launcher; we are the other half
+			// of that pair, so {1,2} still falls out.
+			long launcher = 0, index = 0, players = 0, model = -1;
+			if (end && *end == ',') launcher = strtol(end + 1, &end, 10);
+			if (end && *end == ',') index    = strtol(end + 1, &end, 10);
+			if (end && *end == ',') players  = strtol(end + 1, &end, 10);
+			if (end && *end == ',') model    = strtol(end + 1, &end, 10);
+
+			if (index < 1) index = (launcher == 1) ? 2 : 1;
+			if (index > 4) index = 4;
+			Settings.GBLinkPlayerIndex = (uint8)index;
+
+			if (launcher < 1) launcher = 1;
+			if (launcher > 4) launcher = 4;
+			GBLinkLauncherIndex = (int)launcher;
+
+			// The master's Game Boy Model overrides the shared config, which
+			// may have been saved under a different pick.
+			if (model >= 0 && model < S9X_NUM_GBBOOT_POLICIES)
+			{
+				GBLinkUserModel       = Settings.GBBootPolicy;
+				Settings.GBBootPolicy = S9xNormalizeGBBootPolicy((int)model);
+			}
+
+			if (players < 2) players = 2;
+			if (players > 4) players = 4;
+			GBLinkSessionPlayers = (int)players;
+		}
+
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
 	}
 
 	const char* rf = S9xParseArgs (parameters, count);
@@ -1014,6 +1104,8 @@ void WinRegisterConfigItems()
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");
 	AddUIntC("GBBootPolicy", Settings.GBBootPolicy, 7, "console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9.");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Link Cable. Only worth changing if something else on this PC already owns 8765.");
+	AddBoolC("LinkSplitScreen", GBLinkSplitScreen, false, "Link Current Game runs its 2-4 players split screen in this window instead of spawning instances. BIOS-less GB mode only.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");
@@ -1150,6 +1242,8 @@ void WinRegisterConfigItems()
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
 	ADDN(GBModel[4],GBModelSGBC);
+	ADD(Link2P); ADD(Link3P); ADD(Link4P);
+	ADD(LinkOtherGame); ADD(LinkSplitToggle); ADD(LinkEnd);
 #undef ADD
 #undef ADDN
 
@@ -1186,6 +1280,8 @@ void WinRegisterConfigItems()
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
 	ADDXALLN(GBModel[4],GBModelSGBC);
+	ADDXALL(Link2P); ADDXALL(Link3P); ADDXALL(Link4P);
+	ADDXALL(LinkOtherGame); ADDXALL(LinkSplitToggle); ADDXALL(LinkEnd);
 #undef ADDX
 #undef ADDXN
 #undef ADDXALL
@@ -1279,13 +1375,48 @@ void WinSaveConfigFile()
 {
 	if(readOnlyConfig) return; // if user has lock on file, don't let Snes9x overwrite it
 
+	// A spawned link seat shares the master's config file but loaded it at
+	// spawn time: letting it save on exit would overwrite anything the user
+	// changed in the master mid-session (fifteen Faceball windows = fourteen
+	// stale writers racing the real one). Seats never own settings changes.
+	if(Settings.GBLinkPeerInstance) return;
+
 	ConfigFile&	conf = loaded_config_file;
 	conf.ClearUnused();
 
 	WinPreSave(conf);
 
+	// The link session forces these two; the file keeps the user's own values.
+	bool userPause = false, userBackground = false;
+	const bool linkForced = GBLinkGetUserResponsiveSettings(&userPause, &userBackground);
+	const bool livePause = GUI.InactivePause, liveBackground = GUI.BackgroundInput;
+	if(linkForced)
+	{
+		GUI.InactivePause   = userPause;
+		GUI.BackgroundInput = userBackground;
+	}
+
+	// Same for the spawned seat's forced Mute: the file keeps the user's.
+	bool userMute = false;
+	const bool muteForced = GBLinkGetUserMute(&userMute);
+	const bool liveMute = GUI.Mute;
+	if(muteForced) GUI.Mute = userMute;
+
+	// And its forced Game Boy Model (a launch switch overrode the file's).
+	const uint8 liveModel = Settings.GBBootPolicy;
+	if(GBLinkUserModel >= 0)
+		Settings.GBBootPolicy = (uint8)GBLinkUserModel;
+
 	for(unsigned int i = 0 ; i < configItems.size()	; i++)
 		configItems[i].Set(conf);
+
+	if(linkForced)
+	{
+		GUI.InactivePause   = livePause;
+		GUI.BackgroundInput = liveBackground;
+	}
+	if(muteForced) GUI.Mute = liveMute;
+	if(GBLinkUserModel >= 0) Settings.GBBootPolicy = liveModel;
 
 	bool wasLocked = locked_file!=NULL;
 	if(wasLocked) WinUnlockConfigFile();

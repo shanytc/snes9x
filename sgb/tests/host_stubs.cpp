@@ -16,6 +16,7 @@
 uint8 mul_brightness[16][32] = {};
 
 void S9xApplyColorAdjustments (uint8 &, uint8 &, uint8 &, int) {}
+void S9xApplyImageAdjustments (uint8 &, uint8 &, uint8 &, int) {}
 
 void S9xGetLineRenderState (int, uint8 &brightness, uint16 &backdrop)
 {

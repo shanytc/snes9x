@@ -27,6 +27,7 @@
 #include "sgbc_patches.h"
 #include "sgbc.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstddef>
@@ -2460,6 +2461,91 @@ void Emulator::CaptureScanline(const uint8_t *pixels)
 	icd.sgb_row_latched  = icd.sgb_row;
 }
 
+// Game Boy Color screen correction. CGB palettes are picked for that LCD,
+// whose primaries bleed into one another and whose white sits below full, so
+// feeding them to a monitor untouched is what makes GBC output look so much
+// more saturated than the handheld. This is the profile Gambatte and RetroArch
+// ship as their "accurate" mode (pokefan531's panel measurements): linearise
+// the channels at gamma 2.2, mix them through the panel matrix at 94% of full
+// luminance, then compress back.
+static void GbcPanelColor(uint8 &r, uint8 &g, uint8 &b)
+{
+	static double linear[32];
+	static bool   linear_built = false;
+	if (!linear_built)
+	{
+		for (int v = 0; v < 32; ++v) linear[v] = std::pow(v / 31.0, 2.2);
+		linear_built = true;
+	}
+
+	// rows: output R, G, B -- columns: how much of input R, G, B each takes
+	static const double panel[3][3] = {
+		{ 0.820, 0.240, -0.060 },
+		{ 0.125, 0.665,  0.210 },
+		{ 0.195, 0.075,  0.730 },
+	};
+	const double LUM = 0.94;
+	const double in[3] = { linear[r], linear[g], linear[b] };
+	uint8 *const out[3] = { &r, &g, &b };
+
+	for (int ch = 0; ch < 3; ++ch)
+	{
+		double v = LUM * (panel[ch][0] * in[0] + panel[ch][1] * in[1] +
+		                  panel[ch][2] * in[2]);
+		if (v < 0.0) v = 0.0;
+		v = std::pow(v, 1.0 / 2.2);
+		if (v > 1.0) v = 1.0;
+		*out[ch] = static_cast<uint8>(v * 31.0 + 0.5);
+	}
+}
+
+// Every Game Boy pixel as the Color Correction dialog wants it shown: the CGB
+// panel curve for color output, then the gamma / contrast / saturation sliders,
+// which apply to any picture. 5 bits in and out, so each variant is one table
+// over the whole 15-bit color space; both are rebuilt when the dialog changes
+// anything they stand for.
+static const uint16_t *GbColorTable(bool cgb)
+{
+	static uint16_t table[2][1u << 15];
+	static uint32_t key   = 0;
+	static bool     valid = false;
+
+	const uint32_t settings =
+		(Settings.ColorCorrection    ? 1u : 0u) |
+		(Settings.AdjustmentsEnabled ? 2u : 0u) |
+		(static_cast<uint32_t>(Settings.Gamma      + 100) <<  2) |
+		(static_cast<uint32_t>(Settings.Contrast   + 100) << 11) |
+		(static_cast<uint32_t>(Settings.Saturation + 100) << 20);
+
+	if (valid && settings == key) return table[cgb ? 1 : 0];
+
+	for (uint32_t c = 0; c < (1u << 15); ++c)
+	{
+		for (int variant = 0; variant < 2; ++variant)
+		{
+			uint8 r = static_cast<uint8>(c & 0x1F);
+			uint8 g = static_cast<uint8>((c >> 5) & 0x1F);
+			uint8 b = static_cast<uint8>((c >> 10) & 0x1F);
+			if (variant == 1 && Settings.ColorCorrection)
+				GbcPanelColor(r, g, b);
+			S9xApplyImageAdjustments(r, g, b, 0x1F);
+			table[variant][c] = static_cast<uint16_t>(r | (g << 5) | (b << 10));
+		}
+	}
+	key   = settings;
+	valid = true;
+	return table[cgb ? 1 : 0];
+}
+
+// `cgb` says whether this pixel came out of the CGB color path, which is the
+// only one the panel curve belongs on; the sliders apply either way.
+static inline uint16_t GbShowColor(uint16_t bgr555, bool cgb)
+{
+	if (!Settings.ColorCorrection && !Settings.AdjustmentsEnabled)
+		return bgr555;
+	return GbColorTable(cgb)[bgr555 & 0x7FFF];
+}
+
 static inline uint16_t BgrToHost(uint16_t bgr)
 {
 	const uint16_t r = static_cast<uint16_t>(bgr & 0x1F);
@@ -2512,7 +2598,8 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 		{
 			if (impl_->ppu.cgb)
 			{
-				dst_row[px] = impl_->ppu.color_fb[py * GB_SCREEN_WIDTH + px];
+				dst_row[px] = GbShowColor(
+					impl_->ppu.color_fb[py * GB_SCREEN_WIDTH + px], true);
 				continue;
 			}
 			uint16_t color;
@@ -2533,7 +2620,7 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 					break;
 				}
 			}
-			dst_row[px] = color;
+			dst_row[px] = GbShowColor(color, false);
 		}
 	}
 
@@ -2583,7 +2670,7 @@ void Emulator::BlitScreenGB(uint16_t *dest, uint32_t pitch_pixels)
 					break;
 				}
 			}
-			dst_row[px] = BgrToHost(color);
+			dst_row[px] = BgrToHost(GbShowColor(color, impl_->ppu.cgb));
 		}
 	}
 }

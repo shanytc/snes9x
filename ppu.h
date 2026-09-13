@@ -209,6 +209,7 @@ uint8 S9xGetCPU (uint16);
 void S9xUpdateIRQPositions (bool initial);
 void S9xFixColourBrightness (void);
 void S9xApplyColorAdjustments (uint8 &r, uint8 &g, uint8 &b, int maxVal);
+void S9xApplyImageAdjustments (uint8 &r, uint8 &g, uint8 &b, int maxVal);
 void S9xDoAutoJoypad (void);
 
 #include "gfx.h"

@@ -8266,6 +8266,20 @@ static void EnableAdjustmentSliders(HWND hDlg, BOOL enable)
 	EnableWindow(GetDlgItem(hDlg, IDC_EDIT_SATURATION), enable);
 }
 
+// Which console screen the correction models, for the Color Correction dialog.
+// A Game Boy game running in color gets the CGB LCD curve (in the GB blit);
+// everything else the SNES one, SGB sessions included, since there the SNES
+// draws the picture. NULL when there is nothing to correct: no game running,
+// or a Game Boy picture in plain shades.
+static const TCHAR *ColorCorrectionSystem()
+{
+	if (Settings.StopEmulation)
+		return NULL;
+	if (Settings.SuperGameBoy)
+		return S9xSGBIsCgbRender() ? TEXT("GBC") : NULL;
+	return TEXT("SNES");
+}
+
 INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	static bool prevColorCorrection;
@@ -8284,6 +8298,17 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 
 		CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE, Settings.ColorCorrection ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_ADJUSTMENTS_ENABLE, Settings.AdjustmentsEnabled ? BST_CHECKED : BST_UNCHECKED);
+
+		{
+			const TCHAR *system = ColorCorrectionSystem();
+			TCHAR label[128];
+			if (system)
+				_stprintf(label, TEXT("Enable Color Correction (accurate %s Colors)"), system);
+			else
+				lstrcpy(label, TEXT("Enable Color Correction"));
+			SetDlgItemText(hDlg, IDC_COLOR_CORRECTION_ENABLE, label);
+			EnableWindow(GetDlgItem(hDlg, IDC_COLOR_CORRECTION_ENABLE), system != NULL);
+		}
 
 		SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETRANGE, TRUE, MAKELONG(-100, 100));
 		SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETPOS, TRUE, Settings.Gamma);

@@ -195,6 +195,38 @@ static inline uint8 ClampColor (int v, int max)
 	return (uint8)v;
 }
 
+static void AdjustColor (double &fr, double &fg, double &fb)
+{
+	// Gamma: slider left=darker, right=brighter. Exponential symmetric mapping.
+	// gamma exponent = 2^(-v/100): v=-100 -> 2.0 (darker), v=+100 -> 0.5 (brighter)
+	if (Settings.Gamma != 0)
+	{
+		double gammaExp = pow(2.0, -Settings.Gamma / 100.0);
+		fr = pow(fr, gammaExp);
+		fg = pow(fg, gammaExp);
+		fb = pow(fb, gammaExp);
+	}
+
+	// Contrast: linear around 0.5. v=-100 -> 0 (flat gray), v=+100 -> 2x contrast
+	if (Settings.Contrast != 0)
+	{
+		double contrast = 1.0 + Settings.Contrast / 100.0;
+		fr = (fr - 0.5) * contrast + 0.5;
+		fg = (fg - 0.5) * contrast + 0.5;
+		fb = (fb - 0.5) * contrast + 0.5;
+	}
+
+	// Saturation: v=-100 -> grayscale, v=+100 -> 2x saturated
+	if (Settings.Saturation != 0)
+	{
+		double luma = 0.2126 * fr + 0.7152 * fg + 0.0722 * fb;
+		double sat = 1.0 + Settings.Saturation / 100.0;
+		fr = luma + (fr - luma) * sat;
+		fg = luma + (fg - luma) * sat;
+		fb = luma + (fb - luma) * sat;
+	}
+}
+
 void S9xApplyColorAdjustments (uint8 &r, uint8 &g, uint8 &b, int maxVal)
 {
 	bool needsCorrection = Settings.ColorCorrection;
@@ -219,36 +251,27 @@ void S9xApplyColorAdjustments (uint8 &r, uint8 &g, uint8 &b, int maxVal)
 	}
 
 	if (needsAdjustment)
-	{
-		// Gamma: slider left=darker, right=brighter. Exponential symmetric mapping.
-		// gamma exponent = 2^(-v/100): v=-100 -> 2.0 (darker), v=+100 -> 0.5 (brighter)
-		if (Settings.Gamma != 0)
-		{
-			double gammaExp = pow(2.0, -Settings.Gamma / 100.0);
-			fr = pow(fr, gammaExp);
-			fg = pow(fg, gammaExp);
-			fb = pow(fb, gammaExp);
-		}
+		AdjustColor(fr, fg, fb);
 
-		// Contrast: linear around 0.5. v=-100 -> 0 (flat gray), v=+100 -> 2x contrast
-		if (Settings.Contrast != 0)
-		{
-			double contrast = 1.0 + Settings.Contrast / 100.0;
-			fr = (fr - 0.5) * contrast + 0.5;
-			fg = (fg - 0.5) * contrast + 0.5;
-			fb = (fb - 0.5) * contrast + 0.5;
-		}
+	r = ClampColor((int)(fr * maxVal + 0.5), maxVal);
+	g = ClampColor((int)(fg * maxVal + 0.5), maxVal);
+	b = ClampColor((int)(fb * maxVal + 0.5), maxVal);
+}
 
-		// Saturation: v=-100 -> grayscale, v=+100 -> 2x saturated
-		if (Settings.Saturation != 0)
-		{
-			double luma = 0.2126 * fr + 0.7152 * fg + 0.0722 * fb;
-			double sat = 1.0 + Settings.Saturation / 100.0;
-			fr = luma + (fr - luma) * sat;
-			fg = luma + (fg - luma) * sat;
-			fb = luma + (fb - luma) * sat;
-		}
-	}
+// The gamma / contrast / saturation sliders on their own, without a console
+// correction curve in front of them. The Game Boy blit path uses this: there
+// the Game Boy Color panel matrix stands in for the SNES gamma.
+void S9xApplyImageAdjustments (uint8 &r, uint8 &g, uint8 &b, int maxVal)
+{
+	if (!Settings.AdjustmentsEnabled ||
+	    (Settings.Gamma == 0 && Settings.Contrast == 0 && Settings.Saturation == 0))
+		return;
+
+	double fr = (double)r / maxVal;
+	double fg = (double)g / maxVal;
+	double fb = (double)b / maxVal;
+
+	AdjustColor(fr, fg, fb);
 
 	r = ClampColor((int)(fr * maxVal + 0.5), maxVal);
 	g = ClampColor((int)(fg * maxVal + 0.5), maxVal);

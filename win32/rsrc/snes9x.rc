@@ -875,7 +875,7 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTI
 CAPTION "Color Correction"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    CONTROL         "Enable Color Correction (accurate SNES colors)",IDC_COLOR_CORRECTION_ENABLE,
+    CONTROL         "Enable Color Correction",IDC_COLOR_CORRECTION_ENABLE,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,10,200,10
     GROUPBOX        "Adjustments",IDC_STATIC,6,28,248,120
     CONTROL         "Apply Adjustments",IDC_ADJUSTMENTS_ENABLE,

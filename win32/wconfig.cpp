@@ -874,6 +874,11 @@ void WinRegisterConfigItems()
 	AddIntC("Window:Left", GUI.window_size.left, 0, "in pixels from left edge of screen");
 	AddIntC("Window:Top", GUI.window_size.top, 0, "in pixels from top edge of screen");
 	AddBool("Window:Maximized", GUI.window_maximized, false);
+	AddIntC("Window:SizedFor", GUI.WindowSizedFor, 0, "which console Window:Width/Height belongs to: 0=SNES, 1=Game Boy");
+	AddIntC("Window:SNESWidth", GUI.WindowSizeSnesW, 0, "client width the window returns to for SNES content (0 = keep the zoom it has)");
+	AddIntC("Window:SNESHeight", GUI.WindowSizeSnesH, 0, "client height for SNES content");
+	AddIntC("Window:GBWidth", GUI.WindowSizeGBW, 0, "client width the window returns to for Game Boy content (0 = keep the zoom it has)");
+	AddIntC("Window:GBHeight", GUI.WindowSizeGBH, 0, "client height for Game Boy content");
 	AddIntC("Window:Icon", GUI.IconIndex, 1, "selected window/taskbar icon (1-4), choose via File > Choose Icon");
 	AddBoolC("Window:WriteIconToExe", GUI.ExeIconRewriteOK, false, "when true, choosing a logo also rewrites the .exe file icon on disk (toggle via Emulation > Hacks > Allow .exe icon replacement)");
 	AddIntC("CustomRomDialog:Width", GUI.customRomDlgSettings.window_size.right, 660, "");

@@ -264,7 +264,11 @@ void WinGetContentSize(unsigned int *width, unsigned int *height)
 	// Without the Super Game Boy BIOS the Game Boy core renders its own
 	// 160x144 picture into the frame buffer; with it, the SNES draws the
 	// border and the screen is an ordinary SNES one.
-	const bool gb = (Settings.SuperGameBoy != FALSE);
+	WinGetContentSizeFor(Settings.SuperGameBoy != FALSE, width, height);
+}
+
+void WinGetContentSizeFor(bool gb, unsigned int *width, unsigned int *height)
+{
 	unsigned int w, h;
 
 	if (!gb)
@@ -667,6 +671,7 @@ void ToggleFullScreen ()
 			SetWindowPos (GUI.hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_DRAWFRAME|SWP_FRAMECHANGED);
 			RestoreMainWinPos();
 			WinApplyAlwaysOnTop();
+			WinApplyContentWindowSize();
 		}
 	} else {
 		GUI.FullScreen = !GUI.FullScreen;
@@ -690,6 +695,7 @@ void ToggleFullScreen ()
 			SetWindowPos (GUI.hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_DRAWFRAME|SWP_FRAMECHANGED);
 			RestoreMainWinPos();
 			WinApplyAlwaysOnTop();
+			WinApplyContentWindowSize();
 		}
 		if (GUI.AutomaticInputRate)
 		{

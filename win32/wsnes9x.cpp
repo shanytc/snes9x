@@ -6323,6 +6323,10 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 			ReInitSound();
 			S9xMessage(S9X_INFO, 0, "Playback rate not usable here - switched to 48 kHz");
 		}
+
+		// The console may have changed with the load, and the two picture
+		// sizes are far apart.
+		WinApplyContentWindowSize();
 	}
 
 	if(GUI.ControllerOption == SNES_SUPERSCOPE || GUI.ControllerOption == SNES_MACSRIFLE)
@@ -6777,6 +6781,77 @@ void WinApplyAlwaysOnTop()
 
 	SetWindowPos(GUI.hWnd, GUI.AlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
 		0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+// A Game Boy picture is 160x144 and a SNES one 256x224, so a window sized for
+// one leaves the other stretched or shrunk. Each console keeps its own size:
+// loading content of the other kind stores the size the window had and takes
+// back the size that console was last given. A console with no size yet keeps
+// the zoom the window is already at, rather than jumping to some default.
+void WinApplyContentWindowSize()
+{
+	// Fullscreen runs the window at the display's size and restores the
+	// windowed one on the way out, which is where this runs again.
+	if (!GUI.hWnd || GUI.FullScreen || GUI.EmulatedFullscreen)
+		return;
+
+	const bool gb      = (Settings.SuperGameBoy != FALSE);
+	const int  content = gb ? 1 : 0;
+	if (content == GUI.WindowSizedFor)
+		return;
+
+	RECT client;
+	GetClientRect(GUI.hWnd, &client);
+	const bool maximized = IsZoomed(GUI.hWnd) != 0;
+
+	// what the console we are leaving had, so it comes back to this
+	if (!maximized && client.right > 0 && client.bottom > 0)
+	{
+		if (GUI.WindowSizedFor == 1)
+		{
+			GUI.WindowSizeGBW = client.right;
+			GUI.WindowSizeGBH = client.bottom;
+		}
+		else
+		{
+			GUI.WindowSizeSnesW = client.right;
+			GUI.WindowSizeSnesH = client.bottom;
+		}
+	}
+
+	const int wasFor = GUI.WindowSizedFor;
+	GUI.WindowSizedFor = content;
+
+	// a maximized window letterboxes the picture, so leave it maximized
+	if (maximized)
+		return;
+
+	int width  = gb ? GUI.WindowSizeGBW : GUI.WindowSizeSnesW;
+	int height = gb ? GUI.WindowSizeGBH : GUI.WindowSizeSnesH;
+
+	unsigned int contentW, contentH;
+	WinGetContentSize(&contentW, &contentH);
+
+	if (width <= 0 || height <= 0)
+	{
+		// never sized for this console: carry over the zoom, measured off the
+		// picture the window was holding until now
+		unsigned int wasW, wasH;
+		WinGetContentSizeFor(wasFor == 1, &wasW, &wasH);
+		const int had = (int)wasW;
+		int factor = (had > 0 && client.right > 0)
+		           ? (client.right + had / 2) / had : 2;
+		if (factor < 1)  factor = 1;
+		if (factor > 10) factor = 10;
+		width  = (int)contentW * factor;
+		height = (int)contentH * factor;
+	}
+
+	RECT margins = GetWindowMargins(GUI.hWnd, width);
+	SetWindowPos(GUI.hWnd, NULL, 0, 0,
+		width + margins.left + margins.right,
+		height + margins.top + margins.bottom,
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void WinDeleteRecentGamesList ()

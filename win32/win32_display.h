@@ -30,6 +30,8 @@ void WinChangeWindowSize(unsigned int newWidth, unsigned int newHeight);
 // The unscaled picture for whatever is loaded, with GUI.AspectWidth's shape
 // applied: what Video -> Window Size multiplies and what the blit is held to.
 void WinGetContentSize(unsigned int *width, unsigned int *height);
+// The same for whichever console is named, rather than the loaded one.
+void WinGetContentSizeFor(bool gb, unsigned int *width, unsigned int *height);
 bool WinDisplayReset(void);
 void WinRecreateRenderWindow(void);
 void WinDisplayApplyChanges();

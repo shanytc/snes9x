@@ -356,6 +356,13 @@ struct sGUI {
 
 	// keep the window above every other one (reading a FAQ or map while playing)
 	bool AlwaysOnTop;
+
+	// A window size per console, since 256x224 and 160x144 are far enough
+	// apart that one size cannot suit both. WindowSizedFor says which of
+	// them the live window belongs to. 0 means never sized for that one.
+	int WindowSizeSnesW, WindowSizeSnesH;
+	int WindowSizeGBW, WindowSizeGBH;
+	int WindowSizedFor;
 };
 
 //TURBO masks
@@ -655,6 +662,7 @@ const TCHAR * S9xGetDirectoryT (enum s9x_getdirtype);
 RECT GetWindowMargins(HWND hwnd, UINT width);
 void WinApplyResizeLock();
 void WinApplyAlwaysOnTop();
+void WinApplyContentWindowSize();
 void GetSlotFilename(int slot, char filename[_MAX_PATH + 1]);
 void FreezeUnfreezeSlot(int slot, bool8 freeze);
 void FreezeUnfreezeDialog(bool8 freeze);

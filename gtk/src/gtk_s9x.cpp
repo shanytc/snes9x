@@ -5,8 +5,14 @@
 \*****************************************************************************/
 
 #include <csignal>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
 #define G_LOG_USE_STRUCTURED
 #define G_LOG_DOMAIN GETTEXT_PACKAGE
+// After the G_LOG_* defines above: glib-unix.h pulls in glib.h, which installs
+// its own default G_LOG_DOMAIN if one isn't set yet.
+#include <glib-unix.h>
 #include "gtk_compat.h"
 #include "gtk_config.h"
 #include "gtk_s9x.h"
@@ -34,6 +40,7 @@
 #include "fmt/format.h"
 
 static void check_pointer_timer();
+static void install_quit_signal_handlers();
 static bool idle_func();
 static bool screen_saver_check_func();
 
@@ -58,15 +65,7 @@ int main(int argc, char *argv[])
     bind_textdomain_codeset(GETTEXT_PACKAGE, "UTF-8");
     textdomain(GETTEXT_PACKAGE);
 
-    auto signal_handler = [](int signal) {
-        printf("Received signal %d\n", signal);
-        S9xExit();
-    };
-    struct sigaction sig_callback{};
-    sig_callback.sa_handler = signal_handler;
-    sigaction(15, &sig_callback, nullptr); // SIGTERM
-    sigaction(3, &sig_callback, nullptr);  // SIGQUIT
-    sigaction(2, &sig_callback, nullptr);  // SIGINT
+    install_quit_signal_handlers();
 
     Settings = {};
 
@@ -685,6 +684,57 @@ static void check_pointer_timer()
         top_level->hide_mouse_cursor();
         gui_config->pointer_is_visible = false;
     }
+}
+
+// A quit signal is delivered on whichever thread happens to be running, and
+// S9xExit() tears down GTK (leave_fullscreen_mode, delete top_level). Running
+// that straight out of the handler re-entered GObject on a thread that was
+// already inside it and segfaulted -- reliably when the signal landed during
+// window construction. The handler below is async-signal-safe: it only writes
+// the signal number to a pipe, and the GLib main loop does the actual exit,
+// from the same place a normal window close does.
+static int quit_pipe[2] = { -1, -1 };
+
+static void quit_signal_handler(int sig)
+{
+    int saved_errno = errno;
+    unsigned char num = (unsigned char)sig;
+    // write() is async-signal-safe; a full pipe just means a quit is queued.
+    ssize_t written = write(quit_pipe[1], &num, 1);
+    (void)written;
+    errno = saved_errno;
+}
+
+static gboolean quit_pipe_ready(gint fd, GIOCondition condition, gpointer data)
+{
+    unsigned char num;
+    while (read(fd, &num, 1) == 1)
+        printf("Received signal %d\n", (int)num);
+
+    S9xExit(); // does not return
+    return G_SOURCE_REMOVE;
+}
+
+static void install_quit_signal_handlers()
+{
+    if (pipe(quit_pipe) != 0)
+        return;
+
+    for (int fd : quit_pipe)
+    {
+        fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    }
+
+    g_unix_fd_add(quit_pipe[0], G_IO_IN, quit_pipe_ready, nullptr);
+
+    struct sigaction sig_callback{};
+    sig_callback.sa_handler = quit_signal_handler;
+    sigemptyset(&sig_callback.sa_mask);
+    sig_callback.sa_flags = SA_RESTART;
+    sigaction(SIGTERM, &sig_callback, nullptr);
+    sigaction(SIGQUIT, &sig_callback, nullptr);
+    sigaction(SIGINT, &sig_callback, nullptr);
 }
 
 /* Final exit point, issues exit (0) */

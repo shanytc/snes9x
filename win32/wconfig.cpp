@@ -624,8 +624,11 @@ static char filterString [1024], filterString2 [1024], snapVerString [256];
 static bool niceAlignment, showComments, readOnlyConfig;
 static int configSort;
 
+void WinGBPaletteToText();
+
 void WinPreSave(ConfigFile& conf)
 {
+	WinGBPaletteToText();
 	strcpy(filterString, "output filter: ");
 	for(int i=0;i<NUM_FILTERS;i++)
 	{
@@ -692,8 +695,39 @@ void WinPostSave(ConfigFile& conf)
 	GUI.customRomDlgSettings.window_size.right += GUI.customRomDlgSettings.window_size.left;
 	GUI.customRomDlgSettings.window_size.bottom += GUI.customRomDlgSettings.window_size.top;
 }
+// "RRGGBB,RRGGBB,RRGGBB,RRGGBB" per row, lightest shade first. Anything
+// unparseable leaves that shade at the ramp the core falls back to, so a
+// hand-edited typo costs one color rather than a black screen.
+void WinGBPaletteFromText()
+{
+	static const uint32 ramp[4] = { 0xFFFFFF, 0xADADAD, 0x525252, 0x000000 };
+	for (int reg = 0; reg < 3; reg++)
+	{
+		const char *p = GUI.GBPaletteText[reg];
+		for (int shade = 0; shade < 4; shade++)
+		{
+			while (*p == ' ' || *p == ',' || *p == '#') p++;
+			char *end = NULL;
+			const unsigned long v = strtoul(p, &end, 16);
+			Settings.GBPalette[reg][shade] = (end != p) ? (uint32)(v & 0xFFFFFF)
+			                                            : ramp[shade];
+			p = (end != p) ? end : p;
+			while (*p && *p != ',') p++;
+		}
+	}
+}
+
+void WinGBPaletteToText()
+{
+	for (int reg = 0; reg < 3; reg++)
+		sprintf(GUI.GBPaletteText[reg], "%06X,%06X,%06X,%06X",
+		        (unsigned)Settings.GBPalette[reg][0], (unsigned)Settings.GBPalette[reg][1],
+		        (unsigned)Settings.GBPalette[reg][2], (unsigned)Settings.GBPalette[reg][3]);
+}
+
 void WinPostLoad(ConfigFile& conf)
 {
+	WinGBPaletteFromText();
 	int i;
 	if(Settings.DisplayPressedKeys) Settings.DisplayPressedKeys = 2;
 	for(i=0;i<8;i++) Joypad[i+8].Enabled = Joypad[i].Enabled;
@@ -960,6 +994,9 @@ void WinRegisterConfigItems()
 	AddBoolC("ConfirmSaveLoad", GUI.ConfirmSaveLoad, false, "true to ask for confirmation when saving/loading");
 	AddBoolC("DisableResize", GUI.DisableResize, false, "true to lock the window size, so the frame cannot be dragged with the mouse (avoids accidental resizes in Super Scope games)");
 	AddBoolC("AlwaysOnTop", GUI.AlwaysOnTop, false, "true to keep the window above all other windows");
+	AddAStringC("GBPaletteBackground", GUI.GBPaletteText[0], sizeof(GUI.GBPaletteText[0]), "FFFFFF,ADADAD,525252,000000", "the four shades a plain Game Boy screen draws the background in, lightest first (Video > Color Correction)");
+	AddAStringC("GBPaletteSprites1", GUI.GBPaletteText[1], sizeof(GUI.GBPaletteText[1]), "FFFFFF,ADADAD,525252,000000", "the same for sprites using OBP0");
+	AddAStringC("GBPaletteSprites2", GUI.GBPaletteText[2], sizeof(GUI.GBPaletteText[2]), "FFFFFF,ADADAD,525252,000000", "the same for sprites using OBP1");
 	AddStringC("Language", GUI.UILanguage, 64, "", "UI language: code matching a file in i18n\\<code>.po (e.g. ja, de, pt_BR); empty = English");
 	AddBoolC("FrameAdvanceSkipsNonInput", GUI.FASkipsNonInput, false, "causes frame advance to fast-forward past frames where the game is definitely not checking input, such as during lag or loading time. EXPERIMENTAL");
 	AddBool("MovieDefaultClearSRAM", GUI.MovieClearSRAM, false);

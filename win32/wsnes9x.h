@@ -363,6 +363,10 @@ struct sGUI {
 	int WindowSizeSnesW, WindowSizeSnesH;
 	int WindowSizeGBW, WindowSizeGBH;
 	int WindowSizedFor;
+
+	// Settings.GBPalette as the config file carries it: one
+	// "RRGGBB,RRGGBB,RRGGBB,RRGGBB" per DMG palette register.
+	char GBPaletteText[3][64];
 };
 
 //TURBO masks

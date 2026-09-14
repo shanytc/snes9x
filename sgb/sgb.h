@@ -429,7 +429,14 @@ enum GBPixelLayer
 {
 	GB_PIXEL_BG     = 0,
 	GB_PIXEL_WINDOW = 1,
-	GB_PIXEL_OBJ    = 2   // sprite
+	GB_PIXEL_OBJ    = 2,  // sprite
+
+	// Flag beside the layer on a mono sprite pixel: it took OBP1 rather
+	// than OBP0. That is all that separates the two Game Boy sprite
+	// palettes once the shade is in the frame buffer, so mask a layer
+	// value with GB_PIXEL_LAYER before comparing it.
+	GB_PIXEL_OBJ_PAL1 = 4,
+	GB_PIXEL_LAYER    = 3
 };
 
 // Per-pixel source-layer map for the current GB frame (160x144), values per

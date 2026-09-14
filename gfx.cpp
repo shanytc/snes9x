@@ -884,11 +884,13 @@ static void S9xBlendGameBoyFrames (void)
 					pl = plr[gi];
 				}
 				if (layerSel == GB_BLEND_LAYER_SPRITES)
-					blendPixel = (cl == GB_PIXEL_OBJ || pl == GB_PIXEL_OBJ);  // OBJ in either frame
+					blendPixel = ((cl & GB_PIXEL_LAYER) == GB_PIXEL_OBJ ||
+					              (pl & GB_PIXEL_LAYER) == GB_PIXEL_OBJ);  // OBJ in either frame
 				else
 				{
 					const uint8 want = (layerSel == GB_BLEND_LAYER_WINDOW) ? GB_PIXEL_WINDOW : GB_PIXEL_BG;
-					blendPixel = (cl == want && pl == want);                  // that layer in both frames
+					blendPixel = ((cl & GB_PIXEL_LAYER) == want &&
+					              (pl & GB_PIXEL_LAYER) == want);  // that layer in both frames
 				}
 			}
 

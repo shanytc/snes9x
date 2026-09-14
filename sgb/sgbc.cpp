@@ -247,10 +247,10 @@ void SgbcTrnHold::Scanline(const Ppu &p)
 	const uint32_t wline = static_cast<uint32_t>(p.om.window_line);
 	for (int x = 0; x < GB_SCREEN_WIDTH; ++x)
 	{
-		if (lay[x] == GB_PIXEL_OBJ) { out[x] = p.scanline_raw[x]; continue; }
+		if ((lay[x] & GB_PIXEL_LAYER) == GB_PIXEL_OBJ) { out[x] = p.scanline_raw[x]; continue; }
 		if (!(lcdc & 0x01))         { out[x] = 0; continue; }
 		uint16_t map; uint32_t px, py;
-		if (lay[x] == GB_PIXEL_WINDOW) { map = wmap;  px = static_cast<uint32_t>(x + 7 - p.wx); py = wline; }
+		if ((lay[x] & GB_PIXEL_LAYER) == GB_PIXEL_WINDOW) { map = wmap;  px = static_cast<uint32_t>(x + 7 - p.wx); py = wline; }
 		else                           { map = bgmap; px = static_cast<uint8_t>(x + p.scx); py = static_cast<uint8_t>(p.ly + p.scy); }
 		const uint8_t tn = p.vram[map + ((py & 0xFF) >> 3) * 32 + ((px & 0xFF) >> 3)];
 		uint16_t addr = (lcdc & 0x10) ? static_cast<uint16_t>(tn * 16)

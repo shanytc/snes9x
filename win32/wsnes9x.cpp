@@ -8381,18 +8381,61 @@ static void EnableAdjustmentSliders(HWND hDlg, BOOL enable)
 	EnableWindow(GetDlgItem(hDlg, IDC_EDIT_SATURATION), enable);
 }
 
-// Which console screen the correction models, for the Color Correction dialog.
-// A Game Boy game running in color gets the CGB LCD curve (in the GB blit);
-// everything else the SNES one, SGB sessions included, since there the SNES
-// draws the picture. NULL when there is nothing to correct: no game running,
-// or a Game Boy picture in plain shades.
-static const TCHAR *ColorCorrectionSystem()
+// Which screen the Color Correction dialog is looking at. A Game Boy game
+// running in color gets the CGB LCD curve; a mono one has no curve to model
+// but picks its four shades instead; everything else the SNES curve, SGB
+// sessions included, since there the SNES draws the picture.
+enum ColorSystem { COLOR_SYSTEM_NONE, COLOR_SYSTEM_SNES, COLOR_SYSTEM_GBC,
+                   COLOR_SYSTEM_DMG };
+
+static ColorSystem ColorCorrectionSystem()
 {
 	if (Settings.StopEmulation)
-		return NULL;
+		return COLOR_SYSTEM_NONE;
 	if (Settings.SuperGameBoy)
-		return S9xSGBIsCgbRender() ? TEXT("GBC") : NULL;
-	return TEXT("SNES");
+		return S9xSGBIsCgbRender() ? COLOR_SYSTEM_GBC : COLOR_SYSTEM_DMG;
+	return COLOR_SYSTEM_SNES;
+}
+
+// The four shades a plain Game Boy screen has always used here.
+static const uint32 kGBPaletteDefault[4] = { 0xFFFFFF, 0xADADAD, 0x525252, 0x000000 };
+
+// Mesen's presets, so a palette set up there carries over unchanged. Each
+// applies to all three registers at once; individual shades are then edited
+// by clicking a swatch.
+static const struct { const TCHAR *name; uint32 shades[4]; } kGBPalettePresets[] = {
+	{ TEXT("Grayscale"),                 { 0xE8E8E8, 0xA0A0A0, 0x585858, 0x101010 } },
+	{ TEXT("Grayscale (high contrast)"), { 0xFFFFFF, 0xB0B0B0, 0x686868, 0x000000 } },
+	{ TEXT("Green"),                     { 0xE0F8D0, 0x88C070, 0x346856, 0x081820 } },
+	{ TEXT("Brown"),                     { 0xF8E088, 0xD8B058, 0x987838, 0x483818 } },
+};
+
+// The swatch ids run BG 0-3, OBP0 0-3, OBP1 0-3 in one block.
+#define GB_PAL_SWATCHES 12
+
+static void SetGBPaletteRow(int reg, const uint32 shades[4])
+{
+	for (int shade = 0; shade < 4; shade++)
+		Settings.GBPalette[reg][shade] = shades[shade];
+}
+
+static void RedrawGBPalette(HWND hDlg)
+{
+	for (int i = 0; i < GB_PAL_SWATCHES; i++)
+		InvalidateRect(GetDlgItem(hDlg, IDC_GB_PAL_BG0 + i), NULL, TRUE);
+}
+
+// The palette only reaches the screen on a mono Game Boy picture, so the
+// group follows that rather than the correction checkbox.
+static void EnableGBPalette(HWND hDlg, BOOL enable)
+{
+	static const int labels[] = { IDC_GB_PAL_GROUP, IDC_GB_PAL_LABEL_BG,
+	                              IDC_GB_PAL_LABEL_OB0, IDC_GB_PAL_LABEL_OB1,
+	                              IDC_GB_PAL_PRESET };
+	for (int i = 0; i < _countof(labels); i++)
+		EnableWindow(GetDlgItem(hDlg, labels[i]), enable);
+	for (int i = 0; i < GB_PAL_SWATCHES; i++)
+		EnableWindow(GetDlgItem(hDlg, IDC_GB_PAL_BG0 + i), enable);
 }
 
 INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -8400,6 +8443,7 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 	static bool prevColorCorrection;
 	static bool prevAdjustmentsEnabled;
 	static int prevGamma, prevContrast, prevSaturation;
+	static uint32 prevGBPalette[3][4];
 
 	switch (msg)
 	{
@@ -8410,19 +8454,23 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 		prevGamma = Settings.Gamma;
 		prevContrast = Settings.Contrast;
 		prevSaturation = Settings.Saturation;
+		memcpy(prevGBPalette, Settings.GBPalette, sizeof prevGBPalette);
 
 		CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE, Settings.ColorCorrection ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_ADJUSTMENTS_ENABLE, Settings.AdjustmentsEnabled ? BST_CHECKED : BST_UNCHECKED);
 
 		{
-			const TCHAR *system = ColorCorrectionSystem();
+			const ColorSystem system = ColorCorrectionSystem();
+			const TCHAR *name = (system == COLOR_SYSTEM_SNES) ? TEXT("SNES")
+			                  : (system == COLOR_SYSTEM_GBC)  ? TEXT("GBC") : NULL;
 			TCHAR label[128];
-			if (system)
-				_stprintf(label, TEXT("Enable Color Correction (accurate %s Colors)"), system);
+			if (name)
+				_stprintf(label, TEXT("Enable Color Correction (accurate %s Colors)"), name);
 			else
 				lstrcpy(label, TEXT("Enable Color Correction"));
 			SetDlgItemText(hDlg, IDC_COLOR_CORRECTION_ENABLE, label);
-			EnableWindow(GetDlgItem(hDlg, IDC_COLOR_CORRECTION_ENABLE), system != NULL);
+			EnableWindow(GetDlgItem(hDlg, IDC_COLOR_CORRECTION_ENABLE), name != NULL);
+			EnableGBPalette(hDlg, system == COLOR_SYSTEM_DMG);
 		}
 
 		SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETRANGE, TRUE, MAKELONG(-100, 100));
@@ -8445,6 +8493,42 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 
 		return TRUE;
 
+	case WM_DRAWITEM:
+	{
+		const DRAWITEMSTRUCT *di = (const DRAWITEMSTRUCT *)lParam;
+		const int swatch = (int)di->CtlID - IDC_GB_PAL_BG0;
+		if (swatch < 0 || swatch >= GB_PAL_SWATCHES)
+			break;
+
+		const uint32 rgb = Settings.GBPalette[swatch / 4][swatch % 4];
+		int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+		if (di->itemState & ODS_DISABLED)
+		{
+			// Halfway to the dialog face, so a palette that cannot be edited
+			// still reads as a palette but looks as disabled as its label.
+			const COLORREF face = GetSysColor(COLOR_3DFACE);
+			r = (r + GetRValue(face)) / 2;
+			g = (g + GetGValue(face)) / 2;
+			b = (b + GetBValue(face)) / 2;
+		}
+		HBRUSH fill = CreateSolidBrush(RGB(r, g, b));
+		FillRect(di->hDC, &di->rcItem, fill);
+		DeleteObject(fill);
+
+		// A focused or pushed swatch says so with its frame, since an
+		// owner-drawn button draws none of its own.
+		DrawEdge(di->hDC, (LPRECT)&di->rcItem,
+		         (di->itemState & ODS_SELECTED) ? BDR_SUNKENOUTER : BDR_RAISEDINNER,
+		         BF_RECT);
+		if (di->itemState & ODS_FOCUS)
+		{
+			RECT focus = di->rcItem;
+			InflateRect(&focus, -2, -2);
+			DrawFocusRect(di->hDC, &focus);
+		}
+		return TRUE;
+	}
+
 	case WM_HSCROLL:
 	{
 		HWND trackHwnd = (HWND)lParam;
@@ -8464,6 +8548,30 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			EnableAdjustmentSliders(hDlg, IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED);
 			return TRUE;
 
+		case IDC_GB_PAL_PRESET:
+		{
+			HMENU menu = CreatePopupMenu();
+			if (!menu)
+				return TRUE;
+			for (int i = 0; i < _countof(kGBPalettePresets); i++)
+				AppendMenu(menu, MF_STRING, i + 1, kGBPalettePresets[i].name);
+
+			RECT button;
+			GetWindowRect(GetDlgItem(hDlg, IDC_GB_PAL_PRESET), &button);
+			const int picked = (int)TrackPopupMenu(menu,
+				TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+				button.left, button.bottom, 0, hDlg, NULL);
+			DestroyMenu(menu);
+
+			if (picked > 0)
+			{
+				for (int reg = 0; reg < 3; reg++)
+					SetGBPaletteRow(reg, kGBPalettePresets[picked - 1].shades);
+				RedrawGBPalette(hDlg);
+			}
+			return TRUE;
+		}
+
 		case IDOK:
 			Settings.ColorCorrection = IsDlgButtonChecked(hDlg, IDC_COLOR_CORRECTION_ENABLE) == BST_CHECKED;
 			Settings.AdjustmentsEnabled = IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED;
@@ -8479,10 +8587,14 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			Settings.Gamma = prevGamma;
 			Settings.Contrast = prevContrast;
 			Settings.Saturation = prevSaturation;
+			memcpy(Settings.GBPalette, prevGBPalette, sizeof prevGBPalette);
 			EndDialog(hDlg, 0);
 			return TRUE;
 
 		case IDC_DEFAULTS_COLOR:
+			for (int reg = 0; reg < 3; reg++)
+				SetGBPaletteRow(reg, kGBPaletteDefault);
+			RedrawGBPalette(hDlg);
 			CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE, BST_UNCHECKED);
 			CheckDlgButton(hDlg, IDC_ADJUSTMENTS_ENABLE, BST_UNCHECKED);
 			SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETPOS, TRUE, 0);
@@ -8493,6 +8605,32 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
 			EnableAdjustmentSliders(hDlg, FALSE);
 			return TRUE;
+
+		default:
+		{
+			const int swatch = (int)LOWORD(wParam) - IDC_GB_PAL_BG0;
+			if (HIWORD(wParam) != BN_CLICKED)
+				break;
+			if (swatch < 0 || swatch >= GB_PAL_SWATCHES)
+				break;
+
+			uint32 &shade = Settings.GBPalette[swatch / 4][swatch % 4];
+			static COLORREF custom[16];
+			CHOOSECOLOR cc = { 0 };
+			cc.lStructSize  = sizeof(cc);
+			cc.hwndOwner    = hDlg;
+			cc.rgbResult    = RGB((shade >> 16) & 0xFF, (shade >> 8) & 0xFF, shade & 0xFF);
+			cc.lpCustColors = custom;
+			cc.Flags        = CC_RGBINIT | CC_FULLOPEN;
+			if (ChooseColor(&cc))
+			{
+				shade = ((uint32)GetRValue(cc.rgbResult) << 16) |
+				        ((uint32)GetGValue(cc.rgbResult) << 8)  |
+				         (uint32)GetBValue(cc.rgbResult);
+				InvalidateRect(GetDlgItem(hDlg, IDC_GB_PAL_BG0 + swatch), NULL, TRUE);
+			}
+			return TRUE;
+		}
 		}
 		break;
 	}

@@ -59,7 +59,12 @@ std::vector<std::string> S9xGetSoundDriverNames()
 
 void S9xPortSoundInit()
 {
-    if (gui_config->sound_driver >= (int)gui_config->sound_drivers.size())
+    // The index comes straight from the config file, which inint() reads without
+    // validating, so a hand-edited or stale value can land out of range either
+    // way -- a negative one indexed sound_drivers[] out of bounds. The list
+    // always has at least "SDL", so 0 is always a valid fallback.
+    if (gui_config->sound_driver < 0 ||
+        gui_config->sound_driver >= (int)gui_config->sound_drivers.size())
         gui_config->sound_driver = 0;
 
     auto &name = gui_config->sound_drivers[gui_config->sound_driver];
@@ -138,6 +143,11 @@ void S9xPortSoundDeinit()
         driver->deinit();
 
     delete driver;
+    // The APU can still fire S9xSamplesAvailable() between here and
+    // S9xDeinitAPU(), and S9xPortSoundReinit() leaves this null if the
+    // configured name doesn't match a driver. Everything that dereferences it
+    // checks for null, so don't leave it dangling.
+    driver = nullptr;
 }
 
 void S9xSoundStart()
@@ -155,6 +165,11 @@ void S9xSoundStop()
 static std::vector<int16_t> temp_buffer;
 void S9xSamplesAvailable(void *userdata)
 {
+    // No output device: either teardown (S9xPortSoundDeinit runs before
+    // S9xDeinitAPU) or the gap inside S9xPortSoundReinit. Nothing to drain to.
+    if (!driver)
+        return;
+
     bool clear_leftover_samples = false;
     int samples = S9xGetSampleCount();
 
@@ -289,6 +304,9 @@ void S9xSamplesAvailable(void *userdata)
 
 bool8 S9xOpenSoundDevice()
 {
+    if (!driver)
+        return false;
+
     if (gui_config->mute_sound)
         return false;
 

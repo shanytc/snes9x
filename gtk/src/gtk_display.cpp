@@ -16,6 +16,7 @@
 #include "gfx.h"
 #include "netplay.h"
 #include "common/recording/avi_recorder.hpp"
+#include "common/video/screen_content.hpp"
 
 #if defined(USE_XV) && defined(GDK_WINDOWING_X11)
 #include "gtk_display_driver_xv.h"
@@ -106,6 +107,30 @@ static const uint8 scanline_shifts[] = {
 
 double S9xGetAspect()
 {
+    /* Game Boy content keeps its own shape. The setting names the shape the
+     * picture is held to, as it does on win32: square pixels leave the Game
+     * Boy's own 160x144 unstretched, and the other choices give it the same
+     * display shape a SNES picture gets at its nominal 224 lines. Holding the
+     * blit to that means a window sized from View->Change Size has no bars. */
+    if (S9xContentIsGameBoy())
+    {
+        switch (gui_config->aspect_ratio)
+        {
+        case 0: /* Square pixels */
+        case 1:
+            return 160.0 / 144.0;
+
+        case 2: /* 4:3 */
+        case 3:
+            return 4.0 / 3.0;
+
+        case 4: /* NTSC 64:49 */
+        case 5:
+        default:
+            return 64.0 / 49.0;
+        }
+    }
+
     double native_aspect = 256.0 / (gui_config->overscan ? 239.0 : 224.0);
     double aspect;
 

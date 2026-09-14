@@ -26,6 +26,7 @@
 #include "common/desktop/xdg_app_icon.hpp"
 #endif
 #include "snes9x.h"
+#include "common/video/screen_content.hpp"
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "RAIntegrationQt.hpp"
 #include "retroachievements.h"
@@ -87,6 +88,9 @@ EmuMainWindow::EmuMainWindow(EmuApplication *app)
     createWidgets();
     recreateCanvas();
     setMouseTracking(true);
+    // Before the first show, so the window comes up the way it was left.
+    applyAlwaysOnTop();
+    applyResizeLock();
 
     app->qtapp->installEventFilter(this);
     mouse_timer.setTimerType(Qt::CoarseTimer);
@@ -809,6 +813,53 @@ void EmuMainWindow::createWidgets()
     voicekun_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshVoicekunMenu);
 
+    emulation_menu->addSeparator();
+
+    /* win32's Emulation->S-PPU. The 1-5 hotkeys drive the same mask and say
+     * nothing about what is currently hidden, so the toggles get a menu that
+     * does: four graphics layers, sprites, and the clipping windows switch.
+     * No renderer work -- Settings.BG_Forced and DisableGraphicWindows have
+     * always been there.
+     *
+     * The layer mask hides a layer on the main and the sub screen at once,
+     * which is what every other emulator that offers this does. Transparency
+     * stays out of the menu: the Display panel already has a checkbox for it.
+     */
+    auto sppu_menu = new QMenu(tr("&S-PPU"));
+    struct GraphicsToggle { const char *label; const char *command; };
+    static const GraphicsToggle graphics_toggles[] = {
+        { QT_TR_NOOP("Graphics Layer &1"), "ToggleBG0"     },
+        { QT_TR_NOOP("Graphics Layer &2"), "ToggleBG1"     },
+        { QT_TR_NOOP("Graphics Layer &3"), "ToggleBG2"     },
+        { QT_TR_NOOP("Graphics Layer &4"), "ToggleBG3"     },
+        { QT_TR_NOOP("S&prites Layer"),    "ToggleSprites" },
+        { QT_TR_NOOP("Clipping &Windows"), "ClipWindows"   },
+    };
+    std::vector<QAction *> graphics_toggle_actions;
+    for (auto &toggle : graphics_toggles)
+    {
+        auto item = sppu_menu->addAction(tr(toggle.label));
+        item->setCheckable(true);
+        const char *command = toggle.command;
+        connect(item, &QAction::triggered, this, [this, command](bool checked) {
+            app->applyGraphicsCommand(command);
+        });
+        graphics_toggle_actions.push_back(item);
+    }
+    auto sppu_menu_action = emulation_menu->addMenu(sppu_menu);
+
+    connect(emulation_menu, &QMenu::aboutToShow, this,
+            [this, sppu_menu_action, graphics_toggle_actions] {
+        // Checkmarks are derived rather than stamped when clicked, so the menu
+        // reads the state the hotkeys leave behind, and follows the core
+        // clearing the mask on every ROM load.
+        for (size_t i = 0; i < 5; i++)
+            graphics_toggle_actions[i]->setChecked(!(Settings.BG_Forced & (1 << i)));
+        graphics_toggle_actions[5]->setChecked(!Settings.DisableGraphicWindows);
+        // Nothing here reaches a Game Boy picture: the S-PPU is not drawing it.
+        sppu_menu_action->setEnabled(app->isCoreActive() && !S9xContentIsGameBoy());
+    });
+
     menuBar()->addMenu(emulation_menu);
 
     // win32's Input menu: the configuration dialogs, rumble, and the device
@@ -961,15 +1012,35 @@ void EmuMainWindow::createWidgets()
     // View Menu
     auto view_menu = new QMenu(tr("&View"));
 
+    // win32's Video menu leads with these two.
+    auto always_on_top_item = view_menu->addAction(tr("Always on &Top"));
+    always_on_top_item->setCheckable(true);
+    connect(always_on_top_item, &QAction::triggered, [&](bool checked) {
+        app->config->always_on_top = checked;
+        applyAlwaysOnTop();
+    });
+
+    auto lock_resize_item = view_menu->addAction(tr("&Lock Screen Resize"));
+    lock_resize_item->setCheckable(true);
+    connect(lock_resize_item, &QAction::triggered, [&](bool checked) {
+        app->config->lock_screen_resize = checked;
+        applyResizeLock();
+    });
+
+    view_menu->addSeparator();
+
     // Set Size Menu
     auto set_size_menu = new QMenu(tr("&Set Size"));
+    std::vector<QAction *> set_size_actions;
     for (size_t i = 1; i <= 10; i++)
     {
         auto string = (i == 10) ? tr("1&0x") : tr("&%1x").arg(i);
         auto item = set_size_menu->addAction(string);
+        item->setCheckable(true);
         connect(item, &QAction::triggered, this, [&, i](bool checked) {
             resizeToMultiple(i);
         });
+        set_size_actions.push_back(item);
     }
     view_menu->addMenu(set_size_menu);
 
@@ -987,6 +1058,19 @@ void EmuMainWindow::createWidgets()
     connect(color_correction_item, &QAction::triggered, [&] {
         ColorCorrectionDialog dialog(app, this);
         dialog.exec();
+    });
+
+    connect(view_menu, &QMenu::aboutToShow, this,
+            [this, always_on_top_item, lock_resize_item, set_size_actions] {
+        always_on_top_item->setChecked(app->config->always_on_top);
+        lock_resize_item->setChecked(app->config->lock_screen_resize);
+        // Tick the Set Size the window currently has. Measured off the window
+        // rather than remembered, so dragging the frame to any other size, or
+        // loading content whose picture is a different size, simply leaves
+        // none ticked.
+        int current = currentSizeMultiple();
+        for (size_t i = 0; i < set_size_actions.size(); i++)
+            set_size_actions[i]->setChecked((int)i + 1 == current);
     });
 
     menuBar()->addMenu(view_menu);
@@ -1157,10 +1241,94 @@ void EmuMainWindow::createWidgets()
     setCentralWidget(new DefaultBackground(this));
 }
 
+QSize EmuMainWindow::sizeForMultiple(int multiple)
+{
+    // Multiples of the loaded content's own picture, so a Game Boy cart gets
+    // 160x144 steps rather than the SNES's, in the shape that content is held
+    // to -- a window sized from the menu then has no bars.
+    int content_height;
+    S9xGetContentSize(app->config->show_overscan, nullptr, &content_height);
+
+    int num, den;
+    S9xQtDisplayAspect(app->config.get(), &num, &den);
+
+    double hidpi_height = content_height / devicePixelRatioF();
+    return { (int)((hidpi_height * multiple) * num / den),
+             (int)((hidpi_height * multiple) + menuBar()->height()) };
+}
+
+// Which Set Size the window currently has, or 0 for none of them.
+int EmuMainWindow::currentSizeMultiple()
+{
+    if (isFullScreen())
+        return 0;
+
+    for (int multiple = 1; multiple <= 10; multiple++)
+    {
+        QSize wanted = sizeForMultiple(multiple);
+        // A window manager may be a pixel off what it was asked for.
+        if (qAbs(wanted.width() - width()) <= 1 &&
+            qAbs(wanted.height() - height()) <= 1)
+            return multiple;
+    }
+
+    return 0;
+}
+
+// Lock Screen Resize takes the drag border away by fixing the window size, so
+// every programmatic resize has to set the new size as the fixed one.
+void EmuMainWindow::resizeLocked(const QSize &size)
+{
+    if (app->config->lock_screen_resize && !isFullScreen())
+        setFixedSize(size);
+    else
+        resize(size);
+}
+
 void EmuMainWindow::resizeToMultiple(int multiple)
 {
-    double hidpi_height = 224 / devicePixelRatioF();
-    resize((hidpi_height * multiple) * app->config->aspect_ratio_numerator / app->config->aspect_ratio_denominator, (hidpi_height * multiple) + menuBar()->height());
+    resizeLocked(sizeForMultiple(multiple));
+}
+
+/* Keeping the window above the others. Qt rebuilds the native window when the
+ * flag changes, so a visible window has to be shown again afterwards.
+ * Wayland compositors decide the stacking order themselves and mostly ignore
+ * the hint; on X11 it is honoured.
+ */
+void EmuMainWindow::applyAlwaysOnTop()
+{
+    bool on = app->config->always_on_top;
+
+    if (windowFlags().testFlag(Qt::WindowStaysOnTopHint) == on)
+        return;
+
+    bool was_visible = isVisible();
+    setWindowFlag(Qt::WindowStaysOnTopHint, on);
+    if (was_visible)
+        show();
+}
+
+/* Locking the frame. Only the mouse loses the ability to resize: the Set Size
+ * menu, the saved geometry and both fullscreen transitions go through code
+ * that lifts the lock or sets the new size as the fixed one.
+ *
+ * The size to fix comes from the config rather than from the window, which
+ * still reports the old one right after a resize request or a fullscreen exit;
+ * the resize event keeps that pair at whatever size the window last had while
+ * windowed.
+ */
+void EmuMainWindow::applyResizeLock()
+{
+    if (app->config->lock_screen_resize && !isFullScreen())
+    {
+        QSize windowed(app->config->main_window_width,
+                       app->config->main_window_height);
+        setFixedSize(windowed.isEmpty() ? size() : windowed);
+        return;
+    }
+
+    setMinimumSize(0, 0);
+    setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
 }
 
 void EmuMainWindow::setBypassCompositor(bool bypass)
@@ -1370,7 +1538,7 @@ std::string EmuMainWindow::promptRenameMSU1Pack(const std::string &filename)
     }
 
     auto answer = QMessageBox::question(this, tr("MSU-1 Pack Detected"),
-        tr("\"%1\" holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks "
+        tr("\"%1\" holds MSU-1 audio data. SuperSnes9x can only stream MSU-1 tracks "
            "out of an archive named \".msu1\".\n\n"
            "Rename it to \"%2\" and load it?")
             .arg(info.fileName(), QFileInfo(renamed).fileName()),
@@ -1578,6 +1746,9 @@ void EmuMainWindow::toggleFullscreen()
         setBypassCompositor(false);
         showNormal();
         menuBar()->setVisible(true);
+        // Fullscreen owns the window size while it lasts, so the lock only
+        // goes back on once the window is its own again.
+        applyResizeLock();
     }
     else
     {
@@ -1587,6 +1758,8 @@ void EmuMainWindow::toggleFullscreen()
             app->updateSettings();
         }
         QCursor::setPos(mapToGlobal(rect().center()));
+        setMinimumSize(0, 0);
+        setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
         showFullScreen();
         menuBar()->setVisible(false);
         setBypassCompositor(true);

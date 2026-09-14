@@ -1113,6 +1113,14 @@ void EmuApplication::setSoundChannelMask(uint8_t mask)
     });
 }
 
+void EmuApplication::applyGraphicsCommand(const char *command)
+{
+    std::string name = command;
+    emu_thread->runOnThread([name] {
+        S9xApplyCommand(S9xGetCommandT(name.c_str()), 1, 0);
+    });
+}
+
 void EmuApplication::enableAllSoundChannels()
 {
     // All on audibly: also drops any solo engaged in the waveform viewer.

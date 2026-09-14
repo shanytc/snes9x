@@ -53,6 +53,7 @@
 #include "movie.h"
 #include "snapshot.h"
 #include "common/recording/avi_recorder.hpp"
+#include "common/video/screen_content.hpp"
 #include "apu/apu.h"
 #include "memmap.h"
 #include "cpuexec.h"
@@ -131,6 +132,10 @@ Snes9xWindow::Snes9xWindow(Snes9xConfig *config)
     window->get_window()->set_cursor();
 
     resize(config->window_width, config->window_height);
+
+    // After the saved size, so the lock pins that rather than the default one.
+    apply_always_on_top();
+    apply_resize_lock();
 }
 
 // File->Choose Icon: the four bundled logos, 1-4 like win32's Window:Icon.
@@ -555,9 +560,88 @@ void Snes9xWindow::connect_signals()
     {
         std::string name = "exact_pixels_" + std::to_string(i) + "x_item";
         get_object<Gtk::MenuItem>(name.c_str())->signal_activate().connect([i, this] {
-            resize_to_multiple(i);
+            // The menu-open sync ticks these too; only a click resizes.
+            if (!syncing_menu)
+                resize_to_multiple(i);
         });
     }
+
+    // win32's Video->Always on Top and Lock Screen Resize.
+    auto always_on_top_item = get_object<Gtk::CheckMenuItem>("always_on_top_item");
+    always_on_top_item->signal_toggled().connect([this, always_on_top_item] {
+        if (syncing_menu)
+            return;
+        config->always_on_top = always_on_top_item->get_active();
+        apply_always_on_top();
+    });
+
+    auto lock_resize_item = get_object<Gtk::CheckMenuItem>("lock_screen_resize_item");
+    lock_resize_item->signal_toggled().connect([this, lock_resize_item] {
+        if (syncing_menu)
+            return;
+        config->lock_screen_resize = lock_resize_item->get_active();
+        apply_resize_lock();
+    });
+
+    get_object<Gtk::Menu>("view_menu_menu")->signal_show().connect([this] {
+        syncing_menu = true;
+        get_object<Gtk::CheckMenuItem>("always_on_top_item")->set_active(config->always_on_top);
+        get_object<Gtk::CheckMenuItem>("lock_screen_resize_item")->set_active(config->lock_screen_resize);
+
+        int current = current_size_multiple();
+        for (int i = 1; i <= 10; i++)
+        {
+            std::string name = "exact_pixels_" + std::to_string(i) + "x_item";
+            get_object<Gtk::CheckMenuItem>(name.c_str())->set_active(i == current);
+        }
+        syncing_menu = false;
+    });
+
+    /* win32's Emulation->S-PPU. The layer hotkeys drive the same mask and say
+     * nothing about what is currently hidden, so the toggles get a menu that
+     * does: four graphics layers, sprites, and the clipping windows switch.
+     * No renderer work -- Settings.BG_Forced and DisableGraphicWindows have
+     * always been there.
+     *
+     * They run the core commands the hotkeys carry, so menu and hotkey are one
+     * code path and print the same message. The layer mask hides a layer on the
+     * main and the sub screen at once, which is what every other emulator that
+     * offers this does. Transparency stays out of the menu: the preferences
+     * dialog already has a checkbox for it. */
+    static const struct { const char *item; const char *command; } graphics_toggles[] = {
+        { "layer_1_item",       "ToggleBG0"     },
+        { "layer_2_item",       "ToggleBG1"     },
+        { "layer_3_item",       "ToggleBG2"     },
+        { "layer_4_item",       "ToggleBG3"     },
+        { "sprites_layer_item", "ToggleSprites" },
+        { "clip_windows_item",  "ClipWindows"   },
+    };
+    for (auto &toggle : graphics_toggles)
+    {
+        const char *command = toggle.command;
+        get_object<Gtk::CheckMenuItem>(toggle.item)->signal_toggled().connect([this, command] {
+            if (syncing_menu)
+                return;
+            S9xApplyCommand(S9xGetCommandT(command), 1, 0);
+        });
+    }
+
+    get_object<Gtk::Menu>("emulation_menu_item_menu")->signal_show().connect([this] {
+        // Checkmarks are derived rather than stamped when clicked, so the menu
+        // reads the state the hotkeys leave behind, and follows the core
+        // clearing the mask on every ROM load.
+        syncing_menu = true;
+        for (int i = 0; i < 5; i++)
+            get_object<Gtk::CheckMenuItem>(graphics_toggles[i].item)
+                ->set_active(!(Settings.BG_Forced & (1 << i)));
+        get_object<Gtk::CheckMenuItem>("clip_windows_item")
+            ->set_active(!Settings.DisableGraphicWindows);
+        syncing_menu = false;
+
+        // Nothing here reaches a Game Boy picture: the S-PPU is not drawing it.
+        get_object<Gtk::MenuItem>("sppu_item")
+            ->set_sensitive(config->rom_loaded && !S9xContentIsGameBoy());
+    });
 
     get_object<Gtk::MenuItem>("open_multicart_item")->signal_activate().connect([&] {
         open_multicart_dialog();
@@ -1358,7 +1442,7 @@ std::string Snes9xWindow::prompt_rename_msu1_pack(const std::string &filename)
     }
 
     std::string message = path.filename().string() +
-                          _(" holds MSU-1 audio data. Snes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to ") +
+                          _(" holds MSU-1 audio data. SuperSnes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to ") +
                           renamed.filename().string() + _(" and load it?");
     Gtk::MessageDialog msg(*window.get(), message, false, Gtk::MESSAGE_QUESTION, Gtk::BUTTONS_YES_NO, true);
 
@@ -1704,8 +1788,19 @@ void Snes9xWindow::show_color_correction_dialog()
     vbox->set_spacing(6);
     vbox->set_border_width(12);
 
-    auto correction_check = Gtk::manage(new Gtk::CheckButton(_("Enable color correction (accurate SNES colors)")));
+    /* Correction means whichever screen is being emulated, so the checkbox
+     * says which one it stands for: a Game Boy game rendering in color gets
+     * the Game Boy Color LCD curve, everything else the SNES one, SGB sessions
+     * included, since there the SNES draws the picture. It greys out when
+     * there is no screen to model -- nothing loaded, or a Game Boy picture in
+     * plain shades. */
+    const char *system = S9xColorCorrectionSystem(config->rom_loaded);
+    std::string correction_label =
+        system ? fmt::format(fmt::runtime(_("Enable color correction (accurate {0} colors)")), system)
+               : std::string(_("Enable color correction"));
+    auto correction_check = Gtk::manage(new Gtk::CheckButton(correction_label));
     correction_check->set_active(Settings.ColorCorrection);
+    correction_check->set_sensitive(system != nullptr);
     vbox->pack_start(*correction_check, Gtk::PACK_SHRINK);
 
     auto frame = Gtk::manage(new Gtk::Frame(_("Adjustments")));
@@ -2128,6 +2223,9 @@ void Snes9xWindow::enter_fullscreen_mode()
     /* Make sure everything is done synchronously */
     GdkDisplay *gdk_display = window->get_display()->gobj();
     gdk_display_sync(gdk_display);
+    // config->fullscreen is already set, so this lifts a Lock Screen Resize --
+    // pinned geometry would keep the window at its windowed size.
+    apply_resize_lock();
     window->fullscreen();
     gdk_display_sync(gdk_display);
     window->present();
@@ -2198,6 +2296,19 @@ void Snes9xWindow::leave_fullscreen_mode()
 
     if (driver)
         driver->regrow();
+
+    // The window is its own size again, so the lock can go back on it.
+    apply_resize_lock();
+}
+
+/* Refuse every size but this one, which is how the frame is locked. */
+void Snes9xWindow::set_window_size_pin(int width, int height)
+{
+    Gdk::Geometry geometry = {};
+    geometry.min_width = geometry.max_width = width;
+    geometry.min_height = geometry.max_height = height;
+    window->set_geometry_hints(*window.get(), geometry,
+                               Gdk::HINT_MIN_SIZE | Gdk::HINT_MAX_SIZE);
 }
 
 void Snes9xWindow::resize_viewport(int width, int height)
@@ -2206,7 +2317,44 @@ void Snes9xWindow::resize_viewport(int width, int height)
     if (menubar->get_visible())
         height += menubar->get_height();
 
+    /* Lock Screen Resize pins the frame with geometry hints, which the window
+     * manager applies to a programmatic resize too, so move the pin to the new
+     * size before asking for it. */
+    if (config->lock_screen_resize && !config->fullscreen)
+        set_window_size_pin(width, height);
+
     resize(width, height);
+}
+
+/* Always on Top. X11 window managers honour this; Wayland compositors decide
+ * the stacking order themselves and mostly ignore it. */
+void Snes9xWindow::apply_always_on_top()
+{
+    window->set_keep_above(config->always_on_top);
+}
+
+/* Lock Screen Resize. The frame is pinned with min == max geometry hints
+ * rather than gtk_window_set_resizable(), which would also hand the window's
+ * size over to whatever its contents ask for. Only the mouse loses the ability
+ * to resize: resize_viewport() moves the pin, and fullscreen lifts it.
+ *
+ * The size to pin comes from the config rather than from the window, which
+ * still reports the old one right after a resize request or a fullscreen exit;
+ * draw() keeps that pair at whatever size the window last had while windowed.
+ */
+void Snes9xWindow::apply_resize_lock()
+{
+    if (config->lock_screen_resize && !config->fullscreen)
+    {
+        set_window_size_pin(config->window_width, config->window_height);
+        return;
+    }
+
+    Gdk::Geometry geometry = {};
+    geometry.min_width = geometry.min_height = 1;
+    geometry.max_width = geometry.max_height = G_MAXINT;
+    window->set_geometry_hints(*window.get(), geometry,
+                               Gdk::HINT_MIN_SIZE | Gdk::HINT_MAX_SIZE);
 }
 
 void Snes9xWindow::hide_mouse_cursor()
@@ -2546,12 +2694,50 @@ void Snes9xWindow::update_accelerators()
     }
 }
 
+/* Multiples of the loaded content's own picture, so a Game Boy cart gets
+ * 160x144 steps rather than the SNES's, in the shape S9xGetAspect holds that
+ * content to -- so a window sized from Change Size has no bars. */
+void Snes9xWindow::size_for_multiple(int factor, int *width, int *height)
+{
+    int content_height;
+    S9xGetContentSize(config->overscan, nullptr, &content_height);
+
+    *height = content_height * factor;
+    *width = *height * S9xGetAspect() + 0.5;
+}
+
 void Snes9xWindow::resize_to_multiple(int factor)
 {
-    int h = (config->overscan ? 239 : 224) * factor;
-    int w = h * S9xGetAspect() + 0.5;
+    int w, h;
+    size_for_multiple(factor, &w, &h);
 
     resize_viewport(w, h);
+}
+
+/* Which Change Size the window currently has, or 0 for none of them. Measured
+ * off the window rather than remembered, so dragging the frame to any other
+ * size, or loading content whose picture is a different size, simply leaves
+ * none ticked. */
+int Snes9xWindow::current_size_multiple()
+{
+    if (config->fullscreen)
+        return 0;
+
+    auto menubar = get_object<Gtk::MenuBar>("menubar");
+    int chrome = menubar->get_visible() ? menubar->get_height() : 0;
+
+    for (int factor = 1; factor <= 10; factor++)
+    {
+        int w, h;
+        size_for_multiple(factor, &w, &h);
+
+        /* A window manager may be a pixel off what it was asked for. */
+        if (abs(window->get_width() - w) <= 1 &&
+            abs(window->get_height() - (h + chrome)) <= 1)
+            return factor;
+    }
+
+    return 0;
 }
 
 cairo_t *Snes9xWindow::get_cairo()

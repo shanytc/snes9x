@@ -1988,6 +1988,79 @@
                         </child>
                       </object>
                     </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="sppu_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="sppu_item">
+                        <property name="label" translatable="yes">_S-PPU</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="use_underline">True</property>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="sppu_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="layer_1_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Graphics Layer _1</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="layer_2_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Graphics Layer _2</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="layer_3_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Graphics Layer _3</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="layer_4_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Graphics Layer _4</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="sprites_layer_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">S_prites Layer</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="clip_windows_item">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">Clipping _Windows</property>
+                                <property name="use_underline">True</property>
+                                <property name="active">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
@@ -2318,6 +2391,28 @@
                   <object class="GtkMenu" id="view_menu_menu">
                     <property name="can_focus">False</property>
                     <child>
+                      <object class="GtkCheckMenuItem" id="always_on_top_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Always on _Top</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkCheckMenuItem" id="lock_screen_resize_item">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">_Lock Screen Resize</property>
+                        <property name="use_underline">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem" id="window_options_separator">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkImageMenuItem" id="hide_ui">
                         <property name="label" translatable="yes">_Toggle Menubar</property>
                         <property name="visible">True</property>
@@ -2347,7 +2442,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_1x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_1x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_1×</property>
@@ -2356,7 +2451,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_2x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_2x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_2×</property>
@@ -2365,7 +2460,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_3x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_3x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_3×</property>
@@ -2374,7 +2469,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_4x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_4x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_4×</property>
@@ -2383,7 +2478,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_5x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_5x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_5×</property>
@@ -2392,7 +2487,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_6x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_6x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_6×</property>
@@ -2401,7 +2496,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_7x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_7x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_7×</property>
@@ -2410,7 +2505,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_8x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_8x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_8×</property>
@@ -2419,7 +2514,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_9x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_9x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_9×</property>
@@ -2428,7 +2523,7 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="exact_pixels_10x_item">
+                              <object class="GtkCheckMenuItem" id="exact_pixels_10x_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">1_0×</property>

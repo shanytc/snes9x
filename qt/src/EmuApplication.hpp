@@ -116,6 +116,9 @@ struct EmuApplication
     uint8_t getSoundChannelMask();
     void setSoundChannelMask(uint8_t mask);
     void enableAllSoundChannels();
+    // Emulation->S-PPU layer toggles. Named core commands, the same ones the
+    // ToggleBG0..3 hotkeys carry, so the menu and a hotkey are one code path.
+    void applyGraphicsCommand(const char *command);
     void startGame();
     void startThread();
     void stopThread();

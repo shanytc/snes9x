@@ -33,6 +33,9 @@ class EmuMainWindow : public QMainWindow
     bool event(QEvent *event) override;
     bool eventFilter(QObject *, QEvent *event) override;
     void resizeToMultiple(int multiple);
+    // View->Always on Top / Lock Screen Resize, as on win32's Video menu.
+    void applyAlwaysOnTop();
+    void applyResizeLock();
     void populateRecentlyUsed();
     void chooseState(bool save);
     void statePreviewDialog(bool save);
@@ -72,6 +75,12 @@ class EmuMainWindow : public QMainWindow
     void idle();
     void createWidgets();
     std::string promptRenameMSU1Pack(const std::string &filename);
+    // The window size View->Set Size gives a multiple, and which multiple the
+    // window currently has (0 for none of them).
+    QSize sizeForMultiple(int multiple);
+    int currentSizeMultiple();
+    // Resize past a Lock Screen Resize, which only takes away the drag border.
+    void resizeLocked(const QSize &size);
 
     static const size_t recent_menu_size = 10;
 

@@ -6,6 +6,7 @@
 
 #include "ColorCorrectionDialog.hpp"
 #include "EmuConfig.hpp"
+#include "common/video/screen_content.hpp"
 
 #include <QDialogButtonBox>
 #include <QGridLayout>
@@ -25,7 +26,18 @@ ColorCorrectionDialog::ColorCorrectionDialog(EmuApplication *app, QWidget *paren
 
     auto layout = new QVBoxLayout(this);
 
-    color_correction_checkbox = new QCheckBox(tr("Enable color correction (accurate SNES colors)"));
+    /* Correction means whichever screen is being emulated, so the checkbox
+     * says which one it stands for: a Game Boy game rendering in color gets
+     * the Game Boy Color LCD curve, everything else the SNES one, SGB sessions
+     * included, since there the SNES draws the picture. It greys out when
+     * there is no screen to model -- nothing loaded, or a Game Boy picture in
+     * plain shades. */
+    const char *system = S9xColorCorrectionSystem(app->isCoreActive());
+    color_correction_checkbox = new QCheckBox(
+        system ? tr("Enable color correction (accurate %1 colors)")
+                     .arg(QString::fromUtf8(system))
+               : tr("Enable color correction"));
+    color_correction_checkbox->setEnabled(system != nullptr);
     layout->addWidget(color_correction_checkbox);
 
     auto group = new QGroupBox(tr("Adjustments"));

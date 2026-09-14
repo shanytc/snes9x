@@ -31,6 +31,10 @@
 
 #ifndef _WIN32
 #include <csignal>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#include <QSocketNotifier>
 #endif
 
 #ifdef REAPPLY_THEME_PALETTE
@@ -62,6 +66,66 @@ static void reapplyPlatformThemePalette()
 
     if (palette != QApplication::palette())
         QApplication::setPalette(palette);
+}
+#endif
+
+#ifndef _WIN32
+// QApplication::quit() is not async-signal-safe, and a quit() issued while
+// exec() is not yet running is dropped outright. Startup pumps a nested event
+// loop, so a queued quit can land in that window too and be lost the same way:
+// SIGTERM 0.3s after launch left the window up and deaf to the signal every
+// time, and only a second one, once exec() was running, got through.
+//
+// The handler does nothing but write the signal number to a pipe, which is
+// async-signal-safe. The QSocketNotifier that drains it is not created until
+// enableQuitNotifier(), immediately before exec(), so it cannot fire into the
+// window where a quit would be dropped: a signal taken during startup waits in
+// the pipe until the event loop is up to act on it. Letting startup finish also
+// keeps teardown running against a fully built emulator -- skipping exec()
+// outright instead crashed in stopThread().
+static int quit_pipe[2] = { -1, -1 };
+
+static void quitSignalHandler(int sig)
+{
+    int saved_errno = errno;
+    unsigned char num = (unsigned char)sig;
+    // write() is async-signal-safe; a full pipe just means a quit is queued.
+    ssize_t written = write(quit_pipe[1], &num, 1);
+    (void)written;
+    errno = saved_errno;
+}
+
+static void installQuitSignalHandlers()
+{
+    if (pipe(quit_pipe) != 0)
+        return;
+
+    for (int fd : quit_pipe)
+    {
+        fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    }
+
+    struct sigaction sig_callback{};
+    sig_callback.sa_handler = quitSignalHandler;
+    sigemptyset(&sig_callback.sa_mask);
+    sig_callback.sa_flags = SA_RESTART;
+    for (int s : { SIGQUIT, SIGINT, SIGTERM, SIGHUP })
+        sigaction(s, &sig_callback, nullptr);
+}
+
+static void enableQuitNotifier()
+{
+    if (quit_pipe[0] == -1)
+        return;
+
+    auto *notifier = new QSocketNotifier(quit_pipe[0], QSocketNotifier::Read, qApp);
+    QObject::connect(notifier, &QSocketNotifier::activated, qApp, [] {
+        unsigned char num;
+        while (read(quit_pipe[0], &num, 1) == 1)
+            ;
+        QApplication::quit();
+    });
 }
 #endif
 
@@ -139,9 +203,7 @@ int main(int argc, char *argv[])
 #endif
 
 #ifndef _WIN32
-    auto quit_handler = [](int) { QApplication::quit(); };
-    for (auto s : { SIGQUIT, SIGINT, SIGTERM, SIGHUP })
-        signal(s, quit_handler);
+    installQuitSignalHandlers();
 #endif
 
     emu.startThread();
@@ -180,6 +242,12 @@ int main(int argc, char *argv[])
         RA_SetHardcoreEnabled(emu.config->ra_hardcore_mode);
         RA_AttemptLogin(emu.config->ra_username.c_str(), emu.config->ra_api_token.c_str());
     }
+#endif
+
+#ifndef _WIN32
+    // Not at install time: startup pumps a nested event loop, and a quit
+    // dispatched into that window would be dropped before exec() could take it.
+    enableQuitNotifier();
 #endif
 
     emu.qtapp->exec();

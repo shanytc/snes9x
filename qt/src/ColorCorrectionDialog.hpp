@@ -13,8 +13,10 @@
 
 #include "EmuApplication.hpp"
 
-/* win32-style Video->Color Correction dialog: an accurate-SNES-colors toggle
- * plus optional gamma/contrast/saturation adjustments. Values apply on OK. */
+/* win32-style Video->Color Correction dialog: an accurate-colors toggle for
+ * whichever screen is being emulated, plus optional gamma/contrast/saturation
+ * adjustments, which are not a console model and so apply to any picture.
+ * Values apply on OK. */
 class ColorCorrectionDialog : public QDialog
 {
     Q_OBJECT

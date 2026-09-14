@@ -67,6 +67,13 @@ struct EmuConfig
     int window_icon;
     bool write_icon_to_launcher;
 
+    // View->Always on Top / Lock Screen Resize, as on win32's Video menu.
+    // Keeping the window above others helps when following a FAQ on the same
+    // screen, and locking the frame stops an accidental drag from resizing the
+    // picture while a Super Scope is being aimed with the mouse.
+    bool always_on_top;
+    bool lock_screen_resize;
+
     // Display
     std::string display_driver;
     int display_device_index;

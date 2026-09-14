@@ -136,6 +136,8 @@ int Snes9xConfig::load_defaults()
     enable_icons = true;
     window_icon = 1;
     write_icon_to_launcher = true;
+    always_on_top = false;
+    lock_screen_resize = false;
     current_display_tab = 0;
     sram_directory.clear();
     export_directory.clear();
@@ -318,7 +320,7 @@ int Snes9xConfig::save_config_file()
     outbool("BlendGBFramesAuto", Settings.GBFrameBlendAuto, "Auto-pick the GB frame-blend per game from a built-in known-flicker-game table at load (off for unlisted games); when false the manual mode/layer apply to every GB game");
     outbool("GBVideoCamera", Settings.GBVideoCamera, "Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor");
     outint("GBVideoCameraIndex", Settings.GBVideoCameraIndex, "Index of the selected webcam in the device list (set via Display Settings > Game Boy Image)");
-    outbool("ColorCorrection", Settings.ColorCorrection, "Enable accurate SNES color correction (simulates SNES CRT output)");
+    outbool("ColorCorrection", Settings.ColorCorrection, "Enable accurate color correction: the SNES curve for a SNES game, the Game Boy Color LCD one for a GB game running in color");
     outbool("AdjustmentsEnabled", Settings.AdjustmentsEnabled, "Apply the Gamma/Contrast/Saturation adjustments below");
     outint("Gamma", Settings.Gamma, "Gamma adjustment (-100..+100, 0 = no change)");
     outint("Contrast", Settings.Contrast, "Contrast adjustment (-100..+100, 0 = no change)");
@@ -391,6 +393,8 @@ int Snes9xConfig::save_config_file()
     outbool("EnableIcons", enable_icons, "Show icons next to menu items");
     outint("Icon", window_icon, "Which of the four bundled logos (1-4) the window shows, chosen via File > Choose Icon");
     outbool("WriteIconToLauncher", write_icon_to_launcher, "Also write the chosen logo into ~/.local/share/icons so the launcher, dock and task bar show it (turn off to put the original icon back)");
+    outbool("AlwaysOnTop", always_on_top, "Keep the window above all other windows");
+    outbool("DisableResize", lock_screen_resize, "Lock the window size, so the frame cannot be dragged with the mouse (avoids accidental resizes in Super Scope games)");
     if (default_esc_behavior != ESC_TOGGLE_MENUBAR)
         outbool("Fullscreen", false);
     else
@@ -646,6 +650,8 @@ int Snes9xConfig::load_config_file()
     inbool("EnableIcons", enable_icons);
     inint("Icon", window_icon);
     inbool("WriteIconToLauncher", write_icon_to_launcher);
+    inbool("AlwaysOnTop", always_on_top);
+    inbool("DisableResize", lock_screen_resize);
 
     section = "Netplay";
     inbool("ActAsServer", netplay_is_server);

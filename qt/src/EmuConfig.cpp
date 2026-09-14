@@ -278,6 +278,8 @@ bool EmuConfig::setDefaults(int section)
         language = "";
         window_icon = 1;
         write_icon_to_launcher = true;
+        always_on_top = false;
+        lock_screen_resize = false;
     }
 
     if (section == -1 || section == 1)
@@ -570,6 +572,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     BeginSection("Window");
     Int("Icon", window_icon, "Which of the four bundled logos (1-4) the window shows, chosen via File > Choose Icon");
     Bool("WriteIconToLauncher", write_icon_to_launcher, "Also write the chosen logo into ~/.local/share/icons so the launcher, dock and task bar show it (turn off to put the original icon back)");
+    Bool("AlwaysOnTop", always_on_top, "Keep the window above all other windows");
+    Bool("DisableResize", lock_screen_resize, "Lock the window size, so the frame cannot be dragged with the mouse (avoids accidental resizes in Super Scope games)");
     EndSection();
 
     BeginSection("Display");
@@ -607,7 +611,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     Bool("GBVideoCamera", gb_video_camera, "Feed a connected webcam into the Game Boy Camera (Pocket Camera) cartridge's image sensor");
     Int("GBVideoCameraIndex", gb_video_camera_index, "Index of the selected webcam in the device list under Display > Game Boy Image");
 
-    Bool("ColorCorrection", color_correction, "Enable accurate SNES color correction (simulates SNES CRT output)");
+    Bool("ColorCorrection", color_correction, "Enable accurate color correction: the SNES curve for a SNES game, the Game Boy Color LCD one for a GB game running in color");
     Bool("AdjustmentsEnabled", color_adjustments_enabled, "Apply the gamma/contrast/saturation adjustments below");
     Int("Gamma", color_gamma, "Gamma adjustment (-100..+100, 0 = no change)");
     Int("Contrast", color_contrast, "Contrast adjustment (-100..+100, 0 = no change)");

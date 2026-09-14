@@ -5,6 +5,14 @@
 
 class EmuConfig;
 
+/* The shape the picture is held to, as a width:height pair. Game Boy content
+ * keeps its own -- the aspect setting names the shape, as on win32, so square
+ * pixels leave the 160x144 picture unstretched and the other choices give it
+ * the same display shape a SNES picture gets. Shared by the blit and by
+ * View->Set Size, so a window sized from the menu has no bars.
+ */
+void S9xQtDisplayAspect(EmuConfig *config, int *num, int *den);
+
 class EmuCanvas : public QWidget
 {
   public:

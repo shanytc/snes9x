@@ -1,7 +1,34 @@
 #include "EmuCanvas.hpp"
 #include "EmuConfig.hpp"
+#include "common/video/screen_content.hpp"
 #include <qnamespace.h>
 #include <qwidget.h>
+
+void S9xQtDisplayAspect(EmuConfig *config, int *num, int *den)
+{
+    if (S9xContentIsGameBoy())
+    {
+        // 8:7 is this port's square-pixel choice for the SNES; the Game Boy's
+        // own grid is square already, so that one leaves it at 10:9. The rest
+        // name a display shape, which the Game Boy takes as it stands.
+        bool square = config->aspect_ratio_numerator == 8 &&
+                      config->aspect_ratio_denominator == 7;
+        *num = square ? 10 : config->aspect_ratio_numerator;
+        *den = square ? 9 : config->aspect_ratio_denominator;
+        return;
+    }
+
+    *num = config->aspect_ratio_numerator;
+    *den = config->aspect_ratio_denominator;
+
+    // The aspect names the SNES's shape at its nominal 224 lines; an overscan
+    // frame is 239 lines of the same picture, so it is that much taller.
+    if (config->show_overscan)
+    {
+        *num *= 224;
+        *den *= 239;
+    }
+}
 
 EmuCanvas::EmuCanvas(EmuConfig *config, QWidget *main_window)
     : output_data{}, main_window(main_window), config(config)
@@ -63,13 +90,8 @@ QRect EmuCanvas::applyAspect(const QRect &viewport)
     if (!config->maintain_aspect_ratio)
         return viewport;
 
-    int num = config->aspect_ratio_numerator;
-    int den = config->aspect_ratio_denominator;
-    if (config->show_overscan)
-    {
-        num *= 224;
-        den *= 239;
-    }
+    int num, den;
+    S9xQtDisplayAspect(config, &num, &den);
 
     if (config->use_integer_scaling)
     {

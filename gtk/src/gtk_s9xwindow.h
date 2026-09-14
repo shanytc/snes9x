@@ -94,6 +94,14 @@ class Snes9xWindow : public GtkBuilderWindow
     void toggle_ui();
     void resize_to_multiple(int factor);
     void resize_viewport(int width, int height);
+    /* View->Always on Top / Lock Screen Resize, as on win32's Video menu. */
+    void apply_always_on_top();
+    void apply_resize_lock();
+    void set_window_size_pin(int width, int height);
+    /* The window size Change Size gives a multiple, and which multiple the
+     * window currently has (0 for none of them). */
+    void size_for_multiple(int factor, int *width, int *height);
+    int current_size_multiple();
     bool draw(const Cairo::RefPtr<Cairo::Context> &cr);
     void setup_splash();
     double get_refresh_rate();
@@ -112,6 +120,9 @@ class Snes9xWindow : public GtkBuilderWindow
     bool refreshing_runahead_menu = false;
     bool refreshing_controller_menu = false;
     bool refreshing_icon_menu = false;
+    /* Ticking a check menu item also fires its activate handler, so the
+     * menu-open syncs raise this while they stamp the current state. */
+    bool syncing_menu = false;
     int user_pause, sys_pause;
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;

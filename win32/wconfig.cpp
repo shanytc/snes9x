@@ -706,13 +706,15 @@ void WinGBPaletteFromText()
 		const char *p = GUI.GBPaletteText[reg];
 		for (int shade = 0; shade < 4; shade++)
 		{
-			while (*p == ' ' || *p == ',' || *p == '#') p++;
+			// commas are the field separators, so an empty field keeps its slot
+			while (*p == ' ' || *p == '#') p++;
 			char *end = NULL;
 			const unsigned long v = strtoul(p, &end, 16);
 			Settings.GBPalette[reg][shade] = (end != p) ? (uint32)(v & 0xFFFFFF)
 			                                            : ramp[shade];
 			p = (end != p) ? end : p;
 			while (*p && *p != ',') p++;
+			if (*p == ',') p++;
 		}
 	}
 }

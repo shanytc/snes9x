@@ -2511,7 +2511,7 @@ static const uint16_t *GbColorTable(bool cgb)
 	static bool     valid = false;
 
 	const uint32_t settings =
-		(Settings.ColorCorrection    ? 1u : 0u) |
+		(Settings.ColorCorrectionGBC ? 1u : 0u) |
 		(Settings.AdjustmentsEnabled ? 2u : 0u) |
 		(static_cast<uint32_t>(Settings.Gamma      + 100) <<  2) |
 		(static_cast<uint32_t>(Settings.Contrast   + 100) << 11) |
@@ -2526,7 +2526,7 @@ static const uint16_t *GbColorTable(bool cgb)
 			uint8 r = static_cast<uint8>(c & 0x1F);
 			uint8 g = static_cast<uint8>((c >> 5) & 0x1F);
 			uint8 b = static_cast<uint8>((c >> 10) & 0x1F);
-			if (variant == 1 && Settings.ColorCorrection)
+			if (variant == 1 && Settings.ColorCorrectionGBC)
 				GbcPanelColor(r, g, b);
 			S9xApplyImageAdjustments(r, g, b, 0x1F);
 			table[variant][c] = static_cast<uint16_t>(r | (g << 5) | (b << 10));
@@ -2541,7 +2541,7 @@ static const uint16_t *GbColorTable(bool cgb)
 // only one the panel curve belongs on; the sliders apply either way.
 static inline uint16_t GbShowColor(uint16_t bgr555, bool cgb)
 {
-	if (!Settings.ColorCorrection && !Settings.AdjustmentsEnabled)
+	if (!Settings.ColorCorrectionGBC && !Settings.AdjustmentsEnabled)
 		return bgr555;
 	return GbColorTable(cgb)[bgr555 & 0x7FFF];
 }

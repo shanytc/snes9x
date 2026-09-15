@@ -93,6 +93,7 @@ void WinSetDefaultValues ()
 	Settings.RunAhead = 0;
 	Settings.InRunAhead = false;
 	Settings.ColorCorrection = false;
+	Settings.ColorCorrectionGBC = false;
 	Settings.AdjustmentsEnabled = false;
 	Settings.Gamma = 0;
 	Settings.Contrast = 0;
@@ -958,7 +959,8 @@ void WinRegisterConfigItems()
     AddBoolC("DWMSync", GUI.DWMSync, false, "sync to DWM compositor if it is running");
 	AddUIntC("OSDSize", GUI.OSDSize, 24, "Size of On-Screen Display");
 	AddIntC("RunAhead", Settings.RunAhead, 0, "number of frames to run ahead for reduced input latency (0=off, 1-4)");
-	AddBoolC("ColorCorrection", Settings.ColorCorrection, false, "true to enable accurate color correction: the SNES curve for a SNES game, the Game Boy Color LCD one for a GB game running in color");
+	AddBoolC("ColorCorrection", Settings.ColorCorrection, false, "true to put SNES output through the SNES CRT curve (Super Game Boy sessions too, where the SNES draws the picture)");
+	AddBoolC("ColorCorrectionGBC", Settings.ColorCorrectionGBC, false, "true to put Game Boy Color output through that LCD panel's curve");
 	AddBoolC("AdjustmentsEnabled", Settings.AdjustmentsEnabled, false, "true to apply gamma/contrast/saturation adjustments");
 	AddIntC("Gamma", Settings.Gamma, 0, "gamma adjustment (-100..+100, 0=no change)");
 	AddIntC("Contrast", Settings.Contrast, 0, "contrast adjustment (-100..+100, 0=no change)");

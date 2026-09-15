@@ -894,7 +894,7 @@ BEGIN
     CONTROL         "",IDC_GB_PAL_OB12,"Button",BS_OWNERDRAW | WS_TABSTOP,120,72,22,12
     CONTROL         "",IDC_GB_PAL_OB13,"Button",BS_OWNERDRAW | WS_TABSTOP,145,72,22,12
     PUSHBUTTON      "Select Preset...",IDC_GB_PAL_PRESET,176,40,72,14
-    GROUPBOX        "Adjustments",IDC_STATIC,6,92,248,120
+    GROUPBOX        "Adjustments",IDC_ADJUSTMENTS_GROUP,6,92,248,120
     CONTROL         "Apply Adjustments",IDC_ADJUSTMENTS_ENABLE,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,104,110,10
     RTEXT           "Gamma:",IDC_STATIC,12,130,36,8

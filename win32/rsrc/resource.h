@@ -847,6 +847,7 @@
 #define IDC_GBMV_TILEDATA               3286
 #define IDC_GBMV_VIEWPORT               3287
 #define IDC_GBMV_TILEINFO               3288
+#define IDC_GBMV_BGCOLOR                3289
 
 #define IDC_GBSV_CANVAS                 3300
 #define IDC_GBSV_ZOOM                   3301
@@ -856,6 +857,7 @@
 #define IDC_GBSV_INDEX_SPIN             3305
 #define IDC_GBSV_SPRITEINFO             3306
 #define IDC_GBSV_VIEWPORT               3307
+#define IDC_GBSV_BGCOLOR                3308
 
 #define IDC_TMV_CANVAS                  3150
 #define IDC_TMV_AUTOUPDATE              3151
@@ -875,6 +877,7 @@
 #define IDC_TMV_INFO                    3165
 #define IDC_TMV_SHOWGRID                3166
 #define IDC_TMV_OVERRIDE_TILEMAP        3167
+#define IDC_TMV_BGCOLOR                 3168
 
 #define IDC_SPV_LIST                    3170
 #define IDC_SPV_PREVIEW                 3171

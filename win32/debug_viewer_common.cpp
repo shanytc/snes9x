@@ -346,3 +346,21 @@ bool ParseHex(const TCHAR *text, uint32 *out) {
     *out = v;
     return true;
 }
+
+void AddViewerBgColors(HWND hCombo) {
+    static const TCHAR *const names[VBG_COUNT] = {
+        _T("Transparent"), _T("Magenta"), _T("Cyan"), _T("White"), _T("Black")
+    };
+    for (int i = 0; i < VBG_COUNT; ++i)
+        SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)names[i]);
+}
+
+uint32 ViewerBgBGRA(int vbg, bool forExport) {
+    switch (vbg) {
+    case VBG_MAGENTA: return 0xFFFF00FFu;
+    case VBG_CYAN:    return 0xFF00FFFFu;
+    case VBG_WHITE:   return 0xFFFFFFFFu;
+    case VBG_BLACK:   return 0xFF000000u;
+    }
+    return forExport ? 0x00000000u : 0xFF303030u;
+}

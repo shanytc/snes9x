@@ -27,6 +27,7 @@ struct GBMVState {
     bool autoUpdate;
     bool showGrid;
     bool showViewport;
+    int  bgType;     // 0 = palette colour 0, else 1 + ViewerBgColor
     int  mapSel;     // 0 = BG, 1 = Window
     int  tileData;   // 0 = auto (LCDC), 1 = 0x8000, 2 = 0x8800
     int  selectedTile;
@@ -54,7 +55,7 @@ void DrawViewport(GBMVState *st, int scx, int scy) {
     }
 }
 
-void RedrawMap(HWND hDlg) {
+void RedrawMap(HWND hDlg, bool forExport = false) {
     GBMVState *st = GetState(hDlg);
     if (!st || !st->tileBits) return;
 
@@ -78,6 +79,13 @@ void RedrawMap(HWND hDlg) {
         else    GbGrayPalette4(0xE4, pal4);
     } else {
         GbBuildPalette4(GBPAL_BGP, 0, pal4);
+    }
+
+    // Key colour 0 of every palette so index-0 pixels show the chosen background.
+    if (st->bgType != 0) {
+        uint32 key = ViewerBgBGRA(st->bgType - 1, forExport);
+        pal4[0] = key;
+        for (int p = 0; p < 8; ++p) cgbPal[p][0] = key;
     }
 
     st->curSrcW = 256;
@@ -195,12 +203,18 @@ void PopulateTileData(HWND hCombo) {
     SendMessage(hCombo, CB_SETCURSEL, 0, 0);
 }
 
+void PopulateBg(HWND hCombo) {
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("Palette"));
+    AddViewerBgColors(hCombo);
+    SendMessage(hCombo, CB_SETCURSEL, 0, 0);
+}
+
 void ExportToPng(HWND hDlg) {
     GBMVState *st = GetState(hDlg);
     if (!st || !st->tileBits) return;
     bool savedGrid = st->showGrid, savedVp = st->showViewport;
     st->showGrid = false; st->showViewport = false;
-    RedrawMap(hDlg);
+    RedrawMap(hDlg, true);
     TCHAR path[MAX_PATH];
     bool cancelled = false, ok = false;
     if (ShowSaveDialog(hDlg, path, MAX_PATH, _T("gb_tilemap.png"),
@@ -224,6 +238,7 @@ INT_PTR CALLBACK DlgGBTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
         st->autoUpdate = true;
         st->showGrid = false;
         st->showViewport = true;
+        st->bgType = 0;
         st->mapSel = 0;
         st->tileData = 0;
         st->selectedTile = -1;
@@ -235,6 +250,7 @@ INT_PTR CALLBACK DlgGBTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
         PopulateZoom(GetDlgItem(hDlg, IDC_GBMV_ZOOM));
         PopulateMap(GetDlgItem(hDlg, IDC_GBMV_MAP));
         PopulateTileData(GetDlgItem(hDlg, IDC_GBMV_TILEDATA));
+        PopulateBg(GetDlgItem(hDlg, IDC_GBMV_BGCOLOR));
         CheckDlgButton(hDlg, IDC_GBMV_AUTOUPDATE, BST_CHECKED);
         CheckDlgButton(hDlg, IDC_GBMV_VIEWPORT, BST_CHECKED);
 
@@ -288,6 +304,12 @@ INT_PTR CALLBACK DlgGBTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
             if (code == CBN_SELCHANGE) {
                 int sel = (int)SendDlgItemMessage(hDlg, IDC_GBMV_TILEDATA, CB_GETCURSEL, 0, 0);
                 if (sel >= 0) { st->tileData = sel; RedrawMap(hDlg); }
+            }
+            return TRUE;
+        case IDC_GBMV_BGCOLOR:
+            if (code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hDlg, IDC_GBMV_BGCOLOR, CB_GETCURSEL, 0, 0);
+                if (sel >= 0) { st->bgType = sel; RedrawMap(hDlg); }
             }
             return TRUE;
         case IDC_GBMV_SHOWGRID:

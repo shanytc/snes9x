@@ -59,6 +59,14 @@ void BlitTile8x8BGRA(const uint8 tile[64], const uint32 palBGRA[256],
 // (4 bytes per pixel, width*4 bytes per row, no padding since 4-byte aligned already).
 HBITMAP CreateBGRADib(int width, int height, uint32 **outBits);
 
+// Keyed fill colours the viewers' "Background:" combos offer after their
+// own leading entries. Transparent is dark grey on screen, alpha 0 on export.
+enum ViewerBgColor {
+    VBG_TRANSPARENT = 0, VBG_MAGENTA, VBG_CYAN, VBG_WHITE, VBG_BLACK, VBG_COUNT
+};
+void AddViewerBgColors(HWND hCombo);
+uint32 ViewerBgBGRA(int vbg, bool forExport);
+
 // Viewer registry: per-frame pump from the main emulation loop posts
 // WM_USER_VIEWER_REFRESH to every registered dialog whose auto-update is on.
 struct ViewerEntry {

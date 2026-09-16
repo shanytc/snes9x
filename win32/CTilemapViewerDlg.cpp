@@ -28,6 +28,7 @@ struct TMVState {
     int  selectedBG;          // 0..3
     int  zoom;                // 1..9
     bool showGrid;
+    int  bgType;              // 0 = backdrop (CGRAM 0), else 1 + ViewerBgColor
     bool autoUpdate;
     bool customScreenMode;
     int  customMode;          // 0..7
@@ -280,7 +281,12 @@ void DrawGrid(uint32 *dstBGRA, int width, int height, int cellSize) {
     }
 }
 
-void Render(HWND hDlg) {
+uint32 BackgroundColor(const TMVState *st, const uint32 pal[256], bool forExport) {
+    if (st->bgType == 0) return pal[0];
+    return ViewerBgBGRA(st->bgType - 1, forExport);
+}
+
+void Render(HWND hDlg, bool forExport = false) {
     TMVState *st = GetState(hDlg);
     if (!st) return;
 
@@ -292,8 +298,8 @@ void Render(HWND hDlg) {
     uint32 pal[256];
     SnapshotPaletteBGRA(pal);
 
-    // Initialize full DIB to palette[0] (backdrop) — bsnes does same.
-    uint32 bg = pal[0];
+    // Fill with the backdrop (palette[0], as bsnes does) or the chosen key colour.
+    uint32 bg = BackgroundColor(st, pal, forExport);
     for (int i = 0; i < kSrcMax * kSrcMax; ++i) st->bits[i] = bg;
 
     if (r.bpp == 0) {
@@ -403,6 +409,12 @@ void FillTileSizeCombo(HWND hCombo) {
     SendMessage(hCombo, CB_SETCURSEL, 0, 0);
 }
 
+void FillBgCombo(HWND hCombo) {
+    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)_T("Backdrop (Color 0)"));
+    AddViewerBgColors(hCombo);
+    SendMessage(hCombo, CB_SETCURSEL, 0, 0);
+}
+
 void ApplyControlEnableState(HWND hDlg, TMVState *st) {
     BOOL csm = st->customScreenMode ? TRUE : FALSE;
     BOOL ot  = st->overrideTilemap  ? TRUE : FALSE;
@@ -472,7 +484,7 @@ void ExportTilemapToPng(HWND hDlg) {
 
     bool savedGrid = st->showGrid;
     st->showGrid = false;
-    Render(hDlg);   // redraw st->bits without the grid overlay
+    Render(hDlg, true);   // no grid; a Transparent background exports as alpha 0
 
     int w = st->curSrcW, h = st->curSrcH;
     TCHAR path[MAX_PATH];
@@ -507,6 +519,7 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
         st->viewX = 0;
         st->viewY = 0;
         st->showGrid = false;
+        st->bgType = 0;
         st->autoUpdate = true;
         st->customScreenMode = false;
         st->customMode = 1;
@@ -525,6 +538,7 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
         FillBitDepthCombo(GetDlgItem(hDlg, IDC_TMV_BITDEPTH));
         FillMapSizeCombo(GetDlgItem(hDlg, IDC_TMV_MAPSIZE));
         FillTileSizeCombo(GetDlgItem(hDlg, IDC_TMV_TILESIZE));
+        FillBgCombo(GetDlgItem(hDlg, IDC_TMV_BGCOLOR));
 
         CheckRadioButton(hDlg, IDC_TMV_BG_1, IDC_TMV_BG_4, IDC_TMV_BG_1);
         CheckDlgButton(hDlg, IDC_TMV_AUTOUPDATE, BST_CHECKED);
@@ -648,6 +662,13 @@ INT_PTR CALLBACK DlgTilemapViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPa
                     st->zoom = sel + 1;
                     InvalidateRect(GetDlgItem(hDlg, IDC_TMV_CANVAS), NULL, FALSE);
                 }
+            }
+            return TRUE;
+
+        case IDC_TMV_BGCOLOR:
+            if (code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hDlg, IDC_TMV_BGCOLOR, CB_GETCURSEL, 0, 0);
+                if (sel >= 0) { st->bgType = sel; Render(hDlg); }
             }
             return TRUE;
 

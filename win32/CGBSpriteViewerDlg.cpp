@@ -27,6 +27,7 @@ struct GBSVState {
     int  zoom;
     bool autoUpdate;
     bool showViewport;
+    int  bgType;     // ViewerBgColor
     int  selected;   // 0..39
     int  viewX, viewY;
     HBITMAP tileBmp;
@@ -51,7 +52,7 @@ void DrawRectOutline(uint32 *bits, int x, int y, int w, int h, uint32 col) {
     }
 }
 
-void RedrawSprites(HWND hDlg) {
+void RedrawSprites(HWND hDlg, bool forExport = false) {
     GBSVState *st = GetState(hDlg);
     if (!st || !st->tileBits) return;
 
@@ -73,7 +74,8 @@ void RedrawSprites(HWND hDlg) {
     }
 
     st->curSrcW = st->curSrcH = 256;
-    for (int i = 0; i < kSrcMax * kSrcMax; ++i) st->tileBits[i] = 0xFF202020u;
+    uint32 bg = ViewerBgBGRA(st->bgType, forExport);
+    for (int i = 0; i < kSrcMax * kSrcMax; ++i) st->tileBits[i] = bg;
 
     // Outline the visible 160x144 screen (OAM origin is +8,+16).
     if (st->showViewport) DrawRectOutline(st->tileBits, 8, 16, 160, 144, 0xFF404060u);
@@ -160,12 +162,17 @@ void PopulateZoom(HWND hCombo) {
     SendMessage(hCombo, CB_SETCURSEL, 1, 0);  // 2x
 }
 
+void PopulateBg(HWND hCombo) {
+    AddViewerBgColors(hCombo);
+    SendMessage(hCombo, CB_SETCURSEL, VBG_TRANSPARENT, 0);
+}
+
 void ExportToPng(HWND hDlg) {
     GBSVState *st = GetState(hDlg);
     if (!st || !st->tileBits) return;
     bool savedVp = st->showViewport;
     st->showViewport = false;
-    RedrawSprites(hDlg);
+    RedrawSprites(hDlg, true);
     TCHAR path[MAX_PATH];
     bool cancelled = false, ok = false;
     if (ShowSaveDialog(hDlg, path, MAX_PATH, _T("gb_sprites.png"),
@@ -188,6 +195,7 @@ INT_PTR CALLBACK DlgGBSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
         st->zoom = 2;
         st->autoUpdate = true;
         st->showViewport = true;
+        st->bgType = VBG_TRANSPARENT;
         st->selected = 0;
         st->viewX = st->viewY = 0;
         st->tileBmp = CreateBGRADib(kSrcMax, kSrcMax, &st->tileBits);
@@ -195,6 +203,7 @@ INT_PTR CALLBACK DlgGBSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
         SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)st);
 
         PopulateZoom(GetDlgItem(hDlg, IDC_GBSV_ZOOM));
+        PopulateBg(GetDlgItem(hDlg, IDC_GBSV_BGCOLOR));
         CheckDlgButton(hDlg, IDC_GBSV_AUTOUPDATE, BST_CHECKED);
         CheckDlgButton(hDlg, IDC_GBSV_VIEWPORT, BST_CHECKED);
         SetDlgItemInt(hDlg, IDC_GBSV_INDEX, st->selected, FALSE);
@@ -247,6 +256,12 @@ INT_PTR CALLBACK DlgGBSpriteViewer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
             return TRUE;
         case IDC_GBSV_AUTOUPDATE:
             st->autoUpdate = (IsDlgButtonChecked(hDlg, IDC_GBSV_AUTOUPDATE) == BST_CHECKED);
+            return TRUE;
+        case IDC_GBSV_BGCOLOR:
+            if (code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hDlg, IDC_GBSV_BGCOLOR, CB_GETCURSEL, 0, 0);
+                if (sel >= 0) { st->bgType = sel; RedrawSprites(hDlg); }
+            }
             return TRUE;
         case IDC_GBSV_VIEWPORT:
             st->showViewport = (IsDlgButtonChecked(hDlg, IDC_GBSV_VIEWPORT) == BST_CHECKED);

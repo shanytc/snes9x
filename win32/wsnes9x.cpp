@@ -572,6 +572,10 @@ void WinUnlockConfigFile ();
 // dialog's Pause Emulation checkbox drives PAUSE_SOUND_DIALOG instead.
 static HWND s_hSoundOptsDlg    = NULL;
 static bool s_soundOptsUserClose = false;
+// Color Correction runs modeless too, and live: a slider moves, the screen
+// follows. Cancel puts back what was there when it opened.
+static HWND s_hColorDlg        = NULL;
+static bool s_colorDlgUserClose = false;
 static void S9xSetMuted (bool mute);
 void WinCleanupConfigData ();
 
@@ -2801,10 +2805,15 @@ LRESULT CALLBACK WinProc(
 			Settings.DisplayFrameNumber = !Settings.DisplayFrameNumber;
 			break;
 		case ID_VIDEO_COLORCORRECTION:
+			if (s_hColorDlg)
+			{
+				SetForegroundWindow(s_hColorDlg);
+				break;
+			}
 			RestoreGUIDisplay();
-			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_COLORCORRECTION), hWnd, DlgColorCorrectionProc);
-			RestoreSNESDisplay();
-			S9xFixColourBrightness();
+			s_hColorDlg = CreateDialogParam(g_hInst, MAKEINTRESOURCE(IDD_COLORCORRECTION), hWnd, DlgColorCorrectionProc, 0);
+			if (!s_hColorDlg)
+				RestoreSNESDisplay();
 			break;
 		case ID_SAVESCREENSHOT:
 			WinRequestScreenshot();
@@ -4413,6 +4422,8 @@ void S9xOnSNESPadRead()
 
 				if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
 					continue;
+				if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
+					continue;
 
 				if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
 				{
@@ -4954,6 +4965,8 @@ int WINAPI WinMain(
 #endif
 
             if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
+                continue;
+            if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
                 continue;
 
             if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
@@ -6266,6 +6279,15 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		return false;
 	}
 #endif
+
+	// The Color Correction dialog is laid out for the console that was loaded
+	// when it opened, and this load may bring another. It goes, keeping
+	// whatever was set: everything in it is already live.
+	if (s_hColorDlg)
+	{
+		s_colorDlgUserClose = true;
+		DestroyWindow(s_hColorDlg);
+	}
 
 	TCHAR	msu1_renamed[MAX_PATH];
 
@@ -8477,6 +8499,21 @@ static void RedrawGBPalette(HWND hDlg)
 		InvalidateRect(GetDlgItem(hDlg, IDC_GB_PAL_BG0 + i), NULL, TRUE);
 }
 
+// What the controls say is what the screen shows: every change lands in
+// Settings at once. SNES colours are rebuilt from CGRAM here; the Game Boy
+// paths read Settings every frame and need no push.
+static void ApplyColorDialog(HWND hDlg)
+{
+	bool8 *flag = ColorCorrectionFlag(ColorCorrectionSystem());
+	if (flag)
+		*flag = IsDlgButtonChecked(hDlg, IDC_COLOR_CORRECTION_ENABLE) == BST_CHECKED;
+	Settings.AdjustmentsEnabled = IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED;
+	Settings.Gamma      = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_GETPOS, 0, 0);
+	Settings.Contrast   = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_GETPOS, 0, 0);
+	Settings.Saturation = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_GETPOS, 0, 0);
+	S9xFixColourBrightness();
+}
+
 INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	static bool prevColorCorrection, prevColorCorrectionGBC;
@@ -8587,14 +8624,37 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			UpdateColorSliderText(hDlg, IDC_SLIDER_CONTRAST, IDC_EDIT_CONTRAST);
 		else if (trackHwnd == GetDlgItem(hDlg, IDC_SLIDER_SATURATION))
 			UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
+		ApplyColorDialog(hDlg);
 		return TRUE;
 	}
+
+	// Modeless: the frame's X button has to destroy the dialog itself, and
+	// it means the same thing as Cancel.
+	case WM_CLOSE:
+		SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+		return TRUE;
+
+	case WM_DESTROY:
+		s_hColorDlg = NULL;
+		// Only on a close from in here or from a load -- at app teardown the
+		// parent takes this dialog down with it and the display is going away.
+		if (s_colorDlgUserClose)
+		{
+			s_colorDlgUserClose = false;
+			RestoreSNESDisplay();
+		}
+		return TRUE;
 
 	case WM_COMMAND:
 		switch (LOWORD(wParam))
 		{
+		case IDC_COLOR_CORRECTION_ENABLE:
+			ApplyColorDialog(hDlg);
+			return TRUE;
+
 		case IDC_ADJUSTMENTS_ENABLE:
 			EnableAdjustmentSliders(hDlg, IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED);
+			ApplyColorDialog(hDlg);
 			return TRUE;
 
 		case IDC_GB_PAL_PRESET:
@@ -8622,19 +8682,12 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 		}
 
 		case IDOK:
-		{
-			// Only the screen on show is answered for; the other console keeps
-			// whatever it was last given.
-			bool8 *flag = ColorCorrectionFlag(ColorCorrectionSystem());
-			if (flag)
-				*flag = IsDlgButtonChecked(hDlg, IDC_COLOR_CORRECTION_ENABLE) == BST_CHECKED;
-			Settings.AdjustmentsEnabled = IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED;
-			Settings.Gamma = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_GETPOS, 0, 0);
-			Settings.Contrast = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_GETPOS, 0, 0);
-			Settings.Saturation = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_GETPOS, 0, 0);
-			EndDialog(hDlg, 1);
+			// everything is already live; only the screen on show was ever
+			// answered for, the other console keeps what it was last given
+			ApplyColorDialog(hDlg);
+			s_colorDlgUserClose = true;
+			DestroyWindow(hDlg);
 			return TRUE;
-		}
 
 		case IDCANCEL:
 			Settings.ColorCorrection = prevColorCorrection;
@@ -8644,7 +8697,9 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			Settings.Contrast = prevContrast;
 			Settings.Saturation = prevSaturation;
 			memcpy(Settings.GBPalette, prevGBPalette, sizeof prevGBPalette);
-			EndDialog(hDlg, 0);
+			S9xFixColourBrightness();
+			s_colorDlgUserClose = true;
+			DestroyWindow(hDlg);
 			return TRUE;
 
 		case IDC_DEFAULTS_COLOR:
@@ -8665,6 +8720,7 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			UpdateColorSliderText(hDlg, IDC_SLIDER_CONTRAST, IDC_EDIT_CONTRAST);
 			UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
 			EnableAdjustmentSliders(hDlg, FALSE);
+			ApplyColorDialog(hDlg);
 			return TRUE;
 
 		default:

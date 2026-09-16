@@ -16,6 +16,9 @@
 #endif
 
 #include "AudioWaveformWindow.hpp"
+#include "TileViewerWindow.hpp"
+#include "TilemapViewerWindow.hpp"
+#include "SpriteViewerWindow.hpp"
 #include "CheatsDialog.hpp"
 #include "ColorCorrectionDialog.hpp"
 #include "MovieDialogs.hpp"
@@ -826,6 +829,17 @@ void EmuMainWindow::createWidgets()
      * stays out of the menu: the Display panel already has a checkbox for it.
      */
     auto sppu_menu = new QMenu(tr("&S-PPU"));
+
+    /* The three PPU inspectors win32 puts at the top of this menu. Each is a
+     * single window that comes back to the front when it is already open. */
+    auto tile_viewer_item = sppu_menu->addAction(tr("&Tile Viewer..."));
+    connect(tile_viewer_item, &QAction::triggered, this, &EmuMainWindow::showTileViewer);
+    auto tilemap_viewer_item = sppu_menu->addAction(tr("Tile&map Viewer..."));
+    connect(tilemap_viewer_item, &QAction::triggered, this, &EmuMainWindow::showTilemapViewer);
+    auto sprite_viewer_item = sppu_menu->addAction(tr("&Sprite Viewer..."));
+    connect(sprite_viewer_item, &QAction::triggered, this, &EmuMainWindow::showSpriteViewer);
+    sppu_menu->addSeparator();
+
     struct GraphicsToggle { const char *label; const char *command; };
     static const GraphicsToggle graphics_toggles[] = {
         { QT_TR_NOOP("Graphics Layer &1"), "ToggleBG0"     },
@@ -1890,6 +1904,33 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+}
+
+void EmuMainWindow::showTileViewer()
+{
+    if (!tile_viewer_window)
+        tile_viewer_window = new TileViewerWindow(this, app);
+    tile_viewer_window->show();
+    tile_viewer_window->raise();
+    tile_viewer_window->activateWindow();
+}
+
+void EmuMainWindow::showTilemapViewer()
+{
+    if (!tilemap_viewer_window)
+        tilemap_viewer_window = new TilemapViewerWindow(this, app);
+    tilemap_viewer_window->show();
+    tilemap_viewer_window->raise();
+    tilemap_viewer_window->activateWindow();
+}
+
+void EmuMainWindow::showSpriteViewer()
+{
+    if (!sprite_viewer_window)
+        sprite_viewer_window = new SpriteViewerWindow(this, app);
+    sprite_viewer_window->show();
+    sprite_viewer_window->raise();
+    sprite_viewer_window->activateWindow();
 }
 
 void EmuMainWindow::toggleAudioWaveform()

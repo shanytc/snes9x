@@ -12,6 +12,9 @@
 class EmuApplication;
 class CheatsDialog;
 class AudioWaveformWindow;
+class TileViewerWindow;
+class TilemapViewerWindow;
+class SpriteViewerWindow;
 
 class EmuMainWindow : public QMainWindow
 {
@@ -56,6 +59,10 @@ class EmuMainWindow : public QMainWindow
     void updateShaderSettingsItem();
     void gameChanging();
     void toggleAudioWaveform();
+    /* Emulation > S-PPU: one window each, raised again if already open. */
+    void showTileViewer();
+    void showTilemapViewer();
+    void showSpriteViewer();
     /* "Pause emulation when unfocused". The audio waveform viewer counts as
      * part of this window: moving between the two doesn't pause, leaving
      * from either does, so the viewer reports its focus changes here too. */
@@ -87,6 +94,10 @@ class EmuMainWindow : public QMainWindow
     std::unique_ptr<CheatsDialog> cheats_dialog;
     // Sound->Show Audio Waveform; deletes itself on close, so this goes null.
     QPointer<AudioWaveformWindow> audio_waveform_window;
+    // Emulation->S-PPU viewers; these delete themselves on close too.
+    QPointer<TileViewerWindow> tile_viewer_window;
+    QPointer<TilemapViewerWindow> tilemap_viewer_window;
+    QPointer<SpriteViewerWindow> sprite_viewer_window;
 
     bool manual_pause = false;
     bool focus_pause = false;

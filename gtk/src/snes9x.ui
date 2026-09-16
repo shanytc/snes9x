@@ -2004,6 +2004,36 @@
                           <object class="GtkMenu" id="sppu_menu">
                             <property name="can_focus">False</property>
                             <child>
+                              <object class="GtkMenuItem" id="tile_viewer_item">
+                                <property name="label" translatable="yes">_Tile Viewer...</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="tilemap_viewer_item">
+                                <property name="label" translatable="yes">Tile_map Viewer...</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="sprite_viewer_item">
+                                <property name="label" translatable="yes">_Sprite Viewer...</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkSeparatorMenuItem" id="sppu_viewers_separator">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                              </object>
+                            </child>
+                            <child>
                               <object class="GtkCheckMenuItem" id="layer_1_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>

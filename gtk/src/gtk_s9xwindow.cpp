@@ -31,6 +31,7 @@
 #include "gtk_netplay.h"
 #include "gtk_movie.h"
 #include "gtk_audio_waveform.h"
+#include "gtk_ppu_viewer.h"
 #include "common/audio/audio_waveform.hpp"
 #include "common/desktop/xdg_app_icon.hpp"
 #include "gtk_logos.h"
@@ -595,6 +596,18 @@ void Snes9xWindow::connect_signals()
             get_object<Gtk::CheckMenuItem>(name.c_str())->set_active(i == current);
         }
         syncing_menu = false;
+    });
+
+    /* The three PPU inspectors win32 puts at the top of this menu. Each is a
+     * single window that comes back to the front when it is already open. */
+    get_object<Gtk::MenuItem>("tile_viewer_item")->signal_activate().connect([] {
+        S9xShowTileViewer();
+    });
+    get_object<Gtk::MenuItem>("tilemap_viewer_item")->signal_activate().connect([] {
+        S9xShowTilemapViewer();
+    });
+    get_object<Gtk::MenuItem>("sprite_viewer_item")->signal_activate().connect([] {
+        S9xShowSpriteViewer();
     });
 
     /* win32's Emulation->S-PPU. The layer hotkeys drive the same mask and say

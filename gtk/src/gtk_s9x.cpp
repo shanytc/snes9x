@@ -19,6 +19,7 @@
 #include "gtk_control.h"
 #include "gtk_sound.h"
 #include "gtk_audio_waveform.h"
+#include "gtk_ppu_viewer.h"
 #include "gtk_display.h"
 #include "gtk_netplay.h"
 #include "gtk_retroachievements.h"
@@ -743,6 +744,7 @@ void S9xExit()
     S9xAVIStop();
     S9xGBCameraStop();
     S9xCloseAudioWaveformWindow();
+    S9xClosePPUViewers();
 
     gui_config->save_config_file();
 

@@ -311,6 +311,13 @@ list(APPEND SOURCES
     src/gtk_movie.h
     src/gtk_audio_waveform.cpp
     src/gtk_audio_waveform.h
+    src/gtk_ppu_viewer.cpp
+    src/gtk_ppu_viewer.h
+    src/gtk_tile_viewer.cpp
+    src/gtk_tilemap_viewer.cpp
+    src/gtk_sprite_viewer.cpp
+    ../common/video/ppu_viewer.cpp
+    ../common/video/ppu_viewer.hpp
     ../common/recording/avi_writer.cpp
     ../common/recording/avi_writer.hpp
     ../common/recording/avi_recorder.cpp

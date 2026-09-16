@@ -325,6 +325,16 @@ list(APPEND QT_GUI_SOURCES
     src/MovieDialogs.hpp
     src/AudioWaveformWindow.cpp
     src/AudioWaveformWindow.hpp
+    src/PPUViewerWindow.cpp
+    src/PPUViewerWindow.hpp
+    src/TileViewerWindow.cpp
+    src/TileViewerWindow.hpp
+    src/TilemapViewerWindow.cpp
+    src/TilemapViewerWindow.hpp
+    src/SpriteViewerWindow.cpp
+    src/SpriteViewerWindow.hpp
+    ../common/video/ppu_viewer.cpp
+    ../common/video/ppu_viewer.hpp
     ../common/recording/avi_writer.cpp
     ../common/recording/avi_writer.hpp
     ../common/recording/avi_recorder.cpp

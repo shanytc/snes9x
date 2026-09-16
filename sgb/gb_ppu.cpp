@@ -332,11 +332,12 @@ void EvalSprites(Ppu &p, Memory &mem)
 // {covered, sprite_color_2bit, sprite_palette_8bit, bg_priority} via out
 // args. covered=false means no sprite covers this pixel or all covering
 // sprites are color-0 (transparent).
-struct SpritePixel { bool covered; uint8_t color; uint8_t palette; bool bg_over; };
+struct SpritePixel { bool covered; uint8_t color; uint8_t palette; bool bg_over;
+                     bool pal1; };   // pal1: OBP1 rather than OBP0
 
 SpritePixel SampleSpritePixel(const Ppu &p, int x)
 {
-	SpritePixel out{ false, 0, 0, false };
+	SpritePixel out{ false, 0, 0, false, false };
 	if (!(p.lcdc & 0x02)) return out;
 
 	const bool large    = (p.lcdc & 0x04) != 0;
@@ -374,6 +375,7 @@ SpritePixel SampleSpritePixel(const Ppu &p, int x)
 		out.covered  = true;
 		out.color    = color_idx;
 		out.palette  = (flags & 0x10) ? p.obp1 : p.obp0;
+		out.pal1     = (flags & 0x10) != 0;
 		out.bg_over  = (flags & 0x80) != 0;
 		return out;
 	}
@@ -650,7 +652,8 @@ void RenderPixel(Ppu &p)
 		if (!p.present_hold)
 		{
 			line[x] = ApplyPalette(sp.palette, sp.color);
-			lay[x]  = GB_PIXEL_OBJ;
+			lay[x]  = static_cast<uint8_t>(GB_PIXEL_OBJ |
+			          (sp.pal1 ? GB_PIXEL_OBJ_PAL1 : 0));
 		}
 	}
 }
@@ -1135,7 +1138,8 @@ void EmitPixel(Ppu &p, PixelMachine &m, uint8_t bg_color, uint8_t bg_attr, bool 
 			if (!p.present_hold)
 			{
 				line[x] = ApplyPalette((obj_flags & 0x10) ? p.obp1 : p.obp0, obj_c);
-				lay[x]  = GB_PIXEL_OBJ;
+				lay[x]  = static_cast<uint8_t>(GB_PIXEL_OBJ |
+				          ((obj_flags & 0x10) ? GB_PIXEL_OBJ_PAL1 : 0));
 			}
 		}
 	}
@@ -2265,9 +2269,9 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 						const uint8_t *const lay = &p.layer[p.ly * GB_SCREEN_WIDTH];
 						for (int x = x0; x < x_end; ++x)
 						{
-							if (lay[x] == GB_PIXEL_OBJ)
+							if ((lay[x] & GB_PIXEL_LAYER) == GB_PIXEL_OBJ)
 								continue;
-							const bool hidden = (lay[x] == GB_PIXEL_WINDOW)
+							const bool hidden = ((lay[x] & GB_PIXEL_LAYER) == GB_PIXEL_WINDOW)
 							                        ? !p.show_window : !p.show_bg;
 							line[x] = ApplyPalette(value,
 							                       hidden ? 0 : p.scanline_bg_raw[x]);

@@ -2511,7 +2511,7 @@ static const uint16_t *GbColorTable(bool cgb)
 	static bool     valid = false;
 
 	const uint32_t settings =
-		(Settings.ColorCorrection    ? 1u : 0u) |
+		(Settings.ColorCorrectionGBC ? 1u : 0u) |
 		(Settings.AdjustmentsEnabled ? 2u : 0u) |
 		(static_cast<uint32_t>(Settings.Gamma      + 100) <<  2) |
 		(static_cast<uint32_t>(Settings.Contrast   + 100) << 11) |
@@ -2526,7 +2526,7 @@ static const uint16_t *GbColorTable(bool cgb)
 			uint8 r = static_cast<uint8>(c & 0x1F);
 			uint8 g = static_cast<uint8>((c >> 5) & 0x1F);
 			uint8 b = static_cast<uint8>((c >> 10) & 0x1F);
-			if (variant == 1 && Settings.ColorCorrection)
+			if (variant == 1 && Settings.ColorCorrectionGBC)
 				GbcPanelColor(r, g, b);
 			S9xApplyImageAdjustments(r, g, b, 0x1F);
 			table[variant][c] = static_cast<uint16_t>(r | (g << 5) | (b << 10));
@@ -2541,9 +2541,50 @@ static const uint16_t *GbColorTable(bool cgb)
 // only one the panel curve belongs on; the sliders apply either way.
 static inline uint16_t GbShowColor(uint16_t bgr555, bool cgb)
 {
-	if (!Settings.ColorCorrection && !Settings.AdjustmentsEnabled)
+	if (!Settings.ColorCorrectionGBC && !Settings.AdjustmentsEnabled)
 		return bgr555;
 	return GbColorTable(cgb)[bgr555 & 0x7FFF];
+}
+
+// The shade a mono Game Boy pixel ends up wearing. Settings.GBPalette holds
+// three four-shade ramps, one per DMG palette register, and `layer` is what
+// says which register a pixel went through -- background, or a sprite with
+// OBP0 or OBP1. Only a session with no SGB in it gets here: under the SGB
+// BIOS the game sends its own palettes and they win.
+static inline uint16_t DmgShadeColor(uint8_t shade, uint8_t layer)
+{
+	const int reg = ((layer & GB_PIXEL_LAYER) == GB_PIXEL_OBJ)
+	              ? ((layer & GB_PIXEL_OBJ_PAL1) ? 2 : 1) : 0;
+	const uint32_t rgb = Settings.GBPalette[reg][shade & 3];
+	const uint16_t r = static_cast<uint16_t>(((rgb >> 16) & 0xFF) >> 3);
+	const uint16_t g = static_cast<uint16_t>(((rgb >> 8)  & 0xFF) >> 3);
+	const uint16_t b = static_cast<uint16_t>(( rgb        & 0xFF) >> 3);
+	return static_cast<uint16_t>(r | (g << 5) | (b << 10));
+}
+
+// A host that never filled the palette in -- a headless tool, a config
+// predating it -- gets the ramp mono output has always been drawn with.
+// All twelve entries zero can only mean unset: no usable ramp is black
+// through to its lightest shade.
+static void EnsureDmgPalette()
+{
+	for (int reg = 0; reg < 3; ++reg)
+		for (int shade = 0; shade < 4; ++shade)
+			if (Settings.GBPalette[reg][shade]) return;
+
+	static const uint32_t ramp[4] = { 0xFFFFFF, 0xADADAD, 0x525252, 0x000000 };
+	for (int reg = 0; reg < 3; ++reg)
+		for (int shade = 0; shade < 4; ++shade)
+			Settings.GBPalette[reg][shade] = ramp[shade];
+}
+
+// Whether this frame's mono pixels take the palette above. A cart that has
+// sent SGB palette packets is being colored by the game, so leave it be.
+static inline bool DmgPaletteActive(const SgbState &s, const Ppu &ppu)
+{
+	if (ppu.cgb || s.palette_writes != 0) return false;
+	EnsureDmgPalette();
+	return true;
 }
 
 static inline uint16_t BgrToHost(uint16_t bgr)
@@ -2589,6 +2630,7 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 
 	const uint32_t origin_x = SGB_GB_TILE_X * 8;  // 48
 	const uint32_t origin_y = SGB_GB_TILE_Y * 8;  // 40
+	const bool dmg_palette = DmgPaletteActive(impl_->sgb_state, impl_->ppu);
 
 	for (uint32_t py = 0; py < GB_SCREEN_HEIGHT; ++py)
 	{
@@ -2614,6 +2656,12 @@ void Emulator::BlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 				default:
 				{
 					const uint8_t  shade   = src_fb[py * GB_SCREEN_WIDTH + px];
+					if (dmg_palette)
+					{
+						color = DmgShadeColor(shade,
+							impl_->ppu.layer[py * GB_SCREEN_WIDTH + px]);
+						break;
+					}
 					const uint32_t tile_x  = px / 8;
 					const uint32_t tile_y  = py / 8;
 					color = SgbResolveColor(impl_->sgb_state, tile_x, tile_y, shade);
@@ -2645,6 +2693,8 @@ void Emulator::BlitScreenGB(uint16_t *dest, uint32_t pitch_pixels)
 		src_fb = impl_->sgb_state.frozen_frame;
 	}
 
+	const bool dmg_palette = DmgPaletteActive(impl_->sgb_state, impl_->ppu);
+
 	for (uint32_t py = 0; py < GB_SCREEN_HEIGHT; ++py)
 	{
 		uint16_t *const dst_row = dest + py * pitch_pixels;
@@ -2666,7 +2716,9 @@ void Emulator::BlitScreenGB(uint16_t *dest, uint32_t pitch_pixels)
 				default:
 				{
 					const uint8_t shade = src_fb[py * GB_SCREEN_WIDTH + px];
-					color = SgbResolveColor(impl_->sgb_state, px / 8, py / 8, shade);
+					color = dmg_palette
+					      ? DmgShadeColor(shade, impl_->ppu.layer[py * GB_SCREEN_WIDTH + px])
+					      : SgbResolveColor(impl_->sgb_state, px / 8, py / 8, shade);
 					break;
 				}
 			}

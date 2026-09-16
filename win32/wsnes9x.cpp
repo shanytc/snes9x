@@ -572,6 +572,10 @@ void WinUnlockConfigFile ();
 // dialog's Pause Emulation checkbox drives PAUSE_SOUND_DIALOG instead.
 static HWND s_hSoundOptsDlg    = NULL;
 static bool s_soundOptsUserClose = false;
+// Color Correction runs modeless too, and live: a slider moves, the screen
+// follows. Cancel puts back what was there when it opened.
+static HWND s_hColorDlg        = NULL;
+static bool s_colorDlgUserClose = false;
 static void S9xSetMuted (bool mute);
 void WinCleanupConfigData ();
 
@@ -2801,10 +2805,15 @@ LRESULT CALLBACK WinProc(
 			Settings.DisplayFrameNumber = !Settings.DisplayFrameNumber;
 			break;
 		case ID_VIDEO_COLORCORRECTION:
+			if (s_hColorDlg)
+			{
+				SetForegroundWindow(s_hColorDlg);
+				break;
+			}
 			RestoreGUIDisplay();
-			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_COLORCORRECTION), hWnd, DlgColorCorrectionProc);
-			RestoreSNESDisplay();
-			S9xFixColourBrightness();
+			s_hColorDlg = CreateDialogParam(g_hInst, MAKEINTRESOURCE(IDD_COLORCORRECTION), hWnd, DlgColorCorrectionProc, 0);
+			if (!s_hColorDlg)
+				RestoreSNESDisplay();
 			break;
 		case ID_SAVESCREENSHOT:
 			WinRequestScreenshot();
@@ -4413,6 +4422,8 @@ void S9xOnSNESPadRead()
 
 				if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
 					continue;
+				if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
+					continue;
 
 				if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
 				{
@@ -4954,6 +4965,8 @@ int WINAPI WinMain(
 #endif
 
             if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
+                continue;
+            if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
                 continue;
 
             if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
@@ -6266,6 +6279,15 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		return false;
 	}
 #endif
+
+	// The Color Correction dialog is laid out for the console that was loaded
+	// when it opened, and this load may bring another. It goes, keeping
+	// whatever was set: everything in it is already live.
+	if (s_hColorDlg)
+	{
+		s_colorDlgUserClose = true;
+		DestroyWindow(s_hColorDlg);
+	}
 
 	TCHAR	msu1_renamed[MAX_PATH];
 
@@ -8381,48 +8403,160 @@ static void EnableAdjustmentSliders(HWND hDlg, BOOL enable)
 	EnableWindow(GetDlgItem(hDlg, IDC_EDIT_SATURATION), enable);
 }
 
-// Which console screen the correction models, for the Color Correction dialog.
-// A Game Boy game running in color gets the CGB LCD curve (in the GB blit);
-// everything else the SNES one, SGB sessions included, since there the SNES
-// draws the picture. NULL when there is nothing to correct: no game running,
-// or a Game Boy picture in plain shades.
-static const TCHAR *ColorCorrectionSystem()
+// Which screen the Color Correction dialog is looking at. A Game Boy game
+// running in color gets the CGB LCD curve; a mono one has no curve to model
+// but picks its four shades instead; everything else the SNES curve, SGB
+// sessions included, since there the SNES draws the picture.
+enum ColorSystem { COLOR_SYSTEM_NONE, COLOR_SYSTEM_SNES, COLOR_SYSTEM_GBC,
+                   COLOR_SYSTEM_DMG };
+
+static ColorSystem ColorCorrectionSystem()
 {
 	if (Settings.StopEmulation)
-		return NULL;
+		return COLOR_SYSTEM_NONE;
 	if (Settings.SuperGameBoy)
-		return S9xSGBIsCgbRender() ? TEXT("GBC") : NULL;
-	return TEXT("SNES");
+		return S9xSGBIsCgbRender() ? COLOR_SYSTEM_GBC : COLOR_SYSTEM_DMG;
+	return COLOR_SYSTEM_SNES;
+}
+
+// The four shades a plain Game Boy screen has always used here.
+static const uint32 kGBPaletteDefault[4] = { 0xFFFFFF, 0xADADAD, 0x525252, 0x000000 };
+
+// Mesen's presets, so a palette set up there carries over unchanged. Each
+// applies to all three registers at once; individual shades are then edited
+// by clicking a swatch.
+static const struct { const TCHAR *name; uint32 shades[4]; } kGBPalettePresets[] = {
+	{ TEXT("Grayscale"),                 { 0xE8E8E8, 0xA0A0A0, 0x585858, 0x101010 } },
+	{ TEXT("Grayscale (high contrast)"), { 0xFFFFFF, 0xB0B0B0, 0x686868, 0x000000 } },
+	{ TEXT("Green"),                     { 0xE0F8D0, 0x88C070, 0x346856, 0x081820 } },
+	{ TEXT("Brown"),                     { 0xF8E088, 0xD8B058, 0x987838, 0x483818 } },
+};
+
+// The checkbox edits whichever screen is loaded, so switching consoles
+// mid-session leaves each one's answer where it was.
+static bool8 *ColorCorrectionFlag(ColorSystem system)
+{
+	if (system == COLOR_SYSTEM_GBC) return &Settings.ColorCorrectionGBC;
+	if (system == COLOR_SYSTEM_DMG) return NULL;   // four shades, no curve
+	return &Settings.ColorCorrection;              // SNES, SGB, nothing loaded
+}
+
+// The dialog is three blocks stacked -- the correction checkbox, the mono
+// Game Boy palette, the adjustments -- and each console has one block that
+// does not apply to it. That block goes away rather than sitting there
+// greyed: every control from `firstId` down to where the block starting at
+// `nextId` begins is hidden, what follows moves up into the space, and the
+// dialog loses that much height. Measured, not assumed, so it holds at any
+// DPI; membership is by position, so the block's controls need no listing.
+static void CollapseDialogBlock(HWND hDlg, int firstId, int nextId)
+{
+	HWND first = GetDlgItem(hDlg, firstId);
+	HWND next  = GetDlgItem(hDlg, nextId);
+	if (!first || !next) return;
+
+	RECT firstRect, nextRect;
+	GetWindowRect(first, &firstRect);
+	GetWindowRect(next, &nextRect);
+	const int shift = nextRect.top - firstRect.top;
+	if (shift <= 0) return;
+
+	for (HWND child = GetWindow(hDlg, GW_CHILD); child;
+	     child = GetWindow(child, GW_HWNDNEXT))
+	{
+		RECT r;
+		GetWindowRect(child, &r);
+		if (r.top < firstRect.top)
+			continue;                       // above the block: stays put
+		if (r.top < nextRect.top)
+		{
+			ShowWindow(child, SW_HIDE);     // in the block: goes
+			continue;
+		}
+		MapWindowPoints(NULL, hDlg, (POINT *)&r, 2);
+		SetWindowPos(child, NULL, r.left, r.top - shift, 0, 0,
+		             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+
+	RECT window;
+	GetWindowRect(hDlg, &window);
+	SetWindowPos(hDlg, NULL, 0, 0, window.right - window.left,
+	             window.bottom - window.top - shift,
+	             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// The swatch ids run BG 0-3, OBP0 0-3, OBP1 0-3 in one block.
+#define GB_PAL_SWATCHES 12
+
+static void SetGBPaletteRow(int reg, const uint32 shades[4])
+{
+	for (int shade = 0; shade < 4; shade++)
+		Settings.GBPalette[reg][shade] = shades[shade];
+}
+
+static void RedrawGBPalette(HWND hDlg)
+{
+	for (int i = 0; i < GB_PAL_SWATCHES; i++)
+		InvalidateRect(GetDlgItem(hDlg, IDC_GB_PAL_BG0 + i), NULL, TRUE);
+}
+
+// What the controls say is what the screen shows: every change lands in
+// Settings at once. SNES colours are rebuilt from CGRAM here; the Game Boy
+// paths read Settings every frame and need no push.
+static void ApplyColorDialog(HWND hDlg)
+{
+	bool8 *flag = ColorCorrectionFlag(ColorCorrectionSystem());
+	if (flag)
+		*flag = IsDlgButtonChecked(hDlg, IDC_COLOR_CORRECTION_ENABLE) == BST_CHECKED;
+	Settings.AdjustmentsEnabled = IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED;
+	Settings.Gamma      = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_GETPOS, 0, 0);
+	Settings.Contrast   = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_GETPOS, 0, 0);
+	Settings.Saturation = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_GETPOS, 0, 0);
+	S9xFixColourBrightness();
 }
 
 INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	static bool prevColorCorrection;
+	static bool prevColorCorrection, prevColorCorrectionGBC;
 	static bool prevAdjustmentsEnabled;
 	static int prevGamma, prevContrast, prevSaturation;
+	static uint32 prevGBPalette[3][4];
 
 	switch (msg)
 	{
 	case WM_INITDIALOG:
 		LocalizeDialog(hDlg);
 		prevColorCorrection = Settings.ColorCorrection;
+		prevColorCorrectionGBC = Settings.ColorCorrectionGBC;
 		prevAdjustmentsEnabled = Settings.AdjustmentsEnabled;
 		prevGamma = Settings.Gamma;
 		prevContrast = Settings.Contrast;
 		prevSaturation = Settings.Saturation;
+		memcpy(prevGBPalette, Settings.GBPalette, sizeof prevGBPalette);
 
-		CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE, Settings.ColorCorrection ? BST_CHECKED : BST_UNCHECKED);
 		CheckDlgButton(hDlg, IDC_ADJUSTMENTS_ENABLE, Settings.AdjustmentsEnabled ? BST_CHECKED : BST_UNCHECKED);
 
 		{
-			const TCHAR *system = ColorCorrectionSystem();
+			const ColorSystem system = ColorCorrectionSystem();
+			const bool8 *flag = ColorCorrectionFlag(system);
+			CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE,
+			               (flag && *flag) ? BST_CHECKED : BST_UNCHECKED);
+
+			const TCHAR *name = (system == COLOR_SYSTEM_SNES) ? TEXT("SNES")
+			                  : (system == COLOR_SYSTEM_GBC)  ? TEXT("GBC") : NULL;
 			TCHAR label[128];
-			if (system)
-				_stprintf(label, TEXT("Enable Color Correction (accurate %s Colors)"), system);
+			if (name)
+				_stprintf(label, TEXT("Enable Color Correction (accurate %s Colors)"), name);
 			else
 				lstrcpy(label, TEXT("Enable Color Correction"));
 			SetDlgItemText(hDlg, IDC_COLOR_CORRECTION_ENABLE, label);
-			EnableWindow(GetDlgItem(hDlg, IDC_COLOR_CORRECTION_ENABLE), system != NULL);
+			EnableWindow(GetDlgItem(hDlg, IDC_COLOR_CORRECTION_ENABLE), name != NULL);
+
+			// A mono Game Boy has shades to pick but no curve to model; every
+			// other screen is the other way round.
+			if (system == COLOR_SYSTEM_DMG)
+				CollapseDialogBlock(hDlg, IDC_COLOR_CORRECTION_ENABLE, IDC_GB_PAL_GROUP);
+			else
+				CollapseDialogBlock(hDlg, IDC_GB_PAL_GROUP, IDC_ADJUSTMENTS_GROUP);
 		}
 
 		SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETRANGE, TRUE, MAKELONG(-100, 100));
@@ -8445,6 +8579,42 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 
 		return TRUE;
 
+	case WM_DRAWITEM:
+	{
+		const DRAWITEMSTRUCT *di = (const DRAWITEMSTRUCT *)lParam;
+		const int swatch = (int)di->CtlID - IDC_GB_PAL_BG0;
+		if (swatch < 0 || swatch >= GB_PAL_SWATCHES)
+			break;
+
+		const uint32 rgb = Settings.GBPalette[swatch / 4][swatch % 4];
+		int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+		if (di->itemState & ODS_DISABLED)
+		{
+			// Halfway to the dialog face, so a palette that cannot be edited
+			// still reads as a palette but looks as disabled as its label.
+			const COLORREF face = GetSysColor(COLOR_3DFACE);
+			r = (r + GetRValue(face)) / 2;
+			g = (g + GetGValue(face)) / 2;
+			b = (b + GetBValue(face)) / 2;
+		}
+		HBRUSH fill = CreateSolidBrush(RGB(r, g, b));
+		FillRect(di->hDC, &di->rcItem, fill);
+		DeleteObject(fill);
+
+		// A focused or pushed swatch says so with its frame, since an
+		// owner-drawn button draws none of its own.
+		DrawEdge(di->hDC, (LPRECT)&di->rcItem,
+		         (di->itemState & ODS_SELECTED) ? BDR_SUNKENOUTER : BDR_RAISEDINNER,
+		         BF_RECT);
+		if (di->itemState & ODS_FOCUS)
+		{
+			RECT focus = di->rcItem;
+			InflateRect(&focus, -2, -2);
+			DrawFocusRect(di->hDC, &focus);
+		}
+		return TRUE;
+	}
+
 	case WM_HSCROLL:
 	{
 		HWND trackHwnd = (HWND)lParam;
@@ -8454,35 +8624,93 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			UpdateColorSliderText(hDlg, IDC_SLIDER_CONTRAST, IDC_EDIT_CONTRAST);
 		else if (trackHwnd == GetDlgItem(hDlg, IDC_SLIDER_SATURATION))
 			UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
+		ApplyColorDialog(hDlg);
 		return TRUE;
 	}
+
+	// Modeless: the frame's X button has to destroy the dialog itself, and
+	// it means the same thing as Cancel.
+	case WM_CLOSE:
+		SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+		return TRUE;
+
+	case WM_DESTROY:
+		s_hColorDlg = NULL;
+		// Only on a close from in here or from a load -- at app teardown the
+		// parent takes this dialog down with it and the display is going away.
+		if (s_colorDlgUserClose)
+		{
+			s_colorDlgUserClose = false;
+			RestoreSNESDisplay();
+		}
+		return TRUE;
 
 	case WM_COMMAND:
 		switch (LOWORD(wParam))
 		{
-		case IDC_ADJUSTMENTS_ENABLE:
-			EnableAdjustmentSliders(hDlg, IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED);
+		case IDC_COLOR_CORRECTION_ENABLE:
+			ApplyColorDialog(hDlg);
 			return TRUE;
 
+		case IDC_ADJUSTMENTS_ENABLE:
+			EnableAdjustmentSliders(hDlg, IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED);
+			ApplyColorDialog(hDlg);
+			return TRUE;
+
+		case IDC_GB_PAL_PRESET:
+		{
+			HMENU menu = CreatePopupMenu();
+			if (!menu)
+				return TRUE;
+			for (int i = 0; i < _countof(kGBPalettePresets); i++)
+				AppendMenu(menu, MF_STRING, i + 1, kGBPalettePresets[i].name);
+
+			RECT button;
+			GetWindowRect(GetDlgItem(hDlg, IDC_GB_PAL_PRESET), &button);
+			const int picked = (int)TrackPopupMenu(menu,
+				TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
+				button.left, button.bottom, 0, hDlg, NULL);
+			DestroyMenu(menu);
+
+			if (picked > 0)
+			{
+				for (int reg = 0; reg < 3; reg++)
+					SetGBPaletteRow(reg, kGBPalettePresets[picked - 1].shades);
+				RedrawGBPalette(hDlg);
+			}
+			return TRUE;
+		}
+
 		case IDOK:
-			Settings.ColorCorrection = IsDlgButtonChecked(hDlg, IDC_COLOR_CORRECTION_ENABLE) == BST_CHECKED;
-			Settings.AdjustmentsEnabled = IsDlgButtonChecked(hDlg, IDC_ADJUSTMENTS_ENABLE) == BST_CHECKED;
-			Settings.Gamma = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_GETPOS, 0, 0);
-			Settings.Contrast = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_CONTRAST, TBM_GETPOS, 0, 0);
-			Settings.Saturation = (int)SendDlgItemMessage(hDlg, IDC_SLIDER_SATURATION, TBM_GETPOS, 0, 0);
-			EndDialog(hDlg, 1);
+			// everything is already live; only the screen on show was ever
+			// answered for, the other console keeps what it was last given
+			ApplyColorDialog(hDlg);
+			s_colorDlgUserClose = true;
+			DestroyWindow(hDlg);
 			return TRUE;
 
 		case IDCANCEL:
 			Settings.ColorCorrection = prevColorCorrection;
+			Settings.ColorCorrectionGBC = prevColorCorrectionGBC;
 			Settings.AdjustmentsEnabled = prevAdjustmentsEnabled;
 			Settings.Gamma = prevGamma;
 			Settings.Contrast = prevContrast;
 			Settings.Saturation = prevSaturation;
-			EndDialog(hDlg, 0);
+			memcpy(Settings.GBPalette, prevGBPalette, sizeof prevGBPalette);
+			S9xFixColourBrightness();
+			s_colorDlgUserClose = true;
+			DestroyWindow(hDlg);
 			return TRUE;
 
 		case IDC_DEFAULTS_COLOR:
+			// the palette is only on show for a mono Game Boy; elsewhere it is
+			// not this dialog's to reset
+			if (ColorCorrectionSystem() == COLOR_SYSTEM_DMG)
+			{
+				for (int reg = 0; reg < 3; reg++)
+					SetGBPaletteRow(reg, kGBPaletteDefault);
+				RedrawGBPalette(hDlg);
+			}
 			CheckDlgButton(hDlg, IDC_COLOR_CORRECTION_ENABLE, BST_UNCHECKED);
 			CheckDlgButton(hDlg, IDC_ADJUSTMENTS_ENABLE, BST_UNCHECKED);
 			SendDlgItemMessage(hDlg, IDC_SLIDER_GAMMA, TBM_SETPOS, TRUE, 0);
@@ -8492,7 +8720,34 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			UpdateColorSliderText(hDlg, IDC_SLIDER_CONTRAST, IDC_EDIT_CONTRAST);
 			UpdateColorSliderText(hDlg, IDC_SLIDER_SATURATION, IDC_EDIT_SATURATION);
 			EnableAdjustmentSliders(hDlg, FALSE);
+			ApplyColorDialog(hDlg);
 			return TRUE;
+
+		default:
+		{
+			const int swatch = (int)LOWORD(wParam) - IDC_GB_PAL_BG0;
+			if (HIWORD(wParam) != BN_CLICKED)
+				break;
+			if (swatch < 0 || swatch >= GB_PAL_SWATCHES)
+				break;
+
+			uint32 &shade = Settings.GBPalette[swatch / 4][swatch % 4];
+			static COLORREF custom[16];
+			CHOOSECOLOR cc = { 0 };
+			cc.lStructSize  = sizeof(cc);
+			cc.hwndOwner    = hDlg;
+			cc.rgbResult    = RGB((shade >> 16) & 0xFF, (shade >> 8) & 0xFF, shade & 0xFF);
+			cc.lpCustColors = custom;
+			cc.Flags        = CC_RGBINIT | CC_FULLOPEN;
+			if (ChooseColor(&cc))
+			{
+				shade = ((uint32)GetRValue(cc.rgbResult) << 16) |
+				        ((uint32)GetGValue(cc.rgbResult) << 8)  |
+				         (uint32)GetBValue(cc.rgbResult);
+				InvalidateRect(GetDlgItem(hDlg, IDC_GB_PAL_BG0 + swatch), NULL, TRUE);
+			}
+			return TRUE;
+		}
 		}
 		break;
 	}

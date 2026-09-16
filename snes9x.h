@@ -366,7 +366,16 @@ struct SSettings
 
 	int		RunAhead;     // 0 = off, 1-4 = number of frames to run ahead
 	bool8	InRunAhead;   // true while emulating a hidden "ahead" frame
+	// One switch per screen, since the two model different hardware and a
+	// session can move between them: the SNES CRT curve (SGB sessions too,
+	// where the SNES draws) and the Game Boy Color LCD panel.
 	bool8	ColorCorrection;
+	bool8	ColorCorrectionGBC;
+	// The four shades a plain Game Boy screen shows, per DMG palette
+	// register: background (BGP), sprites 1 (OBP0), sprites 2 (OBP1).
+	// 0xRRGGBB, index 0 = lightest. Only a mono Game Boy picture uses
+	// them: SGB sessions and CGB output carry their own colors.
+	uint32	GBPalette[3][4];
 	bool8	AdjustmentsEnabled;
 	int		Gamma;       // signed: -100..+100, 0 = no change
 	int		Contrast;    // signed: -100..+100, 0 = no change

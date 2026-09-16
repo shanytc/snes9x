@@ -3,6 +3,7 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "ppu.h"
 #include "biosmanager.h"
 #include "srtc.h"
 #include "apu/apu.h"
@@ -930,7 +931,9 @@ float get_aspect_ratio(unsigned width, unsigned height)
 void retro_get_system_av_info(struct retro_system_av_info *info)
 {
     memset(info,0,sizeof(retro_system_av_info));
-    unsigned width = SNES_WIDTH;
+    // Widescreen hands the frontend more columns; ask S9xWidescreenColumns
+    // rather than IPPU, which only knows once a frame has been rendered.
+    unsigned width = SNES_WIDTH + 2 * S9xWidescreenColumns();
     unsigned height = PPU.ScreenHeight;
     if (crop_overscan_mode == OVERSCAN_CROP_ON)
         height = SNES_HEIGHT;
@@ -939,7 +942,7 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 
     info->geometry.base_width = width;
     info->geometry.base_height = height;
-    info->geometry.max_width = MAX_SNES_WIDTH_NTSC;
+    info->geometry.max_width = (MAX_SNES_WIDTH_NTSC > MAX_SNES_WIDTH) ? MAX_SNES_WIDTH_NTSC : MAX_SNES_WIDTH;
     info->geometry.max_height = MAX_SNES_HEIGHT;
     info->geometry.aspect_ratio = get_aspect_ratio(width, height);
     info->timing.sample_rate = 32040;
@@ -1560,6 +1563,10 @@ void retro_init(void)
     environ_cb(RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS, &achievements);
 
     memset(&Settings, 0, sizeof(Settings));
+    // Widescreen is off by default here; a game's .bso file is what turns it
+    // on, and it needs the rest of the settings to be sane when it does.
+    S9xSetWidescreenDefaults(&Settings.Widescreen);
+    S9xUpdateWidescreen();
     Settings.MouseMaster = TRUE;
     Settings.SuperScopeMaster = TRUE;
     Settings.JustifierMaster = TRUE;
@@ -2068,10 +2075,13 @@ void retro_run()
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
         update_variables();
 
-    if (g_geometry_update || height != PPU.ScreenHeight)
+    static int wide_extent = -1;
+
+    if (g_geometry_update || height != PPU.ScreenHeight || wide_extent != S9xWidescreenColumns())
     {
         update_geometry();
         height = PPU.ScreenHeight;
+        wide_extent = S9xWidescreenColumns();
     }
 
     int result = -1;
@@ -2278,7 +2288,7 @@ bool8 S9xDeinitUpdate(int width, int height)
     }
 
 
-    if (blargg_filter)
+    if (blargg_filter && !IPPU.WideExtent)
     {
         burst_phase = (burst_phase + 1) % 3;
 
@@ -2289,7 +2299,7 @@ bool8 S9xDeinitUpdate(int width, int height)
 
         video_cb(snes_ntsc_buffer + ((int)(MAX_SNES_WIDTH_NTSC) * overscan_offset), SNES_NTSC_OUT_WIDTH(256), height, MAX_SNES_WIDTH_NTSC * 2);
     }
-    else if (width == MAX_SNES_WIDTH && hires_blend)
+    else if (width > S9xWideWidth() && hires_blend)
     {
         #define AVERAGE_565(el0, el1) (((el0) & (el1)) + ((((el0) ^ (el1)) & 0xF7DE) >> 1))
 

@@ -3679,6 +3679,22 @@
                                             <property name="position">4</property>
                                           </packing>
                                         </child>
+                                        <child>
+                                          <object class="GtkCheckButton" id="widescreen">
+                                            <property name="label" translatable="yes">Widescreen</property>
+                                            <property name="visible">True</property>
+                                            <property name="can_focus">True</property>
+                                            <property name="receives_default">False</property>
+                                            <property name="tooltip_text" translatable="yes">Draw the columns either side of the SNES's own 256, for a 16:9 picture. Games that were not made for it show artifacts at the edges; widescreen ROM hacks ship a .bso file next to the ROM that sets this up for them.</property>
+                                            <property name="use_underline">True</property>
+                                            <property name="draw_indicator">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">False</property>
+                                            <property name="position">5</property>
+                                          </packing>
+                                        </child>
                                       </object>
                                     </child>
                                   </object>

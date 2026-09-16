@@ -86,6 +86,11 @@ DisplayPanel::DisplayPanel(EmuApplication *app_)
         app->updateSettings();
     });
 
+    connect(checkBox_widescreen, &QCheckBox::clicked, [&](bool checked) {
+        app->config->widescreen = checked;
+        app->updateSettings();
+    });
+
     connect(comboBox_aspect_ratio, &QComboBox::activated, [&](int index) {
         auto &num = app->config->aspect_ratio_numerator;
         auto &den = app->config->aspect_ratio_denominator;
@@ -292,6 +297,7 @@ void DisplayPanel::showEvent(QShowEvent *event)
     checkBox_overscan->setChecked(config->show_overscan);
     checkBox_transparency->setChecked(config->transparency_effects);
     checkBox_blend_hires->setChecked(config->blend_hires);
+    checkBox_widescreen->setChecked(config->widescreen);
 
     if (config->aspect_ratio_numerator == 4)
         comboBox_aspect_ratio->setCurrentIndex(0);

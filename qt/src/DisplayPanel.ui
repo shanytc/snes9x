@@ -400,6 +400,19 @@ Output directly will cause the screen to change between the two modes and look w
           </property>
          </widget>
         </item>
+        <item row="1" column="1">
+         <widget class="QCheckBox" name="checkBox_widescreen">
+          <property name="toolTip">
+           <string>Draw the columns either side of the SNES's own 256, for a 16:9 picture.</string>
+          </property>
+          <property name="whatsThis">
+           <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The SNES scanned out 256 columns, but its backgrounds, Mode 7 matrix and sprites all carry on past them. Widescreen draws what was there.&lt;/p&gt;&lt;p&gt;Games that were not made for it show artifacts at the edges, since they culled sprites and clamped scrolling at the old screen edges. Widescreen ROM hacks are made for it, and ship a .bso file that goes next to the ROM and sets all of this up for them.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+          </property>
+          <property name="text">
+           <string>Widescreen</string>
+          </property>
+         </widget>
+        </item>
        </layout>
       </item>
       <item>

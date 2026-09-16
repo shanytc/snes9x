@@ -905,6 +905,9 @@ void WinRegisterConfigItems()
 	AddStringC("OpenGL:OGLShader", GUI.OGLshaderFileName, MAX_PATH, "", "shader filename for OpenGL mode (bsnes-style XML shader or CG shader)");
 	AddBoolC("OpenGL:DisablePBOs", GUI.OGLdisablePBOs, true, "do not use PBOs in OpenGL mode, even if the video card supports them");
 	AddBoolC("ExtendHeight", Settings.ShowOverscan, false, "true to display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240.");
+	AddBoolC("Widescreen", Settings.Widescreen.Mode, false, "true to draw the columns either side of the SNES's own 256. Games not made for it show artifacts at the edges; a widescreen ROM hack's .bso file, read from beside the ROM, overrides this and the rest of the widescreen settings");
+	AddUIntC("WidescreenAspect", Settings.Widescreen.Aspect, 1609, "widescreen shape: 200 and below is the number of columns added on each side, above it an aspect ratio as width*100+height (1609 is 16:9, 1610 is 16:10, 201 is 2:1)");
+	AddUIntC("WidescreenSprites", Settings.Widescreen.Sprites, 0, "sprites in the added columns: 0 draws only those that reach the SNES's own columns, 1 draws them wherever the game put them (right for Super Mario World Widescreen, artifacts in most other games), 2 clips them all to the SNES's columns");
 	AddBoolC("AlwaysCenterImage", GUI.AlwaysCenterImage,false, "true to center the image even if larger than window");
 	AddIntC("Window:Width", GUI.window_size.right, 512, "256=1x, 512=2x, 768=3x, 1024=4x, etc. (usually)");
 	AddIntC("Window:Height", GUI.window_size.bottom, 448, "224=1x, 448=2x, 672=3x,  896=4x, etc. (usually)");

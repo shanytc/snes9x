@@ -1,6 +1,8 @@
 #include "EmuCanvas.hpp"
 #include "EmuConfig.hpp"
 #include "common/video/screen_content.hpp"
+#include "snes9x.h"
+#include "ppu.h"
 #include <qnamespace.h>
 #include <qwidget.h>
 
@@ -27,6 +29,14 @@ void S9xQtDisplayAspect(EmuConfig *config, int *num, int *den)
     {
         *num *= 224;
         *den *= 239;
+    }
+
+    // Widescreen hands us more columns for the same scanlines, and they are
+    // meant to be seen rather than squeezed back into the SNES's shape.
+    if (IPPU.WideExtent)
+    {
+        *num *= S9xWideWidth();
+        *den *= SNES_WIDTH;
     }
 }
 

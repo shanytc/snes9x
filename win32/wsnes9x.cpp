@@ -13802,6 +13802,7 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 	// temporary GUI state for restoring after previewing while selecting options
 	static int prevScale, prevScaleHiRes, prevPPL, prevGBFrameBlend, prevGBFrameBlendLayer, prevGBFrameBlendAuto;
 	static bool prevStretch, prevAspectRatio, prevHeightExtend, prevAutoDisplayMessages, prevBilinearFilter, prevShaderEnabled, prevBlendHires, prevIntegerScaling, prevNTSCScanlines;
+	static uint8 prevWidescreen;
 	static int prevAspectWidth;
 	static OutputMethod prevOutputMethod;
 	static TCHAR prevD3DShaderFile[MAX_PATH],prevOGLShaderFile[MAX_PATH];
@@ -13822,6 +13823,7 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         CreateToolTip(IDC_HIRES, hDlg, TEXT("Support the hi-res mode that a few games use, otherwise render them in low-res"));
         CreateToolTip(IDC_HEIGHT_EXTEND, hDlg, TEXT("Display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240"));
         CreateToolTip(IDC_MESSAGES_IN_IMAGE, hDlg, TEXT("Draw text inside the SNES image (will get into AVIs, screenshots, and filters)"));
+        CreateToolTip(IDC_WIDESCREEN, hDlg, TEXT("Draw the columns either side of the SNES's own 256, for a 16:9 picture. Games not made for it show artifacts at the edges; a widescreen ROM hack's .bso file, read from beside the ROM, sets this up for it"));
 		CreateToolTip(IDC_MESSAGES_SCALE, hDlg, TEXT("Try to scale messages with EPX instead of Simple, only works for 2x and 3x and when displaying after filters"));
 
         prevOutputMethod = GUI.outputMethod;
@@ -13838,6 +13840,7 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         prevShaderEnabled = GUI.shaderEnabled;
         prevBlendHires = GUI.BlendHiRes;
 		prevNTSCScanlines = GUI.NTSCScanlines;
+		prevWidescreen = Settings.Widescreen.Mode;
 		prevGBFrameBlend = Settings.GBFrameBlend;
 		prevGBFrameBlendLayer = Settings.GBFrameBlendLayer;
 		prevGBFrameBlendAuto = Settings.GBFrameBlendAuto;
@@ -13865,6 +13868,8 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
         if (GUI.BlendHiRes)
             SendDlgItemMessage(hDlg, IDC_HIRESBLEND, BM_SETCHECK, (WPARAM)BST_CHECKED, 0);
+        if (Settings.Widescreen.Mode != WS_MODE_OFF)
+            SendDlgItemMessage(hDlg, IDC_WIDESCREEN, BM_SETCHECK, (WPARAM)BST_CHECKED, 0);
         SendDlgItemMessage(hDlg, IDC_BLEND_GB_FRAMES, CB_RESETCONTENT, 0, 0);
         SendDlgItemMessage(hDlg, IDC_BLEND_GB_FRAMES, CB_ADDSTRING, 0, (LPARAM)TEXT("Off"));
         SendDlgItemMessage(hDlg, IDC_BLEND_GB_FRAMES, CB_ADDSTRING, 0, (LPARAM)TEXT("Simple Blend"));
@@ -14136,6 +14141,14 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			WinRefreshDisplay();
 			break;
 
+		case IDC_WIDESCREEN:
+			Settings.Widescreen.Mode = (IsDlgButtonChecked(hDlg, IDC_WIDESCREEN) == BST_CHECKED) ? WS_MODE_ON : WS_MODE_OFF;
+			S9xUpdateWidescreen();
+			// the picture changes shape, so the window has to follow it
+			WinDisplayApplyChanges();
+			WinRefreshDisplay();
+			break;
+
 		case IDC_BLEND_GB_FRAMES:
 			if (HIWORD(wParam) == CBN_SELCHANGE)
 			{
@@ -14340,6 +14353,8 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
  			Settings.Transparency = IsDlgButtonChecked(hDlg, IDC_TRANS);
 			Settings.BilinearFilter = (bool)(IsDlgButtonChecked(hDlg,IDC_BILINEAR)==BST_CHECKED);
 			Settings.ShowOverscan = IsDlgButtonChecked(hDlg, IDC_HEIGHT_EXTEND)!=0;
+			Settings.Widescreen.Mode = (IsDlgButtonChecked(hDlg, IDC_WIDESCREEN) == BST_CHECKED) ? WS_MODE_ON : WS_MODE_OFF;
+			S9xUpdateWidescreen();
 			GUI.DoubleBuffered = (bool)(IsDlgButtonChecked(hDlg, IDC_DBLBUFFER)==BST_CHECKED);
 			GUI.ReduceInputLag = (bool)(IsDlgButtonChecked(hDlg, IDC_REDUCEINPUTLAG) == BST_CHECKED);
 			GUI.Vsync = (bool)(IsDlgButtonChecked(hDlg, IDC_VSYNC
@@ -14444,6 +14459,8 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				GUI.shaderEnabled = prevShaderEnabled;
 				GUI.BlendHiRes = prevBlendHires;
 				GUI.NTSCScanlines = prevNTSCScanlines;
+				Settings.Widescreen.Mode = prevWidescreen;
+				S9xUpdateWidescreen();
 				Settings.GBFrameBlend = prevGBFrameBlend;
 				Settings.GBFrameBlendLayer = prevGBFrameBlendLayer;
 				Settings.GBFrameBlendAuto = prevGBFrameBlendAuto;

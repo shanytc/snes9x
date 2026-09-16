@@ -315,6 +315,21 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	if (conf.Exists("Controls::MacsRifleCrosshair"))
 		parse_crosshair_spec(X_MACSRIFLE, conf.GetString("Controls::MacsRifleCrosshair"));
 
+	// Widescreen
+	S9xSetWidescreenDefaults(&Settings.Widescreen);
+	Settings.Widescreen.Mode          = conf.GetUInt("Widescreen::Mode",          Settings.Widescreen.Mode);
+	Settings.Widescreen.Aspect        = conf.GetUInt("Widescreen::Aspect",        Settings.Widescreen.Aspect);
+	Settings.Widescreen.Sprites       = conf.GetUInt("Widescreen::Sprites",       Settings.Widescreen.Sprites);
+	Settings.Widescreen.BG[0]         = conf.GetUInt("Widescreen::BG1",           Settings.Widescreen.BG[0]);
+	Settings.Widescreen.BG[1]         = conf.GetUInt("Widescreen::BG2",           Settings.Widescreen.BG[1]);
+	Settings.Widescreen.BG[2]         = conf.GetUInt("Widescreen::BG3",           Settings.Widescreen.BG[2]);
+	Settings.Widescreen.BG[3]         = conf.GetUInt("Widescreen::BG4",           Settings.Widescreen.BG[3]);
+	Settings.Widescreen.StretchWindow = conf.GetBool("Widescreen::StretchWindow", Settings.Widescreen.StretchWindow);
+	Settings.Widescreen.IgnoreWindow  = conf.GetUInt("Widescreen::IgnoreWindow",  Settings.Widescreen.IgnoreWindow);
+	Settings.Widescreen.IgnoreWindowX = conf.GetUInt("Widescreen::IgnoreWindowX", Settings.Widescreen.IgnoreWindowX);
+	Settings.Widescreen.Backdrop      = conf.GetBool("Widescreen::Backdrop",      Settings.Widescreen.Backdrop);
+	S9xUpdateWidescreen();
+
 	// Hack
 	Settings.SuperFXClockMultiplier         = conf.GetUInt("Hack::SuperFXClockMultiplier", 100);
     Settings.OverclockMode                  = conf.GetUInt("Hack::OverclockMode", 0);
@@ -354,6 +369,10 @@ void S9xLoadConfigFiles (char **argv, int argc)
 #endif
 
 	S9xParsePortConfig(conf, 1);
+
+	// A port's own config may have set the widescreen options too.
+	S9xUpdateWidescreen();
+
 	S9xVerifyControllers();
 }
 

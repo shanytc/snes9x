@@ -96,6 +96,9 @@ struct EmuConfig
     // frames before the software filter ("Blend Hi-Res Images").
     bool transparency_effects;
     bool blend_hires;
+    // Draw the columns either side of the SNES's own 256 (widescreen.h). A
+    // game's .bso file overrides this and the rest of the widescreen settings.
+    bool widescreen;
     enum HighResolutionEffect
     {
         eLeaveAlone = 0,

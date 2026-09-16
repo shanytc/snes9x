@@ -607,6 +607,7 @@ void Snes9xPreferences::move_settings_to_dialog()
     set_check("change_display_resolution", config->change_display_resolution);
     set_check("scale_to_fit",              config->scale_to_fit);
     set_check("transparency_effects",      Settings.Transparency);
+    set_check("widescreen",                Settings.Widescreen.Mode != WS_MODE_OFF);
     set_check("blend_hires",               config->blend_hires);
     set_check("overscan",                  config->overscan);
     set_check("messages_in_image",         Settings.AutoDisplayMessages);
@@ -836,6 +837,8 @@ void Snes9xPreferences::get_settings_from_dialog()
     config->osd_size                  = get_spin("osd_size");
     config->scale_to_fit              = get_check("scale_to_fit");
     Settings.Transparency             = get_check("transparency_effects");
+    Settings.Widescreen.Mode          = get_check("widescreen") ? WS_MODE_ON : WS_MODE_OFF;
+    S9xUpdateWidescreen();
     config->blend_hires               = get_check("blend_hires");
     config->overscan                  = get_check("overscan");
     Settings.AutoDisplayMessages      = get_check("messages_in_image");

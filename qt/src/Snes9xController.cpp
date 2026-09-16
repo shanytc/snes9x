@@ -278,6 +278,10 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.Transparency = config->transparency_effects;
     blend_hires = config->blend_hires;
 
+    S9xSetWidescreenDefaults(&Settings.Widescreen);
+    Settings.Widescreen.Mode = config->widescreen ? WS_MODE_ON : WS_MODE_OFF;
+    S9xUpdateWidescreen();
+
     // Game Boy frame-blend (Super Game Boy). Push the stored mode/layer first, then,
     // when "Auto Layer Transparency" is on, let the per-title table in sgb.cpp pick
     // the mode/layer for the loaded Game Boy game. Like win32, there is a single
@@ -564,16 +568,22 @@ bool8 S9xDeinitUpdate(int width, int height)
 
     auto controller = Snes9xController::get();
     auto hires_effect = controller->high_resolution_effect;
-    const bool native_hires = (width == 512);
+    // "Hi-res" is a frame drawn at two pixels per SNES column, whatever the
+    // column count is - widescreen adds columns without doubling them.
+    const bool native_hires = (width > S9xWideWidth());
+    bool double_width = native_hires;
+
     if (!Settings.Paused)
     {
         if (hires_effect == EmuConfig::eScaleUp)
         {
             S9xForceHires(screen_view, GFX.Pitch, width, height);
+            double_width = true;
         }
         else if (hires_effect == EmuConfig::eScaleDown)
         {
             S9xMergeHires(screen_view, GFX.Pitch, width, height);
+            double_width = false;
         }
     }
 
@@ -581,7 +591,7 @@ bool8 S9xDeinitUpdate(int width, int height)
 
     // Hi-res frames get their own filter selection, like the win32 port's
     // second "Hi Res" box under Output Image Processing.
-    bool hires_frame = (width == 512 || height > SNES_HEIGHT_EXTENDED);
+    bool hires_frame = (double_width || height > SNES_HEIGHT_EXTENDED);
     int filter = hires_frame ? controller->software_filter_hires
                              : controller->software_filter;
 
@@ -590,7 +600,7 @@ bool8 S9xDeinitUpdate(int width, int height)
     // a transparency effect blend them (win32's BlendHiRes). Frames the game
     // drew in low-res and merged frames are left alone, as is a filter that
     // consumes the hi-res columns itself.
-    if (!Settings.Paused && controller->blend_hires && native_hires && width == 512 &&
+    if (!Settings.Paused && controller->blend_hires && native_hires && double_width &&
         !S9xSoftwareFilterBlendsHires(filter))
         S9xBlendHires(screen_view, GFX.Pitch, width, height);
 

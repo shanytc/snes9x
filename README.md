@@ -16,6 +16,8 @@ Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for a
 - Voicer-kun - infrared transmitter/receiver that connects to the second controller port
 - Kaillera Server/Client
 - RetroAchievements (with Hardcore)
+- Widescreen (bsnes-hd compatible, reads a game's `.bso` settings file) - plays
+  the widescreen ROM hacks, and can widen other games
 - PPU Sprite/Tile/Tiles viewers (SNES, GB, GBC, SGB)
 - Audio waveform viewer (Logic-style per-channel tracks, solo/mute, level meters)
 - Enhanced Cheat Search / Cheat Editor (SNES, GB — incl. GB cheats in SGB BIOS mode)

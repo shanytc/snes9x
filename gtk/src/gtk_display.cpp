@@ -14,6 +14,7 @@
 
 #include "snes9x.h"
 #include "gfx.h"
+#include "ppu.h"
 #include "netplay.h"
 #include "common/recording/avi_recorder.hpp"
 #include "common/video/screen_content.hpp"
@@ -131,7 +132,9 @@ double S9xGetAspect()
         }
     }
 
-    double native_aspect = 256.0 / (gui_config->overscan ? 239.0 : 224.0);
+    /* Widescreen hands us more columns for the same scanlines, and they are
+       meant to be seen, not squeezed back into the SNES's shape. */
+    double native_aspect = (double)S9xWideWidth() / (gui_config->overscan ? 239.0 : 224.0);
     double aspect;
 
     switch (gui_config->aspect_ratio)
@@ -347,7 +350,7 @@ static void internal_convert(void *src_buffer,
 
 static void S9xForceHires(void *buffer, int pitch, int &width, int &height)
 {
-    if (width <= 256)
+    if (width <= S9xWideWidth())
     {
         for (int y = (height)-1; y >= 0; y--)
         {
@@ -370,7 +373,7 @@ static inline uint16 average_565(uint16 colora, uint16 colorb)
 
 static void S9xMergeHires(void *buffer, int pitch, int &width, int &height)
 {
-    if (width < 512)
+    if (width <= S9xWideWidth())
         return;
 
     for (int y = 0; y < height; y++)
@@ -388,12 +391,12 @@ static void S9xMergeHires(void *buffer, int pitch, int &width, int &height)
     width >>= 1;
 }
 
-/* In-place horizontal blend of a 512-wide frame that keeps its width: each
-   pixel becomes the average of itself and its left neighbour (win32's
+/* In-place horizontal blend of a double-width frame that keeps its width:
+   each pixel becomes the average of itself and its left neighbour (win32's
    RenderMergeHires behind "Blend Hi-Res Images"). */
 static void S9xBlendHires(void *buffer, int pitch, int width, int height)
 {
-    if (width < 512)
+    if (width <= S9xWideWidth())
         return;
 
     for (int y = 0; y < height; y++)
@@ -929,7 +932,11 @@ bool8 S9xDeinitUpdate(int width, int height)
     if (!Settings.Paused && !NetPlay.Paused)
         S9xAVICaptureFrame(screen_view, GFX.Pitch, width, height);
 
-    const bool native_hires = (width == 512);
+    /* "Hi-res" is a frame drawn at two pixels per SNES column, whatever the
+       column count is - widescreen adds columns without doubling them. */
+    const bool native_hires = (width > S9xWideWidth());
+    bool double_width = native_hires;
+
     if (!Settings.Paused && !NetPlay.Paused)
 
     {
@@ -937,17 +944,19 @@ bool8 S9xDeinitUpdate(int width, int height)
         {
             S9xForceHires(screen_view, GFX.Pitch, width, height);
             top_level->last_width = width;
+            double_width = true;
         }
         else if (gui_config->hires_effect == HIRES_MERGE)
         {
             S9xMergeHires(screen_view, GFX.Pitch, width, height);
             top_level->last_width = width;
+            double_width = false;
         }
     }
 
     /* Hi-res frames use their own filter selection, like the win32 port's
        second "Hi Res" box under Output Image Processing. */
-    bool hires_frame = (width == 512 || height > SNES_HEIGHT_EXTENDED);
+    bool hires_frame = (double_width || height > SNES_HEIGHT_EXTENDED);
     active_filter = hires_frame ? gui_config->hires_scale_method : gui_config->scale_method;
 
     /* "Blend Hi-Res Images": average each pixel of a 512-wide frame with its
@@ -956,7 +965,7 @@ bool8 S9xDeinitUpdate(int width, int height)
        merged frames are left alone; so is Blargg's NTSC filter, which merges
        the hi-res columns itself (win32's GetFilterBlendSupport). */
     if (!Settings.Paused && !NetPlay.Paused && gui_config->blend_hires &&
-        native_hires && width == 512 && active_filter != FILTER_NTSC)
+        native_hires && double_width && active_filter != FILTER_NTSC)
         S9xBlendHires(screen_view, GFX.Pitch, width, height);
 
     if (active_filter > 0)
@@ -1050,9 +1059,9 @@ void S9xDeinitDisplay()
 
 void S9xReinitDisplay()
 {
-    uint16_t buffer[512 * 512];
+    std::vector<uint16_t> buffer(GFX.RealPPL * MAX_SNES_HEIGHT);
 
-    memmove(buffer, GFX.Screen, 512 * 478 * 2);
+    memmove(buffer.data(), GFX.Screen, buffer.size() * 2);
 
     int width = top_level->last_width;
     int height = top_level->last_height;
@@ -1064,7 +1073,7 @@ void S9xReinitDisplay()
     top_level->last_width = width;
     top_level->last_height = height;
 
-    memmove(GFX.Screen, buffer, 512 * 478 * 2);
+    memmove(GFX.Screen, buffer.data(), buffer.size() * 2);
 }
 
 bool8 S9xContinueUpdate(int width, int height)

@@ -2230,6 +2230,7 @@ bool8 CMemory::LoadROM (const char *filename)
         }
 
         CheckForAnyPatch(filename, HeaderCount != 0, totalFileSize);
+        CheckForWidescreenOverride();
 
         // Sufami Turbo / Satellaview images divert before scoring: their
         // BIOS has to be staged into ROM[] first.
@@ -5993,6 +5994,39 @@ static int unzFindExtension (unzFile &file, const char *ext, bool restart, bool 
 	return (port);
 }
 #endif
+
+// A widescreen ROM hack ships a .bso alongside its patch naming the settings
+// it was drawn for - the same file bsnes-hd reads, found the same way a patch
+// is. Without one the user's own settings stand on their own.
+void CMemory::CheckForWidescreenOverride (void)
+{
+	S9xSetWidescreenOverride("");
+
+	auto try_file = [](std::string filename) -> bool
+	{
+		FSTREAM	file = OPEN_FSTREAM(filename.c_str(), "rb");
+		if (!file)
+			return (false);
+
+		char	text[1024];
+		int		len = READ_FSTREAM(text, sizeof(text) - 1, file);
+		CLOSE_FSTREAM(file);
+
+		if (len <= 0)
+			return (false);
+
+		text[len] = '\0';
+		printf("Using widescreen settings %s: %s\n", filename.c_str(), text);
+		S9xSetWidescreenOverride(text);
+
+		return (true);
+	};
+
+	if (try_file(S9xGetFilename(".bso", ROMFILENAME_DIR)))
+		return;
+
+	try_file(S9xGetFilename(".bso", PATCH_DIR));
+}
 
 void CMemory::CheckForAnyPatch(const char *rom_filename, bool8 header, int32 &rom_size)
 {

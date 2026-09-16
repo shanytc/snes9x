@@ -1,8 +1,13 @@
 #include <cstdint>
 
+#include "snes9x.h"
+#include "ppu.h"
+
 void S9xForceHires(void *buffer, int pitch, int &width, int &height)
 {
-    if (width <= 256)
+    // "Hi-res" is two pixels per SNES column, whatever the column count is -
+    // widescreen adds columns without doubling them.
+    if (width <= S9xWideWidth())
     {
         for (int y = (height)-1; y >= 0; y--)
         {
@@ -24,7 +29,7 @@ static inline uint16_t average_565(uint16_t colora, uint16_t colorb)
 }
 void S9xMergeHires(void *buffer, int pitch, int &width, int &height)
 {
-    if (width < 512)
+    if (width <= S9xWideWidth())
         return;
 
     for (int y = 0; y < height; y++)
@@ -44,7 +49,7 @@ void S9xMergeHires(void *buffer, int pitch, int &width, int &height)
 
 void S9xBlendHires(void *buffer, int pitch, int width, int height)
 {
-    if (width < 512)
+    if (width <= S9xWideWidth())
         return;
 
     for (int y = 0; y < height; y++)

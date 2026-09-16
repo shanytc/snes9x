@@ -576,15 +576,19 @@ namespace TileImpl {
 				int	BB = ((l->MatrixB * starty) & ~63) + ((l->MatrixB * yy) & ~63) + (CentreX << 8);
 				int	DD = ((l->MatrixD * starty) & ~63) + ((l->MatrixD * yy) & ~63) + (CentreY << 8);
 
+				// Widescreen: x below indexes the widened picture, but the
+				// matrix is defined in the SNES's own columns, so the walk
+				// starts that many columns earlier. Horizontal flip still
+				// mirrors about the hardware's column 255.
 				if (PPU.Mode7HFlip)
 				{
-					startx = Right - 1;
+					startx = (int) Right - 1 - IPPU.WideExtent;
 					aa = -l->MatrixA;
 					cc = -l->MatrixC;
 				}
 				else
 				{
-					startx = Left;
+					startx = (int) Left - IPPU.WideExtent;
 					aa = l->MatrixA;
 					cc = l->MatrixC;
 				}
@@ -673,10 +677,18 @@ namespace TileImpl {
 
 			if (PPU.BGMosaic[OP::BG])
 			{
+				// Block boundaries are those of the SNES's own columns, so
+				// the blocks in the side columns line up with the rest.
+				const int32	ext = IPPU.WideExtent;
+
 				HMosaic = PPU.Mosaic;
-				MLeft  -= MLeft  % HMosaic;
+
+				int32	m = (MLeft - ext) % HMosaic;
+				MLeft -= (m < 0) ? m + HMosaic : m;
+
 				MRight += HMosaic - 1;
-				MRight -= MRight % HMosaic;
+				m = (MRight - ext) % HMosaic;
+				MRight -= (m < 0) ? m + HMosaic : m;
 			}
 
 			uint32	Offset = StartY * GFX.PPL;
@@ -706,15 +718,16 @@ namespace TileImpl {
 				int	BB = ((l->MatrixB * starty) & ~63) + ((l->MatrixB * yy) & ~63) + (CentreX << 8);
 				int	DD = ((l->MatrixD * starty) & ~63) + ((l->MatrixD * yy) & ~63) + (CentreY << 8);
 
+				// See DrawTileNormal above.
 				if (PPU.Mode7HFlip)
 				{
-					startx = MRight - 1;
+					startx = MRight - 1 - IPPU.WideExtent;
 					aa = -l->MatrixA;
 					cc = -l->MatrixC;
 				}
 				else
 				{
-					startx = MLeft;
+					startx = MLeft - IPPU.WideExtent;
 					aa = l->MatrixA;
 					cc = l->MatrixC;
 				}
@@ -742,11 +755,14 @@ namespace TileImpl {
 
 						if ((Pix = (b & OP::MASK)))
 						{
+							int32	wl = (x < (int32) Left) ? (int32) Left : x;
+							int32	wr = x + HMosaic - 1;
+							if (wr >= (int32) Right)
+								wr = (int32) Right - 1;
+
 							for (int32 h = MosaicStart; h < VMosaic; h++)
-							{
-								for (int32 w = x + HMosaic - 1; w >= x; w--)
-									DRAW_PIXEL(w + h * GFX.PPL, (w >= (int32) Left && w < (int32) Right));
-							}
+								for (int32 w = wr; w >= wl; w--)
+									DRAW_PIXEL(w + h * GFX.PPL, 1);
 						}
 					}
 				}
@@ -776,11 +792,14 @@ namespace TileImpl {
 
 						if ((Pix = (b & OP::MASK)))
 						{
+							int32	wl = (x < (int32) Left) ? (int32) Left : x;
+							int32	wr = x + HMosaic - 1;
+							if (wr >= (int32) Right)
+								wr = (int32) Right - 1;
+
 							for (int32 h = MosaicStart; h < VMosaic; h++)
-							{
-								for (int32 w = x + HMosaic - 1; w >= x; w--)
-									DRAW_PIXEL(w + h * GFX.PPL, (w >= (int32) Left && w < (int32) Right));
-							}
+								for (int32 w = wr; w >= wl; w--)
+									DRAW_PIXEL(w + h * GFX.PPL, 1);
 						}
 					}
 				}

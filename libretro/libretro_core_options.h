@@ -130,6 +130,20 @@ struct retro_core_option_definition option_defs_us[] = {
       "4:3"
    },
    {
+      "snes9x_widescreen",
+      "Widescreen",
+      "Patch a game the core has a widescreen hack for into that hack, in memory, and draw the columns either side of the SNES's own 256. Every other game is left as it is. Changing it restarts the game as the other cart.",
+      {
+         { "disabled", NULL },
+         { "normal",   "Normal (16:9, 16:10)" },
+         { "extra",    "Extra (16:9, 2:1)" },
+         { "ultra",    "Ultra (2:1, 20.5:9, 21:9, 64:27) experimental" },
+         { "hyper",    "Hyper (21:9, 64:27) experimental" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       "snes9x_overscan",
       "Crop Overscan",
       "Remove the ~8 pixel borders at the top and bottom of the screen, typically unused by games and hidden by the bezel of a standard-definition television. 'Auto' will attempt to detect and crop overscan based on the current content.",

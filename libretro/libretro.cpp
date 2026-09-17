@@ -360,6 +360,16 @@ static void widescreen_reload(void)
     g_geometry_update = true;
 }
 
+// Shown only for a game the table has, which the load path knows once the
+// cart is in; with no cart, or any other game, RetroArch hides it.
+static void show_widescreen_option(void)
+{
+    struct retro_core_option_display option_display;
+    option_display.key = "snes9x_widescreen";
+    option_display.visible = S9xWidescreenGame() != NULL;
+    environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+}
+
 static void update_variables(void)
 {
     char key[256];
@@ -1423,6 +1433,7 @@ bool retro_load_game(const struct retro_game_info *game)
         log_cb(RETRO_LOG_ERROR, "ROM loading failed...\n");
 
     Memory.ClearSRAM();
+    show_widescreen_option();
 
     return rom_loaded;
 }
@@ -1558,6 +1569,7 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
 
         g_geometry_update = true;
     }
+    show_widescreen_option();
 
     return rom_loaded;
 }
@@ -1678,6 +1690,7 @@ void retro_init(void)
     S9xUnmapAllControls();
     map_buttons();
     check_system_specs();
+    show_widescreen_option();
 }
 
 #define MAP_BUTTON(id, name) S9xMapButton((id), S9xGetCommandT((name)), false)

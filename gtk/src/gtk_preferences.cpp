@@ -607,7 +607,24 @@ void Snes9xPreferences::move_settings_to_dialog()
     set_check("change_display_resolution", config->change_display_resolution);
     set_check("scale_to_fit",              config->scale_to_fit);
     set_check("transparency_effects",      Settings.Transparency);
-    set_check("widescreen",                Settings.Widescreen.Mode != WS_MODE_OFF);
+    // Only a game with a widescreen hack in the table is offered the choice:
+    // None, then each width the table has for it.
+    {
+        const SWidescreenGame *rows[8];
+        const int n = S9xWidescreenVariants(rows, 8);
+        auto combo = get_object<Gtk::ComboBoxText>("widescreen");
+        combo->remove_all();
+        combo->append(_("None"));
+        int current = 0;
+        for (int i = 0; i < n; i++)
+        {
+            combo->append(rows[i]->Name);
+            if (Settings.Widescreen.Mode != WS_MODE_OFF && rows[i]->Aspect == Settings.Widescreen.Aspect)
+                current = i + 1;
+        }
+        combo->set_active(current);
+        show_widget("widescreen_box", n > 0);
+    }
     set_check("blend_hires",               config->blend_hires);
     set_check("overscan",                  config->overscan);
     set_check("messages_in_image",         Settings.AutoDisplayMessages);
@@ -837,8 +854,18 @@ void Snes9xPreferences::get_settings_from_dialog()
     config->osd_size                  = get_spin("osd_size");
     config->scale_to_fit              = get_check("scale_to_fit");
     Settings.Transparency             = get_check("transparency_effects");
-    Settings.Widescreen.Mode          = get_check("widescreen") ? WS_MODE_ON : WS_MODE_OFF;
-    S9xUpdateWidescreen();
+    {
+        const SWidescreenGame *rows[8];
+        const int n = S9xWidescreenVariants(rows, 8);
+        const int sel = get_combo("widescreen");
+        Settings.Widescreen.Mode = (sel > 0 && sel <= n) ? WS_MODE_ON : WS_MODE_OFF;
+        if (sel > 0 && sel <= n)
+            Settings.Widescreen.Aspect = rows[sel - 1]->Aspect;
+        S9xUpdateWidescreen();
+        // The widescreen choice swaps the cart for a game the table can patch.
+        if (S9xWidescreenReloadNeeded())
+            top_level->reload_loaded_game();
+    }
     config->blend_hires               = get_check("blend_hires");
     config->overscan                  = get_check("overscan");
     Settings.AutoDisplayMessages      = get_check("messages_in_image");

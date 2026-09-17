@@ -294,8 +294,8 @@ struct SSettings
 	bool8	DisableGraphicWindows;
 	uint16  ForcedBackdrop;
 
-	// The user's widescreen settings. A game's .bso override sits on top of
-	// these; the renderer reads the combination, the global Widescreen.
+	// The user's widescreen settings, the switch over the loaded hack's row;
+	// the renderer reads the combination, the global Widescreen.
 	struct SWidescreen	Widescreen;
 
 	bool8	DisplayTime;

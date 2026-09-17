@@ -89,6 +89,7 @@ set(SNES9X_CORE_SOURCES
     ../tileimpl-h2x1.cpp
     ../srtc.cpp
     ../gfx.cpp
+    ../widescreen.cpp
     ../memmap.cpp
     ../biosmanager.cpp
     ../clip.cpp

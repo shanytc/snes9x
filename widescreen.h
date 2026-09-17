@@ -8,7 +8,6 @@
 #define _WIDESCREEN_H_
 
 #include "port.h"
-#include <string>
 
 // Widescreen
 //
@@ -22,13 +21,17 @@
 // clamps, sprites culled off the old edges, HUDs windowed to x=0..255. That
 // part is the ROM's job, which is why widescreen ROM hacks exist (Vitor
 // Vilela's Super Mario World Widescreen being the one this was built
-// against). They ship a .bso file naming the settings they were made for,
-// so we read the same file, with the same letters and values, that bsnes-hd
-// defined and those hacks are distributed with.
+// against). widescreen.cpp keeps the hacks we know: the retail game each one
+// patches, the patch itself, and the settings its author made it for, in the
+// values bsnes-hd defined so a hack's published settings carry over as they
+// are. A hack that comes in several widths is several rows with one retail
+// image, and the user picks the width.
 //
-// Games without a hack still render - the extra columns are genuine PPU
-// output - but anything the game culled or clamped at the old edges shows as
-// artifacts, which is what the per-background and object settings are for.
+// Loading the retail game offers the choice. Picking a width patches the
+// cart in memory into that hack and runs its settings; picking none puts
+// the retail cart back. Any other game is left alone: its extra columns
+// would be genuine PPU output, but everything it culled or clamped at the
+// old edges would show.
 
 enum
 {
@@ -45,7 +48,7 @@ enum
 	WS_OBJ_DISABLE	= 3		// draw no objects at all
 };
 
-// Per-background settings, in the encoding .bso files use.
+// Per-background settings, in bsnes-hd's values.
 enum
 {
 	WS_BG_OFF		= 0,	// background stays inside the classic 256 columns
@@ -81,19 +84,68 @@ struct SWidescreen
 	bool8	AspectCorrection;
 };
 
-// The settings in force: the user's, with any .bso override for this game
-// applied on top. Everything outside the options UI reads this one.
+// The settings in force: the user's choice over the loaded hack's row.
+// Everything outside the options UI reads this one. In Settings.Widescreen,
+// Mode is the switch and Aspect the width picked, as columns on each side.
 extern struct SWidescreen	Widescreen;
 
 void S9xSetWidescreenDefaults (struct SWidescreen *ws);
-// Re-derive the effective settings from Settings.Widescreen and the override
-// text; call after changing any of the user's widescreen settings.
+// Re-derive the effective settings from Settings.Widescreen and the loaded
+// cart; call after changing any of the user's widescreen settings.
 void S9xUpdateWidescreen (void);
-// Hand over the contents of a .bso file (empty string to drop the override).
-void S9xSetWidescreenOverride (const std::string &text);
 // Columns added on each side by the current settings, 0 when off.
 int  S9xWidescreenColumns (void);
 // Whether the side columns take the backdrop colour rather than staying black.
 bool S9xWideBackdropFills (void);
+
+// A byte run in the patched image that this emulator needs changed: `Old` is
+// checked before `New` goes in, so a mismatched image is left alone.
+struct SWidescreenEdit
+{
+	uint32	Offset;
+	uint8	Len;			// up to 4
+	uint8	Old[4];
+	uint8	New[4];
+};
+
+// A widescreen ROM hack we know, at one width: the retail image it patches,
+// the patch, and the settings it was made for.
+struct SWidescreenGame
+{
+	uint32		SourceCRC32;	// the retail image, as CMemory::ROMCRC32 has it
+	uint32		TargetCRC32;	// the image the patch makes of it
+	const char	*Title;			// header title of both, as CMemory::ROMName trims it
+	const char	*Name;			// the width, as offered to the user
+	const uint8	*Patch;			// BPS, applied to the retail image in memory
+	uint32		PatchSize;
+	const struct SWidescreenEdit	*Edits;	// applied to the patched image, if any
+	uint8		EditCount;
+	uint8		Mode;			// WS_MODE_ON or WS_MODE_MODE7
+	uint16		Aspect;			// columns on each side; the row's identity too
+	uint8		Sprites;		// WS_OBJ_*
+	uint16		BG[4];			// WS_BG_*
+	bool8		StretchWindow;
+	uint8		IgnoreWindow;	// WS_WINDOW_*
+	uint8		IgnoreWindowX;
+};
+
+// The row whose retail or patched image this is, NULL for any other image.
+// A NULL title matches on the CRC alone; a non-zero column count picks that
+// width among the rows of one retail image, and 0 takes the first.
+const struct SWidescreenGame *S9xFindWidescreenGame (uint32 crc32, const char *title, uint16 columns);
+// Note the loaded cart: its row, if any, and whether the load path patched it
+// (CMemory::InitROM). Only a cart with a row is offered the choice.
+void S9xSetWidescreenGame (uint32 crc32, const char *title, bool8 patched_here);
+const struct SWidescreenGame *S9xWidescreenGame (void);
+// Whether the image in memory is a hack rather than the retail game.
+bool S9xWidescreenPatched (void);
+// The widths on offer for the loaded cart: every row of its retail image,
+// in table order. Returns how many were written.
+int  S9xWidescreenVariants (const struct SWidescreenGame **rows, int max);
+// Put the loaded hack's edits into the image; false if any old byte differs.
+bool S9xApplyWidescreenGameEdits (uint8 *rom, uint32 size);
+// Whether the user's choice now disagrees with the cart in memory. The port
+// then loads the game again, and the load path patches it or leaves it be.
+bool S9xWidescreenReloadNeeded (void);
 
 #endif

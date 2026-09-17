@@ -280,6 +280,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
 
     S9xSetWidescreenDefaults(&Settings.Widescreen);
     Settings.Widescreen.Mode = config->widescreen ? WS_MODE_ON : WS_MODE_OFF;
+    Settings.Widescreen.Aspect = (uint16)config->widescreen_columns;
     S9xUpdateWidescreen();
 
     // Game Boy frame-blend (Super Game Boy). Push the stored mode/layer first, then,

@@ -6,6 +6,7 @@
 #include <QFileDialog>
 
 #include "snes9x.h"
+#include "memmap.h"
 
 DisplayPanel::DisplayPanel(EmuApplication *app_)
     : app(app_)
@@ -86,9 +87,16 @@ DisplayPanel::DisplayPanel(EmuApplication *app_)
         app->updateSettings();
     });
 
-    connect(checkBox_widescreen, &QCheckBox::clicked, [&](bool checked) {
-        app->config->widescreen = checked;
+    connect(comboBox_widescreen, &QComboBox::activated, [&](int index) {
+        const SWidescreenGame *rows[8];
+        const int n = S9xWidescreenVariants(rows, 8);
+        app->config->widescreen = (index > 0 && index <= n);
+        if (index > 0 && index <= n)
+            app->config->widescreen_columns = rows[index - 1]->Aspect;
         app->updateSettings();
+        // The widescreen choice swaps the cart for a game the table can patch.
+        if (S9xWidescreenReloadNeeded())
+            app->window->openFile(Memory.ROMFilename);
     });
 
     connect(comboBox_aspect_ratio, &QComboBox::activated, [&](int index) {
@@ -297,7 +305,24 @@ void DisplayPanel::showEvent(QShowEvent *event)
     checkBox_overscan->setChecked(config->show_overscan);
     checkBox_transparency->setChecked(config->transparency_effects);
     checkBox_blend_hires->setChecked(config->blend_hires);
-    checkBox_widescreen->setChecked(config->widescreen);
+    // Only a game with a widescreen hack in the table is offered the choice:
+    // None, then each width the table has for it.
+    {
+        const SWidescreenGame *rows[8];
+        const int n = S9xWidescreenVariants(rows, 8);
+        comboBox_widescreen->clear();
+        comboBox_widescreen->addItem(tr("None"));
+        int current = 0;
+        for (int i = 0; i < n; i++)
+        {
+            comboBox_widescreen->addItem(QString::fromUtf8(rows[i]->Name));
+            if (config->widescreen && rows[i]->Aspect == config->widescreen_columns)
+                current = i + 1;
+        }
+        comboBox_widescreen->setCurrentIndex(current);
+        label_widescreen->setVisible(n > 0);
+        comboBox_widescreen->setVisible(n > 0);
+    }
 
     if (config->aspect_ratio_numerator == 4)
         comboBox_aspect_ratio->setCurrentIndex(0);

@@ -274,7 +274,9 @@ void WinGetContentSizeFor(bool gb, unsigned int *width, unsigned int *height)
 	if (!gb)
 	{
 		h = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
-		w = GUI.AspectWidth;
+		// Widescreen hands us more columns for the same scanlines, and they
+		// are meant to be seen, not squeezed back into the SNES's shape.
+		w = (unsigned int)((double)GUI.AspectWidth * (SNES_WIDTH + 2 * S9xWidescreenColumns()) / SNES_WIDTH + 0.5);
 	}
 	else
 	{

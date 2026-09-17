@@ -52,18 +52,14 @@ static void S9xDisplayStringType (const char *, int, int, bool, int);
 // See widescreen.h for what this is and why the settings look the way they
 // do. Everything here answers one of three questions: how many columns are we
 // adding, which layer is allowed into them on a given line, and what did the
-// game's .bso file ask for.
+// hack's table row ask for.
 
 struct SWidescreen	Widescreen;
-
-// Verbatim contents of the game's .bso, re-applied whenever the user's own
-// settings change so neither can be lost to the other.
-static std::string	widescreen_override;
 
 void S9xSetWidescreenDefaults (struct SWidescreen *ws)
 {
 	ws->Mode             = WS_MODE_OFF;
-	ws->Aspect           = 1609;	// 16:9
+	ws->Aspect           = 48;		// the width picked, as columns a side: 352 wide
 	ws->Sprites          = WS_OBJ_SAFE;
 	ws->BG[0] = ws->BG[1] = ws->BG[2] = ws->BG[3] = WS_BG_AUTO_HV;
 	ws->StretchWindow    = FALSE;
@@ -74,7 +70,7 @@ void S9xSetWidescreenDefaults (struct SWidescreen *ws)
 	ws->AspectCorrection = FALSE;
 }
 
-// bsnes-hd's HdToolkit::determineWsExt, so a .bso's aspect ratio lands on the
+// bsnes-hd's HdToolkit::determineWsExt, so a hack's aspect ratio lands on the
 // same column count the patch was made against. Anything at or below 200 is
 // already a column count; above that it is the aspect ratio itself.
 int S9xWidescreenColumns (void)
@@ -124,120 +120,28 @@ int S9xWidescreenColumns (void)
 	return (columns);
 }
 
-static void ApplyWidescreenOverride (int key, int n)
-{
-	switch (key)
-	{
-		case 'w':	// widescreen mode
-			Widescreen.Mode = (n == 1) ? WS_MODE_ON : (n == 2) ? WS_MODE_MODE7 : WS_MODE_OFF;
-			break;
-
-		case 'W':	// columns per side, or an aspect ratio above 200
-			Widescreen.Aspect = (uint16) n;
-			break;
-
-		case 's':	// objects
-			Widescreen.Sprites = (n == 1) ? WS_OBJ_UNSAFE : (n == 2) ? WS_OBJ_CLIP : WS_OBJ_SAFE;
-			break;
-
-		case 'i':	// ignore window
-			Widescreen.IgnoreWindow = (n > WS_WINDOW_ALL) ? WS_WINDOW_NORMAL : (uint8) n;
-			break;
-
-		case 'I':	// the column "ignore window" reads instead
-			Widescreen.IgnoreWindowX = (n > 255) ? 128 : (uint8) n;
-			break;
-
-		case 'b':
-		case 'B':
-		case 'c':
-		case 'C':
-		{
-			const int	bg = (key == 'b') ? 0 : (key == 'B') ? 1 : (key == 'c') ? 2 : 3;
-
-			if (n >= WS_BG_ABOVE && n < WS_BG_BELOW + 1000)
-				Widescreen.BG[bg] = (uint16) n;
-			else
-			switch (n)
-			{
-				case WS_BG_ON:
-				case WS_BG_AUTO_HV:
-				case WS_BG_AUTO_H:
-				case WS_BG_CROP:
-				case WS_BG_CROP_AUTO:
-				case WS_BG_DISABLE:
-					Widescreen.BG[bg] = (uint16) n;
-					break;
-
-				default:
-					Widescreen.BG[bg] = WS_BG_OFF;
-					break;
-			}
-
-			break;
-		}
-
-		case 'S':	// stretch windowing, for patches that adapted their coordinates
-			Widescreen.StretchWindow = (n == 2);
-			break;
-
-		// 'm' (markers), 'P' (Mode 7 perspective), 'f' (Mode 7 scale) and 'v'
-		// (VRAM extension) are bsnes-hd features we have no counterpart for.
-		// 'O' (overclock) and 'l' (sprite limit) exist here but as settings
-		// the user owns, which a game file has no business writing to.
-	}
-}
-
 void S9xUpdateWidescreen (void)
 {
 	Widescreen = Settings.Widescreen;
 
-	// Alternating letters and numbers, each pair one setting; '%' toggles
-	// whether what follows is read at all, which is how .bso files comment.
-	bool	reading = true;
-	int		key = -1;
-	int		n = 0;
+	// Only the hack itself is widened: its row says how, the user's switch
+	// says whether. The retail cart it patches stays as it is until then.
+	const struct SWidescreenGame	*game = S9xWidescreenGame();
 
-	for (size_t i = 0; i < widescreen_override.size(); i++)
+	if (!game || !S9xWidescreenPatched() || Settings.Widescreen.Mode == WS_MODE_OFF)
 	{
-		const char	c = widescreen_override[i];
-
-		if (c == '%')
-		{
-			reading = !reading;
-			continue;
-		}
-
-		if (!reading)
-			continue;
-
-		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
-		{
-			key = c;
-			n = 0;
-		}
-		else
-		if (key > -1 && c >= '0' && c <= '9')
-		{
-			n = n * 10 + (c - '0');
-
-			const bool	last = (i + 1 == widescreen_override.size()) ||
-							   (widescreen_override[i + 1] < '0') ||
-							   (widescreen_override[i + 1] > '9');
-			if (last)
-			{
-				ApplyWidescreenOverride(key, n);
-				key = -1;
-				n = 0;
-			}
-		}
+		Widescreen.Mode = WS_MODE_OFF;
+		return;
 	}
-}
 
-void S9xSetWidescreenOverride (const std::string &text)
-{
-	widescreen_override = text;
-	S9xUpdateWidescreen();
+	Widescreen.Mode          = game->Mode;
+	Widescreen.Aspect        = game->Aspect;
+	Widescreen.Sprites       = game->Sprites;
+	for (int i = 0; i < 4; i++)
+		Widescreen.BG[i] = game->BG[i];
+	Widescreen.StretchWindow = game->StretchWindow;
+	Widescreen.IgnoreWindow  = game->IgnoreWindow;
+	Widescreen.IgnoreWindowX = game->IgnoreWindowX;
 }
 
 // Whether the side columns take the backdrop colour. Under "Mode 7 scenes
@@ -254,7 +158,7 @@ bool S9xWideBackdropFills (void)
 	return (true);
 }
 
-// Layers a .bso switched off entirely, as a $212c/$212d layer mask.
+// Layers the hack's row switched off entirely, as a $212c/$212d layer mask.
 static inline uint8 WideDisabledLayers (void)
 {
 	if (!IPPU.WideExtent)
@@ -389,7 +293,7 @@ static inline bool WideOBJUnseen (int HPos, int width)
 	return (raw > SNES_WIDTH && raw + width - 1 < 512);
 }
 
-// A .bso can hand a layer the side columns from one scanline on, so a run of
+// A row can hand a layer the side columns from one scanline on, so a run of
 // lines drawn as one tile row must not span the switch.
 static inline bool WideSpanBreaks (int bg, uint32 Y, uint32 Y2)
 {
@@ -2182,6 +2086,8 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 
 			uint32	Width = Right - Left;
 
+			// A widened line can cross both screen seams, so the column
+			// counter has to stay inside the map for the seam checks.
 			if (HPos & 7)
 			{
 				uint32	l = HPos & 7;
@@ -2220,7 +2126,7 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 						t = b1;
 				}
 
-				HTile++;
+				HTile = (HTile + 1) & ((BG.TileSizeH == 8) ? 0x3f : 0x7f);
 				Offset += 8 * PixWidth;
 				Width -= w;
 			}
@@ -2257,7 +2163,7 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 						t = b1;
 				}
 
-				HTile++;
+				HTile = (HTile + 1) & ((BG.TileSizeH == 8) ? 0x3f : 0x7f);
 				Offset += 8 * PixWidth;
 				Width -= 8;
 			}
@@ -2442,7 +2348,7 @@ static void DrawBackgroundMosaic (int bg, uint8 Zh, uint8 Zl)
 							t = b1;
 					}
 
-					HTile++;
+					HTile = (HTile + 1) & ((BG.TileSizeH == 8) ? 0x3f : 0x7f);
 				}
 
 				Offset += w * PixWidth;
@@ -2933,7 +2839,7 @@ static inline void DrawBackgroundMode7 (int bg, void (*DrawMath) (uint32, uint32
 		uint32	Right = GFX.Clip[bg].Right[clip];
 
 		// These renderers walk the whole line range themselves, so a
-		// scanline-keyed .bso rule can only be read once, off the first
+		// scanline-keyed row rule can only be read once, off the first
 		// line of the run.
 		if (!WideClip(bg, GFX.StartY, Left, Right))
 			continue;

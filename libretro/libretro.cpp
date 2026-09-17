@@ -1563,9 +1563,10 @@ void retro_init(void)
     environ_cb(RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS, &achievements);
 
     memset(&Settings, 0, sizeof(Settings));
-    // Widescreen is off by default here; a game's .bso file is what turns it
-    // on, and it needs the rest of the settings to be sane when it does.
+    // No option here: a game the core has a widescreen hack for is patched into
+    // it in memory as it loads, and no other game is touched.
     S9xSetWidescreenDefaults(&Settings.Widescreen);
+    Settings.Widescreen.Mode = WS_MODE_ON;
     S9xUpdateWidescreen();
     Settings.MouseMaster = TRUE;
     Settings.SuperScopeMaster = TRUE;

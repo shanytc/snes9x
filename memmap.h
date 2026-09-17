@@ -193,7 +193,7 @@ struct CMemory
 	void	ApplyROMFixes (void);
     std::string SafeString(std::string s, bool allow_jis = false);
 	void	CheckForAnyPatch (const char *, bool8, int32 &);
-	void	CheckForWidescreenOverride (void);
+	void	CheckForWidescreenPatch (int32 &);
 
 	void	MakeRomInfoText (char *);
 	std::string GetMultilineROMInfo();

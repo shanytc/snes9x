@@ -298,9 +298,8 @@ int Snes9xConfig::save_config_file()
     outbool("ScaleToFit", scale_to_fit, "Scale the image to fit the window size");
     outbool("ShowOverscanArea", overscan, "Show the overscan area at the top and bottom that most games hide");
     outbool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
-    outbool("Widescreen", Settings.Widescreen.Mode != WS_MODE_OFF, "Draw the columns either side of the SNES's own 256. Games not made for it show artifacts at the edges; a widescreen ROM hack's .bso file, read from beside the ROM, overrides everything here");
-    outint("WidescreenAspect", Settings.Widescreen.Aspect, "Widescreen shape: 200 and below is the number of columns added on each side, above it an aspect ratio as width*100+height (1609 is 16:9, 1610 is 16:10, 201 is 2:1)");
-    outint("WidescreenSprites", Settings.Widescreen.Sprites, "Sprites in the added columns: 0 draws only those that reach the SNES's own columns, 1 draws them wherever the game put them (right for Super Mario World Widescreen, artifacts in most other games), 2 clips them all to the SNES's columns");
+    outbool("Widescreen", Settings.Widescreen.Mode != WS_MODE_OFF, "Patch a game the emulator has a widescreen hack for into that hack, in memory, and draw the columns either side of the SNES's own 256; every other game is left as it is");
+    outint("WidescreenColumns", Settings.Widescreen.Aspect, "Which of the hack's widths, as columns added on each side: 48 for 352 wide (16:9, 16:10), 64 for 384 wide (16:9, 2:1), 96 for 448 wide and 112 for 480 wide (21:9 and wider, experimental)");
     outbool("MessagesInImage", Settings.AutoDisplayMessages, "Draw messages inside the SNES image (they get into AVIs, screenshots and filters) instead of the on-screen overlay");
     outbool("MaintainAspectRatio", maintain_aspect_ratio, "Resize the screen to the proportions set by aspect ratio option");
     outbool("Multithreading", multithreading, "Apply filters using multiple threads");
@@ -571,8 +570,7 @@ int Snes9xConfig::load_config_file()
     inbool("ShowOverscanArea", overscan);
     inbool("BlendHiRes", blend_hires);
     inbool("Widescreen", Settings.Widescreen.Mode);
-    inint("WidescreenAspect", Settings.Widescreen.Aspect);
-    inint("WidescreenSprites", Settings.Widescreen.Sprites);
+    inint("WidescreenColumns", Settings.Widescreen.Aspect);
     inbool("MessagesInImage", Settings.AutoDisplayMessages);
     inint("HiresEffect", hires_effect);
     inbool("ForceInvertedByteOrder", force_inverted_byte_order);

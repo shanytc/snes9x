@@ -272,6 +272,9 @@
     <ClCompile Include="..\gfx.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
+    <ClCompile Include="..\widescreen.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
     <ClCompile Include="..\globals.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>

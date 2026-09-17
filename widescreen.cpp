@@ -24,21 +24,21 @@ static const struct SWidescreenGame	widescreen_games[] =
 	// Super Mario World Widescreen v1.11 (VitorVilela7/wide-snes), its two
 	// released widths: objects wherever the game put them, windows in its own
 	// coordinates. The 448 and 480 widths are unreleased and unfinished.
-	{ 0xB19ED489, 0x24389EDC, "SUPER MARIOWORLD", "Normal - 352 columns (16:9, 16:10)",
+	{ 0xB19ED489, 0x24389EDC, "SUPER MARIOWORLD", "Normal (16:9, 16:10)",
 	  kSmwWidescreenBps, sizeof(kSmwWidescreenBps), smw_widescreen_edits, 1,
 	  WS_MODE_ON, 48, WS_OBJ_UNSAFE, { WS_BG_ON, WS_BG_ON, WS_BG_ON, WS_BG_AUTO_HV },
 	  TRUE, WS_WINDOW_NORMAL, 128 },
-	{ 0xB19ED489, 0xE7207F98, "SUPER MARIOWORLD", "Extra - 384 columns (16:9, 2:1)",
+	{ 0xB19ED489, 0xE7207F98, "SUPER MARIOWORLD", "Extra (16:9, 2:1)",
 	  kSmwExtrawideBps, sizeof(kSmwExtrawideBps), smw_widescreen_edits, 1,
 	  WS_MODE_ON, 64, WS_OBJ_UNSAFE, { WS_BG_ON, WS_BG_ON, WS_BG_ON, WS_BG_AUTO_HV },
 	  TRUE, WS_WINDOW_NORMAL, 128 },
 	// The two widths the source offers but no release ships: our own builds
 	// of the v1.11 source on its 384 base, which its author calls unfinished.
-	{ 0xB19ED489, 0x3DDDEE65, "SUPER MARIOWORLD", "Ultra - 448 columns (2:1, 20.5:9, 21:9, 64:27) experimental",
+	{ 0xB19ED489, 0x3DDDEE65, "SUPER MARIOWORLD", "Ultra (2:1, 20.5:9, 21:9, 64:27) experimental",
 	  kSmwUltrawideBps, sizeof(kSmwUltrawideBps), smw_widescreen_edits, 1,
 	  WS_MODE_ON, 96, WS_OBJ_UNSAFE, { WS_BG_ON, WS_BG_ON, WS_BG_ON, WS_BG_AUTO_HV },
 	  TRUE, WS_WINDOW_NORMAL, 128 },
-	{ 0xB19ED489, 0x58EA7EE9, "SUPER MARIOWORLD", "Hyper - 480 columns (21:9, 64:27) experimental",
+	{ 0xB19ED489, 0x58EA7EE9, "SUPER MARIOWORLD", "Hyper (21:9, 64:27) experimental",
 	  kSmwHyperwideBps, sizeof(kSmwHyperwideBps), smw_widescreen_edits, 1,
 	  WS_MODE_ON, 112, WS_OBJ_UNSAFE, { WS_BG_ON, WS_BG_ON, WS_BG_ON, WS_BG_AUTO_HV },
 	  TRUE, WS_WINDOW_NORMAL, 128 },

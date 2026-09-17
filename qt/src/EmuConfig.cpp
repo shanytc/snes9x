@@ -597,8 +597,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     Bool("ShowOverscan", show_overscan, "Show the overscan area at the top and bottom that most games hide");
     Bool("Transparency", transparency_effects, "Render the SNES colour-math/transparency effects (turn off only for troubleshooting)");
     Bool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
-    Bool("Widescreen", widescreen, "Patch a game the emulator has a widescreen hack for into that hack, in memory, and draw the columns either side of the SNES's own 256; every other game is left as it is");
-    Int("WidescreenColumns", widescreen_columns, "Which of the hack's widths, as columns added on each side: 48 for 352 wide (16:9, 16:10), 64 for 384 wide (16:9, 2:1), 96 for 448 wide and 112 for 480 wide (21:9 and wider, experimental)");
+    Bool("Widescreen", widescreen, "Run a game that has a known widescreen hack as that hack, patched in memory. Other games are unaffected");
+    Int("WidescreenColumns", widescreen_columns, "The hack's width, as columns added on each side: 48 = 352 wide (16:9), 64 = 384 (2:1), 96 = 448 and 112 = 480 (both experimental)");
     Enum("HighResolutionEffect", high_resolution_effect, { "LeaveAlone", "ScaleDown", "ScaleUp" }, "How to handle hi-res (512-wide) frames: LeaveAlone, ScaleDown, or ScaleUp");
 
     String("SoftwareFilter", software_filter, "Software scaling filter name, e.g. \"HQ2x\" or \"Blargg's NTSC (Composite)\"; empty means none");

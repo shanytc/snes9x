@@ -3700,7 +3700,7 @@
                                               <object class="GtkComboBoxText" id="widescreen">
                                                 <property name="visible">True</property>
                                                 <property name="can_focus">False</property>
-                                                <property name="tooltip_text" translatable="yes">Patch this game in memory into its widescreen hack at the width picked and draw the columns either side of the SNES's own 256 the way the hack was made for. The game restarts as the other cart. Offered only for games the emulator has a hack for.</property>
+                                                <property name="tooltip_text" translatable="yes">Run this game as its widescreen hack at the chosen width, patched in memory. The game restarts. Shown only for games with a known hack.</property>
                                               </object>
                                               <packing>
                                                 <property name="expand">False</property>

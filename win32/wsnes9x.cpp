@@ -13903,7 +13903,7 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         CreateToolTip(IDC_HIRES, hDlg, TEXT("Support the hi-res mode that a few games use, otherwise render them in low-res"));
         CreateToolTip(IDC_HEIGHT_EXTEND, hDlg, TEXT("Display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240"));
         CreateToolTip(IDC_MESSAGES_IN_IMAGE, hDlg, TEXT("Draw text inside the SNES image (will get into AVIs, screenshots, and filters)"));
-        CreateToolTip(IDC_WIDESCREEN, hDlg, TEXT("Patch this game in memory into its widescreen hack at the width picked, and draw the columns either side of the SNES's own 256 the way the hack was made for. The game restarts as the other cart. Offered only for games the emulator has a hack for"));
+        CreateToolTip(IDC_WIDESCREEN, hDlg, TEXT("Run this game as its widescreen hack at the chosen width, patched in memory. The game restarts. Shown only for games with a known hack"));
 		CreateToolTip(IDC_MESSAGES_SCALE, hDlg, TEXT("Try to scale messages with EPX instead of Simple, only works for 2x and 3x and when displaying after filters"));
 
         prevOutputMethod = GUI.outputMethod;

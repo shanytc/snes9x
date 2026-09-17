@@ -905,8 +905,8 @@ void WinRegisterConfigItems()
 	AddStringC("OpenGL:OGLShader", GUI.OGLshaderFileName, MAX_PATH, "", "shader filename for OpenGL mode (bsnes-style XML shader or CG shader)");
 	AddBoolC("OpenGL:DisablePBOs", GUI.OGLdisablePBOs, true, "do not use PBOs in OpenGL mode, even if the video card supports them");
 	AddBoolC("ExtendHeight", Settings.ShowOverscan, false, "true to display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240.");
-	AddBoolC("Widescreen", Settings.Widescreen.Mode, false, "true to patch a game the emulator has a widescreen hack for into that hack, in memory, and draw the columns either side of the SNES's own 256; every other game is left as it is");
-	AddUIntC("WidescreenColumns", Settings.Widescreen.Aspect, 48, "which of the hack's widths, as columns added on each side: 48 for 352 wide (16:9, 16:10), 64 for 384 wide (16:9, 2:1), 96 for 448 wide and 112 for 480 wide (21:9 and wider, experimental)");
+	AddBoolC("Widescreen", Settings.Widescreen.Mode, false, "true to run a game that has a known widescreen hack as that hack, patched in memory. Other games are unaffected");
+	AddUIntC("WidescreenColumns", Settings.Widescreen.Aspect, 48, "the hack's width, as columns added on each side: 48 = 352 wide (16:9), 64 = 384 (2:1), 96 = 448 and 112 = 480 (both experimental)");
 	AddBoolC("AlwaysCenterImage", GUI.AlwaysCenterImage,false, "true to center the image even if larger than window");
 	AddIntC("Window:Width", GUI.window_size.right, 512, "256=1x, 512=2x, 768=3x, 1024=4x, etc. (usually)");
 	AddIntC("Window:Height", GUI.window_size.bottom, 448, "224=1x, 448=2x, 672=3x,  896=4x, etc. (usually)");

@@ -105,6 +105,10 @@ bool S9xPulseSoundDriver::open_device(int playback_rate, int buffer_size_ms)
 {
     init();
 
+    // pa_usec_to_bytes() asserts on a sample spec it can't use.
+    if (playback_rate <= 0 || buffer_size_ms <= 0)
+        return false;
+
     pa_sample_spec ss;
     ss.channels = 2;
     ss.format = PA_SAMPLE_S16NE;

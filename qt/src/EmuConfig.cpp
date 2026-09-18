@@ -4,6 +4,7 @@
 namespace fs = std::filesystem;
 
 #include "EmuConfig.hpp"
+#include <algorithm>
 #include "EmuBinding.hpp"
 #include <cctype>
 #include <cstdlib>
@@ -628,6 +629,14 @@ void EmuConfig::config(const std::string &filename, bool write)
         clamp_adjustment(color_gamma);
         clamp_adjustment(color_contrast);
         clamp_adjustment(color_saturation);
+        // A damaged file must not hand the renderer a 0 pt font or a 0:0 aspect.
+        if (osd_size < 8 || osd_size > 256)
+            osd_size = 24;
+        if (aspect_ratio_numerator <= 0 || aspect_ratio_denominator <= 0)
+        {
+            aspect_ratio_numerator = 4;
+            aspect_ratio_denominator = 3;
+        }
     }
     EndSection();
 
@@ -650,6 +659,15 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("GainRegular", gain_regular, "Master pre-amp applied after the volume percentages (whole dB, 0 = unity)");
     Int("GainSGBMixSPC", sgb_mix_gain_spc, "SGB BIOS mix: SPC channel pre-amp (whole dB, 0 = unity)");
     Int("GainSGBMixGB", sgb_mix_gain_gb, "SGB BIOS mix: GB channel pre-amp (whole dB, 0 = unity)");
+    if (!write)
+    {
+        // PulseAudio aborts on a 0 Hz sample spec, so keep a damaged file's
+        // values inside the ranges the Sound panel offers.
+        if (playback_rate != 96000 && playback_rate != 48000 && playback_rate != 44100)
+            playback_rate = 48000;
+        audio_buffer_size_ms = std::clamp(audio_buffer_size_ms, 16, 256);
+        input_rate = std::clamp(input_rate, 31800, 32200);
+    }
     EndSection();
 
     BeginSection("Emulation");

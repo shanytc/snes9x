@@ -469,17 +469,22 @@ void EmuApplication::reportBinding(EmuBinding b, bool active)
         return;
     }
 
-    auto it = bindings.find(b.hash());
-    if (it == bindings.end())
+    auto range = bindings.equal_range(b.hash());
+    if (range.first == range.second)
         return;
 
-    if (it->second.second == UI)
+    // The core fans one report out to all of its commands on this key itself.
+    bool core_bound = false;
+    for (auto it = range.first; it != range.second; it++)
     {
-        handleBinding(it->second.first, active);
-        return;
+        if (it->second.second == UI)
+            handleBinding(it->second.first, active);
+        else
+            core_bound = true;
     }
 
-    emu_thread->runOnThread([&, b, active] { core->reportBinding(b, active); });
+    if (core_bound)
+        emu_thread->runOnThread([&, b, active] { core->reportBinding(b, active); });
 }
 
 void EmuApplication::updateBindings()

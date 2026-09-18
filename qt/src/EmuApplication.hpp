@@ -144,7 +144,9 @@ struct EmuApplication
         Core = 0,
         UI   = 1
     };
-    std::unordered_map<uint32_t, std::pair<std::string, Handler>> bindings;
+    // One key can carry several hotkeys (the core keeps a multimap too), so
+    // a press has to reach every UI-handled one, not just the first inserted.
+    std::unordered_multimap<uint32_t, std::pair<std::string, Handler>> bindings;
     std::unique_ptr<QTimer> poll_input_timer;
     std::function<void(EmuBinding)> binding_callback = nullptr;
     std::function<void()> joypads_changed_callback = nullptr;

@@ -731,6 +731,8 @@
 #define IDC_GB_PAL_LABEL_OB1            3490
 #define IDC_GB_PAL_GROUP                3491
 #define IDC_ADJUSTMENTS_GROUP           3492
+#define IDC_WIDESCREEN                  3493
+#define IDC_WIDESCREEN_GROUP            3494
 #define IDC_COLOR_CORRECTION_ENABLE     3111
 #define IDC_SLIDER_GAMMA                3112
 #define IDC_SLIDER_CONTRAST             3113
@@ -958,7 +960,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
 #define _APS_NEXT_COMMAND_VALUE         40224
-#define _APS_NEXT_CONTROL_VALUE         3493
+#define _APS_NEXT_CONTROL_VALUE         3495
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

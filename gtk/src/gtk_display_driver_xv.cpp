@@ -378,8 +378,8 @@ int S9xXVDisplayDriver::init()
                                 xv_portid,
                                 format,
                                 0,
-                                512,
-                                512,
+                                MAX_SNES_WIDTH,
+                                MAX_SNES_HEIGHT,
                                 &shm);
 
     shm.shmid = shmget(IPC_PRIVATE, xv_image->data_size, IPC_CREAT | 0777);
@@ -396,8 +396,8 @@ int S9xXVDisplayDriver::init()
 
     XShmAttach(display, &shm);
 
-    xv_image_width = 512;
-    xv_image_height = 512;
+    xv_image_width = MAX_SNES_WIDTH;
+    xv_image_height = MAX_SNES_HEIGHT;
 
     return 0;
 }

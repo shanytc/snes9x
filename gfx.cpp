@@ -47,6 +47,268 @@ static void S9xDisplayStringType (const char *, int, int, bool, int);
 #define TILE_PLUS(t, x)	(((t) & 0xfc00) | ((t + x) & 0x3ff))
 
 
+// --- Widescreen -------------------------------------------------------------
+//
+// See widescreen.h for what this is and why the settings look the way they
+// do. Everything here answers one of three questions: how many columns are we
+// adding, which layer is allowed into them on a given line, and what did the
+// hack's table row ask for.
+
+struct SWidescreen	Widescreen;
+
+void S9xSetWidescreenDefaults (struct SWidescreen *ws)
+{
+	ws->Mode             = WS_MODE_OFF;
+	ws->Aspect           = 48;		// the width picked, as columns a side: 352 wide
+	ws->Sprites          = WS_OBJ_SAFE;
+	ws->BG[0] = ws->BG[1] = ws->BG[2] = ws->BG[3] = WS_BG_AUTO_HV;
+	ws->StretchWindow    = FALSE;
+	ws->IgnoreWindow     = WS_WINDOW_OUTSIDE;
+	ws->IgnoreWindowX    = 128;
+	ws->Backdrop         = TRUE;
+	ws->Overscan         = FALSE;
+	ws->AspectCorrection = FALSE;
+}
+
+// bsnes-hd's HdToolkit::determineWsExt, so a hack's aspect ratio lands on the
+// same column count the patch was made against. Anything at or below 200 is
+// already a column count; above that it is the aspect ratio itself.
+int S9xWidescreenColumns (void)
+{
+	// The Super Game Boy composites its border into a 256-wide frame of its
+	// own, and there is nothing off its edges to show.
+	if (Widescreen.Mode == WS_MODE_OFF || Settings.SuperGameBoy)
+		return (0);
+
+	double	val = Widescreen.Aspect;
+
+	if (Widescreen.Aspect > 200)
+	{
+		const int	w = Widescreen.Aspect / 100;
+		const int	h = Widescreen.Aspect % 100;
+
+		val  = Widescreen.Overscan ? 224.0 : 216.0;
+		val *= w;
+		val /= h;
+
+		if (Widescreen.AspectCorrection)
+		{
+			val *= 7;
+			val /= 8;
+		}
+
+		if (val <= SNES_WIDTH)
+			return (0);
+
+		val -= SNES_WIDTH;
+		val /= 2;
+	}
+
+	// Columns come in whole tiles.
+	val /= 8;
+	if (Widescreen.Overscan || Widescreen.AspectCorrection)
+		val += 0.5;
+
+	int	columns = (int) val;
+	if (columns <= 0)
+		return (0);
+
+	columns *= 8;
+	if (columns > MAX_WS_EXTENT)
+		columns = MAX_WS_EXTENT;
+
+	return (columns);
+}
+
+void S9xUpdateWidescreen (void)
+{
+	Widescreen = Settings.Widescreen;
+
+	// Only the hack itself is widened: its row says how, the user's switch
+	// says whether. The retail cart it patches stays as it is until then.
+	const struct SWidescreenGame	*game = S9xWidescreenGame();
+
+	if (!game || !S9xWidescreenPatched() || Settings.Widescreen.Mode == WS_MODE_OFF)
+	{
+		Widescreen.Mode = WS_MODE_OFF;
+		return;
+	}
+
+	Widescreen.Mode          = game->Mode;
+	Widescreen.Aspect        = game->Aspect;
+	Widescreen.Sprites       = game->Sprites;
+	for (int i = 0; i < 4; i++)
+		Widescreen.BG[i] = game->BG[i];
+	Widescreen.StretchWindow = game->StretchWindow;
+	Widescreen.IgnoreWindow  = game->IgnoreWindow;
+	Widescreen.IgnoreWindowX = game->IgnoreWindowX;
+}
+
+// Whether the side columns take the backdrop colour. Under "Mode 7 scenes
+// only" they stay black while a scene we do not widen is up, so the picture
+// reads as bars rather than as a band of colour belonging to nothing.
+bool S9xWideBackdropFills (void)
+{
+	if (!Widescreen.Backdrop)
+		return (false);
+
+	if (Widescreen.Mode == WS_MODE_MODE7 && PPU.BGMode != 7)
+		return (false);
+
+	return (true);
+}
+
+// Layers the hack's row switched off entirely, as a $212c/$212d layer mask.
+static inline uint8 WideDisabledLayers (void)
+{
+	if (!IPPU.WideExtent)
+		return (0);
+
+	uint8	mask = 0;
+
+	for (int bg = 0; bg < 4; bg++)
+		if (Widescreen.BG[bg] == WS_BG_DISABLE)
+			mask |= 1 << bg;
+
+	if (Widescreen.Sprites == WS_OBJ_DISABLE)
+		mask |= 0x10;
+
+	return (mask);
+}
+
+// The columns one background may draw into on line Y, in screen coordinates
+// (0 is the leftmost column of the widened picture, IPPU.WideExtent the
+// leftmost column the SNES itself would have scanned out).
+static void WideBGBounds (int bg, uint32 Y, int &left, int &right)
+{
+	const int	ext = IPPU.WideExtent;
+
+	left  = 0;
+	right = SNES_WIDTH + 2 * ext;
+
+	if (!ext)
+		return;
+
+	// Mode 7 has no tilemap to run off the end of and no scroll registers for
+	// the heuristics below to read - its matrix is defined everywhere - so
+	// only the settings that plainly say yes or no apply to it.
+	const bool		mode7 = (PPU.BGMode == 7);
+	const uint16	conf  = Widescreen.BG[bg];
+	int				ws    = ext;
+
+	if (Widescreen.Mode == WS_MODE_MODE7 && !mode7)
+		ws = 0;		// not the kind of scene this setting widens
+	else
+	if (conf >= WS_BG_ABOVE && conf < WS_BG_BELOW + 1000)
+	{
+		// A layer that carries a HUD down to some scanline and scenery below
+		// it (or the other way round) is widened over only one of the two.
+		const int	line  = conf % 1000;
+		const bool	above = (conf < WS_BG_BELOW);
+
+		if (above != ((int) Y < line))
+			ws = 0;
+	}
+	else
+	switch (conf)
+	{
+		case WS_BG_ON:
+			break;
+
+		// bsnes-hd's guess at a HUD layer, and the default: 8x8 tiles parked
+		// at the origin is what a status bar looks like, and widening one
+		// drags the end of its tilemap into view. LineData holds VOffset
+		// biased by one, so 1 there is a vertical position of 0.
+		case WS_BG_AUTO_H:
+		case WS_BG_AUTO_HV:
+			if (!mode7 && !PPU.BG[bg].BGSize && LineData[Y].BG[bg].HOffset == 0 &&
+				(conf == WS_BG_AUTO_H || LineData[Y].BG[bg].VOffset == 1))
+				ws = 0;
+			break;
+
+		// Backgrounds that blank their own edge columns leave a black seam
+		// against the new ones, so drop those columns instead.
+		case WS_BG_CROP:
+		case WS_BG_CROP_AUTO:
+			if (!mode7)
+				ws = -8;
+			break;
+
+		default:	// WS_BG_OFF, and anything we don't recognise
+			ws = 0;
+			break;
+	}
+
+	left  = ext - ws;
+	right = ext + SNES_WIDTH + ws;
+}
+
+// Narrow one clip segment to the columns this layer may use. False when
+// there is nothing of it left to draw.
+static inline bool WideClip (int bg, uint32 Y, uint32 &Left, uint32 &Right)
+{
+	if (IPPU.WideExtent)
+	{
+		int	left, right;
+		WideBGBounds(bg, Y, left, right);
+
+		if ((int) Left  < left)  Left  = left;
+		if ((int) Right > right) Right = right;
+	}
+
+	return (Left < Right);
+}
+
+// How far into a mosaic block a column sits. The grid is anchored on the
+// SNES's own column 0, so the blocks in the side columns line up with the
+// ones the hardware drew.
+static inline int MosaicOffset (int x)
+{
+	const int	m = x % (int) PPU.Mosaic;
+	return (m < 0) ? m + (int) PPU.Mosaic : m;
+}
+
+// Where an object sits once the side columns exist. Object coordinates are
+// 9 bits, and bsnes-hd reads everything up to 352 as standing to the right
+// rather than having wrapped around to the left - which is also why 96 is the
+// widest side column that can still hold objects.
+static inline int WideOBJHPos (int HPos)
+{
+	if (!IPPU.WideExtent)
+		return (HPos);
+
+	const int	raw = HPos & 0x1ff;
+	return ((raw > 352) ? raw - 512 : raw);
+}
+
+// An object that never reaches the SNES's own columns is one the game parked
+// out of sight. Only "unsafe" takes it at face value and draws it where it
+// says it is; the others leave it out, slot and all.
+static inline bool WideOBJUnseen (int HPos, int width)
+{
+	if (!IPPU.WideExtent || Widescreen.Sprites == WS_OBJ_UNSAFE)
+		return (false);
+
+	const int	raw = HPos & 0x1ff;
+	return (raw > SNES_WIDTH && raw + width - 1 < 512);
+}
+
+// A row can hand a layer the side columns from one scanline on, so a run of
+// lines drawn as one tile row must not span the switch.
+static inline bool WideSpanBreaks (int bg, uint32 Y, uint32 Y2)
+{
+	if (!IPPU.WideExtent)
+		return (false);
+
+	int	l1, r1, l2, r2;
+	WideBGBounds(bg, Y,  l1, r1);
+	WideBGBounds(bg, Y2, l2, r2);
+
+	return (l1 != l2 || r1 != r2);
+}
+
+
+
 bool8 S9xGraphicsInit (void)
 {
 	S9xInitTileRenderer();
@@ -122,17 +384,22 @@ void S9xGraphicsScreenResize (void)
 	IPPU.InterlaceOBJ = Memory.FillRAM[0x2133] & 2;
 	IPPU.PseudoHires = Memory.FillRAM[0x2133] & 8;
 
+	// The frame's width is settled here and nowhere else: a game can turn
+	// hires on halfway down a frame, but the picture cannot get wider or
+	// narrower under the lines already drawn.
+	IPPU.WideExtent = S9xWidescreenColumns();
+
 	// Interlaced frames render double-width too: the field-aware tile
 	// renderers live on the 512-wide path (see S9xSelectTileRenderers).
 	if (PPU.BGMode == 5 || PPU.BGMode == 6 || IPPU.PseudoHires || IPPU.Interlace)
 	{
 		IPPU.DoubleWidthPixels = TRUE;
-		IPPU.RenderedScreenWidth = SNES_WIDTH << 1;
+		IPPU.RenderedScreenWidth = S9xWideWidth() << 1;
 	}
 	else
 	{
 		IPPU.DoubleWidthPixels = FALSE;
-		IPPU.RenderedScreenWidth = SNES_WIDTH;
+		IPPU.RenderedScreenWidth = S9xWideWidth();
 	}
 
 	if (IPPU.Interlace)
@@ -298,8 +565,13 @@ static inline uint16 byte_reg_addr (int reg)
 // should render with. Clobbers IPPU.PreviousLine/CurrentLine.
 static void rerender_line_span (int line, int x0, int x1)
 {
-	raster_span_l[0] = (uint16) x0;
-	raster_span_r[0] = (uint16) x1;
+	// x0/x1 name the SNES's own columns; the clip regions they restrict are
+	// in the widened picture's. A span that ran to a screen edge runs to the
+	// new one, so a re-rendered line covers its side columns too.
+	const int	ext = IPPU.WideExtent;
+
+	raster_span_l[0] = (uint16) ((x0 <= 0) ? 0 : x0 + ext);
+	raster_span_r[0] = (uint16) ((x1 >= SNES_WIDTH) ? S9xWideWidth() : x1 + ext);
 	raster_span_count = 1;
 
 	const uint8	savedWin[4] =
@@ -404,7 +676,11 @@ static void S9xApplyMidLineBrightness (void)
 			if (GFX.DoInterlace && S9xInterlaceField())
 				p += GFX.RealPPL;
 
-			for (int x = x0 * xscale; x < x1 * xscale; x++)
+			// Same edge rule as rerender_line_span above.
+			const int	xl = (x0 <= 0) ? 0 : (x0 + IPPU.WideExtent);
+			const int	xr = (x1 >= SNES_WIDTH) ? S9xWideWidth() : (x1 + IPPU.WideExtent);
+
+			for (int x = xl * xscale; x < xr * xscale; x++)
 			{
 				uint32	r, g, b;
 				DECOMPOSE_PIXEL(p[x], r, g, b);
@@ -1129,7 +1405,7 @@ static inline void RenderScreen (bool8 sub)
 			GFX.S += GFX.RealPPL;
 		GFX.DB = GFX.ZBuffer;
 		GFX.Clip = IPPU.Clip[0];
-		BGActive = Memory.FillRAM[0x212c] & ~Settings.BG_Forced;
+		BGActive = Memory.FillRAM[0x212c] & ~Settings.BG_Forced & ~WideDisabledLayers();
 		D = 32;
 	}
 	else
@@ -1137,7 +1413,7 @@ static inline void RenderScreen (bool8 sub)
 		GFX.S = GFX.SubScreen;
 		GFX.DB = GFX.SubZBuffer;
 		GFX.Clip = IPPU.Clip[1];
-		BGActive = Memory.FillRAM[0x212d] & ~Settings.BG_Forced;
+		BGActive = Memory.FillRAM[0x212d] & ~Settings.BG_Forced & ~WideDisabledLayers();
 		D = (Memory.FillRAM[0x2130] & 2) << 4; // 'do math' depth flag
 	}
 
@@ -1274,17 +1550,19 @@ void S9xUpdateScreen (void)
 		if (!IPPU.DoubleWidthPixels && (PPU.BGMode == 5 || PPU.BGMode == 6 || IPPU.PseudoHires || IPPU.Interlace))
 		{
 			// Have to back out of the regular speed hack
+			const int	width = S9xWideWidth();
+
 			for (uint32 y = 0; y < GFX.StartY; y++)
 			{
-				uint16	*p = GFX.Screen + y * GFX.PPL + 255;
-				uint16	*q = GFX.Screen + y * GFX.PPL + 510;
+				uint16	*p = GFX.Screen + y * GFX.PPL + (width - 1);
+				uint16	*q = GFX.Screen + y * GFX.PPL + (width - 1) * 2;
 
-				for (int x = 255; x >= 0; x--, p--, q -= 2)
+				for (int x = width - 1; x >= 0; x--, p--, q -= 2)
 					*q = *(q + 1) = *p;
 			}
 
 			IPPU.DoubleWidthPixels = TRUE;
-			IPPU.RenderedScreenWidth = 512;
+			IPPU.RenderedScreenWidth = width << 1;
 		}
 
 		if (!IPPU.DoubleHeightPixels && IPPU.Interlace)
@@ -1414,16 +1692,23 @@ static void SetupOBJ (void)
 				Height = SmallHeight;
 			}
 
+			const int	wl = -IPPU.WideExtent;
+			const int	wr = SNES_WIDTH + IPPU.WideExtent;
+
 			int	HPos = PPU.OBJ[S].HPos;
+			if (IPPU.WideExtent)
+				HPos = WideOBJHPos(HPos);
+			else
 			if (HPos == -256)
 				HPos = 0;
 
-			if (HPos > -GFX.OBJWidths[S] && HPos <= 256)
+			if (HPos + GFX.OBJWidths[S] > wl && HPos <= wr &&
+				!WideOBJUnseen(PPU.OBJ[S].HPos, GFX.OBJWidths[S]))
 			{
-				if (HPos < 0)
-					GFX.OBJVisibleTiles[S] = (GFX.OBJWidths[S] + HPos + 7) >> 3;
-				else if (HPos + GFX.OBJWidths[S] > 255)
-					GFX.OBJVisibleTiles[S] = (256 - HPos + 7) >> 3;
+				if (HPos < wl)
+					GFX.OBJVisibleTiles[S] = (GFX.OBJWidths[S] + (HPos - wl) + 7) >> 3;
+				else if (HPos + GFX.OBJWidths[S] > wr - 1)
+					GFX.OBJVisibleTiles[S] = (wr - HPos + 7) >> 3;
 				else
 					GFX.OBJVisibleTiles[S] = GFX.OBJWidths[S] >> 3;
 
@@ -1485,16 +1770,23 @@ static void SetupOBJ (void)
 				Height = SmallHeight;
 			}
 
+			const int	wl = -IPPU.WideExtent;
+			const int	wr = SNES_WIDTH + IPPU.WideExtent;
+
 			int	HPos = PPU.OBJ[S].HPos;
+			if (IPPU.WideExtent)
+				HPos = WideOBJHPos(HPos);
+			else
 			if (HPos == -256)
 				HPos = 256;
 
-			if (HPos > -GFX.OBJWidths[S] && HPos <= 256)
+			if (HPos + GFX.OBJWidths[S] > wl && HPos <= wr &&
+				!WideOBJUnseen(PPU.OBJ[S].HPos, GFX.OBJWidths[S]))
 			{
-				if (HPos < 0)
-					GFX.OBJVisibleTiles[S] = (GFX.OBJWidths[S] + HPos + 7) >> 3;
-				else if (HPos + GFX.OBJWidths[S] >= 257)
-					GFX.OBJVisibleTiles[S] = (257 - HPos + 7) >> 3;
+				if (HPos < wl)
+					GFX.OBJVisibleTiles[S] = (GFX.OBJWidths[S] + (HPos - wl) + 7) >> 3;
+				else if (HPos + GFX.OBJWidths[S] >= wr + 1)
+					GFX.OBJVisibleTiles[S] = (wr + 1 - HPos + 7) >> 3;
 				else
 					GFX.OBJVisibleTiles[S] = GFX.OBJWidths[S] >> 3;
 
@@ -1601,16 +1893,28 @@ static void DrawOBJS (int D)
 
 			int	DrawMode = 3;
 			int	clip = 0, next_clip = -1000;
-			int	X = PPU.OBJ[S].HPos;
-			if (X == -256)
+
+			// X counts in the SNES's own columns, the clip windows and the
+			// buffer in the widened picture's; ext is the distance between
+			// the two. Object clipping to the classic 256 ("clip" mode) is
+			// the clip window's job, not this loop's.
+			const int	ext = IPPU.WideExtent;
+			const int	wl  = -ext;
+			const int	wr  = SNES_WIDTH + ext;
+
+			int	HStart = ext ? WideOBJHPos(PPU.OBJ[S].HPos) : PPU.OBJ[S].HPos;
+			int	X = HStart;
+			if (!ext && X == -256)
 				X = 256;
 
-			for (int t = tiles, O = Offset + X * PixWidth; X <= 256 && X < PPU.OBJ[S].HPos + GFX.OBJWidths[S]; TileX = (TileX + TileInc) & 0x0f, X += 8, O += 8 * PixWidth)
+			for (int t = tiles, O = Offset + (X + ext) * PixWidth; X <= wr && X < HStart + GFX.OBJWidths[S]; TileX = (TileX + TileInc) & 0x0f, X += 8, O += 8 * PixWidth)
 			{
-				if (X < -7 || --t < 0 || X == 256)
+				if (X < wl - 7 || --t < 0 || X == wr)
 					continue;
 
-				for (int x = X; x < X + 8;)
+				const int	TileLeft = X + ext;
+
+				for (int x = TileLeft; x < TileLeft + 8;)
 				{
 					if (x >= next_clip)
 					{
@@ -1639,7 +1943,7 @@ static void DrawOBJS (int D)
 						}
 					}
 
-					if (x == X && x + 8 < next_clip)
+					if (x == TileLeft && x + 8 < next_clip)
 					{
 						if (DrawMode)
 							DrawTile(BaseTile | TileX, O, TileLine, 1);
@@ -1647,9 +1951,9 @@ static void DrawOBJS (int D)
 					}
 					else
 					{
-						int	w = (next_clip <= X + 8) ? next_clip - x : X + 8 - x;
+						int	w = (next_clip <= TileLeft + 8) ? next_clip - x : TileLeft + 8 - x;
 						if (DrawMode)
-							DrawClippedTile(BaseTile | TileX, O, x - X, w, TileLine, 1);
+							DrawClippedTile(BaseTile | TileX, O, x - TileLeft, w, TileLine, 1);
 						x += w;
 					}
 				}
@@ -1714,6 +2018,8 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 			{
 				if ((VOffset != LineData[Y + Lines].BG[bg].VOffset) || (HOffset != LineData[Y + Lines].BG[bg].HOffset))
 					break;
+				if (WideSpanBreaks(bg, Y, Y + Lines))
+					break;
 			}
 
 			if (Y + Lines > GFX.EndY)
@@ -1754,8 +2060,12 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 
 			uint32	Left   = GFX.Clip[bg].Left[clip];
 			uint32	Right  = GFX.Clip[bg].Right[clip];
+
+			if (!WideClip(bg, Y, Left, Right))
+				continue;
+
 			uint32	Offset = Left * PixWidth + Y * GFX.PPL;
-			uint32	HPos   = (HOffset + Left) & OffsetMask;
+			uint32	HPos   = (HOffset + Left - IPPU.WideExtent) & OffsetMask;
 			uint32	HTile  = HPos >> 3;
 			uint16	*t;
 
@@ -1776,6 +2086,8 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 
 			uint32	Width = Right - Left;
 
+			// A widened line can cross both screen seams, so the column
+			// counter has to stay inside the map for the seam checks.
 			if (HPos & 7)
 			{
 				uint32	l = HPos & 7;
@@ -1814,7 +2126,7 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 						t = b1;
 				}
 
-				HTile++;
+				HTile = (HTile + 1) & ((BG.TileSizeH == 8) ? 0x3f : 0x7f);
 				Offset += 8 * PixWidth;
 				Width -= w;
 			}
@@ -1851,7 +2163,7 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 						t = b1;
 				}
 
-				HTile++;
+				HTile = (HTile + 1) & ((BG.TileSizeH == 8) ? 0x3f : 0x7f);
 				Offset += 8 * PixWidth;
 				Width -= 8;
 			}
@@ -1960,8 +2272,13 @@ static void DrawBackgroundMosaic (int bg, uint8 Zh, uint8 Zl)
 
 			uint32	Left   = GFX.Clip[bg].Left[clip];
 			uint32	Right  = GFX.Clip[bg].Right[clip];
+
+			if (!WideClip(bg, Y + MosaicStart, Left, Right))
+				continue;
+
+			int		SnesLeft = (int) Left - IPPU.WideExtent;
 			uint32	Offset = Left * PixWidth + (Y + MosaicStart) * GFX.PPL;
-			uint32	HPos   = (HOffset + Left - (Left % PPU.Mosaic)) & OffsetMask;
+			uint32	HPos   = (HOffset + SnesLeft - MosaicOffset(SnesLeft)) & OffsetMask;
 			uint32	HTile  = HPos >> 3;
 			uint16	*t;
 
@@ -1986,7 +2303,7 @@ static void DrawBackgroundMosaic (int bg, uint8 Zh, uint8 Zl)
 
 			while (Left < Right)
 			{
-				uint32	w = PPU.Mosaic - (Left % PPU.Mosaic);
+				uint32	w = PPU.Mosaic - MosaicOffset((int) Left - IPPU.WideExtent);
 				if (w > Width)
 					w = Width;
 
@@ -2031,7 +2348,7 @@ static void DrawBackgroundMosaic (int bg, uint8 Zh, uint8 Zl)
 							t = b1;
 					}
 
-					HTile++;
+					HTile = (HTile + 1) & ((BG.TileSizeH == 8) ? 0x3f : 0x7f);
 				}
 
 				Offset += w * PixWidth;
@@ -2124,25 +2441,32 @@ static void DrawBackgroundOffset (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 
 			uint32	Left  = GFX.Clip[bg].Left[clip];
 			uint32	Right = GFX.Clip[bg].Right[clip];
+
+			if (!WideClip(bg, Y, Left, Right))
+				continue;
+
 			uint32	Offset = Left * PixWidth + Y * GFX.PPL;
 			uint32	HScroll = LineData[Y].BG[bg].HOffset;
-			bool8	left_edge = (Left < (8 - (HScroll & 7)));
 			uint32	Width = Right - Left;
 
 			while (Left < Right)
 			{
 				uint32	VOffset, HOffset;
+				// Screen coordinate as the SNES itself would number it: the
+				// offset table is indexed from its column 0, and everything
+				// left of that (the whole left side area included) is the
+				// leftmost tile column as far as OPT is concerned.
+				const int	SnesLeft = (int) Left - IPPU.WideExtent;
 
-				if (left_edge)
+				if (SnesLeft < (int) (8 - (HScroll & 7)))
 				{
 					// SNES cannot do OPT for leftmost tile column
 					VOffset = LineData[Y].BG[bg].VOffset;
 					HOffset = HScroll;
-					left_edge = FALSE;
 				}
 				else
 				{
-					int HOffTile = ((HOff + Left - 1) & Offset2Mask) >> 3;
+					int HOffTile = ((HOff + SnesLeft - 1) & Offset2Mask) >> 3;
 
 					if (BG.OffsetSizeH == 8)
 					{
@@ -2221,7 +2545,7 @@ static void DrawBackgroundOffset (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 				b1 += (TilemapRow & 0x1f) << 5;
 				b2 += (TilemapRow & 0x1f) << 5;
 
-				uint32	HPos = (HOffset + Left) & OffsetMask;
+				uint32	HPos = (HOffset + SnesLeft) & OffsetMask;
 				uint32	HTile = HPos >> 3;
 				uint16	*t;
 
@@ -2355,6 +2679,10 @@ static void DrawBackgroundOffsetMosaic (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 
 			uint32	Left =  GFX.Clip[bg].Left[clip];
 			uint32	Right = GFX.Clip[bg].Right[clip];
+
+			if (!WideClip(bg, Y + MosaicStart, Left, Right))
+				continue;
+
 			uint32	Offset = Left * PixWidth + (Y + MosaicStart) * GFX.PPL;
 			uint32	HScroll = LineData[Y + MosaicStart].BG[bg].HOffset;
 			uint32	Width = Right - Left;
@@ -2362,8 +2690,11 @@ static void DrawBackgroundOffsetMosaic (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 			while (Left < Right)
 			{
 				uint32	VOffset, HOffset;
+				// See DrawBackgroundOffset: OPT is indexed from the SNES's
+				// own column 0.
+				const int	SnesLeft = (int) Left - IPPU.WideExtent;
 
-				if (Left < (8 - (HScroll & 7)))
+				if (SnesLeft < (int) (8 - (HScroll & 7)))
 				{
 					// SNES cannot do OPT for leftmost tile column
 					VOffset = LineData[Y + MosaicStart].BG[bg].VOffset;
@@ -2371,7 +2702,7 @@ static void DrawBackgroundOffsetMosaic (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 				}
 				else
 				{
-					int HOffTile = (((Left + (HScroll & 7)) - 8) + (HOff & ~7)) >> 3;
+					int HOffTile = (((SnesLeft + (int) (HScroll & 7)) - 8) + (HOff & ~7)) >> 3;
 
 					if (BG.OffsetSizeH == 8)
 					{
@@ -2450,7 +2781,7 @@ static void DrawBackgroundOffsetMosaic (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 				b1 += (TilemapRow & 0x1f) << 5;
 				b2 += (TilemapRow & 0x1f) << 5;
 
-				uint32	HPos = (HOffset + Left - (Left % PPU.Mosaic)) & OffsetMask;
+				uint32	HPos = (HOffset + SnesLeft - MosaicOffset(SnesLeft)) & OffsetMask;
 				uint32	HTile = HPos >> 3;
 				uint16	*t;
 
@@ -2469,7 +2800,7 @@ static void DrawBackgroundOffsetMosaic (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 						t = b1 + (HTile >> 1);
 				}
 
-				uint32	w = PPU.Mosaic - (Left % PPU.Mosaic);
+				uint32	w = PPU.Mosaic - MosaicOffset((int) Left - IPPU.WideExtent);
 				if (w > Width)
 					w = Width;
 
@@ -2504,12 +2835,21 @@ static inline void DrawBackgroundMode7 (int bg, void (*DrawMath) (uint32, uint32
 {
 	for (int clip = 0; clip < GFX.Clip[bg].Count; clip++)
 	{
+		uint32	Left  = GFX.Clip[bg].Left[clip];
+		uint32	Right = GFX.Clip[bg].Right[clip];
+
+		// These renderers walk the whole line range themselves, so a
+		// scanline-keyed row rule can only be read once, off the first
+		// line of the run.
+		if (!WideClip(bg, GFX.StartY, Left, Right))
+			continue;
+
 		GFX.ClipColors = !(GFX.Clip[bg].DrawMode[clip] & 1);
 
 		if (BG.EnableMath && (GFX.Clip[bg].DrawMode[clip] & 2))
-			DrawMath(GFX.Clip[bg].Left[clip], GFX.Clip[bg].Right[clip], D);
+			DrawMath(Left, Right, D);
 		else
-			DrawNomath(GFX.Clip[bg].Left[clip], GFX.Clip[bg].Right[clip], D);
+			DrawNomath(Left, Right, D);
 	}
 }
 
@@ -2525,6 +2865,18 @@ static inline void DrawBackdrop (void)
 			GFX.DrawBackdropMath(Offset, GFX.Clip[5].Left[clip], GFX.Clip[5].Right[clip]);
 		else
 			GFX.DrawBackdropNomath(Offset, GFX.Clip[5].Left[clip], GFX.Clip[5].Right[clip]);
+	}
+
+	// With the backdrop colour kept out of the side columns they still have
+	// to be covered: nothing else writes them, so the last frame would show
+	// through wherever no layer reached.
+	if (IPPU.WideExtent && !S9xWideBackdropFills())
+	{
+		const int	ext = IPPU.WideExtent;
+
+		GFX.ClipColors = TRUE;	// draws through BlackColourMap
+		GFX.DrawBackdropNomath(Offset, 0, ext);
+		GFX.DrawBackdropNomath(Offset, ext + SNES_WIDTH, SNES_WIDTH + 2 * ext);
 	}
 }
 

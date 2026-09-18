@@ -3,6 +3,7 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "ppu.h"
 #include "biosmanager.h"
 #include "srtc.h"
 #include "apu/apu.h"
@@ -197,6 +198,11 @@ static overscan_mode crop_overscan_mode = OVERSCAN_CROP_ON; // default to crop
 static aspect_mode aspect_ratio_mode = ASPECT_RATIO_4_3; // default to 4:3
 static bool rom_loaded = false;
 
+// The widescreen option swaps the cart in memory, so a game the table has is
+// kept as the frontend gave it, to load again: its bytes, or just its path.
+static std::vector<uint8_t> widescreen_content;
+static std::string widescreen_content_path;
+
 enum lightgun_mode
 {
 	SETTING_GUN_INPUT_LIGHTGUN,
@@ -339,6 +345,29 @@ void update_geometry(void)
     g_screen_gun_width = av_info.geometry.base_width;
     g_screen_gun_height = av_info.geometry.base_height;
     g_geometry_update = false;
+}
+
+// The option changed with such a game in: load it again, so the load path
+// patches it or leaves it retail. SRAM is the frontend's and stays as it is.
+static void widescreen_reload(void)
+{
+    if (!widescreen_content.empty())
+        rom_loaded = Memory.LoadROMMem(widescreen_content.data(), widescreen_content.size(), g_basename);
+    else if (!widescreen_content_path.empty())
+        rom_loaded = Memory.LoadROM(widescreen_content_path.c_str());
+    else
+        return;
+    g_geometry_update = true;
+}
+
+// Shown only for a game the table has, which the load path knows once the
+// cart is in; with no cart, or any other game, RetroArch hides it.
+static void show_widescreen_option(void)
+{
+    struct retro_core_option_display option_display;
+    option_display.key = "snes9x_widescreen";
+    option_display.visible = S9xWidescreenGame() != NULL;
+    environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
 }
 
 static void update_variables(void)
@@ -512,6 +541,30 @@ static void update_variables(void)
             aspect_ratio_mode = newval;
             g_geometry_update = true;
         }
+    }
+
+    var.key = "snes9x_widescreen";
+
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+    {
+        int columns = 0;
+        if (strcmp(var.value, "normal") == 0)
+            columns = 48;
+        else if (strcmp(var.value, "extra") == 0)
+            columns = 64;
+        else if (strcmp(var.value, "ultra") == 0)
+            columns = 96;
+        else if (strcmp(var.value, "hyper") == 0)
+            columns = 112;
+
+        Settings.Widescreen.Mode = columns ? WS_MODE_ON : WS_MODE_OFF;
+        if (columns)
+            Settings.Widescreen.Aspect = columns;
+        S9xUpdateWidescreen();
+
+        // Changed with a game the table has in: swap the cart, as the other ports do.
+        if (rom_loaded && S9xWidescreenReloadNeeded())
+            widescreen_reload();
     }
 
     var.key = "snes9x_region";
@@ -894,11 +947,13 @@ float get_aspect_ratio(unsigned width, unsigned height)
 {
     if (aspect_ratio_mode == ASPECT_RATIO_4_3)
     {
-        return SNES_4_3;
+        // Wide columns keep the pixel shape 4:3 gives the SNES's own 256.
+        return SNES_4_3 * width / SNES_WIDTH;
     }
     else if (aspect_ratio_mode == ASPECT_RATIO_4_3_SCALED)
     {
-        return (4.0f * (MAX_SNES_HEIGHT - height)) / (3.0f * (MAX_SNES_WIDTH - width));
+        // Against the classic 512 maximum, which MAX_SNES_WIDTH no longer is.
+        return (4.0f * (MAX_SNES_HEIGHT - height)) / (3.0f * SNES_WIDTH) * width / SNES_WIDTH;
     }
     else if (aspect_ratio_mode == ASPECT_RATIO_1_1)
     {
@@ -930,7 +985,9 @@ float get_aspect_ratio(unsigned width, unsigned height)
 void retro_get_system_av_info(struct retro_system_av_info *info)
 {
     memset(info,0,sizeof(retro_system_av_info));
-    unsigned width = SNES_WIDTH;
+    // Widescreen hands the frontend more columns; ask S9xWidescreenColumns
+    // rather than IPPU, which only knows once a frame has been rendered.
+    unsigned width = SNES_WIDTH + 2 * S9xWidescreenColumns();
     unsigned height = PPU.ScreenHeight;
     if (crop_overscan_mode == OVERSCAN_CROP_ON)
         height = SNES_HEIGHT;
@@ -939,7 +996,7 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 
     info->geometry.base_width = width;
     info->geometry.base_height = height;
-    info->geometry.max_width = MAX_SNES_WIDTH_NTSC;
+    info->geometry.max_width = (MAX_SNES_WIDTH_NTSC > MAX_SNES_WIDTH) ? MAX_SNES_WIDTH_NTSC : MAX_SNES_WIDTH;
     info->geometry.max_height = MAX_SNES_HEIGHT;
     info->geometry.aspect_ratio = get_aspect_ratio(width, height);
     info->timing.sample_rate = 32040;
@@ -1294,6 +1351,9 @@ bool retro_load_game(const struct retro_game_info *game)
 {
     init_descriptors();
 
+    rom_loaded = false;
+    widescreen_content.clear();
+    widescreen_content_path.clear();
     update_variables();
 
     if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble_iface))
@@ -1336,6 +1396,15 @@ bool retro_load_game(const struct retro_game_info *game)
         if(biosrom) delete[] biosrom;
     }
 
+    // A game the table has is kept as given, so the option can swap the cart.
+    if (rom_loaded && S9xWidescreenGame())
+    {
+        if (game->data && game->size)
+            widescreen_content.assign((const uint8_t *) game->data, (const uint8_t *) game->data + game->size);
+        else if (game->path)
+            widescreen_content_path = game->path;
+    }
+
     if (rom_loaded)
     {
         /* If we're in RGB565 format, switch frontend to that */
@@ -1364,6 +1433,7 @@ bool retro_load_game(const struct retro_game_info *game)
         log_cb(RETRO_LOG_ERROR, "ROM loading failed...\n");
 
     Memory.ClearSRAM();
+    show_widescreen_option();
 
     return rom_loaded;
 }
@@ -1398,6 +1468,9 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
 {
     uint8_t *romptr[3];
     size_t romsize[3];
+
+    widescreen_content.clear();
+    widescreen_content_path.clear();
 
     for(size_t i=0; i < num_info; i++)
     {
@@ -1496,6 +1569,7 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
 
         g_geometry_update = true;
     }
+    show_widescreen_option();
 
     return rom_loaded;
 }
@@ -1560,6 +1634,9 @@ void retro_init(void)
     environ_cb(RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS, &achievements);
 
     memset(&Settings, 0, sizeof(Settings));
+    // The switch and the width come from the snes9x_widescreen option.
+    S9xSetWidescreenDefaults(&Settings.Widescreen);
+    S9xUpdateWidescreen();
     Settings.MouseMaster = TRUE;
     Settings.SuperScopeMaster = TRUE;
     Settings.JustifierMaster = TRUE;
@@ -1613,6 +1690,7 @@ void retro_init(void)
     S9xUnmapAllControls();
     map_buttons();
     check_system_specs();
+    show_widescreen_option();
 }
 
 #define MAP_BUTTON(id, name) S9xMapButton((id), S9xGetCommandT((name)), false)
@@ -2068,10 +2146,13 @@ void retro_run()
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
         update_variables();
 
-    if (g_geometry_update || height != PPU.ScreenHeight)
+    static int wide_extent = -1;
+
+    if (g_geometry_update || height != PPU.ScreenHeight || wide_extent != S9xWidescreenColumns())
     {
         update_geometry();
         height = PPU.ScreenHeight;
+        wide_extent = S9xWidescreenColumns();
     }
 
     int result = -1;
@@ -2278,7 +2359,7 @@ bool8 S9xDeinitUpdate(int width, int height)
     }
 
 
-    if (blargg_filter)
+    if (blargg_filter && !IPPU.WideExtent)
     {
         burst_phase = (burst_phase + 1) % 3;
 
@@ -2289,7 +2370,7 @@ bool8 S9xDeinitUpdate(int width, int height)
 
         video_cb(snes_ntsc_buffer + ((int)(MAX_SNES_WIDTH_NTSC) * overscan_offset), SNES_NTSC_OUT_WIDTH(256), height, MAX_SNES_WIDTH_NTSC * 2);
     }
-    else if (width == MAX_SNES_WIDTH && hires_blend)
+    else if (width > S9xWideWidth() && hires_blend)
     {
         #define AVERAGE_565(el0, el1) (((el0) & (el1)) + ((((el0) ^ (el1)) & 0xF7DE) >> 1))
 

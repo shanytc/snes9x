@@ -793,6 +793,8 @@ static bool8 FindGB_BootROM   (bool cgb, const char *gb_rom_path, std::string &o
                                std::vector<uint8> *out_bytes);
 static uint32 caCRC32 (uint8 *, uint32, uint32 crc32 = 0xffffffff);
 static bool8 ReadUPSPatch (Stream *, long, int32 &);
+// Whether this load patched the cart into its widescreen hack (widescreen.h).
+static bool8 widescreen_patch_applied = FALSE;
 static long ReadInt (Stream *, unsigned);
 static bool8 ReadIPSPatch (Stream *, long, int32 &);
 #ifdef UNZIP_SUPPORT
@@ -1683,7 +1685,9 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
         memset(&Multi, 0,sizeof(Multi));
         memcpy(ROM,source,sourceSize);
 
-        if (LoadROMInt(sourceSize))
+        int32	size = (int32) sourceSize;
+        CheckForWidescreenPatch(size);
+        if (LoadROMInt(size))
             return TRUE;
     }
     while (++retries < 3);
@@ -2230,6 +2234,7 @@ bool8 CMemory::LoadROM (const char *filename)
         }
 
         CheckForAnyPatch(filename, HeaderCount != 0, totalFileSize);
+        CheckForWidescreenPatch(totalFileSize);
 
         // Sufami Turbo / Satellaview images divert before scoring: their
         // BIOS has to be staged into ROM[] first.
@@ -3868,6 +3873,10 @@ void CMemory::InitROM (void)
 
 	ApplyROMFixes();
 
+	// The hack and the game it patches are told apart by the image, so only now.
+	S9xSetWidescreenGame(ROMCRC32, ROMName, widescreen_patch_applied);
+	S9xApplyWidescreenGameEdits(ROM, CalculatedSize);
+
 	//// Show ROM information
 	ROMId[4] = 0;
     strcpy(ROMId, SafeString(ROMId).c_str());
@@ -4948,6 +4957,12 @@ void CMemory::MakeRomInfoText (char *romtext)
 	strcat(romtext, temp);
 	sprintf(temp, "\n                CRC32: 0x%08X", ROMCRC32);
 	strcat(romtext, temp);
+	if (S9xWidescreenGame())
+	{
+		sprintf(temp, "\n           Widescreen: %s (%s)", S9xWidescreenGame()->Name,
+				S9xWidescreenPatched() ? "patched in" : "available");
+		strcat(romtext, temp);
+	}
 }
 
 // hack
@@ -5993,6 +6008,26 @@ static int unzFindExtension (unzFile &file, const char *ext, bool restart, bool 
 	return (port);
 }
 #endif
+
+// Patch a retail game the widescreen table knows into its hack, in memory,
+// while the user has widescreen on. The BPS reader checks the source CRC too.
+void CMemory::CheckForWidescreenPatch (int32 &rom_size)
+{
+	widescreen_patch_applied = FALSE;
+	S9xSetWidescreenGame(0, "", FALSE);	// no row until InitROM has the image to match
+
+	if (Settings.Widescreen.Mode == WS_MODE_OFF)
+		return;
+
+	const uint32					crc  = caCRC32(ROM, rom_size);
+	const struct SWidescreenGame	*game = S9xFindWidescreenGame(crc, NULL, Settings.Widescreen.Aspect);
+
+	if (!game || crc != game->SourceCRC32)
+		return;
+
+	memStream	patch(game->Patch, game->PatchSize);
+	widescreen_patch_applied = ReadBPSPatch(&patch, 0, rom_size);
+}
 
 void CMemory::CheckForAnyPatch(const char *rom_filename, bool8 header, int32 &rom_size)
 {

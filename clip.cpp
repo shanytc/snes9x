@@ -6,6 +6,86 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "ppu.h"
+
+// --- Widescreen -------------------------------------------------------------
+//
+// Window positions are register values in the SNES's own 256 columns, and the
+// clip regions the renderer walks are in the widened picture's. Everything
+// above S9xComputeClipWindows still works in the former; the boundaries are
+// translated once, on the way out.
+
+// A window that already ran to a screen edge keeps running to the new one -
+// that is what carries a HUD's black bars across the side columns instead of
+// stopping them at the old edge. A ROM hack that adapted its own window
+// positions asks for "stretch" instead, where every position's distance from
+// the centre column is doubled.
+static void WideBoundaries (const int16 *windows, int n_regions, int16 *out)
+{
+	const int	ext   = IPPU.WideExtent;
+	const int	width = SNES_WIDTH + 2 * ext;
+
+	for (int i = 0; i <= n_regions; i++)
+	{
+		int	v = windows[i];
+
+		if (!ext)
+			;
+		else
+		if (v <= 0)
+			v = 0;
+		else
+		if (v >= SNES_WIDTH)
+			v = width;
+		else
+		if (Widescreen.StretchWindow)
+		{
+			// Regions are bounded by "one past the window's right edge", but
+			// what gets stretched is the register value itself, so a right
+			// edge is doubled from v - 1 and the +1 put back afterwards.
+			const bool	w1 = PPU.Window1Left <= PPU.Window1Right;
+			const bool	w2 = PPU.Window2Left <= PPU.Window2Right;
+			const bool	left  = (w1 && v == PPU.Window1Left) || (w2 && v == PPU.Window2Left);
+			const bool	right = !left &&
+							    ((w1 && v == PPU.Window1Right + 1) || (w2 && v == PPU.Window2Right + 1));
+
+			v = 2 * (right ? v - 1 : v) - 128 + ext + (right ? 1 : 0);
+
+			if (v < 0)     v = 0;
+			if (v > width) v = width;
+		}
+		else
+			v += ext;
+
+		out[i] = (int16) v;
+	}
+}
+
+// bsnes-hd's "ignore window": with the colour window set a certain way, every
+// column reads the window state of one fixed column instead of its own, which
+// is what lets scenes whose windows would otherwise black out the side
+// columns widen at all.
+static bool WideIgnoreWindow (bool8 sub)
+{
+	if (!IPPU.WideExtent || Widescreen.IgnoreWindow == WS_WINDOW_NORMAL)
+		return (false);
+
+	const uint8	mask = (Memory.FillRAM[0x2130] >> (sub ? 4 : 6)) & 3;
+
+	return (Widescreen.IgnoreWindow >= WS_WINDOW_ALL ||
+			(Widescreen.IgnoreWindow >= WS_WINDOW_OUTSIDE_ALWAYS && mask == 0) ||
+			(Widescreen.IgnoreWindow >= WS_WINDOW_OUTSIDE && mask == 2));
+}
+
+// Which of the regions the fixed column falls in, in SNES coordinates.
+static int WideIgnoreRegion (const int16 *windows, int n_regions)
+{
+	for (int i = n_regions - 1; i > 0; i--)
+		if (Widescreen.IgnoreWindowX >= windows[i])
+			return (i);
+
+	return (0);
+}
 
 static uint8	region_map[6][6] =
 {
@@ -17,7 +97,7 @@ static uint8	region_map[6][6] =
 };
 
 static inline uint8 CalcWindowMask (int, uint8, uint8);
-static inline void StoreWindowRegions (uint8, struct ClipData *, int, int16 *, uint8 *, bool8, bool8 s = FALSE);
+static inline void StoreWindowRegions (uint8, struct ClipData *, int, int16 *, uint8 *, bool8, bool8 s = FALSE, int ignore_region = -1);
 
 
 static inline uint8 CalcWindowMask (int i, uint8 W1, uint8 W2)
@@ -69,9 +149,30 @@ static inline uint8 CalcWindowMask (int i, uint8 W1, uint8 W2)
 	return (0);
 }
 
-static inline void StoreWindowRegions (uint8 Mask, struct ClipData *Clip, int n_regions, int16 *windows, uint8 *drawing_modes, bool8 sub, bool8 StoreMode0)
+static inline void StoreWindowRegions (uint8 Mask, struct ClipData *Clip, int n_regions, int16 *windows, uint8 *drawing_modes, bool8 sub, bool8 StoreMode0, int ignore_region)
 {
 	int	ct = 0;
+
+	// "Ignore window": one region's state stands for the whole line.
+	if (ignore_region >= 0)
+	{
+		int	DrawMode = drawing_modes[ignore_region];
+		if (sub)
+			DrawMode |= 1;
+		if (Mask & (1 << ignore_region))
+			DrawMode = 0;
+
+		if (StoreMode0 || DrawMode)
+		{
+			Clip->Left[0]     = windows[0];
+			Clip->Right[0]    = windows[n_regions];
+			Clip->DrawMode[0] = DrawMode;
+			ct = 1;
+		}
+
+		Clip->Count = ct;
+		return;
+	}
 
 	for (int j = 0; j < n_regions; j++)
 	{
@@ -82,6 +183,11 @@ static inline void StoreWindowRegions (uint8 Mask, struct ClipData *Clip, int n_
 			DrawMode = 0;
 
 		if (!StoreMode0 && !DrawMode)
+			continue;
+
+		// Stretched window positions can collapse a region against a screen
+		// edge; an empty one would hand the renderer a zero-width span.
+		if (windows[j] >= windows[j + 1])
 			continue;
 
 		if (ct > 0 && Clip->Right[ct - 1] == windows[j] && Clip->DrawMode[ct - 1] == DrawMode)
@@ -213,10 +319,22 @@ void S9xComputeClipWindows (void)
 			drawing_modes[i] |= 2;
 	}
 
+	// Everything above worked in the SNES's own 256 columns; the regions the
+	// renderer walks are in the widened picture's.
+
+	int16	bounds[7];
+	WideBoundaries(windows, n_regions, bounds);
+
+	const int	ignore[2] =
+	{
+		WideIgnoreWindow(FALSE) ? WideIgnoreRegion(windows, n_regions) : -1,
+		WideIgnoreWindow(TRUE)  ? WideIgnoreRegion(windows, n_regions) : -1
+	};
+
 	// Store backdrop clip window (draw everywhere color window allows)
 
-	StoreWindowRegions(0, &IPPU.Clip[0][5], n_regions, windows, drawing_modes, FALSE, TRUE);
-	StoreWindowRegions(0, &IPPU.Clip[1][5], n_regions, windows, drawing_modes, TRUE,  TRUE);
+	StoreWindowRegions(0, &IPPU.Clip[0][5], n_regions, bounds, drawing_modes, FALSE, TRUE, ignore[0]);
+	StoreWindowRegions(0, &IPPU.Clip[1][5], n_regions, bounds, drawing_modes, TRUE,  TRUE, ignore[1]);
 
 	// Store per-BG and OBJ clip windows
 
@@ -226,9 +344,45 @@ void S9xComputeClipWindows (void)
 		for (int sub = 0; sub < 2; sub++)
 		{
 			if (Memory.FillRAM[sub + 0x212e] & (1 << j))
-				StoreWindowRegions(W, &IPPU.Clip[sub][j], n_regions, windows, drawing_modes, sub);
+				StoreWindowRegions(W, &IPPU.Clip[sub][j], n_regions, bounds, drawing_modes, sub, FALSE, ignore[sub]);
 			else
-				StoreWindowRegions(0, &IPPU.Clip[sub][j], n_regions, windows, drawing_modes, sub);
+				StoreWindowRegions(0, &IPPU.Clip[sub][j], n_regions, bounds, drawing_modes, sub, FALSE, ignore[sub]);
+		}
+	}
+
+	if (IPPU.WideExtent)
+	{
+		const int	ext = IPPU.WideExtent;
+
+		for (int sub = 0; sub < 2; sub++)
+		{
+			// "Clip" holds objects inside the columns the SNES itself
+			// scanned out; the same for the backdrop when the side columns
+			// are meant to stay black rather than take its colour.
+			for (int layer = 4; layer <= 5; layer++)
+			{
+				if (layer == 4 ? (Widescreen.Sprites != WS_OBJ_CLIP) : S9xWideBackdropFills())
+					continue;
+
+				struct ClipData	*c = &IPPU.Clip[sub][layer];
+				int	ct = 0;
+
+				for (int k = 0; k < c->Count; k++)
+				{
+					int	l = (c->Left[k]  < ext) ? ext : c->Left[k];
+					int	r = (c->Right[k] > ext + SNES_WIDTH) ? ext + SNES_WIDTH : c->Right[k];
+
+					if (l >= r)
+						continue;
+
+					c->Left[ct]     = (uint16) l;
+					c->Right[ct]    = (uint16) r;
+					c->DrawMode[ct] = c->DrawMode[k];
+					ct++;
+				}
+
+				c->Count = (uint8) ct;
+			}
 		}
 	}
 }

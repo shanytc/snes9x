@@ -556,6 +556,7 @@ static void ResetFrameTimer ();
 static bool LoadROM (const TCHAR *filename, const TCHAR *filename2 = NULL);
 static bool LoadROMMulti (const TCHAR *filename, const TCHAR *filename2);
 static bool ReloadLoadedGame ();
+static bool WinFollowContentWidth ();
 bool8 S9xLoadROMImage (const TCHAR *string);
 #ifdef NETPLAY_SUPPORT
 static void EnableServer (bool8 enable);
@@ -2452,6 +2453,14 @@ LRESULT CALLBACK WinProc(
 				RECT rect;
 				GetClientRect (GUI.hWnd, &rect);
 				InvalidateRect (GUI.hWnd, &rect, true);
+
+				// The widescreen switch swaps the cart for a game the table can
+				// patch: load it again, patched or not as the switch now says.
+				if (S9xWidescreenReloadNeeded() && ReloadLoadedGame())
+				{
+					WinDisplayApplyChanges();	// the picture changed shape
+					WinRefreshDisplay();
+				}
 				break;
 			}
 
@@ -6819,8 +6828,17 @@ void WinApplyContentWindowSize()
 
 	const bool gb      = (Settings.SuperGameBoy != FALSE);
 	const int  content = gb ? 1 : 0;
+
+	// The same console can come back wider or narrower, widescreen on or off.
+	const int  columns = gb ? 0 : S9xWidescreenColumns();
 	if (content == GUI.WindowSizedFor)
+	{
+		if (columns != GUI.WindowColumns && WinFollowContentWidth())
+			GUI.WindowColumns = columns;
 		return;
+	}
+	const int hadColumns = GUI.WindowColumns;
+	GUI.WindowColumns = 0;
 
 	RECT client;
 	GetClientRect(GUI.hWnd, &client);
@@ -6836,7 +6854,8 @@ void WinApplyContentWindowSize()
 		}
 		else
 		{
-			GUI.WindowSizeSnesW = client.right;
+			// In the SNES's own shape; a wide cart's window is that scaled.
+			GUI.WindowSizeSnesW = (int)((double)client.right * SNES_WIDTH / (SNES_WIDTH + 2 * hadColumns) + 0.5);
 			GUI.WindowSizeSnesH = client.bottom;
 		}
 	}
@@ -6874,6 +6893,34 @@ void WinApplyContentWindowSize()
 		width + margins.left + margins.right,
 		height + margins.top + margins.bottom,
 		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+	// A stored size is the SNES's own shape; a wide cart needs it wider.
+	if (columns && WinFollowContentWidth())
+		GUI.WindowColumns = columns;
+}
+
+// The widescreen switch changes the picture's width but not its height:
+// keep the zoom the window is at and let it grow or shrink sideways.
+static bool WinFollowContentWidth ()
+{
+	if (!GUI.hWnd || GUI.FullScreen || GUI.EmulatedFullscreen || IsZoomed(GUI.hWnd))
+		return (false);
+
+	RECT client;
+	GetClientRect(GUI.hWnd, &client);
+
+	unsigned int contentW, contentH;
+	WinGetContentSize(&contentW, &contentH);
+	if (client.bottom <= 0 || contentH == 0)
+		return (false);
+
+	const int width = (int)((double)contentW * client.bottom / contentH + 0.5);
+	RECT margins = GetWindowMargins(GUI.hWnd, width);
+	SetWindowPos(GUI.hWnd, NULL, 0, 0,
+		width + margins.left + margins.right,
+		client.bottom + margins.top + margins.bottom,
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	return (true);
 }
 
 void WinDeleteRecentGamesList ()
@@ -13791,6 +13838,39 @@ void SelectOutputMethodInVideoDropdown(HWND hDlg, OutputMethod method)
 	}
 }
 
+// The widescreen choice: None, then each width the table has for the loaded
+// game. False when the game has none, and the choice is not offered.
+static bool WinFillWidescreenChoice (HWND hDlg)
+{
+	const SWidescreenGame *rows[8];
+	const int n = S9xWidescreenVariants(rows, 8);
+
+	SendDlgItemMessage(hDlg, IDC_WIDESCREEN, CB_RESETCONTENT, 0, 0);
+	SendDlgItemMessage(hDlg, IDC_WIDESCREEN, CB_ADDSTRING, 0, (LPARAM)TEXT("None"));
+	int current = 0;
+	for (int i = 0; i < n; i++)
+	{
+		SendDlgItemMessageA(hDlg, IDC_WIDESCREEN, CB_ADDSTRING, 0, (LPARAM)rows[i]->Name);
+		if (Settings.Widescreen.Mode != WS_MODE_OFF && rows[i]->Aspect == Settings.Widescreen.Aspect)
+			current = i + 1;
+	}
+	SendDlgItemMessage(hDlg, IDC_WIDESCREEN, CB_SETCURSEL, (WPARAM)current, 0);
+	return (n > 0);
+}
+
+// The choice into Settings: the switch, and the width as columns a side.
+static void WinTakeWidescreenChoice (HWND hDlg)
+{
+	const SWidescreenGame *rows[8];
+	const int n = S9xWidescreenVariants(rows, 8);
+	const int sel = (int)SendDlgItemMessage(hDlg, IDC_WIDESCREEN, CB_GETCURSEL, 0, 0);
+
+	Settings.Widescreen.Mode = (sel > 0 && sel <= n) ? WS_MODE_ON : WS_MODE_OFF;
+	if (sel > 0 && sel <= n)
+		Settings.Widescreen.Aspect = rows[sel - 1]->Aspect;
+	S9xUpdateWidescreen();
+}
+
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	int index;
@@ -13802,6 +13882,8 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 	// temporary GUI state for restoring after previewing while selecting options
 	static int prevScale, prevScaleHiRes, prevPPL, prevGBFrameBlend, prevGBFrameBlendLayer, prevGBFrameBlendAuto;
 	static bool prevStretch, prevAspectRatio, prevHeightExtend, prevAutoDisplayMessages, prevBilinearFilter, prevShaderEnabled, prevBlendHires, prevIntegerScaling, prevNTSCScanlines;
+	static uint8 prevWidescreen;
+	static uint16 prevWidescreenAspect;
 	static int prevAspectWidth;
 	static OutputMethod prevOutputMethod;
 	static TCHAR prevD3DShaderFile[MAX_PATH],prevOGLShaderFile[MAX_PATH];
@@ -13822,6 +13904,7 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         CreateToolTip(IDC_HIRES, hDlg, TEXT("Support the hi-res mode that a few games use, otherwise render them in low-res"));
         CreateToolTip(IDC_HEIGHT_EXTEND, hDlg, TEXT("Display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240"));
         CreateToolTip(IDC_MESSAGES_IN_IMAGE, hDlg, TEXT("Draw text inside the SNES image (will get into AVIs, screenshots, and filters)"));
+        CreateToolTip(IDC_WIDESCREEN, hDlg, TEXT("Apply the built-in widescreen patch to this game at the selected width. The patch is applied in memory only, and the game restarts. Available for supported games only"));
 		CreateToolTip(IDC_MESSAGES_SCALE, hDlg, TEXT("Try to scale messages with EPX instead of Simple, only works for 2x and 3x and when displaying after filters"));
 
         prevOutputMethod = GUI.outputMethod;
@@ -13838,6 +13921,8 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         prevShaderEnabled = GUI.shaderEnabled;
         prevBlendHires = GUI.BlendHiRes;
 		prevNTSCScanlines = GUI.NTSCScanlines;
+		prevWidescreen = Settings.Widescreen.Mode;
+		prevWidescreenAspect = Settings.Widescreen.Aspect;
 		prevGBFrameBlend = Settings.GBFrameBlend;
 		prevGBFrameBlendLayer = Settings.GBFrameBlendLayer;
 		prevGBFrameBlendAuto = Settings.GBFrameBlendAuto;
@@ -13865,6 +13950,12 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
         if (GUI.BlendHiRes)
             SendDlgItemMessage(hDlg, IDC_HIRESBLEND, BM_SETCHECK, (WPARAM)BST_CHECKED, 0);
+        // Only a game with a widescreen hack in the table is offered the choice.
+        {
+            const bool wide = WinFillWidescreenChoice(hDlg);
+            ShowWindow(GetDlgItem(hDlg, IDC_WIDESCREEN_GROUP), wide ? SW_SHOW : SW_HIDE);
+            ShowWindow(GetDlgItem(hDlg, IDC_WIDESCREEN), wide ? SW_SHOW : SW_HIDE);
+        }
         SendDlgItemMessage(hDlg, IDC_BLEND_GB_FRAMES, CB_RESETCONTENT, 0, 0);
         SendDlgItemMessage(hDlg, IDC_BLEND_GB_FRAMES, CB_ADDSTRING, 0, (LPARAM)TEXT("Off"));
         SendDlgItemMessage(hDlg, IDC_BLEND_GB_FRAMES, CB_ADDSTRING, 0, (LPARAM)TEXT("Simple Blend"));
@@ -14136,6 +14227,11 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			WinRefreshDisplay();
 			break;
 
+		case IDC_WIDESCREEN:
+			// Nothing to preview: the width only means anything with the cart
+			// that goes with it, and OK loads that cart.
+			break;
+
 		case IDC_BLEND_GB_FRAMES:
 			if (HIWORD(wParam) == CBN_SELCHANGE)
 			{
@@ -14340,6 +14436,7 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
  			Settings.Transparency = IsDlgButtonChecked(hDlg, IDC_TRANS);
 			Settings.BilinearFilter = (bool)(IsDlgButtonChecked(hDlg,IDC_BILINEAR)==BST_CHECKED);
 			Settings.ShowOverscan = IsDlgButtonChecked(hDlg, IDC_HEIGHT_EXTEND)!=0;
+			WinTakeWidescreenChoice(hDlg);
 			GUI.DoubleBuffered = (bool)(IsDlgButtonChecked(hDlg, IDC_DBLBUFFER)==BST_CHECKED);
 			GUI.ReduceInputLag = (bool)(IsDlgButtonChecked(hDlg, IDC_REDUCEINPUTLAG) == BST_CHECKED);
 			GUI.Vsync = (bool)(IsDlgButtonChecked(hDlg, IDC_VSYNC
@@ -14444,6 +14541,9 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				GUI.shaderEnabled = prevShaderEnabled;
 				GUI.BlendHiRes = prevBlendHires;
 				GUI.NTSCScanlines = prevNTSCScanlines;
+				Settings.Widescreen.Mode = prevWidescreen;
+				Settings.Widescreen.Aspect = prevWidescreenAspect;
+				S9xUpdateWidescreen();
 				Settings.GBFrameBlend = prevGBFrameBlend;
 				Settings.GBFrameBlendLayer = prevGBFrameBlendLayer;
 				Settings.GBFrameBlendAuto = prevGBFrameBlendAuto;

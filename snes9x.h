@@ -16,6 +16,7 @@
 #include "port.h"
 #include "65c816.h"
 #include "messages.h"
+#include "widescreen.h"
 
 #ifdef ZLIB
 #include <zlib.h>
@@ -58,7 +59,11 @@
 #define SNES_WIDTH					256
 #define SNES_HEIGHT					224
 #define SNES_HEIGHT_EXTENDED		239
-#define MAX_SNES_WIDTH				(SNES_WIDTH * 2)
+// Widescreen renders further left and right than the SNES ever scanned out,
+// so every buffer sized off MAX_SNES_WIDTH has to hold the widest picture the
+// renderer can produce: the extension on both sides, doubled for hires.
+#define MAX_WS_EXTENT				128
+#define MAX_SNES_WIDTH				((SNES_WIDTH + 2 * MAX_WS_EXTENT) * 2)
 #define MAX_SNES_HEIGHT				(SNES_HEIGHT_EXTENDED * 2)
 
 #define	NTSC_MASTER_CLOCK			21477272.727272 // 21477272 + 8/11 exact
@@ -288,6 +293,10 @@ struct SSettings
 	uint8	BG_Forced;
 	bool8	DisableGraphicWindows;
 	uint16  ForcedBackdrop;
+
+	// The user's widescreen settings, the switch over the loaded hack's row;
+	// the renderer reads the combination, the global Widescreen.
+	struct SWidescreen	Widescreen;
 
 	bool8	DisplayTime;
 	bool8	DisplayFrameRate;

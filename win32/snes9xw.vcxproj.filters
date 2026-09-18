@@ -536,6 +536,9 @@
     <ClCompile Include="..\gfx.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
+    <ClCompile Include="..\widescreen.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
     <ClCompile Include="..\globals.cpp">
       <Filter>Emu</Filter>
     </ClCompile>

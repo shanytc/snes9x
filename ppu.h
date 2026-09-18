@@ -55,6 +55,10 @@ struct InternalPPU
 	uint16	ScreenColors[256];
 	uint8	MaxBrightness;
 	bool8	RenderThisFrame;
+	// Columns drawn past each edge of the SNES's own 256 for the frame being
+	// rendered; 0 when widescreen is off. Latched once per frame so the
+	// picture cannot change shape halfway down it.
+	int		WideExtent;
 	int		RenderedScreenWidth;
 	int		RenderedScreenHeight;
 	uint32	FrameCount;
@@ -198,6 +202,13 @@ struct SPPU
 extern uint16				SignExtend[2];
 extern struct SPPU			PPU;
 extern struct InternalPPU	IPPU;
+
+// Width of the picture being rendered, in SNES pixels: the hardware's 256
+// plus whatever widescreen is adding on either side.
+static inline int S9xWideWidth (void)
+{
+	return (SNES_WIDTH + 2 * IPPU.WideExtent);
+}
 
 void S9xResetPPU (void);
 void S9xResetPPUFast (void);

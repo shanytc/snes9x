@@ -2095,6 +2095,7 @@ void S9xSoftResetPPU (void)
 		IPPU.ScreenColors[c] = c;
 	IPPU.MaxBrightness = 0;
 	IPPU.RenderThisFrame = TRUE;
+	IPPU.WideExtent = 0;
 	IPPU.RenderedScreenWidth = SNES_WIDTH;
 	IPPU.RenderedScreenHeight = SNES_HEIGHT;
 	IPPU.FrameCount = 0;

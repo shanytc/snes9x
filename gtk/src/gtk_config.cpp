@@ -210,6 +210,7 @@ int Snes9xConfig::load_defaults()
     Settings.AutoSaveDelay = 0;
     Settings.SkipFrames = THROTTLE_TIMER_FRAMESKIP;
     Settings.Transparency = true;
+    S9xSetWidescreenDefaults(&Settings.Widescreen);
     // Draw messages into the SNES image (pixel font) instead of the on-screen
     // overlay, so they also land in screenshots, AVIs and the XV/Cairo drivers.
     Settings.AutoDisplayMessages = false;
@@ -297,6 +298,7 @@ int Snes9xConfig::save_config_file()
     outbool("ScaleToFit", scale_to_fit, "Scale the image to fit the window size");
     outbool("ShowOverscanArea", overscan, "Show the overscan area at the top and bottom that most games hide");
     outbool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
+    outint("Widescreen", Settings.Widescreen.Mode != WS_MODE_OFF ? Settings.Widescreen.Aspect : 0, "Widescreen width for supported games, in extra columns per side: 0 (none), 48 (352 wide, 16:9), 64 (384, 2:1), 96 (448, experimental), 112 (480, experimental). The patch is applied in memory only");
     outbool("MessagesInImage", Settings.AutoDisplayMessages, "Draw messages inside the SNES image (they get into AVIs, screenshots and filters) instead of the on-screen overlay");
     outbool("MaintainAspectRatio", maintain_aspect_ratio, "Resize the screen to the proportions set by aspect ratio option");
     outbool("Multithreading", multithreading, "Apply filters using multiple threads");
@@ -566,6 +568,11 @@ int Snes9xConfig::load_config_file()
     inint("ScanlineFilterIntensity", scanline_filter_intensity);
     inbool("ShowOverscanArea", overscan);
     inbool("BlendHiRes", blend_hires);
+    int widescreen = 0;
+    inint("Widescreen", widescreen);
+    Settings.Widescreen.Mode = widescreen ? WS_MODE_ON : WS_MODE_OFF;
+    if (widescreen)
+        Settings.Widescreen.Aspect = widescreen;
     inbool("MessagesInImage", Settings.AutoDisplayMessages);
     inint("HiresEffect", hires_effect);
     inbool("ForceInvertedByteOrder", force_inverted_byte_order);
@@ -800,6 +807,8 @@ int Snes9xConfig::load_config_file()
     }
 
     /* Validation */
+
+    S9xUpdateWidescreen();
 
     if (RemoveSpriteLimit)
         Settings.MaxSpriteTilesPerLine = 128;

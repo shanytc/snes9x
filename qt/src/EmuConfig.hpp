@@ -96,6 +96,8 @@ struct EmuConfig
     // frames before the software filter ("Blend Hi-Res Images").
     bool transparency_effects;
     bool blend_hires;
+    // Widescreen for a supported game, as extra columns per side; 0 is none.
+    int widescreen;
     enum HighResolutionEffect
     {
         eLeaveAlone = 0,

@@ -857,7 +857,7 @@ void Emulator::Reset()
 	// hardware). Applied after the run-mode block so it wins for CGB carts.
 	// DMG-compat mode (non-CGB cart forced onto CGB hardware) hands off
 	// DE=$0008 HL=$007C instead (Pan Docs power-up sequence).
-	if (impl_->cgb_mode && !impl_->boot_rom_loaded)
+	if (impl_->CgbActive() && !impl_->boot_rom_loaded)
 	{
 		cs.r.af = 0x1180;
 		cs.r.bc = 0x0000;

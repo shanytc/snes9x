@@ -71,6 +71,10 @@ public:
     explicit DefaultBackground(QWidget *parent)
         : QWidget(parent)
     {
+        QPalette p;
+        for (auto i = 0; i < QPalette::NColorRoles; i++)
+            p.setColor(QPalette::ColorGroup::All, (QPalette::ColorRole)i, Qt::black);
+        setPalette(p);
     }
 
     void paintEvent(QPaintEvent *event) override
@@ -85,7 +89,7 @@ public:
     }
 };
 
-EmuMainWindow::EmuMainWindow(EmuApplication *app)
+EmuMainWindow::EmuMainWindow(EmuApplication &app)
     : app(app)
 {
     createWidgets();
@@ -95,7 +99,7 @@ EmuMainWindow::EmuMainWindow(EmuApplication *app)
     applyAlwaysOnTop();
     applyResizeLock();
 
-    app->qtapp->installEventFilter(this);
+    app.qtapp->installEventFilter(this);
     mouse_timer.setTimerType(Qt::CoarseTimer);
     mouse_timer.setInterval(1000);
     mouse_timer.callOnTimeout([&] {
@@ -126,71 +130,57 @@ void EmuMainWindow::destroyCanvas()
 bool EmuMainWindow::createCanvas()
 {
     auto fallback = [this]() -> bool {
-        std::string failed = app->config->display_driver;
+        std::string failed = app.config->display_driver;
         std::string next = (failed == "vulkan") ? "opengl" : "qt";
         QMessageBox::warning(
             this, tr("Unable to Start Display Driver"),
             tr("Unable to create a %1 context. Attempting to use %2.")
                 .arg(QString::fromUtf8(failed))
                 .arg(QString::fromUtf8(next)));
-        app->config->display_driver = next;
+        app.config->display_driver = next;
         return createCanvas();
     };
 
-    if (app->config->display_driver != "vulkan" &&
-        app->config->display_driver != "opengl" &&
-        app->config->display_driver != "qt")
-        app->config->display_driver = "qt";
+    if (app.config->display_driver != "vulkan" &&
+        app.config->display_driver != "opengl" &&
+        app.config->display_driver != "qt")
+        app.config->display_driver = "qt";
 
 #ifdef __APPLE__
     // macOS has no native Vulkan; the driver is not built on this platform.
-    if (app->config->display_driver == "vulkan")
-        app->config->display_driver = "opengl";
+    if (app.config->display_driver == "vulkan")
+        app.config->display_driver = "opengl";
 #endif
 
-    if (app->config->display_driver == "vulkan")
+    // The accelerated canvases build their context in the constructor and throw
+    // when it fails, so that throw is what drives the fallback chain.
+    try
     {
+        if (app.config->display_driver == "vulkan")
+        {
 #ifndef __APPLE__
-        canvas = new EmuCanvasVulkan(app->config.get(), this);
-        QGuiApplication::processEvents();
-        if (!canvas->createContext())
-        {
-            delete canvas;
-            return fallback();
-        }
+            canvas = new EmuCanvasVulkan(app, this);
 #endif
+        }
+        else if (app.config->display_driver == "opengl")
+        {
+            canvas = new EmuCanvasOpenGL(app, this);
+        }
+        else
+        {
+            app.config->display_driver = "qt";
+            canvas = new EmuCanvasQt(app, this);
+        }
     }
-    else if (app->config->display_driver == "opengl")
+    catch (const std::exception &)
     {
-        canvas = new EmuCanvasOpenGL(app->config.get(), this);
-        QGuiApplication::processEvents();
-#ifdef __APPLE__
-        // -[NSOpenGLContext setView:] is main-thread only, so the context is
-        // built here and simply made current on the emulation thread later.
-        if (!canvas->createContext())
-        {
-            delete canvas;
-            return fallback();
-        }
-#else
-        // The call blocks, so context_created is safely written before the
-        // check below runs. A false result (e.g. Wayland on a Qt build older
-        // than 6.5, or broken GL drivers) falls back to the software driver
-        // instead of leaving a dead canvas that crashes on first use.
-        bool context_created = false;
-        app->emu_thread->runOnThread([&] { context_created = canvas->createContext(); }, true);
-        if (!context_created)
-        {
-            delete canvas;
-            return fallback();
-        }
-#endif
+        // A constructor that threw already freed its own object.
+        canvas = nullptr;
+        return fallback();
     }
-    else
-        canvas = new EmuCanvasQt(app->config.get(), this);
 
     setCentralWidget(canvas);
-    
+
     if (QGuiApplication::platformName() == "wayland")
     {
         // Qt 6.10+ has a bug with delayed widget repositioning, causing us to get
@@ -209,11 +199,11 @@ void EmuMainWindow::recreateCanvas()
     if (!canvas)
         return;
 
-    app->suspendThread();
+    app.suspendThread();
     destroyCanvas();
     createCanvas();
 
-    app->unsuspendThread();
+    app.unsuspendThread();
     updateShaderSettingsItem();
 }
 
@@ -237,17 +227,17 @@ void EmuMainWindow::setGBBootPolicy(int policy)
     // it chosen while the file still says 5 or 6.
     const bool changed = (Settings.GBBootPolicy != (uint8_t) policy);
     Settings.GBBootPolicy       = (uint8_t) policy;
-    app->config->gb_boot_policy = Settings.GBBootPolicy;
+    app.config->gb_boot_policy = Settings.GBBootPolicy;
     if (changed)
         openFile(std::string(Settings.GBRomPath));
 }
 
 void EmuMainWindow::openBiosManager()
 {
-    BiosManagerDialog dialog(this, app);
+    BiosManagerDialog dialog(this, &app);
     if (dialog.exec() != QDialog::Accepted)
         return;
-    app->config->saveFile(EmuConfig::findConfigFile());
+    app.config->saveFile(EmuConfig::findConfigFile());
     // The running cart keeps the BIOS it was loaded against until a hard reset
     // or the next load - these paths are only read by a load. What changes now
     // is which Game Boy Model entries are selectable.
@@ -264,7 +254,7 @@ void EmuMainWindow::powerCycle()
     if (S9xBiosChangedSinceLoad() && !path.empty())
         openFile(path);
     else
-        app->powerCycle();
+        app.powerCycle();
 }
 
 void EmuMainWindow::refreshBiosMenu()
@@ -328,7 +318,7 @@ void EmuMainWindow::voicekunAttach()
     if (S9xVoiceKunAttached())
         return;
 
-    app->pause();
+    app.pause();
 
     QFileDialog dialog(this, tr("Attach Audio CD (.cue or .zip)"));
     dialog.setFileMode(QFileDialog::ExistingFile);
@@ -336,7 +326,7 @@ void EmuMainWindow::voicekunAttach()
 
     if (!dialog.exec() || dialog.selectedFiles().empty())
     {
-        app->unpause();
+        app.unpause();
         return;
     }
 
@@ -356,7 +346,7 @@ void EmuMainWindow::voicekunAttach()
             tr("This audio CD was not accepted:\n%1").arg(S9xVoiceKunLastError()));
     }
 
-    app->unpause();
+    app.unpause();
 }
 
 void EmuMainWindow::voicekunDetach()
@@ -388,7 +378,7 @@ QIcon EmuMainWindow::logoIcon(int index)
 
 void EmuMainWindow::applyWindowIcon()
 {
-    int index = clampLogoIndex(app->config->window_icon);
+    int index = clampLogoIndex(app.config->window_icon);
     // Icon 1 is the stock look, so an icon theme that ships its own snes9x
     // icon still wins there, as it always has.
     if (index == 1)
@@ -400,19 +390,19 @@ void EmuMainWindow::applyWindowIcon()
 void EmuMainWindow::chooseWindowIcon(int index)
 {
     index = clampLogoIndex(index);
-    if (index == clampLogoIndex(app->config->window_icon))
+    if (index == clampLogoIndex(app.config->window_icon))
         return;
-    app->config->window_icon = index;
+    app.config->window_icon = index;
     applyWindowIcon();
-    app->config->saveFile(EmuConfig::findConfigFile());
-    if (app->config->write_icon_to_launcher)
+    app.config->saveFile(EmuConfig::findConfigFile());
+    if (app.config->write_icon_to_launcher)
         syncLauncherIcon();
 }
 
 void EmuMainWindow::setWriteIconToLauncher(bool enabled)
 {
-    app->config->write_icon_to_launcher = enabled;
-    app->config->saveFile(EmuConfig::findConfigFile());
+    app.config->write_icon_to_launcher = enabled;
+    app.config->saveFile(EmuConfig::findConfigFile());
     syncLauncherIcon();
 }
 
@@ -431,13 +421,13 @@ void EmuMainWindow::syncLauncherIcon()
     };
     std::string error;
     bool ok;
-    if (!app->config->write_icon_to_launcher)
+    if (!app.config->write_icon_to_launcher)
     {
         ok = XdgAppIcon::Restore(launcher_icon_name, entry, error);
     }
     else
     {
-        int index = clampLogoIndex(app->config->window_icon);
+        int index = clampLogoIndex(app.config->window_icon);
         std::vector<XdgAppIcon::Image> images;
         for (int size : logo_sizes)
         {
@@ -467,7 +457,7 @@ void EmuMainWindow::createWidgets()
                           sizeof(cornerPref));
 #endif
 
-    auto iconset = app->iconPrefix();
+    auto iconset = app.iconPrefix();
 
     // File menu
     auto file_menu = new QMenu(tr("&File"));
@@ -497,13 +487,13 @@ void EmuMainWindow::createWidgets()
 
             auto action = load_bank_menu->addAction(tr("Slot &%1").arg(slot));
             connect(action, &QAction::triggered, [&, index] {
-                app->loadState(index);
+                app.loadState(index);
             });
             core_actions.push_back(action);
 
             action = save_bank_menu->addAction(tr("Slot &%1").arg(slot));
             connect(action, &QAction::triggered, [&, index] {
-                app->saveState(index);
+                app.saveState(index);
             });
             core_actions.push_back(action);
         }
@@ -521,7 +511,7 @@ void EmuMainWindow::createWidgets()
 
     auto load_state_undo_item = load_state_menu->addAction(QIcon(iconset + "refresh.svg"), tr("&Undo Load State"));
     connect(load_state_undo_item, &QAction::triggered, [&] {
-        app->loadUndoState();
+        app.loadUndoState();
     });
     core_actions.push_back(load_state_undo_item);
 
@@ -554,31 +544,31 @@ void EmuMainWindow::createWidgets()
 
     auto save_spc_item = save_other_menu->addAction(tr("Save &SPC Data"));
     connect(save_spc_item, &QAction::triggered, [&] {
-        app->saveSPC();
+        app.saveSPC();
     });
     core_actions.push_back(save_spc_item);
 
     auto save_screenshot_item = save_other_menu->addAction(tr("Save S&creenshot"));
     connect(save_screenshot_item, &QAction::triggered, [&] {
-        app->takeScreenshot();
+        app.takeScreenshot();
     });
     core_actions.push_back(save_screenshot_item);
 
     auto save_sram_item = save_other_menu->addAction(tr("Save S-&RAM Data"));
     connect(save_sram_item, &QAction::triggered, [&] {
-        app->saveSRAM();
+        app.saveSRAM();
     });
     core_actions.push_back(save_sram_item);
 
     auto save_mempack_item = save_other_menu->addAction(tr("Save &Memory Pack"));
     connect(save_mempack_item, &QAction::triggered, [&] {
-        app->saveMemoryPack();
+        app.saveMemoryPack();
     });
     core_actions.push_back(save_mempack_item);
     // Only BS-X and Sufami-style multicarts carry a memory pack, so re-check
     // each time the submenu opens (the game may have changed since).
     connect(save_other_menu, &QMenu::aboutToShow, this, [this, save_mempack_item] {
-        save_mempack_item->setEnabled(app->isCoreActive() && app->hasMemoryPack());
+        save_mempack_item->setEnabled(app.isCoreActive() && app.hasMemoryPack());
     });
 
     file_menu->addMenu(save_other_menu);
@@ -605,7 +595,7 @@ void EmuMainWindow::createWidgets()
 
     movie_stop_action = file_menu->addAction(tr("Movie &Stop"));
     connect(movie_stop_action, &QAction::triggered, [&] {
-        app->stopMovie();
+        app.stopMovie();
     });
     core_actions.push_back(movie_stop_action);
 
@@ -619,8 +609,8 @@ void EmuMainWindow::createWidgets()
     core_actions.push_back(avi_recording_action);
 
     connect(file_menu, &QMenu::aboutToShow, this, [this] {
-        movie_stop_action->setEnabled(app->isCoreActive() && app->isMovieActive());
-        avi_recording_action->setText(app->isAVIRecording() ? tr("Stop &AVI Recording")
+        movie_stop_action->setEnabled(app.isCoreActive() && app.isMovieActive());
+        avi_recording_action->setText(app.isAVIRecording() ? tr("Stop &AVI Recording")
                                                             : tr("Start &AVI Recording..."));
     });
 
@@ -650,9 +640,9 @@ void EmuMainWindow::createWidgets()
     });
 #endif
     connect(icon_menu, &QMenu::aboutToShow, this, [this, icon_actions, launcher_action] {
-        icon_actions[clampLogoIndex(app->config->window_icon) - 1]->setChecked(true);
+        icon_actions[clampLogoIndex(app.config->window_icon) - 1]->setChecked(true);
         if (launcher_action)
-            launcher_action->setChecked(app->config->write_icon_to_launcher);
+            launcher_action->setChecked(app.config->write_icon_to_launcher);
     });
     file_menu->addMenu(icon_menu);
     file_menu->addSeparator();
@@ -668,10 +658,10 @@ void EmuMainWindow::createWidgets()
             auto action = language_menu->addAction(lang.name);
             action->setCheckable(true);
             action->setActionGroup(language_group);
-            action->setChecked(code.toStdString() == app->config->language);
+            action->setChecked(code.toStdString() == app.config->language);
             connect(action, &QAction::triggered, this, [this, code] {
-                app->config->language = code.toStdString();
-                app->config->saveFile(EmuConfig::findConfigFile());
+                app.config->language = code.toStdString();
+                app.config->saveFile(EmuConfig::findConfigFile());
                 QMessageBox::information(
                     this, tr("Language"),
                     tr("The language change will take effect after you restart SuperSnes9x."));
@@ -697,7 +687,7 @@ void EmuMainWindow::createWidgets()
         if (manual_pause)
         {
             manual_pause = false;
-            app->unpause();
+            app.unpause();
         }
     });
     core_actions.push_back(run_item);
@@ -707,7 +697,7 @@ void EmuMainWindow::createWidgets()
         if (!manual_pause)
         {
             manual_pause = true;
-            app->pause();
+            app.pause();
         }
     });
     core_actions.push_back(pause_item);
@@ -716,11 +706,11 @@ void EmuMainWindow::createWidgets()
 
     auto reset_item = emulation_menu->addAction(QIcon(iconset + "refresh.svg"), tr("Rese&t"));
     connect(reset_item, &QAction::triggered, [&] {
-        app->reset();
+        app.reset();
         if (manual_pause)
         {
             manual_pause = false;
-            app->unpause();
+            app.unpause();
         }
     });
     core_actions.push_back(reset_item);
@@ -731,7 +721,7 @@ void EmuMainWindow::createWidgets()
         if (manual_pause)
         {
             manual_pause = false;
-            app->unpause();
+            app.unpause();
         }
     });
     core_actions.push_back(hard_reset_item);
@@ -741,7 +731,7 @@ void EmuMainWindow::createWidgets()
     auto cheats_item = emulation_menu->addAction(tr("&Cheats"));
     connect(cheats_item, &QAction::triggered, [&] {
         if (!cheats_dialog)
-            cheats_dialog = std::make_unique<CheatsDialog>(this, app);
+            cheats_dialog = std::make_unique<CheatsDialog>(this, &app);
         cheats_dialog->show();
     });
     core_actions.push_back(cheats_item);
@@ -761,8 +751,8 @@ void EmuMainWindow::createWidgets()
         action->setCheckable(true);
         run_ahead_group->addAction(action);
         connect(action, &QAction::triggered, [&, i] {
-            app->config->run_ahead_frames = i;
-            app->updateSettings();
+            app.config->run_ahead_frames = i;
+            app.updateSettings();
         });
         run_ahead_actions.push_back(action);
     }
@@ -770,7 +760,7 @@ void EmuMainWindow::createWidgets()
     // The Emulation settings panel can also change the value, so sync the
     // check state whenever the menu opens.
     connect(emulation_menu, &QMenu::aboutToShow, this, [this, run_ahead_actions] {
-        int n = app->config->run_ahead_frames;
+        int n = app.config->run_ahead_frames;
         n = n < 0 ? 0 : (n > 4 ? 4 : n);
         run_ahead_actions[n]->setChecked(true);
     });
@@ -856,7 +846,7 @@ void EmuMainWindow::createWidgets()
         item->setCheckable(true);
         const char *command = toggle.command;
         connect(item, &QAction::triggered, this, [this, command](bool checked) {
-            app->applyGraphicsCommand(command);
+            app.applyGraphicsCommand(command);
         });
         graphics_toggle_actions.push_back(item);
     }
@@ -871,7 +861,7 @@ void EmuMainWindow::createWidgets()
             graphics_toggle_actions[i]->setChecked(!(Settings.BG_Forced & (1 << i)));
         graphics_toggle_actions[5]->setChecked(!Settings.DisableGraphicWindows);
         // Nothing here reaches a Game Boy picture: the S-PPU is not drawing it.
-        sppu_menu_action->setEnabled(app->isCoreActive() && !S9xContentIsGameBoy());
+        sppu_menu_action->setEnabled(app.isCoreActive() && !S9xContentIsGameBoy());
     });
 
     menuBar()->addMenu(emulation_menu);
@@ -885,13 +875,13 @@ void EmuMainWindow::createWidgets()
     auto input_configuration_item = input_menu->addAction(QIcon(iconset + "joypad.svg"), tr("&Input Configuration..."));
     QObject::connect(input_configuration_item, &QAction::triggered, [&] {
         if (!g_emu_settings_window)
-            g_emu_settings_window = new EmuSettingsWindow(this, app);
+            g_emu_settings_window = new EmuSettingsWindow(this, &app);
         g_emu_settings_window->show(4);
     });
     auto customize_hotkeys_item = input_menu->addAction(QIcon(iconset + "keyboard.svg"), tr("&Customize Hotkeys..."));
     QObject::connect(customize_hotkeys_item, &QAction::triggered, [&] {
         if (!g_emu_settings_window)
-            g_emu_settings_window = new EmuSettingsWindow(this, app);
+            g_emu_settings_window = new EmuSettingsWindow(this, &app);
         g_emu_settings_window->show(5);
     });
 
@@ -901,9 +891,9 @@ void EmuMainWindow::createWidgets()
     // effects to the port-1 gamepad.
     auto rumble_item = input_menu->addAction(tr("Enable &Rumble (Shake)"));
     rumble_item->setCheckable(true);
-    rumble_item->setChecked(app->config->enable_rumble);
+    rumble_item->setChecked(app.config->enable_rumble);
     QObject::connect(rumble_item, &QAction::triggered, [&](bool checked) {
-        app->config->enable_rumble = checked;
+        app.config->enable_rumble = checked;
     });
 
     input_menu->addSeparator();
@@ -915,7 +905,7 @@ void EmuMainWindow::createWidgets()
         auto action = menu->addAction(text);
         action->setCheckable(true);
         QObject::connect(action, &QAction::triggered, [&, configuration] {
-            app->setPortConfiguration(configuration);
+            app.setPortConfiguration(configuration);
             updatePortConfigurationMenu();
         });
         port_configuration_actions[configuration] = action;
@@ -929,7 +919,7 @@ void EmuMainWindow::createWidgets()
     superscope_crosshair_action = superscope_menu->addAction(tr("Show &Crosshair"));
     superscope_crosshair_action->setCheckable(true);
     QObject::connect(superscope_crosshair_action, &QAction::triggered, [&](bool checked) {
-        app->setSuperScopeCrosshairVisible(checked);
+        app.setSuperScopeCrosshairVisible(checked);
     });
 
     add_device_item(input_menu, EmuConfig::eMultitap5, tr("Use Super Multi&tap (5-player)"));
@@ -957,19 +947,19 @@ void EmuMainWindow::createWidgets()
         action->setCheckable(true);
         action->setChecked(true);
         connect(action, &QAction::triggered, [&, i](bool checked) {
-            uint8_t mask = app->getSoundChannelMask();
+            uint8_t mask = app.getSoundChannelMask();
             if (checked)
                 mask |= 1 << i;
             else
                 mask &= ~(1 << i);
-            app->setSoundChannelMask(mask);
+            app.setSoundChannelMask(mask);
         });
         channel_actions[i] = action;
     }
     channels_menu->addSeparator();
     auto enable_all_channels_item = channels_menu->addAction(tr("Enable All"));
     connect(enable_all_channels_item, &QAction::triggered, [&] {
-        app->enableAllSoundChannels();
+        app.enableAllSoundChannels();
     });
     core_actions.push_back(sound_menu->addMenu(channels_menu));
 
@@ -979,8 +969,8 @@ void EmuMainWindow::createWidgets()
     auto mute_item = sound_menu->addAction(tr("&Mute"));
     mute_item->setCheckable(true);
     connect(mute_item, &QAction::triggered, [&](bool checked) {
-        app->config->mute_audio = checked;
-        app->updateSettings();
+        app.config->mute_audio = checked;
+        app.updateSettings();
     });
 
     sound_menu->addSeparator();
@@ -997,7 +987,7 @@ void EmuMainWindow::createWidgets()
     auto sound_settings_item = sound_menu->addAction(QIcon(iconset + "sound.svg"), tr("&Settings..."));
     connect(sound_settings_item, &QAction::triggered, [&] {
         if (!g_emu_settings_window)
-            g_emu_settings_window = new EmuSettingsWindow(this, app);
+            g_emu_settings_window = new EmuSettingsWindow(this, &app);
         g_emu_settings_window->show(2); // the Sound panel
     });
 
@@ -1017,7 +1007,7 @@ void EmuMainWindow::createWidgets()
             if (i >= 4)
                 channel_actions[i]->setEnabled(!gb_only);
         }
-        mute_item->setChecked(app->config->mute_audio);
+        mute_item->setChecked(app.config->mute_audio);
         waveform_item->setChecked(audio_waveform_window != nullptr);
     });
 
@@ -1030,14 +1020,14 @@ void EmuMainWindow::createWidgets()
     auto always_on_top_item = view_menu->addAction(tr("Always on &Top"));
     always_on_top_item->setCheckable(true);
     connect(always_on_top_item, &QAction::triggered, [&](bool checked) {
-        app->config->always_on_top = checked;
+        app.config->always_on_top = checked;
         applyAlwaysOnTop();
     });
 
     auto lock_resize_item = view_menu->addAction(tr("&Lock Screen Resize"));
     lock_resize_item->setCheckable(true);
     connect(lock_resize_item, &QAction::triggered, [&](bool checked) {
-        app->config->lock_screen_resize = checked;
+        app.config->lock_screen_resize = checked;
         applyResizeLock();
     });
 
@@ -1070,14 +1060,14 @@ void EmuMainWindow::createWidgets()
 
     auto color_correction_item = view_menu->addAction(tr("&Color Correction..."));
     connect(color_correction_item, &QAction::triggered, [&] {
-        ColorCorrectionDialog dialog(app, this);
+        ColorCorrectionDialog dialog(&app, this);
         dialog.exec();
     });
 
     connect(view_menu, &QMenu::aboutToShow, this,
             [this, always_on_top_item, lock_resize_item, set_size_actions] {
-        always_on_top_item->setChecked(app->config->always_on_top);
-        lock_resize_item->setChecked(app->config->lock_screen_resize);
+        always_on_top_item->setChecked(app.config->always_on_top);
+        lock_resize_item->setChecked(app.config->lock_screen_resize);
         // Tick the Set Size the window currently has. Measured off the window
         // rather than remembered, so dragging the frame to any other size, or
         // loading content whose picture is a different size, simply leaves
@@ -1114,7 +1104,7 @@ void EmuMainWindow::createWidgets()
         auto action = options_menu->addAction(QIcon(iconset + setting_icons[i]), setting_panels[i]);
         QObject::connect(action, &QAction::triggered, [&, i] {
             if (!g_emu_settings_window)
-                g_emu_settings_window = new EmuSettingsWindow(this, app);
+                g_emu_settings_window = new EmuSettingsWindow(this, &app);
             g_emu_settings_window->show(i);
         });
     }
@@ -1135,17 +1125,17 @@ void EmuMainWindow::createWidgets()
 
     ra_enabled_action = ra_menu->addAction(tr("&Enabled"));
     ra_enabled_action->setCheckable(true);
-    ra_enabled_action->setChecked(app->config->ra_enabled);
+    ra_enabled_action->setChecked(app.config->ra_enabled);
     connect(ra_enabled_action, &QAction::triggered, [&](bool checked) {
-        app->config->ra_enabled = checked;
-        app->config->saveFile(EmuConfig::findConfigFile());
+        app.config->ra_enabled = checked;
+        app.config->saveFile(EmuConfig::findConfigFile());
         RA_SetEnabled(checked);
         if (checked)
         {
-            RA_Qt_RegisterCallbacks(app);
+            RA_Qt_RegisterCallbacks(&app);
             RA_Init();
-            RA_AttemptLogin(app->config->ra_username.c_str(), app->config->ra_api_token.c_str());
-            if (app->isCoreActive())
+            RA_AttemptLogin(app.config->ra_username.c_str(), app.config->ra_api_token.c_str());
+            if (app.isCoreActive())
                 RA_OnLoadROM();
         }
         else
@@ -1156,7 +1146,7 @@ void EmuMainWindow::createWidgets()
 
     ra_login_action = ra_menu->addAction(tr("&Login..."));
     connect(ra_login_action, &QAction::triggered, [&] {
-        RA_Qt_RegisterCallbacks(app);
+        RA_Qt_RegisterCallbacks(&app);
         RA_Init();
         if (RA_IsLoggedIn())
         {
@@ -1171,9 +1161,9 @@ void EmuMainWindow::createWidgets()
 
     ra_hardcore_action = ra_menu->addAction(tr("&Hardcore Mode"));
     ra_hardcore_action->setCheckable(true);
-    ra_hardcore_action->setChecked(app->config->ra_hardcore_mode);
+    ra_hardcore_action->setChecked(app.config->ra_hardcore_mode);
     connect(ra_hardcore_action, &QAction::triggered, [&](bool checked) {
-        app->config->ra_hardcore_mode = checked;
+        app.config->ra_hardcore_mode = checked;
         RA_SetHardcoreEnabled(checked);
     });
 
@@ -1201,11 +1191,11 @@ void EmuMainWindow::createWidgets()
     });
 
     connect(ra_menu, &QMenu::aboutToShow, [this] {
-        bool enabled = app->config->ra_enabled;
+        bool enabled = app.config->ra_enabled;
         ra_enabled_action->setChecked(enabled);
         ra_login_action->setEnabled(enabled);
         ra_hardcore_action->setEnabled(enabled);
-        ra_achievements_action->setEnabled(enabled && app->isCoreActive() && RA_IsLoggedIn());
+        ra_achievements_action->setEnabled(enabled && app.isCoreActive() && RA_IsLoggedIn());
         ra_view_profile_action->setEnabled(enabled && RA_IsLoggedIn());
     });
 
@@ -1217,7 +1207,7 @@ void EmuMainWindow::createWidgets()
 
     auto kaillera_connect_action = netplay_menu->addAction(tr("Kaillera &Netplay..."));
     connect(kaillera_connect_action, &QAction::triggered, [&] {
-        Kaillera_Qt_RegisterCallbacks(app);
+        Kaillera_Qt_RegisterCallbacks(&app);
         Kaillera_Qt_ShowConnectDialog();
     });
 
@@ -1225,7 +1215,7 @@ void EmuMainWindow::createWidgets()
     kaillera_host_action->setCheckable(true);
     kaillera_host_action->setChecked(KailleraServerIsRunning());
     connect(kaillera_host_action, &QAction::triggered, [&] {
-        Kaillera_Qt_RegisterCallbacks(app);
+        Kaillera_Qt_RegisterCallbacks(&app);
         Kaillera_Qt_ShowHostDialog();
         kaillera_host_action->setChecked(KailleraServerIsRunning());
     });
@@ -1249,8 +1239,8 @@ void EmuMainWindow::createWidgets()
 
     setCoreActionsEnabled(false);
 
-    if (app->config->main_window_width != 0 && app->config->main_window_height != 0)
-        resize(app->config->main_window_width, app->config->main_window_height);
+    if (app.config->main_window_width != 0 && app.config->main_window_height != 0)
+        resize(app.config->main_window_width, app.config->main_window_height);
 
     setCentralWidget(new DefaultBackground(this));
 }
@@ -1261,10 +1251,10 @@ QSize EmuMainWindow::sizeForMultiple(int multiple)
     // 160x144 steps rather than the SNES's, in the shape that content is held
     // to -- a window sized from the menu then has no bars.
     int content_height;
-    S9xGetContentSize(app->config->show_overscan, nullptr, &content_height);
+    S9xGetContentSize(app.config->show_overscan, nullptr, &content_height);
 
     int num, den;
-    S9xQtDisplayAspect(app->config.get(), &num, &den);
+    S9xQtDisplayAspect(app.config.get(), &num, &den);
 
     double hidpi_height = content_height / devicePixelRatioF();
     return { (int)((hidpi_height * multiple) * num / den),
@@ -1293,7 +1283,7 @@ int EmuMainWindow::currentSizeMultiple()
 // every programmatic resize has to set the new size as the fixed one.
 void EmuMainWindow::resizeLocked(const QSize &size)
 {
-    if (app->config->lock_screen_resize && !isFullScreen())
+    if (app.config->lock_screen_resize && !isFullScreen())
         setFixedSize(size);
     else
         resize(size);
@@ -1311,7 +1301,7 @@ void EmuMainWindow::resizeToMultiple(int multiple)
  */
 void EmuMainWindow::applyAlwaysOnTop()
 {
-    bool on = app->config->always_on_top;
+    bool on = app.config->always_on_top;
 
     if (windowFlags().testFlag(Qt::WindowStaysOnTopHint) == on)
         return;
@@ -1333,10 +1323,10 @@ void EmuMainWindow::applyAlwaysOnTop()
  */
 void EmuMainWindow::applyResizeLock()
 {
-    if (app->config->lock_screen_resize && !isFullScreen())
+    if (app.config->lock_screen_resize && !isFullScreen())
     {
-        QSize windowed(app->config->main_window_width,
-                       app->config->main_window_height);
+        QSize windowed(app.config->main_window_width,
+                       app.config->main_window_height);
         setFixedSize(windowed.isEmpty() ? size() : windowed);
         return;
     }
@@ -1353,7 +1343,7 @@ void EmuMainWindow::setBypassCompositor(bool bypass)
     if (QGuiApplication::platformName() == "xcb")
     {
         uint32_t value = bypass;
-        auto iface = app->qtapp->nativeInterface<QNativeInterface::QX11Application>();
+        auto iface = app.qtapp->nativeInterface<QNativeInterface::QX11Application>();
         auto display = iface->display();
         auto xid = winId();
         Atom net_wm_bypass_compositor = XInternAtom(display, "_NET_WM_BYPASS_COMPOSITOR", False);
@@ -1365,32 +1355,32 @@ void EmuMainWindow::setBypassCompositor(bool bypass)
 /* win32's "Save/Load with Preview": pick a slot from a thumbnail grid. */
 void EmuMainWindow::statePreviewDialog(bool save)
 {
-    if (!app->isCoreActive())
+    if (!app.isCoreActive())
         return;
 
-    app->pause();
+    app.pause();
 
-    StatePreviewDialog dialog(app, this, save);
+    StatePreviewDialog dialog(&app, this, save);
     int slot = dialog.exec() ? dialog.selection() : -1;
 
     if (slot >= 0)
     {
         if (save)
-            app->saveState(slot);
+            app.saveState(slot);
         else
-            app->loadState(slot);
+            app.loadState(slot);
     }
 
-    app->unpause();
+    app.unpause();
 }
 
 void EmuMainWindow::chooseState(bool save)
 {
-    app->pause();
+    app.pause();
 
     QFileDialog dialog(this, tr("Choose a State File"));
 
-    dialog.setDirectory(QString::fromStdString(app->getStateFolder()));
+    dialog.setDirectory(QString::fromStdString(app.getStateFolder()));
     dialog.setNameFilters({ tr("Save States (*.sst *.oops *.undo *.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9*)"), tr("All Files (*)") });
 
     if (!save)
@@ -1403,82 +1393,82 @@ void EmuMainWindow::chooseState(bool save)
 
     if (!dialog.exec() || dialog.selectedFiles().empty())
     {
-        app->unpause();
+        app.unpause();
         return;
     }
 
     auto filename = dialog.selectedFiles()[0];
 
     if (!save)
-        app->loadState(filename.toStdString());
+        app.loadState(filename.toStdString());
     else
-        app->saveState(filename.toStdString());
+        app.saveState(filename.toStdString());
 
-    app->unpause();
+    app.unpause();
 }
 
 void EmuMainWindow::playMovieDialog()
 {
-    if (!app->isCoreActive())
+    if (!app.isCoreActive())
         return;
 #ifdef RETROACHIEVEMENTS_SUPPORT
     if (!RA_WarnDisableHardcore("Movie playback"))
         return;
 #endif
 
-    app->pause();
+    app.pause();
 
-    PlayMovieDialog dialog(app, this);
+    PlayMovieDialog dialog(&app, this);
     if (dialog.exec() && !dialog.path().empty())
     {
-        app->config->movie_default_read_only = dialog.readOnly();
-        int result = app->playMovie(dialog.path(), dialog.readOnly());
+        app.config->movie_default_read_only = dialog.readOnly();
+        int result = app.playMovie(dialog.path(), dialog.readOnly());
         if (result != SUCCESS)
             QMessageBox::warning(this, tr("Play Movie"), movieErrorString(result, false));
     }
 
-    app->unpause();
+    app.unpause();
 }
 
 void EmuMainWindow::recordMovieDialog()
 {
-    if (!app->isCoreActive())
+    if (!app.isCoreActive())
         return;
 #ifdef RETROACHIEVEMENTS_SUPPORT
     if (!RA_WarnDisableHardcore("Movie recording"))
         return;
 #endif
 
-    app->pause();
+    app.pause();
 
     // Written out first so the dialog can tell whether there is a battery
     // save that "Clear SRAM" would remove, as win32 does.
-    bool sram_exists = app->movieSRAMExists();
+    bool sram_exists = app.movieSRAMExists();
 
-    RecordMovieDialog dialog(app, this, sram_exists);
+    RecordMovieDialog dialog(&app, this, sram_exists);
     if (dialog.exec() && !dialog.path().empty())
     {
-        int result = app->recordMovie(dialog.path(), dialog.controllersMask(),
+        int result = app.recordMovie(dialog.path(), dialog.controllersMask(),
                                       dialog.fromReset(), dialog.clearSRAM(), dialog.metadata());
         if (result != SUCCESS)
             QMessageBox::warning(this, tr("Record Movie"), movieErrorString(result, false));
     }
 
-    app->unpause();
+    app.unpause();
 }
 
 void EmuMainWindow::toggleAVIRecording()
 {
-    if (!app->isCoreActive())
+    if (!app.isCoreActive())
         return;
 
-    if (app->isAVIRecording())
+    if (app.isAVIRecording())
     {
-        app->stopAVIRecording();
+        app.stopAVIRecording();
         return;
     }
 
-    app->pause();
+    app.pause();
 
     QFileDialog dialog(this, tr("Record AVI"));
     dialog.setFileMode(QFileDialog::AnyFile);
@@ -1491,19 +1481,19 @@ void EmuMainWindow::toggleAVIRecording()
     if (dialog.exec() && !dialog.selectedFiles().empty())
     {
         std::string error;
-        if (!app->startAVIRecording(dialog.selectedFiles()[0].toStdString(), error))
+        if (!app.startAVIRecording(dialog.selectedFiles()[0].toStdString(), error))
             QMessageBox::warning(this, tr("Record AVI"), QString::fromStdString(error));
     }
 
-    app->unpause();
+    app.unpause();
 }
 
 void EmuMainWindow::openFile()
 {
-    app->pause();
+    app.pause();
     QFileDialog dialog(this, tr("Open a ROM File"));
     dialog.setFileMode(QFileDialog::ExistingFile);
-    dialog.setDirectory(QString::fromStdString(app->config->last_rom_folder));
+    dialog.setDirectory(QString::fromStdString(app.config->last_rom_folder));
     // .gb/.gbc route into the SGB subsystem in CMemory::LoadROM, and .sgb (plus
     // any GB dump under a foreign extension) is caught by the Nintendo-logo
     // content sniff, so Game Boy carts belong in the dialog alongside SNES ones.
@@ -1514,15 +1504,15 @@ void EmuMainWindow::openFile()
 
     if (!dialog.exec() || dialog.selectedFiles().empty())
     {
-        app->unpause();
+        app.unpause();
         return;
     }
 
     auto filename = dialog.selectedFiles()[0];
-    app->config->last_rom_folder = dialog.directory().canonicalPath().toStdString();
+    app.config->last_rom_folder = dialog.directory().canonicalPath().toStdString();
 
     openFile(filename.toStdString());
-    app->unpause();
+    app.unpause();
 }
 
 // An MSU-1 pack handed over as a plain .zip can't work: LoadZip() picks the
@@ -1570,7 +1560,7 @@ std::string EmuMainWindow::promptRenameMSU1Pack(const std::string &filename)
     }
 
     // the .zip is gone now, so don't leave it behind in the recent list
-    auto &ru = app->config->recently_used;
+    auto &ru = app.config->recently_used;
     ru.erase(std::remove(ru.begin(), ru.end(), filename), ru.end());
 
     return renamed.toStdString();
@@ -1580,16 +1570,16 @@ bool EmuMainWindow::openFile(const std::string &original_filename)
 {
     auto filename = promptRenameMSU1Pack(original_filename);
 
-    if (app->openFile(filename))
+    if (app.openFile(filename))
     {
-        auto &ru = app->config->recently_used;
+        auto &ru = app.config->recently_used;
         auto it = std::ranges::find(ru, filename);
         if (it != ru.end())
             ru.erase(it);
         ru.insert(ru.begin(), filename);
         populateRecentlyUsed();
         setCoreActionsEnabled(true);
-        if (!isFullScreen() && app->config->fullscreen_on_open)
+        if (!isFullScreen() && app.config->fullscreen_on_open)
             toggleFullscreen();
 
         if (!canvas)
@@ -1598,7 +1588,7 @@ bool EmuMainWindow::openFile(const std::string &original_filename)
         updateShaderSettingsItem();
 
         QApplication::sync();
-        app->startGame();
+        app.startGame();
         mouse_timer.start();
         return true;
     }
@@ -1610,19 +1600,19 @@ void EmuMainWindow::populateRecentlyUsed()
 {
     recent_menu->clear();
 
-    if (app->config->recently_used.empty())
+    if (app.config->recently_used.empty())
     {
         auto action = recent_menu->addAction(tr("No recent files"));
         action->setDisabled(true);
         return;
     }
 
-    while (app->config->recently_used.size() > 10)
-        app->config->recently_used.pop_back();
+    while (app.config->recently_used.size() > 10)
+        app.config->recently_used.pop_back();
 
-    for (int i = 0; i < app->config->recently_used.size(); i++)
+    for (int i = 0; i < app.config->recently_used.size(); i++)
     {
-        auto &string = app->config->recently_used[i];
+        auto &string = app.config->recently_used[i];
         auto action = recent_menu->addAction(QString("&%1: %2")
             .arg(i)
             .arg(QDir::toNativeSeparators(QString::fromStdString(string))));
@@ -1634,7 +1624,7 @@ void EmuMainWindow::populateRecentlyUsed()
     recent_menu->addSeparator();
     auto action = recent_menu->addAction(tr("Clear Recent Files"));
     connect(action, &QAction::triggered, [&] {
-        app->config->recently_used.clear();
+        app.config->recently_used.clear();
         populateRecentlyUsed();
     });
 }
@@ -1646,14 +1636,14 @@ bool EmuMainWindow::event(QEvent *event)
     switch (event->type())
     {
     case QEvent::Close:
-        app->suspendThread();
+        app.suspendThread();
         if (isFullScreen())
         {
             toggleFullscreen();
         }
         QGuiApplication::processEvents();
         QGuiApplication::sync();
-        app->stopThread();
+        app.stopThread();
         if (canvas)
             canvas->deinit();
         QGuiApplication::sync();
@@ -1662,8 +1652,8 @@ bool EmuMainWindow::event(QEvent *event)
     case QEvent::Resize:
         if (!isFullScreen() && !isMaximized())
         {
-            app->config->main_window_width = ((QResizeEvent *)event)->size().width();
-            app->config->main_window_height = ((QResizeEvent *)event)->size().height();
+            app.config->main_window_width = ((QResizeEvent *)event)->size().width();
+            app.config->main_window_height = ((QResizeEvent *)event)->size().height();
         }
         break;
     case QEvent::WindowActivate:
@@ -1683,12 +1673,12 @@ bool EmuMainWindow::event(QEvent *event)
         if (!(scevent->oldState() & Qt::WindowMinimized) && windowState() & Qt::WindowMinimized)
         {
             minimized_pause = true;
-            app->pause();
+            app.pause();
         }
         else if (minimized_pause && !(windowState() & Qt::WindowMinimized))
         {
             minimized_pause = false;
-            app->unpause();
+            app.unpause();
         }
 
         break;
@@ -1715,7 +1705,7 @@ bool EmuMainWindow::event(QEvent *event)
             break;
         }
         if (button)
-            app->reportMouseButton(button, event->type() == QEvent::MouseButtonPress);
+            app.reportMouseButton(button, event->type() == QEvent::MouseButtonPress);
         break;
     }
     case QEvent::MouseMove:
@@ -1726,7 +1716,7 @@ bool EmuMainWindow::event(QEvent *event)
             auto delta = pos - center;
             if (delta.x() == 0 && delta.y() == 0)
                 break;
-            app->reportPointer(delta.x(), delta.y());
+            app.reportPointer(delta.x(), delta.y());
             QCursor::setPos(center);
         }
         else if (gunAimsAtPointer())
@@ -1752,10 +1742,10 @@ void EmuMainWindow::toggleFullscreen()
 {
     if (isFullScreen())
     {
-        if (app->config->adjust_for_vrr)
+        if (app.config->adjust_for_vrr)
         {
-            app->config->setVRRConfig(false);
-            app->updateSettings();
+            app.config->setVRRConfig(false);
+            app.updateSettings();
         }
         setBypassCompositor(false);
         showNormal();
@@ -1766,10 +1756,10 @@ void EmuMainWindow::toggleFullscreen()
     }
     else
     {
-        if (app->config->adjust_for_vrr)
+        if (app.config->adjust_for_vrr)
         {
-            app->config->setVRRConfig(true);
-            app->updateSettings();
+            app.config->setVRRConfig(true);
+            app.updateSettings();
         }
         QCursor::setPos(mapToGlobal(rect().center()));
         setMinimumSize(0, 0);
@@ -1786,7 +1776,7 @@ bool EmuMainWindow::eventFilter(QObject *watched, QEvent *event)
     {
         if (event->type() == QEvent::Resize)
         {
-            app->emu_thread->runOnThread([&] {
+            app.emu_thread->runOnThread([&] {
                 canvas->resizeEvent((QResizeEvent *)event);
             }, true);
             event->accept();
@@ -1794,7 +1784,7 @@ bool EmuMainWindow::eventFilter(QObject *watched, QEvent *event)
         }
         else if (event->type() == QEvent::Paint)
         {
-            app->emu_thread->runOnThread([&] {
+            app.emu_thread->runOnThread([&] {
                 canvas->paintEvent((QPaintEvent *)event);
             }, true);
             event->accept();
@@ -1805,7 +1795,7 @@ bool EmuMainWindow::eventFilter(QObject *watched, QEvent *event)
     if (event->type() != QEvent::KeyPress && event->type() != QEvent::KeyRelease)
         return false;
 
-    if (watched != this && watched != canvas && !app->binding_callback)
+    if (watched != this && watched != canvas && !app.binding_callback)
         return false;
 
     auto key_event = (QKeyEvent *)event;
@@ -1828,9 +1818,9 @@ bool EmuMainWindow::eventFilter(QObject *watched, QEvent *event)
                                         key_event->modifiers().testFlag(Qt::ControlModifier),
                                         key_event->modifiers().testFlag(Qt::MetaModifier));
 
-    if ((app->isBound(binding) || app->binding_callback) && !key_event->isAutoRepeat())
+    if ((app.isBound(binding) || app.binding_callback) && !key_event->isAutoRepeat())
     {
-        app->reportBinding(binding, event->type() == QEvent::KeyPress);
+        app.reportBinding(binding, event->type() == QEvent::KeyPress);
         event->accept();
         return true;
     }
@@ -1850,19 +1840,19 @@ void EmuMainWindow::pauseContinue()
     if (manual_pause)
     {
         manual_pause = false;
-        app->unpause();
+        app.unpause();
     }
     else
     {
         manual_pause = true;
-        app->pause();
+        app.pause();
         canvas->paintEvent(nullptr);
     }
 }
 
 bool EmuMainWindow::isActivelyDrawing()
 {
-    return (!app->isPaused() && app->isCoreActive());
+    return (!app.isPaused() && app.isCoreActive());
 }
 
 void EmuMainWindow::output(uint8_t *buffer, int width, int height, QImage::Format format, int bytes_per_line, double frame_rate)
@@ -1873,7 +1863,7 @@ void EmuMainWindow::output(uint8_t *buffer, int width, int height, QImage::Forma
 
 void EmuMainWindow::recreateUIAssets()
 {
-    app->emu_thread->runOnThread([&] {
+    app.emu_thread->runOnThread([&] {
         if (canvas)
             canvas->recreateUIAssets();
     }, true);
@@ -1881,7 +1871,7 @@ void EmuMainWindow::recreateUIAssets()
 
 void EmuMainWindow::shaderChanged()
 {
-    app->emu_thread->runOnThread([&] {
+    app.emu_thread->runOnThread([&] {
         if (canvas)
             canvas->shaderChanged();
     });
@@ -1894,9 +1884,9 @@ void EmuMainWindow::updateShaderSettingsItem()
     // meaningless until a game is running (no canvas yet) with a preset
     // configured on a driver that can use one. The preset may still fail to
     // load; clicking then reports that instead of showing parameters.
-    bool shader_configured = app->config->use_shader &&
-                             !app->config->shader.empty() &&
-                             app->config->display_driver != "qt";
+    bool shader_configured = app.config->use_shader &&
+                             !app.config->shader.empty() &&
+                             app.config->display_driver != "qt";
     shader_settings_item->setEnabled(canvas != nullptr && shader_configured);
 }
 
@@ -1909,7 +1899,7 @@ void EmuMainWindow::gameChanging()
 void EmuMainWindow::showTileViewer()
 {
     if (!tile_viewer_window)
-        tile_viewer_window = new TileViewerWindow(this, app);
+        tile_viewer_window = new TileViewerWindow(this, &app);
     tile_viewer_window->show();
     tile_viewer_window->raise();
     tile_viewer_window->activateWindow();
@@ -1918,7 +1908,7 @@ void EmuMainWindow::showTileViewer()
 void EmuMainWindow::showTilemapViewer()
 {
     if (!tilemap_viewer_window)
-        tilemap_viewer_window = new TilemapViewerWindow(this, app);
+        tilemap_viewer_window = new TilemapViewerWindow(this, &app);
     tilemap_viewer_window->show();
     tilemap_viewer_window->raise();
     tilemap_viewer_window->activateWindow();
@@ -1927,7 +1917,7 @@ void EmuMainWindow::showTilemapViewer()
 void EmuMainWindow::showSpriteViewer()
 {
     if (!sprite_viewer_window)
-        sprite_viewer_window = new SpriteViewerWindow(this, app);
+        sprite_viewer_window = new SpriteViewerWindow(this, &app);
     sprite_viewer_window->show();
     sprite_viewer_window->raise();
     sprite_viewer_window->activateWindow();
@@ -1940,7 +1930,7 @@ void EmuMainWindow::toggleAudioWaveform()
         audio_waveform_window->close();
         return;
     }
-    audio_waveform_window = new AudioWaveformWindow(this, app);
+    audio_waveform_window = new AudioWaveformWindow(this, &app);
     audio_waveform_window->show();
 }
 
@@ -1951,26 +1941,26 @@ void EmuMainWindow::handleFocusChange(bool active)
         if (focus_pause)
         {
             focus_pause = false;
-            app->unpause();
+            app.unpause();
         }
         return;
     }
 
-    if (app->config->pause_emulation_when_unfocused && !focus_pause
+    if (app.config->pause_emulation_when_unfocused && !focus_pause
 #ifdef KAILLERA_SUPPORT
         && !KailleraClientIsPlaying()
 #endif
     )
     {
         focus_pause = true;
-        app->pause();
+        app.pause();
     }
 }
 
 bool EmuMainWindow::gunAimsAtPointer()
 {
-    return canvas && app->isCoreActive() &&
-           EmuConfig::portConfigurationUsesGun(app->config->port_configuration);
+    return canvas && app.isCoreActive() &&
+           EmuConfig::portConfigurationUsesGun(app.config->port_configuration);
 }
 
 void EmuMainWindow::reportGunAim(const QPoint &global_pos)
@@ -1984,10 +1974,10 @@ void EmuMainWindow::reportGunAim(const QPoint &global_pos)
         return;
 
     auto pos = canvas->mapFromGlobal(global_pos) * ratio;
-    int height = app->config->show_overscan ? 239 : 224;
+    int height = app.config->show_overscan ? 239 : 224;
     int x = (pos.x() - image.x()) * 256 / image.width();
     int y = (pos.y() - image.y()) * height / image.height();
-    app->reportPointerAbsolute(x, y);
+    app.reportPointerAbsolute(x, y);
 }
 
 void EmuMainWindow::updatePortConfigurationMenu()
@@ -1997,14 +1987,14 @@ void EmuMainWindow::updatePortConfigurationMenu()
         auto action = port_configuration_actions[i];
         if (!action)
             continue;
-        action->setChecked(app->config->port_configuration == i);
-        action->setEnabled(app->isPortConfigurationValid(i));
+        action->setChecked(app.config->port_configuration == i);
+        action->setEnabled(app.isPortConfigurationValid(i));
     }
 
     if (superscope_crosshair_action)
     {
-        superscope_crosshair_action->setChecked(app->config->superscope_crosshair_visible);
-        superscope_crosshair_action->setEnabled(app->config->port_configuration == EmuConfig::eSuperScope);
+        superscope_crosshair_action->setChecked(app.config->superscope_crosshair_visible);
+        superscope_crosshair_action->setEnabled(app.config->port_configuration == EmuConfig::eSuperScope);
     }
 }
 

@@ -11,6 +11,7 @@
 #endif
 
 #include <clocale>
+#include <cstring>
 #include <qnamespace.h>
 #include <QStyle>
 #include <QStyleHints>
@@ -153,15 +154,22 @@ int main(int argc, char *argv[])
     EmuApplication emu;
     emu.qtapp = std::make_unique<QApplication>(argc, argv);
 
+    // Upstream reads --dark off a QCommandLineParser; this port hands the
+    // command line to the core's own S9xParseArgs, so scan for it here.
+    bool force_dark = false;
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--dark") || !strcmp(argv[i], "-dark"))
+            force_dark = true;
+
     QGuiApplication::setDesktopFileName("super-snes9x-qt");
 
-    if (QApplication::platformName() == "windows")
+    if (QApplication::platformName() == "windows" || force_dark)
     {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-        if (QApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark)
+        if (QApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark || force_dark)
         {
 #else
-        if (false) {
+        if (force_dark) {
 #endif
             QApplication::setStyle("fusion");
 
@@ -217,7 +225,7 @@ int main(int argc, char *argv[])
         emu.qtapp->installTranslator(&translator);
 
     emu.input_manager = std::make_unique<SDLInputManager>();
-    emu.window = std::make_unique<EmuMainWindow>(&emu);
+    emu.window = std::make_unique<EmuMainWindow>(emu);
     emu.window->show();
 
     emu.updateBindings();

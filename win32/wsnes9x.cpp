@@ -14228,12 +14228,8 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			break;
 
 		case IDC_WIDESCREEN:
-			if (HIWORD(wParam) != CBN_SELCHANGE)
-				break;
-			WinTakeWidescreenChoice(hDlg);
-			// the picture changes shape, so the window has to follow it
-			WinDisplayApplyChanges();
-			WinRefreshDisplay();
+			// Nothing to preview: the width only means anything with the cart
+			// that goes with it, and OK loads that cart.
 			break;
 
 		case IDC_BLEND_GB_FRAMES:

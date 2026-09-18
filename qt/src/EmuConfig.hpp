@@ -96,11 +96,8 @@ struct EmuConfig
     // frames before the software filter ("Blend Hi-Res Images").
     bool transparency_effects;
     bool blend_hires;
-    // Draw the columns either side of the SNES's own 256 (widescreen.h), for a
-    // game the emulator has a hack for, patched in memory; nothing else is widened.
-    bool widescreen;
-    // Which of the hack's widths, as columns added on each side (48 = 352 wide).
-    int widescreen_columns;
+    // Widescreen for a supported game, as extra columns per side; 0 is none.
+    int widescreen;
     enum HighResolutionEffect
     {
         eLeaveAlone = 0,

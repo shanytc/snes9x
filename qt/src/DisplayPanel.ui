@@ -412,7 +412,7 @@ Output directly will cause the screen to change between the two modes and look w
           <item>
            <widget class="QComboBox" name="comboBox_widescreen">
             <property name="toolTip">
-             <string>Run this game as its widescreen hack at the chosen width, patched in memory. The game restarts. Shown only for games with a known hack.</string>
+             <string>Apply the built-in widescreen patch to this game at the selected width. The patch is applied in memory only, and the game restarts. Available for supported games only.</string>
             </property>
             <property name="whatsThis">
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The SNES scanned out 256 columns, but its backgrounds, Mode 7 matrix and sprites all carry on past them. Widescreen draws what was there.&lt;/p&gt;&lt;p&gt;Games that were not made for it would show artifacts at the edges, since they culled sprites and clamped scrolling there, so the choice is offered only for games the emulator has a widescreen hack for. Picking a width patches the cart in memory into that hack and restarts it; picking None puts the original cart back.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>

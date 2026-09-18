@@ -306,8 +306,7 @@ bool EmuConfig::setDefaults(int section)
         show_overscan = false;
         transparency_effects = true;
         blend_hires = true;
-        widescreen = false;
-        widescreen_columns = 48;
+        widescreen = 0;
         high_resolution_effect = eLeaveAlone;
 
         software_filter = {};
@@ -597,8 +596,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     Bool("ShowOverscan", show_overscan, "Show the overscan area at the top and bottom that most games hide");
     Bool("Transparency", transparency_effects, "Render the SNES colour-math/transparency effects (turn off only for troubleshooting)");
     Bool("BlendHiRes", blend_hires, "Horizontally blend hi-res (512-wide) frames so games that alternate columns for a transparency effect look as intended with filters that do not account for this");
-    Bool("Widescreen", widescreen, "Run a game that has a known widescreen hack as that hack, patched in memory. Other games are unaffected");
-    Int("WidescreenColumns", widescreen_columns, "The hack's width, as columns added on each side: 48 = 352 wide (16:9), 64 = 384 (2:1), 96 = 448 and 112 = 480 (both experimental)");
+    Int("Widescreen", widescreen, "Widescreen width for supported games, in extra columns per side: 0 (none), 48 (352 wide, 16:9), 64 (384, 2:1), 96 (448, experimental), 112 (480, experimental). The patch is applied in memory only");
     Enum("HighResolutionEffect", high_resolution_effect, { "LeaveAlone", "ScaleDown", "ScaleUp" }, "How to handle hi-res (512-wide) frames: LeaveAlone, ScaleDown, or ScaleUp");
 
     String("SoftwareFilter", software_filter, "Software scaling filter name, e.g. \"HQ2x\" or \"Blargg's NTSC (Composite)\"; empty means none");

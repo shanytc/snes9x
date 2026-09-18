@@ -556,7 +556,7 @@ static void ResetFrameTimer ();
 static bool LoadROM (const TCHAR *filename, const TCHAR *filename2 = NULL);
 static bool LoadROMMulti (const TCHAR *filename, const TCHAR *filename2);
 static bool ReloadLoadedGame ();
-static void WinFollowContentWidth ();
+static bool WinFollowContentWidth ();
 bool8 S9xLoadROMImage (const TCHAR *string);
 #ifdef NETPLAY_SUPPORT
 static void EnableServer (bool8 enable);
@@ -6830,16 +6830,15 @@ void WinApplyContentWindowSize()
 	const int  content = gb ? 1 : 0;
 
 	// The same console can come back wider or narrower, widescreen on or off.
-	static int sizedForColumns = 0;
 	const int  columns = gb ? 0 : S9xWidescreenColumns();
 	if (content == GUI.WindowSizedFor)
 	{
-		if (columns != sizedForColumns)
-			WinFollowContentWidth();
-		sizedForColumns = columns;
+		if (columns != GUI.WindowColumns && WinFollowContentWidth())
+			GUI.WindowColumns = columns;
 		return;
 	}
-	sizedForColumns = columns;
+	const int hadColumns = GUI.WindowColumns;
+	GUI.WindowColumns = 0;
 
 	RECT client;
 	GetClientRect(GUI.hWnd, &client);
@@ -6855,7 +6854,8 @@ void WinApplyContentWindowSize()
 		}
 		else
 		{
-			GUI.WindowSizeSnesW = client.right;
+			// In the SNES's own shape; a wide cart's window is that scaled.
+			GUI.WindowSizeSnesW = (int)((double)client.right * SNES_WIDTH / (SNES_WIDTH + 2 * hadColumns) + 0.5);
 			GUI.WindowSizeSnesH = client.bottom;
 		}
 	}
@@ -6895,16 +6895,16 @@ void WinApplyContentWindowSize()
 		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 
 	// A stored size is the SNES's own shape; a wide cart needs it wider.
-	if (columns)
-		WinFollowContentWidth();
+	if (columns && WinFollowContentWidth())
+		GUI.WindowColumns = columns;
 }
 
 // The widescreen switch changes the picture's width but not its height:
 // keep the zoom the window is at and let it grow or shrink sideways.
-static void WinFollowContentWidth ()
+static bool WinFollowContentWidth ()
 {
 	if (!GUI.hWnd || GUI.FullScreen || GUI.EmulatedFullscreen || IsZoomed(GUI.hWnd))
-		return;
+		return (false);
 
 	RECT client;
 	GetClientRect(GUI.hWnd, &client);
@@ -6912,7 +6912,7 @@ static void WinFollowContentWidth ()
 	unsigned int contentW, contentH;
 	WinGetContentSize(&contentW, &contentH);
 	if (client.bottom <= 0 || contentH == 0)
-		return;
+		return (false);
 
 	const int width = (int)((double)contentW * client.bottom / contentH + 0.5);
 	RECT margins = GetWindowMargins(GUI.hWnd, width);
@@ -6920,6 +6920,7 @@ static void WinFollowContentWidth ()
 		width + margins.left + margins.right,
 		client.bottom + margins.top + margins.bottom,
 		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	return (true);
 }
 
 void WinDeleteRecentGamesList ()
@@ -13903,7 +13904,7 @@ INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         CreateToolTip(IDC_HIRES, hDlg, TEXT("Support the hi-res mode that a few games use, otherwise render them in low-res"));
         CreateToolTip(IDC_HEIGHT_EXTEND, hDlg, TEXT("Display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240"));
         CreateToolTip(IDC_MESSAGES_IN_IMAGE, hDlg, TEXT("Draw text inside the SNES image (will get into AVIs, screenshots, and filters)"));
-        CreateToolTip(IDC_WIDESCREEN, hDlg, TEXT("Run this game as its widescreen hack at the chosen width, patched in memory. The game restarts. Shown only for games with a known hack"));
+        CreateToolTip(IDC_WIDESCREEN, hDlg, TEXT("Apply the built-in widescreen patch to this game at the selected width. The patch is applied in memory only, and the game restarts. Available for supported games only"));
 		CreateToolTip(IDC_MESSAGES_SCALE, hDlg, TEXT("Try to scale messages with EPX instead of Simple, only works for 2x and 3x and when displaying after filters"));
 
         prevOutputMethod = GUI.outputMethod;

@@ -630,6 +630,7 @@ void WinGBPaletteToText();
 void WinPreSave(ConfigFile& conf)
 {
 	WinGBPaletteToText();
+	GUI.WidescreenColumns = (Settings.Widescreen.Mode != WS_MODE_OFF) ? Settings.Widescreen.Aspect : 0;
 	strcpy(filterString, "output filter: ");
 	for(int i=0;i<NUM_FILTERS;i++)
 	{
@@ -731,6 +732,14 @@ void WinGBPaletteToText()
 void WinPostLoad(ConfigFile& conf)
 {
 	WinGBPaletteFromText();
+	S9xSetWidescreenDefaults(&Settings.Widescreen);
+	Settings.Widescreen.Mode = GUI.WidescreenColumns ? WS_MODE_ON : WS_MODE_OFF;
+	if (GUI.WidescreenColumns)
+		Settings.Widescreen.Aspect = GUI.WidescreenColumns;
+	// A file from before the shape was recorded: the window was last saved
+	// with whatever the option was.
+	if (GUI.WindowColumns < 0)
+		GUI.WindowColumns = GUI.WidescreenColumns;
 	int i;
 	if(Settings.DisplayPressedKeys) Settings.DisplayPressedKeys = 2;
 	for(i=0;i<8;i++) Joypad[i+8].Enabled = Joypad[i].Enabled;
@@ -905,14 +914,14 @@ void WinRegisterConfigItems()
 	AddStringC("OpenGL:OGLShader", GUI.OGLshaderFileName, MAX_PATH, "", "shader filename for OpenGL mode (bsnes-style XML shader or CG shader)");
 	AddBoolC("OpenGL:DisablePBOs", GUI.OGLdisablePBOs, true, "do not use PBOs in OpenGL mode, even if the video card supports them");
 	AddBoolC("ExtendHeight", Settings.ShowOverscan, false, "true to display an extra 15 pixels at the bottom, which few games use. Also increases AVI output size from 256x224 to 256x240.");
-	AddBoolC("Widescreen", Settings.Widescreen.Mode, false, "true to run a game that has a known widescreen hack as that hack, patched in memory. Other games are unaffected");
-	AddUIntC("WidescreenColumns", Settings.Widescreen.Aspect, 48, "the hack's width, as columns added on each side: 48 = 352 wide (16:9), 64 = 384 (2:1), 96 = 448 and 112 = 480 (both experimental)");
+	AddIntC("Widescreen", GUI.WidescreenColumns, 0, "widescreen width for supported games, in extra columns per side: 0 (none), 48 (352 wide, 16:9), 64 (384, 2:1), 96 (448, experimental), 112 (480, experimental); the patch is applied in memory only");
 	AddBoolC("AlwaysCenterImage", GUI.AlwaysCenterImage,false, "true to center the image even if larger than window");
 	AddIntC("Window:Width", GUI.window_size.right, 512, "256=1x, 512=2x, 768=3x, 1024=4x, etc. (usually)");
 	AddIntC("Window:Height", GUI.window_size.bottom, 448, "224=1x, 448=2x, 672=3x,  896=4x, etc. (usually)");
 	AddIntC("Window:Left", GUI.window_size.left, 0, "in pixels from left edge of screen");
 	AddIntC("Window:Top", GUI.window_size.top, 0, "in pixels from top edge of screen");
 	AddBool("Window:Maximized", GUI.window_maximized, false);
+	AddIntC("Window:Columns", GUI.WindowColumns, -1, "the shape Window:Width was saved in: 0 = the SNES's own 256 columns, else the widescreen columns per side it was widened for");
 	AddIntC("Window:SizedFor", GUI.WindowSizedFor, 0, "which console Window:Width/Height belongs to: 0=SNES, 1=Game Boy");
 	AddIntC("Window:SNESWidth", GUI.WindowSizeSnesW, 0, "client width the window returns to for SNES content (0 = keep the zoom it has)");
 	AddIntC("Window:SNESHeight", GUI.WindowSizeSnesH, 0, "client height for SNES content");

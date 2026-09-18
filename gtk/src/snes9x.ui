@@ -3700,7 +3700,7 @@
                                               <object class="GtkComboBoxText" id="widescreen">
                                                 <property name="visible">True</property>
                                                 <property name="can_focus">False</property>
-                                                <property name="tooltip_text" translatable="yes">Run this game as its widescreen hack at the chosen width, patched in memory. The game restarts. Shown only for games with a known hack.</property>
+                                                <property name="tooltip_text" translatable="yes">Apply the built-in widescreen patch to this game at the selected width. The patch is applied in memory only, and the game restarts. Available for supported games only.</property>
                                               </object>
                                               <packing>
                                                 <property name="expand">False</property>

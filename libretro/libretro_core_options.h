@@ -132,7 +132,7 @@ struct retro_core_option_definition option_defs_us[] = {
    {
       "snes9x_widescreen",
       "Widescreen",
-      "Run a game that has a known widescreen hack as that hack, patched in memory. Changing it restarts the game. Other games are unaffected.",
+      "Apply the built-in widescreen patch to supported games at the selected width. The patch is applied in memory only, and changing this option restarts the game. Unsupported games are unaffected.",
       {
          { "disabled", NULL },
          { "normal",   "Normal (16:9, 16:10)" },

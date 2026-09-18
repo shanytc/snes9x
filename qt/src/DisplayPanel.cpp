@@ -90,9 +90,7 @@ DisplayPanel::DisplayPanel(EmuApplication *app_)
     connect(comboBox_widescreen, &QComboBox::activated, [&](int index) {
         const SWidescreenGame *rows[8];
         const int n = S9xWidescreenVariants(rows, 8);
-        app->config->widescreen = (index > 0 && index <= n);
-        if (index > 0 && index <= n)
-            app->config->widescreen_columns = rows[index - 1]->Aspect;
+        app->config->widescreen = (index > 0 && index <= n) ? rows[index - 1]->Aspect : 0;
         app->updateSettings();
         // The widescreen choice swaps the cart for a game the table can patch.
         if (S9xWidescreenReloadNeeded())
@@ -316,7 +314,7 @@ void DisplayPanel::showEvent(QShowEvent *event)
         for (int i = 0; i < n; i++)
         {
             comboBox_widescreen->addItem(QString::fromUtf8(rows[i]->Name));
-            if (config->widescreen && rows[i]->Aspect == config->widescreen_columns)
+            if (rows[i]->Aspect == config->widescreen)
                 current = i + 1;
         }
         comboBox_widescreen->setCurrentIndex(current);

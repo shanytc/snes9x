@@ -367,6 +367,13 @@ struct sGUI {
 	// Settings.GBPalette as the config file carries it: one
 	// "RRGGBB,RRGGBB,RRGGBB,RRGGBB" per DMG palette register.
 	char GBPaletteText[3][64];
+
+	// Widescreen as the config file carries it: extra columns per side, 0 for none.
+	int WidescreenColumns;
+
+	// The columns the window is shaped for: 0 for the SNES's own 256, else a
+	// wide cart's, so the next load knows whether to reshape it.
+	int WindowColumns;
 };
 
 //TURBO masks

@@ -662,6 +662,15 @@ void HubWakeFF(int seat, uint8_t b, bool armed)
 	g_hub.wake_prev[seat] = b;
 }
 
+// A port is connected once its Game Boy answers a ping STAT byte with the
+// $88 ack, or the $AA that replaces it while player 1 asks to transmit.
+// Every DMG-07 game answers from a [88,88,RATE,SIZE] table; a console
+// echoing the wire or idling on its own byte is not in its link menu yet.
+bool HubPresenceAck(uint8_t b, bool armed)
+{
+	return armed && (b == 0x88 || b == 0xAA);
+}
+
 // A seat's answer landed: apply it to the byte it was for. Answers the
 // peer never sent (it flushed on a state load) are skipped past; answers
 // to bytes already skipped are stale and dropped.
@@ -688,11 +697,8 @@ void HubApplyRemoteReply(int ch, uint32_t seq, uint8_t data, bool supplied)
 
 	if (tag.presence_wire >= 0)
 	{
-		// Any non-idle reply means a console is plugged in and listening.
-		// Death Track's lobby gate needs the presence bits while a seat
-		// still only echoes its STAT; the $88 ack merely confirms it.
 		const uint8_t bit = static_cast<uint8_t>(1 << (5 + ch));
-		if (supplied && data != 0x00 && data != 0xFF)
+		if (HubPresenceAck(data, supplied))
 			g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
 		else
 			g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);
@@ -1151,10 +1157,8 @@ void HubInterpretLocal()
 
 			case 1:
 			case 2:
-				// Any non-idle reply counts as plugged in (the $88 ack
-				// only confirms it); $AA keeps player 1 counted while
-				// the train is still short.
-				if ((armed && b != 0x00 && b != 0xFF) || g_hub.begin_sync)
+				// $AA keeps player 1 counted while the train is still short.
+				if (HubPresenceAck(b, armed) || g_hub.begin_sync)
 					g_hub.status = static_cast<uint8_t>(g_hub.status | 0x10);
 				else
 					g_hub.status = static_cast<uint8_t>(g_hub.status & ~0x10);
@@ -1229,7 +1233,7 @@ void HubInterpretLocalSeats()
 		    (g_hub.prev_wire == 1 || g_hub.prev_wire == 2))
 		{
 			const uint8_t bit = static_cast<uint8_t>(1 << (4 + k));
-			if (armed && b != 0x00 && b != 0xFF)
+			if (HubPresenceAck(b, armed))
 				g_hub.status = static_cast<uint8_t>(g_hub.status | bit);
 			else
 				g_hub.status = static_cast<uint8_t>(g_hub.status & ~bit);

@@ -256,6 +256,10 @@ struct SSettings
 	bool8	GB_BIOSActive;       // runtime: the currently-loaded GB/GBC cart is booting through such a boot ROM
 	char	GB_BIOSPath[260];    // runtime: absolute path of the GB/GBC boot ROM in use (empty otherwise)
 	char	GBRomPath[260];      // runtime: path of the currently-loaded GB/GBC ROM (for BIOS-mode reload)
+	uint16	GBLinkPort;          // loopback port for the GB link cable (8765 = BGB's default)
+	bool8	GBLinkPeerInstance;  // runtime: launched as the auto-spawned second instance, so never spawns one itself
+	uint8	GBLinkPlayerIndex;   // 1..15, fixed for the process; players past the first get their own .sav and save states
+	char	GBSramPathOverride[260]; // runtime: battery file picked via File > Load S-RAM Data; saves go back to it. Empty = derive from the player index
 	bool8	MouseMaster;
 	bool8	SuperScopeMaster;
 	bool8	JustifierMaster;
@@ -409,7 +413,10 @@ enum
 	PAUSE_WINDOW_ICONISED		= (1 << 5),
 	PAUSE_RESTORE_GUI			= (1 << 6),
 	PAUSE_FREEZE_FILE			= (1 << 7),
-	PAUSE_SOUND_DIALOG			= (1 << 8)
+	PAUSE_SOUND_DIALOG			= (1 << 8),
+	// The linked instance paused, so this one holds with it: a Game Boy
+	// that stops answering reads to the other game as an unplugged cable.
+	PAUSE_LINK_PEER				= (1 << 9)
 };
 
 void S9xSetPause(uint32);

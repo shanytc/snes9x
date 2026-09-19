@@ -246,6 +246,8 @@ int Snes9xConfig::load_defaults()
     Settings.GBSuppressNRxGlitches = TRUE;
     Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
     
+    Settings.GBLinkPort = 8765;
+
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
     Settings.OneClockCycle = 6;
@@ -466,6 +468,7 @@ int Snes9xConfig::save_config_file()
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
     outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
     outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
+    outint("LinkPort", Settings.GBLinkPort, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
 
     section = "Input";
     outstring("ControllerOption", controller_option_names[controller_option],
@@ -746,6 +749,10 @@ int Snes9xConfig::load_config_file()
     inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
     inint("GBBootPolicy", Settings.GBBootPolicy);
     Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+
+    inint("LinkPort", Settings.GBLinkPort);
+    if (Settings.GBLinkPort == 0)
+        Settings.GBLinkPort = 8765;
 
     section = "Input";
 

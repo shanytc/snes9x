@@ -15,6 +15,7 @@
 #include "ppu.h"
 #include "gfx.h"
 #include "sgb/sgb.h"
+#include "sgb/gb_viewer.h"
 #include "sfcbox.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
@@ -38,15 +39,61 @@ void S9xMainLoop (void)
 			S9xMovieUpdate();
 		}
 
+		// A viewer window never emulates: it displays the frames its seat's
+		// core produced inside the master and publishes its joypad back.
+		if (S9xSGBViewerClientActive())
+		{
+			// 256x224 with the SGB border in BIOS-mode sessions, bare
+			// 160x144 otherwise.
+			int vw, vh;
+			S9xSGBViewerClientDims(&vw, &vh);
+			IPPU.RenderThisFrame = TRUE;
+			PPU.ScreenHeight     = vh;
+			S9xSGBViewerClientSetPad(MovieGetJoypad(0));
+			S9xStartScreenRefresh();
+			// After the refresh starts, which resets them to SNES sizes.
+			IPPU.RenderedScreenWidth  = vw;
+			IPPU.RenderedScreenHeight = vh;
+			S9xSGBViewerClientBlit(GFX.Screen, GFX.RealPPL);
+			S9xEndScreenRefresh();
+			S9xSyncSpeed();
+			CPU.Flags |= SCAN_KEYS_FLAG;
+			return;
+		}
+
+		const bool gb_split = S9xSGBSplitActive();
+		// Viewer-hosted sessions run the split engine but show only the
+		// master's own seat; the others render in their viewer windows.
+		const bool gb_quad  = gb_split && !S9xSGBViewerHostActive();
+
 		IPPU.RenderThisFrame      = !Settings.InRunAhead;
-		PPU.ScreenHeight          = SGB_GB_SCREEN_H;
-		IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
-		IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
+		PPU.ScreenHeight          = gb_quad ? S9xSGBSplitScreenHeight() : SGB_GB_SCREEN_H;
+		IPPU.RenderedScreenWidth  = gb_quad ? S9xSGBSplitScreenWidth()  : SGB_GB_SCREEN_W;
+		IPPU.RenderedScreenHeight = gb_quad ? S9xSGBSplitScreenHeight() : SGB_GB_SCREEN_H;
 
 		// Pipe the SNES controller 0 bitmask into the GB joypad. P6d's
 		// MLT_REQ handling reads from mlt_current_player; for now we
-		// only wire the first controller.
-		S9xSGBSetJoypad(MovieGetJoypad(0));
+		// only wire the first controller. Split-screen seats each read
+		// their own controller slot.
+		const bool local_pads = S9xSGBViewerHostLocalPads();
+		const uint16 pad1 = local_pads ? (uint16)MovieGetJoypad(0) : 0;
+		S9xSGBSetJoypad(pad1);
+		// Viewer sessions: one window = one player, a seat hears only its
+		// viewer. Split screen: all seats share this window's controllers.
+		// Faceball's 15-player mode: seats 5+ replay Joypad #5 on a delay.
+		if (gb_split)
+		{
+			S9xSGBSplitEchoPush(local_pads ? (uint16)MovieGetJoypad(4) : 0);
+			for (int p = 2; p <= S9xSGBSplitPlayers(); p++)
+			{
+				// Every seat plays its own joypad number, whether it is a
+				// tile in the split view or a window of its own.
+				uint16 pad;
+				if (p >= 5) pad = S9xSGBSplitEchoPad(p);
+				else        pad = (uint16)MovieGetJoypad(p - 1);
+				S9xSGBSplitSetJoypad(p, pad);
+			}
+		}
 
 		// Push timing knobs each frame so UI changes take effect live.
 		// Default GBClockMultiplier to 1.0 if it's been left at its
@@ -67,13 +114,26 @@ void S9xMainLoop (void)
 		// some host backends.
 		if (!Settings.InRunAhead)
 			S9xStartScreenRefresh();
-		S9xSGBRunFrame();
+		if (gb_split)
+			S9xSGBSplitRunFrame();
+		else
+			S9xSGBRunFrame();
 		if (!Settings.InRunAhead)
 		{
-			IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
-			IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
-			S9xSGBBlitScreenGB(GFX.Screen, GFX.RealPPL);
+			if (gb_quad)
+			{
+				IPPU.RenderedScreenWidth  = S9xSGBSplitScreenWidth();
+				IPPU.RenderedScreenHeight = S9xSGBSplitScreenHeight();
+				S9xSGBSplitBlitScreen(GFX.Screen, GFX.RealPPL);
+			}
+			else
+			{
+				IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
+				IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
+				S9xSGBBlitScreenGB(GFX.Screen, GFX.RealPPL);
+			}
 			S9xEndScreenRefresh();
+			if (gb_split) S9xSGBViewerHostPush();
 		}
 
 		// Drive the host audio callback to drain GB samples into the

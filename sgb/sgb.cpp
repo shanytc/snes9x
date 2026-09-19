@@ -4408,13 +4408,35 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	const size_t   size = prim.GetROMSize();
 	if (!rom || !size) return false;
 
+	// A seat is the same console the master is, so it boots like one: the
+	// master's staged boot ROM, staged again here because LoadROM's
+	// ColdReset is what maps it. The console override rides along - the
+	// boot ROM was picked DMG or CGB for the master, and a seat left on
+	// "auto" would derive the other one from the cart header. Under the
+	// SGB BIOS the master's boot is slaved to the SNES and the seats are
+	// held through it (SplitRunSeatsSlaved), so that mode keeps its
+	// boot-ROM-less seats.
+	const SGB::Emulator::Impl *pimpl = prim.DebugImpl();
+	const uint8_t *seat_boot      = nullptr;
+	size_t         seat_boot_size = 0;
+	if (!Settings.SGB_BIOSModeActive && pimpl->boot_rom_loaded &&
+	    pimpl->boot_rom_staging_size)
+	{
+		seat_boot      = pimpl->boot_rom_staging;
+		seat_boot_size = pimpl->boot_rom_staging_size;
+	}
+
 	for (int k = 0; k < players - 1; ++k)
 	{
 		std::unique_ptr<SGB::Emulator> core(new SGB::Emulator());
 		core->SetRunMode(prim.GetRunMode());
+		core->SetCgbOverride(pimpl->cgb_override);
+		core->SetForceModel(pimpl->force_model);
 		// Path deliberately empty: the core must not seed itself from the
 		// shared index-less .sav; each seat loads its own .savN below.
-		if (!core->Init() || !core->LoadROM(rom, size, nullptr))
+		if (!core->Init() ||
+		    (seat_boot && !core->LoadBootROM(seat_boot, seat_boot_size)) ||
+		    !core->LoadROM(rom, size, nullptr))
 		{
 			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
 			return false;

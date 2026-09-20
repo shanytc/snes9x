@@ -643,6 +643,11 @@ void Emulator::Deinit()
 	UnloadROM();
 }
 
+// Defined with the rest of the packet builders further down; Reset needs it
+// to colorize an authentic BIOS-less Super Game Boy at boot.
+namespace { inline void BuildSgbDefaultPalettePackets(uint8_t pal01[16],
+                                                      uint8_t pal23[16]); }
+
 void Emulator::ColdReset()
 {
 	// Clear the BIOS-handshake cache before delegating to Reset(). On a
@@ -750,6 +755,19 @@ void Emulator::Reset()
 		{
 			impl_->sgb_state.mlt_players = 2;
 			impl_->joypad.mlt_players    = 2;
+		}
+		// A real SGB colorizes at boot off the BIOS's own table, so a cart
+		// that sends no palette of its own still comes up in SGB colors
+		// rather than DMG greys. We have no table; the BIOS default for an
+		// unknown title is what it lands on.
+		if (impl_->sgb_authentic)
+		{
+			uint8_t pal01[16], pal23[16];
+			BuildSgbDefaultPalettePackets(pal01, pal23);
+			// Whole packet, byte 0 included: that is what the assembler
+			// hands the dispatcher, and HandlePal reads color 0 from [1].
+			OnSgbCommandInternal(0x00, pal01, 16);
+			OnSgbCommandInternal(0x01, pal23, 16);
 		}
 	}
 	MbcReset(impl_->cart.mbc);
@@ -1981,9 +1999,9 @@ void Emulator::RunCycles(int32_t tcycles)
 		}
 		else
 		{
-			OnSgbCommandInternal(0x00, &pal01[1],    14);
-			OnSgbCommandInternal(0x01, &pal23[1],    14);
-			OnSgbCommandInternal(0x04, &attr_blk[1], 14);
+			OnSgbCommandInternal(0x00, pal01,    16);
+			OnSgbCommandInternal(0x01, pal23,    16);
+			OnSgbCommandInternal(0x04, attr_blk, 16);
 		}
 	}
 
@@ -3733,7 +3751,11 @@ float Emulator::GetClockMultiplier() const  { return impl_->clock_mul; }
 
 Emulator &Instance()
 {
-	static Emulator g;
+	// One Game Boy per SNES: a seat running its own SGB BIOS drives its own
+	// core, not the master's. Heap-backed inside, so the per-machine cost is
+	// a pointer. Safe because win32 emulates on the GUI thread - the viewers
+	// and the split engine all reach this from the machine that owns it.
+	static S9X_MACHINE Emulator g;
 	return g;
 }
 
@@ -3760,6 +3782,38 @@ namespace {
 
 std::unique_ptr<SGB::Emulator> g_split_cores[SGB_MAX_LINK_PLAYERS - 1];
 int g_split_players = 0;   // seats including the primary; 0 = off
+
+// Per-seat Game Boy Model, read at session start (see S9xSGBSplitStart).
+// A seat on a model of its own is a different console on the cable, so it
+// runs BIOS-less semantics whatever the master is doing.
+uint8_t g_split_seat_model[SGB_MAX_LINK_PLAYERS - 1];
+bool    g_split_seat_model_init = false;
+
+void SeatModelInit()
+{
+	if (g_split_seat_model_init) return;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		g_split_seat_model[k] = SGB_SEAT_MODEL_MASTER;
+	g_split_seat_model_init = true;
+}
+
+// True while seat k (0-based) carries a model the master did not hand it.
+bool SeatOwnModel(int k)
+{
+	SeatModelInit();
+	return k >= 0 && k < SGB_MAX_LINK_PLAYERS - 1 &&
+	       g_split_seat_model[k] != SGB_SEAT_MODEL_MASTER;
+}
+
+// External seats: flagged before the session starts, core handed over once
+// that machine has loaded (see S9xSGBSplitSetExternalCore).
+bool           g_split_external[SGB_MAX_LINK_PLAYERS - 1] = {};
+SGB::Emulator *g_split_external_core[SGB_MAX_LINK_PLAYERS - 1] = {};
+
+bool SeatExternal(int k)
+{
+	return k >= 0 && k < SGB_MAX_LINK_PLAYERS - 1 && g_split_external[k];
+}
 
 // Each seat's last completed frame, lifted out at its VBlank inside the
 // lockstep loop. Cores then never park while others run — a parked seat
@@ -3879,13 +3933,25 @@ const uint8_t *SplitShadesAt(int i, int age, uint32_t *frame_no)
 	return g_split_snap_shades[i][h];
 }
 
+// Seat order is player order: an external seat whose machine has not loaded
+// yet holds its place as null so the cable index stays the player number.
 int SplitCollect(SGB::Emulator *out[SGB_MAX_LINK_PLAYERS])
 {
 	int n = 0;
 	out[n++] = &SGB::Instance();
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
-		if (g_split_cores[k]) out[n++] = g_split_cores[k].get();
+	{
+		if (g_split_cores[k])           out[n++] = g_split_cores[k].get();
+		else if (g_split_external[k])   out[n++] = g_split_external_core[k];
+	}
 	return n;
+}
+
+// Position i of a SplitCollect result is player i+1; true for a seat whose
+// Game Boy belongs to a machine of its own.
+bool SplitPosExternal(int i)
+{
+	return i >= 1 && SeatExternal(i - 1);
 }
 
 // Wire the cable across every live core. Session start and checkpoint
@@ -3898,6 +3964,11 @@ void SplitAttachLink(void)
 	const int n = SplitCollect(cs);
 	for (int i = 0; i < n; ++i)
 	{
+		// An external seat whose machine has not loaded yet has no core:
+		// the cable stays unplugged until every slot has one. Wiring the
+		// empty slot to the master's own port made the master its own link
+		// partner, and a transfer waited on itself forever.
+		if (!cs[i]) { SGB::SerialSplitDetach(); return; }
 		ss[i] = &cs[i]->DebugImpl()->serial;
 		mm[i] = &cs[i]->DebugImpl()->mem;
 	}
@@ -4426,16 +4497,51 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		seat_boot_size = pimpl->boot_rom_staging_size;
 	}
 
+	// A seat on a Game Boy Model of its own boots on that console's own boot
+	// ROM. BIOS mode holds the seats through the master's boot
+	// (SplitRunSeatsSlaved), so there they stay boot-ROM-less with the rest
+	// rather than come out of the hold a logo scroll behind.
+	SeatModelInit();
+	std::vector<uint8> own_boot[2];   // [0] Game Boy, [1] Color
+	if (!Settings.SGB_BIOSModeActive)
+		for (int k = 0; k < players - 1; ++k)
+		{
+			if (!SeatOwnModel(k) || SeatExternal(k)) continue;
+			const int c = (g_split_seat_model[k] == S9X_GBBOOT_GBC) ? 1 : 0;
+			if (own_boot[c].empty()) S9xGetGBBootROM(c != 0, own_boot[c]);
+		}
+
 	for (int k = 0; k < players - 1; ++k)
 	{
+		// An external seat's Game Boy lives in its own SNES machine; the
+		// place stays empty until that machine hands its core over.
+		if (SeatExternal(k)) { g_split_cores[k].reset(); continue; }
+
 		std::unique_ptr<SGB::Emulator> core(new SGB::Emulator());
-		core->SetRunMode(prim.GetRunMode());
-		core->SetCgbOverride(pimpl->cgb_override);
-		core->SetForceModel(pimpl->force_model);
+		const bool own     = SeatOwnModel(k);
+		const bool own_cgb = own && g_split_seat_model[k] == S9X_GBBOOT_GBC;
+		if (own)
+		{
+			// Its own console, so none of the master's: a plain Game Boy or
+			// Color, BIOS-less, however the master is running.
+			core->SetRunMode(SGB::RunMode::DMG);
+			core->SetCgbOverride(own_cgb ? 1 : 0);
+			core->SetForceModel(0);
+			core->DebugImpl()->host_bios_mode = 0;
+		}
+		else
+		{
+			core->SetRunMode(prim.GetRunMode());
+			core->SetCgbOverride(pimpl->cgb_override);
+			core->SetForceModel(pimpl->force_model);
+		}
+		const std::vector<uint8> &ob = own_boot[own_cgb ? 1 : 0];
+		const uint8_t *boot      = own ? (ob.empty() ? nullptr : ob.data()) : seat_boot;
+		const size_t   boot_size = own ? ob.size() : seat_boot_size;
 		// Path deliberately empty: the core must not seed itself from the
 		// shared index-less .sav; each seat loads its own .savN below.
 		if (!core->Init() ||
-		    (seat_boot && !core->LoadBootROM(seat_boot, seat_boot_size)) ||
+		    (boot && !core->LoadBootROM(boot, boot_size)) ||
 		    !core->LoadROM(rom, size, nullptr))
 		{
 			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
@@ -4454,7 +4560,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		// colors its own window off the packets that follow. Reset
 		// re-derives both - they are set here because the creation reset
 		// ran before sgb_feed said this core was a seat.
-		core->DebugImpl()->joypad.sgb_probe = Settings.SGB_BIOSModeActive;
+		core->DebugImpl()->joypad.sgb_probe = Settings.SGB_BIOSModeActive && !own;
 		// Only the primary is heard, so a seat's mixer output is dead
 		// work — 12.5% of the profile at fifteen seats.
 		core->DebugImpl()->apu.discard_output = true;
@@ -4493,7 +4599,11 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	S9xSGBSplitSaveBatteries(battery_base_path);
 	SGB::Instance().DebugImpl()->sgb_pkt.passive_commands = false;
 	SGB::SerialSplitDetach();
-	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k) g_split_cores[k].reset();
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		g_split_cores[k].reset();
+		g_split_external_core[k] = nullptr;   // the flag stays: it is the frontend's pick
+	}
 	SplitDropSnaps();
 	g_split_players = 0;
 	g_echo_frames   = 0;
@@ -4505,6 +4615,48 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	g_seat_slave_accum = 0;
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
+}
+
+// Takes effect at the next session start: a live seat's console cannot change
+// under its game, so the frontend restarts the session around it.
+void S9xSGBSplitSetSeatModel(int player, unsigned char policy)
+{
+	SeatModelInit();
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return;
+	g_split_seat_model[k] = (policy == S9X_GBBOOT_GB || policy == S9X_GBBOOT_GBC)
+	                      ? policy : SGB_SEAT_MODEL_MASTER;
+}
+
+void S9xSGBSplitSetSeatExternal(int player, bool external)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return;
+	g_split_external[k] = external;
+	if (!external) g_split_external_core[k] = nullptr;
+}
+
+bool S9xSGBSplitSeatIsExternal(int player)
+{
+	return SeatExternal(player - 2);
+}
+
+// The machine's Game Boy joins the cable in its seat's place. Live sessions
+// rewire on the spot; a null core takes the seat back off the wire.
+void S9xSGBSplitSetExternalCore(int player, SGB::Emulator *core)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1 || !g_split_external[k]) return;
+	g_split_external_core[k] = core;
+	if (g_split_players >= 2) SplitAttachLink();
+}
+
+unsigned char S9xSGBSplitGetSeatModel(int player)
+{
+	SeatModelInit();
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return SGB_SEAT_MODEL_MASTER;
+	return g_split_seat_model[k];
 }
 
 bool S9xSGBSplitActive(void)  { return g_split_players >= 2; }
@@ -4548,6 +4700,9 @@ uint8_t S9xSGBSplitPeek(int player, uint16_t addr)
 	return 0xFF;
 }
 
+// Defined with the seat-machine plumbing below the BIOS-mode tick.
+static void SplitYield(int gb_cycles);
+
 void S9xSGBSplitRunFrame(void)
 {
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
@@ -4563,10 +4718,13 @@ void S9xSGBSplitRunFrame(void)
 	// The placer watch is Faceball's alone; checked once, off the hot loops.
 	const bool fb_ring = n >= 5 && S9xSGBCartIsFaceball();
 
-	// Keep the seats on the primary's knobs; cheap and idempotent.
+	// Keep the seats on the primary's knobs; cheap and idempotent. A seat
+	// running its own Game Boy Model keeps its own run mode - the rest are
+	// display and pacing knobs the whole session shares.
 	for (int i = 1; i < n; ++i)
 	{
-		cs[i]->SetRunMode(prim.GetRunMode());
+		if (!cs[i] || SplitPosExternal(i)) continue;   // its own SNES's knobs
+		if (!SeatOwnModel(i - 1)) cs[i]->SetRunMode(prim.GetRunMode());
 		cs[i]->SetClockMultiplier(prim.DebugImpl()->clock_mul);
 		cs[i]->SetNoSpriteLimit(Settings.GBNoSpriteLimit);
 	}
@@ -4597,6 +4755,13 @@ void S9xSGBSplitRunFrame(void)
 	bool    has[SGB_MAX_LINK_PLAYERS], snapped[SGB_MAX_LINK_PLAYERS];
 	for (int i = 0; i < n; ++i)
 	{
+		// An external seat is clocked by its own SNES on its own turn;
+		// here it only sits on the cable.
+		if (!cs[i] || SplitPosExternal(i))
+		{
+			remaining[i] = 0; has[i] = false; snapped[i] = true;
+			continue;
+		}
 		SGB::Emulator::Impl *im = cs[i]->DebugImpl();
 		im->ppu.frame_ready = false;
 		remaining[i] = budget;
@@ -4615,6 +4780,7 @@ void S9xSGBSplitRunFrame(void)
 			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(chunk);
 			remaining[i] -= chunk;
+			if (i == 0) SplitYield(chunk);   // once per round of the cores
 			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
 			running = true;
@@ -4638,6 +4804,7 @@ void S9xSGBSplitRunFrame(void)
 			if (!has[i]) continue;
 			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(456);
+			if (i == 0) SplitYield(456);   // seat machines chase too
 			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
 		}
@@ -4654,6 +4821,7 @@ void S9xSGBSplitRunFrame(void)
 		int  pn = 0;
 		for (int i = 0; i < n && pn < (int)sizeof(pcline) - 40; ++i)
 		{
+			if (!cs[i]) continue;
 			SGB::Emulator::Impl *im = cs[i]->DebugImpl();
 			const SGB::CpuState &cst = im->cpu.State();
 			pn += snprintf(pcline + pn, sizeof(pcline) - (size_t)pn,
@@ -4718,7 +4886,10 @@ void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels)
 		const uint16_t *src = g_split_snap[i];
 		if (!g_split_snap_valid[i])
 		{
-			cs[i]->BlitScreenGB(live, SGB_GB_SCREEN_W);
+			if (!cs[i] || SplitPosExternal(i))
+				std::memset(live, 0, sizeof live);
+			else
+				cs[i]->BlitScreenGB(live, SGB_GB_SCREEN_W);
 			src = live;
 		}
 		for (uint32_t y = 0; y < SGB_GB_SCREEN_H; ++y)
@@ -4743,6 +4914,7 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 	const int n = SplitCollect(cs);
 	const int i = player - 1;
 	if (!dest || i < 1 || i >= n) return false;
+	if (!cs[i] || SplitPosExternal(i)) return false;   // its machine draws it
 
 	// No frame of its own yet — held at the cart's first instruction while
 	// the master runs its boot ROM, or freshly reset. False tells the
@@ -4757,7 +4929,7 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 	// the BIOS's ground truth - for a game that sends none. The frame is
 	// pulled g_pane_delay back in the ring: the master's pane is that many
 	// frames old by the time the SNES shows it, and the seats match it.
-	if (Settings.SGB_BIOSModeActive && g_split_snap_valid[i])
+	if (Settings.SGB_BIOSModeActive && g_split_snap_valid[i] && !SeatOwnModel(i - 1))
 	{
 		const SGB::SgbState &st = cs[i]->DebugImpl()->sgb_state;
 		const uint8_t *sh = SplitShadesAt(i, g_pane_delay, nullptr);
@@ -4808,7 +4980,7 @@ const SGB::SgbState *S9xSGBSplitGetSgbState(int player)
 	const int n = SplitCollect(cs);
 	const int i = player - 1;
 	if (i < 0 || i >= n) return nullptr;
-	return &cs[i]->DebugImpl()->sgb_state;
+	return cs[i] ? &cs[i]->DebugImpl()->sgb_state : nullptr;
 }
 
 const SGB::PacketState *S9xSGBGetPacketState(void)
@@ -5086,10 +5258,10 @@ void S9xSGBSplitSaveBatteries(const char *battery_base_path)
 }
 
 namespace {
-	int32_t g_snes_cycle_accum = 0;
+	S9X_MACHINE int32_t g_snes_cycle_accum = 0;
 	// SGB2/DMG unspent SNES cycles, pre-multiplied by the GB clock.
-	int64_t g_snes_scaled_accum = 0;
-	int32_t g_sync_anchor      = 0;
+	S9X_MACHINE int64_t g_snes_scaled_accum = 0;
+	S9X_MACHINE int32_t g_sync_anchor      = 0;
 	int32_t g_h_max            = 1364;  // NTSC default; overwritten per-frame by cpuexec
 }
 
@@ -5101,8 +5273,37 @@ void S9xSGBResetClockSync(void)
 }
 
 // Wall-rate meters for the viewer: emulated SNES / GB cycles.
-static uint64_t g_snes_cycle_meter = 0;
-static uint64_t g_gb_cycle_meter   = 0;
+static S9X_MACHINE uint64_t g_snes_cycle_meter = 0;
+static S9X_MACHINE uint64_t g_gb_cycle_meter   = 0;
+
+// A seat machine: its SNES tick drives only its own Game Boy, and can be asked
+// to stop once its SNES has run a total of scanlines (S9xSGBMachineRunUntilLines).
+static S9X_MACHINE bool    g_seat_machine      = false;
+static S9X_MACHINE int64_t g_snes_line_counter = 0;
+static S9X_MACHINE int64_t g_snes_slice_target = 0;
+static S9X_MACHINE int64_t g_gb_debt           = 0;   // GB cycles the SNES owes its Game Boy
+
+// The split engine's yield to the frontend, every so many GB cycles stepped.
+static S9xSGBSplitYieldFn g_split_yield        = nullptr;
+static int                g_split_yield_every  = 0;
+static int                g_split_yield_accum  = 0;
+
+static void SplitYield(int gb_cycles)
+{
+	if (!g_split_yield || g_seat_machine) return;   // only the master's engine yields
+	g_split_yield_accum += gb_cycles;
+	if (g_split_yield_accum < g_split_yield_every) return;
+	const int due = g_split_yield_accum;
+	g_split_yield_accum = 0;
+	g_split_yield(due);
+}
+
+// Reached the slice target: leave S9xMainLoop the way a frame end does.
+static inline void SliceCheck()
+{
+	if (g_snes_slice_target > 0 && g_snes_line_counter >= g_snes_slice_target)
+		CPU.Flags |= SCAN_KEYS_FLAG;
+}
 
 void S9xSGBGetCycleMeters(uint64_t *snes, uint64_t *gb)
 {
@@ -5120,6 +5321,7 @@ static constexpr int32_t kSeatSlaveSlice = 456;
 
 static void SplitRunSeatsSlaved(int32_t gb_cycles)
 {
+	if (g_seat_machine) return;   // the master's seats are the master's to step
 	if (g_split_players < 2 || !Settings.SGB_BIOSModeActive) return;
 
 	// The BIOS power-on-resets the master when it releases it, which maps
@@ -5191,7 +5393,11 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 		for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 			if (g_split_cores[k])
 			{
-				g_split_cores[k]->DebugImpl()->icd2.mlt_players = m_eff;
+				// A seat on its own Game Boy Model is not on a Super Game Boy
+				// at all: no rotation to mirror, and forcing one would rotate
+				// a pad its game never asked to be rotated.
+				g_split_cores[k]->DebugImpl()->icd2.mlt_players =
+					SeatOwnModel(k) ? 1u : m_eff;
 				g_split_cores[k]->DebugImpl()->icd2.mlt_auto_drop_polls = 0;
 			}
 	}
@@ -5233,6 +5439,7 @@ void S9xSGBTickSnes(int snes_master_cycles)
 		if (gb_cycles > 0)
 		{
 			g_snes_cycle_accum -= gb_cycles * 5;
+			if (g_seat_machine) { g_gb_debt += gb_cycles; return; }   // paid by the slice driver
 			SGB::Instance().RunCycles(gb_cycles);
 			SplitRunSeatsSlaved(gb_cycles);
 		}
@@ -5249,10 +5456,49 @@ void S9xSGBTickSnes(int snes_master_cycles)
 		{
 			g_snes_scaled_accum -= static_cast<int64_t>(gb_cycles) * 21477272;
 			g_gb_cycle_meter += (uint64_t)gb_cycles;
+			if (g_seat_machine) { g_gb_debt += gb_cycles; return; }   // paid by the slice driver
 			SGB::Instance().RunCycles(gb_cycles);
 			SplitRunSeatsSlaved(gb_cycles);
 		}
 	}
+}
+
+void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles)
+{
+	g_split_yield       = fn;
+	g_split_yield_every = every_gb_cycles > 0 ? every_gb_cycles : 456;
+	g_split_yield_accum = 0;
+}
+
+void S9xSGBSetSeatMachine(bool seat)            { g_seat_machine = seat; }
+void S9xSGBMachineRunUntilLines(int64_t lines)  { g_snes_slice_target = lines; }
+int64_t S9xSGBMachineLines(void)                { return g_snes_line_counter; }
+int64_t S9xSGBMachineGbCycles(void)
+{
+	return SGB::Instance().DebugImpl()->cpu.State().t_cycles;
+}
+
+// The cable's dose. Short of debt (the SNES is behind), pay what there is;
+// the SNES's line target makes it up next slice. The debt is bounded by the
+// same target from the other side.
+void S9xSGBMachinePayGb(int gb_cycles)
+{
+	if (!g_seat_machine || gb_cycles <= 0) return;
+	int64_t run = g_gb_debt < gb_cycles ? g_gb_debt : gb_cycles;
+	if (run <= 0) return;
+	g_gb_debt -= run;
+	SGB::Instance().RunCycles(static_cast<int32_t>(run));
+}
+
+// One SNES scanline of this machine, gated on nothing. The engine's yield is
+// fed the line's worth of the master's Game Boy cycles (1364 master cycles at
+// the Game Boy's clock), so seat machines pace the cable through the splash.
+void S9xSGBOnSnesScanline(void)
+{
+	++g_snes_line_counter;
+	SliceCheck();
+	const bool sgb1 = SGB::Instance().GetRunMode() == SGB::RunMode::SGB;
+	SplitYield(sgb1 ? 273 : 266);
 }
 
 void S9xSGBResetSyncAnchor(int32_t cpu_cycles)

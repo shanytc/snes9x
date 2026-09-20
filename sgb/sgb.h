@@ -446,6 +446,60 @@ bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap);
 // custom ring cable.
 constexpr int SGB_MAX_LINK_PLAYERS = 15;
 bool S9xSGBSplitStart(int players, const char *battery_base_path);
+
+// A seat may run a Game Boy Model of its own instead of the master's - a plain
+// Game Boy on the cable of a Super Game Boy session, a Color beside a mono one.
+// SGB_SEAT_MODEL_MASTER follows the master; anything else is S9X_GBBOOT_GB or
+// S9X_GBBOOT_GBC. A Super Game Boy seat is not a model of the split engine at
+// all: it is a whole SNES machine of its own (see the external seats below).
+constexpr unsigned char SGB_SEAT_MODEL_MASTER = 0xFF;
+void          S9xSGBSplitSetSeatModel(int player /*2..15*/, unsigned char policy);
+unsigned char S9xSGBSplitGetSeatModel(int player);
+
+// External seats. A Super Game Boy seat is a second SNES running the real SGB
+// BIOS on its own thread (the frontend owns that machine); its Game Boy is
+// that machine's SGB::Instance(). The split engine keeps such a seat ON THE
+// CABLE and does nothing else with it: no stepping (its SNES clocks it), no
+// pad (its SNES reads its controller port), no picture (its own GFX.Screen),
+// no reset (its machine resets). Cross-thread pointers are safe because the
+// machines run cooperatively - one inside a frame at a time.
+//
+// Flag a seat external BEFORE S9xSGBSplitStart so no split core is built for
+// it; hand its core over once its machine has loaded, which rewires the cable.
+void S9xSGBSplitSetSeatExternal(int player /*2..15*/, bool external);
+bool S9xSGBSplitSeatIsExternal(int player);
+void S9xSGBSplitSetExternalCore(int player, SGB::Emulator *core);
+
+// Seat machines run in step with the cable, not a frame behind it. The split
+// engine calls the yield every `every_gb_cycles` of stepping, from both of its
+// loops; the frontend then runs each seat machine until its Game Boy has
+// advanced the same amount. Sub-frame link protocols (the DMG-07 hub, the
+// Faceball ring) need this: a reply a frame late is no reply.
+typedef void (*S9xSGBSplitYieldFn)(int gb_cycles);
+void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles);
+
+// On a seat machine's own thread. The role keeps its SNES tick from stepping
+// the master's split seats; the target makes S9xMainLoop return once this
+// machine's SNES has run that many scanlines in total, mid-frame if need be.
+// Scanlines, because they are the one clock that ticks on a BIOS-mode machine
+// while the BIOS holds its Game Boy in reset through the splash - every
+// SNES->GB sync is gated on the release.
+void    S9xSGBSetSeatMachine(bool seat);
+void    S9xSGBMachineRunUntilLines(int64_t snes_lines);
+int64_t S9xSGBMachineLines(void);
+
+// The ungated per-scanline hook (cpuexec's scanline end, BIOS mode): this
+// machine's line clock, and the engine's yield to seat machines.
+void    S9xSGBOnSnesScanline(void);
+
+// This machine's Game Boy clock, for pacing instruments.
+int64_t S9xSGBMachineGbCycles(void);
+
+// On a seat machine the SNES->GB tick only BANKS the Game Boy cycles the
+// SNES produced; this pays them out. Called once per engine yield with the
+// yield's own Game Boy cycles, so the seat's Game Boy steps in exactly the
+// cable's dose - the SNES's DMA lumps and coasting never reach it.
+void    S9xSGBMachinePayGb(int gb_cycles);
 void S9xSGBSplitStop(const char *battery_base_path);  // saves seat batteries first
 bool S9xSGBSplitActive(void);
 int  S9xSGBSplitPlayers(void);

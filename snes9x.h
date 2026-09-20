@@ -432,14 +432,34 @@ enum
 	PAUSE_LINK_PEER				= (1 << 9)
 };
 
+// A handful of fields in Settings describe THIS machine rather than the
+// program: which console it is and how fast it runs. With a second SNES in the
+// process - a Super Game Boy seat - each machine keeps its own set and swaps
+// them in around its slice. Far cheaper than moving 236 use sites out of
+// Settings, and it leaves SSettings' layout alone. Safe because machines run
+// cooperatively: only one is inside S9xMainLoop at a time.
+struct SMachineState
+{
+	bool8	SuperGameBoy;
+	bool8	SGB_BIOSModeActive;
+	bool8	GB_BIOSActive;
+	bool8	PAL;
+	uint8	GameBoyRunMode;
+	float	GBClockMultiplier;
+	uint32	FrameTime;
+};
+
+void S9xMachineCapture(struct SMachineState *out);       // Settings -> out
+void S9xMachineApply(const struct SMachineState *in);    // in -> Settings
+
 void S9xSetPause(uint32);
 void S9xClearPause(uint32);
 void S9xExit(void);
 void S9xMessage(int, int, const char *);
 
 extern struct SSettings			Settings;
-extern struct SCPUState			CPU;
-extern struct STimings			Timings;
+extern S9X_MACHINE struct SCPUState			CPU;
+extern S9X_MACHINE struct STimings			Timings;
 extern struct SSNESGameFixes	SNESGameFixes;
 extern char						String[513];
 

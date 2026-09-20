@@ -42,7 +42,9 @@ public:
     }
 };
 
-extern CPU cpu;
+// The SNES side of the APU ports ($2140-$2143): the SPC upload handshake
+// itself. One per machine, or two BIOSes talk over each other's.
+extern S9X_MACHINE CPU cpu;
 
 } // namespace SNES
 

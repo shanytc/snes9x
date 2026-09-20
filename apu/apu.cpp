@@ -33,7 +33,7 @@ static const int MINIMUM_BUFFER_SIZE = 550 * 2;
 
 namespace SNES {
 #include "bapu/dsp/blargg_endian.h"
-CPU cpu;
+S9X_MACHINE CPU cpu;
 } // namespace SNES
 
 namespace spc {
@@ -43,10 +43,14 @@ static void *callback_data = NULL;
 static bool8 sound_in_sync = true;
 static bool8 sound_enabled = false;
 
+// Shared: the audio thread reads this one. Only the master machine's DSP is
+// wired to it; a silent machine gets a sink of its own.
 static Resampler resampler;
+static S9X_MACHINE Resampler silent_sink;
+static S9X_MACHINE bool machine_silent = false;
 
-static int32 reference_time;
-static uint32 remainder;
+static S9X_MACHINE int32 reference_time;
+static S9X_MACHINE uint32 remainder;
 
 static const int timing_hack_numerator = 256;
 static int timing_hack_denominator = 256;
@@ -453,6 +457,11 @@ int S9xGetSampleCount(void)
 
 void S9xLandSamples(void)
 {
+    // A silent machine's samples went to its own sink: nothing to hand the
+    // frontend, and the sync flag below is the MASTER's pacing, read off the
+    // master's buffer - a seat rewriting it parks the master in sound sync.
+    if (spc::machine_silent) return;
+
     if (spc::callback != NULL)
         spc::callback(spc::callback_data);
 
@@ -918,6 +927,16 @@ bool8 S9xInitSound(int buffer_ms)
     if (requested_buffer_size_samples > buffer_size_samples)
         buffer_size_samples = requested_buffer_size_samples;
 
+    if (spc::machine_silent)
+    {
+        // A seat: its SPC must run so its BIOS boots, but nothing it produces
+        // is ever heard, so it never touches the shared output.
+        spc::silent_sink.resize(MINIMUM_BUFFER_SIZE);
+        SNES::dsp.spc_dsp.set_output(&spc::silent_sink);
+        UpdatePlaybackRate();
+        return (TRUE);
+    }
+
     spc::resampler.resize(buffer_size_samples);
     msu::resampler.resize(buffer_size_samples * 3 / 2);
     voicekun::resampler.resize(buffer_size_samples * 3 / 2);
@@ -958,8 +977,18 @@ static void SPCSnapshotCallback(void)
     printf("Dumped key-on triggered spc snapshot.\n");
 }
 
+// Call on a machine's own thread before S9xInitSound: its SPC still runs (the
+// SGB BIOS waits on the upload handshake) but its output goes nowhere.
+void S9xAPUSetMachineSilent(bool silent)
+{
+    spc::machine_silent = silent;
+}
+
 bool8 S9xInitAPU(void)
 {
+    // A silent machine has no share in the program's audio buffers.
+    if (spc::machine_silent) return true;
+
     spc::resampler.clear();
     msu::resampler.clear();
     voicekun::resampler.clear();

@@ -11,7 +11,7 @@
 #include "ppu.h"
 #include "tile.h"
 
-extern struct SLineMatrixData	LineMatrixData[240];
+extern S9X_MACHINE struct SLineMatrixData	LineMatrixData[240];
 
 
 namespace TileImpl {

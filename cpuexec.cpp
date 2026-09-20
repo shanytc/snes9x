@@ -610,6 +610,11 @@ void S9xDoHEventProcessing (void)
 			// have no ICD2 traffic.
 			if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
 				S9xSGBSyncToSnesCycle(CPU.Cycles);
+			// Ungated: the line clock a Super Game Boy seat machine is
+			// paced by, and the engine's yield to it - through the splash
+			// too, when nothing above is running.
+			if (Settings.SGB_BIOSModeActive)
+				S9xSGBOnSnesScanline();
 
 			// SFC-Box: the supervisor HD64180 runs its slice of every
 			// scanline whether or not the SNES itself is executing.

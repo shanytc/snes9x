@@ -13,7 +13,10 @@ namespace SNES {
 #include "debugger/disassembler.cpp"
 #endif
 
-SMP smp;
+// One SPC per SNES: a seat's SGB BIOS runs its own upload handshake, and
+// two machines sharing one chip corrupt each other's. Only the master's
+// output reaches the sound device (see S9xInitSound).
+S9X_MACHINE SMP smp;
 
 #include "algorithms.cpp"
 #include "core.cpp"

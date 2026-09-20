@@ -267,6 +267,9 @@ void S9xMessage (int type, int, const char *str)
 	// An Acid Tests SGB child has no window, and stdout is its parent's pipe.
 	if (S9xAcidSgbChild)
 		return;
+	// A seat machine's messages are its own: not the master's OSD, and never
+	// a MessageBox owned by a window on the thread that is waiting for us.
+	if (S9xMachineIsSeat) return;
 #ifdef DEBUGGER
     static FILE *out = NULL;
 
@@ -317,6 +320,14 @@ void S9xSyncSpeed( void)
 {
 	if (S9xAcidSgbChild)
 		return;   // runs flat out; nothing is shown
+	if (S9xMachineIsSeat)
+	{
+		// A seat machine runs on the master's turn, unpaced - but this is
+		// also where the frame-skip decision lives, and it draws every frame.
+		IPPU.RenderThisFrame = TRUE;
+		IPPU.SkippedFrames   = 0;
+		return;
+	}
 #ifdef NETPLAY_SUPPORT
     if (Settings.NetPlay)
     {
@@ -870,6 +881,7 @@ void S9xAutoSaveSRAM ()
 {
 	if (S9xAcidSgbChild)
 		return;   // never write beside a test ROM
+    if (S9xMachineIsSeat) return;   // a seat's SRAM is not the master's file
     Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 }
 

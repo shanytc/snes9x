@@ -50,6 +50,7 @@
 
 #include "../snes9x.h"
 #include "../memmap.h"
+#include "../gfx.h"
 #include "../biosmanager.h"
 #include "../cpuexec.h"
 #include "../display.h"
@@ -162,6 +163,16 @@ static void GBLinkViewerWatch();
 static void GBSeatWindowsCreate(int players);
 static void GBSeatWindowsDestroy();
 static void GBSeatPresentFrame();
+static unsigned char GBSeatModelPick(int player);
+static bool  GBSeatModelFromCommand(int cmd_id, int *player, unsigned char *model);
+static void  WinGBSeatSetModel(int player, unsigned char model);
+static HMENU WinGBBuildSeatModelMenu(int player);
+static void  WinGBSyncSeatModelMenu(HMENU link_hmenu, int players, bool enable);
+static void  GBSeatMachinesCreate(int players);
+static void  GBSeatMachinesDestroy();
+static void  GBSeatMachinesTurn();
+static void  GBSeatMachinesRequestReset();
+static bool  GBSeatModelIsMachine(unsigned char model);
 
 // The master window's shape from before a session resized it — down to 1x
 // for a viewer ring (the seats park at its size, so 1x is what makes a 5x3
@@ -2428,6 +2439,15 @@ LRESULT CALLBACK WinProc(
 			FreezeUnfreezeSlot(cmd_id - ID_FILE_LOAD0, FALSE);
 			break;
 		}
+		else if (cmd_id >= ID_EMULATION_GB_LINK_SEATMODEL0 &&
+		         cmd_id <= ID_EMULATION_GB_LINK_SEATMODEL_LAST)
+		{
+			int           player = 0;
+			unsigned char model  = 0;
+			if (GBSeatModelFromCommand (cmd_id, &player, &model))
+				WinGBSeatSetModel (player, model);
+			break;
+		}
 		else if (cmd_id >= ID_TRANSLATIONS_BASE && cmd_id < ID_TRANSLATIONS_BASE + (int)g_translationCodes.size())
 		{
 			std::wstring code = g_translationCodes[cmd_id - ID_TRANSLATIONS_BASE];
@@ -3170,6 +3190,7 @@ LRESULT CALLBACK WinProc(
 		}	break;
 		case ID_EMULATION_SOFT_RESET:
 		case ID_EMULATION_HARD_RESET:
+			GBSeatMachinesRequestReset ();   // a machine seat power-cycles on its next turn
 #ifdef NETPLAY_SUPPORT
 			if (Settings.NetPlayServer)
 			{
@@ -5904,6 +5925,10 @@ int WINAPI WinMain(
 				S9xMainLoop();
 			}
 
+			// Super Game Boy seats are SNES machines of their own: each gets
+			// its frame now, one at a time, while this one is parked.
+			GBSeatMachinesTurn ();
+
 			// BIOS-mode sessions: the seats stepped inside the frame,
 			// slaved to the SNES clock, so their pads are collected once
 			// per host frame. (BIOS-less sessions do this from the SGB
@@ -6833,6 +6858,11 @@ static void CheckMenuStates ()
 			// The whole Current Game submenu greys during an Other session.
 			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_POPUP, FALSE, &mii);
+
+			// Per-player models: reachable whichever flavour the session is
+			// on - a spawned one has no player windows to right-click - and
+			// before one starts.
+			WinGBSyncSeatModelMenu (s_link_hmenu, players, gblink != 2);
 
 			// Split screen needs the BIOS-less core, so in BIOS mode the
 			// item comes out of the menu rather than offering a dead end.
@@ -12325,6 +12355,187 @@ int GBLinkUserModel     = -1;
 // the next click of a players item does.
 bool GBLinkSplitScreen = false;
 
+// Each player's Game Boy Model, indexed by player number. A session opens
+// every seat on the console the master loaded; this is how one seat is told
+// to be another - a plain Game Boy on the cable of a Super Game Boy session,
+// a Color beside a mono one. Set from the player window's right-click menu
+// and from Link Cable > Player Models; applied at the next session start.
+static uint8 GBSeatModel[SGB_MAX_LINK_PLAYERS + 1];
+static bool  GBSeatModelsReady = false;
+
+// The models a player window offers, in menu order. The two plain ones are
+// split-engine seats; a Super Game Boy is a whole SNES machine of its own,
+// running the real BIOS on its own thread (see GBSeatMachine). SGB1 is shown
+// for what it is: a console with no link port, so it cannot be seated.
+static const uint8 GBSeatModelChoices[] = {
+	SGB_SEAT_MODEL_MASTER, S9X_GBBOOT_GB, S9X_GBBOOT_GBC,
+	S9X_GBBOOT_SGB, S9X_GBBOOT_SGB2
+};
+
+static bool GBSeatModelIsMachine (unsigned char model)
+{
+	return model == S9X_GBBOOT_SGB2;
+}
+
+// The SGB1 has no link port, so a seat cannot be one - the same rule that
+// keeps the master off it for a session.
+static bool GBSeatModelBlocked (uint8 model)
+{
+	return model == S9X_GBBOOT_SGB;
+}
+static const int GBSeatModelChoiceCount =
+	(int)(sizeof(GBSeatModelChoices) / sizeof(GBSeatModelChoices[0]));
+
+static void GBSeatModelsInit ()
+{
+	if (GBSeatModelsReady) return;
+	for (int p = 0; p <= SGB_MAX_LINK_PLAYERS; p++)
+		GBSeatModel[p] = SGB_SEAT_MODEL_MASTER;
+	GBSeatModelsReady = true;
+}
+
+// What the player's menu has ticked, master-follower included.
+static unsigned char GBSeatModelPick (int player)
+{
+	GBSeatModelsInit ();
+	if (player < 2 || player > SGB_MAX_LINK_PLAYERS) return SGB_SEAT_MODEL_MASTER;
+	return GBSeatModel[player];
+}
+
+// Hand the engine the picks. A plain Game Boy or Color is a split-engine
+// seat; a Super Game Boy is external - a SNES machine the frontend owns, on
+// the cable in its seat's place.
+static void GBSeatModelsPushToEngine (int players)
+{
+	for (int p = 2; p <= SGB_MAX_LINK_PLAYERS; p++)
+	{
+		const uint8 m = (p <= players) ? GBSeatModelPick (p) : SGB_SEAT_MODEL_MASTER;
+		const bool machine = GBSeatModelIsMachine (m);
+		S9xSGBSplitSetSeatExternal (p, machine);
+		S9xSGBSplitSetSeatModel (p, machine ? SGB_SEAT_MODEL_MASTER : m);
+	}
+}
+
+// "Game Boy Color", or the master's console spelled out for the follower.
+static const char *GBSeatModelName (uint8 model)
+{
+	return S9xGBBootPolicyName (model == SGB_SEAT_MODEL_MASTER
+		? S9xNormalizeGBBootPolicy (Settings.GBBootPolicy) : model);
+}
+
+// One id per player and model, so the same commands serve the player window's
+// right-click menu and the Player Models submenu.
+static bool GBSeatModelFromCommand (int cmd_id, int *player, unsigned char *model)
+{
+	if (cmd_id < ID_EMULATION_GB_LINK_SEATMODEL0 ||
+	    cmd_id > ID_EMULATION_GB_LINK_SEATMODEL_LAST) return false;
+	const int n = cmd_id - ID_EMULATION_GB_LINK_SEATMODEL0;
+	const int p = 2 + n / GBSeatModelChoiceCount;
+	if (p > SGB_MAX_LINK_PLAYERS) return false;
+	*player = p;
+	*model  = GBSeatModelChoices[n % GBSeatModelChoiceCount];
+	return true;
+}
+
+// The player's own Game Boy Model list. Built fresh every time so the
+// follower entry names the master's current console.
+static HMENU WinGBBuildSeatModelMenu (int player)
+{
+	HMENU menu = CreatePopupMenu ();
+	if (!menu) return NULL;
+
+	const uint8 live = GBSeatModelPick (player);
+	for (int s = 0; s < GBSeatModelChoiceCount; s++)
+	{
+		const uint8 m = GBSeatModelChoices[s];
+		TCHAR label[160];
+		if (m == SGB_SEAT_MODEL_MASTER)
+			_sntprintf (label, 160, TEXT("Same as &Master (%s)"),
+			            (TCHAR *)_tFromChar (GBSeatModelName (m)));
+		else if (m == S9X_GBBOOT_SGB)
+			_sntprintf (label, 160, TEXT("%s (no link port)"),
+			            (TCHAR *)_tFromChar (GBSeatModelName (m)));
+		else
+			_sntprintf (label, 160, TEXT("%s"), (TCHAR *)_tFromChar (GBSeatModelName (m)));
+		label[159] = TEXT('\0');
+
+		UINT flags = MF_STRING | (m == live ? MF_CHECKED : MF_UNCHECKED);
+		if (GBSeatModelBlocked (m)) flags |= MF_GRAYED;
+		AppendMenu (menu, flags, ID_EMULATION_GB_LINK_SEATMODEL0 +
+		            (player - 2) * GBSeatModelChoiceCount + s, label);
+	}
+	return menu;
+}
+
+// Link Cable > Player Models. The same list the player windows carry on their
+// right-click, so the models can also be set before a session opens - when
+// there are no player windows yet.
+static void WinGBSyncSeatModelMenu (HMENU link_hmenu, int players, bool enable)
+{
+	static HMENU s_models = NULL;
+	static int   s_built  = 0;
+	static uint8 s_master = 0xFE;
+
+	if (!link_hmenu) return;
+	if (players < 2) players = 4;   // idle: the shapes a click can start
+	if (players > SGB_MAX_LINK_PLAYERS) players = SGB_MAX_LINK_PLAYERS;
+	const uint8 master = S9xNormalizeGBBootPolicy (Settings.GBBootPolicy);
+
+	// The labels name the master's console, so it is rebuilt when that moves
+	// as well as when the seat count does.
+	if (s_built != players || s_master != master)
+	{
+		MENUITEMINFO probe = {};
+		probe.cbSize = sizeof(probe);
+		probe.fMask  = MIIM_ID;
+		if (GetMenuItemInfo (link_hmenu, ID_EMULATION_GB_LINK_MODELS_POPUP, FALSE, &probe))
+			RemoveMenu (link_hmenu, ID_EMULATION_GB_LINK_MODELS_POPUP, MF_BYCOMMAND);
+		if (s_models) DestroyMenu (s_models);
+
+		s_models = CreatePopupMenu ();
+		s_built  = players;
+		s_master = master;
+		if (!s_models) return;
+
+		for (int p = 2; p <= players; p++)
+		{
+			HMENU one = WinGBBuildSeatModelMenu (p);
+			if (!one) break;
+			TCHAR label[64];
+			_sntprintf (label, 64, TEXT("Player &%d"), p);
+			label[63] = TEXT('\0');
+			AppendMenu (s_models, MF_POPUP, (UINT_PTR)one, label);
+		}
+
+		MENUITEMINFO mi = {};
+		mi.cbSize     = sizeof(mi);
+		mi.fMask      = MIIM_ID | MIIM_SUBMENU | MIIM_STRING;
+		mi.wID        = ID_EMULATION_GB_LINK_MODELS_POPUP;
+		mi.hSubMenu   = s_models;
+		mi.dwTypeData = (LPTSTR)TEXT("Player &Models");
+		InsertMenuItem (link_hmenu, 1, TRUE, &mi);
+	}
+
+	MENUITEMINFO st = {};
+	st.cbSize  = sizeof(st);
+	st.fMask   = MIIM_STATE;
+	st.fState  = enable ? MFS_ENABLED : MFS_DISABLED;
+	SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_MODELS_POPUP, FALSE, &st);
+
+	for (int p = 2; p <= players; p++)
+	{
+		const uint8 live = GBSeatModelPick (p);
+		for (int s = 0; s < GBSeatModelChoiceCount; s++)
+		{
+			const uint8 m = GBSeatModelChoices[s];
+			st.fState = (m == live) ? MFS_CHECKED : MFS_UNCHECKED;
+			if (GBSeatModelBlocked (m)) st.fState |= MFS_DISABLED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SEATMODEL0 +
+			                 (p - 2) * GBSeatModelChoiceCount + s, FALSE, &st);
+		}
+	}
+}
+
 // Held by process id rather than a spawn handle, so it means the same
 // thing whichever instance started the other. The partner is the other
 // half of a direct cable — or, on a spawned instance, the hub host.
@@ -13244,9 +13455,14 @@ static struct { int cols, x, y, w, h, sw, sh; } GBSeatGeom;
 // thread. The busy flag is the entire handshake — staging is skipped while
 // a render is still in flight, so a slow frame re-shows the previous one
 // rather than tearing or stalling the emulator.
-static uint16 GBSeatStage[SGB_MAX_LINK_PLAYERS - 1][SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+// SNES-sized: a Super Game Boy seat stages its whole frame here, bezel and
+// all; every other seat uses the 160x144 corner of it.
+static uint16 GBSeatStage[SGB_MAX_LINK_PLAYERS - 1][SNES_WIDTH * SNES_HEIGHT];
 static uint16 GBSeatStageBorder[SNES_WIDTH * SNES_HEIGHT];
 static bool   GBSeatStageBordered = false;
+// This seat drew its own bezel, so its stage is a whole frame rather than a
+// screen to drop into the master's pane.
+static bool   GBSeatStageOwnBorder[SGB_MAX_LINK_PLAYERS - 1] = {};
 // False while a seat has no frame of its own (master mid-boot): its window
 // then keeps the master's pane, so both play the same boot sequence.
 static bool   GBSeatStageOwn[SGB_MAX_LINK_PLAYERS - 1] = {};
@@ -13368,16 +13584,38 @@ static void GBSeatRenderStaged ()
 {
 	if (!GBSeatSurfaceReady ()) return;
 
+	// The DIB is shared, so a seat that painted its own bezel over it means
+	// the master's plane has to be laid down again for the next seat using it.
+	bool dib_has_master = false;
 	if (GBSeatStageBordered)
+	{
 		GBSeatConvert (GBSeatStageBorder, SNES_WIDTH, 0, 0, SNES_WIDTH, SNES_HEIGHT);
+		dib_has_master = true;
+	}
 
 	for (int k = 0; k < GBSeatCount; k++)
 	{
 		HWND hWnd = GBSeatWnd[k];
 		if (!hWnd || !IsWindowVisible (hWnd) || IsIconic (hWnd)) continue;
 
+		// A Super Game Boy seat is a console of its own: its bezel around its
+		// screen, whatever the master is showing.
+		if (GBSeatStageOwnBorder[k])
+		{
+			GBSeatConvert (GBSeatStage[k], SNES_WIDTH, 0, 0, SNES_WIDTH, SNES_HEIGHT);
+			GBSeatPresent (hWnd, SNES_WIDTH, SNES_HEIGHT);
+			dib_has_master = false;
+			continue;
+		}
+
 		if (GBSeatStageBordered)
 		{
+			if (!dib_has_master)
+			{
+				GBSeatConvert (GBSeatStageBorder, SNES_WIDTH, 0, 0,
+				               SNES_WIDTH, SNES_HEIGHT);
+				dib_has_master = true;
+			}
 			// The DIB is shared across seats: a seat without its own frame
 			// restores the master's pane over the previous seat's. Row 39,
 			// not 40: the PPU skips line 0, so the whole picture — pane
@@ -13414,6 +13652,32 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 			PAINTSTRUCT ps;
 			BeginPaint (hWnd, &ps);
 			EndPaint (hWnd, &ps);
+			return 0;
+		}
+
+		// This player's Game Boy Model. Tracked on this thread because it
+		// owns the window; acting on the pick is the master's job.
+		case WM_CONTEXTMENU:
+		{
+			const int k = (int)GetWindowLongPtr (hWnd, GWLP_USERDATA);
+			if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return 0;
+
+			POINT pt = { (short)LOWORD (lParam), (short)HIWORD (lParam) };
+			if (pt.x == -1 && pt.y == -1)   // the menu key, not the mouse
+			{
+				RECT rc;
+				GetWindowRect (hWnd, &rc);
+				pt.x = rc.left + 16;
+				pt.y = rc.top  + 16;
+			}
+
+			HMENU menu = WinGBBuildSeatModelMenu (k + 2);
+			if (!menu) return 0;
+			SetForegroundWindow (hWnd);
+			const int cmd = (int)TrackPopupMenu (menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+			                                     pt.x, pt.y, 0, hWnd, NULL);
+			DestroyMenu (menu);
+			if (cmd) PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (cmd, 0), 0);
 			return 0;
 		}
 
@@ -13483,9 +13747,15 @@ static void GBSeatWindowsOpen ()
 		if (x < vx) x = vx;
 		if (y < vy) y = vy;
 
-		TCHAR title[64];
-		_sntprintf (title, 64, TEXT("Player %d"), k + 2);
-		title[63] = TEXT('\0');
+		TCHAR title[96];
+		uint8 pick = S9xSGBSplitGetSeatModel (k + 2);
+		if (GBSeatModelIsMachine (GBSeatModelPick (k + 2))) pick = GBSeatModelPick (k + 2);
+		if (pick == SGB_SEAT_MODEL_MASTER)
+			_sntprintf (title, 96, TEXT("Player %d"), k + 2);
+		else
+			_sntprintf (title, 96, TEXT("Player %d - %s"), k + 2,
+			            (TCHAR *)_tFromChar (GBSeatModelName (pick)));
+		title[95] = TEXT('\0');
 
 		HWND hWnd = CreateWindowEx (GBSEAT_EXSTYLE, GBSEAT_WNDCLASS, title,
 		                            GBSEAT_STYLE,
@@ -13536,6 +13806,327 @@ static DWORD WINAPI GBSeatThreadProc (LPVOID)
 	return 0;
 }
 
+// A Super Game Boy seat is a SNES of its own. Every piece of machine state is
+// S9X_MACHINE (per-thread), so a thread that runs Memory.Init, LoadROM and
+// S9xMainLoop IS a second SNES: it boots the real SGB BIOS and the game on
+// it, its Game Boy is its own SGB::Instance(), its SPC runs unheard. The
+// master hands it exactly one frame per turn and waits, so only one machine
+// is ever inside a frame - which is what makes the cable's cross-thread
+// pointers and the shared Settings swap safe.
+//
+// Known limit: a frame per turn is a whole frame the other Game Boys sit
+// parked for. Byte-and-retry link protocols ride that out; the sub-frame
+// ones (the DMG-07 hub, Faceball's ring) want a finer turn, which is the
+// follow-up.
+struct GBSeatMachine
+{
+	HANDLE         thread, go, done;
+	volatile LONG  quit, reset;
+	int            player;
+	uint8          policy;
+	bool           ready, failed;
+	SMachineState  state;
+	uint16         frame[SNES_WIDTH * SNES_HEIGHT];
+	bool           frame_valid;
+	// Its Game Boy, reported by the machine; put on the cable by the master
+	// thread, whose SGB::Instance() is the master's when the cable rewires.
+	SGB::Emulator *core;
+	bool           on_cable;
+	// The cart, captured on the master thread; and how far bring-up got.
+	char           rom[_MAX_PATH + 1];
+	const char    *stage;
+	bool           reported;
+	// Where this machine's SNES must run to on its next turn, in its own
+	// scanlines: base at bring-up plus the master's Game Boy cycles so far,
+	// converted. And the last frame it copied out, so a slice that crosses a
+	// frame end stages it.
+	int64          base_lines, gb_total, target;
+	int            pay;          // this yield's Game Boy dose
+	uint32         frames_seen;
+};
+static GBSeatMachine GBSeatMachines[SGB_MAX_LINK_PLAYERS - 1] = {};
+thread_local bool S9xMachineIsSeat = false;
+
+static GBSeatMachine *GBSeatMachineFor (int player)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return NULL;
+	return GBSeatMachines[k].thread ? &GBSeatMachines[k] : NULL;
+}
+
+// Written by the machine on its turn, read by the emulation thread on the
+// master's - never at the same time.
+static bool GBSeatMachineCopyFrame (int player, uint16 *dest)
+{
+	GBSeatMachine *m = GBSeatMachineFor (player);
+	if (!m || !m->frame_valid) return false;
+	memcpy (dest, m->frame, sizeof m->frame);
+	return true;
+}
+
+static DWORD WINAPI GBSeatMachineThread (LPVOID arg)
+{
+	GBSeatMachine *m = (GBSeatMachine *)arg;
+	S9xMachineIsSeat = true;   // this thread's frame hooks are no-ops
+
+	while (WaitForSingleObject (m->go, INFINITE) == WAIT_OBJECT_0 && !m->quit)
+	{
+		if (!m->ready && !m->failed)
+		{
+			// First turn: bring this SNES up and load the game through the
+			// same path the master used, onto the console this seat picked.
+			// Its SPC must run - the BIOS waits on the upload handshake -
+			// but nothing it makes is heard.
+			S9xSGBSetSeatMachine (true);   // its tick drives only its own Game Boy
+			S9xAPUSetMachineSilent (true);
+			CPU.Flags = 0;
+			Settings.GBBootPolicy = m->policy;
+			bool ok = true;
+			if (ok) { m->stage = "sound chip";  ok = S9xInitAPU () && S9xInitSound (0); }
+			if (ok) { m->stage = "memory";      ok = Memory.Init () != FALSE; }
+			if (ok) { m->stage = "graphics";    ok = S9xGraphicsInit () != FALSE; }
+			if (ok) { m->stage = "loading";     ok = m->rom[0] && Memory.LoadROM (m->rom); }
+			if (ok) { m->stage = "Super Game Boy BIOS";
+			          ok = Settings.SGB_BIOSModeActive != FALSE; }   // no BIOS = not an SGB
+			if (!ok)
+			{
+				m->failed = true;
+				SetEvent (m->done);
+				continue;
+			}
+			m->stage = "running";
+			S9xMachineCapture (&m->state);
+			m->core = &SGB::Instance ();   // this thread's: the seat's own Game Boy
+			S9xReset ();
+			m->base_lines  = S9xSGBMachineLines ();
+			m->gb_total    = 0;
+			m->target      = m->base_lines;
+			m->frames_seen = IPPU.TotalEmulatedFrames;
+			m->ready = true;
+		}
+		else if (m->ready)
+		{
+			S9xMachineApply (&m->state);
+			if (InterlockedExchange (&m->reset, 0)) S9xReset ();
+
+			// This player's pad, on this SNES's first controller port: the
+			// BIOS reads it there and hands it to the Game Boy, exactly as
+			// the real console does.
+			const uint16 saved = MovieGetJoypad (0);
+			MovieSetJoypad (0, MovieGetJoypad (m->player - 1));
+
+			// Run until this machine's SNES reaches the slice target, in its
+			// scanlines - the one clock that ticks while its BIOS holds the
+			// Game Boy in reset for the splash. S9xMainLoop returns there,
+			// and at frame ends, so loop; a frame end inside the slice stages
+			// the picture.
+			S9xSGBMachineRunUntilLines (m->target);
+			for (int guard = 0; guard < 8 && S9xSGBMachineLines () < m->target; guard++)
+			{
+				S9xMainLoop ();
+				if (IPPU.TotalEmulatedFrames != m->frames_seen && GFX.Screen)
+				{
+					m->frames_seen = IPPU.TotalEmulatedFrames;
+					const int pitch = (int)GFX.RealPPL;
+					for (int y = 0; y < SNES_HEIGHT; y++)
+						memcpy (m->frame + y * SNES_WIDTH, GFX.Screen + y * pitch,
+						        SNES_WIDTH * sizeof (uint16));
+					m->frame_valid = true;
+				}
+			}
+			S9xSGBMachineRunUntilLines (0);
+			S9xSGBMachinePayGb (m->pay);   // its Game Boy, in the cable's dose
+
+			MovieSetJoypad (0, saved);
+			S9xMachineCapture (&m->state);
+		}
+		SetEvent (m->done);
+	}
+
+	// This machine's own state goes with its thread; the master took its
+	// Game Boy off the cable before asking it to quit.
+	if (m->ready)
+	{
+		Memory.Deinit ();
+		S9xGraphicsDeinit ();
+		S9xDeinitAPU ();
+	}
+	SetEvent (m->done);
+	return 0;
+}
+
+// Wait for a seat's turn to end while still servicing cross-thread SENT
+// messages: a plain wait cannot, so any window touched from the seat thread
+// would deadlock both. Posted messages stay queued for the main loop.
+static bool GBSeatMachineWaitDone (HANDLE done, DWORD budget)
+{
+	const DWORD start = GetTickCount ();
+	for (;;)
+	{
+		const DWORD spent = GetTickCount () - start;
+		if (spent >= budget) return false;
+		const DWORD r = MsgWaitForMultipleObjects (1, &done, FALSE, budget - spent,
+		                                           QS_SENDMESSAGE);
+		if (r == WAIT_OBJECT_0) return true;
+		if (r == WAIT_TIMEOUT)  return false;
+		MSG msg;   // a sent message is serviced inside PeekMessage
+		PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+	}
+}
+
+// Called by the split engine from inside the master's frame, every few Game
+// Boy lines of stepping: each ready machine runs its own SNES until its Game
+// Boy has advanced the same amount, so its link replies land in time. The
+// master's console identity and policy are put back after every turn.
+static void GBSeatMachinesYield (int gb_cycles)
+{
+	bool any = false;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+		if (GBSeatMachines[k].thread && GBSeatMachines[k].ready && !GBSeatMachines[k].failed)
+		{ any = true; break; }
+	if (!any) return;
+
+	SMachineState master;
+	S9xMachineCapture (&master);
+	const uint8 policy = Settings.GBBootPolicy;
+
+	// The engine counts in the master's Game Boy cycles; a machine's slice is
+	// the same span of time in its SNES scanlines (1364 master cycles each).
+	// The master's Game Boy runs at the SGB1 clock in run mode 1, the exact
+	// one otherwise. Absolute from a running total, so nothing drifts.
+	const int64 gb_hz = (Settings.GameBoyRunMode == 1) ? 4295454 : 4194304;
+
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		GBSeatMachine *m = &GBSeatMachines[k];
+		if (!m->thread || !m->ready || m->failed) continue;
+		m->gb_total += gb_cycles;
+		m->target = m->base_lines + (m->gb_total * 21477272) / (gb_hz * 1364);
+		m->pay    = gb_cycles;
+		SetEvent (m->go);
+		if (!GBSeatMachineWaitDone (m->done, 1000))
+		{
+			m->failed = true;
+			S9xSetInfoString ("Link cable: a Super Game Boy seat stopped responding");
+		}
+	}
+
+	S9xMachineApply (&master);
+	Settings.GBBootPolicy = policy;
+}
+
+// Master side, once per frame: bring machines up, report the ones that could
+// not, and put a freshly loaded one's Game Boy on the cable. Running is the
+// yield's job.
+static void GBSeatMachinesTurn ()
+{
+	bool any = false;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+		if (GBSeatMachines[k].thread && !GBSeatMachines[k].failed) { any = true; break; }
+	if (!any) return;
+
+	SMachineState master;
+	S9xMachineCapture (&master);
+	const uint8 policy = Settings.GBBootPolicy;
+
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		GBSeatMachine *m = &GBSeatMachines[k];
+		if (!m->thread || m->failed) continue;
+		if (m->ready && m->on_cable) continue;   // running: the yield drives it
+		// The first turn loads a BIOS and a cart.
+		const DWORD budget = m->ready ? 1000 : 10000;
+		SetEvent (m->go);
+		if (!GBSeatMachineWaitDone (m->done, budget))
+		{
+			// A machine that never comes back is dropped rather than
+			// freezing the master with it.
+			m->failed = true;
+			S9xSetInfoString ("Link cable: a Super Game Boy seat stopped responding");
+			continue;
+		}
+		if (m->failed && !m->reported)
+		{
+			m->reported = true;
+			char msg[160];
+			snprintf (msg, sizeof (msg), "Player %d: Super Game Boy could not start (%s)",
+			          m->player, m->stage ? m->stage : "?");
+			S9xSetInfoString (msg);
+			continue;
+		}
+		// Loaded: its Game Boy takes its seat on the cable - from here, so
+		// the rewire sees the master's own Instance().
+		if (m->ready && m->core && !m->on_cable)
+		{
+			S9xSGBSplitSetExternalCore (m->player, m->core);
+			m->on_cable = true;
+		}
+	}
+
+	S9xMachineApply (&master);
+	Settings.GBBootPolicy = policy;
+}
+
+static void GBSeatMachinesRequestReset ()
+{
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+		if (GBSeatMachines[k].thread)
+			InterlockedExchange (&GBSeatMachines[k].reset, 1);
+}
+
+static void GBSeatMachinesDestroy ()
+{
+	S9xSGBSplitSetYield (NULL, 0);
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		GBSeatMachine *m = &GBSeatMachines[k];
+		if (!m->thread) continue;
+		if (m->on_cable) S9xSGBSplitSetExternalCore (m->player, NULL);   // master thread
+		InterlockedExchange (&m->quit, 1);
+		SetEvent (m->go);
+		WaitForSingleObject (m->thread, 5000);
+		CloseHandle (m->thread);
+		CloseHandle (m->go);
+		CloseHandle (m->done);
+		memset (m, 0, sizeof *m);
+	}
+}
+
+// One machine per seat whose pick is a Super Game Boy. Threads only: the
+// machines come up on their first turn, from the master's frame loop, so a
+// seat's load never overlaps a master frame.
+static void GBSeatMachinesCreate (int players)
+{
+	GBSeatMachinesDestroy ();
+	for (int p = 2; p <= players && p <= SGB_MAX_LINK_PLAYERS; p++)
+	{
+		const uint8 pick = GBSeatModelPick (p);
+		if (!GBSeatModelIsMachine (pick)) continue;
+
+		GBSeatMachine *m = &GBSeatMachines[p - 2];
+		memset (m, 0, sizeof *m);
+		m->player = p;
+		m->policy = pick;
+		// The cart the master has: its path when it came from a file, its
+		// name otherwise (the master's Memory - this is the master thread).
+		const char *rom = Settings.GBRomPath[0] ? Settings.GBRomPath
+		                                        : Memory.ROMFilename.c_str ();
+		strncpy (m->rom, rom ? rom : "", _MAX_PATH);
+		m->rom[_MAX_PATH] = '\0';
+		m->go     = CreateEvent (NULL, FALSE, FALSE, NULL);
+		m->done   = CreateEvent (NULL, FALSE, FALSE, NULL);
+		m->thread = (m->go && m->done)
+		          ? CreateThread (NULL, 0, GBSeatMachineThread, m, 0, NULL) : NULL;
+		if (!m->thread)
+		{
+			if (m->go)   CloseHandle (m->go);
+			if (m->done) CloseHandle (m->done);
+			memset (m, 0, sizeof *m);
+			S9xSetInfoString ("Link cable: could not start a Super Game Boy seat");
+		}
+	}
+}
+
 // Emulation thread: copy this frame out and wake the renderer. Skipped
 // while a render is still running — the seats then re-show the previous
 // frame, which is what the shared-memory viewers did on a seqlock miss.
@@ -13561,7 +14152,13 @@ static void GBSeatPresentFrame ()
 	// that copy is a per-pixel recolor, not a memcpy.
 	for (int k = 0; k < GBSeatCount; k++)
 		if (GBSeatAlive[k])
-			GBSeatStageOwn[k] = S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
+		{
+			// A machine seat's picture is its own SNES's whole frame, copied
+			// out on its turn; nothing of it comes from the split engine.
+			GBSeatStageOwnBorder[k] = GBSeatMachineCopyFrame (k + 2, GBSeatStage[k]);
+			GBSeatStageOwn[k] = GBSeatStageOwnBorder[k] ||
+				S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
+		}
 
 	SetEvent (GBSeatEvent);
 }
@@ -13655,6 +14252,9 @@ static void WinStartGBSplit (int players)
 	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
 	base[_MAX_PATH] = '\0';
 
+	// One shared window has no seat window to give a machine to.
+	GBSeatModelsPushToEngine (players);
+	for (int p = 2; p <= players; p++) S9xSGBSplitSetSeatExternal (p, false);
 	if (!S9xSGBSplitStart (players, base))
 	{
 		S9xSetInfoString ("Split screen: could not start the extra consoles");
@@ -13692,6 +14292,7 @@ static void WinStopGBSplit ()
 	const bool viewer = S9xSGBViewerHostActive ();
 	if (viewer)
 	{
+		GBSeatMachinesDestroy ();   // machines leave the cable before it comes down
 		GBSeatWindowsDestroy ();
 		S9xSGBViewerHostStop ();
 		GBLinkMode = GBLINK_OFF;
@@ -13733,6 +14334,7 @@ static void WinStartGBViewerSession (int players)
 	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
 	base[_MAX_PATH] = '\0';
 
+	GBSeatModelsPushToEngine (players);
 	if (!S9xSGBSplitStart (players, base))
 	{
 		S9xSetInfoString ("Link cable: could not start the extra consoles");
@@ -13771,6 +14373,12 @@ static void WinStartGBViewerSession (int players)
 	if (GBSeatCount < players - 1)
 		S9xSetInfoString ("Link cable: could not open every player window");
 
+	// And a SNES of its own for every seat that picked a Super Game Boy,
+	// run in step with the cable: every 8 Game Boy lines of the engine's
+	// stepping, each machine advances the same amount.
+	GBSeatMachinesCreate (players);
+	S9xSGBSplitSetYield (GBSeatMachinesYield, 456 * 8);
+
 	// All consoles power up together — hard, so no seat boots from
 	// half-initialized RAM.
 	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
@@ -13778,6 +14386,46 @@ static void WinStartGBViewerSession (int players)
 	char msg[64];
 	snprintf (msg, sizeof (msg), "Link cable: %d players", players);
 	S9xSetInfoString (msg);
+}
+
+// Split screen needs the BIOS-less core; everything else gets player windows.
+static void WinGBRestartSeatSession (int players)
+{
+	if (players < 2) return;
+	if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
+		WinStartGBSplit (players);
+	else
+		WinStartGBViewerSession (players);
+}
+
+// A console cannot change under a running game, so a live session is torn
+// down and brought straight back up around the pick - the same power cycle
+// every session start does.
+static void WinGBSeatSetModel (int player, unsigned char model)
+{
+	GBSeatModelsInit ();
+	if (player < 2 || player > SGB_MAX_LINK_PLAYERS) return;
+	if (Settings.GBLinkPeerInstance) return;   // a seat never reshapes the session
+
+	if (GBSeatModelBlocked (model))
+	{
+		S9xSetInfoString ("Link cable: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2");
+		return;
+	}
+	if (GBSeatModelPick (player) == model) return;
+	GBSeatModel[player] = model;
+
+	char msg[128];
+	snprintf (msg, sizeof (msg), "Player %d: %s", player, GBSeatModelName (model));
+	S9xSetInfoString (msg);
+
+	// Idle, or a session with no in-process seats to rebuild: the pick is
+	// waiting for the next Current Game session either way.
+	if (!S9xSGBSplitActive ()) return;
+
+	const int players = S9xSGBSplitPlayers ();
+	WinStopGBSplit ();
+	WinGBRestartSeatSession (players);
 }
 
 // The per-frame session watchdog for both viewer roles: a viewer follows

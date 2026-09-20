@@ -378,6 +378,7 @@ bool8 S9xContinueUpdate(int Width, int Height)
 {
 	if (S9xAcidSgbChild)
 		return true;
+	if (S9xMachineIsSeat) return (TRUE);   // a seat machine's frame is its own window's
 	// called every other frame during interlace
 
     Src.Width = Width;
@@ -405,6 +406,7 @@ bool8 S9xDeinitUpdate (int Width, int Height)
 {
 	if (S9xAcidSgbChild)
 		return true;   // no window to draw into
+	if (S9xMachineIsSeat) return (TRUE);   // a seat machine's frame is staged by GBSeatMachine
 	if (PF94.active && S9xEventTimerDisplay() == 2)
 	{
 		static int lastShownSecs = -2;

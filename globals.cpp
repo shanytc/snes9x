@@ -20,17 +20,17 @@
 #include "missing.h"
 #endif
 
-struct SCPUState		CPU;
-struct SICPU			ICPU;
-struct SRegisters		Registers;
-struct SPPU				PPU;
-struct InternalPPU		IPPU;
-struct SDMA				DMA[8];
-struct STimings			Timings;
-struct SGFX				GFX;
-struct SBG				BG;
-struct SLineData		LineData[240];
-struct SLineMatrixData	LineMatrixData[240];
+S9X_MACHINE struct SCPUState		CPU;
+S9X_MACHINE struct SICPU			ICPU;
+S9X_MACHINE struct SRegisters		Registers;
+S9X_MACHINE struct SPPU				PPU;
+S9X_MACHINE struct InternalPPU		IPPU;
+S9X_MACHINE struct SDMA				DMA[8];
+S9X_MACHINE struct STimings			Timings;
+S9X_MACHINE struct SGFX				GFX;
+S9X_MACHINE struct SBG				BG;
+S9X_MACHINE struct SLineData		LineData[240];
+S9X_MACHINE struct SLineMatrixData	LineMatrixData[240];
 struct SDSP0			DSP0;
 struct SDSP1			DSP1;
 struct SDSP2			DSP2;
@@ -60,13 +60,13 @@ struct Missing			missing;
 #endif
 struct SCheatData		Cheat;
 struct Watch			watches[16];
-CMemory					Memory;
+S9X_MACHINE CMemory		Memory;
 
 char	String[513];
-uint8	OpenBus = 0;
-uint8	*HDMAMemPointers[8];
+S9X_MACHINE uint8	OpenBus = 0;
+S9X_MACHINE uint8	*HDMAMemPointers[8];
 uint16	BlackColourMap[256];
-uint16	DirectColourMaps[8][256];
+S9X_MACHINE uint16	DirectColourMaps[8][256];
 
 SnesModel	M1SNES = { 1, 3, 2 };
 SnesModel	M2SNES = { 2, 4, 3 };

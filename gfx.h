@@ -123,11 +123,11 @@ struct SLineMatrixData
 };
 
 extern uint16		BlackColourMap[256];
-extern uint16		DirectColourMaps[8][256];
+extern S9X_MACHINE uint16	DirectColourMaps[8][256];
 extern uint8		mul_brightness[16][32];
 extern uint8		brightness_cap[64];
-extern struct SBG	BG;
-extern struct SGFX	GFX;
+extern S9X_MACHINE struct SBG	BG;
+extern S9X_MACHINE struct SGFX	GFX;
 
 #define H_FLIP		0x4000
 #define V_FLIP		0x8000

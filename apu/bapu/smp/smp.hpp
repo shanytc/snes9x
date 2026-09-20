@@ -123,4 +123,4 @@ public:
 #endif
 };
 
-extern SMP smp;
+extern S9X_MACHINE SMP smp;

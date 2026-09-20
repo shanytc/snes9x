@@ -81,6 +81,11 @@ extern int GBLinkLauncherIndex;
 // spawned instances. Persisted; consulted at session start.
 extern bool GBLinkSplitScreen;
 
+// True on a thread that is a Super Game Boy seat's own SNES (see
+// GBSeatMachine): the frame hooks the core calls from S9xMainLoop - blit,
+// pacing, SRAM autosave - belong to the master and do nothing here.
+extern thread_local bool S9xMachineIsSeat;
+
 // The user's own Game Boy Model, captured before a launch switch
 // overrides it; the config file keeps this, not the session's value.
 extern int GBLinkUserModel;      // -1 = not a spawned instance

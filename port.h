@@ -21,6 +21,14 @@
 #endif
 #include <sys/types.h>
 
+// State that belongs to ONE SNES rather than to the program: the CPU, the
+// memory map, the PPU, the renderer. Marking it per-thread is what lets a
+// Super Game Boy seat own a second SNES on its own thread without touching a
+// single use site. Measured free on MSVC (1.00-1.01x per call); cygwin's
+// emulated TLS makes the headless harness ~3x slower, which only costs test
+// time. Config (Settings) and the coprocessors a seat never runs stay shared.
+#define S9X_MACHINE thread_local
+
 #ifdef __WIN32__
 #define NOMINMAX 1
 #include <windows.h>

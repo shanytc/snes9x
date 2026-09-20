@@ -13463,6 +13463,9 @@ static bool   GBSeatStageBordered = false;
 // This seat drew its own bezel, so its stage is a whole frame rather than a
 // screen to drop into the master's pane.
 static bool   GBSeatStageOwnBorder[SGB_MAX_LINK_PLAYERS - 1] = {};
+// This seat is a plain Game Boy / Color of its own inside a Super Game Boy
+// session: a bare 160x144 screen, never the master's SGB frame.
+static bool   GBSeatStagePlain[SGB_MAX_LINK_PLAYERS - 1] = {};
 // False while a seat has no frame of its own (master mid-boot): its window
 // then keeps the master's pane, so both play the same boot sequence.
 static bool   GBSeatStageOwn[SGB_MAX_LINK_PLAYERS - 1] = {};
@@ -13604,6 +13607,18 @@ static void GBSeatRenderStaged ()
 		{
 			GBSeatConvert (GBSeatStage[k], SNES_WIDTH, 0, 0, SNES_WIDTH, SNES_HEIGHT);
 			GBSeatPresent (hWnd, SNES_WIDTH, SNES_HEIGHT);
+			dib_has_master = false;
+			continue;
+		}
+
+		// A plain console of its own: its bare screen, and nothing of the
+		// master's frame, even in a BIOS-mode session.
+		if (GBSeatStagePlain[k])
+		{
+			if (!GBSeatStageOwn[k]) continue;   // no frame yet: leave the window be
+			GBSeatConvert (GBSeatStage[k], SGB_GB_SCREEN_W, 0, 0,
+			               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			GBSeatPresent (hWnd, SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
 			dib_has_master = false;
 			continue;
 		}
@@ -14156,6 +14171,8 @@ static void GBSeatPresentFrame ()
 			// A machine seat's picture is its own SNES's whole frame, copied
 			// out on its turn; nothing of it comes from the split engine.
 			GBSeatStageOwnBorder[k] = GBSeatMachineCopyFrame (k + 2, GBSeatStage[k]);
+			GBSeatStagePlain[k] = !GBSeatStageOwnBorder[k] &&
+				S9xSGBSplitGetSeatModel (k + 2) != SGB_SEAT_MODEL_MASTER;
 			GBSeatStageOwn[k] = GBSeatStageOwnBorder[k] ||
 				S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
 		}

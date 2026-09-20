@@ -4498,18 +4498,17 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	}
 
 	// A seat on a Game Boy Model of its own boots on that console's own boot
-	// ROM. BIOS mode holds the seats through the master's boot
-	// (SplitRunSeatsSlaved), so there they stay boot-ROM-less with the rest
-	// rather than come out of the hold a logo scroll behind.
+	// ROM, in BIOS mode too: it is a separate console switched on beside the
+	// Super Game Boy, and it is not held through the master's boot (see
+	// SplitRunSeatsSlaved) - a logo scroll of its own is the point.
 	SeatModelInit();
 	std::vector<uint8> own_boot[2];   // [0] Game Boy, [1] Color
-	if (!Settings.SGB_BIOSModeActive)
-		for (int k = 0; k < players - 1; ++k)
-		{
-			if (!SeatOwnModel(k) || SeatExternal(k)) continue;
-			const int c = (g_split_seat_model[k] == S9X_GBBOOT_GBC) ? 1 : 0;
-			if (own_boot[c].empty()) S9xGetGBBootROM(c != 0, own_boot[c]);
-		}
+	for (int k = 0; k < players - 1; ++k)
+	{
+		if (!SeatOwnModel(k) || SeatExternal(k)) continue;
+		const int c = (g_split_seat_model[k] == S9X_GBBOOT_GBC) ? 1 : 0;
+		if (own_boot[c].empty()) S9xGetGBBootROM(c != 0, own_boot[c]);
+	}
 
 	for (int k = 0; k < players - 1; ++k)
 	{
@@ -5330,8 +5329,11 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 	// that window, coming out of it permanently ahead — the lead that no
 	// amount of frame delay ever moved. Hold them at the cart's first
 	// instruction until the master gets there.
+	// A seat on a model of its own is a separate console with its own boot:
+	// it runs through the hold. Only the seats mirroring the master wait.
 	static bool held_traced = false;
-	if (SGB::Instance().DebugImpl()->mem.boot_rom_enabled)
+	const bool held = SGB::Instance().DebugImpl()->mem.boot_rom_enabled;
+	if (held)
 	{
 		if (!held_traced && SGB::SerialTraceEnabled())
 		{
@@ -5342,10 +5344,8 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 			         (long long)mi->cpu.State().t_cycles, mi->ppu.frame_no);
 			SGB::SerialTraceMsg(msg);
 		}
-		g_seat_slave_accum = 0;
-		return;
 	}
-	if (held_traced)
+	else if (held_traced)
 	{
 		held_traced = false;
 		if (SGB::SerialTraceEnabled())
@@ -5406,6 +5406,8 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 	{
 		SGB::Emulator *core = g_split_cores[k].get();
 		if (!core || !core->DebugImpl()->has_rom) continue;
+		if (SeatOwnModel(k)) continue;   // its own console: the scanline clock steps it
+		if (held) continue;              // mirrors the master: waits for it
 		SGB::SerialSetTraceSeat(k + 1);
 		core->RunCycles(slice);
 		if (SplitSnapIfReady(core, k + 1))
@@ -5493,12 +5495,37 @@ void S9xSGBMachinePayGb(int gb_cycles)
 // One SNES scanline of this machine, gated on nothing. The engine's yield is
 // fed the line's worth of the master's Game Boy cycles (1364 master cycles at
 // the Game Boy's clock), so seat machines pace the cable through the splash.
+// Own-model split seats in a BIOS-mode session: a separate console beside
+// the Super Game Boy, stepped from this clock - the only one that runs while
+// the BIOS holds its own Game Boy - in the split engine's 456-cycle slices.
+static S9X_MACHINE int32_t g_own_seat_accum = 0;
+
+static void SplitStepOwnSeats(int gb_cycles)
+{
+	if (g_seat_machine || g_split_players < 2) return;
+	g_own_seat_accum += gb_cycles;
+	if (g_own_seat_accum < kSeatSlaveSlice) return;
+	const int32_t slice = g_own_seat_accum;
+	g_own_seat_accum = 0;
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		SGB::Emulator *core = g_split_cores[k].get();
+		if (!core || !SeatOwnModel(k) || !core->DebugImpl()->has_rom) continue;
+		SGB::SerialSetTraceSeat(k + 1);
+		core->RunCycles(slice);
+		SplitSnapIfReady(core, k + 1);
+	}
+	SGB::SerialSetTraceSeat(-1);
+}
+
 void S9xSGBOnSnesScanline(void)
 {
 	++g_snes_line_counter;
 	SliceCheck();
 	const bool sgb1 = SGB::Instance().GetRunMode() == SGB::RunMode::SGB;
-	SplitYield(sgb1 ? 273 : 266);
+	const int  gb   = sgb1 ? 273 : 266;
+	SplitStepOwnSeats(gb);
+	SplitYield(gb);
 }
 
 void S9xSGBResetSyncAnchor(int32_t cpu_cycles)

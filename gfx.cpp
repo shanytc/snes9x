@@ -20,8 +20,8 @@
                         // clobbered by the PPU's final blit.
 
 extern struct SCheatData		Cheat;
-extern struct SLineData			LineData[240];
-extern struct SLineMatrixData	LineMatrixData[240];
+extern S9X_MACHINE struct SLineData			LineData[240];
+extern S9X_MACHINE struct SLineMatrixData	LineMatrixData[240];
 
 void S9xComputeClipWindows (void);
 
@@ -449,12 +449,12 @@ void S9xBuildDirectColourMaps (void)
 // brightness each line was actually drawn with, so the pass is exact for
 // any Timings.RenderPos.
 #define MAX_BRIGHT_EVENTS 64
-static struct
+static S9X_MACHINE struct
 {
 	uint8	line, x, oldB, newB;
 }	bright_events[MAX_BRIGHT_EVENTS];
-static int		bright_event_count = 0;
-static uint8	line_brightness[240];
+static S9X_MACHINE int		bright_event_count = 0;
+static S9X_MACHINE uint8	line_brightness[240];
 
 void S9xRecordMidLineBrightness (int line, int x, uint8 oldBright, uint8 newBright)
 {
@@ -477,21 +477,21 @@ static void S9xApplyMidLineBrightness (void);
 // are recorded here and the outer spans are re-rendered with the pre-raster
 // state at the line's HBlank, clipped through the normal window-segment lists.
 #define MAX_RASTER_EVENTS 64
-static struct
+static S9X_MACHINE struct
 {
 	uint8	line, x, cls, reg;   // cls 0 = $2123+reg window byte, 1 = $210d+reg scroll
 	uint16	oldV, newV;
 }	raster_events[MAX_RASTER_EVENTS];
-static int	raster_event_count = 0;
+static S9X_MACHINE int	raster_event_count = 0;
 
-static int		raster_span_count = 0;   // re-render clip restriction, consumed by S9xUpdateScreen
-static uint16	raster_span_l[2], raster_span_r[2];
+static S9X_MACHINE int		raster_span_count = 0;   // re-render clip restriction, consumed by S9xUpdateScreen
+static S9X_MACHINE uint16	raster_span_l[2], raster_span_r[2];
 
 // Window positions and the backdrop color are HDMA-driven per line (gauge
 // shapes, the radar sweep, the ambient-light gradient on CGRAM entry 0);
 // RenderLine snapshots what each line actually latched.
-static uint8	line_windows[240][4];
-static uint16	line_backdrop[240];
+static S9X_MACHINE uint8	line_windows[240][4];
+static S9X_MACHINE uint16	line_backdrop[240];
 
 static bool mid_line_event_pos (int &line, int &x)
 {
@@ -991,13 +991,13 @@ void S9xStartScreenRefresh (void)
 
 static void S9xBlendGameBoyFrames (void)
 {
-	static uint16 prev[SNES_WIDTH * SNES_HEIGHT_EXTENDED];     // raw composite of last DISTINCT frame
-	static uint16 lastout[SNES_WIDTH * SNES_HEIGHT_EXTENDED];  // last presented blended frame
-	static uint8  prevLayer[GB_BLEND_W * GB_BLEND_H];          // GB layer map of last distinct frame
-	static uint32 prevW = 0, prevH = 0;
-	static uint32 gbPrev = 0;
-	static uint32 dupRun = 0;
-	static bool   primed = false;
+	static S9X_MACHINE uint16 prev[SNES_WIDTH * SNES_HEIGHT_EXTENDED];     // raw composite of last DISTINCT frame
+	static S9X_MACHINE uint16 lastout[SNES_WIDTH * SNES_HEIGHT_EXTENDED];  // last presented blended frame
+	static S9X_MACHINE uint8  prevLayer[GB_BLEND_W * GB_BLEND_H];          // GB layer map of last distinct frame
+	static S9X_MACHINE uint32 prevW = 0, prevH = 0;
+	static S9X_MACHINE uint32 gbPrev = 0;
+	static S9X_MACHINE uint32 dupRun = 0;
+	static S9X_MACHINE bool   primed = false;
 
 	// Suppress blending during fast-forward: the GB races many frames per
 	// displayed frame, so pairing/skip-holding stutters. Present raw frames and

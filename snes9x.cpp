@@ -383,6 +383,32 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	S9xVerifyControllers();
 }
 
+// See SMachineState: the console this machine is, lifted out of the shared
+// Settings so two machines cannot overwrite each other's.
+void S9xMachineCapture (struct SMachineState *out)
+{
+	if (!out) return;
+	out->SuperGameBoy       = Settings.SuperGameBoy;
+	out->SGB_BIOSModeActive = Settings.SGB_BIOSModeActive;
+	out->GB_BIOSActive      = Settings.GB_BIOSActive;
+	out->PAL                = Settings.PAL;
+	out->GameBoyRunMode     = Settings.GameBoyRunMode;
+	out->GBClockMultiplier  = Settings.GBClockMultiplier;
+	out->FrameTime          = Settings.FrameTime;
+}
+
+void S9xMachineApply (const struct SMachineState *in)
+{
+	if (!in) return;
+	Settings.SuperGameBoy       = in->SuperGameBoy;
+	Settings.SGB_BIOSModeActive = in->SGB_BIOSModeActive;
+	Settings.GB_BIOSActive      = in->GB_BIOSActive;
+	Settings.PAL                = in->PAL;
+	Settings.GameBoyRunMode     = in->GameBoyRunMode;
+	Settings.GBClockMultiplier  = in->GBClockMultiplier;
+	Settings.FrameTime          = in->FrameTime;
+}
+
 void S9xUsage (void)
 {
 	/*                               12345678901234567890123456789012345678901234567890123456789012345678901234567890 */

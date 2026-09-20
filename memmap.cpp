@@ -1236,6 +1236,16 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 	return (TRUE);
 }
 
+// A link seat on its own Game Boy Model boots on that console's ROM, not the
+// master's staged one. Empty when the slot is unassigned or the dump is bad.
+bool8 S9xGetGBBootROM (bool8 cgb, std::vector<uint8> &out)
+{
+	out.clear();
+	if (!Settings.GB_BIOSEnabled) return (FALSE);
+	std::string path;
+	return (FindGB_BootROM(cgb != FALSE, Settings.GBRomPath, path, &out));
+}
+
 // $0146 = $03 and $014B = $33: an SGB ignores command packets unless both say
 // so, so the flag alone does not make a cart SGB-enhanced.
 static bool GbHeaderSgbEnhanced (uint8 sgb_flag, uint8 old_licensee)

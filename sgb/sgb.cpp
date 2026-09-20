@@ -4255,17 +4255,39 @@ void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
 // bit-identical instead, so a game that arbitrates the cable by
 // "whoever hears nothing first drives it" — Micro Machines promotes
 // itself to master after 30 idle ticks — has both seats promote on the
-// very same cycle and neither is ever listening. Offset the second
-// seat; the difference lasts until the next reset re-applies it.
-// Adapter sessions are left alone: the DMG-07 owns the clock there and
-// nothing arbitrates for it.
+// very same cycle and neither is ever listening. Switch the seat on
+// first, by longer than a game's whole probe-and-park window (Renju
+// Club's is 0.43 s); the head start lasts until the next reset re-arms
+// it. Adapter sessions are left alone: the DMG-07 owns the clock there
+// and nothing arbitrates for it.
+static constexpr int32_t kSeatHeadStart = 1258291;   // 0.3 s of Game Boy
+static bool g_seat_head_start_due[SGB_MAX_LINK_PLAYERS - 1];
+
 static void SplitStaggerSeats(void)
 {
-	// BIOS mode slaves the primary to the SNES clock: free-running it
-	// here would shear the BIOS's bank-read timing off our slices.
+	std::memset(g_seat_head_start_due, 0, sizeof g_seat_head_start_due);
+	// BIOS mode slaves the primary to the SNES clock: free-running a seat
+	// there would shear the BIOS's bank-read timing off our slices.
 	if (Settings.SGB_BIOSModeActive) return;
 	if (S9xSGBSplitPlayers() != 2 || S9xSGBCartNeedsDmg07()) return;
-	if (g_split_cores[0]) g_split_cores[0]->RunCycles(17556);   // a quarter frame
+	g_seat_head_start_due[0] = true;
+}
+
+// Spent the moment the seat's boot ROM hands off, not at power-on: the two
+// boot logos scroll in step and the gap lands in the game's blank intro.
+static void SplitHeadStart(SGB::Emulator *core, int pos)
+{
+	const int k = pos - 1;
+	if (!g_seat_head_start_due[k] || core->DebugImpl()->mem.boot_rom_enabled) return;
+	g_seat_head_start_due[k] = false;
+	if (SGB::SerialTraceEnabled())
+	{
+		char msg[80];
+		snprintf(msg, sizeof msg, "boot: seat %d head start %d cycles at t=%lld", pos + 1,
+		         (int)kSeatHeadStart, (long long)core->DebugImpl()->cpu.State().t_cycles);
+		SGB::SerialTraceMsg(msg);
+	}
+	core->RunCycles(kSeatHeadStart);
 }
 
 void S9xSGBReset(void)
@@ -4780,6 +4802,7 @@ void S9xSGBSplitRunFrame(void)
 			cs[i]->RunCycles(chunk);
 			remaining[i] -= chunk;
 			if (i == 0) SplitYield(chunk);   // once per round of the cores
+			else        SplitHeadStart(cs[i], i);
 			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
 			running = true;

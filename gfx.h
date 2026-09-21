@@ -210,6 +210,10 @@ void S9xRecordMidLineScroll (int reg, uint16 oldVal, uint16 newVal);
 void S9xBuildDirectColourMaps (void);
 void RenderLine (uint8);
 void S9xComputeClipWindows (void);
+// An interlaced field fetches its own BG rows only where the mode has
+// vertical hires to fetch them for; every other mode repeats the same row
+// in both fields, so the picture is 448 lines of 224 rows.
+bool8 S9xInterlacedBGRows (void);
 void S9xDisplayChar (uint16 *, uint8);
 void S9xGraphicsScreenResize (void);
 // called automatically unless Settings.AutoDisplayMessages is false

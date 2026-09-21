@@ -343,7 +343,7 @@ void S9xSelectTileRenderers (int BGMode, bool8 sub, bool8 obj)
 	M7M1 = PPU.BGMosaic[0] && PPU.Mosaic > 1;
 	M7M2 = PPU.BGMosaic[1] && PPU.Mosaic > 1;
 
-	bool8 interlace = obj ? FALSE : IPPU.Interlace;
+	bool8 interlace = obj ? FALSE : S9xInterlacedBGRows();
 	bool8 hires = !sub && (BGMode == 5 || BGMode == 6 || IPPU.PseudoHires);
 
 	if (!IPPU.DoubleWidthPixels)	// normal width

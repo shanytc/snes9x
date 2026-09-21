@@ -24,6 +24,12 @@ extern struct SLineMatrixData	LineMatrixData[240];
 
 void S9xComputeClipWindows (void);
 
+bool8 S9xInterlacedBGRows (void)
+{
+	return (IPPU.Interlace && IPPU.DoubleWidthPixels &&
+	        (PPU.BGMode == 5 || PPU.BGMode == 6));
+}
+
 void (*S9xCustomDisplayString) (const char *, int, int, bool, int) = NULL;
 
 static void SetupOBJ (void);
@@ -1987,7 +1993,7 @@ static void DrawBackground (int bg, uint8 Zh, uint8 Zl)
 	int		OffsetMask  = (BG.TileSizeH == 16) ? 0x3ff : 0x1ff;
 	int		OffsetShift = (BG.TileSizeV == 16) ? 4 : 3;
 	int		PixWidth = IPPU.DoubleWidthPixels ? 2 : 1;
-	bool8	HiresInterlace = IPPU.Interlace && IPPU.DoubleWidthPixels;
+	bool8	HiresInterlace = S9xInterlacedBGRows();
 
 	void (*DrawTile) (uint32, uint32, uint32, uint32);
 	void (*DrawClippedTile) (uint32, uint32, uint32, uint32, uint32, uint32);
@@ -2212,7 +2218,7 @@ static void DrawBackgroundMosaic (int bg, uint8 Zh, uint8 Zl)
 	int	OffsetMask  = (BG.TileSizeH == 16) ? 0x3ff : 0x1ff;
 	int	OffsetShift = (BG.TileSizeV == 16) ? 4 : 3;
 	int	PixWidth = IPPU.DoubleWidthPixels ? 2 : 1;
-	bool8	HiresInterlace = IPPU.Interlace && IPPU.DoubleWidthPixels;
+	bool8	HiresInterlace = S9xInterlacedBGRows();
 
 	void (*DrawPix) (uint32, uint32, uint32, uint32, uint32, uint32);
 
@@ -2397,7 +2403,7 @@ static void DrawBackgroundOffset (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 	int	Offset2Shift = (BG.OffsetSizeV == 16) ? 4 : 3;
 	int	OffsetEnableMask = 0x2000 << bg;
 	int	PixWidth = IPPU.DoubleWidthPixels ? 2 : 1;
-	bool8	HiresInterlace = IPPU.Interlace && IPPU.DoubleWidthPixels;
+	bool8	HiresInterlace = S9xInterlacedBGRows();
 
 	void (*DrawClippedTile) (uint32, uint32, uint32, uint32, uint32, uint32);
 
@@ -2632,7 +2638,7 @@ static void DrawBackgroundOffsetMosaic (int bg, uint8 Zh, uint8 Zl, int VOffOff)
 	int	Offset2Shift = (BG.OffsetSizeV == 16) ? 4 : 3;
 	int	OffsetEnableMask = 0x2000 << bg;
 	int	PixWidth = IPPU.DoubleWidthPixels ? 2 : 1;
-	bool8	HiresInterlace = IPPU.Interlace && IPPU.DoubleWidthPixels;
+	bool8	HiresInterlace = S9xInterlacedBGRows();
 
 	void (*DrawPix) (uint32, uint32, uint32, uint32, uint32, uint32);
 

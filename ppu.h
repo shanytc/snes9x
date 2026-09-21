@@ -242,6 +242,8 @@ extern SnesModel	M2SNES;
 #define MAX_5A22_VERSION	0x02
 
 void S9xUpdateScreen (void);
+// Latch the window spans the beam has already swept (clip.cpp).
+void S9xLatchWindowSpans (void);
 static inline void FLUSH_REDRAW (void)
 {
 	if (IPPU.PreviousLine != IPPU.CurrentLine)

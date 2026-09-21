@@ -100,6 +100,8 @@
 #define	SNES_HBLANK_END_HC			4						// H=1
 #define	SNES_HDMA_INIT_HC			20						// FIXME: not true
 #define	SNES_RENDER_START_HC		(128 * ONE_DOT_CYCLE)	// FIXME: Snes9x renders a line at a time.
+// HTIME*4+14 raises /IRQ; the CPU acts on the transition one poll later.
+#define SNES_IRQ_TRIGGER_CYCLES		18
 
 #define SNES_TR_MASK		(1 <<  4)
 #define SNES_TL_MASK		(1 <<  5)

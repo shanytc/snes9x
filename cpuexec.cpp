@@ -191,6 +191,8 @@ void S9xMainLoop (void)
 			if (CPU.WaitingForInterrupt)
 			{
 				CPU.WaitingForInterrupt = FALSE;
+				// Upstream adds ONE_DOT_CYCLE here; SNES_IRQ_TRIGGER_CYCLES already
+				// carries that poll delay, so adding it again wakes WAI a dot late.
 				Registers.PCw++;
 				CPU.Cycles += TWO_CYCLES + ONE_DOT_CYCLE / 2;
 				while (CPU.Cycles >= CPU.NextEvent)
@@ -242,122 +244,112 @@ void S9xMainLoop (void)
 		{
 			break;
 		}
-
-		// WAI stalls inside the instruction: the opcode is not re-fetched, so
-		// hardware re-tests the interrupt line once per CPU cycle. Re-running
-		// OpCB polled once per fetch + cycle, twice the real granularity, and
-		// the wake landed up to two CPU cycles late instead of one.
 		if (CPU.WaitingForInterrupt)
 		{
 			CPU.Cycles += ONE_CYCLE;
 			while (CPU.Cycles >= CPU.NextEvent)
 				S9xDoHEventProcessing();
-
-			if (Settings.SA1)
-				S9xSA1MainLoop();
-			if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
-				S9xSGBSyncToSnesCycle(CPU.Cycles);
-
-			continue;
-		}
-
-		// Olympic Summer Games (SGB Enhanced) workaround. The SGB BIOS's
-		// JUMP packet handler at $00:C72B does SEI before JMP [$00B8] to
-		// transfer control to user-uploaded code (Olympic's $7E:081B
-		// handler). Per pandocs the JUMP target runs with IRQs disabled
-		// intentionally. On real hardware Olympic re-enables IRQ later
-		// via its cmd-09 (SOU_TRN) hook at $7E:0900 which calls sub_80C58D
-		// (CLI when $02CA != 0). In our emulation the BIOS reaches the
-		// V-counter-gated wait at $00:BA6A (LDA $22; BEQ $-04) before
-		// the SOU_TRN packets get drained, so I=1 blocks the IRQ that
-		// would write $22 and the wait hangs forever. Clearing I here
-		// restores the invariant the wait requires; non-Olympic SGB
-		// titles never reach $BA6A with I=1 so they are unaffected.
-		if (Settings.SGB_BIOSModeActive &&
-		    Registers.PB == 0x00 && Registers.PCw == 0xBA6A &&
-		    CheckIRQ())
-		{
-			ClearIRQ();
-		}
-
-		// Voicer-kun: the game names a CD track, starts it, or ends the voice.
-		if (Settings.VoiceKun)
-		{
-			if (VoiceKunHook.PlayPC && Registers.PBPC == VoiceKunHook.PlayPC)
-			{
-				uint32	s = Registers.S.W;
-				int	arg = 0;
-				if (!VoiceKunHook.ArmPC)
-					arg = VoiceKunHook.ArgStackOff
-						? (Memory.RAM[(s + VoiceKunHook.ArgStackOff) & 0x1ffff] |
-						   (Memory.RAM[(s + VoiceKunHook.ArgStackOff + 1) & 0x1ffff] << 8))
-						  + VoiceKunHook.TrackBias
-						: (Registers.A.W & 0xff) + VoiceKunHook.TrackBias;
-				S9xVoiceKunPlayTrack(arg);
-			}
-			else
-			if (VoiceKunHook.ArmPC && Registers.PBPC == VoiceKunHook.ArmPC)
-			{
-				uint32	s = Registers.S.W;
-				int	arg = Memory.RAM[(s + VoiceKunHook.ArmArgOff) & 0x1ffff] |
-				          (Memory.RAM[(s + VoiceKunHook.ArmArgOff + 1) & 0x1ffff] << 8);
-				S9xVoiceKunArmTrack(arg + VoiceKunHook.TrackBias);
-			}
-			else
-			if (VoiceKunHook.StopPC && Registers.PBPC == VoiceKunHook.StopPC)
-				S9xVoiceKunStop();
-			else
-			if (VoiceKunHook.IRCmdPC && Registers.PBPC == VoiceKunHook.IRCmdPC)
-			{
-				uint32	s = Registers.S.W;
-				int	cmd = Memory.RAM[(s + VoiceKunHook.IRCmdArgOff) & 0x1ffff] |
-				          (Memory.RAM[(s + VoiceKunHook.IRCmdArgOff + 1) & 0x1ffff] << 8);
-				S9xVoiceKunDeckCommand(cmd);
-			}
-
-			// Voice counter: ticks once per voiced scene whether or not the
-			// game prompts for the disc, so it catches scene changes the
-			// prompt hooks miss (continuous play).
-			int	vaddr = S9xVoiceKunVoiceIdAddr();
-			if (vaddr)
-				S9xVoiceKunPollVoiceId(Memory.RAM[vaddr & 0x1ffff]);
-		}
-
-		uint8				Op;
-		struct	SOpcodes	*Opcodes;
-
-		if (CPU.PCBase)
-		{
-			Op = CPU.PCBase[Registers.PCw];
-			CPU.Cycles += CPU.MemSpeed;
-			Opcodes = ICPU.S9xOpcodes;
-
-			if (CPU.Cycles > 1000000)
-			{
-				Settings.StopEmulation = true;
-				CPU.Flags |= HALTED_FLAG;
-				S9xMessage(S9X_FATAL_ERROR, 0, "CPU is deadlocked");
-				return;
-			}
 		}
 		else
 		{
-			Op = S9xGetByte(Registers.PBPC);
-			OpenBus = Op;
-			Opcodes = S9xOpcodesSlow;
-		}
+			// Olympic Summer Games (SGB Enhanced) workaround. The SGB BIOS's
+			// JUMP packet handler at $00:C72B does SEI before JMP [$00B8] to
+			// transfer control to user-uploaded code (Olympic's $7E:081B
+			// handler). Per pandocs the JUMP target runs with IRQs disabled
+			// intentionally. On real hardware Olympic re-enables IRQ later
+			// via its cmd-09 (SOU_TRN) hook at $7E:0900 which calls sub_80C58D
+			// (CLI when $02CA != 0). In our emulation the BIOS reaches the
+			// V-counter-gated wait at $00:BA6A (LDA $22; BEQ $-04) before
+			// the SOU_TRN packets get drained, so I=1 blocks the IRQ that
+			// would write $22 and the wait hangs forever. Clearing I here
+			// restores the invariant the wait requires; non-Olympic SGB
+			// titles never reach $BA6A with I=1 so they are unaffected.
+			if (Settings.SGB_BIOSModeActive &&
+			    Registers.PB == 0x00 && Registers.PCw == 0xBA6A &&
+			    CheckIRQ())
+			{
+				ClearIRQ();
+			}
 
-		if ((Registers.PCw & MEMMAP_MASK) + ICPU.S9xOpLengths[Op] >= MEMMAP_BLOCK_SIZE)
-		{
-			uint8	*oldPCBase = CPU.PCBase;
+			// Voicer-kun: the game names a CD track, starts it, or ends the voice.
+			if (Settings.VoiceKun)
+			{
+				if (VoiceKunHook.PlayPC && Registers.PBPC == VoiceKunHook.PlayPC)
+				{
+					uint32	s = Registers.S.W;
+					int	arg = 0;
+					if (!VoiceKunHook.ArmPC)
+						arg = VoiceKunHook.ArgStackOff
+							? (Memory.RAM[(s + VoiceKunHook.ArgStackOff) & 0x1ffff] |
+							   (Memory.RAM[(s + VoiceKunHook.ArgStackOff + 1) & 0x1ffff] << 8))
+							  + VoiceKunHook.TrackBias
+							: (Registers.A.W & 0xff) + VoiceKunHook.TrackBias;
+					S9xVoiceKunPlayTrack(arg);
+				}
+				else
+				if (VoiceKunHook.ArmPC && Registers.PBPC == VoiceKunHook.ArmPC)
+				{
+					uint32	s = Registers.S.W;
+					int	arg = Memory.RAM[(s + VoiceKunHook.ArmArgOff) & 0x1ffff] |
+					          (Memory.RAM[(s + VoiceKunHook.ArmArgOff + 1) & 0x1ffff] << 8);
+					S9xVoiceKunArmTrack(arg + VoiceKunHook.TrackBias);
+				}
+				else
+				if (VoiceKunHook.StopPC && Registers.PBPC == VoiceKunHook.StopPC)
+					S9xVoiceKunStop();
+				else
+				if (VoiceKunHook.IRCmdPC && Registers.PBPC == VoiceKunHook.IRCmdPC)
+				{
+					uint32	s = Registers.S.W;
+					int	cmd = Memory.RAM[(s + VoiceKunHook.IRCmdArgOff) & 0x1ffff] |
+					          (Memory.RAM[(s + VoiceKunHook.IRCmdArgOff + 1) & 0x1ffff] << 8);
+					S9xVoiceKunDeckCommand(cmd);
+				}
 
-			CPU.PCBase = S9xGetBasePointer(ICPU.ShiftedPB + ((uint16) (Registers.PCw + 4)));
-			if (oldPCBase != CPU.PCBase || (Registers.PCw & ~MEMMAP_MASK) == (0xffff & ~MEMMAP_MASK))
+				// Voice counter: ticks once per voiced scene whether or not the
+				// game prompts for the disc, so it catches scene changes the
+				// prompt hooks miss (continuous play).
+				int	vaddr = S9xVoiceKunVoiceIdAddr();
+				if (vaddr)
+					S9xVoiceKunPollVoiceId(Memory.RAM[vaddr & 0x1ffff]);
+			}
+
+			uint8				Op;
+			struct	SOpcodes	*Opcodes;
+
+			if (CPU.PCBase)
+			{
+				Op = CPU.PCBase[Registers.PCw];
+				CPU.Cycles += CPU.MemSpeed;
+				Opcodes = ICPU.S9xOpcodes;
+
+				if (CPU.Cycles > 1000000)
+				{
+					Settings.StopEmulation = true;
+					CPU.Flags |= HALTED_FLAG;
+					S9xMessage(S9X_FATAL_ERROR, 0, "CPU is deadlocked");
+					return;
+				}
+			}
+			else
+			{
+				Op = S9xGetByte(Registers.PBPC);
+				OpenBus = Op;
 				Opcodes = S9xOpcodesSlow;
-		}
+			}
 
-		Registers.PCw++;
-		(*Opcodes[Op].S9xOpcode)();
+			if ((Registers.PCw & MEMMAP_MASK) + ICPU.S9xOpLengths[Op] >= MEMMAP_BLOCK_SIZE)
+			{
+				uint8	*oldPCBase = CPU.PCBase;
+
+				CPU.PCBase = S9xGetBasePointer(ICPU.ShiftedPB + ((uint16) (Registers.PCw + 4)));
+				if (oldPCBase != CPU.PCBase || (Registers.PCw & ~MEMMAP_MASK) == (0xffff & ~MEMMAP_MASK))
+					Opcodes = S9xOpcodesSlow;
+			}
+
+			Registers.PCw++;
+			(*Opcodes[Op].S9xOpcode)();
+		}
 
 		if (Settings.SA1)
 			S9xSA1MainLoop();
@@ -517,6 +509,11 @@ void S9xDoHEventProcessing (void)
 				Timings.NextIRQTimer -= Timings.H_Max;
 			S9xAPUSetReferenceTime(CPU.Cycles);
 
+			PPU.CentreXLatched = false;
+			PPU.CentreYLatched = false;
+			PPU.M7HOFSLatched = false;
+			PPU.M7VOFSLatched = false;
+
 			if (Settings.SA1)
 				SA1.Cycles -= Timings.H_Max * 3;
 
@@ -633,6 +630,8 @@ void S9xDoHEventProcessing (void)
 
 			if (CPU.V_Counter == FIRST_VISIBLE_LINE)	// V=1
 				S9xStartScreenRefresh();
+
+
 
 			S9xReschedule();
 

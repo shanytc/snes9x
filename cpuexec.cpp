@@ -243,6 +243,24 @@ void S9xMainLoop (void)
 			break;
 		}
 
+		// WAI stalls inside the instruction: the opcode is not re-fetched, so
+		// hardware re-tests the interrupt line once per CPU cycle. Re-running
+		// OpCB polled once per fetch + cycle, twice the real granularity, and
+		// the wake landed up to two CPU cycles late instead of one.
+		if (CPU.WaitingForInterrupt)
+		{
+			CPU.Cycles += ONE_CYCLE;
+			while (CPU.Cycles >= CPU.NextEvent)
+				S9xDoHEventProcessing();
+
+			if (Settings.SA1)
+				S9xSA1MainLoop();
+			if (Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased())
+				S9xSGBSyncToSnesCycle(CPU.Cycles);
+
+			continue;
+		}
+
 		// Olympic Summer Games (SGB Enhanced) workaround. The SGB BIOS's
 		// JUMP packet handler at $00:C72B does SEI before JMP [$00B8] to
 		// transfer control to user-uploaded code (Olympic's $7E:081B

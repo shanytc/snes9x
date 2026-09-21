@@ -20,10 +20,18 @@
 static struct
 {
 	int32	line;          // scanline this state belongs to
+	uint32	frame;         // and the frame, so a wrapped V counter cannot
+	                       // hand last frame's line its state back
 	int32	dot;           // dots already swept
 	int16	start[2];      // dot X1 was matched at, -1 = not yet
 	int16	stop[2];       // dot X2 was matched at, -1 = not yet
-}	window_latch = { -1, 0, { -1, -1 }, { -1, -1 } };
+}	window_latch = { -1, 0, 0, { -1, -1 }, { -1, -1 } };
+
+static inline bool WindowLatchIsCurrent (void)
+{
+	return (window_latch.line  == CPU.V_Counter &&
+	        window_latch.frame == IPPU.TotalEmulatedFrames);
+}
 
 // The dot the beam has reached. Pixel 0 of the line is dot 22 of the H
 // counter, the same origin the mid-line raster events use.
@@ -52,11 +60,22 @@ static void SweepWindowLatches (int16 *start, int16 *stop, int32 from, int32 to)
 
 // Called before a window position register changes, so the dots the beam has
 // already passed are latched against the value that was in force for them.
+// Only a write inside a visible line has dots behind it: one in VBlank or
+// past HBlank is setting the positions up for lines that have not started,
+// and those lines latch from dot 0 like any other.
 void S9xLatchWindowSpans (void)
 {
-	if (window_latch.line != CPU.V_Counter)
+	if (CPU.V_Counter < FIRST_VISIBLE_LINE ||
+	    CPU.V_Counter >= PPU.ScreenHeight + FIRST_VISIBLE_LINE)
+	{
+		window_latch.line = -1;
+		return;
+	}
+
+	if (!WindowLatchIsCurrent())
 	{
 		window_latch.line     = CPU.V_Counter;
+		window_latch.frame    = IPPU.TotalEmulatedFrames;
 		window_latch.dot      = 0;
 		window_latch.start[0] = window_latch.start[1] = -1;
 		window_latch.stop[0]  = window_latch.stop[1]  = -1;
@@ -79,7 +98,7 @@ static void EffectiveWindows (uint8 *left, uint8 *right)
 	int16	start[2], stop[2];
 	int32	from = 0;
 
-	if (window_latch.line == CPU.V_Counter)
+	if (WindowLatchIsCurrent())
 	{
 		start[0] = window_latch.start[0];	start[1] = window_latch.start[1];
 		stop[0]  = window_latch.stop[0];	stop[1]  = window_latch.stop[1];

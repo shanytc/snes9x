@@ -45,7 +45,10 @@ bool8 S9xCartProtDetect (uint8 *rom, uint32 size)
 	static const uint8	kBurst[] = { 0x08, 0xA0, 0x00, 0x00, 0xAE, 0x1A, 0x03, 0xA9, 0x0F, 0x00, 0x97, 0x16 };
 	static const uint8	kFetch[] = { 0x08, 0xA0, 0x00, 0x01, 0xA2, 0x00, 0x01, 0xB7, 0x16, 0x8D, 0x74, 0x02 };
 
-	if (size < 0x40000)
+	// Only the 2 MB image is verified. The 8 MB "Tekken 2 (USA) (Pirate)"
+	// 2-in-1 carries the same code twice but needs a multicart mapper it
+	// does not have, and its banks $80-$BF hold real ROM - leave it alone.
+	if (size != 0x200000)
 		return (FALSE);
 
 	return (memcmp(rom + 0x35DF, kBurst, sizeof(kBurst)) == 0 &&

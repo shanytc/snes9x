@@ -55,6 +55,15 @@ bool8 S9xCartProtDetect (uint8 *rom, uint32 size)
 	if (size != 0x200000)
 		return (FALSE);
 
+	// Street Fighter EX / EX Plus Alpha (Pirate) drives the same chip from bank
+	// $01 with direct page $86 and registers $0100/$0102/$0104.
+	static const uint8	kSfexBurst[] = { 0x08, 0xC2, 0x30, 0xA0, 0x00, 0x00, 0xAE, 0x14, 0x01, 0xA9, 0x0F, 0x00, 0x97, 0x86 };
+	static const uint8	kSfexFetch[] = { 0x08, 0xA0, 0x00, 0x01, 0xAE, 0x14, 0x01, 0xB7, 0x86, 0x8D, 0x04, 0x01 };
+
+	if (memcmp(rom + 0xCFBB, kSfexBurst, sizeof(kSfexBurst)) == 0 &&
+	    memcmp(rom + 0xD071, kSfexFetch, sizeof(kSfexFetch)) == 0)
+		return (TRUE);
+
 	return (memcmp(rom + 0x35DF, kBurst, sizeof(kBurst)) == 0 &&
 	        memcmp(rom + 0x3693, kFetch, sizeof(kFetch)) == 0);
 }

@@ -5371,38 +5371,6 @@ static uint32 PF94LoadAuxROM (const std::string &dir, const char *const *names, 
 	return (0);
 }
 
-// Street Fighter EX Plus Alpha (unlicensed): a cart chip answers queries the
-// game pushes into ROM space at $80:8000-$87FF, read back from $80:8100. We
-// return ROM there, so the SPC bank base resolves to $08 instead of $05 and the
-// uploader reads a garbage header, overruns APU RAM and hangs the boot.
-static void S9xSimulateSFEXProtection (uint8 *rom, uint32 size, uint32 crc32)
-{
-	// Headerless pirate, so no name to match: identify by dump CRC32.
-	if (size != 0x200000 || crc32 != 0xDAD59B9F)
-		return;
-
-	// The exact instructions we overwrite, at all three query sites
-	if (rom[0x0463] != 0x20 || rom[0x0464] != 0xFC || rom[0x0465] != 0x88 ||
-	    rom[0x0477] != 0x20 || rom[0x0478] != 0xFC || rom[0x0479] != 0x88 ||
-	    rom[0x05B6] != 0x20 || rom[0x05B7] != 0xFC || rom[0x05B8] != 0x88 ||
-	    rom[0x08FC] != 0x08 || rom[0x08FD] != 0xC2 || rom[0x08FE] != 0x30 ||
-	    rom[0x00A2] != 0xA5 || rom[0x00A3] != 0x8C ||
-	    rom[0x047A] != 0xAD || rom[0x047B] != 0x04 || rom[0x047C] != 0x01 ||
-	    rom[0x05B9] != 0xAD || rom[0x05BA] != 0x04 || rom[0x05BB] != 0x01)
-		return;
-
-	rom[0x00A2] = 0xA9; rom[0x00A3] = 0x03;		// LDA #$03   -> sound bank $05
-	rom[0x00A4] = 0xEA; rom[0x00A5] = 0xEA;
-	rom[0x047A] = 0xA9; rom[0x047B] = 0x0A;		// LDA #$000A -> gfx bank / NMI phase base
-	rom[0x047C] = 0x00;
-	// $85C3 jump table: wrong entries derail into a bad P/PC, leaking
-	// 2 bytes of stack per frame until it walks into direct page.
-	rom[0x05B9] = 0xA9; rom[0x05BA] = 0x02;		// LDA #$0002 -> round-init $8694
-	rom[0x05BB] = 0x00;
-
-	printf("Street Fighter EX Plus Alpha: cart protection simulated\n");
-}
-
 // Titles that need invalid VRAM access allowed to render correctly. Keyed on
 // ROMCRC32; the effective setting is per-game, so the user's own preference in
 // the Hacks dialog is left untouched for every other cart.
@@ -5422,10 +5390,6 @@ void CMemory::ApplyROMFixes (void)
 {
 	Settings.BlockInvalidVRAMAccess = Settings.BlockInvalidVRAMAccessMaster;
 	Settings.BlockInvalidVRAMAccessOverride = FALSE;
-
-	// Not gated on DisableGameSpecificHacks: this stands in for cart hardware
-	// we don't emulate, without which the game never boots at all.
-	S9xSimulateSFEXProtection(ROM, CalculatedSize, ROMCRC32);
 
 	// Astro Hawk (PD): enables NMI before clearing WRAM, so the NMI handler
 	// runs on power-on garbage; only boots if WRAM starts zeroed. CRC match —

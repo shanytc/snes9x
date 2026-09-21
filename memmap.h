@@ -53,6 +53,7 @@ struct CMemory
 		MAP_SGB_ICD2,
 		MAP_EVENT,
 		MAP_SFCBOX_SRAM,
+		MAP_CARTPROT,
 		MAP_NONE,
 		MAP_LAST
 	};
@@ -160,6 +161,7 @@ struct CMemory
 	void	map_SetaRISC (void);
 	void	map_SetaDSP (void);
 	void	map_WriteProtectROM (void);
+	void	map_CartProt (void);
 	void	Map_Initialize (void);
 	void	Map_LoROMMap (void);
 	void	Map_SGBLoROMMap (void);

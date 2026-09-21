@@ -8,6 +8,107 @@
 #include "memmap.h"
 #include "ppu.h"
 
+// --- Window latches ---------------------------------------------------------
+//
+// The PPU does not compare every dot against the current X1/X2. It sets one
+// latch when the dot counter reaches X1 and another when it reaches X2, and
+// the second one ends the window for the rest of the line - so moving the
+// positions after a window has stopped cannot restart it, and moving X1 behind
+// the beam never opens it at all. However many times a line rewrites the
+// registers, it shows at most one span per window.
+
+static struct
+{
+	int32	line;          // scanline this state belongs to
+	int32	dot;           // dots already swept
+	int16	start[2];      // dot X1 was matched at, -1 = not yet
+	int16	stop[2];       // dot X2 was matched at, -1 = not yet
+}	window_latch = { -1, 0, { -1, -1 }, { -1, -1 } };
+
+// The dot the beam has reached. Pixel 0 of the line is dot 22 of the H
+// counter, the same origin the mid-line raster events use.
+static inline int32 WindowBeamDot (void)
+{
+	const int32	x = CPU.Cycles / ONE_DOT_CYCLE - 22;
+
+	return (x < 0) ? 0 : (x > 256 ? 256 : x);
+}
+
+// Sweep [from, to) with the positions the registers hold now. The two latches
+// are independent, so a window whose X2 comes first is simply never open.
+static void SweepWindowLatches (int16 *start, int16 *stop, int32 from, int32 to)
+{
+	const uint8	x1[2] = { PPU.Window1Left,  PPU.Window2Left  };
+	const uint8	x2[2] = { PPU.Window1Right, PPU.Window2Right };
+
+	for (int w = 0; w < 2; w++)
+	{
+		if (start[w] < 0 && x1[w] >= from && x1[w] < to)
+			start[w] = x1[w];
+		if (stop[w]  < 0 && x2[w] >= from && x2[w] < to)
+			stop[w]  = x2[w];
+	}
+}
+
+// Called before a window position register changes, so the dots the beam has
+// already passed are latched against the value that was in force for them.
+void S9xLatchWindowSpans (void)
+{
+	if (window_latch.line != CPU.V_Counter)
+	{
+		window_latch.line     = CPU.V_Counter;
+		window_latch.dot      = 0;
+		window_latch.start[0] = window_latch.start[1] = -1;
+		window_latch.stop[0]  = window_latch.stop[1]  = -1;
+	}
+
+	const int32	dot = WindowBeamDot();
+
+	if (dot > window_latch.dot)
+	{
+		SweepWindowLatches(window_latch.start, window_latch.stop, window_latch.dot, dot);
+		window_latch.dot = dot;
+	}
+}
+
+// The spans this line actually shows: what the latches already hold, plus the
+// rest of the line swept with the positions in force now. A line nothing wrote
+// mid-way reduces to the register pair itself.
+static void EffectiveWindows (uint8 *left, uint8 *right)
+{
+	int16	start[2], stop[2];
+	int32	from = 0;
+
+	if (window_latch.line == CPU.V_Counter)
+	{
+		start[0] = window_latch.start[0];	start[1] = window_latch.start[1];
+		stop[0]  = window_latch.stop[0];	stop[1]  = window_latch.stop[1];
+		from     = window_latch.dot;
+	}
+	else
+		start[0] = start[1] = stop[0] = stop[1] = -1;
+
+	SweepWindowLatches(start, stop, from, 256);
+
+	for (int w = 0; w < 2; w++)
+	{
+		if (start[w] < 0 || (stop[w] >= 0 && stop[w] < start[w]))
+		{
+			// Never opened: left > right is how the region builder reads "off".
+			left[w]  = 1;
+			right[w] = 0;
+		}
+		else
+		{
+			left[w]  = (uint8) start[w];
+			right[w] = (uint8) (stop[w] >= 0 ? stop[w] : 255);
+		}
+	}
+}
+
+// The spans S9xComputeClipWindows is working from, for the helpers it calls.
+static uint8	WinLeft[2], WinRight[2];
+
 // --- Widescreen -------------------------------------------------------------
 //
 // Window positions are register values in the SNES's own 256 columns, and the
@@ -43,11 +144,11 @@ static void WideBoundaries (const int16 *windows, int n_regions, int16 *out)
 			// Regions are bounded by "one past the window's right edge", but
 			// what gets stretched is the register value itself, so a right
 			// edge is doubled from v - 1 and the +1 put back afterwards.
-			const bool	w1 = PPU.Window1Left <= PPU.Window1Right;
-			const bool	w2 = PPU.Window2Left <= PPU.Window2Right;
-			const bool	left  = (w1 && v == PPU.Window1Left) || (w2 && v == PPU.Window2Left);
+			const bool	w1 = WinLeft[0] <= WinRight[0];
+			const bool	w2 = WinLeft[1] <= WinRight[1];
+			const bool	left  = (w1 && v == WinLeft[0]) || (w2 && v == WinLeft[1]);
 			const bool	right = !left &&
-							    ((w1 && v == PPU.Window1Right + 1) || (w2 && v == PPU.Window2Right + 1));
+							    ((w1 && v == WinRight[0] + 1) || (w2 && v == WinRight[1] + 1));
 
 			v = 2 * (right ? v - 1 : v) - 128 + ext + (right ? 1 : 0);
 
@@ -212,39 +313,44 @@ void S9xComputeClipWindows (void)
 	int		n_regions = 1;
 	int		i, j;
 
+	// The spans the line's latches leave, which is the register pair itself
+	// unless something moved the positions mid-line.
+
+	EffectiveWindows(WinLeft, WinRight);
+
 	// Calculate window regions. We have at most 5 regions, because we have 6 control points
 	// (screen edges, window 1 left & right, and window 2 left & right).
 
-	if (PPU.Window1Left <= PPU.Window1Right)
+	if (WinLeft[0] <= WinRight[0])
 	{
-		if (PPU.Window1Left > 0)
+		if (WinLeft[0] > 0)
 		{
 			windows[2] = 256;
-			windows[1] = PPU.Window1Left;
+			windows[1] = WinLeft[0];
 			n_regions = 2;
 		}
 
-		if (PPU.Window1Right < 255)
+		if (WinRight[0] < 255)
 		{
 			windows[n_regions + 1] = 256;
-			windows[n_regions] = PPU.Window1Right + 1;
+			windows[n_regions] = WinRight[0] + 1;
 			n_regions++;
 		}
 	}
 
-	if (PPU.Window2Left <= PPU.Window2Right)
+	if (WinLeft[1] <= WinRight[1])
 	{
 		for (i = 0; i <= n_regions; i++)
 		{
-			if (PPU.Window2Left == windows[i])
+			if (WinLeft[1] == windows[i])
 				break;
 
-			if (PPU.Window2Left <  windows[i])
+			if (WinLeft[1] <  windows[i])
 			{
 				for (j = n_regions; j >= i; j--)
 					windows[j + 1] = windows[j];
 
-				windows[i] = PPU.Window2Left;
+				windows[i] = WinLeft[1];
 				n_regions++;
 				break;
 			}
@@ -252,15 +358,15 @@ void S9xComputeClipWindows (void)
 
 		for (; i <= n_regions; i++)
 		{
-			if (PPU.Window2Right + 1 == windows[i])
+			if (WinRight[1] + 1 == windows[i])
 				break;
 
-			if (PPU.Window2Right + 1 <  windows[i])
+			if (WinRight[1] + 1 <  windows[i])
 			{
 				for (j = n_regions; j >= i; j--)
 					windows[j + 1] = windows[j];
 
-				windows[i] = PPU.Window2Right + 1;
+				windows[i] = WinRight[1] + 1;
 				n_regions++;
 				break;
 			}
@@ -271,19 +377,19 @@ void S9xComputeClipWindows (void)
 
 	uint8	W1, W2;
 
-	if (PPU.Window1Left <= PPU.Window1Right)
+	if (WinLeft[0] <= WinRight[0])
 	{
-		for (i = 0; windows[i] != PPU.Window1Left; i++) ;
-		for (j = i; windows[j] != PPU.Window1Right + 1; j++) ;
+		for (i = 0; windows[i] != WinLeft[0]; i++) ;
+		for (j = i; windows[j] != WinRight[0] + 1; j++) ;
 		W1 = region_map[i][j];
 	}
 	else
 		W1 = 0;
 
-	if (PPU.Window2Left <= PPU.Window2Right)
+	if (WinLeft[1] <= WinRight[1])
 	{
-		for (i = 0; windows[i] != PPU.Window2Left; i++) ;
-		for (j = i; windows[j] != PPU.Window2Right + 1; j++) ;
+		for (i = 0; windows[i] != WinLeft[1]; i++) ;
+		for (j = i; windows[j] != WinRight[1] + 1; j++) ;
 		W2 = region_map[i][j];
 	}
 	else

@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 
 #include "memmap.h"
+#include "cartprot.h"
 #include "apu/apu.h"
 #include "cheats.h"
 #include "sgb/sgb.h"
@@ -3664,6 +3665,9 @@ void CMemory::InitROM (void)
 			break;
 	}
 
+	// Unlicensed cart security chip - decided before the map is built
+	Settings.CartProtection = S9xCartProtDetect(ROM, CalculatedSize);
+
 	// MSU1
 	Settings.MSU1 = S9xMSU1ROMExists();
 
@@ -4171,6 +4175,19 @@ void CMemory::Map_Initialize (void)
 	}
 }
 
+// The unlicensed Tekken 2 cart answers on $8000-$87FF of whichever bank the
+// game points its protocol pointer at. It only ever uses $80 and $A0, and it
+// never executes out of $80-$BF, so routing that window costs nothing.
+void CMemory::map_CartProt (void)
+{
+	for (uint32 bank = 0x80; bank <= 0xbf; bank++)
+	{
+		const uint32	block = (bank << 4) | 8;
+		S9xCartProtSetRomBase(bank, Map[block]);
+		Map[block] = (uint8 *) MAP_CARTPROT;
+	}
+}
+
 void CMemory::Map_LoROMMap (void)
 {
 	printf("Map_LoROMMap\n");
@@ -4197,6 +4214,9 @@ void CMemory::Map_LoROMMap (void)
 	map_WRAM();
 
 	map_WriteProtectROM();
+
+	if (Settings.CartProtection)
+		map_CartProt();
 }
 
 // P2 — SGB cart map. Standard LoROM with the 0x6000-0x7FFF range in banks

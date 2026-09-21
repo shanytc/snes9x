@@ -6,6 +6,7 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "cartprot.h"
 #include "dma.h"
 #include "apu/apu.h"
 #include "fxemu.h"
@@ -125,6 +126,7 @@ void S9xReset (void)
 	S9xResetCPU();
 	S9xResetPPU();
 	S9xResetDMA();
+	S9xCartProtReset();
 	S9xResetAPU();
     S9xResetMSU();
 	S9xVoiceKunStop();
@@ -267,6 +269,7 @@ void S9xSoftReset (void)
 	S9xSoftResetCPU();
 	S9xSoftResetPPU();
 	S9xResetDMA();
+	S9xCartProtReset();
 	S9xSoftResetAPU();
     S9xResetMSU();
 	S9xVoiceKunStop();

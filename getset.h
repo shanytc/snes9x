@@ -8,6 +8,7 @@
 #define _GETSET_H_
 
 #include "cpuexec.h"
+#include "cartprot.h"
 #include "dsp.h"
 #include "sa1.h"
 #include "spc7110.h"
@@ -172,6 +173,11 @@ inline uint8 S9xGetByte (uint32 Address)
 
 		case CMemory::MAP_SFCBOX_SRAM:
 			byte = S9xGetSFCBoxSRAM(Address);
+			addCyclesInMemoryAccess;
+			return (byte);
+
+		case CMemory::MAP_CARTPROT:
+			byte = S9xCartProtRead(Address);
 			addCyclesInMemoryAccess;
 			return (byte);
 
@@ -362,6 +368,12 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			addCyclesInMemoryAccess;
 			return (word);
 
+		case CMemory::MAP_CARTPROT:
+			word  = S9xCartProtRead(Address);
+			word |= S9xCartProtRead(Address + 1) << 8;
+			addCyclesInMemoryAccess_x2;
+			return (word);
+
 		case CMemory::MAP_NONE:
 		default:
 			word = OpenBus | (OpenBus << 8);
@@ -486,7 +498,13 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 			addCyclesInMemoryAccess;
 			return;
 
+		case CMemory::MAP_CARTPROT:
 		case CMemory::MAP_NONE:
+			if (Settings.CartProtection)
+				S9xCartProtWrite(Address & 0xffff);
+			addCyclesInMemoryAccess;
+			return;
+
 		default:
 			addCyclesInMemoryAccess;
 			return;
@@ -817,7 +835,16 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 			}
 			return;
 
+		case CMemory::MAP_CARTPROT:
 		case CMemory::MAP_NONE:
+			if (Settings.CartProtection)
+			{
+				S9xCartProtWrite(Address & 0xffff);
+				S9xCartProtWrite((Address + 1) & 0xffff);
+			}
+			addCyclesInMemoryAccess_x2;
+			return;
+
 		default:
 			addCyclesInMemoryAccess_x2;
 			return;

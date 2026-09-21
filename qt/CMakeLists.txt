@@ -109,6 +109,7 @@ set(SNES9X_CORE_SOURCES
     ../cpuops.cpp
     ../cpuexec.cpp
     ../voicekun.cpp
+    ../cartprot.cpp
     ../sa1cpu.cpp
     ../cheats.cpp
     ../cheats2.cpp

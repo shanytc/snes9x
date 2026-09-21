@@ -3123,10 +3123,7 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 	Timings.V_Max        = Timings.V_Max_Master;
 	Timings.DMACPUSync   = 18;
 	Timings.NMIDMADelay  = 24;
-	// The H/V comparator raises /IRQ at HTIME*4+14, but the CPU only sees it
-	// one poll later (4 master cycles), which is when WAI releases and an
-	// instruction boundary takes the interrupt.
-	Timings.IRQTriggerCycles = 18;
+	Timings.IRQTriggerCycles = SNES_IRQ_TRIGGER_CYCLES;
 	Timings.APUSpeedup = 0;
 	S9xAPUTimingSetSpeedup(Timings.APUSpeedup);
 
@@ -3865,10 +3862,7 @@ void CMemory::InitROM (void)
 	   and the NMI handler, time enough for an instruction or two. */
 	// Wild Guns, Mighty Morphin Power Rangers - The Fighting Edition
 	Timings.NMIDMADelay  = 24;
-	// The H/V comparator raises /IRQ at HTIME*4+14, but the CPU only sees it
-	// one poll later (4 master cycles), which is when WAI releases and an
-	// instruction boundary takes the interrupt.
-	Timings.IRQTriggerCycles = 18;
+	Timings.IRQTriggerCycles = SNES_IRQ_TRIGGER_CYCLES;
 	Timings.APUSpeedup = 0;
     Timings.GSUCelDelay = 0;
 	S9xAPUTimingSetSpeedup(Timings.APUSpeedup);

@@ -1761,6 +1761,13 @@ int S9xUnfreezeFromStream (STREAM stream)
 
         UnfreezeStructFromCopy(&Timings, SnapTimings, COUNT(SnapTimings), local_timing_data, version);
 
+		// The IRQ trigger offset is a property of the machine, not of the
+		// snapshot, and it is the one Timings field a game cannot change.
+		// Taking it from the file resurrects whatever the build that wrote
+		// the file believed, which is how a state made before it moved would
+		// silently keep the old timing.
+		Timings.IRQTriggerCycles = SNES_IRQ_TRIGGER_CYCLES;
+
 		if (local_superfx)
 		{
 			GSU.avRegAddr = (uint8 *) &GSU.avReg;

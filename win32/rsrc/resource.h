@@ -970,6 +970,7 @@
 #define ID_NSS_RESTART                  44410
 #define ID_NSS_DIP0                     44412
 #define ID_NSS_EJECT0                   44424
+#define ID_NSS_WATCHDOG                 44427
 
 
 #define IDC_STATIC                      -1
@@ -979,7 +980,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
-#define _APS_NEXT_COMMAND_VALUE         44428
+#define _APS_NEXT_COMMAND_VALUE         44430
 #define _APS_NEXT_CONTROL_VALUE         3620
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

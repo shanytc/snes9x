@@ -730,7 +730,11 @@ static uint8 NSSIORead (uint16 port)
 		case 0:
 		{
 			const uint16	pad = MovieGetJoypad(0);
-			uint8			res = (uint8) (NSS.JoyReadFlag ? 0x80 : 0);
+			// Bit7 is the joypad watchdog. Reporting "the game has not
+			// polled" is what lets the supervisor throw it off the machine,
+			// and we get at least one of those calls wrong — see
+			// Settings.NSSJoypadWatchdog and docs/nss.md.
+			uint8			res = (uint8) ((NSS.JoyReadFlag && Settings.NSSJoypadWatchdog) ? 0x80 : 0);
 
 			res |= (uint8) (VsyncBit() << 6);
 			res |= (uint8) (((pad >> 15) & 1) << 5);	// B

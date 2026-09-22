@@ -19,6 +19,7 @@
 #include "gfx.h"
 #include "ppu.h"
 #include "movie.h"
+#include "apu/apu.h"
 #include "z80.h"
 #include "nss.h"
 
@@ -786,6 +787,8 @@ static void NSSIOWrite (uint16 port, uint8 byte)
 			const bool8	held = (!(byte & 1) || !(byte & 2)) ? TRUE : FALSE;
 			if (!(prev & 1) && (byte & 1))
 				NSS.PendingSNESReset = TRUE;	// reset line released
+			if ((prev & 1) && !(byte & 1))
+				NSS.PendingAPUReset = TRUE;		// reset line asserted
 			NSS.SNESHeld = held;
 
 			if (TraceEnabled() && ((prev ^ byte) & 0x8f))
@@ -1442,7 +1445,8 @@ struct SNSSSaveState
 
 	uint8	WRAM[NSS_WRAM_SIZE];
 	uint8	Port00W, Port01W, Port03W, Port04W;
-	uint8	SlotSelect, SNESHeld, PendingSNESReset, InputDisabled, SoundMuted;
+	uint8	SlotSelect, SNESHeld, PendingSNESReset, PendingAPUReset;
+	uint8	InputDisabled, SoundMuted;
 	uint8	GameOverFlag, JoyReadFlag, DipSwitches;
 	uint16	Buttons, PulseButtons;
 	int32	PulseLeft;
@@ -1511,6 +1515,7 @@ void S9xNSSStateSave (uint8 *buf)
 	s.SlotSelect = NSS.SlotSelect;
 	s.SNESHeld = (uint8) NSS.SNESHeld;
 	s.PendingSNESReset = (uint8) NSS.PendingSNESReset;
+	s.PendingAPUReset = (uint8) NSS.PendingAPUReset;
 	s.InputDisabled = (uint8) NSS.InputDisabled;
 	s.SoundMuted = (uint8) NSS.SoundMuted;
 	s.GameOverFlag = NSS.GameOverFlag;
@@ -1587,6 +1592,7 @@ bool8 S9xNSSStateLoad (const uint8 *buf, size_t size)
 	NSS.SlotSelect = s.SlotSelect;
 	NSS.SNESHeld = s.SNESHeld ? TRUE : FALSE;
 	NSS.PendingSNESReset = s.PendingSNESReset ? TRUE : FALSE;
+	NSS.PendingAPUReset = s.PendingAPUReset ? TRUE : FALSE;
 	NSS.InputDisabled = s.InputDisabled ? TRUE : FALSE;
 	NSS.SoundMuted = s.SoundMuted ? TRUE : FALSE;
 	NSS.GameOverFlag = s.GameOverFlag;
@@ -1661,8 +1667,10 @@ void S9xNSSDeactivate (void)
 
 void S9xNSSPowerOn (void)
 {
-	// Whatever was running keeps its battery across the power cycle.
+	// Whatever was running keeps its battery across the power cycle, and
+	// stops making noise.
 	S9xNSSStashMappedSRAM();
+	NSS.PendingAPUReset = TRUE;
 
 	// Everything the loader owns — the BIOS, the charset and whatever is in
 	// the sockets — outlives a power cycle; only the volatile board does not.
@@ -1728,6 +1736,19 @@ bool8 S9xNSSSNESHeld (void)
 bool8 S9xNSSPendingReset (void)
 {
 	return (NSS.Active && NSS.PendingSNESReset);
+}
+
+bool8 S9xNSSPendingAPUReset (void)
+{
+	return (NSS.Active && NSS.PendingAPUReset);
+}
+
+// Taken at an instruction boundary in the main loop, the same place the
+// 65816's own reset lands, so the APU is not re-timed mid-scanline.
+void S9xNSSApplyAPUReset (void)
+{
+	NSS.PendingAPUReset = FALSE;
+	S9xSoftResetAPU();
 }
 
 void S9xNSSApplySNESReset (void)

@@ -155,6 +155,11 @@ void S9xMainLoop (void)
 
 		if (Settings.NSS)
 		{
+			// The supervisor pulled the reset line: the APU is on it too,
+			// so whatever the last game was playing stops here.
+			if (S9xNSSPendingAPUReset())
+				S9xNSSApplyAPUReset();
+
 			// The supervisor released the reset line: reboot the game side
 			// at an instruction boundary.
 			if (S9xNSSPendingReset())

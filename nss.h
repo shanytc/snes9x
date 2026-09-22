@@ -147,6 +147,7 @@ struct SNSS
 	uint8	SlotSelect;
 	bool8	SNESHeld;				// reset or halt line asserted
 	bool8	PendingSNESReset;		// reset line rose: reboot at a safe point
+	bool8	PendingAPUReset;		// reset line fell: silence the APU with it
 	bool8	InputDisabled;			// joypads unplugged (demo mode)
 	bool8	SoundMuted;
 
@@ -216,6 +217,10 @@ void	S9xNSSEndScanline (void);
 bool8	S9xNSSSNESHeld (void);
 bool8	S9xNSSPendingReset (void);
 void	S9xNSSApplySNESReset (void);
+// The APU sits on the same reset line as the 65816, so it stops when the
+// supervisor pulls a game rather than when it lets the next one go.
+bool8	S9xNSSPendingAPUReset (void);
+void	S9xNSSApplyAPUReset (void);
 
 // SNES-visible hardware
 uint8	S9xNSSReadDIP (void);			// $4100

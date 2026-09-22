@@ -34,7 +34,8 @@
 struct SNSS	NSS;
 
 // NSS_TRACE=1 logs the supervisor's side of the conversation (port writes,
-// reset-line moves and a periodic Z80 PC sample); =2 adds every OSD word.
+// reset-line moves and a periodic Z80 PC sample); =2 adds every OSD word;
+// =3 adds a per-scanline PC histogram, for finding where the BIOS spins.
 static int TraceLevel (void)
 {
 	static int	cached = -1;
@@ -504,12 +505,17 @@ static inline int OSDGlyphDot (uint8 ch, int row, int dot)
 	return ((w >> (11 - dot)) & 1);
 }
 
-// Register 7 bit7 gates the RGB output; register 0 drives the BLNK pin high
-// by hand for the screens that replace the SNES picture entirely rather than
-// genlocking onto it (fullsnes: 003Fh superimposed, 00BDh solid).
+// Two gates, and both matter. Register 7 bit7 enables the chip's RGB
+// output; port 03h bit6 is the board's own layer switch, and the BIOS uses
+// it to stage a page into VRAM without showing it — a Skill Mode game draws
+// its instructions at game start, drops the layer and lights the
+// Instructions LED, so the page is there waiting for a player who asks for
+// it. Ignoring the layer bit leaves those instructions painted over the
+// running game for good.
 static inline bool8 OSDVisible (void)
 {
-	return (NSS.Active && NSS.OSD.FontLoaded && (NSS.OSD.Reg[7] & 0x0080)) ? TRUE : FALSE;
+	return (NSS.Active && NSS.OSD.FontLoaded &&
+	        (NSS.OSD.Reg[7] & 0x0080) && (NSS.Port03W & 0x40)) ? TRUE : FALSE;
 }
 
 static inline bool8 OSDOpaque (void)
@@ -802,6 +808,9 @@ static void NSSIOWrite (uint16 port, uint8 byte)
 			break;
 
 		case 3:		// front-panel LEDs and the layer enables
+			if (TraceEnabled() && ((NSS.Port03W ^ byte) & 0xc0))
+				printf("[nss] port03=%02X osd_layer=%d snes_layer=%d\n",
+				       byte, (byte >> 6) & 1, (byte >> 7) & 1);
 			NSS.Port03W = byte;
 			break;
 
@@ -826,8 +835,13 @@ uint8 S9xNSSReadDIP (void)
 	return (NSS.DipSwitches);
 }
 
+// Counted for the trace: which of the two ways a game can poll the pads it
+// actually uses, since only those feed the supervisor's watchdog.
+static uint32	s_strobes, s_autoreads;
+
 void S9xNSSSetJoypadStrobe (uint8 byte)
 {
+	s_strobes++;
 	// OUT1 carries the Game Over flag back to the supervisor; strobing the
 	// pads at all is what feeds the watchdog.
 	NSS.GameOverFlag = (uint8) ((byte >> 2) & 1);
@@ -836,6 +850,7 @@ void S9xNSSSetJoypadStrobe (uint8 byte)
 
 void S9xNSSJoypadRead (void)
 {
+	s_autoreads++;
 	NSS.JoyReadFlag = 0;
 }
 
@@ -1757,10 +1772,40 @@ void S9xNSSApplySNESReset (void)
 	S9xSoftReset();
 }
 
+// Sampled once per scanline and dumped every few seconds: enough to tell a
+// two-instruction wait loop from a token program that is still walking.
+static void TracePC (void)
+{
+	static uint16	hist[0x10000];
+	static uint32	frames = 0;
+
+	hist[Z80.PC]++;
+	if (CPU.V_Counter != 0 || NSS.LastVCounter == 0 || ++frames < 600)
+		return;
+
+	frames = 0;
+	printf("[nss] PC histogram:");
+	for (int top = 0; top < 10; top++)
+	{
+		uint32	best = 0, at = 0;
+		for (uint32 i = 0; i < 0x10000; i++)
+			if (hist[i] > best) { best = hist[i]; at = i; }
+		if (!best)
+			break;
+		printf(" %04X=%u", (unsigned) at, (unsigned) best);
+		hist[at] = 0;
+	}
+	printf("\n");
+	memset(hist, 0, sizeof(hist));
+}
+
 void S9xNSSEndScanline (void)
 {
 	if (!NSS.Active)
 		return;
+
+	if (TraceLevel() > 2)
+		TracePC();
 
 	const int32	vblank = VBlankLine();
 
@@ -1783,9 +1828,14 @@ void S9xNSSEndScanline (void)
 		}
 
 		if (TraceEnabled())
-			printf("[nss] Z80 PC=%04X SP=%04X halted=%d IFF=%d 00W=%02X 01W=%02X held=%d osd7=%04X\n",
-				   Z80.PC, Z80.SP, Z80.Halted, Z80.IFF1,
-				   NSS.Port00W, NSS.Port01W, NSS.SNESHeld, NSS.OSD.Reg[7]);
+		{
+			printf("[nss] Z80 PC=%04X halted=%d 00W=%02X 01W=%02X 03W=%02X held=%d "
+				   "joyflag=%d strobes=%u autoreads=%u\n",
+				   Z80.PC, Z80.Halted, NSS.Port00W, NSS.Port01W, NSS.Port03W,
+				   NSS.SNESHeld, NSS.JoyReadFlag,
+				   (unsigned) s_strobes, (unsigned) s_autoreads);
+			s_strobes = s_autoreads = 0;
+		}
 	}
 
 	// The supervisor's only interrupt is the vertical one.

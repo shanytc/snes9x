@@ -174,7 +174,7 @@ void S9xWinScanJoypads();
 #define WM_CHEATS_ADDED (WM_APP + 1)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 6;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 7;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
@@ -1288,6 +1288,23 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				}
 				hitHotKey = true;
 			}
+		}
+		// Nintendo Super System front panel. Sent as menu commands so a key
+		// and its menu entry cannot drift apart, and so an entry the menu has
+		// greyed (ejecting the last cartridge, or no cabinet running) stays
+		// greyed for the key too.
+		if(HKmatch(NSSCoin2))        { SendMenuCommand(ID_NSS_COIN2);        hitHotKey = true; }
+		if(HKmatch(NSSService))      { SendMenuCommand(ID_NSS_SERVICE);      hitHotKey = true; }
+		if(HKmatch(NSSInstructions)) { SendMenuCommand(ID_NSS_INSTRUCTIONS); hitHotKey = true; }
+		if(HKmatch(NSSPageUp))       { SendMenuCommand(ID_NSS_PAGEUP);       hitHotKey = true; }
+		if(HKmatch(NSSPageDown))     { SendMenuCommand(ID_NSS_PAGEDOWN);     hitHotKey = true; }
+		if(HKmatch(NSSRestart))      { SendMenuCommand(ID_NSS_RESTART);      hitHotKey = true; }
+		for(int nssg = 0; nssg < 3; nssg++)
+		{
+			if(!HKmatch(NSSGame[nssg]))
+				continue;
+			SendMenuCommand(ID_NSS_GAME1 + nssg);
+			hitHotKey = true;
 		}
 		if(HKmatch(ShowPressed))
 		{
@@ -15296,6 +15313,29 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
+    // Tab 6: Emulation -> Nintendo Super System, the arcade front panel. The
+    // slots fill a column at a time (0-8 left, 9-17 right), so the coin door
+    // and the game buttons take the left column and the rest of the panel the
+    // right, rather than letting a tenth entry sit alone across the gap.
+    // Insert Coin is the same binding the SFC Box tab shows, because one coin
+    // key serves whichever cabinet is running.
+    {
+        // Column 1: coin door and game selection
+        { &CustomKeys.InsertCoin,       &CustomKeysExtra.InsertCoin,       HOTKEYS_INSERT_COIN },
+        { &CustomKeys.NSSCoin2,         &CustomKeysExtra.NSSCoin2,         HOTKEYS_NSS_COIN2 },
+        { &CustomKeys.NSSService,       &CustomKeysExtra.NSSService,       HOTKEYS_NSS_SERVICE },
+        { &CustomKeys.NSSGame[0],       &CustomKeysExtra.NSSGame[0],       HOTKEYS_NSS_GAME1 },
+        { &CustomKeys.NSSGame[1],       &CustomKeysExtra.NSSGame[1],       HOTKEYS_NSS_GAME2 },
+        { &CustomKeys.NSSGame[2],       &CustomKeysExtra.NSSGame[2],       HOTKEYS_NSS_GAME3 },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        // Column 2: the lower panel
+        { &CustomKeys.NSSInstructions,  &CustomKeysExtra.NSSInstructions,  HOTKEYS_NSS_INSTRUCTIONS },
+        { &CustomKeys.NSSPageUp,        &CustomKeysExtra.NSSPageUp,        HOTKEYS_NSS_PAGEUP },
+        { &CustomKeys.NSSPageDown,      &CustomKeysExtra.NSSPageDown,      HOTKEYS_NSS_PAGEDOWN },
+        { &CustomKeys.NSSRestart,       &CustomKeysExtra.NSSRestart,       HOTKEYS_NSS_RESTART },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -15464,7 +15504,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy Model")
+				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

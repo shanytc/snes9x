@@ -365,6 +365,14 @@ int GetNumHotKeysAssignedTo (WORD Key, int modifiers)
 		if(MATCHES_KEY(BiosManager))       count++;
 		for(int i = 0 ; i < 5 ; i++)
 			if(MATCHES_KEY(SFCBoxKeyswitch[i])) count++;
+		if(MATCHES_KEY(NSSCoin2))          count++;
+		if(MATCHES_KEY(NSSService))        count++;
+		if(MATCHES_KEY(NSSInstructions))   count++;
+		if(MATCHES_KEY(NSSPageUp))         count++;
+		if(MATCHES_KEY(NSSPageDown))       count++;
+		if(MATCHES_KEY(NSSRestart))        count++;
+		for(int i = 0 ; i < 3 ; i++)
+			if(MATCHES_KEY(NSSGame[i]))     count++;
 		for(int i = 0 ; i < GB_MODEL_HOTKEYS ; i++)
 			if(MATCHES_KEY(GBModel[i]))         count++;
 

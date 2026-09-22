@@ -20,6 +20,8 @@
 #define _NSS_H_
 
 #include "port.h"
+#include <string>
+#include <vector>
 
 #define NSS_BIOS_SIZE		0x8000
 #define NSS_WRAM_SIZE		0x2000
@@ -37,6 +39,11 @@
 
 #define NSS_PHI				4000000	// Z84C0006 clock
 
+#define NSS_SLOTS			3		// cartridge connectors CN11/12/13
+#define NSS_SLOT_SRAM		0x8000	// biggest battery any NSS cart carries
+#define NSS_SLOT_NAME		32
+#define NSS_SLOT_PATH		512
+
 // Front-panel and coin-door inputs, as a bit set the ports read straight out
 // of. These are momentary switches: the UI raises a bit while its key or
 // button is down, and the coin inputs are pulsed through NSS.CoinPulse.
@@ -52,10 +59,27 @@ enum
 	NSS_BTN_SERVICE		= 0x0100
 };
 
-struct SNSSPROM			// Ricoh RP5H01 72-bit key chip
+// One cartridge connector. Everything a slot holds is per-socket: the SNES
+// program, the Z80 instruction EPROM, the key chip and the battery.
+struct SNSSSlot
 {
-	uint8	Data[NSS_PROM_SIZE];	// as dumped: a set bit reads back as "low"
 	uint8	Present;
+	uint8	*Prg;					// the SNES program, heap-owned
+	uint32	PrgSize;
+	uint8	ROMSizeByte;			// cart header [7FD7h]
+	uint8	SRAMSizeByte;			// cart header [7FD8h]
+	uint8	INST[NSS_INST_SIZE];
+	uint8	PROM[NSS_PROM_SIZE];
+	uint8	PROMPresent;
+	uint8	SRAM[NSS_SLOT_SRAM];
+	uint8	SRAMValid;				// false until this socket's battery is ours
+	uint32	CRC;
+	char	Name[NSS_SLOT_NAME];	// cart header title, for the menu
+	char	Path[NSS_SLOT_PATH];
+};
+
+struct SNSSPROM			// Ricoh RP5H01 72-bit key chip, live pin state
+{
 	uint8	Counter;				// 6/7-bit address counter
 	uint8	SevenBit;				// test pin: 1 = 7-bit addressing
 	uint8	LastClock;
@@ -111,8 +135,10 @@ struct SNSS
 	// Board memories
 	uint8	BIOS[NSS_BIOS_SIZE];
 	uint8	WRAM[NSS_WRAM_SIZE];
-	uint8	INST[NSS_INST_SIZE];	// the selected slot's instruction EPROM
 	uint8	BIOSRevision;			// 0 = unknown, 2 = "02", 3 = "03"
+
+	struct SNSSSlot	Slot[NSS_SLOTS];
+	int8	MappedSlot;				// which one the SNES side currently sees, -1 none
 
 	// Latched port outputs
 	uint8	Port00W, Port01W, Port03W, Port04W;
@@ -152,6 +178,26 @@ bool8	S9xNSSLoadBIOS (void);			// BIOS + OSD charset from their BIOS Manager slo
 void	S9xNSSPowerOn (void);			// full board reset; the SNES ends up held
 void	S9xNSSDeactivate (void);
 
+// Cartridge slots. Slot 1 is filled by the ordinary File -> Load Game; the
+// other two take a cart the way the cabinet does, by putting one in the
+// socket, which reboots the machine so the supervisor rescans.
+bool8	S9xNSSInsertCart (int slot, const char *path);
+void	S9xNSSEjectCart (int slot);
+// The cabinet always holds at least one cartridge, so the last one stays.
+bool8	S9xNSSCanEject (int slot);
+// Splits a merged image straight into a socket (the loader fills slot 1).
+bool8	S9xNSSLoadSlot (int slot, const uint8 *image, uint32 size, const char *path);
+// Puts a socket's cartridge under the SNES: program, size, battery and map.
+void	S9xNSSMapSlot (int slot);
+// The mapped socket's battery is live in Memory.SRAM, not in its own buffer.
+// Anything that moves or drops a cartridge takes a copy first.
+void	S9xNSSStashMappedSRAM (void);
+bool8	S9xNSSSlotPresent (int slot);
+const char *S9xNSSSlotName (int slot);
+const char *S9xNSSSlotPath (int slot);
+// Which slot's cartridge the SNES side is mapped to, or -1.
+int		S9xNSSMappedSlot (void);
+
 // A MAME-style cartridge set (prg chips + instruction EPROM + security.prm)
 // flattened into the fullsnes merged layout. Returns 0 when `path` is not one
 // (and leaves `dest` alone), or NSS_ZIPSET_UNREADABLE when it is one but could
@@ -162,6 +208,8 @@ uint32	S9xNSSAssembleZipSet (const char *path, uint8 *dest, uint32 maxsize);
 // Splits a merged image: keeps the instruction EPROM and key, hands back the
 // SNES program size so the ordinary cart loader can take it from there.
 bool8	S9xNSSTakeCartTail (const uint8 *image, uint32 size, uint32 *prg_size);
+// Reads a cartridge image from disk, either shape, into `out`.
+bool8	S9xNSSReadCartImage (const char *path, std::vector<uint8> &out);
 
 // Main-loop side
 void	S9xNSSEndScanline (void);

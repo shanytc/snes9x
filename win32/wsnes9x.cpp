@@ -3032,9 +3032,65 @@ LRESULT CALLBACK WinProc(
 			break;
 
 		case ID_NSS_SERVICE:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_SERVICE);      break;
-		case ID_NSS_GAME1:        if (NSS.Active) S9xNSSPulseButton(NSS_BTN_GAME1);        break;
-		case ID_NSS_GAME2:        if (NSS.Active) S9xNSSPulseButton(NSS_BTN_GAME2);        break;
-		case ID_NSS_GAME3:        if (NSS.Active) S9xNSSPulseButton(NSS_BTN_GAME3);        break;
+
+		case ID_NSS_GAME1:
+		case ID_NSS_GAME2:
+		case ID_NSS_GAME3:
+		{
+			// A filled socket gets its panel button pressed and the
+			// supervisor decides what to do with it; an empty one gets a
+			// cartridge, which is a file to pick.
+			const int slot = cmd_id - ID_NSS_GAME1;
+			if (!NSS.Active)
+				break;
+			if (S9xNSSSlotPresent(slot))
+			{
+				static const uint16 game_btn[3] =
+					{ NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
+				S9xNSSPulseButton(game_btn[slot]);
+				break;
+			}
+
+			RestoreGUIDisplay();
+			OPENFILENAME	ofn;
+			TCHAR			szFileName[MAX_PATH];
+			TCHAR			title[64];
+			szFileName[0] = TEXT('\0');
+			_stprintf(title, TEXT("Nintendo Super System - cartridge for slot %d"), slot + 1);
+			memset((LPVOID) &ofn, 0, sizeof(OPENFILENAME));
+			ofn.lStructSize = sizeof(OPENFILENAME);
+			ofn.hwndOwner   = GUI.hWnd;
+			ofn.lpstrFilter = TEXT("NSS Cartridges (*.zip;*.bin;*.sfc)\0*.zip;*.bin;*.sfc\0All Files (*.*)\0*.*\0\0");
+			ofn.lpstrFile   = szFileName;
+			ofn.nMaxFile    = MAX_PATH;
+			ofn.lpstrTitle  = title;
+			ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
+			if (GetOpenFileName(&ofn))
+			{
+				if (S9xNSSInsertCart(slot, _tToChar(szFileName)))
+				{
+					char msg[128];
+					snprintf(msg, sizeof msg, "Slot %d: %s", slot + 1, S9xNSSSlotName(slot));
+					S9xSetInfoString(msg);
+				}
+				else
+					MessageBox(GUI.hWnd,
+						TEXT("That is not a Nintendo Super System cartridge, or the same game ")
+						TEXT("is already in another slot."),
+						TEXT("Nintendo Super System"), MB_OK | MB_ICONWARNING);
+			}
+			RestoreSNESDisplay();
+			CheckMenuStates();
+			break;
+		}
+
+		case ID_NSS_EJECT0 + 0:
+		case ID_NSS_EJECT0 + 1:
+		case ID_NSS_EJECT0 + 2:
+			S9xNSSEjectCart(cmd_id - ID_NSS_EJECT0);
+			CheckMenuStates();
+			break;
+
 		case ID_NSS_INSTRUCTIONS: if (NSS.Active) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;
 		case ID_NSS_PAGEUP:       if (NSS.Active) S9xNSSPulseButton(NSS_BTN_PAGEUP);       break;
 		case ID_NSS_PAGEDOWN:     if (NSS.Active) S9xNSSPulseButton(NSS_BTN_PAGEDOWN);     break;
@@ -5602,6 +5658,33 @@ static void CheckMenuStates ()
 		{
 			mii.fState = (Settings.NSSDipSwitches & (1 << sw)) ? MFS_CHECKED : MFS_UNCHECKED;
 			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &mii);
+		}
+
+		// Each socket says what is in it, and an empty one says so rather
+		// than looking like a dead button.
+		for (int slot = 0; slot < 3; slot++)
+		{
+			TCHAR text[128];
+			if (S9xNSSSlotPresent(slot))
+				_stprintf(text, TEXT("Game &%d (%hs)"), slot + 1, S9xNSSSlotName(slot));
+			else
+				_stprintf(text, TEXT("Game &%d (empty - insert cartridge...)"), slot + 1);
+
+			MENUITEMINFO txt = {};
+			txt.cbSize     = sizeof(txt);
+			txt.fMask      = MIIM_STRING;
+			txt.dwTypeData = text;
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_GAME1 + slot, FALSE, &txt);
+
+			if (S9xNSSSlotPresent(slot))
+				_stprintf(text, TEXT("Slot %d (%hs)"), slot + 1, S9xNSSSlotName(slot));
+			else
+				_stprintf(text, TEXT("Slot %d (empty)"), slot + 1);
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_EJECT0 + slot, FALSE, &txt);
+
+			// The cabinet keeps its last cartridge.
+			EnableMenuItem(GUI.hMenu, ID_NSS_EJECT0 + slot,
+			               MF_BYCOMMAND | (S9xNSSCanEject(slot) ? MF_ENABLED : MF_GRAYED));
 		}
 	}
 

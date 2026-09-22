@@ -2733,6 +2733,13 @@ int CMemory::LoadNSSCart (const char *filename, int32 *size)
 	if (!S9xNSSTakeCartTail(ROM, total, &prg))
 		return (0);
 
+	// Socket 1, the one File -> Load Game fills. The other two take a cart
+	// through the Nintendo Super System menu.
+	S9xNSSLoadSlot(0, ROM, total, filename);
+	// Its battery is the .srm the ordinary loader reads, so the first map
+	// takes a copy of that rather than writing a blank one over it.
+	NSS.Slot[0].SRAMValid = FALSE;
+
 	memset(ROM + prg, 0, total - prg);
 	*size = (int32) prg;
 	HeaderCount = 0;
@@ -2751,7 +2758,7 @@ int CMemory::LoadNSSCart (const char *filename, int32 *size)
 		                 FALSE);
 
 	printf("NSS: %u KB program + instruction ROM%s.\n", (unsigned) (prg >> 10),
-	       NSS.PROM.Present ? " + key chip" : " (no key chip)");
+	       NSS.Slot[0].PROMPresent ? " + key chip" : " (no key chip)");
 	return (1);
 }
 
@@ -6255,6 +6262,46 @@ void CMemory::CheckForAnyPatch(const char *rom_filename, bool8 header, int32 &ro
 // and on every register write — the KROM remaps live, SNES running or not
 // (real hardware does the same; the SNES executes garbage until the KROM
 // pulses its reset line).
+
+// Wires one socket's cartridge to the SNES. The supervisor drives this
+// through its slot-select bits, holding the 65816 in reset across the change
+// and rebooting it afterwards, so swapping the map underneath is safe.
+void S9xNSSMapSlot (int slot)
+{
+	if (!Settings.NSS || slot < 0 || slot >= NSS_SLOTS || !NSS.Slot[slot].Present)
+		return;
+
+	// A battery belongs to its own cartridge. Socket 1 arrives with the .srm
+	// the ordinary loader already read, so the first visit takes a copy
+	// rather than overwriting it.
+	S9xNSSStashMappedSRAM();
+
+	struct SNSSSlot	*s = &NSS.Slot[slot];
+
+	memcpy(Memory.ROM, s->Prg, s->PrgSize);
+	Memory.CalculatedSize = s->PrgSize;
+	Memory.ROMSize  = s->ROMSizeByte;
+	Memory.SRAMSize = s->SRAMSizeByte;
+	Memory.SRAMMask = s->SRAMSizeByte ? ((1 << (s->SRAMSizeByte + 3)) * 128) - 1 : 0;
+	Memory.LoROM = TRUE;
+	Memory.HiROM = FALSE;
+	strncpy(Memory.ROMName, s->Name, ROM_NAME_LEN - 1);
+	Memory.ROMName[ROM_NAME_LEN - 1] = 0;
+
+	if (s->SRAMValid)
+		memcpy(Memory.SRAM, s->SRAM, NSS_SLOT_SRAM);
+	else
+	{
+		memcpy(s->SRAM, Memory.SRAM, NSS_SLOT_SRAM);
+		s->SRAMValid = TRUE;
+	}
+
+	Memory.Map_LoROMMap();
+	NSS.MappedSlot = (int8) slot;
+
+	printf("NSS: slot %d mapped (%s, %u KB)\n", slot + 1, s->Name,
+	       (unsigned) (s->PrgSize >> 10));
+}
 
 void S9xSFCBoxRemap (void)
 {

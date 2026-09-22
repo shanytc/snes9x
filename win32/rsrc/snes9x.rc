@@ -1555,6 +1555,12 @@ BEGIN
             MENUITEM "Game &1",                     ID_NSS_GAME1,MFT_STRING,MFS_ENABLED
             MENUITEM "Game &2",                     ID_NSS_GAME2,MFT_STRING,MFS_ENABLED
             MENUITEM "Game &3",                     ID_NSS_GAME3,MFT_STRING,MFS_ENABLED
+            POPUP "&Eject Cartridge",               0,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "Slot 1",                      (ID_NSS_EJECT0+0),MFT_STRING,MFS_ENABLED
+                MENUITEM "Slot 2",                      (ID_NSS_EJECT0+1),MFT_STRING,MFS_ENABLED
+                MENUITEM "Slot 3",                      (ID_NSS_EJECT0+2),MFT_STRING,MFS_ENABLED
+            END
             MENUITEM MFT_SEPARATOR
             MENUITEM "I&nstructions",               ID_NSS_INSTRUCTIONS,MFT_STRING,MFS_ENABLED
             MENUITEM "Page &Up",                    ID_NSS_PAGEUP,MFT_STRING,MFS_ENABLED

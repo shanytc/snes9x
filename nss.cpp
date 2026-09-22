@@ -57,7 +57,7 @@ static inline uint8 PROMDataBit (void)
 {
 	const uint8	mask = NSS.PROM.SevenBit ? 0x7f : 0x3f;
 	const uint8	idx = (uint8) ((NSS.PROM.Counter & mask) >> 3);
-	return (uint8) (((NSS.PROM.Data[idx] >> (NSS.PROM.Counter & 7)) & 1) ^ 1);
+	return (uint8) (((NSS.Slot[NSS.SlotSelect].PROM[idx] >> (NSS.PROM.Counter & 7)) & 1) ^ 1);
 }
 
 static inline uint8 PROMCounterBit (void)
@@ -662,17 +662,17 @@ static uint8 NSSMemRead (uint16 addr)
 	if (addr < 0xe000)
 	{
 		// Only the top 8K of the 32K instruction EPROM is wired up, and only
-		// the slot the supervisor has selected answers: an empty socket
-		// floats high, which is how the BIOS counts the cartridges.
-		if (NSS.SlotSelect != 0)
+		// the socket the supervisor has selected answers: an empty one floats
+		// high, which is how the BIOS counts the cartridges.
+		if (NSS.SlotSelect >= NSS_SLOTS || !NSS.Slot[NSS.SlotSelect].Present)
 			return (0xff);
-		return (NSS.INST[NSS_INST_SIZE - NSS_INST_WINDOW + (addr - 0xc000)]);
+		return (NSS.Slot[NSS.SlotSelect].INST[NSS_INST_SIZE - NSS_INST_WINDOW + (addr - 0xc000)]);
 	}
 
 	// The key chip reads back as an RST opcode with two of its bits carrying
 	// data, which is how the BIOS runs decryptor code straight out of it.
 	uint8	byte = 0xe7;
-	if (NSS.SlotSelect == 0)
+	if (NSS.SlotSelect < NSS_SLOTS && NSS.Slot[NSS.SlotSelect].Present)
 	{
 		byte |= (uint8) (PROMCounterBit() << 4);
 		byte |= (uint8) (PROMDataBit() << 3);
@@ -698,7 +698,7 @@ static void NSSMemWrite (uint16 addr, uint8 byte)
 	if (addr < 0xe000)
 		return;
 
-	if (NSS.SlotSelect == 0)
+	if (NSS.SlotSelect < NSS_SLOTS && NSS.Slot[NSS.SlotSelect].Present)
 		PROMWrite(byte);
 	EEPROMWrite(byte);
 }
@@ -774,6 +774,12 @@ static void NSSIOWrite (uint16 port, uint8 byte)
 			const uint8	prev = NSS.Port01W;
 			NSS.Port01W = byte;
 			NSS.SlotSelect = (uint8) ((byte >> 2) & 3);
+			// The selected socket is wired to both CPUs, so the SNES side
+			// follows. The supervisor holds the 65816 in reset across the
+			// change and reboots it afterwards.
+			if (NSS.SlotSelect < NSS_SLOTS && NSS.Slot[NSS.SlotSelect].Present &&
+				NSS.MappedSlot != (int8) NSS.SlotSelect)
+				S9xNSSMapSlot(NSS.SlotSelect);
 			NSS.InputDisabled = (byte & 0x80) ? FALSE : TRUE;
 			NSS.SoundMuted = (byte & 0x20) ? TRUE : FALSE;
 
@@ -853,6 +859,22 @@ void S9xNSSPulseButton (uint16 mask)
 
 // ---------------------------------------------------------------------------
 // Cartridge images
+
+static uint32 CRC32 (const uint8 *d, uint32 n)
+{
+	uint32	crc = 0xffffffff;
+
+	for (uint32 i = 0; i < n; i++)
+	{
+		crc ^= d[i];
+		for (int b = 0; b < 8; b++)
+			crc = (crc >> 1) ^ (0xedb88320u & (uint32) (-(int32) (crc & 1)));
+	}
+	return (~crc);
+}
+
+// Biggest cartridge image the format allows: a 4M program plus the tail.
+#define CART_STAGING_MAX	(0x400000u + NSS_INST_SIZE + NSS_PROM_SIZE)
 //
 // fullsnes's merged layout is PRG-ROM, then the 32K instruction EPROM, then
 // the 16-byte key. MAME ships the same three parts as separate members of a
@@ -1022,16 +1044,194 @@ bool8 S9xNSSTakeCartTail (const uint8 *image, uint32 size, uint32 *prg_size)
 	if (!LooksLikeInstROM(image + prg))
 		return (FALSE);
 
-	memcpy(NSS.INST, image + prg, NSS_INST_SIZE);
-	memcpy(NSS.PROM.Data, image + prg + NSS_INST_SIZE, NSS_PROM_SIZE);
-
-	NSS.PROM.Present = FALSE;
-	for (uint32 i = 0; i < NSS_PROM_SIZE; i++)
-		if (NSS.PROM.Data[i])
-			NSS.PROM.Present = TRUE;
-
 	*prg_size = prg;
 	return (TRUE);
+}
+
+bool8 S9xNSSReadCartImage (const char *path, std::vector<uint8> &out)
+{
+	out.clear();
+	if (!path || !*path)
+		return (FALSE);
+
+	// A MAME set first: its members have to be stitched into one image.
+	std::vector<uint8>	staging(CART_STAGING_MAX, 0);
+	const uint32			assembled = S9xNSSAssembleZipSet(path, staging.data(), CART_STAGING_MAX);
+
+	if (assembled && assembled != NSS_ZIPSET_UNREADABLE)
+	{
+		out.assign(staging.begin(), staging.begin() + assembled);
+		return (TRUE);
+	}
+	if (assembled == NSS_ZIPSET_UNREADABLE)
+		return (FALSE);
+
+	FILE	*f = fopen(path, "rb");
+	if (!f)
+		return (FALSE);
+	fseek(f, 0, SEEK_END);
+	const long	n = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (n <= 0 || (uint32) n > CART_STAGING_MAX)
+	{
+		fclose(f);
+		return (FALSE);
+	}
+	out.resize((size_t) n);
+	const size_t	got = fread(out.data(), 1, (size_t) n, f);
+	fclose(f);
+	if (got != (size_t) n)
+	{
+		out.clear();
+		return (FALSE);
+	}
+	return (TRUE);
+}
+
+// The cart header sits where every LoROM cart keeps it. These are the same
+// two bytes and the same title trim InitROM takes for the running cart.
+static void NSSCaptureHeader (struct SNSSSlot *s)
+{
+	s->ROMSizeByte = 0;
+	s->SRAMSizeByte = 0;
+	s->Name[0] = 0;
+
+	if (s->PrgSize < 0x8000)
+		return;
+
+	const uint8	*hdr = s->Prg + 0x7fb0;
+	s->ROMSizeByte = hdr[0x27];
+	s->SRAMSizeByte = hdr[0x28];
+
+	int	len = 0;
+	for (int i = 0; i < 21 && len < NSS_SLOT_NAME - 1; i++)
+	{
+		const uint8	c = hdr[0x10 + i];
+		s->Name[len++] = (c >= 0x20 && c < 0x7f) ? (char) c : ' ';
+	}
+	while (len > 0 && s->Name[len - 1] == ' ')
+		len--;
+	s->Name[len] = 0;
+}
+
+// Splits a merged image into one socket. The program gets its own buffer so
+// the other slots keep theirs while this one is the mapped cartridge.
+bool8 S9xNSSLoadSlot (int slot, const uint8 *image, uint32 size, const char *path)
+{
+	uint32	prg = 0;
+
+	if (slot < 0 || slot >= NSS_SLOTS || !S9xNSSTakeCartTail(image, size, &prg))
+		return (FALSE);
+
+	struct SNSSSlot	*s = &NSS.Slot[slot];
+	uint8			*buf = (uint8 *) malloc(prg);
+	if (!buf)
+		return (FALSE);
+
+	free(s->Prg);
+	memset(s, 0, sizeof(*s));
+
+	s->Prg = buf;
+	s->PrgSize = prg;
+	memcpy(s->Prg, image, prg);
+	memcpy(s->INST, image + prg, NSS_INST_SIZE);
+	memcpy(s->PROM, image + prg + NSS_INST_SIZE, NSS_PROM_SIZE);
+	for (uint32 i = 0; i < NSS_PROM_SIZE; i++)
+		if (s->PROM[i])
+			s->PROMPresent = TRUE;
+
+	s->CRC = CRC32(s->Prg, prg);
+	s->SRAMValid = TRUE;	// blank battery until told otherwise
+	NSSCaptureHeader(s);
+	if (path)
+	{
+		strncpy(s->Path, path, NSS_SLOT_PATH - 1);
+		s->Path[NSS_SLOT_PATH - 1] = 0;
+	}
+	s->Present = TRUE;
+	return (TRUE);
+}
+
+bool8 S9xNSSInsertCart (int slot, const char *path)
+{
+	std::vector<uint8>	image;
+
+	if (slot < 0 || slot >= NSS_SLOTS || !NSS.Active)
+		return (FALSE);
+	if (!S9xNSSReadCartImage(path, image) || image.empty())
+		return (FALSE);
+
+	uint32	prg = 0;
+	if (!S9xNSSTakeCartTail(image.data(), (uint32) image.size(), &prg))
+		return (FALSE);
+
+	// The supervisor rejects two cartridges with the same game id, so it
+	// would throw this one out anyway; say so here instead.
+	const uint32	crc = CRC32(image.data(), prg);
+	for (int i = 0; i < NSS_SLOTS; i++)
+		if (i != slot && NSS.Slot[i].Present && NSS.Slot[i].CRC == crc)
+			return (FALSE);
+
+	if (!S9xNSSLoadSlot(slot, image.data(), (uint32) image.size(), path))
+		return (FALSE);
+
+	// Changing a cartridge is a power-off job on the real cabinet, and the
+	// supervisor only scans its sockets at boot. Credits survive: they live
+	// in the EEPROM.
+	S9xNSSPowerOn();
+	return (TRUE);
+}
+
+// A cabinet with nothing in it has nothing to run, so the last cartridge
+// stays put.
+bool8 S9xNSSCanEject (int slot)
+{
+	if (!S9xNSSSlotPresent(slot))
+		return (FALSE);
+	for (int i = 0; i < NSS_SLOTS; i++)
+		if (i != slot && NSS.Slot[i].Present)
+			return (TRUE);
+	return (FALSE);
+}
+
+void S9xNSSEjectCart (int slot)
+{
+	if (!S9xNSSCanEject(slot))
+		return;
+	S9xNSSStashMappedSRAM();
+	free(NSS.Slot[slot].Prg);
+	memset(&NSS.Slot[slot], 0, sizeof(NSS.Slot[slot]));
+	if (NSS.Active)
+		S9xNSSPowerOn();
+}
+
+void S9xNSSStashMappedSRAM (void)
+{
+	if (NSS.MappedSlot < 0 || NSS.MappedSlot >= NSS_SLOTS ||
+		!NSS.Slot[NSS.MappedSlot].Present)
+		return;
+	memcpy(NSS.Slot[NSS.MappedSlot].SRAM, Memory.SRAM, NSS_SLOT_SRAM);
+	NSS.Slot[NSS.MappedSlot].SRAMValid = TRUE;
+}
+
+bool8 S9xNSSSlotPresent (int slot)
+{
+	return (slot >= 0 && slot < NSS_SLOTS && NSS.Slot[slot].Present) ? TRUE : FALSE;
+}
+
+const char *S9xNSSSlotName (int slot)
+{
+	return S9xNSSSlotPresent(slot) ? NSS.Slot[slot].Name : "";
+}
+
+const char *S9xNSSSlotPath (int slot)
+{
+	return S9xNSSSlotPresent(slot) ? NSS.Slot[slot].Path : "";
+}
+
+int S9xNSSMappedSlot (void)
+{
+	return (NSS.MappedSlot);
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,19 +1246,6 @@ static bool AcceptExactSize (const uint8 *data, uint32 size, uint32 full_size, v
 // The BIOS set ships all three revisions at the same length, so they are
 // told apart by checksum: "03" runs every title, "02" only the three oldest.
 struct NSSBiosPick { uint8 want_rev; uint8 seen_rev; };
-
-static uint32 CRC32 (const uint8 *d, uint32 n)
-{
-	uint32	crc = 0xffffffff;
-
-	for (uint32 i = 0; i < n; i++)
-	{
-		crc ^= d[i];
-		for (int b = 0; b < 8; b++)
-			crc = (crc >> 1) ^ (0xedb88320u & (uint32) (-(int32) (crc & 1)));
-	}
-	return (~crc);
-}
 
 // Every revision starts its reset path with LD A,I / JP Z,nnnn.
 static bool8 LooksLikeNSSBios (const uint8 *d, uint32 n)
@@ -1174,6 +1361,12 @@ bool8 S9xNSSLoadBIOS (void)
 // ---------------------------------------------------------------------------
 // Battery-backed settings
 
+// The cabinet's own saved data: the coinage EEPROM, the clock's SRAM and
+// the batteries of sockets 2 and 3. Socket 1 keeps the ordinary .srm the
+// loader already reads and writes for it.
+#define NSS_NVRAM_HEAD	(NSS_EEPROM_WORDS * 2 + NSS_RTC_NVRAM)
+#define NSS_NVRAM_FULL	(NSS_NVRAM_HEAD + (NSS_SLOTS - 1) * NSS_SLOT_SRAM)
+
 bool8 S9xNSSLoadNVRAM (void)
 {
 	std::string	name = S9xGetFilename(".nss", SRAM_DIR);
@@ -1182,16 +1375,27 @@ bool8 S9xNSSLoadNVRAM (void)
 	if (!fp)
 		return (FALSE);
 
-	uint8	buf[NSS_EEPROM_WORDS * 2 + NSS_RTC_NVRAM];
-	const size_t	got = fread(buf, 1, sizeof buf, fp);
+	std::vector<uint8>	buf(NSS_NVRAM_FULL, 0);
+	const size_t		got = fread(buf.data(), 1, NSS_NVRAM_FULL, fp);
 	fclose(fp);
 
-	if (got != sizeof buf)
+	// A file from before the extra sockets existed stops after the clock.
+	if (got != NSS_NVRAM_HEAD && got != NSS_NVRAM_FULL)
 		return (FALSE);
 
 	for (int i = 0; i < NSS_EEPROM_WORDS; i++)
 		NSS.EEPROM.Data[i] = (uint16) (buf[i * 2] | (buf[i * 2 + 1] << 8));
-	memcpy(NSS.RTC.NVRAM, buf + NSS_EEPROM_WORDS * 2, NSS_RTC_NVRAM);
+	memcpy(NSS.RTC.NVRAM, buf.data() + NSS_EEPROM_WORDS * 2, NSS_RTC_NVRAM);
+
+	if (got == NSS_NVRAM_FULL)
+	{
+		for (int i = 1; i < NSS_SLOTS; i++)
+		{
+			memcpy(NSS.Slot[i].SRAM, buf.data() + NSS_NVRAM_HEAD + (i - 1) * NSS_SLOT_SRAM,
+			       NSS_SLOT_SRAM);
+			NSS.Slot[i].SRAMValid = TRUE;
+		}
+	}
 	return (TRUE);
 }
 
@@ -1203,15 +1407,20 @@ bool8 S9xNSSSaveNVRAM (void)
 	if (!fp)
 		return (FALSE);
 
-	uint8	buf[NSS_EEPROM_WORDS * 2 + NSS_RTC_NVRAM];
+	S9xNSSStashMappedSRAM();
+
+	std::vector<uint8>	buf(NSS_NVRAM_FULL, 0);
 	for (int i = 0; i < NSS_EEPROM_WORDS; i++)
 	{
 		buf[i * 2]     = (uint8) NSS.EEPROM.Data[i];
 		buf[i * 2 + 1] = (uint8) (NSS.EEPROM.Data[i] >> 8);
 	}
-	memcpy(buf + NSS_EEPROM_WORDS * 2, NSS.RTC.NVRAM, NSS_RTC_NVRAM);
+	memcpy(buf.data() + NSS_EEPROM_WORDS * 2, NSS.RTC.NVRAM, NSS_RTC_NVRAM);
+	for (int i = 1; i < NSS_SLOTS; i++)
+		memcpy(buf.data() + NSS_NVRAM_HEAD + (i - 1) * NSS_SLOT_SRAM,
+		       NSS.Slot[i].SRAM, NSS_SLOT_SRAM);
 
-	fwrite(buf, 1, sizeof buf, fp);
+	fwrite(buf.data(), 1, NSS_NVRAM_FULL, fp);
 	fclose(fp);
 	NSS.EEPROM.Dirty = FALSE;
 	return (TRUE);
@@ -1222,7 +1431,10 @@ bool8 S9xNSSSaveNVRAM (void)
 // loader-owned data (BIOS, instruction EPROM, key, OSD charset) is rebuilt
 // at ROM load and deliberately stays out.
 
+// magic(4) + version(1) + reserved(3) + payload length(4), then the mirror.
+// The length is 32-bit because three sockets' batteries alone run past 64K.
 #define NSS_STATE_VERSION	1
+#define NSS_STATE_HEADER	12
 
 struct SNSSSaveState
 {
@@ -1239,6 +1451,9 @@ struct SNSSSaveState
 	int32	LastVCounter;
 	int64	CycleRemainder;
 
+	int8	MappedSlot;
+	uint8	SlotSRAMValid[NSS_SLOTS];
+
 	uint8	PROMCounter, PROMSevenBit, PROMLastClock, PROMReset;
 
 	uint16	EEPROMData[NSS_EEPROM_WORDS];
@@ -1254,20 +1469,39 @@ struct SNSSSaveState
 	uint32	OSDBlinkFrame;
 };
 
+// Batteries are appended after the fixed mirror, and only for the sockets
+// that actually have one: carrying three blank 32K buffers would cost more
+// than the rest of the board put together, in every rewind frame.
+static uint32 NSSSlotSRAMBytes (int slot)
+{
+	const struct SNSSSlot	*s = &NSS.Slot[slot];
+	if (!s->Present || !s->SRAMSizeByte)
+		return (0);
+	const uint32	n = (uint32) ((1 << (s->SRAMSizeByte + 3)) * 128);
+	return (n < NSS_SLOT_SRAM) ? n : NSS_SLOT_SRAM;
+}
+
 size_t S9xNSSStateSize (void)
 {
-	return (8 + sizeof(struct SNSSSaveState));
+	size_t	n = NSS_STATE_HEADER + sizeof(struct SNSSSaveState);
+	for (int i = 0; i < NSS_SLOTS; i++)
+		n += NSSSlotSRAMBytes(i);
+	return (n);
 }
 
 void S9xNSSStateSave (uint8 *buf)
 {
 	struct SNSSSaveState	s;
 
+	const uint32	payload = (uint32) (S9xNSSStateSize() - NSS_STATE_HEADER);
+
 	memcpy(buf, "NSS!", 4);
 	buf[4] = NSS_STATE_VERSION;
-	buf[5] = 0;
-	buf[6] = (uint8) (sizeof s & 0xff);
-	buf[7] = (uint8) ((sizeof s >> 8) & 0xff);
+	buf[5] = buf[6] = buf[7] = 0;
+	buf[8]  = (uint8) payload;
+	buf[9]  = (uint8) (payload >> 8);
+	buf[10] = (uint8) (payload >> 16);
+	buf[11] = (uint8) (payload >> 24);
 
 	memset(&s, 0, sizeof s);
 	s.Cpu = Z80;
@@ -1292,6 +1526,10 @@ void S9xNSSStateSave (uint8 *buf)
 	s.LastVCounter = NSS.LastVCounter;
 	s.CycleRemainder = NSS.CycleRemainder;
 
+	s.MappedSlot = NSS.MappedSlot;
+	for (int i = 0; i < NSS_SLOTS; i++)
+		s.SlotSRAMValid[i] = NSS.Slot[i].SRAMValid;
+
 	s.PROMCounter = NSS.PROM.Counter;
 	s.PROMSevenBit = NSS.PROM.SevenBit;
 	s.PROMLastClock = NSS.PROM.LastClock;
@@ -1314,21 +1552,33 @@ void S9xNSSStateSave (uint8 *buf)
 	memcpy(s.OSDReg, NSS.OSD.Reg, sizeof s.OSDReg);
 	s.OSDBlinkFrame = NSS.OSD.BlinkFrame;
 
-	memcpy(buf + 8, &s, sizeof s);
+	memcpy(buf + NSS_STATE_HEADER, &s, sizeof s);
+
+	uint8	*tail = buf + NSS_STATE_HEADER + sizeof s;
+	for (int i = 0; i < NSS_SLOTS; i++)
+	{
+		const uint32	n = NSSSlotSRAMBytes(i);
+		if (!n)
+			continue;
+		memcpy(tail, NSS.Slot[i].SRAM, n);
+		tail += n;
+	}
 }
 
 bool8 S9xNSSStateLoad (const uint8 *buf, size_t size)
 {
 	struct SNSSSaveState	s;
 
-	if (size < 8 || memcmp(buf, "NSS!", 4) != 0 || buf[4] != NSS_STATE_VERSION)
+	if (size < NSS_STATE_HEADER || memcmp(buf, "NSS!", 4) != 0 ||
+		buf[4] != NSS_STATE_VERSION)
 		return (FALSE);
 
-	const size_t	payload = (size_t) (buf[6] | (buf[7] << 8));
-	if (payload != sizeof s || size < 8 + payload)
+	const size_t	payload = (size_t) buf[8] | ((size_t) buf[9] << 8) |
+							  ((size_t) buf[10] << 16) | ((size_t) buf[11] << 24);
+	if (payload < sizeof s || size < NSS_STATE_HEADER + payload)
 		return (FALSE);
 
-	memcpy(&s, buf + 8, sizeof s);
+	memcpy(&s, buf + NSS_STATE_HEADER, sizeof s);
 
 	Z80 = s.Cpu;
 	memcpy(NSS.WRAM, s.WRAM, NSS_WRAM_SIZE);
@@ -1351,6 +1601,24 @@ bool8 S9xNSSStateLoad (const uint8 *buf, size_t size)
 	NSS.WRAMUnlock = s.WRAMUnlock;
 	NSS.LastVCounter = s.LastVCounter;
 	NSS.CycleRemainder = s.CycleRemainder;
+
+	NSS.MappedSlot = s.MappedSlot;
+	for (int i = 0; i < NSS_SLOTS; i++)
+		NSS.Slot[i].SRAMValid = s.SlotSRAMValid[i];
+
+	// The batteries follow, in socket order, for whichever sockets have one.
+	// A snapshot taken with a different set of cartridges in simply runs out
+	// of tail, and those slots keep what they have.
+	const uint8	*tail = buf + NSS_STATE_HEADER + sizeof s;
+	const uint8	*end = buf + NSS_STATE_HEADER + payload;
+	for (int i = 0; i < NSS_SLOTS; i++)
+	{
+		const uint32	n = NSSSlotSRAMBytes(i);
+		if (!n || tail + n > end)
+			continue;
+		memcpy(NSS.Slot[i].SRAM, tail, n);
+		tail += n;
+	}
 
 	NSS.PROM.Counter = s.PROMCounter;
 	NSS.PROM.SevenBit = s.PROMSevenBit;
@@ -1383,33 +1651,44 @@ bool8 S9xNSSStateLoad (const uint8 *buf, size_t size)
 void S9xNSSDeactivate (void)
 {
 	NSS.Active = FALSE;
+	NSS.MappedSlot = -1;
+	for (int i = 0; i < NSS_SLOTS; i++)
+	{
+		free(NSS.Slot[i].Prg);
+		memset(&NSS.Slot[i], 0, sizeof(NSS.Slot[i]));
+	}
 }
 
 void S9xNSSPowerOn (void)
 {
-	// The loader filled these in before the board came up; keep them.
-	static uint8	bios[NSS_BIOS_SIZE], inst[NSS_INST_SIZE], font[NSS_FONT_SIZE];
-	uint8			prom[NSS_PROM_SIZE];
-	const uint8		prom_present = NSS.PROM.Present;
-	const uint8		font_loaded = NSS.OSD.FontLoaded;
-	const uint8		bios_rev = NSS.BIOSRevision;
-	const uint8		dip = NSS.DipSwitches;
+	// Whatever was running keeps its battery across the power cycle.
+	S9xNSSStashMappedSRAM();
 
-	memcpy(bios, NSS.BIOS, NSS_BIOS_SIZE);
-	memcpy(inst, NSS.INST, NSS_INST_SIZE);
-	memcpy(font, NSS.OSD.Font, NSS_FONT_SIZE);
-	memcpy(prom, NSS.PROM.Data, NSS_PROM_SIZE);
+	// Everything the loader owns — the BIOS, the charset and whatever is in
+	// the sockets — outlives a power cycle; only the volatile board does not.
+	// Clearing field by field rather than wiping the struct is what keeps the
+	// slots' heap buffers.
+	memset(NSS.WRAM, 0, sizeof(NSS.WRAM));
+	NSS.Port00W = NSS.Port01W = NSS.Port03W = NSS.Port04W = 0;
+	NSS.SlotSelect = 0;
+	NSS.PendingSNESReset = FALSE;
+	NSS.SoundMuted = FALSE;
+	NSS.Buttons = NSS.PulseButtons = 0;
+	NSS.PulseLeft = 0;
+	NSS.CoinPulse[0] = NSS.CoinPulse[1] = 0;
+	NSS.NMIEnable = NSS.WRAMUnlock = 0;
+	NSS.CycleRemainder = 0;
+	memset(&NSS.PROM, 0, sizeof(NSS.PROM));
+	memset(&NSS.EEPROM, 0, sizeof(NSS.EEPROM));
+	memset(&NSS.RTC, 0, sizeof(NSS.RTC));
 
-	memset(&NSS, 0, sizeof(NSS));
-
-	memcpy(NSS.BIOS, bios, NSS_BIOS_SIZE);
-	memcpy(NSS.INST, inst, NSS_INST_SIZE);
-	memcpy(NSS.OSD.Font, font, NSS_FONT_SIZE);
-	memcpy(NSS.PROM.Data, prom, NSS_PROM_SIZE);
-	NSS.PROM.Present = prom_present;
-	NSS.OSD.FontLoaded = font_loaded;
-	NSS.BIOSRevision = bios_rev;
-	NSS.DipSwitches = dip;
+	NSS.OSD.CS = NSS.OSD.Clock = NSS.OSD.DataIn = 0;
+	NSS.OSD.BitPos = 0;
+	NSS.OSD.Shift = 0;
+	NSS.OSD.HaveAddr = FALSE;
+	NSS.OSD.Addr = 0;
+	NSS.OSD.BlinkFrame = 0;
+	memset(NSS.OSD.Reg, 0, sizeof(NSS.OSD.Reg));
 
 	NSS.Active = TRUE;
 	NSS.SNESHeld = TRUE;		// the BIOS lets the game go when it is paid for
@@ -1417,6 +1696,7 @@ void S9xNSSPowerOn (void)
 	NSS.JoyReadFlag = 1;
 	NSS.GameOverFlag = 1;
 	NSS.LastVCounter = -1;
+	NSS.MappedSlot = -1;
 
 	for (int i = 0; i < NSS_EEPROM_WORDS; i++)
 		NSS.EEPROM.Data[i] = 0xffff;
@@ -1433,8 +1713,11 @@ void S9xNSSPowerOn (void)
 	Z80CB.IntAck = NULL;
 	Z80_Reset();
 
-	printf("NSS: supervisor board powered on (BIOS rev %s in control).\n",
+	printf("NSS: supervisor board powered on (BIOS rev %s, slots:",
 		   NSS.BIOSRevision == 2 ? "02" : NSS.BIOSRevision == 3 ? "03" : "?");
+	for (int i = 0; i < NSS_SLOTS; i++)
+		printf(" %d=%s", i + 1, NSS.Slot[i].Present ? NSS.Slot[i].Name : "-");
+	printf(").\n");
 }
 
 bool8 S9xNSSSNESHeld (void)

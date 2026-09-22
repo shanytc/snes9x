@@ -67,9 +67,24 @@ struct retro_core_option_definition option_defs_us[] = {
       "auto"
    },
    {
+      "snes9x_gb_model",
+      "Game Boy Model (Reload Game)",
+      "Which console Game Boy content runs on, matching the Game Boy Model menu of the desktop builds. 'Automatic' takes the best console the cart says it was built for: an SGB-enhanced cart boots on a Super Game Boy BIOS, a color cart on the Game Boy Color, anything else on the Game Boy. The named entries pin one console the way the hardware does, so a plain Game Boy cart can still be run on a Super Game Boy for its border and palettes. The Super Game Boy entries need the matching BIOS in the system directory (sgb.sfc for SGB1, sgb2.sfc for SGB2) and drop back to Automatic without it; 'Super Game Boy Color' is experimental, is built on the SGB2 BIOS and takes SGB-enhanced carts only.",
+      {
+         { "auto", "Automatic (from the cart header)" },
+         { "gb",   "Game Boy" },
+         { "gbc",  "Game Boy Color" },
+         { "sgb",  "Super Game Boy" },
+         { "sgb2", "Super Game Boy 2" },
+         { "sgbc", "Super Game Boy Color (Experimental)" },
+         { NULL, NULL },
+      },
+      "auto"
+   },
+   {
       "snes9x_sgb_bios",
       "Super Game Boy BIOS Mode (Reload Game)",
-      "Choose how Game Boy / Super Game Boy content boots. 'Prefer SGB BIOS' uses a real SNES Super Game Boy BIOS placed in the system directory (sgb2.sfc / SGB2.sfc / sgb.sfc / SGB.sfc) for authentic SGB sound and borders - preferring SGB2 then SGB1 - and falls back to the built-in BIOS-less core if none is found. 'SGB1 BIOS only' restricts the search to an SGB1 BIOS. 'BIOS-less' always runs the built-in Game Boy core directly. Note: Game Boy Color content runs in monochrome DMG-compatibility mode (no color hardware emulation).",
+      "Which Super Game Boy BIOS a Super Game Boy session runs on. 'Prefer SGB BIOS' uses a real SNES Super Game Boy BIOS placed in the system directory (sgb2.sfc / SGB2.sfc / sgb.sfc / SGB.sfc) for authentic SGB sound and borders - preferring SGB2 then SGB1 - and falls back to the built-in BIOS-less core if none is found. 'SGB1 BIOS only' restricts the search to an SGB1 BIOS. 'BIOS-less' never enters Super Game Boy mode and always runs the built-in Game Boy core directly. Which console the cart boots on is 'Game Boy Model'; this only orders the BIOS search it makes. Note: a color cart in Super Game Boy mode runs in monochrome DMG-compatibility mode, as it does on the hardware; the 'Super Game Boy Color' model is the exception.",
       {
          { "auto", "Prefer SGB BIOS (SGB2 > SGB1 > BIOS-less)" },
          { "sgb1", "SGB1 BIOS only" },

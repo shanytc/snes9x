@@ -458,6 +458,7 @@ void S9xDoHEventProcessing (void)
 	switch (CPU.WhichEvent)
 	{
 		case HC_HBLANK_START_EVENT:
+			S9xApplyMidLineEvents();
 			S9xReschedule();
 			break;
 

@@ -207,6 +207,7 @@ void S9xRecordMidLineBrightness (int line, int x, uint8 oldBright, uint8 newBrig
 void S9xGetLineRenderState (int line, uint8 &brightness, uint16 &backdrop);
 void S9xRecordMidLineWindowSel (int reg, uint8 oldVal, uint8 newVal);
 void S9xRecordMidLineScroll (int reg, uint16 oldVal, uint16 newVal);
+void S9xApplyMidLineEvents (void);
 void S9xBuildDirectColourMaps (void);
 void RenderLine (uint8);
 void S9xComputeClipWindows (void);

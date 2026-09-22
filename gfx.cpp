@@ -444,8 +444,9 @@ void S9xBuildDirectColourMaps (void)
 // aircraft shadow by dimming $2100 for ~10 dots in the middle of a scanline
 // and restoring it before HBlank; a line renderer can't split a line, so the
 // events are recorded here and the mismatching pixel spans are re-scaled
-// after the frame is done. RenderLine snapshots the brightness each line was
-// actually drawn with, so the pass is exact for any Timings.RenderPos.
+// once the line is done (S9xApplyMidLineEvents). RenderLine snapshots the
+// brightness each line was actually drawn with, so the pass is exact for
+// any Timings.RenderPos.
 #define MAX_BRIGHT_EVENTS 64
 static struct
 {
@@ -473,8 +474,8 @@ static void S9xApplyMidLineBrightness (void);
 // before HBlank, bounding the effect horizontally by write timing. The
 // per-line latch applies the rastered value to the whole line, so the events
 // are recorded here and the outer spans are re-rendered with the pre-raster
-// state after the frame, clipped through the normal window-segment lists.
-#define MAX_RASTER_EVENTS 1536
+// state at the line's HBlank, clipped through the normal window-segment lists.
+#define MAX_RASTER_EVENTS 64
 static struct
 {
 	uint8	line, x, cls, reg;   // cls 0 = $2123+reg window byte, 1 = $210d+reg scroll
@@ -486,9 +487,8 @@ static int		raster_span_count = 0;   // re-render clip restriction, consumed by 
 static uint16	raster_span_l[2], raster_span_r[2];
 
 // Window positions and the backdrop color are HDMA-driven per line (gauge
-// shapes, the radar sweep, the ambient-light gradient on CGRAM entry 0), so
-// the end-of-frame values are wrong for a re-render; RenderLine snapshots
-// what each line actually latched.
+// shapes, the radar sweep, the ambient-light gradient on CGRAM entry 0);
+// RenderLine snapshots what each line actually latched.
 static uint8	line_windows[240][4];
 static uint16	line_backdrop[240];
 
@@ -881,6 +881,24 @@ static void S9xApplyMidLineRaster (void)
 	IPPU.CurrentLine  = savedCur;
 }
 
+// HBlank of every line: re-render a line written mid-scanline now, while the
+// PPU still holds the state the beam saw (end-of-frame OAM broke FF VI).
+void S9xApplyMidLineEvents (void)
+{
+	if (!raster_event_count && !bright_event_count)
+		return;
+
+	if (IPPU.RenderThisFrame)
+	{
+		FLUSH_REDRAW();
+		S9xApplyMidLineRaster();
+		S9xApplyMidLineBrightness();
+	}
+
+	raster_event_count = 0;
+	bright_event_count = 0;
+}
+
 void S9xStartScreenRefresh (void)
 {
 	// Interlaced output is drawn one field per frame: this frame fills the
@@ -1216,9 +1234,6 @@ void S9xEndScreenRefresh (void)
 	if (IPPU.RenderThisFrame)
 	{
 		FLUSH_REDRAW();
-
-		S9xApplyMidLineRaster();
-		S9xApplyMidLineBrightness();
 
 		// SGB BIOS-mode custom-border overlay. FLUSH_REDRAW above
 		// finalized the SNES PPU output (including the SGB2 BIOS's

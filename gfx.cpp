@@ -15,6 +15,7 @@
 #include "display.h"
 #include "sgb/sgb.h"   // S9xSGBOverlayBiosBorder — runs after FLUSH_REDRAW
 #include "sfcbox.h"    // S9xSFCBoxRenderOSD — MB90082 overlay plane
+#include "nss.h"       // S9xNSSRenderOSD    — M50458 overlay plane
                         // so the BIOS-mode custom-border overlay isn't
                         // clobbered by the PPU's final blit.
 
@@ -1276,6 +1277,24 @@ void S9xEndScreenRefresh (void)
 				IPPU.RenderedScreenWidth *= 2;
 			}
 			S9xSFCBoxRenderOSD(GFX.Screen, GFX.RealPPL, IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
+		}
+
+		// NSS: the M50458 superimposes the menu, the timer and the coin
+		// prompts the same way, and over the blank frames while the game
+		// sits in reset. Same doubling trick for its 12-dot cells.
+		if (Settings.NSS)
+		{
+			if (S9xNSSOSDHires() && IPPU.RenderedScreenWidth <= 256)
+			{
+				for (int y = 0; y < IPPU.RenderedScreenHeight; y++)
+				{
+					uint16	*line = GFX.Screen + y * GFX.RealPPL;
+					for (int x = IPPU.RenderedScreenWidth - 1; x >= 0; x--)
+						line[x * 2] = line[x * 2 + 1] = line[x];
+				}
+				IPPU.RenderedScreenWidth *= 2;
+			}
+			S9xNSSRenderOSD(GFX.Screen, GFX.RealPPL, IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
 		}
 
 		S9xBlendGameBoyFrames();

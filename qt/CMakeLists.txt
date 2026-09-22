@@ -77,6 +77,8 @@ set(SNES9X_CORE_SOURCES
     ../seta018.cpp
     ../sfcbox.cpp
     ../hd64180.cpp
+    ../nss.cpp
+    ../z80.cpp
     ../controls.cpp
     ../crosshairs.cpp
     ../cpu.cpp

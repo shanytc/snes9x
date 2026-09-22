@@ -20,6 +20,7 @@
 #include "language.h"
 #include "sgb/sgb.h"
 #include "sfcbox.h"
+#include "nss.h"
 #include "gfx.h"
 
 #ifndef min
@@ -1338,6 +1339,16 @@ void S9xFreezeToStream (STREAM stream)
 		delete [] box_buf;
 	}
 
+	// NSS: its supervisor board travels the same way, as an "NSS" blob.
+	if (Settings.NSS)
+	{
+		const size_t	nss_size = S9xNSSStateSize();
+		uint8			*nss_buf = new uint8[nss_size];
+		S9xNSSStateSave(nss_buf);
+		FreezeBlock(stream, "NSS", nss_buf, (int) nss_size);
+		delete [] nss_buf;
+	}
+
 	// SGB BIOS mode: piggyback the GB/SGB blob inside the SNES snapshot.
 	// The blob is self-versioning ("SGB!" magic + version + size); we just
 	// hand the raw bytes to FreezeBlock. Without this, BIOS-mode loads
@@ -1459,6 +1470,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 	uint8	*local_pf94_data     = NULL;
 	uint8	*local_box_data      = NULL;
 	int		local_box_size       = 0;
+	uint8	*local_nss_data      = NULL;
+	int		local_nss_size       = 0;
 	uint8	*local_gbe_data      = NULL;
 	int		local_gbe_size       = 0;
 	uint8	*local_screenshot    = NULL;
@@ -1622,6 +1635,23 @@ int S9xUnfreezeFromStream (STREAM stream)
 			}
 		}
 
+		// Optional NSS supervisor blob, peeked for the same way.
+		{
+			int nss_block_len = 0;
+			if (CheckBlockName(stream, "NSS", nss_block_len) && nss_block_len > 0)
+			{
+				local_nss_data = new uint8[nss_block_len];
+				result = UnfreezeBlock(stream, "NSS", local_nss_data, nss_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_nss_data;
+					local_nss_data = NULL;
+					break;
+				}
+				local_nss_size = nss_block_len;
+			}
+		}
+
 		// Optional GB/SGB blob — present iff the snapshot was taken in
 		// BIOS mode (Settings.SGB_BIOSModeActive). Old snapshots and
 		// non-SGB SNES games omit it. CheckBlockName peeks without
@@ -1721,6 +1751,11 @@ int S9xUnfreezeFromStream (STREAM stream)
 			if (S9xSFCBoxStateLoad(local_box_data, (size_t) local_box_size))
 				S9xSFCBoxPostLoadState();
 		}
+
+		// NSS: the cart map is the ordinary LoROM one, so the supervisor
+		// needs no remap after restoring — just its own state.
+		if (Settings.NSS && local_nss_data)
+			S9xNSSStateLoad(local_nss_data, (size_t) local_nss_size);
 
 		if (local_fillram)
 			memcpy(Memory.FillRAM, local_fillram, 0x8000);
@@ -2022,6 +2057,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_movie_data)		delete [] local_movie_data;
 	if (local_pf94_data)		delete [] local_pf94_data;
 	if (local_box_data)			delete [] local_box_data;
+	if (local_nss_data)			delete [] local_nss_data;
 	if (local_gbe_data)			delete [] local_gbe_data;
 
 	return (result);

@@ -63,6 +63,7 @@
 #include "../msu1.h"
 #include "../sgb/sgb.h"
 #include "../sfcbox.h"
+#include "../nss.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -1258,11 +1259,16 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		}
 		if(HKmatch(InsertCoin))
 		{
-			// SFC-Box front-panel coin switch; only meaningful while a
-			// Super Famicom Box cart is running the KROM supervisor.
+			// Front-panel coin switch of whichever coin-op supervisor is
+			// running: the Super Famicom Box's KROM or the NSS's Z80.
 			if (SFCBox.Active)
 			{
 				S9xSFCBoxInsertCoin();
+				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
+			}
+			else if (NSS.Active)
+			{
+				S9xNSSInsertCoin(0);
 				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
 			}
 			hitHotKey = true;
@@ -3016,6 +3022,34 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_RUNAHEAD_4:
 			Settings.RunAhead = 4;
 			break;
+		case ID_NSS_COIN1:
+		case ID_NSS_COIN2:
+			if (NSS.Active)
+			{
+				S9xNSSInsertCoin(cmd_id == ID_NSS_COIN2 ? 1 : 0);
+				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
+			}
+			break;
+
+		case ID_NSS_SERVICE:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_SERVICE);      break;
+		case ID_NSS_GAME1:        if (NSS.Active) S9xNSSPulseButton(NSS_BTN_GAME1);        break;
+		case ID_NSS_GAME2:        if (NSS.Active) S9xNSSPulseButton(NSS_BTN_GAME2);        break;
+		case ID_NSS_GAME3:        if (NSS.Active) S9xNSSPulseButton(NSS_BTN_GAME3);        break;
+		case ID_NSS_INSTRUCTIONS: if (NSS.Active) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;
+		case ID_NSS_PAGEUP:       if (NSS.Active) S9xNSSPulseButton(NSS_BTN_PAGEUP);       break;
+		case ID_NSS_PAGEDOWN:     if (NSS.Active) S9xNSSPulseButton(NSS_BTN_PAGEDOWN);     break;
+		case ID_NSS_RESTART:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_RESTART);      break;
+
+		case ID_NSS_DIP0 + 0: case ID_NSS_DIP0 + 1: case ID_NSS_DIP0 + 2:
+		case ID_NSS_DIP0 + 3: case ID_NSS_DIP0 + 4: case ID_NSS_DIP0 + 5:
+		case ID_NSS_DIP0 + 6: case ID_NSS_DIP0 + 7:
+			// The cartridge DIP block the game reads at $4100. What each
+			// switch does is per-game, so they are just eight switches.
+			Settings.NSSDipSwitches ^= (uint32) (1 << (cmd_id - ID_NSS_DIP0));
+			NSS.DipSwitches = (uint8) Settings.NSSDipSwitches;
+			CheckMenuStates();
+			break;
+
 		case ID_FILE_BIOSMANAGER:
 			{
 				// Restore the GUI surface ourselves: reached by hotkey there is
@@ -5557,6 +5591,19 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.FullScreen||GUI.EmulatedFullscreen) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_FULLSCREEN, FALSE, &mii);
+
+	// Nintendo Super System front panel: live only while its supervisor is.
+	{
+		HMENU emu = NULL;
+		int   pos = 0;
+		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &emu, &pos))
+			EnableMenuItem(emu, pos, MF_BYPOSITION | (NSS.Active ? MF_ENABLED : MF_GRAYED));
+		for (int sw = 0; sw < 8; sw++)
+		{
+			mii.fState = (Settings.NSSDipSwitches & (1 << sw)) ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &mii);
+		}
+	}
 
 	mii.fState = GUI.Stretch ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_STRETCH, FALSE, &mii);

@@ -244,6 +244,8 @@
     <ClInclude Include="..\sdd1emu.h" />
     <ClInclude Include="..\seta.h" />
     <ClInclude Include="..\sfcbox.h" />
+    <ClInclude Include="..\nss.h" />
+    <ClInclude Include="..\z80.h" />
     <ClInclude Include="..\sha256.h" />
     <ClInclude Include="..\snapshot.h" />
     <ClInclude Include="..\snes9x.h" />
@@ -325,6 +327,8 @@
     <ClCompile Include="..\seta011.cpp" />
     <ClCompile Include="..\seta018.cpp" />
     <ClCompile Include="..\sfcbox.cpp" />
+    <ClCompile Include="..\nss.cpp" />
+    <ClCompile Include="..\z80.cpp" />
     <ClCompile Include="..\sha256.cpp" />
     <ClCompile Include="..\snapshot.cpp" />
     <ClCompile Include="..\snes9x.cpp" />

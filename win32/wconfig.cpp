@@ -1258,6 +1258,7 @@ void WinRegisterConfigItems()
     AddBoolC("GBNoSpriteLimit", Settings.GBNoSpriteLimit, false, "Game Boy: draw every object on a scanline instead of the hardware limit of 10, so sprite-heavy lines stop dropping their highest-index objects (Balloon Fight GB's title clouds). Not hardware-accurate; mode-3 timing is unchanged so raster effects still render correctly");
     AddBoolC("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop, true, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
     AddBoolC("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish, false, "SFC-Box supervisor screen language: FALSE=Japanese (authentic), TRUE=English (render-time translation; the KROM firmware and savestates stay untouched)");
+    AddUIntC("NSSDipSwitches", Settings.NSSDipSwitches, 0x0c, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100. What each one does is per-game; 0x0c is the believed factory setting");
     AddUIntC("PowerFest94TimeLimit", Settings.PF94TimerMinutes, 6, "PowerFest '94 event cart session length in minutes (DIP switches, 3-18)");
     AddUIntC("PowerFest94TimerDisplay", Settings.PF94TimerDisplay, 0, "PowerFest '94 session timer display: 0=none, 1=on screen, 2=window title");
     AddUIntC("CampusChallenge92TimeLimit", Settings.CC92TimerMinutes, 6, "Campus Challenge '92 event cart session length in minutes (DIP switches, 3-18)");

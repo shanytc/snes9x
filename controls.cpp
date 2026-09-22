@@ -21,6 +21,7 @@
 #include "movie.h"
 #include "display.h"
 #include "sfcbox.h"
+#include "nss.h"
 #include "voicekun.h"
 #ifdef NETPLAY_SUPPORT
 #include "netplay.h"
@@ -2971,6 +2972,17 @@ uint8 S9xReadJOYSERn (int n)
 
 	// SFC-Box manual mode: the supervisor's [84h-87h] latches replace the
 	// real pads (demo playback / KROM->SNES bulk transfers).
+	// NSS: outside a paid game the supervisor unplugs both pads. An empty
+	// port holds the data line high for the whole stream, so no button
+	// reads pressed and the bits past the buttons flip too — which is how a
+	// game can tell demo mode from play (fullsnes, Game/Demo-Mode Detection).
+	if (Settings.NSS && S9xNSSInputDisabled())
+	{
+		if (!FLAG_LATCH)
+			IncreaseReadIdxPost(read_idx[n][0]);
+		return (bits);
+	}
+
 	uint16	boxbits;
 	if (Settings.SFCBox && S9xSFCBoxJoypadOverride(n, &boxbits))
 	{
@@ -3143,8 +3155,21 @@ void S9xDoAutoJoypad (void)
 
 	S9xMovieUpdate(false);
 
+	// NSS: the supervisor watches for this poll and removes a game from
+	// the menu if it stops happening.
+	if (Settings.NSS)
+		S9xNSSJoypadRead();
+
 	for (int n = 0; n < 2; n++)
 	{
+		if (Settings.NSS && S9xNSSInputDisabled())
+		{
+			read_idx[n][0] = 16;
+			WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, 0);
+			WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
+			continue;
+		}
+
 		uint16	boxbits;
 		if (Settings.SFCBox && S9xSFCBoxJoypadOverride(n, &boxbits))
 		{

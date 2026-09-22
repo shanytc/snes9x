@@ -16,6 +16,7 @@
 #include "movie.h"
 #include "display.h"
 #include "sfcbox.h"
+#include "nss.h"
 #include "voicekun.h"
 #ifdef NETPLAY_SUPPORT
 #include "netplay.h"
@@ -1419,6 +1420,10 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 		{
 			case 0x4016: // JOYSER0
 				S9xSetJoypadLatch(Byte & 1);
+				// NSS: OUT1 carries the Game Over flag to the supervisor,
+				// and strobing at all is what feeds its joypad watchdog.
+				if (Settings.NSS)
+					S9xNSSSetJoypadStrobe(Byte);
 				break;
 
 			case 0x4017: // JOYSER1
@@ -1779,6 +1784,11 @@ uint8 S9xGetCPU (uint16 Address)
 		{
 			case 0x4016: // JOYSER0
 				return (S9xReadJOYSERn(Address));
+
+			case 0x4100: // NSS cartridge DIP switches
+				if (Settings.NSS)
+					return (S9xNSSReadDIP());
+				return (OpenBus);
 
 			case 0x4017: // JOYSER1
 			{

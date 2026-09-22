@@ -696,12 +696,14 @@
 #define ID_TESTS_ACIDTESTS          44349
 #define ID_FILE_BIOSMANAGER             44369
 #define IDD_BIOSMANAGER                 191
-#define IDC_BIOSMGR_LABEL0              3400
-#define IDC_BIOSMGR_EDIT0               3410
-#define IDC_BIOSMGR_BROWSE0             3420
-#define IDC_BIOSMGR_CLEAR0              3430
-#define IDC_BIOSMGR_STATUS0             3440
-#define IDC_BIOSMGR_INTRO               3450
+/* One block of 20 per control kind, so the BIOS Manager can grow to twenty
+   rows before the ranges collide. */
+#define IDC_BIOSMGR_LABEL0              3500
+#define IDC_BIOSMGR_EDIT0               3520
+#define IDC_BIOSMGR_BROWSE0             3540
+#define IDC_BIOSMGR_CLEAR0              3560
+#define IDC_BIOSMGR_STATUS0             3580
+#define IDC_BIOSMGR_INTRO               3600
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361
@@ -954,6 +956,21 @@
 #define ID_SOUND_AUDIOWAVEFORM          40198
 #define ID_INPUT_ENABLERUMBLE           40211
 
+/* Nintendo Super System front panel (Emulation menu) */
+#define ID_EMULATION_NSS                44400
+#define ID_NSS_COIN1                    44401
+#define ID_NSS_COIN2                    44402
+#define ID_NSS_SERVICE                  44403
+#define ID_NSS_GAME1                    44404
+#define ID_NSS_GAME2                    44405
+#define ID_NSS_GAME3                    44406
+#define ID_NSS_INSTRUCTIONS             44407
+#define ID_NSS_PAGEUP                   44408
+#define ID_NSS_PAGEDOWN                 44409
+#define ID_NSS_RESTART                  44410
+#define ID_NSS_DIP0                     44412
+
+
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -961,8 +978,8 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
-#define _APS_NEXT_COMMAND_VALUE         40224
-#define _APS_NEXT_CONTROL_VALUE         3495
+#define _APS_NEXT_COMMAND_VALUE         44421
+#define _APS_NEXT_CONTROL_VALUE         3620
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

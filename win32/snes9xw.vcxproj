@@ -351,6 +351,8 @@
     <CustomBuild Include="..\c4.h" />
     <CustomBuild Include="..\hd64180.h" />
     <CustomBuild Include="..\sfcbox.h" />
+    <CustomBuild Include="..\z80.h" />
+    <CustomBuild Include="..\nss.h" />
     <CustomBuild Include="..\cheats.h" />
     <CustomBuild Include="..\conffile.h" />
     <CustomBuild Include="..\controls.h" />
@@ -680,6 +682,8 @@
     <ClCompile Include="..\seta011.cpp" />
     <ClCompile Include="..\seta018.cpp" />
     <ClCompile Include="..\sfcbox.cpp" />
+    <ClCompile Include="..\nss.cpp" />
+    <ClCompile Include="..\z80.cpp" />
     <ClCompile Include="..\common\video\opengl\shaders\glsl.cpp" />
     <ClCompile Include="..\common\video\opengl\shaders\shader_helpers.cpp" />
     <ClCompile Include="..\common\video\opengl\shaders\slang.cpp" />

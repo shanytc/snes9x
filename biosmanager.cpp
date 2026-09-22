@@ -49,10 +49,14 @@ static const char *const kNamesKROM[]   = { "KROM1.BIN", "KROM.BIN", "krom1.bin"
 static const char *const kNamesFont[]   = { "MB90082.BIN", NULL };
 static const char *const kNamesBSX[]    = { "BS-X.bin", "BS-X.bios", NULL };
 static const char *const kNamesSufami[] = { "STBIOS.bin", NULL };
+static const char *const kNamesNSS[]    = { "nss-ic14.02.ic14", "nss.zip", "nss-c.ic14",
+                                            "nss-v3.ic14", "NSS-v03a.bin", NULL };
+static const char *const kNamesNSSFont[]= { "m50458_char.bin", "m50458.zip", "m50458-001sp", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
-// bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read. 0 = don't care (the
-// SGB carts ship in two sizes, the CGB boot ROM in two layouts).
+// bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
+// NSS_FONT_SIZE. 0 = don't care (the SGB carts ship in two sizes, the CGB
+// boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
 	{ "GameBoy",       "Game Boy",          kNamesGB,       0x100,   "Optional, adds the boot logo" },
@@ -65,6 +69,8 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "SFCBoxFont",    "SFC Box (MB90082)", kNamesFont,     9216,    NULL },
 	{ "BSX",           "Satellaview / BS-X",kNamesBSX,      0x100000,NULL },
 	{ "SufamiTurbo",   "Sufami Turbo",      kNamesSufami,   0x40000, NULL },
+	{ "NSS",           "Nintendo Super System", kNamesNSS,   0x8000,  NULL },
+	{ "NSSFont",       "NSS (M50458 charset)",  kNamesNSSFont, 0x1200,NULL },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -207,7 +213,8 @@ enum BiosImageKind
 {
 	KIND_UNKNOWN = 0,
 	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
-	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS
+	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
+	KIND_NSS_BIOS, KIND_NSS_FONT
 };
 
 static const char *KindName (int kind)
@@ -222,6 +229,8 @@ static const char *KindName (int kind)
 		case KIND_SGB2_CART: return ("Super Game Boy 2 image");
 		case KIND_BSX_BIOS:  return ("Satellaview BIOS");
 		case KIND_SUFAMI_BIOS: return ("Sufami Turbo BIOS");
+		case KIND_NSS_BIOS:  return ("Nintendo Super System BIOS");
+		case KIND_NSS_FONT:  return ("NSS OSD charset");
 		default:             return ("unrecognised image");
 	}
 }
@@ -242,6 +251,23 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 	if (full == 0x40000 && n >= 0x1E &&
 	    memcmp(d, "BANDAI SFC-ADX", 14) == 0 && memcmp(d + 0x10, "SFC-ADX BACKUP", 14) == 0)
 		return (KIND_SUFAMI_BIOS);
+
+	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
+	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
+	// twelve dots left-aligned at bit 11, so every row word's top nibble is
+	// clear.
+	if (full == 0x8000 && n >= 3 && d[0] == 0xED && d[1] == 0x57 && d[2] == 0xCA)
+		return (KIND_NSS_BIOS);
+	if (full == 0x1200 && n >= 0x1200)
+	{
+		uint32 ink = 0;
+		for (uint32 i = 0; i < 0x1200; i += 2)
+		{
+			if (d[i] & 0xF0) { ink = 0; break; }
+			if (d[i] | d[i + 1]) ink++;
+		}
+		if (ink > 256) return (KIND_NSS_FONT);
+	}
 
 	if (n >= 7 && d[0] == 0x31 && d[1] == 0xFE && d[2] == 0xFF)
 	{
@@ -271,6 +297,8 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_SGB2_BOOT: return (KIND_SGB2_BOOT);
 		case S9X_BIOS_BSX:       return (KIND_BSX_BIOS);
 		case S9X_BIOS_SUFAMI:    return (KIND_SUFAMI_BIOS);
+		case S9X_BIOS_NSS:       return (KIND_NSS_BIOS);
+		case S9X_BIOS_NSS_FONT:  return (KIND_NSS_FONT);
 		default:                 return (KIND_UNKNOWN);
 	}
 }

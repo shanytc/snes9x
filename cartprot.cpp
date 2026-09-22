@@ -32,8 +32,6 @@
 #include "cartprot.h"
 #include "ppu.h"
 
-extern uint8	OpenBus;
-
 struct SCartProt	CartProt;
 
 static uint8	*ProtRomBase[0x40];

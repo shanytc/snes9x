@@ -875,8 +875,16 @@ uint16 S9xNSSGetButtons (void)		{ return (uint16) (NSS.Buttons | NSS.PulseButton
 
 void S9xNSSPulseButton (uint16 mask)
 {
+	const int32	frames = (mask & NSS_BTN_RESTART) ? NSS_BTN_HOLD_FRAMES
+	                                              : NSS_BTN_TAP_FRAMES;
 	NSS.PulseButtons |= mask;
-	NSS.PulseLeft = 8;		// long enough for the supervisor's poll to see it
+	if (NSS.PulseLeft < frames)
+		NSS.PulseLeft = frames;
+}
+
+bool8 S9xNSSGameRunning (void)
+{
+	return (NSS.Active && !NSS.SNESHeld && !NSS.InputDisabled) ? TRUE : FALSE;
 }
 
 // ---------------------------------------------------------------------------

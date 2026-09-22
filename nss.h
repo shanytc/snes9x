@@ -194,6 +194,10 @@ void	S9xNSSMapSlot (int slot);
 // Anything that moves or drops a cartridge takes a copy first.
 void	S9xNSSStashMappedSRAM (void);
 bool8	S9xNSSSlotPresent (int slot);
+// True while a paid game is actually running — the supervisor has let the
+// 65816 go and plugged the pads back in. Its menu is not up, so the game
+// buttons do nothing until the game ends or Restart abandons it.
+bool8	S9xNSSGameRunning (void);
 const char *S9xNSSSlotName (int slot);
 const char *S9xNSSSlotPath (int slot);
 // Which slot's cartridge the SNES side is mapped to, or -1.
@@ -232,8 +236,15 @@ bool8	S9xNSSInputDisabled (void);		// pads unplugged: reads come back empty
 bool8	S9xNSSOSDHires (void);
 void	S9xNSSRenderOSD (uint16 *screen, int pitch, int width, int height);
 
+// How long a tapped button is held down for. The supervisor polls the panel
+// once a frame, so a few frames is plenty for most of them — but it debounces
+// Restart for about half a second before it will abandon a paid game, and a
+// tap that does not outlast that is simply ignored.
+#define NSS_BTN_TAP_FRAMES	10
+#define NSS_BTN_HOLD_FRAMES	40
+
 // Front panel. SetButtons holds a set of NSS_BTN_* down; PulseButton taps
-// one for a few frames, which is what a menu entry or a hotkey can offer.
+// one, which is what a menu entry or a hotkey can offer.
 void	S9xNSSInsertCoin (int slot);
 void	S9xNSSSetButtons (uint16 mask);
 void	S9xNSSPulseButton (uint16 mask);

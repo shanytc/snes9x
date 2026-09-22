@@ -5694,6 +5694,14 @@ static void CheckMenuStates ()
 			else
 				_stprintf(text, TEXT("Game &%d (Click to select cartridge...)"), slot + 1);
 
+			// The panel's game buttons only pick from the supervisor's menu;
+			// while a paid game is running it ignores them, so the entry says
+			// so rather than looking broken. An empty socket stays live
+			// because clicking it asks for a cartridge instead.
+			EnableMenuItem(GUI.hMenu, ID_NSS_GAME1 + slot,
+			               MF_BYCOMMAND | ((!S9xNSSSlotPresent(slot) || !S9xNSSGameRunning())
+			                               ? MF_ENABLED : MF_GRAYED));
+
 			MENUITEMINFO txt = {};
 			txt.cbSize     = sizeof(txt);
 			txt.fMask      = MIIM_STRING;

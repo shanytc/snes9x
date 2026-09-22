@@ -159,6 +159,9 @@
     <ClInclude Include="..\voicekun.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\cartprot.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>s9x-source\APU</Filter>
     </ClInclude>
@@ -333,6 +336,9 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\voicekun.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\cartprot.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\snapshot.cpp">

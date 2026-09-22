@@ -428,6 +428,7 @@ list(APPEND SOURCES
     ../cpuops.cpp
     ../cpuexec.cpp
     ../voicekun.cpp
+    ../cartprot.cpp
     ../sa1cpu.cpp
     ../cheats.cpp
     ../cheats2.cpp

@@ -57,6 +57,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/obc1.cpp \
 				 $(CORE_DIR)/msu1.cpp \
 				 $(CORE_DIR)/voicekun.cpp \
+				 $(CORE_DIR)/cartprot.cpp \
 				 $(CORE_DIR)/ppu.cpp \
 				 $(CORE_DIR)/stream.cpp \
 				 $(CORE_DIR)/sa1.cpp \

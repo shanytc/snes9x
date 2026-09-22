@@ -5668,7 +5668,7 @@ static void CheckMenuStates ()
 			if (S9xNSSSlotPresent(slot))
 				_stprintf(text, TEXT("Game &%d (%hs)"), slot + 1, S9xNSSSlotName(slot));
 			else
-				_stprintf(text, TEXT("Game &%d (empty - insert cartridge...)"), slot + 1);
+				_stprintf(text, TEXT("Game &%d (Click to select cartridge...)"), slot + 1);
 
 			MENUITEMINFO txt = {};
 			txt.cbSize     = sizeof(txt);

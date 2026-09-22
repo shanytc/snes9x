@@ -708,6 +708,31 @@ static void update_variables(void)
     else
         Settings.SeparateEchoBuffer = false;
 
+    // Which console GB/GBC content runs on, the core option behind the desktop
+    // ports' Game Boy Model menu. Automatic reads the cart header, so a cart
+    // that doesn't declare SGB support boots as a plain Game Boy; pinning
+    // Super Game Boy runs it on the BIOS anyway, the way the hardware does.
+    // Read before snes9x_gb_bios below, which defers to a console picked here.
+    var.key = "snes9x_gb_model";
+    var.value = NULL;
+    uint8 gb_model = S9X_GBBOOT_AUTO;
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+    {
+        if (!strcmp(var.value, "gb"))
+            gb_model = S9X_GBBOOT_GB;
+        else if (!strcmp(var.value, "gbc"))
+            gb_model = S9X_GBBOOT_GBC;
+        else if (!strcmp(var.value, "sgb"))
+            gb_model = S9X_GBBOOT_SGB;
+        else if (!strcmp(var.value, "sgb2"))
+            gb_model = S9X_GBBOOT_SGB2;
+        else if (!strcmp(var.value, "sgbc"))
+            gb_model = S9X_GBBOOT_SGBC;
+    }
+    // A pinned console whose BIOS isn't installed, or Super Game Boy Color on
+    // a cart that isn't SGB-enhanced, falls back to Automatic in the load path.
+    Settings.GBBootPolicy = gb_model;
+
     // Super Game Boy BIOS preference for .gb/.gbc content. 2 = prefer a real
     // SNES SGB BIOS in the system dir (SGB2 then SGB1), falling back to the
     // built-in BIOS-less GB core; 1 = SGB1 only; 0 = always BIOS-less.
@@ -729,17 +754,17 @@ static void update_variables(void)
     var.key = "snes9x_gb_bios";
     var.value = NULL;
     Settings.GB_BIOSEnabled = TRUE;
-    Settings.GBBootPolicy   = S9X_GBBOOT_AUTO;
     Settings.GBSuppressNRxGlitches = TRUE;
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
     {
         if (!strcmp(var.value, "disabled"))
             Settings.GB_BIOSEnabled = FALSE;
-        else if (!strcmp(var.value, "prefer"))
+        else if (!strcmp(var.value, "prefer") && gb_model == S9X_GBBOOT_AUTO)
             // "Prefer over SGB BIOS": run the cart on its own console. The old
             // Automatic-prefer-GBC policy said this and is gone; forcing Game
             // Boy Color says it outright, and a mono cart there is what a real
-            // Game Boy Color does with one.
+            // Game Boy Color does with one. A console picked by hand outranks
+            // it - that pick is the same question, answered directly.
             Settings.GBBootPolicy = S9X_GBBOOT_GBC;
     }
 

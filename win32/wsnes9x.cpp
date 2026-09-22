@@ -167,7 +167,6 @@ static unsigned char GBSeatModelPick(int player);
 static bool  GBSeatModelFromCommand(int cmd_id, int *player, unsigned char *model);
 static void  WinGBSeatSetModel(int player, unsigned char model);
 static HMENU WinGBBuildSeatModelMenu(int player);
-static void  WinGBSyncSeatModelMenu(HMENU link_hmenu, int players, bool enable);
 static void  GBSeatMachinesCreate(int players);
 static void  GBSeatMachinesDestroy();
 static void  GBSeatMachinesTurn();
@@ -6859,11 +6858,6 @@ static void CheckMenuStates ()
 			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_POPUP, FALSE, &mii);
 
-			// Per-player models: reachable whichever flavour the session is
-			// on - a spawned one has no player windows to right-click - and
-			// before one starts.
-			WinGBSyncSeatModelMenu (s_link_hmenu, players, gblink != 2);
-
 			// Split screen needs the BIOS-less core, so in BIOS mode the
 			// item comes out of the menu rather than offering a dead end.
 			if (!s_gb_same_hmenu && s_link_hmenu)
@@ -12358,8 +12352,8 @@ bool GBLinkSplitScreen = false;
 // Each player's Game Boy Model, indexed by player number. A session opens
 // every seat on the console the master loaded; this is how one seat is told
 // to be another - a plain Game Boy on the cable of a Super Game Boy session,
-// a Color beside a mono one. Set from the player window's right-click menu
-// and from Link Cable > Player Models; applied at the next session start.
+// a Color beside a mono one. Set from the player window's right-click menu;
+// applied at the next session start.
 static uint8 GBSeatModel[SGB_MAX_LINK_PLAYERS + 1];
 static bool  GBSeatModelsReady = false;
 
@@ -12423,8 +12417,8 @@ static const char *GBSeatModelName (uint8 model)
 		? S9xNormalizeGBBootPolicy (Settings.GBBootPolicy) : model);
 }
 
-// One id per player and model, so the same commands serve the player window's
-// right-click menu and the Player Models submenu.
+// One id per player and model, so a pick posted from a player window's
+// right-click menu names both.
 static bool GBSeatModelFromCommand (int cmd_id, int *player, unsigned char *model)
 {
 	if (cmd_id < ID_EMULATION_GB_LINK_SEATMODEL0 ||
@@ -12465,75 +12459,6 @@ static HMENU WinGBBuildSeatModelMenu (int player)
 		            (player - 2) * GBSeatModelChoiceCount + s, label);
 	}
 	return menu;
-}
-
-// Link Cable > Player Models. The same list the player windows carry on their
-// right-click, so the models can also be set before a session opens - when
-// there are no player windows yet.
-static void WinGBSyncSeatModelMenu (HMENU link_hmenu, int players, bool enable)
-{
-	static HMENU s_models = NULL;
-	static int   s_built  = 0;
-	static uint8 s_master = 0xFE;
-
-	if (!link_hmenu) return;
-	if (players < 2) players = 4;   // idle: the shapes a click can start
-	if (players > SGB_MAX_LINK_PLAYERS) players = SGB_MAX_LINK_PLAYERS;
-	const uint8 master = S9xNormalizeGBBootPolicy (Settings.GBBootPolicy);
-
-	// The labels name the master's console, so it is rebuilt when that moves
-	// as well as when the seat count does.
-	if (s_built != players || s_master != master)
-	{
-		MENUITEMINFO probe = {};
-		probe.cbSize = sizeof(probe);
-		probe.fMask  = MIIM_ID;
-		if (GetMenuItemInfo (link_hmenu, ID_EMULATION_GB_LINK_MODELS_POPUP, FALSE, &probe))
-			RemoveMenu (link_hmenu, ID_EMULATION_GB_LINK_MODELS_POPUP, MF_BYCOMMAND);
-		if (s_models) DestroyMenu (s_models);
-
-		s_models = CreatePopupMenu ();
-		s_built  = players;
-		s_master = master;
-		if (!s_models) return;
-
-		for (int p = 2; p <= players; p++)
-		{
-			HMENU one = WinGBBuildSeatModelMenu (p);
-			if (!one) break;
-			TCHAR label[64];
-			_sntprintf (label, 64, TEXT("Player &%d"), p);
-			label[63] = TEXT('\0');
-			AppendMenu (s_models, MF_POPUP, (UINT_PTR)one, label);
-		}
-
-		MENUITEMINFO mi = {};
-		mi.cbSize     = sizeof(mi);
-		mi.fMask      = MIIM_ID | MIIM_SUBMENU | MIIM_STRING;
-		mi.wID        = ID_EMULATION_GB_LINK_MODELS_POPUP;
-		mi.hSubMenu   = s_models;
-		mi.dwTypeData = (LPTSTR)TEXT("Player &Models");
-		InsertMenuItem (link_hmenu, 1, TRUE, &mi);
-	}
-
-	MENUITEMINFO st = {};
-	st.cbSize  = sizeof(st);
-	st.fMask   = MIIM_STATE;
-	st.fState  = enable ? MFS_ENABLED : MFS_DISABLED;
-	SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_MODELS_POPUP, FALSE, &st);
-
-	for (int p = 2; p <= players; p++)
-	{
-		const uint8 live = GBSeatModelPick (p);
-		for (int s = 0; s < GBSeatModelChoiceCount; s++)
-		{
-			const uint8 m = GBSeatModelChoices[s];
-			st.fState = (m == live) ? MFS_CHECKED : MFS_UNCHECKED;
-			if (GBSeatModelBlocked (m)) st.fState |= MFS_DISABLED;
-			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SEATMODEL0 +
-			                 (p - 2) * GBSeatModelChoiceCount + s, FALSE, &st);
-		}
-	}
 }
 
 // Held by process id rather than a spawn handle, so it means the same

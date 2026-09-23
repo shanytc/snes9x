@@ -496,13 +496,12 @@ static const uint8	osd_b5[8] = {  0,  0,  0,  0, 31, 31, 31, 31 };
 
 // A glyph row is a big-endian 16-bit word with the twelve dots left-aligned
 // at bit 11, so dot d is bit (11 - d).
-static inline int OSDGlyphDot (uint8 ch, int row, int dot)
+static inline uint16 OSDGlyphRow (uint8 ch, int row)
 {
-	if (row < 0 || row > 17 || dot < 0 || dot > 11)
+	if (row < 0 || row > 17)
 		return (0);
 	const uint32	off = (uint32) (ch & 0x7f) * 36 + (uint32) row * 2;
-	const uint16	w = (uint16) ((NSS.OSD.Font[off] << 8) | NSS.OSD.Font[off + 1]);
-	return ((w >> (11 - dot)) & 1);
+	return ((uint16) (((NSS.OSD.Font[off] << 8) | NSS.OSD.Font[off + 1]) & 0x0fff));
 }
 
 // Two gates, and both matter. Register 7 bit7 enables the chip's RGB
@@ -616,6 +615,19 @@ void S9xNSSRenderOSD (uint16 *screen, int pitch, int width, int height)
 				const bool8		blink = (cell & 0x0800) && blink_on;
 				const bool8		underline = (cell & 0x1000) ? TRUE : FALSE;
 
+				// Glyphs are edged in black one dot all round, and the
+				// underline is drawn in that edge colour, not the glyph's.
+				uint16	glyph = 0, edge = 0;
+				if (!blink)
+				{
+					glyph = OSDGlyphRow(ch, grow);
+					const uint16	v = (uint16) (OSDGlyphRow(ch, grow - 1) | glyph | OSDGlyphRow(ch, grow + 1));
+					edge = (uint16) ((v | (v << 1) | (v >> 1)) & 0x0fff);
+					if (underline && grow == 17)
+						edge = 0x0fff;
+					edge &= (uint16) ~glyph;
+				}
+
 				for (int px = 0; px < cellw; px++)
 				{
 					const int	x = xbase + col * cellw + px;
@@ -628,17 +640,12 @@ void S9xNSSRenderOSD (uint16 *screen, int pitch, int width, int height)
 					int	d1 = (cellw < 12) ? (px * 12 + cellw / 2) / cellw : d0;
 					if (d1 > 11)	d1 = 11;
 
-					bool8	on = FALSE;
-					if (!blink)
-					{
-						on = OSDGlyphDot(ch, grow, d0) ||
-							 (d1 != d0 && OSDGlyphDot(ch, grow, d1)) ? TRUE : FALSE;
-						if (underline && grow == 17)
-							on = TRUE;
-					}
+					const uint16	dots = (uint16) ((0x800 >> d0) | (0x800 >> d1));
 
-					if (on)
+					if (glyph & dots)
 						line[x] = BUILD_PIXEL(osd_r5[fg], osd_g5[fg], osd_b5[fg]);
+					else if (edge & dots)
+						line[x] = BUILD_PIXEL(0, 0, 0);
 					else if (opaque && bg)
 						line[x] = BUILD_PIXEL(osd_r5[bg], osd_g5[bg], osd_b5[bg]);
 				}
@@ -1191,18 +1198,37 @@ bool8 S9xNSSReadCartImage (const char *path, std::vector<uint8> &out)
 	return (TRUE);
 }
 
-// The cart header sits where every LoROM cart keeps it. These are the same
-// two bytes and the same title trim InitROM takes for the running cart.
+// A HiROM header: map mode 21h/31h and a checksum pair that adds up.
+static bool8 NSSHiROMHeader (const uint8 *prg, uint32 size)
+{
+	if (size < 0x10000)
+		return (FALSE);
+	const uint8		*h = prg + 0xffb0;
+	const uint16	chk = (uint16) (h[0x2e] | h[0x2f] << 8);
+	const uint16	cpl = (uint16) (h[0x2c] | h[0x2d] << 8);
+	return ((h[0x25] & 0xef) == 0x21 && (uint16) (chk + cpl) == 0xffff) ? TRUE : FALSE;
+}
+
+// Every NSS cart is LoROM, but a retail cart on an adapter keeps its own
+// map. These are the same bytes and title trim InitROM takes.
 static void NSSCaptureHeader (struct SNSSSlot *s)
 {
 	s->ROMSizeByte = 0;
 	s->SRAMSizeByte = 0;
 	s->Name[0] = 0;
+	s->HiROM = 0;
+	s->DSP1 = 0;
 
 	if (s->PrgSize < 0x8000)
 		return;
 
-	const uint8	*hdr = s->Prg + 0x7fb0;
+	s->HiROM = NSSHiROMHeader(s->Prg, s->PrgSize);
+	const uint8	*hdr = s->Prg + (s->HiROM ? 0xffb0 : 0x7fb0);
+
+	// DSP-1 by InitROM's rules, minus the DSP-2/3/4 variants.
+	const uint8	type = hdr[0x26], speed = hdr[0x25] & 0xf0;
+	s->DSP1 = ((type == 0x03 && speed != 0x30) ||
+	           (type == 0x05 && speed != 0x20 && !(speed == 0x30 && hdr[0x2a] == 0xb2))) ? 1 : 0;
 	s->ROMSizeByte = hdr[0x27];
 	s->SRAMSizeByte = hdr[0x28];
 

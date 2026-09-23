@@ -76,6 +76,8 @@ struct SNSSSlot
 	uint32	CRC;
 	char	Name[NSS_SLOT_NAME];	// cart header title, for the menu
 	char	Path[NSS_SLOT_PATH];
+	uint8	HiROM;					// retail cart on an adapter: its own map
+	uint8	DSP1;					// ... and its DSP-1
 };
 
 struct SNSSPROM			// Ricoh RP5H01 72-bit key chip, live pin state

@@ -6283,8 +6283,8 @@ void S9xNSSMapSlot (int slot)
 	Memory.ROMSize  = s->ROMSizeByte;
 	Memory.SRAMSize = s->SRAMSizeByte;
 	Memory.SRAMMask = s->SRAMSizeByte ? ((1 << (s->SRAMSizeByte + 3)) * 128) - 1 : 0;
-	Memory.LoROM = TRUE;
-	Memory.HiROM = FALSE;
+	Memory.LoROM = !s->HiROM;
+	Memory.HiROM = s->HiROM;
 	strncpy(Memory.ROMName, s->Name, ROM_NAME_LEN - 1);
 	Memory.ROMName[ROM_NAME_LEN - 1] = 0;
 
@@ -6296,7 +6296,21 @@ void S9xNSSMapSlot (int slot)
 		s->SRAMValid = TRUE;
 	}
 
-	Memory.Map_LoROMMap();
+	// The DSP-1 travels with its cartridge: a slot without one must not see
+	// the previous cart's registers over its ROM.
+	Settings.DSP = s->DSP1;
+	if (s->DSP1)
+	{
+		DSP0.maptype = s->HiROM ? M_DSP1_HIROM : (s->PrgSize > 0x100000) ? M_DSP1_LOROM_L : M_DSP1_LOROM_S;
+		DSP0.boundary = s->HiROM ? 0x7000 : (s->PrgSize > 0x100000) ? 0x4000 : 0xc000;
+		SetDSP = &DSP1SetByte;
+		GetDSP = &DSP1GetByte;
+	}
+
+	if (s->HiROM)
+		Memory.Map_HiROMMap();
+	else
+		Memory.Map_LoROMMap();
 	NSS.MappedSlot = (int8) slot;
 
 	printf("NSS: slot %d mapped (%s, %u KB)\n", slot + 1, s->Name,

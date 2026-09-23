@@ -17,6 +17,7 @@
 #include "sgb/sgb.h"
 #include "voicekun.h"
 #include "sfcbox.h"
+#include "nss.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #endif
@@ -165,6 +166,11 @@ void S9xReset (void)
 	// freshly-reset KROM immediately holds the SNES until it's ready.
 	if (Settings.SFCBox)
 		S9xSFCBoxPowerOn();
+
+	// NSS: the same, and the game stays in reset until a coin buys it.
+	// A soft reset is the supervisor's own doing, so it never comes here.
+	if (Settings.NSS)
+		S9xNSSPowerOn();
 
 	S9xInitCheatData();
 }

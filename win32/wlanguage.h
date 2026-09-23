@@ -148,6 +148,17 @@ Nintendo is a trademark.")
 #define HOTKEYS_CHEAT_EDITOR_DIALOG TEXT("Cheats Editor Dialog:")
 #define HOTKEYS_CHEAT_SEARCH_DIALOG TEXT("Cheats Search Dialog:")
 #define HOTKEYS_INSERT_COIN TEXT("Insert Coin:")
+// Emulation -> Nintendo Super System, the arcade cabinet's front panel. Same
+// 72-DLU statics as the rest, so the tab name carries the context.
+#define HOTKEYS_NSS_COIN2 TEXT("Insert Coin (slot 2):")
+#define HOTKEYS_NSS_SERVICE TEXT("Service Credit:")
+#define HOTKEYS_NSS_GAME1 TEXT("Game 1:")
+#define HOTKEYS_NSS_GAME2 TEXT("Game 2:")
+#define HOTKEYS_NSS_GAME3 TEXT("Game 3:")
+#define HOTKEYS_NSS_INSTRUCTIONS TEXT("Instructions:")
+#define HOTKEYS_NSS_PAGEUP TEXT("Page Up:")
+#define HOTKEYS_NSS_PAGEDOWN TEXT("Page Down:")
+#define HOTKEYS_NSS_RESTART TEXT("Restart Game:")
 #define HOTKEYS_BIOS_MANAGER TEXT("BIOS Manager:")
 // Emulation -> Game Boy Model. Every label has to fit the 72-DLU statics; the
 // tab name supplies the context.

@@ -1206,6 +1206,9 @@ void WinRegisterConfigItems()
     ADD(BiosManager);
 	ADDN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADD(NSSCoin2); ADD(NSSService); ADD(NSSInstructions);
+	ADD(NSSPageUp); ADD(NSSPageDown); ADD(NSSRestart);
+	ADDN(NSSGame[0],NSSGame1); ADDN(NSSGame[1],NSSGame2); ADDN(NSSGame[2],NSSGame3);
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
 	ADDN(GBModel[4],GBModelSGBC);
@@ -1242,6 +1245,9 @@ void WinRegisterConfigItems()
 	ADDXALL(BiosManager);
 	ADDXALLN(SFCBoxKeyswitch[0],SFCBoxKeyswitch1); ADDXALLN(SFCBoxKeyswitch[1],SFCBoxKeyswitchOFF); ADDXALLN(SFCBoxKeyswitch[2],SFCBoxKeyswitchON);
 	ADDXALLN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDXALLN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
+	ADDXALL(NSSCoin2); ADDXALL(NSSService); ADDXALL(NSSInstructions);
+	ADDXALL(NSSPageUp); ADDXALL(NSSPageDown); ADDXALL(NSSRestart);
+	ADDXALLN(NSSGame[0],NSSGame1); ADDXALLN(NSSGame[1],NSSGame2); ADDXALLN(NSSGame[2],NSSGame3);
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
 	ADDXALLN(GBModel[4],GBModelSGBC);
@@ -1258,6 +1264,8 @@ void WinRegisterConfigItems()
     AddBoolC("GBNoSpriteLimit", Settings.GBNoSpriteLimit, false, "Game Boy: draw every object on a scanline instead of the hardware limit of 10, so sprite-heavy lines stop dropping their highest-index objects (Balloon Fight GB's title clouds). Not hardware-accurate; mode-3 timing is unchanged so raster effects still render correctly");
     AddBoolC("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop, true, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
     AddBoolC("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish, false, "SFC-Box supervisor screen language: FALSE=Japanese (authentic), TRUE=English (render-time translation; the KROM firmware and savestates stay untouched)");
+    AddBoolC("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog, false, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose - it is here for fidelity, not for playing, because our model of it has a confirmed false positive: Lethal Weapon goes quiet for 257 and then 451 frames uploading its sound driver, two frames past the BIOS's limit, and a reference core agrees the game really does that");
+    AddUIntC("NSSDipSwitches", Settings.NSSDipSwitches, 0x0c, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100. What each one does is per-game - kNSSDipInfo in nss.cpp, which the menu shows - and 0x0c is the factory setting on the Addams Family sheet");
     AddUIntC("PowerFest94TimeLimit", Settings.PF94TimerMinutes, 6, "PowerFest '94 event cart session length in minutes (DIP switches, 3-18)");
     AddUIntC("PowerFest94TimerDisplay", Settings.PF94TimerDisplay, 0, "PowerFest '94 session timer display: 0=none, 1=on screen, 2=window title");
     AddUIntC("CampusChallenge92TimeLimit", Settings.CC92TimerMinutes, 6, "Campus Challenge '92 event cart session length in minutes (DIP switches, 3-18)");

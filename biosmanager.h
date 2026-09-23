@@ -26,6 +26,8 @@ enum S9xBiosSlot
 	S9X_BIOS_SFCBOX_FONT,   // MB90082.BIN  — Super Famicom Box OSD font
 	S9X_BIOS_BSX,           // BS-X.bin     — Satellaview
 	S9X_BIOS_SUFAMI,        // STBIOS.bin   — Sufami Turbo
+	S9X_BIOS_NSS,           // nss-ic14.02.ic14 — Nintendo Super System supervisor
+	S9X_BIOS_NSS_FONT,      // m50458_char.bin  — its M50458 OSD charset
 	S9X_NUM_BIOS_SLOTS
 };
 
@@ -39,6 +41,9 @@ struct S9xBiosSlotInfo
 };
 
 #define S9X_BIOS_PATH_MAX 512
+
+// nocash's NSS-TEST.BIN: a hardware test that runs in place of the NSS BIOS.
+#define S9X_NSS_NOCASH_TEST_CRC 0x15616021u
 
 const S9xBiosSlotInfo *S9xGetBiosSlotInfo (int slot);
 

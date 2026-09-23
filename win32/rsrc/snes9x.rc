@@ -742,7 +742,7 @@ BEGIN
     LTEXT           "not found",IDC_MULTICART_BIOSNOTFOUND,270,50,54,8
 END
 
-IDD_BIOSMANAGER DIALOGEX 0, 0, 474, 218
+IDD_BIOSMANAGER DIALOGEX 0, 0, 474, 252
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "BIOS Manager"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
@@ -798,8 +798,18 @@ BEGIN
     PUSHBUTTON      "Select...",(IDC_BIOSMGR_BROWSE0+9),250,175,44,14
     PUSHBUTTON      "X",(IDC_BIOSMGR_CLEAR0+9),298,175,16,14
     LTEXT           "",(IDC_BIOSMGR_STATUS0+9),318,177,150,8,SS_ENDELLIPSIS | SS_NOTIFY
-    DEFPUSHBUTTON   "OK",IDOK,366,198,48,14
-    PUSHBUTTON      "Cancel",IDCANCEL,420,198,48,14
+    RTEXT           "",(IDC_BIOSMGR_LABEL0+10),6,194,76,8
+    EDITTEXT        (IDC_BIOSMGR_EDIT0+10),86,192,160,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "Select...",(IDC_BIOSMGR_BROWSE0+10),250,192,44,14
+    PUSHBUTTON      "X",(IDC_BIOSMGR_CLEAR0+10),298,192,16,14
+    LTEXT           "",(IDC_BIOSMGR_STATUS0+10),318,194,150,8,SS_ENDELLIPSIS | SS_NOTIFY
+    RTEXT           "",(IDC_BIOSMGR_LABEL0+11),6,211,76,8
+    EDITTEXT        (IDC_BIOSMGR_EDIT0+11),86,209,160,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "Select...",(IDC_BIOSMGR_BROWSE0+11),250,209,44,14
+    PUSHBUTTON      "X",(IDC_BIOSMGR_CLEAR0+11),298,209,16,14
+    LTEXT           "",(IDC_BIOSMGR_STATUS0+11),318,211,150,8,SS_ENDELLIPSIS | SS_NOTIFY
+    DEFPUSHBUTTON   "OK",IDOK,366,232,48,14
+    PUSHBUTTON      "Cancel",IDCANCEL,420,232,48,14
 END
 
 IDD_NETCONNECT DIALOGEX 0, 0, 234, 60
@@ -1535,6 +1545,39 @@ BEGIN
             MENUITEM "Super Game Boy Co&lor (Experimental)", (ID_EMULATION_BIOS_POLICY0+9),MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
             MENUITEM "&Automatic",                  (ID_EMULATION_BIOS_POLICY0+7),MFT_STRING,MFS_ENABLED
+        END
+        POPUP "&Nintendo Super System",         ID_EMULATION_NSS,MFT_STRING,MFS_GRAYED
+        BEGIN
+            MENUITEM "&Insert Coin",                ID_NSS_COIN1,MFT_STRING,MFS_ENABLED
+            MENUITEM "Insert Coin (Slot &2)",       ID_NSS_COIN2,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Service Credit",             ID_NSS_SERVICE,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "Game &1",                     ID_NSS_GAME1,MFT_STRING,MFS_ENABLED
+            MENUITEM "Game &2",                     ID_NSS_GAME2,MFT_STRING,MFS_ENABLED
+            MENUITEM "Game &3",                     ID_NSS_GAME3,MFT_STRING,MFS_ENABLED
+            POPUP "&Eject Cartridge",               0,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "Slot 1",                      (ID_NSS_EJECT0+0),MFT_STRING,MFS_ENABLED
+                MENUITEM "Slot 2",                      (ID_NSS_EJECT0+1),MFT_STRING,MFS_ENABLED
+                MENUITEM "Slot 3",                      (ID_NSS_EJECT0+2),MFT_STRING,MFS_ENABLED
+            END
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "I&nstructions",               ID_NSS_INSTRUCTIONS,MFT_STRING,MFS_ENABLED
+            MENUITEM "Page &Up",                    ID_NSS_PAGEUP,MFT_STRING,MFS_ENABLED
+            MENUITEM "Page &Down",                  ID_NSS_PAGEDOWN,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Restart Game",               ID_NSS_RESTART,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            POPUP "Cartridge &DIP Switches",        ID_NSS_DIPS,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "Switch &1",                   (ID_NSS_DIP0+0),MFT_STRING,MFS_ENABLED
+                MENUITEM "Switch &2",                   (ID_NSS_DIP0+1),MFT_STRING,MFS_ENABLED
+                MENUITEM "Switch &3",                   (ID_NSS_DIP0+2),MFT_STRING,MFS_ENABLED
+                MENUITEM "Switch &4",                   (ID_NSS_DIP0+3),MFT_STRING,MFS_ENABLED
+                MENUITEM "Switch &5",                   (ID_NSS_DIP0+4),MFT_STRING,MFS_ENABLED
+                MENUITEM "Switch &6",                   (ID_NSS_DIP0+5),MFT_STRING,MFS_ENABLED
+                MENUITEM "Switch &7",                   (ID_NSS_DIP0+6),MFT_STRING,MFS_ENABLED
+                MENUITEM "Switch &8",                   (ID_NSS_DIP0+7),MFT_STRING,MFS_ENABLED
+            END
         END
         MENUITEM MFT_SEPARATOR
         POPUP "&S-PPU",                         0,MFT_STRING,MFS_ENABLED

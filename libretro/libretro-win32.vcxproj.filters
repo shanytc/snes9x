@@ -135,6 +135,12 @@
     <ClInclude Include="..\sfcbox.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\nss.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\z80.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\snapshot.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
@@ -333,6 +339,12 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\sfcbox.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\nss.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\z80.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\voicekun.cpp">

@@ -63,6 +63,7 @@
 #include "../msu1.h"
 #include "../sgb/sgb.h"
 #include "../sfcbox.h"
+#include "../nss.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -173,7 +174,7 @@ void S9xWinScanJoypads();
 #define WM_CHEATS_ADDED (WM_APP + 1)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 6;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 7;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
@@ -1258,11 +1259,16 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		}
 		if(HKmatch(InsertCoin))
 		{
-			// SFC-Box front-panel coin switch; only meaningful while a
-			// Super Famicom Box cart is running the KROM supervisor.
+			// Front-panel coin switch of whichever coin-op supervisor is
+			// running: the Super Famicom Box's KROM or the NSS's Z80.
 			if (SFCBox.Active)
 			{
 				S9xSFCBoxInsertCoin();
+				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
+			}
+			else if (NSS.Active)
+			{
+				S9xNSSInsertCoin(0);
 				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
 			}
 			hitHotKey = true;
@@ -1282,6 +1288,23 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				}
 				hitHotKey = true;
 			}
+		}
+		// Nintendo Super System front panel. Sent as menu commands so a key
+		// and its menu entry cannot drift apart, and so an entry the menu has
+		// greyed (ejecting the last cartridge, or no cabinet running) stays
+		// greyed for the key too.
+		if(HKmatch(NSSCoin2))        { SendMenuCommand(ID_NSS_COIN2);        hitHotKey = true; }
+		if(HKmatch(NSSService))      { SendMenuCommand(ID_NSS_SERVICE);      hitHotKey = true; }
+		if(HKmatch(NSSInstructions)) { SendMenuCommand(ID_NSS_INSTRUCTIONS); hitHotKey = true; }
+		if(HKmatch(NSSPageUp))       { SendMenuCommand(ID_NSS_PAGEUP);       hitHotKey = true; }
+		if(HKmatch(NSSPageDown))     { SendMenuCommand(ID_NSS_PAGEDOWN);     hitHotKey = true; }
+		if(HKmatch(NSSRestart))      { SendMenuCommand(ID_NSS_RESTART);      hitHotKey = true; }
+		for(int nssg = 0; nssg < 3; nssg++)
+		{
+			if(!HKmatch(NSSGame[nssg]))
+				continue;
+			SendMenuCommand(ID_NSS_GAME1 + nssg);
+			hitHotKey = true;
 		}
 		if(HKmatch(ShowPressed))
 		{
@@ -3016,6 +3039,92 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_RUNAHEAD_4:
 			Settings.RunAhead = 4;
 			break;
+		case ID_NSS_COIN1:
+		case ID_NSS_COIN2:
+			if (NSS.Active)
+			{
+				S9xNSSInsertCoin(cmd_id == ID_NSS_COIN2 ? 1 : 0);
+				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
+			}
+			break;
+
+		case ID_NSS_SERVICE:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_SERVICE);      break;
+
+		case ID_NSS_GAME1:
+		case ID_NSS_GAME2:
+		case ID_NSS_GAME3:
+		{
+			// A filled socket gets its panel button pressed and the
+			// supervisor decides what to do with it; an empty one gets a
+			// cartridge, which is a file to pick.
+			const int slot = cmd_id - ID_NSS_GAME1;
+			if (!NSS.Active)
+				break;
+			if (S9xNSSSlotPresent(slot))
+			{
+				static const uint16 game_btn[3] =
+					{ NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
+				S9xNSSPulseButton(game_btn[slot]);
+				break;
+			}
+
+			RestoreGUIDisplay();
+			OPENFILENAME	ofn;
+			TCHAR			szFileName[MAX_PATH];
+			TCHAR			title[64];
+			szFileName[0] = TEXT('\0');
+			_stprintf(title, TEXT("Nintendo Super System - cartridge for slot %d"), slot + 1);
+			memset((LPVOID) &ofn, 0, sizeof(OPENFILENAME));
+			ofn.lStructSize = sizeof(OPENFILENAME);
+			ofn.hwndOwner   = GUI.hWnd;
+			ofn.lpstrFilter = TEXT("NSS Cartridges (*.zip;*.bin;*.sfc)\0*.zip;*.bin;*.sfc\0All Files (*.*)\0*.*\0\0");
+			ofn.lpstrFile   = szFileName;
+			ofn.nMaxFile    = MAX_PATH;
+			ofn.lpstrTitle  = title;
+			ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
+			if (GetOpenFileName(&ofn))
+			{
+				if (S9xNSSInsertCart(slot, _tToChar(szFileName)))
+				{
+					char msg[128];
+					snprintf(msg, sizeof msg, "Slot %d: %s", slot + 1, S9xNSSSlotName(slot));
+					S9xSetInfoString(msg);
+				}
+				else
+					MessageBox(GUI.hWnd,
+						TEXT("That is not a Nintendo Super System cartridge, or the same game ")
+						TEXT("is already in another slot."),
+						TEXT("Nintendo Super System"), MB_OK | MB_ICONWARNING);
+			}
+			RestoreSNESDisplay();
+			CheckMenuStates();
+			break;
+		}
+
+		case ID_NSS_EJECT0 + 0:
+		case ID_NSS_EJECT0 + 1:
+		case ID_NSS_EJECT0 + 2:
+			S9xNSSEjectCart(cmd_id - ID_NSS_EJECT0);
+			CheckMenuStates();
+			break;
+
+		// These act on the paid game that is playing; the supervisor ignores
+		// them on its menu and during the attract demo.
+		case ID_NSS_INSTRUCTIONS: if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;
+		case ID_NSS_PAGEUP:       if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_PAGEUP);       break;
+		case ID_NSS_PAGEDOWN:     if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_PAGEDOWN);     break;
+		case ID_NSS_RESTART:      if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_RESTART);      break;
+
+		case ID_NSS_DIP0 + 0: case ID_NSS_DIP0 + 1: case ID_NSS_DIP0 + 2:
+		case ID_NSS_DIP0 + 3: case ID_NSS_DIP0 + 4: case ID_NSS_DIP0 + 5:
+		case ID_NSS_DIP0 + 6: case ID_NSS_DIP0 + 7:
+			// The cartridge DIP block the game reads at $4100; the menu
+			// text says what the cartridge in play makes of each one.
+			Settings.NSSDipSwitches ^= (uint32) (1 << (cmd_id - ID_NSS_DIP0));
+			NSS.DipSwitches = (uint8) Settings.NSSDipSwitches;
+			CheckMenuStates();
+			break;
+
 		case ID_FILE_BIOSMANAGER:
 			{
 				// Restore the GUI surface ourselves: reached by hotkey there is
@@ -5557,6 +5666,82 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.FullScreen||GUI.EmulatedFullscreen) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_FULLSCREEN, FALSE, &mii);
+
+	// Nintendo Super System front panel: live only while its supervisor is.
+	{
+		HMENU emu = NULL;
+		int   pos = 0;
+		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &emu, &pos))
+			EnableMenuItem(emu, pos, MF_BYPOSITION | (NSS.Active ? MF_ENABLED : MF_GRAYED));
+
+		TCHAR text[128];
+		MENUITEMINFO txt = {};
+		txt.cbSize     = sizeof(txt);
+		txt.fMask      = MIIM_STRING;
+		txt.dwTypeData = text;
+
+		// Each switch is named for what the cartridge in play does with it,
+		// in its current position, so both switches of a pair read as the
+		// one setting they make. A board without the block greys the popup.
+		const char *label0 = S9xNSSDipSwitchLabel(0);
+		HMENU nss = NULL;
+		if (FindMenuItemParentPos(GUI.hMenu, ID_NSS_DIPS, &nss, &pos))
+		{
+			_tcscpy(text, label0 ? TEXT("Cartridge &DIP Switches")
+			                     : TEXT("Cartridge &DIP Switches (none on this board)"));
+			SetMenuItemInfo(nss, pos, TRUE, &txt);
+			EnableMenuItem(nss, pos, MF_BYPOSITION | (label0 ? MF_ENABLED : MF_GRAYED));
+		}
+		for (int sw = 0; sw < 8; sw++)
+		{
+			const char *label = S9xNSSDipSwitchLabel(sw);
+			if (label && *label)
+				_stprintf(text, TEXT("Switch &%d - %hs"), sw + 1, label);
+			else
+				_stprintf(text, TEXT("Switch &%d"), sw + 1);
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &txt);
+			mii.fState = (Settings.NSSDipSwitches & (1 << sw)) ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &mii);
+		}
+
+		// Each socket says what is in it, and an empty one says so rather
+		// than looking like a dead button.
+		for (int slot = 0; slot < 3; slot++)
+		{
+			if (S9xNSSSlotPresent(slot))
+				_stprintf(text, TEXT("Game &%d (%hs)"), slot + 1, S9xNSSSlotName(slot));
+			else
+				_stprintf(text, TEXT("Game &%d (Click to select cartridge...)"), slot + 1);
+
+			// The panel's game buttons only pick from the supervisor's menu;
+			// while a paid game is running it ignores them, so the entry says
+			// so rather than looking broken. An empty socket stays live
+			// because clicking it asks for a cartridge instead.
+			EnableMenuItem(GUI.hMenu, ID_NSS_GAME1 + slot,
+			               MF_BYCOMMAND | ((!S9xNSSSlotPresent(slot) || !S9xNSSGameRunning())
+			                               ? MF_ENABLED : MF_GRAYED));
+
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_GAME1 + slot, FALSE, &txt);
+
+			if (S9xNSSSlotPresent(slot))
+				_stprintf(text, TEXT("Slot %d (%hs)"), slot + 1, S9xNSSSlotName(slot));
+			else
+				_stprintf(text, TEXT("Slot %d (empty)"), slot + 1);
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_EJECT0 + slot, FALSE, &txt);
+
+			// The cabinet keeps its last cartridge.
+			EnableMenuItem(GUI.hMenu, ID_NSS_EJECT0 + slot,
+			               MF_BYCOMMAND | (S9xNSSCanEject(slot) ? MF_ENABLED : MF_GRAYED));
+		}
+
+		// Instructions, the paging keys and Restart only mean something to
+		// the paid game that is playing, so they grey out on the menu.
+		static const UINT game_only[] =
+			{ ID_NSS_INSTRUCTIONS, ID_NSS_PAGEUP, ID_NSS_PAGEDOWN, ID_NSS_RESTART };
+		for (int i = 0; i < 4; i++)
+			EnableMenuItem(GUI.hMenu, game_only[i],
+			               MF_BYCOMMAND | (S9xNSSGameRunning() ? MF_ENABLED : MF_GRAYED));
+	}
 
 	mii.fState = GUI.Stretch ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_STRETCH, FALSE, &mii);
@@ -15159,6 +15344,29 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
+    // Tab 6: Emulation -> Nintendo Super System, the arcade front panel. The
+    // slots fill a column at a time (0-8 left, 9-17 right), so the coin door
+    // and the game buttons take the left column and the rest of the panel the
+    // right, rather than letting a tenth entry sit alone across the gap.
+    // Insert Coin is the same binding the SFC Box tab shows, because one coin
+    // key serves whichever cabinet is running.
+    {
+        // Column 1: coin door and game selection
+        { &CustomKeys.InsertCoin,       &CustomKeysExtra.InsertCoin,       HOTKEYS_INSERT_COIN },
+        { &CustomKeys.NSSCoin2,         &CustomKeysExtra.NSSCoin2,         HOTKEYS_NSS_COIN2 },
+        { &CustomKeys.NSSService,       &CustomKeysExtra.NSSService,       HOTKEYS_NSS_SERVICE },
+        { &CustomKeys.NSSGame[0],       &CustomKeysExtra.NSSGame[0],       HOTKEYS_NSS_GAME1 },
+        { &CustomKeys.NSSGame[1],       &CustomKeysExtra.NSSGame[1],       HOTKEYS_NSS_GAME2 },
+        { &CustomKeys.NSSGame[2],       &CustomKeysExtra.NSSGame[2],       HOTKEYS_NSS_GAME3 },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        // Column 2: the lower panel
+        { &CustomKeys.NSSInstructions,  &CustomKeysExtra.NSSInstructions,  HOTKEYS_NSS_INSTRUCTIONS },
+        { &CustomKeys.NSSPageUp,        &CustomKeysExtra.NSSPageUp,        HOTKEYS_NSS_PAGEUP },
+        { &CustomKeys.NSSPageDown,      &CustomKeysExtra.NSSPageDown,      HOTKEYS_NSS_PAGEDOWN },
+        { &CustomKeys.NSSRestart,       &CustomKeysExtra.NSSRestart,       HOTKEYS_NSS_RESTART },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -15327,7 +15535,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy Model")
+				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

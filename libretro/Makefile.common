@@ -70,6 +70,8 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/seta011.cpp \
 				 $(CORE_DIR)/seta018.cpp \
 				 $(CORE_DIR)/sfcbox.cpp \
+				 $(CORE_DIR)/nss.cpp \
+				 $(CORE_DIR)/z80.cpp \
 				 $(CORE_DIR)/sgb/sgb.cpp \
 				 $(CORE_DIR)/sgb/sgb_packet.cpp \
 				 $(CORE_DIR)/sgb/sgb_state.cpp \

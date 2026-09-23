@@ -16,6 +16,7 @@
 #include "gfx.h"
 #include "sgb/sgb.h"
 #include "sfcbox.h"
+#include "nss.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
 #include "debug.h"
@@ -142,6 +143,31 @@ void S9xMainLoop (void)
 			// Held in reset: skip opcode execution but keep the H/V event
 			// machinery running so the Z180, APU and frame pacing advance.
 			if (S9xSFCBoxSNESHeld())
+			{
+				CPU.Cycles = CPU.NextEvent;
+				while (CPU.Cycles >= CPU.NextEvent)
+					S9xDoHEventProcessing();
+				if (CPU.Flags & SCAN_KEYS_FLAG)
+					break;
+				continue;
+			}
+		}
+
+		if (Settings.NSS)
+		{
+			// The supervisor pulled the reset line: the APU is on it too,
+			// so whatever the last game was playing stops here.
+			if (S9xNSSPendingAPUReset())
+				S9xNSSApplyAPUReset();
+
+			// The supervisor released the reset line: reboot the game side
+			// at an instruction boundary.
+			if (S9xNSSPendingReset())
+				S9xNSSApplySNESReset();
+
+			// Held in reset or halted: skip opcode execution but keep the
+			// H/V events running so the Z80, APU and frame pacing advance.
+			if (S9xNSSSNESHeld())
 			{
 				CPU.Cycles = CPU.NextEvent;
 				while (CPU.Cycles >= CPU.NextEvent)
@@ -497,6 +523,11 @@ void S9xDoHEventProcessing (void)
 			// scanline whether or not the SNES itself is executing.
 			if (Settings.SFCBox)
 				S9xSFCBoxEndScanline();
+
+			// NSS: likewise for its Z80, which owns the timer and the
+			// reset line and so must keep running while the game is held.
+			if (Settings.NSS)
+				S9xNSSEndScanline();
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

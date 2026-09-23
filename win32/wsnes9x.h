@@ -465,8 +465,16 @@ struct SCustomKeys {
     SCustomKey CheatEditorDialog;
     SCustomKey CheatSearchDialog;
 	SCustomKey MasterHotkey;
-	SCustomKey InsertCoin;           // SFC-Box front-panel coin switch
+	SCustomKey InsertCoin;           // coin switch, either coin-op supervisor
 	SCustomKey SFCBoxKeyswitch[5];   // rotary positions, panel order 1/OFF/ON/2/3
+	// Nintendo Super System front panel; the order matches its menu.
+	SCustomKey NSSCoin2;
+	SCustomKey NSSService;
+	SCustomKey NSSGame[3];
+	SCustomKey NSSInstructions;
+	SCustomKey NSSPageUp;
+	SCustomKey NSSPageDown;
+	SCustomKey NSSRestart;
 	SCustomKey BiosManager;          // opens File -> BIOS Manager
 	// Emulation -> Game Boy Model, one per console the menu offers; see
 	// g_gbModelHotkeyPolicy for which policy each slot picks.
@@ -528,6 +536,13 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra CheatSearchDialog;
 	SCustomKeyExtra InsertCoin;
 	SCustomKeyExtra SFCBoxKeyswitch[5];
+	SCustomKeyExtra NSSCoin2;
+	SCustomKeyExtra NSSService;
+	SCustomKeyExtra NSSGame[3];
+	SCustomKeyExtra NSSInstructions;
+	SCustomKeyExtra NSSPageUp;
+	SCustomKeyExtra NSSPageDown;
+	SCustomKeyExtra NSSRestart;
 	SCustomKeyExtra BiosManager;
 	SCustomKeyExtra GBModel[GB_MODEL_HOTKEYS];
 };

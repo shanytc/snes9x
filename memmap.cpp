@@ -43,6 +43,7 @@
 #include "sha256.h"
 #include "snapshot.h"
 #include "sfcbox.h"
+#include "nss.h"
 #include "voicekun.h"
 
 #ifndef SET_UI_COLOR
@@ -1676,6 +1677,9 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
     Settings.GB_BIOSPath[0] = '\0';
     Settings.GBRomPath[0]   = '\0';
 
+    Settings.NSS = FALSE;
+    S9xNSSDeactivate();
+
     // LoadROMInt only ever needs one retry (the interleave-detection
     // flip-flop); bound the loop so a deterministic failure — e.g. an
     // SFC-Box image without its KROM BIOS — reports instead of spinning.
@@ -1687,6 +1691,13 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
         memcpy(ROM,source,sourceSize);
 
         int32	size = (int32) sourceSize;
+
+        // A merged Nintendo Super System image: split its supervisor tail off
+        // the same way LoadROM does. The MAME split set cannot arrive here —
+        // this path is handed bytes, not an archive.
+        if (LoadNSSCart(NULL, &size) < 0)
+            return (FALSE);
+
         CheckForWidescreenPatch(size);
         if (LoadROMInt(size))
             return TRUE;
@@ -2220,6 +2231,12 @@ bool8 CMemory::LoadROM (const char *filename)
     Settings.GB_BIOSPath[0] = '\0';
     Settings.GBRomPath[0]   = '\0';
 
+    // A fresh load supersedes any Nintendo Super System session. The cart
+    // half of an NSS game loads through the ordinary LoROM path, so this
+    // cannot sit in InitROM the way the SFC-Box teardown does.
+    Settings.NSS = FALSE;
+    S9xNSSDeactivate();
+
     S9xResetSaveTimer(FALSE); // reset oops timer here so that .oops file has rom name of previous rom
 
     int32 totalFileSize;
@@ -2248,6 +2265,15 @@ bool8 CMemory::LoadROM (const char *filename)
 
         CheckForAnyPatch(filename, HeaderCount != 0, totalFileSize);
         CheckForWidescreenPatch(totalFileSize);
+
+        // Nintendo Super System carts carry a Z80 instruction EPROM and an
+        // RP5H01 key past the end of the SNES program. Hand those to the
+        // supervisor board; what is left in ROM[] is a plain LoROM cart.
+        {
+            int nss = LoadNSSCart(filename, &totalFileSize);
+            if (nss < 0)
+                return (FALSE);
+        }
 
         // Sufami Turbo / Satellaview images divert before scoring: their
         // BIOS has to be staged into ROM[] first.
@@ -2680,6 +2706,62 @@ bool8 CMemory::LoadROMInt (int32 ROMfillSize)
 // alongside. The BIOS Manager holds it, so File -> Load Game can take them
 // directly and File -> Load MultiCart is only needed to fill both slots.
 // ROM already holds the image at offset 0 and Multi has been cleared.
+// Nintendo Super System cart images. fullsnes's merged layout is the SNES
+// program, then the 32K Z80 instruction EPROM, then the sixteen key-chip
+// bytes; MAME ships the same three parts as separate .zip members. Either
+// shape ends the same way: the tail goes to the supervisor board and ROM[]
+// is left holding an ordinary cart.
+// -1 = a set that could not be read, 0 = not an NSS image, 1 = split done.
+int CMemory::LoadNSSCart (const char *filename, int32 *size)
+{
+	uint32	assembled = 0;
+
+	if (filename && *filename && S9xFilenameHasExt(filename, ".zip"))
+	{
+		assembled = S9xNSSAssembleZipSet(filename, ROM, MAX_ROM_SIZE);
+		if (assembled == NSS_ZIPSET_UNREADABLE)
+		{
+			S9xMessage(S9X_ERROR, S9X_ROM_INFO,
+			           "Unreadable Nintendo Super System cartridge set.");
+			return (-1);
+		}
+	}
+
+	const uint32	total = assembled ? assembled : (uint32) *size;
+	uint32			prg = 0;
+
+	if (!S9xNSSTakeCartTail(ROM, total, &prg))
+		return (0);
+
+	// Socket 1, the one File -> Load Game fills. The other two take a cart
+	// through the Nintendo Super System menu.
+	S9xNSSLoadSlot(0, ROM, total, filename);
+	// Its battery is the .srm the ordinary loader reads, so the first map
+	// takes a copy of that rather than writing a blank one over it.
+	NSS.Slot[0].SRAMValid = FALSE;
+
+	memset(ROM + prg, 0, total - prg);
+	*size = (int32) prg;
+	HeaderCount = 0;
+
+	Settings.NSS = TRUE;
+	NSS.DipSwitches = (uint8) Settings.NSSDipSwitches;
+
+	// Without the supervisor there is no menu, no timer and nothing to let
+	// the game out of reset, so a missing BIOS makes the cart unrunnable.
+	if (!S9xNSSLoadBIOS())
+		S9xSetBiosNotice("Nintendo Super System BIOS missing - assign it in "
+		                 "File -> BIOS Manager.", TRUE);
+	else if (!NSS.OSD.FontLoaded)
+		S9xSetBiosNotice("Nintendo Super System: the M50458 charset is missing, so the "
+		                 "menu overlay will be blank. Assign it in File -> BIOS Manager.",
+		                 FALSE);
+
+	printf("NSS: %u KB program + instruction ROM%s.\n", (unsigned) (prg >> 10),
+	       NSS.Slot[0].PROMPresent ? " + key chip" : " (no key chip)");
+	return (1);
+}
+
 int CMemory::LoadBIOSPairedCart (const char *filename, int32 size)
 {
 	if (!is_SufamiTurbo_Cart(ROM, size) && !is_BSX_Shell(ROM, size))
@@ -3324,6 +3406,9 @@ bool8 CMemory::SaveSRAM (const char *filename)
 
 	if (Settings.SFCBox)
 		S9xSFCBoxSaveNVRAM();	// KROM battery RAM rides along with the .srm
+
+	if (Settings.NSS)
+		S9xNSSSaveNVRAM();		// coinage EEPROM + clock NVRAM, likewise
 
 	if (Settings.SuperFX && (ROMType < 0x15 || ROMType == 0x17)) // doesn't have SRAM
 		return (TRUE);
@@ -6177,6 +6262,60 @@ void CMemory::CheckForAnyPatch(const char *rom_filename, bool8 header, int32 &ro
 // and on every register write — the KROM remaps live, SNES running or not
 // (real hardware does the same; the SNES executes garbage until the KROM
 // pulses its reset line).
+
+// Wires one socket's cartridge to the SNES. The supervisor drives this
+// through its slot-select bits, holding the 65816 in reset across the change
+// and rebooting it afterwards, so swapping the map underneath is safe.
+void S9xNSSMapSlot (int slot)
+{
+	if (!Settings.NSS || slot < 0 || slot >= NSS_SLOTS || !NSS.Slot[slot].Present)
+		return;
+
+	// A battery belongs to its own cartridge. Socket 1 arrives with the .srm
+	// the ordinary loader already read, so the first visit takes a copy
+	// rather than overwriting it.
+	S9xNSSStashMappedSRAM();
+
+	struct SNSSSlot	*s = &NSS.Slot[slot];
+
+	memcpy(Memory.ROM, s->Prg, s->PrgSize);
+	Memory.CalculatedSize = s->PrgSize;
+	Memory.ROMSize  = s->ROMSizeByte;
+	Memory.SRAMSize = s->SRAMSizeByte;
+	Memory.SRAMMask = s->SRAMSizeByte ? ((1 << (s->SRAMSizeByte + 3)) * 128) - 1 : 0;
+	Memory.LoROM = !s->HiROM;
+	Memory.HiROM = s->HiROM;
+	strncpy(Memory.ROMName, s->Name, ROM_NAME_LEN - 1);
+	Memory.ROMName[ROM_NAME_LEN - 1] = 0;
+
+	if (s->SRAMValid)
+		memcpy(Memory.SRAM, s->SRAM, NSS_SLOT_SRAM);
+	else
+	{
+		memcpy(s->SRAM, Memory.SRAM, NSS_SLOT_SRAM);
+		s->SRAMValid = TRUE;
+	}
+
+	// The DSP-1 travels with its cartridge: a slot without one must not see
+	// the previous cart's registers over its ROM.
+	Settings.DSP = s->DSP1;
+	if (s->DSP1)
+	{
+		DSP0.maptype = s->HiROM ? M_DSP1_HIROM : (s->PrgSize > 0x100000) ? M_DSP1_LOROM_L : M_DSP1_LOROM_S;
+		DSP0.boundary = s->HiROM ? 0x7000 : (s->PrgSize > 0x100000) ? 0x4000 : 0xc000;
+		SetDSP = &DSP1SetByte;
+		GetDSP = &DSP1GetByte;
+	}
+
+	if (s->HiROM)
+		Memory.Map_HiROMMap();
+	else
+		Memory.Map_LoROMMap();
+	NSS.MappedSlot = (int8) slot;
+
+	printf("NSS: slot %d mapped (%s, %u KB)\n", slot + 1, s->Name,
+	       (unsigned) (s->PrgSize >> 10));
+}
 
 void S9xSFCBoxRemap (void)
 {

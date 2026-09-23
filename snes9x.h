@@ -393,6 +393,9 @@ struct SSettings
 	int		Saturation;  // signed: -100..+100, 0 = no change
 	bool8	GBSuppressNRxGlitches; // Game Boy: an NRx2 rewrite on a live channel never raises its volume (hides the zombie-mode click; off = exact hardware)
 	bool8	CartProtection; // unlicensed cart security chip present (set by the loader, not by config)
+	bool8	NSS;            // Nintendo Super System cart loaded, Z80 supervisor active
+	uint32	NSSDipSwitches; // the cartridge DIP block the game reads at $4100 (low 8 bits)
+	bool8	NSSJoypadWatchdog; // let the supervisor drop a game that stops polling the pads
 };
 
 struct SSNESGameFixes

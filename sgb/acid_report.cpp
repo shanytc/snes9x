@@ -465,6 +465,7 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	         info.seconds);
 	o += "# filter: " + info.filter + "\n";
 	if (!info.boot.empty()) o += "# boot: " + info.boot + "\n";
+	o += std::string("# NRx2 glitch suppression: ") + (info.suppress_nrx ? "enabled" : "disabled") + "\n";
 	if (!info.source.empty()) o += "# tests: " + info.source + "\n";
 	for (size_t i = 0; i < nbase; ++i)
 	{
@@ -515,6 +516,7 @@ std::string RenderJson(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += "  \"generated\": " + JsonStr(info.generated) + ",\n";
 	o += "  \"filter\": " + JsonStr(info.filter) + ",\n";
 	o += "  \"boot\": " + JsonStr(info.boot) + ",\n";
+	o += std::string("  \"suppress_nrx\": ") + (info.suppress_nrx ? "true" : "false") + ",\n";
 	o += "  \"tests_dir\": " + JsonStr(info.source) + ",\n";
 	o += "  \"env_overrides\": " + JsonStr(info.env) + ",\n";
 	o += Fmt("  \"threads\": %d,\n", info.threads);
@@ -721,6 +723,7 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	         info.threads == 1 ? "" : "s", info.seconds);
 	o += "filter: " + Html(info.filter);
 	if (!info.boot.empty()) o += " &middot; boot: " + Html(info.boot);
+	o += std::string(" &middot; NRx2 glitch suppression: ") + (info.suppress_nrx ? "enabled" : "disabled");
 	if (!info.source.empty()) o += " &middot; " + Html(info.source);
 	o += "</p>\n";
 	for (size_t i = 0; i < nbase; ++i)

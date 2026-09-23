@@ -125,6 +125,7 @@ struct AcidDlgState
 	std::vector<uint8_t> dmg_boot, cgb_boot;
 	std::string boot_desc;      // "DMG dmg_boot.bin, CGB cgb_boot.bin"
 	bool        boot_on = false;   // the Boot ROMs box as of the last run
+	bool        nrx_on  = false;   // NRx2 glitch suppression as of the last run
 };
 
 std::string BaseName(const std::string &path)
@@ -184,6 +185,15 @@ void SetCtrlText(HWND ctrl, const char *text)
 {
 	Utf8ToWide wtext(text);
 	SetWindowText(ctrl, wtext);
+}
+
+// The run follows the emulator's Sound setting. That dialog is modeless, so
+// this is re-read on activation and at each run.
+void ShowNrxState(AcidDlgState *st)
+{
+	SetCtrlText(GetDlgItem(st->hDlg, IDC_ACID_NRX),
+	            Settings.GBSuppressNRxGlitches ? "NRx2 glitch suppression: enabled"
+	                                           : "NRx2 glitch suppression: disabled");
 }
 
 bool AnyOn(const std::vector<char> &v)
@@ -811,6 +821,7 @@ AcidTests::ReportInfo MakeReportInfo(AcidDlgState *st)
 	info.env     = AcidTests::EnvOverrides();
 	info.filter  = FilterDescription(st);
 	info.boot    = st->boot_on ? st->boot_desc : "BIOS-less";
+	info.suppress_nrx = st->nrx_on;
 	info.source  = st->acid_dir;
 	info.threads = st->threads;
 	info.seconds = st->last_secs;
@@ -1304,6 +1315,8 @@ void RunSuite(AcidDlgState *st)
 	const int sel = (int)SendMessage(st->hThreads, CB_GETCURSEL, 0, 0);
 	st->threads = (sel == CB_ERR) ? 1 : sel + 1;
 	st->boot_on = IsDlgButtonChecked(st->hDlg, IDC_ACID_BOOTROMS) == BST_CHECKED;
+	st->nrx_on  = Settings.GBSuppressNRxGlitches != FALSE;
+	ShowNrxState(st);
 	st->started = GetTickCount();
 
 	AcidTests::RunOptions opts;
@@ -1313,6 +1326,7 @@ void RunSuite(AcidDlgState *st)
 		opts.dmg_boot = st->dmg_boot;
 		opts.cgb_boot = st->cgb_boot;
 	}
+	opts.suppress_nrx = st->nrx_on;
 	opts.progress  = AcidProgress;
 	opts.on_result = AcidResult;
 	opts.on_start  = AcidStart;
@@ -1356,9 +1370,10 @@ void RunSuite(AcidDlgState *st)
 		         ok, sum.total, sum.failed, sum.info, sum.errors);
 	else
 		snprintf(buf, sizeof buf,
-		         "Done in %.1fs on %d thread%s, %s: %d/%d passed (%d failed, %d info, %d errors)%s",
+		         "Done in %.1fs on %d thread%s, %s, NRx2 suppression %s: %d/%d passed (%d failed, %d info, %d errors)%s",
 		         st->last_secs, st->threads, st->threads == 1 ? "" : "s",
 		         st->boot_on ? "boot ROMs" : "BIOS-less",
+		         st->nrx_on ? "on" : "off",
 		         ok, sum.total, sum.failed, sum.info, sum.errors,
 		         wrote ? " — results.txt written" : "");
 	SetCtrlText(st->hStat, buf);
@@ -1429,6 +1444,7 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			CheckDlgButton(hDlg, IDC_ACID_BOOTROMS, any ? BST_CHECKED : BST_UNCHECKED);
 			EnableWindow(GetDlgItem(hDlg, IDC_ACID_BOOTROMS), any);
 		}
+		ShowNrxState(st);
 
 		ListView_SetExtendedListViewStyle(st->hList,
 			LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
@@ -1535,6 +1551,11 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 	}
+
+	case WM_ACTIVATE:
+		if (LOWORD(wParam) != WA_INACTIVE)
+			if (AcidDlgState *st = GetState(hDlg)) ShowNrxState(st);
+		break;
 
 	case WM_COMMAND:
 		switch (LOWORD(wParam))

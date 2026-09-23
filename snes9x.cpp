@@ -224,7 +224,7 @@ void S9xLoadConfigFiles (char **argv, int argc)
 	// Sound
 
 	Settings.SoundSync                  =  conf.GetBool("Sound::Sync",                         false);
-	Settings.GBSuppressNRxGlitches      =  conf.GetBool("Sound::SuppressNRxGlitches",          true);
+	Settings.GBSuppressNRxGlitches      =  conf.GetBool("Sound::SuppressNRxGlitches",          false);
 	Settings.SixteenBitSound            =  conf.GetBool("Sound::16BitSound",                   true);
 	Settings.Stereo                     =  conf.GetBool("Sound::Stereo",                       true);
 	Settings.ReverseStereo              =  conf.GetBool("Sound::ReverseStereo",                false);

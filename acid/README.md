@@ -66,6 +66,15 @@ BIOS-less with the post-boot state synthesised, which is the shootout's own
 setup. SGB tests always start BIOS-less: the SNES side of the Super Game
 Boy is not in this runner. The report header's `boot:` line says which.
 
+## NRx2 glitch suppression
+
+The run follows the emulator's Sound setting that hides the NRx2 "zombie"
+volume glitch (off by default, i.e. exact hardware). The dialog shows its
+state next to the Boot ROMs box; headless, pass `--suppress-nrx` to turn it
+on. With it on, five samesuite tests fail as they do in the emulator, since
+they measure the glitch: `channel_1_nrx2_glitch`, `channel_1_nrx2_speed_change`,
+`channel_1_volume`, `channel_2_nrx2_glitch` and `channel_2_nrx2_speed_change`.
+
 ## Filtering and reports
 
 The runner takes the same cuts as upstream's `main.py`:

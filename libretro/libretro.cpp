@@ -754,7 +754,7 @@ static void update_variables(void)
     var.key = "snes9x_gb_bios";
     var.value = NULL;
     Settings.GB_BIOSEnabled = TRUE;
-    Settings.GBSuppressNRxGlitches = TRUE;
+    Settings.GBSuppressNRxGlitches = FALSE;
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
     {
         if (!strcmp(var.value, "disabled"))

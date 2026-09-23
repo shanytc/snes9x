@@ -171,6 +171,8 @@ int main(int argc, char **argv)
 			ctx.quiet = true;
 		else if (!std::strcmp(arg, "--threads") && has_next)
 			opts.threads = std::atoi(argv[++i]);
+		else if (!std::strcmp(arg, "--suppress-nrx"))
+			opts.suppress_nrx = true;
 		else if ((!std::strcmp(arg, "--dmg-boot") || !std::strcmp(arg, "--cgb-boot")) && has_next)
 		{
 			const bool cgb = arg[2] == 'c';
@@ -254,6 +256,7 @@ int main(int argc, char **argv)
 	info.env     = AcidTests::EnvOverrides();
 	info.filter  = opts.filter.Describe();
 	info.boot    = BootDescription(dmg_boot_path, cgb_boot_path);
+	info.suppress_nrx = opts.suppress_nrx;
 	info.source  = opts.acid_dir;
 	info.seconds = secs;
 	info.threads = opts.threads > 0 ? opts.threads : AcidTests::DefaultThreadCount();

@@ -3108,10 +3108,12 @@ LRESULT CALLBACK WinProc(
 			CheckMenuStates();
 			break;
 
-		case ID_NSS_INSTRUCTIONS: if (NSS.Active) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;
-		case ID_NSS_PAGEUP:       if (NSS.Active) S9xNSSPulseButton(NSS_BTN_PAGEUP);       break;
-		case ID_NSS_PAGEDOWN:     if (NSS.Active) S9xNSSPulseButton(NSS_BTN_PAGEDOWN);     break;
-		case ID_NSS_RESTART:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_RESTART);      break;
+		// These act on the paid game that is playing; the supervisor ignores
+		// them on its menu and during the attract demo.
+		case ID_NSS_INSTRUCTIONS: if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;
+		case ID_NSS_PAGEUP:       if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_PAGEUP);       break;
+		case ID_NSS_PAGEDOWN:     if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_PAGEDOWN);     break;
+		case ID_NSS_RESTART:      if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_RESTART);      break;
 
 		case ID_NSS_DIP0 + 0: case ID_NSS_DIP0 + 1: case ID_NSS_DIP0 + 2:
 		case ID_NSS_DIP0 + 3: case ID_NSS_DIP0 + 4: case ID_NSS_DIP0 + 5:
@@ -5731,6 +5733,14 @@ static void CheckMenuStates ()
 			EnableMenuItem(GUI.hMenu, ID_NSS_EJECT0 + slot,
 			               MF_BYCOMMAND | (S9xNSSCanEject(slot) ? MF_ENABLED : MF_GRAYED));
 		}
+
+		// Instructions, the paging keys and Restart only mean something to
+		// the paid game that is playing, so they grey out on the menu.
+		static const UINT game_only[] =
+			{ ID_NSS_INSTRUCTIONS, ID_NSS_PAGEUP, ID_NSS_PAGEDOWN, ID_NSS_RESTART };
+		for (int i = 0; i < 4; i++)
+			EnableMenuItem(GUI.hMenu, game_only[i],
+			               MF_BYCOMMAND | (S9xNSSGameRunning() ? MF_ENABLED : MF_GRAYED));
 	}
 
 	mii.fState = GUI.Stretch ? MFS_CHECKED : MFS_UNCHECKED;

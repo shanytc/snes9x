@@ -156,6 +156,12 @@ struct RunOptions
 	// Cores to run tests on at once. 0 picks one per hardware thread.
 	// Each gets its own emulator instance; the ROMs are independent.
 	int         threads   = 0;
+	// Boot ROM images DMG and CGB tests start through - the ones the
+	// emulator stages from the BIOS Manager - so a run boots the way File ->
+	// Load Game does. Empty: BIOS-less, the post-boot state synthesised. SGB
+	// tests always start BIOS-less; the SNES side is not in this runner.
+	std::vector<uint8_t> dmg_boot;
+	std::vector<uint8_t> cgb_boot;
 };
 
 struct Summary

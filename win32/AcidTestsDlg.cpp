@@ -30,6 +30,7 @@
 #include "wsnes9x.h"
 #include "rsrc/resource.h"
 #include "../snes9x.h"
+#include "../memmap.h"
 #include "../sgb/acid.h"
 #include "../sgb/acid_report.h"
 #include "../sgb/acid_baseline.h"
@@ -118,7 +119,19 @@ struct AcidDlgState
 	int  shot_src  = -1;
 	DWORD started  = 0;   // GetTickCount at the start of the run
 	double last_secs = 0.0;   // wall clock of the last finished run
+
+	// The boot ROMs File -> Load Game would stage, from the BIOS Manager;
+	// empty when none is assigned or the boot animation is off.
+	std::vector<uint8_t> dmg_boot, cgb_boot;
+	std::string boot_desc;      // "DMG dmg_boot.bin, CGB cgb_boot.bin"
+	bool        boot_on = false;   // the Boot ROMs box as of the last run
 };
+
+std::string BaseName(const std::string &path)
+{
+	const size_t cut = path.find_last_of("\\/");
+	return cut == std::string::npos ? path : path.substr(cut + 1);
+}
 
 constexpr int kPending = -1;
 constexpr int kRunning = -2;
@@ -797,6 +810,7 @@ AcidTests::ReportInfo MakeReportInfo(AcidDlgState *st)
 	AcidTests::ReportInfo info;
 	info.env     = AcidTests::EnvOverrides();
 	info.filter  = FilterDescription(st);
+	info.boot    = st->boot_on ? st->boot_desc : "BIOS-less";
 	info.source  = st->acid_dir;
 	info.threads = st->threads;
 	info.seconds = st->last_secs;
@@ -1246,6 +1260,9 @@ void EnableFilterBar(AcidDlgState *st, BOOL on)
 	                    IDC_ACID_SHOW, IDC_ACID_CLEAR,
 	                    IDC_ACID_SAVEBASE, IDC_ACID_RESCAN, IDC_ACID_DIAG };
 	for (int id : ids) EnableWindow(GetDlgItem(st->hDlg, id), on);
+	// The box stays off when the BIOS Manager has no boot ROM to offer.
+	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_BOOTROMS),
+	             on && !(st->dmg_boot.empty() && st->cgb_boot.empty()));
 	UpdateExportButton(st);
 }
 
@@ -1286,10 +1303,16 @@ void RunSuite(AcidDlgState *st)
 
 	const int sel = (int)SendMessage(st->hThreads, CB_GETCURSEL, 0, 0);
 	st->threads = (sel == CB_ERR) ? 1 : sel + 1;
+	st->boot_on = IsDlgButtonChecked(st->hDlg, IDC_ACID_BOOTROMS) == BST_CHECKED;
 	st->started = GetTickCount();
 
 	AcidTests::RunOptions opts;
 	opts.acid_dir  = st->acid_dir.c_str();
+	if (st->boot_on)
+	{
+		opts.dmg_boot = st->dmg_boot;
+		opts.cgb_boot = st->cgb_boot;
+	}
 	opts.progress  = AcidProgress;
 	opts.on_result = AcidResult;
 	opts.on_start  = AcidStart;
@@ -1333,8 +1356,9 @@ void RunSuite(AcidDlgState *st)
 		         ok, sum.total, sum.failed, sum.info, sum.errors);
 	else
 		snprintf(buf, sizeof buf,
-		         "Done in %.1fs on %d thread%s: %d/%d passed (%d failed, %d info, %d errors)%s",
+		         "Done in %.1fs on %d thread%s, %s: %d/%d passed (%d failed, %d info, %d errors)%s",
 		         st->last_secs, st->threads, st->threads == 1 ? "" : "s",
+		         st->boot_on ? "boot ROMs" : "BIOS-less",
 		         ok, sum.total, sum.failed, sum.info, sum.errors,
 		         wrote ? " — results.txt written" : "");
 	SetCtrlText(st->hStat, buf);
@@ -1391,6 +1415,20 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		}
 		SendMessage(st->hThreads, CB_SETCURSEL, cores - 1, 0);
 		st->threads = cores;
+
+		// Boot the way File -> Load Game does: through the BIOS Manager's
+		// boot ROMs. Off, and greyed, when it has none to stage.
+		{
+			std::string dmg_path, cgb_path;
+			S9xGetGBBootROM(false, st->dmg_boot, &dmg_path);
+			S9xGetGBBootROM(true,  st->cgb_boot, &cgb_path);
+			if (!dmg_path.empty()) st->boot_desc += "DMG " + BaseName(dmg_path);
+			if (!cgb_path.empty())
+				st->boot_desc += (st->boot_desc.empty() ? "" : ", ") + std::string("CGB ") + BaseName(cgb_path);
+			const bool any = !st->dmg_boot.empty() || !st->cgb_boot.empty();
+			CheckDlgButton(hDlg, IDC_ACID_BOOTROMS, any ? BST_CHECKED : BST_UNCHECKED);
+			EnableWindow(GetDlgItem(hDlg, IDC_ACID_BOOTROMS), any);
+		}
 
 		ListView_SetExtendedListViewStyle(st->hList,
 			LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);

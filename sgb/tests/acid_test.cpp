@@ -93,6 +93,29 @@ struct Output
 	std::string       path;
 };
 
+bool ReadWhole(const char *path, std::vector<uint8_t> &out)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f) return false;
+	fseek(f, 0, SEEK_END);
+	const long n = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	out.resize(n > 0 ? static_cast<size_t>(n) : 0);
+	const size_t got = out.empty() ? 0 : fread(out.data(), 1, out.size(), f);
+	fclose(f);
+	return got == out.size();
+}
+
+// "BIOS-less", or which boot ROMs the DMG and CGB tests ran through.
+std::string BootDescription(const std::string &dmg, const std::string &cgb)
+{
+	if (dmg.empty() && cgb.empty()) return "BIOS-less";
+	std::string d;
+	if (!dmg.empty()) d += "DMG " + dmg;
+	if (!cgb.empty()) d += (d.empty() ? "" : ", ") + std::string("CGB ") + cgb;
+	return d;
+}
+
 } // anonymous
 
 int main(int argc, char **argv)
@@ -101,6 +124,7 @@ int main(int argc, char **argv)
 	Ctx ctx;
 	std::vector<Output> outputs;
 	std::string save_baseline, compare_baseline;
+	std::string dmg_boot_path, cgb_boot_path;
 	bool list_tests = false, list_suites = false;
 	opts.acid_dir = "../../acid";
 	opts.progress = &OnProgress;
@@ -147,6 +171,17 @@ int main(int argc, char **argv)
 			ctx.quiet = true;
 		else if (!std::strcmp(arg, "--threads") && has_next)
 			opts.threads = std::atoi(argv[++i]);
+		else if ((!std::strcmp(arg, "--dmg-boot") || !std::strcmp(arg, "--cgb-boot")) && has_next)
+		{
+			const bool cgb = arg[2] == 'c';
+			const char *path = argv[++i];
+			if (!ReadWhole(path, cgb ? opts.cgb_boot : opts.dmg_boot))
+			{
+				fprintf(stderr, "cannot read boot ROM %s\n", path);
+				return 255;
+			}
+			(cgb ? cgb_boot_path : dmg_boot_path) = path;
+		}
 		else if (arg[0] == '-')
 		{
 			fprintf(stderr, "unknown option '%s'\n", arg);
@@ -218,6 +253,7 @@ int main(int argc, char **argv)
 	AcidTests::ReportInfo info;
 	info.env     = AcidTests::EnvOverrides();
 	info.filter  = opts.filter.Describe();
+	info.boot    = BootDescription(dmg_boot_path, cgb_boot_path);
 	info.source  = opts.acid_dir;
 	info.seconds = secs;
 	info.threads = opts.threads > 0 ? opts.threads : AcidTests::DefaultThreadCount();

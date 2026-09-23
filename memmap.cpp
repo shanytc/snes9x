@@ -2014,6 +2014,16 @@ static uint8 StageGBBootROM (bool gbCgb, const char *filename)
     return gbCgb ? 4 : 3;
 }
 
+bool8 S9xGetGBBootROM (bool cgb, std::vector<uint8> &out, std::string *out_path)
+{
+    std::string path;
+    out.clear();
+    if (!Settings.GB_BIOSEnabled || !FindGB_BootROM(cgb, nullptr, path, &out))
+        return (FALSE);
+    if (out_path) *out_path = path;
+    return (TRUE);
+}
+
 // Game Boy header $0143 CGB flag: $80 = CGB-enhanced, $C0 = CGB-only. Both
 // honour the SGB-BIOS preference: under the SGB BIOS a CGB-only cart boots
 // monochrome and shows its own "designed only for Game Boy Color" lockout,
@@ -2094,7 +2104,9 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) S9xSGBDeinit();
     if (Settings.SGB_BIOSModeActive) Settings.SGB_BIOSModeActive = FALSE;
     Settings.SuperGameBoy      = TRUE;
-    Settings.GameBoyRunMode    = gbCgb ? 0 : 1;   // CGB carts run BIOS-less in CGB mode
+    // The GB and GBC consoles are a DMG/CGB core: their own clock, their
+    // own handoff registers. Only a BIOS-driven load runs the cart as an SGB.
+    Settings.GameBoyRunMode    = 0;
     Settings.GBClockMultiplier = 1.0f;
     // InitROM never runs on this path, so set the video timing it would have.
     Settings.PAL               = FALSE;
@@ -2168,7 +2180,7 @@ bool8 CMemory::LoadROM (const char *filename)
         if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) S9xSGBDeinit();
         if (Settings.SGB_BIOSModeActive) Settings.SGB_BIOSModeActive = FALSE;
         Settings.SuperGameBoy      = TRUE;
-        Settings.GameBoyRunMode    = gbCgb ? 0 : 1;   // CGB carts run BIOS-less in CGB mode
+        Settings.GameBoyRunMode    = 0;   // GB / GBC console: a DMG/CGB core (see LoadGBFromBytes)
         Settings.GBClockMultiplier = 1.0f;
         // InitROM never runs on this path, so set the video timing it would have.
         Settings.PAL               = FALSE;

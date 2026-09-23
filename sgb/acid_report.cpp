@@ -464,6 +464,7 @@ std::string RenderText(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += Fmt(", %d thread%s, %.1fs\n", info.threads, info.threads == 1 ? "" : "s",
 	         info.seconds);
 	o += "# filter: " + info.filter + "\n";
+	if (!info.boot.empty()) o += "# boot: " + info.boot + "\n";
 	if (!info.source.empty()) o += "# tests: " + info.source + "\n";
 	for (size_t i = 0; i < nbase; ++i)
 	{
@@ -513,6 +514,7 @@ std::string RenderJson(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += "  \"emulator\": " + JsonStr(info.title) + ",\n";
 	o += "  \"generated\": " + JsonStr(info.generated) + ",\n";
 	o += "  \"filter\": " + JsonStr(info.filter) + ",\n";
+	o += "  \"boot\": " + JsonStr(info.boot) + ",\n";
 	o += "  \"tests_dir\": " + JsonStr(info.source) + ",\n";
 	o += "  \"env_overrides\": " + JsonStr(info.env) + ",\n";
 	o += Fmt("  \"threads\": %d,\n", info.threads);
@@ -718,6 +720,7 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 	o += Fmt(" &middot; %d thread%s &middot; %.1f s &middot; ", info.threads,
 	         info.threads == 1 ? "" : "s", info.seconds);
 	o += "filter: " + Html(info.filter);
+	if (!info.boot.empty()) o += " &middot; boot: " + Html(info.boot);
 	if (!info.source.empty()) o += " &middot; " + Html(info.source);
 	o += "</p>\n";
 	for (size_t i = 0; i < nbase; ++i)

@@ -332,6 +332,10 @@ enum S9xGBPolicyBlock
 S9xGBPolicyBlock S9xGBBootPolicyBlocked(int policy, const char *gb_rom_path);
 
 bool8 S9xGBBootPolicyAvailable(int policy, const char *gb_rom_path);
+
+// The Game Boy (cgb=false) or Game Boy Color boot ROM File -> Load Game stages
+// for a cart on that console: the BIOS Manager's, when assigned and enabled.
+bool8 S9xGetGBBootROM(bool cgb, std::vector<uint8> &out, std::string *out_path = nullptr);
 // Content-sniff a buffer for a Game Boy cart (Nintendo logo at 0x0104, incl.
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away
 // from the SNES/BS-X/Sufami load paths.

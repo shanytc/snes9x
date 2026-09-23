@@ -55,6 +55,17 @@ as INFO, matching the shootout.
   [options]`. `--dump` writes failing frames as PPM into `_failures/`;
   `results.txt` gets a full per-test report.
 
+## Boot ROMs
+
+A run boots each cart the way File → Load Game does. The dialog's **Boot
+ROMs** box (on by default whenever the BIOS Manager holds a Game Boy or
+Game Boy Color boot ROM) starts DMG tests through `dmg_boot.bin` and CGB
+tests through `cgb_boot.bin`; headless, pass `--dmg-boot <file>` and
+`--cgb-boot <file>`. With the box off, or no file given, the core starts
+BIOS-less with the post-boot state synthesised, which is the shootout's own
+setup. SGB tests always start BIOS-less: the SNES side of the Super Game
+Boy is not in this runner. The report header's `boot:` line says which.
+
 ## Filtering and reports
 
 The runner takes the same cuts as upstream's `main.py`:

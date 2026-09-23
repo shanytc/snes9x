@@ -394,11 +394,11 @@ struct Emulator::Impl
 		uint8_t  joypad[4];
 		uint8_t  input_value;   // last $FF00 write from GB (for edge detect)
 		uint8_t  input_index;   // 0..3 — current MLT_REQ player slot
-		uint8_t  mlt_players;   // 1, 2, or 4 — set when game issues MLT_REQ
-		uint16_t mlt_auto_drop_polls; // post-handoff poll counter — drops the
-		                              // forced 2-player override back to 1
-		                              // after ~8 P15 rises if no real MLT_REQ
-		                              // packet arrived (cleared on cmd 0x11)
+		uint8_t  mlt_players;   // MLT_REQ mode + 1 (0 = never set)
+		// Packet bit armed by the last pulse, or the reset being ended.
+		// Was mlt_auto_drop_polls (always 0), so old savestates read kPktNone.
+		enum : uint16_t { kPktNone = 0, kPktZero = 1, kPktOne = 2, kPktReset = 3 };
+		uint16_t pkt_pending;
 
 		// Packet assembler. GB bit-bangs SGB commands over $FF00:
 		//   $00 (P14+P15 both active) = reset/start pulse
@@ -750,6 +750,7 @@ void Emulator::Reset()
 	impl_->run_target            = 0;
 	impl_->drc_integ             = DrcSteadyStateCorr(impl_->cgb_mode, impl_->run_mode);
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
+	impl_->icd2.input_value = 0x30;   // lines idle high, so the first $00 is a reset
 	// 4-bank LCD ring starts at $00 (matches Mesen2 SuperGameboy::Reset).
 	// $7000-$700F latch buffer starts as $FF so reads before the first
 	// $6002 pop return all-ones (matches bsnes r7000 power-on state).
@@ -1014,6 +1015,15 @@ void Emulator::PrimeBIOSHandshake()
 	icd.drain_ptr       = 0;
 }
 
+// MLT_REQ mode into the ICD2 rotation, with sgb_state's HandleMltReq quirks
+// (mode 2 = odd count, index bumped into the glitched slot). Idempotent.
+static void IcdSetMltMode(Emulator::Impl::Icd2 &icd, uint8_t mode)
+{
+	icd.mlt_players = static_cast<uint8_t>(mode + 1);
+	icd.input_index = (mode == 2) ? static_cast<uint8_t>((icd.input_index + 1) & 2)
+	                              : static_cast<uint8_t>(icd.input_index & mode);
+}
+
 // Push a freshly-assembled 16-byte packet onto the queue. Drops the
 // oldest slot silently if the queue is full — matches bsnes icd.cpp
 // behavior (`if(packetSize >= 64) packetSize = 64;`). Bumps the
@@ -1056,8 +1066,9 @@ static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 			// MLT_REQ: the ICD2 latches the player count as the packet lands.
 			// Waiting for the BIOS to program it loses the race against a cart
 			// that probes the rotation right after (Survival Kids and friends).
-			icd.mlt_players = ((pkt[1] & 3) == 1) ? 2u : ((pkt[1] & 3) == 3) ? 4u : 1u;
-			icd.mlt_auto_drop_polls = 0;
+			// Latched as the packet lands: waiting for the BIOS's $6003 write
+			// loses the race against carts that probe right after (Survival Kids).
+			IcdSetMltMode(icd, static_cast<uint8_t>(pkt[1] & 3));
 			break;
 		case 0x12:
 			icd.jump_packets++;
@@ -2212,6 +2223,7 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			// is POWER-ON-RESET. On 1→0 we just freeze the GB in reset.
 			const bool was_released = (icd.control & 0x80) != 0;
 			const bool now_released = (value & 0x80) != 0;
+			const uint8_t old_mlt   = static_cast<uint8_t>(icd.control & 0x30);
 			icd.ctrl_writes++;
 
 			icd.control = value;
@@ -2254,6 +2266,10 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 				icd.sgb_row  = 0;
 				icd.sgb_bank = 0;
 			}
+			// The BIOS mirrors MLT_REQ into bits 5-4; the packet already
+			// latched it, so this only matters when the BIOS alone changes it.
+			if ((value & 0x30) != old_mlt)
+				IcdSetMltMode(icd, static_cast<uint8_t>((value >> 4) & 3));
 			return;
 		}
 		case 0x6004:
@@ -3029,72 +3045,55 @@ void Emulator::SetJoypad(uint16_t snes_pad_mask)
 
 // ICD2 packet decoder. The GB drives $FF00 bits 4/5 in four states:
 //   $00 — reset pulse: start a new packet
-//   $10 — 1-bit
-//   $20 — 0-bit
-//   $30 — idle / clock-high
+//   $10 — arms a 1-bit
+//   $20 — arms a 0-bit
+//   $30 — latches the armed bit
+// Same rules as PacketFeed (sgb_packet.cpp): the last pulse before $30 wins,
+// and the write that ends a reset carries no bit (cpp/sgb-ext-test).
 // Bits accumulate LSB-first into a byte, then into assembly_buf[0..15]
 // which is pushed onto the packet queue on the 16th byte.
-// A rising edge on P15 (bit 5) while NOT in a packet advances the MLT_REQ
-// player index (see Pan Docs SGB multi-player handshake).
+// Every rising edge on P15 (bit 5) advances the MLT_REQ player index while an
+// even player count is active - packet 1-bits included (samesuite sgb/).
 static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
 {
-	const uint8_t sel = value & 0x30;
+	const uint8_t sel      = value & 0x30;
+	const uint8_t prev_sel = icd.input_value & 0x30;
 
-	// Player-select edge detection fires only between packets — during
-	// packet assembly these same transitions encode data bits.
-	if (!icd.in_packet)
-	{
-		const bool p15_rose = !(icd.input_value & 0x20) && (value & 0x20);
-		if (p15_rose)
-		{
-			const uint8_t mlt_bits = static_cast<uint8_t>((icd.control >> 4) & 0x03);
-			const uint8_t ctrl_players = (mlt_bits == 0) ? 1u
-			                           : (mlt_bits == 1) ? 2u : 4u;
-			const uint8_t pkt_players  = icd.mlt_players ? icd.mlt_players : 1u;
-			const uint8_t players      = pkt_players > ctrl_players
-			                             ? pkt_players : ctrl_players;
-			icd.input_index = static_cast<uint8_t>(
-				(icd.input_index + 1) % players);
-
-			// Auto-drop the handoff-time mlt_players=2 override after
-			// the game has had enough polls to complete its SGB
-			// detection ritual. Tetris Plus / Pokemon Red detect SGB
-			// purely by observing rotation on the joypad register —
-			// neither sends an actual MLT_REQ packet — so we have to
-			// fake it at boot. After 8 P15 rises (4 full P1↔P2 cycles)
-			// we drop back to 1 player so games that just poll without
-			// running detection (Animaniacs) get stable input. A real
-			// MLT_REQ packet (cmd 0x11) clears mlt_auto_drop_polls so
-			// games that genuinely want multi-player aren't affected.
-			if (icd.mlt_auto_drop_polls > 0)
-			{
-				icd.mlt_auto_drop_polls++;
-				if (icd.mlt_auto_drop_polls > 8)
-				{
-					if (icd.mlt_players == 2)
-						icd.mlt_players = 1;
-					icd.mlt_auto_drop_polls = 0;
-					icd.input_index         = 0;
-				}
-			}
-		}
-	}
+	const bool p15_rose = !(prev_sel & 0x20) && (sel & 0x20);
+	if (p15_rose && icd.mlt_players && (icd.mlt_players & 1) == 0)
+		icd.input_index = static_cast<uint8_t>((icd.input_index + 1) & (icd.mlt_players - 1));
 	icd.input_value = value;
 
 	if (sel == 0x00)
 	{
 		// Reset pulse — arm the packet assembler.
-		icd.in_packet        = true;
-		icd.packet_byte      = 0;
-		icd.packet_bit       = 0;
-		icd.bit_accumulator  = 0;
+		if (prev_sel != 0x00)
+		{
+			icd.in_packet        = true;
+			icd.packet_byte      = 0;
+			icd.packet_bit       = 0;
+			icd.bit_accumulator  = 0;
+			icd.pkt_pending      = Emulator::Impl::Icd2::kPktReset;
+		}
 		return;
 	}
 
+	if (icd.pkt_pending == Emulator::Impl::Icd2::kPktReset)
+	{
+		icd.pkt_pending = Emulator::Impl::Icd2::kPktNone;
+		return;
+	}
 	if (!icd.in_packet) return;
-	if (sel != 0x10 && sel != 0x20) return;  // $30 (idle) doesn't latch a bit
+	if (sel != 0x30)
+	{
+		icd.pkt_pending = (sel == 0x10) ? Emulator::Impl::Icd2::kPktOne
+		                                : Emulator::Impl::Icd2::kPktZero;
+		return;
+	}
+	if (icd.pkt_pending == Emulator::Impl::Icd2::kPktNone) return;
 
-	const uint16_t bit = (sel == 0x10) ? 1u : 0u;
+	const uint16_t bit = (icd.pkt_pending == Emulator::Impl::Icd2::kPktOne) ? 1u : 0u;
+	icd.pkt_pending = Emulator::Impl::Icd2::kPktNone;
 	icd.bit_accumulator |= static_cast<uint16_t>(bit << icd.packet_bit);
 	icd.packet_bit++;
 
@@ -3198,14 +3197,6 @@ void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t l
 	// Border probe: every processed command bumps this, so a headless
 	// tool can wait out a cart's whole SGB init chatter.
 	++impl_->border_transfers;
-
-	if (cmd == 0x11 && len > 1)
-	{
-		const uint8_t mode = static_cast<uint8_t>(data[1] & 0x03);
-		impl_->icd2.mlt_players = (mode == 1) ? 2u
-		                       : (mode == 3) ? 4u : 1u;
-		impl_->icd2.mlt_auto_drop_polls = 0;
-	}
 
 	if (cmd == 0x13 || cmd == 0x14)
 	{

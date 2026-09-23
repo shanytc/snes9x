@@ -17,6 +17,7 @@
 #include "../netplay.h"
 #include "../controls.h"
 #include "../sgb/sgb.h"
+#include "../acidsgb.h"
 
 #include "wsnes9x.h"
 #include "kaillera.h"
@@ -262,6 +263,9 @@ void S9xCloseSnapshotFile( STREAM file)
 
 void S9xMessage (int type, int, const char *str)
 {
+	// An Acid Tests SGB child has no window, and stdout is its parent's pipe.
+	if (S9xAcidSgbChild)
+		return;
 #ifdef DEBUGGER
     static FILE *out = NULL;
 
@@ -306,6 +310,8 @@ extern unsigned long START;
 
 void S9xSyncSpeed( void)
 {
+	if (S9xAcidSgbChild)
+		return;   // runs flat out; nothing is shown
 #ifdef NETPLAY_SUPPORT
     if (Settings.NetPlay)
     {
@@ -849,6 +855,8 @@ void DeinitS9x()
 
 void S9xAutoSaveSRAM ()
 {
+	if (S9xAcidSgbChild)
+		return;   // never write beside a test ROM
     Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 }
 

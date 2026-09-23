@@ -3116,8 +3116,8 @@ LRESULT CALLBACK WinProc(
 		case ID_NSS_DIP0 + 0: case ID_NSS_DIP0 + 1: case ID_NSS_DIP0 + 2:
 		case ID_NSS_DIP0 + 3: case ID_NSS_DIP0 + 4: case ID_NSS_DIP0 + 5:
 		case ID_NSS_DIP0 + 6: case ID_NSS_DIP0 + 7:
-			// The cartridge DIP block the game reads at $4100. What each
-			// switch does is per-game, so they are just eight switches.
+			// The cartridge DIP block the game reads at $4100; the menu
+			// text says what the cartridge in play makes of each one.
 			Settings.NSSDipSwitches ^= (uint32) (1 << (cmd_id - ID_NSS_DIP0));
 			NSS.DipSwitches = (uint8) Settings.NSSDipSwitches;
 			CheckMenuStates();
@@ -5671,8 +5671,33 @@ static void CheckMenuStates ()
 		int   pos = 0;
 		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &emu, &pos))
 			EnableMenuItem(emu, pos, MF_BYPOSITION | (NSS.Active ? MF_ENABLED : MF_GRAYED));
+
+		TCHAR text[128];
+		MENUITEMINFO txt = {};
+		txt.cbSize     = sizeof(txt);
+		txt.fMask      = MIIM_STRING;
+		txt.dwTypeData = text;
+
+		// Each switch is named for what the cartridge in play does with it,
+		// in its current position, so both switches of a pair read as the
+		// one setting they make. A board without the block greys the popup.
+		const char *label0 = S9xNSSDipSwitchLabel(0);
+		HMENU nss = NULL;
+		if (FindMenuItemParentPos(GUI.hMenu, ID_NSS_DIPS, &nss, &pos))
+		{
+			_tcscpy(text, label0 ? TEXT("Cartridge &DIP Switches")
+			                     : TEXT("Cartridge &DIP Switches (none on this board)"));
+			SetMenuItemInfo(nss, pos, TRUE, &txt);
+			EnableMenuItem(nss, pos, MF_BYPOSITION | (label0 ? MF_ENABLED : MF_GRAYED));
+		}
 		for (int sw = 0; sw < 8; sw++)
 		{
+			const char *label = S9xNSSDipSwitchLabel(sw);
+			if (label && *label)
+				_stprintf(text, TEXT("Switch &%d - %hs"), sw + 1, label);
+			else
+				_stprintf(text, TEXT("Switch &%d"), sw + 1);
+			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &txt);
 			mii.fState = (Settings.NSSDipSwitches & (1 << sw)) ? MFS_CHECKED : MFS_UNCHECKED;
 			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &mii);
 		}
@@ -5681,7 +5706,6 @@ static void CheckMenuStates ()
 		// than looking like a dead button.
 		for (int slot = 0; slot < 3; slot++)
 		{
-			TCHAR text[128];
 			if (S9xNSSSlotPresent(slot))
 				_stprintf(text, TEXT("Game &%d (%hs)"), slot + 1, S9xNSSSlotName(slot));
 			else
@@ -5695,10 +5719,6 @@ static void CheckMenuStates ()
 			               MF_BYCOMMAND | ((!S9xNSSSlotPresent(slot) || !S9xNSSGameRunning())
 			                               ? MF_ENABLED : MF_GRAYED));
 
-			MENUITEMINFO txt = {};
-			txt.cbSize     = sizeof(txt);
-			txt.fMask      = MIIM_STRING;
-			txt.dwTypeData = text;
 			SetMenuItemInfo(GUI.hMenu, ID_NSS_GAME1 + slot, FALSE, &txt);
 
 			if (S9xNSSSlotPresent(slot))

@@ -836,7 +836,80 @@ static void NSSIOWrite (uint16 port, uint8 byte)
 
 uint8 S9xNSSReadDIP (void)
 {
+	if (TraceEnabled())
+		printf("[nss] DIP read at %02X:%04X\n", Registers.PB, Registers.PCw);
 	return (NSS.DipSwitches);
+}
+
+// Only the ROM-C cartridge board carries the eight-switch block, and only
+// four of its games read it. Each setting below was traced from the game's
+// own $4100 read site and checked on its HUD (docs/nss.md has the sites).
+struct SNSSDipSetting
+{
+	uint8		Mask;		// the switches the setting sits on
+	const char	*Name;
+	const char	*Value[4];	// by the setting's bits, lowest switch first
+};
+
+struct SNSSDipInfo
+{
+	uint32			CRC;		// of the SNES program
+	bool8			HasBlock;	// FALSE: this board has no switches at all
+	SNSSDipSetting	Setting[3];
+};
+
+static const SNSSDipInfo	kNSSDipInfo[] =
+{
+	{ 0xb1640d61, TRUE, {	// ActRaiser
+		{ 0x03, "Difficulty",  { "Level 1", "Level 2", "Level 3", "Level 4" } },
+		{ 0x0c, "Lives",       { "5", "4", "3", "2" } },
+		{ 0x30, "Timer Speed", { "100%", "111%", "125%", "143%" } } } },
+	{ 0x6f563adf, TRUE, {	// The Addams Family
+		{ 0x03, "Difficulty",  { "Normal", "Normal", "Normal", "Hard" } },
+		{ 0x0c, "Lives",       { "5", "4", "3", "2" } },
+		{ 0x30, "Timer Speed", { "100%", "103%", "107%", "111%" } } } },
+	{ 0x295ab566, TRUE, {	// Lethal Weapon
+		{ 0x0c, "Health",      { "5 badges", "4 badges", "3 badges", "2 badges" } } } },
+	{ 0x8bf4b379, TRUE, {	// Robocop 3
+		{ 0x0c, "Lives",       { "2", "5", "4", "3" } } } },
+	{ 0x84da7cfe, TRUE,  {} },	// Contra III: never reads them
+	{ 0x20cfc61c, TRUE,  {} },	// NCAA Basketball: never reads them
+	{ 0x473db113, TRUE,  {} },	// Skins Game: never reads them
+	{ 0x1719c322, TRUE,  {} },	// Amazing Tennis: never reads them
+	{ 0xc46766f2, FALSE, {} },	// Super Mario World
+	{ 0xf131611f, FALSE, {} },	// Super Tennis
+	{ 0x70b7f50e, FALSE, {} },	// Super Soccer
+	{ 0xe9b3cdf1, FALSE, {} },	// F-Zero
+};
+
+const char *S9xNSSDipSwitchLabel (int sw)
+{
+	static char			buf[48];
+	const int			slot = S9xNSSMappedSlot();
+	const SNSSDipInfo	*info = NULL;
+
+	if (slot < 0)
+		return ("");
+	for (size_t i = 0; i < sizeof(kNSSDipInfo) / sizeof(kNSSDipInfo[0]); i++)
+		if (kNSSDipInfo[i].CRC == NSS.Slot[slot].CRC)
+			info = &kNSSDipInfo[i];
+	if (!info)
+		return ("");
+	if (!info->HasBlock)
+		return (NULL);
+
+	for (int i = 0; i < 3; i++)
+	{
+		const SNSSDipSetting	&s = info->Setting[i];
+		if (!s.Name || !(s.Mask & (1 << sw)))
+			continue;
+		int	shift = 0;
+		while (!((s.Mask >> shift) & 1))
+			shift++;
+		snprintf(buf, sizeof(buf), "%s: %s", s.Name, s.Value[(NSS.DipSwitches & s.Mask) >> shift]);
+		return (buf);
+	}
+	return ("Unused");
 }
 
 // Counted for the trace: which of the two ways a game can poll the pads it

@@ -228,6 +228,10 @@ void	S9xNSSApplyAPUReset (void);
 
 // SNES-visible hardware
 uint8	S9xNSSReadDIP (void);			// $4100
+// What the cartridge in play does with DIP switch `sw` (0-7) in its current
+// position, e.g. "Lives: 5" or "Unused"; "" for a cartridge we have no
+// table for, NULL when its board has no switch block at all.
+const char *S9xNSSDipSwitchLabel (int sw);
 void	S9xNSSSetJoypadStrobe (uint8 byte);	// $4016 write
 void	S9xNSSJoypadRead (void);		// the game polled the pads
 bool8	S9xNSSInputDisabled (void);		// pads unplugged: reads come back empty

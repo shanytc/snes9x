@@ -1567,7 +1567,7 @@ BEGIN
             MENUITEM "Page &Down",                  ID_NSS_PAGEDOWN,MFT_STRING,MFS_ENABLED
             MENUITEM "&Restart Game",               ID_NSS_RESTART,MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
-            POPUP "Cartridge &DIP Switches",        0,MFT_STRING,MFS_ENABLED
+            POPUP "Cartridge &DIP Switches",        ID_NSS_DIPS,MFT_STRING,MFS_ENABLED
             BEGIN
                 MENUITEM "Switch &1",                   (ID_NSS_DIP0+0),MFT_STRING,MFS_ENABLED
                 MENUITEM "Switch &2",                   (ID_NSS_DIP0+1),MFT_STRING,MFS_ENABLED

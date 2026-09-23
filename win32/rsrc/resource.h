@@ -970,6 +970,7 @@
 #define ID_NSS_RESTART                  44410
 #define ID_NSS_DIP0                     44412
 #define ID_NSS_EJECT0                   44424
+#define ID_NSS_DIPS                     44427
 
 
 #define IDC_STATIC                      -1

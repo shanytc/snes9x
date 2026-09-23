@@ -50,7 +50,8 @@ as INFO, matching the shootout.
 
 - GUI: Tests → Acid Tests. The filter bar narrows the list by name,
   suite, model and result; Run covers whatever is shown, and Export writes
-  that set as `.txt`, `.json` or `.html`.
+  that set as `.txt`, `.json` or `.html`. The dialog is modeless and runs
+  the suite off the UI thread, so the emulator keeps playing beside it.
 - Headless: `cd sgb/tests && make acid_test && ./acid_test [acid-dir]
   [options]`. `--dump` writes failing frames as PPM into `_failures/`;
   `results.txt` gets a full per-test report.

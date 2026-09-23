@@ -57,6 +57,13 @@ enum { kColNum, kColTest, kColModel, kColResult, kColBaseline };
 // Posted by the baseline scan thread: how far it has got, then the tables.
 constexpr UINT WM_ACID_SCANPROG = WM_APP + 20;
 constexpr UINT WM_ACID_SCANDONE = WM_APP + 21;
+// The run's thread hands each runner callback to the UI thread (sent), and
+// its Summary when the run ends (posted).
+constexpr UINT WM_ACID_RUNCALL  = WM_APP + 22;
+constexpr UINT WM_ACID_RUNDONE  = WM_APP + 23;
+
+// The one open dialog; it is modeless so the emulator keeps running.
+HWND s_hAcidDlg = NULL;
 
 // One scan's output. Built on the worker, adopted by the dialog thread.
 struct ScanResult
@@ -126,6 +133,22 @@ struct AcidDlgState
 	std::string boot_desc;      // "DMG dmg_boot.bin, CGB cgb_boot.bin"
 	bool        boot_on = false;   // the Boot ROMs box as of the last run
 	bool        nrx_on  = false;   // NRx2 glitch suppression as of the last run
+
+	// The run executes off the UI thread so the emulator keeps going.
+	std::thread       run_thread;
+	std::vector<AcidTests::Test> run_tests;   // what it runs; outlives the thread
+	std::atomic<bool> run_live{false};
+	std::atomic<bool> dying{false};           // dialog being destroyed mid-run
+};
+
+// One runner callback, carried to the UI thread by WM_ACID_RUNCALL.
+struct RunCall
+{
+	enum Kind { Progress, Start, Running, Finished } kind;
+	int index = 0, a = 0, b = 0;
+	const AcidTests::Test   *test   = nullptr;
+	const AcidTests::Result *result = nullptr;
+	bool ret = true;
 };
 
 std::string BaseName(const std::string &path)
@@ -689,17 +712,38 @@ void PaintShot(AcidDlgState *st, DRAWITEMSTRUCT *dis)
   Runner callbacks
 --------------------------------------------------------------------------*/
 
-void PumpMessages(AcidDlgState *st)
+// Runner callbacks arrive on the run's thread; each is sent to the UI
+// thread, which owns the list and the state they update.
+bool SendRunCall(AcidDlgState *st, RunCall &c)
 {
-	MSG msg;
-	while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-	{
-		if (!IsDialogMessage(st->hDlg, &msg))
-		{
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-	}
+	if (st->dying.load()) return false;
+	SendMessage(st->hDlg, WM_ACID_RUNCALL, 0, (LPARAM)&c);
+	return c.ret;
+}
+
+bool ThunkProgress(void *user, int done, int count, const AcidTests::Test &t, int, int)
+{
+	RunCall c{ RunCall::Progress, done, count, 0, &t };
+	return SendRunCall((AcidDlgState *)user, c);
+}
+
+void ThunkStart(void *user, int run_index, const AcidTests::Test &t)
+{
+	RunCall c{ RunCall::Start, run_index, 0, 0, &t };
+	SendRunCall((AcidDlgState *)user, c);
+}
+
+void ThunkRunning(void *user, int run_index, int done, int total)
+{
+	RunCall c{ RunCall::Running, run_index, done, total };
+	SendRunCall((AcidDlgState *)user, c);
+}
+
+void ThunkResult(void *user, int run_index, const AcidTests::Test &t,
+                 const AcidTests::Result &r)
+{
+	RunCall c{ RunCall::Finished, run_index, 0, 0, &t, &r };
+	SendRunCall((AcidDlgState *)user, c);
 }
 
 // Callbacks index the set that was handed to the runner, not the manifest.
@@ -713,7 +757,7 @@ bool AcidProgress(void *user, int done, int test_count,
                   const AcidTests::Test &, int, int)
 {
 	AcidDlgState *st = (AcidDlgState *)user;
-	if (st->close_when_done) { PumpMessages(st); return false; }
+	if (st->close_when_done) return false;
 	const double secs = (GetTickCount() - st->started) / 1000.0;
 	char buf[256];
 	snprintf(buf, sizeof buf, "%d/%d done, %d running on %d thread%s — %.1fs%s",
@@ -722,7 +766,6 @@ bool AcidProgress(void *user, int done, int test_count,
 	         st->paused.load() ? " — PAUSED" : "");
 	SetCtrlText(st->hStat, buf);
 	SendMessage(st->hProg, PBM_SETPOS, done, 0);
-	PumpMessages(st);
 	return !st->cancelled;
 }
 
@@ -1323,18 +1366,36 @@ void RunSuite(AcidDlgState *st)
 		opts.cgb_boot = st->cgb_boot;
 	}
 	opts.suppress_nrx = st->nrx_on;
-	opts.progress  = AcidProgress;
-	opts.on_result = AcidResult;
-	opts.on_start  = AcidStart;
-	opts.on_running = AcidRunning;
+	opts.progress  = ThunkProgress;
+	opts.on_result = ThunkResult;
+	opts.on_start  = ThunkStart;
+	opts.on_running = ThunkRunning;
 	opts.user      = st;
 	opts.threads   = st->threads;
 	opts.pause     = &st->paused;
-	opts.report    = nullptr;   // written below, with the filter described
+	opts.report    = nullptr;   // FinishRun writes it, with the filter described
 	// Failing frames land in <acid dir>\_failures so they can be diffed
 	// against the reference rather than eyeballed in the preview pane.
 	opts.dump_failures = true;
-	AcidTests::Summary sum = AcidTests::RunTests(subset, opts);
+
+	// Off the UI thread, so the emulator keeps running beside the suite.
+	st->run_tests = std::move(subset);
+	st->run_live.store(true);
+	st->run_thread = std::thread([st, opts]() {
+		AcidTests::Summary *sum =
+			new AcidTests::Summary(AcidTests::RunTests(st->run_tests, opts));
+		if (st->dying.load() ||
+		    !PostMessage(st->hDlg, WM_ACID_RUNDONE, 0, (LPARAM)sum))
+			delete sum;
+		st->run_live.store(false);
+	});
+}
+
+// The run's thread has ended: settle the rows, write the report, and close
+// if Close was pressed mid-run.
+void FinishRun(AcidDlgState *st, const AcidTests::Summary &sum)
+{
+	if (st->run_thread.joinable()) st->run_thread.join();
 
 	// Cancelling drops whatever the workers were holding, so those rows
 	// never get a verdict — put them back to pending.
@@ -1373,7 +1434,7 @@ void RunSuite(AcidDlgState *st)
 		         ok, sum.total, sum.failed, sum.info, sum.errors,
 		         wrote ? " — results.txt written" : "");
 	SetCtrlText(st->hStat, buf);
-	SendMessage(st->hProg, PBM_SETPOS, (WPARAM)subset.size(), 0);
+	SendMessage(st->hProg, PBM_SETPOS, (WPARAM)st->run_tests.size(), 0);
 	EnableWindow(st->hThreads, TRUE);
 	EnableWindow(st->hPause, FALSE);
 	SetWindowText(st->hPause, TEXT("&Pause"));
@@ -1393,7 +1454,24 @@ void RunSuite(AcidDlgState *st)
 
 	// Close pressed mid-run: the workers are joined now, so it is safe.
 	if (st->close_when_done)
-		EndDialog(st->hDlg, 0);
+		DestroyWindow(st->hDlg);
+}
+
+// The emulator is closing under a run: cancel it and wait, still taking the
+// callbacks it sends meanwhile (they see `dying` and return at once).
+void AbandonRun(AcidDlgState *st)
+{
+	if (!st->run_thread.joinable()) return;
+	st->dying.store(true);
+	st->cancelled = true;
+	st->paused.store(false);
+	while (st->run_live.load())
+	{
+		MSG m;
+		PeekMessage(&m, NULL, 0, 0, PM_NOREMOVE);   // delivers sent messages
+		Sleep(1);
+	}
+	st->run_thread.join();
 }
 
 INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -1671,7 +1749,7 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 				SetWindowText(st->hStat, TEXT("Stopping..."));
 				return TRUE;
 			}
-			EndDialog(hDlg, 0);
+			DestroyWindow(hDlg);
 			return TRUE;
 		}
 		}
@@ -1688,16 +1766,41 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			SetWindowText(st->hStat, TEXT("Stopping..."));
 			return TRUE;
 		}
-		EndDialog(hDlg, 0);
+		DestroyWindow(hDlg);
+		return TRUE;
+	}
+
+	case WM_ACID_RUNCALL:
+	{
+		RunCall &c = *(RunCall *)lParam;
+		AcidDlgState *st = GetState(hDlg);
+		if (!st || st->dying.load()) { c.ret = false; return TRUE; }
+		switch (c.kind)
+		{
+		case RunCall::Progress: c.ret = AcidProgress(st, c.index, c.a, *c.test, 0, 0); break;
+		case RunCall::Start:    AcidStart(st, c.index, *c.test); break;
+		case RunCall::Running:  AcidRunning(st, c.index, c.a, c.b); break;
+		case RunCall::Finished: AcidResult(st, c.index, *c.test, *c.result); break;
+		}
+		return TRUE;
+	}
+
+	case WM_ACID_RUNDONE:
+	{
+		AcidTests::Summary *sum = (AcidTests::Summary *)lParam;
+		if (AcidDlgState *st = GetState(hDlg)) FinishRun(st, *sum);
+		delete sum;
 		return TRUE;
 	}
 
 	case WM_DESTROY:
 	{
 		AcidDlgState *st = GetState(hDlg);
+		if (st) AbandonRun(st);   // before the state goes: its callbacks read it
 		SetWindowLongPtr(hDlg, DWLP_USER, 0);
 		if (st) StopScan(st);   // it reads the state, so it goes first
 		delete st;
+		s_hAcidDlg = NULL;
 		return TRUE;
 	}
 	}
@@ -1728,5 +1831,17 @@ bool WinAcidTestsAvailable()
 
 void WinShowAcidTestsDialog()
 {
-	DialogBox(g_hInst, MAKEINTRESOURCE(IDD_ACID_TESTS), GUI.hWnd, AcidDlgProc);
+	if (s_hAcidDlg)
+	{
+		ShowWindow(s_hAcidDlg, SW_RESTORE);
+		SetForegroundWindow(s_hAcidDlg);
+		return;
+	}
+	s_hAcidDlg = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_ACID_TESTS), GUI.hWnd, AcidDlgProc);
+	if (s_hAcidDlg) ShowWindow(s_hAcidDlg, SW_SHOW);
+}
+
+HWND WinAcidTestsDialog()
+{
+	return s_hAcidDlg;
 }

@@ -283,6 +283,13 @@ struct Emulator::Impl
 		                           : host_nrx_glitch != 0;
 	}
 
+	// And for Settings.Mute, which the audio drift controller keys on.
+	int         host_mute = -1;
+	bool Muted() const
+	{
+		return host_mute < 0 ? Settings.Mute != FALSE : host_mute != 0;
+	}
+
 	// Completed CGB frame for the Super Game Boy Color pane. Under the SGB
 	// BIOS the GB is slaved per-opcode rather than frame-locked, so reading
 	// color_fb live hands the compositor a half-drawn frame; latch it at the
@@ -1107,6 +1114,9 @@ const GBAutoBlendEntry kGBAutoBlend[] = {
 
 void Emulator::ApplyAutoBlend()
 {
+	// The blend is the live session's setting: a private core (an Acid Tests
+	// worker, a split-screen seat) must not rewrite it under the player.
+	if (this != &Instance()) return;
 	if (!Settings.GBFrameBlendAuto || !impl_->has_rom) return;
 	const char *title = impl_->cart.header.title;
 	for (const GBAutoBlendEntry &e : kGBAutoBlend)
@@ -1394,6 +1404,11 @@ void Emulator::SetHostBiosMode(int mode)
 void Emulator::SetSuppressNrxGlitches(int mode)
 {
 	impl_->host_nrx_glitch = (mode < 0) ? -1 : (mode ? 1 : 0);
+}
+
+void Emulator::SetHostMute(int mode)
+{
+	impl_->host_mute = (mode < 0) ? -1 : (mode ? 1 : 0);
 }
 
 bool Emulator::IsCgbRender() const
@@ -1764,7 +1779,7 @@ void Emulator::RunFrame()
 	// While muted the host discards the ring instead of draining it at the
 	// playback rate, so the fill level carries no rate signal — skip the
 	// controller update rather than winding up the integrator.
-	if (Settings.Mute)
+	if (impl_->Muted())
 		return;
 	const uint32_t head = impl_->apu.sample_head;
 	const uint32_t tail = impl_->apu.sample_tail;

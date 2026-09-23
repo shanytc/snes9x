@@ -659,6 +659,9 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 		SGB::Emulator emu;
 		SGB::ScopedActiveEmulator bind(emu);
 		emu.SetSuppressNrxGlitches(opts.suppress_nrx ? 1 : 0);
+		// Pinned, not read live: the emulator keeps running beside the suite.
+		emu.SetHostBiosMode(0);
+		emu.SetHostMute(1);
 		if (emu.Init())
 		{
 			for (;;)

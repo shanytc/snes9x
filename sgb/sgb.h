@@ -127,8 +127,12 @@ public:
 
 	// Whether an NRx2 rewrite on a live channel may raise its volume (the
 	// DMG/CGB "zombie" glitch): -1 follows Settings.GBSuppressNRxGlitches,
-	// 0/1 pins it. The Acid runner pins 0 so it scores exact hardware.
+	// 0/1 pins it. The Acid runner pins it to the emulator's setting.
 	void SetSuppressNrxGlitches(int mode);
+
+	// Whether the host discards this core's audio: -1 follows Settings.Mute,
+	// 0/1 pins it. Muted, RunFrame leaves the APU at its authentic clock.
+	void SetHostMute(int mode);
 
 	// Cart-header flags $0143 (CGB) and $0146 (SGB); zeroed with false when
 	// no cart. Describes the cart, not the mode it runs in (cf. IsCgb()).

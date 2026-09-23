@@ -235,6 +235,23 @@ static const char *KindName (int kind)
 	}
 }
 
+static uint32 ImageCRC32 (const uint8 *d, uint32 n)
+{
+	uint32 crc = 0xffffffff;
+	for (uint32 i = 0; i < n; i++)
+	{
+		crc ^= d[i];
+		for (int b = 0; b < 8; b++)
+			crc = (crc >> 1) ^ (0xedb88320u & (uint32) (-(int32) (crc & 1)));
+	}
+	return (~crc);
+}
+
+static bool IsNoCashNSSTest (const uint8 *d, uint32 n, uint32 full)
+{
+	return full == 0x8000 && n >= 0x8000 && ImageCRC32(d, 0x8000) == S9X_NSS_NOCASH_TEST_CRC;
+}
+
 // A boot ROM opens LD SP,$FFFE; the SGB one then sets P1 to $30, and its $FD
 // byte is the A it hands the cart — $01 on SGB1, $FF on SGB2.
 static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
@@ -257,6 +274,9 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 	// twelve dots left-aligned at bit 11, so every row word's top nibble is
 	// clear.
 	if (full == 0x8000 && n >= 3 && d[0] == 0xED && d[1] == 0x57 && d[2] == 0xCA)
+		return (KIND_NSS_BIOS);
+	// nocash's test opens JP 1300h instead; it is known by checksum.
+	if (IsNoCashNSSTest(d, n, full))
 		return (KIND_NSS_BIOS);
 	if (full == 0x1200 && n >= 0x1200)
 	{
@@ -388,6 +408,9 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 	if (detail && img.size() >= 0x8000 &&
 	    (want == KIND_SGB1_CART || want == KIND_SGB2_CART))
 		*detail = SgbRevision(img.data());
+	if (detail && want == KIND_NSS_BIOS &&
+	    IsNoCashNSSTest(img.data(), (uint32) img.size(), (uint32) img.size()))
+		*detail = "No$Cash Test Bios";
 
 	return (S9X_BIOS_PATH_OK);
 }

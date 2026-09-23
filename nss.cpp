@@ -1848,7 +1848,8 @@ void S9xNSSPowerOn (void)
 	Z80_Reset();
 
 	printf("NSS: supervisor board powered on (BIOS rev %s, slots:",
-		   NSS.BIOSRevision == 2 ? "02" : NSS.BIOSRevision == 3 ? "03" : "?");
+		   NSS.BIOSRevision == 2 ? "02" : NSS.BIOSRevision == 3 ? "03" :
+		   CRC32(NSS.BIOS, NSS_BIOS_SIZE) == S9X_NSS_NOCASH_TEST_CRC ? "No$Cash Test Bios" : "?");
 	for (int i = 0; i < NSS_SLOTS; i++)
 		printf(" %d=%s", i + 1, NSS.Slot[i].Present ? NSS.Slot[i].Name : "-");
 	printf(").\n");

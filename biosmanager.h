@@ -42,6 +42,9 @@ struct S9xBiosSlotInfo
 
 #define S9X_BIOS_PATH_MAX 512
 
+// nocash's NSS-TEST.BIN: a hardware test that runs in place of the NSS BIOS.
+#define S9X_NSS_NOCASH_TEST_CRC 0x15616021u
+
 const S9xBiosSlotInfo *S9xGetBiosSlotInfo (int slot);
 
 // Empty string when the slot is unassigned. Set with an empty path to clear.

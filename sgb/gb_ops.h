@@ -55,10 +55,11 @@ inline void BusWrite(CpuState &s, Memory &mem, uint16_t addr, uint8_t v)
 	{
 		// WX latches late in the write cycle (SameBoy GB_CONFLICT_WX_DMG
 		// lands after the comparator has seen the old value one extra dot).
-		// CGB hardware uses its own conflict map: palette writes land at a
-		// different dot than on DMG even in compatibility mode.
+		// CGB hardware uses its own conflict map: palette writes land a dot
+		// into the next cycle, even in compatibility mode (daid
+		// ppu_scanline_bgp on GBC, on the grid the boot ROM's LCD-on leaves).
 		static const int wph = AcidKnob("ACID_WPH", 3);
-		static const int cpph = AcidKnob("ACID_CPPH", 4);
+		static const int cpph = AcidKnob("ACID_CPPH", 5);
 		int phase = (addr == 0xFF4B) ? wph : 1;
 		if (mem.cgb_hw && addr >= 0xFF47 && addr <= 0xFF49)
 			phase = cpph;
@@ -84,6 +85,14 @@ inline void BusWrite(CpuState &s, Memory &mem, uint16_t addr, uint8_t v)
 				MemTick(mem, 1, d < phase);
 			}
 			mem.ppu->tile_sel_glitch = 0;
+		}
+		else if (phase > 4)
+		{
+			// Lands phase-4 dots into the next machine cycle.
+			MemTick(mem, 4);
+			mem.late_addr  = addr;
+			mem.late_value = v;
+			mem.late_dots  = static_cast<int8_t>(phase - 4);
 		}
 		else
 		{

@@ -37,6 +37,14 @@ void Cpu::Reset()
 
 void Cpu::Step(Memory &mem)
 {
+	// A VRAM DMA holds the CPU; nothing is fetched or serviced meanwhile.
+	if (mem.dma_stall > 0)
+	{
+		mem.dma_stall -= 4;
+		TickM(state_, mem);
+		return;
+	}
+
 	// Halt wake-up: any pending IRQ (even with IME=0) clears the halt flag.
 	// When IME is also set, ServiceInterrupts will dispatch to the vector
 	// below; when IME=0 we just resume execution from PC normally.

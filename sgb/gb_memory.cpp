@@ -235,6 +235,8 @@ void MemReset(Memory &m, bool cgb)
 	m.hdma_src = m.hdma_dst = m.hdma_len = 0;
 	m.hdma_active  = false;
 	m.hdma_hblank_latch = false;
+	m.dma_stall    = 0;
+	m.late_dots    = -1;
 	m.ds_tick_rem  = 0;
 	m.cgb_hw       = cgb;
 	m.dma_active   = false;
@@ -333,6 +335,23 @@ static void DmaTickM(Memory &m)
 
 void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
 {
+	// A write deferred into this cycle lands after its dots; the rest of
+	// the cycle then runs with the new value in place.
+	if (m.late_dots >= 0 && tcycles > 0)
+	{
+		const int32_t first = m.late_dots;
+		m.late_dots = -1;
+		if (first > 0 && first < tcycles)
+		{
+			MemTick(m, first, tick_dma);
+			MemWrite(m, m.late_addr, m.late_value);
+			MemTick(m, tcycles - first, false);
+			return;
+		}
+		if (first <= 0) MemWrite(m, m.late_addr, m.late_value);
+		else            m.late_dots = static_cast<int8_t>(first - tcycles);
+	}
+
 	// STOP halts the oscillator: DIV/TIMA and OAM DMA freeze; the APU
 	// freezes too on DMG (it keeps running on CGB hardware).
 	const bool stopped = m.cpu && m.cpu->stopped;
@@ -702,9 +721,19 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 	// Remaining I/O addresses (CGB regs, etc.) are ignored.
 }
 
+// The CPU is held while a VRAM DMA moves its blocks: 8 M-cycles a block
+// (16 in double speed) after a setup M-cycle. The bytes land at once here;
+// only the hold is timed.
+static void HdmaStall(Memory &m, uint32_t blocks)
+{
+	const int32_t per_block = m.double_speed ? 64 : 32;
+	m.dma_stall += static_cast<int32_t>(blocks) * per_block + (m.double_speed ? 8 : 4);
+}
+
 static void DoGdma(Memory &m, uint16_t src, uint16_t dst, uint16_t blocks)
 {
 	const uint32_t n = static_cast<uint32_t>(blocks) * 0x10u;
+	HdmaStall(m, blocks);
 	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < n; ++i)
 	{
@@ -716,6 +745,7 @@ static void DoGdma(Memory &m, uint16_t src, uint16_t dst, uint16_t blocks)
 
 static void HdmaTransferBlock(Memory &m)
 {
+	HdmaStall(m, 1);
 	m.dma_vram_bypass = true;
 	for (uint32_t i = 0; i < 0x10; ++i)
 	{

@@ -195,6 +195,8 @@ public:
 	// `silent` runs it with its video held off the panel — for the embedded
 	// fallback, which the user never asked for. See Emulator::Reset.
 	bool LoadBootROM(const uint8_t *data, size_t size);
+	// True while a staged boot ROM is still mapped, i.e. until its $FF50 write.
+	bool BootROMMapped() const;
 
 	// Populate the 5-packet boot-ROM handshake from the current cart's
 	// header and queue the first packet as if the GB boot ROM had sent

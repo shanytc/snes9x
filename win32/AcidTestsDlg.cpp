@@ -31,6 +31,7 @@
 #include "rsrc/resource.h"
 #include "../snes9x.h"
 #include "../memmap.h"
+#include "../biosmanager.h"
 #include "../sgb/acid.h"
 #include "../sgb/acid_report.h"
 #include "../sgb/acid_baseline.h"
@@ -40,7 +41,7 @@ extern HINSTANCE g_hInst;
 namespace {
 
 // Filter menu entries for the two fixed lists.
-const char *kModelNames[]  = { "DMG", "CGB", "SGB" };
+const char *kModelNames[]  = { "DMG", "CGB", "SGB", "SGB2" };
 const char *kStatusNames[] = { "PASS", "FAIL", "INFO", "ERROR" };
 // Slots 0-3 line up with Status; the rest are the runner's own states.
 const char *kShowNames[]   = { "Passed", "Failed", "Informational", "Errors",
@@ -130,7 +131,10 @@ struct AcidDlgState
 	// The boot ROMs File -> Load Game would stage, from the BIOS Manager;
 	// empty when none is assigned or the boot animation is off.
 	std::vector<uint8_t> dmg_boot, cgb_boot;
-	std::string boot_desc;      // "DMG dmg_boot.bin, CGB cgb_boot.bin"
+	// SGB tests boot the BIOS Manager's Super Game Boy BIOSes in a child
+	// copy of this exe (acidsgb.h); empty when the slot is unusable.
+	std::string sgb1_bios, sgb2_bios, sgb1_boot, sgb2_boot;
+	std::string boot_desc;      // "DMG dmg_boot.bin, CGB cgb_boot.bin, SGB sgb.sfc"
 	bool        boot_on = false;   // the Boot ROMs box as of the last run
 	bool        nrx_on  = false;   // NRx2 glitch suppression as of the last run
 
@@ -155,6 +159,27 @@ std::string BaseName(const std::string &path)
 {
 	const size_t cut = path.find_last_of("\\/");
 	return cut == std::string::npos ? path : path.substr(cut + 1);
+}
+
+// A BIOS Manager slot's path when the loader could use it, else empty.
+std::string UsableBiosPath(int slot)
+{
+	return S9xBiosPathUsable(slot) ? S9xResolveBiosPath(slot) : std::string();
+}
+
+// Whether the Boot ROMs box has anything to boot through.
+bool HasBootSet(const AcidDlgState *st)
+{
+	return !st->dmg_boot.empty() || !st->cgb_boot.empty() ||
+	       !st->sgb1_bios.empty() || !st->sgb2_bios.empty();
+}
+
+// This exe, UTF-8: SGB tests run in a child copy of it.
+std::string SelfExePath()
+{
+	wchar_t path[MAX_PATH * 4];
+	const DWORD n = GetModuleFileNameW(NULL, path, sizeof path / sizeof path[0]);
+	return (n && n < sizeof path / sizeof path[0]) ? std::string(WideToUtf8(path)) : std::string();
 }
 
 constexpr int kPending = -1;
@@ -310,7 +335,7 @@ AcidTests::Filter CoreFilter(const AcidDlgState *st)
 	f.text = st->search;
 	for (size_t i = 0; i < st->suites.size(); ++i)
 		if (st->suite_on[i]) f.suites.push_back(st->suites[i]);
-	for (int i = 0; i < 3; ++i)
+	for (int i = 0; i < AcidTests::kModelCount; ++i)
 		if (st->model_on[i]) f.models |= AcidTests::ModelBit((AcidTests::Model)i);
 	return f;
 }
@@ -1311,8 +1336,7 @@ void EnableFilterBar(AcidDlgState *st, BOOL on)
 	                    IDC_ACID_SAVEBASE, IDC_ACID_RESCAN, IDC_ACID_DIAG };
 	for (int id : ids) EnableWindow(GetDlgItem(st->hDlg, id), on);
 	// The box stays off when the BIOS Manager has no boot ROM to offer.
-	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_BOOTROMS),
-	             on && !(st->dmg_boot.empty() && st->cgb_boot.empty()));
+	EnableWindow(GetDlgItem(st->hDlg, IDC_ACID_BOOTROMS), on && HasBootSet(st));
 	UpdateExportButton(st);
 }
 
@@ -1362,8 +1386,13 @@ void RunSuite(AcidDlgState *st)
 	opts.acid_dir  = st->acid_dir.c_str();
 	if (st->boot_on)
 	{
-		opts.dmg_boot = st->dmg_boot;
-		opts.cgb_boot = st->cgb_boot;
+		opts.dmg_boot  = st->dmg_boot;
+		opts.cgb_boot  = st->cgb_boot;
+		opts.sgb1_bios = st->sgb1_bios;
+		opts.sgb2_bios = st->sgb2_bios;
+		opts.sgb1_boot = st->sgb1_boot;
+		opts.sgb2_boot = st->sgb2_boot;
+		opts.sgb_child = SelfExePath();
 	}
 	opts.suppress_nrx = st->nrx_on;
 	opts.progress  = ThunkProgress;
@@ -1511,10 +1540,19 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			std::string dmg_path, cgb_path;
 			S9xGetGBBootROM(false, st->dmg_boot, &dmg_path);
 			S9xGetGBBootROM(true,  st->cgb_boot, &cgb_path);
-			if (!dmg_path.empty()) st->boot_desc += "DMG " + BaseName(dmg_path);
-			if (!cgb_path.empty())
-				st->boot_desc += (st->boot_desc.empty() ? "" : ", ") + std::string("CGB ") + BaseName(cgb_path);
-			const bool any = !st->dmg_boot.empty() || !st->cgb_boot.empty();
+			st->sgb1_bios = UsableBiosPath(S9X_BIOS_SGB1);
+			st->sgb2_bios = UsableBiosPath(S9X_BIOS_SGB2);
+			st->sgb1_boot = UsableBiosPath(S9X_BIOS_SGB1_BOOT);
+			st->sgb2_boot = UsableBiosPath(S9X_BIOS_SGB2_BOOT);
+			auto add = [&](const char *what, const std::string &path) {
+				if (!path.empty())
+					st->boot_desc += (st->boot_desc.empty() ? "" : ", ") + std::string(what) + " " + BaseName(path);
+			};
+			add("DMG", dmg_path);
+			add("CGB", cgb_path);
+			add("SGB", st->sgb1_bios);
+			add("SGB2", st->sgb2_bios);
+			const bool any = HasBootSet(st);
 			CheckDlgButton(hDlg, IDC_ACID_BOOTROMS, any ? BST_CHECKED : BST_UNCHECKED);
 			EnableWindow(GetDlgItem(hDlg, IDC_ACID_BOOTROMS), any);
 		}
@@ -1532,7 +1570,7 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		st->diff_px.assign(st->tests.size(), std::vector<int>());
 		st->suites   = AcidTests::SuitesOf(st->tests);
 		st->suite_on.assign(st->suites.size(), 0);
-		st->model_on.assign(3, 0);
+		st->model_on.assign(AcidTests::kModelCount, 0);
 		st->show_on.assign(kShowCount, 0);
 
 		// The list first, so the dialog comes up with it filled in; the
@@ -1660,7 +1698,7 @@ INT_PTR CALLBACK AcidDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			AcidDlgState *st = GetState(hDlg);
 			if (st)
 			{
-				const std::vector<std::string> names(kModelNames, kModelNames + 3);
+				const std::vector<std::string> names(kModelNames, kModelNames + AcidTests::kModelCount);
 				CheckMenu(st, IDC_ACID_MODELS, names, st->model_on, "All models");
 			}
 			return TRUE;

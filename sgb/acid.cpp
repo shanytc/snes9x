@@ -4,6 +4,14 @@
    For further information, consult the LICENSE file in the root directory.
 \*****************************************************************************/
 
+// Cygwin's posix_spawn forks, which deadlocks a threaded parent: spawn the
+// SGB child through the Win32 API there too.
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define ACID_WIN32_SPAWN 1
+#elif !defined(_GNU_SOURCE)
+#define _GNU_SOURCE   // pipe2/kill under a strict -std= build
+#endif
+
 #include "acid.h"
 #include "acid_report.h"
 #include "sgb.h"
@@ -20,9 +28,29 @@
 #include <chrono>
 #include <mutex>
 #include <thread>
+#include <memory>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
+#endif
+#ifdef ACID_WIN32_SPAWN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#ifdef __CYGWIN__
+#include <sys/cygwin.h>
+#include <unistd.h>
+#endif
+#else
+#include <fcntl.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #include "stb_image.h"
@@ -260,7 +288,8 @@ std::string ImagePath(const std::string &acid_dir, const std::string &baseline,
 
 const char *ModelName(Model m)
 {
-	return m == Model::CGB ? "CGB" : m == Model::SGB ? "SGB" : "DMG";
+	return m == Model::CGB ? "CGB" : m == Model::SGB ? "SGB"
+	     : m == Model::SGB2 ? "SGB2" : "DMG";
 }
 
 const char *StatusName(Status s)
@@ -331,7 +360,7 @@ std::string Filter::Describe() const
 	if (models)
 	{
 		std::string list;
-		for (Model m : { Model::DMG, Model::CGB, Model::SGB })
+		for (Model m : { Model::DMG, Model::CGB, Model::SGB, Model::SGB2 })
 		{
 			if (!(models & ModelBit(m))) continue;
 			if (!list.empty()) list += "+";
@@ -406,7 +435,17 @@ bool LoadManifest(const char *acid_dir, std::vector<Test> &out, std::string &err
 		split(fields[4], t.pass_images);
 		if (fields.size() >= 6) split(fields[5], t.fail_images);
 		t.suite = SuiteOfName(t.name);
-		out.push_back(std::move(t));
+		// The shootout has one SGB model; we test both BIOSes.
+		if (t.model == Model::SGB)
+		{
+			Test twin = t;
+			twin.model = Model::SGB2;
+			twin.name += kSgb2Suffix;
+			out.push_back(std::move(t));
+			out.push_back(std::move(twin));
+		}
+		else
+			out.push_back(std::move(t));
 	}
 	fclose(f);
 
@@ -420,14 +459,343 @@ bool LoadManifest(const char *acid_dir, std::vector<Test> &out, std::string &err
 
 namespace {
 
-// One test, start to finish, on one core. Everything it touches is either
-// its own emulator instance or a local, so several of these run in
-// parallel without interfering.
+// SNES frames per second, the SGB child's clock.
+constexpr double kSnesFps = 60.0988;
+// Longest the SGB BIOS may take to hand the cart the GB (SGB2's splash is ~6.5 s).
+constexpr double kBiosBootSecs = 30.0;
+
+// A process whose stdout we read: the SGB test child.
+class ChildProcess
+{
+public:
+	~ChildProcess() { Stop(); }
+	bool Start(const std::vector<std::string> &args, std::string &err);
+	bool Read(void *buf, size_t n);   // exactly n bytes; false at EOF
+	void Kill();                      // from another thread: unblocks Read
+	void Stop();
+
+private:
+#ifdef ACID_WIN32_SPAWN
+	HANDLE proc_ = NULL, rd_ = NULL;
+#else
+	pid_t pid_ = -1;
+	int   rd_  = -1;
+#endif
+};
+
+#ifdef ACID_WIN32_SPAWN
+// Paths here are UTF-8, as everywhere in the core.
+std::wstring Widen(const std::string &s)
+{
+	const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int) s.size(), NULL, 0);
+	std::wstring w(n, L'\0');
+	if (n) MultiByteToWideChar(CP_UTF8, 0, s.data(), (int) s.size(), &w[0], n);
+	return w;
+}
+
+// CommandLineToArgv quoting: backslashes double only before a quote.
+void AppendQuoted(std::wstring &cmd, const std::wstring &arg)
+{
+	if (!cmd.empty()) cmd += L' ';
+	cmd += L'"';
+	size_t slashes = 0;
+	for (wchar_t c : arg)
+	{
+		if (c == L'\\') { ++slashes; continue; }
+		cmd.append(c == L'"' ? slashes * 2 + 1 : slashes, L'\\');
+		slashes = 0;
+		cmd += c;
+	}
+	cmd.append(slashes * 2, L'\\');
+	cmd += L'"';
+}
+
+bool ChildProcess::Start(const std::vector<std::string> &args, std::string &err)
+{
+	SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
+	HANDLE wr = NULL;
+	if (!CreatePipe(&rd_, &wr, &sa, 1 << 16))
+	{
+		rd_ = NULL;
+		err = "cannot create a pipe";
+		return false;
+	}
+	SetHandleInformation(rd_, HANDLE_FLAG_INHERIT, 0);
+	HANDLE nul = CreateFileA("NUL", GENERIC_READ | GENERIC_WRITE,
+	                         FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+
+	// Only this child's own handles are inherited: a parallel spawn must not
+	// pick up another child's pipe end and hold it open.
+	HANDLE inherit[2] = { wr, nul };
+	SIZE_T attr_size = 0;
+	InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
+	std::vector<char> attr_buf(attr_size);
+	LPPROC_THREAD_ATTRIBUTE_LIST attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
+	const bool have_attrs = InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size) != FALSE;
+	bool ok = have_attrs && nul != INVALID_HANDLE_VALUE &&
+	          UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+	                                    inherit, sizeof inherit, NULL, NULL);
+
+	STARTUPINFOEXW si = {};
+	si.StartupInfo.cb         = sizeof si;
+	si.StartupInfo.dwFlags    = STARTF_USESTDHANDLES;
+	si.StartupInfo.hStdInput  = nul;
+	si.StartupInfo.hStdOutput = wr;
+	si.StartupInfo.hStdError  = nul;
+	si.lpAttributeList        = attrs;
+	std::vector<std::wstring> argw;
+	for (const std::string &a : args) argw.push_back(Widen(a));
+	const wchar_t *cwd = NULL;
+#ifdef __CYGWIN__
+	// Win32 sees neither cygwin paths nor cygwin's working directory.
+	std::wstring cwd_w;
+	auto to_win = [](const char *posix) {
+		wchar_t buf[4096] = {};
+		return cygwin_conv_path(CCP_POSIX_TO_WIN_W, posix, buf, sizeof buf) == 0
+		       ? std::wstring(buf) : Widen(posix);
+	};
+	argw[0] = to_win(args[0].c_str());
+	char here[4096];
+	if (getcwd(here, sizeof here)) { cwd_w = to_win(here); cwd = cwd_w.c_str(); }
+#endif
+	std::wstring cmd;
+	for (const std::wstring &a : argw) AppendQuoted(cmd, a);
+	std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
+	cmd_buf.push_back(L'\0');
+	// No application name: CreateProcess then finds the program from the
+	// command line and supplies a missing ".exe".
+	PROCESS_INFORMATION pi = {};
+	ok = ok && CreateProcessW(NULL, cmd_buf.data(), NULL, NULL, TRUE,
+	                          CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+	                          NULL, cwd, &si.StartupInfo, &pi);
+	if (have_attrs) DeleteProcThreadAttributeList(attrs);
+	CloseHandle(wr);
+	if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+	if (!ok)
+	{
+		CloseHandle(rd_);
+		rd_ = NULL;
+		err = "cannot start " + args[0];
+		return false;
+	}
+	CloseHandle(pi.hThread);
+	proc_ = pi.hProcess;
+	return true;
+}
+
+bool ChildProcess::Read(void *buf, size_t n)
+{
+	char *p = static_cast<char *>(buf);
+	while (n)
+	{
+		DWORD got = 0;
+		if (!ReadFile(rd_, p, (DWORD) n, &got, NULL) || !got) return false;
+		p += got;
+		n -= got;
+	}
+	return true;
+}
+
+void ChildProcess::Kill()
+{
+	if (proc_) TerminateProcess(proc_, 1);
+}
+
+void ChildProcess::Stop()
+{
+	// Closing our end first lets a still-running child's next write fail.
+	if (rd_) { CloseHandle(rd_); rd_ = NULL; }
+	if (proc_)
+	{
+		if (WaitForSingleObject(proc_, 0) == WAIT_TIMEOUT)
+			TerminateProcess(proc_, 1);
+		WaitForSingleObject(proc_, 5000);
+		CloseHandle(proc_);
+		proc_ = NULL;
+	}
+}
+#else
+bool ChildProcess::Start(const std::vector<std::string> &args, std::string &err)
+{
+	// Close-on-exec, so a parallel spawn never inherits this pipe; the dup2
+	// onto the child's stdout clears the flag for that one copy.
+	int fds[2];
+	if (pipe2(fds, O_CLOEXEC) != 0)
+	{
+		err = "cannot create a pipe";
+		return false;
+	}
+	posix_spawn_file_actions_t fa;
+	posix_spawn_file_actions_init(&fa);
+	posix_spawn_file_actions_adddup2(&fa, fds[1], 1);
+	posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
+	posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
+	std::vector<char *> av;
+	for (const std::string &a : args) av.push_back(const_cast<char *>(a.c_str()));
+	av.push_back(nullptr);
+	const int rc = posix_spawn(&pid_, args[0].c_str(), &fa, nullptr, av.data(), ACID_ENVIRON);
+	posix_spawn_file_actions_destroy(&fa);
+	close(fds[1]);
+	if (rc != 0)
+	{
+		close(fds[0]);
+		pid_ = -1;
+		err = "cannot start " + args[0];
+		return false;
+	}
+	rd_ = fds[0];
+	return true;
+}
+
+bool ChildProcess::Read(void *buf, size_t n)
+{
+	char *p = static_cast<char *>(buf);
+	while (n)
+	{
+		const ssize_t got = read(rd_, p, n);
+		if (got <= 0) return false;
+		p += got;
+		n -= (size_t) got;
+	}
+	return true;
+}
+
+void ChildProcess::Kill()
+{
+	if (pid_ > 0) kill(pid_, SIGKILL);
+}
+
+void ChildProcess::Stop()
+{
+	if (rd_ >= 0) { close(rd_); rd_ = -1; }
+	if (pid_ > 0)
+	{
+		kill(pid_, SIGKILL);
+		waitpid(pid_, nullptr, 0);
+		pid_ = -1;
+	}
+}
+#endif
+
+// A worker's running SGB child, as the runner's main loop sees it: killed on
+// cancel, or when it goes kChildStallSecs without a record.
+constexpr double kChildStallSecs = 30.0;
+
+struct ChildWatch
+{
+	std::mutex    mu;
+	ChildProcess *child = nullptr;
+	std::chrono::steady_clock::time_point last;
+	bool          stalled = false;
+
+	void Touch()
+	{
+		std::lock_guard<std::mutex> lk(mu);
+		last = std::chrono::steady_clock::now();
+	}
+};
+
+// Where a test's frames come from.
+class FrameSource
+{
+public:
+	virtual ~FrameSource() {}
+	virtual bool Next() = 0;            // one more frame; false = gave up (see error)
+	virtual bool Booting() const = 0;   // boot ROM / BIOS still owns the GB
+	virtual void Gray(uint8_t *out) const = 0;
+	virtual void Rgb(std::vector<uint8_t> &out) const = 0;
+	std::string error;
+};
+
+// The worker's own GB core.
+class CoreSource : public FrameSource
+{
+public:
+	explicit CoreSource(SGB::Emulator &emu) : emu_(emu) {}
+	bool Next() override { emu_.RunFrame(); return true; }
+	bool Booting() const override { return emu_.BootROMMapped(); }
+	void Gray(uint8_t *out) const override { CaptureFrameGray(emu_, out); }
+	void Rgb(std::vector<uint8_t> &out) const override { CaptureFrameRgb(emu_, out); }
+
+private:
+	SGB::Emulator &emu_;
+};
+
+// An SGB child running the real BIOS; see acidsgb.h for the record stream.
+class ChildSource : public FrameSource
+{
+public:
+	ChildSource(ChildProcess &child, ChildWatch &watch, std::string &serial)
+		: child_(child), watch_(watch), serial_(serial) {}
+
+	bool Next() override
+	{
+		for (;;)
+		{
+			uint8_t tag = 0;
+			if (!child_.Read(&tag, 1))
+				return Stop("the SGB child exited early");
+			watch_.Touch();
+			if (tag == kChildFrame)
+			{
+				uint8_t flags = 0;
+				if (!child_.Read(&flags, 1) || !child_.Read(px_, sizeof px_))
+					return Stop("the SGB child exited mid-frame");
+				booting_ = (flags & kChildBooting) != 0;
+				return true;
+			}
+			if (tag == kChildSerial)
+			{
+				uint8_t b = 0;
+				if (!child_.Read(&b, 1)) return Stop("the SGB child exited early");
+				OnSerialByte(&serial_, b);
+				continue;
+			}
+			if (tag == kChildError)
+			{
+				uint8_t len[2] = {};
+				std::string msg;
+				if (child_.Read(len, 2))
+				{
+					msg.resize(len[0] | (len[1] << 8));
+					if (!msg.empty() && !child_.Read(&msg[0], msg.size())) msg.clear();
+				}
+				return Stop(msg.empty() ? "the SGB child failed" : msg);
+			}
+			return Stop("the SGB child sent an unknown record");
+		}
+	}
+	bool Booting() const override { return booting_; }
+	void Gray(uint8_t *out) const override
+	{
+		for (int i = 0; i < GB_W * GB_H; ++i)
+			out[i] = static_cast<uint8_t>((3 - (px_[i] & 3)) * 85);
+	}
+	void Rgb(std::vector<uint8_t> &out) const override
+	{
+		out.resize(GB_W * GB_H * 3);
+		for (int i = 0; i < GB_W * GB_H; ++i)
+			out[i * 3 + 0] = out[i * 3 + 1] = out[i * 3 + 2] =
+				static_cast<uint8_t>((3 - (px_[i] & 3)) * 85);
+	}
+
+private:
+	bool Stop(const std::string &why) { error = why; return false; }
+
+	ChildProcess &child_;
+	ChildWatch   &watch_;
+	std::string  &serial_;
+	uint8_t       px_[GB_W * GB_H] = {};
+	bool          booting_ = true;
+};
+
+// One test, start to finish, on one core (or one SGB child). Everything it
+// touches is its own, so several of these run in parallel.
 Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
-                  const std::vector<uint8_t> &boot_rom,
-                  bool dump_failures, const std::atomic<bool> &cancel,
-                  const std::atomic<bool> *pause,
-                  const std::function<void(int, int)> &tick, bool &aborted)
+                  const std::vector<uint8_t> &boot_rom, const RunOptions &opts,
+                  const std::atomic<bool> &cancel,
+                  const std::function<void(int, int)> &tick, ChildWatch &watch,
+                  bool &aborted)
 {
 	aborted = false;
 	Result r;
@@ -464,53 +832,115 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 		return r;
 	}
 
-	// Model setup must precede LoadROM — LoadROM cold-resets with it.
-	emu.SetForceModel(t.model == Model::CGB ? 2 : t.model == Model::SGB ? 3 : 1);
-	emu.SetRunMode(t.model == Model::SGB ? SGB::RunMode::SGB : SGB::RunMode::DMG);
-	emu.SetClockMultiplier(1.0f);
+	const bool sgb2 = t.model == Model::SGB2;
+	const std::string &bios = sgb2 ? opts.sgb2_bios : opts.sgb1_bios;
+	const bool via_child = IsSgbModel(t.model) && !opts.sgb_child.empty() && !bios.empty();
 
-	// Staged before LoadROM as well: its cold reset is what maps it.
-	if (!emu.LoadBootROM(boot_rom.empty() ? nullptr : boot_rom.data(), boot_rom.size()))
-	{
-		r.status = Status::Error;
-		r.detail = "core rejected the boot ROM";
-		return r;
-	}
-
-	if (!emu.LoadROM(rom.data(), rom.size(), nullptr))
-	{
-		r.status = Status::Error;
-		r.detail = "core rejected ROM " + t.rom;
-		return r;
-	}
-
-	// SGB1 pushes ~61.2 GB frames per second; everything else 59.73.
-	const double fps = (t.model == Model::SGB) ? 61.2 : 59.7275;
-	// Match the shootout's wall clock: runtime + startup_time (1s) + 5s, plus
-	// the boot ROM's own run when one is staged (DMG ~5.6s, CGB ~3.1s).
-	const double boot_secs = boot_rom.empty() ? 0.0 : (t.model == Model::CGB ? 3.5 : 6.0);
-	const int frames_total = static_cast<int>(std::ceil((t.runtime + 6.0 + boot_secs) * fps));
-
-	// Armed here, not earlier: it points at a local, and every path above
-	// returns without running a frame.
-	emu.SetSerialSink(&OnSerialByte, &serial);
 	struct SinkGuard
 	{
-		SGB::Emulator &e;
-		~SinkGuard() { e.SetSerialSink(nullptr, nullptr); }
-	} sink_guard{ emu };
+		SGB::Emulator *e = nullptr;
+		~SinkGuard() { if (e) e->SetSerialSink(nullptr, nullptr); }
+	} sink_guard;
+	ChildProcess child;
+	struct WatchGuard
+	{
+		ChildWatch &w;
+		~WatchGuard() { std::lock_guard<std::mutex> lk(w.mu); w.child = nullptr; }
+	} watch_guard{ watch };
+	std::unique_ptr<FrameSource> src;
+	// A BIOS run's budget starts when the BIOS hands the cart the GB.
+	int frames_total = 0, boot_cap = 0;
+	if (via_child)
+	{
+		frames_total = static_cast<int>(std::ceil((t.runtime + 6.0) * kSnesFps));
+		boot_cap     = static_cast<int>(kBiosBootSecs * kSnesFps);
+		const std::string &gb_boot = sgb2 ? opts.sgb2_boot : opts.sgb1_boot;
+		std::string err;
+		if (!child.Start({ opts.sgb_child, kSgbChildFlag, sgb2 ? "2" : "1",
+		                   RomPath(dir, t.rom), bios, gb_boot.empty() ? "-" : gb_boot,
+		                   opts.suppress_nrx ? "1" : "0",
+		                   std::to_string(frames_total + boot_cap) }, err))
+		{
+			r.status = Status::Error;
+			r.detail = err;
+			return r;
+		}
+		src.reset(new ChildSource(child, watch, serial));
+		std::lock_guard<std::mutex> lk(watch.mu);
+		watch.child   = &child;
+		watch.last    = std::chrono::steady_clock::now();
+		watch.stalled = false;
+	}
+	else
+	{
+		// Model setup must precede LoadROM — LoadROM cold-resets with it.
+		emu.SetForceModel(t.model == Model::CGB ? 2 : IsSgbModel(t.model) ? 3 : 1);
+		emu.SetRunMode(t.model == Model::SGB ? SGB::RunMode::SGB
+		             : sgb2 ? SGB::RunMode::SGB2 : SGB::RunMode::DMG);
+		emu.SetClockMultiplier(1.0f);
+
+		// Staged before LoadROM as well: its cold reset is what maps it.
+		if (!emu.LoadBootROM(boot_rom.empty() ? nullptr : boot_rom.data(), boot_rom.size()))
+		{
+			r.status = Status::Error;
+			r.detail = "core rejected the boot ROM";
+			return r;
+		}
+
+		if (!emu.LoadROM(rom.data(), rom.size(), nullptr))
+		{
+			r.status = Status::Error;
+			r.detail = "core rejected ROM " + t.rom;
+			return r;
+		}
+
+		// SGB1 pushes ~61.2 GB frames per second; everything else 59.73.
+		const double fps = (t.model == Model::SGB) ? 61.2 : 59.7275;
+		// Match the shootout's wall clock: runtime + startup_time (1s) + 5s, plus
+		// the boot ROM's own run when one is staged (DMG ~5.6s, CGB ~3.1s).
+		const double boot_secs = boot_rom.empty() ? 0.0 : (t.model == Model::CGB ? 3.5 : 6.0);
+		frames_total = static_cast<int>(std::ceil((t.runtime + 6.0 + boot_secs) * fps));
+
+		emu.SetSerialSink(&OnSerialByte, &serial);
+		sink_guard.e = &emu;
+		src.reset(new CoreSource(emu));
+	}
 
 	uint8_t frame[GB_W * GB_H];
 	r.status = pass_refs.empty() ? Status::Info : Status::Fail;
-	for (int fr = 0; fr < frames_total; ++fr)
+	int counted = 0, boot_frames = 0;
+	while (counted < frames_total)
 	{
-		emu.RunFrame();
-		r.frames = fr + 1;
+		if (!src->Next())
+		{
+			if (cancel.load())
+			{
+				aborted = true;
+				return r;
+			}
+			r.status = Status::Error;
+			std::lock_guard<std::mutex> lk(watch.mu);
+			r.detail = watch.stalled ? "the SGB child stopped sending frames" : src->error;
+			break;
+		}
+		++r.frames;
+		const bool booting = src->Booting();
+		if (via_child && booting)
+		{
+			if (++boot_frames > boot_cap)
+			{
+				r.status = Status::Error;
+				r.detail = "the SGB BIOS never handed the cart the Game Boy";
+				break;
+			}
+		}
+		else
+			++counted;
 
 		// The boot ROM's logo frames are nobody's reference.
-		if (!emu.BootROMMapped() && (!pass_refs.empty() || !fail_refs.empty()))
+		if (!booting && (!pass_refs.empty() || !fail_refs.empty()))
 		{
-			CaptureFrameGray(emu, frame);
+			src->Gray(frame);
 			bool decided = false;
 			for (const auto &ref : pass_refs)
 			{
@@ -537,15 +967,15 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 			if (decided) break;
 		}
 
-		if ((fr & 63) == 63)
+		if ((r.frames & 63) == 63)
 		{
 			if (cancel.load(std::memory_order_relaxed))
 			{
 				aborted = true;
 				return r;   // being cancelled; this one has no verdict
 			}
-			tick(fr + 1, frames_total);
-			while (pause && pause->load(std::memory_order_relaxed) &&
+			tick(counted, frames_total);
+			while (opts.pause && opts.pause->load(std::memory_order_relaxed) &&
 			       !cancel.load(std::memory_order_relaxed))
 				std::this_thread::sleep_for(std::chrono::milliseconds(20));
 		}
@@ -553,7 +983,7 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 
 	if (r.status == Status::Fail && r.detail.empty())
 	{
-		CaptureFrameGray(emu, frame);
+		src->Gray(frame);
 		const int off = ClosestDiff(frame, pass_refs);
 		r.detail = "timeout after " + std::to_string(r.frames) + " frames";
 		if (off >= 0)
@@ -561,12 +991,12 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 		if (!serial.empty())
 			r.detail += "; serial: \"" + OneLine(serial, 160) + "\"";
 	}
-	if (r.status == Status::Fail && dump_failures)
+	if (r.status == Status::Fail && opts.dump_failures)
 	{
-		CaptureFrameGray(emu, frame);
+		src->Gray(frame);
 		DumpGrayPpm(JoinPath(dir, "_failures/" + FlattenName(t.name) + ".ppm"), frame);
 	}
-	CaptureFrameRgb(emu, r.shot);
+	if (r.frames > 0) src->Rgb(r.shot);
 	return r;
 }
 
@@ -655,7 +1085,8 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 
 	// Every worker owns a core of its own; the scoped bind keeps the GB
 	// side's host hooks pointed at it instead of the singleton.
-	auto worker = [&]() {
+	std::vector<ChildWatch> watches(nthreads);
+	auto worker = [&](int w) {
 		SGB::Emulator emu;
 		SGB::ScopedActiveEmulator bind(emu);
 		emu.SetSuppressNrxGlitches(opts.suppress_nrx ? 1 : 0);
@@ -682,8 +1113,8 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 					tests[i].model == Model::DMG ? opts.dmg_boot :
 					tests[i].model == Model::CGB ? opts.cgb_boot : kNoBoot;
 				bool aborted = false;
-				Result r = RunOneTest(emu, dir, tests[i], boot, opts.dump_failures,
-				                      cancel, opts.pause, tick, aborted);
+				Result r = RunOneTest(emu, dir, tests[i], boot, opts, cancel, tick,
+				                      watches[w], aborted);
 				if (aborted) break;
 				std::lock_guard<std::mutex> lk(done_mu);
 				results[i] = std::move(r);
@@ -696,7 +1127,7 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 
 	std::vector<std::thread> pool;
 	pool.reserve(nthreads);
-	for (int i = 0; i < nthreads; ++i) pool.emplace_back(worker);
+	for (int i = 0; i < nthreads; ++i) pool.emplace_back(worker, i);
 
 	// Results are reported from THIS thread, so a UI caller's callbacks
 	// stay on the thread that owns its windows.
@@ -743,6 +1174,26 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 		                   static_cast<int>(tests.size()), tests[last_seen],
 		                   static_cast<int>(reported), static_cast<int>(tests.size())))
 			cancel.store(true);
+
+		// A child blocks its worker in a pipe read: cancel and stalls end it here.
+		{
+			const auto now = std::chrono::steady_clock::now();
+			const bool paused = opts.pause && opts.pause->load();
+			for (ChildWatch &w : watches)
+			{
+				std::lock_guard<std::mutex> lk(w.mu);
+				if (!w.child) continue;
+				if (paused)
+					w.last = now;   // a paused worker reads nothing
+				else if (cancel.load())
+					w.child->Kill();
+				else if (std::chrono::duration<double>(now - w.last).count() > kChildStallSecs)
+				{
+					w.stalled = true;
+					w.child->Kill();
+				}
+			}
+		}
 
 		if (live.load() == 0)
 		{

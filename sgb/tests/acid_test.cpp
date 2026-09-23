@@ -19,7 +19,7 @@
 //
 //   --suite NAME      only this suite (repeatable): blargg, mooneye, acid,
 //                     samesuite, mealybug, daid, ax6, ashiepaws, cpp
-//   --model DMG|CGB|SGB   only tests for this model (repeatable)
+//   --model DMG|CGB|SGB|SGB2   only tests for this model (repeatable)
 //   --filter SUBSTR   only tests whose name contains SUBSTR
 //   --list            print the selected tests and exit
 //   --suites          print the suite names with test counts and exit
@@ -30,6 +30,12 @@
 //   --save-baseline DIR   write the captured frames to DIR as a baseline
 //   --baseline DIR        diff the run against a baseline (ours or another
 //                         emulator's dump laid out like acid/)
+//
+//   --dmg-boot/--cgb-boot PATH   boot DMG / CGB tests through this boot ROM
+//   --sgb1-bios/--sgb2-bios PATH run SGB / SGB2 tests on this SNES BIOS, each
+//                     in an acid_sgb_child process (make acid_sgb_child)
+//   --sgb1-boot/--sgb2-boot PATH the GB-side boot ROM paired with that BIOS
+//   --sgb-child PATH  the child program (default: acid_sgb_child beside this one)
 //
 // Exit code: number of failed tests (capped at 200), 255 on setup error.
 
@@ -106,14 +112,19 @@ bool ReadWhole(const char *path, std::vector<uint8_t> &out)
 	return got == out.size();
 }
 
-// "BIOS-less", or which boot ROMs the DMG and CGB tests ran through.
-std::string BootDescription(const std::string &dmg, const std::string &cgb)
+// "BIOS-less", or which boot ROMs and SGB BIOSes the tests ran through.
+std::string BootDescription(const std::string &dmg, const std::string &cgb,
+                            const std::string &sgb1, const std::string &sgb2)
 {
-	if (dmg.empty() && cgb.empty()) return "BIOS-less";
 	std::string d;
-	if (!dmg.empty()) d += "DMG " + dmg;
-	if (!cgb.empty()) d += (d.empty() ? "" : ", ") + std::string("CGB ") + cgb;
-	return d;
+	auto add = [&](const char *what, const std::string &path) {
+		if (!path.empty()) d += (d.empty() ? "" : ", ") + std::string(what) + " " + path;
+	};
+	add("DMG", dmg);
+	add("CGB", cgb);
+	add("SGB", sgb1);
+	add("SGB2", sgb2);
+	return d.empty() ? "BIOS-less" : d;
 }
 
 } // anonymous
@@ -144,10 +155,11 @@ int main(int argc, char **argv)
 			const std::string m = argv[++i];
 			if      (m == "CGB" || m == "cgb") opts.filter.models |= AcidTests::ModelBit(AcidTests::Model::CGB);
 			else if (m == "SGB" || m == "sgb") opts.filter.models |= AcidTests::ModelBit(AcidTests::Model::SGB);
+			else if (m == "SGB2" || m == "sgb2") opts.filter.models |= AcidTests::ModelBit(AcidTests::Model::SGB2);
 			else if (m == "DMG" || m == "dmg") opts.filter.models |= AcidTests::ModelBit(AcidTests::Model::DMG);
 			else
 			{
-				fprintf(stderr, "unknown model '%s' (want DMG, CGB or SGB)\n", m.c_str());
+				fprintf(stderr, "unknown model '%s' (want DMG, CGB, SGB or SGB2)\n", m.c_str());
 				return 255;
 			}
 		}
@@ -184,6 +196,16 @@ int main(int argc, char **argv)
 			}
 			(cgb ? cgb_boot_path : dmg_boot_path) = path;
 		}
+		else if (!std::strcmp(arg, "--sgb1-bios") && has_next)
+			opts.sgb1_bios = argv[++i];
+		else if (!std::strcmp(arg, "--sgb2-bios") && has_next)
+			opts.sgb2_bios = argv[++i];
+		else if (!std::strcmp(arg, "--sgb1-boot") && has_next)
+			opts.sgb1_boot = argv[++i];
+		else if (!std::strcmp(arg, "--sgb2-boot") && has_next)
+			opts.sgb2_boot = argv[++i];
+		else if (!std::strcmp(arg, "--sgb-child") && has_next)
+			opts.sgb_child = argv[++i];
 		else if (arg[0] == '-')
 		{
 			fprintf(stderr, "unknown option '%s'\n", arg);
@@ -191,6 +213,15 @@ int main(int argc, char **argv)
 		}
 		else
 			opts.acid_dir = arg;
+	}
+
+	if (opts.sgb_child.empty() && (!opts.sgb1_bios.empty() || !opts.sgb2_bios.empty()))
+	{
+		const std::string self = argv[0];
+		const size_t slash = self.find_last_of("/\\");
+		opts.sgb_child = (slash == std::string::npos ? std::string("./")
+		                                              : self.substr(0, slash + 1)) +
+		                 "acid_sgb_child";
 	}
 
 	std::vector<AcidTests::Test> all;
@@ -255,7 +286,8 @@ int main(int argc, char **argv)
 	AcidTests::ReportInfo info;
 	info.env     = AcidTests::EnvOverrides();
 	info.filter  = opts.filter.Describe();
-	info.boot    = BootDescription(dmg_boot_path, cgb_boot_path);
+	info.boot    = BootDescription(dmg_boot_path, cgb_boot_path,
+	                               opts.sgb1_bios, opts.sgb2_bios);
 	info.suppress_nrx = opts.suppress_nrx;
 	info.source  = opts.acid_dir;
 	info.seconds = secs;

@@ -21,7 +21,11 @@
 
 namespace AcidTests {
 
-enum class Model : uint8_t { DMG, CGB, SGB };
+// SGB2 rows are not in the manifest: LoadManifest adds one per SGB test.
+enum class Model : uint8_t { DMG, CGB, SGB, SGB2 };
+constexpr int kModelCount = 4;
+
+inline bool IsSgbModel(Model m) { return m == Model::SGB || m == Model::SGB2; }
 
 enum class Status : uint8_t
 {
@@ -46,8 +50,19 @@ struct Test
 // Bit for a model in Filter::models.
 constexpr unsigned ModelBit(Model m) { return 1u << static_cast<unsigned>(m); }
 
-// "DMG" / "CGB" / "SGB".
+// "DMG" / "CGB" / "SGB" / "SGB2".
 const char *ModelName(Model m);
+
+// Name suffix of the SGB2 twin LoadManifest adds for each SGB test.
+constexpr const char *kSgb2Suffix = " (SGB2)";
+
+// First argument that turns an emulator binary into an SGB test child.
+constexpr const char *kSgbChildFlag = "-acidsgbchild";
+
+// Child stdout records, one tag byte each. Frame: flags (bit 0 = the BIOS
+// still holds the GB) + 160x144 shade indices. Error: u16 LE length + text.
+constexpr uint8_t kChildFrame = 'F', kChildSerial = 'S', kChildError = 'E';
+constexpr uint8_t kChildBooting = 0x01;
 
 // "PASS" / "FAIL" / "INFO" / "ERROR".
 const char *StatusName(Status s);
@@ -158,10 +173,14 @@ struct RunOptions
 	int         threads   = 0;
 	// Boot ROM images DMG and CGB tests start through - the ones the
 	// emulator stages from the BIOS Manager - so a run boots the way File ->
-	// Load Game does. Empty: BIOS-less, the post-boot state synthesised. SGB
-	// tests always start BIOS-less; the SNES side is not in this runner.
+	// Load Game does. Empty: BIOS-less, the post-boot state synthesised.
 	std::vector<uint8_t> dmg_boot;
 	std::vector<uint8_t> cgb_boot;
+	// SGB tests run in a child SNES process (acidsgb.h) on the BIOS Manager's
+	// SGB BIOS; an empty BIOS path or no child program runs them BIOS-less.
+	std::string sgb_child;       // program started with kSgbChildFlag + args
+	std::string sgb1_bios, sgb2_bios;
+	std::string sgb1_boot, sgb2_boot;   // GB-side boot ROMs, may be empty
 	// Hide the NRx2 zombie glitch, as the emulator's Sound setting does.
 	// The samesuite channel_*_nrx2 / volume tests fail with it on, on
 	// hardware-exact grounds: they measure the glitch.

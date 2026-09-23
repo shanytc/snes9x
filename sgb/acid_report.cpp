@@ -781,7 +781,7 @@ std::string RenderHtml(const std::vector<ReportRow> &rows, const ReportInfo &inf
 		o += "<option>" + Html(s.name) + "</option>";
 	o += "</select>\n";
 	o += "<select id=\"model\"><option value=\"\">All models</option>"
-	     "<option>DMG</option><option>CGB</option><option>SGB</option></select>\n";
+	     "<option>DMG</option><option>CGB</option><option>SGB</option><option>SGB2</option></select>\n";
 	o += "<select id=\"stat\"><option value=\"\">All results</option>"
 	     "<option value=\"pass\">Passed</option>"
 	     "<option value=\"fail\">Failed</option>"

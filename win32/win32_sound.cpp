@@ -8,6 +8,7 @@
 #include "../snes9x.h"
 #include "../apu/apu.h"
 #include "../sgb/sgb.h"
+#include "../acidsgb.h"
 #include "wsnes9x.h"
 #include "CXAudio2.h"
 #include "CWaveOut.h"
@@ -135,6 +136,8 @@ returns true if successful, false otherwise
 */
 bool8 S9xOpenSoundDevice ()
 {
+	if (S9xAcidSgbChild)
+		return TRUE;   // a silent test child opens no device
 	S9xSetSamplesAvailableCallback (NULL, NULL);
 
 	// Driver, device, rate and buffer size all unchanged: the device that is

@@ -62,6 +62,8 @@
 #include "../apu/apu.h"
 #include "../msu1.h"
 #include "../sgb/sgb.h"
+#include "../sgb/acid.h"
+#include "../acidsgb.h"
 #include "../sfcbox.h"
 #include "../nss.h"
 #include "../movie.h"
@@ -4934,6 +4936,24 @@ int WINAPI WinMain(
 				   LPSTR lpCmdLine,
 				   int nCmdShow)
 {
+	// An Acid Tests SGB child: no window, config or sound, and stdout is the
+	// parent's pipe, so this must precede the stdout.txt redirect below.
+	{
+		int wargc = 0;
+		LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+		if (wargv && wargc >= 2 && !strcmp(WideToUtf8(wargv[1]), AcidTests::kSgbChildFlag))
+		{
+			std::vector<std::string> args;
+			for (int i = 0; i < wargc; ++i)
+				args.push_back(std::string(WideToUtf8(wargv[i])));
+			LocalFree(wargv);
+			std::vector<char *> argv;
+			for (std::string &a : args) argv.push_back(&a[0]);
+			return S9xAcidSgbChildMain((int) argv.size(), argv.data());
+		}
+		if (wargv) LocalFree(wargv);
+	}
+
 	Settings.StopEmulation = TRUE;
 
 	SetCurrentDirectory(S9xGetDirectoryT(DEFAULT_DIR));

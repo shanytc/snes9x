@@ -14,6 +14,7 @@
 #include "../memmap.h"
 #include "../font.h"
 #include "../sgb/sgb.h"
+#include "../acidsgb.h"
 #include <shellapi.h>
 #include "wsnes9x.h"
 #include "win32_display.h"
@@ -367,6 +368,8 @@ bool8 S9xInitUpdate (void)
 // TODO: check if this can be removed
 bool8 S9xContinueUpdate(int Width, int Height)
 {
+	if (S9xAcidSgbChild)
+		return true;
 	// called every other frame during interlace
 
     Src.Width = Width;
@@ -392,6 +395,8 @@ bool8 S9xContinueUpdate(int Width, int Height)
 // do the actual rendering of a frame
 bool8 S9xDeinitUpdate (int Width, int Height)
 {
+	if (S9xAcidSgbChild)
+		return true;   // no window to draw into
 	if (PF94.active && S9xEventTimerDisplay() == 2)
 	{
 		static int lastShownSecs = -2;

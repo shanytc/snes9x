@@ -513,27 +513,23 @@ const std::vector<uint8_t> *ShotOf(AcidDlgState *st, int test)
 
 void UpdateShotCaption(AcidDlgState *st)
 {
-	char buf[512];
-	if (st->shown < 0 || st->shown >= (int)st->tests.size())
-		buf[0] = 0;
-	else
+	// A scrolling read-only edit: every baseline's line fits, however many.
+	std::string cap;
+	if (st->shown >= 0 && st->shown < (int)st->tests.size())
 	{
 		const int s = st->status[st->shown];
-		int n = snprintf(buf, sizeof buf, "%s\r\n%s",
-		                 st->tests[st->shown].name.c_str(),
-		                 s == kRunning ? "running..." :
-		                 s == kPending ? "not run yet" : kStatusNames[s]);
+		cap = st->tests[st->shown].name + "\r\n" +
+		      (s == kRunning ? "running..." :
+		       s == kPending ? "not run yet" : kStatusNames[s]);
 		// Every baseline's verdict, whether or not it has a frame to show.
 		for (size_t b = 0; b < st->baselines.size(); ++b)
 		{
-			if (n <= 0 || n >= (int)sizeof buf) break;
 			char verdict[64];
 			BaselineText(st, st->shown, b, verdict, sizeof verdict);
-			n += snprintf(buf + n, sizeof buf - n, "\r\n%s: %s",
-			              st->baselines[b].name.c_str(), verdict);
+			cap += "\r\n" + st->baselines[b].name + ": " + verdict;
 		}
 	}
-	SetCtrlText(st->hShotCap, buf);
+	SetCtrlText(st->hShotCap, cap.c_str());
 	UpdateShotNav(st);
 }
 

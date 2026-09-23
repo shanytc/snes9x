@@ -84,6 +84,14 @@ struct Memory
 	uint16_t hdma_src = 0, hdma_dst = 0, hdma_len = 0;
 	bool     hdma_active = false;
 	bool     hdma_hblank_latch = false;
+	// CPU T-cycles a VRAM DMA still holds the CPU for: 2 per byte plus its
+	// setup, doubled in double speed (SameBoy GB_hdma_run). Cpu::Step burns it.
+	int32_t  dma_stall = 0;
+	// A register write that lands some T-cycles into the NEXT machine cycle
+	// (SameBoy's GB_CONFLICT_WRITE_CPU shape); MemTick applies it on the way.
+	uint16_t late_addr  = 0;
+	uint8_t  late_value = 0;
+	int8_t   late_dots  = -1;   // -1: none pending
 
 	// Double-speed odd-cycle carry for MemTick's CPU→PPU/APU clock halving.
 	// Transient (never serialized).

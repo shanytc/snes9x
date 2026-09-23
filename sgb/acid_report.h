@@ -48,6 +48,8 @@ struct ReportInfo
 	std::string generated;      // timestamp; taken from the clock when empty
 	std::string env;            // EnvOverrides(), warned about when set
 	std::string filter = "all tests";       // Filter::Describe()
+	std::string boot;           // how the cores started: boot ROMs used, or BIOS-less
+	bool        suppress_nrx = false;   // NRx2 zombie-glitch suppression was on
 	std::string source;         // acid directory, for the header
 	double      seconds   = 0.0;
 	int         threads   = 1;

@@ -283,6 +283,13 @@ struct Emulator::Impl
 		                           : host_nrx_glitch != 0;
 	}
 
+	// And for Settings.Mute, which the audio drift controller keys on.
+	int         host_mute = -1;
+	bool Muted() const
+	{
+		return host_mute < 0 ? Settings.Mute != FALSE : host_mute != 0;
+	}
+
 	// Completed CGB frame for the Super Game Boy Color pane. Under the SGB
 	// BIOS the GB is slaved per-opcode rather than frame-locked, so reading
 	// color_fb live hands the compositor a half-drawn frame; latch it at the
@@ -351,10 +358,7 @@ struct Emulator::Impl
 	// CGB hardware running a DMG cart: BGP/OBP still select from the boot
 	// ROM's compatibility palettes. Mirrored into Ppu::dmg_compat.
 	bool        dmg_compat_cgb = false;
-	// cgb_compat marks a forced-CGB run of a non-CGB cart (real CGB's
-	// "DMG compatibility mode": A=$11 handoff, DMG rendering).
 	uint8_t     force_model = 0;
-	bool        cgb_compat  = false;
 	bool        sgb_authentic = false;
 
 	// Staged boot ROM, copied into mem.boot_rom on Reset (MemReset zeroes it).
@@ -698,14 +702,14 @@ void Emulator::Reset()
 	impl_->cpu.Reset();
 	MemReset(impl_->mem, impl_->CgbActive());
 	PpuReset(impl_->ppu);
-	// A DMG LCD-enable write takes hold three dots into its machine cycle,
-	// so a BIOS-less start has to swallow that much to land on the same dot
-	// grid; the CGB write is cycle-aligned and needs none. Resolved here,
-	// where the model is settled - leaving it to the first dot made it
-	// depend on when that dot happened to run.
-	if (impl_->mem.cgb_hw) impl_->ppu.boot_skew = 0;
+	// An LCD-enable write takes hold a dot into its machine cycle on both
+	// models - the boot ROM's included - so a BIOS-less start swallows that
+	// dot (PpuReset's boot_skew) to land on the grid a booted cart sees.
 	ApuReset(impl_->apu, impl_->CgbActive(), !impl_->boot_rom_loaded);
 	TimerReset(impl_->timer);
+	// A boot ROM's first fetch trails the divider by one M-cycle (SameBoy
+	// resets DIV to 8; mooneye boot_div-dmgABCmgb measures it at handoff).
+	if (impl_->boot_rom_loaded) impl_->timer.div_counter = 4;
 	JoypadReset(impl_->joypad);
 	PacketReset(impl_->sgb_pkt);
 	SgbReset(impl_->sgb_state);
@@ -781,7 +785,7 @@ void Emulator::Reset()
 	impl_->fb.height = GB_SCREEN_HEIGHT;
 	impl_->fb.pitch  = GB_SCREEN_WIDTH;
 
-	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
+	impl_->ppu.cgb = impl_->CgbActive();
 	// The boot ROM runs in full CGB mode; its KEY0 write enters compat.
 	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
 		!impl_->boot_rom_loaded;
@@ -822,7 +826,7 @@ void Emulator::Reset()
 	{
 		cs.r.af = 0x1180;
 		cs.r.bc = 0x0000;
-		const bool compat = impl_->cgb_compat || impl_->dmg_compat_cgb;
+		const bool compat = impl_->dmg_compat_cgb;
 		cs.r.de = compat ? 0x0008 : 0xFF56;
 		cs.r.hl = compat ? 0x007C : 0x000D;
 	}
@@ -832,8 +836,7 @@ void Emulator::Reset()
 	if (!impl_->boot_rom_loaded)
 	{
 		if (impl_->cgb_mode)
-			impl_->timer.div_counter = (impl_->cgb_compat || impl_->dmg_compat_cgb)
-			                         ? 0x2674 : 0x1E74;
+			impl_->timer.div_counter = impl_->dmg_compat_cgb ? 0x2674 : 0x1E74;
 		else
 			impl_->timer.div_counter = 0xABC8;
 	}
@@ -962,6 +965,11 @@ bool Emulator::LoadBootROM(const uint8_t *data, size_t size)
 
 	impl_->boot_rom_loaded = true;
 	return true;
+}
+
+bool Emulator::BootROMMapped() const
+{
+	return impl_->mem.boot_rom_enabled;
 }
 
 void Emulator::PrimeBIOSHandshake()
@@ -1106,6 +1114,9 @@ const GBAutoBlendEntry kGBAutoBlend[] = {
 
 void Emulator::ApplyAutoBlend()
 {
+	// The blend is the live session's setting: a private core (an Acid Tests
+	// worker, a split-screen seat) must not rewrite it under the player.
+	if (this != &Instance()) return;
 	if (!Settings.GBFrameBlendAuto || !impl_->has_rom) return;
 	const char *title = impl_->cart.header.title;
 	for (const GBAutoBlendEntry &e : kGBAutoBlend)
@@ -1130,10 +1141,6 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	impl_->cgb_mode = (impl_->cgb_override >= 0)
 	                ? (impl_->cgb_override != 0)
 	                : cart_is_cgb;
-	impl_->cgb_compat = false;
-	// A real Color runs a cart with no CGB flag in DMG-compatibility mode:
-	// the boot ROM's palettes, still indexed through the cart's BGP/OBP.
-	impl_->dmg_compat_cgb = impl_->cgb_mode && !cart_is_cgb;
 	impl_->sgb_authentic = false;
 	if (impl_->force_model == 1)
 	{
@@ -1141,14 +1148,16 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	}
 	else if (impl_->force_model == 2)
 	{
-		impl_->cgb_compat = !impl_->cgb_mode;
-		impl_->cgb_mode   = true;
+		impl_->cgb_mode = true;
 	}
 	else if (impl_->force_model == 3)
 	{
 		impl_->cgb_mode      = false;
 		impl_->sgb_authentic = true;
 	}
+	// A real Color runs a cart with no CGB flag in DMG-compatibility mode:
+	// the boot ROM's palettes, still indexed through the cart's BGP/OBP.
+	impl_->dmg_compat_cgb = impl_->cgb_mode && !cart_is_cgb;
 	ApplyAutoBlend();   // pick blend from the per-title table when Auto is on
 	ColdReset();   // new cart → start fresh, drop any stale handshake cache
 	return true;
@@ -1395,6 +1404,11 @@ void Emulator::SetHostBiosMode(int mode)
 void Emulator::SetSuppressNrxGlitches(int mode)
 {
 	impl_->host_nrx_glitch = (mode < 0) ? -1 : (mode ? 1 : 0);
+}
+
+void Emulator::SetHostMute(int mode)
+{
+	impl_->host_mute = (mode < 0) ? -1 : (mode ? 1 : 0);
 }
 
 bool Emulator::IsCgbRender() const
@@ -1765,7 +1779,7 @@ void Emulator::RunFrame()
 	// While muted the host discards the ring instead of draining it at the
 	// playback rate, so the fill level carries no rate signal — skip the
 	// controller update rather than winding up the integrator.
-	if (Settings.Mute)
+	if (impl_->Muted())
 		return;
 	const uint32_t head = impl_->apu.sample_head;
 	const uint32_t tail = impl_->apu.sample_tail;
@@ -1873,7 +1887,7 @@ void Emulator::RunCycles(int32_t tcycles)
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
 	// garbage. Gate the color path off whenever the BIOS is driving.
-	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
+	impl_->ppu.cgb = impl_->CgbActive();
 	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
 		(!impl_->mem.boot_rom_enabled || (impl_->mem.key0 & 0x04));
 	impl_->ppu.hold_present_on_enable = !impl_->BiosMode() &&
@@ -3569,7 +3583,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 			if (impl_->ppu.bg_pal[i] != 0xFF) { impl_->ppu.cgb_pal_written = true; break; }
 	}
 
-	impl_->ppu.cgb = impl_->CgbActive() && !impl_->cgb_compat;
+	impl_->ppu.cgb = impl_->CgbActive();
 	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
 		(!impl_->mem.boot_rom_enabled || (impl_->mem.key0 & 0x04));
 	impl_->ppu.hold_present_on_enable = !impl_->BiosMode() &&

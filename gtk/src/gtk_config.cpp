@@ -243,7 +243,7 @@ int Snes9xConfig::load_defaults()
     Settings.InitialInfoStringTimeout   =  120;
     Settings.SGB_BIOSPreference = 2;
     Settings.GB_BIOSEnabled = TRUE;
-    Settings.GBSuppressNRxGlitches = TRUE;
+    Settings.GBSuppressNRxGlitches = FALSE;
     Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
     
 #ifdef ALLOW_CPU_OVERCLOCK

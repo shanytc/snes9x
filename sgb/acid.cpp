@@ -424,6 +424,7 @@ namespace {
 // its own emulator instance or a local, so several of these run in
 // parallel without interfering.
 Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
+                  const std::vector<uint8_t> &boot_rom,
                   bool dump_failures, const std::atomic<bool> &cancel,
                   const std::atomic<bool> *pause,
                   const std::function<void(int, int)> &tick, bool &aborted)
@@ -468,6 +469,14 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 	emu.SetRunMode(t.model == Model::SGB ? SGB::RunMode::SGB : SGB::RunMode::DMG);
 	emu.SetClockMultiplier(1.0f);
 
+	// Staged before LoadROM as well: its cold reset is what maps it.
+	if (!emu.LoadBootROM(boot_rom.empty() ? nullptr : boot_rom.data(), boot_rom.size()))
+	{
+		r.status = Status::Error;
+		r.detail = "core rejected the boot ROM";
+		return r;
+	}
+
 	if (!emu.LoadROM(rom.data(), rom.size(), nullptr))
 	{
 		r.status = Status::Error;
@@ -477,8 +486,10 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 
 	// SGB1 pushes ~61.2 GB frames per second; everything else 59.73.
 	const double fps = (t.model == Model::SGB) ? 61.2 : 59.7275;
-	// Match the shootout's wall clock: runtime + startup_time (1s) + 5s.
-	const int frames_total = static_cast<int>(std::ceil((t.runtime + 6.0) * fps));
+	// Match the shootout's wall clock: runtime + startup_time (1s) + 5s, plus
+	// the boot ROM's own run when one is staged (DMG ~5.6s, CGB ~3.1s).
+	const double boot_secs = boot_rom.empty() ? 0.0 : (t.model == Model::CGB ? 3.5 : 6.0);
+	const int frames_total = static_cast<int>(std::ceil((t.runtime + 6.0 + boot_secs) * fps));
 
 	// Armed here, not earlier: it points at a local, and every path above
 	// returns without running a frame.
@@ -496,7 +507,8 @@ Result RunOneTest(SGB::Emulator &emu, const std::string &dir, const Test &t,
 		emu.RunFrame();
 		r.frames = fr + 1;
 
-		if (!pass_refs.empty() || !fail_refs.empty())
+		// The boot ROM's logo frames are nobody's reference.
+		if (!emu.BootROMMapped() && (!pass_refs.empty() || !fail_refs.empty()))
 		{
 			CaptureFrameGray(emu, frame);
 			bool decided = false;
@@ -646,7 +658,10 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 	auto worker = [&]() {
 		SGB::Emulator emu;
 		SGB::ScopedActiveEmulator bind(emu);
-		emu.SetSuppressNrxGlitches(0);   // the shootout scores exact hardware behaviour
+		emu.SetSuppressNrxGlitches(opts.suppress_nrx ? 1 : 0);
+		// Pinned, not read live: the emulator keeps running beside the suite.
+		emu.SetHostBiosMode(0);
+		emu.SetHostMute(1);
 		if (emu.Init())
 		{
 			for (;;)
@@ -662,8 +677,12 @@ Summary RunTests(const std::vector<Test> &tests, const RunOptions &opts,
 					std::lock_guard<std::mutex> lk(done_mu);
 					events.push_back({ i, EvRunning, done, total });
 				};
+				static const std::vector<uint8_t> kNoBoot;
+				const std::vector<uint8_t> &boot =
+					tests[i].model == Model::DMG ? opts.dmg_boot :
+					tests[i].model == Model::CGB ? opts.cgb_boot : kNoBoot;
 				bool aborted = false;
-				Result r = RunOneTest(emu, dir, tests[i], opts.dump_failures,
+				Result r = RunOneTest(emu, dir, tests[i], boot, opts.dump_failures,
 				                      cancel, opts.pause, tick, aborted);
 				if (aborted) break;
 				std::lock_guard<std::mutex> lk(done_mu);

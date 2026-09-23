@@ -156,6 +156,16 @@ struct RunOptions
 	// Cores to run tests on at once. 0 picks one per hardware thread.
 	// Each gets its own emulator instance; the ROMs are independent.
 	int         threads   = 0;
+	// Boot ROM images DMG and CGB tests start through - the ones the
+	// emulator stages from the BIOS Manager - so a run boots the way File ->
+	// Load Game does. Empty: BIOS-less, the post-boot state synthesised. SGB
+	// tests always start BIOS-less; the SNES side is not in this runner.
+	std::vector<uint8_t> dmg_boot;
+	std::vector<uint8_t> cgb_boot;
+	// Hide the NRx2 zombie glitch, as the emulator's Sound setting does.
+	// The samesuite channel_*_nrx2 / volume tests fail with it on, on
+	// hardware-exact grounds: they measure the glitch.
+	bool        suppress_nrx = false;
 };
 
 struct Summary

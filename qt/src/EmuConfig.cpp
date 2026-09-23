@@ -341,7 +341,7 @@ bool EmuConfig::setDefaults(int section)
         input_rate = 32040;
         dynamic_rate_control = false;
         dynamic_rate_limit = 0.005;
-        suppress_nrx_glitches = true;
+        suppress_nrx_glitches = false;
         mute_audio = false;
         mute_audio_during_alternate_speed = false;
 

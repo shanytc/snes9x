@@ -50,10 +50,31 @@ as INFO, matching the shootout.
 
 - GUI: Tests → Acid Tests. The filter bar narrows the list by name,
   suite, model and result; Run covers whatever is shown, and Export writes
-  that set as `.txt`, `.json` or `.html`.
+  that set as `.txt`, `.json` or `.html`. The dialog is modeless and runs
+  the suite off the UI thread, so the emulator keeps playing beside it.
 - Headless: `cd sgb/tests && make acid_test && ./acid_test [acid-dir]
   [options]`. `--dump` writes failing frames as PPM into `_failures/`;
   `results.txt` gets a full per-test report.
+
+## Boot ROMs
+
+A run boots each cart the way File → Load Game does. The dialog's **Boot
+ROMs** box (on by default whenever the BIOS Manager holds a Game Boy or
+Game Boy Color boot ROM) starts DMG tests through `dmg_boot.bin` and CGB
+tests through `cgb_boot.bin`; headless, pass `--dmg-boot <file>` and
+`--cgb-boot <file>`. With the box off, or no file given, the core starts
+BIOS-less with the post-boot state synthesised, which is the shootout's own
+setup. SGB tests always start BIOS-less: the SNES side of the Super Game
+Boy is not in this runner. The report header's `boot:` line says which.
+
+## NRx2 glitch suppression
+
+The run follows the emulator's Sound setting that hides the NRx2 "zombie"
+volume glitch (off by default, i.e. exact hardware). The dialog shows its
+state next to the Boot ROMs box; headless, pass `--suppress-nrx` to turn it
+on. With it on, five samesuite tests fail as they do in the emulator, since
+they measure the glitch: `channel_1_nrx2_glitch`, `channel_1_nrx2_speed_change`,
+`channel_1_volume`, `channel_2_nrx2_glitch` and `channel_2_nrx2_speed_change`.
 
 ## Filtering and reports
 

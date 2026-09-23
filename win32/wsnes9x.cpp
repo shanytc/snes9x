@@ -3066,20 +3066,10 @@ LRESULT CALLBACK WinProc(
 			break;
 		case ID_TESTS_ACIDTESTS:
 			{
-				RestoreGUIDisplay();
-				CloseSoundDevice();
-				// The suite runs on its own emulator instances, so the
-				// loaded session survives; these two only steer how the
-				// test cores boot and whether they bother mixing audio.
-				const bool8 saved_bios_active = Settings.SGB_BIOSModeActive;
-				const bool8 saved_mute        = Settings.Mute;
-				Settings.SGB_BIOSModeActive = FALSE;
-				Settings.Mute = TRUE;
+				// Modeless: the suite runs on its own cores (BIOS mode and
+				// mute pinned per core), so the session keeps playing.
+				if (!WinAcidTestsDialog()) RestoreGUIDisplay();
 				WinShowAcidTestsDialog();
-				Settings.SGB_BIOSModeActive = saved_bios_active;
-				Settings.Mute = saved_mute;
-				ReInitSound();
-				RestoreSNESDisplay();
 			}
 			break;
 		case ID_SOUND_VOICEKUN_ATTACH:
@@ -4433,6 +4423,8 @@ void S9xOnSNESPadRead()
 					continue;
 				if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
 					continue;
+				if (WinAcidTestsDialog() && IsDialogMessage (WinAcidTestsDialog(), &msg))
+					continue;
 
 				if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))
 				{
@@ -4976,6 +4968,8 @@ int WINAPI WinMain(
             if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
                 continue;
             if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
+                continue;
+            if (WinAcidTestsDialog() && IsDialogMessage (WinAcidTestsDialog(), &msg))
                 continue;
 
             if (!TranslateAccelerator (GUI.hWnd, GUI.Accelerators, &msg))

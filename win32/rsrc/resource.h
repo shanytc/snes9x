@@ -772,6 +772,8 @@
 #define IDC_ACID_SHOTNEXT               3386
 #define IDC_ACID_RESCAN                 3387
 #define IDC_ACID_DIAG                   3388
+#define IDC_ACID_BOOTROMS               3391
+#define IDC_ACID_NRX                    3392
 #define IDD_ACID_DIAG                   190
 #define IDC_ACID_DIAG_LIST              3389
 #define IDC_ACID_DIAG_HEAD              3390

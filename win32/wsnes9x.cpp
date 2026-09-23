@@ -3101,11 +3101,6 @@ LRESULT CALLBACK WinProc(
 			break;
 		}
 
-		case ID_NSS_WATCHDOG:
-			Settings.NSSJoypadWatchdog = !Settings.NSSJoypadWatchdog;
-			CheckMenuStates();
-			break;
-
 		case ID_NSS_EJECT0 + 0:
 		case ID_NSS_EJECT0 + 1:
 		case ID_NSS_EJECT0 + 2:
@@ -5681,8 +5676,6 @@ static void CheckMenuStates ()
 			mii.fState = (Settings.NSSDipSwitches & (1 << sw)) ? MFS_CHECKED : MFS_UNCHECKED;
 			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &mii);
 		}
-		mii.fState = Settings.NSSJoypadWatchdog ? MFS_CHECKED : MFS_UNCHECKED;
-		SetMenuItemInfo(GUI.hMenu, ID_NSS_WATCHDOG, FALSE, &mii);
 
 		// Each socket says what is in it, and an empty one says so rather
 		// than looking like a dead button.

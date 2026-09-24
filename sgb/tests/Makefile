@@ -47,7 +47,7 @@ CORE_NAMES  := acidsgb biosmanager bml bsx c4 c4emu cartprot cheats cheats2 clip
                conffile controls cpu cpuexec cpuops crosshairs dma dsp dsp1 dsp2 \
                dsp3 dsp4 fscompat fxemu fxinst gfx globals hd64180 loadzip memmap \
                movie msu1 nss obc1 ppu sa1 sa1cpu screenshot sdd1 sdd1emu seta \
-               seta010 seta011 seta018 sfcbox sha256 snapshot snes9x spc7110 srtc \
+               seta010 seta011 seta018 sfcbox sha256 snapshot snes9x spc7110 srtc superdisc \
                statemanager stream tile tileimpl-h2x1 tileimpl-n1x1 tileimpl-n2x1 \
                voicekun widescreen z80
 CHILD_CXX   := $(wildcard $(addprefix $(ROOT)/,$(addsuffix .cpp,$(CORE_NAMES)))) \

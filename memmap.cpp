@@ -44,7 +44,11 @@
 #include "snapshot.h"
 #include "sfcbox.h"
 #include "nss.h"
+#include "superdisc.h"
 #include "voicekun.h"
+
+// The Super Disc BIOS behind a disc image File -> Load Game booted, "" otherwise.
+static std::string SuperDiscBIOSPath;
 
 #ifndef SET_UI_COLOR
 #define SET_UI_COLOR(r, g, b) ;
@@ -1639,7 +1643,7 @@ bool8 S9xBiosChangedSinceLoad (void)
 {
     // Only a cart that took one of the files has anything to pick up.
     const bool takes_bios = Settings.GBRomPath[0] || Settings.BS ||
-                            Multi.cartType || SFCBox.Active;
+                            Multi.cartType || SFCBox.Active || !SuperDiscBIOSPath.empty();
     return takes_bios && s_bios_paths_at_load != S9xBiosPathsFingerprint();
 }
 
@@ -1679,6 +1683,10 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
 
     Settings.NSS = FALSE;
     S9xNSSDeactivate();
+
+    Settings.SuperDisc = FALSE;
+    S9xSuperDiscDeactivate();
+    SuperDiscBIOSPath.clear();
 
     // LoadROMInt only ever needs one retry (the interleave-detection
     // flip-flop); bound the loop so a deterministic failure — e.g. an
@@ -2237,6 +2245,14 @@ bool8 CMemory::LoadROM (const char *filename)
     Settings.NSS = FALSE;
     S9xNSSDeactivate();
 
+    Settings.SuperDisc = FALSE;
+    S9xSuperDiscDeactivate();
+    SuperDiscBIOSPath.clear();
+
+    // A Super Disc CD image boots through the BIOS cart in the BIOS Manager.
+    if (S9xSuperDiscIsDiscImage(filename))
+        return (LoadSuperDiscImage(filename));
+
     S9xResetSaveTimer(FALSE); // reset oops timer here so that .oops file has rom name of previous rom
 
     int32 totalFileSize;
@@ -2491,6 +2507,15 @@ bool8 CMemory::LoadROMInt (int32 ROMfillSize)
 			return (LoadSFCBox(ROMfillSize));
 	}
 
+	// The Super Disc BIOS's header block is FFh-filled, so scoring cannot
+	// place it: it is a plain 128K LoROM image.
+	if (ROMfillSize == SDISC_BIOS_SIZE + 0x200 && S9xSuperDiscIsBIOS(ROM + 0x200, SDISC_BIOS_SIZE))
+	{
+		memmove(ROM, ROM + 0x200, SDISC_BIOS_SIZE);
+		ROMfillSize = SDISC_BIOS_SIZE;
+	}
+	const bool8	superdisc = S9xSuperDiscIsBIOS(ROM, (uint32) ROMfillSize);
+
 	int	hi_score, lo_score;
 	int score_headered;
 	int score_nonheadered;
@@ -2506,7 +2531,7 @@ bool8 CMemory::LoadROMInt (int32 ROMfillSize)
 
 	bool headered_score_highest = score_headered > score_nonheadered;
 
-	if (HeaderCount == 0 && !Settings.ForceNoHeader && headered_score_highest)
+	if (HeaderCount == 0 && !Settings.ForceNoHeader && headered_score_highest && !superdisc)
 	{
 		memmove(ROM, ROM + 512, ROMfillSize - 512);
 		ROMfillSize -= 512;
@@ -2620,6 +2645,14 @@ bool8 CMemory::LoadROMInt (int32 ROMfillSize)
 			interleaved = FALSE;
 			tales = FALSE;
 		}
+	}
+
+	if (superdisc)
+	{
+		LoROM = TRUE;
+		HiROM = FALSE;
+		interleaved = FALSE;
+		tales = FALSE;
 	}
 
 	if (!Settings.ForceNotInterleaved && interleaved)
@@ -2760,6 +2793,47 @@ int CMemory::LoadNSSCart (const char *filename, int32 *size)
 	printf("NSS: %u KB program + instruction ROM%s.\n", (unsigned) (prg >> 10),
 	       NSS.Slot[0].PROMPresent ? " + key chip" : " (no key chip)");
 	return (1);
+}
+
+static bool AcceptSuperDiscBIOS (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	if (size != full_size)
+		return (false);
+	if (size == SDISC_BIOS_SIZE + 0x200)
+		return S9xSuperDiscIsBIOS(data + 0x200, SDISC_BIOS_SIZE) != FALSE;
+	return S9xSuperDiscIsBIOS(data, size) != FALSE;
+}
+
+// Super Disc CD images. The disc goes in the drive; what runs is the BIOS
+// cart from the BIOS Manager, which reads the disc's boot sector itself.
+bool8 CMemory::LoadSuperDiscImage (const char *disc_path)
+{
+	const std::string	bios_path = S9xResolveBiosPath(S9X_BIOS_SUPERDISC);
+	std::vector<uint8>	bios;
+
+	if (bios_path.empty() ||
+		!S9xReadBiosImage(bios_path.c_str(), bios, SDISC_BIOS_SIZE + 0x200, AcceptSuperDiscBIOS, NULL))
+	{
+		S9xMessage(S9X_ERROR, S9X_ROM_INFO,
+		           "Super Disc BIOS missing - assign it in File -> BIOS Manager.");
+		return (FALSE);
+	}
+	if (bios.size() == SDISC_BIOS_SIZE + 0x200)
+		bios.erase(bios.begin(), bios.begin() + 0x200);
+
+	if (!LoadROMMem(bios.data(), (uint32) bios.size(), disc_path) || !Settings.SuperDisc)
+		return (FALSE);
+
+	if (!S9xSuperDiscInsertDisc(disc_path))
+	{
+		S9xMessage(S9X_ERROR, S9X_ROM_INFO, "Unreadable CD image.");
+		return (FALSE);
+	}
+
+	SuperDiscBIOSPath = bios_path;
+	printf("Super Disc: %s\n", disc_path);
+	return (TRUE);
 }
 
 int CMemory::LoadBIOSPairedCart (const char *filename, int32 size)
@@ -3312,10 +3386,23 @@ void CMemory::ClearSRAM (bool8 onlyNonSavedSRAM)
 	memset(SRAM, SNESGameFixes.SRAMInitialValue, 0x80000);
 }
 
+// Super Disc: the battery sits in the BIOS cart, so a disc booted through
+// the BIOS Manager shares the .srm of the BIOS image itself.
+static const char *SuperDiscSRAMName (const char *filename, std::string &buf)
+{
+	if (!Settings.SuperDisc || SuperDiscBIOSPath.empty())
+		return (filename);
+	buf = S9xGetFilename(SuperDiscBIOSPath, ".srm", SRAM_DIR);
+	return (buf.c_str());
+}
+
 bool8 CMemory::LoadSRAM (const char *filename)
 {
 	FILE	*file;
 	int		size, len;
+	std::string	sd_srm;
+
+	filename = SuperDiscSRAMName(filename, sd_srm);
 
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
 	{
@@ -3395,6 +3482,9 @@ bool8 CMemory::LoadSRAM (const char *filename)
 
 bool8 CMemory::SaveSRAM (const char *filename)
 {
+	std::string	sd_srm;
+	filename = SuperDiscSRAMName(filename, sd_srm);
+
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
 	{
 		std::string sav(filename);
@@ -3573,6 +3663,8 @@ void CMemory::InitROM (void)
 	// path bypasses InitROM entirely, so this never undoes its own load).
 	Settings.SFCBox = FALSE;
 	S9xSFCBoxDeactivate();
+
+	Settings.SuperDisc = S9xSuperDiscIsBIOS(ROM, CalculatedSize);
 
 	S9xInitBSX(); // Set BS header before parsing
 
@@ -3768,6 +3860,15 @@ void CMemory::InitROM (void)
 	// MSU1
 	Settings.MSU1 = S9xMSU1ROMExists();
 
+	// Super Disc: its header is FFh-filled, so nothing above applies.
+	if (Settings.SuperDisc)
+	{
+		strcpy(ROMName, "SUPER DISC BIOS");
+		SRAMSize = 3;					// 8K battery RAM at 90h:8000h
+		Settings.CartProtection = FALSE;
+		Settings.MSU1 = FALSE;
+	}
+
 	//// Map memory and calculate checksum
 
 	Map_Initialize();
@@ -3799,7 +3900,9 @@ void CMemory::InitROM (void)
 	}
 	else
 	{
-		if (Settings.BS)
+		if (Settings.SuperDisc)
+			Map_SuperDiscLoROMMap();
+		else if (Settings.BS)
 			/* Do nothing */;
 		else if (Settings.SETA && Settings.SETA != ST_018)
 			Map_SetaDSPLoROMMap();
@@ -3854,6 +3957,11 @@ void CMemory::InitROM (void)
 		else
 			Map_LoROMMap();
     }
+
+	if (Settings.SuperDisc)
+		S9xSuperDiscActivate();
+	else
+		S9xSuperDiscDeactivate();
 
 	Checksum_Calculate();
 
@@ -4331,6 +4439,27 @@ void CMemory::Map_SGBLoROMMap (void)
 
 	map_index(0x00, 0x3f, 0x6000, 0x7fff, MAP_SGB_ICD2, MAP_TYPE_I_O);
 	map_index(0x80, 0xbf, 0x6000, 0x7fff, MAP_SGB_ICD2, MAP_TYPE_I_O);
+
+	map_WRAM();
+	map_WriteProtectROM();
+}
+
+// Super Disc BIOS cart: 128K LoROM, 256K of DRAM at 80h-87h:8000h-FFFFh
+// and 8K of battery SRAM at 90h:8000h-9FFFh behind the $21E0/$21E5 lock.
+void CMemory::Map_SuperDiscLoROMMap (void)
+{
+	printf("Map_SuperDiscLoROMMap\n");
+	map_System();
+
+	map_lorom(0x00, 0x3f, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0x40, 0x7f, 0x0000, 0xffff, CalculatedSize);
+	map_lorom(0x80, 0xbf, 0x8000, 0xffff, CalculatedSize);
+	map_lorom(0xc0, 0xff, 0x0000, 0xffff, CalculatedSize);
+
+	uint8	*dram = S9xSuperDiscDRAM();
+	for (uint32 bank = 0x80; bank <= 0x87; bank++)
+		map_space(bank, bank, 0x8000, 0xffff, dram + (bank - 0x80) * 0x8000 - 0x8000);
+	map_space(0x90, 0x90, 0x8000, 0x9fff, SRAM - 0x8000);
 
 	map_WRAM();
 	map_WriteProtectROM();

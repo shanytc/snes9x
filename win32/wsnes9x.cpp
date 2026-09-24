@@ -66,6 +66,7 @@
 #include "../acidsgb.h"
 #include "../sfcbox.h"
 #include "../nss.h"
+#include "../superdisc.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -3110,6 +3111,46 @@ LRESULT CALLBACK WinProc(
 			CheckMenuStates();
 			break;
 
+		// Super Disc: swapping the disc in the drive. Inserting closes the
+		// tray on the new image; the BIOS notices on its next status poll.
+		case ID_SUPERDISC_INSERT:
+		{
+			if (!Settings.SuperDisc)
+				break;
+			RestoreGUIDisplay();
+			OPENFILENAME	ofn;
+			TCHAR			szFileName[MAX_PATH];
+			szFileName[0] = TEXT('\0');
+			memset((LPVOID) &ofn, 0, sizeof(OPENFILENAME));
+			ofn.lStructSize = sizeof(OPENFILENAME);
+			ofn.hwndOwner   = GUI.hWnd;
+			ofn.lpstrFilter = TEXT("CD Images (*.cue;*.iso;*.bin)\0*.cue;*.iso;*.bin\0All Files (*.*)\0*.*\0\0");
+			ofn.lpstrFile   = szFileName;
+			ofn.nMaxFile    = MAX_PATH;
+			ofn.lpstrTitle  = TEXT("Super Disc - insert disc");
+			ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
+			if (GetOpenFileName(&ofn))
+			{
+				if (S9xSuperDiscInsertDisc(_tToChar(szFileName)))
+					S9xSetInfoString("Disc inserted");
+				else
+					MessageBox(GUI.hWnd, TEXT("That file is not a readable CD image."),
+					           TEXT("Super Disc"), MB_OK | MB_ICONWARNING);
+			}
+			RestoreSNESDisplay();
+			CheckMenuStates();
+			break;
+		}
+
+		case ID_SUPERDISC_EJECT:
+			if (Settings.SuperDisc && S9xSuperDiscHasDisc())
+			{
+				S9xSuperDiscEjectDisc();
+				S9xSetInfoString("Disc ejected");
+			}
+			CheckMenuStates();
+			break;
+
 		// These act on the paid game that is playing; the supervisor ignores
 		// them on its menu and during the attract demo.
 		case ID_NSS_INSTRUCTIONS: if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;
@@ -5686,6 +5727,16 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.FullScreen||GUI.EmulatedFullscreen) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_FULLSCREEN, FALSE, &mii);
+
+	// Super Disc drive: live only while its BIOS cart is.
+	{
+		HMENU emu = NULL;
+		int   pos = 0;
+		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_SUPERDISC, &emu, &pos))
+			EnableMenuItem(emu, pos, MF_BYPOSITION | (Settings.SuperDisc ? MF_ENABLED : MF_GRAYED));
+		EnableMenuItem(GUI.hMenu, ID_SUPERDISC_EJECT,
+		               MF_BYCOMMAND | (S9xSuperDiscHasDisc() ? MF_ENABLED : MF_GRAYED));
+	}
 
 	// Nintendo Super System front panel: live only while its supervisor is.
 	{
@@ -11595,7 +11646,7 @@ void ClearExts(void)
 // rewriting them, so extensions the user added by hand survive the upgrade.
 static void TopUpExtFile(void)
 {
-	static const char *needed[] = { "gb", "gbc" };
+	static const char *needed[] = { "gb", "gbc", "cue", "iso" };
 	bool found[_countof(needed)] = {};
 	char buffer[MAX_PATH+2];
 
@@ -11733,6 +11784,8 @@ void MakeExtFile(void)
 	out<<"bsN"<<endl;
 	out<<"jmaY"<<endl;
 	out << "stN" << endl;
+	out << "cueN" << endl;		// Super Disc CD images
+	out << "isoN" << endl;
 	out.close();
 	SetFileAttributes(TEXT("Valid.Ext"), FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY);
 };

@@ -396,6 +396,7 @@ struct SSettings
 	bool8	NSS;            // Nintendo Super System cart loaded, Z80 supervisor active
 	uint32	NSSDipSwitches; // the cartridge DIP block the game reads at $4100 (low 8 bits)
 	bool8	NSSJoypadWatchdog; // let the supervisor drop a game that stops polling the pads
+	bool8	SuperDisc;      // Super Disc BIOS cart loaded, CD-ROM unit at $21E0-$21E5
 };
 
 struct SSNESGameFixes

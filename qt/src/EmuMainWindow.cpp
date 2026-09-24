@@ -1883,8 +1883,8 @@ void EmuMainWindow::openFile()
     // .gb/.gbc route into the SGB subsystem in CMemory::LoadROM, and .sgb (plus
     // any GB dump under a foreign extension) is caught by the Nintendo-logo
     // content sniff, so Game Boy carts belong in the dialog alongside SNES ones.
-    dialog.setNameFilters({ tr("ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.gb *.gbc *.sgb *.msu *.msu1 *.zip *.gz)"),
-                            tr("Super Nintendo ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin)"),
+    dialog.setNameFilters({ tr("ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.cue *.iso *.gb *.gbc *.sgb *.msu *.msu1 *.zip *.gz)"),
+                            tr("Super Nintendo ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.cue *.iso)"),
                             tr("Game Boy ROM Files (*.gb *.gbc *.sgb)"),
                             tr("All Files (*)") });
 

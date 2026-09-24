@@ -963,7 +963,7 @@ void retro_get_system_info(struct retro_system_info *info)
     // GUIs show. RetroArch also treats library_version as a single token,
     // and the old string embedded a space.
     info->library_version = VERSION_DISPLAY;
-    info->valid_extensions = "smc|sfc|swc|fig|bs|st|gb|gbc|dmg|sgb";
+    info->valid_extensions = "smc|sfc|swc|fig|bs|st|gb|gbc|dmg|sgb|cue|iso";
     info->need_fullpath = false;
     info->block_extract = false;
 }
@@ -1384,6 +1384,11 @@ bool retro_load_game(const struct retro_game_info *game)
     if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble_iface))
         rumble_iface.set_rumble_state = NULL;
 
+    // A Super Disc CD image is read from its path; the BIOS cart comes from
+    // the BIOS slot seeded out of the system directory.
+    if (game->path != NULL && S9xSuperDiscIsDiscImage(game->path))
+        rom_loaded = Memory.LoadROM(game->path);
+    else
     if(game->data == NULL && game->size == 0 && game->path != NULL)
         rom_loaded = Memory.LoadROM(game->path);
     else

@@ -1751,7 +1751,8 @@ std::string Snes9xWindow::open_rom_dialog(bool run)
     const auto snes_extensions = {
         "*.smc", "*.SMC", "*.fig", "*.FIG", "*.sfc", "*.SFC",
         "*.swc", "*.SWC", "*.gd3", "*.GD3", "*.bs", "*.BS",
-        "*.st", "*.ST", "*.bin", "*.BIN"
+        "*.st", "*.ST", "*.bin", "*.BIN",
+        "*.cue", "*.CUE", "*.iso", "*.ISO"   // Super Disc CD images
     };
     // .gb/.gbc route into the SGB subsystem in CMemory::LoadROM, and .sgb (plus
     // any GB dump under a foreign extension) is caught by the Nintendo-logo

@@ -133,6 +133,14 @@ class EmuMainWindow : public QMainWindow
     QAction *nss_game_only_actions[4] = {};
     QAction *nss_dips_action = nullptr;
     QAction *nss_dip_actions[8] = {};
+    // Emulation -> PowerFest '94 / Campus Challenge '92 session timer.
+    QAction *event_menu_action = nullptr;
+    QAction *event_minutes_actions[16] = {};
+    QAction *event_display_actions[3] = {};
+    QTimer event_title_timer;
+    QString event_title_suffix;
+    void setEventTimer(int minutes, int display);
+    void updateEventTitle();
     void createArcadeMenus(QMenu *emulation_menu);
     void refreshArcadeMenus();
     void sfcboxSetKeyswitch(int panel_pos);

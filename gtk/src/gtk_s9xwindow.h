@@ -143,6 +143,13 @@ class Snes9xWindow : public GtkBuilderWindow
     Gtk::MenuItem *nss_game_only_items[4] = {};
     Gtk::MenuItem *nss_dips_item = nullptr;
     Gtk::CheckMenuItem *nss_dip_items[8] = {};
+    // Emulation -> PowerFest '94 / Campus Challenge '92 session timer.
+    Gtk::MenuItem *event_item = nullptr;
+    Gtk::RadioMenuItem *event_minutes_items[16] = {};
+    Gtk::RadioMenuItem *event_display_items[3] = {};
+    std::string event_title_suffix;
+    void set_event_timer(int minutes, int display);
+    bool update_event_title();
     int user_pause, sys_pause;
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;

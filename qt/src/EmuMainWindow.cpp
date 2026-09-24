@@ -474,7 +474,79 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
     nss_menu_action = emulation_menu->addMenu(nss_menu);
     nss_menu_action->setVisible(false);
 
+    // Event carts: win32's Emulation dialog rows, named for the loaded board.
+    auto event_menu = new QMenu(tr("&PowerFest '94"));
+    event_menu->setToolTipsVisible(true);
+    auto minutes_menu = event_menu->addMenu(tr("Time &Limit"));
+    minutes_menu->menuAction()->setToolTip(
+        tr("Session length, set on the board's DIP switches. Takes effect immediately, even mid-session."));
+    auto minutes_group = new QActionGroup(this);
+    for (int m = 3; m <= 18; m++)
+    {
+        auto a = minutes_menu->addAction(tr("%1 minutes").arg(m));
+        a->setCheckable(true);
+        minutes_group->addAction(a);
+        connect(a, &QAction::triggered, [this, m] { setEventTimer(m, -1); });
+        event_minutes_actions[m - 3] = a;
+    }
+    auto display_menu = event_menu->addMenu(tr("Timer &Display"));
+    auto display_group = new QActionGroup(this);
+    static const char *display_names[3] = {
+        QT_TR_NOOP("&None"), QT_TR_NOOP("On &Screen"), QT_TR_NOOP("&Window Title")
+    };
+    for (int d = 0; d < 3; d++)
+    {
+        auto a = display_menu->addAction(tr(display_names[d]));
+        a->setCheckable(true);
+        display_group->addAction(a);
+        connect(a, &QAction::triggered, [this, d] { setEventTimer(-1, d); });
+        event_display_actions[d] = a;
+    }
+    event_menu_action = emulation_menu->addMenu(event_menu);
+    event_menu_action->setVisible(false);
+
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshArcadeMenus);
+
+    connect(&event_title_timer, &QTimer::timeout, this, &EmuMainWindow::updateEventTitle);
+    event_title_timer.start(500);
+}
+
+void EmuMainWindow::setEventTimer(int minutes, int display)
+{
+    const bool cc92 = (PF94.board == EVENT_BOARD_CC92);
+    auto &config = *app.config;
+    if (minutes >= 0)
+        (cc92 ? config.cc92_timer_minutes : config.pf94_timer_minutes) = minutes;
+    if (display >= 0)
+        (cc92 ? config.cc92_timer_display : config.pf94_timer_display) = display;
+    app.updateSettings();
+
+    // A new limit reaches a session already under way.
+    if (minutes >= 0)
+        app.emu_thread->runOnThread([minutes] {
+            if (PF94.active)
+                PF94.timerFrames = minutes * 60 * (Settings.PAL ? 50 : 60);
+        });
+    updateEventTitle();
+}
+
+void EmuMainWindow::updateEventTitle()
+{
+    // The countdown rides on whatever title is up, so Kaillera's survives.
+    QString suffix;
+    if (app.isCoreActive() && PF94.active && S9xEventTimerDisplay() == 2)
+    {
+        const int secs = S9xPF94TimeRemaining();
+        if (secs >= 0)
+            suffix = QString::asprintf(" (%02d:%02d)", secs / 60, secs % 60);
+    }
+    const QString shown = windowTitle();
+    QString title = shown;
+    if (!event_title_suffix.isEmpty() && title.endsWith(event_title_suffix))
+        title.chop(event_title_suffix.size());
+    event_title_suffix = suffix;
+    if (title + suffix != shown)
+        setWindowTitle(title + suffix);
 }
 
 void EmuMainWindow::refreshArcadeMenus()
@@ -487,6 +559,16 @@ void EmuMainWindow::refreshArcadeMenus()
             sfcbox_keyswitch_actions[i]->setChecked(sfcbox_keyswitch_map[i] == SFCBox.Keyswitch);
         sfcbox_backdrop_action->setChecked(app.config->sfcbox_osd_backdrop);
         sfcbox_english_action->setChecked(app.config->sfcbox_osd_english);
+    }
+
+    const bool event_cart = app.isCoreActive() && PF94.active;
+    event_menu_action->setVisible(event_cart);
+    if (event_cart)
+    {
+        event_menu_action->setText(PF94.board == EVENT_BOARD_CC92 ? tr("&Campus Challenge '92")
+                                                                  : tr("&PowerFest '94"));
+        event_minutes_actions[S9xEventTimerMinutes() - 3]->setChecked(true);
+        event_display_actions[S9xEventTimerDisplay()]->setChecked(true);
     }
 
     const bool nss = app.isCoreActive() && NSS.Active;

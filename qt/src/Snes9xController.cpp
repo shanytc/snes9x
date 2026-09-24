@@ -260,6 +260,10 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.NSSJoypadWatchdog = config->nss_joypad_watchdog;
     Settings.SFCBoxOSDBackdrop = config->sfcbox_osd_backdrop;
     Settings.SFCBoxOSDEnglish = config->sfcbox_osd_english;
+    Settings.PF94TimerMinutes = config->pf94_timer_minutes;
+    Settings.PF94TimerDisplay = config->pf94_timer_display;
+    Settings.CC92TimerMinutes = config->cc92_timer_minutes;
+    Settings.CC92TimerDisplay = config->cc92_timer_display;
 
     if (rewind_buffer_size != config->rewind_buffer_size && active)
     {

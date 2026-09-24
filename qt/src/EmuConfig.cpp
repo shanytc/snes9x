@@ -419,6 +419,10 @@ bool EmuConfig::setDefaults(int section)
         nss_joypad_watchdog = false;
         sfcbox_osd_backdrop = true;
         sfcbox_osd_english = false;
+        pf94_timer_minutes = 6;
+        pf94_timer_display = 0;
+        cc92_timer_minutes = 6;
+        cc92_timer_display = 0;
     }
 
     if (section == -1 || section == 4)
@@ -783,6 +787,19 @@ void EmuConfig::config(const std::string &filename, bool write)
     Bool("SFCBoxOSDEnglish", sfcbox_osd_english, "SFC-Box supervisor screen language: false=Japanese (authentic), true=English (render-time translation; the KROM firmware and savestates stay untouched)");
     Bool("NSSJoypadWatchdog", nss_joypad_watchdog, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose: Lethal Weapon trips it while uploading its sound driver");
     Int("NSSDipSwitches", nss_dip_switches, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100 (Emulation -> Nintendo Super System names each one per game); 12 (0x0c) is the factory setting");
+    Int("PowerFest94TimeLimit", pf94_timer_minutes, "PowerFest '94 event cart session length in minutes (DIP switches, 3-18)");
+    Int("PowerFest94TimerDisplay", pf94_timer_display, "PowerFest '94 session timer display: 0=none, 1=on screen, 2=window title");
+    Int("CampusChallenge92TimeLimit", cc92_timer_minutes, "Campus Challenge '92 event cart session length in minutes (DIP switches, 3-18)");
+    Int("CampusChallenge92TimerDisplay", cc92_timer_display, "Campus Challenge '92 session timer display: 0=none, 1=on screen, 2=window title");
+    if (!write)
+    {
+        for (int *m : { &pf94_timer_minutes, &cc92_timer_minutes })
+            if (*m < 3 || *m > 18)
+                *m = 6;
+        for (int *d : { &pf94_timer_display, &cc92_timer_display })
+            if (*d < 0 || *d > 2)
+                *d = 0;
+    }
     EndSection();
 
     BeginSection("Ports");

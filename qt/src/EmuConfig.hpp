@@ -246,6 +246,12 @@ struct EmuConfig
     bool nss_joypad_watchdog;
     bool sfcbox_osd_backdrop;
     bool sfcbox_osd_english;
+    // Event carts: session minutes (3-18) and timer display (0 none,
+    // 1 on screen, 2 window title), kept per board as on win32.
+    int pf94_timer_minutes;
+    int pf94_timer_display;
+    int cc92_timer_minutes;
+    int cc92_timer_display;
 
     // Files
     enum FileLocation

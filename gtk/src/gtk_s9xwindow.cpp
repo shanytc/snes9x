@@ -1291,10 +1291,91 @@ void Snes9xWindow::create_arcade_menus()
     nss_item->set_submenu(*nss_menu);
     emulation_menu->insert(*nss_item, pos++);
 
+    // Event carts: win32's Emulation dialog rows, named for the loaded board.
+    auto event_menu = Gtk::manage(new Gtk::Menu());
+    auto minutes_item = add_item(event_menu, _("Time _Limit"));
+    minutes_item->set_tooltip_text(_("Session length, set on the board's DIP switches. "
+                                     "Takes effect immediately, even mid-session."));
+    auto minutes_menu = Gtk::manage(new Gtk::Menu());
+    Gtk::RadioMenuItem::Group minutes_group;
+    for (int m = 3; m <= 18; m++)
+    {
+        auto item = Gtk::manage(new Gtk::RadioMenuItem(minutes_group, fmt::format("{} minutes", m)));
+        item->signal_toggled().connect([this, m, item] {
+            if (!syncing_menu && item->get_active())
+                set_event_timer(m, -1);
+        });
+        minutes_menu->append(*item);
+        event_minutes_items[m - 3] = item;
+    }
+    minutes_item->set_submenu(*minutes_menu);
+
+    auto display_item = add_item(event_menu, _("Timer _Display"));
+    auto display_menu = Gtk::manage(new Gtk::Menu());
+    Gtk::RadioMenuItem::Group display_group;
+    static const char *display_names[3] = { N_("_None"), N_("On _Screen"), N_("_Window Title") };
+    for (int d = 0; d < 3; d++)
+    {
+        auto item = Gtk::manage(new Gtk::RadioMenuItem(display_group, _(display_names[d]), true));
+        item->signal_toggled().connect([this, d, item] {
+            if (!syncing_menu && item->get_active())
+                set_event_timer(-1, d);
+        });
+        display_menu->append(*item);
+        event_display_items[d] = item;
+    }
+    display_item->set_submenu(*display_menu);
+
+    event_item = Gtk::manage(new Gtk::MenuItem(_("_PowerFest '94"), true));
+    event_item->set_submenu(*event_menu);
+    emulation_menu->insert(*event_item, pos++);
+
     sfcbox_item->show_all();
     nss_item->show_all();
+    event_item->show_all();
     sfcbox_item->hide();
     nss_item->hide();
+    event_item->hide();
+
+    Glib::signal_timeout().connect([this] { return update_event_title(); }, 500);
+}
+
+void Snes9xWindow::set_event_timer(int minutes, int display)
+{
+    const bool cc92 = (PF94.board == EVENT_BOARD_CC92);
+    if (minutes >= 0)
+    {
+        (cc92 ? Settings.CC92TimerMinutes : Settings.PF94TimerMinutes) = minutes;
+        // A new limit reaches a session already under way.
+        if (PF94.active)
+            PF94.timerFrames = minutes * 60 * (Settings.PAL ? 50 : 60);
+    }
+    if (display >= 0)
+        (cc92 ? Settings.CC92TimerDisplay : Settings.PF94TimerDisplay) = display;
+    update_event_title();
+}
+
+bool Snes9xWindow::update_event_title()
+{
+    // The countdown rides on whatever title configure_widgets put up.
+    std::string suffix;
+    if (config->rom_loaded && PF94.active && S9xEventTimerDisplay() == 2)
+    {
+        const int secs = S9xPF94TimeRemaining();
+        if (secs >= 0)
+            suffix = fmt::format(" ({:02}:{:02})", secs / 60, secs % 60);
+    }
+
+    const std::string shown = window->get_title();
+    std::string title = shown;
+    if (!event_title_suffix.empty() && title.size() >= event_title_suffix.size() &&
+        title.compare(title.size() - event_title_suffix.size(), event_title_suffix.size(), event_title_suffix) == 0)
+        title.erase(title.size() - event_title_suffix.size());
+    event_title_suffix = suffix;
+    if (title + suffix != shown)
+        window->set_title(title + suffix);
+
+    return true;
 }
 
 void Snes9xWindow::refresh_arcade_menus()
@@ -1310,6 +1391,16 @@ void Snes9xWindow::refresh_arcade_menus()
                 sfcbox_keyswitch_items[i]->set_active(true);
         sfcbox_backdrop_item->set_active(Settings.SFCBoxOSDBackdrop);
         sfcbox_english_item->set_active(Settings.SFCBoxOSDEnglish);
+    }
+
+    const bool event_cart = config->rom_loaded && PF94.active;
+    event_item->set_visible(event_cart);
+    if (event_cart)
+    {
+        event_item->set_label(PF94.board == EVENT_BOARD_CC92 ? _("_Campus Challenge '92")
+                                                             : _("_PowerFest '94"));
+        event_minutes_items[S9xEventTimerMinutes() - 3]->set_active(true);
+        event_display_items[S9xEventTimerDisplay()]->set_active(true);
     }
 
     const bool nss = config->rom_loaded && NSS.Active;

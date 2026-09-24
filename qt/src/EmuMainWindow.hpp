@@ -49,6 +49,8 @@ class EmuMainWindow : public QMainWindow
     // hotkeys so both apply the same gates and reload the same way.
     void setGBBootPolicy(int policy);
     void openBiosManager();
+    // A coin-op front-panel hotkey; false when the name is not one.
+    bool arcadeShortcut(const std::string &name);
     void powerCycle();
     bool openFile(const std::string &filename);
     void playMovieDialog();
@@ -119,6 +121,26 @@ class EmuMainWindow : public QMainWindow
     void refreshVoicekunMenu();
     void voicekunAttach();
     void voicekunDetach();
+
+    // Emulation -> Super Famicom Box / Nintendo Super System front panels.
+    QAction *sfcbox_menu_action = nullptr;
+    QAction *sfcbox_keyswitch_actions[5] = {};
+    QAction *sfcbox_backdrop_action = nullptr;
+    QAction *sfcbox_english_action = nullptr;
+    QAction *nss_menu_action = nullptr;
+    QAction *nss_game_actions[3] = {};
+    QAction *nss_eject_actions[3] = {};
+    QAction *nss_game_only_actions[4] = {};
+    QAction *nss_dips_action = nullptr;
+    QAction *nss_dip_actions[8] = {};
+    void createArcadeMenus(QMenu *emulation_menu);
+    void refreshArcadeMenus();
+    void sfcboxSetKeyswitch(int panel_pos);
+    void insertCoin(int slot);
+    void nssPulse(uint16_t buttons, bool game_only);
+    void nssGame(int slot);
+    void nssEject(int slot);
+    void nssToggleDip(int sw);
 
     QTimer mouse_timer;
     bool cursor_visible = true;

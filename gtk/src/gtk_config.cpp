@@ -245,7 +245,11 @@ int Snes9xConfig::load_defaults()
     Settings.GB_BIOSEnabled = TRUE;
     Settings.GBSuppressNRxGlitches = FALSE;
     Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
-    
+    Settings.NSSDipSwitches = 0x0c;
+    Settings.NSSJoypadWatchdog = false;
+    Settings.SFCBoxOSDBackdrop = true;
+    Settings.SFCBoxOSDEnglish = false;
+
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
     Settings.OneClockCycle = 6;
@@ -454,6 +458,10 @@ int Snes9xConfig::save_config_file()
     outbool("RemoveSpriteLimit", Settings.MaxSpriteTilesPerLine != 34, "Draw more sprites per scanline than the hardware allows (reduces flicker, but can cause glitches)");
     outbool("OverclockCPU", Settings.OneClockCycle != 6, "Speed up the emulated CPU to cut in-game slowdown (inaccurate; can break some games)");
     outbool("EchoBufferHack", Settings.SeparateEchoBuffer, "Prevents echo buffer from overwriting APU RAM");
+    outbool("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
+    outbool("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish, "SFC-Box supervisor screen language: false=Japanese (authentic), true=English (render-time translation; the KROM firmware and savestates stay untouched)");
+    outbool("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose: Lethal Weapon trips it while uploading its sound driver");
+    outint("NSSDipSwitches", Settings.NSSDipSwitches, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100 (Emulation -> Nintendo Super System names each one per game); 12 (0x0c) is the factory setting");
 
     // Key path "SGB::BIOSPreference" matches the win32 config (wconfig.cpp) and
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
@@ -729,6 +737,11 @@ int Snes9xConfig::load_config_file()
     bool OverclockCPU = false;
     inbool("OverclockCPU", OverclockCPU);
     inbool("EchoBufferHack", Settings.SeparateEchoBuffer);
+    inbool("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop);
+    inbool("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish);
+    inbool("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog);
+    inint("NSSDipSwitches", Settings.NSSDipSwitches);
+    Settings.NSSDipSwitches &= 0xff;
 
     section = "BIOS";
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)

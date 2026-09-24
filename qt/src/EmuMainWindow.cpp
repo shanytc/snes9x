@@ -53,6 +53,8 @@
 #include "display.h"
 #include "msu1.h"
 #include "voicekun.h"
+#include "nss.h"
+#include "sfcbox.h"
 #include "movie.h"
 #include "snapshot.h"
 #include "fscompat.h"
@@ -356,6 +358,388 @@ void EmuMainWindow::voicekunDetach()
         S9xVoiceKunDetach();
         S9xSetInfoString("Voicer-kun: audio CD ejected");
     }
+}
+
+// SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
+// position index as win32 does.
+static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
+static const char *sfcbox_keyswitch_names[5] = {
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&1 (Options)"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "O&FF"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&ON (Play)"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&2"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&3 (Self-Test)"),
+};
+static const uint16 nss_game_buttons[3] = { NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
+
+// Cartridge titles go into menu text, where '&' marks a mnemonic.
+static QString menuText(const char *s)
+{
+    return QString::fromUtf8(s ? s : "").replace("&", "&&");
+}
+
+void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
+{
+    // Super Famicom Box: win32 keeps these rows in its Emulation settings
+    // dialog, shown only while the KROM supervisor runs.
+    auto sfcbox_menu = new QMenu(tr("Super &Famicom Box"));
+    sfcbox_menu->setToolTipsVisible(true);
+    auto coin = sfcbox_menu->addAction(tr("&Insert Coin"));
+    coin->setToolTip(tr("Drop a 100-yen coin into the box. Play time per coin is set in the attendant menus."));
+    connect(coin, &QAction::triggered, [this] { insertCoin(0); });
+
+    auto keyswitch_menu = sfcbox_menu->addMenu(tr("&Keyswitch"));
+    keyswitch_menu->setToolTipsVisible(true);
+    auto keyswitch_group = new QActionGroup(this);
+    keyswitch_group->setExclusive(true);
+    for (int i = 0; i < 5; i++)
+    {
+        auto a = keyswitch_menu->addAction(tr(sfcbox_keyswitch_names[i]));
+        a->setCheckable(true);
+        keyswitch_group->addAction(a);
+        connect(a, &QAction::triggered, [this, i] { sfcboxSetKeyswitch(i); });
+        sfcbox_keyswitch_actions[i] = a;
+    }
+    keyswitch_menu->menuAction()->setToolTip(
+        tr("\"1\" opens the attendant setup menus, \"3\" the self-test; OFF/ON/\"2\" are play modes. "
+           "The supervisor polls it live, no reset needed."));
+    sfcbox_menu->addSeparator();
+
+    sfcbox_backdrop_action = sfcbox_menu->addAction(tr("OSD &Backdrop"));
+    sfcbox_backdrop_action->setCheckable(true);
+    sfcbox_backdrop_action->setToolTip(
+        tr("Draw the supervisor screens over the MB90082 OSD chip's solid background raster "
+           "instead of superimposing the text on the SNES video."));
+    connect(sfcbox_backdrop_action, &QAction::triggered, [this](bool checked) {
+        app.config->sfcbox_osd_backdrop = checked;
+        app.updateSettings();
+    });
+    sfcbox_english_action = sfcbox_menu->addAction(tr("&English OSD"));
+    sfcbox_english_action->setCheckable(true);
+    sfcbox_english_action->setToolTip(
+        tr("Translate the supervisor's on-screen text to English. Game text and the game-select "
+           "menus are drawn by the games and stay Japanese."));
+    connect(sfcbox_english_action, &QAction::triggered, [this](bool checked) {
+        app.config->sfcbox_osd_english = checked;
+        app.updateSettings();
+    });
+    sfcbox_menu_action = emulation_menu->addMenu(sfcbox_menu);
+    sfcbox_menu_action->setVisible(false);
+
+    // Nintendo Super System, laid out as win32's Emulation menu.
+    auto nss_menu = new QMenu(tr("&Nintendo Super System"));
+    connect(nss_menu->addAction(tr("&Insert Coin")), &QAction::triggered, [this] { insertCoin(0); });
+    connect(nss_menu->addAction(tr("Insert Coin (Slot &2)")), &QAction::triggered, [this] { insertCoin(1); });
+    connect(nss_menu->addAction(tr("&Service Credit")), &QAction::triggered,
+            [this] { nssPulse(NSS_BTN_SERVICE, false); });
+    nss_menu->addSeparator();
+
+    for (int slot = 0; slot < 3; slot++)
+    {
+        nss_game_actions[slot] = nss_menu->addAction(tr("Game &%1").arg(slot + 1));
+        connect(nss_game_actions[slot], &QAction::triggered, [this, slot] { nssGame(slot); });
+    }
+    auto eject_menu = nss_menu->addMenu(tr("&Eject Cartridge"));
+    for (int slot = 0; slot < 3; slot++)
+    {
+        nss_eject_actions[slot] = eject_menu->addAction(tr("Slot %1").arg(slot + 1));
+        connect(nss_eject_actions[slot], &QAction::triggered, [this, slot] { nssEject(slot); });
+    }
+    nss_menu->addSeparator();
+
+    struct GameOnly { const char *label; uint16 button; };
+    static const GameOnly game_only[4] = {
+        { QT_TR_NOOP("I&nstructions"), NSS_BTN_INSTRUCTIONS },
+        { QT_TR_NOOP("Page &Up"),      NSS_BTN_PAGEUP },
+        { QT_TR_NOOP("Page &Down"),    NSS_BTN_PAGEDOWN },
+        { QT_TR_NOOP("&Restart Game"), NSS_BTN_RESTART },
+    };
+    for (int i = 0; i < 4; i++)
+    {
+        const uint16 button = game_only[i].button;
+        nss_game_only_actions[i] = nss_menu->addAction(tr(game_only[i].label));
+        connect(nss_game_only_actions[i], &QAction::triggered, [this, button] { nssPulse(button, true); });
+    }
+    nss_menu->addSeparator();
+
+    auto dips_menu = new QMenu(tr("Cartridge &DIP Switches"));
+    for (int sw = 0; sw < 8; sw++)
+    {
+        nss_dip_actions[sw] = dips_menu->addAction(tr("Switch &%1").arg(sw + 1));
+        nss_dip_actions[sw]->setCheckable(true);
+        connect(nss_dip_actions[sw], &QAction::triggered, [this, sw] { nssToggleDip(sw); });
+    }
+    nss_dips_action = nss_menu->addMenu(dips_menu);
+
+    nss_menu_action = emulation_menu->addMenu(nss_menu);
+    nss_menu_action->setVisible(false);
+
+    // Event carts: win32's Emulation dialog rows, named for the loaded board.
+    auto event_menu = new QMenu(tr("&PowerFest '94"));
+    event_menu->setToolTipsVisible(true);
+    auto minutes_menu = event_menu->addMenu(tr("Time &Limit"));
+    minutes_menu->menuAction()->setToolTip(
+        tr("Session length, set on the board's DIP switches. Takes effect immediately, even mid-session."));
+    auto minutes_group = new QActionGroup(this);
+    for (int m = 3; m <= 18; m++)
+    {
+        auto a = minutes_menu->addAction(tr("%1 minutes").arg(m));
+        a->setCheckable(true);
+        minutes_group->addAction(a);
+        connect(a, &QAction::triggered, [this, m] { setEventTimer(m, -1); });
+        event_minutes_actions[m - 3] = a;
+    }
+    auto display_menu = event_menu->addMenu(tr("Timer &Display"));
+    auto display_group = new QActionGroup(this);
+    static const char *display_names[3] = {
+        QT_TR_NOOP("&None"), QT_TR_NOOP("On &Screen"), QT_TR_NOOP("&Window Title")
+    };
+    for (int d = 0; d < 3; d++)
+    {
+        auto a = display_menu->addAction(tr(display_names[d]));
+        a->setCheckable(true);
+        display_group->addAction(a);
+        connect(a, &QAction::triggered, [this, d] { setEventTimer(-1, d); });
+        event_display_actions[d] = a;
+    }
+    event_menu_action = emulation_menu->addMenu(event_menu);
+    event_menu_action->setVisible(false);
+
+    connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshArcadeMenus);
+
+    connect(&event_title_timer, &QTimer::timeout, this, &EmuMainWindow::updateEventTitle);
+    event_title_timer.start(500);
+}
+
+void EmuMainWindow::setEventTimer(int minutes, int display)
+{
+    const bool cc92 = (PF94.board == EVENT_BOARD_CC92);
+    auto &config = *app.config;
+    if (minutes >= 0)
+        (cc92 ? config.cc92_timer_minutes : config.pf94_timer_minutes) = minutes;
+    if (display >= 0)
+        (cc92 ? config.cc92_timer_display : config.pf94_timer_display) = display;
+    app.updateSettings();
+
+    // A new limit reaches a session already under way.
+    if (minutes >= 0)
+        app.emu_thread->runOnThread([minutes] {
+            if (PF94.active)
+                PF94.timerFrames = minutes * 60 * (Settings.PAL ? 50 : 60);
+        });
+    updateEventTitle();
+}
+
+void EmuMainWindow::updateEventTitle()
+{
+    // The countdown rides on whatever title is up, so Kaillera's survives.
+    QString suffix;
+    if (app.isCoreActive() && PF94.active && S9xEventTimerDisplay() == 2)
+    {
+        const int secs = S9xPF94TimeRemaining();
+        if (secs >= 0)
+            suffix = QString::asprintf(" (%02d:%02d)", secs / 60, secs % 60);
+    }
+    const QString shown = windowTitle();
+    QString title = shown;
+    if (!event_title_suffix.isEmpty() && title.endsWith(event_title_suffix))
+        title.chop(event_title_suffix.size());
+    event_title_suffix = suffix;
+    if (title + suffix != shown)
+        setWindowTitle(title + suffix);
+}
+
+void EmuMainWindow::refreshArcadeMenus()
+{
+    const bool box = app.isCoreActive() && SFCBox.Active;
+    sfcbox_menu_action->setVisible(box);
+    if (box)
+    {
+        for (int i = 0; i < 5; i++)
+            sfcbox_keyswitch_actions[i]->setChecked(sfcbox_keyswitch_map[i] == SFCBox.Keyswitch);
+        sfcbox_backdrop_action->setChecked(app.config->sfcbox_osd_backdrop);
+        sfcbox_english_action->setChecked(app.config->sfcbox_osd_english);
+    }
+
+    const bool event_cart = app.isCoreActive() && PF94.active;
+    event_menu_action->setVisible(event_cart);
+    if (event_cart)
+    {
+        event_menu_action->setText(PF94.board == EVENT_BOARD_CC92 ? tr("&Campus Challenge '92")
+                                                                  : tr("&PowerFest '94"));
+        event_minutes_actions[S9xEventTimerMinutes() - 3]->setChecked(true);
+        event_display_actions[S9xEventTimerDisplay()]->setChecked(true);
+    }
+
+    const bool nss = app.isCoreActive() && NSS.Active;
+    nss_menu_action->setVisible(nss);
+    if (!nss)
+        return;
+
+    const bool running = S9xNSSGameRunning();
+    for (int slot = 0; slot < 3; slot++)
+    {
+        const bool present = S9xNSSSlotPresent(slot);
+        // The panel's game buttons only pick from the supervisor's menu, so a
+        // filled socket greys while a paid game runs; an empty one asks for a
+        // cartridge instead.
+        nss_game_actions[slot]->setText(present
+            ? tr("Game &%1 (%2)").arg(slot + 1).arg(menuText(S9xNSSSlotName(slot)))
+            : tr("Game &%1 (Click to select cartridge...)").arg(slot + 1));
+        nss_game_actions[slot]->setEnabled(!present || !running);
+
+        nss_eject_actions[slot]->setText(present
+            ? tr("Slot %1 (%2)").arg(slot + 1).arg(menuText(S9xNSSSlotName(slot)))
+            : tr("Slot %1 (empty)").arg(slot + 1));
+        // The cabinet keeps its last cartridge.
+        nss_eject_actions[slot]->setEnabled(S9xNSSCanEject(slot));
+    }
+
+    for (auto a : nss_game_only_actions)
+        a->setEnabled(running);
+
+    // Each switch is named for what the cartridge in play does with it.
+    const char *label0 = S9xNSSDipSwitchLabel(0);
+    nss_dips_action->setText(label0 ? tr("Cartridge &DIP Switches")
+                                    : tr("Cartridge &DIP Switches (none on this board)"));
+    nss_dips_action->setEnabled(label0 != nullptr);
+    for (int sw = 0; sw < 8; sw++)
+    {
+        const char *label = S9xNSSDipSwitchLabel(sw);
+        nss_dip_actions[sw]->setText((label && *label)
+            ? tr("Switch &%1 - %2").arg(sw + 1).arg(menuText(label))
+            : tr("Switch &%1").arg(sw + 1));
+        nss_dip_actions[sw]->setChecked(app.config->nss_dip_switches & (1 << sw));
+    }
+}
+
+void EmuMainWindow::insertCoin(int slot)
+{
+    // One coin key serves whichever supervisor is running.
+    app.emu_thread->runOnThread([slot] {
+        if (slot == 0 && SFCBox.Active)
+            S9xSFCBoxInsertCoin();
+        else if (NSS.Active)
+            S9xNSSInsertCoin(slot);
+        else
+            return;
+        S9xSetInfoString("Coin inserted");
+    });
+}
+
+void EmuMainWindow::sfcboxSetKeyswitch(int panel_pos)
+{
+    app.emu_thread->runOnThread([panel_pos] {
+        if (!SFCBox.Active)
+            return;
+        static const char *names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
+        SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
+        S9xSetInfoString((std::string("SFC-Box keyswitch: ") + names[panel_pos]).c_str());
+    });
+}
+
+void EmuMainWindow::nssPulse(uint16_t buttons, bool game_only)
+{
+    // Instructions, the paging keys and Restart act on the paid game only.
+    app.emu_thread->runOnThread([buttons, game_only] {
+        if (!NSS.Active || (game_only && !S9xNSSGameRunning()))
+            return;
+        S9xNSSPulseButton(buttons);
+    });
+}
+
+void EmuMainWindow::nssGame(int slot)
+{
+    if (!app.isCoreActive() || !NSS.Active)
+        return;
+
+    // A filled socket gets its panel button pressed; an empty one gets a
+    // cartridge, which is a file to pick.
+    if (S9xNSSSlotPresent(slot))
+    {
+        if (!S9xNSSGameRunning())
+            nssPulse(nss_game_buttons[slot], false);
+        return;
+    }
+
+    app.pause();
+    QFileDialog dialog(this, tr("Nintendo Super System - cartridge for slot %1").arg(slot + 1));
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    dialog.setNameFilters({ tr("NSS Cartridges (*.zip *.bin *.sfc)"), tr("All Files (*)") });
+    if (dialog.exec() && !dialog.selectedFiles().empty())
+    {
+        const std::string filename = dialog.selectedFiles()[0].toStdString();
+        bool inserted = false;
+        app.emu_thread->runOnThread([&] {
+            inserted = S9xNSSInsertCart(slot, filename.c_str());
+            if (inserted)
+                S9xSetInfoString(("Slot " + std::to_string(slot + 1) + ": " + S9xNSSSlotName(slot)).c_str());
+        }, true);
+        if (!inserted)
+            QMessageBox::warning(this, tr("Nintendo Super System"),
+                tr("That is not a Nintendo Super System cartridge, or the same game is already in another slot."));
+    }
+    app.unpause();
+}
+
+void EmuMainWindow::nssEject(int slot)
+{
+    app.emu_thread->runOnThread([slot] {
+        if (NSS.Active && S9xNSSCanEject(slot))
+            S9xNSSEjectCart(slot);
+    });
+}
+
+void EmuMainWindow::nssToggleDip(int sw)
+{
+    // The DIP block the game reads at $4100; the menu names each switch.
+    app.config->nss_dip_switches = (app.config->nss_dip_switches ^ (1 << sw)) & 0xff;
+    const uint8 dips = (uint8)app.config->nss_dip_switches;
+    app.emu_thread->runOnThread([dips] {
+        Settings.NSSDipSwitches = dips;
+        NSS.DipSwitches = dips;
+    });
+}
+
+bool EmuMainWindow::arcadeShortcut(const std::string &name)
+{
+    static const char *keyswitch_keys[5] = {
+        "SFCBoxKeyswitch1", "SFCBoxKeyswitchOFF", "SFCBoxKeyswitchON",
+        "SFCBoxKeyswitch2", "SFCBoxKeyswitch3"
+    };
+    static const char *game_keys[3] = { "NSSGame1", "NSSGame2", "NSSGame3" };
+
+    if (name == "InsertCoin")
+        insertCoin(0);
+    else if (name == "NSSCoin2")
+        insertCoin(1);
+    else if (name == "NSSService")
+        nssPulse(NSS_BTN_SERVICE, false);
+    else if (name == "NSSInstructions")
+        nssPulse(NSS_BTN_INSTRUCTIONS, true);
+    else if (name == "NSSPageUp")
+        nssPulse(NSS_BTN_PAGEUP, true);
+    else if (name == "NSSPageDown")
+        nssPulse(NSS_BTN_PAGEDOWN, true);
+    else if (name == "NSSRestart")
+        nssPulse(NSS_BTN_RESTART, true);
+    else
+    {
+        for (int i = 0; i < 5; i++)
+            if (name == keyswitch_keys[i])
+            {
+                sfcboxSetKeyswitch(i);
+                return true;
+            }
+        for (int i = 0; i < 3; i++)
+            if (name == game_keys[i])
+            {
+                nssGame(i);
+                return true;
+            }
+        return false;
+    }
+    return true;
 }
 
 // File->Choose Icon: the four bundled logos, 1-4 like win32's Window:Icon.
@@ -805,6 +1189,8 @@ void EmuMainWindow::createWidgets()
     voicekun_menu_action = emulation_menu->addMenu(voicekun_menu);
     voicekun_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshVoicekunMenu);
+
+    createArcadeMenus(emulation_menu);
 
     emulation_menu->addSeparator();
 

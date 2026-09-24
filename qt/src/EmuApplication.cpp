@@ -759,6 +759,10 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
                 break;
             }
     }
+    else if (pressed && core->active)
+    {
+        window->arcadeShortcut(name);
+    }
 }
 
 bool EmuApplication::isBound(const EmuBinding &b)

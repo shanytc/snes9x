@@ -441,6 +441,81 @@
        <string>BIOS Manager</string>
       </property>
      </row>
+     <row>
+      <property name="text">
+       <string>Insert Coin (SFC-Box / NSS)</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box Keyswitch: 1 (Options)</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box Keyswitch: OFF</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box Keyswitch: ON (Play)</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box Keyswitch: 2</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box Keyswitch: 3 (Self-Test)</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Insert Coin (Slot 2)</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Service Credit</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Game 1</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Game 2</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Game 3</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Instructions</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Page Up</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Page Down</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Restart Game</string>
+      </property>
+     </row>
      <column>
       <property name="text">
        <string>Binding #1</string>

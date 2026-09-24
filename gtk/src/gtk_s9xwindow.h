@@ -71,6 +71,16 @@ class Snes9xWindow : public GtkBuilderWindow
     void movie_seek_dialog();
     void open_multicart_dialog();
     void open_voicekun_dialog();
+    /* Emulation -> Super Famicom Box / Nintendo Super System front panels,
+     * shared by the menus and their hotkeys. */
+    void create_arcade_menus();
+    void refresh_arcade_menus();
+    void insert_coin(int slot);
+    void sfcbox_set_keyswitch(int panel_pos);
+    void nss_pulse(uint16_t buttons, bool game_only);
+    void nss_game(int slot);
+    void nss_eject(int slot);
+    void nss_toggle_dip(int sw);
     void show_rom_info();
     void show_color_correction_dialog();
 
@@ -123,6 +133,23 @@ class Snes9xWindow : public GtkBuilderWindow
     /* Ticking a check menu item also fires its activate handler, so the
      * menu-open syncs raise this while they stamp the current state. */
     bool syncing_menu = false;
+    Gtk::MenuItem *sfcbox_item = nullptr;
+    Gtk::RadioMenuItem *sfcbox_keyswitch_items[5] = {};
+    Gtk::CheckMenuItem *sfcbox_backdrop_item = nullptr;
+    Gtk::CheckMenuItem *sfcbox_english_item = nullptr;
+    Gtk::MenuItem *nss_item = nullptr;
+    Gtk::MenuItem *nss_game_items[3] = {};
+    Gtk::MenuItem *nss_eject_items[3] = {};
+    Gtk::MenuItem *nss_game_only_items[4] = {};
+    Gtk::MenuItem *nss_dips_item = nullptr;
+    Gtk::CheckMenuItem *nss_dip_items[8] = {};
+    // Emulation -> PowerFest '94 / Campus Challenge '92 session timer.
+    Gtk::MenuItem *event_item = nullptr;
+    Gtk::RadioMenuItem *event_minutes_items[16] = {};
+    Gtk::RadioMenuItem *event_display_items[3] = {};
+    std::string event_title_suffix;
+    void set_event_timer(int minutes, int display);
+    bool update_event_title();
     int user_pause, sys_pause;
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;

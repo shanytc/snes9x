@@ -63,6 +63,8 @@
 #include "netplay.h"
 #include "display.h"
 #include "voicekun.h"
+#include "nss.h"
+#include "sfcbox.h"
 
 // Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the
 // retired values, which have no item any more (normalized away first).
@@ -654,6 +656,8 @@ void Snes9xWindow::connect_signals()
         // Nothing here reaches a Game Boy picture: the S-PPU is not drawing it.
         get_object<Gtk::MenuItem>("sppu_item")
             ->set_sensitive(config->rom_loaded && !S9xContentIsGameBoy());
+
+        refresh_arcade_menus();
     });
 
     get_object<Gtk::MenuItem>("open_multicart_item")->signal_activate().connect([&] {
@@ -672,6 +676,8 @@ void Snes9xWindow::connect_signals()
         }
         configure_widgets();
     });
+
+    create_arcade_menus();
 
     // Sound Channels submenu, as on win32's Sound->Channels popup.
     for (int i = 0; i < 8; i++)
@@ -1144,6 +1150,403 @@ void Snes9xWindow::open_voicekun_dialog()
 
     unpause_from_focus_change();
     configure_widgets();
+}
+
+// SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
+// position index as win32 does.
+static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
+static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
+
+// Cartridge titles go into mnemonic labels, where '_' marks the access key.
+static std::string mnemonic_escape(const char *s)
+{
+    std::string out;
+    for (const char *p = s ? s : ""; *p; p++)
+    {
+        out += *p;
+        if (*p == '_')
+            out += '_';
+    }
+    return out;
+}
+
+void Snes9xWindow::create_arcade_menus()
+{
+    auto emulation_menu = get_object<Gtk::Menu>("emulation_menu_item_menu");
+    auto children = emulation_menu->get_children();
+    Gtk::Widget *voicekun_item = get_object<Gtk::MenuItem>("voicekun_item").get();
+    int pos = 0;
+    for (int i = 0; i < (int)children.size(); i++)
+        if (children[i] == voicekun_item)
+            pos = i + 1;
+
+    auto add_item = [](Gtk::Menu *menu, const std::string &label) {
+        auto item = Gtk::manage(new Gtk::MenuItem(label, true));
+        menu->append(*item);
+        return item;
+    };
+    auto add_check = [](Gtk::Menu *menu, const std::string &label) {
+        auto item = Gtk::manage(new Gtk::CheckMenuItem(label, true));
+        menu->append(*item);
+        return item;
+    };
+
+    // Super Famicom Box: win32 keeps these rows in its Emulation settings
+    // dialog, shown only while the KROM supervisor runs.
+    auto sfcbox_menu = Gtk::manage(new Gtk::Menu());
+    auto coin = add_item(sfcbox_menu, _("_Insert Coin"));
+    coin->set_tooltip_text(_("Drop a 100-yen coin into the box. Play time per coin is set in the attendant menus."));
+    coin->signal_activate().connect([this] { insert_coin(0); });
+
+    auto keyswitch_item = add_item(sfcbox_menu, _("_Keyswitch"));
+    keyswitch_item->set_tooltip_text(_("\"1\" opens the attendant setup menus, \"3\" the self-test; "
+                                       "OFF/ON/\"2\" are play modes. The supervisor polls it live, no reset needed."));
+    auto keyswitch_menu = Gtk::manage(new Gtk::Menu());
+    Gtk::RadioMenuItem::Group keyswitch_group;
+    for (int i = 0; i < 5; i++)
+    {
+        auto item = Gtk::manage(new Gtk::RadioMenuItem(keyswitch_group, sfcbox_keyswitch_names[i]));
+        item->signal_toggled().connect([this, i, item] {
+            if (syncing_menu || !item->get_active())
+                return;
+            sfcbox_set_keyswitch(i);
+        });
+        keyswitch_menu->append(*item);
+        sfcbox_keyswitch_items[i] = item;
+    }
+    keyswitch_item->set_submenu(*keyswitch_menu);
+    sfcbox_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    sfcbox_backdrop_item = add_check(sfcbox_menu, _("OSD _Backdrop"));
+    sfcbox_backdrop_item->set_tooltip_text(_("Draw the supervisor screens over the MB90082 OSD chip's solid "
+                                             "background raster instead of superimposing the text on the SNES video."));
+    sfcbox_backdrop_item->signal_toggled().connect([this] {
+        if (!syncing_menu)
+            Settings.SFCBoxOSDBackdrop = sfcbox_backdrop_item->get_active();
+    });
+    sfcbox_english_item = add_check(sfcbox_menu, _("_English OSD"));
+    sfcbox_english_item->set_tooltip_text(_("Translate the supervisor's on-screen text to English. Game text and "
+                                            "the game-select menus are drawn by the games and stay Japanese."));
+    sfcbox_english_item->signal_toggled().connect([this] {
+        if (!syncing_menu)
+            Settings.SFCBoxOSDEnglish = sfcbox_english_item->get_active();
+    });
+
+    sfcbox_item = Gtk::manage(new Gtk::MenuItem(_("Super _Famicom Box"), true));
+    sfcbox_item->set_submenu(*sfcbox_menu);
+    emulation_menu->insert(*sfcbox_item, pos++);
+
+    // Nintendo Super System, laid out as win32's Emulation menu.
+    auto nss_menu = Gtk::manage(new Gtk::Menu());
+    add_item(nss_menu, _("_Insert Coin"))->signal_activate().connect([this] { insert_coin(0); });
+    add_item(nss_menu, _("Insert Coin (Slot _2)"))->signal_activate().connect([this] { insert_coin(1); });
+    add_item(nss_menu, _("_Service Credit"))->signal_activate().connect([this] {
+        nss_pulse(NSS_BTN_SERVICE, false);
+    });
+    nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    for (int slot = 0; slot < 3; slot++)
+    {
+        nss_game_items[slot] = add_item(nss_menu, fmt::format("Game _{}", slot + 1));
+        nss_game_items[slot]->signal_activate().connect([this, slot] { nss_game(slot); });
+    }
+    auto eject_item = add_item(nss_menu, _("_Eject Cartridge"));
+    auto eject_menu = Gtk::manage(new Gtk::Menu());
+    for (int slot = 0; slot < 3; slot++)
+    {
+        nss_eject_items[slot] = add_item(eject_menu, fmt::format("Slot {}", slot + 1));
+        nss_eject_items[slot]->signal_activate().connect([this, slot] { nss_eject(slot); });
+    }
+    eject_item->set_submenu(*eject_menu);
+    nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    struct GameOnly { const char *label; uint16 button; };
+    static const GameOnly game_only[4] = {
+        { N_("I_nstructions"), NSS_BTN_INSTRUCTIONS },
+        { N_("Page _Up"),      NSS_BTN_PAGEUP },
+        { N_("Page _Down"),    NSS_BTN_PAGEDOWN },
+        { N_("_Restart Game"), NSS_BTN_RESTART },
+    };
+    for (int i = 0; i < 4; i++)
+    {
+        const uint16 button = game_only[i].button;
+        nss_game_only_items[i] = add_item(nss_menu, _(game_only[i].label));
+        nss_game_only_items[i]->signal_activate().connect([this, button] { nss_pulse(button, true); });
+    }
+    nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    nss_dips_item = add_item(nss_menu, _("Cartridge _DIP Switches"));
+    auto dips_menu = Gtk::manage(new Gtk::Menu());
+    for (int sw = 0; sw < 8; sw++)
+    {
+        nss_dip_items[sw] = add_check(dips_menu, fmt::format("Switch _{}", sw + 1));
+        nss_dip_items[sw]->signal_toggled().connect([this, sw] {
+            if (!syncing_menu)
+                nss_toggle_dip(sw);
+        });
+    }
+    nss_dips_item->set_submenu(*dips_menu);
+
+    nss_item = Gtk::manage(new Gtk::MenuItem(_("_Nintendo Super System"), true));
+    nss_item->set_submenu(*nss_menu);
+    emulation_menu->insert(*nss_item, pos++);
+
+    // Event carts: win32's Emulation dialog rows, named for the loaded board.
+    auto event_menu = Gtk::manage(new Gtk::Menu());
+    auto minutes_item = add_item(event_menu, _("Time _Limit"));
+    minutes_item->set_tooltip_text(_("Session length, set on the board's DIP switches. "
+                                     "Takes effect immediately, even mid-session."));
+    auto minutes_menu = Gtk::manage(new Gtk::Menu());
+    Gtk::RadioMenuItem::Group minutes_group;
+    for (int m = 3; m <= 18; m++)
+    {
+        auto item = Gtk::manage(new Gtk::RadioMenuItem(minutes_group, fmt::format("{} minutes", m)));
+        item->signal_toggled().connect([this, m, item] {
+            if (!syncing_menu && item->get_active())
+                set_event_timer(m, -1);
+        });
+        minutes_menu->append(*item);
+        event_minutes_items[m - 3] = item;
+    }
+    minutes_item->set_submenu(*minutes_menu);
+
+    auto display_item = add_item(event_menu, _("Timer _Display"));
+    auto display_menu = Gtk::manage(new Gtk::Menu());
+    Gtk::RadioMenuItem::Group display_group;
+    static const char *display_names[3] = { N_("_None"), N_("On _Screen"), N_("_Window Title") };
+    for (int d = 0; d < 3; d++)
+    {
+        auto item = Gtk::manage(new Gtk::RadioMenuItem(display_group, _(display_names[d]), true));
+        item->signal_toggled().connect([this, d, item] {
+            if (!syncing_menu && item->get_active())
+                set_event_timer(-1, d);
+        });
+        display_menu->append(*item);
+        event_display_items[d] = item;
+    }
+    display_item->set_submenu(*display_menu);
+
+    event_item = Gtk::manage(new Gtk::MenuItem(_("_PowerFest '94"), true));
+    event_item->set_submenu(*event_menu);
+    emulation_menu->insert(*event_item, pos++);
+
+    sfcbox_item->show_all();
+    nss_item->show_all();
+    event_item->show_all();
+    sfcbox_item->hide();
+    nss_item->hide();
+    event_item->hide();
+
+    Glib::signal_timeout().connect([this] { return update_event_title(); }, 500);
+}
+
+void Snes9xWindow::set_event_timer(int minutes, int display)
+{
+    const bool cc92 = (PF94.board == EVENT_BOARD_CC92);
+    if (minutes >= 0)
+    {
+        (cc92 ? Settings.CC92TimerMinutes : Settings.PF94TimerMinutes) = minutes;
+        // A new limit reaches a session already under way.
+        if (PF94.active)
+            PF94.timerFrames = minutes * 60 * (Settings.PAL ? 50 : 60);
+    }
+    if (display >= 0)
+        (cc92 ? Settings.CC92TimerDisplay : Settings.PF94TimerDisplay) = display;
+    update_event_title();
+}
+
+bool Snes9xWindow::update_event_title()
+{
+    // The countdown rides on whatever title configure_widgets put up.
+    std::string suffix;
+    if (config->rom_loaded && PF94.active && S9xEventTimerDisplay() == 2)
+    {
+        const int secs = S9xPF94TimeRemaining();
+        if (secs >= 0)
+            suffix = fmt::format(" ({:02}:{:02})", secs / 60, secs % 60);
+    }
+
+    const std::string shown = window->get_title();
+    std::string title = shown;
+    if (!event_title_suffix.empty() && title.size() >= event_title_suffix.size() &&
+        title.compare(title.size() - event_title_suffix.size(), event_title_suffix.size(), event_title_suffix) == 0)
+        title.erase(title.size() - event_title_suffix.size());
+    event_title_suffix = suffix;
+    if (title + suffix != shown)
+        window->set_title(title + suffix);
+
+    return true;
+}
+
+void Snes9xWindow::refresh_arcade_menus()
+{
+    syncing_menu = true;
+
+    const bool box = config->rom_loaded && SFCBox.Active;
+    sfcbox_item->set_visible(box);
+    if (box)
+    {
+        for (int i = 0; i < 5; i++)
+            if (sfcbox_keyswitch_map[i] == SFCBox.Keyswitch)
+                sfcbox_keyswitch_items[i]->set_active(true);
+        sfcbox_backdrop_item->set_active(Settings.SFCBoxOSDBackdrop);
+        sfcbox_english_item->set_active(Settings.SFCBoxOSDEnglish);
+    }
+
+    const bool event_cart = config->rom_loaded && PF94.active;
+    event_item->set_visible(event_cart);
+    if (event_cart)
+    {
+        event_item->set_label(PF94.board == EVENT_BOARD_CC92 ? _("_Campus Challenge '92")
+                                                             : _("_PowerFest '94"));
+        event_minutes_items[S9xEventTimerMinutes() - 3]->set_active(true);
+        event_display_items[S9xEventTimerDisplay()]->set_active(true);
+    }
+
+    const bool nss = config->rom_loaded && NSS.Active;
+    nss_item->set_visible(nss);
+    if (nss)
+    {
+        const bool running = S9xNSSGameRunning();
+        for (int slot = 0; slot < 3; slot++)
+        {
+            const bool present = S9xNSSSlotPresent(slot);
+            const std::string name = mnemonic_escape(S9xNSSSlotName(slot));
+            // The panel's game buttons only pick from the supervisor's menu, so
+            // a filled socket greys while a paid game runs; an empty one asks
+            // for a cartridge instead.
+            nss_game_items[slot]->set_label(present
+                ? fmt::format("Game _{} ({})", slot + 1, name)
+                : fmt::format("Game _{} (Click to select cartridge...)", slot + 1));
+            nss_game_items[slot]->set_sensitive(!present || !running);
+
+            nss_eject_items[slot]->set_label(present
+                ? fmt::format("Slot {} ({})", slot + 1, name)
+                : fmt::format("Slot {} (empty)", slot + 1));
+            // The cabinet keeps its last cartridge.
+            nss_eject_items[slot]->set_sensitive(S9xNSSCanEject(slot));
+        }
+
+        for (auto item : nss_game_only_items)
+            item->set_sensitive(running);
+
+        // Each switch is named for what the cartridge in play does with it.
+        const char *label0 = S9xNSSDipSwitchLabel(0);
+        nss_dips_item->set_label(label0 ? _("Cartridge _DIP Switches")
+                                        : _("Cartridge _DIP Switches (none on this board)"));
+        nss_dips_item->set_sensitive(label0 != nullptr);
+        for (int sw = 0; sw < 8; sw++)
+        {
+            const char *label = S9xNSSDipSwitchLabel(sw);
+            nss_dip_items[sw]->set_label((label && *label)
+                ? fmt::format("Switch _{} - {}", sw + 1, mnemonic_escape(label))
+                : fmt::format("Switch _{}", sw + 1));
+            nss_dip_items[sw]->set_active(Settings.NSSDipSwitches & (1 << sw));
+        }
+    }
+
+    syncing_menu = false;
+}
+
+void Snes9xWindow::insert_coin(int slot)
+{
+    // One coin key serves whichever supervisor is running.
+    if (!config->rom_loaded)
+        return;
+    if (slot == 0 && SFCBox.Active)
+        S9xSFCBoxInsertCoin();
+    else if (NSS.Active)
+        S9xNSSInsertCoin(slot);
+    else
+        return;
+    S9xSetInfoString(_("Coin inserted"));
+}
+
+void Snes9xWindow::sfcbox_set_keyswitch(int panel_pos)
+{
+    if (!config->rom_loaded || !SFCBox.Active)
+        return;
+    SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
+    auto message = fmt::format("SFC-Box keyswitch: {}", sfcbox_keyswitch_names[panel_pos]);
+    S9xSetInfoString(message.c_str());
+}
+
+void Snes9xWindow::nss_pulse(uint16_t buttons, bool game_only)
+{
+    // Instructions, the paging keys and Restart act on the paid game only.
+    if (!config->rom_loaded || !NSS.Active || (game_only && !S9xNSSGameRunning()))
+        return;
+    S9xNSSPulseButton(buttons);
+}
+
+void Snes9xWindow::nss_game(int slot)
+{
+    if (!config->rom_loaded || !NSS.Active)
+        return;
+
+    // A filled socket gets its panel button pressed; an empty one gets a
+    // cartridge, which is a file to pick.
+    if (S9xNSSSlotPresent(slot))
+    {
+        static const uint16 game_buttons[3] = { NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
+        if (!S9xNSSGameRunning())
+            S9xNSSPulseButton(game_buttons[slot]);
+        return;
+    }
+
+    pause_from_focus_change();
+
+    auto title = fmt::format("Nintendo Super System - cartridge for slot {}", slot + 1);
+    Gtk::FileChooserDialog dialog(*window.get(), title, Gtk::FILE_CHOOSER_ACTION_OPEN);
+    dialog.add_button(Gtk::StockID("gtk-cancel"), Gtk::RESPONSE_CANCEL);
+    dialog.add_button(Gtk::StockID("gtk-open"), Gtk::RESPONSE_ACCEPT);
+
+    auto filter = Gtk::FileFilter::create();
+    filter->set_name(_("NSS Cartridges"));
+    for (const char *ext : { "*.zip", "*.ZIP", "*.bin", "*.BIN", "*.sfc", "*.SFC" })
+        filter->add_pattern(ext);
+    dialog.add_filter(filter);
+    dialog.add_filter(get_all_files_filter());
+
+    if (!gui_config->last_directory.empty())
+        dialog.set_current_folder(config->last_directory);
+
+    auto result = dialog.run();
+    dialog.hide();
+
+    if (result == Gtk::RESPONSE_ACCEPT)
+    {
+        auto filename = dialog.get_filename();
+        if (S9xNSSInsertCart(slot, filename.c_str()))
+        {
+            auto message = fmt::format("Slot {}: {}", slot + 1, S9xNSSSlotName(slot));
+            S9xSetInfoString(message.c_str());
+        }
+        else
+        {
+            Gtk::MessageDialog msg(*window.get(),
+                                   _("That is not a Nintendo Super System cartridge, or the same game "
+                                     "is already in another slot."),
+                                   false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_CLOSE, true);
+            msg.set_title(_("Nintendo Super System"));
+            msg.run();
+        }
+    }
+
+    unpause_from_focus_change();
+}
+
+void Snes9xWindow::nss_eject(int slot)
+{
+    if (config->rom_loaded && NSS.Active && S9xNSSCanEject(slot))
+        S9xNSSEjectCart(slot);
+}
+
+void Snes9xWindow::nss_toggle_dip(int sw)
+{
+    // The DIP block the game reads at $4100; the menu names each switch.
+    Settings.NSSDipSwitches = (Settings.NSSDipSwitches ^ (1u << sw)) & 0xff;
+    NSS.DipSwitches = (uint8)Settings.NSSDipSwitches;
 }
 
 void Snes9xWindow::open_multicart_dialog()

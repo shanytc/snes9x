@@ -123,7 +123,18 @@ enum {
     // S9xGBModelHotkeys, so the offset from PORT_GBMODEL0 is its index there.
     PORT_GBMODEL0           = 54,
     // File -> BIOS Manager, above the five consoles PORT_GBMODEL0 covers.
-    PORT_BIOS_MANAGER       = 59
+    PORT_BIOS_MANAGER       = 59,
+    // Coin-op front panels. The coin key serves whichever cabinet is running;
+    // the five keyswitch positions are in SFC-Box panel order 1/OFF/ON/2/3.
+    PORT_INSERT_COIN        = 60,
+    PORT_SFCBOX_KEYSWITCH0  = 61,
+    PORT_NSS_COIN2          = 66,
+    PORT_NSS_SERVICE        = 67,
+    PORT_NSS_GAME0          = 68,
+    PORT_NSS_INSTRUCTIONS   = 71,
+    PORT_NSS_PAGEUP         = 72,
+    PORT_NSS_PAGEDOWN       = 73,
+    PORT_NSS_RESTART        = 74
 };
 
 typedef struct BindingLink
@@ -138,7 +149,7 @@ extern const int b_breaks[];
 const int NUM_JOYPAD_LINKS = 24;
 // Emulator-wide entries in b_links, after the NUM_JOYPAD_LINKS joypad ones; a
 // static_assert in gtk_control.cpp pins it to that table's real length.
-const int NUM_EMU_LINKS = 84;
+const int NUM_EMU_LINKS = 99;
 
 typedef struct JoypadBinding
 {

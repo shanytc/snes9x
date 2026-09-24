@@ -245,7 +245,15 @@ int Snes9xConfig::load_defaults()
     Settings.GB_BIOSEnabled = TRUE;
     Settings.GBSuppressNRxGlitches = FALSE;
     Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
-    
+    Settings.NSSDipSwitches = 0x0c;
+    Settings.NSSJoypadWatchdog = false;
+    Settings.SFCBoxOSDBackdrop = true;
+    Settings.SFCBoxOSDEnglish = false;
+    Settings.PF94TimerMinutes = 6;
+    Settings.PF94TimerDisplay = 0;
+    Settings.CC92TimerMinutes = 6;
+    Settings.CC92TimerDisplay = 0;
+
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
     Settings.OneClockCycle = 6;
@@ -454,6 +462,14 @@ int Snes9xConfig::save_config_file()
     outbool("RemoveSpriteLimit", Settings.MaxSpriteTilesPerLine != 34, "Draw more sprites per scanline than the hardware allows (reduces flicker, but can cause glitches)");
     outbool("OverclockCPU", Settings.OneClockCycle != 6, "Speed up the emulated CPU to cut in-game slowdown (inaccurate; can break some games)");
     outbool("EchoBufferHack", Settings.SeparateEchoBuffer, "Prevents echo buffer from overwriting APU RAM");
+    outbool("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
+    outbool("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish, "SFC-Box supervisor screen language: false=Japanese (authentic), true=English (render-time translation; the KROM firmware and savestates stay untouched)");
+    outbool("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose: Lethal Weapon trips it while uploading its sound driver");
+    outint("NSSDipSwitches", Settings.NSSDipSwitches, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100 (Emulation -> Nintendo Super System names each one per game); 12 (0x0c) is the factory setting");
+    outint("PowerFest94TimeLimit", Settings.PF94TimerMinutes, "PowerFest '94 event cart session length in minutes (DIP switches, 3-18)");
+    outint("PowerFest94TimerDisplay", Settings.PF94TimerDisplay, "PowerFest '94 session timer display: 0=none, 1=on screen, 2=window title");
+    outint("CampusChallenge92TimeLimit", Settings.CC92TimerMinutes, "Campus Challenge '92 event cart session length in minutes (DIP switches, 3-18)");
+    outint("CampusChallenge92TimerDisplay", Settings.CC92TimerDisplay, "Campus Challenge '92 session timer display: 0=none, 1=on screen, 2=window title");
 
     // Key path "SGB::BIOSPreference" matches the win32 config (wconfig.cpp) and
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
@@ -729,6 +745,21 @@ int Snes9xConfig::load_config_file()
     bool OverclockCPU = false;
     inbool("OverclockCPU", OverclockCPU);
     inbool("EchoBufferHack", Settings.SeparateEchoBuffer);
+    inbool("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop);
+    inbool("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish);
+    inbool("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog);
+    inint("NSSDipSwitches", Settings.NSSDipSwitches);
+    Settings.NSSDipSwitches &= 0xff;
+    inint("PowerFest94TimeLimit", Settings.PF94TimerMinutes);
+    inint("PowerFest94TimerDisplay", Settings.PF94TimerDisplay);
+    inint("CampusChallenge92TimeLimit", Settings.CC92TimerMinutes);
+    inint("CampusChallenge92TimerDisplay", Settings.CC92TimerDisplay);
+    for (int *m : { &Settings.PF94TimerMinutes, &Settings.CC92TimerMinutes })
+        if (*m < 3 || *m > 18)
+            *m = 6;
+    for (int *d : { &Settings.PF94TimerDisplay, &Settings.CC92TimerDisplay })
+        if (*d < 0 || *d > 2)
+            *d = 0;
 
     section = "BIOS";
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)

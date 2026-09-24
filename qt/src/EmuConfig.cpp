@@ -102,6 +102,23 @@ static const char *shortcut_names[] =
     "GBModelSGB2",
     "GBModelSGBC",
     "BiosManager",
+    // Coin-op front panels, named as win32's [Keys] entries. InsertCoin
+    // serves whichever cabinet is running.
+    "InsertCoin",
+    "SFCBoxKeyswitch1",
+    "SFCBoxKeyswitchOFF",
+    "SFCBoxKeyswitchON",
+    "SFCBoxKeyswitch2",
+    "SFCBoxKeyswitch3",
+    "NSSCoin2",
+    "NSSService",
+    "NSSGame1",
+    "NSSGame2",
+    "NSSGame3",
+    "NSSInstructions",
+    "NSSPageUp",
+    "NSSPageDown",
+    "NSSRestart",
 };
 
 static const char *default_controller_keys[] =
@@ -185,8 +202,27 @@ static const char *default_controller_keys[] =
     "", //    Super Game Boy
     "", //    Super Game Boy 2
     "", //    Super Game Boy Color
-    ""  //    BIOS Manager
+    "", //    BIOS Manager
+    "", //    Insert Coin
+    "", //    SFC-Box Keyswitch 1
+    "", //    SFC-Box Keyswitch OFF
+    "", //    SFC-Box Keyswitch ON
+    "", //    SFC-Box Keyswitch 2
+    "", //    SFC-Box Keyswitch 3
+    "", //    NSS Insert Coin (slot 2)
+    "", //    NSS Service Credit
+    "", //    NSS Game 1
+    "", //    NSS Game 2
+    "", //    NSS Game 3
+    "", //    NSS Instructions
+    "", //    NSS Page Up
+    "", //    NSS Page Down
+    ""  //    NSS Restart Game
 };
+
+static_assert(std::size(shortcut_names) == EmuConfig::num_shortcuts &&
+                  std::size(default_controller_keys) == EmuConfig::num_shortcuts,
+              "shortcut tables are out of step with EmuConfig::num_shortcuts");
 
 const char **EmuConfig::getDefaultShortcutKeys()
 {
@@ -379,6 +415,14 @@ bool EmuConfig::setDefaults(int section)
         gb_bios_enabled = true;
         gb_boot_policy = S9X_GBBOOT_AUTO;
         for (auto &p : bios_paths) p.clear();
+        nss_dip_switches = 0x0c;
+        nss_joypad_watchdog = false;
+        sfcbox_osd_backdrop = true;
+        sfcbox_osd_english = false;
+        pf94_timer_minutes = 6;
+        pf94_timer_display = 0;
+        cc92_timer_minutes = 6;
+        cc92_timer_display = 0;
     }
 
     if (section == -1 || section == 4)
@@ -734,6 +778,27 @@ void EmuConfig::config(const std::string &filename, bool write)
         String(S9xGetBiosSlotInfo(i)->key, bios_paths[i], S9xGetBiosSlotInfo(i)->label);
         if (!write)
             S9xSetBiosPath(i, bios_paths[i].c_str());
+    }
+    EndSection();
+
+    // Section and keys as win32 writes them.
+    BeginSection("Hack");
+    Bool("SFCBoxOSDBackdrop", sfcbox_osd_backdrop, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
+    Bool("SFCBoxOSDEnglish", sfcbox_osd_english, "SFC-Box supervisor screen language: false=Japanese (authentic), true=English (render-time translation; the KROM firmware and savestates stay untouched)");
+    Bool("NSSJoypadWatchdog", nss_joypad_watchdog, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose: Lethal Weapon trips it while uploading its sound driver");
+    Int("NSSDipSwitches", nss_dip_switches, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100 (Emulation -> Nintendo Super System names each one per game); 12 (0x0c) is the factory setting");
+    Int("PowerFest94TimeLimit", pf94_timer_minutes, "PowerFest '94 event cart session length in minutes (DIP switches, 3-18)");
+    Int("PowerFest94TimerDisplay", pf94_timer_display, "PowerFest '94 session timer display: 0=none, 1=on screen, 2=window title");
+    Int("CampusChallenge92TimeLimit", cc92_timer_minutes, "Campus Challenge '92 event cart session length in minutes (DIP switches, 3-18)");
+    Int("CampusChallenge92TimerDisplay", cc92_timer_display, "Campus Challenge '92 session timer display: 0=none, 1=on screen, 2=window title");
+    if (!write)
+    {
+        for (int *m : { &pf94_timer_minutes, &cc92_timer_minutes })
+            if (*m < 3 || *m > 18)
+                *m = 6;
+        for (int *d : { &pf94_timer_display, &cc92_timer_display })
+            if (*d < 0 || *d > 2)
+                *d = 0;
     }
     EndSection();
 

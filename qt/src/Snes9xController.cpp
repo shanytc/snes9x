@@ -255,6 +255,16 @@ void Snes9xController::updateSettings(EmuConfig *config)
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
         S9xSetBiosPath(i, config->bios_paths[i].c_str());
 
+    // The DIP block reaches NSS.DipSwitches on the next load, or from the menu.
+    Settings.NSSDipSwitches = (uint32)(config->nss_dip_switches & 0xff);
+    Settings.NSSJoypadWatchdog = config->nss_joypad_watchdog;
+    Settings.SFCBoxOSDBackdrop = config->sfcbox_osd_backdrop;
+    Settings.SFCBoxOSDEnglish = config->sfcbox_osd_english;
+    Settings.PF94TimerMinutes = config->pf94_timer_minutes;
+    Settings.PF94TimerDisplay = config->pf94_timer_display;
+    Settings.CC92TimerMinutes = config->cc92_timer_minutes;
+    Settings.CC92TimerDisplay = config->cc92_timer_display;
+
     if (rewind_buffer_size != config->rewind_buffer_size && active)
     {
         g_state_manager.init(config->rewind_buffer_size * 1048576);

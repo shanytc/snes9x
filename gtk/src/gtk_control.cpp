@@ -17,6 +17,7 @@
 #include "controls.h"
 #include "crosshairs.h"
 #include "memmap.h"
+#include "nss.h"
 #include "movie.h"
 #include "display.h"
 #include "gfx.h"
@@ -138,6 +139,21 @@ const BindingLink b_links[] =
         { "b_gb_model_sgb2",       "GTK_gb_model_3"    },
         { "b_gb_model_sgbc",       "GTK_gb_model_4"    },
         { "b_bios_manager",        "GTK_bios_manager"  },
+        { "b_insert_coin",         "GTK_insert_coin"   },
+        { "b_sfcbox_keyswitch_0",  "GTK_sfcbox_keyswitch_0" },
+        { "b_sfcbox_keyswitch_1",  "GTK_sfcbox_keyswitch_1" },
+        { "b_sfcbox_keyswitch_2",  "GTK_sfcbox_keyswitch_2" },
+        { "b_sfcbox_keyswitch_3",  "GTK_sfcbox_keyswitch_3" },
+        { "b_sfcbox_keyswitch_4",  "GTK_sfcbox_keyswitch_4" },
+        { "b_nss_coin2",           "GTK_nss_coin2"     },
+        { "b_nss_service",         "GTK_nss_service"   },
+        { "b_nss_game_0",          "GTK_nss_game_0"    },
+        { "b_nss_game_1",          "GTK_nss_game_1"    },
+        { "b_nss_game_2",          "GTK_nss_game_2"    },
+        { "b_nss_instructions",    "GTK_nss_instructions" },
+        { "b_nss_page_up",         "GTK_nss_page_up"   },
+        { "b_nss_page_down",       "GTK_nss_page_down" },
+        { "b_nss_restart",         "GTK_nss_restart"   },
 
         { nullptr, nullptr }
 };
@@ -157,7 +173,8 @@ const int b_breaks[] =
         43, /* End of Graphic options */
         85, /* End of save/load states */
         94, /* End of sound buttons */
-        NUM_JOYPAD_LINKS + NUM_EMU_LINKS, /* End of miscellaneous buttons */
+        108, /* End of miscellaneous buttons */
+        NUM_JOYPAD_LINKS + NUM_EMU_LINKS, /* End of arcade front panels */
         -1
 };
 
@@ -710,6 +727,42 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         {
             top_level->open_bios_manager();
         }
+        else if (cmd.port[0] == PORT_INSERT_COIN)
+        {
+            top_level->insert_coin(0);
+        }
+        else if (cmd.port[0] >= PORT_SFCBOX_KEYSWITCH0 && cmd.port[0] < PORT_SFCBOX_KEYSWITCH0 + 5)
+        {
+            top_level->sfcbox_set_keyswitch(cmd.port[0] - PORT_SFCBOX_KEYSWITCH0);
+        }
+        else if (cmd.port[0] == PORT_NSS_COIN2)
+        {
+            top_level->insert_coin(1);
+        }
+        else if (cmd.port[0] == PORT_NSS_SERVICE)
+        {
+            top_level->nss_pulse(NSS_BTN_SERVICE, false);
+        }
+        else if (cmd.port[0] >= PORT_NSS_GAME0 && cmd.port[0] < PORT_NSS_GAME0 + 3)
+        {
+            top_level->nss_game(cmd.port[0] - PORT_NSS_GAME0);
+        }
+        else if (cmd.port[0] == PORT_NSS_INSTRUCTIONS)
+        {
+            top_level->nss_pulse(NSS_BTN_INSTRUCTIONS, true);
+        }
+        else if (cmd.port[0] == PORT_NSS_PAGEUP)
+        {
+            top_level->nss_pulse(NSS_BTN_PAGEUP, true);
+        }
+        else if (cmd.port[0] == PORT_NSS_PAGEDOWN)
+        {
+            top_level->nss_pulse(NSS_BTN_PAGEDOWN, true);
+        }
+        else if (cmd.port[0] == PORT_NSS_RESTART)
+        {
+            top_level->nss_pulse(NSS_BTN_RESTART, true);
+        }
     }
 }
 
@@ -783,6 +836,42 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strcasecmp(name, "GTK_bios_manager"))
     {
         cmd.port[0] = PORT_BIOS_MANAGER;
+    }
+    else if (!strcasecmp(name, "GTK_insert_coin"))
+    {
+        cmd.port[0] = PORT_INSERT_COIN;
+    }
+    else if (!strncasecmp(name, "GTK_sfcbox_keyswitch_", 21))
+    {
+        cmd.port[0] = PORT_SFCBOX_KEYSWITCH0 + (name[21] - '0');
+    }
+    else if (!strcasecmp(name, "GTK_nss_coin2"))
+    {
+        cmd.port[0] = PORT_NSS_COIN2;
+    }
+    else if (!strcasecmp(name, "GTK_nss_service"))
+    {
+        cmd.port[0] = PORT_NSS_SERVICE;
+    }
+    else if (!strncasecmp(name, "GTK_nss_game_", 13))
+    {
+        cmd.port[0] = PORT_NSS_GAME0 + (name[13] - '0');
+    }
+    else if (!strcasecmp(name, "GTK_nss_instructions"))
+    {
+        cmd.port[0] = PORT_NSS_INSTRUCTIONS;
+    }
+    else if (!strcasecmp(name, "GTK_nss_page_up"))
+    {
+        cmd.port[0] = PORT_NSS_PAGEUP;
+    }
+    else if (!strcasecmp(name, "GTK_nss_page_down"))
+    {
+        cmd.port[0] = PORT_NSS_PAGEDOWN;
+    }
+    else if (!strcasecmp(name, "GTK_nss_restart"))
+    {
+        cmd.port[0] = PORT_NSS_RESTART;
     }
     else if (!strcasecmp(name, "GTK_rewind"))
     {

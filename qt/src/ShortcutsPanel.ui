@@ -516,6 +516,16 @@
        <string>NSS: Restart Game</string>
       </property>
      </row>
+     <row>
+      <property name="text">
+       <string>Super Disc: Insert Disc</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>Super Disc: Eject Disc</string>
+      </property>
+     </row>
      <column>
       <property name="text">
        <string>Binding #1</string>

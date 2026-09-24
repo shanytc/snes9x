@@ -119,6 +119,8 @@ static const char *shortcut_names[] =
     "NSSPageUp",
     "NSSPageDown",
     "NSSRestart",
+    "SuperDiscInsert",
+    "SuperDiscEject",
 };
 
 static const char *default_controller_keys[] =
@@ -217,7 +219,9 @@ static const char *default_controller_keys[] =
     "", //    NSS Instructions
     "", //    NSS Page Up
     "", //    NSS Page Down
-    ""  //    NSS Restart Game
+    "", //    NSS Restart Game
+    "", //    Super Disc: Insert Disc
+    ""  //    Super Disc: Eject Disc
 };
 
 static_assert(std::size(shortcut_names) == EmuConfig::num_shortcuts &&

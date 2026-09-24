@@ -750,6 +750,14 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
     {
         window->openBiosManager();
     }
+    else if (name == "SuperDiscInsert" && pressed)
+    {
+        window->superDiscInsert();
+    }
+    else if (name == "SuperDiscEject" && pressed)
+    {
+        window->superDiscEject();
+    }
     else if (pressed && name.compare(0, 7, "GBModel") == 0)
     {
         // Same route as the menu entry, gates included.

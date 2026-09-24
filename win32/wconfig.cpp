@@ -1208,6 +1208,7 @@ void WinRegisterConfigItems()
 	ADDN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
 	ADD(NSSCoin2); ADD(NSSService); ADD(NSSInstructions);
 	ADD(NSSPageUp); ADD(NSSPageDown); ADD(NSSRestart);
+	ADD(SuperDiscInsert); ADD(SuperDiscEject);
 	ADDN(NSSGame[0],NSSGame1); ADDN(NSSGame[1],NSSGame2); ADDN(NSSGame[2],NSSGame3);
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
@@ -1247,6 +1248,7 @@ void WinRegisterConfigItems()
 	ADDXALLN(SFCBoxKeyswitch[3],SFCBoxKeyswitch2); ADDXALLN(SFCBoxKeyswitch[4],SFCBoxKeyswitch3);
 	ADDXALL(NSSCoin2); ADDXALL(NSSService); ADDXALL(NSSInstructions);
 	ADDXALL(NSSPageUp); ADDXALL(NSSPageDown); ADDXALL(NSSRestart);
+	ADDXALL(SuperDiscInsert); ADDXALL(SuperDiscEject);
 	ADDXALLN(NSSGame[0],NSSGame1); ADDXALLN(NSSGame[1],NSSGame2); ADDXALLN(NSSGame[2],NSSGame3);
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);

@@ -177,7 +177,7 @@ void S9xWinScanJoypads();
 #define WM_CHEATS_ADDED (WM_APP + 1)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 7;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 8;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
@@ -901,6 +901,22 @@ static inline bool MatchesHotkeyBinding(WORD key, int modifiers, SCustomKey *pri
 	return false;
 }
 
+// Super Disc Insert/Eject fire once per press: Insert opens a modal picker, and a
+// held key must not reopen it. A key-up re-arms them, and so does any gap longer
+// than the slowest repeat, since the key-up can land on the modal dialog instead.
+struct SuperDiscHotkeyGate { bool fired; DWORD last; };
+static SuperDiscHotkeyGate g_superDiscGate[2];
+
+static bool SuperDiscHotkeyShouldFire(int which)
+{
+	SuperDiscHotkeyGate &g = g_superDiscGate[which];
+	const DWORD now = timeGetTime();
+	const bool fire = !g.fired || now - g.last > 1100;
+	g.fired = true;
+	g.last = now;
+	return fire;
+}
+
 // Held-style hotkeys (Rewind/FastForward/ScopePause) must disengage when their
 // chord breaks in ANY order: releasing the modifier first leaves the main key's
 // key-up unmatched by MatchesHotkeyBinding (modifiers no longer down), sticking
@@ -1310,6 +1326,22 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			if(!HKmatch(NSSGame[nssg]))
 				continue;
 			SendMenuCommand(ID_NSS_GAME1 + nssg);
+			hitHotKey = true;
+		}
+		// Super Disc drive, through the menu so its greying applies to the keys.
+		if(HKmatch(SuperDiscInsert))
+		{
+			if(SuperDiscHotkeyShouldFire(0))
+			{
+				SendMenuCommand(ID_SUPERDISC_INSERT);
+				g_superDiscGate[0].last = timeGetTime();	// the picker may have been up a while
+			}
+			hitHotKey = true;
+		}
+		if(HKmatch(SuperDiscEject))
+		{
+			if(SuperDiscHotkeyShouldFire(1))
+				SendMenuCommand(ID_SUPERDISC_EJECT);
 			hitHotKey = true;
 		}
 		if(HKmatch(ShowPressed))
@@ -2168,6 +2200,10 @@ LRESULT CALLBACK WinProc(
 		    {
                 Settings.Rewinding = false;
             }
+			if(HotkeyChordBroken((WORD)wParam, &CustomKeys.SuperDiscInsert, &CustomKeysExtra.SuperDiscInsert))
+				g_superDiscGate[0].fired = false;
+			if(HotkeyChordBroken((WORD)wParam, &CustomKeys.SuperDiscEject, &CustomKeysExtra.SuperDiscEject))
+				g_superDiscGate[1].fired = false;
 
 		}
 		break;
@@ -15451,6 +15487,17 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
+    // Tab 7: Emulation -> Super Disc, the CD drive.
+    {
+        { &CustomKeys.SuperDiscInsert,  &CustomKeysExtra.SuperDiscInsert,  HOTKEYS_SUPERDISC_INSERT },
+        { &CustomKeys.SuperDiscEject,   &CustomKeysExtra.SuperDiscEject,   HOTKEYS_SUPERDISC_EJECT },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -15619,7 +15666,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System")
+				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

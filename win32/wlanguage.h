@@ -159,6 +159,8 @@ Nintendo is a trademark.")
 #define HOTKEYS_NSS_PAGEUP TEXT("Page Up:")
 #define HOTKEYS_NSS_PAGEDOWN TEXT("Page Down:")
 #define HOTKEYS_NSS_RESTART TEXT("Restart Game:")
+#define HOTKEYS_SUPERDISC_INSERT TEXT("Insert Disc:")
+#define HOTKEYS_SUPERDISC_EJECT TEXT("Eject Disc:")
 #define HOTKEYS_BIOS_MANAGER TEXT("BIOS Manager:")
 // Emulation -> Game Boy Model. Every label has to fit the 72-DLU statics; the
 // tab name supplies the context.

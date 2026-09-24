@@ -51,6 +51,9 @@ class EmuMainWindow : public QMainWindow
     void openBiosManager();
     // A coin-op front-panel hotkey; false when the name is not one.
     bool arcadeShortcut(const std::string &name);
+    // Emulation -> Super Disc; the shortcuts call these too.
+    void superDiscInsert();
+    void superDiscEject();
     void powerCycle();
     bool openFile(const std::string &filename);
     void playMovieDialog();
@@ -155,8 +158,6 @@ class EmuMainWindow : public QMainWindow
     QAction *superdisc_insert_action = nullptr;
     QAction *superdisc_eject_action = nullptr;
     void refreshSuperDiscMenu();
-    void superDiscInsert();
-    void superDiscEject();
     void updateWindowTitle();
 
     QTimer mouse_timer;

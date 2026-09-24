@@ -684,16 +684,8 @@ void Snes9xWindow::connect_signals()
         open_superdisc_dialog();
     });
 
-    // A disc game can't run on without its disc: eject through the Reset
-    // item, so the BIOS reboots to its home screen and reports the open tray.
     get_object<Gtk::MenuItem>("superdisc_eject_item")->signal_activate().connect([&] {
-        if (Settings.SuperDisc && S9xSuperDiscHasDisc())
-        {
-            S9xSuperDiscEjectDisc();
-            get_object<Gtk::MenuItem>("reset_item")->activate();
-            S9xSetInfoString(_("Disc ejected"));
-        }
-        configure_widgets();
+        eject_superdisc();
     });
 
     // Sound Channels submenu, as on win32's Sound->Channels popup.
@@ -1564,6 +1556,19 @@ void Snes9xWindow::nss_toggle_dip(int sw)
     // The DIP block the game reads at $4100; the menu names each switch.
     Settings.NSSDipSwitches = (Settings.NSSDipSwitches ^ (1u << sw)) & 0xff;
     NSS.DipSwitches = (uint8)Settings.NSSDipSwitches;
+}
+
+// A disc game can't run on without its disc: eject through the Reset item,
+// so the BIOS reboots to its home screen and reports the open tray.
+void Snes9xWindow::eject_superdisc()
+{
+    if (Settings.SuperDisc && S9xSuperDiscHasDisc())
+    {
+        S9xSuperDiscEjectDisc();
+        get_object<Gtk::MenuItem>("reset_item")->activate();
+        S9xSetInfoString(_("Disc ejected"));
+    }
+    configure_widgets();
 }
 
 void Snes9xWindow::open_superdisc_dialog()

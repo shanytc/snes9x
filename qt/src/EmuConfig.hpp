@@ -312,9 +312,10 @@ struct EmuConfig
 
     static const int allowed_bindings = 4;
     static const int num_controller_bindings = 18;
-    // Then the five Game Boy Model consoles in S9xGBModelHotkeys order, and
-    // the BIOS Manager last.
-    static const int num_shortcuts = 92;
+    // Then the five Game Boy Model consoles in S9xGBModelHotkeys order, the
+    // BIOS Manager, the coin-op front panels, and the Super Disc's
+    // Insert/Eject last.
+    static const int num_shortcuts = 94;
 
     /* Save states are organized in banks of slots, as on win32. The state
      * file extension is the flat index, bank * save_slots_per_bank + slot. */

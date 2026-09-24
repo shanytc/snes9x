@@ -134,7 +134,10 @@ enum {
     PORT_NSS_INSTRUCTIONS   = 71,
     PORT_NSS_PAGEUP         = 72,
     PORT_NSS_PAGEDOWN       = 73,
-    PORT_NSS_RESTART        = 74
+    PORT_NSS_RESTART        = 74,
+    // Emulation -> Super Disc
+    PORT_SUPERDISC_INSERT   = 75,
+    PORT_SUPERDISC_EJECT    = 76
 };
 
 typedef struct BindingLink
@@ -149,7 +152,7 @@ extern const int b_breaks[];
 const int NUM_JOYPAD_LINKS = 24;
 // Emulator-wide entries in b_links, after the NUM_JOYPAD_LINKS joypad ones; a
 // static_assert in gtk_control.cpp pins it to that table's real length.
-const int NUM_EMU_LINKS = 99;
+const int NUM_EMU_LINKS = 101;
 
 typedef struct JoypadBinding
 {

@@ -475,6 +475,8 @@ struct SCustomKeys {
 	SCustomKey NSSPageUp;
 	SCustomKey NSSPageDown;
 	SCustomKey NSSRestart;
+	SCustomKey SuperDiscInsert;      // Emulation -> Super Disc
+	SCustomKey SuperDiscEject;
 	SCustomKey BiosManager;          // opens File -> BIOS Manager
 	// Emulation -> Game Boy Model, one per console the menu offers; see
 	// g_gbModelHotkeyPolicy for which policy each slot picks.
@@ -543,6 +545,8 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra NSSPageUp;
 	SCustomKeyExtra NSSPageDown;
 	SCustomKeyExtra NSSRestart;
+	SCustomKeyExtra SuperDiscInsert;
+	SCustomKeyExtra SuperDiscEject;
 	SCustomKeyExtra BiosManager;
 	SCustomKeyExtra GBModel[GB_MODEL_HOTKEYS];
 };

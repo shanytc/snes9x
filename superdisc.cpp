@@ -49,6 +49,7 @@ struct SDiscTrack
 struct SDiscImage
 {
 	std::string					path;
+	std::string					name;		// ISO volume identifier, else the file name
 	std::vector<FILE *>			files;
 	std::vector<SDiscTrack>		tracks;
 	int32						leadout;
@@ -106,6 +107,7 @@ enum { MECH_IDLE = 0, MECH_PARAMS, MECH_DATA };
 static SSuperDisc	SD;
 static SDiscImage	Disc;
 static bool8		Active = FALSE;
+static char			BIOSVersion[16];	// "0.95", from the boot ROM's banner
 
 static Resampler	*AudioOut = NULL;
 static int16		CddaFifo[CDDA_FIFO_FRAMES * 2];
@@ -160,6 +162,7 @@ static void CloseDisc (void)
 	Disc.files.clear();
 	Disc.tracks.clear();
 	Disc.path.clear();
+	Disc.name.clear();
 	Disc.leadout = 0;
 }
 
@@ -410,6 +413,33 @@ static void ReadRawSector (int32 lba, uint8 *raw, int *type)
 		raw[14] = ToBCD(a % 75);
 		raw[15] = (*type == TRACK_MODE2) ? 2 : 1;
 	}
+}
+
+// The volume identifier from the ISO descriptor at sector 16 (bytes 28h-47h),
+// falling back to the image's file name when the disc leaves it blank.
+static void ReadDiscName (void)
+{
+	uint8	raw[SECTOR_RAW];
+	int		type;
+	ReadRawSector(16, raw, &type);
+
+	const uint8	*vd = raw + ((raw[15] == 2) ? 24 : 16);
+	std::string	name;
+	if (type != TRACK_AUDIO && vd[0] == 0x01 && !memcmp(vd + 1, "CD001", 5))
+		for (int i = 0x28; i < 0x48; i++)
+			name += (vd[i] > 0x20 && vd[i] < 0x7F && vd[i] != '_') ? (char) vd[i] : ' ';	// ISO names spell spaces as '_'
+
+	size_t	end = name.find_last_not_of(" _");
+	name = (end == std::string::npos) ? std::string() : name.substr(0, end + 1);
+	if (name.empty())
+	{
+		size_t	slash = Disc.path.find_last_of("/\\");
+		name = Disc.path.substr(slash == std::string::npos ? 0 : slash + 1);
+		size_t	dot = name.rfind('.');
+		if (dot != std::string::npos)
+			name.erase(dot);
+	}
+	Disc.name = name;
 }
 
 // ---------------------------------------------------------------------------
@@ -1256,9 +1286,32 @@ static void ResetChips (void)
 	ClearAudio();
 }
 
+// "Super Disc boot ROM ver.0.95 ..." sits near the start of the BIOS.
+static void ReadBIOSVersion (void)
+{
+	static const char	tag[] = "boot ROM ver.";
+	strcpy(BIOSVersion, "?");
+	for (uint32 i = 0; i + sizeof tag + 8 < SDISC_BIOS_SIZE; i++)
+		if (!memcmp(Memory.ROM + i, tag, sizeof tag - 1))
+		{
+			const uint8	*v = Memory.ROM + i + sizeof tag - 1;
+			int			n = 0;
+			while (n < (int) sizeof BIOSVersion - 1 && (isdigit(v[n]) || v[n] == '.'))
+			{
+				BIOSVersion[n] = (char) v[n];
+				n++;
+			}
+			BIOSVersion[n] = 0;
+			if (!n)
+				strcpy(BIOSVersion, "?");
+			return;
+		}
+}
+
 void S9xSuperDiscActivate (void)
 {
 	Active = TRUE;
+	ReadBIOSVersion();
 	memset(&SD, 0, sizeof SD);
 	SD.DiscPresent = !Disc.tracks.empty();
 	ResetChips();
@@ -1329,6 +1382,7 @@ bool8 S9xSuperDiscInsertDisc (const char *path)
 			EnterIdleState();
 		return (FALSE);
 	}
+	ReadDiscName();
 	if (!Active)
 		return (TRUE);
 
@@ -1358,6 +1412,15 @@ bool8 S9xSuperDiscHasDisc (void)
 const char *S9xSuperDiscDiscPath (void)
 {
 	return (Disc.path.c_str());
+}
+
+const char *S9xSuperDiscTitle (void)
+{
+	static std::string	title;
+	title = std::string("Super Disc (v") + BIOSVersion + ")";
+	if (!Disc.name.empty())
+		title += " - " + Disc.name;
+	return (title.c_str());
 }
 
 // ---------------------------------------------------------------------------

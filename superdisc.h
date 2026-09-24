@@ -54,6 +54,7 @@ bool8 S9xSuperDiscInsertDisc (const char *path);
 void  S9xSuperDiscEjectDisc (void);
 bool8 S9xSuperDiscHasDisc (void);
 const char *S9xSuperDiscDiscPath (void);
+const char *S9xSuperDiscTitle (void);	// "Super Disc (v0.95) - <disc name>"
 
 uint8 *S9xSuperDiscDRAM (void);
 void  S9xSuperDiscRemapSRAM (void);		// apply the SRAM write lock to WriteMap

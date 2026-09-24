@@ -802,6 +802,9 @@ static void CenterCursor()
 void S9xRestoreWindowTitle ()
 {
     TCHAR buf [1024];
+    if (Settings.SuperDisc)
+        _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSuperDiscTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+    else
     if (Memory.ROMFilename[0])
     {
         char def[_MAX_FNAME];
@@ -3115,7 +3118,7 @@ LRESULT CALLBACK WinProc(
 		// tray on the new image; the BIOS notices on its next status poll.
 		case ID_SUPERDISC_INSERT:
 		{
-			if (!Settings.SuperDisc)
+			if (!Settings.SuperDisc || S9xSuperDiscHasDisc())
 				break;
 			RestoreGUIDisplay();
 			OPENFILENAME	ofn;
@@ -3138,6 +3141,7 @@ LRESULT CALLBACK WinProc(
 					           TEXT("Super Disc"), MB_OK | MB_ICONWARNING);
 			}
 			RestoreSNESDisplay();
+			S9xRestoreWindowTitle();
 			CheckMenuStates();
 			break;
 		}
@@ -3145,8 +3149,12 @@ LRESULT CALLBACK WinProc(
 		case ID_SUPERDISC_EJECT:
 			if (Settings.SuperDisc && S9xSuperDiscHasDisc())
 			{
+				// A disc game can't run on without its disc: reset back to the
+				// BIOS home screen, which then reports the open tray.
 				S9xSuperDiscEjectDisc();
+				SendMenuCommand(ID_EMULATION_SOFT_RESET);
 				S9xSetInfoString("Disc ejected");
+				S9xRestoreWindowTitle();
 			}
 			CheckMenuStates();
 			break;
@@ -5734,6 +5742,9 @@ static void CheckMenuStates ()
 		int   pos = 0;
 		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_SUPERDISC, &emu, &pos))
 			EnableMenuItem(emu, pos, MF_BYPOSITION | (Settings.SuperDisc ? MF_ENABLED : MF_GRAYED));
+		// One disc at a time: Insert waits for the tray to be emptied.
+		EnableMenuItem(GUI.hMenu, ID_SUPERDISC_INSERT,
+		               MF_BYCOMMAND | (S9xSuperDiscHasDisc() ? MF_GRAYED : MF_ENABLED));
 		EnableMenuItem(GUI.hMenu, ID_SUPERDISC_EJECT,
 		               MF_BYCOMMAND | (S9xSuperDiscHasDisc() ? MF_ENABLED : MF_GRAYED));
 	}

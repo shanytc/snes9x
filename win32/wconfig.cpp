@@ -763,6 +763,10 @@ void WinPostLoad(ConfigFile& conf)
     if (Settings.MaxSpriteTilesPerLine != 34 && Settings.MaxSpriteTilesPerLine != 128)
         Settings.MaxSpriteTilesPerLine = 34;
 
+    // The core and the other ports read [Display]; honour it when win32's own key is absent.
+    if (!conf.Exists("Settings::MessageDisplayTime") && conf.Exists("Display::MessageDisplayTime"))
+        Settings.InitialInfoStringTimeout = conf.GetUInt("Display::MessageDisplayTime", 120);
+
     if (Settings.PF94TimerMinutes < 3 || Settings.PF94TimerMinutes > 18)
         Settings.PF94TimerMinutes = 6;
 

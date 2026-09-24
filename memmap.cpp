@@ -1908,7 +1908,7 @@ static void EmitSGBLoadBanner(const char *gb_path, uint8 bios_mode)
     s_last_bios_mode = bios_mode;
 
     const uint32 saved = Settings.InitialInfoStringTimeout;
-    Settings.InitialInfoStringTimeout = 60 * 5;
+    Settings.InitialInfoStringTimeout = saved ? 60 * 5 : 0;   // 0 = messages off
     S9xMessage(S9X_INFO, S9X_ROM_INFO, msg);
     Settings.InitialInfoStringTimeout = saved;
 }
@@ -2138,6 +2138,9 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
         Settings.GBRomPath[0] = '\0';
         return -1;
     }
+    // Reset() seeds the post-boot registers from the core's run mode, so it
+    // has to be current before the load; the frame loop only pushes it later.
+    S9xSGBSetRunMode(Settings.GameBoyRunMode);
     const uint8 gb_banner = StageGBBootROM(gbCgb, filename);
     if (!S9xSGBLoadROMBytes(rom, static_cast<size_t>(size), filename))
     {
@@ -2212,6 +2215,7 @@ bool8 CMemory::LoadROM (const char *filename)
             Settings.GBRomPath[0] = '\0';
             return FALSE;
         }
+        S9xSGBSetRunMode(Settings.GameBoyRunMode);   // see LoadGBFromBytes
         const uint8 gb_banner = StageGBBootROM(gbCgb, filename);
         if (!S9xSGBLoadROM(filename))
         {
@@ -2399,6 +2403,7 @@ bool8 CMemory::LoadROMWithSGBBIOS (const char *gb_path, const char *bios_path)
     strncpy(Settings.SGB_BIOSPath, bios_path, sizeof Settings.SGB_BIOSPath - 1);
     Settings.SGB_BIOSPath[sizeof Settings.SGB_BIOSPath - 1] = 0;
     Settings.GameBoyRunMode     = mode;
+    S9xSGBSetRunMode(mode);   // see LoadGBFromBytes
     Settings.GBClockMultiplier  = 1.0f;
 
     if (gb_path && *gb_path)
@@ -2469,6 +2474,7 @@ bool8 CMemory::LoadROMWithSGBBIOSBytes (const uint8 *gb_bytes, uint32 gb_size,
     strncpy(Settings.SGB_BIOSPath, bios_path, sizeof Settings.SGB_BIOSPath - 1);
     Settings.SGB_BIOSPath[sizeof Settings.SGB_BIOSPath - 1] = 0;
     Settings.GameBoyRunMode     = mode;
+    S9xSGBSetRunMode(mode);   // see LoadGBFromBytes
     Settings.GBClockMultiplier  = 1.0f;
 
     if (gb_path && *gb_path)

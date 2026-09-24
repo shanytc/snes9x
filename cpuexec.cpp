@@ -16,6 +16,7 @@
 #include "gfx.h"
 #include "sgb/sgb.h"
 #include "sfcbox.h"
+#include "superdisc.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
@@ -528,6 +529,10 @@ void S9xDoHEventProcessing (void)
 			// reset line and so must keep running while the game is held.
 			if (Settings.NSS)
 				S9xNSSEndScanline();
+
+			// Super Disc: mechacon replies and the drive's 75Hz sector clock.
+			if (Settings.SuperDisc)
+				S9xSuperDiscEndScanline();
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

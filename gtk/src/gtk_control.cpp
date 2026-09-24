@@ -139,6 +139,8 @@ const BindingLink b_links[] =
         { "b_gb_model_sgb2",       "GTK_gb_model_3"    },
         { "b_gb_model_sgbc",       "GTK_gb_model_4"    },
         { "b_bios_manager",        "GTK_bios_manager"  },
+        { "b_superdisc_insert",    "GTK_superdisc_insert" },
+        { "b_superdisc_eject",     "GTK_superdisc_eject" },
         { "b_insert_coin",         "GTK_insert_coin"   },
         { "b_sfcbox_keyswitch_0",  "GTK_sfcbox_keyswitch_0" },
         { "b_sfcbox_keyswitch_1",  "GTK_sfcbox_keyswitch_1" },
@@ -173,7 +175,7 @@ const int b_breaks[] =
         43, /* End of Graphic options */
         85, /* End of save/load states */
         94, /* End of sound buttons */
-        108, /* End of miscellaneous buttons */
+        110, /* End of miscellaneous buttons */
         NUM_JOYPAD_LINKS + NUM_EMU_LINKS, /* End of arcade front panels */
         -1
 };
@@ -727,6 +729,14 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         {
             top_level->open_bios_manager();
         }
+        else if (cmd.port[0] == PORT_SUPERDISC_INSERT)
+        {
+            top_level->open_superdisc_dialog();
+        }
+        else if (cmd.port[0] == PORT_SUPERDISC_EJECT)
+        {
+            top_level->eject_superdisc();
+        }
         else if (cmd.port[0] == PORT_INSERT_COIN)
         {
             top_level->insert_coin(0);
@@ -836,6 +846,14 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strcasecmp(name, "GTK_bios_manager"))
     {
         cmd.port[0] = PORT_BIOS_MANAGER;
+    }
+    else if (!strcasecmp(name, "GTK_superdisc_insert"))
+    {
+        cmd.port[0] = PORT_SUPERDISC_INSERT;
+    }
+    else if (!strcasecmp(name, "GTK_superdisc_eject"))
+    {
+        cmd.port[0] = PORT_SUPERDISC_EJECT;
     }
     else if (!strcasecmp(name, "GTK_insert_coin"))
     {

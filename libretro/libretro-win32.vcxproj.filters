@@ -138,6 +138,9 @@
     <ClInclude Include="..\nss.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\superdisc.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\z80.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
@@ -342,6 +345,9 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\nss.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\superdisc.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\z80.cpp">

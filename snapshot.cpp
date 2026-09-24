@@ -21,6 +21,7 @@
 #include "sgb/sgb.h"
 #include "sfcbox.h"
 #include "nss.h"
+#include "superdisc.h"
 #include "gfx.h"
 
 #ifndef min
@@ -1349,6 +1350,16 @@ void S9xFreezeToStream (STREAM stream)
 		delete [] nss_buf;
 	}
 
+	// Super Disc: the CD unit and the BIOS cart's DRAM, as an "SDC" blob.
+	if (Settings.SuperDisc)
+	{
+		const size_t	sdc_size = S9xSuperDiscStateSize();
+		uint8			*sdc_buf = new uint8[sdc_size];
+		S9xSuperDiscStateSave(sdc_buf);
+		FreezeBlock(stream, "SDC", sdc_buf, (int) sdc_size);
+		delete [] sdc_buf;
+	}
+
 	// SGB BIOS mode: piggyback the GB/SGB blob inside the SNES snapshot.
 	// The blob is self-versioning ("SGB!" magic + version + size); we just
 	// hand the raw bytes to FreezeBlock. Without this, BIOS-mode loads
@@ -1472,6 +1483,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 	int		local_box_size       = 0;
 	uint8	*local_nss_data      = NULL;
 	int		local_nss_size       = 0;
+	uint8	*local_sdc_data      = NULL;
+	int		local_sdc_size       = 0;
 	uint8	*local_gbe_data      = NULL;
 	int		local_gbe_size       = 0;
 	uint8	*local_screenshot    = NULL;
@@ -1652,6 +1665,23 @@ int S9xUnfreezeFromStream (STREAM stream)
 			}
 		}
 
+		// Optional Super Disc blob, likewise.
+		{
+			int sdc_block_len = 0;
+			if (CheckBlockName(stream, "SDC", sdc_block_len) && sdc_block_len > 0)
+			{
+				local_sdc_data = new uint8[sdc_block_len];
+				result = UnfreezeBlock(stream, "SDC", local_sdc_data, sdc_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_sdc_data;
+					local_sdc_data = NULL;
+					break;
+				}
+				local_sdc_size = sdc_block_len;
+			}
+		}
+
 		// Optional GB/SGB blob — present iff the snapshot was taken in
 		// BIOS mode (Settings.SGB_BIOSModeActive). Old snapshots and
 		// non-SGB SNES games omit it. CheckBlockName peeks without
@@ -1756,6 +1786,9 @@ int S9xUnfreezeFromStream (STREAM stream)
 		// needs no remap after restoring — just its own state.
 		if (Settings.NSS && local_nss_data)
 			S9xNSSStateLoad(local_nss_data, (size_t) local_nss_size);
+
+		if (Settings.SuperDisc && local_sdc_data)
+			S9xSuperDiscStateLoad(local_sdc_data, (size_t) local_sdc_size);
 
 		if (local_fillram)
 			memcpy(Memory.FillRAM, local_fillram, 0x8000);
@@ -2058,6 +2091,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_pf94_data)		delete [] local_pf94_data;
 	if (local_box_data)			delete [] local_box_data;
 	if (local_nss_data)			delete [] local_nss_data;
+	if (local_sdc_data)			delete [] local_sdc_data;
 	if (local_gbe_data)			delete [] local_gbe_data;
 
 	return (result);

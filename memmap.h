@@ -134,6 +134,7 @@ struct CMemory
 	bool8	LoadBSCart ();
 	bool8	LoadSFCBox (int32);
 	int		LoadNSSCart (const char *, int32 *);
+	bool8	LoadSuperDiscImage (const char *);
 	bool8	LoadGNEXT ();
 	bool8	LoadSRAM (const char *);
 	bool8	SaveSRAM (const char *);
@@ -166,6 +167,7 @@ struct CMemory
 	void	Map_Initialize (void);
 	void	Map_LoROMMap (void);
 	void	Map_SGBLoROMMap (void);
+	void	Map_SuperDiscLoROMMap (void);
 	void	Map_NoMAD1LoROMMap (void);
 	void	Map_JumboLoROMMap (void);
 	void	Map_ROM24MBSLoROMMap (void);

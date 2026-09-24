@@ -20,6 +20,7 @@
 #include "snes9x.h"
 #include "memmap.h"
 #include "controls.h"
+#include "superdisc.h"
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "RAIntegrationQt.hpp"
 #include "retroachievements.h"
@@ -749,6 +750,14 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
     {
         window->openBiosManager();
     }
+    else if (name == "SuperDiscInsert" && pressed)
+    {
+        window->superDiscInsert();
+    }
+    else if (name == "SuperDiscEject" && pressed)
+    {
+        window->superDiscEject();
+    }
     else if (pressed && name.compare(0, 7, "GBModel") == 0)
     {
         // Same route as the menu entry, gates included.
@@ -991,6 +1000,26 @@ void EmuApplication::reset()
         RA_OnReset();
 #endif
     });
+}
+
+bool EmuApplication::superDiscInsert(const std::string &filename)
+{
+    bool result = false;
+    emu_thread->runOnThread([&] {
+        result = S9xSuperDiscInsertDisc(filename.c_str());
+    }, true);
+    return result;
+}
+
+void EmuApplication::superDiscEject()
+{
+    emu_thread->runOnThread([&] {
+        S9xSuperDiscEjectDisc();
+        core->softReset();
+#ifdef RETROACHIEVEMENTS_SUPPORT
+        RA_OnReset();
+#endif
+    }, true);
 }
 
 void EmuApplication::powerCycle()

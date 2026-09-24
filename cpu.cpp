@@ -17,6 +17,7 @@
 #include "sgb/sgb.h"
 #include "voicekun.h"
 #include "sfcbox.h"
+#include "superdisc.h"
 #include "nss.h"
 #ifdef DEBUGGER
 #include "debug.h"
@@ -172,6 +173,10 @@ void S9xReset (void)
 	if (Settings.NSS)
 		S9xNSSPowerOn();
 
+	// Super Disc: the CD unit resets with the console and re-reads the TOC.
+	if (Settings.SuperDisc)
+		S9xSuperDiscPowerOn();
+
 	S9xInitCheatData();
 }
 
@@ -298,6 +303,8 @@ void S9xSoftReset (void)
 		S9xResetSRTC();
 	if (Settings.MSU1)
 		S9xMSU1Init();
+	if (Settings.SuperDisc)
+		S9xSuperDiscSoftReset();
 
 	S9xInitCheatData();
 }

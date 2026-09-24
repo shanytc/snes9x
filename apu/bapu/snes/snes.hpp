@@ -5,6 +5,7 @@
 #include "../../resampler.h"
 #include "../../../msu1.h"
 #include "../../../voicekun.h"
+#include "../../../superdisc.h"
 
 #define debugvirtual
 

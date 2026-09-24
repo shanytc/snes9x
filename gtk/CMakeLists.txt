@@ -397,6 +397,7 @@ list(APPEND SOURCES
     ../sfcbox.cpp
     ../hd64180.cpp
     ../nss.cpp
+    ../superdisc.cpp
     ../z80.cpp
     ../controls.cpp
     ../crosshairs.cpp

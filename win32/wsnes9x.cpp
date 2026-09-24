@@ -66,6 +66,7 @@
 #include "../acidsgb.h"
 #include "../sfcbox.h"
 #include "../nss.h"
+#include "../superdisc.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -176,7 +177,7 @@ void S9xWinScanJoypads();
 #define WM_CHEATS_ADDED (WM_APP + 1)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 7;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 8;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
@@ -801,6 +802,9 @@ static void CenterCursor()
 void S9xRestoreWindowTitle ()
 {
     TCHAR buf [1024];
+    if (Settings.SuperDisc)
+        _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSuperDiscTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+    else
     if (Memory.ROMFilename[0])
     {
         char def[_MAX_FNAME];
@@ -895,6 +899,22 @@ static inline bool MatchesHotkeyBinding(WORD key, int modifiers, SCustomKey *pri
 		}
 	}
 	return false;
+}
+
+// Super Disc Insert/Eject fire once per press: Insert opens a modal picker, and a
+// held key must not reopen it. A key-up re-arms them, and so does any gap longer
+// than the slowest repeat, since the key-up can land on the modal dialog instead.
+struct SuperDiscHotkeyGate { bool fired; DWORD last; };
+static SuperDiscHotkeyGate g_superDiscGate[2];
+
+static bool SuperDiscHotkeyShouldFire(int which)
+{
+	SuperDiscHotkeyGate &g = g_superDiscGate[which];
+	const DWORD now = timeGetTime();
+	const bool fire = !g.fired || now - g.last > 1100;
+	g.fired = true;
+	g.last = now;
+	return fire;
 }
 
 // Held-style hotkeys (Rewind/FastForward/ScopePause) must disengage when their
@@ -1306,6 +1326,22 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			if(!HKmatch(NSSGame[nssg]))
 				continue;
 			SendMenuCommand(ID_NSS_GAME1 + nssg);
+			hitHotKey = true;
+		}
+		// Super Disc drive, through the menu so its greying applies to the keys.
+		if(HKmatch(SuperDiscInsert))
+		{
+			if(SuperDiscHotkeyShouldFire(0))
+			{
+				SendMenuCommand(ID_SUPERDISC_INSERT);
+				g_superDiscGate[0].last = timeGetTime();	// the picker may have been up a while
+			}
+			hitHotKey = true;
+		}
+		if(HKmatch(SuperDiscEject))
+		{
+			if(SuperDiscHotkeyShouldFire(1))
+				SendMenuCommand(ID_SUPERDISC_EJECT);
 			hitHotKey = true;
 		}
 		if(HKmatch(ShowPressed))
@@ -2164,6 +2200,10 @@ LRESULT CALLBACK WinProc(
 		    {
                 Settings.Rewinding = false;
             }
+			if(HotkeyChordBroken((WORD)wParam, &CustomKeys.SuperDiscInsert, &CustomKeysExtra.SuperDiscInsert))
+				g_superDiscGate[0].fired = false;
+			if(HotkeyChordBroken((WORD)wParam, &CustomKeys.SuperDiscEject, &CustomKeysExtra.SuperDiscEject))
+				g_superDiscGate[1].fired = false;
 
 		}
 		break;
@@ -3107,6 +3147,51 @@ LRESULT CALLBACK WinProc(
 		case ID_NSS_EJECT0 + 1:
 		case ID_NSS_EJECT0 + 2:
 			S9xNSSEjectCart(cmd_id - ID_NSS_EJECT0);
+			CheckMenuStates();
+			break;
+
+		// Super Disc: swapping the disc in the drive. Inserting closes the
+		// tray on the new image; the BIOS notices on its next status poll.
+		case ID_SUPERDISC_INSERT:
+		{
+			if (!Settings.SuperDisc || S9xSuperDiscHasDisc())
+				break;
+			RestoreGUIDisplay();
+			OPENFILENAME	ofn;
+			TCHAR			szFileName[MAX_PATH];
+			szFileName[0] = TEXT('\0');
+			memset((LPVOID) &ofn, 0, sizeof(OPENFILENAME));
+			ofn.lStructSize = sizeof(OPENFILENAME);
+			ofn.hwndOwner   = GUI.hWnd;
+			ofn.lpstrFilter = TEXT("CD Images (*.cue;*.iso;*.bin)\0*.cue;*.iso;*.bin\0All Files (*.*)\0*.*\0\0");
+			ofn.lpstrFile   = szFileName;
+			ofn.nMaxFile    = MAX_PATH;
+			ofn.lpstrTitle  = TEXT("Super Disc - insert disc");
+			ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
+			if (GetOpenFileName(&ofn))
+			{
+				if (S9xSuperDiscInsertDisc(_tToChar(szFileName)))
+					S9xSetInfoString("Disc inserted");
+				else
+					MessageBox(GUI.hWnd, TEXT("That file is not a readable CD image."),
+					           TEXT("Super Disc"), MB_OK | MB_ICONWARNING);
+			}
+			RestoreSNESDisplay();
+			S9xRestoreWindowTitle();
+			CheckMenuStates();
+			break;
+		}
+
+		case ID_SUPERDISC_EJECT:
+			if (Settings.SuperDisc && S9xSuperDiscHasDisc())
+			{
+				// A disc game can't run on without its disc: reset back to the
+				// BIOS home screen, which then reports the open tray.
+				S9xSuperDiscEjectDisc();
+				SendMenuCommand(ID_EMULATION_SOFT_RESET);
+				S9xSetInfoString("Disc ejected");
+				S9xRestoreWindowTitle();
+			}
 			CheckMenuStates();
 			break;
 
@@ -5686,6 +5771,19 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.FullScreen||GUI.EmulatedFullscreen) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_FULLSCREEN, FALSE, &mii);
+
+	// Super Disc drive: live only while its BIOS cart is.
+	{
+		HMENU emu = NULL;
+		int   pos = 0;
+		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_SUPERDISC, &emu, &pos))
+			EnableMenuItem(emu, pos, MF_BYPOSITION | (Settings.SuperDisc ? MF_ENABLED : MF_GRAYED));
+		// One disc at a time: Insert waits for the tray to be emptied.
+		EnableMenuItem(GUI.hMenu, ID_SUPERDISC_INSERT,
+		               MF_BYCOMMAND | (S9xSuperDiscHasDisc() ? MF_GRAYED : MF_ENABLED));
+		EnableMenuItem(GUI.hMenu, ID_SUPERDISC_EJECT,
+		               MF_BYCOMMAND | (S9xSuperDiscHasDisc() ? MF_ENABLED : MF_GRAYED));
+	}
 
 	// Nintendo Super System front panel: live only while its supervisor is.
 	{
@@ -11595,7 +11693,7 @@ void ClearExts(void)
 // rewriting them, so extensions the user added by hand survive the upgrade.
 static void TopUpExtFile(void)
 {
-	static const char *needed[] = { "gb", "gbc" };
+	static const char *needed[] = { "gb", "gbc", "cue", "iso" };
 	bool found[_countof(needed)] = {};
 	char buffer[MAX_PATH+2];
 
@@ -11733,6 +11831,8 @@ void MakeExtFile(void)
 	out<<"bsN"<<endl;
 	out<<"jmaY"<<endl;
 	out << "stN" << endl;
+	out << "cueN" << endl;		// Super Disc CD images
+	out << "isoN" << endl;
 	out.close();
 	SetFileAttributes(TEXT("Valid.Ext"), FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY);
 };
@@ -15387,6 +15487,17 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
+    // Tab 7: Emulation -> Super Disc, the CD drive.
+    {
+        { &CustomKeys.SuperDiscInsert,  &CustomKeysExtra.SuperDiscInsert,  HOTKEYS_SUPERDISC_INSERT },
+        { &CustomKeys.SuperDiscEject,   &CustomKeysExtra.SuperDiscEject,   HOTKEYS_SUPERDISC_EJECT },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -15555,7 +15666,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System")
+				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

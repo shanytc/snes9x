@@ -16,6 +16,7 @@
 #include "movie.h"
 #include "display.h"
 #include "sfcbox.h"
+#include "superdisc.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef NETPLAY_SUPPORT
@@ -1134,6 +1135,9 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 			return;
 		}
 		else
+		if (Settings.SuperDisc && (Address == 0x21d0 || (Address >= 0x21e0 && Address <= 0x21e5)))
+			S9xSetSuperDisc(Byte, Address);
+		else
 		if (Settings.BS      && Address >= 0x2188 && Address <= 0x219f)
 			S9xSetBSXPPU(Byte, Address);
 		else
@@ -1387,6 +1391,9 @@ uint8 S9xGetPPU (uint16 Address)
 		else
 		if (Settings.SA1     && Address >= 0x2200)
 			return (S9xGetSA1(Address));
+		else
+		if (Settings.SuperDisc && Address >= 0x21e1 && Address <= 0x21e3)
+			return (S9xGetSuperDisc(Address));
 		else
 		if (Settings.BS      && Address >= 0x2188 && Address <= 0x219f)
 			return (S9xGetBSXPPU(Address));

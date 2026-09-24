@@ -10,6 +10,7 @@
 #include "apu.h"
 #include "../msu1.h"
 #include "../voicekun.h"
+#include "../superdisc.h"
 #include "../snapshot.h"
 #include "../display.h"
 #include "resampler.h"
@@ -69,6 +70,12 @@ namespace voicekun {
 static Resampler resampler;
 static std::vector<int16_t> resampler_buffer;
 } // namespace voicekun
+
+namespace superdisc {
+// Super Disc CD-DA / XA-ADPCM, 44.1 kHz stereo like the two above
+static Resampler resampler;
+static std::vector<int16_t> resampler_buffer;
+} // namespace superdisc
 
 namespace audiowave {
 static bool enabled = false;
@@ -144,6 +151,7 @@ void S9xSetAudioFidelity(int engine)
     Settings.AudioFidelity = engine;
     spc::resampler.set_engine(engine);
     msu::resampler.set_engine(engine);
+    superdisc::resampler.set_engine(engine);
     voicekun::resampler.set_engine(engine);
 }
 
@@ -402,6 +410,19 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
         }
     }
 
+    if (Settings.SuperDisc)
+    {
+        if ((int)superdisc::resampler_buffer.size() < sample_count)
+            superdisc::resampler_buffer.resize(sample_count);
+
+        superdisc::resampler.read(superdisc::resampler_buffer.data(), sample_count);
+        for (int i = 0; i < sample_count; ++i)
+        {
+            int32 mixed = (int32)out[i] + superdisc::resampler_buffer[i];
+            out[i] = ((int16)mixed != mixed) ? (mixed >> 31) ^ 0x7fff : mixed;
+        }
+    }
+
     if (spc::resampler.space_empty() >= 535 * 2 || !Settings.SoundSync ||
         Settings.TurboMode || Settings.Mute)
         spc::sound_in_sync = true;
@@ -425,6 +446,8 @@ int S9xGetSampleCount(void)
 		avail = Resampler::min(avail, msu::resampler.avail());
 	if (Settings.VoiceKun)
 		avail = Resampler::min(avail, voicekun::resampler.avail());
+	if (Settings.SuperDisc)
+		avail = Resampler::min(avail, superdisc::resampler.avail());
     return avail;
 }
 
@@ -447,6 +470,8 @@ void S9xClearSamples(void)
         msu::resampler.clear();
     if (Settings.VoiceKun)
         voicekun::resampler.clear();
+    if (Settings.SuperDisc)
+        superdisc::resampler.clear();
 }
 
 void S9xAudioWaveformPushMix(const int16_t *src, int frames)
@@ -809,6 +834,7 @@ int S9xAudioWaveformSampleRate(void)
 static ResamplerState saved_spc_resampler_state;
 static ResamplerState saved_msu_resampler_state;
 static ResamplerState saved_voicekun_resampler_state;
+static ResamplerState saved_superdisc_resampler_state;
 
 void S9xRunAheadSaveAudio(void)
 {
@@ -817,6 +843,8 @@ void S9xRunAheadSaveAudio(void)
         msu::resampler.save_state(saved_msu_resampler_state);
     if (Settings.VoiceKun)
         voicekun::resampler.save_state(saved_voicekun_resampler_state);
+    if (Settings.SuperDisc)
+        superdisc::resampler.save_state(saved_superdisc_resampler_state);
 }
 
 void S9xRunAheadLoadAudio(void)
@@ -826,6 +854,8 @@ void S9xRunAheadLoadAudio(void)
         msu::resampler.load_state(saved_msu_resampler_state);
     if (Settings.VoiceKun)
         voicekun::resampler.load_state(saved_voicekun_resampler_state);
+    if (Settings.SuperDisc)
+        superdisc::resampler.load_state(saved_superdisc_resampler_state);
 }
 
 bool8 S9xSyncSound(void)
@@ -876,6 +906,7 @@ static void UpdatePlaybackRate(void)
     if (Settings.MSU1)
         msu::resampler.time_ratio(cd_ratio);
     voicekun::resampler.time_ratio(cd_ratio);
+    superdisc::resampler.time_ratio(cd_ratio);
 }
 
 bool8 S9xInitSound(int buffer_ms)
@@ -890,10 +921,12 @@ bool8 S9xInitSound(int buffer_ms)
     spc::resampler.resize(buffer_size_samples);
     msu::resampler.resize(buffer_size_samples * 3 / 2);
     voicekun::resampler.resize(buffer_size_samples * 3 / 2);
+    superdisc::resampler.resize(buffer_size_samples * 3 / 2);
 
     SNES::dsp.spc_dsp.set_output(&spc::resampler);
     S9xMSU1SetOutput(&msu::resampler);
     S9xVoiceKunSetOutput(&voicekun::resampler);
+    S9xSuperDiscSetOutput(&superdisc::resampler);
 
     UpdatePlaybackRate();
 
@@ -930,6 +963,7 @@ bool8 S9xInitAPU(void)
     spc::resampler.clear();
     msu::resampler.clear();
     voicekun::resampler.clear();
+    superdisc::resampler.clear();
 
     return true;
 }
@@ -939,6 +973,7 @@ void S9xDeinitAPU(void)
     S9xMSU1DeInit();
     msu::resampler_buffer.clear();
     voicekun::resampler_buffer.clear();
+    superdisc::resampler_buffer.clear();
 }
 
 static inline uint32 S9xAPUEffectiveDenominator(void)

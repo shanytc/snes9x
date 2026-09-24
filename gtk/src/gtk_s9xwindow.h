@@ -81,6 +81,8 @@ class Snes9xWindow : public GtkBuilderWindow
     void nss_game(int slot);
     void nss_eject(int slot);
     void nss_toggle_dip(int sw);
+    void open_superdisc_dialog();
+    void eject_superdisc();
     void show_rom_info();
     void show_color_correction_dialog();
 

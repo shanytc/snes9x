@@ -245,6 +245,7 @@
     <ClInclude Include="..\seta.h" />
     <ClInclude Include="..\sfcbox.h" />
     <ClInclude Include="..\nss.h" />
+    <ClInclude Include="..\superdisc.h" />
     <ClInclude Include="..\z80.h" />
     <ClInclude Include="..\sha256.h" />
     <ClInclude Include="..\snapshot.h" />
@@ -328,6 +329,7 @@
     <ClCompile Include="..\seta018.cpp" />
     <ClCompile Include="..\sfcbox.cpp" />
     <ClCompile Include="..\nss.cpp" />
+    <ClCompile Include="..\superdisc.cpp" />
     <ClCompile Include="..\z80.cpp" />
     <ClCompile Include="..\sha256.cpp" />
     <ClCompile Include="..\snapshot.cpp" />

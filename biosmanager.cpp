@@ -7,6 +7,7 @@
 #include "snes9x.h"
 #include "biosmanager.h"
 #include "memmap.h"
+#include "superdisc.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -52,11 +53,13 @@ static const char *const kNamesSufami[] = { "STBIOS.bin", NULL };
 static const char *const kNamesNSS[]    = { "nss-ic14.02.ic14", "nss.zip", "nss-c.ic14",
                                             "nss-v3.ic14", "NSS-v03a.bin", NULL };
 static const char *const kNamesNSSFont[]= { "m50458_char.bin", "m50458.zip", "m50458-001sp", NULL };
+static const char *const kNamesSuperDisc[] = { "SDBR_v0.95.sfc", "SDBR_v0.95_unheadered.sfc",
+                                               "Super Disc System Cartridge (Prototype).zip", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
-// NSS_FONT_SIZE. 0 = don't care (the SGB carts ship in two sizes, the CGB
-// boot ROM in two layouts).
+// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE. 0 = don't care (the SGB carts
+// ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
 	{ "GameBoy",       "Game Boy",          kNamesGB,       0x100,   "Optional, adds the boot logo" },
@@ -71,6 +74,7 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "SufamiTurbo",   "Sufami Turbo",      kNamesSufami,   0x40000, NULL },
 	{ "NSS",           "Nintendo Super System", kNamesNSS,   0x8000,  NULL },
 	{ "NSSFont",       "NSS (M50458 charset)",  kNamesNSSFont, 0x1200,NULL },
+	{ "SuperDisc",     "Super Disc",        kNamesSuperDisc, 0x20000, NULL },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -164,6 +168,7 @@ static bool SizeOkForSlot (int slot, uint32 n)
 {
 	if (n == 0) return (false);
 	if (slot == S9X_BIOS_GBC) return (n == 0x900 || n == 0x800);
+	if (slot == S9X_BIOS_SUPERDISC) return (n == SDISC_BIOS_SIZE || n == SDISC_BIOS_SIZE + 0x200);
 	return (kSlots[slot].size == 0 || n == kSlots[slot].size);
 }
 
@@ -214,7 +219,7 @@ enum BiosImageKind
 	KIND_UNKNOWN = 0,
 	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
 	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
-	KIND_NSS_BIOS, KIND_NSS_FONT
+	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS
 };
 
 static const char *KindName (int kind)
@@ -231,6 +236,7 @@ static const char *KindName (int kind)
 		case KIND_SUFAMI_BIOS: return ("Sufami Turbo BIOS");
 		case KIND_NSS_BIOS:  return ("Nintendo Super System BIOS");
 		case KIND_NSS_FONT:  return ("NSS OSD charset");
+		case KIND_SUPERDISC_BIOS: return ("Super Disc BIOS");
 		default:             return ("unrecognised image");
 	}
 }
@@ -268,6 +274,12 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 	if (full == 0x40000 && n >= 0x1E &&
 	    memcmp(d, "BANDAI SFC-ADX", 14) == 0 && memcmp(d + 0x10, "SFC-ADX BACKUP", 14) == 0)
 		return (KIND_SUFAMI_BIOS);
+
+	// The Super Disc BIOS, with or without a copier header.
+	if (full == SDISC_BIOS_SIZE && n >= 0x8000 && S9xSuperDiscIsBIOS(d, SDISC_BIOS_SIZE))
+		return (KIND_SUPERDISC_BIOS);
+	if (full == SDISC_BIOS_SIZE + 0x200 && n >= 0x8200 && S9xSuperDiscIsBIOS(d + 0x200, SDISC_BIOS_SIZE))
+		return (KIND_SUPERDISC_BIOS);
 
 	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
 	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
@@ -319,6 +331,7 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_SUFAMI:    return (KIND_SUFAMI_BIOS);
 		case S9X_BIOS_NSS:       return (KIND_NSS_BIOS);
 		case S9X_BIOS_NSS_FONT:  return (KIND_NSS_FONT);
+		case S9X_BIOS_SUPERDISC: return (KIND_SUPERDISC_BIOS);
 		default:                 return (KIND_UNKNOWN);
 	}
 }
@@ -390,7 +403,7 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 	const int want = ExpectedKind(slot);
 	KindProbe          probe = { want, KIND_UNKNOWN };
 	std::vector<uint8> img;
-	if (!S9xReadBiosImage(g_paths[slot], img, 0x8000, AcceptKind, &probe))
+	if (!S9xReadBiosImage(g_paths[slot], img, 0x8200, AcceptKind, &probe))
 	{
 		// Say it is wrong, not just what it is, or the row reads as a caption
 		// for whatever was dropped on it.

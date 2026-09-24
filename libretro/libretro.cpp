@@ -1372,6 +1372,87 @@ static void set_gb_memory_maps(void)
     environ_cb(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &map);
 }
 
+// Super Disc: the frontend's disc control drives the drive. Ejecting also
+// resets back to the BIOS home screen, as the desktop ports do.
+static std::vector<std::string> superdisc_images;
+static unsigned superdisc_index = 0;
+static bool superdisc_ejected = false;
+
+static bool RETRO_CALLCONV superdisc_set_eject_state(bool ejected)
+{
+    if (!Settings.SuperDisc || ejected == superdisc_ejected)
+        return !!Settings.SuperDisc;
+
+    if (ejected)
+    {
+        S9xSuperDiscEjectDisc();
+        S9xSoftReset();
+    }
+    else if (superdisc_index < superdisc_images.size() && !superdisc_images[superdisc_index].empty())
+    {
+        if (!S9xSuperDiscInsertDisc(superdisc_images[superdisc_index].c_str()))
+            return false;
+    }
+    superdisc_ejected = ejected;
+    return true;
+}
+
+static bool RETRO_CALLCONV superdisc_get_eject_state(void)
+{
+    return superdisc_ejected;
+}
+
+static unsigned RETRO_CALLCONV superdisc_get_image_index(void)
+{
+    return superdisc_index;
+}
+
+static bool RETRO_CALLCONV superdisc_set_image_index(unsigned index)
+{
+    if (!superdisc_ejected || index > superdisc_images.size())
+        return false;
+    superdisc_index = index;   // == size means "no disc"
+    return true;
+}
+
+static unsigned RETRO_CALLCONV superdisc_get_num_images(void)
+{
+    return (unsigned) superdisc_images.size();
+}
+
+static bool RETRO_CALLCONV superdisc_replace_image_index(unsigned index, const struct retro_game_info *info)
+{
+    if (!superdisc_ejected || index >= superdisc_images.size())
+        return false;
+    if (info && info->path)
+        superdisc_images[index] = info->path;
+    else
+    {
+        superdisc_images.erase(superdisc_images.begin() + index);
+        if (superdisc_index > index)
+            superdisc_index--;
+    }
+    return true;
+}
+
+static bool RETRO_CALLCONV superdisc_add_image_index(void)
+{
+    if (!superdisc_ejected)
+        return false;
+    superdisc_images.push_back(std::string());
+    return true;
+}
+
+static struct retro_disk_control_callback superdisc_disk_control = {
+    superdisc_set_eject_state,
+    superdisc_get_eject_state,
+    superdisc_get_image_index,
+    superdisc_set_image_index,
+    superdisc_get_num_images,
+    superdisc_replace_image_index,
+    superdisc_add_image_index,
+};
+
 bool retro_load_game(const struct retro_game_info *game)
 {
     init_descriptors();
@@ -1450,6 +1531,18 @@ bool retro_load_game(const struct retro_game_info *game)
         g_geometry_update = true;
 
         set_gb_memory_maps();
+
+        // Super Disc: hand the drive to the frontend's disc control, with the
+        // disc this session booted (if any) as image 0.
+        superdisc_images.clear();
+        superdisc_index = 0;
+        superdisc_ejected = !S9xSuperDiscHasDisc();
+        if (Settings.SuperDisc)
+        {
+            if (S9xSuperDiscHasDisc())
+                superdisc_images.push_back(S9xSuperDiscDiscPath());
+            environ_cb(RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE, &superdisc_disk_control);
+        }
 
         if (randomize_memory)
         {

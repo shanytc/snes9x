@@ -150,6 +150,15 @@ class EmuMainWindow : public QMainWindow
     void nssEject(int slot);
     void nssToggleDip(int sw);
 
+    QMenu *superdisc_menu = nullptr;
+    QAction *superdisc_menu_action = nullptr;
+    QAction *superdisc_insert_action = nullptr;
+    QAction *superdisc_eject_action = nullptr;
+    void refreshSuperDiscMenu();
+    void superDiscInsert();
+    void superDiscEject();
+    void updateWindowTitle();
+
     QTimer mouse_timer;
     bool cursor_visible = true;
     // Light guns aim at the spot under the (ungrabbed) host pointer.

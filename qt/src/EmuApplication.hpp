@@ -83,6 +83,10 @@ struct EmuApplication
     void pause();
     void reset();
     void powerCycle();
+    /* Super Disc drive, run on the emulation thread. Eject also resets back
+     * to the BIOS home screen, which then reports the open tray. */
+    bool superDiscInsert(const std::string &filename);
+    void superDiscEject();
     void suspendThread();
     void unsuspendThread();
     bool isPaused();

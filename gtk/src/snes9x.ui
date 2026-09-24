@@ -1989,6 +1989,35 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkMenuItem" id="superdisc_item">
+                        <property name="label" translatable="yes">Super _Disc</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="use_underline">True</property>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="superdisc_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkMenuItem" id="superdisc_insert_item">
+                                <property name="label" translatable="yes">_Insert Disc…</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="superdisc_eject_item">
+                                <property name="label" translatable="yes">_Eject Disc</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkSeparatorMenuItem" id="sppu_separator">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>

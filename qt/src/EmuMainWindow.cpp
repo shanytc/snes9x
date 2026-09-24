@@ -55,6 +55,7 @@
 #include "voicekun.h"
 #include "nss.h"
 #include "sfcbox.h"
+#include "superdisc.h"
 #include "movie.h"
 #include "snapshot.h"
 #include "fscompat.h"
@@ -742,6 +743,74 @@ bool EmuMainWindow::arcadeShortcut(const std::string &name)
     return true;
 }
 
+void EmuMainWindow::refreshSuperDiscMenu()
+{
+    if (!superdisc_menu_action)
+        return;
+
+    superdisc_menu_action->setVisible(Settings.SuperDisc);
+    if (!Settings.SuperDisc)
+        return;
+
+    // One disc at a time: Insert waits for the tray to be emptied.
+    const bool has_disc = S9xSuperDiscHasDisc();
+    superdisc_insert_action->setEnabled(!has_disc);
+    superdisc_eject_action->setEnabled(has_disc);
+}
+
+void EmuMainWindow::superDiscInsert()
+{
+    if (!Settings.SuperDisc || S9xSuperDiscHasDisc())
+        return;
+
+    app.pause();
+
+    QFileDialog dialog(this, tr("Super Disc - insert disc"));
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    dialog.setDirectory(QString::fromStdString(app.config->last_rom_folder));
+    dialog.setNameFilters({ tr("CD Images (*.cue *.iso *.bin)"), tr("All Files (*)") });
+
+    if (dialog.exec() && !dialog.selectedFiles().empty())
+    {
+        auto filename = dialog.selectedFiles()[0].toStdString();
+        if (app.superDiscInsert(filename))
+            S9xSetInfoString("Disc inserted");
+        else
+            QMessageBox::warning(this, tr("Super Disc"), tr("That file is not a readable CD image."));
+    }
+
+    updateWindowTitle();
+    app.unpause();
+}
+
+void EmuMainWindow::superDiscEject()
+{
+    if (!Settings.SuperDisc || !S9xSuperDiscHasDisc())
+        return;
+
+    // A disc game can't run on without its disc: the eject resets back to
+    // the BIOS home screen, which then reports the open tray.
+    app.superDiscEject();
+    S9xSetInfoString("Disc ejected");
+    updateWindowTitle();
+}
+
+// Super Disc sessions name the BIOS and the disc in play. Any other title
+// (Kaillera's, say) is left alone unless it is a stale Super Disc one.
+void EmuMainWindow::updateWindowTitle()
+{
+    if (!Settings.SuperDisc && !windowTitle().startsWith("Super Disc ("))
+        return;
+    event_title_suffix.clear();
+    if (Settings.SuperDisc)
+        setWindowTitle(QString("%1 - SuperSnes9x %2")
+                           .arg(QString::fromUtf8(S9xSuperDiscTitle()))
+                           .arg(VERSION_DISPLAY));
+    else
+        setWindowTitle(QString("SuperSnes9x %1").arg(VERSION_DISPLAY));
+    updateEventTitle();   // put the session-timer countdown back
+}
+
 // File->Choose Icon: the four bundled logos, 1-4 like win32's Window:Icon.
 static const int logo_sizes[] = { 16, 24, 32, 48, 64, 128, 256 };
 static const char *launcher_icon_name = "snes9x"; // Icon= of super-snes9x-qt.desktop
@@ -1191,6 +1260,16 @@ void EmuMainWindow::createWidgets()
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshVoicekunMenu);
 
     createArcadeMenus(emulation_menu);
+
+    // Super Disc drive: only offered while its BIOS cart is loaded.
+    superdisc_menu = new QMenu(tr("Super &Disc"));
+    superdisc_insert_action = superdisc_menu->addAction(tr("&Insert Disc..."));
+    connect(superdisc_insert_action, &QAction::triggered, this, &EmuMainWindow::superDiscInsert);
+    superdisc_eject_action = superdisc_menu->addAction(tr("&Eject Disc"));
+    connect(superdisc_eject_action, &QAction::triggered, this, &EmuMainWindow::superDiscEject);
+    superdisc_menu_action = emulation_menu->addMenu(superdisc_menu);
+    superdisc_menu_action->setVisible(false);
+    connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshSuperDiscMenu);
 
     emulation_menu->addSeparator();
 
@@ -1965,6 +2044,7 @@ bool EmuMainWindow::openFile(const std::string &original_filename)
         ru.insert(ru.begin(), filename);
         populateRecentlyUsed();
         setCoreActionsEnabled(true);
+        updateWindowTitle();
         if (!isFullScreen() && app.config->fullscreen_on_open)
             toggleFullscreen();
 

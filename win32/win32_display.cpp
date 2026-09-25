@@ -15,6 +15,7 @@
 #include "../font.h"
 #include "../sgb/sgb.h"
 #include "../acidsgb.h"
+#include "../sfcbox.h"
 #include <shellapi.h>
 #include "wsnes9x.h"
 #include "win32_display.h"
@@ -404,6 +405,17 @@ bool8 S9xDeinitUpdate (int Width, int Height)
 		if (secs != lastShownSecs)
 		{
 			lastShownSecs = secs;
+			S9xRestoreWindowTitle();
+		}
+	}
+	if (SFCBox.Active)
+	{
+		// The box swaps games under the SNES; the title follows.
+		static std::string lastBoxTitle;
+		const char *title = S9xSFCBoxTitle();
+		if (lastBoxTitle != title)
+		{
+			lastBoxTitle = title;
 			S9xRestoreWindowTitle();
 		}
 	}

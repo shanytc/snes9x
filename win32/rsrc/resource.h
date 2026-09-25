@@ -452,12 +452,6 @@
 #define IDC_PF94_TIME_LABEL             3323
 #define IDC_PF94_TIMER_SHOW             3324
 #define IDC_PF94_TIMER_SHOW_LABEL       3325
-#define IDC_SFCBOX_OSD_BACKDROP         3326
-#define IDC_SFCBOX_KEYSWITCH            3327
-#define IDC_SFCBOX_KEYSWITCH_LABEL      3328
-#define IDC_SFCBOX_COIN                 3329
-#define IDC_SFCBOX_OSD_LANGUAGE         3330
-#define IDC_SFCBOX_OSD_LANGUAGE_LABEL   3331
 #define IDC_SET_DEFAULTS                3038
 #define IDC_BUTTON_SLOT_1               3039
 #define IDC_BUTTON_EDIT_CHEATGROUP      3039
@@ -974,6 +968,13 @@
 #define ID_EMULATION_SUPERDISC          44430
 #define ID_SUPERDISC_INSERT             44431
 #define ID_SUPERDISC_EJECT              44432
+/* Super Famicom Box (Emulation menu) */
+#define ID_EMULATION_SFCBOX             44433
+#define ID_SFCBOX_COIN                  44434
+#define ID_SFCBOX_KEYSWITCH0            44435
+#define ID_SFCBOX_OSD_JAPANESE          44440
+#define ID_SFCBOX_OSD_ENGLISH           44441
+#define ID_SFCBOX_OSD_BACKDROP          44442
 
 
 #define IDC_STATIC                      -1
@@ -983,7 +984,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
-#define _APS_NEXT_COMMAND_VALUE         44433
+#define _APS_NEXT_COMMAND_VALUE         44443
 #define _APS_NEXT_CONTROL_VALUE         3620
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

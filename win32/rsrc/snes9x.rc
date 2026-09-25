@@ -853,7 +853,7 @@ BEGIN
     ICON            "",IDC_STATIC_ICON,7,7,20,20,SS_CENTERIMAGE | SS_REALSIZEIMAGE | WS_GROUP
 END
 
-IDD_DIALOG_HACKS DIALOGEX 0, 0, 234, 264
+IDD_DIALOG_HACKS DIALOGEX 0, 0, 234, 216
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Emulator Hacks"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
@@ -862,8 +862,8 @@ BEGIN
     LTEXT           "The settings in this dialog should only be used for compatibility with old ROM hacks or if you otherwise know what you're doing. If any problems occur, click ""Set Defaults"" to reset the options to normal.",
                     IDC_STATIC,34,6,194,40
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,6,50,222,1
-    DEFPUSHBUTTON   "OK",IDOK,126,244,48,14
-    PUSHBUTTON      "Cancel",IDCANCEL,180,244,48,14
+    DEFPUSHBUTTON   "OK",IDOK,126,196,48,14
+    PUSHBUTTON      "Cancel",IDCANCEL,180,196,48,14
     RTEXT           "CPU Overclock:",IDC_STATIC,12,58,90,8
     RTEXT           "Sound Interpolation Type:",IDC_STATIC,6,76,96,8
     COMBOBOX        IDC_CPU_OVERCLOCK,108,58,54,30,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
@@ -874,17 +874,11 @@ BEGIN
     CONTROL         "Disable Sprite Limit",IDC_NO_SPRITE_LIMIT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,108,118,80,10
     CONTROL         "No Sprite Limit (GameBoy)",IDC_NO_SPRITE_LIMIT_GB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,108,130,120,10
     CONTROL         "Allow executable icon override",IDC_ALLOW_EXE_ICON,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,108,142,120,10
-    CONTROL         "SFC-Box OSD backdrop",IDC_SFCBOX_OSD_BACKDROP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,108,154,120,10
-    RTEXT           "SFC-Box OSD Language:",IDC_SFCBOX_OSD_LANGUAGE_LABEL,6,170,96,8
-    COMBOBOX        IDC_SFCBOX_OSD_LANGUAGE,108,168,70,40,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    RTEXT           "SFC-Box Keyswitch:",IDC_SFCBOX_KEYSWITCH_LABEL,6,188,96,8
-    COMBOBOX        IDC_SFCBOX_KEYSWITCH,108,186,70,60,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Insert Coin",IDC_SFCBOX_COIN,182,186,46,12
-    RTEXT           "PowerFest '94 Time Limit:",IDC_PF94_TIME_LABEL,6,206,96,8
-    COMBOBOX        IDC_PF94_TIME,108,204,70,96,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    RTEXT           "PowerFest '94 Timer:",IDC_PF94_TIMER_SHOW_LABEL,6,224,96,8
-    COMBOBOX        IDC_PF94_TIMER_SHOW,108,222,70,60,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Set Defaults",IDC_SET_DEFAULTS,6,244,48,14
+    RTEXT           "PowerFest '94 Time Limit:",IDC_PF94_TIME_LABEL,6,158,96,8
+    COMBOBOX        IDC_PF94_TIME,108,156,70,96,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    RTEXT           "PowerFest '94 Timer:",IDC_PF94_TIMER_SHOW_LABEL,6,176,96,8
+    COMBOBOX        IDC_PF94_TIMER_SHOW,108,174,70,60,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Set Defaults",IDC_SET_DEFAULTS,6,196,48,14
 END
 
 IDD_COLORCORRECTION DIALOGEX 0, 0, 260, 244
@@ -1583,6 +1577,25 @@ BEGIN
                 MENUITEM "Switch &7",                   (ID_NSS_DIP0+6),MFT_STRING,MFS_ENABLED
                 MENUITEM "Switch &8",                   (ID_NSS_DIP0+7),MFT_STRING,MFS_ENABLED
             END
+        END
+        POPUP "Super &Famicom Box",             ID_EMULATION_SFCBOX,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&Insert Coin",                ID_SFCBOX_COIN,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            POPUP "&Keyswitch",                     0,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "&1 (Options)",                (ID_SFCBOX_KEYSWITCH0+0),MFT_STRING,MFS_ENABLED
+                MENUITEM "O&FF",                        (ID_SFCBOX_KEYSWITCH0+1),MFT_STRING,MFS_ENABLED
+                MENUITEM "&ON (Play)",                  (ID_SFCBOX_KEYSWITCH0+2),MFT_STRING,MFS_ENABLED
+                MENUITEM "&2",                          (ID_SFCBOX_KEYSWITCH0+3),MFT_STRING,MFS_ENABLED
+                MENUITEM "&3 (Self-Test)",              (ID_SFCBOX_KEYSWITCH0+4),MFT_STRING,MFS_ENABLED
+            END
+            POPUP "OSD &Language",                  0,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "&Japanese",                   ID_SFCBOX_OSD_JAPANESE,MFT_STRING,MFS_ENABLED
+                MENUITEM "&English",                    ID_SFCBOX_OSD_ENGLISH,MFT_STRING,MFS_ENABLED
+            END
+            MENUITEM "OSD &Backdrop",               ID_SFCBOX_OSD_BACKDROP,MFT_STRING,MFS_ENABLED
         END
         POPUP "Super &Disc",                    ID_EMULATION_SUPERDISC,MFT_STRING,MFS_ENABLED
         BEGIN

@@ -147,6 +147,9 @@ void	S9xSFCBoxRenderOSD (uint16 *screen, int pitch, int width, int height);
 // Front panel
 void	S9xSFCBoxInsertCoin (void);
 
+// "Super Famicom Box - <game>", or just "Super Famicom Box" on the menu
+const char *S9xSFCBoxTitle (void);
+
 // Battery-backed KROM work RAM (+ RTC SRAM pages), "<rom>.box" sidecar
 bool8	S9xSFCBoxLoadNVRAM (void);
 bool8	S9xSFCBoxSaveNVRAM (void);

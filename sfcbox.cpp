@@ -391,7 +391,7 @@ static inline int OSDGlyphDot (uint8 ch, int row, int dot)
 }
 
 // ---------------------------------------------------------------------------
-// OSD English translation (win32 Hacks option, Settings.SFCBoxOSDEnglish).
+// OSD English translation (win32 Emulation -> Super Famicom Box, Settings.SFCBoxOSDEnglish).
 //
 // A view-layer substitution: the KROM runs untouched (checksums, self-test
 // and savestates stay authentic) and known Japanese phrases are swapped for
@@ -736,7 +736,7 @@ void S9xSFCBoxRenderOSD (uint16 *screen, int pitch, int width, int height)
 	// for the blue supervisor screens NO$SNS shows. In external-sync mode
 	// it genlocks to the SNES video and the plane outside the characters
 	// stays transparent. snes9x traditionally superimposes in both modes,
-	// so the raster can be turned off (win32 Hacks dialog, default on).
+	// so the raster can be turned off (win32 Super Famicom Box menu, default on).
 	if (Settings.SFCBoxOSDBackdrop && !o->ExtSync)
 	{
 		uint16	uc = BUILD_PIXEL(osd_r5[o->UnderColor], osd_g5[o->UnderColor], osd_b5[o->UnderColor]);
@@ -1158,6 +1158,60 @@ void S9xSFCBoxInsertCoin (void)
 }
 
 // ---------------------------------------------------------------------------
+// Window title
+
+// GROM title of the program the SNES was last reset into; empty for the
+// attraction menu. Not saved: PostLoadState re-derives it.
+static char	SFCBoxGame[23];
+
+static void SFCBoxLatchGame (void)
+{
+	SFCBoxGame[0] = 0;
+
+	const uint8	*grom = SFCBox.GROM[(SFCBox.MapReg0 >> 2) & 1];
+	if (!grom)
+		return;
+
+	// The loader bounds-checked this directory (SFCBoxParseSlot).
+	const uint32	nroms = grom[0];
+	const uint32	dir = grom[8] | (grom[9] << 8);
+	for (uint32 i = 0; i < nroms; i++)
+	{
+		if ((grom[dir + nroms * 2 + i] & 3) != (SFCBox.MapReg0 & 3))
+			continue;
+
+		const uint32	block = (uint32) (grom[dir + i * 2] | (grom[dir + i * 2 + 1] << 8)) * 0x1000;
+		const uint8		*info = grom + block + (grom[block] | (grom[block + 1] << 8));
+		if (!info[0x26])	// game flag clear: the attraction menu
+			return;
+
+		// "SUPER MARIO KART      " -> "Super Mario Kart"
+		int	len = 22;
+		while (len && info[len - 1] == ' ')
+			len--;
+		for (int c = 0; c < len; c++)
+		{
+			char	ch = (char) info[c];
+			if (c && info[c - 1] != ' ' && ch >= 'A' && ch <= 'Z')
+				ch += 'a' - 'A';
+			SFCBoxGame[c] = ch;
+		}
+		SFCBoxGame[len] = 0;
+		return;
+	}
+}
+
+const char *S9xSFCBoxTitle (void)
+{
+	static char	title[48];
+	if (SFCBoxGame[0])
+		snprintf(title, sizeof(title), "Super Famicom Box - %s", SFCBoxGame);
+	else
+		strcpy(title, "Super Famicom Box");
+	return (title);
+}
+
+// ---------------------------------------------------------------------------
 // NVRAM (KROM work RAM + RTC SRAM pages) — "<rom>.box" sidecar
 
 bool8 S9xSFCBoxLoadNVRAM (void)
@@ -1343,6 +1397,7 @@ void S9xSFCBoxPostLoadState (void)
 	// Rebuild the SNES-visible map from the restored mapping registers
 	// (stages the GSU view and re-arms/disarms the SuperFX as needed).
 	S9xSFCBoxRemap();
+	SFCBoxLatchGame();
 }
 
 // ---------------------------------------------------------------------------
@@ -1424,6 +1479,7 @@ void S9xSFCBoxPowerOn (void)
 	SFCBox.SlotPresent[1] = present[1];
 
 	SFCBox.Active = TRUE;
+	SFCBoxGame[0] = 0;			// the KROM boots the attraction menu first
 	SFCBox.Keyswitch = 1;		// "ON" (play mode)
 	SFCBox.WRIOOut = 0xff;
 	SFCBox.SNESHeld = TRUE;		// the KROM releases us when it's ready
@@ -1457,6 +1513,7 @@ bool8 S9xSFCBoxPendingReset (void)
 void S9xSFCBoxApplySNESReset (void)
 {
 	SFCBox.PendingSNESReset = FALSE;
+	SFCBoxLatchGame();		// the KROM maps the next program before releasing reset
 	S9xSoftReset();
 }
 

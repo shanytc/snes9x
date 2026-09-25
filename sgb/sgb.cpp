@@ -5401,10 +5401,8 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 	// session ran that far ahead of the master's.
 	{
 		const SGB::Emulator::Impl *mi = SGB::Instance().DebugImpl();
-		const uint8_t ctrl = static_cast<uint8_t>((mi->icd2.control >> 4) & 0x03);
-		const uint8_t ctrl_players = (ctrl == 0) ? 1u : (ctrl == 1) ? 2u : 4u;
-		const uint8_t m_eff = mi->icd2.mlt_players > ctrl_players
-		                      ? mi->icd2.mlt_players : ctrl_players;
+		// mlt_players already folds in the $6003 mlt bits (IcdSetMltMode).
+		const uint8_t m_eff = mi->icd2.mlt_players ? mi->icd2.mlt_players : 1u;
 		if (m_eff != g_seat_mlt_mirror && SGB::SerialTraceEnabled())
 		{
 			char msg[64];
@@ -5419,9 +5417,8 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 				// A seat on its own Game Boy Model is not on a Super Game Boy
 				// at all: no rotation to mirror, and forcing one would rotate
 				// a pad its game never asked to be rotated.
-				g_split_cores[k]->DebugImpl()->icd2.mlt_players =
-					SeatOwnModel(k) ? 1u : m_eff;
-				g_split_cores[k]->DebugImpl()->icd2.mlt_auto_drop_polls = 0;
+				SGB::IcdSetMltMode(g_split_cores[k]->DebugImpl()->icd2,
+				                   SeatOwnModel(k) ? 0 : static_cast<uint8_t>(m_eff - 1));
 			}
 	}
 

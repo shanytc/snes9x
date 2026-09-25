@@ -11,7 +11,9 @@ Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for a
 - Supports GameBoy, GameBoy Color, SuperGameBoy (1 and 2)
 - libretro core for SNES / SGB / GB / GBC
 - Voicer-kun peripheral emulation (plays its audio CDs from cue/bin images)
-- Super Famicom Box (hotel SNES) emulation, with live English OSD translations
+- [Super Famicom Box](https://github.com/shanytc/snes9x/wiki/Super-Famicom-Box) (hotel version, with live English OSD translations)
+- [Nintendo SuperDisc](https://github.com/shanytc/snes9x/wiki/SuperDisc)
+- [Nintendo Super System](https://github.com/shanytc/snes9x/wiki/Nintendo-Super-System)
 - Event carts - PowerFest '94, Nintendo Campus Challenge '92
 - Voicer-kun - infrared transmitter/receiver that connects to the second controller port
 - Kaillera Server/Client
@@ -26,6 +28,8 @@ Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for a
 - Color Correction Support / Native CRT Colors
 - SDL Support
 - Multi-Language Pack
+- 100% Acid Tests support for gbc/gb/sgb (Emulator [shootout](https://tomek.rekawek.eu/GBEmulatorShootout/))
+
 
 ## SuperSnes9x libretro core
 

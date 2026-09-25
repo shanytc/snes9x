@@ -137,7 +137,11 @@ enum {
     PORT_NSS_RESTART        = 74,
     // Emulation -> Super Disc
     PORT_SUPERDISC_INSERT   = 75,
-    PORT_SUPERDISC_EJECT    = 76
+    PORT_SUPERDISC_EJECT    = 76,
+    // Graphics Layer 1/2 and Sprites Layer keys, routed per core (as win32).
+    PORT_LAYER_BG0          = 77,
+    PORT_LAYER_BG1          = 78,
+    PORT_LAYER_SPRITES      = 79
 };
 
 typedef struct BindingLink

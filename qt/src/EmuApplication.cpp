@@ -21,6 +21,8 @@
 #include "memmap.h"
 #include "controls.h"
 #include "superdisc.h"
+#include "sgb/sgb.h"
+#include "display.h"
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "RAIntegrationQt.hpp"
 #include "retroachievements.h"
@@ -503,12 +505,16 @@ void EmuApplication::updateBindings()
             {
                 /* The core's QuickSave/QuickLoad commands address absolute
                  * slots; handle them here so they apply to the current bank.
-                 * The movie commands open the dialogs of the File menu. */
+                 * The movie commands open the dialogs of the File menu, and
+                 * the layer keys go to the Game Boy's layers in a GB session. */
                 bool ui_handled = strncmp(name, "QuickSave", 9) == 0 ||
                                   strncmp(name, "QuickLoad", 9) == 0 ||
                                   strcmp(name, "BeginRecordingMovie") == 0 ||
                                   strcmp(name, "LoadMovie") == 0 ||
-                                  strcmp(name, "EndRecordingMovie") == 0;
+                                  strcmp(name, "EndRecordingMovie") == 0 ||
+                                  strcmp(name, "ToggleBG0") == 0 ||
+                                  strcmp(name, "ToggleBG1") == 0 ||
+                                  strcmp(name, "ToggleSprites") == 0;
                 auto handler = (!ui_handled && core->acceptsCommand(name)) ? Core : UI;
                 bindings.insert({ binding.hash(), { name, handler } });
             }
@@ -624,6 +630,24 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
             if (name == "PauseContinue")
             {
                 window->pauseContinue();
+            }
+
+            else if (name == "ToggleBG0" || name == "ToggleBG1" || name == "ToggleSprites")
+            {
+                // While a Game Boy core is drawing these switch its BG, window
+                // and sprites instead, as on win32.
+                const int which = name == "ToggleBG0" ? 0 : name == "ToggleBG1" ? 1 : 2;
+                emu_thread->runOnThread([which, command = name] {
+                    if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+                    {
+                        static const char *names[3] = { "GB Background", "GB Window", "GB Sprites" };
+                        const bool on = !S9xSGBGetLayerEnabled(which);
+                        S9xSGBSetLayerEnabled(which, on);
+                        S9xSetInfoString((std::string(names[which]) + (on ? " on" : " off")).c_str());
+                    }
+                    else
+                        S9xApplyCommand(S9xGetCommandT(command.c_str()), 1, 0);
+                });
             }
 
             else if (name == "IncreaseSlot" || name == "DecreaseSlot" ||

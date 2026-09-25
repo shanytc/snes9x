@@ -21,6 +21,7 @@
 #include "movie.h"
 #include "display.h"
 #include "gfx.h"
+#include "sgb/sgb.h"
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "retroachievements.h"
@@ -578,6 +579,22 @@ static void change_bank(int difference)
     show_slot_info();
 }
 
+// Graphics Layer 1/2 and Sprites Layer keys: while a Game Boy core is drawing
+// they switch its BG, window and sprites instead, as on win32.
+static void toggle_layer_key(int which)
+{
+    if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+    {
+        static const char *names[3] = { "GB Background", "GB Window", "GB Sprites" };
+        const bool on = !S9xSGBGetLayerEnabled(which);
+        S9xSGBSetLayerEnabled(which, on);
+        S9xSetInfoString((std::string(names[which]) + (on ? " on" : " off")).c_str());
+        return;
+    }
+    static const char *commands[3] = { "ToggleBG0", "ToggleBG1", "ToggleSprites" };
+    S9xApplyCommand(S9xGetCommandT(commands[which]), 1, 0);
+}
+
 void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
 {
     static bool quit_binding_down = false;
@@ -586,6 +603,8 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
     {
         if (cmd.port[0] == PORT_QUIT)
             quit_binding_down = true;
+        else if (cmd.port[0] >= PORT_LAYER_BG0 && cmd.port[0] <= PORT_LAYER_SPRITES)
+            toggle_layer_key(cmd.port[0] - PORT_LAYER_BG0);
         else if (cmd.port[0] == PORT_REWIND)
         {
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -830,6 +849,20 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strcasecmp(name, "LoadMovie"))
     {
         cmd.port[0] = PORT_PLAY_MOVIE;
+    }
+    // A Game Boy session sends these to its own layers (S9xHandlePortCommand).
+    // The config keys stay the same.
+    else if (!strcasecmp(name, "ToggleBG0"))
+    {
+        cmd.port[0] = PORT_LAYER_BG0;
+    }
+    else if (!strcasecmp(name, "ToggleBG1"))
+    {
+        cmd.port[0] = PORT_LAYER_BG1;
+    }
+    else if (!strcasecmp(name, "ToggleSprites"))
+    {
+        cmd.port[0] = PORT_LAYER_SPRITES;
     }
     else if (!strcasecmp(name, "GTK_quit"))
     {

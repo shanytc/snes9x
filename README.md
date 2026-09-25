@@ -32,8 +32,9 @@ Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for a
 ## SuperSnes9x libretro core
 
 The SuperSnes9x libretro core (`supersnes9x_libretro.so` — SNES / SFC / SGB /
-GB / GBC in one core) is built from this repository. There are no prebuilt
-binaries yet; build the portable Linux core locally with Docker:
+GB / GBC in one core) is built from this repository. Prebuilt cores for
+Windows, Linux, macOS and Android are in the [nightly builds](#nightly-builds).
+To build the portable Linux core locally with Docker:
 
 ```bash
 cd libretro/linux
@@ -101,26 +102,38 @@ See [qt/docs/README-macos.md](qt/docs/README-macos.md) for details.
 
 [![Nightly builds](https://github.com/shanytc/snes9x/actions/workflows/nightly.yml/badge.svg?branch=master)](https://github.com/shanytc/snes9x/actions/workflows/nightly.yml)
 
-Every night that `master` has new commits, GitHub Actions builds the GUIs
-for Windows (32-bit and 64-bit), Linux (Qt and GTK AppImages, x86_64 and
-x86) and macOS (Apple Silicon), plus the libretro cores for Windows, Linux,
-Android and macOS (universal), and publishes them as the rolling
+Every night that `master` has new commits, GitHub Actions builds everything
+below and publishes it as the rolling
 [nightly pre-release](https://github.com/shanytc/snes9x/releases/tag/nightly).
-These are untested snapshots and may be broken. For stable builds use the
+The links always point at the newest nightly. These are untested snapshots
+and may be broken. For stable builds use the
 [latest release](https://github.com/shanytc/snes9x/releases/latest).
 
-## Upstream builds (plain snes9x, not SuperSnes9x)
+| Platform       | GUI                                            | libretro core                                   |
+|----------------|------------------------------------------------|-------------------------------------------------|
+| Windows 64-bit | [super-snes9x (x64)][win64]                    | [core (x64)][core-win64]                        |
+| Windows 32-bit | [super-snes9x (x86)][win32]                    | [core (x86)][core-win32]                        |
+| Linux x86_64   | [Qt AppImage][qt-x64] · [GTK AppImage][gtk-x64] | [core (x86_64)][core-linux64]                   |
+| Linux x86      | [Qt AppImage][qt-x86] · [GTK AppImage][gtk-x86] | [core (x86)][core-linux32]                      |
+| macOS          | [Qt app (Apple Silicon)][mac-qt]               | [core (universal x86_64 + arm64)][core-mac]     |
+| Android        | —                                              | [arm64-v8a][core-android64] · [armeabi-v7a][core-android32] |
 
-Official upstream snes9x builds, for reference:
+Windows: unzip and run. Linux: `chmod +x` the AppImage. macOS: the app is
+self-signed, so after copying it run
+`xattr -dr com.apple.quarantine super-snes9x-qt.app`. Cores: unzip the core
+and its `.info` file into RetroArch's cores directory.
 
-| OS      | status / downloads                             |
-|---------|------------------------------------------------|
-| Windows | [![Status][s9x-win-all]][appveyor]             |
-| All     | [upstream releases][snes9x-releases]           |
-
-[appveyor]: https://ci.appveyor.com/project/snes9x/snes9x
-[s9x-win-all]: https://ci.appveyor.com/api/projects/status/github/snes9xgit/snes9x?branch=master&svg=true
-[snes9x-releases]: https://github.com/snes9xgit/snes9x/releases
-
-(The Cirrus CI badge tables that used to be here were removed: Cirrus CI
-has shut down, so those status images no longer load.)
+[win64]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-win32-x64.zip
+[win32]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-win32.zip
+[qt-x64]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-qt-x86_64.AppImage
+[gtk-x64]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-gtk-x86_64.AppImage
+[qt-x86]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-qt-x86.AppImage
+[gtk-x86]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-gtk-x86.AppImage
+[mac-qt]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-qt-macos-arm64.zip
+[core-win64]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-win32-x64.zip
+[core-win32]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-win32.zip
+[core-linux64]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-linux-x64.zip
+[core-linux32]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-linux.zip
+[core-mac]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-osx-universal.zip
+[core-android64]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-android-arm64.zip
+[core-android32]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-android.zip

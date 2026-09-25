@@ -169,7 +169,9 @@ jobs:
           retention-days: 7
 
   # ------------------------------------------------------------------ macOS
-  # Qt .app (Apple Silicon) and the universal x86_64 + arm64 libretro core.
+  # Qt .app and libretro core, both universal x86_64 + arm64. Homebrew's Qt
+  # and libpng are arm64-only, so the GUI uses Qt's official (universal)
+  # binaries and a universal static libpng built here.
   macos:
     name: macOS
     runs-on: macos-latest   # Apple Silicon
@@ -183,17 +185,49 @@ jobs:
       - name: Fetch submodules
         run: git submodule update --init --recursive --depth 1 $UNIX_SUBMODULES
       - name: Install dependencies
-        run: brew install cmake ninja pkg-config qt libpng
+        run: brew install cmake ninja pkg-config
+      - name: Install Qt (universal)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.2
+          host: mac
+          target: desktop
+          arch: clang_64
+          cache: true
+      - name: Build libpng (universal, static)
+        # Hardware optimizations off: libpng can't pick SIMD per slice in one universal build.
+        run: |
+          git clone --depth 1 --branch v1.6.58 https://github.com/pnggroup/libpng.git "$RUNNER_TEMP/libpng"
+          cmake -S "$RUNNER_TEMP/libpng" -B "$RUNNER_TEMP/libpng/build" -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/deps" \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+                -DPNG_SHARED=OFF -DPNG_FRAMEWORK=OFF -DPNG_TESTS=OFF -DPNG_TOOLS=OFF \
+                -DPNG_HARDWARE_OPTIMIZATIONS=OFF
+          cmake --build "$RUNNER_TEMP/libpng/build"
+          cmake --install "$RUNNER_TEMP/libpng/build"
       - name: Build GUI
         run: |
-          export PKG_CONFIG_PATH="$(brew --prefix libpng)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PKG_CONFIG_PATH="$RUNNER_TEMP/deps/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
           cmake -S qt -B qt/build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+                -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
           cmake --build qt/build-macos -j"$(sysctl -n hw.ncpu)"
       - name: Package .app
+        run: qt/scripts/makeapp-macos.sh
+      - name: Check every binary in the .app is universal
         run: |
-          qt/scripts/makeapp-macos.sh
-          ditto -c -k --keepParent qt/build-macos/super-snes9x-qt.app super-snes9x-qt-macos-arm64.zip
+          bad=0
+          while IFS= read -r -d '' f; do
+            file -b "$f" | grep -q Mach-O || continue
+            archs=$(lipo -archs "$f")
+            if [[ " $archs " != *" arm64 "* || " $archs " != *" x86_64 "* ]]; then
+              echo "::error::${f#qt/build-macos/} is $archs only"
+              bad=1
+            fi
+          done < <(find qt/build-macos/super-snes9x-qt.app -type f -print0)
+          exit $bad
+      - name: Zip .app
+        run: ditto -c -k --keepParent qt/build-macos/super-snes9x-qt.app super-snes9x-qt-macos-universal.zip
       - name: Build libretro core (universal)
         run: libretro/macos/build-macos.sh
       - name: Package core
@@ -204,8 +238,8 @@ jobs:
              docs/changes.txt core/
       - uses: actions/upload-artifact@v4
         with:
-          name: super-snes9x-qt-macos-arm64
-          path: super-snes9x-qt-macos-arm64.zip
+          name: super-snes9x-qt-macos-universal
+          path: super-snes9x-qt-macos-universal.zip
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:

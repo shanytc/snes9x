@@ -115,7 +115,7 @@ and may be broken. For stable builds use the
 | Windows 32-bit | [super-snes9x (x86)][win32]                    | [core (x86)][core-win32]                        |
 | Linux x86_64   | [Qt AppImage][qt-x64] · [GTK AppImage][gtk-x64] | [core (x86_64)][core-linux64]                   |
 | Linux x86      | [Qt AppImage][qt-x86] · [GTK AppImage][gtk-x86] | [core (x86)][core-linux32]                      |
-| macOS          | [Qt app (Apple Silicon)][mac-qt]               | [core (universal x86_64 + arm64)][core-mac]     |
+| macOS          | [Qt app (universal x86_64 + arm64)][mac-qt]    | [core (universal x86_64 + arm64)][core-mac]     |
 | Android        | —                                              | [arm64-v8a][core-android64] · [armeabi-v7a][core-android32] |
 
 Windows: unzip and run. Linux: `chmod +x` the AppImage. macOS: the app is
@@ -129,7 +129,7 @@ and its `.info` file into RetroArch's cores directory.
 [gtk-x64]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-gtk-x86_64.AppImage
 [qt-x86]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-qt-x86.AppImage
 [gtk-x86]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-gtk-x86.AppImage
-[mac-qt]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-qt-macos-arm64.zip
+[mac-qt]: https://github.com/shanytc/snes9x/releases/download/nightly/super-snes9x-nightly-qt-macos-universal.zip
 [core-win64]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-win32-x64.zip
 [core-win32]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-win32.zip
 [core-linux64]: https://github.com/shanytc/snes9x/releases/download/nightly/supersnes9x_libretro-nightly-linux-x64.zip

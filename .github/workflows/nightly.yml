@@ -70,7 +70,7 @@ jobs:
 
           These are untested snapshots and may be broken. For stable builds use the [latest release](https://github.com/${GITHUB_REPOSITORY}/releases/latest).
 
-          **GUIs** (\`super-snes9x-nightly-*\`): Windows: unzip and run. Linux: \`chmod +x\` the AppImage. macOS: the app is self-signed, so after copying it run \`xattr -dr com.apple.quarantine super-snes9x-qt.app\`.
+          **GUIs** (\`super-snes9x-nightly-*\`): Windows: unzip and run. Linux: \`chmod +x\` the AppImage. macOS: the app is universal (Intel + Apple Silicon) and self-signed, so after copying it run \`xattr -dr com.apple.quarantine super-snes9x-qt.app\`.
 
           **libretro cores** (\`supersnes9x_libretro-nightly-*\`): unzip the core and its \`.info\` file into RetroArch's cores directory. The macOS core is a universal x86_64 + arm64 binary." \
              out/*

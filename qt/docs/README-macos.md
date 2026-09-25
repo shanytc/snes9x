@@ -101,9 +101,12 @@ on an older system.
 ### Architecture
 
 The Qt build is single-architecture: whatever the host is, matching the Qt you
-link against. Homebrew ships a native-only Qt, so a universal `.app` would
-require building Qt from source as a universal binary first. The libretro core
-below has no such constraint and is built universal.
+link against. Homebrew ships a native-only Qt (and libpng), so a local build
+against it is too. A universal `.app` needs Qt's official binaries, which are
+universal, plus a universal libpng and
+`-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"`; the `macos` job in
+`.github/workflows/build.yml` does exactly that for the nightly and release
+builds. The libretro core below has no such constraint and is built universal.
 
 ## Both at once
 

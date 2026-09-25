@@ -114,7 +114,7 @@ jobs:
              --generate-notes ${prev:+--notes-start-tag "$prev"} \
              --notes "## Downloads
 
-          **GUIs** (\`super-snes9x-$TAG-*\`): Windows: unzip and run. Linux: \`chmod +x\` the AppImage. macOS: the app is self-signed, so after copying it run \`xattr -dr com.apple.quarantine super-snes9x-qt.app\`.
+          **GUIs** (\`super-snes9x-$TAG-*\`): Windows: unzip and run. Linux: \`chmod +x\` the AppImage. macOS: the app is universal (Intel + Apple Silicon) and self-signed, so after copying it run \`xattr -dr com.apple.quarantine super-snes9x-qt.app\`.
 
           **libretro cores** (\`supersnes9x_libretro-$TAG-*\`): unzip the core and its \`.info\` file into RetroArch's cores directory. The macOS core is a universal x86_64 + arm64 binary.
           " \

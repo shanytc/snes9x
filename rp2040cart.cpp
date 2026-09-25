@@ -51,6 +51,10 @@ static bool8	prefetched;
 static uint32	prefetch_addr;
 static uint8	prefetch_byte;
 
+// The libretro save image is kept current once a frontend has asked for it.
+static bool8	save_image_on;
+static void		RefreshSaveImage (void);
+
 RP2040::Chip *S9xRP2040CartChip (void)
 {
 	return chip;
@@ -96,9 +100,9 @@ static bool ReadFirmwareFile (const std::string &path)
 	return n > 0;
 }
 
-// A zipped ROM can carry its firmware in the same archive: the entry named
-// after the zip wins, else the first *_rp2040.bin in it.
-static bool ReadFirmwareFromZip (const char *zip_path)
+// A zip can carry the firmware beside the ROM: the entry called wanted
+// wins, else the first *_rp2040.bin in it.
+static bool ReadFirmwareFromZip (const char *zip_path, const std::string &wanted)
 {
 #ifdef UNZIP_SUPPORT
 	SplitPath zp = splitpath(zip_path);
@@ -108,7 +112,6 @@ static bool ReadFirmwareFromZip (const char *zip_path)
 	if (!z)
 		return false;
 
-	const std::string wanted = zp.stem + "_rp2040.bin";
 	std::string pick;
 	char name[260];
 	unz_file_info info;
@@ -138,8 +141,18 @@ static bool ReadFirmwareFromZip (const char *zip_path)
 	return ok;
 #else
 	(void) zip_path;
+	(void) wanted;
 	return false;
 #endif
+}
+
+// libretro frontends unpack archived content themselves and pass "X.zip#rom";
+// the firmware is still inside X.zip.
+static std::string archive_path;
+
+void S9xRP2040CartSetArchive (const char *path)
+{
+	archive_path = path ? path : "";
 }
 
 bool8 S9xRP2040CartActivate (const char *rom_path)
@@ -147,9 +160,11 @@ bool8 S9xRP2040CartActivate (const char *rom_path)
 	S9xRP2040CartDeactivate();
 
 	std::string path = FirmwarePath(rom_path);
-	if (!ReadFirmwareFile(path) && !ReadFirmwareFromZip(rom_path))
+	std::string name = S9xBasename(path);
+	if (!ReadFirmwareFile(path) && !ReadFirmwareFromZip(rom_path, name) &&
+		(archive_path.empty() || !ReadFirmwareFromZip(archive_path.c_str(), name)))
 	{
-		std::string msg = "RP2040 firmware missing - place " + S9xBasename(path) + " next to the ROM or in its zip";
+		std::string msg = "RP2040 firmware missing - place " + name + " next to the ROM or in its zip";
 		S9xSetBiosNotice(msg.c_str());
 		return FALSE;
 	}
@@ -171,6 +186,7 @@ void S9xRP2040CartDeactivate (void)
 	delete chip;
 	chip = NULL;
 	firmware.clear();
+	save_image_on = FALSE;
 }
 
 void S9xRP2040CartPowerOn (void)
@@ -215,40 +231,17 @@ void S9xRP2040CartEndScanline (void)
 	{
 		chip->ClearFlashDirty();
 		CPU.SRAMModified = TRUE;
+		if (save_image_on)
+			RefreshSaveImage();
 	}
 }
 
 #define FLASH_SECTOR	0x1000
+#define SAVE_IMAGE_SIZE	0x10000		// room for 15 sectors; the game saves to one
 
-bool8 S9xRP2040CartLoadFlash (const char *srm_path)
+// The flash sectors that differ from the firmware file.
+static std::vector<uint32> ChangedSectors (void)
 {
-	if (!chip)
-		return FALSE;
-	FILE *f = fopen(srm_path, "rb");
-	if (!f)
-		return FALSE;
-	char magic[8];
-	uint32 count = 0;
-	bool8 ok = fread(magic, 1, 8, f) == 8 && !memcmp(magic, "RP2040FL", 8) && fread(&count, 4, 1, f) == 1;
-	std::vector<uint8_t> &flash = chip->FlashMutable();
-	for (uint32 i = 0; ok && i < count; i++)
-	{
-		uint32 offset;
-		std::vector<uint8_t> sector(FLASH_SECTOR);
-		ok = fread(&offset, 4, 1, f) == 1 && fread(sector.data(), 1, FLASH_SECTOR, f) == FLASH_SECTOR &&
-			 !(offset % FLASH_SECTOR) && offset + FLASH_SECTOR <= flash.size();
-		if (ok)
-			memcpy(&flash[offset], sector.data(), FLASH_SECTOR);
-	}
-	fclose(f);
-	chip->ClearFlashDirty();
-	return ok;
-}
-
-bool8 S9xRP2040CartSaveFlash (const char *srm_path)
-{
-	if (!chip)
-		return FALSE;
 	const std::vector<uint8_t> &flash = chip->Flash();
 	std::vector<uint32> changed;
 	for (uint32 off = 0; off + FLASH_SECTOR <= flash.size(); off += FLASH_SECTOR)
@@ -265,21 +258,135 @@ bool8 S9xRP2040CartSaveFlash (const char *srm_path)
 		if (differs)
 			changed.push_back(off);
 	}
-	if (changed.empty())
-		return TRUE;
+	return changed;
+}
+
+// .srm layout: "RP2040FL", u32 count, then count x (u32 offset, 4K sector).
+static std::vector<uint8> EncodeFlash (size_t cap)
+{
+	const std::vector<uint8_t> &flash = chip->Flash();
+	std::vector<uint32> changed = ChangedSectors();
+	if (changed.size() > (cap - 12) / (4 + FLASH_SECTOR))
+	{
+		changed.resize((cap - 12) / (4 + FLASH_SECTOR));
+		S9xMessage(S9X_WARNING, S9X_NO_INFO, "RP2040: flash save is larger than the save image; sectors dropped");
+	}
+	uint32 count = (uint32) changed.size();
+	std::vector<uint8> out(12 + count * (4 + FLASH_SECTOR));
+	memcpy(&out[0], "RP2040FL", 8);
+	memcpy(&out[8], &count, 4);
+	uint8 *p = &out[12];
+	for (uint32 off : changed)
+	{
+		memcpy(p, &off, 4);
+		memcpy(p + 4, &flash[off], FLASH_SECTOR);
+		p += 4 + FLASH_SECTOR;
+	}
+	return out;
+}
+
+// Rebuilds flash as the firmware file plus the saved sectors. A malformed
+// image leaves flash alone; bytes after the last sector are ignored.
+static bool DecodeFlash (const uint8 *buf, size_t size)
+{
+	std::vector<uint8_t> &flash = chip->FlashMutable();
+	uint32 count;
+	if (size < 12 || memcmp(buf, "RP2040FL", 8))
+		return false;
+	memcpy(&count, buf + 8, 4);
+	if (count > (size - 12) / (4 + FLASH_SECTOR))
+		return false;
+	for (uint32 i = 0; i < count; i++)
+	{
+		uint32 off;
+		memcpy(&off, buf + 12 + i * (4 + FLASH_SECTOR), 4);
+		if (off % FLASH_SECTOR || off + FLASH_SECTOR > flash.size())
+			return false;
+	}
+
+	size_t n = firmware.size() < flash.size() ? firmware.size() : flash.size();
+	memcpy(&flash[0], firmware.data(), n);
+	memset(&flash[n], 0xff, flash.size() - n);
+	for (uint32 i = 0; i < count; i++)
+	{
+		const uint8 *e = buf + 12 + i * (4 + FLASH_SECTOR);
+		uint32 off;
+		memcpy(&off, e, 4);
+		memcpy(&flash[off], e + 4, FLASH_SECTOR);
+	}
+	return true;
+}
+
+bool8 S9xRP2040CartLoadFlash (const char *srm_path)
+{
+	if (!chip)
+		return FALSE;
+	FILE *f = fopen(srm_path, "rb");
+	if (!f)
+		return FALSE;
+	fseek(f, 0, SEEK_END);
+	long len = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	std::vector<uint8> buf(len > 0 ? (size_t) len : 0);
+	bool8 ok = !buf.empty() && fread(buf.data(), 1, buf.size(), f) == buf.size() && DecodeFlash(buf.data(), buf.size());
+	fclose(f);
+	chip->ClearFlashDirty();
+	return ok;
+}
+
+bool8 S9xRP2040CartSaveFlash (const char *srm_path)
+{
+	if (!chip)
+		return FALSE;
+	std::vector<uint8> data = EncodeFlash((size_t) -1);
+	if (data.size() == 12)
+		return TRUE;		// nothing saved yet
 	FILE *f = fopen(srm_path, "wb");
 	if (!f)
 		return FALSE;
-	uint32 count = (uint32) changed.size();
-	fwrite("RP2040FL", 1, 8, f);
-	fwrite(&count, 4, 1, f);
-	for (uint32 off : changed)
-	{
-		fwrite(&off, 4, 1, f);
-		fwrite(&flash[off], 1, FLASH_SECTOR, f);
-	}
+	bool8 ok = fwrite(data.data(), 1, data.size(), f) == data.size();
 	fclose(f);
-	return TRUE;
+	return ok;
+}
+
+// save_built: what the image held after the core last wrote it, so a
+// change means the frontend loaded a save into it.
+static uint8	save_image[SAVE_IMAGE_SIZE];
+static uint8	save_built[SAVE_IMAGE_SIZE];
+
+static void RefreshSaveImage (void)
+{
+	std::vector<uint8> data = EncodeFlash(SAVE_IMAGE_SIZE);
+	memset(save_image, 0, SAVE_IMAGE_SIZE);
+	memcpy(save_image, data.data(), data.size());
+	memcpy(save_built, save_image, SAVE_IMAGE_SIZE);
+}
+
+uint8 *S9xRP2040CartSaveImage (void)
+{
+	if (!chip)
+		return NULL;
+	if (!save_image_on)
+	{
+		RefreshSaveImage();
+		save_image_on = TRUE;
+	}
+	return save_image;
+}
+
+size_t S9xRP2040CartSaveImageSize (void)
+{
+	return chip ? SAVE_IMAGE_SIZE : 0;
+}
+
+void S9xRP2040CartSyncSaveImage (void)
+{
+	if (!chip || !save_image_on || !memcmp(save_image, save_built, SAVE_IMAGE_SIZE))
+		return;
+	if (!DecodeFlash(save_image, SAVE_IMAGE_SIZE))
+		S9xMessage(S9X_WARNING, S9X_NO_INFO, "RP2040: the save file is not an RP2040 flash save; ignored");
+	chip->ClearFlashDirty();
+	RefreshSaveImage();
 }
 
 uint8 S9xRP2040CartRead (uint32 address)

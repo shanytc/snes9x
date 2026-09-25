@@ -17,6 +17,7 @@
 #include "conffile.h"
 #include "crosshairs.h"
 #include "sgb/sgb.h"
+#include "rp2040cart.h"
 #include <stdio.h>
 #include <vector>
 #include <string>
@@ -1462,6 +1463,13 @@ bool retro_load_game(const struct retro_game_info *game)
     widescreen_content_path.clear();
     update_variables();
 
+    // Archived content arrives as "X.zip#rom"; an RP2040 cart's firmware may be in X.zip.
+    std::string archive;
+    const char *archive_delim = game->path ? find_archive_delim(game->path) : NULL;
+    if (archive_delim)
+        archive.assign(game->path, archive_delim - game->path);
+    S9xRP2040CartSetArchive(archive.c_str());
+
     if (!environ_cb(RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE, &rumble_iface))
         rumble_iface.set_rumble_state = NULL;
 
@@ -2265,6 +2273,10 @@ static void report_buttons()
 
 void retro_run()
 {
+    // The frontend may have loaded an .srm into the RP2040 save image.
+    if (Settings.RP2040Cart)
+        S9xRP2040CartSyncSaveImage();
+
     static uint16 height = PPU.ScreenHeight;
     bool updated = false;
     if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
@@ -2326,6 +2338,12 @@ void* retro_get_memory_data(unsigned type)
         case RETRO_MEMORY_SNES_GAME_BOY_RAM:
         case RETRO_MEMORY_SNES_SUFAMI_TURBO_A_RAM:
         case RETRO_MEMORY_SAVE_RAM:
+            // An RP2040 cart saves to its own flash, exposed as a fixed .srm image.
+            if (Settings.RP2040Cart)
+            {
+                data = S9xRP2040CartSaveImage();
+                break;
+            }
             // A loaded GB/SGB cart keeps its battery RAM in the SGB cart, not
             // in Memory.SRAM — expose that so the frontend persists the .srm.
             // S9xSGBIsActive() is true in both BIOS and BIOS-less GB modes.
@@ -2368,6 +2386,11 @@ size_t retro_get_memory_size(unsigned type)
         case RETRO_MEMORY_SNES_GAME_BOY_RAM:
         case RETRO_MEMORY_SNES_SUFAMI_TURBO_A_RAM:
         case RETRO_MEMORY_SAVE_RAM:
+            if (Settings.RP2040Cart)
+            {
+                size = S9xRP2040CartSaveImageSize();
+                break;
+            }
             if (S9xSGBIsActive())
             {
                 size = S9xSGBGetSRAMSize();

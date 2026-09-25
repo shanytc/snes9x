@@ -17,6 +17,7 @@
 
 bool8  S9xRP2040CartDetect (const uint8 *rom, uint32 size);
 const char *S9xRP2040CartTitle (void);		// window title, e.g. "Xeno Crisis"
+void   S9xRP2040CartSetArchive (const char *archive_path);	// the ROM came out of this archive ("" = none)
 bool8  S9xRP2040CartActivate (const char *rom_path);	// loads the firmware
 void   S9xRP2040CartDeactivate (void);
 void   S9xRP2040CartPowerOn (void);
@@ -36,6 +37,12 @@ RP2040::Chip *S9xRP2040CartChip (void);
 // differ from the firmware file.
 bool8  S9xRP2040CartLoadFlash (const char *srm_path);
 bool8  S9xRP2040CartSaveFlash (const char *srm_path);
+
+// The same .srm as a fixed-size, zero-padded buffer, for frontends that
+// own the save file (libretro SAVE_RAM). Sync applies a frontend-loaded image.
+uint8  *S9xRP2040CartSaveImage (void);
+size_t S9xRP2040CartSaveImageSize (void);
+void   S9xRP2040CartSyncSaveImage (void);
 
 size_t S9xRP2040CartStateSize (void);
 void   S9xRP2040CartStateSave (uint8 *buf);

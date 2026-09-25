@@ -236,14 +236,14 @@ extern struct FxRegs_s	GSU;
 { \
 	int32 _rd = (int32) (GSU.vRomReadyAt - GSU.vCycles); \
 	if (_rd > 0) \
-		GSU.vCycles += (uint32) _rd; \
+		FX_CYC(_rd); \
 }
 
 #define FX_SYNC_RAM \
 { \
 	int32 _rd = (int32) (GSU.vRamReadyAt - GSU.vCycles); \
 	if (_rd > 0) \
-		GSU.vCycles += (uint32) _rd; \
+		FX_CYC(_rd); \
 }
 
 // Post a byte/word to the RAM write buffer: stall for the previous write,
@@ -259,7 +259,7 @@ extern struct FxRegs_s	GSU;
 #define FX_RAM_WRITE_WORD \
 { \
 	FX_SYNC_RAM; \
-	GSU.vCycles += GSU.vCostMem; \
+	FX_CYC(GSU.vCostMem); \
 	GSU.vRamReadyAt = GSU.vCycles + GSU.vCostMem; \
 }
 
@@ -360,9 +360,9 @@ extern struct FxRegs_s	GSU;
 		if (!(GSU.vCacheMask & _flb)) \
 		{ \
 			GSU.vCacheMask |= _flb; \
-			GSU.vCycles += GSU.vCostMem << 4; \
+			FX_CYC(GSU.vCostMem << 4); \
 		} \
-		GSU.vCycles += GSU.vCostCache; \
+		FX_CYC(GSU.vCostCache); \
 	} \
 	else \
 	{ \
@@ -370,7 +370,7 @@ extern struct FxRegs_s	GSU;
 			FX_SYNC_RAM \
 		else \
 			FX_SYNC_ROM \
-		GSU.vCycles += GSU.vCostMem; \
+		FX_CYC(GSU.vCostMem); \
 	} \
 }
 

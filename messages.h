@@ -53,7 +53,8 @@ enum
 	S9X_NOT_A_MOVIE_SNAPSHOT,
 	S9X_SNAPSHOT_INCONSISTENT,
 	S9X_AVI_INFO,
-	S9X_PRESSED_KEYS_INFO
+	S9X_PRESSED_KEYS_INFO,
+	S9X_BIOS_NOTICE			// a missing BIOS/firmware; ports show the text as-is
 };
 
 #endif

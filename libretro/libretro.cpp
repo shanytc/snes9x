@@ -2590,8 +2590,15 @@ void S9xParseArg(char**, int&, int) {}
 void S9xExit() {}
 bool S9xPollPointer(unsigned int, short*, short*) { return false; }
 
-void S9xMessage(int type, int, const char* s)
+void S9xMessage(int type, int number, const char* s)
 {
+    // a missing BIOS/firmware leaves a black screen: say why on the frontend's OSD
+    if (number == S9X_BIOS_NOTICE && environ_cb)
+    {
+        struct retro_message msg = { s, 180 };
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+    }
+
     if (!log_cb) return;
 
     switch (type)

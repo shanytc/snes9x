@@ -2960,7 +2960,7 @@ void S9xShowBiosNotice (void)
 	if (s_bios_notice_fatal) s_bios_missing = TRUE;
 	const uint32 saved = Settings.InitialInfoStringTimeout;
 	Settings.InitialInfoStringTimeout = saved + saved / 2;
-	S9xMessage(S9X_INFO, S9X_ROM_INFO, s_bios_notice.c_str());
+	S9xMessage(S9X_INFO, S9X_BIOS_NOTICE, s_bios_notice.c_str());
 	Settings.InitialInfoStringTimeout = saved;
 	s_bios_notice.clear();
 }

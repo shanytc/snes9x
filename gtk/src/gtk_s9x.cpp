@@ -492,6 +492,12 @@ void S9xMessage(int type, int number, const char *message)
             S9xSetInfoString(Memory.GetMultilineROMInfo().c_str());
             break;
         }
+        case S9X_BIOS_NOTICE:
+        {
+            S9xSetInfoString(message);
+            g_message("%s", message);
+            break;
+        }
         default:
         {
             switch (type)

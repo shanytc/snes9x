@@ -1,0 +1,121 @@
+name: Release
+run-name: Release ${{ inputs.tag }}
+
+# Manual release: Actions > Release > Run workflow, enter the version tag
+# (e.g. 1.63.31). Builds the same files as the nightly (build.yml), named
+# with the version instead of "nightly", and attaches them to a DRAFT
+# release for that tag, to edit and publish by hand.
+#
+# - An existing tag is built as-is. Otherwise "ref" (default master) is
+#   built, and GitHub creates the tag on that commit when the draft is
+#   published.
+# - The tag must equal VERSION.PATCH_VERSION from snes9x.h at that commit,
+#   so the file names never disagree with the version the program reports.
+# - Re-running while the release is still a draft replaces its files and
+#   keeps the edited notes; a published release is never touched.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag, e.g. 1.63.31
+        required: true
+        type: string
+      ref:
+        description: Branch or commit to build (ignored if the tag already exists)
+        required: false
+        type: string
+        default: master
+
+permissions:
+  contents: write           # publish job creates the draft release
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Check ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0    # all tags too
+      - id: check
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if sha=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}"); then
+            echo "Tag $TAG exists, building its commit $sha."
+          else
+            sha=$(git rev-parse HEAD)
+            echo "Tag $TAG doesn't exist yet, building $sha; it is tagged when the draft is published."
+          fi
+          h=$(git show "$sha:snes9x.h" | tr -d '\r')
+          ver=$(sed -n 's/^#define VERSION[[:space:]]*"\([^"]*\)".*/\1/p' <<< "$h")
+          patch=$(sed -n 's/^#define PATCH_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' <<< "$h")
+          if [ "$ver.$patch" != "$TAG" ]; then
+            echo "::error::snes9x.h at ${sha::8} is version $ver.$patch, not $TAG. Bump PATCH_VERSION (or pick the right ref) first."
+            exit 1
+          fi
+          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::Release $TAG is already published."
+              exit 1
+            fi
+            echo "Draft release $TAG exists; its files will be replaced."
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      label: ${{ inputs.tag }}
+
+  # ---------------------------------------------------------------- Publish
+  publish:
+    name: Draft release ${{ inputs.tag }}
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: out
+      - name: Create or update the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          repo=(--repo "$GITHUB_REPOSITORY")
+          if draft=$(gh release view "$TAG" "${repo[@]}" --json isDraft -q .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::Release $TAG was published while this run was building; not touching it."
+              exit 1
+            fi
+            gh release edit "$TAG" "${repo[@]}" --target "$SHA"
+            gh release upload "$TAG" "${repo[@]}" --clobber out/*
+            echo "Replaced the files of draft $TAG."
+            exit 0
+          fi
+          # Changelog starts from the last published full release (skips nightly).
+          prev=$(gh release list "${repo[@]}" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName')
+          gh release create "$TAG" "${repo[@]}" \
+             --draft --target "$SHA" --title "$TAG" \
+             --generate-notes ${prev:+--notes-start-tag "$prev"} \
+             --notes "## Downloads
+
+          **GUIs** (\`super-snes9x-$TAG-*\`): Windows: unzip and run. Linux: \`chmod +x\` the AppImage. macOS: the app is self-signed, so after copying it run \`xattr -dr com.apple.quarantine super-snes9x-qt.app\`.
+
+          **libretro cores** (\`supersnes9x_libretro-$TAG-*\`): unzip the core and its \`.info\` file into RetroArch's cores directory. The macOS core is a universal x86_64 + arm64 binary.
+          " \
+             out/*

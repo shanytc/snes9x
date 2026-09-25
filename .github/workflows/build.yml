@@ -1,0 +1,261 @@
+name: Build
+
+# Builds every platform the nightly and release workflows ship (called from
+# nightly.yml and release.yml, never run on its own), then collects the
+# results into one "release-files" artifact for the caller to publish.
+#
+# Artifact naming drives the package step: an artifact holding a single
+# AppImage or zip is shipped as-is, anything else is zipped under the
+# artifact's name, and "<label>-" is then inserted after the product prefix
+# (super-snes9x-* for the GUIs, supersnes9x_libretro-* for the cores), e.g.
+# super-snes9x-nightly-win32.zip or super-snes9x-1.63.31-win32.zip.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build (default the caller's commit)
+        type: string
+        default: ''
+      label:
+        description: Inserted into every file name (nightly, or the release version)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # Submodules the Linux and macOS builds need. Skips the win32-only ones
+  # (libpng from SourceForge, the pinned SDL3 fork) that are slow to clone.
+  UNIX_SUBMODULES: external/cubeb external/glslang external/SPIRV-Cross external/rcheevos external/vulkan-headers
+
+jobs:
+  # ---------------------------------------------------------------- Windows
+  # GUI (snes9xw.sln) and the libretro core, both from one checkout.
+  win32:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: Win32, arch: win32,     exe: super-snes9x.exe,     core_suffix: '' }
+          - { platform: x64,   arch: win32-x64, exe: super-snes9x-x64.exe, core_suffix: -x64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build GUI
+        run: msbuild win32\snes9xw.sln /m /p:Configuration="Release Unicode" /p:Platform=${{ matrix.platform }}
+      - name: Build libretro core
+        run: msbuild libretro\libretro-win32.vcxproj /m /p:Configuration="libretro Release" /p:Platform=${{ matrix.platform }}
+      - name: Package
+        shell: cmd
+        run: |
+          mkdir pkg
+          copy win32\${{ matrix.exe }} pkg
+          copy docs\changes.txt pkg
+          copy LICENSE pkg
+          copy data\cheats.bml pkg
+          copy win32\docs\faqs-windows.txt pkg
+          copy win32\docs\readme-windows.txt pkg
+          mkdir core
+          copy "libretro\${{ matrix.platform }}\libretro Release\supersnes9x_libretro.dll" core\supersnes9x_libretro${{ matrix.core_suffix }}.dll
+          copy libretro\supersnes9x_libretro.info core\supersnes9x_libretro${{ matrix.core_suffix }}.info
+          copy docs\changes.txt core
+      - uses: actions/upload-artifact@v4
+        with:
+          name: super-snes9x-${{ matrix.arch }}
+          path: pkg
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supersnes9x_libretro-${{ matrix.arch }}
+          path: core
+          retention-days: 7
+
+  # ------------------------------------------------------------------ Linux
+  # Qt and GTK AppImages via the repo's Docker packaging scripts (Ubuntu
+  # 22.04 baseline for x86_64, Debian 12 for x86).
+  linux:
+    name: Linux ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: qt-x86_64,  script: qt/scripts/makeappimage-docker.sh,      out: qt/build-appimage/super-snes9x-*.AppImage }
+          - { name: qt-x86,     script: qt/scripts/makeappimage-x86-docker.sh,  out: qt/build-appimage-x86/super-snes9x-*.AppImage }
+          - { name: gtk-x86_64, script: gtk/scripts/makeappimage-docker.sh,     out: gtk/build-appimage/super-snes9x-*.AppImage }
+          - { name: gtk-x86,    script: gtk/scripts/makeappimage-x86-docker.sh, out: gtk/build-appimage-x86/super-snes9x-*.AppImage }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Fetch submodules
+        run: git submodule update --init --recursive --depth 1 $UNIX_SUBMODULES
+      - name: Build AppImage (in Docker)
+        run: ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: super-snes9x-${{ matrix.name }}
+          path: ${{ matrix.out }}
+          retention-days: 7
+
+  # Portable libretro cores (Ubuntu 18.04 container, static libstdc++), the
+  # same script the releases use.
+  linux-core:
+    name: Linux libretro core ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, name: linux-x64, core: supersnes9x_libretro-x64 }
+          - { arch: x86,    name: linux,     core: supersnes9x_libretro }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Fetch submodules
+        run: git submodule update --init --recursive --depth 1 $UNIX_SUBMODULES
+      - name: Build portable core (in Docker)
+        run: libretro/linux/build-portable.sh ${{ matrix.arch }}
+      - name: Package
+        run: |
+          mkdir core
+          cp libretro/linux/dist/${{ matrix.arch }}/${{ matrix.core }}.so \
+             libretro/linux/dist/${{ matrix.arch }}/${{ matrix.core }}.info \
+             docs/changes.txt core/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supersnes9x_libretro-${{ matrix.name }}
+          path: core
+          retention-days: 7
+
+  # Android cores. build-android.sh fetches the pinned NDK (r27c) itself.
+  android-core:
+    name: Android libretro cores
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Fetch submodules
+        run: git submodule update --init --recursive --depth 1 $UNIX_SUBMODULES
+      - name: Build (arm64-v8a + armeabi-v7a)
+        run: bash libretro/jni/build-android.sh "arm64-v8a armeabi-v7a"
+      - name: Package
+        run: |
+          mkdir core-arm64 core-arm
+          cp libretro/jni/dist/arm64-v8a/supersnes9x_libretro_android-arm64.so \
+             libretro/jni/dist/arm64-v8a/supersnes9x_libretro_android-arm64.info \
+             docs/changes.txt core-arm64/
+          cp libretro/jni/dist/armeabi-v7a/supersnes9x_libretro_android.so \
+             libretro/jni/dist/armeabi-v7a/supersnes9x_libretro_android.info \
+             docs/changes.txt core-arm/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supersnes9x_libretro-android-arm64
+          path: core-arm64
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supersnes9x_libretro-android
+          path: core-arm
+          retention-days: 7
+
+  # ------------------------------------------------------------------ macOS
+  # Qt .app (Apple Silicon) and the universal x86_64 + arm64 libretro core.
+  macos:
+    name: macOS
+    runs-on: macos-latest   # Apple Silicon
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Fetch submodules
+        run: git submodule update --init --recursive --depth 1 $UNIX_SUBMODULES
+      - name: Install dependencies
+        run: brew install cmake ninja pkg-config qt libpng
+      - name: Build GUI
+        run: |
+          export PKG_CONFIG_PATH="$(brew --prefix libpng)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          cmake -S qt -B qt/build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          cmake --build qt/build-macos -j"$(sysctl -n hw.ncpu)"
+      - name: Package .app
+        run: |
+          qt/scripts/makeapp-macos.sh
+          ditto -c -k --keepParent qt/build-macos/super-snes9x-qt.app super-snes9x-qt-macos-arm64.zip
+      - name: Build libretro core (universal)
+        run: libretro/macos/build-macos.sh
+      - name: Package core
+        run: |
+          mkdir core
+          cp libretro/macos/dist/supersnes9x_libretro.dylib \
+             libretro/macos/dist/supersnes9x_libretro.info \
+             docs/changes.txt core/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: super-snes9x-qt-macos-arm64
+          path: super-snes9x-qt-macos-arm64.zip
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supersnes9x_libretro-osx-universal
+          path: core
+          retention-days: 7
+
+  # ---------------------------------------------------------------- Package
+  package:
+    name: Collect release files
+    needs: [win32, linux, linux-core, android-core, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: super*   # every build above, not release-files
+          path: dist
+      - name: Collect files
+        env:
+          LABEL: ${{ inputs.label }}
+        run: |
+          shopt -s nullglob
+          mkdir out
+          for d in dist/*/; do
+            name=$(basename "$d")
+            files=("$d"*)
+            # A lone AppImage or zip is already the deliverable; anything
+            # else (exe/dll/so + .info + docs) gets zipped under the
+            # artifact's name.
+            if [ ${#files[@]} -eq 1 ] && [[ ${files[0]} == *.AppImage || ${files[0]} == *.zip ]]; then
+              mv "${files[0]}" out/
+            else
+              (cd "$d" && zip -qr "../../out/$name.zip" .)
+            fi
+          done
+          # Label every file (nightly or the version) so builds can't be mixed up.
+          for f in out/*; do
+            b=$(basename "$f")
+            case "$b" in
+              super-snes9x-*)         n="super-snes9x-$LABEL-${b#super-snes9x-}" ;;
+              supersnes9x_libretro-*) n="supersnes9x_libretro-$LABEL-${b#supersnes9x_libretro-}" ;;
+              *)                      n="$b" ;;
+            esac
+            [ "$n" = "$b" ] || mv "$f" "out/$n"
+          done
+          ls -l out
+          [ -n "$(ls out)" ] || { echo "nothing to publish"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: out
+          compression-level: 0   # zips and AppImages are already compressed
+          retention-days: 7

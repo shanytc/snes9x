@@ -1551,7 +1551,7 @@ BEGIN
             MENUITEM MFT_SEPARATOR
             MENUITEM "&Automatic",                  (ID_EMULATION_BIOS_POLICY0+7),MFT_STRING,MFS_ENABLED
         END
-        POPUP "&Nintendo Super System",         ID_EMULATION_NSS,MFT_STRING,MFS_GRAYED
+        POPUP "&Nintendo Super System",         ID_EMULATION_NSS,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Insert Coin",                ID_NSS_COIN1,MFT_STRING,MFS_ENABLED
             MENUITEM "Insert Coin (Slot &2)",       ID_NSS_COIN2,MFT_STRING,MFS_ENABLED
@@ -1584,7 +1584,7 @@ BEGIN
                 MENUITEM "Switch &8",                   (ID_NSS_DIP0+7),MFT_STRING,MFS_ENABLED
             END
         END
-        POPUP "Super &Disc",                    ID_EMULATION_SUPERDISC,MFT_STRING,MFS_GRAYED
+        POPUP "Super &Disc",                    ID_EMULATION_SUPERDISC,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Insert Disc...",             ID_SUPERDISC_INSERT,MFT_STRING,MFS_ENABLED
             MENUITEM "&Eject Disc",                 ID_SUPERDISC_EJECT,MFT_STRING,MFS_ENABLED

@@ -2015,25 +2015,6 @@ void WinShowCheatEditorDialog()
 #define TIMER_HOTPLUG_BURST 0xD0D0
 static int g_hotplugTicksRemaining = 0;
 
-// Grey (or enable) the submenu inside `parent` that contains `containedCmd`.
-// Used to keep the S-PPU viewers usable whenever the 65816/S-PPU are running
-// (SNES ROMs and SGB BIOS mode) and the GB-PPU viewers only for GB/GBC/SGB
-// games.
-static void GbSetSubmenuEnabled(HMENU parent, UINT containedCmd, bool enabled)
-{
-	if (!parent) return;
-	int n = GetMenuItemCount(parent);
-	for (int i = 0; i < n; ++i)
-	{
-		HMENU sub = GetSubMenu(parent, i);
-		if (sub && GetMenuState(sub, containedCmd, MF_BYCOMMAND) != (UINT)-1)
-		{
-			EnableMenuItem(parent, i, MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED));
-			return;
-		}
-	}
-}
-
 static std::vector<std::wstring> g_translationCodes;
 
 static bool FindMenuItemParentPos(HMENU root, UINT id, HMENU *outParent, int *outPos)
@@ -2118,21 +2099,6 @@ LRESULT CALLBACK WinProc(
 		g_hInst = ((LPCREATESTRUCT)lParam)->hInstance;
 		DragAcceptFiles(hWnd, TRUE);
 		return 0;
-	case WM_INITMENUPOPUP:
-	{
-		HMENU hPopup = (HMENU)wParam;
-		// A cart whose BIOS is missing is mapped but cannot run, so it counts
-		// as no ROM here — same as the state before anything was loaded.
-		bool romLoaded  = !Settings.StopEmulation && !S9xBiosMissing();
-		bool gbActive   = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
-		// SGB BIOS mode runs the real 65816/S-PPU (border + GB screen tiles),
-		// so the S-PPU viewers stay live there; only the BIOS-less GB path
-		// bypasses the SNES side entirely.
-		bool snesActive = !Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
-		GbSetSubmenuEnabled(hPopup, ID_DEBUG_VRAM_VIEWER,    romLoaded && snesActive); // S-PPU
-		GbSetSubmenuEnabled(hPopup, ID_DEBUG_GB_TILE_VIEWER, romLoaded && gbActive);   // GB-PPU
-		return DefWindowProc(hWnd, uMsg, wParam, lParam);
-	}
 	case WM_DEVICECHANGE:
 		// Windows fires WM_DEVICECHANGE when a device is connected/disconnected,
 		// but SDL's backends (XInput, WGI, RawInput, DI) may not have enumerated
@@ -5760,6 +5726,97 @@ static void UpdateTestsMenu ()
 	if (GUI.hWnd) DrawMenuBar(GUI.hWnd);   // no window yet at build time
 }
 
+// Emulation menu entries that depend on what is loaded: each is on the menu
+// only while its hardware runs. They follow Game Boy Model, which also comes
+// and goes, so the group's slot is counted from it.
+static void UpdateHardwarePopups ()
+{
+	// Resource order; `has` is a command inside the popup, 0 for the separator.
+	struct Entry { UINT has; const TCHAR *text; UINT id; HMENU sub; bool shown; };
+	static Entry s_entries[] = {
+		{ ID_NSS_COIN1,            TEXT("&Nintendo Super System") },
+		{ ID_SUPERDISC_INSERT,     TEXT("Super &Disc") },
+		{ 0,                       NULL },
+		{ ID_DEBUG_VRAM_VIEWER,    TEXT("&S-PPU") },
+		{ ID_DEBUG_GB_TILE_VIEWER, TEXT("&GB-PPU") },
+	};
+	static HMENU s_parent = NULL;
+	static int   s_first  = 0;   // NSS's slot while Game Boy Model is hidden
+
+	MENUITEMINFO probe = {};
+	probe.cbSize = sizeof(probe);
+	probe.fMask  = MIIM_ID;
+
+	if (!s_parent)
+	{
+		HMENU parent = NULL;
+		int   pos    = 0;
+		if (!GUI.hMenu || !FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &parent, &pos))
+			return;
+		s_first = pos - (GetMenuItemInfo(parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+		for (Entry &e : s_entries)
+		{
+			MENUITEMINFO item = {};
+			item.cbSize = sizeof(item);
+			item.fMask  = MIIM_ID | MIIM_FTYPE | MIIM_SUBMENU;
+			// Leave the menu alone if the resource no longer matches the table.
+			if (!GetMenuItemInfo(parent, pos++, TRUE, &item) ||
+			    (e.has ? !item.hSubMenu || GetMenuState(item.hSubMenu, e.has, MF_BYCOMMAND) == (UINT)-1
+			           : !(item.fType & MFT_SEPARATOR)))
+				return;
+			e.id    = item.wID;
+			e.sub   = item.hSubMenu;
+			e.shown = true;
+		}
+		s_parent = parent;
+	}
+
+	// A cart whose BIOS is missing is mapped but cannot run: no ROM.
+	const bool rom  = !Settings.StopEmulation && !S9xBiosMissing();
+	const bool gb   = rom && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+	// SGB BIOS mode runs the real S-PPU too, so an SGB game gets both.
+	const bool snes = rom && (!Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+	const bool want[] = { NSS.Active != 0, Settings.SuperDisc != 0, snes || gb, snes, gb };
+
+	int  pos     = s_first + (GetMenuItemInfo(s_parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+	bool changed = false;
+	for (size_t i = 0; i < _countof(s_entries); i++)
+	{
+		Entry &e = s_entries[i];
+		if (want[i] && !e.shown)
+		{
+			MENUITEMINFO ins = {};
+			ins.cbSize = sizeof(ins);
+			if (e.has)
+			{
+				ins.fMask      = MIIM_STRING | MIIM_SUBMENU | MIIM_ID | MIIM_FTYPE;
+				ins.fType      = MFT_STRING;
+				ins.wID        = e.id;
+				ins.hSubMenu   = e.sub;
+				ins.dwTypeData = (LPTSTR) e.text;
+				ins.cch        = (UINT)_tcslen(e.text);
+			}
+			else
+			{
+				ins.fMask = MIIM_FTYPE;
+				ins.fType = MFT_SEPARATOR;
+			}
+			InsertMenuItem(s_parent, pos, TRUE, &ins);
+			changed = true;
+		}
+		else if (!want[i] && e.shown)
+		{
+			RemoveMenu(s_parent, pos, MF_BYPOSITION);
+			changed = true;
+		}
+		e.shown = want[i];
+		if (e.shown)
+			pos++;
+	}
+	if (changed && LocaleIsTranslated())
+		LocalizeMenu(s_parent);
+}
+
 static void CheckMenuStates ()
 {
     MENUITEMINFO mii;
@@ -5772,12 +5829,10 @@ static void CheckMenuStates ()
 	mii.fState = (GUI.FullScreen||GUI.EmulatedFullscreen) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_FULLSCREEN, FALSE, &mii);
 
-	// Super Disc drive: live only while its BIOS cart is.
+	UpdateHardwarePopups();
+
+	// Super Disc drive.
 	{
-		HMENU emu = NULL;
-		int   pos = 0;
-		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_SUPERDISC, &emu, &pos))
-			EnableMenuItem(emu, pos, MF_BYPOSITION | (Settings.SuperDisc ? MF_ENABLED : MF_GRAYED));
 		// One disc at a time: Insert waits for the tray to be emptied.
 		EnableMenuItem(GUI.hMenu, ID_SUPERDISC_INSERT,
 		               MF_BYCOMMAND | (S9xSuperDiscHasDisc() ? MF_GRAYED : MF_ENABLED));
@@ -5785,13 +5840,9 @@ static void CheckMenuStates ()
 		               MF_BYCOMMAND | (S9xSuperDiscHasDisc() ? MF_ENABLED : MF_GRAYED));
 	}
 
-	// Nintendo Super System front panel: live only while its supervisor is.
+	// Nintendo Super System front panel.
 	{
-		HMENU emu = NULL;
-		int   pos = 0;
-		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &emu, &pos))
-			EnableMenuItem(emu, pos, MF_BYPOSITION | (NSS.Active ? MF_ENABLED : MF_GRAYED));
-
+		int pos = 0;
 		TCHAR text[128];
 		MENUITEMINFO txt = {};
 		txt.cbSize     = sizeof(txt);
@@ -5928,6 +5979,13 @@ static void CheckMenuStates ()
 
 	mii.fState = (Settings.DisableGraphicWindows) ? MFS_UNCHECKED : MFS_CHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_DEBUG_CLIPWINDOWS, FALSE, &mii);
+
+	// The GB layer hotkeys can toggle while GB-PPU is off the menu.
+	for (int layer = 0; layer < 3; layer++)
+	{
+		mii.fState = S9xSGBGetLayerEnabled(layer) ? MFS_CHECKED : MFS_UNCHECKED;
+		SetMenuItemInfo(GUI.hMenu, ID_DEBUG_GB_SHOW_BG + layer, FALSE, &mii);
+	}
 
 	mii.fState = (GUI.DisableResize) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_VIDEO_LOCKRESIZE, FALSE, &mii);

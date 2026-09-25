@@ -1018,6 +1018,7 @@ static void FreezeBlock (STREAM, const char *, uint8 *, int);
 static void FreezeStruct (STREAM, const char *, void *, FreezeData *, int);
 static bool CheckBlockName(STREAM stream, const char *name, int &len);
 static void SkipBlockWithName(STREAM stream, const char *name);
+static void SkipBlocksUntil(STREAM stream, const char *name);
 
 
 void S9xResetSaveTimer (bool8 dontsave)
@@ -2155,39 +2156,9 @@ int S9xUnfreezeScreenshotFromStream(STREAM stream, uint16 **image_buffer, int &w
 
     uint8	*local_screenshot = NULL;
 
-    // skip all blocks until screenshot
-    SkipBlockWithName(stream, "CPU");
-    SkipBlockWithName(stream, "REG");
-    SkipBlockWithName(stream, "PPU");
-    SkipBlockWithName(stream, "DMA");
-    SkipBlockWithName(stream, "VRA");
-    SkipBlockWithName(stream, "RAM");
-    SkipBlockWithName(stream, "SRA");
-    SkipBlockWithName(stream, "FIL");
-    SkipBlockWithName(stream, "SND");
-    SkipBlockWithName(stream, "CTL");
-    SkipBlockWithName(stream, "TIM");
-    SkipBlockWithName(stream, "SFX");
-    SkipBlockWithName(stream, "SA1");
-    SkipBlockWithName(stream, "SAR");
-    SkipBlockWithName(stream, "DP1");
-    SkipBlockWithName(stream, "DP2");
-    SkipBlockWithName(stream, "DP4");
-    SkipBlockWithName(stream, "CX4");
-    SkipBlockWithName(stream, "ST0");
-    SkipBlockWithName(stream, "OBC");
-    SkipBlockWithName(stream, "OBM");
-    SkipBlockWithName(stream, "S71");
-    SkipBlockWithName(stream, "SRT");
-    SkipBlockWithName(stream, "CLK");
-    SkipBlockWithName(stream, "BSX");
-    SkipBlockWithName(stream, "MSU");
-    SkipBlockWithName(stream, "PF9");
-    // GBE — optional SGB BIOS-mode GB/SGB state blob (see S9xFreezeToStream).
-    // Sits between MSU and SHO when present; absent on non-SGB snapshots and
-    // on BIOS-less mode. SkipBlockWithName rewinds on mismatch, so it's safe
-    // to call unconditionally.
-    SkipBlockWithName(stream, "GBE");
+    // Every block before the screenshot, whatever it is: a fixed list of
+    // names lost the preview each time a chip or machine added its own.
+    SkipBlocksUntil(stream, "SHO");
     result = UnfreezeStructCopy(stream, "SHO", &local_screenshot, SnapScreenshot, COUNT(SnapScreenshot), version);
 
 
@@ -2430,6 +2401,23 @@ static void SkipBlockWithName(STREAM stream, const char *name)
 		long rewind = FIND_STREAM(stream);
 		rewind += len + 11;
 		REVERT_STREAM(stream, rewind, 0);
+	}
+}
+
+static void SkipBlocksUntil(STREAM stream, const char *name)
+{
+	for (;;)
+	{
+		char	head[12];
+		int		len;
+		size_t	l = READ_STREAM(head, 11, stream);
+		REVERT_STREAM(stream, FIND_STREAM(stream) - l, 0);
+		if (l != 11 || head[3] != ':' || strncmp(head, name, 3) == 0)
+			return;
+		head[3] = 0;
+		if (!CheckBlockName(stream, head, len))
+			return;
+		SkipBlockWithName(stream, head);
 	}
 }
 

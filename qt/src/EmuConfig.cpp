@@ -342,8 +342,9 @@ bool EmuConfig::setDefaults(int section)
         scale_image = true;
         maintain_aspect_ratio = true;
         use_integer_scaling = false;
-        aspect_ratio_numerator = 4;
-        aspect_ratio_denominator = 3;
+        // Square pixels, as win32's default AspectRatioBaseWidth of 256.
+        aspect_ratio_numerator = 8;
+        aspect_ratio_denominator = 7;
         show_overscan = false;
         transparency_effects = true;
         blend_hires = true;
@@ -683,8 +684,8 @@ void EmuConfig::config(const std::string &filename, bool write)
             osd_size = 24;
         if (aspect_ratio_numerator <= 0 || aspect_ratio_denominator <= 0)
         {
-            aspect_ratio_numerator = 4;
-            aspect_ratio_denominator = 3;
+            aspect_ratio_numerator = 8;
+            aspect_ratio_denominator = 7;
         }
     }
     EndSection();

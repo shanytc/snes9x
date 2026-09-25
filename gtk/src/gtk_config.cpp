@@ -83,7 +83,7 @@ int Snes9xConfig::load_defaults()
     xrr_index = 0;
     scale_to_fit = true;
     maintain_aspect_ratio = true;
-    aspect_ratio = 2;
+    aspect_ratio = 0; // square pixels, as win32's default
     scale_method = 0;
     hires_scale_method = 0;
     overscan = false;

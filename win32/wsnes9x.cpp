@@ -3060,6 +3060,7 @@ LRESULT CALLBACK WinProc(
 				const int ksp = cmd_id - ID_SFCBOX_KEYSWITCH0;
 				char msg[48];
 				SFCBox.Keyswitch = sfcbox_keyswitch_map[ksp];
+				Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;	// and the next power-on
 				snprintf(msg, sizeof(msg), "SFC-Box keyswitch: %s", sfcbox_keyswitch_names[ksp]);
 				S9xMessage(S9X_INFO, S9X_INFO, msg);
 			}

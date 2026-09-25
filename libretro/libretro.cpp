@@ -1757,6 +1757,7 @@ void retro_init(void)
     environ_cb(RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS, &achievements);
 
     memset(&Settings, 0, sizeof(Settings));
+    Settings.SFCBoxKeyswitch = 1;
     // The switch and the width come from the snes9x_widescreen option.
     S9xSetWidescreenDefaults(&Settings.Widescreen);
     S9xUpdateWidescreen();

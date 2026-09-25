@@ -21,6 +21,15 @@ void S9xShowSpriteViewer();
 void S9xCloseTileViewer();
 void S9xCloseTilemapViewer();
 void S9xCloseSpriteViewer();
+
+/* Emulation > GB-PPU: the same three for the Game Boy core (gtk_gb_viewer.cpp). */
+void S9xShowGBTileViewer();
+void S9xShowGBTilemapViewer();
+void S9xShowGBSpriteViewer();
+
+void S9xCloseGBTileViewer();
+void S9xCloseGBTilemapViewer();
+void S9xCloseGBSpriteViewer();
 /* Shuts every open viewer, for when the main window goes away. */
 void S9xClosePPUViewers();
 

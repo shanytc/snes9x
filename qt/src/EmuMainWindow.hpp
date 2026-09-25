@@ -15,6 +15,9 @@ class AudioWaveformWindow;
 class TileViewerWindow;
 class TilemapViewerWindow;
 class SpriteViewerWindow;
+class GBTileViewerWindow;
+class GBTilemapViewerWindow;
+class GBSpriteViewerWindow;
 
 class EmuMainWindow : public QMainWindow
 {
@@ -68,6 +71,9 @@ class EmuMainWindow : public QMainWindow
     void showTileViewer();
     void showTilemapViewer();
     void showSpriteViewer();
+    void showGBTileViewer();
+    void showGBTilemapViewer();
+    void showGBSpriteViewer();
     /* "Pause emulation when unfocused". The audio waveform viewer counts as
      * part of this window: moving between the two doesn't pause, leaving
      * from either does, so the viewer reports its focus changes here too. */
@@ -103,6 +109,9 @@ class EmuMainWindow : public QMainWindow
     QPointer<TileViewerWindow> tile_viewer_window;
     QPointer<TilemapViewerWindow> tilemap_viewer_window;
     QPointer<SpriteViewerWindow> sprite_viewer_window;
+    QPointer<GBTileViewerWindow> gb_tile_viewer_window;
+    QPointer<GBTilemapViewerWindow> gb_tilemap_viewer_window;
+    QPointer<GBSpriteViewerWindow> gb_sprite_viewer_window;
 
     bool manual_pause = false;
     bool focus_pause = false;

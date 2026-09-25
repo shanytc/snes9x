@@ -316,8 +316,11 @@ list(APPEND SOURCES
     src/gtk_tile_viewer.cpp
     src/gtk_tilemap_viewer.cpp
     src/gtk_sprite_viewer.cpp
+    src/gtk_gb_viewer.cpp
     ../common/video/ppu_viewer.cpp
     ../common/video/ppu_viewer.hpp
+    ../common/video/gb_ppu_viewer.cpp
+    ../common/video/gb_ppu_viewer.hpp
     ../common/recording/avi_writer.cpp
     ../common/recording/avi_writer.hpp
     ../common/recording/avi_recorder.cpp

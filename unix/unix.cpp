@@ -1627,6 +1627,7 @@ int main (int argc, char **argv)
 	s9x_base_dir = default_dir;
 
 	memset(&Settings, 0, sizeof(Settings));
+	Settings.SFCBoxKeyswitch = 1;
 	Settings.MouseMaster = TRUE;
 	Settings.SuperScopeMaster = TRUE;
 	Settings.JustifierMaster = TRUE;

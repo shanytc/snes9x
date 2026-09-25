@@ -338,8 +338,12 @@ list(APPEND QT_GUI_SOURCES
     src/TilemapViewerWindow.hpp
     src/SpriteViewerWindow.cpp
     src/SpriteViewerWindow.hpp
+    src/GBViewerWindows.cpp
+    src/GBViewerWindows.hpp
     ../common/video/ppu_viewer.cpp
     ../common/video/ppu_viewer.hpp
+    ../common/video/gb_ppu_viewer.cpp
+    ../common/video/gb_ppu_viewer.hpp
     ../common/recording/avi_writer.cpp
     ../common/recording/avi_writer.hpp
     ../common/recording/avi_recorder.cpp

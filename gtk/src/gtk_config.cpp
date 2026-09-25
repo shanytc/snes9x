@@ -249,6 +249,7 @@ int Snes9xConfig::load_defaults()
     Settings.NSSJoypadWatchdog = false;
     Settings.SFCBoxOSDBackdrop = true;
     Settings.SFCBoxOSDEnglish = false;
+    Settings.SFCBoxKeyswitch = 1;
     Settings.PF94TimerMinutes = 6;
     Settings.PF94TimerDisplay = 0;
     Settings.CC92TimerMinutes = 6;
@@ -464,6 +465,7 @@ int Snes9xConfig::save_config_file()
     outbool("EchoBufferHack", Settings.SeparateEchoBuffer, "Prevents echo buffer from overwriting APU RAM");
     outbool("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
     outbool("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish, "SFC-Box supervisor screen language: false=Japanese (authentic), true=English (render-time translation; the KROM firmware and savestates stay untouched)");
+    outint("SFCBoxKeyswitch", Settings.SFCBoxKeyswitch, "SFC-Box keyswitch position at power-on, as the port 80h bit it grounds: 4=1 (Options), 0=OFF, 1=ON (Play), 2=2, 3=3 (Self-Test). Follows Emulation -> Super Famicom Box -> Keyswitch");
     outbool("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose: Lethal Weapon trips it while uploading its sound driver");
     outint("NSSDipSwitches", Settings.NSSDipSwitches, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100 (Emulation -> Nintendo Super System names each one per game); 12 (0x0c) is the factory setting");
     outint("PowerFest94TimeLimit", Settings.PF94TimerMinutes, "PowerFest '94 event cart session length in minutes (DIP switches, 3-18)");
@@ -747,6 +749,7 @@ int Snes9xConfig::load_config_file()
     inbool("EchoBufferHack", Settings.SeparateEchoBuffer);
     inbool("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop);
     inbool("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish);
+    inint("SFCBoxKeyswitch", Settings.SFCBoxKeyswitch);
     inbool("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog);
     inint("NSSDipSwitches", Settings.NSSDipSwitches);
     Settings.NSSDipSwitches &= 0xff;

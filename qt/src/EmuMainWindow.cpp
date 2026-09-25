@@ -19,6 +19,7 @@
 #include "TileViewerWindow.hpp"
 #include "TilemapViewerWindow.hpp"
 #include "SpriteViewerWindow.hpp"
+#include "GBViewerWindows.hpp"
 #include "CheatsDialog.hpp"
 #include "ColorCorrectionDialog.hpp"
 #include "MovieDialogs.hpp"
@@ -55,6 +56,7 @@
 #include "voicekun.h"
 #include "nss.h"
 #include "sfcbox.h"
+#include "sgb/sgb.h"
 #include "superdisc.h"
 #include "movie.h"
 #include "snapshot.h"
@@ -533,6 +535,15 @@ void EmuMainWindow::setEventTimer(int minutes, int display)
 
 void EmuMainWindow::updateEventTitle()
 {
+    // The Super Famicom Box swaps games under the SNES; the title follows.
+    static std::string box_title;
+    if (app.isCoreActive() && SFCBox.Active && box_title != S9xSFCBoxTitle())
+    {
+        box_title = S9xSFCBoxTitle();
+        updateWindowTitle();   // comes back here with the new base
+        return;
+    }
+
     // The countdown rides on whatever title is up, so Kaillera's survives.
     QString suffix;
     if (app.isCoreActive() && PF94.active && S9xEventTimerDisplay() == 2)
@@ -630,11 +641,16 @@ void EmuMainWindow::insertCoin(int slot)
 
 void EmuMainWindow::sfcboxSetKeyswitch(int panel_pos)
 {
+    if (!app.isCoreActive() || !SFCBox.Active)
+        return;
+    // A real key stays where it was left: the next power-on starts there.
+    app.config->sfcbox_keyswitch = sfcbox_keyswitch_map[panel_pos];
     app.emu_thread->runOnThread([panel_pos] {
         if (!SFCBox.Active)
             return;
         static const char *names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
         SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
+        Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;
         S9xSetInfoString((std::string("SFC-Box keyswitch: ") + names[panel_pos]).c_str());
     });
 }
@@ -795,16 +811,20 @@ void EmuMainWindow::superDiscEject()
     updateWindowTitle();
 }
 
-// Super Disc sessions name the BIOS and the disc in play. Any other title
-// (Kaillera's, say) is left alone unless it is a stale Super Disc one.
+// Super Disc and Super Famicom Box sessions name the machine and what's in it.
+// Any other title (Kaillera's, say) is left alone unless it is a stale one of theirs.
 void EmuMainWindow::updateWindowTitle()
 {
-    if (!Settings.SuperDisc && !windowTitle().startsWith("Super Disc ("))
+    const char *machine = Settings.SuperDisc                       ? S9xSuperDiscTitle()
+                        : (app.isCoreActive() && SFCBox.Active)   ? S9xSFCBoxTitle()
+                                                                   : nullptr;
+    if (!machine && !windowTitle().startsWith("Super Disc (") &&
+        !windowTitle().startsWith("Super Famicom Box"))
         return;
     event_title_suffix.clear();
-    if (Settings.SuperDisc)
+    if (machine)
         setWindowTitle(QString("%1 - SuperSnes9x %2")
-                           .arg(QString::fromUtf8(S9xSuperDiscTitle()))
+                           .arg(QString::fromUtf8(machine))
                            .arg(VERSION_DISPLAY));
     else
         setWindowTitle(QString("SuperSnes9x %1").arg(VERSION_DISPLAY));
@@ -1317,8 +1337,38 @@ void EmuMainWindow::createWidgets()
     }
     auto sppu_menu_action = emulation_menu->addMenu(sppu_menu);
 
+    /* win32's Emulation->GB-PPU: the Game Boy core's own viewers and layer
+     * switches. The layer state lives in the core, so the checkmarks are read
+     * back from it whenever the menu opens. */
+    auto gbppu_menu = new QMenu(tr("&GB-PPU"));
+    connect(gbppu_menu->addAction(tr("GB &Tile Viewer...")), &QAction::triggered, this,
+            &EmuMainWindow::showGBTileViewer);
+    connect(gbppu_menu->addAction(tr("GB Tile&map Viewer...")), &QAction::triggered, this,
+            &EmuMainWindow::showGBTilemapViewer);
+    connect(gbppu_menu->addAction(tr("GB &Sprite Viewer...")), &QAction::triggered, this,
+            &EmuMainWindow::showGBSpriteViewer);
+    gbppu_menu->addSeparator();
+    static const char *gb_layer_labels[3] = {
+        QT_TR_NOOP("Show &Background"), QT_TR_NOOP("Show &Window"), QT_TR_NOOP("Show S&prites"),
+    };
+    std::vector<QAction *> gb_layer_actions;
+    for (int layer = 0; layer < 3; layer++)
+    {
+        auto item = gbppu_menu->addAction(tr(gb_layer_labels[layer]));
+        item->setCheckable(true);
+        connect(item, &QAction::triggered, this, [this, layer](bool checked) {
+            app.emu_thread->runOnThread([layer, checked] {
+                static const char *names[3] = { "GB Background", "GB Window", "GB Sprites" };
+                S9xSGBSetLayerEnabled(layer, checked);
+                S9xSetInfoString((std::string(names[layer]) + (checked ? " on" : " off")).c_str());
+            });
+        });
+        gb_layer_actions.push_back(item);
+    }
+    auto gbppu_menu_action = emulation_menu->addMenu(gbppu_menu);
+
     connect(emulation_menu, &QMenu::aboutToShow, this,
-            [this, sppu_menu_action, graphics_toggle_actions] {
+            [this, sppu_menu_action, graphics_toggle_actions, gbppu_menu_action, gb_layer_actions] {
         // Checkmarks are derived rather than stamped when clicked, so the menu
         // reads the state the hotkeys leave behind, and follows the core
         // clearing the mask on every ROM load.
@@ -1326,7 +1376,12 @@ void EmuMainWindow::createWidgets()
             graphics_toggle_actions[i]->setChecked(!(Settings.BG_Forced & (1 << i)));
         graphics_toggle_actions[5]->setChecked(!Settings.DisableGraphicWindows);
         // Nothing here reaches a Game Boy picture: the S-PPU is not drawing it.
-        sppu_menu_action->setEnabled(app.isCoreActive() && !S9xContentIsGameBoy());
+        sppu_menu_action->setVisible(app.isCoreActive() && !S9xContentIsGameBoy());
+        // SGB BIOS mode runs both PPUs, so an SGB game gets both menus.
+        gbppu_menu_action->setVisible(app.isCoreActive() &&
+                                      (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive));
+        for (int layer = 0; layer < 3; layer++)
+            gb_layer_actions[layer]->setChecked(S9xSGBGetLayerEnabled(layer));
     });
 
     menuBar()->addMenu(emulation_menu);
@@ -2387,6 +2442,33 @@ void EmuMainWindow::showSpriteViewer()
     sprite_viewer_window->show();
     sprite_viewer_window->raise();
     sprite_viewer_window->activateWindow();
+}
+
+void EmuMainWindow::showGBTileViewer()
+{
+    if (!gb_tile_viewer_window)
+        gb_tile_viewer_window = new GBTileViewerWindow(this, &app);
+    gb_tile_viewer_window->show();
+    gb_tile_viewer_window->raise();
+    gb_tile_viewer_window->activateWindow();
+}
+
+void EmuMainWindow::showGBTilemapViewer()
+{
+    if (!gb_tilemap_viewer_window)
+        gb_tilemap_viewer_window = new GBTilemapViewerWindow(this, &app);
+    gb_tilemap_viewer_window->show();
+    gb_tilemap_viewer_window->raise();
+    gb_tilemap_viewer_window->activateWindow();
+}
+
+void EmuMainWindow::showGBSpriteViewer()
+{
+    if (!gb_sprite_viewer_window)
+        gb_sprite_viewer_window = new GBSpriteViewerWindow(this, &app);
+    gb_sprite_viewer_window->show();
+    gb_sprite_viewer_window->raise();
+    gb_sprite_viewer_window->activateWindow();
 }
 
 void EmuMainWindow::toggleAudioWaveform()

@@ -1480,7 +1480,8 @@ void S9xSFCBoxPowerOn (void)
 
 	SFCBox.Active = TRUE;
 	SFCBoxGame[0] = 0;			// the KROM boots the attraction menu first
-	SFCBox.Keyswitch = 1;		// "ON" (play mode)
+	// A real key stays where it was left; out of range falls back to "ON".
+	SFCBox.Keyswitch = Settings.SFCBoxKeyswitch <= 4 ? (uint8) Settings.SFCBoxKeyswitch : 1;
 	SFCBox.WRIOOut = 0xff;
 	SFCBox.SNESHeld = TRUE;		// the KROM releases us when it's ready
 	SFCBox.LastVCounter = -1;

@@ -66,6 +66,7 @@
 #include "nss.h"
 #include "sfcbox.h"
 #include "superdisc.h"
+#include "sgb/sgb.h"
 
 // Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the
 // retired values, which have no item any more (normalized away first).
@@ -655,8 +656,17 @@ void Snes9xWindow::connect_signals()
         syncing_menu = false;
 
         // Nothing here reaches a Game Boy picture: the S-PPU is not drawing it.
-        get_object<Gtk::MenuItem>("sppu_item")
-            ->set_sensitive(config->rom_loaded && !S9xContentIsGameBoy());
+        const bool sppu = config->rom_loaded && !S9xContentIsGameBoy();
+        // SGB BIOS mode runs both PPUs, so an SGB game gets both menus.
+        const bool gbppu = config->rom_loaded &&
+                           (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+        show_widget("sppu_separator", sppu || gbppu);
+        show_widget("sppu_item", sppu);
+        gbppu_item->set_visible(gbppu);
+        syncing_menu = true;
+        for (int layer = 0; layer < 3; layer++)
+            gb_layer_items[layer]->set_active(S9xSGBGetLayerEnabled(layer));
+        syncing_menu = false;
 
         refresh_arcade_menus();
     });
@@ -679,6 +689,7 @@ void Snes9xWindow::connect_signals()
     });
 
     create_arcade_menus();
+    create_gbppu_menu();
 
     get_object<Gtk::MenuItem>("superdisc_insert_item")->signal_activate().connect([&] {
         open_superdisc_dialog();
@@ -1179,6 +1190,45 @@ static std::string mnemonic_escape(const char *s)
     return out;
 }
 
+/* win32's Emulation->GB-PPU, after S-PPU: the Game Boy core's own viewers and
+ * layer switches. The layer state lives in the core, so the checkmarks are
+ * read back from it whenever the menu opens. */
+void Snes9xWindow::create_gbppu_menu()
+{
+    auto menu = Gtk::manage(new Gtk::Menu());
+    auto add_viewer = [menu](const char *label, void (*show)()) {
+        auto item = Gtk::manage(new Gtk::MenuItem(label, true));
+        item->signal_activate().connect([show] { show(); });
+        menu->append(*item);
+    };
+    add_viewer(_("GB _Tile Viewer..."), S9xShowGBTileViewer);
+    add_viewer(_("GB Tile_map Viewer..."), S9xShowGBTilemapViewer);
+    add_viewer(_("GB _Sprite Viewer..."), S9xShowGBSpriteViewer);
+    menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    const char *labels[3] = { _("Show _Background"), _("Show _Window"), _("Show S_prites") };
+    for (int layer = 0; layer < 3; layer++)
+    {
+        gb_layer_items[layer] = Gtk::manage(new Gtk::CheckMenuItem(labels[layer], true));
+        gb_layer_items[layer]->signal_toggled().connect([this, layer] {
+            if (syncing_menu)
+                return;
+            static const char *names[3] = { "GB Background", "GB Window", "GB Sprites" };
+            const bool on = gb_layer_items[layer]->get_active();
+            S9xSGBSetLayerEnabled(layer, on);
+            S9xSetInfoString((std::string(names[layer]) + (on ? " on" : " off")).c_str());
+        });
+        menu->append(*gb_layer_items[layer]);
+    }
+
+    gbppu_item = Gtk::manage(new Gtk::MenuItem(_("_GB-PPU"), true));
+    gbppu_item->set_submenu(*menu);
+    // S-PPU is the last entry, so this lands right after it.
+    get_object<Gtk::Menu>("emulation_menu_item_menu")->append(*gbppu_item);
+    gbppu_item->show_all();
+    gbppu_item->hide();
+}
+
 void Snes9xWindow::create_arcade_menus()
 {
     auto emulation_menu = get_object<Gtk::Menu>("emulation_menu_item_menu");
@@ -1364,6 +1414,15 @@ void Snes9xWindow::set_event_timer(int minutes, int display)
     update_event_title();
 }
 
+// Super Disc and Super Famicom Box sessions name the machine and what's in it.
+std::string Snes9xWindow::rom_title()
+{
+    const std::string name = Settings.SuperDisc ? std::string(S9xSuperDiscTitle())
+                           : SFCBox.Active      ? std::string(S9xSFCBoxTitle())
+                                                : S9xBasenameNoExt(Memory.ROMFilename);
+    return name + " - SuperSnes9x " VERSION_DISPLAY;
+}
+
 bool Snes9xWindow::update_event_title()
 {
     // The countdown rides on whatever title configure_widgets put up.
@@ -1381,6 +1440,9 @@ bool Snes9xWindow::update_event_title()
         title.compare(title.size() - event_title_suffix.size(), event_title_suffix.size(), event_title_suffix) == 0)
         title.erase(title.size() - event_title_suffix.size());
     event_title_suffix = suffix;
+    // The Super Famicom Box swaps games under the SNES; the title follows.
+    if (config->rom_loaded && SFCBox.Active)
+        title = rom_title();
     if (title + suffix != shown)
         window->set_title(title + suffix);
 
@@ -1476,6 +1538,7 @@ void Snes9xWindow::sfcbox_set_keyswitch(int panel_pos)
     if (!config->rom_loaded || !SFCBox.Active)
         return;
     SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
+    Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;   // and the next power-on
     auto message = fmt::format("SFC-Box keyswitch: {}", sfcbox_keyswitch_names[panel_pos]);
     S9xSetInfoString(message.c_str());
 }
@@ -2499,12 +2562,7 @@ void Snes9xWindow::configure_widgets()
         show_mouse_cursor();
 
     if (config->rom_loaded)
-    {
-        std::string title = Settings.SuperDisc ? std::string(S9xSuperDiscTitle())
-                                               : S9xBasenameNoExt(Memory.ROMFilename);
-        title += " - SuperSnes9x " VERSION_DISPLAY;
-        window->set_title(title);
-    }
+        window->set_title(rom_title());
     else
     {
         window->set_title("SuperSnes9x " VERSION_DISPLAY);

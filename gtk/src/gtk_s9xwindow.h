@@ -135,6 +135,10 @@ class Snes9xWindow : public GtkBuilderWindow
     /* Ticking a check menu item also fires its activate handler, so the
      * menu-open syncs raise this while they stamp the current state. */
     bool syncing_menu = false;
+    // Emulation -> GB-PPU: the Game Boy core's viewers and layer switches.
+    void create_gbppu_menu();
+    Gtk::MenuItem *gbppu_item = nullptr;
+    Gtk::CheckMenuItem *gb_layer_items[3] = {};
     Gtk::MenuItem *sfcbox_item = nullptr;
     Gtk::RadioMenuItem *sfcbox_keyswitch_items[5] = {};
     Gtk::CheckMenuItem *sfcbox_backdrop_item = nullptr;
@@ -152,6 +156,7 @@ class Snes9xWindow : public GtkBuilderWindow
     std::string event_title_suffix;
     void set_event_timer(int minutes, int display);
     bool update_event_title();
+    std::string rom_title();
     int user_pause, sys_pause;
     int last_width, last_height;
     int mouse_region_x, mouse_region_y;

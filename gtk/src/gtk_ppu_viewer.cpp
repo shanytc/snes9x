@@ -323,4 +323,7 @@ void S9xClosePPUViewers()
     S9xCloseTileViewer();
     S9xCloseTilemapViewer();
     S9xCloseSpriteViewer();
+    S9xCloseGBTileViewer();
+    S9xCloseGBTilemapViewer();
+    S9xCloseGBSpriteViewer();
 }

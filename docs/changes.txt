@@ -1,3 +1,110 @@
+SuperSnes9x 1.63.31
+-------------------
+
+General
+- Added Nintendo Super System arcade support: Z80 supervisor, key chip,
+  on-screen display, three cartridge sockets and the front panel. Twelve
+  of the thirteen dumped cartridges run, including HiROM and DSP-1 boards.
+- NSS: named the cartridge DIP switches for ActRaiser, The Addams Family,
+  Lethal Weapon and Robocop 3.
+- NSS: the supervisor's reset silences the APU too, Restart has to be held
+  as on the cabinet, and nocash's test program is accepted as a BIOS.
+- NSS: the joypad watchdog is off by default. Fixes Lethal Weapon being
+  thrown off the machine.
+- Added Super Disc support: BIOS from the BIOS Manager, disc insert and
+  eject (eject resets to the home screen), and the disc's name in the
+  window title.
+- Added Xeno Crisis (RP2040 cartridge) support. The firmware is read from
+  <rom>_rp2040.bin beside the ROM or inside its zip, and the game's flash
+  saves are kept in the .srm.
+- Added widescreen. Super Mario World is patched in memory into Vitor
+  Vilela's Wide-SNES hack at four widths: Normal, Extra, Ultra and Hyper
+  (the last two experimental). Other games are unaffected.
+- Emulated the security chip on the unlicensed Tekken 2 cart. Street
+  Fighter EX now uses the same chip instead of a ROM patch.
+- Fixed the Mickey Magic demo: H/V IRQs are taken one poll later, WAI
+  wakes a cycle sooner, and a window can start and stop only once per line.
+- Fixed interlaced modes 0-4 fetching separate BG rows per field. Fixes
+  the A.S.P. sortie report screen.
+- Re-applied A.S.P.'s mid-scanline effects, now re-rendered at each line's
+  HBlank, which avoids the Final Fantasy VI damage-number glitches.
+- Latch Mode 7 registers early. (BearOso)
+- Fixed WAI when no IRQ or NMI is imminent. (BearOso)
+- Fixed SuperFX 8-bit plotting transparency and RPIX clearing DREG too
+  early. (Wyatt)
+- Loading an invalid snapshot no longer hangs. (BearOso)
+- One button or axis can now be bound to multiple actions. (BearOso)
+- BIOS files come only from the BIOS Manager; the loaders no longer search
+  folders for them by name.
+- Super Game Boy Color is only offered for SGB-enhanced carts, and a Super
+  Game Boy pick whose BIOS is missing falls back to Automatic.
+- SGB: the ICD2 packet decoder follows the hardware's rules. Fixes Bonk's
+  Revenge / B.C. Kid 2 booting to a blank border and the KCE logo in
+  Castlevania Legends.
+- GB: the boot-ROM handoff now matches hardware cycle for cycle.
+- GB: NRx2 glitch suppression is off by default.
+- GB: added Game Boy Color LCD color correction, picture adjustments for
+  Game Boy output and a custom Game Boy (DMG) palette.
+- SFC-Box: the keyswitch position is remembered, and the window title
+  names the running game.
+- Load with Preview shows previews for SFC-Box, NSS, Super Disc and Xeno
+  Crisis savestates.
+- Fixed a hang computing the checksum of an exactly 16MB ROM.
+
+win32 GUI
+- Loading a game while another is running is now instant.
+- Added Always on Top and Lock Screen Resize to the Video menu.
+- Each console keeps its own window size, and Window Size steps in the
+  loaded content's own resolution.
+- Fixed a phantom menu-bar margin leaving a black bar at some window sizes.
+- Added layer toggles to the S-PPU menu.
+- The Color Correction dialog is modeless, applies changes live, and keeps
+  separate SNES and GBC settings.
+- Added a background color choice to the tilemap and Game Boy sprite
+  viewers.
+- Added a Super Famicom Box menu (coin, keyswitch, OSD language and
+  backdrop), moved from the Hacks dialog.
+- Added hotkey tabs for the NSS front panel and the Super Disc.
+- Hardware menus (NSS, Super Disc, S-PPU, GB-PPU) only appear while their
+  hardware is loaded.
+- Acid Tests boot through the BIOS Manager's boot ROMs and SGB BIOS, and
+  run modeless in the background.
+
+Qt/GTK (Linux)
+- Added the S-PPU Tile, Tilemap and Sprite Viewers, and a GB-PPU menu with
+  the Game Boy viewers and layer toggles.
+- Added front panels, hotkeys and settings for the NSS and SFC-Box, and
+  the PowerFest '94 / Campus Challenge '92 session timer.
+- Added the Super Disc menu and hotkeys.
+- Added Always on Top, Lock Screen Resize, the S-PPU layer menu and a
+  Widescreen option.
+- Game Boy content keeps its own shape, and new configs default to square
+  pixels.
+- Layer hotkeys 1/2/5 switch the Game Boy layers in a Game Boy session.
+- Missing-BIOS notices are shown instead of the ROM info.
+
+GTK
+- Fixed a crash on SIGTERM and Ctrl-C.
+- Fixed an out-of-range sound driver setting leaving no sound.
+- Updated Japanese translation. (Nekokabu)
+
+Qt
+- Fixed quit signals being ignored during startup.
+- Fixed a PulseAudio abort with a zeroed config.
+- A key bound to several hotkeys now fires all of them.
+- Added a --dark command line option. (BearOso)
+- OpenGL repaints on resize. (BearOso)
+
+libretro
+- Added a Game Boy Model core option, so any cart can run on the Super
+  Game Boy.
+- Added a Widescreen core option for Super Mario World.
+- Super Disc supports RetroArch's Disc Control.
+- Xeno Crisis runs from a zip, and its saves are kept in SAVE_RAM,
+  interchangeable with the other ports' .srm.
+- Missing-BIOS notices are shown on the frontend's OSD.
+
+
 SuperSnes9x 1.63.30
 -------------------
 

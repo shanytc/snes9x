@@ -17,6 +17,14 @@
 #include "rp2040cart.h"
 #include "fscompat.h"
 
+#ifdef UNZIP_SUPPORT
+#ifdef SYSTEM_ZIP
+#include <minizip/unzip.h>
+#else
+#include "unzip/unzip.h"
+#endif
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -76,22 +84,75 @@ static std::string FirmwarePath (const char *rom_path)
 	return S9xGetFilename(rom_path, "_rp2040.bin", ROMFILENAME_DIR);
 }
 
+static bool ReadFirmwareFile (const std::string &path)
+{
+	FILE *f = fopen(path.c_str(), "rb");
+	if (!f)
+		return false;
+	firmware.assign(16 << 20, 0xff);
+	size_t n = fread(&firmware[0], 1, firmware.size(), f);
+	fclose(f);
+	firmware.resize(n);
+	return n > 0;
+}
+
+// A zipped ROM can carry its firmware in the same archive: the entry named
+// after the zip wins, else the first *_rp2040.bin in it.
+static bool ReadFirmwareFromZip (const char *zip_path)
+{
+#ifdef UNZIP_SUPPORT
+	SplitPath zp = splitpath(zip_path);
+	if (!zp.ext_is(".zip") && !zp.ext_is(".msu1"))
+		return false;
+	unzFile z = unzOpen(zip_path);
+	if (!z)
+		return false;
+
+	const std::string wanted = zp.stem + "_rp2040.bin";
+	std::string pick;
+	char name[260];
+	unz_file_info info;
+	for (int port = unzGoToFirstFile(z); port == UNZ_OK; port = unzGoToNextFile(z))
+	{
+		if (unzGetCurrentFileInfo(z, &info, name, sizeof(name), NULL, 0, NULL, 0) != UNZ_OK)
+			break;
+		size_t len = strlen(name);
+		if (len <= 11 || strcasecmp(name + len - 11, "_rp2040.bin") != 0 || info.uncompressed_size > (16u << 20))
+			continue;
+		if (pick.empty() || !strcasecmp(S9xBasename(name).c_str(), wanted.c_str()))
+			pick = name;
+	}
+
+	bool ok = false;
+	if (!pick.empty() && unzLocateFile(z, pick.c_str(), 0) == UNZ_OK &&
+		unzGetCurrentFileInfo(z, &info, NULL, 0, NULL, 0, NULL, 0) == UNZ_OK &&
+		unzOpenCurrentFile(z) == UNZ_OK)
+	{
+		firmware.resize(info.uncompressed_size);
+		int got = unzReadCurrentFile(z, firmware.data(), (unsigned) firmware.size());
+		ok = unzCloseCurrentFile(z) == UNZ_OK && got == (int) firmware.size() && got > 0;
+		if (!ok)
+			firmware.clear();
+	}
+	unzClose(z);
+	return ok;
+#else
+	(void) zip_path;
+	return false;
+#endif
+}
+
 bool8 S9xRP2040CartActivate (const char *rom_path)
 {
 	S9xRP2040CartDeactivate();
 
 	std::string path = FirmwarePath(rom_path);
-	FILE *f = fopen(path.c_str(), "rb");
-	if (!f)
+	if (!ReadFirmwareFile(path) && !ReadFirmwareFromZip(rom_path))
 	{
-		std::string msg = "RP2040 firmware missing - place " + S9xBasename(path) + " next to the ROM";
+		std::string msg = "RP2040 firmware missing - place " + S9xBasename(path) + " next to the ROM or in its zip";
 		S9xSetBiosNotice(msg.c_str());
 		return FALSE;
 	}
-	firmware.assign(16 << 20, 0xff);
-	size_t n = fread(&firmware[0], 1, firmware.size(), f);
-	fclose(f);
-	firmware.resize(n);
 
 	chip = new RP2040::Chip;
 	if (!chip->LoadFlash(&firmware[0], firmware.size()))

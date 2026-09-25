@@ -5015,6 +5015,10 @@ uint16 CMemory::checksum_mirror_sum (uint8 *start, uint32 &length, uint32 mask)
 	while (!(length & mask) && mask)
 		mask >>= 1;
 
+	// nothing left that a power of two fits: sum the rest as it is
+	if (!mask)
+		return (checksum_calc_sum(start, length));
+
 	uint16	part1 = checksum_calc_sum(start, mask);
 	uint16	part2 = 0;
 
@@ -5054,8 +5058,11 @@ void CMemory::Checksum_Calculate (void)
 			sum = checksum_calc_sum(ROM, CalculatedSize);
 		else
 		{
-			uint32	length = CalculatedSize;
-			sum = checksum_mirror_sum(ROM, length);
+			// The 8MB default mask never covers a 16MB image's only set bit.
+			uint32	length = CalculatedSize, mask = 0x800000;
+			while ((mask << 1) <= length)
+				mask <<= 1;
+			sum = checksum_mirror_sum(ROM, length, mask);
 		}
 	}
 

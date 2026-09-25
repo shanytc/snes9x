@@ -40,6 +40,15 @@ static bool is_rom_entry (const char *name)
 	return (false);
 }
 
+// A cart's companion data packed alongside the ROM, never the ROM itself:
+// an RP2040 cart's firmware is a far bigger ".bin" than the cartridge dump.
+static bool is_companion_entry (const char *name)
+{
+	int	len = strlen(name);
+
+	return (len > 11 && strcasecmp(name + len - 11, "_rp2040.bin") == 0);
+}
+
 bool8 LoadZip (const char *zipname, uint32 *TotalFileSize, uint8 *buffer,
                uint32 buffer_size)
 {
@@ -66,7 +75,7 @@ bool8 LoadZip (const char *zipname, uint32 *TotalFileSize, uint8 *buffer,
 		char	name[132];
 		unzGetCurrentFileInfo(file, &info, name, 128, NULL, 0, NULL, 0);
 
-		if (info.uncompressed_size > CMemory::MAX_ROM_SIZE + 512)
+		if (info.uncompressed_size > CMemory::MAX_ROM_SIZE + 512 || is_companion_entry(name))
 		{
 			port = unzGoToNextFile(file);
 			continue;

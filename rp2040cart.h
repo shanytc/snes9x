@@ -7,7 +7,8 @@
 // Carts whose game runs on an RP2040 (Bitmap Bureau's Xeno Crisis). The SNES
 // side is a thin client: it polls $3000 for commands and executes 65816
 // code the RP2040 streams through that same byte, one byte per bus read.
-// The RP2040's flash image is a separate file, <rom name>_rp2040.bin.
+// The RP2040's flash image is a separate file, <rom name>_rp2040.bin, beside
+// the ROM or packed in the same zip.
 
 #ifndef _RP2040CART_H_
 #define _RP2040CART_H_

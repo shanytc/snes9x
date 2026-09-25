@@ -1,4 +1,927 @@
-Snes9x 1.63
+SuperSnes9x 1.63.30
+-------------------
+
+Super Game Boy Color (new, Experimental)
+- New SGBC mode: an SGB2 with a Game Boy Color inside.
+- This mode runs a memory patched SGB2 BIOS with per-game memory byte in memory patch.
+- Colour 0 now comes from the cart instead of the stale SGB palette. 
+- Pre-palette fallback goes through BGP.
+- DMG-compatibility colour is routed through BGP/OBP.
+- Border handling: one-frame hold for SGBC border transfers, custom borders allowed, Great Battle Pocket gets its own border.
+- Carts whose SGB detect beats the Color branch get dedicated patches.
+
+Super Game Boy Core
+- MLT_REQ is latched in the ICD2 instead of waiting for the BIOS.
+- BIOS mode carries its cycle remainder instead of flooring twice, and deducts GB cycle overshoot (fixes audio pacing).
+- Packet bits latch on the rising edge, not the falling one.
+- MASK_EN honored on the BIOS pane, LCD-off treated as a freeze.
+- Boot logo held on displayed content, hidden under the SGB BIOS, and shown only when a boot ROM was actually assigned.
+- GBC-only carts are no longer forced out of SGB BIOS mode on the container path.
+- Sprite-limit hack offered in SGB BIOS sessions.
+
+Game Boy Core
+- When installed as acid/ folder, a new Tests > Acid Tests menu will appear. SuperSnes9x passes all 264 tests, matching Coffee GB. 
+- Mode 3 split into a timing skeleton and an output machine. Window insertion-glitch kill latched per machine, DMG window-kill narrowed to the tile-number stage, window output latch no longer double-counted.
+- Mode-0 STAT interrupt sourced from the transition, CGB gets its own STAT mode-window edges.
+- LCD-enable line timing passes mooneye lcdon_timing and lcdon_write_timing.
+- WY comparator re-run on LCDC and WY writes. Pre-DMA OAM bytes kept for scan slots read before the transfer.
+- Several emulator cores can run at once (used by the shootout pool).
+- New "Suppress NRx Glitches" sound setting, default on (fixes the CH1 zombie click).
+
+Boot ROMs, BIOS Manager, Game Boy Model selection
+- GB/GBC carts boot through a real boot ROM for the power-on logo, offered as a fourth BIOS choice.
+- New: File > BIOS Manager: assign BIOS files by path, now the source of truth for all BIOS files. Console list reordered, Super Game Boy 2 split out, SGB revision named, optional slots marked.
+- SGB boot ROM slots with per-slot validation. Real SGB-CPU boot ROM dumps found by their No-Intro names. Blank slots resolved from the whole BIOS folder, zipped or renamed.
+- Emulation > BIOS renamed to Game Boy Model. One Automatic model decided from the cart header. Entries with missing BIOS greyed. Model hotkeys added (win32 hotkey tab, Qt/GTK).
+- Missing BIOS reported on the OSD instead of a modal box, UI stays in its no-game state.
+- Hard reset picks up BIOS Manager changes. Both Super Famicom Box BIOS files named, only the required one blocks.
+- Sufami Turbo and Satellaview carts load through File > Load Game (or double click on the rom file.)
+- Mono carts boot on the Color without its BIOS.
+- Cheat lifecycle fixed in the SGB BIOS-mode load paths.
+
+Support for more Game Boy mappers
+- Unlicensed mapper families: Rocket, Makon/NT, BBD, Sintax, Li Cheng, Vast Fame, and kin.
+- Zook Hero Z mapper and protection.
+
+SNES emulation
+- PPU: A.S.P. Air Strike Patrol beam-raced mid-scanline effects (INIDISP brightness windows, raster spans bounded to their horizontal extent, mosaic onset, scroll boundaries, per-line backdrop).
+- gfx: frames no longer skipped mid-interlace (half the scanlines went black).
+- SuperFX: cycle-accurate GSU timing (Winter Gold), GSU ROM/RAM buffer overlap modelled (Yoshi's Island slowdown), 11MB SuperFX mapper, new vars moved into the gsu struct with a settings/command-line mode switch.
+- MSU-1 packs load from archives, with an offer to rename plain .zip ones.
+
+Audio (win32)
+- WaveOut sound-sync pacing could lock about 20% below real time. Now paced from the play cursor.
+
+RetroAchievements
+- User agent now "SuperSnes9x/1.63.1", unicode truncation fixed.
+- Logging out no longer disables RetroAchievements. The running game is identified on a mid-session login.
+- Hardcore will not work anymore, it was declined by the RA team.
+
+Qt/GTK (Linux)
+- Updated gtk/qt to match win32 on:
+  - Added run ahead, output image processing filters, save state banks and state hotkeys, 
+  - Added sound menu with per-channel toggles and mute plus Sound Settings, Color Correction dialog, LRG rumble cart support, 
+  - Added input menu with controller device list, File > Save Other, 
+  - Added movie and AVI recording, Audio Waveform viewer, 
+  - Added SNES image and Game Boy Image settings, 
+  - Added File > Choose Icon.
+- Game Boy ROMs listed in the Open dialog.
+- BIOS-less Game Boy frames shown instead of a black screen. SGB BIOS preference persisted.
+- Config file migrated to the shared conffile format with comments and toggles, header written as "SuperSnes9x".
+- Fixes: SRAM autosave interval, scrambled SoundFilter token map, Wayland segfault with Qt < 6.5, black menubar text on KDE dark schemes, Shader Settings only enabled with a preset, GTK Vulkan build and lockup, GTK accelerator table.
+
+win32 GUI
+- Choose Logo renamed to Choose Icon, with an option to register file types under the chosen icon.
+- Acid Tests dialog: thread count, live rows, screenshots, pause, filters, export, per-emulator baselines, Test Diagnosis dialog, own Tests menu.
+- Duplicate SuperFX speed control removed from Hacks. Sound Settings item moved to the end of its menu. OSD message fix.
+- American spelling in fork text.
+
+Testing tools
+- Acid baselines per emulator from the shootout table, baselines fetch script replaces tracked files.
+
+Build, CI, packaging
+- macOS: Qt .app and universal libretro core, both self-signed. Info.plist regenerated after clean.
+- GitHub Actions nightlies for win32, Qt/GTK AppImages, macOS, and the libretro cores.
+- Android: minizip built without the fopen64 family, 32-bit file API.
+- libretro: reports 1.63.29 without a git hash, ROM extension not stripped twice, built with zip support for MSU-1.
+- Dangling libco submodule pointer dropped, gitignore cleanups, unzip includes fixed without SYSTEM_ZIP.
+- Screenshot PNG output ordering and png_set_shift placement fixed.
+
+
+SuperSnes9x 1.63.29
+-------------------
+
+Emulation
+  - Voicer-kun support:
+    - Play Voicer-kun audio CDs from cue/bin images (.zip supported too); the peripheral is fully emulated so the games drive the CD themselves
+    - Menu placed under Sound and renamed to "Voicer-kun"; GTK and Qt got the same menu.
+    - Fixes along the way: one disc in the drive at a time, port 2 forced to a joypad on attach so the device is detected 
+    - IR burst looped so the learn wizard registers keys (4e04a343), port 2 reports only the device id, not player buttons
+    - Using the automatic mode (not manual) in the setup part, will use the IR burst.
+    - Supported games:
+      - EMIT Vol. 1 (CD1, CD2)
+      - EMIT Vol. 2 (CD1, CD2)
+      - EMIT Vol. 3 (CD1, CD2)
+      - Angelique (CD1)
+  - Game Boy
+    - Optional no-sprite-limit hack for the BIOS-less GB/GBC core
+    - Allow-invalid-VRAM-access override for games that need it, surfaced in GTK/Qt with proper enable/gray-out handling
+  - GB / Super Game Boy
+    - GB/SGB BIOS-mode audio repaired on GTK and
+    - libretro: SGB BIOS-mode SPC starvation no longer causes 60 Hz audio crackle (63284f8e)
+    - Emulator holds 60 fps in GB/SGB when sound is muted (76149c9d)
+    - Sound|Mute now toggles the real mute inste64ba)
+    - Video timing is set on the BIOS-less GB load path (7613bd59)
+    - Staged boot ROM is dropped when switching
+
+Audio
+- Fixed waveOut starvation bug where fps would drop by 20%.
+- Fixeed WaveOut play-cursor queries flood on min gated mixing (fixex Voicer-kun auto cd play)
+- Audio fidelity:
+  - Added selectable Audio Fidelity kernel (Herminte vs Windowed-Sinc) in Sound Settings (SNES/SGB).
+  - Added 32040 Hz "SNES native" playback rate (works with WavOut audio driver).
+  - filtered playback rate list per driver and mode.
+
+- Sound settings upgrades
+  - Pre-amp gain sliders
+  - live apply 
+  - Changed model so it is now modeless Sound Settings dialog
+  - Ported to GTK and Qt
+
+Linux:
+- Linux packaging & rebranding
+- Qt AppImage packaging with an Ubuntu 20.04 shipping baseline
+- Linux ports rebranded as Super Snes9x
+- Android NDK build script for the libretro core
+
+Qt/GTK
+- Qt 6.2 compatibility restored for the 22.0g missing QAction includes
+- Docker AppImage build made clean and PCH-f
+- voicekun.cpp wired into the GTK, Qt, and libretro Win32 builds (530b11e7, 9581238b, b508e900)
+
+Win32
+- Added new file type icons registration via Hacks... dialog window.
+- Per-console icons for SNES and Game Boy ROMs, per-extension association checkboxes, Satellaview and Sufami Turbo icons 
+- Hacks warning moved into the dialog itself (826f4df5)
+- GB camera controls given unique resource I
+
+Misc
+- RetroAchievements: win32 additions ported to gtk/qt
+- duplicate controller names are numbered in the device list
+
+
+Localization
+- Dialogs that overwrite their text in WM_INITDIALOG now localize correctly
+- Japanese translation update (thanks Nekokabu)
+- GTK turbo hotkey labels renamed to Fast Forward
+
+
+
+SuperSnes9x 1.63.28
+-------------------
+ 
+Super FX3 Support:
+ - New cart types $17 (FX3) and $18 (FX3 + battery), detected alongside the classic GSU codes.
+ - GSU MMIO relocated to $7000–$7FFF (mirroring every $400, $x300 quarter reads open bus); the old $3000 window and $6000–$7FFF RAM window are gone.
+ - ROM banking widened to 4 MB for both the GSU and the CPU ($C0–$FF); RAM only at $70–$71.
+ - ~4x GSU clock in both cycle and legacy timing modes, stacking with the SuperFX clock multiplier.
+ - No SCMR RON/RAN bus arbitration; any ROM or RAM program bank is runnable.
+ - STOP resets R15 to 0 — the FX3 has no completion IRQ; the CPU polls R15 from its V-IRQ.
+ - MERGE repurposed as a command port keyed on R0: chunky-to-planar conversions (0–2) and framebuffer-third clears (3–5).
+ - VCR reads $52. Savestates need no format change — the FX3 flag is re-derived from the cart on load.
+ - New games playable roms:
+  - StarFox 1 (FX3)
+  - StarFox 2 (FX3)
+  - Ultimate Doom (FX3)
+
+SNES Rumble (Shake) support:
+ - Support for the Port-1 pass-through rumble dongle the 2026 LRG carts drive, verified against LRG's published source and Mesen:
+ - The core decodes the WRIO ($4201) bit-bang protocol — one bit latched per $4016 read-clock, preamble $72, then right/left motor magnitudes.
+ - libretro: decoded values go through the fron=left, weak=right).
+
+Street Fighter EX Plus Alpha — protection simulation:
+ - The pirate cart's protection chip is now simulatedoot, menus, player select, full rounds withfighters, timer, damage, and round transitions.
+ - Without the chip's three answers the game black-screened on boot (APU upload overran into the IPL), drew HUD-but-no-fighters, or hit the "CPU is deadlocked" crash via a 2-byte-per-frame stack leak.
+ - The patch is pinned to the dump's CRC32 plus 12 code-byte matches, and the ROM-info dialog still identifies the original pre-patch dump.
+
+Game Boy / Super GameBoy:
+ - Sachen MMC1 open bus: banks past the end of the ROM chip now read $FF instead of mirroring — fixes "Rocman X Gold + 4 in 1" hanging forever on its boot-logo probe loop. All 17 Sachen carts in the test set A/B-verified.
+ - Sachen RA7-high logo detection: carts that kRA7-high half of the scrambled window ("4 in 1 + 8in 1" and its three siblings) are now detected instead of booting to the SGB red-X reject screen.
+ - MBC5 multicart base/mask banking: the 23 in  registers are implemented, so its sub-games (Super Mario 3, GB DBZ Gokou, Tarzan, Tetris, …) actually launch. Ordinary MBC5 carts are untouched.
+ - SGB BIOS mode powers on with the LCD off, matching hardware — fixes the GB boot logo rendering as scattered tile fragments (Balloon Fight GB, Castlevania Legends). A mid-splash warm reset now power-cycles instead of stranding the BIOS on a half-drawn logo.
+
+RetroAchievements:
+ - The achievement list is modeless (the game k once a second, and gains Progress and Type (Missable / Progression / Win Condition) columns plus a game/user summary header.
+ - Hardcore now permits fast-forward/speed-up (RA reds); slow-mo, frame-advance, and rewind blocksshow OSD notices instead of failing silently.
+ - Real login feedback: server errors in a MessageBox, success confirmation with points, empty-field validation. Toasts expire in wall-clock time so a later ROM load doesn't replay a stale backlog.
+ - Menu shows Logout \<user\> (\<points\>); new View Profile item opens the RA profile page.
+ - Logging in with a game running hard-resets once the game is identified (single posted reset; the hardcore toggle no longer
+resets twice).
+ - Netplay (Natgive Netplay or Kaillera) suspends achievement processing so remote players' inputs can't earn unlocks on this account; triggers re-arm when the session ends.
+ - libretro: GB memory maps are exposed to the finally evaluate against GB WRAM instead of neverfiring — also fixes RetroArch cheat search for GB games.                                                                          
+
+SFC-Box:
+ - The keyswitch 2/3 trial banner now reads "Free play in progress", and the check-play banner and minutes-only trial countdown are translated ("Time left N min").
+ - gtk/qt builds compile the supervisor-board sources (sfcbox.cpp, hd64180.cpp) they were missing.                                                                                                                                 
+
+Win32 / UI:
+ - Controller auto-assign is now user-pickable and newly plugged pads no longer hijack configured slots: the Input Config device label is a dropdown of all detected controllers, and the free-slot fallback skips slots whose saved GUID belongs to another (possibly unplugged) device.
+ - Added "Input → Enable Rumble (Shake)"" toggle (persisted, default on) drives the SDL gamepad holding Port 1's bindings; rumble auto-stops on pause/exit.
+ - Registry file associations are opt-in: AddToRegistry defaults to off, registration uses a SuperSnes9x identity instead of squatting on official Snes9x's, stale per-exe entries are swept (including renamed copies), and the Settings checkbox applies immediately.
+ 
+Translations: 
+ - translated dialog controls are measured and sized at runtime with the control's real font (33 languages, English layouts untouched); the menu-localization cache is keyed by command ID so the runtime-inserted BIOS popup no longer scrambles the Emulation menu on language switches.
+ - Cheat search watch buttons moved clear of the Data Size group box (spotted by Nekokabu).
+
+Bootable Games:
+- Astro Hawk (PD)
+- Street Fighter EX Plus Alpha
+- StarFox 1 (FX3)
+- StarFox 2 (FX3)
+- Ultimate Doom (FX3)
+- Rocman X Gold + 4 in 1
+- 4 in 1 + 8in 1 (and its three siblings)
+
+SuperSnes9x 1.63.27
+-------------------
+
+- Cheats:
+ - proper SGB/GB support and standard code formats.
+ - GB address space for SGB games in both modes (80807d85). S9xCheatsGBMode() now includes SGB_BIOSModeActive, 
+  so BIOS mode gets the same GB-address-space cheat handling bios-less mode already had: the cheat search scans GB WRAM/SRAM/HRAM, results display as GB bus addresses, 
+  GB GameShark / Game Genie codes parse, and apply/restore route through the GB core.
+ - Previously BIOS mode scanned the SGB BIOS''s own SNES WRAM (useless for game cheats) and saved SNES-space cheats into the same per-game .cht file that bios-less mode interprets as GB cheats.
+ - Load order is safe: both BIOS-mode load paths re-run S9xInitCheatData() after the flag is set, with the GB cart already loaded.
+
+- Standard code/cheats formats:
+ - Raw codes display and save as xxxxxx:bb; conditionals as addr?compare:value (e.g. 198a?e0:f0) — the format cheat sites, decoders, and other emulators use.
+ - All legacy forms (=, addr:cmp?val, /) still parse, so old .cht files keep working.
+ - GB cheats print without SNES-style %06x zero padding, and GB bank-0 ROM patches no longer leak the internal 0x01000000 ROM-flag into the displayed address; the bare address parses back to the identical patch.
+ - A conditional colon code previously matched the plain pattern and silently dropped its compare byte; the pattern order now handles it.
+ - Set Value takes the value as whatever follows the last :/= of the displayed entry.
+ - The Cheat Entry and Editor dialog gains a minimize box.
+ - ROM revision mismatch warning. New S9xGBGameGenieMismatch() checks a GB Game Genie code's verify byte against the loaded ROM (bank-0 sites directly, banked codes as any-bank match).
+ - Editor now warns on Add/Update when a code was authored for a different revision and would silently no-op.
+
+- Rewind:
+ - Never-ending rewind fixed; paused reverse frame advance added (fe6b690c). 
+ - StateManager::init() kept a stale bottom_ptr across re-inits,  so once the ring had wrapped in an earlier epoch, holding rewind drained real history and then ran forever over stale entries. 
+ - Also normalizes pop() returns (negative error codes were truthy for Settings.Rewinding), 
+  fixes held-hotkey chords sticking when modifier and key release in the "wrong" order, 
+  and makes the rewind key while paused step exactly one frame back per tap.
+
+- Event-cart state loads
+ - Remap the game window before PC base on unfreeze.
+ - Non-fast unfreeze hard-resets first, which maps the PF94/CC92 menu back into the game window;
+ - S9xSetPCBase then resolved the restored PC against the menu mapping and the CPU derailed within frames on any in-game savestate load or rewind pop.
+ - The PF9 block is now restored and the window remapped before S9xSetPCBase, matching the SFC-Box supervisor restore ordering. Also rebases the session timer on load to avoid an instant time-over from unsigned wraparound.
+
+- SGB BIOS-mode audio
+ - Core timing (1851de18): slaving clock, scanline-wrap loss, and DRC seed fixes for the BIOS-mode pacing chain.
+ - Win32 host: ProcessSound recreates the sync-to-sound throttle in BIOS mode and adds drain waits, fixing runaway speed and crackle.
+
+- Audio waveform viewer / mixer
+ - Logic-style per-track L/R level meters with peak hold, sqrt zoom + 20 Hz refresh defaults.
+ - Logic-style record-arm [R] per track: unbounded-length WAV capture at source rate via cursor-based ring taps, Save-As on stop.
+ - Footer rate selectbox + stats-for-nerds toggle for per-row diagnostics, vertical zoom selectbox, reset-on-close checkbox and solo-aware Channels menu.
+ - Cheaper waveform paint and continuous envelope trace.
+
+- SFC-Box (Super Famicom Box)
+ - Translated demo, countdown-hour, and coin-service OSD screens.
+ - Hotkeys tab polish: label clipping, naming, conflict colors; clearer OSD language tooltip.
+
+- Translations:
+ - Fill missing plural forms for languages with >2 plural categories (ar/he/bn/...), drop stale entries.
+
+
+SuperSnes9x 1.63.26
+-------------------
+Super Famicom Box (hotel SNES) emulation:
+- Full emulation of the Super Famicom Box (SFC-Box), the coin-operated hotel unit.
+  Boots the real KROM 1.00 BIOS, reaches the attraction menu, and launches games — verified with Super Mario Kart (DSP-1), Super Donkey Kong, Star Fox, and two-cart PSS-61+63 images.
+
+- New HD64180 (Z180) CPU core — full documented Z80 set plus Z180 extensions, MMU, PRT timers, and interrupt handling for the supervisor board.
+- Board emulation — custom I/O ports, S-3520CF RTC, MB90082 on-screen-display renderer, joypad sniff/inject latches, coin switch, keyswitch, watchdog, and battery-RAM sidecar (`.box`).
+- GSU socket support — Star Fox runs in the box with full SuperFX polygon rendering, with dynamic arming/disarming as the KROM remaps between menu and game.
+- Savestate support — the entire supervisor board (Z180 core, latches, RTC, OSD state) travels in snapshots; menu and mid-game GSU states resume correctly.
+- English OSD translation — optional view-layer translation of the Japanese supervisor screens (~110-phrase dictionary covering every reachable screen, including coin-mode countdowns and continue prompts). The KROM itself runs untouched. Toggle via the new SFC-Box OSD Language option in the Hacks dialog.
+- Authentic OSD rendering — blue under-color backdrop on the boot/supervisor screens, correct MB90082 glyph decoding, per-character background colors (the attendant menu's yellow B-button icon), and full-resolution OSD output.
+- Hacks dialog controls — keyswitch position selector (1/OFF/ON/2/3) and an Insert Coin button, live while a box is loaded.
+- SFC Box hotkeys tab — bindable hotkeys for Insert Coin and all five keyswitch positions, with OSD confirmation and config persistence.
+- Fixes along the way — soft reset now restarts the current game instead of power-cycling the whole box; the KROM BIOS is found regardless of working directory; a missing BIOS reports a load error instead of hanging.
+
+Audio: DAW-style waveform viewer
+- The audio-waveform viewer is reworked into Logic-style track rows: color-coded groups (SPC, GB, MIX) with per-track colors, collapsible per-source breakdowns (SPC voices V1–8, GB channels CH1–4), and a master MIX bus.
+- Mute buttons on every track — GB channels get their own mute mask so silencing a GB channel no longer silences the matching SPC voice; group mutes remember the per-member pattern.
+- Solo buttons with proper DAW semantics: solos union across cores, mute wins over solo, and solos auto-clear when the viewer closes or a ROM swap removes the track.
+- Sound > Channels drives the GB APU too — menu channels 1–4 now toggle GB pulse A/B, wave, and noise; channels 5–8 grey out in GB mode.
+
+Fixes:
+- GB/SGB: Frame-advance and fast-forward now fully mute GB audio instead of banking up samples — no more ~0.3s audio burst on unmute or sped-up "screechy" playback after releasing turbo.
+- Win32: The S-PPU viewer menu stays enabled in SGB BIOS mode, where the real S-PPU is running.
+- libretro: The SuperFX clock multiplier now defaults to 100 when the frontend doesn't answer core options — previously every SuperFX title hung in minimal harnesses.
+
+
+SuperSnes9x 1.63.25
+-------------------
+SNES:
+- Event Carts:
+  - PowerFest '94 event cart support (MX15001 board emulation): boot the Scoring ROM and it assembles the full competition cart from the sibling game dumps (Lost Levels, Super Mario Kart, Ken Griffey Jr. MLB) found next to it, zipped or raw
+  - PowerFest '94: on-screen tournament timer display + configurable time limit in the Hacks dialog (the board's DIP switches, 3–18 minutes)
+  - PowerFest '94: selecting a missing game reboots the menu and resets the session timer; game ROMs are rescanned on hard reset
+  - Nintendo Campus Challenge '92 event-cart support (SNES-EVENT board, EVENT-CC92): the combined cart image boots and chains menu → Super Mario World → F-Zero → Pilotwings (DSP-1 wired for Pilotwings)
+- NFL Football (Europe) (Proto): pin the real board config (32 KB battery SRAM + PAL region) — the junk internal header made auto-detection run the game off the rails
+
+Timing / IRQ:
+ - Latch pending timer IRQ on $4211 read — a tight TIMEUP polling loop can no longer miss an IRQ that already fired mid-instruction (accepted upstream as snes9x PR snes9xgit#1062)
+ - Revert Circuit USA APU speedup hack to 2 — the 1.59 SMP-clock retune value made the menu palette DMA race the CGRAM-gradient HDMA
+
+SuperFX (GSU):
+Cycle-accurate GSU timing: replaced the flat per-scanline instruction budget with a master-clock cycle budget and real per-op costs derived from Mesen2 (cached/uncached fetch, RAM/ROM access, cache-line fill, plot/rpix, multiplies per CFGR MS0). snes9x_overclock_superfx remains a true throughput knob (100 = hardware)
+Fix RPIX clearing DREG too early (upstream, by Wyatt)
+
+Game Boy:
+- Audio (APU):
+  - Silence ultrasonic tone channels (CH1/CH2/CH3 parked above the output Nyquist) at the source — the box-filter decimator no longer folds them back into the audible band as fixed high-pitched tones; rate-adaptive (32k/48k, DMG/SGB/CGB)
+  - Keep digitized voice audible above Nyquist: channels streaming 4-bit PCM through ultrasonic squares now emit the physically-correct DC level (duty-cycle average / wave-RAM mean) instead of a frozen bit
+
+- Video / PPU:
+  - Cycle-precise VBlank IRQ latch: the IRQ lands on the same instruction boundary as real DMG regardless of CPU/PPU interleave skew (verified byte-identical to SameBoy per-instruction traces)
+  - SGB: reconstruct DMG BGP raster write timing — mid-scanline palette stores are re-mapped to the dot they were aimed at and the corrected line is re-pushed into the ICD2 capture ring (SameBoy-verified)
+
+GTK:
+  - RetroAchievements support — full parity with win32/Qt: login/logout, achievement list, hardcore mode with confirm prompt, unlock toasts and challenge/progress badges via the shared overlay; config keys match win32/Qt so a shared install reuses the same credentials
+
+Win32:
+  - Fixed frozen screen when switching renderer Vulkan → Direct3D/DirectDraw (render window is recreated on display reset)
+  - Render window handle made local to win32_display.cpp; removed the OpenGL↔Vulkan toggle warnings (upstream, by OV2)
+
+Internationalization / Translations:
+Japanese translation updated (thanks Nekokabu)
+
+Game fixed:
+- Winter Gold / FX Skiing (SNES, Super FX) — the long-standing garbled-skier bug at race start is fixed: with cycle-accurate GSU timing the pose-cel publish is held one frame from CPU view (matching hardware measured frame-by-frame against a Mesen2 trace), so the game no longer commits a stale arrangement over the new pose tiles (upstream issue snes9xgit#533)
+- Traverse: Starlight & Prairie (SNES, Japan) — no longer hangs after the birthday screen: its vsync-wait polls $4211 mid-instruction and now observes the timer IRQ as hardware would (regression since 1.55; upstream issues snes9xgit#540, snes9xgit#614)
+- Circuit USA (SNES) — menu no longer blacks out: the 512-byte palette DMA lands in VBlank again instead of racing the CGRAM-gradient HDMA mid-frame (upstream issue snes9xgit#563)
+- PowerFest '94 (SNES) — the historical black-screen hang is gone (the MCU status register now reads 0 at boot) and the full tournament flow works: menu, all three game segments, DIP-switch time limit, score persistence; a standalone Lost Levels dump also plays as a normal game
+- Nintendo Campus Challenge '92 (SNES) — boots and runs the full event chain (Super Mario World → F-Zero → Pilotwings) with its own timer settings
+- NFL Football (Europe) (Proto) (SNES) — clean menus and full Mode 7 in-game rendering, no more crashes (was reading open-bus / wrapped save RAM due to the junk cart header)
+- Sumou Fighter (GB) — stray '07' tile no longer appears in the background during the title scroll-in (the VBlank ISR fired one instruction late, letting a tile-copy run with the sound ISR's leftover ROM bank)
+- Top Rank Tennis (GB) — the digitized "Play!" and score-call voices are back (they stream PCM through squares parked at freq 0x7FF, which the ultrasonic suppression was gating to silence)
+- Pit Fighter (GB) — the ~13–19 kHz whines from CH2/CH3 left running at 0x7FF are now silenced at the source, matching SameBoy's band-limited output
+- Prehistorik Man (SGB) — the black bands on the left/right edges of the scrolling title banner are gone (left band 307px → 6px, right band 449px → ~0, verified headless against SameBoy); the game's HALT-synced self-modifying BGP write chain now lands on the exact dot it was aimed at
+
+
+SuperSnes9x 1.63.24
+-------------------
+
+Game Boy Camera:
+- Added the Pocket Camera mapper so the Game Boy Camera boots
+- Live viewfinder via host-side framebuffer injection (real USB webcam feed)
+- Per-scanline viewfinder injection in SGB BIOS mode + always-on in SHOOT mode
+- Viewfinder honors the contrast and matrix-based brightness slider
+- New brightness slider for the viewfinder (host-side, Up/Down)
+
+Game Boy Audio (APU)
+- Low-pass APU output to fixes the ultrasonic wave-channel output
+- Seed DMG/SGB power-on wave RAM so CH3 isn't dead-silent
+- Post-boot APU state on boot-skip
+- PI rate-match / rate-lock the SPC resampler for once-per-frame SGB frontends (win32, GTK, Qt, libretro)
+- libretro: mix the SGB BIOS SPC stream into audio output
+
+Game Boy video / PPU
+- Block CGB palette (CRAM) writes during mode 3; restrict the mode-3 lock to pixel output
+- Sample fetch_scy for the leftmost SCX-fine partial tile
+- Auto frame-blend Boxing (Tonkin House) to stop HUD flicker
+
+SGB soft reset
+- BIOS-mode soft reset now restores a settled-title snapshot
+- Preserve GBRomPath across the BIOS switch
+
+libretro core
+- Added Game Boy / Super Game Boy / GBC content support
+- Rebranded core to SuperSnes9x (supersnes9x_libretro, library name + core info)
+- Aligned valid_extensions with the core info file
+- Added GB/GBC core sources to the MSVC project
+
+Internationalization / translations
+- Shared i18n translation files support (win32/Qt/GTK)
+- Extract the language-pack to i18n/ folder next to the executable.
+
+Qt / GTK frontends
+- GB frame-blend options (mode, layer, auto transparency) for GTK and Qt
+- Qt matches win32 config keys and single-store model
+- Poll joysticks more often; update SDL3 (FetchContent) and Windows Qt binary build scripts
+
+Win32 fixes
+- Fixed crash when opening the ROM dialog a second time (Custom ROM Open)
+- Use a common function to get the base filename
+
+Game fixes:
+- Donkey Kong (SGB) — soft reset in SGB BIOS mode no longer shows a garbled title / leaves music playing; restores a settled-title snapshot instead of letting DK re-upload its border visibly 
+- Pit Fighter (GB) — fixed the faint continuous ~19 kHz whine (CH3 wave alias) with a 4th-order Butterworth low-pass on APU output
+- Pit Fighter, Bart Simpson, Mortal Kombat 4 (GB) — fixed audio going silent after a soft reset (games that never write NR50/NR51 now get the post-boot $77/$F3 state on boot-skip)
+- Game Boy Camera — now boots at all (added the Pocket Camera $FC mapper; was rejected outright), plus a full live webcam viewfinder with brightness/contrast sliders and steady per-scanline injection
+- Boxing (Tonkin House, GB) — stopped the every-other-frame HUD flicker (round/timer/head) via an auto frame-blend entry
+- Altered Space (GB) — restored the missing jump SFX by seeding the DMG/SGB power-on wave-RAM pattern (game drives CH3 without loading wave RAM)
+- LEGO Racers (GBC) — "Dark Forest Dash" wrong BG colors fixed by locking CRAM during mode 3 (drops the game's mid-scanline palette writes like real hardware); follow-ups kept the HUD palette from flashing and fixed the far-left horizon toggling grass↔dark (SCX-fine partial-tile SCY sampling)
+
+
+
+SuperSnes9x 1.63.23
+-------------------
+
+Game Boy / Super Game Boy
+  - Borderless BIOS-less mode — BIOS-less GB/GBC/SGB games now render at their native 160×144 instead of being composited into the
+  256×224 SGB frame with the gray border. The host scales the picture to the window just like SNES output; SGB/SGB2 BIOS mode keeps the full
+  border. Includes win32 render fixes so filters (FakeTV, xBRZ, Blargg NTSC) honor sub-SNES source sizes, and AVI recording captures at the
+  GB frame size.
+  - GB cheat engine — the cheat search and editor now work on BIOS-less GB/GBC/SGB games, operating on the GB bus: native
+  $0000–$FFFF addressing with banked CGB WRAM, cart SRAM banks, HRAM, and physical ROM patches. Parses GB GameShark (01/8x/9x) and GB Game
+  Genie (6/9-digit) codes; per-game .cht files load/save like the SNES paths. Also fixes a stale CGB WRAM window in PeekRAByte so
+  RetroAchievements sees banks 2–7.
+  - GB layer toggles on SNES hotkeys — when a GB cart is loaded, the Graphics layer 1/2 and Sprites hotkeys now drive the GB-PPU Show
+  Background/Window/Sprites menu toggles, with matching OSD feedback.
+
+RetroAchievements:
+  - On-screen badge images — active challenge indicators and measured-progress achievements display as badge images anchored
+  bottom-right (per RA team guidelines) instead of toast messages. Badges fetch asynchronously and render as imgui quads, so all video
+  backends work without GPU texture management. New "Toggle Achievements Images" menu item (default on) falls back to the old toast behavior.
+  Verified by a 28-assertion headless harness.
+
+Emulation / UI:
+  - Soft Reset / Hard Reset split — File→Reset Game is replaced by two Emulation-menu items, Mesen-style. Hard Reset (Ctrl+Alt+R)
+  is a full power cycle that replays the SGB BIOS splash; Soft Reset (Ctrl+R) is the console reset button on SNES, and on GB a new warm reset
+  that restarts at $0100 with no splash, preserving SRAM and the SGB handshake. The new hotkey is rebindable.
+  - Instant screenshots while paused — the screenshot hotkey/menu previously only flagged a capture serviced at end-of-frame, so pausing made
+  it wait for a frame advance and grab the next frame. Capture now happens immediately from the last rendered frame when emulation is
+  halted.
+
+  - SNES tile viewer layout option — added layout dropdown (Normal / 8×16 same line / 16×16 same line) so fonts and graphics stored as
+  tile groups display unscrambled; click-select maps back through the inverse, keeping tile index/address info correct.
+
+
+SuperSnes9x 1.63.22
+-------------------
+
+Game Boy / Game Boy Color emulation accuracy: 
+
+  New mappers & cartridge support:
+  - MBC7 (accelerometer + 93LC56 EEPROM) — Kirby Tilt 'n' Tumble now boots past its loading hang
+  - MBC6 (dual half-bank ROM windows + split SRAM) — Net de Get: Minigame @ 100 now boots
+  - Duz 2-in-1 MBC3 multicart — custom game-select register support fixes Pokémon Red/Blue 2-in-1
+  - Sachen mapper fixes — header-transform lifetime corrections for 4B-008/4B-009
+    - runs-raw boundary moved to the header end, and logo-less
+  - Sachen carts (Beast Fighter) now load and SGB-boot
+
+  Game Boy Color DMA fixes
+  - GDMA now advances the HDMA source/destination registers ($FF51–54) to end-of-transfer — fixes NASCAR 2000 title screen and menu corruption
+  - HBLANK HDMA destination auto-advance + transfers happen in the H-blank they're armed in (live VBK bank) — fixes The Little Mermaid II garbled graphics
+  - HBLANK HDMA armed while the LCD is off copies one block immediately — fixes Worms quickstart freeze
+  - $FF46 (OAM DMA) reads its correct boot value of $00 on CGB — fixes Doc Cosmos title marquee pop
+
+  PPU & timing fixes
+  - DMG window/background pixel alignment — fixes Star Trek: 25th Anniversary TV-frame glitches
+  - Window WY-trigger latch matches real hardware — fixes Zerd no Densetsu HUD corruption
+  - STAT-write bug correctly gated to DMG/SGB only — fixes NASCAR 2000 title on CGB
+  - LY=LYC STAT re-latch at scanline boundaries — unblocks chained-LYC raster effects, fixes Ken Griffey Jr. field flicker
+  - PPU-raised STAT IRQs deferred 24 dots + first frame after LCD enable held — fixes RoboCop one-frame flashes
+  - Persistent double-speed CPU budget + tile-granular SCY fetching — fixes Demotronic demo raster effects
+  - Auto frame-blend entry for 3D Pocket Pool — its 2-phase sprite/background multiplexing no longer flashes
+  - BGP mid-mode-3 re-latch + mode-3 VRAM blocking
+
+  Audio fixes:
+  - Dynamic-rate control locks GB sample production to host pacing — eliminates static/crackle from APU–host rate drift
+  - Wave RAM reads while channel 3 plays return the current byte on CGB and $FF on DMG — Demotronic "NO BOY!" detection passes
+
+Super Game Boy:
+  - SGB BIOS cold-boots on soft reset — fixes black screen after reset
+  - GBC-only carts honor the SGB BIOS preference (lockout restored)
+
+Windows UI
+  - File → Choose Logo can now also replace the .exe's own shell icon
+  - Added "Allow .exe icon replacement" opt-in toggle in Emulator => Hacks...
+  - Cheat Search: 
+    - the New Value field in the add-cheat dialog is pre-filled and sign-extended correctly
+    - Support signed values to be added to the game genie cheat editor.
+
+SuperSnes9x 1.63.21
+-------------------
+
+Added Game Boy Color core:
+ - Game Boy Color emulation added — full CGB support in the SGB core.
+ - CGB-mode rendering, palette/color handling, and automatic CGB loading for CGB carts. 
+ - Fixes CGB rendering under the SGB BIOS and refines cart routing so GB/GBC/SGB titles dispatch correctly.
+
+Game Boy?
+  - New PPU debugger viewers — GB tile viewer, tilemap viewer, and sprite/OAM viewer, plus per-layer toggles.
+  - S-PPU and GB-PPU viewer menus are now context-enabled based on the loaded roms.
+  - MBC1 multicart (MBC1M) support — BANK2<<4 game-slot select so multicarts like "Mortal Kombat & Mortal Kombat II" boot to the correct game.
+  - APU DAC DC-bias modeling — models the DAC's DC bias so master-volume-driven PCM voices (NR50 PCM + CH4 carrier) are no longer cut off.
+  - Fixes half-playing digitized voices (e.g. Bart Simpson voice samples).
+  - Square-channel duty reset on trigger (master c0d9941d) — resets square duty position on channel trigger, fixing the silent/garbled Telefang title-screen PCM voice jingle.
+
+Win32:
+  - Controller image switcher — USA / Euro-Japanese controller image selector in the Input Config dialog.
+  - Input config multi-bind fixes — fixes multi-bind / single-bind glitches in the input configuration dialog.
+
+
+SuperSnes9x 1.63.20
+-------------------
+
+Game Boy / Super Game Boy:
+New mapper support
+- M161 mapper — adds support for the Mani 4-in-1 multicart (a forged-MBC3 cart) so its game-select menu works correctly
+
+Emulation accuracy fixes:
+- Fixed a blank-screen hang in Spot caused by the EI; HALT halt-bug being armed while an EI was still pending,
+corrupting the interrupt-vector fetch
+- Fixed the Mr. Do! title screen freezing by latching the STAT LYC-coincidence flag while the LCD is off, instead of
+recomputing it from the parked LY
+
+Auto Layer Transparency (frame-blend):
+- New Auto Layer Transparency option that blends alternate frames to restore flicker-based transparency effects (e.g. ZAS)
+- Per-layer selector so blending can be enabled independently for background / window / sprites
+- Per-title "Auto Layer" defaults, with frame-blend automatically bypassed during fast-forward
+- Fixed blend tearing and SGB flicker, and stopped static GB screens from ghosting; added a blend-mode dropdown
+- GB blend controls moved into their own "Game Boy Image" group, disabled for SNES titles
+- GB mix volume now persists in SGB BIOS mode
+
+Windows (win32) input:
+- Hotkey modifiers now mask the GetAsyncKeyState high bit, preventing stray/stuck modifier detection
+- Input binding fixes: maxKeys is now derived from the Single/Multi combo alone, capture re-enters when the binding
+mode changes mid-focus, and the existing binding (rather than ...) is shown on a mid-focus mode switch
+
+Linux (Qt/Gtk) build system:
+- link libpng/zlib directly to the core target to fix a DSO missing link error
+
+
+SuperSnes9x 1.63.19
+-------------------
+New Mappers:
+Three previously-unsupported cartridge mappers now load and run under SGB emulation. All three reuse existing MbcState fields, so the GB savestate layout is unchanged.
+
+- HuC1 (cart type $FD→ $FF) — Was a read-only stub, so ROM-bank-select writes were dropped and the game jumped into the wrong bank and locked up executing $FC filler.
+  Reimplemented as MBC1-with-infrared (ROM/RAM banking + IR register). Fixes Chousoku Spinner, Pokémon Trading Card Game.
+- HuC3 (cart type $FE) — Added the RTC command/response interface plus IR; boot gates on the RTC status command reading back ready. Fixes Robopon (Sun Version).
+- Bandai TAMA5 (cart type $FD) — The ROM was rejected at load entirely. Implemented its unusual two-register port ($A001 selects, $A000 carries one nibble), a 32-byte battery-backed EEPROM, the $0A ready handshake, and the TAMA6 RTC. Fixes Game de Hakken!! Tamagotchi - Osutchi to Mesutchi.
+
+Game Boy / Super Game Boy fixes:
+- MBC5 keeps cart RAM readable when RAM-enable is off (2026-05-29). Some games run a trampoline out of SRAM; returning $FF while disabled hung them at boot. Fixes the Nettou King
+  of Fighters '97 SGB boot hang.
+- Optional frame-blend toggle — Games that fake transparency by flickering two backgrounds (e.g. Chikyuu Kaihou Gun ZAS) can now blend each displayed frame 50/50 with the
+  previous one at the shared end-of-frame hook. New "Blend Game Boy Frames" checkbox in Display Settings.
+- Independent GB volume slider in SGB BIOS mode
+
+SuperSnes9x 1.63.18
+-------------------
+Super Game Boy / GB emulation fixes
+
+GB PPU hardware correctness:
+- STAT IRQ hardware quirks (LCD-off guard, LY=153 edge case) — fixes Zerd no Densetsu boot
+- DMG STAT-write quirk now only fires on newly-enabled source bits
+- Mode 3 sprite stall + WX latching — fixes One Piece dialog torn edges
+- BGP latch at mode 2→3 boundary — try-fix for split-scanline palette glitch
+- SCX-fine mode-3 penalty modeled (per-scanline raster timing)
+
+Cart mappers support:
+- Sachen MMC1 mapper + scrambled-logo detection (Sachen 4 in 1 4B-007 boot)
+- Sachen BIOS-mode boot fix: value-gated unlock + MbcRead synth path
+- MMM01 multicart mapper added (Mani / Taito 4-in-1)
+- MMM01 sub-game SGB palette injection (no splash)
+- Cart MBC now resets on File → Reset (Sachen 4B-007 no-cartridge post-reset)
+- Cart SRAM defaults to $FF instead of $00 — fixes Initial D Gaiden text rendering
+
+Audio:
+- Independent GB volume slider in BIOS-less SGB mode enabled
+
+
+SuperSnes9x 1.63.17
+-------------------
+SGB fixes:
+  - Blank last visible scanline in OverlayBiosBorder (frame-glitch)
+  - Route GB cart .sav through CMemory::Save/LoadSRAM into SRAM_DIR
+  - Fix BIOS-mode save state restore: boot ROM remap, handshake cache, ICD2 bridge
+  - Skip GBE block in S9xUnfreezeScreenshotFromStream
+
+Qt / GTK platform parity:
+  - Add SGB sources to CMake builds
+  - Qt: configurable BIOS folder under Settings → Files
+  - Qt: default Settings.SGB_BIOSPreference to 2 (SGB2 then SGB1)
+  - Qt: add Emulation → BIOS submenu (None / SGB1 / SGB2)
+  - Qt: move QActionGroup include above X11-pulling headers
+  - GTK: BIOS folder + Emulation → BIOS submenu (parity with Qt)
+  - GTK: fix snes9x.ui duplicate label157 (BIOS row crash)
+  - GTK: track snes9x.ui and mini_icon.png in sourcify custom commands
+  - Qt + GTK: mix SPC over GB after S9xMixSamples in SGB BIOS mode
+
+SGB audio controls:
+  - Win32 + APU: per-source SPC/GB volume sliders for SGB BIOS mix
+  - Qt + GTK: master Regular/FastForward + per-source SGB SPC/GB volume
+
+Win32
+  - Fix save-slot corruption from SelectSave hotkey on bank > 0
+
+Versioning
+  - Split PATCH_VERSION into VERSION_DISPLAY for UI, widen About dialog, tag x64 title
+
+
+SuperSnes9x 1.63.16
+-------------------
+ SGB / Game Boy Compatibility:
+ - General SGB accuracy: Restored instruction-level GB↔SNES interleaving. After each SNES opcode the GB core
+  syncs to the current SNES cycle, so ICD2 reads ($6000/$6002/$7800) see GB state that varies naturally with
+  execution. This removes the BIOS band-counter phase-lock that was producing striped/yellow artifacts on
+  SGB-enhanced carts, and lets us drop the BG3/OAM/tilemap workaround memsets entirely. Gated to
+  BIOS+post-release so plain GB carts keep the cheap sync.
+  - Killer Instinct '95: Fixed the intro/title screen raster effect — the per-scanline SCX effect that animates
+  the logo and title text now advances correctly. Previously stalled at ~1 IRQ per frame because PpuWriteReg
+  never re-evaluated the STAT IRQ line on writes to $FF45 (LYC), $FF41 (STAT), $FF44 (LY reset), or $FF40 bit 7.
+  - Olympic Summer Games: No longer hangs on the yellow BIOS screen. The SGB2 BIOS band-DMA wait at $00:BA6A is
+  now unblocked when the IRQ-disable flag is set after the JUMP packet handoff. Tiles, custom border, and audio
+  now appear.
+  - Pro Mahjong Kiwame, Toy Story, and similar titles: Fixed BG3 tilemap being clobbered by the post-handoff
+  wipe. The 30-frame wipe was zeroing both BG3 char AND BG3 tilemap ($E000-$FFFF), but the BIOS IRQ DMA only
+  refills char data — tilemap stayed zero forever. Wipe range now matches the BIOS DMA range exactly (0x1680
+  bytes).
+  - GB games with custom borders: Fixed regression that broke titles uploading their own CHR_TRN + PCT_TRN
+  borders. The BG3 wipe now also skips when a cart-supplied border is detected.
+  - 2-player MLT handoff: Dropped the forced 2-player MLT at handoff that was causing input quirks.
+
+  Audio:
+  - Eliminated the audible "chang" / release-click that played on every SGB game when the BIOS handed off to the
+  GB. The pre-release SPC residual sample is now muted through the transition window until the GB boot ROM
+  completes ($FF50 write); the SGB BIOS chime still plays normally.
+
+SuperSnes9x 1.63.15
+-------------------
+cheat_edit_fixesm:
+  - Win32: cheat editor changes now apply live instead of waiting for the dialog to close
+
+SGB:
+  - gate BIOS artifact-cleanup memsets on sgb_flag == 0x03 — the BIOS artifact-cleanup
+  memsets (added for SGB Tetris/Tetris Plus stripe fixes) are now gated on sgb_flag == 0x03, so they only run
+  for actual SGB carts and don't regress plain SNES titles.
+
+
+SuperSnes9x 1.63.14
+-------------------
+SGB audio:
+  - GB APU output through a Hermite resampler with adaptive ratio so GB samples match host playback rate.
+  - BIOS-released audio mix path in CXAudio2: GB owns the voice, SPC is mixed under via MixSpcOverGB.
+  - GB APU gain + DC blocker tuned to eliminate DC-step impulses at the source.
+  - Closed-loop SPC chip-clock DRC (S9xSpcAdjustRate + spc::drc_scale applied inside S9xAPUGetClock). Slows the SPC chip
+   toward wall-native rate based on resampler fill, so SPC tempo + pitch stay correct independent of emulator pace.
+  S9xSpcResetDrc restores neutral state when leaving SGB mode.
+
+Audio waveform window (Sound > Show Audio Waveform):
+  - Three-panel viewer (SPC / GB / MIX) with mint-green filled waveform on black, gray grid, right-side Y-axis
+  (-30000…+30000, smpl header), hollow bordered panel labels, shared bottom X-axis (ms) on the MIX panel.
+  - Live readouts: GB output rate / emu fps, SPC effective Hz + resampler r_step, current UI refresh.
+  - Right-click refresh-rate menu — 2 / 5 / 10 / 20 / 30 / 60 Hz. Only affects the UI repaint timer; emulator thread is
+  untouched.
+  - Double-buffered painting (memory DC + BitBlt) and WM_ERASEBKGND suppression — flicker-free at any refresh rate.
+
+SGB VRAM / handoff
+  - Hide GB boot-ROM Nintendo logo until the game writes VRAM.
+  - Latch row/bank for $6000 to fix vertical-stripe artifacts (Pokémon Red, Animaniacs, etc.).
+  - Zero BG1 tilemap + OAM at handoff, then re-zero each frame for the first 30 frames post-handoff (kills Tetris Plus
+  stripes).
+  - Zero BG1 + BG3 tilemaps during the BIOS fade-out window, plus pattern-detected BG3 char cleanup for the Tetris
+  fade-in.
+  - Removed the post-handoff $7800 write gate so CHR_TRN / PCT_TRN packets reach the BIOS.
+
+SGB multiplayer:
+  - Enabled MLT_REQ joypad rotation for SGB-flagged carts; auto-drop forced 2-player MLT after the detection window for
+  single-player games miscategorised by the cart header.
+
+UI:
+  - Video > Show Frame Number toggle.
+
+SuperSnes9x 1.63.13
+-------------------
+Build / packaging:
+  - Renamed binary + config to super-snes9x (executable, x64, debug variants, super-snes9x.conf) so it no longer collides
+  with stock Snes9X; existing snes9x.conf is left untouched.
+
+Hotkey Configuration window:
+  - Redesigned with a tabbed layout (Emulation / Turbo / Display & Tools) replacing the old 5-page dropdown.
+  - Added a dedicated States tab containing all Save/Load/Select Slot bindings plus Bank/Slot/Dialog/File tools.
+  - Tidied the header (dropped redundant "Key:" label, vertically centered Master Hotkey row) and grew the dialog so all four
+  legend lines fit without clipping.
+  - Fixed paint glitches: InputCustomHot now draws its own EDGE_SUNKEN border, tab body uses EnableThemeDialogTexture, and tab
+  switches force a full redraw + focus shift to clear capturing fields.
+  - Added a Reset Speed hotkey on page 1 (restores FrameTime to NTSC/PAL default; unbound by default).
+
+Meun bar:
+  - Added File → Choose Logo menu with bitmap previews to switch between the four embedded app icons live (title bar + taskbar, both
+  sizes), persisted as Window:Icon in the config.
+
+Cheat & viewer dialogs
+  - Cheat Editor is now resizable (WS_THICKFRAME/WS_MAXIMIZEBOX, anchor-based WM_SIZE, min-size floor) and its default width was
+  shrunk from 450 to 280 DLU.
+  - Cheat Entry/Editor, Cheat Search, Tile (VRAM), Tilemap, and Sprite viewers now persist their position (and the cheat editor's
+  size) across opens, clipped to the nearest monitor's work area.
+  - Tile Viewer's < / > address arrows now auto-repeat (250 ms hold delay, 50 ms repeat; pauses if you drag off the button).
+
+Audio
+  - Silenced the SGB first-boot click: APU-side one-pole DC blocker (~14 Hz HPF) with seeded initial state, plus onset-aligned
+  cosine fade-in that defers firing until the buffer actually contains audio.
+  - Suppressed pause/resume and SGB source-switch clicks via cosine fade-in across underruns, fade-out tail on pause, and an APU
+  cross-fade that carries the previous source's last sample forward.
+  - Fixed CXAudio2 SoundSync freeze on SGB speed change: ProcessSound now breaks out of its wait when bufferCount==0 so PushBuffer
+   can re-prime; PC throttle bypass also gates on the runtime AllowSoundSync flag so off-100% speeds pace correctly.
+
+
+SuperSnes9x 1.63.12
+-------------------
+- Added Per-pixel PPU + per-dot CPU/PPU interleaving 
+- Fixes mid-LY SCX/BGP/LCDC/WX changes (e.g Animaniacs cloud strip, Balloon Kid title parallax)
+- Fixes HBlank-IRQ SCX streaks (e.g Wario Land 2, Balloon Fight)
+- STAT IRQs service before PPU advances
+- Removed cycle_debt accumulator
+- RunFrame runs to vblank past cycle budget so BlitScreen reads complete framebuffers; 
+- Stopped running a 2nd frame on each CHR/PCT_TRN packet (DK title was at half fps); 
+- Removed empirical sample-count cap that produced gibberish on some hosts; 
+- StateLoad no longer wipes sample_head/tail (was discarding runahead audio); 
+- Skip blit/present during runahead
+- Per-opcode SNES→GB sync — added then reverted; aimed at BIOS-mode border corruption at default timing
+- Slice-rotation defenses — added then dropped; clamp/phantom-rotation/freeze-capture layers for the 18-slice protocol
+- Switched to 4-bank ICD2 protocol — replaced 18-slice; 
+- Fixed W6001-wobble frame jumps; 
+- $6000 returns (sgb_row & 0xF8) | (sgb_bank & 0x03); 
+- $7800 inline planar decode; sgb_bank persists across frames;
+- Dropped full_frame, full_frame_planar, read_slice, slice_index, r7800_snapshot, freeze_capture defense
+- Incompatible with 4-bank (caused stale lcd_ring reads → black flash); 4-bank doesn't need it since sgb_bank tracks actual GB scanline position
+- Skip auto-mode throttle so SoundSync can pace SGB without underruns 
+- In auto frame-skip, WinThrottleFramerate locked to QPC 60.0988 fps;
+- SoundSync can only slow the emulator, never speed it up, so QPC vs. host-audio-crystal
+- drift drained the GB ring → S9xMixSamples zero-padded → crackling/slowdown;
+- when SGB owns audio and SoundSync is on, fall through to no-throttle and let SoundSync pace
+
+SuperSnes9x 1.63.11
+-------------------
+Emulation:
+  - Support Game Boy / Game Boy Color/ Super Game Boy (SM83 CPU, PPU, APU, timer, joypad, MBC1/3/5, battery SRAM, save states)
+    - Implemented the SGB command set: 
+      - palettes (PAL01/PAL23/PAL_TRN/PAL_SET)
+      - attributes (ATTR_BLK/LIN/DIV/CHR/SET/TRN)
+      - custom borders (CHR_TRN + PCT_TRN), MASK_EN, MLT_REQ
+    - Added BIOS-mode SOU_TRN ($09) capture + SPC mix so cart-uploaded voice clips like Donkey Kong '94's "Help! Help!" are audible
+    - Added a BIOS selection menu (No BIOS / SGB1 / SGB2) when loading gb/gbc/sgb roms with auto-detection (Bios are copy-righted and are not supplied!)
+  - Fixed RetroAchievements GB/GBC hash recognition and routed RA memory reads through GB-side WRAM/HRAM/cart ROM/SRAM
+  - Squashed real-game blockers along the way: Tetris Plus serial IRQ, Pokémon Yellow STAT-while-LCD-off hang, joypad nibble swap, BIOS-mode 2× over-stepping, $7800 row-ordering and scroll drift, File→Reset crash, cheat-search NULL deref
+
+SuperSnes9x 1.63.10
+-------------------
+- Fixec RetroAchievement user agent to report the name correctly.
+- Adds three new Win32 debug viewer dialogs: VRAM viewer, Tilemap viewer, and Sprite viewer, with bsnes-parity
+  controls and transparency handling.
+  - Sprite viewer highlights:
+    - Per-refresh OAM snapshot so all panels stay coherent
+    - Correct tile addressing for N≥256; zoom applied to screen canvas
+    - Right-click context menu on the sprite list
+    - Auto-fit preview that follows the Background color
+    - Configurable update rate (Realtime / 0.25s / 0.5s / 1s / 2s)
+    - Export sprites and screen composition to PNG/ZIP
+  - Tilemap viewer: memory sources, rename menu, right-click canvas → export to PNG.
+  - Tile/VRAM viewer: bsnes-parity controls, transparency fix, right-click canvas → export to PNG.
+  - Shared plumbing:
+    - debug_viewer_common.{cpp,h} — palette, OAM/VRAM helpers, widget rendering
+    - debug_viewer_export.{cpp,h} — PNG/ZIP export via libpng
+    - Canvas rendering switched to StretchBlt + memory DC
+    - Mouse drag to pan at any zoom; zoom defaults to 1×
+  - Project changes: new sources wired into snes9xw.vcxproj/filters, resource IDs in rsrc/resource.h/snes9x.rc, menu
+  hooks in wsnes9x.cpp, and a win32/libpng/src submodule.
+- Add DirectInput toggle and WM_DEVICECHANGE burst-retry for faster, stutter-free controller hot-plug
+
+SuperSnes9x 1.63.9
+------------------
+
+- Run-Ahead (latency reduction)
+
+  - New Emulation → Run Ahead submenu with five options: 0 (off), 1 frame, 2 frames, 3 frames, 4 frames
+  - Reduces apparent input latency by the selected number of frames using bsnes's approach: commit a hidden frame, save
+  state, peek N-1 frames into the future, display that preview, then restore to the committed state
+  - Works with audio (preserves hermite filter continuity — no clicks, pops, or distortion from the hidden frames)
+  - Automatically skipped during rewind, turbo, and pause
+  - FPS counter reports the logical game frame rate (~60), not the internal emulation throughput, so it stays meaningful
+   at every run-ahead setting
+
+- Color Correction
+
+  - New Video → Color Correction… dialog
+  - Toggle "Enable Color Correction (accurate SNES colors)" applies a 1.8/2.2 gamma curve to the palette, approximating
+  the SNES DAC output as seen on a CRT — richer, more accurate colors
+
+- Gamma / Contrast / Saturation adjustments
+
+  - Photoshop-style sliders in the same dialog, each ranging from -100 to +100 (centered at 0 = no change)
+  - Master "Apply Adjustments" checkbox to enable/disable the three sliders independently of Color Correction
+  - Gamma: symmetric exponential (2^(-v/100)) — slide left for darker, right for brighter
+  - Contrast: linear (1 + v/100) — -100 flattens to gray, +100 doubles contrast
+  - Saturation: linear (1 + v/100) — -100 gives grayscale, +100 doubles saturation
+  - "Defaults" button resets both toggles and all three sliders
+  - Applied at the palette level so it catches all rendering paths (standard palette, direct-color mode, and live CGDATA
+   writes)
+
+- Performance
+
+  Run-ahead was tuned for minimal overhead on a typical displayed frame:
+  - State-buffer size cached on first use instead of recomputed every frame
+  - FastSavestates mode enabled during the run-ahead block (skips the 512 KB screen memset and memory zeroing on load)
+  - Embedded screenshot dropped from the serialized state (~500 KB saved per freeze)
+  - S9xSyncSpeed skipped for hidden frames via a new Settings.InRunAhead flag
+  - Audio sample callback detached during hidden frames so their audio never reaches the OS buffer (otherwise the buffer
+   fills 2× faster than it drains and throttles the iteration rate)
+  - Resampler state (ring pointers, phase accumulator, hermite history) snapshotted across the hidden block so the
+  displayed frame's output flows seamlessly from the previous displayed frame's
+
+
+SuperSnes9x 1.63.8
+------------------
+  - Input:
+    - Support hiding/showing Super Scope crosshair during game play.
+    - Add support for Master Hotkey in Hokey Configuration dialog.
+      If enabled and a key is set then:
+        Hold the key for 2 seconds in game to toggle the usage of hotkeys.
+        an mesage on the screen will tell you if hotkeys are ON or OFF.
+
+SuperSnes9x 1.63.7
+------------------
+  - SDL3 Gamepad Support
+    - Replaced the legacy WinMM joystick API with SDL3 for gamepad input
+    - Added SDL3 as a statically linked library — no SDL3.dll needed at runtime
+
+  - Input Configuration Dialog
+    - Added Auto-Assign button that maps gamepad buttons automatically via SDL3's gamepad database
+    - Fixed Auto-Assign button and device name label overlapping help text
+    - Added hot-plug detection timer — device name and bindings refresh when controllers are connected/disconnected
+    - Auto-assign preserves existing keyboard bindings as extras when in multi-bind mode
+    - Joystick bindings are cleaned up automatically when a controller is disconnected
+
+  - Multi-Bind Smart Edit Mode (Input + Hotkey dialogs)
+    - Smart add mode: left-clicking a field with existing bindings preserves them and allows adding more (shows Left, J,... in green) instead of clearing everything
+    - Right-click context menu with:
+      - Reset — clears all bindings and enters fresh capture mode
+      - Remove — submenu listing each bound key individually for targeted removal
+    - Green highlight stays visible during the context menu and persists after pressing keys or removing bindings, so
+    users know the control still accepts input
+    - Green highlight on one field is properly deactivated when right-clicking a different field
+
+  - Bug Fixes
+    - Joystick input race condition: funky global was being overwritten by re-entrant messages during SDL_PollEvent — now only set by the active control right before polling
+    - keyPressLock blocking joystick: after one controller button press, all subsequent presses were ignored because only keyboard WM_KEYDOWN could reset the lock — joystick input now bypasses it (edge detection already prevents repeats)
+    - keyPressLock not resetting on focus: entering capture mode now resets the lock so controller input works reliably after Reset/Remove
+    - selectedItem clobbered after Reset: unconditional selectedItem = NULL at the end of the context menu handler was overwriting the Reset branch's assignment, breaking joystick polling
+
+SuperSnes9x 1.63.6
+------------------
+  - Hotkey Configuration:
+    - Add support for multiple key bindings for hotkeys. user can change modes between single and multi key-bindings.
+
+SuperSnes9x 1.63.6
+------------------
+  - Hotkey Configuration:
+    - Add support for multiple key bindings for hotkeys. user can change modes between single and multi key-bindings.
+
+SuperSnes9x 1.63.5
+------------------
+  - Input Configuration:
+    - Add support for multiple key bindings. user can change modes between single and multi key-bindings.
+  - RetroAchievements:
+    - Enabling HardCore mode is now compliant with the RetroAchinvemetns list: https://docs.retroachievements.org/general/hardcore-compliance-requirements.html
+  - Sound:
+    - Added 'Mute' menu item to toggle between 0% and 100% volume (it affects the volume slider in Sound Settings)
+
+SuperSnes9x 1.63.4
+------------------
+  - Input Configuration:
+    - Add support for multiple key bindings. select a button  (it will be highlighted in yello), 
+      then press the keys you want to trigger this button.
+
+
+SuperSnes9x 1.63.3
+------------------
+  - Cheat Entry and Editor:
+    - Allow user to edit and update multiple addresses with the same value
+
+
+SuperSnes9x 1.63.2
+------------------
+  - Cheat Entry and Editor:
+    - Add 'Update' option in Context Menu of a cheat value/description (Right Click on the input.)
+    - <Enter> key updates the value of a cheat's value or description.
+    - Batch Add of cheats from the Cheat Search window will not include the Address in the description.
+
+
+SuperSnes9x 1.63.1
+------------------
+
+General:
+- RetroAchievements now supports SuperSnex9x with a unique User-Agent thanks to the RA Admins via Discord.
+
+Win32:
+  - Cheat Search:
+    - Fix list view flickering with double buffering
+    - Sortable columns with sort arrows, result count in title bar
+    - Multi-select support, right-click context menu (Add Cheat, Add to Watch, Copy Address, Remove Selected)
+    - Mask dialog for hiding addresses, optimized with virtual list view
+    - Clear selection after context menu actions
+    - Delete key removes selected addresses (adds to mask list)
+
+  - Cheat Entry and Editor:
+    - Right-click context menu with Toggle Selected Cheat(s) and Delete Selected Cheat(s)
+    - Delete key support to delete selected cheats
+    - Ctrl+A to select all rows
+    - Batch add cheats directly when multiple rows selected from search
+    - Live-update editor when adding cheats from search dialog (both dialogs open simultaneously)
+    - Fix X button discarding pending changes — now applies changes same as OK
+    - Fix delete button not clearing edit fields when deleting the last/only row
+
+SuperSnes9x 1.63
+-----------------
+
 General:
 - Added a shortcut to change the backdrop color for sprite extraction.
 - Fixed QuickSave 0-9 slot shortcuts not working.
@@ -16,17 +939,21 @@ Win32:
 - Fixed Bank+/- hotkey saving.
 - Added hotkeys for aspect ratio, cheat edit/search.
 - Added multiselect for cheat edit dialog.
+- Added RetroAchievements.
+- Kaillera Server/Client.
+- Allow Emulation with Cheat Engine opened (Game Genie, Pro-Action Replay Codes).
+- Screenshots will now be saved correctly
 
 Gtk:
-- Fixed config file location to never put files directly in $HOME and obey
-  $XDG_CONFIG_HOME.
+- Fixed config file location to never put files directly in $HOME and obey $XDG_CONFIG_HOME.
 - Updated translations from JakeSmarter and StanleyKid-22.
+- Added RetroAchievements
+- Vulcan/OpenGL drivers check, if fails to load them defaults to Qt Renderer instead of crashing.
 
 Mac:
 - Added a new cheat finder.
 - Added MultiCart support back.
-- Create a blank window when starting the program, so the global menu change
-  doesn't go unnoticed.
+- Create a blank window when starting the program, so the global menu change doesn't go unnoticed.
 
 Snes9x 1.62
 - Fixed SA1 division with negative dividend again. (Atari2)

@@ -9915,6 +9915,11 @@ static void BiosManagerFitWidth(HWND hDlg)
 		GetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text, _countof(text));
 		if (GetTextExtentPoint32(hdc, text, lstrlen(text), &sz) && sz.cx > widest)
 			widest = sz.cx;
+		// Room for the note a cleared row shows, so X never resizes the window.
+		const char *note = S9xGetBiosSlotInfo(slot)->note;
+		Utf8ToWide  note_w(note ? note : "");
+		if (GetTextExtentPoint32(hdc, (wchar_t *) note_w, lstrlen((wchar_t *) note_w), &sz) && sz.cx > widest)
+			widest = sz.cx;
 	}
 	GetDlgItemText(hDlg, IDC_BIOSMGR_INTRO, text, _countof(text));
 	GetTextExtentPoint32(hdc, text, lstrlen(text), &sz);
@@ -9966,6 +9971,8 @@ static void BiosManagerFitWidth(HWND hDlg)
 	SetWindowPos(hDlg, NULL, win.left - dx / 2, win.top,
 	             (win.right - win.left) + dx, win.bottom - win.top,
 	             SWP_NOZORDER | SWP_NOACTIVATE);
+	// A resize while shown leaves stale text and button pixels behind.
+	RedrawWindow(hDlg, NULL, NULL, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
 	s_bios_fit_width = want;
 }
 

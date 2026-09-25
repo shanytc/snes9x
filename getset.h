@@ -9,6 +9,7 @@
 
 #include "cpuexec.h"
 #include "cartprot.h"
+#include "rp2040cart.h"
 #include "dsp.h"
 #include "sa1.h"
 #include "spc7110.h"
@@ -178,6 +179,11 @@ inline uint8 S9xGetByte (uint32 Address)
 
 		case CMemory::MAP_CARTPROT:
 			byte = S9xCartProtRead(Address);
+			addCyclesInMemoryAccess;
+			return (byte);
+
+		case CMemory::MAP_RP2040:
+			byte = S9xRP2040CartRead(Address);
 			addCyclesInMemoryAccess;
 			return (byte);
 
@@ -374,6 +380,13 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			addCyclesInMemoryAccess_x2;
 			return (word);
 
+		case CMemory::MAP_RP2040:
+			word  = S9xRP2040CartRead(Address);
+			addCyclesInMemoryAccess;
+			word |= S9xRP2040CartRead(Address + 1) << 8;
+			addCyclesInMemoryAccess;
+			return (word);
+
 		case CMemory::MAP_NONE:
 		default:
 			word = OpenBus | (OpenBus << 8);
@@ -495,6 +508,11 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 
 		case CMemory::MAP_SFCBOX_SRAM:
 			S9xSetSFCBoxSRAM(Byte, Address);
+			addCyclesInMemoryAccess;
+			return;
+
+		case CMemory::MAP_RP2040:
+			S9xRP2040CartWrite(Byte, Address);
 			addCyclesInMemoryAccess;
 			return;
 
@@ -831,6 +849,23 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 				S9xSetSFCBoxSRAM((uint8) Word, Address);
 				addCyclesInMemoryAccess;
 				S9xSetSFCBoxSRAM(Word >> 8, Address + 1);
+				addCyclesInMemoryAccess;
+			}
+			return;
+
+		case CMemory::MAP_RP2040:
+			if (o)
+			{
+				S9xRP2040CartWrite(Word >> 8, Address + 1);
+				addCyclesInMemoryAccess;
+				S9xRP2040CartWrite((uint8) Word, Address);
+				addCyclesInMemoryAccess;
+			}
+			else
+			{
+				S9xRP2040CartWrite((uint8) Word, Address);
+				addCyclesInMemoryAccess;
+				S9xRP2040CartWrite(Word >> 8, Address + 1);
 				addCyclesInMemoryAccess;
 			}
 			return;

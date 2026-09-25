@@ -49,7 +49,7 @@ CORE_NAMES  := acidsgb biosmanager bml bsx c4 c4emu cartprot cheats cheats2 clip
                movie msu1 nss obc1 ppu sa1 sa1cpu screenshot sdd1 sdd1emu seta \
                seta010 seta011 seta018 sfcbox sha256 snapshot snes9x spc7110 srtc superdisc \
                statemanager stream tile tileimpl-h2x1 tileimpl-n1x1 tileimpl-n2x1 \
-               voicekun widescreen z80
+               voicekun widescreen z80 rp2040 rp2040cart
 CHILD_CXX   := $(wildcard $(addprefix $(ROOT)/,$(addsuffix .cpp,$(CORE_NAMES)))) \
                $(ROOT)/apu/apu.cpp $(ROOT)/apu/bapu/dsp/sdsp.cpp \
                $(ROOT)/apu/bapu/smp/smp.cpp $(ROOT)/apu/bapu/smp/smp_state.cpp \

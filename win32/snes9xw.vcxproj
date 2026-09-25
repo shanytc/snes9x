@@ -455,6 +455,8 @@
     <ClInclude Include="..\msu1.h" />
     <ClInclude Include="..\voicekun.h" />
     <ClInclude Include="..\cartprot.h" />
+    <ClInclude Include="..\rp2040.h" />
+    <ClInclude Include="..\rp2040cart.h" />
     <ClInclude Include="..\common\video\opengl\shaders\glsl.h" />
     <ClInclude Include="..\common\video\opengl\shaders\shader_helpers.h" />
     <ClInclude Include="..\common\video\opengl\shaders\shader_platform.h" />
@@ -671,6 +673,8 @@
     <ClCompile Include="..\msu1.cpp" />
     <ClCompile Include="..\voicekun.cpp" />
     <ClCompile Include="..\cartprot.cpp" />
+    <ClCompile Include="..\rp2040.cpp" />
+    <ClCompile Include="..\rp2040cart.cpp" />
     <ClCompile Include="..\netplay.cpp" />
     <ClCompile Include="..\obc1.cpp" />
     <ClCompile Include="..\ppu.cpp" />

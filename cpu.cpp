@@ -18,6 +18,7 @@
 #include "voicekun.h"
 #include "sfcbox.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
 #include "nss.h"
 #ifdef DEBUGGER
 #include "debug.h"
@@ -177,6 +178,9 @@ void S9xReset (void)
 	if (Settings.SuperDisc)
 		S9xSuperDiscPowerOn();
 
+	if (Settings.RP2040Cart)
+		S9xRP2040CartPowerOn();
+
 	S9xInitCheatData();
 }
 
@@ -305,6 +309,8 @@ void S9xSoftReset (void)
 		S9xMSU1Init();
 	if (Settings.SuperDisc)
 		S9xSuperDiscSoftReset();
+	if (Settings.RP2040Cart)
+		S9xRP2040CartSoftReset();
 
 	S9xInitCheatData();
 }

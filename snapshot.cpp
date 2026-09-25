@@ -22,6 +22,7 @@
 #include "sfcbox.h"
 #include "nss.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
 #include "gfx.h"
 
 #ifndef min
@@ -1360,6 +1361,16 @@ void S9xFreezeToStream (STREAM stream)
 		delete [] sdc_buf;
 	}
 
+	// RP2040 cart: both cores, the chip's RAM and peripherals, as "RPC".
+	if (Settings.RP2040Cart)
+	{
+		const size_t	rpc_size = S9xRP2040CartStateSize();
+		uint8			*rpc_buf = new uint8[rpc_size];
+		S9xRP2040CartStateSave(rpc_buf);
+		FreezeBlock(stream, "RPC", rpc_buf, (int) rpc_size);
+		delete [] rpc_buf;
+	}
+
 	// SGB BIOS mode: piggyback the GB/SGB blob inside the SNES snapshot.
 	// The blob is self-versioning ("SGB!" magic + version + size); we just
 	// hand the raw bytes to FreezeBlock. Without this, BIOS-mode loads
@@ -1485,6 +1496,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 	int		local_nss_size       = 0;
 	uint8	*local_sdc_data      = NULL;
 	int		local_sdc_size       = 0;
+	uint8	*local_rpc_data      = NULL;
+	int		local_rpc_size       = 0;
 	uint8	*local_gbe_data      = NULL;
 	int		local_gbe_size       = 0;
 	uint8	*local_screenshot    = NULL;
@@ -1682,6 +1695,23 @@ int S9xUnfreezeFromStream (STREAM stream)
 			}
 		}
 
+		// Optional RP2040 cart blob, likewise.
+		{
+			int rpc_block_len = 0;
+			if (CheckBlockName(stream, "RPC", rpc_block_len) && rpc_block_len > 0)
+			{
+				local_rpc_data = new uint8[rpc_block_len];
+				result = UnfreezeBlock(stream, "RPC", local_rpc_data, rpc_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_rpc_data;
+					local_rpc_data = NULL;
+					break;
+				}
+				local_rpc_size = rpc_block_len;
+			}
+		}
+
 		// Optional GB/SGB blob — present iff the snapshot was taken in
 		// BIOS mode (Settings.SGB_BIOSModeActive). Old snapshots and
 		// non-SGB SNES games omit it. CheckBlockName peeks without
@@ -1789,6 +1819,9 @@ int S9xUnfreezeFromStream (STREAM stream)
 
 		if (Settings.SuperDisc && local_sdc_data)
 			S9xSuperDiscStateLoad(local_sdc_data, (size_t) local_sdc_size);
+
+		if (Settings.RP2040Cart && local_rpc_data)
+			S9xRP2040CartStateLoad(local_rpc_data, (size_t) local_rpc_size);
 
 		if (local_fillram)
 			memcpy(Memory.FillRAM, local_fillram, 0x8000);
@@ -2092,6 +2125,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_box_data)			delete [] local_box_data;
 	if (local_nss_data)			delete [] local_nss_data;
 	if (local_sdc_data)			delete [] local_sdc_data;
+	if (local_rpc_data)			delete [] local_rpc_data;
 	if (local_gbe_data)			delete [] local_gbe_data;
 
 	return (result);

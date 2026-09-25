@@ -113,6 +113,8 @@ set(SNES9X_CORE_SOURCES
     ../cpuexec.cpp
     ../voicekun.cpp
     ../cartprot.cpp
+    ../rp2040.cpp
+    ../rp2040cart.cpp
     ../sa1cpu.cpp
     ../cheats.cpp
     ../cheats2.cpp

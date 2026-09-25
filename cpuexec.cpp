@@ -17,6 +17,7 @@
 #include "sgb/sgb.h"
 #include "sfcbox.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
@@ -533,6 +534,10 @@ void S9xDoHEventProcessing (void)
 			// Super Disc: mechacon replies and the drive's 75Hz sector clock.
 			if (Settings.SuperDisc)
 				S9xSuperDiscEndScanline();
+
+			// RP2040 cart: the chip runs on between the SNES's accesses to it.
+			if (Settings.RP2040Cart)
+				S9xRP2040CartEndScanline();
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

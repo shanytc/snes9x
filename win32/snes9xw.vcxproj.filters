@@ -294,6 +294,12 @@
     <ClInclude Include="..\cartprot.h">
       <Filter>APU</Filter>
     </ClInclude>
+    <ClInclude Include="..\rp2040.h">
+      <Filter>APU</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rp2040cart.h">
+      <Filter>APU</Filter>
+    </ClInclude>
     <ClInclude Include="cgMini.h">
       <Filter>GUI\VideoDriver</Filter>
     </ClInclude>
@@ -840,6 +846,12 @@
       <Filter>APU</Filter>
     </ClCompile>
     <ClCompile Include="..\cartprot.cpp">
+      <Filter>APU</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rp2040.cpp">
+      <Filter>APU</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rp2040cart.cpp">
       <Filter>APU</Filter>
     </ClCompile>
     <ClCompile Include="DumpAtEnd.cpp">

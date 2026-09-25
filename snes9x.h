@@ -398,6 +398,7 @@ struct SSettings
 	bool8	NSSJoypadWatchdog; // let the supervisor drop a game that stops polling the pads
 	bool8	SuperDisc;      // Super Disc BIOS cart loaded, CD-ROM unit at $21E0-$21E5
 	uint32	SFCBoxKeyswitch; // SFC-Box keyswitch at power-on, as SFCBox.Keyswitch (1 = ON); ports must seed it
+	bool8	RP2040Cart;     // RP2040 game cart (Xeno Crisis) with its firmware loaded, streaming through $3000
 };
 
 struct SSNESGameFixes

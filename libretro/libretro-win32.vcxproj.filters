@@ -171,6 +171,12 @@
     <ClInclude Include="..\cartprot.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\rp2040.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rp2040cart.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>s9x-source\APU</Filter>
     </ClInclude>
@@ -357,6 +363,12 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\cartprot.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rp2040.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rp2040cart.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\snapshot.cpp">

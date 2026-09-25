@@ -45,6 +45,7 @@
 #include "sfcbox.h"
 #include "nss.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
 #include "voicekun.h"
 
 // The Super Disc BIOS behind a disc image File -> Load Game booted, "" otherwise.
@@ -1688,6 +1689,9 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
     S9xSuperDiscDeactivate();
     SuperDiscBIOSPath.clear();
 
+    Settings.RP2040Cart = FALSE;
+    S9xRP2040CartDeactivate();
+
     // LoadROMInt only ever needs one retry (the interleave-detection
     // flip-flop); bound the loop so a deterministic failure — e.g. an
     // SFC-Box image without its KROM BIOS — reports instead of spinning.
@@ -2252,6 +2256,9 @@ bool8 CMemory::LoadROM (const char *filename)
     Settings.SuperDisc = FALSE;
     S9xSuperDiscDeactivate();
     SuperDiscBIOSPath.clear();
+
+    Settings.RP2040Cart = FALSE;
+    S9xRP2040CartDeactivate();
 
     // A Super Disc CD image boots through the BIOS cart in the BIOS Manager.
     if (S9xSuperDiscIsDiscImage(filename))
@@ -3421,6 +3428,9 @@ bool8 CMemory::LoadSRAM (const char *filename)
 
 	ClearSRAM();
 
+	if (Settings.RP2040Cart)
+		return (S9xRP2040CartLoadFlash(filename));
+
 	if (Multi.cartType && Multi.sramSizeB)
 	{
 		size = (1 << (Multi.sramSizeB + 3)) * 128;
@@ -3505,6 +3515,9 @@ bool8 CMemory::SaveSRAM (const char *filename)
 
 	if (Settings.NSS)
 		S9xNSSSaveNVRAM();		// coinage EEPROM + clock NVRAM, likewise
+
+	if (Settings.RP2040Cart)
+		return (S9xRP2040CartSaveFlash(filename));	// the game saves to its own flash
 
 	if (Settings.SuperFX && (ROMType < 0x15 || ROMType == 0x17)) // doesn't have SRAM
 		return (TRUE);
@@ -3865,6 +3878,12 @@ void CMemory::InitROM (void)
 
 	// MSU1
 	Settings.MSU1 = S9xMSU1ROMExists();
+
+	// RP2040 cart: the game is the firmware, a file beside the ROM.
+	Settings.RP2040Cart = S9xRP2040CartDetect(ROM, CalculatedSize) &&
+						  S9xRP2040CartActivate(ROMFilename.c_str());
+	if (!Settings.RP2040Cart)
+		S9xRP2040CartDeactivate();
 
 	// Super Disc: its header is FFh-filled, so nothing above applies.
 	if (Settings.SuperDisc)
@@ -4428,6 +4447,23 @@ void CMemory::Map_LoROMMap (void)
 
 	if (Settings.CartProtection)
 		map_CartProt();
+
+	if (Settings.RP2040Cart)
+		map_RP2040();
+}
+
+// The RP2040 answers the whole of $3000-$3FFF in the system banks; the SNES
+// only uses $3000, but it executes streamed code from there upwards.
+void CMemory::map_RP2040 (void)
+{
+	for (uint32 bank = 0x00; bank <= 0xbf; bank++)
+	{
+		if (bank == 0x40)
+			bank = 0x80;
+		const uint32	block = (bank << 4) | 3;
+		Map[block] = WriteMap[block] = (uint8 *) MAP_RP2040;
+		BlockIsROM[block] = BlockIsRAM[block] = FALSE;
+	}
 }
 
 // P2 — SGB cart map. Standard LoROM with the 0x6000-0x7FFF range in banks

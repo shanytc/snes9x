@@ -66,6 +66,7 @@
 #include "nss.h"
 #include "sfcbox.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
 #include "sgb/sgb.h"
 
 // Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the
@@ -1417,9 +1418,10 @@ void Snes9xWindow::set_event_timer(int minutes, int display)
 // Super Disc and Super Famicom Box sessions name the machine and what's in it.
 std::string Snes9xWindow::rom_title()
 {
-    const std::string name = Settings.SuperDisc ? std::string(S9xSuperDiscTitle())
-                           : SFCBox.Active      ? std::string(S9xSFCBoxTitle())
-                                                : S9xBasenameNoExt(Memory.ROMFilename);
+    const std::string name = Settings.SuperDisc  ? std::string(S9xSuperDiscTitle())
+                           : SFCBox.Active       ? std::string(S9xSFCBoxTitle())
+                           : Settings.RP2040Cart ? std::string(S9xRP2040CartTitle())
+                                                 : S9xBasenameNoExt(Memory.ROMFilename);
     return name + " - SuperSnes9x " VERSION_DISPLAY;
 }
 

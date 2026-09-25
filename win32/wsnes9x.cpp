@@ -67,6 +67,7 @@
 #include "../sfcbox.h"
 #include "../nss.h"
 #include "../superdisc.h"
+#include "../rp2040cart.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -807,6 +808,9 @@ void S9xRestoreWindowTitle ()
     else
     if (SFCBox.Active)
         _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSFCBoxTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+    else
+    if (Settings.RP2040Cart)
+        _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xRP2040CartTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     else
     if (Memory.ROMFilename[0])
     {

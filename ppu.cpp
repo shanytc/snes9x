@@ -17,6 +17,7 @@
 #include "display.h"
 #include "sfcbox.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef NETPLAY_SUPPORT
@@ -1687,6 +1688,10 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 			case 0x420b: // MDMAEN
 				if (CPU.InDMAorHDMA)
 					return;
+				// The S-CPU fetches the next opcode before the DMA takes the bus;
+				// only a cart that streams code through one address can tell.
+				if (Byte && Settings.RP2040Cart)
+					S9xRP2040CartDMAPrefetch();
 				// XXX: Not quite right...
                 if (Byte) {
 				CPU.Cycles += Timings.DMACPUSync;

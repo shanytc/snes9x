@@ -962,6 +962,7 @@
 #define ID_NSS_PAGEUP                   44408
 #define ID_NSS_PAGEDOWN                 44409
 #define ID_NSS_RESTART                  44410
+#define ID_NSS_OPGUIDE                  44411
 #define ID_NSS_DIP0                     44412
 #define ID_NSS_EJECT0                   44424
 #define ID_NSS_DIPS                     44427

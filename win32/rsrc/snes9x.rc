@@ -1550,6 +1550,7 @@ BEGIN
             MENUITEM "&Insert Coin",                ID_NSS_COIN1,MFT_STRING,MFS_ENABLED
             MENUITEM "Insert Coin (Slot &2)",       ID_NSS_COIN2,MFT_STRING,MFS_ENABLED
             MENUITEM "&Service Credit",             ID_NSS_SERVICE,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Operational Guide",          ID_NSS_OPGUIDE,MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
             MENUITEM "Game &1",                     ID_NSS_GAME1,MFT_STRING,MFS_ENABLED
             MENUITEM "Game &2",                     ID_NSS_GAME2,MFT_STRING,MFS_ENABLED

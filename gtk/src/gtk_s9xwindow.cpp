@@ -1303,6 +1303,10 @@ void Snes9xWindow::create_arcade_menus()
     add_item(nss_menu, _("_Service Credit"))->signal_activate().connect([this] {
         nss_pulse(NSS_BTN_SERVICE, false);
     });
+    // Service and Restart together open the operator menu.
+    add_item(nss_menu, _("_Operational Guide"))->signal_activate().connect([this] {
+        nss_pulse(NSS_BTN_SERVICE | NSS_BTN_RESTART, false);
+    });
     nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
 
     for (int slot = 0; slot < 3; slot++)
@@ -1321,18 +1325,21 @@ void Snes9xWindow::create_arcade_menus()
     nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
 
     struct GameOnly { const char *label; uint16 button; };
-    static const GameOnly game_only[4] = {
+    static const GameOnly game_only[3] = {
         { N_("I_nstructions"), NSS_BTN_INSTRUCTIONS },
         { N_("Page _Up"),      NSS_BTN_PAGEUP },
         { N_("Page _Down"),    NSS_BTN_PAGEDOWN },
-        { N_("_Restart Game"), NSS_BTN_RESTART },
     };
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 3; i++)
     {
         const uint16 button = game_only[i].button;
         nss_game_only_items[i] = add_item(nss_menu, _(game_only[i].label));
         nss_game_only_items[i]->signal_activate().connect([this, button] { nss_pulse(button, true); });
     }
+    // Restart also leaves each operator page and adds Free Play credits.
+    add_item(nss_menu, _("_Restart Game"))->signal_activate().connect([this] {
+        nss_pulse(NSS_BTN_RESTART, false);
+    });
     nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
 
     nss_dips_item = add_item(nss_menu, _("Cartridge _DIP Switches"));
@@ -1547,7 +1554,7 @@ void Snes9xWindow::sfcbox_set_keyswitch(int panel_pos)
 
 void Snes9xWindow::nss_pulse(uint16_t buttons, bool game_only)
 {
-    // Instructions, the paging keys and Restart act on the paid game only.
+    // Instructions and the paging keys act on the paid game only.
     if (!config->rom_loaded || !NSS.Active || (game_only && !S9xNSSGameRunning()))
         return;
     S9xNSSPulseButton(buttons);

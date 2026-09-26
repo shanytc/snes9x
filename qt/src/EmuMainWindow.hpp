@@ -142,7 +142,7 @@ class EmuMainWindow : public QMainWindow
     QAction *nss_menu_action = nullptr;
     QAction *nss_game_actions[3] = {};
     QAction *nss_eject_actions[3] = {};
-    QAction *nss_game_only_actions[4] = {};
+    QAction *nss_game_only_actions[3] = {};
     QAction *nss_dips_action = nullptr;
     QAction *nss_dip_actions[8] = {};
     // Emulation -> PowerFest '94 / Campus Challenge '92 session timer.

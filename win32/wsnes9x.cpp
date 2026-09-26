@@ -3087,6 +3087,9 @@ LRESULT CALLBACK WinProc(
 			break;
 
 		case ID_NSS_SERVICE:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_SERVICE);      break;
+		// The service switch and Restart pressed together open the operator
+		// menu (bookkeeping, coinage, self test), from a game or the menu.
+		case ID_NSS_OPGUIDE:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_SERVICE | NSS_BTN_RESTART); break;
 
 		case ID_NSS_GAME1:
 		case ID_NSS_GAME2:
@@ -3196,7 +3199,9 @@ LRESULT CALLBACK WinProc(
 		case ID_NSS_INSTRUCTIONS: if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;
 		case ID_NSS_PAGEUP:       if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_PAGEUP);       break;
 		case ID_NSS_PAGEDOWN:     if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_PAGEDOWN);     break;
-		case ID_NSS_RESTART:      if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_RESTART);      break;
+		// Restart also leaves each operator page and, with Free Play on, adds
+		// credits on the game menu, so it stays live outside a game.
+		case ID_NSS_RESTART:      if (NSS.Active) S9xNSSPulseButton(NSS_BTN_RESTART);              break;
 
 		case ID_NSS_DIP0 + 0: case ID_NSS_DIP0 + 1: case ID_NSS_DIP0 + 2:
 		case ID_NSS_DIP0 + 3: case ID_NSS_DIP0 + 4: case ID_NSS_DIP0 + 5:
@@ -5948,11 +5953,11 @@ static void CheckMenuStates ()
 			               MF_BYCOMMAND | (S9xNSSCanEject(slot) ? MF_ENABLED : MF_GRAYED));
 		}
 
-		// Instructions, the paging keys and Restart only mean something to
-		// the paid game that is playing, so they grey out on the menu.
+		// Instructions and the paging keys only mean something to the paid
+		// game that is playing, so they grey out on the menu.
 		static const UINT game_only[] =
-			{ ID_NSS_INSTRUCTIONS, ID_NSS_PAGEUP, ID_NSS_PAGEDOWN, ID_NSS_RESTART };
-		for (int i = 0; i < 4; i++)
+			{ ID_NSS_INSTRUCTIONS, ID_NSS_PAGEUP, ID_NSS_PAGEDOWN };
+		for (int i = 0; i < 3; i++)
 			EnableMenuItem(GUI.hMenu, game_only[i],
 			               MF_BYCOMMAND | (S9xNSSGameRunning() ? MF_ENABLED : MF_GRAYED));
 	}

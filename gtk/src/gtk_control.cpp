@@ -790,7 +790,7 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         }
         else if (cmd.port[0] == PORT_NSS_RESTART)
         {
-            top_level->nss_pulse(NSS_BTN_RESTART, true);
+            top_level->nss_pulse(NSS_BTN_RESTART, false);
         }
     }
 }

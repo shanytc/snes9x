@@ -435,6 +435,9 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
     connect(nss_menu->addAction(tr("Insert Coin (Slot &2)")), &QAction::triggered, [this] { insertCoin(1); });
     connect(nss_menu->addAction(tr("&Service Credit")), &QAction::triggered,
             [this] { nssPulse(NSS_BTN_SERVICE, false); });
+    // Service and Restart together open the operator menu.
+    connect(nss_menu->addAction(tr("&Operational Guide")), &QAction::triggered,
+            [this] { nssPulse(NSS_BTN_SERVICE | NSS_BTN_RESTART, false); });
     nss_menu->addSeparator();
 
     for (int slot = 0; slot < 3; slot++)
@@ -451,18 +454,20 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
     nss_menu->addSeparator();
 
     struct GameOnly { const char *label; uint16 button; };
-    static const GameOnly game_only[4] = {
+    static const GameOnly game_only[3] = {
         { QT_TR_NOOP("I&nstructions"), NSS_BTN_INSTRUCTIONS },
         { QT_TR_NOOP("Page &Up"),      NSS_BTN_PAGEUP },
         { QT_TR_NOOP("Page &Down"),    NSS_BTN_PAGEDOWN },
-        { QT_TR_NOOP("&Restart Game"), NSS_BTN_RESTART },
     };
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 3; i++)
     {
         const uint16 button = game_only[i].button;
         nss_game_only_actions[i] = nss_menu->addAction(tr(game_only[i].label));
         connect(nss_game_only_actions[i], &QAction::triggered, [this, button] { nssPulse(button, true); });
     }
+    // Restart also leaves each operator page and adds Free Play credits.
+    connect(nss_menu->addAction(tr("&Restart Game")), &QAction::triggered,
+            [this] { nssPulse(NSS_BTN_RESTART, false); });
     nss_menu->addSeparator();
 
     auto dips_menu = new QMenu(tr("Cartridge &DIP Switches"));
@@ -657,7 +662,7 @@ void EmuMainWindow::sfcboxSetKeyswitch(int panel_pos)
 
 void EmuMainWindow::nssPulse(uint16_t buttons, bool game_only)
 {
-    // Instructions, the paging keys and Restart act on the paid game only.
+    // Instructions and the paging keys act on the paid game only.
     app.emu_thread->runOnThread([buttons, game_only] {
         if (!NSS.Active || (game_only && !S9xNSSGameRunning()))
             return;
@@ -739,7 +744,7 @@ bool EmuMainWindow::arcadeShortcut(const std::string &name)
     else if (name == "NSSPageDown")
         nssPulse(NSS_BTN_PAGEDOWN, true);
     else if (name == "NSSRestart")
-        nssPulse(NSS_BTN_RESTART, true);
+        nssPulse(NSS_BTN_RESTART, false);
     else
     {
         for (int i = 0; i < 5; i++)

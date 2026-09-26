@@ -1587,20 +1587,26 @@ bool8 S9xNSSSaveBatteries (void)
 	return (ok);
 }
 
-// The cabinet's own data in "<rom>.nss": the coinage EEPROM, the clock's SRAM
-// and the board's backup RAM (the bookkeeping).
+// The cabinet's own data: the coinage EEPROM, the clock's SRAM and the
+// board's backup RAM (the bookkeeping). One cabinet, one file, whichever
+// cartridges are in it.
 #define NSS_NVRAM_HEAD	(NSS_EEPROM_WORDS * 2 + NSS_RTC_NVRAM)
 #define NSS_NVRAM_SIZE	(NSS_NVRAM_HEAD + NSS_BACKUP_SIZE)
 
+static std::string NSSNVRAMName (void)
+{
+	return (S9xGetDirectory(SRAM_DIR) + SLASH_STR + "NSS.nss");
+}
+
 bool8 S9xNSSLoadNVRAM (void)
 {
-	std::string	name = S9xGetFilename(".nss", SRAM_DIR);
+	std::string	name = NSSNVRAMName();
 	FILE		*fp = fopen(name.c_str(), "rb");
 
 	if (!fp)
 		return (FALSE);
 
-	// One byte over, so an older layout holding the sockets' batteries is refused.
+	// One byte over, so a file of any other size is refused.
 	std::vector<uint8>	buf(NSS_NVRAM_SIZE + 1, 0);
 	const size_t		got = fread(buf.data(), 1, buf.size(), fp);
 	fclose(fp);
@@ -1616,7 +1622,7 @@ bool8 S9xNSSLoadNVRAM (void)
 
 bool8 S9xNSSSaveNVRAM (void)
 {
-	std::string	name = S9xGetFilename(".nss", SRAM_DIR);
+	std::string	name = NSSNVRAMName();
 	FILE		*fp = fopen(name.c_str(), "wb");
 
 	if (!fp)

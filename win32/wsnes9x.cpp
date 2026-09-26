@@ -6679,8 +6679,8 @@ static void UpdateTestsMenu ()
 }
 
 // Emulation menu entries that depend on what is loaded: each is on the menu
-// only while its hardware runs. They follow Game Boy Model and RTC, which
-// also come and go, so the group's slot is counted from them.
+// only while its hardware runs. They follow Link Cable, Game Boy Model and
+// Real Time Clock, which also come and go, so the group's slot is counted from them.
 static void UpdateHardwarePopups ()
 {
 	// Resource order; `has` is a command inside the popup, 0 for the separator.
@@ -6694,14 +6694,15 @@ static void UpdateHardwarePopups ()
 		{ ID_DEBUG_GB_TILE_VIEWER, TEXT("&GB-PPU") },
 	};
 	static HMENU s_parent = NULL;
-	static int   s_first  = 0;   // NSS's slot while Game Boy Model and RTC are hidden
+	static int   s_first  = 0;   // NSS's slot while Link Cable, Game Boy Model and RTC are hidden
 
 	MENUITEMINFO probe = {};
 	probe.cbSize = sizeof(probe);
 	probe.fMask  = MIIM_ID;
 	auto above = [&probe](HMENU m) {
-		return (GetMenuItemInfo(m, ID_EMULATION_BIOS,   FALSE, &probe) ? 1 : 0) +
-		       (GetMenuItemInfo(m, ID_EMULATION_GB_RTC, FALSE, &probe) ? 1 : 0);
+		return (GetMenuItemInfo(m, ID_EMULATION_GB_LINK, FALSE, &probe) ? 1 : 0) +
+		       (GetMenuItemInfo(m, ID_EMULATION_BIOS,    FALSE, &probe) ? 1 : 0) +
+		       (GetMenuItemInfo(m, ID_EMULATION_GB_RTC,  FALSE, &probe) ? 1 : 0);
 	};
 
 	if (!s_parent)

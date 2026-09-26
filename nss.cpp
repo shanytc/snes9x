@@ -582,7 +582,6 @@ void S9xNSSRenderOSD (uint16 *screen, int pitch, int width, int height)
 	// rows map to scanlines 1:1 and the 24x12 grid is centered.
 	const int	xscale = (width >= 512) ? 2 : 1;
 	const int	xbase = (width - 192 * xscale) / 2;
-	const int	ybase = (height > NSS_OSD_H * 18) ? (height - NSS_OSD_H * 18) / 2 : 0;
 
 	// Character size is set for three line groups — line 1, lines 2-11 and
 	// line 12 — and the plane can be scrolled by whole lines and by dots
@@ -593,11 +592,22 @@ void S9xNSSRenderOSD (uint16 *screen, int pitch, int width, int height)
 	const int	vsz[3] = { (o->Reg[2] >> 6) & 3, (o->Reg[2] >> 8) & 3, (o->Reg[2] >> 10) & 3 };
 	const int	scroll_dot = o->Reg[3] & 0x1f;
 	const int	scroll_row = (o->Reg[3] >> 8) & 0x0f;
-	const int	gap = (int) ((o->Reg[3] >> 5) & 3) * 18;	// blank lines under line 1
+	int			gap = (int) ((o->Reg[3] >> 5) & 3) * 18;	// blank lines under line 1
 
 	const uint8	bg = (uint8) ((o->Reg[6] >> 4) & 7);
 	const bool8	blink_on = ((o->BlinkFrame & ((o->Reg[5] & 4) ? 16u : 32u)) != 0);
 	const bool8	opaque = OSDOpaque();
+
+	// Center on the page's unscrolled height. One that overflows the frame
+	// only by its headline gap gives up gap lines so its last line shows.
+	int	total = gap + 18 * ((vsz[0] + 1) + 10 * (vsz[1] + 1) + (vsz[2] + 1));
+	if (total > height && total - gap <= height)
+	{
+		gap -= total - height;
+		total = height;
+	}
+	const int	ybase = (total <= height) ? (height - total) / 2
+	                  : (height > NSS_OSD_H * 18) ? (height - NSS_OSD_H * 18) / 2 : 0;
 
 	// Lines stack: each one is as tall as its own size setting, so a
 	// double-height line pushes everything under it down.

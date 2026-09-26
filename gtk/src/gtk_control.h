@@ -141,7 +141,9 @@ enum {
     // Graphics Layer 1/2 and Sprites Layer keys, routed per core (as win32).
     PORT_LAYER_BG0          = 77,
     PORT_LAYER_BG1          = 78,
-    PORT_LAYER_SPRITES      = 79
+    PORT_LAYER_SPRITES      = 79,
+    // Nintendo Super System -> Slot 1-3 (mount/eject)
+    PORT_NSS_MOUNT0         = 80
 };
 
 typedef struct BindingLink
@@ -156,7 +158,7 @@ extern const int b_breaks[];
 const int NUM_JOYPAD_LINKS = 24;
 // Emulator-wide entries in b_links, after the NUM_JOYPAD_LINKS joypad ones; a
 // static_assert in gtk_control.cpp pins it to that table's real length.
-const int NUM_EMU_LINKS = 101;
+const int NUM_EMU_LINKS = 104;
 
 typedef struct JoypadBinding
 {

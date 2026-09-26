@@ -157,6 +157,9 @@ const BindingLink b_links[] =
         { "b_nss_page_up",         "GTK_nss_page_up"   },
         { "b_nss_page_down",       "GTK_nss_page_down" },
         { "b_nss_restart",         "GTK_nss_restart"   },
+        { "b_nss_mount_0",         "GTK_nss_mount_0"   },
+        { "b_nss_mount_1",         "GTK_nss_mount_1"   },
+        { "b_nss_mount_2",         "GTK_nss_mount_2"   },
 
         { nullptr, nullptr }
 };
@@ -792,6 +795,10 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         {
             top_level->nss_pulse(NSS_BTN_RESTART, false);
         }
+        else if (cmd.port[0] >= PORT_NSS_MOUNT0 && cmd.port[0] < PORT_NSS_MOUNT0 + 3)
+        {
+            top_level->nss_mount_eject(cmd.port[0] - PORT_NSS_MOUNT0);
+        }
     }
 }
 
@@ -923,6 +930,10 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strcasecmp(name, "GTK_nss_restart"))
     {
         cmd.port[0] = PORT_NSS_RESTART;
+    }
+    else if (!strncasecmp(name, "GTK_nss_mount_", 14))
+    {
+        cmd.port[0] = PORT_NSS_MOUNT0 + (name[14] - '0');
     }
     else if (!strcasecmp(name, "GTK_rewind"))
     {

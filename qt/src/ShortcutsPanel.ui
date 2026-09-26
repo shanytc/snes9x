@@ -483,17 +483,17 @@
      </row>
      <row>
       <property name="text">
-       <string>NSS: Game 1</string>
+       <string>NSS: Select Slot 1</string>
       </property>
      </row>
      <row>
       <property name="text">
-       <string>NSS: Game 2</string>
+       <string>NSS: Select Slot 2</string>
       </property>
      </row>
      <row>
       <property name="text">
-       <string>NSS: Game 3</string>
+       <string>NSS: Select Slot 3</string>
       </property>
      </row>
      <row>
@@ -524,6 +524,21 @@
      <row>
       <property name="text">
        <string>Super Disc: Eject Disc</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Mount/Eject Slot 1</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Mount/Eject Slot 2</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>NSS: Mount/Eject Slot 3</string>
       </property>
      </row>
      <column>

@@ -1314,14 +1314,12 @@ void Snes9xWindow::create_arcade_menus()
         nss_game_items[slot] = add_item(nss_menu, fmt::format("Game _{}", slot + 1));
         nss_game_items[slot]->signal_activate().connect([this, slot] { nss_game(slot); });
     }
-    auto eject_item = add_item(nss_menu, _("_Eject Cartridge"));
-    auto eject_menu = Gtk::manage(new Gtk::Menu());
+    nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
     for (int slot = 0; slot < 3; slot++)
     {
-        nss_eject_items[slot] = add_item(eject_menu, fmt::format("Slot {}", slot + 1));
-        nss_eject_items[slot]->signal_activate().connect([this, slot] { nss_eject(slot); });
+        nss_eject_items[slot] = add_item(nss_menu, fmt::format("Slot {}", slot + 1));
+        nss_eject_items[slot]->signal_activate().connect([this, slot] { nss_mount_eject(slot); });
     }
-    eject_item->set_submenu(*eject_menu);
     nss_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
 
     struct GameOnly { const char *label; uint16 button; };
@@ -1492,19 +1490,17 @@ void Snes9xWindow::refresh_arcade_menus()
         {
             const bool present = S9xNSSSlotPresent(slot);
             const std::string name = mnemonic_escape(S9xNSSSlotName(slot));
-            // The panel's game buttons only pick from the supervisor's menu, so
-            // a filled socket greys while a paid game runs; an empty one asks
-            // for a cartridge instead.
+            // The supervisor ignores the game buttons while a paid game runs.
             nss_game_items[slot]->set_label(present
                 ? fmt::format("Game _{} ({})", slot + 1, name)
-                : fmt::format("Game _{} (Click to select cartridge...)", slot + 1));
-            nss_game_items[slot]->set_sensitive(!present || !running);
+                : fmt::format("Game _{}", slot + 1));
+            nss_game_items[slot]->set_sensitive(!running);
 
             nss_eject_items[slot]->set_label(present
-                ? fmt::format("Slot {} ({})", slot + 1, name)
-                : fmt::format("Slot {} (empty)", slot + 1));
+                ? fmt::format("Slot {}: Eject ({})", slot + 1, name)
+                : fmt::format("Slot {}: Mount...", slot + 1));
             // The cabinet keeps its last cartridge.
-            nss_eject_items[slot]->set_sensitive(S9xNSSCanEject(slot));
+            nss_eject_items[slot]->set_sensitive(!present || S9xNSSCanEject(slot));
         }
 
         for (auto item : nss_game_only_items)
@@ -1562,16 +1558,24 @@ void Snes9xWindow::nss_pulse(uint16_t buttons, bool game_only)
 
 void Snes9xWindow::nss_game(int slot)
 {
+    // Only ever a panel button, filled socket or not: the operator pages
+    // use all three as page keys. Cartridges go in via Mount/Eject.
+    static const uint16 game_buttons[3] = { NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
+    if (config->rom_loaded && NSS.Active && !S9xNSSGameRunning())
+        S9xNSSPulseButton(game_buttons[slot]);
+}
+
+void Snes9xWindow::nss_mount_eject(int slot)
+{
     if (!config->rom_loaded || !NSS.Active)
         return;
 
-    // A filled socket gets its panel button pressed; an empty one gets a
+    // A filled socket gives up its cartridge; an empty one takes a
     // cartridge, which is a file to pick.
     if (S9xNSSSlotPresent(slot))
     {
-        static const uint16 game_buttons[3] = { NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
-        if (!S9xNSSGameRunning())
-            S9xNSSPulseButton(game_buttons[slot]);
+        if (S9xNSSCanEject(slot))
+            S9xNSSEjectCart(slot);
         return;
     }
 
@@ -1615,12 +1619,6 @@ void Snes9xWindow::nss_game(int slot)
     }
 
     unpause_from_focus_change();
-}
-
-void Snes9xWindow::nss_eject(int slot)
-{
-    if (config->rom_loaded && NSS.Active && S9xNSSCanEject(slot))
-        S9xNSSEjectCart(slot);
 }
 
 void Snes9xWindow::nss_toggle_dip(int sw)

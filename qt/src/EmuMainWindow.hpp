@@ -159,7 +159,7 @@ class EmuMainWindow : public QMainWindow
     void insertCoin(int slot);
     void nssPulse(uint16_t buttons, bool game_only);
     void nssGame(int slot);
-    void nssEject(int slot);
+    void nssMountEject(int slot);
     void nssToggleDip(int sw);
 
     QMenu *superdisc_menu = nullptr;

@@ -1329,6 +1329,13 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 			SendMenuCommand(ID_NSS_GAME1 + nssg);
 			hitHotKey = true;
 		}
+		for(int nssm = 0; nssm < 3; nssm++)
+		{
+			if(!HKmatch(NSSMountEject[nssm]))
+				continue;
+			SendMenuCommand(ID_NSS_EJECT0 + nssm);
+			hitHotKey = true;
+		}
 		// Super Disc drive, through the menu so its greying applies to the keys.
 		if(HKmatch(SuperDiscInsert))
 		{
@@ -3095,17 +3102,28 @@ LRESULT CALLBACK WinProc(
 		case ID_NSS_GAME2:
 		case ID_NSS_GAME3:
 		{
-			// A filled socket gets its panel button pressed and the
-			// supervisor decides what to do with it; an empty one gets a
+			// Only ever a panel button, filled socket or not: the operator
+			// pages use all three as page keys. Cartridges go in via Mount/Eject.
+			static const uint16 game_btn[3] =
+				{ NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
+			if (NSS.Active)
+				S9xNSSPulseButton(game_btn[cmd_id - ID_NSS_GAME1]);
+			break;
+		}
+
+		case ID_NSS_EJECT0 + 0:
+		case ID_NSS_EJECT0 + 1:
+		case ID_NSS_EJECT0 + 2:
+		{
+			// A filled socket gives up its cartridge; an empty one takes a
 			// cartridge, which is a file to pick.
-			const int slot = cmd_id - ID_NSS_GAME1;
+			const int slot = cmd_id - ID_NSS_EJECT0;
 			if (!NSS.Active)
 				break;
 			if (S9xNSSSlotPresent(slot))
 			{
-				static const uint16 game_btn[3] =
-					{ NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
-				S9xNSSPulseButton(game_btn[slot]);
+				S9xNSSEjectCart(slot);
+				CheckMenuStates();
 				break;
 			}
 
@@ -3141,13 +3159,6 @@ LRESULT CALLBACK WinProc(
 			CheckMenuStates();
 			break;
 		}
-
-		case ID_NSS_EJECT0 + 0:
-		case ID_NSS_EJECT0 + 1:
-		case ID_NSS_EJECT0 + 2:
-			S9xNSSEjectCart(cmd_id - ID_NSS_EJECT0);
-			CheckMenuStates();
-			break;
 
 		// Super Disc: swapping the disc in the drive. Inserting closes the
 		// tray on the new image; the BIOS notices on its next status poll.
@@ -5923,34 +5934,31 @@ static void CheckMenuStates ()
 			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &mii);
 		}
 
-		// Each socket says what is in it, and an empty one says so rather
-		// than looking like a dead button.
+		// Each socket says what is in it.
 		for (int slot = 0; slot < 3; slot++)
 		{
 			if (S9xNSSSlotPresent(slot))
 				_stprintf(text, TEXT("Game &%d (%hs)"), slot + 1, S9xNSSSlotName(slot));
 			else
-				_stprintf(text, TEXT("Game &%d (Click to select cartridge...)"), slot + 1);
+				_stprintf(text, TEXT("Game &%d"), slot + 1);
 
-			// The panel's game buttons only pick from the supervisor's menu;
-			// while a paid game is running it ignores them, so the entry says
-			// so rather than looking broken. An empty socket stays live
-			// because clicking it asks for a cartridge instead.
+			// While a paid game is running the supervisor ignores the game
+			// buttons, so the entries say so rather than looking broken.
 			EnableMenuItem(GUI.hMenu, ID_NSS_GAME1 + slot,
-			               MF_BYCOMMAND | ((!S9xNSSSlotPresent(slot) || !S9xNSSGameRunning())
-			                               ? MF_ENABLED : MF_GRAYED));
+			               MF_BYCOMMAND | (!S9xNSSGameRunning() ? MF_ENABLED : MF_GRAYED));
 
 			SetMenuItemInfo(GUI.hMenu, ID_NSS_GAME1 + slot, FALSE, &txt);
 
 			if (S9xNSSSlotPresent(slot))
-				_stprintf(text, TEXT("Slot %d (%hs)"), slot + 1, S9xNSSSlotName(slot));
+				_stprintf(text, TEXT("Slot %d: Eject (%hs)"), slot + 1, S9xNSSSlotName(slot));
 			else
-				_stprintf(text, TEXT("Slot %d (empty)"), slot + 1);
+				_stprintf(text, TEXT("Slot %d: Mount..."), slot + 1);
 			SetMenuItemInfo(GUI.hMenu, ID_NSS_EJECT0 + slot, FALSE, &txt);
 
 			// The cabinet keeps its last cartridge.
 			EnableMenuItem(GUI.hMenu, ID_NSS_EJECT0 + slot,
-			               MF_BYCOMMAND | (S9xNSSCanEject(slot) ? MF_ENABLED : MF_GRAYED));
+			               MF_BYCOMMAND | ((!S9xNSSSlotPresent(slot) || S9xNSSCanEject(slot))
+			                               ? MF_ENABLED : MF_GRAYED));
 		}
 
 		// Instructions and the paging keys only mean something to the paid
@@ -15535,14 +15543,16 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
     // Insert Coin is the same binding the SFC Box tab shows, because one coin
     // key serves whichever cabinet is running.
     {
-        // Column 1: coin door and game selection
+        // Column 1: coin door, game selection and the cartridge slots
         { &CustomKeys.InsertCoin,       &CustomKeysExtra.InsertCoin,       HOTKEYS_INSERT_COIN },
         { &CustomKeys.NSSCoin2,         &CustomKeysExtra.NSSCoin2,         HOTKEYS_NSS_COIN2 },
         { &CustomKeys.NSSService,       &CustomKeysExtra.NSSService,       HOTKEYS_NSS_SERVICE },
         { &CustomKeys.NSSGame[0],       &CustomKeysExtra.NSSGame[0],       HOTKEYS_NSS_GAME1 },
         { &CustomKeys.NSSGame[1],       &CustomKeysExtra.NSSGame[1],       HOTKEYS_NSS_GAME2 },
         { &CustomKeys.NSSGame[2],       &CustomKeysExtra.NSSGame[2],       HOTKEYS_NSS_GAME3 },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { &CustomKeys.NSSMountEject[0], &CustomKeysExtra.NSSMountEject[0], HOTKEYS_NSS_MOUNT1 },
+        { &CustomKeys.NSSMountEject[1], &CustomKeysExtra.NSSMountEject[1], HOTKEYS_NSS_MOUNT2 },
+        { &CustomKeys.NSSMountEject[2], &CustomKeysExtra.NSSMountEject[2], HOTKEYS_NSS_MOUNT3 },
         // Column 2: the lower panel
         { &CustomKeys.NSSInstructions,  &CustomKeysExtra.NSSInstructions,  HOTKEYS_NSS_INSTRUCTIONS },
         { &CustomKeys.NSSPageUp,        &CustomKeysExtra.NSSPageUp,        HOTKEYS_NSS_PAGEUP },

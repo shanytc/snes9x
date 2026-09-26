@@ -79,7 +79,7 @@ class Snes9xWindow : public GtkBuilderWindow
     void sfcbox_set_keyswitch(int panel_pos);
     void nss_pulse(uint16_t buttons, bool game_only);
     void nss_game(int slot);
-    void nss_eject(int slot);
+    void nss_mount_eject(int slot);
     void nss_toggle_dip(int sw);
     void open_superdisc_dialog();
     void eject_superdisc();

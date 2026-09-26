@@ -481,6 +481,7 @@ struct SCustomKeys {
 	// Emulation -> Game Boy Model, one per console the menu offers; see
 	// g_gbModelHotkeyPolicy for which policy each slot picks.
 	SCustomKey GBModel[GB_MODEL_HOTKEYS];
+	SCustomKey NSSMountEject[3];     // Nintendo Super System -> Slot 1-3 (mount/eject)
 };
 
 struct SCustomKeyExtra {
@@ -549,6 +550,7 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra SuperDiscEject;
 	SCustomKeyExtra BiosManager;
 	SCustomKeyExtra GBModel[GB_MODEL_HOTKEYS];
+	SCustomKeyExtra NSSMountEject[3];
 };
 
 struct SJoypad {

@@ -375,6 +375,8 @@ int GetNumHotKeysAssignedTo (WORD Key, int modifiers)
 		if(MATCHES_KEY(SuperDiscEject))    count++;
 		for(int i = 0 ; i < 3 ; i++)
 			if(MATCHES_KEY(NSSGame[i]))     count++;
+		for(int i = 0 ; i < 3 ; i++)
+			if(MATCHES_KEY(NSSMountEject[i])) count++;
 		for(int i = 0 ; i < GB_MODEL_HOTKEYS ; i++)
 			if(MATCHES_KEY(GBModel[i]))         count++;
 

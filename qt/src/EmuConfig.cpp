@@ -121,6 +121,9 @@ static const char *shortcut_names[] =
     "NSSRestart",
     "SuperDiscInsert",
     "SuperDiscEject",
+    "NSSMountEject1",
+    "NSSMountEject2",
+    "NSSMountEject3",
 };
 
 static const char *default_controller_keys[] =
@@ -213,15 +216,18 @@ static const char *default_controller_keys[] =
     "", //    SFC-Box Keyswitch 3
     "", //    NSS Insert Coin (slot 2)
     "", //    NSS Service Credit
-    "", //    NSS Game 1
-    "", //    NSS Game 2
-    "", //    NSS Game 3
+    "", //    NSS Select Slot 1
+    "", //    NSS Select Slot 2
+    "", //    NSS Select Slot 3
     "", //    NSS Instructions
     "", //    NSS Page Up
     "", //    NSS Page Down
     "", //    NSS Restart Game
     "", //    Super Disc: Insert Disc
-    ""  //    Super Disc: Eject Disc
+    "", //    Super Disc: Eject Disc
+    "", //    NSS Mount/Eject Slot 1
+    "", //    NSS Mount/Eject Slot 2
+    ""  //    NSS Mount/Eject Slot 3
 };
 
 static_assert(std::size(shortcut_names) == EmuConfig::num_shortcuts &&

@@ -445,11 +445,11 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
         nss_game_actions[slot] = nss_menu->addAction(tr("Game &%1").arg(slot + 1));
         connect(nss_game_actions[slot], &QAction::triggered, [this, slot] { nssGame(slot); });
     }
-    auto eject_menu = nss_menu->addMenu(tr("&Eject Cartridge"));
+    nss_menu->addSeparator();
     for (int slot = 0; slot < 3; slot++)
     {
-        nss_eject_actions[slot] = eject_menu->addAction(tr("Slot %1").arg(slot + 1));
-        connect(nss_eject_actions[slot], &QAction::triggered, [this, slot] { nssEject(slot); });
+        nss_eject_actions[slot] = nss_menu->addAction(tr("Slot %1").arg(slot + 1));
+        connect(nss_eject_actions[slot], &QAction::triggered, [this, slot] { nssMountEject(slot); });
     }
     nss_menu->addSeparator();
 
@@ -597,19 +597,17 @@ void EmuMainWindow::refreshArcadeMenus()
     for (int slot = 0; slot < 3; slot++)
     {
         const bool present = S9xNSSSlotPresent(slot);
-        // The panel's game buttons only pick from the supervisor's menu, so a
-        // filled socket greys while a paid game runs; an empty one asks for a
-        // cartridge instead.
+        // The supervisor ignores the game buttons while a paid game runs.
         nss_game_actions[slot]->setText(present
             ? tr("Game &%1 (%2)").arg(slot + 1).arg(menuText(S9xNSSSlotName(slot)))
-            : tr("Game &%1 (Click to select cartridge...)").arg(slot + 1));
-        nss_game_actions[slot]->setEnabled(!present || !running);
+            : tr("Game &%1").arg(slot + 1));
+        nss_game_actions[slot]->setEnabled(!running);
 
         nss_eject_actions[slot]->setText(present
-            ? tr("Slot %1 (%2)").arg(slot + 1).arg(menuText(S9xNSSSlotName(slot)))
-            : tr("Slot %1 (empty)").arg(slot + 1));
+            ? tr("Slot %1: Eject (%2)").arg(slot + 1).arg(menuText(S9xNSSSlotName(slot)))
+            : tr("Slot %1: Mount...").arg(slot + 1));
         // The cabinet keeps its last cartridge.
-        nss_eject_actions[slot]->setEnabled(S9xNSSCanEject(slot));
+        nss_eject_actions[slot]->setEnabled(!present || S9xNSSCanEject(slot));
     }
 
     for (auto a : nss_game_only_actions)
@@ -672,15 +670,26 @@ void EmuMainWindow::nssPulse(uint16_t buttons, bool game_only)
 
 void EmuMainWindow::nssGame(int slot)
 {
+    // Only ever a panel button, filled socket or not: the operator pages
+    // use all three as page keys. Cartridges go in via Mount/Eject.
+    if (!app.isCoreActive() || !NSS.Active || S9xNSSGameRunning())
+        return;
+    nssPulse(nss_game_buttons[slot], false);
+}
+
+void EmuMainWindow::nssMountEject(int slot)
+{
     if (!app.isCoreActive() || !NSS.Active)
         return;
 
-    // A filled socket gets its panel button pressed; an empty one gets a
+    // A filled socket gives up its cartridge; an empty one takes a
     // cartridge, which is a file to pick.
     if (S9xNSSSlotPresent(slot))
     {
-        if (!S9xNSSGameRunning())
-            nssPulse(nss_game_buttons[slot], false);
+        app.emu_thread->runOnThread([slot] {
+            if (NSS.Active && S9xNSSCanEject(slot))
+                S9xNSSEjectCart(slot);
+        });
         return;
     }
 
@@ -704,14 +713,6 @@ void EmuMainWindow::nssGame(int slot)
     app.unpause();
 }
 
-void EmuMainWindow::nssEject(int slot)
-{
-    app.emu_thread->runOnThread([slot] {
-        if (NSS.Active && S9xNSSCanEject(slot))
-            S9xNSSEjectCart(slot);
-    });
-}
-
 void EmuMainWindow::nssToggleDip(int sw)
 {
     // The DIP block the game reads at $4100; the menu names each switch.
@@ -730,6 +731,7 @@ bool EmuMainWindow::arcadeShortcut(const std::string &name)
         "SFCBoxKeyswitch2", "SFCBoxKeyswitch3"
     };
     static const char *game_keys[3] = { "NSSGame1", "NSSGame2", "NSSGame3" };
+    static const char *mount_keys[3] = { "NSSMountEject1", "NSSMountEject2", "NSSMountEject3" };
 
     if (name == "InsertCoin")
         insertCoin(0);
@@ -757,6 +759,12 @@ bool EmuMainWindow::arcadeShortcut(const std::string &name)
             if (name == game_keys[i])
             {
                 nssGame(i);
+                return true;
+            }
+        for (int i = 0; i < 3; i++)
+            if (name == mount_keys[i])
+            {
+                nssMountEject(i);
                 return true;
             }
         return false;

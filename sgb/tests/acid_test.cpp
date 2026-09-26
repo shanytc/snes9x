@@ -56,9 +56,10 @@
 
 // snes9x globals the sgb/ subsystem links against.
 struct SSettings   Settings;
-struct SPPU        PPU;
-struct InternalPPU IPPU;
-struct CMemory     Memory;
+S9X_MACHINE struct SCPUState   CPU;
+S9X_MACHINE struct SPPU        PPU;
+S9X_MACHINE struct InternalPPU IPPU;
+S9X_MACHINE struct CMemory     Memory;
 
 void S9xMessage(int, int, const char *) {}
 

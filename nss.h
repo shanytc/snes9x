@@ -74,7 +74,7 @@ struct SNSSSlot
 	uint8	PROM[NSS_PROM_SIZE];
 	uint8	PROMPresent;
 	uint8	SRAM[NSS_SLOT_SRAM];
-	uint8	SRAMValid;				// false until this socket's battery is ours
+	uint8	SRAMValid;				// always set now; kept for the savestate layout
 	uint32	CRC;
 	char	Name[NSS_SLOT_NAME];	// cart header title, for the menu
 	char	Path[NSS_SLOT_PATH];
@@ -258,9 +258,12 @@ void	S9xNSSSetButtons (uint16 mask);
 void	S9xNSSPulseButton (uint16 mask);
 uint16	S9xNSSGetButtons (void);
 
-// Battery-backed settings EEPROM + clock NVRAM, "<rom>.nss" beside the .srm
+// The cabinet's EEPROM, clock NVRAM and bookkeeping, "<rom>.nss" beside the .srm
 bool8	S9xNSSLoadNVRAM (void);
 bool8	S9xNSSSaveNVRAM (void);
+// Every cartridge's battery, each in "<its own file>.srm"
+bool8	S9xNSSLoadBatteries (void);
+bool8	S9xNSSSaveBatteries (void);
 
 // Savestates: opaque versioned blob embedded as the snapshot's "NSS" block
 size_t	S9xNSSStateSize (void);

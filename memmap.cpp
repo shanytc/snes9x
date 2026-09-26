@@ -2782,9 +2782,6 @@ int CMemory::LoadNSSCart (const char *filename, int32 *size)
 	// Socket 1, the one File -> Load Game fills. The other two take a cart
 	// through the Nintendo Super System menu.
 	S9xNSSLoadSlot(0, ROM, total, filename);
-	// Its battery is the .srm the ordinary loader reads, so the first map
-	// takes a copy of that rather than writing a blank one over it.
-	NSS.Slot[0].SRAMValid = FALSE;
 
 	memset(ROM + prg, 0, total - prg);
 	*size = (int32) prg;
@@ -3426,6 +3423,10 @@ bool8 CMemory::LoadSRAM (const char *filename)
 		S9xSGBLoadBatteryFromPath(sav.c_str());
 	}
 
+	// Every NSS cartridge keeps its own .srm, whichever socket it is in.
+	if (Settings.NSS)
+		return (S9xNSSLoadBatteries());
+
 	ClearSRAM();
 
 	if (Settings.RP2040Cart)
@@ -3514,7 +3515,10 @@ bool8 CMemory::SaveSRAM (const char *filename)
 		S9xSFCBoxSaveNVRAM();	// KROM battery RAM rides along with the .srm
 
 	if (Settings.NSS)
-		S9xNSSSaveNVRAM();		// coinage EEPROM + clock NVRAM, likewise
+	{
+		S9xNSSSaveNVRAM();		// coinage EEPROM, clock NVRAM and bookkeeping
+		return (S9xNSSSaveBatteries());	// each cartridge to its own .srm
+	}
 
 	if (Settings.RP2040Cart)
 		return (S9xRP2040CartSaveFlash(filename));	// the game saves to its own flash
@@ -6449,9 +6453,8 @@ void S9xNSSMapSlot (int slot)
 	if (!Settings.NSS || slot < 0 || slot >= NSS_SLOTS || !NSS.Slot[slot].Present)
 		return;
 
-	// A battery belongs to its own cartridge. Socket 1 arrives with the .srm
-	// the ordinary loader already read, so the first visit takes a copy
-	// rather than overwriting it.
+	// A battery belongs to its own cartridge: the outgoing one goes back to
+	// its socket and the incoming one onto the bus.
 	S9xNSSStashMappedSRAM();
 
 	struct SNSSSlot	*s = &NSS.Slot[slot];
@@ -6466,13 +6469,7 @@ void S9xNSSMapSlot (int slot)
 	strncpy(Memory.ROMName, s->Name, ROM_NAME_LEN - 1);
 	Memory.ROMName[ROM_NAME_LEN - 1] = 0;
 
-	if (s->SRAMValid)
-		memcpy(Memory.SRAM, s->SRAM, NSS_SLOT_SRAM);
-	else
-	{
-		memcpy(s->SRAM, Memory.SRAM, NSS_SLOT_SRAM);
-		s->SRAMValid = TRUE;
-	}
+	memcpy(Memory.SRAM, s->SRAM, NSS_SLOT_SRAM);
 
 	// The DSP-1 travels with its cartridge: a slot without one must not see
 	// the previous cart's registers over its ROM.

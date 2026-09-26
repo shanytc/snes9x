@@ -1255,6 +1255,9 @@ static void NSSCaptureHeader (struct SNSSSlot *s)
 	s->Name[len] = 0;
 }
 
+static bool8 NSSLoadBattery (int slot);
+static bool8 NSSSaveBattery (int slot);
+
 // Splits a merged image into one socket. The program gets its own buffer so
 // the other slots keep theirs while this one is the mapped cartridge.
 bool8 S9xNSSLoadSlot (int slot, const uint8 *image, uint32 size, const char *path)
@@ -1269,6 +1272,9 @@ bool8 S9xNSSLoadSlot (int slot, const uint8 *image, uint32 size, const char *pat
 	if (!buf)
 		return (FALSE);
 
+	// The live battery on the bus belongs to the cart coming out.
+	if (NSS.MappedSlot == slot)
+		NSS.MappedSlot = -1;
 	free(s->Prg);
 	memset(s, 0, sizeof(*s));
 
@@ -1282,7 +1288,6 @@ bool8 S9xNSSLoadSlot (int slot, const uint8 *image, uint32 size, const char *pat
 			s->PROMPresent = TRUE;
 
 	s->CRC = CRC32(s->Prg, prg);
-	s->SRAMValid = TRUE;	// blank battery until told otherwise
 	NSSCaptureHeader(s);
 	if (path)
 	{
@@ -1290,6 +1295,7 @@ bool8 S9xNSSLoadSlot (int slot, const uint8 *image, uint32 size, const char *pat
 		s->Path[NSS_SLOT_PATH - 1] = 0;
 	}
 	s->Present = TRUE;
+	NSSLoadBattery(slot);
 	return (TRUE);
 }
 
@@ -1313,6 +1319,8 @@ bool8 S9xNSSInsertCart (int slot, const char *path)
 		if (i != slot && NSS.Slot[i].Present && NSS.Slot[i].CRC == crc)
 			return (FALSE);
 
+	// The cartridge coming out takes its battery with it.
+	NSSSaveBattery(slot);
 	if (!S9xNSSLoadSlot(slot, image.data(), (uint32) image.size(), path))
 		return (FALSE);
 
@@ -1339,7 +1347,7 @@ void S9xNSSEjectCart (int slot)
 {
 	if (!S9xNSSCanEject(slot))
 		return;
-	S9xNSSStashMappedSRAM();
+	NSSSaveBattery(slot);
 	free(NSS.Slot[slot].Prg);
 	memset(&NSS.Slot[slot], 0, sizeof(NSS.Slot[slot]));
 	if (NSS.Active)
@@ -1500,18 +1508,91 @@ bool8 S9xNSSLoadBIOS (void)
 }
 
 // ---------------------------------------------------------------------------
-// Battery-backed settings
+// Battery-backed data
 
-// The cabinet's own saved data: the coinage EEPROM, the clock's SRAM, the
-// batteries of sockets 2 and 3 and the board's backup RAM (the bookkeeping).
-// Socket 1 keeps the ordinary .srm the loader already reads and writes for it.
+// Every cartridge keeps its own battery in "<its file>.srm", whichever socket
+// it sits in, so a save follows its cart the way the real battery does.
+static uint32 NSSSlotSRAMBytes (int slot)
+{
+	const struct SNSSSlot	*s = &NSS.Slot[slot];
+	if (!s->Present || !s->SRAMSizeByte)
+		return (0);
+	const uint32	n = (uint32) ((1 << (s->SRAMSizeByte + 3)) * 128);
+	return (n < NSS_SLOT_SRAM) ? n : NSS_SLOT_SRAM;
+}
+
+static std::string NSSBatteryName (int slot)
+{
+	const char	*path = NSS.Slot[slot].Path;
+	if (*path)
+		return (S9xGetFilename(path, ".srm", SRAM_DIR));
+	// A cart handed over as bytes has no file; socket 1 goes by the ROM name.
+	return (slot == 0) ? S9xGetFilename(".srm", SRAM_DIR) : std::string();
+}
+
+static bool8 NSSLoadBattery (int slot)
+{
+	struct SNSSSlot		*s = &NSS.Slot[slot];
+	const uint32		size = NSSSlotSRAMBytes(slot);
+	const std::string	name = NSSBatteryName(slot);
+
+	memset(s->SRAM, SNESGameFixes.SRAMInitialValue, sizeof(s->SRAM));
+	s->SRAMValid = TRUE;
+	if (!size || name.empty())
+		return (TRUE);
+
+	FILE	*fp = fopen(name.c_str(), "rb");
+	if (!fp)
+		return (FALSE);
+	fread(s->SRAM, 1, size, fp);
+	fclose(fp);
+	return (TRUE);
+}
+
+static bool8 NSSSaveBattery (int slot)
+{
+	const uint32		size = NSSSlotSRAMBytes(slot);
+	const std::string	name = NSSBatteryName(slot);
+
+	if (!size || name.empty())
+		return (TRUE);
+	if (slot == NSS.MappedSlot)
+		S9xNSSStashMappedSRAM();
+
+	FILE	*fp = fopen(name.c_str(), "wb");
+	if (!fp)
+		return (FALSE);
+	const bool8	ok = fwrite(NSS.Slot[slot].SRAM, size, 1, fp) == 1;
+	fclose(fp);
+	return (ok);
+}
+
+bool8 S9xNSSLoadBatteries (void)
+{
+	bool8	ok = TRUE;
+	for (int i = 0; i < NSS_SLOTS; i++)
+		if (NSS.Slot[i].Present && !NSSLoadBattery(i))
+			ok = FALSE;
+	if (NSS.MappedSlot >= 0 && NSS.Slot[NSS.MappedSlot].Present)
+		memcpy(Memory.SRAM, NSS.Slot[NSS.MappedSlot].SRAM, NSS_SLOT_SRAM);
+	return (ok);
+}
+
+bool8 S9xNSSSaveBatteries (void)
+{
+	bool8	ok = TRUE;
+	for (int i = 0; i < NSS_SLOTS; i++)
+		if (!NSSSaveBattery(i))
+			ok = FALSE;
+	return (ok);
+}
+
+// The cabinet's own data in "<rom>.nss": the coinage EEPROM, the clock's SRAM
+// and the board's backup RAM (the bookkeeping).
 #define NSS_NVRAM_HEAD	(NSS_EEPROM_WORDS * 2 + NSS_RTC_NVRAM)
-#define NSS_NVRAM_SLOTS	(NSS_NVRAM_HEAD + (NSS_SLOTS - 1) * NSS_SLOT_SRAM)
-#define NSS_NVRAM_FULL	(NSS_NVRAM_SLOTS + NSS_BACKUP_SIZE)
+#define NSS_NVRAM_SIZE	(NSS_NVRAM_HEAD + NSS_BACKUP_SIZE)
 
-// `board` takes the EEPROM, clock SRAM and backup RAM too; without it only
-// the sockets' batteries come off disk.
-static bool8 NSSLoadNVRAMFile (bool8 board)
+bool8 S9xNSSLoadNVRAM (void)
 {
 	std::string	name = S9xGetFilename(".nss", SRAM_DIR);
 	FILE		*fp = fopen(name.c_str(), "rb");
@@ -1519,38 +1600,18 @@ static bool8 NSSLoadNVRAMFile (bool8 board)
 	if (!fp)
 		return (FALSE);
 
-	std::vector<uint8>	buf(NSS_NVRAM_FULL, 0);
-	const size_t		got = fread(buf.data(), 1, NSS_NVRAM_FULL, fp);
+	// One byte over, so an older layout holding the sockets' batteries is refused.
+	std::vector<uint8>	buf(NSS_NVRAM_SIZE + 1, 0);
+	const size_t		got = fread(buf.data(), 1, buf.size(), fp);
 	fclose(fp);
-
-	// Older files stop after the clock, or after the sockets.
-	if (got != NSS_NVRAM_HEAD && got != NSS_NVRAM_SLOTS && got != NSS_NVRAM_FULL)
+	if (got != NSS_NVRAM_SIZE)
 		return (FALSE);
 
-	if (board)
-	{
-		for (int i = 0; i < NSS_EEPROM_WORDS; i++)
-			NSS.EEPROM.Data[i] = (uint16) (buf[i * 2] | (buf[i * 2 + 1] << 8));
-		memcpy(NSS.RTC.NVRAM, buf.data() + NSS_EEPROM_WORDS * 2, NSS_RTC_NVRAM);
-		if (got == NSS_NVRAM_FULL)
-			memcpy(NSS.WRAM + NSS_BACKUP_BASE, buf.data() + NSS_NVRAM_SLOTS, NSS_BACKUP_SIZE);
-	}
-
-	if (got >= NSS_NVRAM_SLOTS)
-	{
-		for (int i = 1; i < NSS_SLOTS; i++)
-		{
-			memcpy(NSS.Slot[i].SRAM, buf.data() + NSS_NVRAM_HEAD + (i - 1) * NSS_SLOT_SRAM,
-			       NSS_SLOT_SRAM);
-			NSS.Slot[i].SRAMValid = TRUE;
-		}
-	}
+	for (int i = 0; i < NSS_EEPROM_WORDS; i++)
+		NSS.EEPROM.Data[i] = (uint16) (buf[i * 2] | (buf[i * 2 + 1] << 8));
+	memcpy(NSS.RTC.NVRAM, buf.data() + NSS_EEPROM_WORDS * 2, NSS_RTC_NVRAM);
+	memcpy(NSS.WRAM + NSS_BACKUP_BASE, buf.data() + NSS_NVRAM_HEAD, NSS_BACKUP_SIZE);
 	return (TRUE);
-}
-
-bool8 S9xNSSLoadNVRAM (void)
-{
-	return (NSSLoadNVRAMFile(TRUE));
 }
 
 bool8 S9xNSSSaveNVRAM (void)
@@ -1561,21 +1622,16 @@ bool8 S9xNSSSaveNVRAM (void)
 	if (!fp)
 		return (FALSE);
 
-	S9xNSSStashMappedSRAM();
-
-	std::vector<uint8>	buf(NSS_NVRAM_FULL, 0);
+	std::vector<uint8>	buf(NSS_NVRAM_SIZE, 0);
 	for (int i = 0; i < NSS_EEPROM_WORDS; i++)
 	{
 		buf[i * 2]     = (uint8) NSS.EEPROM.Data[i];
 		buf[i * 2 + 1] = (uint8) (NSS.EEPROM.Data[i] >> 8);
 	}
 	memcpy(buf.data() + NSS_EEPROM_WORDS * 2, NSS.RTC.NVRAM, NSS_RTC_NVRAM);
-	for (int i = 1; i < NSS_SLOTS; i++)
-		memcpy(buf.data() + NSS_NVRAM_HEAD + (i - 1) * NSS_SLOT_SRAM,
-		       NSS.Slot[i].SRAM, NSS_SLOT_SRAM);
-	memcpy(buf.data() + NSS_NVRAM_SLOTS, NSS.WRAM + NSS_BACKUP_BASE, NSS_BACKUP_SIZE);
+	memcpy(buf.data() + NSS_NVRAM_HEAD, NSS.WRAM + NSS_BACKUP_BASE, NSS_BACKUP_SIZE);
 
-	fwrite(buf.data(), 1, NSS_NVRAM_FULL, fp);
+	fwrite(buf.data(), 1, NSS_NVRAM_SIZE, fp);
 	fclose(fp);
 	NSS.EEPROM.Dirty = FALSE;
 	return (TRUE);
@@ -1628,15 +1684,6 @@ struct SNSSSaveState
 // Batteries are appended after the fixed mirror, and only for the sockets
 // that actually have one: carrying three blank 32K buffers would cost more
 // than the rest of the board put together, in every rewind frame.
-static uint32 NSSSlotSRAMBytes (int slot)
-{
-	const struct SNSSSlot	*s = &NSS.Slot[slot];
-	if (!s->Present || !s->SRAMSizeByte)
-		return (0);
-	const uint32	n = (uint32) ((1 << (s->SRAMSizeByte + 3)) * 128);
-	return (n < NSS_SLOT_SRAM) ? n : NSS_SLOT_SRAM;
-}
-
 size_t S9xNSSStateSize (void)
 {
 	size_t	n = NSS_STATE_HEADER + sizeof(struct SNSSSaveState);
@@ -1877,9 +1924,8 @@ void S9xNSSPowerOn (void)
 	for (int i = 0; i < NSS_OSD_CELLS; i++)
 		NSS.OSD.VRAM[i] = 0x007f;
 
-	// The sockets' batteries still come off disk on a power cycle: that is
-	// how a cartridge put back in a socket finds its save.
-	NSSLoadNVRAMFile(!warm);
+	if (!warm)
+		S9xNSSLoadNVRAM();
 	RTCLoadHostTime();
 
 	Z80CB.MemRead = NSSMemRead;

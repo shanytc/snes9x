@@ -2090,6 +2090,21 @@ static uint8 GbFileByte(const char *filename, long offset)
 //   returns  1 : handled — loaded as a GB/SGB cart (caller should return TRUE)
 //            0 : not a GB ROM — caller continues with the normal SNES path
 //           -1 : GB ROM but the load failed (caller should return FALSE)
+// For the loads that skip LoadROM's teardown (BIOS-less GB, MultiCart); a
+// live NSS kept its menu page painted over every GB frame.
+static void RetireSNESSessions (void)
+{
+	Settings.NSS = FALSE;
+	S9xNSSDeactivate();
+	Settings.SFCBox = FALSE;
+	S9xSFCBoxDeactivate();
+	Settings.SuperDisc = FALSE;
+	S9xSuperDiscDeactivate();
+	SuperDiscBIOSPath.clear();
+	Settings.RP2040Cart = FALSE;
+	S9xRP2040CartDeactivate();
+}
+
 int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filename)
 {
     if (!S9xRomBytesAreGb(rom, static_cast<int32>(size)))
@@ -2122,6 +2137,7 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     // BIOS-less fallback — the legacy path that runs our GB core directly in
     // S9xMainLoop, gated on Settings.SuperGameBoy.
     S9xDeleteCheats();
+    RetireSNESSessions();
     // Tear down for BIOS mode too (mirrors the BIOS path): a live BIOS ->
     // BIOS-less switch otherwise keeps the staged GB boot ROM.
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) S9xSGBDeinit();
@@ -2201,6 +2217,7 @@ bool8 CMemory::LoadROM (const char *filename)
         // BIOS-less fallback — the legacy path that runs our GB core directly
         // in S9xMainLoop, gated on Settings.SuperGameBoy.
         S9xDeleteCheats();
+        RetireSNESSessions();
         // Tear down for BIOS mode too (see the LoadGBFromBytes twin): a live
         // BIOS -> BIOS-less switch otherwise keeps the staged GB boot ROM.
         if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) S9xSGBDeinit();
@@ -2931,6 +2948,19 @@ bool8 CMemory::LoadMultiCartInt ()
 {
 	S9xSetBiosNotice(NULL);   // File -> Load MultiCart does not pass through LoadROM
 	s_bios_paths_at_load = S9xBiosPathsFingerprint();
+
+	// ...nor its teardown: a Game Boy or NSS session left running would keep
+	// its core or supervisor on the SNES in place of the carts.
+	if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
+	{
+		S9xSGBDeinit();
+		Settings.SuperGameBoy       = FALSE;
+		Settings.SGB_BIOSModeActive = FALSE;
+	}
+	Settings.GB_BIOSActive  = FALSE;
+	Settings.GB_BIOSPath[0] = '\0';
+	Settings.GBRomPath[0]   = '\0';
+	RetireSNESSessions();
 
 	bool8	r = TRUE;
 

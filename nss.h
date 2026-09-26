@@ -258,7 +258,7 @@ void	S9xNSSSetButtons (uint16 mask);
 void	S9xNSSPulseButton (uint16 mask);
 uint16	S9xNSSGetButtons (void);
 
-// The cabinet's EEPROM, clock NVRAM and bookkeeping: one "NSS.nss" in the save folder
+// The cabinet's EEPROM, clock NVRAM and bookkeeping: one "NSS.srm" in the save folder
 bool8	S9xNSSLoadNVRAM (void);
 bool8	S9xNSSSaveNVRAM (void);
 // Every cartridge's battery, each in "<its own file>.srm"

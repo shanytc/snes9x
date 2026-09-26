@@ -1595,7 +1595,7 @@ bool8 S9xNSSSaveBatteries (void)
 
 static std::string NSSNVRAMName (void)
 {
-	return (S9xGetDirectory(SRAM_DIR) + SLASH_STR + "NSS.nss");
+	return (S9xGetDirectory(SRAM_DIR) + SLASH_STR + "NSS.srm");
 }
 
 bool8 S9xNSSLoadNVRAM (void)

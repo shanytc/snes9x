@@ -2250,7 +2250,7 @@ LRESULT CALLBACK WinProc(
 			WinSaveConfigFile();
 			break;
 		}
-		// XBAND spoof-cart-ID picker sub-menu (40300..40363).
+		// XBAND spoof-cart-ID picker sub-menu (45100..45163).
 		// Pick a specific candidate cart-id from the brute-force list.
 		else if (cmd_id >= ID_XBAND_SPOOF_BASE &&
 		         cmd_id <= ID_XBAND_SPOOF_LAST)

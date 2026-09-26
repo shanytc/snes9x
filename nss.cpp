@@ -126,8 +126,10 @@ static void EEPROMClockIn (void)
 			e->BitPos++;
 			if (e->BitPos == 8)
 				e->Addr = (uint8) ((e->Shift >> 16) & (NSS_EEPROM_WORDS - 1));
-			if (e->BitPos >= 8)
-				e->DataOut = (uint8) ((e->Data[e->Addr] >> (23 - e->BitPos)) & 1);
+			// The word goes back out LSB first, one bit per clock after the
+			// address, the order the BIOS wrote it in (its reader is 6CEBh).
+			if (e->BitPos > 8)
+				e->DataOut = (uint8) ((e->Data[e->Addr] >> (e->BitPos - 9)) & 1);
 			if (e->BitPos == 24)
 			{
 				e->State = EE_IDLE;
@@ -143,10 +145,12 @@ static void EEPROMClockIn (void)
 				e->Addr = (uint8) ((e->Shift >> 16) & (NSS_EEPROM_WORDS - 1));
 			if (e->BitPos == 24)
 			{
-				if (e->WriteEnable)
+				const uint16	word = (uint16) ((e->Shift >> 8) & 0xffff);
+				if (e->WriteEnable && e->Data[e->Addr] != word)
 				{
-					e->Data[e->Addr] = (uint16) ((e->Shift >> 8) & 0xffff);
+					e->Data[e->Addr] = word;
 					e->Dirty = TRUE;
+					CPU.SRAMModified = TRUE;	// let the timed battery save pick it up
 				}
 				e->State = EE_IDLE;
 				e->BitPos = 0;
@@ -325,8 +329,11 @@ static void RTCWriteReg (uint8 offset, uint8 data)
 		uint8	idx = (uint8) (offset + ((r->Mode > 2) ? 15 : 0));
 		if (idx / 2 >= NSS_RTC_NVRAM)
 			return;
+		const uint8	prev = r->NVRAM[idx / 2];
 		if (idx & 1)	r->NVRAM[idx / 2] = (uint8) ((r->NVRAM[idx / 2] & 0x0f) | (data << 4));
 		else			r->NVRAM[idx / 2] = (uint8) ((r->NVRAM[idx / 2] & 0xf0) | (data & 0x0f));
+		if (r->NVRAM[idx / 2] != prev)
+			CPU.SRAMModified = TRUE;
 		return;
 	}
 
@@ -704,8 +711,13 @@ static void NSSMemWrite (uint16 addr, uint8 byte)
 	if (addr < 0xa000)
 	{
 		// 9000h-9FFFh only takes writes while port 00h bit2 unlocks it.
-		if (addr < 0x9000 || NSS.WRAMUnlock)
+		if (addr < 0x9000)
 			NSS.WRAM[addr - 0x8000] = byte;
+		else if (NSS.WRAMUnlock && NSS.WRAM[addr - 0x8000] != byte)
+		{
+			NSS.WRAM[addr - 0x8000] = byte;
+			CPU.SRAMModified = TRUE;	// the battery-backed half
+		}
 		return;
 	}
 
@@ -1490,13 +1502,16 @@ bool8 S9xNSSLoadBIOS (void)
 // ---------------------------------------------------------------------------
 // Battery-backed settings
 
-// The cabinet's own saved data: the coinage EEPROM, the clock's SRAM and
-// the batteries of sockets 2 and 3. Socket 1 keeps the ordinary .srm the
-// loader already reads and writes for it.
+// The cabinet's own saved data: the coinage EEPROM, the clock's SRAM, the
+// batteries of sockets 2 and 3 and the board's backup RAM (the bookkeeping).
+// Socket 1 keeps the ordinary .srm the loader already reads and writes for it.
 #define NSS_NVRAM_HEAD	(NSS_EEPROM_WORDS * 2 + NSS_RTC_NVRAM)
-#define NSS_NVRAM_FULL	(NSS_NVRAM_HEAD + (NSS_SLOTS - 1) * NSS_SLOT_SRAM)
+#define NSS_NVRAM_SLOTS	(NSS_NVRAM_HEAD + (NSS_SLOTS - 1) * NSS_SLOT_SRAM)
+#define NSS_NVRAM_FULL	(NSS_NVRAM_SLOTS + NSS_BACKUP_SIZE)
 
-bool8 S9xNSSLoadNVRAM (void)
+// `board` takes the EEPROM, clock SRAM and backup RAM too; without it only
+// the sockets' batteries come off disk.
+static bool8 NSSLoadNVRAMFile (bool8 board)
 {
 	std::string	name = S9xGetFilename(".nss", SRAM_DIR);
 	FILE		*fp = fopen(name.c_str(), "rb");
@@ -1508,15 +1523,20 @@ bool8 S9xNSSLoadNVRAM (void)
 	const size_t		got = fread(buf.data(), 1, NSS_NVRAM_FULL, fp);
 	fclose(fp);
 
-	// A file from before the extra sockets existed stops after the clock.
-	if (got != NSS_NVRAM_HEAD && got != NSS_NVRAM_FULL)
+	// Older files stop after the clock, or after the sockets.
+	if (got != NSS_NVRAM_HEAD && got != NSS_NVRAM_SLOTS && got != NSS_NVRAM_FULL)
 		return (FALSE);
 
-	for (int i = 0; i < NSS_EEPROM_WORDS; i++)
-		NSS.EEPROM.Data[i] = (uint16) (buf[i * 2] | (buf[i * 2 + 1] << 8));
-	memcpy(NSS.RTC.NVRAM, buf.data() + NSS_EEPROM_WORDS * 2, NSS_RTC_NVRAM);
+	if (board)
+	{
+		for (int i = 0; i < NSS_EEPROM_WORDS; i++)
+			NSS.EEPROM.Data[i] = (uint16) (buf[i * 2] | (buf[i * 2 + 1] << 8));
+		memcpy(NSS.RTC.NVRAM, buf.data() + NSS_EEPROM_WORDS * 2, NSS_RTC_NVRAM);
+		if (got == NSS_NVRAM_FULL)
+			memcpy(NSS.WRAM + NSS_BACKUP_BASE, buf.data() + NSS_NVRAM_SLOTS, NSS_BACKUP_SIZE);
+	}
 
-	if (got == NSS_NVRAM_FULL)
+	if (got >= NSS_NVRAM_SLOTS)
 	{
 		for (int i = 1; i < NSS_SLOTS; i++)
 		{
@@ -1526,6 +1546,11 @@ bool8 S9xNSSLoadNVRAM (void)
 		}
 	}
 	return (TRUE);
+}
+
+bool8 S9xNSSLoadNVRAM (void)
+{
+	return (NSSLoadNVRAMFile(TRUE));
 }
 
 bool8 S9xNSSSaveNVRAM (void)
@@ -1548,6 +1573,7 @@ bool8 S9xNSSSaveNVRAM (void)
 	for (int i = 1; i < NSS_SLOTS; i++)
 		memcpy(buf.data() + NSS_NVRAM_HEAD + (i - 1) * NSS_SLOT_SRAM,
 		       NSS.Slot[i].SRAM, NSS_SLOT_SRAM);
+	memcpy(buf.data() + NSS_NVRAM_SLOTS, NSS.WRAM + NSS_BACKUP_BASE, NSS_BACKUP_SIZE);
 
 	fwrite(buf.data(), 1, NSS_NVRAM_FULL, fp);
 	fclose(fp);
@@ -1802,7 +1828,15 @@ void S9xNSSPowerOn (void)
 	// the sockets — outlives a power cycle; only the volatile board does not.
 	// Clearing field by field rather than wiping the struct is what keeps the
 	// slots' heap buffers.
-	memset(NSS.WRAM, 0, sizeof(NSS.WRAM));
+	// The EEPROM, the clock's SRAM and the backup RAM keep their contents
+	// through a power cycle; only the first power-on after a load reads disk.
+	const bool8	warm = NSS.Active;
+	uint16		ee_data[NSS_EEPROM_WORDS];
+	uint8		clock_ram[NSS_RTC_NVRAM];
+	memcpy(ee_data, NSS.EEPROM.Data, sizeof(ee_data));
+	memcpy(clock_ram, NSS.RTC.NVRAM, sizeof(clock_ram));
+
+	memset(NSS.WRAM, 0, warm ? NSS_BACKUP_BASE : sizeof(NSS.WRAM));
 	NSS.Port00W = NSS.Port01W = NSS.Port03W = NSS.Port04W = 0;
 	NSS.SlotSelect = 0;
 	NSS.PendingSNESReset = FALSE;
@@ -1832,12 +1866,20 @@ void S9xNSSPowerOn (void)
 	NSS.LastVCounter = -1;
 	NSS.MappedSlot = -1;
 
-	for (int i = 0; i < NSS_EEPROM_WORDS; i++)
-		NSS.EEPROM.Data[i] = 0xffff;
+	if (warm)
+	{
+		memcpy(NSS.EEPROM.Data, ee_data, sizeof(ee_data));
+		memcpy(NSS.RTC.NVRAM, clock_ram, sizeof(clock_ram));
+	}
+	else
+		for (int i = 0; i < NSS_EEPROM_WORDS; i++)
+			NSS.EEPROM.Data[i] = 0xffff;
 	for (int i = 0; i < NSS_OSD_CELLS; i++)
 		NSS.OSD.VRAM[i] = 0x007f;
 
-	S9xNSSLoadNVRAM();
+	// The sockets' batteries still come off disk on a power cycle: that is
+	// how a cartridge put back in a socket finds its save.
+	NSSLoadNVRAMFile(!warm);
 	RTCLoadHostTime();
 
 	Z80CB.MemRead = NSSMemRead;

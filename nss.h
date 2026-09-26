@@ -25,6 +25,8 @@
 
 #define NSS_BIOS_SIZE		0x8000
 #define NSS_WRAM_SIZE		0x2000
+#define NSS_BACKUP_BASE		0x1000	// 9000h-9FFFh: battery-backed, holds the bookkeeping
+#define NSS_BACKUP_SIZE		0x1000
 #define NSS_INST_SIZE		0x8000	// whole EPROM; only the top 8K is wired
 #define NSS_INST_WINDOW		0x2000	// C000h-DFFFh
 #define NSS_PROM_SIZE		0x10

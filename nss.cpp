@@ -235,21 +235,10 @@ static const uint8	days_in_month[12] =
 
 static inline int FromBCD (uint8 v)	{ return ((v >> 4) * 10 + (v & 0x0f)); }
 
-static void RTCTickSecond (void)
+// Midnight: the weekday and the date move on.
+static void RTCNextDay (void)
 {
 	struct SNSSRTC	*r = &NSS.RTC;
-	int	s = FromBCD(r->Sec) + 1;
-
-	if (s < 60)	{ r->Sec = ToBCD(s); return; }
-	r->Sec = 0;
-
-	int	m = FromBCD(r->Min) + 1;
-	if (m < 60)	{ r->Min = ToBCD(m); return; }
-	r->Min = 0;
-
-	int	h = FromBCD(r->Hour) + 1;
-	if (h < 24)	{ r->Hour = ToBCD(h); return; }
-	r->Hour = 0;
 
 	r->Weekday = (uint8) ((r->Weekday + 1) % 7);
 
@@ -267,6 +256,34 @@ static void RTCTickSecond (void)
 	if (nm <= 12)	{ r->Month = ToBCD(nm); return; }
 	r->Month = ToBCD(1);
 	r->Year = ToBCD((year + 1) % 100);
+}
+
+static void RTCTickSecond (void)
+{
+	struct SNSSRTC	*r = &NSS.RTC;
+	int	s = FromBCD(r->Sec) + 1;
+
+	if (s < 60)	{ r->Sec = ToBCD(s); return; }
+	r->Sec = 0;
+
+	int	m = FromBCD(r->Min) + 1;
+	if (m < 60)	{ r->Min = ToBCD(m); return; }
+	r->Min = 0;
+
+	int	h = FromBCD(r->Hour) + 1;
+	if (h < 24)	{ r->Hour = ToBCD(h); return; }
+	r->Hour = 0;
+	RTCNextDay();
+}
+
+// Runs the clock on by the time the cabinet spent switched off; the chip
+// keeps counting on its battery.
+static void RTCAdvance (int64 secs)
+{
+	for (; secs >= 86400; secs -= 86400)
+		RTCNextDay();
+	while (secs-- > 0)
+		RTCTickSecond();
 }
 
 // Register file as seen through the serial port: sixteen nibble-wide slots,
@@ -371,6 +388,8 @@ static void RTCWriteReg (uint8 offset, uint8 data)
 	if ((r->Month & 0x0f) > 9)	r->Month = (uint8) ((r->Month & 0xf0) + 0x10);
 	if (r->Month >= 0x13)		r->Month = 1;
 	if ((r->Year & 0x0f) > 9)	r->Year = (uint8) ((r->Year & 0xf0) + 0x10);
+
+	CPU.SRAMModified = TRUE;	// the operator set the clock; save it
 }
 
 // The chip answers one byte behind: the bit shifted out on a clock edge
@@ -1587,11 +1606,12 @@ bool8 S9xNSSSaveBatteries (void)
 	return (ok);
 }
 
-// The cabinet's own data: the coinage EEPROM, the clock's SRAM and the
-// board's backup RAM (the bookkeeping). One cabinet, one file, whichever
-// cartridges are in it.
+// The cabinet's own data: the coinage EEPROM, the clock's SRAM, the board's
+// backup RAM (the bookkeeping) and the clock itself, with the host time it
+// was saved at. One cabinet, one file, whichever cartridges are in it.
 #define NSS_NVRAM_HEAD	(NSS_EEPROM_WORDS * 2 + NSS_RTC_NVRAM)
-#define NSS_NVRAM_SIZE	(NSS_NVRAM_HEAD + NSS_BACKUP_SIZE)
+#define NSS_NVRAM_CLOCK	(NSS_NVRAM_HEAD + NSS_BACKUP_SIZE)
+#define NSS_NVRAM_SIZE	(NSS_NVRAM_CLOCK + 7 + 8)	// 7 BCD fields + 64-bit time_t
 
 static std::string NSSNVRAMName (void)
 {
@@ -1617,6 +1637,22 @@ bool8 S9xNSSLoadNVRAM (void)
 		NSS.EEPROM.Data[i] = (uint16) (buf[i * 2] | (buf[i * 2 + 1] << 8));
 	memcpy(NSS.RTC.NVRAM, buf.data() + NSS_EEPROM_WORDS * 2, NSS_RTC_NVRAM);
 	memcpy(NSS.WRAM + NSS_BACKUP_BASE, buf.data() + NSS_NVRAM_HEAD, NSS_BACKUP_SIZE);
+
+	const uint8	*c = buf.data() + NSS_NVRAM_CLOCK;
+	NSS.RTC.Sec = c[0];
+	NSS.RTC.Min = c[1];
+	NSS.RTC.Hour = c[2];
+	NSS.RTC.Day = c[3];
+	NSS.RTC.Month = c[4];
+	NSS.RTC.Year = c[5];
+	NSS.RTC.Weekday = c[6];
+	uint64	saved = 0;
+	for (int i = 7; i >= 0; i--)
+		saved = (saved << 8) | c[7 + i];
+	// Past a century the stamp is garbage, not an operator on holiday.
+	const int64	gone = (int64) time(NULL) - (int64) saved;
+	if (gone > 0 && gone < (int64) 100 * 366 * 86400)
+		RTCAdvance(gone);
 	return (TRUE);
 }
 
@@ -1636,6 +1672,18 @@ bool8 S9xNSSSaveNVRAM (void)
 	}
 	memcpy(buf.data() + NSS_EEPROM_WORDS * 2, NSS.RTC.NVRAM, NSS_RTC_NVRAM);
 	memcpy(buf.data() + NSS_NVRAM_HEAD, NSS.WRAM + NSS_BACKUP_BASE, NSS_BACKUP_SIZE);
+
+	uint8		*c = buf.data() + NSS_NVRAM_CLOCK;
+	const int64	now = (int64) time(NULL);
+	c[0] = NSS.RTC.Sec;
+	c[1] = NSS.RTC.Min;
+	c[2] = NSS.RTC.Hour;
+	c[3] = NSS.RTC.Day;
+	c[4] = NSS.RTC.Month;
+	c[5] = NSS.RTC.Year;
+	c[6] = NSS.RTC.Weekday;
+	for (int i = 0; i < 8; i++)
+		c[7 + i] = (uint8) (now >> (i * 8));
 
 	fwrite(buf.data(), 1, NSS_NVRAM_SIZE, fp);
 	fclose(fp);
@@ -1881,13 +1929,11 @@ void S9xNSSPowerOn (void)
 	// the sockets — outlives a power cycle; only the volatile board does not.
 	// Clearing field by field rather than wiping the struct is what keeps the
 	// slots' heap buffers.
-	// The EEPROM, the clock's SRAM and the backup RAM keep their contents
-	// through a power cycle; only the first power-on after a load reads disk.
+	// The EEPROM, the clock and the backup RAM keep their contents through a
+	// power cycle; only the first power-on after a load reads disk.
 	const bool8	warm = NSS.Active;
 	uint16		ee_data[NSS_EEPROM_WORDS];
-	uint8		clock_ram[NSS_RTC_NVRAM];
 	memcpy(ee_data, NSS.EEPROM.Data, sizeof(ee_data));
-	memcpy(clock_ram, NSS.RTC.NVRAM, sizeof(clock_ram));
 
 	memset(NSS.WRAM, 0, warm ? NSS_BACKUP_BASE : sizeof(NSS.WRAM));
 	NSS.Port00W = NSS.Port01W = NSS.Port03W = NSS.Port04W = 0;
@@ -1901,7 +1947,14 @@ void S9xNSSPowerOn (void)
 	NSS.CycleRemainder = 0;
 	memset(&NSS.PROM, 0, sizeof(NSS.PROM));
 	memset(&NSS.EEPROM, 0, sizeof(NSS.EEPROM));
-	memset(&NSS.RTC, 0, sizeof(NSS.RTC));
+	if (warm)
+	{
+		// The clock is battery-backed; only its serial port resets.
+		struct SNSSRTC	*r = &NSS.RTC;
+		r->CS = r->Clock = r->Dir = r->DataIn = r->DataOut = r->Shift = r->BitPos = 0;
+	}
+	else
+		memset(&NSS.RTC, 0, sizeof(NSS.RTC));
 
 	NSS.OSD.CS = NSS.OSD.Clock = NSS.OSD.DataIn = 0;
 	NSS.OSD.BitPos = 0;
@@ -1920,19 +1973,16 @@ void S9xNSSPowerOn (void)
 	NSS.MappedSlot = -1;
 
 	if (warm)
-	{
 		memcpy(NSS.EEPROM.Data, ee_data, sizeof(ee_data));
-		memcpy(NSS.RTC.NVRAM, clock_ram, sizeof(clock_ram));
-	}
 	else
 		for (int i = 0; i < NSS_EEPROM_WORDS; i++)
 			NSS.EEPROM.Data[i] = 0xffff;
 	for (int i = 0; i < NSS_OSD_CELLS; i++)
 		NSS.OSD.VRAM[i] = 0x007f;
 
-	if (!warm)
-		S9xNSSLoadNVRAM();
-	RTCLoadHostTime();
+	// A clock nobody has saved yet starts from the host's.
+	if (!warm && !S9xNSSLoadNVRAM())
+		RTCLoadHostTime();
 
 	Z80CB.MemRead = NSSMemRead;
 	Z80CB.MemWrite = NSSMemWrite;

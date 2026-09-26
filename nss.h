@@ -102,7 +102,7 @@ struct SNSSEEPROM		// Mitsubishi M6M80011, the coinage/settings store
 	uint8	Dirty;
 };
 
-struct SNSSRTC			// Seiko Epson S-3520
+struct SNSSRTC			// Seiko Instruments S-3520CF (MAME: "Seiko Epson")
 {
 	uint8	CS, Clock, Dir, DataIn, DataOut;
 	uint8	Shift;

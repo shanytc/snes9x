@@ -1349,6 +1349,12 @@ void Snes9xWindow::create_arcade_menus()
             if (!syncing_menu)
                 nss_toggle_dip(sw);
         });
+        // Flipped here instead of by activation, which would close the menu,
+        // so a block of switches can be set without reopening it each time.
+        nss_dip_items[sw]->signal_button_release_event().connect([this, sw](GdkEventButton *) {
+            nss_dip_items[sw]->set_active(!nss_dip_items[sw]->get_active());
+            return true;
+        }, false);
     }
     nss_dips_item->set_submenu(*dips_menu);
 
@@ -1506,19 +1512,11 @@ void Snes9xWindow::refresh_arcade_menus()
         for (auto item : nss_game_only_items)
             item->set_sensitive(running);
 
-        // Each switch is named for what the cartridge in play does with it.
         const char *label0 = S9xNSSDipSwitchLabel(0);
         nss_dips_item->set_label(label0 ? _("Cartridge _DIP Switches")
                                         : _("Cartridge _DIP Switches (none on this board)"));
         nss_dips_item->set_sensitive(label0 != nullptr);
-        for (int sw = 0; sw < 8; sw++)
-        {
-            const char *label = S9xNSSDipSwitchLabel(sw);
-            nss_dip_items[sw]->set_label((label && *label)
-                ? fmt::format("Switch _{} - {}", sw + 1, mnemonic_escape(label))
-                : fmt::format("Switch _{}", sw + 1));
-            nss_dip_items[sw]->set_active(Settings.NSSDipSwitches & (1 << sw));
-        }
+        refresh_nss_dips();
     }
 
     syncing_menu = false;
@@ -1626,6 +1624,24 @@ void Snes9xWindow::nss_toggle_dip(int sw)
     // The DIP block the game reads at $4100; the menu names each switch.
     Settings.NSSDipSwitches = (Settings.NSSDipSwitches ^ (1u << sw)) & 0xff;
     NSS.DipSwitches = (uint8)Settings.NSSDipSwitches;
+    refresh_nss_dips();
+}
+
+// Each switch is named for what the cartridge in play does with it, in its
+// current position, so both switches of a pair read as the one setting.
+void Snes9xWindow::refresh_nss_dips()
+{
+    const bool was_syncing = syncing_menu;
+    syncing_menu = true;
+    for (int sw = 0; sw < 8; sw++)
+    {
+        const char *label = S9xNSSDipSwitchLabel(sw);
+        nss_dip_items[sw]->set_label((label && *label)
+            ? fmt::format("Switch _{} - {}", sw + 1, mnemonic_escape(label))
+            : fmt::format("Switch _{}", sw + 1));
+        nss_dip_items[sw]->set_active(Settings.NSSDipSwitches & (1 << sw));
+    }
+    syncing_menu = was_syncing;
 }
 
 // A disc game can't run on without its disc: eject through the Reset item,

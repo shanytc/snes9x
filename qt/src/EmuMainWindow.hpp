@@ -155,6 +155,7 @@ class EmuMainWindow : public QMainWindow
     void updateEventTitle();
     void createArcadeMenus(QMenu *emulation_menu);
     void refreshArcadeMenus();
+    void refreshNSSDips();
     void sfcboxSetKeyswitch(int panel_pos);
     void insertCoin(int slot);
     void nssPulse(uint16_t buttons, bool game_only);

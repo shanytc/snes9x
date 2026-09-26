@@ -381,6 +381,36 @@ static QString menuText(const char *s)
     return QString::fromUtf8(s ? s : "").replace("&", "&&");
 }
 
+// Keeps a menu open when one of its checkable entries is clicked or given
+// Enter, so a block of switches can be set without reopening it each time.
+class StayOpenMenuFilter : public QObject
+{
+  public:
+    using QObject::QObject;
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        auto menu = qobject_cast<QMenu *>(watched);
+        if (!menu)
+            return false;
+
+        QAction *action = nullptr;
+        if (event->type() == QEvent::MouseButtonRelease)
+            action = menu->actionAt(static_cast<QMouseEvent *>(event)->position().toPoint());
+        else if (event->type() == QEvent::KeyPress)
+        {
+            const int key = static_cast<QKeyEvent *>(event)->key();
+            if (key == Qt::Key_Return || key == Qt::Key_Enter)
+                action = menu->activeAction();
+        }
+
+        if (!action || !action->isCheckable() || !action->isEnabled())
+            return false;
+        action->trigger();
+        return true;
+    }
+};
+
 void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
 {
     // Super Famicom Box: win32 keeps these rows in its Emulation settings
@@ -477,6 +507,7 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
         nss_dip_actions[sw]->setCheckable(true);
         connect(nss_dip_actions[sw], &QAction::triggered, [this, sw] { nssToggleDip(sw); });
     }
+    dips_menu->installEventFilter(new StayOpenMenuFilter(dips_menu));
     nss_dips_action = nss_menu->addMenu(dips_menu);
 
     nss_menu_action = emulation_menu->addMenu(nss_menu);
@@ -613,11 +644,17 @@ void EmuMainWindow::refreshArcadeMenus()
     for (auto a : nss_game_only_actions)
         a->setEnabled(running);
 
-    // Each switch is named for what the cartridge in play does with it.
     const char *label0 = S9xNSSDipSwitchLabel(0);
     nss_dips_action->setText(label0 ? tr("Cartridge &DIP Switches")
                                     : tr("Cartridge &DIP Switches (none on this board)"));
     nss_dips_action->setEnabled(label0 != nullptr);
+    refreshNSSDips();
+}
+
+// Each switch is named for what the cartridge in play does with it, in its
+// current position, so both switches of a pair read as the one setting.
+void EmuMainWindow::refreshNSSDips()
+{
     for (int sw = 0; sw < 8; sw++)
     {
         const char *label = S9xNSSDipSwitchLabel(sw);
@@ -718,10 +755,13 @@ void EmuMainWindow::nssToggleDip(int sw)
     // The DIP block the game reads at $4100; the menu names each switch.
     app.config->nss_dip_switches = (app.config->nss_dip_switches ^ (1 << sw)) & 0xff;
     const uint8 dips = (uint8)app.config->nss_dip_switches;
+    // Waits for the core, so the relabelled pair reads the new position
+    // while the menu stays open.
     app.emu_thread->runOnThread([dips] {
         Settings.NSSDipSwitches = dips;
         NSS.DipSwitches = dips;
-    });
+    }, true);
+    refreshNSSDips();
 }
 
 bool EmuMainWindow::arcadeShortcut(const std::string &name)

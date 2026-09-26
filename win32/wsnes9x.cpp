@@ -547,6 +547,8 @@ void RestoreGUIDisplay ();
 void RestoreSNESDisplay ();
 void CheckDirectoryIsWritable (const char *filename);
 static void CheckMenuStates ();
+static void NSSToggleDip (int sw);
+static void HookDipMenu (bool on);
 static void UpdateTestsMenu ();
 static bool RateSupportedByDriver (unsigned int rate, int driver);
 static bool RateUsefulForMode (unsigned int rate);
@@ -3217,10 +3219,9 @@ LRESULT CALLBACK WinProc(
 		case ID_NSS_DIP0 + 0: case ID_NSS_DIP0 + 1: case ID_NSS_DIP0 + 2:
 		case ID_NSS_DIP0 + 3: case ID_NSS_DIP0 + 4: case ID_NSS_DIP0 + 5:
 		case ID_NSS_DIP0 + 6: case ID_NSS_DIP0 + 7:
-			// The cartridge DIP block the game reads at $4100; the menu
-			// text says what the cartridge in play makes of each one.
-			Settings.NSSDipSwitches ^= (uint32) (1 << (cmd_id - ID_NSS_DIP0));
-			NSS.DipSwitches = (uint8) Settings.NSSDipSwitches;
+			// Normally flipped in place by DipMenuFilter; this is the
+			// fallback for anything that still sends the command.
+			NSSToggleDip(cmd_id - ID_NSS_DIP0);
 			CheckMenuStates();
 			break;
 
@@ -3507,6 +3508,7 @@ LRESULT CALLBACK WinProc(
         break;
 	}
 	case WM_EXITMENULOOP:
+		HookDipMenu(false);
 		UpdateWindow(GUI.hWnd);
 		DrawMenuBar(GUI.hWnd);
 		S9xClearPause (PAUSE_MENU);
@@ -3515,6 +3517,7 @@ LRESULT CALLBACK WinProc(
 	case WM_ENTERMENULOOP:
 		S9xSetPause (PAUSE_MENU);
 		CheckMenuStates ();
+		HookDipMenu(Settings.NSS);
 
 		SwitchToGDI();
 		DrawMenuBar(GUI.hWnd);
@@ -5865,6 +5868,94 @@ static void UpdateHardwarePopups ()
 		LocalizeMenu(s_parent);
 }
 
+// Each switch is named for what the cartridge in play does with it, in its
+// current position, so both switches of a pair read as the one setting.
+// CheckMenuItem leaves the highlight alone, which the in-place toggle needs.
+static void RefreshNSSDipItems ()
+{
+	TCHAR text[128];
+	MENUITEMINFO txt = {};
+	txt.cbSize     = sizeof(txt);
+	txt.fMask      = MIIM_STRING;
+	txt.dwTypeData = text;
+
+	for (int sw = 0; sw < 8; sw++)
+	{
+		const char *label = S9xNSSDipSwitchLabel(sw);
+		if (label && *label)
+			_stprintf(text, TEXT("Switch &%d - %hs"), sw + 1, label);
+		else
+			_stprintf(text, TEXT("Switch &%d"), sw + 1);
+		SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &txt);
+		CheckMenuItem(GUI.hMenu, ID_NSS_DIP0 + sw,
+		              MF_BYCOMMAND | ((Settings.NSSDipSwitches & (1 << sw)) ? MF_CHECKED : MF_UNCHECKED));
+	}
+}
+
+// The cartridge DIP block the game reads at $4100.
+static void NSSToggleDip (int sw)
+{
+	Settings.NSSDipSwitches ^= (uint32) (1 << sw);
+	NSS.DipSwitches = (uint8) Settings.NSSDipSwitches;
+}
+
+// The DIP switches flip in place: while a menu is open, a click or Enter on
+// one toggles it and is swallowed, so its popup stays up for the next one.
+static HHOOK s_dipMenuHook = NULL;
+
+static BOOL CALLBACK RepaintDipPopup (HWND hwnd, LPARAM lp)
+{
+	TCHAR cls[16];
+	if (GetClassName(hwnd, cls, 16) && !_tcscmp(cls, TEXT("#32768")) &&
+	    (HMENU) SendMessage(hwnd, MN_GETHMENU, 0, 0) == (HMENU) lp)
+		InvalidateRect(hwnd, NULL, TRUE);
+	return TRUE;
+}
+
+static LRESULT CALLBACK DipMenuFilter (int code, WPARAM wp, LPARAM lp)
+{
+	const MSG	*m = (const MSG *) lp;
+	HMENU		sub = NULL;
+	int			pos = 0;
+
+	if (code == MSGF_MENU && NSS.Active &&
+	    (m->message == WM_LBUTTONUP || (m->message == WM_KEYDOWN && m->wParam == VK_RETURN)) &&
+	    FindMenuItemParentPos(GUI.hMenu, ID_NSS_DIP0, &sub, &pos))
+	{
+		// The item under the pointer, not the last one hovered, so a
+		// release off the popup never flips anything.
+		int	idx = -1;
+		if (m->message == WM_LBUTTONUP)
+			idx = MenuItemFromPoint(NULL, sub, m->pt);
+		else
+			for (int i = 0; i < GetMenuItemCount(sub); i++)
+				if (GetMenuState(sub, i, MF_BYPOSITION) & MF_HILITE)
+					idx = i;
+
+		const UINT	id = (idx >= 0) ? GetMenuItemID(sub, idx) : 0;
+		if (id >= ID_NSS_DIP0 && id < ID_NSS_DIP0 + 8 &&
+		    !(GetMenuState(sub, idx, MF_BYPOSITION) & (MF_GRAYED | MF_DISABLED)))
+		{
+			NSSToggleDip(id - ID_NSS_DIP0);
+			RefreshNSSDipItems();
+			EnumThreadWindows(GetCurrentThreadId(), RepaintDipPopup, (LPARAM) sub);
+			return 1;
+		}
+	}
+	return CallNextHookEx(s_dipMenuHook, code, wp, lp);
+}
+
+static void HookDipMenu (bool on)
+{
+	if (on && !s_dipMenuHook)
+		s_dipMenuHook = SetWindowsHookEx(WH_MSGFILTER, DipMenuFilter, NULL, GetCurrentThreadId());
+	else if (!on && s_dipMenuHook)
+	{
+		UnhookWindowsHookEx(s_dipMenuHook);
+		s_dipMenuHook = NULL;
+	}
+}
+
 static void CheckMenuStates ()
 {
     MENUITEMINFO mii;
@@ -5922,17 +6013,7 @@ static void CheckMenuStates ()
 			SetMenuItemInfo(nss, pos, TRUE, &txt);
 			EnableMenuItem(nss, pos, MF_BYPOSITION | (label0 ? MF_ENABLED : MF_GRAYED));
 		}
-		for (int sw = 0; sw < 8; sw++)
-		{
-			const char *label = S9xNSSDipSwitchLabel(sw);
-			if (label && *label)
-				_stprintf(text, TEXT("Switch &%d - %hs"), sw + 1, label);
-			else
-				_stprintf(text, TEXT("Switch &%d"), sw + 1);
-			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &txt);
-			mii.fState = (Settings.NSSDipSwitches & (1 << sw)) ? MFS_CHECKED : MFS_UNCHECKED;
-			SetMenuItemInfo(GUI.hMenu, ID_NSS_DIP0 + sw, FALSE, &mii);
-		}
+		RefreshNSSDipItems();
 
 		// Each socket says what is in it.
 		for (int slot = 0; slot < 3; slot++)

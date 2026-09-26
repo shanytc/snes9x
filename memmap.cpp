@@ -2139,6 +2139,8 @@ static void RetireSNESSessions (void)
 	SuperDiscBIOSPath.clear();
 	Settings.RP2040Cart = FALSE;
 	S9xRP2040CartDeactivate();
+	Settings.XBAND = FALSE;
+	S9xXBandDisconnect();
 }
 
 int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filename)
@@ -3944,9 +3946,13 @@ void CMemory::InitROM (void)
 		char dbg[4096];
 		int  dbg_len = 0;
 		dbg[0] = 0;
+		dbg[sizeof(dbg) - 1] = 0;
+		// C99 snprintf and MSVC's _snprintf (port.h) truncate differently:
+		// the last byte stays a terminator and dbg_len never passes it.
 		#define DBG(...) do { \
-			int _r = _snprintf(dbg + dbg_len, sizeof(dbg) - dbg_len - 1, __VA_ARGS__); \
+			int _r = snprintf(dbg + dbg_len, sizeof(dbg) - dbg_len - 1, __VA_ARGS__); \
 			if (_r > 0) dbg_len += _r; \
+			if (dbg_len > (int)sizeof(dbg) - 1) dbg_len = (int)sizeof(dbg) - 1; \
 		} while (0)
 
 		DBG("ROM CalculatedSize = 0x%x (%u bytes)\n\n",

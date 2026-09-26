@@ -1233,7 +1233,21 @@ void S9xStartHDMA (void)
 	CPU.CurrentDMAorHDMAChannel = tmpch;
 }
 
+static uint8 DoHDMA (uint8 byte, int32 busLen);
+
 uint8 S9xDoHDMA (uint8 byte)
+{
+	return (DoHDMA(byte, 0));
+}
+
+// bsnes timing: align to the 8-clock DMA divider (phase 538 - refresh pos at
+// line start), then resume the CPU on a busLen-clock boundary.
+uint8 S9xDoHDMASynced (uint8 byte, int32 busLen)
+{
+	return (DoHDMA(byte, busLen));
+}
+
+static uint8 DoHDMA (uint8 byte, int32 busLen)
 {
 	struct SDMA *p;
 
@@ -1250,6 +1264,13 @@ uint8 S9xDoHDMA (uint8 byte)
 	temp = CPU.InWRAMDMAorHDMA;
 	tmpch = CPU.CurrentDMAorHDMAChannel;
 
+	const int32	hdmaStart = CPU.Cycles;
+	if (busLen)
+	{
+		ADD_CYCLES(8 - ((SNES_WRAM_REFRESH_HC_v2 - Timings.WRAMRefreshPos + CPU.Cycles) & 7));
+		ADD_CYCLES(SLOW_ONE_CYCLE);
+	}
+	else
 	// XXX: Not quite right...
 	ADD_CYCLES(Timings.DMACPUSync);
 
@@ -1602,6 +1623,9 @@ uint8 S9xDoHDMA (uint8 byte)
 				ADD_CYCLES(SLOW_ONE_CYCLE);
 		}
 	}
+
+	if (busLen)
+		ADD_CYCLES(busLen - (CPU.Cycles - hdmaStart) % busLen);
 
 	CPU.InHDMA = FALSE;
 	CPU.InDMAorHDMA = CPU.InDMA;

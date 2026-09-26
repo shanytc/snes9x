@@ -35,6 +35,7 @@ extern struct SDMA	DMA[8];
 bool8 S9xDoDMA (uint8);
 void S9xStartHDMA (void);
 uint8 S9xDoHDMA (uint8);
+uint8 S9xDoHDMASynced (uint8, int32);
 void S9xResetDMA (void);
 
 #endif

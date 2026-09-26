@@ -100,7 +100,7 @@ static int CyclesUntilNext (int hc, int vc)
 		// Add number of lines
 		total += (vc - vpos) * Timings.H_Max_Master;
 		// If line 240 is in there and we're odd, subtract a dot
-		if (vpos <= 240 && vc > 240 && S9xInterlaceField() & !IPPU.Interlace)
+		if (vpos <= 240 && vc > 240 && S9xInterlaceField() && !Timings.FrameInterlace)
 			total -= ONE_DOT_CYCLE;
 	}
 	else
@@ -111,11 +111,11 @@ static int CyclesUntilNext (int hc, int vc)
 		}
 
 		total += (Timings.V_Max - vpos) * Timings.H_Max_Master;
-		if (vpos <= 240 && S9xInterlaceField() && !IPPU.Interlace)
+		if (vpos <= 240 && S9xInterlaceField() && !Timings.FrameInterlace)
 			total -= ONE_DOT_CYCLE;
 
 		total += (vc) * Timings.H_Max_Master;
-		if (vc > 240 && !S9xInterlaceField() && !IPPU.Interlace)
+		if (vc > 240 && !S9xInterlaceField() && !Timings.FrameInterlace)
 			total -= ONE_DOT_CYCLE;
 	}
 
@@ -152,7 +152,7 @@ void S9xUpdateIRQPositions (bool initial)
 		}
 
 		// Check for short dot scanline
-		if (v_pos == 240 && S9xInterlaceField() && !IPPU.Interlace)
+		if (v_pos == 240 && S9xInterlaceField() && !Timings.FrameInterlace)
 		{
 			Timings.NextIRQTimer -= PPU.IRQHBeamPos <= 322 ? ONE_DOT_CYCLE / 2 : 0;
 			Timings.NextIRQTimer -= PPU.IRQHBeamPos <= 326 ? ONE_DOT_CYCLE / 2 : 0;
@@ -178,7 +178,7 @@ void S9xUpdateIRQPositions (bool initial)
 			field = !field;
 		}
 
-		if (PPU.VTimerPosition == 240 && field && !IPPU.Interlace)
+		if (PPU.VTimerPosition == 240 && field && !Timings.FrameInterlace)
 		{
 			Timings.NextIRQTimer -= PPU.IRQHBeamPos <= 322 ? ONE_DOT_CYCLE / 2 : 0;
 			Timings.NextIRQTimer -= PPU.IRQHBeamPos <= 326 ? ONE_DOT_CYCLE / 2 : 0;
@@ -1694,6 +1694,12 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 				// only a cart that streams code through one address can tell.
 				if (Byte && Settings.RP2040Cart)
 					S9xRP2040CartDMAPrefetch();
+				// an HDMA already due takes the bus before this DMA
+				if (Byte && CPU.HDMAEdge)
+				{
+					CPU.HDMAEdge = 0;
+					S9xRunPendingHDMA(ONE_CYCLE);
+				}
 				// XXX: Not quite right...
                 if (Byte) {
 				CPU.Cycles += Timings.DMACPUSync;

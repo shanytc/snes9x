@@ -96,7 +96,7 @@
 #define SNES_WRAM_REFRESH_CYCLES	40
 
 #define SNES_HBLANK_START_HC		1096					// H=274
-#define	SNES_HDMA_START_HC			1106					// FIXME: not true
+#define	SNES_HDMA_START_HC			1104					// bsnes: HDMA triggers at H=1104
 #define	SNES_HBLANK_END_HC			4						// H=1
 #define	SNES_HDMA_INIT_HC			20						// FIXME: not true
 #define	SNES_RENDER_START_HC		(128 * ONE_DOT_CYCLE)	// FIXME: Snes9x renders a line at a time.
@@ -154,6 +154,9 @@ struct SCPUState
 	bool8	WaitingForInterrupt;
 	uint32	AutoSaveTimer;
 	bool8	SRAMModified;
+	int32	LastBusStart;	// start of the most recent CPU bus cycle
+	int32	HDMAEdge;		// bus cycles left before a triggered HDMA runs
+	bool8	IRQDeferOne;	// /IRQ rose during an instruction's last bus cycle
 };
 
 enum
@@ -188,6 +191,7 @@ struct STimings
 	int32	NextIRQTimer;
 	int32	IRQTriggerCycles;
 	int32	WRAMRefreshPos;
+	bool8	FrameInterlace;	// SETINI interlace as latched at V=0; sets frame length and the short line
 	int32	RenderPos;
 	bool8	InterlaceField;
 	int32	DMACPUSync;		// The cycles to synchronize DMA and CPU. Snes9x cannot emulate correctly.

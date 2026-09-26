@@ -50,6 +50,34 @@ void S9xSoftReset (void);
 void S9xSGBCaptureSoftResetCheckpoint (void);
 void S9xSGBInvalidateSoftResetCheckpoint (void);
 void S9xDoHEventProcessing (void);
+void S9xRunPendingHDMA (int32 busLen);
+
+// A CPU bus cycle of busLen clocks starts: remembered for IRQ sampling, and a
+// triggered HDMA takes the bus at the second one (bsnes timing).
+static inline void S9xCPUBusCycleStart (int32 busLen)
+{
+	CPU.LastBusStart = CPU.Cycles;
+	if (CPU.HDMAEdge && !--CPU.HDMAEdge)
+		S9xRunPendingHDMA(busLen);
+}
+
+// Add fetch/internal cycles one bus cycle at a time so the hook sees each.
+static inline void S9xCPUAddBusCycles (int32 n)
+{
+	while (n > 0)
+	{
+		int32	c;
+		if (n % ONE_CYCLE == 0 && (n % CPU.MemSpeed != 0 || CPU.MemSpeed == ONE_CYCLE))
+			c = ONE_CYCLE;
+		else
+			c = (n >= CPU.MemSpeed) ? CPU.MemSpeed : n;
+		S9xCPUBusCycleStart(c);
+		CPU.Cycles += c;
+		while (CPU.Cycles >= CPU.NextEvent)
+			S9xDoHEventProcessing();
+		n -= c;
+	}
+}
 
 static inline void S9xUnpackStatus (void)
 {

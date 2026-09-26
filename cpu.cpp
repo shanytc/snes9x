@@ -44,6 +44,10 @@ static void S9xSoftResetCPU (void)
 {
 	CPU.Cycles = 182; // Or 188. This is the cycle count just after the jump to the Reset Vector.
 	CPU.PrevCycles = CPU.Cycles;
+	CPU.LastBusStart = CPU.Cycles;
+	CPU.HDMAEdge = 0;
+	CPU.IRQDeferOne = FALSE;
+	Timings.FrameInterlace = FALSE;
 	CPU.V_Counter = 0;
 	CPU.Flags = CPU.Flags & (DEBUG_MODE_FLAG | TRACE_FLAG);
 	CPU.PCBase = NULL;

@@ -1785,6 +1785,9 @@ int S9xUnfreezeFromStream (STREAM stream)
 		}
 
 		UnfreezeStructFromCopy(&CPU, SnapCPU, COUNT(SnapCPU), local_cpu, version);
+		CPU.LastBusStart = CPU.Cycles;
+		CPU.HDMAEdge = 0;
+		CPU.IRQDeferOne = FALSE;
 
 		UnfreezeStructFromCopy(&Registers, SnapRegisters, COUNT(SnapRegisters), local_registers, version);
 
@@ -1983,6 +1986,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 		CPU.InDMA = CPU.InHDMA = FALSE;
 		CPU.InDMAorHDMA = CPU.InWRAMDMAorHDMA = FALSE;
 		CPU.HDMARanInDMA = 0;
+		Timings.FrameInterlace = Memory.FillRAM[0x2133] & 1;
 
 		S9xFixColourBrightness();
 		S9xBuildDirectColourMaps();

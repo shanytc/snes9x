@@ -23,6 +23,7 @@
 #define addCyclesInMemoryAccess \
 	if (!CPU.InDMAorHDMA) \
 	{ \
+		S9xCPUBusCycleStart(speed); \
 		CPU.Cycles += speed; \
 		while (CPU.Cycles >= CPU.NextEvent) \
 			S9xDoHEventProcessing(); \
@@ -31,7 +32,12 @@
 #define addCyclesInMemoryAccess_x2 \
 	if (!CPU.InDMAorHDMA) \
 	{ \
-		CPU.Cycles += speed << 1; \
+		S9xCPUBusCycleStart(speed); \
+		CPU.Cycles += speed; \
+		while (CPU.Cycles >= CPU.NextEvent) \
+			S9xDoHEventProcessing(); \
+		S9xCPUBusCycleStart(speed); \
+		CPU.Cycles += speed; \
 		while (CPU.Cycles >= CPU.NextEvent) \
 			S9xDoHEventProcessing(); \
 	}

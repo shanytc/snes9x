@@ -210,10 +210,17 @@ void S9xMainLoop (void)
 			S9xTraceMessage ("Timer triggered\n");
 			#endif
 
+			// /IRQ is sampled before an instruction's last bus cycle (bsnes):
+			// a rise inside that cycle waits for the next instruction.
+			if (CPU.LastBusStart < Timings.NextIRQTimer && !CPU.WaitingForInterrupt)
+				CPU.IRQDeferOne = TRUE;
 			S9xUpdateIRQPositions(false);
 			CPU.IRQLine = TRUE;
 		}
 
+		if (CPU.IRQDeferOne)
+			CPU.IRQDeferOne = FALSE;
+		else
 		if (CPU.IRQLine || CPU.IRQExternal)
 		{
 			if (CPU.WaitingForInterrupt)
@@ -274,6 +281,7 @@ void S9xMainLoop (void)
 		}
 		if (CPU.WaitingForInterrupt)
 		{
+			S9xCPUBusCycleStart(ONE_CYCLE);
 			CPU.Cycles += ONE_CYCLE;
 			while (CPU.Cycles >= CPU.NextEvent)
 				S9xDoHEventProcessing();
@@ -348,6 +356,7 @@ void S9xMainLoop (void)
 			if (CPU.PCBase)
 			{
 				Op = CPU.PCBase[Registers.PCw];
+				S9xCPUBusCycleStart(CPU.MemSpeed);
 				CPU.Cycles += CPU.MemSpeed;
 				Opcodes = ICPU.S9xOpcodes;
 
@@ -462,6 +471,12 @@ static inline void S9xReschedule (void)
 	}
 }
 
+void S9xRunPendingHDMA (int32 busLen)
+{
+	if (PPU.HDMA && CPU.V_Counter <= PPU.ScreenHeight)
+		PPU.HDMA = S9xDoHDMASynced(PPU.HDMA, busLen);
+}
+
 void S9xDoHEventProcessing (void)
 {
 #ifdef DEBUGGER
@@ -498,12 +513,27 @@ void S9xDoHEventProcessing (void)
 			#ifdef DEBUGGER
 				S9xTraceFormattedMessage("*** HDMA Transfer HC:%04d, Channel:%02x", CPU.Cycles, PPU.HDMA);
 			#endif
-				PPU.HDMA = S9xDoHDMA(PPU.HDMA);
+				// HDMA takes the bus two CPU bus cycles later (bsnes); a DMA in
+				// flight hands it over directly.
+				if (CPU.InDMA || Model->_5A22 != 2)
+					PPU.HDMA = S9xDoHDMA(PPU.HDMA);
+				else
+					CPU.HDMAEdge = 2;
 			}
 
 			break;
 
 		case HC_HCOUNTER_MAX_EVENT:
+		{
+			// no bus cycles reached the pending HDMA (CPU held): run it now
+			if (CPU.HDMAEdge)
+			{
+				CPU.HDMAEdge = 0;
+				S9xRunPendingHDMA(ONE_CYCLE);
+			}
+
+			const int32	finishedLine = Timings.H_Max;
+
 			if (Settings.SuperFX)
 			{
 				if (!SuperFX.oneLineDone)
@@ -549,6 +579,7 @@ void S9xDoHEventProcessing (void)
 				Timings.NMITriggerPos -= Timings.H_Max;
 			if (Timings.NextIRQTimer != 0x0fffffff)
 				Timings.NextIRQTimer -= Timings.H_Max;
+			CPU.LastBusStart -= Timings.H_Max;
 			S9xAPUSetReferenceTime(CPU.Cycles);
 
 			PPU.CentreXLatched = false;
@@ -571,7 +602,8 @@ void S9xDoHEventProcessing (void)
 				// [PAL] <PAL info is unverified on hardware>
 				// interlace mode has 625 scanlines: 313 on the even frame, and 312 on the odd.
 				// non-interlace mode has 624 scanlines: 312 scanlines on both even and odd frames.
-				if (IPPU.Interlace && S9xInterlaceField())
+				Timings.FrameInterlace = Memory.FillRAM[0x2133] & 1;
+				if (Timings.FrameInterlace && S9xInterlaceField())
 					Timings.V_Max = Timings.V_Max_Master + 1;	// 263 (NTSC), 313?(PAL)
 				else
 					Timings.V_Max = Timings.V_Max_Master;		// 262 (NTSC), 312?(PAL)
@@ -592,14 +624,16 @@ void S9xDoHEventProcessing (void)
 			// In interlace mode, there are always 341 dots per scanline. Even frames have 263 scanlines,
 			// and odd frames have 262 scanlines.
 			// Interlace mode scanline 240 on odd frames is not missing a dot.
-			if (CPU.V_Counter == 240 && !IPPU.Interlace && S9xInterlaceField())	// V=240
+			if (CPU.V_Counter == 240 && !Timings.FrameInterlace && S9xInterlaceField())	// V=240
 				Timings.H_Max = Timings.H_Max_Master - ONE_DOT_CYCLE;	// HC=1360
 			else
 				Timings.H_Max = Timings.H_Max_Master;					// HC=1364
 
 			if (Model->_5A22 == 2)
 			{
-				if (CPU.V_Counter != 240 || IPPU.Interlace || !S9xInterlaceField())	// V=240
+				// refresh = 530 + 8 - (clock & 7) at line start, so it flips after
+				// a 1364-clock line and holds after the 1360-clock short one
+				if (finishedLine & 4)
 				{
 					if (Timings.WRAMRefreshPos == SNES_WRAM_REFRESH_HC_v2 - ONE_DOT_CYCLE)	// HC=534
 						Timings.WRAMRefreshPos = SNES_WRAM_REFRESH_HC_v2;					// HC=538
@@ -678,6 +712,7 @@ void S9xDoHEventProcessing (void)
 			S9xReschedule();
 
 			break;
+		}
 
 		case HC_HDMA_INIT_EVENT:
 			S9xReschedule();

@@ -16,7 +16,7 @@
 
 #define ADD_CYCLES(n)	{ CPU.Cycles += (n); }
 
-extern uint8	*HDMAMemPointers[8];
+extern S9X_MACHINE uint8	*HDMAMemPointers[8];
 extern int		HDMA_ModeByteCounts[8];
 extern SPC7110	s7emu;
 

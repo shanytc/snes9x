@@ -50,6 +50,7 @@
 
 #include "../snes9x.h"
 #include "../memmap.h"
+#include "../gfx.h"
 #include "../biosmanager.h"
 #include "../cpuexec.h"
 #include "../display.h"
@@ -64,6 +65,7 @@
 #include "../sgb/sgb.h"
 #include "../sgb/acid.h"
 #include "../acidsgb.h"
+#include "../sgb/gb_viewer.h"
 #include "../sfcbox.h"
 #include "../nss.h"
 #include "../superdisc.h"
@@ -138,6 +140,46 @@ LRESULT CALLBACK DlgChildSplitProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+void WinToggleGBLink(int mode, int players);
+void WinToggleGBLinkSplit();
+void WinGBLinkHotkey(int what);
+bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid = 0);
+void GBLinkMirrorPause();
+void WinAutoStartGBLinkPeer();
+int  WinGetGBLinkMode();
+int  WinGetGBLinkPlayers();
+static int  WinGetGBLinkLivePlayers();
+static bool GBLinkPidAlive(DWORD pid);
+static void GBLinkPumpSpawns();
+static void GBLinkAutoCloseAbandonedHub();
+static void WinGBLinkMasterUnplug();
+static void WinGBLinkUnlink();
+static void GBLinkResetWhenLeftAlone();
+static void GBLinkPlacePeerWindow();
+static void WinStartGBSplit(int players);
+static void WinStopGBSplit();
+static void WinStartGBViewerSession(int players);
+static void GBLinkViewerWatch();
+static void GBSeatWindowsCreate(int players);
+static void GBSeatWindowsDestroy();
+static void GBSeatPresentFrame();
+static unsigned char GBSeatModelPick(int player);
+static bool  GBSeatModelFromCommand(int cmd_id, int *player, unsigned char *model);
+static void  WinGBSeatSetModel(int player, unsigned char model);
+static HMENU WinGBBuildSeatModelMenu(int player);
+static void  GBSeatMachinesCreate(int players);
+static void  GBSeatMachinesDestroy();
+static void  GBSeatMachinesTurn();
+static void  GBSeatMachinesRequestReset();
+static bool  GBSeatModelIsMachine(unsigned char model);
+
+// The master window's shape from before a session resized it — down to 1x
+// for a viewer ring (the seats park at its size, so 1x is what makes a 5x3
+// grid fit), up to the tile grid for split screen. Teardown puts it back,
+// and so does the config on the way out. 0 = nothing to restore.
+static int GBLinkPreRingW = 0;
+static int GBLinkPreRingH = 0;
+
 INT_PTR CALLBACK DlgKailleraServer(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgFunky(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -176,10 +218,18 @@ void S9xWinScanJoypads();
 #define TIMER_SCANJOYPADS  (99999)
 #define NC_SEARCHDB 0x8000
 #define WM_CHEATS_ADDED (WM_APP + 1)
+// Save/load fanned out to the linked instances. wParam = slot in the low
+// word, non-zero high word to save; lParam = the originator's pid, so the
+// hub host can forward it to the other seats without it bouncing back.
+#define WM_GBLINK_FREEZE (WM_APP + 2)
+// Pause mirrored to the linked instances. wParam != 0 to hold; lParam =
+// the originator's pid, forwarded the same way.
+#define WM_GBLINK_PAUSE (WM_APP + 3)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 8;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 9;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
+constexpr int HOTKEY_TAB_LINK   = 8;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
 constexpr int HOTKEY_TAB_TURBO      = 2;
@@ -196,6 +246,26 @@ constexpr int HOTKEY_TAB_GBMODEL    = 5;
 /* Global variables                                                          */
 /*****************************************************************************/
 struct sGUI GUI;
+
+// Set while applying a peer-initiated save/load, so it is not relayed back.
+static bool GBLinkStateRelaying = false;
+
+// Who last paused the session over the link, so a watchdog timer can
+// lift the pause if that process dies without sending the unpause.
+static DWORD GBLinkPauserPid = 0;
+
+// A spawned seat comes up muted — only the master should sound — but
+// the shared config file keeps the user's own Mute. Cleared the moment
+// the user flips Mute themselves: their choice becomes the real one.
+static bool GBLinkMuteForced = false;
+static bool GBLinkUserMute   = false;
+
+bool GBLinkGetUserMute (bool *mute)
+{
+	if (!GBLinkMuteForced) return false;
+	*mute = GBLinkUserMute;
+	return true;
+}
 typedef struct sExtList
 {
 	TCHAR* extension;
@@ -975,6 +1045,50 @@ static void WinRequestScreenshot()
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
 static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
 
+// Super Game Boy Color has no link cable yet: every session start refuses
+// while it is the picked Game Boy Model, and the submenu hides with it.
+static bool GBLinkBlockedBySgbc ()
+{
+	return S9xNormalizeGBBootPolicy (Settings.GBBootPolicy) == S9X_GBBOOT_SGBC;
+}
+
+// A held link hotkey re-fires (key auto-repeat, plus the background-input
+// scanner a new session switches on mid-press): gate to one shot per press.
+struct SLinkHotkeyGate { WPARAM key; DWORD lastSeen; };
+static SLinkHotkeyGate linkHotkeyGate[4];
+
+static bool LinkHotkeyPressEdge (WPARAM key)
+{
+	const DWORD now = timeGetTime ();
+	int oldest = 0;
+	for (int i = 0; i < 4; i++)
+	{
+		if (linkHotkeyGate[i].key == key)
+		{
+			// Refreshed on every blocked repeat; the timeout only re-arms
+			// a key whose key-up landed in another window.
+			const bool held = (now - linkHotkeyGate[i].lastSeen) <= 1500;
+			linkHotkeyGate[i].lastSeen = now;
+			return !held;
+		}
+		if (linkHotkeyGate[i].lastSeen < linkHotkeyGate[oldest].lastSeen)
+			oldest = i;
+	}
+	linkHotkeyGate[oldest].key      = key;
+	linkHotkeyGate[oldest].lastSeen = now;
+	return true;
+}
+
+static void LinkHotkeyRelease (WPARAM key)
+{
+	for (int i = 0; i < 4; i++)
+		if (linkHotkeyGate[i].key == key)
+		{
+			linkHotkeyGate[i].key      = 0;
+			linkHotkeyGate[i].lastSeen = 0;
+		}
+}
+
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {
 	auto MatchesAnyBinding = [](WPARAM wParam, WORD primary, const WORD* extra) -> bool {
@@ -1303,6 +1417,23 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
 			}
 			hitHotKey = true;
+		}
+		{
+			// Session toggles fire once per press, like their menu items
+			// fire once per click — a repeat would flip the session back.
+			int linkWhat = -3;
+			if      (HKmatch(Link2P))          linkWhat = 2;
+			else if (HKmatch(Link3P))          linkWhat = 3;
+			else if (HKmatch(Link4P))          linkWhat = 4;
+			else if (HKmatch(LinkOtherGame))   linkWhat = 0;
+			else if (HKmatch(LinkSplitToggle)) linkWhat = -1;
+			else if (HKmatch(LinkEnd))         linkWhat = -2;
+			if (linkWhat != -3)
+			{
+				hitHotKey = true;
+				if (LinkHotkeyPressEdge (wParam))
+					WinGBLinkHotkey (linkWhat);
+			}
 		}
 		for (int ksp = 0; ksp < 5; ksp++)
 		{
@@ -2023,6 +2154,7 @@ void WinShowCheatEditorDialog()
 // giving slow backends (XInput polling, driver init) time to enumerate a
 // newly plugged device without a ~10s wait for SDL's own scan schedule.
 #define TIMER_HOTPLUG_BURST 0xD0D0
+#define TIMER_GBLINK_PAUSE  0xD0D1
 static int g_hotplugTicksRemaining = 0;
 
 static std::vector<std::wstring> g_translationCodes;
@@ -2092,6 +2224,69 @@ static void BuildLanguageMenu(HMENU bar)
 	}
 }
 
+// Keep the menu open when the Split Screen preference is clicked: run the
+// toggle ourselves and swallow the click so the menu never dismisses.
+static HHOOK s_menu_filter_hook = NULL;
+// The "Link Current Game" popup, tracked by CheckMenuStates. While a menu is
+// up the mouse is captured by the owner, so hit-test this handle directly.
+static HMENU s_gb_same_hmenu = NULL;
+
+static bool MenuSplitIdle (void)
+{
+	return !S9xSGBLinkIsEnabled () && !S9xSGBSplitActive ();
+}
+
+// A menu window repaints on its own only when the mouse moves; after a
+// swallowed click the fresh check state has to be pushed at it.
+static BOOL CALLBACK MenuRedrawProc (HWND hwnd, LPARAM)
+{
+	TCHAR cls[16];
+	if (GetClassName (hwnd, cls, 16) && _tcscmp (cls, TEXT("#32768")) == 0)
+		RedrawWindow (hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+	return TRUE;
+}
+
+static void MenuToggleSplitInPlace (void)
+{
+	SendMessage (GUI.hWnd, WM_COMMAND, ID_EMULATION_GB_LINK_SPLIT, 0);
+	CheckMenuItem (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SPLIT, MF_BYCOMMAND |
+	               (GBLinkSplitScreen ? MF_CHECKED : MF_UNCHECKED));
+	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
+}
+
+static LRESULT CALLBACK MenuKeepOpenFilter (int code, WPARAM wParam, LPARAM lParam)
+{
+	if (code == MSGF_MENU && s_gb_same_hmenu)
+	{
+		MSG *msg = (MSG *)lParam;
+		if (msg->message == WM_LBUTTONDOWN || msg->message == WM_LBUTTONUP)
+		{
+			int idx = MenuItemFromPoint (NULL, s_gb_same_hmenu, msg->pt);
+			if (idx < 0) idx = MenuItemFromPoint (GUI.hWnd, s_gb_same_hmenu, msg->pt);
+			if (idx >= 0 &&
+			    GetMenuItemID (s_gb_same_hmenu, idx) == ID_EMULATION_GB_LINK_SPLIT &&
+			    MenuSplitIdle ())
+			{
+				if (msg->message == WM_LBUTTONUP)
+					MenuToggleSplitInPlace ();
+				return TRUE;
+			}
+		}
+		else if (msg->message == WM_KEYDOWN && msg->wParam == VK_RETURN)
+		{
+			MENUITEMINFO mii = { sizeof(mii), MIIM_STATE };
+			if (GetMenuItemInfo (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SPLIT,
+			                     FALSE, &mii) && (mii.fState & MFS_HILITE) &&
+			    MenuSplitIdle ())
+			{
+				MenuToggleSplitInPlace ();
+				return TRUE;
+			}
+		}
+	}
+	return CallNextHookEx (s_menu_filter_hook, code, wParam, lParam);
+}
+
 LRESULT CALLBACK WinProc(
 						 HWND hWnd,
 						 UINT uMsg,
@@ -2139,6 +2334,25 @@ LRESULT CALLBACK WinProc(
 				KillTimer(hWnd, TIMER_HOTPLUG_BURST);
 			return 0;
 		}
+		if (wParam == TIMER_GBLINK_PAUSE)
+		{
+			// Runs inside the paused message pump, where the main loop's
+			// stuck-pause watchdog cannot: a peer that died holding the
+			// session paused would otherwise freeze this instance forever.
+			if (!(Settings.ForcedPause & PAUSE_LINK_PEER))
+			{
+				KillTimer(hWnd, TIMER_GBLINK_PAUSE);
+				return 0;
+			}
+			S9xSGBLinkPump();
+			if (!GBLinkPidAlive(GBLinkPauserPid) || !S9xSGBLinkIsConnected())
+			{
+				KillTimer(hWnd, TIMER_GBLINK_PAUSE);
+				GBLinkPauserPid = 0;
+				S9xClearPause(PAUSE_LINK_PEER);
+			}
+			return 0;
+		}
 		break;
 	case WM_KEYDOWN:
 		if(GUI.BackgroundInput && !GUI.InactivePause)
@@ -2155,6 +2369,8 @@ LRESULT CALLBACK WinProc(
 	case WM_KEYUP:
 	case WM_CUSTKEYUP:
 		{
+			LinkHotkeyRelease (wParam);
+
 			// Master hotkey key-up: reset hold timer
 			// (the static vars are in HandleKeyMessage, so we reset via a sentinel call)
 			if (GUI.MasterHotkeyEnabled && CustomKeys.MasterHotkey.key != 0
@@ -2220,6 +2436,15 @@ LRESULT CALLBACK WinProc(
 		else if (cmd_id >= ID_FILE_LOAD0 && cmd_id < ID_FILE_LOAD0 + NUM_SAVE_BANKS * SAVE_SLOTS_PER_BANK)
 		{
 			FreezeUnfreezeSlot(cmd_id - ID_FILE_LOAD0, FALSE);
+			break;
+		}
+		else if (cmd_id >= ID_EMULATION_GB_LINK_SEATMODEL0 &&
+		         cmd_id <= ID_EMULATION_GB_LINK_SEATMODEL_LAST)
+		{
+			int           player = 0;
+			unsigned char model  = 0;
+			if (GBSeatModelFromCommand (cmd_id, &player, &model))
+				WinGBSeatSetModel (player, model);
 			break;
 		}
 		else if (cmd_id >= ID_TRANSLATIONS_BASE && cmd_id < ID_TRANSLATIONS_BASE + (int)g_translationCodes.size())
@@ -2525,6 +2750,11 @@ LRESULT CALLBACK WinProc(
             break;
 
 		case ID_EMULATION_BACKGROUNDINPUT:
+			if (S9xSGBLinkIsEnabled ())
+			{
+				S9xSetInfoString ("Link cable: background input stays on while linked");
+				break;
+			}
 			GUI.BackgroundInput = !GUI.BackgroundInput;
 			if(!GUI.hHotkeyTimer)
 				GUI.hHotkeyTimer = timeSetEvent (32, 0, (LPTIMECALLBACK)HotkeyTimer, 0, TIME_PERIODIC);
@@ -2873,9 +3103,78 @@ LRESULT CALLBACK WinProc(
 			S9xMessage(S9X_INFO, 0, INFO_SAVE_SPC);
 			break;
 		case ID_FILE_SAVE_SRAM_DATA: {
+			// Battery-less carts have nothing to write; without this check
+			// SaveSRAM's FALSE return would read as a write error.
+			const bool no_sram = S9xSGBIsActive()
+				? !S9xSGBHasBattery()
+				: (!Memory.SRAMSize && !(Multi.cartType && Multi.sramSizeB)) ||
+				  (Settings.SuperFX && (Memory.ROMType < 0x15 || Memory.ROMType == 0x17)) ||
+				  (Settings.SA1 && Memory.ROMType == 0x34);
+			if (no_sram)
+			{
+				S9xMessage(S9X_INFO, 0, SRM_NO_BATTERY);
+				break;
+			}
 			bool8 success = Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
-			if(!success)
+			if (success)
+				S9xMessage(S9X_INFO, 0, SRM_SAVED);
+			else
 				S9xMessage(S9X_ERROR, S9X_FREEZE_FILE_INFO, SRM_SAVE_FAILED);
+		}	break;
+		case ID_FILE_LOAD_SRAM_DATA: {
+			if (Settings.StopEmulation)
+				break;
+
+			TCHAR picked[MAX_PATH];
+			picked[0] = TEXT('\0');
+
+			OPENFILENAME ofn;
+			ZeroMemory (&ofn, sizeof ofn);
+			ofn.lStructSize     = sizeof(ofn);
+			ofn.hwndOwner       = GUI.hWnd;
+			ofn.lpstrFilter     = TEXT("Battery saves\0*.sav;*.sav2;*.sav3;*.sav4;*.srm\0All Files\0*.*\0\0");
+			ofn.lpstrFile       = picked;
+			ofn.nMaxFile        = MAX_PATH;
+			ofn.lpstrInitialDir = S9xGetDirectoryT (SRAM_DIR);
+			ofn.lpstrTitle      = TEXT("Load S-RAM Data");
+			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+
+			RestoreGUIDisplay ();
+			if (GetOpenFileName (&ofn))
+			{
+				char chosen[MAX_PATH];
+				strncpy (chosen, _tToChar (picked), MAX_PATH - 1);
+				chosen[MAX_PATH - 1] = '\0';
+
+				bool ok;
+				if (S9xSGBIsActive ())
+				{
+					// Straight to the battery loader: Memory.LoadSRAM rewrites
+					// the extension and would load the player-index file back.
+					ok = S9xSGBLoadBatteryFromPath (chosen);
+
+					// Keep writing to the file just loaded, or the next save
+					// would land on the index-derived name and overwrite it.
+					if (ok)
+					{
+						strncpy (Settings.GBSramPathOverride, chosen,
+						         sizeof(Settings.GBSramPathOverride) - 1);
+						Settings.GBSramPathOverride[sizeof(Settings.GBSramPathOverride) - 1] = '\0';
+					}
+				}
+				else
+					ok = Memory.LoadSRAM (chosen) != FALSE;
+
+				// Reboot so the game re-reads the save it was just given.
+				// Mid-game the old save is already in work RAM, and an
+				// in-game save would overwrite the file just loaded.
+				// Reset does not clear cart SRAM, so the load survives it.
+				if (ok)
+					S9xReset ();
+
+				S9xSetInfoString (ok ? "S-RAM loaded" : "S-RAM load failed");
+			}
+			RestoreSNESDisplay ();
 		}	break;
 		case ID_SAVEMEMPACK: {
 			std::string filename = S9xGetFilenameInc(".bs", SRAM_DIR);
@@ -2890,6 +3189,7 @@ LRESULT CALLBACK WinProc(
 		}	break;
 		case ID_EMULATION_SOFT_RESET:
 		case ID_EMULATION_HARD_RESET:
+			GBSeatMachinesRequestReset ();   // a machine seat power-cycles on its next turn
 #ifdef NETPLAY_SUPPORT
 			if (Settings.NetPlayServer)
 			{
@@ -3032,6 +3332,11 @@ LRESULT CALLBACK WinProc(
 			}
 			break;
 		case ID_EMULATION_PAUSEWHENINACTIVE:
+			if (S9xSGBLinkIsEnabled ())
+			{
+				S9xSetInfoString ("Link cable: pause-when-inactive stays off while linked");
+				break;
+			}
 			GUI.InactivePause = !GUI.InactivePause;
 			break;
 		case ID_VIDEO_ALWAYSONTOP:
@@ -3041,6 +3346,87 @@ LRESULT CALLBACK WinProc(
 		case ID_VIDEO_LOCKRESIZE:
 			GUI.DisableResize = !GUI.DisableResize;
 			WinApplyResizeLock();
+			break;
+		case ID_EMULATION_GB_LINK_SAME:
+			WinToggleGBLink (1, 2);
+			break;
+		case ID_EMULATION_GB_LINK_SAME_3:
+			WinToggleGBLink (1, 3);
+			break;
+		case ID_EMULATION_GB_LINK_SAME_4:
+			WinToggleGBLink (1, 4);
+			break;
+		case ID_EMULATION_GB_LINK_SAME_5:
+		case ID_EMULATION_GB_LINK_SAME_6:
+		case ID_EMULATION_GB_LINK_SAME_7:
+		case ID_EMULATION_GB_LINK_SAME_8:
+		case ID_EMULATION_GB_LINK_SAME_9:
+		case ID_EMULATION_GB_LINK_SAME_10:
+		case ID_EMULATION_GB_LINK_SAME_11:
+		case ID_EMULATION_GB_LINK_SAME_12:
+		case ID_EMULATION_GB_LINK_SAME_13:
+		case ID_EMULATION_GB_LINK_SAME_14:
+		case ID_EMULATION_GB_LINK_SAME_15:
+			// Faceball 2000's ring cable: the game's own lobby counts
+			// whoever joins (the submenu only exists for that cart).
+			WinToggleGBLink (1, (int)((wParam & 0xffff) - ID_EMULATION_GB_LINK_SAME_5 + 5));
+			break;
+		case ID_EMULATION_GB_LINK_DIFF:
+			WinToggleGBLink (2, 2);
+			break;
+		case ID_EMULATION_GB_LINK_UNLINK:
+			WinGBLinkUnlink ();
+			break;
+		case ID_EMULATION_GB_LINK_SPLIT:
+			WinToggleGBLinkSplit ();
+			break;
+		case ID_EMULATION_GB_LINK_CONNECT:
+			// lParam rides the master's Game Boy Model + 1 (0 = not
+			// specified): a reused window may sit on another console and
+			// has to reboot onto the master's before dialing in.
+			if (lParam >= 1 && lParam <= S9X_NUM_GBBOOT_POLICIES)
+			{
+				const uint8 want   = S9xNormalizeGBBootPolicy ((int) (lParam - 1));
+				const uint8 active = S9xNormalizeGBBootPolicy (Settings.GBBootPolicy);
+				Settings.GBBootPolicy = want;   // covers a later cart pick too
+				if (Settings.GBRomPath[0] && want != active)
+				{
+					TCHAR wpath[_MAX_PATH];
+					Utf8ToWide u8(Settings.GBRomPath);
+					_tcsncpy(wpath, u8, _MAX_PATH - 1);
+					wpath[_MAX_PATH - 1] = 0;
+					RestoreGUIDisplay();
+					if (LoadROM(wpath))
+					{
+						S9xReset();
+						ReInitSound();
+					}
+					RestoreSNESDisplay();
+				}
+			}
+			// Dial into whatever session exists; idempotent, so a rejoin
+			// request can never unplug an instance that is already on. A
+			// connect request always means a socket seat, so the split
+			// preference must not hijack it into an in-process session.
+			if (!S9xSGBLinkIsEnabled () && !S9xSGBSplitActive () &&
+			    !S9xSGBViewerClientActive ())
+			{
+				const bool split_pref = GBLinkSplitScreen;
+				GBLinkSplitScreen = false;
+				WinToggleGBLink (Settings.GBRomPath[0] ? 1 : 2, 2);
+				GBLinkSplitScreen = split_pref;
+			}
+			break;
+		case ID_EMULATION_GB_LINK_DISCONNECT:
+			// A Current Game seat has no socket: leaving means closing its
+			// window. Only an Other Game peer unplugs a TCP link here.
+			if (S9xSGBViewerClientActive ())
+			{
+				PostMessage (GUI.hWnd, WM_CLOSE, 0, 0);
+				break;
+			}
+			if (S9xSGBLinkIsEnabled ())
+				WinToggleGBLink (WinGetGBLinkMode () ? WinGetGBLinkMode () : 1, 2);
 			break;
 		case ID_EMULATION_RUNAHEAD_OFF:
 			Settings.RunAhead = 0;
@@ -3277,6 +3663,11 @@ LRESULT CALLBACK WinProc(
 					WinSaveConfigFile();
 					break;
 				}
+				// No link cable under Super Game Boy Color yet: a live
+				// session ends before the game reboots onto it.
+				if (policy == S9X_GBBOOT_SGBC &&
+				    (S9xSGBLinkIsEnabled () || S9xSGBSplitActive ()))
+					WinGBLinkUnlink ();
 				Settings.GBBootPolicy = policy;
 				WinSaveConfigFile();
 				if (Settings.GBRomPath[0] && ReloadLoadedGame())
@@ -3519,12 +3910,20 @@ LRESULT CALLBACK WinProc(
 	}
 	case WM_EXITMENULOOP:
 		HookDipMenu(false);
+		if (s_menu_filter_hook)
+		{
+			UnhookWindowsHookEx (s_menu_filter_hook);
+			s_menu_filter_hook = NULL;
+		}
 		UpdateWindow(GUI.hWnd);
 		DrawMenuBar(GUI.hWnd);
 		S9xClearPause (PAUSE_MENU);
 		break;
 
 	case WM_ENTERMENULOOP:
+		if (!s_menu_filter_hook)
+			s_menu_filter_hook = SetWindowsHookEx (WH_MSGFILTER, MenuKeepOpenFilter,
+			                                       NULL, GetCurrentThreadId ());
 		S9xSetPause (PAUSE_MENU);
 		CheckMenuStates ();
 		HookDipMenu(Settings.NSS);
@@ -3533,8 +3932,46 @@ LRESULT CALLBACK WinProc(
 		DrawMenuBar(GUI.hWnd);
 		break;
 
+	case WM_GBLINK_PAUSE:
+		if (wParam)
+		{
+			// Watch the pauser: if it dies, its unpause can never arrive.
+			GBLinkPauserPid = (DWORD)lParam;
+			S9xSetPause (PAUSE_LINK_PEER);
+			SetTimer (hWnd, TIMER_GBLINK_PAUSE, 250, NULL);
+		}
+		else
+		{
+			KillTimer (hWnd, TIMER_GBLINK_PAUSE);
+			GBLinkPauserPid = 0;
+			S9xClearPause (PAUSE_LINK_PEER);
+		}
+		// The hub host passes a seat's pause on to the other seats; they
+		// only know the host, so nothing bounces back.
+		if (!Settings.GBLinkPeerInstance)
+			GBLinkPostToPartner (WM_GBLINK_PAUSE, wParam, lParam, (DWORD)lParam);
+		return 0;
+
+	case WM_GBLINK_FREEZE:
+		// A linked instance saved or loaded; match it on our own file.
+		// The flag stops this bouncing straight back at the sender.
+		GBLinkStateRelaying = true;
+		FreezeUnfreezeSlot ((int)LOWORD (wParam), HIWORD (wParam) ? TRUE : FALSE);
+		GBLinkStateRelaying = false;
+		// The hub host passes it on to the seats that have not heard.
+		if (!Settings.GBLinkPeerInstance)
+			GBLinkPostToPartner (WM_GBLINK_FREEZE, wParam, lParam, (DWORD)lParam);
+		return 0;
+
 	case WM_CLOSE:
 		SaveMainWinPos();
+		// Quitting mid-session must not save the session's shape as the
+		// user's: a split grid or a ring's 1x would greet the next game.
+		if (GBLinkPreRingW > 0 && !GUI.FullScreen && !GUI.window_maximized)
+		{
+			GUI.window_size.right  = GUI.window_size.left + GBLinkPreRingW;
+			GUI.window_size.bottom = GUI.window_size.top  + GBLinkPreRingH;
+		}
 		break;
 
 	case WM_DESTROY:
@@ -3564,7 +4001,10 @@ LRESULT CALLBACK WinProc(
 	case WM_ACTIVATE:
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
-			if(GUI.InactivePause)
+			// Never while linked: an unfocused pause reads as a dead cable,
+			// and a parked viewer never reaches the force that unparks it.
+			if(GUI.InactivePause && !S9xSGBLinkIsEnabled () &&
+			   !S9xSGBViewerClientActive () && !S9xSGBViewerHostActive ())
 			{
 				S9xSetPause (PAUSE_INACTIVE_WINDOW);
 			}
@@ -3584,7 +4024,8 @@ LRESULT CALLBACK WinProc(
 		//                RealizePalette (GUI.WindowDC);
 		break;
 	case WM_SIZE:
-		if (wParam == SIZE_MINIMIZED && GUI.InactivePause)
+		if (wParam == SIZE_MINIMIZED && GUI.InactivePause && !S9xSGBLinkIsEnabled () &&
+		    !S9xSGBViewerClientActive () && !S9xSGBViewerHostActive ())
 		{
 			S9xSetPause(PAUSE_INACTIVE_WINDOW);
 		}
@@ -4389,7 +4830,7 @@ BOOL WinInit( HINSTANCE hInstance)
     wndclass.hIconSm = NULL;
     wndclass.hCursor = NULL;
     wndclass.lpszMenuName = NULL;
-    wndclass.lpszClassName = TEXT("Snes9x: WndClass");
+    wndclass.lpszClassName = SNES9XW_WNDCLASS;
 	wndclass.hbrBackground=(HBRUSH)GetStockObject(BLACK_BRUSH);
 
     GUI.hInstance = hInstance;
@@ -4489,7 +4930,7 @@ BOOL WinInit( HINSTANCE hInstance)
     AdjustWindowRectEx (&rect, dwStyle, FALSE, dwExStyle);
     if ((GUI.hWnd = CreateWindowEx (
         dwExStyle,
-        TEXT("Snes9x: WndClass"),
+        SNES9XW_WNDCLASS,
         buf,
         WS_CLIPSIBLINGS |
         WS_CLIPCHILDREN |
@@ -5082,6 +5523,17 @@ int WINAPI WinMain(
 	ConfigFile::SetTimeSort(false);
 
     const TCHAR *rom_filename = WinParseCommandLineAndLoadConfigFile (GetCommandLine());
+
+	// A spawned seat plays silent: several instances of one soundtrack is
+	// noise, so only the master sounds. The stash keeps the user's Mute
+	// out of the shared config file.
+	if (Settings.GBLinkPeerInstance && !GUI.Mute)
+	{
+		GBLinkUserMute   = GUI.Mute;
+		GBLinkMuteForced = true;
+		GUI.Mute         = true;
+	}
+
     WinSaveConfigFile ();
 	WinLockConfigFile ();
 
@@ -5113,6 +5565,7 @@ int WINAPI WinMain(
     S9xSetRecentGames ();
 
 	RestoreMainWinPos();
+	GBLinkPlacePeerWindow();
 
 	void InitSnes9x (void);
 	InitSnes9x ();
@@ -5168,6 +5621,13 @@ int WINAPI WinMain(
 		}
 	}
 
+	// After the ROM load, so the peer can tell same-game from other-game.
+	// No-op in a normal launch.
+	WinAutoStartGBLinkPeer ();
+	// A viewer spawns unfocused; force the responsive settings before the
+	// main loop can park on an inactive-window pause it can never clear.
+	GBLinkSyncResponsiveSettings ();
+
 	S9xUnmapAllControls();
 	S9xSetupDefaultKeymap();
 
@@ -5218,6 +5678,41 @@ int WINAPI WinMain(
             }
 
 			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && (!Settings.FrameAdvance || GUI.FAMute)));
+        }
+
+        // Runs with no ROM loaded too: the spawned instance sits here
+        // until its game is picked, and the peer must see it arrive.
+        S9xSGBLinkPump ();
+
+        // Catches every unlink path, including the peer just going away.
+        GBLinkSyncResponsiveSettings ();
+
+        // A hub host seats its instances one at a time as they arrive,
+        // and folds the session once every one of them has been closed.
+        GBLinkPumpSpawns ();
+        GBLinkResetWhenLeftAlone ();
+        GBLinkAutoCloseAbandonedHub ();
+        GBLinkViewerWatch ();
+
+        // Never stay frozen waiting on an instance that has gone away.
+        if ((Settings.ForcedPause & PAUSE_LINK_PEER) && !S9xSGBLinkIsConnected ())
+            S9xClearPause (PAUSE_LINK_PEER);
+
+        // The driving end can change mid-session, so refresh on change
+        // rather than only at connect.
+        {
+            char gblink_status[256];
+            if (S9xSGBLinkTakeStatusChange (gblink_status, sizeof(gblink_status)))
+                S9xSetInfoString (gblink_status);
+        }
+
+        // Timestamp lockstep: while our emulated clock has outrun a
+        // linked peer's, idle this frame. The pump above keeps running,
+        // so the peer's timestamps arrive and the pair converges.
+        if (S9xSGBLinkShouldHoldFrame ())
+        {
+            Sleep (1);
+            continue;
         }
 
 #ifdef NETPLAY_SUPPORT
@@ -5291,7 +5786,9 @@ int WINAPI WinMain(
 
 			ProcessInput();
 
-			if (GUI.rewindBufferSize
+			// Rewind snapshots capture only the primary core; rewinding a
+			// split-screen session would desync the other seats.
+			if (GUI.rewindBufferSize && !S9xSGBSplitActive()
 #ifdef NETPLAY_SUPPORT
 				&& !Settings.NetPlay
 #endif
@@ -5345,7 +5842,10 @@ int WINAPI WinMain(
 				}
 			}
 
-			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
+			// Run-ahead rolls back through savestates that do not carry the
+			// split-screen seats; run those sessions plainly.
+			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused &&
+			    !S9xSGBSplitActive())
 			{
 				// Run-ahead: commit 1 hidden frame, save state, run N-1 more hidden frames
 				// to "look into the future", then run the displayed frame as a preview, and
@@ -5423,6 +5923,33 @@ int WINAPI WinMain(
 			{
 				S9xMainLoop();
 			}
+
+			// Super Game Boy seats are SNES machines of their own: each gets
+			// its frame now, one at a time, while this one is parked.
+			GBSeatMachinesTurn ();
+
+			// BIOS-mode sessions: the seats stepped inside the frame,
+			// slaved to the SNES clock, so their pads are collected once
+			// per host frame. (BIOS-less sessions do this from the SGB
+			// branch in S9xMainLoop.)
+			if (Settings.SGB_BIOSModeActive && S9xSGBViewerHostActive ())
+			{
+				// One window = one player, and every seat reads its own
+				// joypad number, so no window needs focus. Faceball's
+				// 15-player mode: seats 5+ replay Joypad #5 on a delay.
+				S9xSGBSplitEchoPush ((uint16)MovieGetJoypad (4));
+				for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
+					S9xSGBSplitSetJoypad (p, p >= 5 ? S9xSGBSplitEchoPad (p)
+					                                : (uint16)MovieGetJoypad (p - 1));
+				S9xSGBDebugSgbCompare (GFX.Screen, GFX.RealPPL, PPU.CGDATA);
+				// RunFrame does this for BIOS-less sessions; this path is
+				// the only per-frame hook BIOS mode has.
+				S9xSGBSplitRingWatch ();
+			}
+
+			// Seat windows live in this process now. The emulation thread
+			// only stages the frame; the render thread draws it.
+			GBSeatPresentFrame ();
 #ifdef RETROACHIEVEMENTS_SUPPORT
 			{
 				// Suspend achievement processing whenever remote inputs are
@@ -5455,6 +5982,21 @@ int WINAPI WinMain(
 				static uint32 sgbCpAge   = 0;
 				static uint32 sgbCpQuiet = 0;
 				static uint32 sgbCpShown = 0;
+				static int    sgbCpPlayers = 0;
+				// A checkpoint taken before the cable was plugged in holds no
+				// seats, and one taken for a different seat count is not this
+				// session. Either way, take it again.
+				const int sgbPlayers = S9xSGBSplitPlayers ();
+				if (sgbPlayers != sgbCpPlayers)
+				{
+					sgbCpPlayers = sgbPlayers;
+					S9xSGBInvalidateSoftResetCheckpoint ();
+					sgbCpDone  = false;
+					sgbCpPkts  = S9xSGBGetPacketCount ();
+					sgbCpQuiet = 0;
+					sgbCpAge   = 0;
+					sgbCpShown = 0;
+				}
 				if (!S9xSGBBootHandoffCaptured())
 				{
 					S9xSGBInvalidateSoftResetCheckpoint();
@@ -5602,10 +6144,17 @@ void GetSlotFilename(int slot, char filename[_MAX_PATH + 1])
 {
     char ext[_MAX_EXT + 1];
 
+    // Linked instances on one ROM resolve to the same path. Tagged by
+    // player index rather than bind role: the role is re-decided on every
+    // reconnect, which would swap the files between sessions.
+    char tag[8] = "";
+    if (S9xSGBLinkIsConnected())
+        snprintf(tag, sizeof(tag), "_p%u", (unsigned)Settings.GBLinkPlayerIndex);
+
     if(slot == -1)
-        strcpy(ext, ".oops");
+        snprintf(ext, _MAX_EXT, "%s.oops", tag);
     else
-        snprintf(ext, _MAX_EXT, ".%03d", slot);
+        snprintf(ext, _MAX_EXT, "%s.%03d", tag, slot);
     strcpy(filename, S9xGetFilename(ext, SNAPSHOT_DIR).c_str());
 }
 
@@ -5614,24 +6163,43 @@ void FreezeUnfreezeSlot(int slot, bool8 freeze)
     char filename[_MAX_PATH + 1];
     GetSlotFilename(slot, filename);
 
-    FreezeUnfreeze(filename, freeze);
+    // A linked session is one save: loading part of it would leave the
+    // games at different moments and desync immediately. Relayed only after
+    // this side commits, so a cancelled confirm cannot half-apply it. The
+    // oops slot is an emergency dump of this instance alone.
+    const bool done = FreezeUnfreeze(filename, freeze);
+
+    if (done && !GBLinkStateRelaying && slot != -1 && S9xSGBLinkIsConnected())
+        GBLinkPostToPartner(WM_GBLINK_FREEZE,
+                            MAKEWPARAM(slot, freeze ? 1 : 0),
+                            (LPARAM)GetCurrentProcessId());
 }
 
-void FreezeUnfreeze (const char *filename, bool8 freeze)
+bool FreezeUnfreeze (const char *filename, bool8 freeze)
 {
+    // Save states capture only the primary core; loading one under a
+    // split-screen session would desync the other seats.
+    if (S9xSGBSplitActive ())
+    {
+        S9xSetInfoString ("Save states are not supported in split screen yet");
+        return false;
+    }
+
 #ifdef NETPLAY_SUPPORT
     if (!freeze && Settings.NetPlay && !Settings.NetPlayServer)
     {
         S9xMessage (S9X_INFO, S9X_NETPLAY_NOT_SERVER,
 			"Only the server is allowed to load freeze files.");
-        return;
+        return false;
     }
 #endif
 
     if(Settings.StopEmulation)
-        return;
+        return false;
 
-	if (GUI.ConfirmSaveLoad)
+	// Not while matching the paired instance: nobody asked for it on this
+	// window, and a modal prompt here would strand the other half.
+	if (GUI.ConfirmSaveLoad && !GBLinkStateRelaying)
 	{
 		std::string msg, title;
 		if (freeze)
@@ -5647,7 +6215,7 @@ void FreezeUnfreeze (const char *filename, bool8 freeze)
 		msg += filename;
 		int res = MessageBox(GUI.hWnd, _tFromChar(msg.c_str()), _tFromChar(title.c_str()), MB_YESNO | MB_ICONQUESTION);
 		if (res != IDYES)
-			return;
+			return false;
 	}
 
     S9xSetPause (PAUSE_FREEZE_FILE);
@@ -5665,7 +6233,7 @@ void FreezeUnfreeze (const char *filename, bool8 freeze)
 		if (!RA_WarnDisableHardcore("Loading save states"))
 		{
 			S9xClearPause(PAUSE_FREEZE_FILE);
-			return;
+			return false;
 		}
 #endif
 
@@ -5684,6 +6252,7 @@ void FreezeUnfreeze (const char *filename, bool8 freeze)
     }
 
     S9xClearPause (PAUSE_FREEZE_FILE);
+    return true;
 }
 
 bool UnfreezeScreenshotSlot(int slot, uint16 **image_buffer, int &width, int &height)
@@ -5786,8 +6355,8 @@ static void UpdateTestsMenu ()
 }
 
 // Emulation menu entries that depend on what is loaded: each is on the menu
-// only while its hardware runs. They follow Game Boy Model, which also comes
-// and goes, so the group's slot is counted from it.
+// only while its hardware runs. They follow Link Cable and Game Boy Model,
+// which also come and go, so the group's slot is counted from them.
 static void UpdateHardwarePopups ()
 {
 	// Resource order; `has` is a command inside the popup, 0 for the separator.
@@ -5801,11 +6370,15 @@ static void UpdateHardwarePopups ()
 		{ ID_DEBUG_GB_TILE_VIEWER, TEXT("&GB-PPU") },
 	};
 	static HMENU s_parent = NULL;
-	static int   s_first  = 0;   // NSS's slot while Game Boy Model is hidden
+	static int   s_first  = 0;   // NSS's slot while Link Cable and Game Boy Model are hidden
 
 	MENUITEMINFO probe = {};
 	probe.cbSize = sizeof(probe);
 	probe.fMask  = MIIM_ID;
+	auto above = [&probe](HMENU m) {
+		return (GetMenuItemInfo(m, ID_EMULATION_GB_LINK, FALSE, &probe) ? 1 : 0) +
+		       (GetMenuItemInfo(m, ID_EMULATION_BIOS,    FALSE, &probe) ? 1 : 0);
+	};
 
 	if (!s_parent)
 	{
@@ -5813,7 +6386,7 @@ static void UpdateHardwarePopups ()
 		int   pos    = 0;
 		if (!GUI.hMenu || !FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &parent, &pos))
 			return;
-		s_first = pos - (GetMenuItemInfo(parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+		s_first = pos - above(parent);
 		for (Entry &e : s_entries)
 		{
 			MENUITEMINFO item = {};
@@ -5839,7 +6412,7 @@ static void UpdateHardwarePopups ()
 	const bool want[] = { NSS.Active != 0, SFCBox.Active != 0, Settings.SuperDisc != 0,
 	                      snes || gb, snes, gb };
 
-	int  pos     = s_first + (GetMenuItemInfo(s_parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+	int  pos     = s_first + above(s_parent);
 	bool changed = false;
 	for (size_t i = 0; i < _countof(s_entries); i++)
 	{
@@ -5963,6 +6536,64 @@ static void HookDipMenu (bool on)
 	{
 		UnhookWindowsHookEx(s_dipMenuHook);
 		s_dipMenuHook = NULL;
+	}
+}
+
+// Show or hide a whole submenu, the way the BIOS one below does inline.
+// Placement is "before before_id" because an absolute index would drift
+// under the BIOS submenu, which is itself inserted and removed.
+static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT before_id,
+                               bool visible, HMENU *cached, HMENU *parent)
+{
+	if (!*cached)
+	{
+		const int top_n = GetMenuItemCount (GUI.hMenu);
+		for (int t = 0; t < top_n && !*cached; t++)
+		{
+			HMENU sub = GetSubMenu (GUI.hMenu, t);
+			if (!sub) continue;
+			const int sub_n = GetMenuItemCount (sub);
+			for (int j = 0; j < sub_n; j++)
+			{
+				MENUITEMINFO probe = {};
+				probe.cbSize = sizeof(probe);
+				probe.fMask  = MIIM_ID | MIIM_SUBMENU;
+				if (GetMenuItemInfo (sub, j, TRUE, &probe) &&
+				    probe.wID == id && probe.hSubMenu)
+				{
+					*cached = probe.hSubMenu;
+					*parent = sub;
+					break;
+				}
+			}
+		}
+	}
+	if (!*cached || !*parent) return;
+
+	MENUITEMINFO present = {};
+	present.cbSize = sizeof(present);
+	present.fMask  = MIIM_ID;
+	const bool in_menu = GetMenuItemInfo (*parent, id, FALSE, &present) != FALSE;
+
+	if (visible && !in_menu)
+	{
+		MENUITEMINFO ins = {};
+		ins.cbSize     = sizeof(ins);
+		ins.fMask      = MIIM_STRING | MIIM_SUBMENU | MIIM_ID | MIIM_FTYPE;
+		ins.fType      = MFT_STRING;
+		ins.wID        = id;
+		ins.hSubMenu   = *cached;
+		ins.dwTypeData = (LPTSTR)label;
+		ins.cch        = (UINT)_tcslen (label);
+
+		InsertMenuItem (*parent, before_id, FALSE, &ins);
+		if (LocaleIsTranslated ()) LocalizeMenu (*parent);
+		DrawMenuBar (GUI.hWnd);
+	}
+	else if (!visible && in_menu)
+	{
+		RemoveMenu (*parent, id, MF_BYCOMMAND);
+		DrawMenuBar (GUI.hWnd);
 	}
 }
 
@@ -6139,6 +6770,202 @@ static void CheckMenuStates ()
 	mii.fState = (GUI.DisableResize) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_VIDEO_LOCKRESIZE, FALSE, &mii);
 
+	// Game Boy only, so the submenu comes and goes like the BIOS one. A
+	// spawned instance keeps it unconditionally: it must always be able
+	// to reconnect, even before its game is picked.
+	{
+		static HMENU s_link_hmenu  = NULL;
+		static HMENU s_link_parent = NULL;
+
+		// SGB1 has no link port. Run mode 1 alone can't say that: the
+		// BIOS-less path parks every non-CGB cart there too.
+		const bool sgb1_bios = Settings.SGB_BIOSModeActive &&
+		                       Settings.GameBoyRunMode == 1;
+		const bool show = ((Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
+		                   !sgb1_bios && !GBLinkBlockedBySgbc ()) ||
+		                  S9xSGBLinkIsEnabled () ||
+		                  Settings.GBLinkPeerInstance;
+		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("&Link Cable"),
+		                   ID_EMULATION_RUNAHEAD_POPUP, show, &s_link_hmenu, &s_link_parent);
+
+		// A spawned instance never chooses the session shape — only the
+		// master does. Its menu is rebuilt once into plain Connect and
+		// Disconnect, which cover it whichever game it was launched for.
+		static bool s_peer_menu_built = false;
+		if (show && Settings.GBLinkPeerInstance && !s_peer_menu_built && s_link_hmenu)
+		{
+			while (GetMenuItemCount (s_link_hmenu) > 0)
+				DeleteMenu (s_link_hmenu, 0, MF_BYPOSITION);
+			AppendMenu (s_link_hmenu, MF_STRING, ID_EMULATION_GB_LINK_CONNECT,
+			            TEXT("&Connect"));
+			AppendMenu (s_link_hmenu, MF_STRING, ID_EMULATION_GB_LINK_DISCONNECT,
+			            TEXT("&Disconnect"));
+			s_peer_menu_built = true;
+		}
+
+		if (show && Settings.GBLinkPeerInstance)
+		{
+			// A viewer seat is wired for the session's life: Connect is a
+			// status tick, and its Disconnect leaves by closing the window.
+			const bool viewer = S9xSGBViewerClientActive ();
+			const bool linked = S9xSGBLinkIsEnabled () || viewer;
+			// The label follows the state: a live seat reads Connected, an
+			// unplugged Other Game peer offers Connect.
+			MENUITEMINFO mtext = { sizeof(mtext), MIIM_STRING };
+			mtext.dwTypeData = (LPTSTR)(linked ? TEXT("&Connected") : TEXT("&Connect"));
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_CONNECT, FALSE, &mtext);
+			mii.fState = linked ? (MFS_CHECKED | MFS_DISABLED) : MFS_UNCHECKED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_CONNECT, FALSE, &mii);
+			mii.fState = linked ? MFS_UNCHECKED : (MFS_UNCHECKED | MFS_DISABLED);
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DISCONNECT, FALSE, &mii);
+		}
+		else if (show)
+		{
+			// Same-game shapes stay enabled among themselves: the ticked
+			// one doubles as the disconnect, any other one switches the
+			// live session to it. Crossing between Same and Other makes
+			// no sense mid-session, so the opposite family greys out.
+			// The tick follows the instances actually present: a 4-player
+			// session with one window closed reads as 3. A split session
+			// ticks like a live link of its size.
+			int gblink  = WinGetGBLinkMode ();
+			int players = WinGetGBLinkPlayers ();
+			if (S9xSGBSplitActive ())
+			{
+				gblink  = 1;
+				players = S9xSGBSplitPlayers ();
+			}
+			else if (gblink == 1 && players > 2)
+			{
+				players = WinGetGBLinkLivePlayers ();
+			}
+			const UINT same_off = (gblink == 2)
+			                    ? (MFS_UNCHECKED | MFS_DISABLED) : MFS_UNCHECKED;
+			const UINT diff_off = (gblink == 1)
+			                    ? (MFS_UNCHECKED | MFS_DISABLED) : MFS_UNCHECKED;
+
+			mii.fState = (gblink == 1 && players <= 2) ? MFS_CHECKED : same_off;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
+			mii.fState = (gblink == 1 && players == 3) ? MFS_CHECKED : same_off;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_3, FALSE, &mii);
+			mii.fState = (gblink == 1 && players == 4) ? MFS_CHECKED : same_off;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_4, FALSE, &mii);
+			mii.fState = (gblink == 2) ? MFS_CHECKED : diff_off;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
+
+			// Live only: the way out of a session, so nobody has to guess
+			// that the ticked player count doubles as the leave button.
+			mii.fState = gblink ? MFS_ENABLED : MFS_DISABLED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_UNLINK, FALSE, &mii);
+
+			// The whole Current Game submenu greys during an Other session.
+			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_POPUP, FALSE, &mii);
+
+			// Split screen needs the BIOS-less core, so in BIOS mode the
+			// item comes out of the menu rather than offering a dead end.
+			if (!s_gb_same_hmenu && s_link_hmenu)
+			{
+				const int cnt = GetMenuItemCount (s_link_hmenu);
+				for (int j = 0; j < cnt; j++)
+				{
+					MENUITEMINFO probe = {};
+					probe.cbSize = sizeof(probe);
+					probe.fMask  = MIIM_ID | MIIM_SUBMENU;
+					if (GetMenuItemInfo (s_link_hmenu, j, TRUE, &probe) &&
+					    probe.wID == ID_EMULATION_GB_LINK_SAME_POPUP && probe.hSubMenu)
+					{
+						s_gb_same_hmenu = probe.hSubMenu;
+						break;
+					}
+				}
+			}
+			// Faceball 2000 alone gets the ring submenu (5..15 Players),
+			// right under 4 Players; every other cart never sees it. The
+			// popup is built once and re-attached as carts come and go —
+			// RemoveMenu detaches without destroying it.
+			if (s_gb_same_hmenu)
+			{
+				static HMENU s_ring_hmenu = NULL;
+				MENUITEMINFO probe15 = {};
+				probe15.cbSize = sizeof(probe15);
+				probe15.fMask  = MIIM_ID;
+				const bool in15   = GetMenuItemInfo (s_gb_same_hmenu,
+				                                     ID_EMULATION_GB_LINK_SAME_RING_POPUP,
+				                                     FALSE, &probe15) != FALSE;
+				const bool want15 = S9xSGBCartIsFaceball ();
+				if (want15 && !in15)
+				{
+					if (!s_ring_hmenu)
+					{
+						s_ring_hmenu = CreatePopupMenu ();
+						for (int p = 5; p <= 15; p++)
+						{
+							TCHAR label[32];
+							_sntprintf (label, 32, TEXT("%d Players"), p);
+							AppendMenu (s_ring_hmenu, MF_STRING,
+							            ID_EMULATION_GB_LINK_SAME_5 + (p - 5), label);
+						}
+					}
+					MENUITEMINFO mring = {};
+					mring.cbSize     = sizeof(mring);
+					mring.fMask      = MIIM_ID | MIIM_SUBMENU | MIIM_STRING;
+					mring.wID        = ID_EMULATION_GB_LINK_SAME_RING_POPUP;
+					mring.hSubMenu   = s_ring_hmenu;
+					mring.dwTypeData = (LPTSTR)TEXT("5-15 &Players");
+					InsertMenuItem (s_gb_same_hmenu, 3, TRUE, &mring);
+					if (LocaleIsTranslated ()) LocalizeMenu (s_gb_same_hmenu);
+				}
+				else if (!want15 && in15)
+					RemoveMenu (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SAME_RING_POPUP,
+					            MF_BYCOMMAND);
+				if (want15)
+				{
+					// The popup greys with its Current Game family; the live
+					// seat count owns the tick inside it.
+					mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
+					SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_RING_POPUP,
+					                 FALSE, &mii);
+					for (int p = 5; p <= 15; p++)
+					{
+						mii.fState = (gblink == 1 && players == p) ? MFS_CHECKED : same_off;
+						SetMenuItemInfo (GUI.hMenu,
+						                 ID_EMULATION_GB_LINK_SAME_5 + (p - 5), FALSE, &mii);
+					}
+				}
+			}
+
+			if (s_gb_same_hmenu)
+			{
+				MENUITEMINFO present = {};
+				present.cbSize = sizeof(present);
+				present.fMask  = MIIM_ID;
+				const bool in_menu  = GetMenuItemInfo (s_gb_same_hmenu, ID_EMULATION_GB_LINK_SPLIT,
+				                                       FALSE, &present) != FALSE;
+				const bool split_ok = !Settings.SGB_BIOSModeActive;
+				if (split_ok && !in_menu)
+				{
+					AppendMenu (s_gb_same_hmenu, MF_SEPARATOR, 0, NULL);
+					AppendMenu (s_gb_same_hmenu, MF_STRING, ID_EMULATION_GB_LINK_SPLIT,
+					            TEXT("S&plit Screen"));
+					if (LocaleIsTranslated ()) LocalizeMenu (s_gb_same_hmenu);
+				}
+				else if (!split_ok && in_menu)
+				{
+					// The item and its separator sit at the submenu's tail.
+					const int cnt = GetMenuItemCount (s_gb_same_hmenu);
+					RemoveMenu (s_gb_same_hmenu, cnt - 1, MF_BYPOSITION);
+					if (cnt >= 2) RemoveMenu (s_gb_same_hmenu, cnt - 2, MF_BYPOSITION);
+				}
+			}
+
+			// The split toggle stays live too: mid-session it restarts
+			// the session in the other flavor.
+			mii.fState = (GBLinkSplitScreen ? MFS_CHECKED : MFS_UNCHECKED);
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SPLIT, FALSE, &mii);
+		}
+	}
+
 	{
 		int runAheadIds[5] = {
 			ID_EMULATION_RUNAHEAD_OFF,
@@ -6204,8 +7031,22 @@ static void CheckMenuStates ()
 				TCHAR txt[]    = TEXT("Game &Boy Model");
 				ins.dwTypeData = txt;
 				ins.cch        = (UINT)_tcslen(txt);
+				// anchor after Run Ahead: the cached index drifts when the
+				// Link Cable popup above it comes and goes
 				UINT pos = s_bios_pos;
 				const UINT count = (UINT)GetMenuItemCount(s_bios_parent);
+				for (UINT j = 0; j < count; j++)
+				{
+					MENUITEMINFO probe = {};
+					probe.cbSize = sizeof(probe);
+					probe.fMask  = MIIM_ID;
+					if (GetMenuItemInfo(s_bios_parent, j, TRUE, &probe) &&
+					    probe.wID == ID_EMULATION_RUNAHEAD_POPUP)
+					{
+						pos = j + 1;
+						break;
+					}
+				}
 				if (pos > count) pos = count;
 				InsertMenuItem(s_bios_parent, pos, TRUE, &ins);
 				if (LocaleIsTranslated())
@@ -6355,6 +7196,7 @@ static void CheckMenuStates ()
         mii.fState |= MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SPC_DATA, FALSE, &mii);
     SetMenuItemInfo (GUI.hMenu, ID_FILE_SAVE_SRAM_DATA, FALSE, &mii);
+    SetMenuItemInfo (GUI.hMenu, ID_FILE_LOAD_SRAM_DATA, FALSE, &mii);
 
 	for(int i = ID_FILE_SAVE0; i <= ID_FILE_SAVE_FILE; i++)
 		SetMenuItemInfo (GUI.hMenu, i, FALSE, &mii);
@@ -6808,6 +7650,11 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		filename = msu1_renamed;
 
 	if (!Settings.StopEmulation) {
+		// A split session belongs to the outgoing game: fold it (and save
+		// its seat batteries) before the paths change under it. A master
+		// swapping its cartridge likewise ends a socket session outright.
+		if (S9xSGBSplitActive ()) WinStopGBSplit ();
+		WinGBLinkMasterUnplug ();
 		Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 		S9xSaveCheatFile (S9xGetFilename (".cht", CHEAT_DIR).c_str());
 #ifdef RETROACHIEVEMENTS_SUPPORT
@@ -6823,7 +7670,17 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 	if (!Settings.StopEmulation) {
 		bool8 loadedSRAM = Memory.LoadSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 		if(!loadedSRAM) // help migration from earlier Snes9x versions by checking ROM directory for savestates
-			Memory.LoadSRAM (S9xGetFilename (".srm", ROMFILENAME_DIR).c_str());
+			loadedSRAM = Memory.LoadSRAM (S9xGetFilename (".srm", ROMFILENAME_DIR).c_str());
+
+		// A linked player past the first with no .savN of its own would start
+		// on the index-less .sav the GB core pre-seeds; back to power-on $FF.
+		if (!loadedSRAM && Settings.GBLinkPlayerIndex > 1 &&
+		    S9xSGBIsActive () && S9xSGBHasBattery ())
+		{
+			unsigned char *sram = S9xSGBGetSRAM ();
+			const size_t   size = S9xSGBGetSRAMSize ();
+			if (sram && size) memset (sram, 0xFF, size);
+		}
 		if(!filename2) // no recent for multi cart
 			S9xAddToRecentGames (filename);
 		CheckDirectoryIsWritable (S9xGetFilename (".---", SNAPSHOT_DIR).c_str());
@@ -6862,6 +7719,11 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		// The console may have changed with the load, and the two picture
 		// sizes are far apart.
 		WinApplyContentWindowSize();
+
+		// A peer whose cartridge change unplugged the cable dials back
+		// in; the master is still listening. First loads keep the link
+		// and fall through the already-on-the-wire guard.
+		WinAutoStartGBLinkPeer ();
 	}
 
 	if(GUI.ControllerOption == SNES_SUPERSCOPE || GUI.ControllerOption == SNES_MACSRIFLE)
@@ -7653,6 +8515,8 @@ static void SoundConfUpdateModeState(HWND hDlg, bool force)
 // has to track changes made behind it or OK would push a stale value back.
 static void S9xSetMuted(bool mute)
 {
+	// The user's own flip outranks the spawned seat's forced default.
+	GBLinkMuteForced = false;
 	GUI.Mute = mute;
 	S9xSetSoundMute(GUI.Mute);
 	if (s_hSoundOptsDlg)
@@ -8012,6 +8876,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 					Settings.DynamicRateControl=IsDlgButtonChecked(hDlg, IDC_DYNRATECONTROL);
 					Settings.SoundSync=IsDlgButtonChecked(hDlg, IDC_SYNC_TO_SOUND_CPU);
 					Settings.GBSuppressNRxGlitches=IsDlgButtonChecked(hDlg, IDC_SUPPRESS_NRX_GLITCHES);
+					GBLinkMuteForced = false;   // dialog apply is the user's choice too
 					GUI.Mute=IsDlgButtonChecked(hDlg, IDC_MUTE);
 					GUI.FAMute=IsDlgButtonChecked(hDlg, IDC_FAMT)!=0;
 
@@ -11456,6 +12321,2145 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 	return FALSE;
 }
 #endif
+
+// Game Boy link cable (Emulation > Link Cable).
+//
+// Ticking an item senses the role and, if this instance ends up hosting,
+// launches the missing instances with the item already ticked. Same-game
+// and other-game differ only in what the new instance loads; the player
+// count under "Link Current Game" decides between the direct cable and the
+// DMG-07 adapter, which this instance hosts while the launched ones dial
+// in as ordinary clients.
+enum
+{
+	GBLINK_OFF  = 0,
+	GBLINK_SAME = 1,
+	GBLINK_DIFF = 2
+};
+
+static int GBLinkMode = GBLINK_OFF;
+
+// Players on the session this instance asked for, or was spawned into
+// via the launch switch. Read back by the menu while a session exists.
+int GBLinkSessionPlayers = 2;
+
+// Player number of the instance that spawned this one; anchors the
+// split-screen-style window placement of a spawned seat.
+int GBLinkLauncherIndex = 1;
+int GBLinkUserModel     = -1;
+
+// Link Current Game runs its 2-4 players as in-process split screen rather
+// than spawned instances. A preference, not a session: it decides what
+// the next click of a players item does.
+bool GBLinkSplitScreen = false;
+
+// Each player's Game Boy Model, indexed by player number. A session opens
+// every seat on the console the master loaded; this is how one seat is told
+// to be another - a plain Game Boy on the cable of a Super Game Boy session,
+// a Color beside a mono one. Set from the player window's right-click menu;
+// applied at the next session start.
+static uint8 GBSeatModel[SGB_MAX_LINK_PLAYERS + 1];
+static bool  GBSeatModelsReady = false;
+
+// The models a player window offers, in menu order. The two plain ones are
+// split-engine seats; a Super Game Boy is a whole SNES machine of its own,
+// running the real BIOS on its own thread (see GBSeatMachine). SGB1 is shown
+// for what it is: a console with no link port, so it cannot be seated.
+static const uint8 GBSeatModelChoices[] = {
+	SGB_SEAT_MODEL_MASTER, S9X_GBBOOT_GB, S9X_GBBOOT_GBC,
+	S9X_GBBOOT_SGB, S9X_GBBOOT_SGB2
+};
+
+static bool GBSeatModelIsMachine (unsigned char model)
+{
+	return model == S9X_GBBOOT_SGB2;
+}
+
+// The SGB1 has no link port, so a seat cannot be one - the same rule that
+// keeps the master off it for a session.
+static bool GBSeatModelBlocked (uint8 model)
+{
+	return model == S9X_GBBOOT_SGB;
+}
+static const int GBSeatModelChoiceCount =
+	(int)(sizeof(GBSeatModelChoices) / sizeof(GBSeatModelChoices[0]));
+
+static void GBSeatModelsInit ()
+{
+	if (GBSeatModelsReady) return;
+	for (int p = 0; p <= SGB_MAX_LINK_PLAYERS; p++)
+		GBSeatModel[p] = SGB_SEAT_MODEL_MASTER;
+	GBSeatModelsReady = true;
+}
+
+// What the player's menu has ticked, master-follower included.
+static unsigned char GBSeatModelPick (int player)
+{
+	GBSeatModelsInit ();
+	if (player < 2 || player > SGB_MAX_LINK_PLAYERS) return SGB_SEAT_MODEL_MASTER;
+	return GBSeatModel[player];
+}
+
+// Hand the engine the picks. A plain Game Boy or Color is a split-engine
+// seat; a Super Game Boy is external - a SNES machine the frontend owns, on
+// the cable in its seat's place.
+static void GBSeatModelsPushToEngine (int players)
+{
+	for (int p = 2; p <= SGB_MAX_LINK_PLAYERS; p++)
+	{
+		const uint8 m = (p <= players) ? GBSeatModelPick (p) : SGB_SEAT_MODEL_MASTER;
+		const bool machine = GBSeatModelIsMachine (m);
+		S9xSGBSplitSetSeatExternal (p, machine);
+		S9xSGBSplitSetSeatModel (p, machine ? SGB_SEAT_MODEL_MASTER : m);
+	}
+}
+
+// "Game Boy Color", or the master's console spelled out for the follower.
+static const char *GBSeatModelName (uint8 model)
+{
+	return S9xGBBootPolicyName (model == SGB_SEAT_MODEL_MASTER
+		? S9xNormalizeGBBootPolicy (Settings.GBBootPolicy) : model);
+}
+
+// One id per player and model, so a pick posted from a player window's
+// right-click menu names both.
+static bool GBSeatModelFromCommand (int cmd_id, int *player, unsigned char *model)
+{
+	if (cmd_id < ID_EMULATION_GB_LINK_SEATMODEL0 ||
+	    cmd_id > ID_EMULATION_GB_LINK_SEATMODEL_LAST) return false;
+	const int n = cmd_id - ID_EMULATION_GB_LINK_SEATMODEL0;
+	const int p = 2 + n / GBSeatModelChoiceCount;
+	if (p > SGB_MAX_LINK_PLAYERS) return false;
+	*player = p;
+	*model  = GBSeatModelChoices[n % GBSeatModelChoiceCount];
+	return true;
+}
+
+// The player's own Game Boy Model list. Built fresh every time so the
+// follower entry names the master's current console.
+static HMENU WinGBBuildSeatModelMenu (int player)
+{
+	HMENU menu = CreatePopupMenu ();
+	if (!menu) return NULL;
+
+	const uint8 live = GBSeatModelPick (player);
+	for (int s = 0; s < GBSeatModelChoiceCount; s++)
+	{
+		const uint8 m = GBSeatModelChoices[s];
+		TCHAR label[160];
+		if (m == SGB_SEAT_MODEL_MASTER)
+			_sntprintf (label, 160, TEXT("Same as &Master (%s)"),
+			            (TCHAR *)_tFromChar (GBSeatModelName (m)));
+		else if (m == S9X_GBBOOT_SGB)
+			_sntprintf (label, 160, TEXT("%s (no link port)"),
+			            (TCHAR *)_tFromChar (GBSeatModelName (m)));
+		else
+			_sntprintf (label, 160, TEXT("%s"), (TCHAR *)_tFromChar (GBSeatModelName (m)));
+		label[159] = TEXT('\0');
+
+		UINT flags = MF_STRING | (m == live ? MF_CHECKED : MF_UNCHECKED);
+		if (GBSeatModelBlocked (m)) flags |= MF_GRAYED;
+		AppendMenu (menu, flags, ID_EMULATION_GB_LINK_SEATMODEL0 +
+		            (player - 2) * GBSeatModelChoiceCount + s, label);
+	}
+	return menu;
+}
+
+// Held by process id rather than a spawn handle, so it means the same
+// thing whichever instance started the other. The partner is the other
+// half of a direct cable — or, on a spawned instance, the hub host.
+DWORD GBLinkPartnerPid = 0;
+
+// The instances a hub host has seated: slot k plays as player k+2. Kept
+// across unlink so a re-link finds the same windows instead of piling up
+// new ones. Spawning is sequential — the next seat is only brought up
+// once the previous one is on the port — so the seat a peer connects
+// into always matches the player number it was launched with.
+static DWORD GBLinkPeerPids[SGB_MAX_LINK_PLAYERS - 1] = {};
+static int   GBLinkSlotsStarted = 0;
+
+static bool GBLinkPidAlive (DWORD pid)
+{
+	if (!pid) return false;
+
+	HANDLE h = OpenProcess (SYNCHRONIZE, FALSE, pid);
+	if (!h) return false;
+
+	const bool alive = WaitForSingleObject (h, 0) == WAIT_TIMEOUT;
+	CloseHandle (h);
+	return alive;
+}
+
+static bool GBLinkPartnerAlive ()
+{
+	if (!GBLinkPidAlive (GBLinkPartnerPid)) { GBLinkPartnerPid = 0; return false; }
+	return true;
+}
+
+// Locate the top-level window belonging to a linked instance.
+struct GBLinkFindWndCtx
+{
+	DWORD pid;
+	HWND  hwnd;
+};
+
+static BOOL CALLBACK GBLinkFindWndByPid (HWND hWnd, LPARAM lParam)
+{
+	GBLinkFindWndCtx *ctx = (GBLinkFindWndCtx *)lParam;
+
+	DWORD pid = 0;
+	GetWindowThreadProcessId (hWnd, &pid);
+	if (pid != ctx->pid) return TRUE;
+
+	TCHAR cls[64] = {0};
+	if (GetClassName (hWnd, cls, 64) && !lstrcmp (cls, SNES9XW_WNDCLASS))
+	{
+		ctx->hwnd = hWnd;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+static bool GBLinkPostToPid (DWORD pid, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	GBLinkFindWndCtx ctx = { pid, NULL };
+	EnumWindows (GBLinkFindWndByPid, (LPARAM)&ctx);
+	if (!ctx.hwnd) return false;
+
+	PostMessage (ctx.hwnd, msg, wParam, lParam);
+	return true;
+}
+
+// A ring session gives every seat its own window, so the desktop has to
+// hold the whole grid: the shape and the zoom are chosen together, taking
+// the largest tiles the work area can take and never going under 1x. Five
+// seats therefore get room to grow where a fixed 5-wide row forced them
+// to 1x, and fifteen still land on the 5x3 grid of 1x tiles. Four seats
+// and under keep the 2x2 quadrants, sized by the user alone (factor 0).
+struct GBLinkRingGrid { int cols, rows, factor; };
+
+static GBLinkRingGrid GBLinkRingLayout (int players)
+{
+	if (players < 2) players = 2;
+	if (players <= 4) return { 2, (players + 1) / 2, 0 };
+
+	GBLinkRingGrid best = { 5, (players + 4) / 5, 1 };
+
+	RECT work;
+	if (!SystemParametersInfo (SPI_GETWORKAREA, 0, &work, 0))
+	{
+		work.left  = work.top = 0;
+		work.right = GetSystemMetrics (SM_CXSCREEN);
+		work.bottom= GetSystemMetrics (SM_CYSCREEN);
+	}
+	const int availW = work.right - work.left;
+	const int availH = work.bottom - work.top;
+	const int tileW  = GUI.AspectWidth > 0 ? GUI.AspectWidth : SNES_WIDTH;
+	const int tileH  = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
+
+	int bestFactor = 0, bestScore = 0;
+	for (int cols = 1; cols <= players; cols++)
+	{
+		const int rows = (players + cols - 1) / cols;
+		if (cols * rows - players >= cols) continue;   // a whole empty row
+
+		for (int factor = 4; factor >= 1; factor--)
+		{
+			RECT m = GetWindowMargins (GUI.hWnd, tileW * factor);
+			const int w = tileW * factor + m.left + m.right;
+			const int h = tileH * factor + m.top + m.bottom;
+			if (cols * w > availW || rows * h > availH) continue;
+
+			// Biggest tiles win. Between equal zooms take the grid shaped
+			// most like the desktop — as a percentage, so the screen's own
+			// size does not weigh in — nudged away from empty cells.
+			const long dev = labs ((long)cols * availH - (long)rows * availW);
+			const int score = (int)(100 * dev / ((long)rows * availW)) +
+			                  (cols * rows - players) * 8;
+			if (factor > bestFactor || (factor == bestFactor && score < bestScore))
+			{
+				bestFactor = factor;
+				bestScore  = score;
+				best.cols  = cols;
+				best.rows  = rows;
+				best.factor= factor;
+			}
+			break;   // this shape's largest zoom; no smaller one can win
+		}
+	}
+	return best;
+}
+
+// A spawned seat parks itself where split screen would draw it: the
+// launcher's window is the anchor tile and the player number picks the
+// quadrant, so the session comes up as the same 1x2 / 2x2 grid.
+static void GBLinkPlacePeerWindow ()
+{
+	if (!Settings.GBLinkPeerInstance || GUI.FullScreen) return;
+
+	GBLinkFindWndCtx ctx = { GBLinkPartnerPid, NULL };
+	EnumWindows (GBLinkFindWndByPid, (LPARAM)&ctx);
+	if (!ctx.hwnd) return;
+
+	RECT host;
+	if (!GetWindowRect (ctx.hwnd, &host)) return;
+	const int w = (int)(host.right - host.left);
+	const int h = (int)(host.bottom - host.top);
+	if (w <= 0 || h <= 0) return;
+
+	// 2x2 quadrants up to four players; a ring takes the grid its seat
+	// count and the desktop agree on, the master anchoring its own tile.
+	const int cols   = GBLinkRingLayout (GBLinkSessionPlayers).cols;
+	const int me     = (int)Settings.GBLinkPlayerIndex - 1;
+	const int anchor = GBLinkLauncherIndex - 1;
+	int x = host.left + (me % cols - anchor % cols) * w;
+	int y = host.top  + (me / cols - anchor / cols) * h;
+
+	// Pull a tile that ran off the desktop back to the nearest edge.
+	const int vx = GetSystemMetrics (SM_XVIRTUALSCREEN);
+	const int vy = GetSystemMetrics (SM_YVIRTUALSCREEN);
+	const int vr = vx + GetSystemMetrics (SM_CXVIRTUALSCREEN);
+	const int vb = vy + GetSystemMetrics (SM_CYVIRTUALSCREEN);
+	if (x + w > vr) x = vr - w;
+	if (y + h > vb) y = vb - h;
+	if (x < vx) x = vx;
+	if (y < vy) y = vy;
+
+	if (IsZoomed (GUI.hWnd)) ShowWindow (GUI.hWnd, SW_RESTORE);
+	SetWindowPos (GUI.hWnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// Everyone on the CURRENT session: the hub host fans out to its seats,
+// anyone else talks to its partner. Scoped by the session shape, so an
+// instance remembered from an earlier session of the other kind never
+// hears about pauses or savestates that are not its business.
+static int GBLinkKnownPids (DWORD out[SGB_MAX_LINK_PLAYERS])
+{
+	int n = 0;
+
+	const bool hub_host = !Settings.GBLinkPeerInstance &&
+	                      ((GBLinkSessionPlayers > 2 && S9xSGBLinkIsEnabled ()) ||
+	                       S9xSGBViewerHostActive ());
+	if (hub_host)
+	{
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < SGB_MAX_LINK_PLAYERS - 1; i++)
+			if (GBLinkPeerPids[i]) out[n++] = GBLinkPeerPids[i];
+		return n;
+	}
+
+	if (GBLinkPartnerPid) out[n++] = GBLinkPartnerPid;
+	return n;
+}
+
+// Close every spawned seat window: switching to split screen replaces
+// them with in-process seats. Must run before the disconnect, which is
+// what scopes GBLinkKnownPids to the live session.
+static void GBLinkCloseInstances ()
+{
+	DWORD pids[SGB_MAX_LINK_PLAYERS];
+	const int n = GBLinkKnownPids (pids);
+	for (int i = 0; i < n; i++)
+		GBLinkPostToPid (pids[i], WM_CLOSE, 0, 0);
+	for (int i = 0; i < SGB_MAX_LINK_PLAYERS - 1; i++) GBLinkPeerPids[i] = 0;
+	GBLinkPartnerPid = 0;
+}
+
+// The menu's own way out. Unticking the live player count does the same
+// thing, but nothing about a ticked "2 Players" says clicking it again is
+// how you leave, so the session gets a plain verb of its own.
+static void WinGBLinkUnlink ()
+{
+	if (Settings.GBLinkPeerInstance) return;
+
+	if (S9xSGBSplitActive ())
+		WinStopGBSplit ();
+	else if (S9xSGBLinkIsEnabled ())
+	{
+		GBLinkCloseInstances ();
+		S9xSGBLinkDisconnect ();
+		GBLinkMode = GBLINK_OFF;
+		GBLinkSyncResponsiveSettings ();
+		S9xSetInfoString ("Link cable: disconnected");
+	}
+	else
+		return;   // nothing live to leave
+
+	// The master is alone again with a game that was mid-link. Hard, for
+	// the reason the session started hard: a warm reset landing mid-boot
+	// strands the game with a dead link engine.
+	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+}
+
+// A master swapping its cartridge ends the whole session, spawned seats
+// and all - the same teardown as its disconnect click.
+static void WinGBLinkMasterUnplug ()
+{
+	if (Settings.GBLinkPeerInstance) return;
+	if (S9xSGBViewerHostActive ()) { WinStopGBSplit (); return; }
+	if (!S9xSGBLinkIsEnabled ()) return;
+	GBLinkCloseInstances ();
+	S9xSGBLinkDisconnect ();
+	GBLinkMode = GBLINK_OFF;
+	GBLinkSyncResponsiveSettings ();
+	S9xSetInfoString ("Link cable: disconnected");
+}
+
+// A paused instance stops answering the cable, and the other games read
+// that as unplugged and drop to their title screens -- so the session
+// holds together. Called from S9xSetPause/S9xClearPause to catch every
+// source, including the modal menu loop, which never returns to the main
+// loop.
+void GBLinkMirrorPause ()
+{
+	static bool mirrored = false;
+
+	if (!S9xSGBLinkIsConnected ()) { mirrored = false; return; }
+
+	// Our own pause only: mirroring the peer's would hold both forever.
+	// PAUSE_EXIT is a dying instance's last act — its clear never runs,
+	// so mirroring it would leave the session paused with no unpauser.
+	const bool paused = (Settings.ForcedPause & ~(PAUSE_LINK_PEER | PAUSE_EXIT)) != 0;
+	if (paused == mirrored) return;
+
+	mirrored = paused;
+	GBLinkPostToPartner (WM_GBLINK_PAUSE, (WPARAM)(paused ? 1 : 0),
+	                     (LPARAM)GetCurrentProcessId ());
+}
+
+bool GBLinkPostToPartner (UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid)
+{
+	DWORD pids[SGB_MAX_LINK_PLAYERS];
+	const int n = GBLinkKnownPids (pids);
+
+	bool any = false;
+	for (int i = 0; i < n; i++)
+	{
+		if (pids[i] == exceptPid) continue;
+		if (GBLinkPostToPid (pids[i], msg, wParam, lParam)) any = true;
+	}
+	return any;
+}
+
+// Launch one instance, or ask a surviving one to re-tick its item so a
+// re-link reuses that window instead of piling up a new one each time.
+// The switch carries our pid and index, the launched side's index, the
+// session's player count and our Game Boy Model, so the pairing is known
+// from both ends and the seat boots on the console the master picked.
+static DWORD GBLinkLaunchInstance (DWORD reusePid, int mode, int playerIndex, int players)
+{
+	const int model = S9xNormalizeGBBootPolicy (Settings.GBBootPolicy);
+
+	if (GBLinkPidAlive (reusePid))
+	{
+		// Connect senses the role: our port is up, so it dials in — and
+		// being idempotent, it cannot unplug an instance already linked.
+		// lParam rides our Game Boy Model + 1 so a window sitting on
+		// another console reboots onto ours first.
+		if (GBLinkPostToPid (reusePid, WM_COMMAND,
+		                     MAKEWPARAM (ID_EMULATION_GB_LINK_CONNECT, 0),
+		                     (LPARAM)(model + 1)))
+			return reusePid;
+	}
+
+	TCHAR exe[MAX_PATH];
+	if (!GetModuleFileName (NULL, exe, MAX_PATH)) return 0;
+
+	// Same-game mode passes our ROM as a positional argument so the new
+	// instance loads it through the normal path.
+	TCHAR cmd[MAX_PATH * 3];
+	if (mode == GBLINK_SAME && Settings.GBRomPath[0])
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d,%d \"%s\""), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
+		            playerIndex, players, model, (TCHAR *)_tFromChar (Settings.GBRomPath));
+	else
+		_sntprintf (cmd, MAX_PATH * 3, TEXT("\"%s\" %s=%lu,%d,%d,%d,%d"), exe, GBLINK_PEER_SWITCH,
+		            (unsigned long)GetCurrentProcessId (), (int)Settings.GBLinkPlayerIndex,
+		            playerIndex, players, model);
+	cmd[MAX_PATH * 3 - 1] = TEXT('\0');
+
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+	ZeroMemory (&si, sizeof si);
+	ZeroMemory (&pi, sizeof pi);
+	si.cb = sizeof si;
+
+	if (!CreateProcess (NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+		return 0;
+
+	CloseHandle (pi.hThread);
+	CloseHandle (pi.hProcess);
+	return pi.dwProcessId;
+}
+
+// Whichever instance ends up hosting a direct cable brings the other one
+// up, so the same single click works from either window.
+static void GBLinkBringUpPartner (int mode)
+{
+	const DWORD pid = GBLinkLaunchInstance (GBLinkPartnerAlive () ? GBLinkPartnerPid : 0,
+	                                        mode,
+	                                        Settings.GBLinkPlayerIndex == 1 ? 2 : 1, 2);
+	if (!pid)
+	{
+		S9xSetInfoString ("Link cable: could not launch the second instance");
+		return;
+	}
+	GBLinkPartnerPid = pid;
+}
+
+// A hub host brings its seats up one at a time from the main loop, where
+// arrivals are seen: the next instance is only launched once the previous
+// one is on the port, so seat order — the player number — always matches
+// launch order.
+static void GBLinkPumpSpawns ()
+{
+	if (Settings.GBLinkPeerInstance) return;
+	if (GBLinkSessionPlayers <= 2 || GBLinkMode != GBLINK_SAME) return;
+	if (!S9xSGBLinkIsEnabled ()) return;
+
+	const int want = GBLinkSessionPlayers - 1;
+	if (GBLinkSlotsStarted >= want) return;
+
+	// The next seat waits for the attached count to catch up; an instance
+	// that died on the way up parks the sequence rather than respawning
+	// every frame.
+	if (S9xSGBLinkPlayerCount () - 1 < GBLinkSlotsStarted) return;
+
+	const int   slot = GBLinkSlotsStarted;
+	const DWORD pid  = GBLinkLaunchInstance (GBLinkPeerPids[slot], GBLINK_SAME,
+	                                         slot + 2, GBLinkSessionPlayers);
+	if (!pid)
+	{
+		S9xSetInfoString ("Link cable: could not launch the next instance");
+		GBLinkSlotsStarted = want;   // give up rather than retry forever
+		return;
+	}
+	GBLinkPeerPids[slot] = pid;
+	++GBLinkSlotsStarted;
+}
+
+// A hub whose instances were all closed is over: untick the item and hand
+// the user's settings back rather than hosting an empty port forever. An
+// instance that merely unlinked keeps the session — its window is still
+// there to re-tick — so only dead processes count.
+static void GBLinkAutoCloseAbandonedHub ()
+{
+	// A spawned companion closing its window is the exit from the link
+	// setup; a mere unlink keeps the master listening for a reconnect.
+	static bool had_partner = false;
+
+	if (Settings.GBLinkPeerInstance) return;
+	if (GBLinkMode == GBLINK_OFF || !S9xSGBLinkIsEnabled ())
+	{
+		had_partner = false;
+		return;
+	}
+	if (S9xSGBLinkPlayerCount () > 1) return;   // someone is still linked
+
+	if (GBLinkSessionPlayers > 2 && GBLinkMode == GBLINK_SAME)
+	{
+		if (GBLinkSlotsStarted == 0) return;    // nothing brought up yet
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < 3; i++)
+			if (GBLinkPidAlive (GBLinkPeerPids[i])) return;
+	}
+	else
+	{
+		// A hand-launched instance leaves no pid and never triggers this.
+		if (GBLinkPartnerAlive ()) { had_partner = true; return; }
+		if (!had_partner) return;
+	}
+
+	had_partner = false;
+	S9xSGBLinkDisconnect ();
+	GBLinkMode = GBLINK_OFF;
+	GBLinkSyncResponsiveSettings ();
+	S9xSetInfoString ("Link cable: all instances closed - disconnected");
+}
+
+// The last instance standing drops back to its title screen: its game
+// was linked and is now alone mid-session, and a lone racer waiting on
+// dead cars reads as a freeze. Runs before the hub auto-close so the
+// fold cannot mask the transition.
+static void GBLinkResetWhenLeftAlone ()
+{
+	static bool had_company = false;
+
+	bool company = false;
+	if (GBLinkMode != GBLINK_OFF)
+	{
+		if (!Settings.GBLinkPeerInstance &&
+		    (GBLinkSessionPlayers > 2 || S9xSGBViewerHostActive ()))
+		{
+			for (int i = 0; i < GBLinkSessionPlayers - 1 && i < SGB_MAX_LINK_PLAYERS - 1; i++)
+				if (GBLinkPidAlive (GBLinkPeerPids[i])) { company = true; break; }
+		}
+		else
+			company = GBLinkPartnerAlive ();
+	}
+
+	// Only a companion process dying counts: a manual unlink clears the
+	// mode first and must leave the game exactly where it is.
+	if (had_company && !company && GBLinkMode != GBLINK_OFF &&
+	    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
+		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_SOFT_RESET, 0), 0);
+
+	had_company = company;
+}
+
+// A linked instance must keep running and reading input while unfocused,
+// or the other game reads the quiet cable as unplugged. Forced for the
+// session only; the stash holds the user's values for unlink and the file.
+static bool GBLinkSettingsForced      = false;
+static bool GBLinkUserInactivePause   = false;
+static bool GBLinkUserBackgroundInput = false;
+
+bool GBLinkGetUserResponsiveSettings (bool *inactivePause, bool *backgroundInput)
+{
+	if (!GBLinkSettingsForced) return false;
+	*inactivePause   = GBLinkUserInactivePause;
+	*backgroundInput = GBLinkUserBackgroundInput;
+	return true;
+}
+
+void GBLinkSyncResponsiveSettings ()
+{
+	// One keyboard, one joypad slot per player: a session reads input
+	// with or without focus, exactly like the socket instances always
+	// did - so every window plays without ever being clicked.
+	const bool session = S9xSGBLinkIsEnabled () ||
+	                     S9xSGBViewerHostActive () || S9xSGBViewerClientActive ();
+	S9xSGBViewerSetBackgroundInput (session ? true : GUI.BackgroundInput);
+
+	// Sessions also need an unfocused master running: a paused master
+	// would pause every seat, an unfocused viewer would freeze.
+	if (session)
+	{
+		if (!GBLinkSettingsForced)
+		{
+			GBLinkSettingsForced      = true;
+			GBLinkUserInactivePause   = GUI.InactivePause;
+			GBLinkUserBackgroundInput = GUI.BackgroundInput;
+		}
+
+		// Re-asserted every pass, so a mid-session menu toggle cannot stick.
+		GUI.InactivePause   = false;
+		GUI.BackgroundInput = true;
+		if (!GUI.hHotkeyTimer)
+			GUI.hHotkeyTimer = timeSetEvent (32, 0, (LPTIMECALLBACK)HotkeyTimer, 0, TIME_PERIODIC);
+
+		// The spawned instance can link while already sitting unfocused.
+		if (Settings.ForcedPause & PAUSE_INACTIVE_WINDOW)
+			S9xClearPause (PAUSE_INACTIVE_WINDOW);
+	}
+	else if (GBLinkSettingsForced)
+	{
+		GBLinkSettingsForced = false;
+		GUI.InactivePause    = GBLinkUserInactivePause;
+		GUI.BackgroundInput  = GBLinkUserBackgroundInput;
+
+		// Unfocused at unlink: land in the state the setting would have made.
+		if (GUI.InactivePause && GUI.hWnd != GetForegroundWindow ())
+			S9xSetPause (PAUSE_INACTIVE_WINDOW);
+	}
+}
+
+static void WinStartGBLink (int mode, int players)
+{
+	char err[192];
+	err[0] = '\0';
+
+	// A spawned instance always dials in as a plain client, whatever size
+	// the session is; only the original instance can host the hub.
+	const int link_players = Settings.GBLinkPeerInstance ? 2 : players;
+
+	// Adapter-only games (F-1 Race) never link on a bare 2-player cable:
+	// their session hosts the DMG-07 even with a single seat.
+	const bool force_adapter = !Settings.GBLinkPeerInstance && mode == GBLINK_SAME &&
+	                           link_players == 2 && S9xSGBCartNeedsDmg07 ();
+
+	const int role = S9xSGBLinkAutoStart (err, sizeof(err), link_players, force_adapter,
+	                                      Settings.GBLinkPeerInstance);
+	if (role == S9X_GBLINK_NONE)
+	{
+		MessageBox (GUI.hWnd,
+		            _tFromChar (err[0] ? err : "Could not open the link cable socket."),
+		            TEXT("Link Cable"), MB_OK | MB_ICONERROR);
+		return;
+	}
+
+	GBLinkMode           = mode;
+	GBLinkSessionPlayers = players;
+	GBLinkSlotsStarted   = 0;
+	GBLinkSyncResponsiveSettings ();
+
+	// Same-game sessions power-cycle into the session like consoles
+	// switched on together - a HARD reset, because a soft one landing
+	// mid-boot leaves the game's RAM half-initialized and its link
+	// engine dead (Death Track's seats went white on exactly that). An
+	// other-game link joins wherever each game already is.
+	if (mode == GBLINK_SAME &&
+	    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
+		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+
+	if (role == S9X_GBLINK_SERVER)
+	{
+		if (players <= 2)
+		{
+			GBLinkBringUpPartner (mode);
+			S9xSetInfoString ("Link cable: waiting for the second instance");
+		}
+		// A hub's instances come up one at a time from the main loop, so
+		// seat order stays deterministic; the OSD counts the arrivals.
+	}
+	else
+	{
+		char status[256];
+		S9xSGBLinkGetStatusText (status, sizeof(status));
+		S9xSetInfoString (status);
+	}
+}
+
+// All the link items land here; clicking any while linked unplugs, and
+// the next click starts the newly picked session size.
+void WinToggleGBLink (int mode, int players)
+{
+	// A viewer window has no session shape of its own to change.
+	if (S9xSGBViewerClientActive ())
+	{
+		S9xSetInfoString ("This window is a player's screen - close it to leave the session");
+		return;
+	}
+
+	// A spawned instance keeps the session size it was launched into, so
+	// a rejoin request cannot turn it into a competing host.
+	if (Settings.GBLinkPeerInstance) players = GBLinkSessionPlayers;
+
+	// Clicking the live shape disconnects; any other shape switches to it.
+	if (S9xSGBSplitActive ())
+	{
+		const bool same = (mode == GBLINK_SAME &&
+		                   players == S9xSGBSplitPlayers ());
+		WinStopGBSplit ();
+		if (same || Settings.GBLinkPeerInstance)
+		{
+			// Unticking the live shape ends the session outright — no new
+			// one follows it — so the master is suddenly alone with a game
+			// that was mid-link. Restart it rather than leave it waiting on
+			// seats that no longer exist. Hard, for the reason the session
+			// started hard: a warm reset landing mid-boot strands the game
+			// with a dead link engine.
+			if (!Settings.GBLinkPeerInstance)
+				PostMessage (GUI.hWnd, WM_COMMAND,
+				             MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+			return;
+		}
+	}
+	else if (S9xSGBLinkIsEnabled ())
+	{
+		// The tick follows the instances actually present, so the
+		// disconnect click is matched against that same count.
+		const int live_mode = WinGetGBLinkMode ();
+		int live = WinGetGBLinkPlayers ();
+		if (live_mode == GBLINK_SAME && live > 2)
+			live = WinGetGBLinkLivePlayers ();
+		const bool same = (mode == live_mode && players == live);
+
+		// Any click ends the session and its spawned seats with it; a
+		// switch then brings up a fresh set for the new shape, the same
+		// way split screen rebuilds its seats.
+		if (!Settings.GBLinkPeerInstance)
+			GBLinkCloseInstances ();
+
+		// Closing the socket is what unlinks the peers. Their menu ticks
+		// clear by themselves, because the check state is read back from
+		// the link.
+		S9xSGBLinkDisconnect ();
+		GBLinkMode = GBLINK_OFF;
+		GBLinkSyncResponsiveSettings ();
+		S9xSetInfoString ("Link cable: disconnected");
+		if (same || Settings.GBLinkPeerInstance) return;
+	}
+
+	// Both flags needed: the BIOS path leaves SuperGameBoy FALSE, and BIOS
+	// mode is the default. A spawned instance is exempt — it links before
+	// its ROM is picked, exactly as it does at startup.
+	if (!Settings.GBLinkPeerInstance &&
+	    !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+	{
+		S9xSetInfoString ("Link cable: load a Game Boy game first");
+		return;
+	}
+
+	if (Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1)
+	{
+		S9xSetInfoString ("Link cable: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2 in Emulation > Game Boy Model");
+		return;
+	}
+	if (GBLinkBlockedBySgbc ())
+	{
+		S9xSetInfoString ("Link cable: not available under Super Game Boy Color yet - pick another Game Boy Model");
+		return;
+	}
+
+	// Every Current Game session runs on the split engine — the one
+	// architecture that cannot desync. Split checked = one shared window
+	// (BIOS-less only), unchecked = a viewer window per player; in BIOS
+	// mode the seats slave to the SNES-driven GB clock. Only Link Other
+	// Game still rides sockets.
+	if (mode == GBLINK_SAME && !Settings.GBLinkPeerInstance)
+	{
+		// Faceball's ring sessions share the window too: past four seats
+		// the blit drops to half-resolution tiles (5-wide grid) to fit
+		// the SNES-sized surface.
+		if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
+			WinStartGBSplit (players);
+		else
+			WinStartGBViewerSession (players);
+		return;
+	}
+
+	WinStartGBLink (mode, players);
+}
+
+// A preference when idle; on a live same-game session it restarts the
+// session in the other flavor, same seat count.
+void WinToggleGBLinkSplit ()
+{
+	if (S9xSGBViewerClientActive ()) return;
+	if (S9xSGBSplitActive ())
+	{
+		// One shared window needs the BIOS-less core; don't fold a live
+		// BIOS-mode viewer session into a dead end.
+		if (Settings.SGB_BIOSModeActive)
+		{
+			S9xSetInfoString ("Split screen needs a plain Game Boy - pick Game Boy or Game Boy Color in Emulation > Game Boy Model");
+			return;
+		}
+		// Restart the live session in the other flavor, same seat count:
+		// viewer windows fold into one shared window and vice versa.
+		const int  players  = S9xSGBSplitPlayers ();
+		const bool to_split = S9xSGBViewerHostActive ();
+		WinStopGBSplit ();
+		GBLinkSplitScreen = to_split;
+		WinToggleGBLink (GBLINK_SAME, players);
+	}
+	else if (S9xSGBLinkIsEnabled () && !Settings.GBLinkPeerInstance &&
+	         WinGetGBLinkMode () == GBLINK_SAME)
+	{
+		int players = WinGetGBLinkPlayers ();
+		if (players > 2) players = WinGetGBLinkLivePlayers ();
+		GBLinkCloseInstances ();
+		S9xSGBLinkDisconnect ();
+		GBLinkMode = GBLINK_OFF;
+		GBLinkSyncResponsiveSettings ();
+		GBLinkSplitScreen = true;
+		WinToggleGBLink (GBLINK_SAME, players);
+	}
+	else if (!S9xSGBLinkIsEnabled ())
+		GBLinkSplitScreen = !GBLinkSplitScreen;
+}
+
+// Hotkey face of the link menu, same gating: the opposite family blocks
+// mid-session, and a spawned seat never chooses the shape. what = 2..4
+// for Current Game, 0 for Other Game, -1 split toggle, -2 end the session.
+void WinGBLinkHotkey (int what)
+{
+	const int  live      = WinGetGBLinkMode ();
+	const bool same_live = S9xSGBSplitActive () || live == GBLINK_SAME;
+	const bool diff_live = live == GBLINK_DIFF;
+
+	switch (what)
+	{
+		case 2: case 3: case 4:
+			if (Settings.GBLinkPeerInstance) return;
+			if (diff_live)
+			{
+				S9xSetInfoString ("Link cable: end the Other Game session first");
+				return;
+			}
+			WinToggleGBLink (GBLINK_SAME, what);
+			return;
+
+		case 0:
+			if (Settings.GBLinkPeerInstance) return;
+			if (same_live)
+			{
+				S9xSetInfoString ("Link cable: end the Current Game session first");
+				return;
+			}
+			WinToggleGBLink (GBLINK_DIFF, 2);
+			return;
+
+		case -1:
+		{
+			// Mirror the menu, which hides/greys the Split Screen item in
+			// exactly these states.
+			if (Settings.GBLinkPeerInstance) return;
+			if (diff_live)
+			{
+				S9xSetInfoString ("Link cable: end the Other Game session first");
+				return;
+			}
+			if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+			{
+				S9xSetInfoString ("Link cable: load a Game Boy game first");
+				return;
+			}
+			if (Settings.SGB_BIOSModeActive)
+			{
+				S9xSetInfoString ("Split screen needs a plain Game Boy - pick Game Boy or Game Boy Color in Emulation > Game Boy Model");
+				return;
+			}
+			const bool was = GBLinkSplitScreen;
+			WinToggleGBLinkSplit ();
+			if (GBLinkSplitScreen != was &&
+			    !S9xSGBSplitActive () && !S9xSGBLinkIsEnabled ())
+				S9xSetInfoString (GBLinkSplitScreen
+				                  ? "Split screen: on for the next Current Game session"
+				                  : "Split screen: off for the next Current Game session");
+			return;
+		}
+
+		case -2:
+			if (S9xSGBViewerClientActive ())
+			{
+				// A viewer's exit is its window: the master folds the
+				// session once every player window is gone.
+				PostMessage (GUI.hWnd, WM_CLOSE, 0, 0);
+				return;
+			}
+			if (S9xSGBSplitActive ())
+			{
+				WinStopGBSplit ();
+				return;
+			}
+			if (!S9xSGBLinkIsEnabled ()) return;
+			if (Settings.GBLinkPeerInstance)
+			{
+				S9xSGBLinkDisconnect ();
+				GBLinkMode = GBLINK_OFF;
+				GBLinkSyncResponsiveSettings ();
+				S9xSetInfoString ("Link cable: disconnected");
+				return;
+			}
+			WinGBLinkMasterUnplug ();
+			return;
+	}
+}
+
+// One window carries every seat, so the grid needs room of its own: a
+// fifteen-player session composes 800x432 of native tiles, which a window
+// sized for a 256-wide SNES frame shrinks to a third. Size the client to
+// the tiles at the zoom the window was already running, stepping the
+// factor down until the desktop can hold it.
+static void WinSizeWindowForSplit ()
+{
+	if (GUI.FullScreen || GUI.EmulatedFullscreen || IsZoomed (GUI.hWnd)) return;
+
+	const int tilesW = S9xSGBSplitScreenWidth ();
+	const int tilesH = S9xSGBSplitScreenHeight ();
+	if (tilesW <= 0 || tilesH <= 0) return;
+
+	RECT wr, client, work;
+	if (!GetWindowRect (GUI.hWnd, &wr) || !GetClientRect (GUI.hWnd, &client)) return;
+	if (!SystemParametersInfo (SPI_GETWORKAREA, 0, &work, 0))
+	{
+		work.left  = work.top = 0;
+		work.right = GetSystemMetrics (SM_CXSCREEN);
+		work.bottom = GetSystemMetrics (SM_CYSCREEN);
+	}
+
+	const int aspectW = GUI.AspectWidth > 0 ? GUI.AspectWidth : SNES_WIDTH;
+	int factor = ((int)client.right + aspectW / 2) / aspectW;
+	int winW, winH;
+	for (;;)
+	{
+		if (factor < 1) factor = 1;
+		RECT m = GetWindowMargins (GUI.hWnd, tilesW * factor);
+		winW = tilesW * factor + m.left + m.right;
+		winH = tilesH * factor + m.top + m.bottom;
+		if (factor == 1 ||
+		    (winW <= work.right - work.left && winH <= work.bottom - work.top))
+			break;
+		--factor;
+	}
+
+	GBLinkPreRingW = (int)(wr.right - wr.left);
+	GBLinkPreRingH = (int)(wr.bottom - wr.top);
+
+	// Grow in place, but not off the desktop.
+	int x = wr.left, y = wr.top;
+	if (x + winW > work.right)  x = work.right - winW;
+	if (y + winH > work.bottom) y = work.bottom - winH;
+	if (x < work.left) x = work.left;
+	if (y < work.top)  y = work.top;
+	SetWindowPos (GUI.hWnd, NULL, x, y, winW, winH, SWP_NOZORDER);
+}
+
+// Every spawned seat parks itself at the master's size, so the master's
+// shape sets the whole ring: take the zoom the layout allows and sit where
+// the grid lands on the desktop. Remembered for teardown, as before.
+static void WinSizeWindowForRing (int players)
+{
+	if (GUI.FullScreen || GUI.EmulatedFullscreen || IsZoomed (GUI.hWnd)) return;
+
+	const GBLinkRingGrid grid = GBLinkRingLayout (players);
+	if (grid.factor <= 0) return;   // four seats and under keep the user's size
+
+	RECT wr, work;
+	if (!GetWindowRect (GUI.hWnd, &wr)) return;
+	if (!SystemParametersInfo (SPI_GETWORKAREA, 0, &work, 0))
+	{
+		work.left  = work.top = 0;
+		work.right = GetSystemMetrics (SM_CXSCREEN);
+		work.bottom= GetSystemMetrics (SM_CYSCREEN);
+	}
+
+	const int tileW = GUI.AspectWidth > 0 ? GUI.AspectWidth : SNES_WIDTH;
+	const int tileH = Settings.ShowOverscan ? SNES_HEIGHT_EXTENDED : SNES_HEIGHT;
+	RECT m = GetWindowMargins (GUI.hWnd, tileW * grid.factor);
+	const int w = tileW * grid.factor + m.left + m.right;
+	const int h = tileH * grid.factor + m.top + m.bottom;
+
+	GBLinkPreRingW = (int)(wr.right - wr.left);
+	GBLinkPreRingH = (int)(wr.bottom - wr.top);
+
+	// The seats fan out from this tile, so place the grid, not the window.
+	const int anchor = GBLinkLauncherIndex - 1;
+	int gx = (int)wr.left - (anchor % grid.cols) * w;
+	int gy = (int)wr.top  - (anchor / grid.cols) * h;
+	if (gx + grid.cols * w > work.right)  gx = work.right  - grid.cols * w;
+	if (gy + grid.rows * h > work.bottom) gy = work.bottom - grid.rows * h;
+	if (gx < work.left) gx = work.left;
+	if (gy < work.top)  gy = work.top;
+
+	SetWindowPos (GUI.hWnd, NULL, gx + (anchor % grid.cols) * w,
+	              gy + (anchor / grid.cols) * h, w, h, SWP_NOZORDER);
+}
+
+// ------------------------------------------------------------- seats ----
+// Every seat already emulates inside this process, so its window lives here
+// too rather than in a spawned copy of the exe: fifteen players is one
+// process instead of fifteen, with no CreateProcess burst for a security
+// filter to walk.
+//
+// The drawing runs on its own thread. The seats used to render inside their
+// own processes, on other cores; folding them into the emulation thread put
+// ~560us of blitting onto a frame that had only ~90us of slack, which is
+// what pushed a 60fps session to 58.4 and set the sound-sync pacer
+// oscillating. The emulation thread now only stages a copy — the same cost
+// the shared-memory push used to be — and the render thread owns the
+// windows, so their messages never block emulation either.
+#define GBSEAT_WNDCLASS TEXT("Snes9xGBSeat")
+
+static HWND GBSeatWnd[SGB_MAX_LINK_PLAYERS - 1] = {};
+static int  GBSeatCount = 0;
+
+// A seat the user closed. Read by the emulation thread to skip its staging,
+// written by the render thread that owns the window.
+static volatile LONG GBSeatAlive[SGB_MAX_LINK_PLAYERS - 1] = {};
+
+// Seats still showing, master included — what the menu ticks against.
+int WinGBSeatLivePlayers ()
+{
+	if (GBSeatCount <= 0) return 0;
+	int live = 1;
+	for (int k = 0; k < GBSeatCount; k++) if (GBSeatAlive[k]) ++live;
+	return live;
+}
+
+// Worked out on the main thread while GUI.hWnd is safe to read, then handed
+// to the render thread that creates the windows.
+// w/h space the grid (the master's tile); sw/sh size a seat so its client
+// matches the master's. They differ by the menu, which the master carries
+// and the seats do not — and which grows taller as the window narrows.
+static struct { int cols, x, y, w, h, sw, sh; } GBSeatGeom;
+
+#define GBSEAT_STYLE (WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX)
+// A normal caption, not WS_EX_TOOLWINDOW: the tool caption crams its close
+// button against the frame. The cost is a taskbar button per seat, which is
+// what the spawned windows had anyway.
+#define GBSEAT_EXSTYLE (0)
+
+// One staged frame: written by the emulation thread, read by the render
+// thread. The busy flag is the entire handshake — staging is skipped while
+// a render is still in flight, so a slow frame re-shows the previous one
+// rather than tearing or stalling the emulator.
+// SNES-sized: a Super Game Boy seat stages its whole frame here, bezel and
+// all; every other seat uses the 160x144 corner of it.
+static uint16 GBSeatStage[SGB_MAX_LINK_PLAYERS - 1][SNES_WIDTH * SNES_HEIGHT];
+static uint16 GBSeatStageBorder[SNES_WIDTH * SNES_HEIGHT];
+static bool   GBSeatStageBordered = false;
+// This seat drew its own bezel, so its stage is a whole frame rather than a
+// screen to drop into the master's pane.
+static bool   GBSeatStageOwnBorder[SGB_MAX_LINK_PLAYERS - 1] = {};
+// This seat is a plain Game Boy / Color of its own inside a Super Game Boy
+// session: a bare 160x144 screen, never the master's SGB frame.
+static bool   GBSeatStagePlain[SGB_MAX_LINK_PLAYERS - 1] = {};
+// False while a seat has no frame of its own (master mid-boot): its window
+// then keeps the master's pane, so both play the same boot sequence.
+static bool   GBSeatStageOwn[SGB_MAX_LINK_PLAYERS - 1] = {};
+static volatile LONG GBSeatBusy = 0;
+
+static HANDLE        GBSeatEvent  = NULL;
+static HANDLE        GBSeatThread = NULL;
+static volatile LONG GBSeatQuit   = 0;
+
+// Render thread only, from here down.
+static HDC     GBSeatMemDC   = NULL;
+static HBITMAP GBSeatDibBmp  = NULL;
+static HGDIOBJ GBSeatDibPrev = NULL;
+static DWORD  *GBSeatBits    = nullptr;
+static DWORD  *GBSeatLut     = nullptr;
+
+static void GBSeatSurfaceFree ()
+{
+	if (GBSeatMemDC)
+	{
+		SelectObject (GBSeatMemDC, GBSeatDibPrev);
+		DeleteDC (GBSeatMemDC);
+		GBSeatMemDC = NULL;
+	}
+	if (GBSeatDibBmp) { DeleteObject (GBSeatDibBmp); GBSeatDibBmp = NULL; }
+	delete[] GBSeatLut;
+	GBSeatLut  = nullptr;
+	GBSeatBits = nullptr;
+}
+
+// Handing GDI the emulator's 16-bit pixels makes it convert every pixel of
+// every window in software — a five-bit green at shift 6 matches no fast
+// path. Through a table into the desktop's own 32-bit layout each seat's
+// blit is a straight copy.
+static bool GBSeatSurfaceReady ()
+{
+	if (GBSeatMemDC && GBSeatBits && GBSeatLut) return true;
+	GBSeatSurfaceFree ();
+
+	const bool g6 = (GUI.GreenShift == 5);   // six-bit green only in 565
+	GBSeatLut = new DWORD[65536];
+	for (int v = 0; v < 65536; v++)
+	{
+		const int r  = (v >> GUI.RedShift)  & 0x1F;
+		const int b  = (v >> GUI.BlueShift) & 0x1F;
+		const int g  = g6 ? ((v >> 5) & 0x3F) : ((v >> GUI.GreenShift) & 0x1F);
+		const int g8 = g6 ? ((g << 2) | (g >> 4)) : ((g << 3) | (g >> 2));
+		GBSeatLut[v] = ((DWORD)((r << 3) | (r >> 2)) << 16) |
+		               ((DWORD)g8 << 8) | (DWORD)((b << 3) | (b >> 2));
+	}
+
+	BITMAPINFO bi;
+	ZeroMemory (&bi, sizeof bi);
+	bi.bmiHeader.biSize        = sizeof (BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth       = SNES_WIDTH;
+	bi.bmiHeader.biHeight      = -SNES_HEIGHT;   // top-down
+	bi.bmiHeader.biPlanes      = 1;
+	bi.bmiHeader.biBitCount    = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+
+	HDC screen = GetDC (NULL);
+	GBSeatMemDC = CreateCompatibleDC (screen);
+	ReleaseDC (NULL, screen);
+	if (!GBSeatMemDC) { GBSeatSurfaceFree (); return false; }
+
+	GBSeatDibBmp = CreateDIBSection (GBSeatMemDC, &bi, DIB_RGB_COLORS,
+	                                 (void **)&GBSeatBits, NULL, 0);
+	if (!GBSeatDibBmp || !GBSeatBits) { GBSeatSurfaceFree (); return false; }
+	GBSeatDibPrev = SelectObject (GBSeatMemDC, GBSeatDibBmp);
+	return true;
+}
+
+static void GBSeatConvert (const uint16 *src, int srcPitch, int x, int y, int w, int h)
+{
+	for (int r = 0; r < h; r++)
+	{
+		const uint16 *s = src + r * srcPitch;
+		DWORD        *d = GBSeatBits + (y + r) * SNES_WIDTH + x;
+		for (int c = 0; c < w; c++) d[c] = GBSeatLut[s[c]];
+	}
+}
+
+static void GBSeatPresent (HWND hWnd, int sw, int sh)
+{
+	RECT rc;
+	if (!GetClientRect (hWnd, &rc) || rc.right <= 0 || rc.bottom <= 0) return;
+
+	HDC dc = GetDC (hWnd);
+	if (!dc) return;
+	if (rc.right == sw && rc.bottom == sh)
+		BitBlt (dc, 0, 0, sw, sh, GBSeatMemDC, 0, 0, SRCCOPY);
+	else
+	{
+		// The master's picture geometry, gaps included: a seat follows the
+		// same display settings (stretch, aspect, integer scaling) or its
+		// picture comes out taller than the master's at the same size.
+		const RECT dst = CalculateDisplayRect (sw, sh, rc.right, rc.bottom);
+		HBRUSH black = (HBRUSH)GetStockObject (BLACK_BRUSH);
+		RECT gap;
+		if (dst.top > 0)
+		{ gap = { 0, 0, rc.right, dst.top }; FillRect (dc, &gap, black); }
+		if (dst.bottom < rc.bottom)
+		{ gap = { 0, dst.bottom, rc.right, rc.bottom }; FillRect (dc, &gap, black); }
+		if (dst.left > 0)
+		{ gap = { 0, dst.top, dst.left, dst.bottom }; FillRect (dc, &gap, black); }
+		if (dst.right < rc.right)
+		{ gap = { dst.right, dst.top, rc.right, dst.bottom }; FillRect (dc, &gap, black); }
+		SetStretchBltMode (dc, COLORONCOLOR);
+		StretchBlt (dc, dst.left, dst.top, dst.right - dst.left,
+		            dst.bottom - dst.top, GBSeatMemDC, 0, 0, sw, sh, SRCCOPY);
+	}
+	ReleaseDC (hWnd, dc);
+}
+
+// The SGB border is one plane shared by every seat and each seat's screen
+// lands in the same pane inside it, so the border is converted once and a
+// seat redoes only its own pane.
+static void GBSeatRenderStaged ()
+{
+	if (!GBSeatSurfaceReady ()) return;
+
+	// The DIB is shared, so a seat that painted its own bezel over it means
+	// the master's plane has to be laid down again for the next seat using it.
+	bool dib_has_master = false;
+	if (GBSeatStageBordered)
+	{
+		GBSeatConvert (GBSeatStageBorder, SNES_WIDTH, 0, 0, SNES_WIDTH, SNES_HEIGHT);
+		dib_has_master = true;
+	}
+
+	for (int k = 0; k < GBSeatCount; k++)
+	{
+		HWND hWnd = GBSeatWnd[k];
+		if (!hWnd || !IsWindowVisible (hWnd) || IsIconic (hWnd)) continue;
+
+		// A Super Game Boy seat is a console of its own: its bezel around its
+		// screen, whatever the master is showing.
+		if (GBSeatStageOwnBorder[k])
+		{
+			GBSeatConvert (GBSeatStage[k], SNES_WIDTH, 0, 0, SNES_WIDTH, SNES_HEIGHT);
+			GBSeatPresent (hWnd, SNES_WIDTH, SNES_HEIGHT);
+			dib_has_master = false;
+			continue;
+		}
+
+		// A plain console of its own: its bare screen, and nothing of the
+		// master's frame, even in a BIOS-mode session.
+		if (GBSeatStagePlain[k])
+		{
+			if (!GBSeatStageOwn[k]) continue;   // no frame yet: leave the window be
+			GBSeatConvert (GBSeatStage[k], SGB_GB_SCREEN_W, 0, 0,
+			               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			GBSeatPresent (hWnd, SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			dib_has_master = false;
+			continue;
+		}
+
+		if (GBSeatStageBordered)
+		{
+			if (!dib_has_master)
+			{
+				GBSeatConvert (GBSeatStageBorder, SNES_WIDTH, 0, 0,
+				               SNES_WIDTH, SNES_HEIGHT);
+				dib_has_master = true;
+			}
+			// The DIB is shared across seats: a seat without its own frame
+			// restores the master's pane over the previous seat's. Row 39,
+			// not 40: the PPU skips line 0, so the whole picture — pane
+			// included — sits one line high in the rendered frame.
+			if (GBSeatStageOwn[k])
+				GBSeatConvert (GBSeatStage[k], SGB_GB_SCREEN_W, 48, 39,
+				               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			else
+				GBSeatConvert (GBSeatStageBorder + 39 * SNES_WIDTH + 48,
+				               SNES_WIDTH, 48, 39,
+				               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			GBSeatPresent (hWnd, SNES_WIDTH, SNES_HEIGHT);
+		}
+		else
+		{
+			GBSeatConvert (GBSeatStage[k], SGB_GB_SCREEN_W, 0, 0,
+			               SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+			GBSeatPresent (hWnd, SGB_GB_SCREEN_W, SGB_GB_SCREEN_H);
+		}
+	}
+}
+
+static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+		case WM_ERASEBKGND:
+			return 1;   // the blit covers every pixel; erasing only flickers
+
+		// Nothing is drawn here: the next staged frame lands within a frame
+		// time and repaints it, which keeps the staging buffer single-reader.
+		case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			BeginPaint (hWnd, &ps);
+			EndPaint (hWnd, &ps);
+			return 0;
+		}
+
+		// This player's Game Boy Model. Tracked on this thread because it
+		// owns the window; acting on the pick is the master's job.
+		case WM_CONTEXTMENU:
+		{
+			const int k = (int)GetWindowLongPtr (hWnd, GWLP_USERDATA);
+			if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return 0;
+
+			POINT pt = { (short)LOWORD (lParam), (short)HIWORD (lParam) };
+			if (pt.x == -1 && pt.y == -1)   // the menu key, not the mouse
+			{
+				RECT rc;
+				GetWindowRect (hWnd, &rc);
+				pt.x = rc.left + 16;
+				pt.y = rc.top  + 16;
+			}
+
+			HMENU menu = WinGBBuildSeatModelMenu (k + 2);
+			if (!menu) return 0;
+			SetForegroundWindow (hWnd);
+			const int cmd = (int)TrackPopupMenu (menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+			                                     pt.x, pt.y, 0, hWnd, NULL);
+			DestroyMenu (menu);
+			if (cmd) PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (cmd, 0), 0);
+			return 0;
+		}
+
+		// Closing a seat drops that player, as closing its spawned window
+		// used to. The session ends only when the last seat is gone and
+		// the master is alone again — teardown is the master's, so that
+		// is posted rather than called from this thread.
+		case WM_CLOSE:
+		{
+			const int k = (int)GetWindowLongPtr (hWnd, GWLP_USERDATA);
+			if (k >= 0 && k < SGB_MAX_LINK_PLAYERS - 1)
+			{
+				InterlockedExchange (&GBSeatAlive[k], 0);
+				GBSeatWnd[k] = NULL;
+			}
+			DestroyWindow (hWnd);
+			// Unlink, not Disconnect: Disconnect is the peer's socket verb
+			// and does nothing for a split session. Unlink ends it and
+			// hard resets the master, which is alone again.
+			if (WinGBSeatLivePlayers () <= 1)
+				PostMessage (GUI.hWnd, WM_COMMAND,
+				             MAKEWPARAM (ID_EMULATION_GB_LINK_UNLINK, 0), 0);
+			return 0;
+		}
+	}
+	return DefWindowProc (hWnd, msg, wParam, lParam);
+}
+
+// Created on the render thread so their messages are serviced there, and
+// unowned: an owned window across threads couples the two input queues,
+// which is the coupling this thread exists to avoid.
+static void GBSeatWindowsOpen ()
+{
+	static bool registered = false;
+	if (!registered)
+	{
+		WNDCLASS wc;
+		ZeroMemory (&wc, sizeof wc);
+		wc.lpfnWndProc   = GBSeatWndProc;
+		wc.hInstance     = g_hInst;
+		wc.hCursor       = LoadCursor (NULL, IDC_ARROW);
+		wc.hbrBackground = (HBRUSH)GetStockObject (BLACK_BRUSH);
+		wc.lpszClassName = GBSEAT_WNDCLASS;
+		wc.hIcon         = LoadIcon (g_hInst, MAKEINTRESOURCE (IDI_ICON1));
+		if (!RegisterClass (&wc)) return;
+		registered = true;
+	}
+
+	const int vx = GetSystemMetrics (SM_XVIRTUALSCREEN);
+	const int vy = GetSystemMetrics (SM_YVIRTUALSCREEN);
+	const int vr = vx + GetSystemMetrics (SM_CXVIRTUALSCREEN);
+	const int vb = vy + GetSystemMetrics (SM_CYVIRTUALSCREEN);
+	// The grid steps by the master's tile; each seat is sized to its own.
+	const int w  = GBSeatGeom.w,  h  = GBSeatGeom.h;
+	const int sw = GBSeatGeom.sw, sh = GBSeatGeom.sh;
+
+	for (int k = 0; k < GBSeatCount; k++)
+	{
+		// Sit on the bottom of the tile, not the top: the master is taller
+		// only by the menu above its picture, so equal bottoms put every
+		// seat's picture on the master's line.
+		const int me = k + 1;   // the master holds tile 0
+		int x = GBSeatGeom.x + (me % GBSeatGeom.cols) * w;
+		int y = GBSeatGeom.y + (me / GBSeatGeom.cols) * h + (h - sh);
+		if (x + sw > vr) x = vr - sw;
+		if (y + sh > vb) y = vb - sh;
+		if (x < vx) x = vx;
+		if (y < vy) y = vy;
+
+		TCHAR title[96];
+		uint8 pick = S9xSGBSplitGetSeatModel (k + 2);
+		if (GBSeatModelIsMachine (GBSeatModelPick (k + 2))) pick = GBSeatModelPick (k + 2);
+		if (pick == SGB_SEAT_MODEL_MASTER)
+			_sntprintf (title, 96, TEXT("Player %d"), k + 2);
+		else
+			_sntprintf (title, 96, TEXT("Player %d - %s"), k + 2,
+			            (TCHAR *)_tFromChar (GBSeatModelName (pick)));
+		title[95] = TEXT('\0');
+
+		HWND hWnd = CreateWindowEx (GBSEAT_EXSTYLE, GBSEAT_WNDCLASS, title,
+		                            GBSEAT_STYLE,
+		                            x, y, sw, sh, NULL, NULL, g_hInst, NULL);
+		if (!hWnd) { GBSeatCount = k; break; }
+		SetWindowLongPtr (hWnd, GWLP_USERDATA, (LONG_PTR)k);
+		ShowWindow (hWnd, SW_SHOWNOACTIVATE);
+		GBSeatWnd[k] = hWnd;
+		InterlockedExchange (&GBSeatAlive[k], 1);
+	}
+}
+
+static void GBSeatWindowsClose ()
+{
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		InterlockedExchange (&GBSeatAlive[k], 0);
+		if (GBSeatWnd[k]) { DestroyWindow (GBSeatWnd[k]); GBSeatWnd[k] = NULL; }
+	}
+	GBSeatSurfaceFree ();
+}
+
+static DWORD WINAPI GBSeatThreadProc (LPVOID)
+{
+	GBSeatWindowsOpen ();
+
+	while (!GBSeatQuit)
+	{
+		const DWORD r = MsgWaitForMultipleObjects (1, &GBSeatEvent, FALSE,
+		                                           INFINITE, QS_ALLINPUT);
+		if (GBSeatQuit) break;
+
+		if (r == WAIT_OBJECT_0)
+		{
+			GBSeatRenderStaged ();
+			InterlockedExchange (&GBSeatBusy, 0);   // staging may resume
+		}
+
+		MSG msg;
+		while (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage (&msg);
+			DispatchMessage (&msg);
+		}
+	}
+
+	GBSeatWindowsClose ();
+	return 0;
+}
+
+// A Super Game Boy seat is a SNES of its own. Every piece of machine state is
+// S9X_MACHINE (per-thread), so a thread that runs Memory.Init, LoadROM and
+// S9xMainLoop IS a second SNES: it boots the real SGB BIOS and the game on
+// it, its Game Boy is its own SGB::Instance(), its SPC runs unheard. The
+// master hands it exactly one frame per turn and waits, so only one machine
+// is ever inside a frame - which is what makes the cable's cross-thread
+// pointers and the shared Settings swap safe.
+//
+// Known limit: a frame per turn is a whole frame the other Game Boys sit
+// parked for. Byte-and-retry link protocols ride that out; the sub-frame
+// ones (the DMG-07 hub, Faceball's ring) want a finer turn, which is the
+// follow-up.
+struct GBSeatMachine
+{
+	HANDLE         thread, go, done;
+	volatile LONG  quit, reset;
+	int            player;
+	uint8          policy;
+	bool           ready, failed;
+	SMachineState  state;
+	uint16         frame[SNES_WIDTH * SNES_HEIGHT];
+	bool           frame_valid;
+	// Its Game Boy, reported by the machine; put on the cable by the master
+	// thread, whose SGB::Instance() is the master's when the cable rewires.
+	SGB::Emulator *core;
+	bool           on_cable;
+	// The cart, captured on the master thread; and how far bring-up got.
+	char           rom[_MAX_PATH + 1];
+	const char    *stage;
+	bool           reported;
+	// Where this machine's SNES must run to on its next turn, in its own
+	// scanlines: base at bring-up plus the master's Game Boy cycles so far,
+	// converted. And the last frame it copied out, so a slice that crosses a
+	// frame end stages it.
+	int64          base_lines, gb_total, target;
+	int            pay;          // this yield's Game Boy dose
+	uint32         frames_seen;
+};
+static GBSeatMachine GBSeatMachines[SGB_MAX_LINK_PLAYERS - 1] = {};
+thread_local bool S9xMachineIsSeat = false;
+
+static GBSeatMachine *GBSeatMachineFor (int player)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return NULL;
+	return GBSeatMachines[k].thread ? &GBSeatMachines[k] : NULL;
+}
+
+// Written by the machine on its turn, read by the emulation thread on the
+// master's - never at the same time.
+static bool GBSeatMachineCopyFrame (int player, uint16 *dest)
+{
+	GBSeatMachine *m = GBSeatMachineFor (player);
+	if (!m || !m->frame_valid) return false;
+	memcpy (dest, m->frame, sizeof m->frame);
+	return true;
+}
+
+static DWORD WINAPI GBSeatMachineThread (LPVOID arg)
+{
+	GBSeatMachine *m = (GBSeatMachine *)arg;
+	S9xMachineIsSeat = true;   // this thread's frame hooks are no-ops
+
+	while (WaitForSingleObject (m->go, INFINITE) == WAIT_OBJECT_0 && !m->quit)
+	{
+		if (!m->ready && !m->failed)
+		{
+			// First turn: bring this SNES up and load the game through the
+			// same path the master used, onto the console this seat picked.
+			// Its SPC must run - the BIOS waits on the upload handshake -
+			// but nothing it makes is heard.
+			S9xSGBSetSeatMachine (true);   // its tick drives only its own Game Boy
+			S9xAPUSetMachineSilent (true);
+			CPU.Flags = 0;
+			Settings.GBBootPolicy = m->policy;
+			bool ok = true;
+			if (ok) { m->stage = "sound chip";  ok = S9xInitAPU () && S9xInitSound (0); }
+			if (ok) { m->stage = "memory";      ok = Memory.Init () != FALSE; }
+			if (ok) { m->stage = "graphics";    ok = S9xGraphicsInit () != FALSE; }
+			if (ok) { m->stage = "loading";     ok = m->rom[0] && Memory.LoadROM (m->rom); }
+			if (ok) { m->stage = "Super Game Boy BIOS";
+			          ok = Settings.SGB_BIOSModeActive != FALSE; }   // no BIOS = not an SGB
+			if (!ok)
+			{
+				m->failed = true;
+				SetEvent (m->done);
+				continue;
+			}
+			m->stage = "running";
+			S9xMachineCapture (&m->state);
+			m->core = &SGB::Instance ();   // this thread's: the seat's own Game Boy
+			S9xReset ();
+			m->base_lines  = S9xSGBMachineLines ();
+			m->gb_total    = 0;
+			m->target      = m->base_lines;
+			m->frames_seen = IPPU.TotalEmulatedFrames;
+			m->ready = true;
+		}
+		else if (m->ready)
+		{
+			S9xMachineApply (&m->state);
+			if (InterlockedExchange (&m->reset, 0)) S9xReset ();
+
+			// This player's pad, on this SNES's first controller port: the
+			// BIOS reads it there and hands it to the Game Boy, exactly as
+			// the real console does.
+			const uint16 saved = MovieGetJoypad (0);
+			MovieSetJoypad (0, MovieGetJoypad (m->player - 1));
+
+			// Run until this machine's SNES reaches the slice target, in its
+			// scanlines - the one clock that ticks while its BIOS holds the
+			// Game Boy in reset for the splash. S9xMainLoop returns there,
+			// and at frame ends, so loop; a frame end inside the slice stages
+			// the picture.
+			S9xSGBMachineRunUntilLines (m->target);
+			for (int guard = 0; guard < 8 && S9xSGBMachineLines () < m->target; guard++)
+			{
+				S9xMainLoop ();
+				if (IPPU.TotalEmulatedFrames != m->frames_seen && GFX.Screen)
+				{
+					m->frames_seen = IPPU.TotalEmulatedFrames;
+					const int pitch = (int)GFX.RealPPL;
+					for (int y = 0; y < SNES_HEIGHT; y++)
+						memcpy (m->frame + y * SNES_WIDTH, GFX.Screen + y * pitch,
+						        SNES_WIDTH * sizeof (uint16));
+					m->frame_valid = true;
+				}
+			}
+			S9xSGBMachineRunUntilLines (0);
+			S9xSGBMachinePayGb (m->pay);   // its Game Boy, in the cable's dose
+
+			MovieSetJoypad (0, saved);
+			S9xMachineCapture (&m->state);
+		}
+		SetEvent (m->done);
+	}
+
+	// This machine's own state goes with its thread; the master took its
+	// Game Boy off the cable before asking it to quit.
+	if (m->ready)
+	{
+		Memory.Deinit ();
+		S9xGraphicsDeinit ();
+		S9xDeinitAPU ();
+	}
+	SetEvent (m->done);
+	return 0;
+}
+
+// Wait for a seat's turn to end while still servicing cross-thread SENT
+// messages: a plain wait cannot, so any window touched from the seat thread
+// would deadlock both. Posted messages stay queued for the main loop.
+static bool GBSeatMachineWaitDone (HANDLE done, DWORD budget)
+{
+	const DWORD start = GetTickCount ();
+	for (;;)
+	{
+		const DWORD spent = GetTickCount () - start;
+		if (spent >= budget) return false;
+		const DWORD r = MsgWaitForMultipleObjects (1, &done, FALSE, budget - spent,
+		                                           QS_SENDMESSAGE);
+		if (r == WAIT_OBJECT_0) return true;
+		if (r == WAIT_TIMEOUT)  return false;
+		MSG msg;   // a sent message is serviced inside PeekMessage
+		PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+	}
+}
+
+// Called by the split engine from inside the master's frame, every few Game
+// Boy lines of stepping: each ready machine runs its own SNES until its Game
+// Boy has advanced the same amount, so its link replies land in time. The
+// master's console identity and policy are put back after every turn.
+static void GBSeatMachinesYield (int gb_cycles)
+{
+	bool any = false;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+		if (GBSeatMachines[k].thread && GBSeatMachines[k].ready && !GBSeatMachines[k].failed)
+		{ any = true; break; }
+	if (!any) return;
+
+	SMachineState master;
+	S9xMachineCapture (&master);
+	const uint8 policy = Settings.GBBootPolicy;
+
+	// The engine counts in the master's Game Boy cycles; a machine's slice is
+	// the same span of time in its SNES scanlines (1364 master cycles each).
+	// The master's Game Boy runs at the SGB1 clock in run mode 1, the exact
+	// one otherwise. Absolute from a running total, so nothing drifts.
+	const int64 gb_hz = (Settings.GameBoyRunMode == 1) ? 4295454 : 4194304;
+
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		GBSeatMachine *m = &GBSeatMachines[k];
+		if (!m->thread || !m->ready || m->failed) continue;
+		m->gb_total += gb_cycles;
+		m->target = m->base_lines + (m->gb_total * 21477272) / (gb_hz * 1364);
+		m->pay    = gb_cycles;
+		SetEvent (m->go);
+		if (!GBSeatMachineWaitDone (m->done, 1000))
+		{
+			m->failed = true;
+			S9xSetInfoString ("Link cable: a Super Game Boy seat stopped responding");
+		}
+	}
+
+	S9xMachineApply (&master);
+	Settings.GBBootPolicy = policy;
+}
+
+// Master side, once per frame: bring machines up, report the ones that could
+// not, and put a freshly loaded one's Game Boy on the cable. Running is the
+// yield's job.
+static void GBSeatMachinesTurn ()
+{
+	bool any = false;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+		if (GBSeatMachines[k].thread && !GBSeatMachines[k].failed) { any = true; break; }
+	if (!any) return;
+
+	SMachineState master;
+	S9xMachineCapture (&master);
+	const uint8 policy = Settings.GBBootPolicy;
+
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		GBSeatMachine *m = &GBSeatMachines[k];
+		if (!m->thread || m->failed) continue;
+		if (m->ready && m->on_cable) continue;   // running: the yield drives it
+		// The first turn loads a BIOS and a cart.
+		const DWORD budget = m->ready ? 1000 : 10000;
+		SetEvent (m->go);
+		if (!GBSeatMachineWaitDone (m->done, budget))
+		{
+			// A machine that never comes back is dropped rather than
+			// freezing the master with it.
+			m->failed = true;
+			S9xSetInfoString ("Link cable: a Super Game Boy seat stopped responding");
+			continue;
+		}
+		if (m->failed && !m->reported)
+		{
+			m->reported = true;
+			char msg[160];
+			snprintf (msg, sizeof (msg), "Player %d: Super Game Boy could not start (%s)",
+			          m->player, m->stage ? m->stage : "?");
+			S9xSetInfoString (msg);
+			continue;
+		}
+		// Loaded: its Game Boy takes its seat on the cable - from here, so
+		// the rewire sees the master's own Instance().
+		if (m->ready && m->core && !m->on_cable)
+		{
+			S9xSGBSplitSetExternalCore (m->player, m->core);
+			m->on_cable = true;
+		}
+	}
+
+	S9xMachineApply (&master);
+	Settings.GBBootPolicy = policy;
+}
+
+static void GBSeatMachinesRequestReset ()
+{
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+		if (GBSeatMachines[k].thread)
+			InterlockedExchange (&GBSeatMachines[k].reset, 1);
+}
+
+static void GBSeatMachinesDestroy ()
+{
+	S9xSGBSplitSetYield (NULL, 0);
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; k++)
+	{
+		GBSeatMachine *m = &GBSeatMachines[k];
+		if (!m->thread) continue;
+		if (m->on_cable) S9xSGBSplitSetExternalCore (m->player, NULL);   // master thread
+		InterlockedExchange (&m->quit, 1);
+		SetEvent (m->go);
+		WaitForSingleObject (m->thread, 5000);
+		CloseHandle (m->thread);
+		CloseHandle (m->go);
+		CloseHandle (m->done);
+		memset (m, 0, sizeof *m);
+	}
+}
+
+// One machine per seat whose pick is a Super Game Boy. Threads only: the
+// machines come up on their first turn, from the master's frame loop, so a
+// seat's load never overlaps a master frame.
+static void GBSeatMachinesCreate (int players)
+{
+	GBSeatMachinesDestroy ();
+	for (int p = 2; p <= players && p <= SGB_MAX_LINK_PLAYERS; p++)
+	{
+		const uint8 pick = GBSeatModelPick (p);
+		if (!GBSeatModelIsMachine (pick)) continue;
+
+		GBSeatMachine *m = &GBSeatMachines[p - 2];
+		memset (m, 0, sizeof *m);
+		m->player = p;
+		m->policy = pick;
+		// The cart the master has: its path when it came from a file, its
+		// name otherwise (the master's Memory - this is the master thread).
+		const char *rom = Settings.GBRomPath[0] ? Settings.GBRomPath
+		                                        : Memory.ROMFilename.c_str ();
+		strncpy (m->rom, rom ? rom : "", _MAX_PATH);
+		m->rom[_MAX_PATH] = '\0';
+		m->go     = CreateEvent (NULL, FALSE, FALSE, NULL);
+		m->done   = CreateEvent (NULL, FALSE, FALSE, NULL);
+		m->thread = (m->go && m->done)
+		          ? CreateThread (NULL, 0, GBSeatMachineThread, m, 0, NULL) : NULL;
+		if (!m->thread)
+		{
+			if (m->go)   CloseHandle (m->go);
+			if (m->done) CloseHandle (m->done);
+			memset (m, 0, sizeof *m);
+			S9xSetInfoString ("Link cable: could not start a Super Game Boy seat");
+		}
+	}
+}
+
+// Emulation thread: copy this frame out and wake the renderer. Skipped
+// while a render is still running — the seats then re-show the previous
+// frame, which is what the shared-memory viewers did on a seqlock miss.
+static void GBSeatPresentFrame ()
+{
+	if (GBSeatCount <= 0 || !GBSeatEvent) return;
+	if (InterlockedCompareExchange (&GBSeatBusy, 1, 0) != 0) return;
+
+	GBSeatStageBordered = false;
+	if (Settings.SGB_BIOSModeActive && GFX.Screen)
+	{
+		const int pitch = (int)GFX.RealPPL;
+		for (int y = 0; y < SNES_HEIGHT; y++)
+			memcpy (GBSeatStageBorder + y * SNES_WIDTH, GFX.Screen + y * pitch,
+			        SNES_WIDTH * sizeof (uint16));
+		GBSeatStageBordered = true;
+		// Date the pane on the frame being presented; the seat snapshots
+		// staged below present at the age it measures.
+		S9xSGBSplitMeasurePaneSync (GFX.Screen, GFX.RealPPL);
+	}
+
+	// A closed seat is not drawn, so it is not staged either — in BIOS mode
+	// that copy is a per-pixel recolor, not a memcpy.
+	for (int k = 0; k < GBSeatCount; k++)
+		if (GBSeatAlive[k])
+		{
+			// A machine seat's picture is its own SNES's whole frame, copied
+			// out on its turn; nothing of it comes from the split engine.
+			GBSeatStageOwnBorder[k] = GBSeatMachineCopyFrame (k + 2, GBSeatStage[k]);
+			GBSeatStagePlain[k] = !GBSeatStageOwnBorder[k] &&
+				S9xSGBSplitGetSeatModel (k + 2) != SGB_SEAT_MODEL_MASTER;
+			GBSeatStageOwn[k] = GBSeatStageOwnBorder[k] ||
+				S9xSGBSplitCopySeatFrame (k + 2, GBSeatStage[k]);
+		}
+
+	SetEvent (GBSeatEvent);
+}
+
+static void GBSeatWindowsDestroy ()
+{
+	if (GBSeatThread)
+	{
+		InterlockedExchange (&GBSeatQuit, 1);
+		if (GBSeatEvent) SetEvent (GBSeatEvent);
+		WaitForSingleObject (GBSeatThread, 2000);
+		CloseHandle (GBSeatThread);
+		GBSeatThread = NULL;
+	}
+	if (GBSeatEvent) { CloseHandle (GBSeatEvent); GBSeatEvent = NULL; }
+	GBSeatCount = 0;
+	GBSeatBusy  = 0;
+}
+
+static void GBSeatWindowsCreate (int players)
+{
+	GBSeatWindowsDestroy ();   // a restarted session never leaks its old set
+
+	RECT host, hostClient;
+	if (!GetWindowRect (GUI.hWnd, &host)) return;
+	if (!GetClientRect (GUI.hWnd, &hostClient)) return;
+	const int w = (int)(host.right - host.left);
+	const int h = (int)(host.bottom - host.top);
+	if (w <= 0 || h <= 0 || hostClient.right <= 0 || hostClient.bottom <= 0) return;
+
+	// A seat sized to the master's window would be taller inside it by the
+	// height of the menu the master has and it does not, and the blit would
+	// stretch to fill that. Size it to the master's client area instead.
+	RECT seat = { 0, 0, hostClient.right, hostClient.bottom };
+	AdjustWindowRectEx (&seat, GBSEAT_STYLE, FALSE, GBSEAT_EXSTYLE);
+
+	int count = players - 1;
+	if (count > SGB_MAX_LINK_PLAYERS - 1) count = SGB_MAX_LINK_PLAYERS - 1;
+	if (count <= 0) return;
+
+	GBSeatGeom.cols = GBLinkRingLayout (players).cols;
+	GBSeatGeom.x    = (int)host.left;
+	GBSeatGeom.y    = (int)host.top;
+	GBSeatGeom.w    = w;
+	GBSeatGeom.h    = h;
+	GBSeatGeom.sw   = (int)(seat.right - seat.left);
+	GBSeatGeom.sh   = (int)(seat.bottom - seat.top);
+	GBSeatCount     = count;
+
+	GBSeatQuit  = 0;
+	GBSeatBusy  = 0;
+	GBSeatEvent = CreateEvent (NULL, FALSE, FALSE, NULL);
+	if (!GBSeatEvent) { GBSeatCount = 0; return; }
+
+	GBSeatThread = CreateThread (NULL, 0, GBSeatThreadProc, NULL, 0, NULL);
+	if (!GBSeatThread)
+	{
+		CloseHandle (GBSeatEvent);
+		GBSeatEvent = NULL;
+		GBSeatCount = 0;
+		return;
+	}
+
+	// The master keeps the keyboard: seats are displays, and every seat
+	// reads its own joypad number rather than whichever window has focus.
+	SetForegroundWindow (GUI.hWnd);
+}
+
+// In-process split screen: no processes, no sockets — the SGB layer owns
+// the extra consoles and the local cable/adapter. The battery base path
+// hands each seat its own .savN next to the primary's .sav.
+static void WinStartGBSplit (int players)
+{
+	if (GBLinkBlockedBySgbc ())
+	{
+		S9xSetInfoString ("Link cable: not available under Super Game Boy Color yet - pick another Game Boy Model");
+		return;
+	}
+	if (Settings.SGB_BIOSModeActive)
+	{
+		S9xSetInfoString ("Split screen needs a plain Game Boy - pick Game Boy or Game Boy Color in Emulation > Game Boy Model");
+		return;
+	}
+	if (!Settings.SuperGameBoy)
+	{
+		S9xSetInfoString ("Link cable: load a Game Boy game first");
+		return;
+	}
+
+	char base[_MAX_PATH + 1];
+	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
+	base[_MAX_PATH] = '\0';
+
+	// One shared window has no seat window to give a machine to.
+	GBSeatModelsPushToEngine (players);
+	for (int p = 2; p <= players; p++) S9xSGBSplitSetSeatExternal (p, false);
+	if (!S9xSGBSplitStart (players, base))
+	{
+		S9xSetInfoString ("Split screen: could not start the extra consoles");
+		return;
+	}
+	if (S9xSGBSplitPlayers () != players)
+	{
+		char warn[96];
+		snprintf (warn, sizeof (warn),
+		          "Split screen: engine seated %d of %d players - do a clean rebuild",
+		          S9xSGBSplitPlayers (), players);
+		S9xSetInfoString (warn);
+		S9xSGBSplitStop (base);
+		return;
+	}
+
+	WinSizeWindowForSplit ();
+
+	// All seats power up together; the primary may have been in demo.
+	// Hard, for the same reason as the socket session: a warm reset
+	// landing mid-boot strands a game with a dead link engine.
+	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+
+	char msg[64];
+	snprintf (msg, sizeof (msg), "Split screen: %d players", players);
+	S9xSetInfoString (msg);
+}
+
+static void WinStopGBSplit ()
+{
+	char base[_MAX_PATH + 1];
+	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
+	base[_MAX_PATH] = '\0';
+
+	const bool viewer = S9xSGBViewerHostActive ();
+	if (viewer)
+	{
+		GBSeatMachinesDestroy ();   // machines leave the cable before it comes down
+		GBSeatWindowsDestroy ();
+		S9xSGBViewerHostStop ();
+		GBLinkMode = GBLINK_OFF;
+		GBLinkSyncResponsiveSettings ();
+	}
+	S9xSGBSplitStop (base);
+
+	// A ring session shrank the master to 1x; give the user's shape back.
+	if (GBLinkPreRingW > 0 && !GUI.FullScreen && !IsZoomed (GUI.hWnd))
+		SetWindowPos (GUI.hWnd, NULL, 0, 0, GBLinkPreRingW, GBLinkPreRingH,
+		              SWP_NOMOVE | SWP_NOZORDER);
+	GBLinkPreRingW = GBLinkPreRingH = 0;
+
+	S9xSetInfoString (viewer ? "Link cable: disconnected" : "Split screen: off");
+}
+
+// The socketless Current Game session: every seat emulates inside this process
+// on the split engine, so a desync is structurally impossible; the spawned
+// windows only view a seat over shared memory and send their joypad back.
+static void WinStartGBViewerSession (int players)
+{
+	if (Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1)
+	{
+		S9xSetInfoString ("Link cable: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2 in Emulation > Game Boy Model");
+		return;
+	}
+	if (GBLinkBlockedBySgbc ())
+	{
+		S9xSetInfoString ("Link cable: not available under Super Game Boy Color yet - pick another Game Boy Model");
+		return;
+	}
+	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+	{
+		S9xSetInfoString ("Link cable: load a Game Boy game first");
+		return;
+	}
+
+	char base[_MAX_PATH + 1];
+	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
+	base[_MAX_PATH] = '\0';
+
+	GBSeatModelsPushToEngine (players);
+	if (!S9xSGBSplitStart (players, base))
+	{
+		S9xSetInfoString ("Link cable: could not start the extra consoles");
+		return;
+	}
+	if (S9xSGBSplitPlayers () != players)
+	{
+		// The engine seated fewer than asked: the 15-seat arrays span
+		// sgb/ and win32/, so a shortfall means mixed objects from an
+		// incremental build. Say so instead of showing white windows.
+		char warn[96];
+		snprintf (warn, sizeof (warn),
+		          "Link cable: engine seated %d of %d players - do a clean rebuild",
+		          S9xSGBSplitPlayers (), players);
+		S9xSetInfoString (warn);
+		S9xSGBSplitStop (base);
+		return;
+	}
+	if (!S9xSGBViewerHostStart (players))
+	{
+		S9xSGBSplitStop (base);
+		S9xSetInfoString ("Link cable: could not share the player windows");
+		return;
+	}
+
+	GBLinkMode           = GBLINK_SAME;
+	GBLinkSessionPlayers = players;
+	GBLinkSlotsStarted   = 0;
+	GBLinkSyncResponsiveSettings ();
+
+	WinSizeWindowForRing (players);
+
+	// One window per seat, all in this process. Seat identity is the
+	// window's own, so they can all come up at once.
+	GBSeatWindowsCreate (players);
+	if (GBSeatCount < players - 1)
+		S9xSetInfoString ("Link cable: could not open every player window");
+
+	// And a SNES of its own for every seat that picked a Super Game Boy,
+	// run in step with the cable: every 8 Game Boy lines of the engine's
+	// stepping, each machine advances the same amount.
+	GBSeatMachinesCreate (players);
+	S9xSGBSplitSetYield (GBSeatMachinesYield, 456 * 8);
+
+	// All consoles power up together — hard, so no seat boots from
+	// half-initialized RAM.
+	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+
+	char msg[64];
+	snprintf (msg, sizeof (msg), "Link cable: %d players", players);
+	S9xSetInfoString (msg);
+}
+
+// Split screen needs the BIOS-less core; everything else gets player windows.
+static void WinGBRestartSeatSession (int players)
+{
+	if (players < 2) return;
+	if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
+		WinStartGBSplit (players);
+	else
+		WinStartGBViewerSession (players);
+}
+
+// A console cannot change under a running game, so a live session is torn
+// down and brought straight back up around the pick - the same power cycle
+// every session start does.
+static void WinGBSeatSetModel (int player, unsigned char model)
+{
+	GBSeatModelsInit ();
+	if (player < 2 || player > SGB_MAX_LINK_PLAYERS) return;
+	if (Settings.GBLinkPeerInstance) return;   // a seat never reshapes the session
+
+	if (GBSeatModelBlocked (model))
+	{
+		S9xSetInfoString ("Link cable: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2");
+		return;
+	}
+	if (GBSeatModelPick (player) == model) return;
+	GBSeatModel[player] = model;
+
+	char msg[128];
+	snprintf (msg, sizeof (msg), "Player %d: %s", player, GBSeatModelName (model));
+	S9xSetInfoString (msg);
+
+	// Idle, or a session with no in-process seats to rebuild: the pick is
+	// waiting for the next Current Game session either way.
+	if (!S9xSGBSplitActive ()) return;
+
+	const int players = S9xSGBSplitPlayers ();
+	WinStopGBSplit ();
+	WinGBRestartSeatSession (players);
+}
+
+// The per-frame session watchdog for both viewer roles: a viewer follows
+// its master out; the master reports arrivals and folds the session once
+// every player window is gone.
+static void GBLinkViewerWatch ()
+{
+	if (S9xSGBViewerClientActive ())
+	{
+		static bool closing = false;
+		if (!closing &&
+		    (!S9xSGBViewerClientAlive () || !GBLinkPidAlive (GBLinkPartnerPid)))
+		{
+			closing = true;
+			PostMessage (GUI.hWnd, WM_CLOSE, 0, 0);
+		}
+		return;
+	}
+
+	static int last_count = -1;
+	if (!S9xSGBViewerHostActive ()) { last_count = -1; return; }
+
+	const int count = S9xSGBViewerHostViewerCount ();
+	if (last_count >= 0 && count != last_count)
+	{
+		char msg[96];
+		snprintf (msg, sizeof (msg), "Link cable: %d of %d players connected",
+		          count + 1, GBLinkSessionPlayers);
+		S9xSetInfoString (msg);
+	}
+	last_count = count;
+
+	// Every player window closed = out of the link setup, same as sockets.
+	if (GBLinkSlotsStarted > 0)
+	{
+		for (int i = 0; i < GBLinkSessionPlayers - 1 && i < SGB_MAX_LINK_PLAYERS - 1; i++)
+			if (GBLinkPidAlive (GBLinkPeerPids[i])) return;
+		WinStopGBSplit ();
+		S9xSetInfoString ("Link cable: all instances closed - disconnected");
+	}
+}
+
+// The spawned instance links itself on startup; its mode is inferred from
+// whether it was handed a ROM, which only affects which item shows ticked.
+void WinAutoStartGBLinkPeer ()
+{
+	if (S9xSGBViewerClientActive ()) return;   // viewers never dial
+	if (!Settings.GBLinkPeerInstance) return;
+	if (S9xSGBLinkIsEnabled ()) return;   // already on the wire
+	WinStartGBLink (Settings.GBRomPath[0] ? GBLINK_SAME : GBLINK_DIFF,
+	                GBLinkSessionPlayers);
+}
+
+// Which item owns the tick, read from the live link.
+int WinGetGBLinkMode ()
+{
+	return S9xSGBLinkIsEnabled () ? GBLinkMode : GBLINK_OFF;
+}
+
+int WinGetGBLinkPlayers ()
+{
+	return S9xSGBLinkIsEnabled () ? GBLinkSessionPlayers : 0;
+}
+
+// Instances actually on the session: linked seats, launched ones still
+// alive (they can re-tick Connect), and seats not yet brought up. A seat
+// whose window was closed no longer counts, so the master's tick slides
+// from 4 Players to 3 when one is gone for good.
+static int WinGetGBLinkLivePlayers ()
+{
+	// In-process seats have no pid to outlive them: a closed window is the
+	// player leaving, so the tick follows the windows still open.
+	const int seats = WinGBSeatLivePlayers ();
+	if (seats > 0) return seats < 2 ? 2 : seats;
+
+	int live = 1;
+	const int want = GBLinkSessionPlayers - 1;
+	for (int i = 0; i < want && i < SGB_MAX_LINK_PLAYERS - 1; i++)
+		if (i >= GBLinkSlotsStarted || GBLinkPidAlive (GBLinkPeerPids[i]))
+			++live;
+
+	// An instance the user launched by hand holds a seat without a pid.
+	const int linked = S9xSGBLinkPlayerCount ();
+	if (linked > live) live = linked;
+
+	return live < 2 ? 2 : live;
+}
+
 void SetInfoDlgColor(unsigned char r, unsigned char g, unsigned char b)
 {
 	GUI.InfoColor=RGB(r,g,b);
@@ -15243,7 +18247,10 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)(LPCTSTR)temp);
 		}
 
-		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)0,0);
+		// A linked player-N instance plays on Joypad #N, so open on it.
+		index = (Settings.GBLinkPlayerIndex >= 2 && Settings.GBLinkPlayerIndex <= 4 &&
+		         S9xSGBLinkIsEnabled ()) ? Settings.GBLinkPlayerIndex - 1 : 0;
+		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)index,0);
 
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
@@ -15663,6 +18670,19 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") },
     },
+    // Tab 8: Link Cable - the menu's session controls as keys.
+    {
+        { &CustomKeys.Link2P,          &CustomKeysExtra.Link2P,          HOTKEYS_LINK_2P },
+        { &CustomKeys.Link3P,          &CustomKeysExtra.Link3P,          HOTKEYS_LINK_3P },
+        { &CustomKeys.Link4P,          &CustomKeysExtra.Link4P,          HOTKEYS_LINK_4P },
+        { &CustomKeys.LinkSplitToggle, &CustomKeysExtra.LinkSplitToggle, HOTKEYS_LINK_SPLIT },
+        { &CustomKeys.LinkOtherGame,   &CustomKeysExtra.LinkOtherGame,   HOTKEYS_LINK_OTHER },
+        { &CustomKeys.LinkEnd,         &CustomKeysExtra.LinkEnd,         HOTKEYS_LINK_END },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -15831,7 +18851,8 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc")
+				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc"),
+				TEXT("Link Cable")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

@@ -309,6 +309,13 @@ RECT CalculateDisplayRect(unsigned int sourceWidth,unsigned int sourceHeight,
 	double snesAspect = (double)contentWidth/contentHeight;
 	RECT drawRect;
 
+	// A split-screen session tiles square-pixel GB viewports into its own
+	// geometry (320x144 side by side, 320x288 as a grid); forcing the SNES
+	// preset onto that stretches every screen. The source itself is the
+	// aspect, whatever filter scaling rode on top of it.
+	if (S9xSGBSplitActive() && sourceWidth && sourceHeight)
+		snesAspect = (double)sourceWidth / (double)sourceHeight;
+
 	if(GUI.Stretch) {
 		if(GUI.AspectRatio) {
 
@@ -371,6 +378,7 @@ bool8 S9xContinueUpdate(int Width, int Height)
 {
 	if (S9xAcidSgbChild)
 		return true;
+	if (S9xMachineIsSeat) return (TRUE);   // a seat machine's frame is its own window's
 	// called every other frame during interlace
 
     Src.Width = Width;
@@ -398,6 +406,7 @@ bool8 S9xDeinitUpdate (int Width, int Height)
 {
 	if (S9xAcidSgbChild)
 		return true;   // no window to draw into
+	if (S9xMachineIsSeat) return (TRUE);   // a seat machine's frame is staged by GBSeatMachine
 	if (PF94.active && S9xEventTimerDisplay() == 2)
 	{
 		static int lastShownSecs = -2;

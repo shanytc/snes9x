@@ -225,7 +225,7 @@ struct SMulti
 	char	fileNameA[PATH_MAX + 1], fileNameB[PATH_MAX + 1];
 };
 
-extern CMemory	Memory;
+extern S9X_MACHINE CMemory	Memory;
 extern SMulti	Multi;
 
 inline bool S9xInterlaceField()
@@ -236,6 +236,10 @@ inline bool S9xInterlaceField()
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *, uint32);
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
+
+// The GB/GBC boot ROM bytes from the BIOS Manager, for a link seat running a
+// Game Boy Model of its own rather than the master's staged one.
+bool8 S9xGetGBBootROM(bool8 cgb, std::vector<uint8> &out);
 
 // TRUE when `data` is a Super Game Boy BIOS cart image, judged the way the
 // loader judges it: *out_mode comes back 1 for SGB1, 2 for SGB2.

@@ -15,6 +15,10 @@ typedef void (*apu_callback) (void *);
 #define SPC_FILE_SIZE             (66048)
 
 bool8 S9xInitAPU (void);
+
+// A second SNES (a Super Game Boy seat) runs its SPC so its BIOS boots, but is
+// never heard: its DSP output goes to a sink of its own.
+void S9xAPUSetMachineSilent(bool silent);
 void S9xDeinitAPU (void);
 void S9xResetAPU (void);
 void S9xSoftResetAPU (void);

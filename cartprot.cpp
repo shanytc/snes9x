@@ -19,8 +19,6 @@
 #include "memmap.h"
 #include "cartprot.h"
 
-extern uint8	OpenBus;
-
 struct SCartProt	CartProt;
 
 static uint8	*ProtRomBase[0x40];

@@ -28,7 +28,7 @@
 #include "missing.h"
 #endif
 
-extern uint8	*HDMAMemPointers[8];
+extern S9X_MACHINE uint8	*HDMAMemPointers[8];
 
 
 static inline void S9xLatchCounters (bool force)

@@ -100,6 +100,6 @@ struct SRegisters
 #define PCl		PC.B.xPCl
 #define PB		PC.B.xPB
 
-extern struct SRegisters	Registers;
+extern S9X_MACHINE struct SRegisters	Registers;
 
 #endif

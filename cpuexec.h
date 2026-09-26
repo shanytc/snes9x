@@ -31,7 +31,7 @@ struct SICPU
 	uint32	FrameAdvanceCount;
 };
 
-extern struct SICPU		ICPU;
+extern S9X_MACHINE struct SICPU		ICPU;
 
 extern struct SOpcodes	S9xOpcodesE1[256];
 extern struct SOpcodes	S9xOpcodesM1X1[256];

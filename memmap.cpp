@@ -1236,6 +1236,16 @@ static bool8 FindGB_BootROM (bool cgb, const char *gb_rom_path,
 	return (TRUE);
 }
 
+// A link seat on its own Game Boy Model boots on that console's ROM, not the
+// master's staged one. Empty when the slot is unassigned or the dump is bad.
+bool8 S9xGetGBBootROM (bool8 cgb, std::vector<uint8> &out)
+{
+	out.clear();
+	if (!Settings.GB_BIOSEnabled) return (FALSE);
+	std::string path;
+	return (FindGB_BootROM(cgb != FALSE, Settings.GBRomPath, path, &out));
+}
+
 // $0146 = $03 and $014B = $33: an SGB ignores command packets unless both say
 // so, so the flag alone does not make a cart SGB-enhanced.
 static bool GbHeaderSgbEnhanced (uint8 sgb_flag, uint8 old_licensee)
@@ -1671,7 +1681,8 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
     }
 
     // Not a GB ROM — tear down any previous SGB session so a SNES ROM loaded
-    // after a GB ROM runs on the 65816 path.
+    // after a GB ROM runs on the 65816 path. S9xSGBDeinit unplugs the cable with it:
+    // there is no Game Boy left for the peer to talk to.
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
         S9xSGBDeinit();
@@ -2107,6 +2118,12 @@ static void RetireSNESSessions (void)
 
 int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filename)
 {
+    // A hand-picked battery file belongs to the cartridge it was chosen
+    // for, so it survives a reload of the same ROM and is dropped for a
+    // different one.
+    if (!filename || !*filename || strcmp(filename, Settings.GBRomPath) != 0)
+        Settings.GBSramPathOverride[0] = 0;
+
     if (!S9xRomBytesAreGb(rom, static_cast<int32>(size)))
         return 0;
 
@@ -2253,7 +2270,8 @@ bool8 CMemory::LoadROM (const char *filename)
         return TRUE;
     }
 
-    // Loading a non-GB ROM — tear down any previous SGB state first.
+    // Loading a non-GB ROM — tear down any previous SGB state first, link
+    // cable included (S9xSGBDeinit drops it).
     if (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)
     {
         S9xSGBDeinit();
@@ -3436,6 +3454,28 @@ static const char *SuperDiscSRAMName (const char *filename, std::string &buf)
 	return (buf.c_str());
 }
 
+// GB battery file for this instance. Players past the first get their own
+// (.sav2, .sav3...): two linked instances on one ROM would otherwise write
+// the same file. Keyed on the player index, not on the link being up --
+// SRAM loads before linking starts and saves after it may have dropped, so
+// anything connection-dependent could load .sav and then save .sav2.
+static std::string GBBatteryPath(const char *filename)
+{
+	// A battery file loaded by hand keeps being the one we write, or the
+	// next save would land on the index-derived name and overwrite it.
+	if (Settings.GBSramPathOverride[0])
+		return std::string(Settings.GBSramPathOverride);
+
+	std::string sav(filename);
+	const size_t dot = sav.rfind('.');
+	if (dot != std::string::npos) sav.replace(dot, std::string::npos, ".sav");
+	else                          sav += ".sav";
+
+	if (Settings.GBLinkPlayerIndex > 1)
+		sav += std::to_string(Settings.GBLinkPlayerIndex);
+	return sav;
+}
+
 bool8 CMemory::LoadSRAM (const char *filename)
 {
 	FILE	*file;
@@ -3444,13 +3484,17 @@ bool8 CMemory::LoadSRAM (const char *filename)
 
 	filename = SuperDiscSRAMName(filename, sd_srm);
 
+	// GB cart: the battery result IS the result. Falling through to the
+	// SNES logic reported FALSE (SGB carts have no SNES SRAM), which made
+	// the caller's ROM-directory fallback re-load the battery from there,
+	// silently overriding the Saves-dir file with any stale .sav by the ROM.
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
 	{
-		std::string sav(filename);
-		size_t dot = sav.rfind('.');
-		if (dot != std::string::npos) sav.replace(dot, std::string::npos, ".sav");
-		else                          sav += ".sav";
-		S9xSGBLoadBatteryFromPath(sav.c_str());
+		const bool ok = S9xSGBLoadBatteryFromPath(GBBatteryPath(filename).c_str());
+		if (S9xSGBSplitActive())
+			S9xSGBSplitLoadBatteries(GBBatteryPath(filename).c_str());
+		ClearSRAM();
+		return ok ? TRUE : FALSE;
 	}
 
 	// Every NSS cartridge keeps its own .srm, whichever socket it is in.
@@ -3532,13 +3576,12 @@ bool8 CMemory::SaveSRAM (const char *filename)
 	std::string	sd_srm;
 	filename = SuperDiscSRAMName(filename, sd_srm);
 
+	// GB cart: the battery result is the result, same as LoadSRAM.
 	if (S9xSGBIsActive() && S9xSGBHasBattery())
 	{
-		std::string sav(filename);
-		size_t dot = sav.rfind('.');
-		if (dot != std::string::npos) sav.replace(dot, std::string::npos, ".sav");
-		else                          sav += ".sav";
-		S9xSGBSaveBatteryToPath(sav.c_str());
+		if (S9xSGBSplitActive())
+			S9xSGBSplitSaveBatteries(GBBatteryPath(filename).c_str());
+		return S9xSGBSaveBatteryToPath(GBBatteryPath(filename).c_str()) ? TRUE : FALSE;
 	}
 
 	if (Settings.SFCBox)

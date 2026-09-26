@@ -54,7 +54,8 @@ enum
 	S9X_SNAPSHOT_INCONSISTENT,
 	S9X_AVI_INFO,
 	S9X_PRESSED_KEYS_INFO,
-	S9X_BIOS_NOTICE			// a missing BIOS/firmware; ports show the text as-is
+	S9X_BIOS_NOTICE,		// a missing BIOS/firmware; ports show the text as-is
+	S9X_INFO_STRING	// transient OSD message; drawn with a dimmed backdrop
 };
 
 #endif

@@ -31,4 +31,4 @@ public:
   SPC_DSP spc_dsp;
 };
 
-extern DSP dsp;
+extern S9X_MACHINE DSP dsp;

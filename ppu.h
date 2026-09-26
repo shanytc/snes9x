@@ -208,8 +208,8 @@ struct SPPU
 };
 
 extern uint16				SignExtend[2];
-extern struct SPPU			PPU;
-extern struct InternalPPU	IPPU;
+extern S9X_MACHINE struct SPPU			PPU;
+extern S9X_MACHINE struct InternalPPU	IPPU;
 
 // Width of the picture being rendered, in SNES pixels: the hardware's 256
 // plus whatever widescreen is adding on either side.

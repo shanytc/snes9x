@@ -6355,8 +6355,8 @@ static void UpdateTestsMenu ()
 }
 
 // Emulation menu entries that depend on what is loaded: each is on the menu
-// only while its hardware runs. They follow Game Boy Model, which also comes
-// and goes, so the group's slot is counted from it.
+// only while its hardware runs. They follow Link Cable and Game Boy Model,
+// which also come and go, so the group's slot is counted from them.
 static void UpdateHardwarePopups ()
 {
 	// Resource order; `has` is a command inside the popup, 0 for the separator.
@@ -6370,11 +6370,15 @@ static void UpdateHardwarePopups ()
 		{ ID_DEBUG_GB_TILE_VIEWER, TEXT("&GB-PPU") },
 	};
 	static HMENU s_parent = NULL;
-	static int   s_first  = 0;   // NSS's slot while Game Boy Model is hidden
+	static int   s_first  = 0;   // NSS's slot while Link Cable and Game Boy Model are hidden
 
 	MENUITEMINFO probe = {};
 	probe.cbSize = sizeof(probe);
 	probe.fMask  = MIIM_ID;
+	auto above = [&probe](HMENU m) {
+		return (GetMenuItemInfo(m, ID_EMULATION_GB_LINK, FALSE, &probe) ? 1 : 0) +
+		       (GetMenuItemInfo(m, ID_EMULATION_BIOS,    FALSE, &probe) ? 1 : 0);
+	};
 
 	if (!s_parent)
 	{
@@ -6382,7 +6386,7 @@ static void UpdateHardwarePopups ()
 		int   pos    = 0;
 		if (!GUI.hMenu || !FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &parent, &pos))
 			return;
-		s_first = pos - (GetMenuItemInfo(parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+		s_first = pos - above(parent);
 		for (Entry &e : s_entries)
 		{
 			MENUITEMINFO item = {};
@@ -6408,7 +6412,7 @@ static void UpdateHardwarePopups ()
 	const bool want[] = { NSS.Active != 0, SFCBox.Active != 0, Settings.SuperDisc != 0,
 	                      snes || gb, snes, gb };
 
-	int  pos     = s_first + (GetMenuItemInfo(s_parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+	int  pos     = s_first + above(s_parent);
 	bool changed = false;
 	for (size_t i = 0; i < _countof(s_entries); i++)
 	{

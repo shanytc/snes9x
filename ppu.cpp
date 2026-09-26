@@ -371,7 +371,9 @@ void S9xSetPPU (uint8 Byte, uint16 Address)
 						CPU.V_Counter < PPU.ScreenHeight + FIRST_VISIBLE_LINE &&
 						CPU.Cycles < Timings.HBlankStart)
 					{
-						int x = CPU.Cycles / ONE_DOT_CYCLE - 22;
+						// The write lands at the end of its bus cycle; pixel x samples
+						// brightness at H = 58 + 4x (bsnes). Rounds up: first dimmed pixel.
+						int x = (CPU.Cycles + ONE_CYCLE - 58 + ONE_DOT_CYCLE - 1) / ONE_DOT_CYCLE;
 						if (x >= 1 && x <= 255)
 							S9xRecordMidLineBrightness(CPU.V_Counter - FIRST_VISIBLE_LINE, x,
 									PPU.Brightness, Byte & 0xf);

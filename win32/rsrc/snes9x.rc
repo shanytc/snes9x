@@ -1600,6 +1600,8 @@ BEGIN
         BEGIN
             MENUITEM "&Insert Disc...",             ID_SUPERDISC_INSERT,MFT_STRING,MFS_ENABLED
             MENUITEM "&Eject Disc",                 ID_SUPERDISC_EJECT,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "&Debug Menu",                 ID_SUPERDISC_DEBUGMENU,MFT_STRING,MFS_ENABLED
         END
         MENUITEM MFT_SEPARATOR
         POPUP "&S-PPU",                         0,MFT_STRING,MFS_ENABLED

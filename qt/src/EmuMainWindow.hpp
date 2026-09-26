@@ -57,6 +57,7 @@ class EmuMainWindow : public QMainWindow
     // Emulation -> Super Disc; the shortcuts call these too.
     void superDiscInsert();
     void superDiscEject();
+    void superDiscDebugMenu();
     void powerCycle();
     bool openFile(const std::string &filename);
     void playMovieDialog();

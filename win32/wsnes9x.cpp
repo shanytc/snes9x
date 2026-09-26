@@ -3207,6 +3207,16 @@ LRESULT CALLBACK WinProc(
 			CheckMenuStates();
 			break;
 
+		// The BIOS monitor: reset, then A+X at the title screen.
+		case ID_SUPERDISC_DEBUGMENU:
+			if (Settings.SuperDisc)
+			{
+				SendMenuCommand(ID_EMULATION_SOFT_RESET);
+				S9xSuperDiscEnterMonitor();
+				S9xSetInfoString("Debug menu");
+			}
+			break;
+
 		// These act on the paid game that is playing; the supervisor ignores
 		// them on its menu and during the attract demo.
 		case ID_NSS_INSTRUCTIONS: if (S9xNSSGameRunning()) S9xNSSPulseButton(NSS_BTN_INSTRUCTIONS); break;

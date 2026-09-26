@@ -700,6 +700,15 @@ void Snes9xWindow::connect_signals()
         eject_superdisc();
     });
 
+    // The BIOS monitor: reset, then A+X at the title screen.
+    get_object<Gtk::MenuItem>("superdisc_debug_item")->signal_activate().connect([&] {
+        if (!Settings.SuperDisc)
+            return;
+        get_object<Gtk::MenuItem>("reset_item")->activate();
+        S9xSuperDiscEnterMonitor();
+        S9xSetInfoString(_("Debug menu"));
+    });
+
     // Sound Channels submenu, as on win32's Sound->Channels popup.
     for (int i = 0; i < 8; i++)
     {

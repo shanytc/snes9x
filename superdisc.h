@@ -56,6 +56,11 @@ bool8 S9xSuperDiscHasDisc (void);
 const char *S9xSuperDiscDiscPath (void);
 const char *S9xSuperDiscTitle (void);	// "Super Disc (v0.95) - <disc name>"
 
+// The BIOS monitor ("SFX-100 MONITOR MENU", A+X at the title). The caller
+// presses reset; pad 1 then holds A+X until the monitor has taken over.
+void  S9xSuperDiscEnterMonitor (void);
+uint16 S9xSuperDiscPadHold (void);		// buttons S9xDoAutoJoypad adds to pad 1
+
 uint8 *S9xSuperDiscDRAM (void);
 void  S9xSuperDiscRemapSRAM (void);		// apply the SRAM write lock to WriteMap
 

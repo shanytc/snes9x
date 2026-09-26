@@ -87,6 +87,7 @@ struct EmuApplication
      * to the BIOS home screen, which then reports the open tray. */
     bool superDiscInsert(const std::string &filename);
     void superDiscEject();
+    void superDiscDebugMenu();
     void suspendThread();
     void unsuspendThread();
     bool isPaused();

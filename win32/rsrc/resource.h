@@ -976,6 +976,7 @@
 #define ID_SFCBOX_OSD_JAPANESE          44440
 #define ID_SFCBOX_OSD_ENGLISH           44441
 #define ID_SFCBOX_OSD_BACKDROP          44442
+#define ID_SUPERDISC_DEBUGMENU          44443
 
 
 #define IDC_STATIC                      -1
@@ -985,7 +986,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
-#define _APS_NEXT_COMMAND_VALUE         44443
+#define _APS_NEXT_COMMAND_VALUE         44444
 #define _APS_NEXT_CONTROL_VALUE         3620
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

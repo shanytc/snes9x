@@ -108,6 +108,8 @@ static SSuperDisc	SD;
 static SDiscImage	Disc;
 static bool8		Active = FALSE;
 static char			BIOSVersion[16];	// "0.95", from the boot ROM's banner
+static int			MonitorHold;		// auto-joypad polls left holding A+X
+static bool8		MonitorLeft;		// NMI vector seen off the monitor's since
 
 static Resampler	*AudioOut = NULL;
 static int16		CddaFifo[CDDA_FIFO_FRAMES * 2];
@@ -1312,6 +1314,7 @@ void S9xSuperDiscActivate (void)
 {
 	Active = TRUE;
 	ReadBIOSVersion();
+	MonitorHold = 0;
 	memset(&SD, 0, sizeof SD);
 	SD.DiscPresent = !Disc.tracks.empty();
 	ResetChips();
@@ -1323,6 +1326,7 @@ void S9xSuperDiscDeactivate (void)
 	if (Active)
 		CPU.IRQExternal = FALSE;
 	Active = FALSE;
+	MonitorHold = 0;
 	CloseDisc();
 	ClearAudio();
 }
@@ -1423,6 +1427,40 @@ const char *S9xSuperDiscTitle (void)
 	return (title.c_str());
 }
 
+// The monitor's first act is to plant JML 01:81C3 as the NMI vector at
+// 1FF8h; its own pad poll comes later, so it never sees the held A+X.
+static bool8 MonitorVectorPlanted (void)
+{
+	static const uint8	jml[4] = { 0x5c, 0xc3, 0x81, 0x01 };
+	return (memcmp(Memory.RAM + 0x1ff8, jml, 4) == 0);
+}
+
+void S9xSuperDiscEnterMonitor (void)
+{
+	if (!Active)
+		return;
+	MonitorHold = 60 * 30;
+	MonitorLeft = !MonitorVectorPlanted();
+}
+
+uint16 S9xSuperDiscPadHold (void)
+{
+	if (!MonitorHold)
+		return (0);
+
+	// Reset out of the monitor leaves its vector in WRAM until the BIOS
+	// plants its own, and a still-held A+X at EXIT would come straight back.
+	const bool8	planted = MonitorVectorPlanted();
+	if (!planted)
+		MonitorLeft = TRUE;
+	if ((planted && MonitorLeft) || --MonitorHold == 0)
+	{
+		MonitorHold = 0;
+		return (0);
+	}
+	return (SNES_A_MASK | SNES_X_MASK);
+}
+
 // ---------------------------------------------------------------------------
 // Savestates: "SDC!", version, payload size, then the SSuperDisc image. The
 // disc itself stays whatever is in the drive.
@@ -1458,6 +1496,7 @@ bool8 S9xSuperDiscStateLoad (const uint8 *buf, size_t size)
 		return (FALSE);
 
 	memcpy(&SD, buf + SDISC_STATE_HEADER, sizeof SD);
+	MonitorHold = 0;
 
 	// A state taken with a disc in the drive, restored without one, finds
 	// the tray empty.

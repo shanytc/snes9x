@@ -864,6 +864,15 @@ void EmuMainWindow::superDiscEject()
     updateWindowTitle();
 }
 
+void EmuMainWindow::superDiscDebugMenu()
+{
+    if (!Settings.SuperDisc)
+        return;
+
+    app.superDiscDebugMenu();
+    S9xSetInfoString("Debug menu");
+}
+
 // Super Disc and Super Famicom Box sessions name the machine and what's in it.
 // Any other title (Kaillera's, say) is left alone unless it is a stale one of theirs.
 void EmuMainWindow::updateWindowTitle()
@@ -1340,6 +1349,8 @@ void EmuMainWindow::createWidgets()
     connect(superdisc_insert_action, &QAction::triggered, this, &EmuMainWindow::superDiscInsert);
     superdisc_eject_action = superdisc_menu->addAction(tr("&Eject Disc"));
     connect(superdisc_eject_action, &QAction::triggered, this, &EmuMainWindow::superDiscEject);
+    superdisc_menu->addSeparator();
+    connect(superdisc_menu->addAction(tr("&Debug Menu")), &QAction::triggered, this, &EmuMainWindow::superDiscDebugMenu);
     superdisc_menu_action = emulation_menu->addMenu(superdisc_menu);
     superdisc_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshSuperDiscMenu);

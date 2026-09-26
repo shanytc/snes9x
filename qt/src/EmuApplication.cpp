@@ -1046,6 +1046,18 @@ void EmuApplication::superDiscEject()
     }, true);
 }
 
+// The BIOS monitor: reset, then A+X at the title screen.
+void EmuApplication::superDiscDebugMenu()
+{
+    emu_thread->runOnThread([&] {
+        core->softReset();
+        S9xSuperDiscEnterMonitor();
+#ifdef RETROACHIEVEMENTS_SUPPORT
+        RA_OnReset();
+#endif
+    }, true);
+}
+
 void EmuApplication::powerCycle()
 {
     emu_thread->runOnThread([&] {

@@ -22,6 +22,7 @@
 #include "display.h"
 #include "sfcbox.h"
 #include "nss.h"
+#include "superdisc.h"
 #include "voicekun.h"
 #ifdef NETPLAY_SUPPORT
 #include "netplay.h"
@@ -3212,6 +3213,9 @@ void S9xDoAutoJoypad (void)
 				uint16	w = joypad[i - JOYPAD0].buttons;
 				if (n == 1 && Settings.VoiceKun)
 					w = S9xVoiceKunPort2Id();
+				// Super Disc Debug Menu: A+X held for the BIOS title screen.
+				if (n == 0 && Settings.SuperDisc)
+					w |= S9xSuperDiscPadHold();
 				WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, w);
 				WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
 				break;

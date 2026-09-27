@@ -2970,9 +2970,9 @@ LRESULT CALLBACK WinProc(
 						S9xMovieStop (TRUE);
 					if (cmd_id == ID_EMULATION_HARD_RESET)
 					{
-						// A BIOS assigned since the cart loaded is only read by a
-						// load, and a power cycle is when it should take over.
-						if (S9xBiosChangedSinceLoad())
+						// A BIOS assigned since the cart loaded, or the XBAND switched
+						// on or off, only takes effect by a load: the power cycle does it.
+						if (S9xBiosChangedSinceLoad() || S9xXBandSwitchChangedSinceLoad())
 							ReloadLoadedGame();
 						else
 						{
@@ -3237,15 +3237,17 @@ LRESULT CALLBACK WinProc(
 			break;
 		}
 
-		// Takes effect on the next Load Game.
+		// Takes effect on the next hard reset or Load Game.
 		case ID_EMULATION_XBAND:
 			Settings.XBANDEnabled = !Settings.XBANDEnabled;
 			if (!Settings.XBANDEnabled)
-				S9xSetInfoString("XBAND off");
-			else if (S9xBiosPathUsable(S9X_BIOS_XBAND))
-				S9xSetInfoString("XBAND on: games load through it");
-			else
+				S9xSetInfoString(S9xXBandSwitchChangedSinceLoad() ? "XBAND off: hard reset to unplug it" : "XBAND off");
+			else if (!S9xBiosPathUsable(S9X_BIOS_XBAND))
 				S9xSetInfoString("XBAND on: assign its BIOS in File -> BIOS Manager");
+			else if (S9xXBandSwitchChangedSinceLoad())
+				S9xSetInfoString("XBAND on: hard reset to plug the game into it");
+			else
+				S9xSetInfoString("XBAND on: games load through it");
 			break;
 
 		// The card stays in the slot across games, like the real modem's.

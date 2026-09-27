@@ -5642,11 +5642,9 @@ static uint8 xband_reg_read (uint8 reg)
 				ret = 0xFF;
 				break;
 			case 0x0B:
-				// bsnes "$196 DIAL-UP! -> 0x80". OR with our
-				// state-machine bits so dialing/ATV25 still works
-				// for the network side.
-				ret = 0x80;
-				if (XBand.modem_line_relay) ret |= (1 << 7); // TONEA
+				// TONEA (bit 7): dial tone until a call is up; in a call it would
+				// be the call-waiting bong (PUListenToLine) and pause the game.
+				ret = (XBand.net_step == XBAND_NET_CONNECTED) ? 0x00 : 0x80;
 				if (XBand.modem_set_ATV25)
 				{
 					ret |= (1 << 4); // ATV25

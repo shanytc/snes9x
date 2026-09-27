@@ -69,6 +69,15 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdarg>
+#include <chrono>
+#include <ctime>
+
+// A hung-up peer must not kill the process with SIGPIPE where that exists.
+#ifdef MSG_NOSIGNAL
+  #define XBAND_SEND_FLAGS	MSG_NOSIGNAL
+#else
+  #define XBAND_SEND_FLAGS	0
+#endif
 
 // Global instance, referenced by memory dispatch.
 struct SXBAND XBand;
@@ -808,6 +817,23 @@ static bool xband_helo_filter_enabled = false;
 // the network bridging section, but called from S9xSetXBand (modem
 // reg $08 RTS handler) which lives much earlier in the file.
 static void xband_try_auto_reconnect (void);
+
+// Local switchboard (XBAND_SERVER set): between calls each window keeps an
+// idle line to the server so an opponent's call can ring it (RI, modem $0F
+// bit 3); answering adopts that line, which the server relays to the caller.
+static intptr_t xband_ring_fd      = XBAND_INVALID_SOCKET;
+static bool     xband_ringing      = false;
+static bool     xband_answered     = false;	// this call was answered, not dialed
+static char     xband_ring_line[16];
+static int      xband_ring_len     = 0;
+static uint32   xband_ring_retry   = 0;		// frames until the next ring-line attempt
+
+static bool xband_local_switch (void)
+{
+	return getenv("XBAND_SERVER") != NULL;
+}
+
+static bool xband_ring_answer (void);
 
 // First-N capture buffers for both directions. These let us hex/ASCII
 // dump the start of each conversation in the kctl popup so we can
@@ -5623,12 +5649,16 @@ static uint8 xband_reg_read (uint8 reg)
 				break;
 			case 0x0D:
 				ret |= (1 << 3); // U1DET
+				if (xband_answered)
+					ret |= (1 << 5); // S1DET: the answering side hears the caller's S1
 				break;
 			case 0x0E:
 				ret |= 3; // k2400Baud
 				break;
 			case 0x0F:
 				ret |= (1 << 7) | (1 << 5); // RLSD + CTS — "modem alive"
+				if (xband_ringing)
+					ret |= (1 << 3); // RI
 				break;
 			case 0x18:
 				// bsnes "$1b0 -> 0xff" -- not previously handled.
@@ -5832,7 +5862,8 @@ static void xband_reg_write (uint8 reg, uint8 byte, uint32 address)
 					// the user to re-click the Netplay menu item
 					// after every "Translation problem".
 					XBand.net_step = XBAND_NET_HANDSHAKE;
-					xband_try_auto_reconnect();
+					if (!xband_ring_answer())
+						xband_try_auto_reconnect();
 				}
 				break;
 			case 0x09:
@@ -6185,7 +6216,7 @@ static void xband_send_identity (xband_sock_t fd)
 {
 	static const char IDENTITY[] = "///////EMU-Waj04qaASNfmaRNw\x0a";
 	const int len = (int)(sizeof(IDENTITY) - 1);
-	int sent = (int)send(fd, IDENTITY, len, 0);
+	int sent = (int)send(fd, IDENTITY, len, XBAND_SEND_FLAGS);
 	if (sent == len)
 		xband_identity_sends++;
 	// If the send failed (e.g. socket buffer full on first hit),
@@ -6206,17 +6237,15 @@ static bool xband_set_nonblocking (xband_sock_t fd)
 #endif
 }
 
-bool8 S9xXBandConnect (const char *host, int port)
+// A connected, non-blocking, no-Nagle TCP socket, or XBAND_INVALID_SOCKET.
+static intptr_t xband_open_socket (const char *host, int port)
 {
-	if (XBand.socket_fd != XBAND_INVALID_SOCKET)
-		S9xXBandDisconnect();
-
 #ifdef _WIN32
 	if (!s_winsock_inited)
 	{
 		WSADATA wsa;
 		if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-			return FALSE;
+			return XBAND_INVALID_SOCKET;
 		s_winsock_inited = true;
 	}
 #endif
@@ -6232,20 +6261,20 @@ bool8 S9xXBandConnect (const char *host, int port)
 	snprintf(port_str, sizeof(port_str), "%d", port);
 
 	if (getaddrinfo(host, port_str, &hints, &result) != 0 || !result)
-		return FALSE;
+		return XBAND_INVALID_SOCKET;
 
 	xband_sock_t fd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 	if ((intptr_t)fd == XBAND_INVALID_SOCKET)
 	{
 		freeaddrinfo(result);
-		return FALSE;
+		return XBAND_INVALID_SOCKET;
 	}
 
 	if (connect(fd, result->ai_addr, (socklen_t)result->ai_addrlen) == XBAND_SOCKET_ERROR)
 	{
 		XBAND_CLOSESOCKET(fd);
 		freeaddrinfo(result);
-		return FALSE;
+		return XBAND_INVALID_SOCKET;
 	}
 
 	freeaddrinfo(result);
@@ -6255,6 +6284,119 @@ bool8 S9xXBandConnect (const char *host, int port)
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(flag));
 
 	xband_set_nonblocking(fd);
+	return (intptr_t)fd;
+}
+
+// This window's line on the local switchboard; opponents are rung by it.
+static uint32 xband_line_id (void)
+{
+	static uint32 id = 0;
+	while (!id)
+		id = (uint32) std::chrono::steady_clock::now().time_since_epoch().count() ^
+		     (uint32) (uintptr_t) &id ^ (uint32) time(NULL) * 2654435761u;
+	return id;
+}
+
+static void xband_send_line (xband_sock_t fd, const char *what)
+{
+	char msg[32];
+	snprintf(msg, sizeof(msg), "%s %08X\n", what, (unsigned) xband_line_id());
+	send(fd, msg, (int) strlen(msg), XBAND_SEND_FLAGS);
+}
+
+static void xband_ring_close (void)
+{
+	if (xband_ring_fd != XBAND_INVALID_SOCKET)
+		XBAND_CLOSESOCKET(xband_ring_fd);
+	xband_ring_fd  = XBAND_INVALID_SOCKET;
+	xband_ringing  = false;
+	xband_ring_len = 0;
+}
+
+// Between calls, keep a line open so the server can ring this window.
+static void xband_ring_poll (void)
+{
+	if (!xband_local_switch() || !xband_last_host[0] || XBand.socket_fd != XBAND_INVALID_SOCKET)
+		return;
+
+	if (xband_ring_fd == XBAND_INVALID_SOCKET)
+	{
+		if (xband_ring_retry)
+		{
+			xband_ring_retry--;
+			return;
+		}
+		xband_ring_fd = xband_open_socket(xband_last_host, xband_last_port);
+		if (xband_ring_fd == XBAND_INVALID_SOCKET)
+		{
+			xband_ring_retry = 300;
+			return;
+		}
+		xband_send_identity((xband_sock_t) xband_ring_fd);
+		xband_send_line((xband_sock_t) xband_ring_fd, "RING");
+		xband_ring_len = 0;
+		return;
+	}
+
+	// Once it rings, the caller's bytes stay queued until the BIOS answers.
+	while (!xband_ringing)
+	{
+		char c;
+		int got = (int) recv((xband_sock_t) xband_ring_fd, &c, 1, 0);
+		if (got == 1)
+		{
+			if (c != '\n')
+			{
+				if (xband_ring_len < (int) sizeof(xband_ring_line) - 1)
+					xband_ring_line[xband_ring_len++] = c;
+				continue;
+			}
+			xband_ring_line[xband_ring_len] = 0;
+			xband_ring_len = 0;
+			xband_ringing = !strcmp(xband_ring_line, "RING");
+		}
+		else
+		{
+			if (got == 0)
+			{
+				xband_ring_close();
+				xband_ring_retry = 300;
+			}
+			break;
+		}
+	}
+}
+
+// RTS raised while ringing answers the call on the ring line.
+static bool xband_ring_answer (void)
+{
+	if (!xband_ringing)
+	{
+		xband_ring_close();		// dialing out instead
+		return false;
+	}
+	XBand.socket_fd = xband_ring_fd;
+	xband_ring_fd   = XBAND_INVALID_SOCKET;
+	xband_ringing   = false;
+	xband_answered  = true;
+	XBand.connected = TRUE;
+	XBand.net_step  = XBAND_NET_CONNECTED;
+	XBand.rxbufpos  = XBand.rxbufused = 0;
+	XBand.txbufpos  = XBand.txbufused = 0;
+	xband_sniff_box_seen = xband_sniff_srv_seen = false;
+	return true;
+}
+
+bool8 S9xXBandConnect (const char *host, int port)
+{
+	if (XBand.socket_fd != XBAND_INVALID_SOCKET)
+		S9xXBandDisconnect();
+	xband_ring_close();
+
+	intptr_t sock = xband_open_socket(host, port);
+	if (sock == XBAND_INVALID_SOCKET)
+		return FALSE;
+	xband_sock_t fd = (xband_sock_t) sock;
 
 	XBand.socket_fd = (intptr_t)fd;
 	XBand.connected = TRUE;
@@ -6278,6 +6420,8 @@ bool8 S9xXBandConnect (const char *host, int port)
 	// against a pure-HELO server, and BIOS TX bytes would be stuck
 	// in xband_txbuf forever.
 	xband_send_identity(fd);
+	if (xband_local_switch())
+		xband_send_line(fd, "LINE");
 	XBand.net_step = XBAND_NET_CONNECTED;
 
 	// Reset the HELO filter state so a previous attempt's partial
@@ -6336,6 +6480,8 @@ void S9xXBandDisconnect (void)
 		XBAND_CLOSESOCKET(XBand.socket_fd);
 		XBand.socket_fd = XBAND_INVALID_SOCKET;
 	}
+	xband_ring_close();
+	xband_answered  = false;
 	XBand.connected = FALSE;
 	XBand.net_step  = XBAND_NET_IDLE;
 	XBand.rxbufpos  = XBand.rxbufused = 0;
@@ -6344,6 +6490,7 @@ void S9xXBandDisconnect (void)
 
 void S9xXBandPoll (void)
 {
+	xband_ring_poll();
 	if (XBand.socket_fd == XBAND_INVALID_SOCKET)
 		return;
 
@@ -6486,14 +6633,16 @@ void S9xXBandPoll (void)
 				// raw — better to send something than block the
 				// BIOS forever waiting for a marker that may
 				// never come.
-				if (unsent < XBAND_TXBUF_SIZE / 2)
+				// The local switchboard also carries games' raw bytes: send them now.
+				if (unsent < XBAND_TXBUF_SIZE / 2 && !xband_local_switch())
 					break;
 				end = XBand.txbufpos;  // flush all
 			}
 
 			uint32 frame_len = end - start;
-			bool   was_real_frame = (XBand.txbuf[end - 2] == 0x10 &&
-			                          XBand.txbuf[end - 1] == 0x03);
+			bool   was_real_frame = frame_len >= 2 &&
+			                        XBand.txbuf[end - 2] == 0x10 &&
+			                        XBand.txbuf[end - 1] == 0x03;
 
 			// TX rewriter: if the GameID spoofer is enabled, rebuild
 			// the frame with $d8 22 21 03 instead of $f7 2b 5d 1a.
@@ -6568,7 +6717,7 @@ void S9xXBandPoll (void)
 			// Send on the socket (best-effort, may fail if server dropped).
 			if (XBand.socket_fd != (intptr_t)-2)
 			{
-				int sent = (int)send(fd, (const char *)send_data, send_len, 0);
+				int sent = (int)send(fd, (const char *)send_data, send_len, XBAND_SEND_FLAGS);
 				if (sent > 0)
 					xband_sock_tx_bytes += sent;
 			}

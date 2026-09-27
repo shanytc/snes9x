@@ -61,6 +61,9 @@
 // The Super Disc BIOS behind a disc image File -> Load Game booted, "" otherwise.
 static std::string SuperDiscBIOSPath;
 
+// Set while LoadXBand hands its slots to LoadMultiCartInt.
+static bool s_xband_from_manager = false;
+
 #ifndef SET_UI_COLOR
 #define SET_UI_COLOR(r, g, b) ;
 #endif
@@ -1094,24 +1097,8 @@ static bool8 is_BSCart_BIOS(const uint8 *data, uint32 size)
 // ROM header area or first ~1KB).
 static bool8 is_XBand_BIOS (const uint8 *data, uint32 size)
 {
-	if (size != XBAND_ROM_SIZE) return (FALSE);
-	auto find = [data, size](const char *needle, size_t needle_len,
-	                          const uint8 *hay, size_t hay_len) -> bool {
-		if (hay_len < needle_len) return false;
-		for (size_t i = 0; i + needle_len <= hay_len; i++)
-			if (memcmp(hay + i, needle, needle_len) == 0)
-				return true;
-		return false;
-	};
-	if (find("CATAPULT", 8, data, 0x400)) goto yes;
-	if (find("X-BAND",  6, data + 0x7FB0, 0x40)) goto yes;
-	if (find("X-Band",  6, data + 0x7FB0, 0x40)) goto yes;
-	if (find("XBAND",   5, data + 0x7FB0, 0x40)) goto yes;
-	if (find("X-BAND",  6, data + 0xFFB0, 0x40)) goto yes;
-	if (find("X-Band",  6, data + 0xFFB0, 0x40)) goto yes;
-	if (find("XBAND",   5, data + 0xFFB0, 0x40)) goto yes;
-	return (FALSE);
-yes:
+	if (size != XBAND_ROM_SIZE || !S9xXBandIsBIOS(data, size))
+		return (FALSE);
 	Memory.LoROM = FALSE;
 	Memory.HiROM = TRUE;
 	return (TRUE);
@@ -2225,6 +2212,26 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     return 1;
 }
 
+// A GROM directory whose checksum and complement hold.
+static bool IsSFCBoxImage (const uint8 *rom, int32 size)
+{
+	if (size < 0x28000 || rom[0] < 1 || rom[0] > 8 || rom[1] != 0x05)
+		return (false);
+	uint32	sum = 0;
+	for (int32 i = 0; i < 0x7ffc; i++)
+		sum += rom[i];
+	uint16	chk = rom[0x7ffc] | (rom[0x7ffd] << 8);
+	uint16	cmp = rom[0x7ffe] | (rom[0x7fff] << 8);
+	return ((uint16) sum == chk && (uint16) (chk ^ 0xffff) == cmp);
+}
+
+// Images that are hardware of their own, so XBAND never takes them.
+static bool OwnsItsHardware (const uint8 *rom, int32 size)
+{
+	return IsSFCBoxImage(rom, size) || S9xSuperDiscIsBIOS(rom, (uint32) size) ||
+	       (size == SDISC_BIOS_SIZE + 0x200 && S9xSuperDiscIsBIOS(rom + 0x200, SDISC_BIOS_SIZE));
+}
+
 bool8 CMemory::LoadROM (const char *filename)
 {
     if(!filename || !*filename)
@@ -2383,6 +2390,10 @@ bool8 CMemory::LoadROM (const char *filename)
             if (paired >= 0)
                 return paired > 0;
         }
+
+        // With XBAND switched on, an ordinary cart plugs into it instead.
+        if (Settings.XBANDEnabled && !Settings.NSS && !OwnsItsHardware(ROM, totalFileSize))
+            return (LoadXBand(filename, totalFileSize));
 
         if (LoadROMInt(totalFileSize))
             return TRUE;
@@ -2582,17 +2593,8 @@ bool8 CMemory::LoadROMInt (int32 ROMfillSize)
 	// Super Famicom Box cart images (GROM directory + ROMs) must divert
 	// before scoring: a GROM's checksum bytes sit where the reset vector
 	// would be, so the interleave heuristics would scramble the image.
-	if (ROMfillSize >= 0x28000 &&
-		ROM[0] >= 1 && ROM[0] <= 8 && ROM[1] == 0x05)
-	{
-		uint32	sum = 0;
-		for (int32 i = 0; i < 0x7ffc; i++)
-			sum += ROM[i];
-		uint16	chk = ROM[0x7ffc] | (ROM[0x7ffd] << 8);
-		uint16	cmp = ROM[0x7ffe] | (ROM[0x7fff] << 8);
-		if ((uint16) sum == chk && (uint16) (chk ^ 0xffff) == cmp)
-			return (LoadSFCBox(ROMfillSize));
-	}
+	if (IsSFCBoxImage(ROM, ROMfillSize))
+		return (LoadSFCBox(ROMfillSize));
 
 	// The Super Disc BIOS's header block is FFh-filled, so scoring cannot
 	// place it: it is a plain 128K LoROM image.
@@ -2920,6 +2922,62 @@ bool8 CMemory::LoadSuperDiscImage (const char *disc_path)
 	return (TRUE);
 }
 
+static bool AcceptXBandBIOS (const uint8 *data, uint32 size, uint32 full_size, void *)
+{
+	if (full_size == XBAND_ROM_SIZE + 0x200)
+		return size > 0x200 && S9xXBandIsBIOS(data + 0x200, size - 0x200);
+	return full_size == XBAND_ROM_SIZE && S9xXBandIsBIOS(data, size);
+}
+
+// XBAND is a pass-through cart: its BIOS from the BIOS Manager runs, with the
+// game Load Game read into ROM[] plugged into it.
+bool8 CMemory::LoadXBand (const char *game, int32 game_size)
+{
+	const std::string	bios_path = S9xResolveBiosPath(S9X_BIOS_XBAND);
+	std::vector<uint8>	bios;
+
+	if (bios_path.empty() ||
+		!S9xReadBiosImage(bios_path.c_str(), bios, XBAND_ROM_SIZE + 0x200, AcceptXBandBIOS, NULL))
+	{
+		S9xMessage(S9X_ERROR, S9X_ROM_INFO,
+		           "XBAND BIOS missing - assign it in File -> BIOS Manager.");
+		return (FALSE);
+	}
+	if (bios.size() == XBAND_ROM_SIZE + 0x200)
+		bios.erase(bios.begin(), bios.begin() + 0x200);
+
+	memset(&Multi, 0, sizeof(Multi));
+	Settings.DisplayColor = BUILD_PIXEL(31, 31, 31);
+	SET_UI_COLOR(255, 255, 255);
+
+	// The XBAND BIOS itself, loaded as the game, is XBAND with an empty port.
+	if (game_size == XBAND_ROM_SIZE && S9xXBandIsBIOS(ROM, (uint32) game_size))
+		game_size = 0;
+	if (game_size > MAX_ROM_SIZE - 0x400000)
+	{
+		S9xMessage(S9X_ERROR, S9X_ROM_INFO, "Game too large for the XBAND cartridge port.");
+		return (FALSE);
+	}
+
+	// The game moves to where LoadMultiCart puts slot B.
+	if (game_size > 0)
+	{
+		Multi.cartSizeB   = game_size;
+		Multi.cartOffsetB = 0x400000;
+		strncpy(Multi.fileNameB, game, sizeof(Multi.fileNameB) - 1);
+		memmove(ROM + Multi.cartOffsetB, ROM, game_size);
+	}
+	memset(ROM, 0, 0x400000);
+	memcpy(ROM, bios.data(), XBAND_ROM_SIZE);
+	Multi.cartSizeA = XBAND_ROM_SIZE;
+	strncpy(Multi.fileNameA, bios_path.c_str(), sizeof(Multi.fileNameA) - 1);
+
+	s_xband_from_manager = true;
+	const bool8 r = LoadMultiCartInt();
+	s_xband_from_manager = false;
+	return (r);
+}
+
 int CMemory::LoadBIOSPairedCart (const char *filename, int32 size)
 {
 	if (!is_SufamiTurbo_Cart(ROM, size) && !is_BSX_Shell(ROM, size))
@@ -3027,7 +3085,17 @@ bool8 CMemory::LoadMultiCartInt ()
 	if (Multi.cartSizeA)
 	{
 		if (is_XBand_BIOS(ROM + Multi.cartOffsetA, Multi.cartSizeA))
+		{
+			// Its BIOS comes from the BIOS Manager, through LoadXBand only.
+			if (!s_xband_from_manager)
+			{
+				S9xMessage(S9X_ERROR, S9X_ROM_INFO,
+				           "XBAND: switch on Emulation -> XBAND and use Load Game; its BIOS goes in the BIOS Manager.");
+				memset(&Multi, 0, sizeof(Multi));
+				return (FALSE);
+			}
 			Multi.cartType = 6; // XBAND BIOS as base cart, game cart in slot B
+		}
 		else
 		if (is_SufamiTurbo_Cart(ROM + Multi.cartOffsetA, Multi.cartSizeA))
 			Multi.cartType = 4;
@@ -5602,70 +5670,16 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 		(unsigned)Multi.cartSizeB / 1024);
 	map_System();
 
-	// Multi-cart layout follows the bsnes-plus xband_gameplay branch
-	// (cartridge_GAMEPLAY.hpp lines 519-520). The XBAND BIOS firmware
-	// only occupies TWO bank ranges:
-	//
-	//   $D0-$DF:$0000-$FFFF   BIOS firmware (linear, 1 MB)
-	//   $50-$5F:$0000-$FFFF   BIOS shadow mirror (1 MB)
-	//
-	// All other HiROM banks are free for the game cart in slot B,
-	// laid out as a standard HiROM cart. This way the BIOS can read
-	// the game cart's SNES header at $C0:$FFB0 (and the $00:$FFB0
-	// mirror) directly from Memory.Map[], no Fred bank-mux required.
-	//
-	// The one wrinkle is the SNES reset vector at $00:$FFFC. The CPU
-	// reads it on power-on and it must point at the BIOS entry, not
-	// the cart entry. So we override the upper 4KB of bank $00 (the
-	// vector area) with BIOS bytes after the cart map is laid down.
-	// Same for the $80:$Fxxx mirror for safety.
-	if (Multi.cartSizeB)
+	// With a game in the port, Fred's here/plain/softHere modes decide who
+	// answers where (S9xXBandFredRemap, below); the box boots in here mode.
+	if (!Multi.cartSizeB)
 	{
-		// Game cart in slot B fills the standard HiROM range first.
-		map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
-		                 Multi.cartSizeB, Multi.cartOffsetB);
-		map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
-		                 Multi.cartSizeB, Multi.cartOffsetB);
-		map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
-		                 Multi.cartSizeB, Multi.cartOffsetB);
-		map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
-		                 Multi.cartSizeB, Multi.cartOffsetB);
-	}
-	else
-	{
-		// No game cart loaded -- fall back to BIOS-only layout so
-		// the BIOS still boots normally.
-		map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
-		                 Multi.cartSizeA, Multi.cartOffsetA);
-		map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
-		                 Multi.cartSizeA, Multi.cartOffsetA);
-		map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
-		                 Multi.cartSizeA, Multi.cartOffsetA);
-		map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
-		                 Multi.cartSizeA, Multi.cartOffsetA);
-	}
-
-	// XBAND BIOS firmware overlay -- $D0-$DF (canonical) + $50-$5F
-	// (shadow). These overwrite whatever the cart placed there above
-	// because they're called after the cart map.
-	map_hirom_offset(0xd0, 0xdf, 0x0000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
-	map_hirom_offset(0x50, 0x5f, 0x0000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
-
-	// Reset/IRQ vector preservation. The SNES reads the reset vector
-	// at $00:$FFFC on power-on; if that area is cart bytes, the SNES
-	// will boot the GAME instead of the BIOS. Override the upper 4KB
-	// of bank $00 (and bank $80 for the mirror) so the vector area
-	// always reads BIOS bytes regardless of what the cart claims.
-	// The BIOS firmware contains its own reset vector at the same
-	// $XX:$FFFC offset, so the math just works out.
-	if (Multi.cartSizeB)
-	{
-		map_hirom_offset(0x00, 0x00, 0xf000, 0xffff,
-		                 Multi.cartSizeA, Multi.cartOffsetA);
-		map_hirom_offset(0x80, 0x80, 0xf000, 0xffff,
-		                 Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff, Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff, Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff, Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff, Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0xd0, 0xdf, 0x0000, 0xffff, Multi.cartSizeA, Multi.cartOffsetA);
+		map_hirom_offset(0x50, 0x5f, 0x0000, 0xffff, Multi.cartSizeA, Multi.cartOffsetA);
 	}
 
 	// DIALOG TRIGGER SCAN. The BIOS shows a "This game may not be
@@ -6007,6 +6021,7 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 	map_HiROMSRAM();
 	map_WRAM();
 	map_WriteProtectROM();
+	S9xXBandFredRemap();
 
 	// (We previously experimented with patching the game cart's SNES
 	// header into the BIOS image at $00:$FFB0-$FFDF. The XBandHdrRead*
@@ -6018,54 +6033,6 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 
 	// Multicart XBAND load: BIOS lives at ROM offset Multi.cartOffsetA.
 	xband_apply_loop_break_patch(Multi.cartOffsetA);
-}
-
-// Fred bank-mux: when the BIOS asserts the kill register, the SNES
-// HiROM cartridge bus is electrically disconnected from the BIOS ROM
-// and reconnected to the game cart slot. The BIOS jumps to a small
-// trampoline in WRAM before flipping the kill bit, reads the cart
-// bytes (typically the SNES header for game identification), then
-// flips the kill bit back and returns to its own code. We mirror
-// that behavior by remapping the HiROM range in Memory.Map[]:
-//
-//   $00-$3F:$8000-$FFFF   HiROM mirror (lo half)
-//   $40-$7D:$0000-$FFFF   HiROM lo half
-//   $80-$BF:$8000-$FFFF   HiROM mirror (hi half)
-//   $C0-$DF:$0000-$FFFF   HiROM hi half (BIOS firmware lives here)
-//
-// $E0-$FF is XBAND-specific (SRAM mirror + MMIO) and never gets
-// remapped by either helper. The system / WRAM / write-protect
-// setup also stays put -- only ROM bank pointers move.
-void CMemory::Map_XBandMultiCartCartVisible (void)
-{
-	if (!Multi.cartSizeB)
-		return;  // no game cart loaded; nothing to expose
-
-	map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
-	                 Multi.cartSizeB, Multi.cartOffsetB);
-	map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
-	                 Multi.cartSizeB, Multi.cartOffsetB);
-	map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
-	                 Multi.cartSizeB, Multi.cartOffsetB);
-	map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
-	                 Multi.cartSizeB, Multi.cartOffsetB);
-
-	// Re-apply write protection so MAP_NONE writes still get caught.
-	map_WriteProtectROM();
-}
-
-void CMemory::Map_XBandMultiCartBiosVisible (void)
-{
-	map_hirom_offset(0x00, 0x3f, 0x8000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
-	map_hirom_offset(0x40, 0x7d, 0x0000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
-	map_hirom_offset(0x80, 0xbf, 0x8000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
-	map_hirom_offset(0xc0, 0xdf, 0x0000, 0xffff,
-	                 Multi.cartSizeA, Multi.cartOffsetA);
-
-	map_WriteProtectROM();
 }
 
 void CMemory::Map_BSCartHiROMMap(void)

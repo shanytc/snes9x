@@ -35,6 +35,7 @@ enum S9xBiosSlot
 	S9X_BIOS_DSP3,          // dsp3.bin     — DSP-3 firmware
 	S9X_BIOS_DSP4,          // dsp4.bin     — DSP-4 firmware
 	S9X_BIOS_CX4,           // cx4.bin      — Cx4 data ROM (Mega Man X2 and X3)
+	S9X_BIOS_XBAND,         // X-Band Modem BIOS (USA).sfc — XBAND modem cart
 	S9X_NUM_BIOS_SLOTS
 };
 
@@ -100,7 +101,7 @@ enum
 struct S9xBiosFamily
 {
 	const char	*name;
-	int			members[8];	// its slots in sidebar order, ended by -1
+	int			members[9];	// its slots in sidebar order, ended by -1
 };
 
 struct S9xBiosNesting

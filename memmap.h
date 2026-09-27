@@ -138,6 +138,8 @@ struct CMemory
 	int		LoadNSSCart (const char *, int32 *);
 	int		LoadSFCBoxFile (const char *, int32 *);
 	bool8	LoadSuperDiscImage (const char *);
+	// The XBAND BIOS from the BIOS Manager, with the game in ROM[] plugged in.
+	bool8	LoadXBand (const char *game, int32 game_size);
 	bool8	LoadXBandMultiCart ();
 	bool8	LoadGNEXT ();
 	bool8	LoadSRAM (const char *);
@@ -194,14 +196,6 @@ struct CMemory
 	void	Map_XBandLoROMMap (void);
 	void	Map_XBandHiROMMap (void);
 	void	Map_XBandMultiCartHiROMMap (void);
-
-	// Fred bank-mux helpers used by xband.cpp's kill-register write
-	// handler. They re-map the HiROM range to either the BIOS firmware
-	// (slot A) or the game cart (slot B), without touching the system,
-	// SRAM, MMIO, or write-protect setup. Idempotent and only valid
-	// after a successful Map_XBandMultiCartHiROMMap.
-	void	Map_XBandMultiCartCartVisible (void);
-	void	Map_XBandMultiCartBiosVisible (void);
 
 	uint16	checksum_calc_sum (uint8 *, uint32);
 	uint16	checksum_mirror_sum (uint8 *, uint32 &, uint32 mask = 0x800000);

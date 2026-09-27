@@ -10,6 +10,7 @@
 #include "superdisc.h"
 #include "upd7725.h"
 #include "hg51b.h"
+#include "xband.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -64,6 +65,8 @@ static const char *const kNamesDSP2[]  = { "dsp2.bin", "dsp2.rom", "DSP2 (World)
 static const char *const kNamesDSP3[]  = { "dsp3.bin", "dsp3.rom", "DSP3 (Japan) (Enhancement Chip).bin", NULL };
 static const char *const kNamesDSP4[]  = { "dsp4.bin", "dsp4.rom", "DSP4 (World) (Enhancement Chip).bin", NULL };
 static const char *const kNamesCX4[]   = { "cx4.bin", "cx4.data.rom", "CX4 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesXBand[] = { "X-Band Modem BIOS (USA).sfc", "X-Band Modem BIOS (USA).zip",
+                                           "X-Band Modem BIOS (U).smc", "XBand Modem BIOS (U).smc", NULL };
 
 // Behind each row's info icon: a heading, then one "name — detail — CRC32" line
 // per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
@@ -115,6 +118,8 @@ static const char kInfoDSP4[] = "Supports the following DSP-4 firmware dumps:\n"
                                 "dsp4.bin — 8192 bytes — E15384C0";
 static const char kInfoCX4[] = "Supports the following Cx4 data ROM dumps (Mega Man X2 and X3):\n"
                                "cx4.bin — 3072 bytes — B6E76A6A";
+static const char kInfoXBand[] = "Supports the following XBAND modem BIOS ROMs:\n"
+                                 "X-Band Modem BIOS (USA).sfc — 1 MB, with or without a copier header — A8B868A0";
 
 // No-Intro dumps each slot accepts, all passing its size and signature checks.
 static const char *const kNoIntroGB[] = {
@@ -153,7 +158,7 @@ static const char *const kNoIntroCX4[]   = { "CX4 (World) (Enhancement Chip).bin
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
-// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE, upd7725.h, hg51b.h. 0 = don't care (the SGB carts
+// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE, upd7725.h, hg51b.h, xband.h XBAND_ROM_SIZE. 0 = don't care (the SGB carts
 // ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
@@ -176,6 +181,7 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "DSP3",         "DSP-3",                          kNamesDSP3,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP3,      kNoIntroDSP3 },
 	{ "DSP4",         "DSP-4",                          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP4,      kNoIntroDSP4 },
 	{ "CX4",          "Cx4",                            kNamesCX4,       HG51B_DATAROM_SIZE,    "Optional, built-in native chip",         kInfoCX4,       kNoIntroCX4 },
+	{ "XBAND",        "XBAND",                          kNamesXBand,     XBAND_ROM_SIZE, NULL,                                  kInfoXBand,     NULL },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -252,7 +258,7 @@ static const S9xBiosFamily kFamilies[S9X_BIOS_NUM_FAMILIES] =
 	  { S9X_BIOS_SFCBOX_KROM, S9X_BIOS_SFCBOX_FONT, S9X_BIOS_NSS, S9X_BIOS_NSS_FONT, -1 } },
 	{ "Expansions & Peripherals",
 	  { S9X_BIOS_SGB1, S9X_BIOS_SGB1_BOOT, S9X_BIOS_SGB2, S9X_BIOS_SGB2_BOOT,
-	    S9X_BIOS_BSX, S9X_BIOS_SUFAMI, S9X_BIOS_SUPERDISC, -1 } },
+	    S9X_BIOS_BSX, S9X_BIOS_SUFAMI, S9X_BIOS_SUPERDISC, S9X_BIOS_XBAND, -1 } },
 	{ "CoProcessors & Special Chips",
 	  { S9X_BIOS_DSP1, S9X_BIOS_DSP1B, S9X_BIOS_DSP2, S9X_BIOS_DSP3, S9X_BIOS_DSP4, S9X_BIOS_CX4, -1 } },
 	{ "Handheld Systems",
@@ -388,6 +394,7 @@ static bool SizeOkForSlot (int slot, uint32 n)
 	if (slot == S9X_BIOS_GBC) return (n == 0x900 || n == 0x800);
 	if (slot == S9X_BIOS_SUPERDISC) return (n == SDISC_BIOS_SIZE || n == SDISC_BIOS_SIZE + 0x200);
 	if (slot == S9X_BIOS_SFCBOX_KROM) return (n == 0x10000 || n == 0x20000);	// KROM 1.00 / 2.00
+	if (slot == S9X_BIOS_XBAND)     return (n == XBAND_ROM_SIZE || n == XBAND_ROM_SIZE + 0x200);
 	return (kSlots[slot].size == 0 || n == kSlots[slot].size);
 }
 
@@ -468,7 +475,7 @@ enum BiosImageKind
 	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
 	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS,
 	KIND_DSP1_FIRMWARE, KIND_DSP1B_FIRMWARE, KIND_DSP2_FIRMWARE, KIND_DSP3_FIRMWARE,
-	KIND_DSP4_FIRMWARE, KIND_NECDSP_FIRMWARE, KIND_CX4_DATAROM
+	KIND_DSP4_FIRMWARE, KIND_NECDSP_FIRMWARE, KIND_CX4_DATAROM, KIND_XBAND_BIOS
 };
 
 static const char *KindName (int kind)
@@ -493,6 +500,7 @@ static const char *KindName (int kind)
 		case KIND_DSP4_FIRMWARE: return ("DSP-4 firmware");
 		case KIND_NECDSP_FIRMWARE: return ("other DSP firmware");
 		case KIND_CX4_DATAROM: return ("Cx4 data ROM");
+		case KIND_XBAND_BIOS:     return ("XBAND BIOS");
 		default:             return ("unrecognised image");
 	}
 }
@@ -555,6 +563,12 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 	if (full == HG51B_DATAROM_SIZE && n >= HG51B_DATAROM_SIZE && S9xHG51BIsDataROM(d, HG51B_DATAROM_SIZE))
 		return (KIND_CX4_DATAROM);
 
+	// XBAND names itself in its HiROM header, so this needs 64K in hand.
+	if (full == XBAND_ROM_SIZE && S9xXBandIsBIOS(d, n))
+		return (KIND_XBAND_BIOS);
+	if (full == XBAND_ROM_SIZE + 0x200 && n > 0x200 && S9xXBandIsBIOS(d + 0x200, n - 0x200))
+		return (KIND_XBAND_BIOS);
+
 	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
 	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
 	// twelve dots left-aligned at bit 11, so every row word's top nibble is
@@ -612,6 +626,7 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_DSP3:      return (KIND_DSP3_FIRMWARE);
 		case S9X_BIOS_DSP4:      return (KIND_DSP4_FIRMWARE);
 		case S9X_BIOS_CX4:       return (KIND_CX4_DATAROM);
+		case S9X_BIOS_XBAND:     return (KIND_XBAND_BIOS);
 		default:                 return (KIND_UNKNOWN);
 	}
 }
@@ -684,7 +699,8 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 	const int want = ExpectedKind(slot);
 	KindProbe          probe = { want, KIND_UNKNOWN };
 	std::vector<uint8> img;
-	if (!S9xReadBiosImage(g_paths[slot], img, 0x8200, AcceptKind, &probe))
+	const uint32 probe_len = (slot == S9X_BIOS_XBAND) ? 0x10200 : 0x8200;
+	if (!S9xReadBiosImage(g_paths[slot], img, probe_len, AcceptKind, &probe))
 	{
 		// Say it is wrong, not just what it is, or the row reads as a caption
 		// for whatever was dropped on it.

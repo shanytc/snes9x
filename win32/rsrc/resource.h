@@ -491,16 +491,11 @@
 #define ID_NETPLAY_CONNECT              40078
 #define ID_NETPLAY_DISCONNECT           40079
 #define ID_NETPLAY_OPTIONS              40080
-#define ID_XBAND_CONNECT                45000
 #define ID_XBAND_DISCONNECT             45001
 #define ID_XBAND_PC_HISTOGRAM           45002
 #define ID_XBAND_PPU_STATE              45003
 #define ID_XBAND_KCTL_TRACE             45004
 #define ID_XBAND_TOGGLE_HELO_FILTER     45005
-#define ID_XBAND_CONNECT_16BIT          45006
-#define ID_XBAND_CONNECT_XBAND          45007
-#define ID_XBAND_CONNECT_BARE           45008
-#define ID_XBAND_CONNECT_XBSERVER       45009
 #define ID_XBAND_SRAM_AUTO              45010
 #define ID_XBAND_SRAM_BENNER            45011
 #define ID_XBAND_SRAM_LUKE2             45012
@@ -511,7 +506,6 @@
 #define ID_XBAND_FAKE_INJECT_VALIDATE   45017
 #define ID_XBAND_FAKE_TOGGLE_CONNID     45018
 #define ID_XBAND_FAKE_INJECT_LOGIN      45019
-#define ID_XBAND_TOGGLE_BANKMUX         45020
 #define ID_XBAND_FAKE_INJECT_GAMESUPP   45021
 #define ID_XBAND_FAKE_INJECT_SSF2PATCH  45022
 #define ID_XBAND_TOGGLE_GAMEID_SPOOF    45023
@@ -523,6 +517,7 @@
 #define ID_XBAND_SERVER_START           45030
 #define ID_XBAND_SERVER_STOP            45031
 #define ID_XBAND_SERVER_LOG             45032
+#define ID_EMULATION_XBAND              45033
 // Spoof candidate sub-menu IDs. 19 candidates currently, leave
 // headroom up to 64 entries (40300..40363). Keep range contiguous.
 #define ID_XBAND_SPOOF_BASE             45100

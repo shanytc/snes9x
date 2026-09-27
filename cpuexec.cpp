@@ -186,6 +186,10 @@ void S9xMainLoop (void)
 			}
 		}
 
+		// The XBAND BIOS pulled /RESET and halted: reboot at an instruction boundary.
+		if (Settings.XBAND && S9xXBandPendingReset())
+			S9xXBandApplyReset();
+
 		if (Settings.NSS)
 		{
 			// The supervisor pulled the reset line: the APU is on it too,

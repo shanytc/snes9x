@@ -433,13 +433,6 @@ static uint32 xband_fred_switches = 0;
 static char   xband_fred_last[64] = "(none)";
 
 // BIOS firmware scan results. Populated at multi-cart load time by
-// memmap.cpp's dialog-trigger scanner. Free-form text we can grow as
-// we add more scans (PEA #$4C54, LDA #$021D, etc). Visible in the
-// kctl trace dialog so the user can read scan output without needing
-// a console attached for stderr.
-#define XBAND_DIALOG_SCAN_BUF 16384
-static char xband_dialog_scan_buf[XBAND_DIALOG_SCAN_BUF] = {0};
-
 // kDispatcherVector logger. Every XBAND OS function call goes through
 // `JSL $E0:$0040` with the function ID in the X register. Per the
 // fresh-eggs xband_post writeup:
@@ -518,23 +511,6 @@ void S9xXBandLogDispatcherCall (uint32 caller, uint16 func_id, uint16 a)
 	e->a_last = a;
 	e->hits = 1;
 	e->first_seen_call = xband_dispatch_total_calls;
-}
-
-void S9xXBandResetDialogScan ()
-{
-	xband_dialog_scan_buf[0] = '\0';
-}
-
-void S9xXBandAppendDialogScan (const char *line)
-{
-	if (!line) return;
-	size_t cur = strlen(xband_dialog_scan_buf);
-	size_t room = XBAND_DIALOG_SCAN_BUF - cur - 1;
-	if (room == 0) return;
-	size_t n = strlen(line);
-	if (n > room) n = room;
-	memcpy(xband_dialog_scan_buf + cur, line, n);
-	xband_dialog_scan_buf[cur + n] = '\0';
 }
 
 // Read interceptor PC log. When the BIOS reads from $7F:$0C8B-$0C8E
@@ -4167,17 +4143,6 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		(unsigned)xband_fred_switches,
 		xband_fred_last,
 		(unsigned)xband_bios_resets, (unsigned)xband_bios_reset_pc);
-
-	// BIOS firmware scan results. Populated by memmap.cpp's
-	// dialog-trigger scanner at multi-cart load time. Empty unless
-	// a multi-cart was loaded this session.
-	if (xband_dialog_scan_buf[0])
-	{
-		pos += snprintf(out + pos, out_size - pos,
-			"BIOS firmware scan (dialog-trigger search):\n"
-			"%s\n",
-			xband_dialog_scan_buf);
-	}
 
 	// kDispatcherVector log. Every JSL $E0:$0040 in BIOS code lands
 	// in our trap (cpuexec.cpp) and gets logged here. We track UNIQUE

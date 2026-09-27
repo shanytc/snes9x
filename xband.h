@@ -127,6 +127,10 @@ void	S9xXBandPostLoadState (void);
 // Lays the bus out for the current Fred mode (BIOS + game cart loads only).
 void	S9xXBandFredRemap (void);
 
+// The BIOS resets the console through Fred's LED line 6; cpuexec applies it.
+bool8	S9xXBandPendingReset (void);
+void	S9xXBandApplyReset (void);
+
 // The prepaid XBAND Card in the modem's smart-card slot (a Gemplus GPM103).
 bool8	S9xXBandCardInserted (void);
 void	S9xXBandInsertCard (bool8 insert);

@@ -835,6 +835,10 @@ static bool xband_local_switch (void)
 
 static bool xband_ring_answer (void);
 
+static bool xband_seed_sram     = false;	// load the SRAM dump on the next reset
+static bool xband_reset_pending = false;	// the BIOS pulled /RESET via the LEDs
+static uint32 xband_bios_resets = 0, xband_bios_reset_pc = 0;
+
 // First-N capture buffers for both directions. These let us hex/ASCII
 // dump the start of each conversation in the kctl popup so we can
 // identify the on-the-wire protocol (ADSP framing, server banner,
@@ -4157,10 +4161,12 @@ void S9xXBandKCtlDump (char *out, size_t out_size)
 		"  mode            = %s (kill $%02X, control $%02X)\n"
 		"  switches        = %u\n"
 		"  last switch     = %s\n"
+		"  BIOS resets     = %u (last from PC=$%06X)\n"
 		"\n",
 		fred_modes[XBand.fred_mode % 3], XBand.kill, XBand.control,
 		(unsigned)xband_fred_switches,
-		xband_fred_last);
+		xband_fred_last,
+		(unsigned)xband_bios_resets, (unsigned)xband_bios_reset_pc);
 
 	// BIOS firmware scan results. Populated by memmap.cpp's
 	// dialog-trigger scanner at multi-cart load time. Empty unless
@@ -5908,6 +5914,13 @@ static void xband_reg_write (uint8 reg, uint8 byte, uint32 address)
 	XBand.regs[reg] = byte;
 	if (reg == 0x80)
 		xband_card_control(byte);
+	// LED line 6 is the console's /RESET: enabled and driven low resets it.
+	if ((reg == 0xB4 || reg == 0xB5) && (XBand.regs[0xB5] & 0x40) && !(XBand.regs[0xB4] & 0x40))
+	{
+		xband_reset_pending = true;
+		xband_bios_resets++;
+		xband_bios_reset_pc = Registers.PBPC & 0xFFFFFF;
+	}
 	fred_reg_written(reg);
 }
 
@@ -6007,6 +6020,7 @@ void S9xInitXBand (void)
 	// to the ROM loader.
 	memset(&XBand, 0, sizeof(XBand));
 	XBand.socket_fd = XBAND_INVALID_SOCKET;
+	xband_seed_sram = true;
 }
 
 // External hooks into cpuexec.cpp's BRK detector so a fresh power-on
@@ -6154,6 +6168,10 @@ void S9xResetXBand (void)
 	fred_map_valid = false;
 	fred_remap(true);
 
+	// /RESET reaches the modem too: any call hangs up.
+	S9xXBandDisconnect();
+	xband_reset_pending = false;
+
 	XBand.modem_line_relay  = 0;
 	XBand.modem_set_ATV25   = 0;
 	XBand.net_step          = XBAND_NET_IDLE;
@@ -6179,13 +6197,27 @@ void S9xResetXBand (void)
 	snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
 	         "(none)");
 
-	// Try to load a real XBAND SRAM dump (e.g. one of the dumps in the
-	// Cinghialotto repo's SNES-XBandSRAMs.rar). On a fresh "first-time
-	// setup" boot, the BIOS spins forever in init because nothing in
-	// zeroed SRAM matches the magic boot vector / box ID it expects.
-	// A real SRAM dump bypasses that hang.
-	if (xband_load_sram_image())
-		XBand.sram_dirty = FALSE;
+	// Seed from a real XBAND SRAM dump (e.g. one of the Cinghialotto
+	// SNES-XBandSRAMs) once per game load; a saved .srm loaded after this
+	// wins. Later resets keep the battery-backed SRAM, as the box does.
+	if (xband_seed_sram)
+	{
+		xband_seed_sram = false;
+		if (xband_load_sram_image())
+			XBand.sram_dirty = FALSE;
+	}
+}
+
+bool8 S9xXBandPendingReset (void)
+{
+	return xband_reset_pending;
+}
+
+// The BIOS pulled /RESET through the LED lines (SNESBoot.c reboot) and stopped.
+void S9xXBandApplyReset (void)
+{
+	xband_reset_pending = false;
+	S9xSoftReset();
 }
 
 void S9xXBandPostLoadState (void)

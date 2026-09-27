@@ -2104,6 +2104,46 @@ static void BuildLanguageMenu(HMENU bar)
 	}
 }
 
+// Emulation -> XBAND -> Local Server: the host and port the BIOS's dial goes to.
+static INT_PTR CALLBACK DlgXBandServerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+		LocalizeDialog(hDlg);
+		SetDlgItemTextA(hDlg, IDC_XBAND_HOST, Settings.XBANDServerHost[0] ? Settings.XBANDServerHost : "127.0.0.1");
+		SetDlgItemInt(hDlg, IDC_XBAND_PORT, Settings.XBANDServerPort ? Settings.XBANDServerPort : 56969, FALSE);
+		return TRUE;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDOK:
+		{
+			char host[sizeof(Settings.XBANDServerHost)] = {};
+			GetDlgItemTextA(hDlg, IDC_XBAND_HOST, host, sizeof(host));
+			BOOL ok = FALSE;
+			UINT port = GetDlgItemInt(hDlg, IDC_XBAND_PORT, &ok, FALSE);
+			if (!host[0] || strchr(host, ' ') || !ok || port < 1 || port > 65535)
+			{
+				MessageBoxA(hDlg, "Enter a host name or IP address and a port from 1 to 65535.",
+				            "XBAND Local Server", MB_OK | MB_ICONWARNING);
+				return TRUE;
+			}
+			strcpy(Settings.XBANDServerHost, host);
+			Settings.XBANDServerPort = port;
+			EndDialog(hDlg, IDOK);
+			return TRUE;
+		}
+		case IDCANCEL:
+			EndDialog(hDlg, IDCANCEL);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
 LRESULT CALLBACK WinProc(
 						 HWND hWnd,
 						 UINT uMsg,
@@ -3216,6 +3256,24 @@ LRESULT CALLBACK WinProc(
 			S9xSetInfoString(msg);
 			break;
 		}
+
+		// The next dial goes to the picked server; a call already up stays up.
+		case ID_EMULATION_XBAND_SERVER_RETRO:
+			Settings.XBANDLocalServer = FALSE;
+			S9xXBandServerChanged();
+			S9xSetInfoString("XBAND server: xbserver.retrocomputing.network");
+			break;
+
+		case ID_EMULATION_XBAND_SERVER_LOCAL:
+			if (DialogBoxA(g_hInst, MAKEINTRESOURCEA(IDD_XBAND_SERVER), hWnd, DlgXBandServerProc) == IDOK)
+			{
+				Settings.XBANDLocalServer = TRUE;
+				S9xXBandServerChanged();
+				char msg[320];
+				snprintf(msg, sizeof(msg), "XBAND server: %s:%u", Settings.XBANDServerHost, (unsigned) Settings.XBANDServerPort);
+				S9xSetInfoString(msg);
+			}
+			break;
 
 		case ID_NSS_COIN1:
 		case ID_NSS_COIN2:
@@ -6166,6 +6224,21 @@ static void CheckMenuStates ()
 		txt.fMask      = MIIM_STRING;
 		txt.dwTypeData = text;
 		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_CARD, FALSE, &txt);
+	}
+	mii.fState = Settings.XBANDLocalServer ? MFS_UNCHECKED : MFS_CHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_SERVER_RETRO, FALSE, &mii);
+	mii.fState = Settings.XBANDLocalServer ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_SERVER_LOCAL, FALSE, &mii);
+	{
+		TCHAR text[320];
+		_stprintf(text, TEXT("&Local Server (%s:%u)..."),
+		          (TCHAR *) _tFromChar(Settings.XBANDServerHost[0] ? Settings.XBANDServerHost : "127.0.0.1"),
+		          Settings.XBANDServerPort ? (unsigned) Settings.XBANDServerPort : 56969u);
+		MENUITEMINFO txt = {};
+		txt.cbSize     = sizeof(txt);
+		txt.fMask      = MIIM_STRING;
+		txt.dwTypeData = text;
+		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_SERVER_LOCAL, FALSE, &txt);
 	}
 
 	// Super Disc drive.

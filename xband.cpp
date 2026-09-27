@@ -794,20 +794,33 @@ static bool xband_helo_filter_enabled = false;
 // reg $08 RTS handler) which lives much earlier in the file.
 static void xband_try_auto_reconnect (void);
 
-// Local switchboard (XBAND_SERVER set): between calls each window keeps an
-// idle line to the server so an opponent's call can ring it (RI, modem $0F
-// bit 3); answering adopts that line, which the server relays to the caller.
+// Local switchboard (Emulation -> XBAND -> Local Server): between calls each
+// window keeps an idle line to the server so an opponent's call can ring it
+// (RI, modem $0F bit 3); answering adopts that line, which the server relays.
 static intptr_t xband_ring_fd      = XBAND_INVALID_SOCKET;
 static bool     xband_ringing      = false;
 static bool     xband_answered     = false;	// this call was answered, not dialed
 static bool     xband_far_end_up   = true;	// a local dial rings out until the far end speaks
+static bool     xband_call_local   = false;	// the call up now went to the local server
 static char     xband_ring_line[16];
 static int      xband_ring_len     = 0;
 static uint32   xband_ring_retry   = 0;		// frames until the next ring-line attempt
 
 static bool xband_local_switch (void)
 {
-	return getenv("XBAND_SERVER") != NULL;
+	return Settings.XBANDLocalServer && Settings.XBANDServerHost[0] && Settings.XBANDServerPort;
+}
+
+// The server the next dial goes to.
+static const char *xband_server (int *port)
+{
+	if (xband_local_switch())
+	{
+		*port = (int) Settings.XBANDServerPort;
+		return Settings.XBANDServerHost;
+	}
+	*port = 56969;
+	return "xbserver.retrocomputing.network";
 }
 
 static bool xband_ring_answer (void);
@@ -6343,7 +6356,12 @@ static void xband_ring_close (void)
 // Between calls, keep a line open so the server can ring this window.
 static void xband_ring_poll (void)
 {
-	if (!xband_local_switch() || !xband_last_host[0] || XBand.socket_fd != XBAND_INVALID_SOCKET)
+	if (!xband_local_switch())
+	{
+		xband_ring_close();
+		return;
+	}
+	if (!xband_last_host[0] || XBand.socket_fd != XBAND_INVALID_SOCKET)
 		return;
 
 	if (xband_ring_fd == XBAND_INVALID_SOCKET)
@@ -6353,7 +6371,9 @@ static void xband_ring_poll (void)
 			xband_ring_retry--;
 			return;
 		}
-		xband_ring_fd = xband_open_socket(xband_last_host, xband_last_port);
+		int port;
+		const char *host = xband_server(&port);
+		xband_ring_fd = xband_open_socket(host, port);
 		if (xband_ring_fd == XBAND_INVALID_SOCKET)
 		{
 			xband_ring_retry = 300;
@@ -6416,6 +6436,7 @@ static bool xband_ring_answer (void)
 	xband_ringing   = false;
 	xband_answered  = true;
 	xband_far_end_up = true;
+	xband_call_local = true;
 	XBand.connected = TRUE;
 	XBand.net_step  = XBAND_NET_CONNECTED;
 	XBand.rxbufpos  = XBand.rxbufused = 0;
@@ -6437,7 +6458,8 @@ bool8 S9xXBandConnect (const char *host, int port)
 
 	XBand.socket_fd = (intptr_t)fd;
 	XBand.connected = TRUE;
-	xband_far_end_up = !xband_local_switch();	// the switchboard's first bytes answer
+	xband_call_local = xband_local_switch();
+	xband_far_end_up = !xband_call_local;	// the switchboard's first bytes answer
 
 	// Fresh connection -- drop all sniffed ADSP state and the running
 	// fake-server send_seq counter so a previous session's numbers
@@ -6458,7 +6480,7 @@ bool8 S9xXBandConnect (const char *host, int port)
 	// against a pure-HELO server, and BIOS TX bytes would be stuck
 	// in xband_txbuf forever.
 	xband_send_identity(fd);
-	if (xband_local_switch())
+	if (xband_call_local)
 		xband_send_line(fd, "LINE");
 	XBand.net_step = XBAND_NET_CONNECTED;
 
@@ -6485,30 +6507,23 @@ bool S9xXBandGetHeloFilter (void)
 	return xband_helo_filter_enabled;
 }
 
-// Auto-reconnect: re-open the socket using the host/port the user
-// originally clicked Connect with. Called from the modem reg $07/$08
-// write path when the BIOS asserts RTS again after a previous hangup.
-// No-op if there's no remembered host (user never clicked Connect)
-// or the socket is already open.
-// The BIOS's dial opens the connection, as dreampi does on the modem's
+// The BIOS's dial (RTS) opens the connection, as dreampi does on the modem's
 // CONNECT: a socket opened ahead of the dial goes stale and the server
 // ignores the BIOS's open requests on it.
 static void xband_try_auto_reconnect (void)
 {
 	if (XBand.socket_fd != XBAND_INVALID_SOCKET) return;
-	const char *host = xband_last_host[0] ? xband_last_host : "xbserver.retrocomputing.network";
-	int         port = xband_last_host[0] ? xband_last_port : 56969;
-	// XBAND_SERVER=host:port points the dial at another server (a local one).
-	static char env_host[256];
-	if (!xband_last_host[0] && getenv("XBAND_SERVER"))
-	{
-		snprintf(env_host, sizeof(env_host), "%s", getenv("XBAND_SERVER"));
-		char *colon = strrchr(env_host, ':');
-		if (colon) { *colon = 0; port = atoi(colon + 1); }
-		host = env_host;
-	}
+	int port;
+	const char *host = xband_server(&port);
 	if (S9xXBandConnect(host, port))
 		xband_auto_reconnects++;
+}
+
+// Emulation -> XBAND picked another server: the idle ring line follows it.
+void S9xXBandServerChanged (void)
+{
+	xband_ring_close();
+	xband_ring_retry = 0;
 }
 
 void S9xXBandDisconnect (void)
@@ -6678,7 +6693,7 @@ void S9xXBandPoll (void)
 				// BIOS forever waiting for a marker that may
 				// never come.
 				// The local switchboard also carries games' raw bytes: send them now.
-				if (unsent < XBAND_TXBUF_SIZE / 2 && !xband_local_switch())
+				if (unsent < XBAND_TXBUF_SIZE / 2 && !xband_call_local)
 					break;
 				end = XBand.txbufpos;  // flush all
 			}

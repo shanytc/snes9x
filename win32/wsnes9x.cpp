@@ -4007,6 +4007,28 @@ LRESULT CALLBACK WinProc(
 				S9xSetInfoString("XBAND on: assign its BIOS in File -> BIOS Manager");
 			break;
 
+		// The card stays in the slot across games, like the real modem's.
+		case ID_EMULATION_XBAND_CARD:
+		{
+			S9xXBandInsertCard(!S9xXBandCardInserted());
+			char msg[64];
+			if (S9xXBandCardInserted())
+				snprintf(msg, sizeof(msg), "XBAND Card inserted: %d credits", S9xXBandCardCredits());
+			else
+				snprintf(msg, sizeof(msg), "XBAND Card removed");
+			S9xSetInfoString(msg);
+			break;
+		}
+
+		case ID_EMULATION_XBAND_CARD_RESET:
+		{
+			S9xXBandResetCard();
+			char msg[64];
+			snprintf(msg, sizeof(msg), "XBAND Card reset: %d credits", S9xXBandCardCredits());
+			S9xSetInfoString(msg);
+			break;
+		}
+
 		case ID_NSS_COIN1:
 		case ID_NSS_COIN2:
 			if (NSS.Active)
@@ -6945,6 +6967,18 @@ static void CheckMenuStates ()
 
 	mii.fState = Settings.XBANDEnabled ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND, FALSE, &mii);
+	mii.fState = S9xXBandCardInserted() ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_CARD, FALSE, &mii);
+	{
+		const int credits = S9xXBandCardCredits();
+		TCHAR text[64];
+		_stprintf(text, TEXT("Insert &Prepaid Card (%d credit%s)"), credits, credits == 1 ? TEXT("") : TEXT("s"));
+		MENUITEMINFO txt = {};
+		txt.cbSize     = sizeof(txt);
+		txt.fMask      = MIIM_STRING;
+		txt.dwTypeData = text;
+		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_CARD, FALSE, &txt);
+	}
 
 	// Super Disc drive.
 	{

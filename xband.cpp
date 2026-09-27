@@ -5375,6 +5375,164 @@ bool8 S9xXBandSoftReg (uint32 address, uint8 *byte, bool8 write)
 	return TRUE;
 }
 
+// -----------------------------------------------------------------------
+// Prepaid XBAND Card (Catapult SmartCard.c / SmartCardPriv.h)
+// -----------------------------------------------------------------------
+// A Gemplus GPM103: 104 bits read MSB-first a clock at a time through Fred
+// reg $80 (clk $01, reset $08, vcc $10) and status reg $84 (bit 0 detect,
+// bit 1 data). Bits 0-31 carry the "real debit card" ID, 32-63 the serial,
+// 72-103 the octal credit counter C3..C0 (credits = sum of ones * 8^stage).
+// Rising clock: with reset high the address returns to 0, else it advances;
+// after a reset pulse with no clock inside it, the next rising clock writes
+// the addressed counter bit to 0, or, if it already is, refills the next
+// lower stage (the carry of WriteCarry103).
+
+#define XBAND_CARD_BITS		104
+#define XBAND_CARD_COUNTER	72
+
+struct XBandCard
+{
+	bool	inserted;
+	uint8	bits[XBAND_CARD_BITS / 8];
+	int		addr;
+	uint8	ctl;
+	bool	reset_clean;	// reset is high and no clock has risen during it
+	bool	write_armed;
+};
+
+static XBandCard xband_card;
+
+static std::string xband_card_path (void)
+{
+	return S9xGetDirectory(SRAM_DIR) + SLASH_STR + "XBAND Prepaid Card.bin";
+}
+
+static bool xband_card_bit (int n)
+{
+	return (xband_card.bits[n >> 3] >> (7 - (n & 7))) & 1;
+}
+
+static void xband_card_save (void)
+{
+	if (FILE *f = fopen(xband_card_path().c_str(), "wb"))
+	{
+		fwrite(xband_card.bits, 1, sizeof(xband_card.bits), f);
+		fclose(f);
+	}
+}
+
+// A new card: Gemplus/Catapult debit ID $0BDF04, serial 12345,
+// 100 credits (C2 one bit = 64, C1 four = 32, C0 four = 4).
+static void xband_card_fresh (void)
+{
+	static const uint8 fresh[XBAND_CARD_BITS / 8] = {
+		0x00, 0x0B, 0xDF, 0x04,  0x00, 0x00, 0x30, 0x39,  0xFF,
+		0x00, 0x01, 0x0F, 0x0F
+	};
+	memcpy(xband_card.bits, fresh, sizeof(fresh));
+}
+
+// Read once; every write saves, so memory stays the file's copy. No file = a new card.
+static void xband_card_load (void)
+{
+	static bool loaded = false;
+	if (loaded)
+		return;
+	loaded = true;
+	FILE *f = fopen(xband_card_path().c_str(), "rb");
+	if (f)
+	{
+		bool ok = fread(xband_card.bits, 1, sizeof(xband_card.bits), f) == sizeof(xband_card.bits);
+		fclose(f);
+		if (ok)
+			return;
+	}
+	xband_card_fresh();
+}
+
+static void xband_card_write (int n)
+{
+	if (n < XBAND_CARD_COUNTER || n >= XBAND_CARD_BITS)
+		return;		// the ID and serial are fused
+	if (xband_card_bit(n))
+		xband_card.bits[n >> 3] &= ~(0x80 >> (n & 7));
+	else if ((n >> 3) + 1 < XBAND_CARD_BITS / 8)
+		xband_card.bits[(n >> 3) + 1] = 0xFF;
+	xband_card_save();
+}
+
+static void xband_card_control (uint8 v)
+{
+	const uint8 prev = xband_card.ctl;
+	xband_card.ctl = v;
+	if (!xband_card.inserted || !(v & 0x10))
+		return;
+
+	if (!(prev & 0x08) && (v & 0x08))
+		xband_card.reset_clean = true;
+	if ((prev & 0x08) && !(v & 0x08) && xband_card.reset_clean && !(v & 0x01))
+		xband_card.write_armed = true;
+
+	if (!(prev & 0x01) && (v & 0x01))
+	{
+		if (v & 0x08)
+		{
+			xband_card.addr = 0;
+			xband_card.reset_clean = false;
+			xband_card.write_armed = false;
+		}
+		else if (xband_card.write_armed)
+		{
+			xband_card_write(xband_card.addr);
+			xband_card.write_armed = false;
+		}
+		else if (xband_card.addr < XBAND_CARD_BITS - 1)
+			xband_card.addr++;
+	}
+}
+
+static uint8 xband_card_status (void)
+{
+	if (!xband_card.inserted)
+		return 0x00;
+	return 0x01 | (xband_card_bit(xband_card.addr) ? 0x02 : 0x00);
+}
+
+bool8 S9xXBandCardInserted (void)
+{
+	return xband_card.inserted;
+}
+
+void S9xXBandInsertCard (bool8 insert)
+{
+	if (insert && !xband_card.inserted)
+	{
+		xband_card_load();
+		xband_card.addr = 0;
+		xband_card.reset_clean = xband_card.write_armed = false;
+	}
+	xband_card.inserted = insert;
+}
+
+void S9xXBandResetCard (void)
+{
+	xband_card_load();		// memory, not an older file, holds the card from here on
+	xband_card_fresh();
+	xband_card_save();
+	xband_card.addr = 0;
+	xband_card.reset_clean = xband_card.write_armed = false;
+}
+
+int S9xXBandCardCredits (void)
+{
+	xband_card_load();
+	int credits = 0, weight = 1;
+	for (int stage = 3; stage >= 0; stage--, weight *= 8)
+		for (int b = 0; b < 8; b++)
+			credits += xband_card_bit(XBAND_CARD_COUNTER + stage * 8 + b) ? weight : 0;
+	return credits;
+}
+
 // Fred register file read; reg = register byte address / 2 (A0 ignored).
 static uint8 xband_reg_read (uint8 reg)
 {
@@ -5425,11 +5583,8 @@ static uint8 xband_reg_read (uint8 reg)
 	}
 	else if (reg == 0x84)
 	{
-		// kSStatus — smart card status. Return "card present"
-		// (bit 0 = 1) so the firmware doesn't loop waiting for
-		// a card insertion. Catapult's earlier xband_cart.cpp
-		// dead code returned 0x01 here for the same reason.
-		result = 0x01;
+		// kSStatus: bit 0 card detect, bit 1 the card's data line.
+		result = xband_card_status();
 	}
 	else if (reg >= 0xC0)
 	{
@@ -5720,6 +5875,8 @@ static void xband_reg_write (uint8 reg, uint8 byte, uint32 address)
 			break;
 	}
 	XBand.regs[reg] = byte;
+	if (reg == 0x80)
+		xband_card_control(byte);
 	fred_reg_written(reg);
 }
 

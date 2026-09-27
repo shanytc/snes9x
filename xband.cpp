@@ -800,6 +800,7 @@ static void xband_try_auto_reconnect (void);
 static intptr_t xband_ring_fd      = XBAND_INVALID_SOCKET;
 static bool     xband_ringing      = false;
 static bool     xband_answered     = false;	// this call was answered, not dialed
+static bool     xband_far_end_up   = true;	// a local dial rings out until the far end speaks
 static char     xband_ring_line[16];
 static int      xband_ring_len     = 0;
 static uint32   xband_ring_retry   = 0;		// frames until the next ring-line attempt
@@ -810,6 +811,7 @@ static bool xband_local_switch (void)
 }
 
 static bool xband_ring_answer (void);
+static void xband_hang_up (void);
 
 static bool xband_seed_sram     = false;	// load the SRAM dump on the next reset
 static bool xband_reset_pending = false;	// the BIOS pulled /RESET via the LEDs
@@ -5610,7 +5612,8 @@ static uint8 xband_reg_read (uint8 reg)
 				// TONEA (bit 7): dial tone until a call is up; in a call it would
 				// be the call-waiting bong (PUListenToLine) and pause the game.
 				ret = (XBand.net_step == XBAND_NET_CONNECTED) ? 0x00 : 0x80;
-				if (XBand.modem_set_ATV25)
+				// No answer tone while the opponent's line is still ringing.
+				if (XBand.modem_set_ATV25 && xband_far_end_up)
 				{
 					ret |= (1 << 4); // ATV25
 					XBand.modem_set_ATV25 = 0;
@@ -6159,8 +6162,9 @@ void S9xResetXBand (void)
 	fred_map_valid = false;
 	fred_remap(true);
 
-	// /RESET reaches the modem too: any call hangs up.
-	S9xXBandDisconnect();
+	// /RESET hangs up a call, but the line keeps ringing: the BIOS reboots
+	// out of the practice game to answer it.
+	xband_hang_up();
 	xband_reset_pending = false;
 
 	XBand.modem_line_relay  = 0;
@@ -6388,6 +6392,14 @@ static void xband_ring_poll (void)
 			break;
 		}
 	}
+
+	// The caller gave up before the BIOS answered: the ringing stops.
+	char c;
+	if (xband_ringing && recv((xband_sock_t) xband_ring_fd, &c, 1, MSG_PEEK) == 0)
+	{
+		xband_ring_close();
+		xband_ring_retry = 300;
+	}
 }
 
 // RTS raised while ringing answers the call on the ring line.
@@ -6398,10 +6410,12 @@ static bool xband_ring_answer (void)
 		xband_ring_close();		// dialing out instead
 		return false;
 	}
+	send((xband_sock_t) xband_ring_fd, "ANSWER\n", 7, XBAND_SEND_FLAGS);	// the caller hears the pickup
 	XBand.socket_fd = xband_ring_fd;
 	xband_ring_fd   = XBAND_INVALID_SOCKET;
 	xband_ringing   = false;
 	xband_answered  = true;
+	xband_far_end_up = true;
 	XBand.connected = TRUE;
 	XBand.net_step  = XBAND_NET_CONNECTED;
 	XBand.rxbufpos  = XBand.rxbufused = 0;
@@ -6423,6 +6437,7 @@ bool8 S9xXBandConnect (const char *host, int port)
 
 	XBand.socket_fd = (intptr_t)fd;
 	XBand.connected = TRUE;
+	xband_far_end_up = !xband_local_switch();	// the switchboard's first bytes answer
 
 	// Fresh connection -- drop all sniffed ADSP state and the running
 	// fake-server send_seq counter so a previous session's numbers
@@ -6498,12 +6513,17 @@ static void xband_try_auto_reconnect (void)
 
 void S9xXBandDisconnect (void)
 {
+	xband_hang_up();
+	xband_ring_close();
+}
+
+static void xband_hang_up (void)
+{
 	if (XBand.socket_fd != XBAND_INVALID_SOCKET)
 	{
 		XBAND_CLOSESOCKET(XBand.socket_fd);
 		XBand.socket_fd = XBAND_INVALID_SOCKET;
 	}
-	xband_ring_close();
 	xband_answered  = false;
 	XBand.connected = FALSE;
 	XBand.net_step  = XBAND_NET_IDLE;
@@ -6552,6 +6572,7 @@ void S9xXBandPoll (void)
 		int got = (int)recv(fd, (char *)&b, 1, 0);
 		if (got == 1)
 		{
+			xband_far_end_up = true;
 			xband_sock_rx_bytes++;
 			if (xband_sock_rx_first_used < XBAND_SOCK_FIRST_SIZE)
 				xband_sock_rx_first[xband_sock_rx_first_used++] = b;

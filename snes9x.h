@@ -405,6 +405,7 @@ struct SSettings
 	bool8	RP2040Cart;     // RP2040 game cart (Xeno Crisis) with its firmware loaded, streaming through $3000
 	uint32	SFCBoxKROMVersion; // SFC-Box supervisor BIOS: 1 = KROM 1.00, 2 = KROM 2.00 (when the KROM file holds it); ports must seed it
 	bool8	XBAND;          // XBAND modem pass-through cart loaded
+	bool8	XBANDEnabled;   // Load Game plugs the game into XBAND, BIOS from the BIOS Manager
 };
 
 struct SSNESGameFixes

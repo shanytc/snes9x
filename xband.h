@@ -24,12 +24,11 @@
  *   $FB:$C000-$FDFF       Fred + Rockwell modem MMIO, via MAP_XBAND
  *     $FBC000-$FBC17E     Fred general registers (2-byte stride, reg 0x00-0xBF)
  *     $FBC180-$FBC1BE     Rockwell modem registers (2-byte stride, modem 0x00-0x1F)
- *     $FBFE01             XBAND kill register
- *     $FBFE03             XBAND control register
+ *     $FBFC00/$FBFE00     XBAND kill register
+ *     $FBFC02/$FBFE02     XBAND control register
  *
- * Register address decoding is at a 2-byte stride:
+ * Register address decoding is at a 2-byte stride, A0 ignored:
  *   reg = (offset - $C000) / 2
- * Writes to even addresses are ignored ("event/strobe" half).
  *
  * The modem data path is bridged to a TCP socket so the emulator can
  * connect to a replacement XBAND server (e.g. 16bit.retrocomputing.network
@@ -61,6 +60,12 @@
 #define XBAND_NET_HANDSHAKE	1
 #define XBAND_NET_CONNECTED	2
 
+// Fred II bus modes: here = box ROM + SRAM, cart hidden; plain = cart;
+// softHere = cart plus the soft kill/control and the SRAM vector page.
+#define XBAND_FRED_HERE		0
+#define XBAND_FRED_PLAIN	1
+#define XBAND_FRED_SOFTHERE	2
+
 struct SXBAND
 {
 	// Enable / detect flags
@@ -77,9 +82,11 @@ struct SXBAND
 	// (so $FBC180 is modem reg $00).
 	uint8	modem_regs[XBAND_MODEM_REGS];
 
-	// XBAND cartridge kill/control registers at $FBFE01 / $FBFE03.
+	// Fred kill/control registers ($FBFC00/$FBFC02, aliased at $FBFE00).
 	uint8	kill;
 	uint8	control;
+	uint8	fred_mode;		// XBAND_FRED_*
+	uint8	fred_armed;		// a kill write arms the next magic-address read
 
 	// Modem state
 	uint8	modem_line_relay;	// RTS bit from modem reg 0x07
@@ -116,7 +123,13 @@ uint8  *S9xGetBasePointerXBand (uint32 address);
 void	S9xInitXBand (void);
 void	S9xResetXBand (void);
 void	S9xXBandPostLoadState (void);
-bool8	S9xLoadXBandBIOS (void);
+
+// Lays the bus out for the current Fred mode (BIOS + game cart loads only).
+void	S9xXBandFredRemap (void);
+// The softHere kill/control at $00:4F00/$4F02; false when not decoded.
+bool8	S9xXBandSoftReg (uint32 address, uint8 *byte, bool8 write);
+// A 1MB image carrying the XBAND BIOS marks; `size` is how much of it is in hand.
+bool8	S9xXBandIsBIOS (const uint8 *data, uint32 size);
 
 // Mirror XBand.sram[] back into Memory.SRAM[] so snes9x's standard
 // SaveSRAM picks up the current XBAND SRAM contents on shutdown.
@@ -184,16 +197,6 @@ bool	S9xXBandFakeInjectSSF2Patch (void);
 // test whether the BIOS uses the NGP list as its supported-games
 // table when deciding whether to show "not an XBAND Card".
 bool	S9xXBandFakeInjectFakeNGPList (void);
-
-// Toggle the Fred bank-mux (cart-detection swap). When enabled, a
-// non-zero write to the XBAND kill register at $FB:FE01 maps the
-// game cart from slot B into the HiROM range so the BIOS can read
-// cart bytes during cart identification; a zero write restores
-// the BIOS view. OFF by default because the BIOS may write to the
-// kill register during early boot before its WRAM trampoline is
-// set up. Returns the new state.
-bool	S9xXBandToggleBankMux (void);
-bool	S9xXBandGetBankMux (void);
 
 // Search WRAM, XBAND SRAM, Fred regs, and modem regs for the
 // BIOS's cached cart-id bytes ($F7 $2B $5D $1A). Writes a

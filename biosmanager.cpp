@@ -8,6 +8,7 @@
 #include "biosmanager.h"
 #include "memmap.h"
 #include "superdisc.h"
+#include "xband.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -56,6 +57,8 @@ static const char *const kNamesNSS[]    = { "nss-ic14.02.ic14", "nss.zip", "nss-
 static const char *const kNamesNSSFont[]= { "m50458_char.bin", "m50458.zip", "m50458-001sp", NULL };
 static const char *const kNamesSuperDisc[] = { "SDBR_v0.95.sfc", "SDBR_v0.95_unheadered.sfc",
                                                "Super Disc System Cartridge (Prototype).zip", NULL };
+static const char *const kNamesXBand[] = { "X-Band Modem BIOS (USA).sfc", "X-Band Modem BIOS (USA).zip",
+                                           "X-Band Modem BIOS (U).smc", "XBand Modem BIOS (U).smc", NULL };
 
 // Behind each row's info icon: a heading, then one "name — detail — CRC32" line
 // per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
@@ -95,6 +98,8 @@ static const char kInfoNSSFont[] = "Supports the following M50458 OSD character 
                                    "m50458-001sp — 4608 bytes — 444F597D";
 static const char kInfoSuperDisc[] = "Supports the following Super Disc BIOS cartridge ROMs:\n"
                                      "SDBR_v0.95.sfc — 128 KB, with or without a copier header — 3B64A370";
+static const char kInfoXBand[] = "Supports the following XBAND modem BIOS ROMs:\n"
+                                 "X-Band Modem BIOS (USA).sfc — 1 MB, with or without a copier header — A8B868A0";
 
 // No-Intro dumps each slot accepts, all passing its size and signature checks.
 static const char *const kNoIntroGB[] = {
@@ -127,7 +132,7 @@ static const char *const kNoIntroSufami[] = { "Sufami Turbo (Japan).sfc — 256 
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
-// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE. 0 = don't care (the SGB carts
+// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE, xband.h XBAND_ROM_SIZE. 0 = don't care (the SGB carts
 // ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
@@ -144,6 +149,7 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "NSS",          "Nintendo Super System",          kNamesNSS,       0x8000,   NULL,                                     kInfoNSS,       NULL },
 	{ "NSSFont",      "Nintendo Super System OSD Font", kNamesNSSFont,   0x1200,   NULL,                                     kInfoNSSFont,   NULL },
 	{ "SuperDisc",    "Super Disc",                     kNamesSuperDisc, 0x20000,  NULL,                                     kInfoSuperDisc, NULL },
+	{ "XBAND",        "XBAND",                          kNamesXBand,     XBAND_ROM_SIZE, NULL,                                  kInfoXBand,     NULL },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -249,6 +255,7 @@ static bool SizeOkForSlot (int slot, uint32 n)
 	if (slot == S9X_BIOS_GBC) return (n == 0x900 || n == 0x800);
 	if (slot == S9X_BIOS_SUPERDISC) return (n == SDISC_BIOS_SIZE || n == SDISC_BIOS_SIZE + 0x200);
 	if (slot == S9X_BIOS_SFCBOX_KROM) return (n == 0x10000 || n == 0x20000);	// KROM 1.00 / 2.00
+	if (slot == S9X_BIOS_XBAND)     return (n == XBAND_ROM_SIZE || n == XBAND_ROM_SIZE + 0x200);
 	return (kSlots[slot].size == 0 || n == kSlots[slot].size);
 }
 
@@ -327,7 +334,7 @@ enum BiosImageKind
 	KIND_UNKNOWN = 0,
 	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
 	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
-	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS
+	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS, KIND_XBAND_BIOS
 };
 
 static const char *KindName (int kind)
@@ -345,6 +352,7 @@ static const char *KindName (int kind)
 		case KIND_NSS_BIOS:  return ("Nintendo Super System BIOS");
 		case KIND_NSS_FONT:  return ("NSS OSD charset");
 		case KIND_SUPERDISC_BIOS: return ("Super Disc BIOS");
+		case KIND_XBAND_BIOS:     return ("XBAND BIOS");
 		default:             return ("unrecognised image");
 	}
 }
@@ -388,6 +396,12 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 		return (KIND_SUPERDISC_BIOS);
 	if (full == SDISC_BIOS_SIZE + 0x200 && n >= 0x8200 && S9xSuperDiscIsBIOS(d + 0x200, SDISC_BIOS_SIZE))
 		return (KIND_SUPERDISC_BIOS);
+
+	// XBAND names itself in its HiROM header, so this needs 64K in hand.
+	if (full == XBAND_ROM_SIZE && S9xXBandIsBIOS(d, n))
+		return (KIND_XBAND_BIOS);
+	if (full == XBAND_ROM_SIZE + 0x200 && n > 0x200 && S9xXBandIsBIOS(d + 0x200, n - 0x200))
+		return (KIND_XBAND_BIOS);
 
 	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
 	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
@@ -440,6 +454,7 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_NSS:       return (KIND_NSS_BIOS);
 		case S9X_BIOS_NSS_FONT:  return (KIND_NSS_FONT);
 		case S9X_BIOS_SUPERDISC: return (KIND_SUPERDISC_BIOS);
+		case S9X_BIOS_XBAND:     return (KIND_XBAND_BIOS);
 		default:                 return (KIND_UNKNOWN);
 	}
 }
@@ -512,7 +527,8 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 	const int want = ExpectedKind(slot);
 	KindProbe          probe = { want, KIND_UNKNOWN };
 	std::vector<uint8> img;
-	if (!S9xReadBiosImage(g_paths[slot], img, 0x8200, AcceptKind, &probe))
+	const uint32 probe_len = (slot == S9X_BIOS_XBAND) ? 0x10200 : 0x8200;
+	if (!S9xReadBiosImage(g_paths[slot], img, probe_len, AcceptKind, &probe))
 	{
 		// Say it is wrong, not just what it is, or the row reads as a caption
 		// for whatever was dropped on it.

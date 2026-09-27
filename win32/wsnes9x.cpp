@@ -2714,64 +2714,6 @@ LRESULT CALLBACK WinProc(
 				RestoreSNESDisplay ();
 				break;
 			}
-        case ID_XBAND_CONNECT:
-        case ID_XBAND_CONNECT_XBSERVER:
-        case ID_XBAND_CONNECT_16BIT:
-        case ID_XBAND_CONNECT_XBAND:
-        case ID_XBAND_CONNECT_BARE:
-			{
-				// Pick host based on which menu item was clicked.
-				// xbserver.retrocomputing.network is the canonical
-				// hostname per the dreampi reference (netlink.py
-				// xband_server). All four hostnames currently resolve
-				// to the same backend IP (51.79.10.145) but using the
-				// dreampi-documented one is the right thing to do.
-				const char *xband_host = "xbserver.retrocomputing.network";
-				const int   xband_port = 56969;
-				switch (LOWORD(wParam))
-				{
-				case ID_XBAND_CONNECT_XBAND:
-					xband_host = "xband.retrocomputing.network";
-					break;
-				case ID_XBAND_CONNECT_BARE:
-					xband_host = "retrocomputing.network";
-					break;
-				case ID_XBAND_CONNECT_16BIT:
-					xband_host = "16bit.retrocomputing.network";
-					break;
-				case ID_XBAND_CONNECT_XBSERVER:
-				case ID_XBAND_CONNECT:
-				default:
-					xband_host = "xbserver.retrocomputing.network";
-					break;
-				}
-
-				if (!Settings.XBAND)
-				{
-					MessageBox(hWnd,
-						TEXT("Load the XBAND BIOS ROM first, then try connecting."),
-						TEXT("XBAND"), MB_OK | MB_ICONINFORMATION);
-					break;
-				}
-
-				RestoreGUIDisplay();
-				if (S9xXBandConnect(xband_host, xband_port))
-				{
-					TCHAR msg[256];
-					_stprintf(msg, TEXT("Connected to XBAND server %s:%d."),
-						(TCHAR *)_tFromChar(xband_host), xband_port);
-					MessageBox(hWnd, msg, TEXT("XBAND"), MB_OK | MB_ICONINFORMATION);
-				}
-				else
-				{
-					TCHAR msg[256];
-					_stprintf(msg, TEXT("Failed to connect to XBAND server %s:%d."),
-						(TCHAR *)_tFromChar(xband_host), xband_port);
-					MessageBox(hWnd, msg, TEXT("XBAND"), MB_OK | MB_ICONERROR);
-				}
-				RestoreSNESDisplay();
-				break;
-			}
         case ID_XBAND_DISCONNECT:
 			S9xXBandDisconnect();
 			break;
@@ -3420,29 +3362,6 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			break;
-        case ID_XBAND_TOGGLE_BANKMUX:
-			{
-				// Toggle the Fred bank-mux for cart identification.
-				// Off by default. Enable AFTER reaching the main menu
-				// so the BIOS isn't writing to kill during early boot
-				// (which could swap the bank out from under itself).
-				bool now = S9xXBandToggleBankMux();
-				char buf[512];
-				snprintf(buf, sizeof(buf),
-					"Fred bank-mux is now: %s\n\n"
-					"When ON: a non-zero write to $FB:FE01 (XBAND kill\n"
-					"register) maps the game cart from slot B over the\n"
-					"BIOS HiROM range so the BIOS can read cart bytes\n"
-					"during cart identification. A zero write flips it\n"
-					"back to BIOS.\n\n"
-					"Enable BEFORE clicking Challenge with a real game\n"
-					"loaded in slot B. Use 'XBAND: Show Kill/Ctrl Trace'\n"
-					"to see whether swaps actually fire.",
-					now ? "ON" : "OFF");
-				MessageBoxA(GUI.hWnd, buf, "XBAND Bank-Mux",
-					MB_OK | MB_ICONINFORMATION);
-			}
-			break;
         case ID_XBAND_FAKE_INJECT_GAMESUPP:
 			{
 				// Post-Challenge advance: just msEndOfStream. The
@@ -4076,6 +3995,17 @@ LRESULT CALLBACK WinProc(
 			CheckMenuStates();
 			break;
 		}
+
+		// Takes effect on the next Load Game.
+		case ID_EMULATION_XBAND:
+			Settings.XBANDEnabled = !Settings.XBANDEnabled;
+			if (!Settings.XBANDEnabled)
+				S9xSetInfoString("XBAND off");
+			else if (S9xBiosPathUsable(S9X_BIOS_XBAND))
+				S9xSetInfoString("XBAND on: games load through it");
+			else
+				S9xSetInfoString("XBAND on: assign its BIOS in File -> BIOS Manager");
+			break;
 
 		case ID_NSS_COIN1:
 		case ID_NSS_COIN2:
@@ -7013,6 +6943,9 @@ static void CheckMenuStates ()
 		}
 	}
 
+	mii.fState = Settings.XBANDEnabled ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND, FALSE, &mii);
+
 	// Super Disc drive.
 	{
 		// One disc at a time: Insert waits for the tray to be emptied.
@@ -7910,6 +7843,8 @@ static bool ReloadLoadedGame ()
 	std::string a, b;
 	if (Settings.GBRomPath[0])
 		a = Settings.GBRomPath;
+	else if (Multi.cartType == 6)
+		a = Multi.fileNameB[0] ? Multi.fileNameB : Multi.fileNameA;
 	else if (Multi.fileNameB[0])
 	{
 		// Only a two-file load fills slot B's name; a cart paired with its

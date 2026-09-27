@@ -29,6 +29,7 @@ enum S9xBiosSlot
 	S9X_BIOS_NSS,           // nss-ic14.02.ic14 — Nintendo Super System supervisor
 	S9X_BIOS_NSS_FONT,      // m50458_char.bin  — its M50458 OSD charset
 	S9X_BIOS_SUPERDISC,     // SDBR_v0.95.sfc   — Super Disc BIOS cartridge
+	S9X_BIOS_XBAND,         // X-Band Modem BIOS (USA).sfc — XBAND modem cart
 	S9X_NUM_BIOS_SLOTS
 };
 

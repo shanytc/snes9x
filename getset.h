@@ -101,6 +101,13 @@ inline uint8 S9xGetByte (uint32 Address)
 			S9xXBandKCtlLog(Address, val, false);
 		}
 
+		// Fred's softHere kill/control answer at $00:4F00/$4F02.
+		if ((Address & 0xFFFFFC) == 0x004F00 && S9xXBandSoftReg(Address, &byte, FALSE))
+		{
+			addCyclesInMemoryAccess;
+			return (byte);
+		}
+
 		// XBAND debug: cross-bank read trap. Logs reads where the
 		// program bank is in BIOS code space ($D0-$DF or its $50-$5F
 		// mirror) but the target bank is on the cart side ($00-$3F:
@@ -130,18 +137,6 @@ inline uint8 S9xGetByte (uint32 Address)
 		}
 	}
 
-	// XBAND cart-id read interceptor: when xband_tx_gameid_spoof is
-	// enabled and the CPU reads from $7F:$0C8B-$0C8E, return the
-	// chosen cart-id bytes (default $D8 $22 $21 $03 = SSF2 Japan)
-	// instead of whatever the BIOS computed and cached. The BIOS
-	// recomputes its broken default $F7 $2B $5D $1A on each call so
-	// static memory patching loses the race -- this interceptor wins
-	// because it lies at the moment of read.
-	//
-	// Address is the linear 24-bit SNES address. We compare against
-	// $7F0C8B-$7F0C8E and substitute the corresponding spoof byte.
-	// Reuses the existing GameID spoofer toggle so the user doesn't
-	// have to manage a second on/off state.
 	// XBAND dialog renderer trap: when the BIOS reads from the
 	// "may not be available" dialog string at $C8:$4C69 (or its
 	// $D8:$4C69 mirror), capture the calling PC. The first read
@@ -162,45 +157,6 @@ inline uint8 S9xGetByte (uint32 Address)
 				(uint32)(Registers.PBPC & 0xFFFFFF),
 				(int)(a24 & 0xFF) + 0x300,
 				(uint8)0);  // value not interesting; PC matters
-		}
-	}
-
-	if (Settings.XBAND && S9xXBandGetGameIDSpoof())
-	{
-		uint32 a = Address & 0xFFFFFF;
-		const uint8 *spoof = S9xXBandSpoofValueBytes();
-		// Downstream cache at $7F:0C8B-0C8E (where the MVN at
-		// $00:0EEA copies the cart-id to).
-		if (a >= 0x7F0C8B && a <= 0x7F0C8E)
-		{
-			byte = spoof[a - 0x7F0C8B];
-			S9xXBandLogCartIDRead(
-				(uint32)(Registers.PBPC & 0xFFFFFF),
-				(int)(a - 0x7F0C8B), byte);
-			addCyclesInMemoryAccess;
-			return (byte);
-		}
-		// MASTER source at $7F:2D15-2D18 (the MVN reads from here).
-		if (a >= 0x7F2D15 && a <= 0x7F2D18)
-		{
-			byte = spoof[a - 0x7F2D15];
-			S9xXBandLogCartIDRead(
-				(uint32)(Registers.PBPC & 0xFFFFFF),
-				(int)(a - 0x7F2D15) + 0x100, byte);
-			addCyclesInMemoryAccess;
-			return (byte);
-		}
-		// ROOT source at $7F:323B-323E (the value still showing
-		// the BIOS's broken default after we spoof the MVN chain --
-		// this is one level upstream from $2D15).
-		if (a >= 0x7F323B && a <= 0x7F323E)
-		{
-			byte = spoof[a - 0x7F323B];
-			S9xXBandLogCartIDRead(
-				(uint32)(Registers.PBPC & 0xFFFFFF),
-				(int)(a - 0x7F323B) + 0x200, byte);
-			addCyclesInMemoryAccess;
-			return (byte);
 		}
 	}
 
@@ -575,6 +531,8 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 		    a24 == 0x004F02 || a24 == 0x004F03)
 		{
 			S9xXBandKCtlLog(Address, Byte, true);
+			uint8 b = Byte;
+			S9xXBandSoftReg(a24, &b, TRUE);
 		}
 
 		// Write trap on $7F:0C8B-0C8E -- the downstream cache that

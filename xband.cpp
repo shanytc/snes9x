@@ -62,6 +62,7 @@
 
 #include "snes9x.h"
 #include "memmap.h"
+#include "dsp.h"
 #include "fscompat.h"
 #include "xband.h"
 
@@ -5193,6 +5194,8 @@ static void fred_remap (bool force)
 	fred_map_cart(0x00, 0x3f, 0x8000, 0xffff);
 	fred_map_cart(0x40, 0x7d, 0x0000, 0xffff);
 	fred_map_cart(0x80, 0xbf, 0x8000, 0xffff);
+	if (Settings.DSP == 1)
+		Memory.map_DSP();	// the cart's own chip answers on its own bus
 
 	if (m.mode == XBAND_FRED_HERE)
 	{
@@ -5367,11 +5370,45 @@ static void fred_reg_written (uint8 reg)
 		fred_remap(false);
 }
 
+// The loader armed chips from slot A's header (the BIOS); the game's DSP-1
+// (Super Mario Kart) is classified as InitROM does, from slot B's.
+static void fred_arm_cart_dsp (void)
+{
+	const uint32 base = fred_cart_hirom ? 0xFFB0 : 0x7FB0;
+	if (Multi.cartSizeB < base + 0x30)
+		return;
+	const uint8 *hdr = Memory.ROM + Multi.cartOffsetB + base;
+	const uint8 speed = hdr[0x25], type = hdr[0x26];
+	const bool dsp1 = (type == 0x03 && speed != 0x30) ||
+	                  (type == 0x05 && speed != 0x20 && !(speed == 0x30 && hdr[0x2a] == 0xb2));
+	if (!dsp1)
+		return;
+	Settings.DSP = 1;
+	if (fred_cart_hirom)
+	{
+		DSP0.boundary = 0x7000;
+		DSP0.maptype = M_DSP1_HIROM;
+	}
+	else if (Multi.cartSizeB > 0x100000)
+	{
+		DSP0.boundary = 0x4000;
+		DSP0.maptype = M_DSP1_LOROM_L;
+	}
+	else
+	{
+		DSP0.boundary = 0xc000;
+		DSP0.maptype = M_DSP1_LOROM_S;
+	}
+	SetDSP = &DSP1SetByte;
+	GetDSP = &DSP1GetByte;
+}
+
 void S9xXBandFredRemap (void)
 {
 	if (!fred_active())
 		return;
 	fred_cart_hirom = Memory.ScoreHiROM(FALSE, Multi.cartOffsetB) >= Memory.ScoreLoROM(FALSE, Multi.cartOffsetB);
+	fred_arm_cart_dsp();
 	fred_remap(true);
 }
 

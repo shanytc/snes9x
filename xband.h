@@ -126,6 +126,12 @@ void	S9xXBandPostLoadState (void);
 
 // Lays the bus out for the current Fred mode (BIOS + game cart loads only).
 void	S9xXBandFredRemap (void);
+
+// The prepaid XBAND Card in the modem's smart-card slot (a Gemplus GPM103).
+bool8	S9xXBandCardInserted (void);
+void	S9xXBandInsertCard (bool8 insert);
+void	S9xXBandResetCard (void);		// back to a new card's 100 credits
+int		S9xXBandCardCredits (void);
 // The softHere kill/control at $00:4F00/$4F02; false when not decoded.
 bool8	S9xXBandSoftReg (uint32 address, uint8 *byte, bool8 write);
 // A 1MB image carrying the XBAND BIOS marks; `size` is how much of it is in hand.

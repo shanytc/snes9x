@@ -518,6 +518,8 @@
 #define ID_XBAND_SERVER_STOP            45031
 #define ID_XBAND_SERVER_LOG             45032
 #define ID_EMULATION_XBAND              45033
+#define ID_EMULATION_XBAND_CARD         45034
+#define ID_EMULATION_XBAND_CARD_RESET   45035
 // Spoof candidate sub-menu IDs. 19 candidates currently, leave
 // headroom up to 64 entries (40300..40363). Keep range contiguous.
 #define ID_XBAND_SPOOF_BASE             45100

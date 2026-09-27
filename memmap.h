@@ -256,6 +256,9 @@ void S9xAnnounceGBBios(void);
 // TRUE when the BIOS Manager changed a path after the loaded cart took its
 // BIOS. The paths are only read by a load, so a hard reset wants one then.
 bool8 S9xBiosChangedSinceLoad(void);
+// TRUE when Emulation -> XBAND was flipped after a cart it can take loaded:
+// plugging it in (or out) is a load, so a hard reset wants one then.
+bool8 S9xXBandSwitchChangedSinceLoad(void);
 
 // Which console GB content runs on (Settings.GBBootPolicy). The Automatic
 // entries pick from what the cart supports, breaking ties in the stated

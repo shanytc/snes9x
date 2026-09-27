@@ -61,6 +61,8 @@ static std::string SuperDiscBIOSPath;
 
 // Set while LoadXBand hands its slots to LoadMultiCartInt.
 static bool s_xband_from_manager = false;
+// The loaded cart is one Load Game plugs into the XBAND when it is switched on.
+static bool s_xband_pluggable = false;
 
 #ifndef SET_UI_COLOR
 #define SET_UI_COLOR(r, g, b) ;
@@ -1671,6 +1673,11 @@ bool8 S9xBiosChangedSinceLoad (void)
     return takes_bios && s_bios_paths_at_load != S9xBiosPathsFingerprint();
 }
 
+bool8 S9xXBandSwitchChangedSinceLoad (void)
+{
+    return s_xband_pluggable && Settings.XBANDEnabled != Settings.XBAND;
+}
+
 bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* optional_rom_filename /*= NULL*/)
 {
     if(!source || sourceSize > MAX_ROM_SIZE)
@@ -1678,6 +1685,7 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
 
     S9xSetBiosNotice(NULL);
     s_bios_paths_at_load = S9xBiosPathsFingerprint();
+    s_xband_pluggable = false;
 
     if (optional_rom_filename)
         ROMFilename = optional_rom_filename;
@@ -2235,6 +2243,7 @@ bool8 CMemory::LoadROM (const char *filename)
 
     S9xSetBiosNotice(NULL);   // a fresh load owns the missing-BIOS state
     s_bios_paths_at_load = S9xBiosPathsFingerprint();
+    s_xband_pluggable = false;
 
     // .gb / .gbc — hand off to the SGB subsystem. The 65816 path below
     // is bypassed entirely; S9xMainLoop gates on Settings.SuperGameBoy
@@ -2388,7 +2397,8 @@ bool8 CMemory::LoadROM (const char *filename)
         }
 
         // With XBAND switched on, an ordinary cart plugs into it instead.
-        if (Settings.XBANDEnabled && !Settings.NSS && !OwnsItsHardware(ROM, totalFileSize))
+        s_xband_pluggable = !Settings.NSS && !OwnsItsHardware(ROM, totalFileSize);
+        if (Settings.XBANDEnabled && s_xband_pluggable)
             return (LoadXBand(filename, totalFileSize));
 
         if (LoadROMInt(totalFileSize))
@@ -3059,6 +3069,8 @@ bool8 CMemory::LoadMultiCartInt ()
 {
 	S9xSetBiosNotice(NULL);   // File -> Load MultiCart does not pass through LoadROM
 	s_bios_paths_at_load = S9xBiosPathsFingerprint();
+	if (!s_xband_from_manager)
+		s_xband_pluggable = false;
 
 	// ...nor its teardown: a Game Boy or NSS session left running would keep
 	// its core or supervisor on the SNES in place of the carts.

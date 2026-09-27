@@ -6123,13 +6123,41 @@ bool8 S9xXBandReloadSRAM (void)
 	return xband_load_sram_image() ? TRUE : FALSE;
 }
 
-void S9xXBandSyncSRAMOut (void)
+bool8 S9xXBandLoadSRAM (const char *srm_path)
 {
-	// Mirror our XBand.sram[] back into Memory.SRAM[] so snes9x's
-	// standard SaveSRAM picks up the latest XBAND SRAM contents when
-	// the user closes the emulator or auto-saves.
-	if (Settings.XBAND)
-		memcpy(Memory.SRAM, XBand.sram, XBAND_SRAM_SIZE);
+	FILE *f = fopen(srm_path, "rb");
+	if (!f)
+		return FALSE;
+	fseek(f, 0, SEEK_END);
+	long sz = ftell(f);
+	bool8 ok = FALSE;
+	if (sz == XBAND_SRAM_SIZE || sz == XBAND_SRAM_SIZE + 512)
+	{
+		fseek(f, sz - XBAND_SRAM_SIZE, SEEK_SET);	// past a copier header
+		ok = fread(XBand.sram, 1, XBAND_SRAM_SIZE, f) == XBAND_SRAM_SIZE;
+	}
+	fclose(f);
+	if (ok)
+		XBand.sram_dirty = FALSE;
+	return ok;
+}
+
+bool8 S9xXBandSaveSRAM (const char *srm_path)
+{
+	// All zero: the BIOS never ran, so don't hide a BIOS-folder dump behind it.
+	uint32 i = 0;
+	while (i < XBAND_SRAM_SIZE && !XBand.sram[i])
+		i++;
+	if (i == XBAND_SRAM_SIZE)
+		return TRUE;
+	FILE *f = fopen(srm_path, "wb");
+	if (!f)
+		return FALSE;
+	bool8 ok = fwrite(XBand.sram, 1, XBAND_SRAM_SIZE, f) == XBAND_SRAM_SIZE;
+	fclose(f);
+	if (ok)
+		XBand.sram_dirty = FALSE;
+	return ok;
 }
 
 void S9xResetXBand (void)

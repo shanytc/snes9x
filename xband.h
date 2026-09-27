@@ -141,9 +141,9 @@ bool8	S9xXBandSoftReg (uint32 address, uint8 *byte, bool8 write);
 // A 1MB image carrying the XBAND BIOS marks; `size` is how much of it is in hand.
 bool8	S9xXBandIsBIOS (const uint8 *data, uint32 size);
 
-// Mirror XBand.sram[] back into Memory.SRAM[] so snes9x's standard
-// SaveSRAM picks up the current XBAND SRAM contents on shutdown.
-void	S9xXBandSyncSRAMOut (void);
+// The box's 64KB battery SRAM in the BIOS's .srm (Memory.LoadSRAM/SaveSRAM).
+bool8	S9xXBandLoadSRAM (const char *srm_path);
+bool8	S9xXBandSaveSRAM (const char *srm_path);
 
 // User-selected SRAM dump filename for the BIOS_DIR loader. Set via
 // the Win32 Netplay menu (XBAND: Use SRAM ...). Empty string =

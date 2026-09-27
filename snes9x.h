@@ -409,6 +409,9 @@ struct SSettings
 	uint32	SFCBoxKROMVersion; // SFC-Box supervisor BIOS: 1 = KROM 1.00, 2 = KROM 2.00 (when the KROM file holds it); ports must seed it
 	bool8	XBAND;          // XBAND modem pass-through cart loaded
 	bool8	XBANDEnabled;   // Load Game plugs the game into XBAND, BIOS from the BIOS Manager
+	bool8	XBANDLocalServer;     // XBAND dials XBANDServerHost:Port, not xbserver.retrocomputing.network
+	char	XBANDServerHost[256];
+	uint32	XBANDServerPort;
 };
 
 struct SSNESGameFixes

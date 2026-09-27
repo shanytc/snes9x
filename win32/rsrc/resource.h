@@ -494,6 +494,11 @@
 #define ID_EMULATION_XBAND              45033
 #define ID_EMULATION_XBAND_CARD         45034
 #define ID_EMULATION_XBAND_CARD_RESET   45035
+#define ID_EMULATION_XBAND_SERVER_RETRO 45036
+#define ID_EMULATION_XBAND_SERVER_LOCAL 45037
+#define IDD_XBAND_SERVER                195
+#define IDC_XBAND_HOST                  3700
+#define IDC_XBAND_PORT                  3701
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083
@@ -1009,9 +1014,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        195
+#define _APS_NEXT_RESOURCE_VALUE        196
 #define _APS_NEXT_COMMAND_VALUE         44451
-#define _APS_NEXT_CONTROL_VALUE         3700
+#define _APS_NEXT_CONTROL_VALUE         3702
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

@@ -158,6 +158,8 @@ bool8	S9xXBandReloadSRAM (void);
 // Network bridging.
 bool8	S9xXBandConnect (const char *host, int port);
 void	S9xXBandDisconnect (void);
+// Settings.XBANDLocalServer/Host/Port changed; takes effect on the next dial.
+void	S9xXBandServerChanged (void);
 void	S9xXBandPoll (void);
 
 // Fake-server injection: synthesize an ADSP-framed ServerTalk reply

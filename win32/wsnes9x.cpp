@@ -815,6 +815,15 @@ void S9xRestoreWindowTitle ()
     if (Settings.RP2040Cart)
         _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xRP2040CartTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     else
+    if (Settings.XBAND && Multi.cartSizeB)
+    {
+        // The BIOS names the saves; the game in its cartridge port goes next to it.
+        char bios[_MAX_FNAME], cart[_MAX_FNAME];
+        _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, bios, NULL);
+        _splitpath(Multi.fileNameB, NULL, NULL, cart, NULL);
+        _stprintf(buf, TEXT("%s - %s - %s %s"), (wchar_t *)Utf8ToWide(bios), (wchar_t *)Utf8ToWide(cart), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+    }
+    else
     if (Memory.ROMFilename[0])
     {
         char def[_MAX_FNAME];

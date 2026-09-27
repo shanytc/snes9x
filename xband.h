@@ -261,13 +261,6 @@ const uint8 *S9xXBandGetSpoofValueBytesAt (int idx);
 const char *S9xXBandSpoofValueLabel (void);
 const uint8 *S9xXBandSpoofValueBytes (void);
 
-// BIOS firmware scan output. memmap.cpp's multi-cart loader scans
-// the BIOS image for dialog-trigger references (PEA #$4C54 etc.) at
-// load time and uses these to publish the results into the kctl
-// trace dialog. Reset clears the buffer; Append adds a line/string.
-void	S9xXBandResetDialogScan (void);
-void	S9xXBandAppendDialogScan (const char *line);
-
 // Inject a complete login + matchmaking server response. Force-primes
 // the ADSP sniffer state so it works even without a live server
 // connection. Sends: login reply, NGP list (SSF2 Japan), wait for

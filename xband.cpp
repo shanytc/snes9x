@@ -5687,6 +5687,12 @@ static void xband_reg_write (uint8 reg, uint8 byte, uint32 address)
 				if (byte == 0x84)   // kV22bisMode
 					XBand.modem_set_ATV25 = 1;
 				break;
+			case 0x1B:
+			case 0x1D:
+				// YACC/XACC (bit 7) request a DSP RAM access; the DSP finishes it
+				// at once and clears the bit (PModem.c WHILE_TIMEOUT_XACC waits on it).
+				XBand.modem_regs[modemreg] = byte & 0x7F;
+				break;
 			case 0x1E:
 				XBand.modem_regs[0x1E] = byte & 0x24; // TDBIE + RDBIE
 				break;

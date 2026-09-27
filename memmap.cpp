@@ -5518,113 +5518,6 @@ void CMemory::Map_XBandLoROMMap (void)
 	map_WriteProtectROM();
 }
 
-// EXPERIMENT: a list of surgical 2-byte ROM patches that NOP-out
-// conditional branches that gate infinite loops in the XBAND BIOS,
-// allowing the firmware to make forward progress past stages it
-// otherwise can't escape on its own (no real game cart, no live
-// network traffic, no Fred bank-mux). Each patch records the
-// expected original bytes so we can detect mismatches and abort
-// rather than corrupting random firmware code.
-//
-// Patch 1 — $D5:$5B3D (database iterator at $D5:$5B27)
-//   $D5:$5B32  LDY  #$003A
-//   $D5:$5B35  LDA  [$0B],Y       ; read SRAM byte at record offset $3A
-//   $D5:$5B37  AND  #$00FF
-//   $D5:$5B3A  AND  #$0080        ; test bit 7
-//   $D5:$5B3D  BNE  +3            ; <-- patched to NOP NOP
-//   $D5:$5B3F  BRL  +$005F        ; -> $5BA1 (function epilogue)
-//   ...                           ; loop body
-//   $D5:$5B9E  BRL  -$006F        ; back-edge to $5B32
-//   $D5:$5BA1  PLD : TSC : CLC : ADC #$0016 : TCS : RTL
-//
-// Patch 2 — $D5:$40FC (record-create loop in the function at $D5:$403B)
-//   $D5:$40F1  LDY  #$0032
-//   $D5:$40F4  LDA  [$13],Y       ; read record byte at offset $32
-//   $D5:$40F9  CMP  #$0046        ; check for $46 (early-exit value)
-//   $D5:$40FC  BNE  +3            ; <-- patched to NOP NOP
-//   $D5:$40FE  BRL  +$0016        ; -> $4117 (LOOP EXIT)
-//   $D5:$4101  ...                ; pre-JSL setup
-//   $D5:$4108  JSL  $E00040       ; in-loop SRAM call
-//   $D5:$410C  BNE  +3            ; alternate exit if JSL returns NZ
-//   $D5:$410E  BRL  +$0003 -> $4114
-//   $D5:$4114  BRL  -$0026        ; back-edge to $40F1
-//   $D5:$4117  STZ  $0D           ; (post-loop continues here)
-//
-// HiROM bank $D5 maps to ROM offset $50000 (1MB ROM mirrors every 16
-// banks; bank index $D5-$C0=$15, $15 mod 16 = $5, * $10000 = $50000).
-struct XBandLoopBreakPatch
-{
-	uint32      offset;       // ROM offset within the 1MB BIOS image
-	uint8       expected[2];  // bytes that must be there before patching
-	uint8       patched[2];   // bytes to write
-	const char *site;         // human-readable site, e.g. "$D5:$5B3D"
-	const char *description;  // one-line description for the popup
-};
-
-static const XBandLoopBreakPatch s_xband_patches[] = {
-	{
-		0x55B3D,
-		{ 0xD0, 0x03 },
-		{ 0xEA, 0xEA },
-		"$D5:$5B3D",
-		"NOP BNE so BRL +$5F always exits the database iterator at $D5:$5B27"
-	},
-	{
-		0x540FC,
-		{ 0xD0, 0x03 },
-		{ 0xEA, 0xEA },
-		"$D5:$40FC",
-		"NOP BNE so BRL +$16 always exits the record-create loop at $D5:$40F1"
-	},
-};
-
-static void xband_apply_loop_break_patch (uint32 bios_base)
-{
-	const int n = (int)(sizeof(s_xband_patches) / sizeof(s_xband_patches[0]));
-
-#ifdef _WIN32
-	char msg[1024];
-	int  pos = 0;
-	pos += _snprintf(msg + pos, sizeof(msg) - pos,
-		"XBAND loop-break patches (bios_base = 0x%X)\n\n",
-		(unsigned)bios_base);
-#endif
-
-	for (int i = 0; i < n; i++)
-	{
-		const XBandLoopBreakPatch &p = s_xband_patches[i];
-		uint32 ofs = bios_base + p.offset;
-		uint8  b0  = Memory.ROM[ofs];
-		uint8  b1  = Memory.ROM[ofs + 1];
-		bool   ok  = (b0 == p.expected[0] && b1 == p.expected[1]);
-		if (ok)
-		{
-			Memory.ROM[ofs]     = p.patched[0];
-			Memory.ROM[ofs + 1] = p.patched[1];
-		}
-#ifdef _WIN32
-		pos += _snprintf(msg + pos, sizeof(msg) - pos,
-			"%s  %s\n"
-			"  ROM offset: 0x%X\n"
-			"  Original:   %02X %02X (expected %02X %02X)\n"
-			"  Patched:    %02X %02X\n"
-			"  %s\n\n",
-			p.site,
-			ok ? "APPLIED" : "FAILED (mismatch)",
-			(unsigned)ofs,
-			(unsigned)b0, (unsigned)b1,
-			(unsigned)p.expected[0], (unsigned)p.expected[1],
-			(unsigned)p.patched[0], (unsigned)p.patched[1],
-			p.description);
-#endif
-	}
-
-#ifdef _WIN32
-	msg[sizeof(msg) - 1] = 0;
-	MessageBoxA(NULL, msg, "XBAND patches", MB_OK);
-#endif
-}
-
 void CMemory::Map_XBandHiROMMap (void)
 {
 	printf("Map_XBandHiROMMap\n");
@@ -5658,9 +5551,6 @@ void CMemory::Map_XBandHiROMMap (void)
 	map_WRAM();
 
 	map_WriteProtectROM();
-
-	// Standalone XBAND BIOS load: BIOS lives at ROM offset 0.
-	xband_apply_loop_break_patch(0);
 }
 
 void CMemory::Map_XBandMultiCartHiROMMap (void)
@@ -6018,7 +5908,8 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 	// XBAND modem + Fred MMIO at $FB:$C000-$FFFF.
 	map_index(0xfb, 0xfb, 0xc000, 0xffff, MAP_XBAND, MAP_TYPE_I_O);
 
-	map_HiROMSRAM();
+	// No cart SRAM at $20-$3F:6000: Memory.SRAM mirrors the XBAND's own, and a
+	// game that finds RAM there takes it for a copier (SSF2 then ignores Start).
 	map_WRAM();
 	map_WriteProtectROM();
 	S9xXBandFredRemap();
@@ -6030,9 +5921,6 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 	// the patch was dead code and has been removed. The counters are
 	// still wired up so future experiments can verify their hypotheses
 	// the same way.)
-
-	// Multicart XBAND load: BIOS lives at ROM offset Multi.cartOffsetA.
-	xband_apply_loop_break_patch(Multi.cartOffsetA);
 }
 
 void CMemory::Map_BSCartHiROMMap(void)

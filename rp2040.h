@@ -135,13 +135,14 @@ public:
 
 	Core	core[2];
 
-	// Bus (public so the CPU helpers can reach them)
-	uint32_t Read32 (int cpu, uint32_t addr);
-	uint16_t Read16 (int cpu, uint32_t addr);
-	uint8_t	Read8 (int cpu, uint32_t addr);
-	void	Write32 (int cpu, uint32_t addr, uint32_t v);
-	void	Write16 (int cpu, uint32_t addr, uint16_t v);
-	void	Write8 (int cpu, uint32_t addr, uint8_t v);
+	// Bus (public so the CPU helpers can reach them). Inline, defined in
+	// rp2040.cpp: only usable from there.
+	inline uint32_t Read32 (int cpu, uint32_t addr);
+	inline uint16_t Read16 (int cpu, uint32_t addr);
+	inline uint8_t	Read8 (int cpu, uint32_t addr);
+	inline void	Write32 (int cpu, uint32_t addr, uint32_t v);
+	inline void	Write16 (int cpu, uint32_t addr, uint16_t v);
+	inline void	Write8 (int cpu, uint32_t addr, uint8_t v);
 
 private:
 	// Memories
@@ -275,6 +276,9 @@ private:
 
 	void	BuildHleRom ();
 	void	Log (const char *fmt, ...);
+
+	// Native stand-ins for hot firmware routines; return the cycles charged, 0 to interpret
+	uint32_t AccelBrrEncode (int n);
 };
 
 }

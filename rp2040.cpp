@@ -48,6 +48,7 @@ enum
 #define ROSC_HZ			6500000u
 #define SLICE			256
 #define ROM_CORE1_DEAD	0x0000003c	// where a returning core 1 entry lands
+#define XC_BRR_ENCODE	0x20000a00	// Xeno Crisis' BRR encoder, see AccelBrrEncode
 
 // HLE ids: BKPT #id inside the ROM runs the native routine.
 enum
@@ -64,10 +65,12 @@ enum
 
 #ifdef _MSC_VER
 #include <intrin.h>
+#define FORCE_INLINE	__forceinline
 static inline int ctz32 (uint32_t v) { unsigned long i; _BitScanForward(&i, v); return (int) i; }
 static inline int clz32 (uint32_t v) { unsigned long i; _BitScanReverse(&i, v); return 31 - (int) i; }
 static inline uint32_t bswap32 (uint32_t v) { return _byteswap_ulong(v); }
 #else
+#define FORCE_INLINE	inline __attribute__((always_inline))
 static inline int ctz32 (uint32_t v) { return __builtin_ctz(v); }
 static inline int clz32 (uint32_t v) { return __builtin_clz(v); }
 static inline uint32_t bswap32 (uint32_t v) { return __builtin_bswap32(v); }
@@ -619,37 +622,35 @@ static inline void nz (Core &c, uint32_t res)
 	c.z = (res == 0);
 }
 
+// Per condition, bit NZCV says whether it passes: EQ NE CS CC MI PL VS VC HI LS GE LT GT LE AL.
+static const uint16_t cond_table[16] =
+{
+	0xf0f0, 0x0f0f, 0xcccc, 0x3333, 0xff00, 0x00ff, 0xaaaa, 0x5555,
+	0x0c0c, 0xf3f3, 0xaa55, 0x55aa, 0x0a05, 0xf5fa, 0xffff, 0xffff
+};
+
 static inline bool cond_pass (const Core &c, uint32_t cond)
 {
-	switch (cond)
-	{
-		case 0x0: return c.z;
-		case 0x1: return !c.z;
-		case 0x2: return c.c;
-		case 0x3: return !c.c;
-		case 0x4: return c.n;
-		case 0x5: return !c.n;
-		case 0x6: return c.v;
-		case 0x7: return !c.v;
-		case 0x8: return c.c && !c.z;
-		case 0x9: return !c.c || c.z;
-		case 0xa: return c.n == c.v;
-		case 0xb: return c.n != c.v;
-		case 0xc: return !c.z && c.n == c.v;
-		case 0xd: return c.z || c.n != c.v;
-		default:  return true;
-	}
+	return (cond_table[cond] >> ((c.n << 3) | (c.z << 2) | (c.c << 1) | c.v)) & 1;
 }
 
 // A short backward loop whose iteration left every register as it found it
 // and repeated the previous iteration's stores exactly is waiting on another
 // agent (the other core, DMA, a timer, an interrupt), all of which only act
 // between slices: the rest of the slice can be skipped.
+// A core that left its last slice from an idle loop: spin_detect has just cleared its store hash and
+// recorded the loop head, where the core still sits.
+static inline bool parked (const Core &c)
+{
+	return c.spin_pc == c.r[15] && !c.store_hash;
+}
+
 static inline bool spin_detect (Core &c, uint32_t target)
 {
 	uint32_t flags = (c.n << 3) | (c.z << 2) | (c.c << 1) | c.v;
-	bool spin = c.spin_pc == target && c.spin_hash == c.store_hash && c.spin_flags == flags &&
-				!memcmp(c.spin_regs, c.r, sizeof(c.spin_regs));
+	bool spin = c.spin_pc == target && c.spin_hash == c.store_hash && c.spin_flags == flags;
+	for (int i = 0; spin && i < 13; i++)	// inline: a memcmp call costs more than the compare
+		spin = c.spin_regs[i] == c.r[i];
 	c.spin_pc = target;
 	c.spin_hash = c.store_hash;
 	c.spin_flags = flags;
@@ -670,6 +671,10 @@ void Chip::Execute (int n, uint64_t until)
 	uint64_t cyc = c.cycles;
 #define SYNC_OUT	c.cycles = cyc
 #define SYNC_IN		cyc = c.cycles
+	// Likewise, or they are reloaded every instruction; neither changes while a core runs.
+	const bool tracing = trace;
+	const uint8_t *code_flash = flash.data();
+	const uint32_t code_mask = flash_mask;
 
 	while (cyc < until)
 	{
@@ -695,7 +700,7 @@ void Chip::Execute (int n, uint64_t until)
 		uint32_t pc = r[15];
 		uint32_t op;
 		if ((pc - 0x10000000u) < 0x04000000u)
-			op = rd16(&flash[pc & flash_mask]);
+			op = rd16(code_flash + (pc & code_mask));
 		else if ((pc - 0x20000000u) < SRAM_SIZE - 1)
 			op = rd16(sram + (pc - 0x20000000u));
 		else if (pc < ROM_SIZE)
@@ -703,7 +708,7 @@ void Chip::Execute (int n, uint64_t until)
 		else
 			op = Read16(n, pc);
 
-		if (trace)
+		if (tracing)
 		{
 			instr_count++;
 			if (profile[n])
@@ -1261,6 +1266,9 @@ void Chip::Execute (int n, uint64_t until)
 					r[14] = (pc + 4) | 1;
 					r[15] = pc + 4 + (uint32_t) off;
 					cyc += 2;
+					// traces and profiles keep the real instructions
+					if (r[15] == XC_BRR_ENCODE && !tracing)
+						cyc += AccelBrrEncode(n);
 				}
 				else if ((op & 0xfff0) == 0xf380 && (op2 & 0xff00) == 0x8800)
 				{
@@ -1342,7 +1350,7 @@ void Chip::Execute (int n, uint64_t until)
 // ---------------------------------------------------------------------------
 // Bus
 
-uint32_t Chip::Read32 (int cpu, uint32_t a)
+FORCE_INLINE uint32_t Chip::Read32 (int cpu, uint32_t a)
 {
 	if ((a - 0x20000000u) <= SRAM_SIZE - 4)
 		return rd32(sram + (a - 0x20000000u));
@@ -1351,7 +1359,7 @@ uint32_t Chip::Read32 (int cpu, uint32_t a)
 	return PeriphRead(cpu, a & ~3u);
 }
 
-uint16_t Chip::Read16 (int cpu, uint32_t a)
+FORCE_INLINE uint16_t Chip::Read16 (int cpu, uint32_t a)
 {
 	if ((a - 0x20000000u) <= SRAM_SIZE - 2)
 		return rd16(sram + (a - 0x20000000u));
@@ -1360,7 +1368,7 @@ uint16_t Chip::Read16 (int cpu, uint32_t a)
 	return (uint16_t) (PeriphRead(cpu, a & ~3u) >> ((a & 2) * 8));
 }
 
-uint8_t Chip::Read8 (int cpu, uint32_t a)
+FORCE_INLINE uint8_t Chip::Read8 (int cpu, uint32_t a)
 {
 	if ((a - 0x20000000u) < SRAM_SIZE)
 		return sram[a - 0x20000000u];
@@ -1381,7 +1389,7 @@ static inline void store_progress (Core &c)
 	c.spin_pc = 0;
 }
 
-void Chip::Write32 (int cpu, uint32_t a, uint32_t v)
+FORCE_INLINE void Chip::Write32 (int cpu, uint32_t a, uint32_t v)
 {
 	if ((a - 0x20000000u) <= SRAM_SIZE - 4)
 	{
@@ -1393,7 +1401,7 @@ void Chip::Write32 (int cpu, uint32_t a, uint32_t v)
 	PeriphWrite(cpu, a & ~3u, v, 4);
 }
 
-void Chip::Write16 (int cpu, uint32_t a, uint16_t v)
+FORCE_INLINE void Chip::Write16 (int cpu, uint32_t a, uint16_t v)
 {
 	if ((a - 0x20000000u) <= SRAM_SIZE - 2)
 	{
@@ -1406,7 +1414,7 @@ void Chip::Write16 (int cpu, uint32_t a, uint16_t v)
 	PeriphWrite(cpu, a, v | ((uint32_t) v << 16), 2);
 }
 
-void Chip::Write8 (int cpu, uint32_t a, uint8_t v)
+FORCE_INLINE void Chip::Write8 (int cpu, uint32_t a, uint8_t v)
 {
 	if ((a - 0x20000000u) < SRAM_SIZE)
 	{
@@ -2129,8 +2137,20 @@ void Chip::AdvanceTimer ()
 	if (timer_pause)
 		return;
 	us_rem += delta * 1000000ull;
-	us_count += us_rem / sys_hz;
-	us_rem %= sys_hz;
+	if (us_rem < 4ull * sys_hz)
+	{
+		// a slice adds a microsecond or two: subtracting beats a 64-bit divide
+		while (us_rem >= sys_hz)
+		{
+			us_rem -= sys_hz;
+			us_count++;
+		}
+	}
+	else
+	{
+		us_count += us_rem / sys_hz;
+		us_rem %= sys_hz;
+	}
 
 	for (int i = 0; i < 4; i++)
 	{
@@ -2239,26 +2259,27 @@ void Chip::UpdateIrqLines ()
 		gpio_intr[word] = (gpio_intr[word] & ~(3u << sh)) | ((bits & 3) << sh) | ((bits & 12) << sh);
 	}
 
+	// Lines both cores see alike: the timer, the PIO and DMA interrupts
+	uint32_t shared = ((timer_intr | timer_intf) & timer_inte) & 0xf;
+	for (int p = 0; p < 2; p++)
+	{
+		if (!(pio[p].irq_inte[0] | pio[p].irq_inte[1] | pio[p].irq_intf[0] | pio[p].irq_intf[1]))
+			continue;
+		uint32_t intr = PioIntr(p);
+		if ((intr & pio[p].irq_inte[0]) | pio[p].irq_intf[0])
+			shared |= 1u << (IRQ_PIO0_0 + 2 * p);
+		if ((intr & pio[p].irq_inte[1]) | pio[p].irq_intf[1])
+			shared |= 1u << (IRQ_PIO0_1 + 2 * p);
+	}
+	if ((dma_intr & dma_inte[0]) | dma_intf[0])
+		shared |= 1u << IRQ_DMA_0;
+	if ((dma_intr & dma_inte[1]) | dma_intf[1])
+		shared |= 1u << IRQ_DMA_1;
+
 	for (int n = 0; n < 2; n++)
 	{
 		Core &c = core[n];
-		uint32_t lines = 0;
-		uint32_t ts = (timer_intr | timer_intf) & timer_inte;
-		lines |= ts & 0xf;
-		for (int p = 0; p < 2; p++)
-		{
-			if (!(pio[p].irq_inte[0] | pio[p].irq_inte[1] | pio[p].irq_intf[0] | pio[p].irq_intf[1]))
-				continue;
-			uint32_t intr = PioIntr(p);
-			if ((intr & pio[p].irq_inte[0]) | pio[p].irq_intf[0])
-				lines |= 1u << (IRQ_PIO0_0 + 2 * p);
-			if ((intr & pio[p].irq_inte[1]) | pio[p].irq_intf[1])
-				lines |= 1u << (IRQ_PIO0_1 + 2 * p);
-		}
-		if ((dma_intr & dma_inte[0]) | dma_intf[0])
-			lines |= 1u << IRQ_DMA_0;
-		if ((dma_intr & dma_inte[1]) | dma_intf[1])
-			lines |= 1u << IRQ_DMA_1;
+		uint32_t lines = shared;
 		for (int w = 0; w < 4; w++)
 			if ((gpio_intr[w] & gpio_inte[n][w]) | gpio_intf[n][w])
 				lines |= 1u << IRQ_IO_BANK0;
@@ -4017,6 +4038,163 @@ void Chip::Core1LaunchStep ()
 }
 
 // ---------------------------------------------------------------------------
+// Firmware accelerators: native versions of hot routines, taken only when the
+// bytes at their address are the ones they were written against.
+
+static uint64_t fnv1a64 (const uint8_t *p, size_t len)
+{
+	uint64_t h = 0xcbf29ce484222325ull;
+	while (len--)
+		h = (h ^ *p++) * 0x100000001b3ull;
+	return h;
+}
+
+// Xeno Crisis' core-1 BRR encoder (a third of that core's work), entry up to its memcpy call at +0xe2.
+// Leaves registers, flags, stack and cycles as the Thumb code does; an interrupt waits until it ends.
+uint32_t Chip::AccelBrrEncode (int n)
+{
+	if (fnv1a64(sram + (XC_BRR_ENCODE - 0x20000000u), 0x104) != 0x6327c799c8bde760ull)	// code and literal pool
+		return 0;
+
+	Core &c = core[n];
+	uint32_t *r = c.r;
+	uint32_t sp = r[13] - 0x70;		// after push {r4-r7,lr}; sub sp,#0x5c
+	uint32_t src = r[1], out = r[2];
+	if (sp - 0x20000000u > SRAM_SIZE - 0x74u)	// the frame and the stacked stride argument
+		return 0;
+	uint32_t step = Read32(n, sp + 0x70) << 2;
+	for (uint32_t i = 0, a = src; i < 16; i++, a += step)
+		if (a - 0x20000000u > SRAM_SIZE - 4u)
+			return 0;
+
+	uint32_t cyc = 186;		// entry, the sample copy loop and the search setup
+	Write32(n, sp + 0x5c, r[4]);
+	Write32(n, sp + 0x60, r[5]);
+	Write32(n, sp + 0x64, r[6]);
+	Write32(n, sp + 0x68, r[7]);
+	Write32(n, sp + 0x6c, r[14]);
+	Write32(n, sp + 0x10, 0);
+	Write32(n, sp + 0x14, out);
+	int16_t smp[16];
+	for (uint32_t i = 0; i < 16; i++, src += step)
+	{
+		uint32_t w = Read32(n, src);
+		smp[i] = (int16_t) w;
+		Write16(n, sp + 0x38 + 2 * i, (uint16_t) w);
+	}
+	Write32(n, sp + 4, 0);
+	Write32(n, sp, 0x7fffffff);
+
+	uint32_t best = 0x7fffffff, err = 0, hdr = 0, last_r6 = 16;
+	int32_t s = 0;
+	bool found = false;
+	uint8_t nib[16];
+	for (uint32_t sh = 12; sh >= 2; sh--)
+	{
+		uint32_t half = (1u << sh) >> 1;
+		Write32(n, sp + 8, half);
+		cyc += 7;
+		err = 0;
+		for (uint32_t i = 0; i < 16; i++)
+		{
+			// the nibble rounding up from the sample (0..7) and the one below it (-8..7)
+			s = smp[i] >> 1;
+			int32_t p = (int32_t) ((((uint32_t) s << 17) >> 16) + half) >> sh;
+			int32_t q = (int32_t) ((((uint32_t) s | 0xffff8000u) << 1) + half) >> sh;
+			cyc += 23;
+			if (p > 7)
+				p = 7;
+			if ((int64_t) q + 8 >= 0)
+			{
+				cyc += 3;
+				if (q > 7)
+				{
+					q = 7;
+					cyc += 3;
+				}
+				else
+					cyc += 1;
+			}
+			else
+			{
+				q = -8;
+				cyc += 2;
+			}
+			uint32_t e1 = (uint32_t) s - (uint32_t) ((int32_t) (int16_t) (((uint32_t) p << sh) & ~1u) >> 1);
+			uint32_t e2 = (uint32_t) s - (uint32_t) ((int32_t) (int16_t) (((uint32_t) q << sh) & ~1u) >> 1);
+			Write32(n, sp + 0xc, e1);
+			e1 *= e1;
+			e2 *= e2;
+			cyc += 22;
+			uint8_t v;
+			if ((int32_t) e1 >= (int32_t) e2)
+			{
+				v = (uint8_t) (q & 15);
+				err += e2;
+				cyc += 6;
+			}
+			else
+			{
+				v = (uint8_t) p;
+				err += e1;
+				cyc += 2;
+			}
+			nib[i] = v;
+			Write8(n, sp + 0x28 + i, v);
+			cyc += (i < 15) ? 7 : 6;
+		}
+		cyc += 4;
+		last_r6 = 16;
+		if ((int32_t) err < (int32_t) best)
+		{
+			hdr = (sh << 4) & 0xff;
+			Write32(n, sp + 0x10, hdr);
+			for (uint32_t k = 0; k < 8; k++)
+				Write8(n, sp + 0x1d + k, (uint8_t) ((nib[2 * k] << 4) | nib[2 * k + 1]));
+			last_r6 = nib[15];
+			best = err;
+			found = true;
+			Write32(n, sp, best);
+			Write32(n, sp + 4, 1);
+			cyc += 114;
+		}
+		else
+			cyc += 1;
+		cyc += (sh > 2) ? 4 : 3;
+	}
+
+	cyc += 5;
+	if (found)
+	{
+		Write8(n, sp + 0x1c, (uint8_t) hdr);
+		cyc += 4;
+	}
+	else
+		cyc += 1;
+	uint8_t head = Read8(n, sp + 0x1c) | 2;
+	Write8(n, sp + 0x1c, head);
+	cyc += 9;
+
+	r[0] = out;
+	r[1] = sp + 0x1c;
+	r[2] = 9;
+	r[3] = head;
+	r[4] = 1;
+	r[5] = err;
+	r[6] = last_r6;
+	r[7] = (uint32_t) s;
+	r[12] = 1;
+	r[13] = sp;
+	r[15] = XC_BRR_ENCODE + 0xe2;
+	c.n = 0;
+	c.z = 0;
+	c.c = 1;
+	c.v = 0;
+	c.spin_pc = 0;
+	return cyc;
+}
+
+// ---------------------------------------------------------------------------
 // Scheduler
 
 void Chip::RunUntil (uint64_t target)
@@ -4044,14 +4222,14 @@ void Chip::RunUntil (uint64_t target)
 		if (end > target)
 			end = target;
 		bool busy = false;
-		for (int n = 0; n < 2; n++)
+		auto run = [&](int n)
 		{
 			Core &c = core[n];
 			if (c.halted || c.lockup || c.sleeping)
 			{
 				if (c.cycles < end)
 					c.cycles = end;
-				continue;
+				return;
 			}
 			busy = true;
 			irq_check[n] = true;
@@ -4059,6 +4237,18 @@ void Chip::RunUntil (uint64_t target)
 				Execute(n, end);
 			if (c.sleeping && c.cycles < end)
 				c.cycles = end;
+		};
+		// An idle-waiting core runs second, so it sees this slice's hand-offs, not the next's.
+		// Xeno Crisis passes its audio between cores; a slice of delay per hand-off starved the SPC stream.
+		if (parked(core[0]) && !parked(core[1]))
+		{
+			run(1);
+			run(0);
+		}
+		else
+		{
+			run(0);
+			run(1);
 		}
 		if (!busy)
 		{

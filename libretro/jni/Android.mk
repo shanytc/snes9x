@@ -18,8 +18,10 @@ endif
 include $(CLEAR_VARS)
 LOCAL_MODULE    := retro
 LOCAL_SRC_FILES := $(SOURCES_C) $(SOURCES_CXX)
+# ndk-build defaults to -O2, and to thumb -Oz on armeabi-v7a; the RP2040 interpreter needs the speed.
+LOCAL_ARM_MODE  := arm
 LOCAL_CXXFLAGS  := $(COREFLAGS)
-LOCAL_CFLAGS    := $(COREFLAGS)
+LOCAL_CFLAGS    := $(COREFLAGS) -O3
 LOCAL_LDFLAGS   := -Wl,-version-script=$(CORE_DIR)/libretro/link.T
 # zlib ships with the NDK, so $(UNZIP_LIBS) resolves without extra setup
 LOCAL_LDLIBS    := $(UNZIP_LIBS)

@@ -14,6 +14,7 @@ class EmuCanvasQt : public EmuCanvas
 
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void drawOverlay(QPainter &paint);
 
     std::mutex qimage_mutex;
     QImage qimage;

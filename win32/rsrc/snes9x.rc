@@ -1581,6 +1581,14 @@ BEGIN
         BEGIN
             MENUITEM "&Insert Coin",                ID_SFCBOX_COIN,MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
+            MENUITEM "Slot 1: Mount...",            (ID_SFCBOX_SLOT0+0),MFT_STRING,MFS_ENABLED
+            MENUITEM "Slot 2: Mount...",            (ID_SFCBOX_SLOT0+1),MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            POPUP "BI&OS",                          0,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "v&1.00",                      ID_SFCBOX_KROM_V1,MFT_STRING,MFS_ENABLED
+                MENUITEM "v&2.00",                      ID_SFCBOX_KROM_V2,MFT_STRING,MFS_ENABLED
+            END
             POPUP "&Keyswitch",                     0,MFT_STRING,MFS_ENABLED
             BEGIN
                 MENUITEM "&1 (Options)",                (ID_SFCBOX_KEYSWITCH0+0),MFT_STRING,MFS_ENABLED

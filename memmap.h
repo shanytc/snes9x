@@ -135,6 +135,7 @@ struct CMemory
 	bool8	LoadBSCart ();
 	bool8	LoadSFCBox (int32);
 	int		LoadNSSCart (const char *, int32 *);
+	int		LoadSFCBoxFile (const char *, int32 *);
 	bool8	LoadSuperDiscImage (const char *);
 	bool8	LoadGNEXT ();
 	bool8	LoadSRAM (const char *);

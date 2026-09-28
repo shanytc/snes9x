@@ -10,6 +10,8 @@
 #include <time.h>
 #include <string.h>
 #include <stdlib.h>
+#include <string>
+#include <vector>
 #include "snes9x.h"
 #include "memmap.h"
 #include "biosmanager.h"
@@ -17,6 +19,14 @@
 #include "movie.h"
 #include "hd64180.h"
 #include "sfcbox.h"
+
+#ifdef UNZIP_SUPPORT
+#  ifdef SYSTEM_ZIP
+#    include <minizip/unzip.h>
+#  else
+#    include "unzip/unzip.h"
+#  endif
+#endif
 
 struct SSFCBox	SFCBox;
 
@@ -416,11 +426,59 @@ static const struct SOSDXlat	osd_xlat[] =
 	{ "\xCF\xBC\xDD\x20\xA6\x20\xBC\xAE\xB7\xB6\x20\xBC\xC3\xB2\xCF\xBD", "Initializing machine" },
 	{ "\xBC\x96\xD7\xB8\x20\xB5\xCF\xC1\xB8\xC0\xDE\xBB\xB2", "Please wait a moment" },
 
+	// Empty-slot errors: row 4 only when slot 1 (PSS-61) is missing
+	{ "\x94\xB3\xBB\xBD\xD9\xC9\xC6\x20\xCB\xC2\xD6\xB3\xC5", "Required to operate:" },
+	{ "\xB6\x2D\xC4\xD8\xAF\xBC\xDE\xB6\xDE\xD0\xC2\xB6\xD8\xCF\xBE\xDD", "Cartridge not found" },
+	{ "\xB6\x2D\xC4\xD8\xAF\xBC\xDE\xA6\x20\xB6\xB8\xC6\xDD\xBC\xC3\x20\xB8\xC0\xDE\xBB\xB2", "Please check cartridge" },
+
 	// Date/time fields (clock first: it embeds the shorter date pattern)
 	{ "'\x01\x01\xF2\x01\x01\xF3\x01\x01\xF4\x01\x01\xF5\x01\x01\xF6", "'\x01\x01-\x01\x01-\x01\x01 \x01\x01:\x01\x01" },
 	{ "'\x01\x01\xF2\x01\x01\xF3\x01\x01\xF4\xB6\xD7\x20\xB9\xDE\xDD\xBB\xDE\xB2\x20\xCF\x92", "From '\x01\x01-\x01\x01-\x01\x01 to now" },
 	{ "'\x01\x01\xF2\x01\x01\xF3\x01\x01\xF4\x20\xB6\xD7", "From '\x01\x01-\x01\x01-\x01\x01" },
 	{ "'\x01\x01\xF2\x01\x01\xF3\x01\x01\xF4\x20\xCF\x92", "To '\x01\x01-\x01\x01-\x01\x01" },
+
+	// KROM 2.00 only: its central-billing tree (2-2-3), video-off mode (2-3-5),
+	// coin time auto-clear (2-4-3) and play-time total. None of these occur in
+	// KROM 1.00, so leading the table cannot change its screens.
+	{ "\x32\x2D\x32\x2D\x33\x2E\xBC\xAD\xB3\xC1\xAD\xB3\xB6\xDD\xD8\xCE\xB3\xBC\xB7", "2-2-3.Central billing" },
+	{ "\xF6\xB0\xBA\xDE\xC4\xC6\x20\xB6\xB7\xDD\x20\xA6\x20\xB6\xB3\xDD\xC4\xBD\xD9", " min per charge" },
+	{ "\xF5\xB0\xC0\xC2\xC4\x20\xC9\xBA\xD8\xF5\xB0\xA6\x20\xB8\xD8\xB1\xBC\xCF\xBD", "h later, clear it" },
+	{ "\xC2\xB3\xBC\xDD\x20\xCE\xB3\xBC\xB7\x20\xA6\x20\xBE\xDD\xC0\xB8\x20\xBD\xD9", "Select comm method" },
+	{ "\xC6\xDD\xBC\xB7\x96\xDD\xBA\xDE\xB3\x20\xA6\x20\xBE\xAF\xC3\xB2\x20\xBD\xD9", "Set ID number" },
+	{ "\xB7\xBE\xB2\xC9\x20\xCE\xB3\xBC\xB7\x20\xA6\x20\xBE\xDD\xC0\xB8\x20\xBD\xD9", "Select preset method" },
+	{ "\xBA\x99\xC2\x20\x9D\xDB\xC4\xBA\xD9\x20\xA6\x20\xBE\xAF\xC3\xB2\x20\xBD\xD9", "Set custom protocol" },
+	{ "\xB7\xBE\xB2\xC9\x20\xBE\xAF\xC3\xB2\x20\xA6\x20\xBE\xDD\xC0\xB8\x20\xBD\xD9", "Pick preset setting" },
+	{ "\xBA\x99\xC2\x20\x9B\xD7\xD2\x2D\xC0\x20\xA6\x20\xBE\xAF\xC3\xB2\x20\xBD\xD9", "Set custom params" },
+	{ "\xBA\xB2\xDD\x20\xC9\xBA\xD8\xF5\xB0\xBC\xDE\x94\xB3\xB8\xD8\xB1", "Auto-clear coins" },
+	{ "\xBC\xAD\xB3\xD8\xAE\xB3\x20\xB6\xB3\xDD\xC4\xC0\xDE\xB3\xDD", "End countdown" },
+	{ "\xB6\xB7\xDD\x20\xBC\xAD\xB3\xD8\xAE\xB3\x20\xD5\xB3\xD6", "End grace time" },
+	{ "\xB9\xDE\x2D\xD1\x9D\xDA\xB2\xC4\x2D\xC0\xD9\xF5\xB0", "Total play time" },
+	{ "\xB6\xB7\xDD\x20\xB6\xB3\xDD\xC4\x20\xD8\xD0\xAF\xC4", "Charge limit" },
+	{ "\xB6\xB7\xDD\x20\xC9\x20\xB6\xB3\xDD\xC4\x20\xCA", "Charge count" },
+	{ "\xBA\xB2\xDD\x20\xC9\x20\xC9\xBA\xD8\xF5\xB0\xA6", "Coin time left" },
+	{ "\xCE\xB3\xBC\xB7\xC6\x20\xBE\xAF\xC3\xB2\xBD\xD9", "Set as method" },
+	{ "\xBA\x99\xC2\x9B\xD7\xD2\x2D\xC0\xBE\xAF\xC3\xB2", "Custom set" },
+	{ "\xB6\xB7\xDD\x20\xB6\xB3\xDD\xC4\x20\xF5\xB0", "Charge time" },
+	{ "\xBE\xAF\xC3\xB2\x20\x92\xB7\xCF\xBE\xDD\x21", "Cannot be set!" },
+	{ "\xBC\xDE\x94\xB3\xC3\xB7\xC6\x20\xB8\xD8\xB1", "auto-clear" },
+	{ "\xB7\xBE\xB2\xBE\xAF\xC3\xB2\xBE\xDD\xC0\xB8", "Presets" },
+	{ "\xBC\xAD\xB3\xD8\xAE\xB3\xB6\xB3\xDD\xC4", "End count" },
+	{ "\xCE\xB3\xBC\xB7\x20\xBE\xDD\xC0\xB8", "Select method" },
+	{ "\x97\x92\xB5\x4F\x46\x46\xD3\x2D\x94", "Video OFF mode" },
+	{ "\xB7\xBE\xB2\xC9\x20\xCE\xB3\xBC\xB7", "Presets" },
+	{ "\xC6\xDD\xBC\xB7\x96\xDD\xBA\xDE\xB3", "ID number" },
+	{ "\xBC\xD8\xB1\xD9\x20\xCE\xB3\xBC\xB7", "Serial mode" },
+	{ "\x9B\xD7\xDA\xD9\x20\xCE\xB3\xBC\xB7", "Parallel mode" },
+	{ "\x94\xB3\xBB\x20\xBE\xAF\xC3\xB2", "Op. setup" },
+	{ "\xC2\xB3\xBC\xDD\xCE\xB3\xBC\xB7", "Comm method" },
+	{ "\xBC\xDE\xB6\xDD\xB6\xB7\xDD", "Time billing" },
+	{ "\xDA\xB2\xBF\xDE\xB3\xBA", "Fridge" },
+	{ "\xC8\x9D\xC1\xAD\x2D\xDD", "Neptune" },
+	{ "\xBA\x99\xC2\x9B\xD7\xD2\x2D\xC0", "Custom params" },
+	{ "\x9B\xD7\xD2\x2D\xC0", "Params" },
+	{ "\x9B\xD7\xDA\xD9", "Parallel" },
+	{ "\xBC\xD8\xB1\xD9", "Serial" },
+	{ "\x01\x01\xF5\xB0\x5C\x01\x01\xF5\xB0", "\x01\x01\x5C\x01\x01 h" },
 
 	// Navigation bars ("[SELECT]で▶を移動して、Bで決定、Aで取りやめ" etc.)
 	{ "\x1E\x1F\x92\x19\xA6\xB2\x94\xB3\xBC\xC3\xA4", "SELECT:move " },
@@ -860,7 +918,7 @@ static uint8 SFCBoxMemRead (uint32 addr)
 	addr &= 0x7ffff;
 
 	if (addr < 0x20000)
-		return (SFCBox.KROM[addr & 0xffff]);
+		return (SFCBox.KROM[addr]);
 	if (addr < 0x40000)
 		return (SFCBox.WRAM[addr & 0x7fff]);
 	if (addr < 0x60000)
@@ -1164,6 +1222,53 @@ void S9xSFCBoxInsertCoin (void)
 // attraction menu. Not saved: PostLoadState re-derives it.
 static char	SFCBoxGame[23];
 
+// "SUPER MARIO KART      " -> "Super Mario Kart"
+static void SFCBoxTitleCase (const uint8 *info, char *out)
+{
+	int	len = 22;
+	while (len && info[len - 1] == ' ')
+		len--;
+	for (int c = 0; c < len; c++)
+	{
+		char	ch = (char) info[c];
+		if (c && info[c - 1] != ' ' && ch >= 'A' && ch <= 'Z')
+			ch += 'a' - 'A';
+		out[c] = ch;
+	}
+	out[len] = 0;
+}
+
+const char *S9xSFCBoxSlotName (int slot)
+{
+	static char	name[2][96];
+	const uint8	*grom = SFCBox.GROM[slot & 1];
+	char		*out = name[slot & 1];
+
+	out[0] = 0;
+	if (!grom)
+		return (out);
+
+	// The loader bounds-checked this directory (SFCBoxParseSlot).
+	const uint32	nroms = grom[0];
+	const uint32	dir = grom[8] | (grom[9] << 8);
+	for (uint32 i = 0; i < nroms; i++)
+	{
+		const uint32	block = (uint32) (grom[dir + i * 2] | (grom[dir + i * 2 + 1] << 8)) * 0x1000;
+		const uint8		*info = grom + block + (grom[block] | (grom[block + 1] << 8));
+		if (!info[0x26])	// the attraction menu is not a game
+			continue;
+
+		char	title[23];
+		SFCBoxTitleCase(info, title);
+		if (strlen(out) + strlen(title) + 4 > sizeof(name[0]))
+			break;
+		if (out[0])
+			strcat(out, " / ");
+		strcat(out, title);
+	}
+	return (out);
+}
+
 static void SFCBoxLatchGame (void)
 {
 	SFCBoxGame[0] = 0;
@@ -1185,18 +1290,7 @@ static void SFCBoxLatchGame (void)
 		if (!info[0x26])	// game flag clear: the attraction menu
 			return;
 
-		// "SUPER MARIO KART      " -> "Super Mario Kart"
-		int	len = 22;
-		while (len && info[len - 1] == ' ')
-			len--;
-		for (int c = 0; c < len; c++)
-		{
-			char	ch = (char) info[c];
-			if (c && info[c - 1] != ' ' && ch >= 'A' && ch <= 'Z')
-				ch += 'a' - 'A';
-			SFCBoxGame[c] = ch;
-		}
-		SFCBoxGame[len] = 0;
+		SFCBoxTitleCase(info, SFCBoxGame);
 		return;
 	}
 }
@@ -1214,9 +1308,15 @@ const char *S9xSFCBoxTitle (void)
 // ---------------------------------------------------------------------------
 // NVRAM (KROM work RAM + RTC SRAM pages) — "<rom>.box" sidecar
 
+// Each KROM version keeps its own battery RAM, so neither reads the other's layout.
+static const char *SFCBoxNVRAMExt (void)
+{
+	return (SFCBox.KROMVersion == 2 ? ".box2" : ".box");
+}
+
 bool8 S9xSFCBoxLoadNVRAM (void)
 {
-	std::string	name = S9xGetFilename(".box", SRAM_DIR);
+	std::string	name = S9xGetFilename(SFCBoxNVRAMExt(), SRAM_DIR);
 	FILE		*fp = fopen(name.c_str(), "rb");
 
 	if (!fp)
@@ -1230,7 +1330,7 @@ bool8 S9xSFCBoxLoadNVRAM (void)
 
 bool8 S9xSFCBoxSaveNVRAM (void)
 {
-	std::string	name = S9xGetFilename(".box", SRAM_DIR);
+	std::string	name = S9xGetFilename(SFCBoxNVRAMExt(), SRAM_DIR);
 	FILE		*fp = fopen(name.c_str(), "wb");
 
 	if (!fp)
@@ -1289,7 +1389,7 @@ void S9xSFCBoxStateSave (uint8 *buf)
 {
 	memcpy(buf, "BOX!", 4);
 	buf[4] = SFCBOX_STATE_VERSION;
-	buf[5] = 0;
+	buf[5] = SFCBox.KROMVersion == 2 ? 2 : 0;	// 0 = KROM 1.00, as older states wrote it
 	buf[6] = (uint8) (sizeof(struct SSFCBoxSaveState) & 0xff);
 	buf[7] = (uint8) ((sizeof(struct SSFCBoxSaveState) >> 8) & 0xff);
 
@@ -1332,6 +1432,13 @@ void S9xSFCBoxStateSave (uint8 *buf)
 	s->OSDUnderColor = SFCBox.OSD.UnderColor;
 	s->OSDXOfs = SFCBox.OSD.XOfs;			s->OSDYOfs = SFCBox.OSD.YOfs;
 	s->OSDExtSync = SFCBox.OSD.ExtSync;
+}
+
+bool8 S9xSFCBoxStateMatchesKROM (const uint8 *buf, size_t size)
+{
+	if (size < 8 || memcmp(buf, "BOX!", 4) != 0)
+		return (TRUE);	// StateLoad judges the rest
+	return ((buf[5] == 2) == (SFCBox.KROMVersion == 2));
 }
 
 bool8 S9xSFCBoxStateLoad (const uint8 *buf, size_t size)
@@ -1424,13 +1531,38 @@ static bool8 LoadBIOSFile (int bios_slot, uint8 *dest, uint32 size, uint32 minsi
 	return (TRUE);
 }
 
+uint8 S9xSFCBoxKROMVersions (void)
+{
+	return (uint8) ((S9xBiosHasImageOfSize(S9X_BIOS_SFCBOX_KROM, SFCBOX_KROM1_SIZE) ? 1 : 0) |
+					(S9xBiosHasImageOfSize(S9X_BIOS_SFCBOX_KROM, SFCBOX_KROM_SIZE)  ? 2 : 0));
+}
+
+uint8 S9xSFCBoxResolveKROMVersion (void)
+{
+	const uint8	have = S9xSFCBoxKROMVersions();
+	uint8		want = Settings.SFCBoxKROMVersion == 2 ? 2 : 1;
+
+	if (!(have & want) && have)
+		want = (have & 1) ? 1 : 2;
+	Settings.SFCBoxKROMVersion = want;
+	return (want);
+}
+
 bool8 S9xSFCBoxLoadKROM (void)
 {
-	const bool8	krom =
-		LoadBIOSFile(S9X_BIOS_SFCBOX_KROM, SFCBox.KROM, SFCBOX_KROM_SIZE, SFCBOX_KROM_SIZE);
-	if (!krom)
-		printf("SFC-Box: KROM1.BIN missing - assign it in File -> BIOS Manager (get it from "
-			   "https://archive.org/details/super-famicom-box-bios).\n");
+	const uint8		version = S9xSFCBoxResolveKROMVersion();
+	const uint32	size = version == 2 ? SFCBOX_KROM_SIZE : SFCBOX_KROM1_SIZE;
+	const bool8		krom = LoadBIOSFile(S9X_BIOS_SFCBOX_KROM, SFCBox.KROM, size, size);
+
+	if (krom)
+	{
+		SFCBox.KROMVersion = version;
+		if (size < SFCBOX_KROM_SIZE)
+			memcpy(SFCBox.KROM + size, SFCBox.KROM, SFCBOX_KROM_SIZE - size);	// A16 undecoded
+		printf("SFC-Box: KROM %u.00.\n", (unsigned) version);
+	}
+	else
+		printf("SFC-Box: KROM missing - assign KROM1.BIN or MAME's sfcbox.zip in File -> BIOS Manager.\n");
 
 	// Probed even when the KROM is missing: the box needs both files, and the
 	// caller names whichever are actually absent.
@@ -1453,13 +1585,14 @@ void S9xSFCBoxDeactivate (void)
 void S9xSFCBoxPowerOn (void)
 {
 	// Preserve the loader-installed bits across the state wipe.
-	uint8	krom[SFCBOX_KROM_SIZE];
+	static uint8	krom[SFCBOX_KROM_SIZE];	// 128K: too big for a thread's stack
 	struct SSFCBoxOSD	osd = SFCBox.OSD;
 	uint8	*grom0 = SFCBox.GROM[0], *grom1 = SFCBox.GROM[1];
 	uint32	romoff[2][4], romsize[2][4];
 	uint8	chipset[2] = { SFCBox.SlotChipset[0], SFCBox.SlotChipset[1] };
 	bool8	present[2] = { SFCBox.SlotPresent[0], SFCBox.SlotPresent[1] };
 
+	const uint8	krom_version = SFCBox.KROMVersion;
 	memcpy(krom, SFCBox.KROM, SFCBOX_KROM_SIZE);
 	memcpy(romoff, SFCBox.RomOffset, sizeof(romoff));
 	memcpy(romsize, SFCBox.RomSize, sizeof(romsize));
@@ -1467,6 +1600,7 @@ void S9xSFCBoxPowerOn (void)
 	memset(&SFCBox, 0, sizeof(SFCBox));
 
 	memcpy(SFCBox.KROM, krom, SFCBOX_KROM_SIZE);
+	SFCBox.KROMVersion = krom_version;
 	SFCBox.OSD = osd;
 	memset(SFCBox.OSD.VRAMChar, 0xff, sizeof(SFCBox.OSD.VRAMChar));
 	SFCBox.GROM[0] = grom0;
@@ -1585,4 +1719,307 @@ void S9xSFCBoxEndScanline (void)
 		SFCBox.SNESHeld = TRUE;
 		HD64180_Reset();
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Cartridge images. A cart is kept in the fullsnes/no$sns merged layout: its
+// 32K GROM, the ROMs in GROM directory order, then 8K where the DSP-1 program
+// dump sits on carts with the chip (our DSP-1 is HLE, so MAME sets get FFs).
+
+bool8 S9xSFCBoxValidGROM (const uint8 *grom, uint32 avail)
+{
+	if (avail < SFCBOX_GROM_SIZE || grom[0] < 1 || grom[0] > 8 || grom[1] != 0x05)
+		return (FALSE);
+
+	uint32	sum = 0;
+	for (uint32 i = 0; i < 0x7ffc; i++)
+		sum += grom[i];
+
+	uint16	chk = grom[0x7ffc] | (grom[0x7ffd] << 8);
+	uint16	cmp = grom[0x7ffe] | (grom[0x7fff] << 8);
+	return ((uint16) sum == chk && (uint16) (chk ^ 0xffff) == cmp);
+}
+
+// Directory entry i: socket, ROM size and the 22-character menu title.
+static bool SFCBoxGROMEntry (const uint8 *grom, uint32 i, uint8 *socket, uint32 *size, const uint8 **title)
+{
+	const uint32	nroms = grom[0];
+	const uint32	dir = grom[8] | (grom[9] << 8);
+	if (i >= nroms || dir + nroms * 3 > SFCBOX_GROM_SIZE)
+		return (false);
+
+	const uint32	block = (uint32) (grom[dir + i * 2] | (grom[dir + i * 2 + 1] << 8)) * 0x1000;
+	if (block + 0x30 > SFCBOX_GROM_SIZE)
+		return (false);
+	const uint32	p0 = grom[block] | (grom[block + 1] << 8);
+	if (block + p0 + 0x2b > SFCBOX_GROM_SIZE)
+		return (false);
+
+	*socket = grom[dir + nroms * 2 + i] & 3;
+	*size = (uint32) grom[block + p0 + 0x19] * 0x20000;	// 128K units
+	*title = grom + block + p0;
+	return (*size != 0);
+}
+
+uint32 S9xSFCBoxCartLength (const uint8 *image, uint32 avail)
+{
+	if (!S9xSFCBoxValidGROM(image, avail))
+		return (0);
+
+	uint32	len = SFCBOX_GROM_SIZE;
+	for (uint32 i = 0; i < image[0]; i++)
+	{
+		uint8		socket;
+		uint32		size;
+		const uint8	*title;
+		if (!SFCBoxGROMEntry(image, i, &socket, &size, &title))
+			return (0);
+		len += size;
+	}
+	if (image[4] & 0x02)
+		len += 0x2000;
+	return (len <= avail ? len : 0);
+}
+
+bool8 S9xSFCBoxIsMainCart (const uint8 *grom)
+{
+	// Only the PSS-61 carries the attraction ROM, in socket 0 (ROM5).
+	for (uint32 i = 0; i < grom[0]; i++)
+	{
+		uint8		socket;
+		uint32		size;
+		const uint8	*title;
+		if (SFCBoxGROMEntry(grom, i, &socket, &size, &title) && socket == 0)
+			return (TRUE);
+	}
+	return (FALSE);
+}
+
+// How many words of the GROM title appear in a ROM's own header title: tells
+// apart same-sized ROMs, like the PSS-61's ATROM and Mario Kart.
+static int SFCBoxTitleScore (const uint8 *grom_title, const uint8 *rom, uint32 size)
+{
+	char	gt[23];
+	memcpy(gt, grom_title, 22);
+	gt[22] = 0;
+
+	char	ht[2][22];
+	for (int h = 0; h < 2; h++)
+	{
+		const uint32	at = h ? 0xffc0 : 0x7fc0;
+		memset(ht[h], 0, sizeof(ht[h]));
+		if (at + 21 <= size)
+			memcpy(ht[h], rom + at, 21);
+	}
+
+	int	score = 0;
+	for (char *w = strtok(gt, " "); w; w = strtok(NULL, " "))
+		if (strlen(w) >= 3 && (strstr(ht[0], w) || strstr(ht[1], w)))
+			score++;
+	return (score);
+}
+
+#ifdef UNZIP_SUPPORT
+struct SFCBoxZipMember
+{
+	char	name[260];
+	uint32	size;
+	bool	used;
+};
+
+static bool SFCBoxReadMember (unzFile file, const char *name, std::vector<uint8> &out, uint32 size)
+{
+	out.assign(size, 0);
+	if (unzLocateFile(file, name, 1) != UNZ_OK || unzOpenCurrentFile(file) != UNZ_OK)
+		return (false);
+	const int	got = unzReadCurrentFile(file, out.data(), size);
+	unzCloseCurrentFile(file);
+	return (got == (int) size);
+}
+
+static bool AcceptATROM (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	return (full_size == 0x80000 && size >= 0x7fd5 && memcmp(data + 0x7fc0, "4S ATTRACTION", 13) == 0);
+}
+#endif
+
+int S9xSFCBoxReadZipSet (const char *path, std::vector<uint8> &out)
+{
+	out.clear();
+#ifndef UNZIP_SUPPORT
+	(void) path;
+	return (0);
+#else
+	unzFile	file = unzOpen(path);
+	if (!file)
+		return (0);
+
+	std::vector<SFCBoxZipMember>	members;
+	for (int pos = unzGoToFirstFile(file); pos == UNZ_OK; pos = unzGoToNextFile(file))
+	{
+		unz_file_info	info;
+		SFCBoxZipMember	m = {};
+		if (unzGetCurrentFileInfo(file, &info, m.name, sizeof(m.name) - 1, NULL, 0, NULL, 0) != UNZ_OK)
+			continue;
+		m.size = (uint32) info.uncompressed_size;
+		if (m.size)
+			members.push_back(m);
+	}
+
+	std::vector<uint8>	grom;
+	for (SFCBoxZipMember &m : members)
+	{
+		if (m.size == SFCBOX_GROM_SIZE && SFCBoxReadMember(file, m.name, grom, m.size) &&
+			S9xSFCBoxValidGROM(grom.data(), m.size))
+		{
+			m.used = true;
+			break;
+		}
+		grom.clear();
+	}
+	if (grom.empty())
+	{
+		unzClose(file);
+		return (0);		// not an SFC-Box set
+	}
+
+	out = grom;
+	std::vector<uint8>	rom, best;
+	for (uint32 i = 0; i < grom[0]; i++)
+	{
+		uint8		socket;
+		uint32		size;
+		const uint8	*title;
+		if (!SFCBoxGROMEntry(grom.data(), i, &socket, &size, &title))
+		{
+			unzClose(file);
+			return (-1);
+		}
+
+		int		best_score = -1;
+		size_t	best_member = members.size();
+		best.clear();
+		for (size_t k = 0; k < members.size(); k++)
+		{
+			if (members[k].used || members[k].size != size || !SFCBoxReadMember(file, members[k].name, rom, size))
+				continue;
+			// Socket 0 is the ATROM's alone: a split set must not hand it Mario Kart.
+			if (AcceptATROM(rom.data(), size, size, NULL) != (socket == 0))
+				continue;
+			const int	score = SFCBoxTitleScore(title, rom.data(), size);
+			if (score > best_score)
+			{
+				best_score = score;
+				best_member = k;
+				best.swap(rom);
+			}
+		}
+
+		if (best_member < members.size())
+			members[best_member].used = true;
+		else if (socket == 0)
+		{
+			// MAME files the ATROM under the sfcbox BIOS set, so a split
+			// pss61.zip leaves it in the KROM's archive.
+			if (!S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_SFCBOX_KROM).c_str(), best, 0x80000, AcceptATROM, NULL))
+			{
+				S9xMessage(S9X_ERROR, S9X_ROM_INFO, "Super Famicom Box: this PSS-61 set has no attraction ROM "
+						   "(atrom-4s-0.rom5); assign MAME's sfcbox.zip as the KROM in File -> BIOS Manager.");
+				unzClose(file);
+				return (-1);
+			}
+		}
+		else
+		{
+			char	msg[96];
+			snprintf(msg, sizeof(msg), "Super Famicom Box: the set is missing the %u KB ROM for \"%.22s\".",
+					 (unsigned) (size >> 10), (const char *) title);
+			S9xMessage(S9X_ERROR, S9X_ROM_INFO, msg);
+			unzClose(file);
+			return (-1);
+		}
+
+		out.insert(out.end(), best.begin(), best.end());
+	}
+	unzClose(file);
+
+	if (grom[4] & 0x02)
+		out.insert(out.end(), 0x2000, 0xff);
+	return (1);
+#endif
+}
+
+int S9xSFCBoxReadCarts (const char *path, std::vector<uint8> carts[2])
+{
+	carts[0].clear();
+	carts[1].clear();
+
+	std::vector<uint8>	image;
+	const int			zip = S9xSFCBoxReadZipSet(path, image);
+	if (zip < 0)
+		return (-1);
+	if (!zip)
+	{
+		FILE	*fp = fopen(path, "rb");
+		if (!fp)
+			return (0);
+		uint8	sig[4] = { 0 };
+		const bool	zipfile = fread(sig, 1, 4, fp) == 4 && !memcmp(sig, "PK\x03\x04", 4);	// an ordinary game's archive
+		fseek(fp, 0, SEEK_END);
+		const long	n = ftell(fp);
+		fseek(fp, 0, SEEK_SET);
+		if (!zipfile && n > 0 && n <= 0x1000000)
+		{
+			image.resize((size_t) n);
+			image.resize(fread(image.data(), 1, (size_t) n, fp));
+		}
+		fclose(fp);
+	}
+
+	uint32	off = 0;
+	for (int c = 0; c < 2 && off < image.size(); c++)
+	{
+		uint32	len = S9xSFCBoxCartLength(image.data() + off, (uint32) image.size() - off);
+		if (!len && c && off + 0x800 < image.size())	// a DSP dump padded to 10K
+		{
+			off += 0x800;
+			len = S9xSFCBoxCartLength(image.data() + off, (uint32) image.size() - off);
+		}
+		if (!len)
+			break;
+		carts[c].assign(image.begin() + off, image.begin() + off + len);
+		off += len;
+	}
+	return (carts[0].empty() ? 0 : 1);
+}
+
+// Slots as last set from the menu, for the box loaded from `base`; a load of
+// any other file forgets them.
+static std::string	SFCBoxSlotBase, SFCBoxSlotPath[2];
+static bool			SFCBoxSlotSet[2];
+
+void S9xSFCBoxSetSlot (int slot, const char *base, const char *path)
+{
+	if (!base || SFCBoxSlotBase != base)
+	{
+		SFCBoxSlotBase = base ? base : "";
+		SFCBoxSlotSet[0] = SFCBoxSlotSet[1] = false;
+	}
+	SFCBoxSlotSet[slot & 1] = true;
+	SFCBoxSlotPath[slot & 1] = path ? path : "";
+}
+
+bool8 S9xSFCBoxSlotOverride (int slot, const char *base, std::string &path)
+{
+	if (SFCBoxSlotBase.empty() || !base || SFCBoxSlotBase != base)
+	{
+		SFCBoxSlotBase.clear();
+		SFCBoxSlotSet[0] = SFCBoxSlotSet[1] = false;
+		return (FALSE);
+	}
+	if (!SFCBoxSlotSet[slot & 1])
+		return (FALSE);
+	path = SFCBoxSlotPath[slot & 1];
+	return (TRUE);
 }

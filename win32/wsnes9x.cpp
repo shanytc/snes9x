@@ -3085,6 +3085,80 @@ LRESULT CALLBACK WinProc(
 		case ID_SFCBOX_OSD_BACKDROP:
 			Settings.SFCBoxOSDBackdrop = !Settings.SFCBoxOSDBackdrop;
 			break;
+		// A different KROM, or a cart swapped in slot 2, is a power cycle: the
+		// load saves the outgoing battery RAM and brings the box up again.
+		case ID_SFCBOX_KROM_V1:
+		case ID_SFCBOX_KROM_V2:
+		{
+			const uint8 v = (cmd_id == ID_SFCBOX_KROM_V2) ? 2 : 1;
+			if (!SFCBox.Active || SFCBox.KROMVersion == v || !(S9xSFCBoxKROMVersions() & v))
+				break;
+			Settings.SFCBoxKROMVersion = v;
+			if (ReloadLoadedGame())
+				S9xSetInfoString(v == 2 ? "SFC-Box BIOS: KROM 2.00" : "SFC-Box BIOS: KROM 1.00");
+			CheckMenuStates();
+			break;
+		}
+		// Slot 1 takes the PSS-61, slot 2 a PSS-62/63/64. A filled slot gives
+		// up its cartridge, an empty one takes a file; either can stay empty,
+		// and the KROM then reports the missing cartridge itself.
+		case ID_SFCBOX_SLOT0 + 0:
+		case ID_SFCBOX_SLOT0 + 1:
+		{
+			const int slot = cmd_id - ID_SFCBOX_SLOT0;
+			if (!SFCBox.Active)
+				break;
+			if (SFCBox.SlotPresent[slot])
+			{
+				S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), "");
+				if (ReloadLoadedGame())
+					S9xSetInfoString(slot ? "Slot 2 ejected" : "Slot 1 ejected");
+				CheckMenuStates();
+				break;
+			}
+			RestoreGUIDisplay();
+			OPENFILENAME	ofn;
+			TCHAR			szFileName[MAX_PATH];
+			szFileName[0] = TEXT('\0');
+			memset((LPVOID) &ofn, 0, sizeof(OPENFILENAME));
+			ofn.lStructSize = sizeof(OPENFILENAME);
+			ofn.hwndOwner   = GUI.hWnd;
+			ofn.lpstrFilter = TEXT("SFC-Box Cartridges (*.zip;*.sfc;*.bin)\0*.zip;*.sfc;*.bin\0All Files (*.*)\0*.*\0\0");
+			ofn.lpstrFile   = szFileName;
+			ofn.nMaxFile    = MAX_PATH;
+			ofn.lpstrTitle  = slot ? TEXT("Super Famicom Box - cartridge for slot 2")
+			                       : TEXT("Super Famicom Box - cartridge for slot 1");
+			ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
+			const bool picked = GetOpenFileName(&ofn) != 0;
+			RestoreSNESDisplay();
+			if (!picked)
+				break;
+
+			const std::string	path = (const char *) _tToChar(szFileName);
+			std::vector<uint8>	carts[2];
+			bool				fits = false;
+			if (S9xSFCBoxReadCarts(path.c_str(), carts) > 0)
+				for (int c = 0; c < 2; c++)
+					if (!carts[c].empty() && (S9xSFCBoxIsMainCart(carts[c].data()) != 0) == (slot == 0))
+						fits = true;
+			if (!fits)
+			{
+				MessageBox(GUI.hWnd,
+					slot ? TEXT("That is not a Super Famicom Box slot 2 cartridge (PSS-62, PSS-63 or PSS-64).")
+					     : TEXT("That is not a Super Famicom Box slot 1 cartridge (PSS-61)."),
+					TEXT("Super Famicom Box"), MB_OK | MB_ICONWARNING);
+				break;
+			}
+			S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), path.c_str());
+			if (ReloadLoadedGame())
+			{
+				char msg[128];
+				snprintf(msg, sizeof msg, "Slot %d: %s", slot + 1, S9xSFCBoxSlotName(slot));
+				S9xSetInfoString(msg);
+			}
+			CheckMenuStates();
+			break;
+		}
 
 		case ID_NSS_COIN1:
 		case ID_NSS_COIN2:
@@ -5992,6 +6066,31 @@ static void CheckMenuStates ()
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_ENGLISH, FALSE, &mii);
 	mii.fState = Settings.SFCBoxOSDBackdrop ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_BACKDROP, FALSE, &mii);
+	if (SFCBox.Active)
+	{
+		// A KROM file with one version only boots that one, and the choice follows it.
+		const uint8 krom = S9xSFCBoxResolveKROMVersion();
+		const uint8 have = S9xSFCBoxKROMVersions();
+		mii.fState = (krom == 1 ? MFS_CHECKED : MFS_UNCHECKED) | ((have & 1) ? MFS_ENABLED : MFS_GRAYED);
+		SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_KROM_V1, FALSE, &mii);
+		mii.fState = (krom == 2 ? MFS_CHECKED : MFS_UNCHECKED) | ((have & 2) ? MFS_ENABLED : MFS_GRAYED);
+		SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_KROM_V2, FALSE, &mii);
+		// Each slot says what is in it.
+		for (int slot = 0; slot < 2; slot++)
+		{
+			TCHAR text[160];
+			if (SFCBox.SlotPresent[slot])
+				_sntprintf(text, 160, TEXT("Slot %d: Eject (%hs)"), slot + 1, S9xSFCBoxSlotName(slot));
+			else
+				_sntprintf(text, 160, TEXT("Slot %d: Mount..."), slot + 1);
+			text[159] = 0;
+			MENUITEMINFO txt = {};
+			txt.cbSize     = sizeof(txt);
+			txt.fMask      = MIIM_STRING;
+			txt.dwTypeData = text;
+			SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_SLOT0 + slot, FALSE, &txt);
+		}
+	}
 
 	// Super Disc drive.
 	{

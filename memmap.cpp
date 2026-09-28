@@ -2297,6 +2297,16 @@ bool8 CMemory::LoadROM (const char *filename)
         if (!totalFileSize)
             return (FALSE);
 
+        // Super Famicom Box carts, merged or as a MAME set, are assembled
+        // into one image here; nothing else below applies to them.
+        {
+            int box = LoadSFCBoxFile(filename, &totalFileSize);
+            if (box < 0)
+                return (FALSE);
+            if (box > 0)
+                return (LoadSFCBox(totalFileSize));
+        }
+
         // Container-format sniff: .zip/.jma/.7z of a GB ROM land here
         // because FileLoader accepted the extension. If the unzipped
         // content carries the Nintendo logo it's a GB cart — route
@@ -3116,6 +3126,85 @@ bool8 CMemory::LoadBSCart ()
 	return (TRUE);
 }
 
+// Super Famicom Box carts, from a merged image or a MAME set (.zip). Slot 1
+// takes the PSS-61; an optional cart (PSS-62/63/64) loaded on its own goes to
+// slot 2 and brings in the pss61.zip beside it, or boots with slot 1 empty for
+// the KROM to report. Slots picked from the menu replace the file's own. ROM
+// ends up holding slot 1's image then slot 2's, either possibly absent.
+// -1 = failed, 0 = not a box cart, 1 = ready for LoadSFCBox.
+static void SFCBoxPickCart (const std::string &path, bool main, std::vector<uint8> &out, const char *slot)
+{
+	std::vector<uint8>	c[2];
+	out.clear();
+	if (path.empty())
+		return;
+	if (S9xSFCBoxReadCarts(path.c_str(), c) > 0)
+		for (int i = 0; i < 2 && out.empty(); i++)
+			if (!c[i].empty() && (S9xSFCBoxIsMainCart(c[i].data()) != 0) == main)
+				out = c[i];
+	if (out.empty())
+	{
+		char	msg[96];
+		snprintf(msg, sizeof(msg), "The %s cartridge could not be read; that slot is empty.", slot);
+		S9xMessage(S9X_ERROR, S9X_ROM_INFO, msg);
+	}
+}
+
+int CMemory::LoadSFCBoxFile (const char *filename, int32 *size)
+{
+	if (!filename || !*filename)
+		return (0);
+	if (!S9xFilenameHasExt(filename, ".zip") && !S9xSFCBoxValidGROM(ROM, (uint32) *size))
+		return (0);
+
+	std::vector<uint8>	carts[2];
+	const int			found = S9xSFCBoxReadCarts(filename, carts);
+	if (found < 0)
+		return (-1);	// the reader named the missing ROM
+	if (!found)
+		return (0);
+
+	std::string			base = filename;
+	std::vector<uint8>	slot[2] = { carts[0], carts[1] };
+
+	if (!S9xSFCBoxIsMainCart(carts[0].data()))
+	{
+		std::string			main_path = base.substr(0, base.find_last_of("/\\") + 1) + "pss61.zip";
+		std::vector<uint8>	mc[2];
+		slot[1] = carts[0];
+		slot[0].clear();
+		if (S9xSFCBoxReadCarts(main_path.c_str(), mc) > 0 && S9xSFCBoxIsMainCart(mc[0].data()))
+		{
+			slot[0] = mc[0];
+			S9xSFCBoxSetSlot(1, main_path.c_str(), filename);
+			base = main_path;
+			ROMFilename = main_path;	// saves and NVRAM belong to the box, not the slot 2 cart
+		}
+		else
+			S9xMessage(S9X_INFO, S9X_ROM_INFO, "Super Famicom Box: no pss61.zip beside this cartridge, so slot 1 is empty.");
+	}
+
+	static const char	*names[2] = { "slot 1", "slot 2" };
+	for (int s = 0; s < 2; s++)
+	{
+		std::string	path;
+		if (S9xSFCBoxSlotOverride(s, base.c_str(), path))
+			SFCBoxPickCart(path, s == 0, slot[s], names[s]);
+	}
+
+	if (slot[0].size() + slot[1].size() > MAX_ROM_SIZE)
+		return (-1);
+
+	memset(ROM, 0, MAX_ROM_SIZE);
+	if (!slot[0].empty())
+		memcpy(ROM, slot[0].data(), slot[0].size());
+	if (!slot[1].empty())
+		memcpy(ROM + slot[0].size(), slot[1].data(), slot[1].size());
+	*size = (int32) (slot[0].size() + slot[1].size());
+	HeaderCount = 0;
+	return (1);
+}
+
 // ---------------------------------------------------------------------------
 // Super Famicom Box (docs/sfcbox.md). Images use the fullsnes/no$sns merged
 // format: 32K GROM directory, that cart's ROMs in directory order, then an
@@ -3159,20 +3248,6 @@ static bool8 SFCBoxStageGSU (uint32 off, uint32 size)
 
 	SFCBoxFXRomOffset = off;
 	return (TRUE);
-}
-
-static bool8 SFCBoxValidGROM (const uint8 *grom, uint32 avail)
-{
-	if (avail < 0x8000 || grom[0] < 1 || grom[0] > 8 || grom[1] != 0x05)
-		return (FALSE);
-
-	uint32	sum = 0;
-	for (uint32 i = 0; i < 0x7ffc; i++)
-		sum += grom[i];
-
-	uint16	chk = grom[0x7ffc] | (grom[0x7ffd] << 8);
-	uint16	cmp = grom[0x7ffe] | (grom[0x7fff] << 8);
-	return ((uint16) sum == chk && (uint16) (chk ^ 0xffff) == cmp);
 }
 
 // Walk one cart's GROM directory, filling the socket table; returns the
@@ -3220,19 +3295,31 @@ static uint32 SFCBoxParseSlot (int slot, uint32 base, uint32 avail)
 
 bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 {
+	Settings.DisplayColor = BUILD_PIXEL(31, 31, 31);
+	SET_UI_COLOR(255, 255, 255);
+
 	memset(&SFCBox, 0, sizeof(SFCBox));
 	SFCBoxFXRomOffset = ~0u;	// new image: invalidate the staged GSU view
 
-	uint32	total = SFCBoxParseSlot(0, 0, (uint32) ROMfillSize);
-	if (!total || !SFCBox.RomSize[0][0])
+	// Either slot may be empty: the image leads with the PSS-61 when slot 1
+	// holds one, and is empty altogether when both slots are.
+	uint32	total = 0;
+	if (ROMfillSize >= 0x8000 && S9xSFCBoxValidGROM(ROM, (uint32) ROMfillSize))
 	{
-		printf("SFC-Box: unrecognized GROM directory in slot 0 image.\n");
-		return (FALSE);
+		const int	first = S9xSFCBoxIsMainCart(ROM) ? 0 : 1;
+		total = SFCBoxParseSlot(first, 0, (uint32) ROMfillSize);
+		if (!total || (first == 0 && !SFCBox.RomSize[0][0]))
+		{
+			printf("SFC-Box: unrecognized GROM directory in the cartridge image.\n");
+			return (FALSE);
+		}
 	}
+	else if (ROMfillSize)
+		return (FALSE);
 
 	// A second cart appended? (also probe +0x800 for images whose DSP dump
 	// kept the 10K padded layout)
-	if ((uint32) ROMfillSize >= total + 0x8000)
+	if (SFCBox.SlotPresent[0] && (uint32) ROMfillSize >= total + 0x8000)
 	{
 		uint32	candidates[2] = { total, total + 0x800 };
 		bool8	found = FALSE;
@@ -3240,7 +3327,7 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 		for (int i = 0; i < 2 && !found; i++)
 		{
 			if (candidates[i] + 0x8000 <= (uint32) ROMfillSize &&
-				SFCBoxValidGROM(ROM + candidates[i], ROMfillSize - candidates[i]))
+				S9xSFCBoxValidGROM(ROM + candidates[i], ROMfillSize - candidates[i]))
 				found = SFCBoxParseSlot(1, candidates[i], (uint32) ROMfillSize) != 0;
 		}
 
@@ -3347,9 +3434,9 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 	Map_Initialize();
 	S9xSFCBoxRemap();
 
-	sprintf(String, "\"SUPER FAMICOM BOX\" slot0%s, %s, %s, CRC32:%08X",
-			SFCBox.SlotPresent[1] ? " + slot1" : " only",
-			Size(), Settings.DSP ? "DSP1" : "no DSP", ROMCRC32);
+	sprintf(String, "\"SUPER FAMICOM BOX\" slot 1 %s, slot 2 %s, %s, %s, CRC32:%08X",
+			SFCBox.SlotPresent[0] ? "in" : "empty", SFCBox.SlotPresent[1] ? "in" : "empty",
+			CalculatedSize ? Size() : "no ROM",Settings.DSP ? "DSP1" : "no DSP", ROMCRC32);
 	S9xMessage(S9X_INFO, S9X_ROM_INFO, String);
 
 	S9xShowBiosNotice();
@@ -6556,7 +6643,14 @@ void S9xSFCBoxRemap (void)
 		size = SFCBox.RomSize[0][0];
 		hirom = FALSE;
 		if (!size)
+		{
+			// No PSS-61 either: nothing but open bus on the cart side.
+			Memory.Map_Initialize();
+			Memory.map_System();
+			Memory.map_WRAM();
+			Memory.map_WriteProtectROM();
 			return;
+		}
 	}
 
 	Memory.Map_Initialize();

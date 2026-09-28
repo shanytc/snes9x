@@ -46,7 +46,8 @@ static const char *const kNamesSGB2Boot[] = {
 	"sgb2.boot.rom", "sgb2_bios.bin", "sgb2_boot.bin",
 	"Super Game Boy 2 SGB2-CPU (Japan) (Enhancement Chip).bin", NULL
 };
-static const char *const kNamesKROM[]   = { "KROM1.BIN", "KROM.BIN", "krom1.bin", NULL };
+static const char *const kNamesKROM[]   = { "KROM1.BIN", "KROM.BIN", "krom1.bin", "sfcbox.zip",
+                                            "krom2.00.ic1", "krom1.ic1", NULL };
 static const char *const kNamesFont[]   = { "MB90082.BIN", NULL };
 static const char *const kNamesBSX[]    = { "BS-X.bin", "BS-X.bios", NULL };
 static const char *const kNamesSufami[] = { "STBIOS.bin", NULL };
@@ -169,7 +170,36 @@ static bool SizeOkForSlot (int slot, uint32 n)
 	if (n == 0) return (false);
 	if (slot == S9X_BIOS_GBC) return (n == 0x900 || n == 0x800);
 	if (slot == S9X_BIOS_SUPERDISC) return (n == SDISC_BIOS_SIZE || n == SDISC_BIOS_SIZE + 0x200);
+	if (slot == S9X_BIOS_SFCBOX_KROM) return (n == 0x10000 || n == 0x20000);	// KROM 1.00 / 2.00
 	return (kSlots[slot].size == 0 || n == kSlots[slot].size);
+}
+
+bool8 S9xBiosHasImageOfSize (int slot, uint32 size)
+{
+	if (!SlotValid(slot) || !g_paths[slot][0])
+		return (FALSE);
+
+	if (IsZipFile(g_paths[slot]))
+	{
+#ifdef UNZIP_SUPPORT
+		unzFile file = unzOpen(g_paths[slot]);
+		if (!file) return (FALSE);
+
+		bool found = false;
+		for (int pos = unzGoToFirstFile(file); pos == UNZ_OK && !found; pos = unzGoToNextFile(file))
+		{
+			unz_file_info info;
+			if (unzGetCurrentFileInfo(file, &info, NULL, 0, NULL, 0, NULL, 0) == UNZ_OK)
+				found = info.uncompressed_size == size;
+		}
+		unzClose(file);
+		return found ? TRUE : FALSE;
+#else
+		return (FALSE);
+#endif
+	}
+
+	return (FileSize(g_paths[slot]) == (long) size) ? TRUE : FALSE;
 }
 
 // The size half of the check, zip-aware. Kept separate so the status can say
@@ -367,6 +397,7 @@ static std::string SizeWanted (int slot)
 {
 	char buf[64];
 	if (slot == S9X_BIOS_GBC) return ("wrong size: need 2048 or 2304 bytes");
+	if (slot == S9X_BIOS_SFCBOX_KROM) return ("wrong size: need 65536 or 131072 bytes");
 	if (kSlots[slot].size == 0) return ("empty file");
 	snprintf(buf, sizeof buf, "wrong size: need %u bytes", (unsigned) kSlots[slot].size);
 	return (std::string(buf));
@@ -424,6 +455,12 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail)
 	if (detail && want == KIND_NSS_BIOS &&
 	    IsNoCashNSSTest(img.data(), (uint32) img.size(), (uint32) img.size()))
 		*detail = "No$Cash Test Bios";
+	if (detail && slot == S9X_BIOS_SFCBOX_KROM)
+	{
+		const bool v1 = S9xBiosHasImageOfSize(slot, 0x10000) != 0;
+		const bool v2 = S9xBiosHasImageOfSize(slot, 0x20000) != 0;
+		*detail = (v1 && v2) ? "KROM 1.00 + 2.00" : v2 ? "KROM 2.00" : "KROM 1.00";
+	}
 
 	return (S9X_BIOS_PATH_OK);
 }

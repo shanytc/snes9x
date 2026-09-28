@@ -79,6 +79,10 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail = NULL);
 // warning, not a block.
 bool8 S9xBiosPathUsable (int slot);
 
+// Whether the slot's file (or one member of its .zip) is exactly `size`
+// bytes. Reads the zip directory only, so it is cheap enough for menus.
+bool8 S9xBiosHasImageOfSize (int slot, uint32 size);
+
 // Assigned path when it is readable, otherwise "". Empty means the loader has
 // no BIOS for that slot; nothing else is searched.
 std::string S9xResolveBiosPath (int slot);

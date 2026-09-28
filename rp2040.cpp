@@ -641,8 +641,9 @@ static inline bool cond_pass (const Core &c, uint32_t cond)
 static inline bool spin_detect (Core &c, uint32_t target)
 {
 	uint32_t flags = (c.n << 3) | (c.z << 2) | (c.c << 1) | c.v;
-	bool spin = c.spin_pc == target && c.spin_hash == c.store_hash && c.spin_flags == flags &&
-				!memcmp(c.spin_regs, c.r, sizeof(c.spin_regs));
+	bool spin = c.spin_pc == target && c.spin_hash == c.store_hash && c.spin_flags == flags;
+	for (int i = 0; spin && i < 13; i++)	// inline: a memcmp call costs more than the compare
+		spin = c.spin_regs[i] == c.r[i];
 	c.spin_pc = target;
 	c.spin_hash = c.store_hash;
 	c.spin_flags = flags;
@@ -663,6 +664,10 @@ void Chip::Execute (int n, uint64_t until)
 	uint64_t cyc = c.cycles;
 #define SYNC_OUT	c.cycles = cyc
 #define SYNC_IN		cyc = c.cycles
+	// Likewise, or they are reloaded every instruction; neither changes while a core runs.
+	const bool tracing = trace;
+	const uint8_t *code_flash = flash.data();
+	const uint32_t code_mask = flash_mask;
 
 	while (cyc < until)
 	{
@@ -688,7 +693,7 @@ void Chip::Execute (int n, uint64_t until)
 		uint32_t pc = r[15];
 		uint32_t op;
 		if ((pc - 0x10000000u) < 0x04000000u)
-			op = rd16(&flash[pc & flash_mask]);
+			op = rd16(code_flash + (pc & code_mask));
 		else if ((pc - 0x20000000u) < SRAM_SIZE - 1)
 			op = rd16(sram + (pc - 0x20000000u));
 		else if (pc < ROM_SIZE)
@@ -696,7 +701,7 @@ void Chip::Execute (int n, uint64_t until)
 		else
 			op = Read16(n, pc);
 
-		if (trace)
+		if (tracing)
 		{
 			instr_count++;
 			if (profile[n])
@@ -1255,7 +1260,7 @@ void Chip::Execute (int n, uint64_t until)
 					r[15] = pc + 4 + (uint32_t) off;
 					cyc += 2;
 					// traces and profiles keep the real instructions
-					if (r[15] == XC_BRR_ENCODE && !trace)
+					if (r[15] == XC_BRR_ENCODE && !tracing)
 						cyc += AccelBrrEncode(n);
 				}
 				else if ((op & 0xfff0) == 0xf380 && (op2 & 0xff00) == 0x8800)
@@ -2125,8 +2130,20 @@ void Chip::AdvanceTimer ()
 	if (timer_pause)
 		return;
 	us_rem += delta * 1000000ull;
-	us_count += us_rem / sys_hz;
-	us_rem %= sys_hz;
+	if (us_rem < 4ull * sys_hz)
+	{
+		// a slice adds a microsecond or two: subtracting beats a 64-bit divide
+		while (us_rem >= sys_hz)
+		{
+			us_rem -= sys_hz;
+			us_count++;
+		}
+	}
+	else
+	{
+		us_count += us_rem / sys_hz;
+		us_rem %= sys_hz;
+	}
 
 	for (int i = 0; i < 4; i++)
 	{
@@ -2235,26 +2252,27 @@ void Chip::UpdateIrqLines ()
 		gpio_intr[word] = (gpio_intr[word] & ~(3u << sh)) | ((bits & 3) << sh) | ((bits & 12) << sh);
 	}
 
+	// Lines both cores see alike: the timer, the PIO and DMA interrupts
+	uint32_t shared = ((timer_intr | timer_intf) & timer_inte) & 0xf;
+	for (int p = 0; p < 2; p++)
+	{
+		if (!(pio[p].irq_inte[0] | pio[p].irq_inte[1] | pio[p].irq_intf[0] | pio[p].irq_intf[1]))
+			continue;
+		uint32_t intr = PioIntr(p);
+		if ((intr & pio[p].irq_inte[0]) | pio[p].irq_intf[0])
+			shared |= 1u << (IRQ_PIO0_0 + 2 * p);
+		if ((intr & pio[p].irq_inte[1]) | pio[p].irq_intf[1])
+			shared |= 1u << (IRQ_PIO0_1 + 2 * p);
+	}
+	if ((dma_intr & dma_inte[0]) | dma_intf[0])
+		shared |= 1u << IRQ_DMA_0;
+	if ((dma_intr & dma_inte[1]) | dma_intf[1])
+		shared |= 1u << IRQ_DMA_1;
+
 	for (int n = 0; n < 2; n++)
 	{
 		Core &c = core[n];
-		uint32_t lines = 0;
-		uint32_t ts = (timer_intr | timer_intf) & timer_inte;
-		lines |= ts & 0xf;
-		for (int p = 0; p < 2; p++)
-		{
-			if (!(pio[p].irq_inte[0] | pio[p].irq_inte[1] | pio[p].irq_intf[0] | pio[p].irq_intf[1]))
-				continue;
-			uint32_t intr = PioIntr(p);
-			if ((intr & pio[p].irq_inte[0]) | pio[p].irq_intf[0])
-				lines |= 1u << (IRQ_PIO0_0 + 2 * p);
-			if ((intr & pio[p].irq_inte[1]) | pio[p].irq_intf[1])
-				lines |= 1u << (IRQ_PIO0_1 + 2 * p);
-		}
-		if ((dma_intr & dma_inte[0]) | dma_intf[0])
-			lines |= 1u << IRQ_DMA_0;
-		if ((dma_intr & dma_inte[1]) | dma_intf[1])
-			lines |= 1u << IRQ_DMA_1;
+		uint32_t lines = shared;
 		for (int w = 0; w < 4; w++)
 			if ((gpio_intr[w] & gpio_inte[n][w]) | gpio_intf[n][w])
 				lines |= 1u << IRQ_IO_BANK0;

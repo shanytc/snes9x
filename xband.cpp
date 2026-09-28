@@ -5172,9 +5172,20 @@ static void fred_trap_range (uint32 start, uint32 end, bool ram)
 static void fred_map_cart (uint32 bank_s, uint32 bank_e, uint32 addr_s, uint32 addr_e)
 {
 	if (fred_cart_hirom)
+	{
 		Memory.map_hirom_offset(bank_s, bank_e, addr_s, addr_e, Multi.cartSizeB, Multi.cartOffsetB);
-	else
-		Memory.map_lorom_offset(bank_s, bank_e, addr_s, addr_e, Multi.cartSizeB, Multi.cartOffsetB);
+		return;
+	}
+	// LoROM by the absolute bank ($C0 is cart bank $40): map_lorom_offset counts from bank_s,
+	// which only agrees for carts of 2MB or less (NBA Jam TE is 3MB).
+	for (uint32 c = bank_s; c <= bank_e; c++)
+		for (uint32 i = addr_s; i <= addr_e; i += 0x1000)
+		{
+			uint32 p = (c << 4) | (i >> 12);
+			Memory.Map[p] = Memory.ROM + Multi.cartOffsetB + Memory.map_mirror(Multi.cartSizeB, (c & 0x7f) * 0x8000) - (i & 0x8000);
+			Memory.BlockIsROM[p] = TRUE;
+			Memory.BlockIsRAM[p] = FALSE;
+		}
 }
 
 static void fred_remap (bool force)

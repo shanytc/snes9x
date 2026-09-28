@@ -638,6 +638,13 @@ static inline bool cond_pass (const Core &c, uint32_t cond)
 // and repeated the previous iteration's stores exactly is waiting on another
 // agent (the other core, DMA, a timer, an interrupt), all of which only act
 // between slices: the rest of the slice can be skipped.
+// A core that left its last slice from an idle loop: spin_detect has just cleared its store hash and
+// recorded the loop head, where the core still sits.
+static inline bool parked (const Core &c)
+{
+	return c.spin_pc == c.r[15] && !c.store_hash;
+}
+
 static inline bool spin_detect (Core &c, uint32_t target)
 {
 	uint32_t flags = (c.n << 3) | (c.z << 2) | (c.c << 1) | c.v;
@@ -4215,14 +4222,14 @@ void Chip::RunUntil (uint64_t target)
 		if (end > target)
 			end = target;
 		bool busy = false;
-		for (int n = 0; n < 2; n++)
+		auto run = [&](int n)
 		{
 			Core &c = core[n];
 			if (c.halted || c.lockup || c.sleeping)
 			{
 				if (c.cycles < end)
 					c.cycles = end;
-				continue;
+				return;
 			}
 			busy = true;
 			irq_check[n] = true;
@@ -4230,6 +4237,18 @@ void Chip::RunUntil (uint64_t target)
 				Execute(n, end);
 			if (c.sleeping && c.cycles < end)
 				c.cycles = end;
+		};
+		// An idle-waiting core runs second, so it sees this slice's hand-offs, not the next's.
+		// Xeno Crisis passes its audio between cores; a slice of delay per hand-off starved the SPC stream.
+		if (parked(core[0]) && !parked(core[1]))
+		{
+			run(1);
+			run(0);
+		}
+		else
+		{
+			run(0);
+			run(1);
 		}
 		if (!busy)
 		{

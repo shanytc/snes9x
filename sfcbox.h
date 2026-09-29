@@ -90,7 +90,7 @@ struct SSFCBox
 
 	// Inputs
 	uint8	Keyswitch;					// rotary position 0-5 (bit index into [80h].R)
-	bool8	ResetButton, TVGameButton;
+	int32	SwitchCycles[2];			// PHI cycles left of a Reset / GAME/TV press
 	int32	CoinCycles;					// PHI cycles left of coin-switch closure
 
 	// SNES link + reset
@@ -155,7 +155,10 @@ bool8	S9xSFCBoxOSDHires (void);		// character plane visible: double lores frames
 void	S9xSFCBoxRenderOSD (uint16 *screen, int pitch, int width, int height);
 
 // Front panel
+enum { SFCBOX_RESET_SWITCH, SFCBOX_TVGAME_SWITCH };
 void	S9xSFCBoxInsertCoin (void);
+void	S9xSFCBoxPressSwitch (int sw);	// one press of a front-panel push switch
+bool8	S9xSFCBoxTVMode (void);			// TV indicator lit: RF out carries the antenna, not the SNES
 
 // "Super Famicom Box - <game>", or just "Super Famicom Box" on the menu
 const char *S9xSFCBoxTitle (void);

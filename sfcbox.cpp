@@ -47,6 +47,8 @@ static int TraceEnabled (void)
 #define SFCBOX_PHI			4608000
 // Coin switch stays closed 44-80ms; use ~60ms of PHI clocks.
 #define SFCBOX_COIN_CYCLES	276480
+// A push-switch press: ~150ms, past the KROM's 4-sample debounce.
+#define SFCBOX_SWITCH_CYCLES	(SFCBOX_PHI * 3 / 20)
 // External watchdog, reloaded by [81h].W bit6 transitions. Real timeout is
 // ~1.5s (0xABA timer0 steps at 1772 Hz); run generous so emulation-timing
 // hiccups don't reboot the board under us.
@@ -778,14 +780,34 @@ static void OSDTranslateRow (uint8 *ch, uint8 *at)
 // frame first so the 12-dot cells render at 16 output pixels.
 bool8 S9xSFCBoxOSDHires (void)
 {
-	return (SFCBox.Active && SFCBox.OSD.DisplayEnable && SFCBox.OSD.FontLoaded) ? TRUE : FALSE;
+	return (SFCBox.Active && SFCBox.OSD.DisplayEnable && SFCBox.OSD.FontLoaded && !S9xSFCBoxTVMode()) ? TRUE : FALSE;
 }
 
 void S9xSFCBoxRenderOSD (uint16 *screen, int pitch, int width, int height)
 {
 	struct SSFCBoxOSD	*o = &SFCBox.OSD;
 
-	if (!SFCBox.Active || !o->FontLoaded)
+	if (!SFCBox.Active)
+		return;
+
+	// TV mode: the set shows the antenna, which we don't have, so snow.
+	if (S9xSFCBoxTVMode())
+	{
+		static uint32	seed = 0x2545f491;
+		for (int py = 0; py < height; py++)
+		{
+			uint16	*line = screen + py * pitch;
+			for (int px = 0; px < width; px++)
+			{
+				seed = seed * 1664525 + 1013904223;
+				uint8	v = (uint8) (seed >> 27);
+				line[px] = BUILD_PIXEL(v, v, v);
+			}
+		}
+		return;
+	}
+
+	if (!o->FontLoaded)
 		return;
 
 	// In internal-sync mode (Screen Control 1 IE=0) the MB90082 generates
@@ -955,8 +977,8 @@ static uint8 SFCBoxIORead (uint16 port)
 		case 0x80:	// Keyswitch and buttons (0 = selected/pressed)
 		{
 			uint8	v = 0x3f & ~(1 << (SFCBox.Keyswitch <= 5 ? SFCBox.Keyswitch : 1));
-			v |= SFCBox.TVGameButton ? 0 : 0x40;
-			v |= SFCBox.ResetButton ? 0 : 0x80;
+			v |= (SFCBox.SwitchCycles[SFCBOX_TVGAME_SWITCH] > 0) ? 0 : 0x40;
+			v |= (SFCBox.SwitchCycles[SFCBOX_RESET_SWITCH] > 0) ? 0 : 0x80;
 			return (v);
 		}
 
@@ -1215,6 +1237,19 @@ void S9xSFCBoxInsertCoin (void)
 	SFCBox.CoinCycles = SFCBOX_COIN_CYCLES;
 }
 
+void S9xSFCBoxPressSwitch (int sw)
+{
+	if (sw == SFCBOX_RESET_SWITCH || sw == SFCBOX_TVGAME_SWITCH)
+		SFCBox.SwitchCycles[sw] = SFCBOX_SWITCH_CYCLES;
+}
+
+// [80h].W bit5 lights the TV indicator; bit7 is the RF relay, which in an
+// AV install also passes the antenna, so the lamp is the one to follow.
+bool8 S9xSFCBoxTVMode (void)
+{
+	return (SFCBox.Active && (SFCBox.Port80W & 0x20)) ? TRUE : FALSE;
+}
+
 // ---------------------------------------------------------------------------
 // Window title
 
@@ -1402,7 +1437,8 @@ void S9xSFCBoxStateSave (uint8 *buf)
 	s->Port80W = SFCBox.Port80W;			s->Port81W = SFCBox.Port81W;
 	s->MapReg0 = SFCBox.MapReg0;			s->MapReg1 = SFCBox.MapReg1;
 	s->Keyswitch = SFCBox.Keyswitch;
-	s->ResetButton = SFCBox.ResetButton;	s->TVGameButton = SFCBox.TVGameButton;
+	s->ResetButton = SFCBox.SwitchCycles[SFCBOX_RESET_SWITCH] > 0;
+	s->TVGameButton = SFCBox.SwitchCycles[SFCBOX_TVGAME_SWITCH] > 0;
 	s->CoinCycles = SFCBox.CoinCycles;
 	s->WRIOOut = SFCBox.WRIOOut;
 	s->SNESHeld = SFCBox.SNESHeld;			s->PendingSNESReset = SFCBox.PendingSNESReset;
@@ -1460,7 +1496,8 @@ bool8 S9xSFCBoxStateLoad (const uint8 *buf, size_t size)
 	SFCBox.Port80W = s->Port80W;			SFCBox.Port81W = s->Port81W;
 	SFCBox.MapReg0 = s->MapReg0;			SFCBox.MapReg1 = s->MapReg1;
 	SFCBox.Keyswitch = s->Keyswitch;
-	SFCBox.ResetButton = s->ResetButton;	SFCBox.TVGameButton = s->TVGameButton;
+	SFCBox.SwitchCycles[SFCBOX_RESET_SWITCH] = s->ResetButton ? SFCBOX_SWITCH_CYCLES : 0;
+	SFCBox.SwitchCycles[SFCBOX_TVGAME_SWITCH] = s->TVGameButton ? SFCBOX_SWITCH_CYCLES : 0;
 	SFCBox.CoinCycles = s->CoinCycles;
 	SFCBox.WRIOOut = s->WRIOOut;
 	SFCBox.SNESHeld = s->SNESHeld;			SFCBox.PendingSNESReset = s->PendingSNESReset;
@@ -1710,6 +1747,9 @@ void S9xSFCBoxEndScanline (void)
 
 	if (SFCBox.CoinCycles > 0)
 		SFCBox.CoinCycles -= ran;
+	for (int sw = 0; sw < 2; sw++)
+		if (SFCBox.SwitchCycles[sw] > 0)
+			SFCBox.SwitchCycles[sw] -= ran;
 
 	SFCBox.WatchdogCycles += ran;
 	if (SFCBox.WatchdogCycles > SFCBOX_WATCHDOG_CYCLES)

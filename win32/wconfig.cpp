@@ -1215,6 +1215,8 @@ void WinRegisterConfigItems()
 	ADD(SuperDiscInsert); ADD(SuperDiscEject);
 	ADDN(NSSGame[0],NSSGame1); ADDN(NSSGame[1],NSSGame2); ADDN(NSSGame[2],NSSGame3);
 	ADDN(NSSMountEject[0],NSSMountEject1); ADDN(NSSMountEject[1],NSSMountEject2); ADDN(NSSMountEject[2],NSSMountEject3);
+	ADD(SFCBoxReset); ADD(SFCBoxTVGame);
+	ADDN(SFCBoxMountEject[0],SFCBoxMountEject1); ADDN(SFCBoxMountEject[1],SFCBoxMountEject2);
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
 	ADDN(GBModel[4],GBModelSGBC);
@@ -1256,6 +1258,8 @@ void WinRegisterConfigItems()
 	ADDXALL(SuperDiscInsert); ADDXALL(SuperDiscEject);
 	ADDXALLN(NSSGame[0],NSSGame1); ADDXALLN(NSSGame[1],NSSGame2); ADDXALLN(NSSGame[2],NSSGame3);
 	ADDXALLN(NSSMountEject[0],NSSMountEject1); ADDXALLN(NSSMountEject[1],NSSMountEject2); ADDXALLN(NSSMountEject[2],NSSMountEject3);
+	ADDXALL(SFCBoxReset); ADDXALL(SFCBoxTVGame);
+	ADDXALLN(SFCBoxMountEject[0],SFCBoxMountEject1); ADDXALLN(SFCBoxMountEject[1],SFCBoxMountEject2);
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
 	ADDXALLN(GBModel[4],GBModelSGBC);

@@ -1580,6 +1580,8 @@ BEGIN
         POPUP "Super &Famicom Box",             ID_EMULATION_SFCBOX,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Insert Coin",                ID_SFCBOX_COIN,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Reset Switch",               ID_SFCBOX_RESET,MFT_STRING,MFS_ENABLED
+            MENUITEM "&GAME/TV Switch",             ID_SFCBOX_TVGAME,MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
             MENUITEM "Slot 1: Mount...",            (ID_SFCBOX_SLOT0+0),MFT_STRING,MFS_ENABLED
             MENUITEM "Slot 2: Mount...",            (ID_SFCBOX_SLOT0+1),MFT_STRING,MFS_ENABLED

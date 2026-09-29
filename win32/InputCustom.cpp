@@ -377,6 +377,10 @@ int GetNumHotKeysAssignedTo (WORD Key, int modifiers)
 			if(MATCHES_KEY(NSSGame[i]))     count++;
 		for(int i = 0 ; i < 3 ; i++)
 			if(MATCHES_KEY(NSSMountEject[i])) count++;
+		if(MATCHES_KEY(SFCBoxReset))       count++;
+		if(MATCHES_KEY(SFCBoxTVGame))      count++;
+		for(int i = 0 ; i < 2 ; i++)
+			if(MATCHES_KEY(SFCBoxMountEject[i])) count++;
 		for(int i = 0 ; i < GB_MODEL_HOTKEYS ; i++)
 			if(MATCHES_KEY(GBModel[i]))         count++;
 

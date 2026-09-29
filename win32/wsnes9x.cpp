@@ -1314,6 +1314,16 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				hitHotKey = true;
 			}
 		}
+		// SFC-Box push switches and slots, through the menu like the NSS panel.
+		if(HKmatch(SFCBoxReset))     { SendMenuCommand(ID_SFCBOX_RESET);     hitHotKey = true; }
+		if(HKmatch(SFCBoxTVGame))    { SendMenuCommand(ID_SFCBOX_TVGAME);    hitHotKey = true; }
+		for(int sfcm = 0; sfcm < 2; sfcm++)
+		{
+			if(!HKmatch(SFCBoxMountEject[sfcm]))
+				continue;
+			SendMenuCommand(ID_SFCBOX_SLOT0 + sfcm);
+			hitHotKey = true;
+		}
 		// Nintendo Super System front panel. Sent as menu commands so a key
 		// and its menu entry cannot drift apart, and so an entry the menu has
 		// greyed (ejecting the last cartridge, or no cabinet running) stays
@@ -3063,6 +3073,11 @@ LRESULT CALLBACK WinProc(
 				S9xSFCBoxInsertCoin();
 				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
 			}
+			break;
+		case ID_SFCBOX_RESET:
+		case ID_SFCBOX_TVGAME:
+			if (SFCBox.Active)
+				S9xSFCBoxPressSwitch(cmd_id == ID_SFCBOX_RESET ? SFCBOX_RESET_SWITCH : SFCBOX_TVGAME_SWITCH);
 			break;
 		case ID_SFCBOX_KEYSWITCH0 + 0: case ID_SFCBOX_KEYSWITCH0 + 1:
 		case ID_SFCBOX_KEYSWITCH0 + 2: case ID_SFCBOX_KEYSWITCH0 + 3:
@@ -6066,6 +6081,8 @@ static void CheckMenuStates ()
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_ENGLISH, FALSE, &mii);
 	mii.fState = Settings.SFCBoxOSDBackdrop ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_BACKDROP, FALSE, &mii);
+	mii.fState = S9xSFCBoxTVMode() ? MFS_CHECKED : MFS_UNCHECKED;	// the TV indicator
+	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_TVGAME, FALSE, &mii);
 	if (SFCBox.Active)
 	{
 		// A KROM file with one version only boots that one, and the choice follows it.
@@ -15707,8 +15724,13 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { &CustomKeys.SFCBoxKeyswitch[2], &CustomKeysExtra.SFCBoxKeyswitch[2], HOTKEYS_KEYSWITCH_ON },
         { &CustomKeys.SFCBoxKeyswitch[3], &CustomKeysExtra.SFCBoxKeyswitch[3], HOTKEYS_KEYSWITCH_2 },
         { &CustomKeys.SFCBoxKeyswitch[4], &CustomKeysExtra.SFCBoxKeyswitch[4], HOTKEYS_KEYSWITCH_3 },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { &CustomKeys.SFCBoxReset,        &CustomKeysExtra.SFCBoxReset,        HOTKEYS_SFCBOX_RESET },
+        { &CustomKeys.SFCBoxTVGame,       &CustomKeysExtra.SFCBoxTVGame,       HOTKEYS_SFCBOX_TVGAME },
+        { NULL, NULL, _T("") },
+        // Column 2: the cartridge slots
+        { &CustomKeys.SFCBoxMountEject[0], &CustomKeysExtra.SFCBoxMountEject[0], HOTKEYS_SFCBOX_MOUNT1 },
+        { &CustomKeys.SFCBoxMountEject[1], &CustomKeysExtra.SFCBoxMountEject[1], HOTKEYS_SFCBOX_MOUNT2 },
+        { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },

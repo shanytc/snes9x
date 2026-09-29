@@ -541,6 +541,26 @@
        <string>NSS: Mount/Eject Slot 3</string>
       </property>
      </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box: Reset Switch</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box: GAME/TV Switch</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box: Mount/Eject Slot 1</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box: Mount/Eject Slot 2</string>
+      </property>
+     </row>
      <column>
       <property name="text">
        <string>Binding #1</string>

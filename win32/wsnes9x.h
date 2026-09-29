@@ -482,6 +482,10 @@ struct SCustomKeys {
 	// g_gbModelHotkeyPolicy for which policy each slot picks.
 	SCustomKey GBModel[GB_MODEL_HOTKEYS];
 	SCustomKey NSSMountEject[3];     // Nintendo Super System -> Slot 1-3 (mount/eject)
+	// Super Famicom Box front panel push switches and cartridge slots
+	SCustomKey SFCBoxReset;
+	SCustomKey SFCBoxTVGame;
+	SCustomKey SFCBoxMountEject[2];
 };
 
 struct SCustomKeyExtra {
@@ -551,6 +555,9 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra BiosManager;
 	SCustomKeyExtra GBModel[GB_MODEL_HOTKEYS];
 	SCustomKeyExtra NSSMountEject[3];
+	SCustomKeyExtra SFCBoxReset;
+	SCustomKeyExtra SFCBoxTVGame;
+	SCustomKeyExtra SFCBoxMountEject[2];
 };
 
 struct SJoypad {

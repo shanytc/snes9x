@@ -31,6 +31,8 @@
 extern uint8	*HDMAMemPointers[8];
 
 
+int32	S9xCPUNextAccessSpeed = 0;
+
 static inline void S9xLatchCounters (bool force)
 {
 	if (force || (Memory.FillRAM[0x4213] & 0x80))
@@ -1688,6 +1690,7 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 				break;
 
 			case 0x420b: // MDMAEN
+			{
 				if (CPU.InDMAorHDMA)
 					return;
 				// The S-CPU fetches the next opcode before the DMA takes the bus;
@@ -1700,10 +1703,24 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 					CPU.HDMAEdge = 0;
 					S9xRunPendingHDMA(ONE_CYCLE);
 				}
-				// XXX: Not quite right...
-                if (Byte) {
-				CPU.Cycles += Timings.DMACPUSync;
-                }
+				// The DMA takes the bus one CPU cycle after this 6-clock write, on
+				// the 8-clock DMA divider, and hands it back on a CPU clock edge
+				// (Mesen2/bsnes). The line-start phase is known on the 5A22 v2 only.
+				int32	dmaSync = 0, dmaBody = 0, dmaRefresh = 0;
+				const bool8	dmaPhase = Byte && Timings.WRAMRefreshPos != SNES_WRAM_REFRESH_HC_v1;
+				if (dmaPhase)
+				{
+					const int32	lineStart = SNES_WRAM_REFRESH_HC_v2 - Timings.WRAMRefreshPos;	// clock & 7 at line start
+					// the delay cycle is the word write's second byte, else the next fetch
+					const int32	next = S9xCPUNextAccessSpeed ? S9xCPUNextAccessSpeed : CPU.MemSpeed;
+					dmaSync = 8 - ((lineStart + CPU.Cycles + ONE_CYCLE + next) & 7);
+					CPU.Cycles += dmaSync + SLOW_ONE_CYCLE;
+					dmaBody = CPU.Cycles;
+					dmaRefresh = S9xRefreshClocks;
+				}
+				else if (Byte)
+					CPU.Cycles += Timings.DMACPUSync;	// XXX: Not quite right...
+
 				if (Byte & 0x01)
 					S9xDoDMA(0);
 				if (Byte & 0x02)
@@ -1720,11 +1737,19 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 					S9xDoDMA(6);
 				if (Byte & 0x80)
 					S9xDoDMA(7);
+
+				if (dmaPhase)
+				{
+					const int32	counter = dmaSync + SLOW_ONE_CYCLE + (CPU.Cycles - dmaBody) - (S9xRefreshClocks - dmaRefresh);
+					const int32	speed = CPU.MemSpeed ? CPU.MemSpeed : SLOW_ONE_CYCLE;
+					CPU.Cycles += speed - (counter % speed);
+				}
 			#ifdef DEBUGGER
 				missing.dma_this_frame = Byte;
 				missing.dma_channels = Byte;
 			#endif
 				break;
+			}
 
 			case 0x420c: // HDMAEN
 				if (CPU.InDMAorHDMA)

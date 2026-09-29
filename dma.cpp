@@ -1270,6 +1270,10 @@ static uint8 DoHDMA (uint8 byte, int32 busLen)
 		ADD_CYCLES(8 - ((SNES_WRAM_REFRESH_HC_v2 - Timings.WRAMRefreshPos + CPU.Cycles) & 7));
 		ADD_CYCLES(SLOW_ONE_CYCLE);
 	}
+	else if (CPU.InDMA && Timings.WRAMRefreshPos != SNES_WRAM_REFRESH_HC_v1)
+	{
+		ADD_CYCLES(SLOW_ONE_CYCLE);	// a DMA already holds the bus: no sync, just the overhead
+	}
 	else
 	// XXX: Not quite right...
 	ADD_CYCLES(Timings.DMACPUSync);

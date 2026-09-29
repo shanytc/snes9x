@@ -595,7 +595,9 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 			}
 			else
 			{
+				S9xCPUNextAccessSpeed = speed;
 				S9xSetCPU((uint8) Word, Address & 0xffff);
+				S9xCPUNextAccessSpeed = 0;
 				addCyclesInMemoryAccess;
 				S9xSetCPU(Word >> 8, (Address + 1) & 0xffff);
 				addCyclesInMemoryAccess;

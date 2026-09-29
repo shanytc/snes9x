@@ -14,6 +14,8 @@
 #include "movie.h"
 #include "ppu.h"
 #include "gfx.h"
+
+int32	S9xRefreshClocks = 0;
 #include "sgb/sgb.h"
 #include "sfcbox.h"
 #include "superdisc.h"
@@ -741,6 +743,7 @@ void S9xDoHEventProcessing (void)
 		#endif
 
 			CPU.Cycles += SNES_WRAM_REFRESH_CYCLES;
+			S9xRefreshClocks += SNES_WRAM_REFRESH_CYCLES;
 
 			S9xReschedule();
 

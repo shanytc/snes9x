@@ -31,7 +31,8 @@
 extern uint8	*HDMAMemPointers[8];
 
 
-static inline void S9xLatchCounters (bool force)
+// `delay`: master clocks into the access where the latch happens
+static inline void S9xLatchCounters (bool force, int32 delay = 0)
 {
 	if (force || (Memory.FillRAM[0x4213] & 0x80))
 	{
@@ -49,7 +50,7 @@ static inline void S9xLatchCounters (bool force)
 		// The reason for this is because this scanline is only 1360 cycles long,
 		// instead of 1364 like all other scanlines.
 		// This makes the effective range of hscan_pos 0-339 at all times.
-		int32	hc = CPU.Cycles;
+		int32	hc = CPU.Cycles + delay;
 
 		if (Timings.H_Max == Timings.H_Max_Master) // 1364
 		{
@@ -1241,7 +1242,8 @@ uint8 S9xGetPPU (uint16 Address)
 				return (PPU.OpenBus1 = Memory.FillRAM[Address]);
 
 			case 0x2137: // SLHV
-				S9xLatchCounters(0);
+				// the read cycle latches 2 clocks into its 6-clock access (Mesen2)
+				S9xLatchCounters(0, CPU.InDMAorHDMA ? 0 : 2);
 				return (PPU.OpenBus1);
 
 			case 0x2138: // OAMDATAREAD

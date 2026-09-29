@@ -39,6 +39,7 @@ struct S9xBiosSlotInfo
 	const char *const *names;  // conventional filenames, NULL-ended; [0] is the dialog hint
 	uint32      size;          // expected byte count, 0 = any
 	const char *note;          // shown while the slot is empty, NULL if required
+	const char *info;          // behind the row's info icon, NULL for none
 };
 
 #define S9X_BIOS_PATH_MAX 512

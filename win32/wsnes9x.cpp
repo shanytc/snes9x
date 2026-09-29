@@ -10267,10 +10267,60 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	BiosManagerSetStatus(hDlg, slot, text.c_str());
 }
 
+// A clickable info icon in front of the row's name, which moves over for it.
+static void BiosManagerAddInfoIcon(HWND hDlg, int slot)
+{
+	static HICON icon;
+	const S9xBiosSlotInfo *info = S9xGetBiosSlotInfo(slot);
+	if (!info->info) return;
+
+	const int size = GetSystemMetrics(SM_CXSMICON);
+	if (!icon && FAILED(LoadIconWithScaleDown(NULL, IDI_INFORMATION, size, size, &icon)))
+		return;
+
+	HWND label = GetDlgItem(hDlg, IDC_BIOSMGR_LABEL0 + slot);
+	RECT rc;
+	GetWindowRect(label, &rc);
+	MapWindowPoints(NULL, hDlg, (POINT *) &rc, 2);
+	const int shift = size + size / 3;
+	SetWindowPos(label, NULL, rc.left + shift, rc.top, rc.right - rc.left - shift, rc.bottom - rc.top,
+	             SWP_NOZORDER | SWP_NOACTIVATE);
+
+	HWND hIcon = CreateWindowEx(0, TEXT("STATIC"), NULL,
+	                            WS_CHILD | WS_VISIBLE | SS_ICON | SS_REALSIZECONTROL | SS_NOTIFY,
+	                            rc.left, (rc.top + rc.bottom - size) / 2, size, size,
+	                            hDlg, (HMENU) (INT_PTR) (IDC_BIOSMGR_INFO0 + slot), g_hInst, NULL);
+	SendMessage(hIcon, STM_SETICON, (WPARAM) icon, 0);
+
+	if (s_bios_tip)
+	{
+		Utf8ToWide tip(info->info);
+		TOOLINFO ti = { 0 };
+		ti.cbSize   = sizeof(ti);
+		ti.hwnd     = hDlg;
+		ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+		ti.uId      = (UINT_PTR) hIcon;
+		ti.lpszText = (LPTSTR) (wchar_t *) tip;
+		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+	}
+}
+
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
+	case WM_SETCURSOR:
+	{
+		const int id = GetDlgCtrlID((HWND) wParam);
+		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS)
+		{
+			SetCursor(LoadCursor(NULL, IDC_HAND));
+			SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+			return true;
+		}
+		break;
+	}
+
 	case WM_CTLCOLORSTATIC:
 	{
 		const int id = GetDlgCtrlID((HWND) lParam);
@@ -10314,6 +10364,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		{
 			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
 						   Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
+			BiosManagerAddInfoIcon(hDlg, slot);
 			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
 			BiosManagerRefreshStatus(hDlg, slot);
 		}
@@ -10351,6 +10402,14 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
 			if (GetOpenFileName(&ofn))
 				SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename);
+			return true;
+		}
+
+		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS &&
+			HIWORD(wParam) == STN_CLICKED)
+		{
+			const S9xBiosSlotInfo *info = S9xGetBiosSlotInfo(id - IDC_BIOSMGR_INFO0);
+			MessageBox(hDlg, Utf8ToWide(info->info), Utf8ToWide(info->label), MB_OK | MB_ICONINFORMATION);
 			return true;
 		}
 

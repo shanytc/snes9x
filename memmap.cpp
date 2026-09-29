@@ -3154,34 +3154,47 @@ int CMemory::LoadSFCBoxFile (const char *filename, int32 *size)
 {
 	if (!filename || !*filename)
 		return (0);
-	if (!S9xFilenameHasExt(filename, ".zip") && !S9xSFCBoxValidGROM(ROM, (uint32) *size))
+
+	// The attraction ROM on its own (4S Attraction, ATROM-4S-0) only runs
+	// under the KROM, so it boots the box too.
+	const bool	atrom = *size == 0x80000 && !memcmp(ROM + 0x7fc0, "4S ATTRACTION", 13);
+
+	if (!atrom && !S9xFilenameHasExt(filename, ".zip") && !S9xSFCBoxValidGROM(ROM, (uint32) *size))
 		return (0);
 
 	std::vector<uint8>	carts[2];
-	const int			found = S9xSFCBoxReadCarts(filename, carts);
+	const int			found = atrom ? 0 : S9xSFCBoxReadCarts(filename, carts);
 	if (found < 0)
 		return (-1);	// the reader named the missing ROM
-	if (!found)
+	if (!found && !atrom)
 		return (0);
 
 	std::string			base = filename;
 	std::vector<uint8>	slot[2] = { carts[0], carts[1] };
 
-	if (!S9xSFCBoxIsMainCart(carts[0].data()))
-	{
+	// Slot 1 from a pss61.zip in the same folder; saves and NVRAM then belong to it.
+	auto sibling_main = [&] (const char *what) {
 		std::string			main_path = base.substr(0, base.find_last_of("/\\") + 1) + "pss61.zip";
 		std::vector<uint8>	mc[2];
-		slot[1] = carts[0];
 		slot[0].clear();
 		if (S9xSFCBoxReadCarts(main_path.c_str(), mc) > 0 && S9xSFCBoxIsMainCart(mc[0].data()))
 		{
 			slot[0] = mc[0];
-			S9xSFCBoxSetSlot(1, main_path.c_str(), filename);
 			base = main_path;
-			ROMFilename = main_path;	// saves and NVRAM belong to the box, not the slot 2 cart
+			ROMFilename = main_path;
+			return (true);
 		}
-		else
-			S9xMessage(S9X_INFO, S9X_ROM_INFO, "Super Famicom Box: no pss61.zip beside this cartridge, so slot 1 is empty.");
+		S9xMessage(S9X_INFO, S9X_ROM_INFO, what);
+		return (false);
+	};
+
+	if (atrom)
+		sibling_main("Super Famicom Box: no pss61.zip beside this ROM, so slot 1 is empty.");
+	else if (!S9xSFCBoxIsMainCart(carts[0].data()))
+	{
+		slot[1] = carts[0];
+		if (sibling_main("Super Famicom Box: no pss61.zip beside this cartridge, so slot 1 is empty."))
+			S9xSFCBoxSetSlot(1, base.c_str(), filename);
 	}
 
 	static const char	*names[2] = { "slot 1", "slot 2" };

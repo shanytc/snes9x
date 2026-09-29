@@ -10,6 +10,9 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGroupBox>
+#include <QMessageBox>
+#include <QStyle>
+#include <QToolButton>
 
 #include "snes9x.h"
 #include "memmap.h"
@@ -27,7 +30,7 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
     outer->addWidget(intro);
 
     auto grid = new QGridLayout();
-    grid->setColumnStretch(1, 1);
+    grid->setColumnStretch(2, 1);
     outer->addLayout(grid);
 
     for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
@@ -45,11 +48,23 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
         clear->setFixedWidth(clear->fontMetrics().height() * 2);
 
         const int r = slot;
-        grid->addWidget(new QLabel(QString::fromUtf8(info->label)), r, 0);
-        grid->addWidget(edit, r, 1);
-        grid->addWidget(select, r, 2);
-        grid->addWidget(clear, r, 3);
-        grid->addWidget(status, r, 4);
+        grid->addWidget(new QLabel(QString::fromUtf8(info->label)), r, 0, Qt::AlignRight);
+        if (info->info)
+        {
+            auto about = new QToolButton();
+            about->setIcon(style()->standardIcon(QStyle::SP_MessageBoxInformation));
+            about->setAutoRaise(true);
+            about->setCursor(Qt::PointingHandCursor);
+            about->setToolTip(QString::fromUtf8(info->info));
+            connect(about, &QToolButton::clicked, this, [this, info] {
+                QMessageBox::information(this, QString::fromUtf8(info->label), QString::fromUtf8(info->info));
+            });
+            grid->addWidget(about, r, 1);
+        }
+        grid->addWidget(edit, r, 2);
+        grid->addWidget(select, r, 3);
+        grid->addWidget(clear, r, 4);
+        grid->addWidget(status, r, 5);
 
         connect(select, &QPushButton::clicked, this, [this, slot] { browse(slot); });
         connect(clear, &QPushButton::clicked, this, [this, slot] {

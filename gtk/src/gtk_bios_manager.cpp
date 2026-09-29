@@ -120,7 +120,7 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
         const auto *info = S9xGetBiosSlotInfo(slot);
 
         auto *label = Gtk::manage(new Gtk::Label(info->label));
-        label->set_xalign(0.0f);
+        label->set_xalign(1.0f);
 
         auto *entry = Gtk::manage(new Gtk::Entry());
         entry->set_text(S9xGetBiosPath(slot));
@@ -136,10 +136,23 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
         status->set_xalign(0.0f);
 
         grid->attach(*label,  0, slot, 1, 1);
-        grid->attach(*entry,  1, slot, 1, 1);
-        grid->attach(*select, 2, slot, 1, 1);
-        grid->attach(*clear,  3, slot, 1, 1);
-        grid->attach(*status, 4, slot, 1, 1);
+        grid->attach(*entry,  2, slot, 1, 1);
+        grid->attach(*select, 3, slot, 1, 1);
+        grid->attach(*clear,  4, slot, 1, 1);
+        grid->attach(*status, 5, slot, 1, 1);
+        if (info->info)
+        {
+            auto *about = Gtk::manage(new Gtk::Button());
+            about->set_image_from_icon_name("dialog-information", Gtk::ICON_SIZE_MENU);
+            about->set_relief(Gtk::RELIEF_NONE);
+            about->set_tooltip_text(info->info);
+            about->signal_clicked().connect([&dialog, info] {
+                Gtk::MessageDialog msg(dialog, info->info, false, Gtk::MESSAGE_INFO, Gtk::BUTTONS_OK, true);
+                msg.set_title(info->label);
+                msg.run();
+            });
+            grid->attach(*about, 1, slot, 1, 1);
+        }
 
         rows[slot] = { entry, status, clear };
 

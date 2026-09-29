@@ -698,6 +698,7 @@
 #define IDC_BIOSMGR_CLEAR0              3560
 #define IDC_BIOSMGR_STATUS0             3580
 #define IDC_BIOSMGR_INTRO               3600
+#define IDC_BIOSMGR_INFO0               3620
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361
@@ -992,7 +993,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        193
 #define _APS_NEXT_COMMAND_VALUE         44450
-#define _APS_NEXT_CONTROL_VALUE         3620
+#define _APS_NEXT_CONTROL_VALUE         3640
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

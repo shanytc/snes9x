@@ -1205,9 +1205,24 @@ void S9xStartHDMA (void)
 	CPU.InDMAorHDMA = TRUE;
 	tmpch = CPU.CurrentDMAorHDMAChannel;
 
-	// XXX: Not quite right...
-	if (PPU.HDMA != 0)
-		ADD_CYCLES(Timings.DMACPUSync);
+	// Like a DMA: take the bus one CPU cycle later on the 8-clock divider, and
+	// hand it back on a CPU clock edge; no sync while a DMA holds the bus.
+	// The line-start clock phase is known on the 5A22 v2 only.
+	const bool8	phase = PPU.HDMA != 0 && Timings.WRAMRefreshPos != SNES_WRAM_REFRESH_HC_v1;
+	const bool8	sync = phase && !CPU.InDMA;
+	const int32	initStart = CPU.Cycles, initRefresh = S9xRefreshClocks;
+	if (sync)
+	{
+		ADD_CYCLES(8 - ((SNES_WRAM_REFRESH_HC_v2 - Timings.WRAMRefreshPos + CPU.Cycles + CPU.MemSpeed) & 7));
+	}
+	if (phase)
+	{
+		ADD_CYCLES(SLOW_ONE_CYCLE);
+	}
+	else if (PPU.HDMA != 0)
+	{
+		ADD_CYCLES(Timings.DMACPUSync);	// XXX: Not quite right...
+	}
 
 	for (uint8 i = 0; i < 8; i++)
 	{
@@ -1225,6 +1240,13 @@ void S9xStartHDMA (void)
 		}
 		else
 			DMA[i].DoTransfer = FALSE;
+	}
+
+	if (sync)
+	{
+		// the refresh stall isn't DMA time
+		const int32	speed = CPU.MemSpeed ? CPU.MemSpeed : SLOW_ONE_CYCLE;
+		ADD_CYCLES(speed - ((CPU.Cycles - initStart - (S9xRefreshClocks - initRefresh)) % speed));
 	}
 
 	CPU.InHDMA = FALSE;

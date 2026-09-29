@@ -454,6 +454,9 @@ static inline void S9xReschedule (void)
 		case HC_HCOUNTER_MAX_EVENT:
 			CPU.WhichEvent = HC_HDMA_INIT_EVENT;
 			CPU.NextEvent  = Timings.HDMAInit;
+			// 5A22 v2: HDMA init is due at HC 12 + (clock & 7) at line start
+			if (CPU.V_Counter == 0 && Timings.WRAMRefreshPos != SNES_WRAM_REFRESH_HC_v1)
+				CPU.NextEvent = 12 + (SNES_WRAM_REFRESH_HC_v2 - Timings.WRAMRefreshPos);
 			break;
 
 		case HC_HDMA_INIT_EVENT:

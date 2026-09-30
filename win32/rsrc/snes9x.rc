@@ -1605,11 +1605,11 @@ BEGIN
             END
             POPUP "&Keyswitch",                     0,MFT_STRING,MFS_ENABLED
             BEGIN
-                MENUITEM "&1 (Options)",                (ID_SFCBOX_KEYSWITCH0+0),MFT_STRING,MFS_ENABLED
+                MENUITEM "O&ptions",                    (ID_SFCBOX_KEYSWITCH0+0),MFT_STRING,MFS_ENABLED
                 MENUITEM "O&FF",                        (ID_SFCBOX_KEYSWITCH0+1),MFT_STRING,MFS_ENABLED
-                MENUITEM "&ON (Play)",                  (ID_SFCBOX_KEYSWITCH0+2),MFT_STRING,MFS_ENABLED
-                MENUITEM "&2",                          (ID_SFCBOX_KEYSWITCH0+3),MFT_STRING,MFS_ENABLED
-                MENUITEM "&3 (Self-Test)",              (ID_SFCBOX_KEYSWITCH0+4),MFT_STRING,MFS_ENABLED
+                MENUITEM "&ON",                         (ID_SFCBOX_KEYSWITCH0+2),MFT_STRING,MFS_ENABLED
+                MENUITEM "&Check Play",                 (ID_SFCBOX_KEYSWITCH0+3),MFT_STRING,MFS_ENABLED
+                MENUITEM "&Self Test",                  (ID_SFCBOX_KEYSWITCH0+4),MFT_STRING,MFS_ENABLED
             END
             POPUP "OSD &Language",                  0,MFT_STRING,MFS_ENABLED
             BEGIN

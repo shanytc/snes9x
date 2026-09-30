@@ -1185,7 +1185,7 @@ void Snes9xWindow::open_voicekun_dialog()
 // SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
 // position index as win32 does.
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
-static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
+static const char *sfcbox_keyswitch_names[5] = { "Options", "OFF", "ON", "Check Play", "Self Test" };
 
 // Cartridge titles go into mnemonic labels, where '_' marks the access key.
 static std::string mnemonic_escape(const char *s)
@@ -1303,8 +1303,8 @@ void Snes9xWindow::create_arcade_menus()
     krom_item->set_submenu(*krom_menu);
 
     auto keyswitch_item = add_item(sfcbox_menu, _("_Keyswitch"));
-    keyswitch_item->set_tooltip_text(_("\"1\" opens the attendant setup menus, \"3\" the self-test; "
-                                       "OFF/ON/\"2\" are play modes. The supervisor polls it live, no reset needed."));
+    keyswitch_item->set_tooltip_text(_("Options opens the attendant setup menus, Self Test the self-test; "
+                                       "OFF/ON/Check Play are play modes. The supervisor polls it live, no reset needed."));
     auto keyswitch_menu = Gtk::manage(new Gtk::Menu());
     Gtk::RadioMenuItem::Group keyswitch_group;
     for (int i = 0; i < 5; i++)

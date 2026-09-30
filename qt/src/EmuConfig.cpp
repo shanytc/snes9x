@@ -806,7 +806,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     BeginSection("Hack");
     Bool("SFCBoxOSDBackdrop", sfcbox_osd_backdrop, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
     Bool("SFCBoxOSDEnglish", sfcbox_osd_english, "SFC-Box supervisor screen language: false=Japanese (authentic), true=English (render-time translation; the KROM firmware and savestates stay untouched)");
-    Int("SFCBoxKeyswitch", sfcbox_keyswitch, "SFC-Box keyswitch position at power-on, as the port 80h bit it grounds: 4=1 (Options), 0=OFF, 1=ON (Play), 2=2, 3=3 (Self-Test). Follows Emulation -> Super Famicom Box -> Keyswitch");
+    Int("SFCBoxKeyswitch", sfcbox_keyswitch, "SFC-Box keyswitch position at power-on, as the port 80h bit it grounds: 4=Options, 0=OFF, 1=ON, 2=Check Play, 3=Self Test. Follows Emulation -> Super Famicom Box -> Keyswitch");
     Int("SFCBoxKROMVersion", sfcbox_krom_version, "SFC-Box supervisor firmware to boot when the KROM file holds both: 1=KROM 1.00, 2=KROM 2.00. Follows Emulation -> Super Famicom Box -> BIOS");
     Bool("NSSJoypadWatchdog", nss_joypad_watchdog, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose: Lethal Weapon trips it while uploading its sound driver");
     Int("NSSDipSwitches", nss_dip_switches, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100 (Emulation -> Nintendo Super System names each one per game); 12 (0x0c) is the factory setting");

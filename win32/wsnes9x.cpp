@@ -973,7 +973,7 @@ static void WinRequestScreenshot()
 // the port 80h bit the position grounds (the relay-off position is omitted).
 // Order of Emulation -> Super Famicom Box -> Keyswitch and its hotkeys.
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
-static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
+static const char *sfcbox_keyswitch_names[5] = { "Options", "OFF", "ON", "Check Play", "Self Test" };
 
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {

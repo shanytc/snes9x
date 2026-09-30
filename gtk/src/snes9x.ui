@@ -11378,7 +11378,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: 1 (Options)</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: Options</property>
                               </object>
                               <packing>
                                 <property name="top_attach">1</property>
@@ -11440,7 +11440,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: ON (Play)</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: ON</property>
                               </object>
                               <packing>
                                 <property name="top_attach">3</property>
@@ -11471,7 +11471,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: 2</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: Check Play</property>
                               </object>
                               <packing>
                                 <property name="top_attach">4</property>
@@ -11502,7 +11502,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: 3 (Self-Test)</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: Self Test</property>
                               </object>
                               <packing>
                                 <property name="top_attach">5</property>

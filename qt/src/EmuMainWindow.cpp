@@ -367,11 +367,11 @@ void EmuMainWindow::voicekunDetach()
 // position index as win32 does.
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
 static const char *sfcbox_keyswitch_names[5] = {
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&1 (Options)"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "O&ptions"),
     QT_TRANSLATE_NOOP("EmuMainWindow", "O&FF"),
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&ON (Play)"),
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&2"),
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&3 (Self-Test)"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&ON"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&Check Play"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&Self Test"),
 };
 static const uint16 nss_game_buttons[3] = { NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
 
@@ -462,7 +462,7 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
         sfcbox_keyswitch_actions[i] = a;
     }
     keyswitch_menu->menuAction()->setToolTip(
-        tr("\"1\" opens the attendant setup menus, \"3\" the self-test; OFF/ON/\"2\" are play modes. "
+        tr("Options opens the attendant setup menus, Self Test the self-test; OFF/ON/Check Play are play modes. "
            "The supervisor polls it live, no reset needed."));
 
     auto language_menu = sfcbox_menu->addMenu(tr("OSD &Language"));
@@ -743,7 +743,7 @@ void EmuMainWindow::sfcboxSetKeyswitch(int panel_pos)
     app.emu_thread->runOnThread([panel_pos] {
         if (!SFCBox.Active)
             return;
-        static const char *names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
+        static const char *names[5] = { "Options", "OFF", "ON", "Check Play", "Self Test" };
         SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
         Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;
         S9xSetInfoString((std::string("SFC-Box keyswitch: ") + names[panel_pos]).c_str());

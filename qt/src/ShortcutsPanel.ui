@@ -448,7 +448,7 @@
      </row>
      <row>
       <property name="text">
-       <string>SFC-Box Keyswitch: 1 (Options)</string>
+       <string>SFC-Box Keyswitch: Options</string>
       </property>
      </row>
      <row>
@@ -458,17 +458,17 @@
      </row>
      <row>
       <property name="text">
-       <string>SFC-Box Keyswitch: ON (Play)</string>
+       <string>SFC-Box Keyswitch: ON</string>
       </property>
      </row>
      <row>
       <property name="text">
-       <string>SFC-Box Keyswitch: 2</string>
+       <string>SFC-Box Keyswitch: Check Play</string>
       </property>
      </row>
      <row>
       <property name="text">
-       <string>SFC-Box Keyswitch: 3 (Self-Test)</string>
+       <string>SFC-Box Keyswitch: Self Test</string>
       </property>
      </row>
      <row>

@@ -827,6 +827,7 @@ static const char *xband_server (int *port)
 
 static bool xband_ring_answer (void);
 static void xband_hang_up (void);
+static bool xband_console_reset = false;	// S9xResetXBand from the box's own /RESET
 
 static bool xband_seed_sram     = false;	// load the SRAM dump on the next reset
 static bool xband_reset_pending = false;	// the BIOS pulled /RESET via the LEDs
@@ -6298,7 +6299,8 @@ void S9xResetXBand (void)
 	// bsnes-plus xband_base.cpp reset(). Without these, the XBAND USA
 	// BIOS triggers a BRK panic handler during init.
 	memset(XBand.regs, 0, sizeof(XBand.regs));
-	memset(XBand.modem_regs, 0, sizeof(XBand.modem_regs));
+	if (!xband_console_reset)
+		memset(XBand.modem_regs, 0, sizeof(XBand.modem_regs));
 
 	XBand.regs[0x7C] = 0;      // kAddrStatus
 	XBand.regs[0x7D] = 0x80;   // read-constant, also seeded here
@@ -6319,18 +6321,20 @@ void S9xResetXBand (void)
 	fred_map_valid = false;
 	fred_remap(true);
 
-	// /RESET hangs up a call, but the line keeps ringing: the BIOS reboots
-	// out of the practice game to answer it.
-	xband_hang_up();
 	xband_reset_pending = false;
-
-	XBand.modem_line_relay  = 0;
-	XBand.modem_set_ATV25   = 0;
-	XBand.net_step          = XBAND_NET_IDLE;
 	XBand.consecutive_reads = 0;
 
-	XBand.rxbufpos = XBand.rxbufused = 0;
-	XBand.txbufpos = XBand.txbufused = 0;
+	// The modem and its call sit on the box, not the console: a /RESET the box
+	// drives (_ResetCPU mid-game) keeps the line; power-on and user resets hang up.
+	if (!xband_console_reset)
+	{
+		xband_hang_up();
+		XBand.modem_line_relay  = 0;
+		XBand.modem_set_ATV25   = 0;
+		XBand.net_step          = XBAND_NET_IDLE;
+		XBand.rxbufpos = XBand.rxbufused = 0;
+		XBand.txbufpos = XBand.txbufused = 0;
+	}
 
 	// Drop sniffed ADSP connection state -- a fresh power-on / reset
 	// implies any prior connID/seq numbers are stale. The dispatcher
@@ -6369,7 +6373,9 @@ bool8 S9xXBandPendingReset (void)
 void S9xXBandApplyReset (void)
 {
 	xband_reset_pending = false;
+	xband_console_reset = true;
 	S9xSoftReset();
+	xband_console_reset = false;
 }
 
 void S9xXBandPostLoadState (void)

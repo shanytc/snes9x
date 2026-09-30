@@ -16,8 +16,11 @@
 #define _SFCBOX_H_
 
 #include "port.h"
+#include <string>
+#include <vector>
 
-#define SFCBOX_KROM_SIZE	0x10000
+#define SFCBOX_KROM_SIZE	0x20000	// the Z180's KROM window; 2.00 fills it
+#define SFCBOX_KROM1_SIZE	0x10000	// 1.00 is mirrored into both halves
 #define SFCBOX_WRAM_SIZE	0x8000
 #define SFCBOX_GROM_SIZE	0x8000
 #define SFCBOX_OSD_W		24
@@ -69,6 +72,7 @@ struct SSFCBox
 
 	// Board memories
 	uint8	KROM[SFCBOX_KROM_SIZE];
+	uint8	KROMVersion;				// 1 or 2 (KROM 1.00 / 2.00), 0 = none loaded
 	uint8	WRAM[SFCBOX_WRAM_SIZE];		// 32K battery-backed (low 16K = save area)
 	uint8	*GROM[2];					// point into Memory.ROM, NULL = slot empty
 
@@ -86,7 +90,7 @@ struct SSFCBox
 
 	// Inputs
 	uint8	Keyswitch;					// rotary position 0-5 (bit index into [80h].R)
-	bool8	ResetButton, TVGameButton;
+	int32	SwitchCycles[2];			// PHI cycles left of a Reset / GAME/TV press
 	int32	CoinCycles;					// PHI cycles left of coin-switch closure
 
 	// SNES link + reset
@@ -124,8 +128,22 @@ struct SSFCBox
 extern struct SSFCBox	SFCBox;
 
 // Loader side (memmap.cpp calls these)
-bool8	S9xSFCBoxLoadKROM (void);		// KROM1.BIN (+MB90082.BIN) from their BIOS Manager slots
+bool8	S9xSFCBoxLoadKROM (void);		// KROM (+MB90082.BIN) from their BIOS Manager slots
+
+// KROM versions the BIOS Manager's KROM file holds: bit0 = 1.00, bit1 = 2.00.
+uint8	S9xSFCBoxKROMVersions (void);
+// Settings.SFCBoxKROMVersion if the file holds it, else what it does hold;
+// writes the answer back so the menu shows the version that will boot.
+uint8	S9xSFCBoxResolveKROMVersion (void);
 void	S9xSFCBoxPowerOn (void);		// full board reset; SNES ends up held
+
+// Keyswitch position 4 ("Power OFF", port 80h bit 5) cuts the box's power in
+// hardware: the KROM never acts on it. Leaving it is a cold boot.
+#define SFCBOX_KEY_POWER_OFF	5
+bool8	S9xSFCBoxPoweredOff (void);
+// Turns the key to `pos` (port 80h bit). TRUE when that restored the power:
+// the port then hard-resets (S9xReset), which boots the box from cold.
+bool8	S9xSFCBoxTurnKey (uint8 pos);
 void	S9xSFCBoxDeactivate (void);
 
 // Main-loop side
@@ -145,10 +163,15 @@ bool8	S9xSFCBoxOSDHires (void);		// character plane visible: double lores frames
 void	S9xSFCBoxRenderOSD (uint16 *screen, int pitch, int width, int height);
 
 // Front panel
+enum { SFCBOX_RESET_SWITCH, SFCBOX_TVGAME_SWITCH };
 void	S9xSFCBoxInsertCoin (void);
+void	S9xSFCBoxPressSwitch (int sw);	// one press of a front-panel push switch
+bool8	S9xSFCBoxTVMode (void);			// TV indicator lit: RF out carries the antenna, not the SNES
 
 // "Super Famicom Box - <game>", or just "Super Famicom Box" on the menu
 const char *S9xSFCBoxTitle (void);
+// The games in a slot, "Super Mario Kart / Mario Collection / Star Fox"; "" when empty
+const char *S9xSFCBoxSlotName (int slot);
 
 // Battery-backed KROM work RAM (+ RTC SRAM pages), "<rom>.box" sidecar
 bool8	S9xSFCBoxLoadNVRAM (void);
@@ -161,9 +184,25 @@ bool8	S9xSFCBoxSaveNVRAM (void);
 size_t	S9xSFCBoxStateSize (void);
 void	S9xSFCBoxStateSave (uint8 *buf);
 bool8	S9xSFCBoxStateLoad (const uint8 *buf, size_t size);
+bool8	S9xSFCBoxStateMatchesKROM (const uint8 *buf, size_t size);	// taken on the running KROM version?
 void	S9xSFCBoxPostLoadState (void);
 
 // Rebuilds the SNES memory map from MapReg0/MapReg1 (memmap.cpp)
 void	S9xSFCBoxRemap (void);
+
+// Cartridge images, each in the merged layout (GROM, ROMs, DSP-1 space).
+bool8	S9xSFCBoxValidGROM (const uint8 *grom, uint32 avail);
+uint32	S9xSFCBoxCartLength (const uint8 *image, uint32 avail);	// 0 = not a cart
+bool8	S9xSFCBoxIsMainCart (const uint8 *grom);	// the PSS-61, which slot 1 needs
+// A MAME set (.zip): 1 = assembled into `out`, 0 = not a set, -1 = set with ROMs missing.
+int		S9xSFCBoxReadZipSet (const char *path, std::vector<uint8> &out);
+// The carts in a MAME set or a merged image, in file order: 1 = found, 0 = none, -1 = broken set.
+int		S9xSFCBoxReadCarts (const char *path, std::vector<uint8> carts[2]);
+
+// A slot (0 = main, 1 = optional) chosen from the menu for the box loaded
+// from `base`: a cart file, or "" for an empty slot. Read by the next load of
+// `base`; a load of any other file clears both.
+void	S9xSFCBoxSetSlot (int slot, const char *base, const char *path);
+bool8	S9xSFCBoxSlotOverride (int slot, const char *base, std::string &path);
 
 #endif

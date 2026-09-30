@@ -11338,7 +11338,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
                             <property name="border_width">10</property>
-                            <property name="n_rows">18</property>
+                            <property name="n_rows">23</property>
                             <property name="n_columns">2</property>
                             <property name="column_spacing">10</property>
                             <property name="row_spacing">5</property>
@@ -11378,7 +11378,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: 1 (Options)</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: Options</property>
                               </object>
                               <packing>
                                 <property name="top_attach">1</property>
@@ -11440,7 +11440,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: ON (Play)</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: ON</property>
                               </object>
                               <packing>
                                 <property name="top_attach">3</property>
@@ -11471,7 +11471,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: 2</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: Check Play</property>
                               </object>
                               <packing>
                                 <property name="top_attach">4</property>
@@ -11502,7 +11502,7 @@
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="xalign">0</property>
-                                <property name="label" translatable="yes">SFC-Box Keyswitch: 3 (Self-Test)</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: Self Test</property>
                               </object>
                               <packing>
                                 <property name="top_attach">5</property>
@@ -11897,6 +11897,161 @@
                                 <property name="right_attach">2</property>
                                 <property name="top_attach">17</property>
                                 <property name="bottom_attach">18</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label_sfcbox_reset">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">SFC-Box: Reset Switch</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">18</property>
+                                <property name="bottom_attach">19</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_sfcbox_reset">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">18</property>
+                                <property name="bottom_attach">19</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label_sfcbox_tvgame">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">SFC-Box: GAME/TV Switch</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">19</property>
+                                <property name="bottom_attach">20</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_sfcbox_tvgame">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">19</property>
+                                <property name="bottom_attach">20</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label_sfcbox_mount_0">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">SFC-Box: Mount/Eject Slot 1</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">20</property>
+                                <property name="bottom_attach">21</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_sfcbox_mount_0">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">20</property>
+                                <property name="bottom_attach">21</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label_sfcbox_mount_1">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">SFC-Box: Mount/Eject Slot 2</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">21</property>
+                                <property name="bottom_attach">22</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_sfcbox_mount_1">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">21</property>
+                                <property name="bottom_attach">22</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label_sfcbox_power_off">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">SFC-Box Keyswitch: Power OFF</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">22</property>
+                                <property name="bottom_attach">23</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_sfcbox_power_off">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">22</property>
+                                <property name="bottom_attach">23</property>
                                 <property name="y_options">GTK_FILL</property>
                               </packing>
                             </child>

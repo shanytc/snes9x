@@ -32,6 +32,7 @@ struct SICPU
 };
 
 extern struct SICPU		ICPU;
+extern int32			S9xRefreshClocks;	// running total of DRAM refresh stalls
 
 extern struct SOpcodes	S9xOpcodesE1[256];
 extern struct SOpcodes	S9xOpcodesM1X1[256];

@@ -18,6 +18,7 @@
 #include "crosshairs.h"
 #include "memmap.h"
 #include "nss.h"
+#include "sfcbox.h"
 #include "movie.h"
 #include "display.h"
 #include "gfx.h"
@@ -160,6 +161,11 @@ const BindingLink b_links[] =
         { "b_nss_mount_0",         "GTK_nss_mount_0"   },
         { "b_nss_mount_1",         "GTK_nss_mount_1"   },
         { "b_nss_mount_2",         "GTK_nss_mount_2"   },
+        { "b_sfcbox_reset",        "GTK_sfcbox_reset"  },
+        { "b_sfcbox_tvgame",       "GTK_sfcbox_tvgame" },
+        { "b_sfcbox_mount_0",      "GTK_sfcbox_mount_0" },
+        { "b_sfcbox_mount_1",      "GTK_sfcbox_mount_1" },
+        { "b_sfcbox_power_off",    "GTK_sfcbox_power_off" },
 
         { nullptr, nullptr }
 };
@@ -767,6 +773,10 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         {
             top_level->sfcbox_set_keyswitch(cmd.port[0] - PORT_SFCBOX_KEYSWITCH0);
         }
+        else if (cmd.port[0] == PORT_SFCBOX_POWER_OFF)
+        {
+            top_level->sfcbox_set_keyswitch(5);   // the menu's Power OFF entry
+        }
         else if (cmd.port[0] == PORT_NSS_COIN2)
         {
             top_level->insert_coin(1);
@@ -798,6 +808,18 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         else if (cmd.port[0] >= PORT_NSS_MOUNT0 && cmd.port[0] < PORT_NSS_MOUNT0 + 3)
         {
             top_level->nss_mount_eject(cmd.port[0] - PORT_NSS_MOUNT0);
+        }
+        else if (cmd.port[0] == PORT_SFCBOX_RESET)
+        {
+            top_level->sfcbox_press_switch(SFCBOX_RESET_SWITCH);
+        }
+        else if (cmd.port[0] == PORT_SFCBOX_TVGAME)
+        {
+            top_level->sfcbox_press_switch(SFCBOX_TVGAME_SWITCH);
+        }
+        else if (cmd.port[0] >= PORT_SFCBOX_MOUNT0 && cmd.port[0] < PORT_SFCBOX_MOUNT0 + 2)
+        {
+            top_level->sfcbox_mount_eject(cmd.port[0] - PORT_SFCBOX_MOUNT0);
         }
     }
 }
@@ -934,6 +956,22 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strncasecmp(name, "GTK_nss_mount_", 14))
     {
         cmd.port[0] = PORT_NSS_MOUNT0 + (name[14] - '0');
+    }
+    else if (!strcasecmp(name, "GTK_sfcbox_reset"))
+    {
+        cmd.port[0] = PORT_SFCBOX_RESET;
+    }
+    else if (!strcasecmp(name, "GTK_sfcbox_tvgame"))
+    {
+        cmd.port[0] = PORT_SFCBOX_TVGAME;
+    }
+    else if (!strcasecmp(name, "GTK_sfcbox_power_off"))
+    {
+        cmd.port[0] = PORT_SFCBOX_POWER_OFF;
+    }
+    else if (!strncasecmp(name, "GTK_sfcbox_mount_", 17))
+    {
+        cmd.port[0] = PORT_SFCBOX_MOUNT0 + (name[17] - '0');
     }
     else if (!strcasecmp(name, "GTK_rewind"))
     {

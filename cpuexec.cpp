@@ -14,6 +14,8 @@
 #include "movie.h"
 #include "ppu.h"
 #include "gfx.h"
+
+int32	S9xRefreshClocks = 0;
 #include "sgb/sgb.h"
 #include "sfcbox.h"
 #include "superdisc.h"
@@ -142,9 +144,9 @@ void S9xMainLoop (void)
 			if (S9xSFCBoxPendingReset())
 				S9xSFCBoxApplySNESReset();
 
-			// Held in reset: skip opcode execution but keep the H/V event
-			// machinery running so the Z180, APU and frame pacing advance.
-			if (S9xSFCBoxSNESHeld())
+			// Held in reset (or the box is powered off): skip opcode execution
+			// but keep the H/V event machinery running so frame pacing advances.
+			if (S9xSFCBoxSNESHeld() || S9xSFCBoxPoweredOff())
 			{
 				CPU.Cycles = CPU.NextEvent;
 				while (CPU.Cycles >= CPU.NextEvent)
@@ -452,6 +454,9 @@ static inline void S9xReschedule (void)
 		case HC_HCOUNTER_MAX_EVENT:
 			CPU.WhichEvent = HC_HDMA_INIT_EVENT;
 			CPU.NextEvent  = Timings.HDMAInit;
+			// 5A22 v2: HDMA init is due at HC 12 + (clock & 7) at line start
+			if (CPU.V_Counter == 0 && Timings.WRAMRefreshPos != SNES_WRAM_REFRESH_HC_v1)
+				CPU.NextEvent = 12 + (SNES_WRAM_REFRESH_HC_v2 - Timings.WRAMRefreshPos);
 			break;
 
 		case HC_HDMA_INIT_EVENT:
@@ -741,6 +746,7 @@ void S9xDoHEventProcessing (void)
 		#endif
 
 			CPU.Cycles += SNES_WRAM_REFRESH_CYCLES;
+			S9xRefreshClocks += SNES_WRAM_REFRESH_CYCLES;
 
 			S9xReschedule();
 

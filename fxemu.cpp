@@ -18,6 +18,7 @@ static bool8 fx_checkStartAddress (void);
 static uint32 FxEmulate (uint32);
 static void FxCacheWriteAccess (uint16);
 static void FxFlushCache (void);
+static void FxSyncToCPU (void);
 
 
 void S9xInitSuperFX (void)
@@ -32,6 +33,8 @@ void S9xResetSuperFX (void)
     // only used when GSU Cycle Mode is disabled (see below)
 	SuperFX.speedPerLine = (uint32) (5823405 * ((1.0 / (float) Memory.ROMFramesPerSecond) / ((float) (Timings.V_Max))));
 	SuperFX.oneLineDone = FALSE;
+	SuperFX.syncCycle = 0;
+	SuperFX.cycleDebt = 0;
 	SuperFX.vFlags = 0;
 	CPU.IRQExternal = FALSE;
 
@@ -40,6 +43,10 @@ void S9xResetSuperFX (void)
 
 void S9xSetSuperFX (uint8 byte, uint16 address)
 {
+	// Cycle mode: the GSU catches up to the CPU before the write lands
+	if (GSU.bCycleMode)
+		FxSyncToCPU();
+
 	switch (address)
 	{
 		case 0x3030:
@@ -48,7 +55,7 @@ void S9xSetSuperFX (uint8 byte, uint16 address)
 				Memory.FillRAM[0x3030] = byte;
 				if (byte & FLG_G)
 				{
-					if (!SuperFX.oneLineDone)
+					if (!GSU.bCycleMode && !SuperFX.oneLineDone)
 					{
 						S9xSuperFXExec();
 						SuperFX.oneLineDone = TRUE;
@@ -72,6 +79,7 @@ void S9xSetSuperFX (uint8 byte, uint16 address)
 
 		case 0x3034:
 			Memory.FillRAM[0x3034] = byte & 0x7f;
+			GSU.vCacheMask = 0;	// a PBR write invalidates the cache (timing only)
 			break;
 
 		case 0x3036:
@@ -110,7 +118,7 @@ void S9xSetSuperFX (uint8 byte, uint16 address)
 		case 0x301f:
 			Memory.FillRAM[0x301f] = byte;
 			Memory.FillRAM[0x3000 + GSU_SFR] |= FLG_G;
-			if (!SuperFX.oneLineDone)
+			if (!GSU.bCycleMode && !SuperFX.oneLineDone)
 			{
 				S9xSuperFXExec();
 				SuperFX.oneLineDone = TRUE;
@@ -131,6 +139,9 @@ uint8 S9xGetSuperFX (uint16 address)
 {
 	uint8	byte;
 
+	if (GSU.bCycleMode)
+		FxSyncToCPU();
+
 	byte = Memory.FillRAM[address];
 
 	if (address == 0x3031)
@@ -142,39 +153,94 @@ uint8 S9xGetSuperFX (uint16 address)
 	return (byte);
 }
 
-void S9xSuperFXExec (void)
+static bool8 FxRunning (void)
 {
 	// FX3: the CPU keeps ROM/RAM access, so SCMR RON/RAN don't gate execution
-	if ((Memory.FillRAM[0x3000 + GSU_SFR] & FLG_G) && (SuperFX.isFx3 || (Memory.FillRAM[0x3000 + GSU_SCMR] & 0x18) != 0))
+	return ((Memory.FillRAM[0x3000 + GSU_SFR] & FLG_G) && (SuperFX.isFx3 || (Memory.FillRAM[0x3000 + GSU_SCMR] & 0x18) != 0));
+}
+
+static void FxCheckIRQ (void)
+{
+	uint16 GSUStatus = Memory.FillRAM[0x3000 + GSU_SFR] | (Memory.FillRAM[0x3000 + GSU_SFR + 1] << 8);
+	if ((GSUStatus & (FLG_G | FLG_IRQ)) == FLG_IRQ)
+		CPU.IRQExternal = TRUE;
+}
+
+// Cycle mode: run the GSU for `master` clocks of SNES time. An instruction
+// that crosses the end of the slice is paid for out of the next one.
+static void FxRunFor (int32 master)
+{
+	if (master <= 0)
+		return;
+
+	// Bus ownership replaces the RON/RAN run gate: the GSU runs from its
+	// cache regardless and only halts on an access to a bus it doesn't own.
+	uint8	scmr = Memory.FillRAM[0x3000 + GSU_SCMR];
+	GSU.vBusOwned = SuperFX.isFx3 ? (FX_BUS_ROM | FX_BUS_RAM) :
+		(uint8) (((scmr & 0x10) ? FX_BUS_ROM : 0) | ((scmr & 0x08) ? FX_BUS_RAM : 0));
+	GSU.vBusWait &= ~GSU.vBusOwned;
+
+	if (!(Memory.FillRAM[0x3000 + GSU_SFR] & FLG_G) || GSU.vBusWait)
 	{
-        int	cs = Memory.FillRAM[0x3000 + GSU_CLSR] & 1;
+		SuperFX.cycleDebt = 0;
+		return;
+	}
 
-		if (GSU.bCycleMode)
-		{
-			// Real cycle costs: the GSU runs at the master clock (21.4MHz,
-			// CLSR=1) or half of it (10.7MHz, CLSR=0). Costs carry the CLSR
-			// scaling, so the per-line budget is a flat master-cycle slice.
+	// Real cycle costs: the GSU runs at the master clock (21.4MHz, CLSR=1)
+	// or half of it (10.7MHz, CLSR=0); costs carry the CLSR scaling.
+	int	cs  = Memory.FillRAM[0x3000 + GSU_CLSR] & 1;
+	int	ms0 = Memory.FillRAM[0x3000 + GSU_CFGR] & 0x20;
 
-			int	ms0 = Memory.FillRAM[0x3000 + GSU_CFGR] & 0x20;
+	GSU.vCostCache = cs ? 1 : 2;
+	GSU.vCostMem   = cs ? 5 : 6;
+	GSU.vCostFmult = (ms0 ? 3 : 7) * (cs ? 1 : 2);
+	GSU.vCostMult  = ms0 ? 1 : 2;
 
-			GSU.vCostCache = cs ? 1 : 2;
-			GSU.vCostMem   = cs ? 5 : 6;
-			GSU.vCostFmult = (ms0 ? 3 : 7) * (cs ? 1 : 2);
-			GSU.vCostMult  = ms0 ? 1 : 2;
+	int64	scaled = (int64) master * (SuperFX.isFx3 ? 4 : 1) * Settings.SuperFXClockMultiplier / 100;	// the FX3 runs ~4x the GSU clock
+	int64	budget = scaled - SuperFX.cycleDebt;
+	if (budget <= 0)
+	{
+		SuperFX.cycleDebt = (int32) -budget;
+		return;
+	}
 
-			uint32	budget = (uint32) (Timings.H_Max > 0 ? Timings.H_Max : 1364);
-			if (SuperFX.isFx3)
-				budget *= 4;	// the FX3 runs ~4x the GSU clock
-			FxEmulate(budget * Settings.SuperFXClockMultiplier / 100);
-		}
-        else
-        {
-            FxEmulate((cs ? (SuperFX.speedPerLine * 5 / 2) : SuperFX.speedPerLine) * (SuperFX.isFx3 ? 4 : 1) * Settings.SuperFXClockMultiplier / 100);
-        }
+	uint32	start = GSU.vCycles;
+	FxEmulate((uint32) budget);
+	int64	used = (int64) (GSU.vCycles - start);
+	SuperFX.cycleDebt = ((Memory.FillRAM[0x3000 + GSU_SFR] & FLG_G) && !GSU.vBusWait && used > budget) ? (int32) (used - budget) : 0;
 
-		uint16 GSUStatus = Memory.FillRAM[0x3000 + GSU_SFR] | (Memory.FillRAM[0x3000 + GSU_SFR + 1] << 8);
-		if ((GSUStatus & (FLG_G | FLG_IRQ)) == FLG_IRQ)
-			CPU.IRQExternal = TRUE;
+	FxCheckIRQ();
+}
+
+// Cycle mode: bring the GSU up to the CPU's position in the current line.
+static void FxSyncToCPU (void)
+{
+	if (!Settings.SuperFX)
+		return;
+	int32	target = CPU.Cycles < Timings.H_Max ? CPU.Cycles : Timings.H_Max;
+	if (target > SuperFX.syncCycle)
+	{
+		int32	from = SuperFX.syncCycle;
+		SuperFX.syncCycle = target;
+		FxRunFor(target - from);
+	}
+}
+
+void S9xSuperFXExec (void)
+{
+	if (GSU.bCycleMode)
+	{
+		// End of line: run the rest of it; the next line starts at 0
+		int32	from = SuperFX.syncCycle;
+		SuperFX.syncCycle = 0;
+		FxRunFor((Timings.H_Max > 0 ? Timings.H_Max : 1364) - from);
+	}
+	else if (FxRunning())
+	{
+		int	cs = Memory.FillRAM[0x3000 + GSU_CLSR] & 1;
+
+		FxEmulate((cs ? (SuperFX.speedPerLine * 5 / 2) : SuperFX.speedPerLine) * (SuperFX.isFx3 ? 4 : 1) * Settings.SuperFXClockMultiplier / 100);
+		FxCheckIRQ();
 	}
 
 	// Winter Gold (#533): at the race-start pose switch, the game polls the
@@ -283,6 +349,10 @@ static void FxReset (struct FxInfo_s *psFxInfo)
     GSU.vCostMult = 2;
     GSU.vRomReadyAt = 0;
     GSU.vRamReadyAt = 0;
+    GSU.vPixPrimX = GSU.vPixPrimY = 0;
+    GSU.vPixPrimValid = GSU.vPixSecValid = 0;
+    GSU.vBusTouch = GSU.vBusWait = 0;
+    GSU.vBusOwned = FX_BUS_ROM | FX_BUS_RAM;
     GSU.bCycleMode = Settings.DisableGSUCycleMode ? 0 : 1;
 
 	fx_readRegisterSpace();
@@ -416,6 +486,10 @@ static bool8 fx_checkStartAddress (void)
 	// FX3: no bus arbitration, any ROM (<= 0x6f) or RAM (0x70-0x71) bank runs
 	if (GSU.bFx3)
 		return (GSU.vPrgBankReg <= 0x71);
+
+	// Cycle mode: a bus the CPU holds stalls the GSU (vBusWait) instead of stopping it
+	if (GSU.bCycleMode)
+		return (GSU.vPrgBankReg <= 0x5f || GSU.vPrgBankReg >= 0x70);
 
 	if (SCMR & (1 << 4))
 	{

@@ -143,7 +143,13 @@ enum {
     PORT_LAYER_BG1          = 78,
     PORT_LAYER_SPRITES      = 79,
     // Nintendo Super System -> Slot 1-3 (mount/eject)
-    PORT_NSS_MOUNT0         = 80
+    PORT_NSS_MOUNT0         = 80,
+    // Super Famicom Box push switches and Slot 1-2 (mount/eject)
+    PORT_SFCBOX_RESET       = 83,
+    PORT_SFCBOX_TVGAME      = 84,
+    PORT_SFCBOX_MOUNT0      = 85,
+    // Super Famicom Box keyswitch position 4 (Power OFF), menu-only otherwise
+    PORT_SFCBOX_POWER_OFF   = 87
 };
 
 typedef struct BindingLink
@@ -158,7 +164,7 @@ extern const int b_breaks[];
 const int NUM_JOYPAD_LINKS = 24;
 // Emulator-wide entries in b_links, after the NUM_JOYPAD_LINKS joypad ones; a
 // static_assert in gtk_control.cpp pins it to that table's real length.
-const int NUM_EMU_LINKS = 104;
+const int NUM_EMU_LINKS = 109;
 
 typedef struct JoypadBinding
 {

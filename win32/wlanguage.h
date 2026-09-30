@@ -180,11 +180,16 @@ Nintendo is a trademark.")
 #define HOTKEYS_GBMODEL_SGBC TEXT("Super GB Color:")
 // Keep these short enough for the 72-DLU IDC_LABEL_HK* statics: longer text
 // word-wraps and the clipped second line shows as pixel garbage under the label.
-#define HOTKEYS_KEYSWITCH_1 TEXT("Key Switch 1:")
+#define HOTKEYS_KEYSWITCH_1 TEXT("Key Switch Options:")
 #define HOTKEYS_KEYSWITCH_OFF TEXT("Key Switch OFF:")
 #define HOTKEYS_KEYSWITCH_ON TEXT("Key Switch ON:")
-#define HOTKEYS_KEYSWITCH_2 TEXT("Key Switch 2:")
-#define HOTKEYS_KEYSWITCH_3 TEXT("Key Switch 3:")
+#define HOTKEYS_KEYSWITCH_2 TEXT("Key Switch Check Play:")
+#define HOTKEYS_KEYSWITCH_3 TEXT("Key Switch Self Test:")
+#define HOTKEYS_KEYSWITCH_POWEROFF TEXT("Key Switch Power OFF:")
+#define HOTKEYS_SFCBOX_RESET TEXT("Reset Switch:")
+#define HOTKEYS_SFCBOX_TVGAME TEXT("GAME/TV Switch:")
+#define HOTKEYS_SFCBOX_MOUNT1 TEXT("Mount/Eject Slot 1:")
+#define HOTKEYS_SFCBOX_MOUNT2 TEXT("Mount/Eject Slot 2:")
 
 // gaming buttons and axes
 #define GAMEDEVICE_JOYNUMPREFIX "(J%x)" // don't change this

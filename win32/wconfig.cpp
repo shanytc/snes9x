@@ -1215,6 +1215,9 @@ void WinRegisterConfigItems()
 	ADD(SuperDiscInsert); ADD(SuperDiscEject);
 	ADDN(NSSGame[0],NSSGame1); ADDN(NSSGame[1],NSSGame2); ADDN(NSSGame[2],NSSGame3);
 	ADDN(NSSMountEject[0],NSSMountEject1); ADDN(NSSMountEject[1],NSSMountEject2); ADDN(NSSMountEject[2],NSSMountEject3);
+	ADD(SFCBoxReset); ADD(SFCBoxTVGame);
+	ADDN(SFCBoxMountEject[0],SFCBoxMountEject1); ADDN(SFCBoxMountEject[1],SFCBoxMountEject2);
+	ADD(SFCBoxPowerOff);
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
 	ADDN(GBModel[4],GBModelSGBC);
@@ -1256,6 +1259,9 @@ void WinRegisterConfigItems()
 	ADDXALL(SuperDiscInsert); ADDXALL(SuperDiscEject);
 	ADDXALLN(NSSGame[0],NSSGame1); ADDXALLN(NSSGame[1],NSSGame2); ADDXALLN(NSSGame[2],NSSGame3);
 	ADDXALLN(NSSMountEject[0],NSSMountEject1); ADDXALLN(NSSMountEject[1],NSSMountEject2); ADDXALLN(NSSMountEject[2],NSSMountEject3);
+	ADDXALL(SFCBoxReset); ADDXALL(SFCBoxTVGame);
+	ADDXALLN(SFCBoxMountEject[0],SFCBoxMountEject1); ADDXALLN(SFCBoxMountEject[1],SFCBoxMountEject2);
+	ADDXALL(SFCBoxPowerOff);
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
 	ADDXALLN(GBModel[4],GBModelSGBC);
@@ -1273,7 +1279,8 @@ void WinRegisterConfigItems()
     AddBoolC("SFCBoxOSDBackdrop", Settings.SFCBoxOSDBackdrop, true, "Draw SFC-Box supervisor screens over the MB90082's solid background raster (blue boot screen, like NO$SNS) instead of superimposing on the SNES video");
     AddBoolC("SFCBoxOSDEnglish", Settings.SFCBoxOSDEnglish, false, "SFC-Box supervisor screen language: FALSE=Japanese (authentic), TRUE=English (render-time translation; the KROM firmware and savestates stay untouched)");
     AddBoolC("NSSJoypadWatchdog", Settings.NSSJoypadWatchdog, false, "Nintendo Super System: let the supervisor throw a game off the machine when it stops reading the joypads, as a real cabinet does with a crashed one. No menu entry on purpose - it is here for fidelity, not for playing, because our model of it has a confirmed false positive: Lethal Weapon goes quiet for 257 and then 451 frames uploading its sound driver, two frames past the BIOS's limit, and a reference core agrees the game really does that");
-    AddUIntC("SFCBoxKeyswitch", Settings.SFCBoxKeyswitch, 1, "SFC-Box keyswitch position at power-on, as the port 80h bit it grounds: 4=1 (Options), 0=OFF, 1=ON (Play), 2=2, 3=3 (Self-Test). Follows Emulation -> Super Famicom Box -> Keyswitch");
+    AddUIntC("SFCBoxKeyswitch", Settings.SFCBoxKeyswitch, 1, "SFC-Box keyswitch position at power-on, as the port 80h bit it grounds: 4=Options, 0=OFF, 1=ON, 2=Check Play, 3=Self Test. Follows Emulation -> Super Famicom Box -> Keyswitch");
+    AddUIntC("SFCBoxKROMVersion", Settings.SFCBoxKROMVersion, 1, "SFC-Box supervisor BIOS: 1=KROM 1.00, 2=KROM 2.00. 2.00 needs a KROM file that holds it (MAME's sfcbox.zip); otherwise 1.00 boots and this follows. Emulation -> Super Famicom Box -> BIOS");
     AddUIntC("NSSDipSwitches", Settings.NSSDipSwitches, 0x0c, "Nintendo Super System: the cartridge's eight DIP switches, as a bitmask the game reads at $4100. What each one does is per-game - kNSSDipInfo in nss.cpp, which the menu shows - and 0x0c is the factory setting on the Addams Family sheet");
     AddUIntC("PowerFest94TimeLimit", Settings.PF94TimerMinutes, 6, "PowerFest '94 event cart session length in minutes (DIP switches, 3-18)");
     AddUIntC("PowerFest94TimerDisplay", Settings.PF94TimerDisplay, 0, "PowerFest '94 session timer display: 0=none, 1=on screen, 2=window title");

@@ -569,7 +569,7 @@ static void fx_alt3 (void)
 
 // 40-4b - ldw (rn) - load word from RAM
 #define FX_LDW(reg) \
-	FX_SYNC_RAM \
+	FX_RAM_READ \
 	uint32	v; \
 	GSU.vLastRamAdr = GSU.avReg[reg]; \
 	v = (uint32) RAM(GSU.avReg[reg]); \
@@ -641,7 +641,7 @@ static void fx_ldw_r11 (void)
 
 // 40-4b (ALT1) - ldb (rn) - load byte
 #define FX_LDB(reg) \
-	FX_SYNC_RAM \
+	FX_RAM_READ \
 	uint32	v; \
 	GSU.vLastRamAdr = GSU.avReg[reg]; \
 	v = (uint32) RAM(GSU.avReg[reg]); \
@@ -710,6 +710,46 @@ static void fx_ldb_r11 (void)
 	FX_LDB(11);
 }
 
+// PLOT pixel-cache timing (Mesen2's model). Writing a cache back costs one
+// access per bitplane, plus a read first when the row is only partly plotted.
+static void fx_pixcache_write (uint8 valid, uint32 bpp)
+{
+	if (valid)
+	{
+		FX_CYC(GSU.vCostMem * bpp * (valid == 0xff ? 1 : 2));
+		FX_BUS(FX_BUS_RAM);
+	}
+}
+
+// A flush writes out the secondary cache; the primary becomes the secondary.
+static void fx_pixcache_flush (uint32 x, uint32 y, uint32 bpp)
+{
+	fx_pixcache_write(GSU.vPixSecValid, bpp);
+	GSU.vPixSecValid = GSU.vPixPrimValid;
+	GSU.vPixPrimValid = 0;
+	GSU.vPixPrimX = (uint8) (x & 0xf8);
+	GSU.vPixPrimY = (uint8) y;
+}
+
+static void fx_pixcache_plot (uint32 x, uint32 y, uint32 bpp)
+{
+	if (GSU.vPixPrimX != (x & 0xf8) || GSU.vPixPrimY != y)
+		fx_pixcache_flush(x, y, bpp);
+	GSU.vPixPrimValid |= (uint8) (0x80 >> (x & 7));
+	if (GSU.vPixPrimValid == 0xff)
+		fx_pixcache_flush(x, y, bpp);
+}
+
+// RPIX drains both caches before reading the pixel's bitplanes.
+static void fx_pixcache_rpix (uint32 bpp)
+{
+	fx_pixcache_write(GSU.vPixSecValid, bpp);
+	fx_pixcache_write(GSU.vPixPrimValid, bpp);
+	GSU.vPixSecValid = GSU.vPixPrimValid = 0;
+	FX_CYC(GSU.vCostMem * bpp);
+	FX_BUS(FX_BUS_RAM);
+}
+
 // 4c - plot - plot pixel with R1, R2 as x, y and the color register as the color
 static void fx_plot_2bit (void)
 {
@@ -722,15 +762,15 @@ static void fx_plot_2bit (void)
 	CLRFLAGS;
 	R1++;
 
+	if (!(GSU.vPlotOptionReg & PLOT_TRANSPARENT) && !(COLR & 0xf))
+		return;
+
+	fx_pixcache_plot(x, y, 2);
+
 #ifdef CHECK_LIMITS
 	if (y >= GSU.vScreenHeight)
 		return;
 #endif
-
-	if (!(GSU.vPlotOptionReg & PLOT_TRANSPARENT) && !(COLR & 0xf))
-		return;
-
-	FX_CYC(((GSU.vCostMem << 1) >> 3) + 1);
 
 	if (GSU.vPlotOptionReg & PLOT_DITHER)
 		c = ((x ^ y) & 1) ? (uint8) (GSU.vColorReg >> 4) : (uint8) GSU.vColorReg;
@@ -754,7 +794,7 @@ static void fx_plot_2bit (void)
 // 4c (ALT1) - rpix - read color of the pixel with R1, R2 as x, y
 static void fx_rpix_2bit (void)
 {
-	FX_CYC(GSU.vCostMem << 1);
+	fx_pixcache_rpix(2);
 	uint32	x = USEX8(R1);
 	uint32	y = USEX8(R2);
 	uint8	*a;
@@ -789,15 +829,15 @@ static void fx_plot_4bit (void)
 	CLRFLAGS;
 	R1++;
 
+	if (!(GSU.vPlotOptionReg & PLOT_TRANSPARENT) && !(COLR & 0xf))
+		return;
+
+	fx_pixcache_plot(x, y, 4);
+
 #ifdef CHECK_LIMITS
 	if (y >= GSU.vScreenHeight)
 		return;
 #endif
-
-	if (!(GSU.vPlotOptionReg & PLOT_TRANSPARENT) && !(COLR & 0xf))
-		return;
-
-	FX_CYC(((GSU.vCostMem << 2) >> 3) + 1);
 
 	if (GSU.vPlotOptionReg & PLOT_DITHER)
 		c = ((x ^ y) & 1) ? (uint8) (GSU.vColorReg >> 4) : (uint8) GSU.vColorReg;
@@ -831,7 +871,7 @@ static void fx_plot_4bit (void)
 // 4c (ALT1) - rpix - read color of the pixel with R1, R2 as x, y
 static void fx_rpix_4bit (void)
 {
-	FX_CYC(GSU.vCostMem << 2);
+	fx_pixcache_rpix(4);
 	uint32	x = USEX8(R1);
 	uint32	y = USEX8(R2);
 	uint8	*a;
@@ -868,18 +908,18 @@ static void fx_plot_8bit (void)
 	CLRFLAGS;
 	R1++;
 
-#ifdef CHECK_LIMITS
-	if (y >= GSU.vScreenHeight)
-		return;
-#endif
-
 	c = (uint8) GSU.vColorReg;
     if (!(GSU.vPlotOptionReg & PLOT_TRANSPARENT)) {
         if ( (GSU.vPlotOptionReg & PLOT_FREEZEHIGH) && !(c & 0xf)) return;
         if (!(GSU.vPlotOptionReg & PLOT_FREEZEHIGH) && !c)         return;
     }
 
-	FX_CYC(GSU.vCostMem + 1);
+	fx_pixcache_plot(x, y, 8);
+
+#ifdef CHECK_LIMITS
+	if (y >= GSU.vScreenHeight)
+		return;
+#endif
 
 	a = GSU.apvScreen[y >> 3] + GSU.x[x >> 3] + ((y & 7) << 1);
 	v = 128 >> (x & 7);
@@ -928,7 +968,7 @@ static void fx_plot_8bit (void)
 // 4c (ALT1) - rpix - read color of the pixel with R1, R2 as x, y
 static void fx_rpix_8bit (void)
 {
-	FX_CYC(GSU.vCostMem << 3);
+	fx_pixcache_rpix(8);
 	uint32	x = USEX8(R1);
 	uint32	y = USEX8(R2);
 	uint8	*a;
@@ -2841,7 +2881,7 @@ static void fx_ibt_r15 (void)
 	R15++; \
 	FETCHPIPE; \
 	R15++; \
-	FX_SYNC_RAM \
+	FX_RAM_READ \
 	GSU.avReg[reg] = (uint32) RAM(GSU.vLastRamAdr); \
 	GSU.avReg[reg] |= ((uint32) RAM(GSU.vLastRamAdr + 1)) << 8; \
 	CLRFLAGS
@@ -3858,7 +3898,7 @@ static void fx_iwt_r15 (void)
 	GSU.vLastRamAdr |= USEX8(PIPE) << 8; \
 	FETCHPIPE; \
 	R15++; \
-	FX_SYNC_RAM \
+	FX_RAM_READ \
 	GSU.avReg[reg] = RAM(GSU.vLastRamAdr); \
 	GSU.avReg[reg] |= USEX8(RAM(GSU.vLastRamAdr ^ 1)) << 8; \
 	CLRFLAGS
@@ -4050,9 +4090,19 @@ uint32 fx_run (uint32 nInstructions)
 		// accrues its real cost into GSU.vCycles (fetch source, memory ops).
 		// vCycles runs monotonically so the ROM/RAM buffer ready-at
 		// timestamps stay valid across the per-line budget slices of a job.
+		// An instruction that touches a bus the CPU holds (SCMR RON/RAN)
+		// completes, then the GSU halts until the bus is handed back.
 		uint32	vStart = GSU.vCycles;
 		while (TF(G) && GSU.vCycles - vStart < nInstructions)
+		{
+			GSU.vBusTouch = 0;
 			FX_STEP;
+			if (GSU.vBusTouch & ~GSU.vBusOwned)
+			{
+				GSU.vBusWait = GSU.vBusTouch & ~GSU.vBusOwned;
+				break;
+			}
+		}
 
 		return (0);
 	}

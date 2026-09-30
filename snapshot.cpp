@@ -1659,6 +1659,13 @@ int S9xUnfreezeFromStream (STREAM stream)
 					break;
 				}
 				local_box_size = box_block_len;
+
+				// Another KROM's Z180 state would run the wrong firmware.
+				if (Settings.SFCBox && !S9xSFCBoxStateMatchesKROM(local_box_data, (size_t) local_box_size))
+				{
+					result = WRONG_VERSION;
+					break;
+				}
 			}
 		}
 

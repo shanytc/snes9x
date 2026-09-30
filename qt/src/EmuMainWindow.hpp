@@ -137,9 +137,13 @@ class EmuMainWindow : public QMainWindow
 
     // Emulation -> Super Famicom Box / Nintendo Super System front panels.
     QAction *sfcbox_menu_action = nullptr;
-    QAction *sfcbox_keyswitch_actions[5] = {};
+    QAction *sfcbox_keyswitch_actions[6] = {};
     QAction *sfcbox_backdrop_action = nullptr;
+    QAction *sfcbox_japanese_action = nullptr;
     QAction *sfcbox_english_action = nullptr;
+    QAction *sfcbox_tvgame_action = nullptr;
+    QAction *sfcbox_slot_actions[2] = {};
+    QAction *sfcbox_krom_actions[2] = {};
     QAction *nss_menu_action = nullptr;
     QAction *nss_game_actions[3] = {};
     QAction *nss_eject_actions[3] = {};
@@ -158,6 +162,10 @@ class EmuMainWindow : public QMainWindow
     void refreshArcadeMenus();
     void refreshNSSDips();
     void sfcboxSetKeyswitch(int panel_pos);
+    void sfcboxPressSwitch(int sw);
+    void sfcboxMountEject(int slot);
+    void sfcboxSetKROMVersion(int version);
+    bool sfcboxReload();
     void insertCoin(int slot);
     void nssPulse(uint16_t buttons, bool game_only);
     void nssGame(int slot);

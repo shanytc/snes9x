@@ -365,13 +365,14 @@ void EmuMainWindow::voicekunDetach()
 
 // SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
 // position index as win32 does.
-static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
-static const char *sfcbox_keyswitch_names[5] = {
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&1 (Options)"),
+static const uint8 sfcbox_keyswitch_map[6] = { 4, 0, 1, 2, 3, SFCBOX_KEY_POWER_OFF };
+static const char *sfcbox_keyswitch_names[6] = {
+    QT_TRANSLATE_NOOP("EmuMainWindow", "O&ptions"),
     QT_TRANSLATE_NOOP("EmuMainWindow", "O&FF"),
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&ON (Play)"),
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&2"),
-    QT_TRANSLATE_NOOP("EmuMainWindow", "&3 (Self-Test)"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&ON"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&Check Play"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "&Self Test"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "Po&wer OFF"),
 };
 static const uint16 nss_game_buttons[3] = { NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
 
@@ -420,12 +421,40 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
     auto coin = sfcbox_menu->addAction(tr("&Insert Coin"));
     coin->setToolTip(tr("Drop a 100-yen coin into the box. Play time per coin is set in the attendant menus."));
     connect(coin, &QAction::triggered, [this] { insertCoin(0); });
+    auto reset = sfcbox_menu->addAction(tr("&Reset Switch"));
+    reset->setToolTip(tr("Front-panel reset: restarts the game in play, or backs out of the game select screens."));
+    connect(reset, &QAction::triggered, [this] { sfcboxPressSwitch(SFCBOX_RESET_SWITCH); });
+    // Checked while the TV indicator is lit (RF installs only).
+    sfcbox_tvgame_action = sfcbox_menu->addAction(tr("&GAME/TV Switch"));
+    sfcbox_tvgame_action->setCheckable(true);
+    sfcbox_tvgame_action->setToolTip(tr("Switches the TV between the games and broadcast TV. Works only when the "
+                                        "attendant menus set the TV connection to RF."));
+    connect(sfcbox_tvgame_action, &QAction::triggered, [this] { sfcboxPressSwitch(SFCBOX_TVGAME_SWITCH); });
+    sfcbox_menu->addSeparator();
+
+    for (int slot = 0; slot < 2; slot++)
+    {
+        sfcbox_slot_actions[slot] = sfcbox_menu->addAction(tr("Slot %1: Mount...").arg(slot + 1));
+        connect(sfcbox_slot_actions[slot], &QAction::triggered, [this, slot] { sfcboxMountEject(slot); });
+    }
+    sfcbox_menu->addSeparator();
+
+    auto krom_menu = sfcbox_menu->addMenu(tr("BI&OS"));
+    auto krom_group = new QActionGroup(this);
+    krom_group->setExclusive(true);
+    for (int v = 0; v < 2; v++)
+    {
+        sfcbox_krom_actions[v] = krom_menu->addAction(v ? tr("v&2.00") : tr("v&1.00"));
+        sfcbox_krom_actions[v]->setCheckable(true);
+        krom_group->addAction(sfcbox_krom_actions[v]);
+        connect(sfcbox_krom_actions[v], &QAction::triggered, [this, v] { sfcboxSetKROMVersion(v + 1); });
+    }
 
     auto keyswitch_menu = sfcbox_menu->addMenu(tr("&Keyswitch"));
     keyswitch_menu->setToolTipsVisible(true);
     auto keyswitch_group = new QActionGroup(this);
     keyswitch_group->setExclusive(true);
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 6; i++)
     {
         auto a = keyswitch_menu->addAction(tr(sfcbox_keyswitch_names[i]));
         a->setCheckable(true);
@@ -434,9 +463,28 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
         sfcbox_keyswitch_actions[i] = a;
     }
     keyswitch_menu->menuAction()->setToolTip(
-        tr("\"1\" opens the attendant setup menus, \"3\" the self-test; OFF/ON/\"2\" are play modes. "
-           "The supervisor polls it live, no reset needed."));
-    sfcbox_menu->addSeparator();
+        tr("Options opens the attendant setup menus, Self Test the self-test; OFF/ON/Check Play are play modes; "
+           "Power OFF cuts the power and turning back boots the box."));
+
+    auto language_menu = sfcbox_menu->addMenu(tr("OSD &Language"));
+    language_menu->setToolTipsVisible(true);
+    auto language_group = new QActionGroup(this);
+    language_group->setExclusive(true);
+    sfcbox_japanese_action = language_menu->addAction(tr("&Japanese"));
+    sfcbox_english_action = language_menu->addAction(tr("&English"));
+    sfcbox_english_action->setToolTip(
+        tr("Translate the supervisor's on-screen text to English. Game text and the game-select "
+           "menus are drawn by the games and stay Japanese."));
+    for (auto a : { sfcbox_japanese_action, sfcbox_english_action })
+    {
+        a->setCheckable(true);
+        language_group->addAction(a);
+        const bool english = (a == sfcbox_english_action);
+        connect(a, &QAction::triggered, [this, english] {
+            app.config->sfcbox_osd_english = english;
+            app.updateSettings();
+        });
+    }
 
     sfcbox_backdrop_action = sfcbox_menu->addAction(tr("OSD &Backdrop"));
     sfcbox_backdrop_action->setCheckable(true);
@@ -445,15 +493,6 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
            "instead of superimposing the text on the SNES video."));
     connect(sfcbox_backdrop_action, &QAction::triggered, [this](bool checked) {
         app.config->sfcbox_osd_backdrop = checked;
-        app.updateSettings();
-    });
-    sfcbox_english_action = sfcbox_menu->addAction(tr("&English OSD"));
-    sfcbox_english_action->setCheckable(true);
-    sfcbox_english_action->setToolTip(
-        tr("Translate the supervisor's on-screen text to English. Game text and the game-select "
-           "menus are drawn by the games and stay Japanese."));
-    connect(sfcbox_english_action, &QAction::triggered, [this](bool checked) {
-        app.config->sfcbox_osd_english = checked;
         app.updateSettings();
     });
     sfcbox_menu_action = emulation_menu->addMenu(sfcbox_menu);
@@ -603,10 +642,27 @@ void EmuMainWindow::refreshArcadeMenus()
     sfcbox_menu_action->setVisible(box);
     if (box)
     {
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 6; i++)
             sfcbox_keyswitch_actions[i]->setChecked(sfcbox_keyswitch_map[i] == SFCBox.Keyswitch);
         sfcbox_backdrop_action->setChecked(app.config->sfcbox_osd_backdrop);
+        sfcbox_japanese_action->setChecked(!app.config->sfcbox_osd_english);
         sfcbox_english_action->setChecked(app.config->sfcbox_osd_english);
+        sfcbox_tvgame_action->setChecked(S9xSFCBoxTVMode());
+
+        for (int slot = 0; slot < 2; slot++)
+            sfcbox_slot_actions[slot]->setText(SFCBox.SlotPresent[slot]
+                ? tr("Slot %1: Eject (%2)").arg(slot + 1).arg(menuText(S9xSFCBoxSlotName(slot)))
+                : tr("Slot %1: Mount...").arg(slot + 1));
+
+        // A KROM file with one version only boots that one, and the choice follows it.
+        const uint8 krom = S9xSFCBoxResolveKROMVersion();
+        const uint8 have = S9xSFCBoxKROMVersions();
+        app.config->sfcbox_krom_version = krom;
+        for (int v = 0; v < 2; v++)
+        {
+            sfcbox_krom_actions[v]->setChecked(krom == v + 1);
+            sfcbox_krom_actions[v]->setEnabled(have & (1 << v));
+        }
     }
 
     const bool event_cart = app.isCoreActive() && PF94.active;
@@ -683,16 +739,86 @@ void EmuMainWindow::sfcboxSetKeyswitch(int panel_pos)
 {
     if (!app.isCoreActive() || !SFCBox.Active)
         return;
-    // A real key stays where it was left: the next power-on starts there.
-    app.config->sfcbox_keyswitch = sfcbox_keyswitch_map[panel_pos];
+    // A real key stays where it was left: the next power-on starts there
+    // (never at Power OFF, which would leave the box dark at startup).
+    if (sfcbox_keyswitch_map[panel_pos] != SFCBOX_KEY_POWER_OFF)
+        app.config->sfcbox_keyswitch = sfcbox_keyswitch_map[panel_pos];
     app.emu_thread->runOnThread([panel_pos] {
         if (!SFCBox.Active)
             return;
-        static const char *names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
-        SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
-        Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;
+        static const char *names[6] = { "Options", "OFF", "ON", "Check Play", "Self Test", "Power OFF" };
+        // Only leaving Power OFF needs a reset: the box boots from cold.
+        if (S9xSFCBoxTurnKey(sfcbox_keyswitch_map[panel_pos]))
+            S9xReset();
         S9xSetInfoString((std::string("SFC-Box keyswitch: ") + names[panel_pos]).c_str());
     });
+}
+
+void EmuMainWindow::sfcboxPressSwitch(int sw)
+{
+    app.emu_thread->runOnThread([sw] {
+        if (SFCBox.Active)
+            S9xSFCBoxPressSwitch(sw);
+    });
+}
+
+// Loads the box again, which picks up the slot and BIOS choices.
+bool EmuMainWindow::sfcboxReload()
+{
+    const std::string path = Memory.ROMFilename;
+    return !path.empty() && openFile(path);
+}
+
+void EmuMainWindow::sfcboxSetKROMVersion(int version)
+{
+    if (!app.isCoreActive() || !SFCBox.Active)
+        return;
+    const bool changed = (app.config->sfcbox_krom_version != version);
+    app.config->sfcbox_krom_version = version;
+    if (changed)
+        sfcboxReload();
+}
+
+void EmuMainWindow::sfcboxMountEject(int slot)
+{
+    if (!app.isCoreActive() || !SFCBox.Active)
+        return;
+
+    // A filled slot gives up its cartridge; the real box then shows its error.
+    if (SFCBox.SlotPresent[slot])
+    {
+        S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), "");
+        if (sfcboxReload())
+            S9xSetInfoString(slot ? "Slot 2 ejected" : "Slot 1 ejected");
+        return;
+    }
+
+    app.pause();
+    QFileDialog dialog(this, tr("Super Famicom Box - cartridge for slot %1").arg(slot + 1));
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    dialog.setNameFilters({ tr("SFC-Box Cartridges (*.zip *.sfc *.bin)"), tr("All Files (*)") });
+    const bool picked = dialog.exec() && !dialog.selectedFiles().empty();
+    app.unpause();
+    if (!picked)
+        return;
+
+    const std::string path = dialog.selectedFiles()[0].toStdString();
+    std::vector<uint8> carts[2];
+    bool fits = false;
+    if (S9xSFCBoxReadCarts(path.c_str(), carts) > 0)
+        for (int c = 0; c < 2; c++)
+            if (!carts[c].empty() && (S9xSFCBoxIsMainCart(carts[c].data()) != 0) == (slot == 0))
+                fits = true;
+    if (!fits)
+    {
+        QMessageBox::warning(this, tr("Super Famicom Box"),
+            slot ? tr("That is not a Super Famicom Box slot 2 cartridge (PSS-62, PSS-63 or PSS-64).")
+                 : tr("That is not a Super Famicom Box slot 1 cartridge (PSS-61)."));
+        return;
+    }
+    S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), path.c_str());
+    if (sfcboxReload())
+        S9xSetInfoString(("Slot " + std::to_string(slot + 1) + ": " + S9xSFCBoxSlotName(slot)).c_str());
 }
 
 void EmuMainWindow::nssPulse(uint16_t buttons, bool game_only)
@@ -787,6 +913,16 @@ bool EmuMainWindow::arcadeShortcut(const std::string &name)
         nssPulse(NSS_BTN_PAGEDOWN, true);
     else if (name == "NSSRestart")
         nssPulse(NSS_BTN_RESTART, false);
+    else if (name == "SFCBoxReset")
+        sfcboxPressSwitch(SFCBOX_RESET_SWITCH);
+    else if (name == "SFCBoxTVGame")
+        sfcboxPressSwitch(SFCBOX_TVGAME_SWITCH);
+    else if (name == "SFCBoxMountEject1")
+        sfcboxMountEject(0);
+    else if (name == "SFCBoxMountEject2")
+        sfcboxMountEject(1);
+    else if (name == "SFCBoxPowerOff")
+        sfcboxSetKeyswitch(5);   // the menu's Power OFF entry
     else
     {
         for (int i = 0; i < 5; i++)

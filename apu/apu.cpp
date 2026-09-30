@@ -11,6 +11,7 @@
 #include "../msu1.h"
 #include "../voicekun.h"
 #include "../superdisc.h"
+#include "../sfcbox.h"
 #include "../snapshot.h"
 #include "../display.h"
 #include "resampler.h"
@@ -376,6 +377,10 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
     }
 
     spc::resampler.read((short *)out, sample_count);
+
+    // SFC-Box TV mode: the RF output carries the antenna's sound instead.
+    if (Settings.SFCBox && S9xSFCBoxTVMode())
+        memset(out, 0, sample_count << 1);
 
     // The viewer's SPC lane: the SGB BIOS mix path feeds it from
     // S9xPullSpcOutput, so the plain SNES path has to do it here, before

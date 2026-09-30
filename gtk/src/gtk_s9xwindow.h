@@ -77,6 +77,9 @@ class Snes9xWindow : public GtkBuilderWindow
     void refresh_arcade_menus();
     void insert_coin(int slot);
     void sfcbox_set_keyswitch(int panel_pos);
+    void sfcbox_press_switch(int sw);
+    void sfcbox_mount_eject(int slot);
+    void sfcbox_set_krom_version(int version);
     void nss_pulse(uint16_t buttons, bool game_only);
     void nss_game(int slot);
     void nss_mount_eject(int slot);
@@ -141,9 +144,13 @@ class Snes9xWindow : public GtkBuilderWindow
     Gtk::MenuItem *gbppu_item = nullptr;
     Gtk::CheckMenuItem *gb_layer_items[3] = {};
     Gtk::MenuItem *sfcbox_item = nullptr;
-    Gtk::RadioMenuItem *sfcbox_keyswitch_items[5] = {};
+    Gtk::RadioMenuItem *sfcbox_keyswitch_items[6] = {};
     Gtk::CheckMenuItem *sfcbox_backdrop_item = nullptr;
-    Gtk::CheckMenuItem *sfcbox_english_item = nullptr;
+    Gtk::RadioMenuItem *sfcbox_japanese_item = nullptr;
+    Gtk::RadioMenuItem *sfcbox_english_item = nullptr;
+    Gtk::CheckMenuItem *sfcbox_tvgame_item = nullptr;
+    Gtk::MenuItem *sfcbox_slot_items[2] = {};
+    Gtk::RadioMenuItem *sfcbox_krom_items[2] = {};
     Gtk::MenuItem *nss_item = nullptr;
     Gtk::MenuItem *nss_game_items[3] = {};
     Gtk::MenuItem *nss_eject_items[3] = {};

@@ -247,6 +247,7 @@ struct EmuConfig
     bool sfcbox_osd_backdrop;
     bool sfcbox_osd_english;
     int sfcbox_keyswitch;
+    int sfcbox_krom_version;
     // Event carts: session minutes (3-18) and timer display (0 none,
     // 1 on screen, 2 window title), kept per board as on win32.
     int pf94_timer_minutes;
@@ -316,7 +317,7 @@ struct EmuConfig
     // Then the five Game Boy Model consoles in S9xGBModelHotkeys order, the
     // BIOS Manager, the coin-op front panels, and the Super Disc's
     // Insert/Eject last.
-    static const int num_shortcuts = 97;
+    static const int num_shortcuts = 102;
 
     /* Save states are organized in banks of slots, as on win32. The state
      * file extension is the flat index, bank * save_slots_per_bank + slot. */

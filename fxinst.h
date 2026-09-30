@@ -219,7 +219,18 @@ struct FxRegs_s
     uint8	bCycleMode;		// 1 = cycle budget (default), 0 = legacy
     uint32	vRomReadyAt;	// vCycles when the pending ROM buffer read lands
     uint32	vRamReadyAt;	// vCycles when the pending RAM buffer write lands
+    uint8	vPixPrimX;		// PLOT pixel caches (timing only): primary row x & 0xf8,
+    uint8	vPixPrimY;		// its y, and each cache's plotted-pixel bits
+    uint8	vPixPrimValid;
+    uint8	vPixSecValid;
+    uint8	vBusTouch;		// FX_BUS_ROM/RAM accessed by the current instruction
+    uint8	vBusOwned;		// buses SCMR RON/RAN give the GSU this slice
+    uint8	vBusWait;		// halted until the CPU hands these buses back
 };
+
+#define FX_BUS_ROM	0x01
+#define FX_BUS_RAM	0x02
+#define FX_BUS(b)	{ GSU.vBusTouch |= (b); }
 
 extern struct FxRegs_s	GSU;
 
@@ -253,14 +264,23 @@ extern struct FxRegs_s	GSU;
 #define FX_RAM_WRITE_BYTE \
 { \
 	FX_SYNC_RAM; \
+	FX_BUS(FX_BUS_RAM); \
 	GSU.vRamReadyAt = GSU.vCycles + GSU.vCostMem; \
 }
 
 #define FX_RAM_WRITE_WORD \
 { \
 	FX_SYNC_RAM; \
+	FX_BUS(FX_BUS_RAM); \
 	FX_CYC(GSU.vCostMem); \
 	GSU.vRamReadyAt = GSU.vCycles + GSU.vCostMem; \
+}
+
+// A RAM load waits for the pending write, then reads the bus
+#define FX_RAM_READ \
+{ \
+	FX_SYNC_RAM; \
+	FX_BUS(FX_BUS_RAM); \
 }
 
 // GSU registers
@@ -361,15 +381,19 @@ extern struct FxRegs_s	GSU;
 		{ \
 			GSU.vCacheMask |= _flb; \
 			FX_CYC(GSU.vCostMem << 4); \
+			FX_BUS(GSU.vPrgBankReg >= 0x70 ? FX_BUS_RAM : FX_BUS_ROM); \
 		} \
 		FX_CYC(GSU.vCostCache); \
 	} \
 	else \
 	{ \
 		if (GSU.vPrgBankReg >= 0x70) \
-			FX_SYNC_RAM \
+			FX_RAM_READ \
 		else \
+		{ \
 			FX_SYNC_ROM \
+			FX_BUS(FX_BUS_ROM); \
+		} \
 		FX_CYC(GSU.vCostMem); \
 	} \
 }
@@ -395,7 +419,7 @@ extern struct FxRegs_s	GSU;
 
 // Read R14, starting the background ROM buffer load (the byte is latched
 // here; FX_SYNC_ROM charges whatever remains of the load when it's consumed)
-#define READR14			{ GSU.vRomBuffer = ROM(R14); GSU.vRomReadyAt = GSU.vCycles + GSU.vCostMem; }
+#define READR14			{ GSU.vRomBuffer = ROM(R14); GSU.vRomReadyAt = GSU.vCycles + GSU.vCostMem; FX_BUS(FX_BUS_ROM); }
 
 // Test and/or read R14
 #define TESTR14			if (GSU.pvDreg == &R14) READR14

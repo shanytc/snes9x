@@ -1182,10 +1182,10 @@ void Snes9xWindow::open_voicekun_dialog()
     configure_widgets();
 }
 
-// SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
-// position index as win32 does.
-static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
-static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
+// SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3/4, mapped to the KROM's
+// position index as win32 does (4 = Power OFF, which only the menu offers).
+static const uint8 sfcbox_keyswitch_map[6] = { 4, 0, 1, 2, 3, SFCBOX_KEY_POWER_OFF };
+static const char *sfcbox_keyswitch_names[6] = { "Options", "OFF", "ON", "Check Play", "Self Test", "Power OFF" };
 
 // Cartridge titles go into mnemonic labels, where '_' marks the access key.
 static std::string mnemonic_escape(const char *s)
@@ -1266,13 +1266,48 @@ void Snes9xWindow::create_arcade_menus()
     auto coin = add_item(sfcbox_menu, _("_Insert Coin"));
     coin->set_tooltip_text(_("Drop a 100-yen coin into the box. Play time per coin is set in the attendant menus."));
     coin->signal_activate().connect([this] { insert_coin(0); });
+    auto reset = add_item(sfcbox_menu, _("_Reset Switch"));
+    reset->set_tooltip_text(_("Front-panel reset: restarts the game in play, or backs out of the game select screens."));
+    reset->signal_activate().connect([this] { sfcbox_press_switch(SFCBOX_RESET_SWITCH); });
+    // Checked while the TV indicator is lit (RF installs only).
+    sfcbox_tvgame_item = add_check(sfcbox_menu, _("_GAME/TV Switch"));
+    sfcbox_tvgame_item->set_tooltip_text(_("Switches the TV between the games and broadcast TV. Works only when the "
+                                           "attendant menus set the TV connection to RF."));
+    sfcbox_tvgame_item->signal_toggled().connect([this] {
+        if (!syncing_menu)
+            sfcbox_press_switch(SFCBOX_TVGAME_SWITCH);
+    });
+    sfcbox_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    for (int slot = 0; slot < 2; slot++)
+    {
+        sfcbox_slot_items[slot] = add_item(sfcbox_menu, fmt::format("Slot {}: Mount...", slot + 1));
+        sfcbox_slot_items[slot]->signal_activate().connect([this, slot] { sfcbox_mount_eject(slot); });
+    }
+    sfcbox_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    auto krom_item = add_item(sfcbox_menu, _("BI_OS"));
+    auto krom_menu = Gtk::manage(new Gtk::Menu());
+    Gtk::RadioMenuItem::Group krom_group;
+    for (int v = 0; v < 2; v++)
+    {
+        auto item = Gtk::manage(new Gtk::RadioMenuItem(krom_group, v ? _("v_2.00") : _("v_1.00"), true));
+        item->signal_toggled().connect([this, v, item] {
+            if (syncing_menu || !item->get_active())
+                return;
+            sfcbox_set_krom_version(v + 1);
+        });
+        krom_menu->append(*item);
+        sfcbox_krom_items[v] = item;
+    }
+    krom_item->set_submenu(*krom_menu);
 
     auto keyswitch_item = add_item(sfcbox_menu, _("_Keyswitch"));
-    keyswitch_item->set_tooltip_text(_("\"1\" opens the attendant setup menus, \"3\" the self-test; "
-                                       "OFF/ON/\"2\" are play modes. The supervisor polls it live, no reset needed."));
+    keyswitch_item->set_tooltip_text(_("Options opens the attendant setup menus, Self Test the self-test; "
+                                       "OFF/ON/Check Play are play modes; Power OFF cuts the power and turning back boots the box."));
     auto keyswitch_menu = Gtk::manage(new Gtk::Menu());
     Gtk::RadioMenuItem::Group keyswitch_group;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 6; i++)
     {
         auto item = Gtk::manage(new Gtk::RadioMenuItem(keyswitch_group, sfcbox_keyswitch_names[i]));
         item->signal_toggled().connect([this, i, item] {
@@ -1284,7 +1319,24 @@ void Snes9xWindow::create_arcade_menus()
         sfcbox_keyswitch_items[i] = item;
     }
     keyswitch_item->set_submenu(*keyswitch_menu);
-    sfcbox_menu->append(*Gtk::manage(new Gtk::SeparatorMenuItem()));
+
+    auto language_item = add_item(sfcbox_menu, _("OSD _Language"));
+    auto language_menu = Gtk::manage(new Gtk::Menu());
+    Gtk::RadioMenuItem::Group language_group;
+    sfcbox_japanese_item = Gtk::manage(new Gtk::RadioMenuItem(language_group, _("_Japanese"), true));
+    sfcbox_english_item = Gtk::manage(new Gtk::RadioMenuItem(language_group, _("_English"), true));
+    sfcbox_english_item->set_tooltip_text(_("Translate the supervisor's on-screen text to English. Game text and "
+                                            "the game-select menus are drawn by the games and stay Japanese."));
+    for (auto item : { sfcbox_japanese_item, sfcbox_english_item })
+    {
+        item->signal_toggled().connect([this, item] {
+            if (syncing_menu || !item->get_active())
+                return;
+            Settings.SFCBoxOSDEnglish = (item == sfcbox_english_item);
+        });
+        language_menu->append(*item);
+    }
+    language_item->set_submenu(*language_menu);
 
     sfcbox_backdrop_item = add_check(sfcbox_menu, _("OSD _Backdrop"));
     sfcbox_backdrop_item->set_tooltip_text(_("Draw the supervisor screens over the MB90082 OSD chip's solid "
@@ -1292,13 +1344,6 @@ void Snes9xWindow::create_arcade_menus()
     sfcbox_backdrop_item->signal_toggled().connect([this] {
         if (!syncing_menu)
             Settings.SFCBoxOSDBackdrop = sfcbox_backdrop_item->get_active();
-    });
-    sfcbox_english_item = add_check(sfcbox_menu, _("_English OSD"));
-    sfcbox_english_item->set_tooltip_text(_("Translate the supervisor's on-screen text to English. Game text and "
-                                            "the game-select menus are drawn by the games and stay Japanese."));
-    sfcbox_english_item->signal_toggled().connect([this] {
-        if (!syncing_menu)
-            Settings.SFCBoxOSDEnglish = sfcbox_english_item->get_active();
     });
 
     sfcbox_item = Gtk::manage(new Gtk::MenuItem(_("Super _Famicom Box"), true));
@@ -1479,11 +1524,27 @@ void Snes9xWindow::refresh_arcade_menus()
     sfcbox_item->set_visible(box);
     if (box)
     {
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 6; i++)
             if (sfcbox_keyswitch_map[i] == SFCBox.Keyswitch)
                 sfcbox_keyswitch_items[i]->set_active(true);
         sfcbox_backdrop_item->set_active(Settings.SFCBoxOSDBackdrop);
-        sfcbox_english_item->set_active(Settings.SFCBoxOSDEnglish);
+        (Settings.SFCBoxOSDEnglish ? sfcbox_english_item : sfcbox_japanese_item)->set_active(true);
+        sfcbox_tvgame_item->set_active(S9xSFCBoxTVMode());
+
+        for (int slot = 0; slot < 2; slot++)
+            sfcbox_slot_items[slot]->set_label(SFCBox.SlotPresent[slot]
+                ? fmt::format("Slot {}: Eject ({})", slot + 1, mnemonic_escape(S9xSFCBoxSlotName(slot)))
+                : fmt::format("Slot {}: Mount...", slot + 1));
+
+        // A KROM file with one version only boots that one, and the choice follows it.
+        const uint8 krom = S9xSFCBoxResolveKROMVersion();
+        const uint8 have = S9xSFCBoxKROMVersions();
+        for (int v = 0; v < 2; v++)
+        {
+            if (krom == v + 1)
+                sfcbox_krom_items[v]->set_active(true);
+            sfcbox_krom_items[v]->set_sensitive(have & (1 << v));
+        }
     }
 
     const bool event_cart = config->rom_loaded && PF94.active;
@@ -1549,10 +1610,87 @@ void Snes9xWindow::sfcbox_set_keyswitch(int panel_pos)
 {
     if (!config->rom_loaded || !SFCBox.Active)
         return;
-    SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
-    Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;   // and the next power-on
+    // Only leaving Power OFF needs a reset: the box boots from cold.
+    if (S9xSFCBoxTurnKey(sfcbox_keyswitch_map[panel_pos]))
+        S9xReset();
     auto message = fmt::format("SFC-Box keyswitch: {}", sfcbox_keyswitch_names[panel_pos]);
     S9xSetInfoString(message.c_str());
+}
+
+void Snes9xWindow::sfcbox_press_switch(int sw)
+{
+    if (config->rom_loaded && SFCBox.Active)
+        S9xSFCBoxPressSwitch(sw);
+}
+
+void Snes9xWindow::sfcbox_set_krom_version(int version)
+{
+    if (!config->rom_loaded || !SFCBox.Active || Settings.SFCBoxKROMVersion == (uint32)version)
+        return;
+    Settings.SFCBoxKROMVersion = version;
+    reload_loaded_game();
+}
+
+void Snes9xWindow::sfcbox_mount_eject(int slot)
+{
+    if (!config->rom_loaded || !SFCBox.Active)
+        return;
+
+    // A filled slot gives up its cartridge; the real box then shows its error.
+    if (SFCBox.SlotPresent[slot])
+    {
+        S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), "");
+        if (reload_loaded_game())
+            S9xSetInfoString(slot ? "Slot 2 ejected" : "Slot 1 ejected");
+        return;
+    }
+
+    pause_from_focus_change();
+
+    auto title = fmt::format("Super Famicom Box - cartridge for slot {}", slot + 1);
+    Gtk::FileChooserDialog dialog(*window.get(), title, Gtk::FILE_CHOOSER_ACTION_OPEN);
+    dialog.add_button(Gtk::StockID("gtk-cancel"), Gtk::RESPONSE_CANCEL);
+    dialog.add_button(Gtk::StockID("gtk-open"), Gtk::RESPONSE_ACCEPT);
+
+    auto filter = Gtk::FileFilter::create();
+    filter->set_name(_("SFC-Box Cartridges"));
+    for (const char *ext : { "*.zip", "*.ZIP", "*.sfc", "*.SFC", "*.bin", "*.BIN" })
+        filter->add_pattern(ext);
+    dialog.add_filter(filter);
+    dialog.add_filter(get_all_files_filter());
+
+    if (!gui_config->last_directory.empty())
+        dialog.set_current_folder(config->last_directory);
+
+    auto result = dialog.run();
+    dialog.hide();
+    unpause_from_focus_change();
+    if (result != Gtk::RESPONSE_ACCEPT)
+        return;
+
+    const std::string filename = dialog.get_filename();
+    std::vector<uint8> carts[2];
+    bool fits = false;
+    if (S9xSFCBoxReadCarts(filename.c_str(), carts) > 0)
+        for (int c = 0; c < 2; c++)
+            if (!carts[c].empty() && (S9xSFCBoxIsMainCart(carts[c].data()) != 0) == (slot == 0))
+                fits = true;
+    if (!fits)
+    {
+        Gtk::MessageDialog msg(*window.get(),
+                               slot ? _("That is not a Super Famicom Box slot 2 cartridge (PSS-62, PSS-63 or PSS-64).")
+                                    : _("That is not a Super Famicom Box slot 1 cartridge (PSS-61)."),
+                               false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_CLOSE, true);
+        msg.set_title(_("Super Famicom Box"));
+        msg.run();
+        return;
+    }
+    S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), filename.c_str());
+    if (reload_loaded_game())
+    {
+        auto message = fmt::format("Slot {}: {}", slot + 1, S9xSFCBoxSlotName(slot));
+        S9xSetInfoString(message.c_str());
+    }
 }
 
 void Snes9xWindow::nss_pulse(uint16_t buttons, bool game_only)

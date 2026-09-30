@@ -39,6 +39,8 @@ struct S9xBiosSlotInfo
 	const char *const *names;  // conventional filenames, NULL-ended; [0] is the dialog hint
 	uint32      size;          // expected byte count, 0 = any
 	const char *note;          // shown while the slot is empty, NULL if required
+	const char *info;          // behind the row's info icon, NULL for none
+	const char *const *nointro; // No-Intro dump names this slot takes, NULL-ended; NULL for none
 };
 
 #define S9X_BIOS_PATH_MAX 512
@@ -47,6 +49,10 @@ struct S9xBiosSlotInfo
 #define S9X_NSS_NOCASH_TEST_CRC 0x15616021u
 
 const S9xBiosSlotInfo *S9xGetBiosSlotInfo (int slot);
+
+// The info icon's full text: the slot's info plus one line per No-Intro
+// dump it takes. Empty when the slot has no info.
+std::string S9xBiosSlotInfoText (int slot);
 
 // Empty string when the slot is unassigned. Set with an empty path to clear.
 const char *S9xGetBiosPath (int slot);
@@ -78,6 +84,10 @@ S9xBiosPathStatus S9xCheckBiosPath (int slot, std::string *detail = NULL);
 // path themselves and run without a BIOS when it fails, so a bad file is a
 // warning, not a block.
 bool8 S9xBiosPathUsable (int slot);
+
+// Whether the slot's file (or one member of its .zip) is exactly `size`
+// bytes. Reads the zip directory only, so it is cheap enough for menus.
+bool8 S9xBiosHasImageOfSize (int slot, uint32 size);
 
 // Assigned path when it is readable, otherwise "". Empty means the loader has
 // no BIOS for that slot; nothing else is searched.

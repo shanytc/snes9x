@@ -24,6 +24,8 @@ struct FxInfo_s
 	uint32	speedPerLine;
 	bool8	oneLineDone;
 	bool8	isFx3;			// Super FX 3 (LRG 2026, ROM type $17/$18)
+	int32	syncCycle;		// cycle mode: line position the GSU has run up to
+	int32	cycleDebt;		// cycle mode: GSU cycles overrun past the last slice
 };
 
 extern struct FxInfo_s	SuperFX;

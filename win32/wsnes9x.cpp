@@ -973,7 +973,7 @@ static void WinRequestScreenshot()
 // the port 80h bit the position grounds (the relay-off position is omitted).
 // Order of Emulation -> Super Famicom Box -> Keyswitch and its hotkeys.
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
-static const char *sfcbox_keyswitch_names[5] = { "1 (Options)", "OFF", "ON (Play)", "2", "3 (Self-Test)" };
+static const char *sfcbox_keyswitch_names[5] = { "Options", "OFF", "ON", "Check Play", "Self Test" };
 
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {
@@ -1313,6 +1313,17 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				SendMenuCommand(ID_SFCBOX_KEYSWITCH0 + ksp);
 				hitHotKey = true;
 			}
+		}
+		// SFC-Box push switches and slots, through the menu like the NSS panel.
+		if(HKmatch(SFCBoxReset))     { SendMenuCommand(ID_SFCBOX_RESET);     hitHotKey = true; }
+		if(HKmatch(SFCBoxTVGame))    { SendMenuCommand(ID_SFCBOX_TVGAME);    hitHotKey = true; }
+		if(HKmatch(SFCBoxPowerOff))  { SendMenuCommand(ID_SFCBOX_POWER_OFF); hitHotKey = true; }
+		for(int sfcm = 0; sfcm < 2; sfcm++)
+		{
+			if(!HKmatch(SFCBoxMountEject[sfcm]))
+				continue;
+			SendMenuCommand(ID_SFCBOX_SLOT0 + sfcm);
+			hitHotKey = true;
 		}
 		// Nintendo Super System front panel. Sent as menu commands so a key
 		// and its menu entry cannot drift apart, and so an entry the menu has
@@ -3064,17 +3075,29 @@ LRESULT CALLBACK WinProc(
 				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
 			}
 			break;
+		case ID_SFCBOX_RESET:
+		case ID_SFCBOX_TVGAME:
+			if (SFCBox.Active)
+				S9xSFCBoxPressSwitch(cmd_id == ID_SFCBOX_RESET ? SFCBOX_RESET_SWITCH : SFCBOX_TVGAME_SWITCH);
+			break;
 		case ID_SFCBOX_KEYSWITCH0 + 0: case ID_SFCBOX_KEYSWITCH0 + 1:
 		case ID_SFCBOX_KEYSWITCH0 + 2: case ID_SFCBOX_KEYSWITCH0 + 3:
-		case ID_SFCBOX_KEYSWITCH0 + 4:
+		case ID_SFCBOX_KEYSWITCH0 + 4: case ID_SFCBOX_POWER_OFF:
 			if (SFCBox.Active)
 			{
-				// The KROM polls the switch live, no reset needed.
-				const int ksp = cmd_id - ID_SFCBOX_KEYSWITCH0;
+				// The KROM polls the switch live; only leaving Power OFF
+				// needs a reset, the cold boot of a box getting power again.
+				const int  ksp = (cmd_id == ID_SFCBOX_POWER_OFF) ? -1 : cmd_id - ID_SFCBOX_KEYSWITCH0;
+				const bool power_on = S9xSFCBoxTurnKey(ksp < 0 ? SFCBOX_KEY_POWER_OFF : sfcbox_keyswitch_map[ksp]);
 				char msg[48];
-				SFCBox.Keyswitch = sfcbox_keyswitch_map[ksp];
-				Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;	// and the next power-on
-				snprintf(msg, sizeof(msg), "SFC-Box keyswitch: %s", sfcbox_keyswitch_names[ksp]);
+				snprintf(msg, sizeof(msg), "SFC-Box keyswitch: %s", ksp < 0 ? "Power OFF" : sfcbox_keyswitch_names[ksp]);
+				if (power_on)
+				{
+					S9xReset();
+#ifdef RETROACHIEVEMENTS_SUPPORT
+					RA_OnReset();
+#endif
+				}
 				S9xMessage(S9X_INFO, S9X_INFO, msg);
 			}
 			break;
@@ -3085,6 +3108,80 @@ LRESULT CALLBACK WinProc(
 		case ID_SFCBOX_OSD_BACKDROP:
 			Settings.SFCBoxOSDBackdrop = !Settings.SFCBoxOSDBackdrop;
 			break;
+		// A different KROM, or a cart swapped in slot 2, is a power cycle: the
+		// load saves the outgoing battery RAM and brings the box up again.
+		case ID_SFCBOX_KROM_V1:
+		case ID_SFCBOX_KROM_V2:
+		{
+			const uint8 v = (cmd_id == ID_SFCBOX_KROM_V2) ? 2 : 1;
+			if (!SFCBox.Active || SFCBox.KROMVersion == v || !(S9xSFCBoxKROMVersions() & v))
+				break;
+			Settings.SFCBoxKROMVersion = v;
+			if (ReloadLoadedGame())
+				S9xSetInfoString(v == 2 ? "SFC-Box BIOS: KROM 2.00" : "SFC-Box BIOS: KROM 1.00");
+			CheckMenuStates();
+			break;
+		}
+		// Slot 1 takes the PSS-61, slot 2 a PSS-62/63/64. A filled slot gives
+		// up its cartridge, an empty one takes a file; either can stay empty,
+		// and the KROM then reports the missing cartridge itself.
+		case ID_SFCBOX_SLOT0 + 0:
+		case ID_SFCBOX_SLOT0 + 1:
+		{
+			const int slot = cmd_id - ID_SFCBOX_SLOT0;
+			if (!SFCBox.Active)
+				break;
+			if (SFCBox.SlotPresent[slot])
+			{
+				S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), "");
+				if (ReloadLoadedGame())
+					S9xSetInfoString(slot ? "Slot 2 ejected" : "Slot 1 ejected");
+				CheckMenuStates();
+				break;
+			}
+			RestoreGUIDisplay();
+			OPENFILENAME	ofn;
+			TCHAR			szFileName[MAX_PATH];
+			szFileName[0] = TEXT('\0');
+			memset((LPVOID) &ofn, 0, sizeof(OPENFILENAME));
+			ofn.lStructSize = sizeof(OPENFILENAME);
+			ofn.hwndOwner   = GUI.hWnd;
+			ofn.lpstrFilter = TEXT("SFC-Box Cartridges (*.zip;*.sfc;*.bin)\0*.zip;*.sfc;*.bin\0All Files (*.*)\0*.*\0\0");
+			ofn.lpstrFile   = szFileName;
+			ofn.nMaxFile    = MAX_PATH;
+			ofn.lpstrTitle  = slot ? TEXT("Super Famicom Box - cartridge for slot 2")
+			                       : TEXT("Super Famicom Box - cartridge for slot 1");
+			ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
+			const bool picked = GetOpenFileName(&ofn) != 0;
+			RestoreSNESDisplay();
+			if (!picked)
+				break;
+
+			const std::string	path = (const char *) _tToChar(szFileName);
+			std::vector<uint8>	carts[2];
+			bool				fits = false;
+			if (S9xSFCBoxReadCarts(path.c_str(), carts) > 0)
+				for (int c = 0; c < 2; c++)
+					if (!carts[c].empty() && (S9xSFCBoxIsMainCart(carts[c].data()) != 0) == (slot == 0))
+						fits = true;
+			if (!fits)
+			{
+				MessageBox(GUI.hWnd,
+					slot ? TEXT("That is not a Super Famicom Box slot 2 cartridge (PSS-62, PSS-63 or PSS-64).")
+					     : TEXT("That is not a Super Famicom Box slot 1 cartridge (PSS-61)."),
+					TEXT("Super Famicom Box"), MB_OK | MB_ICONWARNING);
+				break;
+			}
+			S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), path.c_str());
+			if (ReloadLoadedGame())
+			{
+				char msg[128];
+				snprintf(msg, sizeof msg, "Slot %d: %s", slot + 1, S9xSFCBoxSlotName(slot));
+				S9xSetInfoString(msg);
+			}
+			CheckMenuStates();
+			break;
+		}
 
 		case ID_NSS_COIN1:
 		case ID_NSS_COIN2:
@@ -5986,12 +6083,41 @@ static void CheckMenuStates ()
 		mii.fState = (sfcbox_keyswitch_map[ksp] == SFCBox.Keyswitch) ? MFS_CHECKED : MFS_UNCHECKED;
 		SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_KEYSWITCH0 + ksp, FALSE, &mii);
 	}
+	mii.fState = S9xSFCBoxPoweredOff() ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_POWER_OFF, FALSE, &mii);
 	mii.fState = Settings.SFCBoxOSDEnglish ? MFS_UNCHECKED : MFS_CHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_JAPANESE, FALSE, &mii);
 	mii.fState = Settings.SFCBoxOSDEnglish ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_ENGLISH, FALSE, &mii);
 	mii.fState = Settings.SFCBoxOSDBackdrop ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_BACKDROP, FALSE, &mii);
+	mii.fState = S9xSFCBoxTVMode() ? MFS_CHECKED : MFS_UNCHECKED;	// the TV indicator
+	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_TVGAME, FALSE, &mii);
+	if (SFCBox.Active)
+	{
+		// A KROM file with one version only boots that one, and the choice follows it.
+		const uint8 krom = S9xSFCBoxResolveKROMVersion();
+		const uint8 have = S9xSFCBoxKROMVersions();
+		mii.fState = (krom == 1 ? MFS_CHECKED : MFS_UNCHECKED) | ((have & 1) ? MFS_ENABLED : MFS_GRAYED);
+		SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_KROM_V1, FALSE, &mii);
+		mii.fState = (krom == 2 ? MFS_CHECKED : MFS_UNCHECKED) | ((have & 2) ? MFS_ENABLED : MFS_GRAYED);
+		SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_KROM_V2, FALSE, &mii);
+		// Each slot says what is in it.
+		for (int slot = 0; slot < 2; slot++)
+		{
+			TCHAR text[160];
+			if (SFCBox.SlotPresent[slot])
+				_sntprintf(text, 160, TEXT("Slot %d: Eject (%hs)"), slot + 1, S9xSFCBoxSlotName(slot));
+			else
+				_sntprintf(text, 160, TEXT("Slot %d: Mount..."), slot + 1);
+			text[159] = 0;
+			MENUITEMINFO txt = {};
+			txt.cbSize     = sizeof(txt);
+			txt.fMask      = MIIM_STRING;
+			txt.dwTypeData = text;
+			SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_SLOT0 + slot, FALSE, &txt);
+		}
+	}
 
 	// Super Disc drive.
 	{
@@ -10151,10 +10277,398 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	BiosManagerSetStatus(hDlg, slot, text.c_str());
 }
 
+// A clickable info icon in the gap between the row's label and its path box.
+static void BiosManagerAddInfoIcon(HWND hDlg, int slot)
+{
+	static HICON icon;
+	const S9xBiosSlotInfo *info = S9xGetBiosSlotInfo(slot);
+	if (!info->info) return;
+
+	const int size = GetSystemMetrics(SM_CXSMICON);
+	if (!icon && FAILED(LoadIconWithScaleDown(NULL, IDI_INFORMATION, size, size, &icon)))
+		return;
+
+	RECT label, edit;
+	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_LABEL0 + slot), &label);
+	MapWindowPoints(NULL, hDlg, (POINT *) &label, 2);
+	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_EDIT0 + slot), &edit);
+	MapWindowPoints(NULL, hDlg, (POINT *) &edit, 2);
+
+	HWND hIcon = CreateWindowEx(0, TEXT("STATIC"), NULL,
+	                            WS_CHILD | WS_VISIBLE | SS_ICON | SS_REALSIZECONTROL | SS_NOTIFY,
+	                            (label.right + edit.left - size) / 2, (edit.top + edit.bottom - size) / 2,
+	                            size, size,
+	                            hDlg, (HMENU) (INT_PTR) (IDC_BIOSMGR_INFO0 + slot), g_hInst, NULL);
+	SendMessage(hIcon, STM_SETICON, (WPARAM) icon, 0);
+
+	if (s_bios_tip)
+	{
+		Utf8ToWide tip(S9xBiosSlotInfoText(slot).c_str());
+		TOOLINFO ti = { 0 };
+		ti.cbSize   = sizeof(ti);
+		ti.hwnd     = hDlg;
+		ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+		ti.uId      = (UINT_PTR) hIcon;
+		ti.lpszText = (LPTSTR) (wchar_t *) tip;
+		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+	}
+}
+
+// Segoe MDL2 Assets ships with Windows 10 and later; older systems get words.
+static int CALLBACK BiosInfoFontFound(const LOGFONT *, const TEXTMETRIC *, DWORD, LPARAM found)
+{
+	*(bool *) found = true;
+	return 0;
+}
+
+static HFONT BiosInfoGlyphFont(HWND hWnd)
+{
+	LOGFONT lf = { 0 };
+	lf.lfCharSet = DEFAULT_CHARSET;
+	lstrcpy(lf.lfFaceName, TEXT("Segoe MDL2 Assets"));
+	bool found = false;
+	HDC dc = GetDC(hWnd);
+	EnumFontFamiliesEx(dc, &lf, BiosInfoFontFound, (LPARAM) &found, 0);
+	lf.lfHeight = -MulDiv(10, GetDeviceCaps(dc, LOGPIXELSY), 72);
+	ReleaseDC(hWnd, dc);
+	return found ? CreateFontIndirect(&lf) : NULL;
+}
+
+// The copy button shows a copy glyph, or a tick for a moment after a copy.
+static void BiosInfoSetCopyFace(HWND hDlg, bool copied)
+{
+	HWND btn = GetDlgItem(hDlg, IDC_BIOSINFO_COPY);
+	if (GetProp(hDlg, TEXT("S9xGlyphFont")))
+		SetWindowText(btn, copied ? L"\xE73E" : L"\xE8C8");
+	else
+		SetWindowText(btn, copied ? TEXT("Copied") : TEXT("Copy"));
+}
+
+static bool BiosInfoToClipboard(HWND hDlg, const std::wstring &text)
+{
+	if (text.empty() || !OpenClipboard(hDlg))
+		return false;
+	EmptyClipboard();
+	const size_t len = (text.size() + 1) * sizeof(wchar_t);
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+	if (hMem)
+	{
+		memcpy(GlobalLock(hMem), text.c_str(), len);
+		GlobalUnlock(hMem);
+		SetClipboardData(CF_UNICODETEXT, hMem);
+	}
+	CloseClipboard();
+	return hMem != NULL;
+}
+
+// A table row's ROM name; "(built-in)" rows have none to give.
+static bool BiosInfoRowName(HWND hList, int item, wchar_t (&name)[MAX_PATH])
+{
+	name[0] = L'\0';
+	ListView_GetItemText(hList, item, 0, name, MAX_PATH);
+	return name[0] && name[0] != L'(';
+}
+
+static void BiosInfoCopyRow(HWND hDlg, HWND hList, int item)
+{
+	wchar_t name[MAX_PATH];
+	if (BiosInfoRowName(hList, item, name))
+		BiosInfoToClipboard(hDlg, name);
+}
+
+// The info icon's popup: the slot's heading over a table of the files it
+// takes, sized to fit, plus a button that copies the file names.
+static INT_PTR CALLBACK DlgBiosInfoProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog(hDlg);
+		const int slot = (int) lParam;
+		SetWindowText(hDlg, Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
+
+		// Line one is the heading; every later line is "name — detail — CRC32",
+		// the last two optional.
+		Utf8ToWide   text_w(S9xBiosSlotInfoText(slot).c_str());
+		std::wstring all((wchar_t *) text_w);
+		size_t       nl = all.find(L'\n');
+		std::wstring heading = all.substr(0, nl);
+		std::vector<std::vector<std::wstring>> rows;
+		bool         versions = true, sizes = true;   // what the detail column holds
+		bool         any_note = false, any_crc = false;
+		while (nl != std::wstring::npos && nl + 1 < all.size())
+		{
+			size_t end = all.find(L'\n', nl + 1);
+			if (end == std::wstring::npos) end = all.size();
+			std::wstring line = all.substr(nl + 1, end - nl - 1);
+			std::vector<std::wstring> f;
+			for (size_t p = 0; f.size() < 2; )
+			{
+				const size_t dash = line.find(L" \x2014 ", p);
+				if (dash == std::wstring::npos) { f.push_back(line.substr(p)); p = std::wstring::npos; break; }
+				f.push_back(line.substr(p, dash - p));
+				p = dash + 3;
+				if (f.size() == 2) f.push_back(line.substr(p));
+			}
+			f.resize(3);
+			if (!f[1].empty())
+			{
+				any_note = true;
+				versions = versions && f[1][0] == L'v';
+				sizes    = sizes && iswdigit(f[1][0]);
+			}
+			any_crc = any_crc || !f[2].empty();
+			rows.push_back(f);
+			nl = (end < all.size()) ? end : std::wstring::npos;
+		}
+
+		// "(built-in)" names no file, so the copies leave it out.
+		std::wstring copy;
+		for (const auto &r : rows)
+			if (r[0][0] != L'(')
+				copy += r[0] + L"\r\n";
+		SetProp(hDlg, TEXT("S9xCopyText"), (HANDLE) new std::wstring(copy));
+
+		HWND hText = GetDlgItem(hDlg, IDC_BIOSINFO_TEXT);
+		HWND hList = GetDlgItem(hDlg, IDC_BIOSINFO_LIST);
+		SetWindowText(hText, heading.c_str());
+
+		HICON icon = NULL;
+		const int isz = GetSystemMetrics(SM_CXICON);
+		if (SUCCEEDED(LoadIconWithScaleDown(NULL, IDI_INFORMATION, isz, isz, &icon)))
+			SendDlgItemMessage(hDlg, IDC_BIOSINFO_ICON, STM_SETICON, (WPARAM) icon, 0);
+
+		HFONT glyph = BiosInfoGlyphFont(hDlg);
+		if (glyph)
+		{
+			SetProp(hDlg, TEXT("S9xGlyphFont"), (HANDLE) glyph);
+			SendDlgItemMessage(hDlg, IDC_BIOSINFO_COPY, WM_SETFONT, (WPARAM) glyph, FALSE);
+		}
+		BiosInfoSetCopyFace(hDlg, false);
+
+		HWND tip = CreateWindowEx(0, TOOLTIPS_CLASS, NULL, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+		                          CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+		                          hDlg, NULL, g_hInst, NULL);
+		if (tip)
+		{
+			TOOLINFO ti = { 0 };
+			ti.cbSize   = sizeof(ti);
+			ti.hwnd     = hDlg;
+			ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+			ti.uId      = (UINT_PTR) GetDlgItem(hDlg, IDC_BIOSINFO_COPY);
+			ti.lpszText = (LPTSTR) TEXT("Copy the ROM names to the clipboard");
+			SendMessage(tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+		}
+
+		RECT tr, lr, cr, okr, cpr;
+		GetWindowRect(hText, &tr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &tr, 2);
+		GetWindowRect(hList, &lr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &lr, 2);
+		GetClientRect(hDlg, &cr);
+		GetWindowRect(GetDlgItem(hDlg, IDOK), &okr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &okr, 2);
+		GetWindowRect(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), &cpr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &cpr, 2);
+		const int margin = cr.right - tr.right;
+		const int gap    = okr.top - lr.bottom;
+
+		// The heading wraps when there is no table under it.
+		HDC   dc  = GetDC(hText);
+		HFONT old = (HFONT) SelectObject(dc, (HFONT) SendMessage(hText, WM_GETFONT, 0, 0));
+		RECT  need = { 0, 0, rows.empty() ? (LONG) (tr.right - tr.left) : 0, 0 };
+		DrawText(dc, heading.c_str(), -1, &need,
+		         DT_CALCRECT | DT_NOPREFIX | (rows.empty() ? DT_WORDBREAK : DT_SINGLELINE));
+		SelectObject(dc, old);
+		ReleaseDC(hText, dc);
+
+		int width  = max((int) (tr.right - tr.left), (int) need.right);
+		int bottom = tr.top + max((int) (tr.bottom - tr.top), (int) need.bottom);
+		if (rows.empty())
+		{
+			EnableWindow(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), FALSE);
+			ShowWindow(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), SW_HIDE);
+			ShowWindow(hList, SW_HIDE);
+		}
+		else
+		{
+			ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+			// Columns: ROM, then whichever of the detail and CRC32 any row has.
+			int      field_of[3] = { 0 }, ncols = 0;
+			LVCOLUMN col = { 0 };
+			col.mask    = LVCF_TEXT | LVCF_WIDTH;
+			col.cx      = 100;
+			col.pszText = (LPTSTR) TEXT("ROM");
+			ListView_InsertColumn(hList, ncols, &col);
+			field_of[ncols++] = 0;
+			if (any_note)
+			{
+				col.pszText = (LPTSTR) (versions ? TEXT("Version") : sizes ? TEXT("Size") : TEXT("Details"));
+				ListView_InsertColumn(hList, ncols, &col);
+				field_of[ncols++] = 1;
+			}
+			if (any_crc)
+			{
+				col.pszText = (LPTSTR) TEXT("CRC32");
+				ListView_InsertColumn(hList, ncols, &col);
+				field_of[ncols++] = 2;
+			}
+			for (int i = 0; i < (int) rows.size(); i++)
+			{
+				LVITEM it = { 0 };
+				it.mask    = LVIF_TEXT;
+				it.iItem   = i;
+				it.pszText = (LPTSTR) rows[i][0].c_str();
+				ListView_InsertItem(hList, &it);
+				for (int c = 1; c < ncols; c++)
+					ListView_SetItemText(hList, i, c, (LPTSTR) rows[i][field_of[c]].c_str());
+			}
+			for (int c = 0; c < ncols; c++)
+				ListView_SetColumnWidth(hList, c, LVSCW_AUTOSIZE_USEHEADER);
+
+			// Every row visible: the view's own estimate plus the border.
+			const DWORD view = ListView_ApproximateViewRect(hList, -1, -1, (int) rows.size());
+			RECT wr = { 0, 0, LOWORD(view) + 2, HIWORD(view) + 2 };
+			AdjustWindowRectEx(&wr, GetWindowLong(hList, GWL_STYLE), FALSE, GetWindowLong(hList, GWL_EXSTYLE));
+			const int listw = wr.right - wr.left;
+			const int listh = wr.bottom - wr.top;
+			const int top   = bottom + (lr.top - tr.bottom);
+			SetWindowPos(hList, NULL, lr.left, top, listw, listh, SWP_NOZORDER);
+			width  = max(width, listw);
+			bottom = top + listh;
+		}
+		SetWindowPos(hText, NULL, 0, 0, width, (rows.empty() ? need.bottom : tr.bottom - tr.top),
+		             SWP_NOMOVE | SWP_NOZORDER);
+
+		const int clientw = tr.left + width + margin;
+		const int btn_top = bottom + gap;
+		const int clienth = btn_top + (okr.bottom - okr.top) + (cr.bottom - okr.bottom);
+		SetWindowPos(GetDlgItem(hDlg, IDOK), NULL, clientw - margin - (okr.right - okr.left), btn_top, 0, 0,
+		             SWP_NOSIZE | SWP_NOZORDER);
+		SetWindowPos(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), NULL, cpr.left, btn_top, 0, 0,
+		             SWP_NOSIZE | SWP_NOZORDER);
+
+		RECT dr = { 0, 0, clientw, clienth };
+		AdjustWindowRectEx(&dr, GetWindowLong(hDlg, GWL_STYLE), FALSE, GetWindowLong(hDlg, GWL_EXSTYLE));
+		RECT owner;
+		GetWindowRect(GetParent(hDlg), &owner);
+		const int w = dr.right - dr.left, h = dr.bottom - dr.top;
+		SetWindowPos(hDlg, NULL, (owner.left + owner.right - w) / 2, (owner.top + owner.bottom - h) / 2, w, h,
+		             SWP_NOZORDER | SWP_NOACTIVATE);
+		SetFocus(GetDlgItem(hDlg, IDOK));
+		return false;
+	}
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDC_BIOSINFO_COPY:
+		{
+			const std::wstring *copy = (const std::wstring *) GetProp(hDlg, TEXT("S9xCopyText"));
+			if (copy && BiosInfoToClipboard(hDlg, *copy))
+			{
+				BiosInfoSetCopyFace(hDlg, true);
+				SetTimer(hDlg, 1, 1200, NULL);
+			}
+			return true;
+		}
+		case IDOK:
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return true;
+		}
+		break;
+
+	case WM_CONTEXTMENU:
+	{
+		HWND hList = GetDlgItem(hDlg, IDC_BIOSINFO_LIST);
+		if ((HWND) wParam != hList)
+			break;
+
+		// A right-click picks the row under it; Shift+F10 uses the selected one.
+		POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+		int   item;
+		if (pt.x == -1 && pt.y == -1)
+		{
+			item = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+			RECT r;
+			if (item < 0 || !ListView_GetItemRect(hList, item, &r, LVIR_LABEL))
+				return true;
+			pt.x = r.left;
+			pt.y = r.bottom;
+			ClientToScreen(hList, &pt);
+		}
+		else
+		{
+			LVHITTESTINFO ht = { 0 };
+			ht.pt = pt;
+			ScreenToClient(hList, &ht.pt);
+			item = ListView_HitTest(hList, &ht);
+			if (item < 0)
+				return true;
+			ListView_SetItemState(hList, item, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		}
+
+		wchar_t name[MAX_PATH];
+		HMENU   menu = CreatePopupMenu();
+		AppendMenu(menu, MF_STRING | (BiosInfoRowName(hList, item, name) ? 0 : MF_GRAYED), 1, TEXT("&Copy"));
+		const int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
+		DestroyMenu(menu);
+		if (cmd == 1)
+			BiosInfoCopyRow(hDlg, hList, item);
+		return true;
+	}
+
+	case WM_NOTIFY:
+	{
+		// Ctrl+C in the table copies the selected row.
+		const NMLVKEYDOWN *kd = (const NMLVKEYDOWN *) lParam;
+		if (kd->hdr.idFrom == IDC_BIOSINFO_LIST && kd->hdr.code == LVN_KEYDOWN &&
+		    kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
+		{
+			const int item = ListView_GetNextItem(kd->hdr.hwndFrom, -1, LVNI_SELECTED);
+			if (item >= 0)
+				BiosInfoCopyRow(hDlg, kd->hdr.hwndFrom, item);
+			return true;
+		}
+		break;
+	}
+
+	case WM_TIMER:
+		KillTimer(hDlg, 1);
+		BiosInfoSetCopyFace(hDlg, false);
+		return true;
+
+	case WM_DESTROY:
+	{
+		delete (std::wstring *) RemoveProp(hDlg, TEXT("S9xCopyText"));
+		HFONT glyph = (HFONT) RemoveProp(hDlg, TEXT("S9xGlyphFont"));
+		if (glyph) DeleteObject(glyph);
+		HICON icon = (HICON) SendDlgItemMessage(hDlg, IDC_BIOSINFO_ICON, STM_GETICON, 0, 0);
+		if (icon) DestroyIcon(icon);
+		break;
+	}
+	}
+	return false;
+}
+
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
+	case WM_SETCURSOR:
+	{
+		const int id = GetDlgCtrlID((HWND) wParam);
+		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS)
+		{
+			SetCursor(LoadCursor(NULL, IDC_HAND));
+			SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+			return true;
+		}
+		break;
+	}
+
 	case WM_CTLCOLORSTATIC:
 	{
 		const int id = GetDlgCtrlID((HWND) lParam);
@@ -10183,6 +10697,9 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 									WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
 									CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 									hDlg, NULL, g_hInst, NULL);
+		// A width limit is what makes the info tips honour their line breaks.
+		if (s_bios_tip)
+			SendMessage(s_bios_tip, TTM_SETMAXTIPWIDTH, 0, GetSystemMetrics(SM_CXSCREEN));
 		for (int slot = 0; s_bios_tip && slot < S9X_NUM_BIOS_SLOTS; slot++)
 		{
 			TOOLINFO ti = { 0 };
@@ -10198,6 +10715,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		{
 			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
 						   Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
+			BiosManagerAddInfoIcon(hDlg, slot);
 			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
 			BiosManagerRefreshStatus(hDlg, slot);
 		}
@@ -10235,6 +10753,14 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
 			if (GetOpenFileName(&ofn))
 				SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename);
+			return true;
+		}
+
+		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS &&
+			HIWORD(wParam) == STN_CLICKED)
+		{
+			DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSINFO), hDlg, DlgBiosInfoProc,
+			               (LPARAM) (id - IDC_BIOSMGR_INFO0));
 			return true;
 		}
 
@@ -15608,8 +16134,13 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { &CustomKeys.SFCBoxKeyswitch[2], &CustomKeysExtra.SFCBoxKeyswitch[2], HOTKEYS_KEYSWITCH_ON },
         { &CustomKeys.SFCBoxKeyswitch[3], &CustomKeysExtra.SFCBoxKeyswitch[3], HOTKEYS_KEYSWITCH_2 },
         { &CustomKeys.SFCBoxKeyswitch[4], &CustomKeysExtra.SFCBoxKeyswitch[4], HOTKEYS_KEYSWITCH_3 },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { &CustomKeys.SFCBoxPowerOff,     &CustomKeysExtra.SFCBoxPowerOff,     HOTKEYS_KEYSWITCH_POWEROFF },
+        { &CustomKeys.SFCBoxReset,        &CustomKeysExtra.SFCBoxReset,        HOTKEYS_SFCBOX_RESET },
+        { &CustomKeys.SFCBoxTVGame,       &CustomKeysExtra.SFCBoxTVGame,       HOTKEYS_SFCBOX_TVGAME },
+        // Column 2: the cartridge slots
+        { &CustomKeys.SFCBoxMountEject[0], &CustomKeysExtra.SFCBoxMountEject[0], HOTKEYS_SFCBOX_MOUNT1 },
+        { &CustomKeys.SFCBoxMountEject[1], &CustomKeysExtra.SFCBoxMountEject[1], HOTKEYS_SFCBOX_MOUNT2 },
+        { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },

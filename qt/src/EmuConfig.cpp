@@ -128,6 +128,7 @@ static const char *shortcut_names[] =
     "SFCBoxTVGame",
     "SFCBoxMountEject1",
     "SFCBoxMountEject2",
+    "SFCBoxPowerOff",
 };
 
 static const char *default_controller_keys[] =
@@ -235,7 +236,8 @@ static const char *default_controller_keys[] =
     "", //    SFC-Box Reset Switch
     "", //    SFC-Box GAME/TV Switch
     "", //    SFC-Box Mount/Eject Slot 1
-    ""  //    SFC-Box Mount/Eject Slot 2
+    "", //    SFC-Box Mount/Eject Slot 2
+    ""  //    SFC-Box Keyswitch Power OFF
 };
 
 static_assert(std::size(shortcut_names) == EmuConfig::num_shortcuts &&

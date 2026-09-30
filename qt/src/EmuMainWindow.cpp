@@ -921,6 +921,8 @@ bool EmuMainWindow::arcadeShortcut(const std::string &name)
         sfcboxMountEject(0);
     else if (name == "SFCBoxMountEject2")
         sfcboxMountEject(1);
+    else if (name == "SFCBoxPowerOff")
+        sfcboxSetKeyswitch(5);   // the menu's Power OFF entry
     else
     {
         for (int i = 0; i < 5; i++)

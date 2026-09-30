@@ -561,6 +561,11 @@
        <string>SFC-Box: Mount/Eject Slot 2</string>
       </property>
      </row>
+     <row>
+      <property name="text">
+       <string>SFC-Box Keyswitch: Power OFF</string>
+      </property>
+     </row>
      <column>
       <property name="text">
        <string>Binding #1</string>

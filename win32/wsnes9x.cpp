@@ -1317,6 +1317,7 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 		// SFC-Box push switches and slots, through the menu like the NSS panel.
 		if(HKmatch(SFCBoxReset))     { SendMenuCommand(ID_SFCBOX_RESET);     hitHotKey = true; }
 		if(HKmatch(SFCBoxTVGame))    { SendMenuCommand(ID_SFCBOX_TVGAME);    hitHotKey = true; }
+		if(HKmatch(SFCBoxPowerOff))  { SendMenuCommand(ID_SFCBOX_POWER_OFF); hitHotKey = true; }
 		for(int sfcm = 0; sfcm < 2; sfcm++)
 		{
 			if(!HKmatch(SFCBoxMountEject[sfcm]))
@@ -16133,9 +16134,9 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { &CustomKeys.SFCBoxKeyswitch[2], &CustomKeysExtra.SFCBoxKeyswitch[2], HOTKEYS_KEYSWITCH_ON },
         { &CustomKeys.SFCBoxKeyswitch[3], &CustomKeysExtra.SFCBoxKeyswitch[3], HOTKEYS_KEYSWITCH_2 },
         { &CustomKeys.SFCBoxKeyswitch[4], &CustomKeysExtra.SFCBoxKeyswitch[4], HOTKEYS_KEYSWITCH_3 },
+        { &CustomKeys.SFCBoxPowerOff,     &CustomKeysExtra.SFCBoxPowerOff,     HOTKEYS_KEYSWITCH_POWEROFF },
         { &CustomKeys.SFCBoxReset,        &CustomKeysExtra.SFCBoxReset,        HOTKEYS_SFCBOX_RESET },
         { &CustomKeys.SFCBoxTVGame,       &CustomKeysExtra.SFCBoxTVGame,       HOTKEYS_SFCBOX_TVGAME },
-        { NULL, NULL, _T("") },
         // Column 2: the cartridge slots
         { &CustomKeys.SFCBoxMountEject[0], &CustomKeysExtra.SFCBoxMountEject[0], HOTKEYS_SFCBOX_MOUNT1 },
         { &CustomKeys.SFCBoxMountEject[1], &CustomKeysExtra.SFCBoxMountEject[1], HOTKEYS_SFCBOX_MOUNT2 },

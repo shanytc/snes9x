@@ -1217,6 +1217,7 @@ void WinRegisterConfigItems()
 	ADDN(NSSMountEject[0],NSSMountEject1); ADDN(NSSMountEject[1],NSSMountEject2); ADDN(NSSMountEject[2],NSSMountEject3);
 	ADD(SFCBoxReset); ADD(SFCBoxTVGame);
 	ADDN(SFCBoxMountEject[0],SFCBoxMountEject1); ADDN(SFCBoxMountEject[1],SFCBoxMountEject2);
+	ADD(SFCBoxPowerOff);
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
 	ADDN(GBModel[4],GBModelSGBC);
@@ -1260,6 +1261,7 @@ void WinRegisterConfigItems()
 	ADDXALLN(NSSMountEject[0],NSSMountEject1); ADDXALLN(NSSMountEject[1],NSSMountEject2); ADDXALLN(NSSMountEject[2],NSSMountEject3);
 	ADDXALL(SFCBoxReset); ADDXALL(SFCBoxTVGame);
 	ADDXALLN(SFCBoxMountEject[0],SFCBoxMountEject1); ADDXALLN(SFCBoxMountEject[1],SFCBoxMountEject2);
+	ADDXALL(SFCBoxPowerOff);
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
 	ADDXALLN(GBModel[4],GBModelSGBC);

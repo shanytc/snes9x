@@ -10293,7 +10293,7 @@ static void BiosManagerAddInfoIcon(HWND hDlg, int slot)
 
 	if (s_bios_tip)
 	{
-		Utf8ToWide tip(info->info);
+		Utf8ToWide tip(S9xBiosSlotInfoText(slot).c_str());
 		TOOLINFO ti = { 0 };
 		ti.cbSize   = sizeof(ti);
 		ti.hwnd     = hDlg;
@@ -10302,6 +10302,345 @@ static void BiosManagerAddInfoIcon(HWND hDlg, int slot)
 		ti.lpszText = (LPTSTR) (wchar_t *) tip;
 		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
 	}
+}
+
+// Segoe MDL2 Assets ships with Windows 10 and later; older systems get words.
+static int CALLBACK BiosInfoFontFound(const LOGFONT *, const TEXTMETRIC *, DWORD, LPARAM found)
+{
+	*(bool *) found = true;
+	return 0;
+}
+
+static HFONT BiosInfoGlyphFont(HWND hWnd)
+{
+	LOGFONT lf = { 0 };
+	lf.lfCharSet = DEFAULT_CHARSET;
+	lstrcpy(lf.lfFaceName, TEXT("Segoe MDL2 Assets"));
+	bool found = false;
+	HDC dc = GetDC(hWnd);
+	EnumFontFamiliesEx(dc, &lf, BiosInfoFontFound, (LPARAM) &found, 0);
+	lf.lfHeight = -MulDiv(10, GetDeviceCaps(dc, LOGPIXELSY), 72);
+	ReleaseDC(hWnd, dc);
+	return found ? CreateFontIndirect(&lf) : NULL;
+}
+
+// The copy button shows a copy glyph, or a tick for a moment after a copy.
+static void BiosInfoSetCopyFace(HWND hDlg, bool copied)
+{
+	HWND btn = GetDlgItem(hDlg, IDC_BIOSINFO_COPY);
+	if (GetProp(hDlg, TEXT("S9xGlyphFont")))
+		SetWindowText(btn, copied ? L"\xE73E" : L"\xE8C8");
+	else
+		SetWindowText(btn, copied ? TEXT("Copied") : TEXT("Copy"));
+}
+
+static bool BiosInfoToClipboard(HWND hDlg, const std::wstring &text)
+{
+	if (text.empty() || !OpenClipboard(hDlg))
+		return false;
+	EmptyClipboard();
+	const size_t len = (text.size() + 1) * sizeof(wchar_t);
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+	if (hMem)
+	{
+		memcpy(GlobalLock(hMem), text.c_str(), len);
+		GlobalUnlock(hMem);
+		SetClipboardData(CF_UNICODETEXT, hMem);
+	}
+	CloseClipboard();
+	return hMem != NULL;
+}
+
+// A table row's ROM name; "(built-in)" rows have none to give.
+static bool BiosInfoRowName(HWND hList, int item, wchar_t (&name)[MAX_PATH])
+{
+	name[0] = L'\0';
+	ListView_GetItemText(hList, item, 0, name, MAX_PATH);
+	return name[0] && name[0] != L'(';
+}
+
+static void BiosInfoCopyRow(HWND hDlg, HWND hList, int item)
+{
+	wchar_t name[MAX_PATH];
+	if (BiosInfoRowName(hList, item, name))
+		BiosInfoToClipboard(hDlg, name);
+}
+
+// The info icon's popup: the slot's heading over a table of the files it
+// takes, sized to fit, plus a button that copies the file names.
+static INT_PTR CALLBACK DlgBiosInfoProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog(hDlg);
+		const int slot = (int) lParam;
+		SetWindowText(hDlg, Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
+
+		// Line one is the heading; every later line is "name — detail — CRC32",
+		// the last two optional.
+		Utf8ToWide   text_w(S9xBiosSlotInfoText(slot).c_str());
+		std::wstring all((wchar_t *) text_w);
+		size_t       nl = all.find(L'\n');
+		std::wstring heading = all.substr(0, nl);
+		std::vector<std::vector<std::wstring>> rows;
+		bool         versions = true, sizes = true;   // what the detail column holds
+		bool         any_note = false, any_crc = false;
+		while (nl != std::wstring::npos && nl + 1 < all.size())
+		{
+			size_t end = all.find(L'\n', nl + 1);
+			if (end == std::wstring::npos) end = all.size();
+			std::wstring line = all.substr(nl + 1, end - nl - 1);
+			std::vector<std::wstring> f;
+			for (size_t p = 0; f.size() < 2; )
+			{
+				const size_t dash = line.find(L" \x2014 ", p);
+				if (dash == std::wstring::npos) { f.push_back(line.substr(p)); p = std::wstring::npos; break; }
+				f.push_back(line.substr(p, dash - p));
+				p = dash + 3;
+				if (f.size() == 2) f.push_back(line.substr(p));
+			}
+			f.resize(3);
+			if (!f[1].empty())
+			{
+				any_note = true;
+				versions = versions && f[1][0] == L'v';
+				sizes    = sizes && iswdigit(f[1][0]);
+			}
+			any_crc = any_crc || !f[2].empty();
+			rows.push_back(f);
+			nl = (end < all.size()) ? end : std::wstring::npos;
+		}
+
+		// "(built-in)" names no file, so the copies leave it out.
+		std::wstring copy;
+		for (const auto &r : rows)
+			if (r[0][0] != L'(')
+				copy += r[0] + L"\r\n";
+		SetProp(hDlg, TEXT("S9xCopyText"), (HANDLE) new std::wstring(copy));
+
+		HWND hText = GetDlgItem(hDlg, IDC_BIOSINFO_TEXT);
+		HWND hList = GetDlgItem(hDlg, IDC_BIOSINFO_LIST);
+		SetWindowText(hText, heading.c_str());
+
+		HICON icon = NULL;
+		const int isz = GetSystemMetrics(SM_CXICON);
+		if (SUCCEEDED(LoadIconWithScaleDown(NULL, IDI_INFORMATION, isz, isz, &icon)))
+			SendDlgItemMessage(hDlg, IDC_BIOSINFO_ICON, STM_SETICON, (WPARAM) icon, 0);
+
+		HFONT glyph = BiosInfoGlyphFont(hDlg);
+		if (glyph)
+		{
+			SetProp(hDlg, TEXT("S9xGlyphFont"), (HANDLE) glyph);
+			SendDlgItemMessage(hDlg, IDC_BIOSINFO_COPY, WM_SETFONT, (WPARAM) glyph, FALSE);
+		}
+		BiosInfoSetCopyFace(hDlg, false);
+
+		HWND tip = CreateWindowEx(0, TOOLTIPS_CLASS, NULL, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+		                          CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+		                          hDlg, NULL, g_hInst, NULL);
+		if (tip)
+		{
+			TOOLINFO ti = { 0 };
+			ti.cbSize   = sizeof(ti);
+			ti.hwnd     = hDlg;
+			ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+			ti.uId      = (UINT_PTR) GetDlgItem(hDlg, IDC_BIOSINFO_COPY);
+			ti.lpszText = (LPTSTR) TEXT("Copy the ROM names to the clipboard");
+			SendMessage(tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+		}
+
+		RECT tr, lr, cr, okr, cpr;
+		GetWindowRect(hText, &tr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &tr, 2);
+		GetWindowRect(hList, &lr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &lr, 2);
+		GetClientRect(hDlg, &cr);
+		GetWindowRect(GetDlgItem(hDlg, IDOK), &okr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &okr, 2);
+		GetWindowRect(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), &cpr);
+		MapWindowPoints(NULL, hDlg, (POINT *) &cpr, 2);
+		const int margin = cr.right - tr.right;
+		const int gap    = okr.top - lr.bottom;
+
+		// The heading wraps when there is no table under it.
+		HDC   dc  = GetDC(hText);
+		HFONT old = (HFONT) SelectObject(dc, (HFONT) SendMessage(hText, WM_GETFONT, 0, 0));
+		RECT  need = { 0, 0, rows.empty() ? (LONG) (tr.right - tr.left) : 0, 0 };
+		DrawText(dc, heading.c_str(), -1, &need,
+		         DT_CALCRECT | DT_NOPREFIX | (rows.empty() ? DT_WORDBREAK : DT_SINGLELINE));
+		SelectObject(dc, old);
+		ReleaseDC(hText, dc);
+
+		int width  = max((int) (tr.right - tr.left), (int) need.right);
+		int bottom = tr.top + max((int) (tr.bottom - tr.top), (int) need.bottom);
+		if (rows.empty())
+		{
+			EnableWindow(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), FALSE);
+			ShowWindow(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), SW_HIDE);
+			ShowWindow(hList, SW_HIDE);
+		}
+		else
+		{
+			ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+			// Columns: ROM, then whichever of the detail and CRC32 any row has.
+			int      field_of[3] = { 0 }, ncols = 0;
+			LVCOLUMN col = { 0 };
+			col.mask    = LVCF_TEXT | LVCF_WIDTH;
+			col.cx      = 100;
+			col.pszText = (LPTSTR) TEXT("ROM");
+			ListView_InsertColumn(hList, ncols, &col);
+			field_of[ncols++] = 0;
+			if (any_note)
+			{
+				col.pszText = (LPTSTR) (versions ? TEXT("Version") : sizes ? TEXT("Size") : TEXT("Details"));
+				ListView_InsertColumn(hList, ncols, &col);
+				field_of[ncols++] = 1;
+			}
+			if (any_crc)
+			{
+				col.pszText = (LPTSTR) TEXT("CRC32");
+				ListView_InsertColumn(hList, ncols, &col);
+				field_of[ncols++] = 2;
+			}
+			for (int i = 0; i < (int) rows.size(); i++)
+			{
+				LVITEM it = { 0 };
+				it.mask    = LVIF_TEXT;
+				it.iItem   = i;
+				it.pszText = (LPTSTR) rows[i][0].c_str();
+				ListView_InsertItem(hList, &it);
+				for (int c = 1; c < ncols; c++)
+					ListView_SetItemText(hList, i, c, (LPTSTR) rows[i][field_of[c]].c_str());
+			}
+			for (int c = 0; c < ncols; c++)
+				ListView_SetColumnWidth(hList, c, LVSCW_AUTOSIZE_USEHEADER);
+
+			// Every row visible: the view's own estimate plus the border.
+			const DWORD view = ListView_ApproximateViewRect(hList, -1, -1, (int) rows.size());
+			RECT wr = { 0, 0, LOWORD(view) + 2, HIWORD(view) + 2 };
+			AdjustWindowRectEx(&wr, GetWindowLong(hList, GWL_STYLE), FALSE, GetWindowLong(hList, GWL_EXSTYLE));
+			const int listw = wr.right - wr.left;
+			const int listh = wr.bottom - wr.top;
+			const int top   = bottom + (lr.top - tr.bottom);
+			SetWindowPos(hList, NULL, lr.left, top, listw, listh, SWP_NOZORDER);
+			width  = max(width, listw);
+			bottom = top + listh;
+		}
+		SetWindowPos(hText, NULL, 0, 0, width, (rows.empty() ? need.bottom : tr.bottom - tr.top),
+		             SWP_NOMOVE | SWP_NOZORDER);
+
+		const int clientw = tr.left + width + margin;
+		const int btn_top = bottom + gap;
+		const int clienth = btn_top + (okr.bottom - okr.top) + (cr.bottom - okr.bottom);
+		SetWindowPos(GetDlgItem(hDlg, IDOK), NULL, clientw - margin - (okr.right - okr.left), btn_top, 0, 0,
+		             SWP_NOSIZE | SWP_NOZORDER);
+		SetWindowPos(GetDlgItem(hDlg, IDC_BIOSINFO_COPY), NULL, cpr.left, btn_top, 0, 0,
+		             SWP_NOSIZE | SWP_NOZORDER);
+
+		RECT dr = { 0, 0, clientw, clienth };
+		AdjustWindowRectEx(&dr, GetWindowLong(hDlg, GWL_STYLE), FALSE, GetWindowLong(hDlg, GWL_EXSTYLE));
+		RECT owner;
+		GetWindowRect(GetParent(hDlg), &owner);
+		const int w = dr.right - dr.left, h = dr.bottom - dr.top;
+		SetWindowPos(hDlg, NULL, (owner.left + owner.right - w) / 2, (owner.top + owner.bottom - h) / 2, w, h,
+		             SWP_NOZORDER | SWP_NOACTIVATE);
+		SetFocus(GetDlgItem(hDlg, IDOK));
+		return false;
+	}
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDC_BIOSINFO_COPY:
+		{
+			const std::wstring *copy = (const std::wstring *) GetProp(hDlg, TEXT("S9xCopyText"));
+			if (copy && BiosInfoToClipboard(hDlg, *copy))
+			{
+				BiosInfoSetCopyFace(hDlg, true);
+				SetTimer(hDlg, 1, 1200, NULL);
+			}
+			return true;
+		}
+		case IDOK:
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return true;
+		}
+		break;
+
+	case WM_CONTEXTMENU:
+	{
+		HWND hList = GetDlgItem(hDlg, IDC_BIOSINFO_LIST);
+		if ((HWND) wParam != hList)
+			break;
+
+		// A right-click picks the row under it; Shift+F10 uses the selected one.
+		POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+		int   item;
+		if (pt.x == -1 && pt.y == -1)
+		{
+			item = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+			RECT r;
+			if (item < 0 || !ListView_GetItemRect(hList, item, &r, LVIR_LABEL))
+				return true;
+			pt.x = r.left;
+			pt.y = r.bottom;
+			ClientToScreen(hList, &pt);
+		}
+		else
+		{
+			LVHITTESTINFO ht = { 0 };
+			ht.pt = pt;
+			ScreenToClient(hList, &ht.pt);
+			item = ListView_HitTest(hList, &ht);
+			if (item < 0)
+				return true;
+			ListView_SetItemState(hList, item, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		}
+
+		wchar_t name[MAX_PATH];
+		HMENU   menu = CreatePopupMenu();
+		AppendMenu(menu, MF_STRING | (BiosInfoRowName(hList, item, name) ? 0 : MF_GRAYED), 1, TEXT("&Copy"));
+		const int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
+		DestroyMenu(menu);
+		if (cmd == 1)
+			BiosInfoCopyRow(hDlg, hList, item);
+		return true;
+	}
+
+	case WM_NOTIFY:
+	{
+		// Ctrl+C in the table copies the selected row.
+		const NMLVKEYDOWN *kd = (const NMLVKEYDOWN *) lParam;
+		if (kd->hdr.idFrom == IDC_BIOSINFO_LIST && kd->hdr.code == LVN_KEYDOWN &&
+		    kd->wVKey == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
+		{
+			const int item = ListView_GetNextItem(kd->hdr.hwndFrom, -1, LVNI_SELECTED);
+			if (item >= 0)
+				BiosInfoCopyRow(hDlg, kd->hdr.hwndFrom, item);
+			return true;
+		}
+		break;
+	}
+
+	case WM_TIMER:
+		KillTimer(hDlg, 1);
+		BiosInfoSetCopyFace(hDlg, false);
+		return true;
+
+	case WM_DESTROY:
+	{
+		delete (std::wstring *) RemoveProp(hDlg, TEXT("S9xCopyText"));
+		HFONT glyph = (HFONT) RemoveProp(hDlg, TEXT("S9xGlyphFont"));
+		if (glyph) DeleteObject(glyph);
+		HICON icon = (HICON) SendDlgItemMessage(hDlg, IDC_BIOSINFO_ICON, STM_GETICON, 0, 0);
+		if (icon) DestroyIcon(icon);
+		break;
+	}
+	}
+	return false;
 }
 
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -10348,6 +10687,9 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 									WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
 									CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 									hDlg, NULL, g_hInst, NULL);
+		// A width limit is what makes the info tips honour their line breaks.
+		if (s_bios_tip)
+			SendMessage(s_bios_tip, TTM_SETMAXTIPWIDTH, 0, GetSystemMetrics(SM_CXSCREEN));
 		for (int slot = 0; s_bios_tip && slot < S9X_NUM_BIOS_SLOTS; slot++)
 		{
 			TOOLINFO ti = { 0 };
@@ -10407,8 +10749,8 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS &&
 			HIWORD(wParam) == STN_CLICKED)
 		{
-			const S9xBiosSlotInfo *info = S9xGetBiosSlotInfo(id - IDC_BIOSMGR_INFO0);
-			MessageBox(hDlg, Utf8ToWide(info->info), Utf8ToWide(info->label), MB_OK | MB_ICONINFORMATION);
+			DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSINFO), hDlg, DlgBiosInfoProc,
+			               (LPARAM) (id - IDC_BIOSMGR_INFO0));
 			return true;
 		}
 

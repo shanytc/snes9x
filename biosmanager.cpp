@@ -57,23 +57,73 @@ static const char *const kNamesNSSFont[]= { "m50458_char.bin", "m50458.zip", "m5
 static const char *const kNamesSuperDisc[] = { "SDBR_v0.95.sfc", "SDBR_v0.95_unheadered.sfc",
                                                "Super Disc System Cartridge (Prototype).zip", NULL };
 
-// Behind each row's info icon.
-static const char kInfoGB[] = "Supports dmg_boot.bin (256 bytes), the Game Boy boot ROM.";
-static const char kInfoGBC[] = "Supports cgb_boot.bin (2048 or 2304 bytes), the Game Boy Color boot ROM.";
-static const char kInfoSGB1[] = "Supports sgb.sfc, the Super Game Boy cartridge ROM.";
-static const char kInfoSGB2[] = "Supports sgb2.sfc, the Super Game Boy 2 cartridge ROM.";
-static const char kInfoSGB1Boot[] = "Supports sgb.boot.rom (256 bytes), the Super Game Boy SGB-CPU boot ROM.";
-static const char kInfoSGB2Boot[] = "Supports sgb2.boot.rom (256 bytes), the Super Game Boy 2 SGB2-CPU boot ROM.";
-static const char kInfoKROM[] = "Supports the krom1.zip and sfcbox.zip (MAME) releases.";
-static const char kInfoFont[] = "Supports MB90082.BIN (9216 bytes), the MB90082 OSD character ROM. "
-                                "MAME's sfcbox.zip does not include it.";
-static const char kInfoBSX[] = "Supports BS-X.bin (1 MB), the Satellaview BS-X cartridge ROM.";
-static const char kInfoSufami[] = "Supports STBIOS.bin (256 KB), the Sufami Turbo base unit ROM.";
-static const char kInfoNSS[]  = "Supports the nss.zip (MAME) release, or a single BIOS dump "
-                                "(nss-ic14.02.ic14, nss-v3.ic14, nss-c.ic14).";
-static const char kInfoNSSFont[] = "Supports the m50458.zip (MAME) release, or m50458_char.bin "
-                                   "(4608 bytes), the M50458 OSD character ROM.";
-static const char kInfoSuperDisc[] = "Supports SDBR_v0.95.sfc (128 KB, with or without a copier header), the Super Disc BIOS cartridge.";
+// Behind each row's info icon: a heading, then one "name — detail — CRC32" line
+// per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
+// CRC32s are No-Intro's or MAME's; a generic name's is the dump in the BIOS folder
+// it was checked against, and a .zip's is the whole archive's (as distributed).
+// A "(built-in)" row is the copy sgb.cpp runs when the slot is empty.
+static const char kInfoGB[] = "Supports the following Game Boy Boot ROMs:\ndmg_boot.bin — 256 bytes — 59C8598E";
+static const char kInfoGBC[] = "Supports the following Game Boy Color Boot ROMs:\ncgb_boot.bin — 2304 bytes (SameBoy) — 1D67E99E";
+static const char kInfoSGB1[] = "Supports the following Super Game Boy cartridge ROMs:\nsgb.sfc — v1.2 — 8A4A174F";
+static const char kInfoSGB2[] = "Supports the following Super Game Boy 2 cartridge ROMs:\nsgb2.sfc — v1.16 — CB176E45";
+static const char kInfoSGB1Boot[] = "Supports the following Super Game Boy SGB-CPU boot ROMs:\n"
+                                    "(built-in) — 256 bytes (SameBoy) — 6AF31430\n"
+                                    "sgb.boot.rom — 256 bytes — EC8A83B9\n"
+                                    "Super Game Boy SGB-CPU (World) (Enhancement Chip).bin — 256 bytes — EC8A83B9";
+static const char kInfoSGB2Boot[] = "Supports the following Super Game Boy 2 SGB2-CPU boot ROMs:\n"
+                                    "(built-in) — 256 bytes (SameBoy) — F4E2EAE2\n"
+                                    "sgb2.boot.rom — 256 bytes — 53D0DD63\n"
+                                    "Super Game Boy 2 SGB2-CPU (Japan) (Enhancement Chip).bin — 256 bytes — 53D0DD63";
+static const char kInfoKROM[] = "Supports the following Super Famicom Box KROM releases:\n"
+                                "KROM1.BIN — v1.00 — C9010002\n"
+                                "krom1.zip — v1.00 — E52F16F9\n"
+                                "krom2.00.ic1 — v2.00 — E31B5580\n"
+                                "sfcbox.zip — v1.00 + v2.00 (MAME set) — 2DD4E948";
+static const char kInfoFont[] = "Supports the following MB90082 OSD character ROMs (MAME's sfcbox.zip has none):\n"
+                                "MB90082.BIN — 9216 bytes — 1F0A5EFE";
+static const char kInfoBSX[] = "Supports the following Satellaview BS-X cartridge ROMs:\nBS-X.bin — 1 MB — F51F07A0";
+static const char kInfoSufami[] = "Supports the following Sufami Turbo base unit ROMs:\nSTBIOS.bin — 256 KB — 9B4CA911";
+static const char kInfoNSS[] = "Supports the following Nintendo Super System BIOS releases:\n"
+                               "nss.zip — MAME set: the three dumps below — C732AB81\n"
+                               "nss-ic14.02.ic14 — 32 KB — E06CB58F\n"
+                               "nss-v3.ic14 — 32 KB — AC385B53\n"
+                               "nss-c.ic14 — 32 KB — A8E202B3\n"
+                               "NSS-TEST.BIN — No$Cash test BIOS — 15616021";
+static const char kInfoNSSFont[] = "Supports the following M50458 OSD character ROMs:\n"
+                                   "m50458.zip — MAME set: both dumps below — 1CD87DF4\n"
+                                   "m50458_char.bin — 4608 bytes — 011CC342\n"
+                                   "m50458-001sp — 4608 bytes — 444F597D";
+static const char kInfoSuperDisc[] = "Supports the following Super Disc BIOS cartridge ROMs:\n"
+                                     "SDBR_v0.95.sfc — 128 KB, with or without a copier header — 3B64A370";
+
+// No-Intro dumps each slot accepts, all passing its size and signature checks.
+static const char *const kNoIntroGB[] = {
+	"Nintendo Game Boy Boot ROM (Japan) (En).gb — 256 bytes — C2F5CC97",
+	"Nintendo Game Boy Boot ROM (World) (Rev 1).gb — 256 bytes — 59C8598E",
+	"Nintendo Game Boy Pocket Boot ROM (World).gb — 256 bytes — E6920754", NULL
+};
+static const char *const kNoIntroGBC[] = {
+	"Nintendo Game Boy Color Boot ROM (Japan) (En).gbc — 2304 bytes — E8EF5318",
+	"Nintendo Game Boy Color Boot ROM (World).gbc — 2304 bytes — 41884E46",
+	"Nintendo Game Boy Color Boot ROM (World) (Rev 1).gbc — 2304 bytes", NULL
+};
+static const char *const kNoIntroSGB1[] = {
+	"Super Game Boy (Europe) (Beta) (1994-03-24).sfc — v1.0 — DACCC879",
+	"Super Game Boy (Japan).sfc — v1.0 — 2E35EDBB",
+	"Super Game Boy (Japan, USA) (Beta) (SYS-SGB X2).sfc — v1.0 — 4D93E5B5",
+	"Super Game Boy (Japan, USA) (En) (Beta) (1994-03-06).sfc — v1.0 — 4D93E5B5",
+	"Super Game Boy (Japan, USA) (En) (Beta) (1994-03-23) (Alt).sfc — v1.0 — F5FFB691",
+	"Super Game Boy (Japan, USA) (En) (Beta) (1994-03-23).sfc — v1.0 — 5F99275B",
+	"Super Game Boy (Japan, USA) (En) (Rev 1).sfc — v1.1 — 27A03C98",
+	"Super Game Boy (Japan, USA) (En).sfc — v1.0 — 2E35EDBB",
+	"Super Game Boy (Japan, USA) (Rev 1).sfc — v1.1 — 27A03C98",
+	"Super Game Boy (World) (Rev 2).sfc — v1.2 — 8A4A174F", NULL
+};
+static const char *const kNoIntroSGB2[] = { "Super Game Boy 2 (Japan).sfc — v1.16 — CB176E45", NULL };
+static const char *const kNoIntroBSX[] = {
+	"BS-X - Sore wa Namae o Nusumareta Machi no Monogatari (Japan) (Rev 1).sfc — 1 MB — F51F07A0", NULL
+};
+static const char *const kNoIntroSufami[] = { "Sufami Turbo (Japan).sfc — 256 KB — 9B4CA911", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
@@ -81,19 +131,19 @@ static const char kInfoSuperDisc[] = "Supports SDBR_v0.95.sfc (128 KB, with or w
 // ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
-	{ "GameBoy",      "Game Boy",                       kNamesGB,        0x100,    "Optional, adds the boot logo",           kInfoGB },
-	{ "GameBoyColor", "Game Boy Color",                 kNamesGBC,       0,        "Optional, adds boot logo and GB colors", kInfoGBC },
-	{ "SGB1",         "Super Game Boy",                 kNamesSGB1,      0,        NULL,                                     kInfoSGB1 },
-	{ "SGB2",         "Super Game Boy 2",               kNamesSGB2,      0,        NULL,                                     kInfoSGB2 },
-	{ "SGB1BootROM",  "SGB boot ROM",                   kNamesSGB1Boot,  0x100,    "Optional, built-in is used",             kInfoSGB1Boot },
-	{ "SGB2BootROM",  "SGB2 boot ROM",                  kNamesSGB2Boot,  0x100,    "Optional, built-in is used",             kInfoSGB2Boot },
-	{ "SFCBoxKROM",   "Super Famicom Box",              kNamesKROM,      0x10000,  NULL,                                     kInfoKROM },
-	{ "SFCBoxFont",   "Super Famicom Box OSD Font",     kNamesFont,      9216,     NULL,                                     kInfoFont },
-	{ "BSX",          "Satellaview / BS-X",             kNamesBSX,       0x100000, NULL,                                     kInfoBSX },
-	{ "SufamiTurbo",  "Sufami Turbo",                   kNamesSufami,    0x40000,  NULL,                                     kInfoSufami },
-	{ "NSS",          "Nintendo Super System",          kNamesNSS,       0x8000,   NULL,                                     kInfoNSS },
-	{ "NSSFont",      "Nintendo Super System OSD Font", kNamesNSSFont,   0x1200,   NULL,                                     kInfoNSSFont },
-	{ "SuperDisc",    "Super Disc",                     kNamesSuperDisc, 0x20000,  NULL,                                     kInfoSuperDisc },
+	{ "GameBoy",      "Game Boy",                       kNamesGB,        0x100,    "Optional, adds the boot logo",           kInfoGB,        kNoIntroGB },
+	{ "GameBoyColor", "Game Boy Color",                 kNamesGBC,       0,        "Optional, adds boot logo and GB colors", kInfoGBC,       kNoIntroGBC },
+	{ "SGB1",         "Super Game Boy",                 kNamesSGB1,      0,        NULL,                                     kInfoSGB1,      kNoIntroSGB1 },
+	{ "SGB2",         "Super Game Boy 2",               kNamesSGB2,      0,        NULL,                                     kInfoSGB2,      kNoIntroSGB2 },
+	{ "SGB1BootROM",  "SGB boot ROM",                   kNamesSGB1Boot,  0x100,    "Optional, built-in is used",             kInfoSGB1Boot,  NULL },
+	{ "SGB2BootROM",  "SGB2 boot ROM",                  kNamesSGB2Boot,  0x100,    "Optional, built-in is used",             kInfoSGB2Boot,  NULL },
+	{ "SFCBoxKROM",   "Super Famicom Box",              kNamesKROM,      0x10000,  NULL,                                     kInfoKROM,      NULL },
+	{ "SFCBoxFont",   "Super Famicom Box OSD Font",     kNamesFont,      9216,     NULL,                                     kInfoFont,      NULL },
+	{ "BSX",          "Satellaview / BS-X",             kNamesBSX,       0x100000, NULL,                                     kInfoBSX,       kNoIntroBSX },
+	{ "SufamiTurbo",  "Sufami Turbo",                   kNamesSufami,    0x40000,  NULL,                                     kInfoSufami,    kNoIntroSufami },
+	{ "NSS",          "Nintendo Super System",          kNamesNSS,       0x8000,   NULL,                                     kInfoNSS,       NULL },
+	{ "NSSFont",      "Nintendo Super System OSD Font", kNamesNSSFont,   0x1200,   NULL,                                     kInfoNSSFont,   NULL },
+	{ "SuperDisc",    "Super Disc",                     kNamesSuperDisc, 0x20000,  NULL,                                     kInfoSuperDisc, NULL },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -106,6 +156,16 @@ static bool SlotValid (int slot)
 const S9xBiosSlotInfo *S9xGetBiosSlotInfo (int slot)
 {
 	return SlotValid(slot) ? &kSlots[slot] : NULL;
+}
+
+std::string S9xBiosSlotInfoText (int slot)
+{
+	const S9xBiosSlotInfo *info = S9xGetBiosSlotInfo(slot);
+	if (!info || !info->info) return (std::string());
+	std::string text(info->info);
+	for (const char *const *n = info->nointro; n && *n; n++)
+		text += std::string("\n") + *n;
+	return (text);
 }
 
 const char *S9xGetBiosPath (int slot)
@@ -224,7 +284,7 @@ bool8 S9xBiosHasImageOfSize (int slot, uint32 size)
 // which test failed.
 static bool8 SizeOkForPath (int slot)
 {
-	// Judge an archive off the central directory rather than inflating it —
+	// Judge an archive off the central directory rather than inflating it â€”
 	// the dialog re-checks on every keystroke.
 	if (IsZipFile(g_paths[slot]))
 	{
@@ -307,7 +367,7 @@ static bool IsNoCashNSSTest (const uint8 *d, uint32 n, uint32 full)
 }
 
 // A boot ROM opens LD SP,$FFFE; the SGB one then sets P1 to $30, and its $FD
-// byte is the A it hands the cart — $01 on SGB1, $FF on SGB2.
+// byte is the A it hands the cart â€” $01 on SGB1, $FF on SGB2.
 static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 {
 	uint8 sgb_mode = 0;

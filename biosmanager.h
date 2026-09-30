@@ -40,6 +40,7 @@ struct S9xBiosSlotInfo
 	uint32      size;          // expected byte count, 0 = any
 	const char *note;          // shown while the slot is empty, NULL if required
 	const char *info;          // behind the row's info icon, NULL for none
+	const char *const *nointro; // No-Intro dump names this slot takes, NULL-ended; NULL for none
 };
 
 #define S9X_BIOS_PATH_MAX 512
@@ -48,6 +49,10 @@ struct S9xBiosSlotInfo
 #define S9X_NSS_NOCASH_TEST_CRC 0x15616021u
 
 const S9xBiosSlotInfo *S9xGetBiosSlotInfo (int slot);
+
+// The info icon's full text: the slot's info plus one line per No-Intro
+// dump it takes. Empty when the slot has no info.
+std::string S9xBiosSlotInfoText (int slot);
 
 // Empty string when the slot is unassigned. Set with an empty path to clear.
 const char *S9xGetBiosPath (int slot);

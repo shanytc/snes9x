@@ -145,9 +145,10 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
             auto *about = Gtk::manage(new Gtk::Button());
             about->set_image_from_icon_name("dialog-information", Gtk::ICON_SIZE_MENU);
             about->set_relief(Gtk::RELIEF_NONE);
-            about->set_tooltip_text(info->info);
-            about->signal_clicked().connect([&dialog, info] {
-                Gtk::MessageDialog msg(dialog, info->info, false, Gtk::MESSAGE_INFO, Gtk::BUTTONS_OK, true);
+            const std::string text = S9xBiosSlotInfoText(slot);
+            about->set_tooltip_text(text);
+            about->signal_clicked().connect([&dialog, info, text] {
+                Gtk::MessageDialog msg(dialog, text, false, Gtk::MESSAGE_INFO, Gtk::BUTTONS_OK, true);
                 msg.set_title(info->label);
                 msg.run();
             });

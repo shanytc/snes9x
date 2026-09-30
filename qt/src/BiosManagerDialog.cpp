@@ -55,9 +55,10 @@ BiosManagerDialog::BiosManagerDialog(QWidget *parent, EmuApplication *app)
             about->setIcon(style()->standardIcon(QStyle::SP_MessageBoxInformation));
             about->setAutoRaise(true);
             about->setCursor(Qt::PointingHandCursor);
-            about->setToolTip(QString::fromUtf8(info->info));
-            connect(about, &QToolButton::clicked, this, [this, info] {
-                QMessageBox::information(this, QString::fromUtf8(info->label), QString::fromUtf8(info->info));
+            const QString text = QString::fromUtf8(S9xBiosSlotInfoText(slot).c_str());
+            about->setToolTip(text);
+            connect(about, &QToolButton::clicked, this, [this, info, text] {
+                QMessageBox::information(this, QString::fromUtf8(info->label), text);
             });
             grid->addWidget(about, r, 1);
         }

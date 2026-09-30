@@ -1610,6 +1610,7 @@ BEGIN
                 MENUITEM "&ON",                         (ID_SFCBOX_KEYSWITCH0+2),MFT_STRING,MFS_ENABLED
                 MENUITEM "&Check Play",                 (ID_SFCBOX_KEYSWITCH0+3),MFT_STRING,MFS_ENABLED
                 MENUITEM "&Self Test",                  (ID_SFCBOX_KEYSWITCH0+4),MFT_STRING,MFS_ENABLED
+                MENUITEM "Po&wer OFF",                  ID_SFCBOX_POWER_OFF,MFT_STRING,MFS_ENABLED
             END
             POPUP "OSD &Language",                  0,MFT_STRING,MFS_ENABLED
             BEGIN

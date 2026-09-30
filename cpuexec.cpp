@@ -144,9 +144,9 @@ void S9xMainLoop (void)
 			if (S9xSFCBoxPendingReset())
 				S9xSFCBoxApplySNESReset();
 
-			// Held in reset: skip opcode execution but keep the H/V event
-			// machinery running so the Z180, APU and frame pacing advance.
-			if (S9xSFCBoxSNESHeld())
+			// Held in reset (or the box is powered off): skip opcode execution
+			// but keep the H/V event machinery running so frame pacing advances.
+			if (S9xSFCBoxSNESHeld() || S9xSFCBoxPoweredOff())
 			{
 				CPU.Cycles = CPU.NextEvent;
 				while (CPU.Cycles >= CPU.NextEvent)

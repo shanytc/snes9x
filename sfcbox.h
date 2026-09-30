@@ -136,6 +136,14 @@ uint8	S9xSFCBoxKROMVersions (void);
 // writes the answer back so the menu shows the version that will boot.
 uint8	S9xSFCBoxResolveKROMVersion (void);
 void	S9xSFCBoxPowerOn (void);		// full board reset; SNES ends up held
+
+// Keyswitch position 4 ("Power OFF", port 80h bit 5) cuts the box's power in
+// hardware: the KROM never acts on it. Leaving it is a cold boot.
+#define SFCBOX_KEY_POWER_OFF	5
+bool8	S9xSFCBoxPoweredOff (void);
+// Turns the key to `pos` (port 80h bit). TRUE when that restored the power:
+// the port then hard-resets (S9xReset), which boots the box from cold.
+bool8	S9xSFCBoxTurnKey (uint8 pos);
 void	S9xSFCBoxDeactivate (void);
 
 // Main-loop side

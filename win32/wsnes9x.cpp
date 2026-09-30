@@ -3081,15 +3081,22 @@ LRESULT CALLBACK WinProc(
 			break;
 		case ID_SFCBOX_KEYSWITCH0 + 0: case ID_SFCBOX_KEYSWITCH0 + 1:
 		case ID_SFCBOX_KEYSWITCH0 + 2: case ID_SFCBOX_KEYSWITCH0 + 3:
-		case ID_SFCBOX_KEYSWITCH0 + 4:
+		case ID_SFCBOX_KEYSWITCH0 + 4: case ID_SFCBOX_POWER_OFF:
 			if (SFCBox.Active)
 			{
-				// The KROM polls the switch live, no reset needed.
-				const int ksp = cmd_id - ID_SFCBOX_KEYSWITCH0;
+				// The KROM polls the switch live; only leaving Power OFF
+				// needs a reset, the cold boot of a box getting power again.
+				const int  ksp = (cmd_id == ID_SFCBOX_POWER_OFF) ? -1 : cmd_id - ID_SFCBOX_KEYSWITCH0;
+				const bool power_on = S9xSFCBoxTurnKey(ksp < 0 ? SFCBOX_KEY_POWER_OFF : sfcbox_keyswitch_map[ksp]);
 				char msg[48];
-				SFCBox.Keyswitch = sfcbox_keyswitch_map[ksp];
-				Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;	// and the next power-on
-				snprintf(msg, sizeof(msg), "SFC-Box keyswitch: %s", sfcbox_keyswitch_names[ksp]);
+				snprintf(msg, sizeof(msg), "SFC-Box keyswitch: %s", ksp < 0 ? "Power OFF" : sfcbox_keyswitch_names[ksp]);
+				if (power_on)
+				{
+					S9xReset();
+#ifdef RETROACHIEVEMENTS_SUPPORT
+					RA_OnReset();
+#endif
+				}
 				S9xMessage(S9X_INFO, S9X_INFO, msg);
 			}
 			break;
@@ -6075,6 +6082,8 @@ static void CheckMenuStates ()
 		mii.fState = (sfcbox_keyswitch_map[ksp] == SFCBox.Keyswitch) ? MFS_CHECKED : MFS_UNCHECKED;
 		SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_KEYSWITCH0 + ksp, FALSE, &mii);
 	}
+	mii.fState = S9xSFCBoxPoweredOff() ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_POWER_OFF, FALSE, &mii);
 	mii.fState = Settings.SFCBoxOSDEnglish ? MFS_UNCHECKED : MFS_CHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_SFCBOX_OSD_JAPANESE, FALSE, &mii);
 	mii.fState = Settings.SFCBoxOSDEnglish ? MFS_CHECKED : MFS_UNCHECKED;

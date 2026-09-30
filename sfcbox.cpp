@@ -14,6 +14,7 @@
 #include <vector>
 #include "snes9x.h"
 #include "memmap.h"
+#include "apu/apu.h"
 #include "biosmanager.h"
 #include "display.h"
 #include "movie.h"
@@ -780,7 +781,8 @@ static void OSDTranslateRow (uint8 *ch, uint8 *at)
 // frame first so the 12-dot cells render at 16 output pixels.
 bool8 S9xSFCBoxOSDHires (void)
 {
-	return (SFCBox.Active && SFCBox.OSD.DisplayEnable && SFCBox.OSD.FontLoaded && !S9xSFCBoxTVMode()) ? TRUE : FALSE;
+	return (SFCBox.Active && SFCBox.OSD.DisplayEnable && SFCBox.OSD.FontLoaded && !S9xSFCBoxTVMode() &&
+	        !S9xSFCBoxPoweredOff()) ? TRUE : FALSE;
 }
 
 void S9xSFCBoxRenderOSD (uint16 *screen, int pitch, int width, int height)
@@ -789,6 +791,14 @@ void S9xSFCBoxRenderOSD (uint16 *screen, int pitch, int width, int height)
 
 	if (!SFCBox.Active)
 		return;
+
+	// Powered off: no picture at all.
+	if (S9xSFCBoxPoweredOff())
+	{
+		for (int py = 0; py < height; py++)
+			memset(screen + py * pitch, 0, width * sizeof(uint16));
+		return;
+	}
 
 	// TV mode: the set shows the antenna, which we don't have, so snow.
 	if (S9xSFCBoxTVMode())
@@ -1247,7 +1257,7 @@ void S9xSFCBoxPressSwitch (int sw)
 // AV install also passes the antenna, so the lamp is the one to follow.
 bool8 S9xSFCBoxTVMode (void)
 {
-	return (SFCBox.Active && (SFCBox.Port80W & 0x20)) ? TRUE : FALSE;
+	return (SFCBox.Active && (SFCBox.Port80W & 0x20) && !S9xSFCBoxPoweredOff()) ? TRUE : FALSE;
 }
 
 // ---------------------------------------------------------------------------
@@ -1672,6 +1682,24 @@ void S9xSFCBoxPowerOn (void)
 	printf("SFC-Box: supervisor board powered on (KROM in control).\n");
 }
 
+bool8 S9xSFCBoxPoweredOff (void)
+{
+	return (SFCBox.Active && SFCBox.Keyswitch == SFCBOX_KEY_POWER_OFF);
+}
+
+bool8 S9xSFCBoxTurnKey (uint8 pos)
+{
+	const bool8	was_off = S9xSFCBoxPoweredOff();
+
+	SFCBox.Keyswitch = pos;
+	if (pos != SFCBOX_KEY_POWER_OFF)
+		Settings.SFCBoxKeyswitch = pos;		// where the next power-on finds the key
+	else if (!was_off)
+		S9xResetAPU();						// the sound dies with the power
+
+	return (was_off && pos != SFCBOX_KEY_POWER_OFF);
+}
+
 bool8 S9xSFCBoxSNESHeld (void)
 {
 	return (SFCBox.Active && SFCBox.SNESHeld);
@@ -1734,6 +1762,10 @@ void S9xSFCBoxEndScanline (void)
 				   Memory.FillRAM[0x3034], Memory.FillRAM[0x3036],
 				   Memory.FillRAM[0x303a], Memory.FillRAM[0x3039]);
 	}
+
+	// Powered off: the supervisor is dark too; only the battery RTC ticks on.
+	if (SFCBox.Keyswitch == SFCBOX_KEY_POWER_OFF)
+		return;
 
 	// PHI cycles for one SNES scanline (H_Max master clocks)
 	const int64	master = Settings.PAL ? 21281370 : 21477272;

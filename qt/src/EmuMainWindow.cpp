@@ -365,13 +365,14 @@ void EmuMainWindow::voicekunDetach()
 
 // SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
 // position index as win32 does.
-static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
-static const char *sfcbox_keyswitch_names[5] = {
+static const uint8 sfcbox_keyswitch_map[6] = { 4, 0, 1, 2, 3, SFCBOX_KEY_POWER_OFF };
+static const char *sfcbox_keyswitch_names[6] = {
     QT_TRANSLATE_NOOP("EmuMainWindow", "O&ptions"),
     QT_TRANSLATE_NOOP("EmuMainWindow", "O&FF"),
     QT_TRANSLATE_NOOP("EmuMainWindow", "&ON"),
     QT_TRANSLATE_NOOP("EmuMainWindow", "&Check Play"),
     QT_TRANSLATE_NOOP("EmuMainWindow", "&Self Test"),
+    QT_TRANSLATE_NOOP("EmuMainWindow", "Po&wer OFF"),
 };
 static const uint16 nss_game_buttons[3] = { NSS_BTN_GAME1, NSS_BTN_GAME2, NSS_BTN_GAME3 };
 
@@ -453,7 +454,7 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
     keyswitch_menu->setToolTipsVisible(true);
     auto keyswitch_group = new QActionGroup(this);
     keyswitch_group->setExclusive(true);
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 6; i++)
     {
         auto a = keyswitch_menu->addAction(tr(sfcbox_keyswitch_names[i]));
         a->setCheckable(true);
@@ -462,8 +463,8 @@ void EmuMainWindow::createArcadeMenus(QMenu *emulation_menu)
         sfcbox_keyswitch_actions[i] = a;
     }
     keyswitch_menu->menuAction()->setToolTip(
-        tr("Options opens the attendant setup menus, Self Test the self-test; OFF/ON/Check Play are play modes. "
-           "The supervisor polls it live, no reset needed."));
+        tr("Options opens the attendant setup menus, Self Test the self-test; OFF/ON/Check Play are play modes; "
+           "Power OFF cuts the power and turning back boots the box."));
 
     auto language_menu = sfcbox_menu->addMenu(tr("OSD &Language"));
     language_menu->setToolTipsVisible(true);
@@ -641,7 +642,7 @@ void EmuMainWindow::refreshArcadeMenus()
     sfcbox_menu_action->setVisible(box);
     if (box)
     {
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 6; i++)
             sfcbox_keyswitch_actions[i]->setChecked(sfcbox_keyswitch_map[i] == SFCBox.Keyswitch);
         sfcbox_backdrop_action->setChecked(app.config->sfcbox_osd_backdrop);
         sfcbox_japanese_action->setChecked(!app.config->sfcbox_osd_english);
@@ -738,14 +739,17 @@ void EmuMainWindow::sfcboxSetKeyswitch(int panel_pos)
 {
     if (!app.isCoreActive() || !SFCBox.Active)
         return;
-    // A real key stays where it was left: the next power-on starts there.
-    app.config->sfcbox_keyswitch = sfcbox_keyswitch_map[panel_pos];
+    // A real key stays where it was left: the next power-on starts there
+    // (never at Power OFF, which would leave the box dark at startup).
+    if (sfcbox_keyswitch_map[panel_pos] != SFCBOX_KEY_POWER_OFF)
+        app.config->sfcbox_keyswitch = sfcbox_keyswitch_map[panel_pos];
     app.emu_thread->runOnThread([panel_pos] {
         if (!SFCBox.Active)
             return;
-        static const char *names[5] = { "Options", "OFF", "ON", "Check Play", "Self Test" };
-        SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
-        Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;
+        static const char *names[6] = { "Options", "OFF", "ON", "Check Play", "Self Test", "Power OFF" };
+        // Only leaving Power OFF needs a reset: the box boots from cold.
+        if (S9xSFCBoxTurnKey(sfcbox_keyswitch_map[panel_pos]))
+            S9xReset();
         S9xSetInfoString((std::string("SFC-Box keyswitch: ") + names[panel_pos]).c_str());
     });
 }

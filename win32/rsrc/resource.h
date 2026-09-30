@@ -988,6 +988,7 @@
 #define ID_SFCBOX_SLOT0                 44446
 #define ID_SFCBOX_RESET                 44448
 #define ID_SFCBOX_TVGAME                44449
+#define ID_SFCBOX_POWER_OFF             44450
 
 
 #define IDC_STATIC                      -1
@@ -997,7 +998,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        194
-#define _APS_NEXT_COMMAND_VALUE         44450
+#define _APS_NEXT_COMMAND_VALUE         44451
 #define _APS_NEXT_CONTROL_VALUE         3644
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

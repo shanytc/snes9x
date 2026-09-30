@@ -137,7 +137,7 @@ class EmuMainWindow : public QMainWindow
 
     // Emulation -> Super Famicom Box / Nintendo Super System front panels.
     QAction *sfcbox_menu_action = nullptr;
-    QAction *sfcbox_keyswitch_actions[5] = {};
+    QAction *sfcbox_keyswitch_actions[6] = {};
     QAction *sfcbox_backdrop_action = nullptr;
     QAction *sfcbox_japanese_action = nullptr;
     QAction *sfcbox_english_action = nullptr;

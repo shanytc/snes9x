@@ -144,7 +144,7 @@ class Snes9xWindow : public GtkBuilderWindow
     Gtk::MenuItem *gbppu_item = nullptr;
     Gtk::CheckMenuItem *gb_layer_items[3] = {};
     Gtk::MenuItem *sfcbox_item = nullptr;
-    Gtk::RadioMenuItem *sfcbox_keyswitch_items[5] = {};
+    Gtk::RadioMenuItem *sfcbox_keyswitch_items[6] = {};
     Gtk::CheckMenuItem *sfcbox_backdrop_item = nullptr;
     Gtk::RadioMenuItem *sfcbox_japanese_item = nullptr;
     Gtk::RadioMenuItem *sfcbox_english_item = nullptr;

@@ -1182,10 +1182,10 @@ void Snes9xWindow::open_voicekun_dialog()
     configure_widgets();
 }
 
-// SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
-// position index as win32 does.
-static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
-static const char *sfcbox_keyswitch_names[5] = { "Options", "OFF", "ON", "Check Play", "Self Test" };
+// SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3/4, mapped to the KROM's
+// position index as win32 does (4 = Power OFF, which only the menu offers).
+static const uint8 sfcbox_keyswitch_map[6] = { 4, 0, 1, 2, 3, SFCBOX_KEY_POWER_OFF };
+static const char *sfcbox_keyswitch_names[6] = { "Options", "OFF", "ON", "Check Play", "Self Test", "Power OFF" };
 
 // Cartridge titles go into mnemonic labels, where '_' marks the access key.
 static std::string mnemonic_escape(const char *s)
@@ -1304,10 +1304,10 @@ void Snes9xWindow::create_arcade_menus()
 
     auto keyswitch_item = add_item(sfcbox_menu, _("_Keyswitch"));
     keyswitch_item->set_tooltip_text(_("Options opens the attendant setup menus, Self Test the self-test; "
-                                       "OFF/ON/Check Play are play modes. The supervisor polls it live, no reset needed."));
+                                       "OFF/ON/Check Play are play modes; Power OFF cuts the power and turning back boots the box."));
     auto keyswitch_menu = Gtk::manage(new Gtk::Menu());
     Gtk::RadioMenuItem::Group keyswitch_group;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 6; i++)
     {
         auto item = Gtk::manage(new Gtk::RadioMenuItem(keyswitch_group, sfcbox_keyswitch_names[i]));
         item->signal_toggled().connect([this, i, item] {
@@ -1524,7 +1524,7 @@ void Snes9xWindow::refresh_arcade_menus()
     sfcbox_item->set_visible(box);
     if (box)
     {
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 6; i++)
             if (sfcbox_keyswitch_map[i] == SFCBox.Keyswitch)
                 sfcbox_keyswitch_items[i]->set_active(true);
         sfcbox_backdrop_item->set_active(Settings.SFCBoxOSDBackdrop);
@@ -1610,8 +1610,9 @@ void Snes9xWindow::sfcbox_set_keyswitch(int panel_pos)
 {
     if (!config->rom_loaded || !SFCBox.Active)
         return;
-    SFCBox.Keyswitch = sfcbox_keyswitch_map[panel_pos];
-    Settings.SFCBoxKeyswitch = SFCBox.Keyswitch;   // and the next power-on
+    // Only leaving Power OFF needs a reset: the box boots from cold.
+    if (S9xSFCBoxTurnKey(sfcbox_keyswitch_map[panel_pos]))
+        S9xReset();
     auto message = fmt::format("SFC-Box keyswitch: {}", sfcbox_keyswitch_names[panel_pos]);
     S9xSetInfoString(message.c_str());
 }

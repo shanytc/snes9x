@@ -3981,6 +3981,10 @@ void CMemory::InitROM (void)
 	Settings.XBAND = FALSE;
 
 	SuperFX.nRomBanks = CalculatedSize >> 15;
+	// An XBAND game cart points the GSU at its own views; take them back.
+	SuperFX.pvRom = ROM;
+	SuperFX.pvRam = SRAM;
+	SuperFX.nRamBanks = 2;
 
 	//// Parse ROM header and read ROM informatoin
 

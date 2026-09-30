@@ -63,6 +63,7 @@
 #include "snes9x.h"
 #include "memmap.h"
 #include "dsp.h"
+#include "fxemu.h"
 #include "fscompat.h"
 #include "xband.h"
 
@@ -5089,6 +5090,8 @@ struct FredMap
 static FredMap	fred_map;
 static bool		fred_map_valid = false;
 static bool		fred_cart_hirom = true;
+static bool		fred_cart_gsu = false;
+static uint8	*fred_gsu_rom = NULL;		// fxemu's view of the game: linear + doubled-32K mirrors
 static uint8	*fred_under[MEMMAP_NUM_BLOCKS];		// ROM/RAM behind a trapped block
 static bool		fred_under_ram[MEMMAP_NUM_BLOCKS];
 
@@ -5169,8 +5172,52 @@ static void fred_trap_range (uint32 start, uint32 end, bool ram)
 	}
 }
 
+static inline uint8 *fred_gsu_ram (void)
+{
+	return Memory.SRAM + 0x20000;	// XBAND mode leaves Memory.SRAM unused
+}
+
+// Super FX board (Map_SuperFXLoROMMap, GSU1 layout): LoROM at $00-$3F:8000,
+// linear at $40-$5F, work RAM at $70-$71; the rest of $40-$7D is open.
+static void fred_map_gsu (uint32 bank_s, uint32 bank_e, uint32 addr_s, uint32 addr_e)
+{
+	uint8 *rom = Memory.ROM + Multi.cartOffsetB;
+	for (uint32 c = bank_s; c <= bank_e; c++)
+		for (uint32 i = addr_s; i <= addr_e; i += 0x1000)
+		{
+			uint32 p = (c << 4) | (i >> 12), b = c & 0x7f;
+			uint8 *ptr = (uint8 *) CMemory::MAP_NONE;
+			bool rom_blk = false, ram_blk = false;
+			if (b < 0x40)
+			{
+				if (i < 0x8000)
+					continue;
+				ptr = rom + Memory.map_mirror(Multi.cartSizeB, b * 0x8000) - 0x8000;
+				rom_blk = true;
+			}
+			else if (b < 0x60)
+			{
+				ptr = rom + Memory.map_mirror(Multi.cartSizeB, (b - 0x40) << 16);
+				rom_blk = true;
+			}
+			else if (b == 0x70 || b == 0x71)
+			{
+				ptr = fred_gsu_ram() + ((b & 1) << 16);
+				ram_blk = true;
+			}
+			Memory.Map[p] = ptr;
+			Memory.BlockIsROM[p] = rom_blk;
+			Memory.BlockIsRAM[p] = ram_blk;
+		}
+}
+
 static void fred_map_cart (uint32 bank_s, uint32 bank_e, uint32 addr_s, uint32 addr_e)
 {
+	if (fred_cart_gsu)
+	{
+		fred_map_gsu(bank_s, bank_e, addr_s, addr_e);
+		return;
+	}
 	if (fred_cart_hirom)
 	{
 		Memory.map_hirom_offset(bank_s, bank_e, addr_s, addr_e, Multi.cartSizeB, Multi.cartOffsetB);
@@ -5207,6 +5254,11 @@ static void fred_remap (bool force)
 	fred_map_cart(0x80, 0xbf, 0x8000, 0xffff);
 	if (Settings.DSP == 1)
 		Memory.map_DSP();	// the cart's own chip answers on its own bus
+	if (fred_cart_gsu)
+	{
+		Memory.map_space(0x00, 0x3f, 0x6000, 0x7fff, fred_gsu_ram() - 0x6000);
+		Memory.map_space(0x80, 0xbf, 0x6000, 0x7fff, fred_gsu_ram() - 0x6000);
+	}
 
 	if (m.mode == XBAND_FRED_HERE)
 	{
@@ -5414,11 +5466,55 @@ static void fred_arm_cart_dsp (void)
 	GetDSP = &DSP1GetByte;
 }
 
+// A Super FX game (DOOM) keeps its GSU and work RAM behind the box, as InitROM
+// would arm them from slot B's LoROM header.
+static void fred_arm_cart_gsu (void)
+{
+	fred_cart_gsu = false;
+	if (Multi.cartSizeB < 0x8000)
+		return;
+	const uint8 *hdr = Memory.ROM + Multi.cartOffsetB + 0x7FB0;
+	switch (hdr[0x25] | (hdr[0x26] << 8))
+	{
+		case 0x1320: case 0x1420: case 0x1520: case 0x1A20:
+		case 0x1330: case 0x1430: case 0x1530: case 0x1A30:
+			break;
+		default:
+			return;
+	}
+
+	if (!fred_gsu_rom && !(fred_gsu_rom = (uint8 *) malloc(FX_MEMORY_32K_MIRRORS + 0x400000)))
+		return;
+	const uint8 *rom = Memory.ROM + Multi.cartOffsetB;
+	const uint32 size = Multi.cartSizeB;
+	memset(fred_gsu_rom, 0xff, FX_MEMORY_32K_MIRRORS);
+	for (uint32 o = 0; o < 0x400000; o += 0x8000)
+		memcpy(fred_gsu_rom + o, rom + Memory.map_mirror(size, o), 0x8000);
+	for (uint32 c = 0; c < 64; c++)
+	{
+		const uint8 *src = rom + Memory.map_mirror(size, c * 0x8000);
+		memcpy(fred_gsu_rom + FX_MEMORY_32K_MIRRORS + c * 0x10000, src, 0x8000);
+		memcpy(fred_gsu_rom + FX_MEMORY_32K_MIRRORS + c * 0x10000 + 0x8000, src, 0x8000);
+	}
+
+	fred_cart_gsu = true;
+	fred_cart_hirom = false;
+	SuperFX.pvRom = fred_gsu_rom;
+	SuperFX.nRomBanks = (size > 0x200000 ? 0x200000 : size) >> 15;
+	SuperFX.pvRam = fred_gsu_ram();
+	SuperFX.nRamBanks = 2;
+	SuperFX.isFx3 = FALSE;
+	S9xInitSuperFX();
+	Settings.SuperFX = TRUE;
+	S9xResetSuperFX();
+}
+
 void S9xXBandFredRemap (void)
 {
 	if (!fred_active())
 		return;
 	fred_cart_hirom = Memory.ScoreHiROM(FALSE, Multi.cartOffsetB) >= Memory.ScoreLoROM(FALSE, Multi.cartOffsetB);
+	fred_arm_cart_gsu();
 	fred_arm_cart_dsp();
 	fred_remap(true);
 }

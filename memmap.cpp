@@ -3605,7 +3605,7 @@ bool8 CMemory::LoadXBandMultiCart ()
 	// We use Memory.SRAM for the standard game-cart save data and
 	// XBand.sram[] for the XBAND-internal SRAM. The two are separate.
 	Multi.sramA = SRAM;
-	Multi.sramB = SRAM + 0x10000;
+	Multi.sramB = SRAM;		// the game cart's battery: Fred passes its own bus through
 
 	// XBAND firmware doesn't itself need an SRAM region in the
 	// multicart sense -- its SRAM lives in XBand.sram[].
@@ -3615,7 +3615,8 @@ bool8 CMemory::LoadXBandMultiCart ()
 	// Game cart in slot B uses standard SRAM size detection.
 	if (Multi.cartSizeB)
 	{
-		Multi.sramSizeB = ROM[Multi.cartOffsetB + 0xffd8];
+		bool8 hi = ScoreHiROM(FALSE, Multi.cartOffsetB) >= ScoreLoROM(FALSE, Multi.cartOffsetB);
+		Multi.sramSizeB = ROM[Multi.cartOffsetB + (hi ? 0xffd8 : 0x7fd8)];
 		// Default to 0 if the header looks bogus.
 		if (Multi.sramSizeB > 7) Multi.sramSizeB = 0;
 		Multi.sramMaskB = Multi.sramSizeB
@@ -3735,8 +3736,23 @@ bool8 CMemory::LoadSRAM (const char *filename)
 		return (S9xRP2040CartLoadFlash(filename));
 
 	// Over the BIOS-folder dump the reset seeded, if the box has saved before.
+	// The game cart keeps its battery in its own .srm.
 	if (Settings.XBAND)
+	{
+		if (Multi.cartType == 6 && Multi.sramSizeB)
+		{
+			size = (1 << (Multi.sramSizeB + 3)) * 128;
+			file = fopen(S9xGetFilename(Multi.fileNameB, ".srm", SRAM_DIR).c_str(), "rb");
+			if (file)
+			{
+				len = fread((char *) Multi.sramB, 1, size + 512, file);
+				fclose(file);
+				if (len - size == 512)
+					memmove(Multi.sramB, Multi.sramB + 512, size);
+			}
+		}
 		return (S9xXBandLoadSRAM(filename));
+	}
 
 	if (Multi.cartType && Multi.sramSizeB)
 	{
@@ -3836,8 +3852,20 @@ bool8 CMemory::SaveSRAM (const char *filename)
 		return (TRUE);
 
 	// The box's own battery SRAM; the BIOS-folder dumps are only ever read.
+	// The game cart's goes to its own .srm.
 	if (Settings.XBAND)
+	{
+		if (Multi.cartType == 6 && Multi.sramSizeB)
+		{
+			if (FILE *file = fopen(S9xGetFilename(Multi.fileNameB, ".srm", SRAM_DIR).c_str(), "wb"))
+			{
+				if (!fwrite((char *) Multi.sramB, (1 << (Multi.sramSizeB + 3)) * 128, 1, file))
+					printf("Couldn't write to the game cart's SRAM file.\n");
+				fclose(file);
+			}
+		}
 		return (S9xXBandSaveSRAM(filename));
+	}
 
 	FILE	*file;
 	int		size;
@@ -4485,6 +4513,8 @@ void CMemory::InitROM (void)
 
 	// SRAM size
 	SRAMMask = SRAMSize ? ((1 << (SRAMSize + 3)) * 128) - 1 : 0;
+	if (Multi.cartType == 6)
+		SRAMMask = Multi.sramMaskB;	// XBAND: Memory.SRAM is the game cart's battery
 
 	// checksum
 	if (!isChecksumOK || ((uint32) CalculatedSize > (uint32) (((1 << (ROMSize - 7)) * 128) * 1024)))
@@ -5496,8 +5526,8 @@ void CMemory::Map_XBandMultiCartHiROMMap (void)
 	// XBAND modem + Fred MMIO at $FB:$C000-$FFFF.
 	map_index(0xfb, 0xfb, 0xc000, 0xffff, MAP_XBAND, MAP_TYPE_I_O);
 
-	// No cart SRAM at $20-$3F:6000: Memory.SRAM mirrors the XBAND's own, and a
-	// game that finds RAM there takes it for a copier (SSF2 then ignores Start).
+	// The game's own SRAM is mapped by Fred's remap, and only when its header has
+	// some: a game that finds RAM there takes it for a copier (SSF2 ignores Start).
 	map_WRAM();
 	map_WriteProtectROM();
 	S9xXBandFredRemap();

@@ -16529,7 +16529,7 @@ static void SetInputPicture(HWND hDlg, int bitmap)
 	BITMAP bm;
 	GetObject(src, sizeof(bm), &bm);
 
-	RECT box = { 5, 184, 375, 344 };
+	RECT box = { 5, 158, 375, 318 };
 	MapDialogRect(hDlg, &box);
 	const int boxW = box.right - box.left, boxH = box.bottom - box.top;
 	double scale = (double) boxW / bm.bmWidth;
@@ -16584,18 +16584,9 @@ static void ShowInputPicture(HWND hDlg, int index)
 	{
 		s_xbandPanelShown = xband;
 
-		// Use DirectInput moves left into the hidden Left+Right checkbox's slot
-		RECT step = { 0, 0, 92, 0 };
-		MapDialogRect(hDlg, &step);
-		static const int directInput[] = { IDC_USEDIRECTINPUT, IDC_LABEL_RESTART_REQUIRED };
-		for (int id : directInput)
-		{
-			HWND c = GetDlgItem(hDlg, id);
-			RECT r;
-			GetWindowRect(c, &r);
-			MapWindowPoints(NULL, hDlg, (POINT *) &r, 2);
-			SetWindowPos(c, NULL, r.left + (xband ? -step.right : step.right), r.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-		}
+		// The X/Ctrl keys note takes the checkbox row's place; Use DirectInput is on every pad row
+		ShowWindow(GetDlgItem(hDlg, IDC_USEDIRECTINPUT), xband ? SW_HIDE : SW_SHOW);
+		ShowWindow(GetDlgItem(hDlg, IDC_LABEL_RESTART_REQUIRED), xband ? SW_HIDE : SW_SHOW);
 		ShowWindow(GetDlgItem(hDlg, IDC_LABEL_XBAND_NOTE), xband ? SW_SHOW : SW_HIDE);
 	}
 

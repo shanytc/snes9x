@@ -17624,11 +17624,38 @@ static bool InputPictureOutlined(int field)
 
 static void ShowInputPictureBitmap(HWND hDlg)
 {
-	HWND pic = GetDlgItem(hDlg, IDC_INPUT_PICTURE);
-	HBITMAP old = (HBITMAP) SendMessage(pic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM) s_panelBitmap);
-	if (old && old != s_panelBitmap && old != s_panelBase)
-		DeleteObject(old);
-	InvalidateRect(pic, NULL, FALSE);
+	InvalidateRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), NULL, FALSE);
+}
+
+// Paints the picture from s_panelBitmap without erasing first, so frequent redraws don't flicker.
+static LRESULT CALLBACK InputPictureSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+	switch (msg)
+	{
+	case WM_ERASEBKGND:
+		return 1;
+	case WM_PAINT:
+	{
+		PAINTSTRUCT ps;
+		HDC dc = BeginPaint(hWnd, &ps);
+		if (s_panelBitmap)
+		{
+			BITMAP bm;
+			GetObject(s_panelBitmap, sizeof(bm), &bm);
+			HDC mem = CreateCompatibleDC(dc);
+			HGDIOBJ old = SelectObject(mem, s_panelBitmap);
+			BitBlt(dc, 0, 0, bm.bmWidth, bm.bmHeight, mem, 0, 0, SRCCOPY);
+			SelectObject(mem, old);
+			DeleteDC(mem);
+		}
+		EndPaint(hWnd, &ps);
+		return 0;
+	}
+	case WM_NCDESTROY:
+		RemoveWindowSubclass(hWnd, InputPictureSubclassProc, 0);
+		break;
+	}
+	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
 
 // Copies the unlit picture into the shown one, lights regions over it, then shows it.
@@ -18013,11 +18040,7 @@ static void SetInputPicture(HWND hDlg, int bitmap)
 	DeleteDC(to);
 	DeleteObject(src);
 
-	// Detach the old picture before freeing it.
 	HWND pic = GetDlgItem(hDlg, IDC_INPUT_PICTURE);
-	HBITMAP shown = (HBITMAP) SendMessage(pic, STM_SETIMAGE, IMAGE_BITMAP, 0);
-	if (shown && shown != s_panelBitmap && shown != s_panelBase)
-		DeleteObject(shown);
 	FreeInputPicture();
 
 	SetWindowPos(pic, NULL, box.left + (boxW - w) / 2, box.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -18173,6 +18196,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		PostMessage(hDlg,WM_COMMAND, MAKEWPARAM(IDC_JPCOMBO, CBN_SELCHANGE), 0);
 
 		SetWindowSubclass(GetDlgItem(hDlg,IDC_JPCOMBO), ControllerComboSubclassProc, 0, 0);
+		SetWindowSubclass(GetDlgItem(hDlg,IDC_INPUT_PICTURE), InputPictureSubclassProc, 0, 0);
 		SetFocus(GetDlgItem(hDlg,IDC_JPCOMBO));
 
 		// Start timer to poll for controller hot-plug events
@@ -18188,7 +18212,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		return TRUE;
 	case WM_DESTROY:
 		KillTimer(hDlg, INPUT_PICTURE_TIMER);
-		SendDlgItemMessage(hDlg, IDC_INPUT_PICTURE, STM_SETIMAGE, IMAGE_BITMAP, 0);
 		FreeInputPicture();
 		break;
 	case WM_CONTEXTMENU:

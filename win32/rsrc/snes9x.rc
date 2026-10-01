@@ -375,7 +375,7 @@ BEGIN
     CONTROL         "Progress1",IDC_NPPROGRESS,"msctls_progress32",WS_BORDER,6,30,174,25
 END
 
-IDD_INPUTCONFIG DIALOGEX 0, 0, 380, 212
+IDD_INPUTCONFIG DIALOGEX 0, 0, 380, 368
 STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CLIPCHILDREN | WS_CAPTION
 CAPTION " "
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
@@ -402,8 +402,8 @@ BEGIN
     CONTROL         " ",IDC_UPRIGHT,"InputCustom",WS_DISABLED | WS_TABSTOP,190,133,100,12
     CONTROL         " ",IDC_DWNRIGHT,"InputCustom",WS_DISABLED | WS_TABSTOP,190,146,100,12
     CONTROL         " ",IDC_DWNLEFT,"InputCustom",WS_DISABLED | WS_TABSTOP,190,159,100,12
-    PUSHBUTTON      "Cancel",IDCANCEL,326,192,48,14
-    PUSHBUTTON      "OK",IDOK,272,192,48,14
+    PUSHBUTTON      "Cancel",IDCANCEL,326,348,48,14
+    PUSHBUTTON      "OK",IDOK,272,348,48,14
     LTEXT           "Blue means already mapped. Pink conflicts with hotkey.\nRed is reserved by Windows. Escape clears bindings.\nPress multiple keys for multi-bind. Delete removes last.",IDC_LABEL_BLUE,155,0,220,26
     RTEXT           "UP",IDC_LABEL_UP,8,71,38,8
     RTEXT           "RIGHT",IDC_LABEL_RIGHT,6,110,41,8
@@ -428,7 +428,7 @@ BEGIN
     GROUPBOX        "Controller",IDC_STATIC,5,1,142,28,0,WS_EX_TRANSPARENT
     GROUPBOX        "Binding",IDC_STATIC,5,30,142,28,0,WS_EX_TRANSPARENT
     GROUPBOX        "Buttons",IDC_STATIC,5,59,288,118,0,WS_EX_TRANSPARENT
-    CONTROL         "",IDC_XBAND_KBD_IMAGE,"Static",SS_BITMAP | NOT WS_VISIBLE,5,184,370,160
+    CONTROL         "",IDC_INPUT_PICTURE,"Static",SS_BITMAP,5,184,370,160
     LTEXT           "",IDC_LABEL_XBAND_NOTE,155,27,220,32,NOT WS_VISIBLE
 END
 
@@ -1321,6 +1321,12 @@ IDB_PAD2                BITMAP                  "pad2.bmp"
 IDB_XBAND_LOGO          BITMAP                  "xband_logo.bmp"
 
 IDB_XBAND_KEYBOARD      BITMAP                  "xband_keyboard.bmp"
+
+IDB_PAD_USA             BITMAP                  "pad_usa.bmp"
+
+IDB_PAD_SFC             BITMAP                  "pad_sfc.bmp"
+
+IDB_PAD_EUR             BITMAP                  "pad_eur.bmp"
 
 IDB_REMOVABLE           BITMAP                  "rd.bmp"
 

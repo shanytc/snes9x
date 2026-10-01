@@ -498,6 +498,8 @@ bool8 S9xReadMousePosition (int which, int &x, int &y, uint32 &buttons)
 
 bool XBandKeyboardOwnsKey (WORD key);
 void XBandKeyboardPollKeys ();
+bool S9xKeyHeld (WORD KeyIdent);
+static bool S9xKeyReleased (WORD KeyIdent);
 
 bool S9xGetState (WORD KeyIdent)
 {
@@ -511,6 +513,20 @@ bool S9xGetState (WORD KeyIdent)
 	if (XBandKeyboardOwnsKey(KeyIdent))
 		return true;
 
+	return !S9xKeyHeld(KeyIdent);
+}
+
+// The device read alone, without S9xGetState's focus and XBAND gates.
+bool S9xKeyHeld (WORD KeyIdent)
+{
+	if(KeyIdent == 0 || KeyIdent == VK_ESCAPE)
+		return false;
+
+	return !S9xKeyReleased(KeyIdent);
+}
+
+static bool S9xKeyReleased (WORD KeyIdent)
+{
     if (KeyIdent & 0x8000) // if it's a joystick 'key':
     {
         int j = (KeyIdent >> 8) & 15;

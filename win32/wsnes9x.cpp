@@ -16584,8 +16584,8 @@ static void ShowInputPicture(HWND hDlg, int index)
 	{
 		s_xbandPanelShown = xband;
 
-		// Use DirectInput moves up into the hidden Left+Right checkbox's slot
-		RECT step = { 0, 0, 0, 13 };
+		// Use DirectInput moves left into the hidden Left+Right checkbox's slot
+		RECT step = { 0, 0, 92, 0 };
 		MapDialogRect(hDlg, &step);
 		static const int directInput[] = { IDC_USEDIRECTINPUT, IDC_LABEL_RESTART_REQUIRED };
 		for (int id : directInput)
@@ -16594,7 +16594,7 @@ static void ShowInputPicture(HWND hDlg, int index)
 			RECT r;
 			GetWindowRect(c, &r);
 			MapWindowPoints(NULL, hDlg, (POINT *) &r, 2);
-			SetWindowPos(c, NULL, r.left, r.top + (xband ? -step.bottom : step.bottom), 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+			SetWindowPos(c, NULL, r.left + (xband ? -step.right : step.right), r.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 		}
 		ShowWindow(GetDlgItem(hDlg, IDC_LABEL_XBAND_NOTE), xband ? SW_SHOW : SW_HIDE);
 	}

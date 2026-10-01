@@ -1162,6 +1162,16 @@ void WinRegisterConfigItems()
 #define ADDXTB3(n,x) ADDXTB(n,x,1); ADDXTB(n,x,2); ADDXTB(n,x,3)
 #define ADDXTBALL(n) ADDXTB3(n,A); ADDXTB3(n,B); ADDXTB3(n,Y); ADDXTB3(n,X); ADDXTB3(n,L); ADDXTB3(n,R); ADDXTB3(n,Start); ADDXTB3(n,Select)
 	ADDXTBALL(1); ADDXTBALL(2); ADDXTBALL(3); ADDXTBALL(4); ADDXTBALL(5); ADDXTBALL(6); ADDXTBALL(7); ADDXTBALL(8);
+	// XBAND Keyboard keys (Input Configuration's "XBAND Keyboard" row)
+#define ADDXB(x,n) AddVKey("XBANDKeyboard:" n, XBandKeys.x, XBandKeys.x); \
+	AddVKey("XBANDKeyboard:" n ":Extra1", XBandKeysExtra.x[0], XBandKeysExtra.x[0]); \
+	AddVKey("XBANDKeyboard:" n ":Extra2", XBandKeysExtra.x[1], XBandKeysExtra.x[1]); \
+	AddVKey("XBANDKeyboard:" n ":Extra3", XBandKeysExtra.x[2], XBandKeysExtra.x[2])
+	ADDXB(Up,"Up"); ADDXB(Down,"Down"); ADDXB(Left,"Left"); ADDXB(Right,"Right");
+	ADDXB(A,"A"); ADDXB(B,"B"); ADDXB(X,"X"); ADDXB(Y,"Y"); ADDXB(L,"L"); ADDXB(R,"R");
+	ADDXB(Start,"Start"); ADDXB(Select,"Select");
+	ADDXB(Left_Up,"Cancel"); ADDXB(Right_Up,"Switch"); ADDXB(Right_Down,"LeftX"); ADDXB(Left_Down,"RightX");
+#undef ADDXB
 #undef ADDX
 #undef ADDXN
 #undef ADDX3

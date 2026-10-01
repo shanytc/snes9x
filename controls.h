@@ -152,7 +152,8 @@ enum controllers
 	CTL_SUPERSCOPE,
 	CTL_JUSTIFIER,	// use id1: 0=one justifier, 1=two justifiers
 	CTL_MP5,			// use id1-id4 to specify pad 0-7 (or -1)
-	CTL_MACSRIFLE
+	CTL_MACSRIFLE,
+	CTL_XBANDKEYBOARD	// port 2 only
 };
 
 void S9xSetController (int port, enum controllers controller, int8 id1, int8 id2, int8 id3, int8 id4); // port=0-1
@@ -264,6 +265,11 @@ void S9xSetJoypadLatch (bool latch);
 
 uint8 S9xReadJOYSERn (int n);
 void S9xGetRumble (uint8 &left, uint8 &right);	// LRG dongle motor magnitudes, 0-15
+
+// Use when writing to $4201 (WRIO); the XBAND Keyboard listens to bit 7.
+
+void S9xControlsWRIO (uint8 byte);
+bool8 S9xXBandKeyboardPlugged (void);
 
 // End-Of-Frame processing. Sets gun latch variables and tries to draw crosshairs
 

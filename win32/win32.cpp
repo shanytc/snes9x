@@ -496,12 +496,19 @@ bool8 S9xReadMousePosition (int which, int &x, int &y, uint32 &buttons)
     return (FALSE);
 }
 
+bool XBandKeyboardOwnsKey (WORD key);
+void XBandKeyboardPollKeys ();
+
 bool S9xGetState (WORD KeyIdent)
 {
 	if(KeyIdent == 0 || KeyIdent == VK_ESCAPE) // if it's the 'disabled' key, it's never pressed
 		return true;
 
 	if(!GUI.BackgroundInput && GUI.hWnd != GetForegroundWindow())
+		return true;
+
+	// Keys (or pad buttons) the XBAND Keyboard is taking don't also press pad buttons.
+	if (XBandKeyboardOwnsKey(KeyIdent))
 		return true;
 
     if (KeyIdent & 0x8000) // if it's a joystick 'key':
@@ -735,6 +742,8 @@ void S9xWinScanJoypads ()
         }
         lastLow = low, lastHigh = high;
     }
+
+    XBandKeyboardPollKeys();
 }
 
 void S9xDetectJoypads()

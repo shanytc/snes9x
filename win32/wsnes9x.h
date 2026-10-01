@@ -653,6 +653,7 @@ enum
 	SNES_MULTIPLAYER8,
 	SNES_JUSTIFIER_2,
 	SNES_MACSRIFLE,
+	SNES_XBAND_KEYBOARD,
 	SNES_MAX_CONTROLLER_OPTIONS
 };
 
@@ -666,6 +667,8 @@ extern struct SJoypad Joypad[16];
 extern struct SJoypad ToggleJoypadStorage[8];
 extern struct SJoypad TurboToggleJoypadStorage[8];
 extern struct SJoypadExtraBinds JoypadExtra[16];
+extern struct SJoypad XBandKeys;
+extern struct SJoypadExtraBinds XBandKeysExtra;
 extern struct SCustomKeys CustomKeys;
 extern struct SCustomKeysExtra CustomKeysExtra;
 

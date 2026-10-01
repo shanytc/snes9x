@@ -24,6 +24,7 @@
 #include "nss.h"
 #include "superdisc.h"
 #include "voicekun.h"
+#include "xband.h"
 #ifdef NETPLAY_SUPPORT
 #include "netplay.h"
 #endif
@@ -46,7 +47,8 @@ using namespace	std;
 #define ONE_JUSTIFIER			11
 #define TWO_JUSTIFIERS			12
 #define MACSRIFLE				13
-#define NUMCTLS					14 // This must be LAST
+#define XBANDKBD				14
+#define NUMCTLS					15 // This must be LAST
 
 #define POLL_ALL				NUMCTLS
 
@@ -387,6 +389,7 @@ static int maptype (int t)
 void S9xControlsReset (void)
 {
 	S9xControlsSoftReset();
+	S9xXBandKeyboardReset(TRUE);
 	mouse[0].buttons  &= ~0x30;
 	mouse[1].buttons  &= ~0x30;
 	justifier.buttons &= ~JUSTIFIER_SELECT;
@@ -408,6 +411,7 @@ void S9xGetRumble (uint8 &left, uint8 &right)
 
 void S9xControlsSoftReset (void)
 {
+	S9xXBandKeyboardReset(FALSE);
 	rumble_shift = 0xffff;
 	rumble_left = rumble_right = 0;
 
@@ -569,6 +573,16 @@ void S9xSetController (int port, enum controllers controller, int8 id1, int8 id2
 			}
 
 			newcontrollers[port] = MACSRIFLE;
+			return;
+
+		case CTL_XBANDKEYBOARD:
+			if (port != 1)
+			{
+				S9xMessage(S9X_CONFIG_INFO, S9X_ERROR, "Cannot select XBAND Keyboard: it plugs into port 2");
+				break;
+			}
+
+			newcontrollers[port] = XBANDKBD;
 			return;
 
 		case CTL_MP5:
@@ -739,6 +753,16 @@ bool S9xVerifyControllers (void)
 
 				break;
 
+			case XBANDKBD:
+				if (port != 1)
+				{
+					S9xMessage(S9X_CONFIG_INFO, S9X_ERROR, "Cannot select XBAND Keyboard: it plugs into port 2");
+					newcontrollers[port] = NONE;
+					ret = true;
+				}
+
+				break;
+
 			default:
 				break;
 		}
@@ -799,6 +823,10 @@ void S9xGetController (int port, enum controllers *controller, int8 *id1, int8 *
 		case MACSRIFLE:
 			*controller = CTL_MACSRIFLE;
 			*id1 = 1;
+			return;
+
+		case XBANDKBD:
+			*controller = CTL_XBANDKEYBOARD;
 			return;
 	}
 }
@@ -874,6 +902,10 @@ void S9xReportControllers (void)
 					c += sprintf(c, "M.A.C.S. Rifle (cannot fire). ");
 				else
 					c += sprintf(c, "M.A.C.S. Rifle. ");
+				break;
+
+			case XBANDKBD:
+				c += sprintf(c, "XBAND Keyboard. ");
 				break;
 		}
 	}
@@ -3032,6 +3064,9 @@ uint8 S9xReadJOYSERn (int n)
 				do_polling(i);
 				return (bits | ((macsrifle.buttons & 0x01) ? 1 : 0));
 
+			case XBANDKBD:
+				return (bits | S9xXBandKeyboardClock());
+
 			default:
 				return (bits);
 		}
@@ -3140,11 +3175,25 @@ uint8 S9xReadJOYSERn (int n)
 				do_polling(i);
 				return (bits | ((macsrifle.buttons & 0x01) ? 1 : 0));
 
+			case XBANDKBD:
+				return (bits | S9xXBandKeyboardClock());
+
 			default:
 				IncreaseReadIdxPost(read_idx[n][0]);
 				return (bits);
 		}
 	}
+}
+
+void S9xControlsWRIO (uint8 byte)
+{
+	if (curcontrollers[1] == XBANDKBD)
+		S9xXBandKeyboardWRIO(byte);
+}
+
+bool8 S9xXBandKeyboardPlugged (void)
+{
+	return (curcontrollers[1] == XBANDKBD);
 }
 
 void S9xDoAutoJoypad (void)
@@ -3248,6 +3297,22 @@ void S9xDoAutoJoypad (void)
 				Memory.FillRAM[0x4219 + n * 2] = macsrifle.buttons;
 				WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
 				break;
+
+			case XBANDKBD:
+			{
+				// The auto-read clocks the keyboard 16 times like any $4017 read.
+				uint16	d0 = 0, d1 = 0;
+				for (int b = 0; b < 16; b++)
+				{
+					const uint8	d = S9xXBandKeyboardClock();
+					d0 = (d0 << 1) | (d & 1);
+					d1 = (d1 << 1) | (d >> 1);
+				}
+
+				WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, d0);
+				WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, d1);
+				break;
+			}
 
 			default:
 				WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, 0);

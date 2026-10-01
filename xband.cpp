@@ -66,6 +66,8 @@
 #include "fxemu.h"
 #include "fscompat.h"
 #include "xband.h"
+#include "ppu.h"
+#include "display.h"
 
 #include <cstdio>
 #include <cstring>
@@ -6940,4 +6942,197 @@ void S9xXBandPoll (void)
 		if (XBand.txbufused >= XBand.txbufpos)
 			XBand.txbufpos = XBand.txbufused = 0;
 	}
+}
+
+// -----------------------------------------------------------------------
+// XBAND Keyboard (SNES port 2)
+// -----------------------------------------------------------------------
+// Catapult's SNES keyboard firmware (catakybd.SRC v1.7SNES) behind the BIOS
+// driver in SNESControls.c: PP7 ($4201.7) falling starts a transaction and
+// every $4017 read clocks out one inverted D1:D0 pair, LSB first.
+
+#define XBKBD_ID		0x78	// 'x'
+#define XBKBD_QUEUE		15		// the byte count is 4 bits
+#define XBKBD_STATE_VER	1
+
+struct SXBandKbd
+{
+	uint8	pp7;			// last $4201.7 level
+	uint8	active;			// a transaction is running
+	uint8	clocks;			// $4017 clocks since PP7 fell
+	uint8	find;			// PP7 high after the 2nd clock: ID-only transaction
+	uint8	break_all;		// PP7 after the 3rd clock: breaks for every key
+	uint8	caps_led;		// Caps Lock LED lit
+	uint8	led_sample;		// PP7 after the 5th clock (low = LED on)
+	uint8	count;			// bytes sent in this transaction
+	uint8	len;
+	uint8	queue[XBKBD_QUEUE];
+};
+
+static struct SXBandKbd	xbkbd;
+static uint32	xbkbd_last_poll;
+static bool		xbkbd_polled;
+static bool		xbkbd_read_seen;
+
+void S9xXBandKeyboardReset (bool8 power)
+{
+	if (power)
+	{
+		memset(&xbkbd, 0, sizeof(xbkbd));
+		xbkbd_polled = false;
+		xbkbd_read_seen = false;
+	}
+
+	// A reset only drives WRIO back to $FF; the keyboard keeps its state.
+	xbkbd.pp7 = 1;
+}
+
+void S9xXBandKeyboardWRIO (uint8 byte)
+{
+	const uint8	pp7 = byte >> 7;
+
+	if (xbkbd.pp7 && !pp7 && !xbkbd.active)
+	{
+		xbkbd.active = 1;
+		xbkbd.clocks = 0;
+		xbkbd.find = 0;
+		xbkbd.count = 0;
+		xbkbd_last_poll = IPPU.TotalEmulatedFrames;
+		xbkbd_polled = true;
+	}
+
+	xbkbd.pp7 = pp7;
+}
+
+static void xbkbd_finish (void)
+{
+	xbkbd.active = 0;
+	if (xbkbd.find)
+		return;
+
+	xbkbd.len -= xbkbd.count;
+	memmove(xbkbd.queue, xbkbd.queue + xbkbd.count, xbkbd.len);
+
+	if (!xbkbd_read_seen)
+	{
+		xbkbd_read_seen = true;
+		S9xSetInfoString("XBAND Keyboard connected");
+	}
+
+	const uint8	led = !xbkbd.led_sample;
+	if (led != xbkbd.caps_led)
+	{
+		xbkbd.caps_led = led;
+		S9xSetInfoString(led ? "XBAND Keyboard: Caps Lock on" : "XBAND Keyboard: Caps Lock off");
+	}
+}
+
+uint8 S9xXBandKeyboardClock (void)
+{
+	if (!xbkbd.active)
+		return (0);	// both lines idle high
+
+	const uint8	k = xbkbd.clocks;
+	uint8		d;
+
+	if (k < 4)
+	{
+		if (k == 2)
+			xbkbd.find = xbkbd.pp7;
+		else
+		if (k == 3 && !xbkbd.find)
+			xbkbd.break_all = xbkbd.pp7;
+		d = XBKBD_ID >> (k * 2);
+	}
+	else
+	if (k < 6)
+	{
+		if (k == 4)
+			xbkbd.count = xbkbd.len;
+		else
+			xbkbd.led_sample = xbkbd.pp7;
+		d = xbkbd.count >> ((k - 4) * 2);
+	}
+	else
+	{
+		const int	i = k - 6;
+		d = xbkbd.queue[i >> 2] >> ((i & 3) * 2);
+	}
+
+	xbkbd.clocks = k + 1;
+	if (xbkbd.clocks == (xbkbd.find ? 4 : 6 + 4 * xbkbd.count))
+		xbkbd_finish();
+
+	return (~d & 3);
+}
+
+void S9xXBandKeyboardKey (uint16 key, bool8 down, bool8 repeat)
+{
+	const uint8	code = key & 0xff;
+	const bool	ext = (key & XBAND_KEY_EXT) != 0;
+	bool		always_break, repeats;
+
+	if (ext || (code >= 0x86 && code <= 0x8d))	// arrows, pad buttons
+		always_break = true, repeats = false;
+	else
+	if (code == 0x11 || code == 0x12 || code == 0x14 || code == 0x58 || code == 0x59 || code == 0x80 || code == 0x81)
+		always_break = true, repeats = false;	// Alt, Shift, Ctrl, Caps, Open/Closed-X
+	else
+		always_break = false, repeats = true;
+
+	uint8	seq[3];
+	int		n = 0;
+
+	if (down)
+	{
+		if (repeat && !repeats)
+			return;
+	}
+	else
+	if (!always_break && !xbkbd.break_all)
+		return;
+
+	if (ext)
+		seq[n++] = 0xe0;
+	if (!down)
+		seq[n++] = 0xf0;
+	seq[n++] = code;
+
+	// The firmware drops keys once its buffer is full.
+	if (xbkbd.len + n > XBKBD_QUEUE)
+		return;
+
+	memcpy(xbkbd.queue + xbkbd.len, seq, n);
+	xbkbd.len += n;
+}
+
+bool8 S9xXBandKeyboardPolled (void)
+{
+	return (xbkbd_polled && IPPU.TotalEmulatedFrames - xbkbd_last_poll < 64);
+}
+
+size_t S9xXBandKeyboardStateSize (void)
+{
+	return (1 + sizeof(xbkbd));
+}
+
+void S9xXBandKeyboardStateSave (uint8 *buf)
+{
+	buf[0] = XBKBD_STATE_VER;
+	memcpy(buf + 1, &xbkbd, sizeof(xbkbd));
+}
+
+void S9xXBandKeyboardStateLoad (const uint8 *buf, size_t size)
+{
+	if (buf && size == S9xXBandKeyboardStateSize() && buf[0] == XBKBD_STATE_VER)
+	{
+		memcpy(&xbkbd, buf + 1, sizeof(xbkbd));
+		if (xbkbd.len > XBKBD_QUEUE)
+			xbkbd.len = 0;
+		return;
+	}
+
+	// No keyboard in the state: no transaction in flight, WRIO as saved.
+	xbkbd.active = 0;
+	xbkbd.pp7 = Memory.FillRAM[0x4201] >> 7;
 }

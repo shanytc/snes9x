@@ -1100,6 +1100,7 @@ void WinRegisterConfigItems()
 	AddBoolC("HotkeyMultiBindingMode", GUI.HotkeyMultiBindingMode, false, "true to use multi-binding mode in hotkey config, false for single-binding mode");
 	AddBoolC("UseDirectInput", GUI.UseDirectInput, true, "true to let SDL use DirectInput for controllers; set false if plugging/unplugging USB devices causes stutter (restart required)");
 	AddBoolC("JapaneseController", GUI.JapaneseController, false, "true to show the Euro/Japanese controller image in the Input Configuration dialog, false for the USA controller");
+	AddBoolC("EuropeanController", GUI.EuropeanController, false, "with JapaneseController, true to show the European controller image rather than the Super Famicom one");
 #undef CATEGORY
 #define	CATEGORY "ROM"
 	AddBoolC("Cheat", Settings.ApplyCheats, true, "true to allow enabled cheats to be applied");

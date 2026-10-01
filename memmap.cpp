@@ -3743,23 +3743,9 @@ bool8 CMemory::LoadSRAM (const char *filename)
 		return (S9xRP2040CartLoadFlash(filename));
 
 	// Over the BIOS-folder dump the reset seeded, if the box has saved before.
-	// The game cart keeps its battery in its own .srm.
+	// The game cart's battery has no file: every XBAND boot starts it blank.
 	if (Settings.XBAND)
-	{
-		if (Multi.cartType == 6 && Multi.sramSizeB)
-		{
-			size = (1 << (Multi.sramSizeB + 3)) * 128;
-			file = fopen(S9xGetFilename(Multi.fileNameB, ".srm", SRAM_DIR).c_str(), "rb");
-			if (file)
-			{
-				len = fread((char *) Multi.sramB, 1, size + 512, file);
-				fclose(file);
-				if (len - size == 512)
-					memmove(Multi.sramB, Multi.sramB + 512, size);
-			}
-		}
 		return (S9xXBandLoadSRAM(filename));
-	}
 
 	if (Multi.cartType && Multi.sramSizeB)
 	{
@@ -3859,20 +3845,8 @@ bool8 CMemory::SaveSRAM (const char *filename)
 		return (TRUE);
 
 	// The box's own battery SRAM; the BIOS-folder dumps are only ever read.
-	// The game cart's goes to its own .srm.
 	if (Settings.XBAND)
-	{
-		if (Multi.cartType == 6 && Multi.sramSizeB)
-		{
-			if (FILE *file = fopen(S9xGetFilename(Multi.fileNameB, ".srm", SRAM_DIR).c_str(), "wb"))
-			{
-				if (!fwrite((char *) Multi.sramB, (1 << (Multi.sramSizeB + 3)) * 128, 1, file))
-					printf("Couldn't write to the game cart's SRAM file.\n");
-				fclose(file);
-			}
-		}
 		return (S9xXBandSaveSRAM(filename));
-	}
 
 	FILE	*file;
 	int		size;

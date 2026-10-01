@@ -6340,6 +6340,11 @@ void S9xResetXBand (void)
 	fred_map_valid = false;
 	fred_remap(true);
 
+	// A match never continues a save: the game cart's battery starts blank at every
+	// boot, so both boxes run the same game.
+	if (fred_active() && Multi.sramSizeB)
+		memset(Memory.SRAM, SNESGameFixes.SRAMInitialValue, (1 << (Multi.sramSizeB + 3)) * 128);
+
 	xband_reset_pending = false;
 	XBand.consecutive_reads = 0;
 

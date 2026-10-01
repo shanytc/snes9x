@@ -78,6 +78,7 @@
 #include "AVIOutput.h"
 #include "InputCustom.h"
 #include "SDLInput.h"
+#pragma comment(lib, "msimg32.lib")	// AlphaBlend
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "retroachievements.h"
 #endif
@@ -980,6 +981,38 @@ bool XBandKeyboardOwnsKey (WORD key)
 	const UINT		sc = MapVirtualKey(key, MAPVK_VK_TO_VSC_EX);
 	const uint16	code = XBandKeyFromScan(sc & 0xff, (sc >> 8) == 0xe0);
 	return (code && XBandKeyboardTakes(code));
+}
+
+bool S9xKeyHeld (WORD KeyIdent);
+
+// Right Ctrl sends left Ctrl's code; the keyboard picture tells them apart.
+#define XBAND_PIC_RCTRL	0x214
+
+// The XBAND keys held now, for Input Configuration's keyboard picture: the row's
+// bindings first, then typing keys by scancode. Returns the count.
+static int XBandHeldKeys (uint16 *codes, int max)
+{
+	int n = 0;
+	for (int i = 0; i < 16 && n < max; i++)
+	{
+		const XBandSlot &s = kXBandSlots[i];
+		bool held = S9xKeyHeld(*s.key);
+		for (int e = 0; !held && GUI.AllowMultipleBindings && e < MAX_EXTRA_BINDS; e++)
+			held = S9xKeyHeld(s.extra[e]);
+		if (held)
+			codes[n++] = s.code;
+	}
+
+	for (int vk = 8; vk < 0xff && n < max; vk++)
+	{
+		if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || XBandKeyBound((WORD) vk) || !(GetKeyState(vk) & 0x80))
+			continue;
+		const UINT		sc = MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX);
+		const uint16	code = vk == VK_RCONTROL ? XBAND_PIC_RCTRL : XBandKeyFromScan(sc & 0xff, (sc >> 8) == 0xe0);
+		if (code)
+			codes[n++] = code;
+	}
+	return (n);
 }
 
 static void CenterCursor()
@@ -16101,8 +16134,116 @@ static void SetInputPadImage(HWND hDlg, int bitmap)
 // grows by XBAND_PANEL_DLU while that row is shown.
 #define XBAND_PANEL_DLU 156
 
-static HBITMAP s_xbandKbdBitmap = NULL;
+static HBITMAP s_xbandKbdBitmap = NULL;	// shown, with the held keys lit
+static HBITMAP s_xbandKbdBase = NULL;	// the scaled picture, unlit
+static double s_xbandKbdScale = 1.0;
 static bool s_xbandPanelShown = false;
+static uint16 s_xbandLit[32];
+static int s_xbandLitCount = -1;
+
+#define XBAND_KBD_TIMER 98
+
+// xband_keyboard.bmp's keys (source pixels) by XBAND code; the blank keys send nothing.
+struct XBandPicKey { short x, y, w, h; uint16 code; };
+
+static const XBandPicKey kXBandPicKeys[] =
+{
+	{ 509,  67, 37, 29, 0x8a }, { 549,  67, 37, 29, 0x8c }, { 590,  67, 36, 29, 0x8d }, { 629,  67, 33, 29, 0x8b },	// L Select Start R
+
+	{  29, 105, 32, 32, 0x76 }, {  64, 105, 37, 32, 0x16 }, { 104, 105, 37, 32, 0x1e }, { 144, 105, 37, 32, 0x26 },	// Cancel 1 2 3
+	{ 185, 105, 38, 32, 0x25 }, { 226, 105, 38, 32, 0x2e }, { 267, 105, 37, 32, 0x36 }, { 307, 105, 37, 32, 0x3d },	// 4 5 6 7
+	{ 348, 105, 37, 32, 0x3e }, { 388, 105, 37, 32, 0x46 }, { 428, 104, 38, 32, 0x45 }, { 469, 104, 37, 32, 0x4e },	// 8 9 0 -
+	{ 509, 104, 37, 32, 0x55 }, { 549, 104, 77, 32, 0x66 }, { 629, 104, 33, 32, 0x88 },							// = Backspace X
+
+	{  29, 145, 54, 32, 0x0d }, {  86, 145, 37, 32, 0x15 }, { 126, 145, 37, 32, 0x1d }, { 166, 145, 37, 32, 0x24 },	// Switch Q W E
+	{ 206, 145, 38, 32, 0x2d }, { 247, 145, 38, 32, 0x2c }, { 288, 145, 37, 32, 0x35 }, { 328, 145, 37, 32, 0x3c },	// R T Y U
+	{ 368, 145, 37, 32, 0x43 }, { 409, 144, 37, 32, 0x44 }, { 449, 144, 37, 32, 0x4d }, { 490, 144, 37, 32, 0x54 },	// I O P [
+	{ 529, 144, 37, 32, 0x5b }, { 629, 144, 33, 32, 0x89 },														// ] Y
+
+	{  29, 185, 64, 34, 0x58 }, {  97, 185, 36, 34, 0x1c }, { 136, 185, 39, 34, 0x1b }, { 177, 185, 37, 34, 0x23 },	// Caps A S D
+	{ 218, 185, 37, 33, 0x2b }, { 258, 185, 39, 33, 0x34 }, { 300, 185, 36, 33, 0x33 }, { 339, 185, 38, 33, 0x3b },	// F G H J
+	{ 380, 185, 36, 33, 0x42 }, { 420, 184, 37, 34, 0x4b }, { 460, 184, 38, 34, 0x4c }, { 500, 184, 37, 34, 0x52 },	// K L ; '
+	{ 541, 185, 85, 33, 0x5a }, { 629, 184, 33, 33, 0x86 },														// Enter (its lower bar) A
+
+	{  29, 227, 83, 34, 0x12 }, { 115, 227, 38, 34, 0x1a }, { 155, 227, 38, 34, 0x22 }, { 196, 226, 37, 35, 0x21 },	// Shift Z X C
+	{ 237, 226, 37, 35, 0x2a }, { 277, 226, 37, 35, 0x32 }, { 317, 226, 38, 35, 0x31 }, { 358, 226, 37, 35, 0x3a },	// V B N M
+	{ 398, 226, 37, 34, 0x41 }, { 438, 226, 38, 34, 0x49 }, { 479, 226, 37, 34, 0x4a }, { 519, 226, 70, 34, 0x59 },	// , . / Shift
+	{ 592, 225, 35, 35, XBAND_KEY_EXT | 0x75 }, { 631, 225, 31, 35, 0x87 },										// Up B
+
+	{  29, 269, 36, 32, 0x0e }, { 108, 269, 37, 32, 0x80 }, { 149, 269, 37, 32, 0x14 }, { 189, 268, 238, 33, 0x29 },	// ` X Ctrl Space
+	{ 429, 268, 38, 33, XBAND_PIC_RCTRL }, { 470, 268, 37, 33, 0x81 }, { 510, 268, 37, 33, 0x5d },				// Ctrl X backslash
+	{ 550, 268, 38, 33, XBAND_KEY_EXT | 0x6b }, { 591, 268, 37, 33, XBAND_KEY_EXT | 0x72 }, { 631, 268, 31, 33, XBAND_KEY_EXT | 0x74 }	// Left Down Right
+};
+
+// A light blue disc over each held key, on a fresh copy of the unlit picture.
+static void DrawXBandKeyboardLit(HWND hDlg)
+{
+	if (!s_xbandKbdBase || !s_xbandKbdBitmap)
+		return;
+	BITMAP bm;
+	GetObject(s_xbandKbdBase, sizeof(bm), &bm);
+
+	HDC screen = GetDC(hDlg);
+	HDC from = CreateCompatibleDC(screen), to = CreateCompatibleDC(screen), tint = CreateCompatibleDC(screen);
+	HBITMAP dot = CreateCompatibleBitmap(screen, 1, 1);
+	HGDIOBJ oldFrom = SelectObject(from, s_xbandKbdBase), oldTo = SelectObject(to, s_xbandKbdBitmap), oldTint = SelectObject(tint, dot);
+	SetPixel(tint, 0, 0, RGB(80, 170, 255));
+	BitBlt(to, 0, 0, bm.bmWidth, bm.bmHeight, from, 0, 0, SRCCOPY);
+
+	HPEN pen = CreatePen(PS_SOLID, 2, RGB(40, 130, 230));
+	HGDIOBJ oldPen = SelectObject(to, pen), oldBrush = SelectObject(to, GetStockObject(NULL_BRUSH));
+	const BLENDFUNCTION blend = { AC_SRC_OVER, 0, 120, 0 };
+	for (const XBandPicKey &k : kXBandPicKeys)
+	{
+		bool lit = false;
+		for (int i = 0; i < s_xbandLitCount && !lit; i++)
+			lit = (s_xbandLit[i] == k.code);
+		if (!lit)
+			continue;
+
+		const double s = s_xbandKbdScale;
+		const int d = (int) ((k.w < k.h ? k.w : k.h) * s * 0.9);
+		const int cx = (int) ((k.x + k.w / 2.0) * s), cy = (int) ((k.y + k.h / 2.0) * s);
+		const int l = cx - d / 2, t = cy - d / 2;
+		HRGN disc = CreateEllipticRgn(l, t, l + d + 1, t + d + 1);
+		SelectClipRgn(to, disc);
+		AlphaBlend(to, l, t, d, d, tint, 0, 0, 1, 1, blend);
+		SelectClipRgn(to, NULL);
+		DeleteObject(disc);
+		Ellipse(to, l, t, l + d, t + d);
+	}
+	SelectObject(to, oldPen);
+	SelectObject(to, oldBrush);
+	DeleteObject(pen);
+
+	SelectObject(from, oldFrom);
+	SelectObject(to, oldTo);
+	SelectObject(tint, oldTint);
+	DeleteObject(dot);
+	DeleteDC(from);
+	DeleteDC(to);
+	DeleteDC(tint);
+	ReleaseDC(hDlg, screen);
+
+	HWND pic = GetDlgItem(hDlg, IDC_XBAND_KBD_IMAGE);
+	HBITMAP old = (HBITMAP) SendMessage(pic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM) s_xbandKbdBitmap);
+	if (old && old != s_xbandKbdBitmap && old != s_xbandKbdBase)
+		DeleteObject(old);
+	InvalidateRect(pic, NULL, FALSE);
+}
+
+// XBAND_KBD_TIMER: redraw when the set of held keys changes.
+static void UpdateXBandKeyboardLit(HWND hDlg)
+{
+	SDLInput_Poll();
+	uint16 codes[32];
+	const int n = XBandHeldKeys(codes, 32);
+	if (n == s_xbandLitCount && !memcmp(codes, s_xbandLit, n * sizeof(uint16)))
+		return;
+	memcpy(s_xbandLit, codes, n * sizeof(uint16));
+	s_xbandLitCount = n;
+	DrawXBandKeyboardLit(hDlg);
+}
 
 // The picture scaled into its box (never past 1:1) and centred.
 static void SetXBandKeyboardPicture(HWND hDlg)
@@ -16139,10 +16280,13 @@ static void SetXBandKeyboardPicture(HWND hDlg)
 
 	HWND pic = GetDlgItem(hDlg, IDC_XBAND_KBD_IMAGE);
 	SetWindowPos(pic, NULL, box.left + (boxW - w) / 2, box.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
-	HBITMAP old = (HBITMAP) SendMessage(pic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM) dst);
-	if (old && old != dst)
-		DeleteObject(old);
-	s_xbandKbdBitmap = dst;
+	s_xbandKbdBase = dst;
+	s_xbandKbdScale = scale;
+	HDC dc = GetDC(hDlg);
+	s_xbandKbdBitmap = CreateCompatibleBitmap(dc, w, h);
+	ReleaseDC(hDlg, dc);
+	s_xbandLitCount = 0;
+	DrawXBandKeyboardLit(hDlg);
 }
 
 static void ShowXBandKeyboardPanel(HWND hDlg, bool show)
@@ -16198,6 +16342,22 @@ static void ShowXBandKeyboardPanel(HWND hDlg, bool show)
 
 	ShowWindow(GetDlgItem(hDlg, IDC_XBAND_KBD_IMAGE), show ? SW_SHOW : SW_HIDE);
 	ShowWindow(GetDlgItem(hDlg, IDC_LABEL_XBAND_NOTE), show ? SW_SHOW : SW_HIDE);
+
+	if (show)
+		SetTimer(hDlg, XBAND_KBD_TIMER, 30, NULL);
+	else
+		KillTimer(hDlg, XBAND_KBD_TIMER);
+}
+
+// The controller list keeps focus, so keys pressed to try bindings must not switch
+// rows through its closed-list navigation. F4 and Alt+Down still open it.
+static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+	// Only key messages query the list: CB_GETDROPPEDSTATE comes back through here.
+	const bool navKey = msg == WM_CHAR || (msg == WM_KEYDOWN && wParam >= VK_PRIOR && wParam <= VK_DOWN);	// PgUp PgDn End Home arrows
+	if (navKey && !SendMessage(hWnd, CB_GETDROPPEDSTATE, 0, 0))
+		return 0;
+	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
 
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -16295,6 +16455,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		PostMessage(hDlg,WM_COMMAND, MAKEWPARAM(IDC_JPCOMBO, CBN_SELCHANGE), 0);
 
+		SetWindowSubclass(GetDlgItem(hDlg,IDC_JPCOMBO), ControllerComboSubclassProc, 0, 0);
 		SetFocus(GetDlgItem(hDlg,IDC_JPCOMBO));
 
 		// Start timer to poll for controller hot-plug events
@@ -16313,10 +16474,16 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			DeleteObject(s_padBitmap);
 			s_padBitmap = NULL;
 		}
+		KillTimer(hDlg, XBAND_KBD_TIMER);
 		if (s_xbandKbdBitmap)
 		{
 			DeleteObject(s_xbandKbdBitmap);
 			s_xbandKbdBitmap = NULL;
+		}
+		if (s_xbandKbdBase)
+		{
+			DeleteObject(s_xbandKbdBase);
+			s_xbandKbdBase = NULL;
 		}
 		break;
 	case WM_CONTEXTMENU:
@@ -16351,6 +16518,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		}
 		break;
 	case WM_TIMER:
+		if(wParam == XBAND_KBD_TIMER)
+			UpdateXBandKeyboardLit(hDlg);
 		if(wParam == 99)
 		{
 			// Poll SDL for device add/remove events
@@ -16411,7 +16580,16 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			PostMessage(hDlg,WM_NEXTDLGCTL,0,0);
 		return true;
 		}
+	case WM_LBUTTONDOWN:
+		// A click off the binding fields (background, labels, pictures) ends editing
+		SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
+		return TRUE;
 	case WM_COMMAND:
+		if (LOWORD(wParam) == IDC_PAD_IMAGE && HIWORD(wParam) == STN_CLICKED)
+		{
+			SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
+			return TRUE;
+		}
 		switch(LOWORD(wParam))
 		{
 		case IDCANCEL:

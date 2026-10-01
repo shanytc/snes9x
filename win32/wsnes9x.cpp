@@ -17473,6 +17473,7 @@ static uint16 s_xbandLit[32];
 static int s_xbandLitCount = -1;
 static int s_padPanelIndex = 0;	// the dialog row whose bindings light the pad
 static int s_padLit = -1;
+static int s_hoverField = 0, s_markedField = 0;	// outlined: the field under the mouse, the one being edited
 
 #define INPUT_PICTURE_TIMER 98
 
@@ -17576,6 +17577,49 @@ static float PadPicDistance(const PadPicShape &b, float x, float y)
 			inside = !inside;
 	}
 	return inside ? -d : d;
+}
+
+// The binding field a pad picture shape stands for; turbo rows bind turbo modes in the d-pad slots.
+static int PadPicField(int mask)
+{
+	if (s_padPanelIndex >= 8 && mask <= PADPIC_RIGHT)
+		return 0;
+	switch (mask)
+	{
+		case PADPIC_UP:     return IDC_UP;
+		case PADPIC_DOWN:   return IDC_DOWN;
+		case PADPIC_LEFT:   return IDC_LEFT;
+		case PADPIC_RIGHT:  return IDC_RIGHT;
+		case PADPIC_A:      return IDC_A;
+		case PADPIC_B:      return IDC_B;
+		case PADPIC_X:      return IDC_X;
+		case PADPIC_Y:      return IDC_Y;
+		case PADPIC_L:      return IDC_L;
+		case PADPIC_R:      return IDC_R;
+		case PADPIC_START:  return IDC_START;
+		case PADPIC_SELECT: return IDC_SELECT;
+	}
+	return 0;
+}
+
+// The XBAND row's binding field for a keyboard picture key (as kXBandSlots); typing keys have none.
+static int XBandPicField(uint16 code)
+{
+	static const struct { uint16 code; int field; } fields[] =
+	{
+		{ XBAND_KEY_EXT | 0x75, IDC_UP }, { XBAND_KEY_EXT | 0x72, IDC_DOWN }, { XBAND_KEY_EXT | 0x6b, IDC_LEFT }, { XBAND_KEY_EXT | 0x74, IDC_RIGHT },
+		{ 0x86, IDC_A }, { 0x87, IDC_B }, { 0x88, IDC_X }, { 0x89, IDC_Y }, { 0x8a, IDC_L }, { 0x8b, IDC_R }, { 0x8c, IDC_SELECT }, { 0x8d, IDC_START },
+		{ 0x76, IDC_UPLEFT }, { 0x0d, IDC_UPRIGHT }, { 0x80, IDC_DWNRIGHT }, { 0x81, IDC_DWNLEFT }	// Cancel, Switch, left X, right X
+	};
+	for (const auto &f : fields)
+		if (f.code == code)
+			return f.field;
+	return 0;
+}
+
+static bool InputPictureOutlined(int field)
+{
+	return field && (field == s_hoverField || field == s_markedField);
 }
 
 static void ShowInputPictureBitmap(HWND hDlg)
@@ -17682,6 +17726,15 @@ static void DrawXBandKeyboardLit(HWND hDlg)
 		pic.Light(rgn, 2);
 		DeleteObject(rgn);
 	}
+	HBRUSH outline = CreateSolidBrush(RGB(255, 200, 0));
+	for (const XBandPicKey &k : kXBandPicKeys)
+		if (InputPictureOutlined(XBandPicField(k.code)))
+		{
+			HRGN ring = keyRgn(k.x - 3, k.y - 3, k.w + 6, k.h + 6);
+			FrameRgn(pic.to, ring, outline, 2, 2);
+			DeleteObject(ring);
+		}
+	DeleteObject(outline);
 	HBRUSH ledOn = CreateSolidBrush(RGB(255, 210, 0));
 	for (int i = 0; i < 3; i++)
 		if (s_xbandLeds & (1 << i))
@@ -17730,7 +17783,9 @@ static void DrawPadPictureLit(HWND hDlg)
 	const float s = (float) s_panelScale;
 	for (const PadPicShape &b : kPadPicShapes)
 	{
-		if (s_padLit < 0 || !(s_padLit & b.mask))
+		const bool lit = s_padLit >= 0 && (s_padLit & b.mask);
+		const float ring = InputPictureOutlined(PadPicField(b.mask)) ? 2.0f : 0.0f;	// display pixels outside the edge
+		if (!lit && !ring)
 			continue;
 
 		// Face buttons in the pad's colours, d-pad arrows and Start/Select yellow, the shoulders a blue tint
@@ -17752,30 +17807,31 @@ static void DrawPadPictureLit(HWND hDlg)
 			x1 = (std::max)(x1, b.pt[i][0] + r);
 			y1 = (std::max)(y1, b.pt[i][1] + r);
 		}
-		const int left = (std::max)(0, (int) (x0 * s) - 1), top = (std::max)(0, (int) (y0 * s) - 1);
-		const int right = (std::min)(w - 1, (int) (x1 * s) + 1), bottom = (std::min)(h - 1, (int) (y1 * s) + 1);
+		const int left = (std::max)(0, (int) (x0 * s) - 3), top = (std::max)(0, (int) (y0 * s) - 3);
+		const int right = (std::min)(w - 1, (int) (x1 * s) + 3), bottom = (std::min)(h - 1, (int) (y1 * s) + 3);
+		const COLORREF outline = RGB(255, 200, 0);
 
 		for (int y = top; y <= bottom; y++)
 			for (int x = left; x <= right; x++)
 			{
-				int inFill = 0, inRim = 0;
+				int inFill = 0, inRim = 0, inRing = 0;
 				for (int sy = 0; sy < 4; sy++)
 					for (int sx = 0; sx < 4; sx++)
 					{
 						const float d = PadPicDistance(b, (x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
-						if (d < -rimWidth)
-							inFill++;
-						else if (d < 0)
-							inRim++;
+						if (d >= 0)
+							inRing += (d < ring);
+						else if (lit)
+							(d < -rimWidth ? inFill : inRim)++;
 					}
-				if (!inFill && !inRim)
+				if (!inFill && !inRim && !inRing)
 					continue;
 
-				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cb = 1.0f - cf - cr;
+				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cg = inRing / 16.0f, cb = 1.0f - cf - cr - cg;
 				uint32 &c = px[y * w + x];
-				const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + 0.5f);
-				const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + 0.5f);
-				const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + 0.5f);
+				const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + GetBValue(outline) * cg + 0.5f);
+				const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + GetGValue(outline) * cg + 0.5f);
+				const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + GetRValue(outline) * cg + 0.5f);
 				c = (red << 16) | (green << 8) | blue;
 			}
 	}
@@ -17815,6 +17871,65 @@ static int PadHeldButtons(int index)
 	return lit;
 }
 
+// The XBAND keyboard picture's key under a source-pixel point, as the XBAND row's
+// binding field; typing keys have no field.
+static int XBandPictureFieldAt(float x, float y)
+{
+	for (const XBandPicKey &k : kXBandPicKeys)
+		if (x >= k.x && x < k.x + k.w && y >= k.y && y < k.y + k.h)
+			return XBandPicField(k.code);
+	return 0;
+}
+
+// The binding field for the picture's button or key under a dialog-client point; 0 if none.
+static int InputPictureFieldAt(HWND hDlg, POINT pt)
+{
+	if (!s_panelBase)
+		return 0;
+	RECT r;
+	GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &r);
+	MapWindowPoints(NULL, hDlg, (POINT *) &r, 2);
+	if (!PtInRect(&r, pt))
+		return 0;
+	const float x = (pt.x - r.left + 0.5f) / (float) s_panelScale, y = (pt.y - r.top + 0.5f) / (float) s_panelScale;
+	if (s_xbandPanelShown)
+		return XBandPictureFieldAt(x, y);
+
+	int field = 0;
+	float nearest = 8.0f;	// source pixels of slack, so the small arrows are easy to hit
+	for (const PadPicShape &b : kPadPicShapes)
+	{
+		const float d = PadPicDistance(b, x, y);
+		if (d < nearest && PadPicField(b.mask))
+		{
+			nearest = d;
+			field = PadPicField(b.mask);
+		}
+	}
+	return field && IsWindowEnabled(GetDlgItem(hDlg, field)) ? field : 0;
+}
+
+// Notes the field under the mouse and the one being edited; true when either changed.
+static bool UpdateInputPictureOutlines(HWND hDlg)
+{
+	POINT pt;
+	GetCursorPos(&pt);
+	const HWND under = WindowFromPoint(pt);
+	int hover = 0;
+	if (under == hDlg || under == GetDlgItem(hDlg, IDC_INPUT_PICTURE))
+	{
+		ScreenToClient(hDlg, &pt);
+		hover = InputPictureFieldAt(hDlg, pt);
+	}
+	const HWND focus = GetFocus();
+	const int marked = focus && GetParent(focus) == hDlg ? GetDlgCtrlID(focus) : 0;
+	if (hover == s_hoverField && marked == s_markedField)
+		return false;
+	s_hoverField = hover;
+	s_markedField = marked;
+	return true;
+}
+
 static void DrawInputPictureLit(HWND hDlg)
 {
 	if (s_xbandPanelShown)
@@ -17827,10 +17942,11 @@ static void DrawInputPictureLit(HWND hDlg)
 static void UpdateInputPictureLit(HWND hDlg)
 {
 	SDLInput_Poll();
+	const bool outlines = UpdateInputPictureOutlines(hDlg);
 	if (!s_xbandPanelShown)
 	{
 		const int lit = PadHeldButtons(s_padPanelIndex);
-		if (lit == s_padLit)
+		if (lit == s_padLit && !outlines)
 			return;
 		s_padLit = lit;
 		DrawPadPictureLit(hDlg);
@@ -17840,7 +17956,7 @@ static void UpdateInputPictureLit(HWND hDlg)
 	uint16 codes[32];
 	const int n = XBandHeldKeys(codes, 32);
 	const int leds = XBandLedState();
-	if (n == s_xbandLitCount && !memcmp(codes, s_xbandLit, n * sizeof(uint16)) && leds == s_xbandLeds)
+	if (n == s_xbandLitCount && !memcmp(codes, s_xbandLit, n * sizeof(uint16)) && leds == s_xbandLeds && !outlines)
 		return;
 	memcpy(s_xbandLit, codes, n * sizeof(uint16));
 	s_xbandLitCount = n;
@@ -18171,9 +18287,27 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		return true;
 		}
 	case WM_LBUTTONDOWN:
-		// A click off the binding fields (background, labels, pictures) ends editing
-		SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
+	{
+		// A click on the picture's button or key edits its binding; elsewhere off the fields it ends editing
+		POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+		const int field = InputPictureFieldAt(hDlg, pt);
+		SetFocus(GetDlgItem(hDlg, field ? field : IDC_JPCOMBO));
 		return TRUE;
+	}
+	case WM_SETCURSOR:
+		if ((HWND)wParam == hDlg && LOWORD(lParam) == HTCLIENT)
+		{
+			POINT pt;
+			GetCursorPos(&pt);
+			ScreenToClient(hDlg, &pt);
+			if (InputPictureFieldAt(hDlg, pt))
+			{
+				SetCursor(LoadCursor(NULL, IDC_HAND));
+				SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+				return TRUE;
+			}
+		}
+		break;
 	case WM_COMMAND:
 		switch(LOWORD(wParam))
 		{

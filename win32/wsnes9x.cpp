@@ -16097,6 +16097,109 @@ static void SetInputPadImage(HWND hDlg, int bitmap)
 	s_padBitmap = hbm;
 }
 
+// The XBAND row's keyboard picture sits in a band under the Buttons box; the dialog
+// grows by XBAND_PANEL_DLU while that row is shown.
+#define XBAND_PANEL_DLU 156
+
+static HBITMAP s_xbandKbdBitmap = NULL;
+static bool s_xbandPanelShown = false;
+
+// The picture scaled into its box (never past 1:1) and centred.
+static void SetXBandKeyboardPicture(HWND hDlg)
+{
+	HBITMAP src = (HBITMAP) LoadImage(g_hInst, MAKEINTRESOURCE(IDB_XBAND_KEYBOARD), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
+	if (!src)
+		return;
+	BITMAP bm;
+	GetObject(src, sizeof(bm), &bm);
+
+	RECT box = { 5, 184, 375, 344 };
+	MapDialogRect(hDlg, &box);
+	const int boxW = box.right - box.left, boxH = box.bottom - box.top;
+	double scale = (double) boxW / bm.bmWidth;
+	if ((double) boxH / bm.bmHeight < scale)
+		scale = (double) boxH / bm.bmHeight;
+	if (scale > 1.0)
+		scale = 1.0;
+	const int w = (int) (bm.bmWidth * scale), h = (int) (bm.bmHeight * scale);
+
+	HDC screen = GetDC(hDlg);
+	HDC from = CreateCompatibleDC(screen), to = CreateCompatibleDC(screen);
+	HBITMAP dst = CreateCompatibleBitmap(screen, w, h);
+	HGDIOBJ oldFrom = SelectObject(from, src), oldTo = SelectObject(to, dst);
+	SetStretchBltMode(to, HALFTONE);
+	SetBrushOrgEx(to, 0, 0, NULL);
+	StretchBlt(to, 0, 0, w, h, from, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+	SelectObject(from, oldFrom);
+	SelectObject(to, oldTo);
+	DeleteDC(from);
+	DeleteDC(to);
+	ReleaseDC(hDlg, screen);
+	DeleteObject(src);
+
+	HWND pic = GetDlgItem(hDlg, IDC_XBAND_KBD_IMAGE);
+	SetWindowPos(pic, NULL, box.left + (boxW - w) / 2, box.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+	HBITMAP old = (HBITMAP) SendMessage(pic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM) dst);
+	if (old && old != dst)
+		DeleteObject(old);
+	s_xbandKbdBitmap = dst;
+}
+
+static void ShowXBandKeyboardPanel(HWND hDlg, bool show)
+{
+	if (show == s_xbandPanelShown)
+		return;
+	s_xbandPanelShown = show;
+
+	RECT band = { 0, 0, 0, XBAND_PANEL_DLU };
+	MapDialogRect(hDlg, &band);
+	const int dy = show ? band.bottom : -band.bottom;
+
+	// OK and Cancel ride the bottom edge
+	static const int buttons[] = { IDOK, IDCANCEL };
+	for (int id : buttons)
+	{
+		HWND b = GetDlgItem(hDlg, id);
+		RECT r;
+		GetWindowRect(b, &r);
+		MapWindowPoints(NULL, hDlg, (POINT *) &r, 2);
+		SetWindowPos(b, NULL, r.left, r.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+
+	// Use DirectInput moves up into the hidden Left+Right checkbox's slot
+	RECT step = { 0, 0, 0, 13 };
+	MapDialogRect(hDlg, &step);
+	static const int directInput[] = { IDC_USEDIRECTINPUT, IDC_LABEL_RESTART_REQUIRED };
+	for (int id : directInput)
+	{
+		HWND c = GetDlgItem(hDlg, id);
+		RECT r;
+		GetWindowRect(c, &r);
+		MapWindowPoints(NULL, hDlg, (POINT *) &r, 2);
+		SetWindowPos(c, NULL, r.left, r.top + (show ? -step.bottom : step.bottom), 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+
+	// Grow downward, lifting the dialog if the band would leave the work area
+	RECT w;
+	GetWindowRect(hDlg, &w);
+	int top = w.top;
+	MONITORINFO mi = {};
+	mi.cbSize = sizeof(mi);
+	if (show && GetMonitorInfo(MonitorFromWindow(hDlg, MONITOR_DEFAULTTONEAREST), &mi) && w.bottom + dy > mi.rcWork.bottom)
+	{
+		top = mi.rcWork.bottom - (w.bottom - w.top + dy);
+		if (top < mi.rcWork.top)
+			top = mi.rcWork.top;
+	}
+	SetWindowPos(hDlg, NULL, w.left, top, w.right - w.left, w.bottom - w.top + dy, SWP_NOZORDER | SWP_NOACTIVATE);
+
+	if (show && !s_xbandKbdBitmap)
+		SetXBandKeyboardPicture(hDlg);
+
+	ShowWindow(GetDlgItem(hDlg, IDC_XBAND_KBD_IMAGE), show ? SW_SHOW : SW_HIDE);
+	ShowWindow(GetDlgItem(hDlg, IDC_LABEL_XBAND_NOTE), show ? SW_SHOW : SW_HIDE);
+}
+
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	TCHAR temp[256];
@@ -16139,6 +16242,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		SetDlgItemText(hDlg,IDC_LABEL_DOWNRIGHT,INPUTCONFIG_LABEL_DOWNRIGHT);
 		SetDlgItemText(hDlg,IDC_LABEL_DOWNLEFT,INPUTCONFIG_LABEL_DOWNLEFT);
 		SetDlgItemText(hDlg,IDC_LABEL_BLUE,INPUTCONFIG_LABEL_BLUE);
+		SetDlgItemText(hDlg,IDC_LABEL_XBAND_NOTE,INPUTCONFIG_LABEL_XBAND_NOTE);
+		s_xbandPanelShown = false;
 
 		for(i=5;i<10;i++)
 			Joypad[i].Left_Up = Joypad[i].Right_Up = Joypad[i].Left_Down = Joypad[i].Right_Down = 0;
@@ -16207,6 +16312,11 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		{
 			DeleteObject(s_padBitmap);
 			s_padBitmap = NULL;
+		}
+		if (s_xbandKbdBitmap)
+		{
+			DeleteObject(s_xbandKbdBitmap);
+			s_xbandKbdBitmap = NULL;
 		}
 		break;
 	case WM_CONTEXTMENU:
@@ -16443,9 +16553,13 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 				UpdateDeviceInfo(hDlg, index);
 
-				// The XBAND row shows its logo; Left+Right filtering is a pad matter.
+				// The XBAND row shows its logo and keyboard picture; Left+Right filtering
+				// and gamepad auto-assign are pad matters.
 				SetInputPadImage(hDlg, index == XBAND_DLG_INDEX ? IDB_XBAND_LOGO : GUI.JapaneseController ? IDB_PAD2 : IDB_PAD);
 				ShowWindow(GetDlgItem(hDlg,IDC_ALLOWLEFTRIGHT), index == XBAND_DLG_INDEX ? SW_HIDE : SW_SHOW);
+				ShowWindow(GetDlgItem(hDlg,IDC_AUTOASSIGN), index == XBAND_DLG_INDEX ? SW_HIDE : SW_SHOW);
+				ShowWindow(GetDlgItem(hDlg,IDC_DEVICECOMBO), index == XBAND_DLG_INDEX ? SW_HIDE : SW_SHOW);
+				ShowXBandKeyboardPanel(hDlg, index == XBAND_DLG_INDEX);
 
 				break;
 		}

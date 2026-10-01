@@ -16188,7 +16188,7 @@ static int XBandLedState(void)
 	return ((GetKeyState(VK_NUMLOCK) & 1) | ((GetKeyState(VK_CAPITAL) & 1) << 1) | ((GetKeyState(VK_SCROLL) & 1) << 2));
 }
 
-// A light blue disc over each held key, and the lit lock LEDs, on a fresh copy of the unlit picture.
+// A light blue key-shaped tint over each held key, and the lit lock LEDs, on a fresh copy of the unlit picture.
 static void DrawXBandKeyboardLit(HWND hDlg)
 {
 	if (!s_xbandKbdBase || !s_xbandKbdBitmap)
@@ -16203,9 +16203,14 @@ static void DrawXBandKeyboardLit(HWND hDlg)
 	SetPixel(tint, 0, 0, RGB(80, 170, 255));
 	BitBlt(to, 0, 0, bm.bmWidth, bm.bmHeight, from, 0, 0, SRCCOPY);
 
-	HPEN pen = CreatePen(PS_SOLID, 2, RGB(40, 130, 230));
-	HGDIOBJ oldPen = SelectObject(to, pen), oldBrush = SelectObject(to, GetStockObject(NULL_BRUSH));
+	HBRUSH edge = CreateSolidBrush(RGB(40, 130, 230));
 	const BLENDFUNCTION blend = { AC_SRC_OVER, 0, 120, 0 };
+	const double s = s_xbandKbdScale;
+	const int radius = (int) (12 * s) | 1;
+	auto keyRgn = [&](int x, int y, int w, int h)
+	{
+		return CreateRoundRectRgn((int) (x * s), (int) (y * s), (int) ((x + w) * s) + 1, (int) ((y + h) * s) + 1, radius, radius);
+	};
 	for (const XBandPicKey &k : kXBandPicKeys)
 	{
 		bool lit = k.code == 0x58 && (s_xbandLeds & XBAND_LED_CAPS);	// Caps Lock while on
@@ -16214,29 +16219,31 @@ static void DrawXBandKeyboardLit(HWND hDlg)
 		if (!lit)
 			continue;
 
-		const double s = s_xbandKbdScale;
-		const int d = (int) ((k.w < k.h ? k.w : k.h) * s * 0.9);
-		const int cx = (int) ((k.x + k.w / 2.0) * s), cy = (int) ((k.y + k.h / 2.0) * s);
-		const int l = cx - d / 2, t = cy - d / 2;
-		HRGN disc = CreateEllipticRgn(l, t, l + d + 1, t + d + 1);
-		SelectClipRgn(to, disc);
-		AlphaBlend(to, l, t, d, d, tint, 0, 0, 1, 1, blend);
+		// The key's own outline; Enter adds its upper part to the bar in the table.
+		HRGN rgn = keyRgn(k.x, k.y, k.w, k.h);
+		if (k.code == 0x5a)
+		{
+			HRGN upper = keyRgn(572, 144, 55, 45);
+			CombineRgn(rgn, rgn, upper, RGN_OR);
+			DeleteObject(upper);
+		}
+		RECT box;
+		GetRgnBox(rgn, &box);
+		SelectClipRgn(to, rgn);
+		AlphaBlend(to, box.left, box.top, box.right - box.left, box.bottom - box.top, tint, 0, 0, 1, 1, blend);
 		SelectClipRgn(to, NULL);
-		DeleteObject(disc);
-		Ellipse(to, l, t, l + d, t + d);
+		FrameRgn(to, rgn, edge, 2, 2);
+		DeleteObject(rgn);
 	}
+	DeleteObject(edge);
 	HBRUSH ledOn = CreateSolidBrush(RGB(255, 210, 0));
 	for (int i = 0; i < 3; i++)
 		if (s_xbandLeds & (1 << i))
 		{
-			const double s = s_xbandKbdScale;
 			RECT r = { (int) (kXBandLeds[i].x0 * s), (int) (XBAND_LED_Y0 * s), (int) ((kXBandLeds[i].x1 + 1) * s + 0.5), (int) ((XBAND_LED_Y1 + 1) * s + 0.5) };
 			FillRect(to, &r, ledOn);
 		}
 	DeleteObject(ledOn);
-	SelectObject(to, oldPen);
-	SelectObject(to, oldBrush);
-	DeleteObject(pen);
 
 	SelectObject(from, oldFrom);
 	SelectObject(to, oldTo);

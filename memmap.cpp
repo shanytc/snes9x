@@ -2171,6 +2171,9 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
     }
     S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
     S9xInitCheatData();
+    // InitROM (and its PostRomInitFunc cheat enable) never runs on this path.
+    if (Settings.ApplyCheats)
+        S9xCheatsEnable();
     if (filename && *filename)
     {
         ROMFilename = filename;
@@ -2247,6 +2250,8 @@ bool8 CMemory::LoadROM (const char *filename)
         }
         S9xSGBSetAudioRate(Settings.SoundPlaybackRate);
         S9xInitCheatData();
+        if (Settings.ApplyCheats)   // see LoadGBFromBytes
+            S9xCheatsEnable();
         ROMFilename = filename;
         S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
         EmitSGBLoadBanner(filename, gb_banner);

@@ -3246,7 +3246,9 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v8: add the Super Game Boy Color flag, so a state names the kind of session
 //     it came from (the SNES ROM differs: SGBC runs a patched BIOS).
 // v10: add ppu.cgb_pal_written. Older states derive it from the palette RAM.
-constexpr uint32_t SGB_STATE_VERSION = 10;
+// v11: add the in-flight DMA, PPU pipeline and APU internals. Older states
+//      load them from fixed defaults instead of the pre-load session's.
+constexpr uint32_t SGB_STATE_VERSION = 11;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3481,6 +3483,175 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 	{
 		IoField(c, impl.ppu.cgb_pal_written);
 	}
+
+	// v11: everything else that runs mid-frame. A state is taken right after
+	// VBlank starts, while the game's OAM DMA and VBlank IRQ are in flight.
+	if (c.version >= 11)
+	{
+		Memory &m = impl.mem;
+		IoField(c, m.serial_bits);
+		IoField(c, m.serial_guard);
+		IoField(c, m.ff72);
+		IoField(c, m.ff73);
+		IoField(c, m.ff74);
+		IoField(c, m.ff75);
+		IoField(c, m.hdma_hblank_latch);
+		IoField(c, m.dma_stall);
+		IoField(c, m.late_addr);
+		IoField(c, m.late_value);
+		IoField(c, m.late_dots);
+		IoField(c, m.ds_tick_rem);
+		IoField(c, m.dma_active);
+		IoField(c, m.dma_index);
+		IoField(c, m.dma_src);
+		IoField(c, m.dma_setup);
+		IoField(c, m.dma_src_next);
+		IoField(c, m.dma_bus_byte);
+		IoBytes(c, m.dma_oam_old, sizeof m.dma_oam_old);
+		IoField(c, m.dma_last);
+		IoField(c, m.dma_vram_bypass);
+
+		Ppu &p = impl.ppu;
+		IoField(c, p.mode3_sprite_stall);
+		IoField(c, p.mode3_hold);
+		IoField(c, p.latched_wx);
+		IoField(c, p.fetch_scy);
+		IoField(c, p.latched_bgp);
+		IoField(c, p.lyc_relatch);
+		IoField(c, p.vblank_irq_at);
+		IoField(c, p.stat_irq_delay);
+		IoField(c, p.present_hold);
+		IoField(c, p.boot_logo_hold);
+		IoField(c, p.stop_display);
+		IoField(c, p.tm);
+		IoField(c, p.om);
+		IoField(c, p.wx_write_cooldown);
+		IoField(c, p.lcdon_first);
+		IoField(c, p.lcdon_pad);
+		IoField(c, p.ly_change_t);
+		IoField(c, p.ly_prev);
+		IoField(c, p.pal_glitch);
+		IoField(c, p.pal_glitch_reg);
+		IoField(c, p.pal_glitch_next);
+		IoField(c, p.scan_y_bus);
+		IoField(c, p.scan_x_bus);
+		IoField(c, p.lcdon_line);
+		IoField(c, p.ly_lag);
+		IoField(c, p.lcdc_shadow);
+		IoField(c, p.lcdc_d2);
+		IoField(c, p.lcdc_d3);
+		IoField(c, p.lcdc_d4);
+		IoField(c, p.wx_d1);
+		IoField(c, p.wx_d2);
+		IoField(c, p.wx_d3);
+		IoField(c, p.wx_d4);
+		IoField(c, p.tile_sel_glitch);
+		IoField(c, p.sel_glitch_data);
+		IoField(c, p.boot_skew);
+		IoBytes(c, p.raw_framebuffer, sizeof p.raw_framebuffer);
+		IoBytes(c, p.layer,           sizeof p.layer);
+		IoBytes(c, p.color_fb,        sizeof p.color_fb);
+
+		Apu &a = impl.apu;
+		IoBytes(c, a.is_active, sizeof a.is_active);
+		IoField(c, a.skip_div_event);
+		IoField(c, a.pending_envelope_tick);
+		IoField(c, a.apu_tick_parity);
+		IoField(c, a.square_sweep_countdown);
+		IoField(c, a.square_sweep_calculate_countdown);
+		IoField(c, a.square_sweep_calculate_countdown_reload_timer);
+		IoField(c, a.sweep_length_addend);
+		IoField(c, a.shadow_sweep_sample_length);
+		IoField(c, a.unshifted_sweep);
+		IoField(c, a.square_sweep_instant_calculation_done);
+		IoField(c, a.channel_1_restart_hold);
+		IoField(c, a.channel1_completed_addend);
+		IoField(c, a.noise_counter_active);
+		IoField(c, a.noise_background_counter_active);
+		IoField(c, a.lfsr_stepped_in_narrow);
+		IoField(c, a.lfsr_bit_7_before_step);
+		IoField(c, a.noise_started_with_dac_disabled);
+
+		IoField(c, impl.joypad.mlt_players);
+		IoField(c, impl.joypad.mlt_index);
+		IoBytes(c, impl.cart.camera_regs, sizeof impl.cart.camera_regs);
+		IoField(c, impl.run_target);   // the last frame's overshoot, owed by the next
+	}
+}
+
+// What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
+// whatever the session running before the load left there.
+void DefaultUnsavedState(Emulator::Impl &impl)
+{
+	Memory &m = impl.mem;
+	m.serial_bits = m.serial_guard = 0;
+	m.ff72 = m.ff73 = m.ff74 = m.ff75 = 0;
+	m.hdma_hblank_latch = false;
+	m.dma_stall   = 0;
+	m.late_addr   = 0;
+	m.late_value  = 0;
+	m.late_dots   = -1;
+	m.ds_tick_rem = 0;
+	m.dma_active  = false;
+	m.dma_index   = 0;
+	m.dma_src     = 0;
+	m.dma_setup   = 0;
+	m.dma_src_next = 0;
+	m.dma_bus_byte = 0xFF;
+	std::memcpy(m.dma_oam_old, impl.ppu.oam, sizeof m.dma_oam_old);
+	m.dma_last    = 0xFF;
+	m.dma_vram_bypass = false;
+
+	Ppu &p = impl.ppu;
+	const bool om_emits = p.om.emits;
+	p.tm = PixelMachine{};
+	p.om = PixelMachine{};
+	p.om.emits = om_emits;
+	p.mode3_sprite_stall = 0;
+	p.mode3_hold     = -1;
+	p.latched_wx     = p.wx;
+	p.fetch_scy      = p.scy;
+	p.latched_bgp    = p.bgp;
+	p.lyc_relatch    = false;
+	p.vblank_irq_at  = 0;
+	p.stat_irq_delay = 0;
+	p.present_hold   = false;
+	p.boot_logo_hold = false;
+	p.stop_display   = 0;
+	p.wx_write_cooldown = 0;
+	p.lcdon_first    = false;
+	p.lcdon_pad      = 0;
+	p.ly_change_t    = 0;
+	p.ly_prev        = p.ly;
+	p.pal_glitch     = 0;
+	p.scan_y_bus = p.scan_x_bus = 0;
+	p.lcdon_line     = false;
+	p.ly_lag         = 0;
+	p.lcdc_shadow = p.lcdc_d2 = p.lcdc_d3 = p.lcdc_d4 = p.lcdc;
+	p.wx_d1 = p.wx_d2 = p.wx_d3 = p.wx_d4 = p.wx;
+	p.tile_sel_glitch = 0;
+	p.sel_glitch_data = 0;
+	p.boot_skew       = 0;
+
+	Apu &a = impl.apu;
+	for (bool &on : a.is_active) on = false;   // until the next trigger
+	a.skip_div_event = 0;
+	a.pending_envelope_tick = false;
+	a.apu_tick_parity = 0;
+	a.square_sweep_countdown = 0;
+	a.square_sweep_calculate_countdown = 0;
+	a.square_sweep_calculate_countdown_reload_timer = 0;
+	a.sweep_length_addend = 0;
+	a.shadow_sweep_sample_length = a.ch1.sample_length;
+	a.unshifted_sweep = false;
+	a.square_sweep_instant_calculation_done = false;
+	a.channel_1_restart_hold = 0;
+	a.channel1_completed_addend = 0;
+	a.noise_counter_active = false;
+	a.noise_background_counter_active = false;
+	a.lfsr_stepped_in_narrow = false;
+	a.lfsr_bit_7_before_step = false;
+	a.noise_started_with_dac_disabled = false;
 }
 
 } // anonymous
@@ -3527,6 +3698,8 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	IoCtx c{nullptr, buffer + 12, 0, plen, IoMode::Load, true, version};
 	VisitState(*impl_, c);
 	if (!c.ok) return false;
+	if (version < 11)
+		DefaultUnsavedState(*impl_);
 	if (c.sgbc_mismatch)
 	{
 		S9xMessage(S9X_INFO, S9X_ROM_INFO,
@@ -3546,7 +3719,8 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->cart.sram_dirty = false;
 	impl_->ds_extra        = -1;
 	impl_->apu_ds_rem      = 0;
-	impl_->run_target      = impl_->ppu.t_cycles;
+	if (version < 11)
+		impl_->run_target  = impl_->ppu.t_cycles;
 	impl_->drc_integ       = DrcSteadyStateCorr(impl_->cgb_mode, impl_->run_mode);
 
 	// Reset only the sub-sample integration accumulator. The ring buffer

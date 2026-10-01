@@ -5238,6 +5238,21 @@ static void fred_map_cart (uint32 bank_s, uint32 bank_e, uint32 addr_s, uint32 a
 		}
 }
 
+// The game cart's battery RAM: the cart decodes it on its own bus. Only when its
+// header has some - a cart without it must not find RAM there (SSF2's copier check).
+static void fred_map_cart_sram (uint32 lorom_bank_s, uint32 lorom_bank_e)
+{
+	if (!Multi.sramSizeB || fred_cart_gsu)
+		return;
+	if (!fred_cart_hirom)
+		Memory.map_index(lorom_bank_s, lorom_bank_e, 0x0000, 0x7fff, CMemory::MAP_LOROM_SRAM, CMemory::MAP_TYPE_RAM);
+	else if (lorom_bank_s < 0x80)
+	{
+		Memory.map_index(0x20, 0x3f, 0x6000, 0x7fff, CMemory::MAP_HIROM_SRAM, CMemory::MAP_TYPE_RAM);
+		Memory.map_index(0xa0, 0xbf, 0x6000, 0x7fff, CMemory::MAP_HIROM_SRAM, CMemory::MAP_TYPE_RAM);
+	}
+}
+
 static void fred_remap (bool force)
 {
 	if (!fred_active())
@@ -5255,6 +5270,7 @@ static void fred_remap (bool force)
 	fred_map_cart(0x00, 0x3f, 0x8000, 0xffff);
 	fred_map_cart(0x40, 0x7d, 0x0000, 0xffff);
 	fred_map_cart(0x80, 0xbf, 0x8000, 0xffff);
+	fred_map_cart_sram(0x70, 0x7d);
 	if (Settings.DSP == 1)
 		Memory.map_DSP();	// the cart's own chip answers on its own bus
 	if (fred_cart_gsu)
@@ -5279,6 +5295,7 @@ static void fred_remap (bool force)
 	else
 	{
 		fred_map_cart(0xc0, 0xff, 0x0000, 0xffff);
+		fred_map_cart_sram(0xf0, 0xff);		// $E0-$FF are the box's in here mode
 		if (m.control & FRED_CTL_FIXED)
 			Memory.map_index(0xfb, 0xfb, 0xc000, 0xffff, CMemory::MAP_XBAND, CMemory::MAP_TYPE_I_O);
 		if (m.control & FRED_CTL_INTERNAL)

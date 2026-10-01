@@ -17730,9 +17730,18 @@ static void ShowXBandKeyboardPanel(HWND hDlg, bool show)
 // rows through its closed-list navigation. F4 and Alt+Down still open it.
 static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
 {
+	// The closed list scrolls on the wheel by sending itself VK_UP/VK_DOWN; let those through.
+	static bool inWheel = false;
+	if (msg == WM_MOUSEWHEEL)
+	{
+		inWheel = true;
+		LRESULT r = DefSubclassProc(hWnd, msg, wParam, lParam);
+		inWheel = false;
+		return r;
+	}
 	// Only key messages query the list: CB_GETDROPPEDSTATE comes back through here.
 	const bool navKey = msg == WM_CHAR || (msg == WM_KEYDOWN && wParam >= VK_PRIOR && wParam <= VK_DOWN);	// PgUp PgDn End Home arrows
-	if (navKey && !SendMessage(hWnd, CB_GETDROPPEDSTATE, 0, 0))
+	if (navKey && !inWheel && !SendMessage(hWnd, CB_GETDROPPEDSTATE, 0, 0))
 		return 0;
 	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }

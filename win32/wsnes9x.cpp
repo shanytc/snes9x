@@ -16175,7 +16175,20 @@ static const XBandPicKey kXBandPicKeys[] =
 	{ 550, 268, 38, 33, XBAND_KEY_EXT | 0x6b }, { 591, 268, 37, 33, XBAND_KEY_EXT | 0x72 }, { 631, 268, 31, 33, XBAND_KEY_EXT | 0x74 }	// Left Down Right
 };
 
-// A light blue disc over each held key, on a fresh copy of the unlit picture.
+// The Num/Caps/Scroll Lock LEDs (source pixels) follow the PC's own locks; while
+// Caps Lock is on its key keeps its marker too.
+static const struct { short x0, x1; } kXBandLeds[3] = { { 474, 495 }, { 515, 536 }, { 557, 577 } };
+#define XBAND_LED_Y0 22
+#define XBAND_LED_Y1 26
+#define XBAND_LED_CAPS 2
+static int s_xbandLeds = 0;
+
+static int XBandLedState(void)
+{
+	return ((GetKeyState(VK_NUMLOCK) & 1) | ((GetKeyState(VK_CAPITAL) & 1) << 1) | ((GetKeyState(VK_SCROLL) & 1) << 2));
+}
+
+// A light blue disc over each held key, and the lit lock LEDs, on a fresh copy of the unlit picture.
 static void DrawXBandKeyboardLit(HWND hDlg)
 {
 	if (!s_xbandKbdBase || !s_xbandKbdBitmap)
@@ -16195,7 +16208,7 @@ static void DrawXBandKeyboardLit(HWND hDlg)
 	const BLENDFUNCTION blend = { AC_SRC_OVER, 0, 120, 0 };
 	for (const XBandPicKey &k : kXBandPicKeys)
 	{
-		bool lit = false;
+		bool lit = k.code == 0x58 && (s_xbandLeds & XBAND_LED_CAPS);	// Caps Lock while on
 		for (int i = 0; i < s_xbandLitCount && !lit; i++)
 			lit = (s_xbandLit[i] == k.code);
 		if (!lit)
@@ -16212,6 +16225,15 @@ static void DrawXBandKeyboardLit(HWND hDlg)
 		DeleteObject(disc);
 		Ellipse(to, l, t, l + d, t + d);
 	}
+	HBRUSH ledOn = CreateSolidBrush(RGB(255, 210, 0));
+	for (int i = 0; i < 3; i++)
+		if (s_xbandLeds & (1 << i))
+		{
+			const double s = s_xbandKbdScale;
+			RECT r = { (int) (kXBandLeds[i].x0 * s), (int) (XBAND_LED_Y0 * s), (int) ((kXBandLeds[i].x1 + 1) * s + 0.5), (int) ((XBAND_LED_Y1 + 1) * s + 0.5) };
+			FillRect(to, &r, ledOn);
+		}
+	DeleteObject(ledOn);
 	SelectObject(to, oldPen);
 	SelectObject(to, oldBrush);
 	DeleteObject(pen);
@@ -16232,16 +16254,18 @@ static void DrawXBandKeyboardLit(HWND hDlg)
 	InvalidateRect(pic, NULL, FALSE);
 }
 
-// XBAND_KBD_TIMER: redraw when the set of held keys changes.
+// XBAND_KBD_TIMER: redraw when the set of held keys or the lock LEDs change.
 static void UpdateXBandKeyboardLit(HWND hDlg)
 {
 	SDLInput_Poll();
 	uint16 codes[32];
 	const int n = XBandHeldKeys(codes, 32);
-	if (n == s_xbandLitCount && !memcmp(codes, s_xbandLit, n * sizeof(uint16)))
+	const int leds = XBandLedState();
+	if (n == s_xbandLitCount && !memcmp(codes, s_xbandLit, n * sizeof(uint16)) && leds == s_xbandLeds)
 		return;
 	memcpy(s_xbandLit, codes, n * sizeof(uint16));
 	s_xbandLitCount = n;
+	s_xbandLeds = leds;
 	DrawXBandKeyboardLit(hDlg);
 }
 
@@ -16286,6 +16310,7 @@ static void SetXBandKeyboardPicture(HWND hDlg)
 	s_xbandKbdBitmap = CreateCompatibleBitmap(dc, w, h);
 	ReleaseDC(hDlg, dc);
 	s_xbandLitCount = 0;
+	s_xbandLeds = XBandLedState();
 	DrawXBandKeyboardLit(hDlg);
 }
 

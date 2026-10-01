@@ -44,6 +44,11 @@ struct Joypad
 	// joypad-rotation byte). Maintained by Emulator::OnJoyserWrite.
 	uint8_t mlt_players = 1;
 	uint8_t mlt_index   = 0;
+	// A split-screen seat is a Game Boy in its own Super Game Boy: it
+	// answers that same rotation probe, so its game colors itself like
+	// the master's, but its buttons are its own pad rather than a BIOS
+	// mirror of the SNES ones — there is no BIOS behind a seat.
+	bool    sgb_probe  = false;
 };
 
 enum : uint8_t

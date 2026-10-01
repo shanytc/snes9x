@@ -18,7 +18,6 @@
 
 #include "apu/bapu/snes/snes.hpp"
 
-extern SDMA	DMA[8];
 extern FILE	*apu_trace;
 FILE		*trace = NULL, *trace2 = NULL;
 

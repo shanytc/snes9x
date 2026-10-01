@@ -25,6 +25,8 @@ void S9xShowBiosNotice (void);
 // True once an unrunnable notice has been shown: a cart is mapped but cannot
 // run, so the UI should stay in its no-game state rather than offer resets.
 bool8 S9xBiosMissing (void);
+// Same, held half again as long — for warnings meant to be read.
+void S9xSetInfoStringLong (const char *);
 
 // Routines the port has to implement even if it doesn't use them
 

@@ -42,7 +42,7 @@
 			S9xDoHEventProcessing(); \
 	}
 
-extern uint8	OpenBus;
+extern S9X_MACHINE uint8	OpenBus;
 
 static inline int32 memory_speed (uint32 address)
 {

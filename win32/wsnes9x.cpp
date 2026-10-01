@@ -394,6 +394,22 @@ SJoypad TurboToggleJoypadStorage [8] = {
 
 SJoypadExtraBinds JoypadExtra[16] = {};
 
+// XBAND Keyboard keys set in Input Configuration; the diagonal slots are Cancel,
+// right X, Switch and left X (Esc is always Cancel as well).
+struct SJoypad XBandKeys = {
+	true,
+	VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN,	/* Left, Right, Up, Down */
+	0, VK_APPS, VK_TAB, VK_LWIN,		/* Cancel, right X, Switch, left X */
+	VK_NUMPAD3, VK_NUMPAD1,				/* Start, Select */
+	VK_NUMPAD6, VK_NUMPAD2,				/* A, B */
+	VK_NUMPAD8, VK_NUMPAD4,				/* X, Y */
+	VK_NUMPAD7, VK_NUMPAD9				/* L, R */
+};
+SJoypadExtraBinds XBandKeysExtra = {
+	{}, {}, {}, {}, {}, { VK_RWIN }, {}, {},
+	{ VK_HOME }, { VK_END }, { VK_INSERT }, { VK_DELETE }, {}, {}, { VK_PRIOR }, { VK_NEXT }
+};
+
 struct SCustomKeysExtra CustomKeysExtra = {};
 
 struct SCustomKeys CustomKeys = {
@@ -705,6 +721,8 @@ void ControllerOptionsFromControllers()
       GUI.ControllerOption = SNES_JUSTIFIER_2;
    else if (controller[0] == CTL_JOYPAD && controller[1] == CTL_MACSRIFLE)
       GUI.ControllerOption = SNES_MACSRIFLE;
+   else if (controller[0] == CTL_JOYPAD && controller[1] == CTL_XBANDKEYBOARD)
+      GUI.ControllerOption = SNES_XBAND_KEYBOARD;
    else if (controller[0] == CTL_JOYPAD)
       GUI.ControllerOption = SNES_JOYPAD;
 
@@ -764,6 +782,10 @@ void ChangeInputDevice(void)
 		S9xSetController(0, CTL_JOYPAD,     0, 0, 0, 0);
 		S9xSetController(1, CTL_MACSRIFLE,  0, 0, 0, 0);
 		break;
+	case SNES_XBAND_KEYBOARD:
+		S9xSetController(0, CTL_JOYPAD,     0, 0, 0, 0);
+		S9xSetController(1, CTL_XBANDKEYBOARD, 0, 0, 0, 0);
+		break;
 	default:
 	case SNES_JOYPAD:
 		S9xSetController(0, CTL_JOYPAD,     0, 0, 0, 0);
@@ -775,6 +797,191 @@ void ChangeInputDevice(void)
 	}
 
     GUI.ControlForced = 0xff;
+}
+
+// XBAND Keyboard: the typing keys by position (PC set-1 scancode -> XBAND scancode).
+// Arrows, pad keys, Switch and the X keys come from XBandKeys (Input Configuration).
+static uint16 XBandKeyFromScan (UINT scan, bool ext)
+{
+	static const uint8 plain[0x3b] =
+	{
+		0x00, 0x76, 0x16, 0x1e, 0x26, 0x25, 0x2e, 0x36, 0x3d, 0x3e, 0x46, 0x45, 0x4e, 0x55, 0x66, 0x00,	// Esc is always Cancel
+		0x15, 0x1d, 0x24, 0x2d, 0x2c, 0x35, 0x3c, 0x43, 0x44, 0x4d, 0x54, 0x5b, 0x5a, 0x14, 0x1c, 0x1b,
+		0x23, 0x2b, 0x34, 0x33, 0x3b, 0x42, 0x4b, 0x4c, 0x52, 0x0e, 0x12, 0x5d, 0x1a, 0x22, 0x21, 0x2a,
+		0x32, 0x31, 0x3a, 0x41, 0x49, 0x4a, 0x59, 0x00, 0x11, 0x29, 0x58
+	};
+
+	if (!ext)
+		return (scan < sizeof(plain) ? plain[scan] : 0);
+
+	switch (scan)
+	{
+		case 0x1c: return (0x5a);	// keypad Enter
+		case 0x1d: return (0x14);	// right Ctrl
+		case 0x38: return (0x11);	// right Alt
+	}
+
+	return (0);
+}
+
+// Input Configuration's "XBAND Keyboard" row; the diagonal slots hold Cancel,
+// Switch and the X keys. Polled once a frame, so gamepad buttons work too.
+struct XBandSlot { WORD *key; WORD *extra; uint16 code; };
+
+static const XBandSlot kXBandSlots[16] =
+{
+	{ &XBandKeys.Up,         XBandKeysExtra.Up,         XBAND_KEY_EXT | 0x75 },
+	{ &XBandKeys.Down,       XBandKeysExtra.Down,       XBAND_KEY_EXT | 0x72 },
+	{ &XBandKeys.Left,       XBandKeysExtra.Left,       XBAND_KEY_EXT | 0x6b },
+	{ &XBandKeys.Right,      XBandKeysExtra.Right,      XBAND_KEY_EXT | 0x74 },
+	{ &XBandKeys.A,          XBandKeysExtra.A,          0x86 },
+	{ &XBandKeys.B,          XBandKeysExtra.B,          0x87 },
+	{ &XBandKeys.X,          XBandKeysExtra.X,          0x88 },
+	{ &XBandKeys.Y,          XBandKeysExtra.Y,          0x89 },
+	{ &XBandKeys.L,          XBandKeysExtra.L,          0x8a },
+	{ &XBandKeys.R,          XBandKeysExtra.R,          0x8b },
+	{ &XBandKeys.Select,     XBandKeysExtra.Select,     0x8c },
+	{ &XBandKeys.Start,      XBandKeysExtra.Start,      0x8d },
+	{ &XBandKeys.Left_Up,    XBandKeysExtra.Left_Up,    0x76 },	// Cancel
+	{ &XBandKeys.Right_Up,   XBandKeysExtra.Right_Up,   0x0d },	// Switch
+	{ &XBandKeys.Right_Down, XBandKeysExtra.Right_Down, 0x80 },	// left X
+	{ &XBandKeys.Left_Down,  XBandKeysExtra.Left_Down,  0x81 }	// right X
+};
+
+static bool xband_polling;
+
+static bool XBandSlotBound (int i, WORD key)
+{
+	const XBandSlot &s = kXBandSlots[i];
+	if (key == 0 || key == VK_ESCAPE)
+		return (false);
+	if (*s.key == key)
+		return (true);
+	for (int e = 0; GUI.AllowMultipleBindings && e < MAX_EXTRA_BINDS; e++)
+		if (s.extra[e] == key)
+			return (true);
+	return (false);
+}
+
+static bool XBandKeyBound (WORD key)
+{
+	for (int i = 0; i < 16; i++)
+		if (XBandSlotBound(i, key))
+			return (true);
+	return (false);
+}
+
+// Keys type on the XBAND Keyboard while a game polls it.
+static bool XBandKeyboardActive ()
+{
+	return (S9xXBandKeyboardPlugged() && !Settings.StopEmulation && S9xXBandKeyboardPolled());
+}
+
+// Ctrl and Alt go to the keyboard too, but chords with them stay emulator hotkeys.
+static bool XBandKeyboardTakes (uint16 key)
+{
+	if (key == 0x14 || key == 0x11)
+		return (true);
+	return (!(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000));
+}
+
+bool AnyBindPressed (WORD primary, const WORD *extra);
+
+// Once a frame from S9xWinScanJoypads: make and break codes for the XBandKeys slots.
+void XBandKeyboardPollKeys ()
+{
+	static bool	down[16];
+	const bool	active = XBandKeyboardActive();
+
+	xband_polling = true;
+	for (int i = 0; i < 16; i++)
+	{
+		const XBandSlot &s = kXBandSlots[i];
+		const bool now = active && XBandKeyboardTakes(s.code) && AnyBindPressed(*s.key, s.extra);
+		if (now != down[i])
+		{
+			S9xXBandKeyboardKey(s.code, now, FALSE);
+			down[i] = now;
+		}
+	}
+	xband_polling = false;
+}
+
+// Shift/Ctrl/Alt/Caps held on the keyboard: releasing them when focus leaves keeps
+// an Alt+Tab from leaving the BIOS with Alt down.
+static const uint8	kXBandMods[5] = { 0x12, 0x59, 0x14, 0x11, 0x58 };
+static bool			xband_mod_held[5];
+
+static void XBandKeyboardReleaseMods ()
+{
+	for (int i = 0; i < 5; i++)
+		if (xband_mod_held[i])
+		{
+			S9xXBandKeyboardKey(kXBandMods[i], FALSE, FALSE);
+			xband_mod_held[i] = false;
+		}
+}
+
+// True when the message is the keyboard's alone (Ctrl/Alt still reach the hotkeys).
+static bool XBandKeyboardMessage (WPARAM vk, LPARAM lParam, bool down)
+{
+	if (!XBandKeyboardActive())
+		return (false);
+
+	const bool repeat = down && (lParam & (1 << 30)) != 0;
+
+	// Bound in XBandKeys (ahead of the typing keys): the frame poll sends it and
+	// the hotkeys must not see it.
+	if (XBandKeyBound((WORD) vk))
+	{
+		if (!XBandKeyboardTakes(0))
+			return (false);
+
+		// A Windows key as an X key: a stroke of unassigned vk $E8 makes the shell
+		// take it for a chord, so the Start menu stays shut.
+		if ((vk == VK_LWIN || vk == VK_RWIN) && down && !repeat)
+		{
+			INPUT in[2] = {};
+			in[0].type = INPUT_KEYBOARD;
+			in[0].ki.wVk = 0xe8;
+			in[1] = in[0];
+			in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+			SendInput(2, in, sizeof(INPUT));
+		}
+		return (true);
+	}
+
+	const uint16 key = XBandKeyFromScan((UINT) ((lParam >> 16) & 0xff), ((lParam >> 24) & 1) != 0);
+	if (!key || !XBandKeyboardTakes(key))
+		return (false);
+
+	S9xXBandKeyboardKey(key, down, repeat);
+	for (int i = 0; i < 5; i++)
+		if (kXBandMods[i] == key)
+			xband_mod_held[i] = down;
+
+	return (key != 0x14 && key != 0x11);
+}
+
+#ifndef MAPVK_VK_TO_VSC_EX
+#define MAPVK_VK_TO_VSC_EX 4	// Vista+, hidden by _WIN32_WINNT 0x0501
+#endif
+
+// S9xGetState: a key the XBAND Keyboard is taking reads as released on the pads.
+bool XBandKeyboardOwnsKey (WORD key)
+{
+	if (xband_polling || !XBandKeyboardActive())
+		return (false);
+
+	if (XBandKeyBound(key))
+		return (XBandKeyboardTakes(0));
+
+	if (key & 0x8000)
+		return (false);
+
+	const UINT		sc = MapVirtualKey(key, MAPVK_VK_TO_VSC_EX);
+	const uint16	code = XBandKeyFromScan(sc & 0xff, (sc >> 8) == 0xe0);
+	return (code && XBandKeyboardTakes(code));
 }
 
 static void CenterCursor()
@@ -2206,11 +2413,15 @@ LRESULT CALLBACK WinProc(
 		}
 		break;
 	case WM_KEYDOWN:
+		if (XBandKeyboardMessage(wParam, lParam, true))
+			return 0;
 		if(GUI.BackgroundInput && !GUI.InactivePause)
 			break;
 	case WM_CUSTKEYDOWN:
 	case WM_SYSKEYDOWN:
 		{
+			if (uMsg == WM_SYSKEYDOWN && XBandKeyboardMessage(wParam, lParam, true))
+				return 0;
 			if(!HandleKeyMessage(wParam,lParam))
 				return 0;
 	        break;
@@ -2220,6 +2431,10 @@ LRESULT CALLBACK WinProc(
 	case WM_KEYUP:
 	case WM_CUSTKEYUP:
 		{
+			// Releases still reach the hotkey code below.
+			if (uMsg == WM_KEYUP || uMsg == WM_SYSKEYUP)
+				XBandKeyboardMessage(wParam, lParam, false);
+
 			// Master hotkey key-up: reset hold timer
 			// (the static vars are in HandleKeyMessage, so we reset via a sentinel call)
 			if (GUI.MasterHotkeyEnabled && CustomKeys.MasterHotkey.key != 0
@@ -2246,6 +2461,9 @@ LRESULT CALLBACK WinProc(
 			if(HotkeyChordBroken((WORD)wParam, &CustomKeys.SuperDiscEject, &CustomKeysExtra.SuperDiscEject))
 				g_superDiscGate[1].fired = false;
 
+			// A bare Alt is the XBAND Keyboard's Alt, not a trip to the menu bar.
+			if (uMsg == WM_SYSKEYUP && wParam == VK_MENU && XBandKeyboardActive())
+				return 0;
 		}
 		break;
 
@@ -2462,6 +2680,11 @@ LRESULT CALLBACK WinProc(
 		case IDM_MACSRIFLE_TOGGLE:
 			MOVIE_LOCKED_SETTING
 			GUI.ControllerOption = SNES_MACSRIFLE;
+			ChangeInputDevice();
+			break;
+		case IDM_XBAND_KEYBOARD:
+			MOVIE_LOCKED_SETTING
+			GUI.ControllerOption = SNES_XBAND_KEYBOARD;
 			ChangeInputDevice();
 			break;
 
@@ -3768,6 +3991,7 @@ LRESULT CALLBACK WinProc(
 	case WM_ACTIVATE:
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
+			XBandKeyboardReleaseMods();
 			if(GUI.InactivePause)
 			{
 				S9xSetPause (PAUSE_INACTIVE_WINDOW);
@@ -6924,6 +7148,10 @@ static void CheckMenuStates ()
 	validFlag = (((1<<SNES_MACSRIFLE) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;
     mii.fState = validFlag | (GUI.ControllerOption == SNES_MACSRIFLE ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_MACSRIFLE_TOGGLE, FALSE, &mii);
+
+	validFlag = (((1<<SNES_XBAND_KEYBOARD) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;
+    mii.fState = validFlag | (GUI.ControllerOption == SNES_XBAND_KEYBOARD ? MFS_CHECKED : MFS_UNCHECKED);
+    SetMenuItemInfo (GUI.hMenu, IDM_XBAND_KEYBOARD, FALSE, &mii);
 
 	mii.fState = !Settings.StopEmulation ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_FILE_AVI_RECORDING, FALSE, &mii);
@@ -14931,9 +15159,27 @@ INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 }
 #endif
 
+// Input Configuration's last row: the dialog's "index += 3" skip lands it on 13,
+// but its bindings are XBandKeys, not Joypad[13].
+#define XBAND_DLG_INDEX 13
+
 void EnableDisableKeyFields (int index, HWND hDlg)
 {
 	bool enableUnTurboable;
+	SetDlgItemText(hDlg,IDC_LABEL_BLUE,index == XBAND_DLG_INDEX ? INPUTCONFIG_LABEL_XBAND : INPUTCONFIG_LABEL_BLUE);
+	if(index == XBAND_DLG_INDEX)
+	{
+		SetDlgItemText(hDlg,IDC_LABEL_UP,INPUTCONFIG_LABEL_UP);
+		SetDlgItemText(hDlg,IDC_LABEL_LEFT,INPUTCONFIG_LABEL_LEFT);
+		SetDlgItemText(hDlg,IDC_LABEL_DOWN,INPUTCONFIG_LABEL_DOWN);
+		SetDlgItemText(hDlg,IDC_LABEL_RIGHT,INPUTCONFIG_LABEL_RIGHT);
+		SetDlgItemText(hDlg,IDC_LABEL_UPLEFT,INPUTCONFIG_LABEL_XBAND_CANCEL);
+		SetDlgItemText(hDlg,IDC_LABEL_UPRIGHT,INPUTCONFIG_LABEL_XBAND_SWITCH);
+		SetDlgItemText(hDlg,IDC_LABEL_DOWNRIGHT,INPUTCONFIG_LABEL_XBAND_LEFTX);
+		SetDlgItemText(hDlg,IDC_LABEL_DOWNLEFT,INPUTCONFIG_LABEL_XBAND_RIGHTX);
+		enableUnTurboable = true;
+	}
+	else
 	if(index < 5)
 	{
 		SetDlgItemText(hDlg,IDC_LABEL_RIGHT,INPUTCONFIG_LABEL_RIGHT);
@@ -17040,26 +17286,39 @@ static void SendMultiBindToControl(HWND hDlg, int idc, WORD primary, const WORD*
 	SendDlgItemMessage(hDlg, idc, WM_USER+44, (WPARAM)keys, MAX_BIND_KEYS);
 }
 
+static SJoypad &DlgPad (int index)
+{
+	return (index == XBAND_DLG_INDEX ? XBandKeys : Joypad[index]);
+}
+
+static SJoypadExtraBinds &DlgPadExtra (int index)
+{
+	return (index == XBAND_DLG_INDEX ? XBandKeysExtra : JoypadExtra[index]);
+}
+
 static void set_buttoninfo(int index, HWND hDlg)
 {
-	SendMultiBindToControl(hDlg, IDC_UP,     Joypad[index].Up,     JoypadExtra[index].Up);
-	SendMultiBindToControl(hDlg, IDC_LEFT,   Joypad[index].Left,   JoypadExtra[index].Left);
-	SendMultiBindToControl(hDlg, IDC_DOWN,   Joypad[index].Down,   JoypadExtra[index].Down);
-	SendMultiBindToControl(hDlg, IDC_RIGHT,  Joypad[index].Right,  JoypadExtra[index].Right);
-	SendMultiBindToControl(hDlg, IDC_A,      Joypad[index].A,      JoypadExtra[index].A);
-	SendMultiBindToControl(hDlg, IDC_B,      Joypad[index].B,      JoypadExtra[index].B);
-	SendMultiBindToControl(hDlg, IDC_X,      Joypad[index].X,      JoypadExtra[index].X);
-	SendMultiBindToControl(hDlg, IDC_Y,      Joypad[index].Y,      JoypadExtra[index].Y);
-	SendMultiBindToControl(hDlg, IDC_L,      Joypad[index].L,      JoypadExtra[index].L);
-	SendMultiBindToControl(hDlg, IDC_R,      Joypad[index].R,      JoypadExtra[index].R);
-	SendMultiBindToControl(hDlg, IDC_START,  Joypad[index].Start,  JoypadExtra[index].Start);
-	SendMultiBindToControl(hDlg, IDC_SELECT, Joypad[index].Select, JoypadExtra[index].Select);
-	if(index < 5)
+	const SJoypad &pad = DlgPad(index);
+	const SJoypadExtraBinds &extra = DlgPadExtra(index);
+
+	SendMultiBindToControl(hDlg, IDC_UP,     pad.Up,     extra.Up);
+	SendMultiBindToControl(hDlg, IDC_LEFT,   pad.Left,   extra.Left);
+	SendMultiBindToControl(hDlg, IDC_DOWN,   pad.Down,   extra.Down);
+	SendMultiBindToControl(hDlg, IDC_RIGHT,  pad.Right,  extra.Right);
+	SendMultiBindToControl(hDlg, IDC_A,      pad.A,      extra.A);
+	SendMultiBindToControl(hDlg, IDC_B,      pad.B,      extra.B);
+	SendMultiBindToControl(hDlg, IDC_X,      pad.X,      extra.X);
+	SendMultiBindToControl(hDlg, IDC_Y,      pad.Y,      extra.Y);
+	SendMultiBindToControl(hDlg, IDC_L,      pad.L,      extra.L);
+	SendMultiBindToControl(hDlg, IDC_R,      pad.R,      extra.R);
+	SendMultiBindToControl(hDlg, IDC_START,  pad.Start,  extra.Start);
+	SendMultiBindToControl(hDlg, IDC_SELECT, pad.Select, extra.Select);
+	if(index < 5 || index == XBAND_DLG_INDEX)
 	{
-		SendMultiBindToControl(hDlg, IDC_UPLEFT,   Joypad[index].Left_Up,    JoypadExtra[index].Left_Up);
-		SendMultiBindToControl(hDlg, IDC_UPRIGHT,  Joypad[index].Right_Up,   JoypadExtra[index].Right_Up);
-		SendMultiBindToControl(hDlg, IDC_DWNLEFT,  Joypad[index].Left_Down,  JoypadExtra[index].Left_Down);
-		SendMultiBindToControl(hDlg, IDC_DWNRIGHT, Joypad[index].Right_Down, JoypadExtra[index].Right_Down);
+		SendMultiBindToControl(hDlg, IDC_UPLEFT,   pad.Left_Up,    extra.Left_Up);
+		SendMultiBindToControl(hDlg, IDC_UPRIGHT,  pad.Right_Up,   extra.Right_Up);
+		SendMultiBindToControl(hDlg, IDC_DWNLEFT,  pad.Left_Down,  extra.Left_Down);
+		SendMultiBindToControl(hDlg, IDC_DWNRIGHT, pad.Right_Down, extra.Right_Down);
 	}
 }
 
@@ -17131,9 +17390,8 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 	int prefer = (index >= 0 && index < 16) ? s_deviceChoice[index] : -1;
 	if (prefer < 0)
 	{
-		WORD testKey = Joypad[index].A ? Joypad[index].A :
-		               Joypad[index].B ? Joypad[index].B :
-		               Joypad[index].Up ? Joypad[index].Up : 0;
+		const SJoypad &pad = DlgPad(index);
+		WORD testKey = pad.A ? pad.A : pad.B ? pad.B : pad.Up ? pad.Up : 0;
 		if (testKey & 0x8000)
 			prefer = (testKey >> 8) & 0xF;
 	}
@@ -17162,7 +17420,7 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 	for (size_t i = 0; i < devices.size(); i++)
 		if (devices[i].slot == prefer) { sel = (int)i; break; }
 	SendMessage(combo, CB_SETCURSEL, sel, 0);
-	EnableWindow(GetDlgItem(hDlg, IDC_AUTOASSIGN), devices[sel].is_gamepad ? TRUE : FALSE);
+	EnableWindow(GetDlgItem(hDlg, IDC_AUTOASSIGN), devices[sel].is_gamepad && index != XBAND_DLG_INDEX ? TRUE : FALSE);
 }
 
 // Set by DlgInputConfig while the Input Config dialog is open. Read from
@@ -17173,9 +17431,9 @@ HWND InputConfig_GetOpenHwnd() { return s_inputConfigHwnd; }
 
 static HBITMAP s_padBitmap = NULL;
 
-static void SetInputPadImage(HWND hDlg, bool japanese)
+static void SetInputPadImage(HWND hDlg, int bitmap)
 {
-	HBITMAP hbm = LoadBitmap(g_hInst, MAKEINTRESOURCE(japanese ? IDB_PAD2 : IDB_PAD));
+	HBITMAP hbm = LoadBitmap(g_hInst, MAKEINTRESOURCE(bitmap));
 	if (!hbm)
 		return;
 	SendDlgItemMessage(hDlg, IDC_PAD_IMAGE, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hbm);
@@ -17194,6 +17452,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 	static SJoypad pads[10];
 	static SJoypadExtraBinds padsExtra[10];
+	static SJoypad padXBand;
+	static SJoypadExtraBinds padXBandExtra;
 
 
 	//HBRUSH g_hbrBackground;
@@ -17230,6 +17490,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		memcpy(pads, Joypad, 10*sizeof(SJoypad));
 		memcpy(padsExtra, JoypadExtra, 10*sizeof(SJoypadExtraBinds));
+		padXBand = XBandKeys;
+		padXBandExtra = XBandKeysExtra;
 
 		for(i=0;i<16;i++)
 			s_deviceChoice[i] = -1;
@@ -17248,13 +17510,14 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			_stprintf(temp,INPUTCONFIG_JPCOMBO INPUTCONFIG_LABEL_CONTROLLER_TURBO_PANEL_MOD,i-5);
 			SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)(LPCTSTR)temp);
 		}
+		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)INPUTCONFIG_JPCOMBO_XBAND);
 
 		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)0,0);
 
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_USEDIRECTINPUT,BM_SETCHECK, GUI.UseDirectInput ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
-		SetInputPadImage(hDlg, GUI.JapaneseController);
+		SetInputPadImage(hDlg, GUI.JapaneseController ? IDB_PAD2 : IDB_PAD);
 
 		// Initialize binding mode combobox
 		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO,CB_ADDSTRING,0,(LPARAM)TEXT("Single"));
@@ -17294,6 +17557,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 	case WM_CONTEXTMENU:
 		if ((HWND)wParam == GetDlgItem(hDlg, IDC_PAD_IMAGE))
 		{
+			if (SendDlgItemMessage(hDlg, IDC_JPCOMBO, CB_GETCURSEL, 0, 0) + 3 == XBAND_DLG_INDEX)
+				return TRUE;	// the XBAND logo has no controller style
 			POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
 			if (pt.x == -1 && pt.y == -1)
 			{
@@ -17313,7 +17578,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				if (japanese != GUI.JapaneseController)
 				{
 					GUI.JapaneseController = japanese;
-					SetInputPadImage(hDlg, japanese);
+					SetInputPadImage(hDlg, japanese ? IDB_PAD2 : IDB_PAD);
 					WinSaveConfigFile();
 				}
 			}
@@ -17347,9 +17612,9 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		// Helper macro: store multi-bind keys from control into primary + extra
 		#define STORE_MULTIBIND(idc, field) \
 			case idc: { \
-				Joypad[index].field = icp->numKeys > 0 ? icp->keys[0] : 0; \
+				DlgPad(index).field = icp->numKeys > 0 ? icp->keys[0] : 0; \
 				for(int _i = 0; _i < MAX_EXTRA_BINDS; _i++) \
-					JoypadExtra[index].field[_i] = (_i+1) < icp->numKeys ? icp->keys[_i+1] : 0; \
+					DlgPadExtra(index).field[_i] = (_i+1) < icp->numKeys ? icp->keys[_i+1] : 0; \
 				break; \
 			}
 
@@ -17389,6 +17654,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			s_inputConfigHwnd = NULL;
 			memcpy(Joypad, pads, 10*sizeof(SJoypad));
 			memcpy(JoypadExtra, padsExtra, 10*sizeof(SJoypadExtraBinds));
+			XBandKeys = padXBand;
+			XBandKeysExtra = padXBandExtra;
 			EndDialog(hDlg,0);
 			break;
 
@@ -17406,6 +17673,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		case IDC_JPTOGGLE: // joypad Enable toggle
 			index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
 			if(index > 4) index += 3; // skip controllers 6, 7, and 8 in the input dialog
+			if(index == XBAND_DLG_INDEX) break;
 			Joypad[index].Enabled=IsDlgButtonChecked(hDlg,IDC_JPTOGGLE);
 			set_buttoninfo(index, hDlg); // update display of conflicts
 			break;
@@ -17435,7 +17703,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				if (slot >= 0 && index >= 0 && index < 16)
 				{
 					s_deviceChoice[index] = slot;
-					EnableWindow(GetDlgItem(hDlg,IDC_AUTOASSIGN), SDLInput_IsGamepad(slot) ? TRUE : FALSE);
+					EnableWindow(GetDlgItem(hDlg,IDC_AUTOASSIGN), SDLInput_IsGamepad(slot) && index != XBAND_DLG_INDEX ? TRUE : FALSE);
 				}
 			}
 			break;
@@ -17444,6 +17712,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			{
 				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
 				if(index > 4) index += 3;
+				if(index == XBAND_DLG_INDEX) break;
 
 				// Auto-assign from the device selected in the device combo
 				int sel = SendDlgItemMessage(hDlg,IDC_DEVICECOMBO,CB_GETCURSEL,0,0);
@@ -17495,6 +17764,13 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
 				SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)index,0);
 				if(index > 4) index += 3; // skip controllers 6, 7, and 8 in the input dialog
+				if(index == XBAND_DLG_INDEX)
+				{
+					// "Enabled" = the XBAND Keyboard is the Input menu's device
+					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, GUI.ControllerOption == SNES_XBAND_KEYBOARD ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
+					EnableWindow(GetDlgItem(hDlg,IDC_JPTOGGLE),FALSE);
+				}
+				else
 				if(index < 8)
 				{
 					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
@@ -17511,6 +17787,10 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				EnableDisableKeyFields(index,hDlg);
 
 				UpdateDeviceInfo(hDlg, index);
+
+				// The XBAND row shows its logo; Left+Right filtering is a pad matter.
+				SetInputPadImage(hDlg, index == XBAND_DLG_INDEX ? IDB_XBAND_LOGO : GUI.JapaneseController ? IDB_PAD2 : IDB_PAD);
+				ShowWindow(GetDlgItem(hDlg,IDC_ALLOWLEFTRIGHT), index == XBAND_DLG_INDEX ? SW_HIDE : SW_SHOW);
 
 				break;
 		}

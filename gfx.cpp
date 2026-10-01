@@ -3303,6 +3303,7 @@ static void DisplayPressedKeys (void)
 			}
 
 			case CTL_NONE:
+			case CTL_XBANDKEYBOARD:
 			{
 				// Display Nothing
 				break;

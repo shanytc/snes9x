@@ -1316,6 +1316,8 @@ IDB_PAD                 BITMAP                  "pad.bmp"
 
 IDB_PAD2                BITMAP                  "pad2.bmp"
 
+IDB_XBAND_LOGO          BITMAP                  "xband_logo.bmp"
+
 IDB_REMOVABLE           BITMAP                  "rd.bmp"
 
 IDB_RAMDISK             BITMAP                  "ram.bmp"
@@ -1635,6 +1637,7 @@ BEGIN
         MENUITEM "Use Multitaps (8-player)",    IDM_MULTITAP8,MFT_STRING,MFS_ENABLED
         MENUITEM "Use Dual Justifiers",         IDM_JUSTIFIERS,MFT_STRING,MFS_ENABLED
         MENUITEM "Use M.A.C.S. Rifle",          IDM_MACSRIFLE_TOGGLE,MFT_STRING,MFS_ENABLED
+        MENUITEM "Use XBAND Keyboard",          IDM_XBAND_KEYBOARD,MFT_STRING,MFS_ENABLED
     END
     POPUP "&Sound",                         0,MFT_STRING,MFS_ENABLED
     BEGIN

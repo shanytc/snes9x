@@ -30,6 +30,7 @@
 #define IDD_CHEAT_FROM_SEARCH           131
 #define IDB_PAD                         133
 #define IDB_PAD2                        183
+#define IDB_XBAND_LOGO                  196
 #define IDD_OPENMOVIE                   134
 #define IDD_CREATEMOVIE                 135
 #define IDD_KEYCUSTOM                   136
@@ -499,6 +500,7 @@
 #define IDD_XBAND_SERVER                195
 #define IDC_XBAND_HOST                  3700
 #define IDC_XBAND_PORT                  3701
+#define IDM_XBAND_KEYBOARD              45038
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083
@@ -1014,7 +1016,7 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        196
+#define _APS_NEXT_RESOURCE_VALUE        197
 #define _APS_NEXT_COMMAND_VALUE         44451
 #define _APS_NEXT_CONTROL_VALUE         3702
 #define _APS_NEXT_SYMED_VALUE           101

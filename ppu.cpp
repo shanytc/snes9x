@@ -1618,6 +1618,7 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 				Memory.FillRAM[0x4201] = Memory.FillRAM[0x4213] = Byte;
 				if (Settings.SFCBox)
 					S9xSFCBoxSetWRIO(Byte);	// serial link to the KROM
+				S9xControlsWRIO(Byte);		// XBAND Keyboard PP7
 				break;
 
 			case 0x4202: // WRMPYA

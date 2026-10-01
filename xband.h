@@ -371,4 +371,17 @@ void	S9xXBandFredRegWriteBump (uint8 reg, uint8 value);
 // shows us exactly where the BIOS thinks the cart should be.
 void	S9xXBandCrossBankReadLog (uint32 address, uint8 value);
 
+// XBAND Keyboard on port 2. Keys are PS/2 set-2 scancodes; XBAND_KEY_EXT
+// marks the E0-prefixed ones (the arrows).
+#define XBAND_KEY_EXT	0x100
+
+void	S9xXBandKeyboardReset (bool8 power);
+void	S9xXBandKeyboardWRIO (uint8 byte);		// $4201 write, PP7 = bit 7
+uint8	S9xXBandKeyboardClock (void);			// one $4017 clock, returns D1:D0
+void	S9xXBandKeyboardKey (uint16 key, bool8 down, bool8 repeat);
+bool8	S9xXBandKeyboardPolled (void);			// the host read it in the last ~second
+size_t	S9xXBandKeyboardStateSize (void);
+void	S9xXBandKeyboardStateSave (uint8 *buf);
+void	S9xXBandKeyboardStateLoad (const uint8 *buf, size_t size);	// NULL: no keyboard block
+
 #endif

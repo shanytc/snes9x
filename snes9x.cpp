@@ -52,6 +52,8 @@ static bool parse_controller_spec (int port, const char *arg)
 		S9xSetController(port, CTL_JUSTIFIER,  1, 0, 0, 0);
 	else if (!strcasecmp(arg, "macsrifle"))
 		S9xSetController(port, CTL_MACSRIFLE,  0, 0, 0, 0);
+	else if (!strcasecmp(arg, "xbandkeyboard"))
+		S9xSetController(port, CTL_XBANDKEYBOARD, 0, 0, 0, 0);
 	else if (!strncasecmp(arg, "mp5:", 4) && ((arg[4] >= '1' && arg[4] <= '8') || arg[4] == 'n') &&
 										((arg[5] >= '1' && arg[5] <= '8') || arg[5] == 'n') &&
 										((arg[6] >= '1' && arg[6] <= '8') || arg[6] == 'n') &&
@@ -421,6 +423,7 @@ void S9xUsage (void)
 	S9xMessage(S9X_INFO, S9X_USAGE, "                 two-justifiers    Blue & Pink Justifiers");
 	S9xMessage(S9X_INFO, S9X_USAGE, "                 mp5:####          MP5 with the 4 named pads (1-8 or n)");
 	S9xMessage(S9X_INFO, S9X_USAGE, "                 macsrifle         M.A.C.S. Rifle");
+	S9xMessage(S9X_INFO, S9X_USAGE, "                 xbandkeyboard     XBAND Keyboard (port 2 only)");
 	S9xMessage(S9X_INFO, S9X_USAGE, "");
 
 	// ROM OPTIONS

@@ -1492,6 +1492,16 @@ void S9xFreezeToStream (STREAM stream)
 		}
 	}
 
+	// XBAND Keyboard, always and last: run-ahead sizes its buffer once, so the
+	// state size must not follow the port-2 device; older builds stop before it.
+	{
+		const size_t	kbd_size = S9xXBandKeyboardStateSize();
+		uint8			*kbd_buf = new uint8[kbd_size];
+		S9xXBandKeyboardStateSave(kbd_buf);
+		FreezeBlock(stream, "XBK", kbd_buf, (int) kbd_size);
+		delete [] kbd_buf;
+	}
+
 	delete [] soundsnapshot;
 }
 
@@ -1560,6 +1570,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 	int		local_hgb_size       = 0;
 	uint8	*local_gbe_data      = NULL;
 	int		local_gbe_size       = 0;
+	uint8	*local_xbk_data      = NULL;
+	int		local_xbk_size       = 0;
 	uint8	*local_screenshot    = NULL;
 	uint8	*local_movie_data    = NULL;
 
@@ -1873,6 +1885,23 @@ int S9xUnfreezeFromStream (STREAM stream)
 			}
 		}
 
+		// Optional XBAND Keyboard blob, last in the stream.
+		{
+			int xbk_block_len = 0;
+			if (CheckBlockName(stream, "XBK", xbk_block_len) && xbk_block_len > 0)
+			{
+				local_xbk_data = new uint8[xbk_block_len];
+				result = UnfreezeBlock(stream, "XBK", local_xbk_data, xbk_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_xbk_data;
+					local_xbk_data = NULL;
+					break;
+				}
+				local_xbk_size = xbk_block_len;
+			}
+		}
+
 		result = SUCCESS;
 	} while (false);
 
@@ -2159,6 +2188,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 		if (local_xband_data)
 			S9xXBandPostLoadState();
 
+		S9xXBandKeyboardStateLoad(local_xbk_data, (size_t) local_xbk_size);
+
 		if (local_msu1_data)
 			S9xMSU1PostLoadState();
 
@@ -2263,6 +2294,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_upd_data)			delete [] local_upd_data;
 	if (local_hgb_data)			delete [] local_hgb_data;
 	if (local_gbe_data)			delete [] local_gbe_data;
+	if (local_xbk_data)			delete [] local_xbk_data;
 
 	return (result);
 }

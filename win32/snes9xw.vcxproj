@@ -828,7 +828,6 @@
     <Image Include="rsrc\sufami-turbo.ico" />
     <Image Include="rsrc\nd.bmp" />
     <Image Include="rsrc\openfold.bmp" />
-    <Image Include="rsrc\pad.bmp" />
     <Image Include="rsrc\ram.bmp" />
     <Image Include="rsrc\rd.bmp" />
     <Image Include="rsrc\rodir.bmp" />

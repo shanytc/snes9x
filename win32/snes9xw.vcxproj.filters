@@ -1057,9 +1057,6 @@
     <Image Include="rsrc\openfold.bmp">
       <Filter>Resource\Other</Filter>
     </Image>
-    <Image Include="rsrc\pad.bmp">
-      <Filter>Resource\Other</Filter>
-    </Image>
     <Image Include="rsrc\ram.bmp">
       <Filter>Resource\Other</Filter>
     </Image>

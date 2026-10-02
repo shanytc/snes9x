@@ -510,6 +510,7 @@
     <ClInclude Include="CGBTileViewerDlg.h" />
     <ClInclude Include="AcidTestsDlg.h" />
     <ClInclude Include="xbandserver.h" />
+    <ClInclude Include="xbandgames.h" />
     <ClInclude Include="CGBTilemapViewerDlg.h" />
     <ClInclude Include="CGBSpriteViewerDlg.h" />
     <ClInclude Include="gb_viewer_common.h" />

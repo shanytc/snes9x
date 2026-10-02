@@ -465,6 +465,9 @@
     <ClInclude Include="xbandserver.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="xbandgames.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
     <ClInclude Include="CGBTilemapViewerDlg.h">
       <Filter>GUI</Filter>
     </ClInclude>

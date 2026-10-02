@@ -330,11 +330,17 @@ static const struct { uint32_t id; const char *name; } kGames[] =
 	{ 0x1c0b8d96, "Madden '95\xa8" },
 };
 
+#include "xbandgames.h"
+
 static std::string game_name (uint32_t id)
 {
 	for (const auto &g : kGames)
 		if (g.id == id)
 			return g.name;
+	const auto t = std::lower_bound(std::begin(kGameTitles), std::end(kGameTitles), id,
+	                                [](const decltype(kGameTitles[0]) &g, uint32_t v) { return g.id < v; });
+	if (t != std::end(kGameTitles) && t->id == id)
+		return t->name;
 	char unknown[32];
 	snprintf(unknown, sizeof(unknown), "Unknown game 0x%08x", (unsigned) id);
 	return unknown;

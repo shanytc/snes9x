@@ -54,6 +54,7 @@
   #include <unistd.h>
   #include <fcntl.h>
   #include <errno.h>
+  #include <sys/file.h>
   typedef int xband_sock_t;
   #define XBAND_CLOSESOCKET(s)	close((int)(s))
   #define XBAND_INVALID_SOCKET	(-1)
@@ -70,6 +71,7 @@
 #include "display.h"
 
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <cstdlib>
 #include <cstdarg>
@@ -6279,9 +6281,85 @@ bool8 S9xXBandReloadSRAM (void)
 	return xband_load_sram_image() ? TRUE : FALSE;
 }
 
+// Windows run from one folder each claim a free box save, "<box>.srm", "<box> [window 2].srm", ...,
+// for their lifetime instead of overwriting one shared file; a new slot starts as a copy of the first.
+#define XBAND_BOX_SLOTS 8
+static int xband_box_slot = 0;	// 0 = not claimed yet
+
+static std::string xband_box_slot_path (const char *srm_path, int slot)
+{
+	std::string path(srm_path);
+	if (slot <= 1)
+		return path;
+	char suffix[24];
+	snprintf(suffix, sizeof(suffix), " [window %d]", slot);
+	const size_t dot = path.rfind('.'), sep = path.find_last_of("/\\");
+	if (dot == std::string::npos || (sep != std::string::npos && dot < sep))
+		path += suffix;
+	else
+		path.insert(dot, suffix);
+	return path;
+}
+
+static bool xband_box_slot_lock (const std::string &path)
+{
+#ifdef _WIN32
+	// A named mutex per save file; Windows drops it when the process ends, crashed or not.
+	uint32 hash = 2166136261u;
+	for (char c : path)
+		hash = (hash ^ (uint8) tolower((uint8) c)) * 16777619u;
+	char name[64];
+	snprintf(name, sizeof(name), "Local\\snes9x-xband-box-%08X", (unsigned) hash);
+	HANDLE m = CreateMutexA(NULL, FALSE, name);
+	if (!m)
+		return true;	// can't tell; don't lock everyone out of the first slot
+	if (GetLastError() == ERROR_ALREADY_EXISTS)
+	{
+		CloseHandle(m);
+		return false;
+	}
+	return true;		// held (not closed) for the life of the process
+#elif defined(__unix__) || defined(__APPLE__)
+	int fd = open((path + ".lock").c_str(), O_CREAT | O_RDWR, 0644);
+	if (fd < 0)
+		return true;
+	if (flock(fd, LOCK_EX | LOCK_NB) != 0)
+	{
+		close(fd);
+		return false;
+	}
+	return true;		// fd held for the life of the process
+#else
+	return true;
+#endif
+}
+
+static std::string xband_box_path (const char *srm_path)
+{
+	if (!xband_box_slot)
+	{
+		xband_box_slot = 1;
+		for (int slot = 1; slot <= XBAND_BOX_SLOTS; slot++)
+			if (xband_box_slot_lock(xband_box_slot_path(srm_path, slot)))
+			{
+				xband_box_slot = slot;
+				break;
+			}
+		if (xband_box_slot > 1)
+		{
+			std::string msg = "XBAND: this window's box saves to " + xband_box_slot_path(srm_path, xband_box_slot);
+			S9xMessage(S9X_INFO, 0, msg.c_str());
+		}
+	}
+	return xband_box_slot_path(srm_path, xband_box_slot);
+}
+
 bool8 S9xXBandLoadSRAM (const char *srm_path)
 {
-	FILE *f = fopen(srm_path, "rb");
+	const std::string box = xband_box_path(srm_path);
+	FILE *f = fopen(box.c_str(), "rb");
+	if (!f && xband_box_slot > 1)
+		f = fopen(srm_path, "rb");	// a new slot starts as a copy of the first box
 	if (!f)
 		return FALSE;
 	fseek(f, 0, SEEK_END);
@@ -6306,7 +6384,7 @@ bool8 S9xXBandSaveSRAM (const char *srm_path)
 		i++;
 	if (i == XBAND_SRAM_SIZE)
 		return TRUE;
-	FILE *f = fopen(srm_path, "wb");
+	FILE *f = fopen(xband_box_path(srm_path).c_str(), "wb");
 	if (!f)
 		return FALSE;
 	bool8 ok = fwrite(XBand.sram, 1, XBAND_SRAM_SIZE, f) == XBAND_SRAM_SIZE;

@@ -3838,15 +3838,16 @@ bool8 CMemory::SaveSRAM (const char *filename)
 	if (Settings.RP2040Cart)
 		return (S9xRP2040CartSaveFlash(filename));	// the game saves to its own flash
 
+	// The box's own battery SRAM; the BIOS-folder dumps are only ever read. Ahead of
+	// the chip checks below: those are the game cart's (Doom's Super FX), not the box's.
+	if (Settings.XBAND)
+		return (S9xXBandSaveSRAM(filename));
+
 	if (Settings.SuperFX && (ROMType < 0x15 || ROMType == 0x17)) // doesn't have SRAM
 		return (TRUE);
 
 	if (Settings.SA1 && ROMType == 0x34)    // doesn't have SRAM
 		return (TRUE);
-
-	// The box's own battery SRAM; the BIOS-folder dumps are only ever read.
-	if (Settings.XBAND)
-		return (S9xXBandSaveSRAM(filename));
 
 	FILE	*file;
 	int		size;

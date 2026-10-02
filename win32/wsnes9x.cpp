@@ -1066,14 +1066,16 @@ void S9xRestoreWindowTitle ()
         char bios[_MAX_FNAME], cart[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, bios, NULL);
         _splitpath(Multi.fileNameB, NULL, NULL, cart, NULL);
-        _stprintf(buf, TEXT("%s - %s - %s %s"), (wchar_t *)Utf8ToWide(bios), (wchar_t *)Utf8ToWide(cart), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        _stprintf(buf, TEXT("%s%s - %s - %s %s"), (wchar_t *)Utf8ToWide(bios), XBandServerRunning() ? TEXT(" (Hosting)") : TEXT(""),
+                  (wchar_t *)Utf8ToWide(cart), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
     if (Memory.ROMFilename[0])
     {
         char def[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, def, NULL);
-        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        _stprintf(buf, TEXT("%s%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip,
+                  Settings.XBAND && XBandServerRunning() ? TEXT(" (Hosting)") : TEXT(""), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
         _stprintf(buf, TEXT("%s %s"), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
@@ -3621,6 +3623,7 @@ LRESULT CALLBACK WinProc(
 			Settings.XBANDServerPort = port;
 			S9xXBandServerChanged();
 			WinSaveConfigFile();
+			S9xRestoreWindowTitle();
 			const int patches = XBandServerPatchCount(dir);
 			char msg[512];
 			if (patches)
@@ -3634,6 +3637,7 @@ LRESULT CALLBACK WinProc(
 
 		case ID_NETPLAY_XBAND_SERVER_STOP:
 			XBandServerStop();
+			S9xRestoreWindowTitle();
 			S9xSetInfoString("XBAND server stopped");
 			break;
 

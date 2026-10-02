@@ -17658,118 +17658,133 @@ static LRESULT CALLBACK InputPictureSubclassProc(HWND hWnd, UINT msg, WPARAM wPa
 	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
 
-// Copies the unlit picture into the shown one, lights regions over it, then shows it.
-class LitPicture
+// The unlit picture's pixels, to light and then show.
+struct PicturePixels
 {
-public:
-	explicit LitPicture(HWND hDlg) : hDlg(hDlg)
+	explicit PicturePixels(HWND hDlg) : hDlg(hDlg)
 	{
-		ok = s_panelBase && s_panelBitmap;
-		if (!ok)
+		if (!s_panelBase || !s_panelBitmap)
 			return;
 		BITMAP bm;
 		GetObject(s_panelBase, sizeof(bm), &bm);
-		screen = GetDC(hDlg);
-		from = CreateCompatibleDC(screen);
-		to = CreateCompatibleDC(screen);
-		tint = CreateCompatibleDC(screen);
-		dot = CreateCompatibleBitmap(screen, 1, 1);
-		oldFrom = SelectObject(from, s_panelBase);
-		oldTo = SelectObject(to, s_panelBitmap);
-		oldTint = SelectObject(tint, dot);
-		SetPixel(tint, 0, 0, RGB(80, 170, 255));
-		BitBlt(to, 0, 0, bm.bmWidth, bm.bmHeight, from, 0, 0, SRCCOPY);
-		edge = CreateSolidBrush(RGB(40, 130, 230));
+		w = bm.bmWidth;
+		h = bm.bmHeight;
+		bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+		bi.bmiHeader.biWidth = w;
+		bi.bmiHeader.biHeight = -h;
+		bi.bmiHeader.biPlanes = 1;
+		bi.bmiHeader.biBitCount = 32;
+		bi.bmiHeader.biCompression = BI_RGB;
+		px.resize(w * h);
+		HDC screen = GetDC(hDlg);
+		GetDIBits(screen, s_panelBase, 0, h, px.data(), &bi, DIB_RGB_COLORS);
+		ReleaseDC(hDlg, screen);
 	}
 
-	~LitPicture()
+	void Show()
 	{
-		if (!ok)
-			return;
-		DeleteObject(edge);
-		SelectObject(from, oldFrom);
-		SelectObject(to, oldTo);
-		SelectObject(tint, oldTint);
-		DeleteObject(dot);
-		DeleteDC(from);
-		DeleteDC(to);
-		DeleteDC(tint);
+		HDC screen = GetDC(hDlg);
+		SetDIBits(screen, s_panelBitmap, 0, h, px.data(), &bi, DIB_RGB_COLORS);
 		ReleaseDC(hDlg, screen);
 		ShowInputPictureBitmap(hDlg);
 	}
 
-	// A light blue tint inside the region and an edge around it.
-	void Light(HRGN rgn, int edgeWidth)
-	{
-		const BLENDFUNCTION blend = { AC_SRC_OVER, 0, 120, 0 };
-		RECT box;
-		GetRgnBox(rgn, &box);
-		SelectClipRgn(to, rgn);
-		AlphaBlend(to, box.left, box.top, box.right - box.left, box.bottom - box.top, tint, 0, 0, 1, 1, blend);
-		SelectClipRgn(to, NULL);
-		FrameRgn(to, rgn, edge, edgeWidth, edgeWidth);
-	}
-
-	bool ok;
-	HDC to;
-
-private:
 	HWND hDlg;
-	HDC screen, from, tint;
-	HBITMAP dot;
-	HGDIOBJ oldFrom, oldTo, oldTint;
-	HBRUSH edge;
+	int w = 0, h = 0;
+	BITMAPINFO bi = {};
+	std::vector<uint32> px;
 };
 
-// A key-shaped light over each held key, and the lit lock LEDs.
+// Blends one shape over the source-pixel box x0..x1, y0..y1, anti-aliased from 4x4 samples per
+// pixel: when lit, a fill and a rim of rimWidth inside the edge; an outline ring of ring outside it.
+// dist is the signed distance to the edge in source pixels, negative inside.
+template <class Dist>
+static void BlendPictureShape(PicturePixels &pic, float x0, float y0, float x1, float y1, Dist dist,
+	bool lit, COLORREF fill, COLORREF rim, float fillAlpha, float rimWidth, float ring)
+{
+	const COLORREF outline = RGB(255, 200, 0);
+	const float s = (float) s_panelScale;
+	const int left = (std::max)(0, (int) (x0 * s) - 3), top = (std::max)(0, (int) (y0 * s) - 3);
+	const int right = (std::min)(pic.w - 1, (int) (x1 * s) + 3), bottom = (std::min)(pic.h - 1, (int) (y1 * s) + 3);
+	for (int y = top; y <= bottom; y++)
+		for (int x = left; x <= right; x++)
+		{
+			int inFill = 0, inRim = 0, inRing = 0;
+			for (int sy = 0; sy < 4; sy++)
+				for (int sx = 0; sx < 4; sx++)
+				{
+					const float d = dist((x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
+					if (d >= 0)
+						inRing += (d < ring);
+					else if (lit)
+						(d < -rimWidth ? inFill : inRim)++;
+				}
+			if (!inFill && !inRim && !inRing)
+				continue;
+
+			const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cg = inRing / 16.0f, cb = 1.0f - cf - cr - cg;
+			uint32 &c = pic.px[y * pic.w + x];
+			const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + GetBValue(outline) * cg + 0.5f);
+			const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + GetGValue(outline) * cg + 0.5f);
+			const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + GetRValue(outline) * cg + 0.5f);
+			c = (red << 16) | (green << 8) | blue;
+		}
+}
+
+// Signed distance from a rectangle at l, t, w x h with corners rounded by r; negative inside.
+static float RoundRectDistance(float x, float y, float l, float t, float w, float h, float r)
+{
+	const float qx = fabsf(x - (l + w / 2)) - w / 2 + r, qy = fabsf(y - (t + h / 2)) - h / 2 + r;
+	return hypotf((std::max)(qx, 0.0f), (std::max)(qy, 0.0f)) + (std::min)((std::max)(qx, qy), 0.0f) - r;
+}
+
+// A key-shaped blue light over each held key, a yellow ring around the hovered or
+// edited one, and the lit lock LEDs; Enter joins its upper part to the bar in the table.
 static void DrawXBandKeyboardLit(HWND hDlg)
 {
-	LitPicture pic(hDlg);
-	if (!pic.ok)
+	PicturePixels pic(hDlg);
+	if (!pic.w)
 		return;
 
-	const double s = s_panelScale;
-	const int radius = (int) (12 * s) | 1;
-	auto keyRgn = [&](int x, int y, int w, int h)
+	auto keyDist = [](const XBandPicKey &k)
 	{
-		return CreateRoundRectRgn((int) (x * s), (int) (y * s), (int) ((x + w) * s) + 1, (int) ((y + h) * s) + 1, radius, radius);
+		return [&k](float x, float y)
+		{
+			float d = RoundRectDistance(x, y, k.x, k.y, k.w, k.h, 6);
+			if (k.code == 0x5a)
+				d = (std::min)(d, RoundRectDistance(x, y, 572, 142, 55, 45, 6));
+			return d;
+		};
 	};
-	for (const XBandPicKey &k : kXBandPicKeys)
+	auto keyBox = [](const XBandPicKey &k, float &x0, float &y0, float &x1, float &y1)
 	{
-		bool lit = k.code == 0x58 && (s_xbandLeds & XBAND_LED_CAPS);	// Caps Lock while on
-		for (int i = 0; i < s_xbandLitCount && !lit; i++)
-			lit = (s_xbandLit[i] == k.code);
-		if (!lit)
-			continue;
+		x0 = k.x, y0 = k.code == 0x5a ? 142 : k.y, x1 = k.x + k.w, y1 = k.y + k.h;
+	};
 
-		// The key's own outline; Enter adds its upper part to the bar in the table.
-		HRGN rgn = keyRgn(k.x, k.y, k.w, k.h);
-		if (k.code == 0x5a)
+	// Lights first, then rings, so a lit neighbour can't cover a ring
+	for (int pass = 0; pass < 2; pass++)
+		for (const XBandPicKey &k : kXBandPicKeys)
 		{
-			HRGN upper = keyRgn(572, 142, 55, 45);
-			CombineRgn(rgn, rgn, upper, RGN_OR);
-			DeleteObject(upper);
+			bool lit = k.code == 0x58 && (s_xbandLeds & XBAND_LED_CAPS);	// Caps Lock while on
+			for (int i = 0; i < s_xbandLitCount && !lit; i++)
+				lit = (s_xbandLit[i] == k.code);
+			const bool ring = InputPictureOutlined(XBandPicField(k.code));
+			if (pass == 0 ? !lit : !ring)
+				continue;
+			float x0, y0, x1, y1;
+			keyBox(k, x0, y0, x1, y1);
+			BlendPictureShape(pic, x0, y0, x1, y1, keyDist(k), pass == 0, RGB(80, 170, 255), RGB(40, 130, 230), 120 / 255.0f, 2.0f, pass == 1 ? 2.0f : 0.0f);
 		}
-		pic.Light(rgn, 2);
-		DeleteObject(rgn);
-	}
-	HBRUSH outline = CreateSolidBrush(RGB(255, 200, 0));
-	for (const XBandPicKey &k : kXBandPicKeys)
-		if (InputPictureOutlined(XBandPicField(k.code)))
-		{
-			HRGN ring = keyRgn(k.x - 3, k.y - 3, k.w + 6, k.h + 6);
-			FrameRgn(pic.to, ring, outline, 2, 2);
-			DeleteObject(ring);
-		}
-	DeleteObject(outline);
-	HBRUSH ledOn = CreateSolidBrush(RGB(255, 210, 0));
+
 	for (int i = 0; i < 3; i++)
 		if (s_xbandLeds & (1 << i))
 		{
-			RECT r = { (int) (kXBandLeds[i].x0 * s), (int) (XBAND_LED_Y0 * s), (int) ((kXBandLeds[i].x1 + 1) * s + 0.5), (int) ((XBAND_LED_Y1 + 1) * s + 0.5) };
-			FillRect(pic.to, &r, ledOn);
+			const float l = kXBandLeds[i].x0, w = kXBandLeds[i].x1 + 1 - l, h = XBAND_LED_Y1 + 1 - XBAND_LED_Y0;
+			BlendPictureShape(pic, l, XBAND_LED_Y0, l + w, XBAND_LED_Y0 + h,
+				[&](float x, float y) { return RoundRectDistance(x, y, l, XBAND_LED_Y0, w, h, 0); },
+				true, RGB(255, 210, 0), RGB(255, 210, 0), 1.0f, 0.0f, 0.0f);
 		}
-	DeleteObject(ledOn);
+	pic.Show();
 }
 
 // A held face button takes the real pad's colour: lavender/purple (USA), or the
@@ -17787,27 +17802,14 @@ static COLORREF PadPicFaceColor(int mask)
 	return CLR_INVALID;
 }
 
-// Each held button's own shape with a rim inside its edge, anti-aliased from 4x4
-// samples per pixel.
+// Each held button's own shape with a rim inside its edge, and a yellow ring around the
+// hovered or edited one.
 static void DrawPadPictureLit(HWND hDlg)
 {
-	if (!s_panelBase || !s_panelBitmap)
+	PicturePixels pic(hDlg);
+	if (!pic.w)
 		return;
-	BITMAP bm;
-	GetObject(s_panelBase, sizeof(bm), &bm);
-	const int w = bm.bmWidth, h = bm.bmHeight;
-	BITMAPINFO bi = {};
-	bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
-	bi.bmiHeader.biWidth = w;
-	bi.bmiHeader.biHeight = -h;
-	bi.bmiHeader.biPlanes = 1;
-	bi.bmiHeader.biBitCount = 32;
-	bi.bmiHeader.biCompression = BI_RGB;
-	std::vector<uint32> px(w * h);
-	HDC screen = GetDC(hDlg);
-	GetDIBits(screen, s_panelBase, 0, h, px.data(), &bi, DIB_RGB_COLORS);
 
-	const float s = (float) s_panelScale;
 	for (const PadPicShape &b : kPadPicShapes)
 	{
 		const bool lit = s_padLit >= 0 && (s_padLit & b.mask);
@@ -17834,38 +17836,10 @@ static void DrawPadPictureLit(HWND hDlg)
 			x1 = (std::max)(x1, b.pt[i][0] + r);
 			y1 = (std::max)(y1, b.pt[i][1] + r);
 		}
-		const int left = (std::max)(0, (int) (x0 * s) - 3), top = (std::max)(0, (int) (y0 * s) - 3);
-		const int right = (std::min)(w - 1, (int) (x1 * s) + 3), bottom = (std::min)(h - 1, (int) (y1 * s) + 3);
-		const COLORREF outline = RGB(255, 200, 0);
-
-		for (int y = top; y <= bottom; y++)
-			for (int x = left; x <= right; x++)
-			{
-				int inFill = 0, inRim = 0, inRing = 0;
-				for (int sy = 0; sy < 4; sy++)
-					for (int sx = 0; sx < 4; sx++)
-					{
-						const float d = PadPicDistance(b, (x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
-						if (d >= 0)
-							inRing += (d < ring);
-						else if (lit)
-							(d < -rimWidth ? inFill : inRim)++;
-					}
-				if (!inFill && !inRim && !inRing)
-					continue;
-
-				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cg = inRing / 16.0f, cb = 1.0f - cf - cr - cg;
-				uint32 &c = px[y * w + x];
-				const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + GetBValue(outline) * cg + 0.5f);
-				const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + GetGValue(outline) * cg + 0.5f);
-				const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + GetRValue(outline) * cg + 0.5f);
-				c = (red << 16) | (green << 8) | blue;
-			}
+		BlendPictureShape(pic, x0, y0, x1, y1, [&b](float x, float y) { return PadPicDistance(b, x, y); },
+			lit, fill, rim, fillAlpha, rimWidth, ring);
 	}
-
-	SetDIBits(screen, s_panelBitmap, 0, h, px.data(), &bi, DIB_RGB_COLORS);
-	ReleaseDC(hDlg, screen);
-	ShowInputPictureBitmap(hDlg);
+	pic.Show();
 }
 
 // The buttons the row's bindings hold now (extras included). Turbo rows bind the

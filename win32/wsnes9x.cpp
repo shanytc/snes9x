@@ -57,6 +57,7 @@
 #include "../cheats.h"
 #include "../netplay.h"
 #include "../xband.h"
+#include "xbandserver.h"
 #include "kaillera.h"
 #include "kaillera_client.h"
 #include "kaillera_server.h"
@@ -2358,6 +2359,62 @@ static void BuildLanguageMenu(HMENU bar)
 }
 
 // Emulation -> XBAND -> Local Server: the host and port the BIOS's dial goes to.
+// The XBAND server's folder (patches\, server.log): xband\ next to the exe, or one or two levels up
+// so a build tree finds the repo's copy, as with acid\. Else xband\ next to the exe.
+static std::string FindXBandDir()
+{
+	char exe[MAX_PATH];
+	if (!GetModuleFileNameA(NULL, exe, MAX_PATH))
+		return "xband";
+	std::string dir(exe);
+	const size_t slash = dir.find_last_of("\\/");
+	if (slash != std::string::npos)
+		dir.resize(slash);
+	const char *cands[] = { "\\xband", "\\..\\xband", "\\..\\..\\xband" };
+	for (const char *c : cands)
+	{
+		const DWORD a = GetFileAttributesA((dir + c + "\\patches").c_str());
+		if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
+			return dir + c;
+	}
+	CreateDirectoryA((dir + "\\xband").c_str(), NULL);
+	return dir + "\\xband";
+}
+
+// Netplay > XBand > Start Server: the port, or 0 when cancelled.
+static INT_PTR CALLBACK DlgXBandHostServerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+		LocalizeDialog(hDlg);
+		SetDlgItemInt(hDlg, IDC_XBAND_HOST_PORT, Settings.XBANDServerPort ? Settings.XBANDServerPort : 56969, FALSE);
+		return TRUE;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDOK:
+		{
+			BOOL ok = FALSE;
+			const UINT port = GetDlgItemInt(hDlg, IDC_XBAND_HOST_PORT, &ok, FALSE);
+			if (!ok || port < 1 || port > 65535)
+			{
+				MessageBoxA(hDlg, "Enter a port from 1 to 65535.", "XBAND Server", MB_OK | MB_ICONWARNING);
+				return TRUE;
+			}
+			EndDialog(hDlg, port);
+			return TRUE;
+		}
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
 static INT_PTR CALLBACK DlgXBandServerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
@@ -3544,6 +3601,40 @@ LRESULT CALLBACK WinProc(
 				snprintf(msg, sizeof(msg), "XBAND server: %s:%u", Settings.XBANDServerHost, (unsigned) Settings.XBANDServerPort);
 				S9xSetInfoString(msg);
 			}
+			break;
+
+		// The built-in server listens on every interface; this window dials it at 127.0.0.1.
+		case ID_NETPLAY_XBAND_SERVER_START:
+		{
+			const int port = (int) DialogBoxA(g_hInst, MAKEINTRESOURCEA(IDD_XBAND_HOST_SERVER), hWnd, DlgXBandHostServerProc);
+			if (!port)
+				break;
+			const std::string dir = FindXBandDir();
+			std::string why;
+			if (!XBandServerStart(port, dir, why))
+			{
+				MessageBoxA(hWnd, ("The XBAND server didn't start: " + why + ".").c_str(), "XBAND Server", MB_OK | MB_ICONWARNING);
+				break;
+			}
+			Settings.XBANDLocalServer = TRUE;
+			strcpy(Settings.XBANDServerHost, "127.0.0.1");
+			Settings.XBANDServerPort = port;
+			S9xXBandServerChanged();
+			WinSaveConfigFile();
+			const int patches = XBandServerPatchCount(dir);
+			char msg[512];
+			if (patches)
+				snprintf(msg, sizeof(msg), "XBAND server on port %d: %d game patches", port, patches);
+			else
+				snprintf(msg, sizeof(msg), "XBAND server on port %d: no patches in %s\\patches - only games already patched in a box can be matched",
+				         port, dir.c_str());
+			S9xSetInfoString(msg);
+			break;
+		}
+
+		case ID_NETPLAY_XBAND_SERVER_STOP:
+			XBandServerStop();
+			S9xSetInfoString("XBAND server stopped");
 			break;
 
 		case ID_NSS_COIN1:
@@ -5979,6 +6070,8 @@ loop_exit:
 
     timeEndPeriod(wSoundTimerRes);
 
+	XBandServerStop();
+
     if (!Settings.StopEmulation)
     {
         Memory.SaveSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
@@ -6496,6 +6589,20 @@ static void CheckMenuStates ()
 		txt.fMask      = MIIM_STRING;
 		txt.dwTypeData = text;
 		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_CARD, FALSE, &txt);
+	}
+	EnableMenuItem(GUI.hMenu, ID_NETPLAY_XBAND_SERVER_START, MF_BYCOMMAND | (XBandServerRunning() ? MF_GRAYED : MF_ENABLED));
+	EnableMenuItem(GUI.hMenu, ID_NETPLAY_XBAND_SERVER_STOP, MF_BYCOMMAND | (XBandServerRunning() ? MF_ENABLED : MF_GRAYED));
+	{
+		TCHAR text[64];
+		if (XBandServerRunning())
+			_stprintf(text, TEXT("&Disconnect (server on port %d)"), XBandServerPort());
+		else
+			_tcscpy(text, TEXT("&Disconnect"));
+		MENUITEMINFO txt = {};
+		txt.cbSize     = sizeof(txt);
+		txt.fMask      = MIIM_STRING;
+		txt.dwTypeData = text;
+		SetMenuItemInfo(GUI.hMenu, ID_NETPLAY_XBAND_SERVER_STOP, FALSE, &txt);
 	}
 	mii.fState = Settings.XBANDLocalServer ? MFS_UNCHECKED : MFS_CHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_SERVER_RETRO, FALSE, &mii);

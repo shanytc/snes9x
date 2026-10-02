@@ -477,6 +477,9 @@
     <ClInclude Include="AcidTestsDlg.h">
       <Filter>GUI</Filter>
     </ClInclude>
+    <ClInclude Include="xbandserver.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
     <ClInclude Include="CGBTilemapViewerDlg.h">
       <Filter>GUI</Filter>
     </ClInclude>
@@ -1044,6 +1047,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="AcidTestsDlg.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="xbandserver.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="debug_viewer_common.cpp">

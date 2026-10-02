@@ -505,6 +505,10 @@
 #define IDC_LABEL_XBAND_NOTE            3703
 #define IDC_LABEL_RESTART_REQUIRED      3704
 #define IDC_INPUT_PICTURE               3702
+#define ID_NETPLAY_XBAND_SERVER_START   45039
+#define ID_NETPLAY_XBAND_SERVER_STOP    45040
+#define IDD_XBAND_HOST_SERVER           201
+#define IDC_XBAND_HOST_PORT             3705
 #define ID_NETPLAY_ROM                  40081
 #define ID_NETPLAY_SYNC                 40082
 #define ID_NETPLAY_SEND_ROM_ON_CONNECT  40083
@@ -1019,9 +1023,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        201
+#define _APS_NEXT_RESOURCE_VALUE        202
 #define _APS_NEXT_COMMAND_VALUE         44451
-#define _APS_NEXT_CONTROL_VALUE         3705
+#define _APS_NEXT_CONTROL_VALUE         3706
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

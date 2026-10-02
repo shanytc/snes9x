@@ -809,6 +809,8 @@ static bool     xband_call_local   = false;	// the call up now went to the local
 static char     xband_ring_line[16];
 static int      xband_ring_len     = 0;
 static uint32   xband_ring_retry   = 0;		// frames until the next ring-line attempt
+static bool     xband_ring_connecting = false;	// the ring line's connect is still in progress
+static bool     xband_connecting   = false;	// the dial's connect is still in progress
 
 static bool xband_local_switch (void)
 {
@@ -5788,7 +5790,8 @@ static uint8 xband_reg_read (uint8 reg)
 			case 0x0B:
 				// TONEA (bit 7): dial tone until a call is up; in a call it would
 				// be the call-waiting bong (PUListenToLine) and pause the game.
-				ret = (XBand.net_step == XBAND_NET_CONNECTED) ? 0x00 : 0x80;
+				// A dial whose connect is still pending rings out: no dial tone, or the BIOS hangs up in ~2 s.
+				ret = (XBand.net_step == XBAND_NET_CONNECTED || xband_connecting) ? 0x00 : 0x80;
 				// No answer tone while the opponent's line is still ringing.
 				if (XBand.modem_set_ATV25 && xband_far_end_up)
 				{
@@ -6451,6 +6454,35 @@ static bool xband_set_nonblocking (xband_sock_t fd)
 #endif
 }
 
+// A non-blocking connect that is still under way (not an error).
+static bool xband_connect_in_progress (void)
+{
+#ifdef _WIN32
+	return WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+	return errno == EINPROGRESS;
+#endif
+}
+
+// Where a non-blocking connect stands: 1 connected, 0 still pending, -1 failed.
+static int xband_connect_state (xband_sock_t fd)
+{
+	fd_set writable, failed;
+	FD_ZERO(&writable);
+	FD_ZERO(&failed);
+	FD_SET(fd, &writable);
+	FD_SET(fd, &failed);
+	struct timeval now = { 0, 0 };
+	const int n = select((int) fd + 1, NULL, &writable, &failed, &now);
+	if (n == 0)
+		return 0;
+	int err = 0;
+	socklen_t len = sizeof(err);
+	if (n < 0 || FD_ISSET(fd, &failed) || getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *) &err, &len) != 0 || err)
+		return -1;
+	return 1;
+}
+
 // A connected, non-blocking, no-Nagle TCP socket, or XBAND_INVALID_SOCKET.
 static intptr_t xband_open_socket (const char *host, int port)
 {
@@ -6484,7 +6516,15 @@ static intptr_t xband_open_socket (const char *host, int port)
 		return XBAND_INVALID_SOCKET;
 	}
 
-	if (connect(fd, result->ai_addr, (socklen_t)result->ai_addrlen) == XBAND_SOCKET_ERROR)
+	// Disable Nagle — low-latency input exchange matters
+	int flag = 1;
+	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(flag));
+
+	// Connect without blocking: a server that doesn't answer used to stall emulation
+	// ~21 s in connect(). The caller finishes it with xband_connect_state.
+	xband_set_nonblocking(fd);
+	if (connect(fd, result->ai_addr, (socklen_t)result->ai_addrlen) == XBAND_SOCKET_ERROR &&
+	    !xband_connect_in_progress())
 	{
 		XBAND_CLOSESOCKET(fd);
 		freeaddrinfo(result);
@@ -6492,12 +6532,6 @@ static intptr_t xband_open_socket (const char *host, int port)
 	}
 
 	freeaddrinfo(result);
-
-	// Disable Nagle — low-latency input exchange matters
-	int flag = 1;
-	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(flag));
-
-	xband_set_nonblocking(fd);
 	return (intptr_t)fd;
 }
 
@@ -6525,6 +6559,7 @@ static void xband_ring_close (void)
 	xband_ring_fd  = XBAND_INVALID_SOCKET;
 	xband_ringing  = false;
 	xband_ring_len = 0;
+	xband_ring_connecting = false;
 }
 
 // Between calls, keep a line open so the server can ring this window.
@@ -6553,6 +6588,22 @@ static void xband_ring_poll (void)
 			xband_ring_retry = 300;
 			return;
 		}
+		xband_ring_connecting = true;
+		return;
+	}
+
+	if (xband_ring_connecting)
+	{
+		const int state = xband_connect_state((xband_sock_t) xband_ring_fd);
+		if (state == 0)
+			return;
+		if (state < 0)
+		{
+			xband_ring_close();
+			xband_ring_retry = 300;
+			return;
+		}
+		xband_ring_connecting = false;
 		xband_send_identity((xband_sock_t) xband_ring_fd);
 		xband_send_line((xband_sock_t) xband_ring_fd, "RING");
 		xband_ring_len = 0;
@@ -6625,12 +6676,25 @@ bool8 S9xXBandConnect (const char *host, int port)
 		S9xXBandDisconnect();
 	xband_ring_close();
 
+	// Remember host/port so the BIOS retry loop can auto-reconnect.
+	strncpy(xband_last_host, host, sizeof(xband_last_host) - 1);
+	xband_last_host[sizeof(xband_last_host) - 1] = 0;
+	xband_last_port = port;
+
 	intptr_t sock = xband_open_socket(host, port);
 	if (sock == XBAND_INVALID_SOCKET)
 		return FALSE;
-	xband_sock_t fd = (xband_sock_t) sock;
 
-	XBand.socket_fd = (intptr_t)fd;
+	// Until the connect completes the line rings out: no answer tone, TX held in txbuf.
+	XBand.socket_fd = sock;
+	xband_connecting = true;
+	xband_far_end_up = false;
+	return TRUE;
+}
+
+// The dial's connect completed: identify and bring the call up.
+static void xband_call_established (xband_sock_t fd)
+{
 	XBand.connected = TRUE;
 	xband_call_local = xband_local_switch();
 	xband_far_end_up = !xband_call_local;	// the switchboard's first bytes answer
@@ -6661,13 +6725,6 @@ bool8 S9xXBandConnect (const char *host, int port)
 	// Reset the HELO filter state so a previous attempt's partial
 	// match doesn't bleed into this connection.
 	xband_helo_match_pos = 0;
-
-	// Remember host/port so the BIOS retry loop can auto-reconnect.
-	strncpy(xband_last_host, host, sizeof(xband_last_host) - 1);
-	xband_last_host[sizeof(xband_last_host) - 1] = 0;
-	xband_last_port = port;
-
-	return TRUE;
 }
 
 void S9xXBandSetHeloFilter (bool on)
@@ -6713,6 +6770,7 @@ static void xband_hang_up (void)
 		XBAND_CLOSESOCKET(XBand.socket_fd);
 		XBand.socket_fd = XBAND_INVALID_SOCKET;
 	}
+	xband_connecting = false;
 	xband_answered  = false;
 	XBand.connected = FALSE;
 	XBand.net_step  = XBAND_NET_IDLE;
@@ -6727,6 +6785,23 @@ void S9xXBandPoll (void)
 		return;
 
 	xband_sock_t fd = (xband_sock_t)XBand.socket_fd;
+
+	// A dial still connecting: nothing to read or send yet. If it fails the socket
+	// closes and the BIOS, hearing no answer, hangs up and redials as on a failed dial.
+	if (xband_connecting)
+	{
+		const int state = xband_connect_state(fd);
+		if (state == 0)
+			return;
+		xband_connecting = false;
+		if (state < 0)
+		{
+			XBAND_CLOSESOCKET(fd);
+			XBand.socket_fd = XBAND_INVALID_SOCKET;
+			return;
+		}
+		xband_call_established(fd);
+	}
 
 	// ---- ADSP handshake ----
 	//

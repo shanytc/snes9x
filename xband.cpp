@@ -811,6 +811,12 @@ static int      xband_ring_len     = 0;
 static uint32   xband_ring_retry   = 0;		// frames until the next ring-line attempt
 static bool     xband_ring_connecting = false;	// the ring line's connect is still in progress
 static bool     xband_connecting   = false;	// the dial's connect is still in progress
+static uint32   xband_frame        = 0;		// S9xXBandPoll calls (one per frame)
+static uint32   xband_atv25_until  = 0;		// the answer tone sounds until this frame; 0 = not started
+
+// The answer tone is a level held this long, as the real V.25 tone lasts ~3 s: the dialing BIOS reads
+// $0B for ATV25 and again for TONEA each pass, and a one-shot taken by the TONEA read was lost.
+#define XBAND_ATV25_FRAMES 30
 
 static bool xband_local_switch (void)
 {
@@ -5793,11 +5799,13 @@ static uint8 xband_reg_read (uint8 reg)
 				// A dial whose connect is still pending rings out: no dial tone, or the BIOS hangs up in ~2 s.
 				ret = (XBand.net_step == XBAND_NET_CONNECTED || xband_connecting) ? 0x00 : 0x80;
 				// No answer tone while the opponent's line is still ringing.
-				if (XBand.modem_set_ATV25 && xband_far_end_up)
+				if (XBand.modem_set_ATV25 && xband_far_end_up && !xband_atv25_until)
 				{
-					ret |= (1 << 4); // ATV25
+					xband_atv25_until = xband_frame + XBAND_ATV25_FRAMES;
 					XBand.modem_set_ATV25 = 0;
 				}
+				if (xband_atv25_until && (int32) (xband_atv25_until - xband_frame) > 0)
+					ret |= (1 << 4); // ATV25
 				break;
 			case 0x0D:
 				ret |= (1 << 3); // U1DET
@@ -6689,6 +6697,7 @@ bool8 S9xXBandConnect (const char *host, int port)
 	XBand.socket_fd = sock;
 	xband_connecting = true;
 	xband_far_end_up = false;
+	xband_atv25_until = 0;
 	return TRUE;
 }
 
@@ -6765,6 +6774,7 @@ void S9xXBandDisconnect (void)
 
 static void xband_hang_up (void)
 {
+	xband_atv25_until = 0;
 	if (XBand.socket_fd != XBAND_INVALID_SOCKET)
 	{
 		XBAND_CLOSESOCKET(XBand.socket_fd);
@@ -6780,6 +6790,7 @@ static void xband_hang_up (void)
 
 void S9xXBandPoll (void)
 {
+	xband_frame++;
 	xband_ring_poll();
 	if (XBand.socket_fd == XBAND_INVALID_SOCKET)
 		return;

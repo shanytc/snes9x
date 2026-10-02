@@ -6422,13 +6422,13 @@ void S9xXBandPostLoadState (void)
 // triggering the "Translation problem. Dialing XBAND again..." retry
 // loop. The exact string is the one bsnes-plus sends in its
 // xband_base.cpp::xband_send_identity (see fresh-eggs/bsnes-plus
-// xband_support branch). The fixed ID `Waj04qaASNfmaRNw` is what
-// bsnes-plus's release branch ships — the server is happy with it.
+// xband_support branch). The ID `CToY7Enb` was issued to snes9x by the
+// retrocomputing.network server's author (bsnes-plus ships `Waj04qaASNfmaRNw`).
 // xband_identity_sends counter is declared above near the kctl trace
 // state so the dump function can reference it.
 static void xband_send_identity (xband_sock_t fd)
 {
-	static const char IDENTITY[] = "///////EMU-Waj04qaASNfmaRNw\x0a";
+	static const char IDENTITY[] = "///////EMU-CToY7Enb\x0a";
 	const int len = (int)(sizeof(IDENTITY) - 1);
 	int sent = (int)send(fd, IDENTITY, len, XBAND_SEND_FLAGS);
 	if (sent == len)

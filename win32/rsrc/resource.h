@@ -499,6 +499,10 @@
 #define ID_EMULATION_XBAND_SERVER_RETRO 45036
 #define ID_EMULATION_XBAND_SERVER_LOCAL 45037
 #define IDM_XBAND_KEYBOARD              45038
+#define ID_NETPLAY_XBAND_SERVER_START   45039
+#define ID_NETPLAY_XBAND_SERVER_STOP    45040
+#define IDD_XBAND_HOST_SERVER           201
+#define IDC_XBAND_HOST_PORT             3649
 #define IDD_XBAND_SERVER                194
 #define IDC_XBAND_HOST                  3644
 #define IDC_XBAND_PORT                  3645
@@ -1010,9 +1014,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        201
+#define _APS_NEXT_RESOURCE_VALUE        202
 #define _APS_NEXT_COMMAND_VALUE         44451
-#define _APS_NEXT_CONTROL_VALUE         3649
+#define _APS_NEXT_CONTROL_VALUE         3650
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

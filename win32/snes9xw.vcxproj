@@ -509,6 +509,7 @@
     <ClInclude Include="CSpriteViewerDlg.h" />
     <ClInclude Include="CGBTileViewerDlg.h" />
     <ClInclude Include="AcidTestsDlg.h" />
+    <ClInclude Include="xbandserver.h" />
     <ClInclude Include="CGBTilemapViewerDlg.h" />
     <ClInclude Include="CGBSpriteViewerDlg.h" />
     <ClInclude Include="gb_viewer_common.h" />
@@ -770,6 +771,7 @@
     <ClCompile Include="CGBTilemapViewerDlg.cpp" />
     <ClCompile Include="CGBSpriteViewerDlg.cpp" />
     <ClCompile Include="AcidTestsDlg.cpp" />
+    <ClCompile Include="xbandserver.cpp" />
     <ClCompile Include="debug_viewer_common.cpp" />
     <ClCompile Include="debug_viewer_export.cpp" />
     <ClCompile Include="CVulkan.cpp" />

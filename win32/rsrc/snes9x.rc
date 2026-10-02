@@ -1661,7 +1661,7 @@ BEGIN
             MENUITEM "Show S&prites",               ID_DEBUG_GB_SHOW_OBJ,MFT_STRING,MFS_ENABLED | MFS_CHECKED
         END
         MENUITEM MFT_SEPARATOR
-        POPUP "&XBAND",                         0,MFT_STRING,MFS_ENABLED
+        POPUP "&XBand",                         0,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Enable",                     ID_EMULATION_XBAND,MFT_STRING,MFS_ENABLED
             MENUITEM "Insert &Prepaid Card",        ID_EMULATION_XBAND_CARD,MFT_STRING,MFS_ENABLED
@@ -1669,6 +1669,9 @@ BEGIN
             MENUITEM MFT_SEPARATOR
             MENUITEM "Retrocomputing &Server (xbserver.retrocomputing.network)", ID_EMULATION_XBAND_SERVER_RETRO,MFT_STRING,MFS_ENABLED
             MENUITEM "&Local Server...",            ID_EMULATION_XBAND_SERVER_LOCAL,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "S&tart Server...",            ID_NETPLAY_XBAND_SERVER_START,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Disconnect",                 ID_NETPLAY_XBAND_SERVER_STOP,MFT_STRING,MFS_GRAYED
         END
         MENUITEM "&Hacks...",                   ID_EMULATION_HACKS,MFT_STRING,MFS_ENABLED
         MENUITEM "&Settings...\tAlt+F8",        ID_OPTIONS_SETTINGS,MFT_STRING,MFS_ENABLED
@@ -1863,6 +1866,18 @@ BEGIN
     PUSHBUTTON      "Close",IDCANCEL,204,280,50,14
 END
 #endif
+
+IDD_XBAND_HOST_SERVER DIALOGEX 0, 0, 230, 92
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "XBAND Server"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    LTEXT           "Port:",IDC_STATIC,10,12,30,8
+    EDITTEXT        IDC_XBAND_HOST_PORT,42,10,40,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "Other players connect to this PC's IP address on this port (Emulation > XBand > Local Server). Players outside your network need the port forwarded on your router.",IDC_STATIC,10,30,210,34
+    DEFPUSHBUTTON   "Start",IDOK,60,70,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,120,70,50,14
+END
 
 IDD_XBAND_SERVER DIALOGEX 0, 0, 220, 76
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU

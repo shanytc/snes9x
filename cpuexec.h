@@ -71,14 +71,14 @@ static inline int32 S9xBusCycleLen (int32 n, int32 memSpeed)
 
 // Bus cycles ending before FastBusEnd need no event or HDMA work. A pending
 // HDMA forces every bus cycle through the slow path.
-static inline void S9xUpdateFastBusEnd (void)
+static alwaysinline void S9xUpdateFastBusEnd (void)
 {
 	CPU.FastBusEnd = CPU.HDMAEdge ? INT32_MIN : CPU.NextEvent;
 }
 
 // A CPU bus cycle of busLen clocks starts: remembered for IRQ sampling, and a
 // triggered HDMA takes the bus at the second one (bsnes timing).
-static inline void S9xCPUBusCycleStart (int32 busLen)
+static alwaysinline void S9xCPUBusCycleStart (int32 busLen)
 {
 	CPU.LastBusStart = CPU.Cycles;
 	if (CPU.HDMAEdge && !--CPU.HDMAEdge)
@@ -89,7 +89,7 @@ static inline void S9xCPUBusCycleStart (int32 busLen)
 }
 
 // One bus cycle of busLen clocks, as a memory access.
-static inline void S9xCPUBusCycle (int32 busLen)
+static alwaysinline void S9xCPUBusCycle (int32 busLen)
 {
 	if (CPU.Cycles + busLen < CPU.FastBusEnd)
 	{
@@ -103,7 +103,7 @@ static inline void S9xCPUBusCycle (int32 busLen)
 // Add fetch/internal cycles one bus cycle at a time so the hook sees each.
 // On the fast path only the last cycle's start matters, and
 // S9xLastBusStart() splits the run to find it when an IRQ needs it.
-static inline void S9xCPUAddBusCycles (int32 n)
+static alwaysinline void S9xCPUAddBusCycles (int32 n)
 {
 	if (CPU.Cycles + n < CPU.FastBusEnd)
 	{

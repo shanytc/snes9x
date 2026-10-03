@@ -584,7 +584,9 @@ static void ResetFrameTimer ();
 static bool LoadROM (const TCHAR *filename, const TCHAR *filename2 = NULL);	// NULL: the XBAND alone
 static bool LoadROMMulti (const TCHAR *filename, const TCHAR *filename2);
 static bool PowerOnXBand ();
+static void XBandBootAtLaunch ();
 static void XBandShutDown ();
+static void XBandSwitchesChanged ();
 static void XBandRememberPort ();
 static std::string XBandPortCart ();
 static bool ReloadLoadedGame ();
@@ -3556,44 +3558,27 @@ LRESULT CALLBACK WinProc(
 			break;
 		}
 
-		// Enable on: with no game loaded the box boots to its menu, with one it boots with
-		// the game in its port. Off: a normal SNES boot, or nothing left with an empty port.
-		case ID_EMULATION_XBAND:
-			Settings.XBANDEnabled = !Settings.XBANDEnabled;
-			if (Settings.XBANDEnabled && !S9xBiosPathUsable(S9X_BIOS_XBAND))
-				S9xSetInfoString("XBAND on: assign its BIOS in File -> BIOS Manager");
-			else if (Settings.StopEmulation)
-			{
-				if (!Settings.XBANDEnabled)
-					break;
-				RestoreGUIDisplay();
-				PowerOnXBand();
-				RestoreSNESDisplay();
-			}
-			else if (S9xXBandRunning() ||
-			         (!Settings.GBRomPath[0] && !Multi.cartType && !SFCBox.Active && !NSS.Active &&
-			          !Settings.SuperDisc && !Settings.RP2040Cart &&
-			          Memory.XBandTakesCart(Memory.ROMFilename.c_str()) > 0))
-			{
-				if (!Settings.XBANDEnabled && !Multi.cartSizeB)
-				{
-					XBandShutDown();
-					break;
-				}
-				// The same game boots again, into the box's port or out of it.
-				if (ReloadLoadedGame())
-					S9xSetInfoString(Settings.XBANDEnabled ? "XBAND on" : "XBand off, passthrough game");
-			}
-			else
-				S9xSetInfoString(Settings.XBANDEnabled ? "XBAND on: games load through it" : "XBand off, passthrough game");
+		// Enable puts the XBAND in the SNES or takes it out; Modem / Pass-through is
+		// the box's own switch, live only while it is in.
+		case ID_EMULATION_XBAND_ENABLE:
+			GUI.XBandEnabled = !GUI.XBandEnabled;
+			XBandSwitchesChanged();
 			break;
 
-		// With Enable left on, the box boots again at the next launch.
+		case ID_EMULATION_XBAND_MODEM:
+		case ID_EMULATION_XBAND_PASSTHROUGH:
+			if (!GUI.XBandEnabled || GUI.XBandModem == (cmd_id == ID_EMULATION_XBAND_MODEM))
+				break;
+			GUI.XBandModem = !GUI.XBandModem;
+			XBandSwitchesChanged();
+			break;
+
+		// With the modem left on, the box boots again at the next launch.
 		case ID_EMULATION_XBAND_AUTOBOOT:
 			GUI.XBandBootOnRestart = !GUI.XBandBootOnRestart;
 			break;
 
-		// The game in the port stays there across Enable off/on and restarts.
+		// The game in the port stays there across Modem off/on and restarts.
 		case ID_EMULATION_XBAND_REMEMBER:
 			GUI.XBandRememberCart = !GUI.XBandRememberCart;
 			GUI.XBandCart[0] = '\0';
@@ -3629,7 +3614,7 @@ LRESULT CALLBACK WinProc(
 					else if (fits == 0)
 						MessageBox(GUI.hWnd, TEXT("That game could not be loaded."),
 						           TEXT("XBAND"), MB_OK | MB_ICONWARNING);
-					else if (LoadROM(filename))	// with Enable on, LoadROM puts it in the box's port
+					else if (LoadROM(filename))	// with the modem on, LoadROM puts it in the box's port
 					{
 						char cart[_MAX_FNAME], msg[_MAX_FNAME + 32];
 						_splitpath(Multi.fileNameB, NULL, NULL, cart, NULL);
@@ -5800,9 +5785,8 @@ int WINAPI WinMain(
 			S9xUnfreezeGame(Settings.InitialSnapshotFilename);
 		}
 	}
-	// XBand -> Allow booting XBand on restart, with Enable on.
-	else if (GUI.XBandBootOnRestart && Settings.XBANDEnabled && S9xBiosPathUsable(S9X_BIOS_XBAND))
-		PowerOnXBand();
+	else
+		XBandBootAtLaunch();
 
 	S9xUnmapAllControls();
 	S9xSetupDefaultKeymap();
@@ -6683,8 +6667,11 @@ static void CheckMenuStates ()
 		}
 	}
 
-	mii.fState = Settings.XBANDEnabled ? MFS_CHECKED : MFS_UNCHECKED;
-	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND, FALSE, &mii);
+	mii.fState = GUI.XBandEnabled ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_ENABLE, FALSE, &mii);
+	// The box's mode switch: one position or the other.
+	CheckMenuRadioItem(GUI.hMenu, ID_EMULATION_XBAND_MODEM, ID_EMULATION_XBAND_PASSTHROUGH,
+	                   GUI.XBandModem ? ID_EMULATION_XBAND_MODEM : ID_EMULATION_XBAND_PASSTHROUGH, MF_BYCOMMAND);
 	mii.fState = GUI.XBandBootOnRestart ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_AUTOBOOT, FALSE, &mii);
 	mii.fState = GUI.XBandRememberCart ? MFS_CHECKED : MFS_UNCHECKED;
@@ -6750,6 +6737,26 @@ static void CheckMenuStates ()
 		txt.fMask      = MIIM_STRING;
 		txt.dwTypeData = text;
 		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_SERVER_LOCAL, FALSE, &txt);
+	}
+	// Enable is the master switch: with the XBAND out of the SNES nothing else in it applies.
+	{
+		static const UINT xband_items[] = {
+			ID_EMULATION_XBAND_CART, ID_EMULATION_XBAND_CARD, ID_EMULATION_XBAND_CARD_RESET,
+			ID_EMULATION_XBAND_SERVER_RETRO, ID_EMULATION_XBAND_SERVER_LOCAL,
+			ID_NETPLAY_XBAND_SERVER_START, ID_NETPLAY_XBAND_SERVER_STOP,
+			ID_EMULATION_XBAND_AUTOBOOT, ID_EMULATION_XBAND_REMEMBER,
+		};
+		if (!GUI.XBandEnabled)
+			for (UINT id : xband_items)
+				EnableMenuItem(GUI.hMenu, id, MF_BYCOMMAND | MF_GRAYED);
+		else	// the rest set their own state above
+			EnableMenuItem(GUI.hMenu, ID_EMULATION_XBAND_CARD_RESET, MF_BYCOMMAND | MF_ENABLED);
+
+		// The Switch submenu greys as a whole, found by position.
+		HMENU	parent = NULL;
+		int		pos    = 0;
+		if (FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_XBAND_SWITCH, &parent, &pos))
+			EnableMenuItem(parent, (UINT) pos, MF_BYPOSITION | (GUI.XBandEnabled ? MF_ENABLED : MF_GRAYED));
 	}
 
 	// Super Disc drive.
@@ -7512,7 +7519,83 @@ static void XBandRememberPort ()
 	GUI.XBandCart[sizeof(GUI.XBandCart) - 1] = '\0';
 }
 
-// Enable off with nothing in the port: the session ends, back to nothing loaded.
+// Pass-through with the XBAND in: its remembered cartridge plays as a normal SNES game.
+static void XBandPlayPassThrough ()
+{
+	if (!GUI.XBandRememberCart || !GUI.XBandCart[0])
+		return;
+	if (Memory.XBandTakesCart(GUI.XBandCart) <= 0)
+	{
+		GUI.XBandCart[0] = '\0';
+		S9xSetInfoString("XBAND: the remembered game is gone, cartridge ejected");
+		return;
+	}
+	RestoreGUIDisplay();
+	LoadROM(Utf8ToWide(GUI.XBandCart));
+	RestoreSNESDisplay();
+}
+
+// Only Enable + Modem runs the box: with no game loaded it boots to its menu, over a
+// game it boots with the game in its port. Enable + Pass-through plays the port's game
+// as a normal SNES game. Disabled is no XBAND at all, so nothing that came through it
+// keeps running: neither the box nor its cartridge playing through.
+static void XBandSwitchesChanged ()
+{
+	const bool on = GUI.XBandEnabled && GUI.XBandModem;
+	if (!GUI.XBandEnabled)
+	{
+		const bool through = GUI.XBandRememberCart && GUI.XBandCart[0] &&
+		                     !_stricmp(Memory.ROMFilename.c_str(), GUI.XBandCart);
+		Settings.XBANDEnabled = FALSE;
+		if (!Settings.StopEmulation && (S9xXBandRunning() || through))
+			XBandShutDown();
+		S9xSetInfoString("XBAND disabled");
+		return;
+	}
+	if ((Settings.XBANDEnabled != FALSE) == on)	// put in, set to Pass-through
+	{
+		S9xSetInfoString("XBAND enabled (pass-through)");
+		if (Settings.StopEmulation)
+			XBandPlayPassThrough();
+		return;
+	}
+
+	Settings.XBANDEnabled = on;
+	const char *off = "XBand off, passthrough game";
+	if (on && !S9xBiosPathUsable(S9X_BIOS_XBAND))
+		S9xSetInfoString("XBAND on: assign its BIOS in File -> BIOS Manager");
+	else if (Settings.StopEmulation)
+	{
+		if (!on)
+		{
+			S9xSetInfoString(off);
+			XBandPlayPassThrough();
+			return;
+		}
+		RestoreGUIDisplay();
+		PowerOnXBand();
+		RestoreSNESDisplay();
+	}
+	else if (S9xXBandRunning() ||
+	         (!Settings.GBRomPath[0] && !Multi.cartType && !SFCBox.Active && !NSS.Active &&
+	          !Settings.SuperDisc && !Settings.RP2040Cart &&
+	          Memory.XBandTakesCart(Memory.ROMFilename.c_str()) > 0))
+	{
+		if (!on && !Multi.cartSizeB)
+		{
+			XBandShutDown();
+			return;
+		}
+		// The same game boots again, into the box's port or out of it.
+		if (ReloadLoadedGame())
+			S9xSetInfoString(on ? "XBAND on" : off);
+	}
+	else
+		S9xSetInfoString(on ? "XBAND on: games load through it" : off);
+}
+
+// The XBAND taken out, or switched off with nothing in its port: whatever ran through
+// it ends, back to nothing loaded.
 static void XBandShutDown ()
 {
 	if (S9xMovieActive())
@@ -7528,7 +7611,7 @@ static void XBandShutDown ()
 	S9xRestoreWindowTitle();
 }
 
-// Enable with no game loaded, and Allow booting XBand on restart: the box boots with
+// Modem on with no game loaded, and Allow booting XBand on restart: the box boots with
 // the remembered game back in its port, or with an empty one once that file is gone.
 static bool PowerOnXBand ()
 {
@@ -7543,6 +7626,21 @@ static bool PowerOnXBand ()
 	if (gone)
 		S9xSetInfoString("XBAND: the remembered game is gone, cartridge ejected");
 	return (true);
+}
+
+// XBand -> Allow booting XBand on restart, with the XBAND enabled: Modem boots the box;
+// Pass-through hands the remembered game straight to the SNES, a normal boot.
+static void XBandBootAtLaunch ()
+{
+	if (!GUI.XBandBootOnRestart || !GUI.XBandEnabled)
+		return;
+	if (GUI.XBandModem)
+	{
+		if (S9xBiosPathUsable(S9X_BIOS_XBAND))
+			PowerOnXBand();
+	}
+	else
+		XBandPlayPassThrough();
 }
 
 static void RemoveFromRecentGames (const TCHAR *filename)

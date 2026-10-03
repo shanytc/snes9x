@@ -732,6 +732,7 @@ void WinGBPaletteToText()
 void WinPostLoad(ConfigFile& conf)
 {
 	WinGBPaletteFromText();
+	Settings.XBANDEnabled = GUI.XBandEnabled && GUI.XBandModem;
 	S9xSetWidescreenDefaults(&Settings.Widescreen);
 	Settings.Widescreen.Mode = GUI.WidescreenColumns ? WS_MODE_ON : WS_MODE_OFF;
 	if (GUI.WidescreenColumns)
@@ -1297,9 +1298,10 @@ void WinRegisterConfigItems()
 	AddUIntC("SuperFXClockMultiplier", Settings.SuperFXClockMultiplier, 100, "SuperFX speed, in percent (default 100)");
     AddBoolC("SeparateEchoBuffer", Settings.SeparateEchoBuffer, false, "Separate echo buffer from APU ram. For old hacks only.");
     AddBoolC("GBNoSpriteLimit", Settings.GBNoSpriteLimit, false, "Game Boy: draw every object on a scanline instead of the hardware limit of 10, so sprite-heavy lines stop dropping their highest-index objects (Balloon Fight GB's title clouds). Not hardware-accurate; mode-3 timing is unchanged so raster effects still render correctly");
-    AddBoolC("XBAND", Settings.XBANDEnabled, false, "XBAND modem plugged in: with no game loaded its BIOS from the BIOS Manager boots to its menu, and Load Game boots it with the game in its cartridge port. Follows Emulation -> XBand -> Enable");
-    AddBoolC("XBANDBootOnRestart", GUI.XBandBootOnRestart, false, "With XBAND on, the XBAND BIOS boots when SuperSnes9x starts. Follows Emulation -> XBand -> Allow booting XBand on restart");
-    AddBoolC("XBANDRememberCart", GUI.XBandRememberCart, false, "XBAND keeps the game in its cartridge port across Enable off/on and restarts. Follows Emulation -> XBand -> Remember mounted game");
+    AddBoolC("XBAND", GUI.XBandEnabled, false, "XBAND plugged into the SNES. Follows Emulation -> XBand -> Enable");
+    AddBoolC("XBANDModem", GUI.XBandModem, true, "With XBAND on, the box's switch: TRUE = Modem (its BIOS from the BIOS Manager boots, to its menu with no game loaded or with the game in its cartridge port), FALSE = Pass-through (a normal SNES boot). Follows Emulation -> XBand -> Modem / Pass-through");
+    AddBoolC("XBANDBootOnRestart", GUI.XBandBootOnRestart, false, "With XBAND on, SuperSnes9x starts with it: in Modem its BIOS boots, in Pass-through the remembered game boots as a normal SNES game. Follows Emulation -> XBand -> Allow booting XBand on restart (when enabled)");
+    AddBoolC("XBANDRememberCart", GUI.XBandRememberCart, false, "XBAND keeps the game in its cartridge port across Modem off/on and restarts. Follows Emulation -> XBand -> Remember mounted game");
     AddAStringC("XBANDCart", GUI.XBandCart, sizeof(GUI.XBandCart), "", "With XBANDRememberCart: the game in the XBAND's cartridge port, mounted again when the box boots alone; dropped when the file is gone");
     AddBoolC("XBANDLocalServer", Settings.XBANDLocalServer, false, "XBAND dials the local server below instead of xbserver.retrocomputing.network:56969. Follows Emulation -> XBAND");
     AddAStringC("XBANDServerHost", Settings.XBANDServerHost, sizeof(Settings.XBANDServerHost), "127.0.0.1", "XBAND local server: host name or IP");

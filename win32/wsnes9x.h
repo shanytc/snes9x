@@ -378,11 +378,16 @@ struct sGUI {
 	// With JapaneseController: the European pad picture rather than the Super Famicom one.
 	bool EuropeanController;
 
-	// XBand -> Allow booting XBand on restart: with Enable on, the box starts at launch.
+	// XBand -> Allow booting XBand on restart: with Enable on, launch boots the box (Modem)
+	// or the remembered game (Pass-through).
 	bool XBandBootOnRestart;
 	// XBand -> Remember mounted game: the cart in the port, put back whenever the box boots alone.
 	bool XBandRememberCart;
 	char XBandCart[PATH_MAX + 1];
+	// XBand -> Enable: the XBAND is in the SNES. XBand -> Modem (else Pass-through)
+	// is its own switch; Settings.XBANDEnabled is the two together.
+	bool XBandEnabled;
+	bool XBandModem;
 };
 
 //TURBO masks

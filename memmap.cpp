@@ -2985,14 +2985,14 @@ bool8 CMemory::LoadXBand (const char *game, int32 game_size)
 	return (r);
 }
 
-// Emulation -> XBand -> Enable with no game loaded: the box with nothing in its port.
+// Emulation -> XBand -> Modem on with no game loaded: the box with nothing in its port.
 bool8 CMemory::LoadXBandPowerOn ()
 {
 	S9xResetSaveTimer(FALSE);
 	return (LoadXBand(NULL, 0));
 }
 
-// Emulation -> XBand -> Enable off with no game in the port: the box hangs up and
+// Emulation -> XBand -> Modem off with no game in the port: the box hangs up and
 // nothing is loaded any more.
 void CMemory::XBandPowerOff ()
 {
@@ -3140,7 +3140,7 @@ bool8 CMemory::LoadMultiCartInt ()
 			if (!s_xband_from_manager)
 			{
 				S9xMessage(S9X_ERROR, S9X_ROM_INFO,
-				           "XBAND: switch on Emulation -> XBand -> Enable; its BIOS goes in the BIOS Manager.");
+				           "XBAND: switch on Emulation -> XBand -> Modem; its BIOS goes in the BIOS Manager.");
 				memset(&Multi, 0, sizeof(Multi));
 				return (FALSE);
 			}

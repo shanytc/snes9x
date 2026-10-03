@@ -1606,7 +1606,13 @@ BEGIN
         MENUITEM MFT_SEPARATOR
         POPUP "&XBand",                         0,MFT_STRING,MFS_ENABLED
         BEGIN
-            MENUITEM "&Enable",                     ID_EMULATION_XBAND,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Enable",                     ID_EMULATION_XBAND_ENABLE,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            POPUP "S&witch",                        ID_EMULATION_XBAND_SWITCH,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "&Modem",                      ID_EMULATION_XBAND_MODEM,MFT_STRING,MFS_ENABLED
+                MENUITEM "&Pass-through",               ID_EMULATION_XBAND_PASSTHROUGH,MFT_STRING,MFS_ENABLED
+            END
             MENUITEM "&Cartridge: Mount...",        ID_EMULATION_XBAND_CART,MFT_STRING,MFS_ENABLED
             MENUITEM "Insert &Prepaid Card",        ID_EMULATION_XBAND_CARD,MFT_STRING,MFS_ENABLED
             MENUITEM "&Reset Prepaid Card",         ID_EMULATION_XBAND_CARD_RESET,MFT_STRING,MFS_ENABLED
@@ -1617,8 +1623,8 @@ BEGIN
             MENUITEM "S&tart Server...",            ID_NETPLAY_XBAND_SERVER_START,MFT_STRING,MFS_ENABLED
             MENUITEM "&Disconnect",                 ID_NETPLAY_XBAND_SERVER_STOP,MFT_STRING,MFS_GRAYED
             MENUITEM MFT_SEPARATOR
-            MENUITEM "&Allow booting XBand on restart", ID_EMULATION_XBAND_AUTOBOOT,MFT_STRING,MFS_ENABLED
-            MENUITEM "Re&member mounted game",      ID_EMULATION_XBAND_REMEMBER,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Allow booting XBand on restart (when enabled)", ID_EMULATION_XBAND_AUTOBOOT,MFT_STRING,MFS_ENABLED
+            MENUITEM "Remember mounted &game",      ID_EMULATION_XBAND_REMEMBER,MFT_STRING,MFS_ENABLED
         END
         MENUITEM "&Hacks...",                   ID_EMULATION_HACKS,MFT_STRING,MFS_ENABLED
         MENUITEM "&Settings...\tAlt+F8",        ID_OPTIONS_SETTINGS,MFT_STRING,MFS_ENABLED

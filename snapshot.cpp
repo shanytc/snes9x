@@ -1793,7 +1793,9 @@ int S9xUnfreezeFromStream (STREAM stream)
 
 		UnfreezeStructFromCopy(&CPU, SnapCPU, COUNT(SnapCPU), local_cpu, version);
 		CPU.LastBusStart = CPU.Cycles;
+		CPU.LastRunStart = CPU.Cycles - 1;
 		CPU.HDMAEdge = 0;
+		S9xUpdateFastBusEnd();
 		CPU.IRQDeferOne = FALSE;
 
 		UnfreezeStructFromCopy(&Registers, SnapRegisters, COUNT(SnapRegisters), local_registers, version);

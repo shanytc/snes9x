@@ -52,6 +52,29 @@ void S9xSGBCaptureSoftResetCheckpoint (void);
 void S9xSGBInvalidateSoftResetCheckpoint (void);
 void S9xDoHEventProcessing (void);
 void S9xRunPendingHDMA (int32 busLen);
+void S9xCPUAddBusCyclesSlow (int32 n);
+void S9xCPUBusCycleSlow (int32 busLen);
+int32 S9xLastBusStart (void);
+void S9xSettleLastBus (int32 shift);
+
+#ifndef INT32_MIN
+#define INT32_MIN	(-2147483647 - 1)
+#endif
+
+// Length of the next bus cycle when n fetch/internal clocks remain.
+static inline int32 S9xBusCycleLen (int32 n, int32 memSpeed)
+{
+	if (n % ONE_CYCLE == 0 && (n % memSpeed != 0 || memSpeed == ONE_CYCLE))
+		return (ONE_CYCLE);
+	return ((n >= memSpeed) ? memSpeed : n);
+}
+
+// Bus cycles ending before FastBusEnd need no event or HDMA work. A pending
+// HDMA forces every bus cycle through the slow path.
+static inline void S9xUpdateFastBusEnd (void)
+{
+	CPU.FastBusEnd = CPU.HDMAEdge ? INT32_MIN : CPU.NextEvent;
+}
 
 // A CPU bus cycle of busLen clocks starts: remembered for IRQ sampling, and a
 // triggered HDMA takes the bus at the second one (bsnes timing).
@@ -59,25 +82,37 @@ static inline void S9xCPUBusCycleStart (int32 busLen)
 {
 	CPU.LastBusStart = CPU.Cycles;
 	if (CPU.HDMAEdge && !--CPU.HDMAEdge)
+	{
+		S9xUpdateFastBusEnd();
 		S9xRunPendingHDMA(busLen);
+	}
+}
+
+// One bus cycle of busLen clocks, as a memory access.
+static inline void S9xCPUBusCycle (int32 busLen)
+{
+	if (CPU.Cycles + busLen < CPU.FastBusEnd)
+	{
+		CPU.LastBusStart = CPU.Cycles;
+		CPU.Cycles += busLen;
+	}
+	else
+		S9xCPUBusCycleSlow(busLen);
 }
 
 // Add fetch/internal cycles one bus cycle at a time so the hook sees each.
+// On the fast path only the last cycle's start matters, and
+// S9xLastBusStart() splits the run to find it when an IRQ needs it.
 static inline void S9xCPUAddBusCycles (int32 n)
 {
-	while (n > 0)
+	if (CPU.Cycles + n < CPU.FastBusEnd)
 	{
-		int32	c;
-		if (n % ONE_CYCLE == 0 && (n % CPU.MemSpeed != 0 || CPU.MemSpeed == ONE_CYCLE))
-			c = ONE_CYCLE;
-		else
-			c = (n >= CPU.MemSpeed) ? CPU.MemSpeed : n;
-		S9xCPUBusCycleStart(c);
-		CPU.Cycles += c;
-		while (CPU.Cycles >= CPU.NextEvent)
-			S9xDoHEventProcessing();
-		n -= c;
+		CPU.LastRunStart = CPU.Cycles;
+		CPU.LastRunShape = n | (CPU.MemSpeed << 8);
+		CPU.Cycles += n;
 	}
+	else
+		S9xCPUAddBusCyclesSlow(n);
 }
 
 static inline void S9xUnpackStatus (void)

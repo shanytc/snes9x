@@ -1701,6 +1701,7 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 				if (Byte && CPU.HDMAEdge)
 				{
 					CPU.HDMAEdge = 0;
+					S9xUpdateFastBusEnd();
 					S9xRunPendingHDMA(ONE_CYCLE);
 				}
 				// The DMA takes the bus one CPU cycle after this 6-clock write, on

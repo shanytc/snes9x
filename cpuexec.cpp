@@ -214,7 +214,7 @@ void S9xMainLoop (void)
 
 			// /IRQ is sampled before an instruction's last bus cycle (bsnes):
 			// a rise inside that cycle waits for the next instruction.
-			if (CPU.LastBusStart < Timings.NextIRQTimer && !CPU.WaitingForInterrupt)
+			if (S9xLastBusStart() < Timings.NextIRQTimer && !CPU.WaitingForInterrupt)
 				CPU.IRQDeferOne = TRUE;
 			S9xUpdateIRQPositions(false);
 			CPU.IRQLine = TRUE;
@@ -434,6 +434,9 @@ void S9xMainLoop (void)
 
 	}
 
+	// split any pending run now, while ONE_CYCLE is the one it was added under
+	S9xSettleLastBus(0);
+
 	S9xPackStatus();
 }
 
@@ -474,6 +477,52 @@ static inline void S9xReschedule (void)
 			CPU.NextEvent  = Timings.HBlankStart;
 			break;
 	}
+
+	S9xUpdateFastBusEnd();
+}
+
+void S9xCPUBusCycleSlow (int32 busLen)
+{
+	S9xCPUBusCycleStart(busLen);
+	CPU.Cycles += busLen;
+	while (CPU.Cycles >= CPU.NextEvent)
+		S9xDoHEventProcessing();
+}
+
+void S9xCPUAddBusCyclesSlow (int32 n)
+{
+	while (n > 0)
+	{
+		int32	c = S9xBusCycleLen(n, CPU.MemSpeed);
+		S9xCPUBusCycleSlow(c);
+		n -= c;
+	}
+}
+
+// Start of the most recent bus cycle: a fast-path run newer than the last
+// single bus cycle is split the way the slow path would have split it.
+int32 S9xLastBusStart (void)
+{
+	if (CPU.LastRunStart <= CPU.LastBusStart)
+		return (CPU.LastBusStart);
+
+	int32	start = CPU.LastRunStart;
+	int32	n = CPU.LastRunShape & 0xff, memSpeed = CPU.LastRunShape >> 8;
+	while (n > 0)
+	{
+		int32	c = S9xBusCycleLen(n, memSpeed);
+		if ((n -= c) > 0)
+			start += c;
+	}
+
+	return (start);
+}
+
+// Fold any run into LastBusStart, moved by shift clocks.
+void S9xSettleLastBus (int32 shift)
+{
+	CPU.LastBusStart = S9xLastBusStart() - shift;
+	CPU.LastRunStart = CPU.LastBusStart - 1;
 }
 
 void S9xRunPendingHDMA (int32 busLen)
@@ -523,7 +572,10 @@ void S9xDoHEventProcessing (void)
 				if (CPU.InDMA || Model->_5A22 != 2)
 					PPU.HDMA = S9xDoHDMA(PPU.HDMA);
 				else
+				{
 					CPU.HDMAEdge = 2;
+					S9xUpdateFastBusEnd();
+				}
 			}
 
 			break;
@@ -534,6 +586,7 @@ void S9xDoHEventProcessing (void)
 			if (CPU.HDMAEdge)
 			{
 				CPU.HDMAEdge = 0;
+				S9xUpdateFastBusEnd();
 				S9xRunPendingHDMA(ONE_CYCLE);
 			}
 
@@ -584,7 +637,7 @@ void S9xDoHEventProcessing (void)
 				Timings.NMITriggerPos -= Timings.H_Max;
 			if (Timings.NextIRQTimer != 0x0fffffff)
 				Timings.NextIRQTimer -= Timings.H_Max;
-			CPU.LastBusStart -= Timings.H_Max;
+			S9xSettleLastBus(Timings.H_Max);
 			S9xAPUSetReferenceTime(CPU.Cycles);
 
 			PPU.CentreXLatched = false;

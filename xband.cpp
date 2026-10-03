@@ -808,6 +808,7 @@ static bool     xband_ringing      = false;
 static bool     xband_answered     = false;	// this call was answered, not dialed
 static bool     xband_far_end_up   = true;	// a local dial rings out until the far end speaks
 static bool     xband_call_local   = false;	// the call up now went to the local server
+static bool     xband_dial_done    = true;	// the answer tone ended; until then HELO\n probes are dropped
 static char     xband_ring_line[16];
 static int      xband_ring_len     = 0;
 static uint32   xband_ring_retry   = 0;		// frames until the next ring-line attempt
@@ -5808,6 +5809,8 @@ static uint8 xband_reg_read (uint8 reg)
 				}
 				if (xband_atv25_until && (int32) (xband_atv25_until - xband_frame) > 0)
 					ret |= (1 << 4); // ATV25
+				else if (xband_atv25_until)
+					xband_dial_done = true;		// answer tone over: the modems are training, then connected
 				break;
 			case 0x0D:
 				ret |= (1 << 3); // U1DET
@@ -6748,6 +6751,7 @@ static bool xband_ring_answer (void)
 	xband_answered  = true;
 	xband_far_end_up = true;
 	xband_call_local = true;
+	xband_dial_done  = true;
 	XBand.connected = TRUE;
 	XBand.net_step  = XBAND_NET_CONNECTED;
 	XBand.rxbufpos  = XBand.rxbufused = 0;
@@ -6772,8 +6776,11 @@ bool8 S9xXBandConnect (const char *host, int port)
 		return FALSE;
 
 	// Until the connect completes the line rings out: no answer tone, TX held in txbuf.
+	// The socket opens at the dial, while a real modem could hear nothing: a HELO\n
+	// let through then sits ahead of the box's packet parser and shifts every frame.
 	XBand.socket_fd = sock;
 	xband_connecting = true;
+	xband_dial_done = false;
 	xband_far_end_up = false;
 	xband_atv25_until = 0;
 	return TRUE;
@@ -6936,31 +6943,28 @@ void S9xXBandPoll (void)
 			// to real ADSP frames.
 			xband_adsp_feed_byte(b);
 
-			// HELO\n filter (can be bypassed at runtime). When the
-			// filter is disabled the byte goes straight into rxbuf,
-			// just like any other unrecognized byte.
-			if (xband_helo_filter_enabled)
+			// HELO\n filter: always while the box is still dialing, and
+			// for the whole call when switched on at runtime.
+			if ((xband_helo_filter_enabled || !xband_dial_done) &&
+			    b == (uint8)xband_helo_signature[xband_helo_match_pos])
 			{
-				if (b == (uint8)xband_helo_signature[xband_helo_match_pos])
+				xband_helo_match_pos++;
+				if (xband_helo_match_pos == (int)sizeof(xband_helo_signature))
 				{
-					xband_helo_match_pos++;
-					if (xband_helo_match_pos == (int)sizeof(xband_helo_signature))
-					{
-						// Full HELO\n match — discard all 5 bytes.
-						xband_helo_discarded++;
-						xband_helo_match_pos = 0;
-					}
-					continue;
+					// Full HELO\n match — discard all 5 bytes.
+					xband_helo_discarded++;
+					xband_helo_match_pos = 0;
 				}
-
-				// Partial match followed by a non-matching byte —
-				// flush what we provisionally absorbed back into
-				// rxbuf, then handle the current byte normally.
-				for (int i = 0; i < xband_helo_match_pos &&
-				                XBand.rxbufpos < XBAND_RXBUF_SIZE; i++)
-					XBand.rxbuf[XBand.rxbufpos++] = (uint8)xband_helo_signature[i];
-				xband_helo_match_pos = 0;
+				continue;
 			}
+
+			// Partial match followed by a non-matching byte (or the filter
+			// just switched off) — flush what we provisionally absorbed
+			// back into rxbuf, then handle the current byte normally.
+			for (int i = 0; i < xband_helo_match_pos &&
+			                XBand.rxbufpos < XBAND_RXBUF_SIZE; i++)
+				XBand.rxbuf[XBand.rxbufpos++] = (uint8)xband_helo_signature[i];
+			xband_helo_match_pos = 0;
 
 			if (XBand.rxbufpos < XBAND_RXBUF_SIZE)
 				XBand.rxbuf[XBand.rxbufpos++] = b;

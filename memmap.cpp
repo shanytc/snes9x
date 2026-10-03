@@ -63,8 +63,6 @@ static std::string SuperDiscBIOSPath;
 
 // Set while LoadXBand hands its slots to LoadMultiCartInt.
 static bool s_xband_from_manager = false;
-// The loaded cart is one Load Game plugs into the XBAND when it is switched on.
-static bool s_xband_pluggable = false;
 
 #ifndef SET_UI_COLOR
 #define SET_UI_COLOR(r, g, b) ;
@@ -1677,9 +1675,9 @@ bool8 S9xBiosChangedSinceLoad (void)
     return takes_bios && s_bios_paths_at_load != S9xBiosPathsFingerprint();
 }
 
-bool8 S9xXBandSwitchChangedSinceLoad (void)
+bool8 S9xXBandRunning (void)
 {
-    return s_xband_pluggable && Settings.XBANDEnabled != Settings.XBAND;
+    return Settings.XBAND && Multi.cartType == 6;
 }
 
 bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* optional_rom_filename /*= NULL*/)
@@ -1689,7 +1687,6 @@ bool8 CMemory::LoadROMMem (const uint8 *source, uint32 sourceSize, const char* o
 
     S9xSetBiosNotice(NULL);
     s_bios_paths_at_load = S9xBiosPathsFingerprint();
-    s_xband_pluggable = false;
 
     if (optional_rom_filename)
         ROMFilename = optional_rom_filename;
@@ -2247,7 +2244,8 @@ bool8 CMemory::LoadROM (const char *filename)
 
     S9xSetBiosNotice(NULL);   // a fresh load owns the missing-BIOS state
     s_bios_paths_at_load = S9xBiosPathsFingerprint();
-    s_xband_pluggable = false;
+    // With XBAND enabled, a cart it can take goes into its port.
+    const bool8 into_box = Settings.XBANDEnabled && S9xBiosPathUsable(S9X_BIOS_XBAND);
 
     // .gb / .gbc — hand off to the SGB subsystem. The 65816 path below
     // is bypassed entirely; S9xMainLoop gates on Settings.SuperGameBoy
@@ -2400,9 +2398,8 @@ bool8 CMemory::LoadROM (const char *filename)
                 return paired > 0;
         }
 
-        // With XBAND switched on, an ordinary cart plugs into it instead.
-        s_xband_pluggable = !Settings.NSS && !OwnsItsHardware(ROM, totalFileSize);
-        if (Settings.XBANDEnabled && s_xband_pluggable)
+        // The box powers up with the cart in its port.
+        if (into_box && !Settings.NSS && !OwnsItsHardware(ROM, totalFileSize))
             return (LoadXBand(filename, totalFileSize));
 
         if (LoadROMInt(totalFileSize))
@@ -2988,6 +2985,49 @@ bool8 CMemory::LoadXBand (const char *game, int32 game_size)
 	return (r);
 }
 
+// Emulation -> XBand -> Enable with no game loaded: the box with nothing in its port.
+bool8 CMemory::LoadXBandPowerOn ()
+{
+	S9xResetSaveTimer(FALSE);
+	return (LoadXBand(NULL, 0));
+}
+
+// Emulation -> XBand -> Enable off with no game in the port: the box hangs up and
+// nothing is loaded any more.
+void CMemory::XBandPowerOff ()
+{
+	S9xXBandDisconnect();
+	Settings.XBAND = FALSE;
+	memset(&Multi, 0, sizeof(Multi));
+	ROMFilename.clear();
+}
+
+// Whether the XBAND's cartridge port takes this file: 1 yes, 0 unreadable, -1 not a cart for it.
+int CMemory::XBandTakesCart (const char *filename)
+{
+	if (!filename || !*filename || S9xFilenameHasExt(filename, ".gb") ||
+	    S9xFilenameHasExt(filename, ".gbc") || S9xSuperDiscIsDiscImage(filename))
+		return (-1);
+
+	// Read aside, so the running box's ROM[] stays as it is.
+	std::vector<uint8>	img(MAX_ROM_SIZE + 0x200);
+	const std::string	rom_filename = ROMFilename;
+	const int32			size = (int32) FileLoader(img.data(), filename, MAX_ROM_SIZE);
+	ROMFilename = rom_filename;
+	if (!size)
+		return (0);
+
+	const uint8	*d  = img.data();
+	uint32		prg = 0;
+	if (S9xRomBytesAreGb(d, size) || OwnsItsHardware(d, size) ||
+	    S9xNSSTakeCartTail(d, (uint32) size, &prg) ||
+	    is_SufamiTurbo_Cart(d, size) || is_BSX_Shell(d, size) ||
+	    (size == XBAND_ROM_SIZE && S9xXBandIsBIOS(d, (uint32) size)) ||
+	    size > MAX_ROM_SIZE - 0x400000)
+		return (-1);
+	return (1);
+}
+
 int CMemory::LoadBIOSPairedCart (const char *filename, int32 size)
 {
 	if (!is_SufamiTurbo_Cart(ROM, size) && !is_BSX_Shell(ROM, size))
@@ -3073,8 +3113,6 @@ bool8 CMemory::LoadMultiCartInt ()
 {
 	S9xSetBiosNotice(NULL);   // File -> Load MultiCart does not pass through LoadROM
 	s_bios_paths_at_load = S9xBiosPathsFingerprint();
-	if (!s_xband_from_manager)
-		s_xband_pluggable = false;
 
 	// ...nor its teardown: a Game Boy or NSS session left running would keep
 	// its core or supervisor on the SNES in place of the carts.
@@ -3102,7 +3140,7 @@ bool8 CMemory::LoadMultiCartInt ()
 			if (!s_xband_from_manager)
 			{
 				S9xMessage(S9X_ERROR, S9X_ROM_INFO,
-				           "XBAND: switch on Emulation -> XBAND and use Load Game; its BIOS goes in the BIOS Manager.");
+				           "XBAND: switch on Emulation -> XBand -> Enable; its BIOS goes in the BIOS Manager.");
 				memset(&Multi, 0, sizeof(Multi));
 				return (FALSE);
 			}

@@ -101,6 +101,18 @@ void WinRefreshDisplay(void)
 	GUI.FlipCounter++;
 }
 
+// A black frame in place of the last one, for a session that has ended.
+void WinClearDisplay(void)
+{
+	if(!Src.Width)
+		return;
+
+	CheckOverscanOffset();
+	for (unsigned int i = 0; i < Src.Height; i++)
+		memset(Src.Surface + i * Src.Pitch, 0, Src.Width * 2);
+	WinRefreshDisplay();
+}
+
 void WinChangeWindowSize(unsigned int newWidth, unsigned int newHeight)
 {
     if (g_hWndRender)

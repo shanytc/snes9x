@@ -377,6 +377,12 @@ struct sGUI {
 
 	// With JapaneseController: the European pad picture rather than the Super Famicom one.
 	bool EuropeanController;
+
+	// XBand -> Allow booting XBand on restart: with Enable on, the box starts at launch.
+	bool XBandBootOnRestart;
+	// XBand -> Remember mounted game: the cart in the port, put back whenever the box boots alone.
+	bool XBandRememberCart;
+	char XBandCart[PATH_MAX + 1];
 };
 
 //TURBO masks

@@ -569,7 +569,7 @@ void RestoreSNESDisplay ();
 void CheckDirectoryIsWritable (const char *filename);
 static void CheckMenuStates ();
 static void NSSToggleDip (int sw);
-static void HookDipMenu (bool on);
+static void HookToggleMenu (bool on);
 static void UpdateTestsMenu ();
 static bool RateSupportedByDriver (unsigned int rate, int driver);
 static bool RateUsefulForMode (unsigned int rate);
@@ -581,8 +581,12 @@ static bool SetExeFileIcon (int logoIndex);
 static void UpdateLogoMenuBitmaps ();
 static void RestartSnes9x ();
 static void ResetFrameTimer ();
-static bool LoadROM (const TCHAR *filename, const TCHAR *filename2 = NULL);
+static bool LoadROM (const TCHAR *filename, const TCHAR *filename2 = NULL);	// NULL: the XBAND alone
 static bool LoadROMMulti (const TCHAR *filename, const TCHAR *filename2);
+static bool PowerOnXBand ();
+static void XBandShutDown ();
+static void XBandRememberPort ();
+static std::string XBandPortCart ();
 static bool ReloadLoadedGame ();
 static bool WinFollowContentWidth ();
 bool8 S9xLoadROMImage (const TCHAR *string);
@@ -3285,9 +3289,9 @@ LRESULT CALLBACK WinProc(
 						S9xMovieStop (TRUE);
 					if (cmd_id == ID_EMULATION_HARD_RESET)
 					{
-						// A BIOS assigned since the cart loaded, or the XBAND switched
-						// on or off, only takes effect by a load: the power cycle does it.
-						if (S9xBiosChangedSinceLoad() || S9xXBandSwitchChangedSinceLoad())
+						// A BIOS assigned since the cart loaded only takes effect by a
+						// load: the power cycle does it.
+						if (S9xBiosChangedSinceLoad())
 							ReloadLoadedGame();
 						else
 						{
@@ -3552,18 +3556,91 @@ LRESULT CALLBACK WinProc(
 			break;
 		}
 
-		// Takes effect on the next hard reset or Load Game.
+		// Enable on: with no game loaded the box boots to its menu, with one it boots with
+		// the game in its port. Off: a normal SNES boot, or nothing left with an empty port.
 		case ID_EMULATION_XBAND:
 			Settings.XBANDEnabled = !Settings.XBANDEnabled;
-			if (!Settings.XBANDEnabled)
-				S9xSetInfoString(S9xXBandSwitchChangedSinceLoad() ? "XBAND off: hard reset to unplug it" : "XBAND off");
-			else if (!S9xBiosPathUsable(S9X_BIOS_XBAND))
+			if (Settings.XBANDEnabled && !S9xBiosPathUsable(S9X_BIOS_XBAND))
 				S9xSetInfoString("XBAND on: assign its BIOS in File -> BIOS Manager");
-			else if (S9xXBandSwitchChangedSinceLoad())
-				S9xSetInfoString("XBAND on: hard reset to plug the game into it");
+			else if (Settings.StopEmulation)
+			{
+				if (!Settings.XBANDEnabled)
+					break;
+				RestoreGUIDisplay();
+				PowerOnXBand();
+				RestoreSNESDisplay();
+			}
+			else if (S9xXBandRunning() ||
+			         (!Settings.GBRomPath[0] && !Multi.cartType && !SFCBox.Active && !NSS.Active &&
+			          !Settings.SuperDisc && !Settings.RP2040Cart &&
+			          Memory.XBandTakesCart(Memory.ROMFilename.c_str()) > 0))
+			{
+				if (!Settings.XBANDEnabled && !Multi.cartSizeB)
+				{
+					XBandShutDown();
+					break;
+				}
+				// The same game boots again, into the box's port or out of it.
+				if (ReloadLoadedGame())
+					S9xSetInfoString(Settings.XBANDEnabled ? "XBAND on" : "XBand off, passthrough game");
+			}
 			else
-				S9xSetInfoString("XBAND on: games load through it");
+				S9xSetInfoString(Settings.XBANDEnabled ? "XBAND on: games load through it" : "XBand off, passthrough game");
 			break;
+
+		// With Enable left on, the box boots again at the next launch.
+		case ID_EMULATION_XBAND_AUTOBOOT:
+			GUI.XBandBootOnRestart = !GUI.XBandBootOnRestart;
+			break;
+
+		// The game in the port stays there across Enable off/on and restarts.
+		case ID_EMULATION_XBAND_REMEMBER:
+			GUI.XBandRememberCart = !GUI.XBandRememberCart;
+			GUI.XBandCart[0] = '\0';
+			XBandRememberPort();
+			break;
+
+		// The box's port: Eject boots the running box alone, or just takes out the
+		// remembered game; Mount boots the box with the game in the port.
+		case ID_EMULATION_XBAND_CART:
+		{
+			if (!Settings.XBANDEnabled)
+				break;
+			RestoreGUIDisplay();
+			if (!Settings.StopEmulation && S9xXBandRunning() && Multi.cartSizeB)
+			{
+				if (LoadROM(NULL))
+					S9xSetInfoString("XBAND: cartridge ejected");
+			}
+			else if (!XBandPortCart().empty())
+			{
+				GUI.XBandCart[0] = '\0';
+				S9xSetInfoString("XBAND: cartridge ejected");
+			}
+			else
+			{
+				TCHAR filename[_MAX_PATH];
+				if (DoOpenRomDialog(filename))
+				{
+					const int fits = Memory.XBandTakesCart(_tToChar(filename));
+					if (fits < 0)
+						MessageBox(GUI.hWnd, TEXT("That is not a game the XBAND cartridge port takes."),
+						           TEXT("XBAND"), MB_OK | MB_ICONWARNING);
+					else if (fits == 0)
+						MessageBox(GUI.hWnd, TEXT("That game could not be loaded."),
+						           TEXT("XBAND"), MB_OK | MB_ICONWARNING);
+					else if (LoadROM(filename))	// with Enable on, LoadROM puts it in the box's port
+					{
+						char cart[_MAX_FNAME], msg[_MAX_FNAME + 32];
+						_splitpath(Multi.fileNameB, NULL, NULL, cart, NULL);
+						snprintf(msg, sizeof(msg), "XBAND: %s in the cartridge port", cart);
+						S9xSetInfoString(msg);
+					}
+				}
+			}
+			RestoreSNESDisplay();
+			break;
+		}
 
 		// The card stays in the slot across games, like the real modem's.
 		case ID_EMULATION_XBAND_CARD:
@@ -3784,7 +3861,7 @@ LRESULT CALLBACK WinProc(
 		case ID_NSS_DIP0 + 0: case ID_NSS_DIP0 + 1: case ID_NSS_DIP0 + 2:
 		case ID_NSS_DIP0 + 3: case ID_NSS_DIP0 + 4: case ID_NSS_DIP0 + 5:
 		case ID_NSS_DIP0 + 6: case ID_NSS_DIP0 + 7:
-			// Normally flipped in place by DipMenuFilter; this is the
+			// Normally flipped in place by ToggleMenuFilter; this is the
 			// fallback for anything that still sends the command.
 			NSSToggleDip(cmd_id - ID_NSS_DIP0);
 			CheckMenuStates();
@@ -4073,7 +4150,7 @@ LRESULT CALLBACK WinProc(
         break;
 	}
 	case WM_EXITMENULOOP:
-		HookDipMenu(false);
+		HookToggleMenu(false);
 		UpdateWindow(GUI.hWnd);
 		DrawMenuBar(GUI.hWnd);
 		S9xClearPause (PAUSE_MENU);
@@ -4082,7 +4159,7 @@ LRESULT CALLBACK WinProc(
 	case WM_ENTERMENULOOP:
 		S9xSetPause (PAUSE_MENU);
 		CheckMenuStates ();
-		HookDipMenu(Settings.NSS);
+		HookToggleMenu(true);
 
 		SwitchToGDI();
 		DrawMenuBar(GUI.hWnd);
@@ -5723,6 +5800,9 @@ int WINAPI WinMain(
 			S9xUnfreezeGame(Settings.InitialSnapshotFilename);
 		}
 	}
+	// XBand -> Allow booting XBand on restart, with Enable on.
+	else if (GUI.XBandBootOnRestart && Settings.XBANDEnabled && S9xBiosPathUsable(S9X_BIOS_XBAND))
+		PowerOnXBand();
 
 	S9xUnmapAllControls();
 	S9xSetupDefaultKeymap();
@@ -6467,11 +6547,11 @@ static void NSSToggleDip (int sw)
 	NSS.DipSwitches = (uint8) Settings.NSSDipSwitches;
 }
 
-// The DIP switches flip in place: while a menu is open, a click or Enter on
-// one toggles it and is swallowed, so its popup stays up for the next one.
-static HHOOK s_dipMenuHook = NULL;
+// The NSS DIP switches and the XBand options flip in place: while a menu is open,
+// a click or Enter on one toggles it and is swallowed, so its popup stays up.
+static HHOOK s_toggleMenuHook = NULL;
 
-static BOOL CALLBACK RepaintDipPopup (HWND hwnd, LPARAM lp)
+static BOOL CALLBACK RepaintMenuPopup (HWND hwnd, LPARAM lp)
 {
 	TCHAR cls[16];
 	if (GetClassName(hwnd, cls, 16) && !_tcscmp(cls, TEXT("#32768")) &&
@@ -6480,47 +6560,70 @@ static BOOL CALLBACK RepaintDipPopup (HWND hwnd, LPARAM lp)
 	return TRUE;
 }
 
-static LRESULT CALLBACK DipMenuFilter (int code, WPARAM wp, LPARAM lp)
+static bool ToggleMenuItem (UINT id)
 {
-	const MSG	*m = (const MSG *) lp;
-	HMENU		sub = NULL;
-	int			pos = 0;
-
-	if (code == MSGF_MENU && NSS.Active &&
-	    (m->message == WM_LBUTTONUP || (m->message == WM_KEYDOWN && m->wParam == VK_RETURN)) &&
-	    FindMenuItemParentPos(GUI.hMenu, ID_NSS_DIP0, &sub, &pos))
+	if (id >= ID_NSS_DIP0 && id < ID_NSS_DIP0 + 8)
 	{
-		// The item under the pointer, not the last one hovered, so a
-		// release off the popup never flips anything.
-		int	idx = -1;
-		if (m->message == WM_LBUTTONUP)
-			idx = MenuItemFromPoint(NULL, sub, m->pt);
-		else
-			for (int i = 0; i < GetMenuItemCount(sub); i++)
-				if (GetMenuState(sub, i, MF_BYPOSITION) & MF_HILITE)
-					idx = i;
-
-		const UINT	id = (idx >= 0) ? GetMenuItemID(sub, idx) : 0;
-		if (id >= ID_NSS_DIP0 && id < ID_NSS_DIP0 + 8 &&
-		    !(GetMenuState(sub, idx, MF_BYPOSITION) & (MF_GRAYED | MF_DISABLED)))
-		{
-			NSSToggleDip(id - ID_NSS_DIP0);
-			RefreshNSSDipItems();
-			EnumThreadWindows(GetCurrentThreadId(), RepaintDipPopup, (LPARAM) sub);
-			return 1;
-		}
+		if (!NSS.Active)
+			return false;
+		NSSToggleDip(id - ID_NSS_DIP0);
+		RefreshNSSDipItems();
+		return true;
 	}
-	return CallNextHookEx(s_dipMenuHook, code, wp, lp);
+	if (id != ID_EMULATION_XBAND_AUTOBOOT && id != ID_EMULATION_XBAND_REMEMBER)
+		return false;
+	// Through its WM_COMMAND handler, then the tick to match.
+	SendMessage(GUI.hWnd, WM_COMMAND, id, 0);
+	const bool on = (id == ID_EMULATION_XBAND_AUTOBOOT) ? GUI.XBandBootOnRestart : GUI.XBandRememberCart;
+	CheckMenuItem(GUI.hMenu, id, MF_BYCOMMAND | (on ? MF_CHECKED : MF_UNCHECKED));
+	return true;
 }
 
-static void HookDipMenu (bool on)
+static LRESULT CALLBACK ToggleMenuFilter (int code, WPARAM wp, LPARAM lp)
 {
-	if (on && !s_dipMenuHook)
-		s_dipMenuHook = SetWindowsHookEx(WH_MSGFILTER, DipMenuFilter, NULL, GetCurrentThreadId());
-	else if (!on && s_dipMenuHook)
+	const MSG	*m = (const MSG *) lp;
+
+	if (code == MSGF_MENU &&
+	    (m->message == WM_LBUTTONUP || (m->message == WM_KEYDOWN && m->wParam == VK_RETURN)))
 	{
-		UnhookWindowsHookEx(s_dipMenuHook);
-		s_dipMenuHook = NULL;
+		// Each popup holding toggles, found by one of its items.
+		static const UINT	popups[] = { ID_NSS_DIP0, ID_EMULATION_XBAND_AUTOBOOT };
+		for (UINT anchor : popups)
+		{
+			HMENU	sub = NULL;
+			int		pos = 0;
+			if (!FindMenuItemParentPos(GUI.hMenu, anchor, &sub, &pos))
+				continue;
+
+			// The item under the pointer, not the last one hovered, so a
+			// release off the popup never flips anything.
+			int	idx = -1;
+			if (m->message == WM_LBUTTONUP)
+				idx = MenuItemFromPoint(NULL, sub, m->pt);
+			else
+				for (int i = 0; i < GetMenuItemCount(sub); i++)
+					if (GetMenuState(sub, i, MF_BYPOSITION) & MF_HILITE)
+						idx = i;
+
+			if (idx >= 0 && !(GetMenuState(sub, idx, MF_BYPOSITION) & (MF_GRAYED | MF_DISABLED)) &&
+			    ToggleMenuItem(GetMenuItemID(sub, idx)))
+			{
+				EnumThreadWindows(GetCurrentThreadId(), RepaintMenuPopup, (LPARAM) sub);
+				return 1;
+			}
+		}
+	}
+	return CallNextHookEx(s_toggleMenuHook, code, wp, lp);
+}
+
+static void HookToggleMenu (bool on)
+{
+	if (on && !s_toggleMenuHook)
+		s_toggleMenuHook = SetWindowsHookEx(WH_MSGFILTER, ToggleMenuFilter, NULL, GetCurrentThreadId());
+	else if (!on && s_toggleMenuHook)
+	{
+		UnhookWindowsHookEx(s_toggleMenuHook);
+		s_toggleMenuHook = NULL;
 	}
 }
 
@@ -6582,6 +6685,31 @@ static void CheckMenuStates ()
 
 	mii.fState = Settings.XBANDEnabled ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND, FALSE, &mii);
+	mii.fState = GUI.XBandBootOnRestart ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_AUTOBOOT, FALSE, &mii);
+	mii.fState = GUI.XBandRememberCart ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_REMEMBER, FALSE, &mii);
+	{
+		// Eject while a game is in the port, greyed with the box disabled; Mount needs the BIOS.
+		const bool			box  = !Settings.StopEmulation && S9xXBandRunning();
+		const std::string	port = XBandPortCart();
+		TCHAR text[_MAX_FNAME + 32];
+		if (!port.empty())
+		{
+			char cart[_MAX_FNAME];
+			_splitpath(port.c_str(), NULL, NULL, cart, NULL);
+			_sntprintf(text, _countof(text), TEXT("&Cartridge: Eject %s"), (wchar_t *)Utf8ToWide(cart));
+			text[_countof(text) - 1] = 0;
+		}
+		else
+			_tcscpy(text, TEXT("&Cartridge: Mount..."));
+		MENUITEMINFO txt = {};
+		txt.cbSize     = sizeof(txt);
+		txt.fMask      = MIIM_STRING | MIIM_STATE;
+		txt.dwTypeData = text;
+		txt.fState     = (Settings.XBANDEnabled && (box || !port.empty() || S9xBiosPathUsable(S9X_BIOS_XBAND))) ? MFS_ENABLED : MFS_GRAYED;
+		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_CART, FALSE, &txt);
+	}
 	mii.fState = S9xXBandCardInserted() ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_CARD, FALSE, &mii);
 	{
@@ -7354,6 +7482,69 @@ static bool LoadROMMulti(const TCHAR *filename, const TCHAR *filename2)
 	return (FALSE);
 }
 
+static bool LoadXBandPowerOn()
+{
+	SetCurrentDirectory(S9xGetDirectoryT(ROM_DIR));
+	if (Memory.LoadXBandPowerOn())
+	{
+		S9xStartCheatSearch(&Cheat);
+		ReInitSound();
+		ResetFrameTimer();
+		return (TRUE);
+	}
+	return (FALSE);
+}
+
+// What is in the box's port: the running box's game, else the remembered one.
+static std::string XBandPortCart ()
+{
+	if (!Settings.StopEmulation && S9xXBandRunning())
+		return Multi.cartSizeB ? Multi.fileNameB : "";
+	return GUI.XBandRememberCart ? GUI.XBandCart : "";
+}
+
+// Remember mounted game: what is in the running box's port now.
+static void XBandRememberPort ()
+{
+	if (!GUI.XBandRememberCart || !S9xXBandRunning())
+		return;
+	strncpy(GUI.XBandCart, Multi.cartSizeB ? Multi.fileNameB : "", sizeof(GUI.XBandCart) - 1);
+	GUI.XBandCart[sizeof(GUI.XBandCart) - 1] = '\0';
+}
+
+// Enable off with nothing in the port: the session ends, back to nothing loaded.
+static void XBandShutDown ()
+{
+	if (S9xMovieActive())
+		S9xMovieStop(TRUE);
+	Memory.SaveSRAM(S9xGetFilename(".srm", SRAM_DIR).c_str());
+	S9xSaveCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
+#ifdef RETROACHIEVEMENTS_SUPPORT
+	RA_OnCloseROM();
+#endif
+	Memory.XBandPowerOff();
+	Settings.StopEmulation = TRUE;
+	WinClearDisplay();
+	S9xRestoreWindowTitle();
+}
+
+// Enable with no game loaded, and Allow booting XBand on restart: the box boots with
+// the remembered game back in its port, or with an empty one once that file is gone.
+static bool PowerOnXBand ()
+{
+	std::string	cart = GUI.XBandRememberCart ? GUI.XBandCart : "";
+	const bool	gone = !cart.empty() && Memory.XBandTakesCart(cart.c_str()) <= 0;
+	if (gone)
+		cart.clear();
+	if (!LoadROM(NULL))		// the empty port forgets a gone game
+		return (false);
+	if (!cart.empty())
+		LoadROM(Utf8ToWide(cart.c_str()));
+	if (gone)
+		S9xSetInfoString("XBAND: the remembered game is gone, cartridge ejected");
+	return (true);
+}
+
 static void RemoveFromRecentGames (const TCHAR *filename)
 {
 	for (int i = 0; i < MAX_RECENT_GAMES_LIST_SIZE; i++)
@@ -7452,15 +7643,18 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 
 	if(filename2)
 		Settings.StopEmulation = !LoadROMMulti(filename, filename2);
-	else
+	else if (filename)
 		Settings.StopEmulation = !LoadROMPlain(filename);
+	else
+		Settings.StopEmulation = !LoadXBandPowerOn();
 
 	if (!Settings.StopEmulation) {
 		bool8 loadedSRAM = Memory.LoadSRAM (S9xGetFilename (".srm", SRAM_DIR).c_str());
 		if(!loadedSRAM) // help migration from earlier Snes9x versions by checking ROM directory for savestates
 			Memory.LoadSRAM (S9xGetFilename (".srm", ROMFILENAME_DIR).c_str());
-		if(!filename2) // no recent for multi cart
+		if(filename && !filename2) // no recent for multi cart or the XBAND alone
 			S9xAddToRecentGames (filename);
+		XBandRememberPort();
 		CheckDirectoryIsWritable (S9xGetFilename (".---", SNAPSHOT_DIR).c_str());
 
 #ifdef NETPLAY_SUPPORT
@@ -7522,6 +7716,15 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 // Load MultiCart did, for what only a load reads: the BIOS Manager's paths.
 static bool ReloadLoadedGame ()
 {
+	// The XBAND with nothing in its port powers on again.
+	if (S9xXBandRunning() && !Multi.cartSizeB)
+	{
+		RestoreGUIDisplay();
+		const bool ok = LoadROM(NULL);
+		RestoreSNESDisplay();
+		return ok;
+	}
+
 	std::string a, b;
 	if (Settings.GBRomPath[0])
 		a = Settings.GBRomPath;

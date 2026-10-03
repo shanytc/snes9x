@@ -140,6 +140,9 @@ struct CMemory
 	bool8	LoadSuperDiscImage (const char *);
 	// The XBAND BIOS from the BIOS Manager, with the game in ROM[] plugged in.
 	bool8	LoadXBand (const char *game, int32 game_size);
+	bool8	LoadXBandPowerOn ();
+	void	XBandPowerOff ();
+	int		XBandTakesCart (const char *filename);
 	bool8	LoadXBandMultiCart ();
 	bool8	LoadGNEXT ();
 	bool8	LoadSRAM (const char *);
@@ -256,9 +259,8 @@ void S9xAnnounceGBBios(void);
 // TRUE when the BIOS Manager changed a path after the loaded cart took its
 // BIOS. The paths are only read by a load, so a hard reset wants one then.
 bool8 S9xBiosChangedSinceLoad(void);
-// TRUE when Emulation -> XBAND was flipped after a cart it can take loaded:
-// plugging it in (or out) is a load, so a hard reset wants one then.
-bool8 S9xXBandSwitchChangedSinceLoad(void);
+// TRUE while the BIOS Manager's XBAND runs, with or without a game in its port.
+bool8 S9xXBandRunning(void);
 
 // Which console GB content runs on (Settings.GBBootPolicy). The Automatic
 // entries pick from what the cart supports, breaking ties in the stated

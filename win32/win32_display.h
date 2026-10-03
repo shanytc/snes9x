@@ -19,6 +19,7 @@
 #define IS_SLASH(x) ((x) == TEXT('\\') || (x) == TEXT('/'))
 
 void WinRefreshDisplay(void);
+void WinClearDisplay(void);
 void S9xSetWinPixelFormat ();
 void SwitchToGDI();
 void SaveMainWinPos();

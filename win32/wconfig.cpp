@@ -1297,7 +1297,10 @@ void WinRegisterConfigItems()
 	AddUIntC("SuperFXClockMultiplier", Settings.SuperFXClockMultiplier, 100, "SuperFX speed, in percent (default 100)");
     AddBoolC("SeparateEchoBuffer", Settings.SeparateEchoBuffer, false, "Separate echo buffer from APU ram. For old hacks only.");
     AddBoolC("GBNoSpriteLimit", Settings.GBNoSpriteLimit, false, "Game Boy: draw every object on a scanline instead of the hardware limit of 10, so sprite-heavy lines stop dropping their highest-index objects (Balloon Fight GB's title clouds). Not hardware-accurate; mode-3 timing is unchanged so raster effects still render correctly");
-    AddBoolC("XBAND", Settings.XBANDEnabled, false, "Load Game plugs the game into an XBAND modem: the XBAND BIOS from the BIOS Manager runs, with the game in its cartridge port. Follows Emulation -> XBAND");
+    AddBoolC("XBAND", Settings.XBANDEnabled, false, "XBAND modem plugged in: with no game loaded its BIOS from the BIOS Manager boots to its menu, and Load Game boots it with the game in its cartridge port. Follows Emulation -> XBand -> Enable");
+    AddBoolC("XBANDBootOnRestart", GUI.XBandBootOnRestart, false, "With XBAND on, the XBAND BIOS boots when SuperSnes9x starts. Follows Emulation -> XBand -> Allow booting XBand on restart");
+    AddBoolC("XBANDRememberCart", GUI.XBandRememberCart, false, "XBAND keeps the game in its cartridge port across Enable off/on and restarts. Follows Emulation -> XBand -> Remember mounted game");
+    AddAStringC("XBANDCart", GUI.XBandCart, sizeof(GUI.XBandCart), "", "With XBANDRememberCart: the game in the XBAND's cartridge port, mounted again when the box boots alone; dropped when the file is gone");
     AddBoolC("XBANDLocalServer", Settings.XBANDLocalServer, false, "XBAND dials the local server below instead of xbserver.retrocomputing.network:56969. Follows Emulation -> XBAND");
     AddAStringC("XBANDServerHost", Settings.XBANDServerHost, sizeof(Settings.XBANDServerHost), "127.0.0.1", "XBAND local server: host name or IP");
     AddUIntC("XBANDServerPort", Settings.XBANDServerPort, 56969, "XBAND local server: port");

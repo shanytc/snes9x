@@ -30,6 +30,7 @@
   #include <arpa/inet.h>
   #include <unistd.h>
   #include <dirent.h>
+  #include <sys/stat.h>
   typedef int sock_t;
   #define BAD_SOCK (-1)
   #define close_sock(s) close(s)
@@ -386,21 +387,38 @@ static std::vector<std::string> list_dir (const std::string &dir)
 	return out;
 }
 
+static bool read_file (const std::string &path, Bytes &out)
+{
+	FILE *f = fopen(path.c_str(), "rb");
+	if (!f)
+		return false;
+	out.clear();
+	uint8_t chunk[4096];
+	size_t k;
+	while ((k = fread(chunk, 1, sizeof(chunk), f)) > 0)
+		out.insert(out.end(), chunk, chunk + k);
+	fclose(f);
+	return true;
+}
+
+static bool write_file (const std::string &path, const Bytes &data)
+{
+	FILE *f = fopen(path.c_str(), "wb");
+	if (!f)
+		return false;
+	const bool ok = fwrite(data.data(), 1, data.size(), f) == data.size();
+	return fclose(f) == 0 && ok;
+}
+
 static std::map<uint32_t, Patch> game_patches (const std::string &dir)
 {
 	std::map<uint32_t, Patch> out;
 	const std::string pdir = dir + "/patches";
 	for (const std::string &name : list_dir(pdir))
 	{
-		FILE *f = fopen((pdir + "/" + name).c_str(), "rb");
-		if (!f)
-			continue;
 		Bytes blob;
-		uint8_t chunk[4096];
-		size_t k;
-		while ((k = fread(chunk, 1, sizeof(chunk), f)) > 0)
-			blob.insert(blob.end(), chunk, chunk + k);
-		fclose(f);
+		if (!read_file(pdir + "/" + name, blob))
+			continue;
 		if (blob.size() < 17 || blob[0] != 0x03)	// msGamePatch
 			continue;
 		const uint32_t id = get32(&blob[1]), size = get32(&blob[13]);
@@ -425,8 +443,9 @@ int XBandServerPatchCount (const std::string &dir)
 
 enum
 {
-	msEndOfStream = 0x02, msSetDateAndTime = 0x04, msRegisterPlayer = 0x0E, msWaitForOpponent = 0x1C,
-	msOpponentPhoneNumber = 0x1D, msNewsHeader = 0x1F, msNewsPage = 0x20, msQDefDialog = 0x22,
+	msEndOfStream = 0x02, msSetDateAndTime = 0x04, msServerMiscControl = 0x05, msRegisterPlayer = 0x0E,
+	msWaitForOpponent = 0x1C, msOpponentPhoneNumber = 0x1D, msReceiveMail = 0x1E, msNewsHeader = 0x1F,
+	msNewsPage = 0x20, msQDefDialog = 0x22,
 	msReceiveWriteableString = 0x32
 };
 static const int kCurrentGameNameString = 139, kOpponentName = 172;
@@ -532,17 +551,27 @@ static Bytes writable_string (int id, const std::string &text)
 	return b;
 }
 
-static Bytes large_dialog (const std::string &text, uint16_t min_ticks = 120, uint16_t max_ticks = 3600)
+static Bytes dialog (const std::string &text, uint8_t templat, uint16_t min_ticks, uint16_t max_ticks)
 {
 	Bytes b = { msQDefDialog };
 	put16(b, 0x19);		// kDDaASAFP: main event loop | server connect | connect done
-	b.push_back(2);		// kLargeDialog
+	b.push_back(templat);
 	put16(b, min_ticks);
 	put16(b, max_ticks);
 	put32(b, (uint32_t) text.size() + 1);
 	b.insert(b.end(), text.begin(), text.end());
 	b.push_back(0);
 	return b;
+}
+
+static Bytes large_dialog (const std::string &text, uint16_t min_ticks = 120, uint16_t max_ticks = 3600)
+{
+	return dialog(text, 2, min_ticks, max_ticks);		// kLargeDialog
+}
+
+static Bytes medium_dialog (const std::string &text)
+{
+	return dialog(text, 1, 120, 300);		// kMediumDialog, 2-5 seconds like Server_SendDialog
 }
 
 // (gameID, patchVersion) from msGameIDAndPatchVersion, sent right before msSystemVersion.
@@ -562,6 +591,318 @@ static std::mt19937 &rng (void)
 {
 	static std::mt19937 r((unsigned) std::chrono::high_resolution_clock::now().time_since_epoch().count());
 	return r;
+}
+
+// ---------------------------------------------------------------------------
+// X-Mail (Catapult Server_ReceiveMail, Server_Mail.c, Server_SendMail.c): outboxes come up in the
+// upload; mail waits in <dir>/mail until a box connects as its addressee. Bodies stay compressed.
+// ---------------------------------------------------------------------------
+
+static const uint8_t  boxLogin = 0x0B, boxChallengeRequest = 0x0E, boxSendOutgoingMail = 0x1D, boxBoxType = 0x1F;
+static const uint32_t kDeleteAllOutBoxMailFlag = 0x04;
+static const int      kChallengeTypeMailOnly = 4, kMaxInBoxEntries = 10, kMaxOutBoxEntries = 8;
+static const size_t   kIdentSize = 79;			// userIdentification: box serial, user, color, icon, town[34], name[34]
+static const size_t   kBoxMailHeader = 120;		// the box's Mail struct up to compressedMessage
+
+struct Login { Bytes ident; std::string phone, name; uint8_t user; int inbox; };
+struct OutMail { uint8_t user; std::string to, title; Bytes body; };
+
+static std::mutex s_mail_lock;		// <dir>/mail: players.dat and the queued *.xmail
+
+static std::string cstr (const uint8_t *p, size_t max)
+{
+	size_t n = 0;
+	while (n < max && p[n])
+		n++;
+	return std::string((const char *) p, n);
+}
+
+// DataBaseUtil_CompareStrings: names match ignoring case and spaces.
+static std::string name_key (const std::string &name)
+{
+	std::string k;
+	for (char c : name)
+		if (c != ' ')
+			k += (c >= 'a' && c <= 'z') ? (char) (c - 32) : c;
+	return k;
+}
+
+// msBoxType and msLogin open every upload.
+static bool parse_login (const Bytes &up, Login &l)
+{
+	const size_t at = 6 + 16 + 26;		// opcodes + type, os/db free, flags, last state, phoneNumber
+	if (up.size() < at + kIdentSize + 2 || up[0] != boxBoxType || up[5] != boxLogin)
+		return false;
+	l.phone = cstr(&up[24], 24);
+	l.ident.assign(up.begin() + at, up.begin() + at + kIdentSize);
+	l.user = l.ident[8];
+	l.name = cstr(&l.ident[45], 34);
+	l.inbox = up[at + kIdentSize] << 8 | up[at + kIdentSize + 1];
+	return true;
+}
+
+// msChallengeRequest follows msSystemVersion (length 4); its first byte is the challenge type.
+static int challenge_type (const Bytes &up)
+{
+	for (size_t i = 0; i + 9 <= up.size(); i++)
+		if (up[i] == boxSystemVersion && up[i + 1] == 0 && up[i + 2] == 4 && up[i + 7] == boxChallengeRequest)
+			return up[i + 8];
+	return 0;
+}
+
+// DoSendOutgoingMail at i: count, then per mail its local user, the target box + user, name, title, body.
+static bool parse_mail_at (const Bytes &up, size_t i, std::vector<OutMail> &out)
+{
+	size_t p = i + 1;
+	auto have = [&] (size_t n) { return p + n <= up.size(); };
+	auto u16 = [&] (void) { const int v = up[p] << 8 | up[p + 1]; p += 2; return v; };
+	if (!have(2))
+		return false;
+	const int count = u16();
+	if (count < 1 || count > 4 * kMaxOutBoxEntries)
+		return false;
+	for (int m = 0; m < count; m++)
+	{
+		OutMail mail;
+		if (!have(1 + 8 + 1) || up[p] > 3)
+			return false;
+		mail.user = up[p];
+		p += 1 + 8 + 1;
+		for (std::string *field : { &mail.to, &mail.title })
+		{
+			if (!have(2))
+				return false;
+			const int n = u16();
+			if (n < 1 || n > 128 || !have(n) || up[p + n - 1] != 0)
+				return false;
+			*field = cstr(&up[p], n);
+			p += n;
+		}
+		if (!have(2))
+			return false;
+		const int n = u16();
+		// MegaPack header: pad, method, BE expanded size, CRC
+		if (n < 6 || !have(n) || up[p] != 0 || !(up[p + 2] << 8 | up[p + 3]) || (up[p + 2] << 8 | up[p + 3]) > 4096)
+			return false;
+		mail.body.assign(up.begin() + p, up.begin() + p + n);
+		p += n;
+		out.push_back(mail);
+	}
+	return true;
+}
+
+static void outgoing_mail (const Bytes &up, std::vector<OutMail> &out)
+{
+	for (size_t i = 0; i < up.size(); i++)
+	{
+		out.clear();
+		if (up[i] == boxSendOutgoingMail && parse_mail_at(up, i, out))
+			return;
+	}
+	out.clear();
+}
+
+static void make_dir (const std::string &path)
+{
+#ifdef _WIN32
+	CreateDirectoryA(path.c_str(), NULL);
+#else
+	mkdir(path.c_str(), 0755);
+#endif
+}
+
+// players.dat: (phone/box serial/user) -> userIdentification of every login, to find senders and addressees.
+static std::map<std::string, Bytes> load_players (void)
+{
+	std::map<std::string, Bytes> out;
+	Bytes f;
+	if (!read_file(s_dir + "/mail/players.dat", f))
+		return out;
+	for (size_t p = 0; p < f.size() && p + 1 + f[p] + kIdentSize <= f.size(); p += 1 + f[p] + kIdentSize)
+		out[std::string((const char *) &f[p + 1], f[p])] =
+			Bytes(f.begin() + p + 1 + f[p], f.begin() + p + 1 + f[p] + kIdentSize);
+	return out;
+}
+
+static void save_players (const std::map<std::string, Bytes> &players)
+{
+	Bytes f;
+	for (const auto &e : players)
+	{
+		f.push_back((uint8_t) e.first.size());
+		f.insert(f.end(), e.first.begin(), e.first.end());
+		append(f, e.second);
+	}
+	write_file(s_dir + "/mail/players.dat", f);
+}
+
+static std::string player_key (const Login &l, uint8_t user)
+{
+	char box[24];
+	snprintf(box, sizeof(box), "/%08X%08X/%d", (unsigned) get32(&l.ident[0]), (unsigned) get32(&l.ident[4]), user);
+	return (l.phone + box).substr(0, 255);
+}
+
+// An .xmail file: to name, sender's userIdentification, serial, date, title, compressed body.
+struct StoredMail { std::string to, title; Bytes from, body; uint16_t serial; uint32_t date; };
+
+static Bytes pack_mail (const StoredMail &m)
+{
+	Bytes f;
+	f.push_back((uint8_t) m.to.size());
+	f.insert(f.end(), m.to.begin(), m.to.end());
+	append(f, m.from);
+	put16(f, m.serial);
+	put32(f, m.date);
+	f.push_back((uint8_t) m.title.size());
+	f.insert(f.end(), m.title.begin(), m.title.end());
+	put16(f, (uint32_t) m.body.size());
+	append(f, m.body);
+	return f;
+}
+
+static bool unpack_mail (const Bytes &f, StoredMail &m)
+{
+	size_t p = 0;
+	auto have = [&] (size_t n) { return p + n <= f.size(); };
+	if (!have(1) || !have(1 + f[0]))
+		return false;
+	m.to.assign((const char *) &f[1], f[0]);
+	p = 1 + f[0];
+	if (!have(kIdentSize + 6 + 1))
+		return false;
+	m.from.assign(f.begin() + p, f.begin() + p + kIdentSize);
+	p += kIdentSize;
+	m.serial = f[p] << 8 | f[p + 1];
+	m.date = get32(&f[p + 2]);
+	p += 6;
+	const size_t t = f[p++];
+	if (!have(t + 2))
+		return false;
+	m.title.assign((const char *) &f[p], t);
+	p += t;
+	const size_t n = f[p] << 8 | f[p + 1];
+	p += 2;
+	if (!have(n))
+		return false;
+	m.body.assign(f.begin() + p, f.begin() + p + n);
+	return true;
+}
+
+// ReceiveUserIdentification's layout: fixed fields, then town and name as length-prefixed C strings.
+static void put_ident (Bytes &b, const Bytes &ident)
+{
+	b.insert(b.end(), ident.begin(), ident.begin() + 11);
+	for (size_t at : { (size_t) 11, (size_t) 45 })
+	{
+		const std::string s = cstr(&ident[at], 33);
+		b.push_back((uint8_t) (s.size() + 1));
+		b.insert(b.end(), s.begin(), s.end());
+		b.push_back(0);
+	}
+}
+
+// Takes this box's outbox, then hands it the mail waiting for its current player.
+static Bytes xmail (const Bytes &up, const Login &login, bool mail_only)
+{
+	std::lock_guard<std::mutex> g(s_mail_lock);
+	Bytes out;
+	make_dir(s_dir + "/mail");
+	auto players = load_players();
+	players[player_key(login, login.user)] = login.ident;
+	save_players(players);
+
+	std::vector<OutMail> mails;
+	outgoing_mail(up, mails);
+	if (!mails.empty())
+	{
+		int sent = 0;
+		for (const OutMail &m : mails)
+		{
+			auto from = players.find(player_key(login, m.user));
+			char msg[160];
+			if (from == players.end())
+			{
+				logf("         mail: player %d of this box never connected; dropped mail to %s", m.user + 1, m.to.c_str());
+				snprintf(msg, sizeof(msg), "Player %d has not connected to XBAND.  Mail could not be sent.", m.user + 1);
+				append(out, medium_dialog(msg));
+				continue;
+			}
+			bool known = false;
+			for (const auto &p : players)
+				known |= name_key(cstr(&p.second[45], 34)) == name_key(m.to);
+			if (!known)
+			{
+				logf("         mail: no player named %s; dropped", m.to.c_str());
+				snprintf(msg, sizeof(msg), "Sorry, we can't find \"%s\" on XBAND.  Mail not sent.", m.to.c_str());
+				append(out, medium_dialog(msg));
+				continue;
+			}
+			StoredMail s { m.to, m.title, from->second, m.body, (uint16_t) (rng()() % 0x7FFF + 1), sega_date() };
+			char file[64];
+			snprintf(file, sizeof(file), "/mail/%010lld-%04X.xmail", (long long) time(NULL), s.serial);
+			if (write_file(s_dir + file, pack_mail(s)))
+			{
+				logf("         mail: %s -> %s \"%s\" (%d bytes)", cstr(&s.from[45], 34).c_str(), m.to.c_str(),
+				     m.title.c_str(), (int) m.body.size());
+				sent++;
+			}
+		}
+		Bytes clear = { msServerMiscControl };
+		put32(clear, kDeleteAllOutBoxMailFlag);
+		append(out, clear);
+		if (sent)
+			append(out, medium_dialog(sent == 1 ? std::string("One outgoing mail message was sent.") :
+			                          std::to_string(sent) + " outgoing mail messages were sent."));
+	}
+
+	std::vector<std::string> files = list_dir(s_dir + "/mail");
+	std::sort(files.begin(), files.end());
+	Bytes in = { msReceiveMail, 0, 0 };
+	int delivered = 0, left = 0;
+	for (const std::string &name : files)
+	{
+		Bytes f;
+		StoredMail m;
+		if (name.size() < 6 || name.compare(name.size() - 6, 6, ".xmail") || !read_file(s_dir + "/mail/" + name, f) ||
+		    !unpack_mail(f, m) || name_key(m.to) != name_key(login.name))
+			continue;
+		if (login.inbox + delivered >= kMaxInBoxEntries)
+		{
+			left++;
+			continue;
+		}
+		put16(in, (uint32_t) (kBoxMailHeader + m.body.size()));
+		put_ident(in, m.from);
+		put16(in, m.serial);
+		put32(in, m.date);
+		in.push_back((uint8_t) (m.title.size() + 1));
+		in.insert(in.end(), m.title.begin(), m.title.end());
+		in.push_back(0);
+		put16(in, (uint32_t) m.body.size());
+		append(in, m.body);
+		remove((s_dir + "/mail/" + name).c_str());
+		logf("         mail: delivered \"%s\" from %s to %s", m.title.c_str(), cstr(&m.from[45], 34).c_str(),
+		     login.name.c_str());
+		delivered++;
+	}
+	std::string note;
+	if (delivered)
+	{
+		in[1] = (uint8_t) (delivered >> 8);
+		in[2] = (uint8_t) delivered;
+		append(out, in);
+		note = delivered == 1 ? "One new mail message has been added to your mailbox." :
+		       std::to_string(delivered) + " new mail messages have been added to your mailbox.";
+	}
+	if (left)
+		note += (note.empty() ? "" : "  ") + std::string("You have ") + std::to_string(left) +
+		        " more, but your mailbox is full.  Please delete some messages.";
+	if (!note.empty())
+		append(out, left ? large_dialog(note, 120, 300) : medium_dialog(note));
+	else if (mail_only)
+		append(out, dialog("You have no new mail.", 1, 120, 0));		// sticky until dismissed
+	return out;
 }
 
 // True with the waiter's cookie/seed when someone waits for this game; else queues this line.
@@ -591,6 +932,20 @@ static bool match (bool have_game, uint32_t id, bool have_line, uint32_t line, u
 static Bytes reply (const Bytes &upload, bool have_line, uint32_t line)
 {
 	Bytes out = news();
+	Login login;
+	const bool mail_only = challenge_type(upload) == kChallengeTypeMailOnly;
+	if (parse_login(upload, login))
+	{
+		logf("         reply: player %s (player %d)%s, %d mails in the box", login.name.c_str(), login.user + 1,
+		     mail_only ? ", mail only" : "", login.inbox);
+		append(out, xmail(upload, login, mail_only));
+	}
+	if (mail_only)
+	{
+		append(out, date_and_time());
+		out.push_back(msEndOfStream);
+		return out;
+	}
 	uint32_t id = 0;
 	int32_t box_version = 0;
 	const bool have_game = game_id(upload, id, box_version);

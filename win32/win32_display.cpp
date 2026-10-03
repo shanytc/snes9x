@@ -374,16 +374,10 @@ bool8 S9xContinueUpdate(int Width, int Height)
 	// called every other frame during interlace
 
     Src.Width = Width;
-	if(Height%SNES_HEIGHT)
-	    Src.Height = Height;
-	else
-	{
-		if(Height==SNES_HEIGHT)
-			Src.Height=SNES_HEIGHT_EXTENDED;
-		else Src.Height=SNES_HEIGHT_EXTENDED<<1;
-	}
+	Src.Height = Height;
     Src.Pitch = GFX.Pitch;
-    Src.Surface = (BYTE*)GFX.Screen;
+
+	CheckOverscanOffset();
 
 	// avi writing
 	DoAVIVideoFrame();

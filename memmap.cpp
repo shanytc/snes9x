@@ -4089,111 +4089,33 @@ void CMemory::InitROM (void)
 
 	S9xInitBSX(); // Set BS header before parsing
 
-	// XBAND BIOS detection. We scan the whole ROM for known markers,
-	// and also dump bytes around the SNES ROM header locations so that
-	// if detection fails, we can see exactly what's in the ROM and
-	// adjust. Results shown via MessageBox so GUI Win32 builds see them
-	// reliably regardless of CWD.
+	// XBAND BIOS detection: a 1MB image carrying one of Catapult's markers.
 	S9xInitXBand();
+	if (CalculatedSize == XBAND_ROM_SIZE)
 	{
+		static const struct { const char *s; size_t n; } needles[] = {
+			{ "CATAPULT", 8 },
+			{ "Catapult", 8 },
+			{ "X-BAND",   6 },
+			{ "X-Band",   6 },
+			{ "XBAND",    5 },
+			{ "Xband",    5 },
+		};
 		bool xband_bios = false;
-		size_t match_offset = 0;
-		const char *match_name = NULL;
+		for (const auto &needle : needles)
+			for (size_t i = 0; i + needle.n <= CalculatedSize && !xband_bios; i++)
+				if (memcmp(ROM + i, needle.s, needle.n) == 0)
+					xband_bios = true;
 
-		// Write debug output into a single growable buffer, then show
-		// it once via MessageBox if the ROM is 1MB (candidate size).
-		char dbg[4096];
-		int  dbg_len = 0;
-		dbg[0] = 0;
-		dbg[sizeof(dbg) - 1] = 0;
-		// C99 snprintf and MSVC's _snprintf (port.h) truncate differently:
-		// the last byte stays a terminator and dbg_len never passes it.
-		#define DBG(...) do { \
-			int _r = snprintf(dbg + dbg_len, sizeof(dbg) - dbg_len - 1, __VA_ARGS__); \
-			if (_r > 0) dbg_len += _r; \
-			if (dbg_len > (int)sizeof(dbg) - 1) dbg_len = (int)sizeof(dbg) - 1; \
-		} while (0)
-
-		DBG("ROM CalculatedSize = 0x%x (%u bytes)\n\n",
-			(unsigned)CalculatedSize, (unsigned)CalculatedSize);
-
-		if (CalculatedSize == XBAND_ROM_SIZE)
+		if (xband_bios)
 		{
-			static const struct { const char *s; size_t n; } needles[] = {
-				{ "CATAPULT", 8 },
-				{ "Catapult", 8 },
-				{ "X-BAND",   6 },
-				{ "X-Band",   6 },
-				{ "XBAND",    5 },
-				{ "Xband",    5 },
-			};
-			const int num_needles = (int)(sizeof(needles) / sizeof(needles[0]));
-
-			const uint8 *hay = ROM;
-			size_t hay_len = CalculatedSize;
-
-			for (int k = 0; k < num_needles && !xband_bios; k++)
-			{
-				size_t n = needles[k].n;
-				if (hay_len < n) continue;
-				for (size_t i = 0; i + n <= hay_len; i++)
-				{
-					if (memcmp(hay + i, needles[k].s, n) == 0)
-					{
-						xband_bios   = true;
-						match_offset = i;
-						match_name   = needles[k].s;
-						break;
-					}
-				}
-			}
-
-			// Dump printable chars and first 16 raw bytes at standard
-			// ROM header offsets $7FB0 and $FFB0.
-			for (uint32 header_off = 0x7FB0; header_off <= 0xFFB0; header_off += 0x8000)
-			{
-				DBG("Header @ 0x%06x:\n  text: ", header_off);
-				for (int b = 0; b < 32; b++)
-				{
-					uint8 c = ROM[header_off + b];
-					char ch = (c >= 0x20 && c < 0x7f) ? (char)c : '.';
-					DBG("%c", ch);
-				}
-				DBG("\n  hex:  ");
-				for (int b = 0; b < 16; b++)
-					DBG("%02x ", ROM[header_off + b]);
-				DBG("\n\n");
-			}
-
-			if (xband_bios)
-			{
-				Settings.XBAND = TRUE;
-				XBand.enabled  = TRUE;
-				XBand.bios_loaded = TRUE;
-				// Don't force LoROM/HiROM — trust whatever ScoreLoROM /
-				// ScoreHiROM decided earlier. The released XBAND BIOS is
-				// HiROM (internal name "XBAND VIDEOGAME" at $FFB0).
-				DBG("=> DETECTED as XBAND BIOS (%s)\n"
-				    "   signature \"%s\" at offset 0x%06x\n",
-				    HiROM ? "HiROM" : "LoROM",
-				    match_name, (unsigned)match_offset);
-			}
-			else
-			{
-				DBG("=> NOT detected as XBAND BIOS\n"
-				    "   (no known signature matched)\n");
-			}
-
-#ifdef _WIN32
-			// Only show the diagnostic popup if we *didn't* detect. On
-			// successful detection, stay silent and let the firmware
-			// boot unattended.
-			if (!xband_bios)
-				MessageBoxA(NULL, dbg, "XBAND Detection (no match)", MB_OK);
-#endif
+			Settings.XBAND = TRUE;
+			XBand.enabled  = TRUE;
+			XBand.bios_loaded = TRUE;
+			// Don't force LoROM/HiROM — trust whatever ScoreLoROM /
+			// ScoreHiROM decided earlier. The released XBAND BIOS is
+			// HiROM (internal name "XBAND VIDEOGAME" at $FFB0).
 		}
-
-		#undef DBG
 	}
 
 	ParseSNESHeader(RomHeader);

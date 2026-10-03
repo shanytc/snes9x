@@ -23,23 +23,14 @@
 #define addCyclesInMemoryAccess \
 	if (!CPU.InDMAorHDMA) \
 	{ \
-		S9xCPUBusCycleStart(speed); \
-		CPU.Cycles += speed; \
-		while (CPU.Cycles >= CPU.NextEvent) \
-			S9xDoHEventProcessing(); \
+		S9xCPUBusCycle(speed); \
 	}
 
 #define addCyclesInMemoryAccess_x2 \
 	if (!CPU.InDMAorHDMA) \
 	{ \
-		S9xCPUBusCycleStart(speed); \
-		CPU.Cycles += speed; \
-		while (CPU.Cycles >= CPU.NextEvent) \
-			S9xDoHEventProcessing(); \
-		S9xCPUBusCycleStart(speed); \
-		CPU.Cycles += speed; \
-		while (CPU.Cycles >= CPU.NextEvent) \
-			S9xDoHEventProcessing(); \
+		S9xCPUBusCycle(speed); \
+		S9xCPUBusCycle(speed); \
 	}
 
 extern uint8	OpenBus;

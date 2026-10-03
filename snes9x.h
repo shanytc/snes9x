@@ -155,6 +155,9 @@ struct SCPUState
 	uint32	AutoSaveTimer;
 	bool8	SRAMModified;
 	int32	LastBusStart;	// start of the most recent CPU bus cycle
+	int32	LastRunStart;	// start of the last unsplit AddCycles run, if after LastBusStart
+	int32	LastRunShape;	// that run: n | MemSpeed << 8
+	int32	FastBusEnd;		// NextEvent, or INT32_MIN while an HDMA is pending
 	int32	HDMAEdge;		// bus cycles left before a triggered HDMA runs
 	bool8	IRQDeferOne;	// /IRQ rose during an instruction's last bus cycle
 };

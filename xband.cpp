@@ -7183,6 +7183,18 @@ void S9xXBandKeyboardWRIO (uint8 byte)
 
 	if (xbkbd.pp7 && !pp7 && !xbkbd.active)
 	{
+		// Newly seen: the BIOS hot-plug path stores stack garbage as its key flags
+		// (Alt/Ctrl/Caps held); modifier breaks clear them.
+		if (!S9xXBandKeyboardPolled())
+		{
+			static const uint8	breaks[] = { 0xf0, 0x12, 0xf0, 0x59, 0xf0, 0x14, 0xf0, 0x11, 0xf0, 0x58 };
+			if (xbkbd.len + sizeof(breaks) <= XBKBD_QUEUE)
+			{
+				memcpy(xbkbd.queue + xbkbd.len, breaks, sizeof(breaks));
+				xbkbd.len += sizeof(breaks);
+			}
+		}
+
 		xbkbd.active = 1;
 		xbkbd.clocks = 0;
 		xbkbd.find = 0;

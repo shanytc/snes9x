@@ -627,9 +627,15 @@ static int configSort;
 
 void WinGBPaletteToText();
 
+// XBand Enable outlives the session only with Allow booting XBand on restart.
+static bool xband_session_enabled;
+
 void WinPreSave(ConfigFile& conf)
 {
 	WinGBPaletteToText();
+	xband_session_enabled = GUI.XBandEnabled;
+	if (!GUI.XBandBootOnRestart)
+		GUI.XBandEnabled = false;
 	GUI.WidescreenColumns = (Settings.Widescreen.Mode != WS_MODE_OFF) ? Settings.Widescreen.Aspect : 0;
 	strcpy(filterString, "output filter: ");
 	for(int i=0;i<NUM_FILTERS;i++)
@@ -732,6 +738,8 @@ void WinGBPaletteToText()
 void WinPostLoad(ConfigFile& conf)
 {
 	WinGBPaletteFromText();
+	if (!GUI.XBandBootOnRestart)
+		GUI.XBandEnabled = false;	// a file saved before Enable became session-only
 	Settings.XBANDEnabled = GUI.XBandEnabled && GUI.XBandModem;
 	S9xSetWidescreenDefaults(&Settings.Widescreen);
 	Settings.Widescreen.Mode = GUI.WidescreenColumns ? WS_MODE_ON : WS_MODE_OFF;
@@ -1298,7 +1306,7 @@ void WinRegisterConfigItems()
 	AddUIntC("SuperFXClockMultiplier", Settings.SuperFXClockMultiplier, 100, "SuperFX speed, in percent (default 100)");
     AddBoolC("SeparateEchoBuffer", Settings.SeparateEchoBuffer, false, "Separate echo buffer from APU ram. For old hacks only.");
     AddBoolC("GBNoSpriteLimit", Settings.GBNoSpriteLimit, false, "Game Boy: draw every object on a scanline instead of the hardware limit of 10, so sprite-heavy lines stop dropping their highest-index objects (Balloon Fight GB's title clouds). Not hardware-accurate; mode-3 timing is unchanged so raster effects still render correctly");
-    AddBoolC("XBAND", GUI.XBandEnabled, false, "XBAND plugged into the SNES. Follows Emulation -> XBand -> Enable");
+    AddBoolC("XBAND", GUI.XBandEnabled, false, "XBAND plugged into the SNES. Follows Emulation -> XBand -> Enable; kept across restarts only with XBANDBootOnRestart, otherwise session-only");
     AddBoolC("XBANDModem", GUI.XBandModem, true, "With XBAND on, the box's switch: TRUE = Modem (its BIOS from the BIOS Manager boots, to its menu with no game loaded or with the game in its cartridge port), FALSE = Pass-through (a normal SNES boot). Follows Emulation -> XBand -> Modem / Pass-through");
     AddBoolC("XBANDBootOnRestart", GUI.XBandBootOnRestart, false, "With XBAND on, SuperSnes9x starts with it: in Modem its BIOS boots, in Pass-through the remembered game boots as a normal SNES game. Follows Emulation -> XBand -> Allow booting XBand on restart (when enabled)");
     AddBoolC("XBANDRememberCart", GUI.XBandRememberCart, false, "XBAND keeps the game in its cartridge port across Modem off/on and restarts. Follows Emulation -> XBand -> Remember mounted game");
@@ -1408,6 +1416,7 @@ void WinSaveConfigFile()
 	if(wasLocked) WinLockConfigFile();
 
 	WinPostSave(conf);
+	GUI.XBandEnabled = xband_session_enabled;
 }
 
 

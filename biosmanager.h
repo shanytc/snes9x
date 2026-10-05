@@ -29,7 +29,11 @@ enum S9xBiosSlot
 	S9X_BIOS_NSS,           // nss-ic14.02.ic14 — Nintendo Super System supervisor
 	S9X_BIOS_NSS_FONT,      // m50458_char.bin  — its M50458 OSD charset
 	S9X_BIOS_SUPERDISC,     // SDBR_v0.95.sfc   — Super Disc BIOS cartridge
-	S9X_BIOS_DSP4,          // dsp4.bin     — DSP-4 firmware (Top Gear 3000)
+	S9X_BIOS_DSP1,          // dsp1.bin     — DSP-1 firmware (Pilotwings)
+	S9X_BIOS_DSP1B,         // dsp1b.bin    — DSP-1B firmware (the other DSP-1 games)
+	S9X_BIOS_DSP2,          // dsp2.bin     — DSP-2 firmware
+	S9X_BIOS_DSP3,          // dsp3.bin     — DSP-3 firmware
+	S9X_BIOS_DSP4,          // dsp4.bin     — DSP-4 firmware
 	S9X_NUM_BIOS_SLOTS
 };
 
@@ -48,9 +52,6 @@ struct S9xBiosSlotInfo
 
 // nocash's NSS-TEST.BIN: a hardware test that runs in place of the NSS BIOS.
 #define S9X_NSS_NOCASH_TEST_CRC 0x15616021u
-
-// The DSP-4 firmware dump No-Intro lists.
-#define S9X_DSP4_FIRMWARE_CRC 0xE15384C0u
 
 const S9xBiosSlotInfo *S9xGetBiosSlotInfo (int slot);
 

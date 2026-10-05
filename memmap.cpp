@@ -800,6 +800,7 @@ static bool8 LoadSGBBootROM   (const char *path, std::vector<uint8> &out_bytes);
 static bool8 FindGB_BootROM   (bool cgb, const char *gb_rom_path, std::string &out_path,
                                std::vector<uint8> *out_bytes);
 static uint32 caCRC32 (uint8 *, uint32, uint32 crc32 = 0xffffffff);
+static bool8 LoadDSP1Firmware (bool pilotwings);
 static bool8 ReadUPSPatch (Stream *, long, int32 &);
 // Whether this load patched the cart into its widescreen hack (widescreen.h).
 static bool8 widescreen_patch_applied = FALSE;
@@ -3407,13 +3408,15 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 	S9xInitBSX();					// clears Settings.BS
 	Settings.SFCBox = TRUE;
 
-	// DSP-1 (Mario Kart) is HLE'd; armed when a cart carries the chip and
-	// windowed in/out by the mapping registers.
+	// DSP-1 (Mario Kart): armed when a cart carries the chip and windowed
+	// in/out by the mapping registers.
+	S9xUPD7725Unload();
 	if ((SFCBox.SlotChipset[0] | SFCBox.SlotChipset[1]) & 0x02)
 	{
 		Settings.DSP = 1;
 		SetDSP = &DSP1SetByte;
 		GetDSP = &DSP1GetByte;
+		LoadDSP1Firmware(false);
 	}
 
 	Checksum_Calculate();
@@ -3795,12 +3798,22 @@ static bool AcceptDSPFirmware (const uint8 *data, uint32 size, uint32 full_size,
 }
 
 // The chip's own program, when the BIOS Manager has one; the HLE otherwise.
-static void LoadDSPFirmware (int slot)
+static bool8 LoadDSPFirmware (int slot)
 {
 	std::vector<uint8>	image;
-	if (S9xBiosPathUsable(slot) &&
-		S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware))
-		S9xUPD7725Load(image.data(), (uint32) image.size());
+	return (S9xBiosPathUsable(slot) &&
+			S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware) &&
+			S9xUPD7725Load(image.data(), (uint32) image.size()));
+}
+
+// Pilotwings' attract demo was recorded on the first DSP-1 and crashes with
+// the DSP-1B's corrected math; the other games get the DSP-1B. Either falls
+// back to the other revision.
+static bool8 LoadDSP1Firmware (bool pilotwings)
+{
+	const int	first = pilotwings ? S9X_BIOS_DSP1 : S9X_BIOS_DSP1B;
+	const int	second = pilotwings ? S9X_BIOS_DSP1B : S9X_BIOS_DSP1;
+	return (LoadDSPFirmware(first) || LoadDSPFirmware(second));
 }
 
 void CMemory::InitROM (void)
@@ -3906,6 +3919,7 @@ void CMemory::InitROM (void)
 
 			SetDSP = &DSP1SetByte;
 			GetDSP = &DSP1GetByte;
+			LoadDSP1Firmware(strncmp(ROMName, "PILOTWINGS", 10) == 0);
 			break;
 
 		case 2: // DSP2
@@ -3913,6 +3927,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP2_LOROM;
 			SetDSP = &DSP2SetByte;
 			GetDSP = &DSP2GetByte;
+			LoadDSPFirmware(S9X_BIOS_DSP2);
 			break;
 
 		case 3: // DSP3
@@ -3920,6 +3935,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP3_LOROM;
 			SetDSP = &DSP3SetByte;
 			GetDSP = &DSP3GetByte;
+			LoadDSPFirmware(S9X_BIOS_DSP3);
 			break;
 
 		case 4: // DSP4
@@ -4497,6 +4513,12 @@ void CMemory::map_DSP (void)
 			map_index(0x20, 0x3f, 0x8000, 0xbfff, MAP_DSP, MAP_TYPE_I_O);
 			map_index(0xa0, 0xbf, 0x6000, 0x6fff, MAP_DSP, MAP_TYPE_I_O);
 			map_index(0xa0, 0xbf, 0x8000, 0xbfff, MAP_DSP, MAP_TYPE_I_O);
+			// The real chip's status register, which the HLE never needed.
+			if (S9xUPD7725Loaded())
+			{
+				map_index(0x20, 0x3f, 0xc000, 0xffff, MAP_DSP, MAP_TYPE_I_O);
+				map_index(0xa0, 0xbf, 0xc000, 0xffff, MAP_DSP, MAP_TYPE_I_O);
+			}
 			break;
 
 		case M_DSP3_LOROM:
@@ -5707,6 +5729,7 @@ void S9xPF94LoadGames (void)
 		DSP0.maptype = M_DSP1_LOROM_S;
 		SetDSP = &DSP1SetByte;
 		GetDSP = &DSP1GetByte;
+		LoadDSP1Firmware(true);
 		return;
 	}
 
@@ -5752,6 +5775,7 @@ void S9xPF94LoadGames (void)
 		DSP0.maptype = M_DSP1_HIROM;
 		SetDSP = &DSP1SetByte;
 		GetDSP = &DSP1GetByte;
+		LoadDSP1Firmware(false);
 	}
 
 	printf("PowerFest '94 board active: Lost Levels %s, Mario Kart %s, Ken Griffey %s\n",

@@ -57,7 +57,11 @@ static const char *const kNamesNSS[]    = { "nss-ic14.02.ic14", "nss.zip", "nss-
 static const char *const kNamesNSSFont[]= { "m50458_char.bin", "m50458.zip", "m50458-001sp", NULL };
 static const char *const kNamesSuperDisc[] = { "SDBR_v0.95.sfc", "SDBR_v0.95_unheadered.sfc",
                                                "Super Disc System Cartridge (Prototype).zip", NULL };
-static const char *const kNamesDSP4[] = { "dsp4.bin", "dsp4.rom", "DSP4 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP1[]  = { "dsp1.bin", "dsp1.rom", "DSP1 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP1B[] = { "dsp1b.bin", "dsp1b.rom", "DSP1 B (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP2[]  = { "dsp2.bin", "dsp2.rom", "DSP2 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP3[]  = { "dsp3.bin", "dsp3.rom", "DSP3 (Japan) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP4[]  = { "dsp4.bin", "dsp4.rom", "DSP4 (World) (Enhancement Chip).bin", NULL };
 
 // Behind each row's info icon: a heading, then one "name — detail — CRC32" line
 // per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
@@ -97,7 +101,15 @@ static const char kInfoNSSFont[] = "Supports the following M50458 OSD character 
                                    "m50458-001sp — 4608 bytes — 444F597D";
 static const char kInfoSuperDisc[] = "Supports the following Super Disc BIOS cartridge ROMs:\n"
                                      "SDBR_v0.95.sfc — 128 KB, with or without a copier header — 3B64A370";
-static const char kInfoDSP4[] = "Supports the following DSP-4 (Top Gear 3000) firmware dumps:\n"
+static const char kInfoDSP1[] = "Supports the following DSP-1 firmware dumps (Pilotwings needs this revision):\n"
+                                "dsp1.bin — 8192 bytes — E359F184";
+static const char kInfoDSP1B[] = "Supports the following DSP-1B firmware dumps (the other DSP-1 games use it):\n"
+                                 "dsp1b.bin — 8192 bytes — 465C4E1C";
+static const char kInfoDSP2[] = "Supports the following DSP-2 firmware dumps:\n"
+                                "dsp2.bin — 8192 bytes — 9A984974";
+static const char kInfoDSP3[] = "Supports the following DSP-3 firmware dumps:\n"
+                                "dsp3.bin — 8192 bytes — D4A38EE7";
+static const char kInfoDSP4[] = "Supports the following DSP-4 firmware dumps:\n"
                                 "dsp4.bin — 8192 bytes — E15384C0";
 
 // No-Intro dumps each slot accepts, all passing its size and signature checks.
@@ -128,7 +140,11 @@ static const char *const kNoIntroBSX[] = {
 	"BS-X - Sore wa Namae o Nusumareta Machi no Monogatari (Japan) (Rev 1).sfc — 1 MB — F51F07A0", NULL
 };
 static const char *const kNoIntroSufami[] = { "Sufami Turbo (Japan).sfc — 256 KB — 9B4CA911", NULL };
-static const char *const kNoIntroDSP4[] = { "DSP4 (World) (Enhancement Chip).bin — 8192 bytes — E15384C0", NULL };
+static const char *const kNoIntroDSP1[]  = { "DSP1 (World) (Enhancement Chip).bin — 8192 bytes — E359F184", NULL };
+static const char *const kNoIntroDSP1B[] = { "DSP1 B (World) (Enhancement Chip).bin — 8192 bytes — 465C4E1C", NULL };
+static const char *const kNoIntroDSP2[]  = { "DSP2 (World) (Enhancement Chip).bin — 8192 bytes — 9A984974", NULL };
+static const char *const kNoIntroDSP3[]  = { "DSP3 (Japan) (Enhancement Chip).bin — 8192 bytes — D4A38EE7", NULL };
+static const char *const kNoIntroDSP4[]  = { "DSP4 (World) (Enhancement Chip).bin — 8192 bytes — E15384C0", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
@@ -149,7 +165,11 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "NSS",          "Nintendo Super System",          kNamesNSS,       0x8000,   NULL,                                     kInfoNSS,       NULL },
 	{ "NSSFont",      "Nintendo Super System OSD Font", kNamesNSSFont,   0x1200,   NULL,                                     kInfoNSSFont,   NULL },
 	{ "SuperDisc",    "Super Disc",                     kNamesSuperDisc, 0x20000,  NULL,                                     kInfoSuperDisc, NULL },
-	{ "DSP4",         "DSP-4 (Top Gear 3000)",          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in is used",  kInfoDSP4,      kNoIntroDSP4 },
+	{ "DSP1",         "DSP-1",                          kNamesDSP1,      UPD7725_FIRMWARE_SIZE, "Optional, built-in is used",  kInfoDSP1,      kNoIntroDSP1 },
+	{ "DSP1B",        "DSP-1B",                         kNamesDSP1B,     UPD7725_FIRMWARE_SIZE, "Optional, built-in is used",  kInfoDSP1B,     kNoIntroDSP1B },
+	{ "DSP2",         "DSP-2",                          kNamesDSP2,      UPD7725_FIRMWARE_SIZE, "Optional, built-in is used",  kInfoDSP2,      kNoIntroDSP2 },
+	{ "DSP3",         "DSP-3",                          kNamesDSP3,      UPD7725_FIRMWARE_SIZE, "Optional, built-in is used",  kInfoDSP3,      kNoIntroDSP3 },
+	{ "DSP4",         "DSP-4",                          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in is used",  kInfoDSP4,      kNoIntroDSP4 },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -334,6 +354,7 @@ enum BiosImageKind
 	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
 	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
 	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS,
+	KIND_DSP1_FIRMWARE, KIND_DSP1B_FIRMWARE, KIND_DSP2_FIRMWARE, KIND_DSP3_FIRMWARE,
 	KIND_DSP4_FIRMWARE, KIND_NECDSP_FIRMWARE
 };
 
@@ -352,6 +373,10 @@ static const char *KindName (int kind)
 		case KIND_NSS_BIOS:  return ("Nintendo Super System BIOS");
 		case KIND_NSS_FONT:  return ("NSS OSD charset");
 		case KIND_SUPERDISC_BIOS: return ("Super Disc BIOS");
+		case KIND_DSP1_FIRMWARE: return ("DSP-1 firmware");
+		case KIND_DSP1B_FIRMWARE: return ("DSP-1B firmware");
+		case KIND_DSP2_FIRMWARE: return ("DSP-2 firmware");
+		case KIND_DSP3_FIRMWARE: return ("DSP-3 firmware");
 		case KIND_DSP4_FIRMWARE: return ("DSP-4 firmware");
 		case KIND_NECDSP_FIRMWARE: return ("other DSP firmware");
 		default:             return ("unrecognised image");
@@ -398,9 +423,20 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 	if (full == SDISC_BIOS_SIZE + 0x200 && n >= 0x8200 && S9xSuperDiscIsBIOS(d + 0x200, SDISC_BIOS_SIZE))
 		return (KIND_SUPERDISC_BIOS);
 
-	// DSP-n firmware all shares one layout; only DSP-4's dump is taken.
+	// DSP-n firmware all shares one layout, so the dump is known by its CRC.
 	if (full == UPD7725_FIRMWARE_SIZE && n >= UPD7725_FIRMWARE_SIZE && S9xUPD7725IsFirmware(d, n))
-		return (ImageCRC32(d, n) == S9X_DSP4_FIRMWARE_CRC) ? KIND_DSP4_FIRMWARE : KIND_NECDSP_FIRMWARE;
+	{
+		static const struct { uint32 crc; int kind; } dumps[] = {
+			{ 0xE359F184, KIND_DSP1_FIRMWARE }, { 0x465C4E1C, KIND_DSP1B_FIRMWARE },
+			{ 0x9A984974, KIND_DSP2_FIRMWARE }, { 0xD4A38EE7, KIND_DSP3_FIRMWARE },
+			{ 0xE15384C0, KIND_DSP4_FIRMWARE }
+		};
+		const uint32 crc = ImageCRC32(d, n);
+		for (size_t i = 0; i < sizeof(dumps) / sizeof(dumps[0]); i++)
+			if (dumps[i].crc == crc)
+				return (dumps[i].kind);
+		return (KIND_NECDSP_FIRMWARE);
+	}
 
 	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
 	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
@@ -453,6 +489,10 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_NSS:       return (KIND_NSS_BIOS);
 		case S9X_BIOS_NSS_FONT:  return (KIND_NSS_FONT);
 		case S9X_BIOS_SUPERDISC: return (KIND_SUPERDISC_BIOS);
+		case S9X_BIOS_DSP1:      return (KIND_DSP1_FIRMWARE);
+		case S9X_BIOS_DSP1B:     return (KIND_DSP1B_FIRMWARE);
+		case S9X_BIOS_DSP2:      return (KIND_DSP2_FIRMWARE);
+		case S9X_BIOS_DSP3:      return (KIND_DSP3_FIRMWARE);
 		case S9X_BIOS_DSP4:      return (KIND_DSP4_FIRMWARE);
 		default:                 return (KIND_UNKNOWN);
 	}

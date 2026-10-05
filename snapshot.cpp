@@ -1869,7 +1869,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 		// The chip's state, or for a state saved without the firmware the HLE's,
 		// which carries on until the next reset.
 		if (local_upd_data && !S9xUPD7725Loaded())
-			S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state was saved with the DSP-4 firmware; set it in the BIOS Manager.");
+			S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state was saved with the DSP chip's firmware; set it in the BIOS Manager.");
 		if (!local_upd_data || !S9xUPD7725StateLoad(local_upd_data, (uint32) local_upd_size))
 			S9xUPD7725Suspend();
 

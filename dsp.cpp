@@ -33,11 +33,20 @@ void S9xResetDSP (void)
 	S9xUPD7725Reset();
 }
 
+// Which of the chip's two registers an address reaches. DSP-2's HLE window
+// has no status register; the board decodes A14 like the LoROM DSP-1.
+static inline bool8 StatusRegister (uint16 address)
+{
+	if (DSP0.maptype == M_DSP2_LOROM)
+		return (address >= 0xc000);
+	return (address >= DSP0.boundary);
+}
+
 uint8 S9xGetDSP (uint16 address, int32 speed)
 {
 	// With its firmware the chip itself runs; a peek mustn't step its handshake.
 	if (S9xUPD7725Active())
-		return (speed < 0 ? 0 : S9xUPD7725Read(address >= DSP0.boundary, speed));
+		return (speed < 0 ? 0 : S9xUPD7725Read(StatusRegister(address), speed));
 
 #ifdef DEBUGGER
 	if (Settings.TraceDSP)
@@ -55,7 +64,7 @@ void S9xSetDSP (uint8 byte, uint16 address, int32 speed)
 	if (S9xUPD7725Active())
 	{
 		if (speed >= 0)
-			S9xUPD7725Write(byte, address >= DSP0.boundary, speed);
+			S9xUPD7725Write(byte, StatusRegister(address), speed);
 		return;
 	}
 

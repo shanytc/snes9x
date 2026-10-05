@@ -23,6 +23,7 @@
 #include "nss.h"
 #include "superdisc.h"
 #include "rp2040cart.h"
+#include "upd7725.h"
 #include "gfx.h"
 
 #ifndef min
@@ -1372,6 +1373,16 @@ void S9xFreezeToStream (STREAM stream)
 		delete [] rpc_buf;
 	}
 
+	// DSP-n firmware: the chip's registers, RAM and clock, as "UPD".
+	if (S9xUPD7725Active())
+	{
+		const uint32	upd_size = S9xUPD7725StateSize();
+		uint8			*upd_buf = new uint8[upd_size];
+		S9xUPD7725StateSave(upd_buf);
+		FreezeBlock(stream, "UPD", upd_buf, (int) upd_size);
+		delete [] upd_buf;
+	}
+
 	// SGB BIOS mode: piggyback the GB/SGB blob inside the SNES snapshot.
 	// The blob is self-versioning ("SGB!" magic + version + size); we just
 	// hand the raw bytes to FreezeBlock. Without this, BIOS-mode loads
@@ -1499,6 +1510,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 	int		local_sdc_size       = 0;
 	uint8	*local_rpc_data      = NULL;
 	int		local_rpc_size       = 0;
+	uint8	*local_upd_data      = NULL;
+	int		local_upd_size       = 0;
 	uint8	*local_gbe_data      = NULL;
 	int		local_gbe_size       = 0;
 	uint8	*local_screenshot    = NULL;
@@ -1720,6 +1733,23 @@ int S9xUnfreezeFromStream (STREAM stream)
 			}
 		}
 
+		// Optional DSP-n firmware blob, likewise.
+		{
+			int upd_block_len = 0;
+			if (CheckBlockName(stream, "UPD", upd_block_len) && upd_block_len > 0)
+			{
+				local_upd_data = new uint8[upd_block_len];
+				result = UnfreezeBlock(stream, "UPD", local_upd_data, upd_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_upd_data;
+					local_upd_data = NULL;
+					break;
+				}
+				local_upd_size = upd_block_len;
+			}
+		}
+
 		// Optional GB/SGB blob — present iff the snapshot was taken in
 		// BIOS mode (Settings.SGB_BIOSModeActive). Old snapshots and
 		// non-SGB SNES games omit it. CheckBlockName peeks without
@@ -1835,6 +1865,13 @@ int S9xUnfreezeFromStream (STREAM stream)
 
 		if (Settings.RP2040Cart && local_rpc_data)
 			S9xRP2040CartStateLoad(local_rpc_data, (size_t) local_rpc_size);
+
+		// The chip's state, or for a state saved without the firmware the HLE's,
+		// which carries on until the next reset.
+		if (local_upd_data && !S9xUPD7725Loaded())
+			S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state was saved with the DSP-4 firmware; set it in the BIOS Manager.");
+		if (!local_upd_data || !S9xUPD7725StateLoad(local_upd_data, (uint32) local_upd_size))
+			S9xUPD7725Suspend();
 
 		if (local_fillram)
 			memcpy(Memory.FillRAM, local_fillram, 0x8000);
@@ -2140,6 +2177,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_nss_data)			delete [] local_nss_data;
 	if (local_sdc_data)			delete [] local_sdc_data;
 	if (local_rpc_data)			delete [] local_rpc_data;
+	if (local_upd_data)			delete [] local_upd_data;
 	if (local_gbe_data)			delete [] local_gbe_data;
 
 	return (result);

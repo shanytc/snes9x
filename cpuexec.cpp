@@ -20,6 +20,7 @@ int32	S9xRefreshClocks = 0;
 #include "sfcbox.h"
 #include "superdisc.h"
 #include "rp2040cart.h"
+#include "upd7725.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
@@ -626,6 +627,10 @@ void S9xDoHEventProcessing (void)
 			// RP2040 cart: the chip runs on between the SNES's accesses to it.
 			if (Settings.RP2040Cart)
 				S9xRP2040CartEndScanline();
+
+			// DSP-n firmware: likewise, so a long gap isn't one burst of catch-up.
+			if (S9xUPD7725Active())
+				S9xUPD7725EndScanline();
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

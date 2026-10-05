@@ -33,6 +33,7 @@
 #include "sgb/sgb.h"
 #include "sgb/sgbc_patches.h"
 #include "biosmanager.h"
+#include "upd7725.h"
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
@@ -3787,6 +3788,21 @@ void CMemory::ParseSNESHeader (uint8 *RomHeader)
 	}
 }
 
+static bool AcceptDSPFirmware (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	return (full_size == UPD7725_FIRMWARE_SIZE && S9xUPD7725IsFirmware(data, size));
+}
+
+// The chip's own program, when the BIOS Manager has one; the HLE otherwise.
+static void LoadDSPFirmware (int slot)
+{
+	std::vector<uint8>	image;
+	if (S9xBiosPathUsable(slot) &&
+		S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware))
+		S9xUPD7725Load(image.data(), (uint32) image.size());
+}
+
 void CMemory::InitROM (void)
 {
 	Settings.SuperFX = FALSE;
@@ -3849,6 +3865,8 @@ void CMemory::InitROM (void)
 	//// Detect and initialize chips
 	//// detection codes are compatible with NSRT
 
+	S9xUPD7725Unload();
+
 	// DSP1/2/3/4
 	if (ROMType == 0x03)
 	{
@@ -3909,6 +3927,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP4_LOROM;
 			SetDSP = &DSP4SetByte;
 			GetDSP = &DSP4GetByte;
+			LoadDSPFirmware(S9X_BIOS_DSP4);
 			break;
 
 		default:

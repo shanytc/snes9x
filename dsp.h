@@ -428,8 +428,9 @@ extern struct SDSP2	DSP2;
 extern struct SDSP3	DSP3;
 extern struct SDSP4	DSP4;
 
-uint8 S9xGetDSP (uint16);
-void S9xSetDSP (uint8, uint16);
+// `speed` is the bus cycle's length; < 0 is a cheat or debugger peek.
+uint8 S9xGetDSP (uint16, int32 speed = -1);
+void S9xSetDSP (uint8, uint16, int32 speed = -1);
 void S9xResetDSP (void);
 uint8 DSP1GetByte (uint16);
 void DSP1SetByte (uint8, uint16);

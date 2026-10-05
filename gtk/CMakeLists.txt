@@ -391,6 +391,7 @@ list(APPEND SOURCES
     ../dsp2.cpp
     ../dsp3.cpp
     ../dsp4.cpp
+    ../upd7725.cpp
     ../spc7110.cpp
     ../obc1.cpp
     ../seta.cpp

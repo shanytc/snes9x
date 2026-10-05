@@ -300,6 +300,9 @@
     <ClInclude Include="..\rp2040cart.h">
       <Filter>APU</Filter>
     </ClInclude>
+    <ClInclude Include="..\upd7725.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
     <ClInclude Include="cgMini.h">
       <Filter>GUI\VideoDriver</Filter>
     </ClInclude>
@@ -534,6 +537,9 @@
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\dsp4.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\upd7725.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\fxdbg.cpp">

@@ -8,6 +8,7 @@
 #include "biosmanager.h"
 #include "memmap.h"
 #include "superdisc.h"
+#include "upd7725.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -56,6 +57,7 @@ static const char *const kNamesNSS[]    = { "nss-ic14.02.ic14", "nss.zip", "nss-
 static const char *const kNamesNSSFont[]= { "m50458_char.bin", "m50458.zip", "m50458-001sp", NULL };
 static const char *const kNamesSuperDisc[] = { "SDBR_v0.95.sfc", "SDBR_v0.95_unheadered.sfc",
                                                "Super Disc System Cartridge (Prototype).zip", NULL };
+static const char *const kNamesDSP4[] = { "dsp4.bin", "dsp4.rom", "DSP4 (World) (Enhancement Chip).bin", NULL };
 
 // Behind each row's info icon: a heading, then one "name — detail — CRC32" line
 // per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
@@ -95,6 +97,8 @@ static const char kInfoNSSFont[] = "Supports the following M50458 OSD character 
                                    "m50458-001sp — 4608 bytes — 444F597D";
 static const char kInfoSuperDisc[] = "Supports the following Super Disc BIOS cartridge ROMs:\n"
                                      "SDBR_v0.95.sfc — 128 KB, with or without a copier header — 3B64A370";
+static const char kInfoDSP4[] = "Supports the following DSP-4 (Top Gear 3000) firmware dumps:\n"
+                                "dsp4.bin — 8192 bytes — E15384C0";
 
 // No-Intro dumps each slot accepts, all passing its size and signature checks.
 static const char *const kNoIntroGB[] = {
@@ -124,10 +128,11 @@ static const char *const kNoIntroBSX[] = {
 	"BS-X - Sore wa Namae o Nusumareta Machi no Monogatari (Japan) (Rev 1).sfc — 1 MB — F51F07A0", NULL
 };
 static const char *const kNoIntroSufami[] = { "Sufami Turbo (Japan).sfc — 256 KB — 9B4CA911", NULL };
+static const char *const kNoIntroDSP4[] = { "DSP4 (World) (Enhancement Chip).bin — 8192 bytes — E15384C0", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
-// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE. 0 = don't care (the SGB carts
+// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE, upd7725.h. 0 = don't care (the SGB carts
 // ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
@@ -144,6 +149,7 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "NSS",          "Nintendo Super System",          kNamesNSS,       0x8000,   NULL,                                     kInfoNSS,       NULL },
 	{ "NSSFont",      "Nintendo Super System OSD Font", kNamesNSSFont,   0x1200,   NULL,                                     kInfoNSSFont,   NULL },
 	{ "SuperDisc",    "Super Disc",                     kNamesSuperDisc, 0x20000,  NULL,                                     kInfoSuperDisc, NULL },
+	{ "DSP4",         "DSP-4 (Top Gear 3000)",          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in is used",  kInfoDSP4,      kNoIntroDSP4 },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -327,7 +333,8 @@ enum BiosImageKind
 	KIND_UNKNOWN = 0,
 	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
 	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
-	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS
+	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS,
+	KIND_DSP4_FIRMWARE, KIND_NECDSP_FIRMWARE
 };
 
 static const char *KindName (int kind)
@@ -345,6 +352,8 @@ static const char *KindName (int kind)
 		case KIND_NSS_BIOS:  return ("Nintendo Super System BIOS");
 		case KIND_NSS_FONT:  return ("NSS OSD charset");
 		case KIND_SUPERDISC_BIOS: return ("Super Disc BIOS");
+		case KIND_DSP4_FIRMWARE: return ("DSP-4 firmware");
+		case KIND_NECDSP_FIRMWARE: return ("other DSP firmware");
 		default:             return ("unrecognised image");
 	}
 }
@@ -388,6 +397,10 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 		return (KIND_SUPERDISC_BIOS);
 	if (full == SDISC_BIOS_SIZE + 0x200 && n >= 0x8200 && S9xSuperDiscIsBIOS(d + 0x200, SDISC_BIOS_SIZE))
 		return (KIND_SUPERDISC_BIOS);
+
+	// DSP-n firmware all shares one layout; only DSP-4's dump is taken.
+	if (full == UPD7725_FIRMWARE_SIZE && n >= UPD7725_FIRMWARE_SIZE && S9xUPD7725IsFirmware(d, n))
+		return (ImageCRC32(d, n) == S9X_DSP4_FIRMWARE_CRC) ? KIND_DSP4_FIRMWARE : KIND_NECDSP_FIRMWARE;
 
 	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
 	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
@@ -440,6 +453,7 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_NSS:       return (KIND_NSS_BIOS);
 		case S9X_BIOS_NSS_FONT:  return (KIND_NSS_FONT);
 		case S9X_BIOS_SUPERDISC: return (KIND_SUPERDISC_BIOS);
+		case S9X_BIOS_DSP4:      return (KIND_DSP4_FIRMWARE);
 		default:                 return (KIND_UNKNOWN);
 	}
 }

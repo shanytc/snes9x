@@ -46,6 +46,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/dsp2.cpp \
 				 $(CORE_DIR)/dsp3.cpp \
 				 $(CORE_DIR)/dsp4.cpp \
+				 $(CORE_DIR)/upd7725.cpp \
 				 $(CORE_DIR)/fxinst.cpp \
 				 $(CORE_DIR)/fxemu.cpp \
 				 $(CORE_DIR)/gfx.cpp \

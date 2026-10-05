@@ -177,6 +177,9 @@
     <ClInclude Include="..\rp2040cart.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\upd7725.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>s9x-source\APU</Filter>
     </ClInclude>
@@ -279,6 +282,9 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\dsp4.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\upd7725.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\fxemu.cpp">

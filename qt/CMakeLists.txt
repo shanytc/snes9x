@@ -70,6 +70,7 @@ set(SNES9X_CORE_SOURCES
     ../dsp3.cpp
     ../dsp4.cpp
     ../upd7725.cpp
+    ../hg51b.cpp
     ../spc7110.cpp
     ../obc1.cpp
     ../seta.cpp

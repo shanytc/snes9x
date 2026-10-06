@@ -34,6 +34,7 @@
 #include "sgb/sgbc_patches.h"
 #include "biosmanager.h"
 #include "upd7725.h"
+#include "hg51b.h"
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
@@ -3411,6 +3412,7 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 	// DSP-1 (Mario Kart): armed when a cart carries the chip and windowed
 	// in/out by the mapping registers.
 	S9xUPD7725Unload();
+	S9xHG51BUnload();
 	if ((SFCBox.SlotChipset[0] | SFCBox.SlotChipset[1]) & 0x02)
 	{
 		Settings.DSP = 1;
@@ -3816,6 +3818,21 @@ static bool8 LoadDSP1Firmware (bool pilotwings)
 	return (LoadDSPFirmware(first) || LoadDSPFirmware(second));
 }
 
+static bool AcceptCx4DataROM (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	return (full_size == HG51B_DATAROM_SIZE && S9xHG51BIsDataROM(data, size));
+}
+
+// The Cx4 runs the cart's own code once its data ROM is set; the HLE otherwise.
+static bool8 LoadCx4DataROM (void)
+{
+	std::vector<uint8>	image;
+	return (S9xBiosPathUsable(S9X_BIOS_CX4) &&
+			S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_CX4).c_str(), image, HG51B_DATAROM_SIZE, AcceptCx4DataROM) &&
+			S9xHG51BLoad(image.data(), (uint32) image.size()));
+}
+
 void CMemory::InitROM (void)
 {
 	Settings.SuperFX = FALSE;
@@ -3879,6 +3896,7 @@ void CMemory::InitROM (void)
 	//// detection codes are compatible with NSRT
 
 	S9xUPD7725Unload();
+	S9xHG51BUnload();
 
 	// DSP1/2/3/4
 	if (ROMType == 0x03)
@@ -4044,6 +4062,7 @@ void CMemory::InitROM (void)
 		// C4
 		case 0xF320:
 			Settings.C4 = TRUE;
+			LoadCx4DataROM();
 			break;
 	}
 

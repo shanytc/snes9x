@@ -21,6 +21,7 @@ int32	S9xRefreshClocks = 0;
 #include "superdisc.h"
 #include "rp2040cart.h"
 #include "upd7725.h"
+#include "hg51b.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
@@ -628,9 +629,11 @@ void S9xDoHEventProcessing (void)
 			if (Settings.RP2040Cart)
 				S9xRP2040CartEndScanline();
 
-			// DSP-n firmware: likewise, so a long gap isn't one burst of catch-up.
+			// DSP-n firmware and the Cx4: likewise, so a long gap isn't one burst of catch-up.
 			if (S9xUPD7725Active())
 				S9xUPD7725EndScanline();
+			if (S9xHG51BActive())
+				S9xHG51BEndScanline();
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

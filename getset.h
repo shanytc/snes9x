@@ -125,7 +125,7 @@ inline uint8 S9xGetByte (uint32 Address)
 			return (byte);
 
 		case CMemory::MAP_C4:
-			byte = S9xGetC4(Address & 0xffff);
+			byte = S9xGetC4(Address & 0xffff, speed);
 			addCyclesInMemoryAccess;
 			return (byte);
 
@@ -310,9 +310,9 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			return (word);
 
 		case CMemory::MAP_C4:
-			word  = S9xGetC4(Address & 0xffff);
+			word  = S9xGetC4(Address & 0xffff, speed);
 			addCyclesInMemoryAccess;
-			word |= S9xGetC4((Address + 1) & 0xffff) << 8;
+			word |= S9xGetC4((Address + 1) & 0xffff, speed) << 8;
 			addCyclesInMemoryAccess;
 			return (word);
 
@@ -467,7 +467,7 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 			return;
 
 		case CMemory::MAP_C4:
-			S9xSetC4(Byte, Address & 0xffff);
+			S9xSetC4(Byte, Address & 0xffff, speed);
 			addCyclesInMemoryAccess;
 			return;
 
@@ -705,17 +705,17 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 		case CMemory::MAP_C4:
 			if (o)
 			{
-				S9xSetC4(Word >> 8, (Address + 1) & 0xffff);
+				S9xSetC4(Word >> 8, (Address + 1) & 0xffff, speed);
 				addCyclesInMemoryAccess;
-				S9xSetC4((uint8) Word, Address & 0xffff);
+				S9xSetC4((uint8) Word, Address & 0xffff, speed);
 				addCyclesInMemoryAccess;
 				return;
 			}
 			else
 			{
-				S9xSetC4((uint8) Word, Address & 0xffff);
+				S9xSetC4((uint8) Word, Address & 0xffff, speed);
 				addCyclesInMemoryAccess;
-				S9xSetC4(Word >> 8, (Address + 1) & 0xffff);
+				S9xSetC4(Word >> 8, (Address + 1) & 0xffff, speed);
 				addCyclesInMemoryAccess;
 				return;
 			}

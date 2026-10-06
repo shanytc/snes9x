@@ -458,6 +458,7 @@
     <ClInclude Include="..\rp2040.h" />
     <ClInclude Include="..\rp2040cart.h" />
     <ClInclude Include="..\upd7725.h" />
+    <ClInclude Include="..\hg51b.h" />
     <ClInclude Include="..\common\video\opengl\shaders\glsl.h" />
     <ClInclude Include="..\common\video\opengl\shaders\shader_helpers.h" />
     <ClInclude Include="..\common\video\opengl\shaders\shader_platform.h" />
@@ -589,6 +590,7 @@
     <ClCompile Include="..\dsp3.cpp" />
     <ClCompile Include="..\dsp4.cpp" />
     <ClCompile Include="..\upd7725.cpp" />
+    <ClCompile Include="..\hg51b.cpp" />
     <ClCompile Include="..\external\imgui\imgui.cpp" />
     <ClCompile Include="..\external\imgui\imgui_demo.cpp" />
     <ClCompile Include="..\external\imgui\imgui_draw.cpp" />

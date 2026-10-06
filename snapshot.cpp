@@ -24,6 +24,7 @@
 #include "superdisc.h"
 #include "rp2040cart.h"
 #include "upd7725.h"
+#include "hg51b.h"
 #include "gfx.h"
 
 #ifndef min
@@ -1383,6 +1384,16 @@ void S9xFreezeToStream (STREAM stream)
 		delete [] upd_buf;
 	}
 
+	// The Cx4 run from its data ROM: registers, cache, data RAM and clock, as "HGB".
+	if (S9xHG51BActive())
+	{
+		const uint32	hgb_size = S9xHG51BStateSize();
+		uint8			*hgb_buf = new uint8[hgb_size];
+		S9xHG51BStateSave(hgb_buf);
+		FreezeBlock(stream, "HGB", hgb_buf, (int) hgb_size);
+		delete [] hgb_buf;
+	}
+
 	// SGB BIOS mode: piggyback the GB/SGB blob inside the SNES snapshot.
 	// The blob is self-versioning ("SGB!" magic + version + size); we just
 	// hand the raw bytes to FreezeBlock. Without this, BIOS-mode loads
@@ -1512,6 +1523,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 	int		local_rpc_size       = 0;
 	uint8	*local_upd_data      = NULL;
 	int		local_upd_size       = 0;
+	uint8	*local_hgb_data      = NULL;
+	int		local_hgb_size       = 0;
 	uint8	*local_gbe_data      = NULL;
 	int		local_gbe_size       = 0;
 	uint8	*local_screenshot    = NULL;
@@ -1750,6 +1763,23 @@ int S9xUnfreezeFromStream (STREAM stream)
 			}
 		}
 
+		// Optional Cx4 blob, likewise.
+		{
+			int hgb_block_len = 0;
+			if (CheckBlockName(stream, "HGB", hgb_block_len) && hgb_block_len > 0)
+			{
+				local_hgb_data = new uint8[hgb_block_len];
+				result = UnfreezeBlock(stream, "HGB", local_hgb_data, hgb_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_hgb_data;
+					local_hgb_data = NULL;
+					break;
+				}
+				local_hgb_size = hgb_block_len;
+			}
+		}
+
 		// Optional GB/SGB blob — present iff the snapshot was taken in
 		// BIOS mode (Settings.SGB_BIOSModeActive). Old snapshots and
 		// non-SGB SNES games omit it. CheckBlockName peeks without
@@ -1872,6 +1902,12 @@ int S9xUnfreezeFromStream (STREAM stream)
 			S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state was saved with the DSP chip's firmware; set it in the BIOS Manager.");
 		if (!local_upd_data || !S9xUPD7725StateLoad(local_upd_data, (uint32) local_upd_size))
 			S9xUPD7725Suspend();
+
+		// The Cx4 likewise.
+		if (local_hgb_data && !S9xHG51BLoaded())
+			S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state was saved with the Cx4 data ROM; set it in the BIOS Manager.");
+		if (!local_hgb_data || !S9xHG51BStateLoad(local_hgb_data, (uint32) local_hgb_size))
+			S9xHG51BSuspend();
 
 		if (local_fillram)
 			memcpy(Memory.FillRAM, local_fillram, 0x8000);
@@ -2178,6 +2214,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_sdc_data)			delete [] local_sdc_data;
 	if (local_rpc_data)			delete [] local_rpc_data;
 	if (local_upd_data)			delete [] local_upd_data;
+	if (local_hgb_data)			delete [] local_hgb_data;
 	if (local_gbe_data)			delete [] local_gbe_data;
 
 	return (result);

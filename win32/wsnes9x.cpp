@@ -69,6 +69,7 @@
 #include "../superdisc.h"
 #include "../rp2040cart.h"
 #include "../upd7725.h"
+#include "../hg51b.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -819,9 +820,10 @@ void S9xRestoreWindowTitle ()
     {
         char def[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, def, NULL);
-        // The DSP chip is running the BIOS Manager's firmware, not the HLE.
-        const TCHAR *dsp = S9xUPD7725Loaded() ? TEXT(" (DSP Enhanced)") : TEXT("");
-        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), dsp, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        // A DSP or Cx4 chip is running from the BIOS Manager's dump, not the HLE.
+        const TCHAR *chip = S9xUPD7725Loaded() ? TEXT(" (DSP Enhanced)") :
+                            S9xHG51BLoaded()   ? TEXT(" (Cx4 Enhanced)") : TEXT("");
+        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), chip, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
         _stprintf(buf, TEXT("%s %s"), WINDOW_TITLE, TEXT(VERSION_DISPLAY));

@@ -34,6 +34,7 @@ enum S9xBiosSlot
 	S9X_BIOS_DSP2,          // dsp2.bin     — DSP-2 firmware
 	S9X_BIOS_DSP3,          // dsp3.bin     — DSP-3 firmware
 	S9X_BIOS_DSP4,          // dsp4.bin     — DSP-4 firmware
+	S9X_BIOS_CX4,           // cx4.bin      — Cx4 data ROM (Mega Man X2 and X3)
 	S9X_NUM_BIOS_SLOTS
 };
 

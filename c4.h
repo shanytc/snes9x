@@ -27,8 +27,9 @@ void C4Op0D (void);
 void C4Op15 (void);
 void C4Op1F (void);
 void S9xInitC4 (void);
-void S9xSetC4 (uint8, uint16);
-uint8 S9xGetC4 (uint16);
+// `speed` is the bus cycle's length; < 0 is a cheat or debugger peek.
+void S9xSetC4 (uint8, uint16, int32 speed = -1);
+uint8 S9xGetC4 (uint16, int32 speed = -1);
 uint8 * S9xGetBasePointerC4 (uint16);
 uint8 * S9xGetMemPointerC4 (uint16);
 

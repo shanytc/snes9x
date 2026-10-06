@@ -9,6 +9,7 @@
 #include "memmap.h"
 #include "superdisc.h"
 #include "upd7725.h"
+#include "hg51b.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -62,6 +63,7 @@ static const char *const kNamesDSP1B[] = { "dsp1b.bin", "dsp1b.rom", "DSP1 B (Wo
 static const char *const kNamesDSP2[]  = { "dsp2.bin", "dsp2.rom", "DSP2 (World) (Enhancement Chip).bin", NULL };
 static const char *const kNamesDSP3[]  = { "dsp3.bin", "dsp3.rom", "DSP3 (Japan) (Enhancement Chip).bin", NULL };
 static const char *const kNamesDSP4[]  = { "dsp4.bin", "dsp4.rom", "DSP4 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesCX4[]   = { "cx4.bin", "cx4.data.rom", "CX4 (World) (Enhancement Chip).bin", NULL };
 
 // Behind each row's info icon: a heading, then one "name — detail — CRC32" line
 // per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
@@ -111,6 +113,8 @@ static const char kInfoDSP3[] = "Supports the following DSP-3 firmware dumps:\n"
                                 "dsp3.bin — 8192 bytes — D4A38EE7";
 static const char kInfoDSP4[] = "Supports the following DSP-4 firmware dumps:\n"
                                 "dsp4.bin — 8192 bytes — E15384C0";
+static const char kInfoCX4[] = "Supports the following Cx4 data ROM dumps (Mega Man X2 and X3):\n"
+                               "cx4.bin — 3072 bytes — B6E76A6A";
 
 // No-Intro dumps each slot accepts, all passing its size and signature checks.
 static const char *const kNoIntroGB[] = {
@@ -145,10 +149,11 @@ static const char *const kNoIntroDSP1B[] = { "DSP1 B (World) (Enhancement Chip).
 static const char *const kNoIntroDSP2[]  = { "DSP2 (World) (Enhancement Chip).bin — 8192 bytes — 9A984974", NULL };
 static const char *const kNoIntroDSP3[]  = { "DSP3 (Japan) (Enhancement Chip).bin — 8192 bytes — D4A38EE7", NULL };
 static const char *const kNoIntroDSP4[]  = { "DSP4 (World) (Enhancement Chip).bin — 8192 bytes — E15384C0", NULL };
+static const char *const kNoIntroCX4[]   = { "CX4 (World) (Enhancement Chip).bin — 3072 bytes — B6E76A6A", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
-// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE, upd7725.h. 0 = don't care (the SGB carts
+// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE, upd7725.h, hg51b.h. 0 = don't care (the SGB carts
 // ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
@@ -170,6 +175,7 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "DSP2",         "DSP-2",                          kNamesDSP2,      UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP2,      kNoIntroDSP2 },
 	{ "DSP3",         "DSP-3",                          kNamesDSP3,      UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP3,      kNoIntroDSP3 },
 	{ "DSP4",         "DSP-4",                          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP4,      kNoIntroDSP4 },
+	{ "CX4",          "Cx4",                            kNamesCX4,       HG51B_DATAROM_SIZE,    "Optional, built-in HLE (less accurate)",  kInfoCX4,       kNoIntroCX4 },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -355,7 +361,7 @@ enum BiosImageKind
 	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
 	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS,
 	KIND_DSP1_FIRMWARE, KIND_DSP1B_FIRMWARE, KIND_DSP2_FIRMWARE, KIND_DSP3_FIRMWARE,
-	KIND_DSP4_FIRMWARE, KIND_NECDSP_FIRMWARE
+	KIND_DSP4_FIRMWARE, KIND_NECDSP_FIRMWARE, KIND_CX4_DATAROM
 };
 
 static const char *KindName (int kind)
@@ -379,6 +385,7 @@ static const char *KindName (int kind)
 		case KIND_DSP3_FIRMWARE: return ("DSP-3 firmware");
 		case KIND_DSP4_FIRMWARE: return ("DSP-4 firmware");
 		case KIND_NECDSP_FIRMWARE: return ("other DSP firmware");
+		case KIND_CX4_DATAROM: return ("Cx4 data ROM");
 		default:             return ("unrecognised image");
 	}
 }
@@ -438,6 +445,9 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 		return (KIND_NECDSP_FIRMWARE);
 	}
 
+	if (full == HG51B_DATAROM_SIZE && n >= HG51B_DATAROM_SIZE && S9xHG51BIsDataROM(d, HG51B_DATAROM_SIZE))
+		return (KIND_CX4_DATAROM);
+
 	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
 	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
 	// twelve dots left-aligned at bit 11, so every row word's top nibble is
@@ -494,6 +504,7 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_DSP2:      return (KIND_DSP2_FIRMWARE);
 		case S9X_BIOS_DSP3:      return (KIND_DSP3_FIRMWARE);
 		case S9X_BIOS_DSP4:      return (KIND_DSP4_FIRMWARE);
+		case S9X_BIOS_CX4:       return (KIND_CX4_DATAROM);
 		default:                 return (KIND_UNKNOWN);
 	}
 }

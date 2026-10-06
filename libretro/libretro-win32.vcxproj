@@ -97,8 +97,8 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='libretro Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;../unzip;../win32/zlib/src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;UNZIP_SUPPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader />
@@ -121,8 +121,8 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;../unzip;../win32/zlib/src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;UNZIP_SUPPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader />
@@ -145,8 +145,8 @@
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
-      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;../unzip;../win32/zlib/src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;UNZIP_SUPPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader />
@@ -173,8 +173,8 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>../;../apu/bapu;../libretro;libretro-common/include;../unzip;../win32/zlib/src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__WIN32__;__LIBRETRO__;ALLOW_CPU_OVERCLOCK;UNZIP_SUPPORT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader />
@@ -317,6 +317,19 @@
     <ClCompile Include="..\globals.cpp" />
     <ClCompile Include="..\hd64180.cpp" />
     <ClCompile Include="..\loadzip.cpp" />
+    <ClCompile Include="..\unzip\ioapi.c" />
+    <ClCompile Include="..\unzip\unzip.c" />
+    <ClCompile Include="..\win32\zlib\src\adler32.c" />
+    <ClCompile Include="..\win32\zlib\src\compress.c" />
+    <ClCompile Include="..\win32\zlib\src\crc32.c" />
+    <ClCompile Include="..\win32\zlib\src\deflate.c" />
+    <ClCompile Include="..\win32\zlib\src\infback.c" />
+    <ClCompile Include="..\win32\zlib\src\inffast.c" />
+    <ClCompile Include="..\win32\zlib\src\inflate.c" />
+    <ClCompile Include="..\win32\zlib\src\inftrees.c" />
+    <ClCompile Include="..\win32\zlib\src\trees.c" />
+    <ClCompile Include="..\win32\zlib\src\uncompr.c" />
+    <ClCompile Include="..\win32\zlib\src\zutil.c" />
     <ClCompile Include="..\memmap.cpp" />
     <ClCompile Include="..\movie.cpp" />
     <ClCompile Include="..\msu1.cpp" />

@@ -1773,24 +1773,42 @@ static void check_system_specs(void)
     environ_cb(RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL, &level);
 }
 
+static bool seed_bios_slot(int slot, const std::string &name)
+{
+    char path[PATH_MAX + 1];
+    snprintf(path, sizeof path, "%s%s%s", retro_system_directory, SLASH_STR, name.c_str());
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    fclose(f);
+    S9xSetBiosPath(slot, path);
+    return true;
+}
+
 // No BIOS Manager dialog here: the frontend's system directory stands in for
 // it. A blank slot takes the first of its conventional filenames found there,
-// plain files only, and that is then the only place the loader looks.
+// then the same names as .zip, and that is then the only place the loader looks.
 static void seed_bios_slots_from_system_dir(void)
 {
     for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
     {
         if (S9xGetBiosPath(slot)[0]) continue;
-        for (const char *const *n = S9xGetBiosSlotInfo(slot)->names; *n; n++)
+        const char *const *names = S9xGetBiosSlotInfo(slot)->names;
+        bool found = false;
+        for (const char *const *n = names; *n && !found; n++)
+            found = seed_bios_slot(slot, *n);
+#ifdef UNZIP_SUPPORT
+        // No-Intro hands its dumps out zipped: "X (World).bin" as "X (World).zip".
+        for (const char *const *n = names; *n && !found; n++)
         {
-            char path[PATH_MAX + 1];
-            snprintf(path, sizeof path, "%s%s%s", retro_system_directory, SLASH_STR, *n);
-            FILE *f = fopen(path, "rb");
-            if (!f) continue;
-            fclose(f);
-            S9xSetBiosPath(slot, path);
-            break;
+            std::string zip = *n;
+            const size_t dot = zip.rfind('.');
+            if (dot != std::string::npos)
+                zip.erase(dot);
+            zip += ".zip";
+            if (zip != *n)
+                found = seed_bios_slot(slot, zip);
         }
+#endif
     }
 }
 

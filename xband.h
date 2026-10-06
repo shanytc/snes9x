@@ -131,6 +131,20 @@ void	S9xXBandFredRemap (void);
 bool8	S9xXBandPendingReset (void);
 void	S9xXBandApplyReset (void);
 
+// The modem's three front lights that are lit (PrettyLights.h kTopLED etc.).
+#define XBAND_LED_TOP		0x02	// online
+#define XBAND_LED_MIDDLE	0x08	// connecting
+#define XBAND_LED_BOTTOM	0x20	// power
+uint8	S9xXBandLEDs (void);
+
+// The box's DS2401 hardware ID: 48-bit serial on LED line 2 (SNESHardwareID.aii).
+void	S9xXBandSetHardwareSerial (const uint8 serial[6]);
+void	S9xXBandHardwareID (uint8 id[8]);	// family, serial, CRC as the box reads them
+
+// A Netlink caller's socket accepted elsewhere (the local server sharing TCP 65433), with the bytes
+// already read; any thread. The box takes it if it waits for an opponent, else closes it.
+bool8	S9xXBandNetlinkOffer (intptr_t sock, const char *ip, const uint8 *data, size_t len);
+
 // The prepaid XBAND Card in the modem's smart-card slot (a Gemplus GPM103).
 bool8	S9xXBandCardInserted (void);
 void	S9xXBandInsertCard (bool8 insert);
@@ -144,16 +158,6 @@ bool8	S9xXBandIsBIOS (const uint8 *data, uint32 size);
 // The box's 64KB battery SRAM in the BIOS's .srm (Memory.LoadSRAM/SaveSRAM).
 bool8	S9xXBandLoadSRAM (const char *srm_path);
 bool8	S9xXBandSaveSRAM (const char *srm_path);
-
-// User-selected SRAM dump filename for the BIOS_DIR loader. Set via
-// the Win32 Netplay menu (XBAND: Use SRAM ...). Empty string =
-// auto-pick from default candidate list.
-void	S9xXBandSetPreferredSRAM (const char *name);
-const char *S9xXBandGetPreferredSRAM (void);
-
-// Reload the SRAM image from disk into XBand.sram[]. Caller should
-// trigger a SNES reset afterwards so the BIOS re-reads the contents.
-bool8	S9xXBandReloadSRAM (void);
 
 // Network bridging.
 bool8	S9xXBandConnect (const char *host, int port);
@@ -380,6 +384,7 @@ void	S9xXBandKeyboardWRIO (uint8 byte);		// $4201 write, PP7 = bit 7
 uint8	S9xXBandKeyboardClock (void);			// one $4017 clock, returns D1:D0
 void	S9xXBandKeyboardKey (uint16 key, bool8 down, bool8 repeat);
 bool8	S9xXBandKeyboardPolled (void);			// the host read it in the last ~second
+bool8	S9xXBandKeyboardCapsLED (bool8 *known);	// the BIOS's Caps Lock, from its LED line
 size_t	S9xXBandKeyboardStateSize (void);
 void	S9xXBandKeyboardStateSave (uint8 *buf);
 void	S9xXBandKeyboardStateLoad (const uint8 *buf, size_t size);	// NULL: no keyboard block

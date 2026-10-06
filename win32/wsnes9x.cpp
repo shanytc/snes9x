@@ -895,11 +895,32 @@ static bool XBandKeyboardTakes (uint16 key)
 
 bool AnyBindPressed (WORD primary, const WORD *extra);
 
+// The BIOS keeps its own Caps Lock (stack garbage at hot-plug, then flipped by each Caps
+// press), so it can sit opposite the PC's: tap Caps for it until its LED matches.
+static uint32	xband_kbd_frame;
+static uint32	xband_caps_frame;		// the last Caps press either side sent
+
+static void XBandKeyboardSyncCaps ()
+{
+	bool8		known;
+	const bool	box = S9xXBandKeyboardCapsLED(&known) != FALSE;
+	const bool	pc = (GetKeyState(VK_CAPITAL) & 1) != 0;
+	if (!known || box == pc || (GetKeyState(VK_CAPITAL) & 0x8000) || xband_kbd_frame - xband_caps_frame < 30)
+		return;
+	S9xXBandKeyboardKey(0x58, TRUE, FALSE);
+	S9xXBandKeyboardKey(0x58, FALSE, FALSE);
+	xband_caps_frame = xband_kbd_frame;
+}
+
 // Once a frame from S9xWinScanJoypads: make and break codes for the XBandKeys slots.
 void XBandKeyboardPollKeys ()
 {
 	static bool	down[16];
 	const bool	active = XBandKeyboardActive();
+
+	xband_kbd_frame++;
+	if (active)
+		XBandKeyboardSyncCaps();
 
 	xband_polling = true;
 	for (int i = 0; i < 16; i++)
@@ -964,6 +985,8 @@ static bool XBandKeyboardMessage (WPARAM vk, LPARAM lParam, bool down)
 		return (false);
 
 	S9xXBandKeyboardKey(key, down, repeat);
+	if (key == 0x58)
+		xband_caps_frame = xband_kbd_frame;		// its LED catches up on a later poll
 	for (int i = 0; i < 5; i++)
 		if (kXBandMods[i] == key)
 			xband_mod_held[i] = down;
@@ -1052,6 +1075,21 @@ static void CenterCursor()
 }
 
 
+// The modem's lights after the BIOS name, top|middle|bottom, while the box runs (Modem).
+static const TCHAR *XBandLEDTitle ()
+{
+    static TCHAR leds[16];
+    leds[0] = 0;
+    if (Settings.XBAND && GUI.XBandShowLEDs)
+    {
+        const uint8 on = S9xXBandLEDs();
+        // U+26AB/U+26AA: one font's pair, so lit and dark draw the same size (U+25CF is smaller).
+        _stprintf(leds, TEXT(" [%c|%c|%c]"), (on & XBAND_LED_TOP) ? 0x26AB : 0x26AA,
+                  (on & XBAND_LED_MIDDLE) ? 0x26AB : 0x26AA, (on & XBAND_LED_BOTTOM) ? 0x26AB : 0x26AA);
+    }
+    return leds;
+}
+
 void S9xRestoreWindowTitle ()
 {
     TCHAR buf [1024];
@@ -1072,15 +1110,15 @@ void S9xRestoreWindowTitle ()
         char bios[_MAX_FNAME], cart[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, bios, NULL);
         _splitpath(Multi.fileNameB, NULL, NULL, cart, NULL);
-        _stprintf(buf, TEXT("%s%s - %s - %s %s"), (wchar_t *)Utf8ToWide(bios), XBandServerRunning() ? TEXT(" (Hosting)") : TEXT(""),
-                  (wchar_t *)Utf8ToWide(cart), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        _stprintf(buf, TEXT("%s%s%s - %s - %s %s"), (wchar_t *)Utf8ToWide(bios), XBandLEDTitle(),
+                  XBandServerRunning() ? TEXT(" (Hosting)") : TEXT(""), (wchar_t *)Utf8ToWide(cart), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
     if (Memory.ROMFilename[0])
     {
         char def[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, def, NULL);
-        _stprintf(buf, TEXT("%s%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip,
+        _stprintf(buf, TEXT("%s%s%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip, XBandLEDTitle(),
                   Settings.XBAND && XBandServerRunning() ? TEXT(" (Hosting)") : TEXT(""), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
@@ -2390,6 +2428,12 @@ static std::string FindXBandDir()
 }
 
 // Netplay > XBand > Start Server: the port, or 0 when cancelled.
+// The local server shares TCP 65433: a Netlink caller it accepts goes to this window's box.
+static bool XBandHandPeerToBox(intptr_t sock, const char *ip, const uint8_t *data, size_t len)
+{
+	return S9xXBandNetlinkOffer(sock, ip, data, len) != FALSE;
+}
+
 static INT_PTR CALLBACK DlgXBandHostServerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
@@ -2397,6 +2441,7 @@ static INT_PTR CALLBACK DlgXBandHostServerProc(HWND hDlg, UINT msg, WPARAM wPara
 	case WM_INITDIALOG:
 		LocalizeDialog(hDlg);
 		SetDlgItemInt(hDlg, IDC_XBAND_HOST_PORT, Settings.XBANDServerPort ? Settings.XBANDServerPort : 56969, FALSE);
+		CheckDlgButton(hDlg, IDC_XBAND_HOST_NETLINK, GUI.XBandServerNetlink ? BST_CHECKED : BST_UNCHECKED);
 		return TRUE;
 
 	case WM_COMMAND:
@@ -2411,7 +2456,20 @@ static INT_PTR CALLBACK DlgXBandHostServerProc(HWND hDlg, UINT msg, WPARAM wPara
 				MessageBoxA(hDlg, "Enter a port from 1 to 65535.", "XBAND Server", MB_OK | MB_ICONWARNING);
 				return TRUE;
 			}
+			GUI.XBandServerNetlink = IsDlgButtonChecked(hDlg, IDC_XBAND_HOST_NETLINK) == BST_CHECKED;
 			EndDialog(hDlg, port);
+			return TRUE;
+		}
+		case IDC_XBAND_HOST_NETLINK:
+		{
+			// Netlink's port also carries the server, so the host forwards just TCP 65433 + UDP 20001.
+			BOOL ok = FALSE;
+			const UINT port = GetDlgItemInt(hDlg, IDC_XBAND_HOST_PORT, &ok, FALSE);
+			const bool on = IsDlgButtonChecked(hDlg, IDC_XBAND_HOST_NETLINK) == BST_CHECKED;
+			if (on && (!ok || port == 56969))
+				SetDlgItemInt(hDlg, IDC_XBAND_HOST_PORT, 65433, FALSE);
+			else if (!on && ok && port == 65433)
+				SetDlgItemInt(hDlg, IDC_XBAND_HOST_PORT, 56969, FALSE);
 			return TRUE;
 		}
 		case IDCANCEL:
@@ -3291,6 +3349,13 @@ LRESULT CALLBACK WinProc(
 						S9xMovieStop (TRUE);
 					if (cmd_id == ID_EMULATION_HARD_RESET)
 					{
+						// A power cycle also takes down the hosted XBAND server and its queued matches.
+						if (XBandServerRunning())
+						{
+							XBandServerStop();
+							S9xRestoreWindowTitle();
+							S9xSetInfoString("XBAND server stopped by the hard reset");
+						}
 						// A BIOS assigned since the cart loaded only takes effect by a
 						// load: the power cycle does it.
 						if (S9xBiosChangedSinceLoad())
@@ -3573,6 +3638,12 @@ LRESULT CALLBACK WinProc(
 			XBandSwitchesChanged();
 			break;
 
+		// The modem's front lights in the title.
+		case ID_EMULATION_XBAND_LEDS:
+			GUI.XBandShowLEDs = !GUI.XBandShowLEDs;
+			S9xRestoreWindowTitle();
+			break;
+
 		// With the modem left on, the box boots again at the next launch.
 		case ID_EMULATION_XBAND_AUTOBOOT:
 			GUI.XBandBootOnRestart = !GUI.XBandBootOnRestart;
@@ -3675,7 +3746,8 @@ LRESULT CALLBACK WinProc(
 				break;
 			const std::string dir = FindXBandDir();
 			std::string why;
-			if (!XBandServerStart(port, dir, why))
+			XBandServerSetPeerHandler(XBandHandPeerToBox);
+			if (!XBandServerStart(port, dir, GUI.XBandServerNetlink, why))
 			{
 				MessageBoxA(hWnd, ("The XBAND server didn't start: " + why + ".").c_str(), "XBAND Server", MB_OK | MB_ICONWARNING);
 				break;
@@ -3689,7 +3761,8 @@ LRESULT CALLBACK WinProc(
 			const int patches = XBandServerPatchCount(dir);
 			char msg[512];
 			if (patches)
-				snprintf(msg, sizeof(msg), "XBAND server on port %d: %d game patches", port, patches);
+				snprintf(msg, sizeof(msg), "XBAND server on port %d: %d game patches%s", port, patches,
+				         GUI.XBandServerNetlink ? ", peer-to-peer matches" : "");
 			else
 				snprintf(msg, sizeof(msg), "XBAND server on port %d: no patches in %s\\patches - only games already patched in a box can be matched",
 				         port, dir.c_str());
@@ -5658,6 +5731,28 @@ static void ApplyGBVideoCamera()
 		GBCameraStop();
 }
 
+// The XBAND box's hardware ID serial: a one-way hash of this PC's MachineGuid, so every computer is its own box.
+static void XBandSetMachineSerial (void)
+{
+	WCHAR id[128] = L"";
+	DWORD size = sizeof(id);
+	if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", L"MachineGuid",
+	                 RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, NULL, id, &size) != ERROR_SUCCESS)
+	{
+		size = ARRAYSIZE(id);
+		GetComputerNameW(id, &size);
+	}
+	uint64 h = 0xCBF29CE484222325ULL;
+	for (const char *s = "SuperSnes9x XBAND"; *s; s++)
+		h = (h ^ (uint8) *s) * 0x100000001B3ULL;
+	for (const WCHAR *s = id; *s; s++)
+		h = (h ^ (uint16) *s) * 0x100000001B3ULL;
+	uint8 serial[6];
+	for (int i = 0; i < 6; i++)
+		serial[i] = (uint8) (h >> (8 * i));
+	S9xXBandSetHardwareSerial(serial);
+}
+
 int WINAPI WinMain(
 				   HINSTANCE hInstance,
 				   HINSTANCE hPrevInstance,
@@ -5734,6 +5829,7 @@ int WINAPI WinMain(
 
 	void InitSnes9x (void);
 	InitSnes9x ();
+	XBandSetMachineSerial();
 
 	GBCameraRegister();
 	ApplyGBVideoCamera();
@@ -6554,11 +6650,12 @@ static bool ToggleMenuItem (UINT id)
 		RefreshNSSDipItems();
 		return true;
 	}
-	if (id != ID_EMULATION_XBAND_AUTOBOOT && id != ID_EMULATION_XBAND_REMEMBER)
+	if (id != ID_EMULATION_XBAND_AUTOBOOT && id != ID_EMULATION_XBAND_REMEMBER && id != ID_EMULATION_XBAND_LEDS)
 		return false;
 	// Through its WM_COMMAND handler, then the tick to match.
 	SendMessage(GUI.hWnd, WM_COMMAND, id, 0);
-	const bool on = (id == ID_EMULATION_XBAND_AUTOBOOT) ? GUI.XBandBootOnRestart : GUI.XBandRememberCart;
+	const bool on = (id == ID_EMULATION_XBAND_AUTOBOOT) ? GUI.XBandBootOnRestart :
+	                (id == ID_EMULATION_XBAND_LEDS) ? GUI.XBandShowLEDs : GUI.XBandRememberCart;
 	CheckMenuItem(GUI.hMenu, id, MF_BYCOMMAND | (on ? MF_CHECKED : MF_UNCHECKED));
 	return true;
 }
@@ -6672,6 +6769,18 @@ static void CheckMenuStates ()
 	// The box's mode switch: one position or the other.
 	CheckMenuRadioItem(GUI.hMenu, ID_EMULATION_XBAND_MODEM, ID_EMULATION_XBAND_PASSTHROUGH,
 	                   GUI.XBandModem ? ID_EMULATION_XBAND_MODEM : ID_EMULATION_XBAND_PASSTHROUGH, MF_BYCOMMAND);
+	{
+		uint8 id[8];
+		S9xXBandHardwareID(id);
+		TCHAR text[64];
+		_stprintf(text, TEXT("&Modem (%02X%02X%02X%02X%02X%02X%02X%02X)"), id[0], id[1], id[2], id[3], id[4], id[5], id[6], id[7]);
+		MENUITEMINFO txt = { sizeof(MENUITEMINFO) };
+		txt.fMask      = MIIM_STRING;
+		txt.dwTypeData = text;
+		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_MODEM, FALSE, &txt);
+	}
+	mii.fState = GUI.XBandShowLEDs ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_LEDS, FALSE, &mii);
 	mii.fState = GUI.XBandBootOnRestart ? MFS_CHECKED : MFS_UNCHECKED;
 	SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_AUTOBOOT, FALSE, &mii);
 	mii.fState = GUI.XBandRememberCart ? MFS_CHECKED : MFS_UNCHECKED;
@@ -6709,7 +6818,9 @@ static void CheckMenuStates ()
 		txt.dwTypeData = text;
 		SetMenuItemInfo(GUI.hMenu, ID_EMULATION_XBAND_CARD, FALSE, &txt);
 	}
-	EnableMenuItem(GUI.hMenu, ID_NETPLAY_XBAND_SERVER_START, MF_BYCOMMAND | (XBandServerRunning() ? MF_GRAYED : MF_ENABLED));
+	// Hosting only makes sense when this box dials a local server.
+	EnableMenuItem(GUI.hMenu, ID_NETPLAY_XBAND_SERVER_START,
+	               MF_BYCOMMAND | (!XBandServerRunning() && Settings.XBANDLocalServer ? MF_ENABLED : MF_GRAYED));
 	EnableMenuItem(GUI.hMenu, ID_NETPLAY_XBAND_SERVER_STOP, MF_BYCOMMAND | (XBandServerRunning() ? MF_ENABLED : MF_GRAYED));
 	{
 		TCHAR text[64];
@@ -6744,7 +6855,7 @@ static void CheckMenuStates ()
 			ID_EMULATION_XBAND_CART, ID_EMULATION_XBAND_CARD, ID_EMULATION_XBAND_CARD_RESET,
 			ID_EMULATION_XBAND_SERVER_RETRO, ID_EMULATION_XBAND_SERVER_LOCAL,
 			ID_NETPLAY_XBAND_SERVER_START, ID_NETPLAY_XBAND_SERVER_STOP,
-			ID_EMULATION_XBAND_AUTOBOOT, ID_EMULATION_XBAND_REMEMBER,
+			ID_EMULATION_XBAND_AUTOBOOT, ID_EMULATION_XBAND_REMEMBER, ID_EMULATION_XBAND_LEDS,
 		};
 		if (!GUI.XBandEnabled)
 			for (UINT id : xband_items)

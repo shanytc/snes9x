@@ -1613,6 +1613,7 @@ BEGIN
                 MENUITEM "&Modem",                      ID_EMULATION_XBAND_MODEM,MFT_STRING,MFS_ENABLED
                 MENUITEM "&Pass-through",               ID_EMULATION_XBAND_PASSTHROUGH,MFT_STRING,MFS_ENABLED
             END
+            MENUITEM "Show Modem &LED Activity (Online | Connecting | Power)",    ID_EMULATION_XBAND_LEDS,MFT_STRING,MFS_ENABLED
             MENUITEM "&Cartridge: Mount...",        ID_EMULATION_XBAND_CART,MFT_STRING,MFS_ENABLED
             MENUITEM "Insert &Prepaid Card",        ID_EMULATION_XBAND_CARD,MFT_STRING,MFS_ENABLED
             MENUITEM "&Reset Prepaid Card",         ID_EMULATION_XBAND_CARD_RESET,MFT_STRING,MFS_ENABLED
@@ -1820,7 +1821,7 @@ BEGIN
 END
 #endif
 
-IDD_XBAND_HOST_SERVER DIALOGEX 0, 0, 230, 92
+IDD_XBAND_HOST_SERVER DIALOGEX 0, 0, 230, 136
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "XBAND Server"
 FONT 8, "MS Shell Dlg"
@@ -1828,8 +1829,10 @@ BEGIN
     LTEXT           "Port:",IDC_STATIC,10,12,30,8
     EDITTEXT        IDC_XBAND_HOST_PORT,42,10,40,12,ES_AUTOHSCROLL | ES_NUMBER
     LTEXT           "Other players connect to this PC's IP address on this port (Emulation > XBand > Local Server). Players outside your network need the port forwarded on your router.",IDC_STATIC,10,30,210,34
-    DEFPUSHBUTTON   "Start",IDOK,60,70,50,14
-    PUSHBUTTON      "Cancel",IDCANCEL,120,70,50,14
+    CONTROL         "Peer-to-peer matches (Netlink)",IDC_XBAND_HOST_NETLINK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,10,68,210,10
+    LTEXT           "Matched players connect to each other, as on the Retrocomputing server. Use port 65433: the server shares it, so every player (host included) forwards just TCP 65433 and UDP 20001.",IDC_STATIC,22,80,198,26
+    DEFPUSHBUTTON   "Start",IDOK,60,114,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,120,114,50,14
 END
 
 IDD_XBAND_SERVER DIALOGEX 0, 0, 220, 76

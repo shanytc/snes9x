@@ -16,6 +16,7 @@
 #include "../sgb/sgb.h"
 #include "../acidsgb.h"
 #include "../sfcbox.h"
+#include "../xband.h"
 #include <shellapi.h>
 #include "wsnes9x.h"
 #include "win32_display.h"
@@ -411,6 +412,17 @@ bool8 S9xDeinitUpdate (int Width, int Height)
 		if (secs != lastShownSecs)
 		{
 			lastShownSecs = secs;
+			S9xRestoreWindowTitle();
+		}
+	}
+	if (Settings.XBAND && GUI.XBandShowLEDs)
+	{
+		// The modem's lights in the title follow the box.
+		static uint8 lastLEDs = 0xFF;
+		const uint8 leds = S9xXBandLEDs();
+		if (leds != lastLEDs)
+		{
+			lastLEDs = leds;
 			S9xRestoreWindowTitle();
 		}
 	}

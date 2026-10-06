@@ -69,13 +69,20 @@
 #include "xband.h"
 #include "ppu.h"
 #include "display.h"
+#include "apu/apu.h"
+#include "cpuexec.h"
 
 #include <cstdio>
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
 #include <cstdarg>
+#include <algorithm>
 #include <chrono>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
 #include <ctime>
 
 // A hung-up peer must not kill the process with SIGPIPE where that exists.
@@ -814,8 +821,26 @@ static int      xband_ring_len     = 0;
 static uint32   xband_ring_retry   = 0;		// frames until the next ring-line attempt
 static bool     xband_ring_connecting = false;	// the ring line's connect is still in progress
 static bool     xband_connecting   = false;	// the dial's connect is still in progress
+static bool     xband_dial_failed  = false;	// the dial's connect failed: it rings out (no dial tone) until hang-up
 static uint32   xband_frame        = 0;		// S9xXBandPoll calls (one per frame)
 static uint32   xband_atv25_until  = 0;		// the answer tone sounds until this frame; 0 = not started
+
+// Netlink peer calls (the retrocomputing server's matches); see the Netlink section.
+enum { XBNL_IDLE, XBNL_HANDSHAKE, XBNL_DATA };
+static int      xbnl_state         = XBNL_IDLE;
+static bool     xbnl_ringing       = false;	// a peer's RING: RI until the BIOS answers
+static bool     xbnl_dialing       = false;	// our dial to a peer rings out until ANSWERING
+static bool     xbnl_server_call   = false;	// the call up now is with a server (not a peer)
+static bool     xbnl_dial (void);
+static bool     xbnl_answer (void);
+static void     xbnl_poll (void);
+static void     xbnl_close (void);
+static void     xbnl_reset (void);
+static void     xbnl_listen_open (void);
+static void     xbnl_scan_segment (uint32 seq, const uint8 *data, int len);
+static bool     xbnl_stream_valid  = false;	// the server's next ServerTalk byte is known
+static uint32   xbnl_stream_next   = 0;
+static void     xband_link_io (void);
 
 // The answer tone is a level held this long, as the real V.25 tone lasts ~3 s: the dialing BIOS reads
 // $0B for ATV25 and again for TONEA each pass, and a one-shot taken by the TONEA read was lost.
@@ -842,7 +867,6 @@ static bool xband_ring_answer (void);
 static void xband_hang_up (void);
 static bool xband_console_reset = false;	// S9xResetXBand from the box's own /RESET
 
-static bool xband_seed_sram     = false;	// load the SRAM dump on the next reset
 static bool xband_reset_pending = false;	// the BIOS pulled /RESET via the LEDs
 static uint32 xband_bios_resets = 0, xband_bios_reset_pc = 0;
 
@@ -1733,6 +1757,8 @@ static void xband_servertalk_dispatch_rx (const uint8 *body, int body_len)
 			                    &xband_rx_stream_pos,
 			                    &xband_rx_stream_dropped,
 			                    body + data_off, data_end - data_off);
+			if (xbnl_server_call)
+				xbnl_scan_segment(p.first_byte_seq, body + data_off, data_end - data_off);
 		}
 	}
 
@@ -5354,9 +5380,14 @@ static void fred_kill_control_write (bool control, uint8 byte)
 	fred_remap(false);
 }
 
+#define XBLS_MARK	0x13F0		// the generic patch's lockstep byte (plain SRAM on a real box)
+static void xbls_write (uint8 byte);
+
 static void fred_sram_write (uint32 offset, uint8 byte)
 {
 	offset &= XBAND_SRAM_SIZE - 1;
+	if (offset == XBLS_MARK)
+		xbls_write(byte);
 	if (XBand.sram[offset] != byte)
 	{
 		XBand.sram[offset] = byte;
@@ -5720,6 +5751,127 @@ int S9xXBandCardCredits (void)
 	return credits;
 }
 
+// Lockstep: the generic patch's SRAM byte XBLS_MARK (3 match start, 1/2 exchange begin/end, 4 the OS)
+// keeps both consoles cycle-identical; RX shows data only inside an exchange.
+#define XBLS_SPAN		(8 * 1364)
+#define XBLS_PACKET		3
+#define XBLS_WAIT_MS	2000
+
+static bool		xbls_on;
+static bool		xbls_window;
+static bool		xbls_apu_reset;
+static int32	xbls_begin_v, xbls_begin_c;
+static int32	xbls_owed;			// packet bytes the windows asked for less what RX served
+static uint32	xbls_polls;			// frames a window has stayed open
+
+static void xband_net_io (xband_sock_t fd);
+
+static void xbls_reset (void)
+{
+	xbls_on = xbls_window = xbls_apu_reset = false;
+	xbls_owed = 0;
+	xbls_polls = 0;
+}
+
+static uint32 xbls_rx_count (void)
+{
+	return XBand.rxbufpos - XBand.rxbufused;
+}
+
+// Run the beam to line v, clock c as a halted CPU (refresh and HDMA still take their cycles);
+// even: also in a frame whose field bit is clear.
+static void xbls_advance (int32 v, int32 c, bool even)
+{
+	for (int guard = 0; guard < 4 * 1024; guard++)
+	{
+		const bool	line = CPU.V_Counter == v && (!even || !S9xInterlaceField());
+		if (line && CPU.Cycles >= c)
+			return;
+		if (line && CPU.NextEvent > c)
+		{
+			CPU.Cycles = c;
+			return;
+		}
+		if (CPU.Cycles < CPU.NextEvent)
+			CPU.Cycles = CPU.NextEvent;
+		S9xDoHEventProcessing();
+	}
+}
+
+static void xbls_write (uint8 byte)
+{
+	switch (byte)
+	{
+		case 3:
+			xbls_reset();
+			xbls_on = true;
+			xbls_apu_reset = true;
+			xbls_advance(0, 0, true);		// xbls_frame powers the APU on at that frame's start
+			break;
+		case 1:
+		{
+			if (!xbls_on)
+				break;
+			xbls_window = true;
+			xbls_polls = 0;
+			xbls_begin_v = CPU.V_Counter;
+			xbls_begin_c = CPU.Cycles;
+			xbls_owed += XBLS_PACKET;		// below zero: whole packets the ring already holds
+			if (XBand.socket_fd == XBAND_INVALID_SOCKET && xbnl_state != XBNL_DATA)
+				break;
+			const auto	until = std::chrono::steady_clock::now() + std::chrono::milliseconds(XBLS_WAIT_MS);
+			while ((int32) xbls_rx_count() < xbls_owed && std::chrono::steady_clock::now() < until)
+			{
+				xband_link_io();
+				if ((int32) xbls_rx_count() >= xbls_owed)
+					break;
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+			break;
+		}
+		case 2:
+		{
+			if (!xbls_window)
+				break;
+			xbls_window = false;
+			int32	lines = CPU.V_Counter - xbls_begin_v;
+			if (lines < 0)
+				lines += Timings.V_Max;
+			const int32	el = lines * Timings.H_Max_Master + (CPU.Cycles - xbls_begin_c);
+			if (el >= XBLS_SPAN)
+				break;
+			const int32	t = xbls_begin_c + XBLS_SPAN;
+			xbls_advance((xbls_begin_v + t / Timings.H_Max_Master) % Timings.V_Max, t % Timings.H_Max_Master, false);
+			break;
+		}
+		case 4:
+			xbls_reset();
+			break;
+	}
+}
+
+// From S9xXBandPoll, at the start of every frame.
+static void xbls_frame (void)
+{
+	if (xbls_window && ++xbls_polls > 2)
+		xbls_window = false;		// an exchange that never ended (the patch went to the OS)
+	if (xbls_apu_reset && !S9xInterlaceField())
+	{
+		xbls_apu_reset = false;
+		S9xResetAPU();
+		S9xAPUSetReferenceTime(CPU.Cycles);
+		if (Model->_5A22 == 2)
+			Timings.WRAMRefreshPos = SNES_WRAM_REFRESH_HC_v2;
+	}
+}
+
+// The box's DS2401 hardware ID chip (S9xXBandSetHardwareSerial).
+enum { XBID_IDLE, XBID_PRESENCE, XBID_CMD, XBID_READ };
+static int	xbid_state = XBID_IDLE;
+static bool	xbid_master_low = false;
+static uint8	xbid_read_led (void);
+static void	xbid_line_written (void);
+
 // Fred register file read; reg = register byte address / 2 (A0 ignored).
 static uint8 xband_reg_read (uint8 reg)
 {
@@ -5728,14 +5880,16 @@ static uint8 xband_reg_read (uint8 reg)
 	// Fred magic constants that make the USA BIOS boot — straight
 	// from bsnes-plus reset()/read():
 	//   reg $7D ($FBC0FA) must return $80
-	//   reg $B4 ($FBC168) must return $7F (kLEDData)
+	//   reg $B4 ($FBC168) must return $7F (kLEDData); bit 2 is the hardware ID's 1-Wire line
 	if (reg == 0x7D)
 		result = 0x80;
 	else if (reg == 0xB4)
-		result = 0x7F;
+		result = xbid_read_led();
 	else if (reg == 0x94)
 	{
 		// krxbuff — pop one byte from the network RX buffer
+		if (xbls_on && xbls_window && xband_rxbuf_has_data())
+			xbls_owed--;
 		result = xband_rxbuf_pop();
 	}
 	else if (reg == 0x98)
@@ -5744,7 +5898,9 @@ static uint8 xband_reg_read (uint8 reg)
 		// Polled in tight loops inside _PUVBLCallback. bsnes-plus
 		// caps consecutive "yes" responses at 127 to break infinite
 		// poll loops (fixes a kFifoOverflowErr panic).
-		if (XBand.net_step && xband_rxbuf_has_data())
+		if (xbls_on)
+			result = (xbls_window && xband_rxbuf_has_data()) ? 1 : 0;
+		else if (XBand.net_step && xband_rxbuf_has_data())
 		{
 			XBand.consecutive_reads++;
 			if (XBand.consecutive_reads >= 127)
@@ -5800,7 +5956,8 @@ static uint8 xband_reg_read (uint8 reg)
 				// TONEA (bit 7): dial tone until a call is up; in a call it would
 				// be the call-waiting bong (PUListenToLine) and pause the game.
 				// A dial whose connect is still pending rings out: no dial tone, or the BIOS hangs up in ~2 s.
-				ret = (XBand.net_step == XBAND_NET_CONNECTED || xband_connecting) ? 0x00 : 0x80;
+				// A dial tone mid-dial reads as "tone dialing doesn't work"; a failed connect rings unanswered instead.
+				ret = (XBand.net_step == XBAND_NET_CONNECTED || xband_connecting || xband_dial_failed || xbnl_dialing) ? 0x00 : 0x80;
 				// No answer tone while the opponent's line is still ringing.
 				if (XBand.modem_set_ATV25 && xband_far_end_up && !xband_atv25_until)
 				{
@@ -5822,7 +5979,7 @@ static uint8 xband_reg_read (uint8 reg)
 				break;
 			case 0x0F:
 				ret |= (1 << 7) | (1 << 5); // RLSD + CTS — "modem alive"
-				if (xband_ringing)
+				if (xband_ringing || xbnl_ringing)
 					ret |= (1 << 3); // RI
 				break;
 			case 0x18:
@@ -6027,7 +6184,7 @@ static void xband_reg_write (uint8 reg, uint8 byte, uint32 address)
 					// the user to re-click the Netplay menu item
 					// after every "Translation problem".
 					XBand.net_step = XBAND_NET_HANDSHAKE;
-					if (!xband_ring_answer())
+					if (!xbnl_answer() && !xband_ring_answer() && !xbnl_dial())
 						xband_try_auto_reconnect();
 				}
 				break;
@@ -6080,6 +6237,8 @@ static void xband_reg_write (uint8 reg, uint8 byte, uint32 address)
 		xband_bios_resets++;
 		xband_bios_reset_pc = Registers.PBPC & 0xFFFFFF;
 	}
+	if (reg == 0xB4 || reg == 0xB5)
+		xbid_line_written();
 	fred_reg_written(reg);
 }
 
@@ -6179,7 +6338,6 @@ void S9xInitXBand (void)
 	// to the ROM loader.
 	memset(&XBand, 0, sizeof(XBand));
 	XBand.socket_fd = XBAND_INVALID_SOCKET;
-	xband_seed_sram = true;
 }
 
 // External hooks into cpuexec.cpp's BRK detector so a fresh power-on
@@ -6188,101 +6346,6 @@ extern uint8  XBandFirstBrkOp;
 extern uint32 XBandFirstBrkPC;
 extern uint16 XBandFirstBrkS;
 extern bool   XBandFirstBrkSeen;
-
-// Pre-populate XBand.sram with a saved SRAM image so the BIOS doesn't
-// hang in its "first-time setup" loop on a fresh empty SRAM.
-//
-// We load from BIOS_DIR (the snes9x BIOS folder) rather than SRAM_DIR
-// because snes9x never writes to BIOS_DIR — that means a hand-curated
-// SRAM dump can sit there permanently and never get clobbered by
-// snes9x's auto-save / oops-save / shutdown-save paths. The user
-// drops one of the preserved Cinghialotto SNES-XBandSRAMs files into
-// the BIOS dir and the BIOS picks it up on every boot.
-// User-selected SRAM dump filename (set via S9xXBandSetPreferredSRAM
-// from the Win32 Netplay menu). When set, xband_load_sram_image tries
-// this file first; otherwise it falls through to the default candidate
-// list. Empty string means "auto-pick first available".
-static char xband_preferred_sram[64] = {0};
-
-void S9xXBandSetPreferredSRAM (const char *name)
-{
-	if (!name)
-	{
-		xband_preferred_sram[0] = 0;
-		return;
-	}
-	strncpy(xband_preferred_sram, name, sizeof(xband_preferred_sram) - 1);
-	xband_preferred_sram[sizeof(xband_preferred_sram) - 1] = 0;
-}
-
-const char *S9xXBandGetPreferredSRAM (void)
-{
-	return xband_preferred_sram[0] ? xband_preferred_sram : NULL;
-}
-
-static bool xband_load_sram_image (void)
-{
-	const char *default_candidates[] = {
-		"XBAND.srm",
-		"xband.srm",
-		"XBAND.bin",
-		"xband.bin",
-		"Benner.1.SRM",
-		"XBand_luke2.srm",
-		"SF2DXB.S04.srm",
-		NULL
-	};
-	FILE *f = NULL;
-	std::string used_path;
-
-	// Try the user-selected file first.
-	if (xband_preferred_sram[0])
-	{
-		std::string p = S9xGetDirectory(BIOS_DIR);
-		p += SLASH_STR;
-		p += xband_preferred_sram;
-		f = fopen(p.c_str(), "rb");
-		if (f)
-			used_path = p;
-	}
-
-	// Fall back to default candidate list if no preferred file or
-	// preferred file isn't there.
-	for (int i = 0; default_candidates[i] != NULL && !f; i++)
-	{
-		std::string p = S9xGetDirectory(BIOS_DIR);
-		p += SLASH_STR;
-		p += default_candidates[i];
-		f = fopen(p.c_str(), "rb");
-		if (f)
-			used_path = p;
-	}
-	if (!f) return false;
-
-	fseek(f, 0, SEEK_END);
-	long sz = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	long offset = 0;
-	if (sz == XBAND_SRAM_SIZE + 512) offset = 512; // strip copier header
-	else if (sz != XBAND_SRAM_SIZE)
-	{
-		fclose(f);
-		return false;
-	}
-	if (offset) fseek(f, offset, SEEK_SET);
-	size_t r = fread(XBand.sram, 1, XBAND_SRAM_SIZE, f);
-	fclose(f);
-	return (r == XBAND_SRAM_SIZE);
-}
-
-// Public re-entry point: reload the SRAM image from the preferred (or
-// default-fallback) file. Used by the Netplay menu when the user picks
-// a different SRAM dump. Caller is responsible for triggering a SNES
-// reset afterwards so the BIOS re-reads the new contents.
-bool8 S9xXBandReloadSRAM (void)
-{
-	return xband_load_sram_image() ? TRUE : FALSE;
-}
 
 // Windows run from one folder each claim a free box save, "<box>.srm", "<box> [window 2].srm", ...,
 // for their lifetime instead of overwriting one shared file; a new slot starts as a copy of the first.
@@ -6357,6 +6420,102 @@ static std::string xband_box_path (const char *srm_path)
 	return xband_box_slot_path(srm_path, xband_box_slot);
 }
 
+#include "xbandtexts.h"
+
+// The box OS's ccitt_updcrc (CRC-16, poly $1021, MSB first).
+static uint16 xbox_crc (uint32 crc, const uint8 *p, uint32 n)
+{
+	while (n--)
+	{
+		crc ^= (uint32) *p++ << 8;
+		for (int i = 0; i < 8; i++)
+			crc = (crc & 0x8000 ? (crc << 1) ^ 0x1021 : crc << 1) & 0xffff;
+	}
+	return (uint16) crc;
+}
+
+static uint32 xbox_sram_ptr (uint32 off)
+{
+	const uint8 *p = XBand.sram + off;
+	const uint32 a = p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32) p[3] << 24);
+	return a >= 0xE00000 && a < 0xE00000 + XBAND_SRAM_SIZE && !(a & 1) ? a - 0xE00000 : 0;
+}
+
+// _ComputeTypeCheckSum: the DBTypeNode with its crc zeroed, then each SRAM item's heap block
+// (DBListNode next/id/flags/data, Block.logicalBlockSize bytes). Items, or 0 for a broken list.
+static int xbox_type_items (uint32 tn, uint32 *items, int max, uint16 *crc)
+{
+	uint8 node[8];
+	memcpy(node, XBand.sram + tn, 8);
+	node[4] = node[5] = 0;
+	uint32 c = xbox_crc(0xffff, node, 8);
+	int count = 0;
+	for (uint32 n = xbox_sram_ptr(tn); n; n = xbox_sram_ptr(n))
+	{
+		const uint32 size = XBand.sram[n - 2] | (XBand.sram[n - 1] << 8);
+		if (count == max || n < 10 || size < 6 || n + size > XBAND_SRAM_SIZE)
+			return 0;
+		c = xbox_crc(c, XBand.sram + n, size);
+		items[count++] = n;
+	}
+	*crc = (uint16) c;
+	return count;
+}
+
+// Rewrites the server texts in place, as _AddItemToDB does for an item of the same size, and the
+// box's phone number, so the box shows the picked server's before it calls. Too-small items stay.
+static void xband_box_texts (bool local)
+{
+	for (uint8 type : { (uint8) kStringItemType, (uint8) kWriteableStringType })
+		for (uint32 tn = 0; tn + 8 <= XBAND_SRAM_SIZE; tn += 2)
+		{
+			uint32 items[256];
+			uint16 crc;
+			if (XBand.sram[tn + 6] != type || !xbox_sram_ptr(tn))
+				continue;
+			const int count = xbox_type_items(tn, items, 256, &crc);
+			if (!count || crc != (XBand.sram[tn + 4] | (XBand.sram[tn + 5] << 8)))
+				continue;
+			bool changed = false;
+			for (const XBandBoxText &t : kXBandBoxTexts)
+				for (int i = 0; i < count && t.type == type; i++)
+				{
+					const uint32 n = items[i];
+					const uint32 room = (XBand.sram[n - 2] | (XBand.sram[n - 1] << 8)) - 6;
+					uint8 data[64];
+					const size_t size = XBandBoxTextData(t, local, data);
+					if (XBand.sram[n + 4] != t.id || size > room)
+						continue;
+					memset(XBand.sram + n + 6, 0, room);
+					memcpy(XBand.sram + n + 6, data, size);
+					changed = true;
+				}
+			if (changed)
+			{
+				xbox_type_items(tn, items, 256, &crc);
+				XBand.sram[tn + 4] = crc & 0xff;
+				XBand.sram[tn + 5] = crc >> 8;
+				XBand.sram_dirty = TRUE;
+			}
+			break;
+		}
+
+	// gBoxID (BoxIdentification, $E0FD98): boxPhoneNumber at +62, its checksum over the rest at +350.
+	uint8 *id = XBand.sram + 0xFD98;
+	if (xbox_crc(0xffff, id, 350) != (id[350] | (id[351] << 8)))
+		return;
+	const char *phone = local ? kXBandBoxPhoneLocal : kXBandBoxPhoneRetro;
+	uint8 field[26] = { 0 };
+	memcpy(field + 2, phone, strlen(phone));
+	if (!memcmp(id + 62, field, 26))
+		return;
+	memcpy(id + 62, field, 26);
+	const uint16 crc = xbox_crc(0xffff, id, 350);
+	id[350] = crc & 0xff;
+	id[351] = crc >> 8;
+	XBand.sram_dirty = TRUE;
+}
+
 bool8 S9xXBandLoadSRAM (const char *srm_path)
 {
 	const std::string box = xband_box_path(srm_path);
@@ -6375,13 +6534,16 @@ bool8 S9xXBandLoadSRAM (const char *srm_path)
 	}
 	fclose(f);
 	if (ok)
+	{
 		XBand.sram_dirty = FALSE;
+		xband_box_texts(xband_local_switch());
+	}
 	return ok;
 }
 
 bool8 S9xXBandSaveSRAM (const char *srm_path)
 {
-	// All zero: the BIOS never ran, so don't hide a BIOS-folder dump behind it.
+	// All zero: the BIOS never ran, so there's no box to save yet.
 	uint32 i = 0;
 	while (i < XBAND_SRAM_SIZE && !XBand.sram[i])
 		i++;
@@ -6399,6 +6561,7 @@ bool8 S9xXBandSaveSRAM (const char *srm_path)
 
 void S9xResetXBand (void)
 {
+	xbls_reset();
 	// Reset the BRK / COP debugging flag so each power-on captures a
 	// fresh first-trap snapshot.
 	XBandFirstBrkOp   = 0;
@@ -6417,6 +6580,8 @@ void S9xResetXBand (void)
 	XBand.regs[0x7D] = 0x80;   // read-constant, also seeded here
 	XBand.regs[0xB4] = 0x7F;   // kLEDData
 	XBand.regs[222]  = 8;      // UNKNOWN_REG2
+	xbid_master_low = false;
+	xbid_state = XBID_IDLE;
 
 	// From the Catapult _PUResetModem routine.
 	XBand.modem_regs[0x19] = 0x46;
@@ -6444,7 +6609,9 @@ void S9xResetXBand (void)
 	// drives (_ResetCPU mid-game) keeps the line; power-on and user resets hang up.
 	if (!xband_console_reset)
 	{
-		xband_hang_up();
+		xbnl_server_call = false;	// no "wait for an opponent" window from the call cut here
+		S9xXBandDisconnect();
+		xbnl_reset();
 		XBand.modem_line_relay  = 0;
 		XBand.modem_set_ATV25   = 0;
 		XBand.net_step          = XBAND_NET_IDLE;
@@ -6469,20 +6636,136 @@ void S9xResetXBand (void)
 	snprintf(xband_fake_inject_last, sizeof(xband_fake_inject_last),
 	         "(none)");
 
-	// Seed from a real XBAND SRAM dump (e.g. one of the Cinghialotto
-	// SNES-XBandSRAMs) once per game load; a saved .srm loaded after this
-	// wins. Later resets keep the battery-backed SRAM, as the box does.
-	if (xband_seed_sram)
-	{
-		xband_seed_sram = false;
-		if (xband_load_sram_image())
-			XBand.sram_dirty = FALSE;
-	}
 }
 
 bool8 S9xXBandPendingReset (void)
 {
 	return xband_reset_pending;
+}
+
+// A light is on when its data bit ($B4) is set and its line enabled ($B5).
+uint8 S9xXBandLEDs (void)
+{
+	return XBand.regs[0xB4] & XBand.regs[0xB5] & (XBAND_LED_TOP | XBAND_LED_MIDDLE | XBAND_LED_BOTTOM);
+}
+
+// DS2401 silicon serial on LED line 2 (1-Wire): data bit set + enabled drives the line low.
+#define XBID_LINE	0x04
+static uint8	xbid_rom[8] = { 0x01 };		// family $01, serial, Dallas CRC-8
+static bool	xbid_serial_set = false;
+static uint64	xbid_fall = 0, xbid_presence = 0;
+static int	xbid_bits = 0, xbid_bit = -1;
+static uint8	xbid_cmd = 0;
+
+static uint8 xbid_crc (const uint8 *p)
+{
+	uint8 crc = 0;
+	for (int i = 0; i < 7; i++)
+		for (int b = 0, d = p[i]; b < 8; b++, d >>= 1)
+			crc = ((crc ^ d) & 1) ? (uint8) (((crc ^ 0x18) >> 1) | 0x80) : (uint8) (crc >> 1);
+	return crc;
+}
+
+void S9xXBandSetHardwareSerial (const uint8 serial[6])
+{
+	memcpy(xbid_rom + 1, serial, 6);
+	xbid_rom[7] = xbid_crc(xbid_rom);
+	xbid_serial_set = true;
+}
+
+static void xbid_init_serial (void)
+{
+	if (xbid_serial_set)
+		return;
+	// No frontend serial: a random one for this run.
+	uint64 r = (uint64) time(NULL) ^ ((uint64) clock() << 32) ^ (uint64) (uintptr_t) &xbid_rom;
+	uint8 s[6];
+	for (int i = 0; i < 6; i++)
+	{
+		r = r * 6364136223846793005ULL + 1442695040888963407ULL;
+		s[i] = (uint8) (r >> 56);
+	}
+	S9xXBandSetHardwareSerial(s);
+}
+
+void S9xXBandHardwareID (uint8 id[8])
+{
+	xbid_init_serial();
+	memcpy(id, xbid_rom, 8);
+}
+
+// Master clocks since power-on; slot timing needs microseconds across line and frame edges.
+static uint64 xbid_now (void)
+{
+	return ((uint64) IPPU.TotalEmulatedFrames * Timings.V_Max + CPU.V_Counter) * Timings.H_Max_Master + CPU.Cycles;
+}
+
+static inline uint64 xbid_us (int us)
+{
+	return (uint64) us * 21477 / 1000;
+}
+
+static bool xbid_slave_low (uint64 t)
+{
+	if (xbid_state == XBID_PRESENCE)
+	{
+		if (t >= xbid_presence + xbid_us(120))
+			xbid_state = XBID_CMD;
+		else
+			return t >= xbid_presence;
+	}
+	if (xbid_state == XBID_READ && xbid_bit >= 0 && t < xbid_fall + xbid_us(45))
+		return !((xbid_rom[xbid_bit >> 3] >> (xbid_bit & 7)) & 1);
+	return false;
+}
+
+static void xbid_line_written (void)
+{
+	const bool low = (XBand.regs[0xB5] & XBID_LINE) && (XBand.regs[0xB4] & XBID_LINE);
+	if (low == xbid_master_low)
+		return;
+	const uint64 t = xbid_now();
+	xbid_master_low = low;
+	xbid_slave_low(t);
+	if (low)
+	{
+		xbid_fall = t;
+		xbid_bit = -1;
+		if (xbid_state == XBID_READ)
+		{
+			if (xbid_bits < 64)
+				xbid_bit = xbid_bits++;
+			else
+				xbid_state = XBID_IDLE;
+		}
+		return;
+	}
+	const uint64 held = t - xbid_fall;
+	if (held >= xbid_us(400))
+	{
+		xbid_init_serial();
+		xbid_state = XBID_PRESENCE;
+		xbid_presence = t + xbid_us(30);
+		xbid_bits = 0;
+		xbid_cmd = 0;
+	}
+	else if (xbid_state == XBID_CMD)
+	{
+		if (held < xbid_us(30))
+			xbid_cmd |= 1 << xbid_bits;
+		if (++xbid_bits == 8)
+		{
+			// Read ROM ($33, or $0F on the DS2401's older command set)
+			xbid_state = (xbid_cmd == 0x33 || xbid_cmd == 0x0F) ? XBID_READ : XBID_IDLE;
+			xbid_bits = 0;
+		}
+	}
+}
+
+static uint8 xbid_read_led (void)
+{
+	const bool low = xbid_master_low || xbid_slave_low(xbid_now());
+	return low ? (0x7F & ~XBID_LINE) : 0x7F;
 }
 
 // The BIOS pulled /RESET through the LED lines (SNESBoot.c reboot) and stopped.
@@ -6780,6 +7063,7 @@ bool8 S9xXBandConnect (const char *host, int port)
 	// let through then sits ahead of the box's packet parser and shifts every frame.
 	XBand.socket_fd = sock;
 	xband_connecting = true;
+	xband_dial_failed = false;
 	xband_dial_done = false;
 	xband_far_end_up = false;
 	xband_atv25_until = 0;
@@ -6792,6 +7076,8 @@ static void xband_call_established (xband_sock_t fd)
 	XBand.connected = TRUE;
 	xband_call_local = xband_local_switch();
 	xband_far_end_up = !xband_call_local;	// the switchboard's first bytes answer
+	xbnl_server_call = true;	// its "#A*B*C*D*1#" opponent numbers are Netlink calls
+	xbnl_stream_valid = false;
 
 	// Fresh connection -- drop all sniffed ADSP state and the running
 	// fake-server send_seq counter so a previous session's numbers
@@ -6842,6 +7128,8 @@ static void xband_try_auto_reconnect (void)
 	const char *host = xband_server(&port);
 	if (S9xXBandConnect(host, port))
 		xband_auto_reconnects++;
+	else
+		xband_dial_failed = true;
 }
 
 // Emulation -> XBAND picked another server: the idle ring line follows it.
@@ -6849,16 +7137,25 @@ void S9xXBandServerChanged (void)
 {
 	xband_ring_close();
 	xband_ring_retry = 0;
+	if (!XBand.connected)
+		xband_box_texts(xband_local_switch());
 }
 
 void S9xXBandDisconnect (void)
 {
 	xband_hang_up();
 	xband_ring_close();
+	xbnl_close();
 }
 
 static void xband_hang_up (void)
 {
+	// dreampi listens for an opponent's call after every server call, as the box may now wait.
+	if (xbnl_server_call)
+	{
+		xbnl_server_call = false;
+		xbnl_listen_open();
+	}
 	xband_atv25_until = 0;
 	if (XBand.socket_fd != XBAND_INVALID_SOCKET)
 	{
@@ -6866,6 +7163,7 @@ static void xband_hang_up (void)
 		XBand.socket_fd = XBAND_INVALID_SOCKET;
 	}
 	xband_connecting = false;
+	xband_dial_failed = false;
 	xband_answered  = false;
 	XBand.connected = FALSE;
 	XBand.net_step  = XBAND_NET_IDLE;
@@ -6876,7 +7174,9 @@ static void xband_hang_up (void)
 void S9xXBandPoll (void)
 {
 	xband_frame++;
+	xbls_frame();
 	xband_ring_poll();
+	xbnl_poll();
 	if (XBand.socket_fd == XBAND_INVALID_SOCKET)
 		return;
 
@@ -6894,11 +7194,18 @@ void S9xXBandPoll (void)
 		{
 			XBAND_CLOSESOCKET(fd);
 			XBand.socket_fd = XBAND_INVALID_SOCKET;
+			xband_dial_failed = true;
 			return;
 		}
 		xband_call_established(fd);
 	}
 
+	xband_net_io(fd);
+}
+
+// The socket side of a frame: RX bytes in, framed TX bytes out (also run by the lockstep wait).
+static void xband_net_io (xband_sock_t fd)
+{
 	// ---- ADSP handshake ----
 	//
 	// The XBAND server expects an emulator-client to identify itself
@@ -7135,6 +7442,637 @@ void S9xXBandPoll (void)
 }
 
 // -----------------------------------------------------------------------
+// Netlink peer calls
+// -----------------------------------------------------------------------
+// The retrocomputing server matches like dreampi's Netlink tunnel (github.com/eaudunord/Netlink):
+// the caller is handed "#A*B*C*D*1#", the waiter's IP. TCP 65433 carries RESET / RING / ANSWERING /
+// PING / RESPONSE, each side trades $FF / $01 with its own box, then modem bytes go over UDP.
+
+#define XBNL_TCP_PORT		65433
+#define XBNL_UDP_WAITER		20001
+#define XBNL_UDP_CALLER		20002
+#define XBNL_LISTEN_FRAMES	(900 * 60)	// dreampi waits 15 minutes for an opponent's call
+#define XBNL_HANDSHAKE_FRAMES	(120 * 60)
+#define XBNL_HISTORY		5			// datagrams repeat the last 5 packets
+static const char	xbnl_packet_split[] = "<packetSplit>";
+static const char	xbnl_data_split[]   = "<dataSplit>";
+
+static intptr_t	xbnl_listen_fd = XBAND_INVALID_SOCKET;
+static uint32	xbnl_listen_until = 0;
+static intptr_t	xbnl_ctl_fd = XBAND_INVALID_SOCKET;
+static intptr_t	xbnl_udp_fd = XBAND_INVALID_SOCKET;
+static bool	xbnl_ctl_connecting = false;
+static bool	xbnl_caller = false;
+static bool	xbnl_box_up = false;		// our box is in the call
+static bool	xbnl_sync_wanted = false;	// PING handled: trade $FF / $01 with the box
+static bool	xbnl_sync_sent = false;		// $FF given to the box
+static uint32	xbnl_sync_frame = 0;
+#define XBNL_SYNC_FRAMES	120		// wait for the box, or resend $FF, after 2 s
+static bool	xbnl_local_ok = false;		// the box answered $01; RESPONSE sent
+static uint32	xbnl_deadline = 0;
+static char	xbnl_dial_ip[64];			// the next dial goes to this opponent
+static char	xbnl_peer_ip[64];
+static char	xbnl_ctl_buf[64];
+static int	xbnl_ctl_len = 0;
+static char	xbnl_num[24];
+static int	xbnl_num_len = -1;
+static uint32	xbnl_tx_seq = 0, xbnl_rx_seq = 0, xbnl_ping_frame = 0;
+static std::mutex	xbnl_offer_lock;			// a socket handed over by the local server
+static intptr_t	xbnl_offer_fd = XBAND_INVALID_SOCKET;
+static char	xbnl_offer_ip[64];
+static std::string	xbnl_offer_data;
+static std::string	xbnl_history[XBNL_HISTORY];
+static int	xbnl_history_n = 0;
+static struct sockaddr_in	xbnl_peer_addr;
+
+// XBNL_LOG=1: each Netlink step on stdout; XBNL_LOG=<file>: appended to that file.
+static void xbnl_log (const char *fmt, ...)
+{
+	static int on = -1;
+	static FILE *out = NULL;
+	if (on < 0)
+	{
+		const char *e = getenv("XBNL_LOG");
+		on = e != NULL;
+		out = !e ? NULL : strcmp(e, "1") ? fopen(e, "a") : stdout;
+	}
+	if (!on || !out)
+		return;
+	va_list ap;
+	va_start(ap, fmt);
+	fprintf(out, "xbnl f%u ", (unsigned) xband_frame);
+	vfprintf(out, fmt, ap);
+	fputc('\n', out);
+	fflush(out);
+	va_end(ap);
+}
+
+static bool xbnl_winsock (void)
+{
+#ifdef _WIN32
+	if (!s_winsock_inited)
+	{
+		WSADATA wsa;
+		if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+			return false;
+		s_winsock_inited = true;
+	}
+#endif
+	return true;
+}
+
+static void xbnl_rx_push (const uint8 *p, size_t n)
+{
+	for (size_t i = 0; i < n && XBand.rxbufpos < XBAND_RXBUF_SIZE; i++)
+		XBand.rxbuf[XBand.rxbufpos++] = p[i];
+}
+
+static void xbnl_send (const char *token)
+{
+	if (xbnl_ctl_fd != XBAND_INVALID_SOCKET)
+		send((xband_sock_t) xbnl_ctl_fd, token, (int) strlen(token), XBAND_SEND_FLAGS);
+	xbnl_log("sent %s", token);
+}
+
+static void xbnl_listen_close (void)
+{
+	if (xbnl_listen_fd != XBAND_INVALID_SOCKET)
+		XBAND_CLOSESOCKET(xbnl_listen_fd);
+	xbnl_listen_fd = XBAND_INVALID_SOCKET;
+}
+
+static void xbnl_listen_open (void)
+{
+	xbnl_listen_until = xband_frame + XBNL_LISTEN_FRAMES;
+	if (xbnl_listen_fd != XBAND_INVALID_SOCKET || !xbnl_winsock())
+		return;
+	xband_sock_t fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if ((intptr_t) fd == XBAND_INVALID_SOCKET)
+		return;
+	int on = 1;
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *) &on, sizeof(on));
+	struct sockaddr_in a = {};
+	a.sin_family = AF_INET;
+	a.sin_addr.s_addr = htonl(INADDR_ANY);
+	a.sin_port = htons(XBNL_TCP_PORT);
+	if (bind(fd, (struct sockaddr *) &a, sizeof(a)) != 0 || listen(fd, 5) != 0)
+	{
+		XBAND_CLOSESOCKET(fd);		// another window on this PC already listens
+		xbnl_log("listen on %d failed", XBNL_TCP_PORT);
+		return;
+	}
+	xband_set_nonblocking(fd);
+	xbnl_listen_fd = (intptr_t) fd;
+	xbnl_log("listening on %d", XBNL_TCP_PORT);
+}
+
+static void xbnl_close (void)
+{
+	if (xbnl_state != XBNL_IDLE)
+		xbnl_log("close (state %d)", xbnl_state);
+	if (xbnl_ctl_fd != XBAND_INVALID_SOCKET)
+		XBAND_CLOSESOCKET(xbnl_ctl_fd);
+	if (xbnl_udp_fd != XBAND_INVALID_SOCKET)
+		XBAND_CLOSESOCKET(xbnl_udp_fd);
+	xbnl_ctl_fd = xbnl_udp_fd = XBAND_INVALID_SOCKET;
+	xbnl_state = XBNL_IDLE;
+	xbnl_ringing = xbnl_dialing = xbnl_ctl_connecting = false;
+	xbnl_box_up = xbnl_sync_wanted = xbnl_sync_sent = xbnl_local_ok = false;
+	xbnl_ctl_len = 0;
+}
+
+// Power-on / user reset: no listener, no remembered opponent, no handed-over call.
+static void xbnl_reset (void)
+{
+	xbnl_close();
+	xbnl_listen_close();
+	xbnl_listen_until = xband_frame;
+	xbnl_dial_ip[0] = 0;
+	xbnl_num_len = -1;
+	xbnl_stream_valid = false;
+	std::lock_guard<std::mutex> g(xbnl_offer_lock);
+	if (xbnl_offer_fd != XBAND_INVALID_SOCKET)
+		XBAND_CLOSESOCKET(xbnl_offer_fd);
+	xbnl_offer_fd = XBAND_INVALID_SOCKET;
+}
+
+// The server's msOpponentPhoneNumber: "#A*B*C*D*1#" is the waiter's IP.
+static void xbnl_scan_rx (uint8 b)
+{
+	if (b == '#')
+	{
+		int o[5], n = 0, used = 0;
+		if (xbnl_num_len > 0)
+		{
+			xbnl_num[xbnl_num_len] = 0;
+			n = sscanf(xbnl_num, "%d*%d*%d*%d*%d%n", &o[0], &o[1], &o[2], &o[3], &o[4], &used);
+		}
+		if (n == 5 && used == xbnl_num_len && o[4] == 1 && (unsigned) (o[0] | o[1] | o[2] | o[3]) < 256)
+		{
+			snprintf(xbnl_dial_ip, sizeof(xbnl_dial_ip), "%d.%d.%d.%d", o[0], o[1], o[2], o[3]);
+			xbnl_log("opponent number -> %s", xbnl_dial_ip);
+			xbnl_num_len = -1;
+		}
+		else
+			xbnl_num_len = 0;
+		return;
+	}
+	if (xbnl_num_len >= 0 && ((b >= '0' && b <= '9') || b == '*') && xbnl_num_len < (int) sizeof(xbnl_num) - 1)
+		xbnl_num[xbnl_num_len++] = (char) b;
+	else
+		xbnl_num_len = -1;
+}
+
+// A server data segment: scan only bytes not seen yet (resends repeat from the box's ack).
+static void xbnl_scan_segment (uint32 seq, const uint8 *data, int len)
+{
+	if (!xbnl_stream_valid || (int32) (seq - xbnl_stream_next) > 0)
+	{
+		xbnl_num_len = -1;		// a gap: the number can't span it
+		xbnl_stream_next = seq;
+		xbnl_stream_valid = true;
+	}
+	for (int i = (int) (xbnl_stream_next - seq); i < len; i++)
+		xbnl_scan_rx(data[i]);
+	if ((int32) (seq + len - xbnl_stream_next) > 0)
+		xbnl_stream_next = seq + len;
+}
+
+// 0 public (or a host name), 1 private LAN, 2 loopback.
+static int xbnl_scope (const char *host)
+{
+	struct in_addr a;
+	if (!strcmp(host, "localhost"))
+		return 2;
+	if (inet_pton(AF_INET, host, &a) != 1)
+		return 0;
+	const uint32 ip = ntohl(a.s_addr);
+	if ((ip >> 24) == 127)
+		return 2;
+	if ((ip >> 24) == 10 || (ip >> 20) == 0xAC1 || (ip >> 16) == 0xC0A8)
+		return 1;
+	return 0;
+}
+
+// RTS with an opponent's number in hand dials the opponent, not the server.
+static bool xbnl_dial (void)
+{
+	if (!xbnl_dial_ip[0])
+		return false;
+	xbnl_close();
+	strcpy(xbnl_peer_ip, xbnl_dial_ip);
+	// A server reports the waiter as it saw it: on its own PC or LAN that address is the server's own.
+	const int peer = xbnl_scope(xbnl_peer_ip), server = xbnl_scope(xband_last_host);
+	if (xband_last_host[0] && peer > server)
+	{
+		xbnl_log("opponent %s is behind the server; dialing %s", xbnl_peer_ip, xband_last_host);
+		snprintf(xbnl_peer_ip, sizeof(xbnl_peer_ip), "%s", xband_last_host);
+	}
+	xbnl_dial_ip[0] = 0;
+	xbnl_caller = true;
+	xbnl_dialing = true;
+	xbnl_state = XBNL_HANDSHAKE;
+	xbnl_deadline = xband_frame + XBNL_HANDSHAKE_FRAMES;
+	xband_dial_done = false;
+	xband_far_end_up = false;
+	xband_atv25_until = 0;
+	xbnl_ctl_fd = xband_open_socket(xbnl_peer_ip, XBNL_TCP_PORT);
+	xbnl_ctl_connecting = xbnl_ctl_fd != XBAND_INVALID_SOCKET;
+	xbnl_log("dial %s:%d%s", xbnl_peer_ip, XBNL_TCP_PORT, xbnl_ctl_connecting ? "" : " (no socket)");
+	return true;		// a dead address just rings out until the BIOS gives up
+}
+
+static void xbnl_box_answers_call (void)
+{
+	xbnl_box_up = true;
+	XBand.connected = TRUE;
+	XBand.net_step  = XBAND_NET_CONNECTED;
+	XBand.rxbufpos  = XBand.rxbufused = 0;
+	XBand.txbufpos  = XBand.txbufused = 0;
+}
+
+// RTS while a peer rings answers it.
+static bool xbnl_answer (void)
+{
+	if (!xbnl_ringing)
+		return false;
+	xbnl_ringing = false;
+	xbnl_log("box answered");
+	xband_answered   = true;
+	xband_far_end_up = true;
+	xband_dial_done  = true;
+	xbnl_box_answers_call();
+	return true;
+}
+
+static void xbnl_sync_start (void)
+{
+	xbnl_sync_wanted = true;
+	xbnl_sync_frame = xband_frame;
+}
+
+static void xbnl_sync_ff (const char *why)
+{
+	const uint8 ff = 0xFF;
+	XBand.txbufpos = XBand.txbufused = 0;	// dreampi reads past everything before the $01
+	xbnl_rx_push(&ff, 1);
+	xbnl_sync_sent = true;
+	xbnl_sync_frame = xband_frame;
+	xbnl_log("sync: $FF to the box (%s)", why);
+}
+
+static void xbnl_data_start (void)
+{
+	if (xbnl_ctl_fd != XBAND_INVALID_SOCKET)
+		XBAND_CLOSESOCKET(xbnl_ctl_fd);
+	xbnl_ctl_fd = XBAND_INVALID_SOCKET;
+
+	xband_sock_t fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if ((intptr_t) fd == XBAND_INVALID_SOCKET)
+	{
+		xbnl_close();
+		return;
+	}
+	int on = 1;
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *) &on, sizeof(on));
+	struct sockaddr_in a = {};
+	a.sin_family = AF_INET;
+	a.sin_addr.s_addr = htonl(INADDR_ANY);
+	a.sin_port = htons(xbnl_caller ? XBNL_UDP_CALLER : XBNL_UDP_WAITER);
+	if (bind(fd, (struct sockaddr *) &a, sizeof(a)) != 0)
+	{
+		XBAND_CLOSESOCKET(fd);
+		xbnl_close();
+		return;
+	}
+	xband_set_nonblocking(fd);
+	xbnl_udp_fd = (intptr_t) fd;
+
+	memset(&xbnl_peer_addr, 0, sizeof(xbnl_peer_addr));
+	struct addrinfo hints = {}, *res = NULL;
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+	if (getaddrinfo(xbnl_peer_ip, NULL, &hints, &res) == 0 && res)
+	{
+		memcpy(&xbnl_peer_addr, res->ai_addr, sizeof(xbnl_peer_addr));
+		freeaddrinfo(res);
+	}
+	xbnl_peer_addr.sin_family = AF_INET;
+	xbnl_peer_addr.sin_port = htons(xbnl_caller ? XBNL_UDP_WAITER : XBNL_UDP_CALLER);
+	sendto(fd, "OPEN_SHIRO", 10, 0, (struct sockaddr *) &xbnl_peer_addr, sizeof(xbnl_peer_addr));
+
+	xbnl_tx_seq = xbnl_rx_seq = 0;
+	xbnl_history_n = 0;
+	xbnl_ping_frame = xband_frame;
+	xbnl_state = XBNL_DATA;
+	XBand.txbufpos = XBand.txbufused = 0;
+	xbnl_log("data over UDP to %s:%d", xbnl_peer_ip, ntohs(xbnl_peer_addr.sin_port));
+}
+
+// One control token; false leaves it queued (its turn hasn't come).
+static bool xbnl_token (const char *t)
+{
+	if (!strcmp(t, "ACK RESET"))
+		xbnl_send("RING");
+	else if (!strcmp(t, "ANSWERING"))
+	{
+		// The far end picks up: our dial gets its answer tone.
+		xbnl_dialing = false;
+		xband_far_end_up = true;
+		xbnl_box_answers_call();
+		xbnl_send("PING");
+	}
+	else if (!strcmp(t, "RESET"))
+		xbnl_send("ACK RESET");
+	else if (!strcmp(t, "RING"))
+	{
+		xbnl_send("ANSWERING");
+		xbnl_ringing = true;
+	}
+	else if (!strcmp(t, "PING"))
+	{
+		if (!xbnl_box_up)
+			return false;
+		xbnl_send("ACK PING");
+		xbnl_sync_start();
+	}
+	else if (!strcmp(t, "ACK PING"))
+		xbnl_sync_start();
+	else if (!strcmp(t, "RESPONSE"))
+	{
+		if (!xbnl_local_ok)
+			return false;
+		const uint8 one = 0x01;
+		xbnl_rx_push(&one, 1);
+		xbnl_data_start();
+	}
+	return true;
+}
+
+static void xbnl_control (void)
+{
+	static const char *const tokens[] = { "ACK RESET", "ACK PING", "ANSWERING", "RESPONSE", "RESET", "RING", "PING" };
+	char c;
+	while (xbnl_ctl_len < (int) sizeof(xbnl_ctl_buf) &&
+	       recv((xband_sock_t) xbnl_ctl_fd, &c, 1, 0) == 1)
+		xbnl_ctl_buf[xbnl_ctl_len++] = c;
+
+	char peek;
+	const int got = (int) recv((xband_sock_t) xbnl_ctl_fd, &peek, 1, MSG_PEEK);
+	const bool closed = got == 0;
+
+	while (xbnl_ctl_len > 0 && xbnl_state == XBNL_HANDSHAKE)
+	{
+		bool partial = false, used = false;
+		for (const char *t : tokens)
+		{
+			const int n = (int) strlen(t);
+			if (xbnl_ctl_len >= n && !memcmp(xbnl_ctl_buf, t, n))
+			{
+				if (!xbnl_token(t))
+					return;
+				xbnl_log("got %s", t);
+				if (xbnl_ctl_fd == XBAND_INVALID_SOCKET)
+					return;		// RESPONSE moved the call to UDP
+				memmove(xbnl_ctl_buf, xbnl_ctl_buf + n, xbnl_ctl_len - n);
+				xbnl_ctl_len -= n;
+				used = true;
+				break;
+			}
+			if (xbnl_ctl_len < n && !memcmp(xbnl_ctl_buf, t, xbnl_ctl_len))
+				partial = true;
+		}
+		if (used)
+			continue;
+		if (partial)
+			break;
+		memmove(xbnl_ctl_buf, xbnl_ctl_buf + 1, --xbnl_ctl_len);	// not a token: resync
+	}
+	if (closed && xbnl_state == XBNL_HANDSHAKE)
+		xbnl_close();		// the peer gave up before the data phase
+}
+
+static void xbnl_data_io (void)
+{
+	xband_sock_t fd = (xband_sock_t) xbnl_udp_fd;
+	char buf[2048];
+	for (;;)
+	{
+		struct sockaddr_in from;
+		socklen_t fl = sizeof(from);
+		const int n = (int) recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr *) &from, &fl);
+		if (n <= 0)
+			break;
+		const std::string d(buf, n);
+		if (d == "PING_SHIRO")
+		{
+			sendto(fd, "PONG_SHIRO", 10, 0, (struct sockaddr *) &xbnl_peer_addr, sizeof(xbnl_peer_addr));
+			continue;
+		}
+		if (d == "PONG_SHIRO" || d == "OPEN_SHIRO")
+			continue;
+
+		// Newest first; take the one we need next, or the newest when it's gone (as netlink.py).
+		std::vector<std::string> packets;
+		for (size_t at = 0;;)
+		{
+			const size_t cut = d.find(xbnl_packet_split, at);
+			packets.push_back(d.substr(at, cut == std::string::npos ? std::string::npos : cut - at));
+			if (cut == std::string::npos)
+				break;
+			at = cut + sizeof(xbnl_packet_split) - 1;
+		}
+		for (;;)
+		{
+			size_t pick = 0;
+			for (size_t i = 0; i < packets.size(); i++)
+			{
+				const size_t cut = packets[i].rfind(xbnl_data_split);
+				if (cut != std::string::npos && strtoul(packets[i].c_str() + cut + sizeof(xbnl_data_split) - 1, NULL, 10) == xbnl_rx_seq)
+				{
+					pick = i;
+					break;
+				}
+			}
+			const std::string &p = packets[pick];
+			const size_t cut = p.rfind(xbnl_data_split);
+			if (cut == std::string::npos)
+				break;
+			const uint32 seq = (uint32) strtoul(p.c_str() + cut + sizeof(xbnl_data_split) - 1, NULL, 10);
+			if (seq < xbnl_rx_seq)
+				break;
+			xbnl_rx_seq = seq + 1;
+			xbnl_rx_push((const uint8 *) p.data(), cut);
+			if (pick == 0)
+				break;
+		}
+	}
+
+	if (xband_frame - xbnl_ping_frame >= 60)
+	{
+		sendto(fd, "PING_SHIRO", 10, 0, (struct sockaddr *) &xbnl_peer_addr, sizeof(xbnl_peer_addr));
+		xbnl_ping_frame = xband_frame;
+	}
+
+	if (XBand.txbufused < XBand.txbufpos)
+	{
+		std::string pkt((const char *) XBand.txbuf + XBand.txbufused, XBand.txbufpos - XBand.txbufused);
+		pkt += xbnl_data_split;
+		pkt += std::to_string(xbnl_tx_seq++);
+		for (int i = XBNL_HISTORY - 1; i > 0; i--)
+			xbnl_history[i] = xbnl_history[i - 1];
+		xbnl_history[0] = pkt;
+		if (xbnl_history_n < XBNL_HISTORY)
+			xbnl_history_n++;
+		std::string out = xbnl_history[0];
+		for (int i = 1; i < xbnl_history_n; i++)
+			out += xbnl_packet_split + xbnl_history[i];
+		for (int k = 0; k < 2; k++)		// netlink.py sends every datagram twice
+			sendto(fd, out.data(), (int) out.size(), 0, (struct sockaddr *) &xbnl_peer_addr, sizeof(xbnl_peer_addr));
+		XBand.txbufpos = XBand.txbufused = 0;
+	}
+}
+
+bool8 S9xXBandNetlinkOffer (intptr_t sock, const char *ip, const uint8 *data, size_t len)
+{
+	std::lock_guard<std::mutex> g(xbnl_offer_lock);
+	if (!Settings.XBAND || xbnl_offer_fd != XBAND_INVALID_SOCKET)
+		return FALSE;
+	xbnl_offer_fd = sock;
+	snprintf(xbnl_offer_ip, sizeof(xbnl_offer_ip), "%s", ip);
+	xbnl_offer_data.assign((const char *) data, len);
+	return TRUE;
+}
+
+// A handed-over caller rings the box like its own listener's would, while the box waits.
+static void xbnl_take_offer (void)
+{
+	intptr_t fd;
+	std::string data;
+	{
+		std::lock_guard<std::mutex> g(xbnl_offer_lock);
+		fd = xbnl_offer_fd;
+		if (fd == XBAND_INVALID_SOCKET)
+			return;
+		xbnl_offer_fd = XBAND_INVALID_SOCKET;
+		snprintf(xbnl_peer_ip, sizeof(xbnl_peer_ip), "%s", xbnl_offer_ip);
+		data.swap(xbnl_offer_data);
+	}
+	if (xbnl_state != XBNL_IDLE || XBand.socket_fd != XBAND_INVALID_SOCKET || (int32) (xbnl_listen_until - xband_frame) <= 0)
+	{
+		xbnl_log("handed-over call from %s refused: the box isn't waiting", xbnl_peer_ip);
+		XBAND_CLOSESOCKET(fd);
+		return;
+	}
+	xband_set_nonblocking((xband_sock_t) fd);
+	int on = 1;
+	setsockopt((xband_sock_t) fd, IPPROTO_TCP, TCP_NODELAY, (const char *) &on, sizeof(on));
+	xbnl_ctl_fd = fd;
+	xbnl_caller = false;
+	xbnl_state = XBNL_HANDSHAKE;
+	xbnl_deadline = xband_frame + XBNL_HANDSHAKE_FRAMES;
+	xbnl_ctl_len = (int) (data.size() < sizeof(xbnl_ctl_buf) ? data.size() : sizeof(xbnl_ctl_buf));
+	memcpy(xbnl_ctl_buf, data.data(), xbnl_ctl_len);
+	xbnl_log("incoming call from %s (via the local server)", xbnl_peer_ip);
+}
+
+static void xbnl_poll (void)
+{
+	xbnl_take_offer();
+	if (xbnl_listen_fd != XBAND_INVALID_SOCKET)
+	{
+		if ((int32) (xband_frame - xbnl_listen_until) > 0)
+			xbnl_listen_close();
+		else if (xbnl_state == XBNL_IDLE && XBand.socket_fd == XBAND_INVALID_SOCKET)
+		{
+			struct sockaddr_in from;
+			socklen_t fl = sizeof(from);
+			xband_sock_t fd = accept((xband_sock_t) xbnl_listen_fd, (struct sockaddr *) &from, &fl);
+			if ((intptr_t) fd != XBAND_INVALID_SOCKET)
+			{
+				xband_set_nonblocking(fd);
+				int on = 1;
+				setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *) &on, sizeof(on));
+				inet_ntop(AF_INET, &from.sin_addr, xbnl_peer_ip, sizeof(xbnl_peer_ip));
+				xbnl_ctl_fd = (intptr_t) fd;
+				xbnl_caller = false;
+				xbnl_state = XBNL_HANDSHAKE;
+				xbnl_deadline = xband_frame + XBNL_HANDSHAKE_FRAMES;
+				xbnl_log("incoming call from %s", xbnl_peer_ip);
+			}
+		}
+	}
+
+	if (xbnl_state == XBNL_HANDSHAKE)
+	{
+		if ((int32) (xband_frame - xbnl_deadline) > 0)
+		{
+			xbnl_close();
+			return;
+		}
+		if (xbnl_ctl_connecting)
+		{
+			const int state = xband_connect_state((xband_sock_t) xbnl_ctl_fd);
+			if (state == 0)
+				return;
+			xbnl_ctl_connecting = false;
+			if (state < 0)
+			{
+				XBAND_CLOSESOCKET(xbnl_ctl_fd);
+				xbnl_ctl_fd = XBAND_INVALID_SOCKET;
+				xbnl_log("connect to %s failed", xbnl_peer_ip);
+				return;		// no tunnel there: the dial rings out
+			}
+			xbnl_send("RESET");
+		}
+		if (xbnl_ctl_fd == XBAND_INVALID_SOCKET)
+			return;
+
+		// The $FF waits until the box transmits: right after RTS it is still training and drops
+		// it (dreampi sends it after CONNECT). Its $01 answers; everything before is dropped.
+		if (xbnl_sync_wanted && !xbnl_local_ok)
+		{
+			if (!xbnl_sync_sent)
+			{
+				if (XBand.txbufused < XBand.txbufpos)
+					xbnl_sync_ff("box is talking");
+				else if (xband_frame - xbnl_sync_frame >= XBNL_SYNC_FRAMES)
+					xbnl_sync_ff("box quiet");
+			}
+			else
+			{
+				while (XBand.txbufused < XBand.txbufpos)
+					if (XBand.txbuf[XBand.txbufused++] == 0x01)
+					{
+						xbnl_local_ok = true;
+						xbnl_log("sync: box answered $01");
+						xbnl_send("RESPONSE");
+						break;
+					}
+				if (XBand.txbufused >= XBand.txbufpos)
+					XBand.txbufpos = XBand.txbufused = 0;
+				if (!xbnl_local_ok && xband_frame - xbnl_sync_frame >= XBNL_SYNC_FRAMES)
+					xbnl_sync_ff("no $01 yet");
+			}
+		}
+		else if (!xbnl_sync_wanted)
+			XBand.txbufpos = XBand.txbufused = 0;
+		xbnl_control();
+	}
+	else if (xbnl_state == XBNL_DATA)
+		xbnl_data_io();
+}
+
+// One pump of whichever link carries the call (the lockstep wait runs it too).
+static void xband_link_io (void)
+{
+	if (xbnl_state == XBNL_DATA)
+		xbnl_data_io();
+	else if (XBand.socket_fd != XBAND_INVALID_SOCKET)
+		xband_net_io((xband_sock_t) XBand.socket_fd);
+}
+
+// -----------------------------------------------------------------------
 // XBAND Keyboard (SNES port 2)
 // -----------------------------------------------------------------------
 // Catapult's SNES keyboard firmware (catakybd.SRC v1.7SNES) behind the BIOS
@@ -7227,6 +8165,14 @@ static void xbkbd_finish (void)
 		xbkbd.caps_led = led;
 		S9xSetInfoString(led ? "XBAND Keyboard: Caps Lock on" : "XBAND Keyboard: Caps Lock off");
 	}
+}
+
+// The BIOS's own Caps Lock (kCapsLocked, flipped by each Caps make) as its LED line reports it;
+// known once a transaction has carried the LED.
+bool8 S9xXBandKeyboardCapsLED (bool8 *known)
+{
+	*known = xbkbd_read_seen;
+	return (xbkbd.caps_led);
 }
 
 uint8 S9xXBandKeyboardClock (void)

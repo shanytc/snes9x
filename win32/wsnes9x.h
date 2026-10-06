@@ -388,6 +388,10 @@ struct sGUI {
 	// is its own switch; Settings.XBANDEnabled is the two together.
 	bool XBandEnabled;
 	bool XBandModem;
+	// XBand -> Show Modem LED Activity: the box's front lights in the window title (Modem only).
+	bool XBandShowLEDs;
+	// Start Server: matches go peer to peer (Netlink) instead of through this PC.
+	bool XBandServerNetlink;
 };
 
 //TURBO masks

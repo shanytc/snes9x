@@ -275,7 +275,14 @@ struct Event
 };
 
 struct RingLine { sock_t conn; Event bridged, released, done; };
-struct Waiter { uint32_t line, cookie, rnd; double until; };
+struct Waiter { uint32_t line, cookie, rnd; double until; std::string ip; };
+static bool s_netlink = false;	// matches go peer to peer: the dialer gets "#A*B*C*D*1#", the waiter's IP
+static XBandPeerHandler s_peer_handler = NULL;
+
+void XBandServerSetPeerHandler (XBandPeerHandler handler)
+{
+	s_peer_handler = handler;
+}
 
 static std::mutex                                     sb_lock;
 static std::map<uint32_t, Waiter>                     sb_waiting;		// gameID -> waiting line
@@ -289,6 +296,7 @@ static std::map<uint32_t, std::shared_ptr<RingLine>>  sb_ring_lines;	// line -> 
 static const struct { uint32_t id; const char *name; } kGames[] =
 {
 	{ 0x94b564b5, "DOOM\xaa" },
+	{ 0x55ce0daf, "Zelda Maze" },	// Catapult's maze game, on the Link to the Past (USA) cart
 	{ 0xa8973c8c, "Ken Griffey Baseball\xaa" },
 	{ 0xdf5aa2e2, "Ken Griffey Baseball-A\xaa" },
 	{ 0x2d17c045, "Killer Instinct\xaa" },
@@ -528,6 +536,13 @@ static Bytes news (void)
 	snprintf(shortd, sizeof(shortd), "%d.%d.%02d", d->tm_mon + 1, d->tm_mday, d->tm_year % 100);
 	snprintf(longd, sizeof(longd), "%s %d, %d", kMonths[d->tm_mon], d->tm_mday, d->tm_year + 1900);
 	Bytes out = { msNewsHeader, 9, 0x01 };		// kBandwidthNews, kNewDaysNewsFlag
+	// These pages replace another server's Bandwidth issue, so drop its version (kBANDWIDTHVersion,
+	// DB constant 105) too: Retrocomputing.Network skips resending an issue the box claims to have.
+	static const uint8_t kSetConstants = 45;
+	out.push_back(kSetConstants);
+	put32(out, 1);
+	out.push_back(105);
+	put32(out, 0);
 	std::vector<Bytes> p1 = masthead(1, 2, shortd, 41, 54, 0x17E4, 0x1224, 0x1A66);
 	p1.push_back(text_object("XBAND IS BACK ONLINE", 23, 61, 167, 101, 4, 0, 0x7C82, 0x3C41));
 	p1.push_back(text_object(longd, 23, 110, 233, 130, 2, 0, 0x185F, 0x0C2F));
@@ -540,6 +555,32 @@ static Bytes news (void)
 	                         129, 35, 233, 95));
 	append(out, news_page(2, true, 1, p2));
 	return out;
+}
+
+#include "../xbandtexts.h"
+
+static Bytes writable_string (int id, const std::string &text);
+
+// The box's server texts (dial screen, home banner) and phone number, the texts sized like Retrocomputing.Network's so the
+// emulator can swap either set in place when Emulation -> XBAND switches servers.
+static Bytes dial_texts (void)
+{
+	Bytes b;
+	for (const XBandBoxText &t : kXBandBoxTexts)
+	{
+		uint8_t data[64];
+		const size_t size = XBandBoxTextData(t, true, data);
+		if (t.type == kWriteableStringType)
+			append(b, writable_string(t.id, t.local));	// marks a connect message unread; sized by strlen
+		b.insert(b.end(), { 0x12, t.type, t.id });		// msAddItemToDB keeps the padded size
+		put32(b, (uint32_t) size);
+		b.insert(b.end(), data, data + size);
+	}
+	b.insert(b.end(), { 43, 0, 0 });		// msSetBoxPhoneNumber: scriptID, size, 24-byte number
+	const size_t at = b.size();
+	b.resize(at + 24, 0);
+	memcpy(&b[at], kXBandBoxPhoneLocal, strlen(kXBandBoxPhoneLocal));
+	return b;
 }
 
 static Bytes writable_string (int id, const std::string &text)
@@ -906,7 +947,8 @@ static Bytes xmail (const Bytes &up, const Login &login, bool mail_only)
 }
 
 // True with the waiter's cookie/seed when someone waits for this game; else queues this line.
-static bool match (bool have_game, uint32_t id, bool have_line, uint32_t line, uint32_t &cookie, uint32_t &rnd)
+static bool match (bool have_game, uint32_t id, bool have_line, uint32_t line, const std::string &ip, uint32_t &cookie,
+                   uint32_t &rnd, std::string &waiter_ip)
 {
 	std::lock_guard<std::mutex> g(sb_lock);
 	if (have_game)
@@ -916,7 +958,8 @@ static bool match (bool have_game, uint32_t id, bool have_line, uint32_t line, u
 		{
 			cookie = w->second.cookie;
 			rnd = w->second.rnd;
-			if (have_line)
+			waiter_ip = w->second.ip;
+			if (have_line && !s_netlink)
 				sb_pending[line] = w->second.line;
 			sb_waiting.erase(w);
 			return true;
@@ -925,13 +968,14 @@ static bool match (bool have_game, uint32_t id, bool have_line, uint32_t line, u
 	cookie = (rng()() & 0x7FFFFFFF) | 1;
 	rnd = rng()();
 	if (have_game && have_line)
-		sb_waiting[id] = Waiter { line, cookie, rnd, now_s() + TIMEOUT_MINUTES * 60 };
+		sb_waiting[id] = Waiter { line, cookie, rnd, now_s() + TIMEOUT_MINUTES * 60, ip };
 	return false;
 }
 
-static Bytes reply (const Bytes &upload, bool have_line, uint32_t line)
+static Bytes reply (const Bytes &upload, bool have_line, uint32_t line, const std::string &ip)
 {
 	Bytes out = news();
+	append(out, dial_texts());
 	Login login;
 	const bool mail_only = challenge_type(upload) == kChallengeTypeMailOnly;
 	if (parse_login(upload, login))
@@ -975,13 +1019,22 @@ static Bytes reply (const Bytes &upload, bool have_line, uint32_t line)
 	}
 	append(out, date_and_time());
 	uint32_t cookie, rnd;
-	if (match(have_game, id, have_line, line, cookie, rnd))
+	std::string waiter_ip;
+	if (match(have_game, id, have_line, line, ip, cookie, rnd, waiter_ip))
 	{
-		logf("         reply: line %08X: opponent found, dial it (cookie %08X)", (unsigned) line, (unsigned) cookie);
+		// The switchboard routes by line, so any digits do; Netlink dials the waiter's IP.
+		std::string number = "5551212";
+		if (s_netlink)
+		{
+			number = "#" + waiter_ip + "*1#";
+			std::replace(number.begin(), number.end(), '.', '*');
+		}
+		logf("         reply: line %08X: opponent found, dial %s (cookie %08X)", (unsigned) line, number.c_str(),
+		     (unsigned) cookie);
 		append(out, writable_string(kOpponentName, "Opponent"));
-		static const char kNumber[] = "5551212";	// any digits: the switchboard routes by line
-		Bytes ph = { msOpponentPhoneNumber, 0, (uint8_t) sizeof(kNumber) };
-		ph.insert(ph.end(), kNumber, kNumber + sizeof(kNumber));
+		Bytes ph = { msOpponentPhoneNumber, 0, (uint8_t) (number.size() + 1) };
+		ph.insert(ph.end(), number.begin(), number.end());
+		ph.push_back(0);
 		put32(ph, cookie);
 		put32(ph, rnd);
 		append(out, ph);
@@ -1011,7 +1064,7 @@ static Bytes reply (const Bytes &upload, bool have_line, uint32_t line)
 // A server call (xbserver.py serve): HELO, ADSP open, the upload, then the paced reply
 // ---------------------------------------------------------------------------
 
-static void serve (sock_t conn, bool have_line, uint32_t line, Bytes data, const char *tag)
+static void serve (sock_t conn, bool have_line, uint32_t line, Bytes data, const char *tag, const std::string &ip)
 {
 	Deframer deframer;
 	bool have_box = false;
@@ -1147,7 +1200,7 @@ static void serve (sock_t conn, bool have_line, uint32_t line, Bytes data, const
 		{
 			replied = true;
 			logf("%s upload done: %d bytes", tag, (int) upload.size());
-			stream = reply(upload, have_line, line);
+			stream = reply(upload, have_line, line, ip);
 			logf("%s replying %d ServerTalk bytes", tag, (int) stream.size());
 			last_progress = now_s();
 		}
@@ -1322,6 +1375,12 @@ static bool read_intro (sock_t conn, std::string &kind, uint32_t &line, Bytes &p
 		if (recv(conn, &c, 1, 0) <= 0)
 			return false;
 		ident += c;
+		if (ident == "RESET")
+		{
+			kind = "PEER";		// a Netlink caller for this PC's box, sharing the port
+			pending.assign(ident.begin(), ident.end());
+			return true;
+		}
 	}
 	std::string buf;
 	const double more = now_s() + 0.3;
@@ -1353,7 +1412,17 @@ static void handle (sock_t conn, std::string addr)
 	std::string kind;
 	uint32_t line = 0;
 	Bytes pending;
-	if (read_intro(conn, kind, line, pending))
+	const bool intro = read_intro(conn, kind, line, pending);
+	if (intro && kind == "PEER")
+	{
+		const bool taken = s_peer_handler && s_peer_handler((intptr_t) conn, addr.c_str(), pending.data(), pending.size());
+		logf("[--------] Netlink call from %s %s", addr.c_str(), taken ? "handed to this PC's box" : "refused (no box waiting)");
+		track(conn, false);
+		if (!taken)
+			close_sock(conn);
+		return;
+	}
+	if (intro)
 	{
 		const bool have_line = !kind.empty();
 		char tag[16];
@@ -1383,7 +1452,7 @@ static void handle (sock_t conn, std::string addr)
 			else
 			{
 				logf("%s call from %s", tag, addr.c_str());
-				serve(conn, have_line, line, pending, tag);
+				serve(conn, have_line, line, pending, tag, addr);
 			}
 		}
 	}
@@ -1418,10 +1487,11 @@ static void accept_loop (void)
 	}
 }
 
-bool XBandServerStart (int port, const std::string &dir, std::string &why)
+bool XBandServerStart (int port, const std::string &dir, bool netlink, std::string &why)
 {
 	if (s_running)
 		return true;
+	s_netlink = netlink;
 #ifdef _WIN32
 	WSADATA wsa;
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)

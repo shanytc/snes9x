@@ -823,6 +823,8 @@ static bool     xband_ring_connecting = false;	// the ring line's connect is sti
 static bool     xband_connecting   = false;	// the dial's connect is still in progress
 static bool     xband_dial_failed  = false;	// the dial's connect failed: it rings out (no dial tone) until hang-up
 static uint32   xband_frame        = 0;		// S9xXBandPoll calls (one per frame)
+static uint64   xband_mclk_frame   = 0;		// master clocks before this frame
+static uint64   xband_tx_drained   = 0;		// master clock when Fred's TX FIFO runs empty
 static uint32   xband_atv25_until  = 0;		// the answer tone sounds until this frame; 0 = not started
 
 // Netlink peer calls (the retrocomputing server's matches); see the Netlink section.
@@ -5872,6 +5874,20 @@ static bool	xbid_master_low = false;
 static uint8	xbid_read_led (void);
 static void	xbid_line_written (void);
 
+// Fred's TX FIFO drains into the modem at 2400 bps, ten bits a character. Unpaced, the box
+// sent ~2000 bytes/s and a real box at the far end of a Netlink call fell a minute behind.
+#define XBAND_TX_FIFO	4
+
+static uint64 xband_mclk_now (void)
+{
+	return xband_mclk_frame + (uint64) CPU.V_Counter * Timings.H_Max_Master + (uint64) CPU.Cycles;
+}
+
+static uint64 xband_tx_char (void)
+{
+	return (uint64) ((Settings.PAL ? PAL_MASTER_CLOCK : NTSC_MASTER_CLOCK) * 10 / 2400);
+}
+
 // Fred register file read; reg = register byte address / 2 (A0 ignored).
 static uint8 xband_reg_read (uint8 reg)
 {
@@ -5921,8 +5937,8 @@ static uint8 xband_reg_read (uint8 reg)
 	}
 	else if (reg == 0xA0)
 	{
-		// Fred modem status 1 — bsnes-plus returns 0
-		result = 0;
+		// kReadMStatus1: kRMtxfull (bit 0) while the FIFO still holds XBAND_TX_FIFO characters
+		result = xband_tx_drained > xband_mclk_now() + (XBAND_TX_FIFO - 1) * xband_tx_char() ? 0x01 : 0x00;
 	}
 	else if (reg == 0x84)
 	{
@@ -6061,6 +6077,9 @@ static void xband_reg_write (uint8 reg, uint8 byte, uint32 address)
 	// Modem TX FIFO write at Fred reg $90 ($FBC120)
 	if (reg == 0x90)
 	{
+		const uint64 now = xband_mclk_now();
+		xband_tx_drained = (xband_tx_drained > now ? xband_tx_drained : now) + xband_tx_char();
+
 		if (XBand.net_step == XBAND_NET_CONNECTED ||
 		    XBand.net_step == XBAND_NET_HANDSHAKE)
 		{
@@ -6617,6 +6636,7 @@ void S9xResetXBand (void)
 		XBand.net_step          = XBAND_NET_IDLE;
 		XBand.rxbufpos = XBand.rxbufused = 0;
 		XBand.txbufpos = XBand.txbufused = 0;
+		xband_tx_drained = 0;
 	}
 
 	// Drop sniffed ADSP connection state -- a fresh power-on / reset
@@ -7174,6 +7194,7 @@ static void xband_hang_up (void)
 void S9xXBandPoll (void)
 {
 	xband_frame++;
+	xband_mclk_frame += (uint64) Timings.V_Max_Master * Timings.H_Max_Master;
 	xbls_frame();
 	xband_ring_poll();
 	xbnl_poll();

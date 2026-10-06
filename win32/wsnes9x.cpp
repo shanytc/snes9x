@@ -807,11 +807,13 @@ static void CenterCursor()
 void S9xRestoreWindowTitle ()
 {
     TCHAR buf [1024];
+    // The game on screen runs a DSP or Cx4 from the BIOS Manager's dump, not the HLE.
+    Utf8ToWide chip(S9xEnhancedChipTag());
     if (Settings.SuperDisc)
         _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSuperDiscTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     else
     if (SFCBox.Active)
-        _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSFCBoxTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSFCBoxTitle()), (wchar_t *) chip, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     else
     if (Settings.RP2040Cart)
         _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xRP2040CartTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
@@ -820,10 +822,7 @@ void S9xRestoreWindowTitle ()
     {
         char def[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, def, NULL);
-        // A DSP or Cx4 chip is running from the BIOS Manager's dump, not the HLE.
-        const TCHAR *chip = S9xUPD7725Loaded() ? TEXT(" (DSP Enhanced)") :
-                            S9xHG51BLoaded()   ? TEXT(" (Cx4 Enhanced)") : TEXT("");
-        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), chip, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
         _stprintf(buf, TEXT("%s %s"), WINDOW_TITLE, TEXT(VERSION_DISPLAY));

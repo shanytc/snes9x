@@ -1494,9 +1494,10 @@ static struct retro_disk_control_callback superdisc_disk_control = {
 // tag their title, so say it on the OSD.
 static void notify_enhanced_chip(void)
 {
-    const char *s = S9xUPD7725Loaded() ? "DSP Enhanced: running the chip from its firmware"
-                  : S9xHG51BLoaded()   ? "Cx4 Enhanced: running the chip from its data ROM"
-                                       : NULL;
+    const int   chip = S9xEnhancedChip();
+    const char *s = chip == S9X_ENHANCED_DSP ? "DSP Enhanced: running the chip from its firmware"
+                  : chip == S9X_ENHANCED_CX4 ? "Cx4 Enhanced: running the chip from its data ROM"
+                                             : NULL;
     if (!s)
         return;
     if (log_cb)

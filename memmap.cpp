@@ -5717,6 +5717,36 @@ int S9xPF94TimeRemaining (void)
 	return ((PF94.timerFrames - elapsed + fps - 1) / fps);
 }
 
+int S9xEnhancedChip (void)
+{
+	if (S9xHG51BActive())
+		return (S9X_ENHANCED_CX4);
+	if (!S9xUPD7725Active())
+		return (S9X_ENHANCED_NONE);
+
+	// The multi-game boards keep their DSP-1 up all session, but only one
+	// game talks to it: Pilotwings on Campus Challenge '92, Mario Kart on
+	// PowerFest '94, and on the SFC-Box whichever game S9xSFCBoxRemap gave
+	// the DSP window.
+	bool8	used = TRUE;
+	if (PF94.active)
+		used = (PF94.select == ((PF94.board == EVENT_BOARD_CC92) ? 0x03 : 0x0c));
+	else
+	if (Settings.SFCBox)
+		used = (SFCBox.MapReg0 & 0x20) && (SFCBox.MapReg1 & 3) != 1;
+	return (used ? S9X_ENHANCED_DSP : S9X_ENHANCED_NONE);
+}
+
+const char *S9xEnhancedChipTag (void)
+{
+	switch (S9xEnhancedChip())
+	{
+		case S9X_ENHANCED_DSP:	return (" (DSP Enhanced)");
+		case S9X_ENHANCED_CX4:	return (" (Cx4 Enhanced)");
+		default:				return ("");
+	}
+}
+
 // The two event carts keep independent timer settings; these return the loaded
 // board's value (PowerFest '94 vs Campus Challenge '92), clamped to valid ranges.
 int S9xEventTimerMinutes (void)

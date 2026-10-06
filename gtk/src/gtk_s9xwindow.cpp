@@ -1485,13 +1485,12 @@ void Snes9xWindow::set_event_timer(int minutes, int display)
 // Super Disc and Super Famicom Box sessions name the machine and what's in it.
 std::string Snes9xWindow::rom_title()
 {
+    // The game on screen runs a DSP or Cx4 from the BIOS Manager's dump, not the HLE.
+    const char *chip = S9xEnhancedChipTag();
     const std::string name = Settings.SuperDisc  ? std::string(S9xSuperDiscTitle())
-                           : SFCBox.Active       ? std::string(S9xSFCBoxTitle())
+                           : SFCBox.Active       ? std::string(S9xSFCBoxTitle()) + chip
                            : Settings.RP2040Cart ? std::string(S9xRP2040CartTitle())
-                           // A DSP or Cx4 chip is running from the BIOS Manager's dump, not the HLE.
-                           : S9xUPD7725Loaded()  ? S9xBasenameNoExt(Memory.ROMFilename) + " (DSP Enhanced)"
-                           : S9xHG51BLoaded()    ? S9xBasenameNoExt(Memory.ROMFilename) + " (Cx4 Enhanced)"
-                                                 : S9xBasenameNoExt(Memory.ROMFilename);
+                                                 : S9xBasenameNoExt(Memory.ROMFilename) + chip;
     return name + " - SuperSnes9x " VERSION_DISPLAY;
 }
 
@@ -1512,9 +1511,16 @@ bool Snes9xWindow::update_event_title()
         title.compare(title.size() - event_title_suffix.size(), event_title_suffix.size(), event_title_suffix) == 0)
         title.erase(title.size() - event_title_suffix.size());
     event_title_suffix = suffix;
-    // The Super Famicom Box swaps games under the SNES; the title follows.
-    if (config->rom_loaded && SFCBox.Active)
+    // The Super Famicom Box swaps games under the SNES, and whether the game on
+    // screen runs its chip from the dump changes with that or a state saved
+    // under the HLE; the title follows both.
+    static int shown_chip = -1;
+    const int  chip = S9xEnhancedChip();
+    if (config->rom_loaded && (SFCBox.Active || chip != shown_chip))
+    {
+        shown_chip = chip;
         title = rom_title();
+    }
     if (title + suffix != shown)
         window->set_title(title + suffix);
 

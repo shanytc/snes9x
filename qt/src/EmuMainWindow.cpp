@@ -613,11 +613,16 @@ void EmuMainWindow::setEventTimer(int minutes, int display)
 
 void EmuMainWindow::updateEventTitle()
 {
-    // The Super Famicom Box swaps games under the SNES; the title follows.
+    // The Super Famicom Box swaps games under the SNES, and whether the game on
+    // screen runs its chip from the dump changes with that or a state saved
+    // under the HLE; the title follows both.
     static std::string box_title;
-    if (app.isCoreActive() && SFCBox.Active && box_title != S9xSFCBoxTitle())
+    static int         title_chip = -1;
+    const int          chip = S9xEnhancedChip();
+    if (app.isCoreActive() && ((SFCBox.Active && box_title != S9xSFCBoxTitle()) || chip != title_chip))
     {
-        box_title = S9xSFCBoxTitle();
+        box_title  = SFCBox.Active ? S9xSFCBoxTitle() : "";
+        title_chip = chip;
         updateWindowTitle();   // comes back here with the new base
         return;
     }
@@ -1020,21 +1025,17 @@ void EmuMainWindow::updateWindowTitle()
     if (KailleraServerIsRunning())
         return;
 #endif
+    // The game on screen runs a DSP or Cx4 from the BIOS Manager's dump, not the HLE.
+    const char *chip = S9xEnhancedChipTag();
     QString name;
     if (Settings.SuperDisc)
         name = QString::fromUtf8(S9xSuperDiscTitle());
     else if (app.isCoreActive() && SFCBox.Active)
-        name = QString::fromUtf8(S9xSFCBoxTitle());
+        name = QString::fromUtf8(S9xSFCBoxTitle()) + chip;
     else if (app.isCoreActive() && Settings.RP2040Cart)
         name = QString::fromUtf8(S9xRP2040CartTitle());
     else if (app.isCoreActive() && !Memory.ROMFilename.empty())
-    {
-        name = QString::fromStdString(S9xBasenameNoExt(Memory.ROMFilename));
-        if (S9xUPD7725Loaded())
-            name += " (DSP Enhanced)";
-        else if (S9xHG51BLoaded())
-            name += " (Cx4 Enhanced)";
-    }
+        name = QString::fromStdString(S9xBasenameNoExt(Memory.ROMFilename)) + chip;
     event_title_suffix.clear();
     if (!name.isEmpty())
         setWindowTitle(QString("%1 - SuperSnes9x %2").arg(name).arg(VERSION_DISPLAY));

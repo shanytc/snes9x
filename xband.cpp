@@ -7541,6 +7541,18 @@ static void xbnl_listen_close (void)
 	xbnl_listen_fd = XBAND_INVALID_SOCKET;
 }
 
+// Windows lets a second SO_REUSEADDR socket share a port another SO_REUSEADDR socket listens on,
+// so a second window on this PC took a waiting box's 65433; claim it outright, as the server does.
+static void xbnl_claim_port (xband_sock_t fd)
+{
+	int on = 1;
+#ifdef _WIN32
+	setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *) &on, sizeof(on));
+#else
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *) &on, sizeof(on));
+#endif
+}
+
 static void xbnl_listen_open (void)
 {
 	xbnl_listen_until = xband_frame + XBNL_LISTEN_FRAMES;
@@ -7549,8 +7561,7 @@ static void xbnl_listen_open (void)
 	xband_sock_t fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if ((intptr_t) fd == XBAND_INVALID_SOCKET)
 		return;
-	int on = 1;
-	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *) &on, sizeof(on));
+	xbnl_claim_port(fd);
 	struct sockaddr_in a = {};
 	a.sin_family = AF_INET;
 	a.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -7733,8 +7744,7 @@ static void xbnl_data_start (void)
 		xbnl_close();
 		return;
 	}
-	int on = 1;
-	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *) &on, sizeof(on));
+	xbnl_claim_port(fd);
 	struct sockaddr_in a = {};
 	a.sin_family = AF_INET;
 	a.sin_addr.s_addr = htonl(INADDR_ANY);

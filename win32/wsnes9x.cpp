@@ -68,6 +68,7 @@
 #include "../nss.h"
 #include "../superdisc.h"
 #include "../rp2040cart.h"
+#include "../upd7725.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -818,7 +819,9 @@ void S9xRestoreWindowTitle ()
     {
         char def[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, def, NULL);
-        _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(def), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        // The DSP chip is running the BIOS Manager's firmware, not the HLE.
+        const TCHAR *dsp = S9xUPD7725Loaded() ? TEXT(" (DSP Enhanced)") : TEXT("");
+        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), dsp, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
         _stprintf(buf, TEXT("%s %s"), WINDOW_TITLE, TEXT(VERSION_DISPLAY));

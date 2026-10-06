@@ -67,6 +67,7 @@
 #include "sfcbox.h"
 #include "superdisc.h"
 #include "rp2040cart.h"
+#include "upd7725.h"
 #include "sgb/sgb.h"
 
 // Emulation -> Game Boy Model radio items, named in snes9x.ui. NULL for the
@@ -1486,6 +1487,8 @@ std::string Snes9xWindow::rom_title()
     const std::string name = Settings.SuperDisc  ? std::string(S9xSuperDiscTitle())
                            : SFCBox.Active       ? std::string(S9xSFCBoxTitle())
                            : Settings.RP2040Cart ? std::string(S9xRP2040CartTitle())
+                           // The DSP chip is running the BIOS Manager's firmware, not the HLE.
+                           : S9xUPD7725Loaded()  ? S9xBasenameNoExt(Memory.ROMFilename) + " (DSP Enhanced)"
                                                  : S9xBasenameNoExt(Memory.ROMFilename);
     return name + " - SuperSnes9x " VERSION_DISPLAY;
 }

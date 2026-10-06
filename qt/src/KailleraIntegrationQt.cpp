@@ -46,15 +46,18 @@ static void kaillera_qt_update_window_title()
     if (!g_app || !g_app->window)
         return;
 
-    QString title = QString("SuperSnes9x %1").arg(VERSION_DISPLAY);
-    if (KailleraServerIsRunning())
+    // Not hosting: back to the window's own title, the game's.
+    if (!KailleraServerIsRunning())
     {
-        const char *srvName = KailleraServerGetName();
-        title += QString(" | Hosting '%1' on port %2")
-            .arg(srvName)
-            .arg(KailleraServerGetPort());
+        g_app->window->updateWindowTitle();
+        return;
     }
-    g_app->window->setWindowTitle(title);
+
+    const char *srvName = KailleraServerGetName();
+    g_app->window->setWindowTitle(QString("SuperSnes9x %1 | Hosting '%2' on port %3")
+        .arg(VERSION_DISPLAY)
+        .arg(srvName)
+        .arg(KailleraServerGetPort()));
 }
 
 // ---------------------------------------------------------------------------

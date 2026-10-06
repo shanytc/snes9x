@@ -18,6 +18,8 @@
 #include "crosshairs.h"
 #include "sgb/sgb.h"
 #include "rp2040cart.h"
+#include "upd7725.h"
+#include "hg51b.h"
 #include <stdio.h>
 #include <vector>
 #include <string>
@@ -1488,6 +1490,24 @@ static struct retro_disk_control_callback superdisc_disk_control = {
     superdisc_add_image_index,
 };
 
+// A DSP or Cx4 running from its dump in the system folder: the desktop ports
+// tag their title, so say it on the OSD.
+static void notify_enhanced_chip(void)
+{
+    const char *s = S9xUPD7725Loaded() ? "DSP Enhanced: running the chip from its firmware"
+                  : S9xHG51BLoaded()   ? "Cx4 Enhanced: running the chip from its data ROM"
+                                       : NULL;
+    if (!s)
+        return;
+    if (log_cb)
+        log_cb(RETRO_LOG_INFO, "%s\n", s);
+    if (environ_cb)
+    {
+        struct retro_message msg = { s, 180 };
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+    }
+}
+
 bool retro_load_game(const struct retro_game_info *game)
 {
     init_descriptors();
@@ -1592,6 +1612,8 @@ bool retro_load_game(const struct retro_game_info *game)
             for(int lcv = 0; lcv < sizeof(Memory.RAM); lcv++)
                 Memory.RAM[lcv] = rand() % 256;
         }
+
+        notify_enhanced_chip();
     }
 
     if (!rom_loaded && log_cb)

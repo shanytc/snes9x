@@ -58,6 +58,8 @@ class EmuMainWindow : public QMainWindow
     void superDiscInsert();
     void superDiscEject();
     void superDiscDebugMenu();
+    // The game (or machine) and any DSP/Cx4 tag; Kaillera's hosting title wins.
+    void updateWindowTitle();
     void powerCycle();
     bool openFile(const std::string &filename);
     void playMovieDialog();
@@ -177,7 +179,6 @@ class EmuMainWindow : public QMainWindow
     QAction *superdisc_insert_action = nullptr;
     QAction *superdisc_eject_action = nullptr;
     void refreshSuperDiscMenu();
-    void updateWindowTitle();
 
     QTimer mouse_timer;
     bool cursor_visible = true;

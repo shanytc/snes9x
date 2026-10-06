@@ -58,6 +58,9 @@
 #include "sfcbox.h"
 #include "sgb/sgb.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
+#include "upd7725.h"
+#include "hg51b.h"
 #include "movie.h"
 #include "snapshot.h"
 #include "fscompat.h"
@@ -1009,21 +1012,32 @@ void EmuMainWindow::superDiscDebugMenu()
     S9xSetInfoString("Debug menu");
 }
 
-// Super Disc and Super Famicom Box sessions name the machine and what's in it.
-// Any other title (Kaillera's, say) is left alone unless it is a stale one of theirs.
+// Super Disc and Super Famicom Box sessions name the machine and what's in it,
+// any other cart its file, tagged while a DSP or Cx4 runs from its dump.
 void EmuMainWindow::updateWindowTitle()
 {
-    const char *machine = Settings.SuperDisc                       ? S9xSuperDiscTitle()
-                        : (app.isCoreActive() && SFCBox.Active)   ? S9xSFCBoxTitle()
-                                                                   : nullptr;
-    if (!machine && !windowTitle().startsWith("Super Disc (") &&
-        !windowTitle().startsWith("Super Famicom Box"))
+#ifdef KAILLERA_SUPPORT
+    if (KailleraServerIsRunning())
         return;
+#endif
+    QString name;
+    if (Settings.SuperDisc)
+        name = QString::fromUtf8(S9xSuperDiscTitle());
+    else if (app.isCoreActive() && SFCBox.Active)
+        name = QString::fromUtf8(S9xSFCBoxTitle());
+    else if (app.isCoreActive() && Settings.RP2040Cart)
+        name = QString::fromUtf8(S9xRP2040CartTitle());
+    else if (app.isCoreActive() && !Memory.ROMFilename.empty())
+    {
+        name = QString::fromStdString(S9xBasenameNoExt(Memory.ROMFilename));
+        if (S9xUPD7725Loaded())
+            name += " (DSP Enhanced)";
+        else if (S9xHG51BLoaded())
+            name += " (Cx4 Enhanced)";
+    }
     event_title_suffix.clear();
-    if (machine)
-        setWindowTitle(QString("%1 - SuperSnes9x %2")
-                           .arg(QString::fromUtf8(machine))
-                           .arg(VERSION_DISPLAY));
+    if (!name.isEmpty())
+        setWindowTitle(QString("%1 - SuperSnes9x %2").arg(name).arg(VERSION_DISPLAY));
     else
         setWindowTitle(QString("SuperSnes9x %1").arg(VERSION_DISPLAY));
     updateEventTitle();   // put the session-timer countdown back

@@ -43,6 +43,7 @@ static_assert(sizeof(Regs) == 600, "savestate layout");
 static uint32	prog[2048];
 static uint16	drom[1024];
 static uint8	park[2048];		// 1: a JNRQM to itself, 2: a JRQM to itself
+static void		Decode (void);
 static Regs		r;
 static bool8	loaded = FALSE;
 static bool8	active = FALSE;
@@ -87,6 +88,7 @@ bool8 S9xUPD7725Load (const uint8 *image, uint32 size)
 	}
 	for (int i = 0; i < 1024; i++)
 		drom[i] = image[6144 + i * 2] | (image[6144 + i * 2 + 1] << 8);
+	Decode();
 
 	loaded = TRUE;
 	S9xUPD7725Reset();
@@ -337,6 +339,241 @@ static alwaysinline bool Parked (void)
 	return (k && ((k == 1) ? !(r.sr & SR_RQM) : (r.sr & SR_RQM) != 0));
 }
 
+// Each program word decoded once at load, so the run loop reads its fields
+// instead of extracting them, and DP/RP update without branches.
+enum { D_OP, D_RT, D_JP, D_LD, D_PARK };
+struct Dec
+{
+	uint8	kind, src, dst, alu;
+	uint8	psel, accb, dpinc, dpkeep;
+	uint8	dpxor, rpdec, jtest, jwant;	// jtest: 0 flag, 1 DP low, 2 RQM, 3 always, 4 call, 5 JMPSO
+	uint8	jmask, jflagb;
+	uint16	imm;						// LD's immediate, or the jump target
+};
+static Dec	dec[2048];
+
+static void Decode (void)
+{
+	static const uint8	flag_bits[6] = { F_C, F_Z, F_OV0, F_OV1, F_S0, F_S1 };
+
+	for (int i = 0; i < 2048; i++)
+	{
+		const uint32	op = prog[i];
+		Dec				d;
+		memset(&d, 0, sizeof(d));
+		d.dpkeep = 0x0f;
+
+		switch (op >> 22)
+		{
+			case 0:
+			case 1:
+			{
+				d.kind = (op >> 22) ? D_RT : D_OP;
+				d.src = (op >> 4) & 15;
+				d.dst = op & 15;
+				d.alu = (op >> 16) & 15;
+				d.psel = (op >> 20) & 3;
+				d.accb = (op & 0x8000) != 0;
+				// A move into DP or RP takes precedence over that pointer's modifier.
+				if (d.dst != 4)
+				{
+					switch ((op >> 13) & 3)
+					{
+						case 1: d.dpinc = 1; break;
+						case 2: d.dpinc = 0x0f; break;
+						case 3: d.dpkeep = 0; break;
+					}
+					d.dpxor = ((op >> 9) & 15) << 4;
+				}
+				d.rpdec = (op & 0x100) && d.dst != 5;
+				break;
+			}
+
+			case 2:
+			{
+				const uint32	brch = (op >> 13) & 0x1ff;
+				d.kind = D_JP;
+				d.imm = (op >> 2) & 0x7ff;
+				if (brch >= 0x080 && brch <= 0x0af && !(brch & 1))
+				{
+					const uint32	sel = (brch - 0x080) >> 2;
+					d.jtest = 0;
+					d.jflagb = sel & 1;
+					d.jmask = flag_bits[sel >> 1];
+					d.jwant = (brch & 2) != 0;
+				}
+				else switch (brch)
+				{
+					case 0x000: d.jtest = 5; break;
+					case 0x0b0: d.jtest = 1; d.jmask = 0x0f; d.jwant = 0; d.jflagb = 0; break;	// low nibble == 0
+					case 0x0b1: d.jtest = 1; d.jmask = 0x0f; d.jwant = 0; d.jflagb = 1; break;	// != 0
+					case 0x0b2: d.jtest = 1; d.jmask = 0x0f; d.jwant = 0x0f; d.jflagb = 0; break;	// == F
+					case 0x0b3: d.jtest = 1; d.jmask = 0x0f; d.jwant = 0x0f; d.jflagb = 1; break;	// != F
+					case 0x0b4:
+					case 0x0b8:
+					case 0x100: d.jtest = 3; break;
+					case 0x0bc: d.jtest = 2; d.jwant = 0; break;
+					case 0x0be: d.jtest = 2; d.jwant = 1; break;
+					case 0x140: d.jtest = 4; break;
+					default:	d.jtest = 6; break;	// never taken
+				}
+				if (park[i])
+					d.kind = D_PARK;
+				break;
+			}
+
+			default:
+				d.kind = D_LD;
+				d.dst = op & 15;
+				d.imm = (op >> 6) & 0xffff;
+				break;
+		}
+		dec[i] = d;
+	}
+}
+
+// The run loop with the registers in locals, written back at the end. The
+// multiplier only changes M and N when K or L does, so it runs on those writes.
+static void RunFast (void)
+{
+	uint64	left = r.target - r.executed;
+	uint32	pc = r.pc, rp = r.rp, dp = r.dp, sp = r.sp;
+	uint16	k = r.k, l = r.l, m = r.m, n = r.n;
+	uint16	a = r.a, b = r.b, tr = r.tr, trb = r.trb;
+	uint16	dr = r.dr, sr = r.sr, si = r.si, so = r.so;
+	uint8	flaga = r.flaga, flagb = r.flagb;
+
+#define FAST_MUL	{ int32 _p = (int16) k * (int16) l; m = (uint16) (_p >> 15); n = (uint16) (_p << 1); }
+#define FAST_MOVE(idb, dst)															\
+	switch (dst)																	\
+	{																				\
+		case  0: break;																\
+		case  1: a = idb; break;													\
+		case  2: b = idb; break;													\
+		case  3: tr = idb; break;													\
+		case  4: dp = idb & 0xff; break;											\
+		case  5: rp = idb & 0x3ff; break;											\
+		case  6: dr = idb; sr |= SR_RQM; break;										\
+		case  7: sr = (sr & SR_FIXED) | (idb & ~SR_FIXED); break;					\
+		case  8:																	\
+		case  9: so = idb; break;													\
+		case 10: k = idb; FAST_MUL; break;											\
+		case 11: k = idb; l = drom[rp]; FAST_MUL; break;							\
+		case 12: l = idb; k = r.ram[dp | 0x40]; FAST_MUL; break;					\
+		case 13: l = idb; FAST_MUL; break;											\
+		case 14: trb = idb; break;													\
+		default: r.ram[dp] = idb; break;											\
+	}
+
+	while (left)
+	{
+		const Dec	&d = dec[pc];
+		pc = (pc + 1) & 0x7ff;
+		left--;
+
+		switch (d.kind)
+		{
+			case D_OP:
+			case D_RT:
+			{
+				uint16	idb;
+				switch (d.src)
+				{
+					case  0: idb = trb; break;
+					case  1: idb = a; break;
+					case  2: idb = b; break;
+					case  3: idb = tr; break;
+					case  4: idb = (uint16) dp; break;
+					case  5: idb = (uint16) rp; break;
+					case  6: idb = drom[rp]; break;
+					case  7: idb = 0x8000 - ((flaga & F_S1) ? 1 : 0); break;
+					case  8: sr |= SR_RQM; idb = dr; break;
+					case  9: idb = dr; break;
+					case 10: idb = sr; break;
+					case 11:
+					case 12: idb = si; break;
+					case 13: idb = k; break;
+					case 14: idb = l; break;
+					default: idb = r.ram[dp]; break;
+				}
+
+				if (d.alu)
+				{
+					uint16	p;
+					switch (d.psel)
+					{
+						case 0:  p = r.ram[dp]; break;
+						case 1:  p = idb; break;
+						case 2:  p = m; break;
+						default: p = n; break;
+					}
+					if (d.accb)
+						Alu(d.alu, b, flagb, p, (flaga & F_C) != 0);
+					else
+						Alu(d.alu, a, flaga, p, (flagb & F_C) != 0);
+				}
+
+				FAST_MOVE(idb, d.dst)
+				dp = ((dp & 0xf0) | ((dp + d.dpinc) & d.dpkeep)) ^ d.dpxor;
+				rp = (rp - d.rpdec) & 0x3ff;
+
+				if (d.kind == D_RT)
+				{
+					sp = (sp - 1) & 3;
+					pc = r.stack[sp];
+				}
+				break;
+			}
+
+			case D_PARK:	// a one-instruction loop on RQM can't end until the CPU touches DR
+				if ((sr & SR_RQM) ? d.jwant : !d.jwant)
+				{
+					pc = (pc - 1) & 0x7ff;
+					left = 0;
+				}
+				break;		// else the jump falls through
+
+			case D_JP:
+			{
+				bool	take;
+				switch (d.jtest)
+				{
+					case 0:  take = (((d.jflagb ? flagb : flaga) & d.jmask) != 0) == (d.jwant != 0); break;
+					case 1:  take = ((dp & 0x0f) == d.jwant) != (d.jflagb != 0); break;
+					case 2:  take = ((sr & SR_RQM) != 0) == (d.jwant != 0); break;
+					case 3:  take = true; break;
+					case 4:
+						r.stack[sp] = (uint16) pc;
+						sp = (sp + 1) & 3;
+						take = true;
+						break;
+					case 5:  pc = so & 0x7ff; take = false; break;	// JMPSO
+					default: take = false; break;
+				}
+				if (take)
+					pc = d.imm;
+				break;
+			}
+
+			default:	// LD: immediate to a destination
+			{
+				const uint16	idb = d.imm;
+				FAST_MOVE(idb, d.dst)
+				break;
+			}
+		}
+	}
+#undef FAST_MUL
+#undef FAST_MOVE
+
+	r.executed = r.target - left;
+	r.pc = (uint16) pc; r.rp = (uint16) rp; r.dp = (uint16) dp; r.sp = (uint16) sp;
+	r.k = k; r.l = l; r.m = m; r.n = n;
+	r.a = a; r.b = b; r.tr = tr; r.trb = trb;
+	r.dr = dr; r.sr = sr; r.si = si; r.so = so;
+	r.flaga = flaga; r.flagb = flagb;
+}
+
 static void SyncTo (int32 cycles)
 {
 	uint64	t = r.line_base + (uint64) (int64) cycles;
@@ -366,16 +603,15 @@ static void SyncTo (int32 cycles)
 		return;
 	}
 
-	while (r.executed < r.target)
+	if (r.executed >= r.target)
+		return;
+	// Most syncs find the DSP parked; settle those before loading anything.
+	if (Parked())
 	{
-		if (Parked())
-		{
-			r.executed = r.target;
-			break;
-		}
-		Step();
-		r.executed++;
+		r.executed = r.target;
+		return;
 	}
+	RunFast();
 }
 
 void S9xUPD7725EndScanline (void)

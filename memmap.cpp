@@ -3809,13 +3809,11 @@ static bool8 LoadDSPFirmware (int slot)
 }
 
 // Pilotwings' attract demo was recorded on the first DSP-1 and crashes with
-// the DSP-1B's corrected math; the other games get the DSP-1B. Either falls
-// back to the other revision.
+// the DSP-1B's corrected math; the other games get the DSP-1B. Without that
+// revision's dump the chip runs natively, which needs none.
 static bool8 LoadDSP1Firmware (bool pilotwings)
 {
-	const int	first = pilotwings ? S9X_BIOS_DSP1 : S9X_BIOS_DSP1B;
-	const int	second = pilotwings ? S9X_BIOS_DSP1B : S9X_BIOS_DSP1;
-	return (LoadDSPFirmware(first) || LoadDSPFirmware(second));
+	return (LoadDSPFirmware(pilotwings ? S9X_BIOS_DSP1 : S9X_BIOS_DSP1B) || S9xUPD7725LoadNative(pilotwings));
 }
 
 static bool AcceptCx4DataROM (const uint8 *data, uint32 size, uint32 full_size, void *ctx)

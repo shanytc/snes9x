@@ -186,6 +186,9 @@
     <ClInclude Include="..\upd7725.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\dsp1n.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\hg51b.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
@@ -294,6 +297,9 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\upd7725.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp1n.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\hg51b.cpp">

@@ -7,6 +7,7 @@
 #include <string.h>
 #include "snes9x.h"
 #include "upd7725.h"
+#include "dsp1n.h"
 
 #define DSP_HZ		7600000		// the DSP-n carts' oscillator; one instruction per clock
 
@@ -47,6 +48,8 @@ static void		Decode (void);
 static Regs		r;
 static bool8	loaded = FALSE;
 static bool8	active = FALSE;
+static uint8	native = 0;		// 0: the firmware; 1, 2: the native DSP-1, DSP-1B
+static uint64	native_next = 0;	// master clock of the native chip's next bus event (0: unknown)
 
 static inline uint32 ProgWord (const uint8 *image, int i)
 {
@@ -77,6 +80,7 @@ bool8 S9xUPD7725IsFirmware (const uint8 *image, uint32 size)
 bool8 S9xUPD7725Load (const uint8 *image, uint32 size)
 {
 	loaded = active = FALSE;
+	native = 0;
 	if (!S9xUPD7725IsFirmware(image, size))
 		return (FALSE);
 
@@ -95,9 +99,19 @@ bool8 S9xUPD7725Load (const uint8 *image, uint32 size)
 	return (TRUE);
 }
 
+bool8 S9xUPD7725LoadNative (bool8 first)
+{
+	native = first ? 1 : 2;
+	loaded = TRUE;
+	S9xDSP1NAttach(&r.dr, &r.sr, r.ram);
+	S9xUPD7725Reset();
+	return (TRUE);
+}
+
 void S9xUPD7725Unload (void)
 {
 	loaded = active = FALSE;
+	native = 0;
 }
 
 bool8 S9xUPD7725Loaded (void)
@@ -116,6 +130,9 @@ void S9xUPD7725Reset (void)
 		return;
 	memset(&r, 0, sizeof(r));
 	r.rp = 0x3ff;
+	if (native)
+		S9xDSP1NReset(native == 1);
+	native_next = 0;
 	active = TRUE;
 }
 
@@ -579,6 +596,9 @@ static void SyncTo (int32 cycles)
 	uint64	t = r.line_base + (uint64) (int64) cycles;
 	if (t <= r.synced)
 		return;
+	// The native chip can't change what the CPU sees before its next bus event.
+	if (t < native_next)
+		return;
 
 	// Constant divisors, so the compiler multiplies instead of dividing.
 	uint64	acc = (t - r.synced) * DSP_HZ + r.rem;
@@ -592,6 +612,24 @@ static void SyncTo (int32 cycles)
 	{
 		r.target += acc / 21477273;
 		r.rem = acc % 21477273;
+	}
+
+	if (native)
+	{
+		// overclocked, it runs ahead to its next wait on the CPU, as the firmware does below
+		const bool		oc = ONE_CYCLE != 6 || SLOW_ONE_CYCLE != 8;
+		const uint64	owed = (oc || r.executed < r.target) ? S9xDSP1NRun(oc ? (uint64) 1 << 40 : r.target - r.executed) : S9xDSP1NOwed();
+		r.executed = r.target;
+
+		// the first clock its owed instructions have all run by
+		if (!owed)
+			native_next = ~(uint64) 0;
+		else
+		{
+			const uint64	m = Settings.PAL ? 21281370 : 21477273;
+			native_next = r.synced + (owed * m - r.rem + DSP_HZ - 1) / DSP_HZ;
+		}
+		return;
 	}
 
 	// An overclocked CPU outruns the delays games count on, so the DSP keeps up instead.
@@ -633,6 +671,19 @@ static void Handshake (void)
 		r.sr &= ~(SR_DRS | SR_RQM);
 }
 
+// The handshake at `t`. A native chip waiting on it resumes there, so its clock settles up to `t`
+// first; a running one only looks at RQM at its next wait.
+static void NativeHandshake (int32 t)
+{
+	if (native_next == ~(uint64) 0 && (r.sr & (SR_DRC | SR_DRS)))
+		native_next = 0;
+	SyncTo(t);
+	Handshake();
+	// freed (or parked on the way here and freed): it acts on its next instruction
+	if (native_next == ~(uint64) 0 && !(r.sr & SR_RQM))
+		native_next = 0;
+}
+
 uint8 S9xUPD7725Read (bool8 sr, int32 speed)
 {
 	int32	end = CPU.Cycles + speed;
@@ -643,8 +694,7 @@ uint8 S9xUPD7725Read (bool8 sr, int32 speed)
 
 	uint8	byte = (!(r.sr & SR_DRC) && (r.sr & SR_DRS)) ? r.dr >> 8 : (uint8) r.dr;
 
-	SyncTo(end + 2);
-	Handshake();
+	NativeHandshake(end + 2);
 	return (byte);
 }
 
@@ -662,25 +712,52 @@ void S9xUPD7725Write (uint8 byte, bool8 sr, int32 speed)
 		r.dr = (r.dr & 0xff00) | byte;
 
 	// A DSP write before the DSP sees this one lands on top of it.
-	SyncTo(end + 2);
-	Handshake();
+	NativeHandshake(end + 2);
 }
 
+// The native chip saves its program's place after the registers it shares.
 uint32 S9xUPD7725StateSize (void)
 {
-	return (sizeof(r));
+	return (sizeof(r) + (native ? S9xDSP1NStateSize() : 0));
 }
 
 void S9xUPD7725StateSave (uint8 *buf)
 {
 	memcpy(buf, &r, sizeof(r));
+	if (native)
+		S9xDSP1NStateSave(buf + sizeof(r));
 }
 
 bool8 S9xUPD7725StateLoad (const uint8 *buf, uint32 size)
 {
-	if (!loaded || size != sizeof(r))
+	if (!loaded || size < sizeof(r))
 		return (FALSE);
+
+	const uint32	extra = size - (uint32) sizeof(r);
+	if (native ? extra != S9xDSP1NStateSize() : extra != 0)
+	{
+		// From the other kind of chip, firmware or native: only RAM and the bus carry over,
+		// so it picks up at its command wait (where a game nearly always leaves it).
+		if (native ? extra != 0 : extra != S9xDSP1NStateSize())
+			return (FALSE);
+		memcpy(&r, buf, sizeof(r));
+		if (native)
+			S9xDSP1NIdle(native == 1);
+		else
+		{
+			r.pc = 0x004;
+			r.sp = 0;
+		}
+		S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state's DSP chip ran from its firmware, or without it; carrying on from its command wait.");
+		native_next = 0;
+		active = TRUE;
+		return (TRUE);
+	}
+
 	memcpy(&r, buf, sizeof(r));
+	if (native)
+		S9xDSP1NStateLoad(buf + sizeof(r), extra);
+	native_next = 0;
 	active = TRUE;
 	return (TRUE);
 }

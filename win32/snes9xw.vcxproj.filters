@@ -303,6 +303,9 @@
     <ClInclude Include="..\upd7725.h">
       <Filter>Emu</Filter>
     </ClInclude>
+    <ClInclude Include="..\dsp1n.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
     <ClInclude Include="..\hg51b.h">
       <Filter>Emu</Filter>
     </ClInclude>
@@ -543,6 +546,9 @@
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\upd7725.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp1n.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\hg51b.cpp">

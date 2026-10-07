@@ -20,6 +20,8 @@ bool8	S9xUPD7725IsFirmware (const uint8 *image, uint32 size);
 
 // Starts running `image`; FALSE (and off) if it isn't a firmware dump.
 bool8	S9xUPD7725Load (const uint8 *image, uint32 size);
+// No dump: the DSP-1 (`first`, as in Pilotwings) or DSP-1B runs natively instead (dsp1n.h).
+bool8	S9xUPD7725LoadNative (bool8 first);
 void	S9xUPD7725Unload (void);
 bool8	S9xUPD7725Loaded (void);
 // Whether the chip, rather than the HLE, is answering the CPU right now.

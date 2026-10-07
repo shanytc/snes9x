@@ -260,6 +260,7 @@
     <ClInclude Include="..\rp2040.h" />
     <ClInclude Include="..\rp2040cart.h" />
     <ClInclude Include="..\upd7725.h" />
+    <ClInclude Include="..\dsp1n.h" />
     <ClInclude Include="..\hg51b.h" />
     <ClInclude Include="libretro.h" />
     <ClInclude Include="..\sgb\gb_apu.h" />
@@ -309,6 +310,7 @@
     <ClCompile Include="..\dsp3.cpp" />
     <ClCompile Include="..\dsp4.cpp" />
     <ClCompile Include="..\upd7725.cpp" />
+    <ClCompile Include="..\dsp1n.cpp" />
     <ClCompile Include="..\hg51b.cpp" />
     <ClCompile Include="..\fxemu.cpp" />
     <ClCompile Include="..\fxinst.cpp" />

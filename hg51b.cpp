@@ -57,10 +57,11 @@ static const uint32	kConstants[16] = {
 
 static uint32	drom[1024];
 static Regs		r;
+static uint32	hit_key = ~0u;	// pb | page << 15 of the last cache hit; ~0 once a tag or the base may have moved
 static bool8	loaded = FALSE;
 static bool8	active = FALSE;
 
-static void Step (uint32 clocks);
+static alwaysinline void Step (uint32 clocks);
 
 static inline uint32 Word24 (const uint8 *p)
 {
@@ -111,6 +112,7 @@ void S9xHG51BReset (void)
 	if (!loaded)
 		return;
 	memset(&r, 0, sizeof(r));
+	hit_key = ~0u;
 	r.halt = 1;
 	r.rom_cfg = 1;
 	r.wait_rom = r.wait_ram = 3;
@@ -221,9 +223,9 @@ static void WriteIO (uint32 address, uint8 data)
 			}
 			return;
 
-		case 0x7f49: SetByte(r.cache_base, 0, data); return;
-		case 0x7f4a: SetByte(r.cache_base, 1, data); return;
-		case 0x7f4b: SetByte(r.cache_base, 2, data); return;
+		case 0x7f49: SetByte(r.cache_base, 0, data); hit_key = ~0u; return;
+		case 0x7f4a: SetByte(r.cache_base, 1, data); hit_key = ~0u; return;
+		case 0x7f4b: SetByte(r.cache_base, 2, data); hit_key = ~0u; return;
 		case 0x7f4c:
 			r.cache_lock[0] = data & 1;
 			r.cache_lock[1] = (data >> 1) & 1;
@@ -356,7 +358,7 @@ static inline uint32 Wait (uint32 a)
 	return (0);
 }
 
-static uint32 ReadRegister (uint32 reg)
+static alwaysinline uint32 ReadRegister (uint32 reg)
 {
 	switch (reg)
 	{
@@ -385,7 +387,7 @@ static uint32 ReadRegister (uint32 reg)
 	return (0);
 }
 
-static void WriteRegister (uint32 reg, uint32 data)
+static alwaysinline void WriteRegister (uint32 reg, uint32 data)
 {
 	data &= 0xffffff;
 
@@ -426,7 +428,7 @@ static inline uint32 SetNZ (uint32 x)
 	return (x);
 }
 
-static uint32 Add (uint32 x, uint32 y)
+static alwaysinline uint32 Add (uint32 x, uint32 y)
 {
 	int32	z = (int32) x + (int32) y;
 	r.c = (z > 0xffffff);
@@ -435,7 +437,7 @@ static uint32 Add (uint32 x, uint32 y)
 }
 
 // The overflow test is the same as ADD's, as bsnes and ares have it.
-static uint32 Sub (uint32 x, uint32 y)
+static alwaysinline uint32 Sub (uint32 x, uint32 y)
 {
 	int32	z = (int32) x - (int32) y;
 	r.c = (z >= 0);
@@ -450,7 +452,7 @@ static uint64 Mul (uint32 x, uint32 y)
 }
 
 // kind: 0 SHR, 1 ASR, 2 ROR, 3 SHL. Counts past 24 shift by nothing.
-static uint32 Shift (int kind, uint32 a, uint32 s)
+static alwaysinline uint32 Shift (int kind, uint32 a, uint32 s)
 {
 	s &= 31;
 	if (s > 24)
@@ -483,17 +485,21 @@ static void Pull (void)
 }
 
 // Finds the page holding pb, or picks an unlocked one and starts filling it.
-static int Cache (void)
+static alwaysinline int Cache (void)
 {
+	if (!r.cache_preload && hit_key == ((uint32) r.pb | ((uint32) r.cache_page << 15)))
+		return (r.cache_on = 0, CACHE_HIT);
+	hit_key = ~0u;
+
 	uint32	address = (r.cache_base + r.pb * 512) & 0xffffff;
 
 	if (!r.cache_preload)
 	{
 		if (r.cache_tag[r.cache_page] == address)
-			return (r.cache_on = 0, CACHE_HIT);
+			return (hit_key = r.pb | (r.cache_page << 15), r.cache_on = 0, CACHE_HIT);
 		r.cache_page ^= 1;
 		if (r.cache_tag[r.cache_page] == address)
-			return (r.cache_on = 0, CACHE_HIT);
+			return (hit_key = r.pb | (r.cache_page << 15), r.cache_on = 0, CACHE_HIT);
 		if (r.cache_lock[r.cache_page])
 			r.cache_page ^= 1;
 		if (r.cache_lock[r.cache_page])
@@ -501,6 +507,7 @@ static int Cache (void)
 	}
 
 	r.cache_preload = 0;
+	hit_key = ~0u;
 	r.cache_tag[r.cache_page] = address;
 	r.op = OP_FILL;
 	r.fill_page = r.cache_page;
@@ -556,7 +563,7 @@ static void DmaByte (void)
 	}
 }
 
-static void Advance (void)
+static alwaysinline void Advance (void)
 {
 	r.pc++;
 	if (r.pc != 0)
@@ -579,7 +586,7 @@ static void Advance (void)
 		Halt();
 }
 
-static void Jump (uint16 op, bool take, bool call)
+static alwaysinline void Jump (uint16 op, bool take, bool call)
 {
 	if (!take)
 		return;
@@ -597,7 +604,7 @@ static inline uint32 DRAMIndex (uint32 a)
 	return (a >= 0xc00 ? a - 0x400 : a);
 }
 
-static void Instruction (uint16 op)
+static alwaysinline void Instruction (uint16 op)
 {
 	static const uint8	shifts[4] = { 0, 1, 8, 16 };
 	const uint32	reg = op & 0x7f;
@@ -750,7 +757,7 @@ static void Instruction (uint16 op)
 	}
 }
 
-static void Execute (void)
+static alwaysinline void Execute (void)
 {
 	switch (Cache())
 	{
@@ -777,7 +784,7 @@ static void Suspend (void)
 }
 
 // A bus access the chip started finishes on the clocks after it.
-static void Step (uint32 clocks)
+static alwaysinline void Step (uint32 clocks)
 {
 	r.budget -= clocks;
 
@@ -870,6 +877,12 @@ static void SyncTo (int32 cycles)
 
 	while (r.budget > 0)
 	{
+		// Plain execution, what Main() would pick, without its state tests.
+		if (!(r.op | r.lock | r.suspend_on | r.cache_on | r.dma_on | r.halt | r.bus_on))
+		{
+			Execute();
+			continue;
+		}
 		if (Idle())
 		{
 			r.budget = 0;
@@ -927,6 +940,7 @@ bool8 S9xHG51BStateLoad (const uint8 *buf, uint32 size)
 	if (!loaded || size != sizeof(r))
 		return (FALSE);
 	memcpy(&r, buf, sizeof(r));
+	hit_key = ~0u;
 	active = TRUE;
 	return (TRUE);
 }

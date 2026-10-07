@@ -42,6 +42,7 @@ static_assert(sizeof(Regs) == 600, "savestate layout");
 
 static uint32	prog[2048];
 static uint16	drom[1024];
+static uint8	park[2048];		// 1: a JNRQM to itself, 2: a JRQM to itself
 static Regs		r;
 static bool8	loaded = FALSE;
 static bool8	active = FALSE;
@@ -79,7 +80,11 @@ bool8 S9xUPD7725Load (const uint8 *image, uint32 size)
 		return (FALSE);
 
 	for (int i = 0; i < 2048; i++)
+	{
 		prog[i] = ProgWord(image, i);
+		uint32	op = prog[i], brch = (op >> 13) & 0x1ff;
+		park[i] = ((op >> 22) == 2 && ((op >> 2) & 0x7ff) == (uint32) i) ? (brch == 0x0bc ? 1 : brch == 0x0be ? 2 : 0) : 0;
+	}
 	for (int i = 0; i < 1024; i++)
 		drom[i] = image[6144 + i * 2] | (image[6144 + i * 2 + 1] << 8);
 
@@ -117,7 +122,7 @@ void S9xUPD7725Suspend (void)
 	active = FALSE;
 }
 
-static uint16 Source (uint32 src)
+static alwaysinline uint16 Source (uint32 src)
 {
 	switch (src)
 	{
@@ -140,7 +145,7 @@ static uint16 Source (uint32 src)
 	}
 }
 
-static void Move (uint16 idb, uint32 dst)
+static alwaysinline void Move (uint16 idb, uint32 dst)
 {
 	switch (dst)
 	{
@@ -165,7 +170,7 @@ static void Move (uint16 idb, uint32 dst)
 
 // ADC/SBB and SHL1 take their carry in from the other accumulator's flags,
 // which is what chains ACCA and ACCB into one 32-bit value.
-static void Alu (uint32 op, uint16 &acc, uint8 &flag, uint16 p, bool cin)
+static alwaysinline void Alu (uint32 op, uint16 &acc, uint8 &flag, uint16 p, bool cin)
 {
 	uint16	q = acc;
 	uint32	res;
@@ -227,7 +232,7 @@ static void Alu (uint32 op, uint16 &acc, uint8 &flag, uint16 p, bool cin)
 	flag = f;
 }
 
-static void ExecOP (uint32 op)
+static alwaysinline void ExecOP (uint32 op)
 {
 	uint16	idb = Source((op >> 4) & 15);
 	uint32	alu = (op >> 16) & 15;
@@ -269,7 +274,7 @@ static void ExecOP (uint32 op)
 		r.rp = (r.rp - 1) & 0x3ff;
 }
 
-static void ExecJP (uint32 op)
+static alwaysinline void ExecJP (uint32 op)
 {
 	static const uint8	flag_bits[6] = { F_C, F_Z, F_OV0, F_OV1, F_S0, F_S1 };
 	uint32	brch = (op >> 13) & 0x1ff;
@@ -307,7 +312,7 @@ static void ExecJP (uint32 op)
 		r.pc = na;
 }
 
-static inline void Step (void)
+static alwaysinline void Step (void)
 {
 	uint32	op = prog[r.pc];
 	r.pc = (r.pc + 1) & 0x7ff;
@@ -337,13 +342,10 @@ static inline void Step (void)
 }
 
 // A one-instruction loop on RQM can't end until the CPU touches DR.
-static inline bool Parked (void)
+static alwaysinline bool Parked (void)
 {
-	uint32	op = prog[r.pc];
-	if ((op >> 22) != 2 || ((op >> 2) & 0x7ff) != r.pc)
-		return (false);
-	uint32	brch = (op >> 13) & 0x1ff;
-	return ((brch == 0x0bc && !(r.sr & SR_RQM)) || (brch == 0x0be && (r.sr & SR_RQM)));
+	uint8	k = park[r.pc];
+	return (k && ((k == 1) ? !(r.sr & SR_RQM) : (r.sr & SR_RQM) != 0));
 }
 
 static void SyncTo (int32 cycles)
@@ -352,11 +354,19 @@ static void SyncTo (int32 cycles)
 	if (t <= r.synced)
 		return;
 
-	uint64	master = Settings.PAL ? 21281370 : 21477273;
+	// Constant divisors, so the compiler multiplies instead of dividing.
 	uint64	acc = (t - r.synced) * DSP_HZ + r.rem;
 	r.synced = t;
-	r.target += acc / master;
-	r.rem = acc % master;
+	if (Settings.PAL)
+	{
+		r.target += acc / 21281370;
+		r.rem = acc % 21281370;
+	}
+	else
+	{
+		r.target += acc / 21477273;
+		r.rem = acc % 21477273;
+	}
 
 	// An overclocked CPU outruns the delays games count on, so the DSP keeps up instead.
 	if (ONE_CYCLE != 6 || SLOW_ONE_CYCLE != 8)

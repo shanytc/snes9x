@@ -653,6 +653,58 @@ bool Gyrate (void)			// $14: (Zr, Xr, Yr) after turning by (U, F, L) in the body
 	NT_END
 }
 
+// $02 from its first read of Azs: the centre of projection, the angles' sin and cos, the steepest zenith
+// angle the view plane allows, and the instructions to the next read of Azs
+struct ParamGeo
+{
+	int16	cx0, cy0, cz0, sa, ca, mx;
+	int32	cost;
+};
+
+ParamGeo ParamFrame (bool store)
+{
+	const int16	fx = s.in[0], fy = s.in[1], fz = s.in[2], lfe = s.in[3], les = s.in[4], azs = s.in[6];
+	const SubOut	sca = SubSinCos(s.in[5]), scz = SubSinCos(azs);
+	const int16	ca = sca.a, sa = sca.b, nsa = NegSat(sa), cz = scz.a, sz = scz.b, nsz = NegSat(sz);
+	// the screen's normal, horizontal and vertical vectors
+	const int16	nx = Mul(sz, nsa), ny = Mul(sz, ca), nz = Mul(cz, 0x7fff);
+	// the centre of projection, and the eye G = centre - Les * normal, with its sign words
+	const int16	cx0 = (int16) (fx + Mul(nx, lfe)), cy0 = (int16) (fy + Mul(ny, lfe)), cz0 = (int16) (fz + Mul(nz, lfe));
+	// the view plane, and the steepest zenith angle it allows
+	const SubOut	vp = SubNorm(cz0, 15);
+	const SubOut	mn = SubNorm((int16) (0x1200 + vp.b), -11), mi = SubInv(mn.a, mn.b), mx = SubDenorm(mi.a, mi.b);
+	if (store)
+	{
+		ram[0x7a] = (uint16) nx; ram[0x6a] = (uint16) ny; ram[0x5a] = (uint16) nz;
+		ram[0x7c] = (uint16) Mul(0x7fff, ca); ram[0x6c] = (uint16) Mul(0x7fff, sa); ram[0x5c] = 0;
+		ram[0x7b] = (uint16) Mul(cz, nsa); ram[0x6b] = (uint16) Mul(cz, ca); ram[0x5b] = (uint16) Mul(nsz, 0x7fff);
+		ram[0x6e] = (uint16) ca; ram[0x6f] = (uint16) sa; ram[0x7e] = (uint16) nsa; ram[0x7f] = (uint16) ca;
+		ram[0x49] = (uint16) sz;
+		// what's left of the command lands here; $06 adds $4E above Les
+		ram[0x4e] = ram[0x4f] = (uint16) (s.cmd >> 4 & 3);
+		ram[0x5f] = 0;
+		const int16	gx = (int16) (cx0 - Mul(nx, les)), gy = (int16) (cy0 - Mul(ny, les)), gz = (int16) (cz0 - Mul(nz, les));
+		ram[0xbb] = (uint16) gx; ram[0xab] = (uint16) gy; ram[0x9b] = (uint16) gz;
+		ram[0x3b] = (uint16) Mul(gx, RomK(0x329)); ram[0x2b] = (uint16) Mul(gy, RomK(0x329)); ram[0x1b] = (uint16) Mul(gz, RomK(0x329));
+		ram[0xce] = (uint16) les;
+		ram[0x4c] = (uint16) vp.a; ram[0xcc] = (uint16) vp.b;
+	}
+	const ParamGeo	g = { cx0, cy0, cz0, sa, ca, mx.a, (int32) (134 + scz.cost + (sz == -32768 ? 1 : 0) + 1 + vp.cost + mn.cost + mi.cost + mx.cost) };
+	return (g);
+}
+
+// |Azs| and the clip go through the saturation value: 1 - 2^-15 for a negative Azs, else -1
+inline int16 SatSign (int16 azs)
+{
+	return (azs < 0 ? (int16) 0x7fff : (int16) -32768);
+}
+
+// how far Azs is past the steepest angle: clipped when not negative
+inline int16 ParamClip (int16 mx, int16 azs)
+{
+	return ((int16) ((int16) -Mul(azs, SatSign(azs)) - mx));
+}
+
 bool Parameter (void)		// $02: the projection: eye, view plane and angles; Vof, Vva, Cx, Cy
 {
 	NT_BEGIN
@@ -668,36 +720,21 @@ bool Parameter (void)		// $02: the projection: eye, view plane and angles; Vof, 
 		s.i = (int32) (18 + sca.cost + (sca.b == -32768 ? 1 : 0));
 	}
 	NT_BURN(s.i); NT_WAIT(14); NT_READNF(15, s.in[6]);	// Azs
+	s.i = ParamFrame(true).cost;
+	// Azs is read twice more, straight from DR: a CPU byte in between lands in the later reads
+	NT_BURN(s.i - 1); NT_READNF(16, s.in[7]);			// Azs again, for the clip
+	s.out[4] = ParamClip(ParamFrame(false).mx, s.in[7]) >= 0;
+	if (!s.out[4])
 	{
-		const int16	fx = s.in[0], fy = s.in[1], fz = s.in[2], lfe = s.in[3], les = s.in[4], azs = s.in[6];
-		const SubOut	sca = SubSinCos(s.in[5]), scz = SubSinCos(azs);
-		const int16	ca = sca.a, sa = sca.b, nsa = NegSat(sa), cz = scz.a, sz = scz.b, nsz = NegSat(sz);
-		// the screen's normal, horizontal and vertical vectors
-		const int16	nx = Mul(sz, nsa), ny = Mul(sz, ca), nz = Mul(cz, 0x7fff);
-		ram[0x7a] = (uint16) nx; ram[0x6a] = (uint16) ny; ram[0x5a] = (uint16) nz;
-		ram[0x7c] = (uint16) Mul(0x7fff, ca); ram[0x6c] = (uint16) Mul(0x7fff, sa); ram[0x5c] = 0;
-		ram[0x7b] = (uint16) Mul(cz, nsa); ram[0x6b] = (uint16) Mul(cz, ca); ram[0x5b] = (uint16) Mul(nsz, 0x7fff);
-		ram[0x6e] = (uint16) ca; ram[0x6f] = (uint16) sa; ram[0x7e] = (uint16) nsa; ram[0x7f] = (uint16) ca;
-		ram[0x49] = (uint16) sz;
-		// what's left of the command lands here; $06 adds $4E above Les
-		ram[0x4e] = ram[0x4f] = (uint16) (s.cmd >> 4 & 3);
-		ram[0x5f] = 0;
-		// the centre of projection, and the eye G = centre - Les * normal, with its sign words
-		const int16	cx0 = (int16) (fx + Mul(nx, lfe)), cy0 = (int16) (fy + Mul(ny, lfe)), cz0 = (int16) (fz + Mul(nz, lfe));
-		const int16	gx = (int16) (cx0 - Mul(nx, les)), gy = (int16) (cy0 - Mul(ny, les)), gz = (int16) (cz0 - Mul(nz, les));
-		ram[0xbb] = (uint16) gx; ram[0xab] = (uint16) gy; ram[0x9b] = (uint16) gz;
-		ram[0x3b] = (uint16) Mul(gx, RomK(0x329)); ram[0x2b] = (uint16) Mul(gy, RomK(0x329)); ram[0x1b] = (uint16) Mul(gz, RomK(0x329));
-		ram[0xce] = (uint16) les;
-		// the view plane, and the steepest zenith angle it allows
-		const SubOut	vp = SubNorm(cz0, 15);
-		ram[0x4c] = (uint16) vp.a; ram[0xcc] = (uint16) vp.b;
-		const SubOut	mn = SubNorm((int16) (0x1200 + vp.b), -11), mi = SubInv(mn.a, mn.b), mx = SubDenorm(mi.a, mi.b);
-		s.i = (int32) (134 + scz.cost + (sz == -32768 ? 1 : 0) + 1 + vp.cost + mn.cost + mi.cost + mx.cost);
-		// |Azs| and the clip go through the saturation value: 1 - 2^-15 for a negative Azs, else -1
-		const int16	sg = azs < 0 ? (int16) 0x7fff : (int16) -32768;
-		const int16	d = (int16) ((int16) -Mul(azs, sg) - mx.a);
-		const bool	clip = d >= 0;
-		const int16	az = clip ? (int16) -Mul(mx.a, sg) : azs;
+		NT_BURN(5); NT_READNF(17, s.in[7]);				// and once more, unclipped
+	}
+	{
+		const ParamGeo	f = ParamFrame(false);
+		const int16	les = s.in[4], cx0 = f.cx0, cy0 = f.cy0, cz0 = f.cz0, sa = f.sa, ca = f.ca;
+		const bool	clip = s.out[4] != 0;
+		// clipped, the angle comes from the clip's read of Azs
+		const int16	sg = SatSign(s.in[7]), d = ParamClip(f.mx, s.in[7]);
+		const int16	az = clip ? (int16) -Mul(f.mx, sg) : s.in[7];
 		const int16	aux = clip ? (int16) ((Mul(d, sg) << 2) | 3) : 0;
 		ram[0x40] = (uint16) aux;
 		const SubOut	sc = SubSinCos(az);
@@ -720,13 +757,7 @@ bool Parameter (void)		// $02: the projection: eye, view plane and angles; Vof, 
 		s.out[2] = (int16) (Mul(sa, t) + cx0);
 		s.out[3] = (int16) (cy0 - Mul(ca, t));
 		ram[0xb9] = (uint16) s.out[2]; ram[0xa9] = (uint16) s.out[3];
-		s.out[4] = clip;
 		s.out[5] = (int16) ((clip ? 70 : 64) + sc.cost + n1.cost + c1.cost + n2.cost + c2.cost + n3.cost + cs.cost + n4.cost + vva.cost + 1 + vz.cost + dc.cost);
-	}
-	NT_BURN(s.i - 1); NT_READNF(16, s.in[7]);			// Azs again, for the clip
-	if (!s.out[4])
-	{
-		NT_BURN(5); NT_READNF(17, s.in[7]);				// and once more, unclipped
 	}
 	NT_BURN(s.out[5] - 1); NT_WRITE(18, s.out[0]);
 	NT_WAIT(19); NT_WRITE(20, s.out[1]);

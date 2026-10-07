@@ -603,15 +603,9 @@ static void RunFast (void)
 	r.flaga = flaga; r.flagb = flagb;
 }
 
-static void SyncTo (int32 cycles)
+// The DSP's clock up to master clock `t`: the instructions due by then.
+static inline void Advance (uint64 t)
 {
-	uint64	t = r.line_base + (uint64) (int64) cycles;
-	if (t <= r.synced)
-		return;
-	// The native chip can't change what the CPU sees before its next bus event.
-	if (t < native_next)
-		return;
-
 	// Constant divisors, so the compiler multiplies instead of dividing.
 	uint64	acc = (t - r.synced) * DSP_HZ + r.rem;
 	r.synced = t;
@@ -625,6 +619,18 @@ static void SyncTo (int32 cycles)
 		r.target += acc / 21477273;
 		r.rem = acc % 21477273;
 	}
+}
+
+static void SyncTo (int32 cycles)
+{
+	uint64	t = r.line_base + (uint64) (int64) cycles;
+	if (t <= r.synced)
+		return;
+	// The native chip can't change what the CPU sees before its next bus event.
+	if (t < native_next)
+		return;
+
+	Advance(t);
 
 	if (native)
 	{
@@ -687,8 +693,19 @@ static void Handshake (void)
 // first; a running one only looks at RQM at its next wait.
 static void NativeHandshake (int32 t)
 {
+	// parked on a handshake that frees it: only its clock moves, to where it resumes
 	if (native_next == ~(uint64) 0 && (r.sr & (SR_DRC | SR_DRS)))
+	{
+		const uint64	at = r.line_base + (uint64) (int64) t;
+		if (at > r.synced)
+		{
+			Advance(at);
+			r.executed = r.target;
+		}
+		Handshake();
 		native_next = 0;
+		return;
+	}
 	SyncTo(t);
 	Handshake();
 	// freed (or parked on the way here and freed): it acts on its next instruction

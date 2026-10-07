@@ -52,6 +52,9 @@ static int		chip = 0;		// UPD7725_DSP1...
 static const S9xUPD7725Native	*native = NULL;	// the native chip, or NULL for the firmware
 static bool8	native_variant = FALSE;
 static uint64	native_next = 0;	// master clock of the native chip's next bus event (0: unknown)
+static S9xUPD7725Lane	lane = { 0, NULL };	// the native chip's, while parked in a lane
+static uint64	lane_free = 0;		// freed in a lane: when (0: not); its clock still stands where it parked
+static uint32	lane_lo[64], lane_hi[64];	// master clocks within which a span's instructions may, and surely do, all run
 
 static inline uint32 ProgWord (const uint8 *image, int i)
 {
@@ -115,7 +118,7 @@ bool8 S9xUPD7725LoadNative (int which)
 	chip = which;
 	native_variant = which == UPD7725_DSP1;
 	loaded = TRUE;
-	native->attach(&r.dr, &r.sr, r.ram, &r.trb);
+	native->attach(&r.dr, &r.sr, r.ram, &r.trb, &lane);
 	S9xUPD7725Reset();
 	return (TRUE);
 }
@@ -142,6 +145,14 @@ void S9xUPD7725Reset (void)
 		return;
 	memset(&r, 0, sizeof(r));
 	r.rp = 0x3ff;
+	lane_free = 0;
+	// n instructions take a span of master clocks that has n or n - 1 of them, by the clock's phase
+	const uint64	m = Settings.PAL ? 21281370 : 21477273;
+	for (uint32 n = 0; n < 64; n++)
+	{
+		lane_lo[n] = (uint32) ((n ? (n - 1) * m : 0) + DSP_HZ - 1) / DSP_HZ;
+		lane_hi[n] = (uint32) ((n * m + DSP_HZ - 1) / DSP_HZ);
+	}
 	if (native)
 		native->reset(native_variant);
 	native_next = 0;
@@ -604,7 +615,7 @@ static void RunFast (void)
 }
 
 // The DSP's clock up to master clock `t`: the instructions due by then.
-static inline void Advance (uint64 t)
+static alwaysinline void Advance (uint64 t)
 {
 	// Constant divisors, so the compiler multiplies instead of dividing.
 	uint64	acc = (t - r.synced) * DSP_HZ + r.rem;
@@ -621,7 +632,32 @@ static inline void Advance (uint64 t)
 	}
 }
 
-static void SyncTo (int32 cycles)
+// Freed at master clock `at`, has a chip in a lane run its span by `t`? The span decides it from the gap
+// unless the gap is at the edge, where the clock's phase does.
+static bool LaneTakenAtEdge (uint64 at, uint64 t)
+{
+	const uint64	a = (at - r.synced) * DSP_HZ + r.rem, b = (t - r.synced) * DSP_HZ + r.rem;
+	return ((Settings.PAL ? b / 21281370 - a / 21281370 : b / 21477273 - a / 21477273) >= lane.span);
+}
+
+static alwaysinline bool LaneTaken (uint64 at, uint64 t)
+{
+	const uint64	d = t - at;
+	const uint32	n = lane.span;
+	if (n < 64)
+	{
+		if (d >= lane_hi[n])
+			return (true);
+		if (d < lane_lo[n])
+			return (false);
+	}
+	return (LaneTakenAtEdge(at, t));
+}
+
+static void SyncFrom (uint64 t);
+
+// Most syncs end here: before the native chip's next bus event, or with its lane's word taken.
+static alwaysinline void SyncTo (int32 cycles)
 {
 	uint64	t = r.line_base + (uint64) (int64) cycles;
 	if (t <= r.synced)
@@ -629,11 +665,35 @@ static void SyncTo (int32 cycles)
 	// The native chip can't change what the CPU sees before its next bus event.
 	if (t < native_next)
 		return;
+	// freed in a lane and past its next wait: it has taken its word and parked there, untouched since
+	if (lane_free)
+	{
+		if (LaneTaken(lane_free, t))
+		{
+			lane_free = 0;
+			lane.step();
+			native_next = ~(uint64) 0;
+			return;
+		}
+	}
+	SyncFrom(t);
+}
+
+static void SyncFrom (uint64 t)
+{
+	if (lane_free)
+	{
+		// it resumes from where it was freed
+		Advance(lane_free);
+		r.executed = r.target;
+		lane_free = 0;
+	}
 
 	Advance(t);
 
 	if (native)
 	{
+
 		// overclocked, it runs ahead to its next wait on the CPU, as the firmware does below
 		const bool		oc = ONE_CYCLE != 6 || SLOW_ONE_CYCLE != 8;
 		const uint64	owed = (oc || r.executed < r.target) ? native->run(oc ? (uint64) 1 << 40 : r.target - r.executed) : native->owed();
@@ -691,19 +751,25 @@ static void Handshake (void)
 
 // The handshake at `t`. A native chip waiting on it resumes there, so its clock settles up to `t`
 // first; a running one only looks at RQM at its next wait.
-static void NativeHandshake (int32 t)
+static alwaysinline void NativeHandshake (int32 t)
 {
 	// parked on a handshake that frees it: only its clock moves, to where it resumes
 	if (native_next == ~(uint64) 0 && (r.sr & (SR_DRC | SR_DRS)))
 	{
 		const uint64	at = r.line_base + (uint64) (int64) t;
-		if (at > r.synced)
-		{
-			Advance(at);
-			r.executed = r.target;
-		}
 		Handshake();
 		native_next = 0;
+		if (at > r.synced)
+		{
+			// in a lane, its clock waits to see if the next sync finds its word taken
+			if (lane.span && ONE_CYCLE == 6 && SLOW_ONE_CYCLE == 8)
+				lane_free = at;
+			else
+			{
+				Advance(at);
+				r.executed = r.target;
+			}
+		}
 		return;
 	}
 	SyncTo(t);
@@ -769,6 +835,13 @@ uint32 S9xUPD7725StateSize (void)
 
 void S9xUPD7725StateSave (uint8 *buf)
 {
+	// a lane's pending resumption, settled as the handshake would have
+	if (lane_free)
+	{
+		Advance(lane_free);
+		r.executed = r.target;
+		lane_free = 0;
+	}
 	memcpy(buf, &r, sizeof(r));
 	if (native)
 		native->state_save(buf + sizeof(r));
@@ -776,6 +849,7 @@ void S9xUPD7725StateSave (uint8 *buf)
 
 bool8 S9xUPD7725StateLoad (const uint8 *buf, uint32 size)
 {
+	lane_free = 0;
 	if (!loaded || size < sizeof(r))
 		return (FALSE);
 

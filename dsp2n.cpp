@@ -130,35 +130,47 @@ bool Planes (void)			// $00: four bytes' bit pairs, as two words and their byte 
 	NT_END
 }
 
+// $01's 32 bytes in: byte 4g + q, its tables' entries in column 8 + g, rows q and 4 + q
+int32 Planes32Count (void)
+{
+	return (32);
+}
+
+uint32 Planes32InGap (int32 k)
+{
+	return (!k ? 4 : (k & 3) == 2 ? 4 : 5);
+}
+
+void Planes32Put (int32 k, uint16 v)
+{
+	ram[(k & 3) << 4 | (8 + (k >> 2))] = rom[(uint8) v];
+	ram[(4 + (k & 3)) << 4 | (8 + (k >> 2))] = rom[0x200 + (uint8) v];
+}
+
+// and its 32 out: a column's low rows, folded, then high rows, each word then its swap
+uint16 Planes32Word (int32 k)
+{
+	const int	col = 8 + (k >> 1 & 7), row = k < 16 ? 0 : 4;
+	const uint16	v = Fold(ram[row << 4 | col], ram[(row + 1) << 4 | col], ram[(row + 2) << 4 | col], ram[(row + 3) << 4 | col]);
+	return ((k & 1) ? Swap(v) : v);
+}
+
+uint32 Planes32OutGap (int32 k)
+{
+	return (PlaneGaps[k]);
+}
+
+const Lane	Planes32In = { Planes32Count, Planes32InGap, Planes32Put, NULL, LaneIn<Planes32Count, Planes32InGap, Planes32Put> };
+const Lane	Planes32Out = { Planes32Count, Planes32OutGap, NULL, Planes32Word, LaneOut<Planes32Count, Planes32OutGap, Planes32Word> };
+
 bool Planes32 (void)		// $01: 32 bytes of 4-bit pixels to bitplanes: eight $00s, low words first
 {
 	NT_BEGIN
-	// byte 4g + q: its tables' entries in column 8 + g, rows q and 4 + q
-	NT_BURN(4);
-	for (s.i = 0; s.i < 32; s.i++)
-	{
-		if (s.i)
-			NT_BURN((s.i & 3) == 2 ? 4 : 5);
-		NT_WAIT(1); NT_READ(2, s.in[0]);
-		ram[(s.i & 3) << 4 | (8 + (s.i >> 2))] = rom[(uint8) s.in[0]];
-		ram[(4 + (s.i & 3)) << 4 | (8 + (s.i >> 2))] = rom[0x200 + (uint8) s.in[0]];
-	}
-	for (s.i = 0; s.i < 32; s.i++)
-	{
-		{
-			const int	col = 8 + (s.i >> 1 & 7), row = s.i < 16 ? 0 : 4;
-			const uint16	v = Fold(ram[row << 4 | col], ram[(row + 1) << 4 | col], ram[(row + 2) << 4 | col], ram[(row + 3) << 4 | col]);
-			s.out[0] = (int16) ((s.i & 1) ? Swap(v) : v);
-		}
-		if (!s.i)
-		{
-			NT_BURN(PlaneGaps[0]); NT_WRITE(3, s.out[0]);
-		}
-		else
-		{
-			NT_BURN(PlaneGaps[s.i]); NT_WAIT(4); NT_WRITE(5, s.out[0]);
-		}
-	}
+	s.i = 0;
+	NT_GETS(1, Planes32In);
+	NT_BURN(PlaneGaps[0]); NT_WRITE(3, Planes32Word(0));
+	s.i = 1;
+	NT_PUTS(4, Planes32Out);
 	NT_WAIT(6); NT_BURN(2);
 	s.acc = 3;
 	NT_END
@@ -308,6 +320,52 @@ uint32 OverlayMasks (int n)
 	return (k - 1);			// position 0's has no jump back
 }
 
+// $05's bottom bytes, its top bytes but the last, and its results; s.in[1] holds n, s.in[2] min(n, 80)
+int32 OverlayCount (void)
+{
+	return (s.in[2]);
+}
+
+int32 OverlayTopCount (void)
+{
+	return (s.in[2] - 1);
+}
+
+uint32 OverlayBottomGap (int32 k)
+{
+	return (!k ? 4 : (k & 15) ? 3 : 4);
+}
+
+void OverlayBottomPut (int32 k, uint16 v)
+{
+	ram[k] = v;
+	ram[0xa0 + k] = *trb;
+}
+
+uint32 OverlayTopGap (int32 k)
+{
+	return (!k ? 0 : (k & 15) ? 5 : 4);		// the first one's is burned before the loop, which may not run
+}
+
+void OverlayTopPut (int32 k, uint16 v)
+{
+	OverlayTop(k, v, (uint16) (k ? 0 : s.in[1] - s.in[2]));
+}
+
+uint32 OverlayOutGap (int32 k)
+{
+	return (k == 1 || !(k & 15) ? 4 : 5);
+}
+
+uint16 OverlayWord (int32 k)
+{
+	return ((uint16) ((ram[0x50 + k] & ram[0xa0 + k]) | ram[k]));
+}
+
+const Lane	OverlayBottom = { OverlayCount, OverlayBottomGap, OverlayBottomPut, NULL, LaneIn<OverlayCount, OverlayBottomGap, OverlayBottomPut> };
+const Lane	OverlayTops = { OverlayTopCount, OverlayTopGap, OverlayTopPut, NULL, LaneIn<OverlayTopCount, OverlayTopGap, OverlayTopPut> };
+const Lane	OverlayOut = { OverlayCount, OverlayOutGap, NULL, OverlayWord, LaneOut<OverlayCount, OverlayOutGap, OverlayWord> };
+
 bool Overlay (void)			// $05: n bytes (80 at most) under n more, nibble by nibble: the top's unless transparent
 {
 	NT_BEGIN
@@ -323,23 +381,11 @@ bool Overlay (void)			// $05: n bytes (80 at most) under n more, nibble by nibbl
 	{
 		// past 80, the rest of the count lands on the first top byte's mask
 		s.in[2] = s.in[1] > 80 ? 80 : s.in[1];
-		NT_BURN(4);
-		for (s.i = 0; s.i < s.in[2]; s.i++)
-		{
-			if (s.i)
-				NT_BURN((s.i & 15) ? 3 : 4);
-			NT_WAIT(4); NT_READ(5, s.in[3]);
-			ram[s.i] = (uint16) s.in[3];
-			ram[0xa0 + s.i] = *trb;
-		}
+		s.i = 0;
+		NT_GETS(4, OverlayBottom);
 		NT_BURN(s.in[1] > 80 ? 5 : 4);
-		for (s.i = 0; s.i < s.in[2] - 1; s.i++)
-		{
-			if (s.i)
-				NT_BURN((s.i & 15) ? 5 : 4);
-			NT_WAIT(6); NT_READ(7, s.in[3]);
-			OverlayTop(s.i, (uint16) s.in[3], (uint16) (s.i ? 0 : s.in[1] - s.in[2]));
-		}
+		s.i = 0;
+		NT_GETS(6, OverlayTops);
 		if (s.i)
 			NT_BURN(s.in[1] > 80 ? 5 : 4);
 		NT_WAIT(8);
@@ -354,18 +400,12 @@ bool Overlay (void)			// $05: n bytes (80 at most) under n more, nibble by nibbl
 		OverlayTop(s.i, (uint16) s.in[3], (uint16) (s.i ? 0 : s.in[1] - s.in[2]));
 		NT_BURN(OverlayMasks(s.in[2]) + 5);
 		NT_SR(13, 0x0400);
-		for (s.i = 0; s.i < s.in[2]; s.i++)
-		{
-			if (s.i)
-			{
-				NT_BURN(s.i == 1 || !(s.i & 15) ? 4 : 5); NT_WAIT(14);
-			}
-			s.out[0] = (int16) ((ram[0x50 + s.i] & ram[0xa0 + s.i]) | ram[s.i]);
-			NT_WRITE(15, s.out[0]);
-		}
+		NT_WRITE(17, OverlayWord(0));
+		s.i = 1;
+		NT_PUTS(14, OverlayOut);
 		NT_BURN(s.in[2] == 80 ? 0 : 1);
 		NT_WAIT(16); NT_BURN(2);
-		s.acc = (uint16) s.out[0];
+		s.acc = OverlayWord(s.in[2] - 1);
 	}
 	NT_END
 }

@@ -5855,8 +5855,10 @@ static void xbls_write (uint8 byte)
 // From S9xXBandPoll, at the start of every frame.
 static void xbls_frame (void)
 {
+	// An exchange still open after 2 frames is a resync (or the patch went to the OS): lockstep lost
+	// the far box, and gating RX would leave this one deaf to its DARK until LineError.
 	if (xbls_window && ++xbls_polls > 2)
-		xbls_window = false;		// an exchange that never ended (the patch went to the OS)
+		xbls_reset();
 	if (xbls_apu_reset && !S9xInterlaceField())
 	{
 		xbls_apu_reset = false;

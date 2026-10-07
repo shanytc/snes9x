@@ -168,68 +168,57 @@ static alwaysinline void Move (uint16 idb, uint32 dst)
 	}
 }
 
+// S0, Z and S1 without branches: ALU results are too varied to predict. S1
+// follows S0 until an overflow is outstanding (OV1), then holds its sign.
+static alwaysinline uint32 SignFlags (uint16 v, uint8 flag)
+{
+	uint32	s0 = v >> 15;
+	uint32	ov1 = (flag >> 1) & 1;
+	uint32	s1 = s0 ^ ((s0 ^ (flag >> 5)) & ov1 & 1);
+	return ((s0 << 4) | ((uint32) (v == 0) << 2) | (s1 << 5));
+}
+
+// ADD/SUB and friends: carry or borrow, OV0, and OV1, where a second overflow
+// cancels the first if it lands on the other side.
+static alwaysinline uint8 ArithFlags (uint16 q, uint16 p, uint32 res, uint8 flag, bool sub)
+{
+	uint16	v = (uint16) res;
+	uint32	f = SignFlags(v, flag);
+	uint32	s0 = (f >> 4) & 1, s1 = (f >> 5) & 1;
+	uint32	ov0 = (sub ? ((q ^ v) & (q ^ p)) : ((q ^ v) & (p ^ v))) >> 15;
+	uint32	ov1_in = (flag >> 1) & 1;
+	uint32	t = 1 ^ (ov1_in & (s1 ^ s0));
+	uint32	ov1 = ov1_in ^ (ov0 & (t ^ ov1_in));
+	return ((uint8) (f | ((uint32) (res > 0xffff) << 3) | ov0 | (ov1 << 1)));
+}
+
 // ADC/SBB and SHL1 take their carry in from the other accumulator's flags,
 // which is what chains ACCA and ACCB into one 32-bit value.
 static alwaysinline void Alu (uint32 op, uint16 &acc, uint8 &flag, uint16 p, bool cin)
 {
 	uint16	q = acc;
 	uint32	res;
-	int		kind = 0;	// 1 add, 2 subtract, 3 shift right, 4 shift left
 
 	switch (op)
 	{
-		case  1: res = q | p; break;
-		case  2: res = q & p; break;
-		case  3: res = q ^ p; break;
-		case  4: res = q - p; kind = 2; break;
-		case  5: res = q + p; kind = 1; break;
-		case  6: res = q - p - cin; kind = 2; break;
-		case  7: res = q + p + cin; kind = 1; break;
-		case  8: p = 1; res = q - 1; kind = 2; break;
-		case  9: p = 1; res = q + 1; kind = 1; break;
-		case 10: res = (uint16) ~q; break;
-		case 11: res = (q >> 1) | (q & 0x8000); kind = 3; break;
-		case 12: res = (q << 1) | cin; kind = 4; break;
-		case 13: res = (q << 2) | 3; break;
-		case 14: res = (q << 4) | 15; break;
-		default: res = (q << 8) | (q >> 8); break;
+		case  1: acc = q | p; flag = (uint8) SignFlags(acc, flag); return;
+		case  2: acc = q & p; flag = (uint8) SignFlags(acc, flag); return;
+		case  3: acc = q ^ p; flag = (uint8) SignFlags(acc, flag); return;
+		case  4: res = q - p; flag = ArithFlags(q, p, res, flag, true); break;
+		case  5: res = q + p; flag = ArithFlags(q, p, res, flag, false); break;
+		case  6: res = q - p - cin; flag = ArithFlags(q, p, res, flag, true); break;
+		case  7: res = q + p + cin; flag = ArithFlags(q, p, res, flag, false); break;
+		case  8: res = q - 1; flag = ArithFlags(q, 1, res, flag, true); break;
+		case  9: res = q + 1; flag = ArithFlags(q, 1, res, flag, false); break;
+		case 10: acc = (uint16) ~q; flag = (uint8) SignFlags(acc, flag); return;
+		case 11: acc = (q >> 1) | (q & 0x8000); flag = (uint8) (SignFlags(acc, flag) | ((q & 1) << 3)); return;
+		case 12: acc = (uint16) ((q << 1) | cin); flag = (uint8) (SignFlags(acc, flag) | ((q >> 15) << 3)); return;
+		case 13: acc = (uint16) ((q << 2) | 3); flag = (uint8) SignFlags(acc, flag); return;
+		case 14: acc = (uint16) ((q << 4) | 15); flag = (uint8) SignFlags(acc, flag); return;
+		default: acc = (uint16) ((q << 8) | (q >> 8)); flag = (uint8) SignFlags(acc, flag); return;
 	}
 
-	uint16	v = (uint16) res;
-	uint8	f = flag & (F_OV1 | F_S1);
-
-	if (v & 0x8000)
-		f |= F_S0;
-	if (!v)
-		f |= F_Z;
-	// S1 follows S0 until an overflow is outstanding, then holds its sign.
-	if (!(flag & F_OV1))
-		f = (f & ~F_S1) | ((f & F_S0) ? F_S1 : 0);
-
-	if (kind == 1 || kind == 2)
-	{
-		bool	ov0 = (kind == 1) ? ((q ^ v) & (p ^ v) & 0x8000) : ((q ^ v) & (q ^ p) & 0x8000);
-		bool	ov1 = (flag & F_OV1) != 0;
-
-		if (res > 0xffff)	// carry out, or a borrow wrapping below zero
-			f |= F_C;
-		if (ov0)
-		{
-			f |= F_OV0;
-			// A second overflow cancels the first if it lands on the other side.
-			ov1 = ov1 ? (!(f & F_S1) == !(f & F_S0)) : true;
-		}
-		f = (f & ~F_OV1) | (ov1 ? F_OV1 : 0);
-	}
-	else
-	{
-		f &= ~F_OV1;
-		if ((kind == 3 && (q & 1)) || (kind == 4 && (q & 0x8000)))
-			f |= F_C;
-	}
-
-	acc = v;
-	flag = f;
+	acc = (uint16) res;
 }
 
 static alwaysinline void ExecOP (uint32 op)

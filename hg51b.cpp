@@ -771,6 +771,278 @@ static alwaysinline void Execute (void)
 	Instruction(op);
 }
 
+// Plain execution with the hot registers in locals, written back on the way out:
+// after a bus access starts, a halt or a PB change, and before a page's last two.
+static void RunFast (void)
+{
+	switch (Cache())
+	{
+		case CACHE_MISS: Halt(); return;
+		case CACHE_FILL: return;
+	}
+
+	static const uint8	shifts[4] = { 0, 1, 8, 16 };
+	const uint16	*page = r.prog[r.cache_page];
+	int64	budget = r.budget;
+	uint64	mul = r.mul;
+	uint32	a = r.a, mdr = r.mdr, rom = r.rom, ram = r.ram, mar = r.mar, dpr = r.dpr;
+	uint16	pb = r.pb, p = r.p;
+	uint8	pc = r.pc, fn = r.n, fz = r.z, fc = r.c, fv = r.v;
+	bool	leave = false;
+
+	// ReadRegister / WriteRegister on the locals; a bus access starts as in the general path.
+#define FAST_READ(reg, out)															\
+	{																				\
+		const uint32 _g = (reg);													\
+		switch (_g)																	\
+		{																			\
+			case 0x01: out = (uint32) (mul >> 24) & 0xffffff; break;				\
+			case 0x02: out = (uint32) mul & 0xffffff; break;						\
+			case 0x03: out = mdr; break;											\
+			case 0x08: out = rom; break;											\
+			case 0x0c: out = ram; break;											\
+			case 0x13: out = mar; break;											\
+			case 0x1c: out = dpr; break;											\
+			case 0x20: out = pc; break;												\
+			case 0x28: out = p; break;												\
+			case 0x2e: case 0x2f:													\
+				r.bus_on = 1; r.bus_reading = 1;									\
+				r.bus_pending = (_g == 0x2e) ? r.wait_rom : r.wait_ram;				\
+				r.bus_addr = mar; out = 0; leave = true; break;						\
+			default:																\
+				out = (_g >= 0x50 && _g <= 0x5f) ? kConstants[_g & 15] : (_g >= 0x60) ? r.gpr[_g & 15] : 0; \
+		}																			\
+	}
+#define FAST_WRITE(reg, value)														\
+	{																				\
+		const uint32 _g = (reg), _d = (value) & 0xffffff;							\
+		switch (_g)																	\
+		{																			\
+			case 0x01: mul = (mul & 0xffffff) | ((uint64) _d << 24); break;			\
+			case 0x02: mul = (mul & 0xffffff000000ull) | _d; break;					\
+			case 0x03: mdr = _d; break;												\
+			case 0x08: rom = _d; break;												\
+			case 0x0c: ram = _d; break;												\
+			case 0x13: mar = _d; break;												\
+			case 0x1c: dpr = _d; break;												\
+			case 0x20: pc = (uint8) _d; break;										\
+			case 0x28: p = _d & 0x7fff; break;										\
+			case 0x2e: case 0x2f:													\
+				r.bus_on = 1; r.bus_writing = 1;									\
+				r.bus_pending = (_g == 0x2e) ? r.wait_rom : r.wait_ram;				\
+				r.bus_addr = mar; leave = true; break;								\
+			default: if (_g >= 0x60) r.gpr[_g & 15] = _d;							\
+		}																			\
+	}
+#define FAST_NZ(x)		(fn = (uint8) (((x) >> 23) & 1), fz = (uint8) ((x) == 0), (x))
+#define FAST_ADD(x, y)	(_t = (int32) (x) + (int32) (y), fc = (uint8) (_t > 0xffffff),	\
+						 fv = (uint8) ((~((x) ^ (y)) & ((x) ^ (uint32) _t) & 0x800000) != 0), FAST_NZ((uint32) _t & 0xffffff))
+#define FAST_SUB(x, y)	(_t = (int32) (x) - (int32) (y), fc = (uint8) (_t >= 0),	\
+						 fv = (uint8) ((~((x) ^ (y)) & ((x) ^ (uint32) _t) & 0x800000) != 0), FAST_NZ((uint32) _t & 0xffffff))
+
+	while (budget > 0 && pc < 0xfe && !leave)
+	{
+		const uint16	op = page[pc];
+		pc++;
+		budget--;
+
+		const uint32	reg = op & 0x7f;
+		const uint32	imm = op & 0xff;
+		const uint32	sub = (op >> 8) & 3;
+		int32			_t;
+		uint32			v, x;
+#define SA	((a << shifts[sub]) & 0xffffff)
+
+		switch (op >> 10)
+		{
+			case 0x02: case 0x03: case 0x04: case 0x05: case 0x06:
+			case 0x0a: case 0x0b: case 0x0c: case 0x0d: case 0x0e:
+			{
+				const uint32	k = (op >> 10) & 7;
+				const bool		take = (k == 2) || (k == 3 && fz) || (k == 4 && fc) || (k == 5 && fn) || (k == 6 && fv);
+				if (!take)
+					break;
+				if (op & 0x2000)	// CALL: Push
+				{
+					memmove(r.stack + 1, r.stack, 7 * sizeof(r.stack[0]));
+					r.stack[0] = ((uint32) pb << 8) | pc;
+				}
+				if (op & 0x200)
+				{
+					pb = p;
+					leave = true;	// the next fetch needs Cache()
+				}
+				pc = (uint8) op;
+				budget -= 2;
+				break;
+			}
+
+			case 0x07:	break;	// WAIT: no bus access in flight here
+
+			case 0x09:		// SKIP
+			{
+				const uint8	flag = (sub == 0) ? fv : (sub == 1) ? fc : (sub == 2) ? fz : fn;
+				if (flag == (op & 1))
+				{
+					pc++;		// pc < 0xff here, so no page crossing
+					budget--;
+				}
+				break;
+			}
+
+			case 0x0f:		// RET: Pull
+			{
+				uint32	t = r.stack[0];
+				memmove(r.stack, r.stack + 1, 7 * sizeof(r.stack[0]));
+				r.stack[7] = 0;
+				pb = (t >> 8) & 0x7fff;
+				pc = (uint8) t;
+				budget -= 2;
+				leave = true;
+				break;
+			}
+
+			case 0x10: mar = (mar + 1) & 0xffffff; break;
+
+			case 0x12: FAST_READ(reg, x); FAST_SUB(x, SA); break;
+			case 0x13: FAST_SUB(imm, SA); break;
+			case 0x14: FAST_READ(reg, x); FAST_SUB(SA, x); break;
+			case 0x15: FAST_SUB(SA, imm); break;
+
+			case 0x16:
+				if (sub == 1)
+				{
+					v = (uint32) (int32) (int8) a & 0xffffff;
+					a = FAST_NZ(v);
+				}
+				else
+				if (sub == 2)
+				{
+					v = (uint32) (int32) (int16) a & 0xffffff;
+					a = FAST_NZ(v);
+				}
+				break;
+
+			case 0x18:
+				switch (sub)
+				{
+					case 0: FAST_READ(reg, a); break;
+					case 1: FAST_READ(reg, mdr); break;
+					case 2: FAST_READ(reg, mar); break;
+					case 3: p = r.gpr[op & 15] & 0x7fff; break;
+				}
+				break;
+
+			case 0x19:
+				switch (sub)
+				{
+					case 0: a = imm; break;
+					case 1: mdr = imm; break;
+					case 2: mar = imm; break;
+					case 3: p = imm; break;
+				}
+				break;
+
+			case 0x1a: case 0x1b:
+				if (sub != 3)
+					SetByte(ram, sub, r.dram[DRAMIndex((op & 0x400) ? dpr + imm : a)]);
+				break;
+
+			case 0x1c: rom = drom[a & 0x3ff]; break;
+			case 0x1d: rom = drom[op & 0x3ff]; break;
+
+			case 0x1f:
+				if (sub == 0)
+					p = (p & 0x7f00) | imm;
+				else
+				if (sub == 1)
+					p = (p & 0x00ff) | ((op & 0x7f) << 8);
+				break;
+
+			case 0x20: FAST_READ(reg, x); a = FAST_ADD(SA, x); break;
+			case 0x21: a = FAST_ADD(SA, imm); break;
+			case 0x22: FAST_READ(reg, x); a = FAST_SUB(x, SA); break;
+			case 0x23: a = FAST_SUB(imm, SA); break;
+			case 0x24: FAST_READ(reg, x); a = FAST_SUB(SA, x); break;
+			case 0x25: a = FAST_SUB(SA, imm); break;
+			case 0x26: FAST_READ(reg, x); mul = Mul(a, x); break;
+			case 0x27: mul = Mul(a, imm); break;
+			case 0x28: FAST_READ(reg, x); v = (~SA ^ x) & 0xffffff; a = FAST_NZ(v); break;
+			case 0x29: v = (~SA ^ imm) & 0xffffff; a = FAST_NZ(v); break;
+			case 0x2a: FAST_READ(reg, x); v = (SA ^ x) & 0xffffff; a = FAST_NZ(v); break;
+			case 0x2b: v = (SA ^ imm) & 0xffffff; a = FAST_NZ(v); break;
+			case 0x2c: FAST_READ(reg, x); v = (SA & x) & 0xffffff; a = FAST_NZ(v); break;
+			case 0x2d: v = (SA & imm) & 0xffffff; a = FAST_NZ(v); break;
+			case 0x2e: FAST_READ(reg, x); v = (SA | x) & 0xffffff; a = FAST_NZ(v); break;
+			case 0x2f: v = (SA | imm) & 0xffffff; a = FAST_NZ(v); break;
+
+			case 0x30: case 0x31: case 0x32: case 0x33: case 0x34: case 0x35: case 0x36: case 0x37:
+			{
+				uint32	n;
+				if (op & 0x400)
+					n = op & 0x1f;
+				else
+					FAST_READ(reg, n);
+				n &= 31;
+				if (n > 24)
+					n = 0;
+				switch ((op >> 11) & 3)
+				{
+					case 0:  v = a >> n; break;
+					case 1:  v = (uint32) ((int32) SignExtend24(a) >> n); break;
+					case 2:  v = (a >> n) | (a << (24 - n)); break;
+					default: v = a << n; break;
+				}
+				v &= 0xffffff;
+				a = FAST_NZ(v);
+				break;
+			}
+
+			case 0x38:
+				if (sub == 0)
+					FAST_WRITE(reg, a)
+				else
+				if (sub == 1)
+					FAST_WRITE(reg, mdr)
+				break;
+
+			case 0x3a: case 0x3b:
+				if (sub != 3)
+					r.dram[DRAMIndex((op & 0x400) ? dpr + imm : a)] = (uint8) (ram >> (sub * 8));
+				break;
+
+			case 0x3c:
+			{
+				uint32	t = a;
+				a = r.gpr[op & 15];
+				r.gpr[op & 15] = t;
+				break;
+			}
+
+			case 0x3e: a = p = 0; ram = dpr = 0; break;
+
+			case 0x3f:
+				r.pc = pc;	// Halt() reads none of the locals
+				Halt();
+				leave = true;
+				break;
+
+			default: break;
+		}
+#undef SA
+	}
+#undef FAST_READ
+#undef FAST_WRITE
+#undef FAST_NZ
+#undef FAST_ADD
+#undef FAST_SUB
+
+	r.budget = budget; r.mul = mul;
+	r.a = a; r.mdr = mdr; r.rom = rom; r.ram = ram; r.mar = mar; r.dpr = dpr;
+	r.pb = pb; r.p = p;
+	r.pc = pc; r.n = fn; r.z = fz; r.c = fc; r.v = fv;
+}
+
 static void Suspend (void)
 {
 	if (!r.suspend_len)
@@ -878,9 +1150,12 @@ static void SyncTo (int32 cycles)
 	while (r.budget > 0)
 	{
 		// Plain execution, what Main() would pick, without its state tests.
-		if (!(r.op | r.lock | r.suspend_on | r.cache_on | r.dma_on | r.halt | r.bus_on))
+		if (!(r.op | r.lock | r.suspend_on | r.cache_on | r.dma_on | r.halt))
 		{
-			Execute();
+			if (!r.bus_on && r.pc < 0xfe)
+				RunFast();
+			else
+				Execute();
 			continue;
 		}
 		if (Idle())

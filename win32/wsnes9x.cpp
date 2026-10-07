@@ -1075,21 +1075,6 @@ static void CenterCursor()
 }
 
 
-// The modem's lights after the BIOS name, top|middle|bottom, while the box runs (Modem).
-static const TCHAR *XBandLEDTitle ()
-{
-    static TCHAR leds[16];
-    leds[0] = 0;
-    if (Settings.XBAND && GUI.XBandShowLEDs)
-    {
-        const uint8 on = S9xXBandLEDs();
-        // U+26AB/U+26AA: one font's pair, so lit and dark draw the same size (U+25CF is smaller).
-        _stprintf(leds, TEXT(" [%c|%c|%c]"), (on & XBAND_LED_TOP) ? 0x26AB : 0x26AA,
-                  (on & XBAND_LED_MIDDLE) ? 0x26AB : 0x26AA, (on & XBAND_LED_BOTTOM) ? 0x26AB : 0x26AA);
-    }
-    return leds;
-}
-
 void S9xRestoreWindowTitle ()
 {
     TCHAR buf [1024];
@@ -1110,7 +1095,7 @@ void S9xRestoreWindowTitle ()
         char bios[_MAX_FNAME], cart[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, bios, NULL);
         _splitpath(Multi.fileNameB, NULL, NULL, cart, NULL);
-        _stprintf(buf, TEXT("%s%s%s - %s - %s %s"), (wchar_t *)Utf8ToWide(bios), XBandLEDTitle(),
+        _stprintf(buf, TEXT("%s%s - %s - %s %s"), (wchar_t *)Utf8ToWide(bios),
                   XBandServerRunning() ? TEXT(" (Hosting)") : TEXT(""), (wchar_t *)Utf8ToWide(cart), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
@@ -1118,7 +1103,7 @@ void S9xRestoreWindowTitle ()
     {
         char def[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, def, NULL);
-        _stprintf(buf, TEXT("%s%s%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip, XBandLEDTitle(),
+        _stprintf(buf, TEXT("%s%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip,
                   Settings.XBAND && XBandServerRunning() ? TEXT(" (Hosting)") : TEXT(""), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
@@ -3638,10 +3623,10 @@ LRESULT CALLBACK WinProc(
 			XBandSwitchesChanged();
 			break;
 
-		// The modem's front lights in the title.
+		// The modem's front lights over the picture.
 		case ID_EMULATION_XBAND_LEDS:
 			GUI.XBandShowLEDs = !GUI.XBandShowLEDs;
-			S9xRestoreWindowTitle();
+			S9xXBandShowLEDs(GUI.XBandShowLEDs);
 			break;
 
 		// With the modem left on, the box boots again at the next launch.
@@ -5830,6 +5815,7 @@ int WINAPI WinMain(
 	void InitSnes9x (void);
 	InitSnes9x ();
 	XBandSetMachineSerial();
+	S9xXBandShowLEDs(GUI.XBandShowLEDs);
 
 	GBCameraRegister();
 	ApplyGBVideoCamera();

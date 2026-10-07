@@ -136,6 +136,9 @@ void	S9xXBandApplyReset (void);
 #define XBAND_LED_MIDDLE	0x08	// connecting
 #define XBAND_LED_BOTTOM	0x20	// power
 uint8	S9xXBandLEDs (void);
+// The lights drawn in the picture's bottom-right corner (frontend toggle, off by default).
+void	S9xXBandShowLEDs (bool8 on);
+void	S9xXBandRenderOSD (uint16 *screen, int pitch, int width, int height);
 
 // The box's DS2401 hardware ID: 48-bit serial on LED line 2 (SNESHardwareID.aii).
 void	S9xXBandSetHardwareSerial (const uint8 serial[6]);

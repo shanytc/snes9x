@@ -6671,6 +6671,46 @@ uint8 S9xXBandLEDs (void)
 	return XBand.regs[0xB4] & XBand.regs[0xB5] & (XBAND_LED_TOP | XBAND_LED_MIDDLE | XBAND_LED_BOTTOM);
 }
 
+static bool	xband_osd_leds = false;
+
+void S9xXBandShowLEDs (bool8 on)
+{
+	xband_osd_leds = on != 0;
+}
+
+// Three lamps, left to right online / connecting / power, each a 5-pixel disc in a dark ring.
+void S9xXBandRenderOSD (uint16 *screen, int pitch, int width, int height)
+{
+	static const char	lamp[7][8] = { "..ooo..", ".o###o.", "o#####o", "o#####o", "o#####o", ".o###o.", "..ooo.." };
+	static const uint8	bits[3] = { XBAND_LED_TOP, XBAND_LED_MIDDLE, XBAND_LED_BOTTOM };
+
+	if (!xband_osd_leds)
+		return;
+
+	const int		xs = width >= 512 ? 2 : 1, ys = height >= 448 ? 2 : 1;
+	const int		x0 = width - (3 * 7 + 2 * 2 + 4) * xs, y0 = height - (7 + 4) * ys;
+	const uint8		on = S9xXBandLEDs();
+	const uint16	ring = BUILD_PIXEL(0, 0, 0), lit = BUILD_PIXEL(4, 31, 4), dark = BUILD_PIXEL(6, 6, 6);
+
+	if (x0 < 0 || y0 < 0)
+		return;
+
+	for (int n = 0; n < 3; n++)
+	{
+		const uint16	fill = (on & bits[n]) ? lit : dark;
+		for (int py = 0; py < 7 * ys; py++)
+		{
+			uint16	*line = screen + (y0 + py) * pitch + x0 + n * 9 * xs;
+			for (int px = 0; px < 7 * xs; px++)
+			{
+				const char	c = lamp[py / ys][px / xs];
+				if (c != '.')
+					line[px] = c == 'o' ? ring : fill;
+			}
+		}
+	}
+}
+
 // DS2401 silicon serial on LED line 2 (1-Wire): data bit set + enabled drives the line low.
 #define XBID_LINE	0x04
 static uint8	xbid_rom[8] = { 0x01 };		// family $01, serial, Dallas CRC-8

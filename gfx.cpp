@@ -16,6 +16,7 @@
 #include "sgb/sgb.h"   // S9xSGBOverlayBiosBorder — runs after FLUSH_REDRAW
 #include "sfcbox.h"    // S9xSFCBoxRenderOSD — MB90082 overlay plane
 #include "nss.h"       // S9xNSSRenderOSD    — M50458 overlay plane
+#include "xband.h"     // S9xXBandRenderOSD  — the modem's front lights
                         // so the BIOS-mode custom-border overlay isn't
                         // clobbered by the PPU's final blit.
 
@@ -1296,6 +1297,9 @@ void S9xEndScreenRefresh (void)
 			}
 			S9xNSSRenderOSD(GFX.Screen, GFX.RealPPL, IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
 		}
+
+		if (Settings.XBAND)
+			S9xXBandRenderOSD(GFX.Screen, GFX.RealPPL, IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
 
 		S9xBlendGameBoyFrames();
 

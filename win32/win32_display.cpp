@@ -415,17 +415,6 @@ bool8 S9xDeinitUpdate (int Width, int Height)
 			S9xRestoreWindowTitle();
 		}
 	}
-	if (Settings.XBAND && GUI.XBandShowLEDs)
-	{
-		// The modem's lights in the title follow the box.
-		static uint8 lastLEDs = 0xFF;
-		const uint8 leds = S9xXBandLEDs();
-		if (leds != lastLEDs)
-		{
-			lastLEDs = leds;
-			S9xRestoreWindowTitle();
-		}
-	}
 	if (SFCBox.Active)
 	{
 		// The box swaps games under the SNES; the title follows.

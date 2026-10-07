@@ -7,7 +7,7 @@
 #include <string.h>
 #include "snes9x.h"
 #include "upd7725.h"
-#include "dsp1n.h"
+#include "upd7725n.h"
 
 #define DSP_HZ		7600000		// the DSP-n carts' oscillator; one instruction per clock
 
@@ -48,7 +48,9 @@ static void		Decode (void);
 static Regs		r;
 static bool8	loaded = FALSE;
 static bool8	active = FALSE;
-static uint8	native = 0;		// 0: the firmware; 1, 2: the native DSP-1, DSP-1B
+static int		chip = 0;		// UPD7725_DSP1...
+static const S9xUPD7725Native	*native = NULL;	// the native chip, or NULL for the firmware
+static bool8	native_variant = FALSE;
 static uint64	native_next = 0;	// master clock of the native chip's next bus event (0: unknown)
 
 static inline uint32 ProgWord (const uint8 *image, int i)
@@ -77,12 +79,13 @@ bool8 S9xUPD7725IsFirmware (const uint8 *image, uint32 size)
 	return (jumps > 0);
 }
 
-bool8 S9xUPD7725Load (const uint8 *image, uint32 size)
+bool8 S9xUPD7725Load (const uint8 *image, uint32 size, int which)
 {
 	loaded = active = FALSE;
-	native = 0;
+	native = NULL;
 	if (!S9xUPD7725IsFirmware(image, size))
 		return (FALSE);
+	chip = which;
 
 	for (int i = 0; i < 2048; i++)
 	{
@@ -99,11 +102,20 @@ bool8 S9xUPD7725Load (const uint8 *image, uint32 size)
 	return (TRUE);
 }
 
-bool8 S9xUPD7725LoadNative (bool8 first)
+bool8 S9xUPD7725LoadNative (int which)
 {
-	native = first ? 1 : 2;
+	loaded = active = FALSE;
+	native = NULL;
+	if (which == UPD7725_DSP1 || which == UPD7725_DSP1B)
+		native = &S9xDSP1Native;
+	else if (which == UPD7725_DSP2)
+		native = &S9xDSP2Native;
+	else
+		return (FALSE);
+	chip = which;
+	native_variant = which == UPD7725_DSP1;
 	loaded = TRUE;
-	S9xDSP1NAttach(&r.dr, &r.sr, r.ram);
+	native->attach(&r.dr, &r.sr, r.ram, &r.trb);
 	S9xUPD7725Reset();
 	return (TRUE);
 }
@@ -111,7 +123,7 @@ bool8 S9xUPD7725LoadNative (bool8 first)
 void S9xUPD7725Unload (void)
 {
 	loaded = active = FALSE;
-	native = 0;
+	native = NULL;
 }
 
 bool8 S9xUPD7725Loaded (void)
@@ -131,7 +143,7 @@ void S9xUPD7725Reset (void)
 	memset(&r, 0, sizeof(r));
 	r.rp = 0x3ff;
 	if (native)
-		S9xDSP1NReset(native == 1);
+		native->reset(native_variant);
 	native_next = 0;
 	active = TRUE;
 }
@@ -618,7 +630,7 @@ static void SyncTo (int32 cycles)
 	{
 		// overclocked, it runs ahead to its next wait on the CPU, as the firmware does below
 		const bool		oc = ONE_CYCLE != 6 || SLOW_ONE_CYCLE != 8;
-		const uint64	owed = (oc || r.executed < r.target) ? S9xDSP1NRun(oc ? (uint64) 1 << 40 : r.target - r.executed) : S9xDSP1NOwed();
+		const uint64	owed = (oc || r.executed < r.target) ? native->run(oc ? (uint64) 1 << 40 : r.target - r.executed) : native->owed();
 		r.executed = r.target;
 
 		// the first clock its owed instructions have all run by
@@ -715,17 +727,34 @@ void S9xUPD7725Write (uint8 byte, bool8 sr, int32 speed)
 	NativeHandshake(end + 2);
 }
 
+// The firmware at its command wait, with the registers its wait loop sets, for a state from the native chip.
+static void FirmwareAtWait (void)
+{
+	r.sp = 0;
+	if (chip == UPD7725_DSP2)
+	{
+		r.pc = 0x003;
+		r.rp = 0x3ff;
+		r.a = 0;
+	}
+	else
+	{
+		r.pc = 0x004;
+		r.b = 0x00c0;
+	}
+}
+
 // The native chip saves its program's place after the registers it shares.
 uint32 S9xUPD7725StateSize (void)
 {
-	return (sizeof(r) + (native ? S9xDSP1NStateSize() : 0));
+	return (sizeof(r) + (native ? native->state_size() : 0));
 }
 
 void S9xUPD7725StateSave (uint8 *buf)
 {
 	memcpy(buf, &r, sizeof(r));
 	if (native)
-		S9xDSP1NStateSave(buf + sizeof(r));
+		native->state_save(buf + sizeof(r));
 }
 
 bool8 S9xUPD7725StateLoad (const uint8 *buf, uint32 size)
@@ -734,20 +763,17 @@ bool8 S9xUPD7725StateLoad (const uint8 *buf, uint32 size)
 		return (FALSE);
 
 	const uint32	extra = size - (uint32) sizeof(r);
-	if (native ? extra != S9xDSP1NStateSize() : extra != 0)
+	if (native ? extra != native->state_size() : extra != 0)
 	{
 		// From the other kind of chip, firmware or native: only RAM and the bus carry over,
 		// so it picks up at its command wait (where a game nearly always leaves it).
-		if (native ? extra != 0 : extra != S9xDSP1NStateSize())
+		if (native ? extra != 0 : extra != S9xDSP1Native.state_size())
 			return (FALSE);
 		memcpy(&r, buf, sizeof(r));
 		if (native)
-			S9xDSP1NIdle(native == 1);
+			native->idle(native_variant);
 		else
-		{
-			r.pc = 0x004;
-			r.sp = 0;
-		}
+			FirmwareAtWait();
 		S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state's DSP chip ran from its firmware, or without it; carrying on from its command wait.");
 		native_next = 0;
 		active = TRUE;
@@ -756,7 +782,7 @@ bool8 S9xUPD7725StateLoad (const uint8 *buf, uint32 size)
 
 	memcpy(&r, buf, sizeof(r));
 	if (native)
-		S9xDSP1NStateLoad(buf + sizeof(r), extra);
+		native->state_load(buf + sizeof(r), extra);
 	native_next = 0;
 	active = TRUE;
 	return (TRUE);

@@ -393,6 +393,7 @@ list(APPEND SOURCES
     ../dsp4.cpp
     ../upd7725.cpp
     ../dsp1n.cpp
+    ../dsp2n.cpp
     ../hg51b.cpp
     ../spc7110.cpp
     ../obc1.cpp

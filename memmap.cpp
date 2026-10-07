@@ -3799,21 +3799,23 @@ static bool AcceptDSPFirmware (const uint8 *data, uint32 size, uint32 full_size,
 	return (full_size == UPD7725_FIRMWARE_SIZE && S9xUPD7725IsFirmware(data, size));
 }
 
-// The chip's own program, when the BIOS Manager has one; the HLE otherwise.
-static bool8 LoadDSPFirmware (int slot)
+// The chip's own program, when the BIOS Manager has one; else the chip runs natively,
+// which needs none, and the HLE takes a chip without a native version.
+static bool8 LoadDSPFirmware (int slot, int chip)
 {
 	std::vector<uint8>	image;
-	return (S9xBiosPathUsable(slot) &&
-			S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware) &&
-			S9xUPD7725Load(image.data(), (uint32) image.size()));
+	if (S9xBiosPathUsable(slot) &&
+		S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware) &&
+		S9xUPD7725Load(image.data(), (uint32) image.size(), chip))
+		return (TRUE);
+	return (S9xUPD7725LoadNative(chip));
 }
 
 // Pilotwings' attract demo was recorded on the first DSP-1 and crashes with
-// the DSP-1B's corrected math; the other games get the DSP-1B. Without that
-// revision's dump the chip runs natively, which needs none.
+// the DSP-1B's corrected math; the other games get the DSP-1B.
 static bool8 LoadDSP1Firmware (bool pilotwings)
 {
-	return (LoadDSPFirmware(pilotwings ? S9X_BIOS_DSP1 : S9X_BIOS_DSP1B) || S9xUPD7725LoadNative(pilotwings));
+	return (pilotwings ? LoadDSPFirmware(S9X_BIOS_DSP1, UPD7725_DSP1) : LoadDSPFirmware(S9X_BIOS_DSP1B, UPD7725_DSP1B));
 }
 
 static bool AcceptCx4DataROM (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
@@ -3943,7 +3945,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP2_LOROM;
 			SetDSP = &DSP2SetByte;
 			GetDSP = &DSP2GetByte;
-			LoadDSPFirmware(S9X_BIOS_DSP2);
+			LoadDSPFirmware(S9X_BIOS_DSP2, UPD7725_DSP2);
 			break;
 
 		case 3: // DSP3
@@ -3951,7 +3953,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP3_LOROM;
 			SetDSP = &DSP3SetByte;
 			GetDSP = &DSP3GetByte;
-			LoadDSPFirmware(S9X_BIOS_DSP3);
+			LoadDSPFirmware(S9X_BIOS_DSP3, UPD7725_DSP3);
 			break;
 
 		case 4: // DSP4
@@ -3959,7 +3961,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP4_LOROM;
 			SetDSP = &DSP4SetByte;
 			GetDSP = &DSP4GetByte;
-			LoadDSPFirmware(S9X_BIOS_DSP4);
+			LoadDSPFirmware(S9X_BIOS_DSP4, UPD7725_DSP4);
 			break;
 
 		default:

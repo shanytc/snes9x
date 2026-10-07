@@ -15,76 +15,16 @@
 #endif
 #include "snes9x.h"
 #include "dsp.h"
-#include "dsp1n.h"
+#include "upd7725n.h"
 
 namespace
 {
 
-enum
-{
-	SR_RQM = 0x8000, SR_DRS = 0x1000, SR_DRC = 0x0400,
-	SR_FIXED = 0x907c	// what the DSP's own SR writes leave alone
-};
+#define NT_IDLE_WAIT	1
+#include "upd7725np.h"
 
-// Saved as-is, so the layout is fixed.
-struct State
-{
-	int16	in[16];
-	int16	out[16];
-	int32	line;		// where the current program resumes (0 = its start)
-	int32	i;
-	uint32	due;		// instructions owed before the next bus access
-	uint8	cmd;
-	uint8	running;	// 0: the command wait, 1: a command, 2: the power-on sequence
-	uint8	parked;		// waiting on the CPU
-	uint8	first;		// the first DSP-1, not the DSP-1B
-};
-static_assert(sizeof(State) == 80, "savestate layout");
-
-State	s;
-uint16	*dr, *sr, *ram;
-uint64	budget;
 uint16	rom[1024];		// the data ROM
 
-#ifdef DSP1N_LAB
-// The test lab's view: every bus event with the instructions since the one before.
-void	(*lab_event) (char kind, uint32 n, uint32 val);
-uint32	lab_n;
-#define NT_EVENT(kind, v)	do { if (lab_event) lab_event(kind, lab_n, v); lab_n = 0; } while (0)
-#define NT_SPENT(k)			(lab_n += (uint32) (k))
-#else
-#define NT_EVENT(kind, v)	do { } while (0)
-#define NT_SPENT(k)			do { } while (0)
-#endif
-
-// Resume points carry fixed ids, so a savestate outlives edits around them.
-#define NT_BEGIN		switch (s.line) { case 0:
-#define NT_END			} s.line = 0; return (true);
-#define NT_BURN(k)		(s.due += (uint32) (k))
-// the access instruction itself, once the clock gets there
-#define NT_AT(id)																\
-	s.due += 1; s.line = (id); case (id):										\
-	if (budget < s.due) { s.due -= (uint32) budget; NT_SPENT(budget); budget = 0; return (false); }	\
-	budget -= s.due; NT_SPENT(s.due); s.due = 0
-// a JRQM on itself: parks while RQM is up, then runs once more as it falls through
-#define NT_WAIT(id)	do {														\
-	s.line = (id); case (id):													\
-	if (!s.parked)																\
-	{																			\
-		if (budget < s.due) { s.due -= (uint32) budget; NT_SPENT(budget); budget = 0; return (false); }	\
-		budget -= s.due; NT_SPENT(s.due); s.due = 0;							\
-	}																			\
-	if (*sr & SR_RQM)															\
-	{																			\
-		if (!s.parked) { s.parked = 1; NT_EVENT('P', 0); }						\
-		budget = 0;																\
-		return (false);															\
-	}																			\
-	s.parked = 0; s.due = 1; } while (0)
-#define NT_READ(id, dst)	do { NT_AT(id); (dst) = (int16) *dr; *sr |= SR_RQM; NT_EVENT('R', *dr); } while (0)
-#define NT_READNF(id, dst)	do { NT_AT(id); (dst) = (int16) *dr; NT_EVENT('N', *dr); } while (0)
-#define NT_WRITE(id, v)		do { NT_AT(id); *dr = (uint16) (v); *sr |= SR_RQM; NT_EVENT('W', *dr); } while (0)
-#define NT_SR(id, v)		do { NT_AT(id); *sr = (uint16) ((*sr & SR_FIXED) | ((v) & ~SR_FIXED)); NT_EVENT('S', *sr); } while (0)
 // back through $000: wait for the last result to be read, 8-bit mode, DR = $80
 #define NT_EPILOGUE(id)		do { NT_BURN(1); NT_WAIT(id); NT_SR((id) + 1, 0x0400); NT_WRITE((id) + 2, 0x0080); } while (0)
 
@@ -108,13 +48,7 @@ void BuildDataROM (bool first)
 // the constants past $116, wherever this revision keeps them
 inline int16 RomK (int i)
 {
-	return ((int16) rom[i + (s.first ? 2 : 0)]);
-}
-
-// the multiplier's high word
-inline int16 Mul (int16 a, int16 b)
-{
-	return ((int16) ((int32) a * b >> 15));
+	return ((int16) rom[i + (s.variant ? 2 : 0)]);
 }
 
 // -x, saturating -(-1) to 1 - 2^-15
@@ -280,9 +214,9 @@ SubOut SubSqrt (int16 c, int16 e)
 	const int	idx = (0xd6 + (c * 0x40 >> 15)) & 0x3ff;
 	const int16	node2 = (int16) rom[idx], node1 = (int16) rom[(idx - 1) & 0x3ff];
 	// the first DSP-1 doesn't mask the fraction, so mantissa bit 9 lands in its sign
-	const int16	frac = s.first ? (int16) (c << 6) : (int16) ((c & 0x1ff) << 6);
+	const int16	frac = s.variant ? (int16) (c << 6) : (int16) ((c & 0x1ff) << 6);
 	const int16	r = (int16) (node1 + ((int16) (node2 - node1) * frac >> 15));
-	return { r, e, (s.first ? 13u : 14u) + (odd ? 2 : 0) };
+	return { r, e, (s.variant ? 13u : 14u) + (odd ? 2 : 0) };
 }
 
 const int16	SinTable[256] =
@@ -974,7 +908,7 @@ bool Version (void)			// $27/$2F: once the CPU touches DR, the firmware's versio
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(12); NT_WAIT(2); NT_WRITE(3, s.first ? 0x0100 : 0x0101);
+	NT_BURN(12); NT_WAIT(2); NT_WRITE(3, s.variant ? 0x0100 : 0x0101);
 	NT_EPILOGUE(4);
 	NT_END
 }
@@ -1004,8 +938,6 @@ bool Idle (void)			// $003-$006: wait for a command; bits 6-7 send it back to th
 	NT_END
 }
 
-bool	(*prog) (void);		// the running command's program, from s.cmd
-
 bool (*Program (uint8 cmd)) (void)
 {
 	switch (cmd & 0x3f)
@@ -1033,92 +965,22 @@ bool (*Program (uint8 cmd)) (void)
 	}
 }
 
+void ChipReset (bool variant)
+{
+	BuildDataROM(variant);
+}
+
+void ChipLoaded (void)
+{
+	BuildDataROM(s.variant != 0);
+}
+
 }	// namespace
 
-void S9xDSP1NAttach (uint16 *data, uint16 *status, uint16 *mem)
-{
-	dr = data;
-	sr = status;
-	ram = mem;
-}
+const S9xUPD7725Native	S9xDSP1Native = NT_CHIP;
 
-void S9xDSP1NReset (bool8 first)
-{
-	memset(&s, 0, sizeof(s));
-	s.first = first ? 1 : 0;
-	s.running = 2;
-	BuildDataROM(first);
-	prog = Program(0);
-}
-
-void S9xDSP1NIdle (bool8 first)
-{
-	S9xDSP1NReset(first);
-	s.running = 0;
-	s.parked = 1;
-}
-
-uint32 S9xDSP1NRun (uint64 b)
-{
-	// most syncs find it waiting on the CPU
-	if (!(s.parked && (*sr & SR_RQM)))
-	{
-		budget = b;
-		for (;;)
-		{
-			bool	done;
-			switch (s.running)
-			{
-				case 0:	 done = Idle(); break;
-				case 1:	 done = prog(); break;
-				default: done = Boot(); break;
-			}
-			if (!done)
-				break;
-			if (s.running == 0)
-				prog = Program(s.cmd);
-			s.running = s.running == 0 ? 1 : 0;
-		}
-	}
-	return (S9xDSP1NOwed());
-}
-
-uint32 S9xDSP1NOwed (void)
-{
-	// freed but not resumed, or between programs: it acts on its next instruction
-	if (s.parked)
-		return ((*sr & SR_RQM) ? 0 : 1);
-	return (s.due ? s.due : 1);
-}
-
-uint32 S9xDSP1NStateSize (void)
-{
-	return (sizeof(s));
-}
-
-void S9xDSP1NStateSave (uint8 *buf)
-{
-	memcpy(buf, &s, sizeof(s));
-}
-
-bool8 S9xDSP1NStateLoad (const uint8 *buf, uint32 size)
-{
-	if (size != sizeof(s))
-		return (FALSE);
-	memcpy(&s, buf, sizeof(s));
-	BuildDataROM(s.first != 0);
-	prog = Program(s.cmd);
-	return (TRUE);
-}
-
-#ifdef DSP1N_LAB
-// The lab's hooks: bus events, and the shared routines one at a time.
-void S9xDSP1NLabEvents (void (*fn) (char kind, uint32 n, uint32 val))
-{
-	lab_event = fn;
-	lab_n = 0;
-}
-
+#ifdef UPD7725N_LAB
+// The lab's direct checks of the shared routines.
 bool S9xDSP1NLabSub (const char *name, int16 a, int16 b, int16 *ao, int16 *bo, uint32 *cost)
 {
 	SubOut	o;

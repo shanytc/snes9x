@@ -68,7 +68,7 @@ void        S9xSetBiosPath (int slot, const char *path);
 char *S9xGetBiosPathBuffer (int slot);
 
 // How a chip with firmware in its slot runs: the old high-level emulation, the native chip (exact,
-// no file), or the slot's firmware. AUTO until one is picked: the firmware if a file is set, else native.
+// no file), or the slot's firmware. AUTO until one is picked, which is native.
 enum S9xChipMode
 {
 	S9X_CHIP_AUTO = 0,

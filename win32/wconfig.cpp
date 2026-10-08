@@ -1081,7 +1081,7 @@ void WinRegisterConfigItems()
 		snprintf(mode_keys[i], sizeof mode_keys[i], "BIOS::%sMode", S9xGetBiosSlotInfo(i)->key);
 		configItems.push_back(ConfigItem(
 			mode_keys[i], (void *) S9xGetChipModeBuffer(i), 4, (void *) (pint) S9X_CHIP_AUTO,
-			"chip emulation, picked in File -> BIOS Manager: 1 = Legacy (HLE), 2 = Native (LLE), 3 = Firmware (the file above), 0 = the firmware if a file is set, else native", CIT_UINT));
+			"chip emulation, picked in File -> BIOS Manager: 1 = Legacy (HLE), 2 = Native (LLE), 3 = Firmware (the file above), 0 = Native (the default)", CIT_UINT));
 	}
 #undef CATEGORY
 #define	CATEGORY "SGB"

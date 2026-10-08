@@ -238,9 +238,7 @@ void S9xSetChipMode (int slot, int mode)
 int S9xChipModeInEffect (int slot)
 {
 	const int mode = S9xGetChipMode(slot);
-	if (mode != S9X_CHIP_AUTO)
-		return mode;
-	return g_paths[slot][0] ? S9X_CHIP_FIRMWARE : S9X_CHIP_NATIVE;
+	return (mode != S9X_CHIP_AUTO) ? mode : S9X_CHIP_NATIVE;
 }
 
 uint32 *S9xGetChipModeBuffer (int slot)

@@ -22,6 +22,7 @@ void S9xSetInfoString (const char *);
 // Clear `unrunnable` for a BIOS whose absence only degrades the run.
 void S9xSetBiosNotice (const char *, bool8 unrunnable = TRUE);
 void S9xShowBiosNotice (void);
+bool8 S9xBiosNoticePending (void);
 // True once an unrunnable notice has been shown: a cart is mapped but cannot
 // run, so the UI should stay in its no-game state rather than offer resets.
 bool8 S9xBiosMissing (void);

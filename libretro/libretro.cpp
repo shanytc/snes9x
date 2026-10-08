@@ -1490,16 +1490,18 @@ static struct retro_disk_control_callback superdisc_disk_control = {
     superdisc_add_image_index,
 };
 
-// A DSP or Cx4 running from its dump in the system folder: the desktop ports
-// tag their title, so say it on the OSD.
+// A DSP or Cx4 running as the chip, native or from its dump in the system
+// folder: the desktop ports tag their title, so say it on the OSD.
 static void notify_enhanced_chip(void)
 {
     const int   chip = S9xEnhancedChip();
-    const char *s = chip == S9X_ENHANCED_DSP ? "DSP Enhanced: running the chip from its firmware"
-                  : chip == S9X_ENHANCED_CX4 ? "Cx4 Enhanced: running the chip from its data ROM"
-                                             : NULL;
-    if (!s)
+    const char *how = chip == S9X_ENHANCED_DSP_FIRMWARE ? "Chip Enhanced: running the chip from its firmware"
+                    : chip == S9X_ENHANCED_CX4_FIRMWARE ? "Chip Enhanced: running the chip from its data ROM"
+                                                        : "Enhanced: running the native chip";
+    if (chip == S9X_ENHANCED_NONE)
         return;
+    static char s[96];
+    snprintf(s, sizeof(s), "%s %s", S9xEnhancedChipName(), how);
     if (log_cb)
         log_cb(RETRO_LOG_INFO, "%s\n", s);
     if (environ_cb)

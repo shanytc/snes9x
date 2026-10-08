@@ -67,6 +67,25 @@ void        S9xSetBiosPath (int slot, const char *path);
 // Raw buffer for config backends that bind a char array (win32 wconfig).
 char *S9xGetBiosPathBuffer (int slot);
 
+// How a chip with firmware in its slot runs: the old high-level emulation, the native chip (exact,
+// no file), or the slot's firmware. AUTO until one is picked: the firmware if a file is set, else native.
+enum S9xChipMode
+{
+	S9X_CHIP_AUTO = 0,
+	S9X_CHIP_HLE,
+	S9X_CHIP_NATIVE,
+	S9X_CHIP_FIRMWARE
+};
+
+// Whether the slot holds a chip's firmware, so has a mode (DSP-1 to DSP-4, Cx4).
+bool8   S9xBiosSlotHasChipMode (int slot);
+int     S9xGetChipMode (int slot);
+void    S9xSetChipMode (int slot, int mode);
+// The mode a load uses: the one picked, or what AUTO comes to.
+int     S9xChipModeInEffect (int slot);
+// Raw storage for config backends (win32 wconfig): a uint32 per slot.
+uint32 *S9xGetChipModeBuffer (int slot);
+
 // Every slot's path in one string: keep one and compare later to learn
 // whether the BIOS Manager changed anything in between.
 std::string S9xBiosPathsFingerprint (void);

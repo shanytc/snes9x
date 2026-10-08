@@ -170,15 +170,16 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "NSS",          "Nintendo Super System",          kNamesNSS,       0x8000,   NULL,                                     kInfoNSS,       NULL },
 	{ "NSSFont",      "Nintendo Super System OSD Font", kNamesNSSFont,   0x1200,   NULL,                                     kInfoNSSFont,   NULL },
 	{ "SuperDisc",    "Super Disc",                     kNamesSuperDisc, 0x20000,  NULL,                                     kInfoSuperDisc, NULL },
-	{ "DSP1",         "DSP-1",                          kNamesDSP1,      UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP1,      kNoIntroDSP1 },
-	{ "DSP1B",        "DSP-1B",                         kNamesDSP1B,     UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP1B,     kNoIntroDSP1B },
-	{ "DSP2",         "DSP-2",                          kNamesDSP2,      UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP2,      kNoIntroDSP2 },
-	{ "DSP3",         "DSP-3",                          kNamesDSP3,      UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP3,      kNoIntroDSP3 },
-	{ "DSP4",         "DSP-4",                          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in HLE (less accurate)",  kInfoDSP4,      kNoIntroDSP4 },
-	{ "CX4",          "Cx4",                            kNamesCX4,       HG51B_DATAROM_SIZE,    "Optional, built-in HLE (less accurate)",  kInfoCX4,       kNoIntroCX4 },
+	{ "DSP1",         "DSP-1",                          kNamesDSP1,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP1,      kNoIntroDSP1 },
+	{ "DSP1B",        "DSP-1B",                         kNamesDSP1B,     UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP1B,     kNoIntroDSP1B },
+	{ "DSP2",         "DSP-2",                          kNamesDSP2,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP2,      kNoIntroDSP2 },
+	{ "DSP3",         "DSP-3",                          kNamesDSP3,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP3,      kNoIntroDSP3 },
+	{ "DSP4",         "DSP-4",                          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP4,      kNoIntroDSP4 },
+	{ "CX4",          "Cx4",                            kNamesCX4,       HG51B_DATAROM_SIZE,    "Optional, built-in native chip",         kInfoCX4,       kNoIntroCX4 },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
+static uint32 g_modes[S9X_NUM_BIOS_SLOTS];	// S9xChipMode, for the chip slots
 
 static bool SlotValid (int slot)
 {
@@ -218,12 +219,43 @@ char *S9xGetBiosPathBuffer (int slot)
 	return SlotValid(slot) ? g_paths[slot] : NULL;
 }
 
+bool8 S9xBiosSlotHasChipMode (int slot)
+{
+	return slot >= S9X_BIOS_DSP1 && slot <= S9X_BIOS_CX4;
+}
+
+int S9xGetChipMode (int slot)
+{
+	return (S9xBiosSlotHasChipMode(slot) && g_modes[slot] <= S9X_CHIP_FIRMWARE) ? (int) g_modes[slot] : S9X_CHIP_AUTO;
+}
+
+void S9xSetChipMode (int slot, int mode)
+{
+	if (S9xBiosSlotHasChipMode(slot) && mode >= S9X_CHIP_AUTO && mode <= S9X_CHIP_FIRMWARE)
+		g_modes[slot] = (uint32) mode;
+}
+
+int S9xChipModeInEffect (int slot)
+{
+	const int mode = S9xGetChipMode(slot);
+	if (mode != S9X_CHIP_AUTO)
+		return mode;
+	return g_paths[slot][0] ? S9X_CHIP_FIRMWARE : S9X_CHIP_NATIVE;
+}
+
+uint32 *S9xGetChipModeBuffer (int slot)
+{
+	return S9xBiosSlotHasChipMode(slot) ? &g_modes[slot] : NULL;
+}
+
 std::string S9xBiosPathsFingerprint (void)
 {
 	std::string out;
 	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
 	{
 		out += g_paths[slot];
+		if (S9xBiosSlotHasChipMode(slot))
+			out += (char) ('0' + S9xChipModeInEffect(slot));
 		out += '\n';
 	}
 	return (out);

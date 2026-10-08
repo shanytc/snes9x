@@ -614,8 +614,8 @@ void EmuMainWindow::setEventTimer(int minutes, int display)
 void EmuMainWindow::updateEventTitle()
 {
     // The Super Famicom Box swaps games under the SNES, and whether the game on
-    // screen runs its chip from the dump changes with that or a state saved
-    // under the HLE; the title follows both.
+    // screen runs its chip, and how, changes with that or a state saved under
+    // the HLE; the title follows both.
     static std::string box_title;
     static int         title_chip = -1;
     const int          chip = S9xEnhancedChip();
@@ -1025,7 +1025,7 @@ void EmuMainWindow::updateWindowTitle()
     if (KailleraServerIsRunning())
         return;
 #endif
-    // The game on screen runs a DSP or Cx4 from the BIOS Manager's dump, not the HLE.
+    // The game on screen runs a DSP or Cx4 as the chip, native or its dump, not the HLE.
     const char *chip = S9xEnhancedChipTag();
     QString name;
     if (Settings.SuperDisc)

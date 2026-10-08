@@ -1647,7 +1647,8 @@ bool8 S9xBiosChangedSinceLoad (void)
 {
     // Only a cart that took one of the files has anything to pick up.
     const bool takes_bios = Settings.GBRomPath[0] || Settings.BS ||
-                            Multi.cartType || SFCBox.Active || !SuperDiscBIOSPath.empty();
+                            Multi.cartType || SFCBox.Active || !SuperDiscBIOSPath.empty() ||
+                            Settings.DSP || Settings.C4;
     return takes_bios && s_bios_paths_at_load != S9xBiosPathsFingerprint();
 }
 
@@ -3801,13 +3802,30 @@ static bool AcceptDSPFirmware (const uint8 *data, uint32 size, uint32 full_size,
 
 // The chip's own program, when the BIOS Manager has one; else the chip runs natively,
 // which needs none, and the HLE takes a chip without a native version.
+// Firmware picked in the BIOS Manager that won't load: the native chip runs instead, and says so.
+static void ChipFirmwareNotice (int slot)
+{
+	if (!S9xBiosNoticePending())
+		S9xSetBiosNotice((std::string(S9xGetBiosSlotInfo(slot)->label) +
+						  " firmware can't be used: running the native chip. Check it in File -> BIOS Manager.").c_str(), FALSE);
+}
+
+// The chip as the slot's mode picks it: FALSE leaves the cart to the HLE.
 static bool8 LoadDSPFirmware (int slot, int chip)
 {
+	const int	mode = S9xChipModeInEffect(slot);
+	if (mode == S9X_CHIP_HLE)
+		return (FALSE);
+
 	std::vector<uint8>	image;
-	if (S9xBiosPathUsable(slot) &&
-		S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware) &&
-		S9xUPD7725Load(image.data(), (uint32) image.size(), chip))
-		return (TRUE);
+	if (mode == S9X_CHIP_FIRMWARE)
+	{
+		if (S9xBiosPathUsable(slot) &&
+			S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware) &&
+			S9xUPD7725Load(image.data(), (uint32) image.size(), chip))
+			return (TRUE);
+		ChipFirmwareNotice(slot);
+	}
 	return (S9xUPD7725LoadNative(chip));
 }
 
@@ -3824,15 +3842,23 @@ static bool AcceptCx4DataROM (const uint8 *data, uint32 size, uint32 full_size, 
 	return (full_size == HG51B_DATAROM_SIZE && S9xHG51BIsDataROM(data, size));
 }
 
-// The Cx4 runs the cart's own code, on its data ROM if one is set, else the native chip on one
-// worked out from its formulas.
+// The Cx4 as its mode picks it: the cart's own code on the data ROM dump, or the native chip on
+// one worked out from its formulas; FALSE leaves the cart to the HLE.
 static bool8 LoadCx4DataROM (void)
 {
+	const int	mode = S9xChipModeInEffect(S9X_BIOS_CX4);
+	if (mode == S9X_CHIP_HLE)
+		return (FALSE);
+
 	std::vector<uint8>	image;
-	if (S9xBiosPathUsable(S9X_BIOS_CX4) &&
-		S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_CX4).c_str(), image, HG51B_DATAROM_SIZE, AcceptCx4DataROM) &&
-		S9xHG51BLoad(image.data(), (uint32) image.size()))
-		return (TRUE);
+	if (mode == S9X_CHIP_FIRMWARE)
+	{
+		if (S9xBiosPathUsable(S9X_BIOS_CX4) &&
+			S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_CX4).c_str(), image, HG51B_DATAROM_SIZE, AcceptCx4DataROM) &&
+			S9xHG51BLoad(image.data(), (uint32) image.size()))
+			return (TRUE);
+		ChipFirmwareNotice(S9X_BIOS_CX4);
+	}
 	return (S9xHG51BLoadBuiltin());
 }
 
@@ -5723,7 +5749,7 @@ int S9xPF94TimeRemaining (void)
 int S9xEnhancedChip (void)
 {
 	if (S9xHG51BActive())
-		return (S9X_ENHANCED_CX4);
+		return (S9xHG51BIsNative() ? S9X_ENHANCED_CX4 : S9X_ENHANCED_CX4_FIRMWARE);
 	if (!S9xUPD7725Active())
 		return (S9X_ENHANCED_NONE);
 
@@ -5737,17 +5763,43 @@ int S9xEnhancedChip (void)
 	else
 	if (Settings.SFCBox)
 		used = (SFCBox.MapReg0 & 0x20) && (SFCBox.MapReg1 & 3) != 1;
-	return (used ? S9X_ENHANCED_DSP : S9X_ENHANCED_NONE);
+	if (!used)
+		return (S9X_ENHANCED_NONE);
+	return (S9xUPD7725IsNative() ? S9X_ENHANCED_DSP : S9X_ENHANCED_DSP_FIRMWARE);
+}
+
+const char *S9xEnhancedChipName (void)
+{
+	switch (S9xEnhancedChip())
+	{
+		case S9X_ENHANCED_DSP:
+		case S9X_ENHANCED_DSP_FIRMWARE:
+			switch (S9xUPD7725Chip())
+			{
+				case UPD7725_DSP1:	return ("DSP-1");
+				case UPD7725_DSP1B:	return ("DSP-1B");
+				case UPD7725_DSP2:	return ("DSP-2");
+				case UPD7725_DSP3:	return ("DSP-3");
+				case UPD7725_DSP4:	return ("DSP-4");
+				default:			return ("DSP");
+			}
+		case S9X_ENHANCED_CX4:
+		case S9X_ENHANCED_CX4_FIRMWARE:
+			return ("Cx4");
+		default:
+			return ("");
+	}
 }
 
 const char *S9xEnhancedChipTag (void)
 {
-	switch (S9xEnhancedChip())
-	{
-		case S9X_ENHANCED_DSP:	return (" (DSP Enhanced)");
-		case S9X_ENHANCED_CX4:	return (" (Cx4 Enhanced)");
-		default:				return ("");
-	}
+	static char	tag[48];
+	const int	chip = S9xEnhancedChip();
+	if (chip == S9X_ENHANCED_NONE)
+		return ("");
+	const bool	firmware = chip == S9X_ENHANCED_DSP_FIRMWARE || chip == S9X_ENHANCED_CX4_FIRMWARE;
+	snprintf(tag, sizeof(tag), " (%s %sEnhanced)", S9xEnhancedChipName(), firmware ? "Chip " : "");
+	return (tag);
 }
 
 // The two event carts keep independent timer settings; these return the loaded

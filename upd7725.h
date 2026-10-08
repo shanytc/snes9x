@@ -34,6 +34,10 @@ bool8	S9xUPD7725Load (const uint8 *image, uint32 size, int chip);
 bool8	S9xUPD7725LoadNative (int chip);
 void	S9xUPD7725Unload (void);
 bool8	S9xUPD7725Loaded (void);
+// Whether the loaded chip is the native one rather than a firmware dump.
+bool8	S9xUPD7725IsNative (void);
+// Which DSP-n is loaded (UPD7725_DSP1...), 0 for none.
+int		S9xUPD7725Chip (void);
 // Whether the chip, rather than the HLE, is answering the CPU right now.
 bool8	S9xUPD7725Active (void);
 // Back to power-on, and back in charge if a state had handed off to the HLE.

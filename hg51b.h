@@ -24,6 +24,8 @@ bool8	S9xHG51BLoad (const uint8 *image, uint32 size);
 bool8	S9xHG51BLoadBuiltin (void);
 void	S9xHG51BUnload (void);
 bool8	S9xHG51BLoaded (void);
+// Whether the loaded chip is the native one on the built-in data ROM rather than a dump.
+bool8	S9xHG51BIsNative (void);
 // Whether the chip, rather than the HLE, is answering the CPU right now.
 bool8	S9xHG51BActive (void);
 // Back to power-on, and back in charge if a state had handed off to the HLE.

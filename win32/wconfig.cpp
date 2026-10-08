@@ -1073,6 +1073,16 @@ void WinRegisterConfigItems()
 			bios_keys[i], (void *) S9xGetBiosPathBuffer(i), S9X_BIOS_PATH_MAX,
 			(void *) "", S9xGetBiosSlotInfo(i)->label, CIT_ASTRING));
 	}
+	static char mode_keys[S9X_NUM_BIOS_SLOTS][64];
+	for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+	{
+		if (!S9xBiosSlotHasChipMode(i))
+			continue;
+		snprintf(mode_keys[i], sizeof mode_keys[i], "BIOS::%sMode", S9xGetBiosSlotInfo(i)->key);
+		configItems.push_back(ConfigItem(
+			mode_keys[i], (void *) S9xGetChipModeBuffer(i), 4, (void *) (pint) S9X_CHIP_AUTO,
+			"chip emulation, picked in File -> BIOS Manager: 1 = Legacy (HLE), 2 = Native (LLE), 3 = Firmware (the file above), 0 = the firmware if a file is set, else native", CIT_UINT));
+	}
 #undef CATEGORY
 #define	CATEGORY "SGB"
 	AddBoolC("GBBIOSEnabled", Settings.GB_BIOSEnabled, true, "true to use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC. No menu entry: set false here to always skip the boot animation.");

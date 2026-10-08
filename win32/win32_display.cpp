@@ -414,8 +414,8 @@ bool8 S9xDeinitUpdate (int Width, int Height)
 		}
 	}
 	{
-		// Whether the game on screen runs its chip from the dump changes with
-		// a board's game switch, or a state saved under the HLE; the title follows.
+		// Whether the game on screen runs its chip, and how, changes with a
+		// board's game switch, a reload, or a state saved under the HLE; the title follows.
 		static int lastChip = -1;
 		const int  chip = S9xEnhancedChip();
 		if (chip != lastChip)

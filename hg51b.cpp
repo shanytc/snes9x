@@ -147,6 +147,11 @@ bool8 S9xHG51BLoaded (void)
 	return (loaded);
 }
 
+bool8 S9xHG51BIsNative (void)
+{
+	return (native);
+}
+
 bool8 S9xHG51BActive (void)
 {
 	return (active);

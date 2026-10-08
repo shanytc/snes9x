@@ -1485,7 +1485,7 @@ void Snes9xWindow::set_event_timer(int minutes, int display)
 // Super Disc and Super Famicom Box sessions name the machine and what's in it.
 std::string Snes9xWindow::rom_title()
 {
-    // The game on screen runs a DSP or Cx4 from the BIOS Manager's dump, not the HLE.
+    // The game on screen runs a DSP or Cx4 as the chip, native or its dump, not the HLE.
     const char *chip = S9xEnhancedChipTag();
     const std::string name = Settings.SuperDisc  ? std::string(S9xSuperDiscTitle())
                            : SFCBox.Active       ? std::string(S9xSFCBoxTitle()) + chip
@@ -1512,8 +1512,8 @@ bool Snes9xWindow::update_event_title()
         title.erase(title.size() - event_title_suffix.size());
     event_title_suffix = suffix;
     // The Super Famicom Box swaps games under the SNES, and whether the game on
-    // screen runs its chip from the dump changes with that or a state saved
-    // under the HLE; the title follows both.
+    // screen runs its chip, and how, changes with that or a state saved under
+    // the HLE; the title follows both.
     static int shown_chip = -1;
     const int  chip = S9xEnhancedChip();
     if (config->rom_loaded && (SFCBox.Active || chip != shown_chip))

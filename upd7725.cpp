@@ -143,6 +143,16 @@ bool8 S9xUPD7725Loaded (void)
 	return (loaded);
 }
 
+bool8 S9xUPD7725IsNative (void)
+{
+	return (native != NULL);
+}
+
+int S9xUPD7725Chip (void)
+{
+	return (loaded ? chip : 0);
+}
+
 bool8 S9xUPD7725Active (void)
 {
 	return (active);

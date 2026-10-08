@@ -381,12 +381,13 @@ int S9xPF94TimeRemaining (void);
 int S9xEventTimerMinutes (void);
 int S9xEventTimerDisplay (void);
 
-// Which chip the game on screen runs from the BIOS Manager's dump rather
-// than the HLE, and the window-title tag that says so (" (DSP Enhanced)",
-// " (Cx4 Enhanced)" or ""). On a multi-game board only the game that uses
-// the chip counts.
-enum { S9X_ENHANCED_NONE, S9X_ENHANCED_DSP, S9X_ENHANCED_CX4 };
+// Which chip the game on screen runs as the chip rather than the HLE, native or
+// from the BIOS Manager's dump, its name ("DSP-1B", "Cx4"), and the window-title tag
+// that says so (" (DSP-1B Enhanced)" native, " (DSP-1B Chip Enhanced)" firmware, ""
+// for the HLE). On a multi-game board only the game that uses the chip counts.
+enum { S9X_ENHANCED_NONE, S9X_ENHANCED_DSP, S9X_ENHANCED_CX4, S9X_ENHANCED_DSP_FIRMWARE, S9X_ENHANCED_CX4_FIRMWARE };
 int S9xEnhancedChip (void);
+const char *S9xEnhancedChipName (void);
 const char *S9xEnhancedChipTag (void);
 
 enum s9xwrap_t

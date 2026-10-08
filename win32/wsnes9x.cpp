@@ -807,7 +807,7 @@ static void CenterCursor()
 void S9xRestoreWindowTitle ()
 {
     TCHAR buf [1024];
-    // The game on screen runs a DSP or Cx4 from the BIOS Manager's dump, not the HLE.
+    // The game on screen runs a DSP or Cx4 as the chip, native or its dump, not the HLE.
     Utf8ToWide chip(S9xEnhancedChipTag());
     if (Settings.SuperDisc)
         _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSuperDiscTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
@@ -10210,9 +10210,19 @@ static int BiosManagerListLevel(int data)
 	return BiosManagerHeadingOf(data) >= 0 ? 0 : BiosManagerChild(data) ? 2 : 1;
 }
 
-// The controls that make up one slot's row; a row without info has no icon.
+// The controls that make up one slot's row.
+// A row without info has no icon, one without a chip mode no mode box.
 static const int kBiosRowCtrls[] = { IDC_BIOSMGR_LABEL0, IDC_BIOSMGR_INFO0, IDC_BIOSMGR_EDIT0,
-                                     IDC_BIOSMGR_BROWSE0, IDC_BIOSMGR_CLEAR0, IDC_BIOSMGR_STATUS0 };
+                                     IDC_BIOSMGR_BROWSE0, IDC_BIOSMGR_CLEAR0, IDC_BIOSMGR_MODE0,
+                                     IDC_BIOSMGR_STATUS0 };
+
+// A chip row's modes, in its box's order.
+static const struct { const TCHAR *name; int mode; } kBiosChipModes[] =
+{
+	{ TEXT("Legacy (HLE)"), S9X_CHIP_HLE },
+	{ TEXT("Native (LLE)"), S9X_CHIP_NATIVE },
+	{ TEXT("Firmware"),     S9X_CHIP_FIRMWARE },
+};
 
 // Select... starts in the BIOS folder from Emulation -> Settings when one is
 // set and exists, otherwise beside the executable. Resolved here rather than
@@ -10241,12 +10251,42 @@ static void BiosManagerSetStatus(HWND hDlg, int slot, const TCHAR *text)
 	SendMessage(s_bios_tip, TTM_UPDATETIPTEXT, 0, (LPARAM) &ti);
 }
 
+// The mode a chip row's box shows; -1 for a row without one.
+static int BiosManagerChipMode(HWND hDlg, int slot)
+{
+	HWND          box = GetDlgItem(hDlg, IDC_BIOSMGR_MODE0 + slot);
+	const LRESULT sel = box ? SendMessage(box, CB_GETCURSEL, 0, 0) : CB_ERR;
+	return (sel == CB_ERR) ? -1 : (int) SendMessage(box, CB_GETITEMDATA, sel, 0);
+}
+
+// A chip row's status when its mode takes no file, or Firmware has none.
+static const TCHAR *BiosManagerChipNote(int mode)
+{
+	switch (mode)
+	{
+	case S9X_CHIP_HLE:    return _L(TEXT("Fastest (less accurate)"));
+	case S9X_CHIP_NATIVE: return _L(TEXT("Fast (chip accurate)"));
+	default:              return _L(TEXT("Nothing selected: Slow (chip accurate)"));
+	}
+}
+
 static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 {
 	TCHAR wtext[S9X_BIOS_PATH_MAX];
 	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+	// A chip reads its file only in Firmware mode; otherwise the path waits greyed out.
+	const int  mode    = BiosManagerChipMode(hDlg, slot);
+	const bool file_on = mode < 0 || mode == S9X_CHIP_FIRMWARE;
+	EnableWindow(GetDlgItem(hDlg, IDC_BIOSMGR_EDIT0 + slot), file_on);
+	EnableWindow(GetDlgItem(hDlg, IDC_BIOSMGR_BROWSE0 + slot), file_on);
 	// Nothing to clear on a blank row.
-	EnableWindow(GetDlgItem(hDlg, IDC_BIOSMGR_CLEAR0 + slot), wtext[0] != TEXT('\0'));
+	EnableWindow(GetDlgItem(hDlg, IDC_BIOSMGR_CLEAR0 + slot), file_on && wtext[0] != TEXT('\0'));
+	if (mode >= 0 && (!file_on || wtext[0] == TEXT('\0')))
+	{
+		s_bios_status[slot] = file_on ? S9X_BIOS_PATH_MISSING : S9X_BIOS_PATH_UNSET;
+		BiosManagerSetStatus(hDlg, slot, BiosManagerChipNote(mode));
+		return;
+	}
 	if (wtext[0] == TEXT('\0'))
 	{
 		s_bios_status[slot] = S9X_BIOS_PATH_UNSET;
@@ -10274,6 +10314,8 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	Utf8ToWide   why_w(why.c_str());
 	std::wstring text;
 	if (!exists || st == S9X_BIOS_PATH_MISSING) text = TEXT("not found");
+	else if (st == S9X_BIOS_PATH_OK && mode >= 0)
+		text = _L(TEXT("Slow (chip accurate)"));
 	else if (st == S9X_BIOS_PATH_OK)
 	{
 		text = TEXT("OK");
@@ -10345,6 +10387,61 @@ static int BiosManagerDlu(HWND hDlg, int dlu, bool down = false)
 	RECT r = { 0, 0, dlu, dlu };
 	MapDialogRect(hDlg, &r);
 	return down ? r.bottom : r.right;
+}
+
+// A chip row's mode box, on the path box's line where the status starts and after X in the
+// tab order; the layout moves it, never resizes it (a drop list's height is its list's).
+static void BiosManagerAddModeBox(HWND hDlg, int slot)
+{
+	if (!S9xBiosSlotHasChipMode(slot)) return;
+
+	HFONT   font = (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0);
+	HDC     hdc  = GetDC(hDlg);
+	HGDIOBJ old  = SelectObject(hdc, font);
+	int     tw   = 0;
+	for (const auto &m : kBiosChipModes)
+	{
+		const TCHAR *name = _L(m.name);
+		SIZE         sz   = { 0 };
+		GetTextExtentPoint32(hdc, name, lstrlen(name), &sz);
+		tw = max(tw, (int) sz.cx);
+	}
+	SelectObject(hdc, old);
+	ReleaseDC(hDlg, hdc);
+
+	const RECT er  = BiosManagerRect(hDlg, GetDlgItem(hDlg, IDC_BIOSMGR_EDIT0 + slot));
+	const RECT sr  = BiosManagerRect(hDlg, GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot));
+	HWND       box = CreateWindowEx(0, WC_COMBOBOX, NULL, WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+	                                sr.left, er.top, tw + GetSystemMetrics(SM_CXVSCROLL) + BiosManagerDlu(hDlg, 10),
+	                                (er.bottom - er.top) * 8, hDlg, (HMENU) (INT_PTR) (IDC_BIOSMGR_MODE0 + slot),
+	                                g_hInst, NULL);
+	if (!box) return;
+	SendMessage(box, WM_SETFONT, (WPARAM) font, FALSE);
+	const int pick = S9xChipModeInEffect(slot);
+	for (const auto &m : kBiosChipModes)
+	{
+		const int i = (int) SendMessage(box, CB_ADDSTRING, 0, (LPARAM) _L(m.name));
+		SendMessage(box, CB_SETITEMDATA, i, m.mode);
+		if (m.mode == pick)
+			SendMessage(box, CB_SETCURSEL, i, 0);
+	}
+	const RECT br = BiosManagerRect(hDlg, box);
+	SetWindowPos(box, GetDlgItem(hDlg, IDC_BIOSMGR_CLEAR0 + slot), sr.left,
+	             (er.top + er.bottom - (br.bottom - br.top)) / 2, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+
+	if (s_bios_tip)
+	{
+		TOOLINFO ti = { 0 };
+		ti.cbSize   = sizeof(ti);
+		ti.hwnd     = hDlg;
+		ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+		ti.uId      = (UINT_PTR) box;
+		ti.lpszText = (LPTSTR) _L(TEXT("Legacy (HLE): the old high-level code, some games glitch\n"
+		                               "Native (LLE): the chip itself, exact, no file needed\n"
+		                               "Firmware: the chip running the dump picked here, exact but slower\n"
+		                               "Takes effect at the next load or hard reset"));
+		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+	}
 }
 
 static int BiosManagerTextWidth(HDC hdc, HWND h)
@@ -10547,6 +10644,7 @@ static void BiosManagerLayout(HWND hDlg, bool typing = false)
 
 	// Labels for this pick and for any; statuses for any row, with the note a
 	// cleared row shows, so X never resizes the window either.
+	const int gap     = BiosManagerDlu(hDlg, kBiosCtlGap);
 	HWND    intro     = GetDlgItem(hDlg, IDC_BIOSMGR_INTRO);
 	HDC     hdc       = GetDC(hDlg);
 	HGDIOBJ old       = SelectObject(hdc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
@@ -10563,7 +10661,20 @@ static void BiosManagerLayout(HWND hDlg, bool typing = false)
 		SIZE        sz = { 0 };
 		GetTextExtentPoint32(hdc, (wchar_t *) note_w, lstrlen((wchar_t *) note_w), &sz);
 		const int   sw = BiosManagerTextWidth(hdc, GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot));
-		statusw = max(statusw, max(sw, (int) sz.cx) + 4);
+		int         widest = max(sw, (int) sz.cx);
+		// A chip row's status follows its box; every mode's note counts, so a pick never resizes.
+		if (HWND box = GetDlgItem(hDlg, IDC_BIOSMGR_MODE0 + slot))
+		{
+			for (const auto &m : kBiosChipModes)
+			{
+				const TCHAR *chip_note = BiosManagerChipNote(m.mode);
+				GetTextExtentPoint32(hdc, chip_note, lstrlen(chip_note), &sz);
+				widest = max(widest, (int) sz.cx);
+			}
+			const RECT br = BiosManagerRect(hDlg, box);
+			widest += (br.right - br.left) + gap;
+		}
+		statusw = max(statusw, widest + 4);
 	}
 	const int introw = BiosManagerTextWidth(hdc, intro);
 	SelectObject(hdc, old);
@@ -10571,7 +10682,6 @@ static void BiosManagerLayout(HWND hDlg, bool typing = false)
 
 	const int  margin   = BiosManagerDlu(hDlg, kBiosMargin);
 	const int  vmargin  = BiosManagerDlu(hDlg, kBiosMargin, true);
-	const int  gap      = BiosManagerDlu(hDlg, kBiosCtlGap);
 	const int  pitch    = BiosManagerDlu(hDlg, kBiosPitch, true);
 	const int  icon_gap = BiosManagerDlu(hDlg, kBiosIconGap);
 	const RECT lr       = BiosManagerRect(hDlg, list);
@@ -10634,7 +10744,14 @@ static void BiosManagerLayout(HWND hDlg, bool typing = false)
 		put(IDC_BIOSMGR_EDIT0, path_x, path_right - path_x);
 		put(IDC_BIOSMGR_BROWSE0, browse_x, -1);
 		put(IDC_BIOSMGR_CLEAR0, clear_x, -1);
-		put(IDC_BIOSMGR_STATUS0, status_x, w - margin - status_x);
+		int sx = status_x;
+		if (HWND box = GetDlgItem(hDlg, IDC_BIOSMGR_MODE0 + slot))
+		{
+			const RECT r = BiosManagerRect(hDlg, box);
+			dwp = BiosManagerPlace(dwp, box, status_x, r.top + dy, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
+			sx += (r.right - r.left) + gap;
+		}
+		put(IDC_BIOSMGR_STATUS0, sx, w - margin - sx);
 	}
 	if (resize)
 	{
@@ -11183,6 +11300,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
 						   Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
 			BiosManagerAddInfoIcon(hDlg, slot);
+			BiosManagerAddModeBox(hDlg, slot);
 			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
 			BiosManagerRefreshStatus(hDlg, slot);
 		}
@@ -11235,6 +11353,14 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			return true;
 		}
 
+		if (id >= IDC_BIOSMGR_MODE0 && id < IDC_BIOSMGR_MODE0 + S9X_NUM_BIOS_SLOTS &&
+			HIWORD(wParam) == CBN_SELCHANGE)
+		{
+			BiosManagerRefreshStatus(hDlg, id - IDC_BIOSMGR_MODE0);
+			BiosManagerLayout(hDlg, true);
+			return true;
+		}
+
 		if (id >= IDC_BIOSMGR_BROWSE0 && id < IDC_BIOSMGR_BROWSE0 + S9X_NUM_BIOS_SLOTS)
 		{
 			const int slot = id - IDC_BIOSMGR_BROWSE0;
@@ -11282,6 +11408,9 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 				TCHAR wtext[S9X_BIOS_PATH_MAX];
 				GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
 				S9xSetBiosPath(slot, WideToUtf8(wtext));
+				const int mode = BiosManagerChipMode(hDlg, slot);
+				if (mode >= 0)
+					S9xSetChipMode(slot, mode);
 			}
 			EndDialog(hDlg, 1);
 			return true;

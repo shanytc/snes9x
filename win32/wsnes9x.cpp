@@ -10211,10 +10211,10 @@ static int BiosManagerListLevel(int data)
 }
 
 // The controls that make up one slot's row.
-// A row without info has no icon, one without a chip mode no mode box.
-static const int kBiosRowCtrls[] = { IDC_BIOSMGR_LABEL0, IDC_BIOSMGR_INFO0, IDC_BIOSMGR_EDIT0,
-                                     IDC_BIOSMGR_BROWSE0, IDC_BIOSMGR_CLEAR0, IDC_BIOSMGR_MODE0,
-                                     IDC_BIOSMGR_STATUS0 };
+// A row without info has no icon, one without a chip mode no mode box or speed chart.
+static const int kBiosRowCtrls[] = { IDC_BIOSMGR_LABEL0, IDC_BIOSMGR_INFO0, IDC_BIOSMGR_BENCH0,
+                                     IDC_BIOSMGR_EDIT0, IDC_BIOSMGR_BROWSE0, IDC_BIOSMGR_CLEAR0,
+                                     IDC_BIOSMGR_MODE0, IDC_BIOSMGR_STATUS0 };
 
 // A chip row's modes, in its box's order.
 static const struct { const TCHAR *name; int mode; } kBiosChipModes[] =
@@ -10223,6 +10223,41 @@ static const struct { const TCHAR *name; int mode; } kBiosChipModes[] =
 	{ TEXT("Native (LLE)"), S9X_CHIP_NATIVE },
 	{ TEXT("Firmware"),     S9X_CHIP_FIRMWARE },
 };
+
+// Measured in scripted play on one PC and one build, per mode in kBiosChipModes order:
+// milliseconds per frame, and millions of host clock ticks spent inside the chip.
+struct BiosBenchScene { int slot; const TCHAR *scene; float ms[3]; int ticks[3]; };
+static const BiosBenchScene kBiosBench[] =
+{
+	{ S9X_BIOS_DSP1,  TEXT("Pilotwings"),             { 0.784f, 0.813f, 1.049f }, {  91, 310, 2463 } },
+	{ S9X_BIOS_DSP1B, TEXT("Super Mario Kart 2P"),    { 0.780f, 0.788f, 0.846f }, {  17,  43,  378 } },
+	{ S9X_BIOS_DSP1B, TEXT("Super Mario Kart 1P"),    { 0.755f, 0.712f, 0.755f }, {  26,  71,  594 } },
+	{ S9X_BIOS_DSP1B, TEXT("Lock On"),                { 0.855f, 0.866f, 1.114f }, {  67, 208, 1533 } },
+	{ S9X_BIOS_DSP1B, TEXT("Super Air Diver"),        { 0.818f, 0.876f, 1.131f }, {  84, 321, 2428 } },
+	{ S9X_BIOS_DSP1B, TEXT("Ballz"),                  { 0.962f, 0.962f, 1.010f }, {  29,  65,  598 } },
+	{ S9X_BIOS_DSP1B, TEXT("Suzuka 8 Hours"),         { 0.781f, 0.799f, 0.879f }, {  12,  42,  339 } },
+	{ S9X_BIOS_DSP2,  TEXT("Dungeon Master play"),    { 0.567f, 0.598f, 0.759f }, { 169, 572, 3741 } },
+	{ S9X_BIOS_DSP2,  TEXT("Dungeon Master attract"), { 0.728f, 0.724f, 0.718f }, {   0,  11,   10 } },
+	{ S9X_BIOS_DSP3,  TEXT("SD Gundam GX battle"),    { 0.991f, 0.785f, 0.859f }, { 128, 312, 1801 } },
+	{ S9X_BIOS_DSP3,  TEXT("SD Gundam GX attract"),   { 0.839f, 0.841f, 0.839f }, {   6,  48,  108 } },
+	{ S9X_BIOS_DSP4,  TEXT("Top Gear 3000"),          { 0.733f, 0.757f, 0.794f }, {  87, 410, 1269 } },
+	{ S9X_BIOS_DSP4,  TEXT("Top Gear 3000 JP"),       { 0.730f, 0.745f, 0.795f }, { 105, 474, 1455 } },
+	{ S9X_BIOS_CX4,   TEXT("Mega Man X2 attract"),    { 0.616f, 0.617f, 0.700f }, {  35, 144, 1850 } },
+	{ S9X_BIOS_CX4,   TEXT("Mega Man X2 wireframe"),  { 0.556f, 0.524f, 1.081f }, {  28,  99, 1374 } },
+	{ S9X_BIOS_CX4,   TEXT("Mega Man X3 attract"),    { 0.655f, 0.675f, 0.702f }, {   7,  55,  455 } },
+	{ S9X_BIOS_CX4,   TEXT("Mega Man X3 gameplay"),   { 0.884f, 0.877f, 0.963f }, {  37, 173, 2166 } },
+};
+
+// Each mode's colour in the speed chart and on its button.
+static const COLORREF kBiosBenchInk[3] = { RGB(0x8E, 0x9A, 0xA6), RGB(0x2E, 0x9E, 0x4F), RGB(0x2F, 0x7E, 0xD8) };
+
+static int BiosBenchScenes(int slot)
+{
+	int n = 0;
+	for (const BiosBenchScene &b : kBiosBench)
+		n += b.slot == slot;
+	return n;
+}
 
 // Select... starts in the BIOS folder from Emulation -> Settings when one is
 // set and exists, otherwise beside the executable. Resolved here rather than
@@ -10325,6 +10360,47 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	else if (st == S9X_BIOS_PATH_BAD_IMAGE)     text = TEXT("wrong image");
 	else                                        text = TEXT("unexpected size");
 	BiosManagerSetStatus(hDlg, slot, text.c_str());
+}
+
+// A chip row's speed chart button, beside its info icon: a small bar chart in the modes' colours.
+static void BiosManagerAddBenchIcon(HWND hDlg, int slot)
+{
+	if (!BiosBenchScenes(slot)) return;
+
+	const int size = GetSystemMetrics(SM_CXSMICON);
+	RECT edit;
+	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_EDIT0 + slot), &edit);
+	MapWindowPoints(NULL, hDlg, (POINT *) &edit, 2);
+	HWND hIcon = CreateWindowEx(0, TEXT("STATIC"), NULL, WS_CHILD | WS_VISIBLE | SS_OWNERDRAW | SS_NOTIFY,
+	                            edit.left, (edit.top + edit.bottom - size) / 2, size, size,
+	                            hDlg, (HMENU) (INT_PTR) (IDC_BIOSMGR_BENCH0 + slot), g_hInst, NULL);
+	if (hIcon && s_bios_tip)
+	{
+		TOOLINFO ti = { 0 };
+		ti.cbSize   = sizeof(ti);
+		ti.hwnd     = hDlg;
+		ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+		ti.uId      = (UINT_PTR) hIcon;
+		ti.lpszText = (LPTSTR) _L(TEXT("How fast Legacy, Native and Firmware run"));
+		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+	}
+}
+
+static void BiosManagerDrawBenchIcon(const DRAWITEMSTRUCT *dis)
+{
+	static const int kTall[3] = { 45, 65, 100 };   // percent of the icon, short to tall
+	const RECT &rc = dis->rcItem;
+	const int   w  = rc.right - rc.left, h = rc.bottom - rc.top;
+	const int   bw = max(2, w / 4), gap = max(1, (w - 3 * bw) / 4);
+	FillRect(dis->hDC, &rc, GetSysColorBrush(COLOR_BTNFACE));
+	for (int i = 0; i < 3; i++)
+	{
+		const int x   = rc.left + gap + i * (bw + gap);
+		RECT      bar = { x, rc.bottom - 1 - (h - 2) * kTall[i] / 100, x + bw, rc.bottom - 1 };
+		HBRUSH    ink = CreateSolidBrush(kBiosBenchInk[i]);
+		FillRect(dis->hDC, &bar, ink);
+		DeleteObject(ink);
+	}
 }
 
 // A clickable info icon in the gap between the row's label and its path box.
@@ -10648,13 +10724,18 @@ static void BiosManagerLayout(HWND hDlg, bool typing = false)
 	HWND    intro     = GetDlgItem(hDlg, IDC_BIOSMGR_INTRO);
 	HDC     hdc       = GetDC(hDlg);
 	HGDIOBJ old       = SelectObject(hdc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
-	int     labelw    = 0, label_max = 0, statusw = 0;
+	int     labelw    = 0, label_max = 0, statusw = 0, benchw = 0;
 	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
 	{
 		const int lw = BiosManagerTextWidth(hdc, GetDlgItem(hDlg, IDC_BIOSMGR_LABEL0 + slot)) + 2;
 		label_max = max(label_max, lw);
 		if (row_of[slot] >= 0)
 			labelw = max(labelw, lw);
+		if (HWND bench = (row_of[slot] >= 0) ? GetDlgItem(hDlg, IDC_BIOSMGR_BENCH0 + slot) : NULL)
+		{
+			const RECT bench_r = BiosManagerRect(hDlg, bench);
+			benchw = bench_r.right - bench_r.left;
+		}
 
 		const char *note = S9xGetBiosSlotInfo(slot)->note;
 		Utf8ToWide  note_w(note ? note : "");
@@ -10694,7 +10775,9 @@ static void BiosManagerLayout(HWND hDlg, bool typing = false)
 
 	// Columns: only the label's width and the path box's start follow the pick.
 	const int label_x    = lr.right + BiosManagerDlu(hDlg, kBiosListGap);
-	const int path_x     = label_x + labelw + icon_gap;
+	// A pick with speed charts puts each one after its info icon, as far on as the icon from the label.
+	const int bench_x    = label_x + labelw + icon_gap;
+	const int path_x     = bench_x + (benchw ? benchw + max(2, (icon_gap - benchw) / 2) : 0);
 	const int path_right = label_x + label_max + icon_gap + BiosManagerDlu(hDlg, kBiosPathW);
 	const int browse_x   = path_right + gap;
 	const int clear_x    = browse_x + (br.right - br.left) + gap;
@@ -10739,8 +10822,9 @@ static void BiosManagerLayout(HWND hDlg, bool typing = false)
 		if (HWND icon = GetDlgItem(hDlg, IDC_BIOSMGR_INFO0 + slot))
 		{
 			const RECT ic = BiosManagerRect(hDlg, icon);
-			put(IDC_BIOSMGR_INFO0, (label_x + labelw + path_x - (ic.right - ic.left)) / 2, -1);
+			put(IDC_BIOSMGR_INFO0, (label_x + labelw + bench_x - (ic.right - ic.left)) / 2, -1);
 		}
+		put(IDC_BIOSMGR_BENCH0, bench_x, -1);
 		put(IDC_BIOSMGR_EDIT0, path_x, path_right - path_x);
 		put(IDC_BIOSMGR_BROWSE0, browse_x, -1);
 		put(IDC_BIOSMGR_CLEAR0, clear_x, -1);
@@ -11236,6 +11320,229 @@ static INT_PTR CALLBACK DlgBiosInfoProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 	return false;
 }
 
+// The speed chart: a group of bars per measured scene, one per mode on a scale from 0, with
+// gridlines under it. Sized from the dialog font so it scales with the DPI.
+static void BiosBenchGeometry(int th, int &bar, int &gap, int &group, int &pad)
+{
+	bar   = th;
+	gap   = max(1, th / 6);
+	group = th;
+	pad   = th / 2 + 2;
+}
+
+// Legend, then the scenes' bars, then the scale's numbers.
+static int BiosBenchChartHeight(int th, int scenes)
+{
+	int bar, gap, group, pad;
+	BiosBenchGeometry(th, bar, gap, group, pad);
+	return pad + th + pad + scenes * (3 * bar + 2 * gap) + (scenes - 1) * group + 2 * gap + th + pad;
+}
+
+// A bar's label: frame time with its change against the HLE, or the time in the chip.
+static std::wstring BiosBenchLabel(const BiosBenchScene &b, int mode, bool chip)
+{
+	wchar_t buf[64];
+	if (chip)
+		swprintf(buf, _countof(buf), b.ticks[mode] ? L"%dM" : L"<1M", b.ticks[mode]);
+	else if (mode == 0)
+		swprintf(buf, _countof(buf), L"%.3f ms", b.ms[0]);
+	else
+		swprintf(buf, _countof(buf), L"%.3f ms   %+.1f%%", b.ms[mode], (b.ms[mode] - b.ms[0]) * 100.0 / b.ms[0]);
+	return buf;
+}
+
+static void BiosBenchDraw(HWND hDlg, const DRAWITEMSTRUCT *dis)
+{
+	const int  slot = (int) GetWindowLongPtr(hDlg, DWLP_USER);
+	const bool chip = IsDlgButtonChecked(hDlg, IDC_BIOSBENCH_CHIP) == BST_CHECKED;
+	const int  w    = dis->rcItem.right - dis->rcItem.left, h = dis->rcItem.bottom - dis->rcItem.top;
+
+	// Drawn off screen, so switching views doesn't flicker.
+	HDC     dc    = CreateCompatibleDC(dis->hDC);
+	HBITMAP bmp   = CreateCompatibleBitmap(dis->hDC, w, h);
+	HGDIOBJ oldb  = SelectObject(dc, bmp);
+	HGDIOBJ oldf  = SelectObject(dc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
+	TEXTMETRIC tm;
+	GetTextMetrics(dc, &tm);
+	const int th = tm.tmHeight;
+	int       bar, gap, group, pad;
+	BiosBenchGeometry(th, bar, gap, group, pad);
+
+	const COLORREF paper = GetSysColor(COLOR_WINDOW), ink = GetSysColor(COLOR_WINDOWTEXT);
+	const COLORREF grid  = RGB((GetRValue(paper) * 5 + GetRValue(ink)) / 6, (GetGValue(paper) * 5 + GetGValue(ink)) / 6,
+	                           (GetBValue(paper) * 5 + GetBValue(ink)) / 6);
+	RECT all = { 0, 0, w, h };
+	FillRect(dc, &all, GetSysColorBrush(COLOR_WINDOW));
+	FrameRect(dc, &all, GetSysColorBrush(COLOR_3DSHADOW));
+	SetBkMode(dc, TRANSPARENT);
+	SetTextColor(dc, ink);
+	auto text_w = [&](const wchar_t *s)
+	{
+		SIZE sz = { 0 };
+		GetTextExtentPoint32(dc, s, lstrlen(s), &sz);
+		return (int) sz.cx;
+	};
+	auto fill = [&](const RECT &r, COLORREF c)
+	{
+		HBRUSH br = CreateSolidBrush(c);
+		FillRect(dc, &r, br);
+		DeleteObject(br);
+	};
+
+	// The legend: each mode's swatch and name.
+	int x = pad;
+	for (int m = 0; m < 3; m++)
+	{
+		const int    sw   = th * 2 / 3;
+		const RECT   s    = { x, pad + (th - sw) / 2, x + sw, pad + (th - sw) / 2 + sw };
+		const TCHAR *name = _L(kBiosChipModes[m].name);
+		fill(s, kBiosBenchInk[m]);
+		x += sw + th / 3;
+		TextOut(dc, x, pad, name, lstrlen(name));
+		x += text_w(name) + th;
+	}
+
+	// Columns: the scenes' names, the bars, then room for the widest label.
+	int    namew = 0, labelw = 0, scenes = 0;
+	double most  = 0;
+	for (const BiosBenchScene &b : kBiosBench)
+	{
+		if (b.slot != slot) continue;
+		scenes++;
+		namew = max(namew, text_w(b.scene));
+		for (int m = 0; m < 3; m++)
+		{
+			labelw = max(labelw, text_w(BiosBenchLabel(b, m, chip).c_str()));
+			most   = max(most, chip ? (double) b.ticks[m] : (double) b.ms[m]);
+		}
+	}
+	static const double kSteps[] = { 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000 };
+	double step = kSteps[_countof(kSteps) - 1];
+	for (double s : kSteps)
+		if (most / s <= 5) { step = s; break; }
+	int lines = (int) (most / step);
+	if (lines * step < most || lines < 1) lines++;
+	const double top = lines * step;
+
+	const int x0     = pad + namew + th;
+	const int x1     = w - pad - th / 3 - labelw;
+	const int y0     = pad + th + pad;
+	const int y1     = y0 + scenes * (3 * bar + 2 * gap) + (scenes - 1) * group;
+	auto      x_of   = [&](double v) { return x0 + (int) ((x1 - x0) * v / top + 0.5); };
+
+	// Gridlines and their numbers, then the zero line over them.
+	HPEN    pen  = CreatePen(PS_SOLID, 1, grid);
+	HGDIOBJ oldp = SelectObject(dc, pen);
+	for (int t = 0; t <= lines; t++)
+	{
+		const int gx = x_of(t * step);
+		MoveToEx(dc, gx, y0 - gap, NULL);
+		LineTo(dc, gx, y1 + gap);
+		wchar_t num[32];
+		swprintf(num, _countof(num), (chip && t) ? L"%gM" : L"%g", t * step);
+		TextOut(dc, gx - text_w(num) / 2, y1 + 2 * gap, num, lstrlen(num));
+	}
+	DeleteObject(SelectObject(dc, CreatePen(PS_SOLID, 1, ink)));
+	MoveToEx(dc, x0, y0 - gap, NULL);
+	LineTo(dc, x0, y1 + gap);
+	DeleteObject(SelectObject(dc, oldp));
+
+	// Each scene: its name level with its three bars, each bar's value after it.
+	int y = y0;
+	for (const BiosBenchScene &b : kBiosBench)
+	{
+		if (b.slot != slot) continue;
+		TextOut(dc, pad, y + (3 * bar + 2 * gap - th) / 2, b.scene, lstrlen(b.scene));
+		for (int m = 0; m < 3; m++)
+		{
+			const RECT r = { x0 + 1, y, max(x_of(chip ? (double) b.ticks[m] : (double) b.ms[m]), x0 + 2), y + bar };
+			fill(r, kBiosBenchInk[m]);
+			const std::wstring label = BiosBenchLabel(b, m, chip);
+			TextOut(dc, r.right + th / 3, y + (bar - th) / 2, label.c_str(), (int) label.size());
+			y += bar + gap;
+		}
+		y += group - gap;
+	}
+
+	BitBlt(dis->hDC, dis->rcItem.left, dis->rcItem.top, w, h, dc, 0, 0, SRCCOPY);
+	SelectObject(dc, oldf);
+	SelectObject(dc, oldb);
+	DeleteObject(bmp);
+	DeleteDC(dc);
+}
+
+static void BiosBenchSetNote(HWND hDlg)
+{
+	const bool chip = IsDlgButtonChecked(hDlg, IDC_BIOSBENCH_CHIP) == BST_CHECKED;
+	SetDlgItemText(hDlg, IDC_BIOSBENCH_NOTE,
+	               chip ? _L(TEXT("Time spent inside the chip over the same scenes, in millions of CPU clock ticks. Lower is faster. Measured on one PC."))
+	                    : _L(TEXT("Milliseconds the emulator takes per frame while each game plays a scripted scene. Lower is faster. Measured on one PC.")));
+}
+
+// The speed chart's popup for one chip slot, as tall as its scenes need.
+static INT_PTR CALLBACK DlgBiosBenchProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog(hDlg);
+		const int slot = (int) lParam;
+		SetWindowLongPtr(hDlg, DWLP_USER, slot);
+		SetWindowText(hDlg, (std::wstring((wchar_t *) Utf8ToWide(S9xGetBiosSlotInfo(slot)->label)) + L" " +
+		                     _L(TEXT("Speed"))).c_str());
+		CheckRadioButton(hDlg, IDC_BIOSBENCH_FRAME, IDC_BIOSBENCH_CHIP, IDC_BIOSBENCH_FRAME);
+		BiosBenchSetNote(hDlg);
+
+		HWND       chart = GetDlgItem(hDlg, IDC_BIOSBENCH_CHART);
+		HDC        dc    = GetDC(chart);
+		HGDIOBJ    old   = SelectObject(dc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
+		TEXTMETRIC tm;
+		GetTextMetrics(dc, &tm);
+		SelectObject(dc, old);
+		ReleaseDC(chart, dc);
+
+		const RECT cr = BiosManagerRect(hDlg, chart);
+		const RECT ok = BiosManagerRect(hDlg, GetDlgItem(hDlg, IDOK));
+		const int  dy = BiosBenchChartHeight(tm.tmHeight, BiosBenchScenes(slot)) - (cr.bottom - cr.top);
+		SetWindowPos(chart, NULL, 0, 0, cr.right - cr.left, cr.bottom - cr.top + dy, SWP_NOMOVE | SWP_NOZORDER);
+		SetWindowPos(GetDlgItem(hDlg, IDOK), NULL, ok.left, ok.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+		RECT win;
+		GetWindowRect(hDlg, &win);
+		SetWindowPos(hDlg, NULL, win.left, win.top - dy / 2, win.right - win.left, win.bottom - win.top + dy,
+		             SWP_NOZORDER | SWP_NOACTIVATE);
+		return TRUE;
+	}
+
+	case WM_DRAWITEM:
+		if (wParam == IDC_BIOSBENCH_CHART)
+		{
+			BiosBenchDraw(hDlg, (const DRAWITEMSTRUCT *) lParam);
+			return TRUE;
+		}
+		break;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDC_BIOSBENCH_FRAME:
+		case IDC_BIOSBENCH_CHIP:
+			if (HIWORD(wParam) == BN_CLICKED)
+			{
+				BiosBenchSetNote(hDlg);
+				InvalidateRect(GetDlgItem(hDlg, IDC_BIOSBENCH_CHART), NULL, FALSE);
+			}
+			return TRUE;
+		case IDOK:
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
@@ -11243,7 +11550,8 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 	case WM_SETCURSOR:
 	{
 		const int id = GetDlgCtrlID((HWND) wParam);
-		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS)
+		if ((id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS) ||
+			(id >= IDC_BIOSMGR_BENCH0 && id < IDC_BIOSMGR_BENCH0 + S9X_NUM_BIOS_SLOTS))
 		{
 			SetCursor(LoadCursor(NULL, IDC_HAND));
 			SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
@@ -11300,6 +11608,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
 						   Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
 			BiosManagerAddInfoIcon(hDlg, slot);
+			BiosManagerAddBenchIcon(hDlg, slot);
 			BiosManagerAddModeBox(hDlg, slot);
 			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
 			BiosManagerRefreshStatus(hDlg, slot);
@@ -11313,6 +11622,11 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		if (wParam == IDC_BIOSMGR_LIST)
 		{
 			BiosManagerDrawListItem((const DRAWITEMSTRUCT *) lParam);
+			return true;
+		}
+		if ((int) wParam >= IDC_BIOSMGR_BENCH0 && (int) wParam < IDC_BIOSMGR_BENCH0 + S9X_NUM_BIOS_SLOTS)
+		{
+			BiosManagerDrawBenchIcon((const DRAWITEMSTRUCT *) lParam);
 			return true;
 		}
 		break;
@@ -11379,6 +11693,14 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
 			if (GetOpenFileName(&ofn))
 				SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename);
+			return true;
+		}
+
+		if (id >= IDC_BIOSMGR_BENCH0 && id < IDC_BIOSMGR_BENCH0 + S9X_NUM_BIOS_SLOTS &&
+			HIWORD(wParam) == STN_CLICKED)
+		{
+			DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSBENCH), hDlg, DlgBiosBenchProc,
+			               (LPARAM) (id - IDC_BIOSMGR_BENCH0));
 			return true;
 		}
 

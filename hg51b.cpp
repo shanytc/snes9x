@@ -1294,7 +1294,7 @@ static void StartAhead (uint8 kind)
 {
 	ahead.start = r;
 	const bool8	irq = CPU.IRQExternal;
-	int64		clocks;
+	int64		clocks = 0;
 	bool		ok;
 
 	if (kind == AHEAD_JOB)

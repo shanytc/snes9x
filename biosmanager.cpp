@@ -246,6 +246,83 @@ uint32 *S9xGetChipModeBuffer (int slot)
 	return S9xBiosSlotHasChipMode(slot) ? &g_modes[slot] : NULL;
 }
 
+static const S9xBiosFamily kFamilies[S9X_BIOS_NUM_FAMILIES] =
+{
+	{ "Commercial & Arcade Boards",
+	  { S9X_BIOS_SFCBOX_KROM, S9X_BIOS_SFCBOX_FONT, S9X_BIOS_NSS, S9X_BIOS_NSS_FONT, -1 } },
+	{ "Expansions & Peripherals",
+	  { S9X_BIOS_SGB1, S9X_BIOS_SGB1_BOOT, S9X_BIOS_SGB2, S9X_BIOS_SGB2_BOOT,
+	    S9X_BIOS_BSX, S9X_BIOS_SUFAMI, S9X_BIOS_SUPERDISC, -1 } },
+	{ "CoProcessors & Special Chips",
+	  { S9X_BIOS_DSP1, S9X_BIOS_DSP1B, S9X_BIOS_DSP2, S9X_BIOS_DSP3, S9X_BIOS_DSP4, S9X_BIOS_CX4, -1 } },
+	{ "Handheld Systems",
+	  { S9X_BIOS_GB, S9X_BIOS_GBC, -1 } },
+};
+
+const S9xBiosFamily *S9xGetBiosFamily (int family)
+{
+	return (family >= 0 && family < S9X_BIOS_NUM_FAMILIES) ? &kFamilies[family] : NULL;
+}
+
+const char *S9xBiosGroupName (int group)
+{
+	return (group == S9X_BIOS_GROUP_DSP) ? "DSP" : "";
+}
+
+S9xBiosNesting S9xGetBiosNesting (int slot)
+{
+	switch (slot)
+	{
+		case S9X_BIOS_SFCBOX_FONT:	return { S9X_BIOS_SFCBOX_KROM, FALSE, NULL };
+		case S9X_BIOS_NSS_FONT:		return { S9X_BIOS_NSS, FALSE, NULL };
+		case S9X_BIOS_SGB1_BOOT:	return { S9X_BIOS_SGB1, TRUE, "Boot ROM" };
+		case S9X_BIOS_SGB2_BOOT:	return { S9X_BIOS_SGB2, TRUE, "Boot ROM" };
+		case S9X_BIOS_DSP1:
+		case S9X_BIOS_DSP1B:
+		case S9X_BIOS_DSP2:
+		case S9X_BIOS_DSP3:
+		case S9X_BIOS_DSP4:			return { S9X_BIOS_UNDER_GROUP + S9X_BIOS_GROUP_DSP, TRUE, NULL };
+		default:					return { -1, TRUE, NULL };
+	}
+}
+
+// The chipbench tables (s9x-harness/chipbench): same-binary runs, the firmware equal to native.
+static const S9xBiosBenchScene kBench[] =
+{
+	{ S9X_BIOS_DSP1,  "Pilotwings",             { 0.784f, 0.813f, 1.049f }, {  91, 310, 2463 } },
+	{ S9X_BIOS_DSP1B, "Super Mario Kart 2P",    { 0.780f, 0.788f, 0.846f }, {  17,  43,  378 } },
+	{ S9X_BIOS_DSP1B, "Super Mario Kart 1P",    { 0.755f, 0.712f, 0.755f }, {  26,  71,  594 } },
+	{ S9X_BIOS_DSP1B, "Lock On",                { 0.855f, 0.866f, 1.114f }, {  67, 208, 1533 } },
+	{ S9X_BIOS_DSP1B, "Super Air Diver",        { 0.818f, 0.876f, 1.131f }, {  84, 321, 2428 } },
+	{ S9X_BIOS_DSP1B, "Ballz",                  { 0.962f, 0.962f, 1.010f }, {  29,  65,  598 } },
+	{ S9X_BIOS_DSP1B, "Suzuka 8 Hours",         { 0.781f, 0.799f, 0.879f }, {  12,  42,  339 } },
+	{ S9X_BIOS_DSP2,  "Dungeon Master play",    { 0.567f, 0.598f, 0.759f }, { 169, 572, 3741 } },
+	{ S9X_BIOS_DSP2,  "Dungeon Master attract", { 0.728f, 0.724f, 0.718f }, {   0,  11,   10 } },
+	{ S9X_BIOS_DSP3,  "SD Gundam GX battle",    { 0.991f, 0.785f, 0.859f }, { 128, 312, 1801 } },
+	{ S9X_BIOS_DSP3,  "SD Gundam GX attract",   { 0.839f, 0.841f, 0.839f }, {   6,  48,  108 } },
+	{ S9X_BIOS_DSP4,  "Top Gear 3000",          { 0.733f, 0.757f, 0.794f }, {  87, 410, 1269 } },
+	{ S9X_BIOS_DSP4,  "Top Gear 3000 JP",       { 0.730f, 0.745f, 0.795f }, { 105, 474, 1455 } },
+	{ S9X_BIOS_CX4,   "Mega Man X2 attract",    { 0.616f, 0.617f, 0.700f }, {  35, 144, 1850 } },
+	{ S9X_BIOS_CX4,   "Mega Man X2 wireframe",  { 0.556f, 0.524f, 1.081f }, {  28,  99, 1374 } },
+	{ S9X_BIOS_CX4,   "Mega Man X3 attract",    { 0.655f, 0.675f, 0.702f }, {   7,  55,  455 } },
+	{ S9X_BIOS_CX4,   "Mega Man X3 gameplay",   { 0.884f, 0.877f, 0.963f }, {  37, 173, 2166 } },
+};
+
+const S9xBiosBenchScene *S9xGetBiosBench (int *count)
+{
+	if (count)
+		*count = (int) (sizeof(kBench) / sizeof(kBench[0]));
+	return (kBench);
+}
+
+int S9xBiosBenchScenes (int slot)
+{
+	int	n = 0;
+	for (const S9xBiosBenchScene &b : kBench)
+		n += b.slot == slot;
+	return (n);
+}
+
 std::string S9xBiosPathsFingerprint (void)
 {
 	std::string out;

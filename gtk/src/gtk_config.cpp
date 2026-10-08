@@ -479,8 +479,13 @@ int Snes9xConfig::save_config_file()
     // the CLI (snes9x.cpp) so every port reads/writes the same entry.
     section = "BIOS";
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+    {
         outstring(S9xGetBiosSlotInfo(i)->key, S9xGetBiosPath(i),
                   S9xGetBiosSlotInfo(i)->label);
+        if (S9xBiosSlotHasChipMode(i))
+            outint(std::string(S9xGetBiosSlotInfo(i)->key) + "Mode", S9xGetChipMode(i),
+                   "chip emulation, picked in File -> BIOS Manager: 1 = Legacy (HLE), 2 = Native (LLE), 3 = Firmware (the file above), 0 = Native (the default)");
+    }
 
     section = "SGB";
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
@@ -773,6 +778,9 @@ int Snes9xConfig::load_config_file()
         std::string path;
         instr(S9xGetBiosSlotInfo(i)->key, path);
         S9xSetBiosPath(i, path.c_str());
+        int mode = S9X_CHIP_AUTO;
+        inint(std::string(S9xGetBiosSlotInfo(i)->key) + "Mode", mode);
+        S9xSetChipMode(i, mode);   // ignores a non-chip slot and a mode out of range
     }
 
     section = "SGB";

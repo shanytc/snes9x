@@ -86,6 +86,48 @@ int     S9xChipModeInEffect (int slot);
 // Raw storage for config backends (win32 wconfig): a uint32 per slot.
 uint32 *S9xGetChipModeBuffer (int slot);
 
+// The BIOS Manager's sidebar, the same in every frontend: a heading per family over its slots.
+// A slot may sit under another entry instead (a boot ROM under its Super Game Boy, the DSPs
+// under the DSP group); one that isn't listed shows only with its parent (an OSD font with its board).
+enum
+{
+	S9X_BIOS_NUM_FAMILIES = 4,
+	S9X_BIOS_GROUP_DSP    = 0,
+	S9X_BIOS_NUM_GROUPS   = 1,
+	S9X_BIOS_UNDER_GROUP  = 0x100	// a parent of S9X_BIOS_UNDER_GROUP + group is that group
+};
+
+struct S9xBiosFamily
+{
+	const char	*name;
+	int			members[8];	// its slots in sidebar order, ended by -1
+};
+
+struct S9xBiosNesting
+{
+	int			parent;	// -1: straight under its family; else a slot, or S9X_BIOS_UNDER_GROUP + group
+	bool8		listed;	// FALSE: no entry of its own, shown only with its parent
+	const char	*name;	// its entry's name under the parent; NULL for the slot's label
+};
+
+const S9xBiosFamily	*S9xGetBiosFamily (int family);
+const char			*S9xBiosGroupName (int group);
+S9xBiosNesting		S9xGetBiosNesting (int slot);
+
+// The speed chart's figures, per measured scene of a chip's games and per mode in the order
+// Legacy (HLE), Native (LLE), Firmware: milliseconds per frame, and millions of host clock
+// ticks spent inside the chip. Scripted play on one PC and one build.
+struct S9xBiosBenchScene
+{
+	int			slot;
+	const char	*scene;
+	float		ms[3];
+	int			ticks[3];
+};
+
+const S9xBiosBenchScene	*S9xGetBiosBench (int *count);
+int						S9xBiosBenchScenes (int slot);
+
 // Every slot's path in one string: keep one and compare later to learn
 // whether the BIOS Manager changed anything in between.
 std::string S9xBiosPathsFingerprint (void);

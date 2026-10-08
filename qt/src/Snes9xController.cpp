@@ -254,7 +254,10 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(config->gb_boot_policy);
 
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
+    {
         S9xSetBiosPath(i, config->bios_paths[i].c_str());
+        S9xSetChipMode(i, config->chip_modes[i]);
+    }
 
     // The DIP block reaches NSS.DipSwitches on the next load, or from the menu.
     Settings.NSSDipSwitches = (uint32)(config->nss_dip_switches & 0xff);

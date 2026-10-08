@@ -10154,56 +10154,32 @@ static COLORREF BiosMix(COLORREF from, COLORREF to, int a)
 	           (GetBValue(from) * (256 - a) + GetBValue(to) * a) / 256);
 }
 
-// The sidebar: a heading per family with its icon (a Segoe MDL2 Assets glyph), then
-// its slots. Every slot belongs in one family; a slot left out has no card.
-static const struct { const TCHAR *name; wchar_t icon; int slots[8]; } kBiosGroups[] =
-{
-	{ TEXT("Commercial & Arcade Boards"), 0xE7FC,
-	  { S9X_BIOS_SFCBOX_KROM, S9X_BIOS_SFCBOX_FONT, S9X_BIOS_NSS, S9X_BIOS_NSS_FONT, -1 } },
-	{ TEXT("Expansions & Peripherals"), 0xEA86,
-	  { S9X_BIOS_SGB1, S9X_BIOS_SGB1_BOOT, S9X_BIOS_SGB2, S9X_BIOS_SGB2_BOOT,
-	    S9X_BIOS_BSX, S9X_BIOS_SUFAMI, S9X_BIOS_SUPERDISC, -1 } },
-	{ TEXT("CoProcessors & Special Chips"), 0xE950,
-	  { S9X_BIOS_DSP1, S9X_BIOS_DSP1B, S9X_BIOS_DSP2, S9X_BIOS_DSP3, S9X_BIOS_DSP4, S9X_BIOS_CX4, -1 } },
-	{ TEXT("Handheld Systems"), 0xE8EA,
-	  { S9X_BIOS_GB, S9X_BIOS_GBC, -1 } },
-};
-
-// Entries that only name the slots nested under them.
-static const TCHAR *const kBiosSubgroups[] = { TEXT("DSP") };
+// The sidebar's families and their slots come from the core (S9xGetBiosFamily); each heading
+// gets an icon, a Segoe MDL2 Assets glyph.
+static const wchar_t kBiosFamilyIcons[S9X_BIOS_NUM_FAMILIES] = { 0xE7FC, 0xEA86, 0xE950, 0xE8EA };
 
 // Sidebar item data: a slot number, kBiosHeading + family for a heading, or
-// kBiosSubgroup + index for a kBiosSubgroups entry.
+// kBiosSubgroup + group for a group that only names the slots under it.
 static const int kBiosHeading  = S9X_NUM_BIOS_SLOTS;
-static const int kBiosSubgroup = kBiosHeading + (int) _countof(kBiosGroups);
-static const int kBiosDSP      = kBiosSubgroup + 0;
+static const int kBiosSubgroup = kBiosHeading + S9X_BIOS_NUM_FAMILIES;
 
 // Per sidebar entry (by item data): whether the entries under it are listed.
-static bool s_bios_open[kBiosSubgroup + _countof(kBiosSubgroups)];
+static bool s_bios_open[kBiosSubgroup + S9X_BIOS_NUM_GROUPS];
 
-// Slots that show with a parent entry, a slot or a subgroup. Unlisted ones
-// have no entry of their own (an OSD font); listed ones nest under the parent,
-// by `name` or else their own label.
-struct BiosChild { int slot, parent; bool listed; const TCHAR *name; };
-static const BiosChild kBiosChildren[] =
-{
-	{ S9X_BIOS_SFCBOX_FONT, S9X_BIOS_SFCBOX_KROM, false, NULL },
-	{ S9X_BIOS_NSS_FONT,    S9X_BIOS_NSS,         false, NULL },
-	{ S9X_BIOS_SGB1_BOOT,   S9X_BIOS_SGB1,        true,  TEXT("Boot ROM") },
-	{ S9X_BIOS_SGB2_BOOT,   S9X_BIOS_SGB2,        true,  TEXT("Boot ROM") },
-	{ S9X_BIOS_DSP1,        kBiosDSP,             true,  NULL },
-	{ S9X_BIOS_DSP1B,       kBiosDSP,             true,  NULL },
-	{ S9X_BIOS_DSP2,        kBiosDSP,             true,  NULL },
-	{ S9X_BIOS_DSP3,        kBiosDSP,             true,  NULL },
-	{ S9X_BIOS_DSP4,        kBiosDSP,             true,  NULL },
-};
-
+// A slot's place under a parent entry (the core's S9xGetBiosNesting), its parent as item data:
+// another slot or kBiosSubgroup + group. NULL for a slot straight under its family's heading.
+struct BiosChild { int slot, parent; bool listed; const char *name; };
 static const BiosChild *BiosManagerChild(int slot)
 {
-	for (const BiosChild &c : kBiosChildren)
-		if (c.slot == slot)
-			return &c;
-	return NULL;
+	static BiosChild kids[S9X_NUM_BIOS_SLOTS];
+	if (slot < 0 || slot >= S9X_NUM_BIOS_SLOTS)
+		return NULL;
+	const S9xBiosNesting n = S9xGetBiosNesting(slot);
+	if (n.parent < 0)
+		return NULL;
+	const int parent = (n.parent >= S9X_BIOS_UNDER_GROUP) ? kBiosSubgroup + n.parent - S9X_BIOS_UNDER_GROUP : n.parent;
+	kids[slot] = { slot, parent, n.listed != 0, n.name };
+	return &kids[slot];
 }
 
 // The family a heading's item data names; -1 for any other entry.
@@ -10217,9 +10193,10 @@ static bool BiosManagerHasChildren(int data)
 {
 	if (data >= kBiosHeading)
 		return true;
-	for (const BiosChild &c : kBiosChildren)
-		if (c.parent == data && c.listed)
-			return true;
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		if (const BiosChild *c = BiosManagerChild(slot))
+			if (c->parent == data && c->listed)
+				return true;
 	return false;
 }
 
@@ -10246,40 +10223,9 @@ static const struct { const TCHAR *name; int mode; } kBiosChipModes[] =
 	{ TEXT("Firmware"),     S9X_CHIP_FIRMWARE },
 };
 
-// Measured in scripted play on one PC and one build, per mode in kBiosChipModes order:
-// milliseconds per frame, and millions of host clock ticks spent inside the chip.
-struct BiosBenchScene { int slot; const TCHAR *scene; float ms[3]; int ticks[3]; };
-static const BiosBenchScene kBiosBench[] =
-{
-	{ S9X_BIOS_DSP1,  TEXT("Pilotwings"),             { 0.784f, 0.813f, 1.049f }, {  91, 310, 2463 } },
-	{ S9X_BIOS_DSP1B, TEXT("Super Mario Kart 2P"),    { 0.780f, 0.788f, 0.846f }, {  17,  43,  378 } },
-	{ S9X_BIOS_DSP1B, TEXT("Super Mario Kart 1P"),    { 0.755f, 0.712f, 0.755f }, {  26,  71,  594 } },
-	{ S9X_BIOS_DSP1B, TEXT("Lock On"),                { 0.855f, 0.866f, 1.114f }, {  67, 208, 1533 } },
-	{ S9X_BIOS_DSP1B, TEXT("Super Air Diver"),        { 0.818f, 0.876f, 1.131f }, {  84, 321, 2428 } },
-	{ S9X_BIOS_DSP1B, TEXT("Ballz"),                  { 0.962f, 0.962f, 1.010f }, {  29,  65,  598 } },
-	{ S9X_BIOS_DSP1B, TEXT("Suzuka 8 Hours"),         { 0.781f, 0.799f, 0.879f }, {  12,  42,  339 } },
-	{ S9X_BIOS_DSP2,  TEXT("Dungeon Master play"),    { 0.567f, 0.598f, 0.759f }, { 169, 572, 3741 } },
-	{ S9X_BIOS_DSP2,  TEXT("Dungeon Master attract"), { 0.728f, 0.724f, 0.718f }, {   0,  11,   10 } },
-	{ S9X_BIOS_DSP3,  TEXT("SD Gundam GX battle"),    { 0.991f, 0.785f, 0.859f }, { 128, 312, 1801 } },
-	{ S9X_BIOS_DSP3,  TEXT("SD Gundam GX attract"),   { 0.839f, 0.841f, 0.839f }, {   6,  48,  108 } },
-	{ S9X_BIOS_DSP4,  TEXT("Top Gear 3000"),          { 0.733f, 0.757f, 0.794f }, {  87, 410, 1269 } },
-	{ S9X_BIOS_DSP4,  TEXT("Top Gear 3000 JP"),       { 0.730f, 0.745f, 0.795f }, { 105, 474, 1455 } },
-	{ S9X_BIOS_CX4,   TEXT("Mega Man X2 attract"),    { 0.616f, 0.617f, 0.700f }, {  35, 144, 1850 } },
-	{ S9X_BIOS_CX4,   TEXT("Mega Man X2 wireframe"),  { 0.556f, 0.524f, 1.081f }, {  28,  99, 1374 } },
-	{ S9X_BIOS_CX4,   TEXT("Mega Man X3 attract"),    { 0.655f, 0.675f, 0.702f }, {   7,  55,  455 } },
-	{ S9X_BIOS_CX4,   TEXT("Mega Man X3 gameplay"),   { 0.884f, 0.877f, 0.963f }, {  37, 173, 2166 } },
-};
-
+// The speed chart's figures are the core's (S9xGetBiosBench), per mode in kBiosChipModes order.
 // Each mode's colour in the speed chart and on its button.
 static const COLORREF kBiosBenchInk[3] = { RGB(0x8E, 0x9A, 0xA6), RGB(0x2E, 0x9E, 0x4F), RGB(0x2F, 0x7E, 0xD8) };
-
-static int BiosBenchScenes(int slot)
-{
-	int n = 0;
-	for (const BiosBenchScene &b : kBiosBench)
-		n += b.slot == slot;
-	return n;
-}
 
 // Select... starts in the BIOS folder from Emulation -> Settings when one is
 // set and exists, otherwise beside the executable. Resolved here rather than
@@ -10390,7 +10336,7 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 // A chip row's speed chart button, after its info icon: a small bar chart in the modes' colours.
 static void BiosManagerAddBenchIcon(HWND hDlg, int slot)
 {
-	if (!BiosBenchScenes(slot)) return;
+	if (!S9xBiosBenchScenes(slot)) return;
 
 	const int size  = GetSystemMetrics(SM_CXSMICON);
 	HWND      hIcon = CreateWindowEx(0, TEXT("STATIC"), NULL, WS_CHILD | SS_OWNERDRAW | SS_NOTIFY, 0, 0, size, size,
@@ -10620,7 +10566,7 @@ static void BiosManagerDrawListItem(const DRAWITEMSTRUCT *dis)
 	SetBkMode(hdc, TRANSPARENT);
 	if (heading && s_bios_glyphs)
 	{
-		const wchar_t icon = kBiosGroups[BiosManagerHeadingOf(data)].icon;
+		const wchar_t icon = kBiosFamilyIcons[BiosManagerHeadingOf(data)];
 		RECT          ir   = { rc.left + u, rc.top, rc.left + 2 * u, rc.bottom };
 		HGDIOBJ       oldf = SelectObject(hdc, s_bios_glyphs);
 		SetTextColor(hdc, BiosMix(ink, GetSysColor(COLOR_HIGHLIGHT), 150));
@@ -10646,12 +10592,12 @@ static void BiosManagerFillList(HWND list)
 {
 	SendMessage(list, WM_SETREDRAW, FALSE, 0);
 	SendMessage(list, LB_RESETCONTENT, 0, 0);
-	for (int g = 0; g < (int) _countof(kBiosGroups); g++)
+	for (int g = 0; g < S9X_BIOS_NUM_FAMILIES; g++)
 	{
-		int i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(kBiosGroups[g].name));
+		int i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(Utf8ToWide(S9xGetBiosFamily(g)->name)));
 		SendMessage(list, LB_SETITEMDATA, i, kBiosHeading + g);
 		int subgroup = -1;   // listed ahead of its first slot
-		for (const int *s = kBiosGroups[g].slots; s_bios_open[kBiosHeading + g] && *s >= 0; s++)
+		for (const int *s = S9xGetBiosFamily(g)->members; s_bios_open[kBiosHeading + g] && *s >= 0; s++)
 		{
 			const BiosChild *child = BiosManagerChild(*s);
 			if (child && !child->listed)
@@ -10659,13 +10605,13 @@ static void BiosManagerFillList(HWND list)
 			if (child && child->parent >= kBiosSubgroup && child->parent != subgroup)
 			{
 				subgroup = child->parent;
-				i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(kBiosSubgroups[subgroup - kBiosSubgroup]));
+				i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(Utf8ToWide(S9xBiosGroupName(subgroup - kBiosSubgroup))));
 				SendMessage(list, LB_SETITEMDATA, i, subgroup);
 			}
 			if (child && !s_bios_open[child->parent])
 				continue;
-			i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) ((child && child->name) ? _L(child->name)
-			                                       : _L(Utf8ToWide(S9xGetBiosSlotInfo(*s)->label))));
+			i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(Utf8ToWide((child && child->name) ? child->name
+			                                                                 : S9xGetBiosSlotInfo(*s)->label)));
 			SendMessage(list, LB_SETITEMDATA, i, *s);
 		}
 	}
@@ -11060,8 +11006,8 @@ static void BiosManagerLayout(HWND hDlg)
 
 	bool shown[S9X_NUM_BIOS_SLOTS] = { false };
 	int  order[S9X_NUM_BIOS_SLOTS], rows = 0;
-	for (int g = 0; g < (int) _countof(kBiosGroups); g++)
-		for (const int *s = kBiosGroups[g].slots; *s >= 0; s++)
+	for (int g = 0; g < S9X_BIOS_NUM_FAMILIES; g++)
+		for (const int *s = S9xGetBiosFamily(g)->members; *s >= 0; s++)
 		{
 			const BiosChild *child = BiosManagerChild(*s);
 			if (pick == *s || pick == kBiosHeading + g || (child && pick == child->parent))
@@ -11186,10 +11132,10 @@ static void BiosManagerSizeWindow(HWND hDlg)
 	                   BiosManagerDlu(hDlg, kBiosPathW) + 2 * s_bm.gap + s_bm.browse + s_bm.clear +
 	                   GetSystemMetrics(SM_CXVSCROLL);
 	int family = 0;
-	for (const auto &g : kBiosGroups)
+	for (int g = 0; g < S9X_BIOS_NUM_FAMILIES; g++)
 	{
 		int fh = -s_bm.card_gap;
-		for (const int *s = g.slots; *s >= 0; s++)
+		for (const int *s = S9xGetBiosFamily(g)->members; *s >= 0; s++)
 			fh += BiosManagerCardHeight(*s) + s_bm.card_gap;
 		family = max(family, fh);
 	}
@@ -11691,7 +11637,7 @@ static int BiosBenchChartHeight(int th, int scenes)
 }
 
 // A bar's label: frame time with its change against the HLE, or the time in the chip.
-static std::wstring BiosBenchLabel(const BiosBenchScene &b, int mode, bool chip)
+static std::wstring BiosBenchLabel(const S9xBiosBenchScene &b, int mode, bool chip)
 {
 	wchar_t buf[64];
 	if (chip)
@@ -11757,11 +11703,14 @@ static void BiosBenchDraw(HWND hDlg, const DRAWITEMSTRUCT *dis)
 	// Columns: the scenes' names, the bars, then room for the widest label.
 	int    namew = 0, labelw = 0, scenes = 0;
 	double most  = 0;
-	for (const BiosBenchScene &b : kBiosBench)
+	int                      nbench = 0;
+	const S9xBiosBenchScene *bench  = S9xGetBiosBench(&nbench);
+	for (int k = 0; k < nbench; k++)
 	{
+		const S9xBiosBenchScene &b = bench[k];
 		if (b.slot != slot) continue;
 		scenes++;
-		namew = max(namew, text_w(b.scene));
+		namew = max(namew, text_w(Utf8ToWide(b.scene)));
 		for (int m = 0; m < 3; m++)
 		{
 			labelw = max(labelw, text_w(BiosBenchLabel(b, m, chip).c_str()));
@@ -11801,10 +11750,12 @@ static void BiosBenchDraw(HWND hDlg, const DRAWITEMSTRUCT *dis)
 
 	// Each scene: its name level with its three bars, each bar's value after it.
 	int y = y0;
-	for (const BiosBenchScene &b : kBiosBench)
+	for (int k = 0; k < nbench; k++)
 	{
+		const S9xBiosBenchScene &b = bench[k];
 		if (b.slot != slot) continue;
-		TextOut(dc, pad, y + (3 * bar + 2 * gap - th) / 2, b.scene, lstrlen(b.scene));
+		Utf8ToWide scene(b.scene);
+		TextOut(dc, pad, y + (3 * bar + 2 * gap - th) / 2, scene, lstrlen(scene));
 		for (int m = 0; m < 3; m++)
 		{
 			const RECT r = { x0 + 1, y, max(x_of(chip ? (double) b.ticks[m] : (double) b.ms[m]), x0 + 2), y + bar };
@@ -11856,7 +11807,7 @@ static INT_PTR CALLBACK DlgBiosBenchProc(HWND hDlg, UINT msg, WPARAM wParam, LPA
 
 		const RECT cr = BiosManagerRect(hDlg, chart);
 		const RECT ok = BiosManagerRect(hDlg, GetDlgItem(hDlg, IDOK));
-		const int  dy = BiosBenchChartHeight(tm.tmHeight, BiosBenchScenes(slot)) - (cr.bottom - cr.top);
+		const int  dy = BiosBenchChartHeight(tm.tmHeight, S9xBiosBenchScenes(slot)) - (cr.bottom - cr.top);
 		SetWindowPos(chart, NULL, 0, 0, cr.right - cr.left, cr.bottom - cr.top + dy, SWP_NOMOVE | SWP_NOZORDER);
 		SetWindowPos(GetDlgItem(hDlg, IDOK), NULL, ok.left, ok.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 		RECT win;

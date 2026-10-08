@@ -495,12 +495,6 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
     side->set_policy(Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
     side->set_shadow_type(Gtk::SHADOW_IN);
     side->add(*sidebar);
-    // As wide as its widest entry with everything open, so opening one never resizes it.
-    sidebar->expand_all();
-    int min_w, nat_w;
-    sidebar->get_preferred_width(min_w, nat_w);
-    side->set_size_request(nat_w + th * 2, -1);
-    sidebar->collapse_all();
     body->pack_start(*side, Gtk::PACK_SHRINK);
 
     // The cards, one per BIOS in sidebar order; the pick shows its own.
@@ -656,6 +650,13 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
     // Room for the biggest family's cards without scrolling, as on win32.
     dialog.set_default_size(th * 64, th * 44);
     dialog.show_all();
+    // As wide as its widest entry with everything open, so opening one never resizes it.
+    // Measured once shown: an unrealized tree view sizes its rows without the theme.
+    sidebar->expand_all();
+    int min_w, nat_w;
+    sidebar->get_preferred_width(min_w, nat_w);
+    side->set_size_request(nat_w + th * 2, -1);
+    sidebar->collapse_all();
     for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
         refresh_card(slot, cards[slot]);
     sidebar->get_selection()->select(store->children().begin());

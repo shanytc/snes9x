@@ -26,9 +26,9 @@ struct S9xUPD7725Lane
 // One native chip, as upd7725.cpp drives it. `variant` picks a revision (the first DSP-1 over the DSP-1B).
 struct S9xUPD7725Native
 {
-	// the registers the programs share with the firmware's: DR, SR, RAM, and TRB (the DSP-2's
-	// transparent colour, left from one command to the next); and where it posts its lane
-	void	(*attach) (uint16 *dr, uint16 *sr, uint16 *ram, uint16 *trb, S9xUPD7725Lane *lane);
+	// the registers the programs share with the firmware's: DR, SR, RAM, and TR and TRB, which a command
+	// can leave to the next (the DSP-3's last symbol, the DSP-2's transparent colour); and where it posts its lane
+	void	(*attach) (uint16 *dr, uint16 *sr, uint16 *ram, uint16 *tr, uint16 *trb, S9xUPD7725Lane *lane);
 	void	(*reset) (bool8 variant);
 	// runs for `budget` instructions or until it waits on the CPU; returns owed()
 	uint32	(*run) (uint64 budget);
@@ -47,5 +47,6 @@ struct S9xUPD7725Native
 
 extern const S9xUPD7725Native	S9xDSP1Native;
 extern const S9xUPD7725Native	S9xDSP2Native;
+extern const S9xUPD7725Native	S9xDSP3Native;
 
 #endif

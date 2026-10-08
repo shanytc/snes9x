@@ -557,6 +557,9 @@
     <ClCompile Include="..\dsp2n.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
+    <ClCompile Include="..\dsp3n.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
     <ClCompile Include="..\hg51b.cpp">
       <Filter>Emu</Filter>
     </ClCompile>

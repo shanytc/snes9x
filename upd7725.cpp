@@ -115,12 +115,14 @@ bool8 S9xUPD7725LoadNative (int which)
 		native = &S9xDSP1Native;
 	else if (which == UPD7725_DSP2)
 		native = &S9xDSP2Native;
+	else if (which == UPD7725_DSP3)
+		native = &S9xDSP3Native;
 	else
 		return (FALSE);
 	chip = which;
 	native_variant = which == UPD7725_DSP1;
 	loaded = TRUE;
-	native->attach(&r.dr, &r.sr, r.ram, &r.trb, &lane);
+	native->attach(&r.dr, &r.sr, r.ram, &r.tr, &r.trb, &lane);
 	S9xUPD7725Reset();
 	return (TRUE);
 }
@@ -843,6 +845,12 @@ static void FirmwareAtWait (void)
 		r.pc = 0x003;
 		r.rp = 0x3ff;
 		r.a = 0;
+	}
+	else if (chip == UPD7725_DSP3)
+	{
+		r.pc = 0x005;
+		r.dp = 0;
+		r.b = 0x00c0;
 	}
 	else
 	{

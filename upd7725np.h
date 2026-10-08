@@ -38,7 +38,7 @@ struct State
 static_assert(sizeof(State) == 100, "savestate layout");
 
 State	s;
-uint16	*dr, *sr, *ram, *trb;
+uint16	*dr, *sr, *ram, *tr, *trb;
 uint64	budget;
 bool	(*prog) (void);		// the running command's program, from s.cmd
 
@@ -169,6 +169,15 @@ uint32	lab_n;
 	}																			\
 	s.parked = 0; s.due = 1; } while (0)
 
+// pays what's owed so far, so a long stretch without bus accesses runs in steps the clock catches up with
+#define NT_PAY(id)	do {															\
+	s.line = (id); case (id):													\
+	if (budget < s.due) { s.due -= (uint32) budget; NT_SPENT(budget); budget = 0; return (false); }	\
+	budget -= s.due; NT_SPENT(s.due); s.due = 0; } while (0)
+
+// a loop the program never leaves (the firmware's, on RAM where a list never ends): it only burns
+#define NT_FOREVER(id)	do { s.line = (id); case (id): NT_SPENT(budget); budget = 0; s.due = 0xffffffffu; return (false); } while (0)
+
 // a wait whose turn's span hangs on the word that frees it: upd7725.cpp asks spanf for it then
 #define NT_AWAIT(id, spanf, effectf, stepf)	do {									\
 	s.line = (id); case (id):													\
@@ -247,12 +256,13 @@ inline int16 Mul (int16 a, int16 b)
 	return ((int16) ((int32) a * b >> 15));
 }
 
-void Attach (uint16 *data, uint16 *status, uint16 *mem, uint16 *t, S9xUPD7725Lane *l)
+void Attach (uint16 *data, uint16 *status, uint16 *mem, uint16 *t, uint16 *tb, S9xUPD7725Lane *l)
 {
 	dr = data;
 	sr = status;
 	ram = mem;
-	trb = t;
+	tr = t;
+	trb = tb;
 	lanes = l;
 }
 

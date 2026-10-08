@@ -447,5 +447,6 @@ extern void (*SetDSP) (uint8, uint16);
 
 // The DSP-1B's data ROM (the native chip derives the first DSP-1's from it).
 extern const uint16	DSP1ROM[1024];
+extern const uint16	DSP3_DataROM[1024];
 
 #endif

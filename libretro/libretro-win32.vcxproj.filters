@@ -308,6 +308,9 @@
     <ClCompile Include="..\dsp2n.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
+    <ClCompile Include="..\dsp3n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
     <ClCompile Include="..\hg51b.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>

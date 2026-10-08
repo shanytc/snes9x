@@ -710,6 +710,7 @@
 #define IDC_BIOSBENCH_FRAME             3646
 #define IDC_BIOSBENCH_CHIP              3647
 #define IDC_BIOSBENCH_NOTE              3648
+#define IDC_BIOSMGR_CARDS               3649
 #define IDC_BIOSMGR_MODE0               3660
 #define IDC_BIOSMGR_BENCH0              3680
 

@@ -595,6 +595,7 @@
     <ClCompile Include="..\dsp1n.cpp" />
     <ClCompile Include="..\dsp2n.cpp" />
     <ClCompile Include="..\dsp3n.cpp" />
+    <ClCompile Include="..\dsp4n.cpp" />
     <ClCompile Include="..\hg51b.cpp" />
     <ClCompile Include="..\external\imgui\imgui.cpp" />
     <ClCompile Include="..\external\imgui\imgui_demo.cpp" />

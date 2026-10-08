@@ -395,6 +395,7 @@ list(APPEND SOURCES
     ../dsp1n.cpp
     ../dsp2n.cpp
     ../dsp3n.cpp
+    ../dsp4n.cpp
     ../hg51b.cpp
     ../spc7110.cpp
     ../obc1.cpp

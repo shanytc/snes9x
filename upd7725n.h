@@ -48,5 +48,6 @@ struct S9xUPD7725Native
 extern const S9xUPD7725Native	S9xDSP1Native;
 extern const S9xUPD7725Native	S9xDSP2Native;
 extern const S9xUPD7725Native	S9xDSP3Native;
+extern const S9xUPD7725Native	S9xDSP4Native;
 
 #endif

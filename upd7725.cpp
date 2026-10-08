@@ -117,6 +117,8 @@ bool8 S9xUPD7725LoadNative (int which)
 		native = &S9xDSP2Native;
 	else if (which == UPD7725_DSP3)
 		native = &S9xDSP3Native;
+	else if (which == UPD7725_DSP4)
+		native = &S9xDSP4Native;
 	else
 		return (FALSE);
 	chip = which;
@@ -852,6 +854,8 @@ static void FirmwareAtWait (void)
 		r.dp = 0;
 		r.b = 0x00c0;
 	}
+	else if (chip == UPD7725_DSP4)
+		r.pc = 0x001;
 	else
 	{
 		r.pc = 0x004;

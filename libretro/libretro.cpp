@@ -436,6 +436,24 @@ static void update_variables(void)
     else
         Settings.SuperFXClockMultiplier = 100;
 
+    // Each DSP and the Cx4 run as picked, as the BIOS Manager does it; a load reads the mode.
+    for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+    {
+        if (!S9xBiosSlotHasChipMode(slot))
+            continue;
+        std::string key = std::string("snes9x_chip_") + S9xGetBiosSlotInfo(slot)->key;
+        for (char &c : key)
+            c = (char) tolower((unsigned char) c);
+        var.key = key.c_str();
+        var.value = NULL;
+        int mode = S9X_CHIP_NATIVE;
+        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+            mode = !strcmp(var.value, "legacy")   ? S9X_CHIP_HLE
+                 : !strcmp(var.value, "firmware") ? S9X_CHIP_FIRMWARE
+                                                  : S9X_CHIP_NATIVE;
+        S9xSetChipMode(slot, mode);
+    }
+
     var.key = "snes9x_up_down_allowed";
     var.value = NULL;
 
@@ -1490,10 +1508,15 @@ static struct retro_disk_control_callback superdisc_disk_control = {
     superdisc_add_image_index,
 };
 
+// Set when this load put a BIOS notice on the OSD, which then stays up.
+static bool bios_notice_shown = false;
+
 // A DSP or Cx4 running as the chip, native or from its dump in the system
 // folder: the desktop ports tag their title, so say it on the OSD.
 static void notify_enhanced_chip(void)
 {
+    if (bios_notice_shown)
+        return;
     const int   chip = S9xEnhancedChip();
     const char *how = chip == S9X_ENHANCED_DSP_FIRMWARE ? "Chip Enhanced: running the chip from its firmware"
                     : chip == S9X_ENHANCED_CX4_FIRMWARE ? "Chip Enhanced: running the chip from its data ROM"
@@ -1519,6 +1542,7 @@ bool retro_load_game(const struct retro_game_info *game)
     widescreen_content.clear();
     widescreen_content_path.clear();
     update_variables();
+    bios_notice_shown = false;
 
     // Archived content arrives as "X.zip#rom"; an RP2040 cart's firmware may be in X.zip.
     std::string archive;
@@ -2697,6 +2721,7 @@ void S9xMessage(int type, int number, const char* s)
     {
         struct retro_message msg = { s, 180 };
         environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        bios_notice_shown = true;
     }
 
     if (!log_cb) return;

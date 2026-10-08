@@ -3805,9 +3805,14 @@ static bool AcceptDSPFirmware (const uint8 *data, uint32 size, uint32 full_size,
 // Firmware picked in the BIOS Manager that won't load: the native chip runs instead, and says so.
 static void ChipFirmwareNotice (int slot)
 {
+#ifdef __LIBRETRO__
+	const std::string	where = std::string("Put ") + S9xGetBiosSlotInfo(slot)->names[0] + " in the system folder.";
+#else
+	const std::string	where = "Check it in File -> BIOS Manager.";
+#endif
 	if (!S9xBiosNoticePending())
 		S9xSetBiosNotice((std::string(S9xGetBiosSlotInfo(slot)->label) +
-						  " firmware can't be used: running the native chip. Check it in File -> BIOS Manager.").c_str(), FALSE);
+						  " firmware can't be used: running the native chip. " + where).c_str(), FALSE);
 }
 
 // The chip as the slot's mode picks it: FALSE leaves the cart to the HLE.

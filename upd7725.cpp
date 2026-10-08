@@ -8,6 +8,8 @@
 #include "snes9x.h"
 #include "upd7725.h"
 #include "upd7725n.h"
+#include "memmap.h"
+#include "cpuexec.h"
 
 #define DSP_HZ		7600000		// the DSP-n carts' oscillator; one instruction per clock
 
@@ -57,6 +59,7 @@ static uint64	lane_free = 0;		// freed in a lane: when (0: not); its clock still
 static uint64	lane_taken = 0;		// then, the master clock by which it has taken its word (0: not worked out yet)
 static uint64	lane_seen = 0;		// and the one before which the CPU can't see it move (0: not worked out yet)
 static uint32	lane_lo[64], lane_hi[64];	// master clocks within which a span's instructions may, and surely do, all run
+static SPollSkip	poll;		// the CPU's wait on RQM from a native chip, for S9xSkipPollTurns
 
 static inline uint32 ProgWord (const uint8 *image, int i)
 {
@@ -162,6 +165,7 @@ void S9xUPD7725Reset (void)
 	if (native)
 		native->reset(native_variant);
 	native_next = 0;
+	S9xResetPollSkip(poll);
 	active = TRUE;
 }
 
@@ -806,14 +810,54 @@ static alwaysinline void NativeHandshake (int32 t)
 		native_next = 0;
 }
 
-uint8 S9xUPD7725Read (bool8 sr, int32 speed)
+// A read of the CPU's wait on RQM (BIT, LDA or LDA long of the status, then BPL back to it) that ends a
+// turn of it: with a 16-bit A, the high byte's. PC is past the read's instruction.
+static bool WaitLoop (int32 address)
+{
+	const uint32	pc = Registers.PCw, at = pc & MEMMAP_MASK;
+	if (address < 0 || !CPU.PCBase || at < 4 || at + 2 > MEMMAP_BLOCK_SIZE)
+		return (false);
+	const uint8	*b = CPU.PCBase + pc;
+	if (b[0] != 0x10 || !((b[1] == 0xfb && (b[-3] == 0x2c || b[-3] == 0xad)) || (b[1] == 0xfa && b[-4] == 0xaf)))
+		return (false);
+	const uint16	operand = (b[1] == 0xfb) ? (b[-2] | (b[-1] << 8)) : (b[-3] | (b[-2] << 8));
+	return ((uint16) address == (uint16) (operand + (CheckMemory() ? 0 : 1)));
+}
+
+// The master clock before which a native chip can't change SR (0: not known): its next bus event, or in a
+// lane the first clock the CPU could see it move, or take its word.
+static uint64 StatusStill (void)
+{
+	if (lane_free)
+	{
+		if (!lane_seen)
+			lane_seen = LaneClock(lane_free, lane.effect());
+		if (!lane_taken)
+			lane_taken = LaneClock(lane_free, lane.span);
+		return (lane_seen < lane_taken ? lane_seen : lane_taken);
+	}
+	return (native_next == ~(uint64) 0 ? 0 : native_next);
+}
+
+uint8 S9xUPD7725Read (bool8 sr, int32 speed, int32 address)
 {
 	int32	end = CPU.Cycles + speed;
 
 	SyncTo(end - 1, true);
 	if (sr)
+	{
+		// The CPU waits on RQM while a native chip works: whole turns of its loop pass at once. Only the
+		// turns' last reads teach the turn, and a DR access in between forgets it, so a gap is one turn.
+		if (native && !(r.sr & SR_RQM) && WaitLoop(address))
+		{
+			const uint64	still = StatusStill(), t = r.line_base + (uint64) (int64) (end - 1);
+			if (S9xSkipPollTurns(poll, r.line_base, still > t, still > t ? (int64) (still - t) - 1 : 0))
+				SyncTo(CPU.Cycles + speed - 1, true);
+		}
 		return (r.sr >> 8);
+	}
 
+	poll.pbpc = ~0u;
 	uint8	byte = (!(r.sr & SR_DRC) && (r.sr & SR_DRS)) ? r.dr >> 8 : (uint8) r.dr;
 
 	NativeHandshake(end + 2);
@@ -824,6 +868,7 @@ void S9xUPD7725Write (uint8 byte, bool8 sr, int32 speed)
 {
 	int32	end = CPU.Cycles + speed;
 
+	poll.pbpc = ~0u;
 	SyncTo(end);
 	if (sr)
 		return;
@@ -910,6 +955,7 @@ bool8 S9xUPD7725StateLoad (const uint8 *buf, uint32 size)
 	if (native)
 		native->state_load(buf + sizeof(r), extra);
 	native_next = 0;
+	poll.pbpc = ~0u;
 	active = TRUE;
 	return (TRUE);
 }

@@ -46,7 +46,7 @@ uint8 S9xGetDSP (uint16 address, int32 speed)
 {
 	// With its firmware the chip itself runs; a peek mustn't step its handshake.
 	if (S9xUPD7725Active())
-		return (speed < 0 ? 0 : S9xUPD7725Read(StatusRegister(address), speed));
+		return (speed < 0 ? 0 : S9xUPD7725Read(StatusRegister(address), speed, address));
 
 #ifdef DEBUGGER
 	if (Settings.TraceDSP)

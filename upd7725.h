@@ -43,8 +43,8 @@ void	S9xUPD7725Suspend (void);
 void	S9xUPD7725EndScanline (void);
 
 // `sr` picks the status register over the data register; `speed` is the
-// bus cycle's length in master clocks.
-uint8	S9xUPD7725Read (bool8 sr, int32 speed);
+// bus cycle's length in master clocks; `address`, the CPU's, if it's known.
+uint8	S9xUPD7725Read (bool8 sr, int32 speed, int32 address = -1);
 void	S9xUPD7725Write (uint8 byte, bool8 sr, int32 speed);
 
 uint32	S9xUPD7725StateSize (void);

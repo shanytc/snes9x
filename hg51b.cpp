@@ -14,6 +14,7 @@
 #include "memmap.h"
 #include "hg51b.h"
 #include "hg51bn.h"
+#include "cpuexec.h"
 
 #define CX4_HZ		20000000	// the Cx4 carts' oscillator
 
@@ -54,16 +55,7 @@ static struct
 	Regs	start;
 }	ahead;
 
-// The status reads that SkipPolls learns the CPU's wait from, and the length of a turn of it at the
-// sites seen to repeat one (by PB:PC, and the E flag, which can cost a branch a cycle).
-static struct
-{
-	uint32	pbpc;
-	int32	cycles, next, period;
-	uint64	line;
-	uint32	site[8];
-	int32	turn[8];
-}	poll;
+static SPollSkip	poll;		// the CPU's wait on a job, for S9xSkipPollTurns
 
 // Idle, the chip changes only on a CPU write, so its syncs wait (to `parked_t`) until one comes.
 // `view` is its 4K block as reads give it, for DMA, while `viewed`.
@@ -168,7 +160,7 @@ void S9xHG51BReset (void)
 	hit_key = ~0u;
 	ahead.on = false;
 	parked = viewed = false;
-	memset(&poll, 0xff, sizeof(poll));
+	S9xResetPollSkip(poll);
 	S9xHG51BNativeReset();
 	r.halt = 1;
 	r.rom_cfg = 1;
@@ -1405,55 +1397,11 @@ static bool PollLoop (uint32 pbpc)
 			!memcmp(Memory.RAM + a - 4, loop, sizeof(loop)));
 }
 
-// While a job runs ahead, whole turns of that wait pass at once, short of the next event, IRQ timer
-// or the job's end, and never with an interrupt or HDMA due; a turn is two reads apart, twice alike.
+// While a job runs ahead, whole turns of that wait pass at once, short of its end.
 static void SkipPolls (int32 speed)
 {
-	const int32		c = CPU.Cycles;
-	const uint32	pbpc = Registers.PBPC, key = pbpc | (CheckEmulation() ? 0x80000000 : 0);
-	const int32		period = (pbpc == poll.pbpc && r.line_base == poll.line && CPU.NextEvent == poll.next) ? c - poll.cycles : 0;
-	poll.pbpc = pbpc;
-	poll.cycles = c;
-	poll.line = r.line_base;
-	poll.next = CPU.NextEvent;
-
-	int	s = 0;
-	while (s < 8 && poll.site[s] != key)
-		s++;
-	if (period > 0 && period == poll.period && s == 8)
-	{
-		memmove(poll.site + 1, poll.site, 7 * sizeof(poll.site[0]));
-		memmove(poll.turn + 1, poll.turn, 7 * sizeof(poll.turn[0]));
-		poll.site[0] = key;
-		poll.turn[0] = period;
-		s = 0;
-	}
-	poll.period = period;
-	// a gap other than the turn had something more in it (an interrupt): not now
-	if (s == 8 || (period > 0 && period != poll.turn[s]) || poll.turn[s] <= 0)
-		return;
-	const int32	turn = poll.turn[s];
-
-	if (CPU.InDMAorHDMA || CPU.HDMAEdge || CPU.NMIPending || CPU.IRQDeferOne || Timings.IRQFlagChanging ||
-		((CPU.IRQLine || CPU.IRQExternal) && !CheckFlag(IRQ)) || Settings.SA1 || !PollLoop(Registers.PBPC))
-		return;
-#ifdef DEBUGGER
-	if (CPU.Flags & (BREAK_FLAG | TRACE_FLAG | SINGLE_STEP_FLAG | DEBUG_MODE_FLAG))
-		return;
-#endif
-
-	int64	room = (int64) (CPU.NextEvent < Timings.NextIRQTimer ? CPU.NextEvent : Timings.NextIRQTimer) - 1 - c;
-	const int64	end = (int64) (ahead.t_done - (r.line_base + (uint64) (int64) (c + speed))) - 1;
-	if (end < room)
-		room = end;
-	if (room < turn)
-		return;
-
-	const int32	skip = (int32) (room / turn) * turn;
-	CPU.Cycles += skip;
-	CPU.LastBusStart += skip;
-	CPU.LastRunStart += skip;
-	poll.cycles = CPU.Cycles;
+	const uint64	t = r.line_base + (uint64) (int64) (CPU.Cycles + speed);
+	S9xSkipPollTurns(poll, r.line_base, PollLoop(Registers.PBPC), (int64) (ahead.t_done - t) - 1);
 }
 
 // The syncs an idle chip put off, as one: from idle it only owes clocks, and SyncTo's sums come

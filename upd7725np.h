@@ -46,7 +46,8 @@ S9xUPD7725Lane	*lanes;		// upd7725.cpp's, where a chip parked in a lane says so
 
 // A lane: a command's loop of words, one per wait on the CPU, which upd7725.cpp can step through for the
 // program while the chip waits. It runs while s.i < count(); word k comes after gap(k) instructions and
-// a wait, and put takes it (in) or get gives it (out). gap mustn't depend on what put changes.
+// a wait, and put takes it (in) or get gives it (out). gap(k) may use words before k - 1, not k - 1.
+// With an exit, the program goes on to burn gap(count()) and wait there, which the last word steps to.
 struct Lane
 {
 	int32	(*count) (void);
@@ -54,6 +55,7 @@ struct Lane
 	void	(*put) (int32 k, uint16 v);
 	uint16	(*get) (int32 k);
 	bool	(*step) (void);				// LaneIn or LaneOut, for these
+	int32	exit;						// the exit's wait id (0: none)
 };
 uint16	lane_word;
 
@@ -63,31 +65,41 @@ inline uint32 AtAccess (void)
 	return (2);
 }
 
-// one turn of the loop from its wait to the next: the access, then the gap, parked again
-template <int32 (*Count) (void), uint32 (*Gap) (int32), void (*Put) (int32, uint16)>
+// one turn of the loop from its wait to the next: the access, then the gap, parked again (past the last
+// word, at the exit's wait, which posts nothing)
+template <int32 (*Count) (void), uint32 (*Gap) (int32), int32 Exit>
+inline void LaneNext (void)
+{
+	const int32	n = Count();
+	s.parked = 1;
+	s.due = 0;
+	if (s.i < n)
+		lanes->span = s.i + 1 < n ? 2 + Gap(s.i + 1) : Exit ? 2 + Gap(n) : 0;
+	else
+	{
+		s.line = Exit;
+		lanes->span = 0;
+	}
+}
+
+template <int32 (*Count) (void), uint32 (*Gap) (int32), void (*Put) (int32, uint16), int32 Exit = 0>
 bool LaneIn (void)
 {
 	lane_word = *dr;
 	*sr |= SR_RQM;
 	Put(s.i, lane_word);
 	s.i++;
-	s.parked = 1;
-	s.due = 0;
-	const int32	n = Count();
-	lanes->span = s.i + 1 < n ? 2 + Gap(s.i + 1) : 0;
+	LaneNext<Count, Gap, Exit>();
 	return (true);
 }
 
-template <int32 (*Count) (void), uint32 (*Gap) (int32), uint16 (*Get) (int32)>
+template <int32 (*Count) (void), uint32 (*Gap) (int32), uint16 (*Get) (int32), int32 Exit = 0>
 bool LaneOut (void)
 {
 	*dr = Get(s.i);
 	*sr |= SR_RQM;
 	s.i++;
-	s.parked = 1;
-	s.due = 0;
-	const int32	n = Count();
-	lanes->span = s.i + 1 < n ? 2 + Gap(s.i + 1) : 0;
+	LaneNext<Count, Gap, Exit>();
 	return (true);
 }
 
@@ -175,7 +187,7 @@ inline bool LanePark (int32 id, uint32 span, uint32 (*effect) (void), bool (*ste
 	if (*sr & SR_RQM)															\
 	{																			\
 		if (!s.parked) { s.parked = 1; NT_EVENT('P', 0); }						\
-		lanes->span = s.i + 1 < (L).count() ? 2 + (L).gap(s.i + 1) : 0;		\
+		lanes->span = s.i + 1 < (L).count() ? 2 + (L).gap(s.i + 1) : (L).exit ? 2 + (L).gap((L).count()) : 0;	\
 		lanes->effect = AtAccess;												\
 		lanes->step = (L).step;													\
 		budget = 0;																\

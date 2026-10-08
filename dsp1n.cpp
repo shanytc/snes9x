@@ -345,12 +345,75 @@ int16 DistanceOf (uint32 sq, uint32 *cost)
 
 // ---- the commands
 
+// Their words in and out as lanes: inputs into s.in[k], outputs from s.out[F + k], each after its gap.
+template <int32 N> int32 Words (void)
+{
+	return (N);
+}
+
+void PutIn (int32 k, uint16 v)
+{
+	s.in[k] = (int16) v;
+}
+
+template <int32 F> uint16 GetOut (int32 k)
+{
+	return ((uint16) s.out[F + k]);
+}
+
+#define D1_GAPS(name, ...)	uint32 name##Gap (int32 k) { static const uint8 g[] = { __VA_ARGS__ }; return (g[k]); }
+#define D1_IN(name, n, x)	const Lane name = { Words<n>, name##Gap, PutIn, NULL, LaneIn<Words<n>, name##Gap, PutIn, x>, x };
+#define D1_OUT(name, f, n, x)	const Lane name = { Words<n>, name##Gap, NULL, GetOut<f>, LaneOut<Words<n>, name##Gap, GetOut<f>, x>, x };
+
+D1_GAPS(MultiplyIn, 10, 0)			D1_IN(MultiplyIn, 1, 4)
+D1_GAPS(InverseIn, 11, 0)			D1_IN(InverseIn, 1, 4)
+D1_GAPS(InverseOut, 0, 1)			D1_OUT(InverseOut, 1, 1, 9)
+D1_GAPS(TriangleOut, 1, 1)			D1_OUT(TriangleOut, 1, 1, 9)
+D1_GAPS(RadiusIn, 12, 2, 2)			D1_IN(RadiusIn, 2, 6)
+D1_GAPS(RadiusOut, 0, 1)			D1_OUT(RadiusOut, 1, 1, 11)
+D1_GAPS(RangeIn, 10, 2, 2, 2)		D1_IN(RangeIn, 3, 8)
+D1_GAPS(RotateOut, 0, 1)			D1_OUT(RotateOut, 1, 1, 11)
+D1_GAPS(PolarOut, 4, 0, 1)			D1_OUT(PolarOut, 1, 2, 19)
+D1_GAPS(VectorIn, 11, 2, 1)			D1_IN(VectorIn, 2, 6)		// $0D and $03
+D1_GAPS(VectorOut, 3, 3, 1)			D1_OUT(VectorOut, 1, 2, 13)
+D1_GAPS(DotIn, 13, 2, 2)			D1_IN(DotIn, 2, 6)			// $28 and $0B
+D1_GAPS(GyrateIn, 12, 0, 0, 0, 0)	D1_IN(GyrateIn, 5, 0)
+D1_GAPS(GyrateOut, 0, 2, 1)			D1_OUT(GyrateOut, 1, 2, 19)
+D1_GAPS(ParameterIn, 9, 0, 0, 1, 1, 2)	D1_IN(ParameterIn, 6, 0)
+D1_GAPS(ParameterOut, 0, 8, 3, 2)	D1_OUT(ParameterOut, 1, 3, 25)
+D1_GAPS(ProjectIn, 10, 2, 2)		D1_IN(ProjectIn, 2, 6)
+D1_GAPS(ProjectOut, 1, 0, 1)		D1_OUT(ProjectOut, 1, 2, 13)
+D1_GAPS(TargetIn, 9, 2)				D1_IN(TargetIn, 1, 4)
+D1_GAPS(TargetOut, 2, 1)			D1_OUT(TargetOut, 1, 1, 9)
+
+// gaps that take a sine's cost from an angle read two words earlier
+uint32 RotateInGap (int32 k)
+{
+	return (k == 0 ? 10 : k == 1 ? 1 : TriangleCost(s.in[0]) + 3);
+}
+D1_IN(RotateIn, 2, 6)
+
+uint32 PolarInGap (int32 k)
+{
+	static const uint8	g[5] = { 11, 1, 0, 0, 0 };
+	return (k < 5 ? g[k] : 8 + TriangleCost(s.in[0]) + TriangleCost(s.in[1]));
+}
+D1_IN(PolarIn, 5, 12)
+
+uint32 AttitudeInGap (int32 k)
+{
+	static const uint8	g[3] = { 11, 2, 2 };
+	return (k < 3 ? g[k] : 4 + TriangleCost(s.in[1]));
+}
+D1_IN(AttitudeIn, 3, 8)
+
+
 bool Multiply (void)		// $00: (A * B) >> 15; $20 also sets bit 0 (what's left of the command)
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(10); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_WAIT(4); NT_READNF(5, s.in[1]);
+	s.i = 0; NT_GETS(2, MultiplyIn);
+	NT_BURN(MultiplyInGap(1)); NT_WAIT(4); NT_READNF(5, s.in[1]);
 	NT_BURN(1); NT_WRITE(6, (int16) (((int32) s.in[0] * s.in[1]) >> 15) | (s.cmd >> 5 & 1));
 	NT_EPILOGUE(7);
 	NT_END
@@ -360,8 +423,8 @@ bool Inverse (void)			// $10: 1 / (C * 2^E) as a coefficient and an exponent
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(11); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_WAIT(4); NT_READNF(5, s.in[1]);
+	s.i = 0; NT_GETS(2, InverseIn);
+	NT_BURN(InverseInGap(1)); NT_WAIT(4); NT_READNF(5, s.in[1]);
 	{
 		const SubOut	n = SubNorm(s.in[0], s.in[1]), v = SubInv(n.a, n.b);
 		s.out[0] = v.a;
@@ -369,7 +432,7 @@ bool Inverse (void)			// $10: 1 / (C * 2^E) as a coefficient and an exponent
 		s.i = (int32) (3 + n.cost + v.cost);
 	}
 	NT_BURN(s.i - 1); NT_WRITE(6, s.out[0]);
-	NT_WAIT(7); NT_WRITE(8, s.out[1]);
+	s.i = 0; NT_PUTS(7, InverseOut);
 	NT_EPILOGUE(9);
 	NT_END
 }
@@ -383,7 +446,7 @@ bool Triangle (void)		// $04: radius * sin, radius * cos
 	s.out[0] = Mul(Sin(s.in[0]), s.in[1]);
 	s.out[1] = Mul(Cos(s.in[0]), s.in[1]);
 	NT_BURN(1); NT_WRITE(6, s.out[0]);
-	NT_BURN(1); NT_WAIT(7); NT_WRITE(8, s.out[1]);
+	s.i = 0; NT_PUTS(7, TriangleOut);
 	NT_EPILOGUE(9);
 	NT_END
 }
@@ -392,16 +455,15 @@ bool Radius (void)			// $08: 2 * (X^2 + Y^2 + Z^2) as two words
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(12); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(2); NT_WAIT(6); NT_READNF(7, s.in[2]);
+	s.i = 0; NT_GETS(2, RadiusIn);
+	NT_BURN(RadiusInGap(2)); NT_WAIT(6); NT_READNF(7, s.in[2]);
 	{
 		const uint32	size = 2u * ((uint32) (s.in[0] * s.in[0]) + (uint32) (s.in[1] * s.in[1]) + (uint32) (s.in[2] * s.in[2]));
 		s.out[0] = (int16) size;
 		s.out[1] = (int16) (size >> 16);
 	}
 	NT_BURN(3); NT_WRITE(8, s.out[0]);
-	NT_WAIT(9); NT_WRITE(10, s.out[1]);
+	s.i = 0; NT_PUTS(9, RadiusOut);
 	NT_EPILOGUE(11);
 	NT_END
 }
@@ -410,10 +472,8 @@ bool Range (void)			// $18: (X^2 + Y^2 + Z^2 - R^2) >> 15; $38 one more
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(10); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(2); NT_WAIT(6); NT_READ(7, s.in[2]);
-	NT_BURN(2); NT_WAIT(8); NT_READNF(9, s.in[3]);
+	s.i = 0; NT_GETS(2, RangeIn);
+	NT_BURN(RangeInGap(3)); NT_WAIT(8); NT_READNF(9, s.in[3]);
 	{
 		const uint32	sq = (uint32) (s.in[0] * s.in[0]) + (uint32) (s.in[1] * s.in[1]) + (uint32) (s.in[2] * s.in[2]) - (uint32) (s.in[3] * s.in[3]);
 		s.out[0] = (int16) ((int32) sq >> 15);
@@ -429,14 +489,13 @@ bool Rotate (void)			// $0C: (X, Y) turned by A
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(10); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(1); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(TriangleCost(s.in[0]) + 3); NT_WAIT(6); NT_READNF(7, s.in[2]);
+	s.i = 0; NT_GETS(2, RotateIn);
+	NT_BURN(RotateInGap(2)); NT_WAIT(6); NT_READNF(7, s.in[2]);
 	s.out[0] = (int16) (Mul(s.in[2], Sin(s.in[0])) + Mul(s.in[1], Cos(s.in[0])));
 	s.out[1] = (int16) (Mul(s.in[2], Cos(s.in[0])) - Mul(s.in[1], Sin(s.in[0])));
 	ram[0x40] = (uint16) s.in[1];
 	NT_BURN(1); NT_WRITE(8, s.out[0]);
-	NT_WAIT(9); NT_WRITE(10, s.out[1]);
+	s.i = 0; NT_PUTS(9, RotateOut);
 	NT_EPILOGUE(11);
 	NT_END
 }
@@ -445,12 +504,8 @@ bool Polar (void)			// $1C: (X, Y, Z) turned about Z, then Y, then X
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(11); NT_WAIT(2); NT_READ(3, s.in[0]);		// about Z
-	NT_BURN(1); NT_WAIT(4); NT_READ(5, s.in[1]);		// about Y
-	NT_WAIT(6); NT_READ(7, s.in[2]);					// about X
-	NT_WAIT(8); NT_READ(9, s.in[3]);					// X
-	NT_WAIT(10); NT_READ(11, s.in[4]);					// Y
-	NT_BURN(8 + TriangleCost(s.in[0]) + TriangleCost(s.in[1])); NT_WAIT(12); NT_READNF(13, s.in[5]);	// Z
+	s.i = 0; NT_GETS(2, PolarIn);						// about Z, Y and X, then X and Y
+	NT_BURN(PolarInGap(5)); NT_WAIT(12); NT_READNF(13, s.in[5]);	// Z
 	{
 		const int16	x1 = (int16) (Mul(s.in[4], Sin(s.in[0])) + Mul(s.in[3], Cos(s.in[0])));
 		const int16	y1 = (int16) (Mul(s.in[4], Cos(s.in[0])) - Mul(s.in[3], Sin(s.in[0])));
@@ -463,8 +518,7 @@ bool Polar (void)			// $1C: (X, Y, Z) turned about Z, then Y, then X
 		ram[0x42] = (uint16) z2; ram[0x43] = (uint16) s.in[2];
 	}
 	NT_BURN(6 + TriangleCost(s.in[2])); NT_WRITE(14, s.out[0]);
-	NT_BURN(4); NT_WAIT(15); NT_WRITE(16, s.out[1]);
-	NT_WAIT(17); NT_WRITE(18, s.out[2]);
+	s.i = 0; NT_PUTS(15, PolarOut);
 	NT_EPILOGUE(19);
 	NT_END
 }
@@ -473,9 +527,8 @@ bool Distance (void)		// $28: |(X, Y, Z)|
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(13); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(2); NT_WAIT(6); NT_READNF(7, s.in[2]);
+	s.i = 0; NT_GETS(2, DotIn);
+	NT_BURN(DotInGap(2)); NT_WAIT(6); NT_READNF(7, s.in[2]);
 	{
 		const uint32	sq = 2u * ((uint32) (s.in[0] * s.in[0]) + (uint32) (s.in[1] * s.in[1]) + (uint32) (s.in[2] * s.in[2]));
 		uint32			cost;
@@ -513,10 +566,8 @@ bool Attitude (void)		// $01/$11/$21: rotation about Z, then Y, then X, scaled b
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(11); NT_WAIT(2); NT_READ(3, s.in[0]);		// m
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);		// about Z
-	NT_BURN(2); NT_WAIT(6); NT_READ(7, s.in[2]);		// about Y
-	NT_BURN(4 + TriangleCost(s.in[1])); NT_WAIT(8); NT_READNF(9, s.in[3]);	// about X
+	s.i = 0; NT_GETS(2, AttitudeIn);					// m, about Z, about Y
+	NT_BURN(AttitudeInGap(3)); NT_WAIT(8); NT_READNF(9, s.in[3]);	// about X
 	{
 		const uint8	b = MatrixBase[s.cmd >> 4 & 3];
 		const int16	m = s.in[0] >> 1;
@@ -553,9 +604,8 @@ bool Objective (void)		// $0D/$1D/$2D: (F, L, U) = matrix * (X, Y, Z)
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(11); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(1); NT_WAIT(6); NT_READNF(7, s.in[2]);
+	s.i = 0; NT_GETS(2, VectorIn);
+	NT_BURN(VectorInGap(2)); NT_WAIT(6); NT_READNF(7, s.in[2]);
 	{
 		const uint8	b = MatrixBase[s.cmd >> 4 & 3];
 		const int16	x = s.in[0], y = s.in[1], z = s.in[2];
@@ -564,8 +614,7 @@ bool Objective (void)		// $0D/$1D/$2D: (F, L, U) = matrix * (X, Y, Z)
 		s.out[2] = (int16) (Mul(x, MatP(b, 2, 0)) + Mul(y, MatK(b, 2, 1)) + Mul(z, MatK(b, 2, 2)));
 	}
 	NT_BURN(2); NT_WRITE(8, s.out[0]);
-	NT_BURN(3); NT_WAIT(9); NT_WRITE(10, s.out[1]);
-	NT_BURN(3); NT_WAIT(11); NT_WRITE(12, s.out[2]);
+	s.i = 0; NT_PUTS(9, VectorOut);
 	NT_EPILOGUE(13);
 	NT_END
 }
@@ -574,9 +623,8 @@ bool Subjective (void)		// $03/$13/$23: (X, Y, Z) = transposed matrix * (F, L, U
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(11); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(1); NT_WAIT(6); NT_READNF(7, s.in[2]);
+	s.i = 0; NT_GETS(2, VectorIn);
+	NT_BURN(VectorInGap(2)); NT_WAIT(6); NT_READNF(7, s.in[2]);
 	{
 		const uint8	b = MatrixBase[s.cmd >> 4 & 3];
 		const int16	f = s.in[0], l = s.in[1], u = s.in[2];
@@ -585,8 +633,7 @@ bool Subjective (void)		// $03/$13/$23: (X, Y, Z) = transposed matrix * (F, L, U
 		s.out[2] = (int16) (Mul(f, MatP(b, 0, 2)) + Mul(l, MatK(b, 1, 2)) + Mul(u, MatK(b, 2, 2)));
 	}
 	NT_BURN(2); NT_WRITE(8, s.out[0]);
-	NT_BURN(3); NT_WAIT(9); NT_WRITE(10, s.out[1]);
-	NT_BURN(3); NT_WAIT(11); NT_WRITE(12, s.out[2]);
+	s.i = 0; NT_PUTS(9, VectorOut);
 	NT_EPILOGUE(13);
 	NT_END
 }
@@ -595,9 +642,8 @@ bool Scalar (void)			// $0B/$1B/$2B: the matrix's first row . (X, Y, Z), rounded
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(13); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(2); NT_WAIT(6); NT_READNF(7, s.in[2]);
+	s.i = 0; NT_GETS(2, DotIn);
+	NT_BURN(DotInGap(2)); NT_WAIT(6); NT_READNF(7, s.in[2]);
 	{
 		const uint8	b = ScalarBase[s.cmd >> 4 & 3];
 		// the products' double words add up in 32 bits; the result is the high word
@@ -615,11 +661,7 @@ bool Gyrate (void)			// $14: (Zr, Xr, Yr) after turning by (U, F, L) in the body
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(12); NT_WAIT(2); NT_READ(3, s.in[0]);		// Zr
-	NT_WAIT(4); NT_READ(5, s.in[1]);					// Xr
-	NT_WAIT(6); NT_READ(7, s.in[2]);					// Yr
-	NT_WAIT(8); NT_READ(9, s.in[3]);					// U
-	NT_WAIT(10); NT_READ(11, s.in[4]);					// F
+	s.i = 0; NT_GETS(2, GyrateIn);						// Zr, Xr, Yr, U, F
 	{
 		const int16	zr = s.in[0], xr = s.in[1], yr = s.in[2], u = s.in[3], f = s.in[4];
 		// $34 takes Xr's sin and cos with bit 0 set (what's left of the command)
@@ -647,8 +689,7 @@ bool Gyrate (void)			// $14: (Zr, Xr, Yr) after turning by (U, F, L) in the body
 	s.out[2] = (int16) (s.out[2] + s.in[5]);
 	ram[0xd0] = (uint16) s.out[2];
 	NT_WRITE(14, s.out[0]);
-	NT_WAIT(15); NT_WRITE(16, s.out[1]);
-	NT_BURN(2); NT_WAIT(17); NT_WRITE(18, s.out[2]);
+	s.i = 0; NT_PUTS(15, GyrateOut);
 	NT_EPILOGUE(19);
 	NT_END
 }
@@ -709,12 +750,7 @@ bool Parameter (void)		// $02: the projection: eye, view plane and angles; Vof, 
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(9); NT_WAIT(2); NT_READ(3, s.in[0]);		// Fx
-	NT_WAIT(4); NT_READ(5, s.in[1]);					// Fy
-	NT_WAIT(6); NT_READ(7, s.in[2]);					// Fz
-	NT_BURN(1); NT_WAIT(8); NT_READ(9, s.in[3]);		// Lfe
-	NT_BURN(1); NT_WAIT(10); NT_READ(11, s.in[4]);		// Les
-	NT_BURN(2); NT_WAIT(12); NT_READ(13, s.in[5]);		// Aas
+	s.i = 0; NT_GETS(2, ParameterIn);					// Fx, Fy, Fz, Lfe, Les, Aas
 	{
 		const SubOut	sca = SubSinCos(s.in[5]);
 		s.i = (int32) (18 + sca.cost + (sca.b == -32768 ? 1 : 0));
@@ -760,10 +796,8 @@ bool Parameter (void)		// $02: the projection: eye, view plane and angles; Vof, 
 		s.out[5] = (int16) ((clip ? 70 : 64) + sc.cost + n1.cost + c1.cost + n2.cost + c2.cost + n3.cost + cs.cost + n4.cost + vva.cost + 1 + vz.cost + dc.cost);
 	}
 	NT_BURN(s.out[5] - 1); NT_WRITE(18, s.out[0]);
-	NT_WAIT(19); NT_WRITE(20, s.out[1]);
-	NT_BURN(8); NT_WAIT(21); NT_WRITE(22, s.out[2]);
-	NT_BURN(3); NT_WAIT(23); NT_WRITE(24, s.out[3]);
-	NT_BURN(2); NT_WAIT(25); NT_SR(26, 0x0400);
+	s.i = 0; NT_PUTS(19, ParameterOut);
+	NT_BURN(ParameterOutGap(3)); NT_WAIT(25); NT_SR(26, 0x0400);
 	NT_WRITE(27, 0x0080);
 	NT_END
 }
@@ -772,9 +806,8 @@ bool Project (void)			// $06: (X, Y, Z) onto the screen $02 set up: H, V and the
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(10); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READ(5, s.in[1]);
-	NT_BURN(2); NT_WAIT(6); NT_READNF(7, s.in[2]);
+	s.i = 0; NT_GETS(2, ProjectIn);
+	NT_BURN(ProjectInGap(2)); NT_WAIT(6); NT_READNF(7, s.in[2]);
 	{
 		static const uint8	g[3] = { 0xbb, 0xab, 0x9b }, gs[3] = { 0x3b, 0x2b, 0x1b };
 		uint32	cost = 104;
@@ -827,8 +860,7 @@ bool Project (void)			// $06: (X, Y, Z) onto the screen $02 set up: H, V and the
 		s.i = (int32) (cost + 18 + dd.cost + nz.cost + iv.cost + 1 + nl.cost + m.cost + v.cost + h.cost);
 	}
 	NT_BURN(s.i - 1); NT_WRITE(8, s.out[0]);
-	NT_BURN(1); NT_WAIT(9); NT_WRITE(10, s.out[1]);
-	NT_WAIT(11); NT_WRITE(12, s.out[2]);
+	s.i = 0; NT_PUTS(9, ProjectOut);
 	NT_EPILOGUE(13);
 	NT_END
 }
@@ -837,8 +869,8 @@ bool Target (void)			// $0E: the ground point (X, Y) under screen position (H, V
 {
 	NT_BEGIN
 	NT_SR(1, 0x8000);
-	NT_BURN(9); NT_WAIT(2); NT_READ(3, s.in[0]);
-	NT_BURN(2); NT_WAIT(4); NT_READNF(5, s.in[1]);
+	s.i = 0; NT_GETS(2, TargetIn);
+	NT_BURN(TargetInGap(1)); NT_WAIT(4); NT_READNF(5, s.in[1]);
 	{
 		// H and V in 8.8; what's left of the command adds into H
 		const int16	h = (int16) ((s.cmd >> 4 & 3) + (int16) (s.in[0] << 8)), v = (int16) (s.in[1] << 8);
@@ -851,7 +883,7 @@ bool Target (void)			// $0E: the ground point (X, Y) under screen position (H, V
 		s.i = (int32) (35 + n.cost + iv.cost + dh.cost + dv.cost);
 	}
 	NT_BURN(s.i - 1); NT_WRITE(6, s.out[0]);
-	NT_BURN(2); NT_WAIT(7); NT_WRITE(8, s.out[1]);
+	s.i = 0; NT_PUTS(7, TargetOut);
 	NT_EPILOGUE(9);
 	NT_END
 }

@@ -66,8 +66,8 @@ inline uint32 AtAccess (void)
 }
 
 // one turn of the loop from its wait to the next: the access, then the gap, parked again (past the last
-// word, at the exit's wait, which posts nothing)
-template <int32 (*Count) (void), uint32 (*Gap) (int32), int32 Exit>
+// word, at the exit's wait, posting the turn it starts there: XSpan instructions taken by XStep, if any)
+template <int32 (*Count) (void), uint32 (*Gap) (int32), int32 Exit, uint32 XSpan, bool (*XStep) (void)>
 inline void LaneNext (void)
 {
 	const int32	n = Count();
@@ -78,28 +78,33 @@ inline void LaneNext (void)
 	else
 	{
 		s.line = Exit;
-		lanes->span = 0;
+		lanes->span = XSpan;
+		if (XSpan)
+		{
+			lanes->step = XStep;
+			lanes->effect = AtAccess;
+		}
 	}
 }
 
-template <int32 (*Count) (void), uint32 (*Gap) (int32), void (*Put) (int32, uint16), int32 Exit = 0>
+template <int32 (*Count) (void), uint32 (*Gap) (int32), void (*Put) (int32, uint16), int32 Exit = 0, uint32 XSpan = 0, bool (*XStep) (void) = nullptr>
 bool LaneIn (void)
 {
 	lane_word = *dr;
 	*sr |= SR_RQM;
 	Put(s.i, lane_word);
 	s.i++;
-	LaneNext<Count, Gap, Exit>();
+	LaneNext<Count, Gap, Exit, XSpan, XStep>();
 	return (true);
 }
 
-template <int32 (*Count) (void), uint32 (*Gap) (int32), uint16 (*Get) (int32), int32 Exit = 0>
+template <int32 (*Count) (void), uint32 (*Gap) (int32), uint16 (*Get) (int32), int32 Exit = 0, uint32 XSpan = 0, bool (*XStep) (void) = nullptr>
 bool LaneOut (void)
 {
 	*dr = Get(s.i);
 	*sr |= SR_RQM;
 	s.i++;
-	LaneNext<Count, Gap, Exit>();
+	LaneNext<Count, Gap, Exit, XSpan, XStep>();
 	return (true);
 }
 

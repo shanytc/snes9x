@@ -26,7 +26,17 @@ namespace
 uint16	rom[1024];		// the data ROM
 
 // back through $000: wait for the last result to be read, 8-bit mode, DR = $80
-#define NT_EPILOGUE(id)		do { NT_BURN(1); NT_WAIT(id); NT_SR((id) + 1, 0x0400); NT_WRITE((id) + 2, 0x0080); } while (0)
+#define NT_EPILOGUE(id)		do { NT_BURN(1); NT_XWAIT(id, 4, AtAccess, EpilogueStep); NT_SR((id) + 1, 0x0400); NT_WRITE((id) + 2, 0x0080); } while (0)
+
+// that turn, from its wait: SR, DR, the end, and the command wait's burn, parked at it
+bool EpilogueStep (void)
+{
+	*sr = (uint16) ((*sr & SR_FIXED) | (0x0400 & ~SR_FIXED));
+	*dr = 0x0080;
+	*sr |= SR_RQM;
+	s.running = 0;
+	return (LanePark(NT_IDLE_WAIT, 0, AtAccess, NULL));
+}
 
 // The DSP-1B's data ROM is the HLE's table; the first DSP-1's has two more words
 // at $116, so everything past them sits two later and two table pointers follow.
@@ -363,7 +373,7 @@ template <int32 F> uint16 GetOut (int32 k)
 
 #define D1_GAPS(name, ...)	uint32 name##Gap (int32 k) { static const uint8 g[] = { __VA_ARGS__ }; return (g[k]); }
 #define D1_IN(name, n, x)	const Lane name = { Words<n>, name##Gap, PutIn, NULL, LaneIn<Words<n>, name##Gap, PutIn, x>, x };
-#define D1_OUT(name, f, n, x)	const Lane name = { Words<n>, name##Gap, NULL, GetOut<f>, LaneOut<Words<n>, name##Gap, GetOut<f>, x>, x };
+#define D1_OUT(name, f, n, x)	const Lane name = { Words<n>, name##Gap, NULL, GetOut<f>, LaneOut<Words<n>, name##Gap, GetOut<f>, x, 4, EpilogueStep>, x };
 
 D1_GAPS(MultiplyIn, 10, 0)			D1_IN(MultiplyIn, 1, 4)
 D1_GAPS(InverseIn, 11, 0)			D1_IN(InverseIn, 1, 4)
@@ -797,7 +807,7 @@ bool Parameter (void)		// $02: the projection: eye, view plane and angles; Vof, 
 	}
 	NT_BURN(s.out[5] - 1); NT_WRITE(18, s.out[0]);
 	s.i = 0; NT_PUTS(19, ParameterOut);
-	NT_BURN(ParameterOutGap(3)); NT_WAIT(25); NT_SR(26, 0x0400);
+	NT_BURN(ParameterOutGap(3)); NT_XWAIT(25, 4, AtAccess, EpilogueStep); NT_SR(26, 0x0400);
 	NT_WRITE(27, 0x0080);
 	NT_END
 }
@@ -1037,7 +1047,7 @@ bool RomDump (void)			// $17/$1F: the data ROM's 1024 words ($37/$3F: from the s
 			break;
 		NT_BURN(2);
 	}
-	NT_BURN(2); NT_WAIT(4); NT_SR(5, 0x0400);
+	NT_BURN(2); NT_XWAIT(4, 4, AtAccess, EpilogueStep); NT_SR(5, 0x0400);
 	NT_WRITE(6, 0x0080);
 	NT_END
 }

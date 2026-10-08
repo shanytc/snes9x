@@ -857,16 +857,91 @@ bool Target (void)			// $0E: the ground point (X, Y) under screen position (H, V
 }
 
 // One raster line from Vs: A, B, C, D in out[0-3], the instructions to A's write in out[4].
-void RasterLine (int16 vs)
+struct RasterWords
+{
+	int16	a, b, c, d;
+	int32	cost;
+};
+
+RasterWords RasterCalc (int16 vs)
 {
 	const SubOut	n = SubNorm((int16) (Mul((int16) ram[0x49], vs) + (int16) ram[0xc8]), 7), iv = SubInv(n.a, n.b);
 	const int16	c = Mul((int16) ram[0x4c], iv.a), e = (int16) (iv.b + (int16) ram[0xcc]);
 	const SubOut	d1 = SubDenorm(c, e), d2 = SubDenorm(Mul((int16) ram[0x4b], c), (int16) (e + (int16) ram[0xcb]));
-	s.out[0] = Mul((int16) ram[0x7f], d1.a);
-	s.out[1] = Mul((int16) ram[0x7e], d2.a);
-	s.out[2] = Mul((int16) ram[0x6f], d1.a);
-	s.out[3] = Mul((int16) ram[0x6e], d2.a);
-	s.out[4] = (int16) (n.cost + iv.cost + d1.cost + d2.cost);
+	const RasterWords	w = { Mul((int16) ram[0x7f], d1.a), Mul((int16) ram[0x7e], d2.a), Mul((int16) ram[0x6f], d1.a), Mul((int16) ram[0x6e], d2.a),
+		(int32) (n.cost + iv.cost + d1.cost + d2.cost) };
+	return (w);
+}
+
+void RasterOut (const RasterWords &w)
+{
+	s.out[0] = w.a;
+	s.out[1] = w.b;
+	s.out[2] = w.c;
+	s.out[3] = w.d;
+	s.out[4] = (int16) w.cost;
+}
+
+void RasterLine (int16 vs)
+{
+	RasterOut(RasterCalc(vs));
+}
+
+// $0A's lanes, wait to wait: B, C and D, each once the CPU took the word before; after D, the check that
+// the CPU didn't write over it, then the next line's A
+bool RasterStepB (void);
+bool RasterStepC (void);
+bool RasterStepD (void);
+bool RasterStepA (void);
+
+// from D's wait: the check, the next line, its A and the wait for B; that line kept for its step
+RasterWords	raster_next;
+
+inline uint32 RasterSpanA (void)
+{
+	raster_next = RasterCalc((int16) (s.in[0] + 1));
+	return ((uint32) (37 + raster_next.cost));
+}
+
+// what the CPU first sees from there: A, a step short of the wait, or with D written over, the end's SR
+uint32 RasterEffectA (void)
+{
+	return (*dr == (uint16) s.out[3] ? lanes->span - 1 : 5);
+}
+
+bool RasterStepB (void)
+{
+	*dr = (uint16) s.out[1];
+	*sr |= SR_RQM;
+	return (LanePark(7, 3, AtAccess, RasterStepC));
+}
+
+bool RasterStepC (void)
+{
+	*dr = (uint16) s.out[2];
+	*sr |= SR_RQM;
+	return (LanePark(9, 2, AtAccess, RasterStepD));
+}
+
+bool RasterStepD (void)
+{
+	*dr = (uint16) s.out[3];
+	*sr |= SR_RQM;
+	return (LanePark(11, RasterSpanA(), RasterEffectA, RasterStepA));
+}
+
+bool RasterStepA (void)
+{
+	// written over: the raster ends, the program's way
+	if (*dr != (uint16) s.out[3])
+		return (false);
+	s.in[1] = (int16) *dr;
+	s.in[0]++;
+	s.i = 34;
+	RasterOut(raster_next);
+	*dr = (uint16) s.out[0];
+	*sr |= SR_RQM;
+	return (LanePark(5, 3, AtAccess, RasterStepB));
 }
 
 bool Raster (void)			// $0A: A, B, C, D per scanline from Vs up, until the CPU writes over D
@@ -881,10 +956,10 @@ bool Raster (void)			// $0A: A, B, C, D per scanline from Vs up, until the CPU w
 		NT_BURN(s.i + s.out[4] - 1); NT_WRITE(4, s.out[0]);
 		if (!(s.cmd >> 4 & 3))
 		{
-			NT_BURN(1); NT_WAIT(5); NT_WRITE(6, s.out[1]);
-			NT_BURN(1); NT_WAIT(7); NT_WRITE(8, s.out[2]);
-			NT_BURN(1); NT_WAIT(9); NT_WRITE(10, s.out[3]);
-			NT_WAIT(11); NT_READNF(12, s.in[1]);
+			NT_BURN(1); NT_XWAIT(5, 3, AtAccess, RasterStepB); NT_WRITE(6, s.out[1]);
+			NT_BURN(1); NT_XWAIT(7, 3, AtAccess, RasterStepC); NT_WRITE(8, s.out[2]);
+			NT_BURN(1); NT_XWAIT(9, 2, AtAccess, RasterStepD); NT_WRITE(10, s.out[3]);
+			NT_XWAIT(11, RasterSpanA(), RasterEffectA, RasterStepA); NT_READNF(12, s.in[1]);
 		}
 		else
 		{

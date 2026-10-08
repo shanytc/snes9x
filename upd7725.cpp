@@ -52,8 +52,10 @@ static int		chip = 0;		// UPD7725_DSP1...
 static const S9xUPD7725Native	*native = NULL;	// the native chip, or NULL for the firmware
 static bool8	native_variant = FALSE;
 static uint64	native_next = 0;	// master clock of the native chip's next bus event (0: unknown)
-static S9xUPD7725Lane	lane = { 0, NULL };	// the native chip's, while parked in a lane
+static S9xUPD7725Lane	lane = { 0, NULL, NULL };	// the native chip's, while parked in a lane
 static uint64	lane_free = 0;		// freed in a lane: when (0: not); its clock still stands where it parked
+static uint64	lane_taken = 0;		// then, the master clock by which it has taken its word (0: not worked out yet)
+static uint64	lane_seen = 0;		// and the one before which the CPU can't see it move (0: not worked out yet)
 static uint32	lane_lo[64], lane_hi[64];	// master clocks within which a span's instructions may, and surely do, all run
 
 static inline uint32 ProgWord (const uint8 *image, int i)
@@ -632,17 +634,19 @@ static alwaysinline void Advance (uint64 t)
 	}
 }
 
-// Freed at master clock `at`, has a chip in a lane run its span by `t`? The span decides it from the gap
-// unless the gap is at the edge, where the clock's phase does.
-static bool LaneTakenAtEdge (uint64 at, uint64 t)
+// Freed at master clock `at`, the first clock by which a chip whose clock stands where it parked has run
+// n instructions.
+static uint64 LaneClock (uint64 at, uint32 n)
 {
-	const uint64	a = (at - r.synced) * DSP_HZ + r.rem, b = (t - r.synced) * DSP_HZ + r.rem;
-	return ((Settings.PAL ? b / 21281370 - a / 21281370 : b / 21477273 - a / 21477273) >= lane.span);
+	const uint64	a = (at - r.synced) * DSP_HZ + r.rem;
+	const uint64	m = Settings.PAL ? 21281370 : 21477273, due = (Settings.PAL ? a / 21281370 : a / 21477273) + n;
+	return (r.synced + (due * m - r.rem + DSP_HZ - 1) / DSP_HZ);
 }
 
-static alwaysinline bool LaneTaken (uint64 at, uint64 t)
+// Has a chip in a lane taken its word by `t`? A short span decides it from the gap, unless at the edge.
+static alwaysinline bool LaneTaken (uint64 t)
 {
-	const uint64	d = t - at;
+	const uint64	d = t - lane_free;
 	const uint32	n = lane.span;
 	if (n < 64)
 	{
@@ -651,13 +655,16 @@ static alwaysinline bool LaneTaken (uint64 at, uint64 t)
 		if (d < lane_lo[n])
 			return (false);
 	}
-	return (LaneTakenAtEdge(at, t));
+	if (!lane_taken)
+		lane_taken = LaneClock(lane_free, n);
+	return (t >= lane_taken);
 }
 
 static void SyncFrom (uint64 t);
 
-// Most syncs end here: before the native chip's next bus event, or with its lane's word taken.
-static alwaysinline void SyncTo (int32 cycles)
+// Most syncs end here: before the native chip's next bus event, or with its lane's word taken. A look
+// (a status read, or ahead of a data read, or a line's end) leaves a lane that hasn't shown anything yet.
+static alwaysinline void SyncTo (int32 cycles, bool look = false)
 {
 	uint64	t = r.line_base + (uint64) (int64) cycles;
 	if (t <= r.synced)
@@ -668,12 +675,24 @@ static alwaysinline void SyncTo (int32 cycles)
 	// freed in a lane and past its next wait: it has taken its word and parked there, untouched since
 	if (lane_free)
 	{
-		if (LaneTaken(lane_free, t))
-		{
-			lane_free = 0;
-			lane.step();
-			native_next = ~(uint64) 0;
+		// still before the handshake that frees it (an access that ran past a line's end): parked
+		if (t <= lane_free)
 			return;
+		if (LaneTaken(t))
+		{
+			if (lane.step())
+			{
+				lane_free = 0;
+				native_next = ~(uint64) 0;
+				return;
+			}
+		}
+		else if (look)
+		{
+			if (!lane_seen)
+				lane_seen = LaneClock(lane_free, lane.effect());
+			if (t < lane_seen)
+				return;
 		}
 	}
 	SyncFrom(t);
@@ -732,7 +751,7 @@ static void SyncFrom (uint64 t)
 
 void S9xUPD7725EndScanline (void)
 {
-	SyncTo(CPU.Cycles);
+	SyncTo(CPU.Cycles, true);
 	r.line_base += Timings.H_Max;
 }
 
@@ -763,7 +782,10 @@ static alwaysinline void NativeHandshake (int32 t)
 		{
 			// in a lane, its clock waits to see if the next sync finds its word taken
 			if (lane.span && ONE_CYCLE == 6 && SLOW_ONE_CYCLE == 8)
+			{
 				lane_free = at;
+				lane_taken = lane_seen = 0;
+			}
 			else
 			{
 				Advance(at);
@@ -783,7 +805,7 @@ uint8 S9xUPD7725Read (bool8 sr, int32 speed)
 {
 	int32	end = CPU.Cycles + speed;
 
-	SyncTo(end - 1);
+	SyncTo(end - 1, true);
 	if (sr)
 		return (r.sr >> 8);
 

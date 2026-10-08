@@ -13,13 +13,12 @@
 
 #include "port.h"
 
-// A native chip parked in a lane (a loop of words it waits on the CPU for) posts here: the instructions
-// from its resumption to its next wait, its word taken (0: not in one, or at its last word), and the
-// step that takes that word as the program would, leaving it parked at that wait.
+// A native chip parked in a lane (a loop of words it waits on the CPU for) posts its next turn here.
 struct S9xUPD7725Lane
 {
-	uint32	span;
-	void	(*step) (void);
+	uint32	span;					// instructions from resuming to the next wait (0: not in one)
+	bool	(*step) (void);			// takes the turn, parked at that wait; false: the program goes elsewhere
+	uint32	(*effect) (void);		// once freed: instructions to the first thing the CPU could see, either way
 };
 
 // One native chip, as upd7725.cpp drives it. `variant` picks a revision (the first DSP-1 over the DSP-1B).

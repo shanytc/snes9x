@@ -53,13 +53,19 @@ struct Lane
 	uint32	(*gap) (int32 k);
 	void	(*put) (int32 k, uint16 v);
 	uint16	(*get) (int32 k);
-	void	(*step) (void);				// LaneIn or LaneOut, for these
+	bool	(*step) (void);				// LaneIn or LaneOut, for these
 };
 uint16	lane_word;
 
+// a lane's first effect, unless it says otherwise: its access, two instructions past the wait
+inline uint32 AtAccess (void)
+{
+	return (2);
+}
+
 // one turn of the loop from its wait to the next: the access, then the gap, parked again
 template <int32 (*Count) (void), uint32 (*Gap) (int32), void (*Put) (int32, uint16)>
-void LaneIn (void)
+bool LaneIn (void)
 {
 	lane_word = *dr;
 	*sr |= SR_RQM;
@@ -69,10 +75,11 @@ void LaneIn (void)
 	s.due = 0;
 	const int32	n = Count();
 	lanes->span = s.i + 1 < n ? 2 + Gap(s.i + 1) : 0;
+	return (true);
 }
 
 template <int32 (*Count) (void), uint32 (*Gap) (int32), uint16 (*Get) (int32)>
-void LaneOut (void)
+bool LaneOut (void)
 {
 	*dr = Get(s.i);
 	*sr |= SR_RQM;
@@ -81,6 +88,7 @@ void LaneOut (void)
 	s.due = 0;
 	const int32	n = Count();
 	lanes->span = s.i + 1 < n ? 2 + Gap(s.i + 1) : 0;
+	return (true);
 }
 
 bool	Boot (void);
@@ -125,6 +133,37 @@ uint32	lab_n;
 		return (false);															\
 	}																			\
 	s.parked = 0; s.due = 1; } while (0)
+// a wait that, parking, posts its own lane turn (for loops that aren't one word at a time)
+#define NT_XWAIT(id, spanv, effectf, stepf)	do {									\
+	s.line = (id); case (id):													\
+	if (!s.parked)																\
+	{																			\
+		if (budget < s.due) { s.due -= (uint32) budget; NT_SPENT(budget); budget = 0; return (false); }	\
+		budget -= s.due; NT_SPENT(s.due); s.due = 0;							\
+	}																			\
+	if (*sr & SR_RQM)															\
+	{																			\
+		if (!s.parked) { s.parked = 1; NT_EVENT('P', 0); }						\
+		lanes->span = (spanv);													\
+		lanes->effect = (effectf);												\
+		lanes->step = (stepf);													\
+		budget = 0;																\
+		return (false);															\
+	}																			\
+	s.parked = 0; s.due = 1; } while (0)
+
+// a step's end: parked at wait id, the next turn posted
+inline bool LanePark (int32 id, uint32 span, uint32 (*effect) (void), bool (*step) (void))
+{
+	s.line = id;
+	s.parked = 1;
+	s.due = 0;
+	lanes->span = span;
+	lanes->effect = effect;
+	lanes->step = step;
+	return (true);
+}
+
 // a lane's wait for word s.i, which posts the lane as it parks
 #define NT_LWAIT(id, L)	do {													\
 	s.line = (id); case (id):													\
@@ -137,6 +176,7 @@ uint32	lab_n;
 	{																			\
 		if (!s.parked) { s.parked = 1; NT_EVENT('P', 0); }						\
 		lanes->span = s.i + 1 < (L).count() ? 2 + (L).gap(s.i + 1) : 0;		\
+		lanes->effect = AtAccess;												\
 		lanes->step = (L).step;													\
 		budget = 0;																\
 		return (false);															\

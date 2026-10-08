@@ -169,6 +169,26 @@ uint32	lab_n;
 	}																			\
 	s.parked = 0; s.due = 1; } while (0)
 
+// a wait whose turn's span hangs on the word that frees it: upd7725.cpp asks spanf for it then
+#define NT_AWAIT(id, spanf, effectf, stepf)	do {									\
+	s.line = (id); case (id):													\
+	if (!s.parked)																\
+	{																			\
+		if (budget < s.due) { s.due -= (uint32) budget; NT_SPENT(budget); budget = 0; return (false); }	\
+		budget -= s.due; NT_SPENT(s.due); s.due = 0;							\
+	}																			\
+	if (*sr & SR_RQM)															\
+	{																			\
+		if (!s.parked) { s.parked = 1; NT_EVENT('P', 0); }						\
+		lanes->span = UPD7725_LANE_ASK;											\
+		lanes->span_of = (spanf);												\
+		lanes->effect = (effectf);												\
+		lanes->step = (stepf);													\
+		budget = 0;																\
+		return (false);															\
+	}																			\
+	s.parked = 0; s.due = 1; } while (0)
+
 // a step's end: parked at wait id, the next turn posted
 inline bool LanePark (int32 id, uint32 span, uint32 (*effect) (void), bool (*step) (void))
 {

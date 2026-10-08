@@ -16,10 +16,12 @@
 // A native chip parked in a lane (a loop of words it waits on the CPU for) posts its next turn here.
 struct S9xUPD7725Lane
 {
-	uint32	span;					// instructions from resuming to the next wait (0: not in one)
+	uint32	span;					// instructions from resuming to the next wait (0: not in one; ASK: span_of's)
 	bool	(*step) (void);			// takes the turn, parked at that wait; false: the program goes elsewhere
 	uint32	(*effect) (void);		// once freed: instructions to the first thing the CPU could see, either way
+	uint32	(*span_of) (void);		// for ASK, at the handshake that frees it: the span, from the word just in
 };
+#define UPD7725_LANE_ASK	0xffffffffu
 
 // One native chip, as upd7725.cpp drives it. `variant` picks a revision (the first DSP-1 over the DSP-1B).
 struct S9xUPD7725Native

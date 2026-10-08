@@ -52,7 +52,7 @@ static int		chip = 0;		// UPD7725_DSP1...
 static const S9xUPD7725Native	*native = NULL;	// the native chip, or NULL for the firmware
 static bool8	native_variant = FALSE;
 static uint64	native_next = 0;	// master clock of the native chip's next bus event (0: unknown)
-static S9xUPD7725Lane	lane = { 0, NULL, NULL };	// the native chip's, while parked in a lane
+static S9xUPD7725Lane	lane = { 0, NULL, NULL, NULL };	// the native chip's, while parked in a lane
 static uint64	lane_free = 0;		// freed in a lane: when (0: not); its clock still stands where it parked
 static uint64	lane_taken = 0;		// then, the master clock by which it has taken its word (0: not worked out yet)
 static uint64	lane_seen = 0;		// and the one before which the CPU can't see it move (0: not worked out yet)
@@ -781,6 +781,8 @@ static alwaysinline void NativeHandshake (int32 t)
 		if (at > r.synced)
 		{
 			// in a lane, its clock waits to see if the next sync finds its word taken
+			if (lane.span == UPD7725_LANE_ASK)
+				lane.span = lane.span_of();
 			if (lane.span && ONE_CYCLE == 6 && SLOW_ONE_CYCLE == 8)
 			{
 				lane_free = at;

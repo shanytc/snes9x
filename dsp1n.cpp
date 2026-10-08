@@ -29,13 +29,14 @@ uint16	rom[1024];		// the data ROM
 #define NT_EPILOGUE(id)		do { NT_BURN(1); NT_XWAIT(id, 4, AtAccess, EpilogueStep); NT_SR((id) + 1, 0x0400); NT_WRITE((id) + 2, 0x0080); } while (0)
 
 // that turn, from its wait: SR, DR, the end, and the command wait's burn, parked at it
+bool AtCommandWait (void);
 bool EpilogueStep (void)
 {
 	*sr = (uint16) ((*sr & SR_FIXED) | (0x0400 & ~SR_FIXED));
 	*dr = 0x0080;
 	*sr |= SR_RQM;
 	s.running = 0;
-	return (LanePark(NT_IDLE_WAIT, 0, AtAccess, NULL));
+	return (AtCommandWait());
 }
 
 // The DSP-1B's data ROM is the HLE's table; the first DSP-1's has two more words
@@ -371,6 +372,7 @@ template <int32 F> uint16 GetOut (int32 k)
 	return ((uint16) s.out[F + k]);
 }
 
+// name##Gap(k): before word k's wait, and (k = words) before the exit's wait x; D1_OUT's exit is the epilogue
 #define D1_GAPS(name, ...)	uint32 name##Gap (int32 k) { static const uint8 g[] = { __VA_ARGS__ }; return (g[k]); }
 #define D1_IN(name, n, x)	const Lane name = { Words<n>, name##Gap, PutIn, NULL, LaneIn<Words<n>, name##Gap, PutIn, x>, x };
 #define D1_OUT(name, f, n, x)	const Lane name = { Words<n>, name##Gap, NULL, GetOut<f>, LaneOut<Words<n>, name##Gap, GetOut<f>, x, 4, EpilogueStep>, x };
@@ -396,7 +398,7 @@ D1_GAPS(ProjectOut, 1, 0, 1)		D1_OUT(ProjectOut, 1, 2, 13)
 D1_GAPS(TargetIn, 9, 2)				D1_IN(TargetIn, 1, 4)
 D1_GAPS(TargetOut, 2, 1)			D1_OUT(TargetOut, 1, 1, 9)
 
-// gaps that take a sine's cost from an angle read two words earlier
+// gaps that take a sine's cost from an angle read earlier
 uint32 RotateInGap (int32 k)
 {
 	return (k == 0 ? 10 : k == 1 ? 1 : TriangleCost(s.in[0]) + 3);
@@ -416,7 +418,6 @@ uint32 AttitudeInGap (int32 k)
 	return (k < 3 ? g[k] : 4 + TriangleCost(s.in[1]));
 }
 D1_IN(AttitudeIn, 3, 8)
-
 
 bool Multiply (void)		// $00: (A * B) >> 15; $20 also sets bit 0 (what's left of the command)
 {
@@ -1072,12 +1073,79 @@ bool Boot (void)			// $000-$002: 8-bit mode, DR = $80
 	NT_END
 }
 
+// The command wait's turn, per command: its program, the instructions from the byte to the program's first
+// wait (2: the read, the dispatch, its SR and its burn), and that wait's own turn if it starts a lane
+struct Dispatch
+{
+	bool	(*prog) (void);
+	uint32	span;
+	bool	(*step) (void);
+	uint32	next;
+};
+Dispatch	dispatch[64];
+
+void BuildDispatch (void)
+{
+	static const struct { bool (*p) (void); uint32 burn; const Lane *lane; }	t[] = {
+		{ Multiply, 0, &MultiplyIn }, { Inverse, 0, &InverseIn }, { Triangle, 10, NULL }, { Radius, 0, &RadiusIn },
+		{ Range, 0, &RangeIn }, { Rotate, 0, &RotateIn }, { Polar, 0, &PolarIn }, { Distance, 0, &DotIn },
+		{ Gyrate, 0, &GyrateIn }, { Parameter, 0, &ParameterIn }, { Project, 0, &ProjectIn }, { Target, 0, &TargetIn },
+		{ Raster, 10, NULL }, { Subjective, 0, &VectorIn }, { Scalar, 0, &DotIn }, { MemTest, 782, NULL },
+		{ RomDump, 11, NULL }, { Version, 12, NULL }, { Objective, 0, &VectorIn }, { Attitude, 0, &AttitudeIn } };
+	for (int c = 0; c < 64; c++)
+	{
+		Dispatch	&d = dispatch[c];
+		d.prog = Program((uint8) c);
+		d.span = d.next = 0;
+		d.step = NULL;
+		for (const auto &e : t)
+			if (e.p == d.prog)
+			{
+				const Lane	*l = e.lane;
+				d.span = 4 + (l ? l->gap(0) : e.burn);
+				if (l)
+				{
+					d.step = l->step;
+					d.next = 1 < l->count() ? 2 + l->gap(1) : l->exit ? 2 + l->gap(l->count()) : 0;
+				}
+			}
+	}
+}
+
+uint32 DispatchSpan (void)
+{
+	const uint8	cmd = (uint8) *dr;
+	return ((cmd & 0xc0) ? 0 : dispatch[cmd].span);
+}
+
+bool DispatchStep (void)
+{
+	const uint8	cmd = (uint8) *dr;
+	if (cmd & 0xc0)
+		return (false);
+	const Dispatch	&d = dispatch[cmd];
+	s.in[0] = (int16) *dr;
+	s.cmd = cmd;
+	*sr = (uint16) (((*sr | SR_RQM) & SR_FIXED) | (0x8000 & ~SR_FIXED));
+	s.running = 1;
+	prog = d.prog;
+	s.i = 0;
+	return (LanePark(2, d.next, AtAccess, d.step));
+}
+
+bool AtCommandWait (void)
+{
+	LanePark(NT_IDLE_WAIT, UPD7725_LANE_ASK, AtAccess, DispatchStep);
+	lanes->span_of = DispatchSpan;
+	return (true);
+}
+
 bool Idle (void)			// $003-$006: wait for a command; bits 6-7 send it back to the wait
 {
 	NT_BEGIN
 	for (;;)
 	{
-		NT_BURN(1); NT_WAIT(1); NT_READ(2, s.in[0]);
+		NT_BURN(1); NT_AWAIT(1, DispatchSpan, AtAccess, DispatchStep); NT_READ(2, s.in[0]);
 		s.cmd = (uint8) s.in[0];
 		NT_BURN(1);
 		if (!(s.cmd & 0xc0))
@@ -1116,11 +1184,13 @@ bool (*Program (uint8 cmd)) (void)
 void ChipReset (bool variant)
 {
 	BuildDataROM(variant);
+	BuildDispatch();
 }
 
 void ChipLoaded (void)
 {
 	BuildDataROM(s.variant != 0);
+	BuildDispatch();
 }
 
 }	// namespace

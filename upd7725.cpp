@@ -755,7 +755,6 @@ static void SyncFrom (uint64 t)
 
 void S9xUPD7725EndScanline (void)
 {
-	SyncTo(CPU.Cycles, true);
 	r.line_base += Timings.H_Max;
 }
 

@@ -144,10 +144,13 @@ void C4Op0D (void)
 	C41FXVal = (int16) (C41FXVal * tanval * 0.98);
 }
 
-// The chip's data RAM isn't C4RAM, so its accesses all go through S9xGetC4.
+// The chip's data RAM isn't C4RAM, so its accesses all go through S9xGetC4, but for a DMA's
+// reads while the chip is idle.
 uint8 * S9xGetBasePointerC4 (uint16 Address)
 {
-	if (S9xHG51BActive() || (Address >= 0x7f40 && Address <= 0x7f5e))
+	if (S9xHG51BActive())
+		return (CPU.InDMA ? S9xHG51BDMABase(Address) : NULL);
+	if (Address >= 0x7f40 && Address <= 0x7f5e)
 		return (NULL);
 	return (Memory.C4RAM - 0x6000);
 }

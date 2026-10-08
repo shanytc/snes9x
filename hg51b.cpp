@@ -8,46 +8,19 @@
 // Near et al.), rewritten as a catch-up interpreter.
 
 #include <string.h>
+#include <stddef.h>
+#include <math.h>
 #include "snes9x.h"
 #include "memmap.h"
 #include "hg51b.h"
+#include "hg51bn.h"
 
 #define CX4_HZ		20000000	// the Cx4 carts' oscillator
 
 enum { OP_NONE, OP_FILL, OP_DMA };	// a cache fill or DMA under way runs to its end
 enum { CACHE_HIT, CACHE_FILL, CACHE_MISS };
 
-// Saved as-is, so the padding is explicit and the layout the same everywhere.
-struct Regs
-{
-	uint16	prog[2][256];		// the instruction cache's two pages
-	uint8	dram[3072];			// data RAM
-	uint32	gpr[16];
-	uint32	stack[8];			// return addresses, pb << 8 | pc
-	uint32	a, mdr, rom, ram, mar, dpr;
-	uint32	cache_tag[2];		// bus address each page was filled from
-	uint32	cache_base;
-	uint32	dma_src, dma_dst;
-	uint32	bus_addr;
-	uint32	fill_addr;
-	uint32	pad0;
-	uint64	mul;				// 48-bit product
-	uint16	pb, p, cache_pb, dma_len, dma_pos, fill_pos;
-	uint8	pc, cache_pc;
-	uint8	n, z, c, v, i;
-	uint8	lock, halt, irq, rom_cfg, wait_rom, wait_ram;
-	uint8	suspend_on, suspend_len;
-	uint8	cache_on, cache_page, cache_preload, cache_lock[2];
-	uint8	dma_on;
-	uint8	bus_on, bus_reading, bus_writing, bus_pending;
-	uint8	op, fill_page;
-	uint8	vector[32];
-	uint8	pad1[1];
-	uint64	line_base;			// master clock at the start of the current scanline
-	uint64	synced;				// master clock the chip has been run up to
-	uint64	rem;				// what's left over, in master clocks * CX4_HZ
-	int64	budget;				// chip clocks owed; below 0 when it ran ahead
-};
+typedef S9xHG51BRegs	Regs;
 static_assert(sizeof(Regs) == 4360, "savestate layout");
 
 static const uint32	kConstants[16] = {
@@ -60,6 +33,44 @@ static Regs		r;
 static uint32	hit_key = ~0u;	// pb | page << 15 of the last cache hit; ~0 once a tag or the base may have moved
 static bool8	loaded = FALSE;
 static bool8	active = FALSE;
+static bool8	native = FALSE;	// the built-in data ROM: each job is run whole when it starts
+static bool8	halt_op;		// a HALT instruction stopped the chip
+
+#define AHEAD_CAP		(1 << 24)	// clocks a job run ahead may take; a longer one runs as it goes
+#define AHEAD_WINDOWS	4096
+enum { AHEAD_JOB = 1, AHEAD_IDLE };	// run ahead (and r.fresh): a job, or a preload or DMA
+
+// Run ahead, r holds the end, `start` the chip as the CPU sees it until its clocks have passed.
+// The windows are in scaled clocks (elapsed master clocks * CX4_HZ + rem), as SyncTo counts them.
+static struct
+{
+	bool	on;
+	uint8	kind;
+	uint8	status;				// what the status registers read meanwhile, but for a job's busy
+	uint64	master;
+	uint64	t_done;				// the master clock from which the CPU sees the end
+	uint64	busy[AHEAD_WINDOWS][2];	// [from, to): a job's bus access in flight
+	uint32	n, cur;
+	Regs	start;
+}	ahead;
+
+// The status reads that SkipPolls learns the CPU's wait from, and the length of a turn of it at the
+// sites seen to repeat one (by PB:PC, and the E flag, which can cost a branch a cycle).
+static struct
+{
+	uint32	pbpc;
+	int32	cycles, next, period;
+	uint64	line;
+	uint32	site[8];
+	int32	turn[8];
+}	poll;
+
+// Idle, the chip changes only on a CPU write, so its syncs wait (to `parked_t`) until one comes.
+// `view` is its 4K block as reads give it, for DMA, while `viewed`.
+static bool		parked = false;
+static uint64	parked_t;
+static bool		viewed = false;
+static uint8	view[0x1000];
 
 static alwaysinline void Step (uint32 clocks);
 
@@ -88,6 +99,47 @@ bool8 S9xHG51BLoad (const uint8 *image, uint32 size)
 		drom[i] = Word24(image + i * 3);
 
 	loaded = TRUE;
+	native = FALSE;
+	S9xHG51BReset();
+	return (TRUE);
+}
+
+// A table entry: the value's fixed-point floor, capped at $FFFFFF. Every entry that isn't an exact
+// integer lies over 0.0006 from one, so the nudge only steadies tan(pi/4) against rounding.
+static uint32 Fixed (double x)
+{
+	const double	v = floor(x + 1e-6);
+	return (v >= 16777215.0 ? 0xffffff : (uint32) v);
+}
+
+// The data ROM's tables, worked out: $000 $800000 / n, $100 sqrt(n / 256), then quarter waves in
+// 128 steps of pi / 256: $200 sin, $280 asin(n / 128) / pi, $300 tan (x $10000), $380 cos.
+bool8 S9xHG51BLoadBuiltin (void)
+{
+	const double	pi = 3.14159265358979323846;
+
+	for (uint32 n = 0; n < 256; n++)
+	{
+		drom[n] = n ? 0x800000 / n : 0xffffff;
+		// floor(sqrt(n << 40)), squared back to settle the double's last bit
+		uint64	s = (uint64) sqrt((double) ((uint64) n << 40));
+		while (s * s > ((uint64) n << 40))
+			s--;
+		while ((s + 1) * (s + 1) <= ((uint64) n << 40))
+			s++;
+		drom[0x100 + n] = (uint32) s;
+	}
+	for (uint32 n = 0; n < 128; n++)
+	{
+		const double	a = n * pi / 256;
+		drom[0x200 + n] = Fixed(sin(a) * 16777216.0);
+		drom[0x280 + n] = Fixed(asin(n / 128.0) / pi * 16777216.0);
+		drom[0x300 + n] = Fixed(tan(a) * 65536.0);
+		drom[0x380 + n] = Fixed(cos(a) * 16777216.0);
+	}
+
+	loaded = TRUE;
+	native = TRUE;
 	S9xHG51BReset();
 	return (TRUE);
 }
@@ -95,6 +147,7 @@ bool8 S9xHG51BLoad (const uint8 *image, uint32 size)
 void S9xHG51BUnload (void)
 {
 	loaded = active = FALSE;
+	ahead.on = false;
 }
 
 bool8 S9xHG51BLoaded (void)
@@ -113,6 +166,10 @@ void S9xHG51BReset (void)
 		return;
 	memset(&r, 0, sizeof(r));
 	hit_key = ~0u;
+	ahead.on = false;
+	parked = viewed = false;
+	memset(&poll, 0xff, sizeof(poll));
+	S9xHG51BNativeReset();
 	r.halt = 1;
 	r.rom_cfg = 1;
 	r.wait_rom = r.wait_ram = 3;
@@ -123,6 +180,7 @@ void S9xHG51BReset (void)
 void S9xHG51BSuspend (void)
 {
 	active = FALSE;
+	ahead.on = false;
 }
 
 static inline void SetByte (uint32 &reg, int byte, uint8 data)
@@ -751,7 +809,7 @@ static alwaysinline void Instruction (uint16 op)
 			r.ram = r.dpr = 0;
 			break;
 
-		case 0x3f: Halt(); break;
+		case 0x3f: halt_op = TRUE; Halt(); break;
 
 		default: break;	// NOP and the unused encodings
 	}
@@ -1023,6 +1081,7 @@ static void RunFast (void)
 
 			case 0x3f:
 				r.pc = pc;	// Halt() reads none of the locals
+				halt_op = TRUE;
 				Halt();
 				leave = true;
 				break;
@@ -1126,12 +1185,318 @@ static bool Idle (void)
 	return (r.halt != 0);
 }
 
+static inline bool Overclocked (void)
+{
+	return (ONE_CYCLE != 6 || SLOW_ONE_CYCLE != 8);
+}
+
+// Runs a job from its first clock to its HALT; false if it went any other way. `clocks` is what
+// it ran before the HALT, so the CPU sees it once the chip is owed more than that.
+static bool RunJob (int64 &clocks)
+{
+	int64	bus_from = -1;
+	r.budget = AHEAD_CAP;
+	ahead.n = 0;
+	halt_op = FALSE;
+
+	while (r.budget > 0 && !r.halt)
+	{
+		if (r.op | r.lock | r.suspend_on | r.cache_on | r.dma_on)
+		{
+			Main();
+			continue;
+		}
+
+		const int64	before = r.budget;
+		const uint8	was = r.bus_on;
+		if (!was && r.pc < 0xfe)
+			RunFast();
+		else
+			Execute();
+
+		// A bus access starts on an instruction's last clock and reads busy until the one it ends in.
+		if (!was && r.bus_on)
+			bus_from = r.bus_pending ? AHEAD_CAP - r.budget - 1 : -1;
+		else
+		if (was && !r.bus_on && bus_from >= 0)
+		{
+			if (ahead.n == AHEAD_WINDOWS)
+				return (false);
+			ahead.busy[ahead.n][0] = bus_from;
+			ahead.busy[ahead.n][1] = AHEAD_CAP - before;
+			ahead.n++;
+			bus_from = -1;
+		}
+	}
+
+	clocks = AHEAD_CAP - r.budget - 1;
+	return (r.halt && halt_op && r.budget > 0 && r.op == OP_NONE && !r.bus_on);
+}
+
+// Runs a cache preload or a DMA to its end, busy all the while; `clocks` before its last step.
+static bool RunToIdle (int64 &clocks)
+{
+	int64	before = r.budget = AHEAD_CAP;
+	ahead.n = 0;
+
+	// A preload as Cache() and FillByte() run it, without a step a byte.
+	if (r.cache_on && r.cache_preload && r.op == OP_NONE)
+	{
+		const uint32	address = (r.cache_base + r.pb * 512) & 0xffffff;
+		int64			c = 0;
+		r.cache_preload = 0;
+		r.cache_tag[r.cache_page] = address;
+		r.fill_page = r.cache_page;
+#ifdef LSB_FIRST
+		const uint32	lin = ((address & 0x3f0000) >> 1) | (address & 0x7fff);
+		if (IsROM(address) && (address & 0x7fff) <= 0x7e00 && lin + 512 <= Memory.CalculatedSize)
+		{
+			// one ROM page: all bytes at the same wait
+			memcpy(r.prog[r.fill_page], Memory.ROM + lin, 512);
+			clocks = 511 * (1 + r.wait_rom);
+		}
+		else
+#endif
+		for (uint32 i = 0; i < 512; i++)
+		{
+			const uint32	a = (address + i) & 0xffffff;
+			clocks = c;
+			c += Wait(a);
+			const uint8		byte = BusRead(a);
+			uint16			&word = r.prog[r.fill_page][i >> 1];
+			word = (i & 1) ? (word & 0x00ff) | (byte << 8) : (word & 0xff00) | byte;
+		}
+		r.fill_addr = (address + 512) & 0xffffff;
+		r.fill_pos = 512;
+		r.cache_on = 0;
+		hit_key = ~0u;
+		return (true);
+	}
+
+	while (r.budget > 0 && !Idle())
+	{
+		before = r.budget;
+		Main();
+	}
+
+	clocks = AHEAD_CAP - before;
+	return (r.budget > 0 && r.halt && !r.lock && !Busy());
+}
+
+// A DMA run ahead mustn't reach the registers (or cart RAM, which natives run without).
+static bool DmaAhead (void)
+{
+	for (uint32 i = 0; i < r.dma_len; i++)
+		if (IsIO((r.dma_dst + i) & 0xffffff))
+			return (false);
+	return (true);
+}
+
+// Runs a job (r just out of halt), a preload or a DMA to its end, or leaves it to run as the CPU goes.
+static void StartAhead (uint8 kind)
+{
+	ahead.start = r;
+	const bool8	irq = CPU.IRQExternal;
+	int64		clocks;
+	bool		ok;
+
+	if (kind == AHEAD_JOB)
+	{
+		S9xHG51BJob	job = { 0, ahead.busy, 0, AHEAD_WINDOWS };
+		ok = S9xHG51BNativeJob(r, drom, job);
+		hit_key = ~0u;
+		if (ok)
+		{
+			clocks = job.clocks;
+			ahead.n = job.n;
+		}
+		else
+		{
+			r = ahead.start;
+			ok = RunJob(clocks);
+		}
+	}
+	else
+		ok = RunToIdle(clocks);
+
+	CPU.IRQExternal = irq;
+	// The overclocked chip finishes on the CPU's next access, unless it takes a million steps.
+	if (Overclocked() && clocks >= 1000000)
+		ok = false;
+	if (!ok)
+	{
+		r = ahead.start;
+		hit_key = ~0u;
+		return;
+	}
+
+	// In scaled clocks: the chip has run past clock k once elapsed * CX4_HZ + rem >= (k + 1 - budget) * master.
+	const int64		b = ahead.start.budget;
+	const uint64	master = Settings.PAL ? 21281370 : 21477273;
+	const uint64	done = (uint64) (clocks + 1 - b) * master;
+	ahead.master = master;
+	ahead.t_done = r.synced + (done - r.rem + CX4_HZ - 1) / CX4_HZ;
+	for (uint32 i = 0; i < ahead.n; i++)
+	{
+		ahead.busy[i][0] = (ahead.busy[i][0] + 1 - b) * master;
+		ahead.busy[i][1] = (ahead.busy[i][1] + 1 - b) * master;
+	}
+	ahead.cur = 0;
+	ahead.kind = kind;
+	ahead.status = ahead.start.suspend_on | (ahead.start.i << 1) | (kind == AHEAD_JOB ? 0x40 : 0xc0);
+	r.budget = b;
+	ahead.start.fresh = kind;
+	ahead.on = true;
+	poll.pbpc = ~0u;
+}
+
+// Back to the chip the CPU has seen so far, to run the job as it goes.
+static void DropAhead (void)
+{
+	const uint64	line_base = r.line_base;
+	ahead.on = viewed = false;
+	r = ahead.start;
+	r.fresh = 0;
+	r.line_base = line_base;
+	hit_key = ~0u;
+}
+
+// The CPU sees the end, at t: the chip as SyncTo would leave it there.
+static void EndAhead (uint64 t)
+{
+	const uint64	x = (t - r.synced) * CX4_HZ + r.rem;
+	ahead.on = viewed = false;
+	r.synced = t;
+	r.rem = x % ahead.master;
+	r.budget = 0;
+	if (ahead.kind == AHEAD_JOB)
+		Halt();
+	parked = true;
+	parked_t = t;
+}
+
+// A status read meanwhile: a job reads busy while one of its bus accesses is in flight.
+static uint8 StatusAhead (uint64 t)
+{
+	uint8	busy = 0;
+	if (t > r.synced && ahead.n)
+	{
+		const uint64	x = (t - r.synced) * CX4_HZ + r.rem;
+		while (ahead.cur < ahead.n && x >= ahead.busy[ahead.cur][1])
+			ahead.cur++;
+		busy = ahead.cur < ahead.n && x >= ahead.busy[ahead.cur][0];
+	}
+	return (ahead.status | (busy << 7));
+}
+
+static inline bool IsStatus (uint32 address)
+{
+	address = 0x7c00 | (address & 0x3ff);
+	return (address >= 0x7f53 && address <= 0x7f5f && address != 0x7f58 && address != 0x7f5a);
+}
+
+// The CPU's wait for the chip: LDA $7F5E; AND #$40; BNE back, in WRAM, with an 8-bit A. PBPC is
+// past the LDA's operand.
+static bool PollLoop (uint32 pbpc)
+{
+	static const uint8	loop[8] = { 0xaf, 0x5e, 0x7f, 0x00, 0x29, 0x40, 0xd0, 0xf8 };
+	const uint32	a = pbpc & 0x1ffff;
+	return ((pbpc >> 17) == (0x7e >> 1) && a >= 4 && a <= 0x1fffc && CheckMemory() &&
+			!memcmp(Memory.RAM + a - 4, loop, sizeof(loop)));
+}
+
+// While a job runs ahead, whole turns of that wait pass at once, short of the next event, IRQ timer
+// or the job's end, and never with an interrupt or HDMA due; a turn is two reads apart, twice alike.
+static void SkipPolls (int32 speed)
+{
+	const int32		c = CPU.Cycles;
+	const uint32	pbpc = Registers.PBPC, key = pbpc | (CheckEmulation() ? 0x80000000 : 0);
+	const int32		period = (pbpc == poll.pbpc && r.line_base == poll.line && CPU.NextEvent == poll.next) ? c - poll.cycles : 0;
+	poll.pbpc = pbpc;
+	poll.cycles = c;
+	poll.line = r.line_base;
+	poll.next = CPU.NextEvent;
+
+	int	s = 0;
+	while (s < 8 && poll.site[s] != key)
+		s++;
+	if (period > 0 && period == poll.period && s == 8)
+	{
+		memmove(poll.site + 1, poll.site, 7 * sizeof(poll.site[0]));
+		memmove(poll.turn + 1, poll.turn, 7 * sizeof(poll.turn[0]));
+		poll.site[0] = key;
+		poll.turn[0] = period;
+		s = 0;
+	}
+	poll.period = period;
+	// a gap other than the turn had something more in it (an interrupt): not now
+	if (s == 8 || (period > 0 && period != poll.turn[s]) || poll.turn[s] <= 0)
+		return;
+	const int32	turn = poll.turn[s];
+
+	if (CPU.InDMAorHDMA || CPU.HDMAEdge || CPU.NMIPending || CPU.IRQDeferOne || Timings.IRQFlagChanging ||
+		((CPU.IRQLine || CPU.IRQExternal) && !CheckFlag(IRQ)) || Settings.SA1 || !PollLoop(Registers.PBPC))
+		return;
+#ifdef DEBUGGER
+	if (CPU.Flags & (BREAK_FLAG | TRACE_FLAG | SINGLE_STEP_FLAG | DEBUG_MODE_FLAG))
+		return;
+#endif
+
+	int64	room = (int64) (CPU.NextEvent < Timings.NextIRQTimer ? CPU.NextEvent : Timings.NextIRQTimer) - 1 - c;
+	const int64	end = (int64) (ahead.t_done - (r.line_base + (uint64) (int64) (c + speed))) - 1;
+	if (end < room)
+		room = end;
+	if (room < turn)
+		return;
+
+	const int32	skip = (int32) (room / turn) * turn;
+	CPU.Cycles += skip;
+	CPU.LastBusStart += skip;
+	CPU.LastRunStart += skip;
+	poll.cycles = CPU.Cycles;
+}
+
+// The syncs an idle chip put off, as one: from idle it only owes clocks, and SyncTo's sums come
+// out the same however the time between is split.
+static void Unpark (void)
+{
+	if (!parked)
+		return;
+	parked = false;
+	if (parked_t <= r.synced)
+		return;
+	const uint64	master = Settings.PAL ? 21281370 : 21477273;
+	const uint64	acc = (parked_t - r.synced) * CX4_HZ + r.rem;
+	r.synced = parked_t;
+	r.budget += (int64) (acc / master);
+	r.rem = acc % master;
+	if (r.budget > 0)
+		r.budget = 0;
+}
+
 static void SyncTo (int32 cycles)
 {
 	uint64	t = r.line_base + (uint64) (int64) cycles;
 	if (t <= r.synced)
 		return;
+	if (parked)
+	{
+		if (!Overclocked())
+		{
+			if (t > parked_t)
+				parked_t = t;
+			return;
+		}
+		Unpark();
+	}
+	if (ahead.on)
+	{
+		if (t >= ahead.t_done || Overclocked())
+			EndAhead(t);
+		return;
+	}
 
+	viewed = false;
 	uint64	master = Settings.PAL ? 21281370 : 21477273;
 	uint64	acc = (t - r.synced) * CX4_HZ + r.rem;
 	r.synced = t;
@@ -1165,6 +1530,11 @@ static void SyncTo (int32 cycles)
 		}
 		Main();
 	}
+	if (Idle())
+	{
+		parked = true;
+		parked_t = t;
+	}
 }
 
 void S9xHG51BEndScanline (void)
@@ -1178,6 +1548,23 @@ uint8 S9xHG51BRead (uint16 address, int32 speed)
 {
 	if (speed >= 0)
 		SyncTo(CPU.Cycles + speed);
+	if (ahead.on)
+	{
+		if ((address & 0x0c00) == 0x0c00 && IsStatus(address))
+		{
+			if (speed >= 0)
+				SkipPolls(speed);
+			return (StatusAhead(r.line_base + CPU.Cycles + speed));
+		}
+		// a peek sees data RAM as the job found it
+		if (speed < 0 && (address & 0x0c00) != 0x0c00)
+			return (ahead.start.dram[address & 0xfff]);
+		if (speed >= 0)
+		{
+			DropAhead();
+			SyncTo(CPU.Cycles + speed);
+		}
+	}
 	if ((address & 0x0c00) != 0x0c00)
 		return (r.dram[address & 0xfff]);
 	return (ReadIO(address));
@@ -1185,10 +1572,17 @@ uint8 S9xHG51BRead (uint16 address, int32 speed)
 
 void S9xHG51BWrite (uint8 byte, uint16 address, int32 speed)
 {
+	viewed = false;
 	if ((address & 0x0c00) != 0x0c00)
 	{
 		if (speed >= 0)
 			SyncTo(CPU.Cycles + speed);
+		if (ahead.on)
+		{
+			DropAhead();
+			if (speed >= 0)
+				SyncTo(CPU.Cycles + speed);
+		}
 		r.dram[address & 0xfff] = byte;
 		return;
 	}
@@ -1197,7 +1591,42 @@ void S9xHG51BWrite (uint8 byte, uint16 address, int32 speed)
 	if (speed < 0)
 		return;
 	SyncTo(CPU.Cycles + speed);
+	Unpark();
+	if (ahead.on)
+	{
+		DropAhead();
+		SyncTo(CPU.Cycles + speed);
+	}
+
+	// From an idle halt the natives run a job, a preload or a DMA ahead.
+	const uint32	reg = 0x7c00 | (address & 0x3ff);
+	const bool		idle = native && r.halt && r.op == OP_NONE && !r.bus_on && !r.cache_on && !r.dma_on &&
+						   !r.lock && !r.suspend_on && !Memory.SRAMSize;
 	WriteIO(address, byte);
+	if (!idle)
+		return;
+	if (reg == 0x7f4f && !r.halt)
+		StartAhead(AHEAD_JOB);
+	else
+	if ((reg == 0x7f48 && r.cache_on) || (reg == 0x7f47 && r.dma_on && DmaAhead()))
+		StartAhead(AHEAD_IDLE);
+}
+
+uint8 * S9xHG51BDMABase (uint16 address)
+{
+	// the sync the DMA's first byte would make: idle, the chip parks there
+	if (!parked && !ahead.on)
+		SyncTo(CPU.Cycles);
+	if (!parked)
+		return (NULL);
+	if (!viewed)
+	{
+		memcpy(view, r.dram, 0xc00);
+		for (uint32 a = 0xc00; a < 0x1000; a++)
+			view[a] = ReadIO(a);
+		viewed = true;
+	}
+	return (view - (address & 0xf000));
 }
 
 uint32 S9xHG51BStateSize (void)
@@ -1205,9 +1634,17 @@ uint32 S9xHG51BStateSize (void)
 	return (sizeof(r));
 }
 
+// Run ahead, the chip is saved as it started, which runs on the same from there.
 void S9xHG51BStateSave (uint8 *buf)
 {
-	memcpy(buf, &r, sizeof(r));
+	Unpark();
+	if (!ahead.on)
+	{
+		memcpy(buf, &r, sizeof(r));
+		return;
+	}
+	memcpy(buf, &ahead.start, sizeof(r));
+	memcpy(buf + offsetof(Regs, line_base), &r.line_base, sizeof(r.line_base));
 }
 
 bool8 S9xHG51BStateLoad (const uint8 *buf, uint32 size)
@@ -1217,5 +1654,15 @@ bool8 S9xHG51BStateLoad (const uint8 *buf, uint32 size)
 	memcpy(&r, buf, sizeof(r));
 	hit_key = ~0u;
 	active = TRUE;
+	ahead.on = false;
+	parked = viewed = false;
+	poll.pbpc = ~0u;
+	const uint8	fresh = r.fresh;
+	r.fresh = 0;
+	if (native && fresh == AHEAD_JOB && !r.halt)
+		StartAhead(AHEAD_JOB);
+	else
+	if (native && fresh == AHEAD_IDLE && (r.cache_on || r.dma_on))
+		StartAhead(AHEAD_IDLE);
 	return (TRUE);
 }

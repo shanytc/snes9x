@@ -312,6 +312,9 @@
     <ClInclude Include="..\hg51b.h">
       <Filter>Emu</Filter>
     </ClInclude>
+    <ClInclude Include="..\hg51bn.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
     <ClInclude Include="cgMini.h">
       <Filter>GUI\VideoDriver</Filter>
     </ClInclude>
@@ -564,6 +567,9 @@
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\hg51b.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\hg51bn.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\fxdbg.cpp">

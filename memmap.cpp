@@ -3824,13 +3824,16 @@ static bool AcceptCx4DataROM (const uint8 *data, uint32 size, uint32 full_size, 
 	return (full_size == HG51B_DATAROM_SIZE && S9xHG51BIsDataROM(data, size));
 }
 
-// The Cx4 runs the cart's own code once its data ROM is set; the HLE otherwise.
+// The Cx4 runs the cart's own code, on its data ROM if one is set, else the native chip on one
+// worked out from its formulas.
 static bool8 LoadCx4DataROM (void)
 {
 	std::vector<uint8>	image;
-	return (S9xBiosPathUsable(S9X_BIOS_CX4) &&
-			S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_CX4).c_str(), image, HG51B_DATAROM_SIZE, AcceptCx4DataROM) &&
-			S9xHG51BLoad(image.data(), (uint32) image.size()));
+	if (S9xBiosPathUsable(S9X_BIOS_CX4) &&
+		S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_CX4).c_str(), image, HG51B_DATAROM_SIZE, AcceptCx4DataROM) &&
+		S9xHG51BLoad(image.data(), (uint32) image.size()))
+		return (TRUE);
+	return (S9xHG51BLoadBuiltin());
 }
 
 void CMemory::InitROM (void)

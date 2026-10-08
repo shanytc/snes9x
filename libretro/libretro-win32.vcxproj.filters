@@ -195,6 +195,9 @@
     <ClInclude Include="..\hg51b.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\hg51bn.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>s9x-source\APU</Filter>
     </ClInclude>
@@ -315,6 +318,9 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\hg51b.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\hg51bn.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\fxemu.cpp">

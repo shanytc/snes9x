@@ -20,6 +20,8 @@ bool8	S9xHG51BIsDataROM (const uint8 *image, uint32 size);
 
 // Starts running with `image`; FALSE (and off) if it isn't the data ROM.
 bool8	S9xHG51BLoad (const uint8 *image, uint32 size);
+// Starts running with the data ROM worked out from its formulas, no dump needed.
+bool8	S9xHG51BLoadBuiltin (void);
 void	S9xHG51BUnload (void);
 bool8	S9xHG51BLoaded (void);
 // Whether the chip, rather than the HLE, is answering the CPU right now.
@@ -34,6 +36,9 @@ void	S9xHG51BEndScanline (void);
 // < 0 is a cheat or debugger peek, which doesn't advance the chip.
 uint8	S9xHG51BRead (uint16 address, int32 speed);
 void	S9xHG51BWrite (uint8 byte, uint16 address, int32 speed);
+// For a DMA's reads: the 4K block holding `address` as reads of it give it, if the chip is idle
+// (they can't change then); NULL otherwise.
+uint8 *	S9xHG51BDMABase (uint16 address);
 
 uint32	S9xHG51BStateSize (void);
 void	S9xHG51BStateSave (uint8 *buf);

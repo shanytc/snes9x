@@ -461,6 +461,7 @@
     <ClInclude Include="..\upd7725n.h" />
     <ClInclude Include="..\upd7725np.h" />
     <ClInclude Include="..\hg51b.h" />
+    <ClInclude Include="..\hg51bn.h" />
     <ClInclude Include="..\common\video\opengl\shaders\glsl.h" />
     <ClInclude Include="..\common\video\opengl\shaders\shader_helpers.h" />
     <ClInclude Include="..\common\video\opengl\shaders\shader_platform.h" />
@@ -597,6 +598,7 @@
     <ClCompile Include="..\dsp3n.cpp" />
     <ClCompile Include="..\dsp4n.cpp" />
     <ClCompile Include="..\hg51b.cpp" />
+    <ClCompile Include="..\hg51bn.cpp" />
     <ClCompile Include="..\external\imgui\imgui.cpp" />
     <ClCompile Include="..\external\imgui\imgui_demo.cpp" />
     <ClCompile Include="..\external\imgui\imgui_draw.cpp" />

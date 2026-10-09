@@ -17036,19 +17036,6 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 static HWND s_inputConfigHwnd = NULL;
 HWND InputConfig_GetOpenHwnd() { return s_inputConfigHwnd; }
 
-static HBITMAP s_padBitmap = NULL;
-
-static void SetInputPadImage(HWND hDlg, bool japanese)
-{
-	HBITMAP hbm = LoadBitmap(g_hInst, MAKEINTRESOURCE(japanese ? IDB_PAD2 : IDB_PAD));
-	if (!hbm)
-		return;
-	SendDlgItemMessage(hDlg, IDC_PAD_IMAGE, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hbm);
-	if (s_padBitmap)
-		DeleteObject(s_padBitmap);
-	s_padBitmap = hbm;
-}
-
 // The picture under the Buttons box: the pad in the chosen controller style, with
 // the held buttons lit on it.
 static HBITMAP s_panelBitmap = NULL;	// shown, with the held buttons lit
@@ -17429,7 +17416,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_USEDIRECTINPUT,BM_SETCHECK, GUI.UseDirectInput ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
-		SetInputPadImage(hDlg, GUI.JapaneseController);
 
 		// Initialize binding mode combobox
 		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO,CB_ADDSTRING,0,(LPARAM)TEXT("Single"));
@@ -17462,31 +17448,18 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		EndDialog(hDlg, 0);
 		return TRUE;
 	case WM_DESTROY:
-		if (s_padBitmap)
-		{
-			DeleteObject(s_padBitmap);
-			s_padBitmap = NULL;
-		}
 		KillTimer(hDlg, INPUT_PICTURE_TIMER);
 		SendDlgItemMessage(hDlg, IDC_INPUT_PICTURE, STM_SETIMAGE, IMAGE_BITMAP, 0);
 		FreeInputPicture();
 		break;
 	case WM_CONTEXTMENU:
 	{
-		// The style menu: on the small pad picture, or the big one (clicks fall through it)
+		// The style menu is on the pad picture (a plain static the click falls through)
 		POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
 		RECT big;
 		GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &big);
-		const bool onBig = (HWND)wParam == hDlg && PtInRect(&big, pt);
-		if ((HWND)wParam == GetDlgItem(hDlg, IDC_PAD_IMAGE) || onBig)
+		if ((HWND)wParam == hDlg && PtInRect(&big, pt))
 		{
-			if (pt.x == -1 && pt.y == -1)
-			{
-				RECT rc;
-				GetWindowRect(GetDlgItem(hDlg, IDC_PAD_IMAGE), &rc);
-				pt.x = (rc.left + rc.right) / 2;
-				pt.y = (rc.top + rc.bottom) / 2;
-			}
 			// 1 USA, 2 Europe, 3 Japan; Europe and Japan share the coloured buttons
 			const int style = !GUI.JapaneseController ? 1 : GUI.EuropeanController ? 2 : 3;
 			HMENU menu = CreatePopupMenu();
@@ -17501,7 +17474,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				{
 					GUI.JapaneseController = (cmd != 1);
 					GUI.EuropeanController = (cmd == 2);
-					SetInputPadImage(hDlg, GUI.JapaneseController);
 					ShowInputPicture(hDlg, s_padPanelIndex);
 					WinSaveConfigFile();
 				}
@@ -17578,11 +17550,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
 		return TRUE;
 	case WM_COMMAND:
-		if (LOWORD(wParam) == IDC_PAD_IMAGE && HIWORD(wParam) == STN_CLICKED)
-		{
-			SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
-			return TRUE;
-		}
 		switch(LOWORD(wParam))
 		{
 		case IDCANCEL:

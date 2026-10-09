@@ -28,8 +28,6 @@
 #define IDB_JOYPAD                      127
 #define IDD_CHEAT_SEARCH                129
 #define IDD_CHEAT_FROM_SEARCH           131
-#define IDB_PAD                         133
-#define IDB_PAD2                        183
 #define IDB_PAD_USA                     198
 #define IDB_PAD_SFC                     199
 #define IDB_PAD_EUR                     200
@@ -963,7 +961,6 @@
 #define IDC_STATIC_GAIN_GB_LABEL        3349
 #define IDC_STATIC_REGULAR_LABEL        3350
 #define IDC_PAUSE_EMULATION             3351
-#define IDC_PAD_IMAGE                   3320
 #define IDC_INPUT_PICTURE               3702
 
 #define ID_SOUND_AUDIOWAVEFORM          40198

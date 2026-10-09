@@ -17049,6 +17049,296 @@ static void SetInputPadImage(HWND hDlg, bool japanese)
 	s_padBitmap = hbm;
 }
 
+// The picture under the Buttons box: the pad in the chosen controller style, with
+// the held buttons lit on it.
+static HBITMAP s_panelBitmap = NULL;	// shown, with the held buttons lit
+static HBITMAP s_panelBase = NULL;	// the scaled picture, unlit
+static double s_panelScale = 1.0;
+static int s_panelSource = 0;	// the bitmap resource now in s_panelBase
+static int s_padPanelIndex = 0;	// the dialog row whose bindings light the pad
+static int s_padLit = -1;
+
+#define INPUT_PICTURE_TIMER 98
+
+// pad_usa.bmp / pad_sfc.bmp share one outline; each button's shape in source pixels.
+enum
+{
+	PADPIC_UP = 1 << 0, PADPIC_DOWN = 1 << 1, PADPIC_LEFT = 1 << 2, PADPIC_RIGHT = 1 << 3,
+	PADPIC_A = 1 << 4, PADPIC_B = 1 << 5, PADPIC_X = 1 << 6, PADPIC_Y = 1 << 7,
+	PADPIC_L = 1 << 8, PADPIC_R = 1 << 9, PADPIC_START = 1 << 10, PADPIC_SELECT = 1 << 11
+};
+
+// n == 1: a circle (centre, radius); n == 0: a capsule (end centres, radius)
+struct PadPicShape { uint16 mask; uint8 n; float pt[16][2]; };
+
+static const PadPicShape kPadPicShapes[] =
+{
+	{ PADPIC_UP,     6, { { 169, 146 }, { 178, 129 }, { 179, 129 }, { 187, 143 }, { 188, 148 }, { 169, 148 } } },
+	{ PADPIC_DOWN,   6, { { 169, 208 }, { 188, 208 }, { 188, 211 }, { 179, 227 }, { 178, 227 }, { 169, 210 } } },
+	{ PADPIC_LEFT,   5, { { 130, 176 }, { 148, 167 }, { 148, 187 }, { 146, 187 }, { 130, 178 } } },
+	{ PADPIC_RIGHT,  5, { { 209, 167 }, { 228, 177 }, { 228, 178 }, { 212, 187 }, { 209, 187 } } },
+	{ PADPIC_A,      1, { { 694.3f, 191.3f }, { 24.5f } } },
+	{ PADPIC_B,      1, { { 615.8f, 247.5f }, { 24.5f } } },
+	{ PADPIC_X,      1, { { 633.5f, 129.2f }, { 24.5f } } },
+	{ PADPIC_Y,      1, { { 555.1f, 185.4f }, { 24.5f } } },
+	{ PADPIC_L,      6, { { 124,  21 }, { 137,  17 }, { 165,  13 }, { 251,  13 }, { 252,  24 }, { 125,  29 } } },
+	{ PADPIC_R,      8, { { 545,  14 }, { 546,  13 }, { 626,  13 }, { 663,  18 }, { 672,  21 }, { 671,  30 }, { 545,  24 }, { 544,  23 } } },
+	{ PADPIC_SELECT, 0, { { 315.6f, 222.2f }, { 350.1f, 196.0f }, { 10.5f } } },
+	{ PADPIC_START,  0, { { 397.5f, 222.8f }, { 431.9f, 196.5f }, { 10.5f } } }
+};
+
+static float PadPicSegmentDistance(float x, float y, const float *a, const float *b)
+{
+	const float dx = b[0] - a[0], dy = b[1] - a[1];
+	float t = ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy);
+	t = t < 0 ? 0 : t > 1 ? 1 : t;
+	return hypotf(x - a[0] - t * dx, y - a[1] - t * dy);
+}
+
+// Signed distance (source pixels) from the shape's edge; negative inside.
+static float PadPicDistance(const PadPicShape &b, float x, float y)
+{
+	if (b.n == 1)
+		return hypotf(x - b.pt[0][0], y - b.pt[0][1]) - b.pt[1][0];
+	if (b.n == 0)
+		return PadPicSegmentDistance(x, y, b.pt[0], b.pt[1]) - b.pt[2][0];
+
+	float d = 1e9f;
+	bool inside = false;
+	for (int i = 0, j = b.n - 1; i < b.n; j = i++)
+	{
+		const float *p = b.pt[i], *q = b.pt[j];
+		const float e = PadPicSegmentDistance(x, y, q, p);
+		if (e < d)
+			d = e;
+		if ((p[1] > y) != (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0])
+			inside = !inside;
+	}
+	return inside ? -d : d;
+}
+
+static void ShowInputPictureBitmap(HWND hDlg)
+{
+	HWND pic = GetDlgItem(hDlg, IDC_INPUT_PICTURE);
+	HBITMAP old = (HBITMAP) SendMessage(pic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM) s_panelBitmap);
+	if (old && old != s_panelBitmap && old != s_panelBase)
+		DeleteObject(old);
+	InvalidateRect(pic, NULL, FALSE);
+}
+
+// A held face button takes the real pad's colour: lavender/purple (USA), or the
+// European and Super Famicom pads' blue X, green Y, red A, yellow B.
+static COLORREF PadPicFaceColor(int mask)
+{
+	const bool sfc = (s_panelSource != IDB_PAD_USA);
+	switch (mask)
+	{
+		case PADPIC_X: return sfc ? RGB(40, 105, 200) : RGB(185, 182, 232);
+		case PADPIC_Y: return sfc ? RGB(60, 150, 105) : RGB(185, 182, 232);
+		case PADPIC_A: return sfc ? RGB(190, 50, 50) : RGB(80, 72, 172);
+		case PADPIC_B: return sfc ? RGB(245, 210, 70) : RGB(80, 72, 172);
+	}
+	return CLR_INVALID;
+}
+
+// Each held button's own shape with a rim inside its edge, anti-aliased from 4x4
+// samples per pixel.
+static void DrawPadPictureLit(HWND hDlg)
+{
+	if (!s_panelBase || !s_panelBitmap)
+		return;
+	BITMAP bm;
+	GetObject(s_panelBase, sizeof(bm), &bm);
+	const int w = bm.bmWidth, h = bm.bmHeight;
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	std::vector<uint32> px(w * h);
+	HDC screen = GetDC(hDlg);
+	GetDIBits(screen, s_panelBase, 0, h, px.data(), &bi, DIB_RGB_COLORS);
+
+	const float s = (float) s_panelScale;
+	for (const PadPicShape &b : kPadPicShapes)
+	{
+		if (s_padLit < 0 || !(s_padLit & b.mask))
+			continue;
+
+		// Face buttons in the pad's colours, d-pad arrows and Start/Select yellow, the shoulders a blue tint
+		COLORREF fill = PadPicFaceColor(b.mask), rim;
+		float fillAlpha = 1.0f, rimWidth = 1.0f;
+		if (fill != CLR_INVALID)
+			rim = RGB(GetRValue(fill) * 7 / 10, GetGValue(fill) * 7 / 10, GetBValue(fill) * 7 / 10);
+		else if (b.mask & (PADPIC_UP | PADPIC_DOWN | PADPIC_LEFT | PADPIC_RIGHT | PADPIC_START | PADPIC_SELECT))
+			fill = RGB(255, 210, 0), rim = RGB(200, 140, 0);
+		else
+			fill = RGB(80, 170, 255), rim = RGB(40, 130, 230), fillAlpha = 120 / 255.0f, rimWidth = 2.0f;
+
+		float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+		const float r = b.n == 1 ? b.pt[1][0] : b.n == 0 ? b.pt[2][0] : 0;
+		for (int i = 0; i < (b.n == 1 ? 1 : b.n == 0 ? 2 : b.n); i++)
+		{
+			x0 = (std::min)(x0, b.pt[i][0] - r);
+			y0 = (std::min)(y0, b.pt[i][1] - r);
+			x1 = (std::max)(x1, b.pt[i][0] + r);
+			y1 = (std::max)(y1, b.pt[i][1] + r);
+		}
+		const int left = (std::max)(0, (int) (x0 * s) - 1), top = (std::max)(0, (int) (y0 * s) - 1);
+		const int right = (std::min)(w - 1, (int) (x1 * s) + 1), bottom = (std::min)(h - 1, (int) (y1 * s) + 1);
+
+		for (int y = top; y <= bottom; y++)
+			for (int x = left; x <= right; x++)
+			{
+				int inFill = 0, inRim = 0;
+				for (int sy = 0; sy < 4; sy++)
+					for (int sx = 0; sx < 4; sx++)
+					{
+						const float d = PadPicDistance(b, (x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
+						if (d < -rimWidth)
+							inFill++;
+						else if (d < 0)
+							inRim++;
+					}
+				if (!inFill && !inRim)
+					continue;
+
+				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cb = 1.0f - cf - cr;
+				uint32 &c = px[y * w + x];
+				const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + 0.5f);
+				const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + 0.5f);
+				const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + 0.5f);
+				c = (red << 16) | (green << 8) | blue;
+			}
+	}
+
+	SetDIBits(screen, s_panelBitmap, 0, h, px.data(), &bi, DIB_RGB_COLORS);
+	ReleaseDC(hDlg, screen);
+	ShowInputPictureBitmap(hDlg);
+}
+
+bool S9xKeyHeld (WORD KeyIdent);
+
+// The buttons the row's bindings hold now (extras included). Turbo rows bind the
+// d-pad slots to turbo modes, so only their buttons light.
+static int PadHeldButtons(int index)
+{
+	const SJoypad &pad = Joypad[index];
+	const SJoypadExtraBinds &extra = JoypadExtra[index];
+	auto held = [&](WORD key, const WORD *extras)
+	{
+		if (S9xKeyHeld(key))
+			return true;
+		for (int e = 0; GUI.AllowMultipleBindings && e < MAX_EXTRA_BINDS; e++)
+			if (S9xKeyHeld(extras[e]))
+				return true;
+		return false;
+	};
+
+	int lit = 0;
+	#define PAD_HELD(field, bits) if (held(pad.field, extra.field)) lit |= (bits)
+	PAD_HELD(A, PADPIC_A); PAD_HELD(B, PADPIC_B); PAD_HELD(X, PADPIC_X); PAD_HELD(Y, PADPIC_Y);
+	PAD_HELD(L, PADPIC_L); PAD_HELD(R, PADPIC_R); PAD_HELD(Start, PADPIC_START); PAD_HELD(Select, PADPIC_SELECT);
+	if (index < 8)
+	{
+		PAD_HELD(Up, PADPIC_UP); PAD_HELD(Down, PADPIC_DOWN); PAD_HELD(Left, PADPIC_LEFT); PAD_HELD(Right, PADPIC_RIGHT);
+		PAD_HELD(Left_Up, PADPIC_LEFT | PADPIC_UP); PAD_HELD(Right_Up, PADPIC_RIGHT | PADPIC_UP);
+		PAD_HELD(Left_Down, PADPIC_LEFT | PADPIC_DOWN); PAD_HELD(Right_Down, PADPIC_RIGHT | PADPIC_DOWN);
+	}
+	#undef PAD_HELD
+	return lit;
+}
+
+// INPUT_PICTURE_TIMER: redraw when the held set changes.
+static void UpdateInputPictureLit(HWND hDlg)
+{
+	SDLInput_Poll();
+	const int lit = PadHeldButtons(s_padPanelIndex);
+	if (lit == s_padLit)
+		return;
+	s_padLit = lit;
+	DrawPadPictureLit(hDlg);
+}
+
+static void FreeInputPicture(void)
+{
+	if (s_panelBitmap)
+	{
+		DeleteObject(s_panelBitmap);
+		s_panelBitmap = NULL;
+	}
+	if (s_panelBase)
+	{
+		DeleteObject(s_panelBase);
+		s_panelBase = NULL;
+	}
+	s_panelSource = 0;
+}
+
+// The picture scaled into its box (never past 1:1) and centred.
+static void SetInputPicture(HWND hDlg, int bitmap)
+{
+	if (bitmap == s_panelSource)
+		return;
+	HBITMAP src = (HBITMAP) LoadImage(g_hInst, MAKEINTRESOURCE(bitmap), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
+	if (!src)
+		return;
+	BITMAP bm;
+	GetObject(src, sizeof(bm), &bm);
+
+	RECT box = { 5, 184, 375, 344 };
+	MapDialogRect(hDlg, &box);
+	const int boxW = box.right - box.left, boxH = box.bottom - box.top;
+	double scale = (double) boxW / bm.bmWidth;
+	if ((double) boxH / bm.bmHeight < scale)
+		scale = (double) boxH / bm.bmHeight;
+	if (scale > 1.0)
+		scale = 1.0;
+	const int w = (int) (bm.bmWidth * scale), h = (int) (bm.bmHeight * scale);
+
+	HDC screen = GetDC(hDlg);
+	HDC from = CreateCompatibleDC(screen), to = CreateCompatibleDC(screen);
+	HBITMAP dst = CreateCompatibleBitmap(screen, w, h);
+	HGDIOBJ oldFrom = SelectObject(from, src), oldTo = SelectObject(to, dst);
+	SetStretchBltMode(to, HALFTONE);
+	SetBrushOrgEx(to, 0, 0, NULL);
+	StretchBlt(to, 0, 0, w, h, from, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+	SelectObject(from, oldFrom);
+	SelectObject(to, oldTo);
+	DeleteDC(from);
+	DeleteDC(to);
+	DeleteObject(src);
+
+	// Detach the old picture before freeing it.
+	HWND pic = GetDlgItem(hDlg, IDC_INPUT_PICTURE);
+	HBITMAP shown = (HBITMAP) SendMessage(pic, STM_SETIMAGE, IMAGE_BITMAP, 0);
+	if (shown && shown != s_panelBitmap && shown != s_panelBase)
+		DeleteObject(shown);
+	FreeInputPicture();
+
+	SetWindowPos(pic, NULL, box.left + (boxW - w) / 2, box.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+	s_panelBase = dst;
+	s_panelScale = scale;
+	s_panelSource = bitmap;
+	s_panelBitmap = CreateCompatibleBitmap(screen, w, h);
+	ReleaseDC(hDlg, screen);
+	s_padLit = 0;
+	DrawPadPictureLit(hDlg);
+}
+
+// The row's pad picture in the chosen controller style.
+static void ShowInputPicture(HWND hDlg, int index)
+{
+	s_padPanelIndex = index;
+	s_padLit = -1;
+	const int source = !GUI.JapaneseController ? IDB_PAD_USA : GUI.EuropeanController ? IDB_PAD_EUR : IDB_PAD_SFC;
+	if (source != s_panelSource)
+		SetInputPicture(hDlg, source);
+	else
+		UpdateInputPictureLit(hDlg);
+}
 // The controller list keeps focus, so keys pressed to try bindings must not switch
 // rows through its closed-list navigation. F4 and Alt+Down still open it.
 static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
@@ -17162,6 +17452,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		// Start timer to poll for controller hot-plug events
 		SetTimer(hDlg, 99, 500, NULL);
+		SetTimer(hDlg, INPUT_PICTURE_TIMER, 30, NULL);
 
 		return true;
 		break;
@@ -17176,11 +17467,19 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			DeleteObject(s_padBitmap);
 			s_padBitmap = NULL;
 		}
+		KillTimer(hDlg, INPUT_PICTURE_TIMER);
+		SendDlgItemMessage(hDlg, IDC_INPUT_PICTURE, STM_SETIMAGE, IMAGE_BITMAP, 0);
+		FreeInputPicture();
 		break;
 	case WM_CONTEXTMENU:
-		if ((HWND)wParam == GetDlgItem(hDlg, IDC_PAD_IMAGE))
+	{
+		// The style menu: on the small pad picture, or the big one (clicks fall through it)
+		POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
+		RECT big;
+		GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &big);
+		const bool onBig = (HWND)wParam == hDlg && PtInRect(&big, pt);
+		if ((HWND)wParam == GetDlgItem(hDlg, IDC_PAD_IMAGE) || onBig)
 		{
-			POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
 			if (pt.x == -1 && pt.y == -1)
 			{
 				RECT rc;
@@ -17188,25 +17487,32 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				pt.x = (rc.left + rc.right) / 2;
 				pt.y = (rc.top + rc.bottom) / 2;
 			}
+			// 1 USA, 2 Europe, 3 Japan; Europe and Japan share the coloured buttons
+			const int style = !GUI.JapaneseController ? 1 : GUI.EuropeanController ? 2 : 3;
 			HMENU menu = CreatePopupMenu();
-			AppendMenu(menu, MF_STRING | (GUI.JapaneseController ? MF_UNCHECKED : MF_CHECKED), 1, TEXT("USA Controller"));
-			AppendMenu(menu, MF_STRING | (GUI.JapaneseController ? MF_CHECKED : MF_UNCHECKED), 2, TEXT("Euro/Japanese Controller"));
+			AppendMenu(menu, MF_STRING | (style == 1 ? MF_CHECKED : MF_UNCHECKED), 1, TEXT("USA Controller"));
+			AppendMenu(menu, MF_STRING | (style == 2 ? MF_CHECKED : MF_UNCHECKED), 2, TEXT("European Controller"));
+			AppendMenu(menu, MF_STRING | (style == 3 ? MF_CHECKED : MF_UNCHECKED), 3, TEXT("Japanese Controller"));
 			int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
 			DestroyMenu(menu);
-			if (cmd == 1 || cmd == 2)
+			if (cmd >= 1 && cmd <= 3)
 			{
-				bool japanese = (cmd == 2);
-				if (japanese != GUI.JapaneseController)
+				if (cmd != style)
 				{
-					GUI.JapaneseController = japanese;
-					SetInputPadImage(hDlg, japanese);
+					GUI.JapaneseController = (cmd != 1);
+					GUI.EuropeanController = (cmd == 2);
+					SetInputPadImage(hDlg, GUI.JapaneseController);
+					ShowInputPicture(hDlg, s_padPanelIndex);
 					WinSaveConfigFile();
 				}
 			}
 			return TRUE;
 		}
 		break;
+	}
 	case WM_TIMER:
+		if(wParam == INPUT_PICTURE_TIMER)
+			UpdateInputPictureLit(hDlg);
 		if(wParam == 99)
 		{
 			// Poll SDL for device add/remove events
@@ -17406,6 +17712,9 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				EnableDisableKeyFields(index,hDlg);
 
 				UpdateDeviceInfo(hDlg, index);
+
+				// The pad picture lights this row's held buttons.
+				ShowInputPicture(hDlg, index);
 
 				break;
 		}

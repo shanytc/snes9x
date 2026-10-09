@@ -82,6 +82,7 @@ ControllerPanel::ControllerPanel(EmuApplication *app_)
 
     // The pad picture under the table: a click on a button edits its binding.
     pad_picture = new PadPictureWidget(this);
+    verticalLayout->addSpacing(10);
     verticalLayout->addWidget(pad_picture);
     pad_picture->setPadStyle(app->config->pad_picture_style);
     pad_picture->buttonClicked = [&](int button) {

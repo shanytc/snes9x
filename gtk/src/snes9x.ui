@@ -8175,7 +8175,7 @@
                         </child>
                       </object>
                       <packing>
-                        <property name="expand">True</property>
+                        <property name="expand">False</property>
                         <property name="fill">True</property>
                         <property name="position">2</property>
                       </packing>
@@ -8184,6 +8184,7 @@
                       <object class="GtkDrawingArea" id="pad_picture">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
+                        <property name="margin_top">10</property>
                         <property name="height_request">252</property>
                       </object>
                       <packing>
@@ -10817,6 +10818,18 @@
                           </packing>
                         </child>
                         <child>
+                          <object class="GtkScrolledWindow" id="scrolledwindow9">
+                            <property name="visible">True</property>
+                            <property name="can_focus">True</property>
+                            <property name="hscrollbar_policy">never</property>
+                            <property name="vscrollbar_policy">automatic</property>
+                            <child>
+                              <object class="GtkViewport" id="shortcut_viewport5">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="resize_mode">queue</property>
+                                <property name="shadow_type">none</property>
+                                <child>
                           <object class="GtkTable" id="table12">
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
@@ -11329,6 +11342,10 @@
                               </packing>
                             </child>
                           </object>
+                                </child>
+                              </object>
+                            </child>
+                          </object>
                           <packing>
                             <property name="position">4</property>
                           </packing>
@@ -11346,6 +11363,18 @@
                           </packing>
                         </child>
                         <child>
+                          <object class="GtkScrolledWindow" id="scrolledwindow10">
+                            <property name="visible">True</property>
+                            <property name="can_focus">True</property>
+                            <property name="hscrollbar_policy">never</property>
+                            <property name="vscrollbar_policy">automatic</property>
+                            <child>
+                              <object class="GtkViewport" id="shortcut_viewport6">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="resize_mode">queue</property>
+                                <property name="shadow_type">none</property>
+                                <child>
                           <object class="GtkTable" id="table_arcade">
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
@@ -12066,6 +12095,10 @@
                                 <property name="bottom_attach">23</property>
                                 <property name="y_options">GTK_FILL</property>
                               </packing>
+                            </child>
+                          </object>
+                                </child>
+                              </object>
                             </child>
                           </object>
                           <packing>

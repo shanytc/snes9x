@@ -78,6 +78,7 @@ gboolean poll_joystick(gpointer data)
     int focus;
 
     window->config->joysticks.poll_events();
+    window->refresh_device_combo();
     for (auto &j : window->config->joysticks)
     {
         while (j.second->get_event(&event))
@@ -278,6 +279,14 @@ void Snes9xPreferences::connect_signals()
     });
 
     get_object<Gtk::Button>("reset_current_joypad")->signal_pressed().connect(sigc::mem_fun(*this, &Snes9xPreferences::reset_current_joypad));
+    get_object<Gtk::Button>("auto_assign")->signal_clicked().connect(sigc::mem_fun(*this, &Snes9xPreferences::auto_assign_joypad));
+    get_object<Gtk::ComboBoxText>("joypad_device")->signal_changed().connect([&] {
+        const int row = get_object<Gtk::ComboBoxText>("joypad_device")->get_active_row_number();
+        if (updating_device_combo || row < 0 || row >= (int)listed_devices.size())
+            return;
+        device_choice[get_combo("control_combo")] = listed_devices[row].joynum;
+        get_object<Gtk::Widget>("auto_assign")->set_sensitive(listed_devices[row].is_gamepad);
+    });
     get_object<Gtk::Button>("swap_with")->signal_pressed().connect(sigc::mem_fun(*this, &Snes9xPreferences::swap_with));
     get_object<Gtk::Button>("ntsc_composite_preset")->signal_pressed().connect([&] {
         config->ntsc_setup = snes_ntsc_composite;
@@ -1182,6 +1191,7 @@ void Snes9xPreferences::show()
     S9xGrabJoysticks();
     held_keys.clear();
     held_joystick.clear();
+    device_choice.clear();
     pad_picture_lit = pad_picture_outlined = 0;
     guint source_id = g_timeout_add(30, poll_joystick, (gpointer)this);
 
@@ -1368,6 +1378,84 @@ void Snes9xPreferences::bindings_to_dialog(int joypad)
     {
         set_entry_text(shortcut_names[i].button_name, shortcut[i].to_string(true));
     }
+
+    update_device_combo();
+}
+
+// The connected controllers, preselecting the joypad's pick, else the device its
+// bindings use, else the one numbered like it. Auto-Assign needs one SDL knows.
+void Snes9xPreferences::update_device_combo()
+{
+    auto combo = get_object<Gtk::ComboBoxText>("joypad_device");
+    if (combo->property_popup_shown())
+        return;
+
+    const auto devices = config->joysticks.device_list();
+    const int joypad = get_combo("control_combo");
+    updating_device_combo = true;
+
+    if (devices != listed_devices || !combo->get_model()->children().size())
+    {
+        combo->remove_all();
+        for (auto &device : devices)
+            combo->append(device.name);
+        if (devices.empty())
+            combo->append(_("No device detected"));
+        listed_devices = devices;
+    }
+
+    int prefer = device_choice.contains(joypad) ? device_choice[joypad] : -1;
+    for (int i = 0; prefer < 0 && i < kMainLinks; i++)
+        if (pad[joypad].data[i].is_joy())
+            prefer = pad[joypad].data[i].get_device() - 1;
+    if (prefer < 0)
+        prefer = joypad;
+
+    int row = 0;
+    for (size_t i = 0; i < devices.size(); i++)
+        if (devices[i].joynum == prefer)
+            row = i;
+    combo->set_active(row);
+    combo->set_sensitive(!devices.empty());
+    get_object<Gtk::Widget>("auto_assign")->set_sensitive(!devices.empty() && devices[row].is_gamepad);
+
+    updating_device_combo = false;
+}
+
+// From the joystick poll: a controller plugged in or out.
+void Snes9xPreferences::refresh_device_combo()
+{
+    if (config->joysticks.device_list() != listed_devices)
+        update_device_combo();
+}
+
+// Binds the chosen controller's buttons as win32's and Qt's Auto-Assign do.
+// The joypad keeps its binding for a button the pad lacks.
+void Snes9xPreferences::auto_assign_joypad()
+{
+    const int row = get_object<Gtk::ComboBoxText>("joypad_device")->get_active_row_number();
+    if (row < 0 || row >= (int)listed_devices.size())
+        return;
+    const JoyDevice *device = config->joysticks.find(listed_devices[row].joynum);
+    if (!device || device->gamepad_mapping.empty())
+        return;
+
+    const int joypad = get_combo("control_combo");
+    auto bindings = device->gamepad_bindings(config->joystick_threshold);
+    for (int i = 0; i < kMainLinks; i++)
+    {
+        if (!bindings[i].hex())
+            continue;
+        pad[joypad].data[i] = bindings[i];
+
+        // As store_binding: an input drives a button or a shortcut, not both
+        for (auto &s : shortcut)
+            if (s == bindings[i])
+                s.clear();
+    }
+
+    bindings_to_dialog(joypad);
+    update_pad_picture();
 }
 
 void Snes9xPreferences::calibration_dialog()

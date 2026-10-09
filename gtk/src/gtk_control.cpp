@@ -5,6 +5,7 @@
 \*****************************************************************************/
 
 #include <fcntl.h>
+#include <algorithm>
 
 #include "SDL_joystick.h"
 #include "fscompat.h"
@@ -1183,7 +1184,9 @@ void S9xUpdateRumble()
 
 void S9xInitInputDevices()
 {
-    SDL_Init(SDL_INIT_JOYSTICK);
+    // The game controller database is for Auto-Assign; input still comes from the joystick events.
+    SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER);
+    SDL_GameControllerEventState(SDL_IGNORE);
     size_t num_joysticks = SDL_NumJoysticks();
 
     for (size_t i = 0; i < num_joysticks; i++)
@@ -1247,7 +1250,36 @@ bool JoyDevice::set_sdl_joystick(unsigned int sdl_device_index, int new_joynum)
         calibration[i].center = 0;
     }
 
-    description = SDL_JoystickName(filedes);
+    const char *sdl_name = SDL_JoystickName(filedes);
+    name = sdl_name ? sdl_name : "";
+
+    // For Auto-Assign: SDL's controller database layout, read from its mapping
+    // string, as SDL2's per-button lookup drops which way an axis is bound.
+    gamepad_mapping.clear();
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+    if (SDL_IsGameController(sdl_device_index))
+    {
+        if (char *mapping = SDL_GameControllerMappingForDeviceIndex(sdl_device_index))
+        {
+            gamepad_mapping = mapping;
+            SDL_free(mapping);
+        }
+    }
+#endif
+    // Nintendo-layout pads, whose face buttons SDL2 names by label unless told not to
+    bool nintendo = gamepad_mapping.find("hint:SDL_GAMECONTROLLER_USE_BUTTON_LABELS:=1") != std::string::npos;
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+    const SDL_GameControllerType type = SDL_GameControllerTypeForIndex(sdl_device_index);
+    nintendo = nintendo || type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO;
+#if SDL_VERSION_ATLEAST(2, 24, 0)
+    nintendo = nintendo || type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT ||
+               type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT ||
+               type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR;
+#endif
+#endif
+    labelled_face_buttons = nintendo && SDL_GetHintBoolean("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", SDL_TRUE);
+
+    description = name;
     description += ": ";
     description += std::to_string(SDL_JoystickNumButtons(filedes));
     description += " buttons, ";
@@ -1260,6 +1292,79 @@ bool JoyDevice::set_sdl_joystick(unsigned int sdl_device_index, int new_joynum)
         i = 0;
 
     return true;
+}
+
+// The binding for one entry of the device's SDL mapping ("a:b0", "dpup:h0.1",
+// "dpleft:-a0"...), as the joypad page records that input; unset if it has none.
+Binding JoyDevice::mapped_binding(const char *key, unsigned int threshold) const
+{
+    // GUID,name,key:value,...
+    const std::string field = std::string(",") + key + ":";
+    size_t at = gamepad_mapping.find(',');
+    if (at != std::string::npos)
+        at = gamepad_mapping.find(',', at + 1);
+    if (at != std::string::npos)
+        at = gamepad_mapping.find(field, at);
+    if (at == std::string::npos)
+        return Binding();
+
+    const char *value = gamepad_mapping.c_str() + at + field.size();
+    int half = -1;
+    if (*value == '+' || *value == '-')
+        half = *value++ == '+' ? AXIS_POS : AXIS_NEG;
+    const char type = *value++;
+    char *end;
+    const long index = strtol(value, &end, 10);
+    if (end == value || index < 0)
+        return Binding();
+
+    if (type == 'b')
+        return Binding(joynum, index, threshold);
+
+    if (type == 'h' && *end == '.')
+    {
+        // handle_event's hat axes: up/down, then left/right, after the real ones
+        const int vertical = axis.size() + index * 2;
+        const long mask = strtol(end + 1, nullptr, 10);
+        if (mask & SDL_HAT_UP)
+            return Binding(joynum, JOY_AXIS(vertical, AXIS_POS), threshold);
+        if (mask & SDL_HAT_DOWN)
+            return Binding(joynum, JOY_AXIS(vertical, AXIS_NEG), threshold);
+        if (mask & SDL_HAT_LEFT)
+            return Binding(joynum, JOY_AXIS(vertical + 1, AXIS_NEG), threshold);
+        if (mask & SDL_HAT_RIGHT)
+            return Binding(joynum, JOY_AXIS(vertical + 1, AXIS_POS), threshold);
+    }
+
+    if (type == 'a')
+    {
+        // A whole axis presses past its middle; ~ inverts it
+        int direction = half < 0 ? AXIS_POS : half;
+        if (*end == '~')
+            direction = direction == AXIS_POS ? AXIS_NEG : AXIS_POS;
+        return Binding(joynum, JOY_AXIS(index, direction), threshold);
+    }
+
+    return Binding();
+}
+
+// The joypad's main twelve buttons (b_links order) as win32's and Qt's
+// Auto-Assign map them; a button the pad lacks is left unset.
+std::array<Binding, 12> JoyDevice::gamepad_bindings(unsigned int threshold) const
+{
+    // SNES A, B, X, Y sit east, south, north, west. SDL's a, b, x, y are south,
+    // east, west, north, unless it names them by label as on Nintendo pads.
+    const bool labels = labelled_face_buttons;
+    const char *const keys[12] = {
+        "dpup", "dpdown", "dpleft", "dpright", "start", "back",
+        labels ? "a" : "b", labels ? "b" : "a", labels ? "x" : "y", labels ? "y" : "x",
+        "leftshoulder", "rightshoulder"
+    };
+
+    std::array<Binding, 12> bindings;
+    for (int i = 0; i < 12; i++)
+        bindings[i] = mapped_binding(keys[i], threshold);
+    return bindings;
 }
 
 void JoyDevice::add_event(unsigned int parameter, unsigned int state)
@@ -1511,6 +1616,36 @@ bool JoyDevices::remove(SDL_JoystickID instance_id)
     printf("Removed joystick %d, %s", joysticks[instance_id]->joynum+1, joysticks[instance_id]->description.c_str());
     joysticks.erase(instance_id);
     return true;
+}
+
+// The connected devices by number, as win32's list: repeated names get " #2"...
+std::vector<JoyDeviceEntry> JoyDevices::device_list() const
+{
+    std::vector<JoyDeviceEntry> list;
+    for (auto &j : joysticks)
+        list.push_back({ j.second->joynum, !j.second->gamepad_mapping.empty(), j.second->name });
+    std::sort(list.begin(), list.end(), [](const JoyDeviceEntry &a, const JoyDeviceEntry &b) {
+        return a.joynum < b.joynum;
+    });
+
+    std::vector<std::string> names;
+    for (auto &e : list)
+        names.push_back(e.name);
+    for (size_t i = 0; i < list.size(); i++)
+    {
+        const int n = std::count(names.begin(), names.begin() + i, names[i]) + 1;
+        if (n > 1)
+            list[i].name += " #" + std::to_string(n);
+    }
+    return list;
+}
+
+const JoyDevice *JoyDevices::find(int joynum) const
+{
+    for (auto &j : joysticks)
+        if (j.second->joynum == joynum)
+            return j.second.get();
+    return nullptr;
 }
 
 JoyDevice *JoyDevices::get_joystick(SDL_JoystickID instance_id)

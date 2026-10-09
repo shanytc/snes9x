@@ -57,6 +57,11 @@ class Snes9xPreferences final : public GtkBuilderWindow
     void update_pad_picture();
     std::vector<Binding> held_joystick;
 
+    // The joypad page's device row, as win32's: the controller Auto-Assign maps.
+    void update_device_combo();
+    void refresh_device_combo();
+    void auto_assign_joypad();
+
   private:
     bool draw_pad_picture(const Cairo::RefPtr<Cairo::Context> &cr);
     bool bound_on_current_pad(const Binding &binding);
@@ -76,6 +81,9 @@ class Snes9xPreferences final : public GtkBuilderWindow
     Gtk::Menu pad_style_menu;
     Gtk::RadioMenuItem *pad_style_items[3] = {};
     bool syncing_pad_style = false;
+    std::map<int, int> device_choice;	// joypad -> the device picked for it while the dialog is open
+    std::vector<JoyDeviceEntry> listed_devices;
+    bool updating_device_combo = false;
 
     void get_settings_from_dialog();
     void move_settings_to_dialog();

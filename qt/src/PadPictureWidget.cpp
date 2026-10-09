@@ -156,14 +156,17 @@ void PadPictureWidget::mouseMoveEvent(QMouseEvent *event)
 
 void PadPictureWidget::mousePressEvent(QMouseEvent *event)
 {
-    const int button = event->button() == Qt::LeftButton ? buttonAt(event->position()) : 0;
-    if (button && buttonClicked)
+    if (event->button() != Qt::LeftButton)
     {
-        buttonClicked(button);
-        event->accept();
+        QWidget::mousePressEvent(event);
         return;
     }
-    QWidget::mousePressEvent(event);
+    const int button = buttonAt(event->position());
+    if (button && buttonClicked)
+        buttonClicked(button);
+    else if (!button && backgroundClicked)
+        backgroundClicked();
+    event->accept();
 }
 
 void PadPictureWidget::leaveEvent(QEvent *event)

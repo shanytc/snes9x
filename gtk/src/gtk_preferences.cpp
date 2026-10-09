@@ -224,7 +224,9 @@ void Snes9xPreferences::connect_signals()
             pad_style_menu.popup_at_pointer((GdkEvent *)event);
             return true;
         }
-        const int button = event->button == 1 ? pad_picture_button_at(event->x, event->y) : 0;
+        if (event->button != 1)
+            return false;
+        const int button = pad_picture_button_at(event->x, event->y);
         for (int i = 0; button && i < kMainLinks; i++)
             if (kLinkButtons[i] == button)
             {
@@ -232,7 +234,14 @@ void Snes9xPreferences::connect_signals()
                 get_object<Gtk::Entry>(b_links[i].button_name)->grab_focus();
                 return true;
             }
-        return false;
+
+        // As win32: a click off the buttons ends editing
+        if (get_focused_binding() >= 0)
+        {
+            window->unset_focus();
+            update_pad_picture();
+        }
+        return true;
     });
     build_pad_style_menu();
 

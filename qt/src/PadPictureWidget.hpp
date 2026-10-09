@@ -4,7 +4,8 @@
 #include <functional>
 
 // The Controllers panel's pad picture: held buttons lit, the hovered and edited ones ringed
-// (padpicture.cpp draws them), a click picks a button and the right-click menu the pad style.
+// (padpicture.cpp draws them), a click picks a button or, off them, ends editing, and the
+// right-click menu picks the pad style.
 class PadPictureWidget : public QWidget
 {
   public:
@@ -14,6 +15,7 @@ class PadPictureWidget : public QWidget
     void setMarked(int buttons);
 
     std::function<void(int button)> buttonClicked;
+    std::function<void()> backgroundClicked;
     std::function<void(int style)> styleChosen;
 
   protected:

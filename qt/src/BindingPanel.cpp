@@ -51,13 +51,19 @@ void BindingPanel::showEvent(QShowEvent *event)
 
 void BindingPanel::hideEvent(QHideEvent *event)
 {
+    cancelBinding();
+    app->joypads_changed_callback = nullptr;
+
+    QWidget::hideEvent(event);
+}
+
+// Stops waiting for input, leaving the cell's binding as it was.
+void BindingPanel::cancelBinding()
+{
     if (awaiting_binding)
         updateCellFromBinding(cell_row, cell_column);
     awaiting_binding = false;
     setRedirectInput(false);
-    app->joypads_changed_callback = nullptr;
-
-    QWidget::hideEvent(event);
 }
 
 void BindingPanel::setRedirectInput(bool redirect)

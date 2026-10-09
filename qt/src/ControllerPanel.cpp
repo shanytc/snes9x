@@ -96,6 +96,13 @@ ControllerPanel::ControllerPanel(EmuApplication *app_)
                 break;
             }
     };
+    // As win32: a click off the buttons ends editing.
+    pad_picture->backgroundClicked = [&] {
+        cancelBinding();
+        tableWidget_controller->clearSelection();
+        tableWidget_controller->clearFocus();
+        updatePadPicture();
+    };
     pad_picture->styleChosen = [&](int style) {
         this->app->config->pad_picture_style = style;
     };

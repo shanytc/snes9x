@@ -51,6 +51,7 @@
 #include "../snes9x.h"
 #include "../memmap.h"
 #include "../biosmanager.h"
+#include "../padpicture.h"
 #include "../cpuexec.h"
 #include "../display.h"
 #include "../screenshot.h"
@@ -17048,63 +17049,6 @@ static int s_hoverField = 0, s_markedField = 0;	// outlined: the field under the
 
 #define INPUT_PICTURE_TIMER 98
 
-// pad_usa.bmp / pad_sfc.bmp share one outline; each button's shape in source pixels.
-enum
-{
-	PADPIC_UP = 1 << 0, PADPIC_DOWN = 1 << 1, PADPIC_LEFT = 1 << 2, PADPIC_RIGHT = 1 << 3,
-	PADPIC_A = 1 << 4, PADPIC_B = 1 << 5, PADPIC_X = 1 << 6, PADPIC_Y = 1 << 7,
-	PADPIC_L = 1 << 8, PADPIC_R = 1 << 9, PADPIC_START = 1 << 10, PADPIC_SELECT = 1 << 11
-};
-
-// n == 1: a circle (centre, radius); n == 0: a capsule (end centres, radius)
-struct PadPicShape { uint16 mask; uint8 n; float pt[16][2]; };
-
-static const PadPicShape kPadPicShapes[] =
-{
-	{ PADPIC_UP,     6, { { 169, 146 }, { 178, 129 }, { 179, 129 }, { 187, 143 }, { 188, 148 }, { 169, 148 } } },
-	{ PADPIC_DOWN,   6, { { 169, 208 }, { 188, 208 }, { 188, 211 }, { 179, 227 }, { 178, 227 }, { 169, 210 } } },
-	{ PADPIC_LEFT,   5, { { 130, 176 }, { 148, 167 }, { 148, 187 }, { 146, 187 }, { 130, 178 } } },
-	{ PADPIC_RIGHT,  5, { { 209, 167 }, { 228, 177 }, { 228, 178 }, { 212, 187 }, { 209, 187 } } },
-	{ PADPIC_A,      1, { { 694.3f, 191.3f }, { 24.5f } } },
-	{ PADPIC_B,      1, { { 615.8f, 247.5f }, { 24.5f } } },
-	{ PADPIC_X,      1, { { 633.5f, 129.2f }, { 24.5f } } },
-	{ PADPIC_Y,      1, { { 555.1f, 185.4f }, { 24.5f } } },
-	{ PADPIC_L,      6, { { 124,  21 }, { 137,  17 }, { 165,  13 }, { 251,  13 }, { 252,  24 }, { 125,  29 } } },
-	{ PADPIC_R,      8, { { 545,  14 }, { 546,  13 }, { 626,  13 }, { 663,  18 }, { 672,  21 }, { 671,  30 }, { 545,  24 }, { 544,  23 } } },
-	{ PADPIC_SELECT, 0, { { 315.6f, 222.2f }, { 350.1f, 196.0f }, { 10.5f } } },
-	{ PADPIC_START,  0, { { 397.5f, 222.8f }, { 431.9f, 196.5f }, { 10.5f } } }
-};
-
-static float PadPicSegmentDistance(float x, float y, const float *a, const float *b)
-{
-	const float dx = b[0] - a[0], dy = b[1] - a[1];
-	float t = ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy);
-	t = t < 0 ? 0 : t > 1 ? 1 : t;
-	return hypotf(x - a[0] - t * dx, y - a[1] - t * dy);
-}
-
-// Signed distance (source pixels) from the shape's edge; negative inside.
-static float PadPicDistance(const PadPicShape &b, float x, float y)
-{
-	if (b.n == 1)
-		return hypotf(x - b.pt[0][0], y - b.pt[0][1]) - b.pt[1][0];
-	if (b.n == 0)
-		return PadPicSegmentDistance(x, y, b.pt[0], b.pt[1]) - b.pt[2][0];
-
-	float d = 1e9f;
-	bool inside = false;
-	for (int i = 0, j = b.n - 1; i < b.n; j = i++)
-	{
-		const float *p = b.pt[i], *q = b.pt[j];
-		const float e = PadPicSegmentDistance(x, y, q, p);
-		if (e < d)
-			d = e;
-		if ((p[1] > y) != (q[1] > y) && x < (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]) + p[0])
-			inside = !inside;
-	}
-	return inside ? -d : d;
-}
-
 // The binding field a pad picture shape stands for; turbo rows bind turbo modes in the d-pad slots.
 static int PadPicField(int mask)
 {
@@ -17169,23 +17113,7 @@ static LRESULT CALLBACK InputPictureSubclassProc(HWND hWnd, UINT msg, WPARAM wPa
 	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
 
-// A held face button takes the real pad's colour: lavender/purple (USA), or the
-// European and Super Famicom pads' blue X, green Y, red A, yellow B.
-static COLORREF PadPicFaceColor(int mask)
-{
-	const bool sfc = (s_panelSource != IDB_PAD_USA);
-	switch (mask)
-	{
-		case PADPIC_X: return sfc ? RGB(40, 105, 200) : RGB(185, 182, 232);
-		case PADPIC_Y: return sfc ? RGB(60, 150, 105) : RGB(185, 182, 232);
-		case PADPIC_A: return sfc ? RGB(190, 50, 50) : RGB(80, 72, 172);
-		case PADPIC_B: return sfc ? RGB(245, 210, 70) : RGB(80, 72, 172);
-	}
-	return CLR_INVALID;
-}
-
-// Each held button's own shape with a rim inside its edge, anti-aliased from 4x4
-// samples per pixel.
+// The held buttons lit, the hovered and edited ones ringed (padpicture.cpp draws both).
 static void DrawPadPictureLit(HWND hDlg)
 {
 	if (!s_panelBase || !s_panelBitmap)
@@ -17204,61 +17132,12 @@ static void DrawPadPictureLit(HWND hDlg)
 	HDC screen = GetDC(hDlg);
 	GetDIBits(screen, s_panelBase, 0, h, px.data(), &bi, DIB_RGB_COLORS);
 
-	const float s = (float) s_panelScale;
-	for (const PadPicShape &b : kPadPicShapes)
-	{
-		const bool lit = s_padLit >= 0 && (s_padLit & b.mask);
-		const float ring = InputPictureOutlined(PadPicField(b.mask)) ? 2.0f : 0.0f;	// display pixels outside the edge
-		if (!lit && !ring)
-			continue;
-
-		// Face buttons in the pad's colours, d-pad arrows and Start/Select yellow, the shoulders a blue tint
-		COLORREF fill = PadPicFaceColor(b.mask), rim;
-		float fillAlpha = 1.0f, rimWidth = 1.0f;
-		if (fill != CLR_INVALID)
-			rim = RGB(GetRValue(fill) * 7 / 10, GetGValue(fill) * 7 / 10, GetBValue(fill) * 7 / 10);
-		else if (b.mask & (PADPIC_UP | PADPIC_DOWN | PADPIC_LEFT | PADPIC_RIGHT | PADPIC_START | PADPIC_SELECT))
-			fill = RGB(255, 210, 0), rim = RGB(200, 140, 0);
-		else
-			fill = RGB(80, 170, 255), rim = RGB(40, 130, 230), fillAlpha = 120 / 255.0f, rimWidth = 2.0f;
-
-		float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-		const float r = b.n == 1 ? b.pt[1][0] : b.n == 0 ? b.pt[2][0] : 0;
-		for (int i = 0; i < (b.n == 1 ? 1 : b.n == 0 ? 2 : b.n); i++)
-		{
-			x0 = (std::min)(x0, b.pt[i][0] - r);
-			y0 = (std::min)(y0, b.pt[i][1] - r);
-			x1 = (std::max)(x1, b.pt[i][0] + r);
-			y1 = (std::max)(y1, b.pt[i][1] + r);
-		}
-		const int left = (std::max)(0, (int) (x0 * s) - 3), top = (std::max)(0, (int) (y0 * s) - 3);
-		const int right = (std::min)(w - 1, (int) (x1 * s) + 3), bottom = (std::min)(h - 1, (int) (y1 * s) + 3);
-		const COLORREF outline = RGB(255, 200, 0);
-
-		for (int y = top; y <= bottom; y++)
-			for (int x = left; x <= right; x++)
-			{
-				int inFill = 0, inRim = 0, inRing = 0;
-				for (int sy = 0; sy < 4; sy++)
-					for (int sx = 0; sx < 4; sx++)
-					{
-						const float d = PadPicDistance(b, (x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
-						if (d >= 0)
-							inRing += (d < ring);
-						else if (lit)
-							(d < -rimWidth ? inFill : inRim)++;
-					}
-				if (!inFill && !inRim && !inRing)
-					continue;
-
-				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cg = inRing / 16.0f, cb = 1.0f - cf - cr - cg;
-				uint32 &c = px[y * w + x];
-				const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + GetBValue(outline) * cg + 0.5f);
-				const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + GetGValue(outline) * cg + 0.5f);
-				const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + GetRValue(outline) * cg + 0.5f);
-				c = (red << 16) | (green << 8) | blue;
-			}
-	}
+	int outlined = 0;
+	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
+		if (InputPictureOutlined(PadPicField(button)))
+			outlined |= button;
+	const int style = s_panelSource == IDB_PAD_USA ? S9X_PADPIC_USA : s_panelSource == IDB_PAD_EUR ? S9X_PADPIC_EUROPE : S9X_PADPIC_JAPAN;
+	S9xPadPictureDraw(px.data(), w, h, w, (float) s_panelScale, style, s_padLit < 0 ? 0 : s_padLit, outlined);
 
 	SetDIBits(screen, s_panelBitmap, 0, h, px.data(), &bi, DIB_RGB_COLORS);
 	ReleaseDC(hDlg, screen);
@@ -17309,17 +17188,11 @@ static int InputPictureFieldAt(HWND hDlg, POINT pt)
 		return 0;
 	const float x = (pt.x - r.left + 0.5f) / (float) s_panelScale, y = (pt.y - r.top + 0.5f) / (float) s_panelScale;
 
-	int field = 0;
-	float nearest = 8.0f;	// source pixels of slack, so the small arrows are easy to hit
-	for (const PadPicShape &b : kPadPicShapes)
-	{
-		const float d = PadPicDistance(b, x, y);
-		if (d < nearest && PadPicField(b.mask))
-		{
-			nearest = d;
-			field = PadPicField(b.mask);
-		}
-	}
+	int clickable = 0;
+	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
+		if (PadPicField(button))
+			clickable |= button;
+	const int field = PadPicField(S9xPadPictureButtonAt(x, y, clickable));
 	return field && IsWindowEnabled(GetDlgItem(hDlg, field)) ? field : 0;
 }
 
@@ -17429,6 +17302,7 @@ static void ShowInputPicture(HWND hDlg, int index)
 	else
 		UpdateInputPictureLit(hDlg);
 }
+
 // The controller list keeps focus, so keys pressed to try bindings must not switch
 // rows through its closed-list navigation. F4 and Alt+Down still open it.
 static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)

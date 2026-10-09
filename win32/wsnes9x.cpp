@@ -17594,6 +17594,9 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			break;
 
 		case IDOK:
+			// Enter is a bindable key to try out, not a shortcut for OK
+			if (GetKeyState(VK_RETURN) & 0x8000)
+				break;
 			KillTimer(hDlg, 99);
 			s_inputConfigHwnd = NULL;
 			Settings.UpAndDown = IsDlgButtonChecked(hDlg, IDC_ALLOWLEFTRIGHT);

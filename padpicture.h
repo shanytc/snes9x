@@ -36,7 +36,12 @@ enum
 int S9xPadPictureButtonAt (float x, float y, int allowed, float slack = 8.0f);
 
 // Lights the `lit` buttons and rings the `outlined` ones over a copy of the picture scaled by
-// `scale`: w x h pixels of 0x..RRGGBB, `stride` pixels per row, the top byte kept.
-void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int style, int lit, int outlined);
+// `scale`: w x h pixels of 0x..RRGGBB, `stride` pixels per row, the top byte kept. If
+// `premultiplied`, the top byte is alpha (colours premultiplied by it), raised under the lights.
+void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int style, int lit, int outlined, bool premultiplied = false);
+
+// Clears the dialog grey around the full-size picture for themed backgrounds: 0x..RRGGBB in,
+// premultiplied 0xAARRGGBB out. The outline's soft edge becomes black ink, the L and R labels `label`.
+void S9xPadPictureMatte (uint32_t *px, int stride, uint32_t label);
 
 #endif

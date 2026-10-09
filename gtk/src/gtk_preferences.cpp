@@ -1497,9 +1497,12 @@ bool Snes9xPreferences::draw_pad_picture(const Cairo::RefPtr<Cairo::Context> &cr
     if (w <= 0 || h <= 0)
         return true;
 
-    // The style's picture in device pixels, kept until the size or style changes.
+    // The style's picture in device pixels, kept until the size, style or theme changes.
     const int style = std::clamp(config->pad_picture_style, 0, S9X_PADPIC_NUM_STYLES - 1);
-    if (!pad_picture_base || pad_picture_base_style != style ||
+    const Gdk::RGBA text = area->get_style_context()->get_color(area->get_state_flags());
+    const uint32_t label = (uint32_t)std::lround(text.get_red() * 255) << 16 |
+                           (uint32_t)std::lround(text.get_green() * 255) << 8 | (uint32_t)std::lround(text.get_blue() * 255);
+    if (!pad_picture_base || pad_picture_base_style != style || pad_picture_base_label != label ||
         pad_picture_base->get_width() != w || pad_picture_base->get_height() != h)
     {
         const unsigned char *const pictures[S9X_PADPIC_NUM_STYLES] = { pad_usa, pad_eur, pad_sfc };
@@ -1507,30 +1510,41 @@ bool Snes9xPreferences::draw_pad_picture(const Cairo::RefPtr<Cairo::Context> &cr
         auto loader = Gdk::PixbufLoader::create();
         loader->write(pictures[style], sizes[style]);
         loader->close();
-        auto pixbuf = loader->get_pixbuf()->scale_simple(w, h, Gdk::INTERP_BILINEAR);
+        auto pixbuf = loader->get_pixbuf();
 
-        pad_picture_base = Cairo::ImageSurface::create(Cairo::FORMAT_RGB24, w, h);
-        pad_picture_base->flush();
-        unsigned char *data = pad_picture_base->get_data();
-        const int stride = pad_picture_base->get_stride();
+        // Its surround cleared at full size, then scaled
+        auto full = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, S9X_PADPIC_WIDTH, S9X_PADPIC_HEIGHT);
+        full->flush();
+        unsigned char *data = full->get_data();
+        const int stride = full->get_stride();
         const guint8 *pixels = pixbuf->get_pixels();
         const int rowstride = pixbuf->get_rowstride(), channels = pixbuf->get_n_channels();
-        for (int y = 0; y < h; y++)
+        for (int y = 0; y < S9X_PADPIC_HEIGHT; y++)
         {
             uint32_t *row = (uint32_t *)(data + (size_t)y * stride);
             const guint8 *p = pixels + (size_t)y * rowstride;
-            for (int x = 0; x < w; x++, p += channels)
-                row[x] = 0xff000000 | (p[0] << 16) | (p[1] << 8) | p[2];
+            for (int x = 0; x < S9X_PADPIC_WIDTH; x++, p += channels)
+                row[x] = (p[0] << 16) | (p[1] << 8) | p[2];
         }
-        pad_picture_base->mark_dirty();
+        S9xPadPictureMatte((uint32_t *)data, stride / 4, label);
+        full->mark_dirty();
+
+        pad_picture_base = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, w, h);
+        auto scaler = Cairo::Context::create(pad_picture_base);
+        scaler->scale((double)w / S9X_PADPIC_WIDTH, (double)h / S9X_PADPIC_HEIGHT);
+        scaler->set_source(full, 0, 0);
+        cairo_pattern_set_filter(cairo_get_source(scaler->cobj()), CAIRO_FILTER_GOOD);
+        scaler->paint();
+        pad_picture_base->flush();
         pad_picture_base_style = style;
+        pad_picture_base_label = label;
     }
 
-    auto shown = Cairo::ImageSurface::create(Cairo::FORMAT_RGB24, w, h);
+    auto shown = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, w, h);
     shown->flush();
     memcpy(shown->get_data(), pad_picture_base->get_data(), (size_t)shown->get_stride() * h);
     S9xPadPictureDraw((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf, style,
-                      pad_picture_lit, pad_picture_outlined | pad_picture_hover);
+                      pad_picture_lit, pad_picture_outlined | pad_picture_hover, true);
     shown->mark_dirty();
     cairo_surface_set_device_scale(shown->cobj(), sf, sf);
     cr->set_source(shown, (width - w / (double)sf) / 2, 0);

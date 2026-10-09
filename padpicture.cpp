@@ -7,6 +7,7 @@
 #include "padpicture.h"
 #include <math.h>
 #include <algorithm>
+#include <vector>
 
 namespace
 {
@@ -98,7 +99,7 @@ int S9xPadPictureButtonAt (float x, float y, int allowed, float slack)
 	return button;
 }
 
-void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int style, int lit, int outlined)
+void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int style, int lit, int outlined, bool premultiplied)
 {
 	const float s = scale;
 	const PadPicColour outline = { 255, 200, 0 };
@@ -152,7 +153,87 @@ void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int
 				const int blue = (int) ((c & 0xff) * cb + fill.b * cf + rim.b * cr + outline.b * cg + 0.5f);
 				const int green = (int) (((c >> 8) & 0xff) * cb + fill.g * cf + rim.g * cr + outline.g * cg + 0.5f);
 				const int red = (int) (((c >> 16) & 0xff) * cb + fill.r * cf + rim.r * cr + outline.r * cg + 0.5f);
-				c = (c & 0xff000000) | (red << 16) | (green << 8) | blue;
+				const uint32_t alpha = premultiplied ? (uint32_t) ((c >> 24) * cb + 255 * (1.0f - cb) + 0.5f) << 24 : c & 0xff000000;
+				c = alpha | (red << 16) | (green << 8) | blue;
 			}
+	}
+}
+
+// The grey around the pad (win32's dialog colour), and the darkest the outline's soft edge reaches.
+static const int kPadPicGrey = 240, kPadPicInk = 128;
+
+template <class F> static void PadPicNeighbours (int i, F visit)
+{
+	const int w = S9X_PADPIC_WIDTH, x = i % w;
+	if (x > 0) visit(i - 1);
+	if (x < w - 1) visit(i + 1);
+	if (i >= w) visit(i - w);
+	if (i < w * (S9X_PADPIC_HEIGHT - 1)) visit(i + w);
+}
+
+void S9xPadPictureMatte (uint32_t *px, int stride, uint32_t label)
+{
+	const int w = S9X_PADPIC_WIDTH, n = w * S9X_PADPIC_HEIGHT;
+	std::vector<int> grey(n);
+	for (int i = 0; i < n; i++)
+	{
+		const uint32_t c = px[i / w * stride + i % w];
+		grey[i] = (((c >> 16) & 0xff) + ((c >> 8) & 0xff) + (c & 0xff)) / 3;
+	}
+
+	// -1: the surround, lighter than ink and reached from the edges
+	std::vector<int> part(n, 0), queue;
+	for (int x = 0; x < w; x++)
+		queue.push_back(x), queue.push_back(n - w + x);
+	for (int i = w; i < n - w; i += w)
+		queue.push_back(i), queue.push_back(i + w - 1);
+	for (size_t q = 0; q < queue.size(); q++)
+	{
+		const int i = queue[q];
+		if (part[i] || grey[i] <= kPadPicInk)
+			continue;
+		part[i] = -1;
+		PadPicNeighbours(i, [&](int j) { if (!part[j]) queue.push_back(j); });
+	}
+
+	// 1, 2...: the pieces left, the largest the pad and the rest its L and R labels
+	int pieces = 0, pad = 0;
+	size_t padSize = 0;
+	for (int s = 0; s < n; s++)
+	{
+		if (part[s])
+			continue;
+		part[s] = ++pieces;
+		queue.assign(1, s);
+		for (size_t q = 0; q < queue.size(); q++)
+			PadPicNeighbours(queue[q], [&](int j) { if (!part[j]) part[j] = pieces, queue.push_back(j); });
+		if (queue.size() > padSize)
+			padSize = queue.size(), pad = pieces;
+	}
+
+	// The surround's soft edges take the colour of the nearest piece's ink
+	std::vector<int> nearest(part);
+	queue.clear();
+	for (int i = 0; i < n; i++)
+		if (part[i] > 0)
+			queue.push_back(i);
+	for (size_t q = 0; q < queue.size(); q++)
+	{
+		const int i = queue[q];
+		PadPicNeighbours(i, [&](int j) { if (nearest[j] < 0) nearest[j] = nearest[i], queue.push_back(j); });
+	}
+
+	// Ink as opaque as it's darker than the grey, so it looks the same over the grey
+	for (int i = 0; i < n; i++)
+	{
+		uint32_t &c = px[i / w * stride + i % w];
+		if (part[i] == pad)
+		{
+			c |= 0xff000000;
+			continue;
+		}
+		const uint32_t a = ((std::max)(0, kPadPicGrey - grey[i]) * 255 + kPadPicGrey / 2) / kPadPicGrey;
+		const uint32_t ink = nearest[i] == pad ? 0 : label;
+		c = a << 24 | (((ink >> 16) & 0xff) * a + 127) / 255 << 16 | (((ink >> 8) & 0xff) * a + 127) / 255 << 8 | ((ink & 0xff) * a + 127) / 255;
 	}
 }

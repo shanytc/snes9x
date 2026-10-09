@@ -20,7 +20,16 @@ PadPictureWidget::PadPictureWidget(QWidget *parent)
     setFixedHeight((int)std::ceil(S9X_PADPIC_HEIGHT * kPadPictureScale));
     setMinimumWidth(S9X_PADPIC_WIDTH / 4);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    source = QImage(kPadPictureFiles[pad_style]);
+    loadSource();
+}
+
+// The style's picture, its surround cleared and the L and R labels in the palette's text colour.
+void PadPictureWidget::loadSource()
+{
+    source = QImage(kPadPictureFiles[pad_style]).convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (!source.isNull())
+        S9xPadPictureMatte((uint32_t *)source.bits(), source.bytesPerLine() / 4,
+                           palette().color(QPalette::WindowText).rgb() & 0xffffff);
 }
 
 void PadPictureWidget::setPadStyle(int style)
@@ -30,7 +39,7 @@ void PadPictureWidget::setPadStyle(int style)
     if (style == pad_style)
         return;
     pad_style = style;
-    source = QImage(kPadPictureFiles[style]);
+    loadSource();
     rescale();
     update();
 }
@@ -96,7 +105,7 @@ void PadPictureWidget::rescale()
     const QRectF r = pictureRect();
     const int w = (int)std::lround(r.width() * base_dpr), h = (int)std::lround(r.height() * base_dpr);
     if (!source.isNull() && w > 0 && h > 0)
-        base = source.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB32);
+        base = source.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_ARGB32_Premultiplied);
     render();
 }
 
@@ -108,7 +117,7 @@ void PadPictureWidget::render()
     shown = base.copy();
     const float s = (float)shown.width() / S9X_PADPIC_WIDTH;
     S9xPadPictureDraw((uint32_t *)shown.bits(), shown.width(), shown.height(), shown.bytesPerLine() / 4,
-                      s, pad_style, lit, marked | hover);
+                      s, pad_style, lit, marked | hover, true);
     shown.setDevicePixelRatio(base_dpr);
 }
 
@@ -120,6 +129,17 @@ void PadPictureWidget::paintEvent(QPaintEvent *)
         return;
     QPainter painter(this);
     painter.drawImage(pictureRect().topLeft(), shown);
+}
+
+void PadPictureWidget::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange)
+    {
+        loadSource();
+        rescale();
+        update();
+    }
 }
 
 void PadPictureWidget::resizeEvent(QResizeEvent *event)

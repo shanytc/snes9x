@@ -72,6 +72,7 @@ class Snes9xPreferences final : public GtkBuilderWindow
     int pad_picture_hover = 0;
     Cairo::RefPtr<Cairo::ImageSurface> pad_picture_base;	// scaled to the area, unlit
     int pad_picture_base_style = -1;
+    uint32_t pad_picture_base_label = 0;	// the theme's text colour, for the L and R labels
     Gtk::Menu pad_style_menu;
     Gtk::RadioMenuItem *pad_style_items[3] = {};
     bool syncing_pad_style = false;

@@ -18,6 +18,7 @@ class PadPictureWidget : public QWidget
 
   protected:
     void paintEvent(QPaintEvent *event) override;
+    void changeEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
@@ -29,6 +30,7 @@ class PadPictureWidget : public QWidget
     QRectF pictureRect() const;
     int buttonAt(QPointF pos) const;
     void setHover(int button);
+    void loadSource();
     void rescale();
     void render();
 
@@ -36,7 +38,7 @@ class PadPictureWidget : public QWidget
     int lit = 0;
     int marked = 0;
     int hover = 0;
-    QImage source;	// the style's picture, full size
+    QImage source;	// the style's picture, full size, its surround transparent
     QImage base;	// scaled to the widget's device pixels, unlit
     QImage shown;	// base with the buttons lit
     qreal base_dpr = 0;

@@ -436,6 +436,7 @@ bool EmuConfig::setDefaults(int section)
         gb_bios_enabled = true;
         gb_boot_policy = S9X_GBBOOT_AUTO;
         for (auto &p : bios_paths) p.clear();
+        for (int &m : chip_modes) m = S9X_CHIP_AUTO;
         nss_dip_switches = 0x0c;
         nss_joypad_watchdog = false;
         sfcbox_osd_backdrop = true;
@@ -801,6 +802,15 @@ void EmuConfig::config(const std::string &filename, bool write)
         String(S9xGetBiosSlotInfo(i)->key, bios_paths[i], S9xGetBiosSlotInfo(i)->label);
         if (!write)
             S9xSetBiosPath(i, bios_paths[i].c_str());
+        if (!S9xBiosSlotHasChipMode(i))
+            continue;
+        Int(std::string(S9xGetBiosSlotInfo(i)->key) + "Mode", chip_modes[i], "chip emulation, picked in File -> BIOS Manager: 1 = Legacy (HLE), 2 = Native (LLE), 3 = Firmware (the file above), 0 = Native (the default)");
+        if (!write)
+        {
+            if (chip_modes[i] < S9X_CHIP_AUTO || chip_modes[i] > S9X_CHIP_FIRMWARE)
+                chip_modes[i] = S9X_CHIP_AUTO;
+            S9xSetChipMode(i, chip_modes[i]);
+        }
     }
     EndSection();
 

@@ -257,6 +257,78 @@ struct retro_core_option_definition option_defs_us[] = {
       "100%"
    },
    {
+      "snes9x_chip_dsp1",
+      "DSP-1 Emulation",
+      "How the DSP-1 chip runs (Pilotwings). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: fastest, but some games glitch. 'Firmware' runs the chip from its firmware, dsp1.bin or 'DSP1 (World) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      "snes9x_chip_dsp1b",
+      "DSP-1B Emulation",
+      "How the DSP-1B chip runs (the other DSP-1 games: Super Mario Kart, Ballz 3D, Lock On, Super Air Diver, Suzuka 8 Hours and more). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: fastest, but some games glitch. 'Firmware' runs the chip from its firmware, dsp1b.bin or 'DSP1 B (World) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      "snes9x_chip_dsp2",
+      "DSP-2 Emulation",
+      "How the DSP-2 chip runs (Dungeon Master). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: fastest, but some games glitch. 'Firmware' runs the chip from its firmware, dsp2.bin or 'DSP2 (World) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      "snes9x_chip_dsp3",
+      "DSP-3 Emulation",
+      "How the DSP-3 chip runs (SD Gundam GX). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: fastest, but some games glitch. 'Firmware' runs the chip from its firmware, dsp3.bin or 'DSP3 (Japan) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      "snes9x_chip_dsp4",
+      "DSP-4 Emulation",
+      "How the DSP-4 chip runs (Top Gear 3000). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: fastest, but some games glitch. 'Firmware' runs the chip from its firmware, dsp4.bin or 'DSP4 (World) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      "snes9x_chip_cx4",
+      "Cx4 Emulation",
+      "How the Cx4 chip runs (Mega Man X2 and X3). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: fastest, but some games glitch. 'Firmware' runs the chip from its data ROM, cx4.bin or 'CX4 (World) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
       "snes9x_overclock_cycles",
       "Reduce Slowdown (Hack, Unsafe)",
       "Overclock SNES CPU. May cause games to crash! Use 'Light' for shorter loading times, 'Compatible' for most games exhibiting slowdown and 'Max' only if absolutely required (Gradius 3, Super R-type...).",

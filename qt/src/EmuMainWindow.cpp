@@ -58,6 +58,9 @@
 #include "sfcbox.h"
 #include "sgb/sgb.h"
 #include "superdisc.h"
+#include "rp2040cart.h"
+#include "upd7725.h"
+#include "hg51b.h"
 #include "movie.h"
 #include "snapshot.h"
 #include "fscompat.h"
@@ -610,11 +613,16 @@ void EmuMainWindow::setEventTimer(int minutes, int display)
 
 void EmuMainWindow::updateEventTitle()
 {
-    // The Super Famicom Box swaps games under the SNES; the title follows.
+    // The Super Famicom Box swaps games under the SNES, and whether the game on
+    // screen runs its chip, and how, changes with that or a state saved under
+    // the HLE; the title follows both.
     static std::string box_title;
-    if (app.isCoreActive() && SFCBox.Active && box_title != S9xSFCBoxTitle())
+    static int         title_chip = -1;
+    const int          chip = S9xEnhancedChip();
+    if (app.isCoreActive() && ((SFCBox.Active && box_title != S9xSFCBoxTitle()) || chip != title_chip))
     {
-        box_title = S9xSFCBoxTitle();
+        box_title  = SFCBox.Active ? S9xSFCBoxTitle() : "";
+        title_chip = chip;
         updateWindowTitle();   // comes back here with the new base
         return;
     }
@@ -1009,21 +1017,28 @@ void EmuMainWindow::superDiscDebugMenu()
     S9xSetInfoString("Debug menu");
 }
 
-// Super Disc and Super Famicom Box sessions name the machine and what's in it.
-// Any other title (Kaillera's, say) is left alone unless it is a stale one of theirs.
+// Super Disc and Super Famicom Box sessions name the machine and what's in it,
+// any other cart its file, tagged while a DSP or Cx4 runs from its dump.
 void EmuMainWindow::updateWindowTitle()
 {
-    const char *machine = Settings.SuperDisc                       ? S9xSuperDiscTitle()
-                        : (app.isCoreActive() && SFCBox.Active)   ? S9xSFCBoxTitle()
-                                                                   : nullptr;
-    if (!machine && !windowTitle().startsWith("Super Disc (") &&
-        !windowTitle().startsWith("Super Famicom Box"))
+#ifdef KAILLERA_SUPPORT
+    if (KailleraServerIsRunning())
         return;
+#endif
+    // The game on screen runs a DSP or Cx4 as the chip, native or its dump, not the HLE.
+    const char *chip = S9xEnhancedChipTag();
+    QString name;
+    if (Settings.SuperDisc)
+        name = QString::fromUtf8(S9xSuperDiscTitle());
+    else if (app.isCoreActive() && SFCBox.Active)
+        name = QString::fromUtf8(S9xSFCBoxTitle()) + chip;
+    else if (app.isCoreActive() && Settings.RP2040Cart)
+        name = QString::fromUtf8(S9xRP2040CartTitle());
+    else if (app.isCoreActive() && !Memory.ROMFilename.empty())
+        name = QString::fromStdString(S9xBasenameNoExt(Memory.ROMFilename)) + chip;
     event_title_suffix.clear();
-    if (machine)
-        setWindowTitle(QString("%1 - SuperSnes9x %2")
-                           .arg(QString::fromUtf8(machine))
-                           .arg(VERSION_DISPLAY));
+    if (!name.isEmpty())
+        setWindowTitle(QString("%1 - SuperSnes9x %2").arg(name).arg(VERSION_DISPLAY));
     else
         setWindowTitle(QString("SuperSnes9x %1").arg(VERSION_DISPLAY));
     updateEventTitle();   // put the session-timer countdown back

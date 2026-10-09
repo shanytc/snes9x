@@ -300,6 +300,21 @@
     <ClInclude Include="..\rp2040cart.h">
       <Filter>APU</Filter>
     </ClInclude>
+    <ClInclude Include="..\upd7725.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
+    <ClInclude Include="..\upd7725n.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
+    <ClInclude Include="..\upd7725np.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
+    <ClInclude Include="..\hg51b.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
+    <ClInclude Include="..\hg51bn.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
     <ClInclude Include="cgMini.h">
       <Filter>GUI\VideoDriver</Filter>
     </ClInclude>
@@ -534,6 +549,27 @@
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\dsp4.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\upd7725.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp1n.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp2n.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp3n.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp4n.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\hg51b.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\hg51bn.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
     <ClCompile Include="..\fxdbg.cpp">

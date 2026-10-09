@@ -7,6 +7,7 @@
 #include <math.h>
 #include "snes9x.h"
 #include "memmap.h"
+#include "hg51b.h"
 #include "sar.h"
 
 static int16	C4SinTable[512] =
@@ -761,18 +762,30 @@ void S9xInitC4 (void)
 	// Stupid zsnes code, we can't do the logical thing without breaking savestates
 	// Memory.C4RAM = &Memory.FillRAM [0x6000];
 	memset(Memory.C4RAM, 0, 0x2000);
+
+	S9xHG51BReset();
 }
 
-uint8 S9xGetC4 (uint16 Address)
+uint8 S9xGetC4 (uint16 Address, int32 speed)
 {
+	// With its data ROM the chip itself runs.
+	if (S9xHG51BActive())
+		return (S9xHG51BRead(Address, speed));
+
 	if (Address == 0x7f5e)
 		return (0);
 
 	return (Memory.C4RAM[Address - 0x6000]);
 }
 
-void S9xSetC4 (uint8 byte, uint16 Address)
+void S9xSetC4 (uint8 byte, uint16 Address, int32 speed)
 {
+	if (S9xHG51BActive())
+	{
+		S9xHG51BWrite(byte, Address, speed);
+		return;
+	}
+
 	Memory.C4RAM[Address - 0x6000] = byte;
 
 	if (Address == 0x7f4f)

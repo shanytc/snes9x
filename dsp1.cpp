@@ -37,7 +37,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 static FILE	*LogFile = NULL;
 #endif
 
-static const uint16	DSP1ROM[1024] =
+const uint16	DSP1ROM[1024] =
 {
 	 0x0000,  0x0000,  0x0000,  0x0000,  0x0000,  0x0000,  0x0000,  0x0000,
 	 0x0000,  0x0000,  0x0000,  0x0000,  0x0000,  0x0000,  0x0000,  0x0000,

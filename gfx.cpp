@@ -2964,6 +2964,11 @@ void S9xShowBiosNotice (void)
 	s_bios_notice.clear();
 }
 
+bool8 S9xBiosNoticePending (void)
+{
+	return !s_bios_notice.empty();
+}
+
 bool8 S9xBiosMissing (void)
 {
 	return s_bios_missing;

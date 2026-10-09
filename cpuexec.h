@@ -57,6 +57,21 @@ void S9xCPUBusCycleSlow (int32 busLen);
 int32 S9xLastBusStart (void);
 void S9xSettleLastBus (int32 shift);
 
+// A chip's record of the CPU waiting on its status: the last read, and the turn of the wait loop at the
+// sites seen to repeat one (by PB:PC, the E flag and the FastROM speed, which can change a turn's length).
+struct SPollSkip
+{
+	uint32	pbpc;
+	int32	cycles, next, period;
+	uint64	line;
+	uint32	site[8];
+	int32	turn[8];
+};
+void S9xResetPollSkip (SPollSkip &p);
+// At a status read of a wait `loop` (the chip checked its code) that can't change for `room` cycles: the CPU
+// moved on by whole turns, short of the next event or IRQ timer; the cycles moved. `line`: the chip's line base.
+int32 S9xSkipPollTurns (SPollSkip &p, uint64 line, bool loop, int64 room);
+
 #ifndef INT32_MIN
 #define INT32_MIN	(-2147483647 - 1)
 #endif

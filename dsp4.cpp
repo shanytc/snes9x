@@ -1994,10 +1994,11 @@ static void DSP4_SetByte (void)
 			{
 				int16	a, b, c, d, m;
 
-				d = DSP4_READ_WORD();
-				c = DSP4_READ_WORD();
-				b = DSP4_READ_WORD();
+				// The firmware shifts each one's nibble in from the bottom, so the first lands on top.
 				a = DSP4_READ_WORD();
+				b = DSP4_READ_WORD();
+				c = DSP4_READ_WORD();
+				d = DSP4_READ_WORD();
 
 				DSP4_OP11(a, b, c, d, &m);
 

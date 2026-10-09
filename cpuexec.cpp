@@ -20,6 +20,8 @@ int32	S9xRefreshClocks = 0;
 #include "sfcbox.h"
 #include "superdisc.h"
 #include "rp2040cart.h"
+#include "upd7725.h"
+#include "hg51b.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
@@ -525,6 +527,68 @@ void S9xSettleLastBus (int32 shift)
 	CPU.LastRunStart = CPU.LastBusStart - 1;
 }
 
+void S9xResetPollSkip (SPollSkip &p)
+{
+	memset(&p, 0xff, sizeof(p));
+}
+
+// A turn of such a wait changes nothing but the clock, so whole turns can pass at once. A turn is two
+// reads apart, the same twice, within one event window; a gap that differs had something more in it.
+int32 S9xSkipPollTurns (SPollSkip &p, uint64 line, bool loop, int64 room)
+{
+	if (ONE_CYCLE != 6 || SLOW_ONE_CYCLE != 8)
+	{
+		p.pbpc = ~0u;
+		return (0);
+	}
+
+	const int32		c = CPU.Cycles;
+	const uint32	pbpc = Registers.PBPC;
+	const uint32	key = pbpc | (CheckEmulation() ? 0x80000000 : 0) | (CPU.FastROMSpeed == ONE_CYCLE ? 0x40000000 : 0);
+	const int32		period = (pbpc == p.pbpc && line == p.line && CPU.NextEvent == p.next) ? c - p.cycles : 0;
+	p.pbpc = pbpc;
+	p.cycles = c;
+	p.line = line;
+	p.next = CPU.NextEvent;
+
+	int	s = 0;
+	while (s < 8 && p.site[s] != key)
+		s++;
+	if (period > 0 && period == p.period && s == 8)
+	{
+		memmove(p.site + 1, p.site, 7 * sizeof(p.site[0]));
+		memmove(p.turn + 1, p.turn, 7 * sizeof(p.turn[0]));
+		p.site[0] = key;
+		p.turn[0] = period;
+		s = 0;
+	}
+	p.period = period;
+	if (s == 8 || (period > 0 && period != p.turn[s]) || p.turn[s] <= 0 || !loop)
+		return (0);
+	const int32	turn = p.turn[s];
+
+	if (CPU.InDMAorHDMA || CPU.HDMAEdge || CPU.NMIPending || CPU.IRQDeferOne || Timings.IRQFlagChanging ||
+		((CPU.IRQLine || CPU.IRQExternal) && !CheckFlag(IRQ)) || Settings.SA1)
+		return (0);
+#ifdef DEBUGGER
+	if (CPU.Flags & (BREAK_FLAG | TRACE_FLAG | SINGLE_STEP_FLAG | DEBUG_MODE_FLAG))
+		return (0);
+#endif
+
+	int64	lim = (int64) (CPU.NextEvent < Timings.NextIRQTimer ? CPU.NextEvent : Timings.NextIRQTimer) - 1 - c;
+	if (room < lim)
+		lim = room;
+	if (lim < turn)
+		return (0);
+
+	const int32	skip = (int32) (lim / turn) * turn;
+	CPU.Cycles += skip;
+	CPU.LastBusStart += skip;
+	CPU.LastRunStart += skip;
+	p.cycles = CPU.Cycles;
+	return (skip);
+}
+
 void S9xRunPendingHDMA (int32 busLen)
 {
 	if (PPU.HDMA && CPU.V_Counter <= PPU.ScreenHeight)
@@ -626,6 +690,12 @@ void S9xDoHEventProcessing (void)
 			// RP2040 cart: the chip runs on between the SNES's accesses to it.
 			if (Settings.RP2040Cart)
 				S9xRP2040CartEndScanline();
+
+			// DSP-n firmware and the Cx4: likewise, so a long gap isn't one burst of catch-up.
+			if (S9xUPD7725Active())
+				S9xUPD7725EndScanline();
+			if (S9xHG51BActive())
+				S9xHG51BEndScanline();
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

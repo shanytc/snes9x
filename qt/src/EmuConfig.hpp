@@ -240,6 +240,8 @@ struct EmuConfig
 
     // BIOS Manager paths, indexed by S9xBiosSlot. Persisted under [BIOS].
     std::string bios_paths[S9X_NUM_BIOS_SLOTS];
+    // How each chip slot runs (S9xChipMode), as [BIOS] <slot>Mode; unused for the others.
+    int chip_modes[S9X_NUM_BIOS_SLOTS];
 
     // Coin-op cabinets, same keys as win32's [Hack] entries.
     int nss_dip_switches;

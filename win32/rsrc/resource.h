@@ -700,10 +700,19 @@
 #define IDC_BIOSMGR_INTRO               3600
 #define IDC_BIOSMGR_INFO0               3620
 #define IDD_BIOSINFO                    193
+#define IDD_BIOSBENCH                   194
 #define IDC_BIOSINFO_TEXT               3640
 #define IDC_BIOSINFO_COPY               3641
 #define IDC_BIOSINFO_ICON               3642
 #define IDC_BIOSINFO_LIST               3643
+#define IDC_BIOSMGR_LIST                3644
+#define IDC_BIOSBENCH_CHART             3645
+#define IDC_BIOSBENCH_FRAME             3646
+#define IDC_BIOSBENCH_CHIP              3647
+#define IDC_BIOSBENCH_NOTE              3648
+#define IDC_BIOSMGR_CARDS               3649
+#define IDC_BIOSMGR_MODE0               3660
+#define IDC_BIOSMGR_BENCH0              3680
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361
@@ -997,9 +1006,9 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        194
+#define _APS_NEXT_RESOURCE_VALUE        195
 #define _APS_NEXT_COMMAND_VALUE         44451
-#define _APS_NEXT_CONTROL_VALUE         3644
+#define _APS_NEXT_CONTROL_VALUE         3700
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

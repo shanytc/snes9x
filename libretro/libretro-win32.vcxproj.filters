@@ -19,6 +19,12 @@
     <Filter Include="s9x-source\SGB">
       <UniqueIdentifier>{a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="s9x-source\unzip">
+      <UniqueIdentifier>{630175f5-bfba-49dd-b8e5-25b524cfca24}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="zlib">
+      <UniqueIdentifier>{981bade0-3382-4207-85a5-6abc04cc428f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\65c816.h">
@@ -177,6 +183,21 @@
     <ClInclude Include="..\rp2040cart.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\upd7725.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\upd7725n.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\upd7725np.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\hg51b.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\hg51bn.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\apu\apu.h">
       <Filter>s9x-source\APU</Filter>
     </ClInclude>
@@ -281,6 +302,27 @@
     <ClCompile Include="..\dsp4.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
+    <ClCompile Include="..\upd7725.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp1n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp2n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp3n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dsp4n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\hg51b.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\hg51bn.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
     <ClCompile Include="..\fxemu.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
@@ -301,6 +343,45 @@
     </ClCompile>
     <ClCompile Include="..\loadzip.cpp">
       <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\unzip\ioapi.c">
+      <Filter>s9x-source\unzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\unzip\unzip.c">
+      <Filter>s9x-source\unzip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\adler32.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\compress.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\crc32.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\deflate.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\infback.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\inffast.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\inflate.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\inftrees.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\trees.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\uncompr.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\win32\zlib\src\zutil.c">
+      <Filter>zlib</Filter>
     </ClCompile>
     <ClCompile Include="..\memmap.cpp">
       <Filter>s9x-source</Filter>

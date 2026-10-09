@@ -29,6 +29,12 @@ enum S9xBiosSlot
 	S9X_BIOS_NSS,           // nss-ic14.02.ic14 — Nintendo Super System supervisor
 	S9X_BIOS_NSS_FONT,      // m50458_char.bin  — its M50458 OSD charset
 	S9X_BIOS_SUPERDISC,     // SDBR_v0.95.sfc   — Super Disc BIOS cartridge
+	S9X_BIOS_DSP1,          // dsp1.bin     — DSP-1 firmware (Pilotwings)
+	S9X_BIOS_DSP1B,         // dsp1b.bin    — DSP-1B firmware (the other DSP-1 games)
+	S9X_BIOS_DSP2,          // dsp2.bin     — DSP-2 firmware
+	S9X_BIOS_DSP3,          // dsp3.bin     — DSP-3 firmware
+	S9X_BIOS_DSP4,          // dsp4.bin     — DSP-4 firmware
+	S9X_BIOS_CX4,           // cx4.bin      — Cx4 data ROM (Mega Man X2 and X3)
 	S9X_NUM_BIOS_SLOTS
 };
 
@@ -60,6 +66,67 @@ void        S9xSetBiosPath (int slot, const char *path);
 
 // Raw buffer for config backends that bind a char array (win32 wconfig).
 char *S9xGetBiosPathBuffer (int slot);
+
+// How a chip with firmware in its slot runs: the old high-level emulation, the native chip (exact,
+// no file), or the slot's firmware. AUTO until one is picked, which is native.
+enum S9xChipMode
+{
+	S9X_CHIP_AUTO = 0,
+	S9X_CHIP_HLE,
+	S9X_CHIP_NATIVE,
+	S9X_CHIP_FIRMWARE
+};
+
+// Whether the slot holds a chip's firmware, so has a mode (DSP-1 to DSP-4, Cx4).
+bool8   S9xBiosSlotHasChipMode (int slot);
+int     S9xGetChipMode (int slot);
+void    S9xSetChipMode (int slot, int mode);
+// The mode a load uses: the one picked, or what AUTO comes to.
+int     S9xChipModeInEffect (int slot);
+// Raw storage for config backends (win32 wconfig): a uint32 per slot.
+uint32 *S9xGetChipModeBuffer (int slot);
+
+// The BIOS Manager's sidebar, the same in every frontend: a heading per family over its slots.
+// A slot may sit under another entry instead (a boot ROM under its Super Game Boy, the DSPs
+// under the DSP group); one that isn't listed shows only with its parent (an OSD font with its board).
+enum
+{
+	S9X_BIOS_NUM_FAMILIES = 4,
+	S9X_BIOS_GROUP_DSP    = 0,
+	S9X_BIOS_NUM_GROUPS   = 1,
+	S9X_BIOS_UNDER_GROUP  = 0x100	// a parent of S9X_BIOS_UNDER_GROUP + group is that group
+};
+
+struct S9xBiosFamily
+{
+	const char	*name;
+	int			members[8];	// its slots in sidebar order, ended by -1
+};
+
+struct S9xBiosNesting
+{
+	int			parent;	// -1: straight under its family; else a slot, or S9X_BIOS_UNDER_GROUP + group
+	bool8		listed;	// FALSE: no entry of its own, shown only with its parent
+	const char	*name;	// its entry's name under the parent; NULL for the slot's label
+};
+
+const S9xBiosFamily	*S9xGetBiosFamily (int family);
+const char			*S9xBiosGroupName (int group);
+S9xBiosNesting		S9xGetBiosNesting (int slot);
+
+// The speed chart's figures, per measured scene of a chip's games and per mode in the order
+// Legacy (HLE), Native (LLE), Firmware: milliseconds per frame, and millions of host clock
+// ticks spent inside the chip. Scripted play on one PC and one build.
+struct S9xBiosBenchScene
+{
+	int			slot;
+	const char	*scene;
+	float		ms[3];
+	int			ticks[3];
+};
+
+const S9xBiosBenchScene	*S9xGetBiosBench (int *count);
+int						S9xBiosBenchScenes (int slot);
 
 // Every slot's path in one string: keep one and compare later to learn
 // whether the BIOS Manager changed anything in between.

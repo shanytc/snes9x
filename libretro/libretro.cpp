@@ -18,6 +18,8 @@
 #include "crosshairs.h"
 #include "sgb/sgb.h"
 #include "rp2040cart.h"
+#include "upd7725.h"
+#include "hg51b.h"
 #include <stdio.h>
 #include <vector>
 #include <string>
@@ -433,6 +435,24 @@ static void update_variables(void)
         Settings.SuperFXClockMultiplier = atoi(var.value);
     else
         Settings.SuperFXClockMultiplier = 100;
+
+    // Each DSP and the Cx4 run as picked, as the BIOS Manager does it; a load reads the mode.
+    for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+    {
+        if (!S9xBiosSlotHasChipMode(slot))
+            continue;
+        std::string key = std::string("snes9x_chip_") + S9xGetBiosSlotInfo(slot)->key;
+        for (char &c : key)
+            c = (char) tolower((unsigned char) c);
+        var.key = key.c_str();
+        var.value = NULL;
+        int mode = S9X_CHIP_NATIVE;
+        if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+            mode = !strcmp(var.value, "legacy")   ? S9X_CHIP_HLE
+                 : !strcmp(var.value, "firmware") ? S9X_CHIP_FIRMWARE
+                                                  : S9X_CHIP_NATIVE;
+        S9xSetChipMode(slot, mode);
+    }
 
     var.key = "snes9x_up_down_allowed";
     var.value = NULL;
@@ -1488,6 +1508,32 @@ static struct retro_disk_control_callback superdisc_disk_control = {
     superdisc_add_image_index,
 };
 
+// Set when this load put a BIOS notice on the OSD, which then stays up.
+static bool bios_notice_shown = false;
+
+// A DSP or Cx4 running as the chip, native or from its dump in the system
+// folder: the desktop ports tag their title, so say it on the OSD.
+static void notify_enhanced_chip(void)
+{
+    if (bios_notice_shown)
+        return;
+    const int   chip = S9xEnhancedChip();
+    const char *how = chip == S9X_ENHANCED_DSP_FIRMWARE ? "Chip Enhanced: running the chip from its firmware"
+                    : chip == S9X_ENHANCED_CX4_FIRMWARE ? "Chip Enhanced: running the chip from its data ROM"
+                                                        : "Enhanced: running the native chip";
+    if (chip == S9X_ENHANCED_NONE)
+        return;
+    static char s[96];
+    snprintf(s, sizeof(s), "%s %s", S9xEnhancedChipName(), how);
+    if (log_cb)
+        log_cb(RETRO_LOG_INFO, "%s\n", s);
+    if (environ_cb)
+    {
+        struct retro_message msg = { s, 180 };
+        environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+    }
+}
+
 bool retro_load_game(const struct retro_game_info *game)
 {
     init_descriptors();
@@ -1496,6 +1542,7 @@ bool retro_load_game(const struct retro_game_info *game)
     widescreen_content.clear();
     widescreen_content_path.clear();
     update_variables();
+    bios_notice_shown = false;
 
     // Archived content arrives as "X.zip#rom"; an RP2040 cart's firmware may be in X.zip.
     std::string archive;
@@ -1592,6 +1639,8 @@ bool retro_load_game(const struct retro_game_info *game)
             for(int lcv = 0; lcv < sizeof(Memory.RAM); lcv++)
                 Memory.RAM[lcv] = rand() % 256;
         }
+
+        notify_enhanced_chip();
     }
 
     if (!rom_loaded && log_cb)
@@ -1751,24 +1800,42 @@ static void check_system_specs(void)
     environ_cb(RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL, &level);
 }
 
+static bool seed_bios_slot(int slot, const std::string &name)
+{
+    char path[PATH_MAX + 1];
+    snprintf(path, sizeof path, "%s%s%s", retro_system_directory, SLASH_STR, name.c_str());
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    fclose(f);
+    S9xSetBiosPath(slot, path);
+    return true;
+}
+
 // No BIOS Manager dialog here: the frontend's system directory stands in for
 // it. A blank slot takes the first of its conventional filenames found there,
-// plain files only, and that is then the only place the loader looks.
+// then the same names as .zip, and that is then the only place the loader looks.
 static void seed_bios_slots_from_system_dir(void)
 {
     for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
     {
         if (S9xGetBiosPath(slot)[0]) continue;
-        for (const char *const *n = S9xGetBiosSlotInfo(slot)->names; *n; n++)
+        const char *const *names = S9xGetBiosSlotInfo(slot)->names;
+        bool found = false;
+        for (const char *const *n = names; *n && !found; n++)
+            found = seed_bios_slot(slot, *n);
+#ifdef UNZIP_SUPPORT
+        // No-Intro hands its dumps out zipped: "X (World).bin" as "X (World).zip".
+        for (const char *const *n = names; *n && !found; n++)
         {
-            char path[PATH_MAX + 1];
-            snprintf(path, sizeof path, "%s%s%s", retro_system_directory, SLASH_STR, *n);
-            FILE *f = fopen(path, "rb");
-            if (!f) continue;
-            fclose(f);
-            S9xSetBiosPath(slot, path);
-            break;
+            std::string zip = *n;
+            const size_t dot = zip.rfind('.');
+            if (dot != std::string::npos)
+                zip.erase(dot);
+            zip += ".zip";
+            if (zip != *n)
+                found = seed_bios_slot(slot, zip);
         }
+#endif
     }
 }
 
@@ -2654,6 +2721,7 @@ void S9xMessage(int type, int number, const char* s)
     {
         struct retro_message msg = { s, 180 };
         environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+        bios_notice_shown = true;
     }
 
     if (!log_cb) return;

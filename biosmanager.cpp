@@ -8,6 +8,8 @@
 #include "biosmanager.h"
 #include "memmap.h"
 #include "superdisc.h"
+#include "upd7725.h"
+#include "hg51b.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -56,6 +58,12 @@ static const char *const kNamesNSS[]    = { "nss-ic14.02.ic14", "nss.zip", "nss-
 static const char *const kNamesNSSFont[]= { "m50458_char.bin", "m50458.zip", "m50458-001sp", NULL };
 static const char *const kNamesSuperDisc[] = { "SDBR_v0.95.sfc", "SDBR_v0.95_unheadered.sfc",
                                                "Super Disc System Cartridge (Prototype).zip", NULL };
+static const char *const kNamesDSP1[]  = { "dsp1.bin", "dsp1.rom", "DSP1 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP1B[] = { "dsp1b.bin", "dsp1b.rom", "DSP1 B (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP2[]  = { "dsp2.bin", "dsp2.rom", "DSP2 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP3[]  = { "dsp3.bin", "dsp3.rom", "DSP3 (Japan) (Enhancement Chip).bin", NULL };
+static const char *const kNamesDSP4[]  = { "dsp4.bin", "dsp4.rom", "DSP4 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesCX4[]   = { "cx4.bin", "cx4.data.rom", "CX4 (World) (Enhancement Chip).bin", NULL };
 
 // Behind each row's info icon: a heading, then one "name — detail — CRC32" line
 // per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
@@ -95,6 +103,18 @@ static const char kInfoNSSFont[] = "Supports the following M50458 OSD character 
                                    "m50458-001sp — 4608 bytes — 444F597D";
 static const char kInfoSuperDisc[] = "Supports the following Super Disc BIOS cartridge ROMs:\n"
                                      "SDBR_v0.95.sfc — 128 KB, with or without a copier header — 3B64A370";
+static const char kInfoDSP1[] = "Supports the following DSP-1 firmware dumps (Pilotwings needs this revision):\n"
+                                "dsp1.bin — 8192 bytes — E359F184";
+static const char kInfoDSP1B[] = "Supports the following DSP-1B firmware dumps (the other DSP-1 games use it):\n"
+                                 "dsp1b.bin — 8192 bytes — 465C4E1C";
+static const char kInfoDSP2[] = "Supports the following DSP-2 firmware dumps:\n"
+                                "dsp2.bin — 8192 bytes — 9A984974";
+static const char kInfoDSP3[] = "Supports the following DSP-3 firmware dumps:\n"
+                                "dsp3.bin — 8192 bytes — D4A38EE7";
+static const char kInfoDSP4[] = "Supports the following DSP-4 firmware dumps:\n"
+                                "dsp4.bin — 8192 bytes — E15384C0";
+static const char kInfoCX4[] = "Supports the following Cx4 data ROM dumps (Mega Man X2 and X3):\n"
+                               "cx4.bin — 3072 bytes — B6E76A6A";
 
 // No-Intro dumps each slot accepts, all passing its size and signature checks.
 static const char *const kNoIntroGB[] = {
@@ -124,10 +144,16 @@ static const char *const kNoIntroBSX[] = {
 	"BS-X - Sore wa Namae o Nusumareta Machi no Monogatari (Japan) (Rev 1).sfc — 1 MB — F51F07A0", NULL
 };
 static const char *const kNoIntroSufami[] = { "Sufami Turbo (Japan).sfc — 256 KB — 9B4CA911", NULL };
+static const char *const kNoIntroDSP1[]  = { "DSP1 (World) (Enhancement Chip).bin — 8192 bytes — E359F184", NULL };
+static const char *const kNoIntroDSP1B[] = { "DSP1 B (World) (Enhancement Chip).bin — 8192 bytes — 465C4E1C", NULL };
+static const char *const kNoIntroDSP2[]  = { "DSP2 (World) (Enhancement Chip).bin — 8192 bytes — 9A984974", NULL };
+static const char *const kNoIntroDSP3[]  = { "DSP3 (Japan) (Enhancement Chip).bin — 8192 bytes — D4A38EE7", NULL };
+static const char *const kNoIntroDSP4[]  = { "DSP4 (World) (Enhancement Chip).bin — 8192 bytes — E15384C0", NULL };
+static const char *const kNoIntroCX4[]   = { "CX4 (World) (Enhancement Chip).bin — 3072 bytes — B6E76A6A", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
-// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE. 0 = don't care (the SGB carts
+// NSS_FONT_SIZE, superdisc.h SDISC_BIOS_SIZE, upd7725.h, hg51b.h. 0 = don't care (the SGB carts
 // ship in two sizes, the CGB boot ROM in two layouts).
 static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 {
@@ -135,8 +161,8 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "GameBoyColor", "Game Boy Color",                 kNamesGBC,       0,        "Optional, adds boot logo and GB colors", kInfoGBC,       kNoIntroGBC },
 	{ "SGB1",         "Super Game Boy",                 kNamesSGB1,      0,        NULL,                                     kInfoSGB1,      kNoIntroSGB1 },
 	{ "SGB2",         "Super Game Boy 2",               kNamesSGB2,      0,        NULL,                                     kInfoSGB2,      kNoIntroSGB2 },
-	{ "SGB1BootROM",  "SGB boot ROM",                   kNamesSGB1Boot,  0x100,    "Optional, built-in is used",             kInfoSGB1Boot,  NULL },
-	{ "SGB2BootROM",  "SGB2 boot ROM",                  kNamesSGB2Boot,  0x100,    "Optional, built-in is used",             kInfoSGB2Boot,  NULL },
+	{ "SGB1BootROM",  "Super Game Boy Boot ROM",        kNamesSGB1Boot,  0x100,    "Optional, built-in is used",             kInfoSGB1Boot,  NULL },
+	{ "SGB2BootROM",  "Super Game Boy 2 Boot ROM",      kNamesSGB2Boot,  0x100,    "Optional, built-in is used",             kInfoSGB2Boot,  NULL },
 	{ "SFCBoxKROM",   "Super Famicom Box",              kNamesKROM,      0x10000,  NULL,                                     kInfoKROM,      NULL },
 	{ "SFCBoxFont",   "Super Famicom Box OSD Font",     kNamesFont,      9216,     NULL,                                     kInfoFont,      NULL },
 	{ "BSX",          "Satellaview / BS-X",             kNamesBSX,       0x100000, NULL,                                     kInfoBSX,       kNoIntroBSX },
@@ -144,9 +170,16 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "NSS",          "Nintendo Super System",          kNamesNSS,       0x8000,   NULL,                                     kInfoNSS,       NULL },
 	{ "NSSFont",      "Nintendo Super System OSD Font", kNamesNSSFont,   0x1200,   NULL,                                     kInfoNSSFont,   NULL },
 	{ "SuperDisc",    "Super Disc",                     kNamesSuperDisc, 0x20000,  NULL,                                     kInfoSuperDisc, NULL },
+	{ "DSP1",         "DSP-1",                          kNamesDSP1,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP1,      kNoIntroDSP1 },
+	{ "DSP1B",        "DSP-1B",                         kNamesDSP1B,     UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP1B,     kNoIntroDSP1B },
+	{ "DSP2",         "DSP-2",                          kNamesDSP2,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP2,      kNoIntroDSP2 },
+	{ "DSP3",         "DSP-3",                          kNamesDSP3,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP3,      kNoIntroDSP3 },
+	{ "DSP4",         "DSP-4",                          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP4,      kNoIntroDSP4 },
+	{ "CX4",          "Cx4",                            kNamesCX4,       HG51B_DATAROM_SIZE,    "Optional, built-in native chip",         kInfoCX4,       kNoIntroCX4 },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
+static uint32 g_modes[S9X_NUM_BIOS_SLOTS];	// S9xChipMode, for the chip slots
 
 static bool SlotValid (int slot)
 {
@@ -186,12 +219,118 @@ char *S9xGetBiosPathBuffer (int slot)
 	return SlotValid(slot) ? g_paths[slot] : NULL;
 }
 
+bool8 S9xBiosSlotHasChipMode (int slot)
+{
+	return slot >= S9X_BIOS_DSP1 && slot <= S9X_BIOS_CX4;
+}
+
+int S9xGetChipMode (int slot)
+{
+	return (S9xBiosSlotHasChipMode(slot) && g_modes[slot] <= S9X_CHIP_FIRMWARE) ? (int) g_modes[slot] : S9X_CHIP_AUTO;
+}
+
+void S9xSetChipMode (int slot, int mode)
+{
+	if (S9xBiosSlotHasChipMode(slot) && mode >= S9X_CHIP_AUTO && mode <= S9X_CHIP_FIRMWARE)
+		g_modes[slot] = (uint32) mode;
+}
+
+int S9xChipModeInEffect (int slot)
+{
+	const int mode = S9xGetChipMode(slot);
+	return (mode != S9X_CHIP_AUTO) ? mode : S9X_CHIP_NATIVE;
+}
+
+uint32 *S9xGetChipModeBuffer (int slot)
+{
+	return S9xBiosSlotHasChipMode(slot) ? &g_modes[slot] : NULL;
+}
+
+static const S9xBiosFamily kFamilies[S9X_BIOS_NUM_FAMILIES] =
+{
+	{ "Commercial & Arcade Boards",
+	  { S9X_BIOS_SFCBOX_KROM, S9X_BIOS_SFCBOX_FONT, S9X_BIOS_NSS, S9X_BIOS_NSS_FONT, -1 } },
+	{ "Expansions & Peripherals",
+	  { S9X_BIOS_SGB1, S9X_BIOS_SGB1_BOOT, S9X_BIOS_SGB2, S9X_BIOS_SGB2_BOOT,
+	    S9X_BIOS_BSX, S9X_BIOS_SUFAMI, S9X_BIOS_SUPERDISC, -1 } },
+	{ "CoProcessors & Special Chips",
+	  { S9X_BIOS_DSP1, S9X_BIOS_DSP1B, S9X_BIOS_DSP2, S9X_BIOS_DSP3, S9X_BIOS_DSP4, S9X_BIOS_CX4, -1 } },
+	{ "Handheld Systems",
+	  { S9X_BIOS_GB, S9X_BIOS_GBC, -1 } },
+};
+
+const S9xBiosFamily *S9xGetBiosFamily (int family)
+{
+	return (family >= 0 && family < S9X_BIOS_NUM_FAMILIES) ? &kFamilies[family] : NULL;
+}
+
+const char *S9xBiosGroupName (int group)
+{
+	return (group == S9X_BIOS_GROUP_DSP) ? "DSP" : "";
+}
+
+S9xBiosNesting S9xGetBiosNesting (int slot)
+{
+	switch (slot)
+	{
+		case S9X_BIOS_SFCBOX_FONT:	return { S9X_BIOS_SFCBOX_KROM, FALSE, NULL };
+		case S9X_BIOS_NSS_FONT:		return { S9X_BIOS_NSS, FALSE, NULL };
+		case S9X_BIOS_SGB1_BOOT:	return { S9X_BIOS_SGB1, TRUE, "Boot ROM" };
+		case S9X_BIOS_SGB2_BOOT:	return { S9X_BIOS_SGB2, TRUE, "Boot ROM" };
+		case S9X_BIOS_DSP1:
+		case S9X_BIOS_DSP1B:
+		case S9X_BIOS_DSP2:
+		case S9X_BIOS_DSP3:
+		case S9X_BIOS_DSP4:			return { S9X_BIOS_UNDER_GROUP + S9X_BIOS_GROUP_DSP, TRUE, NULL };
+		default:					return { -1, TRUE, NULL };
+	}
+}
+
+// The chipbench tables (s9x-harness/chipbench): same-binary runs, the firmware equal to native.
+static const S9xBiosBenchScene kBench[] =
+{
+	{ S9X_BIOS_DSP1,  "Pilotwings",             { 0.784f, 0.813f, 1.049f }, {  91, 310, 2463 } },
+	{ S9X_BIOS_DSP1B, "Super Mario Kart 2P",    { 0.780f, 0.788f, 0.846f }, {  17,  43,  378 } },
+	{ S9X_BIOS_DSP1B, "Super Mario Kart 1P",    { 0.755f, 0.712f, 0.755f }, {  26,  71,  594 } },
+	{ S9X_BIOS_DSP1B, "Lock On",                { 0.855f, 0.866f, 1.114f }, {  67, 208, 1533 } },
+	{ S9X_BIOS_DSP1B, "Super Air Diver",        { 0.818f, 0.876f, 1.131f }, {  84, 321, 2428 } },
+	{ S9X_BIOS_DSP1B, "Ballz",                  { 0.962f, 0.962f, 1.010f }, {  29,  65,  598 } },
+	{ S9X_BIOS_DSP1B, "Suzuka 8 Hours",         { 0.781f, 0.799f, 0.879f }, {  12,  42,  339 } },
+	{ S9X_BIOS_DSP2,  "Dungeon Master play",    { 0.567f, 0.598f, 0.759f }, { 169, 572, 3741 } },
+	{ S9X_BIOS_DSP2,  "Dungeon Master attract", { 0.728f, 0.724f, 0.718f }, {   0,  11,   10 } },
+	{ S9X_BIOS_DSP3,  "SD Gundam GX battle",    { 0.991f, 0.785f, 0.859f }, { 128, 312, 1801 } },
+	{ S9X_BIOS_DSP3,  "SD Gundam GX attract",   { 0.839f, 0.841f, 0.839f }, {   6,  48,  108 } },
+	{ S9X_BIOS_DSP4,  "Top Gear 3000",          { 0.733f, 0.757f, 0.794f }, {  87, 410, 1269 } },
+	{ S9X_BIOS_DSP4,  "Top Gear 3000 JP",       { 0.730f, 0.745f, 0.795f }, { 105, 474, 1455 } },
+	{ S9X_BIOS_CX4,   "Mega Man X2 attract",    { 0.616f, 0.617f, 0.700f }, {  35, 144, 1850 } },
+	{ S9X_BIOS_CX4,   "Mega Man X2 wireframe",  { 0.556f, 0.524f, 1.081f }, {  28,  99, 1374 } },
+	{ S9X_BIOS_CX4,   "Mega Man X3 attract",    { 0.655f, 0.675f, 0.702f }, {   7,  55,  455 } },
+	{ S9X_BIOS_CX4,   "Mega Man X3 gameplay",   { 0.884f, 0.877f, 0.963f }, {  37, 173, 2166 } },
+};
+
+const S9xBiosBenchScene *S9xGetBiosBench (int *count)
+{
+	if (count)
+		*count = (int) (sizeof(kBench) / sizeof(kBench[0]));
+	return (kBench);
+}
+
+int S9xBiosBenchScenes (int slot)
+{
+	int	n = 0;
+	for (const S9xBiosBenchScene &b : kBench)
+		n += b.slot == slot;
+	return (n);
+}
+
 std::string S9xBiosPathsFingerprint (void)
 {
 	std::string out;
 	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
 	{
 		out += g_paths[slot];
+		if (S9xBiosSlotHasChipMode(slot))
+			out += (char) ('0' + S9xChipModeInEffect(slot));
 		out += '\n';
 	}
 	return (out);
@@ -327,7 +466,9 @@ enum BiosImageKind
 	KIND_UNKNOWN = 0,
 	KIND_DMG_BOOT, KIND_CGB_BOOT, KIND_SGB1_BOOT, KIND_SGB2_BOOT,
 	KIND_SGB1_CART, KIND_SGB2_CART, KIND_BSX_BIOS, KIND_SUFAMI_BIOS,
-	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS
+	KIND_NSS_BIOS, KIND_NSS_FONT, KIND_SUPERDISC_BIOS,
+	KIND_DSP1_FIRMWARE, KIND_DSP1B_FIRMWARE, KIND_DSP2_FIRMWARE, KIND_DSP3_FIRMWARE,
+	KIND_DSP4_FIRMWARE, KIND_NECDSP_FIRMWARE, KIND_CX4_DATAROM
 };
 
 static const char *KindName (int kind)
@@ -345,6 +486,13 @@ static const char *KindName (int kind)
 		case KIND_NSS_BIOS:  return ("Nintendo Super System BIOS");
 		case KIND_NSS_FONT:  return ("NSS OSD charset");
 		case KIND_SUPERDISC_BIOS: return ("Super Disc BIOS");
+		case KIND_DSP1_FIRMWARE: return ("DSP-1 firmware");
+		case KIND_DSP1B_FIRMWARE: return ("DSP-1B firmware");
+		case KIND_DSP2_FIRMWARE: return ("DSP-2 firmware");
+		case KIND_DSP3_FIRMWARE: return ("DSP-3 firmware");
+		case KIND_DSP4_FIRMWARE: return ("DSP-4 firmware");
+		case KIND_NECDSP_FIRMWARE: return ("other DSP firmware");
+		case KIND_CX4_DATAROM: return ("Cx4 data ROM");
 		default:             return ("unrecognised image");
 	}
 }
@@ -388,6 +536,24 @@ static int ClassifyImage (const uint8 *d, uint32 n, uint32 full)
 		return (KIND_SUPERDISC_BIOS);
 	if (full == SDISC_BIOS_SIZE + 0x200 && n >= 0x8200 && S9xSuperDiscIsBIOS(d + 0x200, SDISC_BIOS_SIZE))
 		return (KIND_SUPERDISC_BIOS);
+
+	// DSP-n firmware all shares one layout, so the dump is known by its CRC.
+	if (full == UPD7725_FIRMWARE_SIZE && n >= UPD7725_FIRMWARE_SIZE && S9xUPD7725IsFirmware(d, n))
+	{
+		static const struct { uint32 crc; int kind; } dumps[] = {
+			{ 0xE359F184, KIND_DSP1_FIRMWARE }, { 0x465C4E1C, KIND_DSP1B_FIRMWARE },
+			{ 0x9A984974, KIND_DSP2_FIRMWARE }, { 0xD4A38EE7, KIND_DSP3_FIRMWARE },
+			{ 0xE15384C0, KIND_DSP4_FIRMWARE }
+		};
+		const uint32 crc = ImageCRC32(d, n);
+		for (size_t i = 0; i < sizeof(dumps) / sizeof(dumps[0]); i++)
+			if (dumps[i].crc == crc)
+				return (dumps[i].kind);
+		return (KIND_NECDSP_FIRMWARE);
+	}
+
+	if (full == HG51B_DATAROM_SIZE && n >= HG51B_DATAROM_SIZE && S9xHG51BIsDataROM(d, HG51B_DATAROM_SIZE))
+		return (KIND_CX4_DATAROM);
 
 	// The NSS supervisor BIOS is 32K of Z80 code whose reset path opens
 	// LD A,I / JP Z,nnnn; its OSD charset is 128 glyphs of 18 rows with the
@@ -440,6 +606,12 @@ static int ExpectedKind (int slot)
 		case S9X_BIOS_NSS:       return (KIND_NSS_BIOS);
 		case S9X_BIOS_NSS_FONT:  return (KIND_NSS_FONT);
 		case S9X_BIOS_SUPERDISC: return (KIND_SUPERDISC_BIOS);
+		case S9X_BIOS_DSP1:      return (KIND_DSP1_FIRMWARE);
+		case S9X_BIOS_DSP1B:     return (KIND_DSP1B_FIRMWARE);
+		case S9X_BIOS_DSP2:      return (KIND_DSP2_FIRMWARE);
+		case S9X_BIOS_DSP3:      return (KIND_DSP3_FIRMWARE);
+		case S9X_BIOS_DSP4:      return (KIND_DSP4_FIRMWARE);
+		case S9X_BIOS_CX4:       return (KIND_CX4_DATAROM);
 		default:                 return (KIND_UNKNOWN);
 	}
 }

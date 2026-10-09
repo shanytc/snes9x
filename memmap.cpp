@@ -33,6 +33,8 @@
 #include "sgb/sgb.h"
 #include "sgb/sgbc_patches.h"
 #include "biosmanager.h"
+#include "upd7725.h"
+#include "hg51b.h"
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
@@ -799,6 +801,7 @@ static bool8 LoadSGBBootROM   (const char *path, std::vector<uint8> &out_bytes);
 static bool8 FindGB_BootROM   (bool cgb, const char *gb_rom_path, std::string &out_path,
                                std::vector<uint8> *out_bytes);
 static uint32 caCRC32 (uint8 *, uint32, uint32 crc32 = 0xffffffff);
+static bool8 LoadDSP1Firmware (bool pilotwings);
 static bool8 ReadUPSPatch (Stream *, long, int32 &);
 // Whether this load patched the cart into its widescreen hack (widescreen.h).
 static bool8 widescreen_patch_applied = FALSE;
@@ -1644,7 +1647,8 @@ bool8 S9xBiosChangedSinceLoad (void)
 {
     // Only a cart that took one of the files has anything to pick up.
     const bool takes_bios = Settings.GBRomPath[0] || Settings.BS ||
-                            Multi.cartType || SFCBox.Active || !SuperDiscBIOSPath.empty();
+                            Multi.cartType || SFCBox.Active || !SuperDiscBIOSPath.empty() ||
+                            Settings.DSP || Settings.C4;
     return takes_bios && s_bios_paths_at_load != S9xBiosPathsFingerprint();
 }
 
@@ -3406,13 +3410,16 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 	S9xInitBSX();					// clears Settings.BS
 	Settings.SFCBox = TRUE;
 
-	// DSP-1 (Mario Kart) is HLE'd; armed when a cart carries the chip and
-	// windowed in/out by the mapping registers.
+	// DSP-1 (Mario Kart): armed when a cart carries the chip and windowed
+	// in/out by the mapping registers.
+	S9xUPD7725Unload();
+	S9xHG51BUnload();
 	if ((SFCBox.SlotChipset[0] | SFCBox.SlotChipset[1]) & 0x02)
 	{
 		Settings.DSP = 1;
 		SetDSP = &DSP1SetByte;
 		GetDSP = &DSP1GetByte;
+		LoadDSP1Firmware(false);
 	}
 
 	Checksum_Calculate();
@@ -3787,6 +3794,79 @@ void CMemory::ParseSNESHeader (uint8 *RomHeader)
 	}
 }
 
+static bool AcceptDSPFirmware (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	return (full_size == UPD7725_FIRMWARE_SIZE && S9xUPD7725IsFirmware(data, size));
+}
+
+// The chip's own program, when the BIOS Manager has one; else the chip runs natively,
+// which needs none, and the HLE takes a chip without a native version.
+// Firmware picked in the BIOS Manager that won't load: the native chip runs instead, and says so.
+static void ChipFirmwareNotice (int slot)
+{
+#ifdef __LIBRETRO__
+	const std::string	where = std::string("Put ") + S9xGetBiosSlotInfo(slot)->names[0] + " in the system folder.";
+#else
+	const std::string	where = "Check it in File -> BIOS Manager.";
+#endif
+	if (!S9xBiosNoticePending())
+		S9xSetBiosNotice((std::string(S9xGetBiosSlotInfo(slot)->label) +
+						  " firmware can't be used: running the native chip. " + where).c_str(), FALSE);
+}
+
+// The chip as the slot's mode picks it: FALSE leaves the cart to the HLE.
+static bool8 LoadDSPFirmware (int slot, int chip)
+{
+	const int	mode = S9xChipModeInEffect(slot);
+	if (mode == S9X_CHIP_HLE)
+		return (FALSE);
+
+	std::vector<uint8>	image;
+	if (mode == S9X_CHIP_FIRMWARE)
+	{
+		if (S9xBiosPathUsable(slot) &&
+			S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD7725_FIRMWARE_SIZE, AcceptDSPFirmware) &&
+			S9xUPD7725Load(image.data(), (uint32) image.size(), chip))
+			return (TRUE);
+		ChipFirmwareNotice(slot);
+	}
+	return (S9xUPD7725LoadNative(chip));
+}
+
+// Pilotwings' attract demo was recorded on the first DSP-1 and crashes with
+// the DSP-1B's corrected math; the other games get the DSP-1B.
+static bool8 LoadDSP1Firmware (bool pilotwings)
+{
+	return (pilotwings ? LoadDSPFirmware(S9X_BIOS_DSP1, UPD7725_DSP1) : LoadDSPFirmware(S9X_BIOS_DSP1B, UPD7725_DSP1B));
+}
+
+static bool AcceptCx4DataROM (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	return (full_size == HG51B_DATAROM_SIZE && S9xHG51BIsDataROM(data, size));
+}
+
+// The Cx4 as its mode picks it: the cart's own code on the data ROM dump, or the native chip on
+// one worked out from its formulas; FALSE leaves the cart to the HLE.
+static bool8 LoadCx4DataROM (void)
+{
+	const int	mode = S9xChipModeInEffect(S9X_BIOS_CX4);
+	if (mode == S9X_CHIP_HLE)
+		return (FALSE);
+
+	std::vector<uint8>	image;
+	if (mode == S9X_CHIP_FIRMWARE)
+	{
+		if (S9xBiosPathUsable(S9X_BIOS_CX4) &&
+			S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_CX4).c_str(), image, HG51B_DATAROM_SIZE, AcceptCx4DataROM) &&
+			S9xHG51BLoad(image.data(), (uint32) image.size()))
+			return (TRUE);
+		ChipFirmwareNotice(S9X_BIOS_CX4);
+	}
+	return (S9xHG51BLoadBuiltin());
+}
+
 void CMemory::InitROM (void)
 {
 	Settings.SuperFX = FALSE;
@@ -3849,6 +3929,9 @@ void CMemory::InitROM (void)
 	//// Detect and initialize chips
 	//// detection codes are compatible with NSRT
 
+	S9xUPD7725Unload();
+	S9xHG51BUnload();
+
 	// DSP1/2/3/4
 	if (ROMType == 0x03)
 	{
@@ -3888,6 +3971,7 @@ void CMemory::InitROM (void)
 
 			SetDSP = &DSP1SetByte;
 			GetDSP = &DSP1GetByte;
+			LoadDSP1Firmware(strncmp(ROMName, "PILOTWINGS", 10) == 0);
 			break;
 
 		case 2: // DSP2
@@ -3895,6 +3979,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP2_LOROM;
 			SetDSP = &DSP2SetByte;
 			GetDSP = &DSP2GetByte;
+			LoadDSPFirmware(S9X_BIOS_DSP2, UPD7725_DSP2);
 			break;
 
 		case 3: // DSP3
@@ -3902,6 +3987,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP3_LOROM;
 			SetDSP = &DSP3SetByte;
 			GetDSP = &DSP3GetByte;
+			LoadDSPFirmware(S9X_BIOS_DSP3, UPD7725_DSP3);
 			break;
 
 		case 4: // DSP4
@@ -3909,6 +3995,7 @@ void CMemory::InitROM (void)
 			DSP0.maptype = M_DSP4_LOROM;
 			SetDSP = &DSP4SetByte;
 			GetDSP = &DSP4GetByte;
+			LoadDSPFirmware(S9X_BIOS_DSP4, UPD7725_DSP4);
 			break;
 
 		default:
@@ -4009,6 +4096,7 @@ void CMemory::InitROM (void)
 		// C4
 		case 0xF320:
 			Settings.C4 = TRUE;
+			LoadCx4DataROM();
 			break;
 	}
 
@@ -4478,6 +4566,12 @@ void CMemory::map_DSP (void)
 			map_index(0x20, 0x3f, 0x8000, 0xbfff, MAP_DSP, MAP_TYPE_I_O);
 			map_index(0xa0, 0xbf, 0x6000, 0x6fff, MAP_DSP, MAP_TYPE_I_O);
 			map_index(0xa0, 0xbf, 0x8000, 0xbfff, MAP_DSP, MAP_TYPE_I_O);
+			// The real chip's status register, which the HLE never needed.
+			if (S9xUPD7725Loaded())
+			{
+				map_index(0x20, 0x3f, 0xc000, 0xffff, MAP_DSP, MAP_TYPE_I_O);
+				map_index(0xa0, 0xbf, 0xc000, 0xffff, MAP_DSP, MAP_TYPE_I_O);
+			}
 			break;
 
 		case M_DSP3_LOROM:
@@ -5657,6 +5751,62 @@ int S9xPF94TimeRemaining (void)
 	return ((PF94.timerFrames - elapsed + fps - 1) / fps);
 }
 
+int S9xEnhancedChip (void)
+{
+	if (S9xHG51BActive())
+		return (S9xHG51BIsNative() ? S9X_ENHANCED_CX4 : S9X_ENHANCED_CX4_FIRMWARE);
+	if (!S9xUPD7725Active())
+		return (S9X_ENHANCED_NONE);
+
+	// The multi-game boards keep their DSP-1 up all session, but only one
+	// game talks to it: Pilotwings on Campus Challenge '92, Mario Kart on
+	// PowerFest '94, and on the SFC-Box whichever game S9xSFCBoxRemap gave
+	// the DSP window.
+	bool8	used = TRUE;
+	if (PF94.active)
+		used = (PF94.select == ((PF94.board == EVENT_BOARD_CC92) ? 0x03 : 0x0c));
+	else
+	if (Settings.SFCBox)
+		used = (SFCBox.MapReg0 & 0x20) && (SFCBox.MapReg1 & 3) != 1;
+	if (!used)
+		return (S9X_ENHANCED_NONE);
+	return (S9xUPD7725IsNative() ? S9X_ENHANCED_DSP : S9X_ENHANCED_DSP_FIRMWARE);
+}
+
+const char *S9xEnhancedChipName (void)
+{
+	switch (S9xEnhancedChip())
+	{
+		case S9X_ENHANCED_DSP:
+		case S9X_ENHANCED_DSP_FIRMWARE:
+			switch (S9xUPD7725Chip())
+			{
+				case UPD7725_DSP1:	return ("DSP-1");
+				case UPD7725_DSP1B:	return ("DSP-1B");
+				case UPD7725_DSP2:	return ("DSP-2");
+				case UPD7725_DSP3:	return ("DSP-3");
+				case UPD7725_DSP4:	return ("DSP-4");
+				default:			return ("DSP");
+			}
+		case S9X_ENHANCED_CX4:
+		case S9X_ENHANCED_CX4_FIRMWARE:
+			return ("Cx4");
+		default:
+			return ("");
+	}
+}
+
+const char *S9xEnhancedChipTag (void)
+{
+	static char	tag[48];
+	const int	chip = S9xEnhancedChip();
+	if (chip == S9X_ENHANCED_NONE)
+		return ("");
+	const bool	firmware = chip == S9X_ENHANCED_DSP_FIRMWARE || chip == S9X_ENHANCED_CX4_FIRMWARE;
+	snprintf(tag, sizeof(tag), " (%s %sEnhanced)", S9xEnhancedChipName(), firmware ? "Chip " : "");
+	return (tag);
+}
+
 // The two event carts keep independent timer settings; these return the loaded
 // board's value (PowerFest '94 vs Campus Challenge '92), clamped to valid ranges.
 int S9xEventTimerMinutes (void)
@@ -5688,6 +5838,7 @@ void S9xPF94LoadGames (void)
 		DSP0.maptype = M_DSP1_LOROM_S;
 		SetDSP = &DSP1SetByte;
 		GetDSP = &DSP1GetByte;
+		LoadDSP1Firmware(true);
 		return;
 	}
 
@@ -5733,6 +5884,7 @@ void S9xPF94LoadGames (void)
 		DSP0.maptype = M_DSP1_HIROM;
 		SetDSP = &DSP1SetByte;
 		GetDSP = &DSP1GetByte;
+		LoadDSP1Firmware(false);
 	}
 
 	printf("PowerFest '94 board active: Lost Levels %s, Mario Kart %s, Ken Griffey %s\n",

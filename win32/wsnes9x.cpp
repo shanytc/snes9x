@@ -68,6 +68,8 @@
 #include "../nss.h"
 #include "../superdisc.h"
 #include "../rp2040cart.h"
+#include "../upd7725.h"
+#include "../hg51b.h"
 #include "../movie.h"
 #include "../voicekun.h"
 #include "../crosshairs.h"
@@ -805,11 +807,13 @@ static void CenterCursor()
 void S9xRestoreWindowTitle ()
 {
     TCHAR buf [1024];
+    // The game on screen runs a DSP or Cx4 as the chip, native or its dump, not the HLE.
+    Utf8ToWide chip(S9xEnhancedChipTag());
     if (Settings.SuperDisc)
         _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSuperDiscTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     else
     if (SFCBox.Active)
-        _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSFCBoxTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(S9xSFCBoxTitle()), (wchar_t *) chip, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     else
     if (Settings.RP2040Cart)
         _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(S9xRP2040CartTitle()), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
@@ -818,7 +822,7 @@ void S9xRestoreWindowTitle ()
     {
         char def[_MAX_FNAME];
         _splitpath(Memory.ROMFilename.c_str(), NULL, NULL, def, NULL);
-        _stprintf(buf, TEXT("%s - %s %s"), (wchar_t *)Utf8ToWide(def), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
+        _stprintf(buf, TEXT("%s%s - %s %s"), (wchar_t *)Utf8ToWide(def), (wchar_t *) chip, WINDOW_TITLE, TEXT(VERSION_DISPLAY));
     }
     else
         _stprintf(buf, TEXT("%s %s"), WINDOW_TITLE, TEXT(VERSION_DISPLAY));
@@ -10120,91 +10124,108 @@ void ListFilesFromFolder(HWND hDlg, RomDataList** prdl)
 }
 
 
-// File -> BIOS Manager: one row per supported BIOS. A blank row means that
-// BIOS is unavailable; nothing is searched for.
-// Per-row verdict, kept for WM_CTLCOLORSTATIC: red text is what makes a bad
-// file read as a complaint rather than a caption.
+// File -> BIOS Manager: a card per supported BIOS on a scrolling panel. A blank
+// card means that BIOS is unavailable or runs its built-in; nothing is searched for.
+// Per-card verdict, for the status line: green for OK, a red cross for trouble.
 static S9xBiosPathStatus s_bios_status[S9X_NUM_BIOS_SLOTS];
-static HWND              s_bios_tip;   // one tooltip over the ten status labels
-static int               s_bios_fit_width;   // client width after the first fit, 0 before
+static bool              s_bios_note[S9X_NUM_BIOS_SLOTS];   // the status is the slot's note
+static HWND              s_bios_tip;       // one tooltip over the statuses and icons
+static HFONT             s_bios_bold;      // the sidebar's family headings
+static HFONT             s_bios_italic;    // the notes
+static HFONT             s_bios_glyphs;    // Segoe MDL2 Assets for the sidebar's icons; NULL without it
+static HICON             s_bios_icons[2];  // Browse's folder and Clear's bin
+static HWND              s_bios_cards;     // the panel the cards sit on; it holds every row's controls
+static RECT              s_bios_card[S9X_NUM_BIOS_SLOTS];   // each shown card, in unscrolled panel space
+static int               s_bios_scroll;    // how far the panel is scrolled
+static int               s_bios_content;   // the shown cards' height
+static int               s_bios_pick = -1; // the sidebar entry they were laid out for
 
-// Size the status column to its widest text and the dialog to match, so the
-// window is as wide as its contents and no wider. After the first layout it
-// only ever widens, so a status that changes while typing does not make the
-// window jiggle. The intro line sets the floor.
-static void BiosManagerFitWidth(HWND hDlg)
+// A row's control, on the cards panel.
+static HWND BiosRowItem(int base, int slot)
 {
-	HFONT   font = (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0);
-	HDC     hdc  = GetDC(hDlg);
-	HGDIOBJ old  = SelectObject(hdc, font);
-	TCHAR   text[S9X_BIOS_PATH_MAX];
-	SIZE    sz   = { 0 };
-	int     widest = 0;
-	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
-	{
-		GetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text, _countof(text));
-		if (GetTextExtentPoint32(hdc, text, lstrlen(text), &sz) && sz.cx > widest)
-			widest = sz.cx;
-		// Room for the note a cleared row shows, so X never resizes the window.
-		const char *note = S9xGetBiosSlotInfo(slot)->note;
-		Utf8ToWide  note_w(note ? note : "");
-		if (GetTextExtentPoint32(hdc, (wchar_t *) note_w, lstrlen((wchar_t *) note_w), &sz) && sz.cx > widest)
-			widest = sz.cx;
-	}
-	GetDlgItemText(hDlg, IDC_BIOSMGR_INTRO, text, _countof(text));
-	GetTextExtentPoint32(hdc, text, lstrlen(text), &sz);
-	const int intro_width = sz.cx;
-	SelectObject(hdc, old);
-	ReleaseDC(hDlg, hdc);
-
-	RECT client, status, intro;
-	GetClientRect(hDlg, &client);
-	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0), &status);
-	MapWindowPoints(NULL, hDlg, (POINT *) &status, 2);
-	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_INTRO), &intro);
-	MapWindowPoints(NULL, hDlg, (POINT *) &intro, 2);
-
-	// The .rc's gap right of the intro line is the right margin to keep.
-	const int margin  = client.right - intro.right;
-	const int content = (status.left + widest + 4 > intro.left + intro_width)
-	                  ? status.left + widest + 4 : intro.left + intro_width;
-	const int want    = content + margin;
-	const int dx      = want - client.right;
-	if (dx == 0 || (s_bios_fit_width && dx < 0))
-	{
-		s_bios_fit_width = client.right;
-		return;
-	}
-
-	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
-		SetWindowPos(GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot), NULL, 0, 0,
-		             content - status.left, status.bottom - status.top,
-		             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-	SetWindowPos(GetDlgItem(hDlg, IDC_BIOSMGR_INTRO), NULL, 0, 0,
-	             content - intro.left, intro.bottom - intro.top,
-	             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-
-	// The buttons keep their distance from the right edge.
-	static const int buttons[] = { IDOK, IDCANCEL };
-	for (int i = 0; i < 2; i++)
-	{
-		RECT rc;
-		GetWindowRect(GetDlgItem(hDlg, buttons[i]), &rc);
-		MapWindowPoints(NULL, hDlg, (POINT *) &rc, 2);
-		SetWindowPos(GetDlgItem(hDlg, buttons[i]), NULL, rc.left + dx, rc.top, 0, 0,
-		             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-	}
-
-	// Resize about the centre, where DS_CENTER put the dialog.
-	RECT win;
-	GetWindowRect(hDlg, &win);
-	SetWindowPos(hDlg, NULL, win.left - dx / 2, win.top,
-	             (win.right - win.left) + dx, win.bottom - win.top,
-	             SWP_NOZORDER | SWP_NOACTIVATE);
-	// A resize while shown leaves stale text and button pixels behind.
-	RedrawWindow(hDlg, NULL, NULL, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
-	s_bios_fit_width = want;
+	return GetDlgItem(s_bios_cards, base + slot);
 }
+
+// `from` moved `a`/256 of the way to `to`.
+static COLORREF BiosMix(COLORREF from, COLORREF to, int a)
+{
+	return RGB((GetRValue(from) * (256 - a) + GetRValue(to) * a) / 256,
+	           (GetGValue(from) * (256 - a) + GetGValue(to) * a) / 256,
+	           (GetBValue(from) * (256 - a) + GetBValue(to) * a) / 256);
+}
+
+// The sidebar's families and their slots come from the core (S9xGetBiosFamily); each heading
+// gets an icon, a Segoe MDL2 Assets glyph.
+static const wchar_t kBiosFamilyIcons[S9X_BIOS_NUM_FAMILIES] = { 0xE7FC, 0xEA86, 0xE950, 0xE8EA };
+
+// Sidebar item data: a slot number, kBiosHeading + family for a heading, or
+// kBiosSubgroup + group for a group that only names the slots under it.
+static const int kBiosHeading  = S9X_NUM_BIOS_SLOTS;
+static const int kBiosSubgroup = kBiosHeading + S9X_BIOS_NUM_FAMILIES;
+
+// Per sidebar entry (by item data): whether the entries under it are listed.
+static bool s_bios_open[kBiosSubgroup + S9X_BIOS_NUM_GROUPS];
+
+// A slot's place under a parent entry (the core's S9xGetBiosNesting), its parent as item data:
+// another slot or kBiosSubgroup + group. NULL for a slot straight under its family's heading.
+struct BiosChild { int slot, parent; bool listed; const char *name; };
+static const BiosChild *BiosManagerChild(int slot)
+{
+	static BiosChild kids[S9X_NUM_BIOS_SLOTS];
+	if (slot < 0 || slot >= S9X_NUM_BIOS_SLOTS)
+		return NULL;
+	const S9xBiosNesting n = S9xGetBiosNesting(slot);
+	if (n.parent < 0)
+		return NULL;
+	const int parent = (n.parent >= S9X_BIOS_UNDER_GROUP) ? kBiosSubgroup + n.parent - S9X_BIOS_UNDER_GROUP : n.parent;
+	kids[slot] = { slot, parent, n.listed != 0, n.name };
+	return &kids[slot];
+}
+
+// The family a heading's item data names; -1 for any other entry.
+static int BiosManagerHeadingOf(int data)
+{
+	return (data >= kBiosHeading && data < kBiosSubgroup) ? data - kBiosHeading : -1;
+}
+
+// Whether an entry has others listed under it, and so a [+]/[-] box.
+static bool BiosManagerHasChildren(int data)
+{
+	if (data >= kBiosHeading)
+		return true;
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		if (const BiosChild *c = BiosManagerChild(slot))
+			if (c->parent == data && c->listed)
+				return true;
+	return false;
+}
+
+// Sidebar indent: 0 for a heading, 1 for a slot or subgroup, 2 for one nested
+// under another.
+static int BiosManagerListLevel(int data)
+{
+	if (data >= kBiosSubgroup)
+		return 1;
+	return BiosManagerHeadingOf(data) >= 0 ? 0 : BiosManagerChild(data) ? 2 : 1;
+}
+
+// The controls that make up one slot's row.
+// A row without info has no icon, one without a chip mode no mode box or speed chart.
+static const int kBiosRowCtrls[] = { IDC_BIOSMGR_LABEL0, IDC_BIOSMGR_INFO0, IDC_BIOSMGR_BENCH0,
+                                     IDC_BIOSMGR_EDIT0, IDC_BIOSMGR_BROWSE0, IDC_BIOSMGR_CLEAR0,
+                                     IDC_BIOSMGR_MODE0, IDC_BIOSMGR_STATUS0 };
+
+// A chip row's modes, in its box's order.
+static const struct { const TCHAR *name; int mode; } kBiosChipModes[] =
+{
+	{ TEXT("Legacy (HLE)"), S9X_CHIP_HLE },
+	{ TEXT("Native (LLE)"), S9X_CHIP_NATIVE },
+	{ TEXT("Firmware"),     S9X_CHIP_FIRMWARE },
+};
+
+// The speed chart's figures are the core's (S9xGetBiosBench), per mode in kBiosChipModes order.
+// Each mode's colour in the speed chart and on its button.
+static const COLORREF kBiosBenchInk[3] = { RGB(0x8E, 0x9A, 0xA6), RGB(0x2E, 0x9E, 0x4F), RGB(0x2F, 0x7E, 0xD8) };
 
 // Select... starts in the BIOS folder from Emulation -> Settings when one is
 // set and exists, otherwise beside the executable. Resolved here rather than
@@ -10218,27 +10239,60 @@ static const TCHAR *BiosSelectInitialDir(void)
 	return S9xGetDirectoryT(DEFAULT_DIR);
 }
 
-// The status label and its tooltip say the same thing: the tip is there for
-// when a long path gets cut short.
-static void BiosManagerSetStatus(HWND hDlg, int slot, const TCHAR *text)
+// The status line and its tooltip say the same thing: the tip is there for
+// when a long path gets cut short. `note` shows it as the slot's own note.
+static void BiosManagerSetStatus(HWND hDlg, int slot, const TCHAR *text, bool note = false)
 {
-	SetDlgItemText(hDlg, IDC_BIOSMGR_STATUS0 + slot, text);
+	HWND status = BiosRowItem(IDC_BIOSMGR_STATUS0, slot);
+	s_bios_note[slot] = note;
+	SetWindowText(status, text);
+	InvalidateRect(status, NULL, FALSE);
 	if (!s_bios_tip) return;
 	TOOLINFO ti = { 0 };
 	ti.cbSize   = sizeof(ti);
 	ti.hwnd     = hDlg;
 	ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
-	ti.uId      = (UINT_PTR) GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot);
+	ti.uId      = (UINT_PTR) status;
 	ti.lpszText = (LPTSTR) text;
 	SendMessage(s_bios_tip, TTM_UPDATETIPTEXT, 0, (LPARAM) &ti);
+}
+
+// The mode a chip row's box shows; -1 for a row without one.
+static int BiosManagerChipMode(HWND hDlg, int slot)
+{
+	HWND          box = BiosRowItem(IDC_BIOSMGR_MODE0, slot);
+	const LRESULT sel = box ? SendMessage(box, CB_GETCURSEL, 0, 0) : CB_ERR;
+	return (sel == CB_ERR) ? -1 : (int) SendMessage(box, CB_GETITEMDATA, sel, 0);
+}
+
+// A chip row's status when its mode takes no file, or Firmware has none.
+static const TCHAR *BiosManagerChipNote(int mode)
+{
+	switch (mode)
+	{
+	case S9X_CHIP_HLE:    return _L(TEXT("Fastest (less accurate)"));
+	case S9X_CHIP_NATIVE: return _L(TEXT("Fast (chip accurate)"));
+	default:              return _L(TEXT("Nothing selected: Slow (chip accurate)"));
+	}
 }
 
 static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 {
 	TCHAR wtext[S9X_BIOS_PATH_MAX];
-	GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+	GetWindowText(BiosRowItem(IDC_BIOSMGR_EDIT0, slot), wtext, S9X_BIOS_PATH_MAX);
+	// A chip reads its file only in Firmware mode; otherwise the path waits greyed out.
+	const int  mode    = BiosManagerChipMode(hDlg, slot);
+	const bool file_on = mode < 0 || mode == S9X_CHIP_FIRMWARE;
+	EnableWindow(BiosRowItem(IDC_BIOSMGR_EDIT0, slot), file_on);
+	EnableWindow(BiosRowItem(IDC_BIOSMGR_BROWSE0, slot), file_on);
 	// Nothing to clear on a blank row.
-	EnableWindow(GetDlgItem(hDlg, IDC_BIOSMGR_CLEAR0 + slot), wtext[0] != TEXT('\0'));
+	EnableWindow(BiosRowItem(IDC_BIOSMGR_CLEAR0, slot), file_on && wtext[0] != TEXT('\0'));
+	if (mode >= 0 && (!file_on || wtext[0] == TEXT('\0')))
+	{
+		s_bios_status[slot] = file_on ? S9X_BIOS_PATH_MISSING : S9X_BIOS_PATH_UNSET;
+		BiosManagerSetStatus(hDlg, slot, BiosManagerChipNote(mode));
+		return;
+	}
 	if (wtext[0] == TEXT('\0'))
 	{
 		s_bios_status[slot] = S9X_BIOS_PATH_UNSET;
@@ -10246,7 +10300,7 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 		// Empty is fine for some slots and not others, so say which.
 		const char *note = S9xGetBiosSlotInfo(slot)->note;
 		Utf8ToWide  note_w(note ? note : "");
-		BiosManagerSetStatus(hDlg, slot, (wchar_t *) note_w);
+		BiosManagerSetStatus(hDlg, slot, (wchar_t *) note_w, true);
 		return;
 	}
 
@@ -10266,10 +10320,12 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	Utf8ToWide   why_w(why.c_str());
 	std::wstring text;
 	if (!exists || st == S9X_BIOS_PATH_MISSING) text = TEXT("not found");
+	else if (st == S9X_BIOS_PATH_OK && mode >= 0)
+		text = _L(TEXT("Slow (chip accurate)"));
 	else if (st == S9X_BIOS_PATH_OK)
 	{
 		text = TEXT("OK");
-		if (!why.empty()) text += TEXT("   ") + std::wstring((wchar_t *) why_w);
+		if (!why.empty()) text += TEXT(" - ") + std::wstring((wchar_t *) why_w);
 	}
 	else if (!why.empty())                      text = (wchar_t *) why_w;
 	else if (st == S9X_BIOS_PATH_BAD_IMAGE)     text = TEXT("wrong image");
@@ -10277,7 +10333,44 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	BiosManagerSetStatus(hDlg, slot, text.c_str());
 }
 
-// A clickable info icon in the gap between the row's label and its path box.
+// A chip row's speed chart button, after its info icon: a small bar chart in the modes' colours.
+static void BiosManagerAddBenchIcon(HWND hDlg, int slot)
+{
+	if (!S9xBiosBenchScenes(slot)) return;
+
+	const int size  = GetSystemMetrics(SM_CXSMICON);
+	HWND      hIcon = CreateWindowEx(0, TEXT("STATIC"), NULL, WS_CHILD | SS_OWNERDRAW | SS_NOTIFY, 0, 0, size, size,
+	                                 s_bios_cards, (HMENU) (INT_PTR) (IDC_BIOSMGR_BENCH0 + slot), g_hInst, NULL);
+	if (hIcon && s_bios_tip)
+	{
+		TOOLINFO ti = { 0 };
+		ti.cbSize   = sizeof(ti);
+		ti.hwnd     = hDlg;
+		ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+		ti.uId      = (UINT_PTR) hIcon;
+		ti.lpszText = (LPTSTR) _L(TEXT("How fast Legacy, Native and Firmware run"));
+		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+	}
+}
+
+static void BiosManagerDrawBenchIcon(const DRAWITEMSTRUCT *dis)
+{
+	static const int kTall[3] = { 45, 65, 100 };   // percent of the icon, short to tall
+	const RECT &rc = dis->rcItem;
+	const int   w  = rc.right - rc.left, h = rc.bottom - rc.top;
+	const int   bw = max(2, w / 4), gap = max(1, (w - 3 * bw) / 4);
+	FillRect(dis->hDC, &rc, GetSysColorBrush(COLOR_WINDOW));
+	for (int i = 0; i < 3; i++)
+	{
+		const int x   = rc.left + gap + i * (bw + gap);
+		RECT      bar = { x, rc.bottom - 1 - (h - 2) * kTall[i] / 100, x + bw, rc.bottom - 1 };
+		HBRUSH    ink = CreateSolidBrush(kBiosBenchInk[i]);
+		FillRect(dis->hDC, &bar, ink);
+		DeleteObject(ink);
+	}
+}
+
+// A clickable info icon after the card's label.
 static void BiosManagerAddInfoIcon(HWND hDlg, int slot)
 {
 	static HICON icon;
@@ -10288,17 +10381,9 @@ static void BiosManagerAddInfoIcon(HWND hDlg, int slot)
 	if (!icon && FAILED(LoadIconWithScaleDown(NULL, IDI_INFORMATION, size, size, &icon)))
 		return;
 
-	RECT label, edit;
-	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_LABEL0 + slot), &label);
-	MapWindowPoints(NULL, hDlg, (POINT *) &label, 2);
-	GetWindowRect(GetDlgItem(hDlg, IDC_BIOSMGR_EDIT0 + slot), &edit);
-	MapWindowPoints(NULL, hDlg, (POINT *) &edit, 2);
-
-	HWND hIcon = CreateWindowEx(0, TEXT("STATIC"), NULL,
-	                            WS_CHILD | WS_VISIBLE | SS_ICON | SS_REALSIZECONTROL | SS_NOTIFY,
-	                            (label.right + edit.left - size) / 2, (edit.top + edit.bottom - size) / 2,
-	                            size, size,
-	                            hDlg, (HMENU) (INT_PTR) (IDC_BIOSMGR_INFO0 + slot), g_hInst, NULL);
+	HWND hIcon = CreateWindowEx(0, TEXT("STATIC"), NULL, WS_CHILD | SS_ICON | SS_REALSIZECONTROL | SS_NOTIFY,
+	                            0, 0, size, size, s_bios_cards, (HMENU) (INT_PTR) (IDC_BIOSMGR_INFO0 + slot),
+	                            g_hInst, NULL);
 	SendMessage(hIcon, STM_SETICON, (WPARAM) icon, 0);
 
 	if (s_bios_tip)
@@ -10312,6 +10397,886 @@ static void BiosManagerAddInfoIcon(HWND hDlg, int slot)
 		ti.lpszText = (LPTSTR) (wchar_t *) tip;
 		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
 	}
+}
+
+static RECT BiosManagerRect(HWND hDlg, HWND h)
+{
+	RECT rc = { 0 };
+	GetWindowRect(h, &rc);
+	MapWindowPoints(NULL, hDlg, (POINT *) &rc, 2);
+	return rc;
+}
+
+// Queue `h` to (x, y) at w x ht. Without SWP_NOCOPYBITS a narrowed label keeps
+// its old, further-right text. A missing control or a failed batch is passed over.
+static HDWP BiosManagerPlace(HDWP dwp, HWND h, int x, int y, int w, int ht, UINT flags)
+{
+	if (!dwp || !h)
+		return dwp;
+	return DeferWindowPos(dwp, h, NULL, x, y, w, ht, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS | flags);
+}
+
+// A length in dialog units as pixels, across or (`down`) down.
+static int BiosManagerDlu(HWND hDlg, int dlu, bool down = false)
+{
+	RECT r = { 0, 0, dlu, dlu };
+	MapDialogRect(hDlg, &r);
+	return down ? r.bottom : r.right;
+}
+
+// Over a closed mode box the wheel scrolls the cards, rather than flipping the mode.
+static LRESULT CALLBACK BiosModeBoxProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR)
+{
+	if (msg == WM_MOUSEWHEEL && !SendMessage(hWnd, CB_GETDROPPEDSTATE, 0, 0))
+		return SendMessage(s_bios_cards, msg, wParam, lParam);
+	if (msg == WM_NCDESTROY)
+		RemoveWindowSubclass(hWnd, BiosModeBoxProc, uIdSubclass);
+	return DefSubclassProc(hWnd, msg, wParam, lParam);
+}
+
+// A chip row's mode box, at the start of its status line; the layout moves it, never resizes
+// it (a drop list's height is its list's).
+static void BiosManagerAddModeBox(HWND hDlg, int slot)
+{
+	if (!S9xBiosSlotHasChipMode(slot)) return;
+
+	HFONT   font = (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0);
+	HDC     hdc  = GetDC(hDlg);
+	HGDIOBJ old  = SelectObject(hdc, font);
+	int     tw   = 0;
+	for (const auto &m : kBiosChipModes)
+	{
+		const TCHAR *name = _L(m.name);
+		SIZE         sz   = { 0 };
+		GetTextExtentPoint32(hdc, name, lstrlen(name), &sz);
+		tw = max(tw, (int) sz.cx);
+	}
+	SelectObject(hdc, old);
+	ReleaseDC(hDlg, hdc);
+
+	HWND box = CreateWindowEx(0, WC_COMBOBOX, NULL, WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+	                          0, 0, tw + GetSystemMetrics(SM_CXVSCROLL) + BiosManagerDlu(hDlg, 10),
+	                          BiosManagerDlu(hDlg, 120, true), s_bios_cards, (HMENU) (INT_PTR) (IDC_BIOSMGR_MODE0 + slot),
+	                          g_hInst, NULL);
+	if (!box) return;
+	SendMessage(box, WM_SETFONT, (WPARAM) font, FALSE);
+	SetWindowSubclass(box, BiosModeBoxProc, 0, 0);
+	const int pick = S9xChipModeInEffect(slot);
+	for (const auto &m : kBiosChipModes)
+	{
+		const int i = (int) SendMessage(box, CB_ADDSTRING, 0, (LPARAM) _L(m.name));
+		SendMessage(box, CB_SETITEMDATA, i, m.mode);
+		if (m.mode == pick)
+			SendMessage(box, CB_SETCURSEL, i, 0);
+	}
+
+	if (s_bios_tip)
+	{
+		TOOLINFO ti = { 0 };
+		ti.cbSize   = sizeof(ti);
+		ti.hwnd     = hDlg;
+		ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+		ti.uId      = (UINT_PTR) box;
+		ti.lpszText = (LPTSTR) _L(TEXT("Legacy (HLE): the old high-level code, some games glitch\n"
+		                               "Native (LLE): the chip itself, exact, no file needed\n"
+		                               "Firmware: the chip running the dump picked here, exact but slower\n"
+		                               "Takes effect at the next load or hard reset"));
+		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+	}
+}
+
+static int BiosManagerTextWidth(HDC hdc, HWND h)
+{
+	TCHAR text[S9X_BIOS_PATH_MAX];
+	SIZE  sz = { 0 };
+	const int n = GetWindowText(h, text, _countof(text));
+	return (n > 0 && GetTextExtentPoint32(hdc, text, n, &sz)) ? (int) sz.cx : 0;
+}
+
+static std::wstring BiosManagerListText(HWND list, int i)
+{
+	std::wstring text((size_t) SendMessage(list, LB_GETTEXTLEN, i, 0) + 1, L'\0');
+	SendMessage(list, LB_GETTEXT, i, (LPARAM) &text[0]);
+	text.resize(lstrlen(text.c_str()));
+	return text;
+}
+
+// Where an entry's text starts, given the item height: a heading's box, or a
+// slot's bullet, takes the item-height cell before it, and a heading's icon the
+// next; each level is one in.
+static int BiosManagerListTextLeft(int level, int u)
+{
+	return u * (level + 1) + ((level == 0 && s_bios_glyphs) ? u : 0);
+}
+
+// Headings in bold after a tree view's [+]/[-] box and their family's icon; slots
+// indented under a hollow bullet. The pick sits on a light wash of the accent.
+static void BiosManagerDrawListItem(const DRAWITEMSTRUCT *dis)
+{
+	if (dis->itemID == (UINT) -1)
+		return;
+	const HDC      hdc      = dis->hDC;
+	const RECT    &rc       = dis->rcItem;
+	const int      data     = (int) dis->itemData;
+	const int      level    = BiosManagerListLevel(data);
+	const bool     heading  = level == 0;
+	const bool     parent   = BiosManagerHasChildren(data);
+	const bool     selected = (dis->itemState & ODS_SELECTED) != 0;
+	const int      u        = rc.bottom - rc.top;
+	const COLORREF ink      = GetSysColor(COLOR_WINDOWTEXT);
+
+	FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
+	if (selected)
+	{
+		const COLORREF wash = BiosMix(GetSysColor(COLOR_WINDOW), GetSysColor(COLOR_HIGHLIGHT), 56);
+		HBRUSH  br   = CreateSolidBrush(wash);
+		HPEN    pen  = CreatePen(PS_SOLID, 1, wash);
+		HGDIOBJ oldb = SelectObject(hdc, br), oldp = SelectObject(hdc, pen);
+		RoundRect(hdc, rc.left + 2, rc.top + 1, rc.right - 2, rc.bottom - 1, u / 3, u / 3);
+		SelectObject(hdc, oldb);
+		SelectObject(hdc, oldp);
+		DeleteObject(br);
+		DeleteObject(pen);
+	}
+	HGDIOBJ oldp = SelectObject(hdc, CreatePen(PS_SOLID, 1, parent ? GetSysColor(COLOR_GRAYTEXT) : ink));
+	HGDIOBJ oldb = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+	if (parent)
+	{
+		// The box sits where a bullet would, in the cell before the text.
+		const int b = (u / 2) | 1, x = rc.left + u * level + (u - b) / 2, y = rc.top + (u - b) / 2, c = b / 2;
+		Rectangle(hdc, x, y, x + b, y + b);
+		DeleteObject(SelectObject(hdc, CreatePen(PS_SOLID, 1, ink)));
+		MoveToEx(hdc, x + 2, y + c, NULL);
+		LineTo(hdc, x + b - 2, y + c);
+		if (!s_bios_open[data])
+		{
+			MoveToEx(hdc, x + c, y + 2, NULL);
+			LineTo(hdc, x + c, y + b - 2);
+		}
+	}
+	else
+	{
+		// Odd-sized and centred like the box, so bullets and boxes share a column.
+		const int d = (u * 3 / 8) | 1, x = rc.left + u * level + (u - d) / 2, y = rc.top + (u - d) / 2;
+		Ellipse(hdc, x, y, x + d, y + d);
+	}
+	SelectObject(hdc, oldb);
+	DeleteObject(SelectObject(hdc, oldp));
+
+	SetBkMode(hdc, TRANSPARENT);
+	if (heading && s_bios_glyphs)
+	{
+		const wchar_t icon = kBiosFamilyIcons[BiosManagerHeadingOf(data)];
+		RECT          ir   = { rc.left + u, rc.top, rc.left + 2 * u, rc.bottom };
+		HGDIOBJ       oldf = SelectObject(hdc, s_bios_glyphs);
+		SetTextColor(hdc, BiosMix(ink, GetSysColor(COLOR_HIGHLIGHT), 150));
+		DrawTextW(hdc, &icon, 1, &ir, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		SelectObject(hdc, oldf);
+	}
+
+	const std::wstring text = BiosManagerListText(dis->hwndItem, dis->itemID);
+	HGDIOBJ oldf = SelectObject(hdc, (heading && s_bios_bold) ? s_bios_bold
+	                                 : (HFONT) SendMessage(dis->hwndItem, WM_GETFONT, 0, 0));
+	RECT tr = rc;
+	tr.left += BiosManagerListTextLeft(level, u);
+	SetTextColor(hdc, ink);
+	DrawText(hdc, text.c_str(), -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+	SelectObject(hdc, oldf);
+
+	if ((dis->itemState & ODS_FOCUS) && !(dis->itemState & ODS_NOFOCUSRECT))
+		DrawFocusRect(hdc, &rc);
+}
+
+// List every heading, and under each open entry the entries it holds.
+static void BiosManagerFillList(HWND list)
+{
+	SendMessage(list, WM_SETREDRAW, FALSE, 0);
+	SendMessage(list, LB_RESETCONTENT, 0, 0);
+	for (int g = 0; g < S9X_BIOS_NUM_FAMILIES; g++)
+	{
+		int i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(Utf8ToWide(S9xGetBiosFamily(g)->name)));
+		SendMessage(list, LB_SETITEMDATA, i, kBiosHeading + g);
+		int subgroup = -1;   // listed ahead of its first slot
+		for (const int *s = S9xGetBiosFamily(g)->members; s_bios_open[kBiosHeading + g] && *s >= 0; s++)
+		{
+			const BiosChild *child = BiosManagerChild(*s);
+			if (child && !child->listed)
+				continue;
+			if (child && child->parent >= kBiosSubgroup && child->parent != subgroup)
+			{
+				subgroup = child->parent;
+				i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(Utf8ToWide(S9xBiosGroupName(subgroup - kBiosSubgroup))));
+				SendMessage(list, LB_SETITEMDATA, i, subgroup);
+			}
+			if (child && !s_bios_open[child->parent])
+				continue;
+			i = (int) SendMessage(list, LB_ADDSTRING, 0, (LPARAM) _L(Utf8ToWide((child && child->name) ? child->name
+			                                                                 : S9xGetBiosSlotInfo(*s)->label)));
+			SendMessage(list, LB_SETITEMDATA, i, *s);
+		}
+	}
+	SendMessage(list, WM_SETREDRAW, TRUE, 0);
+	InvalidateRect(list, NULL, TRUE);
+}
+
+// Fill the sidebar with room for each entry's text, as wide as its longest entry and as tall as all
+// of them. Both are measured with every family open; the closed ones close after.
+static void BiosManagerInitList(HWND hDlg)
+{
+	HWND  list = GetDlgItem(hDlg, IDC_BIOSMGR_LIST);
+	HFONT font = (HFONT) SendMessage(list, WM_GETFONT, 0, 0);
+	LOGFONT lf;
+	if (GetObject(font, sizeof(lf), &lf))
+	{
+		lf.lfWeight = FW_BOLD;
+		s_bios_bold = CreateFontIndirect(&lf);
+	}
+
+	std::fill(s_bios_open, s_bios_open + _countof(s_bios_open), true);
+	BiosManagerFillList(list);
+
+	const int count = (int) SendMessage(list, LB_GETCOUNT, 0, 0);
+	HDC     hdc = GetDC(list);
+	HGDIOBJ old = SelectObject(hdc, s_bios_bold ? s_bios_bold : font);
+	TEXTMETRIC tm;
+	GetTextMetrics(hdc, &tm);
+	const int u = tm.tmHeight + tm.tmHeight / 2;
+	SendMessage(list, LB_SETITEMHEIGHT, 0, u);
+
+	int widest = 0;
+	for (int i = 0; i < count; i++)
+	{
+		const int level = BiosManagerListLevel((int) SendMessage(list, LB_GETITEMDATA, i, 0));
+		const std::wstring text = BiosManagerListText(list, i);
+		SIZE sz = { 0 };
+		SelectObject(hdc, (level == 0 && s_bios_bold) ? s_bios_bold : font);
+		GetTextExtentPoint32(hdc, text.c_str(), (int) text.size(), &sz);
+		widest = max(widest, BiosManagerListTextLeft(level, u) + (int) sz.cx);
+	}
+	SelectObject(hdc, old);
+	ReleaseDC(list, hdc);
+
+	// Everything starts closed: just the headings.
+	std::fill(s_bios_open, s_bios_open + _countof(s_bios_open), false);
+	BiosManagerFillList(list);
+
+	// Room for every entry, so the sidebar never needs to scroll while the screen has the room.
+	RECT client;
+	GetClientRect(list, &client);
+	const RECT lr = BiosManagerRect(hDlg, list);
+	SetWindowPos(list, NULL, 0, 0, (lr.right - lr.left) - client.right + widest + u / 2,
+	             (lr.bottom - lr.top) - client.bottom + count * u, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// The dialog's spacing in dialog units.
+enum
+{
+	kBiosMargin = 6,     // round the edges, above the buttons and between them
+	kBiosPathW  = 200,   // a card's path box, at the dialog's size
+};
+
+// The cards' spacing in pixels, from the dialog font so it follows the DPI.
+static struct
+{
+	int th;              // a line of text
+	int pad;             // inside a card, round its edge
+	int gap;             // between controls, and from the status line to the path box
+	int ctl;             // a path box's and a button's height
+	int card_gap;        // one card to the next
+	int icon;            // the info and speed icons
+	int combo;           // a mode box's height
+	int browse, clear;   // the buttons' widths
+} s_bm;
+
+static const COLORREF kBiosGood = RGB(0x1E, 0x8B, 0x3A), kBiosBad = RGB(0xC0, 0x39, 0x2B);
+
+// The status line: OK in green, a red cross and what's wrong, the slot's note in grey
+// italics, or a chip mode's plain words.
+static void BiosManagerDrawStatus(const DRAWITEMSTRUCT *dis)
+{
+	const int               slot = (int) dis->CtlID - IDC_BIOSMGR_STATUS0;
+	const S9xBiosPathStatus st   = s_bios_status[slot];
+	const bool              note = s_bios_note[slot];
+	const bool              verdict = !note && st != S9X_BIOS_PATH_UNSET;
+	const HDC               hdc  = dis->hDC;
+	RECT                    rc   = dis->rcItem;
+	FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
+
+	TCHAR text[S9X_BIOS_PATH_MAX];
+	GetWindowText(dis->hwndItem, text, _countof(text));
+	HGDIOBJ oldf = SelectObject(hdc, (note && s_bios_italic) ? s_bios_italic
+	                                 : (HFONT) SendMessage(dis->hwndItem, WM_GETFONT, 0, 0));
+	TEXTMETRIC tm;
+	GetTextMetrics(hdc, &tm);
+	const COLORREF ink = note ? GetSysColor(COLOR_GRAYTEXT) : !verdict ? GetSysColor(COLOR_WINDOWTEXT)
+	                   : (st == S9X_BIOS_PATH_OK) ? kBiosGood : kBiosBad;
+	if (verdict && st != S9X_BIOS_PATH_OK)
+	{
+		// A rounded badge with a white cross.
+		const int b = (tm.tmHeight * 3 / 4) | 1, x = rc.left, y = (rc.top + rc.bottom - b) / 2;
+		HBRUSH  br   = CreateSolidBrush(ink);
+		HGDIOBJ oldb = SelectObject(hdc, br);
+		HGDIOBJ oldp = SelectObject(hdc, CreatePen(PS_SOLID, 1, ink));
+		RoundRect(hdc, x, y, x + b, y + b, b / 2, b / 2);
+		LOGBRUSH lb = { BS_SOLID, RGB(0xFF, 0xFF, 0xFF), 0 };
+		DeleteObject(SelectObject(hdc, ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND,
+		                                            max(1, b / 7), &lb, 0, NULL)));
+		MoveToEx(hdc, x + b * 32 / 100, y + b * 32 / 100, NULL);
+		LineTo(hdc, x + b * 68 / 100, y + b * 68 / 100);
+		MoveToEx(hdc, x + b * 68 / 100, y + b * 32 / 100, NULL);
+		LineTo(hdc, x + b * 32 / 100, y + b * 68 / 100);
+		SelectObject(hdc, oldb);
+		DeleteObject(SelectObject(hdc, oldp));
+		DeleteObject(br);
+		rc.left += b + tm.tmAveCharWidth;
+	}
+	SetTextColor(hdc, ink);
+	SetBkMode(hdc, TRANSPARENT);
+	DrawText(hdc, text, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+	SelectObject(hdc, oldf);
+}
+
+// Save Changes: filled with the accent, as the button that keeps what was picked.
+static void BiosManagerDrawSave(const DRAWITEMSTRUCT *dis)
+{
+	const HDC   hdc  = dis->hDC;
+	const RECT &rc   = dis->rcItem;
+	COLORREF    fill = GetSysColor(COLOR_HIGHLIGHT);
+	if (dis->itemState & ODS_DISABLED)
+		fill = GetSysColor(COLOR_GRAYTEXT);
+	else if (dis->itemState & ODS_SELECTED)
+		fill = BiosMix(fill, RGB(0, 0, 0), 48);
+	FillRect(hdc, &rc, GetSysColorBrush(COLOR_BTNFACE));
+	HBRUSH  br   = CreateSolidBrush(fill);
+	HPEN    pen  = CreatePen(PS_SOLID, 1, fill);
+	HGDIOBJ oldb = SelectObject(hdc, br), oldp = SelectObject(hdc, pen);
+	const int r = (rc.bottom - rc.top) / 3;
+	RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, r, r);
+	SelectObject(hdc, oldb);
+	SelectObject(hdc, oldp);
+	DeleteObject(br);
+	DeleteObject(pen);
+
+	TCHAR text[64];
+	GetWindowText(dis->hwndItem, text, _countof(text));
+	HGDIOBJ oldf = SelectObject(hdc, (HFONT) SendMessage(dis->hwndItem, WM_GETFONT, 0, 0));
+	RECT    tr   = rc;
+	SetTextColor(hdc, GetSysColor(COLOR_HIGHLIGHTTEXT));
+	SetBkMode(hdc, TRANSPARENT);
+	DrawText(hdc, text, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	SelectObject(hdc, oldf);
+	if ((dis->itemState & ODS_FOCUS) && !(dis->itemState & ODS_NOFOCUSRECT))
+	{
+		RECT fr = rc;
+		InflateRect(&fr, -3, -3);
+		DrawFocusRect(hdc, &fr);
+	}
+}
+
+// A card: the status line (as tall as the mode box on a chip's), the path box under it, padding round them.
+static int BiosManagerCardHeight(int slot)
+{
+	const int line = BiosRowItem(IDC_BIOSMGR_MODE0, slot) ? max(s_bm.th, s_bm.combo) : s_bm.th;
+	return 2 * s_bm.pad + line + s_bm.gap + s_bm.ctl;
+}
+
+// The panel: white rounded cards on the dialog's grey, one round each shown row.
+static void BiosCardsPaint(HWND hWnd, HDC hdc)
+{
+	RECT cr;
+	GetClientRect(hWnd, &cr);
+	FillRect(hdc, &cr, GetSysColorBrush(COLOR_BTNFACE));
+	HBRUSH  br   = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
+	HPEN    pen  = CreatePen(PS_SOLID, 1, BiosMix(GetSysColor(COLOR_BTNFACE), GetSysColor(COLOR_WINDOWTEXT), 40));
+	HGDIOBJ oldb = SelectObject(hdc, br), oldp = SelectObject(hdc, pen);
+	for (const RECT &card : s_bios_card)
+		if (card.bottom > card.top && card.bottom > s_bios_scroll && card.top < s_bios_scroll + cr.bottom)
+			RoundRect(hdc, card.left, card.top - s_bios_scroll, card.right, card.bottom - s_bios_scroll,
+			          s_bm.pad, s_bm.pad);
+	SelectObject(hdc, oldb);
+	SelectObject(hdc, oldp);
+	DeleteObject(br);
+	DeleteObject(pen);
+}
+
+static void BiosCardsScrollTo(HWND hWnd, int pos)
+{
+	RECT cr;
+	GetClientRect(hWnd, &cr);
+	pos = max(0, min(pos, s_bios_content - (int) cr.bottom));
+	if (pos == s_bios_scroll)
+		return;
+	const int dy = s_bios_scroll - pos;
+	s_bios_scroll = pos;
+	SetScrollPos(hWnd, SB_VERT, pos, TRUE);
+	ScrollWindowEx(hWnd, 0, dy, NULL, NULL, NULL, NULL, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+	UpdateWindow(hWnd);
+}
+
+// A control on a card taking the focus brings the whole card into view.
+static void BiosCardsReveal(int slot)
+{
+	RECT cr;
+	GetClientRect(s_bios_cards, &cr);
+	const RECT &card = s_bios_card[slot];
+	if (card.top < s_bios_scroll)
+		BiosCardsScrollTo(s_bios_cards, card.top);
+	else if (card.bottom > s_bios_scroll + cr.bottom)
+		BiosCardsScrollTo(s_bios_cards, card.bottom - cr.bottom);
+}
+
+// The rows' notifications go up to the dialog; the panel itself only paints and scrolls.
+static LRESULT CALLBACK BiosCardsProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_COMMAND:
+	case WM_NOTIFY:
+	case WM_DRAWITEM:
+	case WM_CTLCOLORSTATIC:
+	case WM_CTLCOLORBTN:
+	case WM_CTLCOLOREDIT:
+	case WM_CTLCOLORLISTBOX:
+		return SendMessage(GetParent(hWnd), msg, wParam, lParam);
+
+	case WM_ERASEBKGND:
+		return 1;
+
+	case WM_PAINT:
+	{
+		PAINTSTRUCT ps;
+		HDC         hdc = BeginPaint(hWnd, &ps);
+		BiosCardsPaint(hWnd, hdc);
+		EndPaint(hWnd, &ps);
+		return 0;
+	}
+
+	// Themed buttons ask for what's behind their corners.
+	case WM_PRINTCLIENT:
+		BiosCardsPaint(hWnd, (HDC) wParam);
+		return 0;
+
+	case WM_VSCROLL:
+	{
+		SCROLLINFO si = { sizeof(si), SIF_ALL };
+		GetScrollInfo(hWnd, SB_VERT, &si);
+		int pos = s_bios_scroll;
+		switch (LOWORD(wParam))
+		{
+		case SB_LINEUP:        pos -= 2 * s_bm.th;     break;
+		case SB_LINEDOWN:      pos += 2 * s_bm.th;     break;
+		case SB_PAGEUP:        pos -= (int) si.nPage;  break;
+		case SB_PAGEDOWN:      pos += (int) si.nPage;  break;
+		case SB_THUMBTRACK:
+		case SB_THUMBPOSITION: pos  = si.nTrackPos;    break;
+		case SB_TOP:           pos  = 0;               break;
+		case SB_BOTTOM:        pos  = s_bios_content;  break;
+		}
+		BiosCardsScrollTo(hWnd, pos);
+		return 0;
+	}
+
+	case WM_MOUSEWHEEL:
+		// Three of a line's scroll a notch, as a list scrolls.
+		BiosCardsScrollTo(hWnd, s_bios_scroll - GET_WHEEL_DELTA_WPARAM(wParam) * 3 * 2 * s_bm.th / WHEEL_DELTA);
+		return 0;
+	}
+	return DefWindowProc(hWnd, msg, wParam, lParam);
+}
+
+static void BiosManagerCreateCards(HWND hDlg)
+{
+	static ATOM cls;
+	if (!cls)
+	{
+		WNDCLASS wc      = { 0 };
+		wc.lpfnWndProc   = BiosCardsProc;
+		wc.hInstance     = g_hInst;
+		wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
+		wc.lpszClassName = TEXT("S9xBiosCards");
+		cls = RegisterClass(&wc);
+	}
+	s_bios_cards = CreateWindowEx(WS_EX_CONTROLPARENT, TEXT("S9xBiosCards"), NULL,
+	                              WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN, 0, 0, 0, 0,
+	                              hDlg, (HMENU) (INT_PTR) IDC_BIOSMGR_CARDS, g_hInst, NULL);
+	memset(s_bios_card, 0, sizeof(s_bios_card));
+	s_bios_scroll = 0;
+	s_bios_pick   = -1;
+}
+
+// A slot's card: its label and icons, a chip's mode box, the status line over the path box,
+// Browse and Clear; all on the panel.
+static void BiosManagerAddRow(HWND hDlg, int slot)
+{
+	HFONT font = (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0);
+	auto  make = [&](DWORD ex, const TCHAR *cls, const TCHAR *text, DWORD style, int base)
+	{
+		HWND h = CreateWindowEx(ex, cls, text, WS_CHILD | style, 0, 0, 0, 0, s_bios_cards,
+		                        (HMENU) (INT_PTR) (base + slot), g_hInst, NULL);
+		if (h)
+			SendMessage(h, WM_SETFONT, (WPARAM) font, FALSE);
+		return h;
+	};
+	make(0, WC_STATIC, Utf8ToWide(S9xGetBiosSlotInfo(slot)->label), SS_LEFT | SS_NOPREFIX | SS_CENTERIMAGE,
+	     IDC_BIOSMGR_LABEL0);
+	BiosManagerAddInfoIcon(hDlg, slot);
+	BiosManagerAddBenchIcon(hDlg, slot);
+	BiosManagerAddModeBox(hDlg, slot);
+	HWND status = make(0, WC_STATIC, TEXT(""), SS_OWNERDRAW | SS_NOTIFY, IDC_BIOSMGR_STATUS0);
+	if (status && s_bios_tip)
+	{
+		TOOLINFO ti = { 0 };
+		ti.cbSize   = sizeof(ti);
+		ti.hwnd     = hDlg;
+		ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
+		ti.uId      = (UINT_PTR) status;
+		ti.lpszText = (LPTSTR) TEXT("");
+		SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
+	}
+	HWND edit   = make(WS_EX_CLIENTEDGE, WC_EDIT, TEXT(""), WS_TABSTOP | ES_AUTOHSCROLL, IDC_BIOSMGR_EDIT0);
+	HWND browse = make(0, WC_BUTTON, _L(TEXT("Browse")), WS_TABSTOP | BS_PUSHBUTTON | BS_NOTIFY, IDC_BIOSMGR_BROWSE0);
+	HWND clear  = make(0, WC_BUTTON, _L(TEXT("Clear")), WS_TABSTOP | BS_PUSHBUTTON | BS_NOTIFY, IDC_BIOSMGR_CLEAR0);
+	if (s_bios_icons[0])
+		SendMessage(browse, BM_SETIMAGE, IMAGE_ICON, (LPARAM) s_bios_icons[0]);
+	if (s_bios_icons[1])
+		SendMessage(clear, BM_SETIMAGE, IMAGE_ICON, (LPARAM) s_bios_icons[1]);
+	SetWindowText(edit, Utf8ToWide(S9xGetBiosPath(slot)));
+	BiosManagerRefreshStatus(hDlg, slot);
+}
+
+// Tab order is the panel's z-order: slot by slot, each card left to right and down.
+static void BiosManagerOrderTabs(void)
+{
+	static const int kOrder[] = { IDC_BIOSMGR_LABEL0, IDC_BIOSMGR_INFO0, IDC_BIOSMGR_BENCH0, IDC_BIOSMGR_MODE0,
+	                              IDC_BIOSMGR_STATUS0, IDC_BIOSMGR_EDIT0, IDC_BIOSMGR_BROWSE0, IDC_BIOSMGR_CLEAR0 };
+	HWND prev = HWND_TOP;
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		for (int base : kOrder)
+			if (HWND c = BiosRowItem(base, slot))
+			{
+				SetWindowPos(c, prev, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+				prev = c;
+			}
+}
+
+static void BiosManagerMeasure(HWND hDlg)
+{
+	HDC     hdc = GetDC(hDlg);
+	HGDIOBJ old = SelectObject(hdc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
+	TEXTMETRIC tm;
+	GetTextMetrics(hdc, &tm);
+	s_bm.th       = tm.tmHeight;
+	s_bm.pad      = tm.tmHeight * 2 / 3;
+	s_bm.gap      = max(3, (int) tm.tmHeight / 4);
+	s_bm.ctl      = tm.tmHeight + tm.tmHeight / 2;
+	s_bm.card_gap = tm.tmHeight / 2;
+	s_bm.icon     = GetSystemMetrics(SM_CXSMICON);
+	// A button: its icon and a gap, its text, and room either side.
+	auto button_w = [&](int base, HICON icon)
+	{
+		TCHAR     text[64];
+		SIZE      sz = { 0 };
+		const int n  = GetWindowText(BiosRowItem(base, 0), text, _countof(text));
+		GetTextExtentPoint32(hdc, text, n, &sz);
+		return (int) sz.cx + (icon ? s_bm.icon + s_bm.gap : 0) + (int) tm.tmHeight * 3 / 2;
+	};
+	s_bm.browse = button_w(IDC_BIOSMGR_BROWSE0, s_bios_icons[0]);
+	s_bm.clear  = button_w(IDC_BIOSMGR_CLEAR0, s_bios_icons[1]);
+	SelectObject(hdc, old);
+	ReleaseDC(hDlg, hdc);
+
+	s_bm.combo = s_bm.ctl;
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		if (HWND box = BiosRowItem(IDC_BIOSMGR_MODE0, slot))
+		{
+			const RECT r = BiosManagerRect(s_bios_cards, box);
+			s_bm.combo = r.bottom - r.top;
+			break;
+		}
+}
+
+// Lay the cards out for the sidebar's pick, a heading's whole family or one entry: stacked down
+// the panel, the labels as wide as the pick's widest and the path boxes taking up the slack. A new
+// pick starts at the top.
+static void BiosManagerLayout(HWND hDlg)
+{
+	HWND      list = GetDlgItem(hDlg, IDC_BIOSMGR_LIST);
+	const int sel  = (int) SendMessage(list, LB_GETCURSEL, 0, 0);
+	const int pick = (sel == LB_ERR) ? -1 : (int) SendMessage(list, LB_GETITEMDATA, sel, 0);
+
+	bool shown[S9X_NUM_BIOS_SLOTS] = { false };
+	int  order[S9X_NUM_BIOS_SLOTS], rows = 0;
+	for (int g = 0; g < S9X_BIOS_NUM_FAMILIES; g++)
+		for (const int *s = S9xGetBiosFamily(g)->members; *s >= 0; s++)
+		{
+			const BiosChild *child = BiosManagerChild(*s);
+			if (pick == *s || pick == kBiosHeading + g || (child && pick == child->parent))
+			{
+				shown[*s]     = true;
+				order[rows++] = *s;
+			}
+		}
+
+	// The label column, and the icon columns after it, as this pick needs them.
+	HDC     hdc    = GetDC(hDlg);
+	HGDIOBJ old    = SelectObject(hdc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
+	int     labelw = 0;
+	bool    info   = false, bench = false;
+	for (int i = 0; i < rows; i++)
+	{
+		labelw = max(labelw, BiosManagerTextWidth(hdc, BiosRowItem(IDC_BIOSMGR_LABEL0, order[i])) + 2);
+		info   = info || BiosRowItem(IDC_BIOSMGR_INFO0, order[i]);
+		bench  = bench || BiosRowItem(IDC_BIOSMGR_BENCH0, order[i]);
+	}
+	SelectObject(hdc, old);
+	ReleaseDC(hDlg, hdc);
+
+	// The cards' heights first: they decide the scroll bar, and it the cards' width.
+	memset(s_bios_card, 0, sizeof(s_bios_card));
+	int y = 0;
+	for (int i = 0; i < rows; i++)
+	{
+		s_bios_card[order[i]].top    = y;
+		s_bios_card[order[i]].bottom = y + BiosManagerCardHeight(order[i]);
+		y = s_bios_card[order[i]].bottom + s_bm.card_gap;
+	}
+	s_bios_content = rows ? y - s_bm.card_gap : 0;
+	RECT cr;
+	GetClientRect(s_bios_cards, &cr);
+	if (pick != s_bios_pick)
+		s_bios_scroll = 0;
+	s_bios_pick   = pick;
+	s_bios_scroll = max(0, min(s_bios_scroll, s_bios_content - (int) cr.bottom));
+	SCROLLINFO si = { sizeof(si), SIF_RANGE | SIF_PAGE | SIF_POS, 0, max(0, s_bios_content - 1), (UINT) cr.bottom, s_bios_scroll };
+	SetScrollInfo(s_bios_cards, SB_VERT, &si, TRUE);
+	GetClientRect(s_bios_cards, &cr);
+	const int card_w = cr.right - ((s_bios_content > cr.bottom) ? s_bm.gap : 1);
+
+	HDWP dwp = BeginDeferWindowPos(S9X_NUM_BIOS_SLOTS * (int) _countof(kBiosRowCtrls));
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+	{
+		if (!shown[slot])
+		{
+			for (int base : kBiosRowCtrls)
+				dwp = BiosManagerPlace(dwp, BiosRowItem(base, slot), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_HIDEWINDOW);
+			continue;
+		}
+		RECT &card = s_bios_card[slot];
+		card.right = card_w;
+		const int top = card.top - s_bios_scroll, h = card.bottom - card.top;
+		auto      put = [&](int base, int x, int py, int w, int ht)
+		{
+			dwp = BiosManagerPlace(dwp, BiosRowItem(base, slot), x, py, w, ht, SWP_SHOWWINDOW);
+		};
+
+		// Label and icons down the left, centred on the card.
+		put(IDC_BIOSMGR_LABEL0, s_bm.pad, top + (h - s_bm.th) / 2, labelw, s_bm.th);
+		int x = s_bm.pad + labelw + 2 * s_bm.gap;
+		put(IDC_BIOSMGR_INFO0, x, top + (h - s_bm.icon) / 2, s_bm.icon, s_bm.icon);
+		if (info)
+			x += s_bm.icon + s_bm.gap;
+		put(IDC_BIOSMGR_BENCH0, x, top + (h - s_bm.icon) / 2, s_bm.icon, s_bm.icon);
+		if (bench)
+			x += s_bm.icon + s_bm.gap;
+
+		// The status line, after a chip's mode box, over the path box, Browse and Clear.
+		const int cx    = x + 2 * s_bm.gap;
+		const int right = card_w - s_bm.pad;
+		HWND      box   = BiosRowItem(IDC_BIOSMGR_MODE0, slot);
+		const int line  = box ? max(s_bm.th, s_bm.combo) : s_bm.th;
+		const int y1    = top + s_bm.pad, y2 = y1 + line + s_bm.gap;
+		int       sx    = cx;
+		if (box)
+		{
+			const RECT br = BiosManagerRect(s_bios_cards, box);
+			dwp = BiosManagerPlace(dwp, box, cx, y1 + (line - (br.bottom - br.top)) / 2, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
+			sx += (br.right - br.left) + 2 * s_bm.gap;
+		}
+		put(IDC_BIOSMGR_STATUS0, sx, y1 + (line - s_bm.th) / 2, max(0, right - sx), s_bm.th);
+		const int clear_x  = right - s_bm.clear;
+		const int browse_x = clear_x - s_bm.gap - s_bm.browse;
+		put(IDC_BIOSMGR_EDIT0, cx, y2, max(0, browse_x - s_bm.gap - cx), s_bm.ctl);
+		put(IDC_BIOSMGR_BROWSE0, browse_x, y2, s_bm.browse, s_bm.ctl);
+		put(IDC_BIOSMGR_CLEAR0, clear_x, y2, s_bm.clear, s_bm.ctl);
+	}
+	if (dwp)
+		EndDeferWindowPos(dwp);
+	InvalidateRect(s_bios_cards, NULL, TRUE);
+}
+
+// Size the dialog once: the sidebar down the left and the cards beside it, wide enough for
+// kBiosPathW of path and tall enough for the biggest family without scrolling, as far as
+// the screen allows; Cancel and Save Changes under the cards.
+static void BiosManagerSizeWindow(HWND hDlg)
+{
+	HWND       list   = GetDlgItem(hDlg, IDC_BIOSMGR_LIST);
+	HWND       intro  = GetDlgItem(hDlg, IDC_BIOSMGR_INTRO);
+	HWND       ok     = GetDlgItem(hDlg, IDOK);
+	HWND       cancel = GetDlgItem(hDlg, IDCANCEL);
+	const RECT lr     = BiosManagerRect(hDlg, list);
+	const int  m      = BiosManagerDlu(hDlg, kBiosMargin);
+	const int  vm     = BiosManagerDlu(hDlg, kBiosMargin, true);
+
+	HDC     hdc       = GetDC(hDlg);
+	HGDIOBJ old       = SelectObject(hdc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
+	int     label_max = 0;
+	for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		label_max = max(label_max, BiosManagerTextWidth(hdc, BiosRowItem(IDC_BIOSMGR_LABEL0, slot)) + 2);
+	const int introw  = BiosManagerTextWidth(hdc, intro);
+	const int save_w  = max(BiosManagerTextWidth(hdc, ok) + 2 * s_bm.th, 5 * s_bm.th);
+	const int cancelw = max(BiosManagerTextWidth(hdc, cancel) + 2 * s_bm.th, 5 * s_bm.th);
+	SelectObject(hdc, old);
+	ReleaseDC(hDlg, hdc);
+
+	const int card_w = 2 * s_bm.pad + label_max + 2 * (s_bm.icon + s_bm.gap) + 4 * s_bm.gap +
+	                   BiosManagerDlu(hDlg, kBiosPathW) + 2 * s_bm.gap + s_bm.browse + s_bm.clear +
+	                   GetSystemMetrics(SM_CXVSCROLL);
+	int family = 0;
+	for (int g = 0; g < S9X_BIOS_NUM_FAMILIES; g++)
+	{
+		int fh = -s_bm.card_gap;
+		for (const int *s = S9xGetBiosFamily(g)->members; *s >= 0; s++)
+			fh += BiosManagerCardHeight(*s) + s_bm.card_gap;
+		family = max(family, fh);
+	}
+	const int btn_h = s_bm.ctl + 2;
+	const int top   = vm + s_bm.th + vm;
+	int       w     = max(m + (int) (lr.right - lr.left) + m + card_w + m, m + introw + m);
+	int       h     = top + max((int) (lr.bottom - lr.top), family) + vm + btn_h + vm;
+
+	// The window round that client, centred where DS_CENTER put it and kept on its monitor.
+	RECT win, cr;
+	GetWindowRect(hDlg, &win);
+	GetClientRect(hDlg, &cr);
+	const int fw = (win.right - win.left) - cr.right, fh = (win.bottom - win.top) - cr.bottom;
+	int       wx = 0, wy = 0;
+	MONITORINFO mi = { sizeof(mi) };
+	const bool  on = GetMonitorInfo(MonitorFromWindow(hDlg, MONITOR_DEFAULTTONEAREST), &mi) != FALSE;
+	if (on)
+	{
+		w = min(w, (int) (mi.rcWork.right - mi.rcWork.left) - fw);
+		h = min(h, (int) (mi.rcWork.bottom - mi.rcWork.top) - fh);
+	}
+	wx = (win.left + win.right - (w + fw)) / 2;
+	wy = (win.top + win.bottom - (h + fh)) / 2;
+	if (on)
+	{
+		wx = max((int) mi.rcWork.left, min(wx, (int) mi.rcWork.right - (w + fw)));
+		wy = max((int) mi.rcWork.top, min(wy, (int) mi.rcWork.bottom - (h + fh)));
+	}
+	SetWindowPos(hDlg, NULL, wx, wy, w + fw, h + fh, SWP_NOZORDER | SWP_NOACTIVATE);
+
+	const int btn_y = h - vm - btn_h;
+	const int px    = m + (lr.right - lr.left) + m;
+	SetWindowPos(intro, NULL, m, vm, w - 2 * m, s_bm.th, SWP_NOZORDER | SWP_NOACTIVATE);
+	SetWindowPos(list, NULL, m, top, lr.right - lr.left, btn_y - vm - top, SWP_NOZORDER | SWP_NOACTIVATE);
+	// After the sidebar in the tab order, ahead of Cancel and Save.
+	SetWindowPos(s_bios_cards, list, px, top, w - m - px, btn_y - vm - top, SWP_NOACTIVATE);
+	SetWindowPos(ok, NULL, w - m - save_w, btn_y, save_w, btn_h, SWP_NOZORDER | SWP_NOACTIVATE);
+	SetWindowPos(cancel, NULL, w - m - save_w - m - cancelw, btn_y, cancelw, btn_h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+static int BiosManagerFindEntry(HWND list, int data)
+{
+	const int count = (int) SendMessage(list, LB_GETCOUNT, 0, 0);
+	for (int i = 0; i < count; i++)
+		if ((int) SendMessage(list, LB_GETITEMDATA, i, 0) == data)
+			return i;
+	return -1;
+}
+
+// Open or close the entry with item data `data`. A pick inside one that
+// closes moves up to it, as a tree view's selection does.
+static void BiosManagerSetOpen(HWND hDlg, int data, bool open)
+{
+	if (s_bios_open[data] == open)
+		return;
+	HWND      list = GetDlgItem(hDlg, IDC_BIOSMGR_LIST);
+	const int sel  = (int) SendMessage(list, LB_GETCURSEL, 0, 0);
+	const int pick = (sel == LB_ERR) ? -1 : (int) SendMessage(list, LB_GETITEMDATA, sel, 0);
+	s_bios_open[data] = open;
+	BiosManagerFillList(list);
+
+	int at = BiosManagerFindEntry(list, pick);
+	if (at < 0)
+		at = BiosManagerFindEntry(list, data);
+	SendMessage(list, LB_SETCURSEL, at, 0);
+	if ((int) SendMessage(list, LB_GETITEMDATA, at, 0) != pick)
+		BiosManagerLayout(hDlg);
+}
+
+// A click on an entry's box opens or closes it without picking it.
+static LRESULT CALLBACK BiosManagerListProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam,
+                                            UINT_PTR uIdSubclass, DWORD_PTR)
+{
+	switch (msg)
+	{
+	case WM_LBUTTONDOWN:
+	case WM_LBUTTONDBLCLK:
+	{
+		const LRESULT hit  = SendMessage(hWnd, LB_ITEMFROMPOINT, 0, lParam);
+		const int     u    = (int) SendMessage(hWnd, LB_GETITEMHEIGHT, 0, 0);
+		const int     data = (int) SendMessage(hWnd, LB_GETITEMDATA, LOWORD(hit), 0);
+		const int     box  = u * BiosManagerListLevel(data);   // its cell's left edge
+		const int     x    = GET_X_LPARAM(lParam);
+		if (!HIWORD(hit) && BiosManagerHasChildren(data) && x >= box && x < box + u)
+		{
+			SetFocus(hWnd);
+			BiosManagerSetOpen(GetParent(hWnd), data, !s_bios_open[data]);
+			return 0;
+		}
+		break;
+	}
+	case WM_NCDESTROY:
+		RemoveWindowSubclass(hWnd, BiosManagerListProc, uIdSubclass);
+		break;
+	}
+	return DefSubclassProc(hWnd, msg, wParam, lParam);
+}
+
+// Tree-view keys for the sidebar (WM_VKEYTOITEM): Right or + opens an entry,
+// Left or - closes it. Right on an open entry steps into it; Left on a closed
+// or childless one steps up to its parent.
+static INT_PTR BiosManagerListKey(HWND hDlg, int vk, int caret)
+{
+	HWND      list = GetDlgItem(hDlg, IDC_BIOSMGR_LIST);
+	const int data = (caret < 0) ? LB_ERR : (int) SendMessage(list, LB_GETITEMDATA, caret, 0);
+	if (data == LB_ERR)
+		return -1;
+	const bool parent = BiosManagerHasChildren(data);
+	const bool open   = parent && s_bios_open[data];
+	switch (vk)
+	{
+	case VK_ADD:
+	case VK_SUBTRACT:
+		if (parent)
+			BiosManagerSetOpen(hDlg, data, vk == VK_ADD);
+		return -2;
+	case VK_RIGHT:
+		if (open)
+			return -1;   // the list's own step down lands on the first entry inside
+		if (parent)
+			BiosManagerSetOpen(hDlg, data, true);
+		return -2;
+	case VK_LEFT:
+		if (open)
+		{
+			BiosManagerSetOpen(hDlg, data, false);
+			return -2;
+		}
+		break;
+	default:
+		return -1;
+	}
+	const int level = BiosManagerListLevel(data);
+	if (level == 0)
+		return -2;
+	int i = caret - 1;
+	while (i > 0 && BiosManagerListLevel((int) SendMessage(list, LB_GETITEMDATA, i, 0)) >= level)
+		i--;
+	SendMessage(list, LB_SETCURSEL, i, 0);
+	BiosManagerLayout(hDlg);
+	return -2;
 }
 
 // Segoe MDL2 Assets ships with Windows 10 and later; older systems get words.
@@ -10653,6 +11618,306 @@ static INT_PTR CALLBACK DlgBiosInfoProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 	return false;
 }
 
+// The speed chart: a group of bars per measured scene, one per mode on a scale from 0, with
+// gridlines under it. Sized from the dialog font so it scales with the DPI.
+static void BiosBenchGeometry(int th, int &bar, int &gap, int &group, int &pad)
+{
+	bar   = th;
+	gap   = max(1, th / 6);
+	group = th;
+	pad   = th / 2 + 2;
+}
+
+// Legend, then the scenes' bars, then the scale's numbers.
+static int BiosBenchChartHeight(int th, int scenes)
+{
+	int bar, gap, group, pad;
+	BiosBenchGeometry(th, bar, gap, group, pad);
+	return pad + th + pad + scenes * (3 * bar + 2 * gap) + (scenes - 1) * group + 2 * gap + th + pad;
+}
+
+// A bar's label: frame time with its change against the HLE, or the time in the chip.
+static std::wstring BiosBenchLabel(const S9xBiosBenchScene &b, int mode, bool chip)
+{
+	wchar_t buf[64];
+	if (chip)
+		swprintf(buf, _countof(buf), b.ticks[mode] ? L"%dM" : L"<1M", b.ticks[mode]);
+	else if (mode == 0)
+		swprintf(buf, _countof(buf), L"%.3f ms", b.ms[0]);
+	else
+		swprintf(buf, _countof(buf), L"%.3f ms   %+.1f%%", b.ms[mode], (b.ms[mode] - b.ms[0]) * 100.0 / b.ms[0]);
+	return buf;
+}
+
+static void BiosBenchDraw(HWND hDlg, const DRAWITEMSTRUCT *dis)
+{
+	const int  slot = (int) GetWindowLongPtr(hDlg, DWLP_USER);
+	const bool chip = IsDlgButtonChecked(hDlg, IDC_BIOSBENCH_CHIP) == BST_CHECKED;
+	const int  w    = dis->rcItem.right - dis->rcItem.left, h = dis->rcItem.bottom - dis->rcItem.top;
+
+	// Drawn off screen, so switching views doesn't flicker.
+	HDC     dc    = CreateCompatibleDC(dis->hDC);
+	HBITMAP bmp   = CreateCompatibleBitmap(dis->hDC, w, h);
+	HGDIOBJ oldb  = SelectObject(dc, bmp);
+	HGDIOBJ oldf  = SelectObject(dc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
+	TEXTMETRIC tm;
+	GetTextMetrics(dc, &tm);
+	const int th = tm.tmHeight;
+	int       bar, gap, group, pad;
+	BiosBenchGeometry(th, bar, gap, group, pad);
+
+	const COLORREF paper = GetSysColor(COLOR_WINDOW), ink = GetSysColor(COLOR_WINDOWTEXT);
+	const COLORREF grid  = RGB((GetRValue(paper) * 5 + GetRValue(ink)) / 6, (GetGValue(paper) * 5 + GetGValue(ink)) / 6,
+	                           (GetBValue(paper) * 5 + GetBValue(ink)) / 6);
+	RECT all = { 0, 0, w, h };
+	FillRect(dc, &all, GetSysColorBrush(COLOR_WINDOW));
+	FrameRect(dc, &all, GetSysColorBrush(COLOR_3DSHADOW));
+	SetBkMode(dc, TRANSPARENT);
+	SetTextColor(dc, ink);
+	auto text_w = [&](const wchar_t *s)
+	{
+		SIZE sz = { 0 };
+		GetTextExtentPoint32(dc, s, lstrlen(s), &sz);
+		return (int) sz.cx;
+	};
+	auto fill = [&](const RECT &r, COLORREF c)
+	{
+		HBRUSH br = CreateSolidBrush(c);
+		FillRect(dc, &r, br);
+		DeleteObject(br);
+	};
+
+	// The legend: each mode's swatch and name.
+	int x = pad;
+	for (int m = 0; m < 3; m++)
+	{
+		const int    sw   = th * 2 / 3;
+		const RECT   s    = { x, pad + (th - sw) / 2, x + sw, pad + (th - sw) / 2 + sw };
+		const TCHAR *name = _L(kBiosChipModes[m].name);
+		fill(s, kBiosBenchInk[m]);
+		x += sw + th / 3;
+		TextOut(dc, x, pad, name, lstrlen(name));
+		x += text_w(name) + th;
+	}
+
+	// Columns: the scenes' names, the bars, then room for the widest label.
+	int    namew = 0, labelw = 0, scenes = 0;
+	double most  = 0;
+	int                      nbench = 0;
+	const S9xBiosBenchScene *bench  = S9xGetBiosBench(&nbench);
+	for (int k = 0; k < nbench; k++)
+	{
+		const S9xBiosBenchScene &b = bench[k];
+		if (b.slot != slot) continue;
+		scenes++;
+		namew = max(namew, text_w(Utf8ToWide(b.scene)));
+		for (int m = 0; m < 3; m++)
+		{
+			labelw = max(labelw, text_w(BiosBenchLabel(b, m, chip).c_str()));
+			most   = max(most, chip ? (double) b.ticks[m] : (double) b.ms[m]);
+		}
+	}
+	static const double kSteps[] = { 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000 };
+	double step = kSteps[_countof(kSteps) - 1];
+	for (double s : kSteps)
+		if (most / s <= 5) { step = s; break; }
+	int lines = (int) (most / step);
+	if (lines * step < most || lines < 1) lines++;
+	const double top = lines * step;
+
+	const int x0     = pad + namew + th;
+	const int x1     = w - pad - th / 3 - labelw;
+	const int y0     = pad + th + pad;
+	const int y1     = y0 + scenes * (3 * bar + 2 * gap) + (scenes - 1) * group;
+	auto      x_of   = [&](double v) { return x0 + (int) ((x1 - x0) * v / top + 0.5); };
+
+	// Gridlines and their numbers, then the zero line over them.
+	HPEN    pen  = CreatePen(PS_SOLID, 1, grid);
+	HGDIOBJ oldp = SelectObject(dc, pen);
+	for (int t = 0; t <= lines; t++)
+	{
+		const int gx = x_of(t * step);
+		MoveToEx(dc, gx, y0 - gap, NULL);
+		LineTo(dc, gx, y1 + gap);
+		wchar_t num[32];
+		swprintf(num, _countof(num), (chip && t) ? L"%gM" : L"%g", t * step);
+		TextOut(dc, gx - text_w(num) / 2, y1 + 2 * gap, num, lstrlen(num));
+	}
+	DeleteObject(SelectObject(dc, CreatePen(PS_SOLID, 1, ink)));
+	MoveToEx(dc, x0, y0 - gap, NULL);
+	LineTo(dc, x0, y1 + gap);
+	DeleteObject(SelectObject(dc, oldp));
+
+	// Each scene: its name level with its three bars, each bar's value after it.
+	int y = y0;
+	for (int k = 0; k < nbench; k++)
+	{
+		const S9xBiosBenchScene &b = bench[k];
+		if (b.slot != slot) continue;
+		Utf8ToWide scene(b.scene);
+		TextOut(dc, pad, y + (3 * bar + 2 * gap - th) / 2, scene, lstrlen(scene));
+		for (int m = 0; m < 3; m++)
+		{
+			const RECT r = { x0 + 1, y, max(x_of(chip ? (double) b.ticks[m] : (double) b.ms[m]), x0 + 2), y + bar };
+			fill(r, kBiosBenchInk[m]);
+			const std::wstring label = BiosBenchLabel(b, m, chip);
+			TextOut(dc, r.right + th / 3, y + (bar - th) / 2, label.c_str(), (int) label.size());
+			y += bar + gap;
+		}
+		y += group - gap;
+	}
+
+	BitBlt(dis->hDC, dis->rcItem.left, dis->rcItem.top, w, h, dc, 0, 0, SRCCOPY);
+	SelectObject(dc, oldf);
+	SelectObject(dc, oldb);
+	DeleteObject(bmp);
+	DeleteDC(dc);
+}
+
+static void BiosBenchSetNote(HWND hDlg)
+{
+	const bool chip = IsDlgButtonChecked(hDlg, IDC_BIOSBENCH_CHIP) == BST_CHECKED;
+	SetDlgItemText(hDlg, IDC_BIOSBENCH_NOTE,
+	               chip ? _L(TEXT("Time spent inside the chip over the same scenes, in millions of CPU clock ticks. Lower is faster. Measured on one PC."))
+	                    : _L(TEXT("Milliseconds the emulator takes per frame while each game plays a scripted scene. Lower is faster. Measured on one PC.")));
+}
+
+// The speed chart's popup for one chip slot, as tall as its scenes need.
+static INT_PTR CALLBACK DlgBiosBenchProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog(hDlg);
+		const int slot = (int) lParam;
+		SetWindowLongPtr(hDlg, DWLP_USER, slot);
+		SetWindowText(hDlg, (std::wstring((wchar_t *) Utf8ToWide(S9xGetBiosSlotInfo(slot)->label)) + L" " +
+		                     _L(TEXT("Speed"))).c_str());
+		CheckRadioButton(hDlg, IDC_BIOSBENCH_FRAME, IDC_BIOSBENCH_CHIP, IDC_BIOSBENCH_FRAME);
+		BiosBenchSetNote(hDlg);
+
+		HWND       chart = GetDlgItem(hDlg, IDC_BIOSBENCH_CHART);
+		HDC        dc    = GetDC(chart);
+		HGDIOBJ    old   = SelectObject(dc, (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0));
+		TEXTMETRIC tm;
+		GetTextMetrics(dc, &tm);
+		SelectObject(dc, old);
+		ReleaseDC(chart, dc);
+
+		const RECT cr = BiosManagerRect(hDlg, chart);
+		const RECT ok = BiosManagerRect(hDlg, GetDlgItem(hDlg, IDOK));
+		const int  dy = BiosBenchChartHeight(tm.tmHeight, S9xBiosBenchScenes(slot)) - (cr.bottom - cr.top);
+		SetWindowPos(chart, NULL, 0, 0, cr.right - cr.left, cr.bottom - cr.top + dy, SWP_NOMOVE | SWP_NOZORDER);
+		SetWindowPos(GetDlgItem(hDlg, IDOK), NULL, ok.left, ok.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+		RECT win;
+		GetWindowRect(hDlg, &win);
+		SetWindowPos(hDlg, NULL, win.left, win.top - dy / 2, win.right - win.left, win.bottom - win.top + dy,
+		             SWP_NOZORDER | SWP_NOACTIVATE);
+		return TRUE;
+	}
+
+	case WM_DRAWITEM:
+		if (wParam == IDC_BIOSBENCH_CHART)
+		{
+			BiosBenchDraw(hDlg, (const DRAWITEMSTRUCT *) lParam);
+			return TRUE;
+		}
+		break;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDC_BIOSBENCH_FRAME:
+		case IDC_BIOSBENCH_CHIP:
+			if (HIWORD(wParam) == BN_CLICKED)
+			{
+				BiosBenchSetNote(hDlg);
+				InvalidateRect(GetDlgItem(hDlg, IDC_BIOSBENCH_CHART), NULL, FALSE);
+			}
+			return TRUE;
+		case IDOK:
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+// Segoe MDL2 Assets at `px` pixels, or NULL on a system without it.
+static HFONT BiosManagerGlyphFont(HWND hWnd, int px)
+{
+	LOGFONT lf = { 0 };
+	lf.lfCharSet = DEFAULT_CHARSET;
+	lstrcpy(lf.lfFaceName, TEXT("Segoe MDL2 Assets"));
+	bool found = false;
+	HDC  dc    = GetDC(hWnd);
+	EnumFontFamiliesEx(dc, &lf, BiosInfoFontFound, (LPARAM) &found, 0);
+	ReleaseDC(hWnd, dc);
+	lf.lfHeight  = -px;
+	lf.lfQuality = ANTIALIASED_QUALITY;
+	return found ? CreateFontIndirect(&lf) : NULL;
+}
+
+// A glyph as a small icon in the buttons' text colour, for Browse and Clear; NULL without the font.
+static HICON BiosManagerGlyphIcon(HWND hWnd, wchar_t glyph)
+{
+	const int size = GetSystemMetrics(SM_CXSMICON);
+	HFONT     font = BiosManagerGlyphFont(hWnd, size * 3 / 4);
+	if (!font)
+		return NULL;
+	BITMAPINFO bi = { 0 };
+	bi.bmiHeader.biSize     = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth    = size;
+	bi.bmiHeader.biHeight   = -size;
+	bi.bmiHeader.biPlanes   = 1;
+	bi.bmiHeader.biBitCount = 32;
+	void   *bits  = NULL;
+	HDC     dc    = CreateCompatibleDC(NULL);
+	HBITMAP color = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+	if (!color)
+	{
+		DeleteDC(dc);
+		DeleteObject(font);
+		return NULL;
+	}
+	HGDIOBJ oldb = SelectObject(dc, color), oldf = SelectObject(dc, font);
+	memset(bits, 0, size * size * 4);
+	// White on black: how much of each pixel the glyph covers becomes its alpha.
+	RECT r = { 0, 0, size, size };
+	SetTextColor(dc, RGB(0xFF, 0xFF, 0xFF));
+	SetBkMode(dc, TRANSPARENT);
+	DrawTextW(dc, &glyph, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+	GdiFlush();
+	const COLORREF ink = GetSysColor(COLOR_BTNTEXT);
+	uint32        *px  = (uint32 *) bits;
+	for (int i = 0; i < size * size; i++)
+	{
+		const uint32 a = px[i] & 0xff;
+		px[i] = (a << 24) | ((GetRValue(ink) * a / 255) << 16) | ((GetGValue(ink) * a / 255) << 8) | (GetBValue(ink) * a / 255);
+	}
+	SelectObject(dc, oldf);
+	SelectObject(dc, oldb);
+	DeleteDC(dc);
+	DeleteObject(font);
+
+	std::vector<BYTE> zero(((size + 15) / 16) * 2 * size, 0);
+	HBITMAP  mask = CreateBitmap(size, size, 1, 1, zero.data());
+	ICONINFO ii   = { TRUE, 0, 0, mask, color };
+	HICON    icon = CreateIconIndirect(&ii);
+	DeleteObject(mask);
+	DeleteObject(color);
+	return icon;
+}
+
+// The slot a control of the rows' kind `base` belongs to, or -1.
+static int BiosSlotOf(int id, int base)
+{
+	return (id >= base && id < base + S9X_NUM_BIOS_SLOTS) ? id - base : -1;
+}
+
 INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
@@ -10660,7 +11925,7 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 	case WM_SETCURSOR:
 	{
 		const int id = GetDlgCtrlID((HWND) wParam);
-		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS)
+		if (BiosSlotOf(id, IDC_BIOSMGR_INFO0) >= 0 || BiosSlotOf(id, IDC_BIOSMGR_BENCH0) >= 0)
 		{
 			SetCursor(LoadCursor(NULL, IDC_HAND));
 			SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
@@ -10669,30 +11934,23 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		break;
 	}
 
+	// The cards' labels, icons and buttons sit on their white; a disabled path box keeps its grey.
 	case WM_CTLCOLORSTATIC:
-	{
-		const int id = GetDlgCtrlID((HWND) lParam);
-		if (id >= IDC_BIOSMGR_STATUS0 && id < IDC_BIOSMGR_STATUS0 + S9X_NUM_BIOS_SLOTS)
+	case WM_CTLCOLORBTN:
+		if (s_bios_cards && GetParent((HWND) lParam) == s_bios_cards &&
+			BiosSlotOf(GetDlgCtrlID((HWND) lParam), IDC_BIOSMGR_EDIT0) < 0)
 		{
-			const int               slot = id - IDC_BIOSMGR_STATUS0;
-			const S9xBiosPathStatus st   = s_bios_status[slot];
-			if (st != S9X_BIOS_PATH_UNSET)
-			{
-				SetTextColor((HDC) wParam, st == S9X_BIOS_PATH_OK
-				                           ? RGB(0x1E, 0x8B, 0x3A) : RGB(0xC0, 0x39, 0x2B));
-				SetBkMode((HDC) wParam, TRANSPARENT);
-				return (INT_PTR) GetSysColorBrush(COLOR_BTNFACE);
-			}
+			SetTextColor((HDC) wParam, GetSysColor(COLOR_WINDOWTEXT));
+			SetBkMode((HDC) wParam, TRANSPARENT);
+			return (INT_PTR) GetSysColorBrush(COLOR_WINDOW);
 		}
 		break;
-	}
 
 	case WM_INITDIALOG:
 	{
 		LocalizeDialog(hDlg);
-		s_bios_fit_width = 0;
 
-		// Hovering a status label shows its full text.
+		// Hovering a status line shows its full text, an icon what it's for.
 		s_bios_tip = CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
 									WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
 									CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -10700,46 +11958,111 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 		// A width limit is what makes the info tips honour their line breaks.
 		if (s_bios_tip)
 			SendMessage(s_bios_tip, TTM_SETMAXTIPWIDTH, 0, GetSystemMetrics(SM_CXSCREEN));
-		for (int slot = 0; s_bios_tip && slot < S9X_NUM_BIOS_SLOTS; slot++)
-		{
-			TOOLINFO ti = { 0 };
-			ti.cbSize   = sizeof(ti);
-			ti.hwnd     = hDlg;
-			ti.uFlags   = TTF_IDISHWND | TTF_SUBCLASS;
-			ti.uId      = (UINT_PTR) GetDlgItem(hDlg, IDC_BIOSMGR_STATUS0 + slot);
-			ti.lpszText = (LPTSTR) TEXT("");
-			SendMessage(s_bios_tip, TTM_ADDTOOL, 0, (LPARAM) &ti);
-		}
 
-		for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+		// Italics for the notes; glyphs for the sidebar's icons and the buttons'.
+		HFONT      font = (HFONT) SendMessage(hDlg, WM_GETFONT, 0, 0);
+		LOGFONT    lf;
+		TEXTMETRIC tm   = { 0 };
+		HDC        hdc  = GetDC(hDlg);
+		HGDIOBJ    old  = SelectObject(hdc, font);
+		GetTextMetrics(hdc, &tm);
+		SelectObject(hdc, old);
+		ReleaseDC(hDlg, hdc);
+		if (GetObject(font, sizeof(lf), &lf))
 		{
-			SetDlgItemText(hDlg, IDC_BIOSMGR_LABEL0 + slot,
-						   Utf8ToWide(S9xGetBiosSlotInfo(slot)->label));
-			BiosManagerAddInfoIcon(hDlg, slot);
-			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, Utf8ToWide(S9xGetBiosPath(slot)));
-			BiosManagerRefreshStatus(hDlg, slot);
+			lf.lfItalic   = TRUE;
+			s_bios_italic = CreateFontIndirect(&lf);
 		}
-		BiosManagerFitWidth(hDlg);
+		s_bios_glyphs   = BiosManagerGlyphFont(hDlg, tm.tmHeight * 7 / 8);
+		s_bios_icons[0] = BiosManagerGlyphIcon(hDlg, 0xED25);
+		s_bios_icons[1] = BiosManagerGlyphIcon(hDlg, 0xE74D);
+
+		BiosManagerCreateCards(hDlg);
+		BiosManagerInitList(hDlg);
+		SetWindowSubclass(GetDlgItem(hDlg, IDC_BIOSMGR_LIST), BiosManagerListProc, 0, 0);
+		for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
+			BiosManagerAddRow(hDlg, slot);
+		BiosManagerOrderTabs();
+		BiosManagerMeasure(hDlg);
+		SendDlgItemMessage(hDlg, IDC_BIOSMGR_LIST, LB_SETCURSEL, 0, 0);
+		BiosManagerSizeWindow(hDlg);
+		BiosManagerLayout(hDlg);
 		return true;
 	}
 
+	case WM_DRAWITEM:
+	{
+		const int             id  = (int) wParam;
+		const DRAWITEMSTRUCT *dis = (const DRAWITEMSTRUCT *) lParam;
+		if (id == IDC_BIOSMGR_LIST)
+			BiosManagerDrawListItem(dis);
+		else if (BiosSlotOf(id, IDC_BIOSMGR_BENCH0) >= 0)
+			BiosManagerDrawBenchIcon(dis);
+		else if (BiosSlotOf(id, IDC_BIOSMGR_STATUS0) >= 0)
+			BiosManagerDrawStatus(dis);
+		else if (id == IDOK)
+			BiosManagerDrawSave(dis);
+		else
+			break;
+		return true;
+	}
+
+	case WM_VKEYTOITEM:
+		if ((HWND) lParam == GetDlgItem(hDlg, IDC_BIOSMGR_LIST))
+			return BiosManagerListKey(hDlg, LOWORD(wParam), (short) HIWORD(wParam));
+		break;
+
 	case WM_COMMAND:
 	{
-		const int id = LOWORD(wParam);
+		const int id     = LOWORD(wParam);
+		const int code   = HIWORD(wParam);
+		const int edit   = BiosSlotOf(id, IDC_BIOSMGR_EDIT0);
+		const int mode   = BiosSlotOf(id, IDC_BIOSMGR_MODE0);
+		const int browse = BiosSlotOf(id, IDC_BIOSMGR_BROWSE0);
+		const int clear  = BiosSlotOf(id, IDC_BIOSMGR_CLEAR0);
 
-		if (id >= IDC_BIOSMGR_EDIT0 && id < IDC_BIOSMGR_EDIT0 + S9X_NUM_BIOS_SLOTS &&
-			HIWORD(wParam) == EN_CHANGE)
+		if (id == IDC_BIOSMGR_LIST && code == LBN_SELCHANGE)
 		{
-			BiosManagerRefreshStatus(hDlg, id - IDC_BIOSMGR_EDIT0);
-			BiosManagerFitWidth(hDlg);
+			BiosManagerLayout(hDlg);
 			return true;
 		}
 
-		if (id >= IDC_BIOSMGR_BROWSE0 && id < IDC_BIOSMGR_BROWSE0 + S9X_NUM_BIOS_SLOTS)
+		// Double-clicking an entry with others under it opens or closes it, as in a tree view.
+		if (id == IDC_BIOSMGR_LIST && code == LBN_DBLCLK)
 		{
-			const int slot = id - IDC_BIOSMGR_BROWSE0;
+			HWND      list = (HWND) lParam;
+			const int sel  = (int) SendMessage(list, LB_GETCURSEL, 0, 0);
+			const int data = (sel == LB_ERR) ? -1 : (int) SendMessage(list, LB_GETITEMDATA, sel, 0);
+			if (BiosManagerHasChildren(data))
+				BiosManagerSetOpen(hDlg, data, !s_bios_open[data]);
+			return true;
+		}
+
+		// A control taking the focus brings its card into view.
+		if ((edit >= 0 && code == EN_SETFOCUS) || (mode >= 0 && code == CBN_SETFOCUS) ||
+			((browse >= 0 || clear >= 0) && code == BN_SETFOCUS))
+		{
+			BiosCardsReveal(edit >= 0 ? edit : mode >= 0 ? mode : browse >= 0 ? browse : clear);
+			return true;
+		}
+
+		if (edit >= 0 && code == EN_CHANGE)
+		{
+			BiosManagerRefreshStatus(hDlg, edit);
+			return true;
+		}
+
+		if (mode >= 0 && code == CBN_SELCHANGE)
+		{
+			BiosManagerRefreshStatus(hDlg, mode);
+			return true;
+		}
+
+		if (browse >= 0 && code == BN_CLICKED)
+		{
+			HWND  path = BiosRowItem(IDC_BIOSMGR_EDIT0, browse);
 			TCHAR filename[MAX_PATH] = TEXT("");
-			GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename, MAX_PATH);
+			GetWindowText(path, filename, MAX_PATH);
 
 			OPENFILENAME ofn;
 			ZeroMemory(&ofn, sizeof(ofn));
@@ -10752,24 +12075,30 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			ofn.lpstrTitle      = TEXT("Select BIOS File");
 			ofn.Flags           = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
 			if (GetOpenFileName(&ofn))
-				SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, filename);
+				SetWindowText(path, filename);
 			return true;
 		}
 
-		if (id >= IDC_BIOSMGR_INFO0 && id < IDC_BIOSMGR_INFO0 + S9X_NUM_BIOS_SLOTS &&
-			HIWORD(wParam) == STN_CLICKED)
+		if (BiosSlotOf(id, IDC_BIOSMGR_BENCH0) >= 0 && code == STN_CLICKED)
+		{
+			DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSBENCH), hDlg, DlgBiosBenchProc,
+			               (LPARAM) BiosSlotOf(id, IDC_BIOSMGR_BENCH0));
+			return true;
+		}
+
+		if (BiosSlotOf(id, IDC_BIOSMGR_INFO0) >= 0 && code == STN_CLICKED)
 		{
 			DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BIOSINFO), hDlg, DlgBiosInfoProc,
-			               (LPARAM) (id - IDC_BIOSMGR_INFO0));
+			               (LPARAM) BiosSlotOf(id, IDC_BIOSMGR_INFO0));
 			return true;
 		}
 
-		if (id >= IDC_BIOSMGR_CLEAR0 && id < IDC_BIOSMGR_CLEAR0 + S9X_NUM_BIOS_SLOTS)
+		if (clear >= 0 && code == BN_CLICKED)
 		{
-			const int slot = id - IDC_BIOSMGR_CLEAR0;
-			SetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, TEXT(""));
-			// The button just disabled itself under the focus; hand that to the row.
-			SendMessage(hDlg, WM_NEXTDLGCTL, (WPARAM) GetDlgItem(hDlg, IDC_BIOSMGR_EDIT0 + slot), TRUE);
+			HWND path = BiosRowItem(IDC_BIOSMGR_EDIT0, clear);
+			SetWindowText(path, TEXT(""));
+			// The button just disabled itself under the focus; hand that to the path box.
+			SendMessage(hDlg, WM_NEXTDLGCTL, (WPARAM) path, TRUE);
 			return true;
 		}
 
@@ -10780,8 +12109,11 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 			for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
 			{
 				TCHAR wtext[S9X_BIOS_PATH_MAX];
-				GetDlgItemText(hDlg, IDC_BIOSMGR_EDIT0 + slot, wtext, S9X_BIOS_PATH_MAX);
+				GetWindowText(BiosRowItem(IDC_BIOSMGR_EDIT0, slot), wtext, S9X_BIOS_PATH_MAX);
 				S9xSetBiosPath(slot, WideToUtf8(wtext));
+				const int chip = BiosManagerChipMode(hDlg, slot);
+				if (chip >= 0)
+					S9xSetChipMode(slot, chip);
 			}
 			EndDialog(hDlg, 1);
 			return true;
@@ -10794,7 +12126,20 @@ INT_PTR CALLBACK DlgBiosManagerProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM l
 	}
 
 	case WM_DESTROY:
-		s_bios_tip = NULL;   // goes down with the dialog
+		s_bios_tip   = NULL;   // goes down with the dialog
+		s_bios_cards = NULL;
+		for (HFONT *f : { &s_bios_bold, &s_bios_italic, &s_bios_glyphs })
+		{
+			if (*f)
+				DeleteObject(*f);
+			*f = NULL;
+		}
+		for (HICON &icon : s_bios_icons)
+		{
+			if (icon)
+				DestroyIcon(icon);
+			icon = NULL;
+		}
 		break;
 	}
 	return false;

@@ -428,8 +428,9 @@ extern struct SDSP2	DSP2;
 extern struct SDSP3	DSP3;
 extern struct SDSP4	DSP4;
 
-uint8 S9xGetDSP (uint16);
-void S9xSetDSP (uint8, uint16);
+// `speed` is the bus cycle's length; < 0 is a cheat or debugger peek.
+uint8 S9xGetDSP (uint16, int32 speed = -1);
+void S9xSetDSP (uint8, uint16, int32 speed = -1);
 void S9xResetDSP (void);
 uint8 DSP1GetByte (uint16);
 void DSP1SetByte (uint8, uint16);
@@ -443,5 +444,9 @@ void DSP3_Reset (void);
 
 extern uint8 (*GetDSP) (uint16);
 extern void (*SetDSP) (uint8, uint16);
+
+// The DSP-1B's data ROM (the native chip derives the first DSP-1's from it).
+extern const uint16	DSP1ROM[1024];
+extern const uint16	DSP3_DataROM[1024];
 
 #endif

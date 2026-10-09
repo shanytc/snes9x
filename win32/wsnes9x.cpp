@@ -6503,6 +6503,8 @@ static void UpdateHardwarePopups ()
 		{ 0,                       NULL },
 		{ ID_DEBUG_VRAM_VIEWER,    TEXT("&S-PPU") },
 		{ ID_DEBUG_GB_TILE_VIEWER, TEXT("&GB-PPU") },
+		{ 0,                       NULL },
+		{ ID_EMULATION_XBAND_ENABLE, TEXT("&XBand") },
 	};
 	static HMENU s_parent = NULL;
 	static int   s_first  = 0;   // NSS's slot while Game Boy Model is hidden
@@ -6540,8 +6542,10 @@ static void UpdateHardwarePopups ()
 	const bool gb   = rom && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
 	// SGB BIOS mode runs the real S-PPU too, so an SGB game gets both.
 	const bool snes = rom && (!Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+	// XBand is SNES hardware and needs its BIOS; with no game it still boots the box.
+	const bool xband = !gb && S9xBiosPathUsable(S9X_BIOS_XBAND);
 	const bool want[] = { NSS.Active != 0, SFCBox.Active != 0, Settings.SuperDisc != 0,
-	                      snes || gb, snes, gb };
+	                      snes || gb, snes, gb, xband, xband };
 
 	int  pos     = s_first + (GetMenuItemInfo(s_parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
 	bool changed = false;

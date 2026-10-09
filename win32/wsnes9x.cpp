@@ -17044,6 +17044,7 @@ static double s_panelScale = 1.0;
 static int s_panelSource = 0;	// the bitmap resource now in s_panelBase
 static int s_padPanelIndex = 0;	// the dialog row whose bindings light the pad
 static int s_padLit = -1;
+static int s_hoverField = 0, s_markedField = 0;	// outlined: the field under the mouse, the one being edited
 
 #define INPUT_PICTURE_TIMER 98
 
@@ -17104,6 +17105,34 @@ static float PadPicDistance(const PadPicShape &b, float x, float y)
 	return inside ? -d : d;
 }
 
+// The binding field a pad picture shape stands for; turbo rows bind turbo modes in the d-pad slots.
+static int PadPicField(int mask)
+{
+	if (s_padPanelIndex >= 8 && mask <= PADPIC_RIGHT)
+		return 0;
+	switch (mask)
+	{
+		case PADPIC_UP:     return IDC_UP;
+		case PADPIC_DOWN:   return IDC_DOWN;
+		case PADPIC_LEFT:   return IDC_LEFT;
+		case PADPIC_RIGHT:  return IDC_RIGHT;
+		case PADPIC_A:      return IDC_A;
+		case PADPIC_B:      return IDC_B;
+		case PADPIC_X:      return IDC_X;
+		case PADPIC_Y:      return IDC_Y;
+		case PADPIC_L:      return IDC_L;
+		case PADPIC_R:      return IDC_R;
+		case PADPIC_START:  return IDC_START;
+		case PADPIC_SELECT: return IDC_SELECT;
+	}
+	return 0;
+}
+
+static bool InputPictureOutlined(int field)
+{
+	return field && (field == s_hoverField || field == s_markedField);
+}
+
 static void ShowInputPictureBitmap(HWND hDlg)
 {
 	HWND pic = GetDlgItem(hDlg, IDC_INPUT_PICTURE);
@@ -17151,7 +17180,9 @@ static void DrawPadPictureLit(HWND hDlg)
 	const float s = (float) s_panelScale;
 	for (const PadPicShape &b : kPadPicShapes)
 	{
-		if (s_padLit < 0 || !(s_padLit & b.mask))
+		const bool lit = s_padLit >= 0 && (s_padLit & b.mask);
+		const float ring = InputPictureOutlined(PadPicField(b.mask)) ? 2.0f : 0.0f;	// display pixels outside the edge
+		if (!lit && !ring)
 			continue;
 
 		// Face buttons in the pad's colours, d-pad arrows and Start/Select yellow, the shoulders a blue tint
@@ -17173,30 +17204,31 @@ static void DrawPadPictureLit(HWND hDlg)
 			x1 = (std::max)(x1, b.pt[i][0] + r);
 			y1 = (std::max)(y1, b.pt[i][1] + r);
 		}
-		const int left = (std::max)(0, (int) (x0 * s) - 1), top = (std::max)(0, (int) (y0 * s) - 1);
-		const int right = (std::min)(w - 1, (int) (x1 * s) + 1), bottom = (std::min)(h - 1, (int) (y1 * s) + 1);
+		const int left = (std::max)(0, (int) (x0 * s) - 3), top = (std::max)(0, (int) (y0 * s) - 3);
+		const int right = (std::min)(w - 1, (int) (x1 * s) + 3), bottom = (std::min)(h - 1, (int) (y1 * s) + 3);
+		const COLORREF outline = RGB(255, 200, 0);
 
 		for (int y = top; y <= bottom; y++)
 			for (int x = left; x <= right; x++)
 			{
-				int inFill = 0, inRim = 0;
+				int inFill = 0, inRim = 0, inRing = 0;
 				for (int sy = 0; sy < 4; sy++)
 					for (int sx = 0; sx < 4; sx++)
 					{
 						const float d = PadPicDistance(b, (x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
-						if (d < -rimWidth)
-							inFill++;
-						else if (d < 0)
-							inRim++;
+						if (d >= 0)
+							inRing += (d < ring);
+						else if (lit)
+							(d < -rimWidth ? inFill : inRim)++;
 					}
-				if (!inFill && !inRim)
+				if (!inFill && !inRim && !inRing)
 					continue;
 
-				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cb = 1.0f - cf - cr;
+				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cg = inRing / 16.0f, cb = 1.0f - cf - cr - cg;
 				uint32 &c = px[y * w + x];
-				const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + 0.5f);
-				const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + 0.5f);
-				const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + 0.5f);
+				const int blue = (int) ((c & 0xff) * cb + GetBValue(fill) * cf + GetBValue(rim) * cr + GetBValue(outline) * cg + 0.5f);
+				const int green = (int) (((c >> 8) & 0xff) * cb + GetGValue(fill) * cf + GetGValue(rim) * cr + GetGValue(outline) * cg + 0.5f);
+				const int red = (int) (((c >> 16) & 0xff) * cb + GetRValue(fill) * cf + GetRValue(rim) * cr + GetRValue(outline) * cg + 0.5f);
 				c = (red << 16) | (green << 8) | blue;
 			}
 	}
@@ -17238,12 +17270,60 @@ static int PadHeldButtons(int index)
 	return lit;
 }
 
-// INPUT_PICTURE_TIMER: redraw when the held set changes.
+// The binding field for the pad picture's button under a dialog-client point; 0 if none.
+static int InputPictureFieldAt(HWND hDlg, POINT pt)
+{
+	if (!s_panelBase)
+		return 0;
+	RECT r;
+	GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &r);
+	MapWindowPoints(NULL, hDlg, (POINT *) &r, 2);
+	if (!PtInRect(&r, pt))
+		return 0;
+	const float x = (pt.x - r.left + 0.5f) / (float) s_panelScale, y = (pt.y - r.top + 0.5f) / (float) s_panelScale;
+
+	int field = 0;
+	float nearest = 8.0f;	// source pixels of slack, so the small arrows are easy to hit
+	for (const PadPicShape &b : kPadPicShapes)
+	{
+		const float d = PadPicDistance(b, x, y);
+		if (d < nearest && PadPicField(b.mask))
+		{
+			nearest = d;
+			field = PadPicField(b.mask);
+		}
+	}
+	return field && IsWindowEnabled(GetDlgItem(hDlg, field)) ? field : 0;
+}
+
+// Notes the field under the mouse and the one being edited; true when either changed.
+static bool UpdateInputPictureOutlines(HWND hDlg)
+{
+	POINT pt;
+	GetCursorPos(&pt);
+	const HWND under = WindowFromPoint(pt);
+	int hover = 0;
+	if (under == hDlg || under == GetDlgItem(hDlg, IDC_INPUT_PICTURE))
+	{
+		ScreenToClient(hDlg, &pt);
+		hover = InputPictureFieldAt(hDlg, pt);
+	}
+	const HWND focus = GetFocus();
+	const int marked = focus && GetParent(focus) == hDlg ? GetDlgCtrlID(focus) : 0;
+	if (hover == s_hoverField && marked == s_markedField)
+		return false;
+	s_hoverField = hover;
+	s_markedField = marked;
+	return true;
+}
+
+// INPUT_PICTURE_TIMER: redraw when the held set or the outlined fields change.
 static void UpdateInputPictureLit(HWND hDlg)
 {
 	SDLInput_Poll();
+	const bool outlines = UpdateInputPictureOutlines(hDlg);
 	const int lit = PadHeldButtons(s_padPanelIndex);
-	if (lit == s_padLit)
+	if (lit == s_padLit && !outlines)
 		return;
 	s_padLit = lit;
 	DrawPadPictureLit(hDlg);
@@ -17546,9 +17626,27 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		return true;
 		}
 	case WM_LBUTTONDOWN:
-		// A click off the binding fields (background, labels, pictures) ends editing
-		SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
+	{
+		// A click on the picture's button edits its binding; elsewhere off the fields it ends editing
+		POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+		const int field = InputPictureFieldAt(hDlg, pt);
+		SetFocus(GetDlgItem(hDlg, field ? field : IDC_JPCOMBO));
 		return TRUE;
+	}
+	case WM_SETCURSOR:
+		if ((HWND)wParam == hDlg && LOWORD(lParam) == HTCLIENT)
+		{
+			POINT pt;
+			GetCursorPos(&pt);
+			ScreenToClient(hDlg, &pt);
+			if (InputPictureFieldAt(hDlg, pt))
+			{
+				SetCursor(LoadCursor(NULL, IDC_HAND));
+				SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+				return TRUE;
+			}
+		}
+		break;
 	case WM_COMMAND:
 		switch(LOWORD(wParam))
 		{

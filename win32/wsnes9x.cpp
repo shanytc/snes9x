@@ -17275,7 +17275,7 @@ static void SetInputPicture(HWND hDlg, int bitmap)
 	BITMAP bm;
 	GetObject(src, sizeof(bm), &bm);
 
-	RECT box = { 5, 184, 375, 344 };
+	RECT box = { 5, 158, 375, 318 };
 	MapDialogRect(hDlg, &box);
 	const int boxW = box.right - box.left, boxH = box.bottom - box.top;
 	double scale = (double) boxW / bm.bmWidth;

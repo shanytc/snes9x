@@ -456,6 +456,7 @@ bool EmuConfig::setDefaults(int section)
         // Controllers
         port_configuration = eJoypads;
         superscope_crosshair_visible = true;
+        pad_picture_style = 0;
         memset(binding.controller, 0, sizeof(binding.controller));
 
         const char *button_list[] = { "Up", "Down", "Left", "Right", "d", "c", "s", "x", "z", "a", "Return", "Space" };
@@ -846,6 +847,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     // Joypads default.
     Enum("PortConfiguration", port_configuration, { "Joypads", "Mouse", "SuperScope", "Multitap", "Justifier", "MouseSwapped", "Multitap8", "DualJustifiers", "MacsRifle" }, "What is plugged into the console's controller ports: Joypads, Mouse, SuperScope, Multitap, Justifier, MouseSwapped, Multitap8, DualJustifiers, or MacsRifle");
     Bool("SuperScopeCrosshair", superscope_crosshair_visible, "true to draw the Super Scope's crosshair on screen");
+    Enum("PadPictureStyle", pad_picture_style, { "USA", "Europe", "Japan" }, "Controller picture in the Controllers settings: USA, Europe or Japan");
     EndSection();
 
     for (int c = 0; c < num_controllers; c++)

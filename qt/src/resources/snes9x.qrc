@@ -88,4 +88,9 @@
     <file>blackicons/exit.svg</file>
     <file>blackicons/fullscreen.svg</file>
   </qresource>
+  <qresource prefix="pads">
+    <file alias="pad_usa.png">../../../data/pads/pad_usa.png</file>
+    <file alias="pad_eur.png">../../../data/pads/pad_eur.png</file>
+    <file alias="pad_sfc.png">../../../data/pads/pad_sfc.png</file>
+  </qresource>
 </RCC>

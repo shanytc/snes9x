@@ -102,6 +102,7 @@ set(SNES9X_CORE_SOURCES
     ../widescreen.cpp
     ../memmap.cpp
     ../biosmanager.cpp
+    ../padpicture.cpp
     ../clip.cpp
     ../ppu.cpp
     ../dma.cpp
@@ -322,6 +323,7 @@ list(APPEND QT_GUI_SOURCES
     src/EmuCanvas.cpp
     src/BindingPanel.cpp
     src/ControllerPanel.cpp
+    src/PadPictureWidget.cpp
     src/DisplayPanel.cpp
     src/SoundPanel.cpp
     src/EmulationPanel.cpp

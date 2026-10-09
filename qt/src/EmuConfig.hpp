@@ -345,6 +345,9 @@ struct EmuConfig
     };
     std::vector<controller_t> additional_controllers;
 
+    // The Controllers panel's pad picture: S9X_PADPIC_USA, _EUROPE or _JAPAN (padpicture.h).
+    int pad_picture_style;
+
 
     static const char **getDefaultShortcutKeys();
     static const char **getShortcutNames();

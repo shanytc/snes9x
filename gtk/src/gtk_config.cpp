@@ -105,6 +105,7 @@ int Snes9xConfig::load_defaults()
     mute_sound = false;
     mute_sound_turbo = false;
     enable_rumble = true;
+    pad_picture_style = 0;
     fullscreen = false;
     ui_visible = true;
     default_esc_behavior = 1;
@@ -499,6 +500,7 @@ int Snes9xConfig::save_config_file()
 
     outint("JoystickThreshold", joystick_threshold, "How far an analog stick/trigger must move to register as pressed (percent, 1-100)");
     outbool("EnableRumble", enable_rumble, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad");
+    outint("PadPictureStyle", pad_picture_style, "Joypad picture in Preferences: 0=USA, 1=Europe, 2=Japan");
 
     for (int i = 0; i < NUM_JOYPADS; i++)
     {
@@ -830,6 +832,9 @@ int Snes9xConfig::load_config_file()
 
     inint("JoystickThreshold", joystick_threshold);
     inbool("EnableRumble", enable_rumble);
+    inint("PadPictureStyle", pad_picture_style);
+    if (pad_picture_style < 0 || pad_picture_style > 2)
+        pad_picture_style = 0;
 
     std::string buffer;
     for (int i = 0; i < NUM_JOYPADS; i++)

@@ -200,8 +200,12 @@ class JoyDevice
     void handle_event(SDL_Event *event);
     void register_centers();
     bool set_sdl_joystick(unsigned int device_index, int slot);
+    std::array<Binding, 12> gamepad_bindings(unsigned int threshold) const;
 
     std::string description;
+    std::string name;
+    std::string gamepad_mapping;	// SDL's controller database entry, empty if it doesn't know the device
+    bool labelled_face_buttons = false;	// SDL names the face buttons by label: A east, as on Nintendo pads
     SDL_Joystick *filedes;
     SDL_JoystickID instance_id;
     std::queue<JoyEvent> queue;
@@ -214,6 +218,15 @@ class JoyDevice
 
   private:
     void add_event(unsigned int parameter, unsigned int state);
+    Binding mapped_binding(const char *key, unsigned int threshold) const;
+};
+
+struct JoyDeviceEntry
+{
+    int joynum;
+    bool is_gamepad;
+    std::string name;
+    bool operator==(const JoyDeviceEntry &) const = default;
 };
 
 class JoyDevices
@@ -227,6 +240,8 @@ class JoyDevices
         void set_mode(int mode);
 
         void poll_events();
+        std::vector<JoyDeviceEntry> device_list() const;
+        const JoyDevice *find(int joynum) const;
         std::map<SDL_JoystickID, std::unique_ptr<JoyDevice>>::const_iterator begin() const { return joysticks.begin(); }
         std::map<SDL_JoystickID, std::unique_ptr<JoyDevice>>::const_iterator end() const { return joysticks.end(); }
 

@@ -374,6 +374,9 @@ struct sGUI {
 	// The columns the window is shaped for: 0 for the SNES's own 256, else a
 	// wide cart's, so the next load knows whether to reshape it.
 	int WindowColumns;
+
+	// With JapaneseController: the European pad picture rather than the Super Famicom one.
+	bool EuropeanController;
 };
 
 //TURBO masks

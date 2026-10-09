@@ -16,10 +16,36 @@
 #include "snes9x.h"
 #include "gfx.h"
 #include "sgb/sgb.h"
+#include "padpicture.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 #define SAME_AS_GAME gettext("Same location as current game")
 
 static Snes9xPreferences *preferences = nullptr;
+
+// data/pads/pad_*.png, embedded by sourcify (CMakeLists.txt).
+extern unsigned char pad_usa[], pad_eur[], pad_sfc[];
+extern int pad_usa_size, pad_eur_size, pad_sfc_size;
+
+// b_links' joypad entries as pad picture buttons: the main twelve, then turbo and sticky A-R.
+static const int kLinkButtons[NUM_JOYPAD_LINKS] = {
+    PADPIC_UP, PADPIC_DOWN, PADPIC_LEFT, PADPIC_RIGHT, PADPIC_START, PADPIC_SELECT,
+    PADPIC_A, PADPIC_B, PADPIC_X, PADPIC_Y, PADPIC_L, PADPIC_R,
+    PADPIC_A, PADPIC_B, PADPIC_X, PADPIC_Y, PADPIC_L, PADPIC_R,
+    PADPIC_A, PADPIC_B, PADPIC_X, PADPIC_Y, PADPIC_L, PADPIC_R
+};
+static const int kMainLinks = 12;
+static const int kJoypadPage = 4;
+
+// As win32's Input Configuration: the picture at 0.7 of its size, less when narrower.
+static const float kPadPictureScale = 0.7f;
+
+static float pad_picture_scale(int width)
+{
+    return std::min(kPadPictureScale, (float)width / S9X_PADPIC_WIDTH);
+}
 
 void snes9x_preferences_open(Snes9xWindow *window, int page)
 {
@@ -52,28 +78,34 @@ gboolean poll_joystick(gpointer data)
     int focus;
 
     window->config->joysticks.poll_events();
+    window->refresh_device_combo();
     for (auto &j : window->config->joysticks)
     {
         while (j.second->get_event(&event))
         {
+            Binding binding(j.second->joynum,
+                            event.parameter,
+                            window->config->joystick_threshold);
+            window->track_joystick(binding, event.state == JOY_PRESSED);
+
             if (event.state == JOY_PRESSED)
             {
                 if ((focus = window->get_focused_binding()) >= 0)
                 {
-                    Binding binding(j.second->joynum,
-                                    event.parameter,
-                                    window->config->joystick_threshold);
-
                     window->store_binding(b_links[focus].button_name,
                                           binding);
 
+                    // Releases flushed here would leave buttons lit.
                     window->config->joysticks.flush_events();
+                    window->held_joystick.clear();
+                    window->update_pad_picture();
                     return true;
                 }
             }
         }
     }
 
+    window->update_pad_picture();
     return true;
 }
 
@@ -163,6 +195,55 @@ Snes9xPreferences::Snes9xPreferences(Snes9xConfig *config)
 void Snes9xPreferences::connect_signals()
 {
     window->signal_key_press_event().connect(sigc::mem_fun(*this, &Snes9xPreferences::key_pressed), false);
+    window->signal_key_release_event().connect(sigc::mem_fun(*this, &Snes9xPreferences::key_released), false);
+    window->signal_focus_out_event().connect([&](GdkEventFocus *) {
+        held_keys.clear();
+        return false;
+    });
+
+    // The pad picture: a click on a button edits its binding, a right-click picks the pad.
+    auto picture = get_object<Gtk::DrawingArea>("pad_picture");
+    picture->add_events(Gdk::POINTER_MOTION_MASK | Gdk::BUTTON_PRESS_MASK | Gdk::LEAVE_NOTIFY_MASK);
+    picture->signal_draw().connect(sigc::mem_fun(*this, &Snes9xPreferences::draw_pad_picture));
+    picture->signal_motion_notify_event().connect([&](GdkEventMotion *event) {
+        set_pad_picture_hover(pad_picture_button_at(event->x, event->y));
+        return true;
+    });
+    picture->signal_leave_notify_event().connect([&](GdkEventCrossing *) {
+        set_pad_picture_hover(0);
+        return false;
+    });
+    picture->signal_button_press_event().connect([&](GdkEventButton *event) {
+        if (event->type != GDK_BUTTON_PRESS)
+            return false;
+        if (event->button == 3)
+        {
+            syncing_pad_style = true;
+            pad_style_items[config->pad_picture_style]->set_active(true);
+            syncing_pad_style = false;
+            pad_style_menu.popup_at_pointer((GdkEvent *)event);
+            return true;
+        }
+        if (event->button != 1)
+            return false;
+        const int button = pad_picture_button_at(event->x, event->y);
+        for (int i = 0; button && i < kMainLinks; i++)
+            if (kLinkButtons[i] == button)
+            {
+                get_object<Gtk::Notebook>("notebook2")->set_current_page(0);
+                get_object<Gtk::Entry>(b_links[i].button_name)->grab_focus();
+                return true;
+            }
+
+        // As win32: a click off the buttons ends editing
+        if (get_focused_binding() >= 0)
+        {
+            window->unset_focus();
+            update_pad_picture();
+        }
+        return true;
+    });
+    build_pad_style_menu();
 
     get_object<Gtk::ComboBox>("control_combo")->signal_changed().connect([&] {
         bindings_to_dialog(get_object<Gtk::ComboBox>("control_combo")->get_active_row_number());
@@ -207,6 +288,14 @@ void Snes9xPreferences::connect_signals()
     });
 
     get_object<Gtk::Button>("reset_current_joypad")->signal_pressed().connect(sigc::mem_fun(*this, &Snes9xPreferences::reset_current_joypad));
+    get_object<Gtk::Button>("auto_assign")->signal_clicked().connect(sigc::mem_fun(*this, &Snes9xPreferences::auto_assign_joypad));
+    get_object<Gtk::ComboBoxText>("joypad_device")->signal_changed().connect([&] {
+        const int row = get_object<Gtk::ComboBoxText>("joypad_device")->get_active_row_number();
+        if (updating_device_combo || row < 0 || row >= (int)listed_devices.size())
+            return;
+        device_choice[get_combo("control_combo")] = listed_devices[row].joynum;
+        get_object<Gtk::Widget>("auto_assign")->set_sensitive(listed_devices[row].is_gamepad);
+    });
     get_object<Gtk::Button>("swap_with")->signal_pressed().connect(sigc::mem_fun(*this, &Snes9xPreferences::swap_with));
     get_object<Gtk::Button>("ntsc_composite_preset")->signal_pressed().connect([&] {
         config->ntsc_setup = snes_ntsc_composite;
@@ -495,9 +584,41 @@ Glib::ustring Snes9xPreferences::format_sound_input_rate_value(double value)
     return fmt::format("{0:Ld} Hz", (uint32_t)std::round(value));
 }
 
+// The binding a key event makes, as a binding entry stores it; false for a key the keymap
+// has no entry for (Binding() would read past it). Binding() rewrites keyval, so it gets a copy.
+static bool key_event_binding(GdkEventKey *event, Binding &binding)
+{
+    GdkKeymapKey *keys = nullptr;
+    guint *keyvals = nullptr;
+    int n_entries = 0;
+    auto keymap = gdk_keymap_get_for_display(gdk_window_get_display(event->window));
+    const bool known = gdk_keymap_get_entries_for_keycode(keymap, event->hardware_keycode, &keys, &keyvals, &n_entries) &&
+                       n_entries > 0;
+    g_free(keys);
+    g_free(keyvals);
+    if (!known)
+        return false;
+    GdkEventKey copy = *event;
+    binding = Binding(&copy);
+    return true;
+}
+
 bool Snes9xPreferences::key_pressed(GdkEventKey *event)
 {
     int focus = get_focused_binding();
+
+    // On the joypad page held keys light the pad picture. Off the entries, a key bound on
+    // this joypad does only that, rather than moving around or pressing the default button.
+    if (get_object<Gtk::Notebook>("preferences_notebook")->get_current_page() == kJoypadPage)
+    {
+        Binding held;
+        if (key_event_binding(event, held))
+        {
+            held_keys[event->hardware_keycode] = held;
+            if (focus < 0 && bound_on_current_pad(held))
+                return true;
+        }
+    }
 
     if (focus < 0)
         return false; // Pass event on to Gtk
@@ -537,6 +658,12 @@ bool Snes9xPreferences::key_pressed(GdkEventKey *event)
     store_binding(b_links[focus].button_name, key_binding);
 
     return true;
+}
+
+bool Snes9xPreferences::key_released(GdkEventKey *event)
+{
+    held_keys.erase(event->hardware_keycode);
+    return false;
 }
 
 void Snes9xPreferences::shader_select()
@@ -1071,7 +1198,11 @@ void Snes9xPreferences::show()
     move_settings_to_dialog();
 
     S9xGrabJoysticks();
-    guint source_id = g_timeout_add(100, poll_joystick, (gpointer)this);
+    held_keys.clear();
+    held_joystick.clear();
+    device_choice.clear();
+    pad_picture_lit = pad_picture_outlined = 0;
+    guint source_id = g_timeout_add(30, poll_joystick, (gpointer)this);
 
     if (config->preferences_width > 0 && config->preferences_height > 0)
         resize (config->preferences_width, config->preferences_height);
@@ -1256,6 +1387,84 @@ void Snes9xPreferences::bindings_to_dialog(int joypad)
     {
         set_entry_text(shortcut_names[i].button_name, shortcut[i].to_string(true));
     }
+
+    update_device_combo();
+}
+
+// The connected controllers, preselecting the joypad's pick, else the device its
+// bindings use, else the one numbered like it. Auto-Assign needs one SDL knows.
+void Snes9xPreferences::update_device_combo()
+{
+    auto combo = get_object<Gtk::ComboBoxText>("joypad_device");
+    if (combo->property_popup_shown())
+        return;
+
+    const auto devices = config->joysticks.device_list();
+    const int joypad = get_combo("control_combo");
+    updating_device_combo = true;
+
+    if (devices != listed_devices || !combo->get_model()->children().size())
+    {
+        combo->remove_all();
+        for (auto &device : devices)
+            combo->append(device.name);
+        if (devices.empty())
+            combo->append(_("No device detected"));
+        listed_devices = devices;
+    }
+
+    int prefer = device_choice.contains(joypad) ? device_choice[joypad] : -1;
+    for (int i = 0; prefer < 0 && i < kMainLinks; i++)
+        if (pad[joypad].data[i].is_joy())
+            prefer = pad[joypad].data[i].get_device() - 1;
+    if (prefer < 0)
+        prefer = joypad;
+
+    int row = 0;
+    for (size_t i = 0; i < devices.size(); i++)
+        if (devices[i].joynum == prefer)
+            row = i;
+    combo->set_active(row);
+    combo->set_sensitive(!devices.empty());
+    get_object<Gtk::Widget>("auto_assign")->set_sensitive(!devices.empty() && devices[row].is_gamepad);
+
+    updating_device_combo = false;
+}
+
+// From the joystick poll: a controller plugged in or out.
+void Snes9xPreferences::refresh_device_combo()
+{
+    if (config->joysticks.device_list() != listed_devices)
+        update_device_combo();
+}
+
+// Binds the chosen controller's buttons as win32's and Qt's Auto-Assign do.
+// The joypad keeps its binding for a button the pad lacks.
+void Snes9xPreferences::auto_assign_joypad()
+{
+    const int row = get_object<Gtk::ComboBoxText>("joypad_device")->get_active_row_number();
+    if (row < 0 || row >= (int)listed_devices.size())
+        return;
+    const JoyDevice *device = config->joysticks.find(listed_devices[row].joynum);
+    if (!device || device->gamepad_mapping.empty())
+        return;
+
+    const int joypad = get_combo("control_combo");
+    auto bindings = device->gamepad_bindings(config->joystick_threshold);
+    for (int i = 0; i < kMainLinks; i++)
+    {
+        if (!bindings[i].hex())
+            continue;
+        pad[joypad].data[i] = bindings[i];
+
+        // As store_binding: an input drives a button or a shortcut, not both
+        for (auto &s : shortcut)
+            if (s == bindings[i])
+                s.clear();
+    }
+
+    bindings_to_dialog(joypad);
+    update_pad_picture();
 }
 
 void Snes9xPreferences::calibration_dialog()
@@ -1265,4 +1474,177 @@ void Snes9xPreferences::calibration_dialog()
     dialog.set_title(_("Calibration Complete"));
     dialog.run();
     dialog.hide();
+}
+
+void Snes9xPreferences::build_pad_style_menu()
+{
+    const char *const names[S9X_PADPIC_NUM_STYLES] = {
+        _("USA Controller"), _("European Controller"), _("Japanese Controller")
+    };
+    Gtk::RadioMenuItem::Group group;
+    for (int i = 0; i < S9X_PADPIC_NUM_STYLES; i++)
+    {
+        pad_style_items[i] = Gtk::manage(new Gtk::RadioMenuItem(group, names[i]));
+        pad_style_items[i]->signal_toggled().connect([&, i] {
+            if (syncing_pad_style || !pad_style_items[i]->get_active())
+                return;
+            config->pad_picture_style = i;
+            get_object<Gtk::DrawingArea>("pad_picture")->queue_draw();
+        });
+        pad_style_menu.append(*pad_style_items[i]);
+    }
+    pad_style_menu.attach_to_widget(*get_object<Gtk::DrawingArea>("pad_picture").get());
+    pad_style_menu.show_all();
+}
+
+void Snes9xPreferences::track_joystick(const Binding &binding, bool pressed)
+{
+    auto it = std::find(held_joystick.begin(), held_joystick.end(), binding);
+    if (pressed && it == held_joystick.end())
+        held_joystick.push_back(binding);
+    else if (!pressed && it != held_joystick.end())
+        held_joystick.erase(it);
+}
+
+bool Snes9xPreferences::bound_on_current_pad(const Binding &binding)
+{
+    const int joypad = get_combo("control_combo");
+    if (joypad < 0 || joypad >= NUM_JOYPADS)
+        return false;
+    for (const Binding &b : pad[joypad].data)
+        if (b.value && b == binding)
+            return true;
+    return false;
+}
+
+int Snes9xPreferences::pad_picture_held()
+{
+    const int joypad = get_combo("control_combo");
+    if (joypad < 0 || joypad >= NUM_JOYPADS)
+        return 0;
+    int lit = 0;
+    for (int i = 0; i < NUM_JOYPAD_LINKS; i++)
+    {
+        const Binding &b = pad[joypad].data[i];
+        if (!b.value)
+            continue;
+        bool held = std::find(held_joystick.begin(), held_joystick.end(), b) != held_joystick.end();
+        for (auto &key : held_keys)
+            held = held || key.second == b;
+        if (held)
+            lit |= kLinkButtons[i];
+    }
+    return lit;
+}
+
+// The button of the entry being edited.
+int Snes9xPreferences::pad_picture_marked()
+{
+    const int focus = get_focused_binding();
+    return focus >= 0 && focus < NUM_JOYPAD_LINKS ? kLinkButtons[focus] : 0;
+}
+
+// From the joypad poll: redraw when the held or edited buttons change.
+void Snes9xPreferences::update_pad_picture()
+{
+    if (get_object<Gtk::Notebook>("preferences_notebook")->get_current_page() != kJoypadPage)
+        return;
+    const int lit = pad_picture_held(), outlined = pad_picture_marked();
+    if (lit == pad_picture_lit && outlined == pad_picture_outlined)
+        return;
+    pad_picture_lit = lit;
+    pad_picture_outlined = outlined;
+    get_object<Gtk::DrawingArea>("pad_picture")->queue_draw();
+}
+
+// The picture sits centred along the top of its area.
+int Snes9xPreferences::pad_picture_button_at(double x, double y)
+{
+    const int width = get_object<Gtk::DrawingArea>("pad_picture")->get_allocated_width();
+    const float s = pad_picture_scale(width);
+    const double left = (width - S9X_PADPIC_WIDTH * s) / 2;
+    if (s <= 0 || x < left || x >= left + S9X_PADPIC_WIDTH * s || y < 0 || y >= S9X_PADPIC_HEIGHT * s)
+        return 0;
+    return S9xPadPictureButtonAt((x - left) / s, y / s, PADPIC_ALL);
+}
+
+void Snes9xPreferences::set_pad_picture_hover(int button)
+{
+    if (button == pad_picture_hover)
+        return;
+    pad_picture_hover = button;
+    auto area = get_object<Gtk::DrawingArea>("pad_picture");
+    if (auto gdk_window = area->get_window())
+    {
+        if (button)
+            gdk_window->set_cursor(Gdk::Cursor::create(area->get_display(), "pointer"));
+        else
+            gdk_window->set_cursor();
+    }
+    area->queue_draw();
+}
+
+bool Snes9xPreferences::draw_pad_picture(const Cairo::RefPtr<Cairo::Context> &cr)
+{
+    auto area = get_object<Gtk::DrawingArea>("pad_picture");
+    const int width = area->get_allocated_width();
+    const int sf = std::max(1, area->get_scale_factor());
+    const float s = pad_picture_scale(width);
+    const int w = (int)std::lround(S9X_PADPIC_WIDTH * s * sf), h = (int)std::lround(S9X_PADPIC_HEIGHT * s * sf);
+    if (w <= 0 || h <= 0)
+        return true;
+
+    // The style's picture in device pixels, kept until the size, style or theme changes.
+    const int style = std::clamp(config->pad_picture_style, 0, S9X_PADPIC_NUM_STYLES - 1);
+    const Gdk::RGBA text = area->get_style_context()->get_color(area->get_state_flags());
+    const uint32_t label = (uint32_t)std::lround(text.get_red() * 255) << 16 |
+                           (uint32_t)std::lround(text.get_green() * 255) << 8 | (uint32_t)std::lround(text.get_blue() * 255);
+    if (!pad_picture_base || pad_picture_base_style != style || pad_picture_base_label != label ||
+        pad_picture_base->get_width() != w || pad_picture_base->get_height() != h)
+    {
+        const unsigned char *const pictures[S9X_PADPIC_NUM_STYLES] = { pad_usa, pad_eur, pad_sfc };
+        const int sizes[S9X_PADPIC_NUM_STYLES] = { pad_usa_size, pad_eur_size, pad_sfc_size };
+        auto loader = Gdk::PixbufLoader::create();
+        loader->write(pictures[style], sizes[style]);
+        loader->close();
+        auto pixbuf = loader->get_pixbuf();
+
+        // Its surround cleared at full size, then scaled
+        auto full = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, S9X_PADPIC_WIDTH, S9X_PADPIC_HEIGHT);
+        full->flush();
+        unsigned char *data = full->get_data();
+        const int stride = full->get_stride();
+        const guint8 *pixels = pixbuf->get_pixels();
+        const int rowstride = pixbuf->get_rowstride(), channels = pixbuf->get_n_channels();
+        for (int y = 0; y < S9X_PADPIC_HEIGHT; y++)
+        {
+            uint32_t *row = (uint32_t *)(data + (size_t)y * stride);
+            const guint8 *p = pixels + (size_t)y * rowstride;
+            for (int x = 0; x < S9X_PADPIC_WIDTH; x++, p += channels)
+                row[x] = (p[0] << 16) | (p[1] << 8) | p[2];
+        }
+        S9xPadPictureMatte((uint32_t *)data, stride / 4, label);
+        full->mark_dirty();
+
+        pad_picture_base = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, w, h);
+        auto scaler = Cairo::Context::create(pad_picture_base);
+        scaler->scale((double)w / S9X_PADPIC_WIDTH, (double)h / S9X_PADPIC_HEIGHT);
+        scaler->set_source(full, 0, 0);
+        cairo_pattern_set_filter(cairo_get_source(scaler->cobj()), CAIRO_FILTER_GOOD);
+        scaler->paint();
+        pad_picture_base->flush();
+        pad_picture_base_style = style;
+        pad_picture_base_label = label;
+    }
+
+    auto shown = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, w, h);
+    shown->flush();
+    memcpy(shown->get_data(), pad_picture_base->get_data(), (size_t)shown->get_stride() * h);
+    S9xPadPictureDraw((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf, style,
+                      pad_picture_lit, pad_picture_outlined | pad_picture_hover, true);
+    shown->mark_dirty();
+    cairo_surface_set_device_scale(shown->cobj(), sf, sf);
+    cr->set_source(shown, (width - w / (double)sf) / 2, 0);
+    cr->paint();
+    return true;
 }

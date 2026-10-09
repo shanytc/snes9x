@@ -51,6 +51,7 @@
 #include "../snes9x.h"
 #include "../memmap.h"
 #include "../biosmanager.h"
+#include "../padpicture.h"
 #include "../cpuexec.h"
 #include "../display.h"
 #include "../screenshot.h"
@@ -17036,17 +17037,290 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 static HWND s_inputConfigHwnd = NULL;
 HWND InputConfig_GetOpenHwnd() { return s_inputConfigHwnd; }
 
-static HBITMAP s_padBitmap = NULL;
+// The picture under the Buttons box: the pad in the chosen controller style, with
+// the held buttons lit on it.
+static HBITMAP s_panelBitmap = NULL;	// shown, with the held buttons lit
+static HBITMAP s_panelBase = NULL;	// the scaled picture, unlit
+static double s_panelScale = 1.0;
+static int s_panelSource = 0;	// the bitmap resource now in s_panelBase
+static int s_padPanelIndex = 0;	// the dialog row whose bindings light the pad
+static int s_padLit = -1;
+static int s_hoverField = 0, s_markedField = 0;	// outlined: the field under the mouse, the one being edited
 
-static void SetInputPadImage(HWND hDlg, bool japanese)
+#define INPUT_PICTURE_TIMER 98
+
+// The binding field a pad picture shape stands for; turbo rows bind turbo modes in the d-pad slots.
+static int PadPicField(int mask)
 {
-	HBITMAP hbm = LoadBitmap(g_hInst, MAKEINTRESOURCE(japanese ? IDB_PAD2 : IDB_PAD));
-	if (!hbm)
+	if (s_padPanelIndex >= 8 && mask <= PADPIC_RIGHT)
+		return 0;
+	switch (mask)
+	{
+		case PADPIC_UP:     return IDC_UP;
+		case PADPIC_DOWN:   return IDC_DOWN;
+		case PADPIC_LEFT:   return IDC_LEFT;
+		case PADPIC_RIGHT:  return IDC_RIGHT;
+		case PADPIC_A:      return IDC_A;
+		case PADPIC_B:      return IDC_B;
+		case PADPIC_X:      return IDC_X;
+		case PADPIC_Y:      return IDC_Y;
+		case PADPIC_L:      return IDC_L;
+		case PADPIC_R:      return IDC_R;
+		case PADPIC_START:  return IDC_START;
+		case PADPIC_SELECT: return IDC_SELECT;
+	}
+	return 0;
+}
+
+static bool InputPictureOutlined(int field)
+{
+	return field && (field == s_hoverField || field == s_markedField);
+}
+
+static void ShowInputPictureBitmap(HWND hDlg)
+{
+	InvalidateRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), NULL, FALSE);
+}
+
+// Paints the picture from s_panelBitmap without erasing first, so frequent redraws don't flicker.
+static LRESULT CALLBACK InputPictureSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+	switch (msg)
+	{
+	case WM_ERASEBKGND:
+		return 1;
+	case WM_PAINT:
+	{
+		PAINTSTRUCT ps;
+		HDC dc = BeginPaint(hWnd, &ps);
+		if (s_panelBitmap)
+		{
+			BITMAP bm;
+			GetObject(s_panelBitmap, sizeof(bm), &bm);
+			HDC mem = CreateCompatibleDC(dc);
+			HGDIOBJ old = SelectObject(mem, s_panelBitmap);
+			BitBlt(dc, 0, 0, bm.bmWidth, bm.bmHeight, mem, 0, 0, SRCCOPY);
+			SelectObject(mem, old);
+			DeleteDC(mem);
+		}
+		EndPaint(hWnd, &ps);
+		return 0;
+	}
+	case WM_NCDESTROY:
+		RemoveWindowSubclass(hWnd, InputPictureSubclassProc, 0);
+		break;
+	}
+	return DefSubclassProc(hWnd, msg, wParam, lParam);
+}
+
+// The held buttons lit, the hovered and edited ones ringed (padpicture.cpp draws both).
+static void DrawPadPictureLit(HWND hDlg)
+{
+	if (!s_panelBase || !s_panelBitmap)
 		return;
-	SendDlgItemMessage(hDlg, IDC_PAD_IMAGE, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hbm);
-	if (s_padBitmap)
-		DeleteObject(s_padBitmap);
-	s_padBitmap = hbm;
+	BITMAP bm;
+	GetObject(s_panelBase, sizeof(bm), &bm);
+	const int w = bm.bmWidth, h = bm.bmHeight;
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	std::vector<uint32> px(w * h);
+	HDC screen = GetDC(hDlg);
+	GetDIBits(screen, s_panelBase, 0, h, px.data(), &bi, DIB_RGB_COLORS);
+
+	int outlined = 0;
+	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
+		if (InputPictureOutlined(PadPicField(button)))
+			outlined |= button;
+	const int style = s_panelSource == IDB_PAD_USA ? S9X_PADPIC_USA : s_panelSource == IDB_PAD_EUR ? S9X_PADPIC_EUROPE : S9X_PADPIC_JAPAN;
+	S9xPadPictureDraw(px.data(), w, h, w, (float) s_panelScale, style, s_padLit < 0 ? 0 : s_padLit, outlined);
+
+	SetDIBits(screen, s_panelBitmap, 0, h, px.data(), &bi, DIB_RGB_COLORS);
+	ReleaseDC(hDlg, screen);
+	ShowInputPictureBitmap(hDlg);
+}
+
+bool S9xKeyHeld (WORD KeyIdent);
+
+// The buttons the row's bindings hold now (extras included). Turbo rows bind the
+// d-pad slots to turbo modes, so only their buttons light.
+static int PadHeldButtons(int index)
+{
+	const SJoypad &pad = Joypad[index];
+	const SJoypadExtraBinds &extra = JoypadExtra[index];
+	auto held = [&](WORD key, const WORD *extras)
+	{
+		if (S9xKeyHeld(key))
+			return true;
+		for (int e = 0; GUI.AllowMultipleBindings && e < MAX_EXTRA_BINDS; e++)
+			if (S9xKeyHeld(extras[e]))
+				return true;
+		return false;
+	};
+
+	int lit = 0;
+	#define PAD_HELD(field, bits) if (held(pad.field, extra.field)) lit |= (bits)
+	PAD_HELD(A, PADPIC_A); PAD_HELD(B, PADPIC_B); PAD_HELD(X, PADPIC_X); PAD_HELD(Y, PADPIC_Y);
+	PAD_HELD(L, PADPIC_L); PAD_HELD(R, PADPIC_R); PAD_HELD(Start, PADPIC_START); PAD_HELD(Select, PADPIC_SELECT);
+	if (index < 8)
+	{
+		PAD_HELD(Up, PADPIC_UP); PAD_HELD(Down, PADPIC_DOWN); PAD_HELD(Left, PADPIC_LEFT); PAD_HELD(Right, PADPIC_RIGHT);
+		PAD_HELD(Left_Up, PADPIC_LEFT | PADPIC_UP); PAD_HELD(Right_Up, PADPIC_RIGHT | PADPIC_UP);
+		PAD_HELD(Left_Down, PADPIC_LEFT | PADPIC_DOWN); PAD_HELD(Right_Down, PADPIC_RIGHT | PADPIC_DOWN);
+	}
+	#undef PAD_HELD
+	return lit;
+}
+
+// The binding field for the pad picture's button under a dialog-client point; 0 if none.
+static int InputPictureFieldAt(HWND hDlg, POINT pt)
+{
+	if (!s_panelBase)
+		return 0;
+	RECT r;
+	GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &r);
+	MapWindowPoints(NULL, hDlg, (POINT *) &r, 2);
+	if (!PtInRect(&r, pt))
+		return 0;
+	const float x = (pt.x - r.left + 0.5f) / (float) s_panelScale, y = (pt.y - r.top + 0.5f) / (float) s_panelScale;
+
+	int clickable = 0;
+	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
+		if (PadPicField(button))
+			clickable |= button;
+	const int field = PadPicField(S9xPadPictureButtonAt(x, y, clickable));
+	return field && IsWindowEnabled(GetDlgItem(hDlg, field)) ? field : 0;
+}
+
+// Notes the field under the mouse and the one being edited; true when either changed.
+static bool UpdateInputPictureOutlines(HWND hDlg)
+{
+	POINT pt;
+	GetCursorPos(&pt);
+	const HWND under = WindowFromPoint(pt);
+	int hover = 0;
+	if (under == hDlg || under == GetDlgItem(hDlg, IDC_INPUT_PICTURE))
+	{
+		ScreenToClient(hDlg, &pt);
+		hover = InputPictureFieldAt(hDlg, pt);
+	}
+	const HWND focus = GetFocus();
+	const int marked = focus && GetParent(focus) == hDlg ? GetDlgCtrlID(focus) : 0;
+	if (hover == s_hoverField && marked == s_markedField)
+		return false;
+	s_hoverField = hover;
+	s_markedField = marked;
+	return true;
+}
+
+// INPUT_PICTURE_TIMER: redraw when the held set or the outlined fields change.
+static void UpdateInputPictureLit(HWND hDlg)
+{
+	SDLInput_Poll();
+	const bool outlines = UpdateInputPictureOutlines(hDlg);
+	const int lit = PadHeldButtons(s_padPanelIndex);
+	if (lit == s_padLit && !outlines)
+		return;
+	s_padLit = lit;
+	DrawPadPictureLit(hDlg);
+}
+
+static void FreeInputPicture(void)
+{
+	if (s_panelBitmap)
+	{
+		DeleteObject(s_panelBitmap);
+		s_panelBitmap = NULL;
+	}
+	if (s_panelBase)
+	{
+		DeleteObject(s_panelBase);
+		s_panelBase = NULL;
+	}
+	s_panelSource = 0;
+}
+
+// The picture scaled into its box (never past 1:1) and centred.
+static void SetInputPicture(HWND hDlg, int bitmap)
+{
+	if (bitmap == s_panelSource)
+		return;
+	HBITMAP src = (HBITMAP) LoadImage(g_hInst, MAKEINTRESOURCE(bitmap), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
+	if (!src)
+		return;
+	BITMAP bm;
+	GetObject(src, sizeof(bm), &bm);
+
+	RECT box = { 5, 158, 375, 318 };
+	MapDialogRect(hDlg, &box);
+	const int boxW = box.right - box.left, boxH = box.bottom - box.top;
+	double scale = (double) boxW / bm.bmWidth;
+	if ((double) boxH / bm.bmHeight < scale)
+		scale = (double) boxH / bm.bmHeight;
+	if (scale > 1.0)
+		scale = 1.0;
+	const int w = (int) (bm.bmWidth * scale), h = (int) (bm.bmHeight * scale);
+
+	HDC screen = GetDC(hDlg);
+	HDC from = CreateCompatibleDC(screen), to = CreateCompatibleDC(screen);
+	HBITMAP dst = CreateCompatibleBitmap(screen, w, h);
+	HGDIOBJ oldFrom = SelectObject(from, src), oldTo = SelectObject(to, dst);
+	SetStretchBltMode(to, HALFTONE);
+	SetBrushOrgEx(to, 0, 0, NULL);
+	StretchBlt(to, 0, 0, w, h, from, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+	SelectObject(from, oldFrom);
+	SelectObject(to, oldTo);
+	DeleteDC(from);
+	DeleteDC(to);
+	DeleteObject(src);
+
+	HWND pic = GetDlgItem(hDlg, IDC_INPUT_PICTURE);
+	FreeInputPicture();
+
+	SetWindowPos(pic, NULL, box.left + (boxW - w) / 2, box.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+	s_panelBase = dst;
+	s_panelScale = scale;
+	s_panelSource = bitmap;
+	s_panelBitmap = CreateCompatibleBitmap(screen, w, h);
+	ReleaseDC(hDlg, screen);
+	s_padLit = 0;
+	DrawPadPictureLit(hDlg);
+}
+
+// The row's pad picture in the chosen controller style.
+static void ShowInputPicture(HWND hDlg, int index)
+{
+	s_padPanelIndex = index;
+	s_padLit = -1;
+	const int source = !GUI.JapaneseController ? IDB_PAD_USA : GUI.EuropeanController ? IDB_PAD_EUR : IDB_PAD_SFC;
+	if (source != s_panelSource)
+		SetInputPicture(hDlg, source);
+	else
+		UpdateInputPictureLit(hDlg);
+}
+
+// The controller list keeps focus, so keys pressed to try bindings must not switch
+// rows through its closed-list navigation. F4 and Alt+Down still open it.
+static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+	// The closed list scrolls on the wheel by sending itself VK_UP/VK_DOWN; let those through.
+	static bool inWheel = false;
+	if (msg == WM_MOUSEWHEEL)
+	{
+		inWheel = true;
+		LRESULT r = DefSubclassProc(hWnd, msg, wParam, lParam);
+		inWheel = false;
+		return r;
+	}
+	// Only key messages query the list: CB_GETDROPPEDSTATE comes back through here.
+	const bool navKey = msg == WM_CHAR || (msg == WM_KEYDOWN && wParam >= VK_PRIOR && wParam <= VK_DOWN);	// PgUp PgDn End Home arrows
+	if (navKey && !inWheel && !SendMessage(hWnd, CB_GETDROPPEDSTATE, 0, 0))
+		return 0;
+	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
 
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -17119,7 +17393,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_USEDIRECTINPUT,BM_SETCHECK, GUI.UseDirectInput ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
-		SetInputPadImage(hDlg, GUI.JapaneseController);
 
 		// Initialize binding mode combobox
 		SendDlgItemMessage(hDlg,IDC_BINDINGCOMBO,CB_ADDSTRING,0,(LPARAM)TEXT("Single"));
@@ -17137,10 +17410,13 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		PostMessage(hDlg,WM_COMMAND, MAKEWPARAM(IDC_JPCOMBO, CBN_SELCHANGE), 0);
 
+		SetWindowSubclass(GetDlgItem(hDlg,IDC_JPCOMBO), ControllerComboSubclassProc, 0, 0);
+		SetWindowSubclass(GetDlgItem(hDlg,IDC_INPUT_PICTURE), InputPictureSubclassProc, 0, 0);
 		SetFocus(GetDlgItem(hDlg,IDC_JPCOMBO));
 
 		// Start timer to poll for controller hot-plug events
 		SetTimer(hDlg, 99, 500, NULL);
+		SetTimer(hDlg, INPUT_PICTURE_TIMER, 30, NULL);
 
 		return true;
 		break;
@@ -17150,42 +17426,42 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		EndDialog(hDlg, 0);
 		return TRUE;
 	case WM_DESTROY:
-		if (s_padBitmap)
-		{
-			DeleteObject(s_padBitmap);
-			s_padBitmap = NULL;
-		}
+		KillTimer(hDlg, INPUT_PICTURE_TIMER);
+		FreeInputPicture();
 		break;
 	case WM_CONTEXTMENU:
-		if ((HWND)wParam == GetDlgItem(hDlg, IDC_PAD_IMAGE))
+	{
+		// The style menu is on the pad picture (a plain static the click falls through)
+		POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
+		RECT big;
+		GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &big);
+		if ((HWND)wParam == hDlg && PtInRect(&big, pt))
 		{
-			POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
-			if (pt.x == -1 && pt.y == -1)
-			{
-				RECT rc;
-				GetWindowRect(GetDlgItem(hDlg, IDC_PAD_IMAGE), &rc);
-				pt.x = (rc.left + rc.right) / 2;
-				pt.y = (rc.top + rc.bottom) / 2;
-			}
+			// 1 USA, 2 Europe, 3 Japan; Europe and Japan share the coloured buttons
+			const int style = !GUI.JapaneseController ? 1 : GUI.EuropeanController ? 2 : 3;
 			HMENU menu = CreatePopupMenu();
-			AppendMenu(menu, MF_STRING | (GUI.JapaneseController ? MF_UNCHECKED : MF_CHECKED), 1, TEXT("USA Controller"));
-			AppendMenu(menu, MF_STRING | (GUI.JapaneseController ? MF_CHECKED : MF_UNCHECKED), 2, TEXT("Euro/Japanese Controller"));
+			AppendMenu(menu, MF_STRING | (style == 1 ? MF_CHECKED : MF_UNCHECKED), 1, TEXT("USA Controller"));
+			AppendMenu(menu, MF_STRING | (style == 2 ? MF_CHECKED : MF_UNCHECKED), 2, TEXT("European Controller"));
+			AppendMenu(menu, MF_STRING | (style == 3 ? MF_CHECKED : MF_UNCHECKED), 3, TEXT("Japanese Controller"));
 			int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
 			DestroyMenu(menu);
-			if (cmd == 1 || cmd == 2)
+			if (cmd >= 1 && cmd <= 3)
 			{
-				bool japanese = (cmd == 2);
-				if (japanese != GUI.JapaneseController)
+				if (cmd != style)
 				{
-					GUI.JapaneseController = japanese;
-					SetInputPadImage(hDlg, japanese);
+					GUI.JapaneseController = (cmd != 1);
+					GUI.EuropeanController = (cmd == 2);
+					ShowInputPicture(hDlg, s_padPanelIndex);
 					WinSaveConfigFile();
 				}
 			}
 			return TRUE;
 		}
 		break;
+	}
 	case WM_TIMER:
+		if(wParam == INPUT_PICTURE_TIMER)
+			UpdateInputPictureLit(hDlg);
 		if(wParam == 99)
 		{
 			// Poll SDL for device add/remove events
@@ -17246,6 +17522,28 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			PostMessage(hDlg,WM_NEXTDLGCTL,0,0);
 		return true;
 		}
+	case WM_LBUTTONDOWN:
+	{
+		// A click on the picture's button edits its binding; elsewhere off the fields it ends editing
+		POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+		const int field = InputPictureFieldAt(hDlg, pt);
+		SetFocus(GetDlgItem(hDlg, field ? field : IDC_JPCOMBO));
+		return TRUE;
+	}
+	case WM_SETCURSOR:
+		if ((HWND)wParam == hDlg && LOWORD(lParam) == HTCLIENT)
+		{
+			POINT pt;
+			GetCursorPos(&pt);
+			ScreenToClient(hDlg, &pt);
+			if (InputPictureFieldAt(hDlg, pt))
+			{
+				SetCursor(LoadCursor(NULL, IDC_HAND));
+				SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+				return TRUE;
+			}
+		}
+		break;
 	case WM_COMMAND:
 		switch(LOWORD(wParam))
 		{
@@ -17258,6 +17556,9 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			break;
 
 		case IDOK:
+			// Enter is a bindable key to try out, not a shortcut for OK
+			if (GetKeyState(VK_RETURN) & 0x8000)
+				break;
 			KillTimer(hDlg, 99);
 			s_inputConfigHwnd = NULL;
 			Settings.UpAndDown = IsDlgButtonChecked(hDlg, IDC_ALLOWLEFTRIGHT);
@@ -17376,6 +17677,9 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				EnableDisableKeyFields(index,hDlg);
 
 				UpdateDeviceInfo(hDlg, index);
+
+				// The pad picture lights this row's held buttons.
+				ShowInputPicture(hDlg, index);
 
 				break;
 		}

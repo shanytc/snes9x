@@ -466,6 +466,9 @@ void EmuApplication::mainLoop()
 
 void EmuApplication::reportBinding(EmuBinding b, bool active)
 {
+    if (binding_monitor)
+        binding_monitor(b, active);
+
     if (binding_callback && active)
     {
         binding_callback(b);

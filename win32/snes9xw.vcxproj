@@ -680,6 +680,7 @@
     <ClCompile Include="..\hd64180.cpp" />
     <ClCompile Include="..\loadzip.cpp" />
     <ClCompile Include="..\biosmanager.cpp" />
+    <ClCompile Include="..\padpicture.cpp" />
     <ClCompile Include="..\memmap.cpp" />
     <ClCompile Include="..\movie.cpp" />
     <ClCompile Include="..\msu1.cpp" />
@@ -838,7 +839,6 @@
     <Image Include="rsrc\sufami-turbo.ico" />
     <Image Include="rsrc\nd.bmp" />
     <Image Include="rsrc\openfold.bmp" />
-    <Image Include="rsrc\pad.bmp" />
     <Image Include="rsrc\ram.bmp" />
     <Image Include="rsrc\rd.bmp" />
     <Image Include="rsrc\rodir.bmp" />

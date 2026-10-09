@@ -220,6 +220,9 @@ class Snes9xConfig
     bool superscope_crosshair_visible;
     int valid_controller_options;
     int controller_option_before_rom;
+
+    // Preferences' joypad picture: S9X_PADPIC_USA, _EUROPE or _JAPAN (padpicture.h).
+    int pad_picture_style;
 };
 
 std::string get_config_dir();

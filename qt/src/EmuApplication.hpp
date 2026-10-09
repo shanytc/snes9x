@@ -154,6 +154,8 @@ struct EmuApplication
     std::unordered_multimap<uint32_t, std::pair<std::string, Handler>> bindings;
     std::unique_ptr<QTimer> poll_input_timer;
     std::function<void(EmuBinding)> binding_callback = nullptr;
+    // Sees every report first, pressed or released (the Controllers panel's pad picture).
+    std::function<void(const EmuBinding &, bool)> binding_monitor = nullptr;
     std::function<void()> joypads_changed_callback = nullptr;
     int pause_count = 0;
     int suspend_count = 0;

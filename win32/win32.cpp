@@ -496,6 +496,9 @@ bool8 S9xReadMousePosition (int which, int &x, int &y, uint32 &buttons)
     return (FALSE);
 }
 
+bool S9xKeyHeld (WORD KeyIdent);
+static bool S9xKeyReleased (WORD KeyIdent);
+
 bool S9xGetState (WORD KeyIdent)
 {
 	if(KeyIdent == 0 || KeyIdent == VK_ESCAPE) // if it's the 'disabled' key, it's never pressed
@@ -504,6 +507,20 @@ bool S9xGetState (WORD KeyIdent)
 	if(!GUI.BackgroundInput && GUI.hWnd != GetForegroundWindow())
 		return true;
 
+	return !S9xKeyHeld(KeyIdent);
+}
+
+// The device read alone, without S9xGetState's focus gate.
+bool S9xKeyHeld (WORD KeyIdent)
+{
+	if(KeyIdent == 0 || KeyIdent == VK_ESCAPE)
+		return false;
+
+	return !S9xKeyReleased(KeyIdent);
+}
+
+static bool S9xKeyReleased (WORD KeyIdent)
+{
     if (KeyIdent & 0x8000) // if it's a joystick 'key':
     {
         int j = (KeyIdent >> 8) & 15;

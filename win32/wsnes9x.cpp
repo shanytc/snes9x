@@ -17049,6 +17049,17 @@ static void SetInputPadImage(HWND hDlg, bool japanese)
 	s_padBitmap = hbm;
 }
 
+// The controller list keeps focus, so keys pressed to try bindings must not switch
+// rows through its closed-list navigation. F4 and Alt+Down still open it.
+static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+	// Only key messages query the list: CB_GETDROPPEDSTATE comes back through here.
+	const bool navKey = msg == WM_CHAR || (msg == WM_KEYDOWN && wParam >= VK_PRIOR && wParam <= VK_DOWN);	// PgUp PgDn End Home arrows
+	if (navKey && !SendMessage(hWnd, CB_GETDROPPEDSTATE, 0, 0))
+		return 0;
+	return DefSubclassProc(hWnd, msg, wParam, lParam);
+}
+
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	TCHAR temp[256];
@@ -17137,6 +17148,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		PostMessage(hDlg,WM_COMMAND, MAKEWPARAM(IDC_JPCOMBO, CBN_SELCHANGE), 0);
 
+		SetWindowSubclass(GetDlgItem(hDlg,IDC_JPCOMBO), ControllerComboSubclassProc, 0, 0);
 		SetFocus(GetDlgItem(hDlg,IDC_JPCOMBO));
 
 		// Start timer to poll for controller hot-plug events
@@ -17246,7 +17258,16 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			PostMessage(hDlg,WM_NEXTDLGCTL,0,0);
 		return true;
 		}
+	case WM_LBUTTONDOWN:
+		// A click off the binding fields (background, labels, pictures) ends editing
+		SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
+		return TRUE;
 	case WM_COMMAND:
+		if (LOWORD(wParam) == IDC_PAD_IMAGE && HIWORD(wParam) == STN_CLICKED)
+		{
+			SetFocus(GetDlgItem(hDlg, IDC_JPCOMBO));
+			return TRUE;
+		}
 		switch(LOWORD(wParam))
 		{
 		case IDCANCEL:

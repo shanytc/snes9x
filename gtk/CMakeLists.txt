@@ -424,6 +424,7 @@ list(APPEND SOURCES
     ../widescreen.cpp
     ../memmap.cpp
     ../biosmanager.cpp
+    ../padpicture.cpp
     ../clip.cpp
     ../ppu.cpp
     ../dma.cpp
@@ -504,6 +505,17 @@ foreach(logo RANGE 1 4)
             DEPENDS sourcify ${logo_png})
         list(APPEND LOGO_SOURCES ${logo_cpp})
     endforeach()
+endforeach()
+
+# Preferences' joypad picture, one array per pad style.
+foreach(pad usa eur sfc)
+    set(pad_png ${CMAKE_CURRENT_SOURCE_DIR}/../data/pads/pad_${pad}.png)
+    set(pad_cpp ${CMAKE_CURRENT_BINARY_DIR}/pad_${pad}.cpp)
+    add_custom_command(
+        OUTPUT ${pad_cpp}
+        COMMAND sourcify ${pad_png} ${pad_cpp} pad_${pad}
+        DEPENDS sourcify ${pad_png})
+    list(APPEND LOGO_SOURCES ${pad_cpp})
 endforeach()
 
 add_executable(snes9x-gtk ${SOURCES} ${jma} ${CMAKE_CURRENT_BINARY_DIR}/gtk_snes9x_ui.cpp ${CMAKE_CURRENT_BINARY_DIR}/mini_icon.cpp ${LOGO_SOURCES})

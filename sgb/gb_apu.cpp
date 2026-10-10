@@ -862,10 +862,14 @@ void ApuStep(Apu &a, int32_t tcycles)
 		}
 	}
 
+	// A discarded seat runs the channel machinery a game can read back but
+	// neither the mixer nor the sample clock: nobody hears it.
+	const bool quiet = a.discard_output;
+
 	while (tcycles > 0)
 	{
 		int32_t chunk = tcycles;
-		if (a.sample_timer < chunk) chunk = a.sample_timer;
+		if (!quiet && a.sample_timer < chunk) chunk = a.sample_timer;
 		if (chunk < 1) chunk = 1;
 
 		// Advance the 2 MHz channel machinery.
@@ -1029,29 +1033,32 @@ void ApuStep(Apu &a, int32_t tcycles)
 				ApuWrite(a, 0xFF23, static_cast<uint8_t>(a.ch4.nr44 | 0x80), a.cgb, 0, false);
 		}
 
-		// Integrate the mixer over this chunk.
+		if (!quiet)
 		{
-			int32_t l, r, chlv[4];
-			Mix(a, l, r, g_wave_capture ? chlv : nullptr);
-			a.sample_accum_l += l * chunk;
-			a.sample_accum_r += r * chunk;
-			if (g_wave_capture)
-				for (int ch = 0; ch < 4; ++ch)
-					g_ch_accum[ch] += chlv[ch] * chunk;
-		}
-		a.sample_accum_cnt += static_cast<uint32_t>(chunk);
-		a.sample_timer     -= chunk;
-
-		if (a.sample_timer <= 0)
-		{
-			a.sample_timer += a.cycles_per_sample;
-			a.cps_remainder_acc += a.cps_remainder_step;
-			if (a.cps_remainder_acc >= a.output_rate)
+			// Integrate the mixer over this chunk.
 			{
-				a.cps_remainder_acc -= a.output_rate;
-				a.sample_timer += 1;
+				int32_t l, r, chlv[4];
+				Mix(a, l, r, g_wave_capture ? chlv : nullptr);
+				a.sample_accum_l += l * chunk;
+				a.sample_accum_r += r * chunk;
+				if (g_wave_capture)
+					for (int ch = 0; ch < 4; ++ch)
+						g_ch_accum[ch] += chlv[ch] * chunk;
 			}
-			FlushSample(a);
+			a.sample_accum_cnt += static_cast<uint32_t>(chunk);
+			a.sample_timer     -= chunk;
+
+			if (a.sample_timer <= 0)
+			{
+				a.sample_timer += a.cycles_per_sample;
+				a.cps_remainder_acc += a.cps_remainder_step;
+				if (a.cps_remainder_acc >= a.output_rate)
+				{
+					a.cps_remainder_acc -= a.output_rate;
+					a.sample_timer += 1;
+				}
+				FlushSample(a);
+			}
 		}
 
 		tcycles -= chunk;

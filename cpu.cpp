@@ -42,11 +42,12 @@ static void S9xResetCPU (void)
 
 static void S9xSoftResetCPU (void)
 {
-	CPU.Cycles = 182; // Or 188. This is the cycle count just after the jump to the Reset Vector.
+	CPU.Cycles = 170; // The reset vector read below adds 16: first opcode fetch at 186, as Mesen.
 	CPU.PrevCycles = CPU.Cycles;
 	CPU.LastBusStart = CPU.Cycles;
 	CPU.LastRunStart = CPU.Cycles - 1;
 	CPU.HDMAEdge = 0;
+	CPU.HDMAENDeferred = FALSE;
 	CPU.IRQDeferOne = FALSE;
 	Timings.FrameInterlace = FALSE;
 	CPU.V_Counter = 0;

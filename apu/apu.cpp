@@ -1000,16 +1000,36 @@ static inline int S9xAPUGetClockRemainder(int32 cpucycles)
            S9xAPUEffectiveDenominator();
 }
 
+static void S9xAPUExecuteTo(int32 cpucycles);
+
+// The CPU samples a read 4 clocks before the end of its bus cycle and a write
+// lands at the end of it (bsnes, Mesen); the access starts at CPU.Cycles.
 uint8 S9xAPUReadPort(int port)
 {
-    S9xAPUExecute();
+    S9xAPUExecuteTo(CPU.InDMAorHDMA ? CPU.Cycles : CPU.Cycles + std::max(ONE_CYCLE - 4, 0));
     return ((uint8)SNES::smp.port_read(port & 3));
 }
 
 void S9xAPUWritePort(int port, uint8 byte)
 {
-    S9xAPUExecute();
-    SNES::cpu.port_write(port & 3, byte);
+    S9xAPUExecuteTo(CPU.InDMAorHDMA ? CPU.Cycles : CPU.Cycles + ONE_CYCLE);
+
+    SNES::CPU &c = SNES::cpu;
+    const int32 now = SNES::smp.clock;
+    if (c.pending_mask && c.pending_clock <= now + 1)
+        c.apply_pending();
+
+    // Second half of the SPC cycle: the SPC sees it from the next cycle (Mesen).
+    const bool late = now == 0 && 2 * (uint32)spc::remainder > S9xAPUEffectiveDenominator();
+    if (c.pending_mask || late)
+    {
+        if (!c.pending_mask)
+            c.pending_clock = now + 2;
+        c.pending[port & 3] = byte;
+        c.pending_mask |= 1 << (port & 3);
+    }
+    else
+        c.port_write(port & 3, byte);
 }
 
 void S9xAPUSetReferenceTime(int32 cpucycles)
@@ -1017,14 +1037,20 @@ void S9xAPUSetReferenceTime(int32 cpucycles)
     spc::reference_time = cpucycles;
 }
 
-void S9xAPUExecute(void)
+static void S9xAPUExecuteTo(int32 cpucycles)
 {
-    int cycles = S9xAPUGetClock(CPU.Cycles);
-    spc::remainder = S9xAPUGetClockRemainder(CPU.Cycles);
+    int cycles = S9xAPUGetClock(cpucycles);
+    spc::remainder = S9xAPUGetClockRemainder(cpucycles);
     SNES::smp.clock -= cycles;
+    SNES::cpu.pending_clock -= cycles;
     SNES::smp.enter();
 
-    S9xAPUSetReferenceTime(CPU.Cycles);
+    S9xAPUSetReferenceTime(cpucycles);
+}
+
+void S9xAPUExecute(void)
+{
+    S9xAPUExecuteTo(CPU.Cycles);
 }
 
 static uint32 g_apu_scanline_meter = 0;
@@ -1104,6 +1130,11 @@ void S9xAPUSaveState(uint8 *block)
     ptr += sizeof(int32);
     memcpy(ptr, SNES::cpu.registers, 4);
     ptr += sizeof(int32);
+    *ptr++ = SNES::cpu.pending_mask;
+    memcpy(ptr, SNES::cpu.pending, 4);
+    ptr += 4;
+    SNES::set_le32(ptr, SNES::cpu.pending_clock);
+    ptr += sizeof(int32);
 
     memset(ptr, 0, SPC_SAVE_STATE_BLOCK_SIZE - (ptr - block));
 }
@@ -1121,6 +1152,11 @@ void S9xAPULoadState(uint8 *block)
     SNES::dsp.clock = SNES::get_le32(ptr);
     ptr += sizeof(int32);
     memcpy(SNES::cpu.registers, ptr, 4);
+    ptr += sizeof(int32);
+    SNES::cpu.pending_mask = *ptr++ & 0x0f;
+    memcpy(SNES::cpu.pending, ptr, 4);
+    ptr += 4;
+    SNES::cpu.pending_clock = SNES::get_le32(ptr);
 }
 
 static void to_var_from_buf(uint8 **buf, void *var, size_t size)
@@ -1232,6 +1268,7 @@ void S9xAPULoadBlarggState(uint8 *oldblock)
 
     // blargg stores CPUIx in regs_in
     memcpy(SNES::cpu.registers, regs_in + 4, 4);
+    SNES::cpu.pending_mask = 0;
 }
 
 bool8 S9xSPCDump(const char *filename)

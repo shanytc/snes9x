@@ -103,16 +103,30 @@ case 0x24: {
 }
 
 case 0x64: {
-  dp = op_readpc();
-  rd = op_readdp(dp);
-  regs.B.a = op_cmp(regs.B.a, rd);
+  switch(++opcode_cycle) {
+  case 1:
+    dp = op_readpc();
+    break;
+  case 2:
+    rd = op_readdp(dp);
+    regs.B.a = op_cmp(regs.B.a, rd);
+    opcode_cycle = 0;
+    break;
+  }
   break;
 }
 
 case 0x3e: {
-  dp = op_readpc();
-  rd = op_readdp(dp);
-  regs.x = op_cmp(regs.x, rd);
+  switch(++opcode_cycle) {
+  case 1:
+    dp = op_readpc();
+    break;
+  case 2:
+    rd = op_readdp(dp);
+    regs.x = op_cmp(regs.x, rd);
+    opcode_cycle = 0;
+    break;
+  }
   break;
 }
 

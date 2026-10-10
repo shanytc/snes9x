@@ -160,6 +160,7 @@ struct SCPUState
 	int32	FastBusEnd;		// NextEvent, or INT32_MIN while an HDMA is pending
 	int32	HDMAEdge;		// bus cycles left before a triggered HDMA runs
 	bool8	IRQDeferOne;	// /IRQ rose during an instruction's last bus cycle
+	bool8	HDMAENDeferred;	// a $420C write whose bus cycle holds the HDMA start: applied after it
 };
 
 enum

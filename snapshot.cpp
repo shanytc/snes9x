@@ -1855,6 +1855,7 @@ int S9xUnfreezeFromStream (STREAM stream)
 		CPU.LastBusStart = CPU.Cycles;
 		CPU.LastRunStart = CPU.Cycles - 1;
 		CPU.HDMAEdge = 0;
+		CPU.HDMAENDeferred = FALSE;
 		S9xUpdateFastBusEnd();
 		CPU.IRQDeferOne = FALSE;
 

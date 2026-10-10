@@ -47,6 +47,7 @@ static void S9xSoftResetCPU (void)
 	CPU.LastBusStart = CPU.Cycles;
 	CPU.LastRunStart = CPU.Cycles - 1;
 	CPU.HDMAEdge = 0;
+	CPU.HDMAENDeferred = FALSE;
 	CPU.IRQDeferOne = FALSE;
 	Timings.FrameInterlace = FALSE;
 	CPU.V_Counter = 0;

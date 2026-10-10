@@ -642,6 +642,12 @@ void S9xDoHEventProcessing (void)
 				}
 			}
 
+			if (CPU.HDMAENDeferred)
+			{
+				CPU.HDMAENDeferred = FALSE;
+				PPU.HDMA = Memory.FillRAM[0x420c] & ~PPU.HDMAEnded;
+			}
+
 			break;
 
 		case HC_HCOUNTER_MAX_EVENT:

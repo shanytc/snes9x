@@ -1756,8 +1756,13 @@ void S9xSetCPU (uint8 Byte, uint16 Address)
 				if (CPU.InDMAorHDMA)
 					return;
 				Memory.FillRAM[0x420c] = Byte;
-				// Yoshi's Island, Genjyu Ryodan, Mortal Kombat, Tales of Phantasia
-				PPU.HDMA = Byte & ~PPU.HDMAEnded;
+				// The write lands at the end of its bus cycle (bsnes, Mesen): an HDMA start
+				// inside that cycle still sees the old channels (Full Throttle's water).
+				if (CPU.WhichEvent == HC_HDMA_START_EVENT && CPU.Cycles < CPU.NextEvent && CPU.Cycles + ONE_CYCLE >= CPU.NextEvent)
+					CPU.HDMAENDeferred = TRUE;
+				else
+					// Yoshi's Island, Genjyu Ryodan, Mortal Kombat, Tales of Phantasia
+					PPU.HDMA = Byte & ~PPU.HDMAEnded;
 			#ifdef DEBUGGER
 				missing.hdma_this_frame |= Byte;
 				missing.hdma_channels |= Byte;

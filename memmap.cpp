@@ -3927,25 +3927,30 @@ static bool AcceptST018Firmware (const uint8 *data, uint32 size, uint32 full_siz
 	return (full_size == ST018_FIRMWARE_SIZE && S9xST018IsFirmware(data, size));
 }
 
-// The ST018 from its firmware when the slot's mode comes to that, else the HLE, as for the ST010/ST011.
+// The ST018 as the slot's mode picks it: its firmware, or the native chip; the HLE only when picked.
 static void LoadST018Firmware (void)
 {
-	if (S9xChipModeInEffect(S9X_BIOS_ST018) != S9X_CHIP_FIRMWARE)
+	const int	mode = S9xChipModeInEffect(S9X_BIOS_ST018);
+	if (mode == S9X_CHIP_HLE)
 		return;
 
-	std::vector<uint8>	image;
-	if (S9xBiosPathUsable(S9X_BIOS_ST018) &&
-		S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_ST018).c_str(), image, ST018_FIRMWARE_SIZE, AcceptST018Firmware) &&
-		S9xST018Load(image.data(), (uint32) image.size()))
-		return;
+	if (mode == S9X_CHIP_FIRMWARE)
+	{
+		std::vector<uint8>	image;
+		if (S9xBiosPathUsable(S9X_BIOS_ST018) &&
+			S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_ST018).c_str(), image, ST018_FIRMWARE_SIZE, AcceptST018Firmware) &&
+			S9xST018Load(image.data(), (uint32) image.size()))
+			return;
 
 #ifdef __LIBRETRO__
-	const std::string	where = std::string("Put ") + S9xGetBiosSlotInfo(S9X_BIOS_ST018)->names[0] + " in the system folder.";
+		const std::string	where = std::string("Put ") + S9xGetBiosSlotInfo(S9X_BIOS_ST018)->names[0] + " in the system folder.";
 #else
-	const std::string	where = "Check it in File -> BIOS Manager.";
+		const std::string	where = "Check it in File -> BIOS Manager.";
 #endif
-	if (!S9xBiosNoticePending())
-		S9xSetBiosNotice(("ST018 firmware can't be used: running Legacy (HLE). " + where).c_str(), FALSE);
+		if (!S9xBiosNoticePending())
+			S9xSetBiosNotice(("ST018 firmware can't be used: running the native chip. " + where).c_str(), FALSE);
+	}
+	S9xST018LoadNative();
 }
 
 // The chip as the slot's mode picks it: FALSE leaves the cart to the HLE.
@@ -5946,7 +5951,7 @@ int S9xEnhancedChip (void)
 	if (S9xUPD96050Active())
 		return (S9xUPD96050IsNative() ? S9X_ENHANCED_SETA : S9X_ENHANCED_SETA_FIRMWARE);
 	if (S9xST018Active())
-		return (S9X_ENHANCED_SETA_FIRMWARE);
+		return (S9xST018IsNative() ? S9X_ENHANCED_SETA : S9X_ENHANCED_SETA_FIRMWARE);
 	if (!S9xUPD7725Active())
 		return (S9X_ENHANCED_NONE);
 

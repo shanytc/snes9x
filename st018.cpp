@@ -26,11 +26,10 @@ struct State
 	uint32	bank_lr[6];
 	uint32	spsr[6];
 	uint32	cpsr;
-	uint32	timer, timerlatch;
 	uint32	last_fetch;			// what an unmapped read returns
 	uint32	boot_wait;			// clocks left of the delay after reset
-	uint8	cputoarm_ready, cputoarm_data, armtocpu_ready, armtocpu_data;
-	uint8	reset, ready, signal, pad[5];
+	S9xST018Bus	b;
+	uint32	pad;
 	uint64	line_base;			// master clock at the start of the current scanline
 	uint64	synced;				// master clock the chip has been run up to
 	uint64	clocks;				// chip clocks run since power-on
@@ -46,6 +45,17 @@ static uint8	ram[0x4000];
 static uint32	cur;			// address of the instruction executing
 static bool8	loaded = FALSE;
 static bool8	active = FALSE;
+static bool8	native = FALSE;		// the native chip runs the ARM instead of the interpreter
+static uint64	native_next = 0;	// master clock of its next access the CPU can see (~0: waiting on the CPU)
+
+#ifdef ST018_LAB
+// The test lab's view: each CPU access at the ARM's clock, and how often each program word ran.
+void	(*S9xST018LabBus) (char kind, uint64 at, uint32 address, uint8 v) = NULL;
+uint64	*S9xST018LabCover = NULL;
+#define LAB_BUS(kind, a, v)	do { if (S9xST018LabBus) S9xST018LabBus(kind, s.clocks, a, v); } while (0)
+#else
+#define LAB_BUS(kind, a, v)	do { } while (0)
+#endif
 
 bool8 S9xST018IsFirmware (const uint8 *image, uint32 size)
 {
@@ -59,7 +69,39 @@ bool8 S9xST018IsFirmware (const uint8 *image, uint32 size)
 
 static inline uint8 Status (void)
 {
-	return ((uint8) (s.armtocpu_ready | (s.signal << 2) | (s.cputoarm_ready << 3) | (s.ready << 7)));
+	return ((uint8) (s.b.armtocpu_ready | (s.b.signal << 2) | (s.b.cputoarm_ready << 3) | (s.b.ready << 7)));
+}
+
+static void ToNative (void)
+{
+	S9xST018Arm	t;
+	memcpy(t.r, s.r, sizeof(t.r));
+	memcpy(t.bank_r8, s.bank_r8, sizeof(t.bank_r8));
+	memcpy(t.bank_sp, s.bank_sp, sizeof(t.bank_sp));
+	memcpy(t.bank_lr, s.bank_lr, sizeof(t.bank_lr));
+	memcpy(t.spsr, s.spsr, sizeof(t.spsr));
+	t.cpsr = s.cpsr;
+	t.last_fetch = s.last_fetch;
+	t.boot_wait = s.boot_wait;
+	t.pad = 0;
+	t.clocks = s.clocks;
+	S9xST018NativeSetArm(&t);
+	native_next = 0;
+}
+
+static void FromNative (void)
+{
+	S9xST018Arm	t;
+	S9xST018NativeGetArm(&t);
+	memcpy(s.r, t.r, sizeof(t.r));
+	memcpy(s.bank_r8, t.bank_r8, sizeof(t.bank_r8));
+	memcpy(s.bank_sp, t.bank_sp, sizeof(t.bank_sp));
+	memcpy(s.bank_lr, t.bank_lr, sizeof(t.bank_lr));
+	memcpy(s.spsr, t.spsr, sizeof(t.spsr));
+	s.cpsr = t.cpsr;
+	s.last_fetch = t.last_fetch;
+	s.boot_wait = t.boot_wait;
+	s.clocks = t.clocks;
 }
 
 static void PowerArm (void)
@@ -70,15 +112,17 @@ static void PowerArm (void)
 	memset(s.bank_lr, 0, sizeof(s.bank_lr));
 	memset(s.spsr, 0, sizeof(s.spsr));
 	s.cpsr = M_SVC | F_I | F_F;
-	s.timer = s.timerlatch = 0;
-	s.cputoarm_ready = s.armtocpu_ready = 0;
-	s.signal = s.ready = 0;
+	s.b.timer = s.b.timerlatch = 0;
+	s.b.cputoarm_ready = s.b.armtocpu_ready = 0;
+	s.b.signal = s.b.ready = 0;
 	s.boot_wait = 65536;		// the reset sequence's delay before the ARM starts
+	if (native)
+		ToNative();
 }
 
 bool8 S9xST018Load (const uint8 *image, uint32 size)
 {
-	loaded = active = FALSE;
+	loaded = active = native = FALSE;
 	if (!S9xST018IsFirmware(image, size))
 		return (FALSE);
 	memcpy(prog, image, ST018_PROGRAM_SIZE);
@@ -88,9 +132,22 @@ bool8 S9xST018Load (const uint8 *image, uint32 size)
 	return (TRUE);
 }
 
+bool8 S9xST018LoadNative (void)
+{
+	loaded = native = TRUE;
+	S9xST018NativeAttach(&s.b, ram);
+	S9xST018Reset();
+	return (TRUE);
+}
+
+bool8 S9xST018IsNative (void)
+{
+	return (native);
+}
+
 void S9xST018Unload (void)
 {
-	loaded = active = FALSE;
+	loaded = active = native = FALSE;
 }
 
 bool8 S9xST018Loaded (void)
@@ -109,6 +166,7 @@ void S9xST018Reset (void)
 		return;
 	memset(&s, 0, sizeof(s));
 	memset(ram, 0, sizeof(ram));
+	native_next = 0;
 	PowerArm();
 	active = TRUE;
 }
@@ -125,10 +183,10 @@ static uint32 IoRead (uint32 addr)
 	switch (addr & 0xe000003f)
 	{
 		case 0x40000010:
-			if (s.cputoarm_ready)
+			if (s.b.cputoarm_ready)
 			{
-				s.cputoarm_ready = 0;
-				return (s.cputoarm_data);
+				s.b.cputoarm_ready = 0;
+				return (s.b.cputoarm_data);
 			}
 			return (0);
 		case 0x40000020:
@@ -142,12 +200,12 @@ static void IoWrite (uint32 addr, uint32 v)
 	v &= 0xff;
 	switch (addr & 0xe000003f)
 	{
-		case 0x40000000: s.armtocpu_ready = 1; s.armtocpu_data = (uint8) v; break;
-		case 0x40000010: s.signal = 1; break;
-		case 0x40000020: s.timerlatch = (s.timerlatch & 0xffff00) | v; break;
-		case 0x40000024: s.timerlatch = (s.timerlatch & 0xff00ff) | (v << 8); break;
-		case 0x40000028: s.timerlatch = (s.timerlatch & 0x00ffff) | (v << 16); break;
-		case 0x4000002c: s.timer = s.timerlatch; break;
+		case 0x40000000: s.b.armtocpu_ready = 1; s.b.armtocpu_data = (uint8) v; break;
+		case 0x40000010: s.b.signal = 1; break;
+		case 0x40000020: s.b.timerlatch = (s.b.timerlatch & 0xffff00) | v; break;
+		case 0x40000024: s.b.timerlatch = (s.b.timerlatch & 0xff00ff) | (v << 8); break;
+		case 0x40000028: s.b.timerlatch = (s.b.timerlatch & 0x00ffff) | (v << 16); break;
+		case 0x4000002c: s.b.timer = s.b.timerlatch; break;
 	}
 }
 
@@ -658,6 +716,10 @@ static void Step (void)
 	s.last_fetch = op;
 	s.r[15] = cur + 4;
 	s.clocks++;
+#ifdef ST018_LAB
+	if (S9xST018LabCover && (cur >> 29) == 0)
+		S9xST018LabCover[(cur >> 2) & (ST018_PROGRAM_SIZE / 4 - 1)]++;
+#endif
 
 	if (!Cond(op >> 28))
 		return;
@@ -715,9 +777,17 @@ static void Step (void)
 // Up to `target`: held in reset, the reset delay, then instructions.
 static void Run (void)
 {
+	if (native)
+	{
+		const uint64	next = S9xST018NativeRun(s.target);
+		const uint64	master = Settings.PAL ? 21281370 : 21477273;
+		// the first master clock its next access is due by
+		native_next = (next == ~(uint64) 0) ? next : (next <= s.target) ? 0 : s.synced + ((next - s.target) * master - s.rem + ST018_HZ - 1) / ST018_HZ;
+		return;
+	}
 	while (s.clocks < s.target)
 	{
-		if (s.reset)
+		if (s.b.reset)
 		{
 			s.clocks = s.target;
 			break;
@@ -733,7 +803,7 @@ static void Run (void)
 			}
 			s.clocks += s.boot_wait;
 			s.boot_wait = 0;
-			s.ready = 1;
+			s.b.ready = 1;
 			continue;
 		}
 		Step();
@@ -744,6 +814,10 @@ static void SyncTo (int32 cycles)
 {
 	const uint64	t = s.line_base + (uint64) (int64) cycles;
 	if (t <= s.synced)
+		return;
+	// The native chip can't change what the CPU sees before its next access (a waiting one still syncs
+	// about once a second, so the clock sums below can't overflow).
+	if (t < native_next && t - s.synced < ((uint64) 1 << 24))
 		return;
 
 	const uint64	master = Settings.PAL ? 21281370 : 21477273;
@@ -763,27 +837,19 @@ void S9xST018EndScanline (void)
 }
 
 // $3800 the ARM's byte, $3802 clears its signal, $3804 the status; A0 doesn't decode.
-uint8 S9xST018Read (uint32 address, int32 speed)
+static uint8 BridgeRead (uint32 a)
 {
-	if ((address & 0xff00) != 0x3800)
-		return (OpenBus);
-
-	const uint32	a = address & 0xff06;
-	if (speed < 0)
-		return ((a == 0x3800) ? (s.armtocpu_ready ? s.armtocpu_data : 0) : (a == 0x3804) ? Status() : 0);
-	SyncTo(CPU.Cycles + speed - 1);
-
 	switch (a)
 	{
 		case 0x3800:
-			if (s.armtocpu_ready)
+			if (s.b.armtocpu_ready)
 			{
-				s.armtocpu_ready = 0;
-				return (s.armtocpu_data);
+				s.b.armtocpu_ready = 0;
+				return (s.b.armtocpu_data);
 			}
 			return (0);
 		case 0x3802:
-			s.signal = 0;
+			s.b.signal = 0;
 			return (0);
 		case 0x3804:
 			return (Status());
@@ -792,25 +858,56 @@ uint8 S9xST018Read (uint32 address, int32 speed)
 }
 
 // $3802 a byte for the ARM, $3804 bit 0 holds it in reset (power-on on the rising edge).
+static void BridgeWrite (uint32 a, uint8 byte)
+{
+	switch (a)
+	{
+		case 0x3802:
+			s.b.cputoarm_ready = 1;
+			s.b.cputoarm_data = byte;
+			break;
+		case 0x3804:
+			byte &= 1;
+			if (!s.b.reset && byte)
+			{
+				if (native)
+					FromNative();	// its clock goes on
+				PowerArm();
+			}
+			s.b.reset = byte;
+			break;
+	}
+}
+
+uint8 S9xST018Read (uint32 address, int32 speed)
+{
+	if ((address & 0xff00) != 0x3800)
+		return (OpenBus);
+
+	const uint32	a = address & 0xff06;
+	if (speed < 0)
+		return ((a == 0x3800) ? (s.b.armtocpu_ready ? s.b.armtocpu_data : 0) : (a == 0x3804) ? Status() : 0);
+	// reading the ARM's byte or the signal changes what it sees: a waiting native chip runs up to it first
+	const bool	changes = a != 0x3804;
+	if (changes)
+		native_next = 0;
+	SyncTo(CPU.Cycles + speed - 1);
+	const uint8	v = BridgeRead(a);
+	if (changes)
+		native_next = 0;
+	LAB_BUS('r', a, v);
+	return (v);
+}
+
 void S9xST018Write (uint32 address, uint8 byte, int32 speed)
 {
 	if (speed < 0 || (address & 0xff00) != 0x3800)
 		return;
+	native_next = 0;
 	SyncTo(CPU.Cycles + speed);
-
-	switch (address & 0xff06)
-	{
-		case 0x3802:
-			s.cputoarm_ready = 1;
-			s.cputoarm_data = byte;
-			break;
-		case 0x3804:
-			byte &= 1;
-			if (!s.reset && byte)
-				PowerArm();
-			s.reset = byte;
-			break;
-	}
+	LAB_BUS('w', address & 0xff06, byte);
+	BridgeWrite(address & 0xff06, byte);
+	native_next = 0;
 }
 
 uint32 S9xST018StateSize (void)
@@ -820,6 +917,8 @@ uint32 S9xST018StateSize (void)
 
 void S9xST018StateSave (uint8 *buf)
 {
+	if (native)
+		FromNative();
 	memcpy(buf, &s, sizeof(s));
 	memcpy(buf + sizeof(s), ram, sizeof(ram));
 }
@@ -830,6 +929,80 @@ bool8 S9xST018StateLoad (const uint8 *buf, uint32 size)
 		return (FALSE);
 	memcpy(&s, buf, sizeof(s));
 	memcpy(ram, buf + sizeof(s), sizeof(ram));
+	if (native)
+		ToNative();
 	active = TRUE;
 	return (TRUE);
 }
+
+#ifdef ST018_LAB
+// The lab drives the chip by its own clock instead of the CPU's: up to `at`, then the CPU's access there.
+void S9xST018LabRunTo (uint64 at)
+{
+	if (at > s.target)
+		s.target = at;
+	Run();
+}
+
+uint8 S9xST018LabRead (uint32 address)
+{
+	return (BridgeRead(address & 0xff06));
+}
+
+void S9xST018LabWrite (uint32 address, uint8 byte)
+{
+	BridgeWrite(address & 0xff06, byte);
+}
+
+uint64 S9xST018LabClocks (void)
+{
+	return (s.clocks);
+}
+
+uint32 S9xST018LabPC (void)
+{
+	return (s.r[15]);
+}
+
+// the ARM's RAM (16 KB), registers and bridge, for the lab to compare
+const uint8 *S9xST018LabRam (void)
+{
+	return (ram);
+}
+
+uint8 *S9xST018LabRamW (void)
+{
+	return (ram);
+}
+
+void S9xST018LabSetState (const S9xST018Arm *arm, const S9xST018Bus *b)
+{
+	memcpy(s.r, arm->r, sizeof(s.r));
+	memcpy(s.bank_r8, arm->bank_r8, sizeof(s.bank_r8));
+	memcpy(s.bank_sp, arm->bank_sp, sizeof(s.bank_sp));
+	memcpy(s.bank_lr, arm->bank_lr, sizeof(s.bank_lr));
+	memcpy(s.spsr, arm->spsr, sizeof(s.spsr));
+	s.cpsr = arm->cpsr;
+	s.last_fetch = arm->last_fetch;
+	s.boot_wait = arm->boot_wait;
+	s.clocks = s.target = arm->clocks;
+	s.b = *b;
+}
+
+void S9xST018LabState (S9xST018Arm *arm, S9xST018Bus *b)
+{
+	if (native)
+		FromNative();
+	memcpy(arm->r, s.r, sizeof(s.r));
+	memcpy(arm->bank_r8, s.bank_r8, sizeof(s.bank_r8));
+	memcpy(arm->bank_sp, s.bank_sp, sizeof(s.bank_sp));
+	memcpy(arm->bank_lr, s.bank_lr, sizeof(s.bank_lr));
+	memcpy(arm->spsr, s.spsr, sizeof(s.spsr));
+	arm->cpsr = s.cpsr;
+	arm->last_fetch = s.last_fetch;
+	arm->boot_wait = s.boot_wait;
+	arm->pad = 0;
+	arm->clocks = s.clocks;
+	*b = s.b;
+}
+#endif

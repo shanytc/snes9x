@@ -314,6 +314,9 @@
     <ClCompile Include="..\st011n.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
+    <ClCompile Include="..\st018n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
     <ClCompile Include="..\st018.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>

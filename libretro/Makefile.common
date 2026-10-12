@@ -50,6 +50,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/upd96050.cpp \
 				 $(CORE_DIR)/st010n.cpp \
 				 $(CORE_DIR)/st011n.cpp \
+				 $(CORE_DIR)/st018n.cpp \
 				 $(CORE_DIR)/st018.cpp \
 				 $(CORE_DIR)/dsp1n.cpp \
 				 $(CORE_DIR)/dsp2n.cpp \

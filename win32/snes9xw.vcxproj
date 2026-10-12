@@ -596,6 +596,7 @@
     <ClCompile Include="..\upd96050.cpp" />
     <ClCompile Include="..\st010n.cpp" />
     <ClCompile Include="..\st011n.cpp" />
+    <ClCompile Include="..\st018n.cpp" />
     <ClCompile Include="..\st018.cpp" />
     <ClCompile Include="..\dsp1n.cpp" />
     <ClCompile Include="..\dsp2n.cpp" />

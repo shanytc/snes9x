@@ -192,7 +192,7 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "CX4",          "Cx4",                            kNamesCX4,       HG51B_DATAROM_SIZE,    "Optional, built-in native chip",         kInfoCX4,       kNoIntroCX4 },
 	{ "ST010",        "ST010",                          kNamesST010,     UPD96050_FIRMWARE_SIZE, "Optional, built-in native chip", kInfoST010,     kNoIntroST010 },
 	{ "ST011",        "ST011",                          kNamesST011,     UPD96050_FIRMWARE_SIZE, "Optional, built-in native chip", kInfoST011,     kNoIntroST011 },
-	{ "ST018",        "ST018",                          kNamesST018,     ST018_FIRMWARE_SIZE,   "Needed: Legacy (HLE) has no shogi AI",   kInfoST018,     kNoIntroST018 },
+	{ "ST018",        "ST018",                          kNamesST018,     ST018_FIRMWARE_SIZE,   "Optional, built-in native chip", kInfoST018,     kNoIntroST018 },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -243,7 +243,7 @@ bool8 S9xBiosSlotHasChipMode (int slot)
 
 bool8 S9xBiosSlotHasNative (int slot)
 {
-	return (slot >= S9X_BIOS_DSP1 && slot <= S9X_BIOS_CX4) || slot == S9X_BIOS_ST010 || slot == S9X_BIOS_ST011;
+	return (slot >= S9X_BIOS_DSP1 && slot <= S9X_BIOS_CX4) || slot == S9X_BIOS_ST010 || slot == S9X_BIOS_ST011 || slot == S9X_BIOS_ST018;
 }
 
 int S9xGetChipMode (int slot)
@@ -345,13 +345,14 @@ static const S9xBiosBenchScene kBench[] =
 	{ S9X_BIOS_CX4,   "Mega Man X2 wireframe",  { 0.556f, 0.524f, 1.081f }, {  28,  99, 1374 } },
 	{ S9X_BIOS_CX4,   "Mega Man X3 attract",    { 0.655f, 0.675f, 0.702f }, {   7,  55,  455 } },
 	{ S9X_BIOS_CX4,   "Mega Man X3 gameplay",   { 0.884f, 0.877f, 0.963f }, {  37, 173, 2166 } },
-	// tscseta.sh: the ST010's command wait polls RAM, so its firmware never idles; ST011's think scene searches
-	{ S9X_BIOS_ST010, "F1 ROC II race",         { 0.775f, 0.802f, 2.098f }, {  48, 390, 32044 } },
-	{ S9X_BIOS_ST010, "Exhaust Heat II race",   { 0.770f, 0.801f, 2.095f }, {  47, 388, 31979 } },
-	{ S9X_BIOS_ST011, "Morita Shougi attract",  { 0.601f, 0.604f, 0.607f }, {   0,  10,    22 } },
-	{ S9X_BIOS_ST011, "Morita Shougi game",     { 0.614f, 0.614f, 0.616f }, {   0,   9,    14 } },
-	{ S9X_BIOS_ST011, "Morita Shougi think",    { 0.594f, 0.614f, 0.626f }, {   0,  32,   375 } },
-	{ S9X_BIOS_ST018, "Morita Shougi 2 attract",{ 0.595f, -1.0f,  1.956f }, {   9,  -1, 27765 } },
+	// tscseta.sh: the ST010's command wait polls RAM and the ST018's ARM its bridge, so their firmware never idles
+	{ S9X_BIOS_ST010, "F1 ROC II race",         { 0.769f, 0.799f, 2.175f }, {  49, 382, 33909 } },
+	{ S9X_BIOS_ST010, "Exhaust Heat II race",   { 0.767f, 0.794f, 2.167f }, {  49, 378, 33867 } },
+	{ S9X_BIOS_ST011, "Morita Shougi attract",  { 0.597f, 0.598f, 0.599f }, {   0,  10,    21 } },
+	{ S9X_BIOS_ST011, "Morita Shougi game",     { 0.604f, 0.608f, 0.610f }, {   0,   8,    13 } },
+	{ S9X_BIOS_ST011, "Morita Shougi think",    { 0.593f, 0.609f, 0.623f }, {   0,  31,   389 } },
+	{ S9X_BIOS_ST018, "Morita Shougi 2 attract",{ 0.589f, 0.579f, 2.018f }, {   9,  45, 29177 } },
+	{ S9X_BIOS_ST018, "Morita Shougi 2 think",  { 0.593f, 0.633f, 2.071f }, {  26, 210, 77652 } },
 };
 
 const S9xBiosBenchScene *S9xGetBiosBench (int *count)

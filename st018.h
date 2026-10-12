@@ -39,4 +39,32 @@ uint32	S9xST018StateSize (void);
 void	S9xST018StateSave (uint8 *buf);
 bool8	S9xST018StateLoad (const uint8 *buf, uint32 size);	// resumes the chip
 
+// The native chip (st018n.cpp): the program translated to C, the ROMs built in.
+bool8	S9xST018LoadNative (void);
+bool8	S9xST018IsNative (void);
+
+// What the bridge holds, shared by the CPU's side and the ARM's.
+struct S9xST018Bus
+{
+	uint8	cputoarm_ready, cputoarm_data, armtocpu_ready, armtocpu_data;
+	uint8	reset, ready, signal, pad;
+	uint32	timer, timerlatch;
+};
+
+// The ARM's registers and clock, as the firmware core saves them.
+struct S9xST018Arm
+{
+	uint32	r[16];				// r[15]: the next instruction's address
+	uint32	bank_r8[2][5], bank_sp[6], bank_lr[6], spsr[6];
+	uint32	cpsr, last_fetch, boot_wait, pad;
+	uint64	clocks;
+};
+
+void	S9xST018NativeAttach (S9xST018Bus *bus, uint8 *ram);
+void	S9xST018NativeSetArm (const S9xST018Arm *arm);
+void	S9xST018NativeGetArm (S9xST018Arm *arm);
+// Runs the ARM so every bridge access before clock `target` has happened. Returns the clock of its next
+// access the CPU can see (it may have run ahead to it), or ~0 if only the CPU's next bridge access moves it.
+uint64	S9xST018NativeRun (uint64 target);
+
 #endif

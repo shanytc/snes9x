@@ -395,6 +395,7 @@ list(APPEND SOURCES
     ../upd96050.cpp
     ../st010n.cpp
     ../st011n.cpp
+    ../st018n.cpp
     ../st018.cpp
     ../dsp1n.cpp
     ../dsp2n.cpp

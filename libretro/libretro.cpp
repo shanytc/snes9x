@@ -1518,7 +1518,7 @@ static void notify_enhanced_chip(void)
     if (bios_notice_shown)
         return;
     const int   chip = S9xEnhancedChip();
-    const char *how = chip == S9X_ENHANCED_DSP_FIRMWARE ? "Chip Enhanced: running the chip from its firmware"
+    const char *how = (chip == S9X_ENHANCED_DSP_FIRMWARE || chip == S9X_ENHANCED_SETA_FIRMWARE) ? "Chip Enhanced: running the chip from its firmware"
                     : chip == S9X_ENHANCED_CX4_FIRMWARE ? "Chip Enhanced: running the chip from its data ROM"
                                                         : "Enhanced: running the native chip";
     if (chip == S9X_ENHANCED_NONE)

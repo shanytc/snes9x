@@ -92,7 +92,7 @@ static inline uint8 S9xGetByteFree(uint32 Address)
         return (byte);
 
     case CMemory::MAP_SETA_RISC:
-        byte = S9xGetST018(Address);
+        byte = S9xGetSetaRISC(Address);
         return (byte);
 
     case CMemory::MAP_BSX:
@@ -194,7 +194,7 @@ static inline void S9xSetByteFree(uint8 Byte, uint32 Address)
         return;
 
     case CMemory::MAP_SETA_RISC:
-        S9xSetST018(Byte, Address);
+        S9xSetSetaRISC(Byte, Address);
         return;
 
     case CMemory::MAP_BSX:

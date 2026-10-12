@@ -22,6 +22,8 @@ int32	S9xRefreshClocks = 0;
 #include "rp2040cart.h"
 #include "upd7725.h"
 #include "hg51b.h"
+#include "upd96050.h"
+#include "st018.h"
 #include "nss.h"
 #include "voicekun.h"
 #ifdef DEBUGGER
@@ -702,6 +704,10 @@ void S9xDoHEventProcessing (void)
 				S9xUPD7725EndScanline();
 			if (S9xHG51BActive())
 				S9xHG51BEndScanline();
+			if (S9xUPD96050Active())
+				S9xUPD96050EndScanline();
+			if (S9xST018Active())
+				S9xST018EndScanline();
 
 			S9xAPUEndScanline();
 			CPU.Cycles -= Timings.H_Max;

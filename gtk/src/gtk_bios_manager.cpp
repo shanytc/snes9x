@@ -106,6 +106,8 @@ int bench_height(int th, int scenes)
 std::string bench_label(const S9xBiosBenchScene &b, int mode, bool chip)
 {
     char buf[64];
+    if (b.ms[mode] < 0)
+        return _("not available yet");
     if (chip)
         snprintf(buf, sizeof buf, b.ticks[mode] ? "%dM" : "<1M", b.ticks[mode]);
     else if (mode == 0)
@@ -227,10 +229,14 @@ void draw_bench(Gtk::DrawingArea &area, const Cairo::RefPtr<Cairo::Context> &cr,
         text(pad, y + (3 * bar + 2 * gap - th) / 2, b.scene);
         for (int m = 0; m < 3; m++)
         {
-            const int right = std::max(x_of(chip ? (double)b.ticks[m] : (double)b.ms[m]), x0 + 2);
-            cr->set_source_rgb(kModes[m].r, kModes[m].g, kModes[m].b);
-            cr->rectangle(x0 + 1, y, right - x0 - 1, bar);
-            cr->fill();
+            // a mode the chip doesn't have yet: no bar, just its label
+            const int right = b.ms[m] < 0 ? x0 + 1 : std::max(x_of(chip ? (double)b.ticks[m] : (double)b.ms[m]), x0 + 2);
+            if (b.ms[m] >= 0)
+            {
+                cr->set_source_rgb(kModes[m].r, kModes[m].g, kModes[m].b);
+                cr->rectangle(x0 + 1, y, right - x0 - 1, bar);
+                cr->fill();
+            }
             set(ink);
             text(right + th / 3, y + (bar - th) / 2, bench_label(b, m, chip));
             y += bar + gap;
@@ -345,7 +351,9 @@ void refresh_card(int slot, Card &c)
     std::string says;
     if (mode >= 0 && (!file_on || text.empty()))
     {
-        says = (mode == S9X_CHIP_HLE)    ? _("Fastest (less accurate)")
+        const char *own = S9xBiosChipModeNote(slot, mode);
+        says = own                       ? _(own)
+             : (mode == S9X_CHIP_HLE)    ? _("Fastest (less accurate)")
              : (mode == S9X_CHIP_NATIVE) ? _("Fast (chip accurate)")
                                          : _("Nothing selected: Slow (chip accurate)");
         look = file_on ? Bad : Plain;
@@ -553,7 +561,8 @@ void S9xGtkBiosManagerDialog(Gtk::Window *parent)
             {
                 c.mode = Gtk::manage(new Gtk::ComboBoxText());
                 for (const auto &m : kModes)
-                    c.mode->append(std::to_string(m.mode), _(m.name));
+                    if (m.mode != S9X_CHIP_NATIVE || S9xBiosSlotHasNative(slot))   // a chip without a native version yet doesn't offer it
+                        c.mode->append(std::to_string(m.mode), _(m.name));
                 c.mode->set_active_id(std::to_string(S9xChipModeInEffect(slot)));
                 c.mode->set_tooltip_text(_("Legacy (HLE): the old high-level code, some games glitch\n"
                                            "Native (LLE): the chip itself, exact, no file needed\n"

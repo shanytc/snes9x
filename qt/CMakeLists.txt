@@ -70,6 +70,10 @@ set(SNES9X_CORE_SOURCES
     ../dsp3.cpp
     ../dsp4.cpp
     ../upd7725.cpp
+    ../upd96050.cpp
+    ../st010n.cpp
+    ../st011n.cpp
+    ../st018.cpp
     ../dsp1n.cpp
     ../dsp2n.cpp
     ../dsp3n.cpp

@@ -693,13 +693,13 @@
 #define IDD_BIOSMANAGER                 191
 /* One block of 20 per control kind, so the BIOS Manager can grow to twenty
    rows before the ranges collide. */
-#define IDC_BIOSMGR_LABEL0              3500
-#define IDC_BIOSMGR_EDIT0               3520
-#define IDC_BIOSMGR_BROWSE0             3540
-#define IDC_BIOSMGR_CLEAR0              3560
-#define IDC_BIOSMGR_STATUS0             3580
+#define IDC_BIOSMGR_LABEL0              3800
+#define IDC_BIOSMGR_EDIT0               3832
+#define IDC_BIOSMGR_BROWSE0             3864
+#define IDC_BIOSMGR_CLEAR0              3896
+#define IDC_BIOSMGR_STATUS0             3928
 #define IDC_BIOSMGR_INTRO               3600
-#define IDC_BIOSMGR_INFO0               3620
+#define IDC_BIOSMGR_INFO0               3960
 #define IDD_BIOSINFO                    193
 #define IDD_BIOSBENCH                   194
 #define IDC_BIOSINFO_TEXT               3640
@@ -712,8 +712,8 @@
 #define IDC_BIOSBENCH_CHIP              3647
 #define IDC_BIOSBENCH_NOTE              3648
 #define IDC_BIOSMGR_CARDS               3649
-#define IDC_BIOSMGR_MODE0               3660
-#define IDC_BIOSMGR_BENCH0              3680
+#define IDC_BIOSMGR_MODE0               3992
+#define IDC_BIOSMGR_BENCH0              4024
 
 #define ID_FILE_LOGO_POPUP              44360
 #define ID_FILE_LOGO_1                  44361
@@ -1009,7 +1009,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        201
 #define _APS_NEXT_COMMAND_VALUE         44451
-#define _APS_NEXT_CONTROL_VALUE         3703
+#define _APS_NEXT_CONTROL_VALUE         4056
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

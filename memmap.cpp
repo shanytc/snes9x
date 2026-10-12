@@ -35,6 +35,8 @@
 #include "biosmanager.h"
 #include "upd7725.h"
 #include "hg51b.h"
+#include "upd96050.h"
+#include "st018.h"
 #include "fxemu.h"
 #include "sdd1.h"
 #include "srtc.h"
@@ -3479,6 +3481,8 @@ bool8 CMemory::LoadSFCBox (int32 ROMfillSize)
 	// in/out by the mapping registers.
 	S9xUPD7725Unload();
 	S9xHG51BUnload();
+	S9xUPD96050Unload();
+	S9xST018Unload();
 	if ((SFCBox.SlotChipset[0] | SFCBox.SlotChipset[1]) & 0x02)
 	{
 		Settings.DSP = 1;
@@ -3883,6 +3887,67 @@ static void ChipFirmwareNotice (int slot)
 						  " firmware can't be used: running the native chip. " + where).c_str(), FALSE);
 }
 
+static bool AcceptSetaFirmware (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	return (full_size == UPD96050_FIRMWARE_SIZE && S9xUPD96050IsFirmware(data, size));
+}
+
+// The ST010/ST011 as the slot's mode picks it: its firmware, or the native chip; otherwise, or
+// if neither loads, the HLE runs. A firmware that won't load is said.
+static void LoadSetaFirmware (int slot, int chip)
+{
+	const int	mode = S9xChipModeInEffect(slot);
+	if (mode == S9X_CHIP_HLE)
+		return;
+
+	if (mode == S9X_CHIP_FIRMWARE)
+	{
+		std::vector<uint8>	image;
+		if (S9xBiosPathUsable(slot) &&
+			S9xReadBiosImage(S9xResolveBiosPath(slot).c_str(), image, UPD96050_FIRMWARE_SIZE, AcceptSetaFirmware) &&
+			S9xUPD96050Load(image.data(), (uint32) image.size(), chip))
+			return;
+
+#ifdef __LIBRETRO__
+		const std::string	where = std::string("Put ") + S9xGetBiosSlotInfo(slot)->names[0] + " in the system folder.";
+#else
+		const std::string	where = "Check it in File -> BIOS Manager.";
+#endif
+		if (!S9xBiosNoticePending())
+			S9xSetBiosNotice((std::string(S9xGetBiosSlotInfo(slot)->label) + " firmware can't be used: running " +
+							  (S9xBiosSlotHasNative(slot) ? "the native chip. " : "Legacy (HLE). ") + where).c_str(), FALSE);
+	}
+	S9xUPD96050LoadNative(chip);
+}
+
+static bool AcceptST018Firmware (const uint8 *data, uint32 size, uint32 full_size, void *ctx)
+{
+	(void) ctx;
+	return (full_size == ST018_FIRMWARE_SIZE && S9xST018IsFirmware(data, size));
+}
+
+// The ST018 from its firmware when the slot's mode comes to that, else the HLE, as for the ST010/ST011.
+static void LoadST018Firmware (void)
+{
+	if (S9xChipModeInEffect(S9X_BIOS_ST018) != S9X_CHIP_FIRMWARE)
+		return;
+
+	std::vector<uint8>	image;
+	if (S9xBiosPathUsable(S9X_BIOS_ST018) &&
+		S9xReadBiosImage(S9xResolveBiosPath(S9X_BIOS_ST018).c_str(), image, ST018_FIRMWARE_SIZE, AcceptST018Firmware) &&
+		S9xST018Load(image.data(), (uint32) image.size()))
+		return;
+
+#ifdef __LIBRETRO__
+	const std::string	where = std::string("Put ") + S9xGetBiosSlotInfo(S9X_BIOS_ST018)->names[0] + " in the system folder.";
+#else
+	const std::string	where = "Check it in File -> BIOS Manager.";
+#endif
+	if (!S9xBiosNoticePending())
+		S9xSetBiosNotice(("ST018 firmware can't be used: running Legacy (HLE). " + where).c_str(), FALSE);
+}
+
 // The chip as the slot's mode picks it: FALSE leaves the cart to the HLE.
 static bool8 LoadDSPFirmware (int slot, int chip)
 {
@@ -3999,6 +4064,8 @@ void CMemory::InitROM (void)
 
 	S9xUPD7725Unload();
 	S9xHG51BUnload();
+	S9xUPD96050Unload();
+	S9xST018Unload();
 
 	// DSP1/2/3/4
 	if (ROMType == 0x03)
@@ -4140,6 +4207,7 @@ void CMemory::InitROM (void)
 			GetSETA = NULL;
 			SRAMSize = 2;
 			SNESGameFixes.SRAMInitialValue = 0x00;
+			LoadST018Firmware();
 			break;
 
 		// ST010/011
@@ -4159,6 +4227,11 @@ void CMemory::InitROM (void)
 
 			SRAMSize = 2;
 			SNESGameFixes.SRAMInitialValue = 0x00;
+			// the chip's data RAM is this SRAM
+			if (Settings.SETA == ST_011)
+				LoadSetaFirmware(S9X_BIOS_ST011, UPD96050_ST011);
+			else
+				LoadSetaFirmware(S9X_BIOS_ST010, UPD96050_ST010);
 			break;
 
 		// C4
@@ -5870,6 +5943,10 @@ int S9xEnhancedChip (void)
 {
 	if (S9xHG51BActive())
 		return (S9xHG51BIsNative() ? S9X_ENHANCED_CX4 : S9X_ENHANCED_CX4_FIRMWARE);
+	if (S9xUPD96050Active())
+		return (S9xUPD96050IsNative() ? S9X_ENHANCED_SETA : S9X_ENHANCED_SETA_FIRMWARE);
+	if (S9xST018Active())
+		return (S9X_ENHANCED_SETA_FIRMWARE);
 	if (!S9xUPD7725Active())
 		return (S9X_ENHANCED_NONE);
 
@@ -5906,6 +5983,11 @@ const char *S9xEnhancedChipName (void)
 		case S9X_ENHANCED_CX4:
 		case S9X_ENHANCED_CX4_FIRMWARE:
 			return ("Cx4");
+		case S9X_ENHANCED_SETA:
+		case S9X_ENHANCED_SETA_FIRMWARE:
+			if (S9xST018Active())
+				return ("ST018");
+			return ((S9xUPD96050Chip() == UPD96050_ST011) ? "ST011" : "ST010");
 		default:
 			return ("");
 	}
@@ -5917,7 +5999,7 @@ const char *S9xEnhancedChipTag (void)
 	const int	chip = S9xEnhancedChip();
 	if (chip == S9X_ENHANCED_NONE)
 		return ("");
-	const bool	firmware = chip == S9X_ENHANCED_DSP_FIRMWARE || chip == S9X_ENHANCED_CX4_FIRMWARE;
+	const bool	firmware = chip == S9X_ENHANCED_DSP_FIRMWARE || chip == S9X_ENHANCED_CX4_FIRMWARE || chip == S9X_ENHANCED_SETA_FIRMWARE;
 	snprintf(tag, sizeof(tag), " (%s %sEnhanced)", S9xEnhancedChipName(), firmware ? "Chip " : "");
 	return (tag);
 }

@@ -305,6 +305,18 @@
     <ClCompile Include="..\upd7725.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
+    <ClCompile Include="..\upd96050.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\st010n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\st011n.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\st018.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
     <ClCompile Include="..\dsp1n.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>

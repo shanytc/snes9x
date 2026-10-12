@@ -593,6 +593,10 @@
     <ClCompile Include="..\dsp3.cpp" />
     <ClCompile Include="..\dsp4.cpp" />
     <ClCompile Include="..\upd7725.cpp" />
+    <ClCompile Include="..\upd96050.cpp" />
+    <ClCompile Include="..\st010n.cpp" />
+    <ClCompile Include="..\st011n.cpp" />
+    <ClCompile Include="..\st018.cpp" />
     <ClCompile Include="..\dsp1n.cpp" />
     <ClCompile Include="..\dsp2n.cpp" />
     <ClCompile Include="..\dsp3n.cpp" />

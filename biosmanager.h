@@ -35,6 +35,9 @@ enum S9xBiosSlot
 	S9X_BIOS_DSP3,          // dsp3.bin     — DSP-3 firmware
 	S9X_BIOS_DSP4,          // dsp4.bin     — DSP-4 firmware
 	S9X_BIOS_CX4,           // cx4.bin      — Cx4 data ROM (Mega Man X2 and X3)
+	S9X_BIOS_ST010,         // st010.rom    — Seta ST010 firmware (F1 ROC II, Exhaust Heat II)
+	S9X_BIOS_ST011,         // st011.rom    — Seta ST011 firmware (Hayazashi Nidan Morita Shougi)
+	S9X_BIOS_ST018,         // st018.rom    — Seta ST018 firmware (Hayazashi Nidan Morita Shougi 2)
 	S9X_NUM_BIOS_SLOTS
 };
 
@@ -68,7 +71,8 @@ void        S9xSetBiosPath (int slot, const char *path);
 char *S9xGetBiosPathBuffer (int slot);
 
 // How a chip with firmware in its slot runs: the old high-level emulation, the native chip (exact,
-// no file), or the slot's firmware. AUTO until one is picked, which is native.
+// no file), or the slot's firmware. AUTO until one is picked: native, or for a chip without one
+// the firmware when the slot has a usable file, else the HLE.
 enum S9xChipMode
 {
 	S9X_CHIP_AUTO = 0,
@@ -77,12 +81,16 @@ enum S9xChipMode
 	S9X_CHIP_FIRMWARE
 };
 
-// Whether the slot holds a chip's firmware, so has a mode (DSP-1 to DSP-4, Cx4).
+// Whether the slot holds a chip's firmware, so has a mode (DSP-1 to DSP-4, Cx4, ST010/011/018).
 bool8   S9xBiosSlotHasChipMode (int slot);
+// Whether the chip has a native version; without one, Native is not offered.
+bool8   S9xBiosSlotHasNative (int slot);
 int     S9xGetChipMode (int slot);
 void    S9xSetChipMode (int slot, int mode);
 // The mode a load uses: the one picked, or what AUTO comes to.
 int     S9xChipModeInEffect (int slot);
+// A chip row's status for a mode when the slot needs its own words for it; NULL for the usual note.
+const char *S9xBiosChipModeNote (int slot, int mode);
 // Raw storage for config backends (win32 wconfig): a uint32 per slot.
 uint32 *S9xGetChipModeBuffer (int slot);
 
@@ -93,14 +101,15 @@ enum
 {
 	S9X_BIOS_NUM_FAMILIES = 4,
 	S9X_BIOS_GROUP_DSP    = 0,
-	S9X_BIOS_NUM_GROUPS   = 1,
+	S9X_BIOS_GROUP_SETA   = 1,
+	S9X_BIOS_NUM_GROUPS   = 2,
 	S9X_BIOS_UNDER_GROUP  = 0x100	// a parent of S9X_BIOS_UNDER_GROUP + group is that group
 };
 
 struct S9xBiosFamily
 {
 	const char	*name;
-	int			members[8];	// its slots in sidebar order, ended by -1
+	int			members[12];	// its slots in sidebar order, ended by -1
 };
 
 struct S9xBiosNesting
@@ -116,7 +125,7 @@ S9xBiosNesting		S9xGetBiosNesting (int slot);
 
 // The speed chart's figures, per measured scene of a chip's games and per mode in the order
 // Legacy (HLE), Native (LLE), Firmware: milliseconds per frame, and millions of host clock
-// ticks spent inside the chip. Scripted play on one PC and one build.
+// ticks spent inside the chip. Scripted play on one PC and one build. Below 0: the chip has no such mode.
 struct S9xBiosBenchScene
 {
 	int			slot;

@@ -217,8 +217,10 @@ class BenchChart : public QWidget
                        QString::fromUtf8(b.scene));
             for (int m = 0; m < 3; m++)
             {
-                const int right = std::max(x_of(chip ? (double) b.ticks[m] : (double) b.ms[m]), x0 + 2);
-                p.fillRect(QRect(QPoint(x0 + 1, y), QPoint(right - 1, y + bar - 1)), kModes[m].ink);
+                // a mode the chip doesn't have yet: no bar, just its label
+                const int right = b.ms[m] < 0 ? x0 + 1 : std::max(x_of(chip ? (double) b.ticks[m] : (double) b.ms[m]), x0 + 2);
+                if (b.ms[m] >= 0)
+                    p.fillRect(QRect(QPoint(x0 + 1, y), QPoint(right - 1, y + bar - 1)), kModes[m].ink);
                 p.drawText(QRect(right + th / 3, y, labelw + th, bar), Qt::AlignLeft | Qt::AlignVCenter, label(b, m));
                 y += bar + gap;
             }
@@ -238,6 +240,8 @@ class BenchChart : public QWidget
     // A bar's label: frame time with its change against the HLE, or the time in the chip.
     QString label(const S9xBiosBenchScene &b, int mode) const
     {
+        if (b.ms[mode] < 0)
+            return tr("not available yet");
         if (chip)
             return b.ticks[mode] ? QString("%1M").arg(b.ticks[mode]) : QStringLiteral("<1M");
         QString text = QString::asprintf("%.3f ms", b.ms[mode]);
@@ -449,7 +453,8 @@ void BiosManagerDialog::addCard(int slot, QVBoxLayout *list)
     {
         c.mode = new QComboBox();
         for (const auto &m : kModes)
-            c.mode->addItem(tr(m.name), m.mode);
+            if (m.mode != S9X_CHIP_NATIVE || S9xBiosSlotHasNative(slot))   // a chip without a native version yet doesn't offer it
+                c.mode->addItem(tr(m.name), m.mode);
         c.mode->setCurrentIndex(c.mode->findData(S9xChipModeInEffect(slot)));
         c.mode->setToolTip(tr("Legacy (HLE): the old high-level code, some games glitch\n"
                               "Native (LLE): the chip itself, exact, no file needed\n"
@@ -541,7 +546,9 @@ void BiosManagerDialog::refreshCard(int slot)
     QString says;
     if (mode >= 0 && (!file_on || text.isEmpty()))
     {
-        says = (mode == S9X_CHIP_HLE)      ? tr("Fastest (less accurate)")
+        const char *own = S9xBiosChipModeNote(slot, mode);
+        says = own                         ? tr(own)
+             : (mode == S9X_CHIP_HLE)      ? tr("Fastest (less accurate)")
              : (mode == S9X_CHIP_NATIVE)   ? tr("Fast (chip accurate)")
                                            : tr("Nothing selected: Slow (chip accurate)");
         look = file_on ? Bad : Plain;

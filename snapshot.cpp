@@ -25,6 +25,8 @@
 #include "rp2040cart.h"
 #include "upd7725.h"
 #include "hg51b.h"
+#include "upd96050.h"
+#include "st018.h"
 #include "gfx.h"
 
 #ifndef min
@@ -1403,6 +1405,26 @@ void S9xFreezeToStream (STREAM stream)
 		FreezeBlock(stream, "CPT", cpt_buf, (int) S9xCartProtStateSize());
 	}
 
+	// ST010/ST011 firmware: the chip's registers and clock (its RAM is SRAM), as "U96".
+	if (S9xUPD96050Active())
+	{
+		const uint32	u96_size = S9xUPD96050StateSize();
+		uint8			*u96_buf = new uint8[u96_size];
+		S9xUPD96050StateSave(u96_buf);
+		FreezeBlock(stream, "U96", u96_buf, (int) u96_size);
+		delete [] u96_buf;
+	}
+
+	// ST018 firmware: the ARM's registers, RAM, bridge and clock, as "ARM".
+	if (S9xST018Active())
+	{
+		const uint32	arm_size = S9xST018StateSize();
+		uint8			*arm_buf = new uint8[arm_size];
+		S9xST018StateSave(arm_buf);
+		FreezeBlock(stream, "ARM", arm_buf, (int) arm_size);
+		delete [] arm_buf;
+	}
+
 	// SGB BIOS mode: piggyback the GB/SGB blob inside the SNES snapshot.
 	// The blob is self-versioning ("SGB!" magic + version + size); we just
 	// hand the raw bytes to FreezeBlock. Without this, BIOS-mode loads
@@ -1536,6 +1558,10 @@ int S9xUnfreezeFromStream (STREAM stream)
 	int		local_hgb_size       = 0;
 	uint8	local_cpt_data[64];
 	int		local_cpt_size       = 0;
+	uint8	*local_u96_data      = NULL;
+	int		local_u96_size       = 0;
+	uint8	*local_arm_data      = NULL;
+	int		local_arm_size       = 0;
 	uint8	*local_gbe_data      = NULL;
 	int		local_gbe_size       = 0;
 	uint8	*local_screenshot    = NULL;
@@ -1803,6 +1829,40 @@ int S9xUnfreezeFromStream (STREAM stream)
 			}
 		}
 
+		// Optional ST010/ST011 firmware blob, likewise.
+		{
+			int u96_block_len = 0;
+			if (CheckBlockName(stream, "U96", u96_block_len) && u96_block_len > 0)
+			{
+				local_u96_data = new uint8[u96_block_len];
+				result = UnfreezeBlock(stream, "U96", local_u96_data, u96_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_u96_data;
+					local_u96_data = NULL;
+					break;
+				}
+				local_u96_size = u96_block_len;
+			}
+		}
+
+		// Optional ST018 firmware blob, likewise.
+		{
+			int arm_block_len = 0;
+			if (CheckBlockName(stream, "ARM", arm_block_len) && arm_block_len > 0)
+			{
+				local_arm_data = new uint8[arm_block_len];
+				result = UnfreezeBlock(stream, "ARM", local_arm_data, arm_block_len);
+				if (result != SUCCESS)
+				{
+					delete [] local_arm_data;
+					local_arm_data = NULL;
+					break;
+				}
+				local_arm_size = arm_block_len;
+			}
+		}
+
 		// Optional GB/SGB blob — present iff the snapshot was taken in
 		// BIOS mode (Settings.SGB_BIOSModeActive). Old snapshots and
 		// non-SGB SNES games omit it. CheckBlockName peeks without
@@ -1935,6 +1995,16 @@ int S9xUnfreezeFromStream (STREAM stream)
 
 		if (Settings.CartProtection && local_cpt_size)
 			S9xCartProtStateLoad(local_cpt_data, (uint32) local_cpt_size);
+
+		// The ST010/ST011 likewise; a state without it leaves the cart to the HLE.
+		if (local_u96_size && !S9xUPD96050Loaded())
+			S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state was saved with the Seta chip's firmware; set it in the BIOS Manager.");
+		if (S9xUPD96050Loaded() && (!local_u96_size || !S9xUPD96050StateLoad(local_u96_data, (uint32) local_u96_size)))
+			S9xUPD96050Suspend();
+		if (local_arm_data && !S9xST018Loaded())
+			S9xMessage(S9X_WARNING, S9X_FREEZE_FILE_INFO, "This state was saved with the ST018 firmware; set it in the BIOS Manager.");
+		if (S9xST018Loaded() && (!local_arm_data || !S9xST018StateLoad(local_arm_data, (uint32) local_arm_size)))
+			S9xST018Suspend();
 
 		if (local_fillram)
 			memcpy(Memory.FillRAM, local_fillram, 0x8000);
@@ -2242,6 +2312,8 @@ int S9xUnfreezeFromStream (STREAM stream)
 	if (local_rpc_data)			delete [] local_rpc_data;
 	if (local_upd_data)			delete [] local_upd_data;
 	if (local_hgb_data)			delete [] local_hgb_data;
+	if (local_u96_data)			delete [] local_u96_data;
+	if (local_arm_data)			delete [] local_arm_data;
 	if (local_gbe_data)			delete [] local_gbe_data;
 
 	return (result);

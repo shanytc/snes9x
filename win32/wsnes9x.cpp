@@ -10267,8 +10267,11 @@ static int BiosManagerChipMode(HWND hDlg, int slot)
 }
 
 // A chip row's status when its mode takes no file, or Firmware has none.
-static const TCHAR *BiosManagerChipNote(int mode)
+static const TCHAR *BiosManagerChipNote(int slot, int mode)
 {
+	static std::wstring own;
+	if (const char *note = S9xBiosChipModeNote(slot, mode))
+		return (own = _L(Utf8ToWide(note))).c_str();
 	switch (mode)
 	{
 	case S9X_CHIP_HLE:    return _L(TEXT("Fastest (less accurate)"));
@@ -10291,7 +10294,7 @@ static void BiosManagerRefreshStatus(HWND hDlg, int slot)
 	if (mode >= 0 && (!file_on || wtext[0] == TEXT('\0')))
 	{
 		s_bios_status[slot] = file_on ? S9X_BIOS_PATH_MISSING : S9X_BIOS_PATH_UNSET;
-		BiosManagerSetStatus(hDlg, slot, BiosManagerChipNote(mode));
+		BiosManagerSetStatus(hDlg, slot, BiosManagerChipNote(slot, mode));
 		return;
 	}
 	if (wtext[0] == TEXT('\0'))
@@ -10465,6 +10468,9 @@ static void BiosManagerAddModeBox(HWND hDlg, int slot)
 	const int pick = S9xChipModeInEffect(slot);
 	for (const auto &m : kBiosChipModes)
 	{
+		// a chip without a native version yet doesn't offer it
+		if (m.mode == S9X_CHIP_NATIVE && !S9xBiosSlotHasNative(slot))
+			continue;
 		const int i = (int) SendMessage(box, CB_ADDSTRING, 0, (LPARAM) _L(m.name));
 		SendMessage(box, CB_SETITEMDATA, i, m.mode);
 		if (m.mode == pick)
@@ -11641,6 +11647,8 @@ static int BiosBenchChartHeight(int th, int scenes)
 static std::wstring BiosBenchLabel(const S9xBiosBenchScene &b, int mode, bool chip)
 {
 	wchar_t buf[64];
+	if (b.ms[mode] < 0)
+		return _L(TEXT("not available yet"));
 	if (chip)
 		swprintf(buf, _countof(buf), b.ticks[mode] ? L"%dM" : L"<1M", b.ticks[mode]);
 	else if (mode == 0)
@@ -11759,8 +11767,10 @@ static void BiosBenchDraw(HWND hDlg, const DRAWITEMSTRUCT *dis)
 		TextOut(dc, pad, y + (3 * bar + 2 * gap - th) / 2, scene, lstrlen(scene));
 		for (int m = 0; m < 3; m++)
 		{
-			const RECT r = { x0 + 1, y, max(x_of(chip ? (double) b.ticks[m] : (double) b.ms[m]), x0 + 2), y + bar };
-			fill(r, kBiosBenchInk[m]);
+			// a mode the chip doesn't have yet: no bar, just its label
+			const RECT r = { x0 + 1, y, b.ms[m] < 0 ? x0 + 1 : max(x_of(chip ? (double) b.ticks[m] : (double) b.ms[m]), x0 + 2), y + bar };
+			if (b.ms[m] >= 0)
+				fill(r, kBiosBenchInk[m]);
 			const std::wstring label = BiosBenchLabel(b, m, chip);
 			TextOut(dc, r.right + th / 3, y + (bar - th) / 2, label.c_str(), (int) label.size());
 			y += bar + gap;

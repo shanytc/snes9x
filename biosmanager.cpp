@@ -10,6 +10,8 @@
 #include "superdisc.h"
 #include "upd7725.h"
 #include "hg51b.h"
+#include "upd96050.h"
+#include "seta.h"
 
 #ifdef UNZIP_SUPPORT
 #  ifdef SYSTEM_ZIP
@@ -64,6 +66,9 @@ static const char *const kNamesDSP2[]  = { "dsp2.bin", "dsp2.rom", "DSP2 (World)
 static const char *const kNamesDSP3[]  = { "dsp3.bin", "dsp3.rom", "DSP3 (Japan) (Enhancement Chip).bin", NULL };
 static const char *const kNamesDSP4[]  = { "dsp4.bin", "dsp4.rom", "DSP4 (World) (Enhancement Chip).bin", NULL };
 static const char *const kNamesCX4[]   = { "cx4.bin", "cx4.data.rom", "CX4 (World) (Enhancement Chip).bin", NULL };
+static const char *const kNamesST010[] = { "st010.rom", "st010.bin", "ST010 (Japan, USA) (Enhancement Chip).bin", NULL };
+static const char *const kNamesST011[] = { "st011.rom", "st011.bin", "ST011 (Japan) (Enhancement Chip).bin", NULL };
+static const char *const kNamesST018[] = { "st018.rom", "st018.bin", "ST018 (Japan) (Enhancement Chip).bin", NULL };
 
 // Behind each row's info icon: a heading, then one "name — detail — CRC32" line
 // per file (the dialogs' table); No-Intro dumps follow (S9xBiosSlotInfoText).
@@ -115,6 +120,12 @@ static const char kInfoDSP4[] = "Supports the following DSP-4 firmware dumps:\n"
                                 "dsp4.bin — 8192 bytes — E15384C0";
 static const char kInfoCX4[] = "Supports the following Cx4 data ROM dumps (Mega Man X2 and X3):\n"
                                "cx4.bin — 3072 bytes — B6E76A6A";
+static const char kInfoST010[] = "Supports the following ST010 firmware dumps (F1 ROC II, Exhaust Heat II):\n"
+                                 "st010.rom — 53248 bytes, program then data ROM — 8FC29D4C";
+static const char kInfoST011[] = "Supports the following ST011 firmware dumps (Hayazashi Nidan Morita Shougi):\n"
+                                 "st011.rom — 53248 bytes, program then data ROM — 84AAB2AE";
+static const char kInfoST018[] = "Supports the following ST018 firmware dumps (Hayazashi Nidan Morita Shougi 2):\n"
+                                 "st018.rom — 163840 bytes, program then data ROM — 5C403CC5";
 
 // No-Intro dumps each slot accepts, all passing its size and signature checks.
 static const char *const kNoIntroGB[] = {
@@ -150,6 +161,9 @@ static const char *const kNoIntroDSP2[]  = { "DSP2 (World) (Enhancement Chip).bi
 static const char *const kNoIntroDSP3[]  = { "DSP3 (Japan) (Enhancement Chip).bin — 8192 bytes — D4A38EE7", NULL };
 static const char *const kNoIntroDSP4[]  = { "DSP4 (World) (Enhancement Chip).bin — 8192 bytes — E15384C0", NULL };
 static const char *const kNoIntroCX4[]   = { "CX4 (World) (Enhancement Chip).bin — 3072 bytes — B6E76A6A", NULL };
+static const char *const kNoIntroST010[] = { "ST010 (Japan, USA) (Enhancement Chip).bin — 53248 bytes — 8FC29D4C", NULL };
+static const char *const kNoIntroST011[] = { "ST011 (Japan) (Enhancement Chip).bin — 53248 bytes — 84AAB2AE", NULL };
+static const char *const kNoIntroST018[] = { "ST018 (Japan) (Enhancement Chip).bin — 163840 bytes — 5C403CC5", NULL };
 
 // Sizes match the loaders: sfcbox.h SFCBOX_KROM_SIZE / SFCBOX_FONT_SIZE,
 // bsx.cpp BIOS_SIZE, memmap.cpp's 0x40000 STBIOS read, nss.h NSS_BIOS_SIZE /
@@ -176,6 +190,9 @@ static const S9xBiosSlotInfo kSlots[S9X_NUM_BIOS_SLOTS] =
 	{ "DSP3",         "DSP-3",                          kNamesDSP3,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP3,      kNoIntroDSP3 },
 	{ "DSP4",         "DSP-4",                          kNamesDSP4,      UPD7725_FIRMWARE_SIZE, "Optional, built-in native chip",         kInfoDSP4,      kNoIntroDSP4 },
 	{ "CX4",          "Cx4",                            kNamesCX4,       HG51B_DATAROM_SIZE,    "Optional, built-in native chip",         kInfoCX4,       kNoIntroCX4 },
+	{ "ST010",        "ST010",                          kNamesST010,     UPD96050_FIRMWARE_SIZE, "Optional, built-in native chip", kInfoST010,     kNoIntroST010 },
+	{ "ST011",        "ST011",                          kNamesST011,     UPD96050_FIRMWARE_SIZE, "Optional, built-in native chip", kInfoST011,     kNoIntroST011 },
+	{ "ST018",        "ST018",                          kNamesST018,     ST018_FIRMWARE_SIZE,   "Needed: Legacy (HLE) has no shogi AI",   kInfoST018,     kNoIntroST018 },
 };
 
 static char g_paths[S9X_NUM_BIOS_SLOTS][S9X_BIOS_PATH_MAX];
@@ -221,7 +238,12 @@ char *S9xGetBiosPathBuffer (int slot)
 
 bool8 S9xBiosSlotHasChipMode (int slot)
 {
-	return slot >= S9X_BIOS_DSP1 && slot <= S9X_BIOS_CX4;
+	return slot >= S9X_BIOS_DSP1 && slot <= S9X_BIOS_ST018;
+}
+
+bool8 S9xBiosSlotHasNative (int slot)
+{
+	return (slot >= S9X_BIOS_DSP1 && slot <= S9X_BIOS_CX4) || slot == S9X_BIOS_ST010 || slot == S9X_BIOS_ST011;
 }
 
 int S9xGetChipMode (int slot)
@@ -238,7 +260,20 @@ void S9xSetChipMode (int slot, int mode)
 int S9xChipModeInEffect (int slot)
 {
 	const int mode = S9xGetChipMode(slot);
-	return (mode != S9X_CHIP_AUTO) ? mode : S9X_CHIP_NATIVE;
+	if (S9xBiosSlotHasNative(slot))
+		return (mode != S9X_CHIP_AUTO) ? mode : S9X_CHIP_NATIVE;
+	// no native chip: AUTO (or a Native pick from elsewhere) is the firmware if there is one
+	if (mode == S9X_CHIP_HLE || mode == S9X_CHIP_FIRMWARE)
+		return (mode);
+	return (S9xBiosPathUsable(slot) ? S9X_CHIP_FIRMWARE : S9X_CHIP_HLE);
+}
+
+const char *S9xBiosChipModeNote (int slot, int mode)
+{
+	// the shogi chips' HLE answers every command with nothing
+	if (mode == S9X_CHIP_HLE && (slot == S9X_BIOS_ST011 || slot == S9X_BIOS_ST018))
+		return ("No shogi AI: the computer can't move");
+	return (NULL);
 }
 
 uint32 *S9xGetChipModeBuffer (int slot)
@@ -254,7 +289,8 @@ static const S9xBiosFamily kFamilies[S9X_BIOS_NUM_FAMILIES] =
 	  { S9X_BIOS_SGB1, S9X_BIOS_SGB1_BOOT, S9X_BIOS_SGB2, S9X_BIOS_SGB2_BOOT,
 	    S9X_BIOS_BSX, S9X_BIOS_SUFAMI, S9X_BIOS_SUPERDISC, -1 } },
 	{ "CoProcessors & Special Chips",
-	  { S9X_BIOS_DSP1, S9X_BIOS_DSP1B, S9X_BIOS_DSP2, S9X_BIOS_DSP3, S9X_BIOS_DSP4, S9X_BIOS_CX4, -1 } },
+	  { S9X_BIOS_DSP1, S9X_BIOS_DSP1B, S9X_BIOS_DSP2, S9X_BIOS_DSP3, S9X_BIOS_DSP4, S9X_BIOS_CX4,
+	    S9X_BIOS_ST010, S9X_BIOS_ST011, S9X_BIOS_ST018, -1 } },
 	{ "Handheld Systems",
 	  { S9X_BIOS_GB, S9X_BIOS_GBC, -1 } },
 };
@@ -266,7 +302,7 @@ const S9xBiosFamily *S9xGetBiosFamily (int family)
 
 const char *S9xBiosGroupName (int group)
 {
-	return (group == S9X_BIOS_GROUP_DSP) ? "DSP" : "";
+	return (group == S9X_BIOS_GROUP_DSP) ? "DSP" : (group == S9X_BIOS_GROUP_SETA) ? "Seta" : "";
 }
 
 S9xBiosNesting S9xGetBiosNesting (int slot)
@@ -282,6 +318,9 @@ S9xBiosNesting S9xGetBiosNesting (int slot)
 		case S9X_BIOS_DSP2:
 		case S9X_BIOS_DSP3:
 		case S9X_BIOS_DSP4:			return { S9X_BIOS_UNDER_GROUP + S9X_BIOS_GROUP_DSP, TRUE, NULL };
+		case S9X_BIOS_ST010:
+		case S9X_BIOS_ST011:
+		case S9X_BIOS_ST018:		return { S9X_BIOS_UNDER_GROUP + S9X_BIOS_GROUP_SETA, TRUE, NULL };
 		default:					return { -1, TRUE, NULL };
 	}
 }
@@ -306,6 +345,13 @@ static const S9xBiosBenchScene kBench[] =
 	{ S9X_BIOS_CX4,   "Mega Man X2 wireframe",  { 0.556f, 0.524f, 1.081f }, {  28,  99, 1374 } },
 	{ S9X_BIOS_CX4,   "Mega Man X3 attract",    { 0.655f, 0.675f, 0.702f }, {   7,  55,  455 } },
 	{ S9X_BIOS_CX4,   "Mega Man X3 gameplay",   { 0.884f, 0.877f, 0.963f }, {  37, 173, 2166 } },
+	// tscseta.sh: the ST010's command wait polls RAM, so its firmware never idles; ST011's think scene searches
+	{ S9X_BIOS_ST010, "F1 ROC II race",         { 0.775f, 0.802f, 2.098f }, {  48, 390, 32044 } },
+	{ S9X_BIOS_ST010, "Exhaust Heat II race",   { 0.770f, 0.801f, 2.095f }, {  47, 388, 31979 } },
+	{ S9X_BIOS_ST011, "Morita Shougi attract",  { 0.601f, 0.604f, 0.607f }, {   0,  10,    22 } },
+	{ S9X_BIOS_ST011, "Morita Shougi game",     { 0.614f, 0.614f, 0.616f }, {   0,   9,    14 } },
+	{ S9X_BIOS_ST011, "Morita Shougi think",    { 0.594f, 0.614f, 0.626f }, {   0,  32,   375 } },
+	{ S9X_BIOS_ST018, "Morita Shougi 2 attract",{ 0.595f, -1.0f,  1.956f }, {   9,  -1, 27765 } },
 };
 
 const S9xBiosBenchScene *S9xGetBiosBench (int *count)

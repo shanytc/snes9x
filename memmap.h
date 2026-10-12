@@ -385,7 +385,7 @@ int S9xEventTimerDisplay (void);
 // from the BIOS Manager's dump, its name ("DSP-1B", "Cx4"), and the window-title tag
 // that says so (" (DSP-1B Enhanced)" native, " (DSP-1B Chip Enhanced)" firmware, ""
 // for the HLE). On a multi-game board only the game that uses the chip counts.
-enum { S9X_ENHANCED_NONE, S9X_ENHANCED_DSP, S9X_ENHANCED_CX4, S9X_ENHANCED_DSP_FIRMWARE, S9X_ENHANCED_CX4_FIRMWARE };
+enum { S9X_ENHANCED_NONE, S9X_ENHANCED_DSP, S9X_ENHANCED_CX4, S9X_ENHANCED_DSP_FIRMWARE, S9X_ENHANCED_CX4_FIRMWARE, S9X_ENHANCED_SETA_FIRMWARE, S9X_ENHANCED_SETA };
 int S9xEnhancedChip (void);
 const char *S9xEnhancedChipName (void);
 const char *S9xEnhancedChipTag (void);

@@ -135,12 +135,12 @@ inline uint8 S9xGetByte (uint32 Address)
 			return (byte);
 
 		case CMemory::MAP_SETA_DSP:
-			byte = S9xGetSetaDSP(Address);
+			byte = S9xGetSetaDSP(Address, speed);
 			addCyclesInMemoryAccess;
 			return (byte);
 
 		case CMemory::MAP_SETA_RISC:
-			byte = S9xGetST018(Address);
+			byte = S9xGetSetaRISC(Address, speed);
 			addCyclesInMemoryAccess;
 			return (byte);
 
@@ -324,16 +324,16 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 			return (word);
 
 		case CMemory::MAP_SETA_DSP:
-			word  = S9xGetSetaDSP(Address);
+			word  = S9xGetSetaDSP(Address, speed);
 			addCyclesInMemoryAccess;
-			word |= S9xGetSetaDSP(Address + 1) << 8;
+			word |= S9xGetSetaDSP(Address + 1, speed) << 8;
 			addCyclesInMemoryAccess;
 			return (word);
 
 		case CMemory::MAP_SETA_RISC:
-			word  = S9xGetST018(Address);
+			word  = S9xGetSetaRISC(Address, speed);
 			addCyclesInMemoryAccess;
-			word |= S9xGetST018(Address + 1) << 8;
+			word |= S9xGetSetaRISC(Address + 1, speed) << 8;
 			addCyclesInMemoryAccess;
 			return (word);
 
@@ -477,12 +477,12 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 			return;
 
 		case CMemory::MAP_SETA_DSP:
-			S9xSetSetaDSP(Byte, Address);
+			S9xSetSetaDSP(Byte, Address, speed);
 			addCyclesInMemoryAccess;
 			return;
 
 		case CMemory::MAP_SETA_RISC:
-			S9xSetST018(Byte, Address);
+			S9xSetSetaRISC(Byte, Address, speed);
 			addCyclesInMemoryAccess;
 			return;
 
@@ -741,17 +741,17 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 		case CMemory::MAP_SETA_DSP:
 			if (o)
 			{
-				S9xSetSetaDSP(Word >> 8, Address + 1);
+				S9xSetSetaDSP(Word >> 8, Address + 1, speed);
 				addCyclesInMemoryAccess;
-				S9xSetSetaDSP((uint8) Word, Address);
+				S9xSetSetaDSP((uint8) Word, Address, speed);
 				addCyclesInMemoryAccess;
 				return;
 			}
 			else
 			{
-				S9xSetSetaDSP((uint8) Word, Address);
+				S9xSetSetaDSP((uint8) Word, Address, speed);
 				addCyclesInMemoryAccess;
-				S9xSetSetaDSP(Word >> 8, Address + 1);
+				S9xSetSetaDSP(Word >> 8, Address + 1, speed);
 				addCyclesInMemoryAccess;
 				return;
 			}
@@ -759,17 +759,17 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 		case CMemory::MAP_SETA_RISC:
 			if (o)
 			{
-				S9xSetST018(Word >> 8, Address + 1);
+				S9xSetSetaRISC(Word >> 8, Address + 1, speed);
 				addCyclesInMemoryAccess;
-				S9xSetST018((uint8) Word, Address);
+				S9xSetSetaRISC((uint8) Word, Address, speed);
 				addCyclesInMemoryAccess;
 				return;
 			}
 			else
 			{
-				S9xSetST018((uint8) Word, Address);
+				S9xSetSetaRISC((uint8) Word, Address, speed);
 				addCyclesInMemoryAccess;
-				S9xSetST018(Word >> 8, Address + 1);
+				S9xSetSetaRISC(Word >> 8, Address + 1, speed);
 				addCyclesInMemoryAccess;
 				return;
 			}

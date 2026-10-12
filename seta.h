@@ -52,14 +52,21 @@ extern struct SST010	ST010;
 extern struct SST011	ST011;
 extern struct SST018	ST018;
 
+#define ST018_FIRMWARE_SIZE	0x28000	// 128K ARM program, then 32K data ROM
+
 uint8 S9xGetST010 (uint32);
 void S9xSetST010 (uint32, uint8);
 uint8 S9xGetST011 (uint32);
 void S9xSetST011 (uint32, uint8);
 uint8 S9xGetST018 (uint32);
 void S9xSetST018 (uint8, uint32);
-uint8 S9xGetSetaDSP (uint32);
-void S9xSetSetaDSP (uint8, uint32);
+// `speed`: the bus cycle in master clocks, below 0 a peek (the firmware chip has no side effects then)
+uint8 S9xGetSetaDSP (uint32, int32 speed = -1);
+void S9xSetSetaDSP (uint8, uint32, int32 speed = -1);
+
+// The ST018 window: the ARM from its firmware when it runs, else the HLE.
+uint8 S9xGetSetaRISC (uint32, int32 speed = -1);
+void S9xSetSetaRISC (uint8, uint32, int32 speed = -1);
 
 extern uint8 (*GetSETA) (uint32);
 extern void (*SetSETA) (uint32, uint8);

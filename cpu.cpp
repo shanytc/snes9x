@@ -20,6 +20,8 @@
 #include "superdisc.h"
 #include "rp2040cart.h"
 #include "nss.h"
+#include "upd96050.h"
+#include "st018.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #endif
@@ -143,6 +145,10 @@ void S9xReset (void)
 
 	if (Settings.DSP)
 		S9xResetDSP();
+	if (S9xUPD96050Loaded())
+		S9xUPD96050Reset();
+	if (S9xST018Loaded())
+		S9xST018Reset();
 	if (Settings.SuperFX)
 		S9xResetSuperFX();
 	if (Settings.SA1)
@@ -298,6 +304,10 @@ void S9xSoftReset (void)
 
 	if (Settings.DSP)
 		S9xResetDSP();
+	if (S9xUPD96050Loaded())
+		S9xUPD96050Reset();
+	if (S9xST018Loaded())
+		S9xST018Reset();
 	if (Settings.SuperFX)
 		S9xResetSuperFX();
 	if (Settings.SA1)

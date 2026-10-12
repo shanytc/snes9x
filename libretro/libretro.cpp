@@ -436,7 +436,7 @@ static void update_variables(void)
     else
         Settings.SuperFXClockMultiplier = 100;
 
-    // Each DSP and the Cx4 run as picked, as the BIOS Manager does it; a load reads the mode.
+    // Each DSP, the Cx4 and the Seta chips run as picked, as the BIOS Manager does it; a load reads the mode.
     for (int slot = 0; slot < S9X_NUM_BIOS_SLOTS; slot++)
     {
         if (!S9xBiosSlotHasChipMode(slot))
@@ -1511,7 +1511,7 @@ static struct retro_disk_control_callback superdisc_disk_control = {
 // Set when this load put a BIOS notice on the OSD, which then stays up.
 static bool bios_notice_shown = false;
 
-// A DSP or Cx4 running as the chip, native or from its dump in the system
+// A DSP, Cx4 or Seta chip running as the chip, native or from its dump in the system
 // folder: the desktop ports tag their title, so say it on the OSD.
 static void notify_enhanced_chip(void)
 {

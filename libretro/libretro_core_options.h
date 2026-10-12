@@ -329,6 +329,42 @@ struct retro_core_option_definition option_defs_us[] = {
       "native"
    },
    {
+      "snes9x_chip_st010",
+      "ST010 Emulation",
+      "How the Seta ST010 chip runs (F1 ROC II, Exhaust Heat II). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: fastest, but less accurate. 'Firmware' runs the chip from its firmware, st010.rom or 'ST010 (Japan, USA) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      "snes9x_chip_st011",
+      "ST011 Emulation",
+      "How the Seta ST011 chip runs (Hayazashi Nidan Morita Shougi). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: it has no shogi AI, so the computer can't move. 'Firmware' runs the chip from its firmware, st011.rom or 'ST011 (Japan) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      "snes9x_chip_st018",
+      "ST018 Emulation",
+      "How the Seta ST018 chip runs (Hayazashi Nidan Morita Shougi 2). 'Native (LLE)' is the chip itself, exact, with no file needed. 'Legacy (HLE)' is the old high-level code: it has no shogi AI, so the computer can't move. 'Firmware' runs the chip from its firmware, st018.rom or 'ST018 (Japan) (Enhancement Chip).zip' in the system folder: exact but slower, and without the file the native chip runs. Applies on the next load (Restart Content).",
+      {
+         { "native",   "Native (LLE)" },
+         { "legacy",   "Legacy (HLE)" },
+         { "firmware", "Firmware" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
       "snes9x_overclock_cycles",
       "Reduce Slowdown (Hack, Unsafe)",
       "Overclock SNES CPU. May cause games to crash! Use 'Light' for shorter loading times, 'Compatible' for most games exhibiting slowdown and 'Max' only if absolutely required (Gradius 3, Super R-type...).",

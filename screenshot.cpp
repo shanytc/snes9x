@@ -18,6 +18,108 @@
 
 
 bool8 (*S9xScreenshotTarget) (int width, int height) = NULL;
+int (*S9xScreenshotExtras) (const char *fname) = NULL;
+
+bool8 S9xWriteScreenshotPNG (const char *fname, const uint16 *screen, int pitch, int width, int height, bool8 square)
+{
+#ifdef HAVE_LIBPNG
+	FILE		*fp;
+	png_structp	png_ptr;
+	png_infop	info_ptr;
+	png_color_8	sig_bit;
+	int			imgwidth, imgheight;
+
+	fp = fopen(fname, "wb");
+	if (!fp)
+		return (FALSE);
+
+	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	info_ptr = png_create_info_struct(png_ptr);
+	setjmp(png_jmpbuf(png_ptr));
+
+	imgwidth  = width;
+	imgheight = height;
+
+	if (Settings.StretchScreenshots == 1)
+	{
+		if (!square && width > SNES_WIDTH && height <= SNES_HEIGHT_EXTENDED)
+			imgheight = height << 1;
+	}
+	else if (Settings.StretchScreenshots == 2)
+	{
+		if (square || width  <= SNES_WIDTH)
+			imgwidth  = width  << 1;
+		if (square || height <= SNES_HEIGHT_EXTENDED)
+			imgheight = height << 1;
+	}
+
+	png_init_io(png_ptr, fp);
+
+	png_set_IHDR(png_ptr, info_ptr, imgwidth, imgheight, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+
+	sig_bit.red   = 5;
+	sig_bit.green = 5;
+	sig_bit.blue  = 5;
+	png_set_sBIT(png_ptr, info_ptr, &sig_bit);
+
+	png_write_info(png_ptr, info_ptr);
+
+	// png_set_shift must come after png_write_info: libpng >= 1.6.56 validates
+	// the shift against the write struct's bit depth, which is only set there.
+	png_set_shift(png_ptr, &sig_bit);
+
+	png_set_packing(png_ptr);
+
+	png_byte	*row_pointer = new png_byte[png_get_rowbytes(png_ptr, info_ptr)];
+
+	for (int y = 0; y < height; y++, screen += pitch)
+	{
+		png_byte	*rowpix = row_pointer;
+
+		for (int x = 0; x < width; x++)
+		{
+			uint32	r, g, b;
+
+			DECOMPOSE_PIXEL(screen[x], r, g, b);
+
+			*(rowpix++) = r;
+			*(rowpix++) = g;
+			*(rowpix++) = b;
+
+			if (imgwidth != width)
+			{
+				*(rowpix++) = r;
+				*(rowpix++) = g;
+				*(rowpix++) = b;
+			}
+		}
+
+		png_write_row(png_ptr, row_pointer);
+		if (imgheight != height)
+			png_write_row(png_ptr, row_pointer);
+	}
+
+	delete [] row_pointer;
+
+	png_write_end(png_ptr, info_ptr);
+	png_destroy_write_struct(&png_ptr, &info_ptr);
+
+	fclose(fp);
+
+	return (TRUE);
+#else
+	return (FALSE);
+#endif
+}
+
+bool8 S9xWriteScreenshot (const char *fname, int width, int height)
+{
+	// A GB frame's pixels are already square: a split view is wider than 256
+	// because seats tile across it, not because the PPU went hi-res.
+	const bool gb_native = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+
+	return (S9xWriteScreenshotPNG(fname, GFX.Screen, GFX.RealPPL, width, height, gb_native));
+}
 
 bool8 S9xDoScreenshot (int width, int height)
 {
@@ -58,109 +160,15 @@ bool8 S9xDoScreenshot (int width, int height)
 
 	fprintf(stderr, "%s saved.\n", fname.c_str());
 
+	const int extras = S9xScreenshotExtras ? S9xScreenshotExtras(fname.c_str()) : 0;
 	std::string base = "Saved screenshot " + S9xBasename(fname);
+	if (extras > 0)
+		base += " and " + std::to_string(extras) + " more";
 	S9xMessage(S9X_INFO, 0, base.c_str());
 
 	return (TRUE);
 #else
 	fprintf(stderr, "Screenshot support not available (libpng was not found at build time).\n");
-	return (FALSE);
-#endif
-}
-
-bool8 S9xWriteScreenshot (const char *fname, int width, int height)
-{
-#ifdef HAVE_LIBPNG
-	FILE		*fp;
-	png_structp	png_ptr;
-	png_infop	info_ptr;
-	png_color_8	sig_bit;
-	int			imgwidth, imgheight;
-
-	fp = fopen(fname, "wb");
-	if (!fp)
-		return (FALSE);
-
-	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-	info_ptr = png_create_info_struct(png_ptr);
-	setjmp(png_jmpbuf(png_ptr));
-
-	imgwidth  = width;
-	imgheight = height;
-
-	// A GB frame's pixels are already square: a split view is wider than 256
-	// because seats tile across it, not because the PPU went hi-res.
-	const bool gb_native = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
-
-	if (Settings.StretchScreenshots == 1)
-	{
-		if (!gb_native && width > SNES_WIDTH && height <= SNES_HEIGHT_EXTENDED)
-			imgheight = height << 1;
-	}
-	else if (Settings.StretchScreenshots == 2)
-	{
-		if (gb_native || width  <= SNES_WIDTH)
-			imgwidth  = width  << 1;
-		if (gb_native || height <= SNES_HEIGHT_EXTENDED)
-			imgheight = height << 1;
-	}
-
-	png_init_io(png_ptr, fp);
-
-	png_set_IHDR(png_ptr, info_ptr, imgwidth, imgheight, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-
-	sig_bit.red   = 5;
-	sig_bit.green = 5;
-	sig_bit.blue  = 5;
-	png_set_sBIT(png_ptr, info_ptr, &sig_bit);
-
-	png_write_info(png_ptr, info_ptr);
-
-	// png_set_shift must come after png_write_info: libpng >= 1.6.56 validates
-	// the shift against the write struct's bit depth, which is only set there.
-	png_set_shift(png_ptr, &sig_bit);
-
-	png_set_packing(png_ptr);
-
-	png_byte	*row_pointer = new png_byte[png_get_rowbytes(png_ptr, info_ptr)];
-	uint16		*screen = GFX.Screen;
-
-	for (int y = 0; y < height; y++, screen += GFX.RealPPL)
-	{
-		png_byte	*rowpix = row_pointer;
-
-		for (int x = 0; x < width; x++)
-		{
-			uint32	r, g, b;
-
-			DECOMPOSE_PIXEL(screen[x], r, g, b);
-
-			*(rowpix++) = r;
-			*(rowpix++) = g;
-			*(rowpix++) = b;
-
-			if (imgwidth != width)
-			{
-				*(rowpix++) = r;
-				*(rowpix++) = g;
-				*(rowpix++) = b;
-			}
-		}
-
-		png_write_row(png_ptr, row_pointer);
-		if (imgheight != height)
-			png_write_row(png_ptr, row_pointer);
-	}
-
-	delete [] row_pointer;
-
-	png_write_end(png_ptr, info_ptr);
-	png_destroy_write_struct(&png_ptr, &info_ptr);
-
-	fclose(fp);
-
-	return (TRUE);
-#else
 	return (FALSE);
 #endif
 }

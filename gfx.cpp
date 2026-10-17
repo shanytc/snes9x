@@ -1315,7 +1315,8 @@ void S9xEndScreenRefresh (void)
 
 			S9xControlEOF();
 
-			if (Settings.TakeScreenshot)
+			// Settings is shared: a link seat's own SNES must leave the request to the master.
+			if (Settings.TakeScreenshot && !S9xSGBIsSeatMachine())
 				S9xDoScreenshot(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
 
 			if (Settings.AutoDisplayMessages)

@@ -8,5 +8,9 @@
 #define _SCREENSHOT_H_
 
 bool8 S9xDoScreenshot (int, int);
+// One picture as a PNG, Settings.StretchScreenshots applied; square = its pixels already are (a Game Boy screen).
+bool8 S9xWriteScreenshotPNG (const char *fname, const uint16 *screen, int pitch, int width, int height, bool8 square);
+// A front end's own pictures beside each screenshot (win32: the link session's player windows); returns how many.
+extern int (*S9xScreenshotExtras) (const char *fname);
 
 #endif

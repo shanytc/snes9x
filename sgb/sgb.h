@@ -485,6 +485,7 @@ void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles);
 // while the BIOS holds its Game Boy in reset through the splash - every
 // SNES->GB sync is gated on the release.
 void    S9xSGBSetSeatMachine(bool seat);
+bool    S9xSGBIsSeatMachine(void);
 void    S9xSGBMachineRunUntilLines(int64_t snes_lines);
 int64_t S9xSGBMachineLines(void);
 

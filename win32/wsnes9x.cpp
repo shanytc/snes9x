@@ -177,6 +177,9 @@ static unsigned char GBSeatModelPick(int player);
 static bool  GBSeatModelFromCommand(int cmd_id, int *player, unsigned char *model);
 static void  WinGBSeatSetModel(int player, unsigned char model);
 static HMENU WinGBBuildSeatModelMenu(int player);
+static int   GBSeatPlayerOfWindow(HWND w);
+static int   GBSeatClipboardPlayer = 0;
+static bool8 GBSeatScreenshotToClipboard(int width, int height);
 static void  GBSeatMachinesCreate(int players);
 static void  GBSeatMachinesDestroy();
 static void  GBSeatMachinesTurn();
@@ -1054,10 +1057,10 @@ static void WinRequestScreenshot()
 		S9xDoScreenshot(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
 }
 
-// The screenshot as a 24-bit DIB on the clipboard, at the size Save Screenshot writes.
-static bool8 WinScreenshotToClipboard(int width, int height)
+// A picture as a 24-bit DIB on the clipboard; what names it in the message.
+static bool8 WinPictureToClipboard(const uint16 *screen, int pitch, int width, int height, const char *what)
 {
-	if (!GFX.Screen || width <= 0 || height <= 0)
+	if (!screen || width <= 0 || height <= 0)
 		return FALSE;
 
 	const int stride = (width * 3 + 3) & ~3;   // DIB rows are DWORD-aligned
@@ -1082,7 +1085,7 @@ static bool8 WinScreenshotToClipboard(int width, int height)
 	uint8 *rows = (uint8 *)(bi + 1);
 	for (int y = 0; y < height; y++)
 	{
-		const uint16 *src = GFX.Screen + y * GFX.RealPPL;
+		const uint16 *src = screen + y * pitch;
 		uint8 *dst = rows + (height - 1 - y) * stride;
 		for (int x = 0; x < width; x++)
 		{
@@ -1108,29 +1111,48 @@ static bool8 WinScreenshotToClipboard(int width, int height)
 		S9xMessage(S9X_ERROR, 0, "Failed to copy the screenshot.");
 		return FALSE;
 	}
-	S9xMessage(S9X_INFO, 0, "Screenshot copied to the clipboard");
+	char msg[64];
+	snprintf(msg, sizeof(msg), "%s copied to the clipboard", what);
+	S9xMessage(S9X_INFO, 0, msg);
 	return TRUE;
 }
 
+// The main window's screenshot, at the size Save Screenshot writes.
+static bool8 WinScreenshotToClipboard(int width, int height)
+{
+	return WinPictureToClipboard(GFX.Screen, GFX.RealPPL, width, height, "Screenshot");
+}
+
 // Same moment as Save Screenshot (the frame's end, or now when paused); only the target differs.
-static void WinRequestClipboardScreenshot()
+// player: 0 = whichever window is in front (the hotkey), 1 = the main window, 2+ = that player's window.
+static void WinRequestClipboardScreenshot(int player)
 {
 	if (Settings.StopEmulation)
 		return;
-	S9xScreenshotTarget = WinScreenshotToClipboard;
+	if (player == 0)
+		player = GBSeatPlayerOfWindow(GetForegroundWindow());
+	if (player >= 2)
+	{
+		GBSeatClipboardPlayer = player;
+		S9xScreenshotTarget = GBSeatScreenshotToClipboard;
+	}
+	else
+		S9xScreenshotTarget = WinScreenshotToClipboard;
 	WinRequestScreenshot();
 }
 
 // The Copy screenshot hotkey: a debug viewer in front (Tile, Tilemap or Sprite Viewer)
-// copies its own picture; otherwise the game's screenshot. Only this process's windows are asked.
+// copies its own picture; otherwise a link player's window in front, or the game's screenshot.
+// Only this process's windows are asked; player windows are known without asking.
 static void WinCopyScreenshotHotkey()
 {
 	HWND front = GetForegroundWindow();
 	DWORD pid = 0;
-	if (front && front != GUI.hWnd && GetWindowThreadProcessId(front, &pid) && pid == GetCurrentProcessId()
+	if (front && front != GUI.hWnd && !GBSeatPlayerOfWindow(front)
+		&& GetWindowThreadProcessId(front, &pid) && pid == GetCurrentProcessId()
 		&& SendMessage(front, ViewerCopyMessage(), 0, 0))
 		return;
-	WinRequestClipboardScreenshot();
+	WinRequestClipboardScreenshot(0);
 }
 
 // A key pressed in a debug viewer goes to the viewer, never to HandleKeyMessage, unless
@@ -1343,7 +1365,9 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 	bool hitHotKey = false;
 
     // if this is not a gamepad press and background hotkeys are disabled, skip it if we do not have focus
-    if (!GUI.BackgroundKeyHotkeys && !(wParam & 0x8000) && GUI.hWnd != GetForegroundWindow())
+    // (a link session's player windows count as ours)
+    if (!GUI.BackgroundKeyHotkeys && !(wParam & 0x8000) && GUI.hWnd != GetForegroundWindow()
+        && !GBSeatPlayerOfWindow(GetForegroundWindow()))
     {
         return 0;
     }
@@ -3278,7 +3302,8 @@ LRESULT CALLBACK WinProc(
 			WinRequestScreenshot();
 			break;
 		case ID_SAVESCREENSHOT_CLIPBOARD:
-			WinRequestClipboardScreenshot();
+			// lParam: the player whose window's right-click menu asked; 0 from the menu bar
+			WinRequestClipboardScreenshot((int)lParam);
 			break;
 		case ID_FILE_SAVE_SPC_DATA:
 			S9xDumpSPCSnapshot();
@@ -15899,11 +15924,15 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
 			HMENU menu = WinGBBuildSeatModelMenu (k + 2);
 			if (!menu) return 0;
+			AppendMenu (menu, MF_SEPARATOR, 0, NULL);
+			AppendMenu (menu, MF_STRING, ID_SAVESCREENSHOT_CLIPBOARD, TEXT("Copy Screenshot to Clipboard"));
 			SetForegroundWindow (hWnd);
 			const int cmd = (int)TrackPopupMenu (menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
 			                                     pt.x, pt.y, 0, hWnd, NULL);
 			DestroyMenu (menu);
-			if (cmd) PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (cmd, 0), 0);
+			// The copy names this player in lParam; the master's thread takes it at the frame's end.
+			if (cmd) PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (cmd, 0),
+			                      cmd == ID_SAVESCREENSHOT_CLIPBOARD ? (LPARAM)(k + 2) : 0);
 			return 0;
 		}
 
@@ -16446,6 +16475,33 @@ static int GBSeatScreenshots (const char *fname)
 		if (S9xWriteScreenshotPNG (name.c_str (), pic, w, w, h, square)) saved++;
 	}
 	return saved;
+}
+
+// The player whose open window this is (2+), or 0 for any other window.
+static int GBSeatPlayerOfWindow (HWND w)
+{
+	if (!w) return 0;
+	for (int k = 0; k < GBSeatCount; k++)
+		if (GBSeatAlive[k] && GBSeatWnd[k] == w) return k + 2;
+	return 0;
+}
+
+// Copy Screenshot to Clipboard for one player's window (GBSeatClipboardPlayer):
+// the picture that window shows, read at the master's frame end like the _pN files.
+static bool8 GBSeatScreenshotToClipboard (int, int)
+{
+	static uint16 pic[SNES_WIDTH * SNES_HEIGHT];
+	const int k = GBSeatClipboardPlayer - 2;
+	int w, h;
+	bool8 square;
+	if (k < 0 || k >= GBSeatCount || !GBSeatAlive[k] || !GBSeatPicture (k, pic, &w, &h, &square))
+	{
+		S9xMessage (S9X_ERROR, 0, "Failed to copy the screenshot: that player's window has no picture.");
+		return FALSE;
+	}
+	char what[32];
+	snprintf (what, sizeof (what), "Player %d's screenshot", GBSeatClipboardPlayer);
+	return WinPictureToClipboard (pic, w, w, h, what);
 }
 
 static void GBSeatWindowsDestroy ()

@@ -16391,8 +16391,66 @@ static void GBSeatPresentFrame ()
 	SetEvent (GBSeatEvent);
 }
 
+// The picture seat k's window shows, laid out as GBSeatRenderStaged does but
+// read fresh from the seat, so a screenshot matches the master's frame. Same
+// thread and sources as GBSeatPresentFrame. False while it has none of its own.
+static bool GBSeatPicture (int k, uint16 *out, int *w, int *h, bool8 *square)
+{
+	static uint16 screen[SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+
+	// A Super Game Boy seat: its own SNES's whole frame, bezel and all.
+	if (GBSeatMachineCopyFrame (k + 2, out))
+	{
+		*w = SNES_WIDTH; *h = SNES_HEIGHT; *square = FALSE;
+		return true;
+	}
+
+	const bool own   = S9xSGBSplitCopySeatFrame (k + 2, screen);
+	const bool plain = S9xSGBSplitGetSeatModel (k + 2) != SGB_SEAT_MODEL_MASTER;
+	if (plain || !Settings.SGB_BIOSModeActive || !GFX.Screen)
+	{
+		if (!own) return false;
+		memcpy (out, screen, sizeof screen);
+		*w = SGB_GB_SCREEN_W; *h = SGB_GB_SCREEN_H; *square = TRUE;
+		return true;
+	}
+
+	// The master's Super Game Boy frame with this seat's screen in the pane
+	// (row 39, as GBSeatRenderStaged), or the master's own pane before it has one.
+	for (int y = 0; y < SNES_HEIGHT; y++)
+		memcpy (out + y * SNES_WIDTH, GFX.Screen + y * GFX.RealPPL, SNES_WIDTH * sizeof (uint16));
+	if (own)
+		for (int y = 0; y < SGB_GB_SCREEN_H; y++)
+			memcpy (out + (39 + y) * SNES_WIDTH + 48, screen + y * SGB_GB_SCREEN_W,
+			        SGB_GB_SCREEN_W * sizeof (uint16));
+	*w = SNES_WIDTH; *h = SNES_HEIGHT; *square = FALSE;
+	return true;
+}
+
+// File > Save Screenshot with player windows open: each open window beside the
+// master's file, as <name>_p2.png, <name>_p3.png and on.
+static int GBSeatScreenshots (const char *fname)
+{
+	static uint16 pic[SNES_WIDTH * SNES_HEIGHT];
+	std::string base (fname), ext (".png");
+	const size_t dot = base.rfind ('.');
+	if (dot != std::string::npos) { ext = base.substr (dot); base.erase (dot); }
+
+	int saved = 0;
+	for (int k = 0; k < GBSeatCount; k++)
+	{
+		int w, h;
+		bool8 square;
+		if (!GBSeatAlive[k] || !GBSeatPicture (k, pic, &w, &h, &square)) continue;
+		const std::string name = base + "_p" + std::to_string (k + 2) + ext;
+		if (S9xWriteScreenshotPNG (name.c_str (), pic, w, w, h, square)) saved++;
+	}
+	return saved;
+}
+
 static void GBSeatWindowsDestroy ()
 {
+	S9xScreenshotExtras = NULL;
 	if (GBSeatThread)
 	{
 		InterlockedExchange (&GBSeatQuit, 1);
@@ -16453,6 +16511,7 @@ static void GBSeatWindowsCreate (int players)
 	// The master keeps the keyboard: seats are displays, and every seat
 	// reads its own joypad number rather than whichever window has focus.
 	SetForegroundWindow (GUI.hWnd);
+	S9xScreenshotExtras = GBSeatScreenshots;
 }
 
 // In-process split screen: no processes, no sockets — the SGB layer owns

@@ -5687,6 +5687,7 @@ void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles)
 }
 
 void S9xSGBSetSeatMachine(bool seat)            { g_seat_machine = seat; }
+bool S9xSGBIsSeatMachine(void)                  { return g_seat_machine; }
 void S9xSGBMachineRunUntilLines(int64_t lines)  { g_snes_slice_target = lines; }
 int64_t S9xSGBMachineLines(void)                { return g_snes_line_counter; }
 int64_t S9xSGBMachineGbCycles(void)

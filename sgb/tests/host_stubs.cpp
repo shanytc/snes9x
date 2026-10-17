@@ -23,3 +23,10 @@ void S9xGetLineRenderState (int, uint8 &brightness, uint16 &backdrop)
 	brightness = 0;
 	backdrop   = 0;
 }
+
+// No BIOS Manager here, so a seat on its own model boots without a boot ROM.
+bool8 S9xGetGBBootROM (bool, std::vector<uint8> &out, std::string *)
+{
+	out.clear();
+	return (FALSE);
+}

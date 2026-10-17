@@ -584,6 +584,8 @@ else
    CXX ?= g++
    SHARED := -shared -static-libgcc -static-libstdc++ -s -Wl,--version-script=link.T
    CXXFLAGS += -D__WIN32__
+   # sgb/gb_link.cpp (Game Boy link cable) needs winsock.
+   LIBS += -lws2_32
 endif
 
 CORE_DIR := ..

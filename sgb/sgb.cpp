@@ -4478,6 +4478,68 @@ static void SplitHeadStart(SGB::Emulator *core, int pos)
 	core->RunCycles(kSeatHeadStart);
 }
 
+// BIOS mode: a seat shows the master's pane until the master's boot is
+// through, so it gets the logo hold and MASK_EN covers the master does.
+static constexpr int kBootHashes = 4;
+static bool     g_seat_follow_boot = false;
+static bool     g_follow_input     = false;   // a button since power-on: the games can part
+static bool     g_seat_settling[SGB_MAX_LINK_PLAYERS] = {};
+static uint32_t g_seat_boot_hash[SGB_MAX_LINK_PLAYERS][kBootHashes] = {};
+
+static void SplitFollowMasterBoot(void)
+{
+	if (S9xSGBIsSeatMachine()) return;   // a seat SNES's own reboot, not the master's
+	g_seat_follow_boot = true;
+	g_follow_input     = false;
+	for (int i = 0; i < SGB_MAX_LINK_PLAYERS; ++i) g_seat_settling[i] = true;
+	std::memset(g_seat_boot_hash, 0, sizeof g_seat_boot_hash);
+}
+
+static void SplitFollowDone(void)
+{
+	g_seat_follow_boot = false;
+	for (int i = 0; i < SGB_MAX_LINK_PLAYERS; ++i) g_seat_settling[i] = false;
+}
+
+// Through = the master's pane is the cart's own uncovered picture, after its
+// SGB setup (border or mask cancel); a cart the SGB ignores has none to wait for.
+static bool SplitMasterBooting(void)
+{
+	if (!g_seat_follow_boot) return false;
+	const SGB::Emulator::Impl *mi = SGB::Instance().DebugImpl();
+	if (mi->icd2.joypad[0] != 0xFF) g_follow_input = true;
+	const bool covered = mi->ppu.boot_logo_hold || mi->bios_mask_valid ||
+		mi->sgb_state.mask_mode != SGB::SGB_MASK_CANCEL || !(mi->ppu.lcdc & 0x80);
+	const bool setup_over = mi->boot_setup_done || mi->cart.header.sgb_flag != 0x03 ||
+		g_follow_input;
+	if (SGB::Instance().IsGBReleased() && !covered && setup_over)
+		g_seat_follow_boot = false;
+	return g_seat_follow_boot;
+}
+
+// Seat i keeps the master's pane while it boots, then until its own picture
+// is a new one: a cart can cancel its mask with the TRN payload still on its LCD.
+static bool SplitSeatFollowsMaster(int i, const uint8_t *sh)
+{
+	if (!g_seat_settling[i]) return false;
+	const uint32_t h = sh ? PhaseFbHash(sh) : 0;
+	uint32_t *seen = g_seat_boot_hash[i];
+	if (SplitMasterBooting())
+	{
+		if (seen[0] != h)
+		{
+			std::memmove(seen + 1, seen, (kBootHashes - 1) * sizeof *seen);
+			seen[0] = h;
+		}
+		return true;
+	}
+	if (!g_follow_input)
+		for (int k = 0; k < kBootHashes; ++k)
+			if (seen[k] == h) return true;
+	g_seat_settling[i] = false;
+	return false;
+}
+
 void S9xSGBReset(void)
 {
 	SGB::Instance().ColdReset();
@@ -4486,6 +4548,7 @@ void S9xSGBReset(void)
 	SplitDropSnaps();
 	g_seat_slave_accum = 0;
 	SplitStaggerSeats();
+	SplitFollowMasterBoot();
 }
 
 // Seat cores live outside snes9x's freeze, so the BIOS-mode soft-reset
@@ -4560,6 +4623,7 @@ bool S9xSGBSplitStateLoad(const uint8_t *buf, size_t size)
 	SplitAttachLink();
 	SplitDropSnaps();
 	g_seat_slave_accum = 0;
+	SplitFollowDone();   // the checkpoint is taken past the boot
 	return true;
 }
 
@@ -4574,6 +4638,7 @@ void S9xSGBSplitResetSeats(void)
 		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
 	SplitDropSnaps();
 	g_seat_slave_accum = 0;
+	SplitFollowMasterBoot();
 	if (SGB::SerialTraceEnabled())
 	{
 		const SGB::Emulator::Impl *mi = SGB::Instance().DebugImpl();
@@ -4594,6 +4659,7 @@ bool S9xSGBSoftReset(void)
 		SplitDropSnaps();
 		g_seat_slave_accum = 0;
 		SplitStaggerSeats();
+		SplitFollowMasterBoot();
 	}
 	return ok;
 }
@@ -4783,6 +4849,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	}
 	g_split_players = players;
 	SplitDropSnaps();
+	SplitFollowMasterBoot();
 	g_pane_delay = 0;   // a new session measures its own pane age
 	g_echo_frames = 0;
 	g_placer_said  = false;
@@ -4881,6 +4948,7 @@ void S9xSGBSplitSetJoypad(int player, uint16_t snes_pad_mask)
 {
 	const int k = player - 2;
 	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1 || !g_split_cores[k]) return;
+	if (snes_pad_mask) g_follow_input = true;
 	g_split_cores[k]->SetJoypad(snes_pad_mask);
 }
 
@@ -5137,6 +5205,10 @@ bool S9xSGBSplitCopySeatFrame(int player, uint16_t *dest)
 	// window to keep the master's pane, so every seat plays the same boot
 	// sequence the master does instead of a black hole.
 	if (!g_split_snap_valid[i] && Settings.SGB_BIOSModeActive)
+		return false;
+	// Same game, same boot: the master's pane, logo hold and masks included.
+	if (Settings.SGB_BIOSModeActive && !SeatOwnModel(i - 1) &&
+	    SplitSeatFollowsMaster(i, SplitShadesAt(i, g_pane_delay, nullptr)))
 		return false;
 
 	// A seat in BIOS mode is dressed from its own SGB state: the screen is

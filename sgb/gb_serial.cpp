@@ -1324,11 +1324,12 @@ void HubPacketBoundary()
 				std::memset(g_hub.buffer, 0, sizeof g_hub.buffer);
 				std::memset(g_hub.buffer, 0xFF, 4);
 				g_hub.buffer[0]    = 0xFD;
-				// The requester's command byte doubles as the bulk length
-				// ($0395 stages FFA9 bytes; $035C reads C200[0]). It must
-				// be the first post-wake broadcast byte no matter which
-				// slot the requester sits in.
-				g_hub.buffer[4]        = g_hub.wake_cmd ? g_hub.wake_cmd : 0x04;
+				// The requester's command byte is its payload length; the
+				// consoles count this byte and the header after it too
+				// (Jantaku C200[0], Uno D043, payload read from +2). It must
+				// be the first post-wake broadcast byte whatever the slot.
+				g_hub.buffer[4]        = g_hub.wake_cmd
+				                       ? static_cast<uint8_t>(g_hub.wake_cmd + 2) : 0x04;
 				g_hub.wake_len_guard   = true;
 				g_hub.buf_pos      = 0;
 				g_hub.wake_pending = false;

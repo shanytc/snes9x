@@ -74,7 +74,8 @@ using namespace	std;
 #define FLAG_IOBIT(n)			((n) ? (FLAG_IOBIT1) : (FLAG_IOBIT0))
 
 bool8	pad_read = 0, pad_read_last = 0;
-uint8	read_idx[2 /* ports */][2 /* per port */];
+// Per machine: an SGB seat's SNES must not resume another's half-done pad read.
+S9X_MACHINE uint8	read_idx[2 /* ports */][2 /* per port */];
 
 struct exemulti
 {
@@ -157,8 +158,8 @@ static multimap<uint32, s9xcommand_t>	keymap;
 static vector<s9xcommand_t *>		multis;
 static uint8						turbo_time;
 static uint8						pseudobuttons[256];
-static bool8						FLAG_LATCH = FALSE;
-static int32						curcontrollers[2] = { NONE,    NONE };
+static S9X_MACHINE bool8			FLAG_LATCH = FALSE;
+static S9X_MACHINE int32			curcontrollers[2] = { NONE,    NONE };
 static int32						newcontrollers[2] = { JOYPAD0, NONE };
 static char							buf[256];
 

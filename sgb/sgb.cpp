@@ -4808,6 +4808,14 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
 			return false;
 		}
+		// The ROM handed out is the pristine one: a seat on the master's console
+		// gets the same SGB cart patch the master's BIOS cart got.
+		if (!own && prim.SgbPatchName()[0])
+			if (const SGB::CartPatch *cp = SGB::FindSgbCartPatch(rom, size))
+			{
+				std::vector<uint8_t> &sr = core->DebugImpl()->cart.rom;
+				SGB::ApplyCartPatch(*cp, sr.data(), sr.size());
+			}
 		// A seat decodes its own packets into its own palettes and acts on
 		// nothing else in them (see OnSgbCommandInternal), and the ICD2
 		// LCD feed stays with the primary: a seat feeding it shreds the

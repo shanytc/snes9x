@@ -331,6 +331,10 @@ struct Dmg07
 	uint8_t wake_pairs[4]    = {0, 0, 0, 0};
 	uint8_t wake_pair_cmd[4] = {0, 0, 0, 0};
 	uint8_t wake_seat        = 0;
+	// The fired frame, and how far the requester has repeated it since: a
+	// request stays on the wire until the wake, a stale one-off does not.
+	uint8_t wake_frame[4]    = {0, 0, 0, 0};
+	uint8_t wake_echo        = 0;
 
 	// Bulk relay: the LEN-announced payload is the requesting console's
 	// contiguous C300 block ($03C0 stages C600->C300; $0345 harvests the
@@ -629,6 +633,19 @@ void HubWakeFF(int seat, uint8_t b, bool armed)
 		return;
 	if (!armed || g_hub.prev_phase != kDmg07Net || g_hub.bulk_stage != 0)
 		return;
+	// Uno's ISR resends a stale request once after a bulk; withdraw a wake
+	// whose requester stopped repeating its block before the announcement.
+	if (g_hub.wake_pending && seat == g_hub.wake_seat)
+	{
+		if (b != g_hub.wake_frame[g_hub.wake_echo & 3])
+		{
+			g_hub.wake_pending     = false;
+			g_hub.wake_pairs[seat] = 0;
+			Trace("hub wake withdrawn (seat %d sent %02X, not the request)", seat + 1, b);
+		}
+		else
+			++g_hub.wake_echo;
+	}
 	if (b == 0xFF)
 	{
 		if (g_hub.wake_ff[seat] < 0xFF) ++g_hub.wake_ff[seat];
@@ -654,6 +671,11 @@ void HubWakeFF(int seat, uint8_t b, bool armed)
 			g_hub.wake_pending = true;
 			g_hub.wake_cmd     = cmd;
 			g_hub.wake_seat    = static_cast<uint8_t>(seat);
+			g_hub.wake_frame[0] = cmd;
+			g_hub.wake_frame[1] = 0xFF;
+			g_hub.wake_frame[2] = 0xFF;
+			g_hub.wake_frame[3] = b;
+			g_hub.wake_echo     = 0;
 			Trace("hub wake requested (seat %d $FF pair, cmd=%02X)",
 			      seat + 1, g_hub.wake_cmd);
 		}

@@ -38,6 +38,7 @@ void EmuCanvasQt::draw()
                &output_data.buffer[output_data.bytes_per_line * y],
                output_data.width * 2);
 
+    updateOverlayText();
     qimage_mutex.unlock();
     throttle();
     update();
@@ -98,6 +99,24 @@ static QString frameRateText()
                              (int)Memory.ROMFramesPerSecond);
 }
 
+// On the emulation thread, whose IPPU, GFX and Memory the text comes from.
+void EmuCanvasQt::updateOverlayText()
+{
+    osd_top_right.clear();
+    if (Settings.DisplayFrameRate)
+        osd_top_right = frameRateText();
+    if (Settings.DisplayFrameNumber)
+        osd_top_right += (osd_top_right.isEmpty() ? "#" : "\n#") + QString::number(IPPU.TotalEmulatedFrames);
+
+    osd_message = QString::fromUtf8(GFX.InfoString.c_str());
+    if (Settings.DisplayMovieFrame && S9xMovieActive())
+    {
+        if (!osd_message.isEmpty() && !osd_message.endsWith('\n'))
+            osd_message += '\n';
+        osd_message += QString::fromUtf8(GFX.FrameDisplayString);
+    }
+}
+
 // The on-screen display the Vulkan and OpenGL canvases draw with ImGui, as outlined text;
 // the pause and fast-forward icons become words.
 void EmuCanvasQt::drawOverlay(QPainter &paint)
@@ -120,11 +139,11 @@ void EmuCanvasQt::drawOverlay(QPainter &paint)
         paint.drawText(area, flags, string);
     };
 
-    QString top_right;
-    if (Settings.DisplayFrameRate)
-        top_right = frameRateText();
-    if (Settings.DisplayFrameNumber)
-        top_right += (top_right.isEmpty() ? "#" : "\n#") + QString::number(IPPU.TotalEmulatedFrames);
+    qimage_mutex.lock();
+    const QString top_right = osd_top_right;
+    const QString message = osd_message;
+    qimage_mutex.unlock();
+
     if (!top_right.isEmpty())
         text(top_right, Qt::AlignTop | Qt::AlignRight);
 
@@ -136,13 +155,6 @@ void EmuCanvasQt::drawOverlay(QPainter &paint)
             text(tr("Fast Forwarding"), Qt::AlignTop | Qt::AlignLeft);
     }
 
-    QString message = QString::fromUtf8(GFX.InfoString.c_str());
-    if (Settings.DisplayMovieFrame && S9xMovieActive())
-    {
-        if (!message.isEmpty() && !message.endsWith('\n'))
-            message += '\n';
-        message += QString::fromUtf8(GFX.FrameDisplayString);
-    }
     if (!message.isEmpty())
         text(message, Qt::AlignBottom | Qt::AlignLeft | Qt::TextWordWrap);
 

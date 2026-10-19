@@ -25,6 +25,7 @@
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
+#include "gb_patches.h"
 #include "sgbc_patches.h"
 #include "sgbc.h"
 
@@ -267,6 +268,8 @@ struct Emulator::Impl
 	const uint8_t *sgbc_compat_combo = nullptr;
 	char        sgbc_patch_name[96] = {};
 	char        sgb_patch_name[96] = {};   // PrepareBiosCart's compatibility edit
+	// The file's bytes before a gb_patches.cpp row went in, for the hashes.
+	std::vector<uint8_t> gb_pristine;
 	bool        sgbc_table = true;
 	uint32_t    sgbc_quirks = 0;   // SGBC_QUIRK_* from the cart's table row
 
@@ -1200,6 +1203,7 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	if (!CartLoad(impl_->cart, data, size, path))
 		return false;
 	impl_->has_rom = true;
+	impl_->gb_pristine.clear();
 	const bool cart_is_cgb = (impl_->cart.header.cgb_flag & 0x80) != 0;
 	impl_->cgb_mode = (impl_->cgb_override >= 0)
 	                ? (impl_->cgb_override != 0)
@@ -1309,6 +1313,7 @@ void Emulator::UnloadROM()
 	CartUnload(impl_->cart);
 	impl_->has_rom = false;
 	impl_->cgb_mode = false;
+	impl_->gb_pristine.clear();
 	impl_->sgbc_pristine.clear();
 	impl_->sgbc_compat_combo = nullptr;
 	impl_->sgbc_patch_name[0] = 0;
@@ -1359,11 +1364,12 @@ bool Emulator::TakeSramDirty()
 	return true;
 }
 
-// The file's bytes: under Super Game Boy Color the running image carries the
-// in-memory edits, and a hash of those would name no known game.
+// The file's bytes: the running image can carry in-memory edits (a gb_patches
+// row, Super Game Boy Color's), and a hash of those would name no known game.
 const uint8_t *Emulator::GetROMData() const
 {
 	if (!impl_->has_rom || impl_->cart.rom.empty()) return nullptr;
+	if (!impl_->gb_pristine.empty()) return impl_->gb_pristine.data();
 	if (!impl_->sgbc_pristine.empty()) return impl_->sgbc_pristine.data();
 	return impl_->cart.rom.data();
 }
@@ -1371,6 +1377,7 @@ const uint8_t *Emulator::GetROMData() const
 size_t Emulator::GetROMSize() const
 {
 	if (!impl_->has_rom) return 0;
+	if (!impl_->gb_pristine.empty()) return impl_->gb_pristine.size();
 	if (!impl_->sgbc_pristine.empty()) return impl_->sgbc_pristine.size();
 	return impl_->cart.rom.size();
 }
@@ -1471,14 +1478,14 @@ void Emulator::PrepareBiosCart()
 	Impl &im = *impl_;
 	im.sgb_patch_name[0] = 0;
 	// Look the cart up before PrepareSgbcCart rewrites its header.
-	const CartPatch *p = (im.has_rom && im.sgbc_table)
-	                   ? FindSgbCartPatch(im.cart.rom.data(), im.cart.rom.size()) : nullptr;
+	const GbCartPatch *p = (im.has_rom && im.sgbc_table)
+	                     ? FindSgbCartPatch(im.cart.rom.data(), im.cart.rom.size()) : nullptr;
 	PrepareSgbcCart();
 	if (!p) return;
 	std::vector<uint8_t> &rom = im.cart.rom;
-	// Hashes read the file's bytes, so keep them if SGBC did not already.
-	if (im.sgbc_pristine.empty()) im.sgbc_pristine = rom;
-	if (ApplyCartPatch(*p, rom.data(), rom.size()))
+	// Hashes read the file's bytes, so keep them if nothing kept them yet.
+	if (im.gb_pristine.empty() && im.sgbc_pristine.empty()) im.gb_pristine = rom;
+	if (ApplyGbCartPatch(*p, rom.data(), rom.size()))
 		snprintf(im.sgb_patch_name, sizeof im.sgb_patch_name, "%s", p->name);
 }
 
@@ -4831,10 +4838,10 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		// The ROM handed out is the pristine one: a seat on the master's console
 		// gets the same SGB cart patch the master's BIOS cart got.
 		if (!own && prim.SgbPatchName()[0])
-			if (const SGB::CartPatch *cp = SGB::FindSgbCartPatch(rom, size))
+			if (const SGB::GbCartPatch *cp = SGB::FindSgbCartPatch(rom, size))
 			{
 				std::vector<uint8_t> &sr = core->DebugImpl()->cart.rom;
-				SGB::ApplyCartPatch(*cp, sr.data(), sr.size());
+				SGB::ApplyGbCartPatch(*cp, sr.data(), sr.size());
 			}
 		// A seat decodes its own packets into its own palettes and acts on
 		// nothing else in them (see OnSgbCommandInternal), and the ICD2

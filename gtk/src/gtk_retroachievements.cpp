@@ -32,8 +32,8 @@
 //
 // Mirrors the Qt port (RAIntegrationQt.cpp): rc_client hands us a request, we
 // perform it off the GTK main thread and invoke the completion callback with
-// the response — even on error. rc_client is internally locked and configured
-// with background memory reads, so calling back from this thread is safe.
+// the response — even on error. rc_client is internally locked and leaves its
+// memory reads to rc_client_do_frame, so calling back from this thread is safe.
 // ---------------------------------------------------------------------------
 static size_t ra_curl_write_cb(char *contents, size_t size, size_t nmemb, void *userp)
 {

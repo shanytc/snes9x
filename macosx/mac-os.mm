@@ -43,6 +43,7 @@
 #endif
 
 #import <pthread.h>
+#include <vector>
 
 #import "mac-prefix.h"
 #import "mac-audio.h"
@@ -66,6 +67,45 @@
 
 volatile bool8		running             = false;
 volatile bool8		s9xthreadrunning    = false;
+
+// Machine state is per thread (S9X_MACHINE) and each cart runs on a thread of
+// its own: main-thread work on the SNES is queued to it, and while it lives its
+// RAM and IPPU are published for the main thread's reads.
+static std::vector<dispatch_block_t>	emulationWork;
+static pthread_mutex_t					emulationWorkLock = PTHREAD_MUTEX_INITIALIZER;
+static uint8							*machineRAM = NULL;
+static struct InternalPPU				*machineIPPU = NULL;
+
+static void RunEmulationWork (void)
+{
+	std::vector<dispatch_block_t> work;
+	pthread_mutex_lock(&emulationWorkLock);
+	work.swap(emulationWork);
+	pthread_mutex_unlock(&emulationWorkLock);
+
+	for (dispatch_block_t block : work)
+		block();
+}
+
+void RunOnEmulationThread (dispatch_block_t block, bool wait)
+{
+	dispatch_semaphore_t done = dispatch_semaphore_create(0);
+
+	pthread_mutex_lock(&emulationWorkLock);
+	if (!s9xthreadrunning)
+	{
+		// No cart running: no machine but the main thread's idle one.
+		pthread_mutex_unlock(&emulationWorkLock);
+		block();
+		return;
+	}
+	emulationWork.push_back(^{ block(); dispatch_semaphore_signal(done); });
+	pthread_mutex_unlock(&emulationWorkLock);
+
+	// The emulation thread may be waiting on the main queue; keep serving it.
+	while (wait && dispatch_semaphore_wait(done, DISPATCH_TIME_NOW) != 0)
+		CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+}
 
 volatile bool8		windowExtend        = true;
 
@@ -312,11 +352,19 @@ int main (int argc, const char *argv[])
 static void * MacSnes9xThread (void *)
 {
     Settings.StopEmulation = false;
-    s9xthreadrunning = true;
 
     EmulationLoop();
 
+    // This thread's SNES is the only one holding the cart's SRAM.
+    SNES9X_Quit();
+
+    pthread_mutex_lock(&emulationWorkLock);
     s9xthreadrunning = false;
+    machineRAM = NULL;
+    machineIPPU = NULL;
+    pthread_mutex_unlock(&emulationWorkLock);
+    RunEmulationWork();
+
     Settings.StopEmulation = true;
 
     return (NULL);
@@ -389,6 +437,7 @@ static inline void EmulationLoop (void)
     {
         while (running)
         {
+            RunEmulationWork();
             ProcessInput();
 
             if (!pauseEmulation)
@@ -3031,8 +3080,17 @@ void QuitWithFatalError ( NSString *message)
 			rawMouseY = bounds.size.height;
 		}
 
-		mouseX = (int16) (rawMouseX / ((float) bounds.size.width ) * (float) IPPU.RenderedScreenWidth);
-		mouseY = (int16) (rawMouseY / ((float) bounds.size.height) * (float) IPPU.RenderedScreenHeight);
+		int	width = 0, height = 0;
+		pthread_mutex_lock(&emulationWorkLock);
+		if (machineIPPU)
+		{
+			width  = machineIPPU->RenderedScreenWidth;
+			height = machineIPPU->RenderedScreenHeight;
+		}
+		pthread_mutex_unlock(&emulationWorkLock);
+
+		mouseX = (int16) (rawMouseX / ((float) bounds.size.width ) * (float) width);
+		mouseY = (int16) (rawMouseY / ((float) bounds.size.height) * (float) height);
 	}
 }
 
@@ -3138,13 +3196,10 @@ void QuitWithFatalError ( NSString *message)
 	S9xInitDisplay(NULL, NULL);
 }
 
-- (void)start
+// The cart's thread owns its SNES (S9X_MACHINE state): it brings it up, loads
+// the cart, runs it, and saves it on the way out.
+- (BOOL)startCart:(bool8 (^)(void))openCart
 {
-#ifdef DEBUGGER
-	CPU.Flags |= DEBUG_MODE_FLAG;
-	S9xDoDebug();
-#endif
-
 	lastFrame = GetMicroseconds();
 	frameCount = 0;
 	if (macFrameSkip < 0)
@@ -3154,21 +3209,52 @@ void QuitWithFatalError ( NSString *message)
 
 	S9xInitDisplay(NULL, NULL);
 
+	__block bool8 opened = false;
+	dispatch_semaphore_t loaded = dispatch_semaphore_create(0);
+
 	[NSThread detachNewThreadWithBlock:^
 	{
-		MacSnes9xThread(NULL);
+		if (Memory.Init() && S9xInitAPU() && S9xGraphicsInit())
+			opened = openCart();
+
+		if (opened)
+		{
+			pthread_mutex_lock(&emulationWorkLock);
+			s9xthreadrunning = true;
+			machineRAM = Memory.RAM;
+			machineIPPU = &IPPU;
+			pthread_mutex_unlock(&emulationWorkLock);
+			SNES9X_Go();
+		}
+		dispatch_semaphore_signal(loaded);
+
+		if (opened)
+		{
+#ifdef DEBUGGER
+			CPU.Flags |= DEBUG_MODE_FLAG;
+			S9xDoDebug();
+#endif
+			MacSnes9xThread(NULL);
+		}
+
+		// Only this thread's buffers; the APU's shared ones belong to the next cart.
+		S9xGraphicsDeinit();
+		Memory.Deinit();
 	}];
+
+	dispatch_semaphore_wait(loaded, DISPATCH_TIME_FOREVER);
+	return opened;
 }
 
 - (void)stop
 {
-	SNES9X_Quit();
+	RunOnEmulationThread(^{ SNES9X_Quit(); }, true);
     S9xExit();
 }
 
 - (void)softwareReset
 {
-	SNES9X_SoftReset();
+	RunOnEmulationThread(^{ SNES9X_SoftReset(); }, false);
 	SNES9X_Go();
 	[self resume];
 }
@@ -3176,7 +3262,7 @@ void QuitWithFatalError ( NSString *message)
 
 - (void)hardwareReset
 {
-	SNES9X_Reset();
+	RunOnEmulationThread(^{ SNES9X_Reset(); }, false);
 	SNES9X_Go();
 	[self resume];
 }
@@ -3200,7 +3286,7 @@ void QuitWithFatalError ( NSString *message)
 
 - (void)quit
 {
-	SNES9X_Quit();
+	RunOnEmulationThread(^{ SNES9X_Quit(); }, true);
 	[self pause];
 }
 
@@ -3332,11 +3418,10 @@ void QuitWithFatalError ( NSString *message)
 		usleep(Settings.FrameTime);
 	}
 
-    if ( SNES9X_OpenCart(fileURL) )
+    if ( [self startCart:^bool8 { return SNES9X_OpenCart(fileURL); }] )
     {
 		[self.emulationDelegate gameLoaded];
 		
-        SNES9X_Go();
         s9xView.window.title = fileURL.lastPathComponent.stringByDeletingPathExtension;
         [s9xView.window makeKeyAndOrderFront:nil];
 
@@ -3345,7 +3430,6 @@ void QuitWithFatalError ( NSString *message)
 			[s9xView.window makeFirstResponder:s9xView];
 		});
 
-        [self start];
         return YES;
     }
 
@@ -3367,11 +3451,10 @@ void QuitWithFatalError ( NSString *message)
 		usleep(Settings.FrameTime);
 	}
 
-	if (SNES9X_OpenMultiCart(fileURLs.firstObject, fileURLs.lastObject))
+	if ([self startCart:^bool8 { return SNES9X_OpenMultiCart(fileURLs.firstObject, fileURLs.lastObject); }])
 	{
 		[self.emulationDelegate gameLoaded];
 
-		SNES9X_Go();
 		s9xView.window.title = fileURLs.firstObject.lastPathComponent.stringByDeletingPathExtension;
 		[s9xView.window makeKeyAndOrderFront:nil];
 
@@ -3380,7 +3463,6 @@ void QuitWithFatalError ( NSString *message)
 			[s9xView.window makeFirstResponder:s9xView];
 		});
 
-		[self start];
 		return YES;
 	}
 
@@ -3485,7 +3567,12 @@ void QuitWithFatalError ( NSString *message)
 		length = 0x20000;
 	}
 
-	memcpy(buffer, Memory.RAM, length);
+	pthread_mutex_lock(&emulationWorkLock);
+	if (machineRAM)
+		memcpy(buffer, machineRAM, length);
+	else
+		memset(buffer, 0, length);
+	pthread_mutex_unlock(&emulationWorkLock);
 }
 
 - (NSArray<S9xWatchPoint *> *)getWatchPoints

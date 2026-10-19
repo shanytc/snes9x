@@ -53,12 +53,18 @@ bool S9xProActionReplayToRaw(const std::string &code, uint32 &address, uint8 &by
 
 	char code[256];
 	sprintf(code, "%x=%x", address, value);
-	S9xModifyCheatGroup(self.cheatID, cheatDescription, code);
 
-	if (enabled)
-	{
-		S9xEnableCheatGroup(self.cheatID);
-	}
+	// Patching reads and writes the running cart's memory, which is its thread's.
+	const uint32 cheatID = self.cheatID;
+	const std::string name = cheatDescription, text = code;
+	RunOnEmulationThread(^{
+		S9xModifyCheatGroup(cheatID, name, text);
+
+		if (enabled)
+		{
+			S9xEnableCheatGroup(cheatID);
+		}
+	}, true);
 }
 
 @dynamic address;
@@ -91,14 +97,18 @@ bool S9xProActionReplayToRaw(const std::string &code, uint32 &address, uint8 &by
 
 - (void)setEnabled:(NSNumber *)enabled
 {
-	if (enabled.boolValue)
-	{
-		S9xEnableCheatGroup(self.cheatID);
-	}
-	else
-	{
-		S9xDisableCheatGroup(self.cheatID);
-	}
+	const uint32 cheatID = self.cheatID;
+	const bool on = enabled.boolValue;
+	RunOnEmulationThread(^{
+		if (on)
+		{
+			S9xEnableCheatGroup(cheatID);
+		}
+		else
+		{
+			S9xDisableCheatGroup(cheatID);
+		}
+	}, true);
 }
 
 @dynamic cheatDescription;
@@ -114,7 +124,8 @@ bool S9xProActionReplayToRaw(const std::string &code, uint32 &address, uint8 &by
 
 - (void)delete
 {
-	S9xDeleteCheatGroup(self.cheatID);
+	const uint32 cheatID = self.cheatID;
+	RunOnEmulationThread(^{ S9xDeleteCheatGroup(cheatID); }, true);
 }
 
 @end
@@ -153,14 +164,20 @@ void CreateCheatFromAddress(NSNumber *address, NSNumber *value, NSString *cheatD
 {
 	char code[256];
 	sprintf(code, "%x=%x", address.unsignedIntValue, value.unsignedCharValue);
-	S9xAddCheatGroup(cheatDescription.UTF8String, code);
-	S9xEnableCheatGroup(Cheat.group.size() - 1);
+	const std::string name = cheatDescription.UTF8String, text = code;
+	RunOnEmulationThread(^{
+		S9xAddCheatGroup(name, text);
+		S9xEnableCheatGroup(Cheat.group.size() - 1);
+	}, true);
 }
 
 void CreateCheatFromCode(NSString *code, NSString *cheatDescription)
 {
-	S9xAddCheatGroup(cheatDescription.UTF8String, code.UTF8String);
-	S9xEnableCheatGroup(Cheat.group.size() - 1);
+	const std::string name = cheatDescription.UTF8String, text = code.UTF8String;
+	RunOnEmulationThread(^{
+		S9xAddCheatGroup(name, text);
+		S9xEnableCheatGroup(Cheat.group.size() - 1);
+	}, true);
 }
 
 NSArray<S9xCheatItem *> *GetAllCheats(void)

@@ -1203,7 +1203,14 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	if (!CartLoad(impl_->cart, data, size, path))
 		return false;
 	impl_->has_rom = true;
+	// A known cart bug real consoles can hit too is fixed in memory on every model.
 	impl_->gb_pristine.clear();
+	if (const GbCartPatch *fx = FindGbCartPatch(impl_->cart.rom.data(), impl_->cart.rom.size()))
+	{
+		std::vector<uint8_t> file = impl_->cart.rom;
+		if (ApplyGbCartPatch(*fx, impl_->cart.rom.data(), impl_->cart.rom.size()))
+			impl_->gb_pristine.swap(file);
+	}
 	const bool cart_is_cgb = (impl_->cart.header.cgb_flag & 0x80) != 0;
 	impl_->cgb_mode = (impl_->cgb_override >= 0)
 	                ? (impl_->cgb_override != 0)

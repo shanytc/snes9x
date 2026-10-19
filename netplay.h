@@ -197,6 +197,9 @@ void S9xNPServerQueueSendingROMImage ();
 void S9xNPServerQueueSendingLoadROMRequest (const char *filename);
 
 void S9xNPServerAddTask (uint32 task, void *data);
+// A port whose server thread is not its emulation thread calls this from the
+// emulation thread every loop, paused or not; the server then reads the SNES there.
+void S9xNPServerRunEmulationJob (void);
 
 bool8 S9xNPStartServer (int port);
 void S9xNPStopServer ();

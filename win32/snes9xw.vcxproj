@@ -331,6 +331,7 @@
     <ClInclude Include="..\sgb\gb_ops.h" />
     <ClInclude Include="..\sgb\gb_memory.h" />
     <ClInclude Include="..\sgb\gb_mbc.h" />
+    <ClInclude Include="..\sgb\gb_patches.h" />
     <ClInclude Include="..\sgb\gb_ppu.h" />
     <ClInclude Include="..\sgb\gb_apu.h" />
     <ClInclude Include="..\sgb\gb_timer.h" />
@@ -565,6 +566,7 @@
     <ClCompile Include="..\sgb\gb_ops_cb.cpp" />
     <ClCompile Include="..\sgb\gb_memory.cpp" />
     <ClCompile Include="..\sgb\gb_mbc.cpp" />
+    <ClCompile Include="..\sgb\gb_patches.cpp" />
     <ClCompile Include="..\sgb\gb_ppu.cpp" />
     <ClCompile Include="..\sgb\gb_apu.cpp" />
     <ClCompile Include="..\sgb\gb_timer.cpp" />

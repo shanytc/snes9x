@@ -3,6 +3,7 @@
 #include <QMessageBox>
 #include "EmuCanvasVulkan.hpp"
 #include "EmuMainWindow.hpp"
+#include "EmuApplication.hpp"
 
 #include "snes9x_imgui.h"
 #include "imgui_impl_vulkan.h"
@@ -298,13 +299,13 @@ void EmuCanvasVulkan::paintEvent(QPaintEvent *event)
     if (!isVisible())
         return;
 
-    auto window = (EmuMainWindow *)parent;
     if (output_data.ready)
     {
-        if (!window->isActivelyDrawing())
-        {
-            draw();
-        }
+        // ImGui's OSD reads the emulation thread's GFX and Memory (S9X_MACHINE).
+        app.emu_thread->runOnThread([&] {
+            if (!app.window->isActivelyDrawing())
+                draw();
+        });
         return;
     }
 }

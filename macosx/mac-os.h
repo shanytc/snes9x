@@ -152,6 +152,7 @@ extern S9xView			*s9xView;
 void AdjustMenus (void);
 void UpdateMenuCommandStatus (Boolean);
 void ApplyNSRTHeaderControllers (void);
+void RunOnEmulationThread (dispatch_block_t, bool);
 void QuitWithFatalError (NSString *);
 void ChangeInputDevice (void);
 void PostQueueToSubEventLoop (void);
@@ -204,7 +205,7 @@ extern id<S9xInputDelegate> inputDelegate;
 
 - (void)recreateS9xView;
 
-- (void)start;
+- (BOOL)startCart:(bool8 (^)(void))openCart;
 - (void)stop;
 - (void)softwareReset;
 - (void)hardwareReset;

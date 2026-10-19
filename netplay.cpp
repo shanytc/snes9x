@@ -364,6 +364,17 @@ version of the protocol. Disconnecting.");
 
     NetPlay.FrameCount = READ_LONG (&data [2]);
 
+#ifndef __WIN32__
+    // No ROM loaded and none coming: this machine has nothing to run (and an unpowered APU).
+    if (!(header [2] & 0x80) && Memory.ROMFilename.empty ())
+    {
+        S9xNPSetError ("The server is not sending its ROM image: load its game before joining.");
+        delete[] data;
+        S9xNPDisconnect ();
+        return (FALSE);
+    }
+#endif
+
     if (!(header [2] & 0x80) &&
         strcmp ((char *) data + 4 + 2, NetPlay.ROMName) != 0)
     {

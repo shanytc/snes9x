@@ -5,7 +5,8 @@
 \*****************************************************************************/
 
 // Game Boy cart edits made in memory, outside Super Game Boy Color (which keeps
-// its own in sgbc_patches): SGB compatibility rows, applied under an SGB BIOS.
+// its own in sgbc_patches): SGB compatibility rows, applied under an SGB BIOS,
+// and game-bug rows, applied at every cart load on every console model.
 
 #ifndef _SGB_GB_PATCHES_H_
 #define _SGB_GB_PATCHES_H_
@@ -40,6 +41,10 @@ struct GbCartPatch
 // (Joryuu Janshi parks on the SGB2 boot value). Applied under any SGB BIOS,
 // Super Game Boy Color included.
 const GbCartPatch *FindSgbCartPatch(const uint8_t *rom, size_t size);
+
+// A cart's own bug that a real console can hit too (Uno's VBlank handler
+// re-entering its sound driver after a link bulk). Applied on every model.
+const GbCartPatch *FindGbCartPatch(const uint8_t *rom, size_t size);
 
 // Write a row's edits into the cart image in memory. True when every edit's
 // old bytes matched and all were written; false with nothing written otherwise.

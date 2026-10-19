@@ -5925,7 +5925,16 @@ int WINAPI WinMain(
             }
 
 			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && (!Settings.FrameAdvance || GUI.FAMute)));
+#ifdef NETPLAY_SUPPORT
+			// Paused too: a netplay thread may be waiting on its job.
+			S9xNPRunEmulationJobs ();
+#endif
         }
+
+#ifdef NETPLAY_SUPPORT
+        // The netplay server and client threads' work on the SNES runs here.
+        S9xNPRunEmulationJobs ();
+#endif
 
         // Runs with no ROM loaded too: the spawned instance sits here
         // until its game is picked, and the peer must see it arrive.

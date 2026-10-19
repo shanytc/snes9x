@@ -42,12 +42,23 @@ QString movieErrorString(int result, bool brief)
     }
 }
 
-/* <ROM name>.smv in the export folder, the default both dialogs start from. */
-static QString defaultMoviePath()
+/* <ROM name>.smv in the export folder, the default both dialogs start from.
+ * The ROM, and so these paths, are the emulation thread's (S9X_MACHINE). */
+static QString defaultMoviePath(EmuApplication *app)
 {
-    if (Memory.ROMFilename.empty())
-        return {};
-    return QString::fromStdString(S9xGetFilename(".smv", SCREENSHOT_DIR));
+    std::string path;
+    app->emu_thread->runOnThread([&] {
+        if (!Memory.ROMFilename.empty())
+            path = S9xGetFilename(".smv", SCREENSHOT_DIR);
+    }, true);
+    return QString::fromStdString(path);
+}
+
+static QString exportFolder(EmuApplication *app)
+{
+    std::string folder;
+    app->emu_thread->runOnThread([&] { folder = S9xGetDirectory(SCREENSHOT_DIR); }, true);
+    return QString::fromStdString(folder);
 }
 
 static QString romDescription(uint32_t crc32, const char *name)
@@ -157,7 +168,7 @@ PlayMovieDialog::PlayMovieDialog(EmuApplication *app, QWidget *parent)
     connect(browse_button, &QPushButton::clicked, this, &PlayMovieDialog::browse);
     connect(path_edit, &QLineEdit::textChanged, this, &PlayMovieDialog::refreshInfo);
 
-    path_edit->setText(defaultMoviePath());
+    path_edit->setText(defaultMoviePath(app));
     refreshInfo();
 }
 
@@ -175,7 +186,7 @@ void PlayMovieDialog::browse()
 {
     QFileInfo current(path_edit->text());
     QString start = current.dir().exists() ? current.dir().path()
-                                           : QString::fromStdString(S9xGetDirectory(SCREENSHOT_DIR));
+                                           : exportFolder(app);
 
     QFileDialog dialog(this, tr("Open Movie"));
     dialog.setFileMode(QFileDialog::ExistingFile);
@@ -187,6 +198,14 @@ void PlayMovieDialog::browse()
 
 void PlayMovieDialog::refreshInfo()
 {
+    uint32_t rom_crc32 = 0, rom_fps = 0;
+    std::string rom_name;
+    app->emu_thread->runOnThread([&] {
+        rom_crc32 = Memory.ROMCRC32;
+        rom_fps = Memory.ROMFramesPerSecond;
+        rom_name = Memory.ROMName;
+    }, true);
+
     MovieInfo info{};
     int result = FILE_NOT_FOUND;
     auto path = path_edit->text().toStdString();
@@ -199,7 +218,7 @@ void PlayMovieDialog::refreshInfo()
     {
         date_label->setText(QDateTime::fromSecsSinceEpoch(info.TimeCreated).toString(Qt::TextDate));
 
-        uint32_t fps = Memory.ROMFramesPerSecond ? Memory.ROMFramesPerSecond : 60;
+        uint32_t fps = rom_fps ? rom_fps : 60;
         uint32_t seconds = (info.LengthFrames + fps / 2) / fps;
         length_label->setText(QString("%1:%2:%3")
                                   .arg(seconds / 3600, 2, 10, QChar('0'))
@@ -216,7 +235,7 @@ void PlayMovieDialog::refreshInfo()
         rerecord_label->clear();
     }
 
-    current_rom_label->setText(tr("Current ROM: %1").arg(romDescription(Memory.ROMCRC32, Memory.ROMName)));
+    current_rom_label->setText(tr("Current ROM: %1").arg(romDescription(rom_crc32, rom_name.c_str())));
 
     if (result == SUCCESS)
     {
@@ -239,7 +258,7 @@ void PlayMovieDialog::refreshInfo()
         else
             movie_rom_label->setText(tr("Movie's ROM: (not stored in movie file)"));
 
-        const bool mismatch = has_rom_info && info.ROMCRC32 != Memory.ROMCRC32;
+        const bool mismatch = has_rom_info && info.ROMCRC32 != rom_crc32;
         if (mismatch)
         {
             current_rom_label->setText(current_rom_label->text() + tr(" <-- MISMATCH !!!"));
@@ -314,7 +333,7 @@ RecordMovieDialog::RecordMovieDialog(EmuApplication *app, QWidget *parent, bool 
     connect(browse_button, &QPushButton::clicked, this, &RecordMovieDialog::browse);
     connect(from_reset_radio, &QRadioButton::toggled, this, &RecordMovieDialog::updateClearSRAM);
 
-    path_edit->setText(defaultMoviePath());
+    path_edit->setText(defaultMoviePath(app));
     joypad_boxes[0]->setChecked(true);
     from_reset_radio->setChecked(app->config->movie_default_from_reset);
     from_now_radio->setChecked(!app->config->movie_default_from_reset);
@@ -357,7 +376,7 @@ void RecordMovieDialog::browse()
 {
     QFileInfo current(path_edit->text());
     QString start = current.dir().exists() ? current.dir().path()
-                                           : QString::fromStdString(S9xGetDirectory(SCREENSHOT_DIR));
+                                           : exportFolder(app);
 
     QFileDialog dialog(this, tr("Record Movie"));
     dialog.setFileMode(QFileDialog::AnyFile);

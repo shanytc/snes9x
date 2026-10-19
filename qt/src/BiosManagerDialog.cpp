@@ -510,7 +510,12 @@ void BiosManagerDialog::browse(int slot)
     const auto *info = S9xGetBiosSlotInfo(slot);
     QString start = cards[slot].edit->text();
     if (start.isEmpty())
-        start = QString::fromStdString(S9xGetDirectory(BIOS_DIR));
+    {
+        // Without a BIOS folder this is the ROM's, which the emulation thread knows.
+        std::string folder;
+        app->emu_thread->runOnThread([&] { folder = S9xGetDirectory(BIOS_DIR); }, true);
+        start = QString::fromStdString(folder);
+    }
 
     const QString file = QFileDialog::getOpenFileName(
         this, tr("Select %1 BIOS").arg(QString::fromUtf8(info->label)), start,

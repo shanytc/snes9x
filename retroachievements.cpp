@@ -7,6 +7,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -42,6 +43,9 @@ static bool g_raEnabled = false;
 static bool g_netplayActive = false;
 static bool g_loginUserInitiated = false;
 static bool g_resetPendingOnLoad = false;
+// Memory is per thread (S9X_MACHINE): a load asked for off the emulation
+// thread waits for its next RA_DoFrame.
+static std::atomic<bool> g_loadRomPending{false};
 
 // ---------------------------------------------------------------------------
 // Notification queue (thread-safe)
@@ -508,7 +512,7 @@ static void RC_CCONV ra_login_callback(int result, const char *error_message,
                 // identified so the session starts from power-on.
                 g_resetPendingOnLoad = true;
                 if (!ra_load_in_progress())
-                    RA_OnLoadROM();
+                    g_loadRomPending = true;
             }
         }
     }
@@ -596,7 +600,9 @@ void RA_Init()
 
     rc_client_enable_logging(g_rcClient, RC_CLIENT_LOG_LEVEL_VERBOSE, ra_log_message);
     rc_client_set_event_handler(g_rcClient, ra_event_handler);
-    rc_client_set_allow_background_memory_reads(g_rcClient, 1);
+    // Activation validates addresses through ra_read_memory; keep it on the
+    // emulation thread (rc_client_do_frame), whose Memory is the loaded one.
+    rc_client_set_allow_background_memory_reads(g_rcClient, 0);
 
     g_initialized = true;
 }
@@ -624,12 +630,16 @@ void RA_Shutdown()
     g_netplayActive = false;
     g_loginUserInitiated = false;
     g_resetPendingOnLoad = false;
+    g_loadRomPending = false;
 }
 
 void RA_DoFrame()
 {
     if (!g_rcClient || !g_raEnabled)
         return;
+
+    if (g_loadRomPending.exchange(false))
+        RA_OnLoadROM();
 
     // Netplay: peers emulate everyone's inputs, so other players would earn
     // unlocks here. Idle keeps the server session alive without triggers.
@@ -669,6 +679,7 @@ void RA_SetNetplayActive(bool active)
 // ---------------------------------------------------------------------------
 void RA_OnLoadROM()
 {
+    g_loadRomPending = false;
     if (!g_rcClient || !g_raEnabled)
         return;
 

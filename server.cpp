@@ -817,7 +817,25 @@ void S9xNPServerLoop (void *)
         } while (res > 0);
 
 #ifdef __WIN32__
-        success = WaitForSingleObject (GUI.ServerTimerSemaphore, 200) == WAIT_OBJECT_0;
+        // The frame timer that released ServerTimerSemaphore went with the QPC
+        // throttle (e9233823): pace the heartbeats by the clock, as other ports do.
+        static LARGE_INTEGER qpf = { 0 }, next = { 0 };
+        LARGE_INTEGER now;
+        if (!qpf.QuadPart)
+            QueryPerformanceFrequency (&qpf);
+        QueryPerformanceCounter (&now);
+        const LONGLONG frame = qpf.QuadPart * Settings.FrameTime / 1000000;
+        if (!next.QuadPart || now.QuadPart - next.QuadPart > frame * 4)
+            next = now;   // first beat, or back from a pause: no catch-up burst
+        if (next.QuadPart > now.QuadPart)
+        {
+            DWORD ms = (DWORD) ((next.QuadPart - now.QuadPart) * 1000 / qpf.QuadPart);
+            Sleep (ms < 200 ? ms : 200);
+            QueryPerformanceCounter (&now);
+        }
+        success = next.QuadPart <= now.QuadPart;
+        if (success)
+            next.QuadPart += frame;
 #else
         while (gettimeofday (&now, NULL) < 0) ;
 

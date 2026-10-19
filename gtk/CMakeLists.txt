@@ -405,6 +405,7 @@ list(APPEND SOURCES
     ../sgb/gb_ops_cb.cpp
     ../sgb/gb_memory.cpp
     ../sgb/gb_mbc.cpp
+    ../sgb/gb_patches.cpp
     ../sgb/gb_ppu.cpp
     ../sgb/gb_apu.cpp
     ../sgb/gb_timer.cpp

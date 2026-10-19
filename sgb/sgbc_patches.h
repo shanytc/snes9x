@@ -95,11 +95,6 @@ struct CartPatch
 
 const CartPatch *FindSgbcCartPatch(const uint8_t *rom, size_t size);
 
-// Super Game Boy compatibility: a cart whose own SGB path stops under a BIOS
-// (Joryuu Janshi parks on the SGB2 boot value). Same row shape; applied in
-// memory under any SGB BIOS, Super Game Boy Color included.
-const CartPatch *FindSgbCartPatch(const uint8_t *rom, size_t size);
-
 // Write a row's edits into the Game Boy cart image in memory. True when every
 // edit's old bytes matched and all were written; false with nothing written
 // otherwise. Never resizes the image.

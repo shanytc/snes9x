@@ -11,6 +11,8 @@
 #include <errno.h>
 #include <memory.h>
 #include <sys/types.h>
+#include <atomic>
+#include <vector>
 #ifdef HAVE_STRINGS_H
 	#include <strings.h>
 #endif
@@ -606,6 +608,88 @@ void S9xNPAcceptClient (int Listen, bool8 block)
 
 static bool8 server_continue = TRUE;
 
+// Machine state is per thread (S9X_MACHINE): the server's reads of the running
+// SNES are run by the emulation thread, in S9xNPServerRunEmulationJob.
+enum { NP_JOB_IDLE, NP_JOB_POSTED, NP_JOB_RUNNING, NP_JOB_DONE };
+static std::atomic<int> np_job_state (NP_JOB_IDLE);
+static std::atomic<bool> np_jobs_serviced (false);
+static bool8 (*np_job) (void *) = NULL;
+static void *np_job_data = NULL;
+static bool8 np_job_result = FALSE;
+
+static bool8 S9xNPRunOnEmulationThread (bool8 (*job) (void *), void *data)
+{
+    // A port that never services jobs keeps running them here.
+    if (!np_jobs_serviced)
+        return (job (data));
+
+    np_job = job;
+    np_job_data = data;
+    np_job_state = NP_JOB_POSTED;
+
+    while (np_job_state != NP_JOB_DONE)
+    {
+        // Stopping: take back a job the emulation thread has not started.
+        int posted = NP_JOB_POSTED;
+        if (!server_continue && np_job_state.compare_exchange_strong (posted, NP_JOB_IDLE))
+            return (FALSE);
+#ifdef __WIN32__
+        Sleep (1);
+#else
+        usleep (1000);
+#endif
+    }
+
+    np_job_state = NP_JOB_IDLE;
+    return (np_job_result);
+}
+
+void S9xNPServerRunEmulationJob (void)
+{
+    np_jobs_serviced = true;
+
+    int posted = NP_JOB_POSTED;
+    if (!np_job_state.compare_exchange_strong (posted, NP_JOB_RUNNING))
+        return;
+
+    np_job_result = np_job (np_job_data);
+    np_job_state = NP_JOB_DONE;
+}
+
+struct NPROMImage
+{
+    std::vector<uint8> rom;
+    std::string filename;
+    bool8 hirom;
+};
+
+static bool8 NPCopyROMImageJob (void *data)
+{
+    NPROMImage *image = (NPROMImage *) data;
+    image->rom.assign (Memory.ROM, Memory.ROM + Memory.CalculatedSize);
+    image->filename = Memory.ROMFilename;
+    image->hirom = Memory.HiROM;
+    return (TRUE);
+}
+
+static bool8 NPCopySRAMJob (void *data)
+{
+    int SRAMSize = Memory.SRAMSize ?
+                   (1 << (Memory.SRAMSize + 3)) * 128 : 0;
+    if (Memory.LoROM)
+        SRAMSize = SRAMSize < 0x70000 ? SRAMSize : 0x70000;
+	else if (Memory.HiROM)
+		SRAMSize = SRAMSize < 0x40000 ? SRAMSize : 0x40000;
+
+    ((std::vector<uint8> *) data)->assign (Memory.SRAM, Memory.SRAM + SRAMSize);
+    return (TRUE);
+}
+
+static bool8 NPFreezeGameJob (void *fname)
+{
+    return (S9xFreezeGame ((const char *) fname));
+}
+
 static bool8 S9xNPServerInit (int port)
 {
     struct sockaddr_in address;
@@ -966,23 +1050,27 @@ bool8 S9xNPSendROMImageToClient (int c)
     sprintf (NetPlay.ActionMsg, "Sending ROM image to player %d...", c + 1);
     S9xNPSetAction (NetPlay.ActionMsg, TRUE);
 
+    NPROMImage image;
+    if (!S9xNPRunOnEmulationThread (NPCopyROMImageJob, &image))
+        return (FALSE);
+
     uint8 header [7 + 1 + 4];
     uint8 *ptr = header;
-    int len = sizeof (header) + Memory.CalculatedSize +
-              Memory.ROMFilename.length() + 1;
+    int len = sizeof (header) + image.rom.size () +
+              image.filename.length() + 1;
     *ptr++ = NP_SERV_MAGIC;
     *ptr++ = NPServer.Clients [c].SendSequenceNum++;
     *ptr++ = NP_SERV_ROM_IMAGE;
     WRITE_LONG (ptr, len);
     ptr += 4;
-    *ptr++ = Memory.HiROM;
-    WRITE_LONG (ptr, Memory.CalculatedSize);
+    *ptr++ = image.hirom;
+    WRITE_LONG (ptr, (uint32) image.rom.size ());
 
     if (!S9xNPSSendData (NPServer.Clients [c].Socket, header, sizeof (header)) ||
-        !S9xNPSSendData (NPServer.Clients [c].Socket, Memory.ROM,
-                        Memory.CalculatedSize) ||
-        !S9xNPSSendData (NPServer.Clients [c].Socket, (uint8 *) Memory.ROMFilename.c_str(),
-                        Memory.ROMFilename.length() + 1))
+        !S9xNPSSendData (NPServer.Clients [c].Socket, image.rom.data (),
+                        image.rom.size ()) ||
+        !S9xNPSSendData (NPServer.Clients [c].Socket, (uint8 *) image.filename.c_str(),
+                        image.filename.length() + 1))
     {
         S9xNPShutdownClient (c, TRUE);
         return (FALSE);
@@ -1009,9 +1097,9 @@ void S9xNPSyncClient (int client)
 
     S9xNPSetAction ("SERVER: Freezing game...", TRUE);
 #ifdef HAVE_MKSTEMP
-    if ( ((fd=mkstemp(fname)) >= 0) && S9xFreezeGame(fname) )
+    if ( ((fd=mkstemp(fname)) >= 0) && S9xNPRunOnEmulationThread(NPFreezeGameJob, fname) )
 #else
-    if ( tmpnam(fname) && S9xFreezeGame(fname) )
+    if ( tmpnam(fname) && S9xNPRunOnEmulationThread(NPFreezeGameJob, fname) )
 #endif
     {
         uint8 *data;
@@ -1176,14 +1264,11 @@ void S9xNPSendSRAMToClient (int c)
     printf ("SERVER: Sending S-RAM data to player %d @%ld\n", c + 1, S9xGetMilliTime () - START);
 #endif
     uint8 sram [7];
-    int SRAMSize = Memory.SRAMSize ?
-                   (1 << (Memory.SRAMSize + 3)) * 128 : 0;
-    if (Memory.LoROM)
-        SRAMSize = SRAMSize < 0x70000 ? SRAMSize : 0x70000;
-	else if (Memory.HiROM)
-		SRAMSize = SRAMSize < 0x40000 ? SRAMSize : 0x40000;
+    std::vector<uint8> data;
+    if (!S9xNPRunOnEmulationThread (NPCopySRAMJob, &data))
+        return;
 
-    int len = 7 + SRAMSize;
+    int len = 7 + data.size ();
 
     sprintf (NetPlay.ActionMsg, "SERVER: Sending S-RAM to player %d...", c + 1);
     S9xNPSetAction (NetPlay.ActionMsg, TRUE);
@@ -1197,7 +1282,7 @@ void S9xNPSendSRAMToClient (int c)
                         sram, sizeof (sram)) ||
         (len > 7 &&
          !S9xNPSSendData (NPServer.Clients [c].Socket,
-                         Memory.SRAM, len - 7)))
+                         data.data (), len - 7)))
     {
         S9xNPShutdownClient (c, TRUE);
     }

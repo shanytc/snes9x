@@ -460,8 +460,8 @@ static bool idle_func()
 
     check_pointer_timer();
     S9xProcessEvents(true);
-    // The netplay server thread's reads of the SNES run here, paused or not.
-    S9xNPServerRunEmulationJob();
+    // Netplay's server thread hands its work on the SNES to here, paused or not.
+    S9xNPRunEmulationJobs();
 
     if (Settings.Paused)
     {

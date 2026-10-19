@@ -53,12 +53,7 @@ bool8 SNES9X_OpenCart (NSURL *inRef)
 	NSURL		*cartRef;
 	const char	*filename = inRef.path.UTF8String;
 
-	if (cartOpen)
-	{
-		SNES9X_SaveSRAM();
-		S9xResetSaveTimer(false);
-		S9xSaveCheatFile(S9xGetFilename(".cht", CHEAT_DIR));
-	}
+	// The outgoing cart's thread saved it on its way out (SNES9X_Quit).
 
 	if (!inRef)
 	{
@@ -121,12 +116,7 @@ bool8 SNES9X_OpenMultiCart (NSURL *cart1FileURL, NSURL *cart2FileURL)
 {
 	Boolean	r;
 
-	if (cartOpen)
-	{
-		SNES9X_SaveSRAM();
-		S9xResetSaveTimer(false);
-		S9xSaveCheatFile(S9xGetFilename(".cht", CHEAT_DIR));
-	}
+	// The outgoing cart's thread saved it on its way out (SNES9X_Quit).
 
 	spcFileCount = pngFileCount = 0;
 

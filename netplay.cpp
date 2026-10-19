@@ -11,6 +11,8 @@
 #include <errno.h>
 #include <memory.h>
 #include <sys/types.h>
+#include <atomic>
+#include <mutex>
 
 #include "snes9x.h"
 #include "controls.h"
@@ -63,6 +65,105 @@ void S9xNPGetFreezeFile (uint32 len);
 unsigned long START = 0;
 
 static const uint32 NP_MAX_FREEZE_FILE_SIZE = 64 * 1024 * 1024;
+
+enum { NP_JOB_IDLE, NP_JOB_POSTED, NP_JOB_RUNNING, NP_JOB_DONE };
+static std::mutex np_job_poster;   // one netplay thread's job at a time
+static std::atomic<int> np_job_state (NP_JOB_IDLE);
+static std::atomic<bool> np_jobs_serviced (false);
+static thread_local bool np_on_emulation_thread = false;
+static bool8 (*np_job) (void *) = NULL;
+static void *np_job_data = NULL;
+static bool8 np_job_result = FALSE;
+
+bool8 S9xNPRunOnEmulationThread (bool8 (*job) (void *), void *data, const volatile bool8 &keep_waiting)
+{
+    // Already there (the non-win32 client), or a port that never services jobs.
+    if (np_on_emulation_thread || !np_jobs_serviced)
+        return (job (data));
+
+    std::lock_guard<std::mutex> lock (np_job_poster);
+    np_job = job;
+    np_job_data = data;
+    np_job_state = NP_JOB_POSTED;
+#ifdef __WIN32__
+    PostMessage (GUI.hWnd, WM_NULL, 0, 0);   // a paused win32 loop sleeps in GetMessage
+#endif
+
+    while (np_job_state != NP_JOB_DONE)
+    {
+        // Shutting down: take back a job the emulation thread has not started.
+        int posted = NP_JOB_POSTED;
+        if (!keep_waiting && np_job_state.compare_exchange_strong (posted, NP_JOB_IDLE))
+            return (FALSE);
+#ifdef __WIN32__
+        Sleep (1);
+#else
+        usleep (1000);
+#endif
+    }
+
+    np_job_state = NP_JOB_IDLE;
+    return (np_job_result);
+}
+
+void S9xNPRunEmulationJobs (void)
+{
+    np_on_emulation_thread = true;
+    np_jobs_serviced = true;
+
+    int posted = NP_JOB_POSTED;
+    if (!np_job_state.compare_exchange_strong (posted, NP_JOB_RUNNING))
+        return;
+
+    np_job_result = np_job (np_job_data);
+    np_job_state = NP_JOB_DONE;
+}
+
+// The client's work on the SNES; on win32 it receives on a thread of its own.
+static bool8 NPResetJob (void *)
+{
+    S9xReset ();
+    return (TRUE);
+}
+
+static bool8 NPSwapJoypadsJob (void *)
+{
+    S9xApplyCommand (S9xGetCommandT ("SwapJoypads"), 1, 1);
+    return (TRUE);
+}
+
+static bool8 NPUnfreezeGameJob (void *fname)
+{
+    return (S9xUnfreezeGame ((const char *) fname));
+}
+
+static bool8 NPCopySRAMInJob (void *data)
+{
+    std::vector<uint8> *sram = (std::vector<uint8> *) data;
+    memcpy (Memory.SRAM, sram->data (), sram->size ());
+    return (TRUE);
+}
+
+struct NPReceivedROM
+{
+    uint8 hirom;
+    std::vector<uint8> rom;
+    std::string filename;
+};
+
+static bool8 NPLoadROMImageJob (void *data)
+{
+    NPReceivedROM *received = (NPReceivedROM *) data;
+    Memory.HiROM = received->hirom;
+    Memory.LoROM = !Memory.HiROM;
+    Memory.HeaderCount = 0;
+    Memory.CalculatedSize = received->rom.size ();
+    memcpy (Memory.ROM, received->rom.data (), received->rom.size ());
+    Memory.ROMFilename = received->filename;
+    Memory.InitROM ();
+    S9xReset ();
+    return (TRUE);
+}
 
 bool8 S9xNPConnect ();
 
@@ -484,7 +585,7 @@ bool8 S9xNPWaitForHeartBeat ()
                 printf ("CLIENT: RESET received @%ld\n", S9xGetMilliTime () - START);
 #endif
                 S9xNPDiscardHeartbeats ();
-		S9xReset ();
+		S9xNPRunOnEmulationThread (NPResetJob, NULL, NetPlay.Connected);
                 NetPlay.FrameCount = READ_LONG (&header [3]);
                 S9xNPResetJoypadReadPos ();
                 S9xNPSendReady ();
@@ -500,7 +601,7 @@ bool8 S9xNPWaitForHeartBeat ()
 #ifdef NP_DEBUG
 			printf("CLIENT: Joypad Swap received @%ld\n", S9xGetMilliTime() - START);
 #endif
-			S9xApplyCommand(S9xGetCommandT("SwapJoypads"), 1, 1);
+			S9xNPRunOnEmulationThread (NPSwapJoypadsJob, NULL, NetPlay.Connected);
 			break;
         case NP_SERV_LOAD_ROM:
 #ifdef NP_DEBUG
@@ -630,17 +731,16 @@ bool8 S9xNPGetROMImage (uint32 len)
         return (FALSE);
     }
 
-    Memory.HiROM = rom_info [0];
-    Memory.LoROM = !Memory.HiROM;
-    Memory.HeaderCount = 0;
-    Memory.CalculatedSize = CalculatedSize;
+    NPReceivedROM received;
+    received.hirom = rom_info [0];
+    received.rom.resize (CalculatedSize);
 
     // Load up ROM image
 #ifdef NP_DEBUG
     printf ("CLIENT: Receiving ROM image @%ld...\n", S9xGetMilliTime () - START);
 #endif
     S9xNPSetAction ("Receiving ROM image...");
-    if (!S9xNPGetData (NetPlay.Socket, Memory.ROM, Memory.CalculatedSize))
+    if (!S9xNPGetData (NetPlay.Socket, received.rom.data (), CalculatedSize))
     {
         S9xNPSetError ("Error while receiving ROM image from server.");
         Settings.StopEmulation = TRUE;
@@ -651,7 +751,7 @@ bool8 S9xNPGetROMImage (uint32 len)
     printf ("CLIENT: Receiving ROM filename @%ld...\n", S9xGetMilliTime () - START);
 #endif
     S9xNPSetAction ("Receiving ROM filename...");
-    uint32 filename_len = len - Memory.CalculatedSize - 5;
+    uint32 filename_len = len - CalculatedSize - 5;
     if (filename_len == 0 || filename_len > PATH_MAX)
     {
         S9xNPSetError ("Error while receiving ROM filename from server.");
@@ -668,9 +768,9 @@ bool8 S9xNPGetROMImage (uint32 len)
         Settings.StopEmulation = TRUE;
         return (FALSE);
     }
-    Memory.ROMFilename.assign((char *) filename.data());
-    Memory.InitROM ();
-    S9xReset ();
+    received.filename.assign((char *) filename.data());
+    if (!S9xNPRunOnEmulationThread (NPLoadROMImageJob, &received, NetPlay.Connected))
+        return (FALSE);
     S9xNPResetJoypadReadPos ();
     Settings.StopEmulation = FALSE;
 
@@ -690,11 +790,14 @@ void S9xNPGetSRAMData (uint32 len)
         return;
     }
     S9xNPSetAction ("Receiving S-RAM data...");
-    if (len > 0 && !S9xNPGetData (NetPlay.Socket, Memory.SRAM, len))
+    std::vector<uint8> data (len);
+    if (len > 0 && !S9xNPGetData (NetPlay.Socket, data.data (), len))
     {
         S9xNPSetError ("Error while receiving S-RAM data from server.");
         S9xNPDisconnect ();
     }
+    else if (len > 0)
+        S9xNPRunOnEmulationThread (NPCopySRAMInJob, &data, NetPlay.Connected);
 	S9xNPSetAction ("", TRUE);
 }
 
@@ -765,7 +868,7 @@ void S9xNPGetFreezeFile (uint32 len)
 
                 if (rename(fname, buf) == 0)
                 {
-                    if (!S9xUnfreezeGame (buf))
+                    if (!S9xNPRunOnEmulationThread (NPUnfreezeGameJob, buf, NetPlay.Connected))
                         S9xNPSetError ("Unable to load freeze file just received.");
                     remove(buf);
                 }
@@ -775,7 +878,7 @@ void S9xNPGetFreezeFile (uint32 len)
                     remove(fname);
                 }
 #else
-                if (!S9xUnfreezeGame (fname))
+                if (!S9xNPRunOnEmulationThread (NPUnfreezeGameJob, fname, NetPlay.Connected))
 #endif
                     S9xNPSetError ("Unable to load freeze file just received.");
             } else {
@@ -943,6 +1046,18 @@ bool8 S9xNPGetData (int socket, uint8 *data, int length)
         // abort request from another thread.
         if (num_bytes > chunk)
             num_bytes = chunk;
+
+        // On the emulation thread the server may be waiting on a job: keep serving it.
+        while (np_on_emulation_thread && np_jobs_serviced && !NetPlay.Abort)
+        {
+            fd_set read_fds;
+            FD_ZERO (&read_fds);
+            FD_SET (socket, &read_fds);
+            struct timeval timeout = { 0, 10000 };
+            if (select (socket + 1, &read_fds, NULL, NULL, &timeout) != 0)
+                break;
+            S9xNPRunEmulationJobs ();
+        }
 
         int got = read (socket, (char *) ptr, num_bytes);
         if (got < 0)

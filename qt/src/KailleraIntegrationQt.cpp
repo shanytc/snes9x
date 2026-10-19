@@ -41,6 +41,15 @@ static EmuApplication *g_app = nullptr;
 static bool g_connectDialogOpen = false;
 static std::string g_lastUsername;
 
+// The loaded ROM's name, from the emulation thread's Memory (S9X_MACHINE).
+static std::string kaillera_qt_loaded_rom_name()
+{
+    std::string name;
+    if (g_app && g_app->emu_thread && !Settings.StopEmulation)
+        g_app->emu_thread->runOnThread([&] { name = Memory.ROMName; }, true);
+    return name;
+}
+
 static void kaillera_qt_update_window_title()
 {
     if (!g_app || !g_app->window)
@@ -129,8 +138,8 @@ static void kaillera_qt_game_started(const char *gameName, int playerNumber, int
             g_app->window->kaillera_end_action->setEnabled(true);
 
         // Check if the ROM is already loaded
-        if (!Settings.StopEmulation && Memory.ROMName[0] &&
-            name == Memory.ROMName)
+        const std::string loaded = kaillera_qt_loaded_rom_name();
+        if (!loaded.empty() && name == loaded)
         {
             fprintf(stderr, "[Kaillera] ROM already loaded\n");
             return;
@@ -333,8 +342,9 @@ void Kaillera_Qt_ShowConnectDialog()
 
     // Populate ROM list
     {
-        if (!Settings.StopEmulation && Memory.ROMName[0])
-            romCombo->addItem(QString("%1 (loaded)").arg(Memory.ROMName));
+        const QString loaded = QString::fromStdString(kaillera_qt_loaded_rom_name());
+        if (!loaded.isEmpty())
+            romCombo->addItem(QString("%1 (loaded)").arg(loaded));
 
         std::string romDir = g_app->config->last_rom_folder;
         if (!romDir.empty())
@@ -345,8 +355,7 @@ void Kaillera_Qt_ShowConnectDialog()
             for (auto &entry : entries)
             {
                 QString baseName = entry.completeBaseName();
-                if (!Settings.StopEmulation && Memory.ROMName[0] &&
-                    baseName == Memory.ROMName)
+                if (!loaded.isEmpty() && baseName == loaded)
                     continue;
                 romCombo->addItem(baseName);
             }

@@ -445,6 +445,18 @@ bool S9xGBCameraIsRunning()
     return g_running;
 }
 
+bool S9xGBCameraGetFrame(std::vector<unsigned char> &luma, int &width, int &height)
+{
+    std::lock_guard<std::mutex> lock(g_lock);
+    if (!g_frame_valid || g_frame_width <= 0 || g_frame_height <= 0 || g_frame.empty())
+        return false;
+
+    luma = g_frame;
+    width = g_frame_width;
+    height = g_frame_height;
+    return true;
+}
+
 void S9xGBCameraApply()
 {
     if (!Settings.GBVideoCamera)

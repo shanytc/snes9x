@@ -288,6 +288,9 @@
     <ClInclude Include="..\msu1.h">
       <Filter>APU</Filter>
     </ClInclude>
+    <ClInclude Include="..\barcodebattler.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
     <ClInclude Include="..\voicekun.h">
       <Filter>APU</Filter>
     </ClInclude>
@@ -481,6 +484,9 @@
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="CGBSpriteViewerDlg.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="wbarcodebattler.h">
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="gb_viewer_common.h">
@@ -878,6 +884,9 @@
     <ClCompile Include="..\msu1.cpp">
       <Filter>APU</Filter>
     </ClCompile>
+    <ClCompile Include="..\barcodebattler.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
     <ClCompile Include="..\voicekun.cpp">
       <Filter>APU</Filter>
     </ClCompile>
@@ -1038,6 +1047,9 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CGBSpriteViewerDlg.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="wbarcodebattler.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="AcidTestsDlg.cpp">

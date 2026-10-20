@@ -63,6 +63,8 @@
 #include "netplay.h"
 #include "display.h"
 #include "voicekun.h"
+#include "barcodebattler.h"
+#include "gtk_barcode_battler.h"
 #include "nss.h"
 #include "sfcbox.h"
 #include "superdisc.h"
@@ -689,6 +691,37 @@ void Snes9xWindow::connect_signals()
             S9xSetInfoString(_("Voicer-kun: audio CD ejected"));
         }
         configure_widgets();
+    });
+
+    // Barcode Battler II: takes port 2's place while connected. Scanning a
+    // code connects it; loading a game disconnects it.
+    get_object<Gtk::Menu>("barcode_battler_menu")->signal_show().connect([this] {
+        syncing_menu = true;
+        get_object<Gtk::CheckMenuItem>("barcode_battler_connect_item")
+            ->set_active(S9xBarcodeBattlerConnected());
+        syncing_menu = false;
+        enable_widget("barcode_battler_rescan_item", *S9xBarcodeBattlerLastCode() != 0);
+    });
+
+    get_object<Gtk::CheckMenuItem>("barcode_battler_connect_item")->signal_toggled().connect([this] {
+        if (syncing_menu)
+            return;
+        const bool connect = get_object<Gtk::CheckMenuItem>("barcode_battler_connect_item")->get_active();
+        S9xBarcodeBattlerConnect(connect);
+        S9xSetInfoString(connect ? _("Barcode Battler II connected to port 2")
+                                 : _("Barcode Battler II disconnected"));
+    });
+
+    get_object<Gtk::MenuItem>("barcode_battler_scan_item")->signal_activate().connect([this] {
+        pause_from_focus_change();
+        S9xBarcodeBattlerDialog(*window.get());
+        unpause_from_focus_change();
+    });
+
+    get_object<Gtk::MenuItem>("barcode_battler_rescan_item")->signal_activate().connect([this] {
+        std::string code = S9xBarcodeBattlerLastCode();
+        if (S9xBarcodeBattlerScan(code.c_str()))
+            S9xSetInfoString(fmt::format("Barcode Battler: {} scanned", code).c_str());
     });
 
     create_arcade_menus();
@@ -2704,6 +2737,9 @@ void Snes9xWindow::configure_widgets()
         enable_widget("voicekun_attach_item", !attached);
         enable_widget("voicekun_detach_item", attached);
     }
+
+    // Barcode Battler II: needs a game to talk to.
+    enable_widget("barcode_battler_item", config->rom_loaded);
 
     // Super Disc drive: only offered while its BIOS cart is loaded, and one
     // disc at a time.

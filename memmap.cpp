@@ -49,6 +49,7 @@
 #include "superdisc.h"
 #include "rp2040cart.h"
 #include "voicekun.h"
+#include "barcodebattler.h"
 
 // The Super Disc BIOS behind a disc image File -> Load Game booted, "" otherwise.
 static std::string SuperDiscBIOSPath;
@@ -3951,6 +3952,7 @@ void CMemory::InitROM (void)
 	Settings.BS = FALSE;
 	Settings.MSU1 = FALSE;
 	S9xVoiceKunDetach();	// the hook PC is per-game; a new ROM needs a fresh attach
+	S9xBarcodeBattlerConnect(false);	// port 2 is a joypad again until a code is scanned
 
 	SuperFX.nRomBanks = CalculatedSize >> 15;
 

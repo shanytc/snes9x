@@ -120,6 +120,7 @@ set(SNES9X_CORE_SOURCES
     ../cpuops.cpp
     ../cpuexec.cpp
     ../voicekun.cpp
+    ../barcodebattler.cpp
     ../cartprot.cpp
     ../rp2040.cpp
     ../rp2040cart.cpp
@@ -337,6 +338,8 @@ list(APPEND QT_GUI_SOURCES
     src/StatePreviewDialog.hpp
     src/ColorCorrectionDialog.cpp
     src/ColorCorrectionDialog.hpp
+    src/BarcodeBattlerDialog.cpp
+    src/BarcodeBattlerDialog.hpp
     src/MovieDialogs.cpp
     src/MovieDialogs.hpp
     src/AudioWaveformWindow.cpp

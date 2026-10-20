@@ -4203,6 +4203,19 @@ int32_t g_seat_slave_accum = 0;
 // Last rotation state mirrored to the seats, for the trace edge line.
 uint8_t g_seat_mlt_mirror = 0;
 
+// A seat whose own MLT_REQ has landed answers from its own ICD2 (packets seen so far).
+static bool     g_seat_own_mlt[SGB_MAX_LINK_PLAYERS - 1];
+static uint32_t g_seat_mlt_pkts[SGB_MAX_LINK_PLAYERS - 1];
+
+static void SplitSeatMltRearm(void)
+{
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		g_seat_own_mlt[k]  = false;
+		g_seat_mlt_pkts[k] = g_split_cores[k] ? g_split_cores[k]->DebugImpl()->icd2.packets_received : 0;
+	}
+}
+
 // Lift a completed frame out the moment VBlank latches it, then let the
 // core run on into the next frame; the blit reads the snapshot.
 bool SplitSnapIfReady(SGB::Emulator *core, int i)
@@ -4507,6 +4520,7 @@ static void SplitFollowMasterBoot(void)
 	g_follow_input     = false;
 	for (int i = 0; i < SGB_MAX_LINK_PLAYERS; ++i) g_seat_settling[i] = true;
 	std::memset(g_seat_boot_hash, 0, sizeof g_seat_boot_hash);
+	SplitSeatMltRearm();
 }
 
 static void SplitFollowDone(void)
@@ -4638,6 +4652,7 @@ bool S9xSGBSplitStateLoad(const uint8_t *buf, size_t size)
 	SplitDropSnaps();
 	g_seat_slave_accum = 0;
 	SplitFollowDone();   // the checkpoint is taken past the boot
+	SplitSeatMltRearm();
 	return true;
 }
 
@@ -5702,6 +5717,14 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 		for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 			if (g_split_cores[k])
 			{
+				// From its own MLT_REQ on a seat answers for itself: a cart that re-runs
+				// the SGB check on a button press does it on that player's schedule.
+				const auto &si = g_split_cores[k]->DebugImpl()->icd2;
+				const uint32_t fresh = si.packets_received - g_seat_mlt_pkts[k];
+				g_seat_mlt_pkts[k] = si.packets_received;
+				for (uint32_t j = 0; j < fresh && j < si.last_cmd_ids_len; ++j)
+					if (si.last_cmd_ids[si.last_cmd_ids_len - 1 - j] == 0x11) g_seat_own_mlt[k] = true;
+				if (g_seat_own_mlt[k] && !SeatOwnModel(k)) continue;
 				// A seat on its own Game Boy Model is not on a Super Game Boy
 				// at all: no rotation to mirror, and forcing one would rotate
 				// a pad its game never asked to be rotated.

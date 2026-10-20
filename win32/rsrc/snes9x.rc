@@ -743,6 +743,26 @@ BEGIN
     LTEXT           "not found",IDC_MULTICART_BIOSNOTFOUND,270,50,54,8
 END
 
+IDD_BARCODE_BATTLER DIALOGEX 0, 0, 300, 262
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Barcode Battler II"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "Swipe a card through the Barcode Battler II on controller port 2. Enter its 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, or read it with a camera or from a picture.",IDC_STATIC,6,6,288,26
+    RTEXT           "Barcode:",IDC_STATIC,6,38,34,8
+    EDITTEXT        IDC_BARCODE_EDIT,44,36,132,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "&Random",IDC_BARCODE_RANDOM,180,36,50,14
+    PUSHBUTTON      "From &Image...",IDC_BARCODE_IMAGE,234,36,60,14
+    LTEXT           "",IDC_BARCODE_STATUS,44,54,250,18
+    RTEXT           "Camera:",IDC_STATIC,6,78,34,8
+    COMBOBOX        IDC_BARCODE_CAMERA,44,76,186,100,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Start &Camera",IDC_BARCODE_CAMERA_TOGGLE,234,76,60,14
+    CONTROL         "",IDC_BARCODE_PREVIEW,"Static",SS_OWNERDRAW | SS_SUNKEN,44,94,250,132
+    LTEXT           "Some games look for the Barcode Battler only when they start; reset the game if it doesn't respond.",IDC_STATIC,6,230,200,26
+    DEFPUSHBUTTON   "&Scan",IDOK,210,242,40,14
+    PUSHBUTTON      "Cancel",IDCANCEL,254,242,40,14
+END
+
 IDD_BIOSMANAGER DIALOGEX 0, 0, 600, 300
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "BIOS Manager"
@@ -1636,6 +1656,13 @@ BEGIN
         MENUITEM "Use Multitaps (8-player)",    IDM_MULTITAP8,MFT_STRING,MFS_ENABLED
         MENUITEM "Use Dual Justifiers",         IDM_JUSTIFIERS,MFT_STRING,MFS_ENABLED
         MENUITEM "Use M.A.C.S. Rifle",          IDM_MACSRIFLE_TOGGLE,MFT_STRING,MFS_ENABLED
+        MENUITEM MFT_SEPARATOR
+        POPUP "&Barcode Battler II",            0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&Connect to Port 2",          ID_INPUT_BARCODE_CONNECT,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Scan Barcode...",            ID_INPUT_BARCODE_SCAN,MFT_STRING,MFS_ENABLED
+            MENUITEM "Scan &Last Barcode Again",    ID_INPUT_BARCODE_RESCAN,MFT_STRING,MFS_ENABLED
+        END
     END
     POPUP "&Sound",                         0,MFT_STRING,MFS_ENABLED
     BEGIN

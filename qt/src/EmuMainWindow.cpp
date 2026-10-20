@@ -24,6 +24,8 @@
 #include "LuaScriptWindow.hpp"
 #include "lua/lua_engine.h"
 #include "ColorCorrectionDialog.hpp"
+#include "BarcodeBattlerDialog.hpp"
+#include "barcodebattler.h"
 #include "MovieDialogs.hpp"
 #include "StatePreviewDialog.hpp"
 #include "EmuApplication.hpp"
@@ -1682,6 +1684,39 @@ void EmuMainWindow::createWidgets()
     add_device_item(input_menu, EmuConfig::eMultitap8, tr("Use Multitaps (&8-player)"));
     add_device_item(input_menu, EmuConfig::eDualJustifiers, tr("Use &Dual Justifiers"));
     add_device_item(input_menu, EmuConfig::eMacsRifle, tr("Use M.A.C.S. &Rifle"));
+
+    input_menu->addSeparator();
+
+    // Epoch's barcode reader, which takes port 2's place while connected.
+    // Scanning a code connects it; loading a game disconnects it.
+    auto barcode_menu = input_menu->addMenu(tr("&Barcode Battler II"));
+    auto barcode_connect_action = barcode_menu->addAction(tr("&Connect to Port 2"));
+    barcode_connect_action->setCheckable(true);
+    QObject::connect(barcode_connect_action, &QAction::triggered, [&](bool checked) {
+        S9xBarcodeBattlerConnect(checked);
+        S9xSetInfoString(checked ? "Barcode Battler II connected to port 2"
+                                 : "Barcode Battler II disconnected");
+    });
+    auto barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
+    QObject::connect(barcode_scan_action, &QAction::triggered, [&] {
+        app.pause();
+        BarcodeBattlerDialog dialog(this);
+        dialog.exec();
+        app.unpause();
+    });
+    auto barcode_rescan_action = barcode_menu->addAction(tr("Scan &Last Barcode Again"));
+    QObject::connect(barcode_rescan_action, &QAction::triggered, [&] {
+        std::string code = S9xBarcodeBattlerLastCode();
+        if (S9xBarcodeBattlerScan(code.c_str()))
+            S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
+    });
+    core_actions.push_back(barcode_scan_action);
+    QObject::connect(barcode_menu, &QMenu::aboutToShow, [this, barcode_connect_action, barcode_rescan_action] {
+        const bool running = app.isCoreActive();
+        barcode_connect_action->setEnabled(running);
+        barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
+        barcode_rescan_action->setEnabled(running && *S9xBarcodeBattlerLastCode());
+    });
 
     QObject::connect(input_menu, &QMenu::aboutToShow, [&] {
         updatePortConfigurationMenu();

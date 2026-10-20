@@ -260,3 +260,23 @@ bool GBCameraIsRunning()
 {
 	return g_running;
 }
+
+bool GBCameraGetFrame(std::vector<unsigned char> &luma, int &width, int &height)
+{
+	std::lock_guard<std::mutex> lk(g_lock);
+	if (!g_frameValid || g_frameW <= 0 || g_frameH <= 0 || g_frame.empty())
+		return false;
+
+	width = g_frameW;
+	height = g_frameH;
+	luma.resize(static_cast<size_t>(width) * height);
+	for (int y = 0; y < height; ++y)
+	{
+		const int sy = g_frameBottomUp ? height - 1 - y : y;
+		const unsigned char *px = g_frame.data() + static_cast<size_t>(sy) * width * 4;
+		unsigned char *out = luma.data() + static_cast<size_t>(y) * width;
+		for (int x = 0; x < width; ++x, px += 4)
+			out[x] = static_cast<unsigned char>((px[2] * 54 + px[1] * 183 + px[0] * 19) >> 8);
+	}
+	return true;
+}

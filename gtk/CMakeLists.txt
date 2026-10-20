@@ -348,6 +348,8 @@ list(APPEND SOURCES
     src/gtk_display_driver_gtk.h
     src/gtk_display_driver.h
     src/gtk_display.h
+    src/gtk_barcode_battler.cpp
+    src/gtk_barcode_battler.h
     src/gtk_state_preview_dialog.cpp
     src/gtk_state_preview_dialog.h
     src/threadpool.cpp
@@ -456,6 +458,7 @@ list(APPEND SOURCES
     ../cpuops.cpp
     ../cpuexec.cpp
     ../voicekun.cpp
+    ../barcodebattler.cpp
     ../cartprot.cpp
     ../rp2040.cpp
     ../rp2040cart.cpp

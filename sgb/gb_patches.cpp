@@ -60,6 +60,10 @@ namespace SGB {
 				{ 0x003FEC, 3, { 0xBB, 0xFF, 0xEF }, { 0x00, 0xDA, 0x35 } },
 				{ 0x003FEF, 3, { 0xFB, 0xF5, 0xB7 }, { 0xC9, 0xE1, 0xC3 } },
 				{ 0x003FF2, 2, { 0x33, 0xF9 }, { 0x7B, 0x03 } } } },
+			// Namco Gallery Vol.3's Jantaku Boy arms its link port before its SGB check and sets
+			// the packet length after it; bytes arriving between walk the ISR index into IE.
+			{ 0x4209, "GALLERY3", "link packet length set before the port is armed", 1,
+			  { { 0x000DBF, 3, { 0x00, 0xE0, 0x02 }, { 0x04, 0xE0, 0xD1 } } } },
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

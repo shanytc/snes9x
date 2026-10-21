@@ -16454,11 +16454,11 @@ static void WinStartGBViewerSession (int players)
 	if (GBSeatCount < players - 1)
 		S9xSetInfoString ("Link cable: could not open every player window");
 
-	// And a SNES of its own for every seat that picked a Super Game Boy,
-	// run in step with the cable: every 8 Game Boy lines of the engine's
-	// stepping, each machine advances the same amount.
+	// And a SNES of its own for every seat that picked a Super Game Boy, run in
+	// step with the cable line by line, like the in-process seats (8 lines let a
+	// reply land after the master's next VBlank: Jinsei's START handshake).
 	GBSeatMachinesCreate (players);
-	S9xSGBSplitSetYield (GBSeatMachinesYield, 456 * 8);
+	S9xSGBSplitSetYield (GBSeatMachinesYield, 456);
 
 	// All consoles power up together — hard, so no seat boots from
 	// half-initialized RAM.

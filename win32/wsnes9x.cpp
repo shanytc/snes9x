@@ -16264,14 +16264,23 @@ static void GBSeatMachinesYield (int gb_cycles)
 	{
 		GBSeatMachine *m = &GBSeatMachines[k];
 		if (!m->thread || !m->ready || m->failed) continue;
-		m->gb_total += gb_cycles;
-		m->target = m->base_lines + (m->gb_total * 21477272) / (gb_hz * 1364);
-		m->pay    = gb_cycles;
-		SetEvent (m->go);
-		if (!GBSeatMachineWaitDone (m->done, 1000))
+		// A head start (switched on first) runs as its own slices while the master waits.
+		int32 lead = S9xSGBSplitTakeSeatHeadStart (m->player);
+		for (;;)
 		{
-			m->failed = true;
-			S9xSetInfoString ("Link cable: a Super Game Boy seat stopped responding");
+			const int32 c = (lead > 0 && lead < gb_cycles) ? lead : gb_cycles;
+			m->gb_total += c;
+			m->target = m->base_lines + (m->gb_total * 21477272) / (gb_hz * 1364);
+			m->pay    = c;
+			SetEvent (m->go);
+			if (!GBSeatMachineWaitDone (m->done, 1000))
+			{
+				m->failed = true;
+				S9xSetInfoString ("Link cable: a Super Game Boy seat stopped responding");
+				break;
+			}
+			if (lead <= 0) break;
+			lead -= c;
 		}
 	}
 

@@ -478,6 +478,11 @@ void S9xSGBSplitSetExternalCore(int player, SGB::Emulator *core);
 typedef void (*S9xSGBSplitYieldFn)(int gb_cycles);
 void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles);
 
+// Two consoles are never switched on together: a 2-player seat machine is
+// owed a head start, which the yield spends as that machine's own slices
+// while the master waits. Game Boy cycles still owed (once), else 0.
+int32_t S9xSGBSplitTakeSeatHeadStart(int player);
+
 // On a seat machine's own thread. The role keeps its SNES tick from stepping
 // the master's split seats; the target makes S9xMainLoop return once this
 // machine's SNES has run that many scanlines in total, mid-frame if need be.

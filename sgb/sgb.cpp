@@ -2428,9 +2428,13 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			JoypadSet(impl_->joypad, impl_->mem, mask);
 			return;
 		}
-		case 0x6005: icd.joypad[1] = value; impl_->joypad.sgb_pads[1] = value; return;
-		case 0x6006: icd.joypad[2] = value; impl_->joypad.sgb_pads[2] = value; return;
-		case 0x6007: icd.joypad[3] = value; impl_->joypad.sgb_pads[3] = value; return;
+		case 0x6005:
+		case 0x6006:
+		case 0x6007:
+			icd.joypad[a - 0x6004] = value;
+			impl_->joypad.sgb_pads[a - 0x6004] = value;
+			JoypadLineEdges(impl_->joypad, impl_->mem);   // the rotation may be on this pad
+			return;
 	}
 }
 
@@ -3930,6 +3934,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->joypad.sgb_pads[2]  = impl_->icd2.joypad[2];
 	impl_->joypad.sgb_pads[3]  = impl_->icd2.joypad[3];
 	impl_->joypad.sgb_index    = impl_->icd2.input_index;
+	impl_->joypad.lines        = JoypadRead(impl_->joypad) & 0x0F;
 
 	return true;
 }

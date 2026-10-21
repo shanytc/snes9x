@@ -632,6 +632,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			// Feed this core's own SGB command-packet sniffer. Benign when
 			// SGB mode inactive.
 			S9xSGBOnJoyserWriteCore(m.sgb_owner, value);
+			if (m.joypad) JoypadLineEdges(*m.joypad, m);   // after any rotation step
 			return;
 		case 0xFF01:
 			m.serial_data = value;

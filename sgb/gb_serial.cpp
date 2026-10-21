@@ -859,17 +859,19 @@ bool SplitTryResolveMaster(Serial &s, Memory &mem)
 }
 
 // The peer core was not armed for a clock we drove. Hold the byte for
-// it the way the socket transport holds a peer emulator's: hardware
-// shifts it into the other console's register whether or not that
-// console asked for a transfer, and a game that clocks unilaterally
-// (Micro Machines promotes itself to master on a timeout, whatever the
-// other console is doing) sends most of its handshake into exactly
-// this gap. Games with a settled master and slave never notice, which
-// is why nothing else needed it.
-void SplitHoldClock(Serial &s, uint8_t data)
+// it the way the socket transport holds a peer emulator's: a game that
+// clocks unilaterally (Micro Machines promotes itself to master on a
+// timeout, whatever the other console is doing) sends most of its
+// handshake into exactly this gap. Games with a settled master and slave
+// never notice, which is why nothing else needed it. False when not held.
+bool SplitHoldClock(Serial &s, uint8_t data)
 {
 	Serial *ps = (&s == g_splitlink.s[0]) ? g_splitlink.s[1] : g_splitlink.s[0];
-	if (!ps || ps->pending_len >= Serial::kPendingCap) return;
+	Memory *pm = (&s == g_splitlink.s[0]) ? g_splitlink.m[1] : g_splitlink.m[0];
+	if (!ps || ps->pending_len >= Serial::kPendingCap) return false;
+	// Only a port that is on (SC.7) and externally clocked (SC.0 clear) hears
+	// the clock; one switched off or driving its own clock loses the byte.
+	if (pm && (pm->serial_control & 0x81) != 0x80) return false;
 
 	const int tail = (ps->pending_head + ps->pending_len) % Serial::kPendingCap;
 	ps->pending_data[tail] = data;
@@ -877,6 +879,17 @@ void SplitHoldClock(Serial &s, uint8_t data)
 	ps->pending_born[tail] = ps->real_cycles;
 	if (ps->pending_len == 0) ps->pending_age = 0;
 	++ps->pending_len;
+	return true;
+}
+
+// What a clock nobody answered reads: an idle port's SO is its shift
+// register's top bit, unshifted (Bionic Battler links on reading $00).
+uint8_t SplitIdleLine(const Serial &s)
+{
+	const Serial *ps = (&s == g_splitlink.s[0]) ? g_splitlink.s[1] : g_splitlink.s[0];
+	const Memory *pm = (&s == g_splitlink.s[0]) ? g_splitlink.m[1] : g_splitlink.m[0];
+	if (!ps || !pm || ps->active) return 0xFF;   // no peer, or one driving its own clock
+	return (pm->serial_data & 0x80) ? 0xFF : 0x00;
 }
 
 // Deliver one held clock once this core arms. Nothing is sent back:
@@ -2144,10 +2157,10 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 						}
 						else
 						{
-							Trace("[%lld] split master unanswered -> FF (held)",
-							      (long long)s.real_cycles);
-							SplitHoldClock(s, mem.serial_data);
-							s.peer_data     = 0xFF;
+							const bool held = SplitHoldClock(s, mem.serial_data);
+							s.peer_data     = held ? 0xFF : SplitIdleLine(s);
+							Trace("[%lld] split master unanswered -> %02X (%s)",
+							      (long long)s.real_cycles, s.peer_data, held ? "held" : "lost");
 							s.peer_valid    = true;
 							s.peer_supplied = false;
 						}

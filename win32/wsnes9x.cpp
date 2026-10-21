@@ -16268,10 +16268,11 @@ static void GBSeatMachinesYield (int gb_cycles)
 		int32 lead = S9xSGBSplitTakeSeatHeadStart (m->player);
 		for (;;)
 		{
-			const int32 c = (lead > 0 && lead < gb_cycles) ? lead : gb_cycles;
-			m->gb_total += c;
+			const int32 c  = (lead > 0 && lead < gb_cycles) ? lead : gb_cycles;
+			const int32 sc = S9xSGBSplitSeatCycles (m->player, c);   // its own crystal
+			m->gb_total += sc;
 			m->target = m->base_lines + (m->gb_total * 21477272) / (gb_hz * 1364);
-			m->pay    = c;
+			m->pay    = sc;
 			SetEvent (m->go);
 			if (!GBSeatMachineWaitDone (m->done, 1000))
 			{

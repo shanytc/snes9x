@@ -4463,18 +4463,20 @@ void S9xSGBDeinit(void)             { SGB::Instance().Deinit(); }
 // itself to master after 30 idle ticks — has both seats promote on the
 // very same cycle and neither is ever listening. Switch the seat on
 // first, by longer than a game's whole probe-and-park window (Renju
-// Club's is 0.43 s); the head start lasts until the next reset re-arms
-// it. Adapter sessions are left alone: the DMG-07 owns the clock there
-// and nothing arbitrates for it.
-static constexpr int32_t kSeatHeadStart = 1258291;   // 0.3 s of Game Boy
-static bool g_seat_head_start_due[SGB_MAX_LINK_PLAYERS - 1];
+// Club's is 0.43 s; F1 Pole Position listens for an adapter, then probes
+// until 0.84 s, and an F1 heard while listening locks it up); the head
+// start lasts until the next reset re-arms it. Adapter sessions are left
+// alone: the DMG-07 owns the clock there and nothing arbitrates for it.
+static constexpr int32_t kSeatHeadStart = 4194304;   // 1 s of Game Boy
+static bool    g_seat_head_start_due[SGB_MAX_LINK_PLAYERS - 1];
+static int64_t g_master_handoff_t = -1;   // master's t_cycles leaving its boot ROM
 
 static void SplitStaggerSeats(void)
 {
 	std::memset(g_seat_head_start_due, 0, sizeof g_seat_head_start_due);
-	// BIOS mode slaves the primary to the SNES clock: free-running a seat
-	// there would shear the BIOS's bank-read timing off our slices.
-	if (Settings.SGB_BIOSModeActive) return;
+	g_master_handoff_t = -1;
+	// In BIOS mode only a seat mirroring the master spends it, when the hold
+	// at the cart's first instruction lets go (SplitRunSeatsSlaved).
 	if (S9xSGBSplitPlayers() != 2 || S9xSGBCartNeedsDmg07()) return;
 	g_seat_head_start_due[0] = true;
 }
@@ -4486,14 +4488,45 @@ static void SplitHeadStart(SGB::Emulator *core, int pos)
 	const int k = pos - 1;
 	if (!g_seat_head_start_due[k] || core->DebugImpl()->mem.boot_rom_enabled) return;
 	g_seat_head_start_due[k] = false;
+	// Only consoles that came up in step need it: a master whose own boot ROM
+	// handed off a frame or more earlier is that far ahead already.
+	const int64_t now = SGB::Instance().DebugImpl()->cpu.State().t_cycles;
+	const bool apart = g_master_handoff_t >= 0 && now - g_master_handoff_t > 70224;
+	if (SGB::SerialTraceEnabled())
+	{
+		char msg[96];
+		snprintf(msg, sizeof msg, "boot: seat %d head start %d cycles at t=%lld%s", pos + 1,
+		         apart ? 0 : (int)kSeatHeadStart, (long long)core->DebugImpl()->cpu.State().t_cycles,
+		         apart ? " (master booted earlier)" : "");
+		SGB::SerialTraceMsg(msg);
+	}
+	if (!apart) core->RunCycles(kSeatHeadStart);
+}
+
+// The master's boot ROM handoff, seen once per lockstep round.
+static void SplitNoteMasterHandoff(void)
+{
+	if (g_master_handoff_t >= 0) return;
+	const SGB::Emulator::Impl *mi = SGB::Instance().DebugImpl();
+	if (!mi->mem.boot_rom_enabled) g_master_handoff_t = mi->cpu.State().t_cycles;
+}
+
+// A seat on a machine of its own spends it in its frontend, as that machine's
+// own lockstep slices run while the master waits. Cycles to run; 0 once spent.
+int32_t S9xSGBSplitTakeSeatHeadStart(int player)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1 || !g_split_external[k] || !g_seat_head_start_due[k])
+		return 0;
+	g_seat_head_start_due[k] = false;
 	if (SGB::SerialTraceEnabled())
 	{
 		char msg[80];
-		snprintf(msg, sizeof msg, "boot: seat %d head start %d cycles at t=%lld", pos + 1,
-		         (int)kSeatHeadStart, (long long)core->DebugImpl()->cpu.State().t_cycles);
+		snprintf(msg, sizeof msg, "boot: seat %d machine head start %d cycles", player,
+		         (int)kSeatHeadStart);
 		SGB::SerialTraceMsg(msg);
 	}
-	core->RunCycles(kSeatHeadStart);
+	return kSeatHeadStart;
 }
 
 // BIOS mode: a seat shows the master's pane until the master's boot is
@@ -4658,6 +4691,7 @@ void S9xSGBSplitResetSeats(void)
 		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
 	SplitDropSnaps();
 	g_seat_slave_accum = 0;
+	if (!g_split_external[0]) SplitStaggerSeats();   // a machine seat was not reset
 	SplitFollowMasterBoot();
 	if (SGB::SerialTraceEnabled())
 	{
@@ -5085,7 +5119,7 @@ void S9xSGBSplitRunFrame(void)
 			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(chunk);
 			remaining[i] -= chunk;
-			if (i == 0) SplitYield(chunk);   // once per round of the cores
+			if (i == 0) { SplitYield(chunk); SplitNoteMasterHandoff(); }   // once per round
 			else        SplitHeadStart(cs[i], i);
 			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
@@ -5725,6 +5759,8 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 		if (SeatOwnModel(k)) continue;   // its own console: the scanline clock steps it
 		if (held) continue;              // mirrors the master: waits for it
 		SGB::SerialSetTraceSeat(k + 1);
+		// Released in step with the master; consoles never are (Renju Club).
+		SplitHeadStart(core, k + 1);
 		core->RunCycles(slice);
 		if (SplitSnapIfReady(core, k + 1))
 			PhaseProbe(k + 1, core->DebugImpl()->ppu.framebuffer);

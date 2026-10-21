@@ -4471,9 +4471,26 @@ static constexpr int32_t kSeatHeadStart = 4194304;   // 1 s of Game Boy
 static bool    g_seat_head_start_due[SGB_MAX_LINK_PLAYERS - 1];
 static int64_t g_master_handoff_t = -1;   // master's t_cycles leaving its boot ROM
 
+// Every console runs off its own crystal: each seat's clock sits a fixed few tens
+// of ppm off the master's, so consoles whose frames line up drift apart (Jinsei).
+static constexpr int16_t kSeatPpm[SGB_MAX_LINK_PLAYERS] = {
+	0, 60, -45, 30, -70, 50, -20, 75, -55, 15, -35, 65, -10, 45, -65 };
+static int64_t g_seat_clock_frac[SGB_MAX_LINK_PLAYERS];
+
+int32_t S9xSGBSplitSeatCycles(int player, int32_t master_cycles)
+{
+	const int k = player - 1;
+	if (k < 1 || k >= SGB_MAX_LINK_PLAYERS) return master_cycles;
+	g_seat_clock_frac[k] += static_cast<int64_t>(master_cycles) * kSeatPpm[k];
+	const int64_t extra = g_seat_clock_frac[k] / 1000000;
+	g_seat_clock_frac[k] -= extra * 1000000;
+	return master_cycles + static_cast<int32_t>(extra);
+}
+
 static void SplitStaggerSeats(void)
 {
 	std::memset(g_seat_head_start_due, 0, sizeof g_seat_head_start_due);
+	std::memset(g_seat_clock_frac, 0, sizeof g_seat_clock_frac);
 	g_master_handoff_t = -1;
 	// In BIOS mode only a seat mirroring the master spends it, when the hold
 	// at the cart's first instruction lets go (SplitRunSeatsSlaved).
@@ -5117,7 +5134,7 @@ void S9xSGBSplitRunFrame(void)
 			if (!has[i] || remaining[i] <= 0) continue;
 			const int32_t chunk = remaining[i] < 456 ? remaining[i] : 456;
 			SGB::SerialSetTraceSeat(i);
-			cs[i]->RunCycles(chunk);
+			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, chunk) : chunk);
 			remaining[i] -= chunk;
 			if (i == 0) { SplitYield(chunk); SplitNoteMasterHandoff(); }   // once per round
 			else        SplitHeadStart(cs[i], i);
@@ -5143,7 +5160,7 @@ void S9xSGBSplitRunFrame(void)
 		{
 			if (!has[i]) continue;
 			SGB::SerialSetTraceSeat(i);
-			cs[i]->RunCycles(456);
+			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, 456) : 456);
 			if (i == 0) SplitYield(456);   // seat machines chase too
 			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
@@ -5761,7 +5778,7 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 		SGB::SerialSetTraceSeat(k + 1);
 		// Released in step with the master; consoles never are (Renju Club).
 		SplitHeadStart(core, k + 1);
-		core->RunCycles(slice);
+		core->RunCycles(S9xSGBSplitSeatCycles(k + 2, slice));
 		if (SplitSnapIfReady(core, k + 1))
 			PhaseProbe(k + 1, core->DebugImpl()->ppu.framebuffer);
 	}
@@ -5865,7 +5882,7 @@ static void SplitStepOwnSeats(int gb_cycles)
 		SGB::Emulator *core = g_split_cores[k].get();
 		if (!core || !SeatOwnModel(k) || !core->DebugImpl()->has_rom) continue;
 		SGB::SerialSetTraceSeat(k + 1);
-		core->RunCycles(slice);
+		core->RunCycles(S9xSGBSplitSeatCycles(k + 2, slice));
 		SplitSnapIfReady(core, k + 1);
 	}
 	SGB::SerialSetTraceSeat(-1);

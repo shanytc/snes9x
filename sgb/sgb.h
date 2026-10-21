@@ -483,6 +483,10 @@ void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles);
 // while the master waits. Game Boy cycles still owed (once), else 0.
 int32_t S9xSGBSplitTakeSeatHeadStart(int player);
 
+// Each console has its own crystal: the Game Boy cycles a seat runs while the
+// master runs master_cycles (a fixed few tens of ppm apart, remainder carried).
+int32_t S9xSGBSplitSeatCycles(int player, int32_t master_cycles);
+
 // On a seat machine's own thread. The role keeps its SNES tick from stepping
 // the master's split seats; the target makes S9xMainLoop return once this
 // machine's SNES has run that many scanlines in total, mid-frame if need be.

@@ -362,7 +362,7 @@ void Dispatch(CpuState &s, Memory &mem, uint8_t op)
 	             s.r.hl = AluAddSpE(s, s.r.sp, e); TickM(s, mem); } break;                     // LD HL,SP+e
 	case 0xF9: s.r.sp = s.r.hl; TickM(s, mem); break;                                          // LD SP,HL
 	case 0xFA: { uint16_t a = Fetch16(s, mem); s.r.a = BusRead(s, mem, a); } break;            // LD A,(nn)
-	case 0xFB: s.ime_pending = true; break;                                                    // EI
+	case 0xFB: if (!s.ime) s.ime_pending = true; break;                                        // EI (no-op with IME set)
 	case 0xFC: ++s.illegal_ops; s.stopped = true; break;                                       // *** undefined ***
 	case 0xFD: ++s.illegal_ops; s.stopped = true; break;                                       // *** undefined ***
 	case 0xFE: AluCp(s, s.r.a, Fetch8(s, mem)); break;                                         // CP A,n

@@ -245,6 +245,19 @@ struct retro_core_option_definition option_defs_us[] = {
       "disabled"
    },
    {
+      /* The code list after "last" is filled from system/barcodes.txt at start-up. */
+      "snes9x_barcode_scan",
+      "Barcode Battler II: Scan",
+      "Swipe a card through the Barcode Battler II on port 2. Pick a code when the game asks for a card, then close the menu. Codes listed one per line in system/barcodes.txt are offered too. Shown only for games that read the Barcode Battler.",
+      {
+         { "none",   "Pick a code" },
+         { "random", "Random code" },
+         { "last",   "Last code again" },
+         { NULL, NULL },
+      },
+      "none"
+   },
+   {
       "snes9x_overclock_superfx",
       "SuperFX Overclocking",
       "SuperFX coprocessor frequency multiplier. Can improve frame rate or cause timing errors. Values under 100% can improve game performance on slow devices.",

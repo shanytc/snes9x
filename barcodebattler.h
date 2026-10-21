@@ -22,8 +22,9 @@
 //
 // A scanned code waits in the interface until the game has clocked out all
 // of its digits; then the "waiting" bit drops until the next scan. While
-// connected the device replaces the port-2 joypad. The barcode is not part of
-// the recorded input, so movies and netplay don't carry it.
+// connected the device replaces the port-2 joypad, across game loads too.
+// The barcode is not part of the recorded input, so movies and netplay don't
+// carry it.
 
 void S9xBarcodeBattlerConnect(bool connect);
 bool S9xBarcodeBattlerConnected(void);
@@ -39,6 +40,9 @@ void S9xBarcodeBattlerClear(void);		// drop a code the game hasn't read
 
 // The 13 digits last scanned, as a C string ("" before the first scan).
 const char *S9xBarcodeBattlerLastCode(void);
+
+// True when the loaded game is one that reads the Barcode Battler.
+bool S9xBarcodeBattlerGameSupported(void);
 
 // True when the check digit of an 8-, 12- or 13-digit code adds up.
 bool S9xBarcodeChecksumValid(const char *code);

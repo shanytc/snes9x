@@ -18,11 +18,13 @@
 #include "crosshairs.h"
 #include "sgb/sgb.h"
 #include "rp2040cart.h"
+#include "barcodebattler.h"
 #include "upd7725.h"
 #include "hg51b.h"
 #include <stdio.h>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -39,6 +41,11 @@
 #define RETRO_DEVICE_LIGHTGUN_JUSTIFIER ((2 << 8) | RETRO_DEVICE_LIGHTGUN)
 #define RETRO_DEVICE_LIGHTGUN_JUSTIFIER_2 ((3 << 8) | RETRO_DEVICE_LIGHTGUN)
 #define RETRO_DEVICE_LIGHTGUN_MACS_RIFLE ((4 << 8) | RETRO_DEVICE_LIGHTGUN)
+#define RETRO_DEVICE_BARCODE_BATTLER ((2 << 8) | RETRO_DEVICE_JOYPAD)
+
+#ifndef RETRO_ENVIRONMENT_SET_VARIABLE
+#define RETRO_ENVIRONMENT_SET_VARIABLE 70
+#endif
 
 static int g_screen_gun_width = SNES_WIDTH;
 static int g_screen_gun_height = SNES_HEIGHT;
@@ -252,6 +259,64 @@ static void vfs_close(void *f)
 
 static const S9xRP2040FileOps vfs_file_ops = { vfs_open, vfs_read, vfs_seek, vfs_tell, vfs_close };
 
+// Barcode Battler II: codes from system/barcodes.txt join the scan option's
+// list, one per line ("4901234567894 strong one"); '#' starts a comment.
+static std::vector<std::string> barcode_codes, barcode_labels;
+
+static void load_barcode_list(retro_environment_t cb)
+{
+    struct retro_core_option_definition *def = option_defs_us;
+    while (def->key && strcmp(def->key, "snes9x_barcode_scan"))
+        def++;
+    if (!def->key)
+        return;
+
+    const int fixed = 3;	// none, random, last
+    barcode_codes.clear();
+    barcode_labels.clear();
+
+    const char *dir = NULL;
+    char path[PATH_MAX + 1];
+    FILE *f = NULL;
+    if (cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &dir) && dir)
+    {
+        snprintf(path, sizeof(path), "%s%sbarcodes.txt", dir, SLASH_STR);
+        f = fopen(path, "r");
+    }
+
+    char line[256];
+    while (f && fgets(line, sizeof(line), f) && fixed + barcode_codes.size() < RETRO_NUM_CORE_OPTION_VALUES_MAX - 1)
+    {
+        std::string text = line;
+        text = text.substr(0, text.find('#'));
+        text.erase(text.find_last_not_of(" \t\r\n") + 1);
+        text.erase(0, text.find_first_not_of(" \t"));
+
+        // The code is the leading digits; spaces and dashes inside it are skipped.
+        std::string digits;
+        size_t i = 0;
+        for (; i < text.size() && (isdigit((unsigned char) text[i]) || text[i] == ' ' || text[i] == '-'); i++)
+            if (isdigit((unsigned char) text[i]))
+                digits += text[i];
+        if (digits.size() != 13 && digits.size() != 12 && digits.size() != 8)
+            continue;
+        if (std::find(barcode_codes.begin(), barcode_codes.end(), digits) != barcode_codes.end())
+            continue;
+        barcode_codes.push_back(digits);
+        barcode_labels.push_back(text);
+    }
+    if (f)
+        fclose(f);
+
+    for (size_t n = 0; n < barcode_codes.size(); n++)
+    {
+        def->values[fixed + n].value = barcode_codes[n].c_str();
+        def->values[fixed + n].label = barcode_labels[n].c_str();
+    }
+    def->values[fixed + barcode_codes.size()].value = NULL;
+    def->values[fixed + barcode_codes.size()].label = NULL;
+}
+
 void retro_set_environment(retro_environment_t cb)
 {
     environ_cb = cb;
@@ -276,6 +341,7 @@ void retro_set_environment(retro_environment_t cb)
 
     cb(RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO,  (void*)subsystems);
 
+    load_barcode_list(cb);
     libretro_set_core_options(environ_cb);
 
     static const struct retro_controller_description port_1[] = {
@@ -293,6 +359,7 @@ void retro_set_environment(retro_environment_t cb)
         { "SuperScope", RETRO_DEVICE_LIGHTGUN_SUPER_SCOPE },
         { "Justifier", RETRO_DEVICE_LIGHTGUN_JUSTIFIER },
         { "M.A.C.S. Rifle", RETRO_DEVICE_LIGHTGUN_MACS_RIFLE },
+        { "Barcode Battler II", RETRO_DEVICE_BARCODE_BATTLER },
     };
 
     static const struct retro_controller_description port_3[] = {
@@ -308,7 +375,7 @@ void retro_set_environment(retro_environment_t cb)
 
     static const struct retro_controller_info ports[] = {
         { port_1, 4 },
-        { port_2, 7 },
+        { port_2, 8 },
         { port_3, 3 },
         { port_extra, 2 },
         { port_extra, 2 },
@@ -405,6 +472,52 @@ static void show_widescreen_option(void)
     option_display.key = "snes9x_widescreen";
     option_display.visible = S9xWidescreenGame() != NULL;
     environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+}
+
+// The scan option is shown only for a game that reads the Barcode Battler.
+static void show_barcode_option(void)
+{
+    struct retro_core_option_display option_display;
+    option_display.key = "snes9x_barcode_scan";
+    option_display.visible = rom_loaded && S9xBarcodeBattlerGameSupported();
+    environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+}
+
+// A code picked in the menu is swiped once the game runs again. The value a
+// game loads with is never scanned. Any pick goes back to "none" so the same
+// pick can be made again.
+static std::string barcode_pick;
+static bool barcode_pick_seen = false;
+
+static void update_barcode_scan(void)
+{
+    struct retro_variable var = { "snes9x_barcode_scan", NULL };
+    const std::string pick = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value ? var.value : "none";
+    const bool changed = barcode_pick_seen && pick != barcode_pick;
+    barcode_pick = pick;
+    barcode_pick_seen = true;
+    if (pick == "none")
+        return;
+
+    if (changed && rom_loaded && S9xBarcodeBattlerGameSupported())
+    {
+        std::string code = pick;
+        if (pick == "random")
+        {
+            char random[14];
+            S9xBarcodeRandom(random);
+            code = random;
+        }
+        else if (pick == "last")
+            code = S9xBarcodeBattlerLastCode();
+
+        if (S9xBarcodeBattlerScan(code.c_str()))
+            S9xSetInfoString(("Barcode Battler: " + std::string(S9xBarcodeBattlerLastCode()) + " scanned").c_str());
+    }
+
+    struct retro_variable reset = { "snes9x_barcode_scan", "none" };
+    if (environ_cb(RETRO_ENVIRONMENT_SET_VARIABLE, &reset))
+        barcode_pick = "none";
 }
 
 static void update_variables(void)
@@ -974,6 +1087,8 @@ static void update_variables(void)
             }
         }
     }
+
+    update_barcode_scan();
 }
 
 void S9xSyncSpeed() {
@@ -1147,6 +1262,16 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
                 S9xSetController(port, CTL_MACSRIFLE, 0, 0, 0, 0);
                 snes_devices[port] = RETRO_DEVICE_LIGHTGUN_MACS_RIFLE;
                 break;
+            case RETRO_DEVICE_BARCODE_BATTLER:
+                // The core reads it in place of whatever port 2 holds.
+                if (port == 1)
+                {
+                    S9xSetController(port, CTL_NONE, 0, 0, 0, 0);
+                    snes_devices[port] = RETRO_DEVICE_BARCODE_BATTLER;
+                }
+                else if (log_cb)
+                    log_cb(RETRO_LOG_ERROR, "Invalid Barcode Battler II assignment to port %d, must be port 2.\n", port + 1);
+                break;
             case RETRO_DEVICE_NONE:
                 S9xSetController(port, CTL_NONE, 0, 0, 0, 0);
                 snes_devices[port] = RETRO_DEVICE_NONE;
@@ -1156,6 +1281,9 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
                     log_cb(RETRO_LOG_ERROR, "Invalid device (%d).\n", device);
                 break;
         }
+
+        if (port == 1)
+            S9xBarcodeBattlerConnect(snes_devices[1] == RETRO_DEVICE_BARCODE_BATTLER);
 
         S9xControlsSoftReset();
     }
@@ -1545,6 +1673,7 @@ bool retro_load_game(const struct retro_game_info *game)
     rom_loaded = false;
     widescreen_content.clear();
     widescreen_content_path.clear();
+    barcode_pick_seen = false;
     update_variables();
     bios_notice_shown = false;
 
@@ -1652,6 +1781,7 @@ bool retro_load_game(const struct retro_game_info *game)
 
     Memory.ClearSRAM();
     show_widescreen_option();
+    show_barcode_option();
 
     return rom_loaded;
 }
@@ -1700,6 +1830,7 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
     init_descriptors();
     rom_loaded = false;
 
+    barcode_pick_seen = false;
     update_variables();
     switch (game_type)
     {
@@ -1788,6 +1919,7 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
         g_geometry_update = true;
     }
     show_widescreen_option();
+    show_barcode_option();
 
     return rom_loaded;
 }
@@ -1928,6 +2060,7 @@ void retro_init(void)
     map_buttons();
     check_system_specs();
     show_widescreen_option();
+    show_barcode_option();
 }
 
 #define MAP_BUTTON(id, name) S9xMapButton((id), S9xGetCommandT((name)), false)
@@ -2367,6 +2500,7 @@ static void report_buttons()
                 break;
 
             case RETRO_DEVICE_NONE:
+            case RETRO_DEVICE_BARCODE_BATTLER:	// codes come from the core option
                 break;
 
             default:

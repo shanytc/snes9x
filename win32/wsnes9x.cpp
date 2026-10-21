@@ -2531,17 +2531,17 @@ LRESULT CALLBACK WinProc(
 			ChangeInputDevice();
 			break;
 
-		// Barcode Battler II: takes port 2's place while connected. Scanning
-		// a code connects it; loading a game disconnects it.
+		// Barcode Battler II: takes port 2's place while connected. It can be
+		// connected before a game loads and stays across loads; scanning is
+		// only offered to a game that reads it.
 		case ID_INPUT_BARCODE_CONNECT:
-			if (Settings.StopEmulation)
-				break;
 			S9xBarcodeBattlerConnect(!S9xBarcodeBattlerConnected());
-			S9xSetInfoString(S9xBarcodeBattlerConnected() ? "Barcode Battler II connected to port 2"
-			                                              : "Barcode Battler II disconnected");
+			if (!Settings.StopEmulation)
+				S9xSetInfoString(S9xBarcodeBattlerConnected() ? "Barcode Battler II connected to port 2"
+				                                              : "Barcode Battler II disconnected");
 			break;
 		case ID_INPUT_BARCODE_SCAN:
-			if (Settings.StopEmulation)
+			if (Settings.StopEmulation || !S9xBarcodeBattlerGameSupported())
 				break;
 			RestoreGUIDisplay();
 			WinBarcodeBattlerDialog(GUI.hWnd);
@@ -2550,7 +2550,7 @@ LRESULT CALLBACK WinProc(
 		case ID_INPUT_BARCODE_RESCAN:
 		{
 			std::string code = S9xBarcodeBattlerLastCode();
-			if (!Settings.StopEmulation && S9xBarcodeBattlerScan(code.c_str()))
+			if (!Settings.StopEmulation && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
 				S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
 			break;
 		}
@@ -6948,12 +6948,12 @@ static void CheckMenuStates ()
     mii.fState = validFlag | (GUI.ControllerOption == SNES_MACSRIFLE ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_MACSRIFLE_TOGGLE, FALSE, &mii);
 
-	mii.fState = (Settings.StopEmulation ? MFS_DISABLED : MFS_ENABLED) |
-	             (S9xBarcodeBattlerConnected() ? MFS_CHECKED : MFS_UNCHECKED);
+	mii.fState = MFS_ENABLED | (S9xBarcodeBattlerConnected() ? MFS_CHECKED : MFS_UNCHECKED);
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_CONNECT, FALSE, &mii);
-	mii.fState = Settings.StopEmulation ? MFS_DISABLED : MFS_ENABLED;
+	const bool barcodeGame = !Settings.StopEmulation && S9xBarcodeBattlerGameSupported();
+	mii.fState = barcodeGame ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_SCAN, FALSE, &mii);
-	mii.fState = (Settings.StopEmulation || !*S9xBarcodeBattlerLastCode()) ? MFS_DISABLED : MFS_ENABLED;
+	mii.fState = (barcodeGame && *S9xBarcodeBattlerLastCode()) ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_RESCAN, FALSE, &mii);
 
 	mii.fState = !Settings.StopEmulation ? MFS_ENABLED : MFS_DISABLED;

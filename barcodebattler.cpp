@@ -13,6 +13,7 @@
 #include <stdio.h>
 
 #include "snes9x.h"
+#include "memmap.h"
 #include "display.h"
 #include "barcodebattler.h"
 
@@ -92,6 +93,33 @@ void S9xBarcodeBattlerClear (void)
 const char *S9xBarcodeBattlerLastCode (void)
 {
 	return (bb_last);
+}
+
+// The Super Famicom games that read the Barcode Battler, by No-Intro CRC32.
+static const uint32	bb_games[] =
+{
+	0x115233DB,	// Conveni Wars Barcode Battler Senki
+	0xF409C139,	// Dragon Slayer: Eiyuu Densetsu II
+	0x7A585763,	// Hatayama Hatch no Pro Yakyuu News! Jitsumei Ban
+	0xD343B398,	// Doraemon 2: Nobita no Toys Land Daibouken
+	0xD96B3936,	// J.League Excite Stage '94
+	0xC9E33615,	// J.League Excite Stage '94 (Rev 1)
+	0x560C5EAB,	// Doraemon 3: Nobita to Toki no Hougyoku
+	0x74ADC6E2,	// Lupin Sansei: Densetsu no Hihou o Oe!
+	0x82F7F710,	// The Amazing Spider-Man: Lethal Foes
+	0xDD871511,	// J.League Excite Stage '95
+	0x1ED5D2FA,	// Donald Duck no Mahou no Boushi
+	0x05798DA8,	// Alice no Paint Adventure
+	0x4097BC01	// Doraemon 4: Nobita to Tsuki no Oukoku (fullsnes only)
+};
+
+bool S9xBarcodeBattlerGameSupported (void)
+{
+	for (uint32 crc : bb_games)
+		if (Memory.ROMCRC32 == crc)
+			return (true);
+
+	return (false);
 }
 
 uint8 S9xBarcodeBattlerReadBit (int idx)

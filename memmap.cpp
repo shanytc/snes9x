@@ -3952,7 +3952,7 @@ void CMemory::InitROM (void)
 	Settings.BS = FALSE;
 	Settings.MSU1 = FALSE;
 	S9xVoiceKunDetach();	// the hook PC is per-game; a new ROM needs a fresh attach
-	S9xBarcodeBattlerConnect(false);	// port 2 is a joypad again until a code is scanned
+	S9xBarcodeBattlerClear();	// stays connected; a code the last game didn't read is dropped
 
 	SuperFX.nRomBanks = CalculatedSize >> 15;
 

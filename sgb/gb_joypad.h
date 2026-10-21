@@ -24,6 +24,7 @@ struct Joypad
 	uint8_t dpad      = 0x0F;   // low nibble, active-low — 1 = released
 	uint8_t btns      = 0x0F;
 	uint8_t prev_mask = 0;      // last GB_* mask — used for IRQ edge detection
+	uint8_t lines     = 0x0F;   // P10-P13 as last seen; derived, rebuilt on load
 
 	// ICD2 (SGB BIOS) joypad bridge. When sgb_active, JoypadRead pulls
 	// the selected nibble from sgb_pads[sgb_index] instead of dpad/btns,
@@ -70,6 +71,10 @@ void JoypadReset(Joypad &j);
 void    JoypadSet(Joypad &j, Memory &mem, uint8_t mask);
 uint8_t JoypadRead(const Joypad &j);
 void    JoypadWrite(Joypad &j, uint8_t value);
+
+// Any P10-P13 line falling raises IRQ_JOYPAD, a select write that lands on
+// a held button included. Call after anything that can move the lines.
+void    JoypadLineEdges(Joypad &j, Memory &mem);
 
 } // namespace SGB
 

@@ -32,7 +32,10 @@ ColorCorrectionDialog::ColorCorrectionDialog(EmuApplication *app, QWidget *paren
      * included, since there the SNES draws the picture. It greys out when
      * there is no screen to model -- nothing loaded, or a Game Boy picture in
      * plain shades. */
-    const char *system = S9xColorCorrectionSystem(app->isCoreActive());
+    const char *system = nullptr;
+    const bool active = app->isCoreActive();
+    // Asks the Game Boy core, which lives on the emulation thread.
+    app->emu_thread->runOnThread([&] { system = S9xColorCorrectionSystem(active); }, true);
     color_correction_checkbox = new QCheckBox(
         system ? tr("Enable color correction (accurate %1 colors)")
                      .arg(QString::fromUtf8(system))

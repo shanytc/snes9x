@@ -24,6 +24,7 @@ struct Joypad
 	uint8_t dpad      = 0x0F;   // low nibble, active-low — 1 = released
 	uint8_t btns      = 0x0F;
 	uint8_t prev_mask = 0;      // last GB_* mask — used for IRQ edge detection
+	uint8_t lines     = 0x0F;   // P10-P13 as last seen; derived, rebuilt on load
 
 	// ICD2 (SGB BIOS) joypad bridge. When sgb_active, JoypadRead pulls
 	// the selected nibble from sgb_pads[sgb_index] instead of dpad/btns,
@@ -44,6 +45,11 @@ struct Joypad
 	// joypad-rotation byte). Maintained by Emulator::OnJoyserWrite.
 	uint8_t mlt_players = 1;
 	uint8_t mlt_index   = 0;
+	// A split-screen seat is a Game Boy in its own Super Game Boy: it
+	// answers that same rotation probe, so its game colors itself like
+	// the master's, but its buttons are its own pad rather than a BIOS
+	// mirror of the SNES ones — there is no BIOS behind a seat.
+	bool    sgb_probe  = false;
 };
 
 enum : uint8_t
@@ -65,6 +71,10 @@ void JoypadReset(Joypad &j);
 void    JoypadSet(Joypad &j, Memory &mem, uint8_t mask);
 uint8_t JoypadRead(const Joypad &j);
 void    JoypadWrite(Joypad &j, uint8_t value);
+
+// Any P10-P13 line falling raises IRQ_JOYPAD, a select write that lands on
+// a held button included. Call after anything that can move the lines.
+void    JoypadLineEdges(Joypad &j, Memory &mem);
 
 } // namespace SGB
 

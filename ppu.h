@@ -208,8 +208,8 @@ struct SPPU
 };
 
 extern uint16				SignExtend[2];
-extern struct SPPU			PPU;
-extern struct InternalPPU	IPPU;
+extern S9X_MACHINE struct SPPU			PPU;
+extern S9X_MACHINE struct InternalPPU	IPPU;
 
 // Width of the picture being rendered, in SNES pixels: the hardware's 256
 // plus whatever widescreen is adding on either side.
@@ -224,7 +224,7 @@ void S9xSoftResetPPU (void);
 void S9xSetPPU (uint8, uint16);
 uint8 S9xGetPPU (uint16);
 void S9xSetCPU (uint8, uint16);
-extern int32 S9xCPUNextAccessSpeed;	// set by a word write: its second byte's bus cycle
+extern S9X_MACHINE int32 S9xCPUNextAccessSpeed;	// set by a word write: its second byte's bus cycle
 uint8 S9xGetCPU (uint16);
 void S9xUpdateIRQPositions (bool initial);
 void S9xFixColourBrightness (void);

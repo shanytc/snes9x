@@ -17,6 +17,7 @@ void JoypadReset(Joypad &j)
 	j.dpad      = 0x0F;
 	j.btns      = 0x0F;
 	j.prev_mask = 0;
+	j.lines     = 0x0F;
 }
 
 void JoypadSet(Joypad &j, Memory &mem, uint8_t mask)
@@ -44,6 +45,17 @@ void JoypadSet(Joypad &j, Memory &mem, uint8_t mask)
 
 	if (newly_pressed != 0)
 		mem.if_ = static_cast<uint8_t>(mem.if_ | IRQ_JOYPAD);
+	JoypadLineEdges(j, mem);
+}
+
+void JoypadLineEdges(Joypad &j, Memory &mem)
+{
+	// Double Dragon 3 reads its pad by toggling P14/P15 each VBlank with
+	// IE.4 on: the select write itself is the edge while a button is held.
+	const uint8_t now = static_cast<uint8_t>(JoypadRead(j) & 0x0F);
+	if (j.lines & ~now)
+		mem.if_ = static_cast<uint8_t>(mem.if_ | IRQ_JOYPAD);
+	j.lines = now;
 }
 
 uint8_t JoypadRead(const Joypad &j)
@@ -72,6 +84,12 @@ uint8_t JoypadRead(const Joypad &j)
 			if (sel_dpad) low &= dpad_n;
 			if (sel_btns) low &= btns_n;
 		}
+	}
+	else if (j.sgb_probe && !sel_dpad && !sel_btns)
+	{
+		// Same probe answer, no BIOS behind it: a seat's own SGB says it
+		// is there, and the buttons below stay the seat's own.
+		low = static_cast<uint8_t>(~j.sgb_index & 0x0F);
 	}
 	else
 	{

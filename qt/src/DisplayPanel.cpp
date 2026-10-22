@@ -99,7 +99,7 @@ DisplayPanel::DisplayPanel(EmuApplication *app_)
         app->updateSettings();
         // The widescreen choice swaps the cart for a game the table can patch.
         if (S9xWidescreenReloadNeeded())
-            app->window->openFile(Memory.ROMFilename);
+            app->window->openFile(app->getROMFilename());
     });
 
     connect(comboBox_aspect_ratio, &QComboBox::activated, [&](int index) {

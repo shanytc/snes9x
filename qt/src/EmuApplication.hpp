@@ -130,6 +130,7 @@ struct EmuApplication
     bool isCoreActive();
     QString iconPrefix();
     std::string getContentFolder();
+    std::string getROMFilename();
 
     std::vector<std::tuple<bool, std::string, std::string>> getCheatList();
     void disableAllCheats();

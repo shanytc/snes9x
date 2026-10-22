@@ -37,7 +37,8 @@
 
 EmuApplication::EmuApplication()
 {
-    core = Snes9xController::get();
+    // Built by startThread(), on the thread that runs it.
+    core = nullptr;
 }
 
 EmuApplication::~EmuApplication()
@@ -49,7 +50,6 @@ EmuApplication::~EmuApplication()
     KailleraClientDisconnect();
     KailleraServerStop();
 #endif
-    core->deinit();
 }
 
 void EmuApplication::restartAudio()
@@ -256,6 +256,11 @@ void EmuApplication::stopThread()
     if (!emu_thread)
         return;
 
+    // Saves the SRAM, which only the emulation thread's Memory holds.
+    emu_thread->runOnThread([&] {
+        core->deinit();
+        core->active = false;
+    }, true);
     emu_thread->setStatusBits(EmuThread::eQuit);
     while (!emu_thread->isFinished())
     {
@@ -288,6 +293,8 @@ void EmuApplication::startThread()
         emu_thread->start();
         emu_thread->waitForStatusBit(EmuThread::ePaused);
         emu_thread->moveToThread(emu_thread.get());
+        // Machine state is per thread (S9X_MACHINE): init the SNES where it runs.
+        emu_thread->runOnThread([&] { core = Snes9xController::get(); }, true);
     }
 }
 
@@ -296,17 +303,20 @@ bool EmuApplication::openFile(const std::string &filename)
     window->gameChanging();
     updateSettings();
     suspendThread();
+    bool result = false;
+    emu_thread->runOnThread([&] {
 #ifdef RETROACHIEVEMENTS_SUPPORT
-    RA_OnCloseROM();
+        RA_OnCloseROM();
 #endif
-    auto result = core->openFile(filename);
+        result = core->openFile(filename);
+#ifdef RETROACHIEVEMENTS_SUPPORT
+        if (result)
+            RA_OnLoadROM();
+#endif
+    }, true);
     unsuspendThread();
     if (result)
         applyRomControllerHints();
-#ifdef RETROACHIEVEMENTS_SUPPORT
-    if (result)
-        RA_OnLoadROM();
-#endif
     return result;
 }
 
@@ -348,12 +358,19 @@ void EmuApplication::applyRomControllerHints()
     int &option = config->port_configuration;
     valid_port_configurations = 0xffff;
 
-    if (!Settings.DisableGameSpecificHacks && strncmp(Memory.ROMName, "MAC:Basic Rifle", 15) == 0)
+    bool macs_rifle = false;
+    uint8_t nsrt[sizeof(Memory.NSRTHeader)];
+    emu_thread->runOnThread([&] {
+        macs_rifle = strncmp(Memory.ROMName, "MAC:Basic Rifle", 15) == 0;
+        memcpy(nsrt, Memory.NSRTHeader, sizeof(nsrt));
+    }, true);
+
+    if (!Settings.DisableGameSpecificHacks && macs_rifle)
         option = PC::eMacsRifle;
 
-    if (!strncmp((const char *)Memory.NSRTHeader + 24, "NSRT", 4))
+    if (!strncmp((const char *)nsrt + 24, "NSRT", 4))
     {
-        switch (Memory.NSRTHeader[29])
+        switch (nsrt[29])
         {
         default: // unknown or unsupported
             break;
@@ -606,9 +623,7 @@ void EmuApplication::updateBindings()
         }
     }
 
-    suspendThread();
-    core->updateBindings(config.get());
-    unsuspendThread();
+    emu_thread->runOnThread([&] { core->updateBindings(config.get()); }, true);
 }
 
 void EmuApplication::handleBinding(const std::string &name, bool pressed)
@@ -622,7 +637,7 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
             {
                 core->rewinding = false;
                 if (pressed)
-                    S9xSetInfoString("Rewind is not allowed in Hardcore mode");
+                    emu_thread->runOnThread([] { S9xSetInfoString("Rewind is not allowed in Hardcore mode"); });
             }
             else
 #endif
@@ -1206,14 +1221,19 @@ void EmuApplication::enableAllSoundChannels()
     });
 }
 
+// The paths fall back to the loaded ROM's folder, which is the emulation thread's.
 std::string EmuApplication::getStateFolder()
 {
-    return core->getStateFolder();
+    std::string folder;
+    emu_thread->runOnThread([&] { folder = core->getStateFolder(); }, true);
+    return folder;
 }
 
 std::string EmuApplication::getStateFilename(int slot)
 {
-    return core->getStateFilename(slot);
+    std::string filename;
+    emu_thread->runOnThread([&] { filename = core->getStateFilename(slot); }, true);
+    return filename;
 }
 
 std::vector<std::tuple<bool, std::string, std::string>> EmuApplication::getCheatList()
@@ -1278,9 +1298,8 @@ void EmuApplication::deleteAllCheats()
 
 int EmuApplication::tryImportCheats(const std::string &filename)
 {
-    suspendThread();
-    auto retval = core->tryImportCheats(filename);
-    unsuspendThread();
+    int retval = 0;
+    emu_thread->runOnThread([&] { retval = core->tryImportCheats(filename); }, true);
     return retval;
 }
 
@@ -1295,9 +1314,8 @@ std::string EmuApplication::validateCheat(const std::string &code)
 int EmuApplication::modifyCheat(int index, const std::string &name,
                                 const std::string &code)
 {
-    suspendThread();
-    auto retval = core->modifyCheat(index, name, code);
-    unsuspendThread();
+    int retval = 0;
+    emu_thread->runOnThread([&] { retval = core->modifyCheat(index, name, code); }, true);
     return retval;
 }
 
@@ -1320,7 +1338,16 @@ QString EmuApplication::iconPrefix()
 
 std::string EmuApplication::getContentFolder()
 {
-    return core->getContentFolder();
+    std::string folder;
+    emu_thread->runOnThread([&] { folder = core->getContentFolder(); }, true);
+    return folder;
+}
+
+std::string EmuApplication::getROMFilename()
+{
+    std::string filename;
+    emu_thread->runOnThread([&] { filename = Memory.ROMFilename; }, true);
+    return filename;
 }
 
 void EmuThread::runOnThread(const std::function<void()> &func, bool blocking)

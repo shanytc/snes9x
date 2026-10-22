@@ -18,18 +18,10 @@
 
 
 bool8 (*S9xScreenshotTarget) (int width, int height) = NULL;
+int (*S9xScreenshotExtras) (const char *fname) = NULL;
 
-bool8 S9xDoScreenshot (int width, int height)
+bool8 S9xWriteScreenshotPNG (const char *fname, const uint16 *screen, int pitch, int width, int height, bool8 square)
 {
-	Settings.TakeScreenshot = FALSE;
-
-	if (S9xScreenshotTarget)
-	{
-		bool8 (*target) (int, int) = S9xScreenshotTarget;
-		S9xScreenshotTarget = NULL;
-		return (target(width, height));
-	}
-
 #ifdef HAVE_LIBPNG
 	FILE		*fp;
 	png_structp	png_ptr;
@@ -37,31 +29,9 @@ bool8 S9xDoScreenshot (int width, int height)
 	png_color_8	sig_bit;
 	int			imgwidth, imgheight;
 
-	std::tm *current_time;
-	std::time_t current_timet = time(nullptr);
-	current_time = localtime(&current_timet);
-
-	std::stringstream ss;
-	ss << "-" << std::put_time(current_time, "%Y-%m-%d-%H-%M-%S");
-	std::string fname = S9xGetFilename(ss.str() + ".png", SCREENSHOT_DIR);
-
-	for (int i = 0; i < 60; i++)
-	{
-		FILE *fp = fopen(fname.c_str(), "r");
-
-		if (!fp)
-			break;
-
-		fclose(fp);
-		fname = S9xGetFilename(ss.str() + "-" + std::to_string(i) + ".png", SCREENSHOT_DIR);
-	}
-
-	fp = fopen(fname.c_str(), "wb");
+	fp = fopen(fname, "wb");
 	if (!fp)
-	{
-		S9xMessage(S9X_ERROR, 0, "Failed to take screenshot.");
 		return (FALSE);
-	}
 
 	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	info_ptr = png_create_info_struct(png_ptr);
@@ -72,14 +42,14 @@ bool8 S9xDoScreenshot (int width, int height)
 
 	if (Settings.StretchScreenshots == 1)
 	{
-		if (width > SNES_WIDTH && height <= SNES_HEIGHT_EXTENDED)
+		if (!square && width > SNES_WIDTH && height <= SNES_HEIGHT_EXTENDED)
 			imgheight = height << 1;
 	}
 	else if (Settings.StretchScreenshots == 2)
 	{
-		if (width  <= SNES_WIDTH)
+		if (square || width  <= SNES_WIDTH)
 			imgwidth  = width  << 1;
-		if (height <= SNES_HEIGHT_EXTENDED)
+		if (square || height <= SNES_HEIGHT_EXTENDED)
 			imgheight = height << 1;
 	}
 
@@ -101,9 +71,8 @@ bool8 S9xDoScreenshot (int width, int height)
 	png_set_packing(png_ptr);
 
 	png_byte	*row_pointer = new png_byte[png_get_rowbytes(png_ptr, info_ptr)];
-	uint16		*screen = GFX.Screen;
 
-	for (int y = 0; y < height; y++, screen += GFX.RealPPL)
+	for (int y = 0; y < height; y++, screen += pitch)
 	{
 		png_byte	*rowpix = row_pointer;
 
@@ -137,9 +106,59 @@ bool8 S9xDoScreenshot (int width, int height)
 
 	fclose(fp);
 
+	return (TRUE);
+#else
+	return (FALSE);
+#endif
+}
+
+bool8 S9xDoScreenshot (int width, int height)
+{
+	Settings.TakeScreenshot = FALSE;
+
+	if (S9xScreenshotTarget)
+	{
+		bool8 (*target) (int, int) = S9xScreenshotTarget;
+		S9xScreenshotTarget = NULL;
+		return (target(width, height));
+	}
+
+#ifdef HAVE_LIBPNG
+	std::tm *current_time;
+	std::time_t current_timet = time(nullptr);
+	current_time = localtime(&current_timet);
+
+	std::stringstream ss;
+	ss << "-" << std::put_time(current_time, "%Y-%m-%d-%H-%M-%S");
+	std::string fname = S9xGetFilename(ss.str() + ".png", SCREENSHOT_DIR);
+
+	for (int i = 0; i < 60; i++)
+	{
+		FILE *fp = fopen(fname.c_str(), "r");
+
+		if (!fp)
+			break;
+
+		fclose(fp);
+		fname = S9xGetFilename(ss.str() + "-" + std::to_string(i) + ".png", SCREENSHOT_DIR);
+	}
+
+	// A GB frame's pixels are already square: a split view is wider than 256
+	// because seats tile across it, not because the PPU went hi-res.
+	const bool gb_native = Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+
+	if (!S9xWriteScreenshotPNG(fname.c_str(), GFX.Screen, GFX.RealPPL, width, height, gb_native))
+	{
+		S9xMessage(S9X_ERROR, 0, "Failed to take screenshot.");
+		return (FALSE);
+	}
+
 	fprintf(stderr, "%s saved.\n", fname.c_str());
 
+	const int extras = S9xScreenshotExtras ? S9xScreenshotExtras(fname.c_str()) : 0;
 	std::string base = "Saved screenshot " + S9xBasename(fname);
+	if (extras > 0)
+		base += " and " + std::to_string(extras) + " more";
 	S9xMessage(S9X_INFO, 0, base.c_str());
 
 	return (TRUE);

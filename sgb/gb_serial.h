@@ -73,6 +73,10 @@ struct Serial
 	// (2 MiHz units, this instance's clock); we never run past it.
 	uint32_t grant_horizon = 0;
 	bool     grant_valid   = false;
+
+	// Split screen: a peer core's clock finished our byte between our
+	// instructions; its IRQ is raised on our next M-cycle instead.
+	bool     irq_due       = false;
 };
 
 void SerialReset(Serial &s, bool cgb);

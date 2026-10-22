@@ -25,6 +25,10 @@ namespace SGB {
 			  { { 0x0002AD, 3, { 0xCD, 0xC0, 0x02 }, { 0xCD, 0xCA, 0x3F } },
 				{ 0x003FCA, 3, { 0xFF, 0xFF, 0xFF }, { 0xF3, 0xCD, 0xC0 } },
 				{ 0x003FCD, 3, { 0xFF, 0xFF, 0xFF }, { 0x02, 0xFB, 0xC9 } } } },
+		};
+
+		// Link-cable fixes for code only an SGB BIOS runs: in the cart while a link session runs.
+		const GbCartPatch kSgbLinkCartPatches[] = {
 			// Its SGB packet waits run with IRQs off for frames and lose 4-player adapter
 			// bytes: EI before the LY wait (01:$7271) and around the between-packet delay.
 			{ 0xC29F, "UNO2SMALL WORLD", "SGB packet waits with IRQs on", 6,
@@ -41,10 +45,11 @@ namespace SGB {
 				{ 0x06A50B, 3, { 0x03, 0x0A, 0x07 }, { 0x03, 0x0F, 0x07 } } } },
 		};
 
+		// Link-cable fixes on every model: in the cart while a link session runs.
 		// Uno's VBlank handler calls its sound driver with IRQs on; a VBlank held
 		// through a link bulk can fire late enough for the next one to re-enter it.
 		// Both calls go through a stub: busy flag $DA00 set -> leave by the handler's exit.
-		const GbCartPatch kGbCartPatches[] = {
+		const GbCartPatch kGbLinkCartPatches[] = {
 			{ 0xC315, "UNO-SMALL WORLD", "nested VBlank skips the sound driver", 9,
 			  { { 0x00015B, 3, { 0xCD, 0x80, 0x08 }, { 0xCD, 0x60, 0x3F } },
 				{ 0x00019B, 3, { 0xCD, 0x80, 0x08 }, { 0xCD, 0x60, 0x3F } },
@@ -98,9 +103,14 @@ namespace SGB {
 		return FindIn(kSgbCartPatches, sizeof kSgbCartPatches / sizeof kSgbCartPatches[0], rom, size);
 	}
 
-	const GbCartPatch *FindGbCartPatch(const uint8_t *rom, size_t size)
+	const GbCartPatch *FindSgbLinkCartPatch(const uint8_t *rom, size_t size)
 	{
-		return FindIn(kGbCartPatches, sizeof kGbCartPatches / sizeof kGbCartPatches[0], rom, size);
+		return FindIn(kSgbLinkCartPatches, sizeof kSgbLinkCartPatches / sizeof kSgbLinkCartPatches[0], rom, size);
+	}
+
+	const GbCartPatch *FindGbLinkCartPatch(const uint8_t *rom, size_t size)
+	{
+		return FindIn(kGbLinkCartPatches, sizeof kGbLinkCartPatches / sizeof kGbLinkCartPatches[0], rom, size);
 	}
 
 	bool ApplyGbCartPatch(const GbCartPatch &p, uint8_t *rom, size_t size)
@@ -117,6 +127,24 @@ namespace SGB {
 		{
 			const GbCartEdit &e = p.edits[i];
 			std::memcpy(rom + e.addr, e.neu, e.len);
+		}
+		return true;
+	}
+
+	bool UndoGbCartPatch(const GbCartPatch &p, uint8_t *rom, size_t size)
+	{
+		if (!rom) return false;
+		const int n = p.edit_count < kGbCartPatchMaxEdits ? p.edit_count : kGbCartPatchMaxEdits;
+		for (int i = 0; i < n; ++i)
+		{
+			const GbCartEdit &e = p.edits[i];
+			if (e.len > 3 || e.addr + e.len > size) return false;
+			if (std::memcmp(rom + e.addr, e.neu, e.len) != 0) return false;
+		}
+		for (int i = 0; i < n; ++i)
+		{
+			const GbCartEdit &e = p.edits[i];
+			std::memcpy(rom + e.addr, e.old, e.len);
 		}
 		return true;
 	}

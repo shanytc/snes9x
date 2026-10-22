@@ -115,6 +115,9 @@ public:
 	void PrepareBiosCart();
 	// The compatibility edit PrepareBiosCart applied, or "" when none did.
 	const char *SgbPatchName() const;
+	// Put this cart's link-cable rows (gb_patches.cpp) in or take them out.
+	// ColdReset follows the session; call it directly only before the core runs.
+	void SetLinkCartPatches(bool on);
 	// Tools only: skip the built-in per-game table in PrepareSgbcCart, so a
 	// candidate edit can be tested on the pristine image.
 	void SetSgbcTable(bool enabled);

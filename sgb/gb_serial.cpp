@@ -150,6 +150,17 @@ constexpr int32_t kExtShiftTime = 537;
 // Ceiling for the observed-cadence floor: the slowest DMG-07 byte period.
 constexpr int32_t kExtGapCeil = 10932;
 
+// A peer's clocks never land closer together than it sent them (by its
+// timestamps); gaps past this are idle time, not spacing.
+constexpr int64_t kClockSpacingCap = 4 * 70224;
+
+int64_t ClockDue(const Serial &s, uint32_t ts)
+{
+	if (s.clk_last_at < 0) return 0;
+	const int64_t d = 2 * static_cast<int64_t>(static_cast<int32_t>((ts - s.clk_last_ts) << 1) >> 1);
+	return (d > 0 && d <= kClockSpacingCap) ? s.clk_last_at + d : 0;
+}
+
 int32_t ExtGapFloor(const Serial &s)
 {
 	// The hub declares its byte period; without one (direct cable, an
@@ -827,6 +838,7 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 void TrySettlePending(Serial &s, Memory &mem)
 {
 	if (!s.passive || !s.pending_len || s.ext_gap_timer > 0) return;
+	if (s.real_cycles < ClockDue(s, s.pending_i1[s.pending_head])) return;
 
 	uint8_t  data;
 	uint32_t i1;
@@ -835,6 +847,8 @@ void TrySettlePending(Serial &s, Memory &mem)
 	      (long long)s.real_cycles, data, i1, mem.serial_data, s.pending_len);
 	SendPacket(0, kCmdSync2, mem.serial_data, 0x80, 0, i1);
 	CompletePassive(s, mem, data);
+	s.clk_last_at = s.real_cycles;
+	s.clk_last_ts = i1;
 }
 
 // The countdown of an in-process master ran out: read the other core's
@@ -954,7 +968,8 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 				SendPacket(ch, kCmdSync3, 1, 0, 0, p.i1);
 				return;
 			}
-			if (s.passive && s.pending_len == 0 && s.ext_gap_timer <= 0)
+			if (s.passive && s.pending_len == 0 && s.ext_gap_timer <= 0 &&
+			    s.real_cycles >= ClockDue(s, p.i1))
 			{
 				// Armed and waiting to be clocked — hand back our byte. The
 				// echoed i1 tells a DMG-07 host which clock this answers.
@@ -962,6 +977,8 @@ void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
 				      (long long)s.real_cycles, p.b2, p.i1, mem.serial_data);
 				SendPacket(ch, kCmdSync2, mem.serial_data, 0x80, 0, p.i1);
 				CompletePassive(s, mem, p.b2);
+				s.clk_last_at = s.real_cycles;
+				s.clk_last_ts = p.i1;
 			}
 			else if (s.active)
 			{
@@ -1149,6 +1166,32 @@ void WaitForPeer(Serial &s, Memory &mem)
 		ServiceLink(s, mem);
 	}
 	g_direct.stalled = !s.peer_valid;
+}
+
+void SendTimeGrants()
+{
+	bool     any = false;
+	int32_t  slowest = 0;
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+	{
+		const LinkSession &ses = g_sessions[ch];
+		if (!ses.handshaked || !ses.peer_running || !ses.ts_valid) continue;
+		if (!LinkChannelConnected(ch)) continue;
+		const int32_t prog = static_cast<int32_t>(
+			(ses.peer_timestamp - ses.ts_base_peer) << 1) >> 1;
+		if (!any || prog < slowest) { slowest = prog; any = true; }
+	}
+	if (!any) return;
+	for (int ch = 0; ch < kLinkMaxChannels; ++ch)
+	{
+		const LinkSession &ses = g_sessions[ch];
+		if (!ses.handshaked || !ses.ts_valid) continue;
+		if (!LinkChannelConnected(ch)) continue;
+		const uint32_t horizon = (ses.ts_base_peer +
+			static_cast<uint32_t>(slowest) +
+			static_cast<uint32_t>(kLockstepWindow)) & 0x7FFFFFFF;
+		SendPacket(ch, kCmdTimeGrant, 0, 0, 0, horizon, true);
+	}
 }
 
 // ---- DMG-07 byte engine -----------------------------------------------------
@@ -2245,31 +2288,7 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 		// The host is the clock owner: grant every seat a horizon just
 		// past the slowest seat's progress, in that seat's own clock.
 		// Everything then slows together instead of drifting apart.
-		if (host)
-		{
-			bool     any = false;
-			int32_t  slowest = 0;
-			for (int ch = 0; ch < kLinkMaxChannels; ++ch)
-			{
-				const LinkSession &ses = g_sessions[ch];
-				if (!ses.handshaked || !ses.peer_running || !ses.ts_valid) continue;
-				if (!LinkChannelConnected(ch)) continue;
-				const int32_t prog = static_cast<int32_t>(
-					(ses.peer_timestamp - ses.ts_base_peer) << 1) >> 1;
-				if (!any || prog < slowest) { slowest = prog; any = true; }
-			}
-			if (any)
-				for (int ch = 0; ch < kLinkMaxChannels; ++ch)
-				{
-					const LinkSession &ses = g_sessions[ch];
-					if (!ses.handshaked || !ses.ts_valid) continue;
-					if (!LinkChannelConnected(ch)) continue;
-					const uint32_t horizon = (ses.ts_base_peer +
-						static_cast<uint32_t>(slowest) +
-						static_cast<uint32_t>(kLockstepWindow)) & 0x7FFFFFFF;
-					SendPacket(ch, kCmdTimeGrant, 0, 0, 0, horizon, true);
-				}
-		}
+		if (host) SendTimeGrants();
 
 		// A wall-clock beacon once a second, so logs from separate
 		// processes merge into one real-time timeline.
@@ -2445,7 +2464,13 @@ bool SerialLinkShouldHoldFrame()
 			(ours - ses.ts_base_ours) << 1) >> 1;
 		const int32_t they_ran = static_cast<int32_t>(
 			(ses.peer_timestamp - ses.ts_base_peer) << 1) >> 1;
-		if (we_ran - they_ran > kLockstepWindow) return true;
+		if (we_ran - they_ran > kLockstepWindow)
+		{
+			// A host only grants while it steps: re-grant while held, or a
+			// joiner parked at its last horizon can never catch up.
+			if (g_role == LinkRole::Server) SendTimeGrants();
+			return true;
+		}
 	}
 	return false;
 }

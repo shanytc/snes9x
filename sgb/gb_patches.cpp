@@ -74,6 +74,14 @@ namespace SGB {
 			// the packet length after it; bytes arriving between walk the ISR index into IE.
 			{ 0x4209, "GALLERY3", "link packet length set before the port is armed", 1,
 			  { { 0x000DBF, 3, { 0x00, 0xE0, 0x02 }, { 0x04, 0xE0, 0xD1 } } } },
+			// Mach Go Go Go: an SGB console arms for the race prompt ~0.6 s after a Game Boy partner, whose
+			// confirm ($30) can meet an unarmed port; its F8 polls are then ignored: take F8 as the confirm.
+			{ 0x8BA1, "MACH GO", "race confirm taken from the partner's poll", 5,
+			  { { 0x0078E5, 3, { 0xE6, 0x70, 0xFE }, { 0xCD, 0xC0, 0x3F } },
+				{ 0x0078E8, 3, { 0x30, 0x28, 0x10 }, { 0x28, 0x11, 0x00 } },
+				{ 0x003FC0, 3, { 0xFF, 0xFF, 0xFF }, { 0xFE, 0xF8, 0xC8 } },   // cp $F8 / ret z
+				{ 0x003FC3, 3, { 0xFF, 0xFF, 0xFF }, { 0xE6, 0x70, 0xFE } },   // and $70 / cp $30 / ret
+				{ 0x003FC6, 2, { 0xFF, 0xFF }, { 0x30, 0xC9 } } } },
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

@@ -849,7 +849,15 @@ bool SplitTryResolveMaster(Serial &s, Memory &mem)
 	if (ps && ps->passive)
 	{
 		const uint8_t theirs = pm->serial_data;
+		const bool    had    = (pm->if_ & IRQ_SERIAL) != 0;
 		CompletePassive(*ps, *pm, mem.serial_data);
+		// The edge falls inside the other core's next instruction, which
+		// can still read SC.7 clear before the IRQ (Tamagotchi 2's slave).
+		if (!had)
+		{
+			pm->if_     = static_cast<uint8_t>(pm->if_ & ~IRQ_SERIAL);
+			ps->irq_due = true;
+		}
 		s.peer_data     = theirs;
 		s.peer_valid    = true;
 		s.peer_supplied = true;
@@ -2076,6 +2084,12 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	else
 	{
 		s.real_cycles += tcycles;
+	}
+
+	if (s.irq_due)
+	{
+		mem.if_   = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
+		s.irq_due = false;
 	}
 
 	if (!SerialLinkIsEnabled() && !SerialSplitActive())

@@ -270,6 +270,8 @@ struct Emulator::Impl
 	char        sgb_patch_name[96] = {};   // PrepareBiosCart's compatibility edit
 	// The file's bytes before a gb_patches.cpp row went in, for the hashes.
 	std::vector<uint8_t> gb_pristine;
+	bool        sgb_bios_cart = false;   // PrepareBiosCart ran: an SGB BIOS runs this cart
+	bool        link_rows[2] = {};       // link-cable rows in the cart: every model, SGB BIOS
 	bool        sgbc_table = true;
 	uint32_t    sgbc_quirks = 0;   // SGBC_QUIRK_* from the cart's table row
 
@@ -651,6 +653,9 @@ void Emulator::Deinit()
 namespace { inline void BuildSgbDefaultPalettePackets(uint8_t pal01[16],
                                                       uint8_t pal23[16]); }
 
+// A link session runs: split seats, a seat's own SNES, or a cable socket.
+bool LinkCartPatchesWanted();
+
 void Emulator::ColdReset()
 {
 	// Clear the BIOS-handshake cache before delegating to Reset(). On a
@@ -666,7 +671,26 @@ void Emulator::ColdReset()
 	impl_->cached_count = 0;
 	impl_->cache_valid  = false;
 	impl_->replays_done = 0;
+	SetLinkCartPatches(LinkCartPatchesWanted());   // power-on: never under a running game
 	Reset();
+}
+
+void Emulator::SetLinkCartPatches(bool on)
+{
+	Impl &im = *impl_;
+	if (!im.has_rom) return;
+	std::vector<uint8_t> &rom = im.cart.rom;
+	const GbCartPatch *rows[2] = { FindGbLinkCartPatch(rom.data(), rom.size()),
+	                               FindSgbLinkCartPatch(rom.data(), rom.size()) };
+	for (int i = 0; i < 2; ++i)
+	{
+		const bool want = on && rows[i] && (i == 0 || im.sgb_bios_cart);
+		if (want == im.link_rows[i]) continue;
+		if (want && im.gb_pristine.empty()) im.gb_pristine = rom;
+		if (want ? ApplyGbCartPatch(*rows[i], rom.data(), rom.size())
+		         : UndoGbCartPatch(*rows[i], rom.data(), rom.size()))
+			im.link_rows[i] = want;
+	}
 }
 
 bool Emulator::SoftReset()
@@ -1203,14 +1227,10 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	if (!CartLoad(impl_->cart, data, size, path))
 		return false;
 	impl_->has_rom = true;
-	// A known cart bug real consoles can hit too is fixed in memory on every model.
+	// The file as read; ColdReset puts the link-cable rows in when a session runs.
 	impl_->gb_pristine.clear();
-	if (const GbCartPatch *fx = FindGbCartPatch(impl_->cart.rom.data(), impl_->cart.rom.size()))
-	{
-		std::vector<uint8_t> file = impl_->cart.rom;
-		if (ApplyGbCartPatch(*fx, impl_->cart.rom.data(), impl_->cart.rom.size()))
-			impl_->gb_pristine.swap(file);
-	}
+	impl_->sgb_bios_cart = false;
+	impl_->link_rows[0] = impl_->link_rows[1] = false;
 	const bool cart_is_cgb = (impl_->cart.header.cgb_flag & 0x80) != 0;
 	impl_->cgb_mode = (impl_->cgb_override >= 0)
 	                ? (impl_->cgb_override != 0)
@@ -1321,6 +1341,8 @@ void Emulator::UnloadROM()
 	impl_->has_rom = false;
 	impl_->cgb_mode = false;
 	impl_->gb_pristine.clear();
+	impl_->sgb_bios_cart = false;
+	impl_->link_rows[0] = impl_->link_rows[1] = false;
 	impl_->sgbc_pristine.clear();
 	impl_->sgbc_compat_combo = nullptr;
 	impl_->sgbc_patch_name[0] = 0;
@@ -1474,6 +1496,8 @@ void Emulator::PrepareBiosCart()
 	const GbCartPatch *p = (im.has_rom && im.sgbc_table)
 	                     ? FindSgbCartPatch(im.cart.rom.data(), im.cart.rom.size()) : nullptr;
 	PrepareSgbcCart();
+	im.sgb_bios_cart = im.has_rom;
+	SetLinkCartPatches(LinkCartPatchesWanted());
 	if (!p) return;
 	std::vector<uint8_t> &rom = im.cart.rom;
 	// Hashes read the file's bytes, so keep them if nothing kept them yet.
@@ -4901,6 +4925,9 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 				std::vector<uint8_t> &sr = core->DebugImpl()->cart.rom;
 				SGB::ApplyGbCartPatch(*cp, sr.data(), sr.size());
 			}
+		// It sits on the cable from its first instruction; the master's go in at the session's power-on.
+		core->DebugImpl()->sgb_bios_cart = !own && pimpl->sgb_bios_cart;
+		core->SetLinkCartPatches(true);
 		// A seat decodes its own packets into its own palettes and acts on
 		// nothing else in them (see OnSgbCommandInternal), and the ICD2
 		// LCD feed stays with the primary: a seat feeding it shreds the
@@ -5843,6 +5870,11 @@ void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles)
 
 void S9xSGBSetSeatMachine(bool seat)            { g_seat_machine = seat; }
 bool S9xSGBIsSeatMachine(void)                  { return g_seat_machine; }
+
+bool SGB::LinkCartPatchesWanted()
+{
+	return g_seat_machine || g_split_players >= 2 || SGB::SerialLinkIsEnabled();
+}
 void S9xSGBMachineRunUntilLines(int64_t lines)  { g_snes_slice_target = lines; }
 int64_t S9xSGBMachineLines(void)                { return g_snes_line_counter; }
 int64_t S9xSGBMachineGbCycles(void)

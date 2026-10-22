@@ -77,6 +77,10 @@ struct Serial
 	// Split screen: a peer core's clock finished our byte between our
 	// instructions; its IRQ is raised on our next M-cycle instead.
 	bool     irq_due       = false;
+
+	// The last peer clock we answered: our real_cycles then, its timestamp.
+	int64_t  clk_last_at   = -1;
+	uint32_t clk_last_ts   = 0;
 };
 
 void SerialReset(Serial &s, bool cgb);

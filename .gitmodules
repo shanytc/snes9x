@@ -24,3 +24,12 @@
 	path = external/SDL3-src
 	url = https://github.com/shanytc/SDL.git
 	branch = snes9x-3.2.14
+[submodule "external/libjxl"]
+	path = external/libjxl
+	url = https://github.com/libjxl/libjxl.git
+[submodule "external/highway"]
+	path = external/highway
+	url = https://github.com/google/highway.git
+[submodule "external/brotli"]
+	path = external/brotli
+	url = https://github.com/google/brotli.git

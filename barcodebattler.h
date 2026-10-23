@@ -52,7 +52,7 @@ void S9xBarcodeRandom(char out[14]);
 
 // A known card: the set it came in, its name (both UTF-8), its 13 digits and
 // the stem of its photos ("set/code", "" for none), which a frontend looks up
-// as <stem>-front.jpg, -back.jpg and -fluorescent.jpg in its card folder.
+// as <stem>-front.jxl, -back.jxl and -fluorescent.jxl in its card folder.
 struct S9xBarcodeCard
 {
 	const char	*set;

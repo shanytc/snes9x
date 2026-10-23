@@ -117,7 +117,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src;$(ProjectDir)..\external\libjxl\lib\include;$(ProjectDir)libjxl\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_DEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;D3D_DEBUG_INFO;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
@@ -169,7 +169,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src;$(ProjectDir)..\external\libjxl\lib\include;$(ProjectDir)libjxl\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_DEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;D3D_DEBUG_INFO;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
@@ -226,7 +226,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <WholeProgramOptimization>true</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src;$(ProjectDir)..\external\libjxl\lib\include;$(ProjectDir)libjxl\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>NDEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -282,7 +282,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <WholeProgramOptimization>true</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src;$(ProjectDir)..\external\libjxl\lib\include;$(ProjectDir)libjxl\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>NDEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -878,6 +878,9 @@
     </ProjectReference>
     <ProjectReference Include="zlib\zlib.vcxproj">
       <Project>{99e9817a-4605-44af-8433-7048f0ec1859}</Project>
+    </ProjectReference>
+    <ProjectReference Include="libjxl\libjxl.vcxproj">
+      <Project>{6e1c5b3a-2f4d-4c7b-9a8e-3d5f7b1c9e24}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

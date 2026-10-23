@@ -8,6 +8,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libpng", "libpng\libpng.vcx
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "zlib", "zlib\zlib.vcxproj", "{99E9817A-4605-44AF-8433-7048F0EC1859}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libjxl", "libjxl\libjxl.vcxproj", "{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{CF69CC6C-E1F2-41C3-A82C-D9C58127DD98}"
 	ProjectSection(SolutionItems) = preProject
 		..\.gitignore = ..\.gitignore
@@ -63,6 +65,14 @@ Global
 		{99E9817A-4605-44AF-8433-7048F0EC1859}.Release Unicode|Win32.Build.0 = Release Unicode|Win32
 		{99E9817A-4605-44AF-8433-7048F0EC1859}.Release Unicode|x64.ActiveCfg = Release Unicode|x64
 		{99E9817A-4605-44AF-8433-7048F0EC1859}.Release Unicode|x64.Build.0 = Release Unicode|x64
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Debug Unicode|Win32.ActiveCfg = Debug Unicode|Win32
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Debug Unicode|Win32.Build.0 = Debug Unicode|Win32
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Debug Unicode|x64.ActiveCfg = Debug Unicode|x64
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Debug Unicode|x64.Build.0 = Debug Unicode|x64
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Release Unicode|Win32.ActiveCfg = Release Unicode|Win32
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Release Unicode|Win32.Build.0 = Release Unicode|Win32
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Release Unicode|x64.ActiveCfg = Release Unicode|x64
+		{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}.Release Unicode|x64.Build.0 = Release Unicode|x64
 		{5F003A48-8DC8-3A67-AC87-69EF27CED058}.Debug Unicode|Win32.ActiveCfg = Debug|Win32
 		{5F003A48-8DC8-3A67-AC87-69EF27CED058}.Debug Unicode|Win32.Build.0 = Debug|Win32
 		{5F003A48-8DC8-3A67-AC87-69EF27CED058}.Debug Unicode|x64.ActiveCfg = Debug|x64

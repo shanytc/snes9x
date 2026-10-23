@@ -182,6 +182,13 @@ endif()
 
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
+
+# Optional: decodes the JPEG XL photos of Barcode Battler cards.
+pkg_check_modules(JXL IMPORTED_TARGET libjxl)
+if(JXL_FOUND)
+    list(APPEND LIBS PkgConfig::JXL)
+    list(APPEND DEFINES "HAVE_LIBJXL")
+endif()
 list(APPEND INCLUDES ${ZLIB_INCLUDE_DIRS})
 list(APPEND FLAGS ${ZLIB_COMPILE_FLAGS})
 
@@ -340,6 +347,8 @@ list(APPEND QT_GUI_SOURCES
     src/ColorCorrectionDialog.hpp
     src/BarcodeBattlerDialog.cpp
     src/BarcodeBattlerDialog.hpp
+    ../common/desktop/barcode_card_photos.cpp
+    ../common/desktop/barcode_card_photos.hpp
     src/MovieDialogs.cpp
     src/MovieDialogs.hpp
     src/AudioWaveformWindow.cpp

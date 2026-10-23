@@ -24,6 +24,7 @@
 #include "nss.h"
 #include "superdisc.h"
 #include "voicekun.h"
+#include "barcodebattler.h"
 #ifdef NETPLAY_SUPPORT
 #include "netplay.h"
 #endif
@@ -2997,6 +2998,15 @@ uint8 S9xReadJOYSERn (int n)
 		return (bits | ((boxbits & (0x8000 >> IncreaseReadIdxPost(read_idx[n][0]))) ? 1 : 0));
 	}
 
+	// Barcode Battler II: its interface box takes port 2's place and shifts
+	// out the id, status and barcode digits instead of buttons.
+	if (n == 1 && Settings.BarcodeBattler)
+	{
+		if (FLAG_LATCH)
+			return (bits | S9xBarcodeBattlerReadBit(0));
+		return (bits | S9xBarcodeBattlerReadBit(IncreaseReadIdxPost(read_idx[n][0])));
+	}
+
 	if (FLAG_LATCH)
 	{
 		switch (i = curcontrollers[n])
@@ -3176,6 +3186,14 @@ void S9xDoAutoJoypad (void)
 		{
 			read_idx[n][0] = 16;
 			WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, boxbits);
+			WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
+			continue;
+		}
+
+		if (n == 1 && Settings.BarcodeBattler)
+		{
+			read_idx[n][0] = 16;
+			WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, S9xBarcodeBattlerAutoJoypad());
 			WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
 			continue;
 		}

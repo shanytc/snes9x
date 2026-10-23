@@ -14,6 +14,7 @@
 #include <tchar.h>
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -217,8 +218,52 @@ void DroppedImage(HWND hDlg, HDROP drop)
 		ReadImage(hDlg, file);
 }
 
-// The known cards whose set, name or code holds the search text, one branch
-// per set; every set folded when there's nothing to search for.
+// One printed card: the run of entries from i sharing its set and photo stem
+// (a card with several barcodes); a single entry when it has no photos.
+int CardEnd(const S9xBarcodeCard *cards, int count, int i)
+{
+	int j = i + 1;
+	if (*cards[i].image)
+		while (j < count && !strcmp(cards[j].set, cards[i].set) && !strcmp(cards[j].image, cards[i].image))
+			j++;
+	return j;
+}
+
+bool CardMatches(const S9xBarcodeCard &card, const std::wstring &find)
+{
+	return find.empty() || Lower(Wide(card.name)).find(find) != std::wstring::npos ||
+	       Lower(Wide(card.set)).find(find) != std::wstring::npos || Wide(card.code).find(find) != std::wstring::npos;
+}
+
+// A card with several barcodes is named after them, less their positions.
+std::wstring CardLabel(const S9xBarcodeCard *cards, int i, int end)
+{
+	std::vector<std::wstring> names;
+	for (int k = i; k < end; k++)
+	{
+		std::wstring name = Wide(cards[k].name);
+		for (const wchar_t *where : { L" (Up)", L" (Down)", L" (Left)", L" (Right)", L" (Front)", L" (Back)" })
+		{
+			const size_t n = wcslen(where);
+			if (name.size() > n && !name.compare(name.size() - n, n, where))
+			{
+				name.erase(name.size() - n);
+				break;
+			}
+		}
+		if (std::find(names.begin(), names.end(), name) == names.end())
+			names.push_back(name);
+	}
+
+	std::wstring label;
+	for (const std::wstring &name : names)
+		label += (label.empty() ? L"" : L" / ") + name;
+	return label;
+}
+
+// The known cards with a set, name or code holding the search text, one
+// branch per set and one per card with several barcodes; all folded when
+// there's nothing to search for.
 void FillCards(HWND hDlg)
 {
 	HWND tree = GetDlgItem(hDlg, IDC_BARCODE_CARDS);
@@ -248,21 +293,23 @@ void FillCards(HWND hDlg)
 			TreeView_Expand(tree, branch, TVE_EXPAND);
 	};
 
-	for (int i = 0; i < count; i++)
+	for (int i = 0, end; i < count; i = end)
 	{
-		const S9xBarcodeCard &card = cards[i];
-		if (!find.empty() && Lower(Wide(card.name)).find(find) == std::wstring::npos &&
-		    Lower(Wide(card.set)).find(find) == std::wstring::npos && Wide(card.code).find(find) == std::wstring::npos)
+		end = CardEnd(cards, count, i);
+		bool hit = false;
+		for (int k = i; k < end && !hit; k++)
+			hit = CardMatches(cards[k], find);
+		if (!hit)
 			continue;
 
 		TVINSERTSTRUCTW ins = {};
 		ins.hInsertAfter = TVI_LAST;
 		ins.item.mask = TVIF_TEXT | TVIF_PARAM;
 
-		if (!set || strcmp(set, card.set))
+		if (!set || strcmp(set, cards[i].set))
 		{
 			closeSet();
-			set = card.set;
+			set = cards[i].set;
 			inSet = 0;
 			std::wstring label = Wide(set);
 			ins.hParent = TVI_ROOT;
@@ -271,11 +318,28 @@ void FillCards(HWND hDlg)
 			branch = (HTREEITEM)SendMessage(tree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
 		}
 
-		std::wstring label = Wide(card.name) + L"  " + Wide(card.code);
-		ins.hParent = branch;
-		ins.item.pszText = &label[0];
-		ins.item.lParam = i;
-		SendMessage(tree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+		// lParam: the entry for a barcode, -2 - first entry for a card's branch
+		HTREEITEM parent = branch;
+		if (end - i > 1)
+		{
+			std::wstring label = CardLabel(cards, i, end);
+			ins.hParent = branch;
+			ins.item.pszText = &label[0];
+			ins.item.lParam = -2 - i;
+			parent = (HTREEITEM)SendMessage(tree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+		}
+
+		for (int k = i; k < end; k++)
+		{
+			std::wstring label = Wide(cards[k].name) + L"  " + Wide(cards[k].code);
+			ins.hParent = parent;
+			ins.item.pszText = &label[0];
+			ins.item.lParam = k;
+			SendMessage(tree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+		}
+
+		if (parent != branch && !find.empty())
+			TreeView_Expand(tree, parent, TVE_EXPAND);
 		inSet++;
 	}
 	closeSet();
@@ -284,18 +348,20 @@ void FillCards(HWND hDlg)
 	InvalidateRect(tree, nullptr, TRUE);
 }
 
-// The card under a tree item, or nullptr for a set.
-const S9xBarcodeCard *CardOf(HWND tree, HTREEITEM hItem)
+// The entry under a tree item: a barcode, or with branch set the first
+// barcode of a card's branch; nullptr otherwise.
+const S9xBarcodeCard *CardOf(HWND tree, HTREEITEM hItem, bool branch = false)
 {
 	TVITEMW item = {};
 	item.mask = TVIF_PARAM;
 	item.hItem = hItem;
-	if (!hItem || !TreeView_GetItem(tree, &item) || item.lParam < 0)
+	if (!hItem || !TreeView_GetItem(tree, &item))
 		return nullptr;
 
 	int count = 0;
 	const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
-	return item.lParam < count ? &cards[item.lParam] : nullptr;
+	const LPARAM entry = branch ? -2 - item.lParam : item.lParam;
+	return entry >= 0 && entry < count ? &cards[entry] : nullptr;
 }
 
 void StopCamera(HWND hDlg)
@@ -479,10 +545,17 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 			// Picking a card types its code; a double-click on one scans it.
 			if (nm->code == TVN_SELCHANGEDW)
 			{
-				if (const S9xBarcodeCard *card = CardOf(nm->hwndFrom, ((const NMTREEVIEWW *)lParam)->itemNew.hItem))
+				const HTREEITEM picked = ((const NMTREEVIEWW *)lParam)->itemNew.hItem;
+				if (const S9xBarcodeCard *card = CardOf(nm->hwndFrom, picked))
 				{
 					SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, card->code);
 					ShowCard(hDlg, card);	// this set's printing, not the first card with the code
+				}
+				else
+				{
+					// a set or a card's branch: no barcode until one is picked; a card shows its photos
+					SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, "");
+					ShowCard(hDlg, CardOf(nm->hwndFrom, picked, true));
 				}
 				return TRUE;
 			}

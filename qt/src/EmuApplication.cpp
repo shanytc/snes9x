@@ -32,6 +32,7 @@
 #include "kaillera_client.h"
 #include "kaillera_server.h"
 #endif
+#include "lua/lua_engine.h"
 
 #undef SOUND_BUFFER_WINDOW
 
@@ -442,6 +443,7 @@ void EmuApplication::mainLoop()
 {
     if (!core->active)
     {
+        S9xLuaIdle();
         std::this_thread::yield();
         return;
     }
@@ -1026,6 +1028,7 @@ void EmuApplication::reset()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(false);
     });
 }
 
@@ -1046,6 +1049,7 @@ void EmuApplication::superDiscEject()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(false);
     }, true);
 }
 
@@ -1058,6 +1062,7 @@ void EmuApplication::superDiscDebugMenu()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(false);
     }, true);
 }
 
@@ -1068,7 +1073,37 @@ void EmuApplication::powerCycle()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(true);
     });
+}
+
+void EmuApplication::initLua()
+{
+    S9xLuaFrontend frontend;
+    frontend.set_paused = [this](bool paused) {
+        // Stop right after this frame; the menu state catches up on its thread.
+        if (paused)
+        {
+            Settings.Paused = true;
+            emu_thread->setStatusBits(EmuThread::ePaused);
+        }
+        QMetaObject::invokeMethod(window.get(), [this, paused] { window->setManualPause(paused); },
+                                  Qt::QueuedConnection);
+    };
+    frontend.reset = [this](bool power) {
+        if (power)
+            core->reset();
+        else
+            core->softReset();
+#ifdef RETROACHIEVEMENTS_SUPPORT
+        RA_OnReset();
+#endif
+        S9xLuaNotifyReset(power);
+    };
+    frontend.state_slot_path = [this](int slot) {
+        return core->getStateFilename(slot);
+    };
+    S9xLuaSetFrontend(frontend);
 }
 
 void EmuApplication::loadUndoState()
@@ -1405,6 +1440,9 @@ void EmuThread::run()
 
         if (status & (ePaused | eSuspended))
         {
+            // Scripts keep running while paused (emu.yield, event.on_idle).
+            if (!(status & eSuspended))
+                S9xLuaIdle();
             QThread::usleep(2000);
             continue;
         }

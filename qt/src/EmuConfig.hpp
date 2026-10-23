@@ -42,6 +42,15 @@ struct EmuConfig
     int current_save_bank = 0;
     std::vector<std::string> recently_used;
 
+    // File > Script > Lua editor
+    std::string lua_last_folder;
+    std::vector<std::string> lua_recent_scripts;
+    std::vector<std::string> lua_open_scripts;
+    int lua_window_width = 0;
+    int lua_window_height = 0;
+    int lua_font_size = 0; // 0 = the system's fixed font
+    bool lua_show_reference = true;
+
     // Last choices made in the movie dialogs, remembered like win32's
     // MovieDefault* settings.
     bool movie_default_read_only = true;

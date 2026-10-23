@@ -4,6 +4,7 @@
 #include "EmuPoTranslator.hpp"
 #include "SDLInputManager.hpp"
 #include "display.h"
+#include "lua/lua_engine.h"
 
 #ifdef RETROACHIEVEMENTS_SUPPORT
 #include "RAIntegrationQt.hpp"
@@ -12,6 +13,8 @@
 
 #include <clocale>
 #include <cstring>
+#include <string>
+#include <vector>
 #include <qnamespace.h>
 #include <QStyle>
 #include <QStyleHints>
@@ -230,10 +233,28 @@ int main(int argc, char *argv[])
 
     emu.updateBindings();
     emu.startInputTimer();
+    emu.initLua();
 
-    char *rom_filename = S9xParseArgs(argv, argc);
+    // -lua <script> (repeatable) runs scripts once the game is up; the core's
+    // parser would take the script for the ROM, so it never sees them.
+    std::vector<std::string> lua_scripts;
+    std::vector<char *> core_args;
+    for (int i = 0; i < argc; i++)
+    {
+        if (i > 0 && i + 1 < argc && (!strcmp(argv[i], "-lua") || !strcmp(argv[i], "--lua")))
+            lua_scripts.push_back(argv[++i]);
+        else
+            core_args.push_back(argv[i]);
+    }
+
+    char *rom_filename = S9xParseArgs(core_args.data(), (int)core_args.size());
     if (rom_filename)
         emu.window->openFile(rom_filename);
+
+    if (!lua_scripts.empty())
+        S9xLuaSetEcho(true);
+    for (auto &script : lua_scripts)
+        emu.window->runLuaScript(script);
 
 #ifdef _WIN32
     for (int i = 0; i < argc; i++)

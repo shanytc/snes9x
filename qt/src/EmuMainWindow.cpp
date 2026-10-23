@@ -21,6 +21,8 @@
 #include "SpriteViewerWindow.hpp"
 #include "GBViewerWindows.hpp"
 #include "CheatsDialog.hpp"
+#include "LuaScriptWindow.hpp"
+#include "lua/lua_engine.h"
 #include "ColorCorrectionDialog.hpp"
 #include "MovieDialogs.hpp"
 #include "StatePreviewDialog.hpp"
@@ -1294,6 +1296,23 @@ void EmuMainWindow::createWidgets()
     });
     core_actions.push_back(avi_recording_action);
 
+    file_menu->addSeparator();
+
+    // File->Script: the Lua editor, which runs scripts against the game.
+    auto script_menu = new QMenu(tr("Scr&ipt"), file_menu);
+    script_menu->setIcon(QIcon(iconset + "script.svg"));
+    connect(script_menu->addAction(QIcon(iconset + "script.svg"), tr("&Lua...")), &QAction::triggered, this,
+            &EmuMainWindow::showLuaWindow);
+    auto stop_scripts_action = script_menu->addAction(QIcon(iconset + "stop.svg"), tr("&Stop All Scripts"));
+    connect(stop_scripts_action, &QAction::triggered, this, [this] {
+        S9xLuaRequestStop(0);
+        app.emu_thread->runOnThread([] { S9xLuaStop(0); });
+    });
+    connect(script_menu, &QMenu::aboutToShow, this, [stop_scripts_action] {
+        stop_scripts_action->setEnabled(!S9xLuaScripts().empty());
+    });
+    file_menu->addMenu(script_menu);
+
     connect(file_menu, &QMenu::aboutToShow, this, [this] {
         movie_stop_action->setEnabled(app.isCoreActive() && app.isMovieActive());
         avi_recording_action->setText(app.isAVIRecording() ? tr("Stop &AVI Recording")
@@ -2372,6 +2391,21 @@ bool EmuMainWindow::event(QEvent *event)
     switch (event->type())
     {
     case QEvent::Close:
+        if (lua_window)
+        {
+            if (!lua_window->confirmClose())
+            {
+                event->ignore();
+                return true;
+            }
+            lua_window->saveSession();
+            lua_window->close();
+        }
+        // Scripts get their event.on_stop before the emulation thread goes;
+        // the request first breaks any script stuck in a loop.
+        S9xLuaRequestStop(0);
+        if (app.emu_thread)
+            app.emu_thread->runOnThread([] { S9xLuaShutdown(); }, true);
         app.suspendThread();
         if (isFullScreen())
         {
@@ -2398,9 +2432,10 @@ bool EmuMainWindow::event(QEvent *event)
     case QEvent::WindowDeactivate:
         if (mouse_grabbed)
             toggleMouseGrab();
-        // Focus moving to the audio waveform viewer stays within the
-        // emulator. Qt has already made it the active window at this point.
-        if (!(audio_waveform_window && QApplication::activeWindow() == audio_waveform_window.data()))
+        // Focus moving to the audio waveform viewer or the Lua editor stays
+        // within the emulator. Qt has already made it the active window here.
+        if (!(audio_waveform_window && QApplication::activeWindow() == audio_waveform_window.data()) &&
+            !(lua_window && QApplication::activeWindow() == lua_window.data()))
             handleFocusChange(false);
         break;
     case QEvent::WindowStateChange:
@@ -2630,6 +2665,32 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+}
+
+void EmuMainWindow::showLuaWindow()
+{
+    if (!lua_window)
+        lua_window = new LuaScriptWindow(this, &app);
+    lua_window->show();
+    lua_window->raise();
+    lua_window->activateWindow();
+}
+
+void EmuMainWindow::runLuaScript(const std::string &path)
+{
+    if (lua_window)
+    {
+        lua_window->openScript(QString::fromStdString(path), true);
+        return;
+    }
+    int id = S9xLuaNewScriptId();
+    app.emu_thread->runOnThread([id, path] { S9xLuaRunFile(id, path); });
+}
+
+void EmuMainWindow::setManualPause(bool paused)
+{
+    if (paused != manual_pause)
+        pauseContinue();
 }
 
 void EmuMainWindow::showTileViewer()

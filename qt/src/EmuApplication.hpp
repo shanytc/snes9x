@@ -83,6 +83,8 @@ struct EmuApplication
     void pause();
     void reset();
     void powerCycle();
+    // Hands the Lua engine its pause, reset and save-slot callbacks.
+    void initLua();
     /* Super Disc drive, run on the emulation thread. Eject also resets back
      * to the BIOS home screen, which then reports the open tray. */
     bool superDiscInsert(const std::string &filename);

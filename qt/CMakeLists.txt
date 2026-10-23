@@ -133,10 +133,21 @@ set(SNES9X_CORE_SOURCES
     ../fscompat.cpp
     ../unzip/unzip.c
     ../unzip/ioapi.c
-    ../unzip/zip.c)
+    ../unzip/zip.c
+    ../lua/lua_core.cpp
+    ../lua/lua_engine.cpp
+    ../lua/lua_api_emu.cpp
+    ../lua/lua_api_memory.cpp
+    ../lua/lua_api_input.cpp
+    ../lua/lua_api_gui.cpp
+    ../lua/lua_syntax.cpp
+    ../lua/lua_docs.cpp
+    ../lua/lua_examples.cpp)
 add_library(snes9x-core ${SNES9X_CORE_SOURCES})
-target_include_directories(snes9x-core PRIVATE ../ ../unzip)
-target_compile_definitions(snes9x-core PRIVATE ${DEFINES} ZLIB UNZIP_SUPPORT HAVE_STDINT_H HAVE_LIBPNG ALLOW_CPU_OVERCLOCK)
+target_include_directories(snes9x-core PRIVATE ../ ../unzip ../external/lua/src)
+target_compile_definitions(snes9x-core PRIVATE ${DEFINES} ZLIB UNZIP_SUPPORT HAVE_STDINT_H HAVE_LIBPNG ALLOW_CPU_OVERCLOCK LUA_SUPPORT)
+# Lua scripting (lua/): the engine lives in the core; the editor in src/.
+list(APPEND DEFINES LUA_SUPPORT)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     set(PREBUILT_QT "${PROJECT_SOURCE_DIR}/../external/qt6-mingw-clang-bin")
@@ -351,6 +362,8 @@ list(APPEND QT_GUI_SOURCES
     src/SpriteViewerWindow.hpp
     src/GBViewerWindows.cpp
     src/GBViewerWindows.hpp
+    src/LuaScriptWindow.cpp
+    src/LuaScriptWindow.hpp
     ../common/video/ppu_viewer.cpp
     ../common/video/ppu_viewer.hpp
     ../common/video/gb_ppu_viewer.cpp

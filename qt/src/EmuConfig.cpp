@@ -627,6 +627,22 @@ void EmuConfig::config(const std::string &filename, bool write)
     {
         String("RecentlyUsed" + std::to_string(i), recently_used[i]);
     }
+
+    String("LuaLastFolder", lua_last_folder, "Folder last browsed for a Lua script");
+    Int("LuaWindowWidth", lua_window_width);
+    Int("LuaWindowHeight", lua_window_height);
+    Int("LuaFontSize", lua_font_size, "Lua editor font size in points (0 = system default)");
+    Bool("LuaShowReference", lua_show_reference, "Show the API reference beside the Lua editor");
+    auto StringList = [&](const std::string &name, std::vector<std::string> &list) {
+        int count = list.size();
+        Int(name + "Entries", count);
+        if (!write)
+            list.resize(std::clamp(count, 0, 64));
+        for (size_t i = 0; i < list.size(); i++)
+            String(name + std::to_string(i), list[i]);
+    };
+    StringList("LuaRecentScript", lua_recent_scripts);
+    StringList("LuaOpenScript", lua_open_scripts);
     EndSection();
 
     BeginSection("General");

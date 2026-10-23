@@ -96,11 +96,11 @@ void BuildFonts (void)
 					g.rows[y] |= 1 << x;
 	}
 
-	Font	&small = fonts[FONT_SMALL];
-	small = { "small", 5, 6, {} };
+	Font	&tiny = fonts[FONT_SMALL];
+	tiny = { "small", 5, 6, {} };
 	for (int c = 0; c < 95; c++)
 	{
-		Glyph	&g = small.glyphs[c];
+		Glyph	&g = tiny.glyphs[c];
 		g.width = 3;
 		for (int y = 0; y < 5; y++)
 			for (int x = 0; x < 3; x++)

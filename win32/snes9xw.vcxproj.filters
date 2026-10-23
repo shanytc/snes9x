@@ -252,6 +252,9 @@
     <ClInclude Include="..\sgb\gb_serial.h">
       <Filter>SGB</Filter>
     </ClInclude>
+    <ClInclude Include="..\sgb\gb_infrared.h">
+      <Filter>SGB</Filter>
+    </ClInclude>
     <ClInclude Include="..\sgb\gb_link.h">
       <Filter>SGB</Filter>
     </ClInclude>
@@ -903,6 +906,9 @@
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\gb_serial.cpp">
+      <Filter>SGB</Filter>
+    </ClCompile>
+    <ClCompile Include="..\sgb\gb_infrared.cpp">
       <Filter>SGB</Filter>
     </ClCompile>
     <ClCompile Include="..\sgb\gb_link.cpp">

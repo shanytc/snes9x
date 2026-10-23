@@ -82,6 +82,10 @@ namespace SGB {
 				{ 0x003FC0, 3, { 0xFF, 0xFF, 0xFF }, { 0xFE, 0xF8, 0xC8 } },   // cp $F8 / ret z
 				{ 0x003FC3, 3, { 0xFF, 0xFF, 0xFF }, { 0xE6, 0x70, 0xFE } },   // and $70 / cp $30 / ret
 				{ 0x003FC6, 2, { 0xFF, 0xFF }, { 0x30, 0xC9 } } } },
+			// Bakuchou Retrieve Master: on the trading file screen ($C61A=1) the VBlank pad read and the link
+			// send's read land in one frame, so player 1's A edge is gone: read once, as the trade itself does.
+			{ 0xD954, "RETRIEVE", "file-screen pad read once a frame", 1,
+			  { { 0x000363, 3, { 0xFE, 0x02, 0x28 }, { 0xB7, 0x00, 0x20 } } } },   // or a / nop / jr nz
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

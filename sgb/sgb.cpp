@@ -22,6 +22,7 @@
 #include "gb_timer.h"
 #include "gb_joypad.h"
 #include "gb_serial.h"
+#include "gb_infrared.h"
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
@@ -3451,7 +3452,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v10: add ppu.cgb_pal_written. Older states derive it from the palette RAM.
 // v11: add the in-flight DMA, PPU pipeline and APU internals. Older states
 //      load them from fixed defaults instead of the pre-load session's.
-constexpr uint32_t SGB_STATE_VERSION = 11;
+// v12: add mem.rp, the Game Boy Color infrared port.
+constexpr uint32_t SGB_STATE_VERSION = 12;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3780,6 +3782,14 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		IoBytes(c, impl.cart.camera_regs, sizeof impl.cart.camera_regs);
 		IoField(c, impl.run_target);   // the last frame's overshoot, owed by the next
 	}
+
+	// v12: the infrared port. A lit LED restarts its fade at the load.
+	if (c.version >= 12)
+	{
+		IoField(c, impl.mem.rp);
+		if (c.mode == IoMode::Load)
+			impl.mem.rp_lit_at = (impl.mem.rp & 0x01) ? impl.ppu.t_cycles : -1;
+	}
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
@@ -3903,6 +3913,11 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	if (!c.ok) return false;
 	if (version < 11)
 		DefaultUnsavedState(*impl_);
+	if (version < 12)
+	{
+		impl_->mem.rp        = 0;
+		impl_->mem.rp_lit_at = -1;
+	}
 	if (c.sgbc_mismatch)
 	{
 		S9xMessage(S9X_INFO, S9X_ROM_INFO,
@@ -4013,6 +4028,7 @@ namespace {
 
 std::unique_ptr<SGB::Emulator> g_split_cores[SGB_MAX_LINK_PLAYERS - 1];
 int g_split_players = 0;   // seats including the primary; 0 = off
+bool g_ir_facing = false;  // players 1 and 2 face each other's infrared port
 
 // Per-seat Game Boy Model, read at session start (see S9xSGBSplitStart).
 // A seat on a model of its own is a different console on the cable, so it
@@ -4185,10 +4201,20 @@ bool SplitPosExternal(int i)
 	return i >= 1 && SeatExternal(i - 1);
 }
 
+// Players 1 and 2 face each other's infrared port while the option is on.
+void SplitAttachIr(void)
+{
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	const int n = g_split_players >= 2 ? SplitCollect(cs) : 0;
+	if (!g_ir_facing || n < 2 || !cs[0] || !cs[1] || SplitPosExternal(1)) { SGB::IrUnpair(); return; }
+	SGB::IrPair(&cs[0]->DebugImpl()->mem, &cs[1]->DebugImpl()->mem);
+}
+
 // Wire the cable across every live core. Session start and checkpoint
 // restore both go through here so the cable comes up identically.
 void SplitAttachLink(void)
 {
+	SplitAttachIr();
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS];
 	SGB::Memory   *mm[SGB_MAX_LINK_PLAYERS];
@@ -5001,6 +5027,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	S9xSGBSplitSaveBatteries(battery_base_path);
 	SGB::Instance().DebugImpl()->sgb_pkt.passive_commands = false;
 	SGB::SerialSplitDetach();
+	SGB::IrUnpair();
 	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		g_split_cores[k].reset();
@@ -5062,6 +5089,8 @@ unsigned char S9xSGBSplitGetSeatModel(int player)
 }
 
 bool S9xSGBSplitActive(void)  { return g_split_players >= 2; }
+void S9xSGBSetInfrared(bool on) { g_ir_facing = on; SplitAttachIr(); }
+bool S9xSGBGetInfrared(void)    { return g_ir_facing; }
 int  S9xSGBSplitPlayers(void) { return g_split_players; }
 
 void S9xSGBSplitSetJoypad(int player, uint16_t snes_pad_mask)
@@ -5149,6 +5178,10 @@ void S9xSGBSplitRunFrame(void)
 	const int32_t budget =
 		static_cast<int32_t>((base_hz / SNES_FPS) * static_cast<double>(mul));
 
+	// A sensor reads the facing core's LED live, so while a port is in use the
+	// seats interleave finely: GBE+ found IR games need ~16 cycles of sync.
+	constexpr int32_t kIrSlice = 16;
+
 	// Interleave by scanline so the in-process cable always peeks a peer
 	// within one line of the caller. Cores never park: a seat hitting its
 	// VBlank snapshots the finished frame and runs on, so the adapter can
@@ -5176,10 +5209,11 @@ void S9xSGBSplitRunFrame(void)
 	while (running)
 	{
 		running = false;
+		const int32_t slice = SGB::IrActive() ? kIrSlice : 456;
 		for (int i = 0; i < n; ++i)
 		{
 			if (!has[i] || remaining[i] <= 0) continue;
-			const int32_t chunk = remaining[i] < 456 ? remaining[i] : 456;
+			const int32_t chunk = remaining[i] < slice ? remaining[i] : slice;
 			SGB::SerialSetTraceSeat(i);
 			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, chunk) : chunk);
 			remaining[i] -= chunk;
@@ -5203,16 +5237,17 @@ void S9xSGBSplitRunFrame(void)
 			if (has[i] && !snapped[i] &&
 			    (cs[i]->DebugImpl()->ppu.lcdc & 0x80)) owe = true;
 		if (!owe || chase <= 0) break;
+		const int32_t slice = SGB::IrActive() ? kIrSlice : 456;
 		for (int i = 0; i < n; ++i)
 		{
 			if (!has[i]) continue;
 			SGB::SerialSetTraceSeat(i);
-			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, 456) : 456);
-			if (i == 0) SplitYield(456);   // seat machines chase too
+			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, slice) : slice);
+			if (i == 0) SplitYield(slice);   // seat machines chase too
 			if (fb_ring) SplitPlacerSample(cs[i], i);
 			if (SplitSnapIfReady(cs[i], i)) snapped[i] = true;
 		}
-		chase -= 456;
+		chase -= slice;
 	}
 	SGB::SerialSetTraceSeat(-1);
 

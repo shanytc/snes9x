@@ -410,6 +410,7 @@ list(APPEND SOURCES
     ../sgb/gb_apu.cpp
     ../sgb/gb_timer.cpp
     ../sgb/gb_serial.cpp
+    ../sgb/gb_infrared.cpp
     ../sgb/gb_link.cpp
     ../sgb/gb_viewer.cpp
     ../sgb/gb_joypad.cpp

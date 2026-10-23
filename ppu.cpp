@@ -1822,11 +1822,14 @@ uint8 S9xGetCPU (uint16 Address)
 {
 	if (Address < 0x4200)
 	{
-	#ifdef SNES_JOY_READ_CALLBACKS
+	#if defined(SNES_JOY_READ_CALLBACKS) || defined(LUA_SUPPORT)
+		// Lua scripts count lag frames off pad_read.
 		extern bool8 pad_read;
 		if (Address == 0x4016 || Address == 0x4017)
 		{
+		#ifdef SNES_JOY_READ_CALLBACKS
 			S9xOnSNESPadRead();
+		#endif
 			pad_read = TRUE;
 		}
 	#endif
@@ -1964,11 +1967,13 @@ uint8 S9xGetCPU (uint16 Address)
 			case 0x421d: // JOY3H
 			case 0x421e: // JOY4L
 			case 0x421f: // JOY4H
-			#ifdef SNES_JOY_READ_CALLBACKS
+			#if defined(SNES_JOY_READ_CALLBACKS) || defined(LUA_SUPPORT)
 				extern bool8 pad_read;
 				if (Memory.FillRAM[0x4200] & 1)
 				{
+				#ifdef SNES_JOY_READ_CALLBACKS
 					S9xOnSNESPadRead();
+				#endif
 					pad_read = TRUE;
 				}
 			#endif

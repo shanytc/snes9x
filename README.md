@@ -23,6 +23,7 @@ Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for a
 - Enhanced Cheat Search / Cheat Editor (SNES, GB — incl. GB cheats in SGB BIOS mode)
 - Multi-Bind-Controller support
 - Run-Ahead (Input lag reduction)
+- [Lua scripting](docs/lua-scripting.md) - File > Script > Lua: an editor with a console and API reference; scripts read and write memory, hook CPU accesses, draw on screen, drive input and savestates (Qt, GTK, Windows)
 - Color Correction Support / Native CRT Colors
 - SDL Support
 - Multi-Language Pack

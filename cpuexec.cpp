@@ -29,11 +29,19 @@ int32	S9xRefreshClocks = 0;
 #include "missing.h"
 #include "getset.h"
 #endif
+#ifdef LUA_SUPPORT
+#include "lua/lua_hooks.h"
+#endif
 
 static inline void S9xReschedule (void);
 
 void S9xMainLoop (void)
 {
+#ifdef LUA_SUPPORT
+	if (S9xLuaActive)
+		S9xLuaFrameStart();
+#endif
+
 	// Super Game Boy mode — run the GB core for one frame and return.
 	// The 65816 loop below is bypassed entirely; snes9x's frontends
 	// call S9xMainLoop once per frame, so this satisfies the contract.
@@ -44,6 +52,10 @@ void S9xMainLoop (void)
 			CPU.Flags &= ~SCAN_KEYS_FLAG;
 			S9xMovieUpdate();
 		}
+#ifdef LUA_SUPPORT
+		if (S9xLuaActive)
+			S9xLuaInputLatched();
+#endif
 
 		IPPU.RenderThisFrame      = !Settings.InRunAhead;
 		PPU.ScreenHeight          = SGB_GB_SCREEN_H;
@@ -97,6 +109,10 @@ void S9xMainLoop (void)
 			S9xSyncSpeed();
 
 		CPU.Flags |= SCAN_KEYS_FLAG;
+#ifdef LUA_SUPPORT
+		if (S9xLuaActive)
+			S9xLuaFrameEnd();
+#endif
 		return;
 	}
 
@@ -120,6 +136,10 @@ void S9xMainLoop (void)
 		CPU.Flags &= ~SCAN_KEYS_FLAG;
 		S9xMovieUpdate();
 	}
+#ifdef LUA_SUPPORT
+	if (S9xLuaActive)
+		S9xLuaInputLatched();
+#endif
 
 	// Reset the SGB sync anchor to the current SNES cycle at loop entry
 	// and publish the scanline period for wrap-compensation. getset.h
@@ -354,6 +374,11 @@ void S9xMainLoop (void)
 					S9xVoiceKunPollVoiceId(Memory.RAM[vaddr & 0x1ffff]);
 			}
 
+#ifdef LUA_SUPPORT
+			if (S9xLuaHookMask & S9X_LUA_HOOK_EXEC)
+				S9xLuaHookExec(Registers.PBPC);
+#endif
+
 			uint8				Op;
 			struct	SOpcodes	*Opcodes;
 
@@ -440,6 +465,11 @@ void S9xMainLoop (void)
 	S9xSettleLastBus(0);
 
 	S9xPackStatus();
+
+#ifdef LUA_SUPPORT
+	if (S9xLuaActive)
+		S9xLuaFrameEnd();
+#endif
 }
 
 static inline void S9xReschedule (void)

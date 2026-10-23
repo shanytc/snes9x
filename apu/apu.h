@@ -16,6 +16,7 @@ typedef void (*apu_callback) (void *);
 
 bool8 S9xInitAPU (void);
 void S9xDeinitAPU (void);
+uint8 *S9xGetAPURAM (void);		// the SPC700's 64K, for debuggers and scripts
 void S9xResetAPU (void);
 void S9xSoftResetAPU (void);
 uint8 S9xAPUReadPort (int);

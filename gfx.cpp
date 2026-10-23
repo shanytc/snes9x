@@ -18,6 +18,9 @@
 #include "nss.h"       // S9xNSSRenderOSD    — M50458 overlay plane
                         // so the BIOS-mode custom-border overlay isn't
                         // clobbered by the PPU's final blit.
+#ifdef LUA_SUPPORT
+#include "lua/lua_hooks.h"
+#endif
 
 extern struct SCheatData		Cheat;
 extern struct SLineData			LineData[240];
@@ -1302,6 +1305,9 @@ void S9xEndScreenRefresh (void)
 		if (GFX.DoInterlace && S9xInterlaceField() == 0)
 		{
 			S9xControlEOF();
+#ifdef LUA_SUPPORT
+			if (!S9xLuaDeferPresent(true))
+#endif
 			S9xContinueUpdate(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
 		}
 		else
@@ -1318,10 +1324,16 @@ void S9xEndScreenRefresh (void)
 			if (Settings.TakeScreenshot)
 				S9xDoScreenshot(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
 
-			if (Settings.AutoDisplayMessages)
-				S9xDisplayMessages(GFX.Screen, GFX.RealPPL, IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight, 1);
+#ifdef LUA_SUPPORT
+			// Scripts draw on this frame once it's finished: S9xLuaFrameEnd shows it.
+			if (!S9xLuaDeferPresent())
+#endif
+			{
+				if (Settings.AutoDisplayMessages)
+					S9xDisplayMessages(GFX.Screen, GFX.RealPPL, IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight, 1);
 
-			S9xDeinitUpdate(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
+				S9xDeinitUpdate(IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight);
+			}
 		}
 	}
 	else

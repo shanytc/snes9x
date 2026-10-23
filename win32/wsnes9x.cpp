@@ -185,6 +185,14 @@ static void  GBSeatMachinesDestroy();
 static void  GBSeatMachinesTurn();
 static void  GBSeatMachinesRequestReset();
 static bool  GBSeatModelIsMachine(unsigned char model);
+static void  WinStartGBOtherGame(const TCHAR *path);
+static void  WinGBOtherGameClear();
+
+// Link Other Game's second cart while its session runs: player 2 plays it as an
+// in-process seat. Its console when player 2 follows the master: [0] split
+// screen (no window for a Super Game Boy machine), [1] with player windows.
+static TCHAR GBLinkOtherRom[_MAX_PATH] = {};
+static uint8 GBLinkOtherPolicy[2]      = {};
 
 // The master window's shape from before a session resized it — down to 1x
 // for a viewer ring (the seats park at its size, so 1x is what makes a 5x3
@@ -7240,7 +7248,7 @@ static void CheckMenuStates ()
 			int players = WinGetGBLinkPlayers ();
 			if (S9xSGBSplitActive ())
 			{
-				gblink  = 1;
+				gblink  = GBLinkOtherRom[0] ? 2 : 1;
 				players = S9xSGBSplitPlayers ();
 			}
 			else if (gblink == 1 && players > 2)
@@ -14738,6 +14746,15 @@ static unsigned char GBSeatModelPick (int player)
 	return GBSeatModel[player];
 }
 
+// The console a seat runs: its window's pick, or for Link Other Game's player 2
+// on "Same", the one its own cart resolves to.
+static unsigned char GBSeatModelEffective (int player)
+{
+	const unsigned char pick = GBSeatModelPick (player);
+	if (pick != SGB_SEAT_MODEL_MASTER || player != 2 || !GBLinkOtherRom[0]) return pick;
+	return GBLinkOtherPolicy[(GBLinkSplitScreen && !Settings.SGB_BIOSModeActive) ? 0 : 1];
+}
+
 // Hand the engine the picks. A plain Game Boy or Color is a split-engine
 // seat; a Super Game Boy is external - a SNES machine the frontend owns, on
 // the cable in its seat's place.
@@ -14745,7 +14762,7 @@ static void GBSeatModelsPushToEngine (int players)
 {
 	for (int p = 2; p <= SGB_MAX_LINK_PLAYERS; p++)
 	{
-		const uint8 m = (p <= players) ? GBSeatModelPick (p) : SGB_SEAT_MODEL_MASTER;
+		const uint8 m = (p <= players) ? GBSeatModelEffective (p) : SGB_SEAT_MODEL_MASTER;
 		const bool machine = GBSeatModelIsMachine (m);
 		S9xSGBSplitSetSeatExternal (p, machine);
 		S9xSGBSplitSetSeatModel (p, machine ? SGB_SEAT_MODEL_MASTER : m);
@@ -15009,6 +15026,7 @@ static void WinGBLinkUnlink ()
 {
 	if (Settings.GBLinkPeerInstance) return;
 
+	const bool other = GBLinkOtherRom[0] != 0;
 	if (S9xSGBSplitActive ())
 		WinStopGBSplit ();
 	else if (S9xSGBLinkIsEnabled ())
@@ -15021,6 +15039,7 @@ static void WinGBLinkUnlink ()
 	}
 	else
 		return;   // nothing live to leave
+	if (other) return;   // the master's own game plays on where it was
 
 	// The master is alone again with a game that was mid-link. Hard, for
 	// the reason the session started hard: a warm reset landing mid-boot
@@ -15374,8 +15393,9 @@ void WinToggleGBLink (int mode, int players)
 	// Clicking the live shape disconnects; any other shape switches to it.
 	if (S9xSGBSplitActive ())
 	{
-		const bool same = (mode == GBLINK_SAME &&
-		                   players == S9xSGBSplitPlayers ());
+		const int  live = GBLinkOtherRom[0] ? GBLINK_DIFF : GBLINK_SAME;
+		const bool same = (mode == live &&
+		                   (live == GBLINK_DIFF || players == S9xSGBSplitPlayers ()));
 		WinStopGBSplit ();
 		if (same || Settings.GBLinkPeerInstance)
 		{
@@ -15385,7 +15405,8 @@ void WinToggleGBLink (int mode, int players)
 			// seats that no longer exist. Hard, for the reason the session
 			// started hard: a warm reset landing mid-boot strands the game
 			// with a dead link engine.
-			if (!Settings.GBLinkPeerInstance)
+			// Another game plays on where it was.
+			if (!Settings.GBLinkPeerInstance && live == GBLINK_SAME)
 				PostMessage (GUI.hWnd, WM_COMMAND,
 				             MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 			return;
@@ -15441,8 +15462,9 @@ void WinToggleGBLink (int mode, int players)
 	// Every Current Game session runs on the split engine — the one
 	// architecture that cannot desync. Split checked = one shared window
 	// (BIOS-less only), unchecked = a viewer window per player; in BIOS
-	// mode the seats slave to the SNES-driven GB clock. Only Link Other
-	// Game still rides sockets.
+	// mode the seats slave to the SNES-driven GB clock. Link Other Game
+	// is a seat too, on the cart picked for it; only a spawned peer
+	// instance still rides sockets.
 	if (mode == GBLINK_SAME && !Settings.GBLinkPeerInstance)
 	{
 		// Faceball's ring sessions share the window too: past four seats
@@ -15452,6 +15474,11 @@ void WinToggleGBLink (int mode, int players)
 			WinStartGBSplit (players);
 		else
 			WinStartGBViewerSession (players);
+		return;
+	}
+	if (mode == GBLINK_DIFF && !Settings.GBLinkPeerInstance)
+	{
+		WinStartGBOtherGame (NULL);
 		return;
 	}
 
@@ -15476,9 +15503,12 @@ void WinToggleGBLinkSplit ()
 		// viewer windows fold into one shared window and vice versa.
 		const int  players  = S9xSGBSplitPlayers ();
 		const bool to_split = S9xSGBViewerHostActive ();
+		TCHAR other[_MAX_PATH];
+		_tcscpy (other, GBLinkOtherRom);
 		WinStopGBSplit ();
 		GBLinkSplitScreen = to_split;
-		WinToggleGBLink (GBLINK_SAME, players);
+		if (other[0]) WinStartGBOtherGame (other);
+		else          WinToggleGBLink (GBLINK_SAME, players);
 	}
 	else if (S9xSGBLinkIsEnabled () && !Settings.GBLinkPeerInstance &&
 	         WinGetGBLinkMode () == GBLINK_SAME)
@@ -16035,8 +16065,15 @@ static void GBSeatWindowsOpen ()
 
 		TCHAR title[96];
 		uint8 pick = S9xSGBSplitGetSeatModel (k + 2);
-		if (GBSeatModelIsMachine (GBSeatModelPick (k + 2))) pick = GBSeatModelPick (k + 2);
-		if (pick == SGB_SEAT_MODEL_MASTER)
+		if (GBSeatModelIsMachine (GBSeatModelEffective (k + 2))) pick = GBSeatModelEffective (k + 2);
+		if (k == 0 && GBLinkOtherRom[0])
+		{
+			TCHAR game[_MAX_FNAME];
+			_tsplitpath (GBLinkOtherRom, NULL, NULL, game, NULL);
+			_sntprintf (title, 96, TEXT("Player 2 - %s (%s)"), game,
+			            (TCHAR *)_tFromChar (GBSeatModelName (pick)));
+		}
+		else if (pick == SGB_SEAT_MODEL_MASTER)
 			_sntprintf (title, 96, TEXT("Player %d"), k + 2);
 		else
 			_sntprintf (title, 96, TEXT("Player %d - %s"), k + 2,
@@ -16396,7 +16433,7 @@ static void GBSeatMachinesCreate (int players)
 	GBSeatMachinesDestroy ();
 	for (int p = 2; p <= players && p <= SGB_MAX_LINK_PLAYERS; p++)
 	{
-		const uint8 pick = GBSeatModelPick (p);
+		const uint8 pick = GBSeatModelEffective (p);
 		if (!GBSeatModelIsMachine (pick)) continue;
 
 		GBSeatMachine *m = &GBSeatMachines[p - 2];
@@ -16405,7 +16442,11 @@ static void GBSeatMachinesCreate (int players)
 		m->policy = pick;
 		// The cart the master has: its path when it came from a file, its
 		// name otherwise (the master's Memory - this is the master thread).
-		const char *rom = Settings.GBRomPath[0] ? Settings.GBRomPath
+		// Link Other Game's player 2 plays its own.
+		const std::string other = (p == 2 && GBLinkOtherRom[0])
+		                        ? std::string ((const char *)_tToChar (GBLinkOtherRom)) : std::string ();
+		const char *rom = !other.empty ()      ? other.c_str ()
+		                : Settings.GBRomPath[0] ? Settings.GBRomPath
 		                                        : Memory.ROMFilename.c_str ();
 		strncpy (m->rom, rom ? rom : "", _MAX_PATH);
 		m->rom[_MAX_PATH] = '\0';
@@ -16611,6 +16652,14 @@ static void GBSeatWindowsCreate (int players)
 	S9xScreenshotExtras = GBSeatScreenshots;
 }
 
+// Link Other Game's session is over (or about to be replaced): player 2
+// goes back to the master's cart.
+static void WinGBOtherGameClear ()
+{
+	S9xSGBSplitSetSeatRom (2, NULL, 0, NULL);
+	GBLinkOtherRom[0] = TEXT('\0');
+}
+
 // In-process split screen: no processes, no sockets — the SGB layer owns
 // the extra consoles and the local cable/adapter. The battery base path
 // hands each seat its own .savN next to the primary's .sav.
@@ -16659,8 +16708,10 @@ static void WinStartGBSplit (int players)
 
 	// All seats power up together; the primary may have been in demo.
 	// Hard, for the same reason as the socket session: a warm reset
-	// landing mid-boot strands a game with a dead link engine.
-	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+	// landing mid-boot strands a game with a dead link engine. Another
+	// game joins the master wherever its game is.
+	if (!GBLinkOtherRom[0])
+		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	char msg[64];
 	snprintf (msg, sizeof (msg), "Split screen: %d players", players);
@@ -16683,6 +16734,7 @@ static void WinStopGBSplit ()
 		GBLinkSyncResponsiveSettings ();
 	}
 	S9xSGBSplitStop (base);
+	WinGBOtherGameClear ();
 
 	// A ring session shrank the master to 1x; give the user's shape back.
 	if (GBLinkPreRingW > 0 && !GUI.FullScreen && !IsZoomed (GUI.hWnd))
@@ -16764,8 +16816,9 @@ static void WinStartGBViewerSession (int players)
 	S9xSGBSplitSetYield (GBSeatMachinesYield, 456);
 
 	// All consoles power up together — hard, so no seat boots from
-	// half-initialized RAM.
-	PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
+	// half-initialized RAM. Another game joins the master wherever its game is.
+	if (!GBLinkOtherRom[0])
+		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	char msg[64];
 	snprintf (msg, sizeof (msg), "Link cable: %d players", players);
@@ -16780,6 +16833,56 @@ static void WinGBRestartSeatSession (int players)
 		WinStartGBSplit (players);
 	else
 		WinStartGBViewerSession (players);
+}
+
+// Link Other Game: player 2 plays a second cart as an in-process seat, picked
+// here before its window opens (or the live session's, on a restart).
+static void WinStartGBOtherGame (const TCHAR *path)
+{
+	if (!Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive)
+	{
+		S9xSetInfoString ("Link cable: load a Game Boy game first");
+		return;
+	}
+	TCHAR file[_MAX_PATH] = {};
+	if (path && *path)
+		_tcsncpy (file, path, _MAX_PATH - 1);
+	else
+	{
+		RestoreGUIDisplay ();
+		const bool picked = DoOpenRomDialog (file);
+		RestoreSNESDisplay ();
+		if (!picked) return;
+	}
+
+	const std::string path8 = (const char *)_tToChar (file);
+	std::vector<uint8> rom;
+	if (!S9xReadGBRomFile (path8.c_str (), rom))
+	{
+		S9xSetInfoString ("Link Other Game: that file is not a Game Boy game");
+		return;
+	}
+	// The master's own game picked again: its seat keeps the usual .sav2.
+	const std::string sav = S9xGetFilename (path8, ".sav", SRAM_DIR);
+	S9xSGBSplitSetSeatRom (2, rom.data (), rom.size (),
+	                       sav == S9xGetFilename (".sav", SRAM_DIR) ? NULL : sav.c_str ());
+	_tcsncpy (GBLinkOtherRom, file, _MAX_PATH - 1);
+	GBLinkOtherRom[_MAX_PATH - 1] = TEXT('\0');
+	GBLinkOtherPolicy[0] = S9xGBSeatPolicyForCart (rom.data (), rom.size (), path8.c_str (), false);
+	GBLinkOtherPolicy[1] = S9xGBSeatPolicyForCart (rom.data (), rom.size (), path8.c_str (), true);
+
+	WinGBRestartSeatSession (2);
+	if (!S9xSGBSplitActive ())
+	{
+		WinGBOtherGameClear ();
+		return;
+	}
+	TCHAR game[_MAX_FNAME];
+	_tsplitpath (file, NULL, NULL, game, NULL);
+	const std::string game8 = (const char *)_tToChar (game);
+	char msg[_MAX_FNAME + 48];
+	snprintf (msg, sizeof (msg), "Link cable: player 2 plays %s", game8.c_str ());
+	S9xSetInfoString (msg);
 }
 
 // A console cannot change under a running game, so a live session is torn
@@ -16808,8 +16911,11 @@ static void WinGBSeatSetModel (int player, unsigned char model)
 	if (!S9xSGBSplitActive ()) return;
 
 	const int players = S9xSGBSplitPlayers ();
+	TCHAR other[_MAX_PATH];
+	_tcscpy (other, GBLinkOtherRom);
 	WinStopGBSplit ();
-	WinGBRestartSeatSession (players);
+	if (other[0]) WinStartGBOtherGame (other);
+	else          WinGBRestartSeatSession (players);
 }
 
 // The per-frame session watchdog for both viewer roles: a viewer follows

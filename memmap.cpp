@@ -2111,6 +2111,51 @@ static uint8 GbBytesLicensee(const uint8 *rom, size_t size)
     return size > 0x14B ? rom[0x14B] : 0;
 }
 
+bool8 S9xReadGBRomFile(const char *filename, std::vector<uint8> &out)
+{
+    out.clear();
+    if (!filename || !*filename) return FALSE;
+    if (splitpath(filename).ext_is(".zip"))
+    {
+    #ifdef UNZIP_SUPPORT
+        uint32 size = 0;
+        out.resize(CMemory::MAX_ROM_SIZE + 0x200);
+        if (!LoadZip(filename, &size, out.data(), (uint32)out.size())) size = 0;
+        out.resize(size);
+    #endif
+    }
+    else if (FILE *f = fopen(filename, "rb"))
+    {
+        fseek(f, 0, SEEK_END);
+        const long size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (size > 0 && size <= (long)CMemory::MAX_ROM_SIZE)
+        {
+            out.resize((size_t)size);
+            if (fread(out.data(), 1, out.size(), f) != out.size()) out.clear();
+        }
+        fclose(f);
+    }
+    if (!S9xRomBytesAreGb(out.data(), (int32)out.size())) out.clear();
+    return out.empty() ? FALSE : TRUE;
+}
+
+uint8 S9xGBSeatPolicyForCart(const uint8 *rom, size_t size, const char *filename, bool allow_sgb)
+{
+    // The SGB1 has no link port, so only an SGB2 BIOS makes a Super Game Boy seat.
+    std::string probe;
+    const bool8 sgb2 = allow_sgb && Settings.SGB_BIOSPreference != 0 &&
+                       FindSGB_BIOS(2, filename, probe);
+    bool8 force_cgb = FALSE;
+    switch (S9xResolveGBConsole(GbBytesCgbFlag(rom, size), GbBytesSgbFlag(rom, size),
+                                GbBytesLicensee(rom, size), sgb2, &force_cgb))
+    {
+        case S9X_GBCON_SGB: return S9X_GBBOOT_SGB2;
+        case S9X_GBCON_GBC: return S9X_GBBOOT_GBC;
+        default:            return S9X_GBBOOT_GB;
+    }
+}
+
 static uint8 GbFileByte(const char *filename, long offset)
 {
     FILE *f = fopen(filename, "rb");

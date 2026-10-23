@@ -1555,6 +1555,11 @@ BEGIN
             END
             MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
+            POPUP "&Infra-Red",                     ID_EMULATION_GB_LINK_IR_POPUP,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "&Connect (Players 1 + 2)",    ID_EMULATION_GB_LINK_IR,MFT_STRING,MFS_ENABLED
+            END
+            MENUITEM MFT_SEPARATOR
             MENUITEM "&Unlink",                     ID_EMULATION_GB_LINK_UNLINK,MFT_STRING,MFS_ENABLED
         END
         POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED

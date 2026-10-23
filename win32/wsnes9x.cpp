@@ -3588,6 +3588,23 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_LINK_SPLIT:
 			WinToggleGBLinkSplit ();
 			break;
+		case ID_EMULATION_GB_LINK_IR:
+			// Players 1 and 2 face each other's infrared port; with no session
+			// live, connecting brings up a 2-player one of the current game.
+			if (S9xSGBGetInfrared ())
+			{
+				S9xSGBSetInfrared (false);
+				S9xSetInfoString ("Infra-red: disconnected");
+				break;
+			}
+			S9xSGBSetInfrared (true);
+			if (!S9xSGBSplitActive ())
+				WinToggleGBLink (1, 2);
+			if (S9xSGBSplitActive ())
+				S9xSetInfoString ("Infra-red: players 1 and 2 connected");
+			else
+				S9xSGBSetInfrared (false);   // no session came up; it said why
+			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
 			// lParam rides the master's Game Boy Model + 1 (0 = not
 			// specified): a reused window may sit on another console and
@@ -7252,6 +7269,11 @@ static void CheckMenuStates ()
 			// The whole Current Game submenu greys during an Other session.
 			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_POPUP, FALSE, &mii);
+			// Infra-red pairs in-process seats; a socket peer is another process.
+			mii.fState = S9xSGBLinkIsEnabled () ? MFS_DISABLED : MFS_ENABLED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_IR_POPUP, FALSE, &mii);
+			mii.fState = S9xSGBGetInfrared () ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_IR, FALSE, &mii);
 
 			// Split screen needs the BIOS-less core, so in BIOS mode the
 			// item comes out of the menu rather than offering a dead end.

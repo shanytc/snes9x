@@ -86,6 +86,11 @@ struct Memory
 	// KEY0 $FF4C: boot ROM CPU-mode select; bit 2 = DMG-compat. Locked at $FF50.
 	uint8_t  key0 = 0;
 
+	// RP $FF56 (gb_infrared.cpp): LED bit 0 + read enable bits 6-7, and the
+	// PPU time the LED last lit, which the facing sensor fades against.
+	uint8_t  rp = 0;
+	int64_t  rp_lit_at = -1;
+
 	// True when the machine is CGB hardware, including its DMG-compat
 	// mode (ppu->cgb is false there). STOP display + speed-switch gates.
 	bool     cgb_hw = false;

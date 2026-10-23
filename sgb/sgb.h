@@ -471,6 +471,13 @@ unsigned char S9xSGBSplitGetSeatModel(int player);
 // it; hand its core over once its machine has loaded, which rewires the cable.
 void S9xSGBSplitSetSeatExternal(int player /*2..15*/, bool external);
 bool S9xSGBSplitSeatIsExternal(int player);
+
+// Link Other Game: a seat that plays its own cart instead of the master's,
+// with that game's own battery file (none: the master's base + player). Set
+// BEFORE S9xSGBSplitStart; data nullptr puts the seat back on the master's cart.
+void S9xSGBSplitSetSeatRom(int player /*2..15*/, const unsigned char *data, size_t size,
+                           const char *battery_path);
+bool S9xSGBSplitSeatHasRom(int player);
 void S9xSGBSplitSetExternalCore(int player, SGB::Emulator *core);
 
 // Seat machines run in step with the cable, not a frame behind it. The split

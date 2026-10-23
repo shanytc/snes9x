@@ -32,6 +32,8 @@
 #include "gtk_movie.h"
 #include "gtk_audio_waveform.h"
 #include "gtk_ppu_viewer.h"
+#include "gtk_lua_window.h"
+#include "lua/lua_engine.h"
 #include "common/audio/audio_waveform.hpp"
 #include "common/desktop/xdg_app_icon.hpp"
 #include "gtk_logos.h"
@@ -261,11 +263,14 @@ void Snes9xWindow::connect_signals()
 {
     drawing_area->signal_draw().connect(sigc::mem_fun(*this, &Snes9xWindow::draw));
     window->signal_delete_event().connect([](GdkEventAny *event) -> bool {
+        if (!S9xLuaWindowConfirmClose())
+            return true;
         S9xExit();
         return false;
     });
     get_object<Gtk::MenuItem>("exit_item")->signal_activate().connect([] {
-         S9xExit();
+        if (S9xLuaWindowConfirmClose())
+            S9xExit();
     });
 
     window->signal_window_state_event().connect([&](GdkEventWindowState *state) -> bool {
@@ -327,6 +332,7 @@ void Snes9xWindow::connect_signals()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(false);
     });
 
     get_object<Gtk::MenuItem>("hard_reset_item")->signal_activate().connect([&, movie_reset_hook] {
@@ -346,6 +352,7 @@ void Snes9xWindow::connect_signals()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(true);
     });
 
     // Which console GB content runs on. Its BIOS is used when one is assigned
@@ -526,8 +533,16 @@ void Snes9xWindow::connect_signals()
         toggle_avi_recording();
     });
 
+    get_object<Gtk::MenuItem>("lua_item")->signal_activate().connect([] {
+        S9xShowLuaWindow();
+    });
+    get_object<Gtk::MenuItem>("stop_lua_scripts_item")->signal_activate().connect([] {
+        S9xLuaStop(0);
+    });
+
     get_object<Gtk::Menu>("file_menu_item_menu")->signal_show().connect([this] {
         update_movie_menu();
+        enable_widget("stop_lua_scripts_item", !S9xLuaScripts().empty());
     });
 
     get_object<Gtk::MenuItem>("cheats_item")->signal_activate().connect([&] {
@@ -1118,7 +1133,7 @@ void Snes9xWindow::focus_notify(bool state)
     // Focus moving to the audio waveform viewer is not leaving the emulator,
     // so the focus-loss pause is suspended for as long as the viewer is open.
     if (!state && config->pause_emulation_on_switch && !paused_from_focus_loss &&
-        !S9xAudioWaveformWindowOpen())
+        !S9xAudioWaveformWindowOpen() && !S9xLuaWindowOpen())
     {
         sys_pause++;
         propagate_pause_state();

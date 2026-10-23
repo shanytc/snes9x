@@ -106,6 +106,15 @@ class Snes9xConfig
     std::string last_directory;
     std::string last_shader_directory;
 
+    /* File > Script > Lua editor */
+    std::string lua_last_directory;
+    std::vector<std::string> lua_recent_scripts;
+    std::vector<std::string> lua_open_scripts;
+    int lua_window_width = 0;
+    int lua_window_height = 0;
+    int lua_font_size = 0; // 0 = the theme's monospace size
+    bool lua_show_reference = true;
+
     /* Controls */
     std::array<JoypadBinding, NUM_JOYPADS> pad;
     std::array<Binding, NUM_EMU_LINKS> shortcut;

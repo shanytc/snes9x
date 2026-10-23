@@ -112,7 +112,10 @@ void WRAMWrite (uint32 a, uint8 v)	{ Memory.RAM[a] = v; }
 
 uint32 SRAMSize (void)
 {
-	return Memory.SRAMSize ? (1 << (Memory.SRAMSize + 3)) * 128 : 0;
+	// A garbage header byte (Super FX hacks read $7FBD raw) mustn't reach past the buffer.
+	if (!Memory.SRAMSize)
+		return 0;
+	return Memory.SRAMSize >= 9 ? (uint32) Memory.SRAM_SIZE : (1 << (Memory.SRAMSize + 3)) * 128;
 }
 uint8 SRAMRead (uint32 a)		{ return Memory.SRAM[a]; }
 void SRAMWrite (uint32 a, uint8 v)
@@ -315,8 +318,14 @@ uint32 CheckRange (lua_State *L, int arg, const Domain *d, lua_Integer count)
 	lua_Integer	address = luaL_checkinteger(L, arg);
 	lua_Integer	size = d->size();
 	if (d->read == BusRead)
+	{
+		// The bus wraps, but one call never reads more than all of it.
+		if (count > size)
+			luaL_error(L, "%I bytes is more than the whole bus (0x1000000 bytes)", count);
 		return (uint32) (address & 0xffffff);
-	if (address < 0 || count < 0 || address + count > size)
+	}
+	// Written so a huge address or count can't overflow past the check.
+	if (address < 0 || count < 0 || count > size || address > size - count)
 	{
 		char	text[160];
 		snprintf(text, sizeof(text), "address 0x%llX is outside '%s' (0x%X bytes)",

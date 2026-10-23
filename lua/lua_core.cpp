@@ -65,7 +65,18 @@
 #include "ltm.c"
 #include "lstring.c"
 #include "ltable.c"
+
+// Only Lua source loads: precompiled chunks aren't verified and a crafted one
+// corrupts memory. Every loader (load, dofile, require) parses through here.
+static LClosure *RejectBinaryChunk (lua_State *L)
+{
+	luaO_pushfstring(L, "attempt to load a binary chunk (scripts load Lua source only)");
+	luaD_throw(L, LUA_ERRSYNTAX);
+	return NULL;
+}
+#define luaU_undump(L, Z, name)	RejectBinaryChunk(L)
 #include "ldo.c"
+#undef luaU_undump
 #include "lvm.c"
 #include "lapi.c"
 

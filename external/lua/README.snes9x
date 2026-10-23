@@ -1,0 +1,8 @@
+Lua 5.4.9 (https://www.lua.org/ftp/lua-5.4.9.tar.gz,
+sha256 2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6),
+unmodified. Only src/ is kept, minus the lua.c and luac.c executables.
+
+lua/lua_core.cpp builds these files as one C++ translation unit, as upstream's
+onelua.c does, so Lua errors unwind with exceptions instead of longjmp and the
+C++ destructors in the scripting API still run. Include lua.h, lauxlib.h and
+lualib.h directly, not lua.hpp.

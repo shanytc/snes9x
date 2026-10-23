@@ -920,12 +920,14 @@ struct retro_core_option_definition *option_defs_intl[RETRO_LANGUAGE_LAST] = {
 /* Handles configuration/setting of core options.
  * Should be called as early as possible - ideally inside
  * retro_set_environment(), and no later than retro_load_game()
+ * > defs: option_defs_us, or a copy with options added at run time
  * > We place the function body in the header to avoid the
  *   necessity of adding more .c files (i.e. want this to
  *   be as painless as possible for core devs)
  */
 
-static INLINE void libretro_set_core_options(retro_environment_t environ_cb)
+static INLINE void libretro_set_core_options(retro_environment_t environ_cb,
+                                             struct retro_core_option_definition *defs)
 {
    unsigned version = 0;
 
@@ -938,7 +940,7 @@ static INLINE void libretro_set_core_options(retro_environment_t environ_cb)
       struct retro_core_options_intl core_options_intl;
       unsigned language = 0;
 
-      core_options_intl.us    = option_defs_us;
+      core_options_intl.us    = defs;
       core_options_intl.local = NULL;
 
       if (environ_cb(RETRO_ENVIRONMENT_GET_LANGUAGE, &language) &&
@@ -947,7 +949,7 @@ static INLINE void libretro_set_core_options(retro_environment_t environ_cb)
 
       environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL, &core_options_intl);
 #else
-      environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS, &option_defs_us);
+      environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS, defs);
 #endif
    }
    else
@@ -966,7 +968,7 @@ static INLINE void libretro_set_core_options(retro_environment_t environ_cb)
        *   keep the code 'cleaner' */
       while (true)
       {
-         if (option_defs_us[num_options].key)
+         if (defs[num_options].key)
             num_options++;
          else
             break;
@@ -979,13 +981,13 @@ static INLINE void libretro_set_core_options(retro_environment_t environ_cb)
       if (!variables || !values_buf)
          goto error;
 
-      /* Copy parameters from option_defs_us array */
+      /* Copy parameters from defs array */
       for (i = 0; i < num_options; i++)
       {
-         const char *key                        = option_defs_us[i].key;
-         const char *desc                       = option_defs_us[i].desc;
-         const char *default_value              = option_defs_us[i].default_value;
-         struct retro_core_option_value *values = option_defs_us[i].values;
+         const char *key                        = defs[i].key;
+         const char *desc                       = defs[i].desc;
+         const char *default_value              = defs[i].default_value;
+         struct retro_core_option_value *values = defs[i].values;
          size_t buf_len                         = 3;
          size_t default_index                   = 0;
 

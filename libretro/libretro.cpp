@@ -25,6 +25,8 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <deque>
+#include <map>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -45,6 +47,15 @@
 
 #ifndef RETRO_ENVIRONMENT_SET_VARIABLE
 #define RETRO_ENVIRONMENT_SET_VARIABLE 70
+#endif
+
+#ifndef RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK
+#define RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK 69
+typedef bool (RETRO_CALLCONV *retro_core_options_update_display_callback_t)(void);
+struct retro_core_options_update_display_callback
+{
+    retro_core_options_update_display_callback_t callback;
+};
 #endif
 
 static int g_screen_gun_width = SNES_WIDTH;
@@ -317,6 +328,75 @@ static void load_barcode_list(retro_environment_t cb)
     def->values[fixed + barcode_codes.size()].label = NULL;
 }
 
+// The known cards (barcodebattler.h) as options after the scan option: a set
+// to pick, then one card list per set, shown only while its set is picked
+// (an option takes at most RETRO_NUM_CORE_OPTION_VALUES_MAX values).
+static std::vector<struct retro_core_option_definition> option_defs_all;
+static std::deque<std::string> barcode_strings;
+static std::vector<std::string> barcode_card_keys;
+
+static const char *keep_string(const std::string &text)
+{
+    barcode_strings.push_back(text);
+    return barcode_strings.back().c_str();
+}
+
+static void build_option_defs(void)
+{
+    if (!option_defs_all.empty())
+        return;
+
+    int count = 0;
+    const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
+    for (const struct retro_core_option_definition *def = option_defs_us; ; def++)
+    {
+        option_defs_all.push_back(*def);
+        if (!def->key)
+            break;
+        if (strcmp(def->key, "snes9x_barcode_scan"))
+            continue;
+
+        struct retro_core_option_definition set = {};
+        set.key = "snes9x_barcode_set";
+        set.desc = "Barcode Battler II: Card Set";
+        set.info = "The set of known cards that Barcode Battler II: Card lists. Shown only for games that read the Barcode Battler.";
+        int sets = 0;
+        for (int i = 0; i < count && sets < RETRO_NUM_CORE_OPTION_VALUES_MAX - 1; i++)
+        {
+            if (i && !strcmp(cards[i].set, cards[i - 1].set))
+                continue;
+            set.values[sets].value = keep_string(std::to_string(sets));
+            set.values[sets].label = cards[i].set;
+            sets++;
+        }
+        set.default_value = "0";
+        option_defs_all.push_back(set);
+
+        for (int s = 0, i = 0; s < sets; s++)
+        {
+            struct retro_core_option_definition list = {};
+            barcode_card_keys.push_back("snes9x_barcode_card_" + std::to_string(s));
+            list.key = keep_string(barcode_card_keys.back());
+            list.desc = "Barcode Battler II: Card";
+            list.info = "Swipe a known card from the chosen set: pick it when the game asks for a card, then close the menu.";
+            list.values[0].value = "none";
+            list.values[0].label = "Pick a card";
+            int n = 1;
+            for (const char *name = cards[i].set; i < count && !strcmp(cards[i].set, name); i++)
+                if (n < RETRO_NUM_CORE_OPTION_VALUES_MAX - 1)
+                {
+                    list.values[n].value = keep_string(std::to_string(i));
+                    list.values[n].label = keep_string(std::string(cards[i].name) + "  " + cards[i].code);
+                    n++;
+                }
+            list.default_value = "none";
+            option_defs_all.push_back(list);
+        }
+    }
+}
+
+static bool barcode_update_display(void);
+
 void retro_set_environment(retro_environment_t cb)
 {
     environ_cb = cb;
@@ -342,7 +422,12 @@ void retro_set_environment(retro_environment_t cb)
     cb(RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO,  (void*)subsystems);
 
     load_barcode_list(cb);
-    libretro_set_core_options(environ_cb);
+    build_option_defs();
+    libretro_set_core_options(environ_cb, option_defs_all.data());
+
+    // Lets the menu show the picked set's card list without leaving it.
+    struct retro_core_options_update_display_callback update_display = { barcode_update_display };
+    cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK, &update_display);
 
     static const struct retro_controller_description port_1[] = {
         { "None", RETRO_DEVICE_NONE },
@@ -474,50 +559,96 @@ static void show_widescreen_option(void)
     environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
 }
 
-// The scan option is shown only for a game that reads the Barcode Battler.
-static void show_barcode_option(void)
+// The scan and card options are shown only for a game that reads the Barcode
+// Battler, and of the card lists only the picked set's. True when that changed.
+static int barcode_shown_set = -2;
+
+static bool show_barcode_option(void)
 {
+    const bool visible = rom_loaded && S9xBarcodeBattlerGameSupported();
+    struct retro_variable var = { "snes9x_barcode_set", NULL };
+    const int set = visible ? (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value ? atoi(var.value) : 0) : -1;
+
     struct retro_core_option_display option_display;
-    option_display.key = "snes9x_barcode_scan";
-    option_display.visible = rom_loaded && S9xBarcodeBattlerGameSupported();
-    environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+    option_display.visible = visible;
+    for (const char *key : { "snes9x_barcode_scan", "snes9x_barcode_set" })
+    {
+        option_display.key = key;
+        environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+    }
+    for (size_t s = 0; s < barcode_card_keys.size(); s++)
+    {
+        option_display.key = barcode_card_keys[s].c_str();
+        option_display.visible = (int)s == set;
+        environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+    }
+
+    const bool changed = set != barcode_shown_set;
+    barcode_shown_set = set;
+    return changed;
+}
+
+static bool barcode_update_display(void)
+{
+    return show_barcode_option();
 }
 
 // A code picked in the menu is swiped once the game runs again. The value a
 // game loads with is never scanned. Any pick goes back to "none" so the same
-// pick can be made again.
-static std::string barcode_pick;
-static bool barcode_pick_seen = false;
+// pick can be made again. Returns the new pick, or "".
+struct BarcodePick
+{
+    std::string value;
+    bool seen = false;
+};
+static std::map<std::string, BarcodePick> barcode_picks;
+
+static std::string take_barcode_pick(const char *key)
+{
+    struct retro_variable var = { key, NULL };
+    const std::string pick = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value ? var.value : "none";
+    BarcodePick &last = barcode_picks[key];
+    const bool changed = last.seen && pick != last.value;
+    last.value = pick;
+    last.seen = true;
+    if (pick == "none")
+        return "";
+
+    struct retro_variable reset = { key, "none" };
+    if (environ_cb(RETRO_ENVIRONMENT_SET_VARIABLE, &reset))
+        last.value = "none";
+    return changed ? pick : "";
+}
 
 static void update_barcode_scan(void)
 {
-    struct retro_variable var = { "snes9x_barcode_scan", NULL };
-    const std::string pick = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value ? var.value : "none";
-    const bool changed = barcode_pick_seen && pick != barcode_pick;
-    barcode_pick = pick;
-    barcode_pick_seen = true;
-    if (pick == "none")
-        return;
-
-    if (changed && rom_loaded && S9xBarcodeBattlerGameSupported())
+    std::string code;
+    const std::string pick = take_barcode_pick("snes9x_barcode_scan");
+    if (pick == "random")
     {
-        std::string code = pick;
-        if (pick == "random")
-        {
-            char random[14];
-            S9xBarcodeRandom(random);
-            code = random;
-        }
-        else if (pick == "last")
-            code = S9xBarcodeBattlerLastCode();
+        char random[14];
+        S9xBarcodeRandom(random);
+        code = random;
+    }
+    else if (pick == "last")
+        code = S9xBarcodeBattlerLastCode();
+    else
+        code = pick;
 
-        if (S9xBarcodeBattlerScan(code.c_str()))
-            S9xSetInfoString(("Barcode Battler: " + std::string(S9xBarcodeBattlerLastCode()) + " scanned").c_str());
+    int count = 0;
+    const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
+    for (auto &key : barcode_card_keys)
+    {
+        const std::string card = take_barcode_pick(key.c_str());
+        const int entry = card.empty() ? -1 : atoi(card.c_str());
+        if (entry >= 0 && entry < count)
+            code = cards[entry].code;
     }
 
-    struct retro_variable reset = { "snes9x_barcode_scan", "none" };
-    if (environ_cb(RETRO_ENVIRONMENT_SET_VARIABLE, &reset))
-        barcode_pick = "none";
+    if (!code.empty() && rom_loaded && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
+        S9xSetInfoString(("Barcode Battler: " + std::string(S9xBarcodeBattlerLastCode()) + " scanned").c_str());
+
+    show_barcode_option();
 }
 
 static void update_variables(void)
@@ -1673,7 +1804,7 @@ bool retro_load_game(const struct retro_game_info *game)
     rom_loaded = false;
     widescreen_content.clear();
     widescreen_content_path.clear();
-    barcode_pick_seen = false;
+    barcode_picks.clear();
     update_variables();
     bios_notice_shown = false;
 
@@ -1830,7 +1961,7 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
     init_descriptors();
     rom_loaded = false;
 
-    barcode_pick_seen = false;
+    barcode_picks.clear();
     update_variables();
     switch (game_type)
     {

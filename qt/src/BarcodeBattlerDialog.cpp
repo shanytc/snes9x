@@ -5,6 +5,8 @@
 \*****************************************************************************/
 
 #include "BarcodeBattlerDialog.hpp"
+#include "EmuConfig.hpp"
+#include "common/desktop/barcode_card_photos.hpp"
 #include "common/video/gb_camera_v4l2.hpp"
 #include "barcodebattler.h"
 #include "display.h"
@@ -12,24 +14,68 @@
 
 #include <QApplication>
 #include <QDialogButtonBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFileDialog>
 #include <QHBoxLayout>
-#include <QImage>
 #include <QMessageBox>
+#include <QMimeData>
+#include <QPainter>
 #include <QPixmap>
+#include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QVBoxLayout>
+
+#include <string.h>
+
+namespace {
+
+// One printed card: the run of entries from i sharing its set and photo stem
+// (a card with several barcodes); a single entry when it has no photos.
+int cardEnd(const S9xBarcodeCard *cards, int count, int i)
+{
+    int end = i + 1;
+    if (*cards[i].image)
+        while (end < count && !strcmp(cards[end].set, cards[i].set) && !strcmp(cards[end].image, cards[i].image))
+            end++;
+    return end;
+}
+
+bool cardMatches(const S9xBarcodeCard &card, const QString &find)
+{
+    return find.isEmpty() || QString::fromUtf8(card.name).contains(find, Qt::CaseInsensitive) ||
+           QString::fromUtf8(card.set).contains(find, Qt::CaseInsensitive) || QString(card.code).contains(find);
+}
+
+// A card with several barcodes is named after them, less their positions.
+QString cardLabel(const S9xBarcodeCard *cards, int i, int end)
+{
+    static const QRegularExpression where(" \\((Up|Down|Left|Right|Front|Back)\\)$");
+    QStringList names;
+    for (int k = i; k < end; k++)
+    {
+        const QString name = QString::fromUtf8(cards[k].name).remove(where);
+        if (!names.contains(name))
+            names << name;
+    }
+    return names.join(" / ");
+}
+
+} // namespace
 
 BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Barcode Battler II"));
+    setAcceptDrops(true);
 
-    auto layout = new QVBoxLayout(this);
+    auto columns = new QHBoxLayout(this);
+    auto layout = new QVBoxLayout;
+    columns->addLayout(layout, 1);
 
     auto intro = new QLabel(tr("Swipe a card through the Barcode Battler II on controller port 2. "
                                "Enter its 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) "
-                               "barcode, or read it with a camera or from a picture."));
+                               "barcode, pick a known card, or read it with a camera or from a picture."));
     intro->setWordWrap(true);
     layout->addWidget(intro);
 
@@ -67,13 +113,15 @@ BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent)
     camera_row->addWidget(camera_button);
     layout->addLayout(camera_row);
 
+    photo_dir = S9xBarcodePhotoDir({ EmuConfig::findConfigDir(), QCoreApplication::applicationDirPath().toStdString() });
+
     preview_label = new QLabel;
     preview_label->setMinimumSize(320, 240);
     preview_label->setAlignment(Qt::AlignCenter);
     preview_label->setFrameShape(QFrame::StyledPanel);
     preview_label->setText(tr("Hold the barcode up to the camera, straight and in focus."));
     preview_label->setWordWrap(true);
-    preview_label->setVisible(!names.empty());
+    preview_label->setVisible(!names.empty() || !photo_dir.empty());
     layout->addWidget(preview_label, 1);
 
     auto note = new QLabel(tr("Some games look for the Barcode Battler only when they start; "
@@ -85,6 +133,21 @@ BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent)
     scan_button = buttons->addButton(tr("&Scan"), QDialogButtonBox::AcceptRole);
     scan_button->setDefault(true);
     layout->addWidget(buttons);
+
+    // The known cards, one branch per set and one per card with several barcodes.
+    auto cards_column = new QVBoxLayout;
+    auto find_label = new QLabel(tr("Fin&d a card:"));
+    search_edit = new QLineEdit;
+    search_edit->setPlaceholderText(tr("Name, set or barcode"));
+    search_edit->setClearButtonEnabled(true);
+    find_label->setBuddy(search_edit);
+    card_tree = new QTreeWidget;
+    card_tree->setHeaderHidden(true);
+    card_tree->setMinimumWidth(300);
+    cards_column->addWidget(find_label);
+    cards_column->addWidget(search_edit);
+    cards_column->addWidget(card_tree, 1);
+    columns->addLayout(cards_column);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -104,8 +167,18 @@ BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent)
         }
     });
     connect(&camera_timer, &QTimer::timeout, this, &BarcodeBattlerDialog::pollCamera);
+    connect(search_edit, &QLineEdit::textChanged, this, &BarcodeBattlerDialog::fillCards);
+    connect(card_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
+        cardPicked(item);
+    });
+    // A double-click on a barcode scans it.
+    connect(card_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
+        if (item->data(0, Qt::UserRole).toInt() >= 0)
+            accept();
+    });
 
     codeEdited();
+    fillCards();
 }
 
 BarcodeBattlerDialog::~BarcodeBattlerDialog()
@@ -119,17 +192,23 @@ void BarcodeBattlerDialog::codeEdited()
     digits.remove(' ').remove('-');
     const int n = digits.size();
     const bool length_ok = n == 8 || n == 12 || n == 13;
+    const QByteArray latin = digits.toLatin1();
+    const S9xBarcodeCard *card = length_ok ? S9xBarcodeCardFind(latin.constData()) : nullptr;
 
     scan_button->setEnabled(length_ok);
     if (n == 0)
         status_label->clear();
     else if (!length_ok)
         status_label->setText(tr("%n digit(s); a barcode has 8, 12 or 13.", "", n));
-    else if (!S9xBarcodeChecksumValid(digits.toLatin1().constData()))
+    else if (!S9xBarcodeChecksumValid(latin.constData()))
         status_label->setText(tr("The check digit doesn't add up. A printed barcode would not read like this, "
                                  "but it can still be sent."));
+    else if (card)
+        status_label->setText(tr("%1, from %2.").arg(QString::fromUtf8(card->name), QString::fromUtf8(card->set)));
     else
         status_label->setText(tr("Valid %1 barcode.").arg(n == 13 ? "EAN-13" : n == 12 ? "UPC-A" : "EAN-8"));
+
+    showCard(card);
 }
 
 void BarcodeBattlerDialog::found(const char *code, const QString &where)
@@ -142,9 +221,12 @@ void BarcodeBattlerDialog::fromImage()
 {
     auto filename = QFileDialog::getOpenFileName(this, tr("Read Barcode from Image"), QString(),
                                                  tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)"));
-    if (filename.isEmpty())
-        return;
+    if (!filename.isEmpty())
+        readImage(filename);
+}
 
+void BarcodeBattlerDialog::readImage(const QString &filename)
+{
     QImage image(filename);
     if (image.isNull())
     {
@@ -160,6 +242,25 @@ void BarcodeBattlerDialog::fromImage()
         QMessageBox::information(this, tr("Barcode Battler II"),
                                  tr("No EAN-13, UPC-A or EAN-8 barcode was found in this picture. "
                                     "Crop it closer to the barcode and keep the bars upright."));
+}
+
+// A picture dropped anywhere on the dialog reads like one picked with From Image.
+void BarcodeBattlerDialog::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (event->mimeData()->hasUrls())
+        event->acceptProposedAction();
+}
+
+void BarcodeBattlerDialog::dropEvent(QDropEvent *event)
+{
+    const auto urls = event->mimeData()->urls();
+    if (urls.isEmpty() || !urls.first().isLocalFile())
+        return;
+
+    event->acceptProposedAction();
+    // After the drop has finished, so a message box doesn't run inside it.
+    const QString filename = urls.first().toLocalFile();
+    QTimer::singleShot(0, this, [this, filename] { readImage(filename); });
 }
 
 void BarcodeBattlerDialog::toggleCamera()
@@ -193,6 +294,7 @@ void BarcodeBattlerDialog::stopCamera()
     // Back to what Display > Game Boy Image asks for.
     S9xGBCameraStop();
     S9xGBCameraApply();
+    showPhotos();
 }
 
 void BarcodeBattlerDialog::pollCamera()
@@ -213,6 +315,130 @@ void BarcodeBattlerDialog::pollCamera()
         found(code, tr("camera"));
         QApplication::beep();
     }
+}
+
+// The known cards with a set, name or code holding the search text; all
+// folded when there's nothing to search for. An item's data is the entry for
+// a barcode, -1 for a set and -2 - first entry for a card's branch.
+void BarcodeBattlerDialog::fillCards()
+{
+    const QString find = search_edit->text().trimmed();
+    card_tree->clear();
+
+    int count = 0;
+    const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
+    const char *set_name = nullptr;
+    QTreeWidgetItem *set = nullptr;
+    int in_set = 0;
+
+    auto close_set = [&] {
+        if (set)
+            set->setText(0, QString("%1 (%2)").arg(QString::fromUtf8(set_name)).arg(in_set));
+    };
+
+    for (int i = 0, end; i < count; i = end)
+    {
+        end = cardEnd(cards, count, i);
+        bool hit = false;
+        for (int k = i; k < end && !hit; k++)
+            hit = cardMatches(cards[k], find);
+        if (!hit)
+            continue;
+
+        if (!set_name || strcmp(set_name, cards[i].set))
+        {
+            close_set();
+            set_name = cards[i].set;
+            set = new QTreeWidgetItem(card_tree, { QString::fromUtf8(set_name) });
+            set->setData(0, Qt::UserRole, -1);
+            set->setExpanded(!find.isEmpty());
+            in_set = 0;
+        }
+
+        QTreeWidgetItem *parent = set;
+        if (end - i > 1)
+        {
+            parent = new QTreeWidgetItem(set, { cardLabel(cards, i, end) });
+            parent->setData(0, Qt::UserRole, -2 - i);
+            parent->setExpanded(!find.isEmpty());
+        }
+
+        for (int k = i; k < end; k++)
+        {
+            auto item = new QTreeWidgetItem(parent, { QString("%1  %2").arg(QString::fromUtf8(cards[k].name), cards[k].code) });
+            item->setData(0, Qt::UserRole, k);
+        }
+        in_set++;
+    }
+    close_set();
+}
+
+// Only a barcode types its code; a set or a card's branch clears it, the
+// branch still showing the card's photos.
+void BarcodeBattlerDialog::cardPicked(QTreeWidgetItem *item)
+{
+    if (!item)
+        return;
+
+    int count = 0;
+    const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
+    const int entry = item->data(0, Qt::UserRole).toInt();
+    if (entry >= 0 && entry < count)
+    {
+        code_edit->setText(cards[entry].code);
+        showCard(&cards[entry]);    // this set's printing, not the first card with the code
+        return;
+    }
+
+    code_edit->clear();
+    const int first = -2 - entry;
+    showCard(first >= 0 && first < count ? &cards[first] : nullptr);
+}
+
+void BarcodeBattlerDialog::showCard(const S9xBarcodeCard *card)
+{
+    if (card == photo_card)
+        return;
+
+    photo_card = card;
+    photos.clear();
+    if (card)
+        for (auto &photo : S9xBarcodeCardPhotos(photo_dir, *card))
+            photos.push_back(QImage(photo.rgba.data(), photo.width, photo.height, photo.width * 4,
+                                    QImage::Format_RGBA8888).copy());
+    showPhotos();
+}
+
+// The shown card's photos side by side in the preview, while the camera is off.
+void BarcodeBattlerDialog::showPhotos()
+{
+    if (camera_on)
+        return;
+
+    if (photos.empty())
+    {
+        preview_label->setText(tr("Hold the barcode up to the camera, straight and in focus."));
+        return;
+    }
+
+    const QSize box = preview_label->contentsRect().size();
+    const qreal ratio = devicePixelRatioF();
+    QPixmap canvas(box * ratio);
+    canvas.setDevicePixelRatio(ratio);
+    canvas.fill(Qt::transparent);
+
+    QPainter painter(&canvas);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    const int n = (int)photos.size(), gap = 6;
+    const int slot_w = (box.width() - gap * (n + 1)) / n, slot_h = box.height() - gap * 2;
+    for (int i = 0; i < n; i++)
+    {
+        const QSize size = photos[i].size().scaled(slot_w, slot_h, Qt::KeepAspectRatio);
+        const QPoint at(gap + i * (slot_w + gap) + (slot_w - size.width()) / 2, (box.height() - size.height()) / 2);
+        painter.drawImage(QRect(at, size), photos[i]);
+    }
+    painter.end();
+    preview_label->setPixmap(canvas);
 }
 
 void BarcodeBattlerDialog::done(int result)

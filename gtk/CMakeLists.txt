@@ -267,6 +267,14 @@ pkg_check_modules(ZLIB REQUIRED "zlib")
 list(APPEND ARGS ${ZLIB_CFLAGS})
 list(APPEND LIBS ${ZLIB_LIBRARIES})
 
+# Optional: decodes the JPEG XL photos of Barcode Battler cards.
+pkg_check_modules(JXL "libjxl")
+if(JXL_FOUND)
+    list(APPEND DEFINES "HAVE_LIBJXL")
+    list(APPEND ARGS ${JXL_CFLAGS})
+    list(APPEND LIBS ${JXL_LIBRARIES})
+endif()
+
 pkg_check_modules(MINIZIP "minizip")
 if(USE_SYSTEMZIP AND MINIZIP_FOUND)
     list(APPEND DEFINES "SYSTEM_ZIP")
@@ -350,6 +358,8 @@ list(APPEND SOURCES
     src/gtk_display.h
     src/gtk_barcode_battler.cpp
     src/gtk_barcode_battler.h
+    ../common/desktop/barcode_card_photos.cpp
+    ../common/desktop/barcode_card_photos.hpp
     src/gtk_state_preview_dialog.cpp
     src/gtk_state_preview_dialog.h
     src/threadpool.cpp

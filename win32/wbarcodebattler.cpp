@@ -7,6 +7,9 @@
 #include "../display.h"
 #include "../barcodebattler.h"
 
+#define JXL_STATIC_DEFINE
+#include <jxl/decode.h>
+
 #include <commdlg.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -105,6 +108,59 @@ bool LoadPixels(const wchar_t *path, REFWICPixelFormatGUID format, int bytesPerP
 	return ok;
 }
 
+// A JPEG XL picture as top-down 32-bit BGRX, the layout StretchDIBits draws.
+bool LoadJxl(const std::wstring &path, Photo &photo)
+{
+	FILE *f = _wfopen(path.c_str(), L"rb");
+	if (!f)
+		return false;
+	std::vector<unsigned char> data;
+	unsigned char chunk[65536];
+	for (size_t n; (n = fread(chunk, 1, sizeof(chunk), f)) > 0; )
+		data.insert(data.end(), chunk, chunk + n);
+	fclose(f);
+
+	JxlDecoder *dec = JxlDecoderCreate(nullptr);
+	const JxlPixelFormat format = { 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
+	bool ok = false;
+	if (dec && JxlDecoderSubscribeEvents(dec, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) == JXL_DEC_SUCCESS &&
+	    JxlDecoderSetInput(dec, data.data(), data.size()) == JXL_DEC_SUCCESS)
+	{
+		JxlDecoderCloseInput(dec);
+		for (;;)
+		{
+			const JxlDecoderStatus status = JxlDecoderProcessInput(dec);
+			if (status == JXL_DEC_BASIC_INFO)
+			{
+				JxlBasicInfo info;
+				if (JxlDecoderGetBasicInfo(dec, &info) != JXL_DEC_SUCCESS)
+					break;
+				photo.w = (int)info.xsize;
+				photo.h = (int)info.ysize;
+			}
+			else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER)
+			{
+				size_t size = 0;
+				if (JxlDecoderImageOutBufferSize(dec, &format, &size) != JXL_DEC_SUCCESS || size != (size_t)photo.w * photo.h * 4)
+					break;
+				photo.bgrx.resize(size);
+				if (JxlDecoderSetImageOutBuffer(dec, &format, photo.bgrx.data(), size) != JXL_DEC_SUCCESS)
+					break;
+			}
+			else if (status != JXL_DEC_FULL_IMAGE)
+			{
+				ok = status == JXL_DEC_SUCCESS && !photo.bgrx.empty();
+				break;
+			}
+		}
+	}
+	JxlDecoderDestroy(dec);
+
+	for (size_t i = 0; ok && i < photo.bgrx.size(); i += 4)
+		std::swap(photo.bgrx[i], photo.bgrx[i + 2]);	// RGBA to BGRA
+	return ok;
+}
+
 // The battler folder beside the executable, or "" when there is none.
 std::wstring PhotoDir()
 {
@@ -125,14 +181,14 @@ void ShowCard(HWND hDlg, const S9xBarcodeCard *card)
 	g_photoCard = card;
 	g_photos.clear();
 	if (card && *card->image && !g_photoDir.empty())
-		for (const wchar_t *side : { L"-front.jpg", L"-back.jpg", L"-fluorescent.jpg" })
+		for (const wchar_t *side : { L"-front.jxl", L"-back.jxl", L"-fluorescent.jxl" })
 		{
 			std::wstring path = g_photoDir + Wide(card->image) + side;
 			for (wchar_t &c : path)
 				if (c == L'/')
 					c = L'\\';
 			Photo photo;
-			if (LoadPixels(path.c_str(), GUID_WICPixelFormat32bppBGR, 4, photo.bgrx, photo.w, photo.h))
+			if (LoadJxl(path, photo))
 				g_photos.push_back(std::move(photo));
 		}
 

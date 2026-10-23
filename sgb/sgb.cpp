@@ -5209,8 +5209,8 @@ void S9xSGBSplitRunFrame(void)
 		static_cast<int32_t>((base_hz / SNES_FPS) * static_cast<double>(mul));
 
 	// A sensor reads the facing core's LED live, so while a port is in use the
-	// seats interleave finely: GBE+ found IR games need ~16 cycles of sync.
-	constexpr int32_t kIrSlice = 16;
+	// seats interleave finely: Carrera's track transfer needs <= 8 dots.
+	constexpr int32_t kIrSlice = 4;
 
 	// Interleave by scanline so the in-process cable always peeks a peer
 	// within one line of the caller. Cores never park: a seat hitting its

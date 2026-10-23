@@ -282,6 +282,7 @@
     <ClInclude Include="..\sgb\gb_ppu.h" />
     <ClInclude Include="..\sgb\gb_timer.h" />
     <ClInclude Include="..\sgb\gb_serial.h" />
+    <ClInclude Include="..\sgb\gb_infrared.h" />
     <ClInclude Include="..\sgb\gb_link.h" />
     <ClInclude Include="..\sgb\sgb.h" />
     <ClInclude Include="..\sgb\sgb_packet.h" />
@@ -396,6 +397,7 @@
     <ClCompile Include="..\sgb\gb_ppu.cpp" />
     <ClCompile Include="..\sgb\gb_timer.cpp" />
     <ClCompile Include="..\sgb\gb_serial.cpp" />
+    <ClCompile Include="..\sgb\gb_infrared.cpp" />
     <ClCompile Include="..\sgb\gb_link.cpp" />
     <ClCompile Include="..\sgb\sgb.cpp" />
     <ClCompile Include="..\sgb\sgb_packet.cpp" />

@@ -14,6 +14,7 @@
 #include "gb_joypad.h"
 #include "gb_mbc.h"
 #include "gb_serial.h"
+#include "gb_infrared.h"
 #include "sgb.h"
 
 #include <cstring>
@@ -232,6 +233,8 @@ void MemReset(Memory &m, bool cgb)
 	m.double_speed = false;
 	m.ff72 = m.ff73 = m.ff74 = m.ff75 = 0;
 	m.key0 = 0;
+	m.rp        = 0;
+	m.rp_lit_at = -1;
 	m.hdma1 = m.hdma2 = m.hdma3 = m.hdma4 = 0;
 	m.hdma5        = 0xFF;
 	m.hdma_src = m.hdma_dst = m.hdma_len = 0;
@@ -597,6 +600,8 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.ppu->ocps | 0x40) : 0xFF;
 		case 0xFF6B:
 			return (m.ppu && m.ppu->cgb) ? m.ppu->obj_pal[m.ppu->ocps & 0x3F] : 0xFF;
+		case 0xFF56:
+			return (m.ppu && m.ppu->cgb) ? IrReadRP(m) : 0xFF;
 		case 0xFF70:
 			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.svbk | 0xF8) : 0xFF;
 		case 0xFF72:
@@ -693,6 +698,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		case 0xFF53: if (m.ppu && m.ppu->cgb) m.hdma3 = value; return;
 		case 0xFF54: if (m.ppu && m.ppu->cgb) m.hdma4 = value; return;
 		case 0xFF55: if (m.ppu && m.ppu->cgb) HdmaTrigger(m, value); return;
+		case 0xFF56: if (m.ppu && m.ppu->cgb) IrWriteRP(m, value); return;
 		case 0xFF68: if (m.ppu && m.ppu->cgb) m.ppu->bcps = value; return;
 		case 0xFF69: if (m.ppu && m.ppu->cgb) { CgbWritePalette(m.ppu->bg_pal, m.ppu->bcps, value, !CramBlocked(m)); m.ppu->cgb_pal_written = true; } return;
 		case 0xFF6A: if (m.ppu && m.ppu->cgb) m.ppu->ocps = value; return;

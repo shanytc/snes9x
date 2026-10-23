@@ -4062,6 +4062,17 @@ bool SeatExternal(int k)
 	return k >= 0 && k < SGB_MAX_LINK_PLAYERS - 1 && g_split_external[k];
 }
 
+// Link Other Game seats: their own cart and battery file (see S9xSGBSplitSetSeatRom).
+std::vector<uint8_t> g_seat_rom[SGB_MAX_LINK_PLAYERS - 1];
+std::string          g_seat_battery[SGB_MAX_LINK_PLAYERS - 1];
+
+// Where seat k's battery lives: its own game's file, else the master's base + player.
+std::string SeatBatteryPath(int k, const char *base)
+{
+	if (!g_seat_rom[k].empty() && !g_seat_battery[k].empty()) return g_seat_battery[k];
+	return (base && *base) ? std::string(base) + std::to_string(k + 2) : std::string();
+}
+
 // Each seat's last completed frame, lifted out at its VBlank inside the
 // lockstep loop. Cores then never park while others run — a parked seat
 // cannot re-arm its serial port, and the adapter clocking bytes into it
@@ -4951,6 +4962,9 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 			core->SetCgbOverride(pimpl->cgb_override);
 			core->SetForceModel(pimpl->force_model);
 		}
+		const bool     other     = !g_seat_rom[k].empty();
+		const uint8_t *seat_rom  = other ? g_seat_rom[k].data() : rom;
+		const size_t   seat_size = other ? g_seat_rom[k].size() : size;
 		const std::vector<uint8> &ob = own_boot[own_cgb ? 1 : 0];
 		const uint8_t *boot      = own ? (ob.empty() ? nullptr : ob.data()) : seat_boot;
 		const size_t   boot_size = own ? ob.size() : seat_boot_size;
@@ -4958,14 +4972,14 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		// shared index-less .sav; each seat loads its own .savN below.
 		if (!core->Init() ||
 		    (boot && !core->LoadBootROM(boot, boot_size)) ||
-		    !core->LoadROM(rom, size, nullptr))
+		    !core->LoadROM(seat_rom, seat_size, nullptr))
 		{
 			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
 			return false;
 		}
 		// The ROM handed out is the pristine one: a seat on the master's console
 		// gets the same SGB cart patch the master's BIOS cart got.
-		if (!own && prim.SgbPatchName()[0])
+		if (!own && !other && prim.SgbPatchName()[0])
 			if (const SGB::GbCartPatch *cp = SGB::FindSgbCartPatch(rom, size))
 			{
 				std::vector<uint8_t> &sr = core->DebugImpl()->cart.rom;
@@ -5063,6 +5077,22 @@ void S9xSGBSplitSetSeatExternal(int player, bool external)
 	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return;
 	g_split_external[k] = external;
 	if (!external) g_split_external_core[k] = nullptr;
+}
+
+void S9xSGBSplitSetSeatRom(int player, const unsigned char *data, size_t size,
+                           const char *battery_path)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1) return;
+	if (data && size) g_seat_rom[k].assign(data, data + size);
+	else              g_seat_rom[k].clear();
+	g_seat_battery[k] = (data && size && battery_path) ? battery_path : "";
+}
+
+bool S9xSGBSplitSeatHasRom(int player)
+{
+	const int k = player - 2;
+	return k >= 0 && k < SGB_MAX_LINK_PLAYERS - 1 && !g_seat_rom[k].empty();
 }
 
 bool S9xSGBSplitSeatIsExternal(int player)
@@ -5684,8 +5714,8 @@ void S9xSGBSplitLoadBatteries(const char *battery_base_path)
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
-		const std::string p = std::string(battery_base_path) + std::to_string(k + 2);
-		g_split_cores[k]->LoadBatteryFromPath(p.c_str());
+		const std::string p = SeatBatteryPath(k, battery_base_path);
+		if (!p.empty()) g_split_cores[k]->LoadBatteryFromPath(p.c_str());
 	}
 }
 
@@ -5695,8 +5725,8 @@ void S9xSGBSplitSaveBatteries(const char *battery_base_path)
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
-		const std::string p = std::string(battery_base_path) + std::to_string(k + 2);
-		g_split_cores[k]->SaveBatteryToPath(p.c_str());
+		const std::string p = SeatBatteryPath(k, battery_base_path);
+		if (!p.empty()) g_split_cores[k]->SaveBatteryToPath(p.c_str());
 	}
 }
 

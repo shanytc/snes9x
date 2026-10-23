@@ -174,6 +174,9 @@
     <ClInclude Include="..\barcodebattler.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\barcodebattler_cards.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\voicekun.h">
       <Filter>s9x-source</Filter>
     </ClInclude>

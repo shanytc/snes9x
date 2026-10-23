@@ -743,12 +743,12 @@ BEGIN
     LTEXT           "not found",IDC_MULTICART_BIOSNOTFOUND,270,50,54,8
 END
 
-IDD_BARCODE_BATTLER DIALOGEX 0, 0, 300, 262
+IDD_BARCODE_BATTLER DIALOGEX 0, 0, 490, 262
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Barcode Battler II"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "Swipe a card through the Barcode Battler II on controller port 2. Enter its 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, or read it with a camera or from a picture.",IDC_STATIC,6,6,288,26
+    LTEXT           "Swipe a card through the Barcode Battler II on controller port 2. Enter its 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture.",IDC_STATIC,6,6,288,26
     RTEXT           "Barcode:",IDC_STATIC,6,38,34,8
     EDITTEXT        IDC_BARCODE_EDIT,44,36,132,14,ES_AUTOHSCROLL
     PUSHBUTTON      "&Random",IDC_BARCODE_RANDOM,180,36,50,14
@@ -758,9 +758,12 @@ BEGIN
     COMBOBOX        IDC_BARCODE_CAMERA,44,76,186,100,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "Start &Camera",IDC_BARCODE_CAMERA_TOGGLE,234,76,60,14
     CONTROL         "",IDC_BARCODE_PREVIEW,"Static",SS_OWNERDRAW | SS_SUNKEN,44,94,250,132
-    LTEXT           "Some games look for the Barcode Battler only when they start; reset the game if it doesn't respond.",IDC_STATIC,6,230,200,26
-    DEFPUSHBUTTON   "&Scan",IDOK,210,242,40,14
-    PUSHBUTTON      "Cancel",IDCANCEL,254,242,40,14
+    LTEXT           "Fin&d a card:",IDC_STATIC,304,6,180,8
+    EDITTEXT        IDC_BARCODE_SEARCH,304,18,180,14,ES_AUTOHSCROLL
+    CONTROL         "",IDC_BARCODE_CARDS,"SysTreeView32",TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_DISABLEDRAGDROP | TVS_SHOWSELALWAYS | WS_BORDER | WS_HSCROLL | WS_TABSTOP,304,36,180,190
+    LTEXT           "Some games look for the Barcode Battler only when they start; reset the game if it doesn't respond.",IDC_STATIC,6,230,288,26
+    DEFPUSHBUTTON   "&Scan",IDOK,400,242,40,14
+    PUSHBUTTON      "Cancel",IDCANCEL,444,242,40,14
 END
 
 IDD_BIOSMANAGER DIALOGEX 0, 0, 600, 300

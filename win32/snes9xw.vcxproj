@@ -455,6 +455,7 @@
     <ClInclude Include="..\msu1.h" />
     <ClInclude Include="..\voicekun.h" />
     <ClInclude Include="..\barcodebattler.h" />
+    <ClInclude Include="..\barcodebattler_cards.h" />
     <ClInclude Include="..\cartprot.h" />
     <ClInclude Include="..\rp2040.h" />
     <ClInclude Include="..\rp2040cart.h" />

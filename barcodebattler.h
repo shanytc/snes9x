@@ -50,6 +50,23 @@ bool S9xBarcodeChecksumValid(const char *code);
 // Writes a random EAN-13 code with a valid check digit into out[14].
 void S9xBarcodeRandom(char out[14]);
 
+// A known card: the set it came in, its name (both UTF-8), its 13 digits and
+// the stem of its photos ("set/code", "" for none), which a frontend looks up
+// as <stem>-front.jpg, -back.jpg and -fluorescent.jpg in its card folder.
+struct S9xBarcodeCard
+{
+	const char	*set;
+	const char	*name;
+	const char	*code;
+	const char	*image;
+};
+
+// Every known card, grouped by set, sets in alphabetical order.
+const S9xBarcodeCard *S9xBarcodeCards(int *count);
+
+// The first known card a code (in any form Scan takes) belongs to, or NULL.
+const S9xBarcodeCard *S9xBarcodeCardFind(const char *code);
+
 // Looks for an EAN-13, UPC-A or EAN-8 barcode in an 8-bit greyscale picture,
 // across rows and columns and in both directions. On success writes the
 // digits (13 or 8, NUL-terminated) into out[14] and returns true.

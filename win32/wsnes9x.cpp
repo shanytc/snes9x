@@ -71,6 +71,8 @@
 #include "../superdisc.h"
 #include "../rp2040cart.h"
 #include "../upd7725.h"
+#include "../lua/lua_engine.h"
+#include "wlua.h"
 #include "../hg51b.h"
 #include "../movie.h"
 #include "../voicekun.h"
@@ -2365,6 +2367,12 @@ LRESULT CALLBACK WinProc(
 		}
 		switch (cmd_id)
 		{
+		case ID_FILE_LUA:
+			WinShowLuaWindow();
+			break;
+		case ID_FILE_LUA_STOP_ALL:
+			S9xLuaStop(0);
+			break;
 		case ID_FILE_AVI_RECORDING:
 			if (!GUI.AVIOut)
 				PostMessage(GUI.hWnd, WM_COMMAND, ID_FILE_WRITE_AVI, NULL);
@@ -3055,6 +3063,7 @@ LRESULT CALLBACK WinProc(
 #ifdef RETROACHIEVEMENTS_SUPPORT
 					RA_OnReset();
 #endif
+					S9xLuaNotifyReset(cmd_id == ID_EMULATION_HARD_RESET);
 				}
 				if(!S9xMovieRecording())
 					Settings.Paused = false;
@@ -3752,6 +3761,12 @@ LRESULT CALLBACK WinProc(
 		break;
 
 	case WM_CLOSE:
+		if (!WinLuaConfirmClose())
+		{
+			S9xClearPause(PAUSE_EXIT);
+			return 0;
+		}
+		WinLuaShutdown();
 		SaveMainWinPos();
 		break;
 
@@ -4858,6 +4873,8 @@ void S9xOnSNESPadRead()
 					return;
 				}
 
+				if (WinLuaHandleMessage(&msg))
+					continue;
 				if (s_hSoundOptsDlg && IsDialogMessage (s_hSoundOptsDlg, &msg))
 					continue;
 				if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
@@ -5314,6 +5331,7 @@ int WINAPI WinMain(
     ChangeInputDevice();
 
     WinInit (hInstance);
+	WinLuaInit ();
 	if(GUI.HideMenu)
 	{
 		SetMenu (GUI.hWnd, NULL);
@@ -5387,6 +5405,7 @@ int WINAPI WinMain(
 			S9xUnfreezeGame(Settings.InitialSnapshotFilename);
 		}
 	}
+	WinLuaRunCommandLineScripts ();
 
 	S9xUnmapAllControls();
 	S9xSetupDefaultKeymap();
@@ -5419,6 +5438,8 @@ int WINAPI WinMain(
             if (!GetMessage (&msg, NULL, 0, 0))
                 goto loop_exit; // got WM_QUIT
 
+            if (WinLuaHandleMessage(&msg))
+                continue;
 #ifdef RETROACHIEVEMENTS_SUPPORT
             if (RA_Win32_HandleDialogMessage(&msg))
                 continue;
@@ -6199,6 +6220,9 @@ static void CheckMenuStates ()
 
 	mii.fState = (GUI.FullScreen||GUI.EmulatedFullscreen) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_WINDOW_FULLSCREEN, FALSE, &mii);
+
+	mii.fState = S9xLuaScripts().empty() ? MFS_DISABLED : MFS_ENABLED;
+	SetMenuItemInfo (GUI.hMenu, ID_FILE_LUA_STOP_ALL, FALSE, &mii);
 
 	UpdateHardwarePopups();
 

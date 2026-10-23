@@ -311,6 +311,14 @@ struct sGUI {
     TCHAR RecentGames [MAX_RECENT_GAMES_LIST_SIZE][MAX_PATH];
     TCHAR RecentHostNames [MAX_RECENT_HOSTS_LIST_SIZE][MAX_PATH];
 
+	// File > Script > Lua editor
+	TCHAR LuaDir [MAX_PATH];
+	TCHAR LuaRecentScripts [10][MAX_PATH];
+	TCHAR LuaOpenScripts [16][MAX_PATH];
+	int LuaWindowX, LuaWindowY, LuaWindowWidth, LuaWindowHeight;
+	int LuaFontSize;
+	bool LuaShowReference;
+
 	//turbo switches -- SNES-wide
 	unsigned short TurboMask;
 	COLORREF InfoColor;

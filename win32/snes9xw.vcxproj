@@ -117,8 +117,8 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;D3D_DEBUG_INFO;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;D3D_DEBUG_INFO;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
       <PrecompiledHeader />
@@ -169,8 +169,8 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;D3D_DEBUG_INFO;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;D3D_DEBUG_INFO;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
       <PrecompiledHeader />
@@ -226,8 +226,8 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <WholeProgramOptimization>true</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
@@ -282,8 +282,8 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <WholeProgramOptimization>true</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\..\;$(ProjectDir)zlib\src;$(ProjectDir)..\unzip;$(ProjectDir)libpng\src;$(ProjectDir)..\apu\bapu;$(ProjectDir)..\external\glslang;$(ProjectDir)..\external\stb;$(ProjectDir)..\external\vulkan-headers\include;$(ProjectDir)..\external\VulkanMemoryAllocator-Hpp\include;$(ProjectDir)..\external\imgui;$(ProjectDir)..\external\rcheevos\include;$(ProjectDir)..\external\SDL3\include;$(ProjectDir)..\external\lua\src</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;ALLOW_CPU_OVERCLOCK;HAVE_LIBPNG;JMA_SUPPORT;ZLIB;UNZIP_SUPPORT;__WIN32__;NETPLAY_SUPPORT;KAILLERA_SUPPORT;DIRECTDRAW_SUPPORT;USE_SLANG;SDL_MAIN_HANDLED;SDL_STATIC;%(PreprocessorDefinitions);VK_USE_PLATFORM_WIN32_KHR;VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1;VULKAN_HPP_NO_EXCEPTIONS=1;VULKAN_HPP_NO_NODISCARD_WARNINGS=1;VMA_DYNAMIC_VULKAN_FUNCTIONS=1;VMA_STATIC_VULKAN_FUNCTIONS=0;VMA_USE_STL_SHARED_MUTEX=0;IMGUI_IMPL_VULKAN_NO_PROTOTYPES;RETROACHIEVEMENTS_SUPPORT;RC_DISABLE_LUA;RC_CLIENT_SUPPORTS_HASH;LUA_SUPPORT</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
@@ -539,6 +539,11 @@
     <ClInclude Include="wlanguage.h" />
     <ClInclude Include="wlocale.h" />
     <ClInclude Include="wsnes9x.h" />
+    <ClInclude Include="wlua.h" />
+    <ClInclude Include="..\lua\lua_engine.h" />
+    <ClInclude Include="..\lua\lua_hooks.h" />
+    <ClInclude Include="..\lua\lua_internal.h" />
+    <ClInclude Include="..\lua\lua_font_small.h" />
     <ClInclude Include="retroachievements.h" />
     <ClInclude Include="..\retroachievements.h" />
     <ClInclude Include="_tfwopen.h" />
@@ -583,6 +588,15 @@
     <ClCompile Include="..\controls.cpp" />
     <ClCompile Include="..\cpu.cpp" />
     <ClCompile Include="..\cpuexec.cpp" />
+    <ClCompile Include="..\lua\lua_core.cpp" />
+    <ClCompile Include="..\lua\lua_engine.cpp" />
+    <ClCompile Include="..\lua\lua_api_emu.cpp" />
+    <ClCompile Include="..\lua\lua_api_memory.cpp" />
+    <ClCompile Include="..\lua\lua_api_input.cpp" />
+    <ClCompile Include="..\lua\lua_api_gui.cpp" />
+    <ClCompile Include="..\lua\lua_syntax.cpp" />
+    <ClCompile Include="..\lua\lua_docs.cpp" />
+    <ClCompile Include="..\lua\lua_examples.cpp" />
     <ClCompile Include="..\cpuops.cpp" />
     <ClCompile Include="..\crosshairs.cpp" />
     <ClCompile Include="..\debug.cpp" />
@@ -805,6 +819,7 @@
     <ClCompile Include="win32_webcam.cpp" />
     <ClCompile Include="wlocale.cpp" />
     <ClCompile Include="wsnes9x.cpp" />
+    <ClCompile Include="wlua.cpp" />
     <ClCompile Include="_tfwopen.cpp" />
   </ItemGroup>
   <ItemGroup>

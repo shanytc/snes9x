@@ -1471,6 +1471,12 @@ BEGIN
         MENUITEM MFT_SEPARATOR
         MENUITEM "AVI Recording",               ID_FILE_AVI_RECORDING,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
+        POPUP "Scr&ipt",                        0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&Lua...",                     ID_FILE_LUA,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Stop All Scripts",           ID_FILE_LUA_STOP_ALL,MFT_STRING,MFS_ENABLED
+        END
+        MENUITEM MFT_SEPARATOR
         POPUP "Choose &Icon",                   ID_FILE_LOGO_POPUP,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "Icon &1",                     ID_FILE_LOGO_1,MFT_STRING,MFS_ENABLED

@@ -291,6 +291,9 @@
     <ClInclude Include="..\barcodebattler.h">
       <Filter>Emu</Filter>
     </ClInclude>
+    <ClInclude Include="..\barcodebattler_cards.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
     <ClInclude Include="..\voicekun.h">
       <Filter>APU</Filter>
     </ClInclude>

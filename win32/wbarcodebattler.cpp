@@ -8,6 +8,8 @@
 #include "../barcodebattler.h"
 
 #include <commdlg.h>
+#include <commctrl.h>
+#include <shellapi.h>
 #include <wincodec.h>
 #include <tchar.h>
 #include <stdio.h>
@@ -28,6 +30,28 @@ std::vector<unsigned char> g_frame;
 int                        g_frameW = 0;
 int                        g_frameH = 0;
 
+// The shown card's photos from the battler folder beside the executable.
+struct Photo { std::vector<unsigned char> bgrx; int w = 0, h = 0; };
+std::wstring               g_photoDir;
+const S9xBarcodeCard      *g_photoCard = nullptr;
+std::vector<Photo>         g_photos;
+
+std::wstring Wide(const char *utf8)
+{
+	const int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+	std::wstring w(n > 0 ? n - 1 : 0, L'\0');
+	if (n > 1)
+		MultiByteToWideChar(CP_UTF8, 0, utf8, -1, &w[0], n);
+	return w;
+}
+
+std::wstring Lower(std::wstring s)
+{
+	if (!s.empty())
+		CharLowerBuffW(&s[0], (DWORD)s.size());
+	return s;
+}
+
 std::string DigitsOf(HWND hDlg)
 {
 	char text[64] = "";
@@ -39,40 +63,9 @@ std::string DigitsOf(HWND hDlg)
 	return digits;
 }
 
-void CodeEdited(HWND hDlg)
-{
-	const std::string digits = DigitsOf(hDlg);
-	const size_t n = digits.size();
-	const bool allDigits = digits.find_first_not_of("0123456789") == std::string::npos;
-	const bool lengthOk = allDigits && (n == 8 || n == 12 || n == 13);
-
-	TCHAR status[256] = TEXT("");
-	if (n == 0)
-		;
-	else if (!allDigits)
-		_tcscpy(status, TEXT("A barcode holds only digits."));
-	else if (!lengthOk)
-		_stprintf(status, TEXT("%d digits; a barcode has 8, 12 or 13."), (int)n);
-	else if (!S9xBarcodeChecksumValid(digits.c_str()))
-		_tcscpy(status, TEXT("The check digit doesn't add up. A printed barcode would not read like this, but it can still be sent."));
-	else
-		_stprintf(status, TEXT("Valid %s barcode."),
-		          n == 13 ? TEXT("EAN-13") : n == 12 ? TEXT("UPC-A") : TEXT("EAN-8"));
-
-	SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
-	EnableWindow(GetDlgItem(hDlg, IDOK), lengthOk);
-}
-
-void Found(HWND hDlg, const char *code, const TCHAR *where)
-{
-	SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, code);
-	TCHAR status[128];
-	_stprintf(status, TEXT("Read %hs from the %s."), code, where);
-	SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
-}
-
-// Any picture WIC can open, as 8-bit grey.
-bool LoadLuma(const wchar_t *path, std::vector<unsigned char> &luma, int &w, int &h)
+// Any picture WIC can open, converted to the given pixel format.
+bool LoadPixels(const wchar_t *path, REFWICPixelFormatGUID format, int bytesPerPixel,
+                std::vector<unsigned char> &pixels, int &w, int &h)
 {
 	const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 	bool ok = false;
@@ -88,7 +81,7 @@ bool LoadLuma(const wchar_t *path, std::vector<unsigned char> &luma, int &w, int
 	                                                 WICDecodeMetadataCacheOnDemand, &decoder)) &&
 	    SUCCEEDED(decoder->GetFrame(0, &frame)) &&
 	    SUCCEEDED(factory->CreateFormatConverter(&converter)) &&
-	    SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat8bppGray, WICBitmapDitherTypeNone,
+	    SUCCEEDED(converter->Initialize(frame, format, WICBitmapDitherTypeNone,
 	                                    nullptr, 0.0, WICBitmapPaletteTypeCustom)))
 	{
 		UINT uw = 0, uh = 0;
@@ -97,8 +90,8 @@ bool LoadLuma(const wchar_t *path, std::vector<unsigned char> &luma, int &w, int
 		{
 			w = (int)uw;
 			h = (int)uh;
-			luma.resize((size_t)uw * uh);
-			ok = SUCCEEDED(converter->CopyPixels(nullptr, uw, (UINT)luma.size(), luma.data()));
+			pixels.resize((size_t)uw * uh * bytesPerPixel);
+			ok = SUCCEEDED(converter->CopyPixels(nullptr, uw * bytesPerPixel, (UINT)pixels.size(), pixels.data()));
 		}
 	}
 
@@ -109,6 +102,94 @@ bool LoadLuma(const wchar_t *path, std::vector<unsigned char> &luma, int &w, int
 	if (SUCCEEDED(init))
 		CoUninitialize();
 	return ok;
+}
+
+// The battler folder beside the executable, or "" when there is none.
+std::wstring PhotoDir()
+{
+	wchar_t exe[MAX_PATH] = L"";
+	std::wstring dir(exe, GetModuleFileNameW(nullptr, exe, MAX_PATH));
+	dir.erase(dir.find_last_of(L"\\/") + 1);
+	dir += L"battler\\";
+	const DWORD attr = GetFileAttributesW(dir.c_str());
+	return (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) ? dir : std::wstring();
+}
+
+// Puts a card's front, back and fluorescent photos in the preview; none for nullptr.
+void ShowCard(HWND hDlg, const S9xBarcodeCard *card)
+{
+	if (card == g_photoCard)
+		return;
+
+	g_photoCard = card;
+	g_photos.clear();
+	if (card && *card->image && !g_photoDir.empty())
+		for (const wchar_t *side : { L"-front.jpg", L"-back.jpg", L"-fluorescent.jpg" })
+		{
+			std::wstring path = g_photoDir + Wide(card->image) + side;
+			for (wchar_t &c : path)
+				if (c == L'/')
+					c = L'\\';
+			Photo photo;
+			if (LoadPixels(path.c_str(), GUID_WICPixelFormat32bppBGR, 4, photo.bgrx, photo.w, photo.h))
+				g_photos.push_back(std::move(photo));
+		}
+
+	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODE_PREVIEW), nullptr, TRUE);
+}
+
+void CodeEdited(HWND hDlg)
+{
+	const std::string digits = DigitsOf(hDlg);
+	const size_t n = digits.size();
+	const bool allDigits = digits.find_first_not_of("0123456789") == std::string::npos;
+	const bool lengthOk = allDigits && (n == 8 || n == 12 || n == 13);
+	const S9xBarcodeCard *card = lengthOk ? S9xBarcodeCardFind(digits.c_str()) : nullptr;
+
+	TCHAR status[256] = TEXT("");
+	if (n == 0)
+		;
+	else if (!allDigits)
+		_tcscpy(status, TEXT("A barcode holds only digits."));
+	else if (!lengthOk)
+		_stprintf(status, TEXT("%d digits; a barcode has 8, 12 or 13."), (int)n);
+	else if (!S9xBarcodeChecksumValid(digits.c_str()))
+		_tcscpy(status, TEXT("The check digit doesn't add up. A printed barcode would not read like this, but it can still be sent."));
+	else if (card)
+		swprintf(status, 256, L"%ls, from %ls.", Wide(card->name).c_str(), Wide(card->set).c_str());
+	else
+		_stprintf(status, TEXT("Valid %s barcode."),
+		          n == 13 ? TEXT("EAN-13") : n == 12 ? TEXT("UPC-A") : TEXT("EAN-8"));
+
+	SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
+	EnableWindow(GetDlgItem(hDlg, IDOK), lengthOk);
+	ShowCard(hDlg, card);
+}
+
+void Found(HWND hDlg, const char *code, const TCHAR *where)
+{
+	SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, code);
+	TCHAR status[128];
+	_stprintf(status, TEXT("Read %hs from the %s."), code, where);
+	SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
+}
+
+void ReadImage(HWND hDlg, const TCHAR *file)
+{
+	std::vector<unsigned char> luma;
+	int w = 0, h = 0;
+	if (!LoadPixels(file, GUID_WICPixelFormat8bppGray, 1, luma, w, h))
+	{
+		MessageBox(hDlg, TEXT("This picture could not be opened."), TEXT("Barcode Battler II"), MB_OK | MB_ICONWARNING);
+		return;
+	}
+
+	char code[14];
+	if (S9xBarcodeDecode(luma.data(), w, h, w, code))
+		Found(hDlg, code, TEXT("picture"));
+	else
+		MessageBox(hDlg, TEXT("No EAN-13, UPC-A or EAN-8 barcode was found in this picture. Crop it closer to the barcode and keep the bars upright."),
+		           TEXT("Barcode Battler II"), MB_OK | MB_ICONINFORMATION);
 }
 
 void FromImage(HWND hDlg)
@@ -122,23 +203,99 @@ void FromImage(HWND hDlg)
 	ofn.nMaxFile = MAX_PATH;
 	ofn.lpstrTitle = TEXT("Read Barcode from Image");
 	ofn.Flags = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
-	if (!GetOpenFileName(&ofn))
-		return;
+	if (GetOpenFileName(&ofn))
+		ReadImage(hDlg, file);
+}
 
-	std::vector<unsigned char> luma;
-	int w = 0, h = 0;
-	if (!LoadLuma(file, luma, w, h))
+// A picture dropped anywhere on the dialog reads like one picked with From Image.
+void DroppedImage(HWND hDlg, HDROP drop)
+{
+	TCHAR file[MAX_PATH] = TEXT("");
+	const bool got = DragQueryFile(drop, 0, file, MAX_PATH) > 0;
+	DragFinish(drop);
+	if (got)
+		ReadImage(hDlg, file);
+}
+
+// The known cards whose set, name or code holds the search text, one branch
+// per set; every set folded when there's nothing to search for.
+void FillCards(HWND hDlg)
+{
+	HWND tree = GetDlgItem(hDlg, IDC_BARCODE_CARDS);
+	wchar_t text[64] = L"";
+	GetDlgItemTextW(hDlg, IDC_BARCODE_SEARCH, text, 64);
+	const std::wstring find = Lower(text);
+
+	SendMessage(tree, WM_SETREDRAW, FALSE, 0);
+	TreeView_DeleteAllItems(tree);
+
+	int count = 0;
+	const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
+	const char *set = nullptr;
+	HTREEITEM branch = nullptr;
+	int inSet = 0;
+
+	auto closeSet = [&]() {
+		if (!branch)
+			return;
+		std::wstring label = Wide(set) + L" (" + std::to_wstring(inSet) + L")";
+		TVITEMW item = {};
+		item.mask = TVIF_TEXT;
+		item.hItem = branch;
+		item.pszText = &label[0];
+		TreeView_SetItem(tree, &item);
+		if (!find.empty())
+			TreeView_Expand(tree, branch, TVE_EXPAND);
+	};
+
+	for (int i = 0; i < count; i++)
 	{
-		MessageBox(hDlg, TEXT("This picture could not be opened."), TEXT("Barcode Battler II"), MB_OK | MB_ICONWARNING);
-		return;
-	}
+		const S9xBarcodeCard &card = cards[i];
+		if (!find.empty() && Lower(Wide(card.name)).find(find) == std::wstring::npos &&
+		    Lower(Wide(card.set)).find(find) == std::wstring::npos && Wide(card.code).find(find) == std::wstring::npos)
+			continue;
 
-	char code[14];
-	if (S9xBarcodeDecode(luma.data(), w, h, w, code))
-		Found(hDlg, code, TEXT("picture"));
-	else
-		MessageBox(hDlg, TEXT("No EAN-13, UPC-A or EAN-8 barcode was found in this picture. Crop it closer to the barcode and keep the bars upright."),
-		           TEXT("Barcode Battler II"), MB_OK | MB_ICONINFORMATION);
+		TVINSERTSTRUCTW ins = {};
+		ins.hInsertAfter = TVI_LAST;
+		ins.item.mask = TVIF_TEXT | TVIF_PARAM;
+
+		if (!set || strcmp(set, card.set))
+		{
+			closeSet();
+			set = card.set;
+			inSet = 0;
+			std::wstring label = Wide(set);
+			ins.hParent = TVI_ROOT;
+			ins.item.pszText = &label[0];
+			ins.item.lParam = -1;
+			branch = (HTREEITEM)SendMessage(tree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+		}
+
+		std::wstring label = Wide(card.name) + L"  " + Wide(card.code);
+		ins.hParent = branch;
+		ins.item.pszText = &label[0];
+		ins.item.lParam = i;
+		SendMessage(tree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+		inSet++;
+	}
+	closeSet();
+
+	SendMessage(tree, WM_SETREDRAW, TRUE, 0);
+	InvalidateRect(tree, nullptr, TRUE);
+}
+
+// The card under a tree item, or nullptr for a set.
+const S9xBarcodeCard *CardOf(HWND tree, HTREEITEM hItem)
+{
+	TVITEMW item = {};
+	item.mask = TVIF_PARAM;
+	item.hItem = hItem;
+	if (!hItem || !TreeView_GetItem(tree, &item) || item.lParam < 0)
+		return nullptr;
+
+	int count = 0;
+	const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
+	return item.lParam < count ? &cards[item.lParam] : nullptr;
 }
 
 void StopCamera(HWND hDlg)
@@ -193,10 +350,41 @@ void PollCamera(HWND hDlg)
 	}
 }
 
+// The shown card's photos side by side, each fitted to an equal share of the box.
+void DrawPhotos(const DRAWITEMSTRUCT *dis)
+{
+	const RECT &rc = dis->rcItem;
+	const int n = (int)g_photos.size(), gap = 6;
+	const int slotW = (rc.right - rc.left - gap * (n + 1)) / n, slotH = rc.bottom - rc.top - gap * 2;
+
+	SetStretchBltMode(dis->hDC, HALFTONE);
+	for (int i = 0; i < n; i++)
+	{
+		const Photo &p = g_photos[i];
+		int w = slotW, h = slotW * p.h / p.w;
+		if (h > slotH)
+		{
+			h = slotH;
+			w = slotH * p.w / p.h;
+		}
+		const int x = rc.left + gap + i * (slotW + gap) + (slotW - w) / 2;
+		const int y = rc.top + (rc.bottom - rc.top - h) / 2;
+
+		BITMAPINFOHEADER bi = { sizeof(bi), p.w, -p.h, 1, 32, BI_RGB };	// top-down
+		StretchDIBits(dis->hDC, x, y, w, h, 0, 0, p.w, p.h, p.bgrx.data(), (BITMAPINFO *)&bi, DIB_RGB_COLORS, SRCCOPY);
+	}
+}
+
 void DrawPreview(const DRAWITEMSTRUCT *dis)
 {
 	const RECT &rc = dis->rcItem;
 	FillRect(dis->hDC, &rc, GetSysColorBrush(COLOR_BTNFACE));
+
+	if (!g_cameraOn && !g_photos.empty())
+	{
+		DrawPhotos(dis);
+		return;
+	}
 
 	if (g_frame.empty() || g_frameW <= 0 || g_frameH <= 0)
 	{
@@ -256,6 +444,9 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 		case WM_INITDIALOG:
 		{
 			LocalizeDialog(hDlg);
+			g_photoDir = PhotoDir();
+			g_photoCard = nullptr;
+			g_photos.clear();
 			SendDlgItemMessage(hDlg, IDC_BARCODE_EDIT, EM_SETLIMITTEXT, 20, 0);
 			SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, S9xBarcodeBattlerLastCode());
 
@@ -273,8 +464,40 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 			                   Settings.GBVideoCameraIndex < names.size() ? Settings.GBVideoCameraIndex : 0, 0);
 
 			CodeEdited(hDlg);
+			DragAcceptFiles(hDlg, TRUE);
+			SendDlgItemMessage(hDlg, IDC_BARCODE_SEARCH, EM_SETCUEBANNER, TRUE, (LPARAM)L"Name, set or barcode");
+			FillCards(hDlg);
 			return TRUE;
 		}
+
+		case WM_NOTIFY:
+		{
+			const NMHDR *nm = (const NMHDR *)lParam;
+			if (nm->idFrom != IDC_BARCODE_CARDS)
+				break;
+
+			// Picking a card types its code; a double-click on one scans it.
+			if (nm->code == TVN_SELCHANGEDW)
+			{
+				if (const S9xBarcodeCard *card = CardOf(nm->hwndFrom, ((const NMTREEVIEWW *)lParam)->itemNew.hItem))
+				{
+					SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, card->code);
+					ShowCard(hDlg, card);	// this set's printing, not the first card with the code
+				}
+				return TRUE;
+			}
+			if (nm->code == NM_DBLCLK && CardOf(nm->hwndFrom, TreeView_GetSelection(nm->hwndFrom)))
+			{
+				PostMessage(hDlg, WM_COMMAND, IDOK, 0);
+				SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+				return TRUE;
+			}
+			break;
+		}
+
+		case WM_DROPFILES:
+			DroppedImage(hDlg, (HDROP)wParam);
+			return TRUE;
 
 		case WM_DRAWITEM:
 			if (wParam == IDC_BARCODE_PREVIEW)
@@ -295,6 +518,11 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 				case IDC_BARCODE_EDIT:
 					if (HIWORD(wParam) == EN_CHANGE)
 						CodeEdited(hDlg);
+					return TRUE;
+
+				case IDC_BARCODE_SEARCH:
+					if (HIWORD(wParam) == EN_CHANGE)
+						FillCards(hDlg);
 					return TRUE;
 
 				case IDC_BARCODE_RANDOM:
@@ -343,6 +571,9 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 
 bool WinBarcodeBattlerDialog(HWND parent)
 {
+	INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TREEVIEW_CLASSES };
+	InitCommonControlsEx(&icc);
+
 	if (DialogBox(g_hInst, MAKEINTRESOURCE(IDD_BARCODE_BATTLER), parent, DlgBarcodeBattler) != IDOK)
 		return false;
 

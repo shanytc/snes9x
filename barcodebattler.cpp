@@ -16,6 +16,7 @@
 #include "memmap.h"
 #include "display.h"
 #include "barcodebattler.h"
+#include "barcodebattler_cards.h"
 
 // Digits are written by the frontend's thread and read on the emulation
 // thread; the pending flag is published last and cleared once the game has
@@ -196,6 +197,31 @@ void S9xBarcodeRandom (char out[14])
 
 	out[12] = '0' + (10 - sum % 10) % 10;
 	out[13] = 0;
+}
+
+const S9xBarcodeCard *S9xBarcodeCards (int *count)
+{
+	*count = (int) (sizeof(bb_cards) / sizeof(bb_cards[0]));
+	return (bb_cards);
+}
+
+const S9xBarcodeCard *S9xBarcodeCardFind (const char *code)
+{
+	char	digits[14], full[14];
+	int		n = NormalizeCode(code, digits);
+
+	if (n != 13 && n != 12 && n != 8)
+		return (NULL);
+
+	// The same 13 digits Scan would send.
+	memset(full, '0', 13 - n);
+	memcpy(full + 13 - n, digits, n + 1);
+
+	for (const S9xBarcodeCard &card : bb_cards)
+		if (!strcmp(card.code, full))
+			return (&card);
+
+	return (NULL);
 }
 
 // ---------------------------------------------------------------------------

@@ -189,6 +189,7 @@ keeps them until `gui.clear()`.
 | `gui.image(x, y, image or path [, options])` | A PNG. `options` = `{sx, sy, w, h}` (a part of it), `scale`, `opacity` (0-1). |
 | `gui.load_image(path)` | Loads a PNG once; returns an image with `:width()` and `:height()`. |
 | `gui.clear()`, `gui.set_auto_clear(on)`, `gui.set_opacity(alpha)` | Layer control; opacity (0-1) applies to everything drawn after it. |
+| `gui.set_antialias(on)` | Smooth (anti-aliased) edges for the lines, circles, ellipses and polygons drawn after it, which may then sit between pixels: their coordinates aren't rounded. Off by default. |
 | `gui.width()`, `gui.height()` | The picture in game pixels (256 x 224/239; 160 x 144 for Game Boy). |
 | `gui.screen()` | `{left, top, width, height, hires, interlace}`. With a widescreen hack, `left` is negative and `width` includes the extra columns. |
 | `gui.get_pixel(x, y)` | The game picture's colour there, as `0xRRGGBB`. |

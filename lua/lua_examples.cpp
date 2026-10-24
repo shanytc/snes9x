@@ -55,30 +55,107 @@ while true do
 end
 )lua" },
 
-	{ "Input Display", "input_display.lua", R"lua(-- Input display: the buttons player 1's game saw last frame.
+	{ "Input Display", "input_display.lua", R"lua(-- Input display: the buttons player 1's game saw last frame, on an outline
+-- of the pad. Pressed buttons light up.
 
-local X, Y = 6, 190
-local ON, OFF = "#ff4040", "#ffffff50"
+local X, Y, S = 4, 182, 1           -- the pad's top left; S = 2 doubles its size
+local ON, LINE = "#ff4040", "#202020"
+local W = 88                        -- two lobes of radius 19, centres 50 apart
 
-local function button(x, y, w, h, pressed)
-  gui.rect(X + x, Y + y, w, h, "black", pressed and ON or OFF)
+local function add(t, x, y)
+  t[#t + 1] = x
+  t[#t + 1] = y
+  return t
+end
+
+local function arc(t, cx, cy, r, from, to)
+  for a = from, to, from < to and 5 or -5 do
+    add(t, cx + r * math.cos(math.rad(a)), cy + r * math.sin(math.rad(a)))
+  end
+  return t
+end
+
+gui.set_antialias(true)             -- smooth curves; coordinates needn't be whole
+
+-- Pad units to screen pixels; mirrored shapes are flipped left to right.
+local function place(t, mirrored)
+  local out = {}
+  for i = 1, #t, 2 do
+    add(out, X + (mirrored and W - t[i] or t[i]) * S, Y + t[i + 1] * S)
+  end
+  return out
+end
+
+local function capsule(x1, y1, x2, y2, r)
+  local a = math.deg(math.atan(y2 - y1, x2 - x1))
+  return place(arc(arc({}, x2, y2, r, a - 90, a + 90), x1, y1, r, a + 90, a + 270))
+end
+
+-- The body: the left lobe and half the bottom's curve, then its mirror image.
+local half = arc({}, 19, 19, 19, 270, 70)
+local x0, y0 = half[#half - 1], half[#half]
+for i = 1, 4 do
+  local u = i / 8
+  local a, b, c = (1 - u) ^ 2, 2 * (1 - u) * u, u * u
+  add(half, a * x0 + b * 44 + c * (W - x0), a * y0 + b * 30 + c * y0)
+end
+local body = {table.unpack(half)}
+for i = #half - 3, 1, -2 do
+  add(body, W - half[i], half[i + 1])
+end
+local BODY = place(body)
+
+-- The shoulder buttons: strips along the top of each lobe.
+local shoulder = add(add(arc({}, 19, 19, 23, 235, 270), 27, -4), 30, 0)
+arc(shoulder, 19, 19, 19, 270, 235)
+local L, R = place(shoulder), place(shoulder, true)
+
+-- The d-pad and the rounded well it sits in.
+local well = arc(arc(arc(arc({}, 14, 14, 5, 180, 270), 24, 14, 5, 270, 360), 24, 24, 5, 0, 90), 14, 24, 5, 90, 180)
+local WELL = place(well)
+local DPAD = place({17, 11, 21, 11, 21, 17, 27, 17, 27, 21, 21, 21, 21, 27, 17, 27, 17, 21, 11, 21, 11, 17, 17, 17})
+local ARMS = {
+  up = place({17, 11, 21, 11, 21, 17, 17, 17}),
+  down = place({17, 21, 21, 21, 21, 27, 17, 27}),
+  left = place({11, 17, 17, 17, 17, 21, 11, 21}),
+  right = place({21, 17, 27, 17, 27, 21, 21, 21}),
+}
+
+local SELECT, START = capsule(34, 25, 40, 19, 2.5), capsule(43, 25, 49, 19, 2.5)
+
+-- Face buttons: Y and X share one slanted recess, B and A the other.
+local FACE = {y = {60, 19}, x = {70, 11}, b = {68, 27}, a = {78, 19}}
+local PAIRS = {capsule(60, 19, 70, 11, 4.5), capsule(68, 27, 78, 19, 4.5)}
+local SHADE = {x = "#404040", a = "#404040", y = "#f0f0f0", b = "#f0f0f0"}
+
+local function circle(x, y, r, outline, fill)
+  gui.circle(X + x * S, Y + y * S, r * S, outline, fill)
 end
 
 while true do
   local pad = joypad.get(1)
-  gui.rect(X - 3, Y - 12, 76, 34, nil, "#00000090")
-  button(8, 0, 7, 7, pad.up)
-  button(8, 14, 7, 7, pad.down)
-  button(1, 7, 7, 7, pad.left)
-  button(15, 7, 7, 7, pad.right)
-  button(26, 10, 9, 5, pad.select)
-  button(37, 10, 9, 5, pad.start)
-  button(58, 0, 7, 7, pad.x)
-  button(51, 7, 7, 7, pad.y)
-  button(65, 7, 7, 7, pad.a)
-  button(58, 14, 7, 7, pad.b)
-  button(0, -9, 14, 5, pad.l)
-  button(57, -9, 14, 5, pad.r)
+  gui.polygon(L, LINE, pad.l and ON or "#b8b8b8")
+  gui.polygon(R, LINE, pad.r and ON or "#b8b8b8")
+  gui.polygon(BODY, LINE, "#d8d8d8d0")
+
+  -- The d-pad: its arms, the pressed ones lit, then the outline over them.
+  gui.polygon(WELL, "#989898", "#c4c4c4")
+  gui.polygon(DPAD, nil, "#505050")
+  for dir, arm in pairs(ARMS) do
+    if pad[dir] then gui.polygon(arm, nil, ON) end
+  end
+  gui.polygon(DPAD, LINE)
+
+  gui.polygon(SELECT, LINE, pad.select and ON or "#707070")
+  gui.polygon(START, LINE, pad.start and ON or "#707070")
+
+  circle(69, 19, 15, "#989898", "#c0c0c0")
+  for _, pair in ipairs(PAIRS) do
+    gui.polygon(pair, "#707070", "#949494")
+  end
+  for name, at in pairs(FACE) do
+    circle(at[1], at[2], 3, LINE, pad[name] and ON or SHADE[name])
+  end
   emu.frame_advance()
 end
 )lua" },

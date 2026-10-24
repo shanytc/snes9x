@@ -75,7 +75,10 @@ struct LuaDrawCmd
 	std::shared_ptr<LuaImage>	image;
 	int		sx = 0, sy = 0;				// IMAGE: source rectangle origin
 	int		alpha = 255;
-	std::vector<int>	points;
+	bool	smooth = false;				// LINE, ELLIPSE, POLYGON: anti-aliased
+	// POLYGON vertices (whole pixels unless smooth). Smooth shapes are in
+	// continuous coordinates: LINE x1, y1, x2, y2; ELLIPSE cx, cy, rx, ry.
+	std::vector<double>	points;
 };
 
 struct LuaBreakpoint
@@ -107,6 +110,7 @@ struct LuaScript
 	std::vector<LuaDrawCmd>		layer;
 	bool		auto_clear = true;
 	float		opacity = 1.0f;
+	bool		antialias = false;
 	std::map<std::string, std::shared_ptr<LuaImage>>	images;
 
 	uint16		pad_on[8] = {}, pad_off[8] = {};	// joypad.set for the next frame

@@ -98,6 +98,7 @@ static const S9xLuaApiDoc	docs[] =
 	{ "gui.clear",			"()",			"Removes this script's drawings now." },
 	{ "gui.set_auto_clear",	"(on)",			"False keeps drawings across frames until gui.clear()." },
 	{ "gui.set_opacity",	"(alpha)",		"Opacity (0 to 1) for everything drawn after this." },
+	{ "gui.set_antialias",	"(on)",			"True smooths the lines, circles, ellipses and polygons drawn after this." },
 	{ "gui.width",			"()",			"Width of the picture in game pixels (256, or 160 for Game Boy)." },
 	{ "gui.height",			"()",			"Height of the picture in game pixels." },
 	{ "gui.screen",			"()",			"Table: left, top, width, height (with widescreen columns), hires, interlace." },

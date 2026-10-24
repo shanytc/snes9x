@@ -973,6 +973,11 @@ bool8 S9xInitAPU(void)
     return true;
 }
 
+uint8 *S9xGetAPURAM(void)
+{
+    return SNES::smp.apuram;
+}
+
 void S9xDeinitAPU(void)
 {
     S9xMSU1DeInit();

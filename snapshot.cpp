@@ -26,6 +26,9 @@
 #include "upd7725.h"
 #include "hg51b.h"
 #include "gfx.h"
+#ifdef LUA_SUPPORT
+#include "lua/lua_hooks.h"
+#endif
 
 #ifndef min
 #define min(a,b)	(((a) < (b)) ? (a) : (b))
@@ -1082,6 +1085,9 @@ bool8 S9xFreezeGame (const char *filename)
 		auto base = S9xBasename(filename);
 		sprintf(String, SAVE_INFO_SNAPSHOT " %s", base.c_str());
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
+#ifdef LUA_SUPPORT
+		S9xLuaNotifyStateSaved(filename);
+#endif
 		return (TRUE);
 	}
 
@@ -1101,6 +1107,9 @@ bool8 S9xFreezeGame (const char *filename)
 			sprintf(String, SAVE_INFO_SNAPSHOT " %s", base.c_str());
 
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
+#ifdef LUA_SUPPORT
+		S9xLuaNotifyStateSaved(filename);
+#endif
 
 		return (TRUE);
 	}
@@ -1168,6 +1177,9 @@ bool8 S9xUnfreezeGame (const char *filename)
 		}
 		sprintf(String, SAVE_INFO_LOAD " %s", base.c_str());
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
+#ifdef LUA_SUPPORT
+		S9xLuaNotifyStateLoaded(filename);
+#endif
 		return (TRUE);
 	}
 
@@ -1197,6 +1209,9 @@ bool8 S9xUnfreezeGame (const char *filename)
 			sprintf(String, SAVE_INFO_LOAD " %s", base.c_str());
 
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
+#ifdef LUA_SUPPORT
+		S9xLuaNotifyStateLoaded(filename);
+#endif
 
 		return (TRUE);
 	}

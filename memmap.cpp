@@ -49,6 +49,9 @@
 #include "superdisc.h"
 #include "rp2040cart.h"
 #include "voicekun.h"
+#ifdef LUA_SUPPORT
+#include "lua/lua_hooks.h"
+#endif
 
 // The Super Disc BIOS behind a disc image File -> Load Game booted, "" otherwise.
 static std::string SuperDiscBIOSPath;
@@ -2159,6 +2162,9 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
         LoadROMWithSGBBIOSBytes(rom, size, filename, bios_path.c_str()))
     {
         EmitSGBLoadBanner(filename, bios_mode);
+#ifdef LUA_SUPPORT
+        S9xLuaNotifyRomLoaded();
+#endif
         return 1;
     }
 
@@ -2208,6 +2214,9 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
         S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
     }
     EmitSGBLoadBanner(filename, gb_banner);
+#ifdef LUA_SUPPORT
+    S9xLuaNotifyRomLoaded();
+#endif
     return 1;
 }
 
@@ -2283,6 +2292,9 @@ bool8 CMemory::LoadROM (const char *filename)
         ROMFilename = filename;
         S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
         EmitSGBLoadBanner(filename, gb_banner);
+#ifdef LUA_SUPPORT
+        S9xLuaNotifyRomLoaded();
+#endif
         return TRUE;
     }
 
@@ -2845,6 +2857,9 @@ bool8 CMemory::LoadROMInt (int32 ROMfillSize)
 
 	S9xDeleteCheats();
 	S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
+#ifdef LUA_SUPPORT
+	S9xLuaNotifyRomLoaded();
+#endif
 
     return (TRUE);
 }
@@ -3138,6 +3153,9 @@ bool8 CMemory::LoadMultiCartInt ()
 
 	S9xDeleteCheats();
 	S9xLoadCheatFile(S9xGetFilename(".cht", CHEAT_DIR).c_str());
+#ifdef LUA_SUPPORT
+	S9xLuaNotifyRomLoaded();
+#endif
 
 	return (TRUE);
 }

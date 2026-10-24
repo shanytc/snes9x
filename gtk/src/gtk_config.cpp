@@ -4,6 +4,7 @@
    For further information, consult the LICENSE file in the root directory.
 \*****************************************************************************/
 
+#include <algorithm>
 #include <cstdlib>
 #include <sys/stat.h>
 #include <filesystem>
@@ -128,6 +129,13 @@ int Snes9xConfig::load_defaults()
     sgb_mix_gain_gb = 0;
     last_directory.clear();
     last_shader_directory.clear();
+    lua_last_directory.clear();
+    lua_recent_scripts.clear();
+    lua_open_scripts.clear();
+    lua_window_width = lua_window_height = lua_font_size = 0;
+    lua_show_reference = true;
+    lua_break_on_error = false;
+    lua_panel_height = 0;
     window_width = -1;
     window_height = -1;
     preferences_width = -1;
@@ -393,11 +401,25 @@ int Snes9xConfig::save_config_file()
     outstring("PatchDirectory", patch_directory, "Where ROM patches (IPS/UPS/BPS) are looked for");
     outstring("ExportDirectory", export_directory, "Where exported files (e.g. SPC dumps) are written");
     outstring("BIOSDirectory", bios_directory, "Where the BIOS Manager's file picker starts");
+    outstring("LuaLastDirectory", lua_last_directory, "Last folder browsed for a Lua script (remembered automatically)");
+    auto outlist = [&](const std::string &name, const std::vector<std::string> &list) {
+        outint(name + "Count", (int)list.size());
+        for (size_t i = 0; i < list.size(); i++)
+            outstring(name + std::to_string(i), list[i]);
+    };
+    outlist("LuaRecentScript", lua_recent_scripts);
+    outlist("LuaOpenScript", lua_open_scripts);
 
     // Window sizes and UI state, remembered automatically between sessions.
     section = "Window State";
     outint("MainWidth", window_width);
     outint("MainHeight", window_height);
+    outint("LuaWidth", lua_window_width);
+    outint("LuaHeight", lua_window_height);
+    outint("LuaFontSize", lua_font_size, "Lua editor font size in points (0 = the theme's)");
+    outbool("LuaShowReference", lua_show_reference, "Show the API reference beside the Lua editor");
+    outbool("LuaBreakOnError", lua_break_on_error, "Stop a Lua script in the debugger when it errors");
+    outint("LuaPanelHeight", lua_panel_height, "Height of the panel under the Lua editor (0 = default)");
     outint("PreferencesWidth", preferences_width);
     outint("PreferencesHeight", preferences_height);
     outint("ShaderParametersWidth", shader_parameters_width);
@@ -672,10 +694,31 @@ int Snes9xConfig::load_config_file()
     instr("PatchDirectory", patch_directory);
     instr("ExportDirectory", export_directory);
     instr("BIOSDirectory", bios_directory);
+    instr("LuaLastDirectory", lua_last_directory);
+    auto inlist = [&](const std::string &name, std::vector<std::string> &list) {
+        int count = 0;
+        inint(name + "Count", count);
+        list.clear();
+        for (int i = 0; i < std::clamp(count, 0, 64); i++)
+        {
+            std::string value;
+            instr(name + std::to_string(i), value);
+            if (!value.empty())
+                list.push_back(value);
+        }
+    };
+    inlist("LuaRecentScript", lua_recent_scripts);
+    inlist("LuaOpenScript", lua_open_scripts);
 
     section = "Window State";
     inint("MainWidth", window_width);
     inint("MainHeight", window_height);
+    inint("LuaWidth", lua_window_width);
+    inint("LuaHeight", lua_window_height);
+    inint("LuaFontSize", lua_font_size);
+    inbool("LuaShowReference", lua_show_reference);
+    inbool("LuaBreakOnError", lua_break_on_error);
+    inint("LuaPanelHeight", lua_panel_height);
     inint("PreferencesWidth", preferences_width);
     inint("PreferencesHeight", preferences_height);
     inint("ShaderParametersWidth", shader_parameters_width);

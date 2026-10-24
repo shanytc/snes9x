@@ -11,10 +11,15 @@
 #endif
 
 #include <QTimer>
+#include <QDir>
+#include <QEventLoop>
+#include <QFileInfo>
 #include <QScreen>
 #include <QThread>
 #include <QStyleHints>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 
 #include "snes9x.h"
@@ -32,6 +37,7 @@
 #include "kaillera_client.h"
 #include "kaillera_server.h"
 #endif
+#include "lua/lua_engine.h"
 
 #undef SOUND_BUFFER_WINDOW
 
@@ -442,6 +448,7 @@ void EmuApplication::mainLoop()
 {
     if (!core->active)
     {
+        S9xLuaIdle();
         std::this_thread::yield();
         return;
     }
@@ -613,6 +620,10 @@ void EmuApplication::updateBindings()
 
 void EmuApplication::handleBinding(const std::string &name, bool pressed)
 {
+    // A script stopped in the Lua debugger holds the emulator: hotkeys do nothing until it goes on.
+    if (S9xLuaDebugStoppedScript())
+        return;
+
     if (core->active)
     {
         if (name == "Rewind")
@@ -1026,6 +1037,7 @@ void EmuApplication::reset()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(false);
     });
 }
 
@@ -1046,6 +1058,7 @@ void EmuApplication::superDiscEject()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(false);
     }, true);
 }
 
@@ -1058,6 +1071,7 @@ void EmuApplication::superDiscDebugMenu()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(false);
     }, true);
 }
 
@@ -1068,7 +1082,50 @@ void EmuApplication::powerCycle()
 #ifdef RETROACHIEVEMENTS_SUPPORT
         RA_OnReset();
 #endif
+        S9xLuaNotifyReset(true);
     });
+}
+
+void EmuApplication::initLua()
+{
+    S9xLuaFrontend frontend;
+    frontend.set_paused = [this](bool paused) {
+        // Stop right after this frame; the menu state catches up on its thread.
+        if (paused)
+        {
+            Settings.Paused = true;
+            emu_thread->setStatusBits(EmuThread::ePaused);
+        }
+        QMetaObject::invokeMethod(window.get(), [this, paused] { window->setManualPause(paused); },
+                                  Qt::QueuedConnection);
+    };
+    frontend.reset = [this](bool power) {
+        if (power)
+            core->reset();
+        else
+            core->softReset();
+#ifdef RETROACHIEVEMENTS_SUPPORT
+        RA_OnReset();
+#endif
+        S9xLuaNotifyReset(power);
+    };
+    frontend.state_slot_path = [this](int slot) {
+        return core->getStateFilename(slot);
+    };
+    frontend.default_dir = [] {
+        // The emulator's own folder; the config folder when that's read-only.
+        QString dir = QCoreApplication::applicationDirPath();
+        if (!QFileInfo(dir).isWritable())
+            dir = QString::fromStdString(EmuConfig::findConfigDir());
+        return QDir(dir).absolutePath().toStdString() + "/";
+    };
+    // A stop holds the emulation thread; the editor shows it from the UI thread.
+    frontend.debug_break = [this](int script, bool stopped) {
+        QMetaObject::invokeMethod(window.get(), [this, script, stopped] { window->luaDebugStopped(script, stopped); },
+                                  Qt::QueuedConnection);
+    };
+    S9xLuaSetFrontend(frontend);
+    S9xLuaDebugSetBreakOnError(config->lua_break_on_error);
 }
 
 void EmuApplication::loadUndoState()
@@ -1327,6 +1384,11 @@ void EmuThread::runOnThread(const std::function<void()> &func, bool blocking)
 {
     if (QThread::currentThread() != this)
     {
+        if (blocking && QThread::currentThread() == main_thread && thread() == this)
+        {
+            waitOnThread(func);
+            return;
+        }
         QMetaObject::invokeMethod(this,
                                   "runOnThread",
                                   blocking ? Qt::BlockingQueuedConnection : Qt::QueuedConnection,
@@ -1336,6 +1398,48 @@ void EmuThread::runOnThread(const std::function<void()> &func, bool blocking)
     }
 
     func();
+}
+
+/* A script stopped in the Lua debugger holds this thread mid-frame until the UI
+ * lets it go on, so a wait that meets a stop keeps the UI running. */
+void EmuThread::waitOnThread(const std::function<void()> &func)
+{
+    struct Wait
+    {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool done = false;
+    };
+    auto wait = std::make_shared<Wait>();
+    std::function<void()> call = [func, wait] {
+        func();
+        std::lock_guard<std::mutex> lock(wait->mutex);
+        wait->done = true;
+        wait->cv.notify_all();
+    };
+    QMetaObject::invokeMethod(this, "runOnThread", Qt::QueuedConnection,
+                              Q_ARG(std::function<void()>, call), Q_ARG(bool, false));
+
+    std::unique_lock<std::mutex> lock(wait->mutex);
+    while (!wait->done)
+    {
+        if (!S9xLuaDebugStoppedScript())
+        {
+            wait->cv.wait_for(lock, std::chrono::milliseconds(5));
+            continue;
+        }
+        lock.unlock();
+        QEventLoop loop;
+        QTimer timer;
+        QObject::connect(&timer, &QTimer::timeout, &loop, [&] {
+            std::lock_guard<std::mutex> guard(wait->mutex);
+            if (wait->done)
+                loop.quit();
+        });
+        timer.start(10);
+        loop.exec();
+        return;
+    }
 }
 
 EmuThread::EmuThread(QThread *main_thread_)
@@ -1405,6 +1509,9 @@ void EmuThread::run()
 
         if (status & (ePaused | eSuspended))
         {
+            // Scripts keep running while paused (emu.yield, event.on_idle).
+            if (!(status & eSuspended))
+                S9xLuaIdle();
             QThread::usleep(2000);
             continue;
         }

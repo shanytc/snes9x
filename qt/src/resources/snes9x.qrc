@@ -24,6 +24,9 @@
     <file>whiteicons/open.svg</file>
     <file>whiteicons/pause.svg</file>
     <file>whiteicons/play.svg</file>
+    <file>whiteicons/stop.svg</file>
+    <file>whiteicons/new.svg</file>
+    <file>whiteicons/script.svg</file>
     <file>whiteicons/refresh.svg</file>
     <file>whiteicons/reset.svg</file>
     <file>whiteicons/save.svg</file>
@@ -82,6 +85,9 @@
     <file>blackicons/open.svg</file>
     <file>blackicons/pause.svg</file>
     <file>blackicons/play.svg</file>
+    <file>blackicons/stop.svg</file>
+    <file>blackicons/new.svg</file>
+    <file>blackicons/script.svg</file>
     <file>blackicons/refresh.svg</file>
     <file>blackicons/reset.svg</file>
     <file>blackicons/save.svg</file>

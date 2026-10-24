@@ -428,7 +428,8 @@ enum
 	PAUSE_WINDOW_ICONISED		= (1 << 5),
 	PAUSE_RESTORE_GUI			= (1 << 6),
 	PAUSE_FREEZE_FILE			= (1 << 7),
-	PAUSE_SOUND_DIALOG			= (1 << 8)
+	PAUSE_SOUND_DIALOG			= (1 << 8),
+	PAUSE_LUA_DEBUGGER			= (1 << 9)	// a Lua script is stopped at a breakpoint
 };
 
 void S9xSetPause(uint32);

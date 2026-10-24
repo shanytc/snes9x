@@ -1,6 +1,7 @@
 #include "PPUViewerWindow.hpp"
 #include "EmuApplication.hpp"
 #include "EmuMainWindow.hpp"
+#include "lua/lua_engine.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -202,7 +203,8 @@ PPUViewerWindow::PPUViewerWindow(EmuMainWindow *parent, EmuApplication *app_,
     setWindowTitle(title);
 
     connect(&timer, &QTimer::timeout, this, [this] {
-        if (auto_update && isVisible())
+        // Not while a Lua script is stopped mid-frame: the picture can't change.
+        if (auto_update && isVisible() && !S9xLuaDebugStoppedScript())
             refresh();
     });
     timer.start(1000 / 60);

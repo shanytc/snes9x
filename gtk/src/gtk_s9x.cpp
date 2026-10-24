@@ -39,6 +39,8 @@
 #include "memmap.h"
 #include "ppu.h"
 #include "fmt/format.h"
+#include "gtk_lua_window.h"
+#include "lua/lua_engine.h"
 
 static void check_pointer_timer();
 static void install_quit_signal_handlers();
@@ -48,6 +50,7 @@ static bool screen_saver_check_func();
 // Savestate scratch buffer for run-ahead. Sized per ROM (freeze size depends
 // on which special chips the cart uses), so S9xROMLoaded clears it.
 static std::vector<uint8> run_ahead_buffer;
+static std::vector<std::string> lua_scripts; // -lua <script>, run once the game is up
 
 Snes9xWindow *top_level = nullptr;
 Snes9xConfig *gui_config = nullptr;
@@ -126,12 +129,18 @@ int main(int argc, char *argv[])
 
     Settings.Paused = true;
     S9xNoROMLoaded();
+    S9xLuaInstallFrontend();
 
     if (rom_filename)
     {
         if (S9xOpenROM(rom_filename) && gui_config->full_screen_on_open)
             top_level->window->unfullscreen();
     }
+
+    if (!lua_scripts.empty())
+        S9xLuaSetEcho(true);
+    for (auto &script : lua_scripts)
+        S9xRunLuaScriptFile(script);
 
     // Perform the complete fullscreen process, including mode sets, which
     // didn't happen in the earlier Gtk call.
@@ -312,6 +321,8 @@ static void RunAnimatedBackgrounds()
 static void pause_loop()
 {
     RunAnimatedBackgrounds();
+    // Scripts keep running while paused (emu.yield, event.on_idle).
+    S9xLuaIdle();
 }
 
 static void game_loop()
@@ -440,6 +451,13 @@ static void game_loop()
 
 static bool idle_func()
 {
+    // A Lua script stopped in the debugger holds the emulator until it goes on.
+    if (S9xLuaDebugStoppedScript())
+    {
+        g_usleep(5000);
+        return true;
+    }
+
     check_pointer_timer();
     S9xProcessEvents(true);
 
@@ -543,7 +561,12 @@ void S9xMessage(int type, int number, const char *message)
 /* Varies from ParseArgs because this one is for the OS port to handle */
 void S9xParseArg(char **argv, int &i, int argc)
 {
-    if (!strcasecmp(argv[i], "-filter"))
+    if (!strcasecmp(argv[i], "-lua") || !strcasecmp(argv[i], "--lua"))
+    {
+        if (i + 1 < argc)
+            lua_scripts.push_back(argv[++i]);
+    }
+    else if (!strcasecmp(argv[i], "-filter"))
     {
         std::string filter_names[] =
         {
@@ -751,6 +774,7 @@ void S9xExit()
     S9xGBCameraStop();
     S9xCloseAudioWaveformWindow();
     S9xClosePPUViewers();
+    S9xLuaWindowShutdown();
 
     gui_config->save_config_file();
 

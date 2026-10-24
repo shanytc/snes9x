@@ -52,6 +52,9 @@
     <Filter Include="GUI\VideoDriver\ImGui">
       <UniqueIdentifier>{fc57774a-1be8-4755-932f-90d2f6609097}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Lua">
+      <UniqueIdentifier>{f3c4e754-ced1-4972-beda-a3912059053d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\statemanager.h">
@@ -113,6 +116,21 @@
     </ClInclude>
     <ClInclude Include="wsnes9x.h">
       <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="wlua.h">
+      <Filter>GUI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\lua\lua_engine.h">
+      <Filter>Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\lua\lua_hooks.h">
+      <Filter>Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\lua\lua_internal.h">
+      <Filter>Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\lua\lua_font_small.h">
+      <Filter>Lua</Filter>
     </ClInclude>
     <ClInclude Include="CXAudio2.h">
       <Filter>GUI\SoundDriver</Filter>
@@ -733,6 +751,42 @@
     </ClCompile>
     <ClCompile Include="wsnes9x.cpp">
       <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="wlua.cpp">
+      <Filter>GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_core.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_engine.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_cpuops.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_debug.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_api_emu.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_api_memory.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_api_input.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_api_gui.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_syntax.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_docs.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lua\lua_examples.cpp">
+      <Filter>Lua</Filter>
     </ClCompile>
     <ClCompile Include="CXAudio2.cpp">
       <Filter>GUI\SoundDriver</Filter>

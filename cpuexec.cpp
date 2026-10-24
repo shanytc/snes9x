@@ -29,11 +29,19 @@ int32	S9xRefreshClocks = 0;
 #include "missing.h"
 #include "getset.h"
 #endif
+#ifdef LUA_SUPPORT
+#include "lua/lua_hooks.h"
+#endif
 
 static inline void S9xReschedule (void);
 
 void S9xMainLoop (void)
 {
+#ifdef LUA_SUPPORT
+	if (S9xLuaActive)
+		S9xLuaFrameStart();
+#endif
+
 	// Super Game Boy mode — run the GB core for one frame and return.
 	// The 65816 loop below is bypassed entirely; snes9x's frontends
 	// call S9xMainLoop once per frame, so this satisfies the contract.
@@ -44,6 +52,10 @@ void S9xMainLoop (void)
 			CPU.Flags &= ~SCAN_KEYS_FLAG;
 			S9xMovieUpdate();
 		}
+#ifdef LUA_SUPPORT
+		if (S9xLuaActive)
+			S9xLuaInputLatched();
+#endif
 
 		IPPU.RenderThisFrame      = !Settings.InRunAhead;
 		PPU.ScreenHeight          = SGB_GB_SCREEN_H;
@@ -97,6 +109,10 @@ void S9xMainLoop (void)
 			S9xSyncSpeed();
 
 		CPU.Flags |= SCAN_KEYS_FLAG;
+#ifdef LUA_SUPPORT
+		if (S9xLuaActive)
+			S9xLuaFrameEnd();
+#endif
 		return;
 	}
 
@@ -120,6 +136,10 @@ void S9xMainLoop (void)
 		CPU.Flags &= ~SCAN_KEYS_FLAG;
 		S9xMovieUpdate();
 	}
+#ifdef LUA_SUPPORT
+	if (S9xLuaActive)
+		S9xLuaInputLatched();
+#endif
 
 	// Reset the SGB sync anchor to the current SNES cycle at loop entry
 	// and publish the scanline period for wrap-compensation. getset.h
@@ -204,6 +224,11 @@ void S9xMainLoop (void)
 				}
 
 				CHECK_FOR_IRQ_CHANGE();
+			#ifdef LUA_SUPPORT
+				if (S9xLuaHookMask)
+					S9xLuaOpcode_NMI();
+				else
+			#endif
 				S9xOpcode_NMI();
 			}
 		}
@@ -242,6 +267,11 @@ void S9xMainLoop (void)
 			{
 				/* The flag pushed onto the stack is the new value */
 				CHECK_FOR_IRQ_CHANGE();
+			#ifdef LUA_SUPPORT
+				if (S9xLuaHookMask)
+					S9xLuaOpcode_IRQ();
+				else
+			#endif
 				S9xOpcode_IRQ();
 			}
 		}
@@ -377,6 +407,10 @@ void S9xMainLoop (void)
 				Op = S9xGetByte(Registers.PBPC);
 				OpenBus = Op;
 				Opcodes = S9xOpcodesSlow;
+			#ifdef LUA_SUPPORT
+				if (S9xLuaHookMask)
+					Opcodes = S9xLuaSlowOpcodes();
+			#endif
 			}
 
 			if ((Registers.PCw & MEMMAP_MASK) + ICPU.S9xOpLengths[Op] >= MEMMAP_BLOCK_SIZE)
@@ -385,7 +419,13 @@ void S9xMainLoop (void)
 
 				CPU.PCBase = S9xGetBasePointer(ICPU.ShiftedPB + ((uint16) (Registers.PCw + 4)));
 				if (oldPCBase != CPU.PCBase || (Registers.PCw & ~MEMMAP_MASK) == (0xffff & ~MEMMAP_MASK))
+				{
 					Opcodes = S9xOpcodesSlow;
+				#ifdef LUA_SUPPORT
+					if (S9xLuaHookMask)
+						Opcodes = S9xLuaSlowOpcodes();
+				#endif
+				}
 			}
 
 			Registers.PCw++;
@@ -440,6 +480,11 @@ void S9xMainLoop (void)
 	S9xSettleLastBus(0);
 
 	S9xPackStatus();
+
+#ifdef LUA_SUPPORT
+	if (S9xLuaActive)
+		S9xLuaFrameEnd();
+#endif
 }
 
 static inline void S9xReschedule (void)

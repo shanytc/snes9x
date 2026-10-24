@@ -547,6 +547,8 @@
 #define ID_CHANNELS_ENABLEALL           40147
 #define ID_SAVESCREENSHOT               40151
 #define ID_SAVESCREENSHOT_CLIPBOARD     44451
+#define ID_FILE_LUA                     44452
+#define ID_FILE_LUA_STOP_ALL            44453
 #define ID_FILE_LOAD_GAME               40152
 #define ID_FILE_LOADMULTICART           40153
 #define ID_SOUND_16MS                   40154
@@ -1010,7 +1012,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        201
-#define _APS_NEXT_COMMAND_VALUE         44452
+#define _APS_NEXT_COMMAND_VALUE         44454
 #define _APS_NEXT_CONTROL_VALUE         3704
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

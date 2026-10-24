@@ -18,6 +18,7 @@ class SpriteViewerWindow;
 class GBTileViewerWindow;
 class GBTilemapViewerWindow;
 class GBSpriteViewerWindow;
+class LuaScriptWindow;
 
 class EmuMainWindow : public QMainWindow
 {
@@ -77,6 +78,14 @@ class EmuMainWindow : public QMainWindow
     void showGBTileViewer();
     void showGBTilemapViewer();
     void showGBSpriteViewer();
+    /* File > Script > Lua. Hidden rather than closed, so its tabs and the
+     * scripts they run live on; runLuaScript starts one without the window. */
+    void showLuaWindow();
+    void runLuaScript(const std::string &path);
+    // The Lua debugger stopped a script (or let it go on); the editor shows it.
+    void luaDebugStopped(int script, bool stopped);
+    // The Pause menu item's state, for emu.pause() and emu.unpause().
+    void setManualPause(bool paused);
     /* "Pause emulation when unfocused". The audio waveform viewer counts as
      * part of this window: moving between the two doesn't pause, leaving
      * from either does, so the viewer reports its focus changes here too. */
@@ -115,6 +124,7 @@ class EmuMainWindow : public QMainWindow
     QPointer<GBTileViewerWindow> gb_tile_viewer_window;
     QPointer<GBTilemapViewerWindow> gb_tilemap_viewer_window;
     QPointer<GBSpriteViewerWindow> gb_sprite_viewer_window;
+    QPointer<LuaScriptWindow> lua_window;
 
     bool manual_pause = false;
     bool focus_pause = false;

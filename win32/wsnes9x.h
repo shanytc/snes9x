@@ -311,6 +311,14 @@ struct sGUI {
     TCHAR RecentGames [MAX_RECENT_GAMES_LIST_SIZE][MAX_PATH];
     TCHAR RecentHostNames [MAX_RECENT_HOSTS_LIST_SIZE][MAX_PATH];
 
+	// File > Script > Lua editor
+	TCHAR LuaDir [MAX_PATH];
+	TCHAR LuaRecentScripts [10][MAX_PATH];
+	TCHAR LuaOpenScripts [16][MAX_PATH];
+	int LuaWindowX, LuaWindowY, LuaWindowWidth, LuaWindowHeight;
+	int LuaFontSize;
+	bool LuaShowReference;
+
 	//turbo switches -- SNES-wide
 	unsigned short TurboMask;
 	COLORREF InfoColor;
@@ -377,6 +385,12 @@ struct sGUI {
 
 	// With JapaneseController: the European pad picture rather than the Super Famicom one.
 	bool EuropeanController;
+
+	// Lua editor: a script that errors stops in the debugger.
+	bool LuaBreakOnError;
+
+	// Lua editor: the bottom panel's height in pixels, 0 for the default.
+	int LuaPanelHeight;
 };
 
 //TURBO masks
@@ -706,6 +720,7 @@ int GetFilterScale(RenderFilter filterID);
 bool GetFilterHiResSupport(RenderFilter filterID);
 const TCHAR * S9xGetDirectoryT (enum s9x_getdirtype);
 RECT GetWindowMargins(HWND hwnd, UINT width);
+void WinRunFrameInModalLoop();	// one frame from inside a window's modal loop (menu, drag)
 void WinApplyResizeLock();
 void WinApplyAlwaysOnTop();
 void WinApplyContentWindowSize();

@@ -18,6 +18,7 @@
 #include "../snes9x.h"
 #include "../apu/apu.h"
 #include "wsnes9x.h"
+#include "wlua.h"
 #include "wlanguage.h"
 #include "../display.h"
 #include "../conffile.h"
@@ -57,6 +58,10 @@ void S9xParseArg (char **argv, int &i, int argc)
 	else if (strcasecmp (argv[i], "-hidemenu") == 0)
 	{
 		GUI.HideMenu = true;
+	}
+	else if ((strcasecmp (argv[i], "-lua") == 0 || strcasecmp (argv[i], "--lua") == 0) && i + 1 < argc)
+	{
+		WinLuaAddCommandLineScript (argv[++i]);
 	}
 	else if (strcasecmp (argv[i], "-fullscreen") == 0)
 	{
@@ -1046,6 +1051,24 @@ void WinRegisterConfigItems()
 	#undef ADD
 	AddString("Rom:MultiCartA", multiRomA, _MAX_PATH, "");
 	AddString("Rom:MultiCartB", multiRomB, _MAX_PATH, "");
+#undef CATEGORY
+#define	CATEGORY "Lua"
+	AddStringC("Dir", GUI.LuaDir, MAX_PATH, "", "folder last browsed for a Lua script");
+	#define ADD(n) AddString("RecentScript" #n, GUI.LuaRecentScripts[n-1], MAX_PATH, "")
+		ADD(1); ADD(2); ADD(3); ADD(4); ADD(5); ADD(6); ADD(7); ADD(8); ADD(9); ADD(10);
+	#undef ADD
+	#define ADD(n) AddString("OpenScript" #n, GUI.LuaOpenScripts[n-1], MAX_PATH, "")
+		ADD(1);  ADD(2);  ADD(3);  ADD(4);  ADD(5);  ADD(6);  ADD(7);  ADD(8);
+		ADD(9);  ADD(10); ADD(11); ADD(12); ADD(13); ADD(14); ADD(15); ADD(16);
+	#undef ADD
+	AddInt("WindowX", GUI.LuaWindowX, 0);
+	AddInt("WindowY", GUI.LuaWindowY, 0);
+	AddInt("WindowWidth", GUI.LuaWindowWidth, 0);
+	AddInt("WindowHeight", GUI.LuaWindowHeight, 0);
+	AddIntC("FontSize", GUI.LuaFontSize, 10, "Lua editor font size in points");
+	AddBoolC("ShowReference", GUI.LuaShowReference, true, "true to show the API reference beside the Lua editor");
+	AddBoolC("BreakOnError", GUI.LuaBreakOnError, false, "true to stop a Lua script in the debugger when it errors");
+	AddIntC("PanelHeight", GUI.LuaPanelHeight, 0, "height of the panel under the Lua editor in pixels, 0 for the default");
 #undef CATEGORY
 #define	CATEGORY "Sound"
 	AddIntC("Sync", Settings.SoundSync, 1, "1 to sync emulation to sound output, 0 to disable.");

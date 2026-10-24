@@ -27,6 +27,7 @@ endif(NOT CMAKE_BUILD_TYPE)
 string(APPEND DATADIR ${CMAKE_INSTALL_PREFIX} "/" ${CMAKE_INSTALL_DATAROOTDIR} "/snes9x")
 string(APPEND LOCALEDIR ${CMAKE_INSTALL_PREFIX} "/" ${CMAKE_INSTALL_DATAROOTDIR} "/locale")
 add_compile_definitions(HAVE_LIBPNG
+                        LUA_SUPPORT
                         ZLIB SNES9X_GTK
                         NETPLAY_SUPPORT
                         JMA_SUPPORT
@@ -38,7 +39,7 @@ add_compile_definitions(HAVE_LIBPNG
                         "GETTEXT_PACKAGE=\"${CMAKE_PROJECT_NAME}\""
                         DATADIR=\"${DATADIR}\"
                         SNES9XLOCALEDIR=\"${LOCALEDIR}\")
-set(INCLUDES ../apu/bapu ../ src)
+set(INCLUDES ../apu/bapu ../ src ../external/lua/src)
 set(SOURCES)
 set(ARGS -Wall -Wno-unused-parameter -Wno-unused-variable)
 set(LIBS)
@@ -317,6 +318,19 @@ list(APPEND SOURCES
     src/gtk_tilemap_viewer.cpp
     src/gtk_sprite_viewer.cpp
     src/gtk_gb_viewer.cpp
+    src/gtk_lua_window.cpp
+    src/gtk_lua_window.h
+    ../lua/lua_core.cpp
+    ../lua/lua_engine.cpp
+    ../lua/lua_cpuops.cpp
+    ../lua/lua_debug.cpp
+    ../lua/lua_api_emu.cpp
+    ../lua/lua_api_memory.cpp
+    ../lua/lua_api_input.cpp
+    ../lua/lua_api_gui.cpp
+    ../lua/lua_syntax.cpp
+    ../lua/lua_docs.cpp
+    ../lua/lua_examples.cpp
     ../common/video/ppu_viewer.cpp
     ../common/video/ppu_viewer.hpp
     ../common/video/gb_ppu_viewer.cpp

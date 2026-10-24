@@ -11,7 +11,7 @@
 /* File > Script > Lua: the script editor. The engine (lua/) runs on this, the
  * GTK main thread, so the window calls it directly. */
 
-// Hands the engine its pause, reset and save-slot callbacks.
+// Hands the engine its pause, reset and debugger callbacks.
 void S9xLuaInstallFrontend();
 void S9xShowLuaWindow();
 // Runs a script file from the command line, with or without the window.

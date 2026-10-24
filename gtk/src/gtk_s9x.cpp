@@ -451,6 +451,13 @@ static void game_loop()
 
 static bool idle_func()
 {
+    // A Lua script stopped in the debugger holds the emulator until it goes on.
+    if (S9xLuaDebugStoppedScript())
+    {
+        g_usleep(5000);
+        return true;
+    }
+
     check_pointer_timer();
     S9xProcessEvents(true);
 

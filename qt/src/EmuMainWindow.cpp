@@ -2399,6 +2399,7 @@ bool EmuMainWindow::event(QEvent *event)
                 return true;
             }
             lua_window->saveSession();
+            lua_window->releaseDebugger();
             lua_window->close();
         }
         // Scripts get their event.on_stop before the emulation thread goes;
@@ -2687,6 +2688,18 @@ void EmuMainWindow::runLuaScript(const std::string &path)
     app.emu_thread->runOnThread([id, path] { S9xLuaRunFile(id, path); });
 }
 
+void EmuMainWindow::luaDebugStopped(int script, bool stopped)
+{
+    if (stopped && !lua_window)
+        lua_window = new LuaScriptWindow(this, &app);
+    if (!lua_window)
+        return;
+    if (stopped)
+        lua_window->debuggerStopped(script);
+    else
+        lua_window->debuggerResumed();
+}
+
 void EmuMainWindow::setManualPause(bool paused)
 {
     if (paused != manual_pause)
@@ -2760,6 +2773,10 @@ void EmuMainWindow::toggleAudioWaveform()
 
 void EmuMainWindow::handleFocusChange(bool active)
 {
+    // A script stopped in the debugger already holds the emulator.
+    if (S9xLuaDebugStoppedScript())
+        return;
+
     if (active)
     {
         if (focus_pause)

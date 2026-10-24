@@ -114,6 +114,8 @@ class Snes9xConfig
     int lua_window_height = 0;
     int lua_font_size = 0; // 0 = the theme's monospace size
     bool lua_show_reference = true;
+    bool lua_break_on_error = false;
+    int lua_panel_height = 0; // 0 = the default split
 
     /* Controls */
     std::array<JoypadBinding, NUM_JOYPADS> pad;

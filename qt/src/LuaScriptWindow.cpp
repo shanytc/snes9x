@@ -21,6 +21,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -28,6 +29,7 @@
 #include <QPainter>
 #include <QRegularExpression>
 #include <QScrollBar>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStringListModel>
@@ -40,6 +42,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "common/audio/s9x_sound_driver.hpp"
 #include "lua/lua_engine.h"
 
 // Status lines lead with a symbol; QChar keeps the source ASCII.
@@ -122,6 +125,17 @@ class LineNumberArea : public QWidget
         editor->paintLineNumbers(event);
     }
 
+    // A click sets or clears a breakpoint; the context menu has the rest.
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        editor->lineNumberAreaClicked(event);
+    }
+
+    void contextMenuEvent(QContextMenuEvent *event) override
+    {
+        editor->lineNumberAreaMenu(event);
+    }
+
   private:
     LuaCodeEditor *editor;
 };
@@ -173,10 +187,114 @@ LuaCodeEditor::LuaCodeEditor(QWidget *parent)
     });
 }
 
+int LuaCodeEditor::markerWidth() const
+{
+    return fontMetrics().height() + 2;
+}
+
 int LuaCodeEditor::lineNumberAreaWidth()
 {
     int digits = QString::number(std::max(1, blockCount())).length();
-    return 8 + fontMetrics().horizontalAdvance('9') * std::max(digits, 3);
+    return markerWidth() + 8 + fontMetrics().horizontalAdvance('9') * std::max(digits, 3);
+}
+
+// The line under a y in the line number area, 1-based; 0 below the last.
+int LuaCodeEditor::lineAt(int y)
+{
+    QTextBlock block = firstVisibleBlock();
+    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
+    while (block.isValid())
+    {
+        int bottom = top + qRound(blockBoundingRect(block).height());
+        if (y >= top && y < bottom)
+            return block.blockNumber() + 1;
+        block = block.next();
+        top = bottom;
+    }
+    return 0;
+}
+
+LuaCodeEditor::Breakpoint *LuaCodeEditor::breakpointAt(int line)
+{
+    for (auto &b : breakpoints)
+        if (breakpointLine(b) == line)
+            return &b;
+    return nullptr;
+}
+
+void LuaCodeEditor::toggleBreakpoint(int line)
+{
+    for (size_t i = 0; i < breakpoints.size(); i++)
+    {
+        if (breakpointLine(breakpoints[i]) == line)
+        {
+            breakpoints.erase(breakpoints.begin() + i);
+            line_numbers->update();
+            emit breakpointsChanged();
+            return;
+        }
+    }
+    QTextBlock block = document()->findBlockByNumber(line - 1);
+    if (!block.isValid())
+        return;
+    Breakpoint b;
+    b.anchor = QTextCursor(block);
+    breakpoints.push_back(b);
+    line_numbers->update();
+    emit breakpointsChanged();
+}
+
+void LuaCodeEditor::mergeBreakpoints()
+{
+    std::vector<int> lines;
+    for (size_t i = 0; i < breakpoints.size();)
+    {
+        int line = breakpointLine(breakpoints[i]);
+        if (std::find(lines.begin(), lines.end(), line) != lines.end())
+        {
+            breakpoints.erase(breakpoints.begin() + i);
+            continue;
+        }
+        lines.push_back(line);
+        i++;
+    }
+}
+
+void LuaCodeEditor::lineNumberAreaClicked(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton)
+        return;
+    if (int line = lineAt(event->pos().y()))
+        toggleBreakpoint(line);
+}
+
+void LuaCodeEditor::lineNumberAreaMenu(QContextMenuEvent *event)
+{
+    if (int line = lineAt(event->pos().y()))
+        emit breakpointMenu(line, event->globalPos());
+}
+
+void LuaCodeEditor::refreshMarkers()
+{
+    line_numbers->update();
+}
+
+void LuaCodeEditor::setDebugLines(int stopped, int frame)
+{
+    if (stopped_line == stopped && frame_line == frame)
+        return;
+    stopped_line = stopped;
+    frame_line = frame;
+    updateExtraSelections();
+}
+
+void LuaCodeEditor::showLine(int line)
+{
+    QScrollBar *bar = verticalScrollBar();
+    int visible = std::max(1, viewport()->height() / std::max(1, fontMetrics().height()));
+    int target = line - 1;
+    if (target < bar->value() || target >= bar->value() + visible - 1)
+        bar->setValue(target - visible / 3);
 }
 
 void LuaCodeEditor::resizeEvent(QResizeEvent *event)
@@ -197,19 +315,50 @@ void LuaCodeEditor::paintLineNumbers(QPaintEvent *event)
     int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
     int bottom = top + qRound(blockBoundingRect(block).height());
     int current = textCursor().blockNumber() + 1;
+    int size = fontMetrics().height() - 4;
+    painter.setRenderHint(QPainter::Antialiasing);
 
     while (block.isValid() && top <= event->rect().bottom())
     {
         if (block.isVisible() && bottom >= event->rect().top())
         {
+            QRectF box(3, top + (fontMetrics().height() - size) / 2.0, size, size);
+            if (const Breakpoint *b = breakpointAt(number))
+            {
+                // Red, orange with a condition or hit count, a blue diamond for a log message.
+                QColor color = !b->log.isEmpty() ? QColor(0x24, 0x70, 0xc8)
+                             : (!b->condition.isEmpty() || !b->hit.isEmpty()) ? QColor(0xe2, 0x84, 0x00)
+                             : QColor(0xc8, 0x24, 0x24);
+                painter.setPen(QPen(color, 1.5));
+                painter.setBrush(b->enabled ? QBrush(color) : Qt::NoBrush);
+                if (!b->log.isEmpty())
+                {
+                    QPointF c = box.center();
+                    QPointF points[4] = { { c.x(), box.top() }, { box.right(), c.y() }, { c.x(), box.bottom() }, { box.left(), c.y() } };
+                    painter.drawPolygon(points, 4);
+                }
+                else
+                    painter.drawEllipse(box);
+            }
+            if (number == stopped_line || number == frame_line)
+            {
+                // An arrow: yellow where the script stopped, green for the selected frame.
+                qreal cy = box.center().y(), mid = box.left() + box.width() / 2, h = box.height();
+                QPointF arrow[7] = { { box.left(), cy - h / 5 }, { mid, cy - h / 5 }, { mid, box.top() }, { box.right(), cy },
+                                     { mid, box.bottom() }, { mid, cy + h / 5 }, { box.left(), cy + h / 5 } };
+                painter.setPen(QPen(QColor(0x60, 0x50, 0x00), 1));
+                painter.setBrush(number == stopped_line ? QColor(0xff, 0xd6, 0x00) : QColor(0x60, 0xb8, 0x60));
+                painter.drawPolygon(arrow, 7);
+            }
+
             QColor color = palette().color(QPalette::PlaceholderText);
             if (number == error_line)
                 color = QColor(0xe0, 0x40, 0x40);
             else if (number == current)
                 color = palette().color(QPalette::Text);
             painter.setPen(color);
-            painter.drawText(0, top, line_numbers->width() - 4, fontMetrics().height(), Qt::AlignRight,
-                             QString::number(number));
+            painter.drawText(markerWidth(), top, line_numbers->width() - markerWidth() - 4, fontMetrics().height(),
+                             Qt::AlignRight, QString::number(number));
         }
         block = block.next();
         top = bottom;
@@ -231,14 +380,18 @@ void LuaCodeEditor::updateExtraSelections()
     current.cursor.clearSelection();
     selections.append(current);
 
-    if (error_line > 0 && error_line <= blockCount())
-    {
-        QTextEdit::ExtraSelection error;
-        error.format.setBackground(QColor(0xe0, 0x30, 0x30, 70));
-        error.format.setProperty(QTextFormat::FullWidthSelection, true);
-        error.cursor = QTextCursor(document()->findBlockByNumber(error_line - 1));
-        selections.append(error);
-    }
+    auto whole_line = [&](int line, const QColor &color) {
+        if (line <= 0 || line > blockCount())
+            return;
+        QTextEdit::ExtraSelection selection;
+        selection.format.setBackground(color);
+        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+        selection.cursor = QTextCursor(document()->findBlockByNumber(line - 1));
+        selections.append(selection);
+    };
+    whole_line(error_line, QColor(0xe0, 0x30, 0x30, 70));
+    whole_line(frame_line, QColor(0x60, 0xc0, 0x60, 70));
+    whole_line(stopped_line, QColor(0xff, 0xd8, 0x30, 110));
 
     setExtraSelections(selections);
     line_numbers->update();
@@ -522,7 +675,6 @@ LuaScriptWindow::LuaScriptWindow(EmuMainWindow *main_window_, EmuApplication *ap
     console_layout->setSpacing(2);
     auto console_header = new QHBoxLayout;
     console_header->setContentsMargins(6, 2, 2, 0);
-    console_header->addWidget(new QLabel(tr("Console")));
     console_header->addStretch();
     auto clear_button = new QToolButton;
     clear_button->setText(tr("Clear"));
@@ -532,9 +684,15 @@ LuaScriptWindow::LuaScriptWindow(EmuMainWindow *main_window_, EmuApplication *ap
     console_layout->addLayout(console_header);
     console_layout->addWidget(console);
 
-    auto splitter = new QSplitter(Qt::Vertical);
+    // Under the editor: the console and the debugger's panels.
+    panel_tabs = new QTabWidget;
+    panel_tabs->setDocumentMode(true);
+    panel_tabs->addTab(console_panel, tr("Console"));
+    createDebugPanels();
+
+    splitter = new QSplitter(Qt::Vertical);
     splitter->addWidget(tabs);
-    splitter->addWidget(console_panel);
+    splitter->addWidget(panel_tabs);
     splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 1);
     setCentralWidget(splitter);
@@ -554,6 +712,8 @@ LuaScriptWindow::LuaScriptWindow(EmuMainWindow *main_window_, EmuApplication *ap
     resize(config->lua_window_width > 0 ? config->lua_window_width : 900,
            config->lua_window_height > 0 ? config->lua_window_height : 650);
     reference_dock->setVisible(config->lua_show_reference);
+    if (config->lua_panel_height > 0)
+        splitter->setSizes({ std::max(200, height() - config->lua_panel_height), config->lua_panel_height });
 
     for (auto &path : config->lua_open_scripts)
         if (QFileInfo::exists(QString::fromStdString(path)))
@@ -768,7 +928,10 @@ void LuaScriptWindow::createActions()
     // Script
     auto script_menu = menuBar()->addMenu(tr("&Script"));
     run_action = script_menu->addAction(QIcon(icons + "play.svg"), tr("&Run"), this, [this] {
-        if (auto doc = currentDocument())
+        // While a script is stopped in the debugger, F5 lets it go on.
+        if (stopped)
+            debugCommand(S9X_LUA_DEBUG_CONTINUE);
+        else if (auto doc = currentDocument())
             run(doc);
     });
     run_action->setShortcut(QKeySequence(Qt::Key_F5));
@@ -784,6 +947,66 @@ void LuaScriptWindow::createActions()
     stop_action->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F5));
     script_menu->addSeparator();
     stop_all_action = script_menu->addAction(tr("Stop &All Scripts"), this, &LuaScriptWindow::stopAll);
+
+    // Debug
+    auto debug_menu = menuBar()->addMenu(tr("&Debug"));
+    continue_action = debug_menu->addAction(QIcon(icons + "play.svg"), tr("&Continue\tF5"), this, [this] {
+        debugCommand(S9X_LUA_DEBUG_CONTINUE);
+    });
+    break_action = debug_menu->addAction(tr("&Break"), this, [this] {
+        Document *doc = currentDocument();
+        if (stopped || !doc || !doc->script)
+            return;
+        S9xLuaDebugCommand(doc->script, S9X_LUA_DEBUG_BREAK);
+        status_label->setText(tr("Stopping at the script's next line"));
+    });
+    continue_action->setIconText(tr("Continue"));
+    break_action->setShortcut(QKeySequence(Qt::Key_F8));
+    step_over_action = debug_menu->addAction(tr("Step &Over"), this, [this] { debugCommand(S9X_LUA_DEBUG_STEP_OVER); });
+    step_over_action->setShortcut(QKeySequence(Qt::Key_F10));
+    step_into_action = debug_menu->addAction(tr("Step &Into"), this, [this] { debugCommand(S9X_LUA_DEBUG_STEP_INTO); });
+    step_into_action->setShortcut(QKeySequence(Qt::Key_F11));
+    step_out_action = debug_menu->addAction(tr("Step O&ut"), this, [this] { debugCommand(S9X_LUA_DEBUG_STEP_OUT); });
+    step_out_action->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F11));
+    debug_menu->addSeparator();
+    debug_menu->addAction(tr("&Toggle Breakpoint"), this, [this] {
+        if (auto doc = currentDocument())
+            doc->editor->toggleBreakpoint(doc->editor->textCursor().blockNumber() + 1);
+    })->setShortcut(QKeySequence(Qt::Key_F9));
+    debug_menu->addAction(tr("&Edit Breakpoint..."), this, [this] {
+        if (auto doc = currentDocument())
+            editBreakpoint(doc, doc->editor->textCursor().blockNumber() + 1);
+    });
+    debug_menu->addAction(tr("&Remove All Breakpoints"), this, &LuaScriptWindow::removeAllBreakpoints)
+        ->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F9));
+    debug_menu->addAction(tr("Add &Watch"), this, [this] {
+        Document *doc = currentDocument();
+        if (!doc)
+            return;
+        // The selection, or the name under the cursor.
+        QTextCursor cursor = doc->editor->textCursor();
+        QString text = cursor.selectedText().trimmed();
+        if (text.isEmpty())
+        {
+            QString line = cursor.block().text();
+            int first = cursor.positionInBlock(), last = first;
+            auto ident = [](QChar c) { return c.isLetterOrNumber() || c == '_' || c == '.'; };
+            while (first > 0 && ident(line[first - 1]))
+                first--;
+            while (last < line.length() && ident(line[last]))
+                last++;
+            text = line.mid(first, last - first);
+        }
+        addWatch(text);
+        panel_tabs->setCurrentWidget(watch_tree->parentWidget());
+    })->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F9));
+    debug_menu->addSeparator();
+    break_on_error_action = debug_menu->addAction(tr("Break on &Errors"), this, [this](bool on) {
+        app->config->lua_break_on_error = on;
+        S9xLuaDebugSetBreakOnError(on);
+    });
+    break_on_error_action->setCheckable(true);
+    break_on_error_action->setChecked(app->config->lua_break_on_error);
 
     // View
     auto view_menu = menuBar()->addMenu(tr("&View"));
@@ -832,6 +1055,11 @@ void LuaScriptWindow::createActions()
     toolbar->addAction(run_action);
     toolbar->addAction(pause_action);
     toolbar->addAction(stop_action);
+    toolbar->addSeparator();
+    toolbar->addAction(continue_action);
+    toolbar->addAction(step_over_action);
+    toolbar->addAction(step_into_action);
+    toolbar->addAction(step_out_action);
     toolbar->addSeparator();
     find_field = new QLineEdit;
     find_field->setPlaceholderText(tr("Find"));
@@ -906,6 +1134,16 @@ LuaScriptWindow::Document *LuaScriptWindow::addDocument(const QString &text, con
         position_label->setText(tr("Line %1, Col %2").arg(c.blockNumber() + 1).arg(c.positionInBlock() + 1));
     });
     connect(raw->editor, &LuaCodeEditor::hint, this, [this](const QString &text) { status_label->setText(text); });
+    connect(raw->editor, &LuaCodeEditor::breakpointsChanged, this, [this, raw] { breakpointsChanged(raw); });
+    connect(raw->editor, &LuaCodeEditor::breakpointMenu, this, [this, raw](int line, const QPoint &global) {
+        showBreakpointMenu(raw, line, global);
+    });
+    connect(raw->editor, &QPlainTextEdit::textChanged, this, [this, raw] {
+        if (raw->editor->breakpoints.empty())
+            return;
+        raw->editor->mergeBreakpoints();
+        refreshBreakpointList();
+    });
 
     documents.push_back(std::move(doc));
     tabs->addTab(raw->editor, displayName(raw));
@@ -946,6 +1184,7 @@ void LuaScriptWindow::openScript(const QString &path, bool run_it)
         documents.clear();
         tabs->removeTab(tabs->indexOf(editor));
         editor->deleteLater();
+        refreshBreakpointList();
     }
 
     Document *doc = addDocument(text, clean, QString());
@@ -1009,9 +1248,14 @@ void LuaScriptWindow::updateActions()
     pause_action->setText(doc && doc->paused ? tr("Res&ume") : tr("&Pause"));
     stop_action->setEnabled(running);
     stop_all_action->setEnabled(!script_names.empty());
+    for (QAction *action : { continue_action, step_over_action, step_into_action, step_out_action })
+        action->setEnabled(stopped != 0);
+    break_action->setEnabled(!stopped && running);
 
     int count = (int)script_names.size();
-    if (count == 0)
+    if (stopped)
+        status_label->setText(stop_text);
+    else if (count == 0)
         status_label->setText(tr("No scripts running"));
     else if (doc && doc->script)
         status_label->setText(doc->paused ? tr("Paused") : tr("Running") +
@@ -1074,6 +1318,7 @@ bool LuaScriptWindow::closeDocument(Document *doc)
                                    [doc](const std::unique_ptr<Document> &d) { return d.get() == doc; }),
                     documents.end());
     editor->deleteLater();
+    refreshBreakpointList();
     updateActions();
     return true;
 }
@@ -1105,6 +1350,7 @@ void LuaScriptWindow::saveSession()
         if (auto doc = documentFor(tabs->widget(i)); doc && !doc->path.isEmpty())
             config->lua_open_scripts.push_back(doc->path.toStdString());
     config->lua_show_reference = reference_dock->isVisible() || (!isVisible() && config->lua_show_reference);
+    config->lua_panel_height = splitter->sizes().value(1);
 }
 
 void LuaScriptWindow::run(Document *doc)
@@ -1123,6 +1369,7 @@ void LuaScriptWindow::run(Document *doc)
     app->emu_thread->runOnThread([id, code, name, path] {
         S9xLuaRun(id, code, name, path);
     });
+    sendBreakpoints(doc); // they wait for the script by its id
     updateTab(doc);
 }
 
@@ -1180,6 +1427,7 @@ void LuaScriptWindow::appendConsole(const QString &text, const QColor &color)
 
 void LuaScriptWindow::poll()
 {
+    pollDebug();
     std::vector<S9xLuaEvent> events;
     if (!S9xLuaTakeEvents(events))
         return;
@@ -1312,7 +1560,9 @@ bool LuaScriptWindow::event(QEvent *event)
 
 void LuaScriptWindow::closeEvent(QCloseEvent *event)
 {
-    // Closing only hides the editor; scripts keep running.
+    // Closing only hides the editor; scripts keep running, a stopped one too.
+    debugCommand(S9X_LUA_DEBUG_CONTINUE);
+    app->config->lua_panel_height = splitter->sizes().value(1);
     if (!isMaximized() && !isFullScreen())
     {
         app->config->lua_window_width = width();
@@ -1334,4 +1584,657 @@ void LuaScriptWindow::dropEvent(QDropEvent *event)
         if (url.isLocalFile())
             openScript(url.toLocalFile(), false);
     event->acceptProposedAction();
+}
+
+//------------------------------------------------------------------------------
+// Debugger
+
+namespace {
+
+using PendingList = std::vector<std::pair<int, QTreeWidgetItem *>>;
+
+// A variable row; a ref means it has fields, fetched when it's expanded.
+QTreeWidgetItem *variableItem(const QString &text, int ref)
+{
+    auto item = new QTreeWidgetItem(QStringList(text));
+    item->setData(0, Qt::UserRole, ref);
+    item->setToolTip(0, text);
+    item->setChildIndicatorPolicy(ref ? QTreeWidgetItem::ShowIndicator : QTreeWidgetItem::DontShowIndicator);
+    return item;
+}
+
+bool within(QTreeWidgetItem *item, QTreeWidgetItem *ancestor)
+{
+    for (; item; item = item->parent())
+        if (item == ancestor)
+            return true;
+    return false;
+}
+
+// Deletes an item's children, dropping the requests that would fill them.
+void deleteChildren(PendingList &pending, QTreeWidgetItem *item)
+{
+    pending.erase(std::remove_if(pending.begin(), pending.end(),
+                                 [item](const std::pair<int, QTreeWidgetItem *> &p) {
+                                     return p.second != item && within(p.second, item);
+                                 }),
+                  pending.end());
+    qDeleteAll(item->takeChildren());
+}
+
+// Where the script is: the innermost frame with a line.
+int topFrame(const std::vector<S9xLuaDebugFrame> &frames)
+{
+    for (size_t i = 0; i < frames.size(); i++)
+        if (frames[i].line > 0)
+            return (int)i;
+    return 0;
+}
+
+} // namespace
+
+void LuaScriptWindow::createDebugPanels()
+{
+    auto tree = [](const QStringList &headers) {
+        auto t = new QTreeWidget;
+        t->setColumnCount(headers.size());
+        t->setHeaderLabels(headers);
+        t->setHeaderHidden(headers.size() == 1);
+        t->setUniformRowHeights(true);
+        return t;
+    };
+    auto remove_action = [](QTreeWidget *t, const QString &text) {
+        auto action = new QAction(text, t);
+        action->setShortcut(QKeySequence::Delete);
+        action->setShortcutContext(Qt::WidgetShortcut);
+        t->setContextMenuPolicy(Qt::ActionsContextMenu);
+        t->addAction(action);
+        return action;
+    };
+
+    variables = tree({ tr("Variable") });
+    panel_tabs->addTab(variables, tr("Variables"));
+
+    auto watch_panel = new QWidget;
+    auto watch_layout = new QVBoxLayout(watch_panel);
+    watch_layout->setContentsMargins(0, 2, 0, 0);
+    watch_layout->setSpacing(2);
+    watch_edit = new QLineEdit;
+    watch_edit->setPlaceholderText(tr("Add a watch: type an expression and press Enter"));
+    watch_edit->setClearButtonEnabled(true);
+    connect(watch_edit, &QLineEdit::returnPressed, this, [this] {
+        addWatch(watch_edit->text());
+        watch_edit->clear();
+    });
+    watch_tree = tree({ tr("Watch") });
+    connect(remove_action(watch_tree, tr("Remove Watch")), &QAction::triggered, this, [this] {
+        QTreeWidgetItem *item = watch_tree->currentItem();
+        int index = item && !item->parent() ? watch_tree->indexOfTopLevelItem(item) : -1;
+        if (index < 0 || index >= watches.size())
+            return;
+        watches.removeAt(index);
+        fillWatches();
+    });
+    watch_layout->addWidget(watch_edit);
+    watch_layout->addWidget(watch_tree);
+    panel_tabs->addTab(watch_panel, tr("Watch"));
+
+    for (QTreeWidget *t : { variables, watch_tree })
+    {
+        connect(t, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
+            if (item->childCount() == 0)
+                requestChildren(item);
+        });
+        // Long values are cut off in the tree; the status bar has room.
+        connect(t, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
+            if (item)
+                status_label->setText(item->text(0));
+        });
+    }
+
+    callstack = tree({ tr("Function"), tr("Location") });
+    callstack->setRootIsDecorated(false);
+    callstack->setColumnWidth(0, 260);
+    connect(callstack, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
+        int index = item ? callstack->indexOfTopLevelItem(item) : -1;
+        if (index >= 0 && index != frame)
+            selectFrame(index);
+    });
+    panel_tabs->addTab(callstack, tr("Call Stack"));
+
+    auto bp_panel = new QWidget;
+    auto bp_layout = new QVBoxLayout(bp_panel);
+    bp_layout->setContentsMargins(0, 0, 0, 2);
+    bp_layout->setSpacing(2);
+    breakpoint_list = tree({ tr("Location"), tr("Condition"), tr("Hit Count"), tr("Log Message") });
+    breakpoint_list->setRootIsDecorated(false);
+    breakpoint_list->setColumnWidth(0, 170);
+    breakpoint_list->setColumnWidth(1, 170);
+    breakpoint_list->setColumnWidth(2, 80);
+    connect(breakpoint_list, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item, int column) {
+        Document *doc = nullptr;
+        LuaCodeEditor::Breakpoint *b = nullptr;
+        if (filling_breakpoints || column != 0 ||
+            !(b = breakpointForRow(breakpoint_list->indexOfTopLevelItem(item), &doc)))
+            return;
+        bool enabled = item->checkState(0) == Qt::Checked;
+        if (b->enabled == enabled)
+            return;
+        b->enabled = enabled;
+        sendBreakpoints(doc);
+        doc->editor->refreshMarkers();
+    });
+    connect(breakpoint_list, &QTreeWidget::currentItemChanged, this, [this] {
+        if (!filling_breakpoints)
+            fillBreakpointFields();
+    });
+    connect(breakpoint_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
+        Document *doc = nullptr;
+        if (auto b = breakpointForRow(breakpoint_list->indexOfTopLevelItem(item), &doc))
+        {
+            tabs->setCurrentWidget(doc->editor);
+            doc->editor->goToLine(doc->editor->breakpointLine(*b));
+        }
+    });
+    connect(remove_action(breakpoint_list, tr("Remove Breakpoint")), &QAction::triggered, this, [this] {
+        Document *doc = nullptr;
+        if (auto b = selectedBreakpoint(&doc))
+            doc->editor->toggleBreakpoint(doc->editor->breakpointLine(*b));
+    });
+    auto remove_all = new QAction(tr("Remove All Breakpoints"), breakpoint_list);
+    connect(remove_all, &QAction::triggered, this, &LuaScriptWindow::removeAllBreakpoints);
+    breakpoint_list->addAction(remove_all);
+    bp_layout->addWidget(breakpoint_list);
+
+    auto fields = new QHBoxLayout;
+    fields->setContentsMargins(4, 0, 4, 0);
+    const char *labels[3] = { QT_TR_NOOP("Condition:"), QT_TR_NOOP("Hit count:"), QT_TR_NOOP("Log message:") };
+    const char *cues[3] = { "lives < 3", "5, >= 5 or % 5", "x is {x}" };
+    QLineEdit **edits[3] = { &bp_condition, &bp_hit, &bp_log };
+    int stretch[3] = { 3, 1, 4 };
+    for (int i = 0; i < 3; i++)
+    {
+        auto edit = *edits[i] = new QLineEdit;
+        edit->setPlaceholderText(cues[i]);
+        edit->setEnabled(false);
+        // Enter or leaving the field applies it.
+        connect(edit, &QLineEdit::editingFinished, this, &LuaScriptWindow::applyBreakpointFields);
+        fields->addWidget(new QLabel(tr(labels[i])));
+        fields->addWidget(edit, stretch[i]);
+    }
+    bp_layout->addLayout(fields);
+    panel_tabs->addTab(bp_panel, tr("Breakpoints"));
+}
+
+void LuaScriptWindow::debugCommand(S9xLuaDebugAction action)
+{
+    if (int script = S9xLuaDebugStoppedScript())
+        S9xLuaDebugCommand(script, action);
+}
+
+void LuaScriptWindow::debuggerStopped(int script)
+{
+    if (released)
+    {
+        S9xLuaDebugCommand(script, S9X_LUA_DEBUG_STOP);
+        return;
+    }
+    if (S9xLuaDebugStoppedScript() != script)
+        return; // it went on already
+    if (!holding)
+    {
+        // The script holds the emulation thread mid-frame: the other windows wait with it.
+        holding = true;
+        auto ours = [this](QWidget *w) { // this window, its floating dock, its popups
+            for (; w; w = w->parentWidget())
+                if (w == this)
+                    return true;
+            return false;
+        };
+        for (QWidget *w : QApplication::topLevelWidgets())
+        {
+            if (!ours(w) && w->isVisible() && w->isEnabled())
+            {
+                w->setEnabled(false);
+                held_windows.push_back(w);
+            }
+        }
+        setEnabled(true); // disabling the main window took its children along
+        if (app->sound_driver)
+            app->sound_driver->stop();
+    }
+    if (isMinimized())
+        showNormal();
+    else
+        show();
+    raise();
+    activateWindow();
+    poll();
+}
+
+void LuaScriptWindow::debuggerResumed()
+{
+    if (!holding || S9xLuaDebugStoppedScript())
+        return; // a step that stopped again keeps the hold
+    holding = false;
+    for (auto &w : held_windows)
+        if (w)
+            w->setEnabled(true);
+    held_windows.clear();
+    if (app->sound_driver && app->isCoreActive() && !app->isPaused())
+        app->sound_driver->start();
+    poll();
+}
+
+void LuaScriptWindow::releaseDebugger()
+{
+    released = true;
+    S9xLuaDebugSetBreakOnError(false);
+    for (auto &doc : documents)
+        if (doc->script)
+            S9xLuaDebugSetBreakpoints(doc->script, {});
+    debugCommand(S9X_LUA_DEBUG_CONTINUE);
+}
+
+void LuaScriptWindow::pollDebug()
+{
+    std::vector<S9xLuaDebugEvent> events;
+    if (!S9xLuaDebugTakeEvents(events))
+        return;
+    bool resumed = false;
+    for (auto &e : events)
+    {
+        switch (e.kind)
+        {
+        case S9X_LUA_DEBUG_STOPPED:
+            resumed = false;
+            onStopped(e);
+            break;
+        case S9X_LUA_DEBUG_RESUMED:
+            stopped = 0;
+            resumed = true;
+            break;
+        case S9X_LUA_DEBUG_VARIABLES:
+            onVariables(e);
+            break;
+        case S9X_LUA_DEBUG_EVALUATED:
+            onEvaluated(e);
+            break;
+        }
+    }
+    // A step stops again at once: only clear the views if it didn't.
+    if (resumed && !stopped)
+        clearDebugViews();
+}
+
+void LuaScriptWindow::onStopped(const S9xLuaDebugEvent &e)
+{
+    stopped = e.script;
+    frames = e.frames;
+    int top = topFrame(frames);
+    if (e.reason == "error")
+        stop_text = tr("Stopped on an error: %1").arg(QString::fromStdString(e.message));
+    else
+    {
+        QString why = e.reason == "breakpoint" ? tr("breakpoint") : e.reason == "step" ? tr("step") : tr("break");
+        stop_text = tr("Paused at line %1 (%2)").arg(frames.empty() ? 0 : frames[top].line).arg(why);
+    }
+    fillCallStack();
+    if (frames.empty())
+    {
+        fillVariables();
+        fillWatches();
+    }
+    else
+        selectFrame(top);
+    if (panel_tabs->currentIndex() == 0)
+        panel_tabs->setCurrentWidget(variables);
+    updateActions();
+}
+
+void LuaScriptWindow::onVariables(const S9xLuaDebugEvent &e)
+{
+    for (size_t i = 0; i < pending.size();)
+    {
+        if (pending[i].first != e.ref)
+        {
+            i++;
+            continue;
+        }
+        QTreeWidgetItem *item = pending[i].second;
+        pending.erase(pending.begin() + i);
+        deleteChildren(pending, item);
+        for (auto &v : e.variables)
+            item->addChild(variableItem(QString::fromStdString(v.name + " = " + v.value), v.ref));
+        if (e.variables.empty())
+            item->setChildIndicatorPolicy(QTreeWidgetItem::DontShowIndicator);
+        else
+            item->setExpanded(true);
+        i = 0; // the list changed under the loop
+    }
+}
+
+void LuaScriptWindow::onEvaluated(const S9xLuaDebugEvent &e)
+{
+    int generation = e.request / 1000, index = e.request % 1000;
+    if (generation != watch_generation || index >= watches.size() || e.variables.empty())
+        return;
+    QTreeWidgetItem *item = watch_tree->topLevelItem(index);
+    if (!item)
+        return;
+    const S9xLuaDebugVariable &v = e.variables[0];
+    QString text = watches[index] + " = " + (e.failed ? tr("error: ") : QString()) + QString::fromStdString(v.value);
+    int ref = e.failed ? 0 : v.ref;
+    deleteChildren(pending, item);
+    item->setText(0, text);
+    item->setToolTip(0, text);
+    item->setData(0, Qt::UserRole, ref);
+    item->setChildIndicatorPolicy(ref ? QTreeWidgetItem::ShowIndicator : QTreeWidgetItem::DontShowIndicator);
+}
+
+void LuaScriptWindow::clearDebugViews()
+{
+    frames.clear();
+    pending.clear();
+    for (auto &doc : documents)
+        doc->editor->setDebugLines(0, 0);
+    {
+        QSignalBlocker blocker(callstack);
+        callstack->clear();
+    }
+    clearTree(variables);
+    fillWatches();
+    updateActions();
+}
+
+void LuaScriptWindow::selectFrame(int index)
+{
+    if (index < 0 || index >= (int)frames.size())
+        return;
+    frame = index;
+
+    int top = topFrame(frames);
+    Document *stop_doc = frameDocument(frames[top]);
+    Document *shown = frameDocument(frames[index]);
+    for (auto &doc : documents)
+        doc->editor->setDebugLines(doc.get() == stop_doc ? frames[top].line : 0,
+                                   doc.get() == shown && index != top ? frames[index].line : 0);
+    if (shown)
+    {
+        tabs->setCurrentWidget(shown->editor);
+        shown->editor->showLine(frames[index].line);
+    }
+
+    {
+        QSignalBlocker blocker(callstack);
+        callstack->setCurrentItem(callstack->topLevelItem(index));
+    }
+    fillVariables();
+    fillWatches();
+}
+
+// The document a frame's code is in, opening its file if it has to.
+LuaScriptWindow::Document *LuaScriptWindow::frameDocument(const S9xLuaDebugFrame &f)
+{
+    if (f.line <= 0)
+        return nullptr;
+    if (f.own)
+        return documentForScript(stopped);
+    if (f.path.empty())
+        return nullptr;
+    QFileInfo info(QString::fromStdString(f.path));
+    auto find = [&]() -> Document * {
+        for (auto &doc : documents)
+            if (!doc->path.isEmpty() && QFileInfo(doc->path) == info)
+                return doc.get();
+        return nullptr;
+    };
+    if (Document *doc = find())
+        return doc;
+    if (!info.isFile())
+        return nullptr;
+    openScript(info.absoluteFilePath(), false);
+    return find();
+}
+
+void LuaScriptWindow::fillVariables()
+{
+    clearTree(variables);
+    if (!stopped || frame >= (int)frames.size())
+        return;
+    const char *scopes[3] = { QT_TR_NOOP("Locals"), QT_TR_NOOP("Upvalues"), QT_TR_NOOP("Globals") };
+    for (int scope = 0; scope < 3; scope++)
+    {
+        auto item = variableItem(tr(scopes[scope]), S9xLuaDebugScopeRef(frame, scope));
+        variables->addTopLevelItem(item);
+        if (scope == 0)
+            requestChildren(item);
+    }
+}
+
+// Every watch, evaluated again in the selected frame.
+void LuaScriptWindow::fillWatches()
+{
+    clearTree(watch_tree);
+    watch_generation++;
+    for (int i = 0; i < watches.size(); i++)
+    {
+        watch_tree->addTopLevelItem(variableItem(watches[i], 0));
+        if (stopped)
+            S9xLuaDebugEvaluate(stopped, frame, watches[i].toStdString(), watch_generation * 1000 + i);
+    }
+}
+
+void LuaScriptWindow::fillCallStack()
+{
+    QSignalBlocker blocker(callstack);
+    callstack->clear();
+    for (auto &f : frames)
+    {
+        std::string location = f.line ? f.source + ":" + std::to_string(f.line) : f.source.empty() ? "[C]" : f.source;
+        callstack->addTopLevelItem(
+            new QTreeWidgetItem(QStringList{ QString::fromStdString(f.function), QString::fromStdString(location) }));
+    }
+}
+
+void LuaScriptWindow::clearTree(QTreeWidget *tree)
+{
+    pending.erase(std::remove_if(pending.begin(), pending.end(),
+                                 [tree](const std::pair<int, QTreeWidgetItem *> &p) { return p.second->treeWidget() == tree; }),
+                  pending.end());
+    tree->clear();
+}
+
+// A variable request whose answer fills the item's children.
+void LuaScriptWindow::requestChildren(QTreeWidgetItem *item)
+{
+    int ref = item->data(0, Qt::UserRole).toInt();
+    if (!stopped || !ref)
+        return;
+    pending.push_back({ ref, item });
+    S9xLuaDebugRequestVariables(stopped, ref);
+}
+
+void LuaScriptWindow::addWatch(const QString &expression)
+{
+    QString text = expression.trimmed();
+    if (text.isEmpty() || watches.size() >= 999)
+        return;
+    watches.push_back(text);
+    fillWatches();
+}
+
+// To the running script; its code is what was run, so lines are as they are now.
+void LuaScriptWindow::sendBreakpoints(Document *doc)
+{
+    if (!doc->script)
+        return;
+    std::vector<S9xLuaBreakpoint> list;
+    for (auto &b : doc->editor->breakpoints)
+    {
+        S9xLuaBreakpoint bp;
+        bp.line = doc->editor->breakpointLine(b);
+        bp.enabled = b.enabled;
+        bp.condition = b.condition.toStdString();
+        bp.hit_condition = b.hit.toStdString();
+        bp.log_message = b.log.toStdString();
+        list.push_back(bp);
+    }
+    S9xLuaDebugSetBreakpoints(doc->script, list);
+}
+
+void LuaScriptWindow::breakpointsChanged(Document *doc)
+{
+    doc->editor->mergeBreakpoints();
+    sendBreakpoints(doc);
+    refreshBreakpointList();
+    doc->editor->refreshMarkers();
+}
+
+void LuaScriptWindow::refreshBreakpointList()
+{
+    if (!breakpoint_list)
+        return;
+    filling_breakpoints = true;
+    QTreeWidgetItem *current = breakpoint_list->currentItem();
+    int selected = current ? breakpoint_list->indexOfTopLevelItem(current) : -1;
+    breakpoint_list->clear();
+    bp_rows.clear();
+    for (auto &doc : documents)
+    {
+        auto &list = doc->editor->breakpoints;
+        std::vector<std::pair<int, size_t>> order;
+        for (size_t i = 0; i < list.size(); i++)
+            order.push_back({ doc->editor->breakpointLine(list[i]), i });
+        std::sort(order.begin(), order.end());
+        for (auto &entry : order)
+        {
+            const LuaCodeEditor::Breakpoint &b = list[entry.second];
+            bp_rows.push_back({ doc.get(), entry.second });
+            auto item = new QTreeWidgetItem(QStringList{ QString("%1:%2").arg(displayName(doc.get())).arg(entry.first),
+                                                         b.condition, b.hit, b.log });
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(0, b.enabled ? Qt::Checked : Qt::Unchecked);
+            breakpoint_list->addTopLevelItem(item);
+        }
+    }
+    if (selected >= 0 && selected < breakpoint_list->topLevelItemCount())
+        breakpoint_list->setCurrentItem(breakpoint_list->topLevelItem(selected));
+    filling_breakpoints = false;
+    fillBreakpointFields();
+}
+
+LuaCodeEditor::Breakpoint *LuaScriptWindow::breakpointForRow(int row, Document **owner)
+{
+    if (row < 0 || row >= (int)bp_rows.size())
+        return nullptr;
+    Document *doc = bp_rows[row].first;
+    size_t index = bp_rows[row].second;
+    bool open = std::any_of(documents.begin(), documents.end(),
+                            [doc](const std::unique_ptr<Document> &d) { return d.get() == doc; });
+    if (!open || index >= doc->editor->breakpoints.size())
+        return nullptr;
+    if (owner)
+        *owner = doc;
+    return &doc->editor->breakpoints[index];
+}
+
+LuaCodeEditor::Breakpoint *LuaScriptWindow::selectedBreakpoint(Document **owner)
+{
+    QTreeWidgetItem *item = breakpoint_list->currentItem();
+    return item ? breakpointForRow(breakpoint_list->indexOfTopLevelItem(item), owner) : nullptr;
+}
+
+void LuaScriptWindow::fillBreakpointFields()
+{
+    LuaCodeEditor::Breakpoint *b = selectedBreakpoint(nullptr);
+    QLineEdit *edits[3] = { bp_condition, bp_hit, bp_log };
+    QString values[3] = { b ? b->condition : QString(), b ? b->hit : QString(), b ? b->log : QString() };
+    for (int i = 0; i < 3; i++)
+    {
+        edits[i]->setText(values[i]);
+        edits[i]->setEnabled(b != nullptr);
+    }
+}
+
+void LuaScriptWindow::applyBreakpointFields()
+{
+    Document *doc = nullptr;
+    LuaCodeEditor::Breakpoint *b = selectedBreakpoint(&doc);
+    if (!b)
+        return;
+    QString condition = bp_condition->text().trimmed(), hit = bp_hit->text().trimmed(), log = bp_log->text();
+    if (condition == b->condition && hit == b->hit && log == b->log)
+        return;
+    b->condition = condition;
+    b->hit = hit;
+    b->log = log;
+    sendBreakpoints(doc);
+
+    // The row in place: a rebuild here could pull the list out from under a click.
+    if (QTreeWidgetItem *item = breakpoint_list->currentItem())
+    {
+        filling_breakpoints = true;
+        item->setText(1, condition);
+        item->setText(2, hit);
+        item->setText(3, log);
+        filling_breakpoints = false;
+    }
+    doc->editor->refreshMarkers();
+}
+
+void LuaScriptWindow::editBreakpoint(Document *doc, int line)
+{
+    if (!doc->editor->breakpointAt(line))
+        doc->editor->toggleBreakpoint(line);
+    panel_tabs->setCurrentWidget(breakpoint_list->parentWidget());
+    for (size_t row = 0; row < bp_rows.size(); row++)
+    {
+        if (bp_rows[row].first != doc ||
+            doc->editor->breakpointLine(doc->editor->breakpoints[bp_rows[row].second]) != line)
+            continue;
+        QTreeWidgetItem *item = breakpoint_list->topLevelItem((int)row);
+        breakpoint_list->setCurrentItem(item);
+        breakpoint_list->scrollToItem(item);
+        break;
+    }
+    bp_condition->setFocus();
+    bp_condition->selectAll();
+}
+
+void LuaScriptWindow::removeAllBreakpoints()
+{
+    for (auto &doc : documents)
+    {
+        doc->editor->breakpoints.clear();
+        sendBreakpoints(doc.get());
+        doc->editor->refreshMarkers();
+    }
+    refreshBreakpointList();
+}
+
+void LuaScriptWindow::showBreakpointMenu(Document *doc, int line, const QPoint &global)
+{
+    LuaCodeEditor *editor = doc->editor;
+    LuaCodeEditor::Breakpoint *b = editor->breakpointAt(line);
+    QMenu menu(this);
+    menu.addAction(b ? tr("Remove Breakpoint") : tr("Add Breakpoint"), this, [editor, line] {
+        editor->toggleBreakpoint(line);
+    });
+    menu.addAction(b ? tr("Edit Breakpoint...") : tr("Add Conditional Breakpoint..."), this, [this, doc, line] {
+        editBreakpoint(doc, line);
+    });
+    if (b)
+    {
+        menu.addAction(b->enabled ? tr("Disable Breakpoint") : tr("Enable Breakpoint"), this, [this, doc, line] {
+            if (auto bp = doc->editor->breakpointAt(line))
+            {
+                bp->enabled = !bp->enabled;
+                breakpointsChanged(doc);
+            }
+        });
+    }
+    menu.addSeparator();
+    menu.addAction(tr("Remove All Breakpoints"), this, &LuaScriptWindow::removeAllBreakpoints)->setEnabled(!bp_rows.empty());
+    menu.exec(global);
 }

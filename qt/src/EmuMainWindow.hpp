@@ -82,6 +82,8 @@ class EmuMainWindow : public QMainWindow
      * scripts they run live on; runLuaScript starts one without the window. */
     void showLuaWindow();
     void runLuaScript(const std::string &path);
+    // The Lua debugger stopped a script (or let it go on); the editor shows it.
+    void luaDebugStopped(int script, bool stopped);
     // The Pause menu item's state, for emu.pause() and emu.unpause().
     void setManualPause(bool paused);
     /* "Pause emulation when unfocused". The audio waveform viewer counts as

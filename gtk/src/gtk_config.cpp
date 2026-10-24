@@ -134,6 +134,8 @@ int Snes9xConfig::load_defaults()
     lua_open_scripts.clear();
     lua_window_width = lua_window_height = lua_font_size = 0;
     lua_show_reference = true;
+    lua_break_on_error = false;
+    lua_panel_height = 0;
     window_width = -1;
     window_height = -1;
     preferences_width = -1;
@@ -416,6 +418,8 @@ int Snes9xConfig::save_config_file()
     outint("LuaHeight", lua_window_height);
     outint("LuaFontSize", lua_font_size, "Lua editor font size in points (0 = the theme's)");
     outbool("LuaShowReference", lua_show_reference, "Show the API reference beside the Lua editor");
+    outbool("LuaBreakOnError", lua_break_on_error, "Stop a Lua script in the debugger when it errors");
+    outint("LuaPanelHeight", lua_panel_height, "Height of the panel under the Lua editor (0 = default)");
     outint("PreferencesWidth", preferences_width);
     outint("PreferencesHeight", preferences_height);
     outint("ShaderParametersWidth", shader_parameters_width);
@@ -713,6 +717,8 @@ int Snes9xConfig::load_config_file()
     inint("LuaHeight", lua_window_height);
     inint("LuaFontSize", lua_font_size);
     inbool("LuaShowReference", lua_show_reference);
+    inbool("LuaBreakOnError", lua_break_on_error);
+    inint("LuaPanelHeight", lua_panel_height);
     inint("PreferencesWidth", preferences_width);
     inint("PreferencesHeight", preferences_height);
     inint("ShaderParametersWidth", shader_parameters_width);

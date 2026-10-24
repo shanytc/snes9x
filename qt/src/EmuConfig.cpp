@@ -633,6 +633,8 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("LuaWindowHeight", lua_window_height);
     Int("LuaFontSize", lua_font_size, "Lua editor font size in points (0 = system default)");
     Bool("LuaShowReference", lua_show_reference, "Show the API reference beside the Lua editor");
+    Bool("LuaBreakOnError", lua_break_on_error, "Stop a Lua script in the debugger when it errors");
+    Int("LuaPanelHeight", lua_panel_height, "Height of the panel under the Lua editor (0 = default)");
     auto StringList = [&](const std::string &name, std::vector<std::string> &list) {
         int count = list.size();
         Int(name + "Entries", count);

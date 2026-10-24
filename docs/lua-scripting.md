@@ -252,7 +252,7 @@ movie).
 
 | Function | Description |
 | --- | --- |
-| `script.name()`, `script.path()`, `script.dir()` | The script's file name, path and folder. An unsaved script has no path; on Windows its folder is the emulator's. |
+| `script.name()`, `script.path()`, `script.dir()` | The script's file name, path and folder. An unsaved script has no path; its folder is the emulator's (in the Qt and GTK versions, the config folder if that one is read-only). |
 | `script.id()` | A number for this run of the script. |
 | `script.stop()` | Ends the script cleanly (`os.exit()` does the same). |
 | `script.set_watchdog(seconds)` | How long code may run without letting the emulator continue before it is stopped. 0 turns it off. |
@@ -286,7 +286,7 @@ open files come back the next time the editor opens.
 
 ## The debugger
 
-The Windows editor can stop a script at a line and step through it. While a
+The editor can stop a script at a line and step through it. While a
 script is stopped the emulator waits with it, in the middle of the frame (or
 of the CPU instruction, inside a memory hook), and the sound pauses.
 

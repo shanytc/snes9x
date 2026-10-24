@@ -2,6 +2,7 @@
 #include <QApplication>
 #include <QTimer>
 #include <QThread>
+#include <functional>
 
 class EmuMainWindow;
 class EmuConfig;
@@ -24,6 +25,8 @@ Q_OBJECT
     void pause();
     void unpause();
     void setMainLoop(const std::function<void()> &loop);
+    // A blocking call from the UI thread that a Lua debugger stop can't deadlock.
+    void waitOnThread(const std::function<void()> &func);
 
     std::function<void()> main_loop = nullptr;
 

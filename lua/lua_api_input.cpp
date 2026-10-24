@@ -232,6 +232,7 @@ int savestate_load (lua_State *L)
 		ok = S9xUnfreezeGame(SlotPath(L, luaL_checkinteger(L, 1)).c_str());
 	else
 		ok = S9xUnfreezeGame(ResolvePath(L, luaL_checkstring(L, 1)).c_str());
+	S9xLuaSelectOpcodes();	// a load puts the normal opcode tables back
 	lua_pushboolean(L, ok);
 	return 1;
 }

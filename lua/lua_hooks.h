@@ -10,7 +10,7 @@
 #include "port.h"
 
 // The emulation core's side of Lua scripting. All of it runs on the
-// emulation thread and costs one byte test while no script is loaded.
+// emulation thread; with no script loaded it costs a byte test per frame.
 
 enum
 {
@@ -32,6 +32,14 @@ void S9xLuaFrameEnd (void);
 // overlay and presents the frame itself from S9xLuaFrameEnd. `partial` is an
 // interlaced frame's first field, which goes out through S9xContinueUpdate.
 bool S9xLuaDeferPresent (bool partial = false);
+
+// While S9xLuaHookMask is set the 65816 runs a hooked copy of its opcode
+// handlers (lua_cpuops.cpp), so the normal ones carry no Lua code at all.
+struct SOpcodes;
+void S9xLuaSelectOpcodes (void);			// after S9xLuaHookMask or the CPU state changes
+struct SOpcodes *S9xLuaSlowOpcodes (void);	// the hooked S9xOpcodesSlow
+void S9xLuaOpcode_NMI (void);
+void S9xLuaOpcode_IRQ (void);
 
 uint8 S9xLuaHookRead (uint32 address, uint8 value);
 uint8 S9xLuaHookWrite (uint32 address, uint8 value);

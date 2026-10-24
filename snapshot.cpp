@@ -26,6 +26,9 @@
 #include "upd7725.h"
 #include "hg51b.h"
 #include "gfx.h"
+#ifdef LUA_SUPPORT
+#include "lua/lua_hooks.h"
+#endif
 
 #ifndef min
 #define min(a,b)	(((a) < (b)) ? (a) : (b))

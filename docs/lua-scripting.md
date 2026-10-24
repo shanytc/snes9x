@@ -156,7 +156,9 @@ functions minus the argument: `memory.wram.read_u16(0x10)`.
 Hooks take a bus address or a `{first, last}` range; `memory.wram.on_write`
 takes WRAM offsets. Mirrors are folded together: a hook on `0x7E0100` also sees
 the game write `$00:0100`, and I/O registers match in every system bank. Hooks
-watch the main CPU only, and aren't available for Game Boy games yet.
+watch the main CPU only (not DMA or HDMA transfers), and aren't available for
+Game Boy games yet. While a hook is set the CPU runs a hooked copy of its
+instruction handlers; with none set it runs the normal ones at full speed.
 
 ```lua
 -- Who writes to $7E:0100?

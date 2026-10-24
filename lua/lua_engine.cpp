@@ -760,7 +760,11 @@ void LuaRebuildHooks (void)
 			mask |= 1 << slot;
 		}
 	}
-	S9xLuaHookMask = mask;
+	if (S9xLuaHookMask != mask)
+	{
+		S9xLuaHookMask = mask;
+		S9xLuaSelectOpcodes();
+	}
 }
 
 int LuaAddCallback (lua_State *L, int kind, int fn_index, uint32 first, uint32 last)
@@ -984,6 +988,10 @@ void S9xLuaFrameStart (void)
 {
 	if (LuaEng.present_pending)
 		Present();	// a frame that never reached S9xLuaFrameEnd
+
+	// A savestate load or reset since the last frame put the normal opcode tables back.
+	if (S9xLuaHookMask)
+		S9xLuaSelectOpcodes();
 
 	// Run-ahead emulates frames that get rolled back: every frame after the
 	// first one with Settings.InRunAhead set, up to the next such first one.

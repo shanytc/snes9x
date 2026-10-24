@@ -224,6 +224,11 @@ void S9xMainLoop (void)
 				}
 
 				CHECK_FOR_IRQ_CHANGE();
+			#ifdef LUA_SUPPORT
+				if (S9xLuaHookMask)
+					S9xLuaOpcode_NMI();
+				else
+			#endif
 				S9xOpcode_NMI();
 			}
 		}
@@ -262,6 +267,11 @@ void S9xMainLoop (void)
 			{
 				/* The flag pushed onto the stack is the new value */
 				CHECK_FOR_IRQ_CHANGE();
+			#ifdef LUA_SUPPORT
+				if (S9xLuaHookMask)
+					S9xLuaOpcode_IRQ();
+				else
+			#endif
 				S9xOpcode_IRQ();
 			}
 		}
@@ -374,11 +384,6 @@ void S9xMainLoop (void)
 					S9xVoiceKunPollVoiceId(Memory.RAM[vaddr & 0x1ffff]);
 			}
 
-#ifdef LUA_SUPPORT
-			if (S9xLuaHookMask & S9X_LUA_HOOK_EXEC)
-				S9xLuaHookExec(Registers.PBPC);
-#endif
-
 			uint8				Op;
 			struct	SOpcodes	*Opcodes;
 
@@ -402,6 +407,10 @@ void S9xMainLoop (void)
 				Op = S9xGetByte(Registers.PBPC);
 				OpenBus = Op;
 				Opcodes = S9xOpcodesSlow;
+			#ifdef LUA_SUPPORT
+				if (S9xLuaHookMask)
+					Opcodes = S9xLuaSlowOpcodes();
+			#endif
 			}
 
 			if ((Registers.PCw & MEMMAP_MASK) + ICPU.S9xOpLengths[Op] >= MEMMAP_BLOCK_SIZE)
@@ -410,7 +419,13 @@ void S9xMainLoop (void)
 
 				CPU.PCBase = S9xGetBasePointer(ICPU.ShiftedPB + ((uint16) (Registers.PCw + 4)));
 				if (oldPCBase != CPU.PCBase || (Registers.PCw & ~MEMMAP_MASK) == (0xffff & ~MEMMAP_MASK))
+				{
 					Opcodes = S9xOpcodesSlow;
+				#ifdef LUA_SUPPORT
+					if (S9xLuaHookMask)
+						Opcodes = S9xLuaSlowOpcodes();
+				#endif
+				}
 			}
 
 			Registers.PCw++;

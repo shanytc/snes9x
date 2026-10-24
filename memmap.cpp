@@ -49,6 +49,9 @@
 #include "superdisc.h"
 #include "rp2040cart.h"
 #include "voicekun.h"
+#ifdef LUA_SUPPORT
+#include "lua/lua_hooks.h"
+#endif
 
 // The Super Disc BIOS behind a disc image File -> Load Game booted, "" otherwise.
 static std::string SuperDiscBIOSPath;

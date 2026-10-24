@@ -384,7 +384,7 @@ void SetFlagsWord (uint16 w)
 		Registers.YH = 0;
 	}
 	S9xUnpackStatus();
-	S9xFixCycles();
+	S9xLuaSelectOpcodes();
 }
 
 bool GetRegister (lua_State *L, const char *name)

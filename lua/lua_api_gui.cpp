@@ -275,6 +275,7 @@ struct Target
 	int		pitch;
 	int		sx, sy, ox;					// physical pixels per SNES pixel; columns left of x = 0
 	int		left, top, right, bottom;	// visible SNES pixels, right/bottom exclusive
+	int		pw, ph;						// physical pixels drawn on
 
 	Target (uint16 *screen_, int pitch_, int width, int height)
 		: screen(screen_), pitch(pitch_)
@@ -287,6 +288,8 @@ struct Target
 		top = 0;
 		right = width / sx - ox;
 		bottom = height / sy;
+		pw = (right + ox) * sx;
+		ph = bottom * sy;
 	}
 
 	void Fill (int x, int y, int w, int h, uint32 argb)
@@ -423,7 +426,9 @@ void DrawEllipse (Target &t, const LuaDrawCmd &c)
 
 void DrawPolygon (Target &t, const LuaDrawCmd &c)
 {
-	const std::vector<int>	&p = c.points;
+	std::vector<int>	p(c.points.size());
+	for (size_t i = 0; i < p.size(); i++)
+		p[i] = (int) c.points[i];
 	size_t	n = p.size() / 2;
 	if (n == 0)
 		return;
@@ -565,6 +570,239 @@ void DrawImage (Target &t, const LuaDrawCmd &c)
 	}
 }
 
+//------------------------------------------------------------------------------
+// Anti-aliased shapes. Each pixel row is cut by kSubRows lines and each line's
+// spans give exact horizontal coverage. Outlines are 1 pixel wide.
+
+const int	kSubRows = 5;
+
+struct Span
+{
+	double	a, b;
+};
+
+uint32 WithAlpha (uint32 argb, double alpha)
+{
+	return (argb & 0xffffff) | (uint32) std::min(alpha * 255 + 0.5, 255.0) << 24;
+}
+
+// Merges the spans and adds each pixel's share of them to cov.
+void Cover (std::vector<Span> &spans, std::vector<float> &cov, double scale, double offset)
+{
+	std::sort(spans.begin(), spans.end(), [](const Span &p, const Span &q) { return p.a < q.a; });
+	for (size_t i = 0; i < spans.size();)
+	{
+		double	a = spans[i].a, b = spans[i].b;
+		for (i++; i < spans.size() && spans[i].a <= b; i++)
+			b = std::max(b, spans[i].b);
+		a = std::max(a * scale + offset, 0.0);
+		b = std::min(b * scale + offset, (double) cov.size());
+		if (a >= b)
+			continue;
+		int	ia = (int) a, ib = (int) b;
+		if (ia == ib)
+		{
+			cov[ia] += (float) (b - a);
+			continue;
+		}
+		cov[ia] += (float) (ia + 1 - a);
+		for (int k = ia + 1; k < ib; k++)
+			cov[k] += 1.0f;
+		if (ib < (int) cov.size())
+			cov[ib] += (float) (b - ib);
+	}
+}
+
+// spans(y, stroke, area) lists what the row at y crosses: the outline, then
+// the inside. The box bounds the shape.
+template <typename F>
+void DrawSmooth (Target &t, const LuaDrawCmd &c, double x0, double y0, double x1, double y1, F spans)
+{
+	int	px0 = (int) std::max(std::floor((x0 + t.ox) * t.sx), 0.0);
+	int	px1 = (int) std::min(std::ceil((x1 + t.ox) * t.sx), (double) t.pw);
+	int	py0 = (int) std::max(std::floor(y0 * t.sy), 0.0);
+	int	py1 = (int) std::min(std::ceil(y1 * t.sy), (double) t.ph);
+	if (px0 >= px1 || py0 >= py1)
+		return;
+
+	std::vector<float>	stroke_cov(px1 - px0), all_cov(px1 - px0);
+	std::vector<Span>	stroke, area;
+	double	ao = (c.color >> 24) / 255.0, af = (c.fill >> 24) / 255.0;
+	double	offset = (double) t.ox * t.sx - px0;
+	for (int py = py0; py < py1; py++)
+	{
+		std::fill(stroke_cov.begin(), stroke_cov.end(), 0.0f);
+		std::fill(all_cov.begin(), all_cov.end(), 0.0f);
+		for (int k = 0; k < kSubRows; k++)
+		{
+			stroke.clear();
+			area.clear();
+			spans((py + (k + 0.5) / kSubRows) / t.sy, stroke, area);
+			area.insert(area.end(), stroke.begin(), stroke.end());
+			Cover(stroke, stroke_cov, t.sx, offset);
+			Cover(area, all_cov, t.sx, offset);
+		}
+
+		// The outline over the fill: fill alpha wf / (1 - wo), then outline wo.
+		uint16	*row = t.screen + (size_t) py * t.pitch + px0;
+		for (int i = 0; i < px1 - px0; i++)
+		{
+			double	co = std::min(stroke_cov[i] / kSubRows, 1.0f);
+			double	cf = std::max(std::min(all_cov[i] / kSubRows, 1.0f) - co, 0.0);
+			double	wo = co * ao, wf = cf * af;
+			if (wf > 0 && wo < 1)
+				Blend(row[i], WithAlpha(c.fill, wf / (1 - wo)));
+			if (wo > 0)
+				Blend(row[i], WithAlpha(c.color, wo));
+		}
+	}
+}
+
+// Where the row at y crosses the points within half a pixel of segment a-b.
+bool SegmentSpan (double y, double ax, double ay, double bx, double by, Span &s)
+{
+	const double	r = 0.5;
+	if (y <= std::min(ay, by) - r || y >= std::max(ay, by) + r)
+		return false;
+
+	// The round ends and the band between them are convex, so the hull of
+	// their crossings is the crossing of the whole.
+	double	lo = HUGE_VAL, hi = -HUGE_VAL;
+	auto	take = [&](double x) {
+		lo = std::min(lo, x);
+		hi = std::max(hi, x);
+	};
+	auto	end = [&](double cx, double cy) {
+		double	d = y - cy;
+		if (d * d < r * r)
+		{
+			double	h = std::sqrt(r * r - d * d);
+			take(cx - h);
+			take(cx + h);
+		}
+	};
+	end(ax, ay);
+	end(bx, by);
+
+	double	dx = bx - ax, dy = by - ay, len = std::sqrt(dx * dx + dy * dy);
+	if (len > 0)
+	{
+		double	nx = -dy / len * r, ny = dx / len * r;
+		double	qx[4] = { ax + nx, bx + nx, bx - nx, ax - nx };
+		double	qy[4] = { ay + ny, by + ny, by - ny, ay - ny };
+		for (int i = 0; i < 4; i++)
+		{
+			int	j = (i + 1) & 3;
+			if ((qy[i] <= y) != (qy[j] <= y))
+				take(qx[i] + (y - qy[i]) / (qy[j] - qy[i]) * (qx[j] - qx[i]));
+		}
+	}
+	if (lo > hi)
+		return false;
+	s = { lo, hi };
+	return true;
+}
+
+void SmoothLine (Target &t, const LuaDrawCmd &c)
+{
+	const double	*p = c.points.data();
+	DrawSmooth(t, c, std::min(p[0], p[2]) - 1, std::min(p[1], p[3]) - 1, std::max(p[0], p[2]) + 1, std::max(p[1], p[3]) + 1,
+		[&](double y, std::vector<Span> &stroke, std::vector<Span> &) {
+			Span	s;
+			if (SegmentSpan(y, p[0], p[1], p[2], p[3], s))
+				stroke.push_back(s);
+		});
+}
+
+void SmoothEllipse (Target &t, const LuaDrawCmd &c)
+{
+	double	cx = c.points[0], cy = c.points[1], rx = c.points[2], ry = c.points[3];
+	if (rx <= 0 || ry <= 0)
+		return;
+	bool	outline = (c.color >> 24) != 0;
+	DrawSmooth(t, c, cx - rx, cy - ry, cx + rx, cy + ry,
+		[&](double y, std::vector<Span> &stroke, std::vector<Span> &area) {
+			auto	chord = [&](double a, double b, Span &s) {
+				if (a <= 0 || b <= 0)
+					return false;
+				double	d = (y - cy) / b;
+				if (d * d >= 1)
+					return false;
+				double	h = a * std::sqrt(1 - d * d);
+				s = { cx - h, cx + h };
+				return true;
+			};
+			Span	o, i;
+			if (!chord(rx, ry, o))
+				return;
+			area.push_back(o);
+			if (!outline)
+				return;
+			if (chord(rx - 1, ry - 1, i))
+			{
+				stroke.push_back({ o.a, i.a });
+				stroke.push_back({ i.b, o.b });
+			}
+			else
+				stroke.push_back(o);
+		});
+}
+
+void SmoothPolygon (Target &t, const LuaDrawCmd &c)
+{
+	const std::vector<double>	&p = c.points;
+	size_t	n = p.size() / 2;
+	if (n == 0)
+		return;
+
+	double	x0 = p[0], y0 = p[1], x1 = p[0], y1 = p[1];
+	for (size_t i = 1; i < n; i++)
+	{
+		x0 = std::min(x0, p[i * 2]);
+		x1 = std::max(x1, p[i * 2]);
+		y0 = std::min(y0, p[i * 2 + 1]);
+		y1 = std::max(y1, p[i * 2 + 1]);
+	}
+
+	// Rows come top to bottom, so only the edges near the row are looked at.
+	struct Edge
+	{
+		double	ax, ay, bx, by, top, bottom;
+	};
+	std::vector<Edge>	edges(n);
+	for (size_t i = 0; i < n; i++)
+	{
+		size_t	j = (i + 1) % n;
+		double	ay = p[i * 2 + 1], by = p[j * 2 + 1];
+		edges[i] = { p[i * 2], ay, p[j * 2], by, std::min(ay, by) - 0.5, std::max(ay, by) + 0.5 };
+	}
+	std::sort(edges.begin(), edges.end(), [](const Edge &e, const Edge &f) { return e.top < f.top; });
+
+	bool	outline = (c.color >> 24) != 0;
+	std::vector<double>	xs;
+	std::vector<const Edge *>	active;
+	size_t	next = 0;
+	DrawSmooth(t, c, x0 - 1, y0 - 1, x1 + 1, y1 + 1,
+		[&](double y, std::vector<Span> &stroke, std::vector<Span> &area) {
+			while (next < n && edges[next].top < y)
+				active.push_back(&edges[next++]);
+			active.erase(std::remove_if(active.begin(), active.end(), [&](const Edge *e) { return e->bottom <= y; }), active.end());
+
+			xs.clear();
+			for (const Edge *e : active)
+			{
+				if (n >= 3 && ((e->ay <= y && e->by > y) || (e->by <= y && e->ay > y)))
+					xs.push_back(e->ax + (y - e->ay) / (e->by - e->ay) * (e->bx - e->ax));
+				Span	s;
+				if (outline && SegmentSpan(y, e->ax, e->ay, e->bx, e->by, s))
+					stroke.push_back(s);
+			}
+			std::sort(xs.begin(), xs.end());
+			for (size_t k = 0; k + 1 < xs.size(); k += 2)
+				area.push_back({ xs[k], xs[k + 1] });
+		});
+}
+
 void Draw (Target &t, const LuaDrawCmd &c)
 {
 	switch (c.type)
@@ -573,16 +811,25 @@ void Draw (Target &t, const LuaDrawCmd &c)
 			t.Plot(c.x, c.y, c.color);
 			break;
 		case LuaDrawCmd::LINE:
-			Bresenham(c.x, c.y, c.w, c.h, [&](int x, int y) { t.Plot(x, y, c.color); });
+			if (c.smooth)
+				SmoothLine(t, c);
+			else
+				Bresenham(c.x, c.y, c.w, c.h, [&](int x, int y) { t.Plot(x, y, c.color); });
 			break;
 		case LuaDrawCmd::RECT:
 			DrawRect(t, c);
 			break;
 		case LuaDrawCmd::ELLIPSE:
-			DrawEllipse(t, c);
+			if (c.smooth)
+				SmoothEllipse(t, c);
+			else
+				DrawEllipse(t, c);
 			break;
 		case LuaDrawCmd::POLYGON:
-			DrawPolygon(t, c);
+			if (c.smooth)
+				SmoothPolygon(t, c);
+			else
+				DrawPolygon(t, c);
 			break;
 		case LuaDrawCmd::TEXT:
 			DrawText(t, c);
@@ -603,14 +850,19 @@ LuaDrawCmd &Record (lua_State *L, LuaDrawCmd::Type type)
 		luaL_error(L, "more than %d drawings without a clear; call gui.clear()", (int) kMaxLayer);
 	s->layer.emplace_back();
 	s->layer.back().type = type;
+	s->layer.back().smooth = s->antialias;
 	LuaEng.overlay_dirty = true;
 	return s->layer.back();
 }
 
+double CheckReal (lua_State *L, int arg)
+{
+	return std::clamp((double) luaL_checknumber(L, arg), -1e6, 1e6);
+}
+
 int CheckCoord (lua_State *L, int arg)
 {
-	lua_Number	v = luaL_checknumber(L, arg);
-	return (int) std::floor(std::clamp(v, -1e6, 1e6));
+	return (int) std::floor(CheckReal(L, arg));
 }
 
 int gui_pixel (lua_State *L)
@@ -626,44 +878,51 @@ int gui_pixel (lua_State *L)
 
 int gui_line (lua_State *L)
 {
-	int		x1 = CheckCoord(L, 1), y1 = CheckCoord(L, 2), x2 = CheckCoord(L, 3), y2 = CheckCoord(L, 4);
+	double	x1 = CheckReal(L, 1), y1 = CheckReal(L, 2), x2 = CheckReal(L, 3), y2 = CheckReal(L, 4);
 	uint32	color = OptColor(L, 5, 0xffffffff);
 	LuaDrawCmd	&c = Record(L, LuaDrawCmd::LINE);
-	c.x = x1;
-	c.y = y1;
-	c.w = x2;
-	c.h = y2;
+	c.x = (int) std::floor(x1);
+	c.y = (int) std::floor(y1);
+	c.w = (int) std::floor(x2);
+	c.h = (int) std::floor(y2);
 	c.color = color;
+	if (c.smooth)
+		c.points = { x1 + 0.5, y1 + 0.5, x2 + 0.5, y2 + 0.5 };	// pixel centres
 	return 0;
 }
 
 template <LuaDrawCmd::Type type>
 int gui_shape (lua_State *L)
 {
-	int		x = CheckCoord(L, 1), y = CheckCoord(L, 2), w = CheckCoord(L, 3), h = CheckCoord(L, 4);
+	double	x = CheckReal(L, 1), y = CheckReal(L, 2), w = CheckReal(L, 3), h = CheckReal(L, 4);
 	uint32	outline = OutlineColor(L, 5);
 	uint32	fill = OptColor(L, 6, 0);
 	LuaDrawCmd	&c = Record(L, type);
-	c.x = x;
-	c.y = y;
-	c.w = w;
-	c.h = h;
+	c.x = (int) std::floor(x);
+	c.y = (int) std::floor(y);
+	c.w = (int) std::floor(w);
+	c.h = (int) std::floor(h);
 	c.color = outline;
 	c.fill = fill;
+	if (type == LuaDrawCmd::ELLIPSE && c.smooth)
+		c.points = { x + w / 2, y + h / 2, w / 2, h / 2 };
 	return 0;
 }
 
 int gui_circle (lua_State *L)
 {
-	int		cx = CheckCoord(L, 1), cy = CheckCoord(L, 2), r = CheckCoord(L, 3);
+	double	cx = CheckReal(L, 1), cy = CheckReal(L, 2), r = CheckReal(L, 3);
 	uint32	outline = OutlineColor(L, 4);
 	uint32	fill = OptColor(L, 5, 0);
 	LuaDrawCmd	&c = Record(L, LuaDrawCmd::ELLIPSE);
-	c.x = cx - r;
-	c.y = cy - r;
-	c.w = c.h = r * 2 + 1;
+	int		ir = (int) std::floor(r);
+	c.x = (int) std::floor(cx) - ir;
+	c.y = (int) std::floor(cy) - ir;
+	c.w = c.h = ir * 2 + 1;
 	c.color = outline;
 	c.fill = fill;
+	if (c.smooth)
+		c.points = { cx + 0.5, cy + 0.5, r + 0.5, r + 0.5 };	// the same disc, unrounded
 	return 0;
 }
 
@@ -671,7 +930,7 @@ int gui_circle (lua_State *L)
 int gui_polygon (lua_State *L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	std::vector<int>	points;
+	std::vector<double>	points;
 	lua_Integer	n = luaL_len(L, 1);
 	for (lua_Integer i = 1; i <= n; i++)
 	{
@@ -680,12 +939,12 @@ int gui_polygon (lua_State *L)
 		{
 			lua_geti(L, -1, 1);
 			lua_geti(L, -2, 2);
-			points.push_back(CheckCoord(L, -2));
-			points.push_back(CheckCoord(L, -1));
+			points.push_back(CheckReal(L, -2));
+			points.push_back(CheckReal(L, -1));
 			lua_pop(L, 2);
 		}
 		else
-			points.push_back(CheckCoord(L, -1));
+			points.push_back(CheckReal(L, -1));
 		lua_pop(L, 1);
 	}
 	if (points.size() % 2)
@@ -694,6 +953,8 @@ int gui_polygon (lua_State *L)
 	uint32	outline = OutlineColor(L, 2);
 	uint32	fill = OptColor(L, 3, 0);
 	LuaDrawCmd	&c = Record(L, LuaDrawCmd::POLYGON);
+	for (double &v : points)
+		v = c.smooth ? v + 0.5 : std::floor(v);	// smooth: pixel centres
 	c.points = std::move(points);
 	c.color = outline;
 	c.fill = fill;
@@ -969,6 +1230,12 @@ int gui_set_opacity (lua_State *L)
 	return 0;
 }
 
+int gui_set_antialias (lua_State *L)
+{
+	LuaScriptOf(L)->antialias = lua_toboolean(L, 1);
+	return 0;
+}
+
 int gui_width (lua_State *L)
 {
 	lua_pushinteger(L, Settings.SuperGameBoy ? (int) SGB_GB_SCREEN_W : SNES_WIDTH);
@@ -1057,6 +1324,7 @@ const luaL_Reg	gui_functions[] =
 	{ "clear",			gui_clear },
 	{ "set_auto_clear",	gui_set_auto_clear },
 	{ "set_opacity",	gui_set_opacity },
+	{ "set_antialias",	gui_set_antialias },
 	{ "width",			gui_width },
 	{ "height",			gui_height },
 	{ "screen",			gui_screen },

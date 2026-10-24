@@ -838,7 +838,11 @@ bool S9xLuaRun (int id, const std::string &code, const std::string &name, const 
 	s->id = id;
 	s->name = name.empty() ? "untitled.lua" : name;
 	s->path = path;
+	// An unsaved script has no folder of its own: its files go where the port says
+	// (the emulator's own folder on Windows), not wherever the process happens to be.
 	s->dir = DirectoryOf(path);
+	if (s->dir.empty() && LuaEng.frontend.default_dir)
+		s->dir = LuaEng.frontend.default_dir();
 
 	LuaEmit(id, S9X_LUA_EVENT_STARTED, s->name);
 

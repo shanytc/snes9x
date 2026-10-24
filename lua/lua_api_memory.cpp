@@ -66,6 +66,10 @@ uint8 BusRead (uint32 address)
 	if (p >= (uint8 *) CMemory::MAP_LAST)
 		return p[address & 0xffff];
 
+	// The DMA channels' registers are readable and kept in DMA[], not FillRAM;
+	// reading them changes nothing.
+	if ((pint) p == CMemory::MAP_CPU && (address & 0xff80) == 0x4300)
+		return S9xGetCPU(address & 0xffff);
 	if ((pint) p == CMemory::MAP_CPU || (pint) p == CMemory::MAP_PPU)
 		return Memory.FillRAM[address & 0x7fff];	// the last value, not a live read
 

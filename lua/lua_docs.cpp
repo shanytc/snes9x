@@ -30,6 +30,7 @@ static const S9xLuaApiDoc	docs[] =
 	{ "emu.rom",			"()",			"Table about the game: title, path, crc32, sha256, size, region, mapping, id, platform. Nil without a game." },
 	{ "emu.region",			"()",			"\"ntsc\" or \"pal\"." },
 	{ "emu.fps",			"()",			"The console's native frame rate." },
+	{ "emu.clock",			"()",			"Seconds of real time on a steady clock, for frame rates and timing code." },
 	{ "emu.version",		"()",			"The emulator version string." },
 	{ "emu.platform",		"()",			"\"snes\", \"gb\" (Game Boy core) or \"sgb\" (Super Game Boy BIOS)." },
 
@@ -147,7 +148,7 @@ static const S9xLuaApiDoc	docs[] =
 	// script
 	{ "script.name",		"()",			"The script's file name." },
 	{ "script.path",		"()",			"The script's full path (\"\" if unsaved)." },
-	{ "script.dir",			"()",			"The script's folder; require, io.open and gui.image look there first." },
+	{ "script.dir",			"()",			"The script's folder (the emulator's folder for an unsaved script); require, io.open and gui.image look there first." },
 	{ "script.id",			"()",			"A number identifying this run of the script." },
 	{ "script.stop",		"()",			"Ends the script cleanly." },
 	{ "script.set_watchdog",	"(seconds)",	"How long code may run without yielding before it is stopped (default 5, 0 = never)." }

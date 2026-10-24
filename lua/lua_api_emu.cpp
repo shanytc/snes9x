@@ -323,6 +323,14 @@ int emu_fps (lua_State *L)
 	return 1;
 }
 
+// Real time, for frame rates and timing: os.clock() is CPU time on some systems.
+int emu_clock (lua_State *L)
+{
+	static const auto	start = std::chrono::steady_clock::now();
+	lua_pushnumber(L, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+	return 1;
+}
+
 int emu_version (lua_State *L)
 {
 	lua_pushstring(L, VERSION_DISPLAY);
@@ -355,6 +363,7 @@ const luaL_Reg	emu_functions[] =
 	{ "rom",			emu_rom },
 	{ "region",			emu_region },
 	{ "fps",			emu_fps },
+	{ "clock",			emu_clock },
 	{ "version",		emu_version },
 	{ "platform",		emu_platform },
 	{ nullptr, nullptr }

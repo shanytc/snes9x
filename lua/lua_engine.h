@@ -58,6 +58,7 @@ struct S9xLuaFrontend
 	std::function<void (bool)>				reset;		// true = power cycle
 	std::function<std::string (int)>		state_slot_path;	// savestate.save(slot)
 	std::function<void ()>					wake_ui;	// events are waiting
+	std::function<std::string ()>			default_dir;	// an unsaved script's folder (UTF-8, ending in a separator)
 
 	// The debugger, which is off unless both are set. A script stopped at a
 	// breakpoint waits on the emulation thread, calling debug_wait until an

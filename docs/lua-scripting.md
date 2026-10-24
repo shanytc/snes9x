@@ -104,6 +104,7 @@ exec hooks run before the instruction and may (`cpu.set("pc", ...)` skips code).
 | `emu.rom()` | `{title, path, crc32, sha256, size, region, mapping, id, platform}`, or nil without a game. |
 | `emu.region()` | `"ntsc"` or `"pal"`. |
 | `emu.fps()` | The console's native frame rate. |
+| `emu.clock()` | Seconds of real time on a steady clock, for frame rates and timing code. |
 | `emu.version()` | The emulator version. |
 | `emu.platform()` | `"snes"`, `"gb"` (the Game Boy core) or `"sgb"` (a Game Boy game under the Super Game Boy BIOS). |
 
@@ -143,7 +144,7 @@ functions minus the argument: `memory.wram.read_u16(0x10)`.
 
 | Domain | SNES | Game Boy |
 | --- | --- | --- |
-| `bus` | The 24-bit CPU address space. Writes reach RAM and cartridge RAM; ROM and I/O registers aren't written, and I/O reads give the last value written. | The 16-bit GB address space |
+| `bus` | The 24-bit CPU address space. Writes reach RAM and cartridge RAM; ROM and I/O registers aren't written, and I/O reads give the last value written (the DMA registers, `$4300`-`$437F`, read as they are). | The 16-bit GB address space |
 | `wram` | Work RAM, 128 KB | Work RAM |
 | `sram` | Cartridge battery RAM | Cartridge RAM |
 | `rom` | The ROM image; writes patch it in memory | The ROM image (read-only) |
@@ -251,7 +252,7 @@ movie).
 
 | Function | Description |
 | --- | --- |
-| `script.name()`, `script.path()`, `script.dir()` | The script's file name, path and folder. An unsaved script has no path. |
+| `script.name()`, `script.path()`, `script.dir()` | The script's file name, path and folder. An unsaved script has no path; on Windows its folder is the emulator's. |
 | `script.id()` | A number for this run of the script. |
 | `script.stop()` | Ends the script cleanly (`os.exit()` does the same). |
 | `script.set_watchdog(seconds)` | How long code may run without letting the emulator continue before it is stopped. 0 turns it off. |

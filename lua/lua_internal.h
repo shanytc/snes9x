@@ -78,6 +78,12 @@ struct LuaDrawCmd
 	std::vector<int>	points;
 };
 
+struct LuaBreakpoint
+{
+	S9xLuaBreakpoint	spec;
+	int			hits = 0;
+};
+
 struct LuaScript
 {
 	int			id = 0;
@@ -105,6 +111,17 @@ struct LuaScript
 
 	uint16		pad_on[8] = {}, pad_off[8] = {};	// joypad.set for the next frame
 	std::string	partial_line;			// console.write text not yet ended by '\n'
+
+	// Debugger (lua_debug.cpp)
+	std::map<int, LuaBreakpoint>	breakpoints;	// by line, in the script's own file
+	uint32		breakpoints_version = 0;
+	int			step = 0;
+	lua_State	*step_thread = nullptr;
+	int			step_depth = 0;
+	bool		line_hook = false;		// its threads have the line hook on
+	bool		evaluating = false;		// running a watch or a breakpoint condition
+	int			threads_ref = LUA_NOREF;	// the coroutines it made, weakly
+	int			baseline_ref = LUA_NOREF;	// the globals it started with
 };
 
 struct LuaEngine
@@ -148,6 +165,22 @@ int  LuaAddCallback (lua_State *L, int kind, int fn_index, uint32 first = 0, uin
 void LuaRebuildHooks (void);
 uint32 LuaNormalizeBus (uint32 address);
 int  LuaRaiseStop (lua_State *L);	// ends the calling script cleanly; doesn't return
+
+// Every script thread's hook: the watchdog and stop requests on counts, the
+// debugger on lines.
+const int	kLuaHookInterval = 10000;	// VM instructions between count events
+void LuaHook (lua_State *L, lua_Debug *ar);
+
+// Debugger (lua_debug.cpp)
+void LuaDebugInit (lua_State *L, LuaScript *s);			// before the prelude
+void LuaDebugCaptureGlobals (lua_State *L, LuaScript *s);	// after it
+void LuaDebugPrepare (LuaScript *s);		// before running the script's code
+void LuaDebugCount (lua_State *L, LuaScript *s);
+void LuaDebugLine (lua_State *L, lua_Debug *ar);
+bool LuaDebugError (LuaScript *s, lua_State *L, int level, const char *message);	// true: the user ended it
+bool LuaDebugStopped (void);
+void LuaDebugAbort (int script);			// 0: every script
+void LuaDebugForget (LuaScript *s);
 
 // Modules, each registered into a fresh script state.
 void LuaOpenEmu (lua_State *L);

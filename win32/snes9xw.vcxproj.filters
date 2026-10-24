@@ -764,6 +764,9 @@
     <ClCompile Include="..\lua\lua_cpuops.cpp">
       <Filter>Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\lua\lua_debug.cpp">
+      <Filter>Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\lua\lua_api_emu.cpp">
       <Filter>Lua</Filter>
     </ClCompile>

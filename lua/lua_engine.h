@@ -58,6 +58,13 @@ struct S9xLuaFrontend
 	std::function<void (bool)>				reset;		// true = power cycle
 	std::function<std::string (int)>		state_slot_path;	// savestate.save(slot)
 	std::function<void ()>					wake_ui;	// events are waiting
+
+	// The debugger, which is off unless both are set. A script stopped at a
+	// breakpoint waits on the emulation thread, calling debug_wait until an
+	// action lets it go on; a port that runs emulation on its UI thread pumps
+	// its messages there.
+	std::function<void (int, bool)>			debug_break;	// script, stopped (true) or going on
+	std::function<void ()>					debug_wait;
 };
 
 void S9xLuaSetFrontend (const S9xLuaFrontend &frontend);
@@ -83,6 +90,72 @@ void S9xLuaRequestStop (int id);
 std::vector<S9xLuaScriptInfo> S9xLuaScripts (void);
 bool S9xLuaTakeEvents (std::vector<S9xLuaEvent> &events);
 void S9xLuaSetEcho (bool echo);	// also print script output to stdout
+
+// Debugger. Everything here is safe from any thread. Breakpoints are lines in
+// the script's own file; frames and variables describe the stopped script.
+struct S9xLuaBreakpoint
+{
+	int			line = 0;
+	bool		enabled = true;
+	std::string	condition;		// a Lua expression: stop only when it's true
+	std::string	hit_condition;	// "5" (the 5th hit), ">= 5", "> 5" or "% 5" (every 5th)
+	std::string	log_message;	// not empty: print it, {expressions} filled in, instead of stopping
+};
+
+enum S9xLuaDebugAction
+{
+	S9X_LUA_DEBUG_CONTINUE,
+	S9X_LUA_DEBUG_STEP_INTO,
+	S9X_LUA_DEBUG_STEP_OVER,
+	S9X_LUA_DEBUG_STEP_OUT,
+	S9X_LUA_DEBUG_BREAK,	// stop at the script's next line
+	S9X_LUA_DEBUG_STOP		// end the stopped script
+};
+
+enum S9xLuaDebugEventKind
+{
+	S9X_LUA_DEBUG_STOPPED,		// reason, message, frames
+	S9X_LUA_DEBUG_RESUMED,
+	S9X_LUA_DEBUG_VARIABLES,	// ref, variables
+	S9X_LUA_DEBUG_EVALUATED		// request, variables[0]; failed: its value is the error
+};
+
+struct S9xLuaDebugFrame
+{
+	std::string	function;	// "update", "main chunk", "[C] pcall"
+	std::string	source;		// what to show: "game.lua", "lib/util.lua"
+	std::string	path;		// the file Lua loaded it from, when it came from one
+	int			line = 0;	// 0 in C functions
+	bool		own = false;	// in the script's own file
+};
+
+struct S9xLuaDebugVariable
+{
+	std::string	name, value, type;
+	int			ref = 0;	// > 0: a table whose fields S9xLuaDebugRequestVariables lists
+};
+
+struct S9xLuaDebugEvent
+{
+	S9xLuaDebugEventKind	kind;
+	int						script = 0;
+	std::string				reason;		// STOPPED: "breakpoint", "step", "break" or "error"
+	std::string				message;	// STOPPED on an error: the error
+	std::vector<S9xLuaDebugFrame>		frames;
+	int						ref = 0, request = 0;
+	std::vector<S9xLuaDebugVariable>	variables;
+	bool					failed = false;
+};
+
+bool S9xLuaDebugAvailable (void);
+void S9xLuaDebugSetBreakpoints (int script, const std::vector<S9xLuaBreakpoint> &breakpoints);
+void S9xLuaDebugSetBreakOnError (bool enabled);
+void S9xLuaDebugCommand (int script, S9xLuaDebugAction action);
+int  S9xLuaDebugStoppedScript (void);	// 0 while no script is stopped
+int  S9xLuaDebugScopeRef (int frame, int scope);	// scope: 0 locals, 1 upvalues, 2 globals
+void S9xLuaDebugRequestVariables (int script, int ref);
+void S9xLuaDebugEvaluate (int script, int frame, const std::string &expression, int request);
+bool S9xLuaDebugTakeEvents (std::vector<S9xLuaDebugEvent> &events);
 
 // Editor support: Lua syntax spans for highlighting and the API's names.
 enum S9xLuaTokenKind

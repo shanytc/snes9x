@@ -591,6 +591,7 @@
     <ClCompile Include="..\lua\lua_core.cpp" />
     <ClCompile Include="..\lua\lua_engine.cpp" />
     <ClCompile Include="..\lua\lua_cpuops.cpp" />
+    <ClCompile Include="..\lua\lua_debug.cpp" />
     <ClCompile Include="..\lua\lua_api_emu.cpp" />
     <ClCompile Include="..\lua\lua_api_memory.cpp" />
     <ClCompile Include="..\lua\lua_api_input.cpp" />

@@ -29,7 +29,6 @@ extern bool8	pad_read_last;
 namespace
 {
 
-const int	kHookInterval = 10000;	// VM instructions between interrupt checks
 const size_t	kMaxEvents = 20000;
 char		kStopSentinel;			// its address marks a clean stop
 
@@ -113,14 +112,16 @@ bool TakeStopRequest (int id)
 
 int FindScriptLine (lua_State *T, LuaScript *s, int level);
 
-void CountHook (lua_State *L, lua_Debug *)
+void HookEvent (lua_State *L, lua_Debug *ar)
 {
 	LuaScript	*s = LuaScriptOf(L);
 
-	if (TakeStopRequest(s->id))
+	if (ar->event == LUA_HOOKLINE)
+		LuaDebugLine(L, ar);
+	else if (TakeStopRequest(s->id))
 		s->interrupt = true;
 
-	if (!s->interrupt && s->watchdog > 0.0)
+	if (ar->event != LUA_HOOKLINE && !s->interrupt && s->watchdog > 0.0)
 	{
 		std::chrono::duration<double>	ran = std::chrono::steady_clock::now() - LuaEng.call_started;
 		if (ran.count() > s->watchdog)
@@ -134,11 +135,13 @@ void CountHook (lua_State *L, lua_Debug *)
 			s->end_message = text;
 		}
 	}
+	if (ar->event != LUA_HOOKLINE && !s->interrupt)
+		LuaDebugCount(L, s);
 
 	if (s->interrupt)
 	{
 		// Check every instruction from now on so a pcall loop can't swallow the stop.
-		lua_sethook(L, CountHook, LUA_MASKCOUNT, 1);
+		lua_sethook(L, LuaHook, LUA_MASKCOUNT, 1);
 		lua_pushlightuserdata(L, &kStopSentinel);
 		lua_error(L);
 	}
@@ -184,6 +187,11 @@ int MessageHandler (lua_State *L)
 	const char	*text = ErrorText(L, 1);
 	if (!s->end_line)
 		s->end_line = FindScriptLine(L, s, 1);
+	if (LuaDebugError(s, L, 1, text))
+	{
+		lua_pushlightuserdata(L, &kStopSentinel);	// ended from the debugger
+		return 1;
+	}
 	luaL_traceback(L, L, text, 1);
 	return 1;
 }
@@ -228,6 +236,7 @@ bool CallLua (LuaScript *s, int nargs, int nresults, LuaContext ctx)
 	lua_State	*L = s->L;
 	int			base = lua_gettop(L) - nargs;
 
+	LuaDebugPrepare(s);
 	lua_pushcfunction(L, MessageHandler);
 	lua_insert(L, base);
 
@@ -264,6 +273,7 @@ void ResumeMain (LuaScript *s)
 
 	int	results = 0;
 	int	status;
+	LuaDebugPrepare(s);
 	{
 		CallScope	scope(s, LUA_CTX_SAFE);
 		status = lua_resume(s->main, s->L, 0, &results);
@@ -292,6 +302,10 @@ void ResumeMain (LuaScript *s)
 		s->failed = true;
 		const char	*text = ErrorText(s->main, -1);
 		s->end_line = FindScriptLine(s->main, s, 0);
+		{
+			CallScope	scope(s, LUA_CTX_SAFE);
+			LuaDebugError(s, s->main, 0, text);
+		}
 		luaL_traceback(s->L, s->main, text, 0);
 		s->end_message = lua_tostring(s->L, -1);
 		lua_pop(s->L, 1);
@@ -306,7 +320,8 @@ void FireStopCallbacks (LuaScript *s)
 	s->ending = false;
 	s->failed = false;
 	s->end_line = 0;
-	lua_sethook(s->L, CountHook, LUA_MASKCOUNT, kHookInterval);
+	lua_sethook(s->L, LuaHook, LUA_MASKCOUNT, kLuaHookInterval);
+	s->line_hook = false;
 
 	size_t	count = s->callbacks.size();
 	for (size_t i = 0; i < count; i++)
@@ -339,7 +354,7 @@ void RedrawPaused (void);
 // code may be on the stack.
 void Reap (void)
 {
-	if (LuaEng.running)
+	if (LuaEng.running || LuaDebugStopped())
 		return;
 
 	bool	changed = false;
@@ -371,6 +386,7 @@ void Reap (void)
 
 		if (!s->layer.empty())
 			LuaEng.overlay_dirty = true;
+		LuaDebugForget(s);
 		lua_close(s->L);
 		LuaEng.scripts.erase(LuaEng.scripts.begin() + i);
 		changed = true;
@@ -654,6 +670,11 @@ int l_exit (lua_State *L)
 
 }	// namespace
 
+void LuaHook (lua_State *L, lua_Debug *ar)
+{
+	HookEvent(L, ar);
+}
+
 LuaScript *LuaScriptOf (lua_State *L)
 {
 	return *(LuaScript **) lua_getextraspace(L);
@@ -842,6 +863,7 @@ bool S9xLuaRun (int id, const std::string &code, const std::string &name, const 
 	LuaOpenMemory(L);
 	LuaOpenGui(L);
 	LuaOpenInput(L);
+	LuaDebugInit(L, s.get());
 
 	if (luaL_loadbuffer(L, kPrelude, sizeof(kPrelude) - 1, "=prelude") == LUA_OK)
 	{
@@ -849,6 +871,7 @@ bool S9xLuaRun (int id, const std::string &code, const std::string &name, const 
 		lua_pcall(L, 1, 0, 0);
 	}
 	lua_settop(L, 0);
+	LuaDebugCaptureGlobals(L, s.get());
 
 	std::string	chunk = "@" + s->name;
 	if (luaL_loadbufferx(L, code.data(), code.size(), chunk.c_str(), "t") != LUA_OK)
@@ -860,7 +883,7 @@ bool S9xLuaRun (int id, const std::string &code, const std::string &name, const 
 		return false;
 	}
 
-	lua_sethook(L, CountHook, LUA_MASKCOUNT, kHookInterval);
+	lua_sethook(L, LuaHook, LUA_MASKCOUNT, kLuaHookInterval);
 	s->main = lua_newthread(L);
 	s->main_ref = luaL_ref(L, LUA_REGISTRYINDEX);
 	lua_xmove(L, s->main, 1);
@@ -890,6 +913,7 @@ bool S9xLuaRunFile (int id, const std::string &path)
 
 void S9xLuaStop (int id)
 {
+	LuaDebugAbort(id);
 	{
 		// A request for a script that already ended mustn't linger.
 		std::lock_guard<std::mutex>	lock(stop_mutex);
@@ -938,6 +962,7 @@ void S9xLuaRequestStop (int id)
 	else
 		ids.push_back(id);
 
+	LuaDebugAbort(id);
 	std::lock_guard<std::mutex>	lock(stop_mutex);
 	stop_requests.insert(ids.begin(), ids.end());
 	any_stop_request = !stop_requests.empty();
@@ -962,7 +987,7 @@ bool S9xLuaTakeEvents (std::vector<S9xLuaEvent> &events)
 void S9xLuaIdle (void)
 {
 	// A port that pumps messages mid-frame mustn't run scripts there.
-	if (!S9xLuaActive || LuaEng.in_frame)
+	if (!S9xLuaActive || LuaEng.in_frame || LuaEng.running || LuaDebugStopped())
 		return;
 
 	auto	now = std::chrono::steady_clock::now();

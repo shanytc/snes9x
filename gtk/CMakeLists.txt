@@ -323,6 +323,7 @@ list(APPEND SOURCES
     ../lua/lua_core.cpp
     ../lua/lua_engine.cpp
     ../lua/lua_cpuops.cpp
+    ../lua/lua_debug.cpp
     ../lua/lua_api_emu.cpp
     ../lua/lua_api_memory.cpp
     ../lua/lua_api_input.cpp

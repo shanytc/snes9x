@@ -49,6 +49,9 @@ enum
 {
 	IDC_TABS = 100, IDC_CONSOLE, IDC_TREE, IDC_SEARCH, IDC_STATUS, IDC_FIND, IDC_CLEAR, IDC_COMPLETION,
 	IDC_BUTTON_NEW, IDC_BUTTON_OPEN, IDC_BUTTON_SAVE, IDC_BUTTON_RUN, IDC_BUTTON_PAUSE, IDC_BUTTON_STOP,
+	IDC_BUTTON_CONTINUE, IDC_BUTTON_STEP_OVER, IDC_BUTTON_STEP_INTO, IDC_BUTTON_STEP_OUT,
+	IDC_PANEL_TABS, IDC_VARIABLES, IDC_WATCH_EDIT, IDC_WATCH, IDC_CALLSTACK, IDC_BREAKPOINTS,
+	IDC_BP_CONDITION, IDC_BP_HIT, IDC_BP_LOG,
 	IDC_EDITOR = 1000
 };
 
@@ -60,16 +63,32 @@ enum
 	CMD_RUN, CMD_PAUSE, CMD_STOP, CMD_STOP_ALL,
 	CMD_REFERENCE, CMD_CLEAR_CONSOLE, CMD_ZOOM_IN, CMD_ZOOM_OUT, CMD_ZOOM_RESET,
 	CMD_GUIDE, CMD_MANUAL, CMD_PIL, CMD_RECENT_CLEAR,
+	CMD_CONTINUE, CMD_BREAK, CMD_STEP_OVER, CMD_STEP_INTO, CMD_STEP_OUT,
+	CMD_TOGGLE_BREAKPOINT, CMD_EDIT_BREAKPOINT, CMD_ENABLE_BREAKPOINT, CMD_REMOVE_BREAKPOINTS,
+	CMD_BREAK_ON_ERROR, CMD_ADD_WATCH, CMD_REMOVE_WATCH,
 	CMD_RECENT_FIRST = 41000, CMD_EXAMPLE_FIRST = 42000
 };
 
 enum { TIMER_POLL = 1, TIMER_HIGHLIGHT = 2 };
 const UINT WM_LUA_AFTER_CHAR = WM_APP + 41;
+const UINT WM_LUA_POLL = WM_APP + 42;
+
+const int kButtons = 10;
+enum { PANEL_CONSOLE, PANEL_VARIABLES, PANEL_WATCH, PANEL_CALLSTACK, PANEL_BREAKPOINTS, PANEL_COUNT };
 
 const COLORREF kKeyword = RGB(0, 51, 179), kBuiltin = RGB(0, 128, 128), kNumber = RGB(176, 80, 0);
 const COLORREF kString = RGB(26, 128, 26), kComment = RGB(112, 112, 112), kText = RGB(0, 0, 0);
-const COLORREF kErrorBack = RGB(246, 200, 200);
+const COLORREF kErrorBack = RGB(246, 200, 200), kStoppedBack = RGB(255, 238, 140), kFrameBack = RGB(208, 236, 208);
 const COLORREF kInfo = RGB(26, 95, 180), kWarning = RGB(160, 96, 0), kError = RGB(192, 16, 16), kQuiet = RGB(112, 112, 112);
+const COLORREF kBreakpoint = RGB(200, 36, 36), kConditional = RGB(226, 132, 0), kLogpoint = RGB(36, 112, 200);
+
+// A breakpoint rides a TOM range at its line's start, which follows the text as it's edited.
+struct Breakpoint
+{
+	ITextRange *anchor = nullptr;
+	bool enabled = true;
+	std::wstring condition, hit, log;
+};
 
 struct Document
 {
@@ -81,13 +100,18 @@ struct Document
 	bool paused = false;
 	bool modified = false;
 	int error_line = 0;
+	std::vector<Breakpoint> breakpoints;
+	int stopped_line = 0;	// where its script is stopped in the debugger
+	int frame_line = 0;		// the call stack's selected frame, when it isn't the top one
 };
 
 struct Editor
 {
-	HWND wnd = nullptr, tabs = nullptr, gutter = nullptr, console = nullptr, console_label = nullptr;
+	HWND wnd = nullptr, tabs = nullptr, gutter = nullptr, console = nullptr;
 	HWND tree = nullptr, search = nullptr, status = nullptr, find = nullptr, clear = nullptr;
-	HWND completion = nullptr, buttons[6] = {};
+	HWND completion = nullptr, buttons[kButtons] = {};
+	HWND panel_tabs = nullptr, variables = nullptr, watch_edit = nullptr, watch = nullptr;
+	HWND callstack = nullptr, breakpoint_list = nullptr, bp_fields[3] = {}, bp_labels[3] = {};
 	HFONT ui_font = nullptr, code_font = nullptr;
 	HACCEL accel = nullptr;
 	HMENU recent_menu = nullptr, menu = nullptr;
@@ -99,8 +123,25 @@ struct Editor
 	bool show_reference = true;
 	bool swallow_char = false;
 	bool loading = false;
-	int gutter_width = 40;
+	int gutter_width = 40, marker_width = 16, line_height = 16;
 	double scale = 1.0;
+	int panel = PANEL_CONSOLE;
+
+	// Debugger
+	int stopped = 0;							// the script stopped in the debugger
+	std::wstring stop_text;
+	std::vector<S9xLuaDebugFrame> frames;
+	int frame = 0;								// the selected one
+	struct Pending { int ref; HWND tree; HTREEITEM item; };
+	std::vector<Pending> pending;				// variable requests, answered by ref
+	std::vector<std::wstring> watches;
+	int watch_generation = 0;
+	std::vector<std::pair<Document *, size_t>> bp_rows;	// the breakpoints list
+	bool filling_breakpoints = false;
+	std::vector<HWND> disabled;					// windows switched off while stopped
+	std::vector<MSG> deferred;					// their messages, for after
+	bool poll_posted = false;
+	bool quitting = false;
 };
 
 Editor ed;
@@ -262,6 +303,99 @@ std::wstring DisplayName(const Document *doc)
 	return slash == std::wstring::npos ? doc->path : doc->path.substr(slash + 1);
 }
 
+/* ---- Breakpoints -------------------------------------------------------- */
+
+void RefreshBreakpointList();
+
+int BreakpointLine(Document *doc, const Breakpoint &b)
+{
+	long cp = 0;
+	b.anchor->GetStart(&cp);
+	return LineOf(doc->edit, cp) + 1;
+}
+
+Breakpoint *FindBreakpoint(Document *doc, int line)
+{
+	for (auto &b : doc->breakpoints)
+		if (BreakpointLine(doc, b) == line)
+			return &b;
+	return nullptr;
+}
+
+void ReleaseBreakpoints(Document *doc)
+{
+	for (auto &b : doc->breakpoints)
+		b.anchor->Release();
+	doc->breakpoints.clear();
+}
+
+// Edits can fold two breakpoints onto one line: keep the first.
+void MergeBreakpoints(Document *doc)
+{
+	std::vector<int> lines;
+	for (size_t i = 0; i < doc->breakpoints.size();)
+	{
+		int line = BreakpointLine(doc, doc->breakpoints[i]);
+		if (std::find(lines.begin(), lines.end(), line) != lines.end())
+		{
+			doc->breakpoints[i].anchor->Release();
+			doc->breakpoints.erase(doc->breakpoints.begin() + i);
+			continue;
+		}
+		lines.push_back(line);
+		i++;
+	}
+}
+
+// To the running script; its code is what was run, so lines are as they are now.
+void SendBreakpoints(Document *doc)
+{
+	if (!doc->script)
+		return;
+	std::vector<S9xLuaBreakpoint> list;
+	for (auto &b : doc->breakpoints)
+	{
+		S9xLuaBreakpoint bp;
+		bp.line = BreakpointLine(doc, b);
+		bp.enabled = b.enabled;
+		bp.condition = Narrow(b.condition);
+		bp.hit_condition = Narrow(b.hit);
+		bp.log_message = Narrow(b.log);
+		list.push_back(bp);
+	}
+	S9xLuaDebugSetBreakpoints(doc->script, list);
+}
+
+void BreakpointsChanged(Document *doc)
+{
+	MergeBreakpoints(doc);
+	SendBreakpoints(doc);
+	RefreshBreakpointList();
+	InvalidateRect(ed.gutter, nullptr, TRUE);
+}
+
+void ToggleBreakpoint(Document *doc, int line)
+{
+	if (!doc->tom || line < 1)
+		return;
+	for (size_t i = 0; i < doc->breakpoints.size(); i++)
+	{
+		if (BreakpointLine(doc, doc->breakpoints[i]) == line)
+		{
+			doc->breakpoints[i].anchor->Release();
+			doc->breakpoints.erase(doc->breakpoints.begin() + i);
+			BreakpointsChanged(doc);
+			return;
+		}
+	}
+	LONG start = LineStart(doc->edit, line - 1);
+	Breakpoint b;
+	if (start < 0 || FAILED(doc->tom->Range(start, start, &b.anchor)) || !b.anchor)
+		return;
+	doc->breakpoints.push_back(b);
+	BreakpointsChanged(doc);
+}
+
 void UpdateActions()
 {
 	Document *doc = Active();
@@ -271,10 +405,14 @@ void UpdateActions()
 	EnableWindow(ed.buttons[3], doc != nullptr);
 	EnableWindow(ed.buttons[4], running);
 	EnableWindow(ed.buttons[5], running);
+	for (int i = 6; i < kButtons; i++)
+		EnableWindow(ed.buttons[i], ed.stopped != 0);
 
 	size_t count = ed.names.size();
 	wchar_t text[128];
-	if (count == 0)
+	if (ed.stopped)
+		lstrcpynW(text, ed.stop_text.c_str(), 128);
+	else if (count == 0)
 		lstrcpynW(text, _L(L"No scripts running"), 128);
 	else if (running)
 		lstrcpynW(text, doc->paused ? _L(L"Paused") : _L(L"Running"), 128);
@@ -388,7 +526,11 @@ void Highlight(Document *doc)
 			FormatRange(doc->tom, a, b, color, token.kind == S9X_LUA_TOKEN_KEYWORD, token.kind == S9X_LUA_TOKEN_COMMENT);
 		}
 
-		if (line == doc->error_line)
+		if (line == doc->stopped_line)
+			BackRange(doc->tom, (long)start, (long)end + 1, kStoppedBack);
+		else if (line == doc->frame_line)
+			BackRange(doc->tom, (long)start, (long)end + 1, kFrameBack);
+		else if (line == doc->error_line)
 			BackRange(doc->tom, (long)start, (long)end + 1, kErrorBack);
 		if (end == text.size())
 			break;
@@ -429,9 +571,13 @@ void MakeCodeFont()
 	HGDIOBJ old = SelectObject(dc, ed.code_font);
 	SIZE size = {};
 	GetTextExtentPoint32W(dc, L"99999", 5, &size);
+	TEXTMETRICW metrics = {};
+	GetTextMetricsW(dc, &metrics);
 	SelectObject(dc, old);
 	ReleaseDC(ed.wnd, dc);
-	ed.gutter_width = size.cx + Scaled(8);
+	ed.line_height = std::max<int>(metrics.tmHeight + metrics.tmExternalLeading, 8);
+	ed.marker_width = std::max(Scaled(16), ed.line_height);
+	ed.gutter_width = ed.marker_width + size.cx + Scaled(8);
 }
 
 void Layout();
@@ -577,6 +723,7 @@ void OpenScript(const std::wstring &path, bool run)
 	if (ed.docs.size() == 1 && ed.docs[0]->path.empty() && !ed.docs[0]->script && !ed.docs[0]->modified &&
 	    ScriptText(ed.docs[0].get()) == S9xLuaNewScriptTemplate())
 	{
+		ReleaseBreakpoints(ed.docs[0].get());
 		if (ed.docs[0]->tom)
 			ed.docs[0]->tom->Release();
 		DestroyWindow(ed.docs[0]->edit);
@@ -665,6 +812,7 @@ void Run(Document *doc)
 	if (doc->error_line)
 		SetErrorLine(doc, 0);
 	S9xLuaRun(doc->script, ScriptText(doc), Narrow(DisplayName(doc)), Narrow(doc->path));
+	SendBreakpoints(doc);
 	UpdateTab(doc);
 }
 
@@ -676,11 +824,13 @@ bool CloseDocument(Document *doc)
 		Stop(doc);
 	int index = IndexOf(doc);
 	TabCtrl_DeleteItem(ed.tabs, index);
+	ReleaseBreakpoints(doc);
 	if (doc->tom)
 		doc->tom->Release();
 	DestroyWindow(doc->edit);
 	ed.docs.erase(ed.docs.begin() + index);
 	Activate(std::min(index, (int)ed.docs.size() - 1));
+	RefreshBreakpointList();
 	return true;
 }
 
@@ -753,8 +903,11 @@ void ConsoleDoubleClick(LPARAM position)
 	}
 }
 
+void PollDebug();
+
 void Poll()
 {
+	PollDebug();
 	std::vector<S9xLuaEvent> events;
 	if (!S9xLuaTakeEvents(events))
 		return;
@@ -827,6 +980,594 @@ void Poll()
 		}
 	}
 	UpdateActions();
+}
+
+/* ---- Debugger ----------------------------------------------------------- */
+
+void CreateEditorWindow();
+
+void ShowPanel(int panel)
+{
+	ed.panel = panel;
+	TabCtrl_SetCurSel(ed.panel_tabs, panel);
+	Layout();
+}
+
+std::wstring WindowString(HWND hwnd)
+{
+	int length = GetWindowTextLengthW(hwnd);
+	std::wstring text(length + 1, L'\0');
+	GetWindowTextW(hwnd, &text[0], length + 1);
+	text.resize(length);
+	return text;
+}
+
+std::wstring Trim(const std::wstring &text)
+{
+	size_t first = text.find_first_not_of(L" \t\r\n");
+	if (first == std::wstring::npos)
+		return {};
+	return text.substr(first, text.find_last_not_of(L" \t\r\n") - first + 1);
+}
+
+HTREEITEM AddTreeItem(HWND tree, HTREEITEM parent, const std::wstring &text, int ref)
+{
+	TVINSERTSTRUCTW insert = {};
+	insert.hParent = parent ? parent : TVI_ROOT;
+	insert.hInsertAfter = TVI_LAST;
+	insert.item.mask = TVIF_TEXT | TVIF_PARAM | TVIF_CHILDREN;
+	insert.item.pszText = const_cast<wchar_t *>(text.c_str());
+	insert.item.lParam = ref;
+	insert.item.cChildren = ref ? 1 : 0;
+	return TreeView_InsertItem(tree, &insert);
+}
+
+void SetTreeItem(HWND tree, HTREEITEM item, const std::wstring &text, int ref)
+{
+	while (HTREEITEM child = TreeView_GetChild(tree, item))
+		TreeView_DeleteItem(tree, child);
+	TVITEMW tv = {};
+	tv.mask = TVIF_TEXT | TVIF_PARAM | TVIF_CHILDREN;
+	tv.hItem = item;
+	tv.pszText = const_cast<wchar_t *>(text.c_str());
+	tv.lParam = ref;
+	tv.cChildren = ref ? 1 : 0;
+	TreeView_SetItem(tree, &tv);
+}
+
+void ClearTree(HWND tree)
+{
+	ed.pending.erase(std::remove_if(ed.pending.begin(), ed.pending.end(),
+	                                [tree](const Editor::Pending &p) { return p.tree == tree; }),
+	                 ed.pending.end());
+	TreeView_DeleteAllItems(tree);
+}
+
+// A variable request whose answer fills `item` of `tree`.
+void RequestChildren(HWND tree, HTREEITEM item, int ref)
+{
+	if (!ed.stopped || !ref)
+		return;
+	ed.pending.push_back({ ref, tree, item });
+	S9xLuaDebugRequestVariables(ed.stopped, ref);
+}
+
+std::wstring VariableText(const S9xLuaDebugVariable &v)
+{
+	return Widen(v.name + " = " + v.value);
+}
+
+void FillVariables()
+{
+	SendMessageW(ed.variables, WM_SETREDRAW, FALSE, 0);
+	ClearTree(ed.variables);
+	if (ed.stopped && ed.frame < (int)ed.frames.size())
+	{
+		const wchar_t *scopes[3] = { L"Locals", L"Upvalues", L"Globals" };
+		for (int scope = 0; scope < 3; scope++)
+		{
+			int ref = S9xLuaDebugScopeRef(ed.frame, scope);
+			HTREEITEM item = AddTreeItem(ed.variables, nullptr, _L(scopes[scope]), ref);
+			if (scope == 0)
+				RequestChildren(ed.variables, item, ref);
+		}
+	}
+	SendMessageW(ed.variables, WM_SETREDRAW, TRUE, 0);
+}
+
+HTREEITEM WatchItem(size_t index)
+{
+	HTREEITEM item = TreeView_GetRoot(ed.watch);
+	while (item && index--)
+		item = TreeView_GetNextSibling(ed.watch, item);
+	return item;
+}
+
+// Every watch, evaluated again in the selected frame.
+void FillWatches()
+{
+	SendMessageW(ed.watch, WM_SETREDRAW, FALSE, 0);
+	ClearTree(ed.watch);
+	ed.watch_generation++;
+	for (size_t i = 0; i < ed.watches.size(); i++)
+	{
+		AddTreeItem(ed.watch, nullptr, ed.watches[i], 0);
+		if (ed.stopped)
+			S9xLuaDebugEvaluate(ed.stopped, ed.frame, Narrow(ed.watches[i]), ed.watch_generation * 1000 + (int)i);
+	}
+	SendMessageW(ed.watch, WM_SETREDRAW, TRUE, 0);
+}
+
+void AddWatch(const std::wstring &expression)
+{
+	std::wstring text = Trim(expression);
+	if (text.empty() || ed.watches.size() >= 999)
+		return;
+	ed.watches.push_back(text);
+	FillWatches();
+}
+
+void RemoveWatch(HTREEITEM item)
+{
+	if (!item || TreeView_GetParent(ed.watch, item))
+		return;
+	size_t index = 0;
+	for (HTREEITEM i = TreeView_GetRoot(ed.watch); i && i != item; i = TreeView_GetNextSibling(ed.watch, i))
+		index++;
+	if (index < ed.watches.size())
+	{
+		ed.watches.erase(ed.watches.begin() + index);
+		FillWatches();
+	}
+}
+
+void FillCallStack()
+{
+	ListView_DeleteAllItems(ed.callstack);
+	for (size_t i = 0; i < ed.frames.size(); i++)
+	{
+		const S9xLuaDebugFrame &f = ed.frames[i];
+		std::wstring function = Widen(f.function);
+		std::wstring location = f.line ? Widen(f.source + ":" + std::to_string(f.line)) : Widen(f.source.empty() ? "[C]" : f.source);
+		LVITEMW item = {};
+		item.mask = LVIF_TEXT;
+		item.iItem = (int)i;
+		item.pszText = const_cast<wchar_t *>(function.c_str());
+		ListView_InsertItem(ed.callstack, &item);
+		ListView_SetItemText(ed.callstack, (int)i, 1, const_cast<wchar_t *>(location.c_str()));
+	}
+}
+
+// The document a frame's code is in, opening its file if it has to.
+Document *FrameDocument(const S9xLuaDebugFrame &f)
+{
+	if (f.line <= 0)
+		return nullptr;
+	if (f.own)
+		return ForScript(ed.stopped);
+	if (f.path.empty())
+		return nullptr;
+	wchar_t full[MAX_PATH];
+	if (!GetFullPathNameW(Widen(f.path).c_str(), MAX_PATH, full, nullptr))
+		return nullptr;
+	for (auto &doc : ed.docs)
+		if (!lstrcmpiW(doc->path.c_str(), full))
+			return doc.get();
+	if (GetFileAttributesW(full) == INVALID_FILE_ATTRIBUTES)
+		return nullptr;
+	OpenScript(full, false);
+	for (auto &doc : ed.docs)
+		if (!lstrcmpiW(doc->path.c_str(), full))
+			return doc.get();
+	return nullptr;
+}
+
+void ClearStopLines()
+{
+	for (auto &doc : ed.docs)
+	{
+		if (!doc->stopped_line && !doc->frame_line)
+			continue;
+		doc->stopped_line = doc->frame_line = 0;
+		Highlight(doc.get());
+	}
+}
+
+void EnsureLineVisible(HWND edit, int line)
+{
+	LONG first = (LONG)SendMessageW(edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+	RECT client;
+	GetClientRect(edit, &client);
+	LONG visible = std::max<LONG>(1, client.bottom / ed.line_height);
+	LONG target = line - 1;
+	if (target < first || target >= first + visible - 1)
+		SendMessageW(edit, EM_LINESCROLL, 0, target - first - visible / 3);
+}
+
+// Where the script is: the innermost frame with a line.
+int TopFrame()
+{
+	for (size_t i = 0; i < ed.frames.size(); i++)
+		if (ed.frames[i].line > 0)
+			return (int)i;
+	return 0;
+}
+
+void SelectFrame(int index)
+{
+	if (index < 0 || index >= (int)ed.frames.size())
+		return;
+	ed.frame = index;
+
+	ClearStopLines();
+	int top = TopFrame();
+	if (Document *doc = FrameDocument(ed.frames[top]))
+	{
+		doc->stopped_line = ed.frames[top].line;
+		Highlight(doc);
+	}
+	Document *shown = FrameDocument(ed.frames[index]);
+	if (shown && index != top)
+	{
+		shown->frame_line = ed.frames[index].line;
+		Highlight(shown);
+	}
+	if (shown)
+	{
+		HWND focus = GetFocus();
+		Activate(IndexOf(shown));
+		EnsureLineVisible(shown->edit, ed.frames[index].line);
+		if (focus == ed.callstack)
+			SetFocus(focus);
+	}
+	InvalidateRect(ed.gutter, nullptr, TRUE);
+
+	ListView_SetItemState(ed.callstack, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	ListView_SetItemState(ed.callstack, index, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	FillVariables();
+	FillWatches();
+}
+
+void OnStopped(const S9xLuaDebugEvent &e)
+{
+	ed.stopped = e.script;
+	ed.frames = e.frames;
+	int top = TopFrame();
+	if (e.reason == "error")
+		ed.stop_text = std::wstring(_L(L"Stopped on an error: ")) + Widen(e.message);
+	else
+	{
+		const wchar_t *why = e.reason == "breakpoint" ? _L(L"breakpoint") : e.reason == "step" ? _L(L"step") : _L(L"break");
+		wchar_t text[160];
+		swprintf(text, 160, _L(L"Paused at line %d (%s)"), ed.frames.empty() ? 0 : ed.frames[top].line, why);
+		ed.stop_text = text;
+	}
+	FillCallStack();
+	if (ed.frames.empty())
+	{
+		FillVariables();
+		FillWatches();
+	}
+	else
+		SelectFrame(top);
+	if (ed.panel == PANEL_CONSOLE)
+		ShowPanel(PANEL_VARIABLES);
+	UpdateActions();
+}
+
+void ClearDebugViews()
+{
+	ed.frames.clear();
+	ed.pending.clear();
+	ClearStopLines();
+	ListView_DeleteAllItems(ed.callstack);
+	ClearTree(ed.variables);
+	FillWatches();
+	InvalidateRect(ed.gutter, nullptr, TRUE);
+	UpdateActions();
+}
+
+void OnVariables(const S9xLuaDebugEvent &e)
+{
+	for (size_t i = 0; i < ed.pending.size();)
+	{
+		if (ed.pending[i].ref != e.ref)
+		{
+			i++;
+			continue;
+		}
+		HWND tree = ed.pending[i].tree;
+		HTREEITEM item = ed.pending[i].item;
+		ed.pending.erase(ed.pending.begin() + i);
+
+		while (HTREEITEM child = TreeView_GetChild(tree, item))
+			TreeView_DeleteItem(tree, child);
+		for (auto &v : e.variables)
+			AddTreeItem(tree, item, VariableText(v), v.ref);
+		if (e.variables.empty())
+		{
+			TVITEMW tv = {};
+			tv.mask = TVIF_CHILDREN;
+			tv.hItem = item;
+			tv.cChildren = 0;
+			TreeView_SetItem(tree, &tv);
+		}
+		TreeView_Expand(tree, item, TVE_EXPAND);
+	}
+}
+
+void OnEvaluated(const S9xLuaDebugEvent &e)
+{
+	int generation = e.request / 1000, index = e.request % 1000;
+	if (generation != ed.watch_generation || index >= (int)ed.watches.size() || e.variables.empty())
+		return;
+	HTREEITEM item = WatchItem(index);
+	if (!item)
+		return;
+	const S9xLuaDebugVariable &v = e.variables[0];
+	std::wstring text = ed.watches[index] + L" = " + (e.failed ? std::wstring(_L(L"error: ")) : L"") + Widen(v.value);
+	SetTreeItem(ed.watch, item, text, e.failed ? 0 : v.ref);
+}
+
+void PollDebug()
+{
+	ed.poll_posted = false;
+	std::vector<S9xLuaDebugEvent> events;
+	if (!S9xLuaDebugTakeEvents(events))
+		return;
+	bool resumed = false;
+	for (auto &e : events)
+	{
+		switch (e.kind)
+		{
+			case S9X_LUA_DEBUG_STOPPED:
+				resumed = false;
+				OnStopped(e);
+				break;
+			case S9X_LUA_DEBUG_RESUMED:
+				ed.stopped = 0;
+				resumed = true;
+				break;
+			case S9X_LUA_DEBUG_VARIABLES:
+				OnVariables(e);
+				break;
+			case S9X_LUA_DEBUG_EVALUATED:
+				OnEvaluated(e);
+				break;
+		}
+	}
+	// A step stops again at once: only clear the views if it didn't.
+	if (resumed && !ed.stopped)
+		ClearDebugViews();
+}
+
+/* ---- Breakpoints list --------------------------------------------------- */
+
+Breakpoint *SelectedBreakpoint(Document **owner)
+{
+	int row = ListView_GetNextItem(ed.breakpoint_list, -1, LVNI_SELECTED);
+	if (row < 0 || row >= (int)ed.bp_rows.size())
+		return nullptr;
+	Document *doc = ed.bp_rows[row].first;
+	size_t index = ed.bp_rows[row].second;
+	if (IndexOf(doc) < 0 || index >= doc->breakpoints.size())
+		return nullptr;
+	if (owner)
+		*owner = doc;
+	return &doc->breakpoints[index];
+}
+
+void FillBreakpointFields()
+{
+	Breakpoint *b = SelectedBreakpoint(nullptr);
+	const std::wstring *values[3] = { b ? &b->condition : nullptr, b ? &b->hit : nullptr, b ? &b->log : nullptr };
+	for (int i = 0; i < 3; i++)
+	{
+		SetWindowTextW(ed.bp_fields[i], values[i] ? values[i]->c_str() : L"");
+		EnableWindow(ed.bp_fields[i], b != nullptr);
+	}
+}
+
+void RefreshBreakpointList()
+{
+	if (!ed.breakpoint_list)
+		return;
+	ed.filling_breakpoints = true;
+	int selected = ListView_GetNextItem(ed.breakpoint_list, -1, LVNI_SELECTED);
+	SendMessageW(ed.breakpoint_list, WM_SETREDRAW, FALSE, 0);
+	ListView_DeleteAllItems(ed.breakpoint_list);
+	ed.bp_rows.clear();
+	for (auto &doc : ed.docs)
+	{
+		std::vector<std::pair<int, size_t>> order;
+		for (size_t i = 0; i < doc->breakpoints.size(); i++)
+			order.push_back({ BreakpointLine(doc.get(), doc->breakpoints[i]), i });
+		std::sort(order.begin(), order.end());
+		for (auto &entry : order)
+		{
+			Breakpoint &b = doc->breakpoints[entry.second];
+			int row = (int)ed.bp_rows.size();
+			ed.bp_rows.push_back({ doc.get(), entry.second });
+			std::wstring location = DisplayName(doc.get()) + L":" + std::to_wstring(entry.first);
+			LVITEMW item = {};
+			item.mask = LVIF_TEXT;
+			item.iItem = row;
+			item.pszText = const_cast<wchar_t *>(location.c_str());
+			ListView_InsertItem(ed.breakpoint_list, &item);
+			ListView_SetItemText(ed.breakpoint_list, row, 1, const_cast<wchar_t *>(b.condition.c_str()));
+			ListView_SetItemText(ed.breakpoint_list, row, 2, const_cast<wchar_t *>(b.hit.c_str()));
+			ListView_SetItemText(ed.breakpoint_list, row, 3, const_cast<wchar_t *>(b.log.c_str()));
+			ListView_SetCheckState(ed.breakpoint_list, row, b.enabled);
+		}
+	}
+	if (selected >= 0 && selected < (int)ed.bp_rows.size())
+		ListView_SetItemState(ed.breakpoint_list, selected, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	SendMessageW(ed.breakpoint_list, WM_SETREDRAW, TRUE, 0);
+	ed.filling_breakpoints = false;
+	FillBreakpointFields();
+}
+
+void ApplyBreakpointFields()
+{
+	Document *doc = nullptr;
+	Breakpoint *b = SelectedBreakpoint(&doc);
+	if (!b)
+		return;
+	std::wstring condition = Trim(WindowString(ed.bp_fields[0]));
+	std::wstring hit = Trim(WindowString(ed.bp_fields[1]));
+	std::wstring log = WindowString(ed.bp_fields[2]);
+	if (condition == b->condition && hit == b->hit && log == b->log)
+		return;
+	b->condition = condition;
+	b->hit = hit;
+	b->log = log;
+	SendBreakpoints(doc);
+
+	// The row in place: a rebuild here could pull the list out from under a click.
+	int row = ListView_GetNextItem(ed.breakpoint_list, -1, LVNI_SELECTED);
+	ListView_SetItemText(ed.breakpoint_list, row, 1, const_cast<wchar_t *>(b->condition.c_str()));
+	ListView_SetItemText(ed.breakpoint_list, row, 2, const_cast<wchar_t *>(b->hit.c_str()));
+	ListView_SetItemText(ed.breakpoint_list, row, 3, const_cast<wchar_t *>(b->log.c_str()));
+	InvalidateRect(ed.gutter, nullptr, TRUE);
+}
+
+void SelectBreakpoint(Document *doc, int line)
+{
+	for (size_t row = 0; row < ed.bp_rows.size(); row++)
+	{
+		if (ed.bp_rows[row].first != doc || BreakpointLine(doc, doc->breakpoints[ed.bp_rows[row].second]) != line)
+			continue;
+		ListView_SetItemState(ed.breakpoint_list, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+		ListView_SetItemState(ed.breakpoint_list, (int)row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		ListView_EnsureVisible(ed.breakpoint_list, (int)row, FALSE);
+		FillBreakpointFields();
+		return;
+	}
+}
+
+void EditBreakpoint(Document *doc, int line)
+{
+	if (!FindBreakpoint(doc, line))
+		ToggleBreakpoint(doc, line);
+	ShowPanel(PANEL_BREAKPOINTS);
+	SelectBreakpoint(doc, line);
+	SetFocus(ed.bp_fields[0]);
+}
+
+void RemoveBreakpointAt(int row)
+{
+	if (row < 0 || row >= (int)ed.bp_rows.size())
+		return;
+	Document *doc = ed.bp_rows[row].first;
+	size_t index = ed.bp_rows[row].second;
+	if (IndexOf(doc) < 0 || index >= doc->breakpoints.size())
+		return;
+	doc->breakpoints[index].anchor->Release();
+	doc->breakpoints.erase(doc->breakpoints.begin() + index);
+	BreakpointsChanged(doc);
+}
+
+void RemoveAllBreakpoints()
+{
+	for (auto &doc : ed.docs)
+	{
+		ReleaseBreakpoints(doc.get());
+		SendBreakpoints(doc.get());
+	}
+	RefreshBreakpointList();
+	InvalidateRect(ed.gutter, nullptr, TRUE);
+}
+
+void GoToBreakpoint(int row)
+{
+	if (row < 0 || row >= (int)ed.bp_rows.size())
+		return;
+	Document *doc = ed.bp_rows[row].first;
+	size_t index = ed.bp_rows[row].second;
+	if (IndexOf(doc) < 0 || index >= doc->breakpoints.size())
+		return;
+	Activate(IndexOf(doc));
+	LONG start = LineStart(doc->edit, BreakpointLine(doc, doc->breakpoints[index]) - 1);
+	if (start >= 0)
+		Select(doc->edit, start, start);
+	SetFocus(doc->edit);
+}
+
+/* ---- Stopping (the engine's side) --------------------------------------- */
+
+// Other windows stay off while a script is stopped mid-frame, and messages that
+// could act on the emulator wait for it to go on.
+BOOL CALLBACK DisableWindow(HWND hwnd, LPARAM)
+{
+	if (hwnd != ed.wnd && hwnd != ed.completion && IsWindowVisible(hwnd) && IsWindowEnabled(hwnd))
+	{
+		EnableWindow(hwnd, FALSE);
+		ed.disabled.push_back(hwnd);
+	}
+	return TRUE;
+}
+
+bool Deferrable(UINT message)
+{
+	return message == WM_COMMAND || message == WM_SYSCOMMAND || message == WM_HOTKEY || message == WM_DROPFILES ||
+	       message == WM_CLOSE || (message >= WM_KEYFIRST && message <= WM_KEYLAST) || message >= WM_USER;
+}
+
+void DebuggerStopped(int script, bool stopped)
+{
+	if (stopped)
+	{
+		if (ed.quitting)
+		{
+			S9xLuaDebugCommand(script, S9X_LUA_DEBUG_STOP);
+			return;
+		}
+		if (!ed.wnd)
+			CreateEditorWindow();
+		if (IsIconic(ed.wnd))
+			ShowWindow(ed.wnd, SW_RESTORE);
+		ShowWindow(ed.wnd, SW_SHOW);
+		SetForegroundWindow(ed.wnd);
+		S9xSetPause(PAUSE_LUA_DEBUGGER);
+		ed.disabled.clear();
+		EnumThreadWindows(GetCurrentThreadId(), DisableWindow, 0);
+		ed.stopped = script;
+		Poll();
+		return;
+	}
+
+	for (HWND hwnd : ed.disabled)
+		if (IsWindow(hwnd))
+			EnableWindow(hwnd, TRUE);
+	ed.disabled.clear();
+	std::vector<MSG> deferred;
+	deferred.swap(ed.deferred);
+	for (auto &msg : deferred)
+		PostMessageW(msg.hwnd, msg.message, msg.wParam, msg.lParam);
+	S9xClearPause(PAUSE_LUA_DEBUGGER);
+}
+
+void DebuggerWait()
+{
+	MSG msg;
+	if (GetMessageW(&msg, nullptr, 0, 0) <= 0)
+	{
+		// The emulator is closing: end the stopped script and let the quit through.
+		ed.quitting = true;
+		if (int stopped = S9xLuaDebugStoppedScript())
+			S9xLuaDebugCommand(stopped, S9X_LUA_DEBUG_STOP);
+		PostQuitMessage((int)msg.wParam);
+		return;
+	}
+	if (WinLuaHandleMessage(&msg))
+		return;
+	if (msg.hwnd && Deferrable(msg.message))
+	{
+		ed.deferred.push_back(msg);
+		return;
+	}
+	TranslateMessage(&msg);
+	DispatchMessageW(&msg);
 }
 
 /* ---- Editing ------------------------------------------------------------ */
@@ -1247,10 +1988,17 @@ void Layout()
 	int parts[2] = { width - Scaled(140), -1 };
 	SendMessageW(ed.status, SB_SETPARTS, 2, (LPARAM)parts);
 
-	int pad = Scaled(4), button_w = Scaled(72), button_h = Scaled(26);
-	for (int i = 0; i < 6; i++)
-		MoveWindow(ed.buttons[i], pad + i * (button_w + pad) + (i >= 3 ? Scaled(12) : 0), pad, button_w, button_h, TRUE);
-	MoveWindow(ed.find, width - pad - Scaled(200), pad + Scaled(2), Scaled(200), button_h - Scaled(4), TRUE);
+	int pad = Scaled(4), button_w = Scaled(66), button_h = Scaled(26);
+	int x = pad;
+	for (int i = 0; i < kButtons; i++)
+	{
+		if (i == 3 || i == 6)
+			x += Scaled(10);
+		MoveWindow(ed.buttons[i], x, pad, button_w, button_h, TRUE);
+		x += button_w + pad;
+	}
+	int find_w = std::max(Scaled(80), std::min(Scaled(200), width - pad - x));
+	MoveWindow(ed.find, width - pad - find_w, pad + Scaled(2), find_w, button_h - Scaled(4), TRUE);
 
 	int top = pad * 2 + button_h, bottom = height - status_height;
 	int reference_w = ed.show_reference ? Scaled(270) : 0;
@@ -1275,14 +2023,138 @@ void Layout()
 		MoveWindow(doc->edit, inner.left + ed.gutter_width, inner.top, inner.right - inner.left - ed.gutter_width,
 		           inner.bottom - inner.top, TRUE);
 
-	MoveWindow(ed.console_label, pad + Scaled(2), editor_bottom + pad + Scaled(4), Scaled(120), Scaled(18), TRUE);
+	// The bottom panel: console, variables, watches, call stack, breakpoints.
+	MoveWindow(ed.panel_tabs, pad, editor_bottom + pad, left_w - Scaled(70), header_h, TRUE);
 	MoveWindow(ed.clear, pad + left_w - Scaled(64), editor_bottom + pad, Scaled(64), Scaled(22), TRUE);
-	MoveWindow(ed.console, pad, editor_bottom + header_h + pad, left_w, console_h - pad, TRUE);
+	ShowWindow(ed.clear, ed.panel == PANEL_CONSOLE ? SW_SHOW : SW_HIDE);
+
+	int px = pad, py = editor_bottom + header_h + pad, pw = left_w, ph = console_h - pad, row = Scaled(22);
+	auto place = [](HWND hwnd, bool show, int x0, int y0, int w0, int h0) {
+		if (show)
+			MoveWindow(hwnd, x0, y0, std::max(w0, 1), std::max(h0, 1), TRUE);
+		ShowWindow(hwnd, show ? SW_SHOW : SW_HIDE);
+	};
+	place(ed.console, ed.panel == PANEL_CONSOLE, px, py, pw, ph);
+	place(ed.variables, ed.panel == PANEL_VARIABLES, px, py, pw, ph);
+	place(ed.watch_edit, ed.panel == PANEL_WATCH, px, py, pw, row);
+	place(ed.watch, ed.panel == PANEL_WATCH, px, py + row + pad, pw, ph - row - pad);
+	place(ed.callstack, ed.panel == PANEL_CALLSTACK, px, py, pw, ph);
+
+	bool breakpoints = ed.panel == PANEL_BREAKPOINTS;
+	place(ed.breakpoint_list, breakpoints, px, py, pw, ph - row - pad);
+	int label_w[3] = { Scaled(64), Scaled(58), Scaled(80) };
+	int fields_w = pw - label_w[0] - label_w[1] - label_w[2] - pad * 2;
+	int field_w[3] = { fields_w * 36 / 100, fields_w * 18 / 100, 0 };
+	field_w[2] = fields_w - field_w[0] - field_w[1];
+	int fx = px, fy = py + ph - row;
+	for (int i = 0; i < 3; i++)
+	{
+		place(ed.bp_labels[i], breakpoints, fx, fy + Scaled(3), label_w[i] - Scaled(4), row - Scaled(3));
+		fx += label_w[i];
+		place(ed.bp_fields[i], breakpoints, fx, fy, field_w[i], row);
+		fx += field_w[i] + pad;
+	}
 	InvalidateRect(ed.gutter, nullptr, TRUE);
+}
+
+void DrawBreakpoint(HDC dc, const RECT &box, const Breakpoint &b)
+{
+	COLORREF color = !b.log.empty() ? kLogpoint : (!b.condition.empty() || !b.hit.empty()) ? kConditional : kBreakpoint;
+	HPEN pen = CreatePen(PS_SOLID, std::max(1, Scaled(1)), color);
+	HBRUSH brush = b.enabled ? CreateSolidBrush(color) : nullptr;
+	HGDIOBJ old_pen = SelectObject(dc, pen);
+	HGDIOBJ old_brush = SelectObject(dc, brush ? (HGDIOBJ)brush : GetStockObject(NULL_BRUSH));
+	if (!b.log.empty())
+	{
+		// A logpoint: a diamond.
+		int cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2;
+		POINT points[4] = { { cx, box.top }, { box.right, cy }, { cx, box.bottom }, { box.left, cy } };
+		Polygon(dc, points, 4);
+	}
+	else
+		Ellipse(dc, box.left, box.top, box.right, box.bottom);
+	SelectObject(dc, old_brush);
+	SelectObject(dc, old_pen);
+	DeleteObject(pen);
+	if (brush)
+		DeleteObject(brush);
+}
+
+void DrawArrow(HDC dc, const RECT &box, COLORREF fill)
+{
+	int h = box.bottom - box.top, cy = (box.top + box.bottom) / 2, mid = box.left + (box.right - box.left) / 2;
+	POINT points[7] = {
+		{ box.left, cy - h / 5 }, { mid, cy - h / 5 }, { mid, box.top }, { box.right, cy },
+		{ mid, box.bottom }, { mid, cy + h / 5 }, { box.left, cy + h / 5 }
+	};
+	HPEN pen = CreatePen(PS_SOLID, 1, RGB(96, 80, 0));
+	HBRUSH brush = CreateSolidBrush(fill);
+	HGDIOBJ old_pen = SelectObject(dc, pen);
+	HGDIOBJ old_brush = SelectObject(dc, brush);
+	Polygon(dc, points, 7);
+	SelectObject(dc, old_brush);
+	SelectObject(dc, old_pen);
+	DeleteObject(pen);
+	DeleteObject(brush);
+}
+
+// The line under a gutter y, 1-based; 0 below the last one.
+int GutterLine(Document *doc, int y)
+{
+	POINTL point = { 1, y };
+	LONG at = (LONG)SendMessageW(doc->edit, EM_CHARFROMPOS, 0, (LPARAM)&point);
+	LONG line = LineOf(doc->edit, at);
+	POINTL top = {};
+	SendMessageW(doc->edit, EM_POSFROMCHAR, (WPARAM)&top, LineStart(doc->edit, line));
+	return y < top.y + ed.line_height ? line + 1 : 0;
+}
+
+void GutterMenu(Document *doc, int line, POINT screen)
+{
+	Breakpoint *b = FindBreakpoint(doc, line);
+	HMENU menu = CreatePopupMenu();
+	AppendMenuW(menu, MF_STRING, CMD_TOGGLE_BREAKPOINT, b ? _L(L"Remove Breakpoint") : _L(L"Add Breakpoint"));
+	AppendMenuW(menu, MF_STRING, CMD_EDIT_BREAKPOINT, b ? _L(L"Edit Breakpoint...") : _L(L"Add Conditional Breakpoint..."));
+	if (b)
+		AppendMenuW(menu, MF_STRING, CMD_ENABLE_BREAKPOINT, b->enabled ? _L(L"Disable Breakpoint") : _L(L"Enable Breakpoint"));
+	AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(menu, MF_STRING | (ed.bp_rows.empty() ? MF_GRAYED : 0), CMD_REMOVE_BREAKPOINTS, _L(L"Remove All Breakpoints"));
+	UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, screen.x, screen.y, 0, ed.wnd, nullptr);
+	DestroyMenu(menu);
+
+	switch (command)
+	{
+		case CMD_TOGGLE_BREAKPOINT:		ToggleBreakpoint(doc, line); break;
+		case CMD_EDIT_BREAKPOINT:		EditBreakpoint(doc, line); break;
+		case CMD_REMOVE_BREAKPOINTS:	RemoveAllBreakpoints(); break;
+		case CMD_ENABLE_BREAKPOINT:
+			if ((b = FindBreakpoint(doc, line)) != nullptr)
+			{
+				b->enabled = !b->enabled;
+				BreakpointsChanged(doc);
+			}
+			break;
+	}
 }
 
 LRESULT CALLBACK GutterProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
+	if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONUP)
+	{
+		Document *doc = Active();
+		int line = doc ? GutterLine(doc, GET_Y_LPARAM(lparam)) : 0;
+		if (!line)
+			return 0;
+		if (msg == WM_LBUTTONDOWN)
+			ToggleBreakpoint(doc, line);
+		else
+		{
+			POINT screen = { GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+			ClientToScreen(hwnd, &screen);
+			GutterMenu(doc, line, screen);
+		}
+		return 0;
+	}
 	if (msg != WM_PAINT)
 		return DefWindowProcW(hwnd, msg, wparam, lparam);
 
@@ -1295,17 +2167,34 @@ LRESULT CALLBACK GutterProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	Document *doc = Active();
 	if (doc)
 	{
+		std::vector<std::pair<int, const Breakpoint *>> marks;
+		for (auto &b : doc->breakpoints)
+			marks.push_back({ BreakpointLine(doc, b), &b });
+
 		HGDIOBJ old = SelectObject(dc, ed.code_font);
 		SetBkMode(dc, TRANSPARENT);
 		LONG first = (LONG)SendMessageW(doc->edit, EM_GETFIRSTVISIBLELINE, 0, 0);
 		LONG count = (LONG)SendMessageW(doc->edit, EM_GETLINECOUNT, 0, 0);
 		LONG current = LineOf(doc->edit, Selection(doc->edit).cpMax);
+		int size = std::min(ed.marker_width, ed.line_height) - Scaled(4);
 		for (LONG line = first; line < count; line++)
 		{
 			POINTL point = {};
 			SendMessageW(doc->edit, EM_POSFROMCHAR, (WPARAM)&point, LineStart(doc->edit, line));
 			if (point.y > client.bottom)
 				break;
+
+			RECT box = { Scaled(3), point.y + (ed.line_height - size) / 2, 0, 0 };
+			box.right = box.left + size;
+			box.bottom = box.top + size;
+			for (auto &mark : marks)
+				if (mark.first == line + 1)
+					DrawBreakpoint(dc, box, *mark.second);
+			if (line + 1 == doc->stopped_line)
+				DrawArrow(dc, box, RGB(255, 214, 0));
+			else if (line + 1 == doc->frame_line)
+				DrawArrow(dc, box, RGB(96, 184, 96));
+
 			COLORREF color = GetSysColor(COLOR_GRAYTEXT);
 			if (line + 1 == doc->error_line)
 				color = kError;
@@ -1314,7 +2203,7 @@ LRESULT CALLBACK GutterProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			SetTextColor(dc, color);
 			wchar_t number[16];
 			swprintf(number, 16, L"%ld", line + 1);
-			RECT row = { 0, point.y, client.right - Scaled(4), point.y + Scaled(40) };
+			RECT row = { ed.marker_width, point.y, client.right - Scaled(4), point.y + Scaled(40) };
 			DrawTextW(dc, number, -1, &row, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
 		}
 		SelectObject(dc, old);
@@ -1389,6 +2278,20 @@ HMENU BuildMenu()
 	separator(script);
 	item(script, CMD_STOP_ALL, L"Stop &All Scripts");
 
+	HMENU debug = popup(L"&Debug");
+	item(debug, CMD_CONTINUE, L"&Continue\tF5");
+	item(debug, CMD_BREAK, L"&Break\tF8");
+	item(debug, CMD_STEP_OVER, L"Step &Over\tF10");
+	item(debug, CMD_STEP_INTO, L"Step &Into\tF11");
+	item(debug, CMD_STEP_OUT, L"Step O&ut\tShift+F11");
+	separator(debug);
+	item(debug, CMD_TOGGLE_BREAKPOINT, L"&Toggle Breakpoint\tF9");
+	item(debug, CMD_EDIT_BREAKPOINT, L"&Edit Breakpoint...");
+	item(debug, CMD_REMOVE_BREAKPOINTS, L"&Remove All Breakpoints\tCtrl+Shift+F9");
+	item(debug, CMD_ADD_WATCH, L"Add &Watch\tShift+F9");
+	separator(debug);
+	item(debug, CMD_BREAK_ON_ERROR, L"Break on &Errors");
+
 	HMENU view = popup(L"&View");
 	item(view, CMD_REFERENCE, L"API &Reference\tF1");
 	item(view, CMD_CLEAR_CONSOLE, L"C&lear Console\tCtrl+L");
@@ -1455,6 +2358,25 @@ LRESULT CALLBACK FindProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UIN
 	return DefSubclassProc(hwnd, msg, wparam, lparam);
 }
 
+// Enter in the watch box adds it; in a breakpoint field, applies it.
+LRESULT CALLBACK DebugFieldProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR)
+{
+	if (msg == WM_KEYDOWN && wparam == VK_RETURN)
+	{
+		if (hwnd == ed.watch_edit)
+		{
+			AddWatch(WindowString(hwnd));
+			SetWindowTextW(hwnd, L"");
+		}
+		else
+			ApplyBreakpointFields();
+		return 0;
+	}
+	if (msg == WM_CHAR && wparam == L'\r')
+		return 0;
+	return DefSubclassProc(hwnd, msg, wparam, lparam);
+}
+
 void Command(UINT id)
 {
 	Document *doc = Active();
@@ -1506,7 +2428,59 @@ void Command(UINT id)
 			SendMessageW(ed.find, EM_SETSEL, 1, 1);
 			SetStatus(_L(L"Type a line number after the colon and press Enter"));
 			break;
-		case CMD_RUN:			if (doc) Run(doc); break;
+		case CMD_RUN:
+			// While a script is stopped, F5 lets it go on.
+			if (ed.stopped)
+				S9xLuaDebugCommand(ed.stopped, S9X_LUA_DEBUG_CONTINUE);
+			else if (doc)
+				Run(doc);
+			break;
+		case CMD_CONTINUE:		if (ed.stopped) S9xLuaDebugCommand(ed.stopped, S9X_LUA_DEBUG_CONTINUE); break;
+		case CMD_STEP_OVER:		if (ed.stopped) S9xLuaDebugCommand(ed.stopped, S9X_LUA_DEBUG_STEP_OVER); break;
+		case CMD_STEP_INTO:		if (ed.stopped) S9xLuaDebugCommand(ed.stopped, S9X_LUA_DEBUG_STEP_INTO); break;
+		case CMD_STEP_OUT:		if (ed.stopped) S9xLuaDebugCommand(ed.stopped, S9X_LUA_DEBUG_STEP_OUT); break;
+		case CMD_BREAK:
+			if (!ed.stopped && doc && doc->script)
+			{
+				S9xLuaDebugCommand(doc->script, S9X_LUA_DEBUG_BREAK);
+				SetStatus(_L(L"Stopping at the script's next line"));
+			}
+			break;
+		case CMD_TOGGLE_BREAKPOINT:
+			if (doc)
+				ToggleBreakpoint(doc, LineOf(doc->edit, Selection(doc->edit).cpMax) + 1);
+			break;
+		case CMD_EDIT_BREAKPOINT:
+			if (doc)
+				EditBreakpoint(doc, LineOf(doc->edit, Selection(doc->edit).cpMax) + 1);
+			break;
+		case CMD_REMOVE_BREAKPOINTS:	RemoveAllBreakpoints(); break;
+		case CMD_BREAK_ON_ERROR:
+			GUI.LuaBreakOnError = !GUI.LuaBreakOnError;
+			S9xLuaDebugSetBreakOnError(GUI.LuaBreakOnError);
+			break;
+		case CMD_ADD_WATCH:
+			if (doc)
+			{
+				// The selection, or the name under the caret.
+				CHARRANGE selection = Selection(doc->edit);
+				std::wstring text = TextRange(doc->edit, selection.cpMin, selection.cpMax);
+				if (Trim(text).empty())
+				{
+					LONG start = LineStart(doc->edit, LineOf(doc->edit, selection.cpMax));
+					std::wstring line = LineText(doc->edit, LineOf(doc->edit, selection.cpMax));
+					size_t at = (size_t)(selection.cpMax - start), first = at, last = at;
+					while (first > 0 && IsIdent(line[first - 1]))
+						first--;
+					while (last < line.size() && IsIdent(line[last]))
+						last++;
+					text = line.substr(first, last - first);
+				}
+				AddWatch(text);
+				ShowPanel(PANEL_WATCH);
+			}
+			break;
+		case CMD_REMOVE_WATCH:	RemoveWatch(TreeView_GetSelection(ed.watch)); break;
 		case CMD_PAUSE:			if (doc && doc->script) S9xLuaPause(doc->script, !doc->paused); break;
 		case CMD_STOP:			if (doc) Stop(doc); break;
 		case CMD_STOP_ALL:		StopAll(); break;
@@ -1545,7 +2519,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		case WM_GETMINMAXINFO:
 		{
 			auto info = (MINMAXINFO *)lparam;
-			info->ptMinTrackSize = { Scaled(560), Scaled(380) };
+			info->ptMinTrackSize = { Scaled(800), Scaled(420) };
 			return 0;
 		}
 
@@ -1575,6 +2549,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 						UpdateTab(doc);
 					}
 					doc->error_line = 0;
+					if (!doc->breakpoints.empty())
+					{
+						// Lines moved: the list shows where they are now.
+						MergeBreakpoints(doc);
+						RefreshBreakpointList();
+					}
 					SetTimer(ed.wnd, TIMER_HIGHLIGHT, 150, nullptr);
 					InvalidateRect(ed.gutter, nullptr, TRUE);
 				}
@@ -1587,16 +2567,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				FillReference();
 				return 0;
 			}
+			if (from && (from == ed.bp_fields[0] || from == ed.bp_fields[1] || from == ed.bp_fields[2] ||
+			             from == ed.watch_edit))
+			{
+				if (code == EN_KILLFOCUS && from != ed.watch_edit)
+					ApplyBreakpointFields();
+				return 0;
+			}
 			switch (id)
 			{
-				case IDC_BUTTON_NEW:	Command(CMD_NEW); break;
-				case IDC_BUTTON_OPEN:	Command(CMD_OPEN); break;
-				case IDC_BUTTON_SAVE:	Command(CMD_SAVE); break;
-				case IDC_BUTTON_RUN:	Command(CMD_RUN); break;
-				case IDC_BUTTON_PAUSE:	Command(CMD_PAUSE); break;
-				case IDC_BUTTON_STOP:	Command(CMD_STOP); break;
-				case IDC_CLEAR:			ClearConsole(); break;
-				default:				Command(id); break;
+				case IDC_BUTTON_NEW:		Command(CMD_NEW); break;
+				case IDC_BUTTON_OPEN:		Command(CMD_OPEN); break;
+				case IDC_BUTTON_SAVE:		Command(CMD_SAVE); break;
+				case IDC_BUTTON_RUN:		if (Document *doc = Active()) Run(doc); break;	// a restart, even when stopped
+				case IDC_BUTTON_PAUSE:		Command(CMD_PAUSE); break;
+				case IDC_BUTTON_STOP:		Command(CMD_STOP); break;
+				case IDC_BUTTON_CONTINUE:	Command(CMD_CONTINUE); break;
+				case IDC_BUTTON_STEP_OVER:	Command(CMD_STEP_OVER); break;
+				case IDC_BUTTON_STEP_INTO:	Command(CMD_STEP_INTO); break;
+				case IDC_BUTTON_STEP_OUT:	Command(CMD_STEP_OUT); break;
+				case IDC_CLEAR:				ClearConsole(); break;
+				default:					Command(id); break;
 			}
 			return 0;
 		}
@@ -1607,6 +2598,85 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			if (header->hwndFrom == ed.tabs && header->code == TCN_SELCHANGE)
 			{
 				Activate(TabCtrl_GetCurSel(ed.tabs));
+				return 0;
+			}
+			if (header->hwndFrom == ed.panel_tabs && header->code == TCN_SELCHANGE)
+			{
+				ed.panel = TabCtrl_GetCurSel(ed.panel_tabs);
+				Layout();
+				return 0;
+			}
+			if (header->hwndFrom == ed.variables || header->hwndFrom == ed.watch)
+			{
+				if (header->code == TVN_ITEMEXPANDINGW)
+				{
+					auto view = (NMTREEVIEWW *)lparam;
+					if ((view->action & TVE_EXPAND) && !TreeView_GetChild(header->hwndFrom, view->itemNew.hItem))
+						RequestChildren(header->hwndFrom, view->itemNew.hItem, (int)view->itemNew.lParam);
+				}
+				else if (header->code == TVN_SELCHANGEDW)
+				{
+					// Long values are cut off in the tree; the status bar has room.
+					wchar_t text[1024] = {};
+					TVITEMW tv = {};
+					tv.mask = TVIF_TEXT;
+					tv.hItem = ((NMTREEVIEWW *)lparam)->itemNew.hItem;
+					tv.pszText = text;
+					tv.cchTextMax = 1024;
+					if (tv.hItem && TreeView_GetItem(header->hwndFrom, &tv))
+						SetStatus(text);
+				}
+				else if (header->hwndFrom == ed.watch && header->code == TVN_KEYDOWN && ((NMTVKEYDOWN *)lparam)->wVKey == VK_DELETE)
+					RemoveWatch(TreeView_GetSelection(ed.watch));
+				else if (header->hwndFrom == ed.watch && header->code == NM_RCLICK)
+				{
+					POINT screen;
+					GetCursorPos(&screen);
+					TVHITTESTINFO hit = { screen };
+					ScreenToClient(ed.watch, &hit.pt);
+					if (HTREEITEM item = TreeView_HitTest(ed.watch, &hit))
+						TreeView_SelectItem(ed.watch, item);
+					HMENU menu = CreatePopupMenu();
+					AppendMenuW(menu, MF_STRING | (TreeView_GetSelection(ed.watch) ? 0 : MF_GRAYED), CMD_REMOVE_WATCH, _L(L"Remove Watch"));
+					TrackPopupMenu(menu, TPM_RIGHTBUTTON, screen.x, screen.y, 0, ed.wnd, nullptr);
+					DestroyMenu(menu);
+					return 1;
+				}
+				return 0;
+			}
+			if (header->hwndFrom == ed.callstack && header->code == LVN_ITEMCHANGED)
+			{
+				auto view = (NMLISTVIEW *)lparam;
+				if ((view->uChanged & LVIF_STATE) && (view->uNewState & LVIS_SELECTED) && !(view->uOldState & LVIS_SELECTED) &&
+				    view->iItem != ed.frame)
+					SelectFrame(view->iItem);
+				return 0;
+			}
+			if (header->hwndFrom == ed.breakpoint_list)
+			{
+				if (header->code == LVN_ITEMCHANGED && !ed.filling_breakpoints)
+				{
+					auto view = (NMLISTVIEW *)lparam;
+					if ((view->uChanged & LVIF_STATE) && ((view->uNewState ^ view->uOldState) & LVIS_STATEIMAGEMASK) &&
+					    view->iItem >= 0 && view->iItem < (int)ed.bp_rows.size())
+					{
+						Document *doc = ed.bp_rows[view->iItem].first;
+						size_t index = ed.bp_rows[view->iItem].second;
+						bool enabled = ListView_GetCheckState(ed.breakpoint_list, view->iItem) != FALSE;
+						if (IndexOf(doc) >= 0 && index < doc->breakpoints.size() && doc->breakpoints[index].enabled != enabled)
+						{
+							doc->breakpoints[index].enabled = enabled;
+							SendBreakpoints(doc);
+							InvalidateRect(ed.gutter, nullptr, TRUE);
+						}
+					}
+					if ((view->uChanged & LVIF_STATE) && ((view->uNewState ^ view->uOldState) & LVIS_SELECTED))
+						FillBreakpointFields();
+				}
+				else if (header->code == NM_DBLCLK)
+					GoToBreakpoint(((NMITEMACTIVATE *)lparam)->iItem);
+				else if (header->code == LVN_KEYDOWN && ((NMLVKEYDOWN *)lparam)->wVKey == VK_DELETE)
+					RemoveBreakpointAt(ListView_GetNextItem(ed.breakpoint_list, -1, LVNI_SELECTED));
 				return 0;
 			}
 			if (header->hwndFrom == ed.tree)
@@ -1674,6 +2744,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				UpdateCompletion(false);
 			return 0;
 
+		case WM_LUA_POLL:
+			Poll();
+			return 0;
+
 		case WM_TIMER:
 			if (wparam == TIMER_POLL)
 				Poll();
@@ -1695,6 +2769,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				EnableMenuItem(ed.menu, CMD_STOP, doc && doc->script ? MF_ENABLED : MF_GRAYED);
 				EnableMenuItem(ed.menu, CMD_STOP_ALL, !ed.names.empty() ? MF_ENABLED : MF_GRAYED);
 				CheckMenuItem(ed.menu, CMD_REFERENCE, ed.show_reference ? MF_CHECKED : MF_UNCHECKED);
+				for (UINT command : { CMD_CONTINUE, CMD_STEP_OVER, CMD_STEP_INTO, CMD_STEP_OUT })
+					EnableMenuItem(ed.menu, command, ed.stopped ? MF_ENABLED : MF_GRAYED);
+				EnableMenuItem(ed.menu, CMD_BREAK, !ed.stopped && doc && doc->script ? MF_ENABLED : MF_GRAYED);
+				EnableMenuItem(ed.menu, CMD_REMOVE_BREAKPOINTS, !ed.bp_rows.empty() ? MF_ENABLED : MF_GRAYED);
+				CheckMenuItem(ed.menu, CMD_BREAK_ON_ERROR, GUI.LuaBreakOnError ? MF_CHECKED : MF_UNCHECKED);
 			}
 			return 0;
 
@@ -1721,7 +2800,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 
 		case WM_CLOSE:
 		{
-			// Closing only hides the editor; scripts keep running.
+			// Closing only hides the editor; scripts keep running, a stopped one too.
+			if (ed.stopped)
+				S9xLuaDebugCommand(ed.stopped, S9X_LUA_DEBUG_CONTINUE);
 			RECT r;
 			if (!IsIconic(hwnd) && !IsZoomed(hwnd) && GetWindowRect(hwnd, &r))
 			{
@@ -1792,8 +2873,9 @@ void CreateEditorWindow()
 		return h;
 	};
 
-	const wchar_t *labels[6] = { L"New", L"Open", L"Save", L"Run", L"Pause", L"Stop" };
-	for (int i = 0; i < 6; i++)
+	const wchar_t *labels[kButtons] = { L"New", L"Open", L"Save", L"Run", L"Pause", L"Stop",
+	                                    L"Continue", L"Step Over", L"Step Into", L"Step Out" };
+	for (int i = 0; i < kButtons; i++)
 		ed.buttons[i] = child(L"BUTTON", _L(labels[i]), BS_PUSHBUTTON | WS_TABSTOP, IDC_BUTTON_NEW + i);
 	ed.find = child(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, IDC_FIND, WS_EX_CLIENTEDGE);
 	SendMessageW(ed.find, EM_SETCUEBANNER, TRUE, (LPARAM)_L(L"Find (or :line)"));
@@ -1801,12 +2883,60 @@ void CreateEditorWindow()
 
 	ed.tabs = child(WC_TABCONTROLW, L"", WS_CLIPSIBLINGS | TCS_FOCUSNEVER, IDC_TABS);
 	ed.gutter = child(kGutterClass, L"", 0, 0);
-	ed.console_label = child(L"STATIC", _L(L"Console"), SS_LEFT, 0);
+	ed.panel_tabs = child(WC_TABCONTROLW, L"", WS_CLIPSIBLINGS | TCS_FOCUSNEVER, IDC_PANEL_TABS);
+	const wchar_t *panels[PANEL_COUNT] = { L"Console", L"Variables", L"Watch", L"Call Stack", L"Breakpoints" };
+	for (int i = 0; i < PANEL_COUNT; i++)
+	{
+		std::wstring label = _L(panels[i]);
+		TCITEMW item = {};
+		item.mask = TCIF_TEXT;
+		item.pszText = &label[0];
+		TabCtrl_InsertItem(ed.panel_tabs, i, &item);
+	}
 	ed.clear = child(L"BUTTON", _L(L"Clear"), BS_PUSHBUTTON, IDC_CLEAR);
 	ed.console = child(kRichEditClass, L"", WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, IDC_CONSOLE,
 	                   WS_EX_CLIENTEDGE);
 	SendMessageW(ed.console, EM_SETEVENTMASK, 0, ENM_MOUSEEVENTS);
 	ApplyFont(ed.console);
+
+	// The debugger's panels.
+	DWORD tree_style = TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | WS_TABSTOP;
+	ed.variables = child(WC_TREEVIEWW, L"", tree_style, IDC_VARIABLES, WS_EX_CLIENTEDGE);
+	ed.watch_edit = child(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, IDC_WATCH_EDIT, WS_EX_CLIENTEDGE);
+	SendMessageW(ed.watch_edit, EM_SETCUEBANNER, TRUE, (LPARAM)_L(L"Add a watch: type an expression and press Enter"));
+	SetWindowSubclass(ed.watch_edit, DebugFieldProc, 2, 0);
+	ed.watch = child(WC_TREEVIEWW, L"", tree_style, IDC_WATCH, WS_EX_CLIENTEDGE);
+
+	auto columns = [](HWND list, std::initializer_list<std::pair<const wchar_t *, int>> list_columns) {
+		int index = 0;
+		for (auto &column : list_columns)
+		{
+			std::wstring label = _L(column.first);
+			LVCOLUMNW lv = {};
+			lv.mask = LVCF_TEXT | LVCF_WIDTH;
+			lv.cx = Scaled(column.second);
+			lv.pszText = &label[0];
+			ListView_InsertColumn(list, index++, &lv);
+		}
+	};
+	DWORD list_style = LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER | WS_TABSTOP;
+	ed.callstack = child(WC_LISTVIEWW, L"", list_style, IDC_CALLSTACK, WS_EX_CLIENTEDGE);
+	ListView_SetExtendedListViewStyle(ed.callstack, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+	columns(ed.callstack, { { L"Function", 260 }, { L"Location", 260 } });
+	ed.breakpoint_list = child(WC_LISTVIEWW, L"", list_style, IDC_BREAKPOINTS, WS_EX_CLIENTEDGE);
+	ListView_SetExtendedListViewStyle(ed.breakpoint_list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_CHECKBOXES);
+	columns(ed.breakpoint_list, { { L"Location", 170 }, { L"Condition", 170 }, { L"Hit Count", 80 }, { L"Log Message", 230 } });
+
+	const wchar_t *field_labels[3] = { L"Condition:", L"Hit count:", L"Log message:" };
+	const wchar_t *field_cues[3] = { L"lives < 3", L"5, >= 5 or % 5", L"x is {x}" };
+	for (int i = 0; i < 3; i++)
+	{
+		ed.bp_labels[i] = child(L"STATIC", _L(field_labels[i]), SS_RIGHT, 0);
+		ed.bp_fields[i] = child(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, IDC_BP_CONDITION + i, WS_EX_CLIENTEDGE);
+		SendMessageW(ed.bp_fields[i], EM_SETCUEBANNER, TRUE, (LPARAM)field_cues[i]);
+		SetWindowSubclass(ed.bp_fields[i], DebugFieldProc, 3, 0);
+		EnableWindow(ed.bp_fields[i], FALSE);
+	}
 
 	ed.search = child(L"EDIT", L"", ES_AUTOHSCROLL, IDC_SEARCH, WS_EX_CLIENTEDGE);
 	SendMessageW(ed.search, EM_SETCUEBANNER, TRUE, (LPARAM)_L(L"Search functions"));
@@ -1829,7 +2959,10 @@ void CreateEditorWindow()
 		{ FVIRTKEY, VK_F5, CMD_RUN }, { FVIRTKEY, VK_F6, CMD_PAUSE }, { FSHIFT | FVIRTKEY, VK_F5, CMD_STOP },
 		{ FVIRTKEY, VK_F1, CMD_REFERENCE }, { FCONTROL | FVIRTKEY, 'L', CMD_CLEAR_CONSOLE },
 		{ FCONTROL | FVIRTKEY, VK_OEM_PLUS, CMD_ZOOM_IN }, { FCONTROL | FVIRTKEY, VK_OEM_MINUS, CMD_ZOOM_OUT },
-		{ FCONTROL | FVIRTKEY, '0', CMD_ZOOM_RESET }
+		{ FCONTROL | FVIRTKEY, '0', CMD_ZOOM_RESET },
+		{ FVIRTKEY, VK_F8, CMD_BREAK }, { FVIRTKEY, VK_F9, CMD_TOGGLE_BREAKPOINT },
+		{ FSHIFT | FVIRTKEY, VK_F9, CMD_ADD_WATCH }, { FCONTROL | FSHIFT | FVIRTKEY, VK_F9, CMD_REMOVE_BREAKPOINTS },
+		{ FVIRTKEY, VK_F10, CMD_STEP_OVER }, { FVIRTKEY, VK_F11, CMD_STEP_INTO }, { FSHIFT | FVIRTKEY, VK_F11, CMD_STEP_OUT }
 	};
 	ed.accel = CreateAcceleratorTableW(keys, sizeof(keys) / sizeof(keys[0]));
 
@@ -1894,7 +3027,17 @@ void WinLuaInit()
 		// As Emulation > Soft Reset / Hard Reset, between frames.
 		PostMessage(GUI.hWnd, WM_COMMAND, power ? ID_EMULATION_HARD_RESET : ID_EMULATION_SOFT_RESET, 0);
 	};
+	frontend.wake_ui = [] {
+		if (ed.wnd && !ed.poll_posted)
+		{
+			ed.poll_posted = true;
+			PostMessageW(ed.wnd, WM_LUA_POLL, 0, 0);
+		}
+	};
+	frontend.debug_break = DebuggerStopped;
+	frontend.debug_wait = DebuggerWait;
 	S9xLuaSetFrontend(frontend);
+	S9xLuaDebugSetBreakOnError(GUI.LuaBreakOnError);
 	SetTimer(nullptr, 0, 15, IdleTick);
 }
 
@@ -1939,8 +3082,11 @@ void WinLuaShutdown()
 	{
 		SaveSession();
 		for (auto &doc : ed.docs)
+		{
+			ReleaseBreakpoints(doc.get());
 			if (doc->tom)
 				doc->tom->Release();
+		}
 		ed.docs.clear();
 		DestroyWindow(ed.completion);
 		DestroyWindow(ed.wnd);
@@ -1958,6 +3104,13 @@ bool WinLuaHandleMessage(MSG *msg)
 {
 	if (!ed.wnd || !(msg->hwnd == ed.wnd || IsChild(ed.wnd, msg->hwnd) || msg->hwnd == ed.completion))
 		return false;
+	// F10 arrives as a system key that would open the menu bar: here it steps over.
+	if ((msg->message == WM_SYSKEYDOWN || msg->message == WM_SYSKEYUP) && msg->wParam == VK_F10 && GetKeyState(VK_MENU) >= 0)
+	{
+		if (msg->message == WM_SYSKEYDOWN)
+			Command(CMD_STEP_OVER);
+		return true;
+	}
 	// The editor's keys never reach the emulator's accelerators or hotkeys.
 	if (!TranslateAcceleratorW(ed.wnd, ed.accel, msg))
 	{

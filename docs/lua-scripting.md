@@ -262,7 +262,8 @@ movie).
 `savestate` paths look in the script's folder first, so a script can ship with
 its own modules and data. The standard libraries are all there, except that
 scripts have no console input (`io.read`) and `os.exit()` ends the script
-rather than the emulator. Lua modules written in C can't be loaded.
+rather than the emulator. Lua modules written in C can't be loaded, and neither
+can precompiled chunks: only Lua source.
 
 ## The editor
 
@@ -281,3 +282,36 @@ rather than the emulator. Lua modules written in C can't be loaded.
 Run uses the text in the editor, saved or not. Closing the editor window
 leaves its scripts running; *File > Script > Stop All Scripts* stops them. The
 open files come back the next time the editor opens.
+
+## The debugger
+
+The Windows editor can stop a script at a line and step through it. While a
+script is stopped the emulator waits with it, in the middle of the frame (or
+of the CPU instruction, inside a memory hook), and the sound pauses.
+
+| Key | Action |
+| --- | --- |
+| F9 | Set or remove a breakpoint on the caret's line (or click the gutter) |
+| F5 | Continue a stopped script |
+| F8 | Break: stop the running script at its next line |
+| F10, F11, Shift+F11 | Step over, step into, step out |
+| Shift+F9 | Watch the selection, or the name under the caret |
+| Ctrl+Shift+F9 | Remove all breakpoints |
+
+The panel under the editor shows the stopped script:
+
+- **Variables**: the selected frame's locals, its upvalues, and the globals the
+  script made (the standard ones are left out). Tables open as you expand them.
+- **Watch**: expressions evaluated in the selected frame at every stop, such as
+  `player.x + 1` or `memory.wram.read_u8(0x0DBF)`.
+- **Call Stack**: click a frame to see its variables and its line.
+- **Breakpoints**: every breakpoint, with a box to switch it off. Select one to
+  give it a **condition** (stop only when `lives < 3` is true), a **hit count**
+  (`5` stops on the 5th hit, `>= 5` from the 5th on, `% 5` every 5th) or a
+  **log message**, which prints instead of stopping, `{expressions}` filled in.
+
+Stepping over `emu.frame_advance()` runs the frame and stops on the next line.
+*Debug > Break on Errors* stops a script where it fails, with its variables
+still there, instead of just ending it. Breakpoints are lines in the script's
+own file; code it loads with `require` or `dofile` can be stepped into but not
+given breakpoints. Watches and conditions get one second to finish.

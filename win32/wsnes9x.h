@@ -385,6 +385,9 @@ struct sGUI {
 
 	// With JapaneseController: the European pad picture rather than the Super Famicom one.
 	bool EuropeanController;
+
+	// Lua editor: a script that errors stops in the debugger.
+	bool LuaBreakOnError;
 };
 
 //TURBO masks

@@ -1068,6 +1068,7 @@ void WinRegisterConfigItems()
 	AddIntC("FontSize", GUI.LuaFontSize, 10, "Lua editor font size in points");
 	AddBoolC("ShowReference", GUI.LuaShowReference, true, "true to show the API reference beside the Lua editor");
 	AddBoolC("BreakOnError", GUI.LuaBreakOnError, false, "true to stop a Lua script in the debugger when it errors");
+	AddIntC("PanelHeight", GUI.LuaPanelHeight, 0, "height of the panel under the Lua editor in pixels, 0 for the default");
 #undef CATEGORY
 #define	CATEGORY "Sound"
 	AddIntC("Sync", Settings.SoundSync, 1, "1 to sync emulation to sound output, 0 to disable.");

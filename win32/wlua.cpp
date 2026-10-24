@@ -69,7 +69,7 @@ enum
 	CMD_RECENT_FIRST = 41000, CMD_EXAMPLE_FIRST = 42000
 };
 
-enum { TIMER_POLL = 1, TIMER_HIGHLIGHT = 2 };
+enum { TIMER_POLL = 1, TIMER_HIGHLIGHT = 2, TIMER_MODAL = 3 };
 const UINT WM_LUA_AFTER_CHAR = WM_APP + 41;
 const UINT WM_LUA_POLL = WM_APP + 42;
 
@@ -123,9 +123,17 @@ struct Editor
 	bool show_reference = true;
 	bool swallow_char = false;
 	bool loading = false;
+	int formatting = 0;		// colouring or a font change: RichEdit's EN_CHANGE isn't an edit
 	int gutter_width = 40, marker_width = 16, line_height = 16;
 	double scale = 1.0;
 	int panel = PANEL_CONSOLE;
+	int panel_height = 0;						// the bottom panel's, dragged; 0 for the default
+	RECT splitter = {};							// the bar between the editor and the panel
+	bool splitting = false;
+	int split_grab = 0, split_y = 0, layout_top = 0, layout_bottom = 0;
+	int close_spaces = 4;						// pad each tab title to make room for its close box
+	int close_hover = -1, close_pressed = -1;	// tabs whose close box is under the mouse, pressed
+	bool close_tracking = false;
 
 	// Debugger
 	int stopped = 0;							// the script stopped in the debugger
@@ -260,8 +268,35 @@ std::wstring WordBefore(HWND edit, LONG position)
 	return before.substr(i);
 }
 
+std::wstring WindowString(HWND hwnd)
+{
+	int length = GetWindowTextLengthW(hwnd);
+	std::wstring text(length + 1, L'\0');
+	GetWindowTextW(hwnd, &text[0], length + 1);
+	text.resize(length);
+	return text;
+}
+
+// Setting a control's text or state repaints it even when nothing changed; a
+// script printing every frame would have the toolbar flicker.
+void SetText(HWND hwnd, const std::wstring &text)
+{
+	if (WindowString(hwnd) != text)
+		SetWindowTextW(hwnd, text.c_str());
+}
+
+void Enable(HWND hwnd, bool enabled)
+{
+	if ((IsWindowEnabled(hwnd) != FALSE) != enabled)
+		EnableWindow(hwnd, enabled);
+}
+
 void SetStatus(const std::wstring &text)
 {
+	static std::wstring shown;
+	if (text == shown)
+		return;
+	shown = text;
 	SendMessageW(ed.status, SB_SETTEXTW, 0, (LPARAM)text.c_str());
 }
 
@@ -400,13 +435,13 @@ void UpdateActions()
 {
 	Document *doc = Active();
 	bool running = doc && doc->script;
-	SetWindowTextW(ed.buttons[3], running ? _L(L"Restart") : _L(L"Run"));
-	SetWindowTextW(ed.buttons[4], doc && doc->paused ? _L(L"Resume") : _L(L"Pause"));
-	EnableWindow(ed.buttons[3], doc != nullptr);
-	EnableWindow(ed.buttons[4], running);
-	EnableWindow(ed.buttons[5], running);
+	SetText(ed.buttons[3], running ? _L(L"Restart") : _L(L"Run"));
+	SetText(ed.buttons[4], doc && doc->paused ? _L(L"Resume") : _L(L"Pause"));
+	Enable(ed.buttons[3], doc != nullptr);
+	Enable(ed.buttons[4], running);
+	Enable(ed.buttons[5], running);
 	for (int i = 6; i < kButtons; i++)
-		EnableWindow(ed.buttons[i], ed.stopped != 0);
+		Enable(ed.buttons[i], ed.stopped != 0);
 
 	size_t count = ed.names.size();
 	wchar_t text[128];
@@ -433,10 +468,18 @@ void UpdateTab(Document *doc)
 		title += L"*";
 	if (doc->script)
 		title = std::wstring(doc->paused ? L"\x2016 " : L"\x25b6 ") + title;
+	title += std::wstring(ed.close_spaces, L' ');
+
+	wchar_t shown[MAX_PATH + 64] = {};
 	TCITEMW item = {};
 	item.mask = TCIF_TEXT;
-	item.pszText = &title[0];
-	TabCtrl_SetItem(ed.tabs, index, &item);
+	item.pszText = shown;
+	item.cchTextMax = MAX_PATH + 64;
+	if (!TabCtrl_GetItem(ed.tabs, index, &item) || title != shown)
+	{
+		item.pszText = &title[0];
+		TabCtrl_SetItem(ed.tabs, index, &item);
+	}
 	UpdateActions();
 }
 
@@ -470,10 +513,19 @@ void BackRange(ITextDocument *tom, long first, long last, long color)
 	range->Release();
 }
 
+// RichEdit reports formatting as an edit (EN_CHANGE, sent before the call returns).
+// Colouring marked every script modified and set off the next colouring pass.
+struct Formatting
+{
+	Formatting() { ed.formatting++; }
+	~Formatting() { ed.formatting--; }
+};
+
 void Highlight(Document *doc)
 {
 	if (!doc->tom)
 		return;
+	Formatting formatting;
 	std::wstring text = EditorText(doc->edit);
 
 	long freeze = 0;
@@ -541,6 +593,25 @@ void Highlight(Document *doc)
 	doc->tom->Unfreeze(&freeze);
 }
 
+// One line's background as Highlight paints it, leaving the rest of the text alone.
+void RefreshLineBack(Document *doc, int line)
+{
+	if (!doc->tom || line < 1)
+		return;
+	Formatting formatting;
+	LONG start = LineStart(doc->edit, line - 1);
+	if (start < 0)
+		return;
+	long color = line == doc->stopped_line ? (long)kStoppedBack : line == doc->frame_line ? (long)kFrameBack :
+	             line == doc->error_line ? (long)kErrorBack : tomAutoColor;
+	long freeze = 0;
+	doc->tom->Freeze(&freeze);
+	doc->tom->Undo(tomSuspend, nullptr);
+	BackRange(doc->tom, start, start + LineLength(doc->edit, line - 1) + 1, color);
+	doc->tom->Undo(tomResume, nullptr);
+	doc->tom->Unfreeze(&freeze);
+}
+
 void SetErrorLine(Document *doc, int line)
 {
 	doc->error_line = line;
@@ -550,6 +621,7 @@ void SetErrorLine(Document *doc, int line)
 
 void ApplyFont(HWND edit)
 {
+	Formatting formatting;
 	CHARFORMAT2W format = {};
 	format.cbSize = sizeof(format);
 	format.dwMask = CFM_FACE | CFM_SIZE | CFM_CHARSET;
@@ -617,6 +689,8 @@ Document *AddDocument(const std::string &text, const std::wstring &path, const s
 	                            WS_CHILD | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOVSCROLL |
 	                            ES_AUTOHSCROLL | ES_NOHIDESEL | ES_WANTRETURN,
 	                            0, 0, 10, 10, ed.wnd, (HMENU)(INT_PTR)(IDC_EDITOR + ed.docs.size()), g_hInst, nullptr);
+	// The tab control frames the editors: below them, so painting it never covers them.
+	SetWindowPos(ed.tabs, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	SendMessageW(doc->edit, EM_SETTARGETDEVICE, 0, 1); // no wrapping
 	SendMessageW(doc->edit, EM_EXLIMITTEXT, 0, 16 * 1024 * 1024);
 	SendMessageW(doc->edit, EM_SETUNDOLIMIT, 500, 0);
@@ -652,7 +726,7 @@ Document *AddDocument(const std::string &text, const std::wstring &path, const s
 	ed.docs.push_back(std::move(doc));
 	TCITEMW item = {};
 	item.mask = TCIF_TEXT;
-	std::wstring title = DisplayName(raw);
+	std::wstring title = DisplayName(raw) + std::wstring(ed.close_spaces, L' ');
 	item.pszText = &title[0];
 	TabCtrl_InsertItem(ed.tabs, (int)ed.docs.size() - 1, &item);
 	Highlight(raw);
@@ -786,8 +860,8 @@ bool AskSave(Document *doc)
 		return true;
 	ShowWindow(ed.wnd, SW_SHOW);
 	Activate(IndexOf(doc));
-	std::wstring message = std::wstring(_L(L"Save changes to ")) + DisplayName(doc) + L"?";
-	int answer = MessageBoxW(ed.wnd, message.c_str(), _L(L"Lua Scripting"), MB_YESNOCANCEL | MB_ICONQUESTION);
+	std::wstring message = DisplayName(doc) + _L(L" has changes that aren't saved.\n\nSave them before closing?");
+	int answer = MessageBoxW(ed.wnd, message.c_str(), _L(L"Lua Scripting"), MB_YESNOCANCEL | MB_ICONWARNING);
 	if (answer == IDYES)
 		return Save(doc, false);
 	return answer == IDNO;
@@ -993,15 +1067,6 @@ void ShowPanel(int panel)
 	Layout();
 }
 
-std::wstring WindowString(HWND hwnd)
-{
-	int length = GetWindowTextLengthW(hwnd);
-	std::wstring text(length + 1, L'\0');
-	GetWindowTextW(hwnd, &text[0], length + 1);
-	text.resize(length);
-	return text;
-}
-
 std::wstring Trim(const std::wstring &text)
 {
 	size_t first = text.find_first_not_of(L" \t\r\n");
@@ -1168,8 +1233,10 @@ void ClearStopLines()
 	{
 		if (!doc->stopped_line && !doc->frame_line)
 			continue;
+		int stopped = doc->stopped_line, frame = doc->frame_line;
 		doc->stopped_line = doc->frame_line = 0;
-		Highlight(doc.get());
+		RefreshLineBack(doc.get(), stopped);
+		RefreshLineBack(doc.get(), frame);
 	}
 }
 
@@ -1204,13 +1271,13 @@ void SelectFrame(int index)
 	if (Document *doc = FrameDocument(ed.frames[top]))
 	{
 		doc->stopped_line = ed.frames[top].line;
-		Highlight(doc);
+		RefreshLineBack(doc, doc->stopped_line);
 	}
 	Document *shown = FrameDocument(ed.frames[index]);
 	if (shown && index != top)
 	{
 		shown->frame_line = ed.frames[index].line;
-		Highlight(shown);
+		RefreshLineBack(shown, shown->frame_line);
 	}
 	if (shown)
 	{
@@ -2012,9 +2079,23 @@ void Layout()
 		MoveWindow(ed.tree, x, top + Scaled(26), reference_w, bottom - top - Scaled(26) - pad, TRUE);
 	}
 
-	int console_h = std::max(Scaled(110), (bottom - top) * 3 / 10);
-	int header_h = Scaled(24);
-	int editor_bottom = bottom - console_h - header_h - pad;
+	// The panel's height is the splitter's, kept so neither side gets too small.
+	int header_h = Scaled(24), split = Scaled(6);
+	int console_h = ed.panel_height > 0 ? ed.panel_height : std::max(Scaled(110), (bottom - top) * 3 / 10);
+	int most = std::max(Scaled(60), bottom - top - header_h - split - Scaled(100));
+	console_h = std::clamp(console_h, Scaled(60), most);
+	if (ed.panel_height > 0)
+		ed.panel_height = console_h;
+	int editor_bottom = bottom - console_h - header_h - split;
+	RECT splitter = { pad, editor_bottom, pad + left_w, editor_bottom + split };
+	if (!EqualRect(&splitter, &ed.splitter))
+	{
+		InvalidateRect(ed.wnd, &ed.splitter, TRUE);
+		InvalidateRect(ed.wnd, &splitter, TRUE);
+		ed.splitter = splitter;
+	}
+	ed.layout_top = top;
+	ed.layout_bottom = bottom;
 	MoveWindow(ed.tabs, pad, top, left_w, editor_bottom - top, TRUE);
 	RECT inner = { pad, top, pad + left_w, editor_bottom };
 	TabCtrl_AdjustRect(ed.tabs, FALSE, &inner);
@@ -2024,11 +2105,11 @@ void Layout()
 		           inner.bottom - inner.top, TRUE);
 
 	// The bottom panel: console, variables, watches, call stack, breakpoints.
-	MoveWindow(ed.panel_tabs, pad, editor_bottom + pad, left_w - Scaled(70), header_h, TRUE);
-	MoveWindow(ed.clear, pad + left_w - Scaled(64), editor_bottom + pad, Scaled(64), Scaled(22), TRUE);
+	MoveWindow(ed.panel_tabs, pad, editor_bottom + split, left_w - Scaled(70), header_h, TRUE);
+	MoveWindow(ed.clear, pad + left_w - Scaled(64), editor_bottom + split, Scaled(64), Scaled(22), TRUE);
 	ShowWindow(ed.clear, ed.panel == PANEL_CONSOLE ? SW_SHOW : SW_HIDE);
 
-	int px = pad, py = editor_bottom + header_h + pad, pw = left_w, ph = console_h - pad, row = Scaled(22);
+	int px = pad, py = editor_bottom + split + header_h, pw = left_w, ph = console_h - pad, row = Scaled(22);
 	auto place = [](HWND hwnd, bool show, int x0, int y0, int w0, int h0) {
 		if (show)
 			MoveWindow(hwnd, x0, y0, std::max(w0, 1), std::max(h0, 1), TRUE);
@@ -2055,6 +2136,49 @@ void Layout()
 		fx += field_w[i] + pad;
 	}
 	InvalidateRect(ed.gutter, nullptr, TRUE);
+}
+
+// The dotted bar that follows the mouse while the splitter is dragged, inverted
+// over the window: drawing it a second time takes it away.
+void DrawSplitTracker(int y)
+{
+	static HBRUSH halftone = [] {
+		WORD pattern[8];
+		for (int i = 0; i < 8; i++)
+			pattern[i] = (WORD)(0x5555 << (i & 1));
+		HBITMAP bitmap = CreateBitmap(8, 8, 1, 1, pattern);
+		HBRUSH brush = CreatePatternBrush(bitmap);
+		DeleteObject(bitmap);
+		return brush;
+	}();
+	HDC dc = GetDCEx(ed.wnd, nullptr, DCX_WINDOW | DCX_CACHE | DCX_LOCKWINDOWUPDATE);
+	if (!dc)
+		return;
+	POINT origin = { 0, 0 };
+	ClientToScreen(ed.wnd, &origin);
+	RECT window;
+	GetWindowRect(ed.wnd, &window);
+	HGDIOBJ old = SelectObject(dc, halftone);
+	PatBlt(dc, origin.x - window.left + ed.splitter.left, origin.y - window.top + y,
+	       ed.splitter.right - ed.splitter.left, ed.splitter.bottom - ed.splitter.top, PATINVERT);
+	SelectObject(dc, old);
+	ReleaseDC(ed.wnd, dc);
+}
+
+void EndSplit()
+{
+	ed.splitting = false;
+	DrawSplitTracker(ed.split_y);
+	LockWindowUpdate(nullptr);
+}
+
+// Every pane moved with drawing off, then the window painted once: no flicker, no trails.
+void LayoutAndRedraw()
+{
+	SendMessageW(ed.wnd, WM_SETREDRAW, FALSE, 0);
+	Layout();
+	SendMessageW(ed.wnd, WM_SETREDRAW, TRUE, 0);
+	RedrawWindow(ed.wnd, nullptr, nullptr, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
 
 void DrawBreakpoint(HDC dc, const RECT &box, const Breakpoint &b)
@@ -2155,13 +2279,19 @@ LRESULT CALLBACK GutterProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		return 0;
 	}
+	if (msg == WM_ERASEBKGND)
+		return 1;	// the paint covers it all
 	if (msg != WM_PAINT)
 		return DefWindowProcW(hwnd, msg, wparam, lparam);
 
+	// Drawn off screen and copied in one go, so it never shows half painted.
 	PAINTSTRUCT ps;
-	HDC dc = BeginPaint(hwnd, &ps);
+	HDC target = BeginPaint(hwnd, &ps);
 	RECT client;
 	GetClientRect(hwnd, &client);
+	HDC dc = CreateCompatibleDC(target);
+	HBITMAP bitmap = CreateCompatibleBitmap(target, std::max<LONG>(client.right, 1), std::max<LONG>(client.bottom, 1));
+	HGDIOBJ old_bitmap = SelectObject(dc, bitmap);
 	FillRect(dc, &client, GetSysColorBrush(COLOR_3DFACE));
 
 	Document *doc = Active();
@@ -2208,6 +2338,10 @@ LRESULT CALLBACK GutterProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		SelectObject(dc, old);
 	}
+	BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
+	SelectObject(dc, old_bitmap);
+	DeleteObject(bitmap);
+	DeleteDC(dc);
 	EndPaint(hwnd, &ps);
 	return 0;
 }
@@ -2377,6 +2511,148 @@ LRESULT CALLBACK DebugFieldProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 	return DefSubclassProc(hwnd, msg, wparam, lparam);
 }
 
+/* ---- Tab close boxes ---------------------------------------------------- */
+
+// The close box in the room the padded title leaves at the tab's right.
+RECT CloseBox(int tab)
+{
+	RECT item = {};
+	TabCtrl_GetItemRect(ed.tabs, tab, &item);
+	int size = Scaled(14), cy = (item.top + item.bottom) / 2;
+	return { item.right - Scaled(5) - size, cy - size / 2, item.right - Scaled(5), cy - size / 2 + size };
+}
+
+int CloseBoxAt(POINT point)
+{
+	for (int tab = 0; tab < TabCtrl_GetItemCount(ed.tabs); tab++)
+	{
+		RECT box = CloseBox(tab);
+		if (PtInRect(&box, point))
+			return tab;
+	}
+	return -1;
+}
+
+void DrawCloseBoxes(HWND hwnd)
+{
+	HDC dc = GetDC(hwnd);
+	for (int tab = 0; tab < TabCtrl_GetItemCount(hwnd); tab++)
+	{
+		RECT box = CloseBox(tab);
+		bool hot = tab == ed.close_hover || tab == ed.close_pressed;
+		if (hot)
+		{
+			HBRUSH back = CreateSolidBrush(tab == ed.close_pressed ? RGB(176, 32, 32) : RGB(224, 64, 64));
+			FillRect(dc, &box, back);
+			DeleteObject(back);
+		}
+		int inset = Scaled(4);
+		HPEN pen = CreatePen(PS_SOLID, std::max(1, Scaled(1)), hot ? RGB(255, 255, 255) : RGB(96, 96, 96));
+		HGDIOBJ old = SelectObject(dc, pen);
+		MoveToEx(dc, box.left + inset, box.top + inset, nullptr);
+		LineTo(dc, box.right - inset + 1, box.bottom - inset + 1);
+		MoveToEx(dc, box.right - inset, box.top + inset, nullptr);
+		LineTo(dc, box.left + inset - 1, box.bottom - inset + 1);
+		SelectObject(dc, old);
+		DeleteObject(pen);
+	}
+	ReleaseDC(hwnd, dc);
+}
+
+// Only the box: repainting the whole tab control would repaint the editor it frames.
+void RedrawCloseBox(int tab)
+{
+	if (tab < 0 || tab >= TabCtrl_GetItemCount(ed.tabs))
+		return;
+	RECT box = CloseBox(tab);
+	InvalidateRect(ed.tabs, &box, FALSE);
+}
+
+// A tab's close box (or a middle click anywhere on it) closes it as Ctrl+W does.
+LRESULT CALLBACK TabsProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR)
+{
+	POINT point = { GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+	switch (msg)
+	{
+		case WM_PAINT:
+		{
+			LRESULT result = DefSubclassProc(hwnd, msg, wparam, lparam);
+			DrawCloseBoxes(hwnd);
+			return result;
+		}
+
+		case WM_MOUSEMOVE:
+		{
+			int tab = ed.close_pressed >= 0 ? (CloseBoxAt(point) == ed.close_pressed ? ed.close_pressed : -1) : CloseBoxAt(point);
+			if (tab != ed.close_hover)
+			{
+				RedrawCloseBox(ed.close_hover);
+				ed.close_hover = tab;
+				RedrawCloseBox(tab);
+			}
+			if (!ed.close_tracking)
+			{
+				TRACKMOUSEEVENT track = { sizeof(track), TME_LEAVE, hwnd, 0 };
+				ed.close_tracking = TrackMouseEvent(&track) != FALSE;
+			}
+			break;
+		}
+
+		case WM_MOUSELEAVE:
+			ed.close_tracking = false;
+			if (ed.close_hover >= 0)
+			{
+				RedrawCloseBox(ed.close_hover);
+				ed.close_hover = -1;
+			}
+			break;
+
+		case WM_LBUTTONDOWN:
+		{
+			int tab = CloseBoxAt(point);
+			if (tab < 0)
+				break;
+			ed.close_pressed = tab;
+			SetCapture(hwnd);
+			RedrawCloseBox(tab);
+			return 0;
+		}
+
+		case WM_LBUTTONUP:
+		{
+			if (ed.close_pressed < 0)
+				break;
+			int tab = ed.close_pressed;
+			ed.close_pressed = -1;
+			ReleaseCapture();
+			RedrawCloseBox(tab);
+			if (CloseBoxAt(point) == tab && tab < (int)ed.docs.size())
+				CloseDocument(ed.docs[tab].get());
+			ed.close_hover = -1;
+			return 0;
+		}
+
+		case WM_CAPTURECHANGED:
+			if (ed.close_pressed >= 0)
+			{
+				RedrawCloseBox(ed.close_pressed);
+				ed.close_pressed = -1;
+			}
+			break;
+
+		case WM_MBUTTONUP:
+		{
+			TCHITTESTINFO hit = { point, 0 };
+			int tab = TabCtrl_HitTest(hwnd, &hit);
+			if (tab >= 0 && tab < (int)ed.docs.size())
+				CloseDocument(ed.docs[tab].get());
+			ed.close_hover = -1;
+			return 0;
+		}
+	}
+	return DefSubclassProc(hwnd, msg, wparam, lparam);
+}
+
 void Command(UINT id)
 {
 	Document *doc = Active();
@@ -2516,6 +2792,95 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			Layout();
 			return 0;
 
+		// The splitter between the editor and the panel: drag it, double-click to reset.
+		case WM_SETCURSOR:
+			if ((HWND)wparam == hwnd && LOWORD(lparam) == HTCLIENT)
+			{
+				POINT point;
+				GetCursorPos(&point);
+				ScreenToClient(hwnd, &point);
+				if (ed.splitting || PtInRect(&ed.splitter, point))
+				{
+					SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+					return TRUE;
+				}
+			}
+			break;
+
+		case WM_LBUTTONDOWN:
+		{
+			POINT point = { GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+			if (!PtInRect(&ed.splitter, point))
+				break;
+			ed.splitting = true;
+			ed.split_grab = point.y - ed.splitter.top;
+			ed.split_y = ed.splitter.top;
+			SetCapture(hwnd);
+			LockWindowUpdate(hwnd);	// nothing paints over the tracker while it's dragged
+			DrawSplitTracker(ed.split_y);
+			return 0;
+		}
+
+		case WM_MOUSEMOVE:
+			if (ed.splitting)
+			{
+				// Only the tracker moves; the panes follow once, on release.
+				int y = std::clamp(GET_Y_LPARAM(lparam) - ed.split_grab, ed.layout_top + Scaled(100),
+				                   std::max(ed.layout_top + Scaled(100), ed.layout_bottom - Scaled(60) - Scaled(24) - Scaled(6)));
+				if (y != ed.split_y)
+				{
+					DrawSplitTracker(ed.split_y);
+					ed.split_y = y;
+					DrawSplitTracker(ed.split_y);
+				}
+				return 0;
+			}
+			break;
+
+		case WM_LBUTTONUP:
+			if (ed.splitting)
+			{
+				EndSplit();
+				ed.panel_height = std::max(1, ed.layout_bottom - ed.split_y - Scaled(24) - Scaled(6));
+				ReleaseCapture();
+				LayoutAndRedraw();
+				return 0;
+			}
+			break;
+
+		case WM_CAPTURECHANGED:
+			if (ed.splitting)
+				EndSplit();	// taken away mid-drag: the panes stay as they were
+			break;
+
+		case WM_LBUTTONDBLCLK:
+		{
+			POINT point = { GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+			if (PtInRect(&ed.splitter, point))
+			{
+				ed.panel_height = 0;
+				LayoutAndRedraw();
+				return 0;
+			}
+			break;
+		}
+
+		case WM_PAINT:
+		{
+			// A grip of dots in the middle of the splitter.
+			PAINTSTRUCT ps;
+			HDC dc = BeginPaint(hwnd, &ps);
+			int cx = (ed.splitter.left + ed.splitter.right) / 2, cy = (ed.splitter.top + ed.splitter.bottom) / 2;
+			int dot = std::max(2, Scaled(2));
+			for (int i = -3; i <= 3; i++)
+			{
+				RECT r = { cx + i * dot * 3 - dot / 2, cy - dot / 2, cx + i * dot * 3 - dot / 2 + dot, cy - dot / 2 + dot };
+				FillRect(dc, &r, GetSysColorBrush(COLOR_3DSHADOW));
+			}
+			EndPaint(hwnd, &ps);
+			return 0;
+		}
+
 		case WM_GETMINMAXINFO:
 		{
 			auto info = (MINMAXINFO *)lparam;
@@ -2541,7 +2906,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 						doc = d.get();
 				if (!doc)
 					return 0;
-				if (code == EN_CHANGE && !ed.loading)
+				if (code == EN_CHANGE && !ed.loading && !ed.formatting)
 				{
 					if (!doc->modified)
 					{
@@ -2757,7 +3122,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 				if (Document *doc = Active())
 					Highlight(doc);
 			}
+			else if (wparam == TIMER_MODAL)
+				WinRunFrameInModalLoop();
 			return 0;
+
+		// A menu open or the window being moved or sized: Windows runs its own
+		// loop till it's done, so the editor's timer keeps the game going meanwhile.
+		case WM_ENTERMENULOOP:
+		case WM_ENTERSIZEMOVE:
+			SetTimer(hwnd, TIMER_MODAL, 1, nullptr);
+			break;
+		case WM_EXITMENULOOP:
+		case WM_EXITSIZEMOVE:
+			KillTimer(hwnd, TIMER_MODAL);
+			break;
 
 		case WM_INITMENUPOPUP:
 			if ((HMENU)wparam == ed.recent_menu)
@@ -2830,6 +3208,7 @@ void CreateEditorWindow()
 
 		WNDCLASSEXW wc = { sizeof(wc) };
 		wc.lpfnWndProc = WindowProc;
+		wc.style = CS_DBLCLKS;	// a double-click resets the splitter
 		wc.hInstance = g_hInst;
 		wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
 		wc.hbrBackground = (HBRUSH)(COLOR_3DFACE + 1);
@@ -2852,6 +3231,7 @@ void CreateEditorWindow()
 	ReleaseDC(nullptr, screen);
 	ed.font_size = GUI.LuaFontSize > 0 ? GUI.LuaFontSize : 10;
 	ed.show_reference = GUI.LuaShowReference;
+	ed.panel_height = std::max(0, GUI.LuaPanelHeight);
 
 	int w = GUI.LuaWindowWidth > 0 ? GUI.LuaWindowWidth : Scaled(960);
 	int h = GUI.LuaWindowHeight > 0 ? GUI.LuaWindowHeight : Scaled(680);
@@ -2864,6 +3244,16 @@ void CreateEditorWindow()
 	NONCLIENTMETRICSW metrics = { sizeof(metrics) };
 	SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
 	ed.ui_font = CreateFontIndirectW(&metrics.lfMessageFont);
+	{
+		// Enough trailing spaces after a tab's title for its close box.
+		HDC dc = GetDC(ed.wnd);
+		HGDIOBJ old = SelectObject(dc, ed.ui_font);
+		SIZE space = {};
+		GetTextExtentPoint32W(dc, L" ", 1, &space);
+		SelectObject(dc, old);
+		ReleaseDC(ed.wnd, dc);
+		ed.close_spaces = std::max(1, (int)((Scaled(20) + space.cx - 1) / std::max<LONG>(space.cx, 1)));
+	}
 	MakeCodeFont();
 
 	auto child = [](const wchar_t *cls, const wchar_t *text, DWORD style, int id, DWORD ex = 0) {
@@ -2882,7 +3272,9 @@ void CreateEditorWindow()
 	SetWindowSubclass(ed.find, FindProc, 1, 0);
 
 	ed.tabs = child(WC_TABCONTROLW, L"", WS_CLIPSIBLINGS | TCS_FOCUSNEVER, IDC_TABS);
+	SetWindowSubclass(ed.tabs, TabsProc, 4, 0);
 	ed.gutter = child(kGutterClass, L"", 0, 0);
+	SetWindowPos(ed.tabs, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	ed.panel_tabs = child(WC_TABCONTROLW, L"", WS_CLIPSIBLINGS | TCS_FOCUSNEVER, IDC_PANEL_TABS);
 	const wchar_t *panels[PANEL_COUNT] = { L"Console", L"Variables", L"Watch", L"Call Stack", L"Breakpoints" };
 	for (int i = 0; i < PANEL_COUNT; i++)
@@ -3005,6 +3397,7 @@ void SaveSession()
 		*GUI.LuaOpenScripts[n] = L'\0';
 	GUI.LuaFontSize = ed.font_size;
 	GUI.LuaShowReference = ed.show_reference;
+	GUI.LuaPanelHeight = ed.panel_height;
 }
 
 void CALLBACK IdleTick(HWND, UINT, UINT_PTR, DWORD)
@@ -3033,6 +3426,14 @@ void WinLuaInit()
 			ed.poll_posted = true;
 			PostMessageW(ed.wnd, WM_LUA_POLL, 0, 0);
 		}
+	};
+	frontend.default_dir = [] {
+		// The emulator's own folder.
+		wchar_t path[MAX_PATH];
+		DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+		std::wstring dir(path, n < MAX_PATH ? n : 0);
+		size_t slash = dir.find_last_of(L"\\/");
+		return slash == std::wstring::npos ? std::string() : Narrow(dir.substr(0, slash + 1));
 	};
 	frontend.debug_break = DebuggerStopped;
 	frontend.debug_wait = DebuggerWait;

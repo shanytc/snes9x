@@ -5277,6 +5277,310 @@ static void ApplyGBVideoCamera()
 		GBCameraStop();
 }
 
+// One pass of the emulation loop: input, rewind, run-ahead and the frame itself.
+// Never inside a frame: a Lua script stopped in the debugger pumps messages there.
+static void WinEmulateFrame (void)
+{
+	static bool	emulating = false;
+	static DWORD	lastTime = timeGetTime();
+	if (emulating)
+		return;
+	emulating = true;
+
+#ifdef NETPLAY_SUPPORT
+    if (!Settings.NetPlay || !NetPlay.PendingWait4Sync ||
+        WaitForSingleObject (GUI.ClientSemaphore, 100) != WAIT_TIMEOUT)
+    {
+        if (NetPlay.PendingWait4Sync)
+        {
+            NetPlay.PendingWait4Sync = FALSE;
+            NetPlay.FrameCount++;
+            S9xNPStepJoypadHistory ();
+        }
+#endif
+		if(watches[0].on)
+		{
+			// copy the memory used by each active watch
+			for(unsigned int i = 0 ; i < sizeof(watches)/sizeof(*watches) ; i++)
+			{
+				if(watches[i].on)
+				{
+					int address = watches[i].address - 0x7E0000;
+					if(address < 0 || address >= 0x32000)
+						continue;
+					const uint8* source = NULL;
+					if(address < 0x20000)
+					{
+						if(Cheat.RAM && address + watches[i].size <= (int)Cheat.ram_size)
+							source = Cheat.RAM + address;
+					}
+					else if(address < 0x30000)
+					{
+						if(Cheat.SRAM && (address - 0x20000) + watches[i].size <= (int)Cheat.sram_size)
+							source = Cheat.SRAM + address - 0x20000;
+					}
+					else
+					{
+						if(Cheat.IRAM && (address - 0x30000) + watches[i].size <= (int)Cheat.iram_size)
+							source = Cheat.IRAM + address - 0x30000;
+					}
+
+					if(source)
+						CopyMemory(Cheat.CWatchRAM + address, source, watches[i].size);
+				}
+			}
+		}
+		if(cheatSearchHWND)
+		{
+			if(timeGetTime() - lastTime >= 100)
+			{
+				SendMessage(cheatSearchHWND, WM_COMMAND, (WPARAM)(IDC_REFRESHLIST),(LPARAM)(NULL));
+				lastTime = timeGetTime();
+			}
+		}
+
+		if(Settings.FrameAdvance)
+		{
+			if(GFX.InfoStringTimeout > 4)
+				GFX.InfoStringTimeout = 4;
+
+			if(!GUI.FASkipsNonInput)
+				Settings.FrameAdvance = false;
+		}
+		if(GUI.FrameAdvanceJustPressed)
+			GUI.FrameAdvanceJustPressed--;
+
+		// Frame Advance mute extends to fast-forward. Full mute (not a
+		// volume cut) so the mixers discard samples as they're produced
+		// instead of banking a turbo backlog that replays on release.
+		if (!Settings.Paused && !Settings.ForcedPause)
+			S9xSetSoundMute(GUI.Mute || (Settings.TurboMode && GUI.FAMute));
+
+		ProcessInput();
+
+		if (GUI.rewindBufferSize
+#ifdef NETPLAY_SUPPORT
+			&& !Settings.NetPlay
+#endif
+#ifdef RETROACHIEVEMENTS_SUPPORT
+			&& !RA_IsHardcoreModeActive()
+#endif
+			) {
+			if (reverseFrameAdvance) {
+				reverseFrameAdvance = false;
+				// Reverse frame advance: pop back to the nearest snapshot at
+				// or before the previous frame, replay the gap hidden, and
+				// let the frame-advance frame below render the target.
+				uint32 target = rewindContentFrame >= 2 ? rewindContentFrame - 2 : 0;
+				uint32 tag = 0, reached = 0;
+				bool popped = false;
+				int ok;
+				while ((ok = stateMan.pop(&tag)) != 0 && tag > target) {
+					reached = tag;
+					popped = true;
+				}
+				if (ok) {
+					rewindContentFrame = tag;
+					if (target > tag) {
+						S9xSetSamplesAvailableCallback(NULL, NULL);
+						while (rewindContentFrame < target) {
+							stateMan.push(rewindContentFrame);
+							IPPU.RenderThisFrame = FALSE;
+							S9xMainLoop();
+							rewindContentFrame++;
+						}
+						S9xSetSamplesAvailableCallback(S9xSoundCallback, NULL);
+						IPPU.RenderThisFrame = TRUE;
+					}
+					stateMan.push(rewindContentFrame);
+				}
+				else if (popped) {
+					// Ring ran dry mid-search: settle on the oldest state.
+					rewindContentFrame = reached;
+					stateMan.push(reached);
+				}
+			}
+			else if (Settings.Rewinding) {
+				uint32 tag;
+				Settings.Rewinding = stateMan.pop(&tag);
+				if (Settings.Rewinding)
+					rewindContentFrame = tag;
+			}
+			else {
+				if (IPPU.TotalEmulatedFrames % GUI.rewindGranularity == 0)
+					stateMan.push(rewindContentFrame);
+			}
+		}
+
+		if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
+		{
+			// Run-ahead: commit 1 hidden frame, save state, run N-1 more hidden frames
+			// to "look into the future", then run the displayed frame as a preview, and
+			// finally restore to the committed state. The displayed frame shows what
+			// the game will look like N frames in the future given the current input,
+			// reducing apparent input latency by N frames.
+			int numAheadFrames = Settings.RunAhead;
+			if (numAheadFrames > 4) numAheadFrames = 4;
+
+			static uint32 runAheadBufSize = 0;
+			static uint8 *runAheadBuf = nullptr;
+
+			// Minimize per-frame overhead:
+			// - drop the ~500KB screenshot from the state
+			// - enable fast path (skips 512KB screen memset + memory zeroing on load)
+			// - detach the sample-available callback during hidden frames so their
+			//   audio never reaches the OS buffer; otherwise we push multiple frames
+			//   of audio per iteration and the buffer fills faster than it drains
+			bool8 savedScreenshots = Settings.SnapshotScreenshots;
+			bool8 savedFast = Settings.FastSavestates;
+			Settings.SnapshotScreenshots = FALSE;
+			Settings.FastSavestates = TRUE;
+
+			// Allocate the state buffer once per session. S9xFreezeSize() is expensive
+			// (it does a full dry-run serialization), so cache the result.
+			if (!runAheadBuf) {
+				runAheadBufSize = S9xFreezeSize();
+				runAheadBuf = new uint8[runAheadBufSize];
+			}
+
+			// Suppress audio output for the hidden frames
+			S9xSetSamplesAvailableCallback(NULL, NULL);
+
+			// Snapshot the resampler so we can undo the hidden frames' effect on it
+			// (preserves hermite filter continuity across iterations)
+			S9xRunAheadSaveAudio();
+
+			Settings.InRunAhead = TRUE;
+
+			// First hidden frame: the "commit" frame — its state gets saved and
+			// becomes the starting point of the next iteration
+			IPPU.RenderThisFrame = FALSE;
+			S9xMainLoop();
+
+			// Save state at end of the committed frame
+			S9xFreezeGameMem(runAheadBuf, runAheadBufSize);
+
+			// Additional hidden frames (peek further into the future)
+			for (int i = 1; i < numAheadFrames; i++)
+			{
+				IPPU.RenderThisFrame = FALSE;
+				S9xMainLoop();
+			}
+
+			Settings.InRunAhead = FALSE;
+
+			// Restore resampler state so the displayed frame's output flows on
+			// directly from the previous displayed frame's output
+			S9xRunAheadLoadAudio();
+
+			// Re-enable audio output for the displayed frame
+			S9xSetSamplesAvailableCallback(S9xSoundCallback, NULL);
+
+			// Displayed "preview" frame: renders and throttles normally
+			IPPU.RenderThisFrame = TRUE;
+			S9xMainLoop();
+
+			// Restore to end-of-committed-frame so next iteration starts from there
+			S9xUnfreezeGameMem(runAheadBuf, runAheadBufSize);
+
+			Settings.SnapshotScreenshots = savedScreenshots;
+			Settings.FastSavestates = savedFast;
+		}
+		else
+		{
+			S9xMainLoop();
+		}
+#ifdef RETROACHIEVEMENTS_SUPPORT
+		{
+			// Suspend achievement processing whenever remote inputs are
+			// part of the emulation — unlocks can't be attributed.
+			bool raNetplayActive = false;
+#ifdef NETPLAY_SUPPORT
+			if (Settings.NetPlay || Settings.NetPlayServer)
+				raNetplayActive = true;
+#endif
+#ifdef KAILLERA_SUPPORT
+			if (KailleraClientIsPlaying())
+				raNetplayActive = true;
+#endif
+			RA_SetNetplayActive(raNetplayActive);
+			RA_DoFrame();
+		}
+#endif
+		GUI.FrameCount++;
+		rewindContentFrame++;
+		if (Settings.SGB_BIOSModeActive)
+		{
+			// Where a soft reset should land: the cart's border up and its title
+			// on screen. Waiting for the packet stream to fall quiet instead put
+			// the checkpoint wherever the game next went silent - mid-intro.
+			const uint32 kCpMinAge = 240;   // clear the BIOS splash first
+			const uint32 kCpQuiet  = 30;    // no packets = setup finished
+			const uint32 kCpShown  = 150;   // up and staying up: title, not blank
+			static bool   sgbCpDone  = false;
+			static uint32 sgbCpPkts  = 0;
+			static uint32 sgbCpAge   = 0;
+			static uint32 sgbCpQuiet = 0;
+			static uint32 sgbCpShown = 0;
+			if (!S9xSGBBootHandoffCaptured())
+			{
+				S9xSGBInvalidateSoftResetCheckpoint();
+				sgbCpDone  = false;
+				sgbCpPkts  = S9xSGBGetPacketCount();
+				sgbCpAge   = 0;
+				sgbCpQuiet = 0;
+				sgbCpShown = 0;
+			}
+			else if (!sgbCpDone)
+			{
+				const uint32 pkts = S9xSGBGetPacketCount();
+				if (pkts != sgbCpPkts) { sgbCpPkts = pkts; sgbCpQuiet = 0; }
+				else ++sgbCpQuiet;
+
+				// Shown AND staying shown: the mask flickers off for single
+				// frames mid-setup, and a capture there is an all-black frame.
+				if (S9xSGBScreenVisible()) ++sgbCpShown; else sgbCpShown = 0;
+
+				if (++sgbCpAge >= kCpMinAge && sgbCpShown >= kCpShown &&
+				    (S9xSGBBootSetupComplete() || sgbCpQuiet >= kCpQuiet))
+				{
+					S9xSGBCaptureSoftResetCheckpoint();
+					sgbCpDone = true;
+				}
+			}
+		}
+		DebugViewers_OnFrame();
+		if (GUI.CursorTimer)
+		{
+			if (--GUI.CursorTimer == 0)
+			{
+				if (GUI.ControllerOption != SNES_SUPERSCOPE && GUI.ControllerOption != SNES_JUSTIFIER && GUI.ControllerOption != SNES_JUSTIFIER_2 && GUI.ControllerOption != SNES_MACSRIFLE)
+					SetCursor(NULL);
+			}
+		}
+#ifdef NETPLAY_SUPPORT
+    }
+#endif
+    if (CPU.Flags & DEBUG_MODE_FLAG)
+    {
+        Settings.Paused = TRUE;
+        Settings.FrameAdvance = false;
+        CPU.Flags &= ~DEBUG_MODE_FLAG;
+    }
+
+	emulating = false;
+}
+
+// The Lua editor's menus and window drags run Windows' modal loops, where the
+// loop in WinMain doesn't: the editor's timer calls this to keep the game going.
+void WinRunFrameInModalLoop (void)
+{
+	if (Settings.StopEmulation || (Settings.Paused && !Settings.FrameAdvance) || Settings.ForcedPause)
+		return;
+	EnsureInputDisplayUpdated();
+	WinEmulateFrame();
+}
+
 int WINAPI WinMain(
 				   HINSTANCE hInstance,
 				   HINSTANCE hPrevInstance,
@@ -5422,8 +5726,6 @@ int WINAPI WinMain(
 	}
 #endif
 
-	DWORD lastTime = timeGetTime();
-
     MSG msg;
 
     while (TRUE)
@@ -5463,286 +5765,7 @@ int WINAPI WinMain(
 			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && (!Settings.FrameAdvance || GUI.FAMute)));
         }
 
-#ifdef NETPLAY_SUPPORT
-        if (!Settings.NetPlay || !NetPlay.PendingWait4Sync ||
-            WaitForSingleObject (GUI.ClientSemaphore, 100) != WAIT_TIMEOUT)
-        {
-            if (NetPlay.PendingWait4Sync)
-            {
-                NetPlay.PendingWait4Sync = FALSE;
-                NetPlay.FrameCount++;
-                S9xNPStepJoypadHistory ();
-            }
-#endif
-			if(watches[0].on)
-			{
-				// copy the memory used by each active watch
-				for(unsigned int i = 0 ; i < sizeof(watches)/sizeof(*watches) ; i++)
-				{
-					if(watches[i].on)
-					{
-						int address = watches[i].address - 0x7E0000;
-						if(address < 0 || address >= 0x32000)
-							continue;
-						const uint8* source = NULL;
-						if(address < 0x20000)
-						{
-							if(Cheat.RAM && address + watches[i].size <= (int)Cheat.ram_size)
-								source = Cheat.RAM + address;
-						}
-						else if(address < 0x30000)
-						{
-							if(Cheat.SRAM && (address - 0x20000) + watches[i].size <= (int)Cheat.sram_size)
-								source = Cheat.SRAM + address - 0x20000;
-						}
-						else
-						{
-							if(Cheat.IRAM && (address - 0x30000) + watches[i].size <= (int)Cheat.iram_size)
-								source = Cheat.IRAM + address - 0x30000;
-						}
-
-						if(source)
-							CopyMemory(Cheat.CWatchRAM + address, source, watches[i].size);
-					}
-				}
-			}
-			if(cheatSearchHWND)
-			{
-				if(timeGetTime() - lastTime >= 100)
-				{
-					SendMessage(cheatSearchHWND, WM_COMMAND, (WPARAM)(IDC_REFRESHLIST),(LPARAM)(NULL));
-					lastTime = timeGetTime();
-				}
-			}
-
-			if(Settings.FrameAdvance)
-			{
-				if(GFX.InfoStringTimeout > 4)
-					GFX.InfoStringTimeout = 4;
-
-				if(!GUI.FASkipsNonInput)
-					Settings.FrameAdvance = false;
-			}
-			if(GUI.FrameAdvanceJustPressed)
-				GUI.FrameAdvanceJustPressed--;
-
-			// Frame Advance mute extends to fast-forward. Full mute (not a
-			// volume cut) so the mixers discard samples as they're produced
-			// instead of banking a turbo backlog that replays on release.
-			if (!Settings.Paused && !Settings.ForcedPause)
-				S9xSetSoundMute(GUI.Mute || (Settings.TurboMode && GUI.FAMute));
-
-			ProcessInput();
-
-			if (GUI.rewindBufferSize
-#ifdef NETPLAY_SUPPORT
-				&& !Settings.NetPlay
-#endif
-#ifdef RETROACHIEVEMENTS_SUPPORT
-				&& !RA_IsHardcoreModeActive()
-#endif
-				) {
-				if (reverseFrameAdvance) {
-					reverseFrameAdvance = false;
-					// Reverse frame advance: pop back to the nearest snapshot at
-					// or before the previous frame, replay the gap hidden, and
-					// let the frame-advance frame below render the target.
-					uint32 target = rewindContentFrame >= 2 ? rewindContentFrame - 2 : 0;
-					uint32 tag = 0, reached = 0;
-					bool popped = false;
-					int ok;
-					while ((ok = stateMan.pop(&tag)) != 0 && tag > target) {
-						reached = tag;
-						popped = true;
-					}
-					if (ok) {
-						rewindContentFrame = tag;
-						if (target > tag) {
-							S9xSetSamplesAvailableCallback(NULL, NULL);
-							while (rewindContentFrame < target) {
-								stateMan.push(rewindContentFrame);
-								IPPU.RenderThisFrame = FALSE;
-								S9xMainLoop();
-								rewindContentFrame++;
-							}
-							S9xSetSamplesAvailableCallback(S9xSoundCallback, NULL);
-							IPPU.RenderThisFrame = TRUE;
-						}
-						stateMan.push(rewindContentFrame);
-					}
-					else if (popped) {
-						// Ring ran dry mid-search: settle on the oldest state.
-						rewindContentFrame = reached;
-						stateMan.push(reached);
-					}
-				}
-				else if (Settings.Rewinding) {
-					uint32 tag;
-					Settings.Rewinding = stateMan.pop(&tag);
-					if (Settings.Rewinding)
-						rewindContentFrame = tag;
-				}
-				else {
-					if (IPPU.TotalEmulatedFrames % GUI.rewindGranularity == 0)
-						stateMan.push(rewindContentFrame);
-				}
-			}
-
-			if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
-			{
-				// Run-ahead: commit 1 hidden frame, save state, run N-1 more hidden frames
-				// to "look into the future", then run the displayed frame as a preview, and
-				// finally restore to the committed state. The displayed frame shows what
-				// the game will look like N frames in the future given the current input,
-				// reducing apparent input latency by N frames.
-				int numAheadFrames = Settings.RunAhead;
-				if (numAheadFrames > 4) numAheadFrames = 4;
-
-				static uint32 runAheadBufSize = 0;
-				static uint8 *runAheadBuf = nullptr;
-
-				// Minimize per-frame overhead:
-				// - drop the ~500KB screenshot from the state
-				// - enable fast path (skips 512KB screen memset + memory zeroing on load)
-				// - detach the sample-available callback during hidden frames so their
-				//   audio never reaches the OS buffer; otherwise we push multiple frames
-				//   of audio per iteration and the buffer fills faster than it drains
-				bool8 savedScreenshots = Settings.SnapshotScreenshots;
-				bool8 savedFast = Settings.FastSavestates;
-				Settings.SnapshotScreenshots = FALSE;
-				Settings.FastSavestates = TRUE;
-
-				// Allocate the state buffer once per session. S9xFreezeSize() is expensive
-				// (it does a full dry-run serialization), so cache the result.
-				if (!runAheadBuf) {
-					runAheadBufSize = S9xFreezeSize();
-					runAheadBuf = new uint8[runAheadBufSize];
-				}
-
-				// Suppress audio output for the hidden frames
-				S9xSetSamplesAvailableCallback(NULL, NULL);
-
-				// Snapshot the resampler so we can undo the hidden frames' effect on it
-				// (preserves hermite filter continuity across iterations)
-				S9xRunAheadSaveAudio();
-
-				Settings.InRunAhead = TRUE;
-
-				// First hidden frame: the "commit" frame — its state gets saved and
-				// becomes the starting point of the next iteration
-				IPPU.RenderThisFrame = FALSE;
-				S9xMainLoop();
-
-				// Save state at end of the committed frame
-				S9xFreezeGameMem(runAheadBuf, runAheadBufSize);
-
-				// Additional hidden frames (peek further into the future)
-				for (int i = 1; i < numAheadFrames; i++)
-				{
-					IPPU.RenderThisFrame = FALSE;
-					S9xMainLoop();
-				}
-
-				Settings.InRunAhead = FALSE;
-
-				// Restore resampler state so the displayed frame's output flows on
-				// directly from the previous displayed frame's output
-				S9xRunAheadLoadAudio();
-
-				// Re-enable audio output for the displayed frame
-				S9xSetSamplesAvailableCallback(S9xSoundCallback, NULL);
-
-				// Displayed "preview" frame: renders and throttles normally
-				IPPU.RenderThisFrame = TRUE;
-				S9xMainLoop();
-
-				// Restore to end-of-committed-frame so next iteration starts from there
-				S9xUnfreezeGameMem(runAheadBuf, runAheadBufSize);
-
-				Settings.SnapshotScreenshots = savedScreenshots;
-				Settings.FastSavestates = savedFast;
-			}
-			else
-			{
-				S9xMainLoop();
-			}
-#ifdef RETROACHIEVEMENTS_SUPPORT
-			{
-				// Suspend achievement processing whenever remote inputs are
-				// part of the emulation — unlocks can't be attributed.
-				bool raNetplayActive = false;
-#ifdef NETPLAY_SUPPORT
-				if (Settings.NetPlay || Settings.NetPlayServer)
-					raNetplayActive = true;
-#endif
-#ifdef KAILLERA_SUPPORT
-				if (KailleraClientIsPlaying())
-					raNetplayActive = true;
-#endif
-				RA_SetNetplayActive(raNetplayActive);
-				RA_DoFrame();
-			}
-#endif
-			GUI.FrameCount++;
-			rewindContentFrame++;
-			if (Settings.SGB_BIOSModeActive)
-			{
-				// Where a soft reset should land: the cart's border up and its title
-				// on screen. Waiting for the packet stream to fall quiet instead put
-				// the checkpoint wherever the game next went silent - mid-intro.
-				const uint32 kCpMinAge = 240;   // clear the BIOS splash first
-				const uint32 kCpQuiet  = 30;    // no packets = setup finished
-				const uint32 kCpShown  = 150;   // up and staying up: title, not blank
-				static bool   sgbCpDone  = false;
-				static uint32 sgbCpPkts  = 0;
-				static uint32 sgbCpAge   = 0;
-				static uint32 sgbCpQuiet = 0;
-				static uint32 sgbCpShown = 0;
-				if (!S9xSGBBootHandoffCaptured())
-				{
-					S9xSGBInvalidateSoftResetCheckpoint();
-					sgbCpDone  = false;
-					sgbCpPkts  = S9xSGBGetPacketCount();
-					sgbCpAge   = 0;
-					sgbCpQuiet = 0;
-					sgbCpShown = 0;
-				}
-				else if (!sgbCpDone)
-				{
-					const uint32 pkts = S9xSGBGetPacketCount();
-					if (pkts != sgbCpPkts) { sgbCpPkts = pkts; sgbCpQuiet = 0; }
-					else ++sgbCpQuiet;
-
-					// Shown AND staying shown: the mask flickers off for single
-					// frames mid-setup, and a capture there is an all-black frame.
-					if (S9xSGBScreenVisible()) ++sgbCpShown; else sgbCpShown = 0;
-
-					if (++sgbCpAge >= kCpMinAge && sgbCpShown >= kCpShown &&
-					    (S9xSGBBootSetupComplete() || sgbCpQuiet >= kCpQuiet))
-					{
-						S9xSGBCaptureSoftResetCheckpoint();
-						sgbCpDone = true;
-					}
-				}
-			}
-			DebugViewers_OnFrame();
-			if (GUI.CursorTimer)
-			{
-				if (--GUI.CursorTimer == 0)
-				{
-					if (GUI.ControllerOption != SNES_SUPERSCOPE && GUI.ControllerOption != SNES_JUSTIFIER && GUI.ControllerOption != SNES_JUSTIFIER_2 && GUI.ControllerOption != SNES_MACSRIFLE)
-						SetCursor(NULL);
-				}
-			}
-#ifdef NETPLAY_SUPPORT
-        }
-#endif
-        if (CPU.Flags & DEBUG_MODE_FLAG)
-        {
-            Settings.Paused = TRUE;
-            Settings.FrameAdvance = false;
-            CPU.Flags &= ~DEBUG_MODE_FLAG;
-        }
+        WinEmulateFrame ();
     }
 
 loop_exit:

@@ -388,6 +388,9 @@ struct sGUI {
 
 	// Lua editor: a script that errors stops in the debugger.
 	bool LuaBreakOnError;
+
+	// Lua editor: the bottom panel's height in pixels, 0 for the default.
+	int LuaPanelHeight;
 };
 
 //TURBO masks
@@ -717,6 +720,7 @@ int GetFilterScale(RenderFilter filterID);
 bool GetFilterHiResSupport(RenderFilter filterID);
 const TCHAR * S9xGetDirectoryT (enum s9x_getdirtype);
 RECT GetWindowMargins(HWND hwnd, UINT width);
+void WinRunFrameInModalLoop();	// one frame from inside a window's modal loop (menu, drag)
 void WinApplyResizeLock();
 void WinApplyAlwaysOnTop();
 void WinApplyContentWindowSize();

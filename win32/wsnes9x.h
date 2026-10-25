@@ -81,6 +81,10 @@ extern int GBLinkLauncherIndex;
 // spawned instances. Persisted; consulted at session start.
 extern bool GBLinkSplitScreen;
 
+// Link Cable > Reset on Link / Reset on Unlink. Persisted.
+extern bool GBLinkResetOnLink;
+extern bool GBLinkResetOnUnlink;
+
 // True on a thread that is a Super Game Boy seat's own SNES (see
 // GBSeatMachine): the frame hooks the core calls from S9xMainLoop - blit,
 // pacing, SRAM autosave - belong to the master and do nothing here.

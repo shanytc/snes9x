@@ -1560,6 +1560,9 @@ BEGIN
                 MENUITEM "&2 Players",                  ID_EMULATION_GB_LINK_IR,MFT_STRING,MFS_ENABLED
             END
             MENUITEM MFT_SEPARATOR
+            MENUITEM "&Reset on Link",              ID_EMULATION_GB_LINK_RESET_ON_LINK,MFT_STRING,MFS_ENABLED
+            MENUITEM "Reset on U&nlink",            ID_EMULATION_GB_LINK_RESET_ON_UNLINK,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
             MENUITEM "&Unlink",                     ID_EMULATION_GB_LINK_UNLINK,MFT_STRING,MFS_ENABLED
         END
         POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED

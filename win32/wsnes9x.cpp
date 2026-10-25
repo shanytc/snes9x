@@ -3593,6 +3593,12 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_LINK_UNLINK:
 			WinGBLinkUnlink ();
 			break;
+		case ID_EMULATION_GB_LINK_RESET_ON_LINK:
+			GBLinkResetOnLink = !GBLinkResetOnLink;
+			break;
+		case ID_EMULATION_GB_LINK_RESET_ON_UNLINK:
+			GBLinkResetOnUnlink = !GBLinkResetOnUnlink;
+			break;
 		case ID_EMULATION_GB_LINK_SPLIT:
 			WinToggleGBLinkSplit ();
 			break;
@@ -7273,6 +7279,10 @@ static void CheckMenuStates ()
 			// that the ticked player count doubles as the leave button.
 			mii.fState = gblink ? MFS_ENABLED : MFS_DISABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_UNLINK, FALSE, &mii);
+			mii.fState = GBLinkResetOnLink ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_RESET_ON_LINK, FALSE, &mii);
+			mii.fState = GBLinkResetOnUnlink ? MFS_CHECKED : MFS_UNCHECKED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_RESET_ON_UNLINK, FALSE, &mii);
 
 			// The whole Current Game submenu greys during an Other session.
 			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
@@ -14699,6 +14709,10 @@ int GBLinkUserModel     = -1;
 // the next click of a players item does.
 bool GBLinkSplitScreen = false;
 
+// Power-cycle the master when a session starts / ends. Seats always boot fresh.
+bool GBLinkResetOnLink   = true;
+bool GBLinkResetOnUnlink = true;
+
 // Each player's Game Boy Model, indexed by player number. A session opens
 // every seat on the console the master loaded; this is how one seat is told
 // to be another - a plain Game Boy on the cable of a Super Game Boy session,
@@ -15039,7 +15053,7 @@ static void WinGBLinkUnlink ()
 	}
 	else
 		return;   // nothing live to leave
-	if (other) return;   // the master's own game plays on where it was
+	if (other || !GBLinkResetOnUnlink) return;   // the master's own game plays on where it was
 
 	// The master is alone again with a game that was mid-link. Hard, for
 	// the reason the session started hard: a warm reset landing mid-boot
@@ -15353,7 +15367,7 @@ static void WinStartGBLink (int mode, int players)
 	// mid-boot leaves the game's RAM half-initialized and its link
 	// engine dead (Death Track's seats went white on exactly that). An
 	// other-game link joins wherever each game already is.
-	if (mode == GBLINK_SAME &&
+	if (mode == GBLINK_SAME && GBLinkResetOnLink &&
 	    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
 		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
@@ -15406,7 +15420,7 @@ void WinToggleGBLink (int mode, int players)
 			// started hard: a warm reset landing mid-boot strands the game
 			// with a dead link engine.
 			// Another game plays on where it was.
-			if (!Settings.GBLinkPeerInstance && live == GBLINK_SAME)
+			if (!Settings.GBLinkPeerInstance && live == GBLINK_SAME && GBLinkResetOnUnlink)
 				PostMessage (GUI.hWnd, WM_COMMAND,
 				             MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 			return;
@@ -16710,7 +16724,7 @@ static void WinStartGBSplit (int players)
 	// Hard, for the same reason as the socket session: a warm reset
 	// landing mid-boot strands a game with a dead link engine. Another
 	// game joins the master wherever its game is.
-	if (!GBLinkOtherRom[0])
+	if (!GBLinkOtherRom[0] && GBLinkResetOnLink)
 		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	char msg[64];
@@ -16817,7 +16831,7 @@ static void WinStartGBViewerSession (int players)
 
 	// All consoles power up together — hard, so no seat boots from
 	// half-initialized RAM. Another game joins the master wherever its game is.
-	if (!GBLinkOtherRom[0])
+	if (!GBLinkOtherRom[0] && GBLinkResetOnLink)
 		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	char msg[64];

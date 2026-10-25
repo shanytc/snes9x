@@ -17,14 +17,13 @@ Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for a
 - Event carts - PowerFest '94, Nintendo Campus Challenge '92
 - Kaillera Server/Client
 - RetroAchievements (without Hardcore)
-- Lua Scripting - SuperSnes9x API, Editor & Debugger
 - Wide-SNES - Supports the widescreen SMW ROM hack by [Vitor Vilela](https://github.com/VitorVilela7/wide-snes)
 - PPU Sprite/Tile/Tiles viewers (SNES, GB, GBC, SGB)
 - Audio waveform viewer (Logic-style per-channel tracks, solo/mute, level meters)
 - Enhanced Cheat Search / Cheat Editor (SNES, GB — incl. GB cheats in SGB BIOS mode)
 - Multi-Bind-Controller support
 - Run-Ahead (Input lag reduction)
-- [Lua scripting](docs/lua-scripting.md) - File > Script > Lua: an editor with a console and API reference; scripts read and write memory, hook CPU accesses, draw on screen, drive input and savestates (Qt, GTK, Windows)
+- [Lua scripting](docs/lua-scripting.md) - SuperSnes9x API, Editor & Debugger
 - Color Correction Support / Native CRT Colors
 - SDL Support
 - Multi-Language Pack

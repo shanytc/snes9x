@@ -73,8 +73,7 @@ BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent)
     auto layout = new QVBoxLayout;
     columns->addLayout(layout, 1);
 
-    auto intro = new QLabel(tr("Swipe a card through the Barcode Battler II on controller port 2. "
-                               "Enter its 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) "
+    auto intro = new QLabel(tr("Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) "
                                "barcode, pick a known card, or read it with a camera or from a picture."));
     intro->setWordWrap(true);
     layout->addWidget(intro);

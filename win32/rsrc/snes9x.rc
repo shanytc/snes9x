@@ -748,7 +748,7 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTI
 CAPTION "Barcode Battler II"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "Swipe a card through the Barcode Battler II on controller port 2. Enter its 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture.",IDC_STATIC,6,6,288,26
+    LTEXT           "Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture.",IDC_STATIC,6,6,288,26
     RTEXT           "Barcode:",IDC_STATIC,6,38,34,8
     EDITTEXT        IDC_BARCODE_EDIT,44,36,132,14,ES_AUTOHSCROLL
     PUSHBUTTON      "&Random",IDC_BARCODE_RANDOM,180,36,50,14

@@ -570,6 +570,7 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 			g_photoCard = nullptr;
 			g_photos.clear();
 			SendDlgItemMessage(hDlg, IDC_BARCODE_EDIT, EM_SETLIMITTEXT, 20, 0);
+			SendDlgItemMessage(hDlg, IDC_BARCODE_EDIT, EM_SETCUEBANNER, TRUE, (LPARAM)L"Type your barcode");
 			SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, S9xBarcodeBattlerLastCode());
 
 			std::vector<std::wstring> names;

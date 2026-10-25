@@ -100,8 +100,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         content->pack_start(*columns, Gtk::PACK_EXPAND_WIDGET);
 
         auto intro = Gtk::manage(new Gtk::Label(
-            _("Swipe a card through the Barcode Battler II on controller port 2. "
-              "Enter its 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) "
+            _("Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) "
               "barcode, pick a known card, or read it with a camera or from a picture.")));
         intro->set_line_wrap(true);
         intro->set_max_width_chars(60);

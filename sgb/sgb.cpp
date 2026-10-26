@@ -4883,9 +4883,7 @@ bool S9xSGBCartIsFaceball(void)
 bool S9xSGBCartHasGbKiss(void)
 {
 	SGB::Emulator &prim = SGB::Instance();
-	if (!prim.HasROM()) return false;
-	const SGB::MbcType t = prim.DebugImpl()->cart.mbc.type;
-	return t == SGB::MbcType::HuC1 || t == SGB::MbcType::HuC3;
+	return prim.HasROM() && SGB::CartHasIrPort(prim.DebugImpl()->cart);
 }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }

@@ -6993,14 +6993,14 @@ static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT anchor_id, int 
 	}
 }
 
-// Link Cable > Infra-Red for a game in Game Boy Color mode, GB KISS for a
-// HuC1/HuC3 cart: above Reset on Link, with a separator of their own.
+// Link Cable > Infra-Red for a game in Game Boy Color mode (never under a Super
+// Game Boy), GB KISS for a Hudson IR cart: above Reset on Link, own separator.
 static void GBLinkSyncIrItems (HMENU link)
 {
 	if (!link) return;
 	static const UINT   ids[2]    = { ID_EMULATION_GB_LINK_IR, ID_EMULATION_GB_LINK_KISS };
 	static const TCHAR *labels[2] = { TEXT("&Infra-Red"), TEXT("GB &KISS") };
-	const bool want[2] = { S9xSGBIsCgb (), S9xSGBCartHasGbKiss () };
+	const bool want[2] = { S9xSGBIsCgb () && !Settings.SGB_BIOSModeActive, S9xSGBCartHasGbKiss () };
 	bool same = true;
 	for (int i = 0; i < 2; i++)
 		same = same && (GetMenuState (link, ids[i], MF_BYCOMMAND) != (UINT)-1) == want[i];
@@ -14763,8 +14763,8 @@ bool GBLinkSplitScreen = false;
 bool GBLinkResetOnLink   = true;
 bool GBLinkResetOnUnlink = true;
 
-// Players 1 and 2 face each other: the GBC port / the HuC1-HuC3 cart LED.
-bool GBLinkInfrared = false;
+// Players 1 and 2 face each other: the GBC port (on unless unticked) / the cart LED.
+bool GBLinkInfrared = true;
 bool GBLinkGbKiss   = false;
 
 // Each player's Game Boy Model, indexed by player number. A session opens

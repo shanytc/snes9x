@@ -1030,4 +1030,23 @@ bool CartLoadBattery(Cart &c)
 	return CartLoadBatteryFromPath(c, sav.c_str());
 }
 
+bool CartHasIrPort(const Cart &c)
+{
+	// gbkiss.org/cart, each also carrying Hudson's IR send routine: the GB KISS
+	// menu games, then the ones that only use the port for their own link.
+	// Pocket Family GB2 is HuC-3 with no port; Pro Action Replay forges $FF.
+	static const struct { const char *title, *code; } kIrCarts[] = {
+		{ "GBKISS MINIGAME" }, { "SUPER B DAMAN" }, { "POKEBOM" }, { "NECTARIS GB" },
+		{ "MIRACLE OF ZONE" }, { "POCKET_FAMILY" }, { "ROBOPON SAMPLE" }, { "ROBOPON SUN" },
+		{ "ROBOPON STAR" }, { "ROBO MOON" }, { "ROBO BOM" },
+		{ "SS SPINNER" }, { "POKEMON CARD GB" }, { "SUN", "HREE" }, { "STAR", "HRCE" },
+	};
+	if (c.mbc.type != MbcType::HuC1 && c.mbc.type != MbcType::HuC3) return false;
+	for (const auto &e : kIrCarts)
+		if (std::strcmp(c.header.title, e.title) == 0 &&
+		    (!e.code || (c.rom.size() >= 0x143 && std::memcmp(&c.rom[0x13F], e.code, 4) == 0)))
+			return true;
+	return false;
+}
+
 } // namespace SGB

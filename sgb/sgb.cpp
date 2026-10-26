@@ -23,6 +23,7 @@
 #include "gb_joypad.h"
 #include "gb_serial.h"
 #include "gb_infrared.h"
+#include "gb_kisslink.h"
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
@@ -3455,7 +3456,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 //      load them from fixed defaults instead of the pre-load session's.
 // v12: add mem.rp, the Game Boy Color infrared port.
 // v13: add mem.cart_ir, the HuC1 cartridge's infrared LED.
-constexpr uint32_t SGB_STATE_VERSION = 13;
+// v14: add the GB KISS LINK's progress through its job.
+constexpr uint32_t SGB_STATE_VERSION = 14;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3796,6 +3798,15 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 	// v13: the HuC1 cartridge's infrared LED.
 	if (c.version >= 13)
 		IoField(c, impl.mem.cart_ir);
+
+	// v14: the GB KISS LINK facing this cart, mid-job or not.
+	if (c.version >= 14)
+	{
+		std::vector<uint8_t> link(KissLinkStateBytes());
+		if (c.mode == IoMode::Save) KissLinkStateSave(impl.mem, link.data());
+		IoBytes(c, link.data(), link.size());
+		if (c.mode == IoMode::Load && c.ok) KissLinkStateLoad(impl.mem, link.data());
+	}
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
@@ -4885,6 +4896,64 @@ bool S9xSGBCartHasGbKiss(void)
 {
 	SGB::Emulator &prim = SGB::Instance();
 	return prim.HasROM() && SGB::CartHasIrPort(prim.DebugImpl()->cart);
+}
+
+bool S9xSGBCartHasKissMenu(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	return prim.HasROM() && SGB::CartHasKissMenu(prim.DebugImpl()->cart);
+}
+
+bool S9xSGBCartIsNectaris(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	return prim.HasROM() && SGB::KissLinkIsNectaris(prim.DebugImpl()->mem);
+}
+
+bool S9xSGBKissLinkStart(int kind, const uint8_t *data, size_t size, const char **error)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) { if (error) *error = "no game is running"; return false; }
+	SGB::Memory &mem = prim.DebugImpl()->mem;
+	switch (kind)
+	{
+	case S9X_KISSLINK_SEND_FILE:
+		return SGB::KissLinkStart(mem, SGB::KissJob::SendFile, data, size, error);
+	case S9X_KISSLINK_SEND_MAP:
+	{
+		// Hudson's PC maps convert on the way, as UnitEdit did; a record goes as is.
+		uint8_t rec[SGB::kNectarisMapBytes];
+		if (!SGB::KissLinkIsMapRecord(data, size))
+		{
+			if (!SGB::KissLinkNmdToMap(mem, data, size, rec, error)) return false;
+			data = rec;
+			size = sizeof rec;
+		}
+		return SGB::KissLinkStart(mem, SGB::KissJob::SendMap, data, size, error);
+	}
+	case S9X_KISSLINK_RECEIVE_MAP:
+		return SGB::KissLinkStart(mem, SGB::KissJob::ReceiveMap, nullptr, 0, error);
+	default:
+		if (error) *error = "nothing to do";
+		return false;
+	}
+}
+
+void S9xSGBKissLinkCancel(void) { SGB::KissLinkCancel(); }
+
+int S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char **error)
+{
+	const SGB::KissProgress p = SGB::KissLinkProgress();
+	if (kind)    *kind    = static_cast<int>(p.job);
+	if (percent) *percent = p.percent;
+	if (serial)  *serial  = p.serial;
+	if (error)   *error   = p.error;
+	return static_cast<int>(p.status);
+}
+
+bool S9xSGBKissLinkReceivedMap(uint8_t *out)
+{
+	return SGB::KissLinkReceivedMap(out);
 }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }

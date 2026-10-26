@@ -129,6 +129,8 @@ bool RocketBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out);
 
 // A Hudson cart with its own infrared LED and sensor (GB KISS, gbkiss.org/cart).
 bool CartHasIrPort(const Cart &c);
+// ... whose GB KISS menu takes files (from another cart or the GB KISS LINK).
+bool CartHasKissMenu(const Cart &c);
 
 } // namespace SGB
 

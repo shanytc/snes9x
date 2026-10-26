@@ -9,6 +9,7 @@
 
 #include "gb_infrared.h"
 #include "gb_cart.h"
+#include "gb_kisslink.h"
 #include "gb_memory.h"
 #include "gb_ppu.h"
 
@@ -158,15 +159,18 @@ bool IrCartSelected(const Memory &m)
 // for light gives up after 256 polls, so a steady LED never outlasts its reads.
 uint8_t IrReadCart(const Memory &m)
 {
+	const uint8_t base = (m.cart && m.cart->mbc.type == MbcType::HuC1) ? 0xC0 : 0x00;
+	if (KissLinkFacing(m))
+		return static_cast<uint8_t>(base | (KissLinkLit(m) ? 0x01 : 0x00));
 	const int s = SeatOf(m);
 	const bool lit = s >= 0 && g_cart_on &&
 	                 LevelAt(g_seat[1 - s].cart, Now(s, m) - kCartSensorDots, g_ir[1 - s]->cart_ir & 0x01, nullptr);
-	const uint8_t base = (m.cart && m.cart->mbc.type == MbcType::HuC1) ? 0xC0 : 0x00;
 	return static_cast<uint8_t>(base | (lit ? 0x01 : 0x00));
 }
 
 void IrWriteCart(Memory &m, uint8_t value)
 {
+	KissLinkCartLed(m, value & 0x01);
 	const int s = SeatOf(m);
 	if (s >= 0) Record(g_seat[s].cart, Now(s, m), value & 0x01);
 	m.cart_ir = static_cast<uint8_t>(value & 0x01);

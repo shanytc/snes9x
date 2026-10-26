@@ -17,6 +17,8 @@ namespace SGB {
 namespace {
 
 Memory *g_ir[2] = { nullptr, nullptr };
+bool    g_port_on = false;   // the Game Boy Color port (Infra-Red)
+bool    g_cart_on = false;   // HuC1/HuC3 cart LEDs (GB KISS)
 
 // The sensor adapts to a steady light and reads "normal" again after ~3 ms.
 constexpr int64_t kIrFadeDots = 12583;
@@ -47,18 +49,25 @@ bool IrPaired()
 	return g_ir[0] != nullptr;
 }
 
+void IrSetMedia(bool port, bool cart)
+{
+	g_port_on = port;
+	g_cart_on = cart;
+}
+
 bool IrActive()
 {
 	if (!g_ir[0]) return false;
 	for (const Memory *m : g_ir)
-		if ((m->rp & 0xC1) || (m->cart_ir & 0x01) || IrCartSelected(*m)) return true;
+		if ((g_port_on && (m->rp & 0xC1)) ||
+		    (g_cart_on && ((m->cart_ir & 0x01) || IrCartSelected(*m)))) return true;
 	return false;
 }
 
 uint8_t IrReadRP(const Memory &m)
 {
 	uint8_t v = static_cast<uint8_t>((m.rp & 0xC1) | 0x3E);
-	if ((m.rp & 0xC0) != 0xC0) return v;
+	if ((m.rp & 0xC0) != 0xC0 || !g_port_on) return v;
 	const Memory *p = Facing(m);
 	if (p && (p->rp & 0x01) && p->ppu && p->ppu->t_cycles - p->rp_lit_at < kIrFadeDots)
 		v = static_cast<uint8_t>(v & ~0x02);
@@ -74,15 +83,19 @@ void IrWriteRP(Memory &m, uint8_t value)
 
 bool IrCartSelected(const Memory &m)
 {
-	return m.cart && m.cart->mbc.type == MbcType::HuC1 && !m.cart->mbc.ram_enable;
+	if (!m.cart) return false;
+	if (m.cart->mbc.type == MbcType::HuC1) return !m.cart->mbc.ram_enable;
+	return m.cart->mbc.type == MbcType::HuC3 && m.cart->mbc.rtc_select == 0x0E;
 }
 
 // No fade here: Chousoku Spinner's pulses are at most ~560 dots and every wait
 // for light gives up after 256 polls, so a steady LED never outlasts its reads.
 uint8_t IrReadCart(const Memory &m)
 {
-	const Memory *p = Facing(m);
-	return (p && (p->cart_ir & 0x01)) ? 0xC1 : 0xC0;
+	const Memory *p = g_cart_on ? Facing(m) : nullptr;
+	const uint8_t lit  = (p && (p->cart_ir & 0x01)) ? 0x01 : 0x00;
+	const uint8_t base = (m.cart && m.cart->mbc.type == MbcType::HuC1) ? 0xC0 : 0x00;
+	return static_cast<uint8_t>(base | lit);
 }
 
 void IrWriteCart(Memory &m, uint8_t value)

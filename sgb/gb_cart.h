@@ -127,6 +127,9 @@ bool SachenBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out);
 // boots read it raw and fail — the carts are GBC-only, as on hardware.
 bool RocketBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out);
 
+// A Hudson cart with its own infrared LED and sensor (GB KISS, gbkiss.org/cart).
+bool CartHasIrPort(const Cart &c);
+
 } // namespace SGB
 
 void S9xGBSetCameraCallback(bool (*cb)(unsigned char *dst, int width, int height));

@@ -6747,12 +6747,14 @@ static void UpdateHardwarePopups ()
 	// Resource order; `has` is a command inside the popup, 0 for the separator.
 	struct Entry { UINT has; const TCHAR *text; UINT id; HMENU sub; bool shown; };
 	static Entry s_entries[] = {
-		{ ID_NSS_COIN1,            TEXT("&Nintendo Super System") },
-		{ ID_SFCBOX_COIN,          TEXT("Super &Famicom Box") },
-		{ ID_SUPERDISC_INSERT,     TEXT("Super &Disc") },
-		{ 0,                       NULL },
-		{ ID_DEBUG_VRAM_VIEWER,    TEXT("&S-PPU") },
-		{ ID_DEBUG_GB_TILE_VIEWER, TEXT("&GB-PPU") },
+		{ ID_NSS_COIN1,              TEXT("&Nintendo Super System") },
+		{ ID_SFCBOX_COIN,            TEXT("Super &Famicom Box") },
+		{ ID_SUPERDISC_INSERT,       TEXT("Super &Disc") },
+		{ 0,                         NULL },
+		{ ID_EMULATION_RUNAHEAD_OFF, TEXT("Run &Ahead") },
+		{ 0,                         NULL },
+		{ ID_DEBUG_VRAM_VIEWER,      TEXT("&S-PPU") },
+		{ ID_DEBUG_GB_TILE_VIEWER,   TEXT("&GB-PPU") },
 	};
 	static HMENU s_parent = NULL;
 	static int   s_first  = 0;   // NSS's slot while Link Cable, Game Boy Model and RTC are hidden
@@ -6795,8 +6797,11 @@ static void UpdateHardwarePopups ()
 	const bool gb   = rom && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
 	// SGB BIOS mode runs the real S-PPU too, so an SGB game gets both.
 	const bool snes = rom && (!Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+	// Run Ahead's own divider only under a hardware popup: with none, the one
+	// below Hard Reset already sits above it.
+	const bool hw = above(s_parent) > 0 || NSS.Active || SFCBox.Active || Settings.SuperDisc;
 	const bool want[] = { NSS.Active != 0, SFCBox.Active != 0, Settings.SuperDisc != 0,
-	                      snes || gb, snes, gb };
+	                      hw, true, snes || gb, snes, gb };
 
 	int  pos     = s_first + above(s_parent);
 	bool changed = false;
@@ -6926,9 +6931,9 @@ static void HookDipMenu (bool on)
 }
 
 // Show or hide a whole submenu, the way the BIOS one below does inline.
-// Placement is "before before_id" because an absolute index would drift
-// under the BIOS submenu, which is itself inserted and removed.
-static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT before_id,
+// Placement is `offset` items after anchor_id, which never comes and goes,
+// because an absolute index drifts as the popups around it do.
+static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT anchor_id, int offset,
                                bool visible, HMENU *cached, HMENU *parent)
 {
 	if (!*cached)
@@ -6972,7 +6977,12 @@ static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT before_id,
 		ins.dwTypeData = (LPTSTR)label;
 		ins.cch        = (UINT)_tcslen (label);
 
-		InsertMenuItem (*parent, before_id, FALSE, &ins);
+		int at = -1;
+		const int n = GetMenuItemCount (*parent);
+		for (int j = 0; j < n && at < 0; j++)
+			if (GetMenuItemID (*parent, j) == anchor_id) at = j;
+		if (at < 0) return;
+		InsertMenuItem (*parent, (UINT)(at + offset), TRUE, &ins);
 		if (LocaleIsTranslated ()) LocalizeMenu (*parent);
 		DrawMenuBar (GUI.hWnd);
 	}
@@ -7241,8 +7251,9 @@ static void CheckMenuStates ()
 		                   !sgb1_bios && !GBLinkBlockedBySgbc ()) ||
 		                  S9xSGBLinkIsEnabled () ||
 		                  Settings.GBLinkPeerInstance;
+		// First under the divider below Hard Reset, above Game Boy Model.
 		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("&Link Cable"),
-		                   ID_EMULATION_RUNAHEAD_POPUP, show, &s_link_hmenu, &s_link_parent);
+		                   ID_EMULATION_HARD_RESET, 2, show, &s_link_hmenu, &s_link_parent);
 
 		// A spawned instance never chooses the session shape — only the
 		// master does. Its menu is rebuilt once into plain Connect and
@@ -7498,19 +7509,19 @@ static void CheckMenuStates ()
 				TCHAR txt[]    = TEXT("Game &Boy Model");
 				ins.dwTypeData = txt;
 				ins.cch        = (UINT)_tcslen(txt);
-				// anchor after Run Ahead: the cached index drifts when the
-				// Link Cable popup above it comes and goes
+				// anchor under the divider below Hard Reset, after Link Cable
+				// when it is up: the cached index drifts as that one comes and goes
 				UINT pos = s_bios_pos;
 				const UINT count = (UINT)GetMenuItemCount(s_bios_parent);
 				for (UINT j = 0; j < count; j++)
 				{
-					MENUITEMINFO probe = {};
-					probe.cbSize = sizeof(probe);
-					probe.fMask  = MIIM_ID;
-					if (GetMenuItemInfo(s_bios_parent, j, TRUE, &probe) &&
-					    probe.wID == ID_EMULATION_RUNAHEAD_POPUP)
+					if (GetMenuItemID(s_bios_parent, (int)j) == ID_EMULATION_HARD_RESET)
 					{
-						pos = j + 1;
+						MENUITEMINFO probe = {};
+						probe.cbSize = sizeof(probe);
+						probe.fMask  = MIIM_ID;
+						pos = j + 2 + (GetMenuItemInfo(s_bios_parent, ID_EMULATION_GB_LINK,
+						                               FALSE, &probe) ? 1 : 0);
 						break;
 					}
 				}
@@ -7527,6 +7538,9 @@ static void CheckMenuStates ()
 			}
 		}
 		UpdateRtcPopup(gb_loaded && S9xSGBCartHasClock());
+		// Again, now that Link Cable, Game Boy Model and Real Time Clock are
+		// settled: Run Ahead's divider follows them.
+		UpdateHardwarePopups();
 
 		UpdateTestsMenu();
 

@@ -1560,14 +1560,6 @@ BEGIN
             MENUITEM MFT_SEPARATOR
             MENUITEM "&Unlink",                     ID_EMULATION_GB_LINK_UNLINK,MFT_STRING,MFS_ENABLED
         END
-        POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED
-        BEGIN
-            MENUITEM "&0 (off)",                    ID_EMULATION_RUNAHEAD_OFF,MFT_STRING,MFS_ENABLED
-            MENUITEM "&1 frame",                    ID_EMULATION_RUNAHEAD_1,MFT_STRING,MFS_ENABLED
-            MENUITEM "&2 frames",                   ID_EMULATION_RUNAHEAD_2,MFT_STRING,MFS_ENABLED
-            MENUITEM "&3 frames",                   ID_EMULATION_RUNAHEAD_3,MFT_STRING,MFS_ENABLED
-            MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
-        END
         POPUP "Game &Boy Model",                ID_EMULATION_BIOS,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Game Boy",                   (ID_EMULATION_BIOS_POLICY0+0),MFT_STRING,MFS_ENABLED
@@ -1654,6 +1646,15 @@ BEGIN
             MENUITEM "&Eject Disc",                 ID_SUPERDISC_EJECT,MFT_STRING,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
             MENUITEM "&Debug Menu",                 ID_SUPERDISC_DEBUGMENU,MFT_STRING,MFS_ENABLED
+        END
+        MENUITEM MFT_SEPARATOR
+        POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&0 (off)",                    ID_EMULATION_RUNAHEAD_OFF,MFT_STRING,MFS_ENABLED
+            MENUITEM "&1 frame",                    ID_EMULATION_RUNAHEAD_1,MFT_STRING,MFS_ENABLED
+            MENUITEM "&2 frames",                   ID_EMULATION_RUNAHEAD_2,MFT_STRING,MFS_ENABLED
+            MENUITEM "&3 frames",                   ID_EMULATION_RUNAHEAD_3,MFT_STRING,MFS_ENABLED
+            MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
         END
         MENUITEM MFT_SEPARATOR
         POPUP "&S-PPU",                         0,MFT_STRING,MFS_ENABLED

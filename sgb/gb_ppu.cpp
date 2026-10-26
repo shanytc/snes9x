@@ -62,6 +62,7 @@
 #include "gb_knob.h"
 #include "gb_cart.h"
 #include "gb_joypad.h"
+#include "gb_kisslink.h"
 #include "gb_cpu.h"
 #include "sgb.h"
 
@@ -1848,6 +1849,7 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 				p.wy_triggered  = false;
 				p.vblank_irq_at = p.t_cycles + GB_VBLANK_IRQ_OFFSET;
 				if (p.icd_feed) S9xSGBOnPpuVBlank();
+				KissLinkFrame(mem);
 			}
 			else
 			{

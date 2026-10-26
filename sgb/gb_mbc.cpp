@@ -1149,7 +1149,7 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 	{
 		// HuC1 routes this window between cart RAM and the IR register.
 		// ram_enable doubles as the RAM/IR select (true = RAM, false = IR).
-		// With no link partner the IR sensor idles at $C0 (no light).
+		// CPU reads in IR mode go to gb_infrared.cpp; here it reads no light.
 		if (s.type == MbcType::HuC1)
 		{
 			if (!s.ram_enable) return 0xC0;
@@ -1996,7 +1996,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
-			// RAM mode → cart RAM; IR mode → IR LED, which we discard.
+			// RAM mode → cart RAM; IR-mode writes drive the LED in gb_infrared.cpp.
 			if (!s.ram_enable) break;
 			WriteSram(c, ((s.ram_bank & 0x03) * 0x2000u) + (addr - 0xA000u), value);
 		}

@@ -8,6 +8,7 @@
 // seen, only while bits 6-7 enable reading), 2-5 read 1.
 
 #include "gb_infrared.h"
+#include "gb_cart.h"
 #include "gb_memory.h"
 #include "gb_ppu.h"
 
@@ -48,7 +49,10 @@ bool IrPaired()
 
 bool IrActive()
 {
-	return g_ir[0] && ((g_ir[0]->rp | g_ir[1]->rp) & 0xC1);
+	if (!g_ir[0]) return false;
+	for (const Memory *m : g_ir)
+		if ((m->rp & 0xC1) || (m->cart_ir & 0x01) || IrCartSelected(*m)) return true;
+	return false;
 }
 
 uint8_t IrReadRP(const Memory &m)
@@ -66,6 +70,24 @@ void IrWriteRP(Memory &m, uint8_t value)
 	if ((value & 0x01) && !(m.rp & 0x01))
 		m.rp_lit_at = m.ppu ? m.ppu->t_cycles : 0;
 	m.rp = static_cast<uint8_t>(value & 0xC1);
+}
+
+bool IrCartSelected(const Memory &m)
+{
+	return m.cart && m.cart->mbc.type == MbcType::HuC1 && !m.cart->mbc.ram_enable;
+}
+
+// No fade here: Chousoku Spinner's pulses are at most ~560 dots and every wait
+// for light gives up after 256 polls, so a steady LED never outlasts its reads.
+uint8_t IrReadCart(const Memory &m)
+{
+	const Memory *p = Facing(m);
+	return (p && (p->cart_ir & 0x01)) ? 0xC1 : 0xC0;
+}
+
+void IrWriteCart(Memory &m, uint8_t value)
+{
+	m.cart_ir = static_cast<uint8_t>(value & 0x01);
 }
 
 } // namespace SGB

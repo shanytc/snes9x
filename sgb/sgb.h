@@ -530,7 +530,7 @@ void S9xSGBSetInfrared(bool on);
 bool S9xSGBGetInfrared(void);
 void S9xSGBSetGbKiss(bool on);
 bool S9xSGBGetGbKiss(void);
-// The loaded cart has an infrared LED of its own (HuC1/HuC3).
+// The loaded cart has an infrared LED of its own (a Hudson GB KISS cart).
 bool S9xSGBCartHasGbKiss(void);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 // Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI

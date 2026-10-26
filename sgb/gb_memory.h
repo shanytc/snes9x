@@ -90,6 +90,8 @@ struct Memory
 	// PPU time the LED last lit, which the facing sensor fades against.
 	uint8_t  rp = 0;
 	int64_t  rp_lit_at = -1;
+	// HuC1 cartridge infrared LED, bit 0 (gb_infrared.cpp).
+	uint8_t  cart_ir = 0;
 
 	// True when the machine is CGB hardware, including its DMG-compat
 	// mode (ppu->cgb is false there). STOP display + speed-switch gates.

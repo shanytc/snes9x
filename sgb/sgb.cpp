@@ -3457,7 +3457,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 //      load them from fixed defaults instead of the pre-load session's.
 // v12: add ppu.blank_defer (CGB LCD-off repeat window).
 // v13: add mem.rp, the Game Boy Color infrared port.
-constexpr uint32_t SGB_STATE_VERSION = 13;
+// v14: add mem.cart_ir, the HuC1 cartridge's infrared LED.
+constexpr uint32_t SGB_STATE_VERSION = 14;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3796,6 +3797,10 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		if (c.mode == IoMode::Load)
 			impl.mem.rp_lit_at = (impl.mem.rp & 0x01) ? impl.ppu.t_cycles : -1;
 	}
+
+	// v14: the HuC1 cartridge's infrared LED.
+	if (c.version >= 14)
+		IoField(c, impl.mem.cart_ir);
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
@@ -3926,6 +3931,8 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 		impl_->mem.rp        = 0;
 		impl_->mem.rp_lit_at = -1;
 	}
+	if (version < 14)
+		impl_->mem.cart_ir = 0;
 	if (c.sgbc_mismatch)
 	{
 		S9xMessage(S9X_INFO, S9X_ROM_INFO,

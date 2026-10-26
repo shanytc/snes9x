@@ -523,10 +523,15 @@ void    S9xSGBMachinePayGb(int gb_cycles);
 void S9xSGBSplitStop(const char *battery_base_path);  // saves seat batteries first
 bool S9xSGBSplitActive(void);
 int  S9xSGBSplitPlayers(void);
-// Game Boy Color infrared: players 1 and 2 face each other's port. Holds
-// across sessions until turned off; unpaired outside a same-game session.
+// Players 1 and 2 of an in-process session face each other: Infrared is the
+// Game Boy Color port, GB KISS the HuC1/HuC3 cart LEDs. Each holds across
+// sessions until turned off.
 void S9xSGBSetInfrared(bool on);
 bool S9xSGBGetInfrared(void);
+void S9xSGBSetGbKiss(bool on);
+bool S9xSGBGetGbKiss(void);
+// The loaded cart has an infrared LED of its own (HuC1/HuC3).
+bool S9xSGBCartHasGbKiss(void);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 // Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
 // feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero

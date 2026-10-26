@@ -36,6 +36,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace SGB {
@@ -5257,15 +5258,41 @@ void S9xSGBSplitRunFrame(void)
 	}
 
 	bool running = true;
+	// Each paired core's cycle count on the clock its partner's sensor reads by: the
+	// master's frame position, which every seat's chunk is measured against.
+	const int64_t frame_common = prim.DebugImpl()->run_target;
+	auto ir_clock = [&](int i, int64_t common) {
+		if (SGB::IrPaired())
+			SGB::IrSetClock(&cs[i]->DebugImpl()->mem, cs[i]->DebugImpl()->run_target, common);
+	};
+	// With IR on, the core furthest behind runs first: a sensor then never reads a
+	// partner still short of the reader's own moment, whichever seat it is.
+	int order[SGB_MAX_LINK_PLAYERS];
+	auto plan = [&](bool ir) {
+		for (int i = 0; i < n; ++i) order[i] = i;
+		if (!ir) return;
+		auto lead = [&](int i) {
+			const SGB::Emulator::Impl *im = cs[i] ? cs[i]->DebugImpl() : nullptr;
+			return im ? im->ppu.t_cycles - im->run_target : 0;
+		};
+		for (int a = 1; a < n; ++a)
+			for (int b = a; b > 0 && lead(order[b]) < lead(order[b - 1]); --b)
+				std::swap(order[b], order[b - 1]);
+	};
+
 	while (running)
 	{
 		running = false;
-		const int32_t slice = SGB::IrActive() ? kIrSlice : 456;
-		for (int i = 0; i < n; ++i)
+		const bool    ir    = SGB::IrActive();
+		const int32_t slice = ir ? kIrSlice : 456;
+		plan(ir);
+		for (int k = 0; k < n; ++k)
 		{
+			const int i = order[k];
 			if (!has[i] || remaining[i] <= 0) continue;
 			const int32_t chunk = remaining[i] < slice ? remaining[i] : slice;
 			SGB::SerialSetTraceSeat(i);
+			ir_clock(i, frame_common + (budget - remaining[i]));
 			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, chunk) : chunk);
 			remaining[i] -= chunk;
 			if (i == 0) { SplitYield(chunk); SplitNoteMasterHandoff(); }   // once per round
@@ -5288,11 +5315,15 @@ void S9xSGBSplitRunFrame(void)
 			if (has[i] && !snapped[i] &&
 			    (cs[i]->DebugImpl()->ppu.lcdc & 0x80)) owe = true;
 		if (!owe || chase <= 0) break;
-		const int32_t slice = SGB::IrActive() ? kIrSlice : 456;
-		for (int i = 0; i < n; ++i)
+		const bool    ir    = SGB::IrActive();
+		const int32_t slice = ir ? kIrSlice : 456;
+		plan(ir);
+		for (int k = 0; k < n; ++k)
 		{
+			const int i = order[k];
 			if (!has[i]) continue;
 			SGB::SerialSetTraceSeat(i);
+			ir_clock(i, frame_common + budget + (70224 - chase));
 			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, slice) : slice);
 			if (i == 0) SplitYield(slice);   // seat machines chase too
 			if (fb_ring) SplitPlacerSample(cs[i], i);

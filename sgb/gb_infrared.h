@@ -26,6 +26,12 @@ bool IrActive();
 uint8_t IrReadRP(const Memory &m);
 void    IrWriteRP(Memory &m, uint8_t value);
 
+// HuC1 cartridge infrared: its LED and sensor take the $A000-$BFFF window
+// while $0E is selected at $0000. Reads $C1 while the facing cart's LED is lit.
+bool    IrCartSelected(const Memory &m);
+uint8_t IrReadCart(const Memory &m);
+void    IrWriteCart(Memory &m, uint8_t value);
+
 } // namespace SGB
 
 #endif

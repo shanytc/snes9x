@@ -235,6 +235,7 @@ void MemReset(Memory &m, bool cgb)
 	m.key0 = 0;
 	m.rp        = 0;
 	m.rp_lit_at = -1;
+	m.cart_ir   = 0;
 	m.hdma1 = m.hdma2 = m.hdma3 = m.hdma4 = 0;
 	m.hdma5        = 0xFF;
 	m.hdma_src = m.hdma_dst = m.hdma_len = 0;
@@ -298,6 +299,8 @@ static uint8_t DmaReadByte(Memory &m, uint16_t addr)
 		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xA000)
 		return m.ppu ? m.ppu->vram[(addr - 0x8000) + VramBankBase(m)] : 0xFF;
+	if (addr < 0xC000 && IrCartSelected(m))
+		return IrReadCart(m);
 	if (addr < 0xC000)
 		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xD000)
@@ -427,6 +430,7 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	}
 	if (addr < 0xC000)
 	{
+		if (IrCartSelected(m)) return IrReadCart(m);
 		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	}
 	if (addr < 0xD000)
@@ -496,7 +500,8 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 	}
 	if (addr < 0xC000)
 	{
-		if (m.cart) MbcWrite(*m.cart, addr, value);
+		if (IrCartSelected(m)) IrWriteCart(m, value);
+		else if (m.cart) MbcWrite(*m.cart, addr, value);
 		return;
 	}
 	if (addr < 0xD000)

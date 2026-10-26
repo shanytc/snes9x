@@ -532,6 +532,21 @@ void S9xSGBSetGbKiss(bool on);
 bool S9xSGBGetGbKiss(void);
 // The loaded cart has an infrared LED of its own (a Hudson GB KISS cart).
 bool S9xSGBCartHasGbKiss(void);
+// Hudson's GB KISS LINK, the PC's infrared modem, facing player 1's cart: it
+// sends a .gbf to the GB KISS menu, a Nectaris GB map (.nmd or a 512-byte
+// record) to that game, or takes one back. Status: S9X_KISSLINK_IDLE..FAILED.
+enum
+{
+	S9X_KISSLINK_SEND_FILE = 1, S9X_KISSLINK_SEND_MAP, S9X_KISSLINK_RECEIVE_MAP,
+	S9X_KISSLINK_IDLE = 0, S9X_KISSLINK_WAITING, S9X_KISSLINK_BUSY, S9X_KISSLINK_DONE, S9X_KISSLINK_FAILED,
+	S9X_KISSLINK_MAP_BYTES = 512
+};
+bool S9xSGBCartHasKissMenu(void);
+bool S9xSGBCartIsNectaris(void);
+bool S9xSGBKissLinkStart(int kind, const uint8_t *data, size_t size, const char **error);
+void S9xSGBKissLinkCancel(void);
+int  S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char **error);
+bool S9xSGBKissLinkReceivedMap(uint8_t *out /* S9X_KISSLINK_MAP_BYTES */);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 // Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
 // feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero

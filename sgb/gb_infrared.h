@@ -19,6 +19,8 @@ struct Memory;
 void IrPair(Memory *a, Memory *b);   // nullptr for either unpairs
 void IrUnpair();
 bool IrPaired();
+// What the paired consoles see of each other: the GBC port, the cart LEDs.
+void IrSetMedia(bool port, bool cart);
 
 // A paired port is lit or reading: the split loop steps the seats finer.
 bool IrActive();
@@ -26,8 +28,8 @@ bool IrActive();
 uint8_t IrReadRP(const Memory &m);
 void    IrWriteRP(Memory &m, uint8_t value);
 
-// HuC1 cartridge infrared: its LED and sensor take the $A000-$BFFF window
-// while $0E is selected at $0000. Reads $C1 while the facing cart's LED is lit.
+// HuC1/HuC3 cartridge infrared (GB KISS): its LED and sensor take the $A000-$BFFF
+// window in mode $0E. Bit 0 reads 1 while the facing cart's LED is lit.
 bool    IrCartSelected(const Memory &m);
 uint8_t IrReadCart(const Memory &m);
 void    IrWriteCart(Memory &m, uint8_t value);

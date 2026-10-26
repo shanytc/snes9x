@@ -3603,21 +3603,15 @@ LRESULT CALLBACK WinProc(
 			WinToggleGBLinkSplit ();
 			break;
 		case ID_EMULATION_GB_LINK_IR:
-			// Players 1 and 2 face each other's infrared port; with no session
-			// live, connecting brings up a 2-player one of the current game.
-			if (S9xSGBGetInfrared ())
-			{
-				S9xSGBSetInfrared (false);
-				S9xSetInfoString ("Infra-red: disconnected");
-				break;
-			}
-			S9xSGBSetInfrared (true);
-			if (!S9xSGBSplitActive ())
-				WinToggleGBLink (1, 2);
-			if (S9xSGBSplitActive ())
-				S9xSetInfoString ("Infra-red: players 1 and 2 connected");
-			else
-				S9xSGBSetInfrared (false);   // no session came up; it said why
+			// Players 1 and 2 face each other in whatever session links them.
+			GBLinkInfrared = !GBLinkInfrared;
+			S9xSGBSetInfrared (GBLinkInfrared);
+			S9xSetInfoString (GBLinkInfrared ? "Infra-red: players 1 and 2 face each other" : "Infra-red: off");
+			break;
+		case ID_EMULATION_GB_LINK_KISS:
+			GBLinkGbKiss = !GBLinkGbKiss;
+			S9xSGBSetGbKiss (GBLinkGbKiss);
+			S9xSetInfoString (GBLinkGbKiss ? "GB KISS: players 1 and 2 face each other" : "GB KISS: off");
 			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
 			// lParam rides the master's Game Boy Model + 1 (0 = not
@@ -6243,6 +6237,8 @@ int WINAPI WinMain(
 	GUI.HotkeysActive = !GUI.MasterHotkeyEnabled;
 
 	LoadExts();
+	S9xSGBSetInfrared (GBLinkInfrared);
+	S9xSGBSetGbKiss (GBLinkGbKiss);
 
     ControllerOptionsFromControllers();
     ChangeInputDevice();
@@ -6987,6 +6983,44 @@ static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT before_id,
 	}
 }
 
+// Link Cable > Infra-Red for a game in Game Boy Color mode, GB KISS for a
+// HuC1/HuC3 cart: above Reset on Link, with a separator of their own.
+static void GBLinkSyncIrItems (HMENU link)
+{
+	if (!link) return;
+	static const UINT   ids[2]    = { ID_EMULATION_GB_LINK_IR, ID_EMULATION_GB_LINK_KISS };
+	static const TCHAR *labels[2] = { TEXT("&Infra-Red"), TEXT("GB &KISS") };
+	const bool want[2] = { S9xSGBIsCgb (), S9xSGBCartHasGbKiss () };
+	bool same = true;
+	for (int i = 0; i < 2; i++)
+		same = same && (GetMenuState (link, ids[i], MF_BYCOMMAND) != (UINT)-1) == want[i];
+	if (same) return;
+
+	for (int i = 0; i < 2; i++) RemoveMenu (link, ids[i], MF_BYCOMMAND);
+	RemoveMenu (link, ID_EMULATION_GB_LINK_IR_SEP, MF_BYCOMMAND);
+	if (want[0] || want[1])
+	{
+		MENUITEMINFO ins = {};
+		ins.cbSize = sizeof(ins);
+		ins.fMask  = MIIM_ID | MIIM_FTYPE;
+		ins.fType  = MFT_SEPARATOR;
+		ins.wID    = ID_EMULATION_GB_LINK_IR_SEP;
+		InsertMenuItem (link, ID_EMULATION_GB_LINK_RESET_ON_LINK, FALSE, &ins);
+		for (int i = 0; i < 2; i++)
+		{
+			if (!want[i]) continue;
+			ins.fMask      = MIIM_ID | MIIM_FTYPE | MIIM_STRING;
+			ins.fType      = MFT_STRING;
+			ins.wID        = ids[i];
+			ins.dwTypeData = (LPTSTR)labels[i];
+			ins.cch        = (UINT)_tcslen (labels[i]);
+			InsertMenuItem (link, ID_EMULATION_GB_LINK_IR_SEP, FALSE, &ins);
+		}
+		if (LocaleIsTranslated ()) LocalizeMenu (link);
+	}
+	DrawMenuBar (GUI.hWnd);
+}
+
 static void CheckMenuStates ()
 {
     MENUITEMINFO mii;
@@ -7288,10 +7322,12 @@ static void CheckMenuStates ()
 			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_POPUP, FALSE, &mii);
 			// Infra-red pairs in-process seats; a socket peer is another process.
-			mii.fState = S9xSGBLinkIsEnabled () ? MFS_DISABLED : MFS_ENABLED;
-			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_IR_POPUP, FALSE, &mii);
-			mii.fState = S9xSGBGetInfrared () ? MFS_CHECKED : MFS_UNCHECKED;
+			GBLinkSyncIrItems (s_link_hmenu);
+			const UINT ir_off = S9xSGBLinkIsEnabled () ? MFS_DISABLED : MFS_ENABLED;
+			mii.fState = ir_off | (GBLinkInfrared ? MFS_CHECKED : MFS_UNCHECKED);
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_IR, FALSE, &mii);
+			mii.fState = ir_off | (GBLinkGbKiss ? MFS_CHECKED : MFS_UNCHECKED);
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_KISS, FALSE, &mii);
 
 			// Split screen needs the BIOS-less core, so in BIOS mode the
 			// item comes out of the menu rather than offering a dead end.
@@ -14712,6 +14748,10 @@ bool GBLinkSplitScreen = false;
 // Power-cycle the master when a session starts / ends. Seats always boot fresh.
 bool GBLinkResetOnLink   = true;
 bool GBLinkResetOnUnlink = true;
+
+// Players 1 and 2 face each other: the GBC port / the HuC1-HuC3 cart LED.
+bool GBLinkInfrared = false;
+bool GBLinkGbKiss   = false;
 
 // Each player's Game Boy Model, indexed by player number. A session opens
 // every seat on the console the master loaded; this is how one seat is told

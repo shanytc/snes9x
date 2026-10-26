@@ -21,6 +21,9 @@ void IrUnpair();
 bool IrPaired();
 // What the paired consoles see of each other: the GBC port, the cart LEDs.
 void IrSetMedia(bool port, bool cart);
+// Before a core runs: its cycle count `local` stands at `common` on the clock
+// both paired cores share (the split loop's frame position).
+void IrSetClock(const Memory *m, int64_t local, int64_t common);
 
 // A paired port is lit or reading: the split loop steps the seats finer.
 bool IrActive();

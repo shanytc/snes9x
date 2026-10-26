@@ -183,6 +183,9 @@ static bool8 GBSeatScreenshotToClipboard(int width, int height);
 static void  GBSeatMachinesCreate(int players);
 static void  GBSeatMachinesDestroy();
 static void  GBSeatMachinesTurn();
+static void  WinKissLinkPoll();
+static void  WinKissLinkSend(bool map);
+static void  WinKissLinkReceiveMap();
 static void  GBSeatMachinesRequestReset();
 static bool  GBSeatModelIsMachine(unsigned char model);
 static void  WinStartGBOtherGame(const TCHAR *path);
@@ -3613,6 +3616,17 @@ LRESULT CALLBACK WinProc(
 			S9xSGBSetGbKiss (GBLinkGbKiss);
 			S9xSetInfoString (GBLinkGbKiss ? "GB KISS: players 1 and 2 face each other" : "GB KISS: off");
 			break;
+		case ID_EMULATION_GB_KISSLINK_FILE:
+		case ID_EMULATION_GB_KISSLINK_MAP:
+			WinKissLinkSend (cmd_id == ID_EMULATION_GB_KISSLINK_MAP);
+			break;
+		case ID_EMULATION_GB_KISSLINK_RECV:
+			WinKissLinkReceiveMap ();
+			break;
+		case ID_EMULATION_GB_KISSLINK_CANCEL:
+			S9xSGBKissLinkCancel ();
+			S9xSetInfoString ("GB KISS LINK: cancelled");
+			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
 			// lParam rides the master's Game Boy Model + 1 (0 = not
 			// specified): a reused window may sit on another console and
@@ -6048,6 +6062,7 @@ static void WinEmulateFrame (void)
 		// Super Game Boy seats are SNES machines of their own: each gets
 		// its frame now, one at a time, while this one is parked.
 		GBSeatMachinesTurn ();
+		WinKissLinkPoll ();
 
 		// BIOS-mode sessions: the seats stepped inside the frame,
 		// slaved to the SNES clock, so their pads are collected once
@@ -6993,22 +7008,188 @@ static void SetSubMenuVisible (UINT id, const TCHAR *label, UINT anchor_id, int 
 	}
 }
 
+// GB KISS LINK: the PC's infrared modem facing player 1's cart. Files come
+// from the BIOS folder's GB_KISS_LINK (GBF, Nectaris) when it is there.
+static std::string s_kisslink_name;      // the file being sent, for the OSD
+static std::string s_kisslink_save;      // where a received map goes
+static unsigned    s_kisslink_saved = 0; // the job whose map was written
+
+static void KissLinkDialogDir (TCHAR *dir, const TCHAR *sub)
+{
+	TCHAR d[MAX_PATH];
+	_sntprintf (d, MAX_PATH, TEXT("%s\\GB_KISS_LINK\\%s"), S9xGetDirectoryT (BIOS_DIR), sub);
+	d[MAX_PATH - 1] = 0;
+	if (!_tfullpath (dir, d, MAX_PATH)) dir[0] = 0;
+	const DWORD a = dir[0] ? GetFileAttributes (dir) : INVALID_FILE_ATTRIBUTES;
+	if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY)) dir[0] = 0;
+}
+
+static void WinKissLinkSend (bool map)
+{
+	TCHAR file[MAX_PATH] = TEXT(""), dir[MAX_PATH];
+	KissLinkDialogDir (dir, map ? TEXT("Nectaris") : TEXT("GBF"));
+	OPENFILENAME ofn = {};
+	ofn.lStructSize     = sizeof(ofn);
+	ofn.hwndOwner       = GUI.hWnd;
+	ofn.lpstrFilter     = map ? TEXT("Nectaris maps (*.nmd;*.nec)\0*.nmd;*.nec\0All Files (*.*)\0*.*\0\0")
+	                          : TEXT("GB KISS files (*.gbf)\0*.gbf\0All Files (*.*)\0*.*\0\0");
+	ofn.lpstrFile       = file;
+	ofn.nMaxFile        = MAX_PATH;
+	ofn.lpstrInitialDir = dir[0] ? dir : NULL;
+	ofn.lpstrTitle      = map ? TEXT("GB KISS LINK - send a Nectaris GB map") : TEXT("GB KISS LINK - send a file");
+	ofn.Flags           = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST;
+	RestoreGUIDisplay ();
+	const bool picked = GetOpenFileName (&ofn) != 0;
+	RestoreSNESDisplay ();
+	if (!picked) return;
+
+	const std::string path = (const char *) _tToChar (file);
+	std::vector<uint8> data;
+	if (FILE *fp = fopen (path.c_str (), "rb"))
+	{
+		uint8 buf[4096];
+		size_t n;
+		while ((n = fread (buf, 1, sizeof buf, fp)) > 0) data.insert (data.end (), buf, buf + n);
+		fclose (fp);
+	}
+	const char *err = NULL;
+	if (!S9xSGBKissLinkStart (map ? S9X_KISSLINK_SEND_MAP : S9X_KISSLINK_SEND_FILE, data.data (), data.size (), &err))
+	{
+		MessageBox (GUI.hWnd, _tFromChar (err ? err : "The GB KISS LINK could not start."),
+		            TEXT("GB KISS LINK"), MB_OK | MB_ICONWARNING);
+		return;
+	}
+	const size_t slash = path.find_last_of ("\\/");
+	s_kisslink_name = (slash == std::string::npos) ? path : path.substr (slash + 1);
+}
+
+static void WinKissLinkReceiveMap ()
+{
+	TCHAR file[MAX_PATH] = TEXT("Nectaris map.nec"), dir[MAX_PATH];
+	KissLinkDialogDir (dir, TEXT("Nectaris"));
+	OPENFILENAME ofn = {};
+	ofn.lStructSize     = sizeof(ofn);
+	ofn.hwndOwner       = GUI.hWnd;
+	ofn.lpstrFilter     = TEXT("Nectaris GB maps (*.nec)\0*.nec\0\0");
+	ofn.lpstrDefExt     = TEXT("nec");
+	ofn.lpstrFile       = file;
+	ofn.nMaxFile        = MAX_PATH;
+	ofn.lpstrInitialDir = dir[0] ? dir : NULL;
+	ofn.lpstrTitle      = TEXT("GB KISS LINK - save the map Nectaris GB sends");
+	ofn.Flags           = OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+	RestoreGUIDisplay ();
+	const bool picked = GetSaveFileName (&ofn) != 0;
+	RestoreSNESDisplay ();
+	if (!picked) return;
+
+	const char *err = NULL;
+	if (!S9xSGBKissLinkStart (S9X_KISSLINK_RECEIVE_MAP, NULL, 0, &err))
+	{
+		MessageBox (GUI.hWnd, _tFromChar (err ? err : "The GB KISS LINK could not start."),
+		            TEXT("GB KISS LINK"), MB_OK | MB_ICONWARNING);
+		return;
+	}
+	s_kisslink_save = (const char *) _tToChar (file);
+	const size_t slash = s_kisslink_save.find_last_of ("\\/");
+	s_kisslink_name = (slash == std::string::npos) ? s_kisslink_save : s_kisslink_save.substr (slash + 1);
+}
+
+// Once per shown frame: the job's progress on the OSD, a received map to disk.
+static void WinKissLinkPoll ()
+{
+	static unsigned last_serial = 0;
+	static int last_status = -1, last_step = -1, waiting_frames = 0;
+	int kind = 0, percent = 0;
+	unsigned serial = 0;
+	const char *err = NULL;
+	const int status = S9xSGBKissLinkStatus (&kind, &percent, &serial, &err);
+	if (!serial) return;
+	const int step = (status == S9X_KISSLINK_BUSY) ? percent / 5 : -1;
+	const bool waiting = status == S9X_KISSLINK_WAITING && ++waiting_frames % 180 == 0;
+	if (serial == last_serial && status == last_status && step == last_step && !waiting) return;
+	if (serial != last_serial || status != last_status) waiting_frames = 0;
+	last_serial = serial;
+	last_status = status;
+	last_step   = step;
+
+	char msg[256];
+	const char *name = s_kisslink_name.c_str ();
+	switch (status)
+	{
+	case S9X_KISSLINK_WAITING:
+		snprintf (msg, sizeof msg, "GB KISS LINK: waiting - %s",
+		          kind == S9X_KISSLINK_SEND_FILE ? "pick a slot in the GB KISS menu and Receive"
+		        : kind == S9X_KISSLINK_SEND_MAP  ? "choose \"receive from PC\" in Nectaris GB's GB KISS menu"
+		                                         : "choose \"send to PC\" in Nectaris GB's GB KISS menu");
+		break;
+	case S9X_KISSLINK_BUSY:
+		snprintf (msg, sizeof msg, "GB KISS LINK: %s %s - %d%%",
+		          kind == S9X_KISSLINK_RECEIVE_MAP ? "receiving" : "sending", name, percent);
+		break;
+	case S9X_KISSLINK_DONE:
+		if (kind == S9X_KISSLINK_RECEIVE_MAP && s_kisslink_saved != serial)
+		{
+			uint8 rec[S9X_KISSLINK_MAP_BYTES];
+			FILE *fp = NULL;
+			if (S9xSGBKissLinkReceivedMap (rec) && (fp = fopen (s_kisslink_save.c_str (), "wb")) != NULL)
+			{
+				fwrite (rec, 1, sizeof rec, fp);
+				fclose (fp);
+				s_kisslink_saved = serial;
+				snprintf (msg, sizeof msg, "GB KISS LINK: map saved to %s", name);
+			}
+			else
+				snprintf (msg, sizeof msg, "GB KISS LINK: could not write %s", name);
+		}
+		else if (kind == S9X_KISSLINK_RECEIVE_MAP)
+			snprintf (msg, sizeof msg, "GB KISS LINK: map saved to %s", name);
+		else
+			snprintf (msg, sizeof msg, "GB KISS LINK: %s sent", name);
+		break;
+	case S9X_KISSLINK_FAILED:
+		snprintf (msg, sizeof msg, "GB KISS LINK: failed - %s", err ? err : "cancelled");
+		break;
+	default:
+		return;
+	}
+	S9xSetInfoString (msg);
+}
+
 // Link Cable > Infra-Red for a game in Game Boy Color mode (never under a Super
-// Game Boy), GB KISS for a Hudson IR cart: above Reset on Link, own separator.
+// Game Boy), GB KISS for a Hudson IR cart and GB KISS LINK for one with the GB
+// KISS menu (its map items for Nectaris GB): above Reset on Link, own separator.
 static void GBLinkSyncIrItems (HMENU link)
 {
 	if (!link) return;
-	static const UINT   ids[2]    = { ID_EMULATION_GB_LINK_IR, ID_EMULATION_GB_LINK_KISS };
-	static const TCHAR *labels[2] = { TEXT("&Infra-Red"), TEXT("GB &KISS") };
-	const bool want[2] = { S9xSGBIsCgb () && !Settings.SGB_BIOSModeActive, S9xSGBCartHasGbKiss () };
+	static HMENU kiss_link = NULL;
+	static int   kiss_kind = 0;
+	static const UINT   ids[3]    = { ID_EMULATION_GB_LINK_IR, ID_EMULATION_GB_LINK_KISS, ID_EMULATION_GB_KISSLINK };
+	static const TCHAR *labels[3] = { TEXT("&Infra-Red"), TEXT("GB &KISS"), TEXT("GB KISS &LINK") };
+	const int  kind    = S9xSGBCartHasKissMenu () ? (S9xSGBCartIsNectaris () ? 2 : 1) : 0;
+	const bool want[3] = { S9xSGBIsCgb () && !Settings.SGB_BIOSModeActive, S9xSGBCartHasGbKiss (), kind != 0 };
+	if (kind && kind != kiss_kind)
+	{
+		if (!kiss_link) kiss_link = CreatePopupMenu ();
+		while (GetMenuItemCount (kiss_link) > 0) DeleteMenu (kiss_link, 0, MF_BYPOSITION);
+		AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_FILE, TEXT("Send &File (.gbf)..."));
+		if (kind == 2)
+		{
+			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_MAP, TEXT("Send Nectaris &Map (.nmd)..."));
+			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_RECV, TEXT("&Receive Nectaris Map..."));
+		}
+		AppendMenu (kiss_link, MF_SEPARATOR, 0, NULL);
+		AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_CANCEL, TEXT("&Cancel Transfer"));
+		if (LocaleIsTranslated ()) LocalizeMenu (kiss_link);
+		kiss_kind = kind;
+	}
 	bool same = true;
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < 3; i++)
 		same = same && (GetMenuState (link, ids[i], MF_BYCOMMAND) != (UINT)-1) == want[i];
 	if (same) return;
 
-	for (int i = 0; i < 2; i++) RemoveMenu (link, ids[i], MF_BYCOMMAND);
+	for (int i = 0; i < 3; i++) RemoveMenu (link, ids[i], MF_BYCOMMAND);
 	RemoveMenu (link, ID_EMULATION_GB_LINK_IR_SEP, MF_BYCOMMAND);
-	if (want[0] || want[1])
+	if (want[0] || want[1] || want[2])
 	{
 		MENUITEMINFO ins = {};
 		ins.cbSize = sizeof(ins);
@@ -7016,12 +7197,13 @@ static void GBLinkSyncIrItems (HMENU link)
 		ins.fType  = MFT_SEPARATOR;
 		ins.wID    = ID_EMULATION_GB_LINK_IR_SEP;
 		InsertMenuItem (link, ID_EMULATION_GB_LINK_RESET_ON_LINK, FALSE, &ins);
-		for (int i = 0; i < 2; i++)
+		for (int i = 0; i < 3; i++)
 		{
 			if (!want[i]) continue;
-			ins.fMask      = MIIM_ID | MIIM_FTYPE | MIIM_STRING;
+			ins.fMask      = MIIM_ID | MIIM_FTYPE | MIIM_STRING | (i == 2 ? MIIM_SUBMENU : 0);
 			ins.fType      = MFT_STRING;
 			ins.wID        = ids[i];
+			ins.hSubMenu   = (i == 2) ? kiss_link : NULL;
 			ins.dwTypeData = (LPTSTR)labels[i];
 			ins.cch        = (UINT)_tcslen (labels[i]);
 			InsertMenuItem (link, ID_EMULATION_GB_LINK_IR_SEP, FALSE, &ins);
@@ -7339,6 +7521,9 @@ static void CheckMenuStates ()
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_IR, FALSE, &mii);
 			mii.fState = ir_off | (GBLinkGbKiss ? MFS_CHECKED : MFS_UNCHECKED);
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_KISS, FALSE, &mii);
+			const int kst = S9xSGBKissLinkStatus (NULL, NULL, NULL, NULL);
+			mii.fState = (kst == S9X_KISSLINK_WAITING || kst == S9X_KISSLINK_BUSY) ? MFS_ENABLED : MFS_DISABLED;
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_KISSLINK_CANCEL, FALSE, &mii);
 
 			// Split screen needs the BIOS-less core, so in BIOS mode the
 			// item comes out of the menu rather than offering a dead end.

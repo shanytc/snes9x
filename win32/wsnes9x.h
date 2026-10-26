@@ -85,6 +85,11 @@ extern bool GBLinkSplitScreen;
 extern bool GBLinkResetOnLink;
 extern bool GBLinkResetOnUnlink;
 
+// Link Cable > Infra-Red / GB KISS: players 1 and 2 face each other's Game Boy
+// Color port / HuC1-HuC3 cart LED in any in-process session. Persisted.
+extern bool GBLinkInfrared;
+extern bool GBLinkGbKiss;
+
 // True on a thread that is a Super Game Boy seat's own SNES (see
 // GBSeatMachine): the frame hooks the core calls from S9xMainLoop - blit,
 // pacing, SRAM autosave - belong to the master and do nothing here.

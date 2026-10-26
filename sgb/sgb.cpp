@@ -4036,6 +4036,7 @@ namespace {
 std::unique_ptr<SGB::Emulator> g_split_cores[SGB_MAX_LINK_PLAYERS - 1];
 int g_split_players = 0;   // seats including the primary; 0 = off
 bool g_ir_facing = false;  // players 1 and 2 face each other's infrared port
+bool g_kiss_facing = false; // ... and each other's HuC1/HuC3 cart LED (GB KISS)
 
 // Per-seat Game Boy Model, read at session start (see S9xSGBSplitStart).
 // A seat on a model of its own is a different console on the cable, so it
@@ -4219,12 +4220,17 @@ bool SplitPosExternal(int i)
 	return i >= 1 && SeatExternal(i - 1);
 }
 
-// Players 1 and 2 face each other's infrared port while the option is on.
+// Players 1 and 2 face each other while Infra-Red or GB KISS is on.
 void SplitAttachIr(void)
 {
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	const int n = g_split_players >= 2 ? SplitCollect(cs) : 0;
-	if (!g_ir_facing || n < 2 || !cs[0] || !cs[1] || SplitPosExternal(1)) { SGB::IrUnpair(); return; }
+	SGB::IrSetMedia(g_ir_facing, g_kiss_facing);
+	if (!(g_ir_facing || g_kiss_facing) || n < 2 || !cs[0] || !cs[1] || SplitPosExternal(1))
+	{
+		SGB::IrUnpair();
+		return;
+	}
 	SGB::IrPair(&cs[0]->DebugImpl()->mem, &cs[1]->DebugImpl()->mem);
 }
 
@@ -4874,6 +4880,14 @@ bool S9xSGBCartIsFaceball(void)
 	                   "FACEBALL 2000   ") == 0;
 }
 
+bool S9xSGBCartHasGbKiss(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) return false;
+	const SGB::MbcType t = prim.DebugImpl()->cart.mbc.type;
+	return t == SGB::MbcType::HuC1 || t == SGB::MbcType::HuC3;
+}
+
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }
 int S9xSGBLinkPlayerCount(void)     { return SGB::SerialLinkPlayerCount(); }
 void S9xSGBLinkDisconnect(void)     { SGB::SerialLinkDisconnect(); }
@@ -5128,6 +5142,8 @@ unsigned char S9xSGBSplitGetSeatModel(int player)
 bool S9xSGBSplitActive(void)  { return g_split_players >= 2; }
 void S9xSGBSetInfrared(bool on) { g_ir_facing = on; SplitAttachIr(); }
 bool S9xSGBGetInfrared(void)    { return g_ir_facing; }
+void S9xSGBSetGbKiss(bool on)   { g_kiss_facing = on; SplitAttachIr(); }
+bool S9xSGBGetGbKiss(void)      { return g_kiss_facing; }
 int  S9xSGBSplitPlayers(void) { return g_split_players; }
 
 void S9xSGBSplitSetJoypad(int player, uint16_t snes_pad_mask)

@@ -1209,6 +1209,8 @@ void WinRegisterConfigItems()
 	AddBoolC("LinkSplitScreen", GBLinkSplitScreen, false, "Link Current Game runs its 2-4 players split screen in this window instead of spawning instances. BIOS-less GB mode only.");
 	AddBoolC("LinkResetOnLink", GBLinkResetOnLink, true, "true to power-cycle the game when a link session starts (Emulation -> Link Cable -> Reset on Link). The other players always boot fresh.");
 	AddBoolC("LinkResetOnUnlink", GBLinkResetOnUnlink, true, "true to power-cycle the game when a link session ends (Emulation -> Link Cable -> Reset on Unlink).");
+	AddBoolC("LinkInfrared", GBLinkInfrared, false, "true to have players 1 and 2 face each other's Game Boy Color infrared port in a link session (Emulation -> Link Cable -> Infra-Red).");
+	AddBoolC("LinkGbKiss", GBLinkGbKiss, false, "true to have players 1 and 2 face each other's HuC1/HuC3 cartridge infrared in a link session (Emulation -> Link Cable -> GB KISS).");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

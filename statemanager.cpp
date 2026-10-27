@@ -79,6 +79,7 @@ bool StateManager::init(size_t buffer_size) {
     top_ptr = 1;
     bottom_ptr = 0;
     first_pop = false;
+    has_state = false;
     top_tag = 0;
 
     buf_size = nearest_pow2_size(buffer_size) / sizeof(uint64_t); // Works in multiple of 8.
@@ -150,6 +151,13 @@ int StateManager::pop(uint32_t *tag)
     return S9xUnfreezeGameMem((uint8 *)tmp_state,real_state_size) == SUCCESS;
 }
 
+bool StateManager::empty() const
+{
+    if (!init_done || !has_state)
+        return true;
+    return !first_pop && ((top_ptr - 1) & buf_size_mask) == bottom_ptr;
+}
+
 void StateManager::reassign_bottom()
 {
    bottom_ptr = (top_ptr + 1) & buf_size_mask;
@@ -205,7 +213,11 @@ bool StateManager::push(uint32_t tag)
         return false;
     if(!S9xFreezeGameMem((uint8 *)in_state,real_state_size))
         return false;
-    generate_delta(in_state, top_tag);
+    // The first state has nothing older: a delta against the zeroed tmp_state
+    // would pop as an unloadable state and clobber tmp_state.
+    if (has_state)
+        generate_delta(in_state, top_tag);
+    has_state = true;
     uint32 *tmp = tmp_state;
     tmp_state = in_state;
     in_state = tmp;

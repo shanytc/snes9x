@@ -21,6 +21,7 @@ private:
     uint32_t top_tag;
     bool init_done;
     bool first_pop;
+    bool has_state;
 
     void reassign_bottom();
     void generate_delta(const void *data, uint32_t old_tag);
@@ -33,6 +34,8 @@ public:
     // the state it restored (exact frame bookkeeping across granularity).
     int pop(uint32_t *tag = 0);
     bool push(uint32_t tag = 0);
+    // True when pop() has nothing left to restore.
+    bool empty() const;
 };
 
 #endif // STATEMANAGER_H

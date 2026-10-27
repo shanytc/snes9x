@@ -542,6 +542,9 @@ StateManager stateMan;
 // know exactly how many hidden frames to replay past the popped snapshot.
 static uint32 rewindContentFrame = 0;
 static bool   reverseFrameAdvance = false;
+// Rewind hotkey held since rewindKeyTime; key repeats must not count as taps.
+static bool   rewindKeyHeld = false;
+static DWORD  rewindKeyTime = 0;
 
 std::vector<dMode> dm;
 /*****************************************************************************/
@@ -1681,21 +1684,28 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				&& !RA_IsHardcoreModeActive()
 #endif
 				;
+			bool firstPress = !rewindKeyHeld;
+			if (firstPress)
+			{
+				rewindKeyHeld = true;
+				rewindKeyTime = timeGetTime();
+			}
 			if (Settings.Paused && !Settings.StopEmulation && rewindAllowed)
 			{
-				// Paused: reverse frame advance — step exactly one frame back,
+				// Paused: a tap is a reverse frame advance, exactly one frame back
 				// regardless of the snapshot granularity. Rides the regular
 				// frame-advance machinery to run/render the stepped frame.
-				static DWORD lastRevTime = 0;
-				if ((timeGetTime() - lastRevTime) > 20)
+				if (firstPress && !Settings.Rewinding)
 				{
-					lastRevTime = timeGetTime();
 					reverseFrameAdvance = true;
 					Settings.FrameAdvance = true;
 					GUI.FrameAdvanceJustPressed = 2;
 					// kick the main thread out of GetMessage (just in case)
 					SendMessage(GUI.hWnd, WM_NULL, 0, 0);
 				}
+				// Held: rewind at frame rate, not one step per key repeat.
+				else if (timeGetTime() - rewindKeyTime >= 250 && !stateMan.empty())
+					Settings.Rewinding = true;
 			}
 			else
 			{
@@ -2306,6 +2316,7 @@ LRESULT CALLBACK WinProc(
             if(HotkeyChordBroken((WORD)wParam, &CustomKeys.Rewind, &CustomKeysExtra.Rewind))
 		    {
                 Settings.Rewinding = false;
+                rewindKeyHeld = false;
             }
 			if(HotkeyChordBroken((WORD)wParam, &CustomKeys.SuperDiscInsert, &CustomKeysExtra.SuperDiscInsert))
 				g_superDiscGate[0].fired = false;
@@ -4771,7 +4782,7 @@ VOID CALLBACK HotkeyTimer( UINT idEvent, UINT uMsg, DWORD dwUser, DWORD dw1, DWO
 
 		if(GUI.JoystickHotkeys)
 		{
-			if (Settings.StopEmulation || (Settings.Paused && !Settings.FrameAdvance) || Settings.ForcedPause)
+			if (Settings.StopEmulation || (Settings.Paused && !Settings.FrameAdvance && !Settings.Rewinding) || Settings.ForcedPause)
 			{
 				S9xWinScanJoypads();
 			}
@@ -5405,6 +5416,9 @@ static void WinEmulateFrame (void)
 				Settings.Rewinding = stateMan.pop(&tag);
 				if (Settings.Rewinding)
 					rewindContentFrame = tag;
+				// Paused: stop on the oldest snapshot, never run a frame past it.
+				if (Settings.Paused && stateMan.empty())
+					Settings.Rewinding = false;
 			}
 			else {
 				if (IPPU.TotalEmulatedFrames % GUI.rewindGranularity == 0)
@@ -5575,7 +5589,7 @@ static void WinEmulateFrame (void)
 // loop in WinMain doesn't: the editor's timer calls this to keep the game going.
 void WinRunFrameInModalLoop (void)
 {
-	if (Settings.StopEmulation || (Settings.Paused && !Settings.FrameAdvance) || Settings.ForcedPause)
+	if (Settings.StopEmulation || (Settings.Paused && !Settings.FrameAdvance && !Settings.Rewinding) || Settings.ForcedPause)
 		return;
 	EnsureInputDisplayUpdated();
 	WinEmulateFrame();
@@ -5733,7 +5747,7 @@ int WINAPI WinMain(
 		EnsureInputDisplayUpdated();
 
 		// note: using GUI.hWnd instead of NULL for PeekMessage/GetMessage breaks some non-modal dialogs
-        while (Settings.StopEmulation || (Settings.Paused && !Settings.FrameAdvance) ||
+        while (Settings.StopEmulation || (Settings.Paused && !Settings.FrameAdvance && !Settings.Rewinding) ||
 			Settings.ForcedPause ||
 			PeekMessage (&msg, NULL, 0, 0, PM_NOREMOVE))
         {
@@ -5762,7 +5776,7 @@ int WINAPI WinMain(
                 DispatchMessage (&msg);
             }
 
-			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && (!Settings.FrameAdvance || GUI.FAMute)));
+			S9xSetSoundMute(GUI.Mute || Settings.ForcedPause || (Settings.Paused && !Settings.Rewinding && (!Settings.FrameAdvance || GUI.FAMute)));
         }
 
         WinEmulateFrame ();

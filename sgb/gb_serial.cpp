@@ -25,6 +25,7 @@
 #include "gb_memory.h"
 #include "gb_joypad.h"
 #include "gb_cpu.h"
+#include "gb_timer.h"
 
 #include <cstdio>
 #include <cstring>
@@ -521,6 +522,15 @@ void SerialPcHook(uint16_t pc, uint8_t, const CpuState &st)
 inline int32_t BitPeriod(const Serial &s, uint8_t sc)
 {
 	return (s.cgb && (sc & 0x02)) ? kBitPeriodFast : kBitPeriodNormal;
+}
+
+// The internal clock runs off DIV: the first bit lands on its next falling
+// edge (TimerStep's stub convention), so a byte takes 3585-4096 cycles.
+inline int32_t FirstBitDelay(const Memory &mem, int32_t period)
+{
+	if (!mem.timer) return period;
+	const int32_t phase = static_cast<int32_t>((mem.timer->div_counter + 4) & (period - 1));
+	return phase ? period - phase : period;
 }
 
 inline uint32_t Timestamp(const Serial &s)
@@ -1982,7 +1992,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			s.active        = true;
 			s.bits_left     = 8;
 			s.bit_period    = BitPeriod(s, value);
-			s.bit_timer     = s.bit_period;
+			s.bit_timer     = FirstBitDelay(mem, s.bit_period);
 			s.peer_valid    = true;
 			s.peer_data     = 0xFF;
 			s.peer_supplied = false;
@@ -2037,7 +2047,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			s.active        = true;
 			s.bits_left     = 8;
 			s.bit_period    = BitPeriod(s, value);
-			s.bit_timer     = s.bit_period;
+			s.bit_timer     = FirstBitDelay(mem, s.bit_period);
 			s.peer_valid    = false;
 			s.peer_supplied = false;
 			s.peer_data     = 0xFF;
@@ -2083,7 +2093,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		s.active        = true;
 		s.bits_left     = 8;
 		s.bit_period    = BitPeriod(s, value);
-		s.bit_timer     = s.bit_period;
+		s.bit_timer     = FirstBitDelay(mem, s.bit_period);
 		s.peer_valid    = false;
 		s.peer_supplied = false;
 		s.peer_data     = 0xFF;

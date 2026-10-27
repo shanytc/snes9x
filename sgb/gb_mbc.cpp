@@ -63,11 +63,6 @@ void S9xGBSetCameraCallback(bool (*cb)(unsigned char *, int, int))
 	g_gb_camera_cb = cb;
 }
 
-int g_cam_countdown = 0;
-uint8_t g_cam_shade[128 * 112] = {0};
-int g_cam_live = 0;
-int g_cam_brightness = 0;
-
 namespace SGB {
 
 // TAMA5 reuses existing MbcState fields (it never coexists with the mappers
@@ -184,7 +179,6 @@ void MbcTama6Seed(MbcState &s, int64_t unix_time)
 
 void MbcReset(MbcState &s)
 {
-	g_cam_brightness = 0;
 	s.rom_bank   = 1;
 	s.ram_bank   = 0;
 	// HuC1 RAM is always live — its $0000-$1FFF register only routes the
@@ -232,6 +226,7 @@ void MbcReset(MbcState &s)
 		s.ram_bank           = 0;
 		s.mmm01_rom_bank_mid = 1;
 	}
+	if (s.type == MbcType::Camera) s.rtc_sub_cycles = 0;
 }
 
 namespace {
@@ -295,6 +290,12 @@ void MbcHuc3SetClock(MbcState &s, uint16_t minutes, uint16_t days)
 
 void MbcTickRtc(MbcState &s, int32_t tcycles)
 {
+	// The Camera has no RTC; rtc_sub_cycles is its capture-busy countdown.
+	if (s.type == MbcType::Camera)
+	{
+		s.rtc_sub_cycles = (s.rtc_sub_cycles > tcycles) ? s.rtc_sub_cycles - tcycles : 0;
+		return;
+	}
 	if (s.type == MbcType::HuC3)
 	{
 		s.rtc_sub_cycles += tcycles;
@@ -1216,16 +1217,16 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 			}
 		}
 
+		// Camera RAM reads ignore the RAM enable (it only gates writes) and
+		// read $00 while a capture runs.
 		if (s.type == MbcType::Camera)
 		{
 			if (s.mbc1_mode)
 			{
-				if ((addr & 0x7F) == 0) return (g_cam_countdown > 0) ? 0x01 : 0x00;
+				if ((addr & 0x7F) == 0) return (s.rtc_sub_cycles > 0) ? 0x01 : 0x00;
 				return 0x00;
 			}
-			if ((s.ram_bank & 0x0F) == 0 && addr >= 0xA100 && addr < 0xAF00) g_cam_live = 40;
-			if (g_cam_countdown > 0) return 0x00;
-			if (!s.ram_enable) return 0xFF;
+			if (s.rtc_sub_cycles > 0) return 0x00;
 			return ReadSram(sram, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u));
 		}
 
@@ -1291,8 +1292,8 @@ static void GbCameraCapture(Cart &c)
 {
 	const uint8_t *reg = c.camera_regs;
 	const int expo = (reg[2] << 8) | reg[3];
-	g_cam_countdown = 129792 + expo * 64;
-	if (g_cam_countdown > 200000) g_cam_countdown = 200000;
+	// Pan Docs busy time: 32446 + N_bit + 16 * exposure M-cycles.
+	c.mbc.rtc_sub_cycles = 129792 + ((reg[1] & 0x80) ? 0 : 2048) + expo * 64;
 	const int W = 128, H = 112;
 	unsigned char src[W * H];
 	const bool have = g_gb_camera_cb && g_gb_camera_cb(src, W, H);
@@ -1325,22 +1326,6 @@ static void GbCameraCapture(Cart &c)
 			WriteSram(c, tile_off + row * 2 + 1, hi);
 		}
 	}
-
-	for (int y = 0; y < H; ++y)
-		for (int x = 0; x < W; ++x)
-		{
-			int v = src[y * W + x] * 23 / 16 + g_cam_brightness;
-			if (v < 0) v = 0; else if (v > 255) v = 255;
-			const int base = ((x & 3) + (y & 3) * 4) * 3 + 6;
-			uint8_t shade;
-			if      (v < reg[base + 0]) shade = 3;
-			else if (v < reg[base + 1]) shade = 2;
-			else if (v < reg[base + 2]) shade = 1;
-			else                        shade = 0;
-			g_cam_shade[y * W + x] = shade;
-		}
-	(void)have;
-	g_cam_live = 40;
 }
 
 void MbcWrite(Cart &c, uint16_t addr, uint8_t value)

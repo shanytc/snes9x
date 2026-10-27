@@ -71,11 +71,6 @@
 #include <cstdio>
 #include <cstdlib>
 
-extern int g_cam_countdown;
-extern uint8_t g_cam_shade[128 * 112];
-extern int g_cam_live;
-extern int g_cam_brightness;
-
 namespace SGB {
 
 namespace {
@@ -684,17 +679,6 @@ void FinalizeScanline(Ppu &p)
 	if (p.ly >= GB_SCREEN_HEIGHT) return;
 
 	uint8_t *const line = &p.framebuffer[p.ly * GB_SCREEN_WIDTH];
-
-	if (::g_cam_live > 0 && p.ly >= 16 && p.ly < 16 + 112)
-	{
-		const int srow = p.ly - 16;
-		for (int xx = 0; xx < 128; ++xx)
-		{
-			const int sx = 8 + xx;
-			if (sx < GB_SCREEN_WIDTH)
-				line[sx] = ::g_cam_shade[srow * 128 + xx];
-		}
-	}
 
 	std::memcpy(&p.raw_framebuffer[p.ly * GB_SCREEN_WIDTH],
 	            p.scanline_raw, GB_SCREEN_WIDTH);
@@ -1821,17 +1805,6 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 			if (p.icd_feed) S9xSGBOnPpuHBlank();
 			if (p.ly == VISIBLE_LINES)
 			{
-				if (::g_cam_live > 0)
-				{
-					--::g_cam_live;
-					if (mem.joypad)
-					{
-						const Joypad &jp = *mem.joypad;
-						const uint8_t dn = jp.sgb_active ? jp.sgb_pads[0] : jp.dpad;
-						if ((dn & 0x04) == 0 && ::g_cam_brightness <  96) ::g_cam_brightness += 3;
-						if ((dn & 0x08) == 0 && ::g_cam_brightness > -96) ::g_cam_brightness -= 3;
-					}
-				}
 				p.mode          = PpuMode::VBlank;
 				// The OAM STAT source also pulses at vblank start, on the
 				// same cycle as the vblank IRQ (mooneye vblank_stat_intr).
@@ -1990,8 +1963,6 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		}
 		return;
 	}
-
-	if (::g_cam_countdown > 0) { ::g_cam_countdown -= tcycles; if (::g_cam_countdown < 0) ::g_cam_countdown = 0; }
 
 	// LCD master disable (LCDC bit 7). Real HW parks the PPU in mode 0
 	// with LY=0 until the bit toggles back on. We keep the framebuffer

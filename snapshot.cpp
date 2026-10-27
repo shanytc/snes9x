@@ -1170,6 +1170,15 @@ bool8 S9xUnfreezeGame (const char *filename)
 	// directly without going through the SNES snapshot decoder.
 	if (Settings.SuperGameBoy)
 	{
+		FILE *f = fopen(filename, "rb");
+		if (!f)
+		{
+			sprintf(String, SAVE_ERR_SAVE_NOT_FOUND, base.c_str());
+			S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
+			return (FALSE);
+		}
+		fclose(f);
+
 		if (!S9xSGBLoadStateFromFile(filename))
 		{
 			S9xMessageFromResult(WRONG_FORMAT, base.c_str());

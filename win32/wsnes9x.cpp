@@ -7164,17 +7164,17 @@ static void GBLinkSyncIrItems (HMENU link)
 	static HMENU kiss_link = NULL;
 	static int   kiss_kind = 0;
 	static const UINT   ids[3]    = { ID_EMULATION_GB_LINK_IR, ID_EMULATION_GB_LINK_KISS, ID_EMULATION_GB_KISSLINK };
-	static const TCHAR *labels[3] = { TEXT("&Infra-Red"), TEXT("GB &KISS"), TEXT("GB KISS &LINK") };
+	static const TCHAR *labels[3] = { TEXT("&Infra-Red"), TEXT("GB &Kiss"), TEXT("GB Kiss &Link") };
 	const int  kind    = S9xSGBCartHasKissMenu () ? (S9xSGBCartIsNectaris () ? 2 : 1) : 0;
 	const bool want[3] = { S9xSGBIsCgb () && !Settings.SGB_BIOSModeActive, S9xSGBCartHasGbKiss (), kind != 0 };
 	if (kind && kind != kiss_kind)
 	{
 		if (!kiss_link) kiss_link = CreatePopupMenu ();
 		while (GetMenuItemCount (kiss_link) > 0) DeleteMenu (kiss_link, 0, MF_BYPOSITION);
-		AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_FILE, TEXT("Send &File (.gbf)..."));
+		AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_FILE, TEXT("Import &File (.gbf)..."));
 		if (kind == 2)
 		{
-			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_MAP, TEXT("Send Nectaris &Map (.nmd)..."));
+			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_MAP, TEXT("Import Nectaris &Map (.nmd)..."));
 			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_RECV, TEXT("&Save Nectaris Map..."));
 		}
 		AppendMenu (kiss_link, MF_SEPARATOR, 0, NULL);

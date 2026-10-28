@@ -86,6 +86,12 @@ namespace SGB {
 			// send's read land in one frame, so player 1's A edge is gone: read once, as the trade itself does.
 			{ 0xD954, "RETRIEVE", "file-screen pad read once a frame", 1,
 			  { { 0x000363, 3, { 0xFE, 0x02, 0x28 }, { 0xB7, 0x00, 0x20 } } } },   // or a / nop / jr nz
+			// Jinsei Game Densetsu: the DMG-07 setup's $C4 / $C8 / $C6 handshake bytes are written for one
+			// main-loop pass; a pass that runs past the next packet's start never sends them: hold each one.
+			{ 0x56FD, "JINSEI", "setup handshake bytes held", 3,
+			  { { 0x001B04, 2, { 0xE0, 0xC4 }, { 0x00, 0x00 } },                  // P1 keeps $C4 until it calls a seat
+				{ 0x001ECF, 3, { 0xCD, 0xBC, 0x0E }, { 0x00, 0x00, 0x00 } },     // a seat keeps $C8 until it sees $C6
+				{ 0x001B83, 2, { 0xE0, 0xC4 }, { 0x00, 0x00 } } } },             // P1 keeps $C6 until the game sends
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

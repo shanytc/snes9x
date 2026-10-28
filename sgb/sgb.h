@@ -547,6 +547,19 @@ bool S9xSGBKissLinkStart(int kind, const uint8_t *data, size_t size, const char 
 void S9xSGBKissLinkCancel(void);
 int  S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char **error);
 bool S9xSGBKissLinkReceivedMap(uint8_t *out /* S9X_KISSLINK_MAP_BYTES */);
+// Namcot's Barcode Boy on player 1's link port, while no Game Link session
+// holds it (sgb/gb_barcodeboy.h has the known cards). Scan takes 13 digits,
+// connects it, and the card waits until the game asks for one; ReadCount
+// goes up as a game takes a card whole. Game: the loaded cart's name when
+// it reads the Barcode Boy, else NULL.
+bool S9xSGBBarcodeBoyHasPort(void);
+void S9xSGBBarcodeBoyConnect(bool on);
+bool S9xSGBBarcodeBoyConnected(void);
+bool S9xSGBBarcodeBoyScan(const char *code);
+bool S9xSGBBarcodeBoyPending(void);
+const char *S9xSGBBarcodeBoyLastCode(void);
+unsigned S9xSGBBarcodeBoyReadCount(void);
+const char *S9xSGBBarcodeBoyGame(void);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 // Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
 // feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero

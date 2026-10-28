@@ -21,6 +21,7 @@
 // games are bit-for-bit unaffected.
 
 #include "gb_serial.h"
+#include "gb_barcodeboy.h"
 #include "gb_link.h"
 #include "gb_memory.h"
 #include "gb_joypad.h"
@@ -810,6 +811,43 @@ void StepResolvedActive(Serial &s, Memory &mem, int32_t tcycles)
 		s.bit_timer += s.bit_period;
 	}
 	if (s.bits_left == 0) CompleteActive(s, mem);
+}
+
+// The Barcode Boy holds the port while no Game Link session does.
+bool ScannerOnPort()
+{
+	return BarcodeBoyConnected() && !SerialLinkIsEnabled() && !SerialSplitActive();
+}
+
+// A byte crossing to or from the Barcode Boy. No cable statistics: those
+// describe a Game Link session.
+void ScannerLand(Serial &s, Memory &mem, uint8_t data)
+{
+	mem.serial_data    = data;
+	mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
+	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
+	s.active    = false;
+	s.passive   = false;
+	s.bits_left = 0;
+}
+
+// The game's own bytes (the knock) take their eight bit periods; the
+// scanner's land whenever its clock says so.
+void ScannerStep(Serial &s, Memory &mem, int32_t tcycles, int32_t real)
+{
+	if (s.active)
+	{
+		s.bit_timer -= tcycles;
+		while (s.bit_timer <= 0 && s.bits_left > 0)
+		{
+			--s.bits_left;
+			s.bit_timer += s.bit_period;
+		}
+		if (s.bits_left == 0) ScannerLand(s, mem, s.peer_data);
+	}
+	const bool listening = (mem.serial_control & 0x81) == 0x80;
+	const int  b = BarcodeBoyClock(real, listening);
+	if (b >= 0) ScannerLand(s, mem, static_cast<uint8_t>(b));
 }
 
 // Finish a transfer the peer clocked for us.
@@ -1896,6 +1934,8 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 		s.bits_left  = 8;
 		s.bit_period = BitPeriod(s, mem.serial_control);
 		s.bit_timer  = s.bit_period;
+		// The Barcode Boy's answer to that byte came back with the state.
+		if (ScannerOnPort()) s.peer_data = BarcodeBoyReply();
 	}
 	else
 	{
@@ -2061,6 +2101,25 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		return;
 	}
 
+	if (ScannerOnPort())
+	{
+		// Barcode Boy: the game clocks the knock itself, then listens on
+		// the external clock while the scanner clocks a card in.
+		s.active = s.passive = false;
+		if ((value & 0x81) == 0x81)
+		{
+			if (mem.serial_cb) mem.serial_cb(mem.serial_user, mem.serial_data);
+			s.active     = true;
+			s.bits_left  = 8;
+			s.bit_period = BitPeriod(s, value);
+			s.bit_timer  = FirstBitDelay(mem, s.bit_period);
+			s.peer_data  = BarcodeBoyExchange(mem.serial_data);
+		}
+		else if (value & 0x80)
+			s.passive = true;
+		return;
+	}
+
 	if (!LinkIsConnected())
 	{
 		// No cable: the core's own stub shifts the idle wire's $FF in,
@@ -2148,6 +2207,11 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 
 	if (!SerialLinkIsEnabled() && !SerialSplitActive())
 	{
+		if (BarcodeBoyConnected())
+		{
+			ScannerStep(s, mem, tcycles, real);
+			return;
+		}
 		// No session: only the stub's timed $FF countdown has work here.
 		StepResolvedActive(s, mem, tcycles);
 		return;

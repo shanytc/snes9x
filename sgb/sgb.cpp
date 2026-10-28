@@ -4093,6 +4093,15 @@ std::string SeatBatteryPath(int k, const char *base)
 	return (base && *base) ? std::string(base) + std::to_string(k + 2) : std::string();
 }
 
+// The live session's battery base, for a machine seat's Game Boy that joins after the start.
+std::string g_split_battery_base;
+
+// Seat k's Game Boy: a split-engine core, or a machine's once it is on the cable.
+SGB::Emulator *SeatCore(int k)
+{
+	return g_split_cores[k] ? g_split_cores[k].get() : g_split_external_core[k];
+}
+
 // Each seat's last completed frame, lifted out at its VBlank inside the
 // lockstep loop. Cores then never park while others run — a parked seat
 // cannot re-arm its serial port, and the adapter clocking bytes into it
@@ -5119,6 +5128,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	// the seats answer for themselves — every window one kind of console.
 	SGB::Instance().DebugImpl()->sgb_pkt.passive_commands = true;
 
+	g_split_battery_base = battery_base_path ? battery_base_path : "";
 	S9xSGBSplitLoadBatteries(battery_base_path);
 	SplitStaggerSeats();
 	return true;
@@ -5128,6 +5138,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 {
 	if (!g_split_players) return;
 	S9xSGBSplitSaveBatteries(battery_base_path);
+	g_split_battery_base.clear();
 	SGB::Instance().DebugImpl()->sgb_pkt.passive_commands = false;
 	SGB::SerialSplitDetach();
 	SGB::IrUnpair();
@@ -5195,7 +5206,14 @@ void S9xSGBSplitSetExternalCore(int player, SGB::Emulator *core)
 {
 	const int k = player - 2;
 	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1 || !g_split_external[k]) return;
+	// Its battery goes with it: saved as it leaves, loaded as it joins a live session.
+	SGB::Emulator *old = g_split_external_core[k];
+	const std::string sav = SeatBatteryPath(k, g_split_battery_base.c_str());
+	if (old && old != core && old->HasBattery() && !sav.empty())
+		old->SaveBatteryToPath(sav.c_str());
 	g_split_external_core[k] = core;
+	if (core && core != old && g_split_players >= 2 && core->HasBattery() && !sav.empty())
+		core->LoadBatteryFromPath(sav.c_str());
 	if (g_split_players >= 2) SplitAttachLink();
 }
 
@@ -5834,9 +5852,10 @@ void S9xSGBSplitLoadBatteries(const char *battery_base_path)
 	if (!battery_base_path || !*battery_base_path) return;
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
-		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
+		SGB::Emulator *core = SeatCore(k);
+		if (!core || !core->HasBattery()) continue;
 		const std::string p = SeatBatteryPath(k, battery_base_path);
-		if (!p.empty()) g_split_cores[k]->LoadBatteryFromPath(p.c_str());
+		if (!p.empty()) core->LoadBatteryFromPath(p.c_str());
 	}
 }
 
@@ -5845,9 +5864,10 @@ void S9xSGBSplitSaveBatteries(const char *battery_base_path)
 	if (!battery_base_path || !*battery_base_path) return;
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
-		if (!g_split_cores[k] || !g_split_cores[k]->HasBattery()) continue;
+		SGB::Emulator *core = SeatCore(k);
+		if (!core || !core->HasBattery()) continue;
 		const std::string p = SeatBatteryPath(k, battery_base_path);
-		if (!p.empty()) g_split_cores[k]->SaveBatteryToPath(p.c_str());
+		if (!p.empty()) core->SaveBatteryToPath(p.c_str());
 	}
 }
 

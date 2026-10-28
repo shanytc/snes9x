@@ -46,6 +46,8 @@ class Snes9xWindow : public GtkBuilderWindow
     // Emulation -> Game Boy Model, shared by the menu items and their
     // hotkeys so both apply the same gates and reload the same way.
     void set_gb_boot_policy(int policy);
+    // Emulation -> RTC -> Settings: the PC's clock or a picked date and time.
+    void open_rtc_settings();
     void open_bios_manager();
     bool reload_loaded_game();
     void center_mouse();
@@ -133,6 +135,7 @@ class Snes9xWindow : public GtkBuilderWindow
 
     Snes9xConfig *config;
     bool refreshing_bios_menu = false;
+    bool refreshing_rtc_menu = false;
     bool refreshing_runahead_menu = false;
     bool refreshing_controller_menu = false;
     bool refreshing_icon_menu = false;

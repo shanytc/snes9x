@@ -1995,6 +1995,52 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkMenuItem" id="rtc_item">
+                        <property name="label" translatable="yes">R_TC</property>
+                        <property name="visible">False</property>
+                        <property name="can_focus">False</property>
+                        <property name="use_underline">True</property>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="rtc_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="rtc_sav_item">
+                                <property name="label" translatable="yes">Save RTC to _Battery Save (.sav)</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkRadioMenuItem" id="rtc_file_item">
+                                <property name="label" translatable="yes">Save RTC Se_parately (.rtc)</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                                <property name="draw_as_radio">True</property>
+                                <property name="group">rtc_sav_item</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkSeparatorMenuItem" id="rtc_separator">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkMenuItem" id="rtc_settings_item">
+                                <property name="label" translatable="yes">_Settings…</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkMenuItem" id="voicekun_item">
                         <property name="label" translatable="yes">Voicer-_kun</property>
                         <property name="visible">True</property>

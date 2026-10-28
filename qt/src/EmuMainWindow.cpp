@@ -10,6 +10,15 @@
 #include <QGuiApplication>
 #include <QApplication>
 #include <QActionGroup>
+#include <QCheckBox>
+#include <QDateTime>
+#include <QDateTimeEdit>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QLabel>
+#include <QVBoxLayout>
 
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
@@ -306,6 +315,87 @@ void EmuMainWindow::refreshBiosMenu()
             why == S9X_GBPOLICY_NO_BIOS ? base + missing :
             i == S9X_GBBOOT_SGBC        ? base + experimental : base);
     }
+}
+
+void EmuMainWindow::refreshRtcMenu()
+{
+    if (!rtc_menu_action)
+        return;
+
+    const bool clock = Settings.GBRomPath[0] != '\0' && S9xSGBCartHasClock();
+    rtc_menu_action->setVisible(clock);
+    (Settings.GBRTCSeparate ? rtc_file_action : rtc_sav_action)->setChecked(true);
+}
+
+// The clock moves to its new place with the next battery save.
+void EmuMainWindow::setRtcSeparate(bool separate)
+{
+    Settings.GBRTCSeparate      = separate;
+    app.config->gb_rtc_separate = separate;
+    S9xSetInfoString(separate ? "RTC: saved separately (.rtc)" : "RTC: saved in the battery save (.sav)");
+}
+
+// Emulation > RTC > Settings: the PC's clock, or (RTC off) a date and time
+// picked to stand in for it, kept as Unix seconds and shown in local time.
+void EmuMainWindow::openRtcSettings()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("RTC Settings"));
+    auto layout = new QVBoxLayout(&dialog);
+
+    auto on = new QCheckBox(tr("RTC &on: the cart's clock follows the PC's clock"));
+    on->setChecked(!app.config->gb_rtc_off);
+    layout->addWidget(on);
+
+    auto group = new QGroupBox(tr("Date"));
+    auto grid = new QGridLayout(group);
+    auto date = new QDateEdit;
+    auto time = new QTimeEdit;
+    auto date_label = new QLabel(tr("&Date"));
+    auto time_label = new QLabel(tr("&Time"));
+    date_label->setBuddy(date);
+    time_label->setBuddy(time);
+    date->setCalendarPopup(true);
+    time->setDisplayFormat("hh:mm:ss");
+    // From 1997, when the first RTC carts came out, to where 32-bit Unix
+    // seconds end.
+    date->setDateRange(QDate(1997, 1, 1), QDate(2105, 12, 31));
+    const qint64 picked = app.config->gb_rtc_time ? (qint64)app.config->gb_rtc_time
+                                                  : QDateTime::currentSecsSinceEpoch();
+    const QDateTime when = QDateTime::fromSecsSinceEpoch(picked);
+    date->setDate(when.date());
+    time->setTime(when.time());
+    grid->addWidget(date_label, 0, 0);
+    grid->addWidget(time_label, 0, 1);
+    grid->addWidget(date, 1, 0);
+    grid->addWidget(time, 1, 1);
+    layout->addWidget(group);
+
+    auto note = new QLabel(tr("With the RTC off, this date and time stand in for the PC's clock: "
+                              "the game's clock runs only while it plays, and moving the date forward "
+                              "runs it forward the next time the game loads."));
+    note->setWordWrap(true);
+    layout->addWidget(note);
+
+    auto buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    // The pickers only matter with the RTC off.
+    group->setEnabled(!on->isChecked());
+    connect(on, &QCheckBox::toggled, group, [group](bool checked) { group->setEnabled(!checked); });
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const qint64 secs = QDateTime(date->date(), time->time()).toSecsSinceEpoch();
+    app.config->gb_rtc_off  = !on->isChecked();
+    app.config->gb_rtc_time = secs > 0 ? (uint32_t)secs : 0;
+    Settings.GBRTCOff  = app.config->gb_rtc_off;
+    Settings.GBRTCTime = app.config->gb_rtc_time;
+    S9xSetInfoString(Settings.GBRTCOff ? "RTC off: the picked date and time stand in for the PC's clock"
+                                       : "RTC on: the PC's clock");
 }
 
 void EmuMainWindow::refreshVoicekunMenu()
@@ -1500,6 +1590,26 @@ void EmuMainWindow::createWidgets()
     bios_menu_action = emulation_menu->addMenu(bios_menu);
     bios_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshBiosMenu);
+
+    // Emulation > RTC: where an MBC3/HuC3 cart's clock is saved and what clock
+    // it follows. Only offered while such a cart is loaded.
+    rtc_menu = new QMenu(tr("R&TC"));
+    auto rtc_group = new QActionGroup(this);
+    rtc_group->setExclusive(true);
+    rtc_sav_action  = rtc_menu->addAction(tr("Save RTC to &Battery Save (.sav)"));
+    rtc_file_action = rtc_menu->addAction(tr("Save RTC Se&parately (.rtc)"));
+    for (QAction *a : { rtc_sav_action, rtc_file_action })
+    {
+        a->setCheckable(true);
+        rtc_group->addAction(a);
+    }
+    connect(rtc_sav_action, &QAction::triggered, [this] { setRtcSeparate(false); });
+    connect(rtc_file_action, &QAction::triggered, [this] { setRtcSeparate(true); });
+    rtc_menu->addSeparator();
+    connect(rtc_menu->addAction(tr("&Settings...")), &QAction::triggered, this, &EmuMainWindow::openRtcSettings);
+    rtc_menu_action = emulation_menu->addMenu(rtc_menu);
+    rtc_menu_action->setVisible(false);
+    connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshRtcMenu);
 
     // Koei Voicer-kun audio CD: only offered while a supported game is loaded.
     voicekun_menu = new QMenu(tr("Voicer-&kun"));

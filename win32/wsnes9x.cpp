@@ -6755,7 +6755,7 @@ static void UpdateTestsMenu ()
 }
 
 // Emulation menu entries that depend on what is loaded: each is on the menu
-// only while its hardware runs. They follow Link Cable, Game Boy Model and
+// only while its hardware runs. They follow Game Link, Game Boy Model and
 // Real Time Clock, which also come and go, so the group's slot is counted from them.
 static void UpdateHardwarePopups ()
 {
@@ -6772,7 +6772,7 @@ static void UpdateHardwarePopups ()
 		{ ID_DEBUG_GB_TILE_VIEWER,   TEXT("&GB-PPU") },
 	};
 	static HMENU s_parent = NULL;
-	static int   s_first  = 0;   // NSS's slot while Link Cable, Game Boy Model and RTC are hidden
+	static int   s_first  = 0;   // NSS's slot while Game Link, Game Boy Model and RTC are hidden
 
 	MENUITEMINFO probe = {};
 	probe.cbSize = sizeof(probe);
@@ -7155,7 +7155,7 @@ static void WinKissLinkPoll ()
 	S9xSetInfoString (msg);
 }
 
-// Link Cable > Infra-Red for a game in Game Boy Color mode (never under a Super
+// Game Link > Infra-Red for a game in Game Boy Color mode (never under a Super
 // Game Boy), GB KISS for a Hudson IR cart and GB KISS LINK for one with the GB
 // KISS menu (its map items for Nectaris GB): above Reset on Link, own separator.
 static void GBLinkSyncIrItems (HMENU link)
@@ -7175,7 +7175,7 @@ static void GBLinkSyncIrItems (HMENU link)
 		if (kind == 2)
 		{
 			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_MAP, TEXT("Send Nectaris &Map (.nmd)..."));
-			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_RECV, TEXT("&Receive Nectaris Map..."));
+			AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_RECV, TEXT("&Save Nectaris Map..."));
 		}
 		AppendMenu (kiss_link, MF_SEPARATOR, 0, NULL);
 		AppendMenu (kiss_link, MF_STRING, ID_EMULATION_GB_KISSLINK_CANCEL, TEXT("&Cancel Transfer"));
@@ -7434,7 +7434,7 @@ static void CheckMenuStates ()
 		                  S9xSGBLinkIsEnabled () ||
 		                  Settings.GBLinkPeerInstance;
 		// First under the divider below Hard Reset, above Game Boy Model.
-		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("&Link Cable"),
+		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game &Link"),
 		                   ID_EMULATION_HARD_RESET, 2, show, &s_link_hmenu, &s_link_parent);
 
 		// A spawned instance never chooses the session shape — only the
@@ -7694,7 +7694,7 @@ static void CheckMenuStates ()
 				TCHAR txt[]    = TEXT("Game &Boy Model");
 				ins.dwTypeData = txt;
 				ins.cch        = (UINT)_tcslen(txt);
-				// anchor under the divider below Hard Reset, after Link Cable
+				// anchor under the divider below Hard Reset, after Game Link
 				// when it is up: the cached index drifts as that one comes and goes
 				UINT pos = s_bios_pos;
 				const UINT count = (UINT)GetMenuItemCount(s_bios_parent);
@@ -7723,7 +7723,7 @@ static void CheckMenuStates ()
 			}
 		}
 		UpdateRtcPopup(gb_loaded && S9xSGBCartHasClock());
-		// Again, now that Link Cable, Game Boy Model and Real Time Clock are
+		// Again, now that Game Link, Game Boy Model and Real Time Clock are
 		// settled: Run Ahead's divider follows them.
 		UpdateHardwarePopups();
 
@@ -14913,7 +14913,7 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 }
 #endif
 
-// Game Boy link cable (Emulation > Link Cable).
+// Game Boy link cable (Emulation > Game Link).
 //
 // Ticking an item senses the role and, if this instance ends up hosting,
 // launches the missing instances with the item already ticked. Same-game
@@ -14948,9 +14948,9 @@ bool GBLinkSplitScreen = false;
 bool GBLinkResetOnLink   = true;
 bool GBLinkResetOnUnlink = true;
 
-// Players 1 and 2 face each other: the GBC port (on unless unticked) / the cart LED.
+// Players 1 and 2 face each other: the GBC port / the cart LED, each on unless unticked.
 bool GBLinkInfrared = true;
-bool GBLinkGbKiss   = false;
+bool GBLinkGbKiss   = true;
 
 // Each player's Game Boy Model, indexed by player number. A session opens
 // every seat on the console the master loaded; this is how one seat is told

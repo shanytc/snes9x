@@ -24,6 +24,7 @@
 #include "gb_serial.h"
 #include "gb_infrared.h"
 #include "gb_kisslink.h"
+#include "gb_barcodeboy.h"
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
@@ -3461,7 +3462,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v13: add mem.rp, the Game Boy Color infrared port.
 // v14: add mem.cart_ir, the HuC1 cartridge's infrared LED.
 // v15: add the GB KISS LINK's progress through its job.
-constexpr uint32_t SGB_STATE_VERSION = 15;
+// v16: add the Barcode Boy's side of the wire.
+constexpr uint32_t SGB_STATE_VERSION = 16;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3812,6 +3814,15 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		if (c.mode == IoMode::Save) KissLinkStateSave(impl.mem, link.data());
 		IoBytes(c, link.data(), link.size());
 		if (c.mode == IoMode::Load && c.ok) KissLinkStateLoad(impl.mem, link.data());
+	}
+
+	// v16: the Barcode Boy's side of the wire, and a card waiting in it.
+	if (c.version >= 16)
+	{
+		std::vector<uint8_t> bb(BarcodeBoyStateBytes());
+		if (c.mode == IoMode::Save) BarcodeBoyStateSave(bb.data());
+		IoBytes(c, bb.data(), bb.size());
+		if (c.mode == IoMode::Load && c.ok) BarcodeBoyStateLoad(bb.data());
 	}
 }
 
@@ -4971,6 +4982,26 @@ int S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char *
 bool S9xSGBKissLinkReceivedMap(uint8_t *out)
 {
 	return SGB::KissLinkReceivedMap(out);
+}
+
+// The SGB1 has no link port to plug it into; the SGB2 does.
+bool S9xSGBBarcodeBoyHasPort(void)
+{
+	return !(Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1);
+}
+
+void S9xSGBBarcodeBoyConnect(bool on)       { SGB::BarcodeBoyConnect(on); }
+bool S9xSGBBarcodeBoyConnected(void)        { return SGB::BarcodeBoyConnected(); }
+bool S9xSGBBarcodeBoyScan(const char *code) { return SGB::BarcodeBoyScan(code); }
+bool S9xSGBBarcodeBoyPending(void)          { return SGB::BarcodeBoyPending(); }
+const char *S9xSGBBarcodeBoyLastCode(void)  { return SGB::BarcodeBoyLastCode(); }
+unsigned S9xSGBBarcodeBoyReadCount(void)    { return SGB::BarcodeBoyReadCount(); }
+
+const char *S9xSGBBarcodeBoyGame(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) return nullptr;
+	return SGB::BarcodeBoyGame(prim.DebugImpl()->cart.header.title);
 }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }

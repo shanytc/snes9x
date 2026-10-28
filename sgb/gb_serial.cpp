@@ -264,10 +264,11 @@ LinkRole g_role = LinkRole::None;
 // Timing from Pan Docs, in real T-cycles at 4.194304 MHz (1 ms = 4194).
 constexpr int32_t kCyclesPerMs = 4194;
 
-// Ping packets: four bytes clustered at the start (128 us of shifting,
-// 1.42 ms gap), then a 12.2 ms + (RATE & $0F) ms rest.
-constexpr int32_t kPingByteGap = 6486;
-constexpr int32_t kPingRest    = 51169;
+// Ping packets, measured on a real DMG-07: byte starts 1.548 ms apart, and
+// FE to FE 16.994 ms + 0.9975 ms per RATE & $0F step.
+constexpr int32_t kPingByteGap  = 6494;
+constexpr int32_t kPingRest     = 51797;   // the FE-to-FE period minus three byte gaps
+constexpr int32_t kPingRateStep = 4184;
 
 // Rest after the one $CC packet, socket sessions only: a seat replaying
 // a backlog needs room to match it or it never leaves the ping phase.
@@ -1686,7 +1687,7 @@ void HubAdvance()
 		else if (g_hub.phase == kDmg07Sync && !g_hub.local)
 			delay = kSyncSettle;   // seats over sockets need the room
 		else
-			delay = kPingRest + lo * kCyclesPerMs;
+			delay = kPingRest + lo * kPingRateStep;
 	}
 	else
 	{

@@ -1205,12 +1205,12 @@ void WinRegisterConfigItems()
 	AddBoolC("RTCOff", Settings.GBRTCOff, false, "false (default) = the cartridge clock follows the PC's clock; true = the RTC is off and RTCTime stands in for the PC's clock (Emulation -> Real Time Clock -> Settings)");
 	AddUIntC("RTCTime", Settings.GBRTCTime, 0, "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
 	AddUIntC("RTCHuC3Format", Settings.GBRTCHuC3Format, 0, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
-	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Link Cable. Only worth changing if something else on this PC already owns 8765.");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Link. Only worth changing if something else on this PC already owns 8765.");
 	AddBoolC("LinkSplitScreen", GBLinkSplitScreen, false, "Link Current Game runs its 2-4 players split screen in this window instead of spawning instances. BIOS-less GB mode only.");
-	AddBoolC("LinkResetOnLink", GBLinkResetOnLink, true, "true to power-cycle the game when a link session starts (Emulation -> Link Cable -> Reset on Link). The other players always boot fresh.");
-	AddBoolC("LinkResetOnUnlink", GBLinkResetOnUnlink, true, "true to power-cycle the game when a link session ends (Emulation -> Link Cable -> Reset on Unlink).");
-	AddBoolC("LinkInfrared", GBLinkInfrared, true, "true to have players 1 and 2 face each other's Game Boy Color infrared port in a link session (Emulation -> Link Cable -> Infra-Red).");
-	AddBoolC("LinkGbKiss", GBLinkGbKiss, false, "true to have players 1 and 2 face each other's HuC1/HuC3 cartridge infrared in a link session (Emulation -> Link Cable -> GB KISS).");
+	AddBoolC("LinkResetOnLink", GBLinkResetOnLink, true, "true to power-cycle the game when a link session starts (Emulation -> Game Link -> Reset on Link). The other players always boot fresh.");
+	AddBoolC("LinkResetOnUnlink", GBLinkResetOnUnlink, true, "true to power-cycle the game when a link session ends (Emulation -> Game Link -> Reset on Unlink).");
+	AddBoolC("LinkInfrared", GBLinkInfrared, true, "true to have players 1 and 2 face each other's Game Boy Color infrared port in a link session (Emulation -> Game Link -> Infra-Red).");
+	AddBoolC("LinkGbKiss", GBLinkGbKiss, true, "true to have players 1 and 2 face each other's HuC1/HuC3 cartridge infrared in a link session (Emulation -> Game Link -> GB KISS).");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

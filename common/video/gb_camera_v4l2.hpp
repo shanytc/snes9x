@@ -26,6 +26,11 @@ bool S9xGBCameraStart(int device_index);
 void S9xGBCameraStop();
 bool S9xGBCameraIsRunning();
 
+/* Copies the latest frame as 8-bit luma at the camera's own size, not
+ * mirrored, for the Barcode Battler II camera scan. False until a frame has
+ * arrived. */
+bool S9xGBCameraGetFrame(std::vector<unsigned char> &luma, int &width, int &height);
+
 /* Start or stop the capture to match Settings.GBVideoCamera and
  * Settings.GBVideoCameraIndex; a no-op when the running device already
  * matches. Mirrors win32's ApplyGBVideoCamera(). */

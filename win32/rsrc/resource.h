@@ -1005,15 +1005,28 @@
 #define ID_SFCBOX_POWER_OFF             44450
 
 
+#define IDD_BARCODE_BATTLER             201
+#define IDC_BARCODE_EDIT                3704
+#define IDC_BARCODE_RANDOM              3705
+#define IDC_BARCODE_IMAGE               3706
+#define IDC_BARCODE_STATUS              3707
+#define IDC_BARCODE_CAMERA              3708
+#define IDC_BARCODE_CAMERA_TOGGLE       3709
+#define IDC_BARCODE_PREVIEW             3710
+#define IDC_BARCODE_SEARCH              3711
+#define IDC_BARCODE_CARDS               3712
+#define ID_INPUT_BARCODE_CONNECT        44454
+#define ID_INPUT_BARCODE_SCAN           44455
+#define ID_INPUT_BARCODE_RESCAN         44456
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        201
-#define _APS_NEXT_COMMAND_VALUE         44454
-#define _APS_NEXT_CONTROL_VALUE         3704
+#define _APS_NEXT_RESOURCE_VALUE        202
+#define _APS_NEXT_COMMAND_VALUE         44457
+#define _APS_NEXT_CONTROL_VALUE         3713
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

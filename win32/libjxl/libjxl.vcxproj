@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug Unicode|Win32">
+      <Configuration>Debug Unicode</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug Unicode|x64">
+      <Configuration>Debug Unicode</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release Unicode|Win32">
+      <Configuration>Release Unicode</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release Unicode|x64">
+      <Configuration>Release Unicode</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{6E1C5B3A-2F4D-4C7B-9A8E-3D5F7B1C9E24}</ProjectGuid>
+    <RootNamespace>libjxl</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\s9x.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\s9x.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\s9x.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\s9x.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|Win32'">
+    <OutDir>$(SolutionDir)_Output\$(Configuration)\$(PlatformTarget)\</OutDir>
+    <IntDir>$(SolutionDir)_Intermediate\$(ProjectName)\$(Configuration)\$(PlatformTarget)\</IntDir>
+    <TargetName>$(ProjectName)</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|x64'">
+    <OutDir>$(SolutionDir)_Output\$(Configuration)\$(PlatformTarget)\</OutDir>
+    <IntDir>$(SolutionDir)_Intermediate\$(ProjectName)\$(Configuration)\$(PlatformTarget)\</IntDir>
+    <TargetName>$(ProjectName)</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|Win32'">
+    <OutDir>$(SolutionDir)_Output\$(Configuration)\$(PlatformTarget)\</OutDir>
+    <IntDir>$(SolutionDir)_Intermediate\$(ProjectName)\$(Configuration)\$(PlatformTarget)\</IntDir>
+    <TargetName>$(ProjectName)</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|x64'">
+    <OutDir>$(SolutionDir)_Output\$(Configuration)\$(PlatformTarget)\</OutDir>
+    <IntDir>$(SolutionDir)_Intermediate\$(ProjectName)\$(Configuration)\$(PlatformTarget)\</IntDir>
+    <TargetName>$(ProjectName)</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|Win32'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)..\..\external\libjxl;$(ProjectDir)..\..\external\libjxl\lib\include;$(ProjectDir)..\..\external\highway;$(ProjectDir)..\..\external\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>JXL_STATIC_DEFINE;JXL_INTERNAL_LIBRARY_BUILD;JPEGXL_ENABLE_TRANSCODE_JPEG=0;JPEGXL_ENABLE_BOXES=0;HWY_STATIC_DEFINE;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;_WIN32;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PrecompiledHeader />
+      <ProgramDataBaseFileName>$(OutDir)$(ProjectName).pdb</ProgramDataBaseFileName>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Unicode|x64'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)..\..\external\libjxl;$(ProjectDir)..\..\external\libjxl\lib\include;$(ProjectDir)..\..\external\highway;$(ProjectDir)..\..\external\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>JXL_STATIC_DEFINE;JXL_INTERNAL_LIBRARY_BUILD;JPEGXL_ENABLE_TRANSCODE_JPEG=0;JPEGXL_ENABLE_BOXES=0;HWY_STATIC_DEFINE;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;_WIN32;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PrecompiledHeader />
+      <ProgramDataBaseFileName>$(OutDir)$(ProjectName).pdb</ProgramDataBaseFileName>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|Win32'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)..\..\external\libjxl;$(ProjectDir)..\..\external\libjxl\lib\include;$(ProjectDir)..\..\external\highway;$(ProjectDir)..\..\external\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>JXL_STATIC_DEFINE;JXL_INTERNAL_LIBRARY_BUILD;JPEGXL_ENABLE_TRANSCODE_JPEG=0;JPEGXL_ENABLE_BOXES=0;HWY_STATIC_DEFINE;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;_WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <PrecompiledHeader />
+      <ProgramDataBaseFileName>$(OutDir)$(ProjectName).pdb</ProgramDataBaseFileName>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Unicode|x64'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)..\..\external\libjxl;$(ProjectDir)..\..\external\libjxl\lib\include;$(ProjectDir)..\..\external\highway;$(ProjectDir)..\..\external\brotli\c\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>JXL_STATIC_DEFINE;JXL_INTERNAL_LIBRARY_BUILD;JPEGXL_ENABLE_TRANSCODE_JPEG=0;JPEGXL_ENABLE_BOXES=0;HWY_STATIC_DEFINE;NOMINMAX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;_WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <PrecompiledHeader />
+      <ProgramDataBaseFileName>$(OutDir)$(ProjectName).pdb</ProgramDataBaseFileName>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\ac_strategy.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\alpha.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\ans_common.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\blending.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\chroma_from_luma.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\coeff_order.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\color_encoding_internal.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\compressed_dc.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\convolve_slow.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\convolve_symmetric5.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dct_scales.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_ans.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_bit_reader.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_cache.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_context_map.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_external_image.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_frame.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_group.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_group_border.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_huffman.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_modular.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_noise.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_patch_dictionary.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\dec_xyb.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\decode.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\entropy_coder.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\epf.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\fields.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\frame_header.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\headers.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\huffman_table.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\icc_codec.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\icc_codec_common.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\image.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\image_bundle.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\image_metadata.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\image_ops.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\loop_filter.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\luminance.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\memory_manager_internal.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\encoding\dec_ma.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\encoding\encoding.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\modular_image.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\transform\palette.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\transform\rct.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\transform\squeeze.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\transform\squeeze_params.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\modular\transform\transform.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\opsin_params.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\passes_state.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\quant_weights.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\quantizer.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\low_memory_render_pipeline.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\render_pipeline.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\render_pipeline_stage.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\simple_render_pipeline.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_blending.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_chroma_upsampling.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_cms.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_epf.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_from_linear.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_gaborish.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_noise.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_patches.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_splines.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_spot.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_to_linear.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_tone_mapping.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_upsampling.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_write.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_xyb.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\render_pipeline\stage_ycbcr.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\simd_util.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\splines.cc" />
+    <ClCompile Include="..\..\external\libjxl\lib\jxl\toc.cc" />
+    <ClCompile Include="..\..\external\highway\hwy\abort.cc" />
+    <ClCompile Include="..\..\external\highway\hwy\aligned_allocator.cc" />
+    <ClCompile Include="..\..\external\highway\hwy\per_target.cc" />
+    <ClCompile Include="..\..\external\highway\hwy\print.cc" />
+    <ClCompile Include="..\..\external\highway\hwy\targets.cc" />
+    <ClCompile Include="..\..\external\brotli\c\common\constants.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\common\context.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\common\dictionary.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\common\platform.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\common\shared_dictionary.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\common\transform.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\dec\bit_reader.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\dec\decode.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\dec\huffman.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\dec\prefix.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\dec\state.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="..\..\external\brotli\c\dec\static_init.c">
+      <ObjectFileName>$(IntDir)brotli\</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\jxl\jxl_export.h" />
+    <ClInclude Include="include\jxl\version.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

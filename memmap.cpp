@@ -49,6 +49,7 @@
 #include "superdisc.h"
 #include "rp2040cart.h"
 #include "voicekun.h"
+#include "barcodebattler.h"
 #ifdef LUA_SUPPORT
 #include "lua/lua_hooks.h"
 #endif
@@ -3969,6 +3970,7 @@ void CMemory::InitROM (void)
 	Settings.BS = FALSE;
 	Settings.MSU1 = FALSE;
 	S9xVoiceKunDetach();	// the hook PC is per-game; a new ROM needs a fresh attach
+	S9xBarcodeBattlerClear();	// stays connected; a code the last game didn't read is dropped
 
 	SuperFX.nRomBanks = CalculatedSize >> 15;
 

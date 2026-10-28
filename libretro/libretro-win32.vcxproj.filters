@@ -171,6 +171,12 @@
     <ClInclude Include="..\tileimpl.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
+    <ClInclude Include="..\barcodebattler.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\barcodebattler_cards.h">
+      <Filter>s9x-source</Filter>
+    </ClInclude>
     <ClInclude Include="..\voicekun.h">
       <Filter>s9x-source</Filter>
     </ClInclude>
@@ -438,6 +444,9 @@
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\z80.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\barcodebattler.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
     <ClCompile Include="..\voicekun.cpp">

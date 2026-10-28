@@ -57,7 +57,8 @@ void S9xMainLoop (void)
 			S9xLuaInputLatched();
 #endif
 
-		IPPU.RenderThisFrame      = !Settings.InRunAhead;
+		// A caller hides a frame (win32's rewind replay) by clearing this first.
+		IPPU.RenderThisFrame      = IPPU.RenderThisFrame && !Settings.InRunAhead;
 		PPU.ScreenHeight          = SGB_GB_SCREEN_H;
 		IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
 		IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
@@ -89,9 +90,12 @@ void S9xMainLoop (void)
 		S9xSGBRunFrame();
 		if (!Settings.InRunAhead)
 		{
-			IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
-			IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
-			S9xSGBBlitScreenGB(GFX.Screen, GFX.RealPPL);
+			if (IPPU.RenderThisFrame)
+			{
+				IPPU.RenderedScreenWidth  = SGB_GB_SCREEN_W;
+				IPPU.RenderedScreenHeight = SGB_GB_SCREEN_H;
+				S9xSGBBlitScreenGB(GFX.Screen, GFX.RealPPL);
+			}
 			S9xEndScreenRefresh();
 		}
 
@@ -107,6 +111,8 @@ void S9xMainLoop (void)
 
 		if (!Settings.InRunAhead)
 			S9xSyncSpeed();
+		// The GB never frame-skips: drop S9xSyncSpeed's choice for the next frame.
+		IPPU.RenderThisFrame = TRUE;
 
 		CPU.Flags |= SCAN_KEYS_FLAG;
 #ifdef LUA_SUPPORT

@@ -145,9 +145,17 @@ void MbcReset(MbcState &s);
 // SkobLee8 boards power up with non-zero scramble settings).
 void MbcUnlReset(Cart &c);
 
-// Advance the MBC3 RTC by `tcycles` real-time T-cycles (one second per
-// 4194304). No-op for carts without an RTC or with the halt bit set.
+// Advance the MBC3 RTC (a second per 4194304) or the HuC3 clock (a minute per
+// 60 of those) by `tcycles` real-time T-cycles. No-op for carts without one or
+// with the MBC3 halt bit set.
 void MbcTickRtc(MbcState &s, int32_t tcycles);
+// The same clocks run forward by `seconds` at once: the time that passed while
+// the battery save sat on disk.
+void MbcRtcAdvance(MbcState &s, int64_t seconds);
+// The HuC3 clock: minutes into the day (12-bit) and a 16-bit day count.
+uint16_t MbcHuc3Minutes(const MbcState &s);
+uint16_t MbcHuc3Days(const MbcState &s);
+void     MbcHuc3SetClock(MbcState &s, uint16_t minutes, uint16_t days);
 // `unl` (the Cart's MbcUnl) is required for the scrambled unlicensed types;
 // peeks may pass null and get raw bytes with no protection side effects.
 uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<uint8_t> &sram, uint16_t addr, bool mbc1_multicart = false, MbcUnl *unl = nullptr);

@@ -409,6 +409,12 @@ struct SSettings
 	bool8	RP2040Cart;     // RP2040 game cart (Xeno Crisis) with its firmware loaded, streaming through $3000
 	uint32	SFCBoxKROMVersion; // SFC-Box supervisor BIOS: 1 = KROM 1.00, 2 = KROM 2.00 (when the KROM file holds it); ports must seed it
 	bool8	BilinearMode7;  // smooth Mode 7 by blending the 4 texels around each sample point (display only, not hardware)
+	// Game Boy MBC3/HuC3 clock: saved in its own .rtc instead of after the RAM
+	// in the .sav; and, with the RTC off, GBRTCTime (Unix seconds) stands in
+	// for the PC's clock when the clock is saved and caught up at load.
+	bool8	GBRTCSeparate;
+	bool8	GBRTCOff;
+	uint32	GBRTCTime;
 };
 
 struct SSNESGameFixes

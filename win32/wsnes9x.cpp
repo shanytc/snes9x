@@ -49,6 +49,7 @@
 #include "debug_viewer_common.h"
 #include "win32_webcam.h"
 #include "wbarcodebattler.h"
+#include "wbarcodeboy.h"
 
 #include "../snes9x.h"
 #include "../memmap.h"
@@ -186,6 +187,8 @@ static void  GBSeatMachinesTurn();
 static void  WinKissLinkPoll();
 static void  WinKissLinkSend(bool map);
 static void  WinKissLinkReceiveMap();
+static bool  WinBarcodeBoyPortFree();
+static void  WinBarcodeBoyPoll();
 static void  GBSeatMachinesRequestReset();
 static bool  GBSeatModelIsMachine(unsigned char model);
 static void  WinStartGBOtherGame(const TCHAR *path);
@@ -2836,6 +2839,31 @@ LRESULT CALLBACK WinProc(
 			std::string code = S9xBarcodeBattlerLastCode();
 			if (!Settings.StopEmulation && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
 				S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
+			break;
+		}
+		// Barcode Boy: on player 1's Game Boy link port, across game loads.
+		// Scanning is only offered to a game that reads it.
+		case ID_INPUT_BARCODEBOY_CONNECT:
+			if (!S9xSGBBarcodeBoyConnected () && !WinBarcodeBoyPortFree ())
+				break;
+			S9xSGBBarcodeBoyConnect (!S9xSGBBarcodeBoyConnected ());
+			if (!Settings.StopEmulation)
+				S9xSetInfoString (S9xSGBBarcodeBoyConnected () ? "Barcode Boy connected to the link port"
+				                                               : "Barcode Boy disconnected");
+			break;
+		case ID_INPUT_BARCODEBOY_SCAN:
+			if (Settings.StopEmulation || !S9xSGBBarcodeBoyGame () || !WinBarcodeBoyPortFree ())
+				break;
+			RestoreGUIDisplay ();
+			WinBarcodeBoyDialog (GUI.hWnd);
+			RestoreSNESDisplay ();
+			break;
+		case ID_INPUT_BARCODEBOY_RESCAN:
+		{
+			std::string code = S9xSGBBarcodeBoyLastCode ();
+			if (!Settings.StopEmulation && S9xSGBBarcodeBoyGame () && WinBarcodeBoyPortFree () &&
+			    S9xSGBBarcodeBoyScan (code.c_str ()))
+				WinBarcodeBoyScanned ();
 			break;
 		}
 
@@ -6063,6 +6091,7 @@ static void WinEmulateFrame (void)
 		// its frame now, one at a time, while this one is parked.
 		GBSeatMachinesTurn ();
 		WinKissLinkPoll ();
+		WinBarcodeBoyPoll ();
 
 		// BIOS-mode sessions: the seats stepped inside the frame,
 		// slaved to the SNES clock, so their pads are collected once
@@ -7155,6 +7184,38 @@ static void WinKissLinkPoll ()
 	S9xSetInfoString (msg);
 }
 
+// Input > Barcode Boy plugs into player 1's link port, so it needs one free.
+static bool WinBarcodeBoyPortFree ()
+{
+	if (!S9xSGBBarcodeBoyHasPort ())
+	{
+		S9xSetInfoString ("Barcode Boy: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2 in Emulation > Game Boy Model");
+		return false;
+	}
+	if (S9xSGBLinkIsEnabled () || S9xSGBSplitActive ())
+	{
+		S9xSetInfoString ("Barcode Boy: a Game Link session holds the link port");
+		return false;
+	}
+	return true;
+}
+
+// Once per frame: a game under the SGB1 leaves it nowhere to plug in, and a
+// card taken whole gets its line.
+static void WinBarcodeBoyPoll ()
+{
+	static unsigned seen = 0;
+	if (S9xSGBBarcodeBoyConnected () && !S9xSGBBarcodeBoyHasPort ())
+	{
+		S9xSGBBarcodeBoyConnect (false);
+		S9xSetInfoString ("Barcode Boy disconnected: the Super Game Boy (SGB1) has no link port");
+	}
+	const unsigned reads = S9xSGBBarcodeBoyReadCount ();
+	if (reads > seen && S9xSGBBarcodeBoyConnected ())
+		S9xSetInfoString ("Barcode Boy: card read");
+	seen = reads;
+}
+
 // Game Link > Infra-Red for a game in Game Boy Color mode (never under a Super
 // Game Boy), GB KISS for a Hudson IR cart and GB KISS LINK for one with the GB
 // KISS menu (its map items for Nectaris GB): above Reset on Link, own separator.
@@ -8189,6 +8250,16 @@ static void CheckMenuStates ()
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_SCAN, FALSE, &mii);
 	mii.fState = (barcodeGame && *S9xBarcodeBattlerLastCode()) ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_RESCAN, FALSE, &mii);
+
+	mii.fState = S9xSGBBarcodeBoyConnected () ? MFS_CHECKED : MFS_UNCHECKED;
+	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODEBOY_CONNECT, FALSE, &mii);
+	const bool barcodeBoyGame = !Settings.StopEmulation &&
+	                            (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
+	                            S9xSGBBarcodeBoyGame () != NULL;
+	mii.fState = barcodeBoyGame ? MFS_ENABLED : MFS_DISABLED;
+	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODEBOY_SCAN, FALSE, &mii);
+	mii.fState = (barcodeBoyGame && *S9xSGBBarcodeBoyLastCode ()) ? MFS_ENABLED : MFS_DISABLED;
+	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODEBOY_RESCAN, FALSE, &mii);
 
 	mii.fState = !Settings.StopEmulation ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_FILE_AVI_RECORDING, FALSE, &mii);

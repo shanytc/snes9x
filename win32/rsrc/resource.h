@@ -1021,6 +1021,21 @@
 #define ID_EMULATION_GB_LINK_SEATMODEL0 40250
 #define ID_EMULATION_GB_LINK_SEATMODEL_LAST 40329
 
+/* Input > Barcode Boy */
+#define ID_INPUT_BARCODEBOY_CONNECT     40338
+#define ID_INPUT_BARCODEBOY_SCAN        40339
+#define ID_INPUT_BARCODEBOY_RESCAN      40340
+#define IDD_BARCODE_BOY                 202
+#define IDC_BARCODEBOY_EDIT             3713
+#define IDC_BARCODEBOY_RANDOM           3714
+#define IDC_BARCODEBOY_STATUS           3715
+#define IDC_BARCODEBOY_CARDS            3716
+#define IDC_BARCODEBOY_PREVIEW          3717
+#define IDC_BARCODEBOY_IMAGE            3718
+#define IDC_BARCODEBOY_CAMERA           3719
+#define IDC_BARCODEBOY_CAMERA_TOGGLE    3720
+#define IDC_BARCODEBOY_SEARCH           3721
+
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400
 #define ID_NSS_COIN1                    44401

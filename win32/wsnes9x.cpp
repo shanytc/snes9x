@@ -2553,9 +2553,12 @@ LRESULT CALLBACK WinProc(
 			break;
 
 		// Barcode Battler II: takes port 2's place while connected. It can be
-		// connected before a game loads and stays across loads; scanning is
-		// only offered to a game that reads it.
+		// connected before a game loads and stays across SNES loads (a Game Boy
+		// game unplugs it); scanning is only offered to a game that reads it.
 		case ID_INPUT_BARCODE_CONNECT:
+			if (!S9xBarcodeBattlerConnected() && !Settings.StopEmulation &&
+			    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
+				break;
 			S9xBarcodeBattlerConnect(!S9xBarcodeBattlerConnected());
 			if (!Settings.StopEmulation)
 				S9xSetInfoString(S9xBarcodeBattlerConnected() ? "Barcode Battler II connected to port 2"
@@ -7029,7 +7032,9 @@ static void CheckMenuStates ()
     mii.fState = validFlag | (GUI.ControllerOption == SNES_MACSRIFLE ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_MACSRIFLE_TOGGLE, FALSE, &mii);
 
-	mii.fState = MFS_ENABLED | (S9xBarcodeBattlerConnected() ? MFS_CHECKED : MFS_UNCHECKED);
+	// The Barcode Battler II is a SNES device: greyed while a Game Boy game runs.
+	const bool gbRunning = !Settings.StopEmulation && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+	mii.fState = (gbRunning ? MFS_DISABLED : MFS_ENABLED) | (S9xBarcodeBattlerConnected() ? MFS_CHECKED : MFS_UNCHECKED);
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_CONNECT, FALSE, &mii);
 	const bool barcodeGame = !Settings.StopEmulation && S9xBarcodeBattlerGameSupported();
 	mii.fState = barcodeGame ? MFS_ENABLED : MFS_DISABLED;

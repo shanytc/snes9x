@@ -729,13 +729,16 @@ void Snes9xWindow::connect_signals()
     });
 
     // Barcode Battler II: takes port 2's place while connected. It can be
-    // connected before a game loads and stays across loads; scanning is only
+    // connected before a game loads and stays across SNES loads (a Game Boy
+    // game unplugs it and greys it out); scanning is only
     // offered to a game that reads it.
     get_object<Gtk::Menu>("barcode_battler_menu")->signal_show().connect([this] {
         syncing_menu = true;
         get_object<Gtk::CheckMenuItem>("barcode_battler_connect_item")
             ->set_active(S9xBarcodeBattlerConnected());
         syncing_menu = false;
+        enable_widget("barcode_battler_connect_item",
+                      !(config->rom_loaded && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)));
         const bool supported = config->rom_loaded && S9xBarcodeBattlerGameSupported();
         enable_widget("barcode_battler_scan_item", supported);
         enable_widget("barcode_battler_rescan_item", supported && *S9xBarcodeBattlerLastCode() != 0);

@@ -2141,6 +2141,9 @@ int CMemory::LoadGBFromBytes (const uint8 *rom, uint32 size, const char *filenam
 {
     if (!S9xRomBytesAreGb(rom, static_cast<int32>(size)))
         return 0;
+    // The Barcode Battler II is a SNES device: a Game Boy game unplugs it
+    // (under the SGB BIOS, port 2 is the second player's pad).
+    S9xBarcodeBattlerConnect(false);
 
     if (filename && *filename)
     {
@@ -2234,6 +2237,7 @@ bool8 CMemory::LoadROM (const char *filename)
     // and runs the GB core instead.
     if (S9xFilenameHasExt(filename, ".gb") || S9xFilenameHasExt(filename, ".gbc"))
     {
+        S9xBarcodeBattlerConnect(false);   // a SNES device, as in LoadGBFromBytes
         // Remember the GB ROM path so the BIOS menu can reload with a
         // different preference.
         strncpy(Settings.GBRomPath, filename, sizeof(Settings.GBRomPath) - 1);

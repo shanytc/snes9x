@@ -1798,7 +1798,8 @@ void EmuMainWindow::createWidgets()
     input_menu->addSeparator();
 
     // Epoch's barcode reader, which takes port 2's place while connected.
-    // It can be connected before a game loads and stays across loads.
+    // It can be connected before a game loads and stays across SNES loads;
+    // a Game Boy game unplugs it and greys it out.
     auto barcode_menu = input_menu->addMenu(tr("&Barcode Battler II"));
     auto barcode_connect_action = barcode_menu->addAction(tr("&Connect to Port 2"));
     barcode_connect_action->setCheckable(true);
@@ -1825,6 +1826,7 @@ void EmuMainWindow::createWidgets()
     QObject::connect(barcode_menu, &QMenu::aboutToShow, [this, barcode_connect_action, barcode_scan_action, barcode_rescan_action] {
         const bool supported = app.isCoreActive() && S9xBarcodeBattlerGameSupported();
         barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
+        barcode_connect_action->setEnabled(!(app.isCoreActive() && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)));
         barcode_scan_action->setEnabled(supported);
         barcode_rescan_action->setEnabled(supported && *S9xBarcodeBattlerLastCode());
     });

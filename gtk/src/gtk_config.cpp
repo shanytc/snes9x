@@ -524,7 +524,7 @@ int Snes9xConfig::save_config_file()
     outbool("RTCOff", Settings.GBRTCOff, "false (default) = the cartridge clock follows the PC's clock; true = RTCTime stands in for the PC's clock");
     // Unsigned to reach 2106, past where an int's range ends.
     outstring("RTCTime", std::to_string(Settings.GBRTCTime), "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
-    outint("RTCHuC3Format", Settings.GBRTCHuC3Format, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA compatible), 1 = 17 bytes (BGB compatible), 2 = 136 bytes (mGBA compatible). Any of them loads");
+    outint("RTCHuC3Format", Settings.GBRTCHuC3Format, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads");
 
     section = "Input";
     outstring("ControllerOption", controller_option_names[controller_option],

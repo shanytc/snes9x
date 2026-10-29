@@ -9734,7 +9734,7 @@ static void GBRtcEnablePickers (HWND hDlg)
 }
 
 // The HuC-3 format list goes by size; Settings.GBRTCHuC3Format numbers them
-// 0 = 24 bytes (VBA), 1 = 17 (BGB), 2 = 136 (mGBA).
+// 0 = 24 bytes (VBA-M), 1 = 17 (BGB), 2 = 136 (mGBA).
 static const uint8 kGBRtcHuc3Formats[] = { 1, 0, 2 };
 
 static INT_PTR CALLBACK DlgGBRtcProc (HWND hDlg, UINT msg, WPARAM wParam, LPARAM)
@@ -9764,8 +9764,8 @@ static INT_PTR CALLBACK DlgGBRtcProc (HWND hDlg, UINT msg, WPARAM wParam, LPARAM
 		GBRtcEnablePickers (hDlg);
 
 		HWND huc3 = GetDlgItem (hDlg, IDC_GBRTC_HUC3);
-		ComboBox_AddString (huc3, TEXT("17 bytes (BGB compatible)"));
-		ComboBox_AddString (huc3, TEXT("24 bytes (VBA compatible)"));
+		ComboBox_AddString (huc3, TEXT("17 bytes (BGB, SameBoy compatible)"));
+		ComboBox_AddString (huc3, TEXT("24 bytes (VBA-M compatible)"));
 		ComboBox_AddString (huc3, TEXT("136 bytes (mGBA compatible)"));
 		ComboBox_SetCurSel (huc3, 1);
 		for (int i = 0; i < 3; i++)

@@ -3296,8 +3296,8 @@ void Snes9xWindow::open_rtc_settings()
     huc3_label->set_halign(Gtk::ALIGN_START);
     // By size; the id is the format's number in Settings.GBRTCHuC3Format.
     auto huc3 = Gtk::manage(new Gtk::ComboBoxText);
-    huc3->append("1", _("17 bytes (BGB compatible)"));
-    huc3->append("0", _("24 bytes (VBA compatible)"));
+    huc3->append("1", _("17 bytes (BGB, SameBoy compatible)"));
+    huc3->append("0", _("24 bytes (VBA-M compatible)"));
     huc3->append("2", _("136 bytes (mGBA compatible)"));
     if (!huc3->set_active_id(std::to_string(Settings.GBRTCHuC3Format)))
         huc3->set_active_id("0");
@@ -3306,7 +3306,7 @@ void Snes9xWindow::open_rtc_settings()
     vbox->pack_start(*huc3, Gtk::PACK_SHRINK);
     auto huc3_note = Gtk::manage(new Gtk::Label(
         _("Any of these loads here. Each emulator reads only its own: "
-          "BGB and mGBA then keep just the RAM, and VBA won't load the save.")));
+          "BGB and mGBA then keep just the RAM, and VBA-M won't load the save.")));
     huc3_note->set_line_wrap(true);
     huc3_note->set_max_width_chars(50);
     huc3_note->set_halign(Gtk::ALIGN_START);

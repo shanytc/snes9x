@@ -1114,7 +1114,7 @@ void WinRegisterConfigItems()
 	AddBoolC("RTCSeparateFile", Settings.GBRTCSeparate, false, "where an MBC3/HuC3/TAMA5 cartridge's clock is saved (Emulation -> Real Time Clock): false (default) = after the RAM in the .sav (BGB/VBA format), true = in its own .rtc file beside it");
 	AddBoolC("RTCOff", Settings.GBRTCOff, false, "false (default) = the cartridge clock follows the PC's clock; true = the RTC is off and RTCTime stands in for the PC's clock (Emulation -> Real Time Clock -> Settings)");
 	AddUIntC("RTCTime", Settings.GBRTCTime, 0, "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
-	AddUIntC("RTCHuC3Format", Settings.GBRTCHuC3Format, 0, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA compatible), 1 = 17 bytes (BGB compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
+	AddUIntC("RTCHuC3Format", Settings.GBRTCHuC3Format, 0, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");

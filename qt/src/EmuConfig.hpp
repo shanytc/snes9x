@@ -253,7 +253,7 @@ struct EmuConfig
     // Emulation -> Real Time Clock: an MBC3/HuC3/TAMA5 cart's clock in its own .rtc instead of
     // after the RAM in the .sav, and with the RTC off a picked time (Unix
     // seconds) standing in for the PC's clock. [SGB] RTCSeparateFile, RTCOff,
-    // RTCTime, as win32 names them. A HuC3 clock's block: 0 = 24 bytes (VBA),
+    // RTCTime, as win32 names them. A HuC3 clock's block: 0 = 24 bytes (VBA-M),
     // 1 = 17 (BGB), 2 = 136 (mGBA), [SGB] RTCHuC3Format.
     bool gb_rtc_separate;
     bool gb_rtc_off;

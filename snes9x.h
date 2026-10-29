@@ -416,7 +416,7 @@ struct SSettings
 	bool8	GBRTCSeparate;
 	bool8	GBRTCOff;
 	uint32	GBRTCTime;
-	// A HuC3 clock's block in the save: 0 = 24 bytes (VBA), 1 = 17 (BGB), 2 = 136 (mGBA)
+	// A HuC3 clock's block in the save: 0 = 24 bytes (VBA-M), 1 = 17 (BGB), 2 = 136 (mGBA)
 	uint8	GBRTCHuC3Format;
 };
 

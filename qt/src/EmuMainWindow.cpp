@@ -383,15 +383,15 @@ void EmuMainWindow::openRtcSettings()
     auto huc3_label = new QLabel(tr("&HuC-3 clock format (Robopon, Pocket Family):"));
     // By size; the item data is the format's number in the config.
     auto huc3 = new QComboBox;
-    huc3->addItem(tr("17 bytes (BGB compatible)"), 1);
-    huc3->addItem(tr("24 bytes (VBA compatible)"), 0);
+    huc3->addItem(tr("17 bytes (BGB, SameBoy compatible)"), 1);
+    huc3->addItem(tr("24 bytes (VBA-M compatible)"), 0);
     huc3->addItem(tr("136 bytes (mGBA compatible)"), 2);
     huc3->setCurrentIndex(std::max(0, huc3->findData(app.config->gb_rtc_huc3_format)));
     huc3_label->setBuddy(huc3);
     layout->addWidget(huc3_label);
     layout->addWidget(huc3);
     auto huc3_note = new QLabel(tr("Any of these loads here. Each emulator reads only its own: "
-                                   "BGB and mGBA then keep just the RAM, and VBA won't load the save."));
+                                   "BGB and mGBA then keep just the RAM, and VBA-M won't load the save."));
     huc3_note->setWordWrap(true);
     layout->addWidget(huc3_note);
 

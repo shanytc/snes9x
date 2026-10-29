@@ -602,9 +602,9 @@ BEGIN
     CONTROL         "Master Hotkey",IDC_MASTERHOTKEY_ENABLE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,160,12,62,10
     CONTROL         "",IDC_MASTERHOTKEY_BIND,"InputCustomHot",WS_TABSTOP,224,11,60,12
 
-    // Tab control with 3 tabs (Emulation / Turbo / Display & Tools).
-    // Switchable IDC_HOTKEY1..18 generic slots live INSIDE the tab content area.
-    CONTROL         "",IDC_HOTKEY_TABS,"SysTabControl32",WS_TABSTOP,5,32,400,171
+    // Tab control, two rows of tabs (StackHotkeyTabs). Switchable IDC_HOTKEY1..18
+    // generic slots live INSIDE the tab content area.
+    CONTROL         "",IDC_HOTKEY_TABS,"SysTabControl32",TCS_MULTILINE | WS_TABSTOP,5,32,400,171
 
     // Tab content: 2 columns x 9 rows of generic switchable slots.
     // Column 1: label x=10..82, control x=86..146

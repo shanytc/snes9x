@@ -18387,6 +18387,46 @@ static void set_hotkeyinfo(HWND hDlg, bool layoutChanged)
 		RedrawWindow(hDlg, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
+// Two rows of tabs (TCS_MULTILINE): pad the labels until the first row breaks after
+// half of them, then move everything below the tab strip down by the extra row.
+static void StackHotkeyTabs(HWND hDlg, HWND hTabs)
+{
+	RECT item = {}, next;
+	const int perRow = (TabCtrl_GetItemCount(hTabs) + 1) / 2;
+	const int padY = GetSystemMetrics(SM_CYEDGE) * 3 / 2;   // the control's default
+	for (int padX = GetSystemMetrics(SM_CXEDGE) * 3; padX < 80; padX++)
+	{
+		TabCtrl_SetPadding(hTabs, padX, padY);
+		TabCtrl_SetMinTabWidth(hTabs, -1);   // lays the tabs out again
+		if (!TabCtrl_GetItemRect(hTabs, 0, &item) || !TabCtrl_GetItemRect(hTabs, perRow, &next) ||
+		    next.top != item.top)
+			break;
+	}
+
+	const int rows = TabCtrl_GetRowCount(hTabs);
+	if (rows < 2)
+		return;
+	const int extra = (rows - 1) * (item.bottom - item.top);
+
+	RECT tabs;
+	GetWindowRect(hTabs, &tabs);
+	MapWindowPoints(HWND_DESKTOP, hDlg, (LPPOINT)&tabs, 2);
+	for (HWND child = GetWindow(hDlg, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+	{
+		RECT r;
+		GetWindowRect(child, &r);
+		MapWindowPoints(HWND_DESKTOP, hDlg, (LPPOINT)&r, 2);
+		if (child == hTabs)
+			SetWindowPos(child, NULL, 0, 0, r.right - r.left, r.bottom - r.top + extra, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+		else if (r.top > tabs.top)
+			SetWindowPos(child, NULL, r.left, r.top + extra, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+
+	RECT dlg;
+	GetWindowRect(hDlg, &dlg);
+	SetWindowPos(hDlg, NULL, dlg.left, dlg.top - extra / 2, dlg.right - dlg.left, dlg.bottom - dlg.top + extra, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 // DlgHotkeyConfig
 INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -18420,6 +18460,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 				TabCtrl_InsertItem(hTabs, i, &tie);
 			}
 			TabCtrl_SetCurSel(hTabs, 0);
+			StackHotkeyTabs(hDlg, hTabs);
 		}
 
 		// Use the tab control's themed page background (soft gray) instead of the

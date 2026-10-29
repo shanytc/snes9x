@@ -55,6 +55,9 @@ class EmuMainWindow : public QMainWindow
     void openBiosManager();
     // A coin-op front-panel hotkey; false when the name is not one.
     bool arcadeShortcut(const std::string &name);
+    // Input -> Barcodes' Connect, Scan Barcode and Use Last Barcode Again
+    // shortcuts, through the menu's actions so a greyed one stays greyed.
+    void barcodeShortcut(const std::string &name);
     // Emulation -> Super Disc; the shortcuts call these too.
     void superDiscInsert();
     void superDiscEject();
@@ -140,6 +143,10 @@ class EmuMainWindow : public QMainWindow
     void refreshBiosMenu();
 
     // Emulation -> Real Time Clock, only while an MBC3/HuC3/TAMA5 cart with a clock is loaded.
+    QAction *barcode_connect_action = nullptr;
+    QAction *barcode_scan_action = nullptr;
+    QAction *barcode_rescan_action = nullptr;
+    void updateBarcodeActions();
     QMenu *rtc_menu = nullptr;
     QAction *rtc_menu_action = nullptr;
     QAction *rtc_sav_action = nullptr;

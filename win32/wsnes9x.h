@@ -54,7 +54,7 @@ constexpr unsigned int WINDOW_SIZE_FACTORS = 10;
 // can be told apart, including by our own second-instance lookup.
 #define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
 
-// Marks the instance auto-launched by the Game Link menu.
+// Marks the instance auto-launched by the Game Boy Link menu.
 // "-gblinkpeer=<pid>,<launcher>,<index>,<players>,<model>" carries the
 // launcher's process id and player index, this instance's own index, how
 // many players the session is for, and the launcher's Game Boy Model (an
@@ -81,11 +81,11 @@ extern int GBLinkLauncherIndex;
 // spawned instances. Persisted; consulted at session start.
 extern bool GBLinkSplitScreen;
 
-// Game Link > Reset on Link / Reset on Unlink. Persisted.
+// Game Boy Link > Reset on Link / Reset on Unlink. Persisted.
 extern bool GBLinkResetOnLink;
 extern bool GBLinkResetOnUnlink;
 
-// Game Link > Infra-Red / GB KISS: players 1 and 2 face each other's Game Boy
+// Game Boy Link > Infra-Red / GB KISS: players 1 and 2 face each other's Game Boy
 // Color port / HuC1-HuC3 cart LED in any in-process session. Persisted.
 extern bool GBLinkInfrared;
 extern bool GBLinkGbKiss;

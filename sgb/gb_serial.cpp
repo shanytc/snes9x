@@ -813,14 +813,14 @@ void StepResolvedActive(Serial &s, Memory &mem, int32_t tcycles)
 	if (s.bits_left == 0) CompleteActive(s, mem);
 }
 
-// The Barcode Boy holds the port while no Game Link session does.
+// The Barcode Boy holds the port while no Game Boy Link session does.
 bool ScannerOnPort()
 {
 	return BarcodeBoyConnected() && !SerialLinkIsEnabled() && !SerialSplitActive();
 }
 
 // A byte crossing to or from the Barcode Boy. No cable statistics: those
-// describe a Game Link session.
+// describe a Game Boy Link session.
 void ScannerLand(Serial &s, Memory &mem, uint8_t data)
 {
 	mem.serial_data    = data;

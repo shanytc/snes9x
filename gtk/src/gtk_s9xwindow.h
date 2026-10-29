@@ -89,6 +89,10 @@ class Snes9xWindow : public GtkBuilderWindow
     void refresh_nss_dips();
     void open_superdisc_dialog();
     void eject_superdisc();
+    // Input -> Barcodes' Connect, Scan Barcode and Use Last Barcode Again
+    // (0-2) shortcuts, through the menu items so a greyed one stays greyed.
+    void barcode_shortcut(int which);
+    void update_barcode_menu();
     void show_rom_info();
     void show_color_correction_dialog();
 

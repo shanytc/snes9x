@@ -1,13 +1,11 @@
-#include "wbarcodeboy.h"
+#include "wbarcodes.h"
 #include "win32_webcam.h"
 #include "wlocale.h"
 #include "rsrc/resource.h"
 
 #include "../snes9x.h"
 #include "../display.h"
-#include "../sgb/sgb.h"
-#include "../sgb/gb_barcodeboy.h"
-#include "../sgb/gb_bardigun.h"
+#include "../barcodebattler.h"
 
 #define JXL_STATIC_DEFINE
 #include <jxl/decode.h>
@@ -20,7 +18,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <algorithm>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -30,36 +27,20 @@ extern HINSTANCE g_hInst;
 
 namespace {
 
-// The link-port scanners share the dialog; each brings its cards and calls.
-struct Device
-{
-	int          dialog;
-	const TCHAR *name;
-	const char  *osd;
-	const SGB::BarcodeBoyCard *(*cards)(int *count);
-	bool        (*scan)(const char *code);
-	const char *(*lastCode)();
-	const char *(*game)();
-	bool         ean8;	// takes 8-digit codes too
-};
-
-const Device kBarcodeBoy = { IDD_BARCODE_BOY, TEXT("Barcode Boy"), "Barcode Boy", SGB::BarcodeBoyCards,
-                             S9xSGBBarcodeBoyScan, S9xSGBBarcodeBoyLastCode, S9xSGBBarcodeBoyGame, false };
-const Device kBardigun = { IDD_BARDIGUN, TEXT("Bardigun Card Reader"), "Bardigun Card Reader", SGB::BardigunCards,
-                           S9xSGBBardigunScan, S9xSGBBardigunLastCode, S9xSGBBardigunGame, true };
-const Device *g_device = &kBarcodeBoy;
-
 const UINT_PTR kCameraTimer = 1;
+
+// The reader the dialog is open for; its cards, code lengths and photos.
+S9xBarcodeReader           g_reader = S9X_BARCODE_BATTLER;
 
 bool                       g_cameraOn = false;
 std::vector<unsigned char> g_frame;
 int                        g_frameW = 0;
 int                        g_frameH = 0;
 
-// The shown card's photos from the barcodeboy folder beside the executable.
+// The shown card's photos from the reader's folder beside the executable.
 struct Photo { std::vector<unsigned char> bgrx; int w = 0, h = 0; };
 std::wstring               g_photoDir;
-const char                *g_photoStem = nullptr;
+const S9xBarcodeReaderCard *g_photoCard = nullptr;
 std::vector<Photo>         g_photos;
 // Refilling the tree drops its selection; that isn't the user picking nothing.
 bool                       g_filling = false;
@@ -85,31 +66,12 @@ std::wstring Lower(std::wstring s)
 std::string DigitsOf(HWND hDlg)
 {
 	char text[64] = "";
-	GetDlgItemTextA(hDlg, IDC_BARCODEBOY_EDIT, text, sizeof(text));
+	GetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, text, sizeof(text));
 	std::string digits;
 	for (const char *p = text; *p; p++)
 		if (*p != ' ' && *p != '-')
 			digits += *p;
 	return digits;
-}
-
-// EAN-13 or EAN-8: the digit next to the check digit weighs 3.
-int CheckDigit(const char *digits, int n)
-{
-	int sum = 0;
-	for (int i = 0; i < n - 1; i++)
-		sum += (digits[i] - '0') * (((n - 1 - i) & 1) ? 3 : 1);
-	return (10 - sum % 10) % 10;
-}
-
-const SGB::BarcodeBoyCard *CardWithCode(const Device &device, const char *digits)
-{
-	int count = 0;
-	const SGB::BarcodeBoyCard *cards = device.cards(&count);
-	for (int i = 0; i < count; i++)
-		if (strcmp(digits, cards[i].code) == 0)
-			return &cards[i];
-	return nullptr;
 }
 
 // Any picture WIC can open, converted to the given pixel format.
@@ -206,46 +168,45 @@ bool LoadJxl(const std::wstring &path, Photo &photo)
 	return ok;
 }
 
-// The barcodeboy folder beside the executable, or "" when there is none.
+// The reader's photo folder beside the executable, or "" when there is none.
 std::wstring PhotoDir()
 {
 	wchar_t exe[MAX_PATH] = L"";
 	std::wstring dir(exe, GetModuleFileNameW(nullptr, exe, MAX_PATH));
 	dir.erase(dir.find_last_of(L"\\/") + 1);
-	dir += L"barcodeboy\\";
+	dir += Wide(S9xBarcodeReaderPhotoFolder(g_reader)) + L"\\";
 	const DWORD attr = GetFileAttributesW(dir.c_str());
 	return (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) ? dir : std::wstring();
 }
 
-// Puts a card's front and back photos in the preview; none for nullptr.
-void ShowCard(HWND hDlg, const SGB::BarcodeBoyCard *card)
+// Puts a card's photos in the preview; none for nullptr.
+void ShowCard(HWND hDlg, const S9xBarcodeReaderCard *card)
 {
-	const char *stem = card ? card->image : nullptr;
-	if (stem == g_photoStem)
+	if (card == g_photoCard)
 		return;
 
-	g_photoStem = stem;
+	g_photoCard = card;
 	g_photos.clear();
-	if (stem && !g_photoDir.empty())
-		for (const wchar_t *side : { L"-front.jxl", L"-back.jxl" })
+	if (card && *card->image && !g_photoDir.empty())
+		for (const char * const *side = S9xBarcodeReaderPhotoSides(g_reader); *side; side++)
 		{
-			std::wstring path = g_photoDir + Wide(stem) + side;
+			std::wstring path = g_photoDir + Wide(card->image) + Wide(*side);
 			std::replace(path.begin(), path.end(), L'/', L'\\');
 			Photo photo;
 			if (LoadJxl(path, photo))
 				g_photos.push_back(std::move(photo));
 		}
 
-	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODEBOY_PREVIEW), nullptr, TRUE);
+	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODE_PREVIEW), nullptr, TRUE);
 }
 
 void CodeEdited(HWND hDlg)
 {
 	const std::string digits = DigitsOf(hDlg);
-	const size_t n = digits.size();
+	const int n = (int)digits.size();
 	const bool allDigits = digits.find_first_not_of("0123456789") == std::string::npos;
-	const bool lengthOk = allDigits && (n == 13 || (g_device->ean8 && n == 8));
-	const SGB::BarcodeBoyCard *card = lengthOk ? CardWithCode(*g_device, digits.c_str()) : nullptr;
+	const bool lengthOk = allDigits && S9xBarcodeReaderTakes(g_reader, n);
+	const S9xBarcodeReaderCard *card = lengthOk ? S9xBarcodeReaderCardFind(g_reader, digits.c_str()) : nullptr;
 
 	std::wstring status;
 	if (n == 0)
@@ -253,18 +214,19 @@ void CodeEdited(HWND hDlg)
 	else if (!allDigits)
 		status = L"A barcode holds only digits.";
 	else if (!lengthOk)
-		status = std::to_wstring(n) + (g_device->ean8 ? L" digits; a barcode has 13, or 8 for EAN-8."
-		                                              : L" digits; a Barcode Boy card has 13.");
-	else if (CheckDigit(digits.c_str(), (int)n) != digits[n - 1] - '0')
+		status = std::to_wstring(n) + (g_reader == S9X_BARCODE_BATTLER    ? L" digits; a barcode has 8, 12 or 13."
+		                             : g_reader == S9X_BARCODE_BARCODEBOY ? L" digits; a Barcode Boy card has 13."
+		                                                                  : L" digits; a barcode has 13, or 8 for EAN-8.");
+	else if (!S9xBarcodeChecksumValid(digits.c_str()))
 		status = L"The check digit doesn't add up. A printed barcode would not read like this, but it can still be sent.";
 	else if (card)
-		status = Wide(card->name) + L"  " + Wide(card->kana) + L", from " + Wide(card->game) + L".";
-	else if (n == 8)
+		status = Wide(card->name) + (*card->kana ? L"  " + Wide(card->kana) : L"") + L", from " + Wide(card->branch) + L".";
+	else if (n == 8 && g_reader == S9X_BARCODE_BARDIGUN)
 		status = L"Valid EAN-8 barcode. It reads, but it is too weak to hatch an egg.";
 	else
-		status = L"Valid EAN-13 barcode.";
+		status = std::wstring(L"Valid ") + (n == 13 ? L"EAN-13" : n == 12 ? L"UPC-A" : L"EAN-8") + L" barcode.";
 
-	SetDlgItemTextW(hDlg, IDC_BARCODEBOY_STATUS, status.c_str());
+	SetDlgItemTextW(hDlg, IDC_BARCODE_STATUS, status.c_str());
 	EnableWindow(GetDlgItem(hDlg, IDOK), lengthOk);
 	ShowCard(hDlg, card);
 
@@ -272,34 +234,35 @@ void CodeEdited(HWND hDlg)
 	if (code != g_code)
 	{
 		g_code = code;
-		InvalidateRect(GetDlgItem(hDlg, IDC_BARCODEBOY_PREVIEW), nullptr, TRUE);
+		InvalidateRect(GetDlgItem(hDlg, IDC_BARCODE_PREVIEW), nullptr, TRUE);
 	}
 }
 
 void Found(HWND hDlg, const char *code, const TCHAR *where)
 {
-	SetDlgItemTextA(hDlg, IDC_BARCODEBOY_EDIT, code);
+	SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, code);
 	TCHAR status[128];
 	_stprintf(status, TEXT("Read %hs from the %s."), code, where);
-	SetDlgItemText(hDlg, IDC_BARCODEBOY_STATUS, status);
+	SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
 }
 
 void ReadImage(HWND hDlg, const TCHAR *file)
 {
+	const std::wstring title = Wide(S9xBarcodeReaderName(g_reader));
 	std::vector<unsigned char> luma;
 	int w = 0, h = 0;
 	if (!LoadPixels(file, GUID_WICPixelFormat8bppGray, 1, luma, w, h))
 	{
-		MessageBox(hDlg, TEXT("This picture could not be opened."), g_device->name, MB_OK | MB_ICONWARNING);
+		MessageBoxW(hDlg, L"This picture could not be opened.", title.c_str(), MB_OK | MB_ICONWARNING);
 		return;
 	}
 
 	char code[14];
-	if (SGB::BarcodeBoyDecode(luma.data(), w, h, w, code))
+	if (S9xBarcodeDecode(luma.data(), w, h, w, code))
 		Found(hDlg, code, TEXT("picture"));
 	else
-		MessageBox(hDlg, TEXT("No EAN-13 barcode was found in this picture. Crop it closer to the barcode and keep the bars upright."),
-		           g_device->name, MB_OK | MB_ICONINFORMATION);
+		MessageBoxW(hDlg, L"No EAN-13, UPC-A or EAN-8 barcode was found in this picture. Crop it closer to the barcode and keep the bars upright.",
+		            title.c_str(), MB_OK | MB_ICONINFORMATION);
 }
 
 void FromImage(HWND hDlg)
@@ -327,52 +290,72 @@ void DroppedImage(HWND hDlg, HDROP drop)
 		ReadImage(hDlg, file);
 }
 
-// One printed card: the run of entries from i sharing its photos.
-int CardEnd(const SGB::BarcodeBoyCard *cards, int count, int i)
+// One printed card: the run of entries from i sharing its branch and photos
+// (a card with several barcodes); a single entry when it has no photos.
+int CardEnd(const S9xBarcodeReaderCard *cards, int count, int i)
 {
 	int j = i + 1;
-	while (j < count && !strcmp(cards[j].image, cards[i].image))
-		j++;
+	if (*cards[i].image)
+		while (j < count && !strcmp(cards[j].branch, cards[i].branch) && !strcmp(cards[j].image, cards[i].image))
+			j++;
 	return j;
 }
 
-bool CardMatches(const SGB::BarcodeBoyCard &card, const std::wstring &find)
+bool CardMatches(const S9xBarcodeReaderCard &card, const std::wstring &find)
 {
 	return find.empty() || Lower(Wide(card.name)).find(find) != std::wstring::npos ||
 	       Wide(card.kana).find(find) != std::wstring::npos ||
-	       Lower(Wide(card.game)).find(find) != std::wstring::npos || Wide(card.code).find(find) != std::wstring::npos ||
+	       Lower(Wide(card.branch)).find(find) != std::wstring::npos || Wide(card.code).find(find) != std::wstring::npos ||
 	       (card.group && Lower(Wide(card.group)).find(find) != std::wstring::npos);
 }
 
-// A card with several barcodes is named after them.
-std::wstring CardLabel(const SGB::BarcodeBoyCard *cards, int i, int end)
+// A card with several barcodes is named after them, less their positions.
+std::wstring CardLabel(const S9xBarcodeReaderCard *cards, int i, int end)
 {
-	std::wstring label;
+	std::vector<std::wstring> names;
 	for (int k = i; k < end; k++)
-		label += (k > i ? L" / " : L"") + Wide(cards[k].name);
+	{
+		std::wstring name = Wide(cards[k].name);
+		for (const wchar_t *where : { L" (Up)", L" (Down)", L" (Left)", L" (Right)", L" (Front)", L" (Back)" })
+		{
+			const size_t n = wcslen(where);
+			if (name.size() > n && !name.compare(name.size() - n, n, where))
+			{
+				name.erase(name.size() - n);
+				break;
+			}
+		}
+		if (std::find(names.begin(), names.end(), name) == names.end())
+			names.push_back(name);
+	}
+
+	std::wstring label;
+	for (const std::wstring &name : names)
+		label += (label.empty() ? L"" : L" / ") + name;
 	return label;
 }
 
-// The known cards with a game, name or code holding the search text, one
-// branch per game, per group within it and per card with several barcodes;
-// with nothing to search for, only the loaded game's branch is open.
+// The reader's known cards with a branch, group, name or code holding the
+// search text: one branch per card set or game, per group within it and per
+// card with several barcodes. With nothing to search for, only the loaded
+// game's branch is open.
 void FillCards(HWND hDlg)
 {
-	HWND tree = GetDlgItem(hDlg, IDC_BARCODEBOY_CARDS);
+	HWND tree = GetDlgItem(hDlg, IDC_BARCODE_CARDS);
 	wchar_t text[64] = L"";
-	GetDlgItemTextW(hDlg, IDC_BARCODEBOY_SEARCH, text, 64);
+	GetDlgItemTextW(hDlg, IDC_BARCODE_SEARCH, text, 64);
 	const std::wstring find = Lower(text);
-	const char *loaded = g_device->game();
+	const char *open = S9xBarcodeReaderOpenBranch(g_reader);
 
 	SendMessage(tree, WM_SETREDRAW, FALSE, 0);
 	g_filling = true;
 	TreeView_DeleteAllItems(tree);
 
 	int count = 0;
-	const SGB::BarcodeBoyCard *cards = g_device->cards(&count);
-	const char *game = nullptr, *group = nullptr;
+	const S9xBarcodeReaderCard *cards = S9xBarcodeReaderCards(g_reader, &count);
+	const char *branchName = nullptr, *group = nullptr;
 	HTREEITEM branch = nullptr, groupItem = nullptr;
-	int inGame = 0, inGroup = 0;
+	int inBranch = 0, inGroup = 0;
 
 	auto setCountLabel = [&](HTREEITEM hItem, const char *name, int n) {
 		std::wstring label = Wide(name) + L" (" + std::to_wstring(n) + L")";
@@ -389,12 +372,12 @@ void FillCards(HWND hDlg)
 		TreeView_Expand(tree, groupItem, TVE_EXPAND);
 		groupItem = nullptr;
 	};
-	auto closeGame = [&]() {
+	auto closeBranch = [&]() {
 		closeGroup();
 		if (!branch)
 			return;
-		setCountLabel(branch, game, inGame);
-		if (!find.empty() || (loaded && !strcmp(loaded, game)))
+		setCountLabel(branch, branchName, inBranch);
+		if (!find.empty() || (open && !strcmp(open, branchName)))
 			TreeView_Expand(tree, branch, TVE_EXPAND);
 	};
 
@@ -411,12 +394,12 @@ void FillCards(HWND hDlg)
 		ins.hInsertAfter = TVI_LAST;
 		ins.item.mask = TVIF_TEXT | TVIF_PARAM;
 
-		if (!game || strcmp(game, cards[i].game))
+		if (!branchName || strcmp(branchName, cards[i].branch))
 		{
-			closeGame();
-			game = cards[i].game;
-			inGame = 0;
-			std::wstring label = Wide(game);
+			closeBranch();
+			branchName = cards[i].branch;
+			inBranch = 0;
+			std::wstring label = Wide(branchName);
 			ins.hParent = TVI_ROOT;
 			ins.item.pszText = &label[0];
 			ins.item.lParam = -1;
@@ -465,9 +448,9 @@ void FillCards(HWND hDlg)
 
 		if (parent != under && !find.empty())
 			TreeView_Expand(tree, parent, TVE_EXPAND);
-		inGame++;
+		inBranch++;
 	}
-	closeGame();
+	closeBranch();
 	g_filling = false;
 
 	SendMessage(tree, WM_SETREDRAW, TRUE, 0);
@@ -476,7 +459,7 @@ void FillCards(HWND hDlg)
 
 // The entry under a tree item: a barcode, or with branch set the first
 // barcode of a card's branch; nullptr otherwise.
-const SGB::BarcodeBoyCard *CardOf(HWND tree, HTREEITEM hItem, bool branch = false)
+const S9xBarcodeReaderCard *CardOf(HWND tree, HTREEITEM hItem, bool branch = false)
 {
 	TVITEMW item = {};
 	item.mask = TVIF_PARAM;
@@ -485,7 +468,7 @@ const SGB::BarcodeBoyCard *CardOf(HWND tree, HTREEITEM hItem, bool branch = fals
 		return nullptr;
 
 	int count = 0;
-	const SGB::BarcodeBoyCard *cards = g_device->cards(&count);
+	const S9xBarcodeReaderCard *cards = S9xBarcodeReaderCards(g_reader, &count);
 	const LPARAM entry = branch ? -2 - item.lParam : item.lParam;
 	return entry >= 0 && entry < count ? &cards[entry] : nullptr;
 }
@@ -497,9 +480,9 @@ void StopCamera(HWND hDlg)
 
 	g_cameraOn = false;
 	KillTimer(hDlg, kCameraTimer);
-	SetDlgItemText(hDlg, IDC_BARCODEBOY_CAMERA_TOGGLE, TEXT("Start &Camera"));
+	SetDlgItemText(hDlg, IDC_BARCODE_CAMERA_TOGGLE, TEXT("Start &Camera"));
 	g_frame.clear();
-	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODEBOY_PREVIEW), nullptr, TRUE);
+	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODE_PREVIEW), nullptr, TRUE);
 
 	// Back to what Display > Game Boy Image asks for.
 	GBCameraStop();
@@ -515,15 +498,15 @@ void ToggleCamera(HWND hDlg)
 		return;
 	}
 
-	const int index = (int)SendDlgItemMessage(hDlg, IDC_BARCODEBOY_CAMERA, CB_GETCURSEL, 0, 0);
+	const int index = (int)SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_GETCURSEL, 0, 0);
 	if (index < 0 || !GBCameraStart(index))
 	{
-		SetDlgItemText(hDlg, IDC_BARCODEBOY_STATUS, TEXT("The camera could not be started."));
+		SetDlgItemText(hDlg, IDC_BARCODE_STATUS, TEXT("The camera could not be started."));
 		return;
 	}
 
 	g_cameraOn = true;
-	SetDlgItemText(hDlg, IDC_BARCODEBOY_CAMERA_TOGGLE, TEXT("Stop &Camera"));
+	SetDlgItemText(hDlg, IDC_BARCODE_CAMERA_TOGGLE, TEXT("Stop &Camera"));
 	SetTimer(hDlg, kCameraTimer, 100, nullptr);
 }
 
@@ -532,10 +515,10 @@ void PollCamera(HWND hDlg)
 	if (!GBCameraGetFrame(g_frame, g_frameW, g_frameH))
 		return;
 
-	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODEBOY_PREVIEW), nullptr, FALSE);
+	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODE_PREVIEW), nullptr, FALSE);
 
 	char code[14];
-	if (SGB::BarcodeBoyDecode(g_frame.data(), g_frameW, g_frameH, g_frameW, code) && DigitsOf(hDlg) != code)
+	if (S9xBarcodeDecode(g_frame.data(), g_frameW, g_frameH, g_frameW, code) && DigitsOf(hDlg) != code)
 	{
 		Found(hDlg, code, TEXT("camera"));
 		MessageBeep(MB_OK);
@@ -572,10 +555,12 @@ void DrawPhotos(const DRAWITEMSTRUCT *dis)
 bool DrawBarcode(const DRAWITEMSTRUCT *dis)
 {
 	bool bars[95];
-	const int modules = SGB::EanBars(g_code.c_str(), bars);
+	const int modules = S9xBarcodeReaderBars(g_code.c_str(), bars);
 	if (!modules)
 		return false;
 
+	// A UPC-A prints as the EAN-13 it reads as.
+	const std::string code = g_code.size() == 12 ? "0" + g_code : g_code;
 	const bool ean13 = modules == 95;
 	const int quietL = ean13 ? 11 : 7, quietR = 7, total = quietL + modules + quietR;
 	const RECT &rc = dis->rcItem;
@@ -611,7 +596,6 @@ bool DrawBarcode(const DRAWITEMSTRUCT *dis)
 		RECT r = { left, barTop + barH, left + 7 * m, barTop + barH + digitH + m };
 		DrawTextA(dis->hDC, &c, 1, &r, DT_CENTER | DT_TOP | DT_SINGLELINE | DT_NOCLIP);
 	};
-	const char *code = g_code.c_str();
 	int k = 0;
 	if (ean13)
 		digit(code[k++], barsX - 9 * m);
@@ -710,51 +694,65 @@ void DrawPreview(const DRAWITEMSTRUCT *dis)
 	DeleteDC(dc);
 }
 
-// The games seed their characters from any 13 digits; made-up codes carry
-// JAN's old flag 49, as most of the cards do.
+// Any 13 digits work; the Game Boy games' made-up codes carry JAN's old
+// flag 49, as most of their cards do.
 void RandomCode(char out[14])
 {
-	static std::mt19937 rng(std::random_device{}());
-	std::uniform_int_distribution<int> digit(0, 9);
+	S9xBarcodeRandom(out);
+	if (g_reader == S9X_BARCODE_BATTLER)
+		return;
+
 	out[0] = '4';
 	out[1] = '9';
-	for (int i = 2; i < 12; i++)
-		out[i] = (char)('0' + digit(rng));
-	out[12] = (char)('0' + CheckDigit(out, 13));
-	out[13] = 0;
+	int sum = 0;
+	for (int i = 0; i < 12; i++)
+		sum += (out[i] - '0') * ((i & 1) ? 3 : 1);
+	out[12] = (char)('0' + (10 - sum % 10) % 10);
 }
 
-INT_PTR CALLBACK DlgBarcodeBoy(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK DlgBarcodes(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
 		case WM_INITDIALOG:
 		{
 			LocalizeDialog(hDlg);
+			SetWindowTextW(hDlg, Wide(S9xBarcodeReaderName(g_reader)).c_str());
+			const bool battler = g_reader == S9X_BARCODE_BATTLER;
+			SetDlgItemTextW(hDlg, IDC_BARCODE_INTRO,
+			                battler ? L"Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture."
+			                : g_reader == S9X_BARCODE_BARCODEBOY
+			                        ? L"Enter a card's 13-digit (JAN/EAN-13) barcode, pick a known card, or read it with a camera or from a picture."
+			                        : L"Enter a card's 13-digit (JAN/EAN-13) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture. Shop barcodes work too.");
+			SetDlgItemTextW(hDlg, IDC_BARCODE_NOTE,
+			                battler ? L"Some games look for the Barcode Battler only when they start; reset the game if it doesn't respond."
+			                        : L"The game reads the card the next time it asks for one.");
+
 			g_photoDir = PhotoDir();
-			g_photoStem = nullptr;
+			g_photoCard = nullptr;
 			g_photos.clear();
 			g_code.clear();
-			SendDlgItemMessage(hDlg, IDC_BARCODEBOY_EDIT, EM_SETLIMITTEXT, 20, 0);
-			SendDlgItemMessage(hDlg, IDC_BARCODEBOY_EDIT, EM_SETCUEBANNER, TRUE, (LPARAM)L"Type your barcode");
-			SetDlgItemTextA(hDlg, IDC_BARCODEBOY_EDIT, g_device->lastCode());
+			SendDlgItemMessage(hDlg, IDC_BARCODE_EDIT, EM_SETLIMITTEXT, 20, 0);
+			SendDlgItemMessage(hDlg, IDC_BARCODE_EDIT, EM_SETCUEBANNER, TRUE, (LPARAM)L"Type your barcode");
+			SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, S9xBarcodeReaderLastCode(g_reader));
 
 			std::vector<std::wstring> names;
 			GBCameraEnumerate(names);
 			for (auto &name : names)
-				SendDlgItemMessage(hDlg, IDC_BARCODEBOY_CAMERA, CB_ADDSTRING, 0, (LPARAM)name.c_str());
+				SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_ADDSTRING, 0, (LPARAM)name.c_str());
 			if (names.empty())
 			{
-				SendDlgItemMessage(hDlg, IDC_BARCODEBOY_CAMERA, CB_ADDSTRING, 0, (LPARAM)TEXT("No video camera found"));
-				EnableWindow(GetDlgItem(hDlg, IDC_BARCODEBOY_CAMERA), FALSE);
-				EnableWindow(GetDlgItem(hDlg, IDC_BARCODEBOY_CAMERA_TOGGLE), FALSE);
+				SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_ADDSTRING, 0, (LPARAM)TEXT("No video camera found"));
+				EnableWindow(GetDlgItem(hDlg, IDC_BARCODE_CAMERA), FALSE);
+				EnableWindow(GetDlgItem(hDlg, IDC_BARCODE_CAMERA_TOGGLE), FALSE);
 			}
-			SendDlgItemMessage(hDlg, IDC_BARCODEBOY_CAMERA, CB_SETCURSEL,
+			SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_SETCURSEL,
 			                   Settings.GBVideoCameraIndex < names.size() ? Settings.GBVideoCameraIndex : 0, 0);
 
 			CodeEdited(hDlg);
 			DragAcceptFiles(hDlg, TRUE);
-			SendDlgItemMessage(hDlg, IDC_BARCODEBOY_SEARCH, EM_SETCUEBANNER, TRUE, (LPARAM)L"Name, game or barcode");
+			SendDlgItemMessage(hDlg, IDC_BARCODE_SEARCH, EM_SETCUEBANNER, TRUE,
+			                   (LPARAM)(battler ? L"Name, set or barcode" : L"Name, game or barcode"));
 			FillCards(hDlg);
 			return TRUE;
 		}
@@ -762,19 +760,23 @@ INT_PTR CALLBACK DlgBarcodeBoy(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 		case WM_NOTIFY:
 		{
 			const NMHDR *nm = (const NMHDR *)lParam;
-			if (nm->idFrom != IDC_BARCODEBOY_CARDS)
+			if (nm->idFrom != IDC_BARCODE_CARDS)
 				break;
 
-			// Picking a barcode types its code; a card's branch shows its
-			// photos with no code; a double-click on a barcode scans it.
+			// Picking a barcode types its code; a set, game or card's branch
+			// clears it, a card's branch still showing its photos; a
+			// double-click on a barcode scans it.
 			if (nm->code == TVN_SELCHANGEDW && !g_filling)
 			{
 				const HTREEITEM picked = ((const NMTREEVIEWW *)lParam)->itemNew.hItem;
-				if (const SGB::BarcodeBoyCard *card = CardOf(nm->hwndFrom, picked))
-					SetDlgItemTextA(hDlg, IDC_BARCODEBOY_EDIT, card->code);
+				if (const S9xBarcodeReaderCard *card = CardOf(nm->hwndFrom, picked))
+				{
+					SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, card->code);
+					ShowCard(hDlg, card);	// this set's printing, not the first card with the code
+				}
 				else
 				{
-					SetDlgItemTextA(hDlg, IDC_BARCODEBOY_EDIT, "");
+					SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, "");
 					ShowCard(hDlg, CardOf(nm->hwndFrom, picked, true));
 				}
 				return TRUE;
@@ -793,7 +795,7 @@ INT_PTR CALLBACK DlgBarcodeBoy(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 			return TRUE;
 
 		case WM_DRAWITEM:
-			if (wParam == IDC_BARCODEBOY_PREVIEW)
+			if (wParam == IDC_BARCODE_PREVIEW)
 			{
 				DrawPreview((const DRAWITEMSTRUCT *)lParam);
 				return TRUE;
@@ -808,33 +810,33 @@ INT_PTR CALLBACK DlgBarcodeBoy(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 		case WM_COMMAND:
 			switch (LOWORD(wParam))
 			{
-				case IDC_BARCODEBOY_EDIT:
+				case IDC_BARCODE_EDIT:
 					if (HIWORD(wParam) == EN_CHANGE)
 						CodeEdited(hDlg);
 					return TRUE;
 
-				case IDC_BARCODEBOY_SEARCH:
+				case IDC_BARCODE_SEARCH:
 					if (HIWORD(wParam) == EN_CHANGE)
 						FillCards(hDlg);
 					return TRUE;
 
-				case IDC_BARCODEBOY_RANDOM:
+				case IDC_BARCODE_RANDOM:
 				{
 					char code[14];
 					RandomCode(code);
-					SetDlgItemTextA(hDlg, IDC_BARCODEBOY_EDIT, code);
+					SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, code);
 					return TRUE;
 				}
 
-				case IDC_BARCODEBOY_IMAGE:
+				case IDC_BARCODE_IMAGE:
 					FromImage(hDlg);
 					return TRUE;
 
-				case IDC_BARCODEBOY_CAMERA_TOGGLE:
+				case IDC_BARCODE_CAMERA_TOGGLE:
 					ToggleCamera(hDlg);
 					return TRUE;
 
-				case IDC_BARCODEBOY_CAMERA:
+				case IDC_BARCODE_CAMERA:
 					if (HIWORD(wParam) == CBN_SELCHANGE && g_cameraOn)
 					{
 						StopCamera(hDlg);
@@ -843,7 +845,7 @@ INT_PTR CALLBACK DlgBarcodeBoy(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 					return TRUE;
 
 				case IDOK:
-					if (!g_device->scan(DigitsOf(hDlg).c_str()))
+					if (!S9xBarcodeReaderScan(g_reader, DigitsOf(hDlg).c_str()))
 						return TRUE;
 					StopCamera(hDlg);
 					EndDialog(hDlg, IDOK);
@@ -860,42 +862,26 @@ INT_PTR CALLBACK DlgBarcodeBoy(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 	return FALSE;
 }
 
-bool ScannerDialog(HWND parent, const Device &device)
+} // namespace
+
+bool WinBarcodeDialog(HWND parent, S9xBarcodeReader reader)
 {
 	INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TREEVIEW_CLASSES };
 	InitCommonControlsEx(&icc);
 
-	g_device = &device;
-	return DialogBox(g_hInst, MAKEINTRESOURCE(device.dialog), parent, DlgBarcodeBoy) == IDOK;
+	g_reader = reader;
+	if (DialogBox(g_hInst, MAKEINTRESOURCE(IDD_BARCODES), parent, DlgBarcodes) != IDOK)
+		return false;
+
+	WinBarcodeScanned(reader);
+	return true;
 }
 
-void Scanned(const Device &device)
+void WinBarcodeScanned(S9xBarcodeReader reader)
 {
-	const char *code = device.lastCode();
-	const SGB::BarcodeBoyCard *card = CardWithCode(device, code);
-	char msg[128];
-	snprintf(msg, sizeof(msg), "%s: %s scanned", device.osd, card ? card->name : code);
+	const char *code = S9xBarcodeReaderLastCode(reader);
+	const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code);
+	char msg[160];
+	snprintf(msg, sizeof(msg), "%s: %s scanned", S9xBarcodeReaderName(reader), card ? card->name : code);
 	S9xSetInfoString(msg);
 }
-
-} // namespace
-
-bool WinBarcodeBoyDialog(HWND parent)
-{
-	if (!ScannerDialog(parent, kBarcodeBoy))
-		return false;
-	WinBarcodeBoyScanned();
-	return true;
-}
-
-void WinBarcodeBoyScanned() { Scanned(kBarcodeBoy); }
-
-bool WinBardigunDialog(HWND parent)
-{
-	if (!ScannerDialog(parent, kBardigun))
-		return false;
-	WinBardigunScanned();
-	return true;
-}
-
-void WinBardigunScanned() { Scanned(kBardigun); }

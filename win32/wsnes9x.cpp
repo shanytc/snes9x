@@ -2841,10 +2841,13 @@ LRESULT CALLBACK WinProc(
 				S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
 			break;
 		}
-		// Barcode Boy: on player 1's Game Boy link port, across game loads.
-		// Scanning is only offered to a game that reads it.
+		// Barcode Boy: on player 1's Game Boy link port, across game loads; it
+		// can't be connected while a SNES game runs. Scanning is only offered
+		// to a game that reads it.
 		case ID_INPUT_BARCODEBOY_CONNECT:
-			if (!S9xSGBBarcodeBoyConnected () && !WinBarcodeBoyPortFree ())
+			if (!S9xSGBBarcodeBoyConnected () &&
+			    ((!Settings.StopEmulation && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive) ||
+			     !WinBarcodeBoyPortFree ()))
 				break;
 			S9xSGBBarcodeBoyConnect (!S9xSGBBarcodeBoyConnected ());
 			if (!Settings.StopEmulation)
@@ -8251,7 +8254,9 @@ static void CheckMenuStates ()
 	mii.fState = (barcodeGame && *S9xBarcodeBattlerLastCode()) ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_RESCAN, FALSE, &mii);
 
-	mii.fState = S9xSGBBarcodeBoyConnected () ? MFS_CHECKED : MFS_UNCHECKED;
+	// The Barcode Boy is a Game Boy device: greyed while a SNES game runs.
+	const bool snesRunning = !Settings.StopEmulation && !gbRunning;
+	mii.fState = (snesRunning ? MFS_DISABLED : MFS_ENABLED) | (S9xSGBBarcodeBoyConnected () ? MFS_CHECKED : MFS_UNCHECKED);
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODEBOY_CONNECT, FALSE, &mii);
 	const bool barcodeBoyGame = !Settings.StopEmulation &&
 	                            (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&

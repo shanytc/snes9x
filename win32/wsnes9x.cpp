@@ -6787,7 +6787,7 @@ static void UpdateTestsMenu ()
 }
 
 // Emulation menu entries that depend on what is loaded: each is on the menu
-// only while its hardware runs. They follow Game Link, Game Boy Model and
+// only while its hardware runs. They follow Game Boy Link, Game Boy Model and
 // Real Time Clock, which also come and go, so the group's slot is counted from them.
 static void UpdateHardwarePopups ()
 {
@@ -6804,7 +6804,7 @@ static void UpdateHardwarePopups ()
 		{ ID_DEBUG_GB_TILE_VIEWER,   TEXT("&GB-PPU") },
 	};
 	static HMENU s_parent = NULL;
-	static int   s_first  = 0;   // NSS's slot while Game Link, Game Boy Model and RTC are hidden
+	static int   s_first  = 0;   // NSS's slot while Game Boy Link, Game Boy Model and RTC are hidden
 
 	MENUITEMINFO probe = {};
 	probe.cbSize = sizeof(probe);
@@ -7197,7 +7197,7 @@ static bool WinBarcodeBoyPortFree ()
 	}
 	if (S9xSGBLinkIsEnabled () || S9xSGBSplitActive ())
 	{
-		S9xSetInfoString ("Barcode Boy: a Game Link session holds the link port");
+		S9xSetInfoString ("Barcode Boy: a Game Boy Link session holds the link port");
 		return false;
 	}
 	return true;
@@ -7219,7 +7219,7 @@ static void WinBarcodeBoyPoll ()
 	seen = reads;
 }
 
-// Game Link > Infra-Red for a game in Game Boy Color mode (never under a Super
+// Game Boy Link > Infra-Red for a game in Game Boy Color mode (never under a Super
 // Game Boy), GB KISS for a Hudson IR cart and GB KISS LINK for one with the GB
 // KISS menu (its map items for Nectaris GB): above Reset on Link, own separator.
 static void GBLinkSyncIrItems (HMENU link)
@@ -7498,7 +7498,7 @@ static void CheckMenuStates ()
 		                  S9xSGBLinkIsEnabled () ||
 		                  Settings.GBLinkPeerInstance;
 		// First under the divider below Hard Reset, above Game Boy Model.
-		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game &Link"),
+		SetSubMenuVisible (ID_EMULATION_GB_LINK, TEXT("Game Boy &Link"),
 		                   ID_EMULATION_HARD_RESET, 2, show, &s_link_hmenu, &s_link_parent);
 
 		// A spawned instance never chooses the session shape — only the
@@ -7758,7 +7758,7 @@ static void CheckMenuStates ()
 				TCHAR txt[]    = TEXT("Game &Boy Model");
 				ins.dwTypeData = txt;
 				ins.cch        = (UINT)_tcslen(txt);
-				// anchor under the divider below Hard Reset, after Game Link
+				// anchor under the divider below Hard Reset, after Game Boy Link
 				// when it is up: the cached index drifts as that one comes and goes
 				UINT pos = s_bios_pos;
 				const UINT count = (UINT)GetMenuItemCount(s_bios_parent);
@@ -7787,7 +7787,7 @@ static void CheckMenuStates ()
 			}
 		}
 		UpdateRtcPopup(gb_loaded && S9xSGBCartHasClock());
-		// Again, now that Game Link, Game Boy Model and Real Time Clock are
+		// Again, now that Game Boy Link, Game Boy Model and Real Time Clock are
 		// settled: Run Ahead's divider follows them.
 		UpdateHardwarePopups();
 
@@ -14989,7 +14989,7 @@ INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam
 }
 #endif
 
-// Game Boy link cable (Emulation > Game Link).
+// Game Boy link cable (Emulation > Game Boy Link).
 //
 // Ticking an item senses the role and, if this instance ends up hosting,
 // launches the missing instances with the item already ticked. Same-game
@@ -15668,7 +15668,7 @@ static void WinStartGBLink (int mode, int players)
 	{
 		MessageBox (GUI.hWnd,
 		            _tFromChar (err[0] ? err : "Could not open the link cable socket."),
-		            TEXT("Link Cable"), MB_OK | MB_ICONERROR);
+		            TEXT("Game Boy Link"), MB_OK | MB_ICONERROR);
 		return;
 	}
 
@@ -21855,7 +21855,7 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") },
     },
-    // Tab 8: Link Cable - the menu's session controls as keys.
+    // Tab 8: Game Boy Link - the menu's session controls as keys.
     {
         { &CustomKeys.Link2P,          &CustomKeysExtra.Link2P,          HOTKEYS_LINK_2P },
         { &CustomKeys.Link3P,          &CustomKeysExtra.Link3P,          HOTKEYS_LINK_3P },
@@ -22077,7 +22077,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
 				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc"),
-				TEXT("Link Cable")
+				TEXT("Game Boy Link")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

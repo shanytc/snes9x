@@ -547,7 +547,7 @@ bool S9xSGBKissLinkStart(int kind, const uint8_t *data, size_t size, const char 
 void S9xSGBKissLinkCancel(void);
 int  S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char **error);
 bool S9xSGBKissLinkReceivedMap(uint8_t *out /* S9X_KISSLINK_MAP_BYTES */);
-// Namcot's Barcode Boy on player 1's link port, while no Game Link session
+// Namcot's Barcode Boy on player 1's link port, while no Game Boy Link session
 // holds it (sgb/gb_barcodeboy.h has the known cards). Scan takes 13 digits,
 // connects it, and the card waits until the game asks for one; ReadCount
 // goes up as a game takes a card whole. Game: the loaded cart's name when

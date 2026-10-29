@@ -1532,7 +1532,7 @@ BEGIN
             MENUITEM MFT_SEPARATOR
             MENUITEM "&Automatic",                  (ID_EMULATION_BIOS_POLICY0+7),MFT_STRING,MFS_ENABLED
         END
-        POPUP "R&TC",                           ID_EMULATION_GB_RTC,MFT_STRING,MFS_ENABLED
+        POPUP "Real Ti&me Clock",               ID_EMULATION_GB_RTC,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "Save RTC to &Battery Save (.sav)", ID_EMULATION_GB_RTC_SAV,MFT_STRING | MFT_RADIOCHECK,MFS_ENABLED
             MENUITEM "Save RTC Se&parately (.rtc)", ID_EMULATION_GB_RTC_FILE,MFT_STRING | MFT_RADIOCHECK,MFS_ENABLED

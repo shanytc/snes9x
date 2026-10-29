@@ -3603,7 +3603,7 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			break;
-		// Emulation > RTC: an MBC3/HuC3/TAMA5 clock after the RAM in the .sav or in a
+		// Emulation > Real Time Clock: an MBC3/HuC3/TAMA5 clock after the RAM in the .sav or in a
 		// .rtc beside it; it moves there with the next battery save.
 		case ID_EMULATION_GB_RTC_SAV:
 		case ID_EMULATION_GB_RTC_FILE:
@@ -9658,7 +9658,7 @@ static void LayoutAssocChecks(HWND hDlg, bool visible)
 	             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-// Emulation > RTC > Settings: the PC's clock, or (RTC off) a date and time
+// Emulation > Real Time Clock > Settings: the PC's clock, or (RTC off) a date and time
 // picked to stand in for it. Settings.GBRTCTime keeps it as Unix seconds; the
 // pickers show it in local time.
 static const ULONGLONG kFileTimeUnixEpoch = 116444736000000000ULL;   // 1970 in 100 ns since 1601
@@ -9763,7 +9763,7 @@ static void WinGBRtcSettings ()
 		                                    : "RTC on: the PC's clock");
 }
 
-// Emulation > RTC comes and goes with a cart that keeps a clock, right below
+// Emulation > Real Time Clock comes and goes with a cart that keeps a clock, right below
 // Game Boy Model, which is up whenever a Game Boy game is.
 static void UpdateRtcPopup (bool show)
 {
@@ -9791,7 +9791,7 @@ static void UpdateRtcPopup (bool show)
 		ins.fType      = MFT_STRING;
 		ins.wID        = ID_EMULATION_GB_RTC;
 		ins.hSubMenu   = s_rtc;
-		TCHAR txt[]    = TEXT("R&TC");
+		TCHAR txt[]    = TEXT("Real Ti&me Clock");
 		ins.dwTypeData = txt;
 		ins.cch        = (UINT)_tcslen (txt);
 		InsertMenuItem (parent, (UINT)(pos + 1), TRUE, &ins);

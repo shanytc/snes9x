@@ -250,7 +250,7 @@ struct EmuConfig
     bool gb_bios_enabled;
     // Console for GB content; see S9xGBBootPolicy. Persisted as [SGB] GBBootPolicy.
     int gb_boot_policy;
-    // Emulation -> RTC: an MBC3/HuC3/TAMA5 cart's clock in its own .rtc instead of
+    // Emulation -> Real Time Clock: an MBC3/HuC3/TAMA5 cart's clock in its own .rtc instead of
     // after the RAM in the .sav, and with the RTC off a picked time (Unix
     // seconds) standing in for the PC's clock. [SGB] RTCSeparateFile, RTCOff,
     // RTCTime, as win32 names them.

@@ -139,7 +139,7 @@ class EmuMainWindow : public QMainWindow
     QAction *bios_policy_actions[S9X_NUM_GBBOOT_POLICIES] = {};
     void refreshBiosMenu();
 
-    // Emulation -> RTC, only while an MBC3/HuC3/TAMA5 cart with a clock is loaded.
+    // Emulation -> Real Time Clock, only while an MBC3/HuC3/TAMA5 cart with a clock is loaded.
     QMenu *rtc_menu = nullptr;
     QAction *rtc_menu_action = nullptr;
     QAction *rtc_sav_action = nullptr;

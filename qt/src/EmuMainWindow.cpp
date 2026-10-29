@@ -335,7 +335,7 @@ void EmuMainWindow::setRtcSeparate(bool separate)
     S9xSetInfoString(separate ? "RTC: saved separately (.rtc)" : "RTC: saved in the battery save (.sav)");
 }
 
-// Emulation > RTC > Settings: the PC's clock, or (RTC off) a date and time
+// Emulation > Real Time Clock > Settings: the PC's clock, or (RTC off) a date and time
 // picked to stand in for it, kept as Unix seconds and shown in local time.
 void EmuMainWindow::openRtcSettings()
 {
@@ -1591,9 +1591,9 @@ void EmuMainWindow::createWidgets()
     bios_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshBiosMenu);
 
-    // Emulation > RTC: where an MBC3/HuC3/TAMA5 cart's clock is saved and what clock
+    // Emulation > Real Time Clock: where an MBC3/HuC3/TAMA5 cart's clock is saved and what clock
     // it follows. Only offered while such a cart is loaded.
-    rtc_menu = new QMenu(tr("R&TC"));
+    rtc_menu = new QMenu(tr("Real Ti&me Clock"));
     auto rtc_group = new QActionGroup(this);
     rtc_group->setExclusive(true);
     rtc_sav_action  = rtc_menu->addAction(tr("Save RTC to &Battery Save (.sav)"));

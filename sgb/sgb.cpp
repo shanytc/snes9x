@@ -1260,7 +1260,7 @@ bool Emulator::HasBattery() const
 	       (!impl_->cart.sram.empty() || CartHasClock(impl_->cart));
 }
 
-// Emulation > RTC: where the clock is saved, and the PC's clock or, with the
+// Emulation > Real Time Clock: where the clock is saved, and the PC's clock or, with the
 // RTC off, the date and time picked for it.
 static CartRtcOptions RtcOptionsFromSettings()
 {

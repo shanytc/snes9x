@@ -1996,7 +1996,7 @@
                     </child>
                     <child>
                       <object class="GtkMenuItem" id="rtc_item">
-                        <property name="label" translatable="yes">R_TC</property>
+                        <property name="label" translatable="yes">Real Ti_me Clock</property>
                         <property name="visible">False</property>
                         <property name="can_focus">False</property>
                         <property name="use_underline">True</property>

@@ -560,6 +560,16 @@ bool S9xSGBBarcodeBoyPending(void);
 const char *S9xSGBBarcodeBoyLastCode(void);
 unsigned S9xSGBBarcodeBoyReadCount(void);
 const char *S9xSGBBarcodeBoyGame(void);
+// Barcode Taisen Bardigun's card reader, on the same port (sgb/gb_bardigun.h).
+// The calls match the Barcode Boy's; Scan also takes an 8-digit EAN-8, and
+// connecting either scanner unplugs the other.
+void S9xSGBBardigunConnect(bool on);
+bool S9xSGBBardigunConnected(void);
+bool S9xSGBBardigunScan(const char *code);
+bool S9xSGBBardigunPending(void);
+const char *S9xSGBBardigunLastCode(void);
+unsigned S9xSGBBardigunReadCount(void);
+const char *S9xSGBBardigunGame(void);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 // Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
 // feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero

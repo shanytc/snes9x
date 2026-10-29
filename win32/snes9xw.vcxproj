@@ -338,6 +338,7 @@
     <ClInclude Include="..\sgb\gb_serial.h" />
     <ClInclude Include="..\sgb\gb_infrared.h" />
     <ClInclude Include="..\sgb\gb_barcodeboy.h" />
+    <ClInclude Include="..\sgb\gb_bardigun.h" />
     <ClInclude Include="..\sgb\gb_kisslink.h" />
     <ClInclude Include="..\sgb\gb_link.h" />
     <ClInclude Include="..\sgb\gb_viewer.h" />
@@ -577,6 +578,7 @@
     <ClCompile Include="..\sgb\gb_serial.cpp" />
     <ClCompile Include="..\sgb\gb_infrared.cpp" />
     <ClCompile Include="..\sgb\gb_barcodeboy.cpp" />
+    <ClCompile Include="..\sgb\gb_bardigun.cpp" />
     <ClCompile Include="..\sgb\gb_kisslink.cpp" />
     <ClCompile Include="..\sgb\gb_link.cpp" />
     <ClCompile Include="..\sgb\gb_viewer.cpp" />

@@ -22,6 +22,7 @@
 
 #include "gb_serial.h"
 #include "gb_barcodeboy.h"
+#include "gb_bardigun.h"
 #include "gb_link.h"
 #include "gb_memory.h"
 #include "gb_joypad.h"
@@ -813,14 +814,16 @@ void StepResolvedActive(Serial &s, Memory &mem, int32_t tcycles)
 	if (s.bits_left == 0) CompleteActive(s, mem);
 }
 
-// The Barcode Boy holds the port while no Game Boy Link session does.
+bool ScannerConnected() { return BarcodeBoyConnected() || BardigunConnected(); }
+
+// A card scanner holds the port while no Game Boy Link session does.
 bool ScannerOnPort()
 {
-	return BarcodeBoyConnected() && !SerialLinkIsEnabled() && !SerialSplitActive();
+	return ScannerConnected() && !SerialLinkIsEnabled() && !SerialSplitActive();
 }
 
-// A byte crossing to or from the Barcode Boy. No cable statistics: those
-// describe a Game Boy Link session.
+// A byte crossing to or from a scanner. No cable statistics: those describe
+// a Game Boy Link session.
 void ScannerLand(Serial &s, Memory &mem, uint8_t data)
 {
 	mem.serial_data    = data;
@@ -831,8 +834,8 @@ void ScannerLand(Serial &s, Memory &mem, uint8_t data)
 	s.bits_left = 0;
 }
 
-// The game's own bytes (the knock) take their eight bit periods; the
-// scanner's land whenever its clock says so.
+// The game's own bytes (the knock, the Bardigun's samples) take their eight
+// bit periods; the Barcode Boy's land whenever its clock says so.
 void ScannerStep(Serial &s, Memory &mem, int32_t tcycles, int32_t real)
 {
 	if (s.active)
@@ -844,6 +847,11 @@ void ScannerStep(Serial &s, Memory &mem, int32_t tcycles, int32_t real)
 			s.bit_timer += s.bit_period;
 		}
 		if (s.bits_left == 0) ScannerLand(s, mem, s.peer_data);
+	}
+	if (BardigunConnected())
+	{
+		BardigunClock(real);
+		return;
 	}
 	const bool listening = (mem.serial_control & 0x81) == 0x80;
 	const int  b = BarcodeBoyClock(real, listening);
@@ -1934,8 +1942,9 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 		s.bits_left  = 8;
 		s.bit_period = BitPeriod(s, mem.serial_control);
 		s.bit_timer  = s.bit_period;
-		// The Barcode Boy's answer to that byte came back with the state.
-		if (ScannerOnPort()) s.peer_data = BarcodeBoyReply();
+		// The scanner's answer to that byte came back with the state.
+		if (ScannerOnPort())
+			s.peer_data = BardigunConnected() ? BardigunReply() : BarcodeBoyReply();
 	}
 	else
 	{
@@ -2104,7 +2113,8 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 	if (ScannerOnPort())
 	{
 		// Barcode Boy: the game clocks the knock itself, then listens on
-		// the external clock while the scanner clocks a card in.
+		// the external clock while the scanner clocks a card in. Bardigun:
+		// the game clocks every byte and the reader shifts samples back.
 		s.active = s.passive = false;
 		if ((value & 0x81) == 0x81)
 		{
@@ -2113,7 +2123,8 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			s.bits_left  = 8;
 			s.bit_period = BitPeriod(s, value);
 			s.bit_timer  = FirstBitDelay(mem, s.bit_period);
-			s.peer_data  = BarcodeBoyExchange(mem.serial_data);
+			s.peer_data  = BardigunConnected() ? BardigunExchange()
+			                                   : BarcodeBoyExchange(mem.serial_data);
 		}
 		else if (value & 0x80)
 			s.passive = true;
@@ -2207,7 +2218,7 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 
 	if (!SerialLinkIsEnabled() && !SerialSplitActive())
 	{
-		if (BarcodeBoyConnected())
+		if (ScannerConnected())
 		{
 			ScannerStep(s, mem, tcycles, real);
 			return;

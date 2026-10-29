@@ -21987,6 +21987,40 @@ static const int g_hotkeyLabelIds[MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
 	IDC_LABEL_HK13, IDC_LABEL_HK14, IDC_LABEL_HK15, IDC_LABEL_HK16, IDC_LABEL_HK17, IDC_LABEL_HK18,
 };
 
+// The slots' columns, in dialog units: snes9x.rc's, except on the Game Boy tab,
+// whose model labels need a wider left column (its link labels fit a narrower
+// right one). Only x and width move; the rows keep StackHotkeyTabs' shift.
+static void LayoutHotkeyColumns(HWND hDlg, int tab)
+{
+	struct Column { int labelX, labelW, keyX; };
+	static const Column rc[2] = { { 10, 72, 86 }, { 155, 122, 281 } };
+	static const Column gb[2] = { { 10, 132, 146 }, { 210, 80, 294 } };
+	const Column *cols = tab == HOTKEY_TAB_GBMODEL ? gb : rc;
+	const int rows = MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS / 2;
+
+	for (int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)
+	{
+		const Column &c = cols[i < rows ? 0 : 1];
+		RECT units = { c.labelX, 0, c.labelX + c.labelW, 0 };
+		MapDialogRect(hDlg, &units);
+		RECT key = { c.keyX, 0, c.keyX + 60, 0 };
+		MapDialogRect(hDlg, &key);
+
+		const struct { int id; int x, w; } moves[2] = {
+			{ g_hotkeyLabelIds[i],   units.left, units.right - units.left },
+			{ g_hotkeyControlIds[i], key.left,   key.right - key.left },
+		};
+		for (const auto &m : moves)
+		{
+			HWND hwnd = GetDlgItem(hDlg, m.id);
+			RECT r;
+			GetWindowRect(hwnd, &r);
+			MapWindowPoints(HWND_DESKTOP, hDlg, (LPPOINT)&r, 2);
+			SetWindowPos(hwnd, NULL, m.x, r.top, m.w, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+	}
+}
+
 static void set_hotkeyinfo(HWND hDlg, bool layoutChanged)
 {
 	int index = (int)SendDlgItemMessage(hDlg, IDC_HOTKEY_TABS, TCM_GETCURSEL, 0, 0);
@@ -21994,6 +22028,8 @@ static void set_hotkeyinfo(HWND hDlg, bool layoutChanged)
 		index = 0;
 
 	const bool savestates = (index == HOTKEY_TAB_SAVESTATES);
+	if (layoutChanged)
+		LayoutHotkeyColumns(hDlg, index);
 
 	// Generic IDC_HOTKEY slots: shown for every tab except States.
 	for (int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)

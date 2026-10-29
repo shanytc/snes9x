@@ -612,6 +612,7 @@ BEGIN
     // Tab content: 2 columns x 9 rows of generic switchable slots.
     // Column 1: label x=10..82, control x=86..146
     // Column 2: label x=155..277 (right-aligned; room for long names), control x=281..341
+    // (the Game Boy tab moves both columns across: LayoutHotkeyColumns in wsnes9x.cpp)
     RTEXT           "",IDC_LABEL_HK1,10,52,72,10
     RTEXT           "",IDC_LABEL_HK2,10,66,72,10
     RTEXT           "",IDC_LABEL_HK3,10,80,72,10

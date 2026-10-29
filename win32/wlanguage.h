@@ -166,19 +166,19 @@ Nintendo is a trademark.")
 #define HOTKEYS_SUPERDISC_INSERT TEXT("Insert Disc:")
 #define HOTKEYS_SUPERDISC_EJECT TEXT("Eject Disc:")
 #define HOTKEYS_BIOS_MANAGER TEXT("BIOS Manager:")
-// Emulation -> Game Boy Model. Every label has to fit the 72-DLU statics; the
-// tab name supplies the context.
 // Appended to a greyed Emulation -> Game Boy Model entry, so the item says why
 // it cannot be picked instead of leaving it to guesswork.
 #define GBMODEL_MISSING_BIOS TEXT(" (Missing BIOS)")
 #define GBMODEL_EXPERIMENTAL TEXT(" (Experimental)")
 #define GBMODEL_NOT_SUPPORTED TEXT(" (game not supported)")
 
-#define HOTKEYS_GBMODEL_GB TEXT("Game Boy:")
-#define HOTKEYS_GBMODEL_GBC TEXT("Game Boy Color:")
-#define HOTKEYS_GBMODEL_SGB TEXT("Super Game Boy:")
-#define HOTKEYS_GBMODEL_SGB2 TEXT("Super Game Boy 2:")
-#define HOTKEYS_GBMODEL_SGBC TEXT("Super GB Color:")
+// Emulation -> Game Boy Model. The Game Boy tab widens its left column for
+// these (LayoutHotkeyColumns in wsnes9x.cpp): up to 132 DLU.
+#define HOTKEYS_GBMODEL_GB TEXT("Switch to Game Boy Model:")
+#define HOTKEYS_GBMODEL_GBC TEXT("Switch to Game Boy Color Model:")
+#define HOTKEYS_GBMODEL_SGB TEXT("Switch to Super Game Boy Model:")
+#define HOTKEYS_GBMODEL_SGB2 TEXT("Switch to Super Game Boy 2 Model:")
+#define HOTKEYS_GBMODEL_SGBC TEXT("Switch to Super Game Boy Color Model:")
 // Keep these short enough for the 72-DLU IDC_LABEL_HK* statics: longer text
 // word-wraps and the clipped second line shows as pixel garbage under the label.
 #define HOTKEYS_KEYSWITCH_1 TEXT("Key Switch Options:")

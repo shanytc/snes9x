@@ -34,8 +34,8 @@
 #include "LuaScriptWindow.hpp"
 #include "lua/lua_engine.h"
 #include "ColorCorrectionDialog.hpp"
-#include "BarcodeBattlerDialog.hpp"
-#include "barcodebattler.h"
+#include "BarcodeDialog.hpp"
+#include "barcodereaders.h"
 #include "MovieDialogs.hpp"
 #include "StatePreviewDialog.hpp"
 #include "EmuApplication.hpp"
@@ -1839,38 +1839,66 @@ void EmuMainWindow::createWidgets()
 
     input_menu->addSeparator();
 
-    // Epoch's barcode reader, which takes port 2's place while connected.
-    // It can be connected before a game loads and stays across SNES loads;
-    // a Game Boy game unplugs it and greys it out.
-    auto barcode_menu = input_menu->addMenu(tr("&Barcode Battler II"));
-    auto barcode_connect_action = barcode_menu->addAction(tr("&Connect to Port 2"));
+    // Barcode readers: the loaded game's system picks one - the Barcode
+    // Battler II on port 2 for a SNES game, Barcode Taisen Bardigun's reader
+    // for that game, the Barcode Boy on the link port for any other Game Boy
+    // game. Connect needs a game loaded, toggles in place and stays across
+    // loads; scanning is only offered to a game that reads its reader.
+    auto barcode_menu = input_menu->addMenu(tr("&Barcodes"));
+    barcode_menu->installEventFilter(new StayOpenMenuFilter(barcode_menu));
+    auto barcode_port_free = [](S9xBarcodeReader reader) {
+        const char *busy = S9xBarcodeReaderPortBusy(reader);
+        if (busy)
+            S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) + ": " + busy).c_str());
+        return !busy;
+    };
+    // On the emulation thread: the Game Boy readers' state is the core's.
+    auto scan_barcode = [this](S9xBarcodeReader reader, const std::string &code) {
+        bool ok = false;
+        app.emu_thread->runOnThread([&] { ok = S9xBarcodeReaderScan(reader, code.c_str()); }, true);
+        if (!ok)
+            return;
+        const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code.c_str());
+        S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) + ": " +
+                          (card ? card->name : S9xBarcodeReaderLastCode(reader)) + " scanned").c_str());
+    };
+    auto barcode_connect_action = barcode_menu->addAction(tr("&Connect"));
     barcode_connect_action->setCheckable(true);
-    QObject::connect(barcode_connect_action, &QAction::triggered, [&](bool checked) {
-        S9xBarcodeBattlerConnect(checked);
-        if (app.isCoreActive())
-            S9xSetInfoString(checked ? "Barcode Battler II connected to port 2"
-                                     : "Barcode Battler II disconnected");
+    QObject::connect(barcode_connect_action, &QAction::triggered, [this, barcode_connect_action, barcode_port_free](bool checked) {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+        if (reader == S9X_BARCODE_NONE || (checked && !barcode_port_free(reader)))
+        {
+            barcode_connect_action->setChecked(S9xBarcodeReaderConnected());
+            return;
+        }
+        S9xBarcodeReaderConnect(checked);
+        S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) +
+                          (checked ? std::string(" connected to ") + S9xBarcodeReaderPort(reader) : " disconnected")).c_str());
     });
     auto barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
-    QObject::connect(barcode_scan_action, &QAction::triggered, [&] {
+    QObject::connect(barcode_scan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+        if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader))
+            return;
         app.pause();
-        BarcodeBattlerDialog dialog(this);
-        dialog.exec();
+        BarcodeDialog dialog(this, reader);
+        if (dialog.exec() == QDialog::Accepted)
+            scan_barcode(reader, dialog.code());
         app.unpause();
     });
-    auto barcode_rescan_action = barcode_menu->addAction(tr("Scan &Last Barcode Again"));
-    QObject::connect(barcode_rescan_action, &QAction::triggered, [&] {
-        std::string code = S9xBarcodeBattlerLastCode();
-        if (S9xBarcodeBattlerScan(code.c_str()))
-            S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
+    auto barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
+    QObject::connect(barcode_rescan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+        if (S9xBarcodeReaderGameReads(reader) && barcode_port_free(reader))
+            scan_barcode(reader, S9xBarcodeReaderLastCode(reader));
     });
-    // Scanning is only offered to a game that reads the device.
     QObject::connect(barcode_menu, &QMenu::aboutToShow, [this, barcode_connect_action, barcode_scan_action, barcode_rescan_action] {
-        const bool supported = app.isCoreActive() && S9xBarcodeBattlerGameSupported();
-        barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
-        barcode_connect_action->setEnabled(!(app.isCoreActive() && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)));
-        barcode_scan_action->setEnabled(supported);
-        barcode_rescan_action->setEnabled(supported && *S9xBarcodeBattlerLastCode());
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+        const bool reads = S9xBarcodeReaderGameReads(reader);
+        barcode_connect_action->setChecked(S9xBarcodeReaderConnected());
+        barcode_connect_action->setEnabled(reader != S9X_BARCODE_NONE);
+        barcode_scan_action->setEnabled(reads);
+        barcode_rescan_action->setEnabled(reads && *S9xBarcodeReaderLastCode(reader));
     });
 
     QObject::connect(input_menu, &QMenu::aboutToShow, [&] {

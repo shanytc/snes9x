@@ -1021,27 +1021,6 @@
 #define ID_EMULATION_GB_LINK_SEATMODEL0 40250
 #define ID_EMULATION_GB_LINK_SEATMODEL_LAST 40329
 
-/* Input > Barcode Boy */
-#define ID_INPUT_BARCODEBOY_CONNECT     40338
-#define ID_INPUT_BARCODEBOY_SCAN        40339
-#define ID_INPUT_BARCODEBOY_RESCAN      40340
-#define IDD_BARCODE_BOY                 202
-#define IDC_BARCODEBOY_EDIT             3713
-#define IDC_BARCODEBOY_RANDOM           3714
-#define IDC_BARCODEBOY_STATUS           3715
-#define IDC_BARCODEBOY_CARDS            3716
-#define IDC_BARCODEBOY_PREVIEW          3717
-#define IDC_BARCODEBOY_IMAGE            3718
-#define IDC_BARCODEBOY_CAMERA           3719
-#define IDC_BARCODEBOY_CAMERA_TOGGLE    3720
-#define IDC_BARCODEBOY_SEARCH           3721
-
-/* Input > Bardigun Card Reader: its dialog has the Barcode Boy's controls */
-#define ID_INPUT_BARDIGUN_CONNECT       40345
-#define ID_INPUT_BARDIGUN_SCAN          40346
-#define ID_INPUT_BARDIGUN_RESCAN        40347
-#define IDD_BARDIGUN                    204
-
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400
 #define ID_NSS_COIN1                    44401
@@ -1077,7 +1056,8 @@
 #define ID_SFCBOX_POWER_OFF             44450
 
 
-#define IDD_BARCODE_BATTLER             201
+/* Input > Barcodes: the Barcode Battler II, Barcode Boy and Bardigun reader */
+#define IDD_BARCODES                    201
 #define IDC_BARCODE_EDIT                3704
 #define IDC_BARCODE_RANDOM              3705
 #define IDC_BARCODE_IMAGE               3706
@@ -1087,6 +1067,8 @@
 #define IDC_BARCODE_PREVIEW             3710
 #define IDC_BARCODE_SEARCH              3711
 #define IDC_BARCODE_CARDS               3712
+#define IDC_BARCODE_INTRO               3713
+#define IDC_BARCODE_NOTE                3714
 #define ID_INPUT_BARCODE_CONNECT        44454
 #define ID_INPUT_BARCODE_SCAN           44455
 #define ID_INPUT_BARCODE_RESCAN         44456

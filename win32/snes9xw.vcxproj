@@ -464,6 +464,7 @@
     <ClInclude Include="..\voicekun.h" />
     <ClInclude Include="..\barcodebattler.h" />
     <ClInclude Include="..\barcodebattler_cards.h" />
+    <ClInclude Include="..\barcodereaders.h" />
     <ClInclude Include="..\cartprot.h" />
     <ClInclude Include="..\rp2040.h" />
     <ClInclude Include="..\rp2040cart.h" />
@@ -525,7 +526,6 @@
     <ClInclude Include="AcidTestsDlg.h" />
     <ClInclude Include="CGBTilemapViewerDlg.h" />
     <ClInclude Include="CGBSpriteViewerDlg.h" />
-    <ClInclude Include="wbarcodebattler.h" />
     <ClInclude Include="gb_viewer_common.h" />
     <ClInclude Include="debug_viewer_common.h" />
     <ClInclude Include="debug_viewer_export.h" />
@@ -548,7 +548,7 @@
     <ClInclude Include="win32_sound.h" />
     <ClInclude Include="win32_webcam.h" />
     <ClInclude Include="wlanguage.h" />
-    <ClInclude Include="wbarcodeboy.h" />
+    <ClInclude Include="wbarcodes.h" />
     <ClInclude Include="wlocale.h" />
     <ClInclude Include="wsnes9x.h" />
     <ClInclude Include="wlua.h" />
@@ -722,6 +722,7 @@
     <ClCompile Include="..\msu1.cpp" />
     <ClCompile Include="..\voicekun.cpp" />
     <ClCompile Include="..\barcodebattler.cpp" />
+    <ClCompile Include="..\barcodereaders.cpp" />
     <ClCompile Include="..\cartprot.cpp" />
     <ClCompile Include="..\rp2040.cpp" />
     <ClCompile Include="..\rp2040cart.cpp" />
@@ -817,7 +818,6 @@
     <ClCompile Include="CGBTileViewerDlg.cpp" />
     <ClCompile Include="CGBTilemapViewerDlg.cpp" />
     <ClCompile Include="CGBSpriteViewerDlg.cpp" />
-    <ClCompile Include="wbarcodebattler.cpp" />
     <ClCompile Include="AcidTestsDlg.cpp" />
     <ClCompile Include="debug_viewer_common.cpp" />
     <ClCompile Include="debug_viewer_export.cpp" />
@@ -841,7 +841,7 @@
     <ClCompile Include="win32_display.cpp" />
     <ClCompile Include="win32_sound.cpp" />
     <ClCompile Include="win32_webcam.cpp" />
-    <ClCompile Include="wbarcodeboy.cpp" />
+    <ClCompile Include="wbarcodes.cpp" />
     <ClCompile Include="wlocale.cpp" />
     <ClCompile Include="wsnes9x.cpp" />
     <ClCompile Include="wlua.cpp" />

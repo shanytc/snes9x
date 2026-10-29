@@ -4,7 +4,7 @@
    For further information, consult the LICENSE file in the root directory.
 \*****************************************************************************/
 
-#include "gtk_barcode_battler.h"
+#include "gtk_barcodes.h"
 #include "gtk_config.h"
 #include "gtk_s9x.h"
 #include "common/desktop/barcode_card_photos.hpp"
@@ -32,7 +32,7 @@ std::string digits_of(const std::string &text)
     return digits;
 }
 
-// The folder of the running executable, where a portable build keeps its battler folder.
+// The folder of the running executable, where a portable build keeps its photo folders.
 std::string executable_dir()
 {
     std::error_code ec;
@@ -40,26 +40,28 @@ std::string executable_dir()
     return ec ? std::string() : exe.parent_path().string();
 }
 
-// One printed card: the run of entries from i sharing its set and photo stem
-// (a card with several barcodes); a single entry when it has no photos.
-int card_end(const S9xBarcodeCard *cards, int count, int i)
+// One printed card: the run of entries from i sharing its branch and photo
+// stem (a card with several barcodes); a single entry when it has no photos.
+int card_end(const S9xBarcodeReaderCard *cards, int count, int i)
 {
     int end = i + 1;
     if (*cards[i].image)
-        while (end < count && !strcmp(cards[end].set, cards[i].set) && !strcmp(cards[end].image, cards[i].image))
+        while (end < count && !strcmp(cards[end].branch, cards[i].branch) && !strcmp(cards[end].image, cards[i].image))
             end++;
     return end;
 }
 
-bool card_matches(const S9xBarcodeCard &card, const Glib::ustring &find)
+bool card_matches(const S9xBarcodeReaderCard &card, const Glib::ustring &find)
 {
     return find.empty() || Glib::ustring(card.name).casefold().find(find) != Glib::ustring::npos ||
-           Glib::ustring(card.set).casefold().find(find) != Glib::ustring::npos ||
-           std::string(card.code).find(find.raw()) != std::string::npos;
+           Glib::ustring(card.kana).casefold().find(find) != Glib::ustring::npos ||
+           Glib::ustring(card.branch).casefold().find(find) != Glib::ustring::npos ||
+           std::string(card.code).find(find.raw()) != std::string::npos ||
+           (card.group && Glib::ustring(card.group).casefold().find(find) != Glib::ustring::npos);
 }
 
 // A card with several barcodes is named after them, less their positions.
-std::string card_label(const S9xBarcodeCard *cards, int i, int end)
+std::string card_label(const S9xBarcodeReaderCard *cards, int i, int end)
 {
     std::vector<std::string> names;
     for (int k = i; k < end; k++)
@@ -84,12 +86,13 @@ std::string card_label(const S9xBarcodeCard *cards, int i, int end)
     return label;
 }
 
-class BarcodeBattlerDialog : public Gtk::Dialog
+class BarcodeDialog : public Gtk::Dialog
 {
   public:
-    BarcodeBattlerDialog(Gtk::Window &parent)
-        : Gtk::Dialog(_("Barcode Battler II"), parent, true)
+    BarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader)
+        : Gtk::Dialog(S9xBarcodeReaderName(reader), parent, true), reader(reader)
     {
+        const bool battler = reader == S9X_BARCODE_BATTLER;
         auto content = get_content_area();
         content->set_spacing(8);
         content->set_border_width(8);
@@ -100,8 +103,13 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         content->pack_start(*columns, Gtk::PACK_EXPAND_WIDGET);
 
         auto intro = Gtk::manage(new Gtk::Label(
-            _("Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) "
-              "barcode, pick a known card, or read it with a camera or from a picture.")));
+            battler ? _("Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) "
+                        "barcode, pick a known card, or read it with a camera or from a picture.")
+            : reader == S9X_BARCODE_BARCODEBOY
+                ? _("Enter a card's 13-digit (JAN/EAN-13) barcode, pick a known card, or read it "
+                    "with a camera or from a picture.")
+                : _("Enter a card's 13-digit (JAN/EAN-13) or 8-digit (EAN-8) barcode, pick a known "
+                    "card, or read it with a camera or from a picture. Shop barcodes work too.")));
         intro->set_line_wrap(true);
         intro->set_max_width_chars(60);
         intro->set_xalign(0.0f);
@@ -111,7 +119,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         code_box->pack_start(*Gtk::manage(new Gtk::Label(_("Barcode:"))), Gtk::PACK_SHRINK);
         code_entry.set_max_length(20);
         code_entry.set_placeholder_text(_("e.g. 4901234567894"));
-        code_entry.set_text(S9xBarcodeBattlerLastCode());
+        code_entry.set_text(S9xBarcodeReaderLastCode(reader));
         code_entry.set_activates_default(true);
         code_box->pack_start(code_entry, Gtk::PACK_EXPAND_WIDGET);
         auto random_button = Gtk::manage(new Gtk::Button(_("_Random"), true));
@@ -144,7 +152,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         camera_box->pack_start(camera_button, Gtk::PACK_SHRINK);
         left->pack_start(*camera_box, Gtk::PACK_SHRINK);
 
-        photo_dir = S9xBarcodePhotoDir({ get_config_dir(), executable_dir() });
+        photo_dir = S9xBarcodePhotoDir({ get_config_dir(), executable_dir() }, S9xBarcodeReaderPhotoFolder(reader));
 
         preview_frame.set_size_request(PREVIEW_WIDTH, PREVIEW_HEIGHT);
         preview_label.set_text(_("Hold the barcode up to the camera, straight and in focus."));
@@ -152,28 +160,34 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         preview_label.set_max_width_chars(40);
         photo_box.set_halign(Gtk::ALIGN_CENTER);
         photo_box.set_valign(Gtk::ALIGN_CENTER);
+        barcode_area.signal_draw().connect([this](const Cairo::RefPtr<Cairo::Context> &cr) {
+            draw_barcode(cr, barcode_area.get_allocated_width(), barcode_area.get_allocated_height());
+            return true;
+        });
         preview_stack.add(preview_label, "label");
         preview_stack.add(preview_image, "image");
         preview_stack.add(photo_box, "photos");
+        preview_stack.add(barcode_area, "barcode");
         preview_frame.add(preview_stack);
-        if (!names.empty() || !photo_dir.empty())
-            left->pack_start(preview_frame, Gtk::PACK_EXPAND_WIDGET);
+        left->pack_start(preview_frame, Gtk::PACK_EXPAND_WIDGET);
 
         auto note = Gtk::manage(new Gtk::Label(
-            _("Some games look for the Barcode Battler only when they start; "
-              "reset the game if it doesn't respond.")));
+            battler ? _("Some games look for the Barcode Battler only when they start; "
+                        "reset the game if it doesn't respond.")
+                    : _("The game reads the card the next time it asks for one.")));
         note->set_line_wrap(true);
         note->set_max_width_chars(60);
         note->set_xalign(0.0f);
         left->pack_start(*note, Gtk::PACK_SHRINK);
 
-        // The known cards, one branch per set and one per card with several barcodes.
+        // The known cards, one branch per card set or game, per group within
+        // it and per card with several barcodes.
         auto right = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_VERTICAL, 6));
         auto find_label = Gtk::manage(new Gtk::Label(_("Fin_d a card:"), true));
         find_label->set_mnemonic_widget(search_entry);
         find_label->set_xalign(0.0f);
         right->pack_start(*find_label, Gtk::PACK_SHRINK);
-        search_entry.set_placeholder_text(_("Name, set or barcode"));
+        search_entry.set_placeholder_text(battler ? _("Name, set or barcode") : _("Name, game or barcode"));
         right->pack_start(search_entry, Gtk::PACK_SHRINK);
         card_store = Gtk::TreeStore::create(card_columns);
         card_tree.set_model(card_store);
@@ -193,8 +207,19 @@ class BarcodeBattlerDialog : public Gtk::Dialog
 
         code_entry.signal_changed().connect([this] { code_edited(); });
         random_button->signal_clicked().connect([this] {
+            // Any 13 digits work; the Game Boy games' made-up codes carry
+            // JAN's old flag 49, as most of their cards do.
             char code[14];
             S9xBarcodeRandom(code);
+            if (this->reader != S9X_BARCODE_BATTLER)
+            {
+                code[0] = '4';
+                code[1] = '9';
+                int sum = 0;
+                for (int i = 0; i < 12; i++)
+                    sum += (code[i] - '0') * ((i & 1) ? 3 : 1);
+                code[12] = (char)('0' + (10 - sum % 10) % 10);
+            }
             code_entry.set_text(code);
         });
         image_button->signal_clicked().connect([this] { from_image(); });
@@ -241,17 +266,17 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         code_edited();
         fill_cards();
         show_all();
-        show_photos();
+        show_preview();
     }
 
-    ~BarcodeBattlerDialog()
+    ~BarcodeDialog()
     {
         stop_camera();
     }
 
     bool send()
     {
-        return S9xBarcodeBattlerScan(code_entry.get_text().c_str());
+        return S9xBarcodeReaderScan(reader, code_entry.get_text().c_str());
     }
 
   private:
@@ -266,7 +291,8 @@ class BarcodeBattlerDialog : public Gtk::Dialog
             add(entry);
         }
 
-        // entry: the card entry of a barcode, -1 for a set, -2 - first entry for a card's branch
+        // entry: the card entry of a barcode, -1 for a branch or group,
+        // -2 - first entry for a card's branch
         Gtk::TreeModelColumn<Glib::ustring> text;
         Gtk::TreeModelColumn<int> entry;
     };
@@ -274,10 +300,10 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     void code_edited()
     {
         std::string digits = digits_of(code_entry.get_text());
-        const size_t n = digits.size();
+        const int n = (int)digits.size();
         const bool all_digits = digits.find_first_not_of("0123456789") == std::string::npos;
-        const bool length_ok = all_digits && (n == 8 || n == 12 || n == 13);
-        const S9xBarcodeCard *card = length_ok ? S9xBarcodeCardFind(digits.c_str()) : nullptr;
+        const bool length_ok = all_digits && S9xBarcodeReaderTakes(reader, n);
+        const S9xBarcodeReaderCard *card = length_ok ? S9xBarcodeReaderCardFind(reader, digits.c_str()) : nullptr;
 
         scan_button->set_sensitive(length_ok);
         if (n == 0)
@@ -285,17 +311,32 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         else if (!all_digits)
             status_label.set_text(_("A barcode holds only digits."));
         else if (!length_ok)
-            status_label.set_text(fmt::format(fmt::runtime(_("{} digits; a barcode has 8, 12 or 13.")), n));
+            status_label.set_text(fmt::format(fmt::runtime(reader == S9X_BARCODE_BATTLER
+                                                               ? _("{} digits; a barcode has 8, 12 or 13.")
+                                                           : reader == S9X_BARCODE_BARCODEBOY
+                                                               ? _("{} digits; a Barcode Boy card has 13.")
+                                                               : _("{} digits; a barcode has 13, or 8 for EAN-8.")),
+                                              n));
         else if (!S9xBarcodeChecksumValid(digits.c_str()))
             status_label.set_text(_("The check digit doesn't add up. A printed barcode would not read like "
                                     "this, but it can still be sent."));
         else if (card)
-            status_label.set_text(fmt::format(fmt::runtime(_("{}, from {}.")), card->name, card->set));
+            status_label.set_text(fmt::format(fmt::runtime(_("{}, from {}.")),
+                                              *card->kana ? fmt::format("{}  {}", card->name, card->kana) : card->name,
+                                              card->branch));
+        else if (n == 8 && reader == S9X_BARCODE_BARDIGUN)
+            status_label.set_text(_("Valid EAN-8 barcode. It reads, but it is too weak to hatch an egg."));
         else
             status_label.set_text(fmt::format(fmt::runtime(_("Valid {} barcode.")),
                                               n == 13 ? "EAN-13" : n == 12 ? "UPC-A" : "EAN-8"));
 
         show_card(card);
+        const std::string whole = length_ok ? digits : std::string();
+        if (whole != whole_code)
+        {
+            whole_code = whole;
+            show_preview();
+        }
     }
 
     void found(const char *code, const char *where)
@@ -360,7 +401,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     void message(const char *text, Gtk::MessageType type)
     {
         Gtk::MessageDialog msg(*this, text, false, type, Gtk::BUTTONS_CLOSE, true);
-        msg.set_title(_("Barcode Battler II"));
+        msg.set_title(S9xBarcodeReaderName(reader));
         msg.run();
     }
 
@@ -400,7 +441,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         // Back to what Display Settings > Game Boy Image asks for.
         S9xGBCameraStop();
         S9xGBCameraApply();
-        show_photos();
+        show_preview();
     }
 
     void poll_camera()
@@ -436,22 +477,31 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         }
     }
 
-    // The known cards with a set, name or code holding the search text; all
-    // folded when there's nothing to search for.
+    // The reader's known cards with a branch, group, name or code holding the
+    // search text. With nothing to search for, only the loaded game's branch
+    // is open, with its groups.
     void fill_cards()
     {
         const Glib::ustring find = Glib::ustring(search_entry.get_text()).casefold();
+        const char *open = S9xBarcodeReaderOpenBranch(reader);
         card_store->clear();
 
         int count = 0;
-        const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
-        const char *set_name = nullptr;
-        Gtk::TreeModel::iterator set;
-        int in_set = 0;
+        const S9xBarcodeReaderCard *cards = S9xBarcodeReaderCards(reader, &count);
+        const char *branch_name = nullptr, *group_name = nullptr;
+        Gtk::TreeModel::iterator branch, group;
+        Gtk::TreeModel::Path open_path;
+        int in_branch = 0, in_group = 0;
 
-        auto close_set = [&] {
-            if (set_name)
-                (*set)[card_columns.text] = fmt::format("{} ({})", set_name, in_set);
+        auto close_group = [&] {
+            if (group_name)
+                (*group)[card_columns.text] = fmt::format("{} ({})", group_name, in_group);
+            group_name = nullptr;
+        };
+        auto close_branch = [&] {
+            close_group();
+            if (branch_name)
+                (*branch)[card_columns.text] = fmt::format("{} ({})", branch_name, in_branch);
         };
 
         for (int i = 0, end; i < count; i = end)
@@ -463,20 +513,40 @@ class BarcodeBattlerDialog : public Gtk::Dialog
             if (!hit)
                 continue;
 
-            if (!set_name || strcmp(set_name, cards[i].set))
+            if (!branch_name || strcmp(branch_name, cards[i].branch))
             {
-                close_set();
-                set_name = cards[i].set;
-                set = card_store->append();
-                (*set)[card_columns.text] = set_name;
-                (*set)[card_columns.entry] = -1;
-                in_set = 0;
+                close_branch();
+                branch_name = cards[i].branch;
+                branch = card_store->append();
+                (*branch)[card_columns.text] = branch_name;
+                (*branch)[card_columns.entry] = -1;
+                if (open && !strcmp(open, branch_name))
+                    open_path = card_store->get_path(branch);
+                in_branch = 0;
             }
 
-            Gtk::TreeModel::iterator parent = set;
+            Gtk::TreeModel::iterator under = branch;
+            if (cards[i].group)
+            {
+                if (!group_name || strcmp(group_name, cards[i].group))
+                {
+                    close_group();
+                    group_name = cards[i].group;
+                    group = card_store->append(branch->children());
+                    (*group)[card_columns.text] = group_name;
+                    (*group)[card_columns.entry] = -1;
+                    in_group = 0;
+                }
+                under = group;
+                in_group++;
+            }
+            else
+                close_group();
+
+            Gtk::TreeModel::iterator parent = under;
             if (end - i > 1)
             {
-                parent = card_store->append(set->children());
+                parent = card_store->append(under->children());
                 (*parent)[card_columns.text] = card_label(cards, i, end);
                 (*parent)[card_columns.entry] = -2 - i;
             }
@@ -487,16 +557,24 @@ class BarcodeBattlerDialog : public Gtk::Dialog
                 (*row)[card_columns.text] = fmt::format("{}  {}", cards[k].name, cards[k].code);
                 (*row)[card_columns.entry] = k;
             }
-            in_set++;
+            in_branch++;
         }
-        close_set();
+        close_branch();
 
         if (!find.empty())
             card_tree.expand_all();
+        else if (!open_path.empty())
+        {
+            card_tree.expand_row(open_path, false);
+            auto open_row = card_store->get_iter(open_path);
+            for (auto &child : open_row->children())
+                if (child[card_columns.entry] == -1)
+                    card_tree.expand_row(card_store->get_path(child), false);
+        }
     }
 
-    // Only a barcode types its code; a set or a card's branch clears it, the
-    // branch still showing the card's photos.
+    // Only a barcode types its code; a branch, group or card's branch clears
+    // it, a card's branch still showing the card's photos.
     void card_picked()
     {
         auto row = card_tree.get_selection()->get_selected();
@@ -504,7 +582,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
             return;
 
         int count = 0;
-        const S9xBarcodeCard *cards = S9xBarcodeCards(&count);
+        const S9xBarcodeReaderCard *cards = S9xBarcodeReaderCards(reader, &count);
         const int entry = (*row)[card_columns.entry];
         if (entry >= 0 && entry < count)
         {
@@ -518,7 +596,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         show_card(first >= 0 && first < count ? &cards[first] : nullptr);
     }
 
-    void show_card(const S9xBarcodeCard *card)
+    void show_card(const S9xBarcodeReaderCard *card)
     {
         if (card == photo_card)
             return;
@@ -526,17 +604,73 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         photo_card = card;
         photos.clear();
         if (card)
-            for (auto &photo : S9xBarcodeCardPhotos(photo_dir, *card))
+            for (auto &photo : S9xBarcodeCardPhotos(photo_dir, card->image, S9xBarcodeReaderPhotoSides(reader)))
             {
                 auto pixbuf = Gdk::Pixbuf::create_from_data(photo.rgba.data(), Gdk::COLORSPACE_RGB, true, 8,
                                                             photo.width, photo.height, photo.width * 4);
                 photos.push_back(pixbuf->copy());
             }
-        show_photos();
+        show_preview();
     }
 
-    // The shown card's photos side by side in the preview, while the camera is off.
-    void show_photos()
+    // A code with no photos as its printed barcode: bars on a white label,
+    // the guard bars running down between the digits.
+    void draw_barcode(const Cairo::RefPtr<Cairo::Context> &cr, int box_w, int box_h)
+    {
+        bool bars[95];
+        const int modules = S9xBarcodeReaderBars(whole_code.c_str(), bars);
+        if (!modules)
+            return;
+
+        // A UPC-A prints as the EAN-13 it reads as.
+        const std::string code = whole_code.size() == 12 ? "0" + whole_code : whole_code;
+        const bool ean13 = modules == 95;
+        const int quiet_l = ean13 ? 11 : 7, quiet_r = 7, total = quiet_l + modules + quiet_r;
+        const int m = std::max(1, box_w * 85 / 100 / total);    // pixels per module
+        const int digit_h = 9 * m, pad = 4 * m;
+        const int bar_h = std::min(55 * m, box_h - digit_h - 2 * pad - 8);
+        const int w = total * m, h = pad + bar_h + digit_h + pad;
+        const int x0 = (box_w - w) / 2, y0 = (box_h - h) / 2;
+        const int bars_x = x0 + quiet_l * m, bar_top = y0 + pad;
+
+        cr->set_source_rgb(1.0, 1.0, 1.0);
+        cr->rectangle(x0, y0, w, h);
+        cr->fill();
+        cr->set_source_rgb(0.0, 0.0, 0.0);
+        const int half = ean13 ? 6 : 4, mid = 3 + 7 * half;
+        for (int i = 0; i < modules; i++)
+        {
+            if (!bars[i])
+                continue;
+            const bool guard = i < 3 || i >= modules - 3 || (i >= mid && i < mid + 5);
+            cr->rectangle(bars_x + i * m, bar_top, m, bar_h + (guard ? digit_h / 2 : 0));
+        }
+        cr->fill();
+
+        auto layout = barcode_area.create_pango_layout("");
+        Pango::FontDescription font("monospace");
+        font.set_absolute_size(digit_h * PANGO_SCALE);
+        layout->set_font_description(font);
+        // Each digit under its own seven modules; an EAN-13's first one in the quiet zone.
+        auto digit = [&](char c, int left) {
+            layout->set_text(std::string(1, c));
+            int tw, th;
+            layout->get_pixel_size(tw, th);
+            cr->move_to(left + (7 * m - tw) / 2, bar_top + bar_h);
+            layout->show_in_cairo_context(cr);
+        };
+        int k = 0;
+        if (ean13)
+            digit(code[k++], bars_x - 9 * m);
+        for (int i = 0; i < half; i++)
+            digit(code[k++], bars_x + (3 + 7 * i) * m);
+        for (int i = 0; i < half; i++)
+            digit(code[k++], bars_x + (mid + 5 + 7 * i) * m);
+    }
+
+    // While the camera is off: the shown card's photos side by side, else the
+    // code's barcode, else a hint.
+    void show_preview()
     {
         if (camera_on)
             return;
@@ -547,9 +681,12 @@ class BarcodeBattlerDialog : public Gtk::Dialog
             delete child;
         }
 
+        bool bars[95];
         if (photos.empty())
         {
-            preview_stack.set_visible_child("label");
+            const bool drawn = S9xBarcodeReaderBars(whole_code.c_str(), bars) != 0;
+            preview_stack.set_visible_child(drawn ? "barcode" : "label");
+            barcode_area.queue_draw();
             return;
         }
 
@@ -568,6 +705,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         preview_stack.set_visible_child("photos");
     }
 
+    S9xBarcodeReader reader;
     Gtk::Entry code_entry;
     Gtk::Label status_label;
     Gtk::ComboBoxText camera_combo;
@@ -577,6 +715,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     Gtk::Label preview_label;
     Gtk::Image preview_image;
     Gtk::Box photo_box;
+    Gtk::DrawingArea barcode_area;
     Gtk::Button *scan_button = nullptr;
     Gtk::Entry search_entry;
     Gtk::ScrolledWindow card_scroll;
@@ -587,21 +726,24 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     bool camera_on = false;
     std::vector<unsigned char> frame;
     std::string photo_dir;
-    const S9xBarcodeCard *photo_card = nullptr;
+    const S9xBarcodeReaderCard *photo_card = nullptr;
     std::vector<Glib::RefPtr<Gdk::Pixbuf>> photos;
+    std::string whole_code;    // the code typed in when it is whole, drawn with no photos
 };
 
 } // namespace
 
-bool S9xBarcodeBattlerDialog(Gtk::Window &parent)
+bool S9xBarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader)
 {
-    BarcodeBattlerDialog dialog(parent);
+    BarcodeDialog dialog(parent, reader);
 
     while (dialog.run() == Gtk::RESPONSE_ACCEPT)
     {
         if (dialog.send())
         {
-            S9xSetInfoString(fmt::format("Barcode Battler: {} scanned", S9xBarcodeBattlerLastCode()).c_str());
+            const char *code = S9xBarcodeReaderLastCode(reader);
+            const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code);
+            S9xSetInfoString(fmt::format("{}: {} scanned", S9xBarcodeReaderName(reader), card ? card->name : code).c_str());
             return true;
         }
     }

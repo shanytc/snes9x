@@ -25,6 +25,7 @@ S9X_MACHINE int32	S9xRefreshClocks = 0;
 #include "hg51b.h"
 #include "nss.h"
 #include "voicekun.h"
+#include "barcodereaders.h"
 #ifdef DEBUGGER
 #include "debug.h"
 #include "missing.h"
@@ -42,6 +43,9 @@ void S9xMainLoop (void)
 	if (S9xLuaActive)
 		S9xLuaFrameStart();
 #endif
+
+	// Barcodes > Connect: the running game's reader plugged in, the others out.
+	S9xBarcodeReadersFrame();
 
 	// Super Game Boy mode — run the GB core for one frame and return.
 	// The 65816 loop below is bypassed entirely; snes9x's frontends

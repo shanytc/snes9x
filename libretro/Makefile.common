@@ -65,6 +65,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/msu1.cpp \
 				 $(CORE_DIR)/voicekun.cpp \
 				 $(CORE_DIR)/barcodebattler.cpp \
+				 $(CORE_DIR)/barcodereaders.cpp \
 				 $(CORE_DIR)/cartprot.cpp \
 				 $(CORE_DIR)/rp2040.cpp \
 				 $(CORE_DIR)/rp2040cart.cpp \

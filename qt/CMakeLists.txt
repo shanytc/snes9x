@@ -129,6 +129,7 @@ set(SNES9X_CORE_SOURCES
     ../cpuexec.cpp
     ../voicekun.cpp
     ../barcodebattler.cpp
+    ../barcodereaders.cpp
     ../cartprot.cpp
     ../rp2040.cpp
     ../rp2040cart.cpp
@@ -204,7 +205,7 @@ endif()
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
 
-# Optional: decodes the JPEG XL photos of Barcode Battler cards.
+# Optional: decodes the JPEG XL photos of the barcode readers' cards.
 pkg_check_modules(JXL IMPORTED_TARGET libjxl)
 if(JXL_FOUND)
     list(APPEND LIBS PkgConfig::JXL)
@@ -366,8 +367,8 @@ list(APPEND QT_GUI_SOURCES
     src/StatePreviewDialog.hpp
     src/ColorCorrectionDialog.cpp
     src/ColorCorrectionDialog.hpp
-    src/BarcodeBattlerDialog.cpp
-    src/BarcodeBattlerDialog.hpp
+    src/BarcodeDialog.cpp
+    src/BarcodeDialog.hpp
     ../common/desktop/barcode_card_photos.cpp
     ../common/desktop/barcode_card_photos.hpp
     src/MovieDialogs.cpp

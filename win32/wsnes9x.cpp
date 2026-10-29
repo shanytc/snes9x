@@ -48,8 +48,7 @@
 #include "debug_viewer_export.h"   // ViewerCopyMessage
 #include "debug_viewer_common.h"
 #include "win32_webcam.h"
-#include "wbarcodebattler.h"
-#include "wbarcodeboy.h"
+#include "wbarcodes.h"
 
 #include "../snes9x.h"
 #include "../memmap.h"
@@ -187,8 +186,7 @@ static void  GBSeatMachinesTurn();
 static void  WinKissLinkPoll();
 static void  WinKissLinkSend(bool map);
 static void  WinKissLinkReceiveMap();
-static bool  WinLinkScannerPortFree(const char *device);
-static void  WinLinkScannersPoll();
+static bool  WinBarcodePortFree(S9xBarcodeReader reader);
 static void  GBSeatMachinesRequestReset();
 static bool  GBSeatModelIsMachine(unsigned char model);
 static void  WinStartGBOtherGame(const TCHAR *path);
@@ -2412,6 +2410,8 @@ static HHOOK s_menu_filter_hook = NULL;
 // The "Link Current Game" popup, tracked by CheckMenuStates. While a menu is
 // up the mouse is captured by the owner, so hit-test this handle directly.
 static HMENU s_gb_same_hmenu = NULL;
+// Input > Barcodes, whose Connect toggles in place too.
+static HMENU s_barcodes_hmenu = NULL;
 
 static bool MenuSplitIdle (void)
 {
@@ -2436,8 +2436,62 @@ static void MenuToggleSplitInPlace (void)
 	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
 }
 
+// The popup holding a command, searched for from the menu bar down.
+static HMENU MenuPopupWith (HMENU menu, UINT id)
+{
+	for (int i = 0, n = GetMenuItemCount (menu); i < n; i++)
+	{
+		if (GetMenuItemID (menu, i) == id)
+			return menu;
+		if (HMENU sub = GetSubMenu (menu, i))
+			if (HMENU found = MenuPopupWith (sub, id))
+				return found;
+	}
+	return NULL;
+}
+
+static bool MenuBarcodeConnectEnabled (void)
+{
+	return s_barcodes_hmenu &&
+	       !(GetMenuState (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, MF_BYCOMMAND) & (MF_DISABLED | MF_GRAYED));
+}
+
+static void MenuToggleBarcodeInPlace (void)
+{
+	SendMessage (GUI.hWnd, WM_COMMAND, ID_INPUT_BARCODE_CONNECT, 0);
+	CheckMenuItem (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, MF_BYCOMMAND |
+	               (S9xBarcodeReaderConnected () ? MF_CHECKED : MF_UNCHECKED));
+	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
+}
+
 static LRESULT CALLBACK MenuKeepOpenFilter (int code, WPARAM wParam, LPARAM lParam)
 {
+	if (code == MSGF_MENU && s_barcodes_hmenu)
+	{
+		MSG *msg = (MSG *)lParam;
+		if (msg->message == WM_LBUTTONDOWN || msg->message == WM_LBUTTONUP)
+		{
+			int idx = MenuItemFromPoint (NULL, s_barcodes_hmenu, msg->pt);
+			if (idx < 0) idx = MenuItemFromPoint (GUI.hWnd, s_barcodes_hmenu, msg->pt);
+			if (idx >= 0 && GetMenuItemID (s_barcodes_hmenu, idx) == ID_INPUT_BARCODE_CONNECT &&
+			    MenuBarcodeConnectEnabled ())
+			{
+				if (msg->message == WM_LBUTTONUP)
+					MenuToggleBarcodeInPlace ();
+				return TRUE;
+			}
+		}
+		else if (msg->message == WM_KEYDOWN && msg->wParam == VK_RETURN)
+		{
+			MENUITEMINFO mii = { sizeof(mii), MIIM_STATE };
+			if (GetMenuItemInfo (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, FALSE, &mii) &&
+			    (mii.fState & MFS_HILITE) && MenuBarcodeConnectEnabled ())
+			{
+				MenuToggleBarcodeInPlace ();
+				return TRUE;
+			}
+		}
+	}
 	if (code == MSGF_MENU && s_gb_same_hmenu)
 	{
 		MSG *msg = (MSG *)lParam;
@@ -2814,85 +2868,42 @@ LRESULT CALLBACK WinProc(
 			ChangeInputDevice();
 			break;
 
-		// Barcode Battler II: takes port 2's place while connected. It can be
-		// connected before a game loads and stays across SNES loads (a Game Boy
-		// game unplugs it); scanning is only offered to a game that reads it.
+		// Barcodes: the loaded game's system picks the reader - the Barcode
+		// Battler II on port 2 for a SNES game, Bardigun's reader for that
+		// game, the Barcode Boy on the link port for any other Game Boy game.
+		// Connect stays across loads, the reader following the system;
+		// scanning is only offered to a game that reads its reader.
 		case ID_INPUT_BARCODE_CONNECT:
-			if (!S9xBarcodeBattlerConnected() && !Settings.StopEmulation &&
-			    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
+		{
+			const S9xBarcodeReader reader = S9xBarcodeReaderFor(!Settings.StopEmulation);
+			if (reader == S9X_BARCODE_NONE || (!S9xBarcodeReaderConnected() && !WinBarcodePortFree(reader)))
 				break;
-			S9xBarcodeBattlerConnect(!S9xBarcodeBattlerConnected());
-			if (!Settings.StopEmulation)
-				S9xSetInfoString(S9xBarcodeBattlerConnected() ? "Barcode Battler II connected to port 2"
-				                                              : "Barcode Battler II disconnected");
+			S9xBarcodeReaderConnect(!S9xBarcodeReaderConnected());
+			char msg[96];
+			if (S9xBarcodeReaderConnected())
+				snprintf(msg, sizeof(msg), "%s connected to %s", S9xBarcodeReaderName(reader), S9xBarcodeReaderPort(reader));
+			else
+				snprintf(msg, sizeof(msg), "%s disconnected", S9xBarcodeReaderName(reader));
+			S9xSetInfoString(msg);
 			break;
+		}
 		case ID_INPUT_BARCODE_SCAN:
-			if (Settings.StopEmulation || !S9xBarcodeBattlerGameSupported())
+		{
+			const S9xBarcodeReader reader = S9xBarcodeReaderFor(!Settings.StopEmulation);
+			if (!S9xBarcodeReaderGameReads(reader) || !WinBarcodePortFree(reader))
 				break;
 			RestoreGUIDisplay();
-			WinBarcodeBattlerDialog(GUI.hWnd);
+			WinBarcodeDialog(GUI.hWnd, reader);
 			RestoreSNESDisplay();
 			break;
+		}
 		case ID_INPUT_BARCODE_RESCAN:
 		{
-			std::string code = S9xBarcodeBattlerLastCode();
-			if (!Settings.StopEmulation && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
-				S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
-			break;
-		}
-		// Barcode Boy: on player 1's Game Boy link port, across game loads; it
-		// can't be connected while a SNES game runs. Scanning is only offered
-		// to a game that reads it.
-		case ID_INPUT_BARCODEBOY_CONNECT:
-			if (!S9xSGBBarcodeBoyConnected () &&
-			    ((!Settings.StopEmulation && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive) ||
-			     !WinLinkScannerPortFree ("Barcode Boy")))
-				break;
-			S9xSGBBarcodeBoyConnect (!S9xSGBBarcodeBoyConnected ());
-			if (!Settings.StopEmulation)
-				S9xSetInfoString (S9xSGBBarcodeBoyConnected () ? "Barcode Boy connected to the link port"
-				                                               : "Barcode Boy disconnected");
-			break;
-		case ID_INPUT_BARCODEBOY_SCAN:
-			if (Settings.StopEmulation || !S9xSGBBarcodeBoyGame () || !WinLinkScannerPortFree ("Barcode Boy"))
-				break;
-			RestoreGUIDisplay ();
-			WinBarcodeBoyDialog (GUI.hWnd);
-			RestoreSNESDisplay ();
-			break;
-		case ID_INPUT_BARCODEBOY_RESCAN:
-		{
-			std::string code = S9xSGBBarcodeBoyLastCode ();
-			if (!Settings.StopEmulation && S9xSGBBarcodeBoyGame () && WinLinkScannerPortFree ("Barcode Boy") &&
-			    S9xSGBBarcodeBoyScan (code.c_str ()))
-				WinBarcodeBoyScanned ();
-			break;
-		}
-		// Bardigun Card Reader: the same port and rules. Either scanner plugged
-		// in unplugs the other.
-		case ID_INPUT_BARDIGUN_CONNECT:
-			if (!S9xSGBBardigunConnected () &&
-			    ((!Settings.StopEmulation && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive) ||
-			     !WinLinkScannerPortFree ("Bardigun Card Reader")))
-				break;
-			S9xSGBBardigunConnect (!S9xSGBBardigunConnected ());
-			if (!Settings.StopEmulation)
-				S9xSetInfoString (S9xSGBBardigunConnected () ? "Bardigun Card Reader connected to the link port"
-				                                             : "Bardigun Card Reader disconnected");
-			break;
-		case ID_INPUT_BARDIGUN_SCAN:
-			if (Settings.StopEmulation || !S9xSGBBardigunGame () || !WinLinkScannerPortFree ("Bardigun Card Reader"))
-				break;
-			RestoreGUIDisplay ();
-			WinBardigunDialog (GUI.hWnd);
-			RestoreSNESDisplay ();
-			break;
-		case ID_INPUT_BARDIGUN_RESCAN:
-		{
-			std::string code = S9xSGBBardigunLastCode ();
-			if (!Settings.StopEmulation && S9xSGBBardigunGame () && WinLinkScannerPortFree ("Bardigun Card Reader") &&
-			    S9xSGBBardigunScan (code.c_str ()))
-				WinBardigunScanned ();
+			const S9xBarcodeReader reader = S9xBarcodeReaderFor(!Settings.StopEmulation);
+			const std::string code = S9xBarcodeReaderLastCode(reader);
+			if (S9xBarcodeReaderGameReads(reader) && WinBarcodePortFree(reader) &&
+			    S9xBarcodeReaderScan(reader, code.c_str()))
+				WinBarcodeScanned(reader);
 			break;
 		}
 
@@ -4327,6 +4338,7 @@ LRESULT CALLBACK WinProc(
 		if (!s_menu_filter_hook)
 			s_menu_filter_hook = SetWindowsHookEx (WH_MSGFILTER, MenuKeepOpenFilter,
 			                                       NULL, GetCurrentThreadId ());
+		s_barcodes_hmenu = MenuPopupWith (GUI.hMenu, ID_INPUT_BARCODE_CONNECT);
 		S9xSetPause (PAUSE_MENU);
 		CheckMenuStates ();
 		HookDipMenu(Settings.NSS);
@@ -6120,7 +6132,6 @@ static void WinEmulateFrame (void)
 		// its frame now, one at a time, while this one is parked.
 		GBSeatMachinesTurn ();
 		WinKissLinkPoll ();
-		WinLinkScannersPoll ();
 
 		// BIOS-mode sessions: the seats stepped inside the frame,
 		// slaved to the SNES clock, so their pads are collected once
@@ -7213,49 +7224,18 @@ static void WinKissLinkPoll ()
 	S9xSetInfoString (msg);
 }
 
-// Input > Barcode Boy and Bardigun Card Reader plug into player 1's link
-// port, so they need one free.
-static bool WinLinkScannerPortFree (const char *device)
+// Input > Barcodes: a Game Boy reader plugs into player 1's link port, so it
+// needs one free.
+static bool WinBarcodePortFree (S9xBarcodeReader reader)
 {
-	char msg[160];
-	if (!S9xSGBBarcodeBoyHasPort ())
-	{
-		snprintf (msg, sizeof (msg), "%s: the Super Game Boy (SGB1) has no link port - pick Super Game Boy 2 in Emulation > Game Boy Model", device);
-		S9xSetInfoString (msg);
-		return false;
-	}
-	if (S9xSGBLinkIsEnabled () || S9xSGBSplitActive ())
-	{
-		snprintf (msg, sizeof (msg), "%s: a Game Boy Link session holds the link port", device);
-		S9xSetInfoString (msg);
-		return false;
-	}
-	return true;
-}
-
-// Once per frame: a game under the SGB1 leaves a scanner nowhere to plug in,
-// and a card taken whole gets its line.
-static void WinLinkScannersPoll ()
-{
-	static unsigned seen = 0, seenBardigun = 0;
-	if (S9xSGBBarcodeBoyConnected () && !S9xSGBBarcodeBoyHasPort ())
-	{
-		S9xSGBBarcodeBoyConnect (false);
-		S9xSetInfoString ("Barcode Boy disconnected: the Super Game Boy (SGB1) has no link port");
-	}
-	if (S9xSGBBardigunConnected () && !S9xSGBBarcodeBoyHasPort ())
-	{
-		S9xSGBBardigunConnect (false);
-		S9xSetInfoString ("Bardigun Card Reader disconnected: the Super Game Boy (SGB1) has no link port");
-	}
-	const unsigned reads = S9xSGBBarcodeBoyReadCount ();
-	if (reads > seen && S9xSGBBarcodeBoyConnected ())
-		S9xSetInfoString ("Barcode Boy: card read");
-	seen = reads;
-	const unsigned bardigunReads = S9xSGBBardigunReadCount ();
-	if (bardigunReads > seenBardigun && S9xSGBBardigunConnected ())
-		S9xSetInfoString ("Bardigun Card Reader: card read");
-	seenBardigun = bardigunReads;
+	const char *busy = S9xBarcodeReaderPortBusy (reader);
+	if (!busy)
+		return true;
+	char msg[192];
+	snprintf (msg, sizeof (msg), "%s: %s%s", S9xBarcodeReaderName (reader), busy,
+	          S9xSGBBarcodeBoyHasPort () ? "" : " - pick Super Game Boy 2 in Emulation > Game Boy Model");
+	S9xSetInfoString (msg);
+	return false;
 }
 
 // Game Boy Link > Infra-Red for a game in Game Boy Color mode (never under a Super
@@ -8283,38 +8263,17 @@ static void CheckMenuStates ()
     mii.fState = validFlag | (GUI.ControllerOption == SNES_MACSRIFLE ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_MACSRIFLE_TOGGLE, FALSE, &mii);
 
-	// The Barcode Battler II is a SNES device: greyed while a Game Boy game runs.
-	const bool gbRunning = !Settings.StopEmulation && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
-	mii.fState = (gbRunning ? MFS_DISABLED : MFS_ENABLED) | (S9xBarcodeBattlerConnected() ? MFS_CHECKED : MFS_UNCHECKED);
+	// Input > Barcodes: Connect with any game loaded, Scan for a game that
+	// reads its system's reader.
+	const S9xBarcodeReader barcodeReader = S9xBarcodeReaderFor(!Settings.StopEmulation);
+	mii.fState = (barcodeReader != S9X_BARCODE_NONE ? MFS_ENABLED : MFS_DISABLED) |
+	             (S9xBarcodeReaderConnected() ? MFS_CHECKED : MFS_UNCHECKED);
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_CONNECT, FALSE, &mii);
-	const bool barcodeGame = !Settings.StopEmulation && S9xBarcodeBattlerGameSupported();
+	const bool barcodeGame = S9xBarcodeReaderGameReads(barcodeReader);
 	mii.fState = barcodeGame ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_SCAN, FALSE, &mii);
-	mii.fState = (barcodeGame && *S9xBarcodeBattlerLastCode()) ? MFS_ENABLED : MFS_DISABLED;
+	mii.fState = (barcodeGame && *S9xBarcodeReaderLastCode(barcodeReader)) ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_RESCAN, FALSE, &mii);
-
-	// The Barcode Boy is a Game Boy device: greyed while a SNES game runs.
-	const bool snesRunning = !Settings.StopEmulation && !gbRunning;
-	mii.fState = (snesRunning ? MFS_DISABLED : MFS_ENABLED) | (S9xSGBBarcodeBoyConnected () ? MFS_CHECKED : MFS_UNCHECKED);
-	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODEBOY_CONNECT, FALSE, &mii);
-	const bool barcodeBoyGame = !Settings.StopEmulation &&
-	                            (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
-	                            S9xSGBBarcodeBoyGame () != NULL;
-	mii.fState = barcodeBoyGame ? MFS_ENABLED : MFS_DISABLED;
-	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODEBOY_SCAN, FALSE, &mii);
-	mii.fState = (barcodeBoyGame && *S9xSGBBarcodeBoyLastCode ()) ? MFS_ENABLED : MFS_DISABLED;
-	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODEBOY_RESCAN, FALSE, &mii);
-
-	// The Bardigun Card Reader too.
-	mii.fState = (snesRunning ? MFS_DISABLED : MFS_ENABLED) | (S9xSGBBardigunConnected () ? MFS_CHECKED : MFS_UNCHECKED);
-	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARDIGUN_CONNECT, FALSE, &mii);
-	const bool bardigunGame = !Settings.StopEmulation &&
-	                          (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) &&
-	                          S9xSGBBardigunGame () != NULL;
-	mii.fState = bardigunGame ? MFS_ENABLED : MFS_DISABLED;
-	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARDIGUN_SCAN, FALSE, &mii);
-	mii.fState = (bardigunGame && *S9xSGBBardigunLastCode ()) ? MFS_ENABLED : MFS_DISABLED;
-	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARDIGUN_RESCAN, FALSE, &mii);
 
 	mii.fState = !Settings.StopEmulation ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_FILE_AVI_RECORDING, FALSE, &mii);

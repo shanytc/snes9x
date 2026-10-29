@@ -59,11 +59,6 @@ const BarcodeBoyCard *BarcodeBoyCards(int *count);
 // The game a cart header title belongs to ("Battle Space", ...), or nullptr.
 const char *BarcodeBoyGame(const char *title);
 
-// Looks for an EAN-13 barcode (a UPC-A reads as one with a leading zero) in an
-// 8-bit greyscale picture, across rows and columns and both ways up. On success
-// writes the 13 digits, NUL-terminated, into out[14].
-bool BarcodeBoyDecode(const uint8_t *luma, int width, int height, int stride, char out[14]);
-
 } // namespace SGB
 
 #endif

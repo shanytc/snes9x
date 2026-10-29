@@ -129,6 +129,10 @@ static const char *shortcut_names[] =
     "SFCBoxMountEject1",
     "SFCBoxMountEject2",
     "SFCBoxPowerOff",
+    // Input -> Barcodes, named as win32's [Keys] entries.
+    "BarcodeConnect",
+    "BarcodeScan",
+    "BarcodeRescan",
 };
 
 static const char *default_controller_keys[] =
@@ -237,7 +241,10 @@ static const char *default_controller_keys[] =
     "", //    SFC-Box GAME/TV Switch
     "", //    SFC-Box Mount/Eject Slot 1
     "", //    SFC-Box Mount/Eject Slot 2
-    ""  //    SFC-Box Keyswitch Power OFF
+    "", //    SFC-Box Keyswitch Power OFF
+    "", //    Barcodes: Connect
+    "", //    Barcodes: Scan Barcode
+    ""  //    Barcodes: Use Last Barcode Again
 };
 
 static_assert(std::size(shortcut_names) == EmuConfig::num_shortcuts &&

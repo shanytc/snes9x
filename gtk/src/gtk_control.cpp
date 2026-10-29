@@ -167,6 +167,9 @@ const BindingLink b_links[] =
         { "b_sfcbox_mount_0",      "GTK_sfcbox_mount_0" },
         { "b_sfcbox_mount_1",      "GTK_sfcbox_mount_1" },
         { "b_sfcbox_power_off",    "GTK_sfcbox_power_off" },
+        { "b_barcode_connect",     "GTK_barcode_0"     },
+        { "b_barcode_scan",        "GTK_barcode_1"     },
+        { "b_barcode_rescan",      "GTK_barcode_2"     },
 
         { nullptr, nullptr }
 };
@@ -187,7 +190,8 @@ const int b_breaks[] =
         85, /* End of save/load states */
         94, /* End of sound buttons */
         110, /* End of miscellaneous buttons */
-        NUM_JOYPAD_LINKS + NUM_EMU_LINKS, /* End of arcade front panels */
+        NUM_JOYPAD_LINKS + NUM_EMU_LINKS - 3, /* End of arcade front panels */
+        NUM_JOYPAD_LINKS + NUM_EMU_LINKS, /* End of barcodes */
         -1
 };
 
@@ -778,6 +782,10 @@ void S9xHandlePortCommand(s9xcommand_t cmd, int16 data1, int16 data2)
         {
             top_level->sfcbox_set_keyswitch(5);   // the menu's Power OFF entry
         }
+        else if (cmd.port[0] >= PORT_BARCODE0 && cmd.port[0] < PORT_BARCODE0 + 3)
+        {
+            top_level->barcode_shortcut(cmd.port[0] - PORT_BARCODE0);
+        }
         else if (cmd.port[0] == PORT_NSS_COIN2)
         {
             top_level->insert_coin(1);
@@ -969,6 +977,10 @@ s9xcommand_t S9xGetPortCommandT(const char *name)
     else if (!strcasecmp(name, "GTK_sfcbox_power_off"))
     {
         cmd.port[0] = PORT_SFCBOX_POWER_OFF;
+    }
+    else if (!strncasecmp(name, "GTK_barcode_", 12))
+    {
+        cmd.port[0] = PORT_BARCODE0 + (name[12] - '0');
     }
     else if (!strncasecmp(name, "GTK_sfcbox_mount_", 17))
     {

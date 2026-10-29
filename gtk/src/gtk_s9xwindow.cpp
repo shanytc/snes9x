@@ -740,16 +740,7 @@ void Snes9xWindow::connect_signals()
         return !busy;
     };
 
-    get_object<Gtk::Menu>("barcodes_menu")->signal_show().connect([this] {
-        const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
-        const bool reads = S9xBarcodeReaderGameReads(reader);
-        syncing_menu = true;
-        get_object<Gtk::CheckMenuItem>("barcodes_connect_item")->set_active(S9xBarcodeReaderConnected());
-        syncing_menu = false;
-        enable_widget("barcodes_connect_item", reader != S9X_BARCODE_NONE);
-        enable_widget("barcodes_scan_item", reads);
-        enable_widget("barcodes_rescan_item", reads && *S9xBarcodeReaderLastCode(reader) != 0);
-    });
+    get_object<Gtk::Menu>("barcodes_menu")->signal_show().connect([this] { update_barcode_menu(); });
 
     auto barcodes_connect = get_object<Gtk::CheckMenuItem>("barcodes_connect_item");
     barcodes_connect->signal_toggled().connect([this, barcodes_connect, barcode_port_free] {
@@ -1905,6 +1896,37 @@ void Snes9xWindow::refresh_nss_dips()
 
 // A disc game can't run on without its disc: eject through the Reset item,
 // so the BIOS reboots to its home screen and reports the open tray.
+void Snes9xWindow::update_barcode_menu()
+{
+    const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
+    const bool reads = S9xBarcodeReaderGameReads(reader);
+    syncing_menu = true;
+    get_object<Gtk::CheckMenuItem>("barcodes_connect_item")->set_active(S9xBarcodeReaderConnected());
+    syncing_menu = false;
+    enable_widget("barcodes_connect_item", reader != S9X_BARCODE_NONE);
+    enable_widget("barcodes_scan_item", reads);
+    enable_widget("barcodes_rescan_item", reads && *S9xBarcodeReaderLastCode(reader) != 0);
+}
+
+void Snes9xWindow::barcode_shortcut(int which)
+{
+    static const char *items[3] = { "barcodes_connect_item", "barcodes_scan_item", "barcodes_rescan_item" };
+    if (which < 0 || which >= 3)
+        return;
+
+    update_barcode_menu();
+    auto item = get_object<Gtk::MenuItem>(items[which]);
+    if (!item->get_sensitive())
+        return;
+    if (which == 0)
+    {
+        auto check = get_object<Gtk::CheckMenuItem>(items[0]);
+        check->set_active(!check->get_active());
+    }
+    else
+        item->activate();
+}
+
 void Snes9xWindow::eject_superdisc()
 {
     if (Settings.SuperDisc && S9xSuperDiscHasDisc())

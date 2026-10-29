@@ -252,13 +252,14 @@ void S9xWinScanJoypads();
 #define WM_GBLINK_PAUSE (WM_APP + 3)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 8;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 9;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
 constexpr int HOTKEY_TAB_TURBO      = 2;
 constexpr int HOTKEY_TAB_DISPLAY    = 3;
 constexpr int HOTKEY_TAB_GBMODEL    = 5;
+constexpr int HOTKEY_TAB_BARCODES   = 8;
 
 #ifdef UNICODE
 #define S9XW_SHARD_PATH SHARD_PATHW
@@ -1591,6 +1592,21 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				hitHotKey = true;
 				if (LinkHotkeyPressEdge (wParam))
 					WinGBLinkHotkey (linkWhat);
+			}
+		}
+		{
+			// Input -> Barcodes, through its menu items so a greyed one stays
+			// greyed for its key. Once per press: a repeat would flip Connect
+			// back, reopen the dialog or hand the card over again.
+			UINT barcodeCommand = 0;
+			if      (HKmatch(BarcodeConnect)) barcodeCommand = ID_INPUT_BARCODE_CONNECT;
+			else if (HKmatch(BarcodeScan))    barcodeCommand = ID_INPUT_BARCODE_SCAN;
+			else if (HKmatch(BarcodeRescan))  barcodeCommand = ID_INPUT_BARCODE_RESCAN;
+			if (barcodeCommand)
+			{
+				hitHotKey = true;
+				if (LinkHotkeyPressEdge (wParam))
+					PostMenuCommand (barcodeCommand);
 			}
 		}
 		for (int ksp = 0; ksp < 5; ksp++)
@@ -21869,6 +21885,17 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") },
     },
+    // Tab 8: Input -> Barcodes, for the reader the loaded game's system takes.
+    {
+        { &CustomKeys.BarcodeConnect,   &CustomKeysExtra.BarcodeConnect,   HOTKEYS_BARCODE_CONNECT },
+        { &CustomKeys.BarcodeScan,      &CustomKeysExtra.BarcodeScan,      HOTKEYS_BARCODE_SCAN },
+        { &CustomKeys.BarcodeRescan,    &CustomKeysExtra.BarcodeRescan,    HOTKEYS_BARCODE_RESCAN },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -21946,15 +21973,16 @@ static const int g_hotkeyLabelIds[MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
 	IDC_LABEL_HK13, IDC_LABEL_HK14, IDC_LABEL_HK15, IDC_LABEL_HK16, IDC_LABEL_HK17, IDC_LABEL_HK18,
 };
 
-// The slots' columns, in dialog units: snes9x.rc's, except on the Game Boy tab,
-// whose model labels need a wider left column (its link labels fit a narrower
-// right one). Only x and width move; the rows keep StackHotkeyTabs' shift.
+// The slots' columns, in dialog units: snes9x.rc's, except on the Game Boy and
+// Barcodes tabs, whose labels need a wider left column (the Game Boy link
+// labels fit a narrower right one). Only x and width move; the rows keep
+// StackHotkeyTabs' shift.
 static void LayoutHotkeyColumns(HWND hDlg, int tab)
 {
 	struct Column { int labelX, labelW, keyX; };
 	static const Column rc[2] = { { 10, 72, 86 }, { 155, 122, 281 } };
 	static const Column gb[2] = { { 10, 132, 146 }, { 210, 80, 294 } };
-	const Column *cols = tab == HOTKEY_TAB_GBMODEL ? gb : rc;
+	const Column *cols = (tab == HOTKEY_TAB_GBMODEL || tab == HOTKEY_TAB_BARCODES) ? gb : rc;
 	const int rows = MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS / 2;
 
 	for (int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)
@@ -22113,7 +22141,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy"), TEXT("Super System"), TEXT("Super Disc")
+				TEXT("SFC Box"), TEXT("Game Boy"), TEXT("Super System"), TEXT("Super Disc"), TEXT("Barcodes")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

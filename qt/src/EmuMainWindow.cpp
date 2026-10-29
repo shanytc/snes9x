@@ -1025,6 +1025,27 @@ void EmuMainWindow::nssToggleDip(int sw)
     refreshNSSDips();
 }
 
+void EmuMainWindow::updateBarcodeActions()
+{
+    const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+    const bool reads = S9xBarcodeReaderGameReads(reader);
+    barcode_connect_action->setChecked(S9xBarcodeReaderConnected());
+    barcode_connect_action->setEnabled(reader != S9X_BARCODE_NONE);
+    barcode_scan_action->setEnabled(reads);
+    barcode_rescan_action->setEnabled(reads && *S9xBarcodeReaderLastCode(reader));
+}
+
+void EmuMainWindow::barcodeShortcut(const std::string &name)
+{
+    updateBarcodeActions();
+    QAction *action = name == "BarcodeConnect" ? barcode_connect_action
+                    : name == "BarcodeScan"    ? barcode_scan_action
+                    : name == "BarcodeRescan"  ? barcode_rescan_action
+                                               : nullptr;
+    if (action && action->isEnabled())
+        action->trigger();
+}
+
 bool EmuMainWindow::arcadeShortcut(const std::string &name)
 {
     static const char *keyswitch_keys[5] = {
@@ -1862,9 +1883,9 @@ void EmuMainWindow::createWidgets()
         S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) + ": " +
                           (card ? card->name : S9xBarcodeReaderLastCode(reader)) + " scanned").c_str());
     };
-    auto barcode_connect_action = barcode_menu->addAction(tr("&Connect"));
+    barcode_connect_action = barcode_menu->addAction(tr("&Connect"));
     barcode_connect_action->setCheckable(true);
-    QObject::connect(barcode_connect_action, &QAction::triggered, [this, barcode_connect_action, barcode_port_free](bool checked) {
+    QObject::connect(barcode_connect_action, &QAction::triggered, [this, barcode_port_free](bool checked) {
         const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
         if (reader == S9X_BARCODE_NONE || (checked && !barcode_port_free(reader)))
         {
@@ -1875,7 +1896,7 @@ void EmuMainWindow::createWidgets()
         S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) +
                           (checked ? std::string(" connected to ") + S9xBarcodeReaderPort(reader) : " disconnected")).c_str());
     });
-    auto barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
+    barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
     QObject::connect(barcode_scan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
         const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
         if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader))
@@ -1886,20 +1907,13 @@ void EmuMainWindow::createWidgets()
             scan_barcode(reader, dialog.code());
         app.unpause();
     });
-    auto barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
+    barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
     QObject::connect(barcode_rescan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
         const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
         if (S9xBarcodeReaderGameReads(reader) && barcode_port_free(reader))
             scan_barcode(reader, S9xBarcodeReaderLastCode(reader));
     });
-    QObject::connect(barcode_menu, &QMenu::aboutToShow, [this, barcode_connect_action, barcode_scan_action, barcode_rescan_action] {
-        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
-        const bool reads = S9xBarcodeReaderGameReads(reader);
-        barcode_connect_action->setChecked(S9xBarcodeReaderConnected());
-        barcode_connect_action->setEnabled(reader != S9X_BARCODE_NONE);
-        barcode_scan_action->setEnabled(reads);
-        barcode_rescan_action->setEnabled(reads && *S9xBarcodeReaderLastCode(reader));
-    });
+    QObject::connect(barcode_menu, &QMenu::aboutToShow, this, &EmuMainWindow::updateBarcodeActions);
 
     QObject::connect(input_menu, &QMenu::aboutToShow, [&] {
         updatePortConfigurationMenu();

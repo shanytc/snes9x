@@ -390,6 +390,9 @@ int GetNumHotKeysAssignedTo (WORD Key, int modifiers)
 		if(MATCHES_KEY(LinkOtherGame))     count++;
 		if(MATCHES_KEY(LinkSplitToggle))   count++;
 		if(MATCHES_KEY(LinkEnd))           count++;
+		if(MATCHES_KEY(BarcodeConnect))    count++;
+		if(MATCHES_KEY(BarcodeScan))       count++;
+		if(MATCHES_KEY(BarcodeRescan))     count++;
 
 		#undef MATCHES_KEY
 	}

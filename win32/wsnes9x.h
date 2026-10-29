@@ -584,6 +584,9 @@ struct SCustomKeys {
 	SCustomKey LinkOtherGame;
 	SCustomKey LinkSplitToggle;
 	SCustomKey LinkEnd;
+	SCustomKey BarcodeConnect;       // Input -> Barcodes
+	SCustomKey BarcodeScan;
+	SCustomKey BarcodeRescan;
 };
 
 struct SCustomKeyExtra {
@@ -664,6 +667,9 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra LinkOtherGame;
 	SCustomKeyExtra LinkSplitToggle;
 	SCustomKeyExtra LinkEnd;
+	SCustomKeyExtra BarcodeConnect;
+	SCustomKeyExtra BarcodeScan;
+	SCustomKeyExtra BarcodeRescan;
 };
 
 struct SJoypad {

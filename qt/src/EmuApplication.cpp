@@ -811,6 +811,10 @@ void EmuApplication::handleBinding(const std::string &name, bool pressed)
     {
         window->superDiscEject();
     }
+    else if (pressed && name.compare(0, 7, "Barcode") == 0)
+    {
+        window->barcodeShortcut(name);
+    }
     else if (pressed && name.compare(0, 7, "GBModel") == 0)
     {
         // Same route as the menu entry, gates included.

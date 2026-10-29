@@ -566,6 +566,21 @@
        <string>SFC-Box Keyswitch: Power OFF</string>
       </property>
      </row>
+     <row>
+      <property name="text">
+       <string>Barcodes: Connect</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>Barcodes: Scan Barcode</string>
+      </property>
+     </row>
+     <row>
+      <property name="text">
+       <string>Barcodes: Use Last Barcode Again</string>
+      </property>
+     </row>
      <column>
       <property name="text">
        <string>Binding #1</string>

@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QActionGroup>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDateTimeEdit>
 #include <QDialog>
@@ -379,6 +380,21 @@ void EmuMainWindow::openRtcSettings()
     note->setWordWrap(true);
     layout->addWidget(note);
 
+    auto huc3_label = new QLabel(tr("&HuC-3 clock format (Robopon, Pocket Family):"));
+    // By size; the item data is the format's number in the config.
+    auto huc3 = new QComboBox;
+    huc3->addItem(tr("17 bytes (BGB compatible)"), 1);
+    huc3->addItem(tr("24 bytes (VBA compatible)"), 0);
+    huc3->addItem(tr("136 bytes (mGBA compatible)"), 2);
+    huc3->setCurrentIndex(std::max(0, huc3->findData(app.config->gb_rtc_huc3_format)));
+    huc3_label->setBuddy(huc3);
+    layout->addWidget(huc3_label);
+    layout->addWidget(huc3);
+    auto huc3_note = new QLabel(tr("Any of these loads here. Each emulator reads only its own: "
+                                   "BGB and mGBA then keep just the RAM, and VBA won't load the save."));
+    huc3_note->setWordWrap(true);
+    layout->addWidget(huc3_note);
+
     auto buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -396,6 +412,8 @@ void EmuMainWindow::openRtcSettings()
     app.config->gb_rtc_time = secs > 0 ? (uint32_t)secs : 0;
     Settings.GBRTCOff  = app.config->gb_rtc_off;
     Settings.GBRTCTime = app.config->gb_rtc_time;
+    app.config->gb_rtc_huc3_format = huc3->currentData().toInt();
+    Settings.GBRTCHuC3Format = (uint8)app.config->gb_rtc_huc3_format;
     S9xSetInfoString(Settings.GBRTCOff ? "RTC off: the picked date and time stand in for the PC's clock"
                                        : "RTC on: the PC's clock");
 }

@@ -94,14 +94,20 @@ bool CartLoadBattery(Cart &c);
 // An MBC3 cart with its RTC, a HuC3 or a TAMA5: a clock the battery save carries.
 bool CartHasClock(const Cart &c);
 
+// A HuC3 clock's block, as Settings.GBRTCHuC3Format numbers them: VBA-M's 24
+// bytes, BGB/SameBoy's 17 or mGBA's 136. Loads take any of them by size.
+enum class Huc3RtcFormat : uint8_t { VBA = 0, BGB = 1, MGBA = 2 };
+
 // Where the clock goes and what "now" is. The clock follows the RAM in the
-// .sav (MBC3: BGB/VBA-M's 48 bytes, 44 also read; HuC3: SameBoy's 17; TAMA5:
-// mGBA's 40), or sits in a .rtc beside it. `now` (Unix seconds, -1 = the PC's
-// clock) is written with it, and on load the clock runs forward by the time since.
+// .sav (MBC3: BGB/VBA-M's 48 bytes, 44 also read; HuC3: as `huc3` picks;
+// TAMA5: mGBA's 40), or sits in a .rtc beside it. `now` (Unix seconds, -1 =
+// the PC's clock) is written with it, and on load the clock runs forward by
+// the time since.
 struct CartRtcOptions
 {
-	bool    separate = false;
-	int64_t now      = -1;
+	bool          separate = false;
+	Huc3RtcFormat huc3     = Huc3RtcFormat::VBA;
+	int64_t       now      = -1;
 };
 
 bool CartSaveBatteryToPath(const Cart &c, const char *path, const CartRtcOptions &rtc = CartRtcOptions());

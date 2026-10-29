@@ -439,6 +439,7 @@ bool EmuConfig::setDefaults(int section)
         gb_rtc_separate = false;
         gb_rtc_off = false;
         gb_rtc_time = 0;
+        gb_rtc_huc3_format = 0;
         for (auto &p : bios_paths) p.clear();
         for (int &m : chip_modes) m = S9X_CHIP_AUTO;
         nss_dip_switches = 0x0c;
@@ -824,6 +825,9 @@ void EmuConfig::config(const std::string &filename, bool write)
         if (!write)
             gb_rtc_time = (uint32_t)strtoul(t.c_str(), nullptr, 10);
     }
+    Int("RTCHuC3Format", gb_rtc_huc3_format, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA compatible), 1 = 17 bytes (BGB compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
+    if (gb_rtc_huc3_format < 0 || gb_rtc_huc3_format > 2)
+        gb_rtc_huc3_format = 0;
     EndSection();
 
     // Explicit BIOS file paths; empty means that BIOS is unavailable.

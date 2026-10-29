@@ -257,6 +257,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.GBRTCSeparate = config->gb_rtc_separate;
     Settings.GBRTCOff      = config->gb_rtc_off;
     Settings.GBRTCTime     = config->gb_rtc_time;
+    Settings.GBRTCHuC3Format = (uint8)config->gb_rtc_huc3_format;
 
     for (int i = 0; i < S9X_NUM_BIOS_SLOTS; i++)
     {

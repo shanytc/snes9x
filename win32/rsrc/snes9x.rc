@@ -171,7 +171,7 @@ BEGIN
 END
 
 // Date pickers: 0x20 = DTS_RIGHTALIGN, 0x09 = DTS_TIMEFORMAT (with DTS_UPDOWN).
-IDD_GB_RTC DIALOGEX 0, 0, 228, 132
+IDD_GB_RTC DIALOGEX 0, 0, 228, 186
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "RTC Settings"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
@@ -183,8 +183,11 @@ BEGIN
     LTEXT           "&Time",IDC_GBRTC_TIME_LABEL,114,33,90,8
     CONTROL         "",IDC_GBRTC_TIME,"SysDateTimePick32",0x29 | WS_TABSTOP,114,44,70,14
     LTEXT           "With the RTC off, this date and time stand in for the PC's clock: the game's clock runs only while it plays, and moving the date forward runs it forward the next time the game loads.",IDC_STATIC,7,74,214,34
-    DEFPUSHBUTTON   "OK",IDOK,117,112,50,14
-    PUSHBUTTON      "Cancel",IDCANCEL,171,112,50,14
+    LTEXT           "&HuC-3 clock format (Robopon, Pocket Family):",IDC_GBRTC_HUC3_LABEL,7,114,214,8
+    COMBOBOX        IDC_GBRTC_HUC3,7,125,214,40,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Any of these loads here. Each emulator reads only its own: BGB and mGBA then keep just the RAM, and VBA won't load the save.",IDC_STATIC,7,143,214,18
+    DEFPUSHBUTTON   "OK",IDOK,117,166,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,171,166,50,14
 END
 
 IDD_OPEN_ROM DIALOGEX 0, 0, 430, 223

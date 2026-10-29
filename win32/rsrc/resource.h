@@ -702,6 +702,8 @@
 #define IDC_GBRTC_TIME                  3724
 #define IDC_GBRTC_DATE_LABEL            3725
 #define IDC_GBRTC_TIME_LABEL            3726
+#define IDC_GBRTC_HUC3                  3727
+#define IDC_GBRTC_HUC3_LABEL            3728
 #define ID_TESTS_ACIDTESTS          44349
 #define ID_FILE_BIOSMANAGER             44369
 #define IDD_BIOSMANAGER                 191
@@ -1037,7 +1039,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        202
 #define _APS_NEXT_COMMAND_VALUE         44457
-#define _APS_NEXT_CONTROL_VALUE         3713
+#define _APS_NEXT_CONTROL_VALUE         3729
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

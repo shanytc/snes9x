@@ -3292,6 +3292,26 @@ void Snes9xWindow::open_rtc_settings()
     note->set_halign(Gtk::ALIGN_START);
     vbox->pack_start(*note, Gtk::PACK_SHRINK);
 
+    auto huc3_label = Gtk::manage(new Gtk::Label(_("_HuC-3 clock format (Robopon, Pocket Family):"), true));
+    huc3_label->set_halign(Gtk::ALIGN_START);
+    // By size; the id is the format's number in Settings.GBRTCHuC3Format.
+    auto huc3 = Gtk::manage(new Gtk::ComboBoxText);
+    huc3->append("1", _("17 bytes (BGB compatible)"));
+    huc3->append("0", _("24 bytes (VBA compatible)"));
+    huc3->append("2", _("136 bytes (mGBA compatible)"));
+    if (!huc3->set_active_id(std::to_string(Settings.GBRTCHuC3Format)))
+        huc3->set_active_id("0");
+    huc3_label->set_mnemonic_widget(*huc3);
+    vbox->pack_start(*huc3_label, Gtk::PACK_SHRINK);
+    vbox->pack_start(*huc3, Gtk::PACK_SHRINK);
+    auto huc3_note = Gtk::manage(new Gtk::Label(
+        _("Any of these loads here. Each emulator reads only its own: "
+          "BGB and mGBA then keep just the RAM, and VBA won't load the save.")));
+    huc3_note->set_line_wrap(true);
+    huc3_note->set_max_width_chars(50);
+    huc3_note->set_halign(Gtk::ALIGN_START);
+    vbox->pack_start(*huc3_note, Gtk::PACK_SHRINK);
+
     // The pickers only matter with the RTC off.
     auto sync_sensitive = [on_check, frame] {
         frame->set_sensitive(!on_check->get_active());
@@ -3322,6 +3342,7 @@ void Snes9xWindow::open_rtc_settings()
 
         Settings.GBRTCOff  = !on_check->get_active();
         Settings.GBRTCTime = secs > 0 ? (uint32)secs : 0;
+        Settings.GBRTCHuC3Format = (uint8)std::stoi(huc3->get_active_id().raw());
         S9xSetInfoString(Settings.GBRTCOff ? _("RTC off: the picked date and time stand in for the PC's clock")
                                            : _("RTC on: the PC's clock"));
     }

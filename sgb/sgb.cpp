@@ -1266,6 +1266,8 @@ static CartRtcOptions RtcOptionsFromSettings()
 {
 	CartRtcOptions o;
 	o.separate = Settings.GBRTCSeparate != 0;
+	if (Settings.GBRTCHuC3Format <= 2)
+		o.huc3 = static_cast<Huc3RtcFormat>(Settings.GBRTCHuC3Format);
 	if (Settings.GBRTCOff && Settings.GBRTCTime)
 		o.now = static_cast<int64_t>(Settings.GBRTCTime);
 	return o;

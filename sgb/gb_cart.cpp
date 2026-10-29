@@ -725,11 +725,16 @@ namespace {
 
 // BGB's MBC3 block (bgb.bircd.org/rtcsave.html): ten little-endian dwords,
 // the counters then the latched copy, and a 64-bit Unix time. Old VBA wrote
-// a 32-bit time (44 bytes). SameBoy's HuC3 block: the 64-bit time, minutes,
-// days, alarm minutes, alarm days (16-bit each) and the alarm switch. mGBA's
-// TAMA5 block: the TAMA6's four pages (timer, alarm, two RAM), 16 nibbles
-// each packed low first, then the 64-bit Unix time.
-constexpr size_t kMbc3Rtc = 48, kMbc3RtcOld = 44, kHuc3Rtc = 17, kTama5Rtc = 40;
+// a 32-bit time (44 bytes). VBA-M's HuC3 block: the 64-bit Unix time the
+// clock read day 0 0:00, then dwords day << 12 | minute latched and written,
+// read mode and nibble shift; it reads no other size. BGB and SameBoy's: the
+// time, then 16-bit minutes, days, alarm minutes and days, and the alarm
+// switch; BGB keeps the RAM of VBA-M's but not its clock. mGBA's HuC3 block:
+// the chip's 256 register nibbles packed low first, then the 64-bit Unix time
+// they were read at. mGBA's TAMA5 block: the TAMA6's four pages (timer, alarm,
+// two RAM), 16 nibbles each packed low first, then the 64-bit Unix time.
+constexpr size_t kMbc3Rtc = 48, kMbc3RtcOld = 44, kHuc3Rtc = 24, kHuc3RtcSameBoy = 17, kHuc3RtcMgba = 136,
+                 kTama5Rtc = 40, kRtcMax = 136;
 // Before 1997 there were no RTC carts: an older time isn't clock data.
 constexpr int64_t kRtcEpochFloor = 852076800;
 
@@ -750,10 +755,30 @@ uint64_t Get(const uint8_t *p, int bytes)
 	return v;
 }
 
-size_t RtcEncode(const Cart &c, int64_t now, uint8_t out[kMbc3Rtc])
+size_t RtcEncode(const Cart &c, int64_t now, Huc3RtcFormat huc3, uint8_t out[kRtcMax])
 {
 	const MbcState &s = c.mbc;
-	if (s.type == MbcType::HuC3)
+	if (s.type == MbcType::HuC3 && huc3 == Huc3RtcFormat::MGBA)
+	{
+		// The clock at $10 (mGBA's 12-bit days) and its read copy at $00,
+		// where register 6 holds the top day nibble as our clock reads it;
+		// the alarm at $58. The time is less the part-minute, as BGB's.
+		uint8_t nib[256] = {};
+		const uint16_t minutes = MbcHuc3Minutes(s), days = MbcHuc3Days(s);
+		for (int k = 0; k < 3; ++k)
+		{
+			nib[0x00 + k] = nib[0x10 + k] = (minutes >> (4 * k)) & 0x0F;
+			nib[0x03 + k] = nib[0x13 + k] = (days >> (4 * k)) & 0x0F;
+			nib[0x58 + k] = (c.huc3_alarm_minutes >> (4 * k)) & 0x0F;
+		}
+		nib[0x06] = days >> 12;
+		for (int k = 0; k < 4; ++k) nib[0x5B + k] = (c.huc3_alarm_days >> (4 * k)) & 0x0F;
+		nib[0x5F] = c.huc3_alarm_on ? 1 : 0;
+		for (int i = 0; i < 128; ++i) out[i] = static_cast<uint8_t>(nib[i * 2] | (nib[i * 2 + 1] << 4));
+		Put(out + 128, static_cast<uint64_t>(now - s.rtc_sub_cycles / 4194304), 8);
+		return kHuc3RtcMgba;
+	}
+	if (s.type == MbcType::HuC3 && huc3 == Huc3RtcFormat::BGB)
 	{
 		// The part-minute counted so far moves the time back, so the next
 		// load's catch-up keeps the minute boundaries where they were.
@@ -763,6 +788,20 @@ size_t RtcEncode(const Cart &c, int64_t now, uint8_t out[kMbc3Rtc])
 		Put(out + 12, c.huc3_alarm_minutes, 2);
 		Put(out + 14, c.huc3_alarm_days, 2);
 		out[16] = c.huc3_alarm_on ? 1 : 0;
+		return kHuc3RtcSameBoy;
+	}
+	if (s.type == MbcType::HuC3)
+	{
+		// The part-minute counted so far moves the start back too. The written
+		// dword keeps all 16 day bits (VBA-M reads 12), so start + clock tells
+		// a load when the save was. The write-only alarm doesn't go in.
+		const uint16_t minutes = MbcHuc3Minutes(s), days = MbcHuc3Days(s);
+		const int64_t  start   = now - s.rtc_sub_cycles / 4194304 - days * int64_t(86400) - minutes * int64_t(60);
+		Put(out, static_cast<uint64_t>(start), 8);
+		Put(out + 8, ((days & 0xFFFu) << 12) | minutes, 4);
+		Put(out + 12, (uint32_t(days) << 12) | minutes, 4);
+		Put(out + 16, 1, 4);
+		Put(out + 20, 0, 4);
 		return kHuc3Rtc;
 	}
 	if (s.type == MbcType::TAMA5)
@@ -796,10 +835,59 @@ size_t RtcEncode(const Cart &c, int64_t now, uint8_t out[kMbc3Rtc])
 bool RtcDecode(Cart &c, const uint8_t *in, size_t n, int64_t now)
 {
 	MbcState &s = c.mbc;
-	int64_t   saved;
-	if (s.type == MbcType::HuC3)
+	int64_t   saved, oldest = kRtcEpochFloor;
+	if (s.type == MbcType::HuC3 && (n == kHuc3Rtc || n == kHuc3Rtc - 4))
 	{
-		if (n != kHuc3Rtc) return false;
+		// VBA-M's clock reads now - start, which may lie before 1997. It
+		// takes 20 bytes too (old 32-bit builds), the same fields cut short.
+		const int64_t  start   = static_cast<int64_t>(Get(in, 8));
+		const uint32_t latched = static_cast<uint32_t>(Get(in + 8, 4));
+		const uint32_t written = static_cast<uint32_t>(Get(in + 12, 4));
+		// Ours repeats the latched clock in the written dword, all 16 day bits.
+		const uint32_t clock   = (written & 0xFFFFFF) == latched ? written : latched;
+		const uint16_t minutes = clock & 0xFFF, days = static_cast<uint16_t>(clock >> 12);
+		// When the clock last read that (ours: the save, less the part-minute).
+		const int64_t  stamp   = static_cast<int64_t>(static_cast<uint64_t>(start) + days * 86400ull + minutes * 60ull);
+		c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
+		c.huc3_alarm_on = false;
+		oldest = INT64_MIN;
+		if (minutes >= 60 * 24 || stamp > now)
+		{
+			// Past the day's end (VBA-M's clock can't hold that), or the PC's
+			// clock moved back since: as last read, run forward from then.
+			MbcHuc3SetClock(s, minutes, days);
+			saved = stamp;
+		}
+		else
+		{
+			// The day count wraps at 16 bits, so any start further back reads
+			// the same as one within the wrap.
+			MbcHuc3SetClock(s, 0, 0);
+			saved = now - static_cast<int64_t>((static_cast<uint64_t>(now) - static_cast<uint64_t>(start)) % (65536ull * 86400));
+		}
+	}
+	else if (s.type == MbcType::HuC3 && n == kHuc3RtcMgba)
+	{
+		uint8_t nib[256];
+		for (int i = 0; i < 128; ++i)
+		{
+			nib[i * 2]     = in[i] & 0x0F;
+			nib[i * 2 + 1] = static_cast<uint8_t>(in[i] >> 4);
+		}
+		auto field = [&](int at, int count) {
+			uint16_t v = 0;
+			for (int k = 0; k < count; ++k) v = static_cast<uint16_t>(v | (nib[at + k] << (4 * k)));
+			return v;
+		};
+		MbcHuc3SetClock(s, field(0x10, 3), static_cast<uint16_t>(field(0x13, 3) | (nib[0x06] << 12)));
+		c.huc3_alarm_minutes = field(0x58, 3);
+		c.huc3_alarm_days    = field(0x5B, 4);
+		c.huc3_alarm_on      = (nib[0x5F] & 1) != 0;
+		saved = static_cast<int64_t>(Get(in + 128, 8));
+	}
+	else if (s.type == MbcType::HuC3)
+	{
+		if (n != kHuc3RtcSameBoy) return false;
 		saved = static_cast<int64_t>(Get(in, 8));
 		MbcHuc3SetClock(s, static_cast<uint16_t>(Get(in + 8, 2)), static_cast<uint16_t>(Get(in + 10, 2)));
 		c.huc3_alarm_minutes = static_cast<uint16_t>(Get(in + 12, 2));
@@ -838,7 +926,7 @@ bool RtcDecode(Cart &c, const uint8_t *in, size_t n, int64_t now)
 	s.rtc_sub_cycles = 0;
 	// A time in the future (or the "can't tell" $7FFFFFFF7FFFFFFF) or before
 	// any RTC cart existed runs nothing forward.
-	if (saved >= kRtcEpochFloor && saved <= now)
+	if (saved >= oldest && saved <= now)
 		MbcRtcAdvance(s, now - saved);
 	return true;
 }
@@ -888,8 +976,8 @@ bool CartSaveBatteryToPath(const Cart &c, const char *path, const CartRtcOptions
 	const bool clock = CartHasClock(c);
 	if (!c.has_battery || (c.sram.empty() && !clock) || !path || !*path) return false;
 
-	uint8_t block[kMbc3Rtc];
-	const size_t n = clock ? RtcEncode(c, RtcNow(rtc), block) : 0;
+	uint8_t block[kRtcMax];
+	const size_t n = clock ? RtcEncode(c, RtcNow(rtc), rtc.huc3, block) : 0;
 	if (!clock || !rtc.separate)
 		return WriteWhole(path, c.sram.data(), c.sram.size(), block, n);
 

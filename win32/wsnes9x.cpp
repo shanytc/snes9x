@@ -254,9 +254,8 @@ void S9xWinScanJoypads();
 #define WM_GBLINK_PAUSE (WM_APP + 3)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 9;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 8;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
-constexpr int HOTKEY_TAB_LINK   = 8;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
 constexpr int HOTKEY_TAB_TURBO      = 2;
@@ -21805,18 +21804,23 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
-    // Tab 5: Emulation -> Game Boy Model. Each one picks the console the menu
-    // entry picks, reloading the cart on it; the order matches the menu's.
+    // Tab 5: Game Boy. Left column, Emulation -> Game Boy Model: each picks the
+    // console the menu entry picks, reloading the cart on it (the menu's order).
+    // Right column, Emulation -> Game Boy Link: the session controls.
     {
         { &CustomKeys.GBModel[0], &CustomKeysExtra.GBModel[0], HOTKEYS_GBMODEL_GB },
         { &CustomKeys.GBModel[1], &CustomKeysExtra.GBModel[1], HOTKEYS_GBMODEL_GBC },
         { &CustomKeys.GBModel[2], &CustomKeysExtra.GBModel[2], HOTKEYS_GBMODEL_SGB },
         { &CustomKeys.GBModel[3], &CustomKeysExtra.GBModel[3], HOTKEYS_GBMODEL_SGB2 },
         { &CustomKeys.GBModel[4], &CustomKeysExtra.GBModel[4], HOTKEYS_GBMODEL_SGBC },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { &CustomKeys.Link2P,          &CustomKeysExtra.Link2P,          HOTKEYS_LINK_2P },
+        { &CustomKeys.Link3P,          &CustomKeysExtra.Link3P,          HOTKEYS_LINK_3P },
+        { &CustomKeys.Link4P,          &CustomKeysExtra.Link4P,          HOTKEYS_LINK_4P },
+        { &CustomKeys.LinkSplitToggle, &CustomKeysExtra.LinkSplitToggle, HOTKEYS_LINK_SPLIT },
+        { &CustomKeys.LinkOtherGame,   &CustomKeysExtra.LinkOtherGame,   HOTKEYS_LINK_OTHER },
+        { &CustomKeys.LinkEnd,         &CustomKeysExtra.LinkEnd,         HOTKEYS_LINK_END },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
     // Tab 6: Emulation -> Nintendo Super System, the arcade front panel. The
@@ -21854,19 +21858,6 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") },
-    },
-    // Tab 8: Game Boy Link - the menu's session controls as keys.
-    {
-        { &CustomKeys.Link2P,          &CustomKeysExtra.Link2P,          HOTKEYS_LINK_2P },
-        { &CustomKeys.Link3P,          &CustomKeysExtra.Link3P,          HOTKEYS_LINK_3P },
-        { &CustomKeys.Link4P,          &CustomKeysExtra.Link4P,          HOTKEYS_LINK_4P },
-        { &CustomKeys.LinkSplitToggle, &CustomKeysExtra.LinkSplitToggle, HOTKEYS_LINK_SPLIT },
-        { &CustomKeys.LinkOtherGame,   &CustomKeysExtra.LinkOtherGame,   HOTKEYS_LINK_OTHER },
-        { &CustomKeys.LinkEnd,         &CustomKeysExtra.LinkEnd,         HOTKEYS_LINK_END },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
-        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
     },
 };
 
@@ -22076,8 +22067,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc"),
-				TEXT("Game Boy Link")
+				TEXT("SFC Box"), TEXT("Game Boy"), TEXT("Super System"), TEXT("Super Disc")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

@@ -611,7 +611,7 @@ BEGIN
 
     // Tab content: 2 columns x 9 rows of generic switchable slots.
     // Column 1: label x=10..82, control x=86..146
-    // Column 2: label x=205..277, control x=281..341
+    // Column 2: label x=155..277 (right-aligned; room for long names), control x=281..341
     RTEXT           "",IDC_LABEL_HK1,10,52,72,10
     RTEXT           "",IDC_LABEL_HK2,10,66,72,10
     RTEXT           "",IDC_LABEL_HK3,10,80,72,10
@@ -621,15 +621,15 @@ BEGIN
     RTEXT           "",IDC_LABEL_HK7,10,136,72,10
     RTEXT           "",IDC_LABEL_HK8,10,150,72,10
     RTEXT           "",IDC_LABEL_HK9,10,164,72,10
-    RTEXT           "",IDC_LABEL_HK10,205,52,72,10
-    RTEXT           "",IDC_LABEL_HK11,205,66,72,10
-    RTEXT           "",IDC_LABEL_HK12,205,80,72,10
-    RTEXT           "",IDC_LABEL_HK13,205,94,72,10
-    RTEXT           "",IDC_LABEL_HK14,205,108,72,10
-    RTEXT           "",IDC_LABEL_HK15,205,122,72,10
-    RTEXT           "",IDC_LABEL_HK16,205,136,72,10
-    RTEXT           "",IDC_LABEL_HK17,205,150,72,10
-    RTEXT           "",IDC_LABEL_HK18,205,164,72,10
+    RTEXT           "",IDC_LABEL_HK10,155,52,122,10
+    RTEXT           "",IDC_LABEL_HK11,155,66,122,10
+    RTEXT           "",IDC_LABEL_HK12,155,80,122,10
+    RTEXT           "",IDC_LABEL_HK13,155,94,122,10
+    RTEXT           "",IDC_LABEL_HK14,155,108,122,10
+    RTEXT           "",IDC_LABEL_HK15,155,122,122,10
+    RTEXT           "",IDC_LABEL_HK16,155,136,122,10
+    RTEXT           "",IDC_LABEL_HK17,155,150,122,10
+    RTEXT           "",IDC_LABEL_HK18,155,164,122,10
     CONTROL         "",IDC_HOTKEY1,"InputCustomHot",WS_TABSTOP,86,52,60,12
     CONTROL         "",IDC_HOTKEY2,"InputCustomHot",WS_TABSTOP,86,66,60,12
     CONTROL         "",IDC_HOTKEY3,"InputCustomHot",WS_TABSTOP,86,80,60,12

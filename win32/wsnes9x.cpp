@@ -22169,15 +22169,15 @@ static const int g_hotkeyLabelIds[MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
 	IDC_LABEL_HK13, IDC_LABEL_HK14, IDC_LABEL_HK15, IDC_LABEL_HK16, IDC_LABEL_HK17, IDC_LABEL_HK18,
 };
 
-// The slots' columns, in dialog units: snes9x.rc's, except on the Barcodes
-// tab, whose labels need a wider left column. Only x and width move; the rows
-// keep StackHotkeyTabs' shift.
+// The slots' columns, in dialog units: snes9x.rc's, except on the Game Boy tab,
+// whose model labels need a wider left column (its link labels fit a narrower
+// right one). Only x and width move; the rows keep StackHotkeyTabs' shift.
 static void LayoutHotkeyColumns(HWND hDlg, int tab)
 {
 	struct Column { int labelX, labelW, keyX; };
-	static const Column rc[2] = { { 10, 72, 86 }, { 205, 72, 281 } };
-	static const Column wide[2] = { { 10, 132, 146 }, { 210, 80, 294 } };
-	const Column *cols = tab == HOTKEY_TAB_BARCODES ? wide : rc;
+	static const Column rc[2] = { { 10, 72, 86 }, { 155, 122, 281 } };
+	static const Column gb[2] = { { 10, 132, 146 }, { 210, 80, 294 } };
+	const Column *cols = tab == HOTKEY_TAB_GBMODEL ? gb : rc;
 	const int rows = MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS / 2;
 
 	for (int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)

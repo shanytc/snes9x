@@ -449,6 +449,9 @@
     <ClCompile Include="..\barcodebattler.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>
+    <ClCompile Include="..\barcodereaders.cpp">
+      <Filter>s9x-source</Filter>
+    </ClCompile>
     <ClCompile Include="..\voicekun.cpp">
       <Filter>s9x-source</Filter>
     </ClCompile>

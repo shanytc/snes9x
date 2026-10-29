@@ -10,7 +10,7 @@ win32/Screenshots
 win32/Movies
 win32/SPCs
 win32/BIOS
-win32/barcodes
+win32/battler
 wind32/libpng/src
 .claude/
 *.smc
@@ -528,3 +528,4 @@ Bios/
 tools/
 external/libco/
 xband/
+win32/barcodeboy

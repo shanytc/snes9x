@@ -111,7 +111,7 @@
     <ClInclude Include="wlanguage.h">
       <Filter>GUI</Filter>
     </ClInclude>
-    <ClInclude Include="wbarcodeboy.h">
+    <ClInclude Include="wbarcodes.h">
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="wlocale.h">
@@ -336,6 +336,9 @@
     <ClInclude Include="..\barcodebattler.h">
       <Filter>Emu</Filter>
     </ClInclude>
+    <ClInclude Include="..\barcodereaders.h">
+      <Filter>Emu</Filter>
+    </ClInclude>
     <ClInclude Include="..\barcodebattler_cards.h">
       <Filter>Emu</Filter>
     </ClInclude>
@@ -532,9 +535,6 @@
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="CGBSpriteViewerDlg.h">
-      <Filter>GUI</Filter>
-    </ClInclude>
-    <ClInclude Include="wbarcodebattler.h">
       <Filter>GUI</Filter>
     </ClInclude>
     <ClInclude Include="gb_viewer_common.h">
@@ -770,7 +770,7 @@
     <ClCompile Include="wconfig.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
-    <ClCompile Include="wbarcodeboy.cpp">
+    <ClCompile Include="wbarcodes.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="wlocale.cpp">
@@ -998,6 +998,9 @@
     <ClCompile Include="..\barcodebattler.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
+    <ClCompile Include="..\barcodereaders.cpp">
+      <Filter>Emu</Filter>
+    </ClCompile>
     <ClCompile Include="..\voicekun.cpp">
       <Filter>APU</Filter>
     </ClCompile>
@@ -1158,9 +1161,6 @@
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="CGBSpriteViewerDlg.cpp">
-      <Filter>GUI</Filter>
-    </ClCompile>
-    <ClCompile Include="wbarcodebattler.cpp">
       <Filter>GUI</Filter>
     </ClCompile>
     <ClCompile Include="AcidTestsDlg.cpp">

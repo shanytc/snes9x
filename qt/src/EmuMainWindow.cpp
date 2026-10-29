@@ -1591,7 +1591,7 @@ void EmuMainWindow::createWidgets()
     bios_menu_action->setVisible(false);
     connect(emulation_menu, &QMenu::aboutToShow, this, &EmuMainWindow::refreshBiosMenu);
 
-    // Emulation > RTC: where an MBC3/HuC3 cart's clock is saved and what clock
+    // Emulation > RTC: where an MBC3/HuC3/TAMA5 cart's clock is saved and what clock
     // it follows. Only offered while such a cart is loaded.
     rtc_menu = new QMenu(tr("R&TC"));
     auto rtc_group = new QActionGroup(this);

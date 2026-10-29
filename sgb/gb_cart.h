@@ -65,6 +65,9 @@ struct Cart
 	uint16_t              huc3_alarm_minutes = 0;
 	uint16_t              huc3_alarm_days    = 0;
 	bool                  huc3_alarm_on      = false;
+	// TAMA5's TAMA6 alarm page and two RAM pages (the timer page is in
+	// MbcState). Like the HuC3 alarm, only the battery save carries them.
+	uint8_t               tama6_pages[3][13] = {};
 	// Scrambled-unlicensed mapper state (BBD/Sintax/VF etc.), v7 savestates.
 	MbcUnl                unl;
 	// Vast Fame "A" boards seed the protection running value with $10.
@@ -88,13 +91,13 @@ void CartUnload(Cart &c);
 bool CartSaveBattery(const Cart &c);
 bool CartLoadBattery(Cart &c);
 
-// An MBC3 cart with its RTC, or a HuC3: a clock the battery save carries.
+// An MBC3 cart with its RTC, a HuC3 or a TAMA5: a clock the battery save carries.
 bool CartHasClock(const Cart &c);
 
 // Where the clock goes and what "now" is. The clock follows the RAM in the
-// .sav (MBC3: BGB/VBA-M's 48 bytes, 44 also read; HuC3: SameBoy's 17), or
-// sits in a .rtc beside it. `now` (Unix seconds, -1 = the PC's clock) is
-// written with it, and on load the clock runs forward by the time since.
+// .sav (MBC3: BGB/VBA-M's 48 bytes, 44 also read; HuC3: SameBoy's 17; TAMA5:
+// mGBA's 40), or sits in a .rtc beside it. `now` (Unix seconds, -1 = the PC's
+// clock) is written with it, and on load the clock runs forward by the time since.
 struct CartRtcOptions
 {
 	bool    separate = false;

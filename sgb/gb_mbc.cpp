@@ -78,6 +78,11 @@ namespace SGB {
 //   sachen_outer_mask = packed address byte (ADDR_HI << 4 | ADDR_LO);
 //                       low 5 bits = RAM/command address, top 3 bits = op mode
 //   rtc_regs[0..4] + rtc_latched[0..1] = TAMA6 BCD timer page, one nibble each
+//   rtc_latched[2] = 12-hour mode (the alarm page's 24-hour bit inverted, so
+//                    older states read 24-hour), rtc_latched[3] = leap-year
+//                    counter (0 = leap), rtc_latched[4] bit 2 = alarm on (the
+//                    alarm-page bits the timer needs; the rest is in the Cart)
+//   rtc_latch      = timer running, rtc_sub_cycles = toward the next second
 namespace {
 
 inline void Tama5SetRtcNib(MbcState &s, uint8_t idx, uint8_t nib)
@@ -97,25 +102,85 @@ inline uint8_t Tama5RtcNib(const MbcState &s, uint8_t idx)
 	                 : static_cast<uint8_t>(cell & 0x0F);
 }
 
-inline void Tama5SeedRtc(MbcState &s)
+// TC8521 bits per register (mGBA's masks): timer page, then alarm page.
+constexpr uint8_t kTama6TimerMask[13] = { 0xF, 0x7, 0xF, 0x7, 0xF, 0x3, 0x7, 0xF, 0x3, 0xF, 0x1, 0xF, 0xF };
+constexpr uint8_t kTama6AlarmMask[13] = { 0x0, 0x0, 0xF, 0x7, 0xF, 0x3, 0x7, 0xF, 0x3, 0x0, 0x1, 0x3, 0x0 };
+
+inline void Tama6Put2(MbcState &s, uint8_t lo, int v)
 {
-	std::time_t t = std::time(nullptr);
-	const std::tm *lt = std::localtime(&t);
-	if (!lt) return;
-	auto put2 = [&](uint8_t lo, int v) {
-		Tama5SetRtcNib(s, lo, static_cast<uint8_t>(v % 10));
-		Tama5SetRtcNib(s, static_cast<uint8_t>(lo + 1), static_cast<uint8_t>((v / 10) % 10));
-	};
-	put2(0x0, lt->tm_sec);
-	put2(0x2, lt->tm_min);
-	put2(0x4, lt->tm_hour);
-	Tama5SetRtcNib(s, 0x6, static_cast<uint8_t>(lt->tm_wday));
-	put2(0x7, lt->tm_mday);
-	put2(0x9, lt->tm_mon + 1);
-	put2(0xB, lt->tm_year % 100);
+	Tama5SetRtcNib(s, lo, static_cast<uint8_t>(v % 10));
+	Tama5SetRtcNib(s, static_cast<uint8_t>(lo + 1), static_cast<uint8_t>((v / 10) % 10));
+}
+
+inline int Tama6Get2(const MbcState &s, uint8_t lo)
+{
+	return Tama5RtcNib(s, lo) + 10 * Tama5RtcNib(s, static_cast<uint8_t>(lo + 1));
+}
+
+// Run the timer page forward: BCD seconds to years, the PM bit in 12-hour
+// mode, the weekday, and the leap counter stepping with the year.
+void Tama6Advance(MbcState &s, int64_t secs)
+{
+	if (secs <= 0) return;
+	const bool    h24 = (s.rtc_latched[2] & 1) == 0;
+	const uint8_t h10 = Tama5RtcNib(s, 0x5);
+	const int hour = h24 ? Tama6Get2(s, 0x4) : Tama5RtcNib(s, 0x4) + 10 * (h10 & 1) + ((h10 & 2) ? 12 : 0);
+	const int64_t t = Tama6Get2(s, 0x0) + 60 * (Tama6Get2(s, 0x2) + 60 * static_cast<int64_t>(hour)) + secs;
+	int64_t   days = t / 86400;
+	const int rem  = static_cast<int>(t % 86400);
+	const int h    = rem / 3600;
+	Tama6Put2(s, 0x0, rem % 60);
+	Tama6Put2(s, 0x2, rem / 60 % 60);
+	if (h24)
+		Tama6Put2(s, 0x4, h);
+	else
+	{
+		Tama5SetRtcNib(s, 0x4, static_cast<uint8_t>(h % 12 % 10));
+		Tama5SetRtcNib(s, 0x5, static_cast<uint8_t>(h % 12 / 10 | (h >= 12 ? 2 : 0)));
+	}
+	if (days == 0) return;
+
+	Tama5SetRtcNib(s, 0x6, static_cast<uint8_t>((Tama5RtcNib(s, 0x6) + days) % 7));
+	static const uint8_t kLen[13] = { 31, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+	int     day = Tama6Get2(s, 0x7), month = Tama6Get2(s, 0x9), years = 0;
+	uint8_t leap = s.rtc_latched[3] & 3;
+	while (days > 0)
+	{
+		const int len = (month == 2 && leap == 0) ? 29 : kLen[month <= 12 ? month : 0];
+		if (day + days <= len) { day += static_cast<int>(days); break; }
+		days -= len - day + 1;
+		day = 1;
+		if (++month > 12) { month = 1; ++years; leap = (leap + 1) & 3; }
+	}
+	Tama6Put2(s, 0x7, day);
+	Tama6Put2(s, 0x9, month);
+	// The year digits change only when the year does (games park $F0 there).
+	if (years) Tama6Put2(s, 0xB, (Tama6Get2(s, 0xB) + years) % 100);
+	s.rtc_latched[3] = leap;
 }
 
 } // anonymous
+
+uint8_t MbcTama6Reg(const MbcState &s, uint8_t reg)           { return Tama5RtcNib(s, reg); }
+void    MbcTama6SetReg(MbcState &s, uint8_t reg, uint8_t nib) { Tama5SetRtcNib(s, reg, nib); }
+
+void MbcTama6Seed(MbcState &s, int64_t unix_time)
+{
+	const std::time_t t = static_cast<std::time_t>(unix_time);
+	const std::tm *lt = std::localtime(&t);
+	if (!lt) return;
+	Tama6Put2(s, 0x0, lt->tm_sec);
+	Tama6Put2(s, 0x2, lt->tm_min);
+	Tama6Put2(s, 0x4, lt->tm_hour);
+	Tama5SetRtcNib(s, 0x6, static_cast<uint8_t>(lt->tm_wday));
+	Tama6Put2(s, 0x7, lt->tm_mday);
+	Tama6Put2(s, 0x9, lt->tm_mon + 1);
+	Tama6Put2(s, 0xB, lt->tm_year % 100);
+	s.rtc_latched[2] = 0;                                         // 24-hour
+	s.rtc_latched[3] = static_cast<uint8_t>(lt->tm_year % 4);     // 0 = leap year
+	s.rtc_latch      = true;
+	s.rtc_sub_cycles = 0;
+}
 
 void MbcReset(MbcState &s)
 {
@@ -127,13 +192,13 @@ void MbcReset(MbcState &s)
 	// enabled. (Cart type is assigned before MbcReset runs.)
 	s.ram_enable = (s.type == MbcType::HuC1);
 	s.mbc1_mode  = false;
-	s.rtc_latch  = false;
+	if (s.type != MbcType::TAMA5) s.rtc_latch = false;   // TAMA5: the timer's run bit
 	s.rtc_select = 0;
-	// MBC3 and HuC3 clocks run off the cart's own crystal and battery, so a
-	// console reset leaves their counters alone; CartLoad starts a cart clean.
+	// MBC3, HuC3 and TAMA5 clocks run off the cart's own crystal and battery,
+	// so a console reset leaves their counters alone; CartLoad starts a cart clean.
 	if (s.type == MbcType::HuC3)
 		s.rtc_regs[0] = s.rtc_regs[1] = s.rtc_regs[2] = 0;   // pointer, argument, response
-	else if (s.type != MbcType::MBC3)
+	else if (s.type != MbcType::MBC3 && s.type != MbcType::TAMA5)
 		for (int i = 0; i < 5; ++i) { s.rtc_regs[i] = 0; s.rtc_latched[i] = 0; }
 	s.sachen_outer_bank = 0;
 	s.sachen_outer_mask = 0;
@@ -154,7 +219,6 @@ void MbcReset(MbcState &s)
 	s.mmm01_just_locked       = false;
 
 	if (s.type == MbcType::M161) s.rom_bank = 0;   // power-on page 0 = menu
-	if (s.type == MbcType::TAMA5) Tama5SeedRtc(s);
 	if (s.type == MbcType::MBC7)
 	{
 		s.rtc_regs[1] = 0xFF;
@@ -241,6 +305,17 @@ void MbcTickRtc(MbcState &s, int32_t tcycles)
 		}
 		return;
 	}
+	if (s.type == MbcType::TAMA5)
+	{
+		if (!s.rtc_latch) return;
+		s.rtc_sub_cycles += tcycles;
+		while (s.rtc_sub_cycles >= kRtcSecond)
+		{
+			s.rtc_sub_cycles -= kRtcSecond;
+			Tama6Advance(s, 1);
+		}
+		return;
+	}
 	if (s.type != MbcType::MBC3) return;
 	if (s.rtc_regs[4] & 0x40) return;   // halt bit freezes the oscillator
 	s.rtc_sub_cycles += tcycles;
@@ -273,6 +348,11 @@ void MbcRtcAdvance(MbcState &s, int64_t seconds)
 		minutes %= 60 * 24;
 		MbcHuc3SetClock(s, static_cast<uint16_t>(minutes), static_cast<uint16_t>(days));
 		s.rtc_sub_cycles = static_cast<int32_t>(total % 60) * kRtcSecond;
+		return;
+	}
+	if (s.type == MbcType::TAMA5)
+	{
+		if (s.rtc_latch) Tama6Advance(s, seconds);
 		return;
 	}
 
@@ -615,19 +695,38 @@ inline void Tama5Trigger(Cart &c)
 			switch (addr5)
 			{
 				case 0x0: s.rtc_latch = false; break;
-				case 0x1: s.rtc_latch = true;  break;
+				case 0x1:   // start the timer; the seconds restart from 0 (mGBA)
+					s.rtc_latch      = true;
+					s.rtc_sub_cycles = 0;
+					Tama5SetRtcNib(s, 0x0, 0);
+					Tama5SetRtcNib(s, 0x1, 0);
+					break;
 				case 0x4: Tama5SetRtcNib(s, 0x2, data & 0x0F); Tama5SetRtcNib(s, 0x3, static_cast<uint8_t>(data >> 4)); break;
 				case 0x5: Tama5SetRtcNib(s, 0x4, data & 0x0F); Tama5SetRtcNib(s, 0x5, static_cast<uint8_t>(data >> 4)); break;
+				case 0x10: s.rtc_latched[4] &= ~0x04; break;   // alarm off
+				case 0x11: s.rtc_latched[4] |= 0x04;  break;   // alarm on
 				default: break;
 			}
 			break;
 		case 0x4:
-			if ((s.sachen_outer_mask & 0x0F) == 0x0)
+		{
+			// Low nibble = register, high = value; ADDR_LO picks the page.
+			const uint8_t reg = static_cast<uint8_t>(data & 0x0F), nib = static_cast<uint8_t>(data >> 4);
+			if (reg >= 0x0D) break;
+			switch (s.sachen_outer_mask & 0x0F)
 			{
-				const uint8_t idx = static_cast<uint8_t>(data & 0x0F);
-				if (idx < 0x0D) Tama5SetRtcNib(s, idx, static_cast<uint8_t>(data >> 4));
+				case 0x0: Tama5SetRtcNib(s, reg, nib & kTama6TimerMask[reg]); break;
+				case 0x2:
+					c.tama6_pages[0][reg] = nib & kTama6AlarmMask[reg];
+					if (reg == 0xA) s.rtc_latched[2] = (nib & 1) ? 0 : 1;      // 24-hour bit -> 12-hour mode
+					if (reg == 0xB) s.rtc_latched[3] = c.tama6_pages[0][reg];   // leap counter
+					break;
+				case 0x4: c.tama6_pages[1][reg] = nib; break;
+				case 0x6: c.tama6_pages[2][reg] = nib; break;
+				default: break;
 			}
 			break;
+		}
 		default:
 			break;
 	}
@@ -1092,7 +1191,9 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 				else if (mode == 0x4)
 				{
 					const uint8_t idx = static_cast<uint8_t>(s.sachen_outer_bank & 0x0F);
-					value = (idx < 0x0D) ? Tama5RtcNib(s, idx) : 0;
+					value = (idx < 0x0D)  ? Tama5RtcNib(s, idx)
+					      : (idx == 0x0D) ? static_cast<uint8_t>((s.rtc_latch ? 0x08 : 0) | (s.rtc_latched[4] & 0x04))
+					      :                 0;
 				}
 				if (s.rtc_select == 0x0D) value = static_cast<uint8_t>(value >> 4);
 				return static_cast<uint8_t>(value | 0xF0);

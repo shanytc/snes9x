@@ -253,7 +253,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
     Settings.GB_BIOSEnabled = config->gb_bios_enabled;
     Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(config->gb_boot_policy);
 
-    // MBC3/HuC3 clocks: where they're saved and what clock they follow.
+    // MBC3/HuC3/TAMA5 clocks: where they're saved and what clock they follow.
     Settings.GBRTCSeparate = config->gb_rtc_separate;
     Settings.GBRTCOff      = config->gb_rtc_off;
     Settings.GBRTCTime     = config->gb_rtc_time;

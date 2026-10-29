@@ -370,7 +370,7 @@ void Snes9xWindow::connect_signals()
         });
     }
 
-    // Emulation -> RTC: where an MBC3/HuC3 cart's clock is saved. The clock
+    // Emulation -> RTC: where an MBC3/HuC3/TAMA5 cart's clock is saved. The clock
     // moves to its new place with the next battery save.
     auto rtc_toggle = [this](const char *name, bool separate) {
         auto item = get_object<Gtk::RadioMenuItem>(name);
@@ -2729,7 +2729,7 @@ void Snes9xWindow::configure_widgets()
         refreshing_bios_menu = false;
     }
 
-    // Emulation -> RTC: only for a cart with a clock (MBC3, MBC30, HuC3).
+    // Emulation -> RTC: only for a cart with a clock (MBC3, MBC30, HuC3, TAMA5).
     const bool rtc_cart = gb_loaded && S9xSGBCartHasClock();
     show_widget("rtc_item", rtc_cart);
     if (rtc_cart)

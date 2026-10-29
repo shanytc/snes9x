@@ -428,10 +428,11 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	if (size < 0x0150 || data == nullptr) return false;
 
 	c.rom.assign(data, data + size);
-	// A console reset keeps an MBC3/HuC3 clock running; a new cart starts clean.
+	// A console reset keeps an MBC3/HuC3/TAMA5 clock running; a new cart starts clean.
 	c.mbc = MbcState();
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
+	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 
 	// ----- Header parse -----
 	CartHeader &h = c.header;
@@ -646,6 +647,9 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	}
 	MbcReset(c.mbc);
 	MbcUnlReset(c);
+	// A TAMA5 clock with no save behind it follows the PC's (the load path
+	// reseeds it from the RTC settings).
+	if (c.mbc.type == MbcType::TAMA5) MbcTama6Seed(c.mbc, static_cast<int64_t>(time(nullptr)));
 
 	// ----- Cart RAM allocation -----
 	// Initialize fresh SRAM to $FF. Real hardware SRAM cells with no
@@ -705,6 +709,7 @@ void CartUnload(Cart &c)
 	c.mbc = MbcState();
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
+	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 	c.unl = MbcUnl();
 	c.vf_alt_board = false;
 	c.vf_zook = false;
@@ -712,7 +717,8 @@ void CartUnload(Cart &c)
 
 bool CartHasClock(const Cart &c)
 {
-	return (c.mbc.type == MbcType::MBC3 && c.has_rtc) || c.mbc.type == MbcType::HuC3;
+	return (c.mbc.type == MbcType::MBC3 && c.has_rtc) || c.mbc.type == MbcType::HuC3 ||
+	       c.mbc.type == MbcType::TAMA5;
 }
 
 namespace {
@@ -720,8 +726,10 @@ namespace {
 // BGB's MBC3 block (bgb.bircd.org/rtcsave.html): ten little-endian dwords,
 // the counters then the latched copy, and a 64-bit Unix time. Old VBA wrote
 // a 32-bit time (44 bytes). SameBoy's HuC3 block: the 64-bit time, minutes,
-// days, alarm minutes, alarm days (16-bit each) and the alarm switch.
-constexpr size_t kMbc3Rtc = 48, kMbc3RtcOld = 44, kHuc3Rtc = 17;
+// days, alarm minutes, alarm days (16-bit each) and the alarm switch. mGBA's
+// TAMA5 block: the TAMA6's four pages (timer, alarm, two RAM), 16 nibbles
+// each packed low first, then the 64-bit Unix time.
+constexpr size_t kMbc3Rtc = 48, kMbc3RtcOld = 44, kHuc3Rtc = 17, kTama5Rtc = 40;
 // Before 1997 there were no RTC carts: an older time isn't clock data.
 constexpr int64_t kRtcEpochFloor = 852076800;
 
@@ -757,6 +765,23 @@ size_t RtcEncode(const Cart &c, int64_t now, uint8_t out[kMbc3Rtc])
 		out[16] = c.huc3_alarm_on ? 1 : 0;
 		return kHuc3Rtc;
 	}
+	if (s.type == MbcType::TAMA5)
+	{
+		uint8_t pg[4][16] = {};
+		for (uint8_t r = 0; r < 13; ++r) pg[0][r] = MbcTama6Reg(s, r);
+		for (int p = 0; p < 3; ++p) std::memcpy(pg[p + 1], c.tama6_pages[p], 13);
+		pg[1][0xA] = (s.rtc_latched[2] & 1) ? 0 : 1;   // 24-hour
+		pg[1][0xB] = s.rtc_latched[3] & 3;   // leap counter
+		// The page register: run and alarm bits, then the page number.
+		const uint8_t page = static_cast<uint8_t>((s.rtc_latch ? 0x08 : 0) | (s.rtc_latched[4] & 0x04));
+		for (int p = 0; p < 4; ++p)
+		{
+			pg[p][0xD] = static_cast<uint8_t>(page | p);
+			for (int i = 0; i < 8; ++i) out[p * 8 + i] = static_cast<uint8_t>(pg[p][i * 2] | (pg[p][i * 2 + 1] << 4));
+		}
+		Put(out + 32, static_cast<uint64_t>(now), 8);
+		return kTama5Rtc;
+	}
 	std::memset(out, 0, kMbc3Rtc);
 	for (int i = 0; i < 5; ++i)
 	{
@@ -780,6 +805,24 @@ bool RtcDecode(Cart &c, const uint8_t *in, size_t n, int64_t now)
 		c.huc3_alarm_minutes = static_cast<uint16_t>(Get(in + 12, 2));
 		c.huc3_alarm_days    = static_cast<uint16_t>(Get(in + 14, 2));
 		c.huc3_alarm_on      = (in[16] & 1) != 0;
+	}
+	else if (s.type == MbcType::TAMA5)
+	{
+		if (n != kTama5Rtc) return false;
+		uint8_t pg[4][16];
+		for (int p = 0; p < 4; ++p)
+			for (int i = 0; i < 8; ++i)
+			{
+				pg[p][i * 2]     = in[p * 8 + i] & 0x0F;
+				pg[p][i * 2 + 1] = static_cast<uint8_t>(in[p * 8 + i] >> 4);
+			}
+		for (uint8_t r = 0; r < 13; ++r) MbcTama6SetReg(s, r, pg[0][r]);
+		for (int p = 0; p < 3; ++p) std::memcpy(c.tama6_pages[p], pg[p + 1], 13);
+		s.rtc_latched[2] = (pg[1][0xA] & 1) ? 0 : 1;   // 12-hour mode
+		s.rtc_latched[3] = pg[1][0xB] & 3;
+		s.rtc_latched[4] = pg[0][0xD] & 0x04;
+		s.rtc_latch      = (pg[0][0xD] & 0x08) != 0;
+		saved = static_cast<int64_t>(Get(in + 32, 8));
 	}
 	else
 	{
@@ -879,6 +922,9 @@ bool CartLoadBatteryFromPath(Cart &c, const char *path, const CartRtcOptions &rt
 		got = (have_rtc && RtcDecode(c, file.data(), file.size(), now)) || (tail && RtcDecode(c, tail, tail_n, now));
 	else
 		got = (tail && RtcDecode(c, tail, tail_n, now)) || (have_rtc && RtcDecode(c, file.data(), file.size(), now));
+	// No TAMA5 clock on disk (a new cart, or a save from before it was kept):
+	// it starts at "now", the PC's clock or the picked time.
+	if (!got && c.mbc.type == MbcType::TAMA5) MbcTama6Seed(c.mbc, now);
 	return ok || (want == 0 && got);
 }
 

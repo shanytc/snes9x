@@ -3603,7 +3603,7 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			break;
-		// Emulation > RTC: an MBC3/HuC3 clock after the RAM in the .sav or in a
+		// Emulation > RTC: an MBC3/HuC3/TAMA5 clock after the RAM in the .sav or in a
 		// .rtc beside it; it moves there with the next battery save.
 		case ID_EMULATION_GB_RTC_SAV:
 		case ID_EMULATION_GB_RTC_FILE:

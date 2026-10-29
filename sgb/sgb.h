@@ -661,6 +661,9 @@ bool S9xSGBHasBattery(void);
 bool S9xSGBSaveBatteryToPath(const char *path);
 bool S9xSGBLoadBatteryFromPath(const char *path);
 bool S9xSGBTakeSramDirty(void);
+// The loaded cart keeps a clock (MBC3 with its RTC, HuC3 or TAMA5). The battery
+// save carries it; Settings.GBRTCSeparate / GBRTCOff / GBRTCTime shape how.
+bool S9xSGBCartHasClock(void);
 
 // Raw cart battery-RAM pointer + size, for hosts that persist save RAM via a
 // memory-region API (e.g. libretro's RETRO_MEMORY_SAVE_RAM). nullptr / 0 when

@@ -1256,19 +1256,31 @@ bool Emulator::HasROM() const { return impl_->has_rom; }
 
 bool Emulator::HasBattery() const
 {
-	return impl_->has_rom && impl_->cart.has_battery && !impl_->cart.sram.empty();
+	return impl_->has_rom && impl_->cart.has_battery &&
+	       (!impl_->cart.sram.empty() || CartHasClock(impl_->cart));
+}
+
+// Emulation > Real Time Clock: where the clock is saved, and the PC's clock or, with the
+// RTC off, the date and time picked for it.
+static CartRtcOptions RtcOptionsFromSettings()
+{
+	CartRtcOptions o;
+	o.separate = Settings.GBRTCSeparate != 0;
+	if (Settings.GBRTCOff && Settings.GBRTCTime)
+		o.now = static_cast<int64_t>(Settings.GBRTCTime);
+	return o;
 }
 
 bool Emulator::SaveBatteryToPath(const char *path) const
 {
 	if (!impl_->has_rom) return false;
-	return CartSaveBatteryToPath(impl_->cart, path);
+	return CartSaveBatteryToPath(impl_->cart, path, RtcOptionsFromSettings());
 }
 
 bool Emulator::LoadBatteryFromPath(const char *path)
 {
 	if (!impl_->has_rom) return false;
-	return CartLoadBatteryFromPath(impl_->cart, path);
+	return CartLoadBatteryFromPath(impl_->cart, path, RtcOptionsFromSettings());
 }
 
 bool Emulator::TakeSramDirty()
@@ -3801,6 +3813,12 @@ bool S9xSGBHasBattery(void)         { return SGB::Instance().HasBattery(); }
 bool S9xSGBSaveBatteryToPath(const char *path) { return SGB::Instance().SaveBatteryToPath(path); }
 bool S9xSGBLoadBatteryFromPath(const char *path) { return SGB::Instance().LoadBatteryFromPath(path); }
 bool S9xSGBTakeSramDirty(void)      { return SGB::Instance().TakeSramDirty(); }
+
+bool S9xSGBCartHasClock(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	return prim.HasROM() && SGB::CartHasClock(prim.DebugImpl()->cart);
+}
 unsigned char *S9xSGBGetSRAM(void)  { return SGB::Instance().GetSRAMData(); }
 size_t S9xSGBGetSRAMSize(void)      { return SGB::Instance().GetSRAMSize(); }
 void S9xSGBRunFrame(void)           { SGB::Instance().RunFrame(); }

@@ -7,8 +7,10 @@
 #include "gb_cart.h"
 #include "gb_ppu.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 namespace SGB {
 
@@ -426,6 +428,11 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	if (size < 0x0150 || data == nullptr) return false;
 
 	c.rom.assign(data, data + size);
+	// A console reset keeps an MBC3/HuC3/TAMA5 clock running; a new cart starts clean.
+	c.mbc = MbcState();
+	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
+	c.huc3_alarm_on = false;
+	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 
 	// ----- Header parse -----
 	CartHeader &h = c.header;
@@ -624,6 +631,7 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	}
 	c.mbc1_multicart = (c.mbc.type == MbcType::MBC1) && LooksLikeMbc1Multicart(c.rom);
 	c.duz_multicart  = (c.mbc.type == MbcType::MBC3) && LooksLikeDuzMulticart(c.rom);
+	c.mbc30          = (c.mbc.type == MbcType::MBC3) && (c.rom.size() > 0x200000 || h.ram_size > 0x8000);
 	// DMG palette-transition unit personality: daid's ppu_scanline_bgp
 	// reference photos come from a unit with a clean palette switch, unlike
 	// the mealybug blob's OR pixel (Coffee GB keeps the same per-ROM split).
@@ -639,6 +647,9 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	}
 	MbcReset(c.mbc);
 	MbcUnlReset(c);
+	// A TAMA5 clock with no save behind it follows the PC's (the load path
+	// reseeds it from the RTC settings).
+	if (c.mbc.type == MbcType::TAMA5) MbcTama6Seed(c.mbc, static_cast<int64_t>(time(nullptr)));
 
 	// ----- Cart RAM allocation -----
 	// Initialize fresh SRAM to $FF. Real hardware SRAM cells with no
@@ -690,42 +701,231 @@ void CartUnload(Cart &c)
 	c.sram_dirty     = false;
 	c.mbc1_multicart = false;
 	c.duz_multicart  = false;
+	c.mbc30          = false;
 	c.mbc5_multicart = false;
 	c.sachen_runs_raw  = false;
 	c.sachen_logo_high = false;
 	c.flat_unlicensed  = false;
-	MbcReset(c.mbc);
-	c.mbc.type    = MbcType::None;
+	c.mbc = MbcState();
+	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
+	c.huc3_alarm_on = false;
+	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 	c.unl = MbcUnl();
 	c.vf_alt_board = false;
 	c.vf_zook = false;
 }
 
-bool CartSaveBatteryToPath(const Cart &c, const char *path)
+bool CartHasClock(const Cart &c)
 {
-	if (!c.has_battery || c.sram.empty() || !path || !*path) return false;
-
-	FILE *f = fopen(path, "wb");
-	if (!f) return false;
-
-	const size_t written = fwrite(c.sram.data(), 1, c.sram.size(), f);
-	fclose(f);
-	return written == c.sram.size();
+	return (c.mbc.type == MbcType::MBC3 && c.has_rtc) || c.mbc.type == MbcType::HuC3 ||
+	       c.mbc.type == MbcType::TAMA5;
 }
 
-bool CartLoadBatteryFromPath(Cart &c, const char *path)
+namespace {
+
+// BGB's MBC3 block (bgb.bircd.org/rtcsave.html): ten little-endian dwords,
+// the counters then the latched copy, and a 64-bit Unix time. Old VBA wrote
+// a 32-bit time (44 bytes). SameBoy's HuC3 block: the 64-bit time, minutes,
+// days, alarm minutes, alarm days (16-bit each) and the alarm switch. mGBA's
+// TAMA5 block: the TAMA6's four pages (timer, alarm, two RAM), 16 nibbles
+// each packed low first, then the 64-bit Unix time.
+constexpr size_t kMbc3Rtc = 48, kMbc3RtcOld = 44, kHuc3Rtc = 17, kTama5Rtc = 40;
+// Before 1997 there were no RTC carts: an older time isn't clock data.
+constexpr int64_t kRtcEpochFloor = 852076800;
+
+int64_t RtcNow(const CartRtcOptions &o)
 {
-	if (!c.has_battery || c.sram.empty() || !path || !*path) return false;
+	return o.now >= 0 ? o.now : static_cast<int64_t>(time(nullptr));
+}
 
-	FILE *f = fopen(path, "rb");
+void Put(uint8_t *p, uint64_t v, int bytes)
+{
+	for (int i = 0; i < bytes; ++i) p[i] = static_cast<uint8_t>(v >> (8 * i));
+}
+
+uint64_t Get(const uint8_t *p, int bytes)
+{
+	uint64_t v = 0;
+	for (int i = 0; i < bytes; ++i) v |= static_cast<uint64_t>(p[i]) << (8 * i);
+	return v;
+}
+
+size_t RtcEncode(const Cart &c, int64_t now, uint8_t out[kMbc3Rtc])
+{
+	const MbcState &s = c.mbc;
+	if (s.type == MbcType::HuC3)
+	{
+		// The part-minute counted so far moves the time back, so the next
+		// load's catch-up keeps the minute boundaries where they were.
+		Put(out, static_cast<uint64_t>(now - s.rtc_sub_cycles / 4194304), 8);
+		Put(out + 8, MbcHuc3Minutes(s), 2);
+		Put(out + 10, MbcHuc3Days(s), 2);
+		Put(out + 12, c.huc3_alarm_minutes, 2);
+		Put(out + 14, c.huc3_alarm_days, 2);
+		out[16] = c.huc3_alarm_on ? 1 : 0;
+		return kHuc3Rtc;
+	}
+	if (s.type == MbcType::TAMA5)
+	{
+		uint8_t pg[4][16] = {};
+		for (uint8_t r = 0; r < 13; ++r) pg[0][r] = MbcTama6Reg(s, r);
+		for (int p = 0; p < 3; ++p) std::memcpy(pg[p + 1], c.tama6_pages[p], 13);
+		pg[1][0xA] = (s.rtc_latched[2] & 1) ? 0 : 1;   // 24-hour
+		pg[1][0xB] = s.rtc_latched[3] & 3;   // leap counter
+		// The page register: run and alarm bits, then the page number.
+		const uint8_t page = static_cast<uint8_t>((s.rtc_latch ? 0x08 : 0) | (s.rtc_latched[4] & 0x04));
+		for (int p = 0; p < 4; ++p)
+		{
+			pg[p][0xD] = static_cast<uint8_t>(page | p);
+			for (int i = 0; i < 8; ++i) out[p * 8 + i] = static_cast<uint8_t>(pg[p][i * 2] | (pg[p][i * 2 + 1] << 4));
+		}
+		Put(out + 32, static_cast<uint64_t>(now), 8);
+		return kTama5Rtc;
+	}
+	std::memset(out, 0, kMbc3Rtc);
+	for (int i = 0; i < 5; ++i)
+	{
+		out[i * 4]      = s.rtc_regs[i];
+		out[20 + i * 4] = s.rtc_latched[i];
+	}
+	Put(out + 40, static_cast<uint64_t>(now), 8);
+	return kMbc3Rtc;
+}
+
+// Takes the clock from a block of `n` bytes and runs it forward to `now`.
+bool RtcDecode(Cart &c, const uint8_t *in, size_t n, int64_t now)
+{
+	MbcState &s = c.mbc;
+	int64_t   saved;
+	if (s.type == MbcType::HuC3)
+	{
+		if (n != kHuc3Rtc) return false;
+		saved = static_cast<int64_t>(Get(in, 8));
+		MbcHuc3SetClock(s, static_cast<uint16_t>(Get(in + 8, 2)), static_cast<uint16_t>(Get(in + 10, 2)));
+		c.huc3_alarm_minutes = static_cast<uint16_t>(Get(in + 12, 2));
+		c.huc3_alarm_days    = static_cast<uint16_t>(Get(in + 14, 2));
+		c.huc3_alarm_on      = (in[16] & 1) != 0;
+	}
+	else if (s.type == MbcType::TAMA5)
+	{
+		if (n != kTama5Rtc) return false;
+		uint8_t pg[4][16];
+		for (int p = 0; p < 4; ++p)
+			for (int i = 0; i < 8; ++i)
+			{
+				pg[p][i * 2]     = in[p * 8 + i] & 0x0F;
+				pg[p][i * 2 + 1] = static_cast<uint8_t>(in[p * 8 + i] >> 4);
+			}
+		for (uint8_t r = 0; r < 13; ++r) MbcTama6SetReg(s, r, pg[0][r]);
+		for (int p = 0; p < 3; ++p) std::memcpy(c.tama6_pages[p], pg[p + 1], 13);
+		s.rtc_latched[2] = (pg[1][0xA] & 1) ? 0 : 1;   // 12-hour mode
+		s.rtc_latched[3] = pg[1][0xB] & 3;
+		s.rtc_latched[4] = pg[0][0xD] & 0x04;
+		s.rtc_latch      = (pg[0][0xD] & 0x08) != 0;
+		saved = static_cast<int64_t>(Get(in + 32, 8));
+	}
+	else
+	{
+		if (n != kMbc3Rtc && n != kMbc3RtcOld) return false;
+		static const uint8_t kMask[5] = { 0x3F, 0x3F, 0x1F, 0xFF, 0xC1 };
+		for (int i = 0; i < 5; ++i)
+		{
+			s.rtc_regs[i]    = in[i * 4] & kMask[i];
+			s.rtc_latched[i] = in[20 + i * 4] & kMask[i];
+		}
+		saved = static_cast<int64_t>(Get(in + 40, n == kMbc3Rtc ? 8 : 4));
+	}
+	s.rtc_sub_cycles = 0;
+	// A time in the future (or the "can't tell" $7FFFFFFF7FFFFFFF) or before
+	// any RTC cart existed runs nothing forward.
+	if (saved >= kRtcEpochFloor && saved <= now)
+		MbcRtcAdvance(s, now - saved);
+	return true;
+}
+
+// Game.sav -> Game.rtc, keeping a link seat's digit (Game.sav2 -> Game.rtc2).
+std::string RtcPath(const char *sav)
+{
+	std::string p(sav);
+	const size_t dot   = p.find_last_of('.');
+	const size_t slash = p.find_last_of("/\\");
+	if (dot != std::string::npos && (slash == std::string::npos || dot > slash) &&
+	    p.size() >= dot + 4 &&
+	    tolower(static_cast<unsigned char>(p[dot + 1])) == 's' &&
+	    tolower(static_cast<unsigned char>(p[dot + 2])) == 'a' &&
+	    tolower(static_cast<unsigned char>(p[dot + 3])) == 'v')
+		p.replace(dot + 1, 3, "rtc");
+	else
+		p += ".rtc";
+	return p;
+}
+
+bool ReadWhole(const std::string &path, std::vector<uint8_t> &out)
+{
+	FILE *f = fopen(path.c_str(), "rb");
 	if (!f) return false;
-
-	// Cap at the allocated SRAM; ignore any trailing RTC bytes for now
-	// (proper RTC persistence lands with the P2 follow-up).
-	const size_t want = c.sram.size();
-	const size_t got  = fread(c.sram.data(), 1, want, f);
+	out.clear();
+	uint8_t chunk[4096];
+	for (size_t n; (n = fread(chunk, 1, sizeof chunk, f)) > 0; )
+		out.insert(out.end(), chunk, chunk + n);
 	fclose(f);
-	return got == want;
+	return true;
+}
+
+bool WriteWhole(const std::string &path, const uint8_t *a, size_t an, const uint8_t *b, size_t bn)
+{
+	FILE *f = fopen(path.c_str(), "wb");
+	if (!f) return false;
+	bool ok = (an == 0 || fwrite(a, 1, an, f) == an) && (bn == 0 || fwrite(b, 1, bn, f) == bn);
+	ok = (fclose(f) == 0) && ok;
+	return ok;
+}
+
+} // anonymous
+
+bool CartSaveBatteryToPath(const Cart &c, const char *path, const CartRtcOptions &rtc)
+{
+	const bool clock = CartHasClock(c);
+	if (!c.has_battery || (c.sram.empty() && !clock) || !path || !*path) return false;
+
+	uint8_t block[kMbc3Rtc];
+	const size_t n = clock ? RtcEncode(c, RtcNow(rtc), block) : 0;
+	if (!clock || !rtc.separate)
+		return WriteWhole(path, c.sram.data(), c.sram.size(), block, n);
+
+	// A clock-only cart has no RAM to put in a .sav of its own.
+	const bool ram = c.sram.empty() || WriteWhole(path, c.sram.data(), c.sram.size(), nullptr, 0);
+	return WriteWhole(RtcPath(path), block, n, nullptr, 0) && ram;
+}
+
+bool CartLoadBatteryFromPath(Cart &c, const char *path, const CartRtcOptions &rtc)
+{
+	const bool clock = CartHasClock(c);
+	if (!c.has_battery || (c.sram.empty() && !clock) || !path || !*path) return false;
+
+	std::vector<uint8_t> sav;
+	const bool have_sav = ReadWhole(path, sav);
+	const size_t want   = c.sram.size();
+	if (have_sav && !sav.empty() && want > 0)
+		std::memcpy(c.sram.data(), sav.data(), sav.size() < want ? sav.size() : want);
+	bool ok = have_sav && sav.size() >= want;
+	if (!clock) return ok;
+
+	// The chosen place first, the other one if it has nothing.
+	std::vector<uint8_t> file;
+	const bool have_rtc = ReadWhole(RtcPath(path), file);
+	const uint8_t *tail = sav.size() > want ? sav.data() + want : nullptr;
+	const size_t   tail_n = sav.size() > want ? sav.size() - want : 0;
+	const int64_t  now = RtcNow(rtc);
+	bool got;
+	if (rtc.separate)
+		got = (have_rtc && RtcDecode(c, file.data(), file.size(), now)) || (tail && RtcDecode(c, tail, tail_n, now));
+	else
+		got = (tail && RtcDecode(c, tail, tail_n, now)) || (have_rtc && RtcDecode(c, file.data(), file.size(), now));
+	// No TAMA5 clock on disk (a new cart, or a save from before it was kept):
+	// it starts at "now", the PC's clock or the picked time.
+	if (!got && c.mbc.type == MbcType::TAMA5) MbcTama6Seed(c.mbc, now);
+	return ok || (want == 0 && got);
 }
 
 bool CartSaveBattery(const Cart &c)

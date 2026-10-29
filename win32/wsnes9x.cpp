@@ -136,6 +136,8 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 INT_PTR CALLBACK DlgInfoProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgAboutProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+static void WinGBRtcSettings();
+static void UpdateRtcPopup(bool show);
 INT_PTR CALLBACK DlgEmulatorHacksProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -3627,6 +3629,19 @@ LRESULT CALLBACK WinProc(
 				}
 			}
 			break;
+		// Emulation > Real Time Clock: an MBC3/HuC3/TAMA5 clock after the RAM in the .sav or in a
+		// .rtc beside it; it moves there with the next battery save.
+		case ID_EMULATION_GB_RTC_SAV:
+		case ID_EMULATION_GB_RTC_FILE:
+			Settings.GBRTCSeparate = (cmd_id == ID_EMULATION_GB_RTC_FILE);
+			S9xSetInfoString (Settings.GBRTCSeparate ? "RTC: saved separately (.rtc)"
+			                                         : "RTC: saved in the battery save (.sav)");
+			break;
+		case ID_EMULATION_GB_RTC_SETTINGS:
+			RestoreGUIDisplay ();
+			WinGBRtcSettings ();
+			RestoreSNESDisplay ();
+			break;
 		case ID_OPTIONS_SETTINGS:
 			RestoreGUIDisplay ();
 			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_EMU_SETTINGS), hWnd, DlgEmulatorProc);
@@ -6092,8 +6107,8 @@ static void UpdateTestsMenu ()
 }
 
 // Emulation menu entries that depend on what is loaded: each is on the menu
-// only while its hardware runs. They follow Game Boy Model, which also comes
-// and goes, so the group's slot is counted from it.
+// only while its hardware runs. They follow Game Boy Model and RTC, which
+// also come and go, so the group's slot is counted from them.
 static void UpdateHardwarePopups ()
 {
 	// Resource order; `has` is a command inside the popup, 0 for the separator.
@@ -6107,11 +6122,15 @@ static void UpdateHardwarePopups ()
 		{ ID_DEBUG_GB_TILE_VIEWER, TEXT("&GB-PPU") },
 	};
 	static HMENU s_parent = NULL;
-	static int   s_first  = 0;   // NSS's slot while Game Boy Model is hidden
+	static int   s_first  = 0;   // NSS's slot while Game Boy Model and RTC are hidden
 
 	MENUITEMINFO probe = {};
 	probe.cbSize = sizeof(probe);
 	probe.fMask  = MIIM_ID;
+	auto above = [&probe](HMENU m) {
+		return (GetMenuItemInfo(m, ID_EMULATION_BIOS,   FALSE, &probe) ? 1 : 0) +
+		       (GetMenuItemInfo(m, ID_EMULATION_GB_RTC, FALSE, &probe) ? 1 : 0);
+	};
 
 	if (!s_parent)
 	{
@@ -6119,7 +6138,7 @@ static void UpdateHardwarePopups ()
 		int   pos    = 0;
 		if (!GUI.hMenu || !FindMenuItemParentPos(GUI.hMenu, ID_EMULATION_NSS, &parent, &pos))
 			return;
-		s_first = pos - (GetMenuItemInfo(parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+		s_first = pos - above(parent);
 		for (Entry &e : s_entries)
 		{
 			MENUITEMINFO item = {};
@@ -6145,7 +6164,7 @@ static void UpdateHardwarePopups ()
 	const bool want[] = { NSS.Active != 0, SFCBox.Active != 0, Settings.SuperDisc != 0,
 	                      snes || gb, snes, gb };
 
-	int  pos     = s_first + (GetMenuItemInfo(s_parent, ID_EMULATION_BIOS, FALSE, &probe) ? 1 : 0);
+	int  pos     = s_first + above(s_parent);
 	bool changed = false;
 	for (size_t i = 0; i < _countof(s_entries); i++)
 	{
@@ -6556,6 +6575,7 @@ static void CheckMenuStates ()
 				DrawMenuBar(GUI.hWnd);
 			}
 		}
+		UpdateRtcPopup(gb_loaded && S9xSGBCartHasClock());
 
 		UpdateTestsMenu();
 
@@ -9670,6 +9690,154 @@ static void LayoutAssocChecks(HWND hDlg, bool visible)
 	GetWindowRect(hDlg, &wr);
 	SetWindowPos(hDlg, NULL, 0, 0, wr.right - wr.left, s_assocDlgCY - drop,
 	             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// Emulation > Real Time Clock > Settings: the PC's clock, or (RTC off) a date and time
+// picked to stand in for it. Settings.GBRTCTime keeps it as Unix seconds; the
+// pickers show it in local time.
+static const ULONGLONG kFileTimeUnixEpoch = 116444736000000000ULL;   // 1970 in 100 ns since 1601
+
+static void GBRtcToLocal (uint32 unix_time, SYSTEMTIME &local)
+{
+	ULARGE_INTEGER u;
+	u.QuadPart = (ULONGLONG)unix_time * 10000000ULL + kFileTimeUnixEpoch;
+	FILETIME   ft = { u.LowPart, u.HighPart };
+	SYSTEMTIME utc;
+	FileTimeToSystemTime (&ft, &utc);
+	SystemTimeToTzSpecificLocalTime (NULL, &utc, &local);
+}
+
+static uint32 GBRtcFromLocal (const SYSTEMTIME &local)
+{
+	SYSTEMTIME utc;
+	FILETIME   ft;
+	if (!TzSpecificLocalTimeToSystemTime (NULL, &local, &utc) || !SystemTimeToFileTime (&utc, &ft))
+		return 0;
+	ULARGE_INTEGER u;
+	u.LowPart  = ft.dwLowDateTime;
+	u.HighPart = ft.dwHighDateTime;
+	return u.QuadPart > kFileTimeUnixEpoch ? (uint32)((u.QuadPart - kFileTimeUnixEpoch) / 10000000ULL) : 0;
+}
+
+// The pickers only matter with the RTC off.
+static void GBRtcEnablePickers (HWND hDlg)
+{
+	const BOOL off = IsDlgButtonChecked (hDlg, IDC_GBRTC_ON) != BST_CHECKED;
+	static const int ids[] = { IDC_GBRTC_DATE, IDC_GBRTC_TIME, IDC_GBRTC_DATE_LABEL, IDC_GBRTC_TIME_LABEL };
+	for (int id : ids)
+		EnableWindow (GetDlgItem (hDlg, id), off);
+}
+
+static INT_PTR CALLBACK DlgGBRtcProc (HWND hDlg, UINT msg, WPARAM wParam, LPARAM)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+	{
+		LocalizeDialog (hDlg);
+		CheckDlgButton (hDlg, IDC_GBRTC_ON, Settings.GBRTCOff ? BST_UNCHECKED : BST_CHECKED);
+
+		// From 1997, when the first RTC carts came out, to where 32-bit
+		// Unix seconds end.
+		SYSTEMTIME range[2] = {};
+		range[0].wYear = 1997; range[0].wMonth = 1;  range[0].wDay = 1;
+		range[1].wYear = 2105; range[1].wMonth = 12; range[1].wDay = 31;
+		range[1].wHour = 23;   range[1].wMinute = 59; range[1].wSecond = 59;
+
+		SYSTEMTIME when;
+		GBRtcToLocal (Settings.GBRTCTime ? Settings.GBRTCTime : (uint32)time (NULL), when);
+		for (int id : { IDC_GBRTC_DATE, IDC_GBRTC_TIME })
+		{
+			HWND picker = GetDlgItem (hDlg, id);
+			DateTime_SetRange (picker, GDTR_MIN | GDTR_MAX, range);
+			DateTime_SetSystemtime (picker, GDT_VALID, &when);
+		}
+		GBRtcEnablePickers (hDlg);
+		return TRUE;
+	}
+
+	case WM_COMMAND:
+		switch (LOWORD (wParam))
+		{
+		case IDC_GBRTC_ON:
+			GBRtcEnablePickers (hDlg);
+			return TRUE;
+
+		case IDOK:
+		{
+			// The date from one picker, the time of day from the other.
+			SYSTEMTIME date = {}, tod = {};
+			DateTime_GetSystemtime (GetDlgItem (hDlg, IDC_GBRTC_DATE), &date);
+			DateTime_GetSystemtime (GetDlgItem (hDlg, IDC_GBRTC_TIME), &tod);
+			date.wHour         = tod.wHour;
+			date.wMinute       = tod.wMinute;
+			date.wSecond       = tod.wSecond;
+			date.wMilliseconds = 0;
+			Settings.GBRTCOff  = IsDlgButtonChecked (hDlg, IDC_GBRTC_ON) != BST_CHECKED;
+			Settings.GBRTCTime = GBRtcFromLocal (date);
+			EndDialog (hDlg, IDOK);
+			return TRUE;
+		}
+
+		case IDCANCEL:
+			EndDialog (hDlg, IDCANCEL);
+			return TRUE;
+		}
+		break;
+	}
+	return FALSE;
+}
+
+static void WinGBRtcSettings ()
+{
+	INITCOMMONCONTROLSEX icc = { sizeof (icc), ICC_DATE_CLASSES };
+	InitCommonControlsEx (&icc);
+	if (DialogBox (g_hInst, MAKEINTRESOURCE (IDD_GB_RTC), GUI.hWnd, DlgGBRtcProc) == IDOK)
+		S9xSetInfoString (Settings.GBRTCOff ? "RTC off: the picked date and time stand in for the PC's clock"
+		                                    : "RTC on: the PC's clock");
+}
+
+// Emulation > Real Time Clock comes and goes with a cart that keeps a clock, right below
+// Game Boy Model, which is up whenever a Game Boy game is.
+static void UpdateRtcPopup (bool show)
+{
+	static HMENU s_rtc = NULL;
+	HMENU parent = NULL;
+	int   pos    = 0;
+	if (!s_rtc)
+	{
+		if (!GUI.hMenu || !FindMenuItemParentPos (GUI.hMenu, ID_EMULATION_GB_RTC, &parent, &pos))
+			return;
+		s_rtc = GetSubMenu (parent, pos);
+	}
+
+	const bool in_menu = FindMenuItemParentPos (GUI.hMenu, ID_EMULATION_GB_RTC, &parent, &pos);
+	if (in_menu && !show)
+	{
+		RemoveMenu (parent, ID_EMULATION_GB_RTC, MF_BYCOMMAND);
+		DrawMenuBar (GUI.hWnd);
+	}
+	else if (!in_menu && show && FindMenuItemParentPos (GUI.hMenu, ID_EMULATION_BIOS, &parent, &pos))
+	{
+		MENUITEMINFO ins = {};
+		ins.cbSize     = sizeof (ins);
+		ins.fMask      = MIIM_STRING | MIIM_SUBMENU | MIIM_ID | MIIM_FTYPE;
+		ins.fType      = MFT_STRING;
+		ins.wID        = ID_EMULATION_GB_RTC;
+		ins.hSubMenu   = s_rtc;
+		TCHAR txt[]    = TEXT("Real Ti&me Clock");
+		ins.dwTypeData = txt;
+		ins.cch        = (UINT)_tcslen (txt);
+		InsertMenuItem (parent, (UINT)(pos + 1), TRUE, &ins);
+		if (LocaleIsTranslated ())
+			LocalizeMenu (parent);
+		DrawMenuBar (GUI.hWnd);
+	}
+
+	if (s_rtc)
+		CheckMenuRadioItem (s_rtc, ID_EMULATION_GB_RTC_SAV, ID_EMULATION_GB_RTC_FILE,
+		                    Settings.GBRTCSeparate ? ID_EMULATION_GB_RTC_FILE : ID_EMULATION_GB_RTC_SAV,
+		                    MF_BYCOMMAND);
 }
 
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)

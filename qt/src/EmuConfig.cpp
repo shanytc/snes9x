@@ -436,6 +436,9 @@ bool EmuConfig::setDefaults(int section)
         sgb_bios_preference = 2;
         gb_bios_enabled = true;
         gb_boot_policy = S9X_GBBOOT_AUTO;
+        gb_rtc_separate = false;
+        gb_rtc_off = false;
+        gb_rtc_time = 0;
         for (auto &p : bios_paths) p.clear();
         for (int &m : chip_modes) m = S9X_CHIP_AUTO;
         nss_dip_switches = 0x0c;
@@ -811,6 +814,15 @@ void EmuConfig::config(const std::string &filename, bool write)
         if (sgb_bios_preference < 1 || sgb_bios_preference > 2)
             sgb_bios_preference = 2;
         gb_boot_policy = S9xNormalizeGBBootPolicy(gb_boot_policy);
+    }
+    Bool("RTCSeparateFile", gb_rtc_separate, "where an MBC3/HuC3/TAMA5 cartridge's clock is saved (Emulation -> Real Time Clock): false (default) = after the RAM in the .sav (BGB/VBA format), true = in its own .rtc file beside it");
+    Bool("RTCOff", gb_rtc_off, "false (default) = the cartridge clock follows the PC's clock; true = the RTC is off and RTCTime stands in for the PC's clock (Emulation -> Real Time Clock -> Settings)");
+    {
+        // Unsigned to reach 2106, past where Int's range ends.
+        std::string t = std::to_string(gb_rtc_time);
+        String("RTCTime", t, "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
+        if (!write)
+            gb_rtc_time = (uint32_t)strtoul(t.c_str(), nullptr, 10);
     }
     EndSection();
 

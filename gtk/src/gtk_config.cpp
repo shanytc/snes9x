@@ -255,6 +255,9 @@ int Snes9xConfig::load_defaults()
     Settings.GB_BIOSEnabled = TRUE;
     Settings.GBSuppressNRxGlitches = FALSE;
     Settings.GBBootPolicy = S9X_GBBOOT_AUTO;
+    Settings.GBRTCSeparate = false;
+    Settings.GBRTCOff = false;
+    Settings.GBRTCTime = 0;
     Settings.NSSDipSwitches = 0x0c;
     Settings.NSSJoypadWatchdog = false;
     Settings.SFCBoxOSDBackdrop = true;
@@ -516,6 +519,10 @@ int Snes9xConfig::save_config_file()
     outint("BIOSPreference", Settings.SGB_BIOSPreference, "which Super Game Boy BIOS the Automatic consoles prefer: 1=SGB1, 2=SGB2 (default)");
     outbool("GBBIOSEnabled", Settings.GB_BIOSEnabled, "Use dmg_boot.bin / cgb_boot.bin for the power-on logo animation when running as GB/GBC");
     outint("GBBootPolicy", Settings.GBBootPolicy, "Console for GB content, chosen in Emulation -> Game Boy Model: 0=GB, 1=GBC, 2=SGB, 4=SGB2, 7=automatic (default), 9=Super Game Boy Color. 5 and 6 were the old prefer-GB and prefer-GBC automatics and now load as 7; 3 and 8 were the SGB+GBC hacks and now load as 9");
+    outbool("RTCSeparateFile", Settings.GBRTCSeparate, "where an MBC3/HuC3/TAMA5 cartridge's clock is saved (Emulation -> Real Time Clock): false (default) = at the end of the battery save (.sav), true = in its own .rtc file");
+    outbool("RTCOff", Settings.GBRTCOff, "false (default) = the cartridge clock follows the PC's clock; true = RTCTime stands in for the PC's clock");
+    // Unsigned to reach 2106, past where an int's range ends.
+    outstring("RTCTime", std::to_string(Settings.GBRTCTime), "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
 
     section = "Input";
     outstring("ControllerOption", controller_option_names[controller_option],
@@ -839,6 +846,12 @@ int Snes9xConfig::load_config_file()
     inbool("GBBIOSEnabled", Settings.GB_BIOSEnabled);
     inint("GBBootPolicy", Settings.GBBootPolicy);
     Settings.GBBootPolicy = S9xNormalizeGBBootPolicy(Settings.GBBootPolicy);
+    inbool("RTCSeparateFile", Settings.GBRTCSeparate);
+    inbool("RTCOff", Settings.GBRTCOff);
+    std::string rtc_time;
+    instr("RTCTime", rtc_time);
+    if (!rtc_time.empty())
+        Settings.GBRTCTime = (uint32)strtoul(rtc_time.c_str(), nullptr, 10);
 
     section = "Input";
 

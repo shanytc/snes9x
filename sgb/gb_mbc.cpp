@@ -78,6 +78,11 @@ namespace SGB {
 //   sachen_outer_mask = packed address byte (ADDR_HI << 4 | ADDR_LO);
 //                       low 5 bits = RAM/command address, top 3 bits = op mode
 //   rtc_regs[0..4] + rtc_latched[0..1] = TAMA6 BCD timer page, one nibble each
+//   rtc_latched[2] = 12-hour mode (the alarm page's 24-hour bit inverted, so
+//                    older states read 24-hour), rtc_latched[3] = leap-year
+//                    counter (0 = leap), rtc_latched[4] bit 2 = alarm on (the
+//                    alarm-page bits the timer needs; the rest is in the Cart)
+//   rtc_latch      = timer running, rtc_sub_cycles = toward the next second
 namespace {
 
 inline void Tama5SetRtcNib(MbcState &s, uint8_t idx, uint8_t nib)
@@ -97,25 +102,85 @@ inline uint8_t Tama5RtcNib(const MbcState &s, uint8_t idx)
 	                 : static_cast<uint8_t>(cell & 0x0F);
 }
 
-inline void Tama5SeedRtc(MbcState &s)
+// TC8521 bits per register (mGBA's masks): timer page, then alarm page.
+constexpr uint8_t kTama6TimerMask[13] = { 0xF, 0x7, 0xF, 0x7, 0xF, 0x3, 0x7, 0xF, 0x3, 0xF, 0x1, 0xF, 0xF };
+constexpr uint8_t kTama6AlarmMask[13] = { 0x0, 0x0, 0xF, 0x7, 0xF, 0x3, 0x7, 0xF, 0x3, 0x0, 0x1, 0x3, 0x0 };
+
+inline void Tama6Put2(MbcState &s, uint8_t lo, int v)
 {
-	std::time_t t = std::time(nullptr);
-	const std::tm *lt = std::localtime(&t);
-	if (!lt) return;
-	auto put2 = [&](uint8_t lo, int v) {
-		Tama5SetRtcNib(s, lo, static_cast<uint8_t>(v % 10));
-		Tama5SetRtcNib(s, static_cast<uint8_t>(lo + 1), static_cast<uint8_t>((v / 10) % 10));
-	};
-	put2(0x0, lt->tm_sec);
-	put2(0x2, lt->tm_min);
-	put2(0x4, lt->tm_hour);
-	Tama5SetRtcNib(s, 0x6, static_cast<uint8_t>(lt->tm_wday));
-	put2(0x7, lt->tm_mday);
-	put2(0x9, lt->tm_mon + 1);
-	put2(0xB, lt->tm_year % 100);
+	Tama5SetRtcNib(s, lo, static_cast<uint8_t>(v % 10));
+	Tama5SetRtcNib(s, static_cast<uint8_t>(lo + 1), static_cast<uint8_t>((v / 10) % 10));
+}
+
+inline int Tama6Get2(const MbcState &s, uint8_t lo)
+{
+	return Tama5RtcNib(s, lo) + 10 * Tama5RtcNib(s, static_cast<uint8_t>(lo + 1));
+}
+
+// Run the timer page forward: BCD seconds to years, the PM bit in 12-hour
+// mode, the weekday, and the leap counter stepping with the year.
+void Tama6Advance(MbcState &s, int64_t secs)
+{
+	if (secs <= 0) return;
+	const bool    h24 = (s.rtc_latched[2] & 1) == 0;
+	const uint8_t h10 = Tama5RtcNib(s, 0x5);
+	const int hour = h24 ? Tama6Get2(s, 0x4) : Tama5RtcNib(s, 0x4) + 10 * (h10 & 1) + ((h10 & 2) ? 12 : 0);
+	const int64_t t = Tama6Get2(s, 0x0) + 60 * (Tama6Get2(s, 0x2) + 60 * static_cast<int64_t>(hour)) + secs;
+	int64_t   days = t / 86400;
+	const int rem  = static_cast<int>(t % 86400);
+	const int h    = rem / 3600;
+	Tama6Put2(s, 0x0, rem % 60);
+	Tama6Put2(s, 0x2, rem / 60 % 60);
+	if (h24)
+		Tama6Put2(s, 0x4, h);
+	else
+	{
+		Tama5SetRtcNib(s, 0x4, static_cast<uint8_t>(h % 12 % 10));
+		Tama5SetRtcNib(s, 0x5, static_cast<uint8_t>(h % 12 / 10 | (h >= 12 ? 2 : 0)));
+	}
+	if (days == 0) return;
+
+	Tama5SetRtcNib(s, 0x6, static_cast<uint8_t>((Tama5RtcNib(s, 0x6) + days) % 7));
+	static const uint8_t kLen[13] = { 31, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+	int     day = Tama6Get2(s, 0x7), month = Tama6Get2(s, 0x9), years = 0;
+	uint8_t leap = s.rtc_latched[3] & 3;
+	while (days > 0)
+	{
+		const int len = (month == 2 && leap == 0) ? 29 : kLen[month <= 12 ? month : 0];
+		if (day + days <= len) { day += static_cast<int>(days); break; }
+		days -= len - day + 1;
+		day = 1;
+		if (++month > 12) { month = 1; ++years; leap = (leap + 1) & 3; }
+	}
+	Tama6Put2(s, 0x7, day);
+	Tama6Put2(s, 0x9, month);
+	// The year digits change only when the year does (games park $F0 there).
+	if (years) Tama6Put2(s, 0xB, (Tama6Get2(s, 0xB) + years) % 100);
+	s.rtc_latched[3] = leap;
 }
 
 } // anonymous
+
+uint8_t MbcTama6Reg(const MbcState &s, uint8_t reg)           { return Tama5RtcNib(s, reg); }
+void    MbcTama6SetReg(MbcState &s, uint8_t reg, uint8_t nib) { Tama5SetRtcNib(s, reg, nib); }
+
+void MbcTama6Seed(MbcState &s, int64_t unix_time)
+{
+	const std::time_t t = static_cast<std::time_t>(unix_time);
+	const std::tm *lt = std::localtime(&t);
+	if (!lt) return;
+	Tama6Put2(s, 0x0, lt->tm_sec);
+	Tama6Put2(s, 0x2, lt->tm_min);
+	Tama6Put2(s, 0x4, lt->tm_hour);
+	Tama5SetRtcNib(s, 0x6, static_cast<uint8_t>(lt->tm_wday));
+	Tama6Put2(s, 0x7, lt->tm_mday);
+	Tama6Put2(s, 0x9, lt->tm_mon + 1);
+	Tama6Put2(s, 0xB, lt->tm_year % 100);
+	s.rtc_latched[2] = 0;                                         // 24-hour
+	s.rtc_latched[3] = static_cast<uint8_t>(lt->tm_year % 4);     // 0 = leap year
+	s.rtc_latch      = true;
+	s.rtc_sub_cycles = 0;
+}
 
 void MbcReset(MbcState &s)
 {
@@ -127,9 +192,14 @@ void MbcReset(MbcState &s)
 	// enabled. (Cart type is assigned before MbcReset runs.)
 	s.ram_enable = (s.type == MbcType::HuC1);
 	s.mbc1_mode  = false;
-	s.rtc_latch  = false;
+	if (s.type != MbcType::TAMA5) s.rtc_latch = false;   // TAMA5: the timer's run bit
 	s.rtc_select = 0;
-	for (int i = 0; i < 5; ++i) { s.rtc_regs[i] = 0; s.rtc_latched[i] = 0; }
+	// MBC3, HuC3 and TAMA5 clocks run off the cart's own crystal and battery,
+	// so a console reset leaves their counters alone; CartLoad starts a cart clean.
+	if (s.type == MbcType::HuC3)
+		s.rtc_regs[0] = s.rtc_regs[1] = s.rtc_regs[2] = 0;   // pointer, argument, response
+	else if (s.type != MbcType::MBC3 && s.type != MbcType::TAMA5)
+		for (int i = 0; i < 5; ++i) { s.rtc_regs[i] = 0; s.rtc_latched[i] = 0; }
 	s.sachen_outer_bank = 0;
 	s.sachen_outer_mask = 0;
 	s.sachen_locked     = true;
@@ -149,7 +219,6 @@ void MbcReset(MbcState &s)
 	s.mmm01_just_locked       = false;
 
 	if (s.type == MbcType::M161) s.rom_bank = 0;   // power-on page 0 = menu
-	if (s.type == MbcType::TAMA5) Tama5SeedRtc(s);
 	if (s.type == MbcType::MBC7)
 	{
 		s.rtc_regs[1] = 0xFF;
@@ -165,39 +234,149 @@ void MbcReset(MbcState &s)
 	}
 }
 
+namespace {
+
+constexpr int32_t kRtcSecond = 4194304;
+constexpr int32_t kRtcMinute = 60 * kRtcSecond;
+
+// HuC3: rtc_regs[3..4] = minutes (12-bit), rtc_latched[0..1] = days (16-bit).
+inline void Huc3TickMinute(MbcState &s)
+{
+	uint16_t minutes = static_cast<uint16_t>((MbcHuc3Minutes(s) + 1) & 0xFFF);
+	uint16_t days    = MbcHuc3Days(s);
+	if (minutes == 60 * 24)
+	{
+		minutes = 0;
+		++days;
+	}
+	MbcHuc3SetClock(s, minutes, days);
+}
+
 // MBC3 RTC — one-second cadence with the documented mask/carry quirks:
 // registers hold their written bits (S/M 6-bit, H 5-bit, DH bits 0/6/7);
 // out-of-range values count up and wrap through the field width without
 // carrying, the carry chain only fires on the exact 59->60 / 23->24
 // boundaries, and the 512-day overflow sets the sticky DH bit 7.
+inline void Mbc3TickSecond(MbcState &s)
+{
+	uint8_t sec = static_cast<uint8_t>((s.rtc_regs[0] + 1) & 0x3F);
+	s.rtc_regs[0] = sec;
+	if (sec != 60) return;
+	s.rtc_regs[0] = 0;
+	uint8_t min = static_cast<uint8_t>((s.rtc_regs[1] + 1) & 0x3F);
+	s.rtc_regs[1] = min;
+	if (min != 60) return;
+	s.rtc_regs[1] = 0;
+	uint8_t hour = static_cast<uint8_t>((s.rtc_regs[2] + 1) & 0x1F);
+	s.rtc_regs[2] = hour;
+	if (hour != 24) return;
+	s.rtc_regs[2] = 0;
+	if (++s.rtc_regs[3] == 0)
+	{
+		if (s.rtc_regs[4] & 0x01)
+			s.rtc_regs[4] = static_cast<uint8_t>((s.rtc_regs[4] & ~0x01) | 0x80);
+		else
+			s.rtc_regs[4] |= 0x01;
+	}
+}
+
+} // anonymous
+
+uint16_t MbcHuc3Minutes(const MbcState &s) { return static_cast<uint16_t>(s.rtc_regs[3] | (s.rtc_regs[4] << 8)); }
+uint16_t MbcHuc3Days(const MbcState &s)    { return static_cast<uint16_t>(s.rtc_latched[0] | (s.rtc_latched[1] << 8)); }
+
+void MbcHuc3SetClock(MbcState &s, uint16_t minutes, uint16_t days)
+{
+	s.rtc_regs[3]    = minutes & 0xFF;
+	s.rtc_regs[4]    = (minutes >> 8) & 0x0F;
+	s.rtc_latched[0] = days & 0xFF;
+	s.rtc_latched[1] = (days >> 8) & 0xFF;
+}
+
 void MbcTickRtc(MbcState &s, int32_t tcycles)
 {
+	if (s.type == MbcType::HuC3)
+	{
+		s.rtc_sub_cycles += tcycles;
+		while (s.rtc_sub_cycles >= kRtcMinute)
+		{
+			s.rtc_sub_cycles -= kRtcMinute;
+			Huc3TickMinute(s);
+		}
+		return;
+	}
+	if (s.type == MbcType::TAMA5)
+	{
+		if (!s.rtc_latch) return;
+		s.rtc_sub_cycles += tcycles;
+		while (s.rtc_sub_cycles >= kRtcSecond)
+		{
+			s.rtc_sub_cycles -= kRtcSecond;
+			Tama6Advance(s, 1);
+		}
+		return;
+	}
 	if (s.type != MbcType::MBC3) return;
 	if (s.rtc_regs[4] & 0x40) return;   // halt bit freezes the oscillator
 	s.rtc_sub_cycles += tcycles;
-	while (s.rtc_sub_cycles >= 4194304)
+	while (s.rtc_sub_cycles >= kRtcSecond)
 	{
-		s.rtc_sub_cycles -= 4194304;
-		uint8_t sec = static_cast<uint8_t>((s.rtc_regs[0] + 1) & 0x3F);
-		s.rtc_regs[0] = sec;
-		if (sec != 60) continue;
-		s.rtc_regs[0] = 0;
-		uint8_t min = static_cast<uint8_t>((s.rtc_regs[1] + 1) & 0x3F);
-		s.rtc_regs[1] = min;
-		if (min != 60) continue;
-		s.rtc_regs[1] = 0;
-		uint8_t hour = static_cast<uint8_t>((s.rtc_regs[2] + 1) & 0x1F);
-		s.rtc_regs[2] = hour;
-		if (hour != 24) continue;
-		s.rtc_regs[2] = 0;
-		if (++s.rtc_regs[3] == 0)
-		{
-			if (s.rtc_regs[4] & 0x01)
-				s.rtc_regs[4] = static_cast<uint8_t>((s.rtc_regs[4] & ~0x01) | 0x80);
-			else
-				s.rtc_regs[4] |= 0x01;
-		}
+		s.rtc_sub_cycles -= kRtcSecond;
+		Mbc3TickSecond(s);
 	}
+}
+
+void MbcRtcAdvance(MbcState &s, int64_t seconds)
+{
+	if (seconds <= 0) return;
+
+	if (s.type == MbcType::HuC3)
+	{
+		// The part-minute already counted carries into the catch-up.
+		const int64_t total   = s.rtc_sub_cycles / kRtcSecond + seconds;
+		int64_t       minutes = MbcHuc3Minutes(s), days = MbcHuc3Days(s);
+		int64_t       add     = total / 60;
+		// Minutes past the day's end (the cart's "unset" $FFF) count up to the
+		// 12-bit wrap before the day carry can fire.
+		while (add > 0 && minutes >= 60 * 24)
+		{
+			minutes = (minutes + 1) & 0xFFF;
+			--add;
+		}
+		minutes += add;
+		days    += minutes / (60 * 24);
+		minutes %= 60 * 24;
+		MbcHuc3SetClock(s, static_cast<uint16_t>(minutes), static_cast<uint16_t>(days));
+		s.rtc_sub_cycles = static_cast<int32_t>(total % 60) * kRtcSecond;
+		return;
+	}
+	if (s.type == MbcType::TAMA5)
+	{
+		if (s.rtc_latch) Tama6Advance(s, seconds);
+		return;
+	}
+
+	if (s.type != MbcType::MBC3 || (s.rtc_regs[4] & 0x40)) return;
+
+	// Counters written out of range wrap without carrying: step those through.
+	while (seconds > 0 && (s.rtc_regs[0] >= 60 || s.rtc_regs[1] >= 60 || s.rtc_regs[2] >= 24))
+	{
+		Mbc3TickSecond(s);
+		--seconds;
+	}
+	if (seconds <= 0) return;
+
+	const int64_t total = s.rtc_regs[0] + 60 * (s.rtc_regs[1] + 60 * static_cast<int64_t>(s.rtc_regs[2])) + seconds;
+	const int64_t rem   = total % 86400;
+	int64_t day = (s.rtc_regs[3] | ((s.rtc_regs[4] & 0x01) << 8)) + total / 86400;
+	s.rtc_regs[0] = static_cast<uint8_t>(rem % 60);
+	s.rtc_regs[1] = static_cast<uint8_t>(rem / 60 % 60);
+	s.rtc_regs[2] = static_cast<uint8_t>(rem / 3600);
+	if (day >= 512)
+		s.rtc_regs[4] |= 0x80;   // the day counter overflowed: sticky carry
+	day &= 0x1FF;
+	s.rtc_regs[3] = static_cast<uint8_t>(day & 0xFF);
+	s.rtc_regs[4] = static_cast<uint8_t>((s.rtc_regs[4] & ~0x01) | (day >> 8));
 }
 
 namespace {
@@ -447,46 +626,50 @@ inline uint32_t Mmm01RamBank(const MbcState &s)
 //   rtc_regs[0]    = RTC register-map access pointer
 //   rtc_regs[1]    = last extended-command argument ($2 = boot status request)
 //   rtc_regs[2]    = response nibble (result of the last read command)
-//   rtc_regs[3..4] = minutes (12-bit), rtc_latched[0..1] = days (16-bit)
-inline uint16_t Huc3Minutes(const MbcState &s) { return static_cast<uint16_t>(s.rtc_regs[3] | (s.rtc_regs[4] << 8)); }
-inline uint16_t Huc3Days(const MbcState &s)    { return static_cast<uint16_t>(s.rtc_latched[0] | (s.rtc_latched[1] << 8)); }
-inline void Huc3SetMinutes(MbcState &s, uint16_t v) { s.rtc_regs[3] = v & 0xFF; s.rtc_regs[4] = (v >> 8) & 0x0F; }
-inline void Huc3SetDays(MbcState &s, uint16_t v)    { s.rtc_latched[0] = v & 0xFF; s.rtc_latched[1] = (v >> 8) & 0xFF; }
-
+//   rtc_regs[3..4] = minutes (12-bit), rtc_latched[0..1] = days (16-bit),
+//                    through MbcHuc3Minutes/Days/SetClock
+// The alarm registers live in the Cart (Cart::huc3_alarm_*).
 inline uint8_t Huc3ReadReg(const MbcState &s, uint8_t idx)
 {
-	if (idx < 3) return (Huc3Minutes(s) >> (idx * 4)) & 0x0F;
-	if (idx < 7) return (Huc3Days(s) >> ((idx - 3) * 4)) & 0x0F;
-	return 0;   // alarm/tone registers ($58+) not modeled
+	if (idx < 3) return (MbcHuc3Minutes(s) >> (idx * 4)) & 0x0F;
+	if (idx < 7) return (MbcHuc3Days(s) >> ((idx - 3) * 4)) & 0x0F;
+	return 0;   // alarm/tone registers read back nothing (SameBoy)
 }
 
-inline void Huc3WriteReg(MbcState &s, uint8_t idx, uint8_t nib)
+inline uint16_t SetNibble(uint16_t v, int nib_index, uint8_t nib)
 {
+	return static_cast<uint16_t>((v & ~(0x0Fu << (nib_index * 4))) | (nib << (nib_index * 4)));
+}
+
+inline void Huc3WriteReg(Cart &c, uint8_t idx, uint8_t nib)
+{
+	MbcState &s = c.mbc;
 	nib &= 0x0F;
 	if (idx < 3)
-	{
-		const uint16_t m = Huc3Minutes(s);
-		Huc3SetMinutes(s, static_cast<uint16_t>((m & ~(0x0Fu << (idx * 4))) | (nib << (idx * 4))));
-	}
+		MbcHuc3SetClock(s, SetNibble(MbcHuc3Minutes(s), idx, nib), MbcHuc3Days(s));
 	else if (idx < 7)
-	{
-		const uint16_t d = Huc3Days(s);
-		Huc3SetDays(s, static_cast<uint16_t>((d & ~(0x0Fu << ((idx - 3) * 4))) | (nib << ((idx - 3) * 4))));
-	}
-	// idx >= 7 (alarm/tone) intentionally dropped
+		MbcHuc3SetClock(s, MbcHuc3Minutes(s), SetNibble(MbcHuc3Days(s), idx - 3, nib));
+	else if (idx >= 0x58 && idx <= 0x5A)
+		c.huc3_alarm_minutes = SetNibble(c.huc3_alarm_minutes, idx - 0x58, nib);
+	else if (idx >= 0x5B && idx <= 0x5E)
+		c.huc3_alarm_days = SetNibble(c.huc3_alarm_days, idx - 0x5B, nib);
+	else if (idx == 0x5F)
+		c.huc3_alarm_on = (nib & 1) != 0;
+	// the speaker's tone registers are dropped
 }
 
 // Execute one command written to the $B window. Per SameBoy, HuC3 runs the
 // command immediately on write; the $D semaphore then always reads ready.
-inline void Huc3Command(MbcState &s, uint8_t value)
+inline void Huc3Command(Cart &c, uint8_t value)
 {
+	MbcState &s = c.mbc;
 	uint8_t &idx = s.rtc_regs[0];
 	const uint8_t arg = value & 0x0F;
 	switch (value >> 4)
 	{
 		case 1: s.rtc_regs[2] = Huc3ReadReg(s, idx); ++idx;             break;  // read + advance
-		case 2: Huc3WriteReg(s, idx, arg);                              break;  // write
-		case 3: Huc3WriteReg(s, idx, arg); ++idx;                       break;  // write + advance
+		case 2: Huc3WriteReg(c, idx, arg);                              break;  // write
+		case 3: Huc3WriteReg(c, idx, arg); ++idx;                       break;  // write + advance
 		case 4: idx = static_cast<uint8_t>((idx & 0xF0) | arg);         break;  // pointer low nibble
 		case 5: idx = static_cast<uint8_t>((idx & 0x0F) | (arg << 4));  break;  // pointer high nibble
 		case 6: s.rtc_regs[1] = arg;                                    break;  // extended command
@@ -512,19 +695,38 @@ inline void Tama5Trigger(Cart &c)
 			switch (addr5)
 			{
 				case 0x0: s.rtc_latch = false; break;
-				case 0x1: s.rtc_latch = true;  break;
+				case 0x1:   // start the timer; the seconds restart from 0 (mGBA)
+					s.rtc_latch      = true;
+					s.rtc_sub_cycles = 0;
+					Tama5SetRtcNib(s, 0x0, 0);
+					Tama5SetRtcNib(s, 0x1, 0);
+					break;
 				case 0x4: Tama5SetRtcNib(s, 0x2, data & 0x0F); Tama5SetRtcNib(s, 0x3, static_cast<uint8_t>(data >> 4)); break;
 				case 0x5: Tama5SetRtcNib(s, 0x4, data & 0x0F); Tama5SetRtcNib(s, 0x5, static_cast<uint8_t>(data >> 4)); break;
+				case 0x10: s.rtc_latched[4] &= ~0x04; break;   // alarm off
+				case 0x11: s.rtc_latched[4] |= 0x04;  break;   // alarm on
 				default: break;
 			}
 			break;
 		case 0x4:
-			if ((s.sachen_outer_mask & 0x0F) == 0x0)
+		{
+			// Low nibble = register, high = value; ADDR_LO picks the page.
+			const uint8_t reg = static_cast<uint8_t>(data & 0x0F), nib = static_cast<uint8_t>(data >> 4);
+			if (reg >= 0x0D) break;
+			switch (s.sachen_outer_mask & 0x0F)
 			{
-				const uint8_t idx = static_cast<uint8_t>(data & 0x0F);
-				if (idx < 0x0D) Tama5SetRtcNib(s, idx, static_cast<uint8_t>(data >> 4));
+				case 0x0: Tama5SetRtcNib(s, reg, nib & kTama6TimerMask[reg]); break;
+				case 0x2:
+					c.tama6_pages[0][reg] = nib & kTama6AlarmMask[reg];
+					if (reg == 0xA) s.rtc_latched[2] = (nib & 1) ? 0 : 1;      // 24-hour bit -> 12-hour mode
+					if (reg == 0xB) s.rtc_latched[3] = c.tama6_pages[0][reg];   // leap counter
+					break;
+				case 0x4: c.tama6_pages[1][reg] = nib; break;
+				case 0x6: c.tama6_pages[2][reg] = nib; break;
+				default: break;
 			}
 			break;
+		}
 		default:
 			break;
 	}
@@ -989,7 +1191,9 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 				else if (mode == 0x4)
 				{
 					const uint8_t idx = static_cast<uint8_t>(s.sachen_outer_bank & 0x0F);
-					value = (idx < 0x0D) ? Tama5RtcNib(s, idx) : 0;
+					value = (idx < 0x0D)  ? Tama5RtcNib(s, idx)
+					      : (idx == 0x0D) ? static_cast<uint8_t>((s.rtc_latch ? 0x08 : 0) | (s.rtc_latched[4] & 0x04))
+					      :                 0;
 				}
 				if (s.rtc_select == 0x0D) value = static_cast<uint8_t>(value >> 4);
 				return static_cast<uint8_t>(value | 0xF0);
@@ -1618,7 +1822,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr < 0x4000)
 		{
-			uint32_t v = value & 0x7F;
+			uint32_t v = value & (c.mbc30 ? 0xFF : 0x7F);   // MBC30: 8-bit, 4 MiB
 			if (v == 0) v = 1;
 			s.rom_bank = v;
 		}
@@ -1822,7 +2026,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 			switch (s.rtc_select)
 			{
 				case 0xA: WriteSram(c, ((s.ram_bank & 0x03) * 0x2000u) + (addr - 0xA000u), value); break;
-				case 0xB: Huc3Command(s, value); break;  // RTC command (executes immediately)
+				case 0xB: Huc3Command(c, value); break;  // RTC command (executes immediately)
 				default:  break;                          // RO RAM / semaphore / IR / undefined
 			}
 		}

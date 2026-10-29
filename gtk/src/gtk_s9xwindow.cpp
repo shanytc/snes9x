@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <ctime>
 #include <filesystem>
 #include <unistd.h>
 #include <utility>
@@ -370,6 +371,25 @@ void Snes9xWindow::connect_signals()
             set_gb_boot_policy(i);
         });
     }
+
+    // Emulation -> Real Time Clock: where an MBC3/HuC3/TAMA5 cart's clock is saved. The clock
+    // moves to its new place with the next battery save.
+    auto rtc_toggle = [this](const char *name, bool separate) {
+        auto item = get_object<Gtk::RadioMenuItem>(name);
+        item->signal_toggled().connect([this, item, separate] {
+            if (refreshing_rtc_menu || !item->get_active())
+                return;
+            Settings.GBRTCSeparate = separate;
+            S9xSetInfoString(separate ? _("RTC: saved separately (.rtc)")
+                                      : _("RTC: saved in the battery save (.sav)"));
+        });
+    };
+    rtc_toggle("rtc_sav_item", false);
+    rtc_toggle("rtc_file_item", true);
+
+    get_object<Gtk::MenuItem>("rtc_settings_item")->signal_activate().connect([&] {
+        open_rtc_settings();
+    });
 
     for (int i = 0; i <= 4; i++)
     {
@@ -2746,6 +2766,16 @@ void Snes9xWindow::configure_widgets()
         refreshing_bios_menu = false;
     }
 
+    // Emulation -> Real Time Clock: only for a cart with a clock (MBC3, MBC30, HuC3, TAMA5).
+    const bool rtc_cart = gb_loaded && S9xSGBCartHasClock();
+    show_widget("rtc_item", rtc_cart);
+    if (rtc_cart)
+    {
+        refreshing_rtc_menu = true;
+        get_object<Gtk::RadioMenuItem>(Settings.GBRTCSeparate ? "rtc_file_item" : "rtc_sav_item")->set_active(true);
+        refreshing_rtc_menu = false;
+    }
+
     // Koei Voicer-kun audio CD: only offered while a supported game is loaded,
     // mirroring win32. Attach/eject toggle on whether a disc is mounted.
     const bool voicekun_supported = config->rom_loaded && S9xVoiceKunGameSupported();
@@ -3187,6 +3217,113 @@ void Snes9xWindow::set_gb_boot_policy(int policy)
 void Snes9xWindow::open_bios_manager()
 {
     S9xGtkBiosManagerDialog(window.get());
+}
+
+// Emulation -> Real Time Clock -> Settings: the PC's clock, or (RTC off) a date and time
+// picked to stand in for it, kept as Unix seconds and shown in local time.
+void Snes9xWindow::open_rtc_settings()
+{
+    pause_from_focus_change();
+
+    Gtk::Dialog dialog(_("RTC Settings"), *window.get(), true);
+    dialog.add_button(_("_Cancel"), Gtk::RESPONSE_CANCEL);
+    dialog.add_button(_("_OK"), Gtk::RESPONSE_OK);
+    dialog.set_default_response(Gtk::RESPONSE_OK);
+
+    auto vbox = Gtk::manage(new Gtk::VBox);
+    vbox->set_spacing(6);
+    vbox->set_border_width(12);
+
+    auto on_check = Gtk::manage(new Gtk::CheckButton(_("RTC _on: the cart's clock follows the PC's clock"), true));
+    on_check->set_active(!Settings.GBRTCOff);
+    vbox->pack_start(*on_check, Gtk::PACK_SHRINK);
+
+    time_t picked = Settings.GBRTCTime ? (time_t)Settings.GBRTCTime : time(nullptr);
+    struct tm local = {};
+    localtime_r(&picked, &local);
+
+    auto frame = Gtk::manage(new Gtk::Frame(_("Date")));
+    auto grid = Gtk::manage(new Gtk::Grid);
+    grid->set_row_spacing(6);
+    grid->set_column_spacing(6);
+    grid->set_border_width(12);
+
+    auto calendar = Gtk::manage(new Gtk::Calendar);
+    calendar->select_month(local.tm_mon, local.tm_year + 1900);
+    calendar->select_day(local.tm_mday);
+    grid->attach(*calendar, 0, 0, 6, 1);
+
+    auto time_label = Gtk::manage(new Gtk::Label(_("Time:")));
+    time_label->set_halign(Gtk::ALIGN_END);
+    grid->attach(*time_label, 0, 1, 1, 1);
+
+    const int start[3] = { local.tm_hour, local.tm_min, local.tm_sec };
+    const int top[3]   = { 23, 59, 59 };
+    std::array<Gtk::SpinButton *, 3> hms{};
+    for (int i = 0; i < 3; i++)
+    {
+        auto spin = Gtk::manage(new Gtk::SpinButton(
+            Gtk::Adjustment::create(start[i], 0.0, top[i], 1.0, 10.0, 0.0)));
+        spin->set_numeric(true);
+        spin->set_wrap(true);
+        // Two digits, as a clock shows them.
+        spin->signal_output().connect([spin] {
+            spin->set_text(fmt::format("{:02}", spin->get_value_as_int()));
+            return true;
+        });
+        hms[i] = spin;
+        grid->attach(*spin, 1 + i * 2, 1, 1, 1);
+        if (i < 2)
+            grid->attach(*Gtk::manage(new Gtk::Label(":")), 2 + i * 2, 1, 1, 1);
+    }
+
+    frame->add(*grid);
+    vbox->pack_start(*frame, Gtk::PACK_SHRINK);
+
+    auto note = Gtk::manage(new Gtk::Label(
+        _("With the RTC off, this date and time stand in for the PC's clock: "
+          "the game's clock runs only while it plays, and moving the date forward "
+          "runs it forward the next time the game loads.")));
+    note->set_line_wrap(true);
+    note->set_max_width_chars(50);
+    note->set_halign(Gtk::ALIGN_START);
+    vbox->pack_start(*note, Gtk::PACK_SHRINK);
+
+    // The pickers only matter with the RTC off.
+    auto sync_sensitive = [on_check, frame] {
+        frame->set_sensitive(!on_check->get_active());
+    };
+    on_check->signal_toggled().connect(sync_sensitive);
+    sync_sensitive();
+
+    dialog.get_content_area()->pack_start(*vbox, Gtk::PACK_EXPAND_WIDGET);
+    dialog.show_all();
+
+    if (dialog.run() == Gtk::RESPONSE_OK)
+    {
+        guint year, month, day;
+        calendar->get_date(year, month, day);
+        // From 1997, when the first RTC carts came out, to where 32-bit Unix
+        // seconds end.
+        year = std::clamp(year, 1997u, 2105u);
+
+        struct tm t = {};
+        t.tm_year  = (int)year - 1900;
+        t.tm_mon   = (int)month;
+        t.tm_mday  = (int)day;
+        t.tm_hour  = hms[0]->get_value_as_int();
+        t.tm_min   = hms[1]->get_value_as_int();
+        t.tm_sec   = hms[2]->get_value_as_int();
+        t.tm_isdst = -1;
+        const time_t secs = mktime(&t);
+
+        Settings.GBRTCOff  = !on_check->get_active();
+        Settings.GBRTCTime = secs > 0 ? (uint32)secs : 0;
+        S9xSetInfoString(Settings.GBRTCOff ? _("RTC off: the picked date and time stand in for the PC's clock")
+                                           : _("RTC on: the PC's clock"));
+    }
+
+    unpause_from_focus_change();
 }
 
 // Load the running game from its file(s) again, the way File -> Load Game or

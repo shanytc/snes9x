@@ -48,6 +48,10 @@ struct Cart
 	bool                  mbc1_multicart = false;
 	// Duz "2-in-1" MBC3 multicart: $C0 to $0000 unlocks an $A000/$A100 register port whose reg $A3<<1 is the ROM base bank added to every access.
 	bool                  duz_multicart  = false;
+	// MBC30 (Pokemon Crystal, Japan): an MBC3 with twice the reach, an 8-bit
+	// ROM bank for 4 MiB. Told apart, as SameBoy does, by ROM over 2 MiB or
+	// RAM over 32 KiB; static per ROM like mbc1_multicart.
+	bool                  mbc30          = false;
 	// "23 in 1" MBC5 multicart: $5001/$5002 latch a base bank and a bank mask,
 	// both in 2-bank units (register value << 1).
 	bool                  mbc5_multicart = false;
@@ -55,6 +59,15 @@ struct Cart
 	// $0147 was garbage but a real logo+entry ran it as plain MBC1
 	// (Gowin / SONIC5 / Xploder-style flat unlicensed boards).
 	bool                  flat_unlicensed = false;
+	// HuC3 alarm registers ($58-$5F; the speaker that sounds it is not
+	// emulated). Games can't read them back, so savestates leave them out;
+	// the battery save's clock block carries them.
+	uint16_t              huc3_alarm_minutes = 0;
+	uint16_t              huc3_alarm_days    = 0;
+	bool                  huc3_alarm_on      = false;
+	// TAMA5's TAMA6 alarm page and two RAM pages (the timer page is in
+	// MbcState). Like the HuC3 alarm, only the battery save carries them.
+	uint8_t               tama6_pages[3][13] = {};
 	// Scrambled-unlicensed mapper state (BBD/Sintax/VF etc.), v7 savestates.
 	MbcUnl                unl;
 	// Vast Fame "A" boards seed the protection running value with $10.
@@ -78,8 +91,21 @@ void CartUnload(Cart &c);
 bool CartSaveBattery(const Cart &c);
 bool CartLoadBattery(Cart &c);
 
-bool CartSaveBatteryToPath(const Cart &c, const char *path);
-bool CartLoadBatteryFromPath(Cart &c, const char *path);
+// An MBC3 cart with its RTC, a HuC3 or a TAMA5: a clock the battery save carries.
+bool CartHasClock(const Cart &c);
+
+// Where the clock goes and what "now" is. The clock follows the RAM in the
+// .sav (MBC3: BGB/VBA-M's 48 bytes, 44 also read; HuC3: SameBoy's 17; TAMA5:
+// mGBA's 40), or sits in a .rtc beside it. `now` (Unix seconds, -1 = the PC's
+// clock) is written with it, and on load the clock runs forward by the time since.
+struct CartRtcOptions
+{
+	bool    separate = false;
+	int64_t now      = -1;
+};
+
+bool CartSaveBatteryToPath(const Cart &c, const char *path, const CartRtcOptions &rtc = CartRtcOptions());
+bool CartLoadBatteryFromPath(Cart &c, const char *path, const CartRtcOptions &rtc = CartRtcOptions());
 
 // While the boot ROM is mapped, a Sachen cart's mapper feeds the boot the
 // Nintendo logo at 0x0104-0x0133 (logo-less single-game carts store none, and

@@ -691,6 +691,17 @@
 #define ID_EMULATION_BIOS               44345
 // One per S9xGBBootPolicy, in enum order; the handler indexes off POLICY0.
 #define ID_EMULATION_BIOS_POLICY0       44370
+/* Emulation > Real Time Clock (Game Boy MBC3/HuC3/TAMA5 clocks) */
+#define ID_EMULATION_GB_RTC             40341
+#define ID_EMULATION_GB_RTC_SAV         40342
+#define ID_EMULATION_GB_RTC_FILE        40343
+#define ID_EMULATION_GB_RTC_SETTINGS    40344
+#define IDD_GB_RTC                      203
+#define IDC_GBRTC_ON                    3722
+#define IDC_GBRTC_DATE                  3723
+#define IDC_GBRTC_TIME                  3724
+#define IDC_GBRTC_DATE_LABEL            3725
+#define IDC_GBRTC_TIME_LABEL            3726
 #define ID_TESTS_ACIDTESTS          44349
 #define ID_FILE_BIOSMANAGER             44369
 #define IDD_BIOSMANAGER                 191

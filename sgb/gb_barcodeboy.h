@@ -52,6 +52,7 @@ struct BarcodeBoyCard
 	const char *kana;   // as printed on the card, UTF-8
 	const char *code;   // 13 digits
 	const char *image;  // "<game folder>/<the card's first code>"
+	const char *group = nullptr;  // a branch of its own within the game
 };
 const BarcodeBoyCard *BarcodeBoyCards(int *count);
 

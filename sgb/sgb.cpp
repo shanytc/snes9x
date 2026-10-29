@@ -25,6 +25,7 @@
 #include "gb_infrared.h"
 #include "gb_kisslink.h"
 #include "gb_barcodeboy.h"
+#include "gb_bardigun.h"
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
@@ -3459,7 +3460,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v13: add mem.cart_ir, the HuC1 cartridge's infrared LED.
 // v14: add the GB KISS LINK's progress through its job.
 // v15: add the Barcode Boy's side of the wire.
-constexpr uint32_t SGB_STATE_VERSION = 15;
+// v16: add the Bardigun card reader's.
+constexpr uint32_t SGB_STATE_VERSION = 16;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3817,6 +3819,15 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		if (c.mode == IoMode::Save) BarcodeBoyStateSave(bb.data());
 		IoBytes(c, bb.data(), bb.size());
 		if (c.mode == IoMode::Load && c.ok) BarcodeBoyStateLoad(bb.data());
+	}
+
+	// v16: the Bardigun reader's swipe in flight, and a card waiting in it.
+	if (c.version >= 16)
+	{
+		std::vector<uint8_t> bd(BardigunStateBytes());
+		if (c.mode == IoMode::Save) BardigunStateSave(bd.data());
+		IoBytes(c, bd.data(), bd.size());
+		if (c.mode == IoMode::Load && c.ok) BardigunStateLoad(bd.data());
 	}
 }
 
@@ -4982,9 +4993,22 @@ bool S9xSGBBarcodeBoyHasPort(void)
 	return !(Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1);
 }
 
-void S9xSGBBarcodeBoyConnect(bool on)       { SGB::BarcodeBoyConnect(on); }
+// One scanner on the port at a time: plugging one in unplugs the other.
+void S9xSGBBarcodeBoyConnect(bool on)
+{
+	if (on) SGB::BardigunConnect(false);
+	SGB::BarcodeBoyConnect(on);
+}
+
 bool S9xSGBBarcodeBoyConnected(void)        { return SGB::BarcodeBoyConnected(); }
-bool S9xSGBBarcodeBoyScan(const char *code) { return SGB::BarcodeBoyScan(code); }
+
+bool S9xSGBBarcodeBoyScan(const char *code)
+{
+	if (!SGB::BarcodeBoyScan(code)) return false;
+	SGB::BardigunConnect(false);
+	return true;
+}
+
 bool S9xSGBBarcodeBoyPending(void)          { return SGB::BarcodeBoyPending(); }
 const char *S9xSGBBarcodeBoyLastCode(void)  { return SGB::BarcodeBoyLastCode(); }
 unsigned S9xSGBBarcodeBoyReadCount(void)    { return SGB::BarcodeBoyReadCount(); }
@@ -4994,6 +5018,32 @@ const char *S9xSGBBarcodeBoyGame(void)
 	SGB::Emulator &prim = SGB::Instance();
 	if (!prim.HasROM()) return nullptr;
 	return SGB::BarcodeBoyGame(prim.DebugImpl()->cart.header.title);
+}
+
+void S9xSGBBardigunConnect(bool on)
+{
+	if (on) SGB::BarcodeBoyConnect(false);
+	SGB::BardigunConnect(on);
+}
+
+bool S9xSGBBardigunConnected(void)        { return SGB::BardigunConnected(); }
+
+bool S9xSGBBardigunScan(const char *code)
+{
+	if (!SGB::BardigunScan(code)) return false;
+	SGB::BarcodeBoyConnect(false);
+	return true;
+}
+
+bool S9xSGBBardigunPending(void)          { return SGB::BardigunPending(); }
+const char *S9xSGBBardigunLastCode(void)  { return SGB::BardigunLastCode(); }
+unsigned S9xSGBBardigunReadCount(void)    { return SGB::BardigunReadCount(); }
+
+const char *S9xSGBBardigunGame(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) return nullptr;
+	return SGB::BardigunGame(prim.DebugImpl()->cart.header.title);
 }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }

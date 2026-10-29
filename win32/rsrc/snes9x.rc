@@ -1721,6 +1721,12 @@ BEGIN
             MENUITEM "&Scan Barcode...",            ID_INPUT_BARCODEBOY_SCAN,MFT_STRING,MFS_ENABLED
             MENUITEM "Scan &Last Barcode Again",    ID_INPUT_BARCODEBOY_RESCAN,MFT_STRING,MFS_ENABLED
         END
+        POPUP "Barcode Taisen Bar&digun",       0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&Connect to Link Port",       ID_INPUT_BARDIGUN_CONNECT,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Scan Barcode...",            ID_INPUT_BARDIGUN_SCAN,MFT_STRING,MFS_ENABLED
+            MENUITEM "Scan &Last Barcode Again",    ID_INPUT_BARDIGUN_RESCAN,MFT_STRING,MFS_ENABLED
+        END
     END
     POPUP "&Sound",                         0,MFT_STRING,MFS_ENABLED
     BEGIN
@@ -1934,6 +1940,29 @@ CAPTION "Barcode Boy"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     LTEXT           "Enter a card's 13-digit (JAN/EAN-13) barcode, pick a known card, or read it with a camera or from a picture.",IDC_STATIC,6,6,288,26
+    RTEXT           "Barcode:",IDC_STATIC,6,38,34,8
+    EDITTEXT        IDC_BARCODEBOY_EDIT,44,36,132,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "&Random",IDC_BARCODEBOY_RANDOM,180,36,50,14
+    PUSHBUTTON      "From &Image...",IDC_BARCODEBOY_IMAGE,234,36,60,14
+    LTEXT           "",IDC_BARCODEBOY_STATUS,44,54,250,18
+    RTEXT           "Camera:",IDC_STATIC,6,78,34,8
+    COMBOBOX        IDC_BARCODEBOY_CAMERA,44,76,186,100,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Start &Camera",IDC_BARCODEBOY_CAMERA_TOGGLE,234,76,60,14
+    CONTROL         "",IDC_BARCODEBOY_PREVIEW,"Static",SS_OWNERDRAW | SS_SUNKEN,44,94,250,132
+    LTEXT           "Fin&d a card:",IDC_STATIC,304,6,180,8
+    EDITTEXT        IDC_BARCODEBOY_SEARCH,304,18,180,14,ES_AUTOHSCROLL
+    CONTROL         "",IDC_BARCODEBOY_CARDS,"SysTreeView32",TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_DISABLEDRAGDROP | TVS_SHOWSELALWAYS | WS_BORDER | WS_HSCROLL | WS_TABSTOP,304,36,180,190
+    LTEXT           "The game reads the card the next time it asks for one.",IDC_STATIC,6,230,288,26
+    DEFPUSHBUTTON   "&Scan",IDOK,400,242,40,14
+    PUSHBUTTON      "Cancel",IDCANCEL,444,242,40,14
+END
+
+IDD_BARDIGUN DIALOGEX 0, 0, 490, 262
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Bardigun Card Reader"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    LTEXT           "Enter a card's 13-digit (JAN/EAN-13) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture. Shop barcodes work too.",IDC_STATIC,6,6,288,26
     RTEXT           "Barcode:",IDC_STATIC,6,38,34,8
     EDITTEXT        IDC_BARCODEBOY_EDIT,44,36,132,14,ES_AUTOHSCROLL
     PUSHBUTTON      "&Random",IDC_BARCODEBOY_RANDOM,180,36,50,14

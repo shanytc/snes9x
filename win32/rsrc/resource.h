@@ -1036,6 +1036,12 @@
 #define IDC_BARCODEBOY_CAMERA_TOGGLE    3720
 #define IDC_BARCODEBOY_SEARCH           3721
 
+/* Input > Bardigun Card Reader: its dialog has the Barcode Boy's controls */
+#define ID_INPUT_BARDIGUN_CONNECT       40345
+#define ID_INPUT_BARDIGUN_SCAN          40346
+#define ID_INPUT_BARDIGUN_RESCAN        40347
+#define IDD_BARDIGUN                    204
+
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400
 #define ID_NSS_COIN1                    44401
@@ -1090,7 +1096,7 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        204
+#define _APS_NEXT_RESOURCE_VALUE        205
 #define _APS_NEXT_COMMAND_VALUE         44457
 #define _APS_NEXT_CONTROL_VALUE         3729
 #define _APS_NEXT_SYMED_VALUE           101

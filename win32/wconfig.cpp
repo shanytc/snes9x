@@ -1205,6 +1205,7 @@ void WinRegisterConfigItems()
 	AddBoolC("RTCOff", Settings.GBRTCOff, false, "false (default) = the cartridge clock follows the PC's clock; true = the RTC is off and RTCTime stands in for the PC's clock (Emulation -> Real Time Clock -> Settings)");
 	AddUIntC("RTCTime", Settings.GBRTCTime, 0, "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
 	AddUIntC("RTCHuC3Format", Settings.GBRTCHuC3Format, 0, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
+	AddBoolC("CartSpeaker", Settings.GBCartSpeaker, true, "true (default) to play a HuC3 cartridge's own speaker (Robopon's event beeps) through the sound output (Emulation -> Real Time Clock -> Cartridge Speaker)");
 	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Link. Only worth changing if something else on this PC already owns 8765.");
 	AddBoolC("LinkSplitScreen", GBLinkSplitScreen, false, "Link Current Game runs its 2-4 players split screen in this window instead of spawning instances. BIOS-less GB mode only.");
 	AddBoolC("LinkResetOnLink", GBLinkResetOnLink, true, "true to power-cycle the game when a link session starts (Emulation -> Game Boy Link -> Reset on Link). The other players always boot fresh.");

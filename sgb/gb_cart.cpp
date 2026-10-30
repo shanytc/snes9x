@@ -432,6 +432,11 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	c.mbc = MbcState();
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
+	c.huc3_tone = 0;
+	c.huc3_tone_on = false;
+	c.speaker_request = 0;
+	std::memset(c.huc3_ram, 0, sizeof c.huc3_ram);
+	std::memset(c.tama6_cells, 0xFF, sizeof c.tama6_cells);
 	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 
 	// ----- Header parse -----
@@ -709,6 +714,11 @@ void CartUnload(Cart &c)
 	c.mbc = MbcState();
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
+	c.huc3_tone = 0;
+	c.huc3_tone_on = false;
+	c.speaker_request = 0;
+	std::memset(c.huc3_ram, 0, sizeof c.huc3_ram);
+	std::memset(c.tama6_cells, 0xFF, sizeof c.tama6_cells);
 	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 	c.unl = MbcUnl();
 	c.vf_alt_board = false;

@@ -156,6 +156,10 @@ void MbcRtcAdvance(MbcState &s, int64_t seconds);
 uint16_t MbcHuc3Minutes(const MbcState &s);
 uint16_t MbcHuc3Days(const MbcState &s);
 void     MbcHuc3SetClock(MbcState &s, uint16_t minutes, uint16_t days);
+// The HuC3 alarm slot due at the clock's current minute: its tone + 1, or 0.
+uint8_t  MbcHuc3AlarmDue(const Cart &c);
+// The TAMA6 alarm entry due at the clock's current minute: its pattern (1-4), or 0.
+uint8_t  MbcTama6AlarmDue(const Cart &c);
 // TAMA5's TAMA6 timer page, registers 0-$C (one BCD nibble each); its 12-hour
 // flag, leap counter and alarm bit sit in rtc_latched[2..4], its run bit in
 // rtc_latch. Seed sets the page to `unix_time` in local time, running.

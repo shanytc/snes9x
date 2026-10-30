@@ -259,6 +259,7 @@ struct EmuConfig
     bool gb_rtc_off;
     uint32_t gb_rtc_time;
     int gb_rtc_huc3_format;
+    bool gb_cart_speaker;
 
     // BIOS Manager paths, indexed by S9xBiosSlot. Persisted under [BIOS].
     std::string bios_paths[S9X_NUM_BIOS_SLOTS];

@@ -108,6 +108,20 @@ struct ApuNoise
 	ApuEnvClock env;
 };
 
+// A cartridge's own piezo (HuC3 or TAMA5), mixed into the output. In states
+// from v17, so run-ahead and rewind carry a tone like the channels.
+struct ApuCartSpeaker
+{
+	uint8_t  tone    = 0;      // HuC3 tone playing + 1, 0 = none
+	uint8_t  pattern = 0;      // TAMA6 pattern playing (1-4), 0 = none
+	uint8_t  prog[24] = {};    // TAMA6 patterns: 4 x [next, 4 notes, 0]
+	uint32_t step    = 0;      // beeps, gaps and rests played so far
+	uint32_t left    = 0;      // output samples left in the current one
+	bool     on      = false;  // in a beep
+	double   hz      = 0.0;    // its pitch
+	double   phase   = 0.0;    // square wave phase, 0..1
+};
+
 struct Apu
 {
 	ApuSquare ch1, ch2;
@@ -123,6 +137,8 @@ struct Apu
 	// Host policy (not serialized): an NRx2 rewrite on a live channel may
 	// never raise its volume — see Nrx2Glitch.
 	bool      suppress_nrx2_glitch = false;
+	// Host policy (not serialized): Cartridge Speaker unticked, no tone starts.
+	bool      speaker_off = false;
 
 	// DIV-APU divider chain state.
 	uint8_t   div_divider    = 0;
@@ -196,6 +212,8 @@ struct Apu
 	// can read back (channel enables, the frame sequencer, wave position,
 	// the LFSR) still steps exactly as it would with the mixer running.
 	bool      discard_output = false;
+
+	ApuCartSpeaker speaker;
 };
 
 void ApuReset(Apu &a, bool cgb, bool post_boot = false);
@@ -215,6 +233,13 @@ void ApuSetOutputRate(Apu &a, int32_t rate);
 
 // Tell the APU the actual GB clock rate it's being stepped at. Idempotent.
 void ApuSetClockHz(Apu &a, int32_t hz);
+
+// Sound a HuC3 cartridge tone ($0-$F) on the cart's speaker, from the start
+// (a tone already playing carries on).
+void ApuSpeakerStart(Apu &a, uint8_t tone);
+// Chirp TAMA6 pattern 1-4 of `prog` (the chip's RAM pages, 2 x 12 nibbles).
+void ApuSpeakerStartTama(Apu &a, uint8_t pattern, const uint8_t prog[24]);
+void ApuSpeakerStop(Apu &a);
 
 // Host-side channel enable mask, bits 0..3 = CH1..CH4. UI policy only.
 void    ApuSetHostChannelMask(uint8_t mask);

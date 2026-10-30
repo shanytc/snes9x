@@ -79,10 +79,11 @@ jobs:
 
   # ------------------------------------------------------------------ Linux
   # Qt and GTK AppImages via the repo's Docker packaging scripts (Ubuntu
-  # 22.04 baseline for x86_64, Debian 12 for x86).
+  # 22.04 baseline for x86_64, Debian 12 for x86). 24.04, not latest: 26.04's
+  # Docker 29.4.2 leaves i386 containers no network (actions/runner-images#14790).
   linux:
     name: Linux ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -106,10 +107,10 @@ jobs:
           retention-days: 7
 
   # Portable libretro cores (Ubuntu 18.04 container, static libstdc++), the
-  # same script the releases use.
+  # same script the releases use. On 24.04 for the same i386 reason as above.
   linux-core:
     name: Linux libretro core ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

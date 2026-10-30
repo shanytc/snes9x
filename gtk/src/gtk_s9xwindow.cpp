@@ -386,6 +386,13 @@ void Snes9xWindow::connect_signals()
     };
     rtc_toggle("rtc_sav_item", false);
     rtc_toggle("rtc_file_item", true);
+    auto speaker = get_object<Gtk::CheckMenuItem>("rtc_speaker_item");
+    speaker->signal_toggled().connect([this, speaker] {
+        if (refreshing_rtc_menu)
+            return;
+        Settings.GBCartSpeaker = speaker->get_active();
+        S9xSetInfoString(Settings.GBCartSpeaker ? _("Cartridge speaker on") : _("Cartridge speaker off"));
+    });
 
     get_object<Gtk::MenuItem>("rtc_settings_item")->signal_activate().connect([&] {
         open_rtc_settings();
@@ -2824,6 +2831,7 @@ void Snes9xWindow::configure_widgets()
     {
         refreshing_rtc_menu = true;
         get_object<Gtk::RadioMenuItem>(Settings.GBRTCSeparate ? "rtc_file_item" : "rtc_sav_item")->set_active(true);
+        get_object<Gtk::CheckMenuItem>("rtc_speaker_item")->set_active(Settings.GBCartSpeaker);
         refreshing_rtc_menu = false;
     }
 

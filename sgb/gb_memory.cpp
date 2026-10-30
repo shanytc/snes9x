@@ -385,7 +385,34 @@ void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
 	{
 		if (m.ppu) PpuStep(*m.ppu, m, rt);
 		if (m.apu && !(stopped && !m.cgb_hw)) ApuStep(*m.apu, rt);
-		if (m.cart) MbcTickRtc(m.cart->mbc, rt);
+		if (m.cart && m.cart->mbc.type == MbcType::HuC3)
+		{
+			// A minute on: an alarm slot due now sounds the cart's speaker.
+			const uint16_t minute = MbcHuc3Minutes(m.cart->mbc);
+			MbcTickRtc(m.cart->mbc, rt);
+			if (m.apu && MbcHuc3Minutes(m.cart->mbc) != minute)
+				if (const uint8_t due = MbcHuc3AlarmDue(*m.cart))
+					ApuSpeakerStart(*m.apu, static_cast<uint8_t>(due - 1));
+		}
+		else if (m.cart && m.cart->mbc.type == MbcType::TAMA5)
+		{
+			// A minute on: the last minute's chirp ends, an entry due now starts one.
+			const uint8_t minute = MbcTama6Reg(m.cart->mbc, 0x2);
+			MbcTickRtc(m.cart->mbc, rt);
+			if (m.apu && MbcTama6Reg(m.cart->mbc, 0x2) != minute)
+			{
+				ApuSpeakerStop(*m.apu);
+				if (const uint8_t pattern = MbcTama6AlarmDue(*m.cart))
+				{
+					uint8_t prog[24];   // the chip's two RAM pages hold the patterns
+					std::memcpy(prog, m.cart->tama6_pages[1], 12);
+					std::memcpy(prog + 12, m.cart->tama6_pages[2], 12);
+					ApuSpeakerStartTama(*m.apu, pattern, prog);
+				}
+			}
+		}
+		else if (m.cart)
+			MbcTickRtc(m.cart->mbc, rt);
 	}
 }
 
@@ -501,7 +528,16 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 	if (addr < 0xC000)
 	{
 		if (IrCartSelected(m)) IrWriteCart(m, value);
-		else if (m.cart) MbcWrite(*m.cart, addr, value);
+		else if (m.cart)
+		{
+			MbcWrite(*m.cart, addr, value);
+			if (m.cart->speaker_request)   // a HuC3 tone sounds (or a chirp stops) right away
+			{
+				if (m.apu && m.cart->speaker_request == kSpeakerStop) ApuSpeakerStop(*m.apu);
+				else if (m.apu) ApuSpeakerStart(*m.apu, static_cast<uint8_t>(m.cart->speaker_request - 1));
+				m.cart->speaker_request = 0;
+			}
+		}
 		return;
 	}
 	if (addr < 0xD000)

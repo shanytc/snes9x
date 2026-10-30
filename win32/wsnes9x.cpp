@@ -4184,6 +4184,10 @@ LRESULT CALLBACK WinProc(
 			WinGBRtcSettings ();
 			RestoreSNESDisplay ();
 			break;
+		case ID_EMULATION_GB_RTC_SPEAKER:
+			Settings.GBCartSpeaker = !Settings.GBCartSpeaker;
+			S9xSetInfoString (Settings.GBCartSpeaker ? "Cartridge speaker on" : "Cartridge speaker off");
+			break;
 		case ID_OPTIONS_SETTINGS:
 			RestoreGUIDisplay ();
 			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_EMU_SETTINGS), hWnd, DlgEmulatorProc);
@@ -11128,9 +11132,13 @@ static void UpdateRtcPopup (bool show)
 	}
 
 	if (s_rtc)
+	{
 		CheckMenuRadioItem (s_rtc, ID_EMULATION_GB_RTC_SAV, ID_EMULATION_GB_RTC_FILE,
 		                    Settings.GBRTCSeparate ? ID_EMULATION_GB_RTC_FILE : ID_EMULATION_GB_RTC_SAV,
 		                    MF_BYCOMMAND);
+		CheckMenuItem (s_rtc, ID_EMULATION_GB_RTC_SPEAKER,
+		               MF_BYCOMMAND | (Settings.GBCartSpeaker ? MF_CHECKED : MF_UNCHECKED));
+	}
 }
 
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)

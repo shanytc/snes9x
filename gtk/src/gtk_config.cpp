@@ -259,6 +259,7 @@ int Snes9xConfig::load_defaults()
     Settings.GBRTCOff = false;
     Settings.GBRTCTime = 0;
     Settings.GBRTCHuC3Format = 0;
+    Settings.GBCartSpeaker = true;
     Settings.NSSDipSwitches = 0x0c;
     Settings.NSSJoypadWatchdog = false;
     Settings.SFCBoxOSDBackdrop = true;
@@ -527,6 +528,7 @@ int Snes9xConfig::save_config_file()
     // Unsigned to reach 2106, past where an int's range ends.
     outstring("RTCTime", std::to_string(Settings.GBRTCTime), "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
     outint("RTCHuC3Format", Settings.GBRTCHuC3Format, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads");
+    outbool("CartSpeaker", Settings.GBCartSpeaker, "true (default) to play a HuC3 cartridge's own speaker (Robopon's event beeps) through the sound output (Emulation -> Real Time Clock -> Cartridge Speaker)");
     outint("LinkPort", Settings.GBLinkPort, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
 
     section = "Input";
@@ -860,6 +862,7 @@ int Snes9xConfig::load_config_file()
     inint("RTCHuC3Format", Settings.GBRTCHuC3Format);
     if (Settings.GBRTCHuC3Format > 2)
         Settings.GBRTCHuC3Format = 0;
+    inbool("CartSpeaker", Settings.GBCartSpeaker);
 
     inint("LinkPort", Settings.GBLinkPort);
     if (Settings.GBLinkPort == 0)

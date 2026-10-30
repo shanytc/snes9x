@@ -1232,6 +1232,7 @@ bool Emulator::LoadROM(const uint8_t *data, size_t size, const char *path)
 	if (!CartLoad(impl_->cart, data, size, path))
 		return false;
 	impl_->has_rom = true;
+	ApuSpeakerStop(impl_->apu);
 	// The file as read; ColdReset puts the link-cable rows in when a session runs.
 	impl_->gb_pristine.clear();
 	impl_->sgb_bios_cart = false;
@@ -1343,6 +1344,7 @@ inline void BuildResetAttrBlkPacket(uint8_t pkt[16])
 void Emulator::UnloadROM()
 {
 	CartUnload(impl_->cart);
+	ApuSpeakerStop(impl_->apu);
 	impl_->has_rom = false;
 	impl_->cgb_mode = false;
 	impl_->gb_pristine.clear();
@@ -1837,12 +1839,22 @@ void Emulator::SetForceModel(uint8_t m)
 	impl_->force_model = (m <= 3) ? m : 0;
 }
 
+// Emulation > Real Time Clock > Cartridge Speaker: unticked, no HuC3 tone
+// starts and one playing stops.
+static void SyncCartSpeaker(Emulator::Impl &impl)
+{
+	impl.apu.speaker_off = !Settings.GBCartSpeaker;
+	if (impl.apu.speaker_off)
+		ApuSpeakerStop(impl.apu);
+}
+
 void Emulator::RunFrame()
 {
 	if (!impl_->has_rom) return;
 
 	impl_->ppu.frame_ready = false;
 	impl_->apu.suppress_nrx2_glitch = impl_->SuppressNrxGlitches();
+	SyncCartSpeaker(*impl_);
 
 	// Cycle budget per SNES frame depends on run mode and the user
 	// overclock/underclock knob:
@@ -2025,6 +2037,7 @@ void Emulator::RunCycles(int32_t tcycles)
 	if (!impl_->has_rom) return;
 	if (tcycles <= 0) return;
 	impl_->apu.suppress_nrx2_glitch = impl_->SuppressNrxGlitches();
+	SyncCartSpeaker(*impl_);
 
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read
@@ -3461,7 +3474,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v14: add the GB KISS LINK's progress through its job.
 // v15: add the Barcode Boy's side of the wire.
 // v16: add the Bardigun card reader's.
-constexpr uint32_t SGB_STATE_VERSION = 16;
+// v17: add the HuC3/TAMA5 cartridge speaker's tone in progress.
+constexpr uint32_t SGB_STATE_VERSION = 17;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3829,6 +3843,19 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		IoBytes(c, bd.data(), bd.size());
 		if (c.mode == IoMode::Load && c.ok) BardigunStateLoad(bd.data());
 	}
+
+	// v17: the cartridge speaker, mid-tone or silent.
+	if (c.version >= 17)
+	{
+		IoField(c, impl.apu.speaker.tone);
+		IoField(c, impl.apu.speaker.pattern);
+		IoBytes(c, impl.apu.speaker.prog, sizeof impl.apu.speaker.prog);
+		IoField(c, impl.apu.speaker.step);
+		IoField(c, impl.apu.speaker.left);
+		IoField(c, impl.apu.speaker.on);
+		IoField(c, impl.apu.speaker.hz);
+		IoField(c, impl.apu.speaker.phase);
+	}
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
@@ -3966,6 +3993,9 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 		                       : "State was saved in Super Game Boy Color mode");
 		return false;
 	}
+
+	if (version < 17)
+		ApuSpeakerStop(impl_->apu);
 
 	// Relink Memory's pointer fields — they were serialized as garbage.
 	impl_->mem.sgb_owner = this;

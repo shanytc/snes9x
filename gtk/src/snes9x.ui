@@ -2029,6 +2029,14 @@
                               </object>
                             </child>
                             <child>
+                              <object class="GtkCheckMenuItem" id="rtc_speaker_item">
+                                <property name="label" translatable="yes">_Cartridge Speaker</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
                               <object class="GtkMenuItem" id="rtc_settings_item">
                                 <property name="label" translatable="yes">_Settings…</property>
                                 <property name="visible">True</property>

@@ -151,6 +151,7 @@ class EmuMainWindow : public QMainWindow
     QAction *rtc_menu_action = nullptr;
     QAction *rtc_sav_action = nullptr;
     QAction *rtc_file_action = nullptr;
+    QAction *rtc_speaker_action = nullptr;
     void refreshRtcMenu();
     void setRtcSeparate(bool separate);
     void openRtcSettings();

@@ -3,7 +3,7 @@
 
 This is the un-official source code fork for the Snes9x project.
 
-Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for additional information.
+Please check our [Wiki](https://github.com/shanytc/snes9x/wiki) or the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for additional information.
 
 ## SuperSnes9x Features:
 - Super FX 3 (FX3) support for the 2026 LRG releases, with cycle-accurate GSU timing
@@ -25,6 +25,7 @@ Please check the official [Wiki](https://github.com/snes9xgit/snes9x/wiki) for a
 - Run-Ahead (Input lag reduction)
 - [Lua scripting](docs/lua-scripting.md) - SuperSnes9x API, Editor & Debugger
 - Color Correction Support / Native CRT Colors
+- Barcodes - Barcode Battler II, Barcode Boy, Barcode Taisen Bardigun
 - SDL Support
 - Multi-Language Pack
 - 100% Acid Tests support for gbc/gb/sgb (Emulator [shootout](https://tomek.rekawek.eu/GBEmulatorShootout/))

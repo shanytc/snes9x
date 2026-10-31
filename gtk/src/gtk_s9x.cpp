@@ -19,6 +19,7 @@
 #include "gtk_control.h"
 #include "gtk_sound.h"
 #include "gtk_audio_waveform.h"
+#include "gtk_barcode_battler.h"
 #include "gtk_ppu_viewer.h"
 #include "gtk_display.h"
 #include "gtk_netplay.h"
@@ -164,6 +165,9 @@ int S9xOpenROM(const char *rom_filename)
     // A recording belongs to one game: the next one may have another frame
     // rate or screen size. (LoadROM itself ends any movie.)
     S9xAVIStop();
+
+    // The Barcode Battler's scan dialog was for the game this load replaces.
+    S9xCloseBarcodeBattlerDialog();
 
     if (gui_config->rom_loaded)
     {

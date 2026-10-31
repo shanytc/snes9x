@@ -2,6 +2,7 @@
 #include "win32_webcam.h"
 #include "wlocale.h"
 #include "rsrc/resource.h"
+#include "win32_display.h"
 
 #include "../snes9x.h"
 #include "../display.h"
@@ -29,6 +30,7 @@ namespace {
 
 const UINT_PTR kCameraTimer = 1;
 
+HWND                       g_dlg = nullptr;
 bool                       g_cameraOn = false;
 std::vector<unsigned char> g_frame;
 int                        g_frameW = 0;
@@ -679,19 +681,45 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 					}
 					return TRUE;
 
+				// Scans and stays open: the game runs on behind it.
 				case IDOK:
+				{
+					if (Settings.StopEmulation || !S9xBarcodeBattlerGameSupported())
+					{
+						SetDlgItemText(hDlg, IDC_BARCODE_STATUS, TEXT("The running game doesn't read the Barcode Battler."));
+						return TRUE;
+					}
 					if (!S9xBarcodeBattlerScan(DigitsOf(hDlg).c_str()))
 						return TRUE;
-					StopCamera(hDlg);
-					EndDialog(hDlg, IDOK);
+
+					char msg[64];
+					snprintf(msg, sizeof(msg), "Barcode Battler: %s scanned", S9xBarcodeBattlerLastCode());
+					S9xSetInfoString(msg);
+					TCHAR status[64];
+					_stprintf(status, TEXT("Scanned %hs."), S9xBarcodeBattlerLastCode());
+					SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
 					return TRUE;
+				}
 
 				case IDCANCEL:
 					StopCamera(hDlg);
-					EndDialog(hDlg, IDCANCEL);
+					DestroyWindow(hDlg);
+					RestoreSNESDisplay();
 					return TRUE;
 			}
 			break;
+
+		// Modeless: the frame's X button has to close the dialog itself.
+		case WM_CLOSE:
+			SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+			return TRUE;
+
+		// Also reached at app teardown, where the parent takes the dialog down
+		// and the camera is stopped on the way out.
+		case WM_DESTROY:
+			g_cameraOn = false;
+			g_dlg = nullptr;
+			return TRUE;
 	}
 
 	return FALSE;
@@ -699,16 +727,33 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 
 } // namespace
 
-bool WinBarcodeBattlerDialog(HWND parent)
+void WinShowBarcodeBattlerDialog(HWND parent)
 {
+	if (g_dlg)
+	{
+		ShowWindow(g_dlg, SW_RESTORE);
+		SetForegroundWindow(g_dlg);
+		return;
+	}
+
 	INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TREEVIEW_CLASSES };
 	InitCommonControlsEx(&icc);
 
-	if (DialogBox(g_hInst, MAKEINTRESOURCE(IDD_BARCODE_BATTLER), parent, DlgBarcodeBattler) != IDOK)
-		return false;
+	RestoreGUIDisplay();
+	g_dlg = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_BARCODE_BATTLER), parent, DlgBarcodeBattler);
+	if (g_dlg)
+		ShowWindow(g_dlg, SW_SHOW);
+	else
+		RestoreSNESDisplay();
+}
 
-	char msg[64];
-	snprintf(msg, sizeof(msg), "Barcode Battler: %s scanned", S9xBarcodeBattlerLastCode());
-	S9xSetInfoString(msg);
-	return true;
+HWND WinBarcodeBattlerDialog()
+{
+	return g_dlg;
+}
+
+void WinCloseBarcodeBattlerDialog()
+{
+	if (g_dlg)
+		SendMessage(g_dlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
 }

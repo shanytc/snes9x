@@ -63,8 +63,8 @@ QString cardLabel(const S9xBarcodeCard *cards, int i, int end)
 
 } // namespace
 
-BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent)
-    : QDialog(parent)
+BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent, std::function<bool()> reads)
+    : QDialog(parent), game_reads(std::move(reads))
 {
     setWindowTitle(tr("Barcode Battler II"));
     setAcceptDrops(true);
@@ -128,7 +128,7 @@ BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent)
     note->setWordWrap(true);
     layout->addWidget(note);
 
-    auto buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
+    auto buttons = new QDialogButtonBox(QDialogButtonBox::Close);
     scan_button = buttons->addButton(tr("&Scan"), QDialogButtonBox::AcceptRole);
     scan_button->setDefault(true);
     layout->addWidget(buttons);
@@ -446,12 +446,19 @@ void BarcodeBattlerDialog::done(int result)
     QDialog::done(result);
 }
 
+// Scans and stays open: the game runs on behind it.
 void BarcodeBattlerDialog::accept()
 {
+    if (!game_reads())
+    {
+        status_label->setText(tr("The running game doesn't read the Barcode Battler."));
+        return;
+    }
+
     const QByteArray code = code_edit->text().toLatin1();
     if (!S9xBarcodeBattlerScan(code.constData()))
         return;
 
     S9xSetInfoString(tr("Barcode Battler: %1 scanned").arg(S9xBarcodeBattlerLastCode()).toUtf8().constData());
-    QDialog::accept();
+    status_label->setText(tr("Scanned %1.").arg(S9xBarcodeBattlerLastCode()));
 }

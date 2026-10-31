@@ -754,10 +754,9 @@ void Snes9xWindow::connect_signals()
                                      : _("Barcode Battler II disconnected"));
     });
 
+    // Modeless: the game runs on while cards are browsed and scanned.
     get_object<Gtk::MenuItem>("barcode_battler_scan_item")->signal_activate().connect([this] {
-        pause_from_focus_change();
-        S9xBarcodeBattlerDialog(*window.get());
-        unpause_from_focus_change();
+        S9xShowBarcodeBattlerDialog(*window.get());
     });
 
     get_object<Gtk::MenuItem>("barcode_battler_rescan_item")->signal_activate().connect([this] {

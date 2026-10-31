@@ -1827,12 +1827,16 @@ void EmuMainWindow::createWidgets()
             S9xSetInfoString(checked ? "Barcode Battler II connected to port 2"
                                      : "Barcode Battler II disconnected");
     });
+    // Modeless: the game runs on while cards are browsed and scanned.
     auto barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
     QObject::connect(barcode_scan_action, &QAction::triggered, [&] {
-        app.pause();
-        BarcodeBattlerDialog dialog(this);
-        dialog.exec();
-        app.unpause();
+        if (!barcode_dialog)
+            barcode_dialog = std::make_unique<BarcodeBattlerDialog>(this, [this] {
+                return app.isCoreActive() && S9xBarcodeBattlerGameSupported();
+            });
+        barcode_dialog->show();
+        barcode_dialog->raise();
+        barcode_dialog->activateWindow();
     });
     auto barcode_rescan_action = barcode_menu->addAction(tr("Scan &Last Barcode Again"));
     QObject::connect(barcode_rescan_action, &QAction::triggered, [&] {
@@ -2832,6 +2836,8 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+    if (barcode_dialog)
+        barcode_dialog->close();
 }
 
 void EmuMainWindow::showLuaWindow()

@@ -2568,9 +2568,7 @@ LRESULT CALLBACK WinProc(
 		case ID_INPUT_BARCODE_SCAN:
 			if (Settings.StopEmulation || !S9xBarcodeBattlerGameSupported())
 				break;
-			RestoreGUIDisplay();
-			WinBarcodeBattlerDialog(GUI.hWnd);
-			RestoreSNESDisplay();
+			WinShowBarcodeBattlerDialog(GUI.hWnd);
 			break;
 		case ID_INPUT_BARCODE_RESCAN:
 		{
@@ -4940,6 +4938,8 @@ void S9xOnSNESPadRead()
 					continue;
 				if (WinAcidTestsDialog() && IsDialogMessage (WinAcidTestsDialog(), &msg))
 					continue;
+				if (WinBarcodeBattlerDialog() && IsDialogMessage (WinBarcodeBattlerDialog(), &msg))
+					continue;
 				if (WinViewerTakesHotkey (msg))
 					continue;
 
@@ -5817,6 +5817,8 @@ int WINAPI WinMain(
             if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
                 continue;
             if (WinAcidTestsDialog() && IsDialogMessage (WinAcidTestsDialog(), &msg))
+                continue;
+            if (WinBarcodeBattlerDialog() && IsDialogMessage (WinBarcodeBattlerDialog(), &msg))
                 continue;
             if (WinViewerTakesHotkey (msg))
                 continue;
@@ -7188,6 +7190,9 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		s_colorDlgUserClose = true;
 		DestroyWindow(s_hColorDlg);
 	}
+
+	// The Barcode Battler's scan dialog was for the game this load replaces.
+	WinCloseBarcodeBattlerDialog();
 
 	TCHAR	msu1_renamed[MAX_PATH];
 

@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -27,13 +28,15 @@ struct S9xBarcodeCard;
  * the Game Boy Camera uses; the dialog runs it while open if it isn't
  * already, and puts it back as the settings have it on close. A card's
  * photos show from a "battler" folder in the config folder or beside the
- * executable (common/desktop/barcode_card_photos.hpp). */
+ * executable (common/desktop/barcode_card_photos.hpp). Modeless: Scan leaves
+ * it open, the game running on behind it. */
 class BarcodeBattlerDialog : public QDialog
 {
     Q_OBJECT
 
   public:
-    BarcodeBattlerDialog(QWidget *parent);
+    // game_reads: whether the running game reads the Barcode Battler now.
+    BarcodeBattlerDialog(QWidget *parent, std::function<bool()> game_reads);
     ~BarcodeBattlerDialog();
 
   private:
@@ -62,6 +65,7 @@ class BarcodeBattlerDialog : public QDialog
     QLineEdit *search_edit;
     QTreeWidget *card_tree;
     QTimer camera_timer;
+    std::function<bool()> game_reads;
     bool camera_on = false;
     std::vector<unsigned char> frame;
     std::string photo_dir;

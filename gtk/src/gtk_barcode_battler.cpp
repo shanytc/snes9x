@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <string.h>
 #include <vector>
 
@@ -88,7 +89,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
 {
   public:
     BarcodeBattlerDialog(Gtk::Window &parent)
-        : Gtk::Dialog(_("Barcode Battler II"), parent, true)
+        : Gtk::Dialog(_("Barcode Battler II"), parent, false)
     {
         auto content = get_content_area();
         content->set_spacing(8);
@@ -187,9 +188,21 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         right->pack_start(card_scroll, Gtk::PACK_EXPAND_WIDGET);
         columns->pack_start(*right, Gtk::PACK_SHRINK);
 
-        add_button(Gtk::StockID("gtk-cancel"), Gtk::RESPONSE_CANCEL);
+        add_button(_("_Close"), Gtk::RESPONSE_CLOSE);
         scan_button = add_button(_("_Scan"), Gtk::RESPONSE_ACCEPT);
         set_default_response(Gtk::RESPONSE_ACCEPT);
+
+        // Modeless: Scan leaves it open; Close and the frame's X only hide it.
+        signal_response().connect([this](int response) {
+            if (response == Gtk::RESPONSE_ACCEPT)
+                scan();
+            else
+                close_dialog();
+        });
+        signal_delete_event().connect([this](GdkEventAny *) -> bool {
+            close_dialog();
+            return true;
+        });
 
         code_entry.signal_changed().connect([this] { code_edited(); });
         random_button->signal_clicked().connect([this] {
@@ -249,12 +262,28 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         stop_camera();
     }
 
-    bool send()
+    void close_dialog()
     {
-        return S9xBarcodeBattlerScan(code_entry.get_text().c_str());
+        stop_camera();
+        hide();
     }
 
   private:
+    // Scans and stays open: the game runs on behind it.
+    void scan()
+    {
+        if (!gui_config->rom_loaded || !S9xBarcodeBattlerGameSupported())
+        {
+            status_label.set_text(_("The running game doesn't read the Barcode Battler."));
+            return;
+        }
+        if (!S9xBarcodeBattlerScan(code_entry.get_text().c_str()))
+            return;
+
+        S9xSetInfoString(fmt::format("Barcode Battler: {} scanned", S9xBarcodeBattlerLastCode()).c_str());
+        status_label.set_text(fmt::format(fmt::runtime(_("Scanned {}.")), S9xBarcodeBattlerLastCode()));
+    }
+
     static const int PREVIEW_WIDTH = 320;
     static const int PREVIEW_HEIGHT = 240;
 
@@ -591,20 +620,19 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     std::vector<Glib::RefPtr<Gdk::Pixbuf>> photos;
 };
 
+std::unique_ptr<BarcodeBattlerDialog> barcode_dialog;
+
 } // namespace
 
-bool S9xBarcodeBattlerDialog(Gtk::Window &parent)
+void S9xShowBarcodeBattlerDialog(Gtk::Window &parent)
 {
-    BarcodeBattlerDialog dialog(parent);
+    if (!barcode_dialog)
+        barcode_dialog = std::make_unique<BarcodeBattlerDialog>(parent);
+    barcode_dialog->present();
+}
 
-    while (dialog.run() == Gtk::RESPONSE_ACCEPT)
-    {
-        if (dialog.send())
-        {
-            S9xSetInfoString(fmt::format("Barcode Battler: {} scanned", S9xBarcodeBattlerLastCode()).c_str());
-            return true;
-        }
-    }
-
-    return false;
+void S9xCloseBarcodeBattlerDialog()
+{
+    if (barcode_dialog)
+        barcode_dialog->close_dialog();
 }

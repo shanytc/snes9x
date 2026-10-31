@@ -12,7 +12,8 @@
 
 /* Photos of a barcode reader's known cards (barcodereaders.h): JPEG XL files
  * <image><side> in the reader's folder ("battler" for the Barcode Battler II,
- * "barcodeboy" for the Game Boy readers). Decoding needs libjxl (HAVE_LIBJXL);
+ * "barcodeboy" for the Barcode Boy, "bardigun" for Barcode Taisen Bardigun's
+ * reader). Decoding needs libjxl (HAVE_LIBJXL);
  * without it there are no photos. */
 struct BarcodeCardPhoto
 {

@@ -529,3 +529,4 @@ tools/
 external/libco/
 xband/
 win32/barcodeboy
+win32/bardigun

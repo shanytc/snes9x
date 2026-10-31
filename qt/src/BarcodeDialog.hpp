@@ -27,7 +27,7 @@
  * Barcode Taisen Bardigun's (barcodereaders.h). The webcam is the one Options >
  * Display turns on and picks for the Game Boy Camera; the dialog only reads
  * it. A card's photos show from the
- * reader's folder ("battler", "barcodeboy" or "bardigun") in the config folder or beside
+ * reader's folder ("barcodes/battler", "barcodes/barcodeboy" or "barcodes/bardigun") in the config folder or beside
  * the executable (common/desktop/barcode_card_photos.hpp); a code with none is
  * drawn as its barcode. Modeless: Scan leaves it open, the game running on
  * behind it. */

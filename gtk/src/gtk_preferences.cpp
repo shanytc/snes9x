@@ -6,6 +6,7 @@
 
 #include "gtk_compat.h"
 #include "gtk_preferences.h"
+#include "gtk_barcode_battler.h"
 #include "common/video/gb_camera_v4l2.hpp"
 #include "gtk_config.h"
 #include "gtk_control.h"
@@ -1016,6 +1017,7 @@ void Snes9xPreferences::get_settings_from_dialog()
     if (get_combo("gb_camera_combo") >= 0)
         Settings.GBVideoCameraIndex   = get_combo("gb_camera_combo");
     S9xGBCameraApply();
+    S9xBarcodeBattlerCameraChanged();
     config->maintain_aspect_ratio     = get_check("maintain_aspect_ratio");
     config->aspect_ratio              = get_combo("aspect_ratio");
     config->scale_method              = get_combo("scale_method_combo");

@@ -11,10 +11,11 @@
  * made up, picked from the known cards, or read off a picture (picked or
  * dropped on the dialog) or off a webcam held up to the card. Scan hands it
  * to the BBII interface on port 2 (barcodebattler.h). The webcam is the one
- * the Game Boy Camera uses; the dialog runs it while open if it isn't
- * already, and puts it back as the settings have it on close. A card's
- * photos show from a "battler" folder in the config folder or beside the
- * executable (common/desktop/barcode_card_photos.hpp). Modeless: Scan leaves
- * it open, the game running on behind it; showing it again brings it forward. */
+ * Preferences > Display turns on and picks for the Game Boy Camera; the
+ * dialog only reads it. A card's photos show from a "battler" folder in the
+ * config folder or beside the executable
+ * (common/desktop/barcode_card_photos.hpp). Modeless: Scan leaves it open,
+ * the game running on behind it; showing it again brings it forward. */
 void S9xShowBarcodeBattlerDialog(Gtk::Window &parent);
 void S9xCloseBarcodeBattlerDialog();    // a game load: the dialog was for the last one
+void S9xBarcodeBattlerCameraChanged();  // Preferences applied the camera

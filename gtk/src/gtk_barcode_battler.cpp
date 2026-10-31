@@ -131,17 +131,12 @@ class BarcodeBattlerDialog : public Gtk::Dialog
 
         auto camera_box = Gtk::manage(new Gtk::Box(Gtk::ORIENTATION_HORIZONTAL, 6));
         camera_box->pack_start(*Gtk::manage(new Gtk::Label(_("Camera:"))), Gtk::PACK_SHRINK);
-        for (auto &name : names)
-            camera_combo.append(name);
-        if (names.empty())
-            camera_combo.append(_("No video camera found"));
-        camera_combo.set_active(!names.empty() && Settings.GBVideoCameraIndex < names.size()
-                                    ? Settings.GBVideoCameraIndex : 0);
-        camera_combo.set_sensitive(!names.empty());
-        camera_box->pack_start(camera_combo, Gtk::PACK_EXPAND_WIDGET);
+        camera_label.set_line_wrap(true);
+        camera_label.set_max_width_chars(40);
+        camera_label.set_xalign(0.0f);
+        camera_box->pack_start(camera_label, Gtk::PACK_EXPAND_WIDGET);
         camera_button.set_label(_("Start _Camera"));
         camera_button.set_use_underline(true);
-        camera_button.set_sensitive(!names.empty());
         camera_box->pack_start(camera_button, Gtk::PACK_SHRINK);
         left->pack_start(*camera_box, Gtk::PACK_SHRINK);
 
@@ -212,13 +207,6 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         });
         image_button->signal_clicked().connect([this] { from_image(); });
         camera_button.signal_clicked().connect([this] { toggle_camera(); });
-        camera_combo.signal_changed().connect([this] {
-            if (camera_on)
-            {
-                stop_camera();
-                toggle_camera();
-            }
-        });
         search_entry.signal_changed().connect([this] { fill_cards(); });
         card_tree.get_selection()->signal_changed().connect([this] { card_picked(); });
         // A double-click (or Enter) on a barcode scans it.
@@ -251,6 +239,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
             Glib::signal_idle().connect_once([this, filename] { read_image(filename); });
         });
 
+        show_camera_choice();
         code_edited();
         fill_cards();
         show_all();
@@ -266,6 +255,21 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     {
         stop_camera();
         hide();
+    }
+
+    // The camera Preferences > Display has on, or why there is none to start.
+    // That page is the only place a camera is picked.
+    void show_camera_choice()
+    {
+        std::vector<std::string> names;
+        S9xGBCameraEnumerate(names);
+        const bool ready = Settings.GBVideoCamera && Settings.GBVideoCameraIndex < names.size();
+        camera_label.set_text(ready           ? names[Settings.GBVideoCameraIndex]
+                              : names.empty() ? std::string(_("No video camera found."))
+                                              : std::string(_("Turn on Enable Video Camera and pick a camera in Options > Preferences > Display.")));
+        camera_button.set_sensitive(ready);
+        if (!ready)
+            stop_camera();
     }
 
   private:
@@ -393,6 +397,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         msg.run();
     }
 
+    // Reads the camera Preferences > Display runs; starts it only if that failed.
     void toggle_camera()
     {
         if (camera_on)
@@ -401,7 +406,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
             return;
         }
 
-        if (!S9xGBCameraStart(camera_combo.get_active_row_number()))
+        if (!S9xGBCameraIsRunning() && !S9xGBCameraStart(Settings.GBVideoCameraIndex))
         {
             status_label.set_text(_("The camera could not be started."));
             return;
@@ -426,9 +431,6 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         poll_connection.disconnect();
         camera_button.set_label(_("Start _Camera"));
         preview_label.set_text(_("Hold the barcode up to the camera, straight and in focus."));
-        // Back to what Display Settings > Game Boy Image asks for.
-        S9xGBCameraStop();
-        S9xGBCameraApply();
         show_photos();
     }
 
@@ -599,7 +601,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
 
     Gtk::Entry code_entry;
     Gtk::Label status_label;
-    Gtk::ComboBoxText camera_combo;
+    Gtk::Label camera_label;
     Gtk::Button camera_button;
     Gtk::Frame preview_frame;
     Gtk::Stack preview_stack;
@@ -635,4 +637,10 @@ void S9xCloseBarcodeBattlerDialog()
 {
     if (barcode_dialog)
         barcode_dialog->close_dialog();
+}
+
+void S9xBarcodeBattlerCameraChanged()
+{
+    if (barcode_dialog)
+        barcode_dialog->show_camera_choice();
 }

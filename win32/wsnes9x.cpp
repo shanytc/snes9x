@@ -5334,6 +5334,7 @@ static void ApplyGBVideoCamera()
 		GBCameraStart(Settings.GBVideoCameraIndex);
 	else
 		GBCameraStop();
+	WinBarcodeBattlerCameraChanged();
 }
 
 // One pass of the emulation loop: input, rewind, run-ahead and the frame itself.

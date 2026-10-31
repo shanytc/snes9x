@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <QComboBox>
 #include <QDialog>
 #include <QImage>
 #include <QLabel>
@@ -25,9 +24,8 @@ struct S9xBarcodeCard;
  * made up, picked from the known cards, or read off a picture (picked or
  * dropped on the dialog) or off a webcam held up to the card. Scan hands it
  * to the BBII interface on port 2 (barcodebattler.h). The webcam is the one
- * the Game Boy Camera uses; the dialog runs it while open if it isn't
- * already, and puts it back as the settings have it on close. A card's
- * photos show from a "battler" folder in the config folder or beside the
+ * Options > Display turns on and picks for the Game Boy Camera; the dialog
+ * only reads it. A card's photos show from a "battler" folder in the config folder or beside the
  * executable (common/desktop/barcode_card_photos.hpp). Modeless: Scan leaves
  * it open, the game running on behind it. */
 class BarcodeBattlerDialog : public QDialog
@@ -44,9 +42,11 @@ class BarcodeBattlerDialog : public QDialog
     void done(int result) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+    void changeEvent(QEvent *event) override;
     void codeEdited();
     void fromImage();
     void readImage(const QString &filename);
+    void showCameraChoice();
     void toggleCamera();
     void pollCamera();
     void stopCamera();
@@ -58,7 +58,7 @@ class BarcodeBattlerDialog : public QDialog
 
     QLineEdit *code_edit;
     QLabel *status_label;
-    QComboBox *camera_combo;
+    QLabel *camera_label;
     QPushButton *camera_button;
     QLabel *preview_label;
     QPushButton *scan_button;

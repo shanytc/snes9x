@@ -432,13 +432,25 @@ void StopCamera(HWND hDlg)
 	SetDlgItemText(hDlg, IDC_BARCODE_CAMERA_TOGGLE, TEXT("Start &Camera"));
 	g_frame.clear();
 	InvalidateRect(GetDlgItem(hDlg, IDC_BARCODE_PREVIEW), nullptr, TRUE);
-
-	// Back to what Display > Game Boy Image asks for.
-	GBCameraStop();
-	if (Settings.GBVideoCamera)
-		GBCameraStart(Settings.GBVideoCameraIndex);
 }
 
+// The camera Video > Display Configuration has on, or why there is none to
+// start. That dialog is the only place a camera is picked.
+void ShowCameraChoice(HWND hDlg)
+{
+	std::vector<std::wstring> names;
+	GBCameraEnumerate(names);
+	const bool ready = Settings.GBVideoCamera && Settings.GBVideoCameraIndex < names.size();
+	SetDlgItemTextW(hDlg, IDC_BARCODE_CAMERA,
+	                ready           ? names[Settings.GBVideoCameraIndex].c_str()
+	                : names.empty() ? L"No video camera found."
+	                                : L"Turn on Enable Video Camera and pick a camera in Video\u00A0>\u00A0Display Configuration.");
+	EnableWindow(GetDlgItem(hDlg, IDC_BARCODE_CAMERA_TOGGLE), ready);
+	if (!ready)
+		StopCamera(hDlg);
+}
+
+// Reads the camera Display Configuration runs; it starts it only if that failed.
 void ToggleCamera(HWND hDlg)
 {
 	if (g_cameraOn)
@@ -447,8 +459,7 @@ void ToggleCamera(HWND hDlg)
 		return;
 	}
 
-	const int index = (int)SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_GETCURSEL, 0, 0);
-	if (index < 0 || !GBCameraStart(index))
+	if (!GBCameraIsRunning() && !GBCameraStart(Settings.GBVideoCameraIndex))
 	{
 		SetDlgItemText(hDlg, IDC_BARCODE_STATUS, TEXT("The camera could not be started."));
 		return;
@@ -574,19 +585,7 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 			SendDlgItemMessage(hDlg, IDC_BARCODE_EDIT, EM_SETLIMITTEXT, 20, 0);
 			SendDlgItemMessage(hDlg, IDC_BARCODE_EDIT, EM_SETCUEBANNER, TRUE, (LPARAM)L"Type your barcode");
 			SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, S9xBarcodeBattlerLastCode());
-
-			std::vector<std::wstring> names;
-			GBCameraEnumerate(names);
-			for (auto &name : names)
-				SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_ADDSTRING, 0, (LPARAM)name.c_str());
-			if (names.empty())
-			{
-				SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_ADDSTRING, 0, (LPARAM)TEXT("No video camera found"));
-				EnableWindow(GetDlgItem(hDlg, IDC_BARCODE_CAMERA), FALSE);
-				EnableWindow(GetDlgItem(hDlg, IDC_BARCODE_CAMERA_TOGGLE), FALSE);
-			}
-			SendDlgItemMessage(hDlg, IDC_BARCODE_CAMERA, CB_SETCURSEL,
-			                   Settings.GBVideoCameraIndex < names.size() ? Settings.GBVideoCameraIndex : 0, 0);
+			ShowCameraChoice(hDlg);
 
 			CodeEdited(hDlg);
 			DragAcceptFiles(hDlg, TRUE);
@@ -673,14 +672,6 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 					ToggleCamera(hDlg);
 					return TRUE;
 
-				case IDC_BARCODE_CAMERA:
-					if (HIWORD(wParam) == CBN_SELCHANGE && g_cameraOn)
-					{
-						StopCamera(hDlg);
-						ToggleCamera(hDlg);
-					}
-					return TRUE;
-
 				// Scans and stays open: the game runs on behind it.
 				case IDOK:
 				{
@@ -756,4 +747,10 @@ void WinCloseBarcodeBattlerDialog()
 {
 	if (g_dlg)
 		SendMessage(g_dlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+}
+
+void WinBarcodeBattlerCameraChanged()
+{
+	if (g_dlg)
+		ShowCameraChoice(g_dlg);
 }

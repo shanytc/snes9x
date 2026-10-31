@@ -44,14 +44,14 @@ void   BarcodeBoyStateLoad(const uint8_t *in);
 
 // The known cards, grouped per game and per printed card (top barcode first).
 // A card's entries share its photos, <image>-front.jxl and -back.jxl in the
-// frontend's barcodeboy folder.
+// frontend's barcodeboy folder (bardigun for Barcode Taisen Bardigun's cards).
 struct BarcodeBoyCard
 {
 	const char *game;
 	const char *name;   // English
 	const char *kana;   // as printed on the card, UTF-8
 	const char *code;   // 13 digits
-	const char *image;  // "<game folder>/<the card's first code>"
+	const char *image;  // "<game folder>/<the card's first code>"; a Bardigun card's code alone
 	const char *group = nullptr;  // a branch of its own within the game
 };
 const BarcodeBoyCard *BarcodeBoyCards(int *count);

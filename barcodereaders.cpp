@@ -158,7 +158,9 @@ bool S9xBarcodeReaderTakes (S9xBarcodeReader reader, int digits)
 
 const char *S9xBarcodeReaderPhotoFolder (S9xBarcodeReader reader)
 {
-	return (reader == S9X_BARCODE_BATTLER ? "battler" : "barcodeboy");
+	return (reader == S9X_BARCODE_BATTLER  ? "battler"
+	      : reader == S9X_BARCODE_BARDIGUN ? "bardigun"
+	                                       : "barcodeboy");
 }
 
 const char * const *S9xBarcodeReaderPhotoSides (S9xBarcodeReader reader)

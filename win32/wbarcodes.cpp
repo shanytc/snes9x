@@ -39,7 +39,7 @@ std::vector<unsigned char> g_frame;
 int                        g_frameW = 0;
 int                        g_frameH = 0;
 
-// The shown card's photos from the reader's folder beside the executable.
+// The shown card's photos from the reader's folder in barcodes\ beside the executable.
 struct Photo { std::vector<unsigned char> bgrx; int w = 0, h = 0; };
 std::wstring               g_photoDir;
 const S9xBarcodeReaderCard *g_photoCard = nullptr;
@@ -170,13 +170,14 @@ bool LoadJxl(const std::wstring &path, Photo &photo)
 	return ok;
 }
 
-// The reader's photo folder beside the executable, or "" when there is none.
+// The reader's photo folder in the barcodes folder beside the executable, or
+// "" when there is none.
 std::wstring PhotoDir()
 {
 	wchar_t exe[MAX_PATH] = L"";
 	std::wstring dir(exe, GetModuleFileNameW(nullptr, exe, MAX_PATH));
 	dir.erase(dir.find_last_of(L"\\/") + 1);
-	dir += Wide(S9xBarcodeReaderPhotoFolder(g_reader)) + L"\\";
+	dir += L"barcodes\\" + Wide(S9xBarcodeReaderPhotoFolder(g_reader)) + L"\\";
 	const DWORD attr = GetFileAttributesW(dir.c_str());
 	return (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) ? dir : std::wstring();
 }

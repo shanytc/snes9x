@@ -11,9 +11,9 @@
 #include <vector>
 
 /* Photos of a barcode reader's known cards (barcodereaders.h): JPEG XL files
- * <image><side> in the reader's folder ("battler" for the Barcode Battler II,
- * "barcodeboy" for the Barcode Boy, "bardigun" for Barcode Taisen Bardigun's
- * reader). Decoding needs libjxl (HAVE_LIBJXL);
+ * <image><side> in the reader's folder within a "barcodes" folder ("battler"
+ * for the Barcode Battler II, "barcodeboy" for the Barcode Boy, "bardigun" for
+ * Barcode Taisen Bardigun's reader). Decoding needs libjxl (HAVE_LIBJXL);
  * without it there are no photos. */
 struct BarcodeCardPhoto
 {
@@ -22,7 +22,7 @@ struct BarcodeCardPhoto
     int height = 0;
 };
 
-// The first of the given folders' subfolders by that name that exists, or "".
+// The first of the given folders' barcodes/<subfolder> that exists, or "".
 std::string S9xBarcodePhotoDir(const std::vector<std::string> &folders, const char *subfolder);
 
 // The photos of a card's stem that dir holds, one per side the list (ending in

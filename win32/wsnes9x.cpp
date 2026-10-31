@@ -2477,6 +2477,8 @@ static HHOOK s_menu_filter_hook = NULL;
 static HMENU s_gb_same_hmenu = NULL;
 // Input > Barcodes, whose Connect toggles in place too.
 static HMENU s_barcodes_hmenu = NULL;
+// Emulation > Game Boy Link, whose Reset on Link and Reset on Unlink do too.
+static HMENU s_gb_link_hmenu = NULL;
 
 static bool MenuSplitIdle (void)
 {
@@ -2540,8 +2542,48 @@ static void MenuToggleBarcodeInPlace (void)
 	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
 }
 
+static bool MenuIsLinkReset (UINT id)
+{
+	return id == ID_EMULATION_GB_LINK_RESET_ON_LINK || id == ID_EMULATION_GB_LINK_RESET_ON_UNLINK;
+}
+
+static void MenuToggleLinkResetInPlace (UINT id)
+{
+	SendMessage (GUI.hWnd, WM_COMMAND, id, 0);
+	const bool on = id == ID_EMULATION_GB_LINK_RESET_ON_LINK ? GBLinkResetOnLink : GBLinkResetOnUnlink;
+	CheckMenuItem (s_gb_link_hmenu, id, MF_BYCOMMAND | (on ? MF_CHECKED : MF_UNCHECKED));
+	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
+}
+
 static LRESULT CALLBACK MenuKeepOpenFilter (int code, WPARAM wParam, LPARAM lParam)
 {
+	if (code == MSGF_MENU && s_gb_link_hmenu)
+	{
+		MSG *msg = (MSG *)lParam;
+		UINT id = 0;
+		if (msg->message == WM_LBUTTONDOWN || msg->message == WM_LBUTTONUP)
+		{
+			int idx = MenuItemFromPoint (NULL, s_gb_link_hmenu, msg->pt);
+			if (idx < 0) idx = MenuItemFromPoint (GUI.hWnd, s_gb_link_hmenu, msg->pt);
+			if (idx >= 0) id = GetMenuItemID (s_gb_link_hmenu, idx);
+		}
+		else if (msg->message == WM_KEYDOWN && msg->wParam == VK_RETURN)
+		{
+			for (UINT reset : { ID_EMULATION_GB_LINK_RESET_ON_LINK, ID_EMULATION_GB_LINK_RESET_ON_UNLINK })
+			{
+				MENUITEMINFO mii = { sizeof(mii), MIIM_STATE };
+				if (GetMenuItemInfo (s_gb_link_hmenu, reset, FALSE, &mii) && (mii.fState & MFS_HILITE))
+					id = reset;
+			}
+		}
+		if (MenuIsLinkReset (id) &&
+		    !(GetMenuState (s_gb_link_hmenu, id, MF_BYCOMMAND) & (MF_DISABLED | MF_GRAYED)))
+		{
+			if (msg->message != WM_LBUTTONDOWN)
+				MenuToggleLinkResetInPlace (id);
+			return TRUE;
+		}
+	}
 	if (code == MSGF_MENU && s_barcodes_hmenu)
 	{
 		MSG *msg = (MSG *)lParam;
@@ -4417,6 +4459,8 @@ LRESULT CALLBACK WinProc(
 		s_barcodes_hmenu = MenuPopupWith (GUI.hMenu, ID_INPUT_BARCODE_CONNECT);
 		S9xSetPause (PAUSE_MENU);
 		CheckMenuStates ();
+		// After CheckMenuStates, which shows the popup or takes it away.
+		s_gb_link_hmenu = MenuPopupWith (GUI.hMenu, ID_EMULATION_GB_LINK_RESET_ON_LINK);
 		HookDipMenu(Settings.NSS);
 
 		SwitchToGDI();

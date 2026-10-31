@@ -51,8 +51,8 @@ const char *S9xBarcodeReaderLastCode (S9xBarcodeReader reader);	// "" before the
 const char *S9xBarcodeReaderName (S9xBarcodeReader reader);		// "Barcode Battler II", ...
 const char *S9xBarcodeReaderPort (S9xBarcodeReader reader);		// "port 2", "the link port"
 bool S9xBarcodeReaderTakes (S9xBarcodeReader reader, int digits);	// 8, 12 or 13 digits
-// Photos of the known cards: <image><side> in this folder, under the
-// frontend's photo locations; the sides list ends in NULL.
+// Photos of the known cards: <image><side> in this folder, inside the
+// "barcodes" folder of the frontend's photo locations; the sides list ends in NULL.
 const char *S9xBarcodeReaderPhotoFolder (S9xBarcodeReader reader);
 const char * const *S9xBarcodeReaderPhotoSides (S9xBarcodeReader reader);
 

@@ -229,7 +229,7 @@ void CodeEdited(HWND hDlg)
 		status = std::wstring(L"Valid ") + (n == 13 ? L"EAN-13" : n == 12 ? L"UPC-A" : L"EAN-8") + L" barcode.";
 
 	SetDlgItemTextW(hDlg, IDC_BARCODE_STATUS, status.c_str());
-	EnableWindow(GetDlgItem(hDlg, IDOK), lengthOk);
+	EnableWindow(GetDlgItem(hDlg, IDOK), lengthOk && S9xBarcodeReaderConnected());
 	ShowCard(hDlg, card);
 
 	const std::string code = lengthOk ? digits : std::string();
@@ -238,6 +238,15 @@ void CodeEdited(HWND hDlg)
 		g_code = code;
 		InvalidateRect(GetDlgItem(hDlg, IDC_BARCODE_PREVIEW), nullptr, TRUE);
 	}
+}
+
+// Scan needs Input > Barcodes > Connect on; the title says when it is.
+void ShowConnected(HWND hDlg)
+{
+	const bool on = S9xBarcodeReaderConnected();
+	SetWindowTextW(hDlg, (Wide(S9xBarcodeReaderName(g_reader)) + (on ? L" (Connected)" : L"")).c_str());
+	SetDlgItemTextW(hDlg, IDC_BARCODE_CONNECT_NOTE, on ? L"" : L"Connect first: Input > Barcodes > Connect.");
+	CodeEdited(hDlg);
 }
 
 void Found(HWND hDlg, const char *code, const TCHAR *where)
@@ -730,7 +739,6 @@ INT_PTR CALLBACK DlgBarcodes(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 		case WM_INITDIALOG:
 		{
 			LocalizeDialog(hDlg);
-			SetWindowTextW(hDlg, Wide(S9xBarcodeReaderName(g_reader)).c_str());
 			const bool battler = g_reader == S9X_BARCODE_BATTLER;
 			SetDlgItemTextW(hDlg, IDC_BARCODE_INTRO,
 			                battler ? L"Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture."
@@ -750,7 +758,7 @@ INT_PTR CALLBACK DlgBarcodes(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 			SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, S9xBarcodeReaderLastCode(g_reader));
 			ShowCameraChoice(hDlg);
 
-			CodeEdited(hDlg);
+			ShowConnected(hDlg);	// the title too
 			DragAcceptFiles(hDlg, TRUE);
 			SendDlgItemMessage(hDlg, IDC_BARCODE_SEARCH, EM_SETCUEBANNER, TRUE,
 			                   (LPARAM)(battler ? L"Name, set or barcode" : L"Name, game or barcode"));
@@ -850,7 +858,8 @@ INT_PTR CALLBACK DlgBarcodes(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 						SetDlgItemTextW(hDlg, IDC_BARCODE_STATUS, refused.c_str());
 						return TRUE;
 					}
-					if (!S9xBarcodeReaderScan(g_reader, DigitsOf(hDlg).c_str()))
+					// A double-click on a card asks too, past the greyed button.
+					if (!S9xBarcodeReaderConnected() || !S9xBarcodeReaderScan(g_reader, DigitsOf(hDlg).c_str()))
 						return TRUE;
 
 					WinBarcodeScanned(g_reader);
@@ -917,6 +926,12 @@ void WinCloseBarcodeDialog()
 {
 	if (g_dlg)
 		SendMessage(g_dlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+}
+
+void WinBarcodeConnectChanged()
+{
+	if (g_dlg)
+		ShowConnected(g_dlg);
 }
 
 void WinBarcodeCameraChanged()

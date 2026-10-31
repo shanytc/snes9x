@@ -192,6 +192,9 @@ class BarcodeDialog : public Gtk::Dialog
         card_scroll.set_size_request(320, -1);
         card_scroll.set_shadow_type(Gtk::SHADOW_IN);
         right->pack_start(card_scroll, Gtk::PACK_EXPAND_WIDGET);
+        connect_note.set_line_wrap(true);
+        connect_note.set_xalign(1.0f);
+        right->pack_start(connect_note, Gtk::PACK_SHRINK);
         columns->pack_start(*right, Gtk::PACK_SHRINK);
 
         add_button(_("_Close"), Gtk::RESPONSE_CLOSE);
@@ -262,7 +265,7 @@ class BarcodeDialog : public Gtk::Dialog
         });
 
         show_camera_choice();
-        code_edited();
+        connect_changed();
         fill_cards();
         show_all();
         show_preview();
@@ -282,6 +285,16 @@ class BarcodeDialog : public Gtk::Dialog
     {
         stop_camera();
         hide();
+    }
+
+    // Scan needs Input > Barcodes > Connect on; the title says when it is.
+    void connect_changed()
+    {
+        const bool on = S9xBarcodeReaderConnected();
+        set_title(on ? fmt::format(fmt::runtime(_("{} (Connected)")), S9xBarcodeReaderName(reader))
+                     : std::string(S9xBarcodeReaderName(reader)));
+        connect_note.set_text(on ? "" : _("Connect first: Input > Barcodes > Connect."));
+        code_edited();
     }
 
     // The camera Preferences > Display has on, or why there is none to start.
@@ -313,7 +326,8 @@ class BarcodeDialog : public Gtk::Dialog
             status_label.set_text(refused);
             return;
         }
-        if (!S9xBarcodeReaderScan(reader, code_entry.get_text().c_str()))
+        // A double-click on a card asks too, past the greyed button.
+        if (!S9xBarcodeReaderConnected() || !S9xBarcodeReaderScan(reader, code_entry.get_text().c_str()))
             return;
 
         const char *code = S9xBarcodeReaderLastCode(reader);
@@ -347,7 +361,7 @@ class BarcodeDialog : public Gtk::Dialog
         const bool length_ok = all_digits && S9xBarcodeReaderTakes(reader, n);
         const S9xBarcodeReaderCard *card = length_ok ? S9xBarcodeReaderCardFind(reader, digits.c_str()) : nullptr;
 
-        scan_button->set_sensitive(length_ok);
+        scan_button->set_sensitive(length_ok && S9xBarcodeReaderConnected());
         if (n == 0)
             status_label.set_text("");
         else if (!all_digits)
@@ -749,6 +763,7 @@ class BarcodeDialog : public Gtk::Dialog
     Gtk::Entry code_entry;
     Gtk::Label status_label;
     Gtk::Label camera_label;
+    Gtk::Label connect_note;
     Gtk::Button camera_button;
     Gtk::Frame preview_frame;
     Gtk::Stack preview_stack;
@@ -788,6 +803,12 @@ void S9xCloseBarcodeDialog()
 {
     if (barcode_dialog)
         barcode_dialog->close_dialog();
+}
+
+void S9xBarcodeConnectChanged()
+{
+    if (barcode_dialog)
+        barcode_dialog->connect_changed();
 }
 
 void S9xBarcodeCameraChanged()

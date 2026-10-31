@@ -42,6 +42,9 @@ class BarcodeDialog : public QDialog
 
     S9xBarcodeReader barcodeReader() const { return reader; }
 
+    // Input > Barcodes > Connect was flipped: Scan and the title follow it.
+    void connectChanged();
+
   private:
     void accept() override;
     void done(int result) override;
@@ -67,6 +70,7 @@ class BarcodeDialog : public QDialog
     QLineEdit *code_edit;
     QLabel *status_label;
     QLabel *camera_label;
+    QLabel *connect_note;
     QPushButton *camera_button;
     QLabel *preview_label;
     QPushButton *scan_button;

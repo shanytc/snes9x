@@ -1033,7 +1033,8 @@ void EmuMainWindow::updateBarcodeActions()
     barcode_connect_action->setChecked(S9xBarcodeReaderConnected());
     barcode_connect_action->setEnabled(reader != S9X_BARCODE_NONE);
     barcode_scan_action->setEnabled(reads);
-    barcode_rescan_action->setEnabled(reads && *S9xBarcodeReaderLastCode(reader));
+    // Use Last Barcode Again: Connect on, and a code scanned before.
+    barcode_rescan_action->setEnabled(reads && S9xBarcodeReaderConnected() && *S9xBarcodeReaderLastCode(reader));
 }
 
 void EmuMainWindow::barcodeShortcut(const std::string &name)
@@ -1933,6 +1934,10 @@ void EmuMainWindow::createWidgets()
         S9xBarcodeReaderConnect(checked);
         S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) +
                           (checked ? std::string(" connected to ") + S9xBarcodeReaderPort(reader) : " disconnected")).c_str());
+        // The menu stays open: Use Last Barcode Again follows Connect there.
+        updateBarcodeActions();
+        if (barcode_dialog)
+            barcode_dialog->connectChanged();
     });
     // Modeless: the game runs on while cards are browsed and scanned; Scan
     // checks again that the game still reads the reader.
@@ -1959,7 +1964,7 @@ void EmuMainWindow::createWidgets()
     barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
     QObject::connect(barcode_rescan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
         const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
-        if (S9xBarcodeReaderGameReads(reader) && barcode_port_free(reader))
+        if (S9xBarcodeReaderConnected() && S9xBarcodeReaderGameReads(reader) && barcode_port_free(reader))
             scan_barcode(reader, S9xBarcodeReaderLastCode(reader));
     });
     QObject::connect(barcode_menu, &QMenu::aboutToShow, this, &EmuMainWindow::updateBarcodeActions);

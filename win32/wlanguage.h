@@ -166,19 +166,23 @@ Nintendo is a trademark.")
 #define HOTKEYS_SUPERDISC_INSERT TEXT("Insert Disc:")
 #define HOTKEYS_SUPERDISC_EJECT TEXT("Eject Disc:")
 #define HOTKEYS_BIOS_MANAGER TEXT("BIOS Manager:")
-// Emulation -> Game Boy Model. Every label has to fit the 72-DLU statics; the
-// tab name supplies the context.
 // Appended to a greyed Emulation -> Game Boy Model entry, so the item says why
 // it cannot be picked instead of leaving it to guesswork.
 #define GBMODEL_MISSING_BIOS TEXT(" (Missing BIOS)")
 #define GBMODEL_EXPERIMENTAL TEXT(" (Experimental)")
 #define GBMODEL_NOT_SUPPORTED TEXT(" (game not supported)")
 
-#define HOTKEYS_GBMODEL_GB TEXT("Game Boy:")
-#define HOTKEYS_GBMODEL_GBC TEXT("Game Boy Color:")
-#define HOTKEYS_GBMODEL_SGB TEXT("Super Game Boy:")
-#define HOTKEYS_GBMODEL_SGB2 TEXT("Super Game Boy 2:")
-#define HOTKEYS_GBMODEL_SGBC TEXT("Super GB Color:")
+// Emulation -> Game Boy Model. The Game Boy tab widens its left column for
+// these (LayoutHotkeyColumns in wsnes9x.cpp): up to 132 DLU.
+#define HOTKEYS_GBMODEL_GB TEXT("Switch to Game Boy Model:")
+#define HOTKEYS_GBMODEL_GBC TEXT("Switch to Game Boy Color Model:")
+#define HOTKEYS_GBMODEL_SGB TEXT("Switch to Super Game Boy Model:")
+#define HOTKEYS_GBMODEL_SGB2 TEXT("Switch to Super Game Boy 2 Model:")
+#define HOTKEYS_GBMODEL_SGBC TEXT("Switch to Super Game Boy Color Model:")
+// Input -> Barcodes; the tab widens its left column like the Game Boy tab.
+#define HOTKEYS_BARCODE_CONNECT TEXT("Connect:")
+#define HOTKEYS_BARCODE_SCAN TEXT("Scan Barcode:")
+#define HOTKEYS_BARCODE_RESCAN TEXT("Use Last Barcode Again:")
 // Keep these short enough for the 72-DLU IDC_LABEL_HK* statics: longer text
 // word-wraps and the clipped second line shows as pixel garbage under the label.
 #define HOTKEYS_KEYSWITCH_1 TEXT("Key Switch Options:")
@@ -191,6 +195,12 @@ Nintendo is a trademark.")
 #define HOTKEYS_SFCBOX_TVGAME TEXT("GAME/TV Switch:")
 #define HOTKEYS_SFCBOX_MOUNT1 TEXT("Mount/Eject Slot 1:")
 #define HOTKEYS_SFCBOX_MOUNT2 TEXT("Mount/Eject Slot 2:")
+#define HOTKEYS_LINK_2P TEXT("Link Current Game 2P:")
+#define HOTKEYS_LINK_3P TEXT("Link Current Game 3P:")
+#define HOTKEYS_LINK_4P TEXT("Link Current Game 4P:")
+#define HOTKEYS_LINK_SPLIT TEXT("Toggle Split Screen:")
+#define HOTKEYS_LINK_OTHER TEXT("Link Other Game:")
+#define HOTKEYS_LINK_END TEXT("Unlink:")
 
 // gaming buttons and axes
 #define GAMEDEVICE_JOYNUMPREFIX "(J%x)" // don't change this
@@ -488,6 +498,8 @@ Nintendo is a trademark.")
 
 #define ERR_ROM_NOT_FOUND "ROM image \"%s\" was not found or could not be opened."
 #define SRM_SAVE_FAILED "Failed to save SRM file."
+#define SRM_SAVED "S-RAM saved."
+#define SRM_NO_BATTERY "This game has no battery-backed S-RAM."
 
 #define INFO_SAVE_SPC "Saving SPC Data."
 

@@ -696,6 +696,7 @@
 #define ID_EMULATION_GB_RTC_SAV         40342
 #define ID_EMULATION_GB_RTC_FILE        40343
 #define ID_EMULATION_GB_RTC_SETTINGS    40344
+#define ID_EMULATION_GB_RTC_SPEAKER     40345
 #define IDD_GB_RTC                      203
 #define IDC_GBRTC_ON                    3722
 #define IDC_GBRTC_DATE                  3723
@@ -982,6 +983,44 @@
 
 #define ID_SOUND_AUDIOWAVEFORM          40198
 #define ID_INPUT_ENABLERUMBLE           40211
+#define ID_EMULATION_GB_LINK            40242
+#define ID_EMULATION_RUNAHEAD_POPUP     40244
+#define ID_FILE_LOAD_SRAM_DATA          40243
+#define ID_EMULATION_GB_LINK_SAME       40240
+#define ID_EMULATION_GB_LINK_DIFF       40241
+#define ID_EMULATION_GB_LINK_SAME_POPUP 40245
+#define ID_EMULATION_GB_LINK_SAME_3     40246
+#define ID_EMULATION_GB_LINK_SAME_4     40247
+#define ID_EMULATION_GB_LINK_CONNECT    40224
+#define ID_EMULATION_GB_LINK_DISCONNECT 40225
+#define ID_EMULATION_GB_LINK_SPLIT      40226
+// Faceball ring sessions: one item per seat count, a contiguous range so
+// the handler computes players from the id.
+#define ID_EMULATION_GB_LINK_SAME_5     40227
+#define ID_EMULATION_GB_LINK_SAME_6     40228
+#define ID_EMULATION_GB_LINK_SAME_7     40229
+#define ID_EMULATION_GB_LINK_SAME_8     40230
+#define ID_EMULATION_GB_LINK_SAME_9     40231
+#define ID_EMULATION_GB_LINK_SAME_10    40232
+#define ID_EMULATION_GB_LINK_SAME_11    40233
+#define ID_EMULATION_GB_LINK_SAME_12    40234
+#define ID_EMULATION_GB_LINK_SAME_13    40235
+#define ID_EMULATION_GB_LINK_SAME_14    40236
+#define ID_EMULATION_GB_LINK_SAME_15    40237
+#define ID_EMULATION_GB_LINK_SAME_RING_POPUP 40238
+#define ID_EMULATION_GB_LINK_UNLINK     40239
+#define ID_EMULATION_GB_LINK_IR         40248
+#define ID_EMULATION_GB_LINK_IR_SEP     40249
+#define ID_EMULATION_GB_LINK_KISS       40332
+#define ID_EMULATION_GB_KISSLINK        40333
+#define ID_EMULATION_GB_KISSLINK_FILE   40334
+#define ID_EMULATION_GB_KISSLINK_MAP    40335
+#define ID_EMULATION_GB_KISSLINK_RECV   40336
+#define ID_EMULATION_GB_KISSLINK_CANCEL 40337
+#define ID_EMULATION_GB_LINK_RESET_ON_LINK   40330
+#define ID_EMULATION_GB_LINK_RESET_ON_UNLINK 40331
+#define ID_EMULATION_GB_LINK_SEATMODEL0 40250
+#define ID_EMULATION_GB_LINK_SEATMODEL_LAST 40329
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400
@@ -1018,7 +1057,8 @@
 #define ID_SFCBOX_POWER_OFF             44450
 
 
-#define IDD_BARCODE_BATTLER             201
+/* Input > Barcodes: the Barcode Battler II, Barcode Boy and Bardigun reader */
+#define IDD_BARCODES                    201
 #define IDC_BARCODE_EDIT                3704
 #define IDC_BARCODE_RANDOM              3705
 #define IDC_BARCODE_IMAGE               3706
@@ -1028,6 +1068,8 @@
 #define IDC_BARCODE_PREVIEW             3710
 #define IDC_BARCODE_SEARCH              3711
 #define IDC_BARCODE_CARDS               3712
+#define IDC_BARCODE_INTRO               3713
+#define IDC_BARCODE_NOTE                3714
 #define ID_INPUT_BARCODE_CONNECT        44454
 #define ID_INPUT_BARCODE_SCAN           44455
 #define ID_INPUT_BARCODE_RESCAN         44456
@@ -1037,7 +1079,7 @@
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        202
+#define _APS_NEXT_RESOURCE_VALUE        205
 #define _APS_NEXT_COMMAND_VALUE         44457
 #define _APS_NEXT_CONTROL_VALUE         3729
 #define _APS_NEXT_SYMED_VALUE           101

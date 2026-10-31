@@ -59,15 +59,28 @@ struct Cart
 	// $0147 was garbage but a real logo+entry ran it as plain MBC1
 	// (Gowin / SONIC5 / Xploder-style flat unlicensed boards).
 	bool                  flat_unlicensed = false;
-	// HuC3 alarm registers ($58-$5F; the speaker that sounds it is not
-	// emulated). Games can't read them back, so savestates leave them out;
-	// the battery save's clock block carries them.
+	// HuC3 alarm registers ($58-$5F, alarm slot 7). Games can't read them
+	// back, so savestates leave them out; the battery save's clock block
+	// carries them.
 	uint16_t              huc3_alarm_minutes = 0;
 	uint16_t              huc3_alarm_days    = 0;
 	bool                  huc3_alarm_on      = false;
+	// HuC3 speaker: tone ($26, one of 16) and enable ($27 == 1); two $6E in
+	// a row ask for the tone. speaker_request (tone + 1, or kSpeakerStop) is
+	// for the bus write to hand to the APU.
+	uint8_t               huc3_tone          = 0;
+	bool                  huc3_tone_on       = false;
+	uint8_t               speaker_request    = 0;
+	// HuC3 memory $20-$7F as written: 8-nibble alarm slots (minute x3, day
+	// x3, tone, enable); slot 7 is $58-$5F above. Write-only like the alarm.
+	uint8_t               huc3_ram[0x60]     = {};
 	// TAMA5's TAMA6 alarm page and two RAM pages (the timer page is in
 	// MbcState). Like the HuC3 alarm, only the battery save carries them.
+	// The RAM pages hold the chirp patterns: 4 x [next pattern, 4 notes, 0].
 	uint8_t               tama6_pages[3][13] = {};
+	// TAMA6 alarm entries (mode 3): 8 x minute then hour (BCD), the hour's
+	// tens bits 2-3 = pattern - 1. Write-only like the pages, not saved.
+	uint8_t               tama6_cells[16] = {};
 	// Scrambled-unlicensed mapper state (BBD/Sintax/VF etc.), v7 savestates.
 	MbcUnl                unl;
 	// Vast Fame "A" boards seed the protection running value with $10.
@@ -83,6 +96,9 @@ struct Cart
 	// (clean switch). Derived from the header at load.
 	uint8_t               pal_unit = 0;
 };
+
+// Cart::speaker_request asking the APU to stop the cart's speaker.
+constexpr uint8_t kSpeakerStop = 0xFF;
 
 bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path);
 void CartUnload(Cart &c);
@@ -126,6 +142,11 @@ bool SachenBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out);
 // boot check passes and the game later reads its real (Rocket) header. DMG
 // boots read it raw and fail — the carts are GBC-only, as on hardware.
 bool RocketBootLogoByte(const Cart &c, uint16_t addr, uint8_t &out);
+
+// A Hudson cart with its own infrared LED and sensor (GB KISS, gbkiss.org/cart).
+bool CartHasIrPort(const Cart &c);
+// ... whose GB KISS menu takes files (from another cart or the GB KISS LINK).
+bool CartHasKissMenu(const Cart &c);
 
 } // namespace SGB
 

@@ -65,6 +65,7 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/msu1.cpp \
 				 $(CORE_DIR)/voicekun.cpp \
 				 $(CORE_DIR)/barcodebattler.cpp \
+				 $(CORE_DIR)/barcodereaders.cpp \
 				 $(CORE_DIR)/cartprot.cpp \
 				 $(CORE_DIR)/rp2040.cpp \
 				 $(CORE_DIR)/rp2040cart.cpp \
@@ -93,9 +94,17 @@ SOURCES_CXX := $(CORE_DIR)/apu/apu.cpp \
 				 $(CORE_DIR)/sgb/gb_ops_cb.cpp \
 				 $(CORE_DIR)/sgb/gb_memory.cpp \
 				 $(CORE_DIR)/sgb/gb_mbc.cpp \
+				 $(CORE_DIR)/sgb/gb_patches.cpp \
 				 $(CORE_DIR)/sgb/gb_ppu.cpp \
 				 $(CORE_DIR)/sgb/gb_apu.cpp \
 				 $(CORE_DIR)/sgb/gb_timer.cpp \
+				 $(CORE_DIR)/sgb/gb_serial.cpp \
+				 $(CORE_DIR)/sgb/gb_infrared.cpp \
+				 $(CORE_DIR)/sgb/gb_barcodeboy.cpp \
+				 $(CORE_DIR)/sgb/gb_bardigun.cpp \
+				 $(CORE_DIR)/sgb/gb_kisslink.cpp \
+				 $(CORE_DIR)/sgb/gb_link.cpp \
+				 $(CORE_DIR)/sgb/gb_viewer.cpp \
 				 $(CORE_DIR)/sgb/gb_joypad.cpp \
 				 $(CORE_DIR)/sgb/gb_cart.cpp \
 				 $(CORE_DIR)/snapshot.cpp \

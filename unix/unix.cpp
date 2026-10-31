@@ -308,6 +308,11 @@ namespace {
 
 		void AudioOutputThread()
 		{
+			// Signals belong to the emulation thread: its CPU is the one sigbrkhandler flags.
+			sigset_t all;
+			sigfillset(&all);
+			pthread_sigmask(SIG_BLOCK, &all, NULL);
+
 			while (true)
 			{
 				pthread_mutex_lock(&m_BufferMutex);

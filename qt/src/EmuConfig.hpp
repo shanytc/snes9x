@@ -259,6 +259,7 @@ struct EmuConfig
     bool gb_rtc_off;
     uint32_t gb_rtc_time;
     int gb_rtc_huc3_format;
+    bool gb_cart_speaker;
 
     // BIOS Manager paths, indexed by S9xBiosSlot. Persisted under [BIOS].
     std::string bios_paths[S9X_NUM_BIOS_SLOTS];
@@ -341,7 +342,7 @@ struct EmuConfig
     // Then the five Game Boy Model consoles in S9xGBModelHotkeys order, the
     // BIOS Manager, the coin-op front panels, and the Super Disc's
     // Insert/Eject last.
-    static const int num_shortcuts = 102;
+    static const int num_shortcuts = 105;
 
     /* Save states are organized in banks of slots, as on win32. The state
      * file extension is the flat index, bank * save_slots_per_bank + slot. */

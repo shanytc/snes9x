@@ -50,6 +50,70 @@ constexpr int ASPECT_WIDTH_8_7 = 299;
 // ID_WINDOW_SIZE_1X.
 constexpr unsigned int WINDOW_SIZE_FACTORS = 10;
 
+// Main window class. Distinct from upstream Snes9x so this fork's windows
+// can be told apart, including by our own second-instance lookup.
+#define SNES9XW_WNDCLASS TEXT("SuperSnes9x: WndClass")
+
+// Marks the instance auto-launched by the Game Boy Link menu.
+// "-gblinkpeer=<pid>,<launcher>,<index>,<players>,<model>" carries the
+// launcher's process id and player index, this instance's own index, how
+// many players the session is for, and the launcher's Game Boy Model (an
+// S9xGBBootPolicy value) — the seat boots on the console the master
+// picked, whatever the shared config says.
+#define GBLINK_PEER_SWITCH TEXT("-gblinkpeer")
+#define GBLINK_PEER_SWITCH_A "-gblinkpeer"
+#define GBVIEW_SWITCH TEXT("-gbview")
+#define GBVIEW_SWITCH_A "-gbview"
+
+// The other end this instance talks to directly: the direct-cable
+// partner, or the hub host that spawned it.
+extern DWORD GBLinkPartnerPid;
+
+// Players on the current session (2..4); on a spawned instance the value
+// carried by the launch switch.
+extern int GBLinkSessionPlayers;
+
+// Player number of the launching instance, from the launch switch; the
+// spawned window tiles itself next to it split-screen style.
+extern int GBLinkLauncherIndex;
+
+// Link Current Game runs its players as in-process split screen instead of
+// spawned instances. Persisted; consulted at session start.
+extern bool GBLinkSplitScreen;
+
+// Game Boy Link > Reset on Link / Reset on Unlink. Persisted.
+extern bool GBLinkResetOnLink;
+extern bool GBLinkResetOnUnlink;
+
+// Game Boy Link > Infra-Red / GB KISS: players 1 and 2 face each other's Game Boy
+// Color port / HuC1-HuC3 cart LED in any in-process session. Persisted.
+extern bool GBLinkInfrared;
+extern bool GBLinkGbKiss;
+
+// True on a thread that is a Super Game Boy seat's own SNES (see
+// GBSeatMachine): the frame hooks the core calls from S9xMainLoop - blit,
+// pacing, SRAM autosave - belong to the master and do nothing here.
+extern thread_local bool S9xMachineIsSeat;
+
+// The user's own Game Boy Model, captured before a launch switch
+// overrides it; the config file keeps this, not the session's value.
+extern int GBLinkUserModel;      // -1 = not a spawned instance
+
+// Mirror this instance's pause to the paired one, so a Game Boy that
+// stops answering never reads as an unplugged cable. Called from the
+// pause setters.
+void GBLinkMirrorPause();
+
+// While linked, pause-when-inactive is forced off and background input
+// forced on; unlinking gives the user's own values back.
+void GBLinkSyncResponsiveSettings();
+bool GBLinkGetUserResponsiveSettings(bool *inactivePause, bool *backgroundInput);
+
+// A spawned seat starts muted (only the master sounds); the stash keeps
+// the user's own Mute out of the shared config file.
+bool GBLinkGetUserMute(bool *mute);
+
+
 #include "_tfwopen.h"
 #ifdef UNICODE
 #define _tToChar WideToUtf8
@@ -505,6 +569,15 @@ struct SCustomKeys {
 	SCustomKey SFCBoxMountEject[2];
 	SCustomKey SFCBoxPowerOff;       // keyswitch position 4 (added last: layout)
 	SCustomKey CopyScreenShot;       // screenshot to the clipboard
+	SCustomKey Link2P;               // GB link cable session shapes
+	SCustomKey Link3P;
+	SCustomKey Link4P;
+	SCustomKey LinkOtherGame;
+	SCustomKey LinkSplitToggle;
+	SCustomKey LinkEnd;
+	SCustomKey BarcodeConnect;       // Input -> Barcodes
+	SCustomKey BarcodeScan;
+	SCustomKey BarcodeRescan;
 };
 
 struct SCustomKeyExtra {
@@ -579,6 +652,15 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra SFCBoxMountEject[2];
 	SCustomKeyExtra SFCBoxPowerOff;
 	SCustomKeyExtra CopyScreenShot;
+	SCustomKeyExtra Link2P;
+	SCustomKeyExtra Link3P;
+	SCustomKeyExtra Link4P;
+	SCustomKeyExtra LinkOtherGame;
+	SCustomKeyExtra LinkSplitToggle;
+	SCustomKeyExtra LinkEnd;
+	SCustomKeyExtra BarcodeConnect;
+	SCustomKeyExtra BarcodeScan;
+	SCustomKeyExtra BarcodeRescan;
 };
 
 struct SJoypad {
@@ -728,7 +810,9 @@ void GetSlotFilename(int slot, char filename[_MAX_PATH + 1]);
 void FreezeUnfreezeSlot(int slot, bool8 freeze);
 void FreezeUnfreezeDialog(bool8 freeze);
 void FreezeUnfreezeDialogPreview(bool8 freeze);
-void FreezeUnfreeze(const char *filename, bool8 freeze);
+// Returns false when the action did not happen (stopped, or declined
+// at the confirmation prompt).
+bool FreezeUnfreeze(const char *filename, bool8 freeze);
 bool UnfreezeScreenshotSlot(int slot, uint16 **image_buffer, int &width, int &height);
 void S9xWinRemoveRegistryKeys();
 bool RegisterProgid();

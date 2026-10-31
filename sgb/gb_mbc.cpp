@@ -63,11 +63,6 @@ void S9xGBSetCameraCallback(bool (*cb)(unsigned char *, int, int))
 	g_gb_camera_cb = cb;
 }
 
-int g_cam_countdown = 0;
-uint8_t g_cam_shade[128 * 112] = {0};
-int g_cam_live = 0;
-int g_cam_brightness = 0;
-
 namespace SGB {
 
 // TAMA5 reuses existing MbcState fields (it never coexists with the mappers
@@ -184,7 +179,6 @@ void MbcTama6Seed(MbcState &s, int64_t unix_time)
 
 void MbcReset(MbcState &s)
 {
-	g_cam_brightness = 0;
 	s.rom_bank   = 1;
 	s.ram_bank   = 0;
 	// HuC1 RAM is always live — its $0000-$1FFF register only routes the
@@ -232,6 +226,7 @@ void MbcReset(MbcState &s)
 		s.ram_bank           = 0;
 		s.mmm01_rom_bank_mid = 1;
 	}
+	if (s.type == MbcType::Camera) s.rtc_sub_cycles = 0;
 }
 
 namespace {
@@ -293,8 +288,61 @@ void MbcHuc3SetClock(MbcState &s, uint16_t minutes, uint16_t days)
 	s.rtc_latched[1] = (days >> 8) & 0xFF;
 }
 
+// Slots 2-10 ($30-$77) hold Robopon's events, slot 7 ($58-$5F) is Pan Docs'
+// event time; each is a minute and a day (3 nibbles each, low first), tone,
+// enable. Enable 1 = a built-in tone; Pocket Family's 7 (its melody at $78)
+// isn't emulated.
+uint8_t MbcHuc3AlarmDue(const Cart &c)
+{
+	const uint16_t minute = MbcHuc3Minutes(c.mbc) & 0xFFF, day = MbcHuc3Days(c.mbc) & 0xFFF;
+	for (int slot = 2; slot <= 10; ++slot)
+	{
+		uint16_t m, d;
+		uint8_t  tone;
+		bool     on;
+		if (slot == 7)   // the battery save restores this one, all but the enable's value
+		{
+			m = c.huc3_alarm_minutes & 0xFFF;
+			d = c.huc3_alarm_days & 0xFFF;
+			tone = static_cast<uint8_t>(c.huc3_alarm_days >> 12);
+			on = c.huc3_ram[0x3F] ? c.huc3_ram[0x3F] == 1 : c.huc3_alarm_on;
+		}
+		else
+		{
+			const uint8_t *n = &c.huc3_ram[slot * 8];
+			m = static_cast<uint16_t>(n[0] | (n[1] << 4) | (n[2] << 8));
+			d = static_cast<uint16_t>(n[3] | (n[4] << 4) | (n[5] << 8));
+			tone = n[6];
+			on = n[7] == 1;
+		}
+		if (on && m == minute && d == day)
+			return static_cast<uint8_t>(tone + 1);
+	}
+	return 0;
+}
+
+// With the alarm on, an entry whose minute and hour (BCD, as the clock reads)
+// are the clock's now; the game writes them from command 6/7 reads.
+uint8_t MbcTama6AlarmDue(const Cart &c)
+{
+	const MbcState &s = c.mbc;
+	if (!(s.rtc_latched[4] & 0x04)) return 0;
+	const uint8_t minute = static_cast<uint8_t>((Tama5RtcNib(s, 0x3) << 4) | Tama5RtcNib(s, 0x2));
+	const uint8_t hour   = static_cast<uint8_t>((Tama5RtcNib(s, 0x5) << 4) | Tama5RtcNib(s, 0x4));
+	for (int e = 0; e < 8; ++e)
+		if (c.tama6_cells[e * 2] == minute && (c.tama6_cells[e * 2 + 1] & 0x3F) == hour)
+			return static_cast<uint8_t>((c.tama6_cells[e * 2 + 1] >> 6) + 1);
+	return 0;
+}
+
 void MbcTickRtc(MbcState &s, int32_t tcycles)
 {
+	// The Camera has no RTC; rtc_sub_cycles is its capture-busy countdown.
+	if (s.type == MbcType::Camera)
+	{
+		s.rtc_sub_cycles = (s.rtc_sub_cycles > tcycles) ? s.rtc_sub_cycles - tcycles : 0;
+		return;
+	}
 	if (s.type == MbcType::HuC3)
 	{
 		s.rtc_sub_cycles += tcycles;
@@ -645,6 +693,8 @@ inline void Huc3WriteReg(Cart &c, uint8_t idx, uint8_t nib)
 {
 	MbcState &s = c.mbc;
 	nib &= 0x0F;
+	if (idx >= 0x20 && idx < 0x80)
+		c.huc3_ram[idx - 0x20] = nib;
 	if (idx < 3)
 		MbcHuc3SetClock(s, SetNibble(MbcHuc3Minutes(s), idx, nib), MbcHuc3Days(s));
 	else if (idx < 7)
@@ -655,7 +705,10 @@ inline void Huc3WriteReg(Cart &c, uint8_t idx, uint8_t nib)
 		c.huc3_alarm_days = SetNibble(c.huc3_alarm_days, idx - 0x5B, nib);
 	else if (idx == 0x5F)
 		c.huc3_alarm_on = (nib & 1) != 0;
-	// the speaker's tone registers are dropped
+	else if (idx == 0x26)
+		c.huc3_tone = nib;
+	else if (idx == 0x27)
+		c.huc3_tone_on = nib == 1;   // all four bits checked (Pan Docs)
 }
 
 // Execute one command written to the $B window. Per SameBoy, HuC3 runs the
@@ -672,7 +725,11 @@ inline void Huc3Command(Cart &c, uint8_t value)
 		case 3: Huc3WriteReg(c, idx, arg); ++idx;                       break;  // write + advance
 		case 4: idx = static_cast<uint8_t>((idx & 0xF0) | arg);         break;  // pointer low nibble
 		case 5: idx = static_cast<uint8_t>((idx & 0x0F) | (arg << 4));  break;  // pointer high nibble
-		case 6: s.rtc_regs[1] = arg;                                    break;  // extended command
+		case 6:   // extended command; $E twice in a row sounds the tone
+			if (arg == 0xE && s.rtc_regs[1] == 0xE && c.huc3_tone_on)
+				c.speaker_request = static_cast<uint8_t>(c.huc3_tone + 1);
+			s.rtc_regs[1] = arg;
+			break;
 		default:                                                        break;
 	}
 }
@@ -691,6 +748,9 @@ inline void Tama5Trigger(Cart &c)
 		case 0x0:
 			WriteSram(c, addr5, data);
 			break;
+		case 0x3:   // an alarm entry byte ($10-$1F read back, not emulated)
+			if (addr5 < 0x10) c.tama6_cells[addr5] = data;
+			break;
 		case 0x2:
 			switch (addr5)
 			{
@@ -703,7 +763,10 @@ inline void Tama5Trigger(Cart &c)
 					break;
 				case 0x4: Tama5SetRtcNib(s, 0x2, data & 0x0F); Tama5SetRtcNib(s, 0x3, static_cast<uint8_t>(data >> 4)); break;
 				case 0x5: Tama5SetRtcNib(s, 0x4, data & 0x0F); Tama5SetRtcNib(s, 0x5, static_cast<uint8_t>(data >> 4)); break;
-				case 0x10: s.rtc_latched[4] &= ~0x04; break;   // alarm off
+				case 0x10:   // alarm off, and a chirp playing stops
+					s.rtc_latched[4] &= ~0x04;
+					c.speaker_request = kSpeakerStop;
+					break;
 				case 0x11: s.rtc_latched[4] |= 0x04;  break;   // alarm on
 				default: break;
 			}
@@ -1149,7 +1212,7 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 	{
 		// HuC1 routes this window between cart RAM and the IR register.
 		// ram_enable doubles as the RAM/IR select (true = RAM, false = IR).
-		// With no link partner the IR sensor idles at $C0 (no light).
+		// CPU reads in IR mode go to gb_infrared.cpp; here it reads no light.
 		if (s.type == MbcType::HuC1)
 		{
 			if (!s.ram_enable) return 0xC0;
@@ -1216,16 +1279,16 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 			}
 		}
 
+		// Camera RAM reads ignore the RAM enable (it only gates writes) and
+		// read $00 while a capture runs.
 		if (s.type == MbcType::Camera)
 		{
 			if (s.mbc1_mode)
 			{
-				if ((addr & 0x7F) == 0) return (g_cam_countdown > 0) ? 0x01 : 0x00;
+				if ((addr & 0x7F) == 0) return (s.rtc_sub_cycles > 0) ? 0x01 : 0x00;
 				return 0x00;
 			}
-			if ((s.ram_bank & 0x0F) == 0 && addr >= 0xA100 && addr < 0xAF00) g_cam_live = 40;
-			if (g_cam_countdown > 0) return 0x00;
-			if (!s.ram_enable) return 0xFF;
+			if (s.rtc_sub_cycles > 0) return 0x00;
 			return ReadSram(sram, ((s.ram_bank & 0x0F) * 0x2000u) + (addr - 0xA000u));
 		}
 
@@ -1291,8 +1354,8 @@ static void GbCameraCapture(Cart &c)
 {
 	const uint8_t *reg = c.camera_regs;
 	const int expo = (reg[2] << 8) | reg[3];
-	g_cam_countdown = 129792 + expo * 64;
-	if (g_cam_countdown > 200000) g_cam_countdown = 200000;
+	// Pan Docs busy time: 32446 + N_bit + 16 * exposure M-cycles.
+	c.mbc.rtc_sub_cycles = 129792 + ((reg[1] & 0x80) ? 0 : 2048) + expo * 64;
 	const int W = 128, H = 112;
 	unsigned char src[W * H];
 	const bool have = g_gb_camera_cb && g_gb_camera_cb(src, W, H);
@@ -1325,22 +1388,6 @@ static void GbCameraCapture(Cart &c)
 			WriteSram(c, tile_off + row * 2 + 1, hi);
 		}
 	}
-
-	for (int y = 0; y < H; ++y)
-		for (int x = 0; x < W; ++x)
-		{
-			int v = src[y * W + x] * 23 / 16 + g_cam_brightness;
-			if (v < 0) v = 0; else if (v > 255) v = 255;
-			const int base = ((x & 3) + (y & 3) * 4) * 3 + 6;
-			uint8_t shade;
-			if      (v < reg[base + 0]) shade = 3;
-			else if (v < reg[base + 1]) shade = 2;
-			else if (v < reg[base + 2]) shade = 1;
-			else                        shade = 0;
-			g_cam_shade[y * W + x] = shade;
-		}
-	(void)have;
-	g_cam_live = 40;
 }
 
 void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
@@ -1996,7 +2043,7 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 		}
 		else if (addr >= 0xA000 && addr < 0xC000)
 		{
-			// RAM mode → cart RAM; IR mode → IR LED, which we discard.
+			// RAM mode → cart RAM; IR-mode writes drive the LED in gb_infrared.cpp.
 			if (!s.ram_enable) break;
 			WriteSram(c, ((s.ram_bank & 0x03) * 0x2000u) + (addr - 0xA000u), value);
 		}

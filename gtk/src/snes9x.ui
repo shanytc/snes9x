@@ -2029,6 +2029,14 @@
                               </object>
                             </child>
                             <child>
+                              <object class="GtkCheckMenuItem" id="rtc_speaker_item">
+                                <property name="label" translatable="yes">_Cartridge Speaker</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                            <child>
                               <object class="GtkMenuItem" id="rtc_settings_item">
                                 <property name="label" translatable="yes">_Settings…</property>
                                 <property name="visible">True</property>
@@ -2377,30 +2385,30 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkSeparatorMenuItem" id="barcode_battler_separator">
+                      <object class="GtkSeparatorMenuItem" id="barcodes_separator">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkMenuItem" id="barcode_battler_item">
-                        <property name="label" translatable="yes">_Barcode Battler II</property>
+                      <object class="GtkMenuItem" id="barcodes_item">
+                        <property name="label" translatable="yes">_Barcodes</property>
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="use_underline">True</property>
                         <child type="submenu">
-                          <object class="GtkMenu" id="barcode_battler_menu">
+                          <object class="GtkMenu" id="barcodes_menu">
                             <property name="can_focus">False</property>
                             <child>
-                              <object class="GtkCheckMenuItem" id="barcode_battler_connect_item">
-                                <property name="label" translatable="yes">_Connect to Port 2</property>
+                              <object class="GtkCheckMenuItem" id="barcodes_connect_item">
+                                <property name="label" translatable="yes">_Connect</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="barcode_battler_scan_item">
+                              <object class="GtkMenuItem" id="barcodes_scan_item">
                                 <property name="label" translatable="yes">_Scan Barcode…</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
@@ -2408,8 +2416,8 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="barcode_battler_rescan_item">
-                                <property name="label" translatable="yes">Scan _Last Barcode Again</property>
+                              <object class="GtkMenuItem" id="barcodes_rescan_item">
+                                <property name="label" translatable="yes">Use _Last Barcode Again</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>
@@ -12305,6 +12313,140 @@
                           </object>
                           <packing>
                             <property name="position">5</property>
+                            <property name="tab_fill">False</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkScrolledWindow" id="scrolledwindow_barcodes">
+                            <property name="visible">True</property>
+                            <property name="can_focus">True</property>
+                            <property name="hscrollbar_policy">never</property>
+                            <property name="vscrollbar_policy">automatic</property>
+                            <child>
+                              <object class="GtkViewport" id="shortcut_viewport7">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="resize_mode">queue</property>
+                                <property name="shadow_type">none</property>
+                                <child>
+                          <object class="GtkTable" id="table_barcodes">
+                            <property name="visible">True</property>
+                            <property name="can_focus">False</property>
+                            <property name="border_width">10</property>
+                            <property name="n_rows">3</property>
+                            <property name="n_columns">2</property>
+                            <property name="column_spacing">10</property>
+                            <property name="row_spacing">5</property>
+                            <child>
+                              <object class="GtkLabel" id="label_barcode_connect">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">Barcodes: Connect</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">0</property>
+                                <property name="bottom_attach">1</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_barcode_connect">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">0</property>
+                                <property name="bottom_attach">1</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label_barcode_scan">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">Barcodes: Scan Barcode</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">1</property>
+                                <property name="bottom_attach">2</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_barcode_scan">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">1</property>
+                                <property name="bottom_attach">2</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label_barcode_rescan">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="xalign">0</property>
+                                <property name="label" translatable="yes">Barcodes: Use Last Barcode Again</property>
+                              </object>
+                              <packing>
+                                <property name="top_attach">2</property>
+                                <property name="bottom_attach">3</property>
+                                <property name="x_options">GTK_FILL</property>
+                                <property name="y_options"/>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="b_barcode_rescan">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="primary_icon_activatable">False</property>
+                                <property name="secondary_icon_activatable">False</property>
+                                <property name="primary_icon_sensitive">True</property>
+                                <property name="secondary_icon_sensitive">True</property>
+                              </object>
+                              <packing>
+                                <property name="left_attach">1</property>
+                                <property name="right_attach">2</property>
+                                <property name="top_attach">2</property>
+                                <property name="bottom_attach">3</property>
+                                <property name="y_options">GTK_FILL</property>
+                              </packing>
+                            </child>
+                          </object>
+                                </child>
+                              </object>
+                            </child>
+                          </object>
+                          <packing>
+                            <property name="position">6</property>
+                          </packing>
+                        </child>
+                        <child type="tab">
+                          <object class="GtkLabel" id="label_barcodes_tab">
+                            <property name="visible">True</property>
+                            <property name="can_focus">False</property>
+                            <property name="label" translatable="yes">Barcodes</property>
+                          </object>
+                          <packing>
+                            <property name="position">6</property>
                             <property name="tab_fill">False</property>
                           </packing>
                         </child>

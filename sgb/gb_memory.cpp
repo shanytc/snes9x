@@ -13,6 +13,8 @@
 #include "gb_timer.h"
 #include "gb_joypad.h"
 #include "gb_mbc.h"
+#include "gb_serial.h"
+#include "gb_infrared.h"
 #include "sgb.h"
 
 #include <cstring>
@@ -224,12 +226,16 @@ void MemReset(Memory &m, bool cgb)
 	m.boot_rom_size    = 0;
 	m.boot_rom_enabled = false;
 	m.dma_last         = cgb ? 0x00 : 0xFF;
+	m.dma_vram_bypass  = false;
 
 	m.svbk         = 1;
 	m.key1_armed   = false;
 	m.double_speed = false;
 	m.ff72 = m.ff73 = m.ff74 = m.ff75 = 0;
 	m.key0 = 0;
+	m.rp        = 0;
+	m.rp_lit_at = -1;
+	m.cart_ir   = 0;
 	m.hdma1 = m.hdma2 = m.hdma3 = m.hdma4 = 0;
 	m.hdma5        = 0xFF;
 	m.hdma_src = m.hdma_dst = m.hdma_len = 0;
@@ -293,6 +299,8 @@ static uint8_t DmaReadByte(Memory &m, uint16_t addr)
 		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xA000)
 		return m.ppu ? m.ppu->vram[(addr - 0x8000) + VramBankBase(m)] : 0xFF;
+	if (addr < 0xC000 && IrCartSelected(m))
+		return IrReadCart(m);
 	if (addr < 0xC000)
 		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	if (addr < 0xD000)
@@ -357,6 +365,8 @@ void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
 	const bool stopped = m.cpu && m.cpu->stopped;
 
 	if (!stopped && m.timer) TimerStep(*m.timer, m, tcycles);
+	// The link cable shares the timer's clock domain (DIV doubles in double speed).
+	if (m.serial) SerialStep(*m.serial, m, tcycles);
 
 	// One DMA byte per 4 CPU T-cycles (a split write cycle ticks DMA only
 	// in its first half so the engine still sees whole M-cycles).
@@ -375,7 +385,34 @@ void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
 	{
 		if (m.ppu) PpuStep(*m.ppu, m, rt);
 		if (m.apu && !(stopped && !m.cgb_hw)) ApuStep(*m.apu, rt);
-		if (m.cart) MbcTickRtc(m.cart->mbc, rt);
+		if (m.cart && m.cart->mbc.type == MbcType::HuC3)
+		{
+			// A minute on: an alarm slot due now sounds the cart's speaker.
+			const uint16_t minute = MbcHuc3Minutes(m.cart->mbc);
+			MbcTickRtc(m.cart->mbc, rt);
+			if (m.apu && MbcHuc3Minutes(m.cart->mbc) != minute)
+				if (const uint8_t due = MbcHuc3AlarmDue(*m.cart))
+					ApuSpeakerStart(*m.apu, static_cast<uint8_t>(due - 1));
+		}
+		else if (m.cart && m.cart->mbc.type == MbcType::TAMA5)
+		{
+			// A minute on: the last minute's chirp ends, an entry due now starts one.
+			const uint8_t minute = MbcTama6Reg(m.cart->mbc, 0x2);
+			MbcTickRtc(m.cart->mbc, rt);
+			if (m.apu && MbcTama6Reg(m.cart->mbc, 0x2) != minute)
+			{
+				ApuSpeakerStop(*m.apu);
+				if (const uint8_t pattern = MbcTama6AlarmDue(*m.cart))
+				{
+					uint8_t prog[24];   // the chip's two RAM pages hold the patterns
+					std::memcpy(prog, m.cart->tama6_pages[1], 12);
+					std::memcpy(prog + 12, m.cart->tama6_pages[2], 12);
+					ApuSpeakerStartTama(*m.apu, pattern, prog);
+				}
+			}
+		}
+		else if (m.cart)
+			MbcTickRtc(m.cart->mbc, rt);
 	}
 }
 
@@ -420,6 +457,7 @@ uint8_t MemRead(Memory &m, uint16_t addr)
 	}
 	if (addr < 0xC000)
 	{
+		if (IrCartSelected(m)) return IrReadCart(m);
 		return m.cart ? MbcRead(m.cart->mbc, m.cart->rom, m.cart->sram, addr, m.cart->mbc1_multicart, &m.cart->unl) : 0xFF;
 	}
 	if (addr < 0xD000)
@@ -489,7 +527,17 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 	}
 	if (addr < 0xC000)
 	{
-		if (m.cart) MbcWrite(*m.cart, addr, value);
+		if (IrCartSelected(m)) IrWriteCart(m, value);
+		else if (m.cart)
+		{
+			MbcWrite(*m.cart, addr, value);
+			if (m.cart->speaker_request)   // a HuC3 tone sounds (or a chirp stops) right away
+			{
+				if (m.apu && m.cart->speaker_request == kSpeakerStop) ApuSpeakerStop(*m.apu);
+				else if (m.apu) ApuSpeakerStart(*m.apu, static_cast<uint8_t>(m.cart->speaker_request - 1));
+				m.cart->speaker_request = 0;
+			}
+		}
 		return;
 	}
 	if (addr < 0xD000)
@@ -567,7 +615,9 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 	{
 		case 0xFF00: return m.joypad ? JoypadRead(*m.joypad) : 0xFF;
 		case 0xFF01: return m.serial_data;
-		case 0xFF02: return static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
+		case 0xFF02:
+			return m.serial ? SerialReadSC(*m.serial, m)
+			                : static_cast<uint8_t>((m.serial_control & 0x81) | 0x7E);
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			return m.timer ? TimerRead(*m.timer, addr) : 0xFF;
 		case 0xFF0F: return static_cast<uint8_t>(m.if_ | 0xE0);
@@ -591,6 +641,8 @@ static uint8_t ReadIO(Memory &m, uint16_t addr)
 			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.ppu->ocps | 0x40) : 0xFF;
 		case 0xFF6B:
 			return (m.ppu && m.ppu->cgb) ? m.ppu->obj_pal[m.ppu->ocps & 0x3F] : 0xFF;
+		case 0xFF56:
+			return (m.ppu && m.ppu->cgb) ? IrReadRP(m) : 0xFF;
 		case 0xFF70:
 			return (m.ppu && m.ppu->cgb) ? static_cast<uint8_t>(m.svbk | 0xF8) : 0xFF;
 		case 0xFF72:
@@ -623,30 +675,20 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 	{
 		case 0xFF00:
 			if (m.joypad) JoypadWrite(*m.joypad, value);
-			// Feed SGB command-packet sniffer. Benign when SGB mode inactive.
-			S9xSGBOnJoyserWrite(value);
+			// Feed this core's own SGB command-packet sniffer. Benign when
+			// SGB mode inactive.
+			S9xSGBOnJoyserWriteCore(m.sgb_owner, value);
+			if (m.joypad) JoypadLineEdges(*m.joypad, m);   // after any rotation step
 			return;
 		case 0xFF01:
 			m.serial_data = value;
 			return;
 		case 0xFF02:
-			m.serial_control = value;
-			// Internal clock (bit 0 = 1) completes instantly with no peer:
-			// push the byte to the observer callback and fire the serial IRQ,
-			// then clear the start bit. External clock (bit 0 = 0) has no
-			// partner clocking bits in, so bit 7 stays set and no IRQ fires —
-			// matching real DMG with a disconnected link cable. Games like
-			// Tetris Plus rely on this silence to detect "no link partner".
-			// SB latches $FF: disconnected MISO floats high, so each clock
-			// shifts in a 1. Alleyway's serial-IRQ input loop depends on this.
-			if ((value & 0x81) == 0x81)
-			{
-				if (m.serial_cb) m.serial_cb(m.serial_user, m.serial_data);
-				m.serial_bits  = 8;  // clocked off DIV bit 8 in TimerStep
-				m.serial_guard = 0;
-			}
-			else
-				m.serial_bits = 0;
+			// gb_serial.cpp owns what a start bit means: unlinked it keeps
+			// the original instant-completion stub, linked it clocks eight
+			// real bit periods and swaps a byte with the peer.
+			if (m.serial) SerialWriteSC(*m.serial, m, value);
+			else          m.serial_control = value;
 			return;
 		case 0xFF04: case 0xFF05: case 0xFF06: case 0xFF07:
 			if (m.timer) TimerWrite(*m.timer, m, addr, value);
@@ -697,6 +739,7 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 		case 0xFF53: if (m.ppu && m.ppu->cgb) m.hdma3 = value; return;
 		case 0xFF54: if (m.ppu && m.ppu->cgb) m.hdma4 = value; return;
 		case 0xFF55: if (m.ppu && m.ppu->cgb) HdmaTrigger(m, value); return;
+		case 0xFF56: if (m.ppu && m.ppu->cgb) IrWriteRP(m, value); return;
 		case 0xFF68: if (m.ppu && m.ppu->cgb) m.ppu->bcps = value; return;
 		case 0xFF69: if (m.ppu && m.ppu->cgb) { CgbWritePalette(m.ppu->bg_pal, m.ppu->bcps, value, !CramBlocked(m)); m.ppu->cgb_pal_written = true; } return;
 		case 0xFF6A: if (m.ppu && m.ppu->cgb) m.ppu->ocps = value; return;

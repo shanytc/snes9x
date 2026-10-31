@@ -611,7 +611,8 @@ BEGIN
 
     // Tab content: 2 columns x 9 rows of generic switchable slots.
     // Column 1: label x=10..82, control x=86..146
-    // Column 2: label x=205..277, control x=281..341
+    // Column 2: label x=155..277 (right-aligned; room for long names), control x=281..341
+    // (the Game Boy tab moves both columns across: LayoutHotkeyColumns in wsnes9x.cpp)
     RTEXT           "",IDC_LABEL_HK1,10,52,72,10
     RTEXT           "",IDC_LABEL_HK2,10,66,72,10
     RTEXT           "",IDC_LABEL_HK3,10,80,72,10
@@ -621,15 +622,15 @@ BEGIN
     RTEXT           "",IDC_LABEL_HK7,10,136,72,10
     RTEXT           "",IDC_LABEL_HK8,10,150,72,10
     RTEXT           "",IDC_LABEL_HK9,10,164,72,10
-    RTEXT           "",IDC_LABEL_HK10,205,52,72,10
-    RTEXT           "",IDC_LABEL_HK11,205,66,72,10
-    RTEXT           "",IDC_LABEL_HK12,205,80,72,10
-    RTEXT           "",IDC_LABEL_HK13,205,94,72,10
-    RTEXT           "",IDC_LABEL_HK14,205,108,72,10
-    RTEXT           "",IDC_LABEL_HK15,205,122,72,10
-    RTEXT           "",IDC_LABEL_HK16,205,136,72,10
-    RTEXT           "",IDC_LABEL_HK17,205,150,72,10
-    RTEXT           "",IDC_LABEL_HK18,205,164,72,10
+    RTEXT           "",IDC_LABEL_HK10,155,52,122,10
+    RTEXT           "",IDC_LABEL_HK11,155,66,122,10
+    RTEXT           "",IDC_LABEL_HK12,155,80,122,10
+    RTEXT           "",IDC_LABEL_HK13,155,94,122,10
+    RTEXT           "",IDC_LABEL_HK14,155,108,122,10
+    RTEXT           "",IDC_LABEL_HK15,155,122,122,10
+    RTEXT           "",IDC_LABEL_HK16,155,136,122,10
+    RTEXT           "",IDC_LABEL_HK17,155,150,122,10
+    RTEXT           "",IDC_LABEL_HK18,155,164,122,10
     CONTROL         "",IDC_HOTKEY1,"InputCustomHot",WS_TABSTOP,86,52,60,12
     CONTROL         "",IDC_HOTKEY2,"InputCustomHot",WS_TABSTOP,86,66,60,12
     CONTROL         "",IDC_HOTKEY3,"InputCustomHot",WS_TABSTOP,86,80,60,12
@@ -763,12 +764,12 @@ BEGIN
     LTEXT           "not found",IDC_MULTICART_BIOSNOTFOUND,270,50,54,8
 END
 
-IDD_BARCODE_BATTLER DIALOGEX 0, 0, 490, 262
+IDD_BARCODES DIALOGEX 0, 0, 490, 262
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Barcode Battler II"
+CAPTION "Barcodes"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture.",IDC_STATIC,6,6,288,26
+    LTEXT           "",IDC_BARCODE_INTRO,6,6,288,26
     RTEXT           "Barcode:",IDC_STATIC,6,38,34,8
     EDITTEXT        IDC_BARCODE_EDIT,44,36,132,14,ES_AUTOHSCROLL
     PUSHBUTTON      "&Random",IDC_BARCODE_RANDOM,180,36,50,14
@@ -781,7 +782,7 @@ BEGIN
     LTEXT           "Fin&d a card:",IDC_STATIC,304,6,180,8
     EDITTEXT        IDC_BARCODE_SEARCH,304,18,180,14,ES_AUTOHSCROLL
     CONTROL         "",IDC_BARCODE_CARDS,"SysTreeView32",TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_DISABLEDRAGDROP | TVS_SHOWSELALWAYS | WS_BORDER | WS_HSCROLL | WS_TABSTOP,304,36,180,190
-    LTEXT           "Some games look for the Barcode Battler only when they start; reset the game if it doesn't respond.",IDC_STATIC,6,230,288,26
+    LTEXT           "",IDC_BARCODE_NOTE,6,230,288,26
     DEFPUSHBUTTON   "&Scan",IDOK,400,242,40,14
     PUSHBUTTON      "Cancel",IDCANCEL,444,242,40,14
 END
@@ -1502,8 +1503,12 @@ BEGIN
             MENUITEM "S&ave SPC Data",              ID_FILE_SAVE_SPC_DATA,MFT_STRING,MFS_ENABLED
             MENUITEM "Save Screenshot",             ID_SAVESCREENSHOT,MFT_STRING,MFS_ENABLED
             MENUITEM "Copy Screenshot to Clipboard", ID_SAVESCREENSHOT_CLIPBOARD,MFT_STRING,MFS_ENABLED
-            MENUITEM "Sa&ve S-RAM Data",            ID_FILE_SAVE_SRAM_DATA,MFT_STRING,MFS_ENABLED
             MENUITEM "Save Memory Pack",            ID_SAVEMEMPACK,MFT_STRING,MFS_ENABLED
+        END
+        POPUP "S-&RAM",                        0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&Load S-RAM...",              ID_FILE_LOAD_SRAM_DATA,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Save S-RAM...",              ID_FILE_SAVE_SRAM_DATA,MFT_STRING,MFS_ENABLED
         END
         MENUITEM "BIOS Manager...",              ID_FILE_BIOSMANAGER,MFT_STRING,MFS_ENABLED
         MENUITEM "ROM Information...",          IDM_ROM_INFO,MFT_STRING,MFS_ENABLED
@@ -1539,13 +1544,22 @@ BEGIN
         MENUITEM "Soft &Reset",                 ID_EMULATION_SOFT_RESET,MFT_STRING,MFS_ENABLED
         MENUITEM "&Hard Reset (Power Cycle)",   ID_EMULATION_HARD_RESET,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        POPUP "Run &Ahead",                     0,MFT_STRING,MFS_ENABLED
+        POPUP "Game Boy &Link",                 ID_EMULATION_GB_LINK,MFT_STRING,MFS_ENABLED
         BEGIN
-            MENUITEM "&0 (off)",                    ID_EMULATION_RUNAHEAD_OFF,MFT_STRING,MFS_ENABLED
-            MENUITEM "&1 frame",                    ID_EMULATION_RUNAHEAD_1,MFT_STRING,MFS_ENABLED
-            MENUITEM "&2 frames",                   ID_EMULATION_RUNAHEAD_2,MFT_STRING,MFS_ENABLED
-            MENUITEM "&3 frames",                   ID_EMULATION_RUNAHEAD_3,MFT_STRING,MFS_ENABLED
-            MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
+            POPUP "Link &Current Game",             ID_EMULATION_GB_LINK_SAME_POPUP,MFT_STRING,MFS_ENABLED
+            BEGIN
+                MENUITEM "&2 Players",                  ID_EMULATION_GB_LINK_SAME,MFT_STRING,MFS_ENABLED
+                MENUITEM "&3 Players",                  ID_EMULATION_GB_LINK_SAME_3,MFT_STRING,MFS_ENABLED
+                MENUITEM "&4 Players",                  ID_EMULATION_GB_LINK_SAME_4,MFT_STRING,MFS_ENABLED
+                MENUITEM MFT_SEPARATOR
+                MENUITEM "S&plit Screen",               ID_EMULATION_GB_LINK_SPLIT,MFT_STRING,MFS_ENABLED
+            END
+            MENUITEM "Link &Other Game",            ID_EMULATION_GB_LINK_DIFF,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "&Reset on Link",              ID_EMULATION_GB_LINK_RESET_ON_LINK,MFT_STRING,MFS_ENABLED
+            MENUITEM "Reset on U&nlink",            ID_EMULATION_GB_LINK_RESET_ON_UNLINK,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "&Unlink",                     ID_EMULATION_GB_LINK_UNLINK,MFT_STRING,MFS_ENABLED
         END
         POPUP "Game &Boy Model",                ID_EMULATION_BIOS,MFT_STRING,MFS_ENABLED
         BEGIN
@@ -1563,6 +1577,7 @@ BEGIN
             MENUITEM "Save RTC to &Battery Save (.sav)", ID_EMULATION_GB_RTC_SAV,MFT_STRING | MFT_RADIOCHECK,MFS_ENABLED
             MENUITEM "Save RTC Se&parately (.rtc)", ID_EMULATION_GB_RTC_FILE,MFT_STRING | MFT_RADIOCHECK,MFS_ENABLED
             MENUITEM MFT_SEPARATOR
+            MENUITEM "&Cartridge Speaker",          ID_EMULATION_GB_RTC_SPEAKER,MFT_STRING,MFS_ENABLED
             MENUITEM "&Settings...",                ID_EMULATION_GB_RTC_SETTINGS,MFT_STRING,MFS_ENABLED
         END
         POPUP "&Nintendo Super System",         ID_EMULATION_NSS,MFT_STRING,MFS_ENABLED
@@ -1635,6 +1650,15 @@ BEGIN
             MENUITEM "&Debug Menu",                 ID_SUPERDISC_DEBUGMENU,MFT_STRING,MFS_ENABLED
         END
         MENUITEM MFT_SEPARATOR
+        POPUP "Run &Ahead",                     ID_EMULATION_RUNAHEAD_POPUP,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&0 (off)",                    ID_EMULATION_RUNAHEAD_OFF,MFT_STRING,MFS_ENABLED
+            MENUITEM "&1 frame",                    ID_EMULATION_RUNAHEAD_1,MFT_STRING,MFS_ENABLED
+            MENUITEM "&2 frames",                   ID_EMULATION_RUNAHEAD_2,MFT_STRING,MFS_ENABLED
+            MENUITEM "&3 frames",                   ID_EMULATION_RUNAHEAD_3,MFT_STRING,MFS_ENABLED
+            MENUITEM "&4 frames",                   ID_EMULATION_RUNAHEAD_4,MFT_STRING,MFS_ENABLED
+        END
+        MENUITEM MFT_SEPARATOR
         POPUP "&S-PPU",                         0,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Tile Viewer...",             ID_DEBUG_VRAM_VIEWER,MFT_STRING,MFS_ENABLED
@@ -1687,11 +1711,11 @@ BEGIN
         MENUITEM "Use Dual Justifiers",         IDM_JUSTIFIERS,MFT_STRING,MFS_ENABLED
         MENUITEM "Use M.A.C.S. Rifle",          IDM_MACSRIFLE_TOGGLE,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        POPUP "&Barcode Battler II",            0,MFT_STRING,MFS_ENABLED
+        POPUP "&Barcodes",                      0,MFT_STRING,MFS_ENABLED
         BEGIN
-            MENUITEM "&Connect to Port 2",          ID_INPUT_BARCODE_CONNECT,MFT_STRING,MFS_ENABLED
+            MENUITEM "&Connect",                    ID_INPUT_BARCODE_CONNECT,MFT_STRING,MFS_ENABLED
             MENUITEM "&Scan Barcode...",            ID_INPUT_BARCODE_SCAN,MFT_STRING,MFS_ENABLED
-            MENUITEM "Scan &Last Barcode Again",    ID_INPUT_BARCODE_RESCAN,MFT_STRING,MFS_ENABLED
+            MENUITEM "Use &Last Barcode Again",     ID_INPUT_BARCODE_RESCAN,MFT_STRING,MFS_ENABLED
         END
     END
     POPUP "&Sound",                         0,MFT_STRING,MFS_ENABLED
@@ -1747,7 +1771,7 @@ BEGIN
             MENUITEM "&Attach Audio CD...",         ID_SOUND_VOICEKUN_ATTACH,MFT_STRING,MFS_ENABLED
             MENUITEM "&Eject Audio CD",             ID_SOUND_VOICEKUN_DETACH,MFT_STRING,MFS_GRAYED
         END
-        MENUITEM "Show Audio &Waveform",        ID_SOUND_AUDIOWAVEFORM,MFT_STRING,MFS_ENABLED
+        MENUITEM "Open Audio &Waveform",        ID_SOUND_AUDIOWAVEFORM,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Settings...\tAlt+T",         ID_SOUND_OPTIONS,MFT_STRING,MFS_ENABLED
     END
@@ -1779,7 +1803,7 @@ BEGIN
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Color Correction...",        ID_VIDEO_COLORCORRECTION,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        MENUITEM "&Display Configuration...\tAlt+F5", ID_OPTIONS_DISPLAY,MFT_STRING,MFS_ENABLED
+        MENUITEM "&Settings...\tAlt+F5",        ID_OPTIONS_DISPLAY,MFT_STRING,MFS_ENABLED
     END
     POPUP "&Cheat",                         0,MFT_STRING,MFS_ENABLED
     BEGIN

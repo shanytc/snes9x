@@ -432,6 +432,11 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	c.mbc = MbcState();
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
+	c.huc3_tone = 0;
+	c.huc3_tone_on = false;
+	c.speaker_request = 0;
+	std::memset(c.huc3_ram, 0, sizeof c.huc3_ram);
+	std::memset(c.tama6_cells, 0xFF, sizeof c.tama6_cells);
 	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 
 	// ----- Header parse -----
@@ -709,6 +714,11 @@ void CartUnload(Cart &c)
 	c.mbc = MbcState();
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
+	c.huc3_tone = 0;
+	c.huc3_tone_on = false;
+	c.speaker_request = 0;
+	std::memset(c.huc3_ram, 0, sizeof c.huc3_ram);
+	std::memset(c.tama6_cells, 0xFF, sizeof c.tama6_cells);
 	std::memset(c.tama6_pages, 0, sizeof c.tama6_pages);
 	c.unl = MbcUnl();
 	c.vf_alt_board = false;
@@ -1028,6 +1038,43 @@ bool CartLoadBattery(Cart &c)
 	if (c.path.empty()) return false;
 	const std::string sav = MakeSavPath(c.path);
 	return CartLoadBatteryFromPath(c, sav.c_str());
+}
+
+namespace {
+
+// gbkiss.org/cart, each also carrying Hudson's IR send routine: the GB KISS
+// menu games, then the ones that only use the port for their own link.
+// Pocket Family GB2 is HuC-3 with no port; Pro Action Replay forges $FF.
+// Returns 2 for a GB KISS menu game, 1 for the others, 0 for no port.
+int IrCartKind(const Cart &c)
+{
+	static const struct { const char *title, *code; bool menu; } kIrCarts[] = {
+		{ "GBKISS MINIGAME", nullptr, true }, { "SUPER B DAMAN", nullptr, true },
+		{ "POKEBOM", nullptr, true }, { "NECTARIS GB", nullptr, true },
+		{ "MIRACLE OF ZONE", nullptr, true }, { "POCKET_FAMILY", nullptr, true },
+		{ "ROBOPON SAMPLE", nullptr, true }, { "ROBOPON SUN", nullptr, true },
+		{ "ROBOPON STAR", nullptr, true }, { "ROBO MOON", nullptr, true }, { "ROBO BOM", nullptr, true },
+		{ "SS SPINNER", nullptr, false }, { "POKEMON CARD GB", nullptr, false },
+		{ "SUN", "HREE", false }, { "STAR", "HRCE", false },
+	};
+	if (c.mbc.type != MbcType::HuC1 && c.mbc.type != MbcType::HuC3) return 0;
+	for (const auto &e : kIrCarts)
+		if (std::strcmp(c.header.title, e.title) == 0 &&
+		    (!e.code || (c.rom.size() >= 0x143 && std::memcmp(&c.rom[0x13F], e.code, 4) == 0)))
+			return e.menu ? 2 : 1;
+	return 0;
+}
+
+} // anonymous
+
+bool CartHasIrPort(const Cart &c)
+{
+	return IrCartKind(c) != 0;
+}
+
+bool CartHasKissMenu(const Cart &c)
+{
+	return IrCartKind(c) == 2;
 }
 
 } // namespace SGB

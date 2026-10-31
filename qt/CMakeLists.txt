@@ -57,9 +57,17 @@ set(SNES9X_CORE_SOURCES
     ../sgb/gb_ops_cb.cpp
     ../sgb/gb_memory.cpp
     ../sgb/gb_mbc.cpp
+    ../sgb/gb_patches.cpp
     ../sgb/gb_ppu.cpp
     ../sgb/gb_apu.cpp
     ../sgb/gb_timer.cpp
+    ../sgb/gb_serial.cpp
+    ../sgb/gb_infrared.cpp
+    ../sgb/gb_barcodeboy.cpp
+    ../sgb/gb_bardigun.cpp
+    ../sgb/gb_kisslink.cpp
+    ../sgb/gb_link.cpp
+    ../sgb/gb_viewer.cpp
     ../sgb/gb_joypad.cpp
     ../sgb/gb_cart.cpp
     ../msu1.cpp
@@ -121,6 +129,7 @@ set(SNES9X_CORE_SOURCES
     ../cpuexec.cpp
     ../voicekun.cpp
     ../barcodebattler.cpp
+    ../barcodereaders.cpp
     ../cartprot.cpp
     ../rp2040.cpp
     ../rp2040cart.cpp
@@ -196,7 +205,7 @@ endif()
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
 
-# Optional: decodes the JPEG XL photos of Barcode Battler cards.
+# Optional: decodes the JPEG XL photos of the barcode readers' cards.
 pkg_check_modules(JXL IMPORTED_TARGET libjxl)
 if(JXL_FOUND)
     list(APPEND LIBS PkgConfig::JXL)
@@ -358,8 +367,8 @@ list(APPEND QT_GUI_SOURCES
     src/StatePreviewDialog.hpp
     src/ColorCorrectionDialog.cpp
     src/ColorCorrectionDialog.hpp
-    src/BarcodeBattlerDialog.cpp
-    src/BarcodeBattlerDialog.hpp
+    src/BarcodeDialog.cpp
+    src/BarcodeDialog.hpp
     ../common/desktop/barcode_card_photos.cpp
     ../common/desktop/barcode_card_photos.hpp
     src/MovieDialogs.cpp
@@ -502,6 +511,8 @@ list(APPEND LIBS
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     list(APPEND DEFINES "VK_USE_PLATFORM_WIN32_KHR")
+    # sgb/gb_link.cpp (Game Boy link cable) needs winsock.
+    list(APPEND LIBS ws2_32)
 elseif(NOT APPLE)
     list(APPEND DEFINES
         "VK_USE_PLATFORM_XLIB_KHR"

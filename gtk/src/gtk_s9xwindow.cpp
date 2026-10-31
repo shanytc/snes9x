@@ -66,8 +66,8 @@
 #include "netplay.h"
 #include "display.h"
 #include "voicekun.h"
-#include "barcodebattler.h"
-#include "gtk_barcode_battler.h"
+#include "barcodereaders.h"
+#include "gtk_barcodes.h"
 #include "nss.h"
 #include "sfcbox.h"
 #include "superdisc.h"
@@ -386,6 +386,13 @@ void Snes9xWindow::connect_signals()
     };
     rtc_toggle("rtc_sav_item", false);
     rtc_toggle("rtc_file_item", true);
+    auto speaker = get_object<Gtk::CheckMenuItem>("rtc_speaker_item");
+    speaker->signal_toggled().connect([this, speaker] {
+        if (refreshing_rtc_menu)
+            return;
+        Settings.GBCartSpeaker = speaker->get_active();
+        S9xSetInfoString(Settings.GBCartSpeaker ? _("Cartridge speaker on") : _("Cartridge speaker off"));
+    });
 
     get_object<Gtk::MenuItem>("rtc_settings_item")->signal_activate().connect([&] {
         open_rtc_settings();
@@ -728,42 +735,59 @@ void Snes9xWindow::connect_signals()
         configure_widgets();
     });
 
-    // Barcode Battler II: takes port 2's place while connected. It can be
-    // connected before a game loads and stays across SNES loads (a Game Boy
-    // game unplugs it and greys it out); scanning is only
-    // offered to a game that reads it.
-    get_object<Gtk::Menu>("barcode_battler_menu")->signal_show().connect([this] {
-        syncing_menu = true;
-        get_object<Gtk::CheckMenuItem>("barcode_battler_connect_item")
-            ->set_active(S9xBarcodeBattlerConnected());
-        syncing_menu = false;
-        enable_widget("barcode_battler_connect_item",
-                      !(config->rom_loaded && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive)));
-        const bool supported = config->rom_loaded && S9xBarcodeBattlerGameSupported();
-        enable_widget("barcode_battler_scan_item", supported);
-        enable_widget("barcode_battler_rescan_item", supported && *S9xBarcodeBattlerLastCode() != 0);
-    });
+    // Barcodes: the loaded game's system picks the reader - the Barcode
+    // Battler II on port 2 for a SNES game, Barcode Taisen Bardigun's reader
+    // for that game, the Barcode Boy on the link port for any other Game Boy
+    // game. Connect needs a game loaded, toggles in place and stays across
+    // loads; scanning is only offered to a game that reads its reader.
+    auto barcode_port_free = [](S9xBarcodeReader reader) {
+        const char *busy = S9xBarcodeReaderPortBusy(reader);
+        if (busy)
+            S9xSetInfoString(fmt::format("{}: {}", S9xBarcodeReaderName(reader), busy).c_str());
+        return !busy;
+    };
 
-    get_object<Gtk::CheckMenuItem>("barcode_battler_connect_item")->signal_toggled().connect([this] {
+    get_object<Gtk::Menu>("barcodes_menu")->signal_show().connect([this] { update_barcode_menu(); });
+
+    auto barcodes_connect = get_object<Gtk::CheckMenuItem>("barcodes_connect_item");
+    barcodes_connect->signal_toggled().connect([this, barcodes_connect, barcode_port_free] {
         if (syncing_menu)
             return;
-        const bool connect = get_object<Gtk::CheckMenuItem>("barcode_battler_connect_item")->get_active();
-        S9xBarcodeBattlerConnect(connect);
-        if (config->rom_loaded)
-            S9xSetInfoString(connect ? _("Barcode Battler II connected to port 2")
-                                     : _("Barcode Battler II disconnected"));
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
+        const bool connect = barcodes_connect->get_active();
+        if (reader == S9X_BARCODE_NONE || (connect && !barcode_port_free(reader)))
+        {
+            syncing_menu = true;
+            barcodes_connect->set_active(S9xBarcodeReaderConnected());
+            syncing_menu = false;
+            return;
+        }
+        S9xBarcodeReaderConnect(connect);
+        S9xSetInfoString(connect ? fmt::format("{} connected to {}", S9xBarcodeReaderName(reader), S9xBarcodeReaderPort(reader)).c_str()
+                                 : fmt::format("{} disconnected", S9xBarcodeReaderName(reader)).c_str());
     });
+    // Flipped here instead of by activation, which would close the menu.
+    barcodes_connect->signal_button_release_event().connect([barcodes_connect](GdkEventButton *) {
+        barcodes_connect->set_active(!barcodes_connect->get_active());
+        return true;
+    }, false);
 
-    get_object<Gtk::MenuItem>("barcode_battler_scan_item")->signal_activate().connect([this] {
+    get_object<Gtk::MenuItem>("barcodes_scan_item")->signal_activate().connect([this, barcode_port_free] {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
+        if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader))
+            return;
         pause_from_focus_change();
-        S9xBarcodeBattlerDialog(*window.get());
+        S9xBarcodeDialog(*window.get(), reader);
         unpause_from_focus_change();
     });
 
-    get_object<Gtk::MenuItem>("barcode_battler_rescan_item")->signal_activate().connect([this] {
-        std::string code = S9xBarcodeBattlerLastCode();
-        if (S9xBarcodeBattlerScan(code.c_str()))
-            S9xSetInfoString(fmt::format("Barcode Battler: {} scanned", code).c_str());
+    get_object<Gtk::MenuItem>("barcodes_rescan_item")->signal_activate().connect([this, barcode_port_free] {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
+        const std::string code = S9xBarcodeReaderLastCode(reader);
+        if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader) || !S9xBarcodeReaderScan(reader, code.c_str()))
+            return;
+        const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code.c_str());
+        S9xSetInfoString(fmt::format("{}: {} scanned", S9xBarcodeReaderName(reader), card ? card->name : code).c_str());
     });
 
     create_arcade_menus();
@@ -1879,6 +1903,37 @@ void Snes9xWindow::refresh_nss_dips()
 
 // A disc game can't run on without its disc: eject through the Reset item,
 // so the BIOS reboots to its home screen and reports the open tray.
+void Snes9xWindow::update_barcode_menu()
+{
+    const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
+    const bool reads = S9xBarcodeReaderGameReads(reader);
+    syncing_menu = true;
+    get_object<Gtk::CheckMenuItem>("barcodes_connect_item")->set_active(S9xBarcodeReaderConnected());
+    syncing_menu = false;
+    enable_widget("barcodes_connect_item", reader != S9X_BARCODE_NONE);
+    enable_widget("barcodes_scan_item", reads);
+    enable_widget("barcodes_rescan_item", reads && *S9xBarcodeReaderLastCode(reader) != 0);
+}
+
+void Snes9xWindow::barcode_shortcut(int which)
+{
+    static const char *items[3] = { "barcodes_connect_item", "barcodes_scan_item", "barcodes_rescan_item" };
+    if (which < 0 || which >= 3)
+        return;
+
+    update_barcode_menu();
+    auto item = get_object<Gtk::MenuItem>(items[which]);
+    if (!item->get_sensitive())
+        return;
+    if (which == 0)
+    {
+        auto check = get_object<Gtk::CheckMenuItem>(items[0]);
+        check->set_active(!check->get_active());
+    }
+    else
+        item->activate();
+}
+
 void Snes9xWindow::eject_superdisc()
 {
     if (Settings.SuperDisc && S9xSuperDiscHasDisc())
@@ -2776,6 +2831,7 @@ void Snes9xWindow::configure_widgets()
     {
         refreshing_rtc_menu = true;
         get_object<Gtk::RadioMenuItem>(Settings.GBRTCSeparate ? "rtc_file_item" : "rtc_sav_item")->set_active(true);
+        get_object<Gtk::CheckMenuItem>("rtc_speaker_item")->set_active(Settings.GBCartSpeaker);
         refreshing_rtc_menu = false;
     }
 

@@ -267,6 +267,10 @@ struct SSettings
 	bool8	GB_BIOSActive;       // runtime: the currently-loaded GB/GBC cart is booting through such a boot ROM
 	char	GB_BIOSPath[260];    // runtime: absolute path of the GB/GBC boot ROM in use (empty otherwise)
 	char	GBRomPath[260];      // runtime: path of the currently-loaded GB/GBC ROM (for BIOS-mode reload)
+	uint16	GBLinkPort;          // loopback port for the GB link cable (8765 = BGB's default)
+	bool8	GBLinkPeerInstance;  // runtime: launched as the auto-spawned second instance, so never spawns one itself
+	uint8	GBLinkPlayerIndex;   // 1..15, fixed for the process; players past the first get their own .sav and save states
+	char	GBSramPathOverride[260]; // runtime: battery file picked via File > Load S-RAM Data; saves go back to it. Empty = derive from the player index
 	bool8	MouseMaster;
 	bool8	SuperScopeMaster;
 	bool8	JustifierMaster;
@@ -418,6 +422,7 @@ struct SSettings
 	uint32	GBRTCTime;
 	// A HuC3 clock's block in the save: 0 = 24 bytes (VBA-M), 1 = 17 (BGB), 2 = 136 (mGBA)
 	uint8	GBRTCHuC3Format;
+	bool8	GBCartSpeaker;  // play a HuC3 cartridge's own speaker (its tones) through the audio output
 };
 
 struct SSNESGameFixes
@@ -438,8 +443,31 @@ enum
 	PAUSE_RESTORE_GUI			= (1 << 6),
 	PAUSE_FREEZE_FILE			= (1 << 7),
 	PAUSE_SOUND_DIALOG			= (1 << 8),
-	PAUSE_LUA_DEBUGGER			= (1 << 9)	// a Lua script is stopped at a breakpoint
+	PAUSE_LUA_DEBUGGER			= (1 << 9),	// a Lua script is stopped at a breakpoint
+	// The linked instance paused, so this one holds with it: a Game Boy
+	// that stops answering reads to the other game as an unplugged cable.
+	PAUSE_LINK_PEER				= (1 << 10)
 };
+
+// A handful of fields in Settings describe THIS machine rather than the
+// program: which console it is and how fast it runs. With a second SNES in the
+// process - a Super Game Boy seat - each machine keeps its own set and swaps
+// them in around its slice. Far cheaper than moving 236 use sites out of
+// Settings, and it leaves SSettings' layout alone. Safe because machines run
+// cooperatively: only one is inside S9xMainLoop at a time.
+struct SMachineState
+{
+	bool8	SuperGameBoy;
+	bool8	SGB_BIOSModeActive;
+	bool8	GB_BIOSActive;
+	bool8	PAL;
+	uint8	GameBoyRunMode;
+	float	GBClockMultiplier;
+	uint32	FrameTime;
+};
+
+void S9xMachineCapture(struct SMachineState *out);       // Settings -> out
+void S9xMachineApply(const struct SMachineState *in);    // in -> Settings
 
 void S9xSetPause(uint32);
 void S9xClearPause(uint32);
@@ -447,8 +475,8 @@ void S9xExit(void);
 void S9xMessage(int, int, const char *);
 
 extern struct SSettings			Settings;
-extern struct SCPUState			CPU;
-extern struct STimings			Timings;
+extern S9X_MACHINE struct SCPUState			CPU;
+extern S9X_MACHINE struct STimings			Timings;
 extern struct SSNESGameFixes	SNESGameFixes;
 extern char						String[513];
 

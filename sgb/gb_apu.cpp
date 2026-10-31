@@ -659,6 +659,108 @@ void PushSample(Apu &a, int16_t l, int16_t r)
 	a.dbg_ring_pushed++;
 }
 
+// A cart speaker tone: beeps of a square wave, a rest, the lot repeated.
+struct SpeakerTone
+{
+	double   hz;
+	uint32_t on_us, off_us;   // one beep and the gap after it
+	uint32_t beeps;           // per burst
+	uint32_t rest_us;         // after a burst's last gap
+	uint32_t bursts;
+};
+
+// The HuC3 has 16 built-in tones ($26, gbkiss.org/tech/alarm). Recorded off
+// Robopon carts, both at 2731 Hz (the 32.768 kHz crystal / 12): its mission
+// events' $C, 17 beeps 60 ms apart at half duty, 2 s rest, three bursts; and,
+// likely its other timer's $3, three 366 ms beeps from a 1998 TV ad. The
+// rest aren't recorded yet and play $C.
+constexpr SpeakerTone kHuc3Beeps = { 32768.0 / 12, 30000, 30000, 17, 2000000, 3 };
+constexpr SpeakerTone kHuc3Long  = { 32768.0 / 12, 366000, 167000, 3, 0, 1 };
+constexpr const SpeakerTone *kHuc3Tones[16] = {
+	&kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps, &kHuc3Long,  &kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps,
+	&kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps, &kHuc3Beeps,
+};
+constexpr int32_t kSpeakerLevel = 3000;   // about one GB channel at full volume
+
+// The TAMA6 chirp, recorded off a Tamagotchi cart: pattern 4 ("1 2 1 3") is
+// C5 C6 C5 C7, the 32.768 kHz crystal / 62, /31, /15.5 (note 0 rests), each
+// note 38 ms with 30 ms after it, 176 ms after the fourth; then the pattern
+// its first nibble names plays, so 2-4 repeat until the alarm's minute ends.
+constexpr uint32_t kTamaNoteUs = 38000, kTamaGapUs = 30000, kTamaRestUs = 176000;
+
+// Steps to the next TAMA6 note, gap or rest; false once the chirp has ended.
+bool TamaNextStep(ApuCartSpeaker &s, uint64_t &us)
+{
+	if (s.step == 8)   // the four notes played: on to the next pattern
+	{
+		const uint8_t next = s.prog[(s.pattern - 1) * 6];
+		if (next < 1 || next > 4) return false;
+		s.pattern = next;
+		s.step = 0;
+	}
+	const uint32_t k = s.step++;
+	const uint8_t note = s.prog[(s.pattern - 1) * 6 + 1 + k / 2];
+	us   = (k & 1) ? (k == 7 ? kTamaRestUs : kTamaGapUs) : kTamaNoteUs;
+	s.on = !(k & 1) && note >= 1 && note <= 3;
+	s.hz = s.on ? 32768.0 * (1 << note) / 124.0 : 0.0;
+	return true;
+}
+
+// Steps to the next beep, gap or rest; false once the tone has ended.
+bool SpeakerNextStep(Apu &a)
+{
+	ApuCartSpeaker &s = a.speaker;
+	uint64_t us;
+	if (s.pattern)
+	{
+		if (!TamaNextStep(s, us))
+		{
+			s = ApuCartSpeaker();
+			return false;
+		}
+	}
+	else
+	{
+		const SpeakerTone &t = *kHuc3Tones[s.tone - 1];
+		const uint32_t per_burst = 2 * t.beeps + 1;   // beep/gap pairs, then the rest
+		if (s.step >= per_burst * t.bursts)
+		{
+			s.tone = 0;
+			return false;
+		}
+		const uint32_t k = s.step++ % per_burst;
+		us   = k == 2 * t.beeps ? t.rest_us : (k & 1) ? t.off_us : t.on_us;
+		s.on = k < 2 * t.beeps && !(k & 1);
+		s.hz = t.hz;
+	}
+	s.left  = static_cast<uint32_t>(us * static_cast<uint64_t>(a.output_rate) / 1000000);
+	s.phase = 0.0;
+	return true;
+}
+
+// Band-limited step correction for a square wave edge (polyBLEP).
+inline double PolyBlep(double t, double dt)
+{
+	if (t < dt)       { t /= dt;             return t + t - t * t - 1.0; }
+	if (t > 1.0 - dt) { t = (t - 1.0) / dt;  return t * t + t + t + 1.0; }
+	return 0.0;
+}
+
+// One output sample of the cart speaker.
+int32_t SpeakerSample(Apu &a)
+{
+	ApuCartSpeaker &s = a.speaker;
+	while (s.left == 0)
+		if (!SpeakerNextStep(a)) return 0;
+	--s.left;
+	if (!s.on) return 0;
+	const double dt = s.hz / a.output_rate;
+	const double p  = s.phase;
+	double v = (p < 0.5 ? 1.0 : -1.0) + PolyBlep(p, dt) - PolyBlep(p < 0.5 ? p + 0.5 : p - 0.5, dt);
+	s.phase = p + dt >= 1.0 ? p + dt - 1.0 : p + dt;
+	return static_cast<int32_t>(v * kSpeakerLevel);
+}
+
 void FlushSample(Apu &a)
 {
 	int32_t avg_l = 0, avg_r = 0;
@@ -666,6 +768,12 @@ void FlushSample(Apu &a)
 	{
 		avg_l = a.sample_accum_l / static_cast<int32_t>(a.sample_accum_cnt);
 		avg_r = a.sample_accum_r / static_cast<int32_t>(a.sample_accum_cnt);
+	}
+	if (a.speaker.tone || a.speaker.pattern)
+	{
+		const int32_t spk = SpeakerSample(a);
+		avg_l += spk;
+		avg_r += spk;
 	}
 
 	if (g_wave_capture)
@@ -862,10 +970,14 @@ void ApuStep(Apu &a, int32_t tcycles)
 		}
 	}
 
+	// A discarded seat runs the channel machinery a game can read back but
+	// neither the mixer nor the sample clock: nobody hears it.
+	const bool quiet = a.discard_output;
+
 	while (tcycles > 0)
 	{
 		int32_t chunk = tcycles;
-		if (a.sample_timer < chunk) chunk = a.sample_timer;
+		if (!quiet && a.sample_timer < chunk) chunk = a.sample_timer;
 		if (chunk < 1) chunk = 1;
 
 		// Advance the 2 MHz channel machinery.
@@ -1029,29 +1141,32 @@ void ApuStep(Apu &a, int32_t tcycles)
 				ApuWrite(a, 0xFF23, static_cast<uint8_t>(a.ch4.nr44 | 0x80), a.cgb, 0, false);
 		}
 
-		// Integrate the mixer over this chunk.
+		if (!quiet)
 		{
-			int32_t l, r, chlv[4];
-			Mix(a, l, r, g_wave_capture ? chlv : nullptr);
-			a.sample_accum_l += l * chunk;
-			a.sample_accum_r += r * chunk;
-			if (g_wave_capture)
-				for (int ch = 0; ch < 4; ++ch)
-					g_ch_accum[ch] += chlv[ch] * chunk;
-		}
-		a.sample_accum_cnt += static_cast<uint32_t>(chunk);
-		a.sample_timer     -= chunk;
-
-		if (a.sample_timer <= 0)
-		{
-			a.sample_timer += a.cycles_per_sample;
-			a.cps_remainder_acc += a.cps_remainder_step;
-			if (a.cps_remainder_acc >= a.output_rate)
+			// Integrate the mixer over this chunk.
 			{
-				a.cps_remainder_acc -= a.output_rate;
-				a.sample_timer += 1;
+				int32_t l, r, chlv[4];
+				Mix(a, l, r, g_wave_capture ? chlv : nullptr);
+				a.sample_accum_l += l * chunk;
+				a.sample_accum_r += r * chunk;
+				if (g_wave_capture)
+					for (int ch = 0; ch < 4; ++ch)
+						g_ch_accum[ch] += chlv[ch] * chunk;
 			}
-			FlushSample(a);
+			a.sample_accum_cnt += static_cast<uint32_t>(chunk);
+			a.sample_timer     -= chunk;
+
+			if (a.sample_timer <= 0)
+			{
+				a.sample_timer += a.cycles_per_sample;
+				a.cps_remainder_acc += a.cps_remainder_step;
+				if (a.cps_remainder_acc >= a.output_rate)
+				{
+					a.cps_remainder_acc -= a.output_rate;
+					a.sample_timer += 1;
+				}
+				FlushSample(a);
+			}
 		}
 
 		tcycles -= chunk;
@@ -1780,6 +1895,27 @@ void ApuSetClockHz(Apu &a, int32_t hz)
 	if (hz == a.clock_hz) return;  // idempotent
 	a.clock_hz = hz;
 	RecomputeSampleRate(a);
+}
+
+void ApuSpeakerStart(Apu &a, uint8_t tone)
+{
+	const uint8_t t = static_cast<uint8_t>((tone & 0x0F) + 1);
+	if (a.speaker_off || a.speaker.tone == t) return;   // the same tone plays on
+	a.speaker = ApuCartSpeaker();
+	a.speaker.tone = t;
+}
+
+void ApuSpeakerStartTama(Apu &a, uint8_t pattern, const uint8_t prog[24])
+{
+	if (a.speaker_off || pattern < 1 || pattern > 4) return;
+	a.speaker = ApuCartSpeaker();
+	a.speaker.pattern = pattern;
+	std::memcpy(a.speaker.prog, prog, sizeof a.speaker.prog);
+}
+
+void ApuSpeakerStop(Apu &a)
+{
+	a.speaker = ApuCartSpeaker();
 }
 
 int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples)

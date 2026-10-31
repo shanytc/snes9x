@@ -5,7 +5,6 @@
 \*****************************************************************************/
 
 #include "barcode_card_photos.hpp"
-#include "barcodebattler.h"
 
 #include <filesystem>
 #include <fstream>
@@ -17,14 +16,14 @@
 
 namespace fs = std::filesystem;
 
-std::string S9xBarcodePhotoDir(const std::vector<std::string> &folders)
+std::string S9xBarcodePhotoDir(const std::vector<std::string> &folders, const char *subfolder)
 {
     std::error_code ec;
     for (auto &folder : folders)
     {
         if (folder.empty())
             continue;
-        const fs::path dir = fs::path(folder) / "battler";
+        const fs::path dir = fs::path(folder) / subfolder;
         if (fs::is_directory(dir, ec))
             return dir.string();
     }
@@ -79,17 +78,17 @@ static bool load_jxl(const fs::path &path, BarcodeCardPhoto &photo)
 }
 #endif
 
-std::vector<BarcodeCardPhoto> S9xBarcodeCardPhotos(const std::string &dir, const S9xBarcodeCard &card)
+std::vector<BarcodeCardPhoto> S9xBarcodeCardPhotos(const std::string &dir, const char *image, const char * const *sides)
 {
     std::vector<BarcodeCardPhoto> photos;
 #ifdef HAVE_LIBJXL
-    if (dir.empty() || !*card.image)
+    if (dir.empty() || !image || !*image)
         return photos;
 
-    for (const char *side : { "-front.jxl", "-back.jxl", "-fluorescent.jxl" })
+    for (; *sides; sides++)
     {
         BarcodeCardPhoto photo;
-        if (load_jxl(fs::path(dir) / (std::string(card.image) + side), photo))
+        if (load_jxl(fs::path(dir) / (std::string(image) + *sides), photo))
             photos.push_back(std::move(photo));
     }
 #endif

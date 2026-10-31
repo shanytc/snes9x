@@ -2521,11 +2521,22 @@ static bool MenuBarcodeConnectEnabled (void)
 	       !(GetMenuState (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, MF_BYCOMMAND) & (MF_DISABLED | MF_GRAYED));
 }
 
+// Use Last Barcode Again: Connect on, and a code scanned before for a game
+// that reads its system's reader.
+static bool BarcodeRescanReady (void)
+{
+	const S9xBarcodeReader reader = S9xBarcodeReaderFor (!Settings.StopEmulation);
+	return S9xBarcodeReaderConnected () && S9xBarcodeReaderGameReads (reader) &&
+	       *S9xBarcodeReaderLastCode (reader);
+}
+
 static void MenuToggleBarcodeInPlace (void)
 {
 	SendMessage (GUI.hWnd, WM_COMMAND, ID_INPUT_BARCODE_CONNECT, 0);
 	CheckMenuItem (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, MF_BYCOMMAND |
 	               (S9xBarcodeReaderConnected () ? MF_CHECKED : MF_UNCHECKED));
+	EnableMenuItem (s_barcodes_hmenu, ID_INPUT_BARCODE_RESCAN, MF_BYCOMMAND |
+	                (BarcodeRescanReady () ? MF_ENABLED : MF_GRAYED));
 	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
 }
 
@@ -2947,6 +2958,7 @@ LRESULT CALLBACK WinProc(
 			else
 				snprintf(msg, sizeof(msg), "%s disconnected", S9xBarcodeReaderName(reader));
 			S9xSetInfoString(msg);
+			WinBarcodeConnectChanged();
 			break;
 		}
 		case ID_INPUT_BARCODE_SCAN:
@@ -2961,7 +2973,7 @@ LRESULT CALLBACK WinProc(
 		{
 			const S9xBarcodeReader reader = S9xBarcodeReaderFor(!Settings.StopEmulation);
 			const std::string code = S9xBarcodeReaderLastCode(reader);
-			if (S9xBarcodeReaderGameReads(reader) && WinBarcodePortFree(reader) &&
+			if (BarcodeRescanReady() && WinBarcodePortFree(reader) &&
 			    S9xBarcodeReaderScan(reader, code.c_str()))
 				WinBarcodeScanned(reader);
 			break;
@@ -8371,7 +8383,7 @@ static void CheckMenuStates ()
 	const bool barcodeGame = S9xBarcodeReaderGameReads(barcodeReader);
 	mii.fState = barcodeGame ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_SCAN, FALSE, &mii);
-	mii.fState = (barcodeGame && *S9xBarcodeReaderLastCode(barcodeReader)) ? MFS_ENABLED : MFS_DISABLED;
+	mii.fState = BarcodeRescanReady() ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_RESCAN, FALSE, &mii);
 
 	mii.fState = !Settings.StopEmulation ? MFS_ENABLED : MFS_DISABLED;

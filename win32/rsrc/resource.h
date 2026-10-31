@@ -1072,6 +1072,7 @@
 #define IDC_BARCODE_CARDS               3712
 #define IDC_BARCODE_INTRO               3713
 #define IDC_BARCODE_NOTE                3714
+#define IDC_BARCODE_CONNECT_NOTE        3729
 #define ID_INPUT_BARCODE_CONNECT        44454
 #define ID_INPUT_BARCODE_SCAN           44455
 #define ID_INPUT_BARCODE_RESCAN         44456

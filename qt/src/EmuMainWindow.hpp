@@ -11,6 +11,7 @@
 
 class EmuApplication;
 class CheatsDialog;
+class BarcodeDialog;
 class AudioWaveformWindow;
 class TileViewerWindow;
 class TilemapViewerWindow;
@@ -118,6 +119,7 @@ class EmuMainWindow : public QMainWindow
     static const size_t recent_menu_size = 10;
 
     std::unique_ptr<CheatsDialog> cheats_dialog;
+    std::unique_ptr<BarcodeDialog> barcode_dialog;
     // Sound->Show Audio Waveform; deletes itself on close, so this goes null.
     QPointer<AudioWaveformWindow> audio_waveform_window;
     // Emulation->S-PPU viewers; these delete themselves on close too.

@@ -1934,16 +1934,27 @@ void EmuMainWindow::createWidgets()
         S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) +
                           (checked ? std::string(" connected to ") + S9xBarcodeReaderPort(reader) : " disconnected")).c_str());
     });
+    // Modeless: the game runs on while cards are browsed and scanned; Scan
+    // checks again that the game still reads the reader.
     barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
     QObject::connect(barcode_scan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
         const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
         if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader))
             return;
-        app.pause();
-        BarcodeDialog dialog(this, reader);
-        if (dialog.exec() == QDialog::Accepted)
-            scan_barcode(reader, dialog.code());
-        app.unpause();
+        if (barcode_dialog && barcode_dialog->barcodeReader() != reader)
+            barcode_dialog.reset();
+        if (!barcode_dialog)
+            barcode_dialog = std::make_unique<BarcodeDialog>(this, reader, [this, reader, scan_barcode](const std::string &code) {
+                if (S9xBarcodeReaderFor(app.isCoreActive()) != reader || !S9xBarcodeReaderGameReads(reader))
+                    return tr("The running game doesn't read the %1.").arg(S9xBarcodeReaderName(reader));
+                if (const char *busy = S9xBarcodeReaderPortBusy(reader))
+                    return QString("%1: %2.").arg(S9xBarcodeReaderName(reader), busy);
+                scan_barcode(reader, code);
+                return QString();
+            });
+        barcode_dialog->show();
+        barcode_dialog->raise();
+        barcode_dialog->activateWindow();
     });
     barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
     QObject::connect(barcode_rescan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
@@ -2941,6 +2952,8 @@ void EmuMainWindow::gameChanging()
 {
     if (cheats_dialog)
         cheats_dialog->close();
+    if (barcode_dialog)
+        barcode_dialog->close();
 }
 
 void EmuMainWindow::showLuaWindow()

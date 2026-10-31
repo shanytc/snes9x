@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -29,17 +30,18 @@
  * it back as the settings have it on close. A card's photos show from the
  * reader's folder ("battler" or "barcodeboy") in the config folder or beside
  * the executable (common/desktop/barcode_card_photos.hpp); a code with none is
- * drawn as its barcode. */
+ * drawn as its barcode. Modeless: Scan leaves it open, the game running on
+ * behind it. */
 class BarcodeDialog : public QDialog
 {
     Q_OBJECT
 
   public:
-    BarcodeDialog(QWidget *parent, S9xBarcodeReader reader);
+    // scanner hands a code to the reader: "" when it did, else why it didn't.
+    BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::function<QString(const std::string &)> scanner);
     ~BarcodeDialog();
 
-    // The code Scan was pressed on, for the frontend to hand to the reader.
-    std::string code() const { return scanned; }
+    S9xBarcodeReader barcodeReader() const { return reader; }
 
   private:
     void accept() override;
@@ -76,5 +78,5 @@ class BarcodeDialog : public QDialog
     const S9xBarcodeReaderCard *photo_card = nullptr;
     std::vector<QImage> photos;
     std::string whole_code;    // the code typed in when it is whole, drawn with no photos
-    std::string scanned;
+    std::function<QString(const std::string &)> scan;
 };

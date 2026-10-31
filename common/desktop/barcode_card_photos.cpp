@@ -24,7 +24,7 @@ std::string S9xBarcodePhotoDir(const std::vector<std::string> &folders)
     {
         if (folder.empty())
             continue;
-        const fs::path dir = fs::path(folder) / "battler";
+        const fs::path dir = fs::path(folder) / "barcodes" / "battler";
         if (fs::is_directory(dir, ec))
             return dir.string();
     }

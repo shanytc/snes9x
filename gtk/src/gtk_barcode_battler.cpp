@@ -33,7 +33,7 @@ std::string digits_of(const std::string &text)
     return digits;
 }
 
-// The folder of the running executable, where a portable build keeps its battler folder.
+// The folder of the running executable, where a portable build keeps its barcodes folder.
 std::string executable_dir()
 {
     std::error_code ec;

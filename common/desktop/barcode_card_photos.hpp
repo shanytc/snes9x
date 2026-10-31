@@ -13,7 +13,7 @@
 struct S9xBarcodeCard;
 
 /* Photos of the known Barcode Battler cards (barcodebattler.h): JPEG XL files
- * <image>-front.jxl, -back.jxl and -fluorescent.jxl in a "battler" folder.
+ * <image>-front.jxl, -back.jxl and -fluorescent.jxl in a "barcodes/battler" folder.
  * Decoding needs libjxl (HAVE_LIBJXL); without it there are no photos. */
 struct BarcodeCardPhoto
 {
@@ -22,7 +22,7 @@ struct BarcodeCardPhoto
     int height = 0;
 };
 
-// The first of the given folders' "battler" subfolders that exists, or "".
+// The first of the given folders' "barcodes/battler" subfolders that exists, or "".
 std::string S9xBarcodePhotoDir(const std::vector<std::string> &folders);
 
 // The card's front, back and fluorescent photos that dir holds, in that order.

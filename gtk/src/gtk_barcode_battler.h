@@ -19,3 +19,4 @@
 void S9xShowBarcodeBattlerDialog(Gtk::Window &parent);
 void S9xCloseBarcodeBattlerDialog();    // a game load: the dialog was for the last one
 void S9xBarcodeBattlerCameraChanged();  // Preferences applied the camera
+void S9xBarcodeBattlerConnectChanged(); // Input > Barcodes > Connect was flipped

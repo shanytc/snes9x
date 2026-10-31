@@ -37,6 +37,9 @@ class BarcodeBattlerDialog : public QDialog
     BarcodeBattlerDialog(QWidget *parent, std::function<bool()> game_reads);
     ~BarcodeBattlerDialog();
 
+    // Input > Barcodes > Connect was flipped: Scan and the title follow it.
+    void connectChanged();
+
   private:
     void accept() override;
     void done(int result) override;
@@ -59,6 +62,7 @@ class BarcodeBattlerDialog : public QDialog
     QLineEdit *code_edit;
     QLabel *status_label;
     QLabel *camera_label;
+    QLabel *connect_note;
     QPushButton *camera_button;
     QLabel *preview_label;
     QPushButton *scan_button;

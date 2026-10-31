@@ -181,6 +181,9 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         card_scroll.set_size_request(320, -1);
         card_scroll.set_shadow_type(Gtk::SHADOW_IN);
         right->pack_start(card_scroll, Gtk::PACK_EXPAND_WIDGET);
+        connect_note.set_line_wrap(true);
+        connect_note.set_xalign(1.0f);
+        right->pack_start(connect_note, Gtk::PACK_SHRINK);
         columns->pack_start(*right, Gtk::PACK_SHRINK);
 
         add_button(_("_Close"), Gtk::RESPONSE_CLOSE);
@@ -240,7 +243,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         });
 
         show_camera_choice();
-        code_edited();
+        connect_changed();
         fill_cards();
         show_all();
         show_photos();
@@ -255,6 +258,15 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     {
         stop_camera();
         hide();
+    }
+
+    // Scan needs Input > Barcodes > Connect on; the title says when it is.
+    void connect_changed()
+    {
+        const bool on = S9xBarcodeBattlerConnected();
+        set_title(on ? _("Barcode Battler II (Connected)") : _("Barcode Battler II"));
+        connect_note.set_text(on ? "" : _("Connect first: Input > Barcodes > Connect."));
+        code_edited();
     }
 
     // The camera Preferences > Display has on, or why there is none to start.
@@ -281,7 +293,8 @@ class BarcodeBattlerDialog : public Gtk::Dialog
             status_label.set_text(_("The running game doesn't read the Barcode Battler."));
             return;
         }
-        if (!S9xBarcodeBattlerScan(code_entry.get_text().c_str()))
+        // A double-click on a card asks too, past the greyed button.
+        if (!S9xBarcodeBattlerConnected() || !S9xBarcodeBattlerScan(code_entry.get_text().c_str()))
             return;
 
         S9xSetInfoString(fmt::format("Barcode Battler: {} scanned", S9xBarcodeBattlerLastCode()).c_str());
@@ -312,7 +325,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
         const bool length_ok = all_digits && (n == 8 || n == 12 || n == 13);
         const S9xBarcodeCard *card = length_ok ? S9xBarcodeCardFind(digits.c_str()) : nullptr;
 
-        scan_button->set_sensitive(length_ok);
+        scan_button->set_sensitive(length_ok && S9xBarcodeBattlerConnected());
         if (n == 0)
             status_label.set_text("");
         else if (!all_digits)
@@ -602,6 +615,7 @@ class BarcodeBattlerDialog : public Gtk::Dialog
     Gtk::Entry code_entry;
     Gtk::Label status_label;
     Gtk::Label camera_label;
+    Gtk::Label connect_note;
     Gtk::Button camera_button;
     Gtk::Frame preview_frame;
     Gtk::Stack preview_stack;
@@ -637,6 +651,12 @@ void S9xCloseBarcodeBattlerDialog()
 {
     if (barcode_dialog)
         barcode_dialog->close_dialog();
+}
+
+void S9xBarcodeBattlerConnectChanged()
+{
+    if (barcode_dialog)
+        barcode_dialog->connect_changed();
 }
 
 void S9xBarcodeBattlerCameraChanged()

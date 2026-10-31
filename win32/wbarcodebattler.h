@@ -13,5 +13,6 @@ void WinShowBarcodeBattlerDialog(HWND parent);
 HWND WinBarcodeBattlerDialog();		// the open dialog, or NULL
 void WinCloseBarcodeBattlerDialog();	// a game load: the dialog was for the last one
 void WinBarcodeBattlerCameraChanged();	// Display Configuration applied its camera
+void WinBarcodeBattlerConnectChanged();	// Input > Barcodes > Connect was flipped
 
 #endif

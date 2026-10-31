@@ -141,6 +141,10 @@ BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent, std::function<bool()
     cards_column->addWidget(find_label);
     cards_column->addWidget(search_edit);
     cards_column->addWidget(card_tree, 1);
+    connect_note = new QLabel;
+    connect_note->setWordWrap(true);
+    connect_note->setAlignment(Qt::AlignRight);
+    cards_column->addWidget(connect_note);
     columns->addLayout(cards_column);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -165,8 +169,17 @@ BarcodeBattlerDialog::BarcodeBattlerDialog(QWidget *parent, std::function<bool()
     });
 
     showCameraChoice();
-    codeEdited();
+    connectChanged();
     fillCards();
+}
+
+// Scan needs Input > Barcodes > Connect on; the title says when it is.
+void BarcodeBattlerDialog::connectChanged()
+{
+    const bool on = S9xBarcodeBattlerConnected();
+    setWindowTitle(on ? tr("Barcode Battler II (Connected)") : tr("Barcode Battler II"));
+    connect_note->setText(on ? QString() : tr("Connect first: Input > Barcodes > Connect."));
+    codeEdited();
 }
 
 BarcodeBattlerDialog::~BarcodeBattlerDialog()
@@ -183,7 +196,7 @@ void BarcodeBattlerDialog::codeEdited()
     const QByteArray latin = digits.toLatin1();
     const S9xBarcodeCard *card = length_ok ? S9xBarcodeCardFind(latin.constData()) : nullptr;
 
-    scan_button->setEnabled(length_ok);
+    scan_button->setEnabled(length_ok && S9xBarcodeBattlerConnected());
     if (n == 0)
         status_label->clear();
     else if (!length_ok)
@@ -472,8 +485,9 @@ void BarcodeBattlerDialog::accept()
         return;
     }
 
+    // A double-click on a card asks too, past the greyed button.
     const QByteArray code = code_edit->text().toLatin1();
-    if (!S9xBarcodeBattlerScan(code.constData()))
+    if (!S9xBarcodeBattlerConnected() || !S9xBarcodeBattlerScan(code.constData()))
         return;
 
     S9xSetInfoString(tr("Barcode Battler: %1 scanned").arg(S9xBarcodeBattlerLastCode()).toUtf8().constData());

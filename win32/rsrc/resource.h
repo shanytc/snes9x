@@ -1028,6 +1028,7 @@
 #define IDC_BARCODE_PREVIEW             3710
 #define IDC_BARCODE_SEARCH              3711
 #define IDC_BARCODE_CARDS               3712
+#define IDC_BARCODE_CONNECT_NOTE        3729
 #define ID_INPUT_BARCODE_CONNECT        44454
 #define ID_INPUT_BARCODE_SCAN           44455
 #define ID_INPUT_BARCODE_RESCAN         44456
@@ -1039,7 +1040,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        202
 #define _APS_NEXT_COMMAND_VALUE         44457
-#define _APS_NEXT_CONTROL_VALUE         3729
+#define _APS_NEXT_CONTROL_VALUE         3730
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

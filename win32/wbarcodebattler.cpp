@@ -221,8 +221,17 @@ void CodeEdited(HWND hDlg)
 		          n == 13 ? TEXT("EAN-13") : n == 12 ? TEXT("UPC-A") : TEXT("EAN-8"));
 
 	SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
-	EnableWindow(GetDlgItem(hDlg, IDOK), lengthOk);
+	EnableWindow(GetDlgItem(hDlg, IDOK), lengthOk && S9xBarcodeBattlerConnected());
 	ShowCard(hDlg, card);
+}
+
+// Scan needs Input > Barcodes > Connect on; the title says when it is.
+void ShowConnected(HWND hDlg)
+{
+	const bool on = S9xBarcodeBattlerConnected();
+	SetWindowText(hDlg, on ? TEXT("Barcode Battler II (Connected)") : TEXT("Barcode Battler II"));
+	SetDlgItemText(hDlg, IDC_BARCODE_CONNECT_NOTE, on ? TEXT("") : TEXT("Connect first: Input > Barcodes > Connect."));
+	CodeEdited(hDlg);
 }
 
 void Found(HWND hDlg, const char *code, const TCHAR *where)
@@ -587,7 +596,7 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 			SetDlgItemTextA(hDlg, IDC_BARCODE_EDIT, S9xBarcodeBattlerLastCode());
 			ShowCameraChoice(hDlg);
 
-			CodeEdited(hDlg);
+			ShowConnected(hDlg);
 			DragAcceptFiles(hDlg, TRUE);
 			SendDlgItemMessage(hDlg, IDC_BARCODE_SEARCH, EM_SETCUEBANNER, TRUE, (LPARAM)L"Name, set or barcode");
 			FillCards(hDlg);
@@ -680,7 +689,8 @@ INT_PTR CALLBACK DlgBarcodeBattler(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 						SetDlgItemText(hDlg, IDC_BARCODE_STATUS, TEXT("The running game doesn't read the Barcode Battler."));
 						return TRUE;
 					}
-					if (!S9xBarcodeBattlerScan(DigitsOf(hDlg).c_str()))
+					// A double-click on a card asks too, past the greyed button.
+					if (!S9xBarcodeBattlerConnected() || !S9xBarcodeBattlerScan(DigitsOf(hDlg).c_str()))
 						return TRUE;
 
 					char msg[64];
@@ -753,4 +763,10 @@ void WinBarcodeBattlerCameraChanged()
 {
 	if (g_dlg)
 		ShowCameraChoice(g_dlg);
+}
+
+void WinBarcodeBattlerConnectChanged()
+{
+	if (g_dlg)
+		ShowConnected(g_dlg);
 }

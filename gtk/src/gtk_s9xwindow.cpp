@@ -268,6 +268,13 @@ static bool barcode_snes_game(const Snes9xConfig *config)
     return config->rom_loaded && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
 }
 
+// Use Last Barcode Again: Connect on, and a code scanned before for a game that reads it.
+static bool barcode_rescan_ready(const Snes9xConfig *config)
+{
+    return barcode_snes_game(config) && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerConnected() &&
+           *S9xBarcodeBattlerLastCode() != 0;
+}
+
 void Snes9xWindow::connect_signals()
 {
     drawing_area->signal_draw().connect(sigc::mem_fun(*this, &Snes9xWindow::draw));
@@ -755,6 +762,9 @@ void Snes9xWindow::connect_signals()
         S9xBarcodeBattlerConnect(connect);
         S9xSetInfoString(connect ? _("Barcode Battler II connected to port 2")
                                  : _("Barcode Battler II disconnected"));
+        // The menu stays open: Use Last Barcode Again follows Connect there.
+        update_barcode_menu();
+        S9xBarcodeBattlerConnectChanged();
     });
     // Flipped here instead of by activation, which would close the menu.
     barcodes_connect->signal_button_release_event().connect([barcodes_connect](GdkEventButton *) {
@@ -770,7 +780,7 @@ void Snes9xWindow::connect_signals()
 
     get_object<Gtk::MenuItem>("barcodes_rescan_item")->signal_activate().connect([this] {
         std::string code = S9xBarcodeBattlerLastCode();
-        if (barcode_snes_game(config) && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
+        if (barcode_rescan_ready(config) && S9xBarcodeBattlerScan(code.c_str()))
             S9xSetInfoString(fmt::format("Barcode Battler: {} scanned", code).c_str());
     });
 
@@ -1888,13 +1898,12 @@ void Snes9xWindow::refresh_nss_dips()
 void Snes9xWindow::update_barcode_menu()
 {
     const bool snes = barcode_snes_game(config);
-    const bool reads = snes && S9xBarcodeBattlerGameSupported();
     syncing_menu = true;
     get_object<Gtk::CheckMenuItem>("barcodes_connect_item")->set_active(S9xBarcodeBattlerConnected());
     syncing_menu = false;
     enable_widget("barcodes_connect_item", snes);
-    enable_widget("barcodes_scan_item", reads);
-    enable_widget("barcodes_rescan_item", reads && *S9xBarcodeBattlerLastCode() != 0);
+    enable_widget("barcodes_scan_item", snes && S9xBarcodeBattlerGameSupported());
+    enable_widget("barcodes_rescan_item", barcode_rescan_ready(config));
 }
 
 void Snes9xWindow::barcode_shortcut(int which)

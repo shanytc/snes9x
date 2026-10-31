@@ -2304,6 +2304,13 @@ static bool BarcodeSnesGame (void)
 	return !Settings.StopEmulation && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
 }
 
+// Use Last Barcode Again: Connect on, and a code scanned before for a game that reads it.
+static bool BarcodeRescanReady (void)
+{
+	return BarcodeSnesGame() && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerConnected() &&
+	       *S9xBarcodeBattlerLastCode();
+}
+
 // A menu window repaints on its own only when the mouse moves; after a
 // swallowed click the fresh check state has to be pushed at it.
 static BOOL CALLBACK MenuRedrawProc (HWND hwnd, LPARAM)
@@ -2339,6 +2346,8 @@ static void MenuToggleBarcodeInPlace (void)
 	SendMessage (GUI.hWnd, WM_COMMAND, ID_INPUT_BARCODE_CONNECT, 0);
 	CheckMenuItem (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, MF_BYCOMMAND |
 	               (S9xBarcodeBattlerConnected () ? MF_CHECKED : MF_UNCHECKED));
+	EnableMenuItem (s_barcodes_hmenu, ID_INPUT_BARCODE_RESCAN, MF_BYCOMMAND |
+	                (BarcodeRescanReady () ? MF_ENABLED : MF_GRAYED));
 	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
 }
 
@@ -2700,6 +2709,7 @@ LRESULT CALLBACK WinProc(
 			S9xBarcodeBattlerConnect(!S9xBarcodeBattlerConnected());
 			S9xSetInfoString(S9xBarcodeBattlerConnected() ? "Barcode Battler II connected to port 2"
 			                                              : "Barcode Battler II disconnected");
+			WinBarcodeBattlerConnectChanged();
 			break;
 		case ID_INPUT_BARCODE_SCAN:
 			if (!BarcodeSnesGame() || !S9xBarcodeBattlerGameSupported())
@@ -2709,7 +2719,7 @@ LRESULT CALLBACK WinProc(
 		case ID_INPUT_BARCODE_RESCAN:
 		{
 			std::string code = S9xBarcodeBattlerLastCode();
-			if (BarcodeSnesGame() && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
+			if (BarcodeRescanReady() && S9xBarcodeBattlerScan(code.c_str()))
 				S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
 			break;
 		}
@@ -7195,7 +7205,7 @@ static void CheckMenuStates ()
 	const bool barcodeGame = BarcodeSnesGame() && S9xBarcodeBattlerGameSupported();
 	mii.fState = barcodeGame ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_SCAN, FALSE, &mii);
-	mii.fState = (barcodeGame && *S9xBarcodeBattlerLastCode()) ? MFS_ENABLED : MFS_DISABLED;
+	mii.fState = BarcodeRescanReady() ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_RESCAN, FALSE, &mii);
 
 	mii.fState = !Settings.StopEmulation ? MFS_ENABLED : MFS_DISABLED;

@@ -1016,14 +1016,20 @@ static bool barcodeSnesGame(EmuApplication &app)
     return app.isCoreActive() && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
 }
 
+// Use Last Barcode Again: Connect on, and a code scanned before for a game that reads it.
+static bool barcodeRescanReady(EmuApplication &app)
+{
+    return barcodeSnesGame(app) && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerConnected() &&
+           *S9xBarcodeBattlerLastCode();
+}
+
 void EmuMainWindow::updateBarcodeActions()
 {
     const bool snes = barcodeSnesGame(app);
-    const bool reads = snes && S9xBarcodeBattlerGameSupported();
     barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
     barcode_connect_action->setEnabled(snes);
-    barcode_scan_action->setEnabled(reads);
-    barcode_rescan_action->setEnabled(reads && *S9xBarcodeBattlerLastCode());
+    barcode_scan_action->setEnabled(snes && S9xBarcodeBattlerGameSupported());
+    barcode_rescan_action->setEnabled(barcodeRescanReady(app));
 }
 
 void EmuMainWindow::barcodeShortcut(const std::string &name)
@@ -1859,6 +1865,10 @@ void EmuMainWindow::createWidgets()
         S9xBarcodeBattlerConnect(checked);
         S9xSetInfoString(checked ? "Barcode Battler II connected to port 2"
                                  : "Barcode Battler II disconnected");
+        // The menu stays open: Use Last Barcode Again follows Connect there.
+        updateBarcodeActions();
+        if (barcode_dialog)
+            barcode_dialog->connectChanged();
     });
     // Modeless: the game runs on while cards are browsed and scanned.
     barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
@@ -1874,7 +1884,7 @@ void EmuMainWindow::createWidgets()
     barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
     QObject::connect(barcode_rescan_action, &QAction::triggered, [this] {
         std::string code = S9xBarcodeBattlerLastCode();
-        if (barcodeSnesGame(app) && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
+        if (barcodeRescanReady(app) && S9xBarcodeBattlerScan(code.c_str()))
             S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
     });
     QObject::connect(barcode_menu, &QMenu::aboutToShow, this, &EmuMainWindow::updateBarcodeActions);

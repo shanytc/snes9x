@@ -833,9 +833,8 @@ void Snes9xWindow::connect_signals()
         const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
         if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader))
             return;
-        pause_from_focus_change();
-        S9xBarcodeDialog(*window.get(), reader);
-        unpause_from_focus_change();
+        // Modeless: the game runs on while cards are browsed and scanned.
+        S9xShowBarcodeDialog(*window.get(), reader);
     });
 
     get_object<Gtk::MenuItem>("barcodes_rescan_item")->signal_activate().connect([this, barcode_port_free] {

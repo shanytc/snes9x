@@ -2954,9 +2954,7 @@ LRESULT CALLBACK WinProc(
 			const S9xBarcodeReader reader = S9xBarcodeReaderFor(!Settings.StopEmulation);
 			if (!S9xBarcodeReaderGameReads(reader) || !WinBarcodePortFree(reader))
 				break;
-			RestoreGUIDisplay();
-			WinBarcodeDialog(GUI.hWnd, reader);
-			RestoreSNESDisplay();
+			WinShowBarcodeDialog(GUI.hWnd, reader);
 			break;
 		}
 		case ID_INPUT_BARCODE_RESCAN:
@@ -5579,6 +5577,8 @@ void S9xOnSNESPadRead()
 					continue;
 				if (WinAcidTestsDialog() && IsDialogMessage (WinAcidTestsDialog(), &msg))
 					continue;
+				if (WinBarcodeDialog() && IsDialogMessage (WinBarcodeDialog(), &msg))
+					continue;
 				if (WinViewerTakesHotkey (msg))
 					continue;
 
@@ -6544,6 +6544,8 @@ int WINAPI WinMain(
             if (s_hColorDlg && IsDialogMessage (s_hColorDlg, &msg))
                 continue;
             if (WinAcidTestsDialog() && IsDialogMessage (WinAcidTestsDialog(), &msg))
+                continue;
+            if (WinBarcodeDialog() && IsDialogMessage (WinBarcodeDialog(), &msg))
                 continue;
             if (WinViewerTakesHotkey (msg))
                 continue;
@@ -8510,6 +8512,9 @@ static bool LoadROM(const TCHAR *filename, const TCHAR *filename2 /*= NULL*/) {
 		s_colorDlgUserClose = true;
 		DestroyWindow(s_hColorDlg);
 	}
+
+	// The Barcodes dialog shows the cards of the reader this load may replace.
+	WinCloseBarcodeDialog();
 
 	TCHAR	msu1_renamed[MAX_PATH];
 

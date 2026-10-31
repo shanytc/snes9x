@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <string.h>
 #include <vector>
 
@@ -90,7 +91,7 @@ class BarcodeDialog : public Gtk::Dialog
 {
   public:
     BarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader)
-        : Gtk::Dialog(S9xBarcodeReaderName(reader), parent, true), reader(reader)
+        : Gtk::Dialog(S9xBarcodeReaderName(reader), parent, false), reader(reader)
     {
         const bool battler = reader == S9X_BARCODE_BATTLER;
         auto content = get_content_area();
@@ -201,9 +202,21 @@ class BarcodeDialog : public Gtk::Dialog
         right->pack_start(card_scroll, Gtk::PACK_EXPAND_WIDGET);
         columns->pack_start(*right, Gtk::PACK_SHRINK);
 
-        add_button(Gtk::StockID("gtk-cancel"), Gtk::RESPONSE_CANCEL);
+        add_button(_("_Close"), Gtk::RESPONSE_CLOSE);
         scan_button = add_button(_("_Scan"), Gtk::RESPONSE_ACCEPT);
         set_default_response(Gtk::RESPONSE_ACCEPT);
+
+        // Modeless: Scan leaves it open; Close and the frame's X only hide it.
+        signal_response().connect([this](int response) {
+            if (response == Gtk::RESPONSE_ACCEPT)
+                scan();
+            else
+                close_dialog();
+        });
+        signal_delete_event().connect([this](GdkEventAny *) -> bool {
+            close_dialog();
+            return true;
+        });
 
         code_entry.signal_changed().connect([this] { code_edited(); });
         random_button->signal_clicked().connect([this] {
@@ -274,12 +287,40 @@ class BarcodeDialog : public Gtk::Dialog
         stop_camera();
     }
 
-    bool send()
+    S9xBarcodeReader barcode_reader() const
     {
-        return S9xBarcodeReaderScan(reader, code_entry.get_text().c_str());
+        return reader;
+    }
+
+    void close_dialog()
+    {
+        stop_camera();
+        hide();
     }
 
   private:
+    // Scans and stays open: the game runs on behind it.
+    void scan()
+    {
+        std::string refused;
+        if (S9xBarcodeReaderFor(gui_config->rom_loaded) != reader || !S9xBarcodeReaderGameReads(reader))
+            refused = fmt::format(fmt::runtime(_("The running game doesn't read the {}.")), S9xBarcodeReaderName(reader));
+        else if (const char *busy = S9xBarcodeReaderPortBusy(reader))
+            refused = fmt::format("{}: {}.", S9xBarcodeReaderName(reader), busy);
+        if (!refused.empty())
+        {
+            status_label.set_text(refused);
+            return;
+        }
+        if (!S9xBarcodeReaderScan(reader, code_entry.get_text().c_str()))
+            return;
+
+        const char *code = S9xBarcodeReaderLastCode(reader);
+        const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code);
+        S9xSetInfoString(fmt::format("{}: {} scanned", S9xBarcodeReaderName(reader), card ? card->name : code).c_str());
+        status_label.set_text(fmt::format(fmt::runtime(_("Scanned {}.")), code));
+    }
+
     static const int PREVIEW_WIDTH = 320;
     static const int PREVIEW_HEIGHT = 240;
 
@@ -731,22 +772,21 @@ class BarcodeDialog : public Gtk::Dialog
     std::string whole_code;    // the code typed in when it is whole, drawn with no photos
 };
 
+std::unique_ptr<BarcodeDialog> barcode_dialog;
+
 } // namespace
 
-bool S9xBarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader)
+void S9xShowBarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader)
 {
-    BarcodeDialog dialog(parent, reader);
+    if (barcode_dialog && barcode_dialog->barcode_reader() != reader)
+        barcode_dialog.reset();    // open for another reader's cards
+    if (!barcode_dialog)
+        barcode_dialog = std::make_unique<BarcodeDialog>(parent, reader);
+    barcode_dialog->present();
+}
 
-    while (dialog.run() == Gtk::RESPONSE_ACCEPT)
-    {
-        if (dialog.send())
-        {
-            const char *code = S9xBarcodeReaderLastCode(reader);
-            const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code);
-            S9xSetInfoString(fmt::format("{}: {} scanned", S9xBarcodeReaderName(reader), card ? card->name : code).c_str());
-            return true;
-        }
-    }
-
-    return false;
+void S9xCloseBarcodeDialog()
+{
+    if (barcode_dialog)
+        barcode_dialog->close_dialog();
 }

@@ -22,3 +22,4 @@
 void S9xShowBarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader);
 void S9xCloseBarcodeDialog();   // a game load: the dialog was for the last one
 void S9xBarcodeCameraChanged(); // Preferences applied the camera
+void S9xBarcodeConnectChanged(); // Input > Barcodes > Connect was flipped

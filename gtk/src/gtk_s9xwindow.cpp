@@ -822,6 +822,9 @@ void Snes9xWindow::connect_signals()
         S9xBarcodeReaderConnect(connect);
         S9xSetInfoString(connect ? fmt::format("{} connected to {}", S9xBarcodeReaderName(reader), S9xBarcodeReaderPort(reader)).c_str()
                                  : fmt::format("{} disconnected", S9xBarcodeReaderName(reader)).c_str());
+        // The menu stays open: Use Last Barcode Again follows Connect there.
+        update_barcode_menu();
+        S9xBarcodeConnectChanged();
     });
     // Flipped here instead of by activation, which would close the menu.
     barcodes_connect->signal_button_release_event().connect([barcodes_connect](GdkEventButton *) {
@@ -840,7 +843,8 @@ void Snes9xWindow::connect_signals()
     get_object<Gtk::MenuItem>("barcodes_rescan_item")->signal_activate().connect([this, barcode_port_free] {
         const S9xBarcodeReader reader = S9xBarcodeReaderFor(config->rom_loaded);
         const std::string code = S9xBarcodeReaderLastCode(reader);
-        if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader) || !S9xBarcodeReaderScan(reader, code.c_str()))
+        if (!S9xBarcodeReaderConnected() || !S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader) ||
+            !S9xBarcodeReaderScan(reader, code.c_str()))
             return;
         const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code.c_str());
         S9xSetInfoString(fmt::format("{}: {} scanned", S9xBarcodeReaderName(reader), card ? card->name : code).c_str());
@@ -1971,7 +1975,8 @@ void Snes9xWindow::update_barcode_menu()
     syncing_menu = false;
     enable_widget("barcodes_connect_item", reader != S9X_BARCODE_NONE);
     enable_widget("barcodes_scan_item", reads);
-    enable_widget("barcodes_rescan_item", reads && *S9xBarcodeReaderLastCode(reader) != 0);
+    // Use Last Barcode Again: Connect on, and a code scanned before.
+    enable_widget("barcodes_rescan_item", reads && S9xBarcodeReaderConnected() && *S9xBarcodeReaderLastCode(reader) != 0);
 }
 
 void Snes9xWindow::barcode_shortcut(int which)

@@ -149,6 +149,10 @@ BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::func
     cards_column->addWidget(find_label);
     cards_column->addWidget(search_edit);
     cards_column->addWidget(card_tree, 1);
+    connect_note = new QLabel;
+    connect_note->setWordWrap(true);
+    connect_note->setAlignment(Qt::AlignRight);
+    cards_column->addWidget(connect_note);
     columns->addLayout(cards_column);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -184,8 +188,18 @@ BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::func
     });
 
     showCameraChoice();
-    codeEdited();
+    connectChanged();
     fillCards();
+}
+
+// Scan needs Input > Barcodes > Connect on; the title says when it is.
+void BarcodeDialog::connectChanged()
+{
+    const bool on = S9xBarcodeReaderConnected();
+    const QString name = QString::fromUtf8(S9xBarcodeReaderName(reader));
+    setWindowTitle(on ? tr("%1 (Connected)").arg(name) : name);
+    connect_note->setText(on ? QString() : tr("Connect first: Input > Barcodes > Connect."));
+    codeEdited();
 }
 
 BarcodeDialog::~BarcodeDialog()
@@ -202,7 +216,7 @@ void BarcodeDialog::codeEdited()
     const QByteArray latin = digits.toLatin1();
     const S9xBarcodeReaderCard *card = length_ok ? S9xBarcodeReaderCardFind(reader, latin.constData()) : nullptr;
 
-    scan_button->setEnabled(length_ok);
+    scan_button->setEnabled(length_ok && S9xBarcodeReaderConnected());
     if (n == 0)
         status_label->clear();
     else if (!length_ok)
@@ -589,9 +603,10 @@ void BarcodeDialog::done(int result)
 // Scans and stays open: the game runs on behind it.
 void BarcodeDialog::accept()
 {
+    // A double-click on a card asks too, past the greyed button.
     QString digits = code_edit->text();
     digits.remove(' ').remove('-');
-    if (!S9xBarcodeReaderTakes(reader, digits.size()))
+    if (!S9xBarcodeReaderConnected() || !S9xBarcodeReaderTakes(reader, digits.size()))
         return;
 
     const QString refused = scan(digits.toStdString());

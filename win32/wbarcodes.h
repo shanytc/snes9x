@@ -17,6 +17,7 @@ void WinShowBarcodeDialog(HWND parent, S9xBarcodeReader reader);
 HWND WinBarcodeDialog();		// the open dialog, or NULL
 void WinCloseBarcodeDialog();	// a game load: the dialog was for the last one
 void WinBarcodeCameraChanged();	// Display Configuration applied its camera
+void WinBarcodeConnectChanged();	// Input > Barcodes > Connect was flipped
 
 // The OSD line for the code just scanned: the card's name when it is a known one.
 void WinBarcodeScanned(S9xBarcodeReader reader);

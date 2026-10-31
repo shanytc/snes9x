@@ -26,6 +26,8 @@ constexpr int32_t kBytePeriod = 4096;
 constexpr int32_t kSettle = 1 << 20;   // ~0.25 s
 // The game stops listening mid-card: the rest of it is lost.
 constexpr int32_t kStall = 1 << 18;    // ~62 ms
+// Knock bytes come 1-4 ms apart; a pause this long starts a new knock.
+constexpr int32_t kKnockGap = 1 << 18; // ~62 ms
 constexpr int kCardBytes = 30;
 constexpr int kDigits    = 13;
 
@@ -163,6 +165,15 @@ uint32_t BarcodeBoyReadCount() { return g_state.reads; }
 uint8_t BarcodeBoyExchange(uint8_t out)
 {
 	State &st = g_state;
+	if (st.quiet >= kKnockGap) st.matched = 0;
+	st.quiet = 0;
+	// Sending a card it hears nothing, and the card goes on: Family Jockey 2
+	// can clock its next knock byte mid-card (it polls SC as a byte lands).
+	if (st.busy)
+	{
+		st.reply = 0xFF;
+		return st.reply;
+	}
 	// Its answer is loaded before the byte arrives: the knock's second half
 	// echoes the first.
 	st.reply = st.matched == 2 ? kKnock[0] : st.matched == 3 ? kKnock[1] : 0xFF;
@@ -173,9 +184,6 @@ uint8_t BarcodeBoyExchange(uint8_t out)
 		st.matched = 0;
 		st.armed   = 1;
 	}
-	// The game is talking, so it is not taking a card.
-	st.quiet = 0;
-	st.busy  = 0;
 	return st.reply;
 }
 
@@ -191,6 +199,9 @@ int BarcodeBoyClock(int32_t cycles, bool listening)
 	{
 		if (!st.pending || !st.armed || !listening || st.quiet < kSettle) return -1;
 		std::memcpy(st.card, st.next, kDigits);
+		// A knock the card cut in on starts over: Family Jockey 2 sends the
+		// rest after the card, and an echo there lands in its card buffer.
+		st.matched = 0;
 		st.pending = 0;
 		st.armed   = 0;
 		st.busy    = 1;

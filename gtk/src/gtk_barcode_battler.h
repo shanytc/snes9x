@@ -7,7 +7,7 @@
 #pragma once
 #include "gtk_compat.h"
 
-/* Input > Barcode Battler II > Scan Barcode: the code to swipe, typed in,
+/* Input > Barcodes > Scan Barcode: the code to swipe, typed in,
  * made up, picked from the known cards, or read off a picture (picked or
  * dropped on the dialog) or off a webcam held up to the card. Scan hands it
  * to the BBII interface on port 2 (barcodebattler.h). The webcam is the one

@@ -2238,6 +2238,88 @@ static void BuildLanguageMenu(HMENU bar)
 	}
 }
 
+// Input > Barcodes' Connect toggles in place: the click runs here and is
+// swallowed, so the menu stays up.
+static HHOOK s_menu_filter_hook = NULL;
+// Input > Barcodes. While a menu is up the mouse is captured by the owner, so
+// hit-test this handle directly.
+static HMENU s_barcodes_hmenu = NULL;
+
+// The Barcode Battler II is the reader a SNES game takes; a Game Boy game has none.
+static bool BarcodeSnesGame (void)
+{
+	return !Settings.StopEmulation && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+}
+
+// A menu window repaints on its own only when the mouse moves; after a
+// swallowed click the fresh check state has to be pushed at it.
+static BOOL CALLBACK MenuRedrawProc (HWND hwnd, LPARAM)
+{
+	TCHAR cls[16];
+	if (GetClassName (hwnd, cls, 16) && _tcscmp (cls, TEXT("#32768")) == 0)
+		RedrawWindow (hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+	return TRUE;
+}
+
+// The popup holding a command, searched for from the menu bar down.
+static HMENU MenuPopupWith (HMENU menu, UINT id)
+{
+	for (int i = 0, n = GetMenuItemCount (menu); i < n; i++)
+	{
+		if (GetMenuItemID (menu, i) == id)
+			return menu;
+		if (HMENU sub = GetSubMenu (menu, i))
+			if (HMENU found = MenuPopupWith (sub, id))
+				return found;
+	}
+	return NULL;
+}
+
+static bool MenuBarcodeConnectEnabled (void)
+{
+	return s_barcodes_hmenu &&
+	       !(GetMenuState (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, MF_BYCOMMAND) & (MF_DISABLED | MF_GRAYED));
+}
+
+static void MenuToggleBarcodeInPlace (void)
+{
+	SendMessage (GUI.hWnd, WM_COMMAND, ID_INPUT_BARCODE_CONNECT, 0);
+	CheckMenuItem (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, MF_BYCOMMAND |
+	               (S9xBarcodeBattlerConnected () ? MF_CHECKED : MF_UNCHECKED));
+	EnumThreadWindows (GetCurrentThreadId (), MenuRedrawProc, 0);
+}
+
+static LRESULT CALLBACK MenuKeepOpenFilter (int code, WPARAM wParam, LPARAM lParam)
+{
+	if (code == MSGF_MENU && s_barcodes_hmenu)
+	{
+		MSG *msg = (MSG *)lParam;
+		if (msg->message == WM_LBUTTONDOWN || msg->message == WM_LBUTTONUP)
+		{
+			int idx = MenuItemFromPoint (NULL, s_barcodes_hmenu, msg->pt);
+			if (idx < 0) idx = MenuItemFromPoint (GUI.hWnd, s_barcodes_hmenu, msg->pt);
+			if (idx >= 0 && GetMenuItemID (s_barcodes_hmenu, idx) == ID_INPUT_BARCODE_CONNECT &&
+			    MenuBarcodeConnectEnabled ())
+			{
+				if (msg->message == WM_LBUTTONUP)
+					MenuToggleBarcodeInPlace ();
+				return TRUE;
+			}
+		}
+		else if (msg->message == WM_KEYDOWN && msg->wParam == VK_RETURN)
+		{
+			MENUITEMINFO mii = { sizeof(mii), MIIM_STATE };
+			if (GetMenuItemInfo (s_barcodes_hmenu, ID_INPUT_BARCODE_CONNECT, FALSE, &mii) &&
+			    (mii.fState & MFS_HILITE) && MenuBarcodeConnectEnabled ())
+			{
+				MenuToggleBarcodeInPlace ();
+				return TRUE;
+			}
+		}
+	}
+	return CallNextHookEx (s_menu_filter_hook, code, wParam, lParam);
+}
+
 LRESULT CALLBACK WinProc(
 						 HWND hWnd,
 						 UINT uMsg,
@@ -2553,27 +2635,26 @@ LRESULT CALLBACK WinProc(
 			ChangeInputDevice();
 			break;
 
-		// Barcode Battler II: takes port 2's place while connected. It can be
-		// connected before a game loads and stays across SNES loads (a Game Boy
-		// game unplugs it); scanning is only offered to a game that reads it.
+		// Barcodes: the Barcode Battler II on port 2, the reader a SNES game
+		// takes. Connect needs a SNES game loaded and stays across SNES loads
+		// (a Game Boy game unplugs it); scanning is only offered to a game that
+		// reads it.
 		case ID_INPUT_BARCODE_CONNECT:
-			if (!S9xBarcodeBattlerConnected() && !Settings.StopEmulation &&
-			    (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive))
+			if (!BarcodeSnesGame())
 				break;
 			S9xBarcodeBattlerConnect(!S9xBarcodeBattlerConnected());
-			if (!Settings.StopEmulation)
-				S9xSetInfoString(S9xBarcodeBattlerConnected() ? "Barcode Battler II connected to port 2"
-				                                              : "Barcode Battler II disconnected");
+			S9xSetInfoString(S9xBarcodeBattlerConnected() ? "Barcode Battler II connected to port 2"
+			                                              : "Barcode Battler II disconnected");
 			break;
 		case ID_INPUT_BARCODE_SCAN:
-			if (Settings.StopEmulation || !S9xBarcodeBattlerGameSupported())
+			if (!BarcodeSnesGame() || !S9xBarcodeBattlerGameSupported())
 				break;
 			WinShowBarcodeBattlerDialog(GUI.hWnd);
 			break;
 		case ID_INPUT_BARCODE_RESCAN:
 		{
 			std::string code = S9xBarcodeBattlerLastCode();
-			if (!Settings.StopEmulation && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
+			if (BarcodeSnesGame() && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
 				S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
 			break;
 		}
@@ -3800,12 +3881,21 @@ LRESULT CALLBACK WinProc(
 	}
 	case WM_EXITMENULOOP:
 		HookDipMenu(false);
+		if (s_menu_filter_hook)
+		{
+			UnhookWindowsHookEx (s_menu_filter_hook);
+			s_menu_filter_hook = NULL;
+		}
 		UpdateWindow(GUI.hWnd);
 		DrawMenuBar(GUI.hWnd);
 		S9xClearPause (PAUSE_MENU);
 		break;
 
 	case WM_ENTERMENULOOP:
+		if (!s_menu_filter_hook)
+			s_menu_filter_hook = SetWindowsHookEx (WH_MSGFILTER, MenuKeepOpenFilter,
+			                                       NULL, GetCurrentThreadId ());
+		s_barcodes_hmenu = MenuPopupWith (GUI.hMenu, ID_INPUT_BARCODE_CONNECT);
 		S9xSetPause (PAUSE_MENU);
 		CheckMenuStates ();
 		HookDipMenu(Settings.NSS);
@@ -7042,11 +7132,12 @@ static void CheckMenuStates ()
     mii.fState = validFlag | (GUI.ControllerOption == SNES_MACSRIFLE ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_MACSRIFLE_TOGGLE, FALSE, &mii);
 
-	// The Barcode Battler II is a SNES device: greyed while a Game Boy game runs.
-	const bool gbRunning = !Settings.StopEmulation && (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
-	mii.fState = (gbRunning ? MFS_DISABLED : MFS_ENABLED) | (S9xBarcodeBattlerConnected() ? MFS_CHECKED : MFS_UNCHECKED);
+	// Input > Barcodes: Connect with a SNES game loaded (the Barcode Battler II
+	// is a SNES device), Scan for a game that reads it.
+	mii.fState = (BarcodeSnesGame() ? MFS_ENABLED : MFS_DISABLED) |
+	             (S9xBarcodeBattlerConnected() ? MFS_CHECKED : MFS_UNCHECKED);
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_CONNECT, FALSE, &mii);
-	const bool barcodeGame = !Settings.StopEmulation && S9xBarcodeBattlerGameSupported();
+	const bool barcodeGame = BarcodeSnesGame() && S9xBarcodeBattlerGameSupported();
 	mii.fState = barcodeGame ? MFS_ENABLED : MFS_DISABLED;
 	SetMenuItemInfo (GUI.hMenu, ID_INPUT_BARCODE_SCAN, FALSE, &mii);
 	mii.fState = (barcodeGame && *S9xBarcodeBattlerLastCode()) ? MFS_ENABLED : MFS_DISABLED;

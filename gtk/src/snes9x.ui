@@ -2377,30 +2377,30 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkSeparatorMenuItem" id="barcode_battler_separator">
+                      <object class="GtkSeparatorMenuItem" id="barcodes_separator">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkMenuItem" id="barcode_battler_item">
-                        <property name="label" translatable="yes">_Barcode Battler II</property>
+                      <object class="GtkMenuItem" id="barcodes_item">
+                        <property name="label" translatable="yes">_Barcodes</property>
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="use_underline">True</property>
                         <child type="submenu">
-                          <object class="GtkMenu" id="barcode_battler_menu">
+                          <object class="GtkMenu" id="barcodes_menu">
                             <property name="can_focus">False</property>
                             <child>
-                              <object class="GtkCheckMenuItem" id="barcode_battler_connect_item">
-                                <property name="label" translatable="yes">_Connect to Port 2</property>
+                              <object class="GtkCheckMenuItem" id="barcodes_connect_item">
+                                <property name="label" translatable="yes">_Connect</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="barcode_battler_scan_item">
+                              <object class="GtkMenuItem" id="barcodes_scan_item">
                                 <property name="label" translatable="yes">_Scan Barcode…</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
@@ -2408,8 +2408,8 @@
                               </object>
                             </child>
                             <child>
-                              <object class="GtkMenuItem" id="barcode_battler_rescan_item">
-                                <property name="label" translatable="yes">Scan _Last Barcode Again</property>
+                              <object class="GtkMenuItem" id="barcodes_rescan_item">
+                                <property name="label" translatable="yes">Use _Last Barcode Again</property>
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="use_underline">True</property>

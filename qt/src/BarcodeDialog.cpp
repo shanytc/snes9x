@@ -106,18 +106,11 @@ BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::func
 
     auto camera_row = new QHBoxLayout;
     camera_row->addWidget(new QLabel(tr("Camera:")));
-    camera_combo = new QComboBox;
-    camera_combo->setPlaceholderText(tr("No video camera found"));
-    std::vector<std::string> names;
-    S9xGBCameraEnumerate(names);
-    for (auto &name : names)
-        camera_combo->addItem(QString::fromStdString(name));
-    if (!names.empty())
-        camera_combo->setCurrentIndex(Settings.GBVideoCameraIndex < names.size() ? Settings.GBVideoCameraIndex : 0);
-    camera_row->addWidget(camera_combo, 1);
+    camera_label = new QLabel;
+    camera_label->setWordWrap(true);
+    camera_label->setTextFormat(Qt::PlainText);
+    camera_row->addWidget(camera_label, 1);
     camera_button = new QPushButton(tr("Start &Camera"));
-    camera_button->setEnabled(!names.empty());
-    camera_combo->setEnabled(!names.empty());
     camera_row->addWidget(camera_button);
     layout->addLayout(camera_row);
 
@@ -179,13 +172,6 @@ BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::func
     });
     connect(image_button, &QPushButton::clicked, this, &BarcodeDialog::fromImage);
     connect(camera_button, &QPushButton::clicked, this, &BarcodeDialog::toggleCamera);
-    connect(camera_combo, &QComboBox::activated, [&] {
-        if (camera_on)
-        {
-            stopCamera();
-            toggleCamera();
-        }
-    });
     connect(&camera_timer, &QTimer::timeout, this, &BarcodeDialog::pollCamera);
     connect(search_edit, &QLineEdit::textChanged, this, &BarcodeDialog::fillCards);
     connect(card_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
@@ -197,6 +183,7 @@ BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::func
             accept();
     });
 
+    showCameraChoice();
     codeEdited();
     fillCards();
 }
@@ -306,6 +293,30 @@ void BarcodeDialog::resizeEvent(QResizeEvent *event)
     showPreview();
 }
 
+// The camera Options > Display has on, or why there is none to start. That
+// panel is the only place a camera is picked, and applies on the emulation
+// thread, so this follows it whenever the dialog comes to the front.
+void BarcodeDialog::showCameraChoice()
+{
+    std::vector<std::string> names;
+    S9xGBCameraEnumerate(names);
+    const bool ready = Settings.GBVideoCamera && Settings.GBVideoCameraIndex < names.size();
+    camera_label->setText(ready           ? QString::fromStdString(names[Settings.GBVideoCameraIndex])
+                          : names.empty() ? tr("No video camera found.")
+                                          : tr("Turn on Enable Video Camera and pick a camera in Options > Display."));
+    camera_button->setEnabled(ready);
+    if (!ready)
+        stopCamera();
+}
+
+void BarcodeDialog::changeEvent(QEvent *event)
+{
+    if (event->type() == QEvent::ActivationChange && isActiveWindow())
+        showCameraChoice();
+    QDialog::changeEvent(event);
+}
+
+// Reads the camera Options > Display runs; starts it only if that failed.
 void BarcodeDialog::toggleCamera()
 {
     if (camera_on)
@@ -314,7 +325,7 @@ void BarcodeDialog::toggleCamera()
         return;
     }
 
-    if (!S9xGBCameraStart(camera_combo->currentIndex()))
+    if (!S9xGBCameraIsRunning() && !S9xGBCameraStart(Settings.GBVideoCameraIndex))
     {
         status_label->setText(tr("The camera could not be started."));
         return;
@@ -334,14 +345,18 @@ void BarcodeDialog::stopCamera()
     camera_on = false;
     camera_timer.stop();
     camera_button->setText(tr("Start &Camera"));
-    // Back to what Display > Game Boy Image asks for.
-    S9xGBCameraStop();
-    S9xGBCameraApply();
     showPreview();
 }
 
 void BarcodeDialog::pollCamera()
 {
+    // Turned off in Options > Display while it ran.
+    if (!Settings.GBVideoCamera)
+    {
+        showCameraChoice();
+        return;
+    }
+
     int width = 0, height = 0;
     if (!S9xGBCameraGetFrame(frame, width, height))
         return;

@@ -66,8 +66,8 @@ QString cardLabel(const S9xBarcodeReaderCard *cards, int i, int end)
 
 } // namespace
 
-BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader)
-    : QDialog(parent), reader(reader)
+BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::function<QString(const std::string &)> scanner)
+    : QDialog(parent), reader(reader), scan(std::move(scanner))
 {
     const bool battler = reader == S9X_BARCODE_BATTLER;
     setWindowTitle(QString::fromUtf8(S9xBarcodeReaderName(reader)));
@@ -137,7 +137,7 @@ BarcodeDialog::BarcodeDialog(QWidget *parent, S9xBarcodeReader reader)
     note->setWordWrap(true);
     layout->addWidget(note);
 
-    auto buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
+    auto buttons = new QDialogButtonBox(QDialogButtonBox::Close);
     scan_button = buttons->addButton(tr("&Scan"), QDialogButtonBox::AcceptRole);
     scan_button->setDefault(true);
     layout->addWidget(buttons);
@@ -571,6 +571,7 @@ void BarcodeDialog::done(int result)
     QDialog::done(result);
 }
 
+// Scans and stays open: the game runs on behind it.
 void BarcodeDialog::accept()
 {
     QString digits = code_edit->text();
@@ -578,6 +579,6 @@ void BarcodeDialog::accept()
     if (!S9xBarcodeReaderTakes(reader, digits.size()))
         return;
 
-    scanned = digits.toStdString();
-    QDialog::accept();
+    const QString refused = scan(digits.toStdString());
+    status_label->setText(refused.isEmpty() ? tr("Scanned %1.").arg(digits) : refused);
 }

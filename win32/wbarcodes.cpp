@@ -2,6 +2,7 @@
 #include "win32_webcam.h"
 #include "wlocale.h"
 #include "rsrc/resource.h"
+#include "win32_display.h"
 
 #include "../snes9x.h"
 #include "../display.h"
@@ -32,6 +33,7 @@ const UINT_PTR kCameraTimer = 1;
 // The reader the dialog is open for; its cards, code lengths and photos.
 S9xBarcodeReader           g_reader = S9X_BARCODE_BATTLER;
 
+HWND                       g_dlg = nullptr;
 bool                       g_cameraOn = false;
 std::vector<unsigned char> g_frame;
 int                        g_frameW = 0;
@@ -844,19 +846,48 @@ INT_PTR CALLBACK DlgBarcodes(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 					}
 					return TRUE;
 
+				// Scans and stays open: the game runs on behind it.
 				case IDOK:
+				{
+					std::wstring refused;
+					if (S9xBarcodeReaderFor(!Settings.StopEmulation) != g_reader || !S9xBarcodeReaderGameReads(g_reader))
+						refused = L"The running game doesn't read the " + Wide(S9xBarcodeReaderName(g_reader)) + L".";
+					else if (const char *busy = S9xBarcodeReaderPortBusy(g_reader))
+						refused = Wide(S9xBarcodeReaderName(g_reader)) + L": " + Wide(busy) + L".";
+					if (!refused.empty())
+					{
+						SetDlgItemTextW(hDlg, IDC_BARCODE_STATUS, refused.c_str());
+						return TRUE;
+					}
 					if (!S9xBarcodeReaderScan(g_reader, DigitsOf(hDlg).c_str()))
 						return TRUE;
-					StopCamera(hDlg);
-					EndDialog(hDlg, IDOK);
+
+					WinBarcodeScanned(g_reader);
+					TCHAR status[64];
+					_stprintf(status, TEXT("Scanned %hs."), S9xBarcodeReaderLastCode(g_reader));
+					SetDlgItemText(hDlg, IDC_BARCODE_STATUS, status);
 					return TRUE;
+				}
 
 				case IDCANCEL:
 					StopCamera(hDlg);
-					EndDialog(hDlg, IDCANCEL);
+					DestroyWindow(hDlg);
+					RestoreSNESDisplay();
 					return TRUE;
 			}
 			break;
+
+		// Modeless: the frame's X button has to close the dialog itself.
+		case WM_CLOSE:
+			SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
+			return TRUE;
+
+		// Also reached at app teardown, where the parent takes the dialog down
+		// and the camera is stopped on the way out.
+		case WM_DESTROY:
+			g_cameraOn = false;
+			g_dlg = nullptr;
+			return TRUE;
 	}
 
 	return FALSE;
@@ -864,17 +895,37 @@ INT_PTR CALLBACK DlgBarcodes(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 
 } // namespace
 
-bool WinBarcodeDialog(HWND parent, S9xBarcodeReader reader)
+void WinShowBarcodeDialog(HWND parent, S9xBarcodeReader reader)
 {
+	if (g_dlg && g_reader == reader)
+	{
+		ShowWindow(g_dlg, SW_RESTORE);
+		SetForegroundWindow(g_dlg);
+		return;
+	}
+	WinCloseBarcodeDialog();	// open for another reader's cards
+
 	INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_TREEVIEW_CLASSES };
 	InitCommonControlsEx(&icc);
 
 	g_reader = reader;
-	if (DialogBox(g_hInst, MAKEINTRESOURCE(IDD_BARCODES), parent, DlgBarcodes) != IDOK)
-		return false;
+	RestoreGUIDisplay();
+	g_dlg = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_BARCODES), parent, DlgBarcodes);
+	if (g_dlg)
+		ShowWindow(g_dlg, SW_SHOW);
+	else
+		RestoreSNESDisplay();
+}
 
-	WinBarcodeScanned(reader);
-	return true;
+HWND WinBarcodeDialog()
+{
+	return g_dlg;
+}
+
+void WinCloseBarcodeDialog()
+{
+	if (g_dlg)
+		SendMessage(g_dlg, WM_COMMAND, MAKEWPARAM(IDCANCEL, BN_CLICKED), 0);
 }
 
 void WinBarcodeScanned(S9xBarcodeReader reader)

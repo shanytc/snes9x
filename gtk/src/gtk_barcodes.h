@@ -17,5 +17,7 @@
  * it back as the settings have it on close. A card's photos show from the
  * reader's folder ("battler" or "barcodeboy") in the config folder or beside
  * the executable (common/desktop/barcode_card_photos.hpp); a code with none is
- * drawn as its barcode. Returns true when a code was scanned. */
-bool S9xBarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader);
+ * drawn as its barcode. Modeless: Scan leaves it open, the game running on
+ * behind it; showing it again brings it forward. */
+void S9xShowBarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader);
+void S9xCloseBarcodeDialog();   // a game load: the dialog was for the last one

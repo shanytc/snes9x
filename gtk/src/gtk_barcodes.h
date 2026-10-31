@@ -12,12 +12,13 @@
  * from the reader's known cards, or read off a picture (picked or dropped on
  * the dialog) or off a webcam held up to the card. Scan hands it to the reader
  * the loaded game's system takes: the Barcode Battler II, the Barcode Boy or
- * Barcode Taisen Bardigun's (barcodereaders.h). The webcam is the one the Game
- * Boy Camera uses; the dialog runs it while open if it isn't already, and puts
- * it back as the settings have it on close. A card's photos show from the
+ * Barcode Taisen Bardigun's (barcodereaders.h). The webcam is the one
+ * Preferences > Display turns on and picks for the Game Boy Camera; the dialog
+ * only reads it. A card's photos show from the
  * reader's folder ("battler" or "barcodeboy") in the config folder or beside
  * the executable (common/desktop/barcode_card_photos.hpp); a code with none is
  * drawn as its barcode. Modeless: Scan leaves it open, the game running on
  * behind it; showing it again brings it forward. */
 void S9xShowBarcodeDialog(Gtk::Window &parent, S9xBarcodeReader reader);
 void S9xCloseBarcodeDialog();   // a game load: the dialog was for the last one
+void S9xBarcodeCameraChanged(); // Preferences applied the camera

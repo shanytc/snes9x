@@ -893,6 +893,7 @@ static void UpdateScale(RenderFilter & Scale, RenderFilter & NextScale)
 static char InfoString [100];
 static uint32 prevPadReadFrame = (uint32)-1;
 static bool skipNextFrameStop = false;
+static bool runAheadCommitFrame = false;
 
 static void ShowStatusSlotInfo()
 {
@@ -4904,6 +4905,9 @@ void S9xOnSNESPadRead()
 {
 	if(!GUI.FASkipsNonInput)
 		return;
+	// Run-ahead: stop in the committed frame only; the rest are rolled back.
+	if(Settings.InRunAhead && !runAheadCommitFrame)
+		return;
 
 	if(prevPadReadFrame != IPPU.TotalEmulatedFrames) // we want <= 1 calls per frame
 	{
@@ -5470,7 +5474,8 @@ static void WinEmulateFrame (void)
 			}
 		}
 
-		if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode && !Settings.Paused)
+		// Frame advance runs here too, with Settings.Paused still set.
+		if (Settings.RunAhead > 0 && !Settings.Rewinding && !Settings.TurboMode)
 		{
 			// Run-ahead: commit 1 hidden frame, save state, run N-1 more hidden frames
 			// to "look into the future", then run the displayed frame as a preview, and
@@ -5513,7 +5518,9 @@ static void WinEmulateFrame (void)
 			// First hidden frame: the "commit" frame — its state gets saved and
 			// becomes the starting point of the next iteration
 			IPPU.RenderThisFrame = FALSE;
+			runAheadCommitFrame = true;
 			S9xMainLoop();
+			runAheadCommitFrame = false;
 
 			// Save state at end of the committed frame
 			S9xFreezeGameMem(runAheadBuf, runAheadBufSize);

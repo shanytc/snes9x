@@ -25,7 +25,7 @@ Please check our [Wiki](https://github.com/shanytc/snes9x/wiki) or the official 
 - Run-Ahead (Input lag reduction)
 - [Lua scripting](docs/lua-scripting.md) - SuperSnes9x API, Editor & Debugger
 - Color Correction Support / Native CRT Colors
-- Barcodes - Barcode Battler II, Barcode Boy, Barcode Taisen Bardigun
+- Barcodes - [Barcode Battler II](https://github.com/shanytc/snes9x/wiki/Barcode-Battler-II), [Barcode Boy](https://github.com/shanytc/snes9x/wiki/Barcode-Boy), Barcode Taisen Bardigun
 - SDL Support
 - Multi-Language Pack
 - 100% Acid Tests support for gbc/gb/sgb (Emulator [shootout](https://tomek.rekawek.eu/GBEmulatorShootout/))

@@ -179,6 +179,10 @@ Nintendo is a trademark.")
 #define HOTKEYS_GBMODEL_SGB TEXT("Super Game Boy:")
 #define HOTKEYS_GBMODEL_SGB2 TEXT("Super Game Boy 2:")
 #define HOTKEYS_GBMODEL_SGBC TEXT("Super GB Color:")
+// Input -> Barcodes; the tab widens its left column like the Game Boy tab.
+#define HOTKEYS_BARCODE_CONNECT TEXT("Connect:")
+#define HOTKEYS_BARCODE_SCAN TEXT("Scan Barcode:")
+#define HOTKEYS_BARCODE_RESCAN TEXT("Use Last Barcode Again:")
 // Keep these short enough for the 72-DLU IDC_LABEL_HK* statics: longer text
 // word-wraps and the clipped second line shows as pixel garbage under the label.
 #define HOTKEYS_KEYSWITCH_1 TEXT("Key Switch Options:")

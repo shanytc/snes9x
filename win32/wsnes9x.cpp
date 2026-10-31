@@ -188,13 +188,14 @@ void S9xWinScanJoypads();
 #define WM_CHEATS_ADDED (WM_APP + 1)
 
 constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS = 18;
-constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 8;
+constexpr int MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES = 9;
 constexpr int HOTKEY_TAB_SFCBOX = 4;
 constexpr int HOTKEY_TAB_EMULATION  = 0;
 constexpr int HOTKEY_TAB_SAVESTATES = 1;
 constexpr int HOTKEY_TAB_TURBO      = 2;
 constexpr int HOTKEY_TAB_DISPLAY    = 3;
 constexpr int HOTKEY_TAB_GBMODEL    = 5;
+constexpr int HOTKEY_TAB_BARCODES   = 8;
 
 #ifdef UNICODE
 #define S9XW_SHARD_PATH SHARD_PATHW
@@ -1099,6 +1100,43 @@ static bool WinViewerTakesHotkey(const MSG &msg)
 static const uint8 sfcbox_keyswitch_map[5] = { 4, 0, 1, 2, 3 };
 static const char *sfcbox_keyswitch_names[5] = { "Options", "OFF", "ON", "Check Play", "Self Test" };
 
+// A held hotkey re-fires (key auto-repeat, plus the background-input
+// scanner's re-posts): gate a toggle to one shot per press.
+struct SLinkHotkeyGate { WPARAM key; DWORD lastSeen; };
+static SLinkHotkeyGate linkHotkeyGate[4];
+
+static bool LinkHotkeyPressEdge (WPARAM key)
+{
+	const DWORD now = timeGetTime ();
+	int oldest = 0;
+	for (int i = 0; i < 4; i++)
+	{
+		if (linkHotkeyGate[i].key == key)
+		{
+			// Refreshed on every blocked repeat; the timeout only re-arms
+			// a key whose key-up landed in another window.
+			const bool held = (now - linkHotkeyGate[i].lastSeen) <= 1500;
+			linkHotkeyGate[i].lastSeen = now;
+			return !held;
+		}
+		if (linkHotkeyGate[i].lastSeen < linkHotkeyGate[oldest].lastSeen)
+			oldest = i;
+	}
+	linkHotkeyGate[oldest].key      = key;
+	linkHotkeyGate[oldest].lastSeen = now;
+	return true;
+}
+
+static void LinkHotkeyRelease (WPARAM key)
+{
+	for (int i = 0; i < 4; i++)
+		if (linkHotkeyGate[i].key == key)
+		{
+			linkHotkeyGate[i].key      = 0;
+			linkHotkeyGate[i].lastSeen = 0;
+		}
+}
+
 int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 {
 	auto MatchesAnyBinding = [](WPARAM wParam, WORD primary, const WORD* extra) -> bool {
@@ -1427,6 +1465,21 @@ int HandleKeyMessage(WPARAM wParam, LPARAM lParam)
 				S9xMessage(S9X_INFO, S9X_INFO, "Coin inserted");
 			}
 			hitHotKey = true;
+		}
+		{
+			// Input -> Barcodes, through its menu items so a greyed one stays
+			// greyed for its key. Once per press: a repeat would flip Connect
+			// back, reopen the dialog or hand the card over again.
+			UINT barcodeCommand = 0;
+			if      (HKmatch(BarcodeConnect)) barcodeCommand = ID_INPUT_BARCODE_CONNECT;
+			else if (HKmatch(BarcodeScan))    barcodeCommand = ID_INPUT_BARCODE_SCAN;
+			else if (HKmatch(BarcodeRescan))  barcodeCommand = ID_INPUT_BARCODE_RESCAN;
+			if (barcodeCommand)
+			{
+				hitHotKey = true;
+				if (LinkHotkeyPressEdge (wParam))
+					PostMenuCommand (barcodeCommand);
+			}
 		}
 		for (int ksp = 0; ksp < 5; ksp++)
 		{
@@ -2383,6 +2436,8 @@ LRESULT CALLBACK WinProc(
 	case WM_KEYUP:
 	case WM_CUSTKEYUP:
 		{
+			LinkHotkeyRelease (wParam);
+
 			// Master hotkey key-up: reset hold timer
 			// (the static vars are in HandleKeyMessage, so we reset via a sentinel call)
 			if (GUI.MasterHotkeyEnabled && CustomKeys.MasterHotkey.key != 0
@@ -18364,6 +18419,17 @@ static hotkey_dialog_item hotkey_dialog_items[MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES
         { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
         { NULL, NULL, _T("") },
     },
+    // Tab 8: Input -> Barcodes, the Barcode Battler II's menu items.
+    {
+        { &CustomKeys.BarcodeConnect,   &CustomKeysExtra.BarcodeConnect,   HOTKEYS_BARCODE_CONNECT },
+        { &CustomKeys.BarcodeScan,      &CustomKeysExtra.BarcodeScan,      HOTKEYS_BARCODE_SCAN },
+        { &CustomKeys.BarcodeRescan,    &CustomKeysExtra.BarcodeRescan,    HOTKEYS_BARCODE_RESCAN },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+        { NULL, NULL, _T("") }, { NULL, NULL, _T("") }, { NULL, NULL, _T("") },
+    },
 };
 
 // Save States dedicated controls + their labels. Visible only on the Save States tab.
@@ -18441,6 +18507,40 @@ static const int g_hotkeyLabelIds[MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS] = {
 	IDC_LABEL_HK13, IDC_LABEL_HK14, IDC_LABEL_HK15, IDC_LABEL_HK16, IDC_LABEL_HK17, IDC_LABEL_HK18,
 };
 
+// The slots' columns, in dialog units: snes9x.rc's, except on the Barcodes
+// tab, whose labels need a wider left column. Only x and width move; the rows
+// keep StackHotkeyTabs' shift.
+static void LayoutHotkeyColumns(HWND hDlg, int tab)
+{
+	struct Column { int labelX, labelW, keyX; };
+	static const Column rc[2] = { { 10, 72, 86 }, { 205, 72, 281 } };
+	static const Column wide[2] = { { 10, 132, 146 }, { 210, 80, 294 } };
+	const Column *cols = tab == HOTKEY_TAB_BARCODES ? wide : rc;
+	const int rows = MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS / 2;
+
+	for (int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)
+	{
+		const Column &c = cols[i < rows ? 0 : 1];
+		RECT units = { c.labelX, 0, c.labelX + c.labelW, 0 };
+		MapDialogRect(hDlg, &units);
+		RECT key = { c.keyX, 0, c.keyX + 60, 0 };
+		MapDialogRect(hDlg, &key);
+
+		const struct { int id; int x, w; } moves[2] = {
+			{ g_hotkeyLabelIds[i],   units.left, units.right - units.left },
+			{ g_hotkeyControlIds[i], key.left,   key.right - key.left },
+		};
+		for (const auto &m : moves)
+		{
+			HWND hwnd = GetDlgItem(hDlg, m.id);
+			RECT r;
+			GetWindowRect(hwnd, &r);
+			MapWindowPoints(HWND_DESKTOP, hDlg, (LPPOINT)&r, 2);
+			SetWindowPos(hwnd, NULL, m.x, r.top, m.w, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+	}
+}
+
 static void set_hotkeyinfo(HWND hDlg, bool layoutChanged)
 {
 	int index = (int)SendDlgItemMessage(hDlg, IDC_HOTKEY_TABS, TCM_GETCURSEL, 0, 0);
@@ -18448,6 +18548,8 @@ static void set_hotkeyinfo(HWND hDlg, bool layoutChanged)
 		index = 0;
 
 	const bool savestates = (index == HOTKEY_TAB_SAVESTATES);
+	if (layoutChanged)
+		LayoutHotkeyColumns(hDlg, index);
 
 	// Generic IDC_HOTKEY slots: shown for every tab except States.
 	for (int i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_ITEMS; i++)
@@ -18572,7 +18674,7 @@ INT_PTR CALLBACK DlgHotkeyConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			tie.mask = TCIF_TEXT;
 			static TCHAR tabTexts[][24] = {
 				TEXT("Emulation"), TEXT("States"), TEXT("Turbo"), TEXT("Display && Tools"),
-				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc")
+				TEXT("SFC Box"), TEXT("Game Boy Model"), TEXT("Super System"), TEXT("Super Disc"), TEXT("Barcodes")
 			};
 			for (i = 0; i < MAX_SWITCHABLE_HOTKEY_DIALOG_PAGES; i++)
 			{

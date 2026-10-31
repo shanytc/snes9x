@@ -505,6 +505,9 @@ struct SCustomKeys {
 	SCustomKey SFCBoxMountEject[2];
 	SCustomKey SFCBoxPowerOff;       // keyswitch position 4 (added last: layout)
 	SCustomKey CopyScreenShot;       // screenshot to the clipboard
+	SCustomKey BarcodeConnect;       // Input -> Barcodes
+	SCustomKey BarcodeScan;
+	SCustomKey BarcodeRescan;
 };
 
 struct SCustomKeyExtra {
@@ -579,6 +582,9 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra SFCBoxMountEject[2];
 	SCustomKeyExtra SFCBoxPowerOff;
 	SCustomKeyExtra CopyScreenShot;
+	SCustomKeyExtra BarcodeConnect;
+	SCustomKeyExtra BarcodeScan;
+	SCustomKeyExtra BarcodeRescan;
 };
 
 struct SJoypad {

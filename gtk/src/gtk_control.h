@@ -149,7 +149,9 @@ enum {
     PORT_SFCBOX_TVGAME      = 84,
     PORT_SFCBOX_MOUNT0      = 85,
     // Super Famicom Box keyswitch position 4 (Power OFF), menu-only otherwise
-    PORT_SFCBOX_POWER_OFF   = 87
+    PORT_SFCBOX_POWER_OFF   = 87,
+    // Input -> Barcodes: Connect, Scan Barcode, Use Last Barcode Again
+    PORT_BARCODE0           = 88
 };
 
 typedef struct BindingLink
@@ -164,7 +166,7 @@ extern const int b_breaks[];
 const int NUM_JOYPAD_LINKS = 24;
 // Emulator-wide entries in b_links, after the NUM_JOYPAD_LINKS joypad ones; a
 // static_assert in gtk_control.cpp pins it to that table's real length.
-const int NUM_EMU_LINKS = 109;
+const int NUM_EMU_LINKS = 112;
 
 typedef struct JoypadBinding
 {

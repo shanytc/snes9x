@@ -384,6 +384,9 @@ int GetNumHotKeysAssignedTo (WORD Key, int modifiers)
 		if(MATCHES_KEY(SFCBoxPowerOff))    count++;
 		for(int i = 0 ; i < GB_MODEL_HOTKEYS ; i++)
 			if(MATCHES_KEY(GBModel[i]))         count++;
+		if(MATCHES_KEY(BarcodeConnect))    count++;
+		if(MATCHES_KEY(BarcodeScan))       count++;
+		if(MATCHES_KEY(BarcodeRescan))     count++;
 
 		#undef MATCHES_KEY
 	}

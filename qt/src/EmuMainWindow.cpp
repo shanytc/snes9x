@@ -1010,6 +1010,33 @@ void EmuMainWindow::nssToggleDip(int sw)
     refreshNSSDips();
 }
 
+// The Barcode Battler II is the reader a SNES game takes; a Game Boy game has none.
+static bool barcodeSnesGame(EmuApplication &app)
+{
+    return app.isCoreActive() && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
+}
+
+void EmuMainWindow::updateBarcodeActions()
+{
+    const bool snes = barcodeSnesGame(app);
+    const bool reads = snes && S9xBarcodeBattlerGameSupported();
+    barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
+    barcode_connect_action->setEnabled(snes);
+    barcode_scan_action->setEnabled(reads);
+    barcode_rescan_action->setEnabled(reads && *S9xBarcodeBattlerLastCode());
+}
+
+void EmuMainWindow::barcodeShortcut(const std::string &name)
+{
+    updateBarcodeActions();
+    QAction *action = name == "BarcodeConnect" ? barcode_connect_action
+                    : name == "BarcodeScan"    ? barcode_scan_action
+                    : name == "BarcodeRescan"  ? barcode_rescan_action
+                                               : nullptr;
+    if (action && action->isEnabled())
+        action->trigger();
+}
+
 bool EmuMainWindow::arcadeShortcut(const std::string &name)
 {
     static const char *keyswitch_keys[5] = {
@@ -1821,13 +1848,10 @@ void EmuMainWindow::createWidgets()
     // to a game that reads it.
     auto barcode_menu = input_menu->addMenu(tr("&Barcodes"));
     barcode_menu->installEventFilter(new StayOpenMenuFilter(barcode_menu));
-    auto barcode_snes_game = [this] {
-        return app.isCoreActive() && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
-    };
-    auto barcode_connect_action = barcode_menu->addAction(tr("&Connect"));
+    barcode_connect_action = barcode_menu->addAction(tr("&Connect"));
     barcode_connect_action->setCheckable(true);
-    QObject::connect(barcode_connect_action, &QAction::triggered, [barcode_connect_action, barcode_snes_game](bool checked) {
-        if (!barcode_snes_game())
+    QObject::connect(barcode_connect_action, &QAction::triggered, [this](bool checked) {
+        if (!barcodeSnesGame(app))
         {
             barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
             return;
@@ -1837,30 +1861,23 @@ void EmuMainWindow::createWidgets()
                                  : "Barcode Battler II disconnected");
     });
     // Modeless: the game runs on while cards are browsed and scanned.
-    auto barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
-    QObject::connect(barcode_scan_action, &QAction::triggered, [this, barcode_snes_game] {
+    barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
+    QObject::connect(barcode_scan_action, &QAction::triggered, [this] {
         if (!barcode_dialog)
-            barcode_dialog = std::make_unique<BarcodeBattlerDialog>(this, [barcode_snes_game] {
-                return barcode_snes_game() && S9xBarcodeBattlerGameSupported();
+            barcode_dialog = std::make_unique<BarcodeBattlerDialog>(this, [this] {
+                return barcodeSnesGame(app) && S9xBarcodeBattlerGameSupported();
             });
         barcode_dialog->show();
         barcode_dialog->raise();
         barcode_dialog->activateWindow();
     });
-    auto barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
-    QObject::connect(barcode_rescan_action, &QAction::triggered, [barcode_snes_game] {
+    barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
+    QObject::connect(barcode_rescan_action, &QAction::triggered, [this] {
         std::string code = S9xBarcodeBattlerLastCode();
-        if (barcode_snes_game() && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
+        if (barcodeSnesGame(app) && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerScan(code.c_str()))
             S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
     });
-    QObject::connect(barcode_menu, &QMenu::aboutToShow, [barcode_snes_game, barcode_connect_action, barcode_scan_action, barcode_rescan_action] {
-        const bool snes = barcode_snes_game();
-        const bool supported = snes && S9xBarcodeBattlerGameSupported();
-        barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
-        barcode_connect_action->setEnabled(snes);
-        barcode_scan_action->setEnabled(supported);
-        barcode_rescan_action->setEnabled(supported && *S9xBarcodeBattlerLastCode());
-    });
+    QObject::connect(barcode_menu, &QMenu::aboutToShow, this, &EmuMainWindow::updateBarcodeActions);
 
     QObject::connect(input_menu, &QMenu::aboutToShow, [&] {
         updatePortConfigurationMenu();

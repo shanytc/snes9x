@@ -164,7 +164,7 @@ static void CleanupBindingsForSlot(int joySlot)
 {
     bool isMulti = GUI.MultiBindingMode;
 
-    for (int pad = 0; pad < 16; pad++)
+    for (int pad = 0; pad < NUM_JOYPAD_BINDS; pad++)
     {
         // Process each button field with a macro
         #define CLEANUP(field) do { \

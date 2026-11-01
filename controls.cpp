@@ -47,7 +47,8 @@ using namespace	std;
 #define ONE_JUSTIFIER			11
 #define TWO_JUSTIFIERS			12
 #define MACSRIFLE				13
-#define NUMCTLS					14 // This must be LAST
+#define PACHINKO				14
+#define NUMCTLS					15 // This must be LAST
 
 #define POLL_ALL				NUMCTLS
 
@@ -62,6 +63,12 @@ using namespace	std;
 #define JUSTIFIER_SELECT		0x08
 
 #define MACSRIFLE_TRIGGER		0x01
+
+#define PACHINKO_STOP			0x01
+#define PACHINKO_STRONGER		0x02
+#define PACHINKO_WEAKER			0x04
+#define PACHINKO_DIAL_MAX		0x7f
+#define PACHINKO_REPEAT_DELAY	15	// frames a turn key is held before the dial moves every frame
 
 #define MAP_UNKNOWN				(-1)
 #define MAP_NONE				0
@@ -150,6 +157,14 @@ static struct
 	uint32				ID;
 	struct crosshair	crosshair;
 }	macsrifle;
+
+// Sunsoft Pachinko: an absolute dial (0 = at rest) that stays where it's turned, and the Stop button.
+static struct
+{
+	uint8				dial;
+	uint8				buttons;
+	uint8				hold;		// frames the turn keys have been held
+}	pachinko;
 
 static set<struct exemulti *>		exemultis;
 static set<uint32>					pollmap[NUMCTLS + 1];
@@ -352,6 +367,13 @@ static void DoMacsRifleLatch (int x, int y)
 	PPU.GunHLatch = (uint16) (x + 76);// + (int16) macsrifle.adjust_x;
 }
 
+// The Pachinko's 32 bits, first read in bit 31: Stop 9th, ID $E then $77, the dial inverted
+// and MSB first in the 26th-32nd (the games read it as ~bits & $7F).
+static uint32 PachinkoBits (void)
+{
+	return (0x000e7700 | ((pachinko.buttons & PACHINKO_STOP) ? 0x00800000 : 0) | (~pachinko.dial & PACHINKO_DIAL_MAX));
+}
+
 static int maptype (int t)
 {
 	switch (t)
@@ -364,6 +386,7 @@ static int maptype (int t)
 		case S9xButtonSuperscope:
 		case S9xButtonJustifier:
 		case S9xButtonMacsRifle:
+		case S9xButtonPachinko:
 		case S9xButtonCommand:
 		case S9xButtonPseudopointer:
 		case S9xButtonPort:
@@ -572,6 +595,10 @@ void S9xSetController (int port, enum controllers controller, int8 id1, int8 id2
 			newcontrollers[port] = MACSRIFLE;
 			return;
 
+		case CTL_PACHINKO:
+			newcontrollers[port] = PACHINKO;
+			return;
+
 		case CTL_MP5:
 			if (id1 < -1 || id1 > 7)
 				break;
@@ -695,6 +722,18 @@ bool S9xVerifyControllers (void)
 
 				break;
 
+			case PACHINKO:
+				if (used[i]++ > 0)
+				{
+					snprintf(buf, sizeof(buf), "Sunsoft Pachinko used more than once! Disabling extra instances");
+					S9xMessage(S9X_CONFIG_INFO, S9X_ERROR, buf);
+					newcontrollers[port] = NONE;
+					ret = true;
+					break;
+				}
+
+				break;
+
 			case MP5:
 				if (!Settings.MultiPlayer5Master)
 				{
@@ -801,6 +840,11 @@ void S9xGetController (int port, enum controllers *controller, int8 *id1, int8 *
 			*controller = CTL_MACSRIFLE;
 			*id1 = 1;
 			return;
+
+		case PACHINKO:
+			*controller = CTL_PACHINKO;
+			*id1 = 0;
+			return;
 	}
 }
 
@@ -875,6 +919,10 @@ void S9xReportControllers (void)
 					c += sprintf(c, "M.A.C.S. Rifle (cannot fire). ");
 				else
 					c += sprintf(c, "M.A.C.S. Rifle. ");
+				break;
+
+			case PACHINKO:
+				c += sprintf(c, "Sunsoft Pachinko. ");
 				break;
 		}
 	}
@@ -971,6 +1019,19 @@ char * S9xGetCommandName (s9xcommand_t command)
 
 			c = ' ';
 			if (command.button.macsrifle.trigger)	{ s += c; s += "Trigger"; c = '+'; }
+
+			break;
+
+		case S9xButtonPachinko:
+			if (!command.button.pachinko.stop && !command.button.pachinko.stronger && !command.button.pachinko.weaker)
+				return (strdup("None"));
+
+			s = "Pachinko";
+
+			c = ' ';
+			if (command.button.pachinko.stop    )	{ s += c; s += "Stop";     c = '+'; }
+			if (command.button.pachinko.stronger)	{ s += c; s += "Stronger"; c = '+'; }
+			if (command.button.pachinko.weaker  )	{ s += c; s += "Weaker";   c = '+'; }
 
 			break;
 
@@ -1327,6 +1388,21 @@ s9xcommand_t S9xGetCommandT (const char *name)
 			return (cmd);
 
 		cmd.type = S9xButtonMacsRifle;
+	}
+	else
+	if (!strncmp(name, "Pachinko ", 9))
+	{
+		s = name + 9;
+		i = 0;
+
+		if ((cmd.button.pachinko.stop     = strncmp(s, "Stop",     4) ? 0 : 1))	{ s += i = 4; if (*s == '+') s++; }
+		if ((cmd.button.pachinko.stronger = strncmp(s, "Stronger", 8) ? 0 : 1))	{ s += i = 8; if (*s == '+') s++; }
+		if ((cmd.button.pachinko.weaker   = strncmp(s, "Weaker",   6) ? 0 : 1))	{ s += i = 6; }
+
+		if (i == 0 || *s != 0 || *(s - 1) == '+')
+			return (cmd);
+
+		cmd.type = S9xButtonPachinko;
 	}
 	else
 	if (!strncmp(name, "Pointer ", 8))
@@ -1705,6 +1781,10 @@ bool S9xMapButton (uint32 id, s9xcommand_t mapping, bool poll)
 
 				case S9xButtonMacsRifle:
 					t = MACSRIFLE;
+					break;
+
+				case S9xButtonPachinko:
+					t = PACHINKO;
 					break;
 
 				case S9xButtonCommand:
@@ -2137,6 +2217,19 @@ void S9xApplyCommand (s9xcommand_t cmd, int16 data1, int16 data2)
 				macsrifle.buttons |= i;
 			else
 				macsrifle.buttons &= ~i;
+
+			return;
+
+		case S9xButtonPachinko:
+			i = 0;
+			if (cmd.button.pachinko.stop    )	i |= PACHINKO_STOP;
+			if (cmd.button.pachinko.stronger)	i |= PACHINKO_STRONGER;
+			if (cmd.button.pachinko.weaker  )	i |= PACHINKO_WEAKER;
+
+			if (data1)
+				pachinko.buttons |=  i;
+			else
+				pachinko.buttons &= ~i;
 
 			return;
 
@@ -2928,6 +3021,7 @@ void S9xSetJoypadLatch (bool latch)
 					break;
 
 				case MACSRIFLE:
+				case PACHINKO:
 					do_polling(i);
 					break;
 
@@ -3042,6 +3136,9 @@ uint8 S9xReadJOYSERn (int n)
 				do_polling(i);
 				return (bits | ((macsrifle.buttons & 0x01) ? 1 : 0));
 
+			case PACHINKO:
+				return (bits | (PachinkoBits() >> 31));
+
 			default:
 				return (bits);
 		}
@@ -3149,6 +3246,12 @@ uint8 S9xReadJOYSERn (int n)
 			case MACSRIFLE:
 				do_polling(i);
 				return (bits | ((macsrifle.buttons & 0x01) ? 1 : 0));
+
+			case PACHINKO:
+				if (read_idx[n][0] < 32)
+					return (bits | ((PachinkoBits() >> (31 - IncreaseReadIdxPost(read_idx[n][0]))) & 1));
+				IncreaseReadIdxPost(read_idx[n][0]);
+				return (bits | 1);
 
 			default:
 				IncreaseReadIdxPost(read_idx[n][0]);
@@ -3267,6 +3370,12 @@ void S9xDoAutoJoypad (void)
 				WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
 				break;
 
+			case PACHINKO:
+				read_idx[n][0] = 16;
+				WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, PachinkoBits() >> 16);
+				WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
+				break;
+
 			default:
 				WRITE_WORD(Memory.FillRAM + 0x4218 + n * 2, 0);
 				WRITE_WORD(Memory.FillRAM + 0x421c + n * 2, 0);
@@ -3380,6 +3489,24 @@ void S9xControlEOF (void)
 				}
 
 				break;
+
+			case PACHINKO:
+			{
+				// A turn key moves the dial one step, then every frame once held past the delay
+				const int turn = ((pachinko.buttons & PACHINKO_STRONGER) ? 1 : 0) - ((pachinko.buttons & PACHINKO_WEAKER) ? 1 : 0);
+				if (!turn)
+					pachinko.hold = 0;
+				else
+				{
+					const int dial = pachinko.dial + turn;
+					if ((pachinko.hold == 0 || pachinko.hold >= PACHINKO_REPEAT_DELAY) && dial >= 0 && dial <= PACHINKO_DIAL_MAX)
+						pachinko.dial = (uint8) dial;
+					if (pachinko.hold < PACHINKO_REPEAT_DELAY)
+						pachinko.hold++;
+				}
+
+				break;
+			}
 
 			default:
 				break;
@@ -3606,6 +3733,10 @@ void S9xControlPreSaveState (struct SControlSnapshot *s)
 
 	s->justifier_select = ((justifier.buttons & JUSTIFIER_SELECT) ? 1 : 0);
 
+	s->pachinko[0] = pachinko.dial;
+	s->pachinko[1] = pachinko.buttons;
+	s->pachinko[2] = pachinko.hold;
+
 #define COPY(x)	{ memcpy((char *) s->internal + i, &(x), sizeof(x)); i += sizeof(x); }
 
 	int	i = 0;
@@ -3683,6 +3814,10 @@ void S9xControlPostLoadState (struct SControlSnapshot *s)
 		justifier.buttons |=  JUSTIFIER_SELECT;
 	else
 		justifier.buttons &= ~JUSTIFIER_SELECT;
+
+	pachinko.dial    = s->pachinko[0] & PACHINKO_DIAL_MAX;
+	pachinko.buttons = s->pachinko[1];
+	pachinko.hold    = s->pachinko[2];
 
 	FLAG_LATCH = (Memory.FillRAM[0x4016] & 1) == 1;
 
@@ -3881,5 +4016,25 @@ void MovieSetMacsRifle (int i, uint8 in[5])
 	macsrifle.x = READ_WORD(ptr); ptr += 2;
 	macsrifle.y = READ_WORD(ptr); ptr += 2;
 	macsrifle.buttons = *ptr;
+}
+
+bool MovieGetPachinko (int i, uint8 out[2])
+{
+	if (i < 0 || i > 1 || curcontrollers[i] != PACHINKO)
+		return (false);
+
+	out[0] = pachinko.dial;
+	out[1] = pachinko.buttons;
+
+	return (true);
+}
+
+void MovieSetPachinko (int i, uint8 in[2])
+{
+	if (i < 0 || i > 1 || curcontrollers[i] != PACHINKO)
+		return;
+
+	pachinko.dial    = in[0] & PACHINKO_DIAL_MAX;
+	pachinko.buttons = in[1];
 }
 

@@ -234,7 +234,7 @@ HINSTANCE g_hInst;
 #include "../debug.h"
 #endif
 
-struct SJoypad Joypad[16] = {
+struct SJoypad Joypad[NUM_JOYPAD_BINDS] = {
     {
         true,					/* Joypad 1 enabled */
 			VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN,	/* Left, Right, Up, Down */
@@ -315,6 +315,7 @@ struct SJoypad Joypad[16] = {
 			{ false, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0 },/* Joypad 6 Turbo disabled */
 			{ false, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0 },/* Joypad 7 Turbo disabled */
 			{ false, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0 },/* Joypad 8 Turbo disabled */
+			{ true, 'Q', 0, 'E', 'W',  0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0 },/* Sunsoft Pachinko: Weaker, Stronger, Stop */
 };
 
 // stores on/off toggle info for each key of each controller
@@ -400,7 +401,7 @@ SJoypad TurboToggleJoypadStorage [8] = {
 			{ false, 0, 0, 0, 0,  0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0 },
 };
 
-SJoypadExtraBinds JoypadExtra[16] = {};
+SJoypadExtraBinds JoypadExtra[NUM_JOYPAD_BINDS] = {};
 
 struct SCustomKeysExtra CustomKeysExtra = {};
 
@@ -716,6 +717,8 @@ void ControllerOptionsFromControllers()
       GUI.ControllerOption = SNES_JUSTIFIER_2;
    else if (controller[0] == CTL_JOYPAD && controller[1] == CTL_MACSRIFLE)
       GUI.ControllerOption = SNES_MACSRIFLE;
+   else if (controller[0] == CTL_JOYPAD && controller[1] == CTL_PACHINKO)
+      GUI.ControllerOption = SNES_PACHINKO;
    else if (controller[0] == CTL_JOYPAD)
       GUI.ControllerOption = SNES_JOYPAD;
 
@@ -774,6 +777,10 @@ void ChangeInputDevice(void)
 		Settings.MacsRifleMaster = true;
 		S9xSetController(0, CTL_JOYPAD,     0, 0, 0, 0);
 		S9xSetController(1, CTL_MACSRIFLE,  0, 0, 0, 0);
+		break;
+	case SNES_PACHINKO:
+		S9xSetController(0, CTL_JOYPAD,     0, 0, 0, 0);
+		S9xSetController(1, CTL_PACHINKO,   0, 0, 0, 0);
 		break;
 	default:
 	case SNES_JOYPAD:
@@ -2697,6 +2704,15 @@ LRESULT CALLBACK WinProc(
 			MOVIE_LOCKED_SETTING
 			GUI.ControllerOption = SNES_MACSRIFLE;
 			ChangeInputDevice();
+			break;
+		case ID_INPUT_PACHINKO_CONNECT:
+			MOVIE_LOCKED_SETTING
+			if (!((1 << SNES_PACHINKO) & GUI.ValidControllerOptions))
+				break;
+			GUI.ControllerOption = GUI.ControllerOption == SNES_PACHINKO ? SNES_JOYPAD : SNES_PACHINKO;
+			ChangeInputDevice();
+			S9xSetInfoString(GUI.ControllerOption == SNES_PACHINKO ? "Sunsoft Pachinko connected to port 2"
+			                                                       : "Sunsoft Pachinko disconnected");
 			break;
 
 		// Barcodes: the Barcode Battler II on port 2, the reader a SNES game
@@ -5123,6 +5139,7 @@ enum
 	k_SS = 0x04000000,
 	k_LG = 0x08000000,
 	k_RF = 0x10000000,
+	k_PA = 0x20000000,
 
 	k_BT = 0x00100000,
 	k_PT = 0x00200000,
@@ -5263,6 +5280,10 @@ enum
 	kWinCMapLGun2Start,
 
 	kWinCMapMacsRifleTrigger  = k_HD | k_BT | k_RF | k_C1,
+
+	kWinCMapPachinkoStronger  = k_HD | k_BT | k_PA | k_C1,
+	kWinCMapPachinkoWeaker,
+	kWinCMapPachinkoStop,
 
 	kWinCMapMouse1Pointer     = k_HD | k_PT | k_MO | k_C1,
 	kWinCMapMouse2Pointer     = k_HD | k_PT | k_MO | k_C2,
@@ -5410,6 +5431,10 @@ void S9xSetupDefaultKeymap(void)
 
 	ASSIGN_BUTTONt(kWinCMapMacsRifleTrigger,  "MacsRifle Trigger");
 
+	ASSIGN_BUTTONf(kWinCMapPachinkoStronger,  "Pachinko Stronger");
+	ASSIGN_BUTTONf(kWinCMapPachinkoWeaker,    "Pachinko Weaker");
+	ASSIGN_BUTTONf(kWinCMapPachinkoStop,      "Pachinko Stop");
+
 	ASSIGN_POINTRt(kWinCMapMouse1Pointer,     "Pointer Mouse1");
 	ASSIGN_POINTRt(kWinCMapMouse2Pointer,     "Pointer Mouse2");
 	ASSIGN_POINTRt(kWinCMapSuperscopePointer, "Pointer Superscope");
@@ -5471,6 +5496,16 @@ static void ProcessInput(void)
 
 	if (GUI.ControllerOption==SNES_JUSTIFIER_2)
 		ControlPadFlagsToS9xPseudoPointer(joypads[1]);
+
+	if (GUI.ControllerOption == SNES_PACHINKO)
+	{
+		extern bool AnyBindPressed(WORD primary, const WORD* extra);
+		const SJoypad &pad = Joypad[PACHINKO_PAD];
+		const SJoypadExtraBinds &extra = JoypadExtra[PACHINKO_PAD];
+		S9xReportButton(kWinCMapPachinkoStronger, AnyBindPressed(pad.Up, extra.Up));
+		S9xReportButton(kWinCMapPachinkoWeaker,   AnyBindPressed(pad.Left, extra.Left));
+		S9xReportButton(kWinCMapPachinkoStop,     AnyBindPressed(pad.Down, extra.Down));
+	}
 }
 
 //static void WinDisplayString (const char *string, int linesFromBottom, int pixelsFromLeft, bool allowWrap);
@@ -7196,6 +7231,10 @@ static void CheckMenuStates ()
 	validFlag = (((1<<SNES_MACSRIFLE) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;
     mii.fState = validFlag | (GUI.ControllerOption == SNES_MACSRIFLE ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_MACSRIFLE_TOGGLE, FALSE, &mii);
+
+	validFlag = (((1<<SNES_PACHINKO) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;
+    mii.fState = validFlag | (GUI.ControllerOption == SNES_PACHINKO ? MFS_CHECKED : MFS_UNCHECKED);
+    SetMenuItemInfo (GUI.hMenu, ID_INPUT_PACHINKO_CONNECT, FALSE, &mii);
 
 	// Input > Barcodes: Connect with a SNES game loaded (the Barcode Battler II
 	// is a SNES device), Scan for a game that reads it.
@@ -15381,6 +15420,25 @@ INT_PTR CALLBACK DlgKailleraClient(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 
 void EnableDisableKeyFields (int index, HWND hDlg)
 {
+	// The Sunsoft Pachinko row keeps the first three fields and hides the rest of the pad
+	static const int kPadOnly[] = {
+		IDC_RIGHT, IDC_START, IDC_SELECT, IDC_A, IDC_B, IDC_X, IDC_Y, IDC_L, IDC_R,
+		IDC_UPLEFT, IDC_UPRIGHT, IDC_DWNLEFT, IDC_DWNRIGHT, IDC_JPTOGGLE,
+		IDC_LABEL_RIGHT, IDC_LABEL_START, IDC_LABEL_SELECT, IDC_LABEL_A, IDC_LABEL_B, IDC_LABEL_X, IDC_LABEL_Y,
+		IDC_LABEL_L, IDC_LABEL_R, IDC_LABEL_UPLEFT, IDC_LABEL_UPRIGHT, IDC_LABEL_DOWNLEFT, IDC_LABEL_DOWNRIGHT
+	};
+	const bool pachinko = (index == PACHINKO_PAD);
+	for (int id : kPadOnly)
+		ShowWindow(GetDlgItem(hDlg, id), pachinko ? SW_HIDE : SW_SHOW);
+	ShowWindow(GetDlgItem(hDlg, IDC_PACHINKO_NOTE), pachinko ? SW_SHOW : SW_HIDE);
+	if (pachinko)
+	{
+		SetDlgItemText(hDlg,IDC_LABEL_UP,INPUTCONFIG_LABEL_STRONGER);
+		SetDlgItemText(hDlg,IDC_LABEL_LEFT,INPUTCONFIG_LABEL_WEAKER);
+		SetDlgItemText(hDlg,IDC_LABEL_DOWN,INPUTCONFIG_LABEL_STOP);
+		return;
+	}
+
 	bool enableUnTurboable;
 	if(index < 5)
 	{
@@ -17551,7 +17609,7 @@ static void UpdateBindingMode(HWND hDlg, int index)
 }
 
 // Per-controller device pick from the device combo; -1 = derive from bindings
-static int s_deviceChoice[16] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+static int s_deviceChoice[NUM_JOYPAD_BINDS];
 
 // Helper: update device combo contents/selection and auto-assign button state
 static void UpdateDeviceInfo(HWND hDlg, int index)
@@ -17580,7 +17638,7 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 
 	// Preferred slot: user's pick for this controller, else the slot current bindings
 	// reference, else the controller index itself (turbo panels map to controller 0-4)
-	int prefer = (index >= 0 && index < 16) ? s_deviceChoice[index] : -1;
+	int prefer = (index >= 0 && index < NUM_JOYPAD_BINDS) ? s_deviceChoice[index] : -1;
 	if (prefer < 0)
 	{
 		WORD testKey = Joypad[index].A ? Joypad[index].A :
@@ -17591,7 +17649,7 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 	}
 	if (prefer < 0)
 	{
-		prefer = (index < 5) ? index : (index - 8);
+		prefer = (index == PACHINKO_PAD) ? 0 : (index < 5) ? index : (index - 8);
 		if (prefer < 0) prefer = 0;
 	}
 
@@ -17636,8 +17694,11 @@ static int s_hoverField = 0, s_markedField = 0;	// outlined: the field under the
 #define INPUT_PICTURE_TIMER 98
 
 // The binding field a pad picture shape stands for; turbo rows bind turbo modes in the d-pad slots.
+// The Pachinko row's shapes are PACHPIC_* instead.
 static int PadPicField(int mask)
 {
+	if (s_padPanelIndex == PACHINKO_PAD)
+		return mask == PACHPIC_STRONGER ? IDC_UP : mask == PACHPIC_WEAKER ? IDC_LEFT : mask == PACHPIC_STOP ? IDC_DOWN : 0;
 	if (s_padPanelIndex >= 8 && mask <= PADPIC_RIGHT)
 		return 0;
 	switch (mask)
@@ -17722,8 +17783,13 @@ static void DrawPadPictureLit(HWND hDlg)
 	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
 		if (InputPictureOutlined(PadPicField(button)))
 			outlined |= button;
-	const int style = s_panelSource == IDB_PAD_USA ? S9X_PADPIC_USA : s_panelSource == IDB_PAD_EUR ? S9X_PADPIC_EUROPE : S9X_PADPIC_JAPAN;
-	S9xPadPictureDraw(px.data(), w, h, w, (float) s_panelScale, style, s_padLit < 0 ? 0 : s_padLit, outlined);
+	if (s_panelSource == IDB_PACHINKO)
+		S9xPachinkoPictureDraw(px.data(), w, h, w, (float) s_panelScale, s_padLit < 0 ? 0 : s_padLit, outlined);
+	else
+	{
+		const int style = s_panelSource == IDB_PAD_USA ? S9X_PADPIC_USA : s_panelSource == IDB_PAD_EUR ? S9X_PADPIC_EUROPE : S9X_PADPIC_JAPAN;
+		S9xPadPictureDraw(px.data(), w, h, w, (float) s_panelScale, style, s_padLit < 0 ? 0 : s_padLit, outlined);
+	}
 
 	SetDIBits(screen, s_panelBitmap, 0, h, px.data(), &bi, DIB_RGB_COLORS);
 	ReleaseDC(hDlg, screen);
@@ -17750,6 +17816,11 @@ static int PadHeldButtons(int index)
 
 	int lit = 0;
 	#define PAD_HELD(field, bits) if (held(pad.field, extra.field)) lit |= (bits)
+	if (index == PACHINKO_PAD)
+	{
+		PAD_HELD(Up, PACHPIC_STRONGER); PAD_HELD(Left, PACHPIC_WEAKER); PAD_HELD(Down, PACHPIC_STOP);
+		return lit;
+	}
 	PAD_HELD(A, PADPIC_A); PAD_HELD(B, PADPIC_B); PAD_HELD(X, PADPIC_X); PAD_HELD(Y, PADPIC_Y);
 	PAD_HELD(L, PADPIC_L); PAD_HELD(R, PADPIC_R); PAD_HELD(Start, PADPIC_START); PAD_HELD(Select, PADPIC_SELECT);
 	if (index < 8)
@@ -17778,7 +17849,8 @@ static int InputPictureFieldAt(HWND hDlg, POINT pt)
 	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
 		if (PadPicField(button))
 			clickable |= button;
-	const int field = PadPicField(S9xPadPictureButtonAt(x, y, clickable));
+	const int button = s_panelSource == IDB_PACHINKO ? S9xPachinkoPictureButtonAt(x, y, clickable) : S9xPadPictureButtonAt(x, y, clickable);
+	const int field = PadPicField(button);
 	return field && IsWindowEnabled(GetDlgItem(hDlg, field)) ? field : 0;
 }
 
@@ -17877,12 +17949,13 @@ static void SetInputPicture(HWND hDlg, int bitmap)
 	DrawPadPictureLit(hDlg);
 }
 
-// The row's pad picture in the chosen controller style.
+// The row's pad picture in the chosen controller style, or the Sunsoft Pachinko.
 static void ShowInputPicture(HWND hDlg, int index)
 {
 	s_padPanelIndex = index;
 	s_padLit = -1;
-	const int source = !GUI.JapaneseController ? IDB_PAD_USA : GUI.EuropeanController ? IDB_PAD_EUR : IDB_PAD_SFC;
+	const int source = index == PACHINKO_PAD ? IDB_PACHINKO :
+	                   !GUI.JapaneseController ? IDB_PAD_USA : GUI.EuropeanController ? IDB_PAD_EUR : IDB_PAD_SFC;
 	if (source != s_panelSource)
 		SetInputPicture(hDlg, source);
 	else
@@ -17909,6 +17982,12 @@ static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM 
 	return DefSubclassProc(hWnd, msg, wParam, lParam);
 }
 
+// Controller list row -> Joypad[] index: pads 1-5, their turbo rows (8-12), then the Sunsoft Pachinko.
+static int InputConfigPadIndex(int row)
+{
+	return row == 10 ? PACHINKO_PAD : row > 4 ? row + 3 : row;
+}
+
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	TCHAR temp[256];
@@ -17917,8 +17996,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 	static int index=0;
 
 
-	static SJoypad pads[10];
-	static SJoypadExtraBinds padsExtra[10];
+	static SJoypad pads[NUM_JOYPAD_BINDS];
+	static SJoypadExtraBinds padsExtra[NUM_JOYPAD_BINDS];
 
 
 	//HBRUSH g_hbrBackground;
@@ -17949,14 +18028,15 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		SetDlgItemText(hDlg,IDC_LABEL_DOWNRIGHT,INPUTCONFIG_LABEL_DOWNRIGHT);
 		SetDlgItemText(hDlg,IDC_LABEL_DOWNLEFT,INPUTCONFIG_LABEL_DOWNLEFT);
 		SetDlgItemText(hDlg,IDC_LABEL_BLUE,INPUTCONFIG_LABEL_BLUE);
+		SetDlgItemText(hDlg,IDC_PACHINKO_NOTE,INPUTCONFIG_PACHINKO_NOTE);
 
 		for(i=5;i<10;i++)
 			Joypad[i].Left_Up = Joypad[i].Right_Up = Joypad[i].Left_Down = Joypad[i].Right_Down = 0;
 
-		memcpy(pads, Joypad, 10*sizeof(SJoypad));
-		memcpy(padsExtra, JoypadExtra, 10*sizeof(SJoypadExtraBinds));
+		memcpy(pads, Joypad, sizeof(pads));
+		memcpy(padsExtra, JoypadExtra, sizeof(padsExtra));
 
-		for(i=0;i<16;i++)
+		for(i=0;i<NUM_JOYPAD_BINDS;i++)
 			s_deviceChoice[i] = -1;
 
 		for( i=0;i<256;i++)
@@ -17974,7 +18054,10 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)(LPCTSTR)temp);
 		}
 
+		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)INPUTCONFIG_PACHINKO);
+
 		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)0,0);
+		index = 0;
 
 		SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 		SendDlgItemMessage(hDlg,IDC_ALLOWLEFTRIGHT,BM_SETCHECK, Settings.UpAndDown ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
@@ -18021,7 +18104,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
 		RECT big;
 		GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &big);
-		if ((HWND)wParam == hDlg && PtInRect(&big, pt))
+		if ((HWND)wParam == hDlg && PtInRect(&big, pt) && s_padPanelIndex != PACHINKO_PAD)
 		{
 			// 1 USA, 2 Europe, 3 Japan; Europe and Japan share the coloured buttons
 			const int style = !GUI.JapaneseController ? 1 : GUI.EuropeanController ? 2 : 3;
@@ -18054,7 +18137,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			SDLInput_Poll();
 			// Refresh device name and button bindings display
 			index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
-			if(index > 4) index += 3;
+			index = InputConfigPadIndex(index);
 			UpdateDeviceInfo(hDlg, index);
 			set_buttoninfo(index, hDlg);
 		}
@@ -18062,7 +18145,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 	case WM_USER+46:
 		// refresh command, for clicking away from a selected field
 		index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
-		if(index > 4) index += 3; // skip controllers 6, 7, and 8 in the input dialog
+		index = InputConfigPadIndex(index);
 		set_buttoninfo(index,hDlg);
 		return TRUE;
 	case WM_USER+43:
@@ -18136,8 +18219,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		case IDCANCEL:
 			KillTimer(hDlg, 99);
 			s_inputConfigHwnd = NULL;
-			memcpy(Joypad, pads, 10*sizeof(SJoypad));
-			memcpy(JoypadExtra, padsExtra, 10*sizeof(SJoypadExtraBinds));
+			memcpy(Joypad, pads, sizeof(pads));
+			memcpy(JoypadExtra, padsExtra, sizeof(padsExtra));
 			EndDialog(hDlg,0);
 			break;
 
@@ -18157,14 +18240,14 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		case IDC_JPTOGGLE: // joypad Enable toggle
 			index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
-			if(index > 4) index += 3; // skip controllers 6, 7, and 8 in the input dialog
+			index = InputConfigPadIndex(index);
 			Joypad[index].Enabled=IsDlgButtonChecked(hDlg,IDC_JPTOGGLE);
 			set_buttoninfo(index, hDlg); // update display of conflicts
 			break;
 
 		case IDC_ALLOWMULTIBIND: // binding Enabled toggle
 			index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
-			if(index > 4) index += 3;
+			index = InputConfigPadIndex(index);
 			UpdateBindingMode(hDlg, index);
 			break;
 
@@ -18172,7 +18255,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			if(HIWORD(wParam) == CBN_SELCHANGE)
 			{
 				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
-				if(index > 4) index += 3;
+				index = InputConfigPadIndex(index);
 				UpdateBindingMode(hDlg, index);
 			}
 			break;
@@ -18181,10 +18264,10 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			if(HIWORD(wParam) == CBN_SELCHANGE)
 			{
 				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
-				if(index > 4) index += 3;
+				index = InputConfigPadIndex(index);
 				int sel = SendDlgItemMessage(hDlg,IDC_DEVICECOMBO,CB_GETCURSEL,0,0);
 				int slot = (sel >= 0) ? (int)SendDlgItemMessage(hDlg,IDC_DEVICECOMBO,CB_GETITEMDATA,sel,0) : -1;
-				if (slot >= 0 && index >= 0 && index < 16)
+				if (slot >= 0 && index >= 0 && index < NUM_JOYPAD_BINDS)
 				{
 					s_deviceChoice[index] = slot;
 					EnableWindow(GetDlgItem(hDlg,IDC_AUTOASSIGN), SDLInput_IsGamepad(slot) ? TRUE : FALSE);
@@ -18195,7 +18278,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		case IDC_AUTOASSIGN: // Auto-assign gamepad buttons
 			{
 				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
-				if(index > 4) index += 3;
+				index = InputConfigPadIndex(index);
 
 				// Auto-assign from the device selected in the device combo
 				int sel = SendDlgItemMessage(hDlg,IDC_DEVICECOMBO,CB_GETCURSEL,0,0);
@@ -18209,6 +18292,17 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 				if (SDLInput_AutoMapGamepad(checkSlot, Joypad[index]))
 				{
+					// The Pachinko: the shoulders turn the dial, A (where its own button reads) is Stop
+					if (index == PACHINKO_PAD)
+					{
+						const SJoypad mapped = Joypad[index];
+						memset(&Joypad[index], 0, sizeof(SJoypad));
+						Joypad[index].Enabled = TRUE;
+						Joypad[index].Up = mapped.R;
+						Joypad[index].Left = mapped.L;
+						Joypad[index].Down = mapped.A;
+					}
+
 					bool isMulti = GUI.MultiBindingMode;
 
 					// Helper: for each button, preserve old keyboard bindings as extras
@@ -18246,13 +18340,13 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 				if(LOWORD(wParam) != IDC_JPCOMBO) break;
 				index = SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_GETCURSEL,0,0);
 				SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_SETCURSEL,(WPARAM)index,0);
-				if(index > 4) index += 3; // skip controllers 6, 7, and 8 in the input dialog
+				index = InputConfigPadIndex(index);
 				if(index < 8)
 				{
 					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 					EnableWindow(GetDlgItem(hDlg,IDC_JPTOGGLE),TRUE);
 				}
-				else
+				else if(index != PACHINKO_PAD)	// the Pachinko row hides it
 				{
 					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index-8].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 					EnableWindow(GetDlgItem(hDlg,IDC_JPTOGGLE),FALSE);

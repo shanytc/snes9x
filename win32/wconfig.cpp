@@ -1216,6 +1216,13 @@ void WinRegisterConfigItems()
 #define ADDGUID(n) AddAStringC("Joypad" #n ":DeviceGUID", GUI.JoypadGUID[n-1], 64, "", "SDL device GUID for controller identity persistence")
 	ADDGUID(1); ADDGUID(2); ADDGUID(3); ADDGUID(4); ADDGUID(5); ADDGUID(6); ADDGUID(7); ADDGUID(8);
 #undef ADDGUID
+	// Sunsoft Pachinko (Joypad[PACHINKO_PAD]: Up = Stronger, Left = Weaker, Down = Stop)
+#define ADDP(x,n) AddVKey("Pachinko:" #n, Joypad[PACHINKO_PAD].x, Joypad[PACHINKO_PAD].x); \
+	AddVKey("Pachinko:" #n ":Extra1", JoypadExtra[PACHINKO_PAD].x[0], JoypadExtra[PACHINKO_PAD].x[0]); \
+	AddVKey("Pachinko:" #n ":Extra2", JoypadExtra[PACHINKO_PAD].x[1], JoypadExtra[PACHINKO_PAD].x[1]); \
+	AddVKey("Pachinko:" #n ":Extra3", JoypadExtra[PACHINKO_PAD].x[2], JoypadExtra[PACHINKO_PAD].x[2])
+	ADDP(Up,Stronger); ADDP(Left,Weaker); ADDP(Down,Stop);
+#undef ADDP
 	AddBool2C("Input:Background", GUI.BackgroundInput, false, "on to detect game keypresses and hotkeys while window is inactive, if PauseWhenInactive = FALSE.");
 	AddBool2C("Input:EnableRumble", GUI.EnableRumble, true, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad.");
 	AddBool2C("Input:BackgroundKeyHotkeys", GUI.BackgroundKeyHotkeys, true, "on to also detect keyboard hotkeys when backgroundinput is active");

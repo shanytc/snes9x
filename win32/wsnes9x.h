@@ -678,8 +678,14 @@ enum
 	SNES_MULTIPLAYER8,
 	SNES_JUSTIFIER_2,
 	SNES_MACSRIFLE,
+	SNES_PACHINKO,
 	SNES_MAX_CONTROLLER_OPTIONS
 };
+
+// Joypad[]: pads 1-8, their turbo rows (8-15), then the Sunsoft Pachinko's bindings,
+// with Up = Stronger, Left = Weaker and Down = Stop.
+#define PACHINKO_PAD		16
+#define NUM_JOYPAD_BINDS	17
 
 /*****************************************************************************/
 
@@ -687,10 +693,10 @@ void SetInfoDlgColor(unsigned char r, unsigned char g, unsigned char b);
 
 extern struct sGUI GUI;
 extern struct sLanguages Languages[];
-extern struct SJoypad Joypad[16];
+extern struct SJoypad Joypad[NUM_JOYPAD_BINDS];
 extern struct SJoypad ToggleJoypadStorage[8];
 extern struct SJoypad TurboToggleJoypadStorage[8];
-extern struct SJoypadExtraBinds JoypadExtra[16];
+extern struct SJoypadExtraBinds JoypadExtra[NUM_JOYPAD_BINDS];
 extern struct SCustomKeys CustomKeys;
 extern struct SCustomKeysExtra CustomKeysExtra;
 

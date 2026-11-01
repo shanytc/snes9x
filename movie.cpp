@@ -217,6 +217,9 @@ static int bytes_per_sample (void)
 		else
 		if (Movie.PortType[p] == CTL_JUSTIFIER)
 			bytes += JUSTIFIER_DATA_SIZE;
+		else
+		if (Movie.PortType[p] == CTL_PACHINKO)
+			bytes += PACHINKO_DATA_SIZE;
 	}
 
 	return (bytes);
@@ -250,11 +253,15 @@ static void reset_controllers (void)
 	uint8 clearedJustifier[JUSTIFIER_DATA_SIZE];
 	memset(clearedJustifier, 0, JUSTIFIER_DATA_SIZE);
 
+	uint8 clearedPachinko[PACHINKO_DATA_SIZE];
+	memset(clearedPachinko, 0, PACHINKO_DATA_SIZE);
+
 	for (int p = 0; p < 2; p++)
 	{
 		MovieSetMouse(p, clearedMouse, true);
 		MovieSetScope(p, clearedScope);
 		MovieSetJustifier(p, clearedJustifier);
+		MovieSetPachinko(p, clearedPachinko);
 	}
 }
 
@@ -314,6 +321,14 @@ static void read_frame_controller_data (bool addFrame)
 			Movie.InputBufferPtr += JUSTIFIER_DATA_SIZE;
 			MovieSetJustifier(p, buf);
 		}
+		else
+		if (Movie.PortType[p] == CTL_PACHINKO)
+		{
+			uint8 buf[PACHINKO_DATA_SIZE];
+			memcpy(buf, Movie.InputBufferPtr, PACHINKO_DATA_SIZE);
+			Movie.InputBufferPtr += PACHINKO_DATA_SIZE;
+			MovieSetPachinko(p, buf);
+		}
 	}
 }
 
@@ -353,6 +368,14 @@ static void write_frame_controller_data (void)
 			MovieGetJustifier(p, buf);
 			memcpy(Movie.InputBufferPtr, buf, JUSTIFIER_DATA_SIZE);
 			Movie.InputBufferPtr += JUSTIFIER_DATA_SIZE;
+		}
+		else
+		if (Movie.PortType[p] == CTL_PACHINKO)
+		{
+			uint8 buf[PACHINKO_DATA_SIZE];
+			MovieGetPachinko(p, buf);
+			memcpy(Movie.InputBufferPtr, buf, PACHINKO_DATA_SIZE);
+			Movie.InputBufferPtr += PACHINKO_DATA_SIZE;
 		}
 	}
 }

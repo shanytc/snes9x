@@ -44,4 +44,19 @@ void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int
 // premultiplied 0xAARRGGBB out. The outline's soft edge becomes black ink, the L and R labels `label`.
 void S9xPadPictureMatte (uint32_t *px, int stride, uint32_t label);
 
+// The Sunsoft Pachinko controller's picture (win32/rsrc/pachinko.bmp): the dial's right half turns
+// it stronger, the left half weaker, and the centre stands for the Stop button.
+#define S9X_PACHINKOPIC_WIDTH	357
+#define S9X_PACHINKOPIC_HEIGHT	360
+
+enum
+{
+	PACHPIC_STRONGER = 1 << 0, PACHPIC_WEAKER = 1 << 1, PACHPIC_STOP = 1 << 2,
+	PACHPIC_ALL = (1 << 3) - 1
+};
+
+// As S9xPadPictureButtonAt and S9xPadPictureDraw, for the Pachinko picture.
+int S9xPachinkoPictureButtonAt (float x, float y, int allowed, float slack = 8.0f);
+void S9xPachinkoPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int lit, int outlined, bool premultiplied = false);
+
 #endif

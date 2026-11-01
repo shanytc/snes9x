@@ -3261,6 +3261,16 @@ static void DisplayPressedKeys (void)
 				break;
 			}
 
+			case CTL_PACHINKO:
+			{
+				uint8 buf[2];
+				if (!MovieGetPachinko(port, buf))
+					break;
+				sprintf(string, "#%d Pachinko: dial %03d %s", port + 1, buf[0], (buf[1] & 0x01) ? "Stop" : "");
+				S9xDisplayStringType(string, line++, 1, false, S9X_PRESSED_KEYS_INFO);
+				break;
+			}
+
 			case CTL_JOYPAD:
 			{
 				sprintf(string, "#%d %d:                  ", port + 1, ids[0] + 1);

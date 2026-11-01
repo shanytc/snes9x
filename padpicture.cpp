@@ -13,7 +13,9 @@ namespace
 {
 
 // Each button's shape in source pixels, traced from the pictures. n == 1: a circle (centre,
-// radius); n == 0: a capsule (end centres, radius); else a polygon of n points.
+// radius); n == 0: a capsule (end centres, radius); n == -1: a ring sector (centre, inner and
+// outer radius, start and end angle in degrees clockwise from +x, at most 180 apart); else a
+// polygon of n points.
 struct PadPicShape { int button; int n; float pt[16][2]; };
 
 const PadPicShape kPadPicShapes[] =
@@ -37,6 +39,14 @@ const PadPicShape kPadPicShapes[] =
 	{ PADPIC_START,  0, { { 397.5f, 222.8f }, { 431.9f, 196.5f }, { 10.5f } } }
 };
 
+// The Pachinko dial's halves around the emblem, which stands for Stop.
+const PadPicShape kPachinkoPicShapes[] =
+{
+	{ PACHPIC_STRONGER, -1, { { 200.7f, 207.7f }, { 92.6f, 147.8f }, { -90.0f, 90.0f } } },
+	{ PACHPIC_WEAKER,   -1, { { 200.7f, 207.7f }, { 92.6f, 147.8f }, { 90.0f, 270.0f } } },
+	{ PACHPIC_STOP,      1, { { 199.6f, 197.4f }, { 81.9f } } }
+};
+
 struct PadPicColour { int r, g, b; };
 
 float PadPicSegmentDistance (float x, float y, const float *a, const float *b)
@@ -54,6 +64,29 @@ float PadPicDistance (const PadPicShape &b, float x, float y)
 		return hypotf(x - b.pt[0][0], y - b.pt[0][1]) - b.pt[1][0];
 	if (b.n == 0)
 		return PadPicSegmentDistance(x, y, b.pt[0], b.pt[1]) - b.pt[2][0];
+	if (b.n == -1)
+	{
+		// Within the angles the nearest edge is an arc; outside them, one of the radial edges
+		const float cx = b.pt[0][0], cy = b.pt[0][1], r0 = b.pt[1][0], r1 = b.pt[1][1];
+		const float a0 = b.pt[2][0], a1 = b.pt[2][1];
+		const float r = hypotf(x - cx, y - cy);
+		float a = atan2f(y - cy, x - cx) * 57.29578f;
+		while (a < a0)
+			a += 360.0f;
+		while (a >= a0 + 360.0f)
+			a -= 360.0f;
+		if (a <= a1)
+			return (std::max)(r0 - r, r - r1);
+
+		float d = 1e9f;
+		for (const float e : { a0, a1 })
+		{
+			const float c = cosf(e / 57.29578f), s = sinf(e / 57.29578f);
+			const float in[2] = { cx + r0 * c, cy + r0 * s }, out[2] = { cx + r1 * c, cy + r1 * s };
+			d = (std::min)(d, PadPicSegmentDistance(x, y, in, out));
+		}
+		return d;
+	}
 
 	float d = 1e9f;
 	bool inside = false;
@@ -84,13 +117,11 @@ bool PadPicFaceColour (int button, int style, PadPicColour &c)
 	return false;
 }
 
-}
-
-int S9xPadPictureButtonAt (float x, float y, int allowed, float slack)
+template <size_t N> int PadPicButtonAt (const PadPicShape (&shapes)[N], float x, float y, int allowed, float slack)
 {
 	int button = 0;
 	float nearest = slack;
-	for (const PadPicShape &b : kPadPicShapes)
+	for (const PadPicShape &b : shapes)
 	{
 		if (!(allowed & b.button))
 			continue;
@@ -104,10 +135,59 @@ int S9xPadPictureButtonAt (float x, float y, int allowed, float slack)
 	return button;
 }
 
+// Lights (`on`) and/or rings (`ring` display pixels wide) one shape over the scaled picture.
+void PadPicDrawShape (const PadPicShape &b, uint32_t *px, int w, int h, int stride, float s, bool on, float ring,
+                      const PadPicColour &fill, const PadPicColour &rim, float fillAlpha, float rimWidth, bool premultiplied)
+{
+	const PadPicColour outline = { 255, 200, 0 };
+
+	float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+	const float r = b.n == 1 ? b.pt[1][0] : b.n == 0 ? b.pt[2][0] : b.n == -1 ? b.pt[1][1] : 0;
+	for (int i = 0; i < (b.n == 1 || b.n == -1 ? 1 : b.n == 0 ? 2 : b.n); i++)
+	{
+		x0 = (std::min)(x0, b.pt[i][0] - r);
+		y0 = (std::min)(y0, b.pt[i][1] - r);
+		x1 = (std::max)(x1, b.pt[i][0] + r);
+		y1 = (std::max)(y1, b.pt[i][1] + r);
+	}
+	const int left = (std::max)(0, (int) (x0 * s) - 3), top = (std::max)(0, (int) (y0 * s) - 3);
+	const int right = (std::min)(w - 1, (int) (x1 * s) + 3), bottom = (std::min)(h - 1, (int) (y1 * s) + 3);
+
+	for (int y = top; y <= bottom; y++)
+		for (int x = left; x <= right; x++)
+		{
+			int inFill = 0, inRim = 0, inRing = 0;
+			for (int sy = 0; sy < 4; sy++)
+				for (int sx = 0; sx < 4; sx++)
+				{
+					const float d = PadPicDistance(b, (x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
+					if (d >= 0)
+						inRing += (d < ring);
+					else if (on)
+						(d < -rimWidth ? inFill : inRim)++;
+				}
+			if (!inFill && !inRim && !inRing)
+				continue;
+
+			const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cg = inRing / 16.0f, cb = 1.0f - cf - cr - cg;
+			uint32_t &c = px[y * stride + x];
+			const int blue = (int) ((c & 0xff) * cb + fill.b * cf + rim.b * cr + outline.b * cg + 0.5f);
+			const int green = (int) (((c >> 8) & 0xff) * cb + fill.g * cf + rim.g * cr + outline.g * cg + 0.5f);
+			const int red = (int) (((c >> 16) & 0xff) * cb + fill.r * cf + rim.r * cr + outline.r * cg + 0.5f);
+			const uint32_t alpha = premultiplied ? (uint32_t) ((c >> 24) * cb + 255 * (1.0f - cb) + 0.5f) << 24 : c & 0xff000000;
+			c = alpha | (red << 16) | (green << 8) | blue;
+		}
+}
+
+}
+
+int S9xPadPictureButtonAt (float x, float y, int allowed, float slack)
+{
+	return PadPicButtonAt(kPadPicShapes, x, y, allowed, slack);
+}
+
 void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int style, int lit, int outlined, bool premultiplied)
 {
-	const float s = scale;
-	const PadPicColour outline = { 255, 200, 0 };
 	for (const PadPicShape &b : kPadPicShapes)
 	{
 		const bool on = (lit & b.button) != 0;
@@ -125,42 +205,29 @@ void S9xPadPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int
 		else
 			fill = { 80, 170, 255 }, rim = { 40, 130, 230 }, fillAlpha = 120 / 255.0f, rimWidth = 2.0f;
 
-		float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-		const float r = b.n == 1 ? b.pt[1][0] : b.n == 0 ? b.pt[2][0] : 0;
-		for (int i = 0; i < (b.n == 1 ? 1 : b.n == 0 ? 2 : b.n); i++)
-		{
-			x0 = (std::min)(x0, b.pt[i][0] - r);
-			y0 = (std::min)(y0, b.pt[i][1] - r);
-			x1 = (std::max)(x1, b.pt[i][0] + r);
-			y1 = (std::max)(y1, b.pt[i][1] + r);
-		}
-		const int left = (std::max)(0, (int) (x0 * s) - 3), top = (std::max)(0, (int) (y0 * s) - 3);
-		const int right = (std::min)(w - 1, (int) (x1 * s) + 3), bottom = (std::min)(h - 1, (int) (y1 * s) + 3);
+		PadPicDrawShape(b, px, w, h, stride, scale, on, ring, fill, rim, fillAlpha, rimWidth, premultiplied);
+	}
+}
 
-		for (int y = top; y <= bottom; y++)
-			for (int x = left; x <= right; x++)
-			{
-				int inFill = 0, inRim = 0, inRing = 0;
-				for (int sy = 0; sy < 4; sy++)
-					for (int sx = 0; sx < 4; sx++)
-					{
-						const float d = PadPicDistance(b, (x + (sx + 0.5f) / 4) / s, (y + (sy + 0.5f) / 4) / s) * s;
-						if (d >= 0)
-							inRing += (d < ring);
-						else if (on)
-							(d < -rimWidth ? inFill : inRim)++;
-					}
-				if (!inFill && !inRim && !inRing)
-					continue;
+int S9xPachinkoPictureButtonAt (float x, float y, int allowed, float slack)
+{
+	return PadPicButtonAt(kPachinkoPicShapes, x, y, allowed, slack);
+}
 
-				const float cf = inFill / 16.0f * fillAlpha, cr = inRim / 16.0f, cg = inRing / 16.0f, cb = 1.0f - cf - cr - cg;
-				uint32_t &c = px[y * stride + x];
-				const int blue = (int) ((c & 0xff) * cb + fill.b * cf + rim.b * cr + outline.b * cg + 0.5f);
-				const int green = (int) (((c >> 8) & 0xff) * cb + fill.g * cf + rim.g * cr + outline.g * cg + 0.5f);
-				const int red = (int) (((c >> 16) & 0xff) * cb + fill.r * cf + rim.r * cr + outline.r * cg + 0.5f);
-				const uint32_t alpha = premultiplied ? (uint32_t) ((c >> 24) * cb + 255 * (1.0f - cb) + 0.5f) << 24 : c & 0xff000000;
-				c = alpha | (red << 16) | (green << 8) | blue;
-			}
+void S9xPachinkoPictureDraw (uint32_t *px, int w, int h, int stride, float scale, int lit, int outlined, bool premultiplied)
+{
+	for (const PadPicShape &b : kPachinkoPicShapes)
+	{
+		const bool on = (lit & b.button) != 0;
+		const float ring = (outlined & b.button) ? 2.0f : 0.0f;
+		if (!on && !ring)
+			continue;
+
+		// The dial a blue tint, Stop a red one, both see-through so the drawing shows
+		const bool stop = b.button == PACHPIC_STOP;
+		const PadPicColour fill = stop ? PadPicColour { 230, 60, 60 } : PadPicColour { 80, 170, 255 };
+		const PadPicColour rim = stop ? PadPicColour { 190, 40, 40 } : PadPicColour { 40, 130, 230 };
+		PadPicDrawShape(b, px, w, h, stride, scale, on, ring, fill, rim, 120 / 255.0f, 2.0f, premultiplied);
 	}
 }
 

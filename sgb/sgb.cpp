@@ -4098,7 +4098,14 @@ bool S9xSGBInit(void)               { return SGB::Instance().Init(); }
 namespace {
 
 std::unique_ptr<SGB::Emulator> g_split_cores[SGB_MAX_LINK_PLAYERS - 1];
-int g_split_players = 0;   // seats including the primary; 0 = off
+int g_split_players = 0;   // places at the table, the primary's included; 0 = off
+// The table has had a DMG-07 on it: it keeps the adapter down to two players,
+// whose emptied places are unplugged ports. A table that started on the direct
+// cable moves to the adapter when a third player joins.
+bool g_split_hub = false;
+// A player who got up mid-game: their Game Boy stays on the cable, unattended,
+// until the game lets go of the link (S9xSGBSplitReleaseGhosts).
+bool g_split_ghost[SGB_MAX_LINK_PLAYERS - 1] = {};
 bool g_ir_facing = false;  // players 1 and 2 face each other's infrared port
 bool g_kiss_facing = false; // ... and each other's HuC1/HuC3 cart LED (GB KISS)
 
@@ -4272,17 +4279,15 @@ const uint8_t *SplitShadesAt(int i, int age, uint32_t *frame_no)
 	return g_split_snap_shades[i][h];
 }
 
-// Seat order is player order: an external seat whose machine has not loaded
-// yet holds its place as null so the cable index stays the player number.
+// Seat order is player order: a place without a Game Boy - an external seat
+// whose machine has not loaded yet, or a seat that left the table - holds it
+// as null so the cable index stays the player number.
 int SplitCollect(SGB::Emulator *out[SGB_MAX_LINK_PLAYERS])
 {
 	int n = 0;
 	out[n++] = &SGB::Instance();
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
-	{
-		if (g_split_cores[k])           out[n++] = g_split_cores[k].get();
-		else if (g_split_external[k])   out[n++] = g_split_external_core[k];
-	}
+		out[n++] = SeatCore(k);
 	return n;
 }
 
@@ -4308,27 +4313,51 @@ void SplitAttachIr(void)
 }
 
 // Wire the cable across every live core. Session start and checkpoint
-// restore both go through here so the cable comes up identically.
-void SplitAttachLink(void)
+// restore both go through here so the cable comes up identically (fresh);
+// a seat joining or leaving re-plugs it instead, the rest playing on.
+void SplitAttachLink(bool fresh)
 {
 	SplitAttachIr();
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
-	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS];
-	SGB::Memory   *mm[SGB_MAX_LINK_PLAYERS];
+	SGB::Serial   *ss[SGB_MAX_LINK_PLAYERS] = {};
+	SGB::Memory   *mm[SGB_MAX_LINK_PLAYERS] = {};
 	const int n = SplitCollect(cs);
+	int present = 0;
 	for (int i = 0; i < n; ++i)
 	{
-		// An external seat whose machine has not loaded yet has no core:
-		// the cable stays unplugged until every slot has one. Wiring the
-		// empty slot to the master's own port made the master its own link
-		// partner, and a transfer waited on itself forever.
-		if (!cs[i]) { SGB::SerialSplitDetach(); return; }
+		if (!cs[i])
+		{
+			// An external seat whose machine has not loaded yet has no core:
+			// the cable stays unplugged until every slot has one. Wiring the
+			// empty slot to the master's own port made the master its own link
+			// partner, and a transfer waited on itself forever.
+			if (SplitPosExternal(i)) { SGB::SerialSplitDetach(); return; }
+			continue;   // a seat that left: an empty port
+		}
 		ss[i] = &cs[i]->DebugImpl()->serial;
 		mm[i] = &cs[i]->DebugImpl()->mem;
+		++present;
 	}
+	if (present < 2) { SGB::SerialSplitDetach(); return; }
+
 	// Adapter-only games ride the DMG-07 even as a 2-seat split; five
 	// seats up is reachable only for Faceball and wires its ring cable.
-	SGB::SerialSplitAttach(ss, mm, n, n == 2 && S9xSGBCartNeedsDmg07(), n >= 5);
+	// A third player puts the adapter on the table for good: down to two
+	// players again, the emptied places are its unplugged ports.
+	const bool ring = present >= 5;
+	if (present > 2 || S9xSGBCartNeedsDmg07()) g_split_hub = true;
+
+	// The adapter takes the places as they are, empty ports and all; the
+	// ring and the direct cable join only the consoles present.
+	int count = n;
+	if (ring || !g_split_hub || n > 4)
+	{
+		count = 0;
+		for (int i = 0; i < n; ++i)
+			if (ss[i]) { ss[count] = ss[i]; mm[count] = mm[i]; ++count; }
+	}
+	if (fresh) SGB::SerialSplitAttach(ss, mm, count, g_split_hub, ring);
+	else       SGB::SerialSplitReplug(ss, mm, count, g_split_hub, ring);
 }
 
 // Faceball 15-player test mode: one shared pad for seats 5+ (see sgb.h).
@@ -4655,7 +4684,11 @@ static void SplitStaggerSeats(void)
 	g_master_handoff_t = -1;
 	// In BIOS mode only a seat mirroring the master spends it, when the hold
 	// at the cart's first instruction lets go (SplitRunSeatsSlaved).
-	if (S9xSGBSplitPlayers() != 2 || S9xSGBCartNeedsDmg07()) return;
+	// Two consoles on the direct cable, player 2 in place (its core or its
+	// machine's); a table on the DMG-07 is never staggered.
+	if (S9xSGBSplitPresentPlayers() != 2 || g_split_hub || S9xSGBCartNeedsDmg07() ||
+	    !(g_split_cores[0] || g_split_external[0]))
+		return;
 	g_seat_head_start_due[0] = true;
 }
 
@@ -4800,7 +4833,7 @@ size_t S9xSGBSplitStateSize(void)
 	if (g_split_players < 2) return 0;
 	size_t n = 8;   // seat count + reserved
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
-		if (g_split_cores[k]) n += 4 + g_split_cores[k]->StateSize();
+		n += 4 + (g_split_cores[k] ? g_split_cores[k]->StateSize() : 0);
 	return n;
 }
 
@@ -4816,9 +4849,16 @@ bool S9xSGBSplitStateSave(uint8_t *buf, size_t cap)
 	size_t p = 8;
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
+		// An empty place saves as size 0; a machine seat's console is not ours to save.
 		SGB::Emulator *core = g_split_cores[k].get();
-		if (!core) return false;
-		const uint32_t sz = (uint32_t)core->StateSize();
+		if (!core && SeatExternal(k)) return false;
+		const uint32_t sz = core ? (uint32_t)core->StateSize() : 0;
+		if (!core)
+		{
+			std::memcpy(buf + p, &sz, 4);
+			p += 4;
+			continue;
+		}
 		std::memcpy(buf + p, &sz, 4);
 		p += 4;
 		core->StateSave(buf + p);
@@ -4839,18 +4879,21 @@ bool S9xSGBSplitStateLoad(const uint8_t *buf, size_t size)
 	size_t p = 8;
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
+		// Every place must be taken or empty as it was at the capture.
 		SGB::Emulator *core = g_split_cores[k].get();
-		if (!core || p + 4 > size) return false;
+		if (p + 4 > size) return false;
 		uint32_t sz = 0;
 		std::memcpy(&sz, buf + p, 4);
 		p += 4;
+		if (!core != (sz == 0) || (!core && SeatExternal(k))) return false;
+		if (!core) continue;
 		if (p + sz > size || !core->StateLoad(buf + p, sz)) return false;
 		p += sz;
 	}
 
 	// The cable is shared state and was not in the blob; rebuild it exactly
 	// as session start does. Pre-reset frames go with it.
-	SplitAttachLink();
+	SplitAttachLink(true);
 	SplitDropSnaps();
 	g_seat_slave_accum = 0;
 	SplitFollowDone();   // the checkpoint is taken past the boot
@@ -5101,15 +5144,10 @@ bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap)
 // this file defines anyway. The core array itself lives further up so
 // the reset facades can fan out to it.
 
-bool S9xSGBSplitStart(int players, const char *battery_base_path)
+// Seat k's Game Boy, built and booted the way the master's console was, in
+// its place. False, the place left empty, when it cannot be.
+static bool SplitMakeSeat(int k)
 {
-	S9xSGBSplitStop(battery_base_path);
-
-	if (players < 2) return false;
-	// Only Faceball's ring cable seats more than the DMG-07's four.
-	const int max_players = S9xSGBCartIsFaceball() ? SGB_MAX_LINK_PLAYERS : 4;
-	if (players > max_players) players = max_players;
-
 	SGB::Emulator &prim = SGB::Instance();
 	if (!prim.HasROM()) return false;
 	const uint8_t *rom  = prim.GetROMData();
@@ -5139,23 +5177,13 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	// Super Game Boy, and it is not held through the master's boot (see
 	// SplitRunSeatsSlaved) - a logo scroll of its own is the point.
 	SeatModelInit();
-	std::vector<uint8> own_boot[2];   // [0] Game Boy, [1] Color
-	for (int k = 0; k < players - 1; ++k)
-	{
-		if (!SeatOwnModel(k) || SeatExternal(k)) continue;
-		const int c = (g_split_seat_model[k] == S9X_GBBOOT_GBC) ? 1 : 0;
-		if (own_boot[c].empty()) S9xGetGBBootROM(c != 0, own_boot[c]);
-	}
+	const bool own     = SeatOwnModel(k);
+	const bool own_cgb = own && g_split_seat_model[k] == S9X_GBBOOT_GBC;
+	std::vector<uint8> own_boot;
+	if (own) S9xGetGBBootROM(own_cgb, own_boot);
 
-	for (int k = 0; k < players - 1; ++k)
 	{
-		// An external seat's Game Boy lives in its own SNES machine; the
-		// place stays empty until that machine hands its core over.
-		if (SeatExternal(k)) { g_split_cores[k].reset(); continue; }
-
 		std::unique_ptr<SGB::Emulator> core(new SGB::Emulator());
-		const bool own     = SeatOwnModel(k);
-		const bool own_cgb = own && g_split_seat_model[k] == S9X_GBBOOT_GBC;
 		if (own)
 		{
 			// Its own console, so none of the master's: a plain Game Boy or
@@ -5174,18 +5202,14 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		const bool     other     = !g_seat_rom[k].empty();
 		const uint8_t *seat_rom  = other ? g_seat_rom[k].data() : rom;
 		const size_t   seat_size = other ? g_seat_rom[k].size() : size;
-		const std::vector<uint8> &ob = own_boot[own_cgb ? 1 : 0];
-		const uint8_t *boot      = own ? (ob.empty() ? nullptr : ob.data()) : seat_boot;
-		const size_t   boot_size = own ? ob.size() : seat_boot_size;
+		const uint8_t *boot      = own ? (own_boot.empty() ? nullptr : own_boot.data()) : seat_boot;
+		const size_t   boot_size = own ? own_boot.size() : seat_boot_size;
 		// Path deliberately empty: the core must not seed itself from the
-		// shared index-less .sav; each seat loads its own .savN below.
+		// shared index-less .sav; each seat loads its own .savN.
 		if (!core->Init() ||
 		    (boot && !core->LoadBootROM(boot, boot_size)) ||
 		    !core->LoadROM(seat_rom, seat_size, nullptr))
-		{
-			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
 			return false;
-		}
 		// The ROM handed out is the pristine one: a seat on the master's console
 		// gets the same SGB cart patch the master's BIOS cart got.
 		if (!own && !other && prim.SgbPatchName()[0])
@@ -5216,7 +5240,32 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 		core->DebugImpl()->apu.discard_output = true;
 		g_split_cores[k] = std::move(core);
 	}
+	return true;
+}
+
+bool S9xSGBSplitStart(int players, const char *battery_base_path)
+{
+	S9xSGBSplitStop(battery_base_path);
+
+	if (players < 2) return false;
+	// Only Faceball's ring cable seats more than the DMG-07's four.
+	const int max_players = S9xSGBCartIsFaceball() ? SGB_MAX_LINK_PLAYERS : 4;
+	if (players > max_players) players = max_players;
+	if (!SGB::Instance().HasROM()) return false;
+
+	for (int k = 0; k < players - 1; ++k)
+	{
+		// An external seat's Game Boy lives in its own SNES machine; the
+		// place stays empty until that machine hands its core over.
+		if (SeatExternal(k)) { g_split_cores[k].reset(); continue; }
+		if (!SplitMakeSeat(k))
+		{
+			for (int j = 0; j < SGB_MAX_LINK_PLAYERS - 1; ++j) g_split_cores[j].reset();
+			return false;
+		}
+	}
 	g_split_players = players;
+	g_split_hub     = false;   // SplitAttachLink picks the cable
 	SplitDropSnaps();
 	SplitFollowMasterBoot();
 	g_pane_delay = 0;   // a new session measures its own pane age
@@ -5230,7 +5279,7 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
 
-	SplitAttachLink();
+	SplitAttachLink(true);
 
 	// A link session is Game Boys on a cable, and the SGB has no link
 	// port: with no BIOS running, nobody answers detection and the games
@@ -5257,9 +5306,11 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	{
 		g_split_cores[k].reset();
 		g_split_external_core[k] = nullptr;   // the flag stays: it is the frontend's pick
+		g_split_ghost[k] = false;
 	}
 	SplitDropSnaps();
 	g_split_players = 0;
+	g_split_hub     = false;
 	g_echo_frames   = 0;
 	g_placer_said  = false;
 	g_placer_clear = 0;
@@ -5269,6 +5320,138 @@ void S9xSGBSplitStop(const char *battery_base_path)
 	g_seat_slave_accum = 0;
 	std::memset(g_placer_in,    0, sizeof g_placer_in);
 	std::memset(g_placer_dwell, 0, sizeof g_placer_dwell);
+}
+
+// ---- A table seats join and leave ------------------------------------------
+
+// A Game Boy is on the cable at place k: a player's, or a ghost's.
+static bool SplitPlaceTaken(int k)
+{
+	if (k < 0 || k >= g_split_players - 1 || k >= SGB_MAX_LINK_PLAYERS - 1) return false;
+	return g_split_cores[k] || g_split_external[k];
+}
+
+bool S9xSGBSplitSeatPresent(int player)
+{
+	const int k = player - 2;
+	return g_split_players >= 2 && SplitPlaceTaken(k) && !g_split_ghost[k];
+}
+
+bool S9xSGBSplitSeatGhost(int player)
+{
+	const int k = player - 2;
+	return g_split_players >= 2 && SplitPlaceTaken(k) && g_split_ghost[k];
+}
+
+int S9xSGBSplitPresentPlayers(void)
+{
+	if (g_split_players < 2) return 0;
+	int n = 1;
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		if (SplitPlaceTaken(k) && !g_split_ghost[k]) ++n;
+	return n;
+}
+
+int S9xSGBSplitGhosts(void)
+{
+	int n = 0;
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		if (SplitPlaceTaken(k) && g_split_ghost[k]) ++n;
+	return n;
+}
+
+// A seat's per-console bookkeeping, clean for whoever takes the place next.
+static void SplitClearPlace(int player)
+{
+	const int k = player - 2, i = player - 1;
+	g_split_snap_valid[i] = false;
+	g_split_snap_head[i]  = 0;
+	g_split_snap_count[i] = 0;
+	g_seat_settling[i]    = false;
+	g_phase_hash[i]       = 0;
+	g_seat_head_start_due[k] = false;
+	g_seat_own_mlt[k]     = false;
+	g_seat_mlt_pkts[k]    = 0;
+}
+
+bool S9xSGBSplitAddSeat(int player)
+{
+	const int k = player - 2;
+	const int max_players = S9xSGBCartIsFaceball() ? SGB_MAX_LINK_PLAYERS : 4;
+	if (g_split_players < 2 || k < 0 || player > max_players || S9xSGBSplitSeatPresent(player))
+		return false;
+
+	// Their Game Boy never left the cable: the player just picks it up again.
+	if (S9xSGBSplitSeatGhost(player))
+	{
+		g_split_ghost[k] = false;
+		return true;
+	}
+
+	// A machine seat's Game Boy comes with its machine (S9xSGBSplitSetExternalCore).
+	if (!SeatExternal(k))
+	{
+		if (!SplitMakeSeat(k)) return false;
+		SGB::Emulator *core = g_split_cores[k].get();
+		const std::string sav = SeatBatteryPath(k, g_split_battery_base.c_str());
+		if (core->HasBattery() && !sav.empty()) core->LoadBatteryFromPath(sav.c_str());
+	}
+	if (player > g_split_players) g_split_players = player;
+	SplitClearPlace(player);
+	SplitAttachLink(false);   // the others play on
+	return true;
+}
+
+// Place k's Game Boy comes off the cable, its battery saved as every seat's
+// is when a session ends.
+static void SplitUnplug(int k)
+{
+	// Off the cable before it goes: it may be the console clocking a byte.
+	std::unique_ptr<SGB::Emulator> gone = std::move(g_split_cores[k]);
+	SGB::Emulator *machine = g_split_external_core[k];
+	g_split_external[k]      = false;   // its machine is the frontend's to stop
+	g_split_external_core[k] = nullptr;
+	g_split_ghost[k]         = false;
+	while (g_split_players > 2 && !SplitPlaceTaken(g_split_players - 2)) --g_split_players;
+	SplitClearPlace(k + 2);
+	SplitAttachLink(false);
+
+	SGB::Emulator *core = gone ? gone.get() : machine;
+	const std::string sav = SeatBatteryPath(k, g_split_battery_base.c_str());
+	if (core && core->HasBattery() && !sav.empty()) core->SaveBatteryToPath(sav.c_str());
+}
+
+bool S9xSGBSplitRemoveSeat(int player)
+{
+	const int k = player - 2;
+	if (!S9xSGBSplitSeatPresent(player)) return false;
+
+	// Mid-game the others are waiting on its bytes: pulling it would stall
+	// them, so it plays on unattended until the game lets go of the link.
+	if (SGB::SerialSplitInUse())
+	{
+		g_split_ghost[k] = true;
+		if (g_split_cores[k]) g_split_cores[k]->SetJoypad(0);
+		SGB::Emulator *core = SeatCore(k);
+		const std::string sav = SeatBatteryPath(k, g_split_battery_base.c_str());
+		if (core && core->HasBattery() && !sav.empty()) core->SaveBatteryToPath(sav.c_str());
+		return false;
+	}
+	SplitUnplug(k);
+	return true;
+}
+
+unsigned S9xSGBSplitReleaseGhosts(void)
+{
+	if (!S9xSGBSplitGhosts() || SGB::SerialSplitInUse()) return 0;
+	unsigned gone = 0;
+	for (int k = SGB_MAX_LINK_PLAYERS - 2; k >= 0; --k)
+		if (SplitPlaceTaken(k) && g_split_ghost[k])
+		{
+			SplitUnplug(k);
+			gone |= 1u << (k + 2);
+		}
+	return gone;
 }
 
 // Takes effect at the next session start: a live seat's console cannot change
@@ -5325,7 +5508,7 @@ void S9xSGBSplitSetExternalCore(int player, SGB::Emulator *core)
 	g_split_external_core[k] = core;
 	if (core && core != old && g_split_players >= 2 && core->HasBattery() && !sav.empty())
 		core->LoadBatteryFromPath(sav.c_str());
-	if (g_split_players >= 2) SplitAttachLink();
+	if (g_split_players >= 2) SplitAttachLink(false);   // the others play on
 }
 
 unsigned char S9xSGBSplitGetSeatModel(int player)
@@ -5347,6 +5530,7 @@ void S9xSGBSplitSetJoypad(int player, uint16_t snes_pad_mask)
 {
 	const int k = player - 2;
 	if (k < 0 || k >= SGB_MAX_LINK_PLAYERS - 1 || !g_split_cores[k]) return;
+	if (g_split_ghost[k]) snes_pad_mask = 0;   // nobody holds it
 	if (snes_pad_mask) g_follow_input = true;
 	g_split_cores[k]->SetJoypad(snes_pad_mask);
 }

@@ -1108,6 +1108,10 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
         S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
         S9xSetController(1, CTL_MACSRIFLE, 0, 0, 0, 0);
         break;
+    case EmuConfig::ePachinko:
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_PACHINKO, 0, 0, 0, 0);
+        break;
     case EmuConfig::eJoypads:
     default:
         S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
@@ -1133,6 +1137,19 @@ void Snes9xController::updateBindings(const EmuConfig *const config)
                 S9xMapButton(binding.hash(), cmd, false);
             }
         }
+    }
+
+    // The Sunsoft Pachinko's own keys, live only while it is plugged in
+    if (config->port_configuration == EmuConfig::ePachinko)
+    {
+        const char *pachinko_commands[] = { "Pachinko Stronger", "Pachinko Weaker", "Pachinko Stop" };
+        for (int i = 0; i < EmuConfig::num_pachinko_bindings; i++)
+            for (int b = 0; b < EmuConfig::allowed_bindings; b++)
+            {
+                auto binding = config->binding.pachinko.buttons[i * EmuConfig::allowed_bindings + b];
+                if (binding.hash() != 0)
+                    S9xMapButton(binding.hash(), S9xGetCommandT(pachinko_commands[i]), false);
+            }
     }
 
     for (auto &additional : config->additional_controllers)

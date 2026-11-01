@@ -31,6 +31,7 @@
 #define IDB_PAD_USA                     198
 #define IDB_PAD_SFC                     199
 #define IDB_PAD_EUR                     200
+#define IDB_PACHINKO                    202
 #define IDD_OPENMOVIE                   134
 #define IDD_CREATEMOVIE                 135
 #define IDD_KEYCUSTOM                   136
@@ -978,6 +979,7 @@
 #define IDC_STATIC_REGULAR_LABEL        3350
 #define IDC_PAUSE_EMULATION             3351
 #define IDC_INPUT_PICTURE               3702
+#define IDC_PACHINKO_NOTE               3730
 #define IDC_BILINEAR_MODE7              3703
 
 #define ID_SOUND_AUDIOWAVEFORM          40198
@@ -1032,15 +1034,16 @@
 #define ID_INPUT_BARCODE_CONNECT        44454
 #define ID_INPUT_BARCODE_SCAN           44455
 #define ID_INPUT_BARCODE_RESCAN         44456
+#define ID_INPUT_PACHINKO_CONNECT       44457
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        202
-#define _APS_NEXT_COMMAND_VALUE         44457
-#define _APS_NEXT_CONTROL_VALUE         3730
+#define _APS_NEXT_RESOURCE_VALUE        203
+#define _APS_NEXT_COMMAND_VALUE         44458
+#define _APS_NEXT_CONTROL_VALUE         3731
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

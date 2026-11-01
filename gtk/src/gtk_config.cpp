@@ -282,6 +282,11 @@ int Snes9xConfig::load_defaults()
         joypad.data.fill(Binding());
     }
 
+    // The Sunsoft Pachinko: Stronger, Weaker, Stop
+    pad[PACHINKO_SLOT].data[0] = Binding(GDK_KEY_e, false, false, false);
+    pad[PACHINKO_SLOT].data[1] = Binding(GDK_KEY_q, false, false, false);
+    pad[PACHINKO_SLOT].data[2] = Binding(GDK_KEY_w, false, false, false);
+
     shortcut.fill(Binding());
 
     return 0;
@@ -290,8 +295,11 @@ int Snes9xConfig::load_defaults()
 // Config-file names for ControllerOption, in enum order.
 static const char *controller_option_names[NUM_CONTROLLER_OPTIONS] = {
     "joypads", "mouse", "superscope", "multitap5", "justifier",
-    "mouse_swapped", "multitap8", "dual_justifiers", "macsrifle"
+    "mouse_swapped", "multitap8", "dual_justifiers", "macsrifle", "pachinko"
 };
+
+// Config-file names for the Sunsoft Pachinko's keys, in PACHINKO_SLOT order.
+static const char *pachinko_link_names[NUM_PACHINKO_LINKS] = { "Stronger", "Weaker", "Stop" };
 
 int Snes9xConfig::save_config_file()
 {
@@ -528,7 +536,7 @@ int Snes9xConfig::save_config_file()
 
     section = "Input";
     outstring("ControllerOption", controller_option_names[controller_option],
-              "What is plugged into the controller ports: joypads, mouse, superscope, multitap5, justifier, mouse_swapped, multitap8, dual_justifiers, or macsrifle");
+              "What is plugged into the controller ports: joypads, mouse, superscope, multitap5, justifier, mouse_swapped, multitap8, dual_justifiers, macsrifle, or pachinko (the Sunsoft Pachinko controller in port 2)");
     outbool("SuperScopeCrosshair", superscope_crosshair_visible, "on to draw the Super Scope's crosshair on screen");
 
     outint("JoystickThreshold", joystick_threshold, "How far an analog stick/trigger must move to register as pressed (percent, 1-100)");
@@ -545,6 +553,10 @@ int Snes9xConfig::save_config_file()
             outstring(b_links[j].snes9x_name, joypad.data[j].as_string());
         }
     }
+
+    section = "Pachinko";
+    for (int j = 0; j < NUM_PACHINKO_LINKS; j++)
+        outstring(pachinko_link_names[j], pad[PACHINKO_SLOT].data[j].as_string());
 
     section = "Shortcuts";
     for (int i = NUM_JOYPAD_LINKS; b_links[i].snes9x_name; i++)
@@ -913,6 +925,15 @@ int Snes9xConfig::load_config_file()
         }
     }
 
+    // An older config has no Pachinko section: keep the default keys
+    section = "Pachinko";
+    for (int j = 0; j < NUM_PACHINKO_LINKS; j++)
+        if (cf.Exists((section + "::" + pachinko_link_names[j]).c_str()))
+        {
+            instr(pachinko_link_names[j], buffer);
+            pad[PACHINKO_SLOT].data[j] = Binding(buffer.c_str());
+        }
+
     section = "Shortcuts";
     for (int i = NUM_JOYPAD_LINKS; b_links[i].snes9x_name; i++)
     {
@@ -1061,6 +1082,15 @@ void Snes9xConfig::rebind_keys()
         S9xMapButton(shortcut[i - NUM_JOYPAD_LINKS].base_hex(),
                      cmd,
                      false);
+    }
+
+    // The Sunsoft Pachinko's own keys, live only while it is plugged in
+    if (controller_option == CONTROLLER_PACHINKO)
+    {
+        const char *pachinko_commands[NUM_PACHINKO_LINKS] = { "Pachinko Stronger", "Pachinko Weaker", "Pachinko Stop" };
+        for (int j = 0; j < NUM_PACHINKO_LINKS; j++)
+            if (pad[PACHINKO_SLOT].data[j].hex())
+                S9xMapButton(pad[PACHINKO_SLOT].data[j].base_hex(), S9xGetCommandT(pachinko_commands[j]), false);
     }
 
     // The host pointer aims every device that can sit in a port, whichever

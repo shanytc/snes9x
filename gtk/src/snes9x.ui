@@ -1184,6 +1184,9 @@
       <row>
         <col id="0" translatable="yes">8+</col>
       </row>
+      <row>
+        <col id="0" translatable="yes">Sunsoft Pachinko</col>
+      </row>
 </data>
   </object>
   <object class="GtkListStore" id="liststore4">
@@ -2377,9 +2380,39 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkRadioMenuItem" id="input_pachinko_radio">
+                        <property name="visible">False</property>
+                        <property name="can_focus">False</property>
+                        <property name="label">Sunsoft Pachinko</property>
+                        <property name="draw_as_radio">False</property>
+                        <property name="group">input_joypad_item</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkSeparatorMenuItem" id="barcodes_separator">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="pachinko_item">
+                        <property name="label" translatable="yes">Sunsoft _Pachinko</property>
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="use_underline">True</property>
+                        <child type="submenu">
+                          <object class="GtkMenu" id="pachinko_menu">
+                            <property name="can_focus">False</property>
+                            <child>
+                              <object class="GtkCheckMenuItem" id="input_pachinko_item">
+                                <property name="label" translatable="yes">_Connect to Port 2</property>
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="use_underline">True</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
                       </object>
                     </child>
                     <child>

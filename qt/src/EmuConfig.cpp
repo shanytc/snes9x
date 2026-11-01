@@ -476,6 +476,12 @@ bool EmuConfig::setDefaults(int section)
         {
             binding.controller[0].buttons[i * 4] = EmuBinding::from_config_string("Keyboard " + std::string(button_list[i]));
         }
+
+        // The Sunsoft Pachinko: Stronger, Weaker, Stop
+        memset(binding.pachinko.buttons, 0, sizeof(binding.pachinko.buttons));
+        const char *pachinko_list[] = { "e", "q", "w" };
+        for (int i = 0; i < std::size(pachinko_list); i++)
+            binding.pachinko.buttons[i * allowed_bindings] = EmuBinding::from_config_string("Keyboard " + std::string(pachinko_list[i]));
     }
 
     if (section == -1 || section == 5)
@@ -888,7 +894,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     // devices keep the values older configs wrote; the two legacy joypad
     // names (OneController, TwoControllers) simply fall through to the
     // Joypads default.
-    Enum("PortConfiguration", port_configuration, { "Joypads", "Mouse", "SuperScope", "Multitap", "Justifier", "MouseSwapped", "Multitap8", "DualJustifiers", "MacsRifle" }, "What is plugged into the console's controller ports: Joypads, Mouse, SuperScope, Multitap, Justifier, MouseSwapped, Multitap8, DualJustifiers, or MacsRifle");
+    Enum("PortConfiguration", port_configuration, { "Joypads", "Mouse", "SuperScope", "Multitap", "Justifier", "MouseSwapped", "Multitap8", "DualJustifiers", "MacsRifle", "Pachinko" }, "What is plugged into the console's controller ports: Joypads, Mouse, SuperScope, Multitap, Justifier, MouseSwapped, Multitap8, DualJustifiers, MacsRifle, or Pachinko (the Sunsoft Pachinko controller in port 2)");
     Bool("SuperScopeCrosshair", superscope_crosshair_visible, "true to draw the Super Scope's crosshair on screen");
     Enum("PadPictureStyle", pad_picture_style, { "USA", "Europe", "Japan" }, "Controller picture in the Controllers settings: USA, Europe or Japan");
     EndSection();
@@ -911,6 +917,15 @@ void EmuConfig::config(const std::string &filename, bool write)
 
         EndSection();
     }
+
+    BeginSection("Pachinko");
+    for (int y = 0; y < num_pachinko_bindings; y++)
+        for (int x = 0; x < allowed_bindings; x++)
+        {
+            const char *names[] = { "Stronger", "Weaker", "Stop" };
+            Binding(names[y] + std::to_string(x), binding.pachinko.buttons[y * allowed_bindings + x]);
+        }
+    EndSection();
 
     BeginSection("Shortcuts");
     for (int i = 0; i < num_shortcuts; i++)

@@ -17,6 +17,7 @@
 #define S9xButtonMacsRifle		7
 #define S9xAxisJoypad			8
 #define S9xPointer				9
+#define S9xButtonPachinko		10
 
 #define S9xButtonPseudopointer	254
 #define S9xAxisPseudopointer	253
@@ -94,6 +95,13 @@ typedef struct
 				uint8	trigger:1;
 			}	macsrifle;
 
+			struct
+			{
+				uint8	stop:1;				// the side button: no balls launch while held
+				uint8	stronger:1;			// held: turn the dial up
+				uint8	weaker:1;			// held: turn the dial down
+			}	pachinko;
+
 			int32	multi_idx;
 			uint16	command;
 		}	button;
@@ -152,7 +160,8 @@ enum controllers
 	CTL_SUPERSCOPE,
 	CTL_JUSTIFIER,	// use id1: 0=one justifier, 1=two justifiers
 	CTL_MP5,			// use id1-id4 to specify pad 0-7 (or -1)
-	CTL_MACSRIFLE
+	CTL_MACSRIFLE,
+	CTL_PACHINKO		// Sunsoft Pachinko controller (port 2)
 };
 
 void S9xSetController (int port, enum controllers controller, int8 id1, int8 id2, int8 id3, int8 id4); // port=0-1
@@ -280,7 +289,8 @@ struct SControlSnapshot
 	uint8	dummy2[4];
 	uint8	mouse_speed[2];
 	uint8	justifier_select;
-	uint8	dummy3[8];
+	uint8	pachinko[3];				// dial, buttons, hold frames (was spare; old states load 0)
+	uint8	dummy3[5];
 	bool8	pad_read, pad_read_last;
 	uint8	internal[60];				// yes, we need to save this!
 	uint8   internal_macs[5];

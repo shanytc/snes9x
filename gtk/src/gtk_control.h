@@ -45,8 +45,14 @@ enum ControllerOption
     CONTROLLER_MULTITAP8,
     CONTROLLER_DUAL_JUSTIFIERS,
     CONTROLLER_MACSRIFLE,
+    CONTROLLER_PACHINKO,        // the Sunsoft Pachinko controller in port 2
     NUM_CONTROLLER_OPTIONS
 };
+
+/* The Sunsoft Pachinko's keys sit in the binding slot after the pads, in its
+ * first three b_links entries: b_up = Stronger, b_down = Weaker, b_left = Stop. */
+const int PACHINKO_SLOT = NUM_JOYPADS;
+const int NUM_PACHINKO_LINKS = 3;
 
 /* Save states are organized in banks of slots, as on win32. The state file
  * extension is the flat index, i.e. bank * SAVE_SLOTS_PER_BANK + slot. */

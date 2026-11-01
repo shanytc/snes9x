@@ -44,6 +44,7 @@
 #define RETRO_DEVICE_LIGHTGUN_JUSTIFIER_2 ((3 << 8) | RETRO_DEVICE_LIGHTGUN)
 #define RETRO_DEVICE_LIGHTGUN_MACS_RIFLE ((4 << 8) | RETRO_DEVICE_LIGHTGUN)
 #define RETRO_DEVICE_BARCODE_BATTLER ((2 << 8) | RETRO_DEVICE_JOYPAD)
+#define RETRO_DEVICE_SNES_PACHINKO ((3 << 8) | RETRO_DEVICE_JOYPAD)
 
 #ifndef RETRO_ENVIRONMENT_SET_VARIABLE
 #define RETRO_ENVIRONMENT_SET_VARIABLE 70
@@ -445,6 +446,7 @@ void retro_set_environment(retro_environment_t cb)
         { "Justifier", RETRO_DEVICE_LIGHTGUN_JUSTIFIER },
         { "M.A.C.S. Rifle", RETRO_DEVICE_LIGHTGUN_MACS_RIFLE },
         { "Barcode Battler II", RETRO_DEVICE_BARCODE_BATTLER },
+        { "Sunsoft Pachinko", RETRO_DEVICE_SNES_PACHINKO },
     };
 
     static const struct retro_controller_description port_3[] = {
@@ -460,7 +462,7 @@ void retro_set_environment(retro_environment_t cb)
 
     static const struct retro_controller_info ports[] = {
         { port_1, 4 },
-        { port_2, 8 },
+        { port_2, 9 },
         { port_3, 3 },
         { port_extra, 2 },
         { port_extra, 2 },
@@ -1348,6 +1350,7 @@ void retro_reset()
 }
 
 static unsigned snes_devices[8];
+static void init_descriptors(void);
 void retro_set_controller_port_device(unsigned port, unsigned device)
 {
     if (port < 8)
@@ -1403,6 +1406,15 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
                 else if (log_cb)
                     log_cb(RETRO_LOG_ERROR, "Invalid Barcode Battler II assignment to port %d, must be port 2.\n", port + 1);
                 break;
+            case RETRO_DEVICE_SNES_PACHINKO:
+                if (port == 1)
+                {
+                    S9xSetController(port, CTL_PACHINKO, 0, 0, 0, 0);
+                    snes_devices[port] = RETRO_DEVICE_SNES_PACHINKO;
+                }
+                else if (log_cb)
+                    log_cb(RETRO_LOG_ERROR, "Invalid Sunsoft Pachinko assignment to port %d, must be port 2.\n", port + 1);
+                break;
             case RETRO_DEVICE_NONE:
                 S9xSetController(port, CTL_NONE, 0, 0, 0, 0);
                 snes_devices[port] = RETRO_DEVICE_NONE;
@@ -1414,7 +1426,10 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
         }
 
         if (port == 1)
+        {
             S9xBarcodeBattlerConnect(snes_devices[1] == RETRO_DEVICE_BARCODE_BATTLER);
+            init_descriptors();	// the Sunsoft Pachinko renames port 2's buttons
+        }
 
         S9xControlsSoftReset();
     }
@@ -1532,6 +1547,14 @@ static void init_descriptors(void)
 
         { 0, 0, 0, 0, NULL },
     };
+
+    // The Sunsoft Pachinko in port 2 reads only these; the rest of that pad is idle
+    if (snes_devices[1] == RETRO_DEVICE_SNES_PACHINKO)
+        for (auto &d : desc)
+            if (d.port == 1 && d.description)
+                d.description = d.id == RETRO_DEVICE_ID_JOYPAD_R || d.id == RETRO_DEVICE_ID_JOYPAD_RIGHT ? "Pachinko: Turn Stronger"
+                              : d.id == RETRO_DEVICE_ID_JOYPAD_L || d.id == RETRO_DEVICE_ID_JOYPAD_LEFT  ? "Pachinko: Turn Weaker"
+                              : d.id == RETRO_DEVICE_ID_JOYPAD_A ? "Pachinko: Stop" : "(unused)";
 
     environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
 }
@@ -2202,6 +2225,7 @@ void retro_init(void)
 #define PAD_3 3
 #define PAD_4 4
 #define PAD_5 5
+#define PAD_PACHINKO 9	// above the eight pads two multitaps report
 
 #define BTN_B RETRO_DEVICE_ID_JOYPAD_B
 #define BTN_Y RETRO_DEVICE_ID_JOYPAD_Y
@@ -2318,6 +2342,10 @@ static void map_buttons()
     MAP_BUTTON(MAKE_BUTTON(PAD_5, BTN_RIGHT), "Joypad5 Right");
     MAP_BUTTON(MAKE_BUTTON(PAD_5, BTN_UP), "Joypad5 Up");
     MAP_BUTTON(MAKE_BUTTON(PAD_5, BTN_DOWN), "Joypad5 Down");
+
+    MAP_BUTTON(MAKE_BUTTON(PAD_PACHINKO, BTN_R), "Pachinko Stronger");
+    MAP_BUTTON(MAKE_BUTTON(PAD_PACHINKO, BTN_L), "Pachinko Weaker");
+    MAP_BUTTON(MAKE_BUTTON(PAD_PACHINKO, BTN_A), "Pachinko Stop");
 
 }
 
@@ -2629,6 +2657,16 @@ static void report_buttons()
                     }
                 }
                 break;
+
+            case RETRO_DEVICE_SNES_PACHINKO:
+            {
+                // R or D-pad Right turns the dial stronger, L or D-pad Left weaker, A is Stop
+                auto held = [port](unsigned id) { return input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, id) != 0; };
+                S9xReportButton(MAKE_BUTTON(PAD_PACHINKO, BTN_R), held(BTN_R) || held(BTN_RIGHT));
+                S9xReportButton(MAKE_BUTTON(PAD_PACHINKO, BTN_L), held(BTN_L) || held(BTN_LEFT));
+                S9xReportButton(MAKE_BUTTON(PAD_PACHINKO, BTN_A), held(BTN_A));
+                break;
+            }
 
             case RETRO_DEVICE_NONE:
             case RETRO_DEVICE_BARCODE_BATTLER:	// codes come from the core option

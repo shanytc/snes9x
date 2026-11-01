@@ -441,6 +441,16 @@ int GetNumButtonsAssignedTo (WORD Key)
 			if(Key == JoypadExtra[J].R[e])          count++;
 		}
     }
+
+	// Sunsoft Pachinko: Stronger, Weaker and Stop
+	if(Key != 0 && Key != VK_ESCAPE)
+	{
+		const SJoypad &p = Joypad[PACHINKO_PAD];
+		const SJoypadExtraBinds &x = JoypadExtra[PACHINKO_PAD];
+		count += (Key == p.Up) + (Key == p.Left) + (Key == p.Down);
+		for(int e = 0; e < MAX_EXTRA_BINDS; e++)
+			count += (Key == x.Up[e]) + (Key == x.Left[e]) + (Key == x.Down[e]);
+	}
 	return count;
 }
 

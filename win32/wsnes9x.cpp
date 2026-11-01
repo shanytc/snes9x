@@ -150,7 +150,7 @@ LRESULT CALLBACK DlgChildSplitProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lP
 INT_PTR CALLBACK DlgNPProgress(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNetConnect(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgNPOptions(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
-void WinToggleGBLink(int mode, int players);
+void WinToggleGBLink(int mode, int players, unsigned places = 0);
 void WinToggleGBLinkSplit();
 void WinGBLinkHotkey(int what);
 bool GBLinkPostToPartner(UINT msg, WPARAM wParam, LPARAM lParam, DWORD exceptPid = 0);
@@ -166,11 +166,11 @@ static void WinGBLinkMasterUnplug();
 static void WinGBLinkUnlink();
 static void GBLinkResetWhenLeftAlone();
 static void GBLinkPlacePeerWindow();
-static void WinStartGBSplit(int players);
+static void WinStartGBSplit(int players, unsigned places = 0);
 static void WinStopGBSplit(bool quiet = false);
-static void WinStartGBViewerSession(int players);
+static void WinStartGBViewerSession(int players, unsigned places = 0);
 static void GBLinkViewerWatch();
-static void GBSeatWindowsCreate(int players);
+static void GBSeatWindowsCreate(int players, unsigned places = 0);
 static void GBSeatWindowsDestroy();
 static void GBSeatPresentFrame();
 static unsigned char GBSeatModelPick(int player);
@@ -180,8 +180,10 @@ static HMENU WinGBBuildSeatModelMenu(int player);
 static int   GBSeatPlayerOfWindow(HWND w);
 static int   GBSeatClipboardPlayer = 0;
 static bool8 GBSeatScreenshotToClipboard(int width, int height);
-static void  GBSeatMachinesCreate(int players);
+static void  GBSeatMachinesCreate(int players, unsigned places = 0);
 static void  WinGBTableResize(int want);
+static void  WinGBLinkPlayerItem(int n);
+static bool  GBTableSeated();
 static void  WinGBSeatClosed(int player, LONG table);
 static void  WinGBTableShowNews();
 static void  WinGBTableReleaseGhosts();
@@ -3760,13 +3762,13 @@ LRESULT CALLBACK WinProc(
 			WinApplyResizeLock();
 			break;
 		case ID_EMULATION_GB_LINK_SAME:
-			WinToggleGBLink (1, 2);
+			WinGBLinkPlayerItem (2);
 			break;
 		case ID_EMULATION_GB_LINK_SAME_3:
-			WinToggleGBLink (1, 3);
+			WinGBLinkPlayerItem (3);
 			break;
 		case ID_EMULATION_GB_LINK_SAME_4:
-			WinToggleGBLink (1, 4);
+			WinGBLinkPlayerItem (4);
 			break;
 		case ID_EMULATION_GB_LINK_SAME_5:
 		case ID_EMULATION_GB_LINK_SAME_6:
@@ -7724,13 +7726,9 @@ static void CheckMenuStates ()
 		}
 		else if (show)
 		{
-			// Same-game shapes stay enabled among themselves: the ticked
-			// one doubles as the disconnect, any other one switches the
-			// live session to it. Crossing between Same and Other makes
-			// no sense mid-session, so the opposite family greys out.
-			// The tick follows the instances actually present: a 4-player
-			// session with one window closed reads as 3. A split session
-			// ticks like a live link of its size.
+			// Crossing between Same and Other makes no sense mid-session, so
+			// the opposite family greys out. Faceball's ring counts follow
+			// the players present; 2-4 are set at the end of this block.
 			int gblink  = WinGetGBLinkMode ();
 			int players = WinGetGBLinkPlayers ();
 			if (S9xSGBSplitActive ())
@@ -7748,17 +7746,10 @@ static void CheckMenuStates ()
 			const UINT diff_off = (gblink == 1)
 			                    ? (MFS_UNCHECKED | MFS_DISABLED) : MFS_UNCHECKED;
 
-			mii.fState = (gblink == 1 && players <= 2) ? MFS_CHECKED : same_off;
-			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME, FALSE, &mii);
-			mii.fState = (gblink == 1 && players == 3) ? MFS_CHECKED : same_off;
-			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_3, FALSE, &mii);
-			mii.fState = (gblink == 1 && players == 4) ? MFS_CHECKED : same_off;
-			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SAME_4, FALSE, &mii);
 			mii.fState = (gblink == 2) ? MFS_CHECKED : diff_off;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_DIFF, FALSE, &mii);
 
-			// Live only: the way out of a session, so nobody has to guess
-			// that the ticked player count doubles as the leave button.
+			// Live only: the way out of a session, every player at once.
 			mii.fState = gblink ? MFS_ENABLED : MFS_DISABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_UNLINK, FALSE, &mii);
 			mii.fState = GBLinkResetOnLink ? MFS_CHECKED : MFS_UNCHECKED;
@@ -7799,7 +7790,7 @@ static void CheckMenuStates ()
 				}
 			}
 			// Faceball 2000 alone gets the ring submenu (5..15 Players),
-			// right under 4 Players; every other cart never sees it. The
+			// right under Player 4; every other cart never sees it. The
 			// popup is built once and re-attached as carts come and go —
 			// RemoveMenu detaches without destroying it.
 			if (s_gb_same_hmenu)
@@ -7881,6 +7872,29 @@ static void CheckMenuStates ()
 			// the session in the other flavor.
 			mii.fState = (GBLinkSplitScreen ? MFS_CHECKED : MFS_UNCHECKED);
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_SPLIT, FALSE, &mii);
+
+			// Nobody linked: 2-4 Players start a table that size. Once one
+			// plays they turn into Player 2-4, ticked while that player sits
+			// at it, until the last one gets up. Set after the LocalizeMenu
+			// calls above, which put the .rc wording back.
+			static const UINT player_items[] = { ID_EMULATION_GB_LINK_SAME,
+			                                     ID_EMULATION_GB_LINK_SAME_3,
+			                                     ID_EMULATION_GB_LINK_SAME_4 };
+			static const TCHAR *const count_text[]  = { TEXT("&2 Players"), TEXT("&3 Players"),
+			                                            TEXT("&4 Players") };
+			static const TCHAR *const player_text[] = { TEXT("Player &2"), TEXT("Player &3"),
+			                                            TEXT("Player &4") };
+			const bool table = GBTableSeated ();
+			for (int p = 2; p <= 4; p++)
+			{
+				MENUITEMINFO mlabel = { sizeof(mlabel), MIIM_STRING };
+				mlabel.dwTypeData = (LPTSTR)_L(table ? player_text[p - 2] : count_text[p - 2]);
+				SetMenuItemInfo (GUI.hMenu, player_items[p - 2], FALSE, &mlabel);
+				const bool tick = table ? S9xSGBSplitSeatPresent (p)
+				                        : gblink == 1 && (players == p || (p == 2 && players < 2));
+				mii.fState = tick ? MFS_CHECKED : same_off;
+				SetMenuItemInfo (GUI.hMenu, player_items[p - 2], FALSE, &mii);
+			}
 		}
 	}
 
@@ -15280,12 +15294,13 @@ static unsigned char GBSeatModelEffective (int player)
 // Hand the engine the picks. A plain Game Boy or Color is a split-engine
 // seat; a Super Game Boy is external - a SNES machine the frontend owns, on
 // the cable in its seat's place.
-static void GBSeatModelsPushToEngine (int players)
+static void GBSeatModelsPushToEngine (int players, unsigned places = 0)
 {
 	for (int p = 2; p <= SGB_MAX_LINK_PLAYERS; p++)
 	{
-		const uint8 m = (p <= players) ? GBSeatModelEffective (p) : SGB_SEAT_MODEL_MASTER;
-		const bool machine = GBSeatModelIsMachine (m);
+		const bool  seated  = p <= players && (!places || (places & (1u << p)));
+		const uint8 m       = seated ? GBSeatModelEffective (p) : SGB_SEAT_MODEL_MASTER;
+		const bool  machine = seated && GBSeatModelIsMachine (m);
 		S9xSGBSplitSetSeatExternal (p, machine);
 		S9xSGBSplitSetSeatModel (p, machine ? SGB_SEAT_MODEL_MASTER : m);
 	}
@@ -15541,9 +15556,7 @@ static void GBLinkCloseInstances ()
 	GBLinkPartnerPid = 0;
 }
 
-// The menu's own way out. Unticking the live player count does the same
-// thing, but nothing about a ticked "2 Players" says clicking it again is
-// how you leave, so the session gets a plain verb of its own.
+// The menu's own way out: every player gets up at once.
 static void WinGBLinkUnlink ()
 {
 	if (Settings.GBLinkPeerInstance) return;
@@ -15911,9 +15924,34 @@ static void WinStartGBLink (int mode, int players)
 	}
 }
 
+// A Current Game table with a player at it besides the master.
+static bool GBTableSeated ()
+{
+	return S9xSGBSplitActive () && !GBLinkOtherRom[0] && S9xSGBSplitPresentPlayers () >= 2;
+}
+
+// Who sits at the table now (bit p = player p), so a restart keeps every
+// player in their place, and the highest place: the table's size.
+static unsigned GBTablePlaces ()
+{
+	unsigned places = 0;
+	for (int p = 2; p <= SGB_MAX_LINK_PLAYERS; p++)
+		if (S9xSGBSplitSeatPresent (p)) places |= 1u << p;
+	return places;
+}
+
+static int GBTableTop (unsigned places)
+{
+	int top = 1;
+	for (int p = 2; p <= SGB_MAX_LINK_PLAYERS; p++)
+		if (places & (1u << p)) top = p;
+	return top;
+}
+
 // All the link items land here; clicking any while linked unplugs, and
-// the next click starts the newly picked session size.
-void WinToggleGBLink (int mode, int players)
+// the next click starts the newly picked session size. places: who sits at
+// a new Current Game table (bit p = player p), 0 = players 2..players.
+void WinToggleGBLink (int mode, int players, unsigned places)
 {
 	// A viewer window has no session shape of its own to change.
 	if (S9xSGBViewerClientActive ())
@@ -16020,9 +16058,9 @@ void WinToggleGBLink (int mode, int players)
 		// the blit drops to half-resolution tiles (5-wide grid) to fit
 		// the SNES-sized surface.
 		if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
-			WinStartGBSplit (players);
+			WinStartGBSplit (players, places);
 		else
-			WinStartGBViewerSession (players);
+			WinStartGBViewerSession (players, places);
 		return;
 	}
 	if (mode == GBLINK_DIFF && !Settings.GBLinkPeerInstance)
@@ -16049,15 +16087,16 @@ void WinToggleGBLinkSplit ()
 			return;
 		}
 		// Restart the live session in the other flavor, the players at the
-		// table now: viewer windows fold into one shared window and vice versa.
-		const int  players  = S9xSGBSplitPresentPlayers ();
-		const bool to_split = S9xSGBViewerHostActive ();
+		// table now in their places: viewer windows fold into one shared
+		// window and vice versa.
+		const unsigned places   = GBTablePlaces ();
+		const bool     to_split = S9xSGBViewerHostActive ();
 		TCHAR other[_MAX_PATH];
 		_tcscpy (other, GBLinkOtherRom);
 		WinStopGBSplit ();
 		GBLinkSplitScreen = to_split;
-		if (other[0]) WinStartGBOtherGame (other);
-		else          WinToggleGBLink (GBLINK_SAME, players);
+		if (other[0])    WinStartGBOtherGame (other);
+		else if (places) WinToggleGBLink (GBLINK_SAME, GBTableTop (places), places);
 	}
 	else if (S9xSGBLinkIsEnabled () && !Settings.GBLinkPeerInstance &&
 	         WinGetGBLinkMode () == GBLINK_SAME)
@@ -16077,7 +16116,8 @@ void WinToggleGBLinkSplit ()
 
 // Hotkey face of the link menu, same gating: the opposite family blocks
 // mid-session, and a spawned seat never chooses the shape. what = 2..4
-// for Current Game, 0 for Other Game, -1 split toggle, -2 end the session.
+// toggles that Current Game player, 0 Other Game, -1 split toggle, -2 end
+// the session.
 void WinGBLinkHotkey (int what)
 {
 	const int  live      = WinGetGBLinkMode ();
@@ -16093,7 +16133,7 @@ void WinGBLinkHotkey (int what)
 				S9xSetInfoString ("Link cable: end the Other Game session first");
 				return;
 			}
-			WinToggleGBLink (GBLINK_SAME, what);
+			WinGBLinkPlayerItem (what);
 			return;
 
 		case 0:
@@ -16270,6 +16310,7 @@ static void WinSizeWindowForRing (int players)
 
 static HWND GBSeatWnd[SGB_MAX_LINK_PLAYERS - 1] = {};
 static int  GBSeatCount = 0;
+static unsigned GBSeatPlaces = 0;   // whose windows open at the start (bit p); 0 = all
 
 // A seat the user closed. Read by the emulation thread to skip its staging,
 // written by the render thread that owns the window.
@@ -16645,7 +16686,10 @@ static void GBSeatWindowsOpen ()
 	}
 
 	for (int k = 0; k < GBSeatCount; k++)
+	{
+		if (GBSeatPlaces && !(GBSeatPlaces & (1u << (k + 2)))) continue;   // nobody sits there
 		if (!GBSeatWindowOpen (k)) { GBSeatCount = k; break; }
+	}
 }
 
 // Seat k's window goes without a WM_CLOSE: the master took the seat away.
@@ -17042,11 +17086,12 @@ static void GBSeatMachineCreate (int p)
 	}
 }
 
-// One machine per seat whose pick is a Super Game Boy.
-static void GBSeatMachinesCreate (int players)
+// One machine per seated player whose pick is a Super Game Boy.
+static void GBSeatMachinesCreate (int players, unsigned places)
 {
 	GBSeatMachinesDestroy ();
-	for (int p = 2; p <= players && p <= SGB_MAX_LINK_PLAYERS; p++) GBSeatMachineCreate (p);
+	for (int p = 2; p <= players && p <= SGB_MAX_LINK_PLAYERS; p++)
+		if (!places || (places & (1u << p))) GBSeatMachineCreate (p);
 }
 
 // ---- The table --------------------------------------------------------------
@@ -17157,16 +17202,16 @@ static void WinGBTableLeave (const int *players, int count)
 	GBTableAnnounce (msg, GBLinkResetOnUnlink);
 }
 
-static void WinGBTableJoin (int want)
+// Players sit down in their own places; everyone else plays on.
+static void WinGBTableSeat (const int *players, int count)
 {
-	const int most = S9xSGBCartIsFaceball () ? SGB_MAX_LINK_PLAYERS : 4;
 	int joined = 0, last = 0;
-	for (int p = 2; p <= most && S9xSGBSplitPresentPlayers () < want; p++)
-		if (!S9xSGBSplitSeatPresent (p))
+	for (int i = 0; i < count; i++)
+		if (!S9xSGBSplitSeatPresent (players[i]))
 		{
-			if (!WinGBSeatJoin (p)) break;
+			if (!WinGBSeatJoin (players[i])) break;
 			joined++;
-			last = p;
+			last = players[i];
 		}
 	if (!joined)
 	{
@@ -17180,20 +17225,50 @@ static void WinGBTableJoin (int want)
 	GBTableAnnounce (msg, GBLinkResetOnLink);
 }
 
-// Link Current Game's player count picked while its table plays: seat or
-// unseat players to it, the highest places getting up first.
+// Faceball's ring count picked while its table plays: seat or unseat players
+// to it, the lowest empty places filling first, the highest getting up first.
 static void WinGBTableResize (int want)
 {
 	const int now = S9xSGBSplitPresentPlayers ();
 	if (want > now)
 	{
-		WinGBTableJoin (want);
+		const int most = S9xSGBCartIsFaceball () ? SGB_MAX_LINK_PLAYERS : 4;
+		int seat[SGB_MAX_LINK_PLAYERS], n = 0;
+		for (int p = 2; p <= most && now + n < want; p++)
+			if (!S9xSGBSplitSeatPresent (p)) seat[n++] = p;
+		WinGBTableSeat (seat, n);
 		return;
 	}
 	int gone[SGB_MAX_LINK_PLAYERS], n = 0;
 	for (int p = S9xSGBSplitPlayers (); p >= 2 && now - n > want; p--)
 		if (S9xSGBSplitSeatPresent (p)) gone[n++] = p;
 	WinGBTableLeave (gone, n);
+}
+
+// Link Current Game's 2-4 item. Nobody linked, it is n Players: a table of
+// players 1..n. Once one plays it is Player n: seat them in their own place
+// (port n, .savn) or take them away, the rest playing on; the last player
+// getting up ends the table and the counts come back.
+static void WinGBLinkPlayerItem (int n)
+{
+	if (S9xSGBViewerClientActive ())
+	{
+		S9xSetInfoString ("This window is a player's screen - close it to leave the session");
+		return;
+	}
+	if (Settings.GBLinkPeerInstance) return;
+	if (GBTableSeated ())
+	{
+		if (S9xSGBSplitSeatPresent (n)) WinGBTableLeave (&n, 1);
+		else                            WinGBTableSeat (&n, 1);
+		return;
+	}
+	if (S9xSGBSplitActive () && GBLinkOtherRom[0])
+	{
+		S9xSetInfoString ("Link cable: end the Other Game session first");
+		return;
+	}
+	WinToggleGBLink (GBLINK_SAME, n);
 }
 
 // A seat's window was closed: that player leaves the table they sat at.
@@ -17341,9 +17416,10 @@ static void GBSeatWindowsDestroy ()
 	GBSeatBusy  = 0;
 }
 
-static void GBSeatWindowsCreate (int players)
+static void GBSeatWindowsCreate (int players, unsigned places)
 {
 	GBSeatWindowsDestroy ();   // a restarted session never leaks its old set
+	GBSeatPlaces = places;
 
 	RECT host, hostClient;
 	if (!GetWindowRect (GUI.hWnd, &host)) return;
@@ -17403,7 +17479,7 @@ static void WinGBOtherGameClear ()
 // In-process split screen: no processes, no sockets — the SGB layer owns
 // the extra consoles and the local cable/adapter. The battery base path
 // hands each seat its own .savN next to the primary's .sav.
-static void WinStartGBSplit (int players)
+static void WinStartGBSplit (int players, unsigned places)
 {
 	if (GBLinkBlockedBySgbc ())
 	{
@@ -17426,9 +17502,9 @@ static void WinStartGBSplit (int players)
 	base[_MAX_PATH] = '\0';
 
 	// One shared window has no seat window to give a machine to.
-	GBSeatModelsPushToEngine (players);
+	GBSeatModelsPushToEngine (players, places);
 	for (int p = 2; p <= players; p++) S9xSGBSplitSetSeatExternal (p, false);
-	if (!S9xSGBSplitStart (players, base))
+	if (!S9xSGBSplitStart (players, base, places))
 	{
 		S9xSetInfoString ("Split screen: could not start the extra consoles");
 		return;
@@ -17454,7 +17530,7 @@ static void WinStartGBSplit (int players)
 		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	char msg[64];
-	snprintf (msg, sizeof (msg), "Split screen: %d players", players);
+	snprintf (msg, sizeof (msg), "Split screen: %d players", S9xSGBSplitPresentPlayers ());
 	S9xSetInfoString (msg);
 }
 
@@ -17488,7 +17564,7 @@ static void WinStopGBSplit (bool quiet)
 // The socketless Current Game session: every seat emulates inside this process
 // on the split engine, so a desync is structurally impossible; the spawned
 // windows only view a seat over shared memory and send their joypad back.
-static void WinStartGBViewerSession (int players)
+static void WinStartGBViewerSession (int players, unsigned places)
 {
 	if (Settings.SGB_BIOSModeActive && Settings.GameBoyRunMode == 1)
 	{
@@ -17510,8 +17586,8 @@ static void WinStartGBViewerSession (int players)
 	strncpy (base, S9xGetFilename (".sav", SRAM_DIR).c_str (), _MAX_PATH);
 	base[_MAX_PATH] = '\0';
 
-	GBSeatModelsPushToEngine (players);
-	if (!S9xSGBSplitStart (players, base))
+	GBSeatModelsPushToEngine (players, places);
+	if (!S9xSGBSplitStart (players, base, places))
 	{
 		S9xSetInfoString ("Link cable: could not start the extra consoles");
 		return;
@@ -17543,16 +17619,16 @@ static void WinStartGBViewerSession (int players)
 
 	WinSizeWindowForRing (players);
 
-	// One window per seat, all in this process. Seat identity is the
+	// One window per seated player, all in this process. Seat identity is the
 	// window's own, so they can all come up at once.
-	GBSeatWindowsCreate (players);
+	GBSeatWindowsCreate (players, places);
 	if (GBSeatCount < players - 1)
 		S9xSetInfoString ("Link cable: could not open every player window");
 
 	// And a SNES of its own for every seat that picked a Super Game Boy, run in
 	// step with the cable line by line, like the in-process seats (8 lines let a
 	// reply land after the master's next VBlank: Jinsei's START handshake).
-	GBSeatMachinesCreate (players);
+	GBSeatMachinesCreate (players, places);
 	S9xSGBSplitSetYield (GBSeatMachinesYield, 456);
 
 	// All consoles power up together — hard, so no seat boots from
@@ -17561,18 +17637,20 @@ static void WinStartGBViewerSession (int players)
 		PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (ID_EMULATION_HARD_RESET, 0), 0);
 
 	char msg[64];
-	snprintf (msg, sizeof (msg), "Link cable: %d players", players);
+	snprintf (msg, sizeof (msg), "Link cable: %d players", S9xSGBSplitPresentPlayers ());
 	S9xSetInfoString (msg);
 }
 
 // Split screen needs the BIOS-less core; everything else gets player windows.
-static void WinGBRestartSeatSession (int players)
+// places: who sits at the restarted table (bit p = player p).
+static void WinGBRestartSeatSession (unsigned places)
 {
+	const int players = GBTableTop (places);
 	if (players < 2) return;
 	if (GBLinkSplitScreen && !Settings.SGB_BIOSModeActive)
-		WinStartGBSplit (players);
+		WinStartGBSplit (players, places);
 	else
-		WinStartGBViewerSession (players);
+		WinStartGBViewerSession (players, places);
 }
 
 // Link Other Game: player 2 plays a second cart as an in-process seat, picked
@@ -17611,7 +17689,7 @@ static void WinStartGBOtherGame (const TCHAR *path)
 	GBLinkOtherPolicy[0] = S9xGBSeatPolicyForCart (rom.data (), rom.size (), path8.c_str (), false);
 	GBLinkOtherPolicy[1] = S9xGBSeatPolicyForCart (rom.data (), rom.size (), path8.c_str (), true);
 
-	WinGBRestartSeatSession (2);
+	WinGBRestartSeatSession (1u << 2);
 	if (!S9xSGBSplitActive ())
 	{
 		WinGBOtherGameClear ();
@@ -17646,16 +17724,16 @@ static void WinGBSeatSetModel (int player, unsigned char model)
 	snprintf (msg, sizeof (msg), "Player %d: %s", player, GBSeatModelName (model));
 	S9xSetInfoString (msg);
 
-	// Idle, or a session with no in-process seats to rebuild: the pick is
-	// waiting for the next Current Game session either way.
-	if (!S9xSGBSplitActive ()) return;
+	// Idle, or a player not at the table: the pick waits for the next time
+	// they sit down.
+	if (!S9xSGBSplitActive () || !S9xSGBSplitSeatPresent (player)) return;
 
-	const int players = S9xSGBSplitPresentPlayers ();
+	const unsigned places = GBTablePlaces ();
 	TCHAR other[_MAX_PATH];
 	_tcscpy (other, GBLinkOtherRom);
 	WinStopGBSplit ();
 	if (other[0]) WinStartGBOtherGame (other);
-	else          WinGBRestartSeatSession (players);
+	else          WinGBRestartSeatSession (places);
 }
 
 // The per-frame session watchdog for both viewer roles: a viewer follows

@@ -4298,18 +4298,21 @@ bool SplitPosExternal(int i)
 	return i >= 1 && SeatExternal(i - 1);
 }
 
-// Players 1 and 2 face each other while Infra-Red or GB KISS is on.
+// Player 1 and the next player at the table face each other while Infra-Red
+// or GB KISS is on.
 void SplitAttachIr(void)
 {
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	const int n = g_split_players >= 2 ? SplitCollect(cs) : 0;
+	int j = 1;
+	while (j < n && !cs[j] && !SplitPosExternal(j)) ++j;   // past empty places
 	SGB::IrSetMedia(g_ir_facing, g_kiss_facing);
-	if (!(g_ir_facing || g_kiss_facing) || n < 2 || !cs[0] || !cs[1] || SplitPosExternal(1))
+	if (!(g_ir_facing || g_kiss_facing) || j >= n || !cs[0] || !cs[j] || SplitPosExternal(j))
 	{
 		SGB::IrUnpair();
 		return;
 	}
-	SGB::IrPair(&cs[0]->DebugImpl()->mem, &cs[1]->DebugImpl()->mem);
+	SGB::IrPair(&cs[0]->DebugImpl()->mem, &cs[j]->DebugImpl()->mem);
 }
 
 // Wire the cable across every live core. Session start and checkpoint
@@ -4677,6 +4680,16 @@ int32_t S9xSGBSplitSeatCycles(int player, int32_t master_cycles)
 	return master_cycles + static_cast<int32_t>(extra);
 }
 
+// The master's one partner at a two-player table, whichever place they sit
+// in (their core or their machine's); -1 at any other count.
+static int SplitLoneSeat(void)
+{
+	if (S9xSGBSplitPresentPlayers() != 2) return -1;
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		if ((g_split_cores[k] || g_split_external[k]) && !g_split_ghost[k]) return k;
+	return -1;
+}
+
 static void SplitStaggerSeats(void)
 {
 	std::memset(g_seat_head_start_due, 0, sizeof g_seat_head_start_due);
@@ -4684,12 +4697,10 @@ static void SplitStaggerSeats(void)
 	g_master_handoff_t = -1;
 	// In BIOS mode only a seat mirroring the master spends it, when the hold
 	// at the cart's first instruction lets go (SplitRunSeatsSlaved).
-	// Two consoles on the direct cable, player 2 in place (its core or its
-	// machine's); a table on the DMG-07 is never staggered.
-	if (S9xSGBSplitPresentPlayers() != 2 || g_split_hub || S9xSGBCartNeedsDmg07() ||
-	    !(g_split_cores[0] || g_split_external[0]))
-		return;
-	g_seat_head_start_due[0] = true;
+	// Two consoles on the direct cable; a table on the DMG-07 is never staggered.
+	const int k = SplitLoneSeat();
+	if (k < 0 || g_split_hub || S9xSGBCartNeedsDmg07()) return;
+	g_seat_head_start_due[k] = true;
 }
 
 // Spent the moment the seat's boot ROM hands off, not at power-on: the two
@@ -4912,7 +4923,8 @@ void S9xSGBSplitResetSeats(void)
 		if (g_split_cores[k]) g_split_cores[k]->ColdReset();
 	SplitDropSnaps();
 	g_seat_slave_accum = 0;
-	if (!g_split_external[0]) SplitStaggerSeats();   // a machine seat was not reset
+	const int lone = SplitLoneSeat();
+	if (!g_split_external[lone < 0 ? 0 : lone]) SplitStaggerSeats();   // a machine seat was not reset
 	SplitFollowMasterBoot();
 	if (SGB::SerialTraceEnabled())
 	{
@@ -5243,7 +5255,7 @@ static bool SplitMakeSeat(int k)
 	return true;
 }
 
-bool S9xSGBSplitStart(int players, const char *battery_base_path)
+bool S9xSGBSplitStart(int players, const char *battery_base_path, unsigned places)
 {
 	S9xSGBSplitStop(battery_base_path);
 
@@ -5255,6 +5267,13 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path)
 
 	for (int k = 0; k < players - 1; ++k)
 	{
+		// A place nobody sits at: an empty port until a player joins there.
+		if (places && !(places & (1u << (k + 2))))
+		{
+			g_split_cores[k].reset();
+			g_split_external[k] = false;
+			continue;
+		}
 		// An external seat's Game Boy lives in its own SNES machine; the
 		// place stays empty until that machine hands its core over.
 		if (SeatExternal(k)) { g_split_cores[k].reset(); continue; }

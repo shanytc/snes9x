@@ -151,8 +151,16 @@ constexpr int kLinkMaxSeats = 15;
 // instead (up to kLinkMaxSeats); it overrides the hub.
 void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
                        bool force_hub, bool ring = false);
+// A seat joined or left a live session. A null port is an empty place, an
+// unplugged Game Boy on the DMG-07; a running local adapter keeps its state
+// and only the changed ports are re-plugged. Anything else attaches afresh.
+void SerialSplitReplug(Serial *const serials[], Memory *const mems[], int count,
+                       bool force_hub, bool ring = false);
 void SerialSplitDetach();
 bool SerialSplitActive();
+// True while the game is using the split link: pulling a console now would
+// strand the others mid-exchange.
+bool SerialSplitInUse();
 // True while the cable is still exactly as SerialSplitAttach left it. The
 // ring/hub state is shared and lives outside the cores, so a core-only
 // snapshot can only be restored at a moment this reports true.

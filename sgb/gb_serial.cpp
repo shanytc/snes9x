@@ -405,9 +405,17 @@ struct SplitLink
 	// hub's player 1. (Hub sessions only, so the 4-seat span suffices.)
 	uint8_t prev_seat[kLinkMaxSeats - 1]       = {0xFF, 0xFF, 0xFF};
 	bool    prev_seat_armed[kLinkMaxSeats - 1] = {};
+
+	int64_t traded_at = -1;   // seat 0's real_cycles at the last byte two consoles traded
 };
 
 SplitLink g_splitlink;
+
+// Two consoles just traded a byte: the game is using the cable.
+static void SplitNoteTrade()
+{
+	if (g_splitlink.s[0]) g_splitlink.traded_at = g_splitlink.s[0]->real_cycles;
+}
 
 // ---- Faceball 2000 sixteen-player ring --------------------------------------
 // The custom cable Faceball's dormant 16-player mode was written for:
@@ -932,6 +940,7 @@ bool SplitTryResolveMaster(Serial &s, Memory &mem)
 		s.peer_data     = theirs;
 		s.peer_valid    = true;
 		s.peer_supplied = true;
+		SplitNoteTrade();
 		return true;
 	}
 	return false;
@@ -984,6 +993,7 @@ void SplitSettlePending(Serial &s, Memory &mem)
 	Trace("[%lld] split settle held %02X (left=%u)",
 	      (long long)s.real_cycles, data, s.pending_len);
 	CompletePassive(s, mem, data);
+	SplitNoteTrade();
 }
 
 void HandlePacket(int ch, Serial &s, Memory &mem, const LinkPacket &p)
@@ -1987,6 +1997,7 @@ static void RingExchange()
 	}
 	g_ring.shifting = false;
 	++g_ring.xfers;
+	SplitNoteTrade();
 
 	if (TraceOn())
 	{
@@ -2603,10 +2614,12 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 	g_splitlink.count = count;
 	for (int i = 0; i < count; ++i)
 	{
+		// A null port is an empty place at the table: the DMG-07 sees an
+		// unplugged Game Boy there.
 		g_splitlink.s[i] = serials[i];
 		g_splitlink.m[i] = mems[i];
 		// A byte held from an earlier session belongs to nobody here.
-		PendingClear(*serials[i]);
+		if (serials[i]) PendingClear(*serials[i]);
 	}
 
 	if (ring)
@@ -2636,6 +2649,52 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 	}
 }
 
+// A Game Boy joined or left a running split session. A local DMG-07 stays
+// mid-protocol, the way the real adapter keeps going when a console is
+// plugged in or pulled: only the changed ports and their per-port state are
+// touched, an emptied one then reading as unplugged. Any other cable change
+// (the direct cable becoming an adapter, the ring) attaches afresh.
+void SerialSplitReplug(Serial *const serials[], Memory *const mems[], int count,
+                       bool force_hub, bool ring)
+{
+	if (ring || g_ring.active || !g_hub.local || count < 2 || count > 4 || !serials || !mems)
+	{
+		SerialSplitAttach(serials, mems, count, force_hub, ring);
+		return;
+	}
+
+	for (int i = 0; i < kLinkMaxSeats; ++i)
+	{
+		Serial *ns = i < count ? serials[i] : nullptr;
+		Memory *nm = i < count ? mems[i] : nullptr;
+		if (ns == g_splitlink.s[i] && nm == g_splitlink.m[i]) continue;
+		// A console going away may be the one clocking a byte.
+		if (g_splitlink.s[i] && g_active == g_splitlink.s[i])
+		{
+			g_active     = nullptr;
+			g_active_mem = nullptr;
+		}
+		if (ns) PendingClear(*ns);
+		g_splitlink.s[i] = ns;
+		g_splitlink.m[i] = nm;
+		if (i >= 1 && i < kLinkMaxSeats)
+		{
+			g_splitlink.prev_seat[i - 1]       = 0xFF;
+			g_splitlink.prev_seat_armed[i - 1] = false;
+		}
+		if (i < 4)
+		{
+			g_hub.wake_ff[i] = g_hub.wake_prev[i] = 0;
+			g_hub.wake_pairs[i] = g_hub.wake_pair_cmd[i] = g_hub.wake_frame[i] = 0;
+			if (g_hub.bulk_src == i) { g_hub.bulk_src = -1; g_hub.relay_arm = false; }
+			if (g_hub.wake_seat == i) g_hub.wake_pending = false;
+		}
+	}
+	g_splitlink.count = count;
+	g_hub.target      = static_cast<uint8_t>(count);
+	Trace("session: replug x%d (local DMG-07)", count);
+}
+
 void SerialSplitDetach()
 {
 	Cpu::SetTraceHook(nullptr);
@@ -2650,6 +2709,16 @@ void SerialSplitDetach()
 }
 
 bool SerialSplitActive() { return g_splitlink.count > 0; }
+
+// A local DMG-07 past its ping phase has every player's packet in its rounds;
+// a cable or ring is in use while bytes crossed it in the last two seconds.
+bool SerialSplitInUse()
+{
+	if (g_splitlink.count <= 0) return false;
+	if (g_hub.local) return g_hub.phase != kDmg07Ping;
+	return g_splitlink.traded_at >= 0 && g_splitlink.s[0] &&
+	       g_splitlink.s[0]->real_cycles - g_splitlink.traded_at < 2 * 4194304;
+}
 
 // True while the cable still holds exactly what SerialSplitAttach left: no
 // byte in flight and nothing arbitrated yet. The ring and the hub are shared

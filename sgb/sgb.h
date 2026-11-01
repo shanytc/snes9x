@@ -522,7 +522,23 @@ int64_t S9xSGBMachineGbCycles(void);
 void    S9xSGBMachinePayGb(int gb_cycles);
 void S9xSGBSplitStop(const char *battery_base_path);  // saves seat batteries first
 bool S9xSGBSplitActive(void);
-int  S9xSGBSplitPlayers(void);
+int  S9xSGBSplitPlayers(void);   // places at the table, the master's included
+// A table seats join and leave while it plays. A seat keeps its place (player
+// number, pad, DMG-07 port): one that leaves empties it, and a join refills
+// it. The rest play on, the cable re-plugged under them; a table that has had
+// three players keeps the DMG-07 down to two. Add powers a Game Boy on in that
+// place (a machine seat's comes with its machine); Remove saves its battery.
+// A player leaving mid-game leaves a ghost: their Game Boy plays on unattended
+// until the game stops using the link, so nobody else stalls; Remove then
+// returns false and ReleaseGhosts (once a frame) unplugs it, returning the
+// unplugged players as bits (1 << player). Add on a ghost's place takes it back.
+bool S9xSGBSplitAddSeat(int player /*2..15*/);
+bool S9xSGBSplitRemoveSeat(int player /*2..15*/);   // true = unplugged now
+bool S9xSGBSplitSeatPresent(int player);
+bool S9xSGBSplitSeatGhost(int player);
+int  S9xSGBSplitPresentPlayers(void);   // the master and the seats present; 0 = off
+int  S9xSGBSplitGhosts(void);
+unsigned S9xSGBSplitReleaseGhosts(void);
 // Players 1 and 2 of an in-process session face each other: Infrared is the
 // Game Boy Color port, GB KISS the HuC1/HuC3 cart LEDs. Each holds across
 // sessions until turned off.

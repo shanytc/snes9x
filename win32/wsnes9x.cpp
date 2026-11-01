@@ -17693,6 +17693,41 @@ static int s_hoverField = 0, s_markedField = 0;	// outlined: the field under the
 
 #define INPUT_PICTURE_TIMER 98
 
+// The Sunsoft Pachinko row's power gauge: a preview dial, 0 each time the dialog opens.
+static S9xPachinkoPreview s_pachinkoPreview;
+
+// The power as a percentage in the picture's top-left corner, coloured as the gauge.
+static void DrawPachinkoPowerText(HDC screen)
+{
+	HDC dc = CreateCompatibleDC(screen);
+	HGDIOBJ oldBitmap = SelectObject(dc, s_panelBitmap);
+	SetBkMode(dc, TRANSPARENT);
+	const int x = (int) (S9X_PACHINKOPIC_POWER_X * s_panelScale), y = (int) (S9X_PACHINKOPIC_POWER_Y * s_panelScale);
+
+	HFONT label = CreateFont(-(int) (S9X_PACHINKOPIC_LABEL_SIZE * s_panelScale), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+	                         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, TEXT("Segoe UI"));
+	HGDIOBJ oldFont = SelectObject(dc, label);
+	SetTextColor(dc, RGB(90, 90, 90));
+	TextOut(dc, x, y, TEXT("POWER"), 5);
+	TEXTMETRIC tm;
+	GetTextMetrics(dc, &tm);
+
+	HFONT value = CreateFont(-(int) (S9X_PACHINKOPIC_VALUE_SIZE * s_panelScale), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+	                         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, TEXT("Segoe UI"));
+	SelectObject(dc, value);
+	const uint32 colour = S9xPachinkoPowerColour(s_pachinkoPreview.power());
+	SetTextColor(dc, RGB(colour >> 16, (colour >> 8) & 0xff, colour & 0xff));
+	TCHAR text[8];
+	const int length = _stprintf(text, TEXT("%d%%"), s_pachinkoPreview.percent());
+	TextOut(dc, x, y + tm.tmHeight, text, length);
+
+	SelectObject(dc, oldFont);
+	SelectObject(dc, oldBitmap);
+	DeleteObject(label);
+	DeleteObject(value);
+	DeleteDC(dc);
+}
+
 // The binding field a pad picture shape stands for; turbo rows bind turbo modes in the d-pad slots.
 // The Pachinko row's shapes are PACHPIC_* instead.
 static int PadPicField(int mask)
@@ -17783,8 +17818,12 @@ static void DrawPadPictureLit(HWND hDlg)
 	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
 		if (InputPictureOutlined(PadPicField(button)))
 			outlined |= button;
-	if (s_panelSource == IDB_PACHINKO)
+	const bool pachinko = s_panelSource == IDB_PACHINKO;
+	if (pachinko)
+	{
 		S9xPachinkoPictureDraw(px.data(), w, h, w, (float) s_panelScale, s_padLit < 0 ? 0 : s_padLit, outlined);
+		S9xPachinkoPictureDrawPower(px.data(), w, h, w, (float) s_panelScale, s_pachinkoPreview.power());
+	}
 	else
 	{
 		const int style = s_panelSource == IDB_PAD_USA ? S9X_PADPIC_USA : s_panelSource == IDB_PAD_EUR ? S9X_PADPIC_EUROPE : S9X_PADPIC_JAPAN;
@@ -17792,6 +17831,8 @@ static void DrawPadPictureLit(HWND hDlg)
 	}
 
 	SetDIBits(screen, s_panelBitmap, 0, h, px.data(), &bi, DIB_RGB_COLORS);
+	if (pachinko)
+		DrawPachinkoPowerText(screen);
 	ReleaseDC(hDlg, screen);
 	ShowInputPictureBitmap(hDlg);
 }
@@ -17881,7 +17922,8 @@ static void UpdateInputPictureLit(HWND hDlg)
 	SDLInput_Poll();
 	const bool outlines = UpdateInputPictureOutlines(hDlg);
 	const int lit = PadHeldButtons(s_padPanelIndex);
-	if (lit == s_padLit && !outlines)
+	const bool turned = s_padPanelIndex == PACHINKO_PAD && s_pachinkoPreview.turn(lit);
+	if (lit == s_padLit && !outlines && !turned)
 		return;
 	s_padLit = lit;
 	DrawPadPictureLit(hDlg);
@@ -18038,6 +18080,8 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 		for(i=0;i<NUM_JOYPAD_BINDS;i++)
 			s_deviceChoice[i] = -1;
+
+		s_pachinkoPreview.reset();	// the power gauge starts at 0% each time
 
 		for( i=0;i<256;i++)
 			GetAsyncKeyState(i);

@@ -1227,6 +1227,7 @@ void Snes9xPreferences::show()
     held_joystick.clear();
     device_choice.clear();
     pad_picture_lit = pad_picture_outlined = 0;
+    pachinko_preview.reset();
     guint source_id = g_timeout_add(30, poll_joystick, (gpointer)this);
 
     if (config->preferences_width > 0 && config->preferences_height > 0)
@@ -1618,7 +1619,8 @@ void Snes9xPreferences::update_pad_picture()
     if (get_object<Gtk::Notebook>("preferences_notebook")->get_current_page() != kJoypadPage)
         return;
     const int lit = pad_picture_held(), outlined = pad_picture_marked();
-    if (lit == pad_picture_lit && outlined == pad_picture_outlined)
+    const bool turned = pachinko_shown() && pachinko_preview.turn(lit);
+    if (lit == pad_picture_lit && outlined == pad_picture_outlined && !turned)
         return;
     pad_picture_lit = lit;
     pad_picture_outlined = outlined;
@@ -1724,14 +1726,39 @@ bool Snes9xPreferences::draw_pad_picture(const Cairo::RefPtr<Cairo::Context> &cr
     shown->flush();
     memcpy(shown->get_data(), pad_picture_base->get_data(), (size_t)shown->get_stride() * h);
     if (pachinko)
+    {
         S9xPachinkoPictureDraw((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf,
                                pad_picture_lit, pad_picture_outlined | pad_picture_hover, true);
+        S9xPachinkoPictureDrawPower((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf,
+                                    pachinko_preview.power(), true);
+    }
     else
         S9xPadPictureDraw((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf, style,
                           pad_picture_lit, pad_picture_outlined | pad_picture_hover, true);
     shown->mark_dirty();
     cairo_surface_set_device_scale(shown->cobj(), sf, sf);
-    cr->set_source(shown, (width - w / (double)sf) / 2, 0);
+    const double left = (width - w / (double)sf) / 2;
+    cr->set_source(shown, left, 0);
     cr->paint();
+    if (!pachinko)
+        return true;
+
+    // The power as text in the picture's top-left corner, coloured as the gauge
+    Cairo::FontExtents extents;
+    cr->select_font_face("Sans", Cairo::FONT_SLANT_NORMAL, Cairo::FONT_WEIGHT_BOLD);
+    cr->set_font_size(S9X_PACHINKOPIC_LABEL_SIZE * s);
+    cr->get_font_extents(extents);
+    double y = S9X_PACHINKOPIC_POWER_Y * s + extents.ascent;
+    cr->set_source_rgba(text.get_red(), text.get_green(), text.get_blue(), 0.7);
+    cr->move_to(left + S9X_PACHINKOPIC_POWER_X * s, y);
+    cr->show_text("POWER");
+    y += extents.descent;
+
+    const uint32_t colour = S9xPachinkoPowerColour(pachinko_preview.power());
+    cr->set_font_size(S9X_PACHINKOPIC_VALUE_SIZE * s);
+    cr->get_font_extents(extents);
+    cr->set_source_rgb((colour >> 16) / 255.0, ((colour >> 8) & 0xff) / 255.0, (colour & 0xff) / 255.0);
+    cr->move_to(left + S9X_PACHINKOPIC_POWER_X * s, y + extents.ascent);
+    cr->show_text(std::to_string(pachinko_preview.percent()) + "%");
     return true;
 }

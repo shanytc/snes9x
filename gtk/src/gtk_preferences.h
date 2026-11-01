@@ -8,6 +8,7 @@
 #include "gtk_compat.h"
 #include "gtk_s9x.h"
 #include "gtk_builder_window.h"
+#include "padpicture.h"
 #include <map>
 #include <vector>
 
@@ -77,6 +78,7 @@ class Snes9xPreferences final : public GtkBuilderWindow
     // The Sunsoft Pachinko's row: its note, and the pad labels its three entries borrow.
     Gtk::Label *pachinko_note = nullptr;
     Glib::ustring pad_label_text[NUM_PACHINKO_LINKS];
+    S9xPachinkoPreview pachinko_preview;	// its power gauge, from 0 each time Preferences opens
 
     std::map<guint16, Binding> held_keys;	// by hardware keycode
     int pad_picture_lit = 0;

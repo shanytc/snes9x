@@ -72,6 +72,15 @@ void PadPictureWidget::setPachinko(bool on)
     update();
 }
 
+void PadPictureWidget::setPower(float level)
+{
+    if (level == power)
+        return;
+    power = level;
+    render();
+    update();
+}
+
 void PadPictureWidget::setLit(int buttons)
 {
     if (buttons == lit)
@@ -146,8 +155,12 @@ void PadPictureWidget::render()
     shown = base.copy();
     const float s = (float)shown.width() / PictureWidth(pachinko);
     if (pachinko)
+    {
         S9xPachinkoPictureDraw((uint32_t *)shown.bits(), shown.width(), shown.height(), shown.bytesPerLine() / 4,
                                s, lit, marked | hover, true);
+        S9xPachinkoPictureDrawPower((uint32_t *)shown.bits(), shown.width(), shown.height(), shown.bytesPerLine() / 4,
+                                    s, power, true);
+    }
     else
         S9xPadPictureDraw((uint32_t *)shown.bits(), shown.width(), shown.height(), shown.bytesPerLine() / 4,
                           s, pad_style, lit, marked | hover, true);
@@ -162,6 +175,28 @@ void PadPictureWidget::paintEvent(QPaintEvent *)
         return;
     QPainter painter(this);
     painter.drawImage(pictureRect().topLeft(), shown);
+    if (!pachinko)
+        return;
+
+    // The power as text in the picture's top-left corner, coloured as the gauge
+    const QRectF r = pictureRect();
+    const float s = pictureScale();
+    QFont font = painter.font();
+    font.setPixelSize(std::max(1, (int)std::lround(S9X_PACHINKOPIC_LABEL_SIZE * s)));
+    font.setWeight(QFont::DemiBold);
+    painter.setFont(font);
+    QColor label = palette().color(QPalette::WindowText);
+    label.setAlphaF(0.7);
+    painter.setPen(label);
+    QPointF at(r.left() + S9X_PACHINKOPIC_POWER_X * s, r.top() + S9X_PACHINKOPIC_POWER_Y * s);
+    painter.drawText(at + QPointF(0, painter.fontMetrics().ascent()), "POWER");
+    at.ry() += painter.fontMetrics().height();
+
+    font.setPixelSize(std::max(1, (int)std::lround(S9X_PACHINKOPIC_VALUE_SIZE * s)));
+    font.setWeight(QFont::Bold);
+    painter.setFont(font);
+    painter.setPen(QColor::fromRgb(S9xPachinkoPowerColour(power)));
+    painter.drawText(at + QPointF(0, painter.fontMetrics().ascent()), QString("%1%").arg((int)std::lround(power * 100)));
 }
 
 void PadPictureWidget::changeEvent(QEvent *event)

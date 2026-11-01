@@ -12,6 +12,7 @@ class PadPictureWidget : public QWidget
     explicit PadPictureWidget(QWidget *parent = nullptr);
     void setPadStyle(int style);
     void setPachinko(bool on);	// the Sunsoft Pachinko's picture (PACHPIC_* buttons) instead of the pad
+    void setPower(float level);	// the Pachinko's power gauge, 0-1
     void setLit(int buttons);
     void setMarked(int buttons);
 
@@ -39,6 +40,7 @@ class PadPictureWidget : public QWidget
 
     int pad_style = 0;
     bool pachinko = false;
+    float power = 0;
     int lit = 0;
     int marked = 0;
     int hover = 0;

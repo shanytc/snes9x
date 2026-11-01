@@ -7,6 +7,7 @@
 #include "padpicture.h"
 #include <math.h>
 #include <algorithm>
+#include <chrono>
 #include <vector>
 
 namespace
@@ -229,6 +230,102 @@ void S9xPachinkoPictureDraw (uint32_t *px, int w, int h, int stride, float scale
 		const PadPicColour rim = stop ? PadPicColour { 190, 40, 40 } : PadPicColour { 40, 130, 230 };
 		PadPicDrawShape(b, px, w, h, stride, scale, on, ring, fill, rim, 120 / 255.0f, 2.0f, premultiplied);
 	}
+}
+
+void S9xPachinkoPreview::reset ()
+{
+	dial = hold = 0;
+	last_ms = -1;
+	frames = 0;
+}
+
+bool S9xPachinkoPreview::turn (int held)
+{
+	const int step = ((held & PACHPIC_STRONGER) ? 1 : 0) - ((held & PACHPIC_WEAKER) ? 1 : 0);
+	if (!step)
+	{
+		hold = 0;
+		last_ms = -1;
+		return false;
+	}
+
+	// The press's own frame, then the ones that passed since
+	const double now = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	frames = last_ms < 0 ? 1.0 : frames + (now - last_ms) * 60.0 / 1000.0;
+	last_ms = now;
+	const int before = dial;
+	for (; frames >= 1.0; frames -= 1.0)
+	{
+		if ((hold == 0 || hold >= 15) && dial + step >= 0 && dial + step <= 127)
+			dial += step;
+		if (hold < 15)
+			hold++;
+	}
+	return dial != before;
+}
+
+uint32_t S9xPachinkoPowerColour (float power)
+{
+	// Green, yellow, red
+	static const PadPicColour stops[3] = { { 40, 190, 80 }, { 250, 200, 0 }, { 230, 50, 40 } };
+	const float t = std::clamp(power, 0.0f, 1.0f) * 2;
+	const PadPicColour &a = stops[t < 1 ? 0 : 1], &b = stops[t < 1 ? 1 : 2];
+	const float f = t < 1 ? t : t - 1;
+	const int r = (int) (a.r + (b.r - a.r) * f + 0.5f), g = (int) (a.g + (b.g - a.g) * f + 0.5f), bl = (int) (a.b + (b.b - a.b) * f + 0.5f);
+	return (uint32_t) (r << 16 | g << 8 | bl);
+}
+
+void S9xPachinkoPictureDrawPower (uint32_t *px, int w, int h, int stride, float scale, float power, bool premultiplied)
+{
+	// A 270-degree band on the dial's outer ring, open at the bottom
+	const float cx = 200.7f, cy = 207.7f, r0 = 127.0f, r1 = 143.0f, start = 135.0f, sweep = 270.0f;
+	const float s = scale, edge = 1.2f / s;	// the rim, in source pixels
+	power = std::clamp(power, 0.0f, 1.0f);
+
+	const int left = (std::max)(0, (int) ((cx - r1) * s) - 2), top = (std::max)(0, (int) ((cy - r1) * s) - 2);
+	const int right = (std::min)(w - 1, (int) ((cx + r1) * s) + 2), bottom = (std::min)(h - 1, (int) ((cy + r1) * s) + 2);
+	for (int y = top; y <= bottom; y++)
+		for (int x = left; x <= right; x++)
+		{
+			int inFill = 0, inTrack = 0, inRim = 0;
+			float tPixel = 0;
+			for (int sy = 0; sy < 4; sy++)
+				for (int sx = 0; sx < 4; sx++)
+				{
+					const float ux = (x + (sx + 0.5f) / 4) / s - cx, uy = (y + (sy + 0.5f) / 4) / s - cy;
+					const float r = hypotf(ux, uy);
+					if (r < r0 || r > r1)
+						continue;
+					float a = atan2f(uy, ux) * 57.29578f - start;
+					while (a < 0)
+						a += 360.0f;
+					if (a > sweep)
+						continue;
+					const float t = a / sweep;
+					tPixel = t;
+					// The band's edges, its ends included, are a darker rim
+					const float d = (std::min)((std::min)(r - r0, r1 - r), (std::min)(a, sweep - a) / 57.29578f * r);
+					if (d < edge)
+						inRim++;
+					else if (t <= power && power > 0)
+						inFill++;
+					else
+						inTrack++;
+				}
+			if (!inFill && !inTrack && !inRim)
+				continue;
+
+			const uint32_t gauge = S9xPachinkoPowerColour(tPixel);
+			const PadPicColour fill = { (int) (gauge >> 16), (int) ((gauge >> 8) & 0xff), (int) (gauge & 0xff) };
+			const PadPicColour track = { 170, 170, 170 }, rim = { 70, 70, 70 };
+			const float cf = inFill / 16.0f * 0.95f, ct = inTrack / 16.0f * 0.7f, cr = inRim / 16.0f, cb = 1.0f - cf - ct - cr;
+			uint32_t &c = px[y * stride + x];
+			const int blue = (int) ((c & 0xff) * cb + fill.b * cf + track.b * ct + rim.b * cr + 0.5f);
+			const int green = (int) (((c >> 8) & 0xff) * cb + fill.g * cf + track.g * ct + rim.g * cr + 0.5f);
+			const int red = (int) (((c >> 16) & 0xff) * cb + fill.r * cf + track.r * ct + rim.r * cr + 0.5f);
+			const uint32_t alpha = premultiplied ? (uint32_t) ((c >> 24) * cb + 255 * (1.0f - cb) + 0.5f) << 24 : c & 0xff000000;
+			c = alpha | (red << 16) | (green << 8) | blue;
+		}
 }
 
 // The grey around the pad (win32's dialog colour), and the darkest the outline's soft edge reaches.

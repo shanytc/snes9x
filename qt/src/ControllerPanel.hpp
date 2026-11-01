@@ -3,6 +3,7 @@
 #include "BindingPanel.hpp"
 #include "PadPictureWidget.hpp"
 #include "EmuConfig.hpp"
+#include "padpicture.h"
 #include <QMenu>
 #include <QTimer>
 #include <map>
@@ -37,6 +38,7 @@ class ControllerPanel :
     // The pad rows' names and icons, put back after the Sunsoft Pachinko's three rows.
     QString pad_row_names[EmuConfig::num_controller_bindings];
     QIcon pad_row_icons[EmuConfig::num_controller_bindings];
+    S9xPachinkoPreview pachinko_preview;	// its power gauge, from 0 each time the panel shows
 
     QMenu edit_menu;
     QMenu auto_assign_menu;

@@ -307,6 +307,8 @@ void ControllerPanel::showEvent(QShowEvent *event)
     };
     app->qtapp->installEventFilter(this);
     pad_picture->setPadStyle(app->config->pad_picture_style);
+    pachinko_preview.reset();
+    pad_picture->setPower(0);
     pad_picture_timer.start();
     updatePadPicture();
 }
@@ -398,6 +400,9 @@ int ControllerPanel::markedButtons()
 
 void ControllerPanel::updatePadPicture()
 {
-    pad_picture->setLit(heldButtons());
+    const int held = heldButtons();
+    pad_picture->setLit(held);
     pad_picture->setMarked(markedButtons());
+    if (pachinkoShown() && pachinko_preview.turn(held))
+        pad_picture->setPower(pachinko_preview.power());
 }

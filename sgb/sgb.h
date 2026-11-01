@@ -448,7 +448,9 @@ bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap);
 // Faceball 2000 alone may seat 5..SGB_MAX_LINK_PLAYERS, wired as its
 // custom ring cable.
 constexpr int SGB_MAX_LINK_PLAYERS = 15;
-bool S9xSGBSplitStart(int players, const char *battery_base_path);
+// places: bit p = player p sits at the table (players = the highest one); a
+// place left out starts empty. 0 seats every place from 2 to players.
+bool S9xSGBSplitStart(int players, const char *battery_base_path, unsigned places = 0);
 
 // A seat may run a Game Boy Model of its own instead of the master's - a plain
 // Game Boy on the cable of a Super Game Boy session, a Color beside a mono one.
@@ -539,7 +541,7 @@ bool S9xSGBSplitSeatGhost(int player);
 int  S9xSGBSplitPresentPlayers(void);   // the master and the seats present; 0 = off
 int  S9xSGBSplitGhosts(void);
 unsigned S9xSGBSplitReleaseGhosts(void);
-// Players 1 and 2 of an in-process session face each other: Infrared is the
+// Player 1 and the next player at the table face each other: Infrared is the
 // Game Boy Color port, GB KISS the HuC1/HuC3 cart LEDs. Each holds across
 // sessions until turned off.
 void S9xSGBSetInfrared(bool on);

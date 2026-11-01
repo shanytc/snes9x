@@ -13,6 +13,16 @@ static const char *const kPadPictureFiles[S9X_PADPIC_NUM_STYLES] = {
     ":/pads/pad_usa.png", ":/pads/pad_eur.png", ":/pads/pad_sfc.png"
 };
 
+static int PictureWidth(bool pachinko)
+{
+    return pachinko ? S9X_PACHINKOPIC_WIDTH : S9X_PADPIC_WIDTH;
+}
+
+static int PictureHeight(bool pachinko)
+{
+    return pachinko ? S9X_PACHINKOPIC_HEIGHT : S9X_PADPIC_HEIGHT;
+}
+
 PadPictureWidget::PadPictureWidget(QWidget *parent)
     : QWidget(parent)
 {
@@ -26,6 +36,12 @@ PadPictureWidget::PadPictureWidget(QWidget *parent)
 // The style's picture, its surround cleared and the L and R labels in the palette's text colour.
 void PadPictureWidget::loadSource()
 {
+    // The Pachinko's picture already has a transparent surround
+    if (pachinko)
+    {
+        source = QImage(":/pads/pad_pachinko.png").convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        return;
+    }
     source = QImage(kPadPictureFiles[pad_style]).convertToFormat(QImage::Format_ARGB32_Premultiplied);
     if (!source.isNull())
         S9xPadPictureMatte((uint32_t *)source.bits(), source.bytesPerLine() / 4,
@@ -39,6 +55,18 @@ void PadPictureWidget::setPadStyle(int style)
     if (style == pad_style)
         return;
     pad_style = style;
+    loadSource();
+    rescale();
+    update();
+}
+
+void PadPictureWidget::setPachinko(bool on)
+{
+    if (on == pachinko)
+        return;
+    pachinko = on;
+    lit = marked = hover = 0;
+    unsetCursor();
     loadSource();
     rescale();
     update();
@@ -64,14 +92,14 @@ void PadPictureWidget::setMarked(int buttons)
 
 float PadPictureWidget::pictureScale() const
 {
-    return std::min(kPadPictureScale, (float)width() / S9X_PADPIC_WIDTH);
+    return std::min(kPadPictureScale, (float)width() / PictureWidth(pachinko));
 }
 
 // Centred along the top, in logical pixels.
 QRectF PadPictureWidget::pictureRect() const
 {
     const float s = pictureScale();
-    const float w = S9X_PADPIC_WIDTH * s, h = S9X_PADPIC_HEIGHT * s;
+    const float w = PictureWidth(pachinko) * s, h = PictureHeight(pachinko) * s;
     return QRectF((width() - w) / 2, 0, w, h);
 }
 
@@ -81,7 +109,8 @@ int PadPictureWidget::buttonAt(QPointF pos) const
     const float s = pictureScale();
     if (!r.contains(pos) || s <= 0)
         return 0;
-    return S9xPadPictureButtonAt((pos.x() - r.left()) / s, (pos.y() - r.top()) / s, PADPIC_ALL);
+    const float x = (pos.x() - r.left()) / s, y = (pos.y() - r.top()) / s;
+    return pachinko ? S9xPachinkoPictureButtonAt(x, y, PACHPIC_ALL) : S9xPadPictureButtonAt(x, y, PADPIC_ALL);
 }
 
 void PadPictureWidget::setHover(int button)
@@ -115,9 +144,13 @@ void PadPictureWidget::render()
     if (base.isNull())
         return;
     shown = base.copy();
-    const float s = (float)shown.width() / S9X_PADPIC_WIDTH;
-    S9xPadPictureDraw((uint32_t *)shown.bits(), shown.width(), shown.height(), shown.bytesPerLine() / 4,
-                      s, pad_style, lit, marked | hover, true);
+    const float s = (float)shown.width() / PictureWidth(pachinko);
+    if (pachinko)
+        S9xPachinkoPictureDraw((uint32_t *)shown.bits(), shown.width(), shown.height(), shown.bytesPerLine() / 4,
+                               s, lit, marked | hover, true);
+    else
+        S9xPadPictureDraw((uint32_t *)shown.bits(), shown.width(), shown.height(), shown.bytesPerLine() / 4,
+                          s, pad_style, lit, marked | hover, true);
     shown.setDevicePixelRatio(base_dpr);
 }
 
@@ -177,7 +210,7 @@ void PadPictureWidget::leaveEvent(QEvent *event)
 
 void PadPictureWidget::contextMenuEvent(QContextMenuEvent *event)
 {
-    if (!pictureRect().contains(event->pos()))
+    if (pachinko || !pictureRect().contains(event->pos()))
         return;
 
     QMenu menu(this);

@@ -322,6 +322,7 @@ struct EmuConfig
         eMultitap8,
         eDualJustifiers,
         eMacsRifle,
+        ePachinko,          // the Sunsoft Pachinko controller in port 2
         eNumPortConfigurations
     };
     int port_configuration;
@@ -338,6 +339,8 @@ struct EmuConfig
 
     static const int allowed_bindings = 4;
     static const int num_controller_bindings = 18;
+    // The Sunsoft Pachinko's keys: Stronger, Weaker, Stop.
+    static const int num_pachinko_bindings = 3;
     // Then the five Game Boy Model consoles in S9xGBModelHotkeys order, the
     // BIOS Manager, the coin-op front panels, and the Super Disc's
     // Insert/Eject last.
@@ -357,6 +360,11 @@ struct EmuConfig
         {
             EmuBinding buttons[num_controller_bindings * allowed_bindings];
         } controller[num_controllers];
+
+        struct
+        {
+            EmuBinding buttons[num_pachinko_bindings * allowed_bindings];
+        } pachinko;
 
         EmuBinding shortcuts[num_shortcuts * allowed_bindings];
     } binding;

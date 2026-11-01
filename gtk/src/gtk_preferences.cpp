@@ -27,8 +27,8 @@
 static Snes9xPreferences *preferences = nullptr;
 
 // data/pads/pad_*.png, embedded by sourcify (CMakeLists.txt).
-extern unsigned char pad_usa[], pad_eur[], pad_sfc[];
-extern int pad_usa_size, pad_eur_size, pad_sfc_size;
+extern unsigned char pad_usa[], pad_eur[], pad_sfc[], pad_pachinko[];
+extern int pad_usa_size, pad_eur_size, pad_sfc_size, pad_pachinko_size;
 
 // b_links' joypad entries as pad picture buttons: the main twelve, then turbo and sticky A-R.
 static const int kLinkButtons[NUM_JOYPAD_LINKS] = {
@@ -40,12 +40,16 @@ static const int kLinkButtons[NUM_JOYPAD_LINKS] = {
 static const int kMainLinks = 12;
 static const int kJoypadPage = 4;
 
+// The Sunsoft Pachinko's row: its three entries as its picture's parts, and the labels they borrow.
+static const int kPachinkoLinkButtons[NUM_PACHINKO_LINKS] = { PACHPIC_STRONGER, PACHPIC_WEAKER, PACHPIC_STOP };
+static const char *const kPachinkoLabels[NUM_PACHINKO_LINKS] = { "label16", "label17", "label18" };
+
 // As win32's Input Configuration: the picture at 0.7 of its size, less when narrower.
 static const float kPadPictureScale = 0.7f;
 
-static float pad_picture_scale(int width)
+static float pad_picture_scale(int width, int picture_width)
 {
-    return std::min(kPadPictureScale, (float)width / S9X_PADPIC_WIDTH);
+    return std::min(kPadPictureScale, (float)width / picture_width);
 }
 
 void snes9x_preferences_open(Snes9xWindow *window, int page)
@@ -219,6 +223,8 @@ void Snes9xPreferences::connect_signals()
             return false;
         if (event->button == 3)
         {
+            if (pachinko_shown())
+                return true;
             syncing_pad_style = true;
             pad_style_items[config->pad_picture_style]->set_active(true);
             syncing_pad_style = false;
@@ -228,8 +234,9 @@ void Snes9xPreferences::connect_signals()
         if (event->button != 1)
             return false;
         const int button = pad_picture_button_at(event->x, event->y);
-        for (int i = 0; button && i < kMainLinks; i++)
-            if (kLinkButtons[i] == button)
+        const int links = pachinko_shown() ? NUM_PACHINKO_LINKS : kMainLinks;
+        for (int i = 0; button && i < links; i++)
+            if (link_button(i) == button)
             {
                 get_object<Gtk::Notebook>("notebook2")->set_current_page(0);
                 get_object<Gtk::Entry>(b_links[i].button_name)->grab_focus();
@@ -245,6 +252,20 @@ void Snes9xPreferences::connect_signals()
         return true;
     });
     build_pad_style_menu();
+
+    // The Sunsoft Pachinko's row borrows the first three entries; this note fills the rest.
+    for (int i = 0; i < NUM_PACHINKO_LINKS; i++)
+        pad_label_text[i] = get_object<Gtk::Label>(kPachinkoLabels[i])->get_label();
+    pachinko_note = Gtk::manage(new Gtk::Label(
+        _("Hold Stronger or Weaker to turn the dial; it stays where you leave it.\n\n"
+          "Balls launch at the dial's strength unless Stop is held. Use Joypad 1 for the menus.\n\n"
+          "Connect it with Input > Sunsoft Pachinko > Connect to Port 2. Games look for it when they start, "
+          "so reset after connecting.")));
+    pachinko_note->set_line_wrap(true);
+    pachinko_note->set_max_width_chars(48);
+    pachinko_note->set_xalign(0.0);
+    pachinko_note->set_valign(Gtk::ALIGN_START);
+    get_object<Gtk::Box>("hbox11")->pack_start(*pachinko_note, true, true, 0);
 
     get_object<Gtk::ComboBox>("control_combo")->signal_changed().connect([&] {
         bindings_to_dialog(get_object<Gtk::ComboBox>("control_combo")->get_active_row_number());
@@ -1264,6 +1285,9 @@ void Snes9xPreferences::focus_next()
         if (b_breaks[i] == next)
             next = -1;
     }
+    // The Pachinko's row ends after its three entries
+    if (pachinko_shown() && next == NUM_PACHINKO_LINKS)
+        next = -1;
 
     if (next > 0)
         get_object<Gtk::Entry>(b_links[next].button_name)->grab_focus();
@@ -1275,6 +1299,8 @@ void Snes9xPreferences::swap_with()
 {
     int source_joypad = get_combo("control_combo");
     int dest_joypad = get_combo("joypad_to_swap_with");
+    if (source_joypad == PACHINKO_SLOT)
+        return;
 
     JoypadBinding tmp = pad[source_joypad];
     pad[source_joypad] = pad[dest_joypad];
@@ -1392,7 +1418,40 @@ void Snes9xPreferences::bindings_to_dialog(int joypad)
         set_entry_text(shortcut_names[i].button_name, shortcut[i].to_string(true));
     }
 
+    show_pachinko_layout(joypad == PACHINKO_SLOT);
     update_device_combo();
+}
+
+bool Snes9xPreferences::pachinko_shown()
+{
+    return get_combo("control_combo") == PACHINKO_SLOT;
+}
+
+// The picture part a b_links joypad entry stands for on the row shown.
+int Snes9xPreferences::link_button(int link)
+{
+    if (pachinko_shown())
+        return link >= 0 && link < NUM_PACHINKO_LINKS ? kPachinkoLinkButtons[link] : 0;
+    return link >= 0 && link < NUM_JOYPAD_LINKS ? kLinkButtons[link] : 0;
+}
+
+// The Pachinko's row: three entries relabelled, the rest of the pad and its turbo page hidden.
+void Snes9xPreferences::show_pachinko_layout(bool pachinko)
+{
+    const Glib::ustring names[NUM_PACHINKO_LINKS] = { _("Stronger"), _("Weaker"), _("Stop") };
+    for (int i = 0; i < NUM_PACHINKO_LINKS; i++)
+        get_object<Gtk::Label>(kPachinkoLabels[i])->set_label(pachinko ? names[i] : pad_label_text[i]);
+
+    for (const char *name : { "label19", "label20", "label21", "b_right", "b_start", "b_select", "table3" })
+        get_object<Gtk::Widget>(name)->set_visible(!pachinko);
+    get_object<Gtk::Notebook>("notebook2")->get_nth_page(1)->set_visible(!pachinko);
+    get_object<Gtk::Widget>("swap_with")->set_sensitive(!pachinko);
+    get_object<Gtk::Widget>("joypad_to_swap_with")->set_sensitive(!pachinko);
+    if (pachinko_note)
+        pachinko_note->set_visible(pachinko);
+
+    pad_picture_lit = pad_picture_outlined = pad_picture_hover = 0;
+    get_object<Gtk::DrawingArea>("pad_picture")->queue_draw();
 }
 
 // The connected controllers, preselecting the joypad's pick, else the device its
@@ -1455,15 +1514,20 @@ void Snes9xPreferences::auto_assign_joypad()
 
     const int joypad = get_combo("control_combo");
     auto bindings = device->gamepad_bindings(config->joystick_threshold);
-    for (int i = 0; i < kMainLinks; i++)
+
+    // The Pachinko: the shoulders (b_r, b_l) turn the dial, A (where its own button reads) is Stop
+    const int pachinko_from[NUM_PACHINKO_LINKS] = { 11, 10, 6 };
+    const int count = joypad == PACHINKO_SLOT ? NUM_PACHINKO_LINKS : kMainLinks;
+    for (int i = 0; i < count; i++)
     {
-        if (!bindings[i].hex())
+        Binding from = bindings[joypad == PACHINKO_SLOT ? pachinko_from[i] : i];
+        if (!from.hex())
             continue;
-        pad[joypad].data[i] = bindings[i];
+        pad[joypad].data[i] = from;
 
         // As store_binding: an input drives a button or a shortcut, not both
         for (auto &s : shortcut)
-            if (s == bindings[i])
+            if (s == from)
                 s.clear();
     }
 
@@ -1513,7 +1577,7 @@ void Snes9xPreferences::track_joystick(const Binding &binding, bool pressed)
 bool Snes9xPreferences::bound_on_current_pad(const Binding &binding)
 {
     const int joypad = get_combo("control_combo");
-    if (joypad < 0 || joypad >= NUM_JOYPADS)
+    if (joypad < 0 || joypad > PACHINKO_SLOT)
         return false;
     for (const Binding &b : pad[joypad].data)
         if (b.value && b == binding)
@@ -1524,7 +1588,7 @@ bool Snes9xPreferences::bound_on_current_pad(const Binding &binding)
 int Snes9xPreferences::pad_picture_held()
 {
     const int joypad = get_combo("control_combo");
-    if (joypad < 0 || joypad >= NUM_JOYPADS)
+    if (joypad < 0 || joypad > PACHINKO_SLOT)
         return 0;
     int lit = 0;
     for (int i = 0; i < NUM_JOYPAD_LINKS; i++)
@@ -1536,7 +1600,7 @@ int Snes9xPreferences::pad_picture_held()
         for (auto &key : held_keys)
             held = held || key.second == b;
         if (held)
-            lit |= kLinkButtons[i];
+            lit |= link_button(i);
     }
     return lit;
 }
@@ -1545,7 +1609,7 @@ int Snes9xPreferences::pad_picture_held()
 int Snes9xPreferences::pad_picture_marked()
 {
     const int focus = get_focused_binding();
-    return focus >= 0 && focus < NUM_JOYPAD_LINKS ? kLinkButtons[focus] : 0;
+    return focus >= 0 && focus < NUM_JOYPAD_LINKS ? link_button(focus) : 0;
 }
 
 // From the joypad poll: redraw when the held or edited buttons change.
@@ -1564,12 +1628,15 @@ void Snes9xPreferences::update_pad_picture()
 // The picture sits centred along the top of its area.
 int Snes9xPreferences::pad_picture_button_at(double x, double y)
 {
+    const bool pachinko = pachinko_shown();
+    const int pw = pachinko ? S9X_PACHINKOPIC_WIDTH : S9X_PADPIC_WIDTH, ph = pachinko ? S9X_PACHINKOPIC_HEIGHT : S9X_PADPIC_HEIGHT;
     const int width = get_object<Gtk::DrawingArea>("pad_picture")->get_allocated_width();
-    const float s = pad_picture_scale(width);
-    const double left = (width - S9X_PADPIC_WIDTH * s) / 2;
-    if (s <= 0 || x < left || x >= left + S9X_PADPIC_WIDTH * s || y < 0 || y >= S9X_PADPIC_HEIGHT * s)
+    const float s = pad_picture_scale(width, pw);
+    const double left = (width - pw * s) / 2;
+    if (s <= 0 || x < left || x >= left + pw * s || y < 0 || y >= ph * s)
         return 0;
-    return S9xPadPictureButtonAt((x - left) / s, y / s, PADPIC_ALL);
+    return pachinko ? S9xPachinkoPictureButtonAt((x - left) / s, y / s, PACHPIC_ALL)
+                    : S9xPadPictureButtonAt((x - left) / s, y / s, PADPIC_ALL);
 }
 
 void Snes9xPreferences::set_pad_picture_hover(int button)
@@ -1591,61 +1658,77 @@ void Snes9xPreferences::set_pad_picture_hover(int button)
 bool Snes9xPreferences::draw_pad_picture(const Cairo::RefPtr<Cairo::Context> &cr)
 {
     auto area = get_object<Gtk::DrawingArea>("pad_picture");
+    const bool pachinko = pachinko_shown();
+    const int pw = pachinko ? S9X_PACHINKOPIC_WIDTH : S9X_PADPIC_WIDTH, ph = pachinko ? S9X_PACHINKOPIC_HEIGHT : S9X_PADPIC_HEIGHT;
     const int width = area->get_allocated_width();
     const int sf = std::max(1, area->get_scale_factor());
-    const float s = pad_picture_scale(width);
-    const int w = (int)std::lround(S9X_PADPIC_WIDTH * s * sf), h = (int)std::lround(S9X_PADPIC_HEIGHT * s * sf);
+    const float s = pad_picture_scale(width, pw);
+    const int w = (int)std::lround(pw * s * sf), h = (int)std::lround(ph * s * sf);
     if (w <= 0 || h <= 0)
         return true;
 
-    // The style's picture in device pixels, kept until the size, style or theme changes.
+    // The style's picture (or the Pachinko's) in device pixels, kept until the size, style or theme changes.
     const int style = std::clamp(config->pad_picture_style, 0, S9X_PADPIC_NUM_STYLES - 1);
+    const int picture = pachinko ? S9X_PADPIC_NUM_STYLES : style;
     const Gdk::RGBA text = area->get_style_context()->get_color(area->get_state_flags());
     const uint32_t label = (uint32_t)std::lround(text.get_red() * 255) << 16 |
                            (uint32_t)std::lround(text.get_green() * 255) << 8 | (uint32_t)std::lround(text.get_blue() * 255);
-    if (!pad_picture_base || pad_picture_base_style != style || pad_picture_base_label != label ||
+    if (!pad_picture_base || pad_picture_base_style != picture || pad_picture_base_label != label ||
         pad_picture_base->get_width() != w || pad_picture_base->get_height() != h)
     {
-        const unsigned char *const pictures[S9X_PADPIC_NUM_STYLES] = { pad_usa, pad_eur, pad_sfc };
-        const int sizes[S9X_PADPIC_NUM_STYLES] = { pad_usa_size, pad_eur_size, pad_sfc_size };
+        const unsigned char *const pictures[S9X_PADPIC_NUM_STYLES + 1] = { pad_usa, pad_eur, pad_sfc, pad_pachinko };
+        const int sizes[S9X_PADPIC_NUM_STYLES + 1] = { pad_usa_size, pad_eur_size, pad_sfc_size, pad_pachinko_size };
         auto loader = Gdk::PixbufLoader::create();
-        loader->write(pictures[style], sizes[style]);
+        loader->write(pictures[picture], sizes[picture]);
         loader->close();
         auto pixbuf = loader->get_pixbuf();
 
-        // Its surround cleared at full size, then scaled
-        auto full = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, S9X_PADPIC_WIDTH, S9X_PADPIC_HEIGHT);
+        // The pad's surround cleared at full size (the Pachinko's is transparent already), then scaled
+        auto full = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, pw, ph);
         full->flush();
         unsigned char *data = full->get_data();
         const int stride = full->get_stride();
         const guint8 *pixels = pixbuf->get_pixels();
         const int rowstride = pixbuf->get_rowstride(), channels = pixbuf->get_n_channels();
-        for (int y = 0; y < S9X_PADPIC_HEIGHT; y++)
+        for (int y = 0; y < ph; y++)
         {
             uint32_t *row = (uint32_t *)(data + (size_t)y * stride);
             const guint8 *p = pixels + (size_t)y * rowstride;
-            for (int x = 0; x < S9X_PADPIC_WIDTH; x++, p += channels)
-                row[x] = (p[0] << 16) | (p[1] << 8) | p[2];
+            for (int x = 0; x < pw; x++, p += channels)
+            {
+                if (!pachinko)
+                {
+                    row[x] = (p[0] << 16) | (p[1] << 8) | p[2];
+                    continue;
+                }
+                const uint32_t a = channels == 4 ? p[3] : 255;	// Cairo wants it premultiplied
+                row[x] = (a << 24) | ((p[0] * a / 255) << 16) | ((p[1] * a / 255) << 8) | (p[2] * a / 255);
+            }
         }
-        S9xPadPictureMatte((uint32_t *)data, stride / 4, label);
+        if (!pachinko)
+            S9xPadPictureMatte((uint32_t *)data, stride / 4, label);
         full->mark_dirty();
 
         pad_picture_base = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, w, h);
         auto scaler = Cairo::Context::create(pad_picture_base);
-        scaler->scale((double)w / S9X_PADPIC_WIDTH, (double)h / S9X_PADPIC_HEIGHT);
+        scaler->scale((double)w / pw, (double)h / ph);
         scaler->set_source(full, 0, 0);
         cairo_pattern_set_filter(cairo_get_source(scaler->cobj()), CAIRO_FILTER_GOOD);
         scaler->paint();
         pad_picture_base->flush();
-        pad_picture_base_style = style;
+        pad_picture_base_style = picture;
         pad_picture_base_label = label;
     }
 
     auto shown = Cairo::ImageSurface::create(Cairo::FORMAT_ARGB32, w, h);
     shown->flush();
     memcpy(shown->get_data(), pad_picture_base->get_data(), (size_t)shown->get_stride() * h);
-    S9xPadPictureDraw((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf, style,
-                      pad_picture_lit, pad_picture_outlined | pad_picture_hover, true);
+    if (pachinko)
+        S9xPachinkoPictureDraw((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf,
+                               pad_picture_lit, pad_picture_outlined | pad_picture_hover, true);
+    else
+        S9xPadPictureDraw((uint32_t *)shown->get_data(), w, h, shown->get_stride() / 4, s * sf, style,
+                          pad_picture_lit, pad_picture_outlined | pad_picture_hover, true);
     shown->mark_dirty();
     cairo_surface_set_device_scale(shown->cobj(), sf, sf);
     cr->set_source(shown, (width - w / (double)sf) / 2, 0);

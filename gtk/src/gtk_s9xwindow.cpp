@@ -506,6 +506,26 @@ void Snes9xWindow::connect_signals()
         S9xApplySuperScopeCrosshair();
     });
 
+    // Input > Sunsoft Pachinko > Connect to Port 2: it in, or back to the joypads.
+    auto pachinko_item = get_object<Gtk::CheckMenuItem>("input_pachinko_item");
+    pachinko_item->signal_toggled().connect([this, pachinko_item] {
+        if (refreshing_controller_menu)
+            return;
+        if (S9xMovieActive())
+        {
+            Gtk::MessageDialog msg(*window.get(), _("That setting is locked while a movie is active."), false,
+                                   Gtk::MESSAGE_WARNING, Gtk::BUTTONS_OK, true);
+            msg.run();
+        }
+        else
+        {
+            const bool connect = pachinko_item->get_active();
+            S9xSetControllerOption(connect ? CONTROLLER_PACHINKO : CONTROLLER_JOYPADS);
+            S9xSetInfoString(connect ? "Sunsoft Pachinko connected to port 2" : "Sunsoft Pachinko disconnected");
+        }
+        update_controller_option_menu();
+    });
+
     get_object<Gtk::Menu>("input_menu_item_menu")->signal_show().connect([this] {
         update_controller_option_menu();
     });
@@ -1029,6 +1049,8 @@ void Snes9xWindow::update_controller_option_menu()
         { "input_multitap8_item", CONTROLLER_MULTITAP8 },
         { "input_dual_justifiers_item", CONTROLLER_DUAL_JUSTIFIERS },
         { "input_macsrifle_item", CONTROLLER_MACSRIFLE },
+        // Hidden: holds the radio group while the Pachinko is in, so no device stays checked
+        { "input_pachinko_radio", CONTROLLER_PACHINKO },
     };
 
     // As on win32: a ROM's NSRT header greys the devices it doesn't support,
@@ -1046,6 +1068,10 @@ void Snes9xWindow::update_controller_option_menu()
     auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
     crosshair_item->set_active(config->superscope_crosshair_visible);
     crosshair_item->set_sensitive(config->controller_option == CONTROLLER_SUPERSCOPE);
+
+    auto pachinko_item = get_object<Gtk::CheckMenuItem>("input_pachinko_item");
+    pachinko_item->set_active(config->controller_option == CONTROLLER_PACHINKO);
+    pachinko_item->set_sensitive(S9xControllerOptionValid(CONTROLLER_PACHINKO) && !movie_locked);
     refreshing_controller_menu = false;
 }
 

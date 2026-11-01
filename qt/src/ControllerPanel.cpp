@@ -17,14 +17,18 @@ static const int kRowButtons[EmuConfig::num_controller_bindings] = {
 };
 static const int kMainRows = 12;
 
+// The Sunsoft Pachinko's rows, after the eight pads in the controller list.
+static const int kPachinkoController = EmuConfig::num_controllers;
+static const int kPachinkoRowButtons[EmuConfig::num_pachinko_bindings] = { PACHPIC_STRONGER, PACHPIC_WEAKER, PACHPIC_STOP };
+
 ControllerPanel::ControllerPanel(EmuApplication *app_)
     : BindingPanel(app_)
 {
     setupUi(this);
+    controllerComboBox->addItem(tr("Sunsoft Pachinko"));
+    portComboBox->addItem(tr("Sunsoft Pachinko"));
     QObject::connect(controllerComboBox, &QComboBox::currentIndexChanged, [&](int index) {
-        BindingPanel::binding = this->app->config->binding.controller[index].buttons;
-        fillTable();
-        awaiting_binding = false;
+        showController(index);
     });
 
     BindingPanel::setTableWidget(tableWidget_controller,
@@ -48,7 +52,7 @@ ControllerPanel::ControllerPanel(EmuApplication *app_)
         action = swap_menu->addAction(QObject::tr("Controller %1").arg(i + 1));
         connect(action, &QAction::triggered, [&, i](bool) {
             auto current_index = controllerComboBox->currentIndex();
-            if (current_index == i)
+            if (current_index == i || pachinkoShown())
                 return;
             swapControllers(i, current_index);
             fillTable();
@@ -63,7 +67,11 @@ ControllerPanel::ControllerPanel(EmuApplication *app_)
         "up", "down", "left", "right", "a", "b", "x", "y", "l", "r", "start", "select", "a", "b", "x", "y", "l", "r"
     };
     for (int i = 0; i < 18; i++)
-        tableWidget_controller->verticalHeaderItem(i)->setIcon(QIcon(iconset + icons[i] + ".svg"));
+    {
+        pad_row_icons[i] = QIcon(iconset + icons[i] + ".svg");
+        pad_row_names[i] = tableWidget_controller->verticalHeaderItem(i)->text();
+        tableWidget_controller->verticalHeaderItem(i)->setIcon(pad_row_icons[i]);
+    }
 
     recreateAutoAssignMenu();
     onJoypadsChanged([&]{ recreateAutoAssignMenu(); });
@@ -86,8 +94,9 @@ ControllerPanel::ControllerPanel(EmuApplication *app_)
     verticalLayout->addWidget(pad_picture);
     pad_picture->setPadStyle(app->config->pad_picture_style);
     pad_picture->buttonClicked = [&](int button) {
-        for (int row = 0; row < kMainRows; row++)
-            if (kRowButtons[row] == button)
+        const int rows = pachinkoShown() ? EmuConfig::num_pachinko_bindings : kMainRows;
+        for (int row = 0; row < rows; row++)
+            if (rowButton(row) == button)
             {
                 int column = std::max(tableWidget_controller->currentColumn(), 0);
                 tableWidget_controller->setFocus();
@@ -142,6 +151,16 @@ void ControllerPanel::recreateAutoAssignMenu()
 
 void ControllerPanel::autoPopulateWithKeyboard(int slot)
 {
+    if (pachinkoShown())
+    {
+        const char *pachinko_list[] = { "e", "q", "w" };
+        for (int i = 0; i < EmuConfig::num_pachinko_bindings; i++)
+            binding[EmuConfig::allowed_bindings * i + slot] = EmuBinding::keyboard(QKeySequence::fromString(pachinko_list[i])[0].key());
+        fillTable();
+        app->updateBindings();
+        return;
+    }
+
     auto &buttons = app->config->binding.controller[controllerComboBox->currentIndex()].buttons;
     const char *button_list[] = { "Up", "Down", "Left", "Right", "d", "c", "s", "x", "z", "a", "Return", "Space" };
 
@@ -156,7 +175,11 @@ void ControllerPanel::autoPopulateWithJoystick(int joystick_id, int slot)
 {
     auto &device = app->input_manager->devices[joystick_id];
     auto sdl_controller = device.gamepad;
-    auto &buttons = app->config->binding.controller[controllerComboBox->currentIndex()].buttons;
+    EmuBinding *buttons = binding;
+    // The Pachinko: the shoulders turn the dial, A (where its own button reads) is Stop
+    const SDL_GamepadButton pachinko_list[] = { SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+                                                SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
+                                                SDL_GAMEPAD_BUTTON_EAST };
     const SDL_GamepadButton list[] = { SDL_GAMEPAD_BUTTON_DPAD_UP,
                                        SDL_GAMEPAD_BUTTON_DPAD_DOWN,
                                        SDL_GAMEPAD_BUTTON_DPAD_LEFT,
@@ -172,13 +195,15 @@ void ControllerPanel::autoPopulateWithJoystick(int joystick_id, int slot)
                                        SDL_GAMEPAD_BUTTON_BACK };
 
     auto bindings = SDLInputManager::getXInputButtonBindings(sdl_controller);
+    const SDL_GamepadButton *assign = pachinkoShown() ? pachinko_list : list;
+    const int count = pachinkoShown() ? (int)std::size(pachinko_list) : (int)std::size(list);
 
-    for (auto i = 0; i < std::size(list); i++)
+    for (auto i = 0; i < count; i++)
     {
-        if (!bindings.contains({ SDL_GAMEPAD_BINDTYPE_BUTTON, list[i] }))
+        if (!bindings.contains({ SDL_GAMEPAD_BINDTYPE_BUTTON, assign[i] }))
             continue;
 
-        auto &sdl_binding = bindings[{SDL_GAMEPAD_BINDTYPE_BUTTON, list[i]}];
+        auto &sdl_binding = bindings[{SDL_GAMEPAD_BINDTYPE_BUTTON, assign[i]}];
         if (SDL_GAMEPAD_BINDTYPE_BUTTON == sdl_binding.input_type)
             buttons[4 * i + slot] = EmuBinding::joystick_button(device.index, sdl_binding.input.button);
         else if (SDL_GAMEPAD_BINDTYPE_HAT == sdl_binding.input_type)
@@ -209,9 +234,8 @@ void ControllerPanel::swapControllers(int first, int second)
 
 void ControllerPanel::clearCurrentController()
 {
-    auto &c = app->config->binding.controller[controllerComboBox->currentIndex()];
-    for (auto &b : c.buttons)
-        b = {};
+    for (int i = 0; i < table_width * table_height; i++)
+        binding[i] = {};
     fillTable();
     app->updateBindings();
 }
@@ -221,8 +245,45 @@ void ControllerPanel::clearAllControllers()
     for (auto &c : app->config->binding.controller)
         for (auto &b : c.buttons)
             b = {};
+    for (auto &b : app->config->binding.pachinko.buttons)
+        b = {};
     fillTable();
     app->updateBindings();
+}
+
+bool ControllerPanel::pachinkoShown()
+{
+    return controllerComboBox->currentIndex() == kPachinkoController;
+}
+
+// The picture button a table row stands for.
+int ControllerPanel::rowButton(int row)
+{
+    if (pachinkoShown())
+        return row >= 0 && row < EmuConfig::num_pachinko_bindings ? kPachinkoRowButtons[row] : 0;
+    return row >= 0 && row < EmuConfig::num_controller_bindings ? kRowButtons[row] : 0;
+}
+
+// A pad's eighteen rows, or the Sunsoft Pachinko's three with its picture.
+void ControllerPanel::showController(int index)
+{
+    const bool pachinko = index == kPachinkoController;
+    const QString pachinko_names[EmuConfig::num_pachinko_bindings] = { tr("Stronger"), tr("Weaker"), tr("Stop") };
+
+    BindingPanel::binding = pachinko ? app->config->binding.pachinko.buttons : app->config->binding.controller[index].buttons;
+    table_height = pachinko ? EmuConfig::num_pachinko_bindings : EmuConfig::num_controller_bindings;
+    for (int row = 0; row < EmuConfig::num_controller_bindings; row++)
+    {
+        auto header = tableWidget_controller->verticalHeaderItem(row);
+        const bool renamed = pachinko && row < EmuConfig::num_pachinko_bindings;
+        header->setText(renamed ? pachinko_names[row] : pad_row_names[row]);
+        header->setIcon(renamed ? QIcon() : pad_row_icons[row]);
+        tableWidget_controller->setRowHidden(row, pachinko && !renamed);
+    }
+    pad_picture->setPachinko(pachinko);
+    fillTable();
+    awaiting_binding = false;
+    updatePadPicture();
 }
 
 void ControllerPanel::showEvent(QShowEvent *event)
@@ -300,7 +361,7 @@ bool ControllerPanel::eventFilter(QObject *watched, QEvent *event)
 
 bool ControllerPanel::boundHere(const EmuBinding &b)
 {
-    for (int i = 0; i < EmuConfig::num_controller_bindings * EmuConfig::allowed_bindings; i++)
+    for (int i = 0; i < table_height * EmuConfig::allowed_bindings; i++)
         if (binding[i].type != EmuBinding::None && binding[i].hash() == b.hash())
             return true;
     return false;
@@ -309,7 +370,7 @@ bool ControllerPanel::boundHere(const EmuBinding &b)
 int ControllerPanel::heldButtons()
 {
     int lit = 0;
-    for (int row = 0; row < EmuConfig::num_controller_bindings; row++)
+    for (int row = 0; row < table_height; row++)
         for (int column = 0; column < EmuConfig::allowed_bindings; column++)
         {
             const EmuBinding &b = binding[row * EmuConfig::allowed_bindings + column];
@@ -319,7 +380,7 @@ int ControllerPanel::heldButtons()
             for (auto &key : held_keys)
                 held = held || key.second.hash() == b.hash();
             if (held)
-                lit |= kRowButtons[row];
+                lit |= rowButton(row);
         }
     return lit;
 }
@@ -332,7 +393,7 @@ int ControllerPanel::markedButtons()
         row = cell_row;
     else if (tableWidget_controller->hasFocus())
         row = tableWidget_controller->currentRow();
-    return row >= 0 && row < EmuConfig::num_controller_bindings ? kRowButtons[row] : 0;
+    return rowButton(row);
 }
 
 void ControllerPanel::updatePadPicture()

@@ -534,8 +534,8 @@ foreach(logo RANGE 1 4)
     endforeach()
 endforeach()
 
-# Preferences' joypad picture, one array per pad style.
-foreach(pad usa eur sfc)
+# Preferences' joypad picture, one array per pad style, and the Sunsoft Pachinko's.
+foreach(pad usa eur sfc pachinko)
     set(pad_png ${CMAKE_CURRENT_SOURCE_DIR}/../data/pads/pad_${pad}.png)
     set(pad_cpp ${CMAKE_CURRENT_BINARY_DIR}/pad_${pad}.cpp)
     add_custom_command(

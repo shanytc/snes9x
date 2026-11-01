@@ -2,6 +2,7 @@
 #include "ui_ControllerPanel.h"
 #include "BindingPanel.hpp"
 #include "PadPictureWidget.hpp"
+#include "EmuConfig.hpp"
 #include <QMenu>
 #include <QTimer>
 #include <map>
@@ -29,6 +30,13 @@ class ControllerPanel :
     int heldButtons();
     int markedButtons();
     void updatePadPicture();
+    void showController(int index);
+    bool pachinkoShown();
+    int rowButton(int row);
+
+    // The pad rows' names and icons, put back after the Sunsoft Pachinko's three rows.
+    QString pad_row_names[EmuConfig::num_controller_bindings];
+    QIcon pad_row_icons[EmuConfig::num_controller_bindings];
 
     QMenu edit_menu;
     QMenu auto_assign_menu;

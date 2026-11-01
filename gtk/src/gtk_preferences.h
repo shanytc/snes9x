@@ -49,7 +49,7 @@ class Snes9xPreferences final : public GtkBuilderWindow
     // sliders by the same delta. Mirrors the Win32 dialog's behavior.
     int prev_regular_volume = 100;
     bool suppress_volume_sync = false;
-    std::array<JoypadBinding, NUM_JOYPADS> pad;
+    std::array<JoypadBinding, NUM_JOYPADS + 1> pad;  // + the Sunsoft Pachinko (PACHINKO_SLOT)
     std::array<Binding, NUM_EMU_LINKS> shortcut;
 
     // The joypad page's pad picture: held buttons lit, the hovered and edited ones ringed.
@@ -70,6 +70,13 @@ class Snes9xPreferences final : public GtkBuilderWindow
     int pad_picture_button_at(double x, double y);
     void set_pad_picture_hover(int button);
     void build_pad_style_menu();
+    bool pachinko_shown();
+    int link_button(int link);
+    void show_pachinko_layout(bool pachinko);
+
+    // The Sunsoft Pachinko's row: its note, and the pad labels its three entries borrow.
+    Gtk::Label *pachinko_note = nullptr;
+    Glib::ustring pad_label_text[NUM_PACHINKO_LINKS];
 
     std::map<guint16, Binding> held_keys;	// by hardware keycode
     int pad_picture_lit = 0;

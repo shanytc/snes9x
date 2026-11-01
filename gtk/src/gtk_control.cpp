@@ -305,6 +305,10 @@ void S9xApplyControllerOption()
         S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
         S9xSetController(1, CTL_MACSRIFLE, 0, 0, 0, 0);
         break;
+    case CONTROLLER_PACHINKO:
+        S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
+        S9xSetController(1, CTL_PACHINKO, 0, 0, 0, 0);
+        break;
     case CONTROLLER_JOYPADS:
     default:
         S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);

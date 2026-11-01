@@ -1848,6 +1848,17 @@ void EmuMainWindow::createWidgets()
 
     input_menu->addSeparator();
 
+    // Sunsoft Pachinko: Connect toggles it into port 2 and back to the joypads.
+    auto pachinko_menu = input_menu->addMenu(tr("Sunsoft &Pachinko"));
+    auto pachinko_action = pachinko_menu->addAction(tr("&Connect to Port 2"));
+    pachinko_action->setCheckable(true);
+    QObject::connect(pachinko_action, &QAction::triggered, [&](bool checked) {
+        app.setPortConfiguration(checked ? EmuConfig::ePachinko : EmuConfig::eJoypads);
+        S9xSetInfoString(checked ? "Sunsoft Pachinko connected to port 2" : "Sunsoft Pachinko disconnected");
+        updatePortConfigurationMenu();
+    });
+    port_configuration_actions[EmuConfig::ePachinko] = pachinko_action;
+
     // Barcodes: the Barcode Battler II on port 2, the reader a SNES game
     // takes. Connect needs a SNES game loaded, toggles in place and stays
     // across SNES loads (a Game Boy game unplugs it); scanning is only offered

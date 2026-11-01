@@ -118,7 +118,7 @@ class Snes9xConfig
     int lua_panel_height = 0; // 0 = the default split
 
     /* Controls */
-    std::array<JoypadBinding, NUM_JOYPADS> pad;
+    std::array<JoypadBinding, NUM_JOYPADS + 1> pad;  // + the Sunsoft Pachinko (PACHINKO_SLOT)
     std::array<Binding, NUM_EMU_LINKS> shortcut;
 
     /* Netplay */

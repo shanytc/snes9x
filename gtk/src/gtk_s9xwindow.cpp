@@ -275,6 +275,41 @@ static bool barcode_rescan_ready(const Snes9xConfig *config)
            *S9xBarcodeBattlerLastCode() != 0;
 }
 
+// Devices that leave Joypad #1 in port 1 and take port 2: their menu items
+// toggle, and Use SNES Joypad(s) stays checked with them.
+static const char *Port2DeviceName(int option)
+{
+    switch (option)
+    {
+    case CONTROLLER_MOUSE_SWAPPED:   return "SNES Mouse";
+    case CONTROLLER_SUPERSCOPE:      return "Super Scope";
+    case CONTROLLER_MULTITAP5:       return "Super Multitap";
+    case CONTROLLER_JUSTIFIER:       return "Konami Justifier";
+    case CONTROLLER_DUAL_JUSTIFIERS: return "Dual Justifiers";
+    case CONTROLLER_MACSRIFLE:       return "M.A.C.S. Rifle";
+    case CONTROLLER_PACHINKO:        return "Sunsoft Pachinko";
+    }
+    return nullptr;
+}
+
+static bool Port2Device(int option)
+{
+    return Port2DeviceName(option) != nullptr;
+}
+
+// An Input menu pick, with an OSD for what came into or left port 2.
+static void SelectInputDevice(Snes9xConfig *config, int option)
+{
+    const int previous = config->controller_option;
+    S9xSetControllerOption(option);
+    if (option == previous)
+        return;
+    if (Port2Device(option))
+        S9xSetInfoString((std::string(Port2DeviceName(option)) + " connected to Port 2").c_str());
+    else if (Port2Device(previous))
+        S9xSetInfoString((std::string(Port2DeviceName(previous)) + " disconnected from Port 2").c_str());
+}
+
 void Snes9xWindow::connect_signals()
 {
     drawing_area->signal_draw().connect(sigc::mem_fun(*this, &Snes9xWindow::draw));
@@ -466,7 +501,8 @@ void Snes9xWindow::connect_signals()
     });
 
     // win32's Input menu device list: what is plugged into the two
-    // controller ports. Radio items drawn as checks, as on win32.
+    // controller ports. Joypads, Mouse and Multitaps are radio items drawn as
+    // checks, as on win32; the port-2 devices are check items that toggle.
     const std::pair<const char *, int> device_items[] = {
         { "input_joypad_item", CONTROLLER_JOYPADS },
         { "input_mouse_item", CONTROLLER_MOUSE },
@@ -477,12 +513,14 @@ void Snes9xWindow::connect_signals()
         { "input_multitap8_item", CONTROLLER_MULTITAP8 },
         { "input_dual_justifiers_item", CONTROLLER_DUAL_JUSTIFIERS },
         { "input_macsrifle_item", CONTROLLER_MACSRIFLE },
+        { "input_pachinko_item", CONTROLLER_PACHINKO },
     };
     for (auto &[name, option] : device_items)
     {
-        auto item = get_object<Gtk::RadioMenuItem>(name);
+        auto item = get_object<Gtk::CheckMenuItem>(name);
         item->signal_toggled().connect([this, item, option] {
-            if (refreshing_controller_menu || !item->get_active())
+            // A radio item losing its check to another does nothing
+            if (refreshing_controller_menu || (!item->get_active() && !Port2Device(option)))
                 return;
             if (S9xMovieActive())
             {
@@ -492,24 +530,17 @@ void Snes9xWindow::connect_signals()
             }
             else
             {
-                S9xSetControllerOption(option);
+                SelectInputDevice(config, item->get_active() ? option : CONTROLLER_JOYPADS);
             }
             update_controller_option_menu();
         });
     }
 
-    auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
-    crosshair_item->signal_toggled().connect([this, crosshair_item] {
-        if (refreshing_controller_menu)
-            return;
-        config->superscope_crosshair_visible = crosshair_item->get_active();
-        S9xApplySuperScopeCrosshair();
-    });
-
-    // Input > Sunsoft Pachinko > Connect to Port 2: it in, or back to the joypads.
-    auto pachinko_item = get_object<Gtk::CheckMenuItem>("input_pachinko_item");
-    pachinko_item->signal_toggled().connect([this, pachinko_item] {
-        if (refreshing_controller_menu)
+    // Joypad(s) stays checked with a port-2 device, so clicking it doesn't toggle:
+    // take the device out here, back to joypads in both ports.
+    auto joypad_item = get_object<Gtk::RadioMenuItem>("input_joypad_item");
+    joypad_item->signal_activate().connect([this] {
+        if (refreshing_controller_menu || !Port2Device(config->controller_option))
             return;
         if (S9xMovieActive())
         {
@@ -519,11 +550,17 @@ void Snes9xWindow::connect_signals()
         }
         else
         {
-            const bool connect = pachinko_item->get_active();
-            S9xSetControllerOption(connect ? CONTROLLER_PACHINKO : CONTROLLER_JOYPADS);
-            S9xSetInfoString(connect ? "Sunsoft Pachinko connected to port 2" : "Sunsoft Pachinko disconnected");
+            SelectInputDevice(config, CONTROLLER_JOYPADS);
         }
         update_controller_option_menu();
+    });
+
+    auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
+    crosshair_item->signal_toggled().connect([this, crosshair_item] {
+        if (refreshing_controller_menu)
+            return;
+        config->superscope_crosshair_visible = crosshair_item->get_active();
+        S9xApplySuperScopeCrosshair();
     });
 
     get_object<Gtk::Menu>("input_menu_item_menu")->signal_show().connect([this] {
@@ -1049,8 +1086,7 @@ void Snes9xWindow::update_controller_option_menu()
         { "input_multitap8_item", CONTROLLER_MULTITAP8 },
         { "input_dual_justifiers_item", CONTROLLER_DUAL_JUSTIFIERS },
         { "input_macsrifle_item", CONTROLLER_MACSRIFLE },
-        // Hidden: holds the radio group while the Pachinko is in, so no device stays checked
-        { "input_pachinko_radio", CONTROLLER_PACHINKO },
+        { "input_pachinko_item", CONTROLLER_PACHINKO },
     };
 
     // As on win32: a ROM's NSRT header greys the devices it doesn't support,
@@ -1060,18 +1096,16 @@ void Snes9xWindow::update_controller_option_menu()
     refreshing_controller_menu = true;
     for (auto &[name, option] : device_items)
     {
-        auto item = get_object<Gtk::RadioMenuItem>(name);
-        item->set_active(config->controller_option == option);
+        // A port-2 device leaves Joypad #1 in port 1, so Joypad(s) stays checked with it
+        const bool joypad_too = option == CONTROLLER_JOYPADS && Port2Device(config->controller_option);
+        auto item = get_object<Gtk::CheckMenuItem>(name);
+        item->set_active(config->controller_option == option || joypad_too);
         item->set_sensitive(S9xControllerOptionValid(option) && !movie_locked);
     }
 
     auto crosshair_item = get_object<Gtk::CheckMenuItem>("input_superscope_crosshair_item");
     crosshair_item->set_active(config->superscope_crosshair_visible);
     crosshair_item->set_sensitive(config->controller_option == CONTROLLER_SUPERSCOPE);
-
-    auto pachinko_item = get_object<Gtk::CheckMenuItem>("input_pachinko_item");
-    pachinko_item->set_active(config->controller_option == CONTROLLER_PACHINKO);
-    pachinko_item->set_sensitive(S9xControllerOptionValid(CONTROLLER_PACHINKO) && !movie_locked);
     refreshing_controller_menu = false;
 }
 

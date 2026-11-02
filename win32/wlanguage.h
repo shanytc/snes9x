@@ -80,7 +80,7 @@ Nintendo is a trademark.")
 #define INPUTCONFIG_LABEL_STRONGER TEXT("Stronger")
 #define INPUTCONFIG_LABEL_WEAKER TEXT("Weaker")
 #define INPUTCONFIG_LABEL_STOP TEXT("Stop")
-#define INPUTCONFIG_PACHINKO_NOTE TEXT("Hold Stronger or Weaker to turn the dial; it stays where you leave it.\n\nBalls launch at the dial's strength unless Stop is held. Use Joypad #1 for the menus.\n\nConnect it with Input > Sunsoft Pachinko > Connect to Port 2. Games look for it when they start, so reset after connecting.")
+#define INPUTCONFIG_PACHINKO_NOTE TEXT("Hold Stronger or Weaker to turn the dial; it stays where you leave it.\n\nBalls launch at the dial's strength unless Stop is held. Use Joypad #1 for the menus.\n\nConnect it with Input > Use Sunsoft Pachinko. Games look for it when they start, so reset after connecting.")
 
 // Hotkeys Dialog Strings
 #define HOTKEYS_TITLE TEXT("Hotkey Configuration")

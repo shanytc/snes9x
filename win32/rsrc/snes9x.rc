@@ -1690,11 +1690,8 @@ BEGIN
         MENUITEM "Use Multitaps (8-player)",    IDM_MULTITAP8,MFT_STRING,MFS_ENABLED
         MENUITEM "Use Dual Justifiers",         IDM_JUSTIFIERS,MFT_STRING,MFS_ENABLED
         MENUITEM "Use M.A.C.S. Rifle",          IDM_MACSRIFLE_TOGGLE,MFT_STRING,MFS_ENABLED
+        MENUITEM "Use Sunsoft Pachinko",        ID_INPUT_PACHINKO_CONNECT,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
-        POPUP "Sunsoft &Pachinko",              0,MFT_STRING,MFS_ENABLED
-        BEGIN
-            MENUITEM "&Connect to Port 2",          ID_INPUT_PACHINKO_CONNECT,MFT_STRING,MFS_ENABLED
-        END
         POPUP "&Barcodes",                      0,MFT_STRING,MFS_ENABLED
         BEGIN
             MENUITEM "&Connect",                    ID_INPUT_BARCODE_CONNECT,MFT_STRING,MFS_ENABLED

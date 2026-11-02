@@ -795,6 +795,47 @@ void ChangeInputDevice(void)
     GUI.ControlForced = 0xff;
 }
 
+// Devices that leave Joypad #1 in port 1 and take port 2: their menu items
+// toggle, and Use SNES Joypad(s) stays checked with them.
+static const char *Port2DeviceName(int option)
+{
+	switch (option)
+	{
+	case SNES_MOUSE_SWAPPED: return "SNES Mouse";
+	case SNES_SUPERSCOPE:    return "Super Scope";
+	case SNES_MULTIPLAYER5:  return "Super Multitap";
+	case SNES_JUSTIFIER:     return "Konami Justifier";
+	case SNES_JUSTIFIER_2:   return "Dual Justifiers";
+	case SNES_MACSRIFLE:     return "M.A.C.S. Rifle";
+	case SNES_PACHINKO:      return "Sunsoft Pachinko";
+	}
+	return NULL;
+}
+
+static bool Port2Device(int option)
+{
+	return Port2DeviceName(option) != NULL;
+}
+
+// An Input menu pick, with an OSD for what came into or left port 2.
+static void SelectInputDevice(int option)
+{
+	const int previous = GUI.ControllerOption;
+	GUI.ControllerOption = option;
+	ChangeInputDevice();
+	if (option == previous)
+		return;
+	if (Port2Device(option))
+		S9xSetInfoString((std::string(Port2DeviceName(option)) + " connected to Port 2").c_str());
+	else if (Port2Device(previous))
+		S9xSetInfoString((std::string(Port2DeviceName(previous)) + " disconnected from Port 2").c_str());
+}
+
+static void TogglePort2Device(int option)
+{
+	SelectInputDevice(GUI.ControllerOption == option ? SNES_JOYPAD : option);
+}
+
 static void CenterCursor()
 {
 	if(GUI.ControllerOption==SNES_MOUSE || GUI.ControllerOption==SNES_MOUSE_SWAPPED)
@@ -2655,18 +2696,15 @@ LRESULT CALLBACK WinProc(
 			break;
 		case IDM_SNES_JOYPAD:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_JOYPAD;
-			ChangeInputDevice();
+			SelectInputDevice(SNES_JOYPAD);
 			break;
 		case IDM_ENABLE_MULTITAP:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_MULTIPLAYER5;
-			ChangeInputDevice();
+			TogglePort2Device(SNES_MULTIPLAYER5);
 			break;
 		case IDM_SCOPE_TOGGLE:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_SUPERSCOPE;
-			ChangeInputDevice();
+			TogglePort2Device(SNES_SUPERSCOPE);
 			break;
 		case IDM_SCOPE_SHOW_CROSSHAIR:
 			GUI.SuperScopeCrosshairVisible = !GUI.SuperScopeCrosshairVisible;
@@ -2677,42 +2715,33 @@ LRESULT CALLBACK WinProc(
 			break;
 		case IDM_JUSTIFIER:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_JUSTIFIER;
-			ChangeInputDevice();
+			TogglePort2Device(SNES_JUSTIFIER);
 			break;
 		case IDM_MOUSE_TOGGLE:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_MOUSE;
-			ChangeInputDevice();
+			SelectInputDevice(SNES_MOUSE);
 			break;
 		case IDM_MOUSE_SWAPPED:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_MOUSE_SWAPPED;
-			ChangeInputDevice();
+			TogglePort2Device(SNES_MOUSE_SWAPPED);
 			break;
 		case IDM_MULTITAP8:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_MULTIPLAYER8;
-			ChangeInputDevice();
+			SelectInputDevice(SNES_MULTIPLAYER8);
 			break;
 		case IDM_JUSTIFIERS:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_JUSTIFIER_2;
-			ChangeInputDevice();
+			TogglePort2Device(SNES_JUSTIFIER_2);
 			break;
 		case IDM_MACSRIFLE_TOGGLE:
 			MOVIE_LOCKED_SETTING
-			GUI.ControllerOption = SNES_MACSRIFLE;
-			ChangeInputDevice();
+			TogglePort2Device(SNES_MACSRIFLE);
 			break;
 		case ID_INPUT_PACHINKO_CONNECT:
 			MOVIE_LOCKED_SETTING
 			if (!((1 << SNES_PACHINKO) & GUI.ValidControllerOptions))
 				break;
-			GUI.ControllerOption = GUI.ControllerOption == SNES_PACHINKO ? SNES_JOYPAD : SNES_PACHINKO;
-			ChangeInputDevice();
-			S9xSetInfoString(GUI.ControllerOption == SNES_PACHINKO ? "Sunsoft Pachinko connected to port 2"
-			                                                       : "Sunsoft Pachinko disconnected");
+			TogglePort2Device(SNES_PACHINKO);
 			break;
 
 		// Barcodes: the Barcode Battler II on port 2, the reader a SNES game
@@ -7192,7 +7221,8 @@ static void CheckMenuStates ()
     ControllerOptionsFromControllers();
 
 	validFlag = (((1<<SNES_JOYPAD) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;
-    mii.fState = validFlag | (GUI.ControllerOption == SNES_JOYPAD ? MFS_CHECKED : MFS_UNCHECKED);
+	// A port-2 device leaves Joypad #1 in port 1, so Joypad(s) stays checked with it
+    mii.fState = validFlag | (GUI.ControllerOption == SNES_JOYPAD || Port2Device(GUI.ControllerOption) ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, IDM_SNES_JOYPAD, FALSE, &mii);
 
 	validFlag = (((1<<SNES_MULTIPLAYER5) & GUI.ValidControllerOptions) && (!S9xMovieActive() || !S9xMovieGetFrameCounter())) ? MFS_ENABLED : MFS_DISABLED;

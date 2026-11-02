@@ -1276,6 +1276,28 @@ void EmuMainWindow::syncLauncherIcon()
 #endif
 }
 
+// Devices that leave Joypad #1 in port 1 and take port 2: their items toggle,
+// and Use SNES Joypad(s) stays checked with them.
+static const char *port2DeviceName(int configuration)
+{
+    switch (configuration)
+    {
+    case EmuConfig::eMouseSwapped:   return "SNES Mouse";
+    case EmuConfig::eSuperScope:     return "Super Scope";
+    case EmuConfig::eMultitap5:      return "Super Multitap";
+    case EmuConfig::eJustifier:      return "Konami Justifier";
+    case EmuConfig::eDualJustifiers: return "Dual Justifiers";
+    case EmuConfig::eMacsRifle:      return "M.A.C.S. Rifle";
+    case EmuConfig::ePachinko:       return "Sunsoft Pachinko";
+    }
+    return nullptr;
+}
+
+static bool port2Device(int configuration)
+{
+    return port2DeviceName(configuration) != nullptr;
+}
+
 void EmuMainWindow::createWidgets()
 {
     setWindowTitle(QString("SuperSnes9x %1").arg(VERSION_DISPLAY));
@@ -1816,13 +1838,20 @@ void EmuMainWindow::createWidgets()
     input_menu->addSeparator();
 
     // What is plugged into the two controller ports. Items a ROM's NSRT
-    // header rules out are greyed.
+    // header rules out are greyed. The port-2 devices toggle back to the joypads.
     port_configuration_actions.assign(EmuConfig::eNumPortConfigurations, nullptr);
     auto add_device_item = [&](QMenu *menu, int configuration, const QString &text) {
         auto action = menu->addAction(text);
         action->setCheckable(true);
-        QObject::connect(action, &QAction::triggered, [&, configuration] {
-            app.setPortConfiguration(configuration);
+        QObject::connect(action, &QAction::triggered, [&, configuration](bool checked) {
+            const int previous = app.config->port_configuration;
+            const int next = checked || !port2Device(configuration) ? configuration : EmuConfig::eJoypads;
+            app.setPortConfiguration(next);
+            // An OSD for what came into or left port 2
+            if (next != previous && port2Device(next))
+                S9xSetInfoString((std::string(port2DeviceName(next)) + " connected to Port 2").c_str());
+            else if (next != previous && port2Device(previous))
+                S9xSetInfoString((std::string(port2DeviceName(previous)) + " disconnected from Port 2").c_str());
             updatePortConfigurationMenu();
         });
         port_configuration_actions[configuration] = action;
@@ -1845,19 +1874,9 @@ void EmuMainWindow::createWidgets()
     add_device_item(input_menu, EmuConfig::eMultitap8, tr("Use Multitaps (&8-player)"));
     add_device_item(input_menu, EmuConfig::eDualJustifiers, tr("Use &Dual Justifiers"));
     add_device_item(input_menu, EmuConfig::eMacsRifle, tr("Use M.A.C.S. &Rifle"));
+    add_device_item(input_menu, EmuConfig::ePachinko, tr("Use Sunsoft &Pachinko"));
 
     input_menu->addSeparator();
-
-    // Sunsoft Pachinko: Connect toggles it into port 2 and back to the joypads.
-    auto pachinko_menu = input_menu->addMenu(tr("Sunsoft &Pachinko"));
-    auto pachinko_action = pachinko_menu->addAction(tr("&Connect to Port 2"));
-    pachinko_action->setCheckable(true);
-    QObject::connect(pachinko_action, &QAction::triggered, [&](bool checked) {
-        app.setPortConfiguration(checked ? EmuConfig::ePachinko : EmuConfig::eJoypads);
-        S9xSetInfoString(checked ? "Sunsoft Pachinko connected to port 2" : "Sunsoft Pachinko disconnected");
-        updatePortConfigurationMenu();
-    });
-    port_configuration_actions[EmuConfig::ePachinko] = pachinko_action;
 
     // Barcodes: the Barcode Battler II on port 2, the reader a SNES game
     // takes. Connect needs a SNES game loaded, toggles in place and stays
@@ -3050,6 +3069,9 @@ void EmuMainWindow::updatePortConfigurationMenu()
         action->setChecked(app.config->port_configuration == i);
         action->setEnabled(app.isPortConfigurationValid(i));
     }
+    // A port-2 device leaves Joypad #1 in port 1, so Joypad(s) stays checked with it
+    if (port2Device(app.config->port_configuration) && port_configuration_actions[EmuConfig::eJoypads])
+        port_configuration_actions[EmuConfig::eJoypads]->setChecked(true);
 
     if (superscope_crosshair_action)
     {

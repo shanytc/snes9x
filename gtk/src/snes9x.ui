@@ -2297,13 +2297,11 @@
                           <object class="GtkMenu" id="input_superscope_item_menu">
                             <property name="can_focus">False</property>
                             <child>
-                              <object class="GtkRadioMenuItem" id="input_superscope_enable_item">
+                              <object class="GtkCheckMenuItem" id="input_superscope_enable_item">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">_Enable</property>
                                 <property name="use_underline">True</property>
-                                <property name="draw_as_radio">False</property>
-                                <property name="group">input_joypad_item</property>
                               </object>
                             </child>
                             <child>
@@ -2320,33 +2318,27 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkRadioMenuItem" id="input_multitap5_item">
+                      <object class="GtkCheckMenuItem" id="input_multitap5_item">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">Use Super Multi_tap (5-player)</property>
                         <property name="use_underline">True</property>
-                        <property name="draw_as_radio">False</property>
-                        <property name="group">input_joypad_item</property>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkRadioMenuItem" id="input_justifier_item">
+                      <object class="GtkCheckMenuItem" id="input_justifier_item">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">Use Konami _Justifier</property>
                         <property name="use_underline">True</property>
-                        <property name="draw_as_radio">False</property>
-                        <property name="group">input_joypad_item</property>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkRadioMenuItem" id="input_mouse_swapped_item">
+                      <object class="GtkCheckMenuItem" id="input_mouse_swapped_item">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">Use Mouse in _alternate port</property>
                         <property name="use_underline">True</property>
-                        <property name="draw_as_radio">False</property>
-                        <property name="group">input_joypad_item</property>
                       </object>
                     </child>
                     <child>
@@ -2360,59 +2352,33 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkRadioMenuItem" id="input_dual_justifiers_item">
+                      <object class="GtkCheckMenuItem" id="input_dual_justifiers_item">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">Use _Dual Justifiers</property>
                         <property name="use_underline">True</property>
-                        <property name="draw_as_radio">False</property>
-                        <property name="group">input_joypad_item</property>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkRadioMenuItem" id="input_macsrifle_item">
+                      <object class="GtkCheckMenuItem" id="input_macsrifle_item">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="label" translatable="yes">Use M.A.C.S. _Rifle</property>
                         <property name="use_underline">True</property>
-                        <property name="draw_as_radio">False</property>
-                        <property name="group">input_joypad_item</property>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkRadioMenuItem" id="input_pachinko_radio">
-                        <property name="visible">False</property>
+                      <object class="GtkCheckMenuItem" id="input_pachinko_item">
+                        <property name="visible">True</property>
                         <property name="can_focus">False</property>
-                        <property name="label">Sunsoft Pachinko</property>
-                        <property name="draw_as_radio">False</property>
-                        <property name="group">input_joypad_item</property>
+                        <property name="label" translatable="yes">Use Sunsoft _Pachinko</property>
+                        <property name="use_underline">True</property>
                       </object>
                     </child>
                     <child>
                       <object class="GtkSeparatorMenuItem" id="barcodes_separator">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="pachinko_item">
-                        <property name="label" translatable="yes">Sunsoft _Pachinko</property>
-                        <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="use_underline">True</property>
-                        <child type="submenu">
-                          <object class="GtkMenu" id="pachinko_menu">
-                            <property name="can_focus">False</property>
-                            <child>
-                              <object class="GtkCheckMenuItem" id="input_pachinko_item">
-                                <property name="label" translatable="yes">_Connect to Port 2</property>
-                                <property name="visible">True</property>
-                                <property name="can_focus">False</property>
-                                <property name="use_underline">True</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
                       </object>
                     </child>
                     <child>

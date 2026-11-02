@@ -259,7 +259,7 @@ void Snes9xPreferences::connect_signals()
     pachinko_note = Gtk::manage(new Gtk::Label(
         _("Hold Stronger or Weaker to turn the dial; it stays where you leave it.\n\n"
           "Balls launch at the dial's strength unless Stop is held. Use Joypad 1 for the menus.\n\n"
-          "Connect it with Input > Sunsoft Pachinko > Connect to Port 2. Games look for it when they start, "
+          "Connect it with Input > Use Sunsoft Pachinko. Games look for it when they start, "
           "so reset after connecting.")));
     pachinko_note->set_line_wrap(true);
     pachinko_note->set_max_width_chars(48);

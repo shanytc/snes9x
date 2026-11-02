@@ -1,3 +1,105 @@
+SuperSnes9x 1.63.32
+-------------------
+
+General
+- Added Lua scripting: File > Script > Lua opens a script editor with a
+  debugger (breakpoints, stepping, watches, call stack) and 28 example
+  scripts, and -lua <script> runs one from the command line. The API is
+  documented in docs/lua-scripting.md.
+- DSP-1, DSP-2, DSP-3, DSP-4 and the Cx4 now run as native chips that
+  match their firmware instruction for instruction, with no dump needed.
+  The BIOS Manager picks Native, Firmware (the chip's dump) or Legacy
+  (the old HLE) per chip. Fixes Top Gear 3000's cars being too fast
+  (#256) and Mega Man X3's intro searchlight.
+- Added the Barcode Battler II on port 2. Input > Barcodes connects it
+  and scans a typed code, one of 1331 known cards (with photos from
+  barcodes/battler), a picture or the webcam. The scan dialog stays open
+  while the game runs. (#283)
+- Added the Sunsoft Pachinko controller on port 2, with a power gauge on
+  its controller picture.
+- Added Bilinear Mode 7, which smooths the Mode 7 layer only. (#305)
+- Port-2 devices toggle in the Input menu and keep Use SNES Joypad(s)
+  checked, and an on-screen message names what went into port 2.
+- The pressed-keys display shows every device, named with its port.
+- Added hotkeys for Input > Barcodes, the SFC-Box switches, slots and
+  Power OFF, and the NSS slots.
+- Input Configuration shows a large USA, European or Japanese controller
+  picture that lights held buttons; click a button to edit its binding.
+- BIOS Manager: slots are grouped by family in a sidebar, each BIOS has
+  its own card, the info popup lists every supported dump with its
+  CRC32, and each chip has a speed chart for its three modes.
+- Timing follows Mesen and bsnes more closely: DMA and HDMA init sync to
+  the DMA divider, HDMA and IRQs take the bus where bsnes does, APU ports
+  are read and written at bus timing, and the first opcode after reset is
+  fetched at cycle 186. Fixes Desert Strike's ICBM launching from a
+  destroyed silo and Full Throttle's trembling water, and A.S.P.'s
+  mid-scanline shadow is shaped and placed as on bsnes.
+- Super FX: the cycle-accurate GSU no longer runs ahead of hardware, so
+  Star Fox's intro keeps time with its music.
+- Fixed Yoshi's Island's Fuzzy effect showing blocks of backdrop.
+- Savestates keep the sprite range/time-over flags, so rewind, run-ahead
+  and netplay no longer change games that seed their RNG from them.
+- Many betas, protos and pirates that loaded black or crashed now boot,
+  among them Killer Instinct (Beta), Rockfall, Special Tee Shot (Proto)
+  and Noughts & Crosses.
+- Emulated the protection chips of A Bug's Life, Soul Blade, Hercules,
+  the "Pocket Monster" bitswap family (11 carts) and the Super 20 Hab
+  multicart.
+- Game fixes: Super Ice Hockey (Europe) no longer hangs, and Cute
+  Angela, Gamars Puzzle and Power Slide (Proto) boot.
+- NSS: operator settings, bookkeeping and the clock survive reboots and
+  sessions, in one NSS.srm for the cabinet; each cartridge keeps its own
+  .srm. Added an Operational Guide entry and Mount/Eject entries for each
+  slot, and the DIP switches flip without closing the menu.
+- SFC-Box: added MAME ROM sets, KROM 2.00, mountable slots, the Reset and
+  GAME/TV switches and keyswitch position 4 (Power OFF). The 4S
+  Attraction ROM alone boots the box. (#294)
+- Super Disc: Debug Menu opens the BIOS monitor.
+- Xeno Crisis: the audio no longer crackles, and the RP2040 runs faster.
+- Loading a Game Boy game or a MultiCart ends a running NSS, SFC-Box,
+  Super Disc or Xeno Crisis session.
+- GB: MBC3, HuC-3 and TAMA5 clocks run, are saved with the battery (in
+  the .sav or a .rtc, in the formats BGB, SameBoy, VBA-M and mGBA read)
+  and catch up with the PC's clock. Emulation > Real Time Clock picks
+  where they go, or a fixed date and time. Added MBC30 (Pocket Monsters
+  Crystal).
+- GB: savestates keep the DMA, PPU and APU state in flight, so a state
+  loads the same way every time.
+- GB: Apply Cheats works on the session's first Game Boy load, an empty
+  savestate slot says it doesn't exist, and rewind no longer shows its
+  replay frames.
+
+win32 GUI
+- Added Copy Screenshot to Clipboard (File > Save Other, Ctrl+F12), and
+  Copy to Clipboard in the Tile, Tilemap and Sprite viewers.
+- Run-ahead applies to frame advance. (#314)
+- Holding rewind while paused rewinds at frame rate.
+- Fixed DirectInput-only pads missing at startup.
+- Fixed flickering when some games open their menus.
+- Input Configuration lays its buttons out in three columns, and Enter
+  no longer closes it.
+- The hotkey dialog's tabs stack in two rows.
+
+GTK
+- Added a controller picker and Auto-Assign, as on win32 and Qt.
+- Updated Simplified Chinese translation. (kongfl888)
+
+Qt
+- The software (qt) display driver draws the on-screen display.
+- The window title names every game.
+
+libretro
+- Core options pick Native, Firmware or Legacy for each DSP and the Cx4,
+  and BIOS dumps can sit zipped in the system folder.
+- Added the Barcode Battler II and Sunsoft Pachinko as port-2 devices,
+  with core options to scan codes and pick cards.
+- Added a Bilinear Mode 7 core option.
+- The Windows core reads zips (MSU-1 packs, zipped firmware).
+- CPU overclock works on the Windows and Android cores. (#289)
+- Xeno Crisis finds its firmware on Android saf:// paths (#292), and the
+  Android core is built at -O3.
+
+
 SuperSnes9x 1.63.31
 -------------------
 

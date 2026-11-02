@@ -23,6 +23,7 @@
 #define MOUSE_DATA_SIZE				5
 #define SCOPE_DATA_SIZE				6
 #define JUSTIFIER_DATA_SIZE			11
+#define MACSRIFLE_DATA_SIZE			5
 #define PACHINKO_DATA_SIZE			2
 
 struct MovieInfo
@@ -77,6 +78,8 @@ bool MovieGetScope (int, uint8 d[SCOPE_DATA_SIZE]);
 void MovieSetScope (int, uint8 d[SCOPE_DATA_SIZE]);
 bool MovieGetJustifier (int, uint8 d[JUSTIFIER_DATA_SIZE]);
 void MovieSetJustifier (int, uint8 d[JUSTIFIER_DATA_SIZE]);
+bool MovieGetMacsRifle (int, uint8 d[MACSRIFLE_DATA_SIZE]);
+void MovieSetMacsRifle (int, uint8 d[MACSRIFLE_DATA_SIZE]);
 bool MovieGetPachinko (int, uint8 d[PACHINKO_DATA_SIZE]);
 void MovieSetPachinko (int, uint8 d[PACHINKO_DATA_SIZE]);
 

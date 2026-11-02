@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <string>
 #include <array>
+#include <vector>
+#include <algorithm>
 
 #include "snes9x.h"
 #include "port.h"
@@ -24,31 +26,53 @@ namespace
     S9xImGuiInitInfo settings;
 } // anonymous
 
-static void ImGui_DrawPressedKeys(int spacing)
+// One row of the pressed-keys overlay: the port and its device, then the
+// device's parts, lit while held.
+struct PressedKeysRow
 {
+    std::string label;
+    std::vector<std::pair<std::string, bool>> parts;
+    bool keys = false; // joypad keys sit in fixed cells, so the box doesn't jitter
+};
 
+static std::string PortLabel(int port, const char *device)
+{
+    std::string label = "#" + std::to_string(port + 1);
+    if (device)
+        label += std::string(" ") + device;
+    return label;
+}
+
+static std::string Coordinates(int x, int y)
+{
+    char string[32];
+    snprintf(string, sizeof(string), "(%03d,%03d)", x, y);
+    return string;
+}
+
+static void AddJoypadRow(std::vector<PressedKeysRow> &rows, std::string label, int pad)
+{
     const std::array<const char *, 15> keynames =
         { " ", " ", " ", "R", "L", "X", "A", "→", "←", "↓", "↑", "St", "Sel", "Y", "B" };
     const std::array<int, 12> keyorder =
         { 10, 9, 8, 7, 6, 14, 13, 5, 4, 3, 11, 12 }; // < ^ > v   A B Y X  L R  S s
 
+    PressedKeysRow row;
+    row.label = label;
+    row.keys = true;
+    uint16 buttons = MovieGetJoypad(pad);
+    for (int j : keyorder)
+        row.parts.push_back({ keynames[j], (buttons & (1 << (j + 1))) != 0 });
+    rows.push_back(row);
+}
+
+// What each port holds, as overlay rows: Joypad #1 in port 1 and a Sunsoft
+// Pachinko in port 2 read "#1 <keys>" and "#2 Sunsoft Pachinko Power 48% ...".
+static std::vector<PressedKeysRow> PressedKeysRows()
+{
+    std::vector<PressedKeysRow> rows;
     enum controllers controller;
-    int num_lines = 0;
-    int cell_width = ImGui::CalcTextSize("→ ").x;
     int8_t ids[4];
-    std::string final_string;
-
-    auto draw_list = ImGui::GetForegroundDrawList();
-
-    for (int port = 0; port < 2; port++)
-    {
-        S9xGetController(port, &controller, &ids[0], &ids[1], &ids[2], &ids[3]);
-        if (controller == CTL_JOYPAD || controller == CTL_MOUSE)
-            num_lines++;
-    }
-
-    if (num_lines == 0)
-        return;
 
     for (int port = 0; port < 2; port++)
     {
@@ -56,68 +80,133 @@ static void ImGui_DrawPressedKeys(int spacing)
 
         switch (controller)
         {
+        case CTL_JOYPAD:
+            AddJoypadRow(rows, PortLabel(port, nullptr), ids[0]);
+            break;
+
+        case CTL_MP5:
+            for (int n = 0; n < 4; n++)
+                if (ids[n] != -1)
+                    AddJoypadRow(rows, PortLabel(port, ("Multitap " + std::to_string(n + 1)).c_str()), ids[n]);
+            break;
+
         case CTL_MOUSE: {
-            uint8_t buf[5];
-            char string[256];
+            uint8 buf[MOUSE_DATA_SIZE];
             if (!MovieGetMouse(port, buf))
                 break;
-            int16_t mouse_x = READ_WORD(buf);
-            int16_t mouse_y = READ_WORD(buf + 2);
-            uint8_t buttons = buf[4];
-            sprintf(string, "#%d %d: (%03d,%03d) %c%c", port + 1, ids[0] + 1, mouse_x, mouse_y,
-                    (buttons & 0x40) ? 'L' : ' ', (buttons & 0x80) ? 'R' : ' ');
-
-            auto string_size = ImGui::CalcTextSize(string);
-            int box_width = 2 * spacing + string_size.x;
-            int box_height = 2 * spacing + string_size.y;
-            int x = (ImGui::GetIO().DisplaySize.x - box_width) / 2;
-            int y = ImGui::GetIO().DisplaySize.y - (spacing + box_height) * num_lines;
-
-            draw_list->AddRectFilled(ImVec2(x, y),
-                                     ImVec2(x + box_width, y + box_height),
-                                     settings.box_color,
-                                     spacing / 2.0f);
-
-            draw_list->AddText(ImVec2(x + spacing, y + spacing), settings.text_color, string);
-
+            uint8 buttons = buf[4];
+            rows.push_back({ PortLabel(port, "SNES Mouse"),
+                             { { Coordinates((int16)READ_WORD(buf), (int16)READ_WORD(buf + 2)), true },
+                               { "L", (buttons & 0x40) != 0 },
+                               { "R", (buttons & 0x80) != 0 } } });
             break;
         }
 
-        case CTL_JOYPAD: {
-            std::string prefix = "#" + std::to_string(port + 1) + " ";
-            auto prefix_size = ImGui::CalcTextSize(prefix.c_str());
-            int box_width = 2 * spacing + prefix_size.x + cell_width * keyorder.size();
-            int box_height = 2 * spacing + prefix_size.y;
-            int x = (ImGui::GetIO().DisplaySize.x - box_width) / 2;
-            int y = ImGui::GetIO().DisplaySize.y - (spacing + box_height) * num_lines;
+        case CTL_SUPERSCOPE: {
+            uint8 buf[SCOPE_DATA_SIZE];
+            if (!MovieGetScope(port, buf))
+                break;
+            uint8 buttons = buf[4];
+            rows.push_back({ PortLabel(port, "Super Scope"),
+                             { { Coordinates((int16)READ_WORD(buf), (int16)READ_WORD(buf + 2)), true },
+                               { "Fire", (buttons & 0x80) != 0 },
+                               { "Cursor", (buttons & 0x40) != 0 },
+                               { "Turbo", (buttons & 0x20) != 0 },
+                               { "Pause", (buttons & 0x10) != 0 } } });
+            break;
+        }
 
-            draw_list->AddRectFilled(ImVec2(x, y),
-                                     ImVec2(x + box_width, y + box_height),
-                                     settings.box_color,
-                                     spacing / 2.0f);
-            x += spacing;
-            y += spacing;
+        // One Justifier or two; the second's buttons sit a bit lower
+        case CTL_JUSTIFIER: {
+            uint8 buf[JUSTIFIER_DATA_SIZE];
+            if (!MovieGetJustifier(port, buf))
+                break;
+            const int guns = ids[0] == 1 ? 2 : 1;
+            uint8 buttons = buf[8];
+            for (int k = 0; k < guns; k++)
+                rows.push_back({ PortLabel(port, guns == 1 ? "Konami Justifier" : k == 0 ? "Justifier 1" : "Justifier 2"),
+                                 { { Coordinates((int16)READ_WORD(buf + 2 * k), (int16)READ_WORD(buf + 4 + 2 * k)), true },
+                                   { "Trigger", (buttons & (0x80 >> k)) != 0 },
+                                   { "Start", (buttons & (0x20 >> k)) != 0 } } });
+            break;
+        }
 
-            draw_list->AddText(ImVec2(x, y), settings.text_color, prefix.c_str());
-            x += prefix_size.x;
+        case CTL_MACSRIFLE: {
+            uint8 buf[MACSRIFLE_DATA_SIZE];
+            if (!MovieGetMacsRifle(port, buf))
+                break;
+            rows.push_back({ PortLabel(port, "M.A.C.S. Rifle"),
+                             { { Coordinates((int16)READ_WORD(buf), (int16)READ_WORD(buf + 2)), true },
+                               { "Trigger", (buf[4] & 0x01) != 0 } } });
+            break;
+        }
 
-            uint16 pad = MovieGetJoypad(ids[0]);
-            for (size_t i = 0; i < keyorder.size(); i++)
-            {
-                int j = keyorder[i];
-                int mask = (1 << (j + 1));
-                auto color = (pad & mask) ? settings.text_color : settings.inactive_text_color;
-                draw_list->AddText(ImVec2(x, y), color, keynames[j]);
-                x += cell_width;
-            }
-
-            num_lines--;
+        // Power as the settings' gauge shows it: the dial's 0-127 as a percentage
+        case CTL_PACHINKO: {
+            uint8 buf[PACHINKO_DATA_SIZE];
+            if (!MovieGetPachinko(port, buf))
+                break;
+            uint8 buttons = buf[1];
+            rows.push_back({ PortLabel(port, "Sunsoft Pachinko"),
+                             { { "Power " + std::to_string((buf[0] * 100 + 63) / 127) + "%", true },
+                               { "Stronger", (buttons & 0x02) != 0 },
+                               { "Weaker", (buttons & 0x04) != 0 },
+                               { "Stop", (buttons & 0x01) != 0 } } });
             break;
         }
 
         default:
             break;
         }
+    }
+
+    return rows;
+}
+
+static void ImGui_DrawPressedKeys(int spacing)
+{
+    std::vector<PressedKeysRow> rows = PressedKeysRows();
+    if (rows.empty())
+        return;
+
+    auto draw_list = ImGui::GetForegroundDrawList();
+    const float cell_width = ImGui::CalcTextSize("→ ").x;
+    const float space_width = ImGui::CalcTextSize(" ").x;
+
+    // The labels share a column so the keys line up, and every box is as wide as the widest row
+    float label_width = 0, parts_width = 0;
+    for (auto &row : rows)
+    {
+        label_width = std::max(label_width, ImGui::CalcTextSize(row.label.c_str()).x);
+        float width = 0;
+        for (auto &part : row.parts)
+            width += row.keys ? cell_width : ImGui::CalcTextSize(part.first.c_str()).x + space_width;
+        parts_width = std::max(parts_width, width);
+    }
+
+    int box_width = 2 * spacing + label_width + space_width + parts_width;
+    int box_height = 2 * spacing + ImGui::CalcTextSize("#").y;
+    int x = (ImGui::GetIO().DisplaySize.x - box_width) / 2;
+    int y = ImGui::GetIO().DisplaySize.y - (spacing + box_height) * (int)rows.size();
+
+    for (auto &row : rows)
+    {
+        draw_list->AddRectFilled(ImVec2(x, y),
+                                 ImVec2(x + box_width, y + box_height),
+                                 settings.box_color,
+                                 spacing / 2.0f);
+
+        float text_x = x + spacing;
+        draw_list->AddText(ImVec2(text_x, y + spacing), settings.text_color, row.label.c_str());
+        text_x += label_width + space_width;
+
+        for (auto &part : row.parts)
+        {
+            draw_list->AddText(ImVec2(text_x, y + spacing), part.second ? settings.text_color : settings.inactive_text_color, part.first.c_str());
+            text_x += row.keys ? cell_width : ImGui::CalcTextSize(part.first.c_str()).x + space_width;
+        }
+
+        y += spacing + box_height;
     }
 }
 

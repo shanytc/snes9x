@@ -13,6 +13,8 @@
 #include "gb_memory.h"
 #include "gb_ppu.h"
 
+#include <cstdint>
+
 namespace SGB {
 
 namespace {
@@ -23,6 +25,11 @@ bool    g_cart_on = false;   // HuC1/HuC3 cart LEDs (GB KISS)
 
 // The sensor adapts to a steady light and reads "normal" again after ~3 ms.
 constexpr int64_t kIrFadeDots = 12583;
+
+// The GBC port's receiver sees a light only once it has been on a while and
+// keeps seeing it briefly after it goes out: a pulse [on, off) reads as [on + rise, off + fall).
+constexpr int64_t kPortRiseDots = 24;
+constexpr int64_t kPortFallDots = 40;
 
 // A cart's receiver answers ~1 us after the light changes. Hudson's handshake
 // needs it: read instantly, a reply's first pulse can land just before the
@@ -79,6 +86,26 @@ bool LevelAt(const Led &l, int64_t t, bool live, int64_t *since)
 	return live;
 }
 
+// What the port's sensor reports at t, through its rise and fall delays and
+// the fade of a steady light; `live` if the log is too short.
+bool PortSeen(const Led &l, int64_t t, bool live)
+{
+	int64_t next = INT64_MAX;   // the edge after the one looked at
+	for (int k = 0, i = l.head; k < l.n; ++k, i = (i + kEdges - 1) % kEdges)
+	{
+		const int64_t edge = l.t[i];
+		if (l.on[i])
+		{
+			const int64_t seen = edge + kPortRiseDots;
+			if (next != INT64_MAX && next + kPortFallDots <= t) return false;
+			if (seen <= t && (next == INT64_MAX || t < next + kPortFallDots))
+				return t - seen < kIrFadeDots;
+		}
+		next = edge;
+	}
+	return l.n ? false : live;
+}
+
 } // anonymous
 
 void IrPair(Memory *a, Memory *b)
@@ -132,9 +159,7 @@ uint8_t IrReadRP(const Memory &m)
 	uint8_t v = static_cast<uint8_t>((m.rp & 0xC1) | 0x3E);
 	const int s = SeatOf(m);
 	if ((m.rp & 0xC0) != 0xC0 || !g_port_on || s < 0) return v;
-	const int64_t now = Now(s, m);
-	int64_t since = now;
-	if (LevelAt(g_seat[1 - s].port, now, g_ir[1 - s]->rp & 0x01, &since) && now - since < kIrFadeDots)
+	if (PortSeen(g_seat[1 - s].port, Now(s, m), g_ir[1 - s]->rp & 0x01))
 		v = static_cast<uint8_t>(v & ~0x02);
 	return v;
 }

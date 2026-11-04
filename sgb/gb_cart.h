@@ -65,15 +65,16 @@ struct Cart
 	uint16_t              huc3_alarm_minutes = 0;
 	uint16_t              huc3_alarm_days    = 0;
 	bool                  huc3_alarm_on      = false;
-	// HuC3 speaker: tone ($26, one of 16) and enable ($27 == 1); two $6E in
-	// a row ask for the tone. speaker_request (tone + 1, or kSpeakerStop) is
-	// for the bus write to hand to the APU.
+	// HuC3 speaker: tone ($26, one of 16) and mode ($27: 1 = that tone, 7 =
+	// the melody at $78); two $6E in a row sound it. speaker_request (tone +
+	// 1, kSpeakerMelody or kSpeakerStop) is for the bus write to hand to the APU.
 	uint8_t               huc3_tone          = 0;
-	bool                  huc3_tone_on       = false;
+	uint8_t               huc3_tone_mode     = 0;
 	uint8_t               speaker_request    = 0;
-	// HuC3 memory $20-$7F as written: 8-nibble alarm slots (minute x3, day
-	// x3, tone, enable); slot 7 is $58-$5F above. Write-only like the alarm.
-	uint8_t               huc3_ram[0x60]     = {};
+	// HuC3 memory $20-$FF as written: 8-nibble alarm slots (minute x3, day
+	// x3, tone, enable), slot 7 is $58-$5F above; Pocket Family's melody from
+	// $78. Write-only like the alarm.
+	uint8_t               huc3_ram[0xE0]     = {};
 	// TAMA5's TAMA6 alarm page and two RAM pages (the timer page is in
 	// MbcState). Like the HuC3 alarm, only the battery save carries them.
 	// The RAM pages hold the chirp patterns: 4 x [next pattern, 4 notes, 0].
@@ -97,8 +98,10 @@ struct Cart
 	uint8_t               pal_unit = 0;
 };
 
-// Cart::speaker_request asking the APU to stop the cart's speaker.
-constexpr uint8_t kSpeakerStop = 0xFF;
+// Cart::speaker_request asking the APU to stop the cart's speaker, or to play
+// the HuC3 melody at $78.
+constexpr uint8_t kSpeakerStop   = 0xFF;
+constexpr uint8_t kSpeakerMelody = 0xFE;
 
 bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path);
 void CartUnload(Cart &c);

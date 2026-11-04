@@ -433,7 +433,7 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
 	c.huc3_tone = 0;
-	c.huc3_tone_on = false;
+	c.huc3_tone_mode = 0;
 	c.speaker_request = 0;
 	std::memset(c.huc3_ram, 0, sizeof c.huc3_ram);
 	std::memset(c.tama6_cells, 0xFF, sizeof c.tama6_cells);
@@ -715,7 +715,7 @@ void CartUnload(Cart &c)
 	c.huc3_alarm_minutes = c.huc3_alarm_days = 0;
 	c.huc3_alarm_on = false;
 	c.huc3_tone = 0;
-	c.huc3_tone_on = false;
+	c.huc3_tone_mode = 0;
 	c.speaker_request = 0;
 	std::memset(c.huc3_ram, 0, sizeof c.huc3_ram);
 	std::memset(c.tama6_cells, 0xFF, sizeof c.tama6_cells);

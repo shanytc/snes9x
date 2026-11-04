@@ -341,6 +341,15 @@ static void DmaTickM(Memory &m)
 	}
 }
 
+// Hand a Cart::speaker_request to the APU.
+static void SpeakerRequest(Memory &m, uint8_t req)
+{
+	if (!m.apu || !m.cart) return;
+	if (req == kSpeakerStop)        ApuSpeakerStop(*m.apu);
+	else if (req == kSpeakerMelody) ApuSpeakerStartMelody(*m.apu, &m.cart->huc3_ram[0x78 - 0x20]);
+	else                            ApuSpeakerStart(*m.apu, static_cast<uint8_t>(req - 1));
+}
+
 void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
 {
 	// A write deferred into this cycle lands after its dots; the rest of
@@ -392,7 +401,7 @@ void MemTick(Memory &m, int32_t tcycles, bool tick_dma)
 			MbcTickRtc(m.cart->mbc, rt);
 			if (m.apu && MbcHuc3Minutes(m.cart->mbc) != minute)
 				if (const uint8_t due = MbcHuc3AlarmDue(*m.cart))
-					ApuSpeakerStart(*m.apu, static_cast<uint8_t>(due - 1));
+					SpeakerRequest(m, due);
 		}
 		else if (m.cart && m.cart->mbc.type == MbcType::TAMA5)
 		{
@@ -533,8 +542,7 @@ void MemWrite(Memory &m, uint16_t addr, uint8_t value)
 			MbcWrite(*m.cart, addr, value);
 			if (m.cart->speaker_request)   // a HuC3 tone sounds (or a chirp stops) right away
 			{
-				if (m.apu && m.cart->speaker_request == kSpeakerStop) ApuSpeakerStop(*m.apu);
-				else if (m.apu) ApuSpeakerStart(*m.apu, static_cast<uint8_t>(m.cart->speaker_request - 1));
+				SpeakerRequest(m, m.cart->speaker_request);
 				m.cart->speaker_request = 0;
 			}
 		}

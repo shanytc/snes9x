@@ -288,35 +288,38 @@ void MbcHuc3SetClock(MbcState &s, uint16_t minutes, uint16_t days)
 	s.rtc_latched[1] = (days >> 8) & 0xFF;
 }
 
-// Slots 2-10 ($30-$77) hold Robopon's events, slot 7 ($58-$5F) is Pan Docs'
-// event time; each is a minute and a day (3 nibbles each, low first), tone,
-// enable. Enable 1 = a built-in tone; Pocket Family's 7 (its melody at $78)
-// isn't emulated.
+// Slots 2-10 ($30-$77) hold Robopon's events, slot 1 ($28-$2F) Pocket
+// Family's alarm, slot 7 ($58-$5F) is Pan Docs' event time; each is a minute
+// and a day (3 nibbles each, low first), tone, enable. Enable 1 = a built-in
+// tone, 7 = Pocket Family's melody at $78. Pocket Family writes 9 as the
+// day's top nibble (07:625A), so only the low 8 bits of the day compare.
+// Returns a speaker_request.
 uint8_t MbcHuc3AlarmDue(const Cart &c)
 {
-	const uint16_t minute = MbcHuc3Minutes(c.mbc) & 0xFFF, day = MbcHuc3Days(c.mbc) & 0xFFF;
-	for (int slot = 2; slot <= 10; ++slot)
+	const uint16_t minute = MbcHuc3Minutes(c.mbc) & 0xFFF, day = MbcHuc3Days(c.mbc) & 0xFF;
+	for (int slot = 1; slot <= 10; ++slot)
 	{
 		uint16_t m, d;
-		uint8_t  tone;
-		bool     on;
+		uint8_t  tone, mode;
 		if (slot == 7)   // the battery save restores this one, all but the enable's value
 		{
 			m = c.huc3_alarm_minutes & 0xFFF;
-			d = c.huc3_alarm_days & 0xFFF;
+			d = c.huc3_alarm_days & 0xFF;
 			tone = static_cast<uint8_t>(c.huc3_alarm_days >> 12);
-			on = c.huc3_ram[0x3F] ? c.huc3_ram[0x3F] == 1 : c.huc3_alarm_on;
+			mode = c.huc3_ram[0x3F] ? c.huc3_ram[0x3F] : c.huc3_alarm_on ? 1 : 0;
 		}
 		else
 		{
 			const uint8_t *n = &c.huc3_ram[slot * 8];
 			m = static_cast<uint16_t>(n[0] | (n[1] << 4) | (n[2] << 8));
-			d = static_cast<uint16_t>(n[3] | (n[4] << 4) | (n[5] << 8));
+			d = static_cast<uint16_t>(n[3] | (n[4] << 4));
 			tone = n[6];
-			on = n[7] == 1;
+			mode = n[7];
 		}
-		if (on && m == minute && d == day)
+		if (m == minute && d == day && mode == 1)
 			return static_cast<uint8_t>(tone + 1);
+		if (m == minute && d == day && mode == 7)
+			return kSpeakerMelody;
 	}
 	return 0;
 }
@@ -693,7 +696,7 @@ inline void Huc3WriteReg(Cart &c, uint8_t idx, uint8_t nib)
 {
 	MbcState &s = c.mbc;
 	nib &= 0x0F;
-	if (idx >= 0x20 && idx < 0x80)
+	if (idx >= 0x20)
 		c.huc3_ram[idx - 0x20] = nib;
 	if (idx < 3)
 		MbcHuc3SetClock(s, SetNibble(MbcHuc3Minutes(s), idx, nib), MbcHuc3Days(s));
@@ -708,7 +711,7 @@ inline void Huc3WriteReg(Cart &c, uint8_t idx, uint8_t nib)
 	else if (idx == 0x26)
 		c.huc3_tone = nib;
 	else if (idx == 0x27)
-		c.huc3_tone_on = nib == 1;   // all four bits checked (Pan Docs)
+		c.huc3_tone_mode = nib;
 }
 
 // Execute one command written to the $B window. Per SameBoy, HuC3 runs the
@@ -725,9 +728,11 @@ inline void Huc3Command(Cart &c, uint8_t value)
 		case 3: Huc3WriteReg(c, idx, arg); ++idx;                       break;  // write + advance
 		case 4: idx = static_cast<uint8_t>((idx & 0xF0) | arg);         break;  // pointer low nibble
 		case 5: idx = static_cast<uint8_t>((idx & 0x0F) | (arg << 4));  break;  // pointer high nibble
-		case 6:   // extended command; $E twice in a row sounds the tone
-			if (arg == 0xE && s.rtc_regs[1] == 0xE && c.huc3_tone_on)
+		case 6:   // extended command; $E twice in a row sounds the tone or melody
+			if (arg == 0xE && s.rtc_regs[1] == 0xE && c.huc3_tone_mode == 1)
 				c.speaker_request = static_cast<uint8_t>(c.huc3_tone + 1);
+			else if (arg == 0xE && s.rtc_regs[1] == 0xE && c.huc3_tone_mode == 7)
+				c.speaker_request = kSpeakerMelody;
 			s.rtc_regs[1] = arg;
 			break;
 		default:                                                        break;

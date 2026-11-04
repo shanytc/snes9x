@@ -3475,7 +3475,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v15: add the Barcode Boy's side of the wire.
 // v16: add the Bardigun card reader's.
 // v17: add the HuC3/TAMA5 cartridge speaker's tone in progress.
-constexpr uint32_t SGB_STATE_VERSION = 17;
+// v18: add the HuC3 melody in progress.
+constexpr uint32_t SGB_STATE_VERSION = 18;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3856,6 +3857,16 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		IoField(c, impl.apu.speaker.hz);
 		IoField(c, impl.apu.speaker.phase);
 	}
+
+	// v18: the HuC3 melody.
+	if (c.version >= 18)
+	{
+		IoField(c, impl.apu.speaker.melody);
+		IoBytes(c, impl.apu.speaker.score, sizeof impl.apu.speaker.score);
+		IoField(c, impl.apu.speaker.pos);
+		IoField(c, impl.apu.speaker.transpose);
+		IoField(c, impl.apu.speaker.length);
+	}
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
@@ -3996,6 +4007,8 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 
 	if (version < 17)
 		ApuSpeakerStop(impl_->apu);
+	else if (version < 18)
+		impl_->apu.speaker.melody = false;
 
 	// Relink Memory's pointer fields — they were serialized as garbage.
 	impl_->mem.sgb_owner = this;

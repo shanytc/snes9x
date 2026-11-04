@@ -328,7 +328,6 @@ void EmuMainWindow::refreshRtcMenu()
     const bool clock = Settings.GBRomPath[0] != '\0' && S9xSGBCartHasClock();
     rtc_menu_action->setVisible(clock);
     (Settings.GBRTCSeparate ? rtc_file_action : rtc_sav_action)->setChecked(true);
-    rtc_speaker_action->setChecked(Settings.GBCartSpeaker);
 }
 
 // The clock moves to its new place with the next battery save.
@@ -1690,13 +1689,6 @@ void EmuMainWindow::createWidgets()
     connect(rtc_sav_action, &QAction::triggered, [this] { setRtcSeparate(false); });
     connect(rtc_file_action, &QAction::triggered, [this] { setRtcSeparate(true); });
     rtc_menu->addSeparator();
-    rtc_speaker_action = rtc_menu->addAction(tr("&Cartridge Speaker"));
-    rtc_speaker_action->setCheckable(true);
-    connect(rtc_speaker_action, &QAction::triggered, [this](bool on) {
-        Settings.GBCartSpeaker = on;
-        app.config->gb_cart_speaker = on;
-        S9xSetInfoString(on ? "Cartridge speaker on" : "Cartridge speaker off");
-    });
     connect(rtc_menu->addAction(tr("&Settings...")), &QAction::triggered, this, &EmuMainWindow::openRtcSettings);
     rtc_menu_action = emulation_menu->addMenu(rtc_menu);
     rtc_menu_action->setVisible(false);
@@ -2013,6 +2005,16 @@ void EmuMainWindow::createWidgets()
         app.updateSettings();
     });
 
+    // A HuC3 or TAMA5 cart's own speaker: only offered while such a cart is loaded.
+    cart_speaker_action = sound_menu->addAction(tr("Car&tridge Speaker"));
+    cart_speaker_action->setCheckable(true);
+    cart_speaker_action->setVisible(false);
+    connect(cart_speaker_action, &QAction::triggered, [this](bool on) {
+        Settings.GBCartSpeaker = on;
+        app.config->gb_cart_speaker = on;
+        S9xSetInfoString(on ? "Cartridge speaker on" : "Cartridge speaker off");
+    });
+
     sound_menu->addSeparator();
 
     // win32's Show Audio Waveform: the track viewer of the audio rings.
@@ -2049,6 +2051,8 @@ void EmuMainWindow::createWidgets()
         }
         mute_item->setChecked(app.config->mute_audio);
         waveform_item->setChecked(audio_waveform_window != nullptr);
+        cart_speaker_action->setVisible(Settings.GBRomPath[0] != '\0' && S9xSGBCartHasSpeaker());
+        cart_speaker_action->setChecked(Settings.GBCartSpeaker);
     });
 
     menuBar()->addMenu(sound_menu);

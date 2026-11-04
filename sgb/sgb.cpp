@@ -1839,8 +1839,8 @@ void Emulator::SetForceModel(uint8_t m)
 	impl_->force_model = (m <= 3) ? m : 0;
 }
 
-// Emulation > Real Time Clock > Cartridge Speaker: unticked, no HuC3 tone
-// starts and one playing stops.
+// Sound > Cartridge Speaker: unticked, no HuC3 tone starts and one playing
+// stops.
 static void SyncCartSpeaker(Emulator::Impl &impl)
 {
 	impl.apu.speaker_off = !Settings.GBCartSpeaker;
@@ -4993,6 +4993,14 @@ bool S9xSGBCartHasClock(void)
 {
 	SGB::Emulator &prim = SGB::Instance();
 	return prim.HasROM() && SGB::CartHasClock(prim.DebugImpl()->cart);
+}
+
+bool S9xSGBCartHasSpeaker(void)
+{
+	SGB::Emulator &prim = SGB::Instance();
+	if (!prim.HasROM()) return false;
+	const SGB::MbcType type = prim.DebugImpl()->cart.mbc.type;
+	return type == SGB::MbcType::HuC3 || type == SGB::MbcType::TAMA5;
 }
 unsigned char *S9xSGBGetSRAM(void)  { return SGB::Instance().GetSRAMData(); }
 size_t S9xSGBGetSRAMSize(void)      { return SGB::Instance().GetSRAMSize(); }

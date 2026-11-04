@@ -3165,9 +3165,9 @@ void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 	}
 }
 
-int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples)
+int32_t Emulator::DrainAudio(int16_t *out, int32_t max_samples, int16_t *speaker_out)
 {
-	return ApuDrain(impl_->apu, out, max_samples);
+	return ApuDrain(impl_->apu, out, max_samples, speaker_out);
 }
 
 void Emulator::ClearAudio()
@@ -6630,11 +6630,11 @@ int32_t S9xSGBGetSampleCount(void)
 	return SGB::Instance().GetAudioSamplesAvailable();
 }
 
-int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s)
+int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s, int16_t *speaker_dest)
 {
 	if (!dest || count_int16s <= 0) return 0;
 	const int32_t frames = count_int16s / 2;
-	const int32_t got    = SGB::Instance().DrainAudio(dest, frames);
+	const int32_t got    = SGB::Instance().DrainAudio(dest, frames, speaker_dest);
 	return got * 2;
 }
 

@@ -9338,6 +9338,7 @@ void UpdateAudioDeviceDropdown(HWND hCtl)
 
 static bool s_soundConfBios = false;
 static bool s_soundConfGb   = false;
+static bool s_soundConfCart = false;
 static unsigned int s_soundConfRate = 0;
 
 static const struct { unsigned int rate; const TCHAR *label; } PlaybackRates[] = {
@@ -9410,11 +9411,55 @@ static unsigned int SoundConfSelectedRate(HWND hDlg)
     return (unsigned int)SendDlgItemMessage(hDlg, IDC_RATE, CB_GETITEMDATA, sel, 0);
 }
 
+// SGB Mix > Speaker: only while a cart with its own speaker is loaded. Showing it
+// widens SGB Mix by a column and moves everything right of it (Gain, Sound
+// Quality, the buttons) over; hiding it puts them back.
+static void SoundConfShowCart(HWND hDlg, bool show)
+{
+    if (show == s_soundConfCart)
+        return;
+    s_soundConfCart = show;
+
+    RECT col = { 0, 0, 54, 0 };
+    MapDialogRect(hDlg, &col);
+    const int dx = show ? col.right : -col.right;
+
+    const int cart[4] = { IDC_SLIDER_VOLUME_CART, IDC_EDIT_VOLUME_CART,
+                          IDC_STATIC_CART_LABEL, IDC_STATIC_CART_PCT };
+    RECT gain;
+    GetWindowRect(GetDlgItem(hDlg, IDC_GROUP_GAIN), &gain);
+    MapWindowPoints(NULL, hDlg, (POINT *)&gain, 2);
+    HWND mix = GetDlgItem(hDlg, IDC_GROUP_SGB_MIX);
+    for (HWND child = GetWindow(hDlg, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+    {
+        const int id = GetDlgCtrlID(child);
+        if (id == cart[0] || id == cart[1] || id == cart[2] || id == cart[3])
+            continue;
+        RECT r;
+        GetWindowRect(child, &r);
+        MapWindowPoints(NULL, hDlg, (POINT *)&r, 2);
+        if (child == mix)
+            SetWindowPos(child, NULL, 0, 0, r.right - r.left + dx, r.bottom - r.top,
+                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        else if (r.left >= gain.left)
+            SetWindowPos(child, NULL, r.left + dx, r.top, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    RECT win;
+    GetWindowRect(hDlg, &win);
+    SetWindowPos(hDlg, NULL, 0, 0, win.right - win.left + dx, win.bottom - win.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    for (int id : cart)
+        ShowWindow(GetDlgItem(hDlg, id), show ? SW_SHOW : SW_HIDE);
+    RedrawWindow(hDlg, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+}
+
 static void SoundConfUpdateModeState(HWND hDlg, bool force)
 {
     const bool bios_mode = Settings.SGB_BIOSModeActive ? true : false;
     const bool gb_active = (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) ? true : false;
     const unsigned int rate = SoundConfSelectedRate(hDlg);
+    SoundConfShowCart(hDlg, gb_active && S9xSGBCartHasSpeaker());
     if (!force && bios_mode == s_soundConfBios && gb_active == s_soundConfGb &&
         rate == s_soundConfRate)
         return;
@@ -9503,7 +9548,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
     // The volume/gain sliders and Mute apply as you touch them, so Cancel has to
     // put them back.
     static struct {
-        unsigned int volRegular, volTurbo, volSPC, volGB;
+        unsigned int volRegular, volTurbo, volSPC, volGB, volCart;
         unsigned int gainRegular, gainSPC, gainGB;
         bool mute;
         int  fidelity;
@@ -9528,6 +9573,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
             prevAudio.volTurbo    = GUI.VolumeTurbo;
             prevAudio.volSPC      = S9xSGBMixVolumeSPC;
             prevAudio.volGB       = S9xSGBMixVolumeGB;
+            prevAudio.volCart     = S9xCartSpeakerVolume;
             prevAudio.gainRegular = GUI.GainRegular;
             prevAudio.gainSPC     = S9xSGBMixGainSPC;
             prevAudio.gainGB      = S9xSGBMixGainGB;
@@ -9548,6 +9594,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
             CreateToolTip(IDC_SLIDER_GAIN_REGULAR, hDlg, TEXT("Master pre-amp applied after the Volume percentages. 0 dB is unchanged; boosting can clip loud material."));
             CreateToolTip(IDC_SLIDER_GAIN_SPC, hDlg, TEXT("Pre-amp on the SPC side of the SGB mix, applied after its Volume percentage."));
             CreateToolTip(IDC_SLIDER_GAIN_GB, hDlg, TEXT("Pre-amp on the GB side of the SGB mix, applied after its Volume percentage."));
+            CreateToolTip(IDC_SLIDER_VOLUME_CART, hDlg, TEXT("The cartridge's own speaker (Pocket Family, Robopon, Tamagotchi carts), apart from the Game Boy's sound. Shown while such a cart is loaded."));
             CreateToolTip(IDC_SUPPRESS_NRX_GLITCHES, hDlg, TEXT("Game Boy: hide the volume jump a channel makes when a game rewrites NRx2 while it is still enabled (the 'zombie' glitch). Off = exact hardware behaviour, which clicks on every note in some games."));
 
             HWND output_dropdown = GetDlgItem(hDlg, IDC_OUTPUT_DEVICE);
@@ -9608,6 +9655,14 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
             SendDlgItemMessage(hDlg, IDC_SLIDER_VOLUME_GB, TBM_SETTICFREQ, 10, 0);
             _sntprintf(valTxt, 10, TEXT("%u"), S9xSGBMixVolumeGB);
             Edit_SetText(GetDlgItem(hDlg, IDC_EDIT_VOLUME_GB), valTxt);
+
+            // the cart speaker, shown by SoundConfUpdateModeState below
+            SendDlgItemMessage(hDlg, IDC_SLIDER_VOLUME_CART, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+            SendDlgItemMessage(hDlg, IDC_SLIDER_VOLUME_CART, TBM_SETPOS, TRUE, 100 - (int)S9xCartSpeakerVolume);
+            SendDlgItemMessage(hDlg, IDC_SLIDER_VOLUME_CART, TBM_SETTICFREQ, 10, 0);
+            _sntprintf(valTxt, 10, TEXT("%u"), S9xCartSpeakerVolume);
+            Edit_SetText(GetDlgItem(hDlg, IDC_EDIT_VOLUME_CART), valTxt);
+            s_soundConfCart = false;
 
             // pre-amp gains, one per volume slider (Fast-Forward excluded)
             {
@@ -9793,6 +9848,11 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 					editId = IDC_EDIT_VOLUME_GB;
 					applyTo = &S9xSGBMixVolumeGB;
 				}
+				else if (trackHwnd == GetDlgItem(hDlg, IDC_SLIDER_VOLUME_CART))
+				{
+					editId = IDC_EDIT_VOLUME_CART;
+					applyTo = &S9xCartSpeakerVolume;
+				}
 				else if (trackHwnd == GetDlgItem(hDlg, IDC_SLIDER_GAIN_REGULAR))
 				{
 					trackValue = S9X_GAIN_MAX_DB - scrollPos;
@@ -9888,6 +9948,12 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 						sliderVal = _tstoi(valTxt);
 						S9xSGBMixVolumeGB = (sliderVal >= 0 && sliderVal <= 100) ? (unsigned int)sliderVal : 100u;
 					}
+					if (s_soundConfCart)
+					{
+						Edit_GetText(GetDlgItem(hDlg, IDC_EDIT_VOLUME_CART), valTxt, 10);
+						sliderVal = _tstoi(valTxt);
+						S9xCartSpeakerVolume = (sliderVal >= 0 && sliderVal <= 100) ? (unsigned int)sliderVal : 50u;
+					}
 
 					// pre-amp gains, same mode gating as the volumes above
 					Edit_GetText(GetDlgItem(hDlg, IDC_EDIT_GAIN_REGULAR), valTxt, 10);
@@ -9927,6 +9993,7 @@ INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 					GUI.VolumeTurbo    = prevAudio.volTurbo;
 					S9xSGBMixVolumeSPC = prevAudio.volSPC;
 					S9xSGBMixVolumeGB  = prevAudio.volGB;
+					S9xCartSpeakerVolume = prevAudio.volCart;
 					GUI.GainRegular    = prevAudio.gainRegular;
 					S9xSGBMixGainSPC   = prevAudio.gainSPC;
 					S9xSGBMixGainGB    = prevAudio.gainGB;

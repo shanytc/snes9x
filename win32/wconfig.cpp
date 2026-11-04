@@ -1221,6 +1221,7 @@ void WinRegisterConfigItems()
 	AddUIntC("VolumeTurbo", GUI.VolumeTurbo, 100, "volume during turbo mode (percentage between 0 and 100)");
 	AddUIntC("VolumeSGBMixSPC", S9xSGBMixVolumeSPC, 50, "SGB BIOS mix: SPC channel volume (percentage between 0 and 100, only active when a .gb/.gbc ROM is loaded in SGB BIOS mode)");
 	AddUIntC("VolumeSGBMixGB", S9xSGBMixVolumeGB, 50, "SGB BIOS mix: GB channel volume (percentage between 0 and 100, only active when a .gb/.gbc ROM is loaded in SGB BIOS mode)");
+	AddUIntC("VolumeCartSpeaker", S9xCartSpeakerVolume, 50, "a Game Boy cart's own speaker (HuC3/TAMA5: Pocket Family, Robopon, Tamagotchi), percentage between 0 and 100, apart from the GB volume (Sound Settings, SGB Mix > Speaker)");
 	AddUIntC("GainRegular", GUI.GainRegular, 0, "master pre-amp applied after the volume percentages (whole dB between 0 and 12, 0 = unity)");
 	AddUIntC("GainSGBMixSPC", S9xSGBMixGainSPC, 0, "SGB BIOS mix: SPC channel pre-amp (whole dB between 0 and 12, 0 = unity)");
 	AddUIntC("GainSGBMixGB", S9xSGBMixGainGB, 0, "SGB BIOS mix: GB channel pre-amp (whole dB between 0 and 12, 0 = unity)");

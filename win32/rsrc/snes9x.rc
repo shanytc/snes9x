@@ -1773,7 +1773,6 @@ BEGIN
         MENUITEM MFT_SEPARATOR
         MENUITEM "&Mute",                       ID_SOUND_MUTE,MFT_STRING,MFS_ENABLED
         MENUITEM "S&ync Sound\tAlt+]",          ID_SOUND_SYNC,MFT_STRING,MFS_ENABLED
-        MENUITEM "Car&tridge Speaker",          ID_SOUND_CART_SPEAKER,MFT_STRING,MFS_ENABLED
         MENUITEM MFT_SEPARATOR
         POPUP "Voicer-&kun",                    ID_SOUND_VOICEKUN,MFT_STRING,MFS_ENABLED
         BEGIN

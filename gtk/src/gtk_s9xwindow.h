@@ -140,7 +140,6 @@ class Snes9xWindow : public GtkBuilderWindow
     Snes9xConfig *config;
     bool refreshing_bios_menu = false;
     bool refreshing_rtc_menu = false;
-    bool refreshing_cart_speaker = false;
     bool refreshing_runahead_menu = false;
     bool refreshing_controller_menu = false;
     bool refreshing_icon_menu = false;

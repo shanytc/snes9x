@@ -697,7 +697,6 @@
 #define ID_EMULATION_GB_RTC_SAV         40342
 #define ID_EMULATION_GB_RTC_FILE        40343
 #define ID_EMULATION_GB_RTC_SETTINGS    40344
-#define ID_SOUND_CART_SPEAKER           40345
 #define IDD_GB_RTC                      203
 #define IDC_GBRTC_ON                    3722
 #define IDC_GBRTC_DATE                  3723

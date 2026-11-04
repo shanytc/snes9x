@@ -1959,14 +1959,14 @@ void ApuSetClockHz(Apu &a, int32_t hz)
 void ApuSpeakerStart(Apu &a, uint8_t tone)
 {
 	const uint8_t t = static_cast<uint8_t>((tone & 0x0F) + 1);
-	if (a.speaker_off || a.speaker.tone == t) return;   // the same tone plays on
+	if (a.speaker.tone == t) return;   // the same tone plays on
 	a.speaker = ApuCartSpeaker();
 	a.speaker.tone = t;
 }
 
 void ApuSpeakerStartTama(Apu &a, uint8_t pattern, const uint8_t prog[24])
 {
-	if (a.speaker_off || pattern < 1 || pattern > 4) return;
+	if (pattern < 1 || pattern > 4) return;
 	a.speaker = ApuCartSpeaker();
 	a.speaker.pattern = pattern;
 	std::memcpy(a.speaker.prog, prog, sizeof a.speaker.prog);
@@ -1977,7 +1977,7 @@ void ApuSpeakerStartMelody(Apu &a, const uint8_t nib[0x88])
 	uint8_t score[sizeof a.speaker.score];
 	for (size_t i = 0; i < sizeof score; ++i)
 		score[i] = static_cast<uint8_t>((nib[i * 2] << 4) | (nib[i * 2 + 1] & 0x0F));
-	if (a.speaker_off || (a.speaker.melody && !std::memcmp(a.speaker.score, score, sizeof score))) return;
+	if (a.speaker.melody && !std::memcmp(a.speaker.score, score, sizeof score)) return;
 	a.speaker = ApuCartSpeaker();
 	a.speaker.melody = true;
 	std::memcpy(a.speaker.score, score, sizeof score);

@@ -2552,13 +2552,6 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkCheckMenuItem" id="cart_speaker_item">
-                        <property name="label" translatable="yes">Car_tridge Speaker</property>
-                        <property name="can_focus">False</property>
-                        <property name="use_underline">True</property>
-                      </object>
-                    </child>
-                    <child>
                       <object class="GtkSeparatorMenuItem" id="audio_waveform_separator">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>

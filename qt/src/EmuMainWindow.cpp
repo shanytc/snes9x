@@ -2005,16 +2005,6 @@ void EmuMainWindow::createWidgets()
         app.updateSettings();
     });
 
-    // A HuC3 or TAMA5 cart's own speaker: only offered while such a cart is loaded.
-    cart_speaker_action = sound_menu->addAction(tr("Car&tridge Speaker"));
-    cart_speaker_action->setCheckable(true);
-    cart_speaker_action->setVisible(false);
-    connect(cart_speaker_action, &QAction::triggered, [this](bool on) {
-        Settings.GBCartSpeaker = on;
-        app.config->gb_cart_speaker = on;
-        S9xSetInfoString(on ? "Cartridge speaker on" : "Cartridge speaker off");
-    });
-
     sound_menu->addSeparator();
 
     // win32's Show Audio Waveform: the track viewer of the audio rings.
@@ -2051,8 +2041,6 @@ void EmuMainWindow::createWidgets()
         }
         mute_item->setChecked(app.config->mute_audio);
         waveform_item->setChecked(audio_waveform_window != nullptr);
-        cart_speaker_action->setVisible(Settings.GBRomPath[0] != '\0' && S9xSGBCartHasSpeaker());
-        cart_speaker_action->setChecked(Settings.GBCartSpeaker);
     });
 
     menuBar()->addMenu(sound_menu);

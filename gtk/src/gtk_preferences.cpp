@@ -391,6 +391,10 @@ void Snes9xPreferences::connect_signals()
         if (Settings.SGB_BIOSModeActive)
             config->sgb_mix_volume_gb = (int)get_slider("sgb_mix_volume_gb");
     });
+    get_object<Gtk::HScale>("cart_speaker_volume")->signal_value_changed().connect([&] {
+        if (suppress_volume_sync) return;
+        config->cart_speaker_volume = (int)get_slider("cart_speaker_volume");
+    });
 
     get_object<Gtk::HScale>("master_volume_regular")->signal_value_changed().connect([&] {
         if (suppress_volume_sync)
@@ -485,6 +489,11 @@ void Snes9xPreferences::update_sgb_volume_enable_state()
 
     // Game Boy APU only; hidden outright for SNES titles.
     show_widget("suppress_nrx_glitches", Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+
+    // A cart with its own speaker (HuC3, TAMA5): only shown while one is loaded.
+    const bool cart = (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) && S9xSGBCartHasSpeaker();
+    show_widget("cart_speaker_volume", cart);
+    show_widget("cart_speaker_volume_label", cart);
 
     if (bios_less_gb)
     {
@@ -851,6 +860,7 @@ void Snes9xPreferences::move_settings_to_dialog()
     set_slider("master_volume_fast_forward", config->master_volume_fast_forward);
     set_slider("sgb_mix_volume_spc",         config->sgb_mix_volume_spc);
     set_slider("sgb_mix_volume_gb",          config->sgb_mix_volume_gb);
+    set_slider("cart_speaker_volume",        config->cart_speaker_volume);
     set_slider("gain_regular",               config->gain_regular);
     set_slider("sgb_mix_gain_spc",           config->sgb_mix_gain_spc);
     set_slider("sgb_mix_gain_gb",            config->sgb_mix_gain_gb);
@@ -1074,6 +1084,7 @@ void Snes9xPreferences::get_settings_from_dialog()
         config->sgb_mix_volume_spc = (int)get_slider("sgb_mix_volume_spc");
         config->sgb_mix_volume_gb  = (int)get_slider("sgb_mix_volume_gb");
     }
+    config->cart_speaker_volume = (int)get_slider("cart_speaker_volume");
     // The gain sliders are never mirrored, so they can always be read back.
     config->gain_regular     = (int)get_slider("gain_regular");
     config->sgb_mix_gain_spc = (int)get_slider("sgb_mix_gain_spc");

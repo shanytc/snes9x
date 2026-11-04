@@ -187,6 +187,9 @@ struct Apu
 
 	// Ring buffer of mixed stereo int16 samples (interleaved L,R).
 	int16_t   sample_buf[APU_SAMPLE_BUF_SIZE * 2];
+	// The cart speaker, one sample per frame beside sample_buf: hosts mix it
+	// at its own volume, apart from the GB's.
+	int16_t   speaker_buf[APU_SAMPLE_BUF_SIZE];
 	uint32_t  sample_head = 0;
 	uint32_t  sample_tail = 0;
 
@@ -233,7 +236,9 @@ uint8_t ApuRead(Apu &a, uint16_t addr, bool cgb);
 void    ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb,
                  uint16_t div_counter, bool double_speed);
 
-int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples);
+// speaker_out, if given, gets the cart speaker for the same frames, laid out
+// like out (L = R).
+int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples, int16_t *speaker_out = nullptr);
 
 // Configure the downsample target. Idempotent.
 void ApuSetOutputRate(Apu &a, int32_t rate);

@@ -527,12 +527,14 @@ void CWaveOut::ProcessSound()
         if (availableSamples < samplesleftinblock)
         {
             S9xMixSamples(offsetBuffer, availableSamples);
+            S9xMixCartSpeaker((int16_t *)offsetBuffer, availableSamples);
             partialOffset += availableSamples << 1;
             availableSamples = 0;
         }
         else
         {
             S9xMixSamples(offsetBuffer, samplesleftinblock);
+            S9xMixCartSpeaker((int16_t *)offsetBuffer, samplesleftinblock);
             partialOffset = 0;
             availableSamples -= samplesleftinblock;
             SubmitBlock(waveHeaders[writeOffset]);
@@ -544,6 +546,7 @@ void CWaveOut::ProcessSound()
     while (availableSamples >= singleBufferSamples && bufferCount < blockCount) {
         BYTE *curBuffer = (BYTE *)waveHeaders[writeOffset].lpData;
         S9xMixSamples(curBuffer, singleBufferSamples);
+        S9xMixCartSpeaker((int16_t *)curBuffer, singleBufferSamples);
         SubmitBlock(waveHeaders[writeOffset]);
         writeOffset++;
         writeOffset %= blockCount;
@@ -553,6 +556,7 @@ void CWaveOut::ProcessSound()
 	// need to check this is less than a single buffer, otherwise we have a race condition with bufferCount
     if (availableSamples > 0 && availableSamples < singleBufferSamples && bufferCount < blockCount) {
         S9xMixSamples((BYTE *)waveHeaders[writeOffset].lpData, availableSamples);
+        S9xMixCartSpeaker((int16_t *)waveHeaders[writeOffset].lpData, availableSamples);
         partialOffset = availableSamples << 1;
     }
 }

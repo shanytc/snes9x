@@ -1412,9 +1412,11 @@ void S9xSamplesAvailable(void *data)
 
 #ifndef ALSA
     S9xMixSamples(sound_buffer, samples_to_write);
+    S9xMixCartSpeaker((int16_t *)sound_buffer, samples_to_write);
     s_AudioOutput->Write(sound_buffer, samples_to_write * 2);
 #else
     S9xMixSamples(sound_buffer, frames*2);
+    S9xMixCartSpeaker((int16_t *)sound_buffer, frames*2);
     frames_written = 0;
 
     while (frames_written < frames) {

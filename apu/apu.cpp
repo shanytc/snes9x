@@ -282,9 +282,15 @@ inline void ResetDCBlocker()
 }
 } // namespace
 
+// The cart speaker (HuC3/TAMA5) drained with the GB audio by the last
+// S9xMixSamples, waiting for S9xMixCartSpeaker.
+static std::vector<int16_t> g_cart_speaker;
+static int g_cart_speaker_words = 0;
+
 bool8 S9xMixSamples(uint8 *dest, int sample_count)
 {
     int16 *out = (int16 *)dest;
+    g_cart_speaker_words = 0;
 
     // GB owns the host output: BIOS-less mode (SPC not running) OR
     // BIOS mode after the GB has been released. Splash chime plays
@@ -333,12 +339,16 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
             return true;
         }
 
-        const int32_t got = S9xSGBDrainSamples(out, sample_count);
+        if ((int)g_cart_speaker.size() < sample_count)
+            g_cart_speaker.resize(sample_count);
+        const int32_t got = S9xSGBDrainSamples(out, sample_count, g_cart_speaker.data());
         if (got < sample_count)
         {
             S9xSGBMixGBPadSamples += sample_count - got;
             memset(out + got, 0, (sample_count - got) << 1);
+            memset(g_cart_speaker.data() + got, 0, (sample_count - got) << 1);
         }
+        g_cart_speaker_words = sample_count;
 
         if (audiowave::enabled)
             audiowave::push(audiowave::buf_gb, audiowave::wpos_gb,
@@ -497,6 +507,24 @@ void S9xAudioWaveformPushMix(const int16_t *src, int frames)
 unsigned int S9xSGBMixVolumeSPC = 50;
 unsigned int S9xSGBMixVolumeGB  = 50;
 
+unsigned int S9xCartSpeakerVolume = 50;
+
+void S9xMixCartSpeaker(int16_t *dest, int sample_count)
+{
+    const int n = (sample_count < g_cart_speaker_words) ? sample_count : g_cart_speaker_words;
+    g_cart_speaker_words = 0;
+    const int vol = (S9xCartSpeakerVolume > 100) ? 100 : (int)S9xCartSpeakerVolume;
+    if (!dest || n <= 0 || vol == 0)
+        return;
+    for (int i = 0; i < n; ++i)
+    {
+        int32_t v = dest[i] + ((int32_t)g_cart_speaker[i] * vol) / 100;
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        dest[i] = (int16_t)v;
+    }
+}
+
 unsigned int S9xSGBMixGainSPC = 0;
 unsigned int S9xSGBMixGainGB  = 0;
 
@@ -543,6 +571,7 @@ void S9xMixSpcOverGB(int16_t *dest, int sample_count)
                 }
             }
         }
+        S9xMixCartSpeaker(dest, sample_count);
         S9xAudioWaveformPushMix(dest, frames);
         return;
     }
@@ -592,6 +621,7 @@ void S9xMixSpcOverGB(int16_t *dest, int sample_count)
     if (!S9xSGBBootHandoffCaptured())
         memset(dest, 0, sample_count * sizeof(int16_t));
 
+    S9xMixCartSpeaker(dest, sample_count);
     S9xAudioWaveformPushMix(dest, frames);
 }
 

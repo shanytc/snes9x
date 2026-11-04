@@ -231,7 +231,8 @@ public:
 
 	// Consume pending audio samples. Returns the count written
 	// (stereo frames — each frame stores L, R into out[2*i], out[2*i+1]).
-	int32_t DrainAudio(int16_t *out, int32_t max_samples);
+	// speaker_out, if given, gets the cart speaker for the same frames.
+	int32_t DrainAudio(int16_t *out, int32_t max_samples, int16_t *speaker_out = nullptr);
 
 	// Discard all pending audio samples without playing them. Consumer-side
 	// (moves tail to head), so it is as thread-safe as DrainAudio.
@@ -820,9 +821,11 @@ void S9xSGBOverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
 
 // Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
 // contract. `count_int16s` is the number of int16 samples (stereo frame
-// × 2), returning the number actually drained.
+// × 2), returning the number actually drained. speaker_dest, if given, gets
+// the cart speaker (HuC3/TAMA5) for the same samples, which the GB volume
+// leaves alone (S9xMixCartSpeaker).
 int32_t S9xSGBGetSampleCount(void);
-int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s);
+int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s, int16_t *speaker_dest = nullptr);
 void    S9xSGBClearSamples(void);
 // Host-ring I/O meters in stereo frames (PushSample / ApuDrain sides).
 void    S9xSGBGetAudioRingStats(uint32_t *pushed, uint32_t *dropped, uint32_t *drained);

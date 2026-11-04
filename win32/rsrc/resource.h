@@ -967,6 +967,10 @@
 #define IDC_EDIT_VOLUME_GB              3254
 #define IDC_STATIC_GB_LABEL             3255
 #define IDC_STATIC_GB_PCT               3256
+#define IDC_SLIDER_VOLUME_CART          3731
+#define IDC_EDIT_VOLUME_CART            3732
+#define IDC_STATIC_CART_LABEL           3733
+#define IDC_STATIC_CART_PCT             3734
 #define IDC_GROUP_GAIN                  3340
 #define IDC_SLIDER_GAIN_REGULAR         3341
 #define IDC_EDIT_GAIN_REGULAR           3342

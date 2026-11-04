@@ -94,6 +94,13 @@ void S9xMixSpcOverGB(int16_t *dest, int sample_count);
 extern unsigned int S9xSGBMixVolumeSPC;
 extern unsigned int S9xSGBMixVolumeGB;
 
+// A Game Boy cart's own speaker (HuC3/TAMA5), 0..100 percent, apart from the
+// GB volume. S9xMixCartSpeaker adds what the last S9xMixSamples drained at
+// that volume: S9xMixSpcOverGB calls it, and hosts that skip that step call
+// it right after S9xMixSamples.
+extern unsigned int S9xCartSpeakerVolume;
+void S9xMixCartSpeaker(int16_t *dest, int sample_count);
+
 // Pre-amp gain in whole dB, applied on top of the volume percentages
 // above. 0 = unity; the sliders only go up because attenuation is
 // already what the percent volumes do.

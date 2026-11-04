@@ -55,7 +55,8 @@ void S9xRunAheadSaveAudio (void);
 void S9xRunAheadLoadAudio (void);
 
 // Audio waveform debug capture — see Sound > Show Audio Waveform.
-// streams: 0=SPC pre-mix, 1=GB pre-mix, 2=final mix, 3..10=SPC voices 1-8.
+// streams: 0=SPC pre-mix, 1=GB pre-mix, 2=final mix, 3..10=SPC voices 1-8,
+// 11=the Game Boy cart speaker as mixed.
 void S9xAudioWaveformEnable(bool enable);
 int  S9xAudioWaveformSnapshot(int stream, short *out_lr, int max_frames);
 int  S9xAudioWaveformSampleRate(void);
@@ -100,6 +101,8 @@ extern unsigned int S9xSGBMixVolumeGB;
 // it right after S9xMixSamples.
 extern unsigned int S9xCartSpeakerVolume;
 void S9xMixCartSpeaker(int16_t *dest, int sample_count);
+// The waveform viewer's mute/solo on its SPKR track; false silences the speaker.
+extern bool S9xCartSpeakerAudible;
 
 // Pre-amp gain in whole dB, applied on top of the volume percentages
 // above. 0 = unity; the sliders only go up because attenuation is

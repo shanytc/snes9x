@@ -19448,7 +19448,7 @@ static const int   kAudioWaveFrames  = 4800;
 static const int kWaveHeaderW = 144;
 
 struct WaveTrackInfo { const TCHAR *name; COLORREF color; };
-static const WaveTrackInfo kWaveTracks[15] = {
+static const WaveTrackInfo kWaveTracks[16] = {
     { TEXT("SPC"), RGB( 91, 124, 235) },
     { TEXT("GB"),  RGB(166, 168,  60) },
     { TEXT("MIX"), RGB(148, 156, 172) },
@@ -19464,6 +19464,7 @@ static const WaveTrackInfo kWaveTracks[15] = {
     { TEXT("V6"),  RGB(240, 154,  62) },
     { TEXT("V7"),  RGB(229, 100, 110) },
     { TEXT("V8"),  RGB(176, 106, 212) },
+    { TEXT("SPKR"), RGB(236,  98, 150) },   // 15: a GB cart's own speaker
 };
 
 static COLORREF WaveShade(COLORREF c, int pct)   // scale toward black
@@ -19482,7 +19483,9 @@ static COLORREF WaveTint(COLORREF c, int pct)    // blend toward white
 // Mute state per viewer source. SPC voices ride GUI.SoundChannelEnable
 // (shared with the Sound > Channels menu); GB channels have their own
 // GUI.GBChannelEnable so muting CH2 here doesn't silence SPC voice 2;
-// MIX maps to the master mute.
+// MIX maps to the master mute; SPKR has its own, viewer-only.
+static bool g_wave_speaker_on = true;
+
 static bool AudioWaveIsMuted(int src)
 {
     switch (src)
@@ -19490,6 +19493,7 @@ static bool AudioWaveIsMuted(int src)
         case 0:  return (GUI.SoundChannelEnable & 0xFF) == 0;
         case 1:  return (GUI.GBChannelEnable & 0x0F) == 0;
         case 2:  return GUI.Mute;
+        case 15: return !g_wave_speaker_on;
         default:
             if (src >= 7) return !(GUI.SoundChannelEnable & (1 << (src - 7)));
             return !(GUI.GBChannelEnable & (1 << (src - 3)));
@@ -19503,6 +19507,7 @@ static uint8 g_wave_solo_spc     = 0;      // V1-8 solo bits
 static uint8 g_wave_solo_gb      = 0;      // CH1-4 solo bits
 static bool  g_wave_solo_spc_grp = false;  // SPC group solo (all voices)
 static bool  g_wave_solo_gb_grp  = false;  // GB group solo (all channels)
+static bool  g_wave_solo_speaker = false;
 
 static bool AudioWaveIsSoloed(int src)
 {
@@ -19511,6 +19516,7 @@ static bool AudioWaveIsSoloed(int src)
         case 0:  return g_wave_solo_spc_grp;
         case 1:  return g_wave_solo_gb_grp;
         case 2:  return false;
+        case 15: return g_wave_solo_speaker;
         default:
             if (src >= 7) return (g_wave_solo_spc >> (src - 7)) & 1;
             return (g_wave_solo_gb >> (src - 3)) & 1;
@@ -19522,9 +19528,16 @@ static void AudioWaveEffectiveMasks(uint8 *outSpc, uint8 *outGb)
 {
     const uint8 spcSolo = g_wave_solo_spc | (g_wave_solo_spc_grp ? 0xFF : 0);
     const uint8 gbSolo  = (uint8)((g_wave_solo_gb | (g_wave_solo_gb_grp ? 0x0F : 0)) & 0x0F);
-    const bool  anySolo = (spcSolo | gbSolo) != 0;
+    const bool  anySolo = (spcSolo | gbSolo) != 0 || g_wave_solo_speaker;
     *outSpc = (uint8)GUI.SoundChannelEnable & (anySolo ? spcSolo : 0xFF);
     *outGb  = (uint8)GUI.GBChannelEnable    & (anySolo ? gbSolo  : 0x0F);
+}
+
+static bool AudioWaveSpeakerAudible(void)
+{
+    const bool anySolo = g_wave_solo_spc || g_wave_solo_spc_grp || g_wave_solo_gb ||
+                         g_wave_solo_gb_grp || g_wave_solo_speaker;
+    return g_wave_speaker_on && (!anySolo || g_wave_solo_speaker);
 }
 
 static void AudioWaveApplyAudibility(void)
@@ -19533,6 +19546,7 @@ static void AudioWaveApplyAudibility(void)
     AudioWaveEffectiveMasks(&effSpc, &effGb);
     S9xSetSoundControl(effSpc);
     S9xSGBSetSoundChannelMask(effGb);
+    S9xCartSpeakerAudible = AudioWaveSpeakerAudible();
 }
 
 // Whether the track actually reaches the output right now (mute + solo).
@@ -19545,6 +19559,7 @@ static bool AudioWaveIsAudible(int src)
         case 0:  return effSpc != 0;
         case 1:  return effGb != 0;
         case 2:  return !GUI.Mute;
+        case 15: return AudioWaveSpeakerAudible();
         default:
             if (src >= 7) return (effSpc >> (src - 7)) & 1;
             return (effGb >> (src - 3)) & 1;
@@ -19578,6 +19593,9 @@ static void AudioWaveToggleMute(int src)
         case 2:
             S9xSetMuted(!GUI.Mute);
             return;
+        case 15:
+            g_wave_speaker_on = !g_wave_speaker_on;
+            break;
         default:
             if (src >= 7)
                 GUI.SoundChannelEnable ^= 1 << (src - 7);
@@ -19595,6 +19613,7 @@ static void AudioWaveToggleSolo(int src)
         case 0:  g_wave_solo_spc_grp = !g_wave_solo_spc_grp; break;
         case 1:  g_wave_solo_gb_grp  = !g_wave_solo_gb_grp;  break;
         case 2:  return;   // MIX is the master bus — nothing to solo against
+        case 15: g_wave_solo_speaker = !g_wave_solo_speaker; break;
         default:
             if (src >= 7) g_wave_solo_spc ^= 1 << (src - 7);
             else          g_wave_solo_gb  ^= 1 << (src - 3);
@@ -19606,7 +19625,7 @@ static void AudioWaveToggleSolo(int src)
 static void AudioWaveClearSolo(void)
 {
     g_wave_solo_spc = g_wave_solo_gb = 0;
-    g_wave_solo_spc_grp = g_wave_solo_gb_grp = false;
+    g_wave_solo_spc_grp = g_wave_solo_gb_grp = g_wave_solo_speaker = false;
     AudioWaveApplyAudibility();
 }
 
@@ -19629,9 +19648,9 @@ static RECT AudioWaveSoloRect(const RECT &row)
 }
 
 // Logic-style L/R level meters, one smoothed peak per track side.
-static float g_wave_meter[15][2];
-static float g_wave_peak[15][2];
-static DWORD g_wave_peak_tick[15][2];
+static float g_wave_meter[16][2];
+static float g_wave_peak[16][2];
+static DWORD g_wave_peak_tick[16][2];
 static DWORD g_wave_meter_tick = 0;
 
 // Logic-style record-arm [R], left of [M].
@@ -19654,7 +19673,7 @@ static TCHAR  g_wave_rec_tmp[MAX_PATH];
 
 static int AudioWaveRecRate(int src)
 {
-    if (src < 3)  return Settings.SoundPlaybackRate;
+    if (src < 3 || src == 15) return Settings.SoundPlaybackRate;
     if (src >= 7) return 32000;
     return (int)S9xSGBGetAudioRate();
 }
@@ -19674,7 +19693,8 @@ static void AudioWaveRecPump(void)
         if (g_wave_rec_src >= 3 && g_wave_rec_src <= 6)
             n = S9xSGBReadChannelWaveformNew(g_wave_rec_src - 3, &g_wave_rec_cursor, buf, 4096);
         else
-            n = S9xAudioWaveformReadNew(g_wave_rec_src < 3 ? g_wave_rec_src : g_wave_rec_src - 4,
+            n = S9xAudioWaveformReadNew(g_wave_rec_src < 3 ? g_wave_rec_src :
+                                        g_wave_rec_src == 15 ? 11 : g_wave_rec_src - 4,
                                         &g_wave_rec_cursor, buf, 4096);
         if (n <= 0) break;
         fwrite(buf, AudioWaveRecChans(g_wave_rec_src) * sizeof(short), n, g_wave_rec_file);
@@ -19866,7 +19886,8 @@ static void DrawWaveTrackRow(HDC hdc, const RECT &r, int src, bool isGroup,
     }
 
     SetTextColor(hdc, !audible ? RGB(130, 130, 135) : RGB(225, 225, 228));
-    TextOut(hdc, hd.left + (isGroup ? 26 : 30), cy - 8,
+    // SPKR's four letters start further left so they clear [R].
+    TextOut(hdc, hd.left + (isGroup ? 26 : src == 15 ? 20 : 30), cy - 8,
             ti.name, lstrlen(ti.name));
 
     // [R]ecord-arm button, Logic-style: solid red while recording.
@@ -20201,10 +20222,11 @@ static RECT AudioWaveNerdBoxRect(const RECT &client)
 }
 
 // Build the top-to-bottom panel list for the current core/expansion state.
-// Sources: 0=SPC, 1=GB, 2=MIX, 3..6=GB CH1-4, 7..14=SPC voices V1-V8.
-// Dead cores are dropped entirely (no SPC group in BIOS-less GB, no GB
-// group for SNES-only games); the final MIX always sits at the bottom.
-static int AudioWaveBuildOrder(int order[15])
+// Sources: 0=SPC, 1=GB, 2=MIX, 3..6=GB CH1-4, 7..14=SPC voices V1-V8,
+// 15=SPKR (a cart with its own speaker). Dead cores are dropped entirely (no
+// SPC group in BIOS-less GB, no GB group for SNES-only games); the final MIX
+// always sits at the bottom.
+static int AudioWaveBuildOrder(int order[16])
 {
     const bool gbCore  = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
     const bool spcCore = !Settings.SuperGameBoy;
@@ -20222,6 +20244,12 @@ static int AudioWaveBuildOrder(int order[15])
         g_wave_solo_spc_grp = false;
         AudioWaveApplyAudibility();
     }
+    const bool speaker = gbCore && S9xSGBCartHasSpeaker();
+    if (!speaker && g_wave_solo_speaker)
+    {
+        g_wave_solo_speaker = false;
+        AudioWaveApplyAudibility();
+    }
     int n = 0;
     if (spcCore)
     {
@@ -20235,6 +20263,8 @@ static int AudioWaveBuildOrder(int order[15])
         if (g_audiowave_gb_open)
             for (int c = 3; c <= 6; ++c) order[n++] = c;
     }
+    if (speaker)
+        order[n++] = 15;
     order[n++] = 2;
     return n;
 }
@@ -20258,7 +20288,7 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         case WM_LBUTTONDOWN:
         {
-            int order[15];
+            int order[16];
             const int nPanels = AudioWaveBuildOrder(order);
             RECT cr;
             GetClientRect(hwnd, &cr);
@@ -20407,7 +20437,7 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_wave_backh = ch;
             }
             HDC hdc = g_wave_backdc;
-            int order[15];
+            int order[16];
             const int nPanels = AudioWaveBuildOrder(order);
             const int chPanels = ch - kWaveFooterH;
             int H = chPanels / nPanels;
@@ -20457,7 +20487,7 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 fps_last_tick = now_tick;
             }
 
-            TCHAR rateTxt[15][96];
+            TCHAR rateTxt[16][96];
             // Nerd stats: I/O rates in frames/s (nominal SPC 32k, GB 48k),
             // snes 21.48M / gb 4.30M / ln 15.75k, splice counters, fills, trim.
             if (g_audiowave_nerd_stats)
@@ -20487,6 +20517,7 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             _stprintf(rateTxt[6], TEXT("noise"));
             for (int i = 7; i < 15; ++i)
                 rateTxt[i][0] = 0;
+            _stprintf(rateTxt[15], TEXT("cart speaker"));
             for (int d = 0; d < nPanels; ++d)
             {
                 const int s = order[d];
@@ -20494,6 +20525,10 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 if (s < 3)
                 {
                     n = S9xAudioWaveformSnapshot(s, buf, kAudioWaveFrames);
+                }
+                else if (s == 15)
+                {
+                    n = S9xAudioWaveformSnapshot(11, buf, kAudioWaveFrames);
                 }
                 else if (s >= 7)
                 {
@@ -20520,7 +20555,7 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 DrawWaveTrackRow(hdc, panel, s, s == 0 || s == 1,
                                  s == 0 ? g_audiowave_spc_open : g_audiowave_gb_open,
                                  buf, n, rateTxt[s],
-                                 (s < 3) ? sr : (s >= 7 ? 32000 : (int)gb_rate),
+                                 (s < 3 || s == 15) ? sr : (s >= 7 ? 32000 : (int)gb_rate),
                                  d == nPanels - 1);
             }
             g_wave_meter_tick = GetTickCount();   // shared meter-decay clock
@@ -20656,9 +20691,10 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 // Default: mutes and solos were listening experiments —
                 // restore the all-on state Sound > Channels starts with.
                 g_wave_solo_spc = g_wave_solo_gb = 0;
-                g_wave_solo_spc_grp = g_wave_solo_gb_grp = false;
+                g_wave_solo_spc_grp = g_wave_solo_gb_grp = g_wave_solo_speaker = false;
                 GUI.SoundChannelEnable = 255;
                 GUI.GBChannelEnable    = 0x0F;
+                g_wave_speaker_on      = true;
                 AudioWaveApplyAudibility();
             }
             else
@@ -20670,8 +20706,9 @@ LRESULT CALLBACK AudioWaveProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 AudioWaveEffectiveMasks(&effSpc, &effGb);
                 GUI.SoundChannelEnable = effSpc;
                 GUI.GBChannelEnable    = effGb;
+                g_wave_speaker_on      = AudioWaveSpeakerAudible();
                 g_wave_solo_spc = g_wave_solo_gb = 0;
-                g_wave_solo_spc_grp = g_wave_solo_gb_grp = false;
+                g_wave_solo_spc_grp = g_wave_solo_gb_grp = g_wave_solo_speaker = false;
                 AudioWaveApplyAudibility();
             }
             g_audiowave_hwnd = NULL;
@@ -26002,6 +26039,7 @@ void S9xToggleSoundChannel (int c)
 	if (c == 8)
 	{
 		GUI.SoundChannelEnable = 255;
+		g_wave_speaker_on = true;
 		// Enable All means audibly all-on: drop any engaged viewer solo
 		// too, or the solo mask would keep everything else silent.
 		AudioWaveClearSolo();

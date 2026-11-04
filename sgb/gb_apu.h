@@ -120,6 +120,13 @@ struct ApuCartSpeaker
 	bool     on      = false;  // in a beep
 	double   hz      = 0.0;    // its pitch
 	double   phase   = 0.0;    // square wave phase, 0..1
+	// v18: a HuC3 melody (Pocket Family, $27 = 7). step = the note's fade
+	// steps begun (its level is 8 - step), 8 = past the note.
+	bool     melody    = false;
+	uint8_t  score[68] = {};   // HuC3 memory $78-$FF, high nibble first
+	uint8_t  pos       = 0;    // next score byte
+	uint8_t  transpose = 0;
+	uint8_t  length    = 0;    // the note's length code, 0-7
 };
 
 struct Apu
@@ -239,6 +246,9 @@ void ApuSetClockHz(Apu &a, int32_t hz);
 void ApuSpeakerStart(Apu &a, uint8_t tone);
 // Chirp TAMA6 pattern 1-4 of `prog` (the chip's RAM pages, 2 x 12 nibbles).
 void ApuSpeakerStartTama(Apu &a, uint8_t pattern, const uint8_t prog[24]);
+// Play the HuC3 melody in `nib` (memory $78-$FF, one nibble each; the same
+// melody playing carries on).
+void ApuSpeakerStartMelody(Apu &a, const uint8_t nib[0x88]);
 void ApuSpeakerStop(Apu &a);
 
 // Host-side channel enable mask, bits 0..3 = CH1..CH4. UI policy only.

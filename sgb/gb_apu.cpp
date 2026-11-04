@@ -706,6 +706,60 @@ bool TamaNextStep(ApuCartSpeaker &s, uint64_t &us)
 	return true;
 }
 
+// A HuC3 melody: two header bytes, then $0x-$7x notes (length, pitch), $8x
+// rests, $Ax transpose, $B0 the end (gbkiss.org/tech/alarm). Recorded off a
+// real cart playing Saita Saita (header $40 $F7): the pitch is offset + 2 x
+// transpose semitones above A3, as the crystal over a whole divider; a note
+// fades in 7 linear steps (69 ms, the 5th 57 ms) whatever its length, and
+// the next starts its length + 51.4 ms later; a quarter is 471 ms. The
+// header (tempo?) isn't decoded, so every melody plays at Saita's tempo.
+constexpr uint32_t kMelodyFadeEndUs[7] = { 69000, 138000, 207000, 276000, 333000, 402000, 471000 };
+constexpr uint32_t kMelodyQuarterUs = 471000, kMelodyGapUs = 51440;
+constexpr uint8_t  kMelodySixteenths[8] = { 1, 2, 3, 4, 6, 8, 12, 16 };
+
+// Steps to the next fade step, tail or rest; false once the melody has ended.
+bool MelodyNextStep(ApuCartSpeaker &s, uint64_t &us)
+{
+	const uint32_t len = kMelodyQuarterUs * kMelodySixteenths[s.length] / 4;
+	if (s.step < 7)
+	{
+		const uint32_t from = s.step ? kMelodyFadeEndUs[s.step - 1] : 0;
+		if (from < len)
+		{
+			us   = std::min(kMelodyFadeEndUs[s.step], len) - from;
+			s.on = true;
+			++s.step;
+			return true;
+		}
+		s.step = 7;
+	}
+	if (s.step == 7)
+	{
+		us   = (len > kMelodyFadeEndUs[6] ? len - kMelodyFadeEndUs[6] : 0) + kMelodyGapUs;
+		s.on = false;
+		s.step = 8;
+		return true;
+	}
+	while (s.pos < sizeof s.score)
+	{
+		const uint8_t b = s.score[s.pos++], hi = b >> 4, lo = b & 0x0F;
+		if (hi == 0x8)
+		{
+			us   = kMelodyQuarterUs * kMelodySixteenths[std::min<uint8_t>(lo, 7)] / 4;
+			s.on = false;
+			return true;
+		}
+		if (hi == 0xA) s.transpose = lo;
+		if (hi == 0xB) break;
+		if (hi > 0x7) continue;   // $9x, $Cx-$Fx: unknown
+		s.length = hi;
+		s.hz     = 32768.0 / std::lround(32768.0 / (220.0 * std::pow(2.0, (lo + 2 * s.transpose) / 12.0)));
+		s.step   = 0;
+		return MelodyNextStep(s, us);
+	}
+	return false;
+}
+
 // Steps to the next beep, gap or rest; false once the tone has ended.
 bool SpeakerNextStep(Apu &a)
 {
@@ -714,6 +768,14 @@ bool SpeakerNextStep(Apu &a)
 	if (s.pattern)
 	{
 		if (!TamaNextStep(s, us))
+		{
+			s = ApuCartSpeaker();
+			return false;
+		}
+	}
+	else if (s.melody)
+	{
+		if (!MelodyNextStep(s, us))
 		{
 			s = ApuCartSpeaker();
 			return false;
@@ -734,7 +796,7 @@ bool SpeakerNextStep(Apu &a)
 		s.hz = t.hz;
 	}
 	s.left  = static_cast<uint32_t>(us * static_cast<uint64_t>(a.output_rate) / 1000000);
-	s.phase = 0.0;
+	if (!s.melody || s.step == 1) s.phase = 0.0;   // a fade runs on through its steps
 	return true;
 }
 
@@ -758,6 +820,7 @@ int32_t SpeakerSample(Apu &a)
 	const double p  = s.phase;
 	double v = (p < 0.5 ? 1.0 : -1.0) + PolyBlep(p, dt) - PolyBlep(p < 0.5 ? p + 0.5 : p - 0.5, dt);
 	s.phase = p + dt >= 1.0 ? p + dt - 1.0 : p + dt;
+	if (s.melody) v = v * (8 - s.step) / 7;   // fade step k = step - 1 plays at (7 - k) / 7
 	return static_cast<int32_t>(v * kSpeakerLevel);
 }
 
@@ -769,7 +832,7 @@ void FlushSample(Apu &a)
 		avg_l = a.sample_accum_l / static_cast<int32_t>(a.sample_accum_cnt);
 		avg_r = a.sample_accum_r / static_cast<int32_t>(a.sample_accum_cnt);
 	}
-	if (a.speaker.tone || a.speaker.pattern)
+	if (a.speaker.tone || a.speaker.pattern || a.speaker.melody)
 	{
 		const int32_t spk = SpeakerSample(a);
 		avg_l += spk;
@@ -1911,6 +1974,19 @@ void ApuSpeakerStartTama(Apu &a, uint8_t pattern, const uint8_t prog[24])
 	a.speaker = ApuCartSpeaker();
 	a.speaker.pattern = pattern;
 	std::memcpy(a.speaker.prog, prog, sizeof a.speaker.prog);
+}
+
+void ApuSpeakerStartMelody(Apu &a, const uint8_t nib[0x88])
+{
+	uint8_t score[sizeof a.speaker.score];
+	for (size_t i = 0; i < sizeof score; ++i)
+		score[i] = static_cast<uint8_t>((nib[i * 2] << 4) | (nib[i * 2 + 1] & 0x0F));
+	if (a.speaker_off || (a.speaker.melody && !std::memcmp(a.speaker.score, score, sizeof score))) return;
+	a.speaker = ApuCartSpeaker();
+	a.speaker.melody = true;
+	std::memcpy(a.speaker.score, score, sizeof score);
+	a.speaker.pos  = 2;   // past the header
+	a.speaker.step = 8;
 }
 
 void ApuSpeakerStop(Apu &a)

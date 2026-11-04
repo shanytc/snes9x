@@ -421,9 +421,9 @@ void Snes9xWindow::connect_signals()
     };
     rtc_toggle("rtc_sav_item", false);
     rtc_toggle("rtc_file_item", true);
-    auto speaker = get_object<Gtk::CheckMenuItem>("rtc_speaker_item");
+    auto speaker = get_object<Gtk::CheckMenuItem>("cart_speaker_item");
     speaker->signal_toggled().connect([this, speaker] {
-        if (refreshing_rtc_menu)
+        if (refreshing_cart_speaker)
             return;
         Settings.GBCartSpeaker = speaker->get_active();
         S9xSetInfoString(Settings.GBCartSpeaker ? _("Cartridge speaker on") : _("Cartridge speaker off"));
@@ -2895,8 +2895,17 @@ void Snes9xWindow::configure_widgets()
     {
         refreshing_rtc_menu = true;
         get_object<Gtk::RadioMenuItem>(Settings.GBRTCSeparate ? "rtc_file_item" : "rtc_sav_item")->set_active(true);
-        get_object<Gtk::CheckMenuItem>("rtc_speaker_item")->set_active(Settings.GBCartSpeaker);
         refreshing_rtc_menu = false;
+    }
+
+    // Sound -> Cartridge Speaker: only for a cart with its own speaker (HuC3, TAMA5).
+    const bool speaker_cart = gb_loaded && S9xSGBCartHasSpeaker();
+    show_widget("cart_speaker_item", speaker_cart);
+    if (speaker_cart)
+    {
+        refreshing_cart_speaker = true;
+        get_object<Gtk::CheckMenuItem>("cart_speaker_item")->set_active(Settings.GBCartSpeaker);
+        refreshing_cart_speaker = false;
     }
 
     // Koei Voicer-kun audio CD: only offered while a supported game is loaded,

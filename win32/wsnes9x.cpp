@@ -140,6 +140,7 @@ INT_PTR CALLBACK DlgAboutProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 static void WinGBRtcSettings();
 static void UpdateRtcPopup(bool show);
+static void UpdateCartSpeakerItem(bool show);
 INT_PTR CALLBACK DlgEmulatorHacksProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -4295,7 +4296,7 @@ LRESULT CALLBACK WinProc(
 			WinGBRtcSettings ();
 			RestoreSNESDisplay ();
 			break;
-		case ID_EMULATION_GB_RTC_SPEAKER:
+		case ID_SOUND_CART_SPEAKER:
 			Settings.GBCartSpeaker = !Settings.GBCartSpeaker;
 			S9xSetInfoString (Settings.GBCartSpeaker ? "Cartridge speaker on" : "Cartridge speaker off");
 			break;
@@ -7992,6 +7993,7 @@ static void CheckMenuStates ()
 			}
 		}
 		UpdateRtcPopup(gb_loaded && S9xSGBCartHasClock());
+		UpdateCartSpeakerItem(gb_loaded && S9xSGBCartHasSpeaker());
 		// Again, now that Game Boy Link, Game Boy Model and Real Time Clock are
 		// settled: Run Ahead's divider follows them.
 		UpdateHardwarePopups();
@@ -11310,9 +11312,40 @@ static void UpdateRtcPopup (bool show)
 		CheckMenuRadioItem (s_rtc, ID_EMULATION_GB_RTC_SAV, ID_EMULATION_GB_RTC_FILE,
 		                    Settings.GBRTCSeparate ? ID_EMULATION_GB_RTC_FILE : ID_EMULATION_GB_RTC_SAV,
 		                    MF_BYCOMMAND);
-		CheckMenuItem (s_rtc, ID_EMULATION_GB_RTC_SPEAKER,
-		               MF_BYCOMMAND | (Settings.GBCartSpeaker ? MF_CHECKED : MF_UNCHECKED));
 	}
+}
+
+// Sound > Cartridge Speaker comes and goes with a cart that has its own speaker
+// (HuC3, TAMA5), right below Sync Sound.
+static void UpdateCartSpeakerItem (bool show)
+{
+	HMENU parent = NULL;
+	int   pos    = 0;
+	const bool in_menu = FindMenuItemParentPos (GUI.hMenu, ID_SOUND_CART_SPEAKER, &parent, &pos);
+	if (in_menu && !show)
+	{
+		RemoveMenu (parent, ID_SOUND_CART_SPEAKER, MF_BYCOMMAND);
+		DrawMenuBar (GUI.hWnd);
+	}
+	else if (!in_menu && show && FindMenuItemParentPos (GUI.hMenu, ID_SOUND_SYNC, &parent, &pos))
+	{
+		MENUITEMINFO ins = {};
+		ins.cbSize     = sizeof (ins);
+		ins.fMask      = MIIM_STRING | MIIM_ID | MIIM_FTYPE;
+		ins.fType      = MFT_STRING;
+		ins.wID        = ID_SOUND_CART_SPEAKER;
+		TCHAR txt[]    = TEXT("Car&tridge Speaker");
+		ins.dwTypeData = txt;
+		ins.cch        = (UINT)_tcslen (txt);
+		InsertMenuItem (parent, (UINT)(pos + 1), TRUE, &ins);
+		if (LocaleIsTranslated ())
+			LocalizeMenu (parent);
+		DrawMenuBar (GUI.hWnd);
+	}
+
+	if (show)
+		CheckMenuItem (GUI.hMenu, ID_SOUND_CART_SPEAKER,
+		               MF_BYCOMMAND | (Settings.GBCartSpeaker ? MF_CHECKED : MF_UNCHECKED));
 }
 
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)

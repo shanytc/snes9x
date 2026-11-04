@@ -88,9 +88,11 @@ constexpr int CAPTURE_FRAMES = 9600;
 static int16_t buf_spc[CAPTURE_FRAMES * 2];
 static int16_t buf_gb [CAPTURE_FRAMES * 2];
 static int16_t buf_mix[CAPTURE_FRAMES * 2];
+static int16_t buf_spk[CAPTURE_FRAMES * 2];   // stream 11: the cart speaker as mixed
 static int     wpos_spc = 0;
 static int     wpos_gb  = 0;
 static int     wpos_mix = 0;
+static int     wpos_spk = 0;
 // Per-voice SPC scope rings (streams 3..10), fed by SPC_DSP::voice_output
 // at the DSP's native 32 kHz — each voice's post-envelope, post-volume
 // contribution, so a menu-disabled voice reads flat.
@@ -127,6 +129,7 @@ int snapshot(int stream, short *out_lr, int max_frames)
         case 0: ring = buf_spc; wpos = wpos_spc; break;
         case 1: ring = buf_gb;  wpos = wpos_gb;  break;
         case 2: ring = buf_mix; wpos = wpos_mix; break;
+        case 11: ring = buf_spk; wpos = wpos_spk; break;
         default:
             if (stream >= 3 && stream <= 10)
             {
@@ -508,20 +511,28 @@ unsigned int S9xSGBMixVolumeSPC = 50;
 unsigned int S9xSGBMixVolumeGB  = 50;
 
 unsigned int S9xCartSpeakerVolume = 50;
+bool S9xCartSpeakerAudible = true;
 
 void S9xMixCartSpeaker(int16_t *dest, int sample_count)
 {
     const int n = (sample_count < g_cart_speaker_words) ? sample_count : g_cart_speaker_words;
     g_cart_speaker_words = 0;
-    const int vol = (S9xCartSpeakerVolume > 100) ? 100 : (int)S9xCartSpeakerVolume;
-    if (!dest || n <= 0 || vol == 0)
+    if (!dest || sample_count <= 0)
         return;
+    const int vol = !S9xCartSpeakerAudible ? 0 : (S9xCartSpeakerVolume > 100) ? 100 : (int)S9xCartSpeakerVolume;
     for (int i = 0; i < n; ++i)
     {
-        int32_t v = dest[i] + ((int32_t)g_cart_speaker[i] * vol) / 100;
+        const int32_t s = ((int32_t)g_cart_speaker[i] * vol) / 100;
+        g_cart_speaker[i] = (int16_t)s;   // as mixed, for the viewer's SPKR track
+        int32_t v = dest[i] + s;
         if (v >  32767) v =  32767;
         if (v < -32768) v = -32768;
         dest[i] = (int16_t)v;
+    }
+    if (audiowave::enabled)
+    {
+        audiowave::push(audiowave::buf_spk, audiowave::wpos_spk, g_cart_speaker.data(), n / 2);
+        audiowave::push_silence(audiowave::buf_spk, audiowave::wpos_spk, (sample_count - n) / 2);
     }
 }
 
@@ -796,12 +807,14 @@ void S9xAudioWaveformEnable(bool enable)
         memset(audiowave::buf_spc, 0, sizeof audiowave::buf_spc);
         memset(audiowave::buf_gb,  0, sizeof audiowave::buf_gb);
         memset(audiowave::buf_mix, 0, sizeof audiowave::buf_mix);
+        memset(audiowave::buf_spk, 0, sizeof audiowave::buf_spk);
         memset(audiowave::buf_voice, 0, sizeof audiowave::buf_voice);
         memset(audiowave::wpos_voice, 0, sizeof audiowave::wpos_voice);
         memset(audiowave::voice_pending_l, 0, sizeof audiowave::voice_pending_l);
         audiowave::wpos_spc = 0;
         audiowave::wpos_gb  = 0;
         audiowave::wpos_mix = 0;
+        audiowave::wpos_spk = 0;
     }
     // The GB APU keeps its own per-channel scope rings for the viewer's
     // CH1-CH4 panels — capture in lockstep with the host rings.
@@ -841,6 +854,7 @@ int S9xAudioWaveformReadNew(int stream, int *cursor, short *out_lr, int max_fram
         case 0: ring = audiowave::buf_spc; wpos = audiowave::wpos_spc; break;
         case 1: ring = audiowave::buf_gb;  wpos = audiowave::wpos_gb;  break;
         case 2: ring = audiowave::buf_mix; wpos = audiowave::wpos_mix; break;
+        case 11: ring = audiowave::buf_spk; wpos = audiowave::wpos_spk; break;
         default:
             if (stream >= 3 && stream <= 10)
             {

@@ -144,8 +144,6 @@ struct Apu
 	// Host policy (not serialized): an NRx2 rewrite on a live channel may
 	// never raise its volume — see Nrx2Glitch.
 	bool      suppress_nrx2_glitch = false;
-	// Host policy (not serialized): Cartridge Speaker unticked, no tone starts.
-	bool      speaker_off = false;
 
 	// DIV-APU divider chain state.
 	uint8_t   div_divider    = 0;

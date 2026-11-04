@@ -678,6 +678,7 @@ void Emulator::ColdReset()
 	impl_->replays_done = 0;
 	SetLinkCartPatches(LinkCartPatchesWanted());   // power-on: never under a running game
 	Reset();
+	ApuSpeakerStop(impl_->apu);   // the user's reset silences the cart too
 }
 
 void Emulator::SetLinkCartPatches(bool on)
@@ -713,6 +714,7 @@ bool Emulator::SoftReset()
 
 	impl_->boot_rom_loaded = false;
 	Reset();
+	ApuSpeakerStop(impl_->apu);
 	impl_->boot_rom_loaded       = boot_rom;
 	impl_->boot_handoff_captured = handoff;
 	impl_->boot_handoff_regs     = handoff_regs;
@@ -1839,22 +1841,12 @@ void Emulator::SetForceModel(uint8_t m)
 	impl_->force_model = (m <= 3) ? m : 0;
 }
 
-// Sound > Cartridge Speaker: unticked, no HuC3 tone starts and one playing
-// stops.
-static void SyncCartSpeaker(Emulator::Impl &impl)
-{
-	impl.apu.speaker_off = !Settings.GBCartSpeaker;
-	if (impl.apu.speaker_off)
-		ApuSpeakerStop(impl.apu);
-}
-
 void Emulator::RunFrame()
 {
 	if (!impl_->has_rom) return;
 
 	impl_->ppu.frame_ready = false;
 	impl_->apu.suppress_nrx2_glitch = impl_->SuppressNrxGlitches();
-	SyncCartSpeaker(*impl_);
 
 	// Cycle budget per SNES frame depends on run mode and the user
 	// overclock/underclock knob:
@@ -2037,7 +2029,6 @@ void Emulator::RunCycles(int32_t tcycles)
 	if (!impl_->has_rom) return;
 	if (tcycles <= 0) return;
 	impl_->apu.suppress_nrx2_glitch = impl_->SuppressNrxGlitches();
-	SyncCartSpeaker(*impl_);
 
 	// The SGB BIOS boots even a CGB-capable cart as a plain DMG game (no
 	// bank-1 attributes, no CGB palettes); rendering it as CGB would read

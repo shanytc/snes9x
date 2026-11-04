@@ -644,7 +644,7 @@ inline float Biquad(float x, float b0, float b1, float b2, float a1, float a2,
 	return y;
 }
 
-void PushSample(Apu &a, int16_t l, int16_t r)
+void PushSample(Apu &a, int16_t l, int16_t r, int16_t speaker)
 {
 	const uint32_t size = APU_SAMPLE_BUF_SIZE;
 	const uint32_t next = (a.sample_head + 1) % size;
@@ -655,6 +655,7 @@ void PushSample(Apu &a, int16_t l, int16_t r)
 	}
 	a.sample_buf[a.sample_head * 2 + 0] = l;
 	a.sample_buf[a.sample_head * 2 + 1] = r;
+	a.speaker_buf[a.sample_head] = speaker;
 	a.sample_head = next;
 	a.dbg_ring_pushed++;
 }
@@ -832,12 +833,7 @@ void FlushSample(Apu &a)
 		avg_l = a.sample_accum_l / static_cast<int32_t>(a.sample_accum_cnt);
 		avg_r = a.sample_accum_r / static_cast<int32_t>(a.sample_accum_cnt);
 	}
-	if (a.speaker.tone || a.speaker.pattern || a.speaker.melody)
-	{
-		const int32_t spk = SpeakerSample(a);
-		avg_l += spk;
-		avg_r += spk;
-	}
+	const int32_t spk = (a.speaker.tone || a.speaker.pattern || a.speaker.melody) ? SpeakerSample(a) : 0;
 
 	if (g_wave_capture)
 	{
@@ -880,7 +876,7 @@ void FlushSample(Apu &a)
 	int32_t fr = static_cast<int32_t>(fr_f);
 	if (fl >  32767) fl =  32767; else if (fl < -32768) fl = -32768;
 	if (fr >  32767) fr =  32767; else if (fr < -32768) fr = -32768;
-	PushSample(a, static_cast<int16_t>(fl), static_cast<int16_t>(fr));
+	PushSample(a, static_cast<int16_t>(fl), static_cast<int16_t>(fr), static_cast<int16_t>(spk));
 }
 
 // Derive the output low-pass coefficients from the current output_rate.
@@ -1994,13 +1990,15 @@ void ApuSpeakerStop(Apu &a)
 	a.speaker = ApuCartSpeaker();
 }
 
-int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples)
+int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples, int16_t *speaker_out)
 {
 	int32_t got = 0;
 	while (got < max_samples && a.sample_tail != a.sample_head)
 	{
 		out[got * 2 + 0] = a.sample_buf[a.sample_tail * 2 + 0];
 		out[got * 2 + 1] = a.sample_buf[a.sample_tail * 2 + 1];
+		if (speaker_out)
+			speaker_out[got * 2 + 0] = speaker_out[got * 2 + 1] = a.speaker_buf[a.sample_tail];
 		a.sample_tail    = (a.sample_tail + 1) % APU_SAMPLE_BUF_SIZE;
 		++got;
 	}

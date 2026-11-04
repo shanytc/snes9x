@@ -1312,6 +1312,7 @@ void DoAVIVideoFrame()
 		avi_sound_samples_error -= samples;
 
 		S9xMixSamples(avi_sound_buffer, samples*stereo_multiplier);
+		S9xMixCartSpeaker((int16_t *)avi_sound_buffer, samples*stereo_multiplier);
 
 		AVIAddSoundSamples(avi_sound_buffer, samples, GUI.AVIOut);
 	}

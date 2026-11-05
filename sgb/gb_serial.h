@@ -81,6 +81,18 @@ struct Serial
 	// The last peer clock we answered: our real_cycles then, its timestamp.
 	int64_t  clk_last_at   = -1;
 	uint32_t clk_last_ts   = 0;
+
+	// Split cable: SB writes made mid-transfer, on the cores' shared clock.
+	// SB is the shift register, so a rewrite only changes the bits not yet out.
+	static constexpr int kSbLogCap = 4;
+	int64_t  sb_log_t[kSbLogCap]   = {0};
+	uint8_t  sb_log_old[kSbLogCap] = {0};
+	uint8_t  sb_log_new[kSbLogCap] = {0};
+	uint8_t  sb_log_n = 0;
+	// The transfer we clock: its first bit edge on the shared clock and the
+	// real-time bit period (0 = no shared clock, bytes swap whole).
+	int64_t  xfer_edge1  = 0;
+	int32_t  xfer_period = 0;
 };
 
 void SerialReset(Serial &s, bool cgb);
@@ -93,8 +105,10 @@ void SerialAfterStateLoad(Serial &s, Memory &mem);
 // speed doubles the shift clock the way hardware does.
 void SerialStep(Serial &s, Memory &mem, int32_t tcycles);
 
-// SC writes are what start a transfer; SB writes are plain stores.
+// SC writes are what start a transfer. SB writes are plain stores, logged
+// while a split-cable transfer is armed or in flight.
 void    SerialWriteSC(Serial &s, Memory &mem, uint8_t value);
+void    SerialWriteSB(Serial &s, Memory &mem, uint8_t value);
 uint8_t SerialReadSC(const Serial &s, const Memory &mem);
 
 // ---- Link session control (host UI facade) ---------------------------------
@@ -157,6 +171,13 @@ void SerialSplitAttach(Serial *const serials[], Memory *const mems[], int count,
 void SerialSplitReplug(Serial *const serials[], Memory *const mems[], int count,
                        bool force_hub, bool ring = false);
 void SerialSplitDetach();
+// The split runner anchors each core to the shared clock before it runs a
+// slice: its ppu t_cycles `local` is `common` on every core's timeline.
+void SerialSplitSetClock(const Memory *m, int64_t local, int64_t common);
+// Where on the shared clock the master's span a machine seat is paid for began
+// (set before the frontend yield, read on the seat's thread).
+void    SerialSplitNoteYield(int64_t common);
+int64_t SerialSplitYieldCommon();
 bool SerialSplitActive();
 // True while the game is using the split link: pulling a console now would
 // strand the others mid-exchange.

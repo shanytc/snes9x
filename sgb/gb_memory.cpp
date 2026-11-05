@@ -689,7 +689,8 @@ static void WriteIO(Memory &m, uint16_t addr, uint8_t value)
 			if (m.joypad) JoypadLineEdges(*m.joypad, m);   // after any rotation step
 			return;
 		case 0xFF01:
-			m.serial_data = value;
+			if (m.serial) SerialWriteSB(*m.serial, m, value);
+			else          m.serial_data = value;
 			return;
 		case 0xFF02:
 			// gb_serial.cpp owns what a start bit means: unlinked it keeps

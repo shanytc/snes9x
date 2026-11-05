@@ -25,6 +25,7 @@
 #include "gb_bardigun.h"
 #include "gb_link.h"
 #include "gb_memory.h"
+#include "gb_ppu.h"
 #include "gb_joypad.h"
 #include "gb_cpu.h"
 #include "gb_timer.h"
@@ -149,6 +150,10 @@ constexpr int32_t kExtByteGap = 4257;
 // Arm-to-completion floor, the 0.128 ms the DMG-07 shifts a byte in: a
 // same-instruction settle loses the IRQ to the game's own IF clear.
 constexpr int32_t kExtShiftTime = 537;
+
+// Split cable: in-process cores interleave in 456-cycle slices, so their
+// relative timing is only good to two slices.
+constexpr int32_t kSplitSkew = 912;
 
 // Ceiling for the observed-cadence floor: the slowest DMG-07 byte period.
 constexpr int32_t kExtGapCeil = 10932;
@@ -407,9 +412,28 @@ struct SplitLink
 	bool    prev_seat_armed[kLinkMaxSeats - 1] = {};
 
 	int64_t traded_at = -1;   // seat 0's real_cycles at the last byte two consoles traded
+
+	// Each core's ppu t_cycles at a known shared time (SerialSplitSetClock).
+	int64_t clk_local0[kLinkMaxSeats]  = {};
+	int64_t clk_common0[kLinkMaxSeats] = {};
+	bool    clk_valid[kLinkMaxSeats]   = {};
+	int64_t yield_common = 0;   // SerialSplitNoteYield
 };
 
 SplitLink g_splitlink;
+
+// A core's position on the shared clock; false when it was never anchored.
+static bool SplitNow(const Memory &m, int64_t &now)
+{
+	for (int i = 0; i < g_splitlink.count; ++i)
+		if (g_splitlink.m[i] == &m)
+		{
+			if (!g_splitlink.clk_valid[i] || !m.ppu) return false;
+			now = g_splitlink.clk_common0[i] + (m.ppu->t_cycles - g_splitlink.clk_local0[i]);
+			return true;
+		}
+	return false;
+}
 
 // Two consoles just traded a byte: the game is using the cable.
 static void SplitNoteTrade()
@@ -783,6 +807,7 @@ void CompleteActive(Serial &s, Memory &mem)
 
 	s.active     = false;
 	s.bits_left  = 0;
+	s.sb_log_n   = 0;
 	// The wire cannot clock again for another byte period, whoever the
 	// master was. Without this a peer clock arriving in the same socket
 	// drain as our reply is answered from the stale pre-transfer arm -
@@ -874,6 +899,7 @@ void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
 
 	s.passive       = false;
+	s.sb_log_n      = 0;
 	// The gap preserves the wire's emission spacing, so a byte that
 	// already waited in the queue gets credit - releases must follow the
 	// hub's clock, not re-quantize to this game's arm phase. A fixed
@@ -916,6 +942,48 @@ void TrySettlePending(Serial &s, Memory &mem)
 	s.clk_last_ts = i1;
 }
 
+// Replay both shift registers over the master's eight bit edges; a rewrite within
+// the skew of the first edge counts as the armed byte. False when none landed in flight.
+static bool SplitBlend(const Serial &ms, const Memory &mm, const Serial &ss, const Memory &sm,
+                       uint8_t &to_master, uint8_t &to_slave, int &at_bit)
+{
+	int64_t m_now, s_now;
+	if (ms.xfer_period <= 0 || !SplitNow(mm, m_now) || !SplitNow(sm, s_now)) return false;
+	if (m_now - s_now > 70224 / 4 || s_now - m_now > 70224 / 4) return false;   // a stale anchor
+
+	const int64_t first = ms.xfer_edge1, period = ms.xfer_period, last = first + 7 * period;
+	const Serial *side[2] = {&ms, &ss};
+	uint8_t reg[2] = {mm.serial_data, sm.serial_data};
+	int     use[2][Serial::kSbLogCap], n[2] = {0, 0}, next[2] = {0, 0};
+	for (int k = 0; k < 2; ++k)
+	{
+		const Serial &p = *side[k];
+		for (int i = 0; i < p.sb_log_n; ++i)
+			if (p.sb_log_t[i] >= first + kSplitSkew && p.sb_log_t[i] < last)
+				use[k][n[k]++] = i;
+		if (n[k]) reg[k] = p.sb_log_old[use[k][0]];
+	}
+	if (!n[0] && !n[1]) return false;
+
+	at_bit = -1;
+	for (int b = 0; b < 8; ++b)
+	{
+		const int64_t edge = first + b * period;
+		for (int k = 0; k < 2; ++k)
+			while (next[k] < n[k] && side[k]->sb_log_t[use[k][next[k]]] < edge)
+			{
+				reg[k] = side[k]->sb_log_new[use[k][next[k]++]];
+				if (at_bit < 0) at_bit = b;
+			}
+		const int out_m = reg[0] >> 7, out_s = reg[1] >> 7;
+		reg[0] = static_cast<uint8_t>((reg[0] << 1) | out_s);
+		reg[1] = static_cast<uint8_t>((reg[1] << 1) | out_m);
+	}
+	to_master = reg[0];
+	to_slave  = reg[1];
+	return true;
+}
+
 // The countdown of an in-process master ran out: read the other core's
 // live state, completing its slave side on the spot. False when the
 // peer has nothing armed — the caller waits out the interleave skew
@@ -927,9 +995,13 @@ bool SplitTryResolveMaster(Serial &s, Memory &mem)
 
 	if (ps && ps->passive)
 	{
-		const uint8_t theirs = pm->serial_data;
+		uint8_t theirs = pm->serial_data, ours = mem.serial_data;
+		int     at_bit = -1;
+		if (SplitBlend(s, mem, *ps, *pm, theirs, ours, at_bit))
+			Trace("[%lld] split blend at bit %d: master reads %02X (whole %02X), seat reads %02X (whole %02X)",
+			      (long long)s.real_cycles, at_bit, theirs, pm->serial_data, ours, mem.serial_data);
 		const bool    had    = (pm->if_ & IRQ_SERIAL) != 0;
-		CompletePassive(*ps, *pm, mem.serial_data);
+		CompletePassive(*ps, *pm, ours);
 		// The edge falls inside the other core's next instruction, which
 		// can still read SC.7 clear before the IRQ (Tamagotchi 2's slave).
 		if (!had)
@@ -2009,6 +2081,28 @@ static void RingExchange()
 	}
 }
 
+void SerialWriteSB(Serial &s, Memory &mem, uint8_t value)
+{
+	// Only a port that is shifting can be caught mid-byte: armed or clocking.
+	int64_t now = 0;
+	if ((s.active || s.passive) && SerialSplitActive() && !g_hub.hosting && !g_ring.active &&
+	    SplitNow(mem, now))
+	{
+		if (s.sb_log_n == Serial::kSbLogCap)
+		{
+			std::memmove(s.sb_log_t, s.sb_log_t + 1, sizeof s.sb_log_t - sizeof s.sb_log_t[0]);
+			std::memmove(s.sb_log_old, s.sb_log_old + 1, Serial::kSbLogCap - 1);
+			std::memmove(s.sb_log_new, s.sb_log_new + 1, Serial::kSbLogCap - 1);
+			--s.sb_log_n;
+		}
+		s.sb_log_t[s.sb_log_n]   = now;
+		s.sb_log_old[s.sb_log_n] = mem.serial_data;
+		s.sb_log_new[s.sb_log_n] = value;
+		++s.sb_log_n;
+	}
+	mem.serial_data = value;
+}
+
 void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 {
 	mem.serial_control = value;
@@ -2112,7 +2206,13 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			s.peer_valid    = false;
 			s.peer_supplied = false;
 			s.peer_data     = 0xFF;
-			s.split_grace   = 912;   // two interleave slices of skew
+			s.split_grace   = kSplitSkew;
+			// Real-time bit edges on the shared clock, for SplitBlend.
+			int64_t now = 0;
+			const int32_t ds = mem.double_speed ? 2 : 1;
+			s.sb_log_n    = 0;
+			s.xfer_period = SplitNow(mem, now) ? s.bit_period / ds : 0;
+			s.xfer_edge1  = now + s.bit_timer / ds;
 			return;
 		}
 		s.active  = false;
@@ -2677,6 +2777,7 @@ void SerialSplitReplug(Serial *const serials[], Memory *const mems[], int count,
 		if (ns) PendingClear(*ns);
 		g_splitlink.s[i] = ns;
 		g_splitlink.m[i] = nm;
+		g_splitlink.clk_valid[i] = false;
 		if (i >= 1 && i < kLinkMaxSeats)
 		{
 			g_splitlink.prev_seat[i - 1]       = 0xFF;
@@ -2707,6 +2808,21 @@ void SerialSplitDetach()
 	g_active     = nullptr;
 	g_active_mem = nullptr;
 }
+
+void SerialSplitSetClock(const Memory *m, int64_t local, int64_t common)
+{
+	for (int i = 0; i < g_splitlink.count; ++i)
+		if (g_splitlink.m[i] == m)
+		{
+			g_splitlink.clk_local0[i]  = local;
+			g_splitlink.clk_common0[i] = common;
+			g_splitlink.clk_valid[i]   = true;
+			return;
+		}
+}
+
+void    SerialSplitNoteYield(int64_t common) { g_splitlink.yield_common = common; }
+int64_t SerialSplitYieldCommon()             { return g_splitlink.yield_common; }
 
 bool SerialSplitActive() { return g_splitlink.count > 0; }
 

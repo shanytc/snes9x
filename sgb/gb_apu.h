@@ -112,7 +112,7 @@ struct ApuNoise
 // from v17, so run-ahead and rewind carry a tone like the channels.
 struct ApuCartSpeaker
 {
-	uint8_t  tone    = 0;      // HuC3 tone playing + 1, 0 = none
+	uint8_t  tone    = 0;      // HuC3 tone playing + 1 (17 = the ambulance siren), 0 = none
 	uint8_t  pattern = 0;      // TAMA6 pattern playing (1-4), 0 = none
 	uint8_t  prog[24] = {};    // TAMA6 patterns: 4 x [next, 4 notes, 0]
 	uint32_t step    = 0;      // beeps, gaps and rests played so far

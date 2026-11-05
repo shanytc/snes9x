@@ -5026,7 +5026,6 @@ bool S9xSGBCartNeedsDmg07(void)
 		"F-1 HEROGB",         // Nakajima Satoru F-1 Hero GB - MULTI GAME bounces
 		                      // straight back to the menu without the adapter
 		" - TRUMP BOY2 - ",   // Trump Boy II (Japan) - 4-port screen, no cable mode
-		"JANTAKUBOY",         // Jantaku Boy (Japan) - slave-only serial code
 		"W CIRCUIT SERIES",   // World Circuit Series (USA) - slave-only serial code
 	};
 	SGB::Emulator &prim = SGB::Instance();

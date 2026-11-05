@@ -5689,10 +5689,11 @@ void S9xSGBSplitRunFrame(void)
 	}
 
 	bool running = true;
-	// Each paired core's cycle count on the clock its partner's sensor reads by: the
-	// master's frame position, which every seat's chunk is measured against.
+	// Each core's cycle count on the clock its partner's sensor and shift register are
+	// read by: the master's frame position, which every seat's chunk is measured against.
 	const int64_t frame_common = prim.DebugImpl()->run_target;
-	auto ir_clock = [&](int i, int64_t common) {
+	auto link_clock = [&](int i, int64_t common) {
+		SGB::SerialSplitSetClock(&cs[i]->DebugImpl()->mem, cs[i]->DebugImpl()->run_target, common);
 		if (SGB::IrPaired())
 			SGB::IrSetClock(&cs[i]->DebugImpl()->mem, cs[i]->DebugImpl()->run_target, common);
 	};
@@ -5723,7 +5724,7 @@ void S9xSGBSplitRunFrame(void)
 			if (!has[i] || remaining[i] <= 0) continue;
 			const int32_t chunk = remaining[i] < slice ? remaining[i] : slice;
 			SGB::SerialSetTraceSeat(i);
-			ir_clock(i, frame_common + (budget - remaining[i]));
+			link_clock(i, frame_common + (budget - remaining[i]));
 			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, chunk) : chunk);
 			remaining[i] -= chunk;
 			if (i == 0) { SplitYield(chunk); SplitNoteMasterHandoff(); }   // once per round
@@ -5754,7 +5755,7 @@ void S9xSGBSplitRunFrame(void)
 			const int i = order[k];
 			if (!has[i]) continue;
 			SGB::SerialSetTraceSeat(i);
-			ir_clock(i, frame_common + budget + (70224 - chase));
+			link_clock(i, frame_common + budget + (70224 - chase));
 			cs[i]->RunCycles(i ? S9xSGBSplitSeatCycles(i + 1, slice) : slice);
 			if (i == 0) SplitYield(slice);   // seat machines chase too
 			if (fb_ring) SplitPlacerSample(cs[i], i);
@@ -6248,6 +6249,7 @@ static void SplitYield(int gb_cycles)
 	if (g_split_yield_accum < g_split_yield_every) return;
 	const int due = g_split_yield_accum;
 	g_split_yield_accum = 0;
+	SGB::SerialSplitNoteYield(SGB::Instance().DebugImpl()->run_target - due);   // the master's clock
 	g_split_yield(due);
 }
 
@@ -6361,6 +6363,9 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 			}
 	}
 
+	// The seats catch up the slice the master just ran, on the master's clock.
+	const SGB::Emulator::Impl *mimpl = SGB::Instance().DebugImpl();
+	SGB::SerialSplitSetClock(&mimpl->mem, 0, 0);
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		SGB::Emulator *core = g_split_cores[k].get();
@@ -6370,6 +6375,8 @@ static void SplitRunSeatsSlaved(int32_t gb_cycles)
 		SGB::SerialSetTraceSeat(k + 1);
 		// Released in step with the master; consoles never are (Renju Club).
 		SplitHeadStart(core, k + 1);
+		SGB::SerialSplitSetClock(&core->DebugImpl()->mem, core->DebugImpl()->run_target,
+		                         mimpl->run_target - slice);
 		core->RunCycles(S9xSGBSplitSeatCycles(k + 2, slice));
 		if (SplitSnapIfReady(core, k + 1))
 			PhaseProbe(k + 1, core->DebugImpl()->ppu.framebuffer);
@@ -6456,6 +6463,9 @@ void S9xSGBMachinePayGb(int gb_cycles)
 	int64_t run = g_gb_debt < gb_cycles ? g_gb_debt : gb_cycles;
 	if (run <= 0) return;
 	g_gb_debt -= run;
+	// Like a seat's slice, the dose covers the master's span from its yield.
+	SGB::Emulator::Impl *im = SGB::Instance().DebugImpl();
+	SGB::SerialSplitSetClock(&im->mem, im->run_target, SGB::SerialSplitYieldCommon());
 	SGB::Instance().RunCycles(static_cast<int32_t>(run));
 }
 
@@ -6474,11 +6484,15 @@ static void SplitStepOwnSeats(int gb_cycles)
 	if (g_own_seat_accum < kSeatSlaveSlice) return;
 	const int32_t slice = g_own_seat_accum;
 	g_own_seat_accum = 0;
+	const SGB::Emulator::Impl *mimpl = SGB::Instance().DebugImpl();
+	SGB::SerialSplitSetClock(&mimpl->mem, 0, 0);
 	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
 	{
 		SGB::Emulator *core = g_split_cores[k].get();
 		if (!core || !SeatOwnModel(k) || !core->DebugImpl()->has_rom) continue;
 		SGB::SerialSetTraceSeat(k + 1);
+		SGB::SerialSplitSetClock(&core->DebugImpl()->mem, core->DebugImpl()->run_target,
+		                         mimpl->run_target - slice);
 		core->RunCycles(S9xSGBSplitSeatCycles(k + 2, slice));
 		SplitSnapIfReady(core, k + 1);
 	}

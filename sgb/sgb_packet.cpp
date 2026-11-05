@@ -31,7 +31,7 @@ void ResetPacketBuf(PacketState &ps)
 // Collect one bit into the current byte (LSB-first). When 16 bytes land
 // we finalize the packet — either stashing it as the first in a chain
 // or appending to an in-flight chain, dispatching when complete.
-void AppendBit(PacketState &ps, uint8_t bit)
+void AppendBit(PacketState &ps, uint8_t bit, void *owner)
 {
 	if (bit) ps.packet_buf[ps.byte_count] = static_cast<uint8_t>(ps.packet_buf[ps.byte_count] | (1u << ps.bit_count));
 
@@ -58,9 +58,11 @@ void AppendBit(PacketState &ps, uint8_t bit)
 
 	if (ps.pkts_received >= ps.total_pkts)
 	{
+		// Dispatched even when passive — the owner decides what a command
+		// is allowed to do to it; the decode itself belongs to every core.
 		if (g_command_cb)
 		{
-			g_command_cb(ps.cmd, ps.chain_buf,
+			g_command_cb(owner, ps.cmd, ps.chain_buf,
 			             static_cast<uint32_t>(ps.total_pkts) * 16u);
 		}
 		++ps.commands_received;
@@ -78,11 +80,13 @@ void AppendBit(PacketState &ps, uint8_t bit)
 
 void PacketReset(PacketState &ps)
 {
+	const bool passive = ps.passive_commands;
 	ps = PacketState{};
-	ps.prev_joyser_val = 0x30;
+	ps.prev_joyser_val   = 0x30;
+	ps.passive_commands  = passive;
 }
 
-void PacketFeed(PacketState &ps, uint8_t value)
+void PacketFeed(PacketState &ps, uint8_t value, void *owner)
 {
 	const uint8_t cur  = static_cast<uint8_t>(value & 0x30);
 	const uint8_t prev = static_cast<uint8_t>(ps.prev_joyser_val & 0x30);
@@ -116,7 +120,7 @@ void PacketFeed(PacketState &ps, uint8_t value)
 	else if (cur == 0x10) ps.pending_bit = 1;
 	else if (cur == 0x30 && ps.pending_bit >= 0)
 	{
-		AppendBit(ps, static_cast<uint8_t>(ps.pending_bit));
+		AppendBit(ps, static_cast<uint8_t>(ps.pending_bit), owner);
 		ps.pending_bit = -1;
 	}
 }

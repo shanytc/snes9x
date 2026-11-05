@@ -304,7 +304,7 @@ void Snes9xAudioWaveform::draw_row(const Cairo::RefPtr<Cairo::Context> &cr, cons
         cr->fill();
     }
 
-    draw_text(cr, layout, { header.x + (group ? 26 : 30), cy - 8, 40, 16 }, track.name,
+    draw_text(cr, layout, { header.x + (group ? 26 : src == aw::kSpeaker ? 20 : 30), cy - 8, 40, 16 }, track.name,
               audible ? aw::Color{ 225, 225, 228 } : aw::Color{ 130, 130, 135 });
 
     auto button = [&](const Rect &b, const char *label, bool on, aw::Color fill_on,

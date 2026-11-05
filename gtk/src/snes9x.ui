@@ -178,6 +178,13 @@
     <property name="step_increment">1</property>
     <property name="page_increment">10</property>
   </object>
+  <object class="GtkAdjustment" id="cart_speaker_volume_adjustment">
+    <property name="lower">0</property>
+    <property name="upper">100</property>
+    <property name="value">50</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+  </object>
   <object class="GtkAdjustment" id="gain_regular_adjustment">
     <property name="lower">0</property>
     <property name="upper">12</property>
@@ -5694,7 +5701,7 @@
                                       <object class="GtkTable" id="volume_table">
                                         <property name="visible">True</property>
                                         <property name="can_focus">False</property>
-                                        <property name="n_rows">7</property>
+                                        <property name="n_rows">8</property>
                                         <property name="n_columns">2</property>
                                         <property name="column_spacing">10</property>
                                         <property name="row_spacing">5</property>
@@ -5912,6 +5919,35 @@
                                             <property name="right_attach">2</property>
                                             <property name="top_attach">6</property>
                                             <property name="bottom_attach">7</property>
+                                            <property name="y_options">GTK_FILL</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkLabel" id="cart_speaker_volume_label">
+                                            <property name="can_focus">False</property>
+                                            <property name="xalign">0</property>
+                                            <property name="label" translatable="yes">Speaker volume:</property>
+                                          </object>
+                                          <packing>
+                                            <property name="top_attach">7</property>
+                                            <property name="bottom_attach">8</property>
+                                            <property name="x_options">GTK_FILL</property>
+                                            <property name="y_options">GTK_FILL</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkHScale" id="cart_speaker_volume">
+                                            <property name="can_focus">True</property>
+                                            <property name="tooltip_text" translatable="yes">The cartridge's own speaker (Pocket Family, Robopon, Tamagotchi carts), apart from the Game Boy's sound. Shown while such a cart is loaded.</property>
+                                            <property name="adjustment">cart_speaker_volume_adjustment</property>
+                                            <property name="digits">0</property>
+                                            <property name="value_pos">right</property>
+                                          </object>
+                                          <packing>
+                                            <property name="left_attach">1</property>
+                                            <property name="right_attach">2</property>
+                                            <property name="top_attach">7</property>
+                                            <property name="bottom_attach">8</property>
                                             <property name="y_options">GTK_FILL</property>
                                           </packing>
                                         </child>

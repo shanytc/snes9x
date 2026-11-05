@@ -267,7 +267,7 @@ pkg_check_modules(ZLIB REQUIRED "zlib")
 list(APPEND ARGS ${ZLIB_CFLAGS})
 list(APPEND LIBS ${ZLIB_LIBRARIES})
 
-# Optional: decodes the JPEG XL photos of Barcode Battler cards.
+# Optional: decodes the JPEG XL photos of the barcode readers' cards.
 pkg_check_modules(JXL "libjxl")
 if(JXL_FOUND)
     list(APPEND DEFINES "HAVE_LIBJXL")
@@ -356,8 +356,8 @@ list(APPEND SOURCES
     src/gtk_display_driver_gtk.h
     src/gtk_display_driver.h
     src/gtk_display.h
-    src/gtk_barcode_battler.cpp
-    src/gtk_barcode_battler.h
+    src/gtk_barcodes.cpp
+    src/gtk_barcodes.h
     ../common/desktop/barcode_card_photos.cpp
     ../common/desktop/barcode_card_photos.hpp
     src/gtk_state_preview_dialog.cpp
@@ -405,9 +405,17 @@ list(APPEND SOURCES
     ../sgb/gb_ops_cb.cpp
     ../sgb/gb_memory.cpp
     ../sgb/gb_mbc.cpp
+    ../sgb/gb_patches.cpp
     ../sgb/gb_ppu.cpp
     ../sgb/gb_apu.cpp
     ../sgb/gb_timer.cpp
+    ../sgb/gb_serial.cpp
+    ../sgb/gb_infrared.cpp
+    ../sgb/gb_barcodeboy.cpp
+    ../sgb/gb_bardigun.cpp
+    ../sgb/gb_kisslink.cpp
+    ../sgb/gb_link.cpp
+    ../sgb/gb_viewer.cpp
     ../sgb/gb_joypad.cpp
     ../sgb/gb_cart.cpp
     ../msu1.cpp
@@ -469,6 +477,7 @@ list(APPEND SOURCES
     ../cpuexec.cpp
     ../voicekun.cpp
     ../barcodebattler.cpp
+    ../barcodereaders.cpp
     ../cartprot.cpp
     ../rp2040.cpp
     ../rp2040cart.cpp
@@ -551,6 +560,10 @@ target_include_directories(snes9x-gtk PRIVATE ${INCLUDES})
 target_compile_options(snes9x-gtk PRIVATE ${ARGS})
 target_link_libraries(snes9x-gtk PRIVATE ${LIBS})
 target_compile_definitions(snes9x-gtk PRIVATE ${DEFINES})
+if(WIN32)
+    # sgb/gb_link.cpp (Game Boy link cable) needs winsock.
+    target_link_libraries(snes9x-gtk PRIVATE ws2_32)
+endif()
 
 if(USE_SLANG)
     add_executable(slang_test EXCLUDE_FROM_ALL

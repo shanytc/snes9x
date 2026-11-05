@@ -972,21 +972,6 @@ namespace SGB {
 				{ 0x018017, 2, { 0x28, 0x01 }, { 0x18, 0x01 } } } },
 		};
 
-		// Super Game Boy compatibility: the cart's own SGB path stops under a BIOS the
-		// game never handled. Same row shape, applied under any SGB BIOS.
-		const CartPatch kSgbCartPatches[] = {
-			// Boot A $FF (SGB2) survives the detect, and the first scene then loops
-			// forever (01:$4052 `cp $FF / jr nz`): take the jump for every type.
-			{ 0x20D7, "TUWAMONO   A55J\200", "SGB2 park skipped", 1,
-			  { { 0x004057, 2, { 0x20, 0x05 }, { 0x18, 0x05 } } } },
-			// The MASK_EN cancel after its border goes out with IME on and the VBlank
-			// joypad poll lands in the packet ($B9 00 -> $9A 0B): send it via a DI/EI stub.
-			{ 0xE11B, "Super Fight's", "MASK_EN cancel sent with IRQs off", 3,
-			  { { 0x0002AD, 3, { 0xCD, 0xC0, 0x02 }, { 0xCD, 0xCA, 0x3F } },
-				{ 0x003FCA, 3, { 0xFF, 0xFF, 0xFF }, { 0xF3, 0xCD, 0xC0 } },
-				{ 0x003FCD, 3, { 0xFF, 0xFF, 0xFF }, { 0x02, 0xFB, 0xC9 } } } },
-		};
-
 		bool TitleMatches(const uint8_t *rom, const char *title)
 		{
 			for (int i = 0; i < 16; ++i)
@@ -1056,11 +1041,6 @@ namespace SGB {
 	const CartPatch *FindSgbcCartPatch(const uint8_t *rom, size_t size)
 	{
 		return FindIn(kSgbcCartPatches, sizeof kSgbcCartPatches / sizeof kSgbcCartPatches[0], rom, size);
-	}
-
-	const CartPatch *FindSgbCartPatch(const uint8_t *rom, size_t size)
-	{
-		return FindIn(kSgbCartPatches, sizeof kSgbCartPatches / sizeof kSgbCartPatches[0], rom, size);
 	}
 
 	bool ApplyCartPatch(const CartPatch &p, uint8_t *rom, size_t size)

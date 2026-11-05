@@ -18,24 +18,29 @@
 #include <string>
 #include <vector>
 
-struct S9xBarcodeCard;
+#include "barcodereaders.h"
 
-/* Input > Barcodes > Scan Barcode: the code to swipe, typed in,
- * made up, picked from the known cards, or read off a picture (picked or
- * dropped on the dialog) or off a webcam held up to the card. Scan hands it
- * to the BBII interface on port 2 (barcodebattler.h). The webcam is the one
- * Options > Display turns on and picks for the Game Boy Camera; the dialog
- * only reads it. A card's photos show from a "barcodes/battler" folder in the config folder or beside the
- * executable (common/desktop/barcode_card_photos.hpp). Modeless: Scan leaves
- * it open, the game running on behind it. */
-class BarcodeBattlerDialog : public QDialog
+/* Input > Barcodes > Scan Barcode: the code to scan, typed in, made up, picked
+ * from the reader's known cards, or read off a picture (picked or dropped on
+ * the dialog) or off a webcam held up to the card. The reader is the one the
+ * loaded game's system takes: the Barcode Battler II, the Barcode Boy or
+ * Barcode Taisen Bardigun's (barcodereaders.h). The webcam is the one Options >
+ * Display turns on and picks for the Game Boy Camera; the dialog only reads
+ * it. A card's photos show from the
+ * reader's folder ("barcodes/battler", "barcodes/barcodeboy" or "barcodes/bardigun") in the config folder or beside
+ * the executable (common/desktop/barcode_card_photos.hpp); a code with none is
+ * drawn as its barcode. Modeless: Scan leaves it open, the game running on
+ * behind it. */
+class BarcodeDialog : public QDialog
 {
     Q_OBJECT
 
   public:
-    // game_reads: whether the running game reads the Barcode Battler now.
-    BarcodeBattlerDialog(QWidget *parent, std::function<bool()> game_reads);
-    ~BarcodeBattlerDialog();
+    // scanner hands a code to the reader: "" when it did, else why it didn't.
+    BarcodeDialog(QWidget *parent, S9xBarcodeReader reader, std::function<QString(const std::string &)> scanner);
+    ~BarcodeDialog();
+
+    S9xBarcodeReader barcodeReader() const { return reader; }
 
     // Input > Barcodes > Connect was flipped: Scan and the title follow it.
     void connectChanged();
@@ -45,6 +50,7 @@ class BarcodeBattlerDialog : public QDialog
     void done(int result) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     void changeEvent(QEvent *event) override;
     void codeEdited();
     void fromImage();
@@ -56,9 +62,11 @@ class BarcodeBattlerDialog : public QDialog
     void found(const char *code, const QString &where);
     void fillCards();
     void cardPicked(QTreeWidgetItem *item);
-    void showCard(const S9xBarcodeCard *card);
-    void showPhotos();
+    void showCard(const S9xBarcodeReaderCard *card);
+    void showPreview();
+    void drawBarcode(QPainter &painter, const QSize &box);
 
+    S9xBarcodeReader reader;
     QLineEdit *code_edit;
     QLabel *status_label;
     QLabel *camera_label;
@@ -69,10 +77,11 @@ class BarcodeBattlerDialog : public QDialog
     QLineEdit *search_edit;
     QTreeWidget *card_tree;
     QTimer camera_timer;
-    std::function<bool()> game_reads;
     bool camera_on = false;
     std::vector<unsigned char> frame;
     std::string photo_dir;
-    const S9xBarcodeCard *photo_card = nullptr;
+    const S9xBarcodeReaderCard *photo_card = nullptr;
     std::vector<QImage> photos;
+    std::string whole_code;    // the code typed in when it is whole, drawn with no photos
+    std::function<QString(const std::string &)> scan;
 };

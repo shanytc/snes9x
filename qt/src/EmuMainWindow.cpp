@@ -34,8 +34,8 @@
 #include "LuaScriptWindow.hpp"
 #include "lua/lua_engine.h"
 #include "ColorCorrectionDialog.hpp"
-#include "BarcodeBattlerDialog.hpp"
-#include "barcodebattler.h"
+#include "BarcodeDialog.hpp"
+#include "barcodereaders.h"
 #include "MovieDialogs.hpp"
 #include "StatePreviewDialog.hpp"
 #include "EmuApplication.hpp"
@@ -272,7 +272,7 @@ void EmuMainWindow::powerCycle()
     // cycle is when it should take over; reload or reset, never both. Qt has no
     // multicart UI, so the one file the game came from is enough to load it.
     const std::string path = Settings.GBRomPath[0] ? std::string(Settings.GBRomPath)
-                                                   : Memory.ROMFilename;
+                                                   : app.getROMFilename();
     if (S9xBiosChangedSinceLoad() && !path.empty())
         openFile(path);
     else
@@ -423,7 +423,9 @@ void EmuMainWindow::refreshVoicekunMenu()
     if (!voicekun_menu_action)
         return;
 
-    const bool supported = S9xVoiceKunGameSupported();
+    // Matches the loaded ROM's CRC, which only the emulation thread holds.
+    bool supported = false;
+    app.emu_thread->runOnThread([&] { supported = S9xVoiceKunGameSupported(); }, true);
     voicekun_menu_action->setVisible(supported);
     if (!supported)
         return;
@@ -452,18 +454,26 @@ void EmuMainWindow::voicekunAttach()
 
     auto filename = dialog.selectedFiles()[0].toStdString();
 
-    if (S9xVoiceKunAttach(filename.c_str()))
-    {
-        auto message = tr("Voicer-kun: %1 verified, %2 tracks (%3)")
-            .arg(S9xVoiceKunDiscLabel())
-            .arg(S9xVoiceKunTrackCount())
-            .arg(S9xVoiceKunGameTitle());
-        S9xSetInfoString(message.toUtf8().constData());
-    }
-    else
+    bool attached = false;
+    QString error;
+    app.emu_thread->runOnThread([&] {
+        attached = S9xVoiceKunAttach(filename.c_str());
+        if (attached)
+        {
+            auto message = tr("Voicer-kun: %1 verified, %2 tracks (%3)")
+                .arg(S9xVoiceKunDiscLabel())
+                .arg(S9xVoiceKunTrackCount())
+                .arg(S9xVoiceKunGameTitle());
+            S9xSetInfoString(message.toUtf8().constData());
+        }
+        else
+            error = S9xVoiceKunLastError();
+    }, true);
+
+    if (!attached)
     {
         QMessageBox::critical(this, tr("Voicer-kun"),
-            tr("This audio CD was not accepted:\n%1").arg(S9xVoiceKunLastError()));
+            tr("This audio CD was not accepted:\n%1").arg(error));
     }
 
     app.unpause();
@@ -471,11 +481,13 @@ void EmuMainWindow::voicekunAttach()
 
 void EmuMainWindow::voicekunDetach()
 {
-    if (S9xVoiceKunAttached())
-    {
-        S9xVoiceKunDetach();
-        S9xSetInfoString("Voicer-kun: audio CD ejected");
-    }
+    app.emu_thread->runOnThread([] {
+        if (S9xVoiceKunAttached())
+        {
+            S9xVoiceKunDetach();
+            S9xSetInfoString("Voicer-kun: audio CD ejected");
+        }
+    }, true);
 }
 
 // SFC-Box rotary keyswitch in panel order 1/OFF/ON/2/3, mapped to the KROM's
@@ -743,7 +755,8 @@ void EmuMainWindow::updateEventTitle()
     QString suffix;
     if (app.isCoreActive() && PF94.active && S9xEventTimerDisplay() == 2)
     {
-        const int secs = S9xPF94TimeRemaining();
+        int secs = -1;   // counts the emulation thread's frames
+        app.emu_thread->runOnThread([&] { secs = S9xPF94TimeRemaining(); }, true);
         if (secs >= 0)
             suffix = QString::asprintf(" (%02d:%02d)", secs / 60, secs % 60);
     }
@@ -885,7 +898,7 @@ void EmuMainWindow::sfcboxPressSwitch(int sw)
 // Loads the box again, which picks up the slot and BIOS choices.
 bool EmuMainWindow::sfcboxReload()
 {
-    const std::string path = Memory.ROMFilename;
+    const std::string path = app.getROMFilename();
     return !path.empty() && openFile(path);
 }
 
@@ -907,9 +920,9 @@ void EmuMainWindow::sfcboxMountEject(int slot)
     // A filled slot gives up its cartridge; the real box then shows its error.
     if (SFCBox.SlotPresent[slot])
     {
-        S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), "");
+        S9xSFCBoxSetSlot(slot, app.getROMFilename().c_str(), "");
         if (sfcboxReload())
-            S9xSetInfoString(slot ? "Slot 2 ejected" : "Slot 1 ejected");
+            app.emu_thread->runOnThread([slot] { S9xSetInfoString(slot ? "Slot 2 ejected" : "Slot 1 ejected"); });
         return;
     }
 
@@ -936,9 +949,11 @@ void EmuMainWindow::sfcboxMountEject(int slot)
                  : tr("That is not a Super Famicom Box slot 1 cartridge (PSS-61)."));
         return;
     }
-    S9xSFCBoxSetSlot(slot, Memory.ROMFilename.c_str(), path.c_str());
+    S9xSFCBoxSetSlot(slot, app.getROMFilename().c_str(), path.c_str());
     if (sfcboxReload())
-        S9xSetInfoString(("Slot " + std::to_string(slot + 1) + ": " + S9xSFCBoxSlotName(slot)).c_str());
+        app.emu_thread->runOnThread([slot] {
+            S9xSetInfoString(("Slot " + std::to_string(slot + 1) + ": " + S9xSFCBoxSlotName(slot)).c_str());
+        });
 }
 
 void EmuMainWindow::nssPulse(uint16_t buttons, bool game_only)
@@ -1010,26 +1025,15 @@ void EmuMainWindow::nssToggleDip(int sw)
     refreshNSSDips();
 }
 
-// The Barcode Battler II is the reader a SNES game takes; a Game Boy game has none.
-static bool barcodeSnesGame(EmuApplication &app)
-{
-    return app.isCoreActive() && !Settings.SuperGameBoy && !Settings.SGB_BIOSModeActive;
-}
-
-// Use Last Barcode Again: Connect on, and a code scanned before for a game that reads it.
-static bool barcodeRescanReady(EmuApplication &app)
-{
-    return barcodeSnesGame(app) && S9xBarcodeBattlerGameSupported() && S9xBarcodeBattlerConnected() &&
-           *S9xBarcodeBattlerLastCode();
-}
-
 void EmuMainWindow::updateBarcodeActions()
 {
-    const bool snes = barcodeSnesGame(app);
-    barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
-    barcode_connect_action->setEnabled(snes);
-    barcode_scan_action->setEnabled(snes && S9xBarcodeBattlerGameSupported());
-    barcode_rescan_action->setEnabled(barcodeRescanReady(app));
+    const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+    const bool reads = S9xBarcodeReaderGameReads(reader);
+    barcode_connect_action->setChecked(S9xBarcodeReaderConnected());
+    barcode_connect_action->setEnabled(reader != S9X_BARCODE_NONE);
+    barcode_scan_action->setEnabled(reads);
+    // Use Last Barcode Again: Connect on, and a code scanned before.
+    barcode_rescan_action->setEnabled(reads && S9xBarcodeReaderConnected() && *S9xBarcodeReaderLastCode(reader));
 }
 
 void EmuMainWindow::barcodeShortcut(const std::string &name)
@@ -1132,7 +1136,7 @@ void EmuMainWindow::superDiscInsert()
     {
         auto filename = dialog.selectedFiles()[0].toStdString();
         if (app.superDiscInsert(filename))
-            S9xSetInfoString("Disc inserted");
+            app.emu_thread->runOnThread([] { S9xSetInfoString("Disc inserted"); });
         else
             QMessageBox::warning(this, tr("Super Disc"), tr("That file is not a readable CD image."));
     }
@@ -1149,7 +1153,7 @@ void EmuMainWindow::superDiscEject()
     // A disc game can't run on without its disc: the eject resets back to
     // the BIOS home screen, which then reports the open tray.
     app.superDiscEject();
-    S9xSetInfoString("Disc ejected");
+    app.emu_thread->runOnThread([] { S9xSetInfoString("Disc ejected"); });
     updateWindowTitle();
 }
 
@@ -1159,7 +1163,7 @@ void EmuMainWindow::superDiscDebugMenu()
         return;
 
     app.superDiscDebugMenu();
-    S9xSetInfoString("Debug menu");
+    app.emu_thread->runOnThread([] { S9xSetInfoString("Debug menu"); });
 }
 
 // Super Disc and Super Famicom Box sessions name the machine and what's in it,
@@ -1170,17 +1174,21 @@ void EmuMainWindow::updateWindowTitle()
     if (KailleraServerIsRunning())
         return;
 #endif
-    // The game on screen runs a DSP or Cx4 as the chip, native or its dump, not the HLE.
-    const char *chip = S9xEnhancedChipTag();
     QString name;
-    if (Settings.SuperDisc)
-        name = QString::fromUtf8(S9xSuperDiscTitle());
-    else if (app.isCoreActive() && SFCBox.Active)
-        name = QString::fromUtf8(S9xSFCBoxTitle()) + chip;
-    else if (app.isCoreActive() && Settings.RP2040Cart)
-        name = QString::fromUtf8(S9xRP2040CartTitle());
-    else if (app.isCoreActive() && !Memory.ROMFilename.empty())
-        name = QString::fromStdString(S9xBasenameNoExt(Memory.ROMFilename)) + chip;
+    const bool active = app.isCoreActive();
+    // The cart's file and header are the emulation thread's Memory.
+    app.emu_thread->runOnThread([&] {
+        // The game on screen runs a DSP or Cx4 as the chip, native or its dump, not the HLE.
+        const char *chip = S9xEnhancedChipTag();
+        if (Settings.SuperDisc)
+            name = QString::fromUtf8(S9xSuperDiscTitle());
+        else if (active && SFCBox.Active)
+            name = QString::fromUtf8(S9xSFCBoxTitle()) + chip;
+        else if (active && Settings.RP2040Cart)
+            name = QString::fromUtf8(S9xRP2040CartTitle());
+        else if (active && !Memory.ROMFilename.empty())
+            name = QString::fromStdString(S9xBasenameNoExt(Memory.ROMFilename)) + chip;
+    }, true);
     event_title_suffix.clear();
     if (!name.isEmpty())
         setWindowTitle(QString("%1 - SuperSnes9x %2").arg(name).arg(VERSION_DISPLAY));
@@ -1799,8 +1807,13 @@ void EmuMainWindow::createWidgets()
         // SGB BIOS mode runs both PPUs, so an SGB game gets both menus.
         gbppu_menu_action->setVisible(app.isCoreActive() &&
                                       (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive));
+        bool layers[3];
+        app.emu_thread->runOnThread([&] {
+            for (int layer = 0; layer < 3; layer++)
+                layers[layer] = S9xSGBGetLayerEnabled(layer);
+        }, true);
         for (int layer = 0; layer < 3; layer++)
-            gb_layer_actions[layer]->setChecked(S9xSGBGetLayerEnabled(layer));
+            gb_layer_actions[layer]->setChecked(layers[layer]);
     });
 
     menuBar()->addMenu(emulation_menu);
@@ -1878,44 +1891,73 @@ void EmuMainWindow::createWidgets()
 
     input_menu->addSeparator();
 
-    // Barcodes: the Barcode Battler II on port 2, the reader a SNES game
-    // takes. Connect needs a SNES game loaded, toggles in place and stays
-    // across SNES loads (a Game Boy game unplugs it); scanning is only offered
-    // to a game that reads it.
+    // Barcode readers: the loaded game's system picks one - the Barcode
+    // Battler II on port 2 for a SNES game, Barcode Taisen Bardigun's reader
+    // for that game, the Barcode Boy on the link port for any other Game Boy
+    // game. Connect needs a game loaded, toggles in place and stays across
+    // loads; scanning is only offered to a game that reads its reader.
     auto barcode_menu = input_menu->addMenu(tr("&Barcodes"));
     barcode_menu->installEventFilter(new StayOpenMenuFilter(barcode_menu));
+    auto barcode_port_free = [](S9xBarcodeReader reader) {
+        const char *busy = S9xBarcodeReaderPortBusy(reader);
+        if (busy)
+            S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) + ": " + busy).c_str());
+        return !busy;
+    };
+    // On the emulation thread: the Game Boy readers' state is the core's.
+    auto scan_barcode = [this](S9xBarcodeReader reader, const std::string &code) {
+        bool ok = false;
+        app.emu_thread->runOnThread([&] { ok = S9xBarcodeReaderScan(reader, code.c_str()); }, true);
+        if (!ok)
+            return;
+        const S9xBarcodeReaderCard *card = S9xBarcodeReaderCardFind(reader, code.c_str());
+        S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) + ": " +
+                          (card ? card->name : S9xBarcodeReaderLastCode(reader)) + " scanned").c_str());
+    };
     barcode_connect_action = barcode_menu->addAction(tr("&Connect"));
     barcode_connect_action->setCheckable(true);
-    QObject::connect(barcode_connect_action, &QAction::triggered, [this](bool checked) {
-        if (!barcodeSnesGame(app))
+    QObject::connect(barcode_connect_action, &QAction::triggered, [this, barcode_port_free](bool checked) {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+        if (reader == S9X_BARCODE_NONE || (checked && !barcode_port_free(reader)))
         {
-            barcode_connect_action->setChecked(S9xBarcodeBattlerConnected());
+            barcode_connect_action->setChecked(S9xBarcodeReaderConnected());
             return;
         }
-        S9xBarcodeBattlerConnect(checked);
-        S9xSetInfoString(checked ? "Barcode Battler II connected to port 2"
-                                 : "Barcode Battler II disconnected");
+        S9xBarcodeReaderConnect(checked);
+        S9xSetInfoString((std::string(S9xBarcodeReaderName(reader)) +
+                          (checked ? std::string(" connected to ") + S9xBarcodeReaderPort(reader) : " disconnected")).c_str());
         // The menu stays open: Use Last Barcode Again follows Connect there.
         updateBarcodeActions();
         if (barcode_dialog)
             barcode_dialog->connectChanged();
     });
-    // Modeless: the game runs on while cards are browsed and scanned.
+    // Modeless: the game runs on while cards are browsed and scanned; Scan
+    // checks again that the game still reads the reader.
     barcode_scan_action = barcode_menu->addAction(tr("&Scan Barcode..."));
-    QObject::connect(barcode_scan_action, &QAction::triggered, [this] {
+    QObject::connect(barcode_scan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+        if (!S9xBarcodeReaderGameReads(reader) || !barcode_port_free(reader))
+            return;
+        if (barcode_dialog && barcode_dialog->barcodeReader() != reader)
+            barcode_dialog.reset();
         if (!barcode_dialog)
-            barcode_dialog = std::make_unique<BarcodeBattlerDialog>(this, [this] {
-                return barcodeSnesGame(app) && S9xBarcodeBattlerGameSupported();
+            barcode_dialog = std::make_unique<BarcodeDialog>(this, reader, [this, reader, scan_barcode](const std::string &code) {
+                if (S9xBarcodeReaderFor(app.isCoreActive()) != reader || !S9xBarcodeReaderGameReads(reader))
+                    return tr("The running game doesn't read the %1.").arg(S9xBarcodeReaderName(reader));
+                if (const char *busy = S9xBarcodeReaderPortBusy(reader))
+                    return QString("%1: %2.").arg(S9xBarcodeReaderName(reader), busy);
+                scan_barcode(reader, code);
+                return QString();
             });
         barcode_dialog->show();
         barcode_dialog->raise();
         barcode_dialog->activateWindow();
     });
     barcode_rescan_action = barcode_menu->addAction(tr("Use &Last Barcode Again"));
-    QObject::connect(barcode_rescan_action, &QAction::triggered, [this] {
-        std::string code = S9xBarcodeBattlerLastCode();
-        if (barcodeRescanReady(app) && S9xBarcodeBattlerScan(code.c_str()))
-            S9xSetInfoString(("Barcode Battler: " + code + " scanned").c_str());
+    QObject::connect(barcode_rescan_action, &QAction::triggered, [this, barcode_port_free, scan_barcode] {
+        const S9xBarcodeReader reader = S9xBarcodeReaderFor(app.isCoreActive());
+        if (S9xBarcodeReaderConnected() && S9xBarcodeReaderGameReads(reader) && barcode_port_free(reader))
+            scan_barcode(reader, S9xBarcodeReaderLastCode(reader));
     });
     QObject::connect(barcode_menu, &QMenu::aboutToShow, this, &EmuMainWindow::updateBarcodeActions);
 
@@ -2126,7 +2168,7 @@ void EmuMainWindow::createWidgets()
             RA_Init();
             RA_AttemptLogin(app.config->ra_username.c_str(), app.config->ra_api_token.c_str());
             if (app.isCoreActive())
-                RA_OnLoadROM();
+                app.emu_thread->runOnThread([] { RA_OnLoadROM(); });
         }
         else
         {
@@ -2464,8 +2506,13 @@ void EmuMainWindow::toggleAVIRecording()
     dialog.setFileMode(QFileDialog::AnyFile);
     dialog.setAcceptMode(QFileDialog::AcceptSave);
     dialog.setDefaultSuffix("avi");
-    dialog.setDirectory(QString::fromStdString(S9xGetDirectory(SCREENSHOT_DIR)));
-    dialog.selectFile(QString::fromStdString(S9xBasename(S9xGetFilename(".avi", SCREENSHOT_DIR))));
+    std::string folder, filename;
+    app.emu_thread->runOnThread([&] {
+        folder = S9xGetDirectory(SCREENSHOT_DIR);
+        filename = S9xGetFilename(".avi", SCREENSHOT_DIR);
+    }, true);
+    dialog.setDirectory(QString::fromStdString(folder));
+    dialog.selectFile(QString::fromStdString(S9xBasename(filename)));
     dialog.setNameFilters({ tr("AVI Files (*.avi)"), tr("All Files (*)") });
 
     if (dialog.exec() && !dialog.selectedFiles().empty())

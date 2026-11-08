@@ -1097,18 +1097,10 @@ struct ImageData
 	std::shared_ptr<LuaImage>	image;
 };
 
-std::string ResolvePath (lua_State *L, const char *path)
-{
-	std::string	p = path;
-	const std::string	&dir = LuaScriptOf(L)->dir;
-	bool	absolute = !p.empty() && (p[0] == '/' || p[0] == '\\' || (p.size() > 1 && p[1] == ':'));
-	return absolute || dir.empty() ? p : dir + p;
-}
-
 std::shared_ptr<LuaImage> LoadImage (lua_State *L, const char *path)
 {
 	LuaScript	*s = LuaScriptOf(L);
-	std::string	full = ResolvePath(L, path);
+	std::string	full = LuaResolvePath(L, path);
 	auto		cached = s->images.find(full);
 	if (cached != s->images.end())
 		return cached->second;

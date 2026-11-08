@@ -152,6 +152,9 @@ struct LuaEngine
 	bool		clean_valid = false;
 	bool		overlay_dirty = false;
 
+	struct Screenshot { int script; std::string path; };
+	std::vector<Screenshot>	screenshots;	// emu.screenshot(path), for the next frame
+
 	S9xLuaFrontend	frontend;
 };
 
@@ -164,6 +167,7 @@ void LuaFlushOutput (LuaScript *s);
 void LuaRequireSafe (lua_State *L, const char *what);
 void LuaRequireGame (lua_State *L);
 bool LuaGameLoaded (void);
+std::string LuaResolvePath (lua_State *L, const char *path);	// relative to the script's folder
 void LuaPushHandle (lua_State *L, int handle);
 int  LuaAddCallback (lua_State *L, int kind, int fn_index, uint32 first = 0, uint32 last = 0);
 void LuaRebuildHooks (void);

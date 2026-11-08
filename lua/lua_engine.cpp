@@ -19,6 +19,7 @@
 #include "gfx.h"
 #include "display.h"
 #include "movie.h"
+#include "screenshot.h"
 
 uint8		S9xLuaActive = 0;
 uint8		S9xLuaHookMask = 0;
@@ -495,6 +496,7 @@ void DispatchNotices (void)
 			case LUA_CB_ROM_LOADED:
 				LuaEng.frame_count = LuaEng.lag_count = 0;
 				LuaEng.clean_valid = false;
+				LuaEng.screenshots.clear();	// as InitROM drops Settings.TakeScreenshot
 				Fire(LUA_CB_ROM_LOADED, LUA_CTX_SAFE, nullptr);
 				break;
 
@@ -734,6 +736,14 @@ void LuaRequireGame (lua_State *L)
 {
 	if (!game_loaded)
 		luaL_error(L, "no game is loaded");
+}
+
+std::string LuaResolvePath (lua_State *L, const char *path)
+{
+	std::string	p = path;
+	const std::string	&dir = LuaScriptOf(L)->dir;
+	bool	absolute = !p.empty() && (p[0] == '/' || p[0] == '\\' || (p.size() > 1 && p[1] == ':'));
+	return absolute || dir.empty() ? p : dir + p;
 }
 
 uint32 LuaNormalizeBus (uint32 address)
@@ -1073,6 +1083,15 @@ void S9xLuaFrameEnd (void)
 
 bool S9xLuaDeferPresent (bool partial)
 {
+	// The frame Settings.TakeScreenshot gets, without the overlay; even if the script has ended.
+	if (!partial && !LuaEng.screenshots.empty())
+	{
+		for (auto &shot : LuaEng.screenshots)
+			if (!S9xWriteScreenshot(shot.path.c_str(), IPPU.RenderedScreenWidth, IPPU.RenderedScreenHeight))
+				LuaEmit(shot.script, S9X_LUA_EVENT_WARNING, "emu.screenshot: can't write " + shot.path);
+		LuaEng.screenshots.clear();
+	}
+
 	if (!S9xLuaActive)
 		return false;
 	LuaEng.present_pending = true;

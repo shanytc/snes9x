@@ -31,12 +31,6 @@ bool8 S9xDoScreenshot (int width, int height)
 	}
 
 #ifdef HAVE_LIBPNG
-	FILE		*fp;
-	png_structp	png_ptr;
-	png_infop	info_ptr;
-	png_color_8	sig_bit;
-	int			imgwidth, imgheight;
-
 	std::tm *current_time;
 	std::time_t current_timet = time(nullptr);
 	current_time = localtime(&current_timet);
@@ -56,12 +50,36 @@ bool8 S9xDoScreenshot (int width, int height)
 		fname = S9xGetFilename(ss.str() + "-" + std::to_string(i) + ".png", SCREENSHOT_DIR);
 	}
 
-	fp = fopen(fname.c_str(), "wb");
-	if (!fp)
+	if (!S9xWriteScreenshot(fname.c_str(), width, height))
 	{
 		S9xMessage(S9X_ERROR, 0, "Failed to take screenshot.");
 		return (FALSE);
 	}
+
+	fprintf(stderr, "%s saved.\n", fname.c_str());
+
+	std::string base = "Saved screenshot " + S9xBasename(fname);
+	S9xMessage(S9X_INFO, 0, base.c_str());
+
+	return (TRUE);
+#else
+	fprintf(stderr, "Screenshot support not available (libpng was not found at build time).\n");
+	return (FALSE);
+#endif
+}
+
+bool8 S9xWriteScreenshot (const char *fname, int width, int height)
+{
+#ifdef HAVE_LIBPNG
+	FILE		*fp;
+	png_structp	png_ptr;
+	png_infop	info_ptr;
+	png_color_8	sig_bit;
+	int			imgwidth, imgheight;
+
+	fp = fopen(fname, "wb");
+	if (!fp)
+		return (FALSE);
 
 	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	info_ptr = png_create_info_struct(png_ptr);
@@ -137,14 +155,8 @@ bool8 S9xDoScreenshot (int width, int height)
 
 	fclose(fp);
 
-	fprintf(stderr, "%s saved.\n", fname.c_str());
-
-	std::string base = "Saved screenshot " + S9xBasename(fname);
-	S9xMessage(S9X_INFO, 0, base.c_str());
-
 	return (TRUE);
 #else
-	fprintf(stderr, "Screenshot support not available (libpng was not found at build time).\n");
 	return (FALSE);
 #endif
 }

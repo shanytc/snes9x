@@ -190,8 +190,10 @@ struct S9xLuaApiDoc
 const S9xLuaApiDoc *S9xLuaApiDocs (size_t *count);
 const S9xLuaApiDoc *S9xLuaFindApiDoc (const std::string &name);
 
+// Sorted by group, then title; menus open a submenu wherever the group changes.
 struct S9xLuaExample
 {
+	const char	*group;
 	const char	*title;
 	const char	*filename;
 	const char	*code;

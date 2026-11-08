@@ -11,6 +11,7 @@
 #include "gtk_sound.h"
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <regex>
@@ -1416,10 +1417,18 @@ void LuaWindow::build_menus()
     auto examples = Gtk::manage(new Gtk::Menu);
     size_t count;
     const S9xLuaExample *list = S9xLuaExamples(&count);
+    Gtk::Menu *group = nullptr;
     for (size_t i = 0; i < count; i++)
     {
         const S9xLuaExample *example = &list[i];
-        add_item(*examples, example->title, [this, example] { add_document(example->code, "", example->filename); });
+        if (!i || strcmp(example->group, list[i - 1].group))
+        {
+            auto group_item = Gtk::manage(new Gtk::MenuItem(example->group, true));
+            group = Gtk::manage(new Gtk::Menu);
+            group_item->set_submenu(*group);
+            examples->append(*group_item);
+        }
+        add_item(*group, example->title, [this, example] { add_document(example->code, "", example->filename); });
     }
     examples_item->set_submenu(*examples);
     help->append(*examples_item);

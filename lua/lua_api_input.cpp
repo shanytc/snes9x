@@ -177,15 +177,6 @@ std::string SlotPath (lua_State *L, lua_Integer slot)
 	return S9xGetFilename(ext, SNAPSHOT_DIR);
 }
 
-// A path relative to the script resolves against the script's folder.
-std::string ResolvePath (lua_State *L, const char *path)
-{
-	std::string	p = path;
-	const std::string	&dir = LuaScriptOf(L)->dir;
-	bool	absolute = !p.empty() && (p[0] == '/' || p[0] == '\\' || (p.size() > 1 && p[1] == ':'));
-	return absolute || dir.empty() ? p : dir + p;
-}
-
 int savestate_create (lua_State *L)
 {
 	LuaRequireSafe(L, "savestate.create");
@@ -209,7 +200,7 @@ int savestate_save (lua_State *L)
 	else if (lua_type(L, 1) == LUA_TNUMBER)
 		ok = S9xFreezeGame(SlotPath(L, luaL_checkinteger(L, 1)).c_str());
 	else
-		ok = S9xFreezeGame(ResolvePath(L, luaL_checkstring(L, 1)).c_str());
+		ok = S9xFreezeGame(LuaResolvePath(L, luaL_checkstring(L, 1)).c_str());
 	lua_pushboolean(L, ok);
 	return 1;
 }
@@ -231,7 +222,7 @@ int savestate_load (lua_State *L)
 	else if (lua_type(L, 1) == LUA_TNUMBER)
 		ok = S9xUnfreezeGame(SlotPath(L, luaL_checkinteger(L, 1)).c_str());
 	else
-		ok = S9xUnfreezeGame(ResolvePath(L, luaL_checkstring(L, 1)).c_str());
+		ok = S9xUnfreezeGame(LuaResolvePath(L, luaL_checkstring(L, 1)).c_str());
 	S9xLuaSelectOpcodes();	// a load puts the normal opcode tables back
 	lua_pushboolean(L, ok);
 	return 1;

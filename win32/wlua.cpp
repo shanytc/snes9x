@@ -2435,11 +2435,20 @@ HMENU BuildMenu()
 	item(view, CMD_ZOOM_RESET, L"&Reset Zoom\tCtrl+0");
 
 	HMENU help = popup(L"&Help");
-	HMENU examples = CreatePopupMenu();
+	HMENU examples = CreatePopupMenu(), group = nullptr;
 	size_t count;
 	const S9xLuaExample *list = S9xLuaExamples(&count);
 	for (size_t i = 0; i < count; i++)
-		AppendMenuW(examples, MF_STRING, CMD_EXAMPLE_FIRST + i, Widen(list[i].title).c_str());
+	{
+		if (!i || lstrcmpA(list[i].group, list[i - 1].group))
+		{
+			// "&&" keeps a group's '&' from turning into a mnemonic.
+			group = CreatePopupMenu();
+			std::wstring label = std::regex_replace(Widen(list[i].group), std::wregex(L"&"), L"&&");
+			AppendMenuW(examples, MF_POPUP, (UINT_PTR)group, label.c_str());
+		}
+		AppendMenuW(group, MF_STRING, CMD_EXAMPLE_FIRST + i, Widen(list[i].title).c_str());
+	}
 	AppendMenuW(help, MF_POPUP, (UINT_PTR)examples, _L(L"&Examples"));
 	separator(help);
 	item(help, CMD_GUIDE, L"Snes9x &Scripting Guide");

@@ -7,6 +7,7 @@
 #include "gb_cart.h"
 #include "gb_ppu.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -169,6 +170,15 @@ bool LooksLikeMmm01(const std::vector<uint8_t> &rom)
 	return true;
 }
 
+// SameBoy's MMM01 test: the menu bank's own header types it MMM01, or MBC3 as
+// the Mani carts forge it.
+bool Mmm01MenuTyped(const std::vector<uint8_t> &rom)
+{
+	if (!LooksLikeMmm01(rom)) return false;
+	const uint8_t t = rom[rom.size() - 0x8000 + 0x0147];
+	return (t >= 0x0B && t <= 0x0D) || t == 0x11;
+}
+
 // M161 (Mani 4-in-1 "Tetris Set"): a write-once register selects one of up to
 // eight raw 32 KiB pages into $0000-$7FFF — the menu is page 0, the sub-games
 // follow. The $0147 byte is forged (this cart claims MBC3+TIMER+BATTERY), so
@@ -186,6 +196,17 @@ bool LooksLikeM161(const std::vector<uint8_t> &rom)
 	};
 	if (rom[0x8148] != 0x00) return false;           // page 1 must be a 32 KiB game, not a banked 2-in-1 header
 	return logo_at(0x0000) && logo_at(0x8000);
+}
+
+// Wisdom Tree: no mapper in the header, a Nintendo logo in every 32 KiB page (which
+// fools the MMM01/M161 checks); hhugboy's CartDetection signature identifies it.
+bool LooksLikeWisdomTree(const std::vector<uint8_t> &rom)
+{
+	if (rom.size() < 0x150) return false;
+	if (rom[0x147] == 0xC0 && rom[0x14A] == 0xD1) return true;
+	static const char kSig1[] = "WISDOM TREE", kSig2[] = "WISDOM\0TREE";
+	return std::search(rom.begin(), rom.end(), kSig1, kSig1 + 11) != rom.end() ||
+	       std::search(rom.begin(), rom.end(), kSig2, kSig2 + 11) != rom.end();
 }
 
 // MBC1 multicart (MBC1M): a "menu + games" compilation where the 2-bit BANK2
@@ -358,7 +379,11 @@ MbcType LooksLikeScrambledUnl(const std::vector<uint8_t> &rom)
 		return std::memcmp(logo, ref, 48) == 0;
 	};
 	const bool bbd_plain    = rom[0x7FFF] == 0x01 && rom[0xBFFF] == 0x02;
-	const bool sintax_plain = rom[0x7FFF] == 0x00 || rom[0x7FFF] == 0x01;
+	// Decrypted: the SDK's bank-number byte ends each bank. Some dumps keep it only on
+	// even banks (Emo Cheng DX, Luke Yingxiong Chuan 3: bank 1 ends in data).
+	const bool sintax_plain = rom[0x7FFF] == 0x00 || rom[0x7FFF] == 0x01 ||
+	                          (rom.size() >= 0x1C000 && rom[0xBFFF] == 0x02 &&
+	                           rom[0x13FFF] == 0x04 && rom[0x1BFFF] == 0x06);
 	if (is(kLogoBbd) || is(kLogoBbdSgbc) || is(kLogoBbdFiver))
 		return bbd_plain ? MbcType::None : MbcType::BBD;
 	if (is(kLogoGgb81))    return MbcType::Ggb81;
@@ -499,12 +524,21 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 		c.sachen_runs_raw = c.sachen_logo_high ? false : SachenHeaderRunsRaw(c.rom);
 	}
 	else if (h.cart_type == 0x01 && c.rom.size() == 0x100000 &&
-	         LooksLikeMbc1Multicart(c.rom))
+	         LooksLikeMbc1Multicart(c.rom) && !Mmm01MenuTyped(c.rom))
 	{
 		// MBC1M (1 MiB, plain-MBC1 header, sub-game logos on the 256 KiB
 		// slots). Checked before MMM01: its per-bank logos also satisfy the
 		// end-of-ROM menu-logo probe, which would misfile it as MMM01.
+		// A menu bank typed MMM01/MBC3 wins (Mani 4 in 1, Bomber Boy at $40000).
 		c.mbc.type    = MbcType::MBC1;
+		c.has_battery = false;
+		c.has_rtc     = false;
+		c.has_rumble  = false;
+	}
+	else if (LooksLikeWisdomTree(c.rom))
+	{
+		// Checked before MMM01/M161: its per-page logos satisfy both probes.
+		c.mbc.type    = MbcType::WisdomTree;
 		c.has_battery = false;
 		c.has_rtc     = false;
 		c.has_rumble  = false;
@@ -607,7 +641,11 @@ bool CartLoad(Cart &c, const uint8_t *data, size_t size, const char *path)
 	}
 	else if (DecodeCartType(h.cart_type, c.mbc.type, c.has_battery, c.has_rtc, c.has_rumble))
 	{
-		// Recognized standard cart type — fields set by DecodeCartType.
+		// Recognized standard cart type — fields set by DecodeCartType. A "ROM only"
+		// header on more than 32 KiB had a mapper the header left out (prototypes,
+		// Wisdom Tree): MBC3, as SameBoy (mbc.c) and so bsnes's SGB load it.
+		if (h.cart_type == 0x00 && c.rom.size() > 0x8000)
+			c.mbc.type = MbcType::MBC3;
 	}
 	else if (LooksLikeSachenScrambledHeader(c.rom))
 	{

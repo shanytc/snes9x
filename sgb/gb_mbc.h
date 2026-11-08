@@ -39,7 +39,8 @@ enum class MbcType : uint8_t
 	LiCheng    = 23, // Li Cheng/Niutoude: MBC5 that ignores $2101-$2FFF bank writes
 	NtNew      = 24, // Makon/NT later: MBC5 + $55-armed 8K half-bank split windows
 	PokeJadeDia= 25, // Makon Pokemon Jade/Diamond: MBC3 + fake-RTC D/E/F registers
-	Vf001      = 26  // Vast Fame: MBC5 + rotate-XOR protection engine
+	Vf001      = 26, // Vast Fame: MBC5 + rotate-XOR protection engine
+	WisdomTree = 27  // Wisdom Tree: a $0000-$3FFF write maps 32 KiB page (address & $F) (hhugboy)
 };
 
 // Extra state for the scrambled unlicensed mappers - lives beside MbcState in

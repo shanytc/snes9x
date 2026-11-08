@@ -724,13 +724,14 @@ end
 )lua" },
 
 	{ "Layer Visibility", "layer_visibility.lua", R"lua(-- Layer visibility: every layer of the picture shown but one, and a panel
--- listing them. A SNES game has bg1-bg4 and sprites; a Game Boy or Game Boy
--- Color game has gb_bg, gb_window and gb_sprites; a Game Boy game under the
--- SGB BIOS has both sets. emu.layers() says which the loaded game has.
+-- listing them. A SNES game has bg1-bg4, sprites and windows (the clipping
+-- windows); a Game Boy or Game Boy Color game has gb_bg, gb_window and
+-- gb_sprites; a Game Boy game under the SGB BIOS has both sets.
+-- emu.layers() says which the loaded game has.
 
 -- The layer to hide on each platform (emu.platform()); change it to try another.
 local HIDE = { snes = "sprites", gb = "gb_sprites", sgb = "gb_sprites" }
-local ORDER = { "bg1", "bg2", "bg3", "bg4", "sprites", "gb_bg", "gb_window", "gb_sprites" }
+local ORDER = { "bg1", "bg2", "bg3", "bg4", "sprites", "windows", "gb_bg", "gb_window", "gb_sprites" }
 
 -- The switches stay as a script leaves them, so note them and put them back.
 local saved = {}

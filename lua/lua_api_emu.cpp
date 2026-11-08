@@ -253,27 +253,35 @@ int emu_screenshot (lua_State *L)
 }
 
 // The menus' S-PPU and GB-PPU layer switches. SGB BIOS mode runs both PPUs.
+enum LayerKind { LAYER_SNES, LAYER_WINDOWS, LAYER_GB };
+
 struct Layer
 {
 	const char	*name;
-	bool		gb;
-	int			index;
+	LayerKind	kind;
+	int			index;		// SNES: bit in Settings.BG_Forced; GB: the core's layer number
 };
 
 const Layer	layers[] =
 {
-	{ "bg1", false, 0 }, { "bg2", false, 1 }, { "bg3", false, 2 }, { "bg4", false, 3 }, { "sprites", false, 4 },
-	{ "gb_bg", true, 0 }, { "gb_window", true, 1 }, { "gb_sprites", true, 2 }
+	{ "bg1", LAYER_SNES, 0 }, { "bg2", LAYER_SNES, 1 }, { "bg3", LAYER_SNES, 2 }, { "bg4", LAYER_SNES, 3 },
+	{ "sprites", LAYER_SNES, 4 }, { "windows", LAYER_WINDOWS, 0 },
+	{ "gb_bg", LAYER_GB, 0 }, { "gb_window", LAYER_GB, 1 }, { "gb_sprites", LAYER_GB, 2 }
 };
 
 bool HasLayer (const Layer &layer)
 {
-	return layer.gb ? (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) : !Settings.SuperGameBoy;
+	return layer.kind == LAYER_GB ? (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) : !Settings.SuperGameBoy;
 }
 
 bool LayerOn (const Layer &layer)
 {
-	return layer.gb ? S9xSGBGetLayerEnabled(layer.index) : !(Settings.BG_Forced & (1 << layer.index));
+	switch (layer.kind)
+	{
+		case LAYER_GB:		return S9xSGBGetLayerEnabled(layer.index);
+		case LAYER_WINDOWS:	return !Settings.DisableGraphicWindows;
+		default:			return !(Settings.BG_Forced & (1 << layer.index));
+	}
 }
 
 const Layer &CheckLayer (lua_State *L, int arg)
@@ -297,8 +305,10 @@ int emu_set_layer (lua_State *L)
 	LuaRequireGame(L);
 	const Layer	&layer = CheckLayer(L, 1);
 	bool		on = lua_toboolean(L, 2);
-	if (layer.gb)
+	if (layer.kind == LAYER_GB)
 		S9xSGBSetLayerEnabled(layer.index, on);
+	else if (layer.kind == LAYER_WINDOWS)
+		Settings.DisableGraphicWindows = !on;	// the next frame recomputes the clip windows
 	else if (on)
 		Settings.BG_Forced &= ~(1 << layer.index);
 	else

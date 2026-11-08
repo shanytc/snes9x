@@ -26,7 +26,7 @@ static const S9xLuaApiDoc	docs[] =
 	{ "emu.is_turbo",		"()",			"True while fast-forwarding." },
 	{ "emu.message",		"(text [, seconds])",	"Shows text in the on-screen message area." },
 	{ "emu.screenshot",		"([path])",		"Saves a PNG of the next frame to path (relative to the script's folder), or to the screenshot folder." },
-	{ "emu.set_layer",		"(name, on)",	"Shows or hides a layer: bg1, bg2, bg3, bg4, sprites; gb_bg, gb_window, gb_sprites for Game Boy games." },
+	{ "emu.set_layer",		"(name, on)",	"Shows or hides a layer: bg1, bg2, bg3, bg4, sprites, windows (clipping windows); gb_bg, gb_window, gb_sprites for Game Boy games." },
 	{ "emu.is_layer_on",	"(name)",		"True while the layer is shown." },
 	{ "emu.layers",			"()",			"Table of the game's layers, each name = true if shown." },
 	{ "emu.is_rom_loaded",	"()",			"True once a game is loaded." },

@@ -100,7 +100,7 @@ exec hooks run before the instruction and may (`cpu.set("pc", ...)` skips code).
 | `emu.set_turbo(on)`, `emu.is_turbo()` | Fast-forward. |
 | `emu.message(text [, seconds])` | Shows text in the on-screen message area. |
 | `emu.screenshot([path])` | Saves a PNG of the next frame, without the scripts' drawings. With a `path` (relative to the script's folder) it is written there with no on-screen message, and a file that can't be written is a console warning; without one it goes to the screenshot folder, as the menu item does. |
-| `emu.set_layer(name, on)`, `emu.is_layer_on(name)` | Shows or hides a layer of the picture: `bg1`, `bg2`, `bg3`, `bg4` and `sprites` (the S-PPU), or `gb_bg`, `gb_window` and `gb_sprites` (the Game Boy core). A Game Boy game has the `gb_` layers, an SGB BIOS game both sets. These are the menus' layer switches, so they stay as the script leaves them. |
+| `emu.set_layer(name, on)`, `emu.is_layer_on(name)` | Shows or hides a layer of the picture: `bg1`, `bg2`, `bg3`, `bg4` and `sprites` (the S-PPU), or `gb_bg`, `gb_window` and `gb_sprites` (the Game Boy core). `windows` is the S-PPU's Clipping Windows switch: off, no layer is masked by the game's windows. A Game Boy game has the `gb_` layers, an SGB BIOS game both sets. These are the menus' layer switches, so they stay as the script leaves them. |
 | `emu.layers()` | The game's layers as a table, each `name = true` if shown. |
 | `emu.is_rom_loaded()` | True once a game is loaded. |
 | `emu.rom()` | `{title, path, crc32, sha256, size, region, mapping, id, platform}`, or nil without a game. |

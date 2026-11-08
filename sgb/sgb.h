@@ -539,8 +539,14 @@ bool S9xSGBSplitSeatPresent(int player);
 bool S9xSGBSplitSeatGhost(int player);
 int  S9xSGBSplitPresentPlayers(void);   // the master and the seats present; 0 = off
 int  S9xSGBSplitGhosts(void);
-unsigned S9xSGBSplitReleaseGhosts(void);
-// Player 1 and the next player at the table face each other: Infrared is the
+unsigned S9xSGBSplitReleaseGhosts(void);   // also takes mid-game unlinks off the wire
+// A seated player unlinks without getting up: their Game Boy plays on, no reset,
+// out of infrared range at once and off the cable now or, mid-game, once the game
+// lets go (as a ghost). SetSeatLinked returns false when nothing changed.
+bool S9xSGBSplitSetSeatLinked(int player, bool linked);
+bool S9xSGBSplitSeatLinked(int player);
+int  S9xSGBSplitUnlinkedSeats(void);
+// Player 1 and the next linked player at the table face each other: Infrared is the
 // Game Boy Color port, GB KISS the HuC1/HuC3 cart LEDs. Each holds across
 // sessions until turned off.
 void S9xSGBSetInfrared(bool on);

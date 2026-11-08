@@ -212,7 +212,8 @@ void MbcReset(MbcState &s)
 	s.mmm01_ram_bank_mask     = 0xFF;
 	s.mmm01_just_locked       = false;
 
-	if (s.type == MbcType::M161) s.rom_bank = 0;   // power-on page 0 = menu
+	if (s.type == MbcType::M161 || s.type == MbcType::WisdomTree)
+		s.rom_bank = 0;   // power-on page 0
 	if (s.type == MbcType::MBC7)
 	{
 		s.rtc_regs[1] = 0xFF;
@@ -1129,10 +1130,10 @@ uint8_t MbcRead(MbcState &s, const std::vector<uint8_t> &rom, const std::vector<
 			return static_cast<uint8_t>(ReadRom(rom, off + (addr & 0x1FFFu)));
 		}
 	}
-	if (s.type == MbcType::M161 && addr < 0x8000)
+	if ((s.type == MbcType::M161 || s.type == MbcType::WisdomTree) && addr < 0x8000)
 	{
 		// One 32 KiB page covers the whole $0000-$7FFF window.
-		const uint32_t page = s.rom_bank & 0x07;
+		const uint32_t page = s.rom_bank & (s.type == MbcType::M161 ? 0x07 : 0x0F);
 		return static_cast<uint8_t>(ReadRom(rom, (page << 15) | (addr & 0x7FFF)));
 	}
 	if (addr < 0x4000)
@@ -2109,6 +2110,11 @@ void MbcWrite(Cart &c, uint16_t addr, uint8_t value)
 				}
 			}
 		}
+		break;
+
+	case MbcType::WisdomTree:
+		// The address picks the page, not the data (hhugboy MbcUnlWisdomTree).
+		if (addr < 0x4000) s.rom_bank = static_cast<uint8_t>(addr & 0x0F);
 		break;
 
 	case MbcType::M161:

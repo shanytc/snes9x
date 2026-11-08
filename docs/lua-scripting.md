@@ -99,7 +99,9 @@ exec hooks run before the instruction and may (`cpu.set("pc", ...)` skips code).
 | `emu.reset()`, `emu.power_cycle()` | Soft reset and hard reset, as the menu items. |
 | `emu.set_turbo(on)`, `emu.is_turbo()` | Fast-forward. |
 | `emu.message(text [, seconds])` | Shows text in the on-screen message area. |
-| `emu.screenshot()` | Saves a screenshot of the next frame to the screenshot folder. |
+| `emu.screenshot([path])` | Saves a PNG of the next frame, without the scripts' drawings. With a `path` (relative to the script's folder) it is written there with no on-screen message, and a file that can't be written is a console warning; without one it goes to the screenshot folder, as the menu item does. |
+| `emu.set_layer(name, on)`, `emu.is_layer_on(name)` | Shows or hides a layer of the picture: `bg1`, `bg2`, `bg3`, `bg4` and `sprites` (the S-PPU), or `gb_bg`, `gb_window` and `gb_sprites` (the Game Boy core). A Game Boy game has the `gb_` layers, an SGB BIOS game both sets. These are the menus' layer switches, so they stay as the script leaves them. |
+| `emu.layers()` | The game's layers as a table, each `name = true` if shown. |
 | `emu.is_rom_loaded()` | True once a game is loaded. |
 | `emu.rom()` | `{title, path, crc32, sha256, size, region, mapping, id, platform}`, or nil without a game. |
 | `emu.region()` | `"ntsc"` or `"pal"`. |
@@ -260,8 +262,8 @@ movie).
 
 ## Files and modules
 
-`require`, `dofile`, `loadfile`, `io.open`, `io.lines`, `gui.image` and
-`savestate` paths look in the script's folder first, so a script can ship with
+`require`, `dofile`, `loadfile`, `io.open`, `io.lines`, `gui.image`,
+`emu.screenshot` and `savestate` paths look in the script's folder first, so a script can ship with
 its own modules and data. The standard libraries are all there, except that
 scripts have no console input (`io.read`) and `os.exit()` ends the script
 rather than the emulator. Lua modules written in C can't be loaded, and neither

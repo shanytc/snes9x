@@ -245,8 +245,85 @@ int emu_message (lua_State *L)
 int emu_screenshot (lua_State *L)
 {
 	LuaRequireGame(L);
-	Settings.TakeScreenshot = TRUE;
+	if (lua_isnoneornil(L, 1))
+		Settings.TakeScreenshot = TRUE;
+	else
+		LuaEng.screenshots.push_back({ LuaScriptOf(L)->id, LuaResolvePath(L, luaL_checkstring(L, 1)) });
 	return 0;
+}
+
+// The menus' S-PPU and GB-PPU layer switches. SGB BIOS mode runs both PPUs.
+struct Layer
+{
+	const char	*name;
+	bool		gb;
+	int			index;
+};
+
+const Layer	layers[] =
+{
+	{ "bg1", false, 0 }, { "bg2", false, 1 }, { "bg3", false, 2 }, { "bg4", false, 3 }, { "sprites", false, 4 },
+	{ "gb_bg", true, 0 }, { "gb_window", true, 1 }, { "gb_sprites", true, 2 }
+};
+
+bool HasLayer (const Layer &layer)
+{
+	return layer.gb ? (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) : !Settings.SuperGameBoy;
+}
+
+bool LayerOn (const Layer &layer)
+{
+	return layer.gb ? S9xSGBGetLayerEnabled(layer.index) : !(Settings.BG_Forced & (1 << layer.index));
+}
+
+const Layer &CheckLayer (lua_State *L, int arg)
+{
+	const char	*name = luaL_checkstring(L, arg);
+	std::string	names;
+	for (auto &layer : layers)
+	{
+		if (!HasLayer(layer))
+			continue;
+		if (!strcmp(layer.name, name))
+			return layer;
+		names += (names.empty() ? "" : ", ") + std::string(layer.name);
+	}
+	luaL_argerror(L, arg, lua_pushfstring(L, "no layer named '%s'; this game has %s", name, names.c_str()));
+	return layers[0];
+}
+
+int emu_set_layer (lua_State *L)
+{
+	LuaRequireGame(L);
+	const Layer	&layer = CheckLayer(L, 1);
+	bool		on = lua_toboolean(L, 2);
+	if (layer.gb)
+		S9xSGBSetLayerEnabled(layer.index, on);
+	else if (on)
+		Settings.BG_Forced &= ~(1 << layer.index);
+	else
+		Settings.BG_Forced |= 1 << layer.index;
+	return 0;
+}
+
+int emu_is_layer_on (lua_State *L)
+{
+	lua_pushboolean(L, LayerOn(CheckLayer(L, 1)));
+	return 1;
+}
+
+int emu_layers (lua_State *L)
+{
+	lua_newtable(L);
+	for (auto &layer : layers)
+	{
+		if (HasLayer(layer))
+		{
+			lua_pushboolean(L, LayerOn(layer));
+			lua_setfield(L, -2, layer.name);
+		}
+	}
+	return 1;
 }
 
 int emu_is_rom_loaded (lua_State *L)
@@ -359,6 +436,9 @@ const luaL_Reg	emu_functions[] =
 	{ "is_turbo",		emu_is_turbo },
 	{ "message",		emu_message },
 	{ "screenshot",		emu_screenshot },
+	{ "set_layer",		emu_set_layer },
+	{ "is_layer_on",	emu_is_layer_on },
+	{ "layers",			emu_layers },
 	{ "is_rom_loaded",	emu_is_rom_loaded },
 	{ "rom",			emu_rom },
 	{ "region",			emu_region },

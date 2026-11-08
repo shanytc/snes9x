@@ -382,9 +382,6 @@ struct Emulator::Impl
 	uint16_t    boot_rom_staging_size = 0;
 	bool        boot_rom_loaded = false;
 	// Staged boot ROM is our embedded fallback, not one the user supplied.
-	// Raw GB frame as the boot left it, for the boot-logo hold below.
-	uint8_t     boot_logo_ref[GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT] = {};
-	bool        boot_logo_ref_valid = false;
 
 	// ICD2 state — the SGB cart-chip register set exposed at 0x6000-0x7FFF
 	// on the SNES side when running under a real BIOS. Layout mirrors the
@@ -420,27 +417,21 @@ struct Emulator::Impl
 		//   $10 (P15 active only)     = 1-bit
 		//   $20 (P14 active only)     = 0-bit
 		//   $30 (both inactive)       = clock-high / idle
-		// We shift bits into bit_accumulator LSB-first, pack into
-		// assembly_buf[] every 8 bits. On the 16th byte the fully-
-		// assembled packet is pushed onto packet_queue.
+		// We shift bits into bit_accumulator LSB-first; each finished byte lands
+		// in assembly_buf[] and, as it arrives, in r7000_buf (Mesen).
 		uint8_t  assembly_buf[16];
 		uint16_t bit_accumulator;
 		uint8_t  packet_bit;    // 0..7
 		uint8_t  packet_byte;   // 0..16
 		bool     in_packet;
 
-		// 64-deep packet queue (ring buffer). Matches bsnes's icd.cpp
-		// packet path. The GB sends packets in bursts (5 handshake
-		// packets back-to-back, plus game-driven palette/CHR/PCT/ATTR
-		// transfers) — a single-slot FIFO loses anything after the
-		// first while the BIOS is busy draining, which corrupts the
-		// expected command sequence and strands the BIOS waiting for
-		// $6002 forever. Queue drains on $7000-$700F reads: drain_ptr
-		// advances per read; at 16 we pop the head and decrement count.
+		// ONE packet: r7000_buf and its $6002 flag (queue_count), cleared by a $7000 read
+		// (fullsnes) and by the next packet's reset pulse (inferred: Olympic, NBA Live 96, Poyon).
+		// packet_queue/queue_head/queue_tail are unused, kept for the savestate layout.
 		uint8_t  packet_queue[64][16];
-		uint8_t  queue_head;         // next packet to drain (0..63)
-		uint8_t  queue_tail;         // next slot to push (0..63)
-		uint8_t  queue_count;        // number of packets queued (0..64)
+		uint8_t  queue_head;
+		uint8_t  queue_tail;
+		uint8_t  queue_count;        // packet available ($6002 bit 0)
 
 		// P2c diagnostic counters — help verify packet flow by OSD.
 		uint32_t packets_received;   // completed 16-byte packets
@@ -510,12 +501,7 @@ struct Emulator::Impl
 		uint8_t  last_r7000_vals[16];
 		uint8_t  last_r7000_idx;
 
-		// bsnes-style packet read buffer. Reading $6002 with a pending
-		// packet pops the front of the queue into r7000_buf[0..15], and
-		// subsequent $7000-$700F reads return from this buffer (NOT the
-		// queue directly). This matters because the BIOS may not read
-		// all 16 bytes of a packet — if we only pop on $700F, we'd keep
-		// re-reading the same packet forever.
+		// The packet buffer $7000-$700F reads (see queue_count).
 		uint8_t  r7000_buf[16];
 
 		// Synthesized boot-ROM handshake. Most GB boot ROM dumps are plain
@@ -547,20 +533,15 @@ struct Emulator::Impl
 		uint32_t lcd_reads_prev = 0;
 	} icd2;
 
-	// Cache of the first 6 packets bit-banged by the GB boot ROM. The
-	// SGB BIOS handshake validates that two consecutive GB resets produce
-	// byte-identical packets ($B8AE:BE3C captures byte 1s into $7E:1718,
-	// then $B0F6:B107 drains a second time and $B119 compares against
-	// $1718 — mismatch → $02FA=1 → cart error). Stored OUTSIDE the
-	// Icd2 struct because Reset() zeroes icd2 on every $6003 0→1
-	// transition, and we want the cache to persist across those resets
-	// so we can re-queue deterministic packets on subsequent releases.
+	// Unused: kept so savestates v3+ keep their layout. Every $6003 release now
+	// power-cycles the GB, whose boot ROM re-sends the header packets itself.
 	uint8_t  cached_packets[6][16]{};
-	uint8_t  cached_count   = 0;   // 0..6 (how many filled during first boot)
-	bool     cache_valid    = false; // set true once 6 packets cached
-	uint8_t  replays_done   = 0;   // cap replay count so post-splash releases don't
-	                                // keep re-queuing handshake packets (which would
-	                                // block game-generated SGB commands).
+	uint8_t  cached_count   = 0;
+	bool     cache_valid    = false;
+	uint8_t  replays_done   = 0;
+	// bsnes ICD joypLock: a $10 write flips it, a $30 write with it clear
+	// advances the player ID. Outside icd2 so v1-18 states keep their layout.
+	uint8_t  icd_joyp_lock  = 1;
 
 	// Deferred CHR_TRN / PCT_TRN capture. Real SGB hardware reconstructs
 	// border tile/map data from the GB's LCD over multiple frames after
@@ -663,15 +644,7 @@ bool LinkCartPatchesWanted();
 
 void Emulator::ColdReset()
 {
-	// Clear the BIOS-handshake cache before delegating to Reset(). On a
-	// user-initiated reset (File→Reset / new ROM load), the SNES BIOS
-	// will run from scratch and expects to perform the full handshake
-	// again — but our cache_valid flag and cached_packets persist
-	// across the GB-side Reset() (which is correct for in-game $6003
-	// 0→1 transitions). Without clearing, the next $6003 release skips
-	// the boot-ROM run and replays cached packets, producing no SGB
-	// splash and either a black screen or whatever stale state the
-	// SNES retained from before the reset.
+	// Zeroed so a state saved after a cold reset carries no stale packets.
 	std::memset(impl_->cached_packets, 0, sizeof impl_->cached_packets);
 	impl_->cached_count = 0;
 	impl_->cache_valid  = false;
@@ -756,6 +729,10 @@ void Emulator::Reset()
 	impl_->bios_mask_mode  = 0;
 	impl_->cpu.Reset();
 	MemReset(impl_->mem, impl_->CgbActive());
+	// SGB2 work RAM powers up $55 (SameBoy's SGB2 model, bsnes's ICD2 with entropy off);
+	// Game & Watch Gallery 2 times its first border swap off an uncleared byte of it.
+	if (impl_->run_mode == RunMode::SGB2 && !impl_->CgbActive())
+		std::memset(impl_->mem.wram, 0x55, sizeof impl_->mem.wram);
 	PpuReset(impl_->ppu);
 	// An LCD-enable write takes hold a dot into its machine cycle on both
 	// models - the boot ROM's included - so a BIOS-less start swallows that
@@ -823,6 +800,7 @@ void Emulator::Reset()
 	impl_->drc_integ             = DrcSteadyStateCorr(impl_->cgb_mode, impl_->run_mode);
 	std::memset(&impl_->icd2, 0, sizeof impl_->icd2);
 	impl_->icd2.input_value = 0x30;   // lines idle high, so the first $00 is a reset
+	impl_->icd_joyp_lock    = 1;      // bsnes ICD::power
 	// 4-bank LCD ring starts at $00 (matches Mesen2 SuperGameboy::Reset).
 	// $7000-$700F latch buffer starts as $FF so reads before the first
 	// $6002 pop return all-ones (matches bsnes r7000 power-on state).
@@ -1001,14 +979,12 @@ void Emulator::Reset()
 		cs.r.sp = 0x0000;
 		cs.r.pc = 0x0000;
 
-		// Under the SGB BIOS the SNES splash is the boot animation; the GB logo
-		// scroll only plays behind it. Cover it on the finished SNES frame - the
-		// ICD2 ring it renders into also carries the cart's border payload.
-		if (impl_->BiosMode())
+		// Super Game Boy Color hides the logo a Color boot would have wiped
+		// (SgbcBootCover). Under the SGB BIOS a cart that leaves it up shows it.
+		if (impl_->BiosMode() && impl_->sgbc && impl_->ppu.cgb)
 			impl_->ppu.boot_logo_hold = true;
 	}
 
-	impl_->boot_logo_ref_valid = false;
 	impl_->sgbc_cover.Reset();
 
 	impl_->cart.mbc.sachen_locked = impl_->mem.boot_rom_enabled || !impl_->cart.sachen_runs_raw;
@@ -1103,6 +1079,12 @@ void Emulator::PrimeBIOSHandshake()
 
 // MLT_REQ mode into the ICD2 rotation, with sgb_state's HandleMltReq quirks
 // (mode 2 = odd count, index bumped into the glitched slot). Idempotent.
+// Player-ID mask for an MLT_REQ player count (bsnes ICD: 1, 2 or 4; mode 2 as 4).
+static uint8_t IcdMltMask(uint8_t mlt_players)
+{
+	return mlt_players == 2 ? 1 : mlt_players >= 3 ? 3 : 0;
+}
+
 static void IcdSetMltMode(Emulator::Impl::Icd2 &icd, uint8_t mode)
 {
 	icd.mlt_players = static_cast<uint8_t>(mode + 1);
@@ -1110,23 +1092,23 @@ static void IcdSetMltMode(Emulator::Impl::Icd2 &icd, uint8_t mode)
 	                              : static_cast<uint8_t>(icd.input_index & mode);
 }
 
-// Push a freshly-assembled 16-byte packet onto the queue. Drops the
-// oldest slot silently if the queue is full — matches bsnes icd.cpp
-// behavior (`if(packetSize >= 64) packetSize = 64;`). Bumps the
-// diagnostic counters as the canonical "packet arrived" event.
-static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
+// A completed 16-byte packet fills the single $7000 buffer and raises $6002 (the GB's
+// bytes are already there). Bumps the diagnostic counters as the "packet arrived" event.
+static void IcdLatchPacket(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 {
-	std::memcpy(icd.packet_queue[icd.queue_tail], pkt, 16);
-	icd.queue_tail = static_cast<uint8_t>((icd.queue_tail + 1) & 63);
-	if (icd.queue_count < 64)
-		icd.queue_count++;
-	else
-		icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
+	std::memcpy(icd.r7000_buf, pkt, 16);
+	icd.queue_count = 1;
 
 	icd.packets_received++;
 	const uint8_t byte0  = pkt[0];
 	const uint8_t cmd_id = static_cast<uint8_t>(byte0 >> 3);
 	if (byte0 == 0xF1) icd.f1_packets++;
+	if (SerialTraceEnabled())
+	{
+		char m[64];
+		snprintf(m, sizeof m, "icdpkt sf=%u %02X %02X", IPPU.TotalEmulatedFrames, byte0, pkt[1]);
+		SerialTraceMsg(m);
+	}
 
 	switch (cmd_id)
 	{
@@ -1147,14 +1129,6 @@ static void IcdPushQueue(Emulator::Impl::Icd2 &icd, const uint8_t *pkt)
 			icd.last_data_trn_bank = pkt[1];
 			icd.last_data_trn_addr =
 				static_cast<uint16_t>(pkt[2] | (pkt[3] << 8));
-			break;
-		case 0x11:
-			// MLT_REQ: the ICD2 latches the player count as the packet lands.
-			// Waiting for the BIOS to program it loses the race against a cart
-			// that probes the rotation right after (Survival Kids and friends).
-			// Latched as the packet lands: waiting for the BIOS's $6003 write
-			// loses the race against carts that probe right after (Survival Kids).
-			IcdSetMltMode(icd, static_cast<uint8_t>(pkt[1] & 3));
 			break;
 		case 0x12:
 			icd.jump_packets++;
@@ -1186,7 +1160,7 @@ static void IcdStageNextSynth(Emulator::Impl::Icd2 &icd)
 {
 	if (icd.synth_remaining == 0) return;
 	const uint8_t next_idx = static_cast<uint8_t>(6 - icd.synth_remaining);
-	IcdPushQueue(icd, icd.synth_packets[next_idx]);
+	IcdLatchPacket(icd, icd.synth_packets[next_idx]);
 	icd.synth_remaining--;
 }
 
@@ -2042,24 +2016,16 @@ void Emulator::RunCycles(int32_t tcycles)
 	// MMM01 multicart just locked into game-mode — inject the SGB
 	// default ("Mario") palette packets so the picked sub-game gets
 	// proper SGB-style colorization instead of inheriting the menu
-	// title's misapplied palette. In BIOS mode we push packets onto
-	// the ICD2 FIFO so the SNES SGB BIOS picks them up and updates
-	// CGRAM; in BIOS-less mode we feed them straight into our own
-	// dispatcher. No soft reset, no splash, immediate menu→game.
+	// title's misapplied palette, fed straight into our own dispatcher.
+	// With a boot ROM the ICD2 gets nothing: it only carries packets the cart sends.
 	if (impl_->cart.mbc.mmm01_just_locked)
 	{
 		impl_->cart.mbc.mmm01_just_locked = false;
-		uint8_t pal01[16], pal23[16], attr_blk[16];
-		BuildSgbDefaultPalettePackets(pal01, pal23);
-		BuildResetAttrBlkPacket(attr_blk);
-		if (impl_->boot_rom_loaded)
+		if (!impl_->boot_rom_loaded)
 		{
-			IcdPushQueue(impl_->icd2, pal01);
-			IcdPushQueue(impl_->icd2, pal23);
-			IcdPushQueue(impl_->icd2, attr_blk);
-		}
-		else
-		{
+			uint8_t pal01[16], pal23[16], attr_blk[16];
+			BuildSgbDefaultPalettePackets(pal01, pal23);
+			BuildResetAttrBlkPacket(attr_blk);
 			OnSgbCommandInternal(0x00, pal01,    16);
 			OnSgbCommandInternal(0x01, pal23,    16);
 			OnSgbCommandInternal(0x04, attr_blk, 16);
@@ -2246,13 +2212,21 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 			break;
 	}
 
-	// $7000-$700F — bsnes-style latch read. Returns bytes from r7000_buf,
-	// which was populated on the last $6002 read that found a pending
-	// packet. This lets the BIOS read any subset of the 16 bytes (or
-	// re-read them) without advancing the queue.
+	// $7000-$700F — the packet buffer; reading $7000 clears the $6002 flag (fullsnes).
 	if (a >= 0x7000 && a <= 0x700F)
 	{
 		const uint8_t b = icd.r7000_buf[a & 0x0F];
+		if (a == 0x7000 && icd.queue_count)
+		{
+			icd.queue_count = 0;
+			if (SerialTraceEnabled())
+			{
+				char m[120];
+				int  n = snprintf(m, sizeof m, "sgbpop sf=%u f=%u", IPPU.TotalEmulatedFrames, impl_->ppu.frame_no);
+				n = TraceHex(m, sizeof m, n, icd.r7000_buf, 16);
+				SerialTraceMsg(m);
+			}
+		}
 		// Trace: log into ring so OSD can see what our ICD2 actually
 		// served for the last drain attempts.
 		icd.last_r7000_vals[icd.last_r7000_idx & 0x0F] = b;
@@ -2299,53 +2273,12 @@ uint8_t Emulator::GetICD2(uint16_t addr)
 			return static_cast<uint8_t>((icd.sgb_row_latched & 0xF8) | (icd.sgb_bank_latched & 0x03));
 		case 0x6002:
 		{
-			// Lazy-stage the next synth packet if queue's empty (no-op
+			// Lazy-stage the next synth packet once the buffer is read (no-op
 			// when a real boot ROM is running — synth_remaining stays 0).
 			if (icd.queue_count == 0 && icd.synth_remaining > 0)
 				IcdStageNextSynth(icd);
-
-			// Auto-stage cached packets if queue is empty and we have a
-			// valid cache from the first boot. Without this, the BIOS
-			// eventually enters sub_80B107 with empty queue and spins
-			// on $6002 forever (it doesn't write $6003 inside that
-			// loop, so our release-triggered replay can't fire).
-			//
-			// Cap the count so the BIOS can eventually EXIT the
-			// validate-and-reset cycle. Staging indefinitely keeps the
-			// BIOS forever re-running handshake validation, which
-			// interferes with game-display tile transfers — garbled
-			// CHR_TRN output. 50 iterations is enough for the BIOS to
-			// complete splash setup and advance $0101 to game-display
-			// mode; after that the game's own SGB commands drive the
-			// packet queue and validation is no longer needed.
-			if (icd.queue_count == 0 && impl_->cache_valid &&
-			    impl_->replays_done < 50 &&
-			    !impl_->boot_handoff_captured)
-			{
-				for (int p = 0; p < 6; ++p)
-					IcdPushQueue(icd, impl_->cached_packets[p]);
-				impl_->replays_done++;
-			}
-
-			// bsnes semantics: reading $6002 with a pending packet POPS
-			// the front packet into r7000_buf[0..15] and shifts the queue.
-			if (icd.queue_count > 0)
-			{
-				std::memcpy(icd.r7000_buf, icd.packet_queue[icd.queue_head], 16);
-				icd.queue_head = static_cast<uint8_t>((icd.queue_head + 1) & 63);
-				icd.queue_count--;
-				if (SerialTraceEnabled())
-				{
-					char m[120];
-					int  n = snprintf(m, sizeof m, "sgbpop f=%u q=%u",
-					                  impl_->ppu.frame_no, icd.queue_count);
-					n = TraceHex(m, sizeof m, n, icd.r7000_buf, 16);
-					SerialTraceMsg(m);
-				}
-				IcdStageNextSynth(icd);
-				return 0x01;
-			}
-			return 0x00;
+			// Only the flag: reading $7000 clears it (fullsnes; Mesen SuperGameboy.cpp).
+			return icd.queue_count ? 0x01 : 0x00;
 		}
 		case 0x6003: return icd.control;    // R/W — some BIOS paths verify writes
 		case 0x600F: return 0x21;           // BIOS version byte (bsnes / Mesen return $21)
@@ -2396,8 +2329,7 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 			{
 				char rmsg[96];
 				snprintf(rmsg, sizeof rmsg, "boot: %s t=%lld f=%u",
-				         !now_released ? "hold (reset low)"
-				         : impl_->cache_valid ? "release replay" : "release reset",
+				         !now_released ? "hold (reset low)" : "release reset",
 				         (long long)impl_->cpu.State().t_cycles,
 				         impl_->ppu.frame_no);
 				SerialTraceMsg(rmsg);
@@ -2405,36 +2337,14 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 
 			if (!was_released && now_released)
 			{
-				if (!impl_->cache_valid)
-				{
-					// First release: fresh GB boot. Reset() zeroes icd2,
-					// reloads the boot ROM, sets PC=$0000. The GB's boot
-					// ROM will bit-bang 6 packets, which OnJoyserWrite
-					// caches into impl_->cached_packets as they arrive.
-					Reset();
-					icd.control = value;  // re-apply after Reset wiped it
-					if (!impl_->boot_rom_loaded)
-						PrimeBIOSHandshake();
-					// Every console on the cable power-cycles, not just this one.
-					S9xSGBSplitResetSeats();
-				}
-				else if (icd.queue_count == 0)
-				{
-					// Subsequent release with an EMPTY queue — BIOS is
-					// expecting handshake packets to validate. Replay
-					// cached packets so $B119 passes and the state
-					// machine can advance $0102 through its ~41 sub-
-					// states (at which point $B0CD sets $0101=5 and
-					// $808EA0 jumps to game-mode display).
-					// Gate on queue_count==0 so we don't wipe any
-					// game-generated packets that are already queued —
-					// only replay when the BIOS actually needs packets.
-					for (int p = 0; p < 6; ++p)
-						IcdPushQueue(icd, impl_->cached_packets[p]);
-					impl_->replays_done++;
-				}
-				// Non-empty queue means game packets are pending —
-				// leave them alone and let the BIOS drain/process them.
+				// Every release power-cycles the GB, as on hardware (bsnes, Mesen):
+				// the boot ROM runs again and re-sends its header packets.
+				Reset();
+				icd.control = value;  // re-apply after Reset wiped it
+				if (!impl_->boot_rom_loaded)
+					PrimeBIOSHandshake();
+				// Every console on the cable power-cycles, not just this one.
+				S9xSGBSplitResetSeats();
 			}
 			else if (was_released && !now_released)
 			{
@@ -2443,10 +2353,16 @@ void Emulator::SetICD2(uint8_t value, uint16_t addr)
 				icd.sgb_row  = 0;
 				icd.sgb_bank = 0;
 			}
-			// The BIOS mirrors MLT_REQ into bits 5-4; the packet already
-			// latched it, so this only matters when the BIOS alone changes it.
-			if ((value & 0x30) != old_mlt)
-				IcdSetMltMode(icd, static_cast<uint8_t>((value >> 4) & 3));
+			// MLT_REQ takes effect only through the BIOS's write here, on every write:
+			// mode = bits 5-4, player ID masked (bsnes icd/io.cpp). The ICD2 reads no packets.
+			icd.mlt_players = static_cast<uint8_t>(((value >> 4) & 3) + 1);
+			icd.input_index = static_cast<uint8_t>(icd.input_index & ~IcdMltMask(icd.mlt_players));
+			if ((value & 0x30) != old_mlt && SerialTraceEnabled())
+			{
+				char m[48];
+				snprintf(m, sizeof m, "mlt6003 sf=%u %02X", IPPU.TotalEmulatedFrames, value);
+				SerialTraceMsg(m);
+			}
 			return;
 		}
 		case 0x6004:
@@ -2586,61 +2502,13 @@ void Emulator::OnPpuVBlank()
 	UpdateBootLogoHold();
 }
 
-// The boot leaves its logo in VRAM and plenty of carts never redraw it — they
-// inherit it, fade it with BGP (no raw pixel changes), or blank the screen
-// and flash it back before their first real draw (Test Drive Off-Road 3). So
-// hold the panel on the picture the boot handed over, ride out flat frames
-// that display as white — they are staging, and the cover looks the same —
-// and release on the first frame that is neither. A cart that composes a
-// logo screen of its own (Castlevania Legends) changes the pixels, so its
-// version shows. State checks only: no frame counts, no time bounds.
+// Super Game Boy Color only: a Color boot wipes the logo the SGB boot ROM
+// leaves in VRAM, so SgbcBootCover (sgbc.cpp) covers it until the cart draws.
 void Emulator::UpdateBootLogoHold()
 {
-	// Nothing to hide, or the boot ROM is still scrolling it into place.
+	// Nothing to hide, or the boot ROM is still drawing it.
 	if (!impl_->ppu.boot_logo_hold || impl_->mem.boot_rom_enabled) return;
-
-	// Super Game Boy Color runs its own cover - SgbcBootCover in sgbc.cpp.
-	if (impl_->sgbc && impl_->ppu.cgb)
-	{
-		impl_->ppu.boot_logo_hold = impl_->sgbc_cover.Hold(impl_->ppu);
-		return;
-	}
-
-	const uint8_t *raw = impl_->ppu.raw_framebuffer;
-	bool    flat    = true;
-	uint8_t present = 0;
-	for (size_t i = 0; i < sizeof impl_->boot_logo_ref; ++i)
-	{
-		present |= static_cast<uint8_t>(1u << (raw[i] & 3));
-		if (raw[i] != raw[0]) flat = false;
-	}
-	// raw is pre-palette; what matters is the displayed result. With BGP
-	// mapping every present shade to the lightest color the frame shows as
-	// blank white no matter what the cart staged underneath it (Test Drive
-	// Off-Road 3 builds its first screen under BGP=00 cover).
-	bool disp_white = true;
-	for (int s = 0; s < 4; ++s)
-		if (((present >> s) & 1) && ((impl_->ppu.bgp >> (2 * s)) & 3) != 0)
-			disp_white = false;
-
-	if (!impl_->boot_logo_ref_valid)
-	{
-		if (disp_white) return;   // white staging: wait for the picture
-		if (flat)
-		{
-			// A visible flat frame is the cart's own (fade-in lead);
-			// covering it would repaint it.
-			impl_->ppu.boot_logo_hold = false;
-			return;
-		}
-		std::memcpy(impl_->boot_logo_ref, raw, sizeof impl_->boot_logo_ref);
-		impl_->boot_logo_ref_valid = true;
-		return;
-	}
-
-	if (std::memcmp(raw, impl_->boot_logo_ref, sizeof impl_->boot_logo_ref) != 0 &&
-	    !disp_white)
-		impl_->ppu.boot_logo_hold = false;
+	impl_->ppu.boot_logo_hold = impl_->sgbc_cover.Hold(impl_->ppu);
 }
 
 void Emulator::SetSerialSink(void (*fn)(void *user, uint8_t byte), void *user)
@@ -3037,7 +2905,8 @@ void Emulator::OverlayCgbScreen(uint16_t *dest, uint32_t pitch_pixels)
 // landed, black/blank fill it.
 void Emulator::OverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels)
 {
-	if (!impl_->has_rom || !dest) return;
+	// Plain SGB: the BIOS's own MASK_EN handles the pane (GB power-cycled per release).
+	if (!impl_->has_rom || !dest || !impl_->sgbc) return;
 
 	const uint32_t ORIGIN_X = 48, ORIGIN_Y = 39;
 	const int width = (IPPU.RenderedScreenWidth > 0) ? IPPU.RenderedScreenWidth : SNES_WIDTH;
@@ -3241,18 +3110,23 @@ void Emulator::SetJoypad(uint16_t snes_pad_mask)
 //   $30 — latches the armed bit
 // Same rules as PacketFeed (sgb_packet.cpp): the last pulse before $30 wins,
 // and the write that ends a reset carries no bit (cpp/sgb-ext-test).
-// Bits accumulate LSB-first into a byte, then into assembly_buf[0..15]
-// which is pushed onto the packet queue on the 16th byte.
+// Bits accumulate LSB-first into a byte, which lands in the $7000 buffer as it
+// completes; the 16th raises $6002, and a reset pulse drops an unread packet.
 // Every rising edge on P15 (bit 5) advances the MLT_REQ player index while an
 // even player count is active - packet 1-bits included (samesuite sgb/).
-static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
+static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t &lock, uint8_t value)
 {
 	const uint8_t sel      = value & 0x30;
 	const uint8_t prev_sel = icd.input_value & 0x30;
 
-	const bool p15_rose = !(prev_sel & 0x20) && (sel & 0x20);
-	if (p15_rose && icd.mlt_players && (icd.mlt_players & 1) == 0)
-		icd.input_index = static_cast<uint8_t>((icd.input_index + 1) & (icd.mlt_players - 1));
+	// bsnes ICD::joypWrite: both lines high advances the ID once per unlock;
+	// P14 high with P15 low flips the lock.
+	if (sel == 0x30 && !lock)
+	{
+		lock = 1;
+		icd.input_index = static_cast<uint8_t>((icd.input_index + 1) & IcdMltMask(icd.mlt_players));
+	}
+	if (sel == 0x10) lock ^= 1;
 	icd.input_value = value;
 
 	if (sel == 0x00)
@@ -3265,6 +3139,8 @@ static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
 			icd.packet_bit       = 0;
 			icd.bit_accumulator  = 0;
 			icd.pkt_pending      = Emulator::Impl::Icd2::kPktReset;
+			// The new packet overwrites the buffer, so an unread one is gone.
+			icd.queue_count      = 0;
 		}
 		return;
 	}
@@ -3291,7 +3167,11 @@ static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
 	if (icd.packet_bit >= 8)
 	{
 		if (icd.packet_byte < 16)
+		{
 			icd.assembly_buf[icd.packet_byte] = static_cast<uint8_t>(icd.bit_accumulator);
+			// Each byte lands in the buffer as it arrives (Mesen).
+			icd.r7000_buf[icd.packet_byte] = icd.assembly_buf[icd.packet_byte];
+		}
 		icd.packet_byte++;
 		icd.packet_bit      = 0;
 		icd.bit_accumulator = 0;
@@ -3299,11 +3179,8 @@ static void IcdFeedJoypad(Emulator::Impl::Icd2 &icd, uint8_t value)
 		if (icd.packet_byte >= 16)
 		{
 			icd.in_packet = false;
-			// Push the fully-assembled packet onto the queue. Counter
-			// bookkeeping (packets_received, last_cmd_ids, f1_packets)
-			// is handled inside IcdPushQueue for consistency with the
-			// synth-staging path.
-			IcdPushQueue(icd, icd.assembly_buf);
+			// Counter bookkeeping (packets_received, last_cmd_ids, f1_packets) is in IcdLatchPacket.
+			IcdLatchPacket(icd, icd.assembly_buf);
 		}
 	}
 }
@@ -3347,27 +3224,15 @@ void Emulator::OnJoyserWrite(uint8_t value)
 	// BIOS-mode path — independent decoder that parks completed packets
 	// in the single-slot ICD2 FIFO. Harmless when no BIOS is running
 	// (nothing reads $7000-$700F).
-	const uint32_t pre_received = impl_->icd2.packets_received;
-	IcdFeedJoypad(impl_->icd2, value);
+	const uint32_t pkts = impl_->icd2.packets_received;
+	IcdFeedJoypad(impl_->icd2, impl_->icd_joyp_lock, value);
+	// An in-process seat has no SNES BIOS to answer its MLT_REQ with a $6003 write,
+	// so it answers as that BIOS would.
+	if (impl_->icd2.packets_received != pkts && this != &Instance() &&
+	    (impl_->icd2.r7000_buf[0] >> 3) == 0x11)
+		IcdSetMltMode(impl_->icd2, static_cast<uint8_t>(impl_->icd2.r7000_buf[1] & 3));
 
 	impl_->joypad.sgb_index = impl_->icd2.input_index;
-	// If a new packet completed (packets_received grew), and our cache
-	// isn't full yet, append a copy. The SGB2 BIOS's handshake validator
-	// at $B119 compares each packet's byte 1 across TWO separate GB
-	// resets ($7E:1718 is the reference, populated by $BFD3 from a prior
-	// iteration's packets). If our re-booted GB produces byte-different
-	// packets, validation fails and $02FA=1 triggers cart error. Caching
-	// the first 6 real packets lets us re-queue byte-identical copies on
-	// subsequent releases, guaranteeing the BIOS's byte-1 reference check
-	// passes.
-	if (impl_->icd2.packets_received > pre_received &&
-	    impl_->cached_count < 6)
-	{
-		std::memcpy(impl_->cached_packets[impl_->cached_count],
-		            impl_->icd2.assembly_buf, 16);
-		impl_->cached_count++;
-		if (impl_->cached_count == 6) impl_->cache_valid = true;
-	}
 }
 
 void Emulator::OnSgbCommandInternal(uint8_t cmd, const uint8_t *data, uint32_t len)
@@ -3467,7 +3332,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v16: add the Bardigun card reader's.
 // v17: add the HuC3/TAMA5 cartridge speaker's tone in progress.
 // v18: add the HuC3 melody in progress.
-constexpr uint32_t SGB_STATE_VERSION = 18;
+// v19: add the ICD2 joypad-ID lock (bsnes joypLock); older states load it at power-on 1.
+constexpr uint32_t SGB_STATE_VERSION = 19;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3596,10 +3462,7 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 	//   mem.serial_control — bit 7 = transfer-in-progress; games waiting
 	//     on $FF02 would otherwise hang after a load.
 	//   cache_valid / cached_packets / cached_count / replays_done —
-	//     ColdReset clears these. If the SNES BIOS ever toggles $6003
-	//     0→1 again (some game code does), the !cache_valid branch in
-	//     the ICD2 write handler calls Reset() and PrimeBIOSHandshake,
-	//     wiping our just-restored GB state.
+	//     unused since every $6003 release power-cycles the GB; layout only.
 	//   border_capture / border_fade_frames — in-flight CHR/PCT_TRN
 	//     capture + BIOS-mode border crossfade. Visual only but cheap.
 	//   boot_handoff_* / handoff_frames — first 30 frames after the
@@ -3858,6 +3721,12 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		IoField(c, impl.apu.speaker.transpose);
 		IoField(c, impl.apu.speaker.length);
 	}
+
+	// v19: the ICD2 joypad-ID lock.
+	if (c.version >= 19)
+		IoField(c, impl.icd_joyp_lock);
+	else if (c.mode == IoMode::Load)
+		impl.icd_joyp_lock = 1;
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep

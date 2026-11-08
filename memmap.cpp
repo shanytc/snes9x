@@ -6213,6 +6213,11 @@ void CMemory::ApplyROMFixes (void)
 		printf("Applied zeroed-WRAM hack.\n");
 	}
 
+	// Super Game Boy BIOS: WRAM powers up zeroed, as bsnes (entropy off) and Mesen run it; the $55
+	// fill showed as pane stripes in a buffer the BIOS never fills (GB Aging Cartridge's LCD-off).
+	if (strncmp(ROMName, "Super GAMEBOY", 13) == 0)
+		SNESGameFixes.RAMInitialValue = 0x00;
+
 	// Gamars Puzzle (Unl): a LoROM board with its battery RAM at $30-$3F:6000,
 	// HiROM-style; the boot loops until the signature it writes at $31:6000 sticks.
 	if (ROMCRC32 == 0xF36B620D && !HiROM && SRAMSize)

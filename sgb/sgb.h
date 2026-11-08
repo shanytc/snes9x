@@ -48,15 +48,13 @@ public:
 	bool Init();
 	void Deinit();
 	void Reset();
-	// Like Reset() but ALSO clears the BIOS-handshake packet cache and
-	// counters. Use for SNES-side reset / new ROM load — Reset() alone
-	// preserves the cache, which is correct for in-game $6003 0→1 GB
-	// resets but wrong when the user invokes File→Reset.
+	// Power-on for an SNES-side reset / new ROM load: Reset() plus the
+	// link-cart patch state and the cart speaker.
 	void ColdReset();
 
 	// User-facing soft reset: warm Reset() that skips the staged boot-ROM
 	// overlay (game restarts at $0100 with run-mode handoff registers) and
-	// preserves the handshake cache, handoff state and the ICD2 $6003
+	// preserves the handoff state and the ICD2 $6003
 	// control latch, so a live SGB BIOS session keeps running without
 	// replaying the splash. Returns false (no reset performed) in BIOS
 	// mode while the boot handshake hasn't completed yet — the caller

@@ -6,11 +6,15 @@
 
 // Example scripts every port's editor offers under Help > Examples.
 
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <vector>
 #include "lua/lua_engine.h"
 
 static const S9xLuaExample	examples[] =
 {
-	{ "Frame HUD", "frame_hud.lua", R"lua(-- Frame HUD: frame and lag counters in the corner of the screen.
+	{ "Basics", "Frame HUD", "frame_hud.lua", R"lua(-- Frame HUD: frame and lag counters in the corner of the screen.
 
 while true do
   local lag = emu.is_lag_frame() and "LAG" or ""
@@ -19,7 +23,7 @@ while true do
 end
 )lua" },
 
-	{ "FPS Counter", "fps_counter.lua", R"lua(-- FPS counter: frames emulated per real second, the speed against the
+	{ "Timing", "FPS Counter", "fps_counter.lua", R"lua(-- FPS counter: frames emulated per real second, the speed against the
 -- console's own rate, and a graph of how long each frame took (the line
 -- is a full-speed frame). Green at full speed, yellow under 95%, red under 80%.
 
@@ -55,7 +59,7 @@ while true do
 end
 )lua" },
 
-	{ "Input Display", "input_display.lua", R"lua(-- Input display: the buttons player 1's game saw last frame, on an outline
+	{ "Input", "Input Display", "input_display.lua", R"lua(-- Input display: the buttons player 1's game saw last frame, on an outline
 -- of the pad. Pressed buttons light up.
 
 local X, Y, S = 4, 182, 1           -- the pad's top left; S = 2 doubles its size
@@ -160,7 +164,7 @@ while true do
 end
 )lua" },
 
-	{ "Memory Watch", "memory_watch.lua", R"lua(-- Memory watch: WRAM values on screen, flashing yellow when they change.
+	{ "Memory", "Memory Watch", "memory_watch.lua", R"lua(-- Memory watch: WRAM values on screen, flashing yellow when they change.
 -- Put the addresses your game uses in the list.
 
 local watches = {
@@ -185,7 +189,7 @@ while true do
 end
 )lua" },
 
-	{ "Keep a Value", "keep_value.lua", R"lua(-- Keep a value: stop a WRAM counter (health, lives, timer) from dropping.
+	{ "Memory", "Keep a Value", "keep_value.lua", R"lua(-- Keep a value: stop a WRAM counter (health, lives, timer) from dropping.
 -- HEALTH is the counter's WRAM offset in your game, MAX its full value.
 
 local HEALTH = 0x06C0
@@ -203,7 +207,7 @@ while true do
 end
 )lua" },
 
-	{ "Write Logger", "write_logger.lua", R"lua(-- Write logger: report every CPU write to a WRAM address, with the code
+	{ "Debugging", "Write Logger", "write_logger.lua", R"lua(-- Write logger: report every CPU write to a WRAM address, with the code
 -- that made it. Handy for finding the routine that changes a value.
 
 local OFFSET = 0x0100
@@ -216,7 +220,7 @@ end)
 -- Nothing else to do: the hook keeps the script alive until you stop it.
 )lua" },
 
-	{ "Autofire", "autofire.lua", R"lua(-- Autofire: holding B on player 1 presses and releases it every 4 frames.
+	{ "Input", "Autofire", "autofire.lua", R"lua(-- Autofire: holding B on player 1 presses and releases it every 4 frames.
 
 local PERIOD = 4
 
@@ -228,7 +232,7 @@ while true do
 end
 )lua" },
 
-	{ "Savestate Loop", "savestate_loop.lua", R"lua(-- Savestate loop: replay the next two seconds over and over, as a
+	{ "Savestates", "Savestate Loop", "savestate_loop.lua", R"lua(-- Savestate loop: replay the next two seconds over and over, as a
 -- practice tool. Stop the script to carry on from wherever you are.
 
 local LENGTH = 120
@@ -245,7 +249,7 @@ while true do
 end
 )lua" },
 
-	{ "Paused Overlay", "paused_overlay.lua", R"lua(-- Paused overlay: scripts keep running while emulation is paused.
+	{ "Basics", "Paused Overlay", "paused_overlay.lua", R"lua(-- Paused overlay: scripts keep running while emulation is paused.
 -- emu.yield() returns on every frame and, while paused, on idle ticks.
 
 local ticks = 0
@@ -263,7 +267,7 @@ while true do
 end
 )lua" },
 
-	{ "Sprite Boxes", "sprite_boxes.lua", R"lua(-- Sprite boxes: outline every sprite on screen, with its OAM number.
+	{ "Graphics & PPU", "Sprite Boxes", "sprite_boxes.lua", R"lua(-- Sprite boxes: outline every sprite on screen, with its OAM number.
 -- Colours show priority: blue 0, green 1, yellow 2, red 3.
 
 -- The {small, large} sprite sizes for each OBSEL setting.
@@ -294,7 +298,7 @@ while true do
 end
 )lua" },
 
-	{ "Palette Viewer", "palette_viewer.lua", R"lua(-- Palette viewer: the 256 colours in CGRAM, live. The top eight rows are
+	{ "Graphics & PPU", "Palette Viewer", "palette_viewer.lua", R"lua(-- Palette viewer: the 256 colours in CGRAM, live. The top eight rows are
 -- the background palettes, the bottom eight the sprite palettes.
 -- Hold Select to hide it.
 
@@ -316,7 +320,7 @@ while true do
 end
 )lua" },
 
-	{ "RAM Heat Map", "ram_heat_map.lua", R"lua(-- RAM heat map: the first 8 KB of WRAM as a 128x64 grid, one pixel per
+	{ "Memory", "RAM Heat Map", "ram_heat_map.lua", R"lua(-- RAM heat map: the first 8 KB of WRAM as a 128x64 grid, one pixel per
 -- byte. A byte flashes yellow when it changes and cools to red, then fades:
 -- watch which variables the game is busy with.
 
@@ -342,7 +346,7 @@ while true do
 end
 )lua" },
 
-	{ "Input History", "input_history.lua", R"lua(-- Input history: player 1's buttons over the last frames, newest at the
+	{ "Input", "Input History", "input_history.lua", R"lua(-- Input history: player 1's buttons over the last frames, newest at the
 -- bottom, like a piano roll. A row that repeats is counted, not repeated.
 
 local KEYS = { "b", "y", "select", "start", "up", "down", "left", "right", "a", "x", "l", "r" }
@@ -379,7 +383,7 @@ while true do
 end
 )lua" },
 
-	{ "Instant Rewind", "instant_rewind.lua", R"lua(-- Instant rewind: hold Select and L to go back in time, up to ten seconds.
+	{ "Savestates", "Instant Rewind", "instant_rewind.lua", R"lua(-- Instant rewind: hold Select and L to go back in time, up to ten seconds.
 -- A snapshot is kept every 10 frames; let go to play on from there.
 
 local EVERY, KEEP = 10, 60
@@ -399,7 +403,7 @@ while true do
 end
 )lua" },
 
-	{ "Cheat Finder", "cheat_finder.lua", R"lua(-- Cheat finder: narrow WRAM down to the byte holding a value such as lives
+	{ "Memory", "Cheat Finder", "cheat_finder.lua", R"lua(-- Cheat finder: narrow WRAM down to the byte holding a value such as lives
 -- or health. Hold Select (the game won't see it) and press:
 --   L      start over: every byte is a candidate
 --   Up     keep the bytes that went up since the last check
@@ -459,7 +463,7 @@ while true do
 end
 )lua" },
 
-	{ "Speedrun Timer", "speedrun_timer.lua", R"lua(-- Speedrun timer: game time counted in frames, so it stays exact when the
+	{ "Timing", "Speedrun Timer", "speedrun_timer.lua", R"lua(-- Speedrun timer: game time counted in frames, so it stays exact when the
 -- emulator slows down or fast-forwards. Hold Select and press R to split,
 -- Select and L to reset.
 
@@ -492,7 +496,7 @@ while true do
 end
 )lua" },
 
-	{ "Value Graph", "value_graph.lua", R"lua(-- Value graph: a WRAM value over the last 200 frames. OFFSET is set for
+	{ "Memory", "Value Graph", "value_graph.lua", R"lua(-- Value graph: a WRAM value over the last 200 frames. OFFSET is set for
 -- Mario's horizontal speed in Super Mario World; use one from your game
 -- (SIGNED for values that go below zero).
 
@@ -521,7 +525,7 @@ while true do
 end
 )lua" },
 
-	{ "Routine Profiler", "routine_profiler.lua", R"lua(-- Routine profiler: count the instructions the CPU runs for one second,
+	{ "Debugging", "Routine Profiler", "routine_profiler.lua", R"lua(-- Routine profiler: count the instructions the CPU runs for one second,
 -- then list the busiest addresses - the game's hottest loops and routines.
 -- The exec hook calls Lua for every instruction, so the game crawls while
 -- it measures.
@@ -545,7 +549,7 @@ for i = 1, math.min(20, #list) do
 end
 )lua" },
 
-	{ "Drawing Showcase", "drawing_showcase.lua", R"lua(-- Drawing showcase: what the gui module can draw, animated.
+	{ "Basics", "Drawing Showcase", "drawing_showcase.lua", R"lua(-- Drawing showcase: what the gui module can draw, animated.
 
 local t = 0
 while true do
@@ -576,7 +580,7 @@ while true do
 end
 )lua" },
 
-	{ "Hex Viewer", "hex_viewer.lua", R"lua(-- Hex viewer: 16 rows of WRAM in hex; bytes flash red when they change.
+	{ "Memory", "Hex Viewer", "hex_viewer.lua", R"lua(-- Hex viewer: 16 rows of WRAM in hex; bytes flash red when they change.
 -- Hold Select (the game won't see it) and press Up/Down to scroll a row,
 -- Left/Right a page, L or R to jump between banks $7E and $7F.
 
@@ -621,7 +625,7 @@ while true do
 end
 )lua" },
 
-	{ "VRAM Tile Viewer", "vram_tiles.lua", R"lua(-- VRAM tile viewer: 256 tiles of VRAM decoded as 4bpp graphics, coloured
+	{ "Graphics & PPU", "VRAM Tile Viewer", "vram_tiles.lua", R"lua(-- VRAM tile viewer: 256 tiles of VRAM decoded as 4bpp graphics, coloured
 -- with one of the 16 palettes (8 to 15 are the sprites'). Hold Select and
 -- press Up/Down to page through VRAM, L/R to change the palette. Decoding
 -- in Lua takes a while, so it redraws twice a second or when you change it.
@@ -680,7 +684,7 @@ while true do
 end
 )lua" },
 
-	{ "PPU State", "ppu_state.lua", R"lua(-- PPU state: the background mode, which layers make the main and sub
+	{ "Graphics & PPU", "PPU State", "ppu_state.lua", R"lua(-- PPU state: the background mode, which layers make the main and sub
 -- screens, colour math, windows, and where each background's map and tiles
 -- sit in VRAM. The registers are write-only on the SNES: these are the
 -- values the game last wrote.
@@ -723,7 +727,7 @@ while true do
 end
 )lua" },
 
-	{ "Layer Visibility", "layer_visibility.lua", R"lua(-- Layer visibility: every layer of the picture shown but one, and a panel
+	{ "Graphics & PPU", "Layer Visibility", "layer_visibility.lua", R"lua(-- Layer visibility: every layer of the picture shown but one, and a panel
 -- listing them. A SNES game has bg1-bg4, sprites and windows (the clipping
 -- windows); a Game Boy or Game Boy Color game has gb_bg, gb_window and
 -- gb_sprites; a Game Boy game under the SGB BIOS has both sets.
@@ -773,7 +777,7 @@ while true do
 end
 )lua" },
 
-	{ "DMA Inspector", "dma_inspector.lua", R"lua(-- DMA inspector: the eight DMA channels as the game last set them up. The
+	{ "Graphics & PPU", "DMA Inspector", "dma_inspector.lua", R"lua(-- DMA inspector: the eight DMA channels as the game last set them up. The
 -- HDMA ones, which feed raster effects line by line, are yellow, with the
 -- PPU register each channel writes. Handy for working out wavy or gradient
 -- effects.
@@ -808,7 +812,7 @@ while true do
 end
 )lua" },
 
-	{ "Color Picker", "color_picker.lua", R"lua(-- Color picker: aim the crosshair with Select and the D-pad (add B to move
+	{ "Graphics & PPU", "Color Picker", "color_picker.lua", R"lua(-- Color picker: aim the crosshair with Select and the D-pad (add B to move
 -- faster). Shows the colour under it, its SNES value, and which CGRAM
 -- entries hold that colour: the palette slots to edit to recolour it.
 -- Colour math and fades change what's on screen, so those may not match.
@@ -858,7 +862,7 @@ while true do
 end
 )lua" },
 
-	{ "Memory Breakpoint", "memory_breakpoint.lua", R"lua(-- Memory breakpoint: pause the emulator when the game writes to an address
+	{ "Debugging", "Memory Breakpoint", "memory_breakpoint.lua", R"lua(-- Memory breakpoint: pause the emulator when the game writes to an address
 -- (and, if VALUE is set, only when it writes that value), and print the
 -- CPU's registers at the write. Unpause and it keeps watching.
 -- ADDRESS is set for the lives counter in Super Mario World.
@@ -877,7 +881,7 @@ end)
 print(string.format("Watching $%06X for writes%s", ADDRESS, VALUE and string.format(" of $%02X", VALUE) or ""))
 )lua" },
 
-	{ "Trace Logger", "trace_logger.lua", R"lua(-- Trace logger: write every instruction the CPU runs over FRAMES frames to
+	{ "Debugging", "Trace Logger", "trace_logger.lua", R"lua(-- Trace logger: write every instruction the CPU runs over FRAMES frames to
 -- trace.txt in the script's folder: address, the bytes there and the
 -- registers before it runs. The game crawls while it logs, and a frame
 -- comes to a few megabytes.
@@ -901,7 +905,7 @@ file:close()
 print(string.format("%d instructions written to %s%s", count, script.dir(), NAME))
 )lua" },
 
-	{ "SMW Info", "smw_info.lua", R"lua(-- Super Mario World: Mario's position, speed and P-meter, and a box on
+	{ "Game-specific", "SMW Info", "smw_info.lua", R"lua(-- Super Mario World: Mario's position, speed and P-meter, and a box on
 -- every active sprite with its slot, sprite number and state. Addresses
 -- are from the SMW Central RAM map; any game's RAM map works the same way.
 
@@ -943,10 +947,44 @@ end
 )lua" }
 };
 
+// The menu's group order; an unlisted group goes last.
+static const char * const	groups[] =
+{
+	"Basics", "Timing", "Input", "Savestates", "Memory", "Debugging", "Graphics & PPU", "Game-specific"
+};
+
+static size_t GroupIndex (const char *group)
+{
+	size_t n = sizeof(groups) / sizeof(groups[0]), i = 0;
+	while (i < n && strcmp(groups[i], group))
+		i++;
+	return i;
+}
+
+// Sorted once by group, then A-Z by title, so the menu never depends on the table's order.
 const S9xLuaExample *S9xLuaExamples (size_t *count)
 {
-	*count = sizeof(examples) / sizeof(examples[0]);
-	return examples;
+	static const std::vector<S9xLuaExample> sorted = []
+	{
+		std::vector<S9xLuaExample> list(std::begin(examples), std::end(examples));
+		std::sort(list.begin(), list.end(), [](const S9xLuaExample &a, const S9xLuaExample &b)
+		{
+			size_t ga = GroupIndex(a.group), gb = GroupIndex(b.group);
+			if (ga != gb)
+				return ga < gb;
+			if (int c = strcmp(a.group, b.group))
+				return c < 0;
+			const char *x = a.title, *y = b.title;
+			return std::lexicographical_compare(x, x + strlen(x), y, y + strlen(y), [](char c, char d)
+			{
+				return tolower((unsigned char) c) < tolower((unsigned char) d);
+			});
+		});
+		return list;
+	}();
+
+	*count = sorted.size();
+	return sorted.data();
 }
 
 const char *S9xLuaNewScriptTemplate (void)

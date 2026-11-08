@@ -41,6 +41,7 @@
 #include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <cstring>
 
 #include "common/audio/s9x_sound_driver.hpp"
 #include "lua/lua_engine.h"
@@ -1095,10 +1096,13 @@ void LuaScriptWindow::populateExamples()
 {
     size_t count;
     const S9xLuaExample *examples = S9xLuaExamples(&count);
+    QMenu *group = nullptr;
     for (size_t i = 0; i < count; i++)
     {
         const S9xLuaExample &example = examples[i];
-        examples_menu->addAction(tr(example.title), this, [this, &example] {
+        if (!i || strcmp(example.group, examples[i - 1].group))
+            group = examples_menu->addMenu(tr(example.group).replace('&', "&&"));
+        group->addAction(tr(example.title), this, [this, &example] {
             addDocument(example.code, QString(), example.filename);
         });
     }

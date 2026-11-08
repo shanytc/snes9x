@@ -1026,6 +1026,10 @@
 #define ID_EMULATION_GB_LINK_RESET_ON_UNLINK 40331
 #define ID_EMULATION_GB_LINK_SEATMODEL0 40250
 #define ID_EMULATION_GB_LINK_SEATMODEL_LAST 40329
+/* A seat window's Unlink / Relink and Unlink All Except Me: base + player (2..15) */
+#define ID_EMULATION_GB_SEAT_LINK0      40345
+#define ID_EMULATION_GB_SEAT_ONLY0      40361
+#define ID_EMULATION_GB_SEAT_RELINK_ALL 40377
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

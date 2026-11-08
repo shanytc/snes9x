@@ -3979,6 +3979,11 @@ bool g_split_hub = false;
 // A player who got up mid-game: their Game Boy stays on the cable, unattended,
 // until the game lets go of the link (S9xSGBSplitReleaseGhosts).
 bool g_split_ghost[SGB_MAX_LINK_PLAYERS - 1] = {};
+// A seated player who unlinked: their Game Boy plays on in their window, off the
+// cable and out of infrared range. Mid-game its cable end stays plugged in, as a
+// ghost's does, until the game lets go of the link (g_split_off_wire).
+bool g_split_unlinked[SGB_MAX_LINK_PLAYERS - 1] = {};
+bool g_split_off_wire[SGB_MAX_LINK_PLAYERS - 1] = {};
 bool g_ir_facing = false;  // players 1 and 2 face each other's infrared port
 bool g_kiss_facing = false; // ... and each other's HuC1/HuC3 cart LED (GB KISS)
 
@@ -4191,14 +4196,14 @@ bool SplitPosExternal(int i)
 	return i >= 1 && SeatExternal(i - 1);
 }
 
-// Player 1 and the next player at the table face each other while Infra-Red
-// or GB KISS is on.
+// Player 1 and the next linked player at the table face each other while
+// Infra-Red or GB KISS is on: one partner at a time, as one GBC faces another.
 void SplitAttachIr(void)
 {
 	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
 	const int n = g_split_players >= 2 ? SplitCollect(cs) : 0;
 	int j = 1;
-	while (j < n && !cs[j] && !SplitPosExternal(j)) ++j;   // past empty places
+	while (j < n && ((!cs[j] && !SplitPosExternal(j)) || g_split_unlinked[j - 1])) ++j;   // past empty and unlinked places
 	SGB::IrSetMedia(g_ir_facing, g_kiss_facing);
 	if (!(g_ir_facing || g_kiss_facing) || j >= n || !cs[0] || !cs[j] || SplitPosExternal(j))
 	{
@@ -4230,6 +4235,7 @@ void SplitAttachLink(bool fresh)
 			if (SplitPosExternal(i)) { SGB::SerialSplitDetach(); return; }
 			continue;   // a seat that left: an empty port
 		}
+		if (i >= 1 && g_split_off_wire[i - 1]) continue;   // unlinked: an empty port
 		ss[i] = &cs[i]->DebugImpl()->serial;
 		mm[i] = &cs[i]->DebugImpl()->mem;
 		++present;
@@ -5226,6 +5232,7 @@ void S9xSGBSplitStop(const char *battery_base_path)
 		g_split_cores[k].reset();
 		g_split_external_core[k] = nullptr;   // the flag stays: it is the frontend's pick
 		g_split_ghost[k] = false;
+		g_split_unlinked[k] = g_split_off_wire[k] = false;
 	}
 	SplitDropSnaps();
 	g_split_players = 0;
@@ -5291,6 +5298,8 @@ static void SplitClearPlace(int player)
 	g_seat_head_start_due[k] = false;
 	g_seat_own_mlt[k]     = false;
 	g_seat_mlt_pkts[k]    = 0;
+	g_split_unlinked[k]   = false;
+	g_split_off_wire[k]   = false;
 }
 
 bool S9xSGBSplitAddSeat(int player)
@@ -5345,7 +5354,7 @@ bool S9xSGBSplitRemoveSeat(int player)
 
 	// Mid-game the others are waiting on its bytes: pulling it would stall
 	// them, so it plays on unattended until the game lets go of the link.
-	if (SGB::SerialSplitInUse())
+	if (SGB::SerialSplitInUse() && !g_split_off_wire[k])
 	{
 		g_split_ghost[k] = true;
 		if (g_split_cores[k]) g_split_cores[k]->SetJoypad(0);
@@ -5358,8 +5367,49 @@ bool S9xSGBSplitRemoveSeat(int player)
 	return true;
 }
 
+// ---- Unlinking without getting up ------------------------------------------
+
+bool S9xSGBSplitSeatLinked(int player)
+{
+	return S9xSGBSplitSeatPresent(player) && !g_split_unlinked[player - 2];
+}
+
+int S9xSGBSplitUnlinkedSeats(void)
+{
+	int n = 0;
+	for (int p = 2; p <= g_split_players && p <= SGB_MAX_LINK_PLAYERS; ++p)
+		if (S9xSGBSplitSeatPresent(p) && g_split_unlinked[p - 2]) ++n;
+	return n;
+}
+
+// The player stays seated and their Game Boy plays on, no reset. Unlinked, it
+// leaves infrared at once and the cable now or, mid-game, once the game lets go
+// (S9xSGBSplitReleaseGhosts); relinked, it is back on both.
+bool S9xSGBSplitSetSeatLinked(int player, bool linked)
+{
+	const int k = player - 2;
+	if (!S9xSGBSplitSeatPresent(player) || g_split_unlinked[k] == !linked) return false;
+	g_split_unlinked[k] = !linked;
+	if (linked || !SGB::SerialSplitInUse()) g_split_off_wire[k] = !linked;
+	SplitAttachLink(false);   // the others play on
+	return true;
+}
+
+// Unlinked seats still on the wire come off it once the game lets go.
+static void SplitSettleUnlinks(void)
+{
+	bool due = false;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		if (g_split_unlinked[k] && !g_split_off_wire[k]) due = true;
+	if (!due || SGB::SerialSplitInUse()) return;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		if (g_split_unlinked[k]) g_split_off_wire[k] = true;
+	SplitAttachLink(false);
+}
+
 unsigned S9xSGBSplitReleaseGhosts(void)
 {
+	SplitSettleUnlinks();
 	if (!S9xSGBSplitGhosts() || SGB::SerialSplitInUse()) return 0;
 	unsigned gone = 0;
 	for (int k = SGB_MAX_LINK_PLAYERS - 2; k >= 0; --k)

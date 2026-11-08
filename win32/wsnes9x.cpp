@@ -183,6 +183,8 @@ static bool8 GBSeatScreenshotToClipboard(int width, int height);
 static void  GBSeatMachinesCreate(int players, unsigned places = 0);
 static void  WinGBTableResize(int want);
 static void  WinGBLinkPlayerItem(int n);
+static void  WinGBSeatSetLink(int p, bool linked);
+static void  WinGBSeatLinkOnly(int keep);
 static bool  GBTableSeated();
 static void  WinGBSeatClosed(int player, LONG table);
 static void  WinGBTableShowNews();
@@ -2804,6 +2806,24 @@ LRESULT CALLBACK WinProc(
 		else if (cmd_id >= ID_FILE_LOAD0 && cmd_id < ID_FILE_LOAD0 + NUM_SAVE_BANKS * SAVE_SLOTS_PER_BANK)
 		{
 			FreezeUnfreezeSlot(cmd_id - ID_FILE_LOAD0, FALSE);
+			break;
+		}
+		else if (cmd_id >= ID_EMULATION_GB_SEAT_LINK0 + 2 &&
+		         cmd_id <= ID_EMULATION_GB_SEAT_LINK0 + SGB_MAX_LINK_PLAYERS)
+		{
+			const int p = cmd_id - ID_EMULATION_GB_SEAT_LINK0;
+			WinGBSeatSetLink (p, !S9xSGBSplitSeatLinked (p));
+			break;
+		}
+		else if (cmd_id >= ID_EMULATION_GB_SEAT_ONLY0 + 2 &&
+		         cmd_id <= ID_EMULATION_GB_SEAT_ONLY0 + SGB_MAX_LINK_PLAYERS)
+		{
+			WinGBSeatLinkOnly (cmd_id - ID_EMULATION_GB_SEAT_ONLY0);
+			break;
+		}
+		else if (cmd_id == ID_EMULATION_GB_SEAT_RELINK_ALL)
+		{
+			WinGBSeatLinkOnly (0);
 			break;
 		}
 		else if (cmd_id >= ID_EMULATION_GB_LINK_SEATMODEL0 &&
@@ -16427,6 +16447,7 @@ static volatile LONG GBSeatTable  = 0;
 // Thread messages to the render thread: open or close seat wParam's window.
 #define GBSEAT_TM_OPEN  (WM_APP + 10)
 #define GBSEAT_TM_CLOSE (WM_APP + 11)
+#define GBSEAT_TM_RETITLE (WM_APP + 12)
 
 // Render thread only, from here down.
 static HDC     GBSeatMemDC   = NULL;
@@ -16641,6 +16662,21 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 
 			HMENU menu = WinGBBuildSeatModelMenu (k + 2);
 			if (!menu) return 0;
+			// This player's link, without getting up: off the cable and infrared, or back.
+			if (S9xSGBSplitSeatPresent (k + 2))
+			{
+				const bool linked = S9xSGBSplitSeatLinked (k + 2);
+				int others = 0;   // linked players besides this one and the master
+				for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
+					if (p != k + 2 && S9xSGBSplitSeatLinked (p)) others++;
+				AppendMenu (menu, MF_SEPARATOR, 0, NULL);
+				AppendMenu (menu, MF_STRING, ID_EMULATION_GB_SEAT_LINK0 + k + 2,
+				            linked ? TEXT("Unlink") : TEXT("Relink"));
+				AppendMenu (menu, MF_STRING | (others || !linked ? 0 : MF_GRAYED),
+				            ID_EMULATION_GB_SEAT_ONLY0 + k + 2, TEXT("Unlink All Except Me"));
+				AppendMenu (menu, MF_STRING | (S9xSGBSplitUnlinkedSeats () ? 0 : MF_GRAYED),
+				            ID_EMULATION_GB_SEAT_RELINK_ALL, TEXT("Relink All"));
+			}
 			AppendMenu (menu, MF_SEPARATOR, 0, NULL);
 			AppendMenu (menu, MF_STRING, ID_SAVESCREENSHOT_CLIPBOARD, TEXT("Copy Screenshot to Clipboard"));
 			SetForegroundWindow (hWnd);
@@ -16673,6 +16709,28 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 	return DefWindowProc (hWnd, msg, wParam, lParam);
 }
 
+// Seat k's title: its player, console (or Other Game) and whether it is unlinked.
+static void GBSeatWindowTitle (int k, TCHAR *title, int cap)
+{
+	uint8 pick = S9xSGBSplitGetSeatModel (k + 2);
+	if (GBSeatModelIsMachine (GBSeatModelEffective (k + 2))) pick = GBSeatModelEffective (k + 2);
+	const TCHAR *off = S9xSGBSplitSeatPresent (k + 2) && !S9xSGBSplitSeatLinked (k + 2)
+	                 ? TEXT(" (unlinked)") : TEXT("");
+	if (k == 0 && GBLinkOtherRom[0])
+	{
+		TCHAR game[_MAX_FNAME];
+		_tsplitpath (GBLinkOtherRom, NULL, NULL, game, NULL);
+		_sntprintf (title, cap, TEXT("Player 2 - %s (%s)%s"), game,
+		            (TCHAR *)_tFromChar (GBSeatModelName (pick)), off);
+	}
+	else if (pick == SGB_SEAT_MODEL_MASTER)
+		_sntprintf (title, cap, TEXT("Player %d%s"), k + 2, off);
+	else
+		_sntprintf (title, cap, TEXT("Player %d - %s%s"), k + 2,
+		            (TCHAR *)_tFromChar (GBSeatModelName (pick)), off);
+	title[cap - 1] = TEXT('\0');
+}
+
 // Created on the render thread so their messages are serviced there, and
 // unowned: an owned window across threads couples the two input queues,
 // which is the coupling this thread exists to avoid.
@@ -16700,22 +16758,8 @@ static bool GBSeatWindowOpen (int k)
 	if (x < vx) x = vx;
 	if (y < vy) y = vy;
 
-	TCHAR title[96];
-	uint8 pick = S9xSGBSplitGetSeatModel (k + 2);
-	if (GBSeatModelIsMachine (GBSeatModelEffective (k + 2))) pick = GBSeatModelEffective (k + 2);
-	if (k == 0 && GBLinkOtherRom[0])
-	{
-		TCHAR game[_MAX_FNAME];
-		_tsplitpath (GBLinkOtherRom, NULL, NULL, game, NULL);
-		_sntprintf (title, 96, TEXT("Player 2 - %s (%s)"), game,
-		            (TCHAR *)_tFromChar (GBSeatModelName (pick)));
-	}
-	else if (pick == SGB_SEAT_MODEL_MASTER)
-		_sntprintf (title, 96, TEXT("Player %d"), k + 2);
-	else
-		_sntprintf (title, 96, TEXT("Player %d - %s"), k + 2,
-		            (TCHAR *)_tFromChar (GBSeatModelName (pick)));
-	title[95] = TEXT('\0');
+	TCHAR title[128];
+	GBSeatWindowTitle (k, title, 128);
 
 	HWND hWnd = CreateWindowEx (GBSEAT_EXSTYLE, GBSEAT_WNDCLASS, title,
 	                            GBSEAT_STYLE,
@@ -16793,6 +16837,17 @@ static DWORD WINAPI GBSeatThreadProc (LPVOID)
 			// The master seating a player or taking one away.
 			if (!msg.hwnd && msg.message == GBSEAT_TM_OPEN)  { GBSeatWindowOpen ((int)msg.wParam); continue; }
 			if (!msg.hwnd && msg.message == GBSEAT_TM_CLOSE) { GBSeatWindowShut ((int)msg.wParam); continue; }
+			if (!msg.hwnd && msg.message == GBSEAT_TM_RETITLE)
+			{
+				const int k = (int)msg.wParam;
+				if (k >= 0 && k < SGB_MAX_LINK_PLAYERS - 1 && GBSeatWnd[k])
+				{
+					TCHAR title[128];
+					GBSeatWindowTitle (k, title, 128);
+					SetWindowText (GBSeatWnd[k], title);
+				}
+				continue;
+			}
 			TranslateMessage (&msg);
 			DispatchMessage (&msg);
 		}
@@ -17330,6 +17385,31 @@ static void WinGBLinkPlayerItem (int n)
 		return;
 	}
 	WinToggleGBLink (GBLINK_SAME, n);
+}
+
+// Player p's link from their window's menu, without getting up: unlinked, their
+// Game Boy plays on alone, off the cable and out of infrared range (mid-game the
+// cable lets go as a ghost's does); the master and the table play on.
+static void WinGBSeatSetLink (int p, bool linked)
+{
+	if (!S9xSGBSplitSetSeatLinked (p, linked)) return;
+	GBSeatWindowPost (GBSEAT_TM_RETITLE, p);
+	char msg[64];
+	snprintf (msg, sizeof msg, "Link: player %d %s", p, linked ? "relinked" : "unlinked");
+	S9xSetInfoString (msg);
+}
+
+// Unlink All Except Me: only player `keep` stays linked to the master (relinked
+// if it was not). keep 0 is Relink All.
+static void WinGBSeatLinkOnly (int keep)
+{
+	for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
+		if (S9xSGBSplitSetSeatLinked (p, keep == 0 || p == keep))
+			GBSeatWindowPost (GBSEAT_TM_RETITLE, p);
+	char msg[64];
+	if (keep) snprintf (msg, sizeof msg, "Link: only players 1 and %d linked", keep);
+	else      snprintf (msg, sizeof msg, "Link: every player relinked");
+	S9xSetInfoString (msg);
 }
 
 // A seat's window was closed: that player leaves the table they sat at.

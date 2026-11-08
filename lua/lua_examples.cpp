@@ -723,6 +723,55 @@ while true do
 end
 )lua" },
 
+	{ "Layer Visibility", "layer_visibility.lua", R"lua(-- Layer visibility: every layer of the picture shown but one, and a panel
+-- listing them. A SNES game has bg1-bg4 and sprites; a Game Boy or Game Boy
+-- Color game has gb_bg, gb_window and gb_sprites; a Game Boy game under the
+-- SGB BIOS has both sets. emu.layers() says which the loaded game has.
+
+-- The layer to hide on each platform (emu.platform()); change it to try another.
+local HIDE = { snes = "sprites", gb = "gb_sprites", sgb = "gb_sprites" }
+local ORDER = { "bg1", "bg2", "bg3", "bg4", "sprites", "gb_bg", "gb_window", "gb_sprites" }
+
+-- The switches stay as a script leaves them, so note them and put them back.
+local saved = {}
+
+local function apply()
+  local hide = HIDE[emu.platform()]
+  for name, on in pairs(emu.layers()) do
+    if saved[name] == nil then saved[name] = on end
+    emu.set_layer(name, name ~= hide)
+  end
+end
+
+event.on_rom_loaded(apply)
+event.on_stop(function()
+  if emu.is_rom_loaded() then
+    for name in pairs(emu.layers()) do
+      if saved[name] ~= nil then emu.set_layer(name, saved[name]) end
+    end
+  end
+end)
+if emu.is_rom_loaded() then apply() end
+
+local name_width = 0
+for _, name in ipairs(ORDER) do name_width = math.max(name_width, (gui.text_size(name))) end
+local width = name_width + 8 + gui.text_size("off") + 4
+
+while true do
+  local layers, rows = emu.layers(), {}
+  for _, name in ipairs(ORDER) do
+    if layers[name] ~= nil then table.insert(rows, name) end
+  end
+  gui.rect(2, 2, width, #rows * 9 + 3, nil, "#000000b0")
+  for i, name in ipairs(rows) do
+    local y = 4 + (i - 1) * 9
+    gui.text(4, y, name)
+    gui.text(name_width + 12, y, layers[name] and "on" or "off", { color = layers[name] and "#60ff60" or "#ff6060" })
+  end
+  emu.frame_advance()
+end
+)lua" },
+
 	{ "DMA Inspector", "dma_inspector.lua", R"lua(-- DMA inspector: the eight DMA channels as the game last set them up. The
 -- HDMA ones, which feed raster effects line by line, are yellow, with the
 -- PPU register each channel writes. Handy for working out wavy or gradient

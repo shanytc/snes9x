@@ -2134,6 +2134,14 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			const bool is_on  = (p.lcdc & 0x80) != 0;
 			if (was_on && !is_on && p.cgb && p.mode != PpuMode::HBlank)
 				MemHdmaLcdOff(mem);
+			// A palette glitch in flight resolves to the written value: with the
+			// dots stopped it would leave old|new behind (Batseelor's BGP $E4|$3F).
+			if (was_on && !is_on && p.pal_glitch)
+			{
+				uint8_t *r = p.pal_glitch_reg == 0 ? &p.bgp : p.pal_glitch_reg == 1 ? &p.obp0 : &p.obp1;
+				*r = p.pal_glitch_next;
+				p.pal_glitch = 0;
+			}
 			// LCD turn-on resets to line 0 / mode 2.
 			if (!was_on && is_on)
 			{
@@ -2209,7 +2217,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 		{
 			// DMG palette-write glitch: the dot the store lands on renders
 			// with (old | new); the clean value takes hold next dot.
-			if (!p.cgb && PpuRendering(p) && BlobPalUnit(mem))
+			if (!p.cgb && (p.lcdc & 0x80) && PpuRendering(p) && BlobPalUnit(mem))
 			{
 				{ static const int pgl = AcidKnob("ACID_PGL", 2);
 				  p.pal_glitch = static_cast<uint8_t>(pgl); }
@@ -2286,7 +2294,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			break;
 		}
 		case 0xFF48:
-			if (!p.cgb && PpuRendering(p) && BlobPalUnit(mem))
+			if (!p.cgb && (p.lcdc & 0x80) && PpuRendering(p) && BlobPalUnit(mem))
 			{
 				{ static const int pgl = AcidKnob("ACID_PGL", 2);
 				  p.pal_glitch = static_cast<uint8_t>(pgl); }
@@ -2298,7 +2306,7 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.obp0 = value;
 			break;
 		case 0xFF49:
-			if (!p.cgb && PpuRendering(p) && BlobPalUnit(mem))
+			if (!p.cgb && (p.lcdc & 0x80) && PpuRendering(p) && BlobPalUnit(mem))
 			{
 				{ static const int pgl = AcidKnob("ACID_PGL", 2);
 				  p.pal_glitch = static_cast<uint8_t>(pgl); }

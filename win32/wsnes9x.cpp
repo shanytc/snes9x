@@ -185,6 +185,8 @@ static void  WinGBTableResize(int want);
 static void  WinGBLinkPlayerItem(int n);
 static void  WinGBSeatSetLink(int p, bool linked);
 static void  WinGBSeatLinkOnly(int keep);
+static void  WinGBSeatState(int p, bool freeze);
+static void  WinGBSeatsRetitle();
 static bool  GBTableSeated();
 static void  WinGBSeatClosed(int player, LONG table);
 static void  WinGBTableShowNews();
@@ -2824,6 +2826,18 @@ LRESULT CALLBACK WinProc(
 		else if (cmd_id == ID_EMULATION_GB_SEAT_RELINK_ALL)
 		{
 			WinGBSeatLinkOnly (0);
+			break;
+		}
+		else if (cmd_id >= ID_EMULATION_GB_SEAT_SAVE0 + 2 &&
+		         cmd_id <= ID_EMULATION_GB_SEAT_SAVE0 + SGB_MAX_LINK_PLAYERS)
+		{
+			WinGBSeatState (cmd_id - ID_EMULATION_GB_SEAT_SAVE0, true);
+			break;
+		}
+		else if (cmd_id >= ID_EMULATION_GB_SEAT_LOAD0 + 2 &&
+		         cmd_id <= ID_EMULATION_GB_SEAT_LOAD0 + SGB_MAX_LINK_PLAYERS)
+		{
+			WinGBSeatState (cmd_id - ID_EMULATION_GB_SEAT_LOAD0, false);
 			break;
 		}
 		else if (cmd_id >= ID_EMULATION_GB_LINK_SEATMODEL0 &&
@@ -6835,14 +6849,6 @@ void FreezeUnfreezeSlot(int slot, bool8 freeze)
 
 bool FreezeUnfreeze (const char *filename, bool8 freeze)
 {
-    // Save states capture only the primary core; loading one under a
-    // split-screen session would desync the other seats.
-    if (S9xSGBSplitActive ())
-    {
-        S9xSetInfoString ("Save states are not supported in split screen yet");
-        return false;
-    }
-
 #ifdef NETPLAY_SUPPORT
     if (!freeze && Settings.NetPlay && !Settings.NetPlayServer)
     {
@@ -6897,6 +6903,9 @@ bool FreezeUnfreeze (const char *filename, bool8 freeze)
 
         if (S9xUnfreezeGame (filename))
         {
+            // A link session's players came back with it (S9xSGBSplitLoadSeatStates).
+            if (S9xSGBSplitActive ())
+                WinGBSeatsRetitle ();
 #ifdef NETPLAY_SUPPORT
             S9xNPServerQueueSendingFreezeFile (filename);
 #endif
@@ -6918,6 +6927,9 @@ bool UnfreezeScreenshotSlot(int slot, uint16 **image_buffer, int &width, int &he
     char filename[_MAX_PATH + 1];
     GetSlotFilename(slot, filename);
 
+    // Linked: the whole table's picture, which loads every player.
+    if (S9xSGBSplitActive () && S9xSGBSplitStatePreview (filename, image_buffer, &width, &height))
+        return true;
     return S9xUnfreezeScreenshot(filename, image_buffer, width, height);
 }
 
@@ -16676,6 +16688,14 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 				            ID_EMULATION_GB_SEAT_ONLY0 + k + 2, TEXT("Unlink All Except Me"));
 				AppendMenu (menu, MF_STRING | (S9xSGBSplitUnlinkedSeats () ? 0 : MF_GRAYED),
 				            ID_EMULATION_GB_SEAT_RELINK_ALL, TEXT("Relink All"));
+				// This player's Game Boy alone, in the master's current slot.
+				TCHAR item[48];
+				const int slot = GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot;
+				AppendMenu (menu, MF_SEPARATOR, 0, NULL);
+				_stprintf (item, TEXT("Save State (Slot %d)"), slot);
+				AppendMenu (menu, MF_STRING, ID_EMULATION_GB_SEAT_SAVE0 + k + 2, item);
+				_stprintf (item, TEXT("Load State (Slot %d)"), slot);
+				AppendMenu (menu, MF_STRING, ID_EMULATION_GB_SEAT_LOAD0 + k + 2, item);
 			}
 			AppendMenu (menu, MF_SEPARATOR, 0, NULL);
 			AppendMenu (menu, MF_STRING, ID_SAVESCREENSHOT_CLIPBOARD, TEXT("Copy Screenshot to Clipboard"));
@@ -17410,6 +17430,54 @@ static void WinGBSeatLinkOnly (int keep)
 	if (keep) snprintf (msg, sizeof msg, "Link: only players 1 and %d linked", keep);
 	else      snprintf (msg, sizeof msg, "Link: every player relinked");
 	S9xSetInfoString (msg);
+}
+
+// Player p's Game Boy alone, in the master's current slot ("<state>_pN"), from
+// their window's menu; the rest of the table plays on.
+static void WinGBSeatState (int p, bool freeze)
+{
+	if (!S9xSGBSplitActive () || !S9xSGBSplitSeatPresent (p) || Settings.StopEmulation) return;
+	char state[_MAX_PATH + 1], path[_MAX_PATH + 16], msg[_MAX_PATH + 64];
+	GetSlotFilename (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot, state);
+	S9xSGBSplitSeatStatePath (state, p, path, sizeof path);
+	const std::string base = S9xBasename (path);
+
+	FILE *f = freeze ? NULL : fopen (path, "rb");
+	if (!freeze && !f)
+	{
+		snprintf (msg, sizeof msg, "Player %d: no state in %s", p, base.c_str ());
+		S9xSetInfoString (msg);
+		return;
+	}
+	if (f) fclose (f);
+
+	if (GUI.ConfirmSaveLoad)
+	{
+		snprintf (msg, sizeof msg, "Are you sure you want to %s player %d %s\n%s",
+		          freeze ? "SAVE" : "LOAD", p, freeze ? "to" : "from", path);
+		if (MessageBox (GUI.hWnd, _tFromChar (msg), freeze ? TEXT("Confirm SAVE") : TEXT("Confirm LOAD"),
+		                MB_YESNO | MB_ICONQUESTION) != IDYES)
+			return;
+	}
+#ifdef RETROACHIEVEMENTS_SUPPORT
+	if (!freeze && !RA_WarnDisableHardcore ("Loading save states"))
+		return;
+#endif
+
+	const bool ok = freeze ? S9xSGBSplitSaveSeatState (p, path) : S9xSGBSplitLoadSeatState (p, path);
+	if (ok)
+		snprintf (msg, sizeof msg, "Player %d: %s %s", p, freeze ? "saved" : "loaded", base.c_str ());
+	else
+		snprintf (msg, sizeof msg, "Player %d: %s %s", p,
+		          freeze ? "could not save" : "could not load", base.c_str ());
+	S9xSetInfoString (msg);
+}
+
+// A loaded state can bring back who was unlinked when it was saved.
+static void WinGBSeatsRetitle ()
+{
+	for (int p = 2; p <= S9xSGBSplitPlayers (); p++)
+		GBSeatWindowPost (GBSEAT_TM_RETITLE, p);
 }
 
 // A seat's window was closed: that player leaves the table they sat at.

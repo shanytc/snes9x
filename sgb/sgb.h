@@ -623,6 +623,27 @@ bool    S9xSGBSplitCheckpointable(void);
 size_t  S9xSGBSplitStateSize(void);
 bool    S9xSGBSplitStateSave(uint8_t *buf, size_t cap);
 bool    S9xSGBSplitStateLoad(const uint8_t *buf, size_t size);
+
+// Link session save states. Each seat's Game Boy is saved beside the master's
+// state file as "<file>_p<player>". Masks have bit N set for player N.
+void     S9xSGBSplitSeatStatePath(const char *state_file, int player, char *out, size_t cap);
+// After the master's save: every seat, and the cable when the session is whole.
+unsigned S9xSGBSplitSaveSeatStates(const char *state_file);
+// Before a master load that power-cycles the seats (BIOS mode): seats without a
+// file of their own then resume where they were. false lets go of them.
+void     S9xSGBSplitHoldSeats(bool hold);
+// After the master's load: every seat with a file. All of one save point
+// restores the cable mid-byte; otherwise the cable plays on. `missing` = seats
+// present with no usable file.
+unsigned S9xSGBSplitLoadSeatStates(const char *state_file, unsigned *missing);
+// One player's Game Boy alone (2..15); the rest of the table plays on.
+bool     S9xSGBSplitSaveSeatState(int player, const char *path);
+bool     S9xSGBSplitLoadSeatState(int player, const char *path);
+// The whole table's picture from a session save (every player's screen tiled),
+// malloc'd for the caller to free; false when the slot has none.
+bool     S9xSGBSplitStatePreview(const char *state_file, uint16_t **image, int *w, int *h);
+// "players 1-4", "players 1 and 3", "player 2".
+void     S9xSGBSplitPlayersText(unsigned mask, char *out, size_t cap);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
 // One seat's frame (160x144) for its window. In BIOS mode the frame is the
 // snapshot the measured pane delay selects; false = the seat has nothing of

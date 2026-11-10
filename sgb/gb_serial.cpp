@@ -35,6 +35,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <ctime>
+#include <type_traits>
 
 #ifdef _WIN32
 #include <process.h>
@@ -2001,12 +2002,16 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 	if (g_hub.hosting)
 	{
 		// The adapter's phase belongs to the connection, not the state;
-		// restart from ping and let the games renegotiate.
-		Dmg07 fresh_hub;
-		fresh_hub.hosting = true;
-		fresh_hub.local   = g_hub.local;
-		fresh_hub.target  = g_hub.target;
-		g_hub = fresh_hub;
+		// restart from ping and let the games renegotiate. An in-process
+		// adapter keeps going for the consoles that were not loaded, as the
+		// real one does when one Game Boy jumps.
+		if (!g_hub.local)
+		{
+			Dmg07 fresh_hub;
+			fresh_hub.hosting = true;
+			fresh_hub.target  = g_hub.target;
+			g_hub = fresh_hub;
+		}
 
 		if ((mem.serial_control & 0x80) != 0 && (mem.serial_control & 0x01) == 0)
 			s.passive = true;
@@ -2847,6 +2852,102 @@ bool SerialSplitPristine()
 	if (g_ring.active) return !g_ring.shifting && g_ring.xfers == 0;
 	if (g_hub.local)   return g_hub.phase == kDmg07Ping && g_hub.bulk_stage == 0;
 	return true;   // plain two-seat cable: the attach clears what little there is
+}
+
+static_assert(std::is_trivially_copyable<Dmg07>::value &&
+              std::is_trivially_copyable<FaceRing>::value &&
+              std::is_trivially_copyable<SplitLink>::value &&
+              std::is_trivially_copyable<Serial>::value, "the cable is saved as bytes");
+
+namespace {
+
+constexpr uint32_t kCableMagic = 0x31424143;   // "CAB1"
+
+struct CableHead
+{
+	uint32_t magic, hub_size, ring_size, wire_size, serial_size;
+	int32_t  count;
+};
+
+}
+
+// Header, adapter, ring, the wire (ports nulled), then per place a presence
+// byte and that port's Serial.
+size_t SerialSplitCableBytes()
+{
+	size_t n = sizeof(CableHead) + sizeof(Dmg07) + sizeof(FaceRing) + sizeof(SplitLink);
+	for (int i = 0; i < g_splitlink.count; ++i)
+		n += 1 + (g_splitlink.s[i] ? sizeof(Serial) : 0);
+	return n;
+}
+
+void SerialSplitCableSave(uint8_t *out)
+{
+	CableHead h = { kCableMagic, sizeof(Dmg07), sizeof(FaceRing), sizeof(SplitLink),
+	                sizeof(Serial), g_splitlink.count };
+	SplitLink wire = g_splitlink;
+	for (int i = 0; i < kLinkMaxSeats; ++i) { wire.s[i] = nullptr; wire.m[i] = nullptr; }
+
+	uint8_t *p = out;
+	std::memcpy(p, &h, sizeof h);              p += sizeof h;
+	std::memcpy(p, &g_hub, sizeof g_hub);      p += sizeof g_hub;
+	std::memcpy(p, &g_ring, sizeof g_ring);    p += sizeof g_ring;
+	std::memcpy(p, &wire, sizeof wire);        p += sizeof wire;
+	for (int i = 0; i < g_splitlink.count; ++i)
+	{
+		*p++ = g_splitlink.s[i] ? 1 : 0;
+		if (!g_splitlink.s[i]) continue;
+		std::memcpy(p, g_splitlink.s[i], sizeof(Serial));
+		p += sizeof(Serial);
+	}
+}
+
+bool SerialSplitCableLoad(const uint8_t *in, size_t size)
+{
+	const uint8_t *p = in, *end = in + size;
+	CableHead h;
+	if (!in || size < sizeof h) return false;
+	std::memcpy(&h, p, sizeof h);
+	p += sizeof h;
+	if (h.magic != kCableMagic || h.hub_size != sizeof(Dmg07) || h.ring_size != sizeof(FaceRing) ||
+	    h.wire_size != sizeof(SplitLink) || h.serial_size != sizeof(Serial) ||
+	    h.count != g_splitlink.count || g_splitlink.count <= 0)
+		return false;
+	if ((size_t)(end - p) < sizeof(Dmg07) + sizeof(FaceRing) + sizeof(SplitLink)) return false;
+
+	Dmg07     hub;
+	FaceRing  ring;
+	SplitLink wire;
+	std::memcpy(&hub, p, sizeof hub);    p += sizeof hub;
+	std::memcpy(&ring, p, sizeof ring);  p += sizeof ring;
+	std::memcpy(&wire, p, sizeof wire);  p += sizeof wire;
+	// The same cable: adapter, ring or direct, with the same ports plugged in.
+	if (hub.local != g_hub.local || hub.hosting != g_hub.hosting || ring.active != g_ring.active)
+		return false;
+	const uint8_t *ports = p;
+	for (int i = 0; i < g_splitlink.count; ++i)
+	{
+		if (p >= end || (*p != 0) != (g_splitlink.s[i] != nullptr)) return false;
+		p += 1 + (*p ? sizeof(Serial) : 0);
+		if (p > end) return false;
+	}
+	if (p != end) return false;
+
+	for (int i = 0; i < kLinkMaxSeats; ++i)
+	{
+		wire.s[i] = g_splitlink.s[i];
+		wire.m[i] = g_splitlink.m[i];
+	}
+	g_hub       = hub;
+	g_ring      = ring;
+	g_splitlink = wire;
+	for (int i = 0; i < g_splitlink.count; ++i)
+	{
+		if (!*ports++) continue;
+		std::memcpy(g_splitlink.s[i], ports, sizeof(Serial));
+		ports += sizeof(Serial);
+	}
+	return true;
 }
 
 void SerialTraceMsg(const char *msg)

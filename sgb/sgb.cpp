@@ -37,6 +37,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cstddef>
+#include <cstdlib>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -4809,6 +4811,389 @@ bool S9xSGBSplitStateLoad(const uint8_t *buf, size_t size)
 	SplitFollowDone();   // the checkpoint is taken past the boot
 	SplitSeatMltRearm();
 	return true;
+}
+
+// ---- Link session save states -----------------------------------------------
+// Player N's Game Boy is saved beside the master's state as "<file>_pN": its own
+// state, then a trailer naming the session moment. A whole-session save's trailer
+// also carries the cable, so the master and every seat of that moment resume
+// mid-byte; anything less loads each console and keeps the cable as it is.
+namespace {
+
+constexpr uint32_t kSeatTrailerMagic = 0x314B4E4C;   // "LNK1"
+
+struct SeatTrailerHead
+{
+	uint32_t magic, head_size;
+	uint32_t players;          // places at the table
+	uint32_t present;          // bit k: seat k had a Game Boy of ours
+	uint8_t  unlinked[SGB_MAX_LINK_PLAYERS - 1];
+	uint8_t  off_wire[SGB_MAX_LINK_PLAYERS - 1];
+	uint8_t  hub, whole;       // whole: the master and every seat saved together
+	int64_t  t[SGB_MAX_LINK_PLAYERS];   // each console's clock at the save, -1 = not ours
+	int64_t  clock_frac[SGB_MAX_LINK_PLAYERS];
+	int32_t  slave_accum;
+	uint32_t cable_size, ir_size;
+	uint32_t img_w, img_h;     // the session's preview, in the first seat file only
+	char     title[17];        // this file's cart
+	uint16_t global_sum;
+};
+
+struct SeatFile
+{
+	std::vector<uint8_t> data;
+	size_t               blob = 0;      // bytes of the Game Boy state
+	SeatTrailerHead      head = {};
+	bool                 trailer = false;
+};
+
+std::vector<uint8_t> g_seat_held[SGB_MAX_LINK_PLAYERS - 1];
+
+int64_t CoreClock(SGB::Emulator *core)
+{
+	return core->DebugImpl()->cpu.State().t_cycles;
+}
+
+std::vector<uint8_t> SeatTrailer(bool whole)
+{
+	SeatTrailerHead h = {};
+	h.magic     = kSeatTrailerMagic;
+	h.head_size = sizeof h;
+	h.players   = (uint32_t)g_split_players;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		if (g_split_cores[k]) h.present |= 1u << k;
+		h.unlinked[k] = g_split_unlinked[k];
+		h.off_wire[k] = g_split_off_wire[k];
+	}
+	h.hub   = g_split_hub;
+	h.whole = whole;
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	const int n = SplitCollect(cs);
+	for (int i = 0; i < SGB_MAX_LINK_PLAYERS; ++i)
+		h.t[i] = (i < n && cs[i] && !SplitPosExternal(i)) ? CoreClock(cs[i]) : -1;
+	std::memcpy(h.clock_frac, g_seat_clock_frac, sizeof h.clock_frac);
+	h.slave_accum = g_seat_slave_accum;
+	if (whole)
+	{
+		h.cable_size = SGB::SerialSplitActive() ? (uint32_t)SGB::SerialSplitCableBytes() : 0;
+		h.ir_size    = SGB::IrPaired() ? (uint32_t)SGB::IrStateBytes() : 0;
+	}
+
+	std::vector<uint8_t> out(sizeof h + h.cable_size + h.ir_size);
+	std::memcpy(out.data(), &h, sizeof h);
+	if (h.cable_size) SGB::SerialSplitCableSave(out.data() + sizeof h);
+	if (h.ir_size)    SGB::IrStateSave(out.data() + sizeof h + h.cable_size);
+	return out;
+}
+
+// Player 1's screen as its window shows it: the SGB pane in BIOS mode.
+void MasterPane(uint16_t *dest)
+{
+	if (Settings.SGB_BIOSModeActive && GFX.Screen)
+	{
+		for (int y = 0; y < SGB_GB_SCREEN_H; ++y)
+			std::memcpy(dest + y * SGB_GB_SCREEN_W, GFX.Screen + (39 + y) * GFX.RealPPL + 48,
+			            SGB_GB_SCREEN_W * sizeof *dest);
+		return;
+	}
+	SGB::Instance().BlitScreenGB(dest, SGB_GB_SCREEN_W);
+}
+
+// Every player's screen tiled in player order, centred on a canvas of the
+// preview's 8:7 shape.
+std::vector<uint16_t> LinkPreview(uint32_t &w, uint32_t &h)
+{
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	const int n = SplitCollect(cs);
+	const int cols = n <= 1 ? 1 : n <= 4 ? 2 : 4, rows = (n + cols - 1) / cols;
+	const int tw = cols * SGB_GB_SCREEN_W, th = rows * SGB_GB_SCREEN_H;
+	w = (uint32_t)std::max(tw, (th * 8 + 6) / 7);
+	h = (uint32_t)std::max(th, (int)w * 7 / 8);
+	std::vector<uint16_t> img((size_t)w * h, 0);
+	static uint16_t pane[SGB_GB_SCREEN_W * SGB_GB_SCREEN_H];
+	for (int i = 0; i < n; ++i)
+	{
+		if (i == 0) MasterPane(pane);
+		else if (!S9xSGBSplitCopySeatFrame(i + 1, pane))
+		{
+			// No picture of its own: a machine's seat is black, a following one shows the master's.
+			if (SplitPosExternal(i) || !cs[i]) std::memset(pane, 0, sizeof pane);
+			else                               MasterPane(pane);
+		}
+		const int x0 = ((int)w - tw) / 2 + (i % cols) * SGB_GB_SCREEN_W;
+		const int y0 = ((int)h - th) / 2 + (i / cols) * SGB_GB_SCREEN_H;
+		for (int y = 0; y < SGB_GB_SCREEN_H; ++y)
+			std::memcpy(&img[(size_t)(y0 + y) * w + x0], pane + y * SGB_GB_SCREEN_W,
+			            SGB_GB_SCREEN_W * sizeof(uint16_t));
+	}
+	return img;
+}
+
+bool SeatWriteState(SGB::Emulator *core, const std::string &path, std::vector<uint8_t> trailer,
+                    const std::vector<uint16_t> *preview = nullptr, uint32_t pw = 0, uint32_t ph = 0)
+{
+	SeatTrailerHead h;
+	std::memcpy(&h, trailer.data(), sizeof h);
+	const SGB::CartHeader &cart = core->DebugImpl()->cart.header;
+	std::memcpy(h.title, cart.title, sizeof h.title);
+	h.global_sum = cart.global_sum;
+	if (preview)
+	{
+		h.img_w = pw;
+		h.img_h = ph;
+		const uint8_t *px = reinterpret_cast<const uint8_t *>(preview->data());
+		trailer.insert(trailer.end(), px, px + preview->size() * sizeof(uint16_t));
+	}
+	std::memcpy(trailer.data(), &h, sizeof h);
+
+	std::vector<uint8_t> blob(core->StateSize());
+	core->StateSave(blob.data());
+	FILE *f = fopen(path.c_str(), "wb");
+	if (!f) return false;
+	const bool ok = fwrite(blob.data(), 1, blob.size(), f) == blob.size() &&
+	                fwrite(trailer.data(), 1, trailer.size(), f) == trailer.size();
+	return fclose(f) == 0 && ok;
+}
+
+// A seat file: its Game Boy state, and the trailer when there is one.
+bool SeatReadState(const std::string &path, SeatFile &out)
+{
+	FILE *f = fopen(path.c_str(), "rb");
+	if (!f) return false;
+	fseek(f, 0, SEEK_END);
+	const long sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	if (sz <= 12 || sz > 8 * 1024 * 1024) { fclose(f); return false; }
+	out.data.resize((size_t)sz);
+	const bool got = fread(out.data.data(), 1, out.data.size(), f) == out.data.size();
+	fclose(f);
+	if (!got) return false;
+
+	uint32_t plen = 0;
+	std::memcpy(&plen, out.data.data() + 8, 4);
+	if ((size_t)plen > out.data.size() - 12) return false;
+	out.blob = 12 + (size_t)plen;
+	const size_t rest = out.data.size() - out.blob;
+	if (rest >= sizeof out.head)
+	{
+		std::memcpy(&out.head, out.data.data() + out.blob, sizeof out.head);
+		out.trailer = out.head.magic == kSeatTrailerMagic && out.head.head_size == sizeof out.head &&
+		              out.head.img_w <= 2048 && out.head.img_h <= 2048 &&
+		              rest == sizeof out.head + (size_t)out.head.cable_size + out.head.ir_size +
+		                      (size_t)out.head.img_w * out.head.img_h * 2;
+	}
+	return true;
+}
+
+// A file whose trailer names another cart is not this player's.
+bool SeatFileFits(const SeatFile &f, SGB::Emulator *core)
+{
+	if (!f.trailer) return true;
+	const SGB::CartHeader &cart = core->DebugImpl()->cart.header;
+	return f.head.global_sum == cart.global_sum &&
+	       std::memcmp(f.head.title, cart.title, sizeof f.head.title) == 0;
+}
+
+// After any seat jumps: its old frames and a head start still owed mean nothing now.
+void SeatAfterLoad(int k)
+{
+	g_split_snap_valid[k + 1] = false;
+	g_split_snap_head[k + 1]  = 0;
+	g_split_snap_count[k + 1] = 0;
+	g_seat_head_start_due[k]  = false;
+	g_seat_settling[k + 1]    = false;
+	g_seat_mlt_pkts[k] = g_split_cores[k] ? g_split_cores[k]->DebugImpl()->icd2.packets_received : 0;
+}
+
+} // anonymous
+
+static std::string SeatStatePath(const char *state_file, int player)
+{
+	return std::string(state_file ? state_file : "") + "_p" + std::to_string(player);
+}
+
+void S9xSGBSplitSeatStatePath(const char *state_file, int player, char *out, size_t cap)
+{
+	if (out && cap) snprintf(out, cap, "%s", SeatStatePath(state_file, player).c_str());
+}
+
+unsigned S9xSGBSplitSaveSeatStates(const char *state_file)
+{
+	if (g_split_players < 2 || !state_file || !*state_file) return 0;
+	const std::vector<uint8_t> trailer = SeatTrailer(true);
+	uint32_t pw = 0, ph = 0;
+	const std::vector<uint16_t> preview = LinkPreview(pw, ph);
+	unsigned done = 0;
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		const std::string path = SeatStatePath(state_file, k + 2);
+		SGB::Emulator *core = k < g_split_players - 1 ? g_split_cores[k].get() : nullptr;
+		if (!core)
+		{
+			// The slot is this session now: a player who is not in it has no state there.
+			std::remove(path.c_str());
+			continue;
+		}
+		// The whole table's picture rides in the first seat's file.
+		if (SeatWriteState(core, path, trailer, done ? nullptr : &preview, pw, ph)) done |= 1u << (k + 2);
+	}
+	return done;
+}
+
+void S9xSGBSplitHoldSeats(bool hold)
+{
+	for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		g_seat_held[k].clear();
+		SGB::Emulator *core = k < g_split_players - 1 ? g_split_cores[k].get() : nullptr;
+		if (!hold || !core) continue;
+		g_seat_held[k].resize(core->StateSize());
+		core->StateSave(g_seat_held[k].data());
+	}
+}
+
+unsigned S9xSGBSplitLoadSeatStates(const char *state_file, unsigned *missing)
+{
+	unsigned done = 0, miss = 0;
+	if (missing) *missing = 0;
+	if (g_split_players < 2 || !state_file || !*state_file)
+	{
+		for (auto &held : g_seat_held) held.clear();
+		return 0;
+	}
+
+	SGB::Emulator *cs[SGB_MAX_LINK_PLAYERS];
+	const int n = SplitCollect(cs);
+	SeatTrailerHead first = {};
+	bool exact = true, have_first = false;
+	std::vector<uint8_t> extra;   // the cable and infrared of the first whole trailer
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		SGB::Emulator *core = g_split_cores[k].get();
+		if (!core)
+		{
+			if (SeatExternal(k)) exact = false;   // a machine's own Super Game Boy carries on
+			continue;
+		}
+		SeatFile f;
+		const bool loaded = SeatReadState(SeatStatePath(state_file, k + 2), f) &&
+		                    SeatFileFits(f, core) && core->StateLoad(f.data.data(), f.blob);
+		if (!loaded)
+		{
+			// Played on: the master's own load may have power-cycled it (BIOS mode).
+			if (!g_seat_held[k].empty()) core->StateLoad(g_seat_held[k].data(), g_seat_held[k].size());
+			miss |= 1u << (k + 2);
+			exact = false;
+			SeatAfterLoad(k);
+			continue;
+		}
+		done |= 1u << (k + 2);
+		SeatAfterLoad(k);
+		if (!f.trailer || !f.head.whole) { exact = false; continue; }
+		if (!have_first)
+		{
+			first = f.head;
+			extra.assign(f.data.begin() + f.blob + sizeof f.head, f.data.end());
+			have_first = true;
+		}
+	}
+	for (auto &held : g_seat_held) held.clear();
+
+	// Exact only if every console here is the one that trailer saw, at the same moment.
+	if (exact && have_first && first.players == (uint32_t)g_split_players)
+	{
+		for (int i = 0; i < n && exact; ++i)
+		{
+			if (i >= 1 && ((first.present >> (i - 1)) & 1) != (cs[i] != nullptr)) exact = false;
+			else if (cs[i] && first.t[i] != CoreClock(cs[i]))                   exact = false;
+		}
+	}
+	else
+		exact = false;
+
+	if (exact)
+	{
+		for (int k = 0; k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+		{
+			g_split_unlinked[k] = first.unlinked[k] != 0;
+			g_split_off_wire[k] = first.off_wire[k] != 0;
+		}
+		g_split_hub = first.hub != 0;
+		SplitAttachLink(true);
+		const bool cable_on = SGB::SerialSplitActive();
+		if ((first.cable_size != 0) != cable_on || (first.ir_size != 0) != SGB::IrPaired() ||
+		    (cable_on && !SGB::SerialSplitCableLoad(extra.data(), first.cable_size)) ||
+		    (first.ir_size && !SGB::IrStateLoad(extra.data() + first.cable_size, first.ir_size)))
+			SplitAttachLink(true);   // as at session start rather than half-restored
+		std::memcpy(g_seat_clock_frac, first.clock_frac, sizeof g_seat_clock_frac);
+		g_seat_slave_accum = first.slave_accum;
+	}
+	else
+		SplitAttachIr();   // the cable plays on; the light histories start over
+	SplitDropSnaps();
+	SplitFollowDone();
+	SplitSeatMltRearm();
+	if (missing) *missing = miss;
+	return done;
+}
+
+bool S9xSGBSplitSaveSeatState(int player, const char *path)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= g_split_players - 1 || k >= SGB_MAX_LINK_PLAYERS - 1 || !path) return false;
+	SGB::Emulator *core = g_split_cores[k].get();
+	return core && SeatWriteState(core, path, SeatTrailer(false));
+}
+
+bool S9xSGBSplitLoadSeatState(int player, const char *path)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= g_split_players - 1 || k >= SGB_MAX_LINK_PLAYERS - 1 || !path) return false;
+	SGB::Emulator *core = g_split_cores[k].get();
+	SeatFile f;
+	if (!core || !SeatReadState(path, f) || !SeatFileFits(f, core) ||
+	    !core->StateLoad(f.data.data(), f.blob))
+		return false;
+	SeatAfterLoad(k);
+	SplitAttachIr();
+	return true;
+}
+
+bool S9xSGBSplitStatePreview(const char *state_file, uint16_t **image, int *w, int *h)
+{
+	if (!state_file || !image || !w || !h) return false;
+	for (int p = 2; p <= SGB_MAX_LINK_PLAYERS; ++p)
+	{
+		SeatFile f;
+		if (!SeatReadState(SeatStatePath(state_file, p), f) || !f.trailer || !f.head.img_w || !f.head.img_h)
+			continue;
+		const size_t bytes = (size_t)f.head.img_w * f.head.img_h * sizeof(uint16_t);
+		uint16_t *px = static_cast<uint16_t *>(std::malloc(bytes));
+		if (!px) return false;
+		std::memcpy(px, f.data.data() + f.blob + sizeof f.head + f.head.cable_size + f.head.ir_size, bytes);
+		*image = px;
+		*w = (int)f.head.img_w;
+		*h = (int)f.head.img_h;
+		return true;
+	}
+	return false;
+}
+
+void S9xSGBSplitPlayersText(unsigned mask, char *out, size_t cap)
+{
+	if (!out || !cap) return;
+	int list[SGB_MAX_LINK_PLAYERS + 1], n = 0;
+	for (int p = 1; p <= SGB_MAX_LINK_PLAYERS; ++p)
+		if (mask & (1u << p)) list[n++] = p;
+	std::string s = n == 1 ? "player " : "players ";
+	bool run = n > 2;
+	for (int i = 1; i < n; ++i) run = run && list[i] == list[i - 1] + 1;
+	if (run) s += std::to_string(list[0]) + "-" + std::to_string(list[n - 1]);
+	else
+		for (int i = 0; i < n; ++i)
+			s += (i == 0 ? "" : i == n - 1 ? " and " : ", ") + std::to_string(list[i]);
+	snprintf(out, cap, "%s", n ? s.c_str() : "");
 }
 
 // The BIOS power-on-resets the master partway through its own boot. That

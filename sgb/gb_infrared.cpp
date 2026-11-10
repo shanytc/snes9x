@@ -14,6 +14,7 @@
 #include "gb_ppu.h"
 
 #include <cstdint>
+#include <cstring>
 
 namespace SGB {
 
@@ -152,6 +153,25 @@ bool IrActive()
 		if ((g_port_on && (m->rp & 0xC1)) ||
 		    (g_cart_on && ((m->cart_ir & 0x01) || IrCartSelected(*m)))) return true;
 	return false;
+}
+
+// A paired flag, then both consoles' clock anchors and LED edges.
+size_t IrStateBytes()
+{
+	return 1 + sizeof g_seat;
+}
+
+void IrStateSave(uint8_t *out)
+{
+	out[0] = IrPaired() ? 1 : 0;
+	std::memcpy(out + 1, g_seat, sizeof g_seat);
+}
+
+bool IrStateLoad(const uint8_t *in, size_t size)
+{
+	if (!in || size != IrStateBytes() || (in[0] != 0) != IrPaired()) return false;
+	std::memcpy(g_seat, in + 1, sizeof g_seat);
+	return true;
 }
 
 uint8_t IrReadRP(const Memory &m)

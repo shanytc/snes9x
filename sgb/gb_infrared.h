@@ -8,6 +8,7 @@
 #define _SGB_GB_INFRARED_H_
 
 #include <cstdint>
+#include <cstddef>
 
 namespace SGB {
 
@@ -27,6 +28,12 @@ void IrSetClock(const Memory *m, int64_t local, int64_t common);
 
 // A paired port is lit or reading: the split loop steps the seats finer.
 bool IrActive();
+
+// The pair's light histories at a link session's save point. Load refuses a
+// pairing that differs from the one saved.
+size_t IrStateBytes();
+void   IrStateSave(uint8_t *out);
+bool   IrStateLoad(const uint8_t *in, size_t size);
 
 uint8_t IrReadRP(const Memory &m);
 void    IrWriteRP(Memory &m, uint8_t value);

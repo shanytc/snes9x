@@ -185,7 +185,7 @@ static void  WinGBTableResize(int want);
 static void  WinGBLinkPlayerItem(int n);
 static void  WinGBSeatSetLink(int p, bool linked);
 static void  WinGBSeatLinkOnly(int keep);
-static void  WinGBSeatState(int p, bool freeze);
+static void  WinGBSeatState(int p, bool freeze, int slot);
 static void  WinGBSeatsRetitle();
 static bool  GBTableSeated();
 static void  WinGBSeatClosed(int player, LONG table);
@@ -2831,13 +2831,13 @@ LRESULT CALLBACK WinProc(
 		else if (cmd_id >= ID_EMULATION_GB_SEAT_SAVE0 + 2 &&
 		         cmd_id <= ID_EMULATION_GB_SEAT_SAVE0 + SGB_MAX_LINK_PLAYERS)
 		{
-			WinGBSeatState (cmd_id - ID_EMULATION_GB_SEAT_SAVE0, true);
+			WinGBSeatState (cmd_id - ID_EMULATION_GB_SEAT_SAVE0, true, (int)lParam);
 			break;
 		}
 		else if (cmd_id >= ID_EMULATION_GB_SEAT_LOAD0 + 2 &&
 		         cmd_id <= ID_EMULATION_GB_SEAT_LOAD0 + SGB_MAX_LINK_PLAYERS)
 		{
-			WinGBSeatState (cmd_id - ID_EMULATION_GB_SEAT_LOAD0, false);
+			WinGBSeatState (cmd_id - ID_EMULATION_GB_SEAT_LOAD0, false, (int)lParam);
 			break;
 		}
 		else if (cmd_id >= ID_EMULATION_GB_LINK_SEATMODEL0 &&
@@ -16688,14 +16688,28 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 				            ID_EMULATION_GB_SEAT_ONLY0 + k + 2, TEXT("Unlink All Except Me"));
 				AppendMenu (menu, MF_STRING | (S9xSGBSplitUnlinkedSeats () ? 0 : MF_GRAYED),
 				            ID_EMULATION_GB_SEAT_RELINK_ALL, TEXT("Relink All"));
-				// This player's Game Boy alone, in the master's current slot.
-				TCHAR item[48];
-				const int slot = GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot;
+				// This player's Game Boy alone, in any bank and slot, as File >
+				// Save / Load Game Position offers them for the master.
+				const int slots = NUM_SAVE_BANKS * SAVE_SLOTS_PER_BANK;
+				HMENU save_menu = CreatePopupMenu (), load_menu = CreatePopupMenu ();
+				for (int b = 0; b < NUM_SAVE_BANKS; b++)
+				{
+					HMENU bank_save = CreatePopupMenu (), bank_load = CreatePopupMenu ();
+					TCHAR item[16];
+					for (int s = 0; s < SAVE_SLOTS_PER_BANK; s++)
+					{
+						const int slot = b * SAVE_SLOTS_PER_BANK + s;
+						_stprintf (item, TEXT("Slot #&%d"), s);
+						AppendMenu (bank_save, MF_STRING, ID_EMULATION_GB_SEAT_SLOT0 + slot, item);
+						AppendMenu (bank_load, MF_STRING, ID_EMULATION_GB_SEAT_SLOT0 + slots + slot, item);
+					}
+					_stprintf (item, TEXT("Bank #&%d"), b);
+					AppendMenu (save_menu, MF_POPUP, (UINT_PTR)bank_save, item);
+					AppendMenu (load_menu, MF_POPUP, (UINT_PTR)bank_load, item);
+				}
 				AppendMenu (menu, MF_SEPARATOR, 0, NULL);
-				_stprintf (item, TEXT("Save State (Slot %d)"), slot);
-				AppendMenu (menu, MF_STRING, ID_EMULATION_GB_SEAT_SAVE0 + k + 2, item);
-				_stprintf (item, TEXT("Load State (Slot %d)"), slot);
-				AppendMenu (menu, MF_STRING, ID_EMULATION_GB_SEAT_LOAD0 + k + 2, item);
+				AppendMenu (menu, MF_POPUP, (UINT_PTR)save_menu, TEXT("Save State"));
+				AppendMenu (menu, MF_POPUP, (UINT_PTR)load_menu, TEXT("Load State"));
 			}
 			AppendMenu (menu, MF_SEPARATOR, 0, NULL);
 			AppendMenu (menu, MF_STRING, ID_SAVESCREENSHOT_CLIPBOARD, TEXT("Copy Screenshot to Clipboard"));
@@ -16703,6 +16717,15 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 			const int cmd = (int)TrackPopupMenu (menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
 			                                     pt.x, pt.y, 0, hWnd, NULL);
 			DestroyMenu (menu);
+			// A slot item becomes this player's Save / Load State with the slot in lParam.
+			const int slots = NUM_SAVE_BANKS * SAVE_SLOTS_PER_BANK;
+			if (cmd >= ID_EMULATION_GB_SEAT_SLOT0 && cmd < ID_EMULATION_GB_SEAT_SLOT0 + 2 * slots)
+			{
+				const int  n    = cmd - ID_EMULATION_GB_SEAT_SLOT0;
+				const UINT base = n < slots ? ID_EMULATION_GB_SEAT_SAVE0 : ID_EMULATION_GB_SEAT_LOAD0;
+				PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (base + k + 2, 0), (LPARAM)(n % slots));
+				return 0;
+			}
 			// The copy names this player in lParam; the master's thread takes it at the frame's end.
 			if (cmd) PostMessage (GUI.hWnd, WM_COMMAND, MAKEWPARAM (cmd, 0),
 			                      cmd == ID_SAVESCREENSHOT_CLIPBOARD ? (LPARAM)(k + 2) : 0);
@@ -17432,13 +17455,14 @@ static void WinGBSeatLinkOnly (int keep)
 	S9xSetInfoString (msg);
 }
 
-// Player p's Game Boy alone, in the master's current slot ("<state>_pN"), from
-// their window's menu; the rest of the table plays on.
-static void WinGBSeatState (int p, bool freeze)
+// Player p's Game Boy alone, in a bank's slot ("<state>_pN"), from their
+// window's menu; the rest of the table plays on.
+static void WinGBSeatState (int p, bool freeze, int slot)
 {
 	if (!S9xSGBSplitActive () || !S9xSGBSplitSeatPresent (p) || Settings.StopEmulation) return;
+	if (slot < 0 || slot >= NUM_SAVE_BANKS * SAVE_SLOTS_PER_BANK) return;
 	char state[_MAX_PATH + 1], path[_MAX_PATH + 16], msg[_MAX_PATH + 64];
-	GetSlotFilename (GUI.CurrentSaveBank * SAVE_SLOTS_PER_BANK + GUI.CurrentSaveSlot, state);
+	GetSlotFilename (slot, state);
 	S9xSGBSplitSeatStatePath (state, p, path, sizeof path);
 	const std::string base = S9xBasename (path);
 

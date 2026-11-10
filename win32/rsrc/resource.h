@@ -1030,9 +1030,11 @@
 #define ID_EMULATION_GB_SEAT_LINK0      40345
 #define ID_EMULATION_GB_SEAT_ONLY0      40361
 #define ID_EMULATION_GB_SEAT_RELINK_ALL 40377
-/* A seat window's Save State / Load State, that player alone: base + player (2..15) */
+/* A seat window's Save State / Load State, that player alone: base + player (2..15), slot in lParam */
 #define ID_EMULATION_GB_SEAT_SAVE0      40378
 #define ID_EMULATION_GB_SEAT_LOAD0      40394
+/* Its Bank / Slot items: save slots 0-99, then load slots 0-99 (40410-40609) */
+#define ID_EMULATION_GB_SEAT_SLOT0      40410
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

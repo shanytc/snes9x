@@ -186,6 +186,12 @@ bool SerialSplitInUse();
 // ring/hub state is shared and lives outside the cores, so a core-only
 // snapshot can only be restored at a moment this reports true.
 bool SerialSplitPristine();
+// The cable at a link session's save point: the adapter or ring, the wire's own
+// bookkeeping and each attached port's byte in flight. Load refuses a cable
+// wired differently from the one saved; it runs after the cores have loaded.
+size_t SerialSplitCableBytes();
+void   SerialSplitCableSave(uint8_t *out);
+bool   SerialSplitCableLoad(const uint8_t *in, size_t size);
 
 // Emit one line into the SGB_LINK_TRACE log (no-op when tracing is off).
 // Lets the split runner log per-core state the serial layer cannot see.

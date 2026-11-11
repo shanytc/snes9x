@@ -642,6 +642,19 @@ bool     S9xSGBSplitLoadSeatState(int player, const char *path);
 // The whole table's picture from a session save (every player's screen tiled),
 // malloc'd for the caller to free; false when the slot has none.
 bool     S9xSGBSplitStatePreview(const char *state_file, uint16_t **image, int *w, int *h);
+
+// Player p's Game Boy (2..15) power-cycled: unplugged, rebooted, plugged back
+// (an unlinked seat stays off). False for a seat on a machine of its own.
+bool     S9xSGBSplitResetSeat(int player);
+
+// Apply Cheats per seat: the master's enabled cheat codes, applied to that
+// seat's Game Boy each frame too. Only a seat on the master's own cart can.
+struct SgbSeatCheat { uint32_t address; uint8_t byte; bool conditional; uint8_t cond_byte; };
+bool     S9xSGBSplitSeatCanCheat(int player);
+bool     S9xSGBSplitSeatCheats(int player);
+bool     S9xSGBSplitSetSeatCheats(int player, bool on);   // off puts the replaced bytes back
+// Once a frame with every enabled code (none: cheats off), after the master's.
+void     S9xSGBSplitApplySeatCheats(const SgbSeatCheat *cheats, size_t count);
 // "players 1-4", "players 1 and 3", "player 2".
 void     S9xSGBSplitPlayersText(unsigned mask, char *out, size_t cap);
 void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);

@@ -922,12 +922,22 @@ std::string S9xCheatGroupToText(uint32 num)
 
 void S9xUpdateCheatsInMemory(void)
 {
-    if (!Cheat.enabled)
-        return;
+    if (Cheat.enabled)
+        for (auto &group : Cheat.group)
+            for (auto &cheat : group.cheat)
+                S9xUpdateCheatInMemory(cheat);
 
-    for (auto &group : Cheat.group)
-        for (auto &cheat : group.cheat)
-            S9xUpdateCheatInMemory(cheat);
+    // A link session's seats with Apply Cheats on take the same codes.
+    if (S9xCheatsGBMode() && S9xSGBSplitActive())
+    {
+        std::vector<SgbSeatCheat> on;
+        if (Cheat.enabled)
+            for (auto &group : Cheat.group)
+                for (auto &cheat : group.cheat)
+                    if (cheat.enabled)
+                        on.push_back({ cheat.address, cheat.byte, cheat.conditional != 0, cheat.cond_byte });
+        S9xSGBSplitApplySeatCheats(on.data(), on.size());
+    }
 }
 
 static bool S9xCheatIsDuplicate(const std::string &name, const std::string &code)

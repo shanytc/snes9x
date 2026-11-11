@@ -39,6 +39,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -3986,6 +3987,10 @@ bool g_split_ghost[SGB_MAX_LINK_PLAYERS - 1] = {};
 // ghost's does, until the game lets go of the link (g_split_off_wire).
 bool g_split_unlinked[SGB_MAX_LINK_PLAYERS - 1] = {};
 bool g_split_off_wire[SGB_MAX_LINK_PLAYERS - 1] = {};
+// A seat that takes the master's cheats (Apply Cheats in its window's menu), and
+// the bytes they replaced on it, put back when a cheat goes away.
+bool g_seat_cheats[SGB_MAX_LINK_PLAYERS - 1] = {};
+std::map<uint32_t, uint8_t> g_seat_cheat_saved[SGB_MAX_LINK_PLAYERS - 1];
 bool g_ir_facing = false;  // players 1 and 2 face each other's infrared port
 bool g_kiss_facing = false; // ... and each other's HuC1/HuC3 cart LED (GB KISS)
 
@@ -5180,6 +5185,89 @@ bool S9xSGBSplitStatePreview(const char *state_file, uint16_t **image, int *w, i
 	return false;
 }
 
+// One player's Game Boy power-cycled: unplugged from the cable, rebooted and
+// plugged back in, the rest of the table playing on.
+bool S9xSGBSplitResetSeat(int player)
+{
+	const int k = player - 2;
+	if (k < 0 || k >= g_split_players - 1 || k >= SGB_MAX_LINK_PLAYERS - 1) return false;
+	SGB::Emulator *core = g_split_cores[k].get();
+	if (!core) return false;
+	g_split_off_wire[k] = true;
+	SplitAttachLink(false);
+	core->ColdReset();
+	SeatAfterLoad(k);
+	g_split_off_wire[k] = g_split_unlinked[k];   // an unlinked seat stays off
+	SplitAttachLink(false);
+	return true;
+}
+
+// Only a seat running the master's own cart on a core of ours: another game's
+// RAM and ROM are not where the master's codes point.
+bool S9xSGBSplitSeatCanCheat(int player)
+{
+	const int k = player - 2;
+	return k >= 0 && k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1 &&
+	       g_split_cores[k] && g_seat_rom[k].empty();
+}
+
+bool S9xSGBSplitSeatCheats(int player)
+{
+	return S9xSGBSplitSeatCanCheat(player) && g_seat_cheats[player - 2];
+}
+
+// Every replaced byte back, as disabling the master's cheats does.
+static void SeatCheatsRestore(int k)
+{
+	if (SGB::Emulator *core = g_split_cores[k].get())
+		for (const auto &held : g_seat_cheat_saved[k])
+			core->CheatWrite(held.first, held.second);
+	g_seat_cheat_saved[k].clear();
+}
+
+bool S9xSGBSplitSetSeatCheats(int player, bool on)
+{
+	if (!S9xSGBSplitSeatCanCheat(player)) return false;
+	const int k = player - 2;
+	if (!on) SeatCheatsRestore(k);
+	g_seat_cheats[k] = on;
+	return true;
+}
+
+// The master's rules (S9xUpdateCheatInMemory): a byte the game changed is saved
+// and overwritten again; a conditional code holds only while the game's byte
+// matches its compare value. A code no longer in the list gets its byte back.
+void S9xSGBSplitApplySeatCheats(const SgbSeatCheat *cheats, size_t count)
+{
+	for (int k = 0; k < g_split_players - 1 && k < SGB_MAX_LINK_PLAYERS - 1; ++k)
+	{
+		if (!g_seat_cheats[k] || !S9xSGBSplitSeatCanCheat(k + 2)) continue;
+		SGB::Emulator *core = g_split_cores[k].get();
+		std::map<uint32_t, uint8_t> &saved = g_seat_cheat_saved[k];
+		for (auto it = saved.begin(); it != saved.end(); )
+		{
+			bool listed = false;
+			for (size_t i = 0; i < count && !listed; ++i) listed = cheats[i].address == it->first;
+			if (listed) { ++it; continue; }
+			core->CheatWrite(it->first, it->second);
+			it = saved.erase(it);
+		}
+		for (size_t i = 0; i < count; ++i)
+		{
+			const SgbSeatCheat &c = cheats[i];
+			const uint8_t now = core->CheatRead(c.address);
+			if (now == c.byte) continue;
+			if (c.conditional && now != c.cond_byte)
+			{
+				saved.erase(c.address);   // the condition no longer holds: the game's byte stands
+				continue;
+			}
+			saved[c.address] = now;
+			core->CheatWrite(c.address, c.byte);
+		}
+	}
+}
+
 void S9xSGBSplitPlayersText(unsigned mask, char *out, size_t cap)
 {
 	if (!out || !cap) return;
@@ -5618,6 +5706,8 @@ void S9xSGBSplitStop(const char *battery_base_path)
 		g_split_external_core[k] = nullptr;   // the flag stays: it is the frontend's pick
 		g_split_ghost[k] = false;
 		g_split_unlinked[k] = g_split_off_wire[k] = false;
+		g_seat_cheats[k] = false;
+		g_seat_cheat_saved[k].clear();
 	}
 	SplitDropSnaps();
 	g_split_players = 0;
@@ -5685,6 +5775,8 @@ static void SplitClearPlace(int player)
 	g_seat_mlt_pkts[k]    = 0;
 	g_split_unlinked[k]   = false;
 	g_split_off_wire[k]   = false;
+	g_seat_cheats[k]      = false;
+	g_seat_cheat_saved[k].clear();
 }
 
 bool S9xSGBSplitAddSeat(int player)

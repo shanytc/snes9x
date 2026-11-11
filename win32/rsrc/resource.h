@@ -1035,6 +1035,9 @@
 #define ID_EMULATION_GB_SEAT_LOAD0      40394
 /* Its Bank / Slot items: save slots 0-99, then load slots 0-99 (40410-40609) */
 #define ID_EMULATION_GB_SEAT_SLOT0      40410
+/* A seat window's Reset and Apply Cheats: base + player (2..15) */
+#define ID_EMULATION_GB_SEAT_RESET0     40610
+#define ID_EMULATION_GB_SEAT_CHEATS0    40626
 
 /* Nintendo Super System front panel (Emulation menu) */
 #define ID_EMULATION_NSS                44400

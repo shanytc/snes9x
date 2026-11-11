@@ -186,6 +186,7 @@ static void  WinGBLinkPlayerItem(int n);
 static void  WinGBSeatSetLink(int p, bool linked);
 static void  WinGBSeatLinkOnly(int keep);
 static void  WinGBSeatState(int p, bool freeze, int slot);
+static void  WinGBSeatReset(int p);
 static void  WinGBSeatsRetitle();
 static bool  GBTableSeated();
 static void  WinGBSeatClosed(int player, LONG table);
@@ -2838,6 +2839,25 @@ LRESULT CALLBACK WinProc(
 		         cmd_id <= ID_EMULATION_GB_SEAT_LOAD0 + SGB_MAX_LINK_PLAYERS)
 		{
 			WinGBSeatState (cmd_id - ID_EMULATION_GB_SEAT_LOAD0, false, (int)lParam);
+			break;
+		}
+		else if (cmd_id >= ID_EMULATION_GB_SEAT_RESET0 + 2 &&
+		         cmd_id <= ID_EMULATION_GB_SEAT_RESET0 + SGB_MAX_LINK_PLAYERS)
+		{
+			WinGBSeatReset (cmd_id - ID_EMULATION_GB_SEAT_RESET0);
+			break;
+		}
+		else if (cmd_id >= ID_EMULATION_GB_SEAT_CHEATS0 + 2 &&
+		         cmd_id <= ID_EMULATION_GB_SEAT_CHEATS0 + SGB_MAX_LINK_PLAYERS)
+		{
+			const int p = cmd_id - ID_EMULATION_GB_SEAT_CHEATS0;
+			const bool on = !S9xSGBSplitSeatCheats (p);
+			if (S9xSGBSplitSetSeatCheats (p, on))
+			{
+				char msg[48];
+				snprintf (msg, sizeof msg, "Player %d: cheats %s", p, on ? "applied" : "off");
+				S9xSetInfoString (msg);
+			}
 			break;
 		}
 		else if (cmd_id >= ID_EMULATION_GB_LINK_SEATMODEL0 &&
@@ -16710,6 +16730,12 @@ static LRESULT CALLBACK GBSeatWndProc (HWND hWnd, UINT msg, WPARAM wParam, LPARA
 				AppendMenu (menu, MF_SEPARATOR, 0, NULL);
 				AppendMenu (menu, MF_POPUP, (UINT_PTR)save_menu, TEXT("Save State"));
 				AppendMenu (menu, MF_POPUP, (UINT_PTR)load_menu, TEXT("Load State"));
+				// This player's console alone: power-cycled, and the master's cheats on it.
+				AppendMenu (menu, MF_SEPARATOR, 0, NULL);
+				AppendMenu (menu, MF_STRING, ID_EMULATION_GB_SEAT_RESET0 + k + 2, TEXT("Reset"));
+				AppendMenu (menu, MF_STRING | (S9xSGBSplitSeatCheats (k + 2) ? MF_CHECKED : 0) |
+				            (S9xSGBSplitSeatCanCheat (k + 2) ? 0 : MF_GRAYED),
+				            ID_EMULATION_GB_SEAT_CHEATS0 + k + 2, TEXT("Apply Cheats"));
 			}
 			AppendMenu (menu, MF_SEPARATOR, 0, NULL);
 			AppendMenu (menu, MF_STRING, ID_SAVESCREENSHOT_CLIPBOARD, TEXT("Copy Screenshot to Clipboard"));
@@ -17494,6 +17520,20 @@ static void WinGBSeatState (int p, bool freeze, int slot)
 	else
 		snprintf (msg, sizeof msg, "Player %d: %s %s", p,
 		          freeze ? "could not save" : "could not load", base.c_str ());
+	S9xSetInfoString (msg);
+}
+
+// Player p's console alone, power-cycled: unplugged, rebooted, plugged back in.
+// A Super Game Boy seat's own SNES power-cycles on its next turn.
+static void WinGBSeatReset (int p)
+{
+	if (!S9xSGBSplitActive () || !S9xSGBSplitSeatPresent (p)) return;
+	if (GBSeatMachine *m = GBSeatMachineFor (p))
+		InterlockedExchange (&m->reset, 1);
+	else if (!S9xSGBSplitResetSeat (p))
+		return;
+	char msg[32];
+	snprintf (msg, sizeof msg, "Player %d reset", p);
 	S9xSetInfoString (msg);
 }
 

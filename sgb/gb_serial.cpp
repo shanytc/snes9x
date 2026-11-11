@@ -1945,7 +1945,12 @@ void SerialReset(Serial &s, bool cgb)
 	g_active         = &s;
 	g_direct.stalled = false;
 
-	if (g_hub.hosting)
+	// A Game Boy unplugged from the in-process adapter cannot restart it.
+	bool plugged = !g_hub.local;
+	for (int i = 0; !plugged && i < g_splitlink.count; ++i)
+		plugged = g_splitlink.s[i] == &s;
+
+	if (g_hub.hosting && plugged)
 	{
 		// The console reset does not power the adapter down, but this
 		// session of it starts over from the ping phase. In-flight clocks

@@ -43,6 +43,14 @@ namespace SGB {
 			{ 0x4209, "GALLERY3", "link modes offered on a Super Game Boy", 2,
 			  { { 0x06A596, 3, { 0xA7, 0x28, 0x09 }, { 0xA7, 0x18, 0x09 } },
 				{ 0x06A50B, 3, { 0x03, 0x0A, 0x07 }, { 0x03, 0x0F, 0x07 } } } },
+			// Super Black Bass Pocket 2's packet sender clears IF, dropping a partner byte's pending serial
+			// IRQ, and its 1 s link watchdog resets both: clear all but the serial bit (stub over listing text).
+			{ 0x8FF7, "BASS POCKET 2", "serial IRQ kept through SGB packets", 5,
+			  { { 0x000D34, 3, { 0xAF, 0xE0, 0x0F }, { 0xCD, 0x10, 0x00 } },   // xor a / ldh (IF),a -> call $0010
+				{ 0x000D61, 3, { 0xAF, 0xE0, 0x0F }, { 0xCD, 0x10, 0x00 } },
+				{ 0x000010, 3, { 0x20, 0x20, 0x20 }, { 0xF0, 0x0F, 0xE6 } },   // ldh a,(IF) / and $08
+				{ 0x000013, 3, { 0x20, 0x20, 0x20 }, { 0x08, 0xE0, 0x0F } },   // ldh (IF),a
+				{ 0x000016, 2, { 0x20, 0x20 }, { 0xAF, 0xC9 } } } },             // xor a / ret
 		};
 
 		// Link-cable fixes on every model: in the cart while a link session runs.

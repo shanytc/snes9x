@@ -52,9 +52,11 @@ static void S9xNetplayConnect()
         return;
     }
 
-    if (!S9xNPConnectToServer(gui_config->netplay_last_host.c_str(),
-                              gui_config->netplay_last_port,
-                              Memory.ROMName))
+    NetPlay.ErrorMsg[0] = '\0';
+    bool connected = S9xNPConnectToServer(gui_config->netplay_last_host.c_str(),
+                                          gui_config->netplay_last_port,
+                                          Memory.ROMName);
+    if (!connected)
     {
         msg = gtk_message_dialog_new(NULL,
                                      GTK_DIALOG_DESTROY_WITH_PARENT,
@@ -63,6 +65,8 @@ static void S9xNetplayConnect()
                                      "Couldn't connect to server: %s:%d",
                                      gui_config->netplay_last_host.c_str(),
                                      gui_config->netplay_last_port);
+        if (NetPlay.ErrorMsg[0])
+            gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(msg), "%s", NetPlay.ErrorMsg);
         gtk_window_set_title(GTK_WINDOW(msg), _("Connection Error"));
 
         gtk_dialog_run(GTK_DIALOG(msg));
@@ -71,14 +75,19 @@ static void S9xNetplayConnect()
 
     gui_config->netplay_activated = true;
 
+    // Never loaded a ROM: its APU was never powered, so S9xReset would crash in the DSP.
+    // The ROM image from the server resets the machine when it loads.
+    bool nothing_loaded = !gui_config->rom_loaded;
+
     /* If no rom is specified, assume we'll get it from the server */
-    if (gui_config->netplay_last_rom.empty())
+    if (gui_config->netplay_last_rom.empty() && connected)
     {
         Settings.StopEmulation = false;
         S9xROMLoaded();
     }
 
-    S9xReset();
+    if (!nothing_loaded)
+        S9xReset();
 
     CPU.Flags = flags;
 

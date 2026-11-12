@@ -108,6 +108,27 @@ struct ApuNoise
 	ApuEnvClock env;
 };
 
+// A cartridge's own piezo (HuC3 or TAMA5), mixed into the output. In states
+// from v17, so run-ahead and rewind carry a tone like the channels.
+struct ApuCartSpeaker
+{
+	uint8_t  tone    = 0;      // HuC3 tone playing + 1 (17 = the ambulance siren), 0 = none
+	uint8_t  pattern = 0;      // TAMA6 pattern playing (1-4), 0 = none
+	uint8_t  prog[24] = {};    // TAMA6 patterns: 4 x [next, 4 notes, 0]
+	uint32_t step    = 0;      // beeps, gaps and rests played so far
+	uint32_t left    = 0;      // output samples left in the current one
+	bool     on      = false;  // in a beep
+	double   hz      = 0.0;    // its pitch
+	double   phase   = 0.0;    // square wave phase, 0..1
+	// v18: a HuC3 melody (Pocket Family, $27 = 7). step = the note's fade
+	// steps begun (its level is 8 - step), 8 = past the note.
+	bool     melody    = false;
+	uint8_t  score[68] = {};   // HuC3 memory $78-$FF, high nibble first
+	uint8_t  pos       = 0;    // next score byte
+	uint8_t  transpose = 0;
+	uint8_t  length    = 0;    // the note's length code, 0-7
+};
+
 struct Apu
 {
 	ApuSquare ch1, ch2;
@@ -164,6 +185,9 @@ struct Apu
 
 	// Ring buffer of mixed stereo int16 samples (interleaved L,R).
 	int16_t   sample_buf[APU_SAMPLE_BUF_SIZE * 2];
+	// The cart speaker, one sample per frame beside sample_buf: hosts mix it
+	// at its own volume, apart from the GB's.
+	int16_t   speaker_buf[APU_SAMPLE_BUF_SIZE];
 	uint32_t  sample_head = 0;
 	uint32_t  sample_tail = 0;
 
@@ -190,6 +214,14 @@ struct Apu
 	uint32_t  dbg_ring_pushed  = 0;
 	uint32_t  dbg_ring_dropped = 0;
 	uint32_t  dbg_ring_drained = 0;
+
+	// A split seat's audio is thrown away — only the primary is heard — so
+	// the mixer and the sample ring are skipped for it. Everything a game
+	// can read back (channel enables, the frame sequencer, wave position,
+	// the LFSR) still steps exactly as it would with the mixer running.
+	bool      discard_output = false;
+
+	ApuCartSpeaker speaker;
 };
 
 void ApuReset(Apu &a, bool cgb, bool post_boot = false);
@@ -202,13 +234,25 @@ uint8_t ApuRead(Apu &a, uint16_t addr, bool cgb);
 void    ApuWrite(Apu &a, uint16_t addr, uint8_t value, bool cgb,
                  uint16_t div_counter, bool double_speed);
 
-int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples);
+// speaker_out, if given, gets the cart speaker for the same frames, laid out
+// like out (L = R).
+int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples, int16_t *speaker_out = nullptr);
 
 // Configure the downsample target. Idempotent.
 void ApuSetOutputRate(Apu &a, int32_t rate);
 
 // Tell the APU the actual GB clock rate it's being stepped at. Idempotent.
 void ApuSetClockHz(Apu &a, int32_t hz);
+
+// Sound a HuC3 cartridge tone ($0-$F) on the cart's speaker, from the start
+// (a tone already playing carries on).
+void ApuSpeakerStart(Apu &a, uint8_t tone);
+// Chirp TAMA6 pattern 1-4 of `prog` (the chip's RAM pages, 2 x 12 nibbles).
+void ApuSpeakerStartTama(Apu &a, uint8_t pattern, const uint8_t prog[24]);
+// Play the HuC3 melody in `nib` (memory $78-$FF, one nibble each; the same
+// melody playing carries on).
+void ApuSpeakerStartMelody(Apu &a, const uint8_t nib[0x88]);
+void ApuSpeakerStop(Apu &a);
 
 // Host-side channel enable mask, bits 0..3 = CH1..CH4. UI policy only.
 void    ApuSetHostChannelMask(uint8_t mask);

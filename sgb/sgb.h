@@ -48,15 +48,13 @@ public:
 	bool Init();
 	void Deinit();
 	void Reset();
-	// Like Reset() but ALSO clears the BIOS-handshake packet cache and
-	// counters. Use for SNES-side reset / new ROM load — Reset() alone
-	// preserves the cache, which is correct for in-game $6003 0→1 GB
-	// resets but wrong when the user invokes File→Reset.
+	// Power-on for an SNES-side reset / new ROM load: Reset() plus the
+	// link-cart patch state and the cart speaker.
 	void ColdReset();
 
 	// User-facing soft reset: warm Reset() that skips the staged boot-ROM
 	// overlay (game restarts at $0100 with run-mode handoff registers) and
-	// preserves the handshake cache, handoff state and the ICD2 $6003
+	// preserves the handoff state and the ICD2 $6003
 	// control latch, so a live SGB BIOS session keeps running without
 	// replaying the splash. Returns false (no reset performed) in BIOS
 	// mode while the boot handshake hasn't completed yet — the caller
@@ -115,6 +113,9 @@ public:
 	void PrepareBiosCart();
 	// The compatibility edit PrepareBiosCart applied, or "" when none did.
 	const char *SgbPatchName() const;
+	// Put this cart's link-cable rows (gb_patches.cpp) in or take them out.
+	// ColdReset follows the session; call it directly only before the core runs.
+	void SetLinkCartPatches(bool on);
 	// Tools only: skip the built-in per-game table in PrepareSgbcCart, so a
 	// candidate edit can be tested on the pristine image.
 	void SetSgbcTable(bool enabled);
@@ -228,7 +229,8 @@ public:
 
 	// Consume pending audio samples. Returns the count written
 	// (stereo frames — each frame stores L, R into out[2*i], out[2*i+1]).
-	int32_t DrainAudio(int16_t *out, int32_t max_samples);
+	// speaker_out, if given, gets the cart speaker for the same frames.
+	int32_t DrainAudio(int16_t *out, int32_t max_samples, int16_t *speaker_out = nullptr);
 
 	// Discard all pending audio samples without playing them. Consumer-side
 	// (moves tail to head), so it is as thread-safe as DrainAudio.
@@ -385,6 +387,314 @@ bool S9xSGBLoadROMBytes(const unsigned char *data, size_t size, const char *path
 void S9xSGBRunFrame(void);
 void S9xSGBRunCycles(int tcycles);
 
+// ---- Link cable ------------------------------------------------------------
+// Links emulator instances on this PC over loopback TCP (BGB 1.4
+// protocol). Two players is the direct cable, with the role sensed
+// rather than chosen; three or four makes this instance host an emulated
+// DMG-07 Four Player Adapter that the others dial into as ordinary
+// clients. See gb_serial.h.
+#define S9X_GBLINK_NONE   0
+#define S9X_GBLINK_SERVER 1
+#define S9X_GBLINK_CLIENT 2
+
+// Bring the cable up on Settings.GBLinkPort for a session of `players`
+// (2..4), returning the role taken. S9X_GBLINK_NONE means the socket
+// could not be opened; `err` says why. `force_adapter` hosts the DMG-07
+// even at 2 players (adapter-only games).
+int  S9xSGBLinkAutoStart(char *err, size_t err_cap, int players, bool force_adapter,
+                         bool client_only = false);
+
+// The loaded cart's multiplayer exists only through the DMG-07 Four
+// Player Adapter, so even a 2-player session must host it.
+bool S9xSGBCartNeedsDmg07(void);
+
+// Faceball 2000: the one cart whose dormant 16-player mode can ride the
+// custom ring cable. Only it may open a 5..15-seat session.
+bool S9xSGBCartIsFaceball(void);
+
+// Role of the live session, or S9X_GBLINK_NONE when unplugged.
+int  S9xSGBLinkGetRole(void);
+
+// Game Boys on the session including this one (0..4). Governs what a
+// disconnect means: on a direct cable one side leaving ends it for both,
+// on a hub only that seat empties.
+int  S9xSGBLinkPlayerCount(void);
+
+void S9xSGBLinkDisconnect(void);
+
+// Service the socket while the emulation loop is parked.
+void S9xSGBLinkPump(void);
+bool S9xSGBLinkShouldHoldFrame(void);
+
+// Enabled = a session exists (listening, connecting or connected).
+// Connected = a peer is attached and the version handshake is done.
+bool S9xSGBLinkIsEnabled(void);
+bool S9xSGBLinkIsConnected(void);
+
+// One-line state for the OSD, e.g. "Link cable: connected (Master)".
+void S9xSGBLinkGetStatusText(char *buf, size_t cap);
+
+// True once when the driving end changed and is worth re-announcing;
+// fills `buf` with the text to show. Poll it from the frame loop.
+bool S9xSGBLinkTakeStatusChange(char *buf, size_t cap);
+
+// ---- Split screen -----------------------------------------------------------
+// Runs 2-4 cores of the same game inside this process, tiled into one
+// frame and linked in-process (direct cable at two seats, DMG-07 at
+// three or four). BIOS-less GB mode only. Player N reads SNES joypad N;
+// seats past the first save to <base>.savN. Mutually exclusive with the
+// socket link.
+// Faceball 2000 alone may seat 5..SGB_MAX_LINK_PLAYERS, wired as its
+// custom ring cable.
+constexpr int SGB_MAX_LINK_PLAYERS = 15;
+// places: bit p = player p sits at the table (players = the highest one); a
+// place left out starts empty. 0 seats every place from 2 to players.
+bool S9xSGBSplitStart(int players, const char *battery_base_path, unsigned places = 0);
+
+// A seat may run a Game Boy Model of its own instead of the master's - a plain
+// Game Boy on the cable of a Super Game Boy session, a Color beside a mono one.
+// SGB_SEAT_MODEL_MASTER follows the master; anything else is S9X_GBBOOT_GB or
+// S9X_GBBOOT_GBC. A Super Game Boy seat is not a model of the split engine at
+// all: it is a whole SNES machine of its own (see the external seats below).
+constexpr unsigned char SGB_SEAT_MODEL_MASTER = 0xFF;
+void          S9xSGBSplitSetSeatModel(int player /*2..15*/, unsigned char policy);
+unsigned char S9xSGBSplitGetSeatModel(int player);
+
+// External seats. A Super Game Boy seat is a second SNES running the real SGB
+// BIOS on its own thread (the frontend owns that machine); its Game Boy is
+// that machine's SGB::Instance(). The split engine keeps such a seat ON THE
+// CABLE and does nothing else with it: no stepping (its SNES clocks it), no
+// pad (its SNES reads its controller port), no picture (its own GFX.Screen),
+// no reset (its machine resets). Cross-thread pointers are safe because the
+// machines run cooperatively - one inside a frame at a time.
+//
+// Flag a seat external BEFORE S9xSGBSplitStart so no split core is built for
+// it; hand its core over once its machine has loaded, which rewires the cable.
+void S9xSGBSplitSetSeatExternal(int player /*2..15*/, bool external);
+bool S9xSGBSplitSeatIsExternal(int player);
+
+// Link Other Game: a seat that plays its own cart instead of the master's,
+// with that game's own battery file (none: the master's base + player). Set
+// BEFORE S9xSGBSplitStart; data nullptr puts the seat back on the master's cart.
+void S9xSGBSplitSetSeatRom(int player /*2..15*/, const unsigned char *data, size_t size,
+                           const char *battery_path);
+bool S9xSGBSplitSeatHasRom(int player);
+void S9xSGBSplitSetExternalCore(int player, SGB::Emulator *core);
+
+// Seat machines run in step with the cable, not a frame behind it. The split
+// engine calls the yield every `every_gb_cycles` of stepping, from both of its
+// loops; the frontend then runs each seat machine until its Game Boy has
+// advanced the same amount. Sub-frame link protocols (the DMG-07 hub, the
+// Faceball ring) need this: a reply a frame late is no reply.
+typedef void (*S9xSGBSplitYieldFn)(int gb_cycles);
+void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles);
+
+// Two consoles are never switched on together: a 2-player seat machine is
+// owed a head start, which the yield spends as that machine's own slices
+// while the master waits. Game Boy cycles still owed (once), else 0.
+int32_t S9xSGBSplitTakeSeatHeadStart(int player);
+
+// Each console has its own crystal: the Game Boy cycles a seat runs while the
+// master runs master_cycles (a fixed few tens of ppm apart, remainder carried).
+int32_t S9xSGBSplitSeatCycles(int player, int32_t master_cycles);
+
+// On a seat machine's own thread. The role keeps its SNES tick from stepping
+// the master's split seats; the target makes S9xMainLoop return once this
+// machine's SNES has run that many scanlines in total, mid-frame if need be.
+// Scanlines, because they are the one clock that ticks on a BIOS-mode machine
+// while the BIOS holds its Game Boy in reset through the splash - every
+// SNES->GB sync is gated on the release.
+void    S9xSGBSetSeatMachine(bool seat);
+bool    S9xSGBIsSeatMachine(void);
+void    S9xSGBMachineRunUntilLines(int64_t snes_lines);
+int64_t S9xSGBMachineLines(void);
+
+// The ungated per-scanline hook (cpuexec's scanline end, BIOS mode): this
+// machine's line clock, and the engine's yield to seat machines.
+void    S9xSGBOnSnesScanline(void);
+
+// This machine's Game Boy clock, for pacing instruments.
+int64_t S9xSGBMachineGbCycles(void);
+
+// On a seat machine the SNES->GB tick only BANKS the Game Boy cycles the
+// SNES produced; this pays them out. Called once per engine yield with the
+// yield's own Game Boy cycles, so the seat's Game Boy steps in exactly the
+// cable's dose - the SNES's DMA lumps and coasting never reach it.
+void    S9xSGBMachinePayGb(int gb_cycles);
+void S9xSGBSplitStop(const char *battery_base_path);  // saves seat batteries first
+bool S9xSGBSplitActive(void);
+int  S9xSGBSplitPlayers(void);   // places at the table, the master's included
+// A table seats join and leave while it plays. A seat keeps its place (player
+// number, pad, DMG-07 port): one that leaves empties it, and a join refills
+// it. The rest play on, the cable re-plugged under them; a table that has had
+// three players keeps the DMG-07 down to two. Add powers a Game Boy on in that
+// place (a machine seat's comes with its machine); Remove saves its battery.
+// A player leaving mid-game leaves a ghost: their Game Boy plays on unattended
+// until the game stops using the link, so nobody else stalls; Remove then
+// returns false and ReleaseGhosts (once a frame) unplugs it, returning the
+// unplugged players as bits (1 << player). Add on a ghost's place takes it back.
+bool S9xSGBSplitAddSeat(int player /*2..15*/);
+bool S9xSGBSplitRemoveSeat(int player /*2..15*/);   // true = unplugged now
+bool S9xSGBSplitSeatPresent(int player);
+bool S9xSGBSplitSeatGhost(int player);
+int  S9xSGBSplitPresentPlayers(void);   // the master and the seats present; 0 = off
+int  S9xSGBSplitGhosts(void);
+unsigned S9xSGBSplitReleaseGhosts(void);   // also takes mid-game unlinks off the wire
+// A seated player unlinks without getting up: their Game Boy plays on, no reset,
+// out of infrared range at once and off the cable now or, mid-game, once the game
+// lets go (as a ghost). SetSeatLinked returns false when nothing changed.
+bool S9xSGBSplitSetSeatLinked(int player, bool linked);
+bool S9xSGBSplitSeatLinked(int player);
+int  S9xSGBSplitUnlinkedSeats(void);
+// Player 1 and the next linked player at the table face each other: Infrared is the
+// Game Boy Color port, GB KISS the HuC1/HuC3 cart LEDs. Each holds across
+// sessions until turned off.
+void S9xSGBSetInfrared(bool on);
+bool S9xSGBGetInfrared(void);
+void S9xSGBSetGbKiss(bool on);
+bool S9xSGBGetGbKiss(void);
+// The loaded cart has an infrared LED of its own (a Hudson GB KISS cart).
+bool S9xSGBCartHasGbKiss(void);
+// Hudson's GB KISS LINK, the PC's infrared modem, facing player 1's cart: it
+// sends a .gbf to the GB KISS menu, a Nectaris GB map (.nmd or a 512-byte
+// record) to that game, or takes one back. Status: S9X_KISSLINK_IDLE..FAILED.
+enum
+{
+	S9X_KISSLINK_SEND_FILE = 1, S9X_KISSLINK_SEND_MAP, S9X_KISSLINK_RECEIVE_MAP,
+	S9X_KISSLINK_IDLE = 0, S9X_KISSLINK_WAITING, S9X_KISSLINK_BUSY, S9X_KISSLINK_DONE, S9X_KISSLINK_FAILED,
+	S9X_KISSLINK_MAP_BYTES = 512
+};
+bool S9xSGBCartHasKissMenu(void);
+bool S9xSGBCartIsNectaris(void);
+bool S9xSGBKissLinkStart(int kind, const uint8_t *data, size_t size, const char **error);
+void S9xSGBKissLinkCancel(void);
+int  S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char **error);
+bool S9xSGBKissLinkReceivedMap(uint8_t *out /* S9X_KISSLINK_MAP_BYTES */);
+// Namcot's Barcode Boy on player 1's link port, while no Game Boy Link session
+// holds it (sgb/gb_barcodeboy.h has the known cards). Scan takes 13 digits,
+// connects it, and the card waits until the game asks for one; ReadCount
+// goes up as a game takes a card whole. Game: the loaded cart's name when
+// it reads the Barcode Boy, else NULL.
+bool S9xSGBBarcodeBoyHasPort(void);
+void S9xSGBBarcodeBoyConnect(bool on);
+bool S9xSGBBarcodeBoyConnected(void);
+bool S9xSGBBarcodeBoyScan(const char *code);
+bool S9xSGBBarcodeBoyPending(void);
+const char *S9xSGBBarcodeBoyLastCode(void);
+unsigned S9xSGBBarcodeBoyReadCount(void);
+const char *S9xSGBBarcodeBoyGame(void);
+// Barcode Taisen Bardigun's card reader, on the same port (sgb/gb_bardigun.h).
+// The calls match the Barcode Boy's; Scan also takes an 8-digit EAN-8, and
+// connecting either scanner unplugs the other.
+void S9xSGBBardigunConnect(bool on);
+bool S9xSGBBardigunConnected(void);
+bool S9xSGBBardigunScan(const char *code);
+bool S9xSGBBardigunPending(void);
+const char *S9xSGBBardigunLastCode(void);
+unsigned S9xSGBBardigunReadCount(void);
+const char *S9xSGBBardigunGame(void);
+void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
+// Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
+// feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero
+// today: the bots move in unison). Push once per host frame; read per seat.
+void     S9xSGBSplitEchoPush(uint16_t pad);
+uint16_t S9xSGBSplitEchoPad(int player /*5..15*/);
+// Debug peek at a seat's WRAM/HRAM (player 1 = primary). Returns 0xFF
+// outside $C000-$DFFF / $FF80-$FFFE. Harness diagnostics only.
+uint8_t  S9xSGBSplitPeek(int player, uint16_t addr);
+void S9xSGBSplitRunFrame(void);
+
+// Faceball ring stage warnings, once per host frame. RunFrame calls it
+// itself; BIOS mode never reaches RunFrame and must call it directly.
+void S9xSGBSplitRingWatch(void);
+
+// Power-cycle the seats with the master. The SGB BIOS resets the GB partway
+// through its boot; without this only the master reboots and the seats keep
+// the head start that puts them ahead for the rest of the session.
+void S9xSGBSplitResetSeats(void);
+
+// Seat cores for the BIOS-mode soft-reset checkpoint. They are not in
+// snes9x's freeze, and the unfreeze cold-resets them, so without these a
+// warm restart drops every seat back to the cart while the master resumes
+// mid-game. Only capture while S9xSGBSplitCheckpointable() — the shared
+// ring/hub state is rebuilt on load, which is exact only when the cable
+// has not arbitrated yet.
+bool    S9xSGBSplitCheckpointable(void);
+size_t  S9xSGBSplitStateSize(void);
+bool    S9xSGBSplitStateSave(uint8_t *buf, size_t cap);
+bool    S9xSGBSplitStateLoad(const uint8_t *buf, size_t size);
+
+// Link session save states. Each seat's Game Boy is saved beside the master's
+// state file as "<file>_p<player>". Masks have bit N set for player N.
+void     S9xSGBSplitSeatStatePath(const char *state_file, int player, char *out, size_t cap);
+// After the master's save: every seat, and the cable when the session is whole.
+unsigned S9xSGBSplitSaveSeatStates(const char *state_file);
+// Before a master load that power-cycles the seats (BIOS mode): seats without a
+// file of their own then resume where they were. false lets go of them.
+void     S9xSGBSplitHoldSeats(bool hold);
+// After the master's load: every seat with a file. All of one save point
+// restores the cable mid-byte; otherwise the cable plays on. `missing` = seats
+// present with no usable file.
+unsigned S9xSGBSplitLoadSeatStates(const char *state_file, unsigned *missing);
+// One player's Game Boy alone (2..15); the rest of the table plays on.
+bool     S9xSGBSplitSaveSeatState(int player, const char *path);
+bool     S9xSGBSplitLoadSeatState(int player, const char *path);
+// The whole table's picture from a session save (every player's screen tiled),
+// malloc'd for the caller to free; false when the slot has none.
+bool     S9xSGBSplitStatePreview(const char *state_file, uint16_t **image, int *w, int *h);
+
+// Player p's Game Boy (2..15) power-cycled: unplugged, rebooted, plugged back
+// (an unlinked seat stays off). False for a seat on a machine of its own.
+bool     S9xSGBSplitResetSeat(int player);
+
+// Apply Cheats per seat: the master's enabled cheat codes, applied to that
+// seat's Game Boy each frame too. Only a seat on the master's own cart can.
+struct SgbSeatCheat { uint32_t address; uint8_t byte; bool conditional; uint8_t cond_byte; };
+bool     S9xSGBSplitSeatCanCheat(int player);
+bool     S9xSGBSplitSeatCheats(int player);
+bool     S9xSGBSplitSetSeatCheats(int player, bool on);   // off puts the replaced bytes back
+// Once a frame with every enabled code (none: cheats off), after the master's.
+void     S9xSGBSplitApplySeatCheats(const SgbSeatCheat *cheats, size_t count);
+// "players 1-4", "players 1 and 3", "player 2".
+void     S9xSGBSplitPlayersText(unsigned mask, char *out, size_t cap);
+void S9xSGBSplitBlitScreen(uint16_t *dest, uint32_t pitch_pixels);
+// One seat's frame (160x144) for its window. In BIOS mode the frame is the
+// snapshot the measured pane delay selects; false = the seat has nothing of
+// its own yet (master mid-boot) and its window should keep the master's pane.
+bool S9xSGBSplitCopySeatFrame(int player /*2..4*/, uint16_t *dest);
+
+// BIOS-mode pane-sync instrument. The master's pane crosses the ICD2 ring,
+// the BIOS's VRAM lifts and the SNES PPU before it is seen; the seats' panes
+// do not. MeasurePaneSync matches the presented SNES pane (per 8-pixel band)
+// against recent master frames to find the frame age actually on screen, and
+// derives the snapshot age seats present at so both show the same moment.
+// Call once per host frame with the frame being presented.
+struct SgbPaneSync
+{
+	bool     valid;         // a resolved measurement exists this frame
+	uint32_t newest_frame;  // master frames completed at measure time
+	int      lag_min;       // newest - matched frame, best band
+	int      lag_max;       // newest - matched frame, worst band
+	int      conf_pct;      // mean best-match percentage across bands
+	int      seat_delay;    // snapshot age seats present at (frames)
+	char     band_map[19];  // per-band lag digit, '=' ambiguous, '?' no match
+};
+void S9xSGBSplitMeasurePaneSync(const uint16_t *snes_frame, uint32_t pitch_pixels);
+void S9xSGBSplitGetPaneSync(SgbPaneSync *out);
+// Trace comparator: our decoded SGB palettes vs the BIOS's rendered truth.
+void S9xSGBDebugSgbCompare(const uint16_t *snes_frame, uint32_t pitch_pixels,
+                           const uint16_t *cgram);
+// The primary core's decoded SGB state, for debug tooling.
+namespace SGB { struct SgbState; struct PacketState; }
+const SGB::SgbState *S9xSGBGetSgbState(void);
+// Per-seat (1..N, 1 = primary). Null when that seat is not running.
+const SGB::SgbState *S9xSGBSplitGetSgbState(int player);
+const SGB::PacketState *S9xSGBGetPacketState(void);
+int  S9xSGBSplitScreenWidth(void);
+int  S9xSGBSplitScreenHeight(void);
+void S9xSGBSplitLoadBatteries(const char *battery_base_path);
+void S9xSGBSplitSaveBatteries(const char *battery_base_path);
+
 // Accumulator-based SNES→GB cycle stepping for BIOS mode. Call per
 // SNES opcode (or per H event) with the number of SNES master cycles
 // just consumed. Internally divides by 5 (SGB1 clock ratio) and steps
@@ -507,6 +817,9 @@ bool S9xSGBGetLayerEnabled(int layer);
 void S9xSGBCaptureScanline(const unsigned char *pixels);
 void S9xSGBSetJoypad(uint16_t snes_pad_mask);
 void S9xSGBOnJoyserWrite(uint8_t value);
+// Same, for the core that owns the memory doing the write — a split-screen
+// seat sniffs its own packets, not the primary's. Null owner is a no-op.
+void S9xSGBOnJoyserWriteCore(void *core, uint8_t value);
 bool S9xSGBIsActive(void);
 
 // Composite the current frame (border + GB screen + mask mode) into a
@@ -546,9 +859,11 @@ void S9xSGBOverlayBiosMask(uint16_t *dest, uint32_t pitch_pixels);
 
 // Audio bridge — match snes9x's S9xGetSampleCount / S9xMixSamples
 // contract. `count_int16s` is the number of int16 samples (stereo frame
-// × 2), returning the number actually drained.
+// × 2), returning the number actually drained. speaker_dest, if given, gets
+// the cart speaker (HuC3/TAMA5) for the same samples, which the GB volume
+// leaves alone (S9xMixCartSpeaker).
 int32_t S9xSGBGetSampleCount(void);
-int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s);
+int32_t S9xSGBDrainSamples(int16_t *dest, int32_t count_int16s, int16_t *speaker_dest = nullptr);
 void    S9xSGBClearSamples(void);
 // Host-ring I/O meters in stereo frames (PushSample / ApuDrain sides).
 void    S9xSGBGetAudioRingStats(uint32_t *pushed, uint32_t *dropped, uint32_t *drained);
@@ -664,6 +979,9 @@ bool S9xSGBTakeSramDirty(void);
 // The loaded cart keeps a clock (MBC3 with its RTC, HuC3 or TAMA5). The battery
 // save carries it; Settings.GBRTCSeparate / GBRTCOff / GBRTCTime shape how.
 bool S9xSGBCartHasClock(void);
+// The loaded cart has its own speaker (HuC3 or TAMA5); Sound Settings'
+// Speaker volume (S9xCartSpeakerVolume) sets its level.
+bool S9xSGBCartHasSpeaker(void);
 
 // Raw cart battery-RAM pointer + size, for hosts that persist save RAM via a
 // memory-region API (e.g. libretro's RETRO_MEMORY_SAVE_RAM). nullptr / 0 when

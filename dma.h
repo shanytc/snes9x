@@ -30,7 +30,7 @@ struct SDMA
 #define TransferBytes	DMACount_Or_HDMAIndirectAddress
 #define IndirectAddress	DMACount_Or_HDMAIndirectAddress
 
-extern struct SDMA	DMA[8];
+extern S9X_MACHINE struct SDMA	DMA[8];
 
 bool8 S9xDoDMA (uint8);
 void S9xStartHDMA (void);

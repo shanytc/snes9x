@@ -22,17 +22,22 @@ SGBSRCS := $(filter-out $(SGBDIR)/tests/%.cpp,$(wildcard $(SGBDIR)/*.cpp))
 STBSRC  := $(ROOT)/external/stb/stb_image_implementation.cpp $(ROOT)/sha256.cpp
 INCS    := -I$(ROOT) -I$(SGBDIR) -I$(ROOT)/external/stb
 
+# gb_link.cpp needs winsock on Windows hosts (MinGW/MSYS).
+ifeq ($(OS),Windows_NT)
+LDLIBS += -lws2_32
+endif
+
 TARGET := sgb_test
 SRCS   := cpu_test.cpp host_stubs.cpp
 
 all: $(TARGET)
 
 $(TARGET): $(SRCS) $(SGBSRCS)
-	$(CXX) $(CXXFLAGS) $(INCS) $(SRCS) $(SGBSRCS) $(STBSRC) -o $@
+	$(CXX) $(CXXFLAGS) $(INCS) $(SRCS) $(SGBSRCS) $(STBSRC) -o $@ $(LDLIBS)
 
 # Headless GB Emulator Shootout runner — see acid_test.cpp.
 acid_test: acid_test.cpp host_stubs.cpp $(SGBSRCS)
-	$(CXX) $(CXXFLAGS) $(INCS) acid_test.cpp host_stubs.cpp $(SGBSRCS) $(STBSRC) -o $@
+	$(CXX) $(CXXFLAGS) $(INCS) acid_test.cpp host_stubs.cpp $(SGBSRCS) $(STBSRC) -o $@ $(LDLIBS)
 
 # The SGB child acid_test starts for --sgb1-bios/--sgb2-bios runs: the whole
 # SNES core, so the real Super Game Boy BIOS runs each SGB test (acidsgb.h).

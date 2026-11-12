@@ -68,9 +68,11 @@ TRenderMethod _RenderMethod = RenderPlain;
 TRenderMethod _RenderMethodHiRes = RenderPlain;
 
 // Used as change log
-static uint8 ChangeLog1 [2 * MAX_SNES_WIDTH * MAX_SNES_HEIGHT];
-static uint8 ChangeLog2 [2 * MAX_SNES_WIDTH * MAX_SNES_HEIGHT];
-static uint8 ChangeLog3 [2 * MAX_SNES_WIDTH * MAX_SNES_HEIGHT];
+// Per-pixel deltas walked at the source pitch, so they size with the
+// composition buffer's stride, not the SNES's own width.
+static uint8 ChangeLog1 [2 * GFX_SCREEN_PITCH * MAX_SNES_HEIGHT];
+static uint8 ChangeLog2 [2 * GFX_SCREEN_PITCH * MAX_SNES_HEIGHT];
+static uint8 ChangeLog3 [2 * GFX_SCREEN_PITCH * MAX_SNES_HEIGHT];
 
 BYTE *BlendBuffer = NULL;
 

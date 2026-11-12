@@ -9,6 +9,8 @@
 
 #include <cstdint>
 
+#include "gb_serial.h"
+
 namespace SGB {
 
 struct Cart;
@@ -43,6 +45,7 @@ struct Memory
 	Apu    *apu    = nullptr;
 	Timer  *timer  = nullptr;
 	Joypad *joypad = nullptr;
+	Serial *serial = nullptr;
 	// CPU clock, for PPU-register write-time reconstruction. In the per-dot
 	// interleave the CPU trails the PPU by up to kMaxOpcodeTCycles, so at the
 	// moment a store reaches PpuWriteReg the PPU has already rendered dots the
@@ -69,11 +72,26 @@ struct Memory
 	uint8_t  svbk = 1;            // 0xFF70
 	bool     key1_armed   = false;
 	bool     double_speed = false;
+	// True only for the core wired to the SGB BIOS - the primary. A seat
+	// has its own sniffers but nothing driving them from the SNES side,
+	// so this is what tells it to answer for itself.
+	bool     sgb_feed     = true;
+	// The Emulator these $FF00 writes belong to. Each core sniffs its own
+	// packets; before this they all landed on the primary's assemblers,
+	// which is why seats had to be cut out of the path entirely.
+	void    *sgb_owner    = nullptr;
 
 	// CGB undocumented registers ($FF72/$FF73/$FF74 R/W, $FF75 bits 6-4).
 	uint8_t  ff72 = 0, ff73 = 0, ff74 = 0, ff75 = 0;
 	// KEY0 $FF4C: boot ROM CPU-mode select; bit 2 = DMG-compat. Locked at $FF50.
 	uint8_t  key0 = 0;
+
+	// RP $FF56 (gb_infrared.cpp): LED bit 0 + read enable bits 6-7, and the
+	// PPU time the LED last lit, which the facing sensor fades against.
+	uint8_t  rp = 0;
+	int64_t  rp_lit_at = -1;
+	// HuC1 cartridge infrared LED, bit 0 (gb_infrared.cpp).
+	uint8_t  cart_ir = 0;
 
 	// True when the machine is CGB hardware, including its DMG-compat
 	// mode (ppu->cgb is false there). STOP display + speed-switch gates.

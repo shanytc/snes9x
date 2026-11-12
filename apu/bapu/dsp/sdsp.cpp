@@ -9,7 +9,7 @@ void S9xAudioWaveformPushVoice(int voice, int ch, int amp);
 #define DSP_CPP
 namespace SNES {
 
-DSP dsp;
+S9X_MACHINE DSP dsp;
 
 #include "SPC_DSP.cpp"
 

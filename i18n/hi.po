@@ -6735,3 +6735,2473 @@ msgstr ""
 #: gtk/src/snes9x.ui
 msgid "None"
 msgstr ""
+
+# === Added by i18n/extract_strings.py ===
+
+#: qt/src/EmuMainWindow.cpp
+msgid "\"%1\" holds MSU-1 audio data, but \"%2\" already exists, so it can't be renamed. Load that file instead, or unpack the archive and load the ROM from the folder."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "\"%1\" holds MSU-1 audio data. SuperSnes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to \"%2\" and load it?"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "\"%1\" not found"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "%1 finished"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "%1 minutes"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "%1 paused"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "%1 resumed"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "%1 scripts running"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "%1 started"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "%1 stopped"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "%1 stopped with an error"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "%1, from %2."
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "%d scripts running"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "%n digit(s); a barcode has 8, 12 or 13."
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "(game not supported)"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "(none)"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "0.25s"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "0.5s"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "0x8000"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "0x8800"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "1 script running"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "136 bytes (mGBA compatible)"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "16x16 (same line)"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "17 bytes (BGB, SameBoy compatible)"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "1s"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "24 bytes (VBA-M compatible)"
+msgstr ""
+
+#: qt/src/TilemapViewerWindow.cpp
+msgid "2bpp"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "2s"
+msgstr ""
+
+#: qt/src/TilemapViewerWindow.cpp
+msgid "4bpp"
+msgstr ""
+
+#: qt/src/TilemapViewerWindow.cpp
+msgid "8bpp"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "8x16 (same line)"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "<html><head/><body><p>The SNES scanned out 256 columns, but its backgrounds, Mode 7 matrix and sprites all carry on past them. Widescreen draws what was there.</p><p>Games that were not made for it would show artifacts at the edges, since they culled sprites and clamped scrolling there, so the choice is offered only for games the emulator has a widescreen hack for. Picking a width patches the cart in memory into that hack and restarts it; picking None puts the original cart back.</p></body></html>"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Add a watch: type an expression and press Enter"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Add Breakpoint"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Add Conditional Breakpoint"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Add Watch"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Always on Top"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Any of these loads here. Each emulator reads only its own: BGB and mGBA then keep just the RAM, and VBA-M won't load the save."
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "API Reference"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Apply the built-in widescreen patch to this game at the selected width. The patch is applied in memory only, and the game restarts. Available for supported games only."
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "Auto"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "Auto (LCDC)"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Backdrop (Color 0)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Barcode Battler II"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Barcode Battler II (Connected)"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Barcode Battler: %1 scanned"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Barcode:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Barcodes"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Barcodes: Connect"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Barcodes: Scan Barcode"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Barcodes: Use Last Barcode Again"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Basics"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "BG"
+msgstr ""
+
+#: qt/src/TilemapViewerWindow.cpp
+msgid "BG%1 not valid in mode %2"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Bilinear Mode 7"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Boot ROM"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Boot ROMs"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "break"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Break"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Break on Errors"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "breakpoint"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Breakpoints"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Call Stack"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "camera"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Camera:"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Campus Challenge '92"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Cartridge DIP Switches"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Cartridge DIP Switches (none on this board)"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Cartridge RAM"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Cartridge ROM"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "CD Images (*.cue *.iso *.bin)"
+msgstr ""
+
+#: qt/src/GBViewerWindows.cpp
+msgid "Cell %1,%2  map %3\nTile %4"
+msgstr ""
+
+#: qt/src/GBViewerWindows.cpp
+msgid "Cell %1,%2  map %3\nTile %4  attr %5 (pal %6 bank %7)"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "CGB BG"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "CGB OBJ"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Char"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Cheat Finder"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Check Play"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Clear Console"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Clear Recent Scripts"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Clipping Windows"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Close Script"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Close Window"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Color Picker"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Commercial  Arcade Boards"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Condition"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Condition:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Configure BIOS files for system emulation. Nothing is searched for: an entry without a file runs its built-in, if it has one, or is unavailable."
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Connect first: Input > Barcodes > Connect."
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Connect:"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Console"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Continue"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "CoProcessors  Special Chips"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Copy"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Copy screenshot"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Copy Screenshot to Clipboard"
+msgstr ""
+
+#: win32/CGBSpriteViewerDlg.cpp
+msgid "Copy to Clipboard"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Couldn't open"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Couldn't open %1."
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Couldn't write"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Couldn't write %1."
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Cut"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Cx4"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Cyan"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Date"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Debug"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Debug Menu"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Debugging"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Disable Breakpoint"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "DMA Inspector"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "DMG BGP"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "DMG OBP0"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "DMG OBP1"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Double-click to insert into the script"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Draw the supervisor screens over the MB90082 OSD chip's solid background raster instead of superimposing the text on the SNES video."
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Drawing Showcase"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Drop a 100-yen coin into the box. Play time per coin is set in the attendant menus."
+msgstr ""
+
+#: biosmanager.cpp
+msgid "DSP"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "DSP-1"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "DSP-1B"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "DSP-2"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "DSP-3"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "DSP-4"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "e.g. 4901234567894"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Edit Breakpoint"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Eject Disc"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Eject Disc:"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Enable Breakpoint"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Enable Color Correction"
+msgstr ""
+
+#: qt/src/ColorCorrectionDialog.cpp
+msgid "Enable color correction"
+msgstr ""
+
+#: qt/src/ColorCorrectionDialog.cpp
+msgid "Enable color correction (accurate %1 colors)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "English"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Enter a card's 13-digit (EAN-13), 12-digit (UPC-A) or 8-digit (EAN-8) barcode, pick a known card, or read it with a camera or from a picture."
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "error:"
+msgstr ""
+
+#: qt/src/PadPictureWidget.cpp
+msgid "European Controller"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Examples"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Expansions  Peripherals"
+msgstr ""
+
+#: qt/src/PPUViewerWindow.cpp
+msgid "Failed to save PNG."
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Failed to save ZIP."
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Fast (chip accurate)"
+msgstr ""
+
+#: qt/src/EmuCanvasQt.cpp
+msgid "Fast Forwarding"
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Fastest (less accurate)"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Find"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Find (or :line)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Find a card:"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Find Next"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Find Previous"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "finished"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "Firmware"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Flags"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "FPS Counter"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Frame HUD"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Frame time"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "From Image"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Front-panel reset: restarts the game in play, or backs out of the game select screens."
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Function"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Game %1"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Game %1 (%2)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game 1"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game 2"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game 3"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Game Boy (DMG) Palette"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Game-specific"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "GAME/TV Switch"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "GAME/TV Switch:"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Globals"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Go to Line"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Graphics  PPU"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Graphics Layer 1"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Graphics Layer 2"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Graphics Layer 3"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Graphics Layer 4"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Handheld Systems"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "has changes that aren't saved.\n\nSave them before closing?"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Hex Viewer"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Hit Count"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Hit count:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Hold Stronger or Weaker to turn the dial; it stays where you leave it.\n\nBalls launch at the dial's strength unless Stop is held. Use Joypad #1 for the menus.\n\nConnect it with Input > Use Sunsoft Pachinko. Games look for it when they start, so reset after connecting."
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Hold the barcode up to the camera, straight and in focus."
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "How fast Legacy, Native and Firmware run"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "HuC-3 clock format (Robopon, Pocket Family):"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Input Display"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Input History"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Insert Coin (SFC-Box / NSS)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Insert Coin (Slot 2)"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Insert Coin (slot 2):"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Insert Disc"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Insert Disc:"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Instant Rewind"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Instructions"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Instructions:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Japanese"
+msgstr ""
+
+#: qt/src/PadPictureWidget.cpp
+msgid "Japanese Controller"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Keep a Value"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch Check Play:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch Options:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch Power OFF:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Key Switch Self Test:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Keyswitch"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Layer Visibility"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "Legacy (HLE)"
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Legacy (HLE): the old high-level code, some games glitch"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "Legacy (HLE): the old high-level code, some games glitch\nNative (LLE): the chip itself, exact, no file needed\nFirmware: the chip running the dump picked here, exact but slower\nTakes effect at the next load or hard reset"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Line %1, Col %2"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Line %ld, Col %ld"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Line:"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Locals"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Location"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Lock Screen Resize"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Log Message"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Log message:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Lua"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Lua 5.4 Manual"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Lua Scripting"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Lua scripts (*.lua);;All files (*)"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Magenta"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Memory"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Memory Breakpoint"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Memory Watch"
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Milliseconds the emulator takes per frame while each game plays a scripted scene. Lower is faster. Measured on one PC."
+msgstr ""
+
+#: qt/src/TilemapViewerWindow.cpp
+msgid "Mode %1  BG%2  %3bpp\n%4x%5 tiles  %6x%7 px\nMap @ %8\nTiles @ %9"
+msgstr ""
+
+#: qt/src/TilemapViewerWindow.cpp
+msgid "Mode 7"
+msgstr ""
+
+#: qt/src/TilemapViewerWindow.cpp
+msgid "Mode 7  128x128  8bpp"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Mode 7 EXTBG"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Mount/Eject Slot 1:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Mount/Eject Slot 2:"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Mount/Eject Slot 3:"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Name, set or barcode"
+msgstr ""
+
+#: qt/src/BiosManagerDialog.cpp
+msgid "Native (LLE)"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "New"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "New Script"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Nintendo Super System"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Nintendo Super System - cartridge for slot %1"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Nintendo Super System OSD Font"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "No EAN-13, UPC-A or EAN-8 barcode was found in this picture. Crop it closer to the barcode and keep the bars upright."
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "No scripts running"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "No video camera found."
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Normal"
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Nothing selected: Slow (chip accurate)"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "NSS Cartridges (*.zip *.bin *.sfc)"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Insert Coin (Slot 2)"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Instructions"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Mount/Eject Slot 1"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Mount/Eject Slot 2"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Mount/Eject Slot 3"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Page Down"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Page Up"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Restart Game"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Select Slot 1"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Select Slot 2"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Select Slot 3"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "NSS: Service Credit"
+msgstr ""
+
+#: qt/src/GBViewerWindows.cpp
+msgid "OBP%1  %2"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "OFF"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "ON"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "On Screen"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Open"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Open Lua Script"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Operational Guide"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Optional, adds boot logo and GB colors"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Optional, adds the boot logo"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Optional, built-in is used"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Optional, built-in native chip"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Options opens the attendant setup menus, Self Test the self-test; OFF/ON/Check Play are play modes; Power OFF cuts the power and turning back boots the box."
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "OSD Backdrop"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "OSD Language"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Page Down"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Page Down:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Page Up"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Page Up:"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Pal"
+msgstr ""
+
+#: qt/src/GBViewerWindows.cpp
+msgid "pal %1 bank %2  %3"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "Palette"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Palette Viewer"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Paste"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Pause / Resume"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Paused"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "paused"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Paused at line %1 (%2)"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Paused at line %d (%s)"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Paused Overlay"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "picture"
+msgstr ""
+
+#: qt/src/PPUViewerWindow.cpp
+msgid "PNG Image (*.png)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Power OFF"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "PowerFest '94"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "PPU State"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Pri"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Programming in Lua"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "RAM Heat Map"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Random"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Read %1 from the %2."
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Read Barcode from Image"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Real Time Clock"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Realtime"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Redo"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Remove All Breakpoints"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Remove Breakpoint"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Remove Watch"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Reset Switch"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Reset Switch:"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Reset Zoom"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Restart"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Restart Game"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Restart Game:"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Resume"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "resumed"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.cue *.iso *.gb *.gbc *.sgb *.msu *.msu1 *.zip *.gz)"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Routine Profiler"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "RTC on: the cart's clock follows the PC's clock"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "RTC Settings"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Running"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "S-CPU Bus"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "SA1 Bus"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Satellaview / BS-X"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Save Changes"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Save changes to %1?"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Save Lua Script"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Save RTC Separately (.rtc)"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Save RTC to Battery Save (.sav)"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Saved"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Saved %1"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Savestate Loop"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Savestates"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Scan"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Scan Barcode"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Scan Barcode:"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Scanned %1."
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Script"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Script output appears here. Double-click an error to jump to its line."
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Search functions"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Select All"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Select Preset"
+msgstr ""
+
+#: qt/src/TileViewerWindow.cpp
+msgid "Selected tile #%1\nAddress %2"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Self Test"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Service Credit"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Service Credit:"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Session length, set on the board's DIP switches. Takes effect immediately, even mid-session."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "SFC-Box Cartridges (*.zip *.sfc *.bin)"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box Keyswitch: Check Play"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box Keyswitch: OFF"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box Keyswitch: ON"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box Keyswitch: Options"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box Keyswitch: Power OFF"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box Keyswitch: Self Test"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box: GAME/TV Switch"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box: Mount/Eject Slot 1"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box: Mount/Eject Slot 2"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "SFC-Box: Reset Switch"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "SFX Bus"
+msgstr ""
+
+#: common/video/gb_ppu_viewer.cpp
+msgid "SGB"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Slot %1: Eject (%2)"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Slot %1: Mount"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Slot 1: Mount"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Slot 2: Mount"
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Slow (chip accurate)"
+msgstr ""
+
+#: qt/src/DisplayPanel.ui
+msgid "Smooth the rotated and scaled Mode 7 backgrounds (F-Zero, Super Mario Kart, Pilotwings) by blending neighbouring pixels. A real SNES draws them blocky."
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "SMW Info"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Snes9x Scripting Guide"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Some games look for the Barcode Battler only when they start; reset the game if it doesn't respond."
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Speed"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Speedrun Timer"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Sprite #%1\nsize %2x%3\npos (%4,%5)\ntile %6\npal %7  pri %8\nflags %9"
+msgstr ""
+
+#: qt/src/GBViewerWindows.cpp
+msgid "Sprite %1\nX %2 Y %3 (screen %4,%5)\nTile %6  flags %7"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Sprite Boxes"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "Sprite Palette %1"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Sprites #1:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Sprites #2:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Sprites Layer"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Start Camera"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "started"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "step"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Step Into"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Step Out"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Step Over"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Stop"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Stop All Scripts"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Stop Camera"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "stopped"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Stopped on an error:"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Stopped on an error: %1"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "stopped with an error"
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Stopping at the script's next line"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Stronger"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Sufami Turbo"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Sunsoft Pachinko"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Super Disc"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Super Disc - insert disc"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Super Disc: Eject Disc"
+msgstr ""
+
+#: qt/src/ShortcutsPanel.ui
+msgid "Super Disc: Insert Disc"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Super Famicom Box"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Super Famicom Box - cartridge for slot %1"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Super Famicom Box OSD Font"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Super Game Boy 2 Boot ROM"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Super Game Boy Boot ROM"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Super Nintendo ROM Files (*.sfc *.smc *.swc *.fig *.gd3 *.bs *.st *.bin *.cue *.iso)"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Switch %1"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Switch %1 - %2"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 1"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 2"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 3"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 4"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 5"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 6"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 7"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Switch 8"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Switches the TV between the games and broadcast TV. Works only when the attendant menus set the TV connection to RF."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "That file is not a readable CD image."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "That is not a Nintendo Super System cartridge, or the same game is already in another slot."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "That is not a Super Famicom Box slot 1 cartridge (PSS-61)."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "That is not a Super Famicom Box slot 2 cartridge (PSS-62, PSS-63 or PSS-64)."
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "The camera could not be started."
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "The check digit doesn't add up. A printed barcode would not read like this, but it can still be sent."
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "The running game doesn't read the Barcode Battler."
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "This picture could not be opened."
+msgstr ""
+
+#: qt/src/GBViewerWindows.cpp
+msgid "Tile #%1  bank %2\nVRAM %3"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Time"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Time in the chip"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Time Limit"
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Time spent inside the chip over the same scenes, in millions of CPU clock ticks. Lower is faster. Measured on one PC."
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Timer Display"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Timing"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Toggle Breakpoint"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Toggle Comment"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Trace Logger"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Translate the supervisor's on-screen text to English. Game text and the game-select menus are drawn by the games and stay Japanese."
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "Transparent"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Turn on Enable Video Camera and pick a camera in Options > Display."
+msgstr ""
+
+#: win32/wlua.cpp
+msgid "Type a line number after the colon and press Enter"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Undo"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Upvalues"
+msgstr ""
+
+#: qt/src/PadPictureWidget.cpp
+msgid "USA Controller"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Use Last Barcode Again"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Use Last Barcode Again:"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Use Sunsoft Pachinko"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "v1.00"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "v2.00"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Valid %1 barcode."
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Value Graph"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Variable"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Variables"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "VRAM"
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "VRAM Tile Viewer"
+msgstr ""
+
+#: qt/src/BarcodeBattlerDialog.cpp
+msgid "Waiting for the camera"
+msgstr ""
+
+#: win32/wlanguage.h
+msgid "Weaker"
+msgstr ""
+
+#: common/video/ppu_viewer.cpp
+msgid "White"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "Widescreen"
+msgstr ""
+
+#: qt/src/EmuMainWindow.cpp
+msgid "Window Title"
+msgstr ""
+
+#: win32/rsrc/snes9x.rc
+msgid "With the RTC off, this date and time stand in for the PC's clock: the game's clock runs only while it plays, and moving the date forward runs it forward the next time the game loads."
+msgstr ""
+
+#: lua/lua_examples.cpp
+msgid "Write Logger"
+msgstr ""
+
+#: qt/src/SpriteViewerWindow.cpp
+msgid "ZIP Archive (*.zip)"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Zoom In"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "Zoom Out"
+msgstr ""
+
+#: qt/src/LuaScriptWindow.cpp
+msgid "— %1 scripts running"
+msgstr ""
+
+#: gtk/src/gtk_gb_viewer.cpp
+msgid "\nOBP%1  %2"
+msgstr ""
+
+#: gtk/src/gtk_gb_viewer.cpp
+msgid "\npal %1 bank %2  %3"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " (game not supported)"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid " holds MSU-1 audio data. SuperSnes9x can only stream MSU-1 tracks out of an archive named \".msu1\".\n\nRename it to "
+msgstr ""
+
+#: gtk/src/gtk_sprite_viewer.cpp
+msgid "#"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "<b>Information for %s</b>\n\n<i>Name:</i> %s\n<i>Speed:</i> %02X/%s\n<i>Map:</i> %s\n<i>Type:</i> %02x\n<i>Contents:</i> %s\n<i>ROM Size:</i> %s\n<i>Calculated Size:</i> %d\n<i>SRAM Size:</i> %s\n<i>Header Checksum:</i> %04X\n<i>Checksum Complement:</i> %04X\n<i>Actual Checksum:</i> %04X\n<i>Video:</i> %s\n<i>CRC32:</i> %08X\n<i>Revision:</i> %s\n<b><i>%s%s</i></b>"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Auto-Assign"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Barcodes"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Break"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Campus Challenge '92"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Close Script"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Connect"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Continue"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Debug"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Debug Menu"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Edit"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Edit Breakpoint..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Eject Disc"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_English"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Examples"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Find..."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_GAME/TV Switch"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_GB-PPU"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Go"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Go to Line..."
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Help"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_HuC-3 clock format (Robopon, Pocket Family):"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Insert Coin"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Insert Disc…"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Japanese"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Keyswitch"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Lock Screen Resize"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Lua…"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_New Script"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Nintendo Super System"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_None"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Open..."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Operational Guide"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_PowerFest '94"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Programming in Lua"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "_Random"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Redo"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Remove All Breakpoints"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Reset Switch"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Reset Zoom"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Restart Game"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Run"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_S-PPU"
+msgstr ""
+
+#: gtk/src/gtk_bios_manager.cpp
+msgid "_Save Changes"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "_Scan"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Scan Barcode…"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Script"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Service Credit"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Sprite Viewer..."
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Stop"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Stop All Scripts"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "_Tile Viewer..."
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Toggle Breakpoint"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "_Undo"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "_Window Title"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "A barcode holds only digits."
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Add _Watch"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Add Conditional Breakpoint..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Always on _Top"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "API _Reference"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Arcade"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Barcode Battler II connected to port 2"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Barcode Battler II disconnected"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "BI_OS"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Bind the controller's D-pad, face buttons, L, R, Start and Select as SDL's controller database lays them out"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Break on _Errors"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "C_lear Console"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Cartridge _DIP Switches"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Cartridge _DIP Switches (none on this board)"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "CD Images"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Clipping _Windows"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Close _Window"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Close _without Saving"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Coin inserted"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Commercial & Arcade Boards"
+msgstr ""
+
+#: biosmanager.cpp
+msgid "CoProcessors & Special Chips"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Debug menu"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Disc ejected"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Disc inserted"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Edit Breakpoint..."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Enable color correction (accurate {0} colors)"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "error: "
+msgstr ""
+
+#: biosmanager.cpp
+msgid "Expansions & Peripherals"
+msgstr ""
+
+#: gtk/src/gtk_sprite_viewer.cpp
+msgid "Export Selected to PNG..."
+msgstr ""
+
+#: gtk/src/gtk_gb_viewer.cpp
+msgid "Export to PNG..."
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Fin_d a card:"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Find _Next"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Find Pre_vious"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "From _Image…"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "GB _Sprite Viewer..."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "GB _Tile Viewer..."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "GB Tile_map Viewer..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Graphics Layer _1"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Graphics Layer _2"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Graphics Layer _3"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Graphics Layer _4"
+msgstr ""
+
+#: gtk/src/gtk_preferences.cpp
+msgid "Hold Stronger or Weaker to turn the dial; it stays where you leave it.\n\nBalls launch at the dial's strength unless Stop is held. Use Joypad 1 for the menus.\n\nConnect it with Input > Use Sunsoft Pachinko. Games look for it when they start, so reset after connecting."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "I_nstructions"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Images"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Insert Coin (Slot _2)"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Lua 5.4 _Manual"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Lua scripts"
+msgstr ""
+
+#: gtk/src/gtk_preferences.cpp
+msgid "No device detected"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "NSS Cartridges"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "On _Screen"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Open _Recent"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "OSD _Backdrop"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "OSD _Language"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Page _Down"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Page _Up"
+msgstr ""
+
+#: gtk/src/gtk_ppu_viewer.cpp
+msgid "PNG Image"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Read {} from the {}."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Real Ti_me Clock"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "RTC _on: the cart's clock follows the PC's clock"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "RTC off: the picked date and time stand in for the PC's clock"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "RTC on: the PC's clock"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "RTC: saved in the battery save (.sav)"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "RTC: saved separately (.rtc)"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Running - %1 scripts running"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "S_prites Layer"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Save _As..."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save RTC Se_parately (.rtc)"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Save RTC to _Battery Save (.sav)"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Scanned {}."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Scr_ipt"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Script output. Double-click an error to jump to its line."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "SFC-Box Cartridges"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Show _Background"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Show _Window"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Show S_prites"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Snes9x _Scripting Guide"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Start _Camera"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Step _Into"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Step _Over"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Step O_ut"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Stop _All Scripts"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Stop _Camera"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Stopped on an error: "
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Super _Disc"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Super _Famicom Box"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "The controller Auto-Assign maps onto this joypad"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Tile_map Viewer..."
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Time _Limit"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Time:"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "Timer _Display"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Toggle _Comment"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Turn on Enable Video Camera and pick a camera in Options > Preferences > Display."
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use _Last Barcode Again"
+msgstr ""
+
+#: gtk/src/snes9x.ui
+msgid "Use Sunsoft _Pachinko"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "v_1.00"
+msgstr ""
+
+#: gtk/src/gtk_s9xwindow.cpp
+msgid "v_2.00"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Valid {} barcode."
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "Waiting for the camera…"
+msgstr ""
+
+#: gtk/src/gtk_sprite_viewer.cpp
+msgid "ZIP Archive"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Zoom _In"
+msgstr ""
+
+#: gtk/src/gtk_lua_window.cpp
+msgid "Zoom _Out"
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "{} digits; a barcode has 8, 12 or 13."
+msgstr ""
+
+#: gtk/src/gtk_barcode_battler.cpp
+msgid "{}, from {}."
+msgstr ""

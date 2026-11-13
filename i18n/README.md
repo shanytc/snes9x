@@ -25,14 +25,10 @@ with gettext. To add a language to the GTK build, add its code to the
 `foreach(lang …)` loop there.
 
 ## Updating the string template
-Run the unified extractor to pull win32 strings into the catalog (adds any new
-`msgid` to `snes9x.pot` and every `<lang>.po`, never overwriting existing
-translations):
+Run the unified extractor to pull win32, Qt and GTK strings into the catalog. It appends any new string to `snes9x.pot`, then gives every `<lang>.po` each `snes9x.pot` entry it lacks (empty `msgstr`), never overwriting existing translations. win32 and Qt entries are normalized lookup keys; GTK entries are exact gettext msgids. It needs only Python, no gettext tools. Strings that reach `_L()`, `tr()` or `_()` through a variable need a row in its `TABLES`, or a marker (`N_`, `QT_TR_NOOP`) where they are defined; it warns about any such call it can't trace:
 ```sh
 python3 i18n/extract_strings.py
 ```
-To refresh GTK strings as well (requires gettext), `gtk/po/updatepot.sh` merges
-them into `snes9x.pot` with `xgettext -j` (join, non-destructive).
 
 ## Adding or editing a translation
 * Open `<lang>.po` in [poedit](https://poedit.net) (or a UTF-8 text editor) and

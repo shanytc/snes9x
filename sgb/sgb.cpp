@@ -5665,7 +5665,9 @@ bool S9xSGBSplitStart(int players, const char *battery_base_path, unsigned place
 	g_split_players = players;
 	g_split_hub     = false;   // SplitAttachLink picks the cable
 	SplitDropSnaps();
-	SplitFollowMasterBoot();
+	// The master is wherever its game is: only a reset boots the table together (S9xSGBReset).
+	SplitFollowDone();
+	SplitSeatMltRearm();
 	g_pane_delay = 0;   // a new session measures its own pane age
 	g_echo_frames = 0;
 	g_placer_said  = false;

@@ -1790,8 +1790,11 @@ void Emulator::RunFrame()
 	// 2x fast and the APU floods its ring (dropped samples = crackle) and
 	// winds the DRC integrator to its rail, which then took minutes of
 	// audible ring-bottom underruns to unwind.
+	// Not while the first frame after LCD-on is hidden (present_hold): it shows
+	// nothing, and running on to its VBlank puts this frame ahead of real time.
 	int32_t safety = 70224;
-	while (!impl_->ppu.frame_ready && safety > 0 && (impl_->ppu.lcdc & 0x80))
+	while (!impl_->ppu.frame_ready && safety > 0 && (impl_->ppu.lcdc & 0x80) &&
+	       !impl_->ppu.present_hold)
 	{
 		RunCycles(456);
 		safety -= 456;

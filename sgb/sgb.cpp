@@ -790,7 +790,7 @@ void Emulator::Reset()
 	// The boot ROM runs in full CGB mode; its KEY0 write enters compat.
 	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
 		!impl_->boot_rom_loaded;
-	impl_->ppu.hold_present_on_enable = !impl_->BiosMode() &&
+	impl_->ppu.lcd_panel = !impl_->BiosMode() &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
 	// Apply run-mode specific post-boot register values. The SGB BIOS
@@ -1915,7 +1915,7 @@ void Emulator::RunCycles(int32_t tcycles)
 	impl_->ppu.cgb = impl_->CgbActive();
 	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
 		(!impl_->mem.boot_rom_enabled || (impl_->mem.key0 & 0x04));
-	impl_->ppu.hold_present_on_enable = !impl_->BiosMode() &&
+	impl_->ppu.lcd_panel = !impl_->BiosMode() &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
 	// MMM01 multicart just locked into game-mode — inject the SGB
@@ -3262,7 +3262,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v10: add ppu.cgb_pal_written. Older states derive it from the palette RAM.
 // v11: add the in-flight DMA, PPU pipeline and APU internals. Older states
 //      load them from fixed defaults instead of the pre-load session's.
-constexpr uint32_t SGB_STATE_VERSION = 11;
+// v12: add ppu.blank_defer (CGB LCD-off repeat window).
+constexpr uint32_t SGB_STATE_VERSION = 12;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3591,6 +3592,8 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		IoBytes(c, impl.cart.camera_regs, sizeof impl.cart.camera_regs);
 		IoField(c, impl.run_target);   // the last frame's overshoot, owed by the next
 	}
+	if (c.version >= 12)
+		IoField(c, impl.ppu.blank_defer);
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
@@ -3714,6 +3717,8 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	if (!c.ok) return false;
 	if (version < 11)
 		DefaultUnsavedState(*impl_);
+	if (version < 12)
+		impl_->ppu.blank_defer = 0;
 	if (c.sgbc_mismatch)
 	{
 		S9xMessage(S9X_INFO, S9X_ROM_INFO,
@@ -3765,7 +3770,7 @@ bool Emulator::StateLoad(const uint8_t *buffer, size_t size)
 	impl_->ppu.cgb = impl_->CgbActive();
 	impl_->ppu.dmg_compat = impl_->ppu.cgb && impl_->dmg_compat_cgb &&
 		(!impl_->mem.boot_rom_enabled || (impl_->mem.key0 & 0x04));
-	impl_->ppu.hold_present_on_enable = !impl_->BiosMode() &&
+	impl_->ppu.lcd_panel = !impl_->BiosMode() &&
 		(impl_->cgb_mode || impl_->run_mode == RunMode::DMG);
 
 	// Reseed the SGB-bridge mirrors on Joypad from icd2 — these are

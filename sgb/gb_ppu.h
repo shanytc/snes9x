@@ -245,8 +245,9 @@ struct Ppu
 	// STAT counterpart of the VBlank defer above (PPU-originated edges only).
 	uint8_t  stat_irq_delay = 0;
 
-	// Real panels never display the first frame after LCD enable — hold the prior one.
-	bool     hold_present_on_enable = true;
+	// Output goes to a GB/GBC panel, not the SGB's ICD2: an LCD that is off
+	// shows a blank panel, and the first frame after enable is never shown.
+	bool     lcd_panel = true;
 	bool     present_hold = false;
 
 	// Holds a Nintendo logo the user never asked for off the panel. Set in
@@ -338,6 +339,11 @@ struct Ppu
 	// second boot never writes these, and overlaying the reset-white palette
 	// would hide the picture the BIOS is drawing perfectly well.
 	bool     cgb_pal_written = false;
+
+	// CGB keeps the old picture when the LCD goes off and back on within
+	// 1820 dots of VBlank start (SameBoy frame_repeat_countdown): dots left
+	// before the deferred blank lands, 0 = none pending.
+	int16_t  blank_defer = 0;
 };
 
 void PpuReset(Ppu &p);

@@ -1411,6 +1411,7 @@ void PpuReset(Ppu &p)
 	p.vblank_irq_at = 0;
 	p.stat_irq_delay = 0;
 	p.present_hold  = false;
+	p.blank_defer   = 0;
 	p.boot_logo_hold = false;
 	p.frame_ready   = false;
 	p.t_cycles      = 0;
@@ -1905,6 +1906,15 @@ inline void ExecPpuDot(Ppu &p, Memory &mem)
 	p.wx_d1 = p.wx;
 }
 
+// An LCD that is off shows a blank panel: white on CGB, the lightest shade
+// on DMG (SameBoy GB_display_vblank, Mesen).
+static void BlankPanel(Ppu &p)
+{
+	std::memset(p.framebuffer, 0, sizeof p.framebuffer);
+	for (uint16_t &c : p.color_fb) c = 0x7FFF;
+	std::memset(p.layer, GB_PIXEL_BG, sizeof p.layer);
+}
+
 void PpuOnCpuStop(Ppu &p, bool cgb_hw)
 {
 	if (!cgb_hw)
@@ -1975,8 +1985,8 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 	if (::g_cam_countdown > 0) { ::g_cam_countdown -= tcycles; if (::g_cam_countdown < 0) ::g_cam_countdown = 0; }
 
 	// LCD master disable (LCDC bit 7). Real HW parks the PPU in mode 0
-	// with LY=0 until the bit toggles back on. We keep the framebuffer
-	// contents so the display keeps showing the last valid frame.
+	// with LY=0 until the bit toggles back on; the panel shows blank (see
+	// the LCDC write), the SGB keeps its last picture.
 	//
 	// Crucially: STAT IRQs do NOT fire while the LCD is off. The STAT
 	// line is forced low, which means we must NOT call RecomputeStatLine
@@ -2009,6 +2019,16 @@ void PpuStep(Ppu &p, Memory &mem, int32_t tcycles)
 		// An LCD that gets switched on from here goes through the CPU's
 		// write, which sets the grid on its own.
 		p.boot_skew = 0;
+		if (p.blank_defer > 0)
+		{
+			if (p.blank_defer > tcycles)
+				p.blank_defer = static_cast<int16_t>(p.blank_defer - tcycles);
+			else
+			{
+				p.blank_defer = 0;
+				BlankPanel(p);
+			}
+		}
 		(void)mem;
 		return;
 	}
@@ -2144,6 +2164,16 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 			const bool is_on  = (p.lcdc & 0x80) != 0;
 			if (was_on && !is_on && p.cgb && p.mode != PpuMode::HBlank)
 				MemHdmaLcdOff(mem);
+			// The panel blanks; the frame being drawn is never shown.
+			if (was_on && !is_on && p.lcd_panel)
+			{
+				const int since_vblank = (p.mode == PpuMode::VBlank && p.ly >= VISIBLE_LINES)
+					? (p.ly - VISIBLE_LINES) * LINE_DOTS + p.mode_clock : -1;
+				if (p.cgb && since_vblank >= 0 && since_vblank < 1820)
+					p.blank_defer = static_cast<int16_t>(1820 - since_vblank);
+				else
+					BlankPanel(p);
+			}
 			// LCD turn-on resets to line 0 / mode 2.
 			if (!was_on && is_on)
 			{
@@ -2153,7 +2183,8 @@ void PpuWriteReg(Ppu &p, Memory &mem, uint16_t addr, uint8_t value)
 				p.tm.window_line = -1;
 				p.om.window_line = -1;
 				p.lcdon_first = true;
-				p.present_hold = p.hold_present_on_enable;
+				p.present_hold = p.lcd_panel;
+				p.blank_defer = 0;   // back on in time: the old picture stays
 			}
 			if (is_on) RecomputeStatLine(p, mem);
 			WyRecheck(p);

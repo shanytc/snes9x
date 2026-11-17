@@ -159,6 +159,10 @@ namespace SGB {
 				{ 0x000070, 3, { 0xFF, 0xFF, 0xFF }, { 0xB1, 0xC8, 0xC5 } },
 				{ 0x000073, 3, { 0xFF, 0xFF, 0xFF }, { 0xCD, 0xE4, 0x1E } },
 				{ 0x000076, 3, { 0xFF, 0xFF, 0xFF }, { 0xC1, 0x18, 0xEB } } } },
+			// Tetris Blast 2P: an SGB console sends its screen-change PAL_SETs with IRQs off (~20 frames of
+			// $13D0 waits); a GB partner's 16-frame $FF watchdog ($02B6) resets both first: allow 64 frames.
+			{ 0xC47E, "TETRIS BLAST", "link-lost watchdog outlasts an SGB screen change", 1,
+			  { { 0x0002BD, 2, { 0xFE, 0x10 }, { 0xFE, 0x40 } } } },   // cp $40
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

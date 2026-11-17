@@ -493,6 +493,12 @@ void S9xSGBSplitSetYield(S9xSGBSplitYieldFn fn, int every_gb_cycles);
 // owed a head start, which the yield spends as that machine's own slices
 // while the master waits. Game Boy cycles still owed (once), else 0.
 int32_t S9xSGBSplitTakeSeatHeadStart(int player);
+// Master first instead: true while that machine seat still waits, which
+// spends gb_cycles of the wait; the yield skips its turn.
+bool S9xSGBSplitSeatHeld(int player, int32_t gb_cycles);
+// Game Boy Link > Power On, in Game Boy cycles: > 0 seat first, < 0 master
+// first, 0 together. Taken at the next power-on of a 2-player session.
+void S9xSGBSplitSetHeadStart(int32_t cycles);
 
 // Each console has its own crystal: the Game Boy cycles a seat runs while the
 // master runs master_cycles (a fixed few tens of ppm apart, remainder carried).

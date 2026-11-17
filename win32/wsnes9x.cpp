@@ -3851,6 +3851,18 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_LINK_RESET_ON_UNLINK:
 			GBLinkResetOnUnlink = !GBLinkResetOnUnlink;
 			break;
+		case ID_EMULATION_GB_LINK_POWERON_SEAT:
+		case ID_EMULATION_GB_LINK_POWERON_MASTER:
+		case ID_EMULATION_GB_LINK_POWERON_SAME:
+			GBLinkPowerOnOrder = cmd_id - ID_EMULATION_GB_LINK_POWERON_SEAT;
+			GBLinkApplyPowerOn ();
+			break;
+		case ID_EMULATION_GB_LINK_POWERON_LEAD0 + 0:
+		case ID_EMULATION_GB_LINK_POWERON_LEAD0 + 1:
+		case ID_EMULATION_GB_LINK_POWERON_LEAD0 + 2:
+		case ID_EMULATION_GB_LINK_POWERON_LEAD0 + 3:
+			GBLinkSetPowerOnLead (cmd_id - ID_EMULATION_GB_LINK_POWERON_LEAD0);
+			break;
 		case ID_EMULATION_GB_LINK_SPLIT:
 			WinToggleGBLinkSplit ();
 			break;
@@ -6541,6 +6553,7 @@ int WINAPI WinMain(
 	GUI.HotkeysActive = !GUI.MasterHotkeyEnabled;
 
 	LoadExts();
+	GBLinkApplyPowerOn ();
 	S9xSGBSetInfrared (GBLinkInfrared);
 	S9xSGBSetGbKiss (GBLinkGbKiss);
 
@@ -7804,6 +7817,18 @@ static void CheckMenuStates ()
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_RESET_ON_LINK, FALSE, &mii);
 			mii.fState = GBLinkResetOnUnlink ? MFS_CHECKED : MFS_UNCHECKED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_RESET_ON_UNLINK, FALSE, &mii);
+			// Power On: the order, then the lead (nothing to pick when both start together).
+			for (UINT o = 0; o < 3; o++)
+			{
+				mii.fState = (o == GBLinkPowerOnOrder) ? MFS_CHECKED : MFS_UNCHECKED;
+				SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_POWERON_SEAT + o, FALSE, &mii);
+			}
+			for (int l = 0; l < 4; l++)
+			{
+				mii.fState = (l == GBLinkPowerOnLeadIndex () ? MFS_CHECKED : MFS_UNCHECKED) |
+				             (GBLinkPowerOnOrder == 2 ? MFS_DISABLED : MFS_ENABLED);
+				SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_LINK_POWERON_LEAD0 + l, FALSE, &mii);
+			}
 
 			// The whole Current Game submenu greys during an Other session.
 			mii.fState = (gblink == 2) ? MFS_DISABLED : MFS_ENABLED;
@@ -15391,6 +15416,33 @@ bool GBLinkSplitScreen = false;
 bool GBLinkResetOnLink   = true;
 bool GBLinkResetOnUnlink = true;
 
+// Power On: who switches on first in a 2-player session (0 the seat, 1 the
+// master, 2 both together) and how far ahead, in ms (100 / 200 / 500 / 1000).
+uint32 GBLinkPowerOnOrder  = 0;
+uint32 GBLinkPowerOnLeadMs = 1000;
+static const uint32 kGBLinkPowerOnLeads[4] = { 100, 200, 500, 1000 };
+
+int GBLinkPowerOnLeadIndex ()
+{
+	for (int i = 0; i < 4; i++)
+		if (kGBLinkPowerOnLeads[i] == GBLinkPowerOnLeadMs) return i;
+	return 3;
+}
+
+void GBLinkSetPowerOnLead (int index)
+{
+	GBLinkPowerOnLeadMs = kGBLinkPowerOnLeads[index & 3];
+	GBLinkApplyPowerOn ();
+}
+
+void GBLinkApplyPowerOn ()
+{
+	if (GBLinkPowerOnOrder > 2) GBLinkPowerOnOrder = 0;
+	GBLinkPowerOnLeadMs = kGBLinkPowerOnLeads[GBLinkPowerOnLeadIndex ()];
+	const int32 cycles = (int32)((int64)GBLinkPowerOnLeadMs * 4194304 / 1000);
+	S9xSGBSplitSetHeadStart (GBLinkPowerOnOrder == 2 ? 0 : GBLinkPowerOnOrder == 1 ? -cycles : cycles);
+}
+
 // Players 1 and 2 face each other: the GBC port / the cart LED, each on unless unticked.
 bool GBLinkInfrared = true;
 bool GBLinkGbKiss   = true;
@@ -17177,6 +17229,7 @@ static void GBSeatMachinesYield (int gb_cycles)
 		if (!m->thread || !m->ready || m->failed) continue;
 		// A head start (switched on first) runs as its own slices while the master waits.
 		int32 lead = S9xSGBSplitTakeSeatHeadStart (m->player);
+		if (S9xSGBSplitSeatHeld (m->player, gb_cycles)) continue;   // master switched on first
 		for (;;)
 		{
 			const int32 c  = (lead > 0 && lead < gb_cycles) ? lead : gb_cycles;

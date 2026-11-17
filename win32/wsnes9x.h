@@ -85,6 +85,14 @@ extern bool GBLinkSplitScreen;
 extern bool GBLinkResetOnLink;
 extern bool GBLinkResetOnUnlink;
 
+// Game Boy Link > Power On: 0 seat ahead, 1 master ahead, 2 same time; lead in ms.
+// Persisted; GBLinkApplyPowerOn hands them to the core. Leads: 0.1 / 0.2 / 0.5 / 1 s.
+extern uint32 GBLinkPowerOnOrder;
+extern uint32 GBLinkPowerOnLeadMs;
+void GBLinkApplyPowerOn ();
+int  GBLinkPowerOnLeadIndex ();
+void GBLinkSetPowerOnLead (int index);
+
 // Game Boy Link > Infra-Red / GB KISS: players 1 and 2 face each other's Game Boy
 // Color port / HuC1-HuC3 cart LED in any in-process session. Persisted.
 extern bool GBLinkInfrared;

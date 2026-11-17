@@ -1214,6 +1214,8 @@ void WinRegisterConfigItems()
 	AddBoolC("LinkSplitScreen", GBLinkSplitScreen, false, "Link Current Game runs its 2-4 players split screen in this window instead of spawning instances. BIOS-less GB mode only.");
 	AddBoolC("LinkResetOnLink", GBLinkResetOnLink, true, "true to power-cycle the game when a link session starts (Emulation -> Game Boy Link -> Reset on Link). The other players always boot fresh.");
 	AddBoolC("LinkResetOnUnlink", GBLinkResetOnUnlink, true, "true to power-cycle the game when a link session ends (Emulation -> Game Boy Link -> Reset on Unlink).");
+	AddUIntC("LinkPowerOn", GBLinkPowerOnOrder, 0, "who switches on first in a 2-player link session (Emulation -> Game Boy Link -> Power On): 0 = the seat(s) (default), 1 = player 1 (the master), 2 = both at the same time. Taken at the next power-on.");
+	AddUIntC("LinkPowerOnLead", GBLinkPowerOnLeadMs, 1000, "how far ahead the first console switches on, in milliseconds: 100, 200, 500 or 1000 (default). Unused with LinkPowerOn=2.");
 	AddBoolC("LinkInfrared", GBLinkInfrared, true, "true to have players 1 and 2 face each other's Game Boy Color infrared port in a link session (Emulation -> Game Boy Link -> Infra-Red).");
 	AddBoolC("LinkGbKiss", GBLinkGbKiss, true, "true to have players 1 and 2 face each other's HuC1/HuC3 cartridge infrared in a link session (Emulation -> Game Boy Link -> GB KISS).");
 #undef CATEGORY

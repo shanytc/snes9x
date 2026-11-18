@@ -751,6 +751,8 @@ void WinPostLoad(ConfigFile& conf)
 	if(GUI.MaxRecentGames < 1) GUI.MaxRecentGames = 1;
 	if(GUI.MaxRecentGames > MAX_RECENT_GAMES_LIST_SIZE) GUI.MaxRecentGames = MAX_RECENT_GAMES_LIST_SIZE;
     if(GUI.rewindGranularity==0) GUI.rewindGranularity = 1;
+	// a cap below 1x would be slow motion
+	if(GUI.FastForwardSpeed && GUI.FastForwardSpeed < 100) GUI.FastForwardSpeed = 100;
 	bool gap = false;
 	for(i=0;i<MAX_RECENT_GAMES_LIST_SIZE;i++) // remove gaps in recent games list
 	{
@@ -991,6 +993,7 @@ void WinRegisterConfigItems()
 	AddUIntC("FrameSkip", Settings.SkipFrames, AUTO_FRAMERATE, "200=automatic (limits at 50/60 fps), 0=none, 1=skip every other, ...");
 	AddUIntC("AutoMaxSkipFramesAtOnce", Settings.AutoMaxSkipFrames, 0, "most frames to skip at once to maintain speed in automatic mode, don't set to more than 1 or 2 frames because the skipping algorithm isn't very smart");
 	AddUIntC("TurboFrameSkip", Settings.TurboSkipFrames, 15, "how many frames to skip when in fast-forward mode");
+	AddUIntC("FastForwardSpeed", GUI.FastForwardSpeed, 400, "fast-forward speed cap in percent of normal speed (e.g. 400 = 4x), 0 = unlimited");
 	AddUInt("AutoSaveDelay", Settings.AutoSaveDelay, 30);
 	AddBool("BlockInvalidVRAMAccess", Settings.BlockInvalidVRAMAccessMaster, true);
 	AddBool2C("SnapshotScreenshots", Settings.SnapshotScreenshots, true, "on to save the screenshot in each snapshot, for loading-when-paused display");

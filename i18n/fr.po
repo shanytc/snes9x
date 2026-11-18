@@ -9221,3 +9221,13 @@ msgstr ""
 #: gtk/src/gtk_barcode_battler.cpp
 msgid "{}, from {}."
 msgstr ""
+
+# === Added by i18n/extract_strings.py ===
+
+#: win32/rsrc/snes9x.rc
+msgid "Fast-forward speed:"
+msgstr ""
+
+#: win32/wsnes9x.cpp
+msgid "Unlimited"
+msgstr ""

@@ -842,17 +842,30 @@ void WinThrottleFramerate()
 {
 	static HANDLE throttle_timer = nullptr;
 	static int64_t PCBase, PCFrameTime, PCFrameTimeNTSC, PCFrameTimePAL, PCStart, PCEnd;
+	static uint32 lastFrame;
 
-	if (Settings.SkipFrames != AUTO_FRAMERATE || Settings.TurboMode || Settings.NetPlay || Settings.NetPlayServer)
+	// Frames emulated since the last call; a capped fast-forward draws only some.
+	uint32 frames = IPPU.TotalEmulatedFrames - lastFrame;
+	lastFrame = IPPU.TotalEmulatedFrames;
+
+	if (Settings.NetPlay || Settings.NetPlayServer)
 		return;
 
-	// Yield pacing to the sound driver only while it is actually blocking.
-	// Every driver's sync wait is gated on !Settings.Mute, so a muted GB/SGB
-	// would otherwise have nothing throttling it and free-run.
-	const bool sgb_owns_audio = Settings.SuperGameBoy ||
-		(Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
-	if (sgb_owns_audio && Settings.SoundSync && GUI.AllowSoundSync && !Settings.Mute)
-		return;
+	// Sound sync is off while fast-forwarding, so a capped one paces here.
+	const bool ffCapped = Settings.TurboMode && GUI.FastForwardSpeed;
+	if (!ffCapped)
+	{
+		if (Settings.SkipFrames != AUTO_FRAMERATE || Settings.TurboMode)
+			return;
+
+		// Yield pacing to the sound driver only while it is actually blocking.
+		// Every driver's sync wait is gated on !Settings.Mute, so a muted GB/SGB
+		// would otherwise have nothing throttling it and free-run.
+		const bool sgb_owns_audio = Settings.SuperGameBoy ||
+			(Settings.SGB_BIOSModeActive && S9xSGBBIOSGBIsReleased());
+		if (sgb_owns_audio && Settings.SoundSync && GUI.AllowSoundSync && !Settings.Mute)
+			return;
+	}
 
 	if (!throttle_timer)
 	{
@@ -865,7 +878,13 @@ void WinThrottleFramerate()
 		QueryPerformanceCounter((LARGE_INTEGER *)&PCStart);
 	}
 
-    if (Settings.FrameTime == Settings.FrameTimeNTSC)
+    if (ffCapped)
+    {
+        // Relative to 100% speed, not the speed hotkeys' rate.
+        const int64_t base = Settings.PAL ? PCFrameTimePAL : PCFrameTimeNTSC;
+        PCFrameTime = base * (frames ? frames : 1) * 100 / GUI.FastForwardSpeed;
+    }
+    else if (Settings.FrameTime == Settings.FrameTimeNTSC)
         PCFrameTime = PCFrameTimeNTSC;
     else if (Settings.FrameTime == Settings.FrameTimePAL)
         PCFrameTime = PCFrameTimePAL;

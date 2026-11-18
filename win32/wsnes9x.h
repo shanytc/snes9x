@@ -391,6 +391,9 @@ struct sGUI {
 
 	// Lua editor: the bottom panel's height in pixels, 0 for the default.
 	int LuaPanelHeight;
+
+	// Fast-forward speed cap in percent of normal speed, 0 for unlimited.
+	unsigned int FastForwardSpeed;
 };
 
 //TURBO masks

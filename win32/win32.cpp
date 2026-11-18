@@ -425,7 +425,16 @@ void S9xSyncSpeed( void)
     {
 	uint32 SkipFrames;
 	if(Settings.TurboMode && !GUI.AVIOut)
+	{
 		SkipFrames = Settings.TurboSkipFrames;
+		// Capped: draw about one frame per normal-speed frame period.
+		if (GUI.FastForwardSpeed)
+		{
+			const uint32 perShown = (GUI.FastForwardSpeed + 99) / 100 - 1;
+			if (SkipFrames > perShown)
+				SkipFrames = perShown;
+		}
+	}
 	else
 		SkipFrames = (Settings.SkipFrames == AUTO_FRAMERATE) ? 0 : Settings.SkipFrames;
 	if (IPPU.FrameSkip++ >= SkipFrames)

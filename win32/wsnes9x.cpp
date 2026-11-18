@@ -9873,8 +9873,8 @@ INT_PTR CALLBACK DlgColorCorrectionProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 	return FALSE;
 }
 
-// Height the three checkbox rows add to the dialog template (276 tall with
-// them, 238 without). Everything else is measured, so this is the only shared value.
+// Height the three checkbox rows add to the dialog template (282 tall with
+// them, 244 without). Everything else is measured, so this is the only shared value.
 #define ASSOC_ROW_UNITS 38
 
 static int   s_assocRowPx  = 0;	// row height in pixels, so DPI scaling is respected
@@ -10099,6 +10099,34 @@ static void UpdateRtcPopup (bool show)
 		                    MF_BYCOMMAND);
 }
 
+// Fast-forward slider stops in percent of normal speed; the last, 0, is unlimited.
+static const unsigned int kFFSpeedStops[] = { 150, 200, 250, 300, 400, 500, 600, 800, 1000, 0 };
+
+static int FFSpeedToStop(unsigned int speed)
+{
+	const int last = _countof(kFFSpeedStops) - 1;
+	if (!speed)
+		return last;
+	int best = 0;
+	for (int i = 1; i < last; i++)
+		if (abs((int)kFFSpeedStops[i] - (int)speed) < abs((int)kFFSpeedStops[best] - (int)speed))
+			best = i;
+	return best;
+}
+
+static void ShowFFSpeedStop(HWND hDlg, int stop)
+{
+	const unsigned int speed = kFFSpeedStops[stop];
+	TCHAR text[64];
+	if (!speed)
+		lstrcpyn(text, _L(TEXT("Unlimited")), _countof(text));
+	else if (speed % 100)
+		_stprintf(text, TEXT("%u.%ux"), speed / 100, speed % 100 / 10);
+	else
+		_stprintf(text, TEXT("%ux"), speed / 100);
+	SetDlgItemText(hDlg, IDC_FF_SPEED_TEXT, text);
+}
+
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	static TCHAR paths[10][MAX_PATH];
@@ -10128,6 +10156,13 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			SendDlgItemMessage(hDlg, IDC_SPIN_MAX_SKIP,UDM_SETPOS,0, Settings.AutoMaxSkipFrames);
 			SendDlgItemMessage(hDlg, IDC_SPIN_TURBO_SKIP, UDM_SETRANGE, 0, MAKELPARAM((short)600, (short)0));
 			SendDlgItemMessage(hDlg, IDC_SPIN_TURBO_SKIP,UDM_SETPOS,0, Settings.TurboSkipFrames);
+			{
+				const int stop = FFSpeedToStop(GUI.FastForwardSpeed);
+				SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_SETRANGE, TRUE, MAKELONG(0, _countof(kFFSpeedStops) - 1));
+				SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_SETTICFREQ, 1, 0);
+				SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_SETPOS, TRUE, stop);
+				ShowFFSpeedStop(hDlg, stop);
+			}
             SendDlgItemMessage(hDlg, IDC_REWIND_BUFFER_SPIN, UDM_SETRANGE, 0, MAKELPARAM((short)4000, (short)0));
             SendDlgItemMessage(hDlg, IDC_REWIND_BUFFER_SPIN,UDM_SETPOS,0, GUI.rewindBufferSize);
             SendDlgItemMessage(hDlg, IDC_REWIND_GRANULARITY_SPIN, UDM_SETRANGE, 0, MAKELPARAM((short)300, (short)1));
@@ -10185,6 +10220,10 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
 		EndPaint (hDlg, &ps);
 		}
+		return true;
+	case WM_HSCROLL:
+		if ((HWND)lParam == GetDlgItem(hDlg, IDC_FF_SPEED))
+			ShowFFSpeedStop(hDlg, (int)SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_GETPOS, 0, 0));
 		return true;
 	case WM_COMMAND:
 		{
@@ -10267,6 +10306,7 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 					GUI.AddToRegistry = AddRegistryChecked;
 
 					Settings.TurboSkipFrames=SendDlgItemMessage(hDlg, IDC_SPIN_TURBO_SKIP, UDM_GETPOS, 0,0);
+					GUI.FastForwardSpeed = kFFSpeedStops[SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_GETPOS, 0, 0)];
 					Settings.AutoMaxSkipFrames=SendDlgItemMessage(hDlg, IDC_SPIN_MAX_SKIP, UDM_GETPOS, 0,0);
 					Settings.AutoSaveDelay=SendDlgItemMessage(hDlg, IDC_SRAM_SPIN, UDM_GETPOS, 0,0);
                     GUI.rewindGranularity = SendDlgItemMessage(hDlg, IDC_REWIND_GRANULARITY_SPIN, UDM_GETPOS, 0,0);

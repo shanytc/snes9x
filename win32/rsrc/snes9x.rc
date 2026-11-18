@@ -1788,7 +1788,7 @@ BEGIN
     END
     POPUP "&Cheat",                         0,MFT_STRING,MFS_ENABLED
     BEGIN
-        MENUITEM "&Game Genie, Pro-Action Replay Codes", ID_CHEAT_ENTER,MFT_STRING,MFS_ENABLED
+        MENUITEM "&Cheat Editor",               ID_CHEAT_ENTER,MFT_STRING,MFS_ENABLED
         MENUITEM "&Search for New Cheats",      ID_CHEAT_SEARCH,MFT_STRING,MFS_ENABLED
         MENUITEM "&Apply Cheats",               ID_CHEAT_APPLY,MFT_STRING,MFS_CHECKED
     END

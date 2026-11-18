@@ -2457,8 +2457,8 @@ msgid "Game Boy Image"
 msgstr "Game Boy 遊戲輸出畫面幀"
 
 #: win32/rsrc/snes9x.rc
-msgid "Game Genie, Pro-Action Replay Codes"
-msgstr "Game Genie、Pro-Action Replay 經典舊式作弊硬體條目代碼"
+msgid "Cheat Editor"
+msgstr ""
 
 #: win32/rsrc/snes9x.rc
 msgid "GB"

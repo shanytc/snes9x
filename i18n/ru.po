@@ -2212,8 +2212,8 @@ msgid "Game Boy Image"
 msgstr "Образ Game Boy"
 
 #: win32/rsrc/snes9x.rc
-msgid "Game Genie, Pro-Action Replay Codes"
-msgstr "Коды Game Genie, Pro-Action Replay"
+msgid "Cheat Editor"
+msgstr ""
 
 #: win32/rsrc/snes9x.rc
 msgid "GB"

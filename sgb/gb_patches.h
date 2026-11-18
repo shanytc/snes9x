@@ -27,7 +27,7 @@ struct GbCartEdit
 };
 
 // One row per cart, found by header global-sum + title, never a whole-ROM hash.
-static const int kGbCartPatchMaxEdits = 12;
+static const int kGbCartPatchMaxEdits = 20;
 struct GbCartPatch
 {
 	uint16_t    global_sum;   // header $014E-$014F, big-endian as stored

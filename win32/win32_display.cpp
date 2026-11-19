@@ -852,7 +852,8 @@ void WinThrottleFramerate()
 		return;
 
 	// Sound sync is off while fast-forwarding, so a capped one paces here.
-	const bool ffCapped = Settings.TurboMode && GUI.FastForwardSpeed;
+	const unsigned int ffSpeed = WinFastForwardSpeed();
+	const bool ffCapped = Settings.TurboMode && ffSpeed;
 	if (!ffCapped)
 	{
 		if (Settings.SkipFrames != AUTO_FRAMERATE || Settings.TurboMode)
@@ -882,7 +883,7 @@ void WinThrottleFramerate()
     {
         // Relative to 100% speed, not the speed hotkeys' rate.
         const int64_t base = Settings.PAL ? PCFrameTimePAL : PCFrameTimeNTSC;
-        PCFrameTime = base * (frames ? frames : 1) * 100 / GUI.FastForwardSpeed;
+        PCFrameTime = base * (frames ? frames : 1) * 100 / ffSpeed;
     }
     else if (Settings.FrameTime == Settings.FrameTimeNTSC)
         PCFrameTime = PCFrameTimeNTSC;

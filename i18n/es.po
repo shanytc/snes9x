@@ -9254,9 +9254,15 @@ msgstr ""
 # === Added by i18n/extract_strings.py ===
 
 #: win32/rsrc/snes9x.rc
-msgid "Fast-forward speed:"
+msgid "Fast-forward (SNES):"
 msgstr ""
 
 #: win32/wsnes9x.cpp
 msgid "Unlimited"
+msgstr ""
+
+# === Added by i18n/extract_strings.py ===
+
+#: win32/rsrc/snes9x.rc
+msgid "Fast-forward (Game Boy):"
 msgstr ""

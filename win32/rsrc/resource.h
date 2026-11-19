@@ -983,6 +983,9 @@
 #define IDC_FF_SPEED                    3731
 #define IDC_FF_SPEED_TEXT               3732
 #define IDC_LABEL_FFSPEED               3733
+#define IDC_FF_SPEED_GB                 3735
+#define IDC_FF_SPEED_GB_TEXT            3736
+#define IDC_LABEL_FFSPEED_GB            3737
 #define IDC_BILINEAR_MODE7              3703
 
 #define ID_SOUND_AUDIOWAVEFORM          40198
@@ -1046,7 +1049,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        203
 #define _APS_NEXT_COMMAND_VALUE         44458
-#define _APS_NEXT_CONTROL_VALUE         3734
+#define _APS_NEXT_CONTROL_VALUE         3738
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

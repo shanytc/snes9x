@@ -308,6 +308,12 @@ void S9xMessage (int type, int, const char *str)
 
 extern unsigned long START;
 
+unsigned int WinFastForwardSpeed()
+{
+	const bool gb = Settings.SuperGameBoy || Settings.SGB_BIOSModeActive;
+	return gb ? GUI.FastForwardSpeedGB : GUI.FastForwardSpeed;
+}
+
 void S9xSyncSpeed( void)
 {
 	if (S9xAcidSgbChild)
@@ -428,9 +434,9 @@ void S9xSyncSpeed( void)
 	{
 		SkipFrames = Settings.TurboSkipFrames;
 		// Capped: draw about one frame per normal-speed frame period.
-		if (GUI.FastForwardSpeed)
+		if (const unsigned int ff = WinFastForwardSpeed())
 		{
-			const uint32 perShown = (GUI.FastForwardSpeed + 99) / 100 - 1;
+			const uint32 perShown = (ff + 99) / 100 - 1;
 			if (SkipFrames > perShown)
 				SkipFrames = perShown;
 		}

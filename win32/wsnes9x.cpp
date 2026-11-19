@@ -10114,7 +10114,7 @@ static int FFSpeedToStop(unsigned int speed)
 	return best;
 }
 
-static void ShowFFSpeedStop(HWND hDlg, int stop)
+static void ShowFFSpeedStop(HWND hDlg, int textId, int stop)
 {
 	const unsigned int speed = kFFSpeedStops[stop];
 	TCHAR text[64];
@@ -10124,7 +10124,16 @@ static void ShowFFSpeedStop(HWND hDlg, int stop)
 		_stprintf(text, TEXT("%u.%ux"), speed / 100, speed % 100 / 10);
 	else
 		_stprintf(text, TEXT("%ux"), speed / 100);
-	SetDlgItemText(hDlg, IDC_FF_SPEED_TEXT, text);
+	SetDlgItemText(hDlg, textId, text);
+}
+
+static void InitFFSpeedSlider(HWND hDlg, int sliderId, int textId, unsigned int speed)
+{
+	const int stop = FFSpeedToStop(speed);
+	SendDlgItemMessage(hDlg, sliderId, TBM_SETRANGE, TRUE, MAKELONG(0, _countof(kFFSpeedStops) - 1));
+	SendDlgItemMessage(hDlg, sliderId, TBM_SETTICFREQ, 1, 0);
+	SendDlgItemMessage(hDlg, sliderId, TBM_SETPOS, TRUE, stop);
+	ShowFFSpeedStop(hDlg, textId, stop);
 }
 
 INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -10156,13 +10165,8 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 			SendDlgItemMessage(hDlg, IDC_SPIN_MAX_SKIP,UDM_SETPOS,0, Settings.AutoMaxSkipFrames);
 			SendDlgItemMessage(hDlg, IDC_SPIN_TURBO_SKIP, UDM_SETRANGE, 0, MAKELPARAM((short)600, (short)0));
 			SendDlgItemMessage(hDlg, IDC_SPIN_TURBO_SKIP,UDM_SETPOS,0, Settings.TurboSkipFrames);
-			{
-				const int stop = FFSpeedToStop(GUI.FastForwardSpeed);
-				SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_SETRANGE, TRUE, MAKELONG(0, _countof(kFFSpeedStops) - 1));
-				SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_SETTICFREQ, 1, 0);
-				SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_SETPOS, TRUE, stop);
-				ShowFFSpeedStop(hDlg, stop);
-			}
+			InitFFSpeedSlider(hDlg, IDC_FF_SPEED, IDC_FF_SPEED_TEXT, GUI.FastForwardSpeed);
+			InitFFSpeedSlider(hDlg, IDC_FF_SPEED_GB, IDC_FF_SPEED_GB_TEXT, GUI.FastForwardSpeedGB);
             SendDlgItemMessage(hDlg, IDC_REWIND_BUFFER_SPIN, UDM_SETRANGE, 0, MAKELPARAM((short)4000, (short)0));
             SendDlgItemMessage(hDlg, IDC_REWIND_BUFFER_SPIN,UDM_SETPOS,0, GUI.rewindBufferSize);
             SendDlgItemMessage(hDlg, IDC_REWIND_GRANULARITY_SPIN, UDM_SETRANGE, 0, MAKELPARAM((short)300, (short)1));
@@ -10223,7 +10227,9 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 		return true;
 	case WM_HSCROLL:
 		if ((HWND)lParam == GetDlgItem(hDlg, IDC_FF_SPEED))
-			ShowFFSpeedStop(hDlg, (int)SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_GETPOS, 0, 0));
+			ShowFFSpeedStop(hDlg, IDC_FF_SPEED_TEXT, (int)SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_GETPOS, 0, 0));
+		else if ((HWND)lParam == GetDlgItem(hDlg, IDC_FF_SPEED_GB))
+			ShowFFSpeedStop(hDlg, IDC_FF_SPEED_GB_TEXT, (int)SendDlgItemMessage(hDlg, IDC_FF_SPEED_GB, TBM_GETPOS, 0, 0));
 		return true;
 	case WM_COMMAND:
 		{
@@ -10307,6 +10313,7 @@ INT_PTR CALLBACK DlgEmulatorProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPar
 
 					Settings.TurboSkipFrames=SendDlgItemMessage(hDlg, IDC_SPIN_TURBO_SKIP, UDM_GETPOS, 0,0);
 					GUI.FastForwardSpeed = kFFSpeedStops[SendDlgItemMessage(hDlg, IDC_FF_SPEED, TBM_GETPOS, 0, 0)];
+					GUI.FastForwardSpeedGB = kFFSpeedStops[SendDlgItemMessage(hDlg, IDC_FF_SPEED_GB, TBM_GETPOS, 0, 0)];
 					Settings.AutoMaxSkipFrames=SendDlgItemMessage(hDlg, IDC_SPIN_MAX_SKIP, UDM_GETPOS, 0,0);
 					Settings.AutoSaveDelay=SendDlgItemMessage(hDlg, IDC_SRAM_SPIN, UDM_GETPOS, 0,0);
                     GUI.rewindGranularity = SendDlgItemMessage(hDlg, IDC_REWIND_GRANULARITY_SPIN, UDM_GETPOS, 0,0);

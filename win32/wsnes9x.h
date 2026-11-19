@@ -394,7 +394,13 @@ struct sGUI {
 
 	// Fast-forward speed cap in percent of normal speed, 0 for unlimited.
 	unsigned int FastForwardSpeed;
+
+	// The same cap for Game Boy carts (GB, GBC, and under the SGB BIOS).
+	unsigned int FastForwardSpeedGB;
 };
+
+// The fast-forward cap for the loaded system: SNES or Game Boy.
+unsigned int WinFastForwardSpeed();
 
 //TURBO masks
 #define TURBO_A_MASK 0x0001

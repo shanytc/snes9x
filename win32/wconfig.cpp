@@ -753,6 +753,7 @@ void WinPostLoad(ConfigFile& conf)
     if(GUI.rewindGranularity==0) GUI.rewindGranularity = 1;
 	// a cap below 1x would be slow motion
 	if(GUI.FastForwardSpeed && GUI.FastForwardSpeed < 100) GUI.FastForwardSpeed = 100;
+	if(GUI.FastForwardSpeedGB && GUI.FastForwardSpeedGB < 100) GUI.FastForwardSpeedGB = 100;
 	bool gap = false;
 	for(i=0;i<MAX_RECENT_GAMES_LIST_SIZE;i++) // remove gaps in recent games list
 	{
@@ -994,6 +995,7 @@ void WinRegisterConfigItems()
 	AddUIntC("AutoMaxSkipFramesAtOnce", Settings.AutoMaxSkipFrames, 0, "most frames to skip at once to maintain speed in automatic mode, don't set to more than 1 or 2 frames because the skipping algorithm isn't very smart");
 	AddUIntC("TurboFrameSkip", Settings.TurboSkipFrames, 15, "how many frames to skip when in fast-forward mode");
 	AddUIntC("FastForwardSpeed", GUI.FastForwardSpeed, 400, "fast-forward speed cap in percent of normal speed (e.g. 400 = 4x), 0 = unlimited");
+	AddUIntC("FastForwardSpeedGB", GUI.FastForwardSpeedGB, 400, "the same cap for Game Boy games (GB, GBC, Super Game Boy)");
 	AddUInt("AutoSaveDelay", Settings.AutoSaveDelay, 30);
 	AddBool("BlockInvalidVRAMAccess", Settings.BlockInvalidVRAMAccessMaster, true);
 	AddBool2C("SnapshotScreenshots", Settings.SnapshotScreenshots, true, "on to save the screenshot in each snapshot, for loading-when-paused display");

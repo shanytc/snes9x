@@ -28,10 +28,10 @@
 #include "missing.h"
 #endif
 
-extern uint8	*HDMAMemPointers[8];
+extern S9X_MACHINE uint8	*HDMAMemPointers[8];
 
 
-int32	S9xCPUNextAccessSpeed = 0;
+S9X_MACHINE int32	S9xCPUNextAccessSpeed = 0;
 
 static inline void S9xLatchCounters (bool force)
 {

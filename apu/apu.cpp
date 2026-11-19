@@ -34,7 +34,7 @@ static const int MINIMUM_BUFFER_SIZE = 550 * 2;
 
 namespace SNES {
 #include "bapu/dsp/blargg_endian.h"
-CPU cpu;
+S9X_MACHINE CPU cpu;
 } // namespace SNES
 
 namespace spc {
@@ -44,10 +44,14 @@ static void *callback_data = NULL;
 static bool8 sound_in_sync = true;
 static bool8 sound_enabled = false;
 
+// Shared: the audio thread reads this one. Only the master machine's DSP is
+// wired to it; a silent machine gets a sink of its own.
 static Resampler resampler;
+static S9X_MACHINE Resampler silent_sink;
+static S9X_MACHINE bool machine_silent = false;
 
-static int32 reference_time;
-static uint32 remainder;
+static S9X_MACHINE int32 reference_time;
+static S9X_MACHINE uint32 remainder;
 
 static const int timing_hack_numerator = 256;
 static int timing_hack_denominator = 256;
@@ -84,9 +88,11 @@ constexpr int CAPTURE_FRAMES = 9600;
 static int16_t buf_spc[CAPTURE_FRAMES * 2];
 static int16_t buf_gb [CAPTURE_FRAMES * 2];
 static int16_t buf_mix[CAPTURE_FRAMES * 2];
+static int16_t buf_spk[CAPTURE_FRAMES * 2];   // stream 11: the cart speaker as mixed
 static int     wpos_spc = 0;
 static int     wpos_gb  = 0;
 static int     wpos_mix = 0;
+static int     wpos_spk = 0;
 // Per-voice SPC scope rings (streams 3..10), fed by SPC_DSP::voice_output
 // at the DSP's native 32 kHz — each voice's post-envelope, post-volume
 // contribution, so a menu-disabled voice reads flat.
@@ -123,6 +129,7 @@ int snapshot(int stream, short *out_lr, int max_frames)
         case 0: ring = buf_spc; wpos = wpos_spc; break;
         case 1: ring = buf_gb;  wpos = wpos_gb;  break;
         case 2: ring = buf_mix; wpos = wpos_mix; break;
+        case 11: ring = buf_spk; wpos = wpos_spk; break;
         default:
             if (stream >= 3 && stream <= 10)
             {
@@ -278,9 +285,15 @@ inline void ResetDCBlocker()
 }
 } // namespace
 
+// The cart speaker (HuC3/TAMA5) drained with the GB audio by the last
+// S9xMixSamples, waiting for S9xMixCartSpeaker.
+static std::vector<int16_t> g_cart_speaker;
+static int g_cart_speaker_words = 0;
+
 bool8 S9xMixSamples(uint8 *dest, int sample_count)
 {
     int16 *out = (int16 *)dest;
+    g_cart_speaker_words = 0;
 
     // GB owns the host output: BIOS-less mode (SPC not running) OR
     // BIOS mode after the GB has been released. Splash chime plays
@@ -329,12 +342,16 @@ bool8 S9xMixSamples(uint8 *dest, int sample_count)
             return true;
         }
 
-        const int32_t got = S9xSGBDrainSamples(out, sample_count);
+        if ((int)g_cart_speaker.size() < sample_count)
+            g_cart_speaker.resize(sample_count);
+        const int32_t got = S9xSGBDrainSamples(out, sample_count, g_cart_speaker.data());
         if (got < sample_count)
         {
             S9xSGBMixGBPadSamples += sample_count - got;
             memset(out + got, 0, (sample_count - got) << 1);
+            memset(g_cart_speaker.data() + got, 0, (sample_count - got) << 1);
         }
+        g_cart_speaker_words = sample_count;
 
         if (audiowave::enabled)
             audiowave::push(audiowave::buf_gb, audiowave::wpos_gb,
@@ -458,6 +475,11 @@ int S9xGetSampleCount(void)
 
 void S9xLandSamples(void)
 {
+    // A silent machine's samples went to its own sink: nothing to hand the
+    // frontend, and the sync flag below is the MASTER's pacing, read off the
+    // master's buffer - a seat rewriting it parks the master in sound sync.
+    if (spc::machine_silent) return;
+
     if (spc::callback != NULL)
         spc::callback(spc::callback_data);
 
@@ -487,6 +509,32 @@ void S9xAudioWaveformPushMix(const int16_t *src, int frames)
 
 unsigned int S9xSGBMixVolumeSPC = 50;
 unsigned int S9xSGBMixVolumeGB  = 50;
+
+unsigned int S9xCartSpeakerVolume = 50;
+bool S9xCartSpeakerAudible = true;
+
+void S9xMixCartSpeaker(int16_t *dest, int sample_count)
+{
+    const int n = (sample_count < g_cart_speaker_words) ? sample_count : g_cart_speaker_words;
+    g_cart_speaker_words = 0;
+    if (!dest || sample_count <= 0)
+        return;
+    const int vol = !S9xCartSpeakerAudible ? 0 : (S9xCartSpeakerVolume > 100) ? 100 : (int)S9xCartSpeakerVolume;
+    for (int i = 0; i < n; ++i)
+    {
+        const int32_t s = ((int32_t)g_cart_speaker[i] * vol) / 100;
+        g_cart_speaker[i] = (int16_t)s;   // as mixed, for the viewer's SPKR track
+        int32_t v = dest[i] + s;
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        dest[i] = (int16_t)v;
+    }
+    if (audiowave::enabled)
+    {
+        audiowave::push(audiowave::buf_spk, audiowave::wpos_spk, g_cart_speaker.data(), n / 2);
+        audiowave::push_silence(audiowave::buf_spk, audiowave::wpos_spk, (sample_count - n) / 2);
+    }
+}
 
 unsigned int S9xSGBMixGainSPC = 0;
 unsigned int S9xSGBMixGainGB  = 0;
@@ -534,6 +582,7 @@ void S9xMixSpcOverGB(int16_t *dest, int sample_count)
                 }
             }
         }
+        S9xMixCartSpeaker(dest, sample_count);
         S9xAudioWaveformPushMix(dest, frames);
         return;
     }
@@ -583,6 +632,7 @@ void S9xMixSpcOverGB(int16_t *dest, int sample_count)
     if (!S9xSGBBootHandoffCaptured())
         memset(dest, 0, sample_count * sizeof(int16_t));
 
+    S9xMixCartSpeaker(dest, sample_count);
     S9xAudioWaveformPushMix(dest, frames);
 }
 
@@ -757,12 +807,14 @@ void S9xAudioWaveformEnable(bool enable)
         memset(audiowave::buf_spc, 0, sizeof audiowave::buf_spc);
         memset(audiowave::buf_gb,  0, sizeof audiowave::buf_gb);
         memset(audiowave::buf_mix, 0, sizeof audiowave::buf_mix);
+        memset(audiowave::buf_spk, 0, sizeof audiowave::buf_spk);
         memset(audiowave::buf_voice, 0, sizeof audiowave::buf_voice);
         memset(audiowave::wpos_voice, 0, sizeof audiowave::wpos_voice);
         memset(audiowave::voice_pending_l, 0, sizeof audiowave::voice_pending_l);
         audiowave::wpos_spc = 0;
         audiowave::wpos_gb  = 0;
         audiowave::wpos_mix = 0;
+        audiowave::wpos_spk = 0;
     }
     // The GB APU keeps its own per-channel scope rings for the viewer's
     // CH1-CH4 panels — capture in lockstep with the host rings.
@@ -802,6 +854,7 @@ int S9xAudioWaveformReadNew(int stream, int *cursor, short *out_lr, int max_fram
         case 0: ring = audiowave::buf_spc; wpos = audiowave::wpos_spc; break;
         case 1: ring = audiowave::buf_gb;  wpos = audiowave::wpos_gb;  break;
         case 2: ring = audiowave::buf_mix; wpos = audiowave::wpos_mix; break;
+        case 11: ring = audiowave::buf_spk; wpos = audiowave::wpos_spk; break;
         default:
             if (stream >= 3 && stream <= 10)
             {
@@ -923,6 +976,16 @@ bool8 S9xInitSound(int buffer_ms)
     if (requested_buffer_size_samples > buffer_size_samples)
         buffer_size_samples = requested_buffer_size_samples;
 
+    if (spc::machine_silent)
+    {
+        // A seat: its SPC must run so its BIOS boots, but nothing it produces
+        // is ever heard, so it never touches the shared output.
+        spc::silent_sink.resize(MINIMUM_BUFFER_SIZE);
+        SNES::dsp.spc_dsp.set_output(&spc::silent_sink);
+        UpdatePlaybackRate();
+        return (TRUE);
+    }
+
     spc::resampler.resize(buffer_size_samples);
     msu::resampler.resize(buffer_size_samples * 3 / 2);
     voicekun::resampler.resize(buffer_size_samples * 3 / 2);
@@ -963,8 +1026,18 @@ static void SPCSnapshotCallback(void)
     printf("Dumped key-on triggered spc snapshot.\n");
 }
 
+// Call on a machine's own thread before S9xInitSound: its SPC still runs (the
+// SGB BIOS waits on the upload handshake) but its output goes nowhere.
+void S9xAPUSetMachineSilent(bool silent)
+{
+    spc::machine_silent = silent;
+}
+
 bool8 S9xInitAPU(void)
 {
+    // A silent machine has no share in the program's audio buffers.
+    if (spc::machine_silent) return true;
+
     spc::resampler.clear();
     msu::resampler.clear();
     voicekun::resampler.clear();

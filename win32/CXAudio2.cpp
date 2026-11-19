@@ -652,6 +652,7 @@ static void MixSpcOverGB(uint8 *dest, int sample_words)
                 }
             }
         }
+        S9xMixCartSpeaker(out16, sample_words);
         S9xAudioWaveformPushMix(out16, frames);
         return;
     }
@@ -704,6 +705,7 @@ static void MixSpcOverGB(uint8 *dest, int sample_words)
     if (!S9xSGBBootHandoffCaptured())
         memset(out16, 0, sample_words * sizeof(int16_t));
 
+    S9xMixCartSpeaker(out16, sample_words);
     S9xAudioWaveformPushMix(out16, frames);
 }
 

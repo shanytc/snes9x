@@ -15,7 +15,11 @@ class EmuCanvasQt : public EmuCanvas
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void drawOverlay(QPainter &paint);
+    void updateOverlayText();
 
     std::mutex qimage_mutex;
     QImage qimage;
+    // The OSD's view of the emulation thread's IPPU/GFX, taken in draw().
+    QString osd_top_right;
+    QString osd_message;
 };

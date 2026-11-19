@@ -201,6 +201,7 @@ void Snes9xController::updateSettings(EmuConfig *config)
         };
         S9xSGBMixVolumeSPC = clamp_pct(config->sgb_mix_volume_spc);
         S9xSGBMixVolumeGB  = clamp_pct(config->sgb_mix_volume_gb);
+        S9xCartSpeakerVolume = clamp_pct(config->cart_speaker_volume);
 
         auto clamp_db = [](int v) -> unsigned int {
             if (v < 0)                v = 0;

@@ -6,6 +6,10 @@
 #include "ppu.h"
 #include <qnamespace.h>
 #include <qwidget.h>
+#include <atomic>
+
+// IPPU is the emulation thread's (S9X_MACHINE); output() keeps the extent for the UI thread.
+static std::atomic<int> output_wide_extent{0};
 
 void S9xQtDisplayAspect(EmuConfig *config, int *num, int *den)
 {
@@ -34,9 +38,9 @@ void S9xQtDisplayAspect(EmuConfig *config, int *num, int *den)
 
     // Widescreen hands us more columns for the same scanlines, and they are
     // meant to be seen rather than squeezed back into the SNES's shape.
-    if (IPPU.WideExtent)
+    if (const int wide_extent = output_wide_extent)
     {
-        *num *= S9xWideWidth();
+        *num *= SNES_WIDTH + 2 * wide_extent;
         *den *= SNES_WIDTH;
     }
 }
@@ -51,6 +55,7 @@ EmuCanvas::EmuCanvas(EmuApplication &app, QWidget *parent)
 
 void EmuCanvas::output(uint8_t *buffer, int width, int height, QImage::Format format, int bytes_per_line, double frame_rate)
 {
+    output_wide_extent = IPPU.WideExtent;
     output_data.buffer = buffer;
     output_data.width = width;
     output_data.height = height;

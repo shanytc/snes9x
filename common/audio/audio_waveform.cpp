@@ -37,6 +37,7 @@ const TrackInfo kTracks[kSourceCount] = {
     { "V6", { 240, 154, 62 } },
     { "V7", { 229, 100, 110 } },
     { "V8", { 176, 106, 212 } },
+    { "SPKR", { 236, 98, 150 } },
 };
 
 const char *const kScaleLabels[kScaleCount] = {
@@ -93,6 +94,8 @@ uint8_t solo_spc = 0;      // V1-8 solo bits
 uint8_t solo_gb = 0;       // CH1-4 solo bits
 bool solo_spc_group = false; // SPC group solo (all voices)
 bool solo_gb_group = false;  // GB group solo (all channels)
+bool user_speaker = true;    // the SPKR track's own mute (true = on)
+bool solo_speaker = false;
 std::function<bool()> master_mute_get;
 std::function<void(bool)> master_mute_set;
 
@@ -120,13 +123,22 @@ void set_master_mute_hooks(std::function<bool()> get, std::function<void(bool)> 
     master_mute_set = std::move(set);
 }
 
+static bool any_solo()
+{
+    return solo_spc || solo_spc_group || solo_gb || solo_gb_group || solo_speaker;
+}
+
+static bool speaker_audible()
+{
+    return user_speaker && (!any_solo() || solo_speaker);
+}
+
 void effective_masks(uint8_t *spc, uint8_t *gb)
 {
     const uint8_t spc_solo = solo_spc | (solo_spc_group ? 0xFF : 0);
     const uint8_t gb_solo = (uint8_t)((solo_gb | (solo_gb_group ? 0x0F : 0)) & 0x0F);
-    const bool any_solo = (spc_solo | gb_solo) != 0;
-    *spc = user_spc & (any_solo ? spc_solo : 0xFF);
-    *gb = user_gb & (any_solo ? gb_solo : 0x0F);
+    *spc = user_spc & (any_solo() ? spc_solo : 0xFF);
+    *gb = user_gb & (any_solo() ? gb_solo : 0x0F);
 }
 
 void apply()
@@ -135,6 +147,7 @@ void apply()
     effective_masks(&spc, &gb);
     S9xSetSoundControl(spc);
     S9xSGBSetSoundChannelMask(gb);
+    S9xCartSpeakerAudible = speaker_audible();
 }
 
 void set_channel_mask(uint8_t mask)
@@ -151,10 +164,11 @@ void enable_all_channels()
 {
     user_spc = 255;
     user_gb = 0x0F;
+    user_speaker = true;
     // Enable All means audibly all-on: drop any engaged viewer solo too, or
     // the solo mask would keep everything else silent.
     solo_spc = solo_gb = 0;
-    solo_spc_group = solo_gb_group = false;
+    solo_spc_group = solo_gb_group = solo_speaker = false;
     apply();
 }
 
@@ -176,6 +190,8 @@ bool is_muted(int src)
         return (user_gb & 0x0F) == 0;
     case kMix:
         return master_muted();
+    case kSpeaker:
+        return !user_speaker;
     default:
         if (src >= kSPCVoice1)
             return !(user_spc & (1 << (src - kSPCVoice1)));
@@ -193,6 +209,8 @@ bool is_soloed(int src)
         return solo_gb_group;
     case kMix:
         return false;
+    case kSpeaker:
+        return solo_speaker;
     default:
         if (src >= kSPCVoice1)
             return (solo_spc >> (src - kSPCVoice1)) & 1;
@@ -212,6 +230,8 @@ bool is_audible(int src)
         return gb != 0;
     case kMix:
         return !master_muted();
+    case kSpeaker:
+        return speaker_audible();
     default:
         if (src >= kSPCVoice1)
             return (spc >> (src - kSPCVoice1)) & 1;
@@ -247,6 +267,9 @@ void toggle_mute(int src)
         if (master_mute_set)
             master_mute_set(!master_muted());
         return;
+    case kSpeaker:
+        user_speaker = !user_speaker;
+        break;
     default:
         if (src >= kSPCVoice1)
             user_spc ^= 1 << (src - kSPCVoice1);
@@ -269,6 +292,9 @@ void toggle_solo(int src)
         break;
     case kMix:
         return; // the master bus has nothing to solo against
+    case kSpeaker:
+        solo_speaker = !solo_speaker;
+        break;
     default:
         if (src >= kSPCVoice1)
             solo_spc ^= 1 << (src - kSPCVoice1);
@@ -282,7 +308,7 @@ void toggle_solo(int src)
 void clear_solo()
 {
     solo_spc = solo_gb = 0;
-    solo_spc_group = solo_gb_group = false;
+    solo_spc_group = solo_gb_group = solo_speaker = false;
     apply();
 }
 
@@ -296,7 +322,7 @@ Recorder::~Recorder()
 
 int Recorder::sample_rate(int src)
 {
-    if (src < kGBChannel1)
+    if (src < kGBChannel1 || src == kSpeaker)
         return Settings.SoundPlaybackRate;
     if (src >= kSPCVoice1)
         return 32000;
@@ -335,7 +361,8 @@ void Recorder::pump()
         if (src >= kGBChannel1 && src < kSPCVoice1)
             n = S9xSGBReadChannelWaveformNew(src - kGBChannel1, &cursor, buf, 4096);
         else
-            n = S9xAudioWaveformReadNew(src < kGBChannel1 ? src : src - 4, &cursor, buf, 4096);
+            n = S9xAudioWaveformReadNew(src < kGBChannel1 ? src : src == kSpeaker ? 11 : src - 4,
+                                        &cursor, buf, 4096);
         if (n <= 0)
             break;
         fwrite(buf, channels(src) * sizeof(int16_t), n, file);
@@ -524,8 +551,9 @@ void Viewer::close()
         effective_masks(&spc, &gb);
         user_spc = spc;
         user_gb = gb;
+        user_speaker = speaker_audible();
         solo_spc = solo_gb = 0;
-        solo_spc_group = solo_gb_group = false;
+        solo_spc_group = solo_gb_group = solo_speaker = false;
         apply();
     }
 }
@@ -548,6 +576,12 @@ int Viewer::build_order(int order[kSourceCount])
         solo_spc_group = false;
         apply();
     }
+    const bool speaker = gb_core && S9xSGBCartHasSpeaker();
+    if (!speaker && solo_speaker)
+    {
+        solo_speaker = false;
+        apply();
+    }
     int n = 0;
     if (spc_core)
     {
@@ -563,6 +597,8 @@ int Viewer::build_order(int order[kSourceCount])
             for (int c = 0; c < 4; c++)
                 order[n++] = kGBChannel1 + c;
     }
+    if (speaker)
+        order[n++] = kSpeaker;
     order[n++] = kMix;
     return n;
 }
@@ -571,6 +607,8 @@ int Viewer::fetch(int src, int16_t *lr, int max_frames)
 {
     if (src < kGBChannel1)
         return S9xAudioWaveformSnapshot(src, lr, max_frames);
+    if (src == kSpeaker)
+        return S9xAudioWaveformSnapshot(11, lr, max_frames);
     if (src >= kSPCVoice1)
         return S9xAudioWaveformSnapshot(src - 4, lr, max_frames); // voice rings are streams 3..10
     // The GB channel rings are mono: expand in place to the stereo layout,
@@ -586,7 +624,7 @@ int Viewer::fetch(int src, int16_t *lr, int max_frames)
 
 int Viewer::sample_rate(int src) const
 {
-    if (src < kGBChannel1)
+    if (src < kGBChannel1 || src == kSpeaker)
         return S9xAudioWaveformSampleRate();
     if (src >= kSPCVoice1)
         return 32000;
@@ -652,6 +690,8 @@ std::string Viewer::info_text(int src) const
         return "wave";
     case kGBChannel1 + 3:
         return "noise";
+    case kSpeaker:
+        return "cart speaker";
     default:
         return {};
     }

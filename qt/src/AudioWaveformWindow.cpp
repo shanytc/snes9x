@@ -132,7 +132,7 @@ void AudioWaveformWindow::TrackArea::drawRow(QPainter &p, const QRect &r, int sr
     }
 
     p.setPen(audible ? QColor(225, 225, 228) : QColor(130, 130, 135));
-    p.drawText(QRect(header.left() + (group ? 26 : 30), cy - 8, 40, 16),
+    p.drawText(QRect(header.left() + (group ? 26 : src == aw::kSpeaker ? 20 : 30), cy - 8, 40, 16),
                Qt::AlignLeft | Qt::AlignVCenter, track.name);
 
     auto button = [&p](const QRect &b, const char *label, bool on,

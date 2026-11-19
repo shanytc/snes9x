@@ -226,7 +226,7 @@ struct SMulti
 	char	fileNameA[PATH_MAX + 1], fileNameB[PATH_MAX + 1];
 };
 
-extern CMemory	Memory;
+extern S9X_MACHINE CMemory	Memory;
 extern SMulti	Multi;
 
 inline bool S9xInterlaceField()
@@ -237,6 +237,10 @@ inline bool S9xInterlaceField()
 void S9xAutoSaveSRAM (void);
 bool8 LoadZip(const char *, uint32 *, uint8 *, uint32);
 bool8 S9xSGBBIOSAvailable(uint8 mode, const char *gb_rom_path);
+
+// The GB/GBC boot ROM bytes from the BIOS Manager, for a link seat running a
+// Game Boy Model of its own rather than the master's staged one.
+bool8 S9xGetGBBootROM(bool8 cgb, std::vector<uint8> &out);
 
 // TRUE when `data` is a Super Game Boy BIOS cart image, judged the way the
 // loader judges it: *out_mode comes back 1 for SGB1, 2 for SGB2.
@@ -346,6 +350,13 @@ bool8 S9xGetGBBootROM(bool cgb, std::vector<uint8> &out, std::string *out_path =
 // the Sachen scrambled variant). Lets in-memory callers route GB carts away
 // from the SNES/BS-X/Sufami load paths.
 bool S9xRomBytesAreGb(const uint8 *rom, int32 size);
+// A Game Boy cart's bytes from a plain file or a zip (Link Other Game's second
+// cart); FALSE unless they hold a Game Boy cart.
+bool8 S9xReadGBRomFile(const char *filename, std::vector<uint8> &out);
+// The console a seat following the master gives another cart: the forced
+// Game Boy Model, or under Automatic what that cart's header asks for.
+// S9X_GBBOOT_GB, _GBC, or _SGB2 when `allow_sgb` (a seat window can host the machine).
+uint8 S9xGBSeatPolicyForCart(const uint8 *rom, size_t size, const char *filename, bool allow_sgb);
 
 // NEC uPD78214 SNES-EVENT board: status/select registers, session timer,
 // board work-RAM and the four-image game window. Shared by the two known

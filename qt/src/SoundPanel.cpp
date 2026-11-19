@@ -2,6 +2,7 @@
 #include "EmuApplication.hpp"
 #include "EmuConfig.hpp"
 #include "snes9x.h"
+#include "sgb/sgb.h"
 
 static constexpr int playback_rates[] = { 96000, 48000, 44100 };
 
@@ -107,6 +108,7 @@ SoundPanel::SoundPanel(EmuApplication *app_)
     pairSync(slider_volume_fast_forward, spinBox_volume_fast_forward);
     pairSync(slider_volume_spc,          spinBox_volume_spc);
     pairSync(slider_volume_gb,           spinBox_volume_gb);
+    pairSync(slider_volume_cart,         spinBox_volume_cart);
     pairSync(slider_gain_regular,        spinBox_gain_regular);
     pairSync(slider_gain_spc,            spinBox_gain_spc);
     pairSync(slider_gain_gb,             spinBox_gain_gb);
@@ -156,6 +158,11 @@ SoundPanel::SoundPanel(EmuApplication *app_)
     connect(slider_volume_gb, &QSlider::valueChanged, [&](int value) {
         if (Settings.SGB_BIOSModeActive)
             app->config->sgb_mix_volume_gb = value;
+        app->updateSettings();
+    });
+
+    connect(slider_volume_cart, &QSlider::valueChanged, [&](int value) {
+        app->config->cart_speaker_volume = value;
         app->updateSettings();
     });
 
@@ -224,6 +231,12 @@ void SoundPanel::updateSGBVolumeEnableState()
 
     // Game Boy APU only; hidden outright for SNES titles.
     checkBox_suppress_nrx_glitches->setVisible(Settings.SuperGameBoy || Settings.SGB_BIOSModeActive);
+
+    // A cart with its own speaker (HuC3, TAMA5): only shown while one is loaded.
+    const bool cart = (Settings.SuperGameBoy || Settings.SGB_BIOSModeActive) && S9xSGBCartHasSpeaker();
+    label_volume_cart->setVisible(cart);
+    slider_volume_cart->setVisible(cart);
+    spinBox_volume_cart->setVisible(cart);
 
     if (bios_less_gb)
     {
@@ -294,6 +307,8 @@ void SoundPanel::showEvent(QShowEvent *event)
     spinBox_volume_spc->setValue(config->sgb_mix_volume_spc);
     slider_volume_gb->setValue(config->sgb_mix_volume_gb);
     spinBox_volume_gb->setValue(config->sgb_mix_volume_gb);
+    slider_volume_cart->setValue(config->cart_speaker_volume);
+    spinBox_volume_cart->setValue(config->cart_speaker_volume);
     slider_gain_regular->setValue(config->gain_regular);
     spinBox_gain_regular->setValue(config->gain_regular);
     slider_gain_spc->setValue(config->sgb_mix_gain_spc);

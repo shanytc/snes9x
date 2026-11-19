@@ -115,6 +115,10 @@ void CheatsDialog::removeAll()
 
 void CheatsDialog::searchDatabase()
 {
+    // Without a cheat folder this is the ROM's, which the emulation thread knows.
+    std::string cheat_dir;
+    app->emu_thread->runOnThread([&] { cheat_dir = S9xGetDirectory(CHEAT_DIR); }, true);
+
     std::initializer_list<std::string> dirs =
     {
         EmuConfig::findConfigDir(),
@@ -125,7 +129,7 @@ void CheatsDialog::searchDatabase()
         QDir(QGuiApplication::applicationDirPath())
             .absoluteFilePath("../Resources").toStdString(),
 #endif
-        S9xGetDirectory(CHEAT_DIR),
+        cheat_dir,
         "/usr/share/snes9x",
         "/usr/local/share/snes9x"
     };

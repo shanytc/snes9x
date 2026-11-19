@@ -197,6 +197,11 @@ void S9xNPServerQueueSendingROMImage ();
 void S9xNPServerQueueSendingLoadROMRequest (const char *filename);
 
 void S9xNPServerAddTask (uint32 task, void *data);
+// Machine state is per thread (S9X_MACHINE): the netplay threads hand their work on
+// the SNES to the emulation thread, which a port lets run by calling
+// S9xNPRunEmulationJobs from it every loop, paused or not.
+bool8 S9xNPRunOnEmulationThread (bool8 (*job) (void *), void *data, const volatile bool8 &keep_waiting);
+void S9xNPRunEmulationJobs (void);
 
 bool8 S9xNPStartServer (int port);
 void S9xNPStopServer ();

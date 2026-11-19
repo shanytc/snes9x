@@ -15,6 +15,10 @@ typedef void (*apu_callback) (void *);
 #define SPC_FILE_SIZE             (66048)
 
 bool8 S9xInitAPU (void);
+
+// A second SNES (a Super Game Boy seat) runs its SPC so its BIOS boots, but is
+// never heard: its DSP output goes to a sink of its own.
+void S9xAPUSetMachineSilent(bool silent);
 void S9xDeinitAPU (void);
 uint8 *S9xGetAPURAM (void);		// the SPC700's 64K, for debuggers and scripts
 void S9xResetAPU (void);
@@ -51,7 +55,8 @@ void S9xRunAheadSaveAudio (void);
 void S9xRunAheadLoadAudio (void);
 
 // Audio waveform debug capture — see Sound > Show Audio Waveform.
-// streams: 0=SPC pre-mix, 1=GB pre-mix, 2=final mix, 3..10=SPC voices 1-8.
+// streams: 0=SPC pre-mix, 1=GB pre-mix, 2=final mix, 3..10=SPC voices 1-8,
+// 11=the Game Boy cart speaker as mixed.
 void S9xAudioWaveformEnable(bool enable);
 int  S9xAudioWaveformSnapshot(int stream, short *out_lr, int max_frames);
 int  S9xAudioWaveformSampleRate(void);
@@ -89,6 +94,15 @@ void S9xMixSpcOverGB(int16_t *dest, int sample_count);
 // SPC vs GB audio in SGB-with-BIOS mode. 100 = unchanged from default.
 extern unsigned int S9xSGBMixVolumeSPC;
 extern unsigned int S9xSGBMixVolumeGB;
+
+// A Game Boy cart's own speaker (HuC3/TAMA5), 0..100 percent, apart from the
+// GB volume. S9xMixCartSpeaker adds what the last S9xMixSamples drained at
+// that volume: S9xMixSpcOverGB calls it, and hosts that skip that step call
+// it right after S9xMixSamples.
+extern unsigned int S9xCartSpeakerVolume;
+void S9xMixCartSpeaker(int16_t *dest, int sample_count);
+// The waveform viewer's mute/solo on its SPKR track; false silences the speaker.
+extern bool S9xCartSpeakerAudible;
 
 // Pre-amp gain in whole dB, applied on top of the volume percentages
 // above. 0 = unity; the sliders only go up because attenuation is

@@ -802,6 +802,7 @@ void HubApplyRemoteReply(int ch, uint32_t seq, uint8_t data, bool supplied)
 // the same $FF an unplugged cable shifts in.
 void CompleteActive(Serial &s, Memory &mem)
 {
+	s.so_bit           = (mem.serial_data & 0x01) != 0;
 	mem.serial_data    = s.peer_valid ? s.peer_data : 0xFF;
 	mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
@@ -895,6 +896,7 @@ void ScannerStep(Serial &s, Memory &mem, int32_t tcycles, int32_t real)
 // Finish a transfer the peer clocked for us.
 void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 {
+	s.so_bit           = (mem.serial_data & 0x01) != 0;
 	mem.serial_data    = data;
 	mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
@@ -1043,14 +1045,13 @@ bool SplitHoldClock(Serial &s, uint8_t data)
 	return true;
 }
 
-// What a clock nobody answered reads: an idle port's SO is its shift
-// register's top bit, unshifted (Bionic Battler links on reading $00).
+// What a clock nobody answered reads: an idle port's SO holds the last bit it shifted out,
+// $00 from power-on (Bionic Battler links on $00; Beatmania GB's 2nd cable probe reads its $FE's bit 0).
 uint8_t SplitIdleLine(const Serial &s)
 {
 	const Serial *ps = (&s == g_splitlink.s[0]) ? g_splitlink.s[1] : g_splitlink.s[0];
-	const Memory *pm = (&s == g_splitlink.s[0]) ? g_splitlink.m[1] : g_splitlink.m[0];
-	if (!ps || !pm || ps->active) return 0xFF;   // no peer, or one driving its own clock
-	return (pm->serial_data & 0x80) ? 0xFF : 0x00;
+	if (!ps || ps->active) return 0xFF;   // no peer, or one driving its own clock
+	return ps->so_bit ? 0xFF : 0x00;
 }
 
 // Deliver one held clock once this core arms. Nothing is sent back:

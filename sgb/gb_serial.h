@@ -27,6 +27,9 @@ struct Serial
 
 	bool     passive    = false;   // external clock: armed, waiting to be clocked
 
+	// SO pin: the last bit shifted out, held until the next transfer (SB writes don't move it).
+	bool     so_bit     = false;
+
 	// Split screen: cycles a finished master countdown waits for the
 	// lagging peer core to arm before ruling the wire idle. The cores
 	// interleave in scanline slices, so "not armed right now" can mean

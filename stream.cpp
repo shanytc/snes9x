@@ -16,7 +16,31 @@
 #  endif
 #endif
 #include "stream.h"
+#include <string.h>
 
+
+// Frontend file access
+
+static const S9xFileOps *file_ops;
+
+void S9xSetFileOps (const S9xFileOps *ops)
+{
+	file_ops = ops;
+}
+
+const S9xFileOps *S9xGetFileOps (void)
+{
+	return file_ops;
+}
+
+size_t S9xFileOpsRead (void *f, void *buf, size_t len)
+{
+	size_t n = 0;
+	int64 got;
+	while (n < len && (got = file_ops->read(f, (uint8 *) buf + n, len - n)) > 0)
+		n += (size_t) got;
+	return n;
+}
 
 // Generic constructor/destructor
 
@@ -145,6 +169,63 @@ void fStream::closeStream()
 // unzip Stream
 
 #ifdef UNZIP_SUPPORT
+
+// minizip reading through file_ops.
+static voidpf ZCALLBACK OpsZipOpen (voidpf, const char *name, int)
+{
+	return file_ops->open(name);
+}
+
+static uLong ZCALLBACK OpsZipRead (voidpf, voidpf f, void *buf, uLong size)
+{
+	return (uLong) S9xFileOpsRead(f, buf, size);
+}
+
+static uLong ZCALLBACK OpsZipWrite (voidpf, voidpf, const void *, uLong)
+{
+	return 0;
+}
+
+static long ZCALLBACK OpsZipTell (voidpf, voidpf f)
+{
+	return (long) file_ops->tell(f);
+}
+
+// RetroArch's VFS seek returns 0, not the new position, on success.
+static long ZCALLBACK OpsZipSeek (voidpf, voidpf f, uLong offset, int origin)
+{
+	return file_ops->seek(f, (int64) offset, origin) < 0 ? -1 : 0;
+}
+
+static int ZCALLBACK OpsZipClose (voidpf, voidpf f)
+{
+	file_ops->close(f);
+	return 0;
+}
+
+static int ZCALLBACK OpsZipError (voidpf, voidpf)
+{
+	return 0;
+}
+
+unzFile S9xUnzOpen (const char *path)
+{
+	unzFile z = unzOpen(path);
+	if (!z && file_ops)
+	{
+		zlib_filefunc_def io;
+		io.zopen_file = OpsZipOpen;
+		io.zread_file = OpsZipRead;
+		io.zwrite_file = OpsZipWrite;
+		io.ztell_file = OpsZipTell;
+		io.zseek_file = OpsZipSeek;
+		io.zclose_file = OpsZipClose;
+		io.zerror_file = OpsZipError;
+		io.opaque = NULL;
+		z = unzOpen2(path, &io);
+	}
+	return z;
+}
 
 unzStream::unzStream (unzFile &v)
 {
@@ -290,6 +371,75 @@ void unzStream::closeStream()
 }
 
 #endif
+
+// frontend file ops Stream
+
+opsStream::opsStream (void *f)
+{
+	file = f;
+}
+
+opsStream::~opsStream (void)
+{
+	return;
+}
+
+int opsStream::get_char (void)
+{
+	uint8 c;
+	return file_ops->read(file, &c, 1) == 1 ? c : EOF;
+}
+
+char * opsStream::gets (char *buf, size_t len)
+{
+	size_t i = 0;
+	int c;
+	if (len == 0)
+		return NULL;
+	while (i < len - 1 && (c = get_char()) != EOF)
+	{
+		buf[i++] = (char) c;
+		if (c == '\n')
+			break;
+	}
+	buf[i] = '\0';
+	return i ? buf : NULL;
+}
+
+size_t opsStream::read (void *buf, size_t len)
+{
+	return S9xFileOpsRead(file, buf, len);
+}
+
+size_t opsStream::write (void *, size_t)
+{
+	return 0;
+}
+
+size_t opsStream::pos (void)
+{
+	return (size_t) file_ops->tell(file);
+}
+
+size_t opsStream::size (void)
+{
+	int64 here = file_ops->tell(file);
+	file_ops->seek(file, 0, SEEK_END);
+	int64 sz = file_ops->tell(file);
+	file_ops->seek(file, here, SEEK_SET);
+	return sz < 0 ? 0 : (size_t) sz;
+}
+
+int opsStream::revert (uint8 origin, int32 offset)
+{
+	return file_ops->seek(file, (int64) pos_from_origin_offset(origin, offset), SEEK_SET) < 0 ? -1 : 0;
+}
+
+void opsStream::closeStream()
+{
+	file_ops->close(file);
+	delete this;
+}
 
 // memory Stream
 
@@ -458,7 +608,17 @@ Stream *openStreamFromFSTREAM(const char* filename, const char* mode)
 {
     FSTREAM f = OPEN_FSTREAM(filename,mode);
     if(!f)
+    {
+        // stdio can't see every path a frontend hands out; reads go through
+        // its own file access when it has one
+        if (file_ops && !strpbrk(mode, "wa+"))
+        {
+            void *vf = file_ops->open(filename);
+            if (vf)
+                return new opsStream(vf);
+        }
         return NULL;
+    }
     return new fStream(f);
 }
 

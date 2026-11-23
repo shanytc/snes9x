@@ -269,7 +269,7 @@ static void vfs_close(void *f)
     vfs->close((struct retro_vfs_file_handle *) f);
 }
 
-static const S9xRP2040FileOps vfs_file_ops = { vfs_open, vfs_read, vfs_seek, vfs_tell, vfs_close };
+static const S9xFileOps vfs_file_ops = { vfs_open, vfs_read, vfs_seek, vfs_tell, vfs_close };
 
 // Barcode Battler II: codes from system/barcodes.txt join the scan option's
 // list, one per line ("4901234567894 strong one"); '#' starts a comment.
@@ -476,7 +476,7 @@ void retro_set_environment(retro_environment_t cb)
 
     struct retro_vfs_interface_info vfs_info = { 1, NULL };
     vfs = cb(RETRO_ENVIRONMENT_GET_VFS_INTERFACE, &vfs_info) ? vfs_info.iface : NULL;
-    S9xRP2040CartSetFileOps(vfs ? &vfs_file_ops : NULL);
+    S9xSetFileOps(vfs ? &vfs_file_ops : NULL);
 }
 
 char *get_cursor_color(const char *name)

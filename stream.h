@@ -9,6 +9,23 @@
 
 #include <string>
 
+// Frontend file access, tried when stdio can't open a path (the libretro VFS,
+// for Android's saf:// folders). Read-only; whence 0/1/2 = start/current/end.
+struct S9xFileOps
+{
+	void	*(*open) (const char *path);	// NULL on failure
+	int64	(*read) (void *file, void *buf, uint64 len);
+	int64	(*seek) (void *file, int64 offset, int whence);	// < 0 on failure
+	int64	(*tell) (void *file);
+	void	(*close) (void *file);
+};
+
+void S9xSetFileOps (const S9xFileOps *ops);	// NULL = stdio only
+const S9xFileOps *S9xGetFileOps (void);
+
+// Reads that can come up short are retried until len or EOF.
+size_t S9xFileOpsRead (void *file, void *buf, size_t len);
+
 class Stream
 {
 	public:
@@ -82,7 +99,29 @@ class unzStream : public Stream
         unz_file_pos unz_file_start_pos;
 };
 
+// unzOpen, falling back to the frontend file ops.
+unzFile S9xUnzOpen (const char *path);
+
 #endif
+
+// A file opened through the frontend file ops.
+class opsStream : public Stream
+{
+	public:
+		opsStream (void *);
+		virtual ~opsStream (void);
+		virtual int get_char (void);
+		virtual char * gets (char *, size_t);
+		virtual size_t read (void *, size_t);
+        virtual size_t write (void *, size_t);
+        virtual size_t pos (void);
+        virtual size_t size (void);
+        virtual int revert (uint8 origin, int32 offset);
+        virtual void closeStream();
+
+	private:
+		void	*file;
+};
 
 class memStream : public Stream
 {

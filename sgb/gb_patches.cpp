@@ -183,6 +183,16 @@ namespace SGB {
 			// $13D0 waits); a GB partner's 16-frame $FF watchdog ($02B6) resets both first: allow 64 frames.
 			{ 0xC47E, "TETRIS BLAST", "link-lost watchdog outlasts an SGB screen change", 1,
 			  { { 0x0002BD, 2, { 0xFE, 0x10 }, { 0xFE, 0x40 } } } },   // cp $40
+			// Army Men 2's menus count six HALTs ($1099) to start the HiColor palettes in line 5's HBlank; a link byte's
+			// serial IRQ wakes one, so the picture starts a line early: HALT until HBlank of line 5 or later instead.
+			{ 0xC2F5, "ARMY MEN 2", "menu picture timed by LY, not by wakeups", 7,
+			  { { 0x001099, 3, { 0x76, 0x00, 0x76 }, { 0xC3, 0x00, 0x3F } },   // jp $3F00
+				{ 0x003F00, 3, { 0xFF, 0xFF, 0xFF }, { 0x76, 0x00, 0xF0 } },   // halt / nop / ldh a,(STAT)
+				{ 0x003F03, 3, { 0xFF, 0xFF, 0xFF }, { 0x41, 0xE6, 0x03 } },   // and 3
+				{ 0x003F06, 3, { 0xFF, 0xFF, 0xFF }, { 0x20, 0xF8, 0xF0 } },   // jr nz,$3F00 / ldh a,(LY)
+				{ 0x003F09, 3, { 0xFF, 0xFF, 0xFF }, { 0x44, 0xFE, 0x05 } },   // cp 5
+				{ 0x003F0C, 3, { 0xFF, 0xFF, 0xFF }, { 0x38, 0xF2, 0xC3 } },   // jr c,$3F00 / jp $103A
+				{ 0x003F0F, 2, { 0xFF, 0xFF }, { 0x3A, 0x10 } } } },
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

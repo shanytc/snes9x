@@ -15,21 +15,9 @@
 
 #include "port.h"
 
-// Frontend file access, tried when stdio can't open a path (libretro VFS
-// for Android's saf:// folders). Read-only; whence 0/1/2 = start/current/end.
-struct S9xRP2040FileOps
-{
-	void	*(*open) (const char *path);	// NULL on failure
-	int64	(*read) (void *file, void *buf, uint64 len);
-	int64	(*seek) (void *file, int64 offset, int whence);	// < 0 on failure
-	int64	(*tell) (void *file);
-	void	(*close) (void *file);
-};
-
 bool8  S9xRP2040CartDetect (const uint8 *rom, uint32 size);
 const char *S9xRP2040CartTitle (void);		// window title, e.g. "Xeno Crisis"
 void   S9xRP2040CartSetArchive (const char *archive_path);	// the ROM came out of this archive ("" = none)
-void   S9xRP2040CartSetFileOps (const S9xRP2040FileOps *ops);	// NULL = stdio only
 bool8  S9xRP2040CartActivate (const char *rom_path);	// loads the firmware
 void   S9xRP2040CartDeactivate (void);
 void   S9xRP2040CartPowerOn (void);

@@ -82,32 +82,16 @@ const char *S9xRP2040CartTitle (void)
 	return Memory.ROMName;
 }
 
-static const S9xRP2040FileOps *file_ops;
-
-void S9xRP2040CartSetFileOps (const S9xRP2040FileOps *ops)
-{
-	file_ops = ops;
-}
-
 // Beside the ROM, found the way an MSU-1 pack is: <rom name>_rp2040.bin.
 static std::string FirmwarePath (const char *rom_path)
 {
 	return S9xGetFilename(rom_path, "_rp2040.bin", ROMFILENAME_DIR);
 }
 
-// A frontend read can come up short; keep going until len or EOF.
-static size_t OpsRead (void *f, void *buf, size_t len)
-{
-	size_t n = 0;
-	int64 got;
-	while (n < len && (got = file_ops->read(f, (uint8 *) buf + n, len - n)) > 0)
-		n += (size_t) got;
-	return n;
-}
-
 static bool ReadFirmwareFile (const std::string &path)
 {
 	FILE *f = fopen(path.c_str(), "rb");
+	const S9xFileOps *file_ops = S9xGetFileOps();
 	void *vf = (!f && file_ops) ? file_ops->open(path.c_str()) : NULL;
 	if (!f && !vf)
 		return false;
@@ -120,52 +104,12 @@ static bool ReadFirmwareFile (const std::string &path)
 	}
 	else
 	{
-		n = OpsRead(vf, &firmware[0], firmware.size());
+		n = S9xFileOpsRead(vf, &firmware[0], firmware.size());
 		file_ops->close(vf);
 	}
 	firmware.resize(n);
 	return n > 0;
 }
-
-#ifdef UNZIP_SUPPORT
-// minizip reading through file_ops.
-static voidpf ZCALLBACK ZipOpen (voidpf, const char *name, int)
-{
-	return file_ops->open(name);
-}
-
-static uLong ZCALLBACK ZipRead (voidpf, voidpf f, void *buf, uLong size)
-{
-	return (uLong) OpsRead(f, buf, size);
-}
-
-static uLong ZCALLBACK ZipWrite (voidpf, voidpf, const void *, uLong)
-{
-	return 0;
-}
-
-static long ZCALLBACK ZipTell (voidpf, voidpf f)
-{
-	return (long) file_ops->tell(f);
-}
-
-// RetroArch's VFS seek returns 0, not the new position, on success.
-static long ZCALLBACK ZipSeek (voidpf, voidpf f, uLong offset, int origin)
-{
-	return file_ops->seek(f, (int64) offset, origin) < 0 ? -1 : 0;
-}
-
-static int ZCALLBACK ZipClose (voidpf, voidpf f)
-{
-	file_ops->close(f);
-	return 0;
-}
-
-static int ZCALLBACK ZipError (voidpf, voidpf)
-{
-	return 0;
-}
-#endif
 
 // A zip can carry the firmware beside the ROM: the entry called wanted
 // wins, else the first *_rp2040.bin in it.
@@ -175,20 +119,7 @@ static bool ReadFirmwareFromZip (const char *zip_path, const std::string &wanted
 	SplitPath zp = splitpath(zip_path);
 	if (!zp.ext_is(".zip") && !zp.ext_is(".msu1"))
 		return false;
-	unzFile z = unzOpen(zip_path);
-	if (!z && file_ops)
-	{
-		zlib_filefunc_def io;
-		io.zopen_file = ZipOpen;
-		io.zread_file = ZipRead;
-		io.zwrite_file = ZipWrite;
-		io.ztell_file = ZipTell;
-		io.zseek_file = ZipSeek;
-		io.zclose_file = ZipClose;
-		io.zerror_file = ZipError;
-		io.opaque = NULL;
-		z = unzOpen2(zip_path, &io);
-	}
+	unzFile z = S9xUnzOpen(zip_path);
 	if (!z)
 		return false;
 

@@ -72,12 +72,12 @@ STREAM S9xMSU1OpenFile(const char *msu_ext, bool skip_unpacked)
     if (!file)
     {
         auto zip_filename = S9xGetFilename(".msu1", ROMFILENAME_DIR);
-		unzFile	unzFile = unzOpen(zip_filename.c_str());
+		unzFile	unzFile = S9xUnzOpen(zip_filename.c_str());
 
 		if (!unzFile)
 		{
 			zip_filename = S9xGetFilename(".msu1", PATCH_DIR);
-			unzFile = unzOpen(zip_filename.c_str());
+			unzFile = S9xUnzOpen(zip_filename.c_str());
 		}
 
         if (unzFile)
@@ -209,10 +209,10 @@ bool S9xMSU1ROMExists(void)
 	if (splitpath(Memory.ROMFilename).ext_is(".msu1"))
 		return true;
 
-	unzFile unzFile = unzOpen(S9xGetFilename(".msu1", ROMFILENAME_DIR).c_str());
+	unzFile unzFile = S9xUnzOpen(S9xGetFilename(".msu1", ROMFILENAME_DIR).c_str());
 
 	if(!unzFile)
-		unzFile = unzOpen(S9xGetFilename(".msu1", PATCH_DIR).c_str());
+		unzFile = S9xUnzOpen(S9xGetFilename(".msu1", PATCH_DIR).c_str());
 
 	if (unzFile)
 	{
@@ -226,7 +226,7 @@ bool S9xMSU1ROMExists(void)
 bool S9xMSU1ZipHasMSU1Data(const char *zipname)
 {
 #ifdef UNZIP_SUPPORT
-	unzFile	file = unzOpen(zipname);
+	unzFile	file = S9xUnzOpen(zipname);
 
 	if (!file)
 		return false;

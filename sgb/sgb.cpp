@@ -6096,6 +6096,8 @@ void S9xSGBSplitRunFrame(void)
 	// A sensor reads the facing core's LED live, so while a port is in use the
 	// seats interleave finely: Carrera's track transfer needs <= 8 dots.
 	constexpr int32_t kIrSlice = 4;
+	// Likewise a fast-clock cable exchange (Colin McRae Rally answers each byte within ~100 cycles).
+	constexpr int32_t kBurstSlice = 16;
 
 	// Interleave by scanline so the in-process cable always peeks a peer
 	// within one line of the caller. Cores never park: a seat hitting its
@@ -6148,7 +6150,7 @@ void S9xSGBSplitRunFrame(void)
 	{
 		running = false;
 		const bool    ir    = SGB::IrActive();
-		const int32_t slice = ir ? kIrSlice : 456;
+		const int32_t slice = ir ? kIrSlice : SGB::SerialSplitBurst() ? kBurstSlice : 456;
 		plan(ir);
 		for (int k = 0; k < n; ++k)
 		{
@@ -6186,7 +6188,7 @@ void S9xSGBSplitRunFrame(void)
 			    (cs[i]->DebugImpl()->ppu.lcdc & 0x80)) owe = true;
 		if (!owe || chase <= 0) break;
 		const bool    ir    = SGB::IrActive();
-		const int32_t slice = ir ? kIrSlice : 456;
+		const int32_t slice = ir ? kIrSlice : SGB::SerialSplitBurst() ? kBurstSlice : 456;
 		plan(ir);
 		for (int k = 0; k < n; ++k)
 		{

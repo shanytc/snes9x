@@ -120,6 +120,10 @@ constexpr uint8_t kStatusSupportReconnect = 0x04;
 constexpr int32_t kBitPeriodNormal = 512;
 constexpr int32_t kBitPeriodFast   = 16;
 
+// A fast-clock start or byte keeps the split cores interleaving finely this long (real cycles):
+// Colin McRae Rally swaps 11 bytes a frame within 64 polls (~1400 cycles).
+constexpr int32_t kBurstWindow = 2 * 70224;
+
 // Socket service interval in T-cycles (~0.24 ms): prompt enough for a
 // slave to answer sync1, rare enough to cost nothing.
 constexpr int32_t kPollInterval = 1024;
@@ -803,6 +807,7 @@ void HubApplyRemoteReply(int ch, uint32_t seq, uint8_t data, bool supplied)
 void CompleteActive(Serial &s, Memory &mem)
 {
 	s.so_bit           = (mem.serial_data & 0x01) != 0;
+	if (s.cgb && (mem.serial_control & 0x02)) s.burst = kBurstWindow;
 	mem.serial_data    = s.peer_valid ? s.peer_data : 0xFF;
 	mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
@@ -897,6 +902,7 @@ void ScannerStep(Serial &s, Memory &mem, int32_t tcycles, int32_t real)
 void CompletePassive(Serial &s, Memory &mem, uint8_t data)
 {
 	s.so_bit           = (mem.serial_data & 0x01) != 0;
+	if (s.cgb && (mem.serial_control & 0x02)) s.burst = kBurstWindow;
 	mem.serial_data    = data;
 	mem.serial_control = static_cast<uint8_t>(mem.serial_control & 0x7F);
 	mem.if_            = static_cast<uint8_t>(mem.if_ | IRQ_SERIAL);
@@ -2118,6 +2124,7 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 {
 	mem.serial_control = value;
 	mem.serial_bits    = 0;   // every SC write re-decides the unlinked stub below
+	if (s.cgb && (value & 0x82) == 0x82) s.burst = kBurstWindow;
 
 	if (value & 0x80)
 	{
@@ -2331,6 +2338,7 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 	{
 		s.real_cycles += tcycles;
 	}
+	if (s.burst > 0) s.burst -= real;
 
 	if (s.irq_due)
 	{
@@ -2836,6 +2844,13 @@ void    SerialSplitNoteYield(int64_t common) { g_splitlink.yield_common = common
 int64_t SerialSplitYieldCommon()             { return g_splitlink.yield_common; }
 
 bool SerialSplitActive() { return g_splitlink.count > 0; }
+
+bool SerialSplitBurst()
+{
+	for (int i = 0; i < g_splitlink.count; ++i)
+		if (g_splitlink.s[i] && g_splitlink.s[i]->burst > 0) return true;
+	return false;
+}
 
 // A local DMG-07 past its ping phase has every player's packet in its rounds;
 // a cable or ring is in use while bytes crossed it in the last two seconds.

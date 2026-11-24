@@ -30,6 +30,9 @@ struct Serial
 	// SO pin: the last bit shifted out, held until the next transfer (SB writes don't move it).
 	bool     so_bit     = false;
 
+	// Split cable: real cycles left of a fast-clock exchange, while the cores interleave finely.
+	int32_t  burst      = 0;
+
 	// Split screen: cycles a finished master countdown waits for the
 	// lagging peer core to arm before ruling the wire idle. The cores
 	// interleave in scanline slices, so "not armed right now" can mean
@@ -182,6 +185,8 @@ void SerialSplitSetClock(const Memory *m, int64_t local, int64_t common);
 void    SerialSplitNoteYield(int64_t common);
 int64_t SerialSplitYieldCommon();
 bool SerialSplitActive();
+// A split seat is mid fast-clock exchange: answers come within ~100 cycles, not a scanline.
+bool SerialSplitBurst();
 // True while the game is using the split link: pulling a console now would
 // strand the others mid-exchange.
 bool SerialSplitInUse();

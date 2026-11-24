@@ -193,6 +193,17 @@ namespace SGB {
 				{ 0x003F09, 3, { 0xFF, 0xFF, 0xFF }, { 0x44, 0xFE, 0x05 } },   // cp 5
 				{ 0x003F0C, 3, { 0xFF, 0xFF, 0xFF }, { 0x38, 0xF2, 0xC3 } },   // jr c,$3F00 / jp $103A
 				{ 0x003F0F, 2, { 0xFF, 0xFF }, { 0x3A, 0x10 } } } },
+			// Donkey Kong Country's infrared bytes (F2:$6932 receive, F2:$6859 send) run with IRQs on; unless both frames
+			// are within ~25 lines, the LY 100 sound IRQ or VBlank lands mid-transfer: reach both through DI/EI stubs.
+			{ 0xD439, "DK COUNTRY", "infrared transfer sent with IRQs off", 8,
+			  { { 0x3C7906, 1, { 0x69 }, { 0x7F } },                         // F1:$7905 far jump: $6932 -> $7FF0
+				{ 0x3C790A, 1, { 0x32 }, { 0xF0 } },
+				{ 0x3C7992, 1, { 0x68 }, { 0x7F } },                         // F1:$7991 far jump: $6859 -> $7FF6
+				{ 0x3C7996, 1, { 0x59 }, { 0xF6 } },
+				{ 0x3CBFF0, 3, { 0x00, 0x00, 0x00 }, { 0xF3, 0xCD, 0x32 } },   // di / call $6932
+				{ 0x3CBFF3, 3, { 0x00, 0x00, 0x00 }, { 0x69, 0xFB, 0xC9 } },   // ei / ret
+				{ 0x3CBFF6, 3, { 0x00, 0x00, 0x00 }, { 0xF3, 0xCD, 0x59 } },   // di / call $6859
+				{ 0x3CBFF9, 3, { 0x00, 0x00, 0x00 }, { 0x68, 0xFB, 0xC9 } } } }, // ei / ret
 		};
 
 		bool TitleMatches(const uint8_t *rom, const char *title)

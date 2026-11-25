@@ -23,6 +23,7 @@
 #include "gb_serial.h"
 #include "gb_barcodeboy.h"
 #include "gb_bardigun.h"
+#include "gb_mobile.h"
 #include "gb_link.h"
 #include "gb_memory.h"
 #include "gb_ppu.h"
@@ -854,12 +855,15 @@ void StepResolvedActive(Serial &s, Memory &mem, int32_t tcycles)
 	if (s.bits_left == 0) CompleteActive(s, mem);
 }
 
-bool ScannerConnected() { return BarcodeBoyConnected() || BardigunConnected(); }
+// The Mobile Adapter GB only talks to a Game Boy Color game.
+bool MobileHere(const Serial &s) { return MobileConnected() && s.cgb; }
+
+bool ScannerConnected(const Serial &s) { return BarcodeBoyConnected() || BardigunConnected() || MobileHere(s); }
 
 // A card scanner holds the port while no Game Boy Link session does.
-bool ScannerOnPort()
+bool ScannerOnPort(const Serial &s)
 {
-	return ScannerConnected() && !SerialLinkIsEnabled() && !SerialSplitActive();
+	return ScannerConnected(s) && !SerialLinkIsEnabled() && !SerialSplitActive();
 }
 
 // A byte crossing to or from a scanner. No cable statistics: those describe
@@ -887,6 +891,11 @@ void ScannerStep(Serial &s, Memory &mem, int32_t tcycles, int32_t real)
 			s.bit_timer += s.bit_period;
 		}
 		if (s.bits_left == 0) ScannerLand(s, mem, s.peer_data);
+	}
+	if (MobileHere(s))
+	{
+		MobileClock(real);
+		return;
 	}
 	if (BardigunConnected())
 	{
@@ -2042,8 +2051,9 @@ void SerialAfterStateLoad(Serial &s, Memory &mem)
 		s.bit_period = BitPeriod(s, mem.serial_control);
 		s.bit_timer  = s.bit_period;
 		// The scanner's answer to that byte came back with the state.
-		if (ScannerOnPort())
-			s.peer_data = BardigunConnected() ? BardigunReply() : BarcodeBoyReply();
+		if (ScannerOnPort(s))
+			s.peer_data = MobileHere(s)       ? MobileReply()
+			            : BardigunConnected() ? BardigunReply() : BarcodeBoyReply();
 	}
 	else
 	{
@@ -2239,11 +2249,11 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 		return;
 	}
 
-	if (ScannerOnPort())
+	if (ScannerOnPort(s))
 	{
 		// Barcode Boy: the game clocks the knock itself, then listens on
-		// the external clock while the scanner clocks a card in. Bardigun:
-		// the game clocks every byte and the reader shifts samples back.
+		// the external clock while the scanner clocks a card in. Bardigun
+		// and the Mobile Adapter: the game clocks every byte.
 		s.active = s.passive = false;
 		if ((value & 0x81) == 0x81)
 		{
@@ -2252,7 +2262,8 @@ void SerialWriteSC(Serial &s, Memory &mem, uint8_t value)
 			s.bits_left  = 8;
 			s.bit_period = BitPeriod(s, value);
 			s.bit_timer  = FirstBitDelay(mem, s.bit_period);
-			s.peer_data  = BardigunConnected() ? BardigunExchange()
+			s.peer_data  = MobileHere(s)       ? MobileExchange(mem.serial_data)
+			             : BardigunConnected() ? BardigunExchange()
 			                                   : BarcodeBoyExchange(mem.serial_data);
 		}
 		else if (value & 0x80)
@@ -2348,7 +2359,7 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 
 	if (!SerialLinkIsEnabled() && !SerialSplitActive())
 	{
-		if (ScannerConnected())
+		if (ScannerConnected(s))
 		{
 			ScannerStep(s, mem, tcycles, real);
 			return;

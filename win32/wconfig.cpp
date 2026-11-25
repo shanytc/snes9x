@@ -1217,6 +1217,7 @@ void WinRegisterConfigItems()
 	AddUIntC("LinkPowerOn", GBLinkPowerOnOrder, 0, "who switches on first in a 2-player link session (Emulation -> Game Boy Link -> Power On): 0 = the seat(s) (default), 1 = player 1 (the master), 2 = both at the same time. Taken at the next power-on.");
 	AddUIntC("LinkPowerOnLead", GBLinkPowerOnLeadMs, 1000, "how far ahead the first console switches on, in milliseconds: 100, 200, 500 or 1000 (default). Unused with LinkPowerOn=2.");
 	AddBoolC("LinkInfrared", GBLinkInfrared, true, "true to have players 1 and 2 face each other's Game Boy Color infrared port in a link session (Emulation -> Game Boy Link -> Infra-Red).");
+	AddBoolC("MobileAdapterGB", GBMobileAdapter, false, "true to plug a Mobile Adapter GB into player 1's link port for Game Boy Color games, with a built-in server (Emulation -> Game Boy Link -> Mobile Adapter GB).");
 	AddBoolC("LinkGbKiss", GBLinkGbKiss, true, "true to have players 1 and 2 face each other's HuC1/HuC3 cartridge infrared in a link session (Emulation -> Game Boy Link -> GB KISS).");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"

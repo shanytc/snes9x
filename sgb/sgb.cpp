@@ -26,6 +26,7 @@
 #include "gb_kisslink.h"
 #include "gb_barcodeboy.h"
 #include "gb_bardigun.h"
+#include "gb_mobile.h"
 #include "gb_cart.h"
 #include "sgb_packet.h"
 #include "sgb_state.h"
@@ -3340,7 +3341,8 @@ constexpr uint32_t SGB_STATE_MAGIC   = 0x21424753u;  // 'S''G''B''!' LE
 // v18: add the HuC3/TAMA5 cartridge speaker's tone in progress.
 // v19: add the HuC3 melody in progress.
 // v20: add the ICD2 joypad-ID lock (bsnes joypLock); older states load it at power-on 1.
-constexpr uint32_t SGB_STATE_VERSION = 20;
+// v21: add the Mobile Adapter GB's packet in flight and its server's connections.
+constexpr uint32_t SGB_STATE_VERSION = 21;
 
 enum class IoMode : uint8_t { Size, Save, Load };
 
@@ -3736,6 +3738,15 @@ void VisitState(Emulator::Impl &impl, IoCtx &c)
 		IoField(c, impl.icd_joyp_lock);
 	else if (c.mode == IoMode::Load)
 		impl.icd_joyp_lock = 1;
+
+	// v21: the Mobile Adapter GB, mid-packet or idle, and what its server holds.
+	if (c.version >= 21)
+	{
+		std::vector<uint8_t> ma(MobileStateBytes());
+		if (c.mode == IoMode::Save) MobileStateSave(ma.data());
+		IoBytes(c, ma.data(), ma.size());
+		if (c.mode == IoMode::Load && c.ok) MobileStateLoad(ma.data());
+	}
 }
 
 // What a pre-v11 state lacks: settle it to an idle VBlank rather than keep
@@ -5494,7 +5505,7 @@ bool S9xSGBBarcodeBoyHasPort(void)
 // One scanner on the port at a time: plugging one in unplugs the other.
 void S9xSGBBarcodeBoyConnect(bool on)
 {
-	if (on) SGB::BardigunConnect(false);
+	if (on) { SGB::BardigunConnect(false); SGB::MobileConnect(false); }
 	SGB::BarcodeBoyConnect(on);
 }
 
@@ -5520,7 +5531,7 @@ const char *S9xSGBBarcodeBoyGame(void)
 
 void S9xSGBBardigunConnect(bool on)
 {
-	if (on) SGB::BarcodeBoyConnect(false);
+	if (on) { SGB::BarcodeBoyConnect(false); SGB::MobileConnect(false); }
 	SGB::BardigunConnect(on);
 }
 
@@ -5543,6 +5554,17 @@ const char *S9xSGBBardigunGame(void)
 	if (!prim.HasROM()) return nullptr;
 	return SGB::BardigunGame(prim.DebugImpl()->cart.header.title);
 }
+
+// Plugging the adapter in unplugs a card scanner, and the other way round.
+void S9xSGBMobileConnect(bool on)
+{
+	if (on) { SGB::BarcodeBoyConnect(false); SGB::BardigunConnect(false); }
+	SGB::MobileConnect(on);
+}
+
+bool S9xSGBMobileConnected(void) { return SGB::MobileConnected(); }
+
+void S9xSGBMobileSetPaths(const char *config, const char *root) { SGB::MobileSetPaths(config, root); }
 
 int S9xSGBLinkGetRole(void)         { return static_cast<int>(SGB::SerialLinkGetRole()); }
 int S9xSGBLinkPlayerCount(void)     { return SGB::SerialLinkPlayerCount(); }

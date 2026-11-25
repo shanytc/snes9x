@@ -413,6 +413,7 @@ list(APPEND SOURCES
     ../sgb/gb_infrared.cpp
     ../sgb/gb_barcodeboy.cpp
     ../sgb/gb_bardigun.cpp
+    ../sgb/gb_mobile.cpp
     ../sgb/gb_kisslink.cpp
     ../sgb/gb_link.cpp
     ../sgb/gb_viewer.cpp

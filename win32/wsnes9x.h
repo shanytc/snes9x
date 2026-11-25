@@ -96,6 +96,7 @@ void GBLinkSetPowerOnLead (int index);
 // Game Boy Link > Infra-Red / GB KISS: players 1 and 2 face each other's Game Boy
 // Color port / HuC1-HuC3 cart LED in any in-process session. Persisted.
 extern bool GBLinkInfrared;
+extern bool GBMobileAdapter;
 extern bool GBLinkGbKiss;
 
 // True on a thread that is a Super Game Boy seat's own SNES (see

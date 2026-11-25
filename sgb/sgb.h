@@ -599,6 +599,13 @@ bool S9xSGBBardigunPending(void);
 const char *S9xSGBBardigunLastCode(void);
 unsigned S9xSGBBardigunReadCount(void);
 const char *S9xSGBBardigunGame(void);
+// Nintendo's Mobile Adapter GB on the same port, for Game Boy Color games,
+// with a built-in server instead of a network (sgb/gb_mobile.h). Connecting
+// it unplugs a card scanner. Paths: its config memory file and the folder
+// the server's files come from.
+void S9xSGBMobileConnect(bool on);
+bool S9xSGBMobileConnected(void);
+void S9xSGBMobileSetPaths(const char *config, const char *root);
 void S9xSGBSplitSetJoypad(int player /*2..4*/, uint16_t snes_pad_mask);
 // Faceball 15-player test mode: seats 5+ replay one shared pad (the GUI
 // feeds Joypad #5), each seat (player-4)*kEchoStep frames behind (zero

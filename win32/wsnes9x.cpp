@@ -199,6 +199,8 @@ static void  WinKissLinkPoll();
 static void  WinKissLinkSend(bool map);
 static void  WinKissLinkReceiveMap();
 static bool  WinBarcodePortFree(S9xBarcodeReader reader);
+static void  GBMobileConnect(bool on);
+static void  GBMobileOpenFolder();
 static void  GBSeatMachinesRequestReset();
 static bool  GBSeatModelIsMachine(unsigned char model);
 static void  WinStartGBOtherGame(const TCHAR *path);
@@ -3061,6 +3063,8 @@ LRESULT CALLBACK WinProc(
 			if (reader == S9X_BARCODE_NONE || (!S9xBarcodeReaderConnected() && !WinBarcodePortFree(reader)))
 				break;
 			S9xBarcodeReaderConnect(!S9xBarcodeReaderConnected());
+			if (S9xBarcodeReaderConnected() && reader != S9X_BARCODE_BATTLER)
+				GBMobileConnect(false);
 			char msg[96];
 			if (S9xBarcodeReaderConnected())
 				snprintf(msg, sizeof(msg), "%s connected to %s", S9xBarcodeReaderName(reader), S9xBarcodeReaderPort(reader));
@@ -3887,6 +3891,13 @@ LRESULT CALLBACK WinProc(
 		case ID_EMULATION_GB_KISSLINK_CANCEL:
 			S9xSGBKissLinkCancel ();
 			S9xSetInfoString ("GB KISS LINK: cancelled");
+			break;
+		case ID_EMULATION_GB_MOBILE_CONNECT:
+			GBMobileConnect (!S9xSGBMobileConnected ());
+			S9xSetInfoString (GBMobileAdapter ? "Mobile Adapter GB connected to player 1's link port" : "Mobile Adapter GB disconnected");
+			break;
+		case ID_EMULATION_GB_MOBILE_FOLDER:
+			GBMobileOpenFolder ();
 			break;
 		case ID_EMULATION_GB_LINK_CONNECT:
 			// lParam rides the master's Game Boy Model + 1 (0 = not
@@ -6556,6 +6567,7 @@ int WINAPI WinMain(
 	GBLinkApplyPowerOn ();
 	S9xSGBSetInfrared (GBLinkInfrared);
 	S9xSGBSetGbKiss (GBLinkGbKiss);
+	GBMobileConnect (GBMobileAdapter);
 
     ControllerOptionsFromControllers();
     ChangeInputDevice();
@@ -7479,11 +7491,20 @@ static void GBLinkSyncIrItems (HMENU link)
 {
 	if (!link) return;
 	static HMENU kiss_link = NULL;
+	static HMENU mobile    = NULL;
 	static int   kiss_kind = 0;
-	static const UINT   ids[3]    = { ID_EMULATION_GB_LINK_IR, ID_EMULATION_GB_LINK_KISS, ID_EMULATION_GB_KISSLINK };
-	static const TCHAR *labels[3] = { TEXT("&Infra-Red"), TEXT("GB &Kiss"), TEXT("GB Kiss &Link") };
+	static const UINT   ids[4]    = { ID_EMULATION_GB_LINK_IR, ID_EMULATION_GB_LINK_KISS, ID_EMULATION_GB_KISSLINK, ID_EMULATION_GB_MOBILE };
+	static const TCHAR *labels[4] = { TEXT("&Infra-Red"), TEXT("GB &Kiss"), TEXT("GB Kiss &Link"), TEXT("&Mobile Adapter GB") };
 	const int  kind    = S9xSGBCartHasKissMenu () ? (S9xSGBCartIsNectaris () ? 2 : 1) : 0;
-	const bool want[3] = { S9xSGBIsCgb () && !Settings.SGB_BIOSModeActive, S9xSGBCartHasGbKiss (), kind != 0 };
+	const bool cgb     = S9xSGBIsCgb () && !Settings.SGB_BIOSModeActive;
+	const bool want[4] = { cgb, S9xSGBCartHasGbKiss (), kind != 0, cgb };
+	if (!mobile)
+	{
+		mobile = CreatePopupMenu ();
+		AppendMenu (mobile, MF_STRING, ID_EMULATION_GB_MOBILE_CONNECT, TEXT("&Connect"));
+		AppendMenu (mobile, MF_STRING, ID_EMULATION_GB_MOBILE_FOLDER, TEXT("Open &Server Folder"));
+		if (LocaleIsTranslated ()) LocalizeMenu (mobile);
+	}
 	if (kind && kind != kiss_kind)
 	{
 		if (!kiss_link) kiss_link = CreatePopupMenu ();
@@ -7500,13 +7521,13 @@ static void GBLinkSyncIrItems (HMENU link)
 		kiss_kind = kind;
 	}
 	bool same = true;
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < 4; i++)
 		same = same && (GetMenuState (link, ids[i], MF_BYCOMMAND) != (UINT)-1) == want[i];
 	if (same) return;
 
-	for (int i = 0; i < 3; i++) RemoveMenu (link, ids[i], MF_BYCOMMAND);
+	for (int i = 0; i < 4; i++) RemoveMenu (link, ids[i], MF_BYCOMMAND);
 	RemoveMenu (link, ID_EMULATION_GB_LINK_IR_SEP, MF_BYCOMMAND);
-	if (want[0] || want[1] || want[2])
+	if (want[0] || want[1] || want[2] || want[3])
 	{
 		MENUITEMINFO ins = {};
 		ins.cbSize = sizeof(ins);
@@ -7514,13 +7535,13 @@ static void GBLinkSyncIrItems (HMENU link)
 		ins.fType  = MFT_SEPARATOR;
 		ins.wID    = ID_EMULATION_GB_LINK_IR_SEP;
 		InsertMenuItem (link, ID_EMULATION_GB_LINK_RESET_ON_LINK, FALSE, &ins);
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < 4; i++)
 		{
 			if (!want[i]) continue;
-			ins.fMask      = MIIM_ID | MIIM_FTYPE | MIIM_STRING | (i == 2 ? MIIM_SUBMENU : 0);
+			ins.fMask      = MIIM_ID | MIIM_FTYPE | MIIM_STRING | (i >= 2 ? MIIM_SUBMENU : 0);
 			ins.fType      = MFT_STRING;
 			ins.wID        = ids[i];
-			ins.hSubMenu   = (i == 2) ? kiss_link : NULL;
+			ins.hSubMenu   = (i == 2) ? kiss_link : (i == 3) ? mobile : NULL;
 			ins.dwTypeData = (LPTSTR)labels[i];
 			ins.cch        = (UINT)_tcslen (labels[i]);
 			InsertMenuItem (link, ID_EMULATION_GB_LINK_IR_SEP, FALSE, &ins);
@@ -7528,6 +7549,31 @@ static void GBLinkSyncIrItems (HMENU link)
 		if (LocaleIsTranslated ()) LocalizeMenu (link);
 	}
 	DrawMenuBar (GUI.hWnd);
+}
+
+// The adapter's config memory and its built-in server's files live next to the
+// executable: gbmobileadapter\config.bin and gbmobileadapter\server.
+static std::string GBMobileFolder ()
+{
+	return S9xGetDirectory (DEFAULT_DIR) + SLASH_STR + "gbmobileadapter";
+}
+
+static void GBMobileConnect (bool on)
+{
+	const std::string dir = GBMobileFolder ();
+	S9xSGBMobileSetPaths ((dir + SLASH_STR + "config.bin").c_str (), (dir + SLASH_STR + "server").c_str ());
+	// It takes the link port from a card scanner, so the reader stays off.
+	if (on) S9xBarcodeReaderConnect (false);
+	S9xSGBMobileConnect (on);
+	GBMobileAdapter = on;
+}
+
+static void GBMobileOpenFolder ()
+{
+	const std::string server = GBMobileFolder () + SLASH_STR + "server";
+	Utf8ToWide path (server.c_str ());
+	SHCreateDirectoryEx (NULL, (wchar_t *)path, NULL);
+	ShellExecute (GUI.hWnd, TEXT("open"), (wchar_t *)path, NULL, NULL, SW_SHOWNORMAL);
 }
 
 static void CheckMenuStates ()
@@ -7843,6 +7889,9 @@ static void CheckMenuStates ()
 			const int kst = S9xSGBKissLinkStatus (NULL, NULL, NULL, NULL);
 			mii.fState = (kst == S9X_KISSLINK_WAITING || kst == S9X_KISSLINK_BUSY) ? MFS_ENABLED : MFS_DISABLED;
 			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_KISSLINK_CANCEL, FALSE, &mii);
+			// A link session holds the port the adapter plugs into.
+			mii.fState = ir_off | (S9xSGBMobileConnected () ? MFS_CHECKED : MFS_UNCHECKED);
+			SetMenuItemInfo (GUI.hMenu, ID_EMULATION_GB_MOBILE_CONNECT, FALSE, &mii);
 
 			// Split screen needs the BIOS-less core, so in BIOS mode the
 			// item comes out of the menu rather than offering a dead end.
@@ -15445,6 +15494,7 @@ void GBLinkApplyPowerOn ()
 
 // Players 1 and 2 face each other: the GBC port / the cart LED, each on unless unticked.
 bool GBLinkInfrared = true;
+bool GBMobileAdapter = false;
 bool GBLinkGbKiss   = true;
 
 // Each player's Game Boy Model, indexed by player number. A session opens

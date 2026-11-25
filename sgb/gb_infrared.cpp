@@ -211,8 +211,10 @@ uint8_t IrReadCart(const Memory &m)
 	if (KissLinkFacing(m))
 		return static_cast<uint8_t>(base | (KissLinkLit(m) ? 0x01 : 0x00));
 	const int s = SeatOf(m);
-	const bool lit = s >= 0 && g_cart_on &&
-	                 LevelAt(g_seat[1 - s].cart, Now(s, m) - kCartSensorDots, g_ir[1 - s]->cart_ir & 0x01, nullptr);
+	// The facing cart's LED, or a TV remote aimed at this cart's window (Robopon).
+	const bool lit = (s >= 0 && g_cart_on &&
+	                  LevelAt(g_seat[1 - s].cart, Now(s, m) - kCartSensorDots, g_ir[1 - s]->cart_ir & 0x01, nullptr)) ||
+	                 TvRemoteSeen(m);
 	return static_cast<uint8_t>(base | (lit ? 0x01 : 0x00));
 }
 

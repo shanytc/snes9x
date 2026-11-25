@@ -1069,6 +1069,49 @@ uint8_t SplitIdleLine(const Serial &s)
 	return ps->so_bit ? 0xFF : 0x00;
 }
 
+// A clocking port's SO at shared time t: its idle level until its first falling
+// edge (half a period before the first shift), then bits 7..0, holding bit 0.
+static int SplitMasterSO(const Serial &m, uint8_t out, int64_t t)
+{
+	const int64_t fall0 = m.xfer_edge1 - m.xfer_period / 2;
+	if (t < fall0) return m.so_bit ? 1 : 0;
+	const int64_t j = (t - fall0) / m.xfer_period;
+	return (out >> (7 - (j > 7 ? 7 : j))) & 1;
+}
+
+// Both cores clock at once. The port is full duplex, so each shifts in the other's
+// SO at its own edges (Goemon Nabebugyou's menu retries; a $FF read aborts it).
+static bool SplitCrossMasters(Serial &s, Memory &mem)
+{
+	Serial *ps = (&s == g_splitlink.s[0]) ? g_splitlink.s[1] : g_splitlink.s[0];
+	Memory *pm = (&s == g_splitlink.s[0]) ? g_splitlink.m[1] : g_splitlink.m[0];
+	if (!ps || !pm || !ps->active || ps->peer_valid) return false;
+
+	const uint8_t ours = mem.serial_data, theirs = pm->serial_data;
+	uint8_t to_us = theirs, to_them = ours;   // whole bytes when the clocks were never anchored
+	int64_t a, b;
+	if (s.xfer_period > 0 && ps->xfer_period > 0 && SplitNow(mem, a) && SplitNow(*pm, b) &&
+	    a - b < 70224 / 4 && b - a < 70224 / 4)
+	{
+		to_us = to_them = 0;
+		for (int i = 0; i < 8; ++i)
+		{
+			to_us   = static_cast<uint8_t>((to_us << 1) | SplitMasterSO(*ps, theirs, s.xfer_edge1 + i * s.xfer_period));
+			to_them = static_cast<uint8_t>((to_them << 1) | SplitMasterSO(s, ours, ps->xfer_edge1 + i * ps->xfer_period));
+		}
+	}
+	Trace("[%lld] split crossed masters: ours %02X reads %02X, theirs %02X reads %02X",
+	      (long long)s.real_cycles, ours, to_us, theirs, to_them);
+	s.peer_data       = to_us;
+	s.peer_valid      = true;
+	s.peer_supplied   = true;
+	ps->peer_data     = to_them;
+	ps->peer_valid    = true;
+	ps->peer_supplied = true;
+	SplitNoteTrade();
+	return true;
+}
+
 // Deliver one held clock once this core arms. Nothing is sent back:
 // the core that drove it settled long ago, exactly as it would have
 // against a wire whose other end was not listening yet.
@@ -2428,7 +2471,7 @@ void SerialStep(Serial &s, Memory &mem, int32_t tcycles)
 			{
 				if (SerialSplitActive())
 				{
-					if (!SplitTryResolveMaster(s, mem))
+					if (!SplitTryResolveMaster(s, mem) && !SplitCrossMasters(s, mem))
 					{
 						// The other core lags by up to an interleave slice;
 						// an arm resolved away this instant may already have

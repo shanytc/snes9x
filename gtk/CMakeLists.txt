@@ -415,6 +415,7 @@ list(APPEND SOURCES
     ../sgb/gb_bardigun.cpp
     ../sgb/gb_mobile.cpp
     ../sgb/gb_kisslink.cpp
+    ../sgb/gb_tvremote.cpp
     ../sgb/gb_link.cpp
     ../sgb/gb_viewer.cpp
     ../sgb/gb_joypad.cpp

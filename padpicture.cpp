@@ -48,6 +48,29 @@ const PadPicShape kPachinkoPicShapes[] =
 	{ PACHPIC_STOP,      1, { { 199.6f, 197.4f }, { 81.9f } } }
 };
 
+// The TV remote's keys: Power, Mute, 1-12 (three to a row), CH up and down, VOL up and down.
+const PadPicShape kTvRemotePicShapes[] =
+{
+	{ 1 << 0,  1, { { 88, 52 }, { 15 } } },
+	{ 1 << 1,  1, { { 162, 52 }, { 15 } } },
+	{ 1 << 2,  0, { { 78, 108 }, { 92, 108 }, { 11 } } },
+	{ 1 << 3,  0, { { 118, 108 }, { 132, 108 }, { 11 } } },
+	{ 1 << 4,  0, { { 158, 108 }, { 172, 108 }, { 11 } } },
+	{ 1 << 5,  0, { { 78, 138 }, { 92, 138 }, { 11 } } },
+	{ 1 << 6,  0, { { 118, 138 }, { 132, 138 }, { 11 } } },
+	{ 1 << 7,  0, { { 158, 138 }, { 172, 138 }, { 11 } } },
+	{ 1 << 8,  0, { { 78, 168 }, { 92, 168 }, { 11 } } },
+	{ 1 << 9,  0, { { 118, 168 }, { 132, 168 }, { 11 } } },
+	{ 1 << 10, 0, { { 158, 168 }, { 172, 168 }, { 11 } } },
+	{ 1 << 11, 0, { { 78, 198 }, { 92, 198 }, { 11 } } },
+	{ 1 << 12, 0, { { 118, 198 }, { 132, 198 }, { 11 } } },
+	{ 1 << 13, 0, { { 158, 198 }, { 172, 198 }, { 11 } } },
+	{ 1 << 14, 1, { { 162, 250 }, { 15 } } },
+	{ 1 << 15, 1, { { 162, 296 }, { 15 } } },
+	{ 1 << 16, 1, { { 88, 250 }, { 15 } } },
+	{ 1 << 17, 1, { { 88, 296 }, { 15 } } }
+};
+
 struct PadPicColour { int r, g, b; };
 
 float PadPicSegmentDistance (float x, float y, const float *a, const float *b)
@@ -229,6 +252,28 @@ void S9xPachinkoPictureDraw (uint32_t *px, int w, int h, int stride, float scale
 		const PadPicColour fill = stop ? PadPicColour { 230, 60, 60 } : PadPicColour { 80, 170, 255 };
 		const PadPicColour rim = stop ? PadPicColour { 190, 40, 40 } : PadPicColour { 40, 130, 230 };
 		PadPicDrawShape(b, px, w, h, stride, scale, on, ring, fill, rim, 120 / 255.0f, 2.0f, premultiplied);
+	}
+}
+
+int S9xTvRemotePictureButtonAt (float x, float y, int allowed, float slack)
+{
+	return PadPicButtonAt(kTvRemotePicShapes, x, y, allowed, slack);
+}
+
+void S9xTvRemotePictureDraw (uint32_t *px, int w, int h, int stride, float scale, int lit, int outlined, bool premultiplied)
+{
+	for (const PadPicShape &b : kTvRemotePicShapes)
+	{
+		const bool on = (lit & b.button) != 0;
+		const float ring = (outlined & b.button) ? 2.0f : 0.0f;
+		if (!on && !ring)
+			continue;
+
+		// See-through yellow so the key's legend shows; Power, already red, a lighter red
+		const bool power = b.button == 1;
+		const PadPicColour fill = power ? PadPicColour { 255, 150, 140 } : PadPicColour { 255, 210, 0 };
+		const PadPicColour rim = power ? PadPicColour { 190, 40, 40 } : PadPicColour { 200, 140, 0 };
+		PadPicDrawShape(b, px, w, h, stride, scale, on, ring, fill, rim, 150 / 255.0f, 2.0f, premultiplied);
 	}
 }
 

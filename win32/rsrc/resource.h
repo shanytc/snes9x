@@ -32,6 +32,7 @@
 #define IDB_PAD_SFC                     199
 #define IDB_PAD_EUR                     200
 #define IDB_PACHINKO                    202
+#define IDB_TVREMOTE                    205
 #define IDD_OPENMOVIE                   134
 #define IDD_CREATEMOVIE                 135
 #define IDD_KEYCUSTOM                   136
@@ -984,6 +985,12 @@
 #define IDC_PAUSE_EMULATION             3351
 #define IDC_INPUT_PICTURE               3702
 #define IDC_PACHINKO_NOTE               3730
+#define IDC_TV11                        3738
+#define IDC_TV12                        3739
+#define IDC_LABEL_TV11                  3740
+#define IDC_LABEL_TV12                  3741
+#define IDC_TVVENDOR                    3742
+#define IDC_LABEL_TVVENDOR              3743
 #define IDC_FF_SPEED                    3731
 #define IDC_FF_SPEED_TEXT               3732
 #define IDC_LABEL_FFSPEED               3733
@@ -1106,15 +1113,17 @@
 #define ID_INPUT_BARCODE_SCAN           44455
 #define ID_INPUT_BARCODE_RESCAN         44456
 #define ID_INPUT_PACHINKO_CONNECT       44457
+#define ID_INPUT_TVREMOTE_OFF           44469
+#define ID_INPUT_TVREMOTE_VENDOR0       44470	// + the maker, up to 44489
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        205
-#define _APS_NEXT_COMMAND_VALUE         44469
-#define _APS_NEXT_CONTROL_VALUE         3738
+#define _APS_NEXT_RESOURCE_VALUE        206
+#define _APS_NEXT_COMMAND_VALUE         44490
+#define _APS_NEXT_CONTROL_VALUE         3744
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

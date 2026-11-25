@@ -576,6 +576,23 @@ bool S9xSGBKissLinkStart(int kind, const uint8_t *data, size_t size, const char 
 void S9xSGBKissLinkCancel(void);
 int  S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char **error);
 bool S9xSGBKissLinkReceivedMap(uint8_t *out /* S9X_KISSLINK_MAP_BYTES */);
+// A household TV remote aimed at player 1's Game Boy Color, sending its maker's real
+// frames, and that TV: what the console's own LED sends shows as a message. Vendor -1
+// puts both away. One button sends at a time, repeating while it is held.
+enum
+{
+	S9X_TVKEY_POWER, S9X_TVKEY_MUTE, S9X_TVKEY_1, S9X_TVKEY_12 = S9X_TVKEY_1 + 11,
+	S9X_TVKEY_CH_UP, S9X_TVKEY_CH_DOWN, S9X_TVKEY_VOL_UP, S9X_TVKEY_VOL_DOWN, S9X_TVREMOTE_KEYS
+};
+int         S9xSGBTvRemoteVendorCount(void);
+const char *S9xSGBTvRemoteVendorName(int vendor);
+bool        S9xSGBTvRemoteHasKey(int vendor, int key);
+const char *S9xSGBTvRemoteKeyName(int key);
+void S9xSGBSetTvRemote(int vendor);
+int  S9xSGBGetTvRemote(void);
+void S9xSGBTvRemoteKey(int key, bool down);
+// The TV's last received command and how many it has had; false before the first.
+bool S9xSGBTvReceived(unsigned *serial, const char **text);
 // Namcot's Barcode Boy on player 1's link port, while no Game Boy Link session
 // holds it (sgb/gb_barcodeboy.h has the known cards). Scan takes 13 digits,
 // connects it, and the card waits until the game asks for one; ReadCount

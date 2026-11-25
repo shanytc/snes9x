@@ -24,6 +24,7 @@
 #include "gb_serial.h"
 #include "gb_infrared.h"
 #include "gb_kisslink.h"
+#include "gb_tvremote.h"
 #include "gb_barcodeboy.h"
 #include "gb_bardigun.h"
 #include "gb_mobile.h"
@@ -5480,6 +5481,29 @@ bool S9xSGBKissLinkStart(int kind, const uint8_t *data, size_t size, const char 
 }
 
 void S9xSGBKissLinkCancel(void) { SGB::KissLinkCancel(); }
+
+static void TvShow(const char *text)
+{
+	static char buf[80];
+	snprintf(buf, sizeof buf, "TV: %s", text);
+	S9xMessage(S9X_INFO, S9X_NO_INFO, buf);
+}
+
+int         S9xSGBTvRemoteVendorCount(void)          { return SGB::TvRemoteVendors(); }
+const char *S9xSGBTvRemoteVendorName(int vendor)     { return SGB::TvRemoteVendorName(vendor); }
+bool        S9xSGBTvRemoteHasKey(int vendor, int key) { return SGB::TvRemoteHasKey(vendor, key); }
+const char *S9xSGBTvRemoteKeyName(int key)           { return SGB::TvRemoteKeyName(key); }
+int         S9xSGBGetTvRemote(void)                  { return SGB::TvRemoteVendor(); }
+
+void S9xSGBSetTvRemote(int vendor)
+{
+	SGB::TvSetNotify(TvShow);
+	SGB::TvRemoteFace(&SGB::Instance().DebugImpl()->mem, vendor);
+}
+
+void S9xSGBTvRemoteKey(int key, bool down) { SGB::TvRemoteKey(key, down); }
+
+bool S9xSGBTvReceived(unsigned *serial, const char **text) { return SGB::TvReceived(serial, text); }
 
 int S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char **error)
 {

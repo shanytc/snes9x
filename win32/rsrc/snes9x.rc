@@ -433,6 +433,8 @@ BEGIN
     CONTROL         " ",IDC_UPRIGHT,"InputCustom",WS_DISABLED | WS_TABSTOP,292,81,78,12
     CONTROL         " ",IDC_DWNRIGHT,"InputCustom",WS_DISABLED | WS_TABSTOP,292,94,78,12
     CONTROL         " ",IDC_DWNLEFT,"InputCustom",WS_DISABLED | WS_TABSTOP,292,107,78,12
+    CONTROL         " ",IDC_TV11,"InputCustom",NOT WS_VISIBLE | WS_TABSTOP,292,120,78,12
+    CONTROL         " ",IDC_TV12,"InputCustom",NOT WS_VISIBLE | WS_TABSTOP,292,133,78,12
     PUSHBUTTON      "Cancel",IDCANCEL,326,322,48,14
     PUSHBUTTON      "OK",IDOK,272,322,48,14
     LTEXT           "Blue means already mapped. Pink conflicts with hotkey.\nRed is reserved by Windows. Escape clears bindings.\nPress multiple keys for multi-bind. Delete removes last.",IDC_LABEL_BLUE,155,0,220,26
@@ -459,6 +461,10 @@ BEGIN
     GROUPBOX        "Binding",IDC_STATIC,5,30,142,28,0,WS_EX_TRANSPARENT
     GROUPBOX        "Buttons",IDC_STATIC,5,59,370,92,0,WS_EX_TRANSPARENT
     LTEXT           "",IDC_PACHINKO_NOTE,140,70,228,74,NOT WS_VISIBLE
+    RTEXT           "11",IDC_LABEL_TV11,248,123,40,8,NOT WS_VISIBLE
+    RTEXT           "12",IDC_LABEL_TV12,248,136,40,8,NOT WS_VISIBLE
+    LTEXT           "Maker",IDC_LABEL_TVVENDOR,155,13,24,8,NOT WS_VISIBLE
+    COMBOBOX        IDC_TVVENDOR,182,11,80,160,CBS_DROPDOWNLIST | NOT WS_VISIBLE | WS_VSCROLL | WS_TABSTOP
     CONTROL         "",IDC_INPUT_PICTURE,"Static",SS_BITMAP,5,158,370,160
 END
 
@@ -1376,6 +1382,7 @@ IDB_PAD_SFC             BITMAP                  "pad_sfc.bmp"
 IDB_PAD_EUR             BITMAP                  "pad_eur.bmp"
 
 IDB_PACHINKO            BITMAP                  "pachinko.bmp"
+IDB_TVREMOTE            BITMAP                  "tvremote.bmp"
 
 IDB_REMOVABLE           BITMAP                  "rd.bmp"
 
@@ -1735,6 +1742,23 @@ BEGIN
         MENUITEM "Use Dual Justifiers",         IDM_JUSTIFIERS,MFT_STRING,MFS_ENABLED
         MENUITEM "Use M.A.C.S. Rifle",          IDM_MACSRIFLE_TOGGLE,MFT_STRING,MFS_ENABLED
         MENUITEM "Use Sunsoft Pachinko",        ID_INPUT_PACHINKO_CONNECT,MFT_STRING,MFS_ENABLED
+        POPUP "TV &Remote",                     0,MFT_STRING,MFS_ENABLED
+        BEGIN
+            MENUITEM "&None",                       ID_INPUT_TVREMOTE_OFF,MFT_STRING,MFS_ENABLED
+            MENUITEM MFT_SEPARATOR
+            MENUITEM "Sony",                        ID_INPUT_TVREMOTE_VENDOR0 + 0,MFT_STRING,MFS_ENABLED
+            MENUITEM "Panasonic",                   ID_INPUT_TVREMOTE_VENDOR0 + 1,MFT_STRING,MFS_ENABLED
+            MENUITEM "Toshiba",                     ID_INPUT_TVREMOTE_VENDOR0 + 2,MFT_STRING,MFS_ENABLED
+            MENUITEM "Hitachi",                     ID_INPUT_TVREMOTE_VENDOR0 + 3,MFT_STRING,MFS_ENABLED
+            MENUITEM "Sharp",                       ID_INPUT_TVREMOTE_VENDOR0 + 4,MFT_STRING,MFS_ENABLED
+            MENUITEM "JVC",                         ID_INPUT_TVREMOTE_VENDOR0 + 5,MFT_STRING,MFS_ENABLED
+            MENUITEM "Mitsubishi",                  ID_INPUT_TVREMOTE_VENDOR0 + 6,MFT_STRING,MFS_ENABLED
+            MENUITEM "Sanyo",                       ID_INPUT_TVREMOTE_VENDOR0 + 7,MFT_STRING,MFS_ENABLED
+            MENUITEM "Pioneer",                     ID_INPUT_TVREMOTE_VENDOR0 + 8,MFT_STRING,MFS_ENABLED
+            MENUITEM "LG",                          ID_INPUT_TVREMOTE_VENDOR0 + 9,MFT_STRING,MFS_ENABLED
+            MENUITEM "Samsung",                     ID_INPUT_TVREMOTE_VENDOR0 + 10,MFT_STRING,MFS_ENABLED
+            MENUITEM "Philips",                     ID_INPUT_TVREMOTE_VENDOR0 + 11,MFT_STRING,MFS_ENABLED
+        END
         MENUITEM MFT_SEPARATOR
         POPUP "&Barcodes",                      0,MFT_STRING,MFS_ENABLED
         BEGIN

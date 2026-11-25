@@ -288,6 +288,7 @@
     <ClInclude Include="..\sgb\gb_bardigun.h" />
     <ClInclude Include="..\sgb\gb_mobile.h" />
     <ClInclude Include="..\sgb\gb_kisslink.h" />
+    <ClInclude Include="..\sgb\gb_tvremote.h" />
     <ClInclude Include="..\sgb\gb_link.h" />
     <ClInclude Include="..\sgb\sgb.h" />
     <ClInclude Include="..\sgb\sgb_packet.h" />
@@ -408,6 +409,7 @@
     <ClCompile Include="..\sgb\gb_bardigun.cpp" />
     <ClCompile Include="..\sgb\gb_mobile.cpp" />
     <ClCompile Include="..\sgb\gb_kisslink.cpp" />
+    <ClCompile Include="..\sgb\gb_tvremote.cpp" />
     <ClCompile Include="..\sgb\gb_link.cpp" />
     <ClCompile Include="..\sgb\sgb.cpp" />
     <ClCompile Include="..\sgb\sgb_packet.cpp" />

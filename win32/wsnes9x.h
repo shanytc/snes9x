@@ -98,6 +98,8 @@ void GBLinkSetPowerOnLead (int index);
 extern bool GBLinkInfrared;
 extern bool GBMobileAdapter;
 extern bool GBLinkGbKiss;
+// Input > TV Remote: the maker of the remote (and TV) at player 1's Game Boy Color, -1 none. Persisted.
+extern int GBTvRemoteVendor;
 
 // True on a thread that is a Super Game Boy seat's own SNES (see
 // GBSeatMachine): the frame hooks the core calls from S9xMainLoop - blit,
@@ -513,6 +515,7 @@ struct SCustomKey {
 // Consoles offered as Emulation -> Game Boy Model hotkeys: the four real ones
 // plus Super Game Boy Color, in menu order. Automatic is not bound.
 #define GB_MODEL_HOTKEYS 5
+#define TVREMOTE_HOTKEYS 18   // S9X_TVREMOTE_KEYS
 
 struct SCustomKeys {
 	SCustomKey SpeedUp;
@@ -596,6 +599,7 @@ struct SCustomKeys {
 	SCustomKey BarcodeConnect;       // Input -> Barcodes
 	SCustomKey BarcodeScan;
 	SCustomKey BarcodeRescan;
+	SCustomKey TvRemote[TVREMOTE_HOTKEYS];   // Input -> TV Remote: its keys, in the core's order
 };
 
 struct SCustomKeyExtra {
@@ -679,6 +683,7 @@ struct SCustomKeysExtra {
 	SCustomKeyExtra BarcodeConnect;
 	SCustomKeyExtra BarcodeScan;
 	SCustomKeyExtra BarcodeRescan;
+	SCustomKeyExtra TvRemote[TVREMOTE_HOTKEYS];
 };
 
 struct SJoypad {
@@ -711,6 +716,7 @@ struct SJoypad {
     WORD Y;
     WORD L;
     WORD R;
+    WORD Tv11, Tv12;	// the TV remote's row only: its keys 11 and 12 (last: the rows' initializers)
 };
 
 struct SJoypadExtraBinds {
@@ -730,6 +736,8 @@ struct SJoypadExtraBinds {
     WORD Y[MAX_EXTRA_BINDS];
     WORD L[MAX_EXTRA_BINDS];
     WORD R[MAX_EXTRA_BINDS];
+    WORD Tv11[MAX_EXTRA_BINDS];
+    WORD Tv12[MAX_EXTRA_BINDS];
 };
 
 #define S9X_JOY_NEUTRAL 60
@@ -779,7 +787,9 @@ enum
 // Joypad[]: pads 1-8, their turbo rows (8-15), then the Sunsoft Pachinko's bindings,
 // with Up = Stronger, Left = Weaker and Down = Stop.
 #define PACHINKO_PAD		16
-#define NUM_JOYPAD_BINDS	17
+// ... then the TV remote aimed at a Game Boy Color: TvRemoteBind in wsnes9x.cpp says which member is which key.
+#define TVREMOTE_PAD		17
+#define NUM_JOYPAD_BINDS	18
 
 /*****************************************************************************/
 

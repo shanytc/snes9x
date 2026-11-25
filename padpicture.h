@@ -70,6 +70,17 @@ uint32_t S9xPachinkoPowerColour (float power);
 #define S9X_PACHINKOPIC_LABEL_SIZE	17
 #define S9X_PACHINKOPIC_VALUE_SIZE	40
 
+// The TV remote's picture (win32/rsrc/tvremote.bmp), aimed at a Game Boy Color's infrared port.
+// Bit k is the remote's key k: Power, Mute, 1-12, CH+, CH-, VOL+, VOL-.
+#define S9X_TVREMOTEPIC_WIDTH	250
+#define S9X_TVREMOTEPIC_HEIGHT	360
+#define S9X_TVREMOTEPIC_KEYS	18
+#define TVPIC_ALL	((1 << S9X_TVREMOTEPIC_KEYS) - 1)
+
+// As S9xPadPictureButtonAt and S9xPadPictureDraw, for the TV remote's picture.
+int S9xTvRemotePictureButtonAt (float x, float y, int allowed, float slack = 4.0f);
+void S9xTvRemotePictureDraw (uint32_t *px, int w, int h, int stride, float scale, int lit, int outlined, bool premultiplied = false);
+
 // The controller settings' preview dial for the gauge: 0 when the settings open, turned by the
 // held PACHPIC_STRONGER/WEAKER parts as S9xControlEOF turns the real one (a step, then every
 // frame once held 15), on a 60 Hz clock of its own.

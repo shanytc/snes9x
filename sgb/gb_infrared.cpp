@@ -12,6 +12,7 @@
 #include "gb_kisslink.h"
 #include "gb_memory.h"
 #include "gb_ppu.h"
+#include "gb_tvremote.h"
 
 #include <cstdint>
 #include <cstring>
@@ -177,9 +178,10 @@ bool IrStateLoad(const uint8_t *in, size_t size)
 uint8_t IrReadRP(const Memory &m)
 {
 	uint8_t v = static_cast<uint8_t>((m.rp & 0xC1) | 0x3E);
+	if ((m.rp & 0xC0) != 0xC0) return v;
 	const int s = SeatOf(m);
-	if ((m.rp & 0xC0) != 0xC0 || !g_port_on || s < 0) return v;
-	if (PortSeen(g_seat[1 - s].port, Now(s, m), g_ir[1 - s]->rp & 0x01))
+	if ((g_port_on && s >= 0 && PortSeen(g_seat[1 - s].port, Now(s, m), g_ir[1 - s]->rp & 0x01)) ||
+	    TvRemoteSeen(m))
 		v = static_cast<uint8_t>(v & ~0x02);
 	return v;
 }
@@ -190,6 +192,7 @@ void IrWriteRP(Memory &m, uint8_t value)
 		m.rp_lit_at = m.ppu ? m.ppu->t_cycles : 0;
 	const int s = SeatOf(m);
 	if (s >= 0) Record(g_seat[s].port, Now(s, m), value & 0x01);
+	TvRemoteLed(m, value & 0x01);
 	m.rp = static_cast<uint8_t>(value & 0xC1);
 }
 

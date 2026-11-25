@@ -341,6 +341,7 @@
     <ClInclude Include="..\sgb\gb_bardigun.h" />
     <ClInclude Include="..\sgb\gb_mobile.h" />
     <ClInclude Include="..\sgb\gb_kisslink.h" />
+    <ClInclude Include="..\sgb\gb_tvremote.h" />
     <ClInclude Include="..\sgb\gb_link.h" />
     <ClInclude Include="..\sgb\gb_viewer.h" />
     <ClInclude Include="..\sgb\gb_joypad.h" />
@@ -582,6 +583,7 @@
     <ClCompile Include="..\sgb\gb_bardigun.cpp" />
     <ClCompile Include="..\sgb\gb_mobile.cpp" />
     <ClCompile Include="..\sgb\gb_kisslink.cpp" />
+    <ClCompile Include="..\sgb\gb_tvremote.cpp" />
     <ClCompile Include="..\sgb\gb_link.cpp" />
     <ClCompile Include="..\sgb\gb_viewer.cpp" />
     <ClCompile Include="..\sgb\gb_joypad.cpp" />

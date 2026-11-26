@@ -18,15 +18,18 @@ struct Memory;
 // belongs to: the remote sends its maker's real frames on a modulated carrier,
 // the TV names what the console's own LED sends back.
 constexpr int kTvRemoteKeys = 18;   // Power, Mute, 1-12, CH+, CH-, VOL+, VOL-
+constexpr int kTvRemoteAuto = -2;   // as a maker: the one that does the most in the facing console's game
 
 int         TvRemoteVendors();
 const char *TvRemoteVendorName(int vendor);
 bool        TvRemoteHasKey(int vendor, int key);
 const char *TvRemoteKeyName(int key);
 
-// The console the remote and TV face (nullptr: put away) and the remote's maker.
+// The console the remote and TV face (nullptr: put away) and the remote's maker or kTvRemoteAuto.
 void TvRemoteFace(const Memory *m, int vendor);
 int  TvRemoteVendor();
+// The maker sending: the one chosen, or Auto's for the loaded game (-1: none, or Auto without a game).
+int  TvRemoteVendorInUse();
 // A remote button goes down or up now; one button sends at a time.
 void TvRemoteKey(int key, bool down);
 

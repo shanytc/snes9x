@@ -8,6 +8,7 @@
 // from the irdb tables for each maker's TV device.
 
 #include "gb_tvremote.h"
+#include "gb_cart.h"
 #include "gb_memory.h"
 #include "gb_ppu.h"
 
@@ -127,7 +128,7 @@ struct Press
 };
 
 const Memory *g_face = nullptr;
-int           g_vendor = -1;
+int           g_vendor = -1;   // a maker, kTvRemoteAuto or -1
 Press         g_press;
 bool          g_rc5_toggle = false;
 // A frontend reports buttons once a frame, on the console's VBlank; a finger lands anywhere
@@ -415,9 +416,30 @@ const char *TvRemoteKeyName(int key)
 	return (key >= 0 && key < kTvRemoteKeys) ? kKeyNames[key] : "";
 }
 
+namespace {
+
+// Auto: the maker whose remote does the most in a game, by the cart's game code; Sony elsewhere,
+// which every game tested reads.
+struct AutoRow { const char *code; int vendor; };
+const AutoRow kAutoRows[] =
+{
+	{ "BDMJ", 0 },   // Doraemon Memories: acts on 11 of Sony's keys, the most of any maker
+	{ "A8BE", 0 },   // Bomberman Max Blue: Sony's 1 to 8 reach all eight hidden areas
+};
+
+int AutoVendor(const Memory &m)
+{
+	if (!m.cart || m.cart->rom.size() < 0x150) return -1;
+	for (const AutoRow &r : kAutoRows)
+		if (std::memcmp(&m.cart->rom[0x13F], r.code, 4) == 0) return r.vendor;
+	return 0;
+}
+
+} // anonymous
+
 void TvRemoteFace(const Memory *m, int vendor)
 {
-	if (vendor < 0 || vendor >= kVendorCount) { vendor = -1; m = nullptr; }
+	if (vendor != kTvRemoteAuto && (vendor < 0 || vendor >= kVendorCount)) { vendor = -1; m = nullptr; }
 	if (m == g_face && vendor == g_vendor) return;
 	g_face = m;
 	g_vendor = vendor;
@@ -427,24 +449,31 @@ void TvRemoteFace(const Memory *m, int vendor)
 
 int TvRemoteVendor() { return g_vendor; }
 
+int TvRemoteVendorInUse()
+{
+	if (g_vendor != kTvRemoteAuto) return g_vendor;
+	return g_face ? AutoVendor(*g_face) : -1;
+}
+
 void TvRemoteKey(int key, bool down)
 {
 	Press &p = g_press;
-	if (!g_face || !g_face->ppu || g_vendor < 0) return;
+	const int vendor = TvRemoteVendorInUse();
+	if (!g_face || !g_face->ppu || vendor < 0) return;
 	const int64_t now = g_face->ppu->t_cycles;
 	if (!down)
 	{
 		if (key == p.key && p.release == INT64_MAX) p.release = now;
 		return;
 	}
-	if (!TvRemoteHasKey(g_vendor, key) || (p.key >= 0 && p.release == INT64_MAX)) return;
+	if (!TvRemoteHasKey(vendor, key) || (p.key >= 0 && p.release == INT64_MAX)) return;
 	p = Press();
 	p.key = key;
 	g_phase = g_phase * 1664525u + 1013904223u;
 	p.pressed = now;
 	p.t0 = now + static_cast<int64_t>((g_phase >> 8) % kFrameDots);
-	if (kVendors[g_vendor].proto == Proto::Rc5) g_rc5_toggle = !g_rc5_toggle;
-	Build(kVendors[g_vendor], kVendors[g_vendor].key[key], p);
+	if (kVendors[vendor].proto == Proto::Rc5) g_rc5_toggle = !g_rc5_toggle;
+	Build(kVendors[vendor], kVendors[vendor].key[key], p);
 }
 
 bool TvRemoteSeen(const Memory &m)

@@ -716,7 +716,6 @@ struct SJoypad {
     WORD Y;
     WORD L;
     WORD R;
-    WORD Tv11, Tv12;	// the TV remote's row only: its keys 11 and 12 (last: the rows' initializers)
 };
 
 struct SJoypadExtraBinds {
@@ -736,8 +735,6 @@ struct SJoypadExtraBinds {
     WORD Y[MAX_EXTRA_BINDS];
     WORD L[MAX_EXTRA_BINDS];
     WORD R[MAX_EXTRA_BINDS];
-    WORD Tv11[MAX_EXTRA_BINDS];
-    WORD Tv12[MAX_EXTRA_BINDS];
 };
 
 #define S9X_JOY_NEUTRAL 60
@@ -787,9 +784,7 @@ enum
 // Joypad[]: pads 1-8, their turbo rows (8-15), then the Sunsoft Pachinko's bindings,
 // with Up = Stronger, Left = Weaker and Down = Stop.
 #define PACHINKO_PAD		16
-// ... then the TV remote aimed at a Game Boy Color: TvRemoteBind in wsnes9x.cpp says which member is which key.
-#define TVREMOTE_PAD		17
-#define NUM_JOYPAD_BINDS	18
+#define NUM_JOYPAD_BINDS	17
 
 /*****************************************************************************/
 

@@ -1328,16 +1328,7 @@ void WinRegisterConfigItems()
 	AddVKey("Pachinko:" #n ":Extra3", JoypadExtra[PACHINKO_PAD].x[2], JoypadExtra[PACHINKO_PAD].x[2])
 	ADDP(Up,Stronger); ADDP(Left,Weaker); ADDP(Down,Stop);
 #undef ADDP
-	// The TV remote (Joypad[TVREMOTE_PAD]; TvRemoteBind in wsnes9x.cpp says which member is which key)
-#define ADDT(x,n) AddVKey("TvRemote:" #n, Joypad[TVREMOTE_PAD].x, Joypad[TVREMOTE_PAD].x); \
-	AddVKey("TvRemote:" #n ":Extra1", JoypadExtra[TVREMOTE_PAD].x[0], JoypadExtra[TVREMOTE_PAD].x[0]); \
-	AddVKey("TvRemote:" #n ":Extra2", JoypadExtra[TVREMOTE_PAD].x[1], JoypadExtra[TVREMOTE_PAD].x[1]); \
-	AddVKey("TvRemote:" #n ":Extra3", JoypadExtra[TVREMOTE_PAD].x[2], JoypadExtra[TVREMOTE_PAD].x[2])
-	ADDT(Up,Power); ADDT(Left,Mute); ADDT(Down,ChannelUp); ADDT(Right,ChannelDown); ADDT(Start,VolumeUp); ADDT(Select,VolumeDown);
-	ADDT(B,Key1); ADDT(A,Key2); ADDT(Y,Key3); ADDT(X,Key4); ADDT(L,Key5); ADDT(R,Key6);
-	ADDT(Left_Up,Key7); ADDT(Right_Up,Key8); ADDT(Right_Down,Key9); ADDT(Left_Down,Key10); ADDT(Tv11,Key11); ADDT(Tv12,Key12);
-#undef ADDT
-	AddIntC("TvRemote:Maker", GBTvRemoteVendor, -1, "the TV remote aimed at a Game Boy Color (Input -> TV Remote): -1 none, 0 Sony, 1 Panasonic, 2 Toshiba, 3 Hitachi, 4 Sharp, 5 JVC, 6 Mitsubishi, 7 Sanyo, 8 Pioneer, 9 LG, 10 Samsung, 11 Philips.");
+	AddIntC("TvRemote:Maker", GBTvRemoteVendor, -1, "the TV remote aimed at a Game Boy Color (Input -> TV Remote): -2 auto (the best maker for the loaded game), -1 none, 0 Sony, 1 Panasonic, 2 Toshiba, 3 Hitachi, 4 Sharp, 5 JVC, 6 Mitsubishi, 7 Sanyo, 8 Pioneer, 9 LG, 10 Samsung, 11 Philips.");
 	AddBool2C("Input:Background", GUI.BackgroundInput, false, "on to detect game keypresses and hotkeys while window is inactive, if PauseWhenInactive = FALSE.");
 	AddBool2C("Input:EnableRumble", GUI.EnableRumble, true, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad.");
 	AddBool2C("Input:BackgroundKeyHotkeys", GUI.BackgroundKeyHotkeys, true, "on to also detect keyboard hotkeys when backgroundinput is active");

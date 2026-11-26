@@ -578,7 +578,9 @@ int  S9xSGBKissLinkStatus(int *kind, int *percent, unsigned *serial, const char 
 bool S9xSGBKissLinkReceivedMap(uint8_t *out /* S9X_KISSLINK_MAP_BYTES */);
 // A household TV remote aimed at player 1's Game Boy Color, sending its maker's real
 // frames, and that TV: what the console's own LED sends shows as a message. Vendor -1
-// puts both away. One button sends at a time, repeating while it is held.
+// puts both away; S9X_TVREMOTE_AUTO is the maker that does the most in the loaded game.
+// One button sends at a time, repeating while it is held.
+#define S9X_TVREMOTE_AUTO (-2)
 enum
 {
 	S9X_TVKEY_POWER, S9X_TVKEY_MUTE, S9X_TVKEY_1, S9X_TVKEY_12 = S9X_TVKEY_1 + 11,
@@ -590,6 +592,8 @@ bool        S9xSGBTvRemoteHasKey(int vendor, int key);
 const char *S9xSGBTvRemoteKeyName(int key);
 void S9xSGBSetTvRemote(int vendor);
 int  S9xSGBGetTvRemote(void);
+// The maker sending: the one set, or Auto's for the loaded game; -1 none.
+int  S9xSGBTvRemoteInUse(void);
 void S9xSGBTvRemoteKey(int key, bool down);
 // The TV's last received command and how many it has had; false before the first.
 bool S9xSGBTvReceived(unsigned *serial, const char **text);

@@ -459,19 +459,6 @@ int GetNumButtonsAssignedTo (WORD Key)
 		for(int e = 0; e < MAX_EXTRA_BINDS; e++)
 			count += (Key == x.Up[e]) + (Key == x.Left[e]) + (Key == x.Down[e]);
 	}
-	// The TV remote's 18 keys
-	if(Key != 0 && Key != VK_ESCAPE)
-	{
-		const SJoypad &p = Joypad[TVREMOTE_PAD];
-		const SJoypadExtraBinds &x = JoypadExtra[TVREMOTE_PAD];
-		count += (Key == p.Up) + (Key == p.Left) + (Key == p.Down) + (Key == p.Right) + (Key == p.Start) + (Key == p.Select) +
-		         (Key == p.A) + (Key == p.B) + (Key == p.X) + (Key == p.Y) + (Key == p.L) + (Key == p.R) +
-		         (Key == p.Left_Up) + (Key == p.Right_Up) + (Key == p.Left_Down) + (Key == p.Right_Down) + (Key == p.Tv11) + (Key == p.Tv12);
-		for(int e = 0; e < MAX_EXTRA_BINDS; e++)
-			count += (Key == x.Up[e]) + (Key == x.Left[e]) + (Key == x.Down[e]) + (Key == x.Right[e]) + (Key == x.Start[e]) + (Key == x.Select[e]) +
-			         (Key == x.A[e]) + (Key == x.B[e]) + (Key == x.X[e]) + (Key == x.Y[e]) + (Key == x.L[e]) + (Key == x.R[e]) +
-			         (Key == x.Left_Up[e]) + (Key == x.Right_Up[e]) + (Key == x.Left_Down[e]) + (Key == x.Right_Down[e]) + (Key == x.Tv11[e]) + (Key == x.Tv12[e]);
-	}
 	return count;
 }
 

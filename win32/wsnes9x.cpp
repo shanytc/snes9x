@@ -422,37 +422,9 @@ struct SJoypad Joypad[NUM_JOYPAD_BINDS] = {
 			{ true, 'Q', 0, 'E', 'W',  0, 0, 0, 0,  0, 0,  0, 0, 0, 0, 0, 0 },/* Sunsoft Pachinko: Weaker, Stronger, Stop */
 };
 
-// The TV remote's keys in the core's order (Power, Mute, 1-12, CH+, CH-, VOL+, VOL-): the Input
-// Configuration field each one is bound in, and its Joypad[TVREMOTE_PAD] member.
-static const int kTvRemoteFields[S9X_TVREMOTE_KEYS] =
-{
-	IDC_UP, IDC_LEFT, IDC_B, IDC_A, IDC_Y, IDC_X, IDC_L, IDC_R,
-	IDC_UPLEFT, IDC_UPRIGHT, IDC_DWNRIGHT, IDC_DWNLEFT, IDC_TV11, IDC_TV12,
-	IDC_DOWN, IDC_RIGHT, IDC_START, IDC_SELECT
-};
-#define TVREMOTE_MEMBERS(p, k, none) \
-	switch (k) \
-	{ \
-		case 0: return p.Up;       case 1: return p.Left;      case 2: return p.B;           case 3: return p.A; \
-		case 4: return p.Y;        case 5: return p.X;         case 6: return p.L;           case 7: return p.R; \
-		case 8: return p.Left_Up;  case 9: return p.Right_Up;  case 10: return p.Right_Down; case 11: return p.Left_Down; \
-		case 12: return p.Tv11;    case 13: return p.Tv12;     case 14: return p.Down;       case 15: return p.Right; \
-		case 16: return p.Start;   case 17: return p.Select; \
-	} \
-	return none
-static WORD TvRemoteBind(const SJoypad &p, int k) { TVREMOTE_MEMBERS(p, k, 0); }
-static const WORD *TvRemoteExtraBinds(const SJoypadExtraBinds &p, int k) { TVREMOTE_MEMBERS(p, k, p.Up); }
 static_assert(TVREMOTE_HOTKEYS == S9X_TVREMOTE_KEYS, "one hotkey per remote key");
-// A key's hotkey (Customize Hotkeys > TV Remote) is down: it sends as its Input Configuration binding does.
+// A key's hotkey (Customize Hotkeys > TV Remote) is down.
 static bool g_tvRemoteHotkeyHeld[S9X_TVREMOTE_KEYS];
-#undef TVREMOTE_MEMBERS
-// The field's label on the TV remote's row
-static const int kTvRemoteLabels[S9X_TVREMOTE_KEYS] =
-{
-	IDC_LABEL_UP, IDC_LABEL_LEFT, IDC_LABEL_B, IDC_LABEL_A, IDC_LABEL_Y, IDC_LABEL_X, IDC_LABEL_L, IDC_LABEL_R,
-	IDC_LABEL_UPLEFT, IDC_LABEL_UPRIGHT, IDC_LABEL_DOWNRIGHT, IDC_LABEL_DOWNLEFT, IDC_LABEL_TV11, IDC_LABEL_TV12,
-	IDC_LABEL_DOWN, IDC_LABEL_RIGHT, IDC_LABEL_START, IDC_LABEL_SELECT
-};
 
 // stores on/off toggle info for each key of each controller
 SJoypad ToggleJoypadStorage [8] = {
@@ -3088,6 +3060,7 @@ LRESULT CALLBACK WinProc(
 			TogglePort2Device(SNES_MACSRIFLE);
 			break;
 		case ID_INPUT_TVREMOTE_OFF:
+		case ID_INPUT_TVREMOTE_AUTO:
 		case ID_INPUT_TVREMOTE_VENDOR0 + 0:
 		case ID_INPUT_TVREMOTE_VENDOR0 + 1:
 		case ID_INPUT_TVREMOTE_VENDOR0 + 2:
@@ -3103,13 +3076,18 @@ LRESULT CALLBACK WinProc(
 		{
 			// Input > TV Remote: the maker's remote (and its TV) at player 1's Game Boy Color
 			static char message[64];
-			GBTvRemoteVendor = LOWORD(wParam) == ID_INPUT_TVREMOTE_OFF ? -1 : (int) LOWORD(wParam) - ID_INPUT_TVREMOTE_VENDOR0;
+			GBTvRemoteVendor = LOWORD(wParam) == ID_INPUT_TVREMOTE_OFF ? -1 : LOWORD(wParam) == ID_INPUT_TVREMOTE_AUTO ? S9X_TVREMOTE_AUTO :
+			                   (int) LOWORD(wParam) - ID_INPUT_TVREMOTE_VENDOR0;
 			S9xSGBSetTvRemote (GBTvRemoteVendor);
-			if (GBTvRemoteVendor < 0)
+			if (GBTvRemoteVendor == -1)
 				S9xSetInfoString ("TV remote: off");
+			else if (S9xSGBTvRemoteInUse () < 0)
+				S9xSetInfoString ("TV remote: Auto");
 			else
 			{
-				snprintf (message, sizeof (message), "TV remote: %s", S9xSGBTvRemoteVendorName (GBTvRemoteVendor));
+				// Auto names the maker it picked for the loaded game
+				snprintf (message, sizeof (message), GBTvRemoteVendor == S9X_TVREMOTE_AUTO ? "TV remote: Auto (%s)" : "TV remote: %s",
+				          S9xSGBTvRemoteVendorName (S9xSGBTvRemoteInUse ()));
 				S9xSetInfoString (message);
 			}
 			break;
@@ -6194,14 +6172,13 @@ static void ProcessInput(void)
 		S9xReportButton(kWinCMapPachinkoStop,     AnyBindPressed(pad.Down, extra.Down));
 	}
 
-	// The TV remote at player 1's Game Boy Color sends each key while its binding is held.
-	if (GBTvRemoteVendor >= 0)
+	// The TV remote at player 1's Game Boy Color sends each key while its hotkey is held.
+	if (GBTvRemoteVendor != -1)
 	{
-		extern bool AnyBindPressed(WORD primary, const WORD* extra);
 		static bool held[S9X_TVREMOTE_KEYS];
 		for (int k = 0; k < S9X_TVREMOTE_KEYS; k++)
 		{
-			const bool down = g_tvRemoteHotkeyHeld[k] || AnyBindPressed(TvRemoteBind(Joypad[TVREMOTE_PAD], k), TvRemoteExtraBinds(JoypadExtra[TVREMOTE_PAD], k));
+			const bool down = g_tvRemoteHotkeyHeld[k];
 			if (down != held[k])
 			{
 				held[k] = down;
@@ -8662,7 +8639,9 @@ static void CheckMenuStates ()
     mii.fState = validFlag | (GUI.ControllerOption == SNES_PACHINKO ? MFS_CHECKED : MFS_UNCHECKED);
     SetMenuItemInfo (GUI.hMenu, ID_INPUT_PACHINKO_CONNECT, FALSE, &mii);
 
-	// Input > TV Remote: the maker in use
+	// Input > TV Remote: none, Auto or the maker
+	mii.fState = MFS_ENABLED | (GBTvRemoteVendor == S9X_TVREMOTE_AUTO ? MFS_CHECKED : MFS_UNCHECKED);
+	SetMenuItemInfo (GUI.hMenu, ID_INPUT_TVREMOTE_AUTO, FALSE, &mii);
 	for (int v = -1; v < S9xSGBTvRemoteVendorCount (); v++)
 	{
 		mii.fState = MFS_ENABLED | (GBTvRemoteVendor == v ? MFS_CHECKED : MFS_UNCHECKED);
@@ -19821,36 +19800,6 @@ void EnableDisableKeyFields (int index, HWND hDlg)
 	for (int id : kPadOnly)
 		ShowWindow(GetDlgItem(hDlg, id), pachinko ? SW_HIDE : SW_SHOW);
 	ShowWindow(GetDlgItem(hDlg, IDC_PACHINKO_NOTE), pachinko ? SW_SHOW : SW_HIDE);
-
-	// The TV remote's row: its maker, all 18 fields named for its keys, no pad to enable or assign
-	static const int kTvOnly[] = { IDC_TV11, IDC_TV12, IDC_LABEL_TV11, IDC_LABEL_TV12, IDC_TVVENDOR, IDC_LABEL_TVVENDOR };
-	const bool tv = (index == TVREMOTE_PAD);
-	for (int id : kTvOnly)
-		ShowWindow(GetDlgItem(hDlg, id), tv ? SW_SHOW : SW_HIDE);
-	ShowWindow(GetDlgItem(hDlg, IDC_AUTOASSIGN), tv ? SW_HIDE : SW_SHOW);
-	ShowWindow(GetDlgItem(hDlg, IDC_DEVICECOMBO), tv ? SW_HIDE : SW_SHOW);
-	if (tv)
-	{
-		ShowWindow(GetDlgItem(hDlg, IDC_JPTOGGLE), SW_HIDE);
-		for (int k = 0; k < S9X_TVREMOTE_KEYS; k++)
-		{
-			SetDlgItemTextA(hDlg, kTvRemoteLabels[k], S9xSGBTvRemoteKeyName(k));
-			// a key this maker's remote lacks
-			EnableWindow(GetDlgItem(hDlg, kTvRemoteFields[k]), GBTvRemoteVendor < 0 || S9xSGBTvRemoteHasKey(GBTvRemoteVendor, k));
-		}
-		return;
-	}
-	for (int id : { IDC_UP, IDC_LEFT, IDC_DOWN, IDC_RIGHT, IDC_START, IDC_SELECT, IDC_A, IDC_B, IDC_X, IDC_Y, IDC_L, IDC_R })
-		EnableWindow(GetDlgItem(hDlg, id), TRUE);
-	SetDlgItemText(hDlg,IDC_LABEL_A,INPUTCONFIG_LABEL_A);
-	SetDlgItemText(hDlg,IDC_LABEL_B,INPUTCONFIG_LABEL_B);
-	SetDlgItemText(hDlg,IDC_LABEL_X,INPUTCONFIG_LABEL_X);
-	SetDlgItemText(hDlg,IDC_LABEL_Y,INPUTCONFIG_LABEL_Y);
-	SetDlgItemText(hDlg,IDC_LABEL_L,INPUTCONFIG_LABEL_L);
-	SetDlgItemText(hDlg,IDC_LABEL_R,INPUTCONFIG_LABEL_R);
-	SetDlgItemText(hDlg,IDC_LABEL_START,INPUTCONFIG_LABEL_START);
-	SetDlgItemText(hDlg,IDC_LABEL_SELECT,INPUTCONFIG_LABEL_SELECT);
-	SetDlgItemText(hDlg,IDC_LABEL_RIGHT,INPUTCONFIG_LABEL_RIGHT);
 	if (pachinko)
 	{
 		SetDlgItemText(hDlg,IDC_LABEL_UP,INPUTCONFIG_LABEL_STRONGER);
@@ -22021,17 +21970,12 @@ static void set_buttoninfo(int index, HWND hDlg)
 	SendMultiBindToControl(hDlg, IDC_R,      Joypad[index].R,      JoypadExtra[index].R);
 	SendMultiBindToControl(hDlg, IDC_START,  Joypad[index].Start,  JoypadExtra[index].Start);
 	SendMultiBindToControl(hDlg, IDC_SELECT, Joypad[index].Select, JoypadExtra[index].Select);
-	if(index < 5 || index == TVREMOTE_PAD)
+	if(index < 5)
 	{
 		SendMultiBindToControl(hDlg, IDC_UPLEFT,   Joypad[index].Left_Up,    JoypadExtra[index].Left_Up);
 		SendMultiBindToControl(hDlg, IDC_UPRIGHT,  Joypad[index].Right_Up,   JoypadExtra[index].Right_Up);
 		SendMultiBindToControl(hDlg, IDC_DWNLEFT,  Joypad[index].Left_Down,  JoypadExtra[index].Left_Down);
 		SendMultiBindToControl(hDlg, IDC_DWNRIGHT, Joypad[index].Right_Down, JoypadExtra[index].Right_Down);
-	}
-	if(index == TVREMOTE_PAD)
-	{
-		SendMultiBindToControl(hDlg, IDC_TV11, Joypad[index].Tv11, JoypadExtra[index].Tv11);
-		SendMultiBindToControl(hDlg, IDC_TV12, Joypad[index].Tv12, JoypadExtra[index].Tv12);
 	}
 }
 
@@ -22053,7 +21997,7 @@ static void SetInputMaxKeys(HWND hDlg, int maxKeys)
 		IDC_UP, IDC_DOWN, IDC_LEFT, IDC_RIGHT,
 		IDC_A, IDC_B, IDC_X, IDC_Y,
 		IDC_L, IDC_R, IDC_START, IDC_SELECT,
-		IDC_UPLEFT, IDC_UPRIGHT, IDC_DWNLEFT, IDC_DWNRIGHT, IDC_TV11, IDC_TV12
+		IDC_UPLEFT, IDC_UPRIGHT, IDC_DWNLEFT, IDC_DWNRIGHT
 	};
 	for (int i = 0; i < sizeof(inputControls)/sizeof(inputControls[0]); i++)
 		SendDlgItemMessage(hDlg, inputControls[i], WM_USER+47, maxKeys, 0);
@@ -22111,7 +22055,7 @@ static void UpdateDeviceInfo(HWND hDlg, int index)
 	}
 	if (prefer < 0)
 	{
-		prefer = (index == PACHINKO_PAD || index == TVREMOTE_PAD) ? 0 : (index < 5) ? index : (index - 8);
+		prefer = (index == PACHINKO_PAD) ? 0 : (index < 5) ? index : (index - 8);
 		if (prefer < 0) prefer = 0;
 	}
 
@@ -22192,21 +22136,8 @@ static void DrawPachinkoPowerText(HDC screen)
 
 // The binding field a pad picture shape stands for; turbo rows bind turbo modes in the d-pad slots.
 // The Pachinko row's shapes are PACHPIC_* instead.
-// The last of the shown picture's button bits: the pad's 12, the TV remote's 18.
-static int PanelLastButton(void)
-{
-	return s_padPanelIndex == TVREMOTE_PAD ? 1 << (S9X_TVREMOTE_KEYS - 1) : PADPIC_SELECT;
-}
-
 static int PadPicField(int mask)
 {
-	if (s_padPanelIndex == TVREMOTE_PAD)
-	{
-		for (int k = 0; k < S9X_TVREMOTE_KEYS; k++)
-			if (mask == 1 << k)
-				return kTvRemoteFields[k];
-		return 0;
-	}
 	if (s_padPanelIndex == PACHINKO_PAD)
 		return mask == PACHPIC_STRONGER ? IDC_UP : mask == PACHPIC_WEAKER ? IDC_LEFT : mask == PACHPIC_STOP ? IDC_DOWN : 0;
 	if (s_padPanelIndex >= 8 && mask <= PADPIC_RIGHT)
@@ -22290,13 +22221,11 @@ static void DrawPadPictureLit(HWND hDlg)
 	GetDIBits(screen, s_panelBase, 0, h, px.data(), &bi, DIB_RGB_COLORS);
 
 	int outlined = 0;
-	for (int button = PADPIC_UP; button <= PanelLastButton(); button <<= 1)
+	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
 		if (InputPictureOutlined(PadPicField(button)))
 			outlined |= button;
 	const bool pachinko = s_panelSource == IDB_PACHINKO;
-	if (s_panelSource == IDB_TVREMOTE)
-		S9xTvRemotePictureDraw(px.data(), w, h, w, (float) s_panelScale, s_padLit < 0 ? 0 : s_padLit, outlined);
-	else if (pachinko)
+	if (pachinko)
 	{
 		S9xPachinkoPictureDraw(px.data(), w, h, w, (float) s_panelScale, s_padLit < 0 ? 0 : s_padLit, outlined);
 		S9xPachinkoPictureDrawPower(px.data(), w, h, w, (float) s_panelScale, s_pachinkoPreview.power());
@@ -22333,13 +22262,6 @@ static int PadHeldButtons(int index)
 	};
 
 	int lit = 0;
-	if (index == TVREMOTE_PAD)
-	{
-		for (int k = 0; k < S9X_TVREMOTE_KEYS; k++)
-			if (held(TvRemoteBind(pad, k), TvRemoteExtraBinds(extra, k)))
-				lit |= 1 << k;
-		return lit;
-	}
 	#define PAD_HELD(field, bits) if (held(pad.field, extra.field)) lit |= (bits)
 	if (index == PACHINKO_PAD)
 	{
@@ -22371,10 +22293,10 @@ static int InputPictureFieldAt(HWND hDlg, POINT pt)
 	const float x = (pt.x - r.left + 0.5f) / (float) s_panelScale, y = (pt.y - r.top + 0.5f) / (float) s_panelScale;
 
 	int clickable = 0;
-	for (int button = PADPIC_UP; button <= PanelLastButton(); button <<= 1)
+	for (int button = PADPIC_UP; button <= PADPIC_SELECT; button <<= 1)
 		if (PadPicField(button))
 			clickable |= button;
-	const int button = s_panelSource == IDB_TVREMOTE ? S9xTvRemotePictureButtonAt(x, y, clickable) : s_panelSource == IDB_PACHINKO ? S9xPachinkoPictureButtonAt(x, y, clickable) : S9xPadPictureButtonAt(x, y, clickable);
+	const int button = s_panelSource == IDB_PACHINKO ? S9xPachinkoPictureButtonAt(x, y, clickable) : S9xPadPictureButtonAt(x, y, clickable);
 	const int field = PadPicField(button);
 	return field && IsWindowEnabled(GetDlgItem(hDlg, field)) ? field : 0;
 }
@@ -22480,7 +22402,7 @@ static void ShowInputPicture(HWND hDlg, int index)
 {
 	s_padPanelIndex = index;
 	s_padLit = -1;
-	const int source = index == TVREMOTE_PAD ? IDB_TVREMOTE : index == PACHINKO_PAD ? IDB_PACHINKO :
+	const int source = index == PACHINKO_PAD ? IDB_PACHINKO :
 	                   !GUI.JapaneseController ? IDB_PAD_USA : GUI.EuropeanController ? IDB_PAD_EUR : IDB_PAD_SFC;
 	if (source != s_panelSource)
 		SetInputPicture(hDlg, source);
@@ -22511,7 +22433,7 @@ static LRESULT CALLBACK ControllerComboSubclassProc(HWND hWnd, UINT msg, WPARAM 
 // Controller list row -> Joypad[] index: pads 1-5, their turbo rows (8-12), then the Sunsoft Pachinko.
 static int InputConfigPadIndex(int row)
 {
-	return row == 11 ? TVREMOTE_PAD : row == 10 ? PACHINKO_PAD : row > 4 ? row + 3 : row;
+	return row == 10 ? PACHINKO_PAD : row > 4 ? row + 3 : row;
 }
 
 INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -22524,7 +22446,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 
 	static SJoypad pads[NUM_JOYPAD_BINDS];
 	static SJoypadExtraBinds padsExtra[NUM_JOYPAD_BINDS];
-	static int tvVendor;	// the TV remote's maker when the dialog opened, for Cancel
 
 
 	//HBRUSH g_hbrBackground;
@@ -22584,14 +22505,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		}
 
 		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)INPUTCONFIG_PACHINKO);
-		SendDlgItemMessage(hDlg,IDC_JPCOMBO,CB_ADDSTRING,0,(LPARAM)INPUTCONFIG_TVREMOTE);
-
-		// The TV remote's maker: none, then the core's list
-		tvVendor = GBTvRemoteVendor;
-		SendDlgItemMessage(hDlg,IDC_TVVENDOR,CB_ADDSTRING,0,(LPARAM)TEXT("None"));
-		for(i=0;i<S9xSGBTvRemoteVendorCount();i++)
-			SendDlgItemMessageA(hDlg,IDC_TVVENDOR,CB_ADDSTRING,0,(LPARAM)S9xSGBTvRemoteVendorName(i));
-		SendDlgItemMessage(hDlg,IDC_TVVENDOR,CB_SETCURSEL,(WPARAM)(GBTvRemoteVendor+1),0);
 
 		// A linked player-N instance plays on Joypad #N, so open on it.
 		index = (Settings.GBLinkPlayerIndex >= 2 && Settings.GBLinkPlayerIndex <= 4 &&
@@ -22643,7 +22556,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
 		RECT big;
 		GetWindowRect(GetDlgItem(hDlg, IDC_INPUT_PICTURE), &big);
-		if ((HWND)wParam == hDlg && PtInRect(&big, pt) && s_padPanelIndex != PACHINKO_PAD && s_padPanelIndex != TVREMOTE_PAD)
+		if ((HWND)wParam == hDlg && PtInRect(&big, pt) && s_padPanelIndex != PACHINKO_PAD)
 		{
 			// 1 USA, 2 Europe, 3 Japan; Europe and Japan share the coloured buttons
 			const int style = !GUI.JapaneseController ? 1 : GUI.EuropeanController ? 2 : 3;
@@ -22720,8 +22633,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			STORE_MULTIBIND(IDC_UPRIGHT, Right_Up)
 			STORE_MULTIBIND(IDC_DWNLEFT, Left_Down)
 			STORE_MULTIBIND(IDC_DWNRIGHT, Right_Down)
-			STORE_MULTIBIND(IDC_TV11, Tv11)
-			STORE_MULTIBIND(IDC_TV12, Tv12)
 		}
 		#undef STORE_MULTIBIND
 
@@ -22762,8 +22673,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			s_inputConfigHwnd = NULL;
 			memcpy(Joypad, pads, sizeof(pads));
 			memcpy(JoypadExtra, padsExtra, sizeof(padsExtra));
-			GBTvRemoteVendor = tvVendor;
-			S9xSGBSetTvRemote (GBTvRemoteVendor);
 			EndDialog(hDlg,0);
 			break;
 
@@ -22779,15 +22688,6 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 			GUI.UseDirectInput = (IsDlgButtonChecked(hDlg, IDC_USEDIRECTINPUT) != 0);
 			WinSaveConfigFile();
 			EndDialog(hDlg,0);
-			break;
-
-		case IDC_TVVENDOR: // the TV remote's maker
-			if(HIWORD(wParam) == CBN_SELCHANGE)
-			{
-				GBTvRemoteVendor = (int)SendDlgItemMessage(hDlg,IDC_TVVENDOR,CB_GETCURSEL,0,0) - 1;
-				S9xSGBSetTvRemote (GBTvRemoteVendor);
-				EnableDisableKeyFields(TVREMOTE_PAD,hDlg);
-			}
 			break;
 
 		case IDC_JPTOGGLE: // joypad Enable toggle
@@ -22898,7 +22798,7 @@ INT_PTR CALLBACK DlgInputConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 					EnableWindow(GetDlgItem(hDlg,IDC_JPTOGGLE),TRUE);
 				}
-				else if(index != PACHINKO_PAD && index != TVREMOTE_PAD)	// the Pachinko row hides it
+				else if(index != PACHINKO_PAD)	// the Pachinko row hides it
 				{
 					SendDlgItemMessage(hDlg,IDC_JPTOGGLE,BM_SETCHECK, Joypad[index-8].Enabled ? (WPARAM)BST_CHECKED : (WPARAM)BST_UNCHECKED, 0);
 					EnableWindow(GetDlgItem(hDlg,IDC_JPTOGGLE),FALSE);

@@ -5494,6 +5494,7 @@ const char *S9xSGBTvRemoteVendorName(int vendor)     { return SGB::TvRemoteVendo
 bool        S9xSGBTvRemoteHasKey(int vendor, int key) { return SGB::TvRemoteHasKey(vendor, key); }
 const char *S9xSGBTvRemoteKeyName(int key)           { return SGB::TvRemoteKeyName(key); }
 int         S9xSGBGetTvRemote(void)                  { return SGB::TvRemoteVendor(); }
+int         S9xSGBTvRemoteInUse(void)                { return SGB::TvRemoteVendorInUse(); }
 
 void S9xSGBSetTvRemote(int vendor)
 {

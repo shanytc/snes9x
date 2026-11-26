@@ -1071,6 +1071,24 @@ bool8 S9xFreezeGameMem (uint8 *buf, uint32 bufSize)
 	return (TRUE);
 }
 
+// A link session's players ride along beside the state file; say who.
+static void LinkSeatsNote (unsigned done, unsigned missing)
+{
+	if (!done && !missing)
+		return;
+	char who[96];
+	size_t len = strlen(String);
+	S9xSGBSplitPlayersText(done | 2, who, sizeof(who));   // bit 1: player 1, the file itself
+	len += snprintf(String + len, sizeof(String) - len, " (%s", who);
+	if (missing && len < sizeof(String))
+	{
+		S9xSGBSplitPlayersText(missing, who, sizeof(who));
+		len += snprintf(String + len, sizeof(String) - len, "; %s kept playing", who);
+	}
+	if (len < sizeof(String))
+		snprintf(String + len, sizeof(String) - len, ")");
+}
+
 bool8 S9xFreezeGame (const char *filename)
 {
 	// SGB snapshots bypass the 65816 state format entirely — the cart
@@ -1080,11 +1098,13 @@ bool8 S9xFreezeGame (const char *filename)
 	{
 		if (!S9xSGBSaveStateToFile(filename))
 			return (FALSE);
+		const unsigned seats = S9xSGBSplitActive() ? S9xSGBSplitSaveSeatStates(filename) : 0;
 
 		S9xResetSaveTimer(TRUE);
 
 		auto base = S9xBasename(filename);
 		sprintf(String, SAVE_INFO_SNAPSHOT " %s", base.c_str());
+		LinkSeatsNote(seats, 0);
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
 #ifdef LUA_SUPPORT
 		S9xLuaNotifyStateSaved(filename);
@@ -1098,6 +1118,7 @@ bool8 S9xFreezeGame (const char *filename)
 	{
 		S9xFreezeToStream(stream);
 		S9xCloseSnapshotFile(stream);
+		const unsigned seats = S9xSGBSplitActive() ? S9xSGBSplitSaveSeatStates(filename) : 0;
 
 		S9xResetSaveTimer(TRUE);
 
@@ -1106,6 +1127,7 @@ bool8 S9xFreezeGame (const char *filename)
 			sprintf(String, MOVIE_INFO_SNAPSHOT " %s", base.c_str());
 		else
 			sprintf(String, SAVE_INFO_SNAPSHOT " %s", base.c_str());
+		LinkSeatsNote(seats, 0);
 
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
 #ifdef LUA_SUPPORT
@@ -1185,7 +1207,10 @@ bool8 S9xUnfreezeGame (const char *filename)
 			S9xMessageFromResult(WRONG_FORMAT, base.c_str());
 			return (FALSE);
 		}
+		unsigned missing = 0;
+		const unsigned seats = S9xSGBSplitActive() ? S9xSGBSplitLoadSeatStates(filename, &missing) : 0;
 		sprintf(String, SAVE_INFO_LOAD " %s", base.c_str());
+		LinkSeatsNote(seats, missing);
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
 #ifdef LUA_SUPPORT
 		S9xLuaNotifyStateLoaded(filename);
@@ -1199,14 +1224,23 @@ bool8 S9xUnfreezeGame (const char *filename)
 	{
 		int	result;
 
+		// SGB BIOS mode: the unfreeze power-cycles the seats with the master.
+		const bool link = S9xSGBSplitActive();
+		if (link)
+			S9xSGBSplitHoldSeats(true);
+
 		result = S9xUnfreezeFromStream(stream);
 		S9xCloseSnapshotFile(stream);
 
 		if (result != SUCCESS)
 		{
+			if (link)
+				S9xSGBSplitHoldSeats(false);
             S9xMessageFromResult(result, base.c_str());
 			return (FALSE);
 		}
+		unsigned missing = 0;
+		const unsigned seats = link ? S9xSGBSplitLoadSeatStates(filename, &missing) : 0;
 
 		if (S9xMovieActive())
 		{
@@ -1217,6 +1251,7 @@ bool8 S9xUnfreezeGame (const char *filename)
 		}
 		else
 			sprintf(String, SAVE_INFO_LOAD " %s", base.c_str());
+		LinkSeatsNote(seats, missing);
 
 		S9xMessage(S9X_INFO, S9X_FREEZE_FILE_INFO, String);
 #ifdef LUA_SUPPORT

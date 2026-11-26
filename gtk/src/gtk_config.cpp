@@ -124,6 +124,7 @@ int Snes9xConfig::load_defaults()
     master_volume_fast_forward = 100;
     sgb_mix_volume_spc = 50;
     sgb_mix_volume_gb = 50;
+    cart_speaker_volume = 50;
     gain_regular = 0;
     sgb_mix_gain_spc = 0;
     sgb_mix_gain_gb = 0;
@@ -269,6 +270,8 @@ int Snes9xConfig::load_defaults()
     Settings.PF94TimerDisplay = 0;
     Settings.CC92TimerMinutes = 6;
     Settings.CC92TimerDisplay = 0;
+    
+    Settings.GBLinkPort = 8765;
 
 #ifdef ALLOW_CPU_OVERCLOCK
     Settings.MaxSpriteTilesPerLine = 34;
@@ -398,6 +401,7 @@ int Snes9xConfig::save_config_file()
     outint("MasterVolumeFastForward", master_volume_fast_forward, "Master output volume during turbo/rewind (0..100, percent)");
     outint("VolumeSGBMixSPC", sgb_mix_volume_spc, "SGB BIOS mix: SPC channel volume (0..100, percent; only active in SGB BIOS mode)");
     outint("VolumeSGBMixGB", sgb_mix_volume_gb, "SGB BIOS mix: GB channel volume (0..100, percent; only active in SGB BIOS mode)");
+    outint("VolumeCartSpeaker", cart_speaker_volume, "a Game Boy cart's own speaker (HuC3/TAMA5: Pocket Family, Robopon, Tamagotchi), 0..100 percent, apart from the GB volume");
     outint("GainRegular", gain_regular, "Master pre-amp applied after the volume percentages (whole dB between 0 and 12, 0 = unity)");
     outint("GainSGBMixSPC", sgb_mix_gain_spc, "SGB BIOS mix: SPC channel pre-amp (whole dB between 0 and 12, 0 = unity)");
     outint("GainSGBMixGB", sgb_mix_gain_gb, "SGB BIOS mix: GB channel pre-amp (whole dB between 0 and 12, 0 = unity)");
@@ -533,6 +537,7 @@ int Snes9xConfig::save_config_file()
     // Unsigned to reach 2106, past where an int's range ends.
     outstring("RTCTime", std::to_string(Settings.GBRTCTime), "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
     outint("RTCHuC3Format", Settings.GBRTCHuC3Format, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads");
+    outint("LinkPort", Settings.GBLinkPort, "TCP port for the link cable session; 8765 is BGB's default, so it also links against BGB / SameBoy / Emulicious");
 
     section = "Input";
     outstring("ControllerOption", controller_option_names[controller_option],
@@ -702,6 +707,7 @@ int Snes9xConfig::load_config_file()
     inint("MasterVolumeFastForward", master_volume_fast_forward);
     inint("VolumeSGBMixSPC", sgb_mix_volume_spc);
     inint("VolumeSGBMixGB", sgb_mix_volume_gb);
+    inint("VolumeCartSpeaker", cart_speaker_volume);
     inint("GainRegular", gain_regular);
     inint("GainSGBMixSPC", sgb_mix_gain_spc);
     inint("GainSGBMixGB", sgb_mix_gain_gb);
@@ -869,6 +875,10 @@ int Snes9xConfig::load_config_file()
     inint("RTCHuC3Format", Settings.GBRTCHuC3Format);
     if (Settings.GBRTCHuC3Format > 2)
         Settings.GBRTCHuC3Format = 0;
+
+    inint("LinkPort", Settings.GBLinkPort);
+    if (Settings.GBLinkPort == 0)
+        Settings.GBLinkPort = 8765;
 
     section = "Input";
 

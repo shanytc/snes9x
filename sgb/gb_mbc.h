@@ -39,7 +39,8 @@ enum class MbcType : uint8_t
 	LiCheng    = 23, // Li Cheng/Niutoude: MBC5 that ignores $2101-$2FFF bank writes
 	NtNew      = 24, // Makon/NT later: MBC5 + $55-armed 8K half-bank split windows
 	PokeJadeDia= 25, // Makon Pokemon Jade/Diamond: MBC3 + fake-RTC D/E/F registers
-	Vf001      = 26  // Vast Fame: MBC5 + rotate-XOR protection engine
+	Vf001      = 26, // Vast Fame: MBC5 + rotate-XOR protection engine
+	WisdomTree = 27  // Wisdom Tree: a $0000-$3FFF write maps 32 KiB page (address & $F) (hhugboy)
 };
 
 // Extra state for the scrambled unlicensed mappers - lives beside MbcState in
@@ -156,6 +157,11 @@ void MbcRtcAdvance(MbcState &s, int64_t seconds);
 uint16_t MbcHuc3Minutes(const MbcState &s);
 uint16_t MbcHuc3Days(const MbcState &s);
 void     MbcHuc3SetClock(MbcState &s, uint16_t minutes, uint16_t days);
+// The HuC3 alarm slot due at the clock's current minute: its tone + 1,
+// kSpeakerMelody, or 0.
+uint8_t  MbcHuc3AlarmDue(const Cart &c);
+// The TAMA6 alarm entry due at the clock's current minute: its pattern (1-4), or 0.
+uint8_t  MbcTama6AlarmDue(const Cart &c);
 // TAMA5's TAMA6 timer page, registers 0-$C (one BCD nibble each); its 12-hour
 // flag, leap counter and alarm bit sit in rtc_latched[2..4], its run bit in
 // rtc_latch. Seed sets the page to `unix_time` in local time, running.

@@ -414,6 +414,7 @@ bool EmuConfig::setDefaults(int section)
         master_volume_fast_forward = 100;
         sgb_mix_volume_spc = 50;
         sgb_mix_volume_gb = 50;
+        cart_speaker_volume = 50;
         gain_regular = 0;
         sgb_mix_gain_spc = 0;
         sgb_mix_gain_gb = 0;
@@ -762,6 +763,7 @@ void EmuConfig::config(const std::string &filename, bool write)
     Int("MasterVolumeFastForward", master_volume_fast_forward, "Master output volume during turbo/rewind (0..100, percent)");
     Int("VolumeSGBMixSPC", sgb_mix_volume_spc, "SGB BIOS mix: SPC channel volume (0..100, percent; only active in SGB BIOS mode)");
     Int("VolumeSGBMixGB", sgb_mix_volume_gb, "SGB BIOS mix: GB channel volume (0..100, percent; only active in SGB BIOS mode)");
+    Int("VolumeCartSpeaker", cart_speaker_volume, "a Game Boy cart's own speaker (HuC3/TAMA5: Pocket Family, Robopon, Tamagotchi), 0..100 percent, apart from the GB volume");
     Int("GainRegular", gain_regular, "Master pre-amp applied after the volume percentages (whole dB, 0 = unity)");
     Int("GainSGBMixSPC", sgb_mix_gain_spc, "SGB BIOS mix: SPC channel pre-amp (whole dB, 0 = unity)");
     Int("GainSGBMixGB", sgb_mix_gain_gb, "SGB BIOS mix: GB channel pre-amp (whole dB, 0 = unity)");

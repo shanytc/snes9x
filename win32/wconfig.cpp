@@ -27,6 +27,8 @@
 #include "../spc7110.h"
 #include "../gfx.h"
 #include "../snapshot.h"
+#include "../sgb/gb_viewer.h"
+#include "../sgb/sgb.h"
 #ifdef NETPLAY_SUPPORT
 	#include "../netplay.h"
 	extern SNPServer NPServer;
@@ -308,6 +310,94 @@ const TCHAR*	WinParseCommandLineAndLoadConfigFile (TCHAR *line)
 	{
 		if(!strcasecmp(parameters[i], "/?") || !strcasecmp(parameters[i], "-h"))
 			S9xUsage();
+	}
+
+	// A viewer seat: map the master's session before anything else runs, so
+	// the whole GUI comes up already knowing it never emulates.
+	const size_t gbview_len = strlen(GBVIEW_SWITCH_A);
+	for (int i = 0; i < count; i++)
+	{
+		if (strncasecmp(parameters[i], GBVIEW_SWITCH_A, gbview_len) != 0 ||
+		    parameters[i][gbview_len] != '=')
+			continue;
+
+		char *end = NULL;
+		const unsigned long pid = strtoul(parameters[i] + gbview_len + 1, &end, 10);
+		long seat = 0, players = 0;
+		if (end && *end == ',') seat    = strtol(end + 1, &end, 10);
+		if (end && *end == ',') players = strtol(end + 1, &end, 10);
+		if (seat < 2) seat = 2;
+		if (seat > SGB_MAX_LINK_PLAYERS) seat = SGB_MAX_LINK_PLAYERS;
+		if (players < 2) players = 2;
+		if (players > SGB_MAX_LINK_PLAYERS) players = SGB_MAX_LINK_PLAYERS;
+
+		// Peer housekeeping applies (muting, placement, no hosting).
+		// A viewer never emulates, so it runs as a plain Game Boy whatever
+		// the master boots; the config file keeps the user's own model.
+		Settings.GBLinkPeerInstance = TRUE;
+		Settings.GBLinkPlayerIndex  = (uint8)seat;
+		GBLinkUserModel             = Settings.GBBootPolicy;
+		Settings.GBBootPolicy       = S9X_GBBOOT_GB;
+		GBLinkPartnerPid     = (DWORD)pid;
+		GBLinkLauncherIndex  = 1;
+		GBLinkSessionPlayers = (int)players;
+		S9xSGBViewerClientStart(pid, (int)seat, (int)players);
+
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
+	}
+
+	// Strip before the portable parser sees it: S9xParseArgs would take the
+	// unknown option for a ROM name.
+	const size_t gblink_len = strlen(GBLINK_PEER_SWITCH_A);
+	for (int i = 0; i < count; i++)
+	{
+		if (strncasecmp(parameters[i], GBLINK_PEER_SWITCH_A, gblink_len) != 0)
+			continue;
+
+		Settings.GBLinkPeerInstance = TRUE;
+		if (parameters[i][gblink_len] == '=')
+		{
+			char *end = NULL;
+			GBLinkPartnerPid = (DWORD)strtoul(parameters[i] + gblink_len + 1, &end, 10);
+
+			// "<pid>,<launcher>,<index>,<players>,<model>": our own index is
+			// spelled out so a hub seat keeps its player number. The old
+			// two-value form only names the launcher; we are the other half
+			// of that pair, so {1,2} still falls out.
+			long launcher = 0, index = 0, players = 0, model = -1;
+			if (end && *end == ',') launcher = strtol(end + 1, &end, 10);
+			if (end && *end == ',') index    = strtol(end + 1, &end, 10);
+			if (end && *end == ',') players  = strtol(end + 1, &end, 10);
+			if (end && *end == ',') model    = strtol(end + 1, &end, 10);
+
+			if (index < 1) index = (launcher == 1) ? 2 : 1;
+			if (index > 4) index = 4;
+			Settings.GBLinkPlayerIndex = (uint8)index;
+
+			if (launcher < 1) launcher = 1;
+			if (launcher > 4) launcher = 4;
+			GBLinkLauncherIndex = (int)launcher;
+
+			// The master's Game Boy Model overrides the shared config, which
+			// may have been saved under a different pick.
+			if (model >= 0 && model < S9X_NUM_GBBOOT_POLICIES)
+			{
+				GBLinkUserModel       = Settings.GBBootPolicy;
+				Settings.GBBootPolicy = S9xNormalizeGBBootPolicy((int)model);
+			}
+
+			if (players < 2) players = 2;
+			if (players > 4) players = 4;
+			GBLinkSessionPlayers = (int)players;
+		}
+
+		for (int j = i; j + 1 < count; j++)
+			parameters[j] = parameters[j + 1];
+		count--;
+		break;
 	}
 
 	const char* rf = S9xParseArgs (parameters, count);
@@ -1120,6 +1210,15 @@ void WinRegisterConfigItems()
 	AddBoolC("RTCOff", Settings.GBRTCOff, false, "false (default) = the cartridge clock follows the PC's clock; true = the RTC is off and RTCTime stands in for the PC's clock (Emulation -> Real Time Clock -> Settings)");
 	AddUIntC("RTCTime", Settings.GBRTCTime, 0, "the date and time picked for the RTC-off clock, in Unix seconds (UTC); 0 = not picked yet");
 	AddUIntC("RTCHuC3Format", Settings.GBRTCHuC3Format, 0, "how a HuC3 cartridge's clock (Robopon, Pocket Family) is saved (Emulation -> Real Time Clock -> Settings): 0 (default) = 24 bytes (VBA-M compatible), 1 = 17 bytes (BGB, SameBoy compatible), 2 = 136 bytes (mGBA compatible). Any of them loads.");
+	AddUIntC("LinkPort", Settings.GBLinkPort, 8765, "loopback port used by Emulation > Game Boy Link. Only worth changing if something else on this PC already owns 8765.");
+	AddBoolC("LinkSplitScreen", GBLinkSplitScreen, false, "Link Current Game runs its 2-4 players split screen in this window instead of spawning instances. BIOS-less GB mode only.");
+	AddBoolC("LinkResetOnLink", GBLinkResetOnLink, true, "true to power-cycle the game when a link session starts (Emulation -> Game Boy Link -> Reset on Link). The other players always boot fresh.");
+	AddBoolC("LinkResetOnUnlink", GBLinkResetOnUnlink, true, "true to power-cycle the game when a link session ends (Emulation -> Game Boy Link -> Reset on Unlink).");
+	AddUIntC("LinkPowerOn", GBLinkPowerOnOrder, 0, "who switches on first in a 2-player link session (Emulation -> Game Boy Link -> Power On): 0 = the seat(s) (default), 1 = player 1 (the master), 2 = both at the same time. Taken at the next power-on.");
+	AddUIntC("LinkPowerOnLead", GBLinkPowerOnLeadMs, 1000, "how far ahead the first console switches on, in milliseconds: 100, 200, 500 or 1000 (default). Unused with LinkPowerOn=2.");
+	AddBoolC("LinkInfrared", GBLinkInfrared, true, "true to have players 1 and 2 face each other's Game Boy Color infrared port in a link session (Emulation -> Game Boy Link -> Infra-Red).");
+	AddBoolC("MobileAdapterGB", GBMobileAdapter, false, "true to plug a Mobile Adapter GB into player 1's link port for Game Boy Color games, with a built-in server (Emulation -> Game Boy Link -> Mobile Adapter GB).");
+	AddBoolC("LinkGbKiss", GBLinkGbKiss, true, "true to have players 1 and 2 face each other's HuC1/HuC3 cartridge infrared in a link session (Emulation -> Game Boy Link -> GB KISS).");
 #undef CATEGORY
 #define	CATEGORY "Sound\\Win"
 	AddUIntC("SoundDriver", GUI.SoundDriver, 4, "4=XAudio2 (recommended), 8=WaveOut");
@@ -1129,6 +1228,7 @@ void WinRegisterConfigItems()
 	AddUIntC("VolumeTurbo", GUI.VolumeTurbo, 100, "volume during turbo mode (percentage between 0 and 100)");
 	AddUIntC("VolumeSGBMixSPC", S9xSGBMixVolumeSPC, 50, "SGB BIOS mix: SPC channel volume (percentage between 0 and 100, only active when a .gb/.gbc ROM is loaded in SGB BIOS mode)");
 	AddUIntC("VolumeSGBMixGB", S9xSGBMixVolumeGB, 50, "SGB BIOS mix: GB channel volume (percentage between 0 and 100, only active when a .gb/.gbc ROM is loaded in SGB BIOS mode)");
+	AddUIntC("VolumeCartSpeaker", S9xCartSpeakerVolume, 50, "a Game Boy cart's own speaker (HuC3/TAMA5: Pocket Family, Robopon, Tamagotchi), percentage between 0 and 100, apart from the GB volume (Sound Settings, SGB Mix > Speaker)");
 	AddUIntC("GainRegular", GUI.GainRegular, 0, "master pre-amp applied after the volume percentages (whole dB between 0 and 12, 0 = unity)");
 	AddUIntC("GainSGBMixSPC", S9xSGBMixGainSPC, 0, "SGB BIOS mix: SPC channel pre-amp (whole dB between 0 and 12, 0 = unity)");
 	AddUIntC("GainSGBMixGB", S9xSGBMixGainGB, 0, "SGB BIOS mix: GB channel pre-amp (whole dB between 0 and 12, 0 = unity)");
@@ -1228,6 +1328,7 @@ void WinRegisterConfigItems()
 	AddVKey("Pachinko:" #n ":Extra3", JoypadExtra[PACHINKO_PAD].x[2], JoypadExtra[PACHINKO_PAD].x[2])
 	ADDP(Up,Stronger); ADDP(Left,Weaker); ADDP(Down,Stop);
 #undef ADDP
+	AddIntC("TvRemote:Maker", GBTvRemoteVendor, -1, "the TV remote aimed at a Game Boy Color (Input -> TV Remote): -2 auto (the best maker for the loaded game), -1 none, 0 Sony, 1 Panasonic, 2 Toshiba, 3 Hitachi, 4 Sharp, 5 JVC, 6 Mitsubishi, 7 Sanyo, 8 Pioneer, 9 LG, 10 Samsung, 11 Philips.");
 	AddBool2C("Input:Background", GUI.BackgroundInput, false, "on to detect game keypresses and hotkeys while window is inactive, if PauseWhenInactive = FALSE.");
 	AddBool2C("Input:EnableRumble", GUI.EnableRumble, true, "on to pass rumble-cart motor effects (LRG SNES releases) to the port-1 gamepad.");
 	AddBool2C("Input:BackgroundKeyHotkeys", GUI.BackgroundKeyHotkeys, true, "on to also detect keyboard hotkeys when backgroundinput is active");
@@ -1273,7 +1374,12 @@ void WinRegisterConfigItems()
 	ADDN(GBModel[0],GBModelGB);      ADDN(GBModel[1],GBModelGBC);
 	ADDN(GBModel[2],GBModelSGB);     ADDN(GBModel[3],GBModelSGB2);
 	ADDN(GBModel[4],GBModelSGBC);
+	ADD(Link2P); ADD(Link3P); ADD(Link4P);
+	ADD(LinkOtherGame); ADD(LinkSplitToggle); ADD(LinkEnd);
 	ADD(BarcodeConnect); ADD(BarcodeScan); ADD(BarcodeRescan);
+	ADDN(TvRemote[0],TvRemotePower); ADDN(TvRemote[1],TvRemoteMute); ADDN(TvRemote[2],TvRemoteKey1); ADDN(TvRemote[3],TvRemoteKey2); ADDN(TvRemote[4],TvRemoteKey3); ADDN(TvRemote[5],TvRemoteKey4);
+	ADDN(TvRemote[6],TvRemoteKey5); ADDN(TvRemote[7],TvRemoteKey6); ADDN(TvRemote[8],TvRemoteKey7); ADDN(TvRemote[9],TvRemoteKey8); ADDN(TvRemote[10],TvRemoteKey9); ADDN(TvRemote[11],TvRemoteKey10);
+	ADDN(TvRemote[12],TvRemoteKey11); ADDN(TvRemote[13],TvRemoteKey12); ADDN(TvRemote[14],TvRemoteChannelUp); ADDN(TvRemote[15],TvRemoteChannelDown); ADDN(TvRemote[16],TvRemoteVolumeUp); ADDN(TvRemote[17],TvRemoteVolumeDown);
 #undef ADD
 #undef ADDN
 
@@ -1318,7 +1424,12 @@ void WinRegisterConfigItems()
 	ADDXALLN(GBModel[0],GBModelGB);      ADDXALLN(GBModel[1],GBModelGBC);
 	ADDXALLN(GBModel[2],GBModelSGB);     ADDXALLN(GBModel[3],GBModelSGB2);
 	ADDXALLN(GBModel[4],GBModelSGBC);
+	ADDXALL(Link2P); ADDXALL(Link3P); ADDXALL(Link4P);
+	ADDXALL(LinkOtherGame); ADDXALL(LinkSplitToggle); ADDXALL(LinkEnd);
 	ADDXALL(BarcodeConnect); ADDXALL(BarcodeScan); ADDXALL(BarcodeRescan);
+	ADDXALLN(TvRemote[0],TvRemotePower); ADDXALLN(TvRemote[1],TvRemoteMute); ADDXALLN(TvRemote[2],TvRemoteKey1); ADDXALLN(TvRemote[3],TvRemoteKey2); ADDXALLN(TvRemote[4],TvRemoteKey3); ADDXALLN(TvRemote[5],TvRemoteKey4);
+	ADDXALLN(TvRemote[6],TvRemoteKey5); ADDXALLN(TvRemote[7],TvRemoteKey6); ADDXALLN(TvRemote[8],TvRemoteKey7); ADDXALLN(TvRemote[9],TvRemoteKey8); ADDXALLN(TvRemote[10],TvRemoteKey9); ADDXALLN(TvRemote[11],TvRemoteKey10);
+	ADDXALLN(TvRemote[12],TvRemoteKey11); ADDXALLN(TvRemote[13],TvRemoteKey12); ADDXALLN(TvRemote[14],TvRemoteChannelUp); ADDXALLN(TvRemote[15],TvRemoteChannelDown); ADDXALLN(TvRemote[16],TvRemoteVolumeUp); ADDXALLN(TvRemote[17],TvRemoteVolumeDown);
 #undef ADDX
 #undef ADDXN
 #undef ADDXALL
@@ -1416,13 +1527,48 @@ void WinSaveConfigFile()
 {
 	if(readOnlyConfig) return; // if user has lock on file, don't let Snes9x overwrite it
 
+	// A spawned link seat shares the master's config file but loaded it at
+	// spawn time: letting it save on exit would overwrite anything the user
+	// changed in the master mid-session (fifteen Faceball windows = fourteen
+	// stale writers racing the real one). Seats never own settings changes.
+	if(Settings.GBLinkPeerInstance) return;
+
 	ConfigFile&	conf = loaded_config_file;
 	conf.ClearUnused();
 
 	WinPreSave(conf);
 
+	// The link session forces these two; the file keeps the user's own values.
+	bool userPause = false, userBackground = false;
+	const bool linkForced = GBLinkGetUserResponsiveSettings(&userPause, &userBackground);
+	const bool livePause = GUI.InactivePause, liveBackground = GUI.BackgroundInput;
+	if(linkForced)
+	{
+		GUI.InactivePause   = userPause;
+		GUI.BackgroundInput = userBackground;
+	}
+
+	// Same for the spawned seat's forced Mute: the file keeps the user's.
+	bool userMute = false;
+	const bool muteForced = GBLinkGetUserMute(&userMute);
+	const bool liveMute = GUI.Mute;
+	if(muteForced) GUI.Mute = userMute;
+
+	// And its forced Game Boy Model (a launch switch overrode the file's).
+	const uint8 liveModel = Settings.GBBootPolicy;
+	if(GBLinkUserModel >= 0)
+		Settings.GBBootPolicy = (uint8)GBLinkUserModel;
+
 	for(unsigned int i = 0 ; i < configItems.size()	; i++)
 		configItems[i].Set(conf);
+
+	if(linkForced)
+	{
+		GUI.InactivePause   = livePause;
+		GUI.BackgroundInput = liveBackground;
+	}
+	if(muteForced) GUI.Mute = liveMute;
+	if(GBLinkUserModel >= 0) Settings.GBBootPolicy = liveModel;
 
 	bool wasLocked = locked_file!=NULL;
 	if(wasLocked) WinUnlockConfigFile();

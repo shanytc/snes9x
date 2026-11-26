@@ -233,6 +233,7 @@ void S9xSamplesAvailable(void *userdata)
         };
         S9xSGBMixVolumeSPC = clamp_pct(gui_config->sgb_mix_volume_spc);
         S9xSGBMixVolumeGB  = clamp_pct(gui_config->sgb_mix_volume_gb);
+        S9xCartSpeakerVolume = clamp_pct(gui_config->cart_speaker_volume);
 
         auto clamp_db = [](int v) -> unsigned int {
             if (v < 0)                v = 0;

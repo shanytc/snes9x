@@ -28,7 +28,8 @@ enum Source
     kMix = 2,        // final host mix, always the bottom row
     kGBChannel1 = 3, // GB CH1-CH4 are 3..6
     kSPCVoice1 = 7,  // SPC V1-V8 are 7..14
-    kSourceCount = 15
+    kSpeaker = 15,   // a Game Boy cart's own speaker, while such a cart is loaded
+    kSourceCount = 16
 };
 
 constexpr int kSnapshotFrames = 4800; // frames of history each lane shows

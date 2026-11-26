@@ -185,6 +185,8 @@ struct EmuConfig
     int master_volume_fast_forward;
     int sgb_mix_volume_spc;
     int sgb_mix_volume_gb;
+    // A Game Boy cart's own speaker (HuC3/TAMA5), 0..100, apart from the GB volume.
+    int cart_speaker_volume;
     // Pre-amp gain (0..S9X_GAIN_MAX_DB, whole dB, 0 = unity) applied on top of
     // the volume percentages. Regular rides the post-mix master; SPC/GB fold
     // into the SGB-mix channel gains.

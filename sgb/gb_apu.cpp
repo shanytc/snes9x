@@ -644,7 +644,7 @@ inline float Biquad(float x, float b0, float b1, float b2, float a1, float a2,
 	return y;
 }
 
-void PushSample(Apu &a, int16_t l, int16_t r)
+void PushSample(Apu &a, int16_t l, int16_t r, int16_t speaker)
 {
 	const uint32_t size = APU_SAMPLE_BUF_SIZE;
 	const uint32_t next = (a.sample_head + 1) % size;
@@ -655,8 +655,255 @@ void PushSample(Apu &a, int16_t l, int16_t r)
 	}
 	a.sample_buf[a.sample_head * 2 + 0] = l;
 	a.sample_buf[a.sample_head * 2 + 1] = r;
+	a.speaker_buf[a.sample_head] = speaker;
 	a.sample_head = next;
 	a.dbg_ring_pushed++;
+}
+
+// A cart speaker tone: square-wave steps (the 32.768 kHz crystal / div, 0 = silence) at a
+// level out of 7, repeated; a crescendo rises from 1/7 every 7 repeats. Ends at its last sound.
+struct SpeakerStep
+{
+	uint8_t  div, level;
+	uint32_t us;
+};
+struct SpeakerProg
+{
+	const SpeakerStep *steps;
+	uint8_t  n;
+	uint16_t reps;
+	bool     crescendo;
+};
+
+// The HuC3's built-in tones ($26), recorded off Robopon ($C) and Pocket Family's sound test
+// (07:64CE: $2 $6 $3 $7 $B $F; gbkiss.org has doorbell 2 at $E). Unrecorded ones play $C.
+constexpr SpeakerStep kStepsBeeps[] = {
+	{12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000},
+	{12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000},
+	{12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000},
+	{12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000},
+	{12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000},
+	{12, 7, 30000}, {0, 0, 30000}, {12, 7, 30000}, {0, 0, 30000}, {0, 0, 2000000},
+};
+// Alarms 1 and 2: groups of four 78.7 ms beeps 95 ms apart, 250 ms to the next
+// group; alarm 2's group is 1 ms shorter and swells over 7 x 7 groups.
+constexpr SpeakerStep kStepsAlarm1[] = {
+	{12, 7, 78710}, {0, 0, 16230}, {12, 7, 78710}, {0, 0, 16230},
+	{12, 7, 78710}, {0, 0, 16230}, {12, 7, 78710}, {0, 0, 171250},
+};
+constexpr SpeakerStep kStepsAlarm2[] = {
+	{12, 7, 78690}, {0, 0, 16265}, {12, 7, 78690}, {0, 0, 16265},
+	{12, 7, 78690}, {0, 0, 16265}, {12, 7, 78690}, {0, 0, 170230},
+};
+// The doorbells' ding-dong, E6 (/25) then C6 (/32), each fading in steps.
+#define SPEAKER_RING                                                                         \
+	{25, 7, 112000}, {25, 6, 110000}, {25, 5, 56000}, {25, 4, 111000}, {25, 3, 55000},       \
+	{25, 2, 111000}, {32, 7, 117000}, {32, 6, 159000}, {32, 5, 105000}, {32, 4, 208000},     \
+	{32, 3, 104000}, {32, 2, 208000}, {32, 1, 207000}, {0, 0, 408500}
+constexpr SpeakerStep kStepsRing[]  = { SPEAKER_RING };
+constexpr SpeakerStep kStepsRing4[] = { SPEAKER_RING, SPEAKER_RING, SPEAKER_RING, SPEAKER_RING, {0, 0, 8028000} };
+#undef SPEAKER_RING
+// Pocket Family's きゅうきゅうしゃ melody ($C6 $D9 ...): a siren, /35 then /45, x7.
+constexpr SpeakerStep kStepsSiren[] = { {35, 7, 655500}, {45, 7, 672300} };
+
+constexpr SpeakerProg kProgBeeps  = { kStepsBeeps,  35, 3,  false };
+constexpr SpeakerProg kProgAlarm1 = { kStepsAlarm1, 8,  60, false };
+constexpr SpeakerProg kProgAlarm2 = { kStepsAlarm2, 8,  49, true };
+constexpr SpeakerProg kProgBell1  = { kStepsRing,   14, 1,  false };
+constexpr SpeakerProg kProgBell2  = { kStepsRing,   14, 2,  false };
+constexpr SpeakerProg kProgBell3  = { kStepsRing4,  57, 2,  false };
+constexpr SpeakerProg kProgBell4  = { kStepsRing,   14, 15, false };
+constexpr SpeakerProg kProgSiren  = { kStepsSiren,  2,  7,  false };
+// ApuCartSpeaker::tone - 1: the 16 built-in tones, then the siren.
+constexpr const SpeakerProg *kSpeakerProgs[17] = {
+	&kProgBeeps, &kProgBeeps, &kProgAlarm1, &kProgBell1, &kProgBeeps, &kProgBeeps, &kProgAlarm2, &kProgBell2,
+	&kProgBeeps, &kProgBeeps, &kProgBeeps,  &kProgBell3, &kProgBeeps, &kProgBeeps, &kProgBell2,  &kProgBell4,
+	&kProgSiren,
+};
+constexpr uint8_t kSpeakerSiren = 16;
+constexpr int32_t kSpeakerLevel = 3000;   // about one GB channel at full volume
+
+// The level (0-7) of a tone's step k.
+inline int ProgLevel(const SpeakerProg &p, uint32_t k)
+{
+	const SpeakerStep &st = p.steps[k % p.n];
+	return (p.crescendo && st.div) ? std::min<int>(7, 1 + static_cast<int>(k / p.n) / 7) : st.level;
+}
+
+// The step after which a tone has no more sound to make.
+inline uint32_t ProgLastSound(const SpeakerProg &p)
+{
+	uint32_t k = p.n;
+	while (k > 0 && !p.steps[k - 1].div) --k;
+	return (p.reps - 1u) * p.n + k;
+}
+
+// The TAMA6 chirp, recorded off a Tamagotchi cart: pattern 4 ("1 2 1 3") is
+// C5 C6 C5 C7, the 32.768 kHz crystal / 62, /31, /15.5 (note 0 rests), each
+// note 38 ms with 30 ms after it, 176 ms after the fourth; then the pattern
+// its first nibble names plays, so 2-4 repeat until the alarm's minute ends.
+constexpr uint32_t kTamaNoteUs = 38000, kTamaGapUs = 30000, kTamaRestUs = 176000;
+
+// Steps to the next TAMA6 note, gap or rest; false once the chirp has ended.
+bool TamaNextStep(ApuCartSpeaker &s, uint64_t &us)
+{
+	if (s.step == 8)   // the four notes played: on to the next pattern
+	{
+		const uint8_t next = s.prog[(s.pattern - 1) * 6];
+		if (next < 1 || next > 4) return false;
+		s.pattern = next;
+		s.step = 0;
+	}
+	const uint32_t k = s.step++;
+	const uint8_t note = s.prog[(s.pattern - 1) * 6 + 1 + k / 2];
+	us   = (k & 1) ? (k == 7 ? kTamaRestUs : kTamaGapUs) : kTamaNoteUs;
+	s.on = !(k & 1) && note >= 1 && note <= 3;
+	s.hz = s.on ? 32768.0 * (1 << note) / 124.0 : 0.0;
+	return true;
+}
+
+// A HuC3 melody (gbkiss.org/tech/alarm): per header byte 2, as measured on real carts; a note is
+// 5.4 ms of silence, then 7 fade steps (7/7..1/7) cut by its length. Unknown bytes play as $F7.
+struct MelodyTempo
+{
+	uint8_t  id;
+	uint32_t unit_us, extra_us;
+	uint32_t fade_end_us[7];
+};
+constexpr MelodyTempo kMelodyTempos[] = {
+	{ 0xF7, 126120, 17480, { 69000, 138000, 207000, 276000, 333000, 402000, 471000 } },
+	{ 0x29, 105230, 15900, { 127000, 255000, 369000, 498000, 625000, 741000, 865000 } },
+	{ 0xC2, 186770, 21600, { 373600, 747200, 1120800, 1494400, 1868000, 2241600, 2615200 } },
+};
+constexpr uint8_t  kMelodySixteenths[8] = { 1, 2, 3, 4, 6, 8, 12, 16 };
+constexpr uint32_t kMelodyLeadUs = 5400;
+constexpr uint32_t kMelodyLead   = 9;   // ApuCartSpeaker::step while a note's lead plays
+
+inline const MelodyTempo &MelodyTempoOf(uint8_t id)
+{
+	for (const MelodyTempo &t : kMelodyTempos)
+		if (t.id == id) return t;
+	return kMelodyTempos[0];
+}
+
+// Steps to the next fade step, tail or rest; false once the melody has ended.
+bool MelodyNextStep(ApuCartSpeaker &s, uint64_t &us)
+{
+	const MelodyTempo &t = MelodyTempoOf(s.score[1]);
+	const uint32_t len   = t.unit_us * kMelodySixteenths[s.length] + t.extra_us;
+	const uint32_t sound = len - kMelodyLeadUs;
+	if (s.step == kMelodyLead) s.step = 0;
+	if (s.step < 7)
+	{
+		const uint32_t from = s.step ? t.fade_end_us[s.step - 1] : 0;
+		if (from < sound)
+		{
+			us   = std::min(t.fade_end_us[s.step], sound) - from;
+			s.on = true;
+			++s.step;
+			return true;
+		}
+		s.step = 7;
+	}
+	if (s.step == 7)
+	{
+		s.step = 8;
+		if (sound > t.fade_end_us[6])
+		{
+			us   = sound - t.fade_end_us[6];
+			s.on = false;
+			return true;
+		}
+	}
+	while (s.pos < sizeof s.score)
+	{
+		const uint8_t b = s.score[s.pos++], hi = b >> 4, lo = b & 0x0F;
+		if (hi == 0x8)
+		{
+			// Saita's quarter rest is 471 ms, 0.934 of four units
+			us   = static_cast<uint64_t>(t.unit_us) * kMelodySixteenths[std::min<uint8_t>(lo, 7)] * 471000 / 504480;
+			s.on = false;
+			return true;
+		}
+		if (hi == 0xA) s.transpose = lo;
+		if (hi == 0xB) break;
+		if (hi > 0x7) continue;   // $9x, $Cx-$Fx: unknown
+		s.length = hi;
+		s.hz     = 32768.0 / std::lround(32768.0 / (220.0 * std::pow(2.0, (lo + 2 * s.transpose) / 12.0)));
+		s.step   = kMelodyLead;
+		us       = kMelodyLeadUs;
+		s.on     = false;
+		return true;
+	}
+	return false;
+}
+
+// Steps to the next beep, gap or rest; false once the tone has ended.
+bool SpeakerNextStep(Apu &a)
+{
+	ApuCartSpeaker &s = a.speaker;
+	uint64_t us;
+	bool keep = false;
+	if (s.pattern)
+	{
+		if (!TamaNextStep(s, us))
+		{
+			s = ApuCartSpeaker();
+			return false;
+		}
+	}
+	else if (s.melody)
+	{
+		if (!MelodyNextStep(s, us))
+		{
+			s = ApuCartSpeaker();
+			return false;
+		}
+		keep = s.step != 1;
+	}
+	else
+	{
+		const SpeakerProg &p = *kSpeakerProgs[s.tone - 1];
+		if (s.step >= ProgLastSound(p))
+		{
+			s.tone = 0;
+			return false;
+		}
+		const SpeakerStep &st = p.steps[s.step++ % p.n];
+		const double hz = st.div ? 32768.0 / st.div : 0.0;
+		keep = s.on && st.div && hz == s.hz;   // a fade runs on through its steps
+		us   = st.us;
+		s.on = st.div != 0;
+		s.hz = hz;
+	}
+	s.left  = static_cast<uint32_t>(us * static_cast<uint64_t>(a.output_rate) / 1000000);
+	if (!keep) s.phase = 0.0;
+	return true;
+}
+
+// Band-limited step correction for a square wave edge (polyBLEP).
+inline double PolyBlep(double t, double dt)
+{
+	if (t < dt)       { t /= dt;             return t + t - t * t - 1.0; }
+	if (t > 1.0 - dt) { t = (t - 1.0) / dt;  return t * t + t + t + 1.0; }
+	return 0.0;
+}
+
+// One output sample of the cart speaker.
+int32_t SpeakerSample(Apu &a)
+{
+	ApuCartSpeaker &s = a.speaker;
+	while (s.left == 0)
+		if (!SpeakerNextStep(a)) return 0;
+	--s.left;
+	if (!s.on) return 0;
+	const double dt = s.hz / a.output_rate;
+	const double p  = s.phase;
+	double v = (p < 0.5 ? 1.0 : -1.0) + PolyBlep(p, dt) - PolyBlep(p < 0.5 ? p + 0.5 : p - 0.5, dt);
+	s.phase = p + dt >= 1.0 ? p + dt - 1.0 : p + dt;
+	if (s.melody) v = v * (8 - s.step) / 7;   // fade step k = step - 1 plays at (7 - k) / 7
+	else if (s.tone) v = v * ProgLevel(*kSpeakerProgs[s.tone - 1], s.step - 1) / 7;
+	return static_cast<int32_t>(v * kSpeakerLevel);
 }
 
 void FlushSample(Apu &a)
@@ -667,6 +914,7 @@ void FlushSample(Apu &a)
 		avg_l = a.sample_accum_l / static_cast<int32_t>(a.sample_accum_cnt);
 		avg_r = a.sample_accum_r / static_cast<int32_t>(a.sample_accum_cnt);
 	}
+	const int32_t spk = (a.speaker.tone || a.speaker.pattern || a.speaker.melody) ? SpeakerSample(a) : 0;
 
 	if (g_wave_capture)
 	{
@@ -709,7 +957,7 @@ void FlushSample(Apu &a)
 	int32_t fr = static_cast<int32_t>(fr_f);
 	if (fl >  32767) fl =  32767; else if (fl < -32768) fl = -32768;
 	if (fr >  32767) fr =  32767; else if (fr < -32768) fr = -32768;
-	PushSample(a, static_cast<int16_t>(fl), static_cast<int16_t>(fr));
+	PushSample(a, static_cast<int16_t>(fl), static_cast<int16_t>(fr), static_cast<int16_t>(spk));
 }
 
 // Derive the output low-pass coefficients from the current output_rate.
@@ -862,10 +1110,14 @@ void ApuStep(Apu &a, int32_t tcycles)
 		}
 	}
 
+	// A discarded seat runs the channel machinery a game can read back but
+	// neither the mixer nor the sample clock: nobody hears it.
+	const bool quiet = a.discard_output;
+
 	while (tcycles > 0)
 	{
 		int32_t chunk = tcycles;
-		if (a.sample_timer < chunk) chunk = a.sample_timer;
+		if (!quiet && a.sample_timer < chunk) chunk = a.sample_timer;
 		if (chunk < 1) chunk = 1;
 
 		// Advance the 2 MHz channel machinery.
@@ -1029,29 +1281,32 @@ void ApuStep(Apu &a, int32_t tcycles)
 				ApuWrite(a, 0xFF23, static_cast<uint8_t>(a.ch4.nr44 | 0x80), a.cgb, 0, false);
 		}
 
-		// Integrate the mixer over this chunk.
+		if (!quiet)
 		{
-			int32_t l, r, chlv[4];
-			Mix(a, l, r, g_wave_capture ? chlv : nullptr);
-			a.sample_accum_l += l * chunk;
-			a.sample_accum_r += r * chunk;
-			if (g_wave_capture)
-				for (int ch = 0; ch < 4; ++ch)
-					g_ch_accum[ch] += chlv[ch] * chunk;
-		}
-		a.sample_accum_cnt += static_cast<uint32_t>(chunk);
-		a.sample_timer     -= chunk;
-
-		if (a.sample_timer <= 0)
-		{
-			a.sample_timer += a.cycles_per_sample;
-			a.cps_remainder_acc += a.cps_remainder_step;
-			if (a.cps_remainder_acc >= a.output_rate)
+			// Integrate the mixer over this chunk.
 			{
-				a.cps_remainder_acc -= a.output_rate;
-				a.sample_timer += 1;
+				int32_t l, r, chlv[4];
+				Mix(a, l, r, g_wave_capture ? chlv : nullptr);
+				a.sample_accum_l += l * chunk;
+				a.sample_accum_r += r * chunk;
+				if (g_wave_capture)
+					for (int ch = 0; ch < 4; ++ch)
+						g_ch_accum[ch] += chlv[ch] * chunk;
 			}
-			FlushSample(a);
+			a.sample_accum_cnt += static_cast<uint32_t>(chunk);
+			a.sample_timer     -= chunk;
+
+			if (a.sample_timer <= 0)
+			{
+				a.sample_timer += a.cycles_per_sample;
+				a.cps_remainder_acc += a.cps_remainder_step;
+				if (a.cps_remainder_acc >= a.output_rate)
+				{
+					a.cps_remainder_acc -= a.output_rate;
+					a.sample_timer += 1;
+				}
+				FlushSample(a);
+			}
 		}
 
 		tcycles -= chunk;
@@ -1782,13 +2037,58 @@ void ApuSetClockHz(Apu &a, int32_t hz)
 	RecomputeSampleRate(a);
 }
 
-int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples)
+void ApuSpeakerStart(Apu &a, uint8_t tone)
+{
+	const uint8_t t = static_cast<uint8_t>((tone & 0x0F) + 1);
+	if (a.speaker.tone == t) return;   // the same tone plays on
+	a.speaker = ApuCartSpeaker();
+	a.speaker.tone = t;
+}
+
+void ApuSpeakerStartTama(Apu &a, uint8_t pattern, const uint8_t prog[24])
+{
+	if (pattern < 1 || pattern > 4) return;
+	a.speaker = ApuCartSpeaker();
+	a.speaker.pattern = pattern;
+	std::memcpy(a.speaker.prog, prog, sizeof a.speaker.prog);
+}
+
+void ApuSpeakerStartMelody(Apu &a, const uint8_t nib[0x88])
+{
+	uint8_t score[sizeof a.speaker.score];
+	for (size_t i = 0; i < sizeof score; ++i)
+		score[i] = static_cast<uint8_t>((nib[i * 2] << 4) | (nib[i * 2 + 1] & 0x0F));
+	// Its $C6 header isn't decoded: the ambulance plays as recorded
+	static constexpr uint8_t kAmbulance[6] = { 0xC6, 0xD9, 0xA8, 0x42, 0x43, 0xB0 };
+	if (!std::memcmp(score, kAmbulance, sizeof kAmbulance))
+	{
+		if (a.speaker.tone == kSpeakerSiren + 1) return;
+		a.speaker = ApuCartSpeaker();
+		a.speaker.tone = kSpeakerSiren + 1;
+		return;
+	}
+	if (a.speaker.melody && !std::memcmp(a.speaker.score, score, sizeof score)) return;
+	a.speaker = ApuCartSpeaker();
+	a.speaker.melody = true;
+	std::memcpy(a.speaker.score, score, sizeof score);
+	a.speaker.pos  = 2;   // past the header
+	a.speaker.step = 8;
+}
+
+void ApuSpeakerStop(Apu &a)
+{
+	a.speaker = ApuCartSpeaker();
+}
+
+int32_t ApuDrain(Apu &a, int16_t *out, int32_t max_samples, int16_t *speaker_out)
 {
 	int32_t got = 0;
 	while (got < max_samples && a.sample_tail != a.sample_head)
 	{
 		out[got * 2 + 0] = a.sample_buf[a.sample_tail * 2 + 0];
 		out[got * 2 + 1] = a.sample_buf[a.sample_tail * 2 + 1];
+		if (speaker_out)
+			speaker_out[got * 2 + 0] = speaker_out[got * 2 + 1] = a.speaker_buf[a.sample_tail];
 		a.sample_tail    = (a.sample_tail + 1) % APU_SAMPLE_BUF_SIZE;
 		++got;
 	}
